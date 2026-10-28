@@ -980,6 +980,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (`spike plan: ...`) and `spike centre <w>x<h> mean alpha a mean luminance l`; with `--counters` the channels carry
   extra counts in their high 16 bits (`tau_limited_steps`, `extinction_steps`, `structure_limited_steps`;
   `occupied_steps` = steps in occupied space, the dilated occupancy).
+  Round 2 (Task 2b): `--spike_levers=1,2,4,s,t` / `--spike_stop=<T>` switch the step rule's levers (a bake max volume:
+  the 3^3-texel max per bake cell, or minus the Chebyshev distance of a clear cell; Delta tau from it, sphere tracing on
+  it, one analytic step per bake cell, trilinear / structure options); numbers in `vr-performance.md` round 2.
 - Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
   `data/perf/perf_<date>_<time>.csv`: one row per second (frame interval p50 / p99 / max, root viewport GPU / CPU render
   time, main-thread script time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every

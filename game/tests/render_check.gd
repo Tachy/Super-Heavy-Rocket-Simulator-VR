@@ -68,6 +68,8 @@
 #          march clipped to [2 km, end] (the sanity check's reference; with --handover=0,0); --spike_scale=0.5|1.0 its
 #          resolution per axis. Prints the centre image's mean alpha / luminance and the spike's plan; with --counters
 #          also tau_limited_steps, extinction_steps, structure_limited_steps (occupied_steps: steps in occupied space).
+#          Round 2 (Task 2b): --spike_levers=1,2,4,s,t the step rule's levers, --spike_stop=<T> the termination
+#          (_start_spike).
 # Stereo harness (world volume plan Task 1): --stereo=<json> renders through the multiview path with a stand-in headset
 #          (StereoMockXr: the recorded per-eye projections, eye transforms and render target of the JSON that PerfLog
 #          writes at a VR start, game/tests/data/pimax_dream_air_projections.json) with the VR cloud preset (unless
@@ -1193,6 +1195,17 @@ func _start_spike() -> bool:
 		_refuse("render_check: unknown --spike_scale=%s (0.5, 1.0)" % scale)
 		return false
 	_args["cloud_divisor"] = "2" if scale == "0.5" else "1"
+	# Round 2 (Task 2b): --spike_levers=<1,2,4,s,t> the step rule's levers (1 the bake cell's max bounds Delta tau,
+	# 2 sphere tracing on the bake cells, 4 one analytic step per bake cell, s with 4: keep the structure term, t with
+	# 4: the trilinear bake at the step's middle), --spike_stop=<T>
+	# the termination's scaled transmittance (lever 3; default today's 0.01).
+	var bits := {"1": 1, "2": 2, "4": 8, "s": 16, "t": 32}
+	for lever: String in String(_args.get("spike_levers", "")).split(",", false):
+		if not bits.has(lever):
+			_refuse("render_check: unknown --spike_levers entry %s (1, 2, 4, s, t)" % lever)
+			return false
+		CloudSpike.levers |= bits[lever]
+	CloudSpike.stop_transmittance = float(_args.get("spike_stop", "0.0"))
 	var weather: String = _args.get("weather", "")
 	if weather.begins_with("slab:"):
 		var p := weather.trim_prefix("slab:").split(",")

@@ -24,6 +24,13 @@ static var ready := false
 ## Render thread -> main thread: the plan was refused (render_check exits 1 instead of waiting for `ready`).
 static var failed := false
 static var plan_report := ""
+## Round 2 (Task 2b, render_check --spike_levers / --spike_stop): the step rule's levers (bit mask,
+## cloud_spike.gdshaderinc CLOUD_SPIKE_LEVER_*: 1 the bake cell's max bounds Delta tau, 2 sphere tracing on the bake
+## cells' distance, 8 one analytic step per bake cell, 16 with 8: keep the structure term, 32 with 8: the trilinear
+## bake at the step's middle) and the termination's scaled transmittance (0: today's 0.01). Any lever builds the bake
+## max volume.
+static var levers := 0
+static var stop_transmittance := 0.0
 
 ## R_near (spec D): the far tier starts here.
 const R_NEAR_M := 2000.0
@@ -34,6 +41,8 @@ const BAKE_CELL_MIN_M := 100.0
 ## [E] The distance field's cap (cells): sphere tracing steps up to 16 cells (3.2 km) through the band's gaps; above and
 ## below the band the march jumps to its shells.
 const DISTANCE_CAP_CELLS := 16
+## [E] Round 2: the bake max volume's distance cap (bake cells: sphere tracing up to 8 cells, 800 m, per step).
+const BAKE_DISTANCE_CAP_CELLS := 8
 ## The march's cloud shell (cloud_pass.gdshaderinc CLOUD_BOTTOM_M, clouds.gdshaderinc CLOUD_TOP_M).
 const CLOUD_BOTTOM_M := -500.0
 const CLOUD_TOP_M := 20000.0
@@ -52,12 +61,13 @@ const PLAN_POINTS := 17
 const PLAN_MARGIN_CELLS := 4
 ## [E] Texture slices per build dispatch (one dispatch per frame): the taps ~40-100 ms, the distance passes and the
 ## light fill a few ms per slice.
-const SLICES := {"taps": 4, "distance": 64, "bake": 8, "light": 256}
+const SLICES := {"taps": 4, "distance": 64, "bake": 8, "light": 256, "bake_max": 64}
 ## The kernels' set 1 bindings in the march (cloud_spike.gdshaderinc CLOUD_SPIKE_FAR).
 const BINDING_OCCUPANCY := 30
 const BINDING_BAKE := 31
 const BINDING_LIGHT := 32
 const BINDING_GRID := 33
+const BINDING_MAX := 34
 const GRID_BLOCK_SIZE := 10 * 16
 const FILES := ["res://shaders/cloud_spike.gdshaderinc"]
 
@@ -80,7 +90,8 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 	if stereo:
 		far_defines.append("CLOUD_CENTRE")
 	var kernels := {"far": far_defines, "occupancy": PackedStringArray(["CLOUD_SPIKE_OCCUPANCY"]),
-		"bake": PackedStringArray(["CLOUD_SPIKE_BAKE"])}
+		"bake": PackedStringArray(["CLOUD_SPIKE_BAKE"]),
+		"bake_max": PackedStringArray(["CLOUD_SPIKE_BAKE_MAX"])}
 	for name: String in kernels:
 		var src := RDShaderSource.new()
 		src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -117,6 +128,8 @@ func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, head_t
 	var uniforms: Array[RDUniform] = [CloudEffect._tex(BINDING_OCCUPANCY, nearest, occupancy),
 		CloudEffect._tex(BINDING_BAKE, linear, _textures.get("bake", occupancy)),
 		CloudEffect._tex(BINDING_LIGHT, linear, _textures.get("light", occupancy)),
+		CloudEffect._tex(BINDING_MAX, nearest, _textures["bake_max"] if _textures.get("bake_max", RID()).is_valid()
+				else occupancy),
 		CloudEffect._ubo(_grid_buffer, BINDING_GRID)]
 	return uniforms
 
@@ -126,7 +139,8 @@ func free_all() -> void:
 	if _rd == null:
 		return
 	for rid: RID in _textures.values():
-		_rd.free_rid(rid)
+		if rid.is_valid():
+			_rd.free_rid(rid)
 	for rid: RID in _shaders.values():  # (frees their pipelines too)
 		_rd.free_rid(rid)
 	if _grid_buffer.is_valid():
@@ -211,9 +225,14 @@ func _plan_region(camera: Vector3, head_to_earth: Basis, projection: Projection,
 	if mode == Mode.BAKED:
 		bytes["bake"] = 2.0 * texels_b
 		bytes["light"] = 8.0 * texels_o
+		if levers != 0:
+			bytes["bake_max"] = 2.0 * texels_b
+			bytes["ping"] = texels_b
 	var total := 0.0
 	for name: String in bytes:
 		total += bytes[name]
+	if bytes.has("ping"):
+		total -= bytes["occupancy_a"]  # the peak: occupancy_a is freed before the bake max volume's build
 	plan["bytes"] = bytes
 	plan_report = ("spike plan: band %.0f..%.0f m, region x %.0f..%.0f km y %.0f..%.0f km, rays %d, median far "
 			+ "footprint %.1f m, occupancy cell %.0f m %s, bake cell %.0f m %s, scratch %.2f GB %s") % [z_lo, z_hi,
@@ -286,10 +305,15 @@ func _create_volumes() -> bool:
 		var bake_slices: int = bake["tex"].z
 		_phases.append({"kernel": "bake", "pass": 0, "slices": SLICES["bake"], "total": bake_slices})
 		_phases.append({"kernel": "bake", "pass": 1, "slices": SLICES["light"], "total": occupancy_slices})
+		if levers != 0:
+			_textures["bake_max"] = RID()  # created when the occupancy's ping-pong volume is freed (the peak)
+			for pass_index in range(5):
+				_phases.append({"kernel": "bake_max", "pass": pass_index, "slices": SLICES["bake_max"],
+						"total": bake_slices})
 	for phase in _phases:
 		phase["next"] = 0
-	for rid: RID in _textures.values():
-		if not rid.is_valid():
+	for name: String in _textures:
+		if name != "bake_max" and not _textures[name].is_valid():
 			push_error("CloudSpike: a volume was not created")
 			return false
 	ready = false
@@ -318,7 +342,22 @@ func _build_step(set0: Array[RDUniform], samplers: Dictionary) -> void:
 	var nearest: RID = samplers["false|false|false"]
 	var set1: Array[RDUniform] = [CloudEffect._ubo(_grid_buffer)]
 	var size: Vector3i = _plan["occupancy"]["tex"]
-	if kernel == "occupancy":
+	if kernel == "bake_max":
+		if _textures.has("occupancy_a"):  # round 2: the occupancy's ping-pong volume out, the bake max's in
+			_rd.free_rid(_textures["occupancy_a"])
+			_textures.erase("occupancy_a")
+			var tex: Vector3i = _plan["bake"]["tex"]
+			_textures["bake_max"] = _volume(tex, RenderingDevice.DATA_FORMAT_R16_SFLOAT)
+			_textures["ping"] = _volume(tex, RenderingDevice.DATA_FORMAT_R8_UNORM)
+			_textures["r8_unused"] = _volume(Vector3i.ONE, RenderingDevice.DATA_FORMAT_R8_UNORM)
+		size = _plan["bake"]["tex"]
+		# out (R16F) / in / out (R8) per pass: 0 bake -> max, 1 max -> ping (x), 2 ping -> max (y), 3 max -> ping (z),
+		# 4 ping -> max (copy); an unused out is a volume the pass does not sample
+		var io: Array = [["bake_max", "bake", "ping"], ["bake", "bake_max", "ping"], ["bake_max", "ping", "r8_unused"],
+				["bake", "bake_max", "ping"], ["bake_max", "ping", "r8_unused"]][phase["pass"]]
+		set1.append_array([CloudEffect._image(1, _textures[io[0]]), CloudEffect._tex(2, nearest, _textures[io[1]]),
+				CloudEffect._image(3, _textures[io[2]])])
+	elif kernel == "occupancy":
 		set1.append_array([CloudEffect._image(1, _textures[phase["out"]]),
 				CloudEffect._tex(2, nearest, _textures[phase["in"]])])
 	else:
@@ -335,8 +374,10 @@ func _build_step(set0: Array[RDUniform], samplers: Dictionary) -> void:
 	if phase["next"] >= phase["total"]:
 		_phases.pop_front()
 	if _phases.is_empty():
-		_rd.free_rid(_textures["occupancy_a"])
-		_textures.erase("occupancy_a")
+		for name: String in ["occupancy_a", "ping", "r8_unused"]:
+			if _textures.has(name):
+				_rd.free_rid(_textures[name])
+				_textures.erase(name)
 		ready = true
 		print("CloudSpike: volumes built")
 
@@ -362,5 +403,6 @@ func _grid_block(pass_index: int, first_slice: int) -> PackedByteArray:
 		ints.append_array([cells.x, cells.y, cells.z, tiles.x, tex.x, tex.y, tex.z, tiles.y])
 	ints.append_array([pass_index, first_slice, int(mode), DISTANCE_CAP_CELLS])
 	bytes.append_array(ints.to_byte_array())
-	bytes.append_array(PackedFloat32Array([p["pixel_angle"], 0.0, 0.0, 0.0]).to_byte_array())
+	bytes.append_array(PackedFloat32Array([p["pixel_angle"], levers, stop_transmittance, BAKE_DISTANCE_CAP_CELLS])
+			.to_byte_array())
 	return bytes

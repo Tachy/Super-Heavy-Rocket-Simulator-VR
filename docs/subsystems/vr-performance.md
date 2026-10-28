@@ -491,3 +491,46 @@ and report. The cost is the step count: inside occupied cells the step is 0.3 / 
 real cumulus has ~0.05-0.15 /m, so 2-6 m steps also through the cells' clear parts (V3 (b): 60 % of the occupied steps
 sample no extinction), down to the scaled termination (tau ~18 at k = 1 - g^2). At (b)'s 19.5 ps a step, 5 ms in V3 is
 ~82 occupied steps per pixel on average (2.6x fewer).
+
+### Spike S round 2: the step rule (Task 2b, 2026-10-28)
+
+Same spike, variant (b) only, now with the recorded Pimax projections (centre image 2065 x 1420 = 2.93 Mpx at 0.5x;
+the V3 region grew to 503 x 788 km). Levers (`render_check --spike_levers=1,2,4,s,t`, `--spike_stop=<T>`), on a
+second volume over the bake grid (R16F, 100 m: the max of the 3^3 bake texels a trilinear fetch in the cell reads -
+the exact sup of the interpolated field - or, for a clear cell, minus its Chebyshev distance to the nearest non-clear
+cell, cap 8): **1** Delta tau 0.3 from that max, step ends at the bake cell's exit, clear bake cells stepped to their
+exit; **2** sphere tracing on its distance; **3** termination at scaled T 0.03 instead of 0.01; **4** one step per
+bake cell (to its exit, no Delta tau term: Beer-Lambert is exact for a constant-extinction segment, and with a constant
+source the in-scatter S T (1 - e^{-k tau}) / k is exact for any profile, so only tau matters), **t** with 4 the
+trilinear bake at the step's middle instead of the cell's mean (midpoint rule on a field linear between texel centres),
+**s** with 4 the structure term kept (production adds sub-cell detail where w_k > 0). sdd logs `t2b_*.log`, summary
+`t2b_summary.txt`; one run at a time. ms = march kernel median / p99; steps per pixel median / p90 / p99 / mean.
+
+| V3 (b) | ms (counters) | ms (none) | occupied steps | empty | mean alpha | lum vs base |
+|---|---|---|---|---|---|---|
+| base (round 1 rule) | 22.7 / 28.4 | 18.8 / 25.4 | 137 / 610 / 1503 / 228 | 1 / 6 / 18 | 0.4683 | - |
+| 1 | 11.8 / 17.9 | | 10 / 233 / 560 / 95 | 1 / 33 / 73 | 0.4684 | +0.0 % |
+| 2 | 29.0 / 35.9 | | 116 / 469 / 1287 / 180 | 1 / 10 / 23 | 0.4683 | +0.0 % |
+| 1,2 | 12.2 / 18.2 | 9.6 / 16.9 | 10 / 233 / 560 / 95 | 1 / 17 / 44 | 0.4684 | +0.0 % |
+| 3 (T_sc 0.03) | 22.3 / 27.4 | | 121 / 588 / 1443 / 216 | 1 / 6 / 18 | 0.4683 | -1.9 % |
+| 4 | 1.17 / 3.01 | | 3 / 16 / 41 / 6.5 | 1 / 33 / 73 | 0.4624 | -0.5 % |
+| 1,2,4 | 1.07 / 2.63 | 1.03 / 2.64 | 3 / 16 / 41 / 6.5 | 1 / 17 / 45 | 0.4624 | -0.5 % |
+| 1,2,4,t | 1.03 / 2.72 | 0.97 / 2.20 | 3 / 16 / 38 / 6.3 | 1 / 17 / 44 | 0.4678 | +0.3 % |
+| 1,2,4,s | 1.86 / 4.55 | 1.80 / 4.42 | 7 / 48 / 101 / 19 | 1 / 17 / 45 | 0.4624 | -0.8 % |
+| **1,2,4,s,t** | 1.93 / 4.69 | **1.85 / 4.99** | 7 / 47 / 98 / 19 | 1 / 17 / 44 | 0.4684 | +0.2 % |
+
+V1 (b): base 25.7 / 33.2 (counters), 26.1 / 33.1 ms, steps 329 / 976 / 2212 / 391, alpha 0.3916; 1,2: 8.7 / 15.0 ms,
+105 mean; 1,2,4: 1.03 / 1.30 ms, 6.6 mean, alpha 0.3861; 1,2,4,t: 1.08 / 1.43 ms, alpha 0.3910; 1,2,4,s: 3.88 / 7.89 ms,
+59 mean; **1,2,4,s,t: 4.14 / 10.06 ms**, alpha 0.3916, lum +0.1 %. 1.0x V3: 1,2,4 3.0 / 5.5 ms; 1,2,4,s 11.8 / 13.9 ms.
+References (today's march clipped, `--spike=ref`): V3 alpha 0.4554 (32.0 / 36.0 ms), V1 0.3840 (25.1 / 28.7 ms); all
+(b) variants are within 0.014 alpha of them. Display-level difference vs the base (eye 0 PNG, 8-bit, max over RGB):
+1,2,4,s,t V3 mean 0.12, p99 1, 0.05 % of pixels > 2 steps; V1 mean 0.04, p99 1, 0.00 %. Lever 3 (0.03): mean 0.43,
+max 2 steps, for 5 % fewer steps. Lever 4 with the cell's mean (no t) shows the 100 m cells as stair-stepped edges near
+R_near (V3 4 % of pixels > 2 steps, max 156); t removes them (with s: 0.05 %).
+Base ms is noisier than round 1 (V3 14.3 ms in a first run, 18.8 ms in the clean matrix): the user works on the machine.
+
+Rules (spec G) with 1,2,4,s,t: (b) <= 5 ms in V3: yes (1.85 ms median, p99 4.99) - build. > 100 occupied steps per
+pixel in V3: no (median 7, mean 19). (b) > 10 ms: no. Per occupied step 34.6 ps (more work per step: two grid maps and a
+max fetch), but 12x fewer steps. Lever 2 alone is slower than the base (its per-step overhead on every occupied step,
+only 21 % fewer steps); lever 3 is not worth its luminance bias. The lever that closes the gap is 4 (+ t for the
+image, + s for production's sub-cell detail); 1 and 2 matter only for clear bake cells under it.

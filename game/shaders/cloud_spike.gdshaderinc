@@ -15,7 +15,10 @@
 // the horizontal plane is cut into tiles of 2048 texels (one texel of overlap: hardware filtering across a seam) and the
 // tiles are stacked along the texture's depth, each with its nz cells between two zero guard slices.
 
-#if defined(CLOUD_SPIKE_OCCUPANCY) || defined(CLOUD_SPIKE_BAKE) || defined(CLOUD_SPIKE_FAR)
+#if defined(CLOUD_SPIKE_OCCUPANCY) || defined(CLOUD_SPIKE_BAKE) || defined(CLOUD_SPIKE_BAKE_MAX)
+#define CLOUD_SPIKE_BUILD
+#endif
+#if defined(CLOUD_SPIKE_BUILD) || defined(CLOUD_SPIKE_FAR)
 
 #ifdef CLOUD_SPIKE_FAR
 #define CLOUD_SPIKE_GRID_BINDING 33
@@ -35,8 +38,17 @@ layout(set = 1, binding = CLOUD_SPIKE_GRID_BINDING, std140) uniform CloudSpikeGr
 	ivec4 bake;     // bake cells nx, ny, nz; w: tiles along x
 	ivec4 bake_tex; // its texture W, H, D; w: tiles along y
 	ivec4 build;    // x: pass, y: first texture slice of this dispatch, z: variant (1 a, 2 b), w: distance cap (cells)
-	vec4 view;      // x: the centre view's pixel angle (rad: the footprint's band limit)
+	vec4 view;      // x: the centre view's pixel angle (rad: the footprint's band limit); y: round 2's step-rule levers
+	                // (bit mask CLOUD_SPIKE_LEVER_*); z: the termination's scaled transmittance; w: the bake's
+	                // distance cap (cells)
 } spike;
+
+// Round 2 (Task 2b): the step-rule levers, each switchable (render_check --spike_levers). (b) only.
+const int CLOUD_SPIKE_LEVER_BOUND = 1;      // lever 1: Delta tau from the bake cell's exact max (the bake max volume)
+const int CLOUD_SPIKE_LEVER_SKIP = 2;       // lever 2: sphere tracing on the bake max volume's distance
+const int CLOUD_SPIKE_LEVER_ANALYTIC = 8;   // lever 4: one step per bake cell, Beer-Lambert over its constant mean
+const int CLOUD_SPIKE_LEVER_STRUCTURE = 16; // with lever 4: keep the structure term (production's sub-cell detail)
+const int CLOUD_SPIKE_LEVER_TRILINEAR = 32; // with lever 4: the trilinear bake at the step's middle (not the mean)
 
 // A tile's texels per axis (D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION) and its stride: neighbours share one texel.
 const int CLOUD_SPIKE_TILE = 2048;
@@ -228,11 +240,106 @@ void main() {
 }
 #endif
 
+// ---- Round 2: the bake max volume (R16F: > 0 the bake cell's max extinction, 1/km; <= 0 a clear cell, minus its
+// Chebyshev distance in bake cells to the nearest cell with extinction, capped at view.w + 1) ----------------
+// pass 0: bake -> max (the max over the 3^3 texels a trilinear fetch inside the cell reads: the exact sup of the
+// interpolated field over the cell); passes 1-4: the separable distance to the nearest cell with max > 0 with one R8
+// scratch volume (the peak memory): x (max -> R8), y (R8 -> max), z (max -> R8), copy (R8 -> max); the passes into the
+// max write only clear cells (distance > 0), a cell with max > 0 keeps its max.
+#ifdef CLOUD_SPIKE_BAKE_MAX
+layout(r16f, set = 1, binding = 1) uniform writeonly image3D spike_max_out;
+layout(set = 1, binding = 2) uniform sampler3D spike_max_in;  // pass 0 the bake, 1 / 3 the max, 2 / 4 the R8
+layout(r8, set = 1, binding = 3) uniform writeonly image3D spike_distance_out;
+// R8 unorm holds the distance / CLOUD_SPIKE_DISTANCE_SCALE.
+const float CLOUD_SPIKE_DISTANCE_SCALE = 255.0;
+
+void main() {
+	ivec3 t = ivec3(gl_GlobalInvocationID.xy, int(gl_GlobalInvocationID.z) + spike.build.y);
+	if (any(greaterThanEqual(t, spike.bake_tex.xyz))) {
+		return;
+	}
+	int slot = t.z / (spike.bake.z + 2);
+	ivec3 c = ivec3((slot % spike.bake.w) * CLOUD_SPIKE_STRIDE + t.x,
+			(slot / spike.bake.w) * CLOUD_SPIKE_STRIDE + t.y, t.z % (spike.bake.z + 2) - 1);
+	int pass = spike.build.x;
+	int cap = int(spike.view.w);
+	if (c.z < 0 || c.z >= spike.bake.z || slot / spike.bake.w >= spike.bake_tex.w || c.x >= spike.bake.x
+			|| c.y >= spike.bake.y) {
+		if (pass % 2 == 0) {
+			imageStore(spike_max_out, t, vec4(-float(cap + 1)));
+		} else {
+			imageStore(spike_distance_out, t, vec4(float(cap + 1) / CLOUD_SPIKE_DISTANCE_SCALE));
+		}
+		return;
+	}
+	if (pass == 0) {
+		float largest = 0.0;
+		for (int k = -1; k <= 1; k++) {
+			for (int j = -1; j <= 1; j++) {
+				for (int i = -1; i <= 1; i++) {
+					ivec3 n = c + ivec3(i, j, k);
+					if (any(lessThan(n, ivec3(0))) || any(greaterThanEqual(n, spike.bake.xyz))) {
+						continue;  // the guard slices / beyond the grid: zero
+					}
+					largest = max(largest, texelFetch(spike_max_in, cloud_spike_texel(n, spike.bake, spike.bake_tex),
+							0).r);
+				}
+			}
+		}
+		imageStore(spike_max_out, t, vec4(largest));
+		return;
+	}
+	ivec3 axis = pass == 1 ? ivec3(1, 0, 0) : (pass == 2 ? ivec3(0, 1, 0) : ivec3(0, 0, 1));
+	int reach = pass == 4 ? 0 : cap;
+	float distance = float(cap + 1);
+	for (int j = -reach; j <= reach; j++) {
+		ivec3 n = c + axis * j;
+		if (any(lessThan(n, ivec3(0))) || any(greaterThanEqual(n, spike.bake.xyz))) {
+			continue;
+		}
+		float v = texelFetch(spike_max_in, cloud_spike_texel(n, spike.bake, spike.bake_tex), 0).r;
+		float d = pass == 1 ? (v > 0.0 ? 0.0 : float(cap + 1))
+				: (pass == 3 ? max(-v, 0.0) : round(v * CLOUD_SPIKE_DISTANCE_SCALE));
+		distance = min(distance, max(float(abs(j)), d));
+	}
+	if (pass % 2 == 1) {
+		imageStore(spike_distance_out, t, vec4(distance / CLOUD_SPIKE_DISTANCE_SCALE));
+	} else if (distance > 0.0) {
+		imageStore(spike_max_out, t, vec4(-distance));  // a clear cell (a cell with max > 0 keeps it: distance 0)
+	}
+}
+#endif
+
 // ---- The far tier's march -----------------------------------------------------------------------------------------
 #ifdef CLOUD_SPIKE_FAR
 layout(set = 1, binding = 30) uniform sampler3D spike_occupancy;  // RG16F: dilated max extinction (1/km), distance
 layout(set = 1, binding = 31) uniform sampler3D spike_bake;       // R16F: meso extinction (1/km), linear
 layout(set = 1, binding = 32) uniform sampler3D spike_light;      // RGBA16F dummy light volume (1.0), linear
+layout(set = 1, binding = 34) uniform sampler3D spike_max;        // R16F: the bake max volume (round 2), nearest
+
+// [E] Round 2: how far a step to a bake cell's exit goes past it (m): the float32 Earth-centred positions resolve
+// ~0.5 m, so the next sample lies inside the next cell; the extra path is < 1 % of a 100 m cell.
+const float CLOUD_SPIKE_EXIT_NUDGE_M = 1.0;
+
+// Round 2: the grid coordinates (m: x, y, height above z_lo) of the ray's point at distance t.
+vec3 cloud_spike_grid_m(CloudRay ray, vec3 origin, vec3 dir, float t) {
+	vec2 xy = cloud_spike_map(normalize((origin + dir * t) * ATM_STRETCH));
+	return vec3(xy - vec2(spike.axis_x.w, spike.axis_y.w), cloud_height_along(ray, t) - spike.band.x);
+}
+
+// Round 2: the distance (m) along the ray from continuous cell coordinates g (cells per metre dg) to the exit of the
+// box of cells [lo, hi) (each axis); 1e30 when the ray does not move in the grid.
+float cloud_spike_box_exit(vec3 g, vec3 dg, vec3 lo, vec3 hi) {
+	float exit_m = 1.0e30;
+	for (int a = 0; a < 3; a++) {
+		if (dg[a] > 0.0) {
+			exit_m = min(exit_m, (hi[a] - g[a]) / dg[a]);
+		} else if (dg[a] < 0.0) {
+			exit_m = min(exit_m, (lo[a] - g[a]) / dg[a]);
+		}
+	}
+	return max(exit_m, 0.0);
+}
 
 // The occupied step's limits (spec D / G): Delta tau per step from the occupancy's max extinction, the fraction of the
 // occupancy cell, the floor; the structure term is CLOUD_STRUCTURE_TEXEL_FRACTION of the finest structure at the
@@ -332,6 +439,8 @@ void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 	float transmittance_sc = 1.0;
 	vec3 radiance = vec3(0.0);
 	float weighted = 0.0;
+	// lever 3 (round 2): the termination's scaled transmittance (view.z; 0: today's CLOUD_MIN_SCALED_TRANSMITTANCE)
+	float stop_sc = spike.view.z > 0.0 ? spike.view.z : CLOUD_MIN_SCALED_TRANSMITTANCE;
 	float t = d0;
 	for (int i = 0; i < CLOUD_SPIKE_MAX_STEPS && t < d1; i++) {
 		float h = cloud_height_along(ray, t);
@@ -366,15 +475,58 @@ void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 			t += max(min(step_h, exit_v - t), CLOUD_SPIKE_MIN_STEP_M);
 			continue;
 		}
-		// Occupied space (the occupancy dilated by one cell).
+		// Occupied space (the occupancy dilated by one cell). Round 2 (levers 1, 2, 4; (b) only): the bake cell under
+		// the step - its exact max (the bake max volume) bounds Delta tau up to the cell's exit; a clear bake cell is
+		// stepped to its exit (lever 1 / 4) or, lever 2, to the exit of the clear box around it (distance - 1 cells).
+		int levers = spike.build.z == 2 ? int(spike.view.y) : 0;
+		float bake_m = spike.band.z;
+		float bake_bound = -1.0;  // the bake cell's max extinction (1/m) when levers 1 / 4 use it
+		float cell_exit_m = 1.0e30;
+		vec3 g_b = vec3(0.0);
+		vec3 dg_b = vec3(0.0);
+		if ((levers & (CLOUD_SPIKE_LEVER_BOUND | CLOUD_SPIKE_LEVER_SKIP | CLOUD_SPIKE_LEVER_ANALYTIC)) != 0) {
+			// cells and cells per metre along the ray (linear over a cell: the shells' curvature over 100 m is ~1 mm)
+			vec3 m0 = cloud_spike_grid_m(ray, camera + eye, dir, t);
+			vec3 m1 = cloud_spike_grid_m(ray, camera + eye, dir, t + bake_m);
+			g_b = m0 / bake_m;
+			dg_b = (m1 - m0) / (bake_m * bake_m);
+			ivec3 c_b = clamp(ivec3(floor(g_b)), ivec3(0), spike.bake.xyz - 1);
+			float bound = texelFetch(spike_max, cloud_spike_texel(c_b, spike.bake, spike.bake_tex), 0).r;
+			bool by_cell = (levers & (CLOUD_SPIKE_LEVER_BOUND | CLOUD_SPIKE_LEVER_ANALYTIC)) != 0;
+			if (bound <= 0.0) {
+				float reach = (levers & CLOUD_SPIKE_LEVER_SKIP) != 0 ? max(-bound - 1.0, 0.0) : 0.0;
+				if (by_cell || reach >= 1.0) {
+					CLOUD_COUNT_STEP(false)  // a clear bake cell: no sample
+					float exit_m = cloud_spike_box_exit(g_b, dg_b, vec3(c_b) - reach, vec3(c_b) + 1.0 + reach);
+					t += max(exit_m + CLOUD_SPIKE_EXIT_NUDGE_M, CLOUD_SPIKE_MIN_STEP_M);
+					continue;
+				}
+			} else if (by_cell) {
+				bake_bound = bound / CLOUD_SPIKE_PER_KM;
+				cell_exit_m = cloud_spike_box_exit(g_b, dg_b, vec3(c_b), vec3(c_b) + 1.0) + CLOUD_SPIKE_EXIT_NUDGE_M;
+			}
+		}
+		bool analytic = (levers & CLOUD_SPIKE_LEVER_ANALYTIC) != 0 && bake_bound > 0.0;
 		CLOUD_COUNT_STEP(true)
 		float footprint_m = pixel_angle * t;
 		float climb = abs(cloud_height_slope(ray, t));
 		float max_extinction = occupancy.x / CLOUD_SPIKE_PER_KM;
 		float step_tau = max_extinction > 0.0 ? CLOUD_SPIKE_STEP_TAU / max_extinction : 1.0e30;
 		float step_structure = cloud_spike_structure_m(footprint_m, climb);
-		float step_m = max(min(min(step_tau, CLOUD_SPIKE_STEP_CELL_FRACTION * cell_m), step_structure),
-				CLOUD_SPIKE_MIN_STEP_M);
+		float step_m;
+		if (bake_bound > 0.0) {
+			// Lever 1: Delta tau from the bake cell's max; the step ends at the cell's exit (the bound holds in it).
+			// Lever 4: one step to the exit - Beer-Lambert over the cell's constant mean is exact (no Delta tau term);
+			// the structure term only with CLOUD_SPIKE_LEVER_STRUCTURE (the bake is the spike's finest structure).
+			step_tau = analytic ? 1.0e30 : CLOUD_SPIKE_STEP_TAU / bake_bound;
+			if (analytic && (levers & CLOUD_SPIKE_LEVER_STRUCTURE) == 0) {
+				step_structure = 1.0e30;
+			}
+			step_m = max(min(min(step_tau, cell_exit_m), step_structure), CLOUD_SPIKE_MIN_STEP_M);
+		} else {
+			step_m = max(min(min(step_tau, CLOUD_SPIKE_STEP_CELL_FRACTION * cell_m), step_structure),
+					CLOUD_SPIKE_MIN_STEP_M);
+		}
 #ifdef CLOUD_COUNTERS
 		if (step_tau <= step_m) {
 			cloud_spike_count_tau_limit++;
@@ -389,7 +541,12 @@ void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 #ifdef CLOUD_ABLATE_DENSITY
 		beta = 0.5 * max_extinction;  // (ablation: no density fetch - a constant from the occupancy texel already read)
 #else
-		if (spike.build.z == 2) {
+		if (analytic && (levers & CLOUD_SPIKE_LEVER_TRILINEAR) == 0) {
+			// lever 4: the cell's baked mean (nearest: piecewise constant), at the step's middle
+			ivec3 c_d = clamp(ivec3(floor(g_b + dg_b * (0.5 * step_m))), ivec3(0), spike.bake.xyz - 1);
+			beta = texelFetch(spike_bake, cloud_spike_texel(c_d, spike.bake, spike.bake_tex), 0).r / CLOUD_SPIKE_PER_KM;
+			CLOUD_COUNT_FETCHES(1)
+		} else if (spike.build.z == 2) {
 			vec3 q = camera + eye + dir * d;
 			vec2 xy_d = cloud_spike_map(normalize(q * ATM_STRETCH));
 			vec3 g_d = vec3((xy_d - grid_min) / spike.band.z, (height - z_lo) / spike.band.z);
@@ -426,14 +583,14 @@ void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 		float tau = beta * step_m;
 		float scaled_step = exp(-k * tau);
 		float true_step = exp(-tau);
-		if (transmittance_sc >= CLOUD_MIN_SCALED_TRANSMITTANCE) {
+		if (transmittance_sc >= stop_sc) {
 			radiance += transmittance_sc * source * light * (1.0 - scaled_step) / k;
 		}
 		transmittance_sc *= scaled_step;
 		float next_bg = transmittance_bg * true_step;
 		weighted += d * (transmittance_bg - next_bg);
 		transmittance_bg = next_bg;
-		if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
+		if (transmittance_sc < stop_sc
 				&& !(sun_ray && transmittance_bg > CLOUD_SUN_MIN_TRANSMITTANCE)) {
 			break;
 		}
