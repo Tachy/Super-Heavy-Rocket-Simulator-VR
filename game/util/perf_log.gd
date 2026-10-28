@@ -15,14 +15,13 @@ const ARG := "--perf-log"
 const PROJECTION_NEAR_M := 0.2  ## the site view's near plane (OrbitCamera)
 const PROJECTION_FAR_M := 3.0e7  ## OrbitCamera.far
 const PROJECTION_WAIT_FRAMES := 180  ## [E] 2 s at 90 Hz: the session runs and the head is tracked
-const PROJECTION_RETRY_FRAMES := 30  ## [E]
-const PROJECTION_MAX_ATTEMPTS := 40  ## [E] about 13 s of retries
+const PROJECTION_RETRY_MSEC := 5000  ## [E] retry until recorded: the game needs ~30 s to stand on the pad
 const SPIKE_MS := 22.0  ## [E] two 90 Hz frames: a frame the headset certainly had to reproject
 
 var _projection_interface: XRInterface  ## set while the headset projections are still to be recorded
 var _projection_path := ""
 var _projection_frames := 0
-var _projection_attempts := 0
+var _projection_next_msec := 0
 var _projection_last_reason := ""
 var _world: Node
 var _file: FileAccess
@@ -84,11 +83,13 @@ func _ready() -> void:
 		_projection_interface = xr_interface
 
 
-## Tries to record once the head is tracked; called every frame until it succeeded (or gave up).
+## Tries to record once the head is tracked; called every frame, retries every PROJECTION_RETRY_MSEC until it succeeded.
 func _try_write_projections() -> void:
 	_projection_frames += 1
-	if _projection_frames < PROJECTION_WAIT_FRAMES or _projection_frames % PROJECTION_RETRY_FRAMES != 0:
+	var now := Time.get_ticks_msec()
+	if _projection_frames < PROJECTION_WAIT_FRAMES or now < _projection_next_msec:
 		return
+	_projection_next_msec = now + PROJECTION_RETRY_MSEC
 	var head := XRServer.get_hmd_transform()
 	var reason := ""
 	var record := {}
@@ -101,10 +102,6 @@ func _try_write_projections() -> void:
 		if reason != _projection_last_reason:
 			print("[PerfLog] XR projections not recorded (retrying): ", reason)
 			_projection_last_reason = reason
-		_projection_attempts += 1
-		if _projection_attempts >= PROJECTION_MAX_ATTEMPTS:
-			push_warning("[PerfLog] XR projections: giving up (%s)" % reason)
-			_projection_interface = null
 		return
 	var file := FileAccess.open(_projection_path, FileAccess.WRITE)
 	if file == null:
