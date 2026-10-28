@@ -315,6 +315,44 @@ vec2 cloud_lcl_column_cut(float height_m, vec2 t) {
 	return vec2(cut, cut * t.y);
 }
 
+// ---- Counters of the cloud pass's march (world volume plan Task 0; CloudEffect.counters, render_check --counters).
+// Compiled only with CLOUD_COUNTERS (a diagnostics build of the kernels: without it nothing below exists and the march
+// is bit for bit the one of the game). Per march pixel (the cloud pass writes them as one RGBA32UI texel):
+//   density_fetches  texture fetches of the view ray's samples: the field cell (cloud_field), the shapes, the detail,
+//                    the threshold / edge-mean tables, the column tables of a sample's column terms - everything
+//                    outside the light-source evaluation, the air's tables excepted (not counted)
+//   light_fetches    texture fetches inside one sample's light-source evaluation (cloud_sample_light_source): the
+//                    light cache, the light march's field / shape / detail fetches, the transfer table, the far
+//                    tier's light path
+//   occupied_steps   march steps whose sample position lies inside cloud (sample extinction > 0)
+//   empty_steps      the other steps
+// A fetch is counted by its function's fixed fetch count at the call site (a trilinear 3-D texture() is one fetch).
+// The ablation switches (CloudEffect.ablate; CLOUD_ABLATE_<NAME>) remove one class of work for timing runs; each
+// changes the image, so a time saved is read with the counters of the same run.
+#ifdef CLOUD_COUNTERS
+uint cloud_count_density = 0u;
+uint cloud_count_light = 0u;
+uint cloud_count_occupied = 0u;
+uint cloud_count_empty = 0u;
+bool cloud_counting_light = false;  // inside cloud_sample_light_source: its fetches are the light's
+void cloud_count_fetches(int n) {
+	if (cloud_counting_light) {
+		cloud_count_light += uint(n);
+	} else {
+		cloud_count_density += uint(n);
+	}
+}
+#define CLOUD_COUNT_FETCHES(n) cloud_count_fetches(n);
+#define CLOUD_COUNT_STEP(occupied) if (occupied) { cloud_count_occupied++; } else { cloud_count_empty++; }
+#define CLOUD_LIGHT_BEGIN cloud_counting_light = true;
+#define CLOUD_LIGHT_END cloud_counting_light = false;
+#else
+#define CLOUD_COUNT_FETCHES(n)
+#define CLOUD_COUNT_STEP(occupied)
+#define CLOUD_LIGHT_BEGIN
+#define CLOUD_LIGHT_END
+#endif
+
 // The flat base of each of the four columns around (lat, lon), mixed bilinearly like the field's own values: x the
 // cloud fraction's factor, y the extinction's (cloud_lcl_column_cut). The base texture (core cloud_render_base_texels)
 // is read with nearest texel fetches; nothing is fetched above CLOUD_LCL_CUT_TOP_M.
@@ -322,6 +360,7 @@ vec2 cloud_lcl_cut(sampler2D base_texture, vec3 size, vec2 lat_lon, float height
 	if (height_m > CLOUD_LCL_CUT_TOP_M) {
 		return vec2(1.0);
 	}
+	CLOUD_COUNT_FETCHES(4)
 	float x = lat_lon.y / (2.0 * CLOUD_PI) * size.x;  // column c's centre at longitude c x 360 / columns
 	float y = clamp((0.5 * CLOUD_PI - lat_lon.x) / (CLOUD_PI / (size.y - 1.0)), 0.0, size.y - 1.0);
 	float x0 = floor(x);
@@ -346,23 +385,33 @@ CloudCell cloud_snapshot_cell(sampler3D field, sampler3D ice_share, sampler2D ba
 	float x = clamp(s - k, 0.0, 1.0);  // below centre 0: x = 0 (the end value); above centre 31: x = 1
 	vec4 below = texture(field, cloud_field_uvw(lat_lon, k, size));
 	vec4 above = texture(field, cloud_field_uvw(lat_lon, k + 1.0, size));
+	CLOUD_COUNT_FETCHES(2)
 	float gap = cloud_layer_centre_m(k + 1.0) - cloud_layer_centre_m(k);
 	float beta_b = cloud_decode_extinction(below);
 	float beta_a = cloud_decode_extinction(above);
 	CloudCell c;
 	c.fraction = cloud_profile_value(below.r, above.r, below.r, above.r, x, gap);
 	c.extinction = cloud_profile_value(beta_b, beta_a, below.r, above.r, x, gap);
+#ifdef CLOUD_ABLATE_FIELD
+	// (ablation: the field's secondary fetches - the flat base, the ice share, the stratiform look-ahead - dropped)
+	c.ice = 0.0;
+#else
 	vec2 lcl_cut = cloud_lcl_cut(base, size, lat_lon, height_m);  // the flat base at the lifting condensation level
 	c.fraction *= lcl_cut.x;
 	c.extinction *= lcl_cut.y;
 	c.ice = texture(ice_share, cloud_field_uvw(lat_lon, clamp(s, 0.0, CLOUD_LAYERS - 1.0), size)).r;
+	CLOUD_COUNT_FETCHES(1)
+#endif
 	// The stratiform weight of the centres k and k + 1 weighted by (1 - x) and x times their fractions (core
 	// cloud_stratiform_weight_between; continuous through the centres); centre k + 1's needs the fraction of k + 2 -
 	// fetched only where centre k + 1 can be a deck.
 	float above_next = above.r;
+#ifndef CLOUD_ABLATE_FIELD
 	if (above.r > CLOUD_STRATIFORM_FRACTION - CLOUD_STRATIFORM_FRACTION_BAND && k + 2.0 < CLOUD_LAYERS) {
 		above_next = texture(field, cloud_field_uvw(lat_lon, k + 2.0, size)).r;
+		CLOUD_COUNT_FETCHES(1)
 	}
+#endif
 	float share_below = (1.0 - x) * below.r;
 	float share_above = x * above.r;
 	c.stratiform = share_below + share_above > 0.0
@@ -420,11 +469,13 @@ float cloud_column_depth(vec2 lat_lon) {
 	float result = 0.0;
 	if (cloud_blend < 1.0) {
 		vec4 t = texture(cloud_field_before, cloud_field_uvw(lat_lon, 0.0, cloud_field_before_size));
+		CLOUD_COUNT_FETCHES(1)
 		float in_cloud = t.r >= CLOUD_MIN_FRACTION ? cloud_decode_extinction(t) / t.r : 0.0;
 		result += (1.0 - cloud_blend) * (cloud_decode_depth(t.a) + in_cloud * cloud_layer_centre_m(0.0));
 	}
 	if (cloud_blend > 0.0) {
 		vec4 t = texture(cloud_field_after, cloud_field_uvw(lat_lon, 0.0, cloud_field_after_size));
+		CLOUD_COUNT_FETCHES(1)
 		float in_cloud = t.r >= CLOUD_MIN_FRACTION ? cloud_decode_extinction(t) / t.r : 0.0;
 		result += cloud_blend * (cloud_decode_depth(t.a) + in_cloud * cloud_layer_centre_m(0.0));
 	}
@@ -534,6 +585,9 @@ float cloud_edge_ramp(float value, float threshold, float width_noise) {
 // The detail state L at the pixel footprint [m] (core cloud_detail_state, capped by the preset's levels).
 float cloud_detail_state(float footprint_m) {
 	float state = 0.0;
+#ifdef CLOUD_ABLATE_DETAIL
+	return state;  // (ablation: no detail levels, so none of their fetches)
+#endif
 	float middle_cell_m = CLOUD_DETAIL_TILE_M / 4.0;
 	for (int k = 0; k < CLOUD_DETAIL_LEVELS; k++) {
 		if (k >= cloud_detail_levels) {
@@ -557,6 +611,7 @@ float cloud_detail_perturbation(vec3 offset_local, float state) {
 		}
 		vec3 q = fract(cloud_detail_origin * scale) + offset_local * (scale / CLOUD_DETAIL_TILE_M);
 		float d = dot(texture(cloud_noise_detail, q).rgb, cloud_detail_weights);
+		CLOUD_COUNT_FETCHES(1)
 		float term = w * cloud_level_amplitude[k] * (d - cloud_detail_mean);
 		p += term < 0.0 ? term : cloud_level_lift[k] * term;  // erosion (core cloud_detail_erosion)
 		scale *= 4.0;
@@ -609,14 +664,19 @@ vec3 cloud_subpixel_offset(vec3 offset_local, float footprint_m) {
 // The shapes at the prefilter level (> 0; header) for the pixel footprint footprint_m: the detail is long gone there
 // (its state is 0 beyond 125 m).
 float cloud_extinction_prefiltered(CloudCell cell, vec3 offset_local, float height_m, float footprint_m, float level) {
+#ifdef CLOUD_ABLATE_SHAPE
+	return cell.extinction;  // (ablation: the grid mean, no shape fetch)
+#endif
 	vec2 uv = cloud_prefilter_uv(cell.fraction, level);
 	float threshold = texture(cloud_prefilter_threshold, uv).r;
+	CLOUD_COUNT_FETCHES(1)
 	vec3 shifted = cloud_subpixel_offset(offset_local, footprint_m);
 	vec3 types = cloud_type_weights(cell);
 	float ramp = 0.0;
 	for (int type = 0; type < 3; type++) {  // the types' ramps mixed by their weights (one lookup outside the bands)
 		if (types[type] > 0.0) {
 			vec4 s = cloud_shape_prefiltered(cloud_type_shape_coordinates(type, shifted, height_m), level);
+			CLOUD_COUNT_FETCHES(level < 1.0 ? 2 : 1)
 			ramp += types[type] * cloud_edge_ramp(s.r, threshold, s.a);
 		}
 	}
@@ -624,6 +684,7 @@ float cloud_extinction_prefiltered(CloudCell cell, vec3 offset_local, float heig
 		return 0.0;
 	}
 	float m = texture(cloud_prefilter_edge_mean, uv).r;
+	CLOUD_COUNT_FETCHES(1)
 	return cell.extinction / max(m, 1.0e-4) * ramp;
 }
 
@@ -643,6 +704,9 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 		return 0.0;
 	}
 	in_cloud = cell.extinction / cell.fraction;
+#ifdef CLOUD_ABLATE_SHAPE
+	return cell.extinction;  // (ablation: the grid mean, no shape, detail or table fetch)
+#endif
 #ifdef CLOUD_SHAPE_PREFILTER
 	float prefilter = cloud_shape_prefilter_level(shape_footprint_m);
 	if (prefilter > 0.0) {
@@ -651,12 +715,14 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 #endif
 	float state = cloud_detail_state(footprint_m);
 	float threshold = cloud_threshold(cell.fraction, state);
+	CLOUD_COUNT_FETCHES(1)
 	vec3 types = cloud_type_weights(cell);
 	vec4 shape[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
 	float shape_max = -1.0;
 	for (int type = 0; type < 3; type++) {  // one lookup per type present (one outside the bands)
 		if (types[type] > 0.0) {
 			shape[type] = texture(cloud_noise_shape, cloud_type_shape_coordinates(type, offset_local, height_m));
+			CLOUD_COUNT_FETCHES(1)
 			shape_max = max(shape_max, shape[type].r);
 		}
 	}
@@ -676,6 +742,7 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 		return 0.0;
 	}
 	float m = texture(cloud_edge_mean, cloud_table_uv(cell.fraction, state)).r;
+	CLOUD_COUNT_FETCHES(1)
 	return cell.extinction / max(m, 1.0e-4) * ramp;
 }
 
@@ -894,6 +961,7 @@ float cloud_transfer_lookup(float depth_from_top, float depth_from_bottom, float
 	float im = min(floor(um), n.y - 2.0);
 	vec3 size = vec3((n.y - 1.0) * n.z, (n.x - 1.0) * n.w, n.x);
 	vec4 c = texture(cloud_transfer, (vec3(im * n.z + ut, ib * n.w + up, ua) + 0.5) / size);
+	CLOUD_COUNT_FETCHES(1)
 	float fm = um - im;
 	return clamp(mu0, 0.0, 1.0) * mix(mix(c.r, c.g, fm), mix(c.b, c.a, fm), ub - ib);  // the table holds J / mu0
 }
@@ -968,6 +1036,7 @@ vec2 cloud_column_texel(sampler3D column, vec3 size, vec2 lat_lon, float layer) 
 	int c1 = c0 + 1 < columns ? c0 + 1 : 0;
 	int r0 = int(y0);
 	int z = int(layer);
+	CLOUD_COUNT_FETCHES(4)
 	// The RG8 volume reaches Godot shaders as luminance-alpha (Texture3DRD maps R8G8 to LA8: swizzle R, R, R, G), so
 	// the cover is in .a (the cloud pass's compute kernels - the far tier, static clouds Task 8 - are handed the same
 	// swizzled view: .a there too).
@@ -1004,6 +1073,7 @@ vec2 cloud_column_texel_smooth(sampler3D column, vec3 size, vec2 lat_lon, float 
 	int rows = int(size.y);
 	int z = int(layer);
 	vec2 sum = vec2(0.0);
+	CLOUD_COUNT_FETCHES(16)
 	for (int j = 0; j < 4; j++) {
 		int r = clamp(int(y0) - 1 + j, 0, rows - 1);
 		vec2 row = vec2(0.0);
@@ -1025,6 +1095,7 @@ vec2 cloud_snapshot_column(sampler3D field, sampler3D column, vec3 size, vec2 la
 	float x = clamp(s - k, 0.0, 1.0);
 	vec4 below = texture(field, cloud_field_uvw(lat_lon, k, size));
 	vec4 above = texture(field, cloud_field_uvw(lat_lon, k + 1.0, size));
+	CLOUD_COUNT_FETCHES(2)
 	float beta_b = cloud_decode_extinction(below);
 	float beta_a = cloud_decode_extinction(above);
 	float gap = cloud_layer_centre_m(k + 1.0) - cloud_layer_centre_m(k);

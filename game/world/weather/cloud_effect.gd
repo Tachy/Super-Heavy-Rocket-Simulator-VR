@@ -56,7 +56,8 @@ const CACHE_LOOKUP_STAMP := "cloud_pass_lookup"
 enum CacheMode { OFF, COVERED, ALONE, NEAR_SHELL }
 const GROUP := 8
 const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
-const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline"]
+const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline",
+		"counters"]
 ## Golden ratio conjugate: the frame's jitter offset is frame x this, mod 1 (a low-discrepancy sequence in time).
 const GOLDEN := 0.6180339887498949
 ## The eyes' upsample tent's largest radius [centre pixels] (cloud_pass.gdshaderinc CLOUD_UPSAMPLE): 1 (bilinear) with
@@ -91,6 +92,21 @@ static var capture_timestamps := false
 ## Checks only (cloud_check.gd): >= 0 pins the frame index of the march's jitter (the same noise in two renders that
 ## differ in one setting); -1 in the game.
 static var pinned_frame := -1
+## Diagnostics (world volume plan Task 0; set before the first CloudEffect is created: the kernels are compiled then):
+## counters adds the march's counters (clouds.gdshaderinc CLOUD_COUNTERS: density / light fetches, occupied / empty
+## steps per march pixel; debug_centre_data("counters"), render_check --counters). ablate lists ABLATIONS to switch
+## off for timing runs (CLOUD_ABLATE_<NAME>; render_check --ablate=<names>, or the environment variable
+## STARSIM_CLOUD_ABLATE=<names>, comma separated). Both change nothing in the game (off: the kernels are the game's).
+static var counters := false
+static var ablate := _ablate_from_environment()
+## The ablation names (see clouds.gdshaderinc and cloud_pass.gdshaderinc for what each removes): the fetch classes
+## density (the view samples' shape, detail and tables), light (a sample's light-source evaluation) and air (the
+## atmosphere tables at the clouds); field (the field's secondary fetches), shape and detail (everywhere, the light
+## march included), subsamples (one sample per step), outline (the outline pass), air_shadow, far_tier.
+const ABLATIONS := ["density", "light", "air", "field", "shape", "detail", "subsamples", "outline", "air_shadow",
+		"far_tier"]
+## Set 1 binding of the counters image (cloud_pass.gdshaderinc out_counters).
+const COUNTERS_BINDING := 24
 ## The light cache (CloudLayer's; filled on the render thread before the march, cloud_light_cache.gd); null: none.
 var light_cache: CloudLightCache
 ## The cloud view cache (cloud view cache Tasks 3-4; render thread): created by the first fill (a batch of
@@ -272,6 +288,27 @@ func _reset_history() -> void:
 		_centre["valid"] = false
 
 
+static func _ablate_from_environment() -> PackedStringArray:
+	var names := PackedStringArray()
+	for n in OS.get_environment("STARSIM_CLOUD_ABLATE").split(",", false):
+		names.append(n.strip_edges())
+	return names
+
+
+## The preprocessor names of the diagnostics builds of the march's kernels (CloudShaderPort.build): CLOUD_COUNTERS and
+## CLOUD_ABLATE_<NAME> for each ablation; an unknown name is an error.
+static func diagnostic_defines() -> PackedStringArray:
+	var defines := PackedStringArray()
+	if counters:
+		defines.append("CLOUD_COUNTERS")
+	for n in ablate:
+		if n in ABLATIONS:
+			defines.append("CLOUD_ABLATE_" + n.to_upper())
+		else:
+			push_error("CloudEffect: unknown ablation '%s' (%s)" % [n, ", ".join(ABLATIONS)])
+	return defines
+
+
 func _create() -> void:
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
@@ -422,6 +459,8 @@ func _ensure_images(size: Vector2i, view_count: int, low: Vector2i) -> void:
 	for a in ["age0", "age1"]:  # frames each history holds (the temporal kernel's running mean)
 		c[a] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R16_SFLOAT)
 	c["buffer"] = _rd.uniform_buffer_create(VIEW_BLOCK_SIZE)
+	if CloudEffect.counters:  # density fetches, light fetches, occupied steps, empty steps (clouds.gdshaderinc)
+		c["counters"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT)
 	_centre = c
 	for i in range(view_count):
 		_views.append({"output_slice": _rd.texture_create_shared_from_slice(RDTextureView.new(), _output_rd, i, 0),
@@ -611,7 +650,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# CLOUD_EDGE_REFINE gives them three coverage-only sub-rays each (cloud_pass.gdshaderinc) - no stairs of a march
 	# pixel. Not for the debug outputs (the checks' per-ray quantities) nor the jittered march (its temporal mean
 	# averages the pixel already). The air shadow's checks 9 / 10 (the loss alone) take it as the game does.
-	var refine := deterministic and (debug == 0 or debug == 9 or debug == 10)
+	var refine := deterministic and (debug == 0 or debug == 9 or debug == 10) and not "outline" in CloudEffect.ablate
 	var jitter_frame := _frame if CloudEffect.pinned_frame < 0 else CloudEffect.pinned_frame
 	var params := Vector4(fmod(float(jitter_frame) * GOLDEN, 1.0), weight, debug, pixel_angle)
 	var linear_clamp: RID = _samplers["true|false|false"]
@@ -636,6 +675,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	_rd.buffer_update(_centre_buffer, 0, CENTRE_BLOCK_SIZE, centre_bytes.to_byte_array())
 	var march_set1: Array = [_ubo(_centre["buffer"]), _tex(1, nearest_clamp, buffers.get_depth_layer(0, false)),
 			_image(2, _centre["color"]), _image(3, _centre["depth"])]
+	if CloudEffect.counters:
+		march_set1.append(_image(COUNTERS_BINDING, _centre["counters"]))
 	if stereo:
 		var eyes := PackedFloat32Array()
 		for view in range(2):
@@ -697,7 +738,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var refine_set1 := []
 	var warm_now := not _prefilter_warm and march == family  # the pre-warm below binds the refine set too
 	if refine or warm_now:
-		refine_set1 = march_set1.duplicate()
+		refine_set1 = march_set1.filter(func(u: RDUniform) -> bool: return u.binding != COUNTERS_BINDING)  # no counters
 		refine_set1[2] = _image(2, _centre["refined"])
 		refine_set1.append_array([_tex(6, nearest_clamp, _centre["color"]), _storage(7, _centre["outline"])])
 		_rd.buffer_update(_centre["outline"], 0, 4, PackedInt32Array([0]).to_byte_array())

@@ -57,6 +57,12 @@
 #          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy);
 #          --gpu_passes: also per GPU timestamp interval (the cloud pass's kernels, fill, shadow maps), the light cache
 #          settled first.
+# March counters / ablations (world volume plan Task 0): --counters adds the march's counters (CloudEffect.counters)
+#          and prints, once settled, "counter <name> median / p90 / p99 / max / sum" per march pixel of density_fetches,
+#          light_fetches, occupied_steps (a step whose sample lies inside cloud: extinction > 0) and empty_steps, and
+#          writes <out>_counter_<name>.png (normalised to the maximum); --ablate=<name,...> switches work off for timing
+#          runs (CloudEffect.ABLATIONS: density, light, air, field, shape, detail, subsamples, outline, air_shadow,
+#          far_tier; the environment variable STARSIM_CLOUD_ABLATE does the same).
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -206,6 +212,10 @@ func _initialize() -> void:
 		_args["weather"] = "slab:%d,%d,%s,1" % [SUN_DECK_BOTTOM_M, SUN_DECK_TOP_M,
 				float(_args["sun_through_deck"]) / SUN_DECK_EXTINCTION_PER_LWC / (SUN_DECK_TOP_M - SUN_DECK_BOTTOM_M)]
 		_args["look_at_sun"] = ""
+	# The cloud pass's diagnostics builds (compiled when the CloudEffect is created, i.e. with the main scene).
+	CloudEffect.counters = _args.has("counters")
+	if _args.has("ablate"):
+		CloudEffect.ablate = PackedStringArray(String(_args["ablate"]).split(",", false))
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
@@ -357,6 +367,8 @@ func _process(_delta: float) -> bool:
 		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s, brightness %.4f, chroma %.4f" % [
 				a.last_adaptation_glow_cd_m2, a.scotopic_cd_m2, a.rod_scale, a.moonlight_relative_value, "on" if a.moonlight_active else "off",
 				world.moon_light.light_energy if world.moon_light.visible else 0.0, a.brightness, a.chroma])
+		if _args.has("counters"):
+			_print_counters(world)
 		# Default: <repo>/screenshots/ (git-ignored; every test image goes there, user 2026-10-27).
 		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
 				"../screenshots/render_check.png").simplify_path())
@@ -367,6 +379,42 @@ func _process(_delta: float) -> bool:
 			quit(1)
 		return true  # quit
 	return false
+
+
+## --counters: the march counters of the last frame per march pixel (CloudEffect.debug_centre_data "counters", RGBA32UI:
+## density fetches, light fetches, occupied steps, empty steps) - median, p90, p99, max and sum of each over all march
+## pixels (clear-sky pixels count as 0), and <out>_counter_<name>.png, normalised to the maximum.
+func _print_counters(world: World) -> void:
+	var effect: CloudEffect = world.clouds.effect
+	var data := effect.debug_centre_data("counters")
+	var low := effect.centre_low
+	if data.is_empty() or low.x * low.y == 0:
+		print("render_check: counters: no data (no cloud pass ran)")
+		return
+	var values := data.to_int32_array()  # the texels' uints (counts stay far below 2^31)
+	var names := ["density_fetches", "light_fetches", "occupied_steps", "empty_steps"]
+	var count := low.x * low.y
+	for channel in range(names.size()):
+		var column := PackedInt32Array()
+		column.resize(count)
+		var sum := 0
+		var largest := 0
+		for i in range(count):
+			var v := values[4 * i + channel]
+			column[i] = v
+			sum += v
+			largest = maxi(largest, v)
+		var sorted := column.duplicate()
+		sorted.sort()
+		print("render_check: counter %s median %d p90 %d p99 %d max %d sum %d" % [names[channel],
+				sorted[count / 2], sorted[int(0.9 * (count - 1))], sorted[int(0.99 * (count - 1))], largest, sum])
+		var bytes := PackedByteArray()
+		bytes.resize(count)
+		for i in range(count):
+			bytes[i] = int(round(255.0 * column[i] / maxf(largest, 1.0)))
+		var path := _out_path("_counter_" + names[channel])
+		Image.create_from_data(low.x, low.y, false, Image.FORMAT_L8, bytes).save_png(path)
+		print("render_check: saved %s" % path)
 
 
 ## --gpu_time[=120]: collects the root viewport's GPU render time of that many frames; true when done (printed).

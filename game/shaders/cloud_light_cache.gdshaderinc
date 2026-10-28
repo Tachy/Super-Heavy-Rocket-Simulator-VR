@@ -113,6 +113,7 @@ void cloud_cache_cascade(mat4 c, sampler3D slot0, sampler3D slot1, int k, vec2 p
 	if (w1 > 0.0) {
 		tau = mix(tau, textureLod(slot1, f, 0.0).r, w1);
 	}
+	CLOUD_COUNT_FETCHES((w1 < 1.0 ? 1 : 0) + (w1 > 0.0 ? 1 : 0))
 	float w = result.z * e;
 	result.x += w * tau;
 	if (hybrid) {

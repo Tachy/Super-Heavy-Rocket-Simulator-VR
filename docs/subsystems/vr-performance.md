@@ -413,3 +413,48 @@ ground / 400 km; tiled 40.9 / 6.2 ms): blend in a 0.1 band (c7fe2ca) 97.8 / 11.9
 (V4) 72.9 / 10.2 (+78 / +64 %), smooth warp A = 0.33 (V5) 47.3 / 7.3 (+16 / +18 %; shapes stretched locally, Task 9d
 report). The detail skip does not shorten the per-lookup cost the de-tiling adds, so the ratios stay those of Task 9d;
 the user decided 2026-10-27: not done, the lattice stays.
+
+## Where the march's time goes (cloud world volume plan Task 0, 2026-10-28)
+
+Today's per-frame march (`--no_view_cache`, the reference path of the world-volume plan), measured with the counters and
+ablation switches of `weather-clouds.md` (Diagnostics). VR pixel proxy: `--cloud_quality=vr --render_scale=1.65
+--gpu_time=120 --gpu_passes --fixed_exposure`, Starbase analog 2024-06-15 21 UTC, views ground (az 90, el 25) and deck
+(9 km, el -10); sdd `t0_prof.sh` / `t0_prof_all.sh`, logs `t0_prof_<view>_<tag>.log`, summary `t0_prof_summary.txt`.
+
+Shader clock: none. Grepping `servers/rendering/rendering_device*` and the D3D12 / Vulkan drivers finds no
+`VK_KHR_shader_clock` / `shaderClock` feature (only glslang's compiler knows the extension), and the game runs on
+D3D12 - every time split below comes from ablations.
+
+Time saved, cloud pass ms (median of 120 frames; base 41.4 / 46.9 ms ground / deck; run-to-run spread about +-1.5 ms).
+Each ablation changes the image (a fetch class replaced by a constant also changes the steps taken), so these are
+upper bounds of what the class costs in isolation:
+
+| Ablation | What goes | Ground | Deck |
+|---|---|---|---|
+| `density` | view samples' shape, detail, tables -> the cell's grid mean | 25.2 | 9.8 (outline pass emptied: -9.5 of it) |
+| `light` | a sample's light-source evaluation -> constant | 12.7 | 16.1 |
+| `air` | atmosphere tables at the clouds -> constants | 0.0 | 0.4 |
+| `field` | flat-base / ice / stratiform fetches of the field | 10.3 | 13.2 |
+| `shape` | shape + detail everywhere (light march too) | 29.7 | 22.7 |
+| `detail` | the three detail levels | 12.2 | 16.5 |
+| `subsamples` | 1 sample per step instead of up to 6 | 17.6 | 21.9 |
+| `outline` | the outline pass | 8.6 | 9.5 |
+| `air_shadow` | the air shadow loss | 2.9 | 3.5 |
+| `far_tier` | the far pass | 9.8 | 17.0 |
+
+The counters themselves cost 5.6 / 6.0 ms of the cloud pass (the numbers below are from those runs).
+
+Per march pixel (`--counters`, march image at the proxy's resolution; median / p99 / max; sum over the image):
+
+| | ground | deck |
+|---|---|---|
+| density_fetches | 6 646 / 13 270 / 20 055; 2.84e9 | 8 695 / 17 209 / 26 411; 4.09e9 |
+| light_fetches | 1 217 / 3 905 / 5 655; 5.93e8 | 677 / 4 644 / 6 196; 5.58e8 |
+| occupied_steps | 12 / 42 / 100; 4.77e6 | 13 / 47 / 124; 5.69e6 |
+| empty_steps | 184 / 278 / 285; 8.40e7 | 267 / 303 / 325; 1.02e8 |
+
+Derived: density fetches per step (occupied + empty) 32 / 38; light fetches per occupied step 124 / 98 (the light is
+evaluated on occupied steps only). Cost per occupied step, the number Spike S compares against: march kernel ms /
+occupied steps summed over the image = 32.7 ms / 4.77e6 = 6.9 ns (ground), 37.2 ms / 5.69e6 = 6.5 ns (deck); the whole
+cloud pass (outline refine included) 8.7 / 8.2 ns. The empty steps are 95 % / 95 % of all steps and about 18 times more
+numerous; their field-cell fetches (about 13 per empty step in a cloud-free slab run) are most of the density fetches.

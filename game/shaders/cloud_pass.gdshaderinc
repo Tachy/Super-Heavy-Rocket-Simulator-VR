@@ -168,6 +168,10 @@ layout(rg32f, set = 1, binding = 3) uniform image2D out_depth;  // read too: the
 layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
 #endif
 #endif
+#if defined(CLOUD_COUNTERS) && !defined(CLOUD_EDGE_REFINE) && !defined(CLOUD_CACHE_FILL)
+// The counters of the march (clouds.gdshaderinc): density fetches, light fetches, occupied steps, empty steps.
+layout(rgba32ui, set = 1, binding = 24) uniform writeonly uimage2D out_counters;
+#endif
 #ifdef CLOUD_EDGE_REFINE
 // [E] The centre ray's colour per alpha serves an outline pixel while its alpha is at least half the pixel's mean
 // alpha; a fainter centre (a rim it barely touches) takes the most opaque 3 x 3 neighbour's (alpha > 0.25 on any
@@ -254,7 +258,11 @@ const float CLOUD_STRUCTURE_TEXEL_FRACTION = 0.25;
 // deck view and the cirrus within 0.8 % of the 8 x reference's alpha, 4 within 1.4 % / 1.7 % but left the Cape's alpha
 // grain at 1.375 x the reference's (bound 1.25, cloud_grain_check.gd); 5: 1.241 (no margin), 6: 1.16-1.17. 6 saves
 // 5.4 / 4.2 ms of the VR proxy's cloud pass at the ground / the deck (4: 9.3 / 8.9; crops t10b_substeps_*).
+#ifdef CLOUD_ABLATE_SUBSAMPLES
+const int CLOUD_MAX_SUBSTEPS = 1;  // (ablation: one sample per step)
+#else
 const int CLOUD_MAX_SUBSTEPS = 6;
+#endif
 shared vec3 cloud_group_eclipse_near;
 shared vec3 cloud_group_eclipse_far;
 
@@ -589,6 +597,12 @@ float cloud_far_level(float band_m) {
 // shape texel its mips); the detail band-limited at detail_m. in_cloud: the cell's in-cloud mean extinction.
 float cloud_sample_extinction_in_cell(bool far, CloudCell cell, vec3 offset_local, float height_m, float detail_m,
 		float pixel_m, out float in_cloud) {
+#ifdef CLOUD_ABLATE_DENSITY
+	// (ablation: the view samples' density is the cell's grid mean - no shape, detail or table fetch; the light march
+	// keeps its own)
+	in_cloud = cell.fraction >= CLOUD_MIN_FRACTION && cell.extinction > 0.0 ? cell.extinction / cell.fraction : 0.0;
+	return cell.extinction;
+#endif
 	if (!far) {
 		return cloud_extinction_in_cell(cell, offset_local, height_m, detail_m, pixel_m, in_cloud);
 	}
@@ -609,16 +623,25 @@ float cloud_sample_extinction(bool far, vec3 offset_local, float height_m, float
 // cloud_far_light_depth, the shapes band-limited at the pixel footprint there).
 float cloud_sample_light_source(bool far, vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m,
 		float distance_m, vec2 column, float jitter, float pixel_angle, bool sun) {
+#ifdef CLOUD_ABLATE_LIGHT
+	return 1.0;  // (ablation: a constant source, none of the light's fetches)
+#endif
+	CLOUD_LIGHT_BEGIN
+	float source;
 	if (!far) {
-		return cloud_light_source(light_dir, normal, dir, offset, height_m, distance_m, column, jitter, pixel_angle,
+		source = cloud_light_source(light_dir, normal, dir, offset, height_m, distance_m, column, jitter, pixel_angle,
 				sun);
+	} else {
+		float band_m = pixel_angle * distance_m;
+		float tau_light = cloud_far_light_depth(offset, height_m, light_dir, band_m, band_m, cloud_far_level(band_m));
+		if (cloud_scattering_model == 1) {
+			source = cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
+		} else {
+			source = cloud_scattering_source_3d(light_dir, -dir, normal, tau_light, column.x, column.y);
+		}
 	}
-	float band_m = pixel_angle * distance_m;
-	float tau_light = cloud_far_light_depth(offset, height_m, light_dir, band_m, band_m, cloud_far_level(band_m));
-	if (cloud_scattering_model == 1) {
-		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
-	}
-	return cloud_scattering_source_3d(light_dir, -dir, normal, tau_light, column.x, column.y);
+	CLOUD_LIGHT_END
+	return source;
 }
 
 // The deterministic march's structure step in a cell for a ray climbing at climb (|dh/ds|):
@@ -764,7 +787,11 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 	float pass_weighted[2] = float[](0.0, 0.0);
 	float transmittance_end = 1.0;    // the march's background transmittance at its end (the debug outputs)
 	float transmittance_front = 1.0;  // the march's in front of the hand-over band (the far tier's attenuation)
+#ifdef CLOUD_ABLATE_FAR_TIER
+	int passes = 1;  // (ablation: the march alone, no far tier pass)
+#else
 	int passes = handover && shapes > 0.0 && far_from_m < end_m ? 2 : 1;
+#endif
 	for (int pass = 0; pass < passes; pass++) {
 		bool far = pass == 1;
 		if (far && transmittance_front <= CLOUD_FAR_MIN_TRANSMITTANCE) {
@@ -856,6 +883,7 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 			float a_this = a;
 			a = b;
 			if (cell.extinction <= 0.0) {
+				CLOUD_COUNT_STEP(false)
 				dense_step_m = min(2.0 * dense_step_m, 1.0e30);
 				outside = true;
 				if (phase_m >= 0.0 && b < seg1) {
@@ -963,12 +991,15 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 					beta_taken_max = max(beta_taken_max, beta_j);
 				}
 				if (entered) {
+					CLOUD_COUNT_STEP(true)  // (the entry sample itself lies inside cloud)
 					continue;
 				}
 				if (sum_tau <= 0.0) {
+					CLOUD_COUNT_STEP(false)
 					dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
 					continue;
 				}
+				CLOUD_COUNT_STEP(true)
 				beta = (sum_tau + sum_tau_gap) / taken_m;  // the step's mean extinction
 				tau_step = sum_tau + sum_tau_gap;
 				if (taken < subs) {
@@ -987,10 +1018,12 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 				beta = cloud_sample_extinction_in_cell(far, cell, offset, height, pixel_angle * d, pixel_angle * d,
 						in_cloud);
 				if (beta <= 0.0) {
+					CLOUD_COUNT_STEP(false)
 					dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
 					outside = true;
 					continue;
 				}
+				CLOUD_COUNT_STEP(true)
 				tau_step = beta * (b - a_this);
 				if (phase_m >= 0.0) {
 					bool entry = outside && beta >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
@@ -1063,6 +1096,11 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 					// kilometres.
 					if (abs(d - light_at_m) > max(CLOUD_LIGHT_REFRESH_M, CLOUD_LIGHT_REFRESH_FRACTION * d)) {
 						light_at_m = d;
+#ifdef CLOUD_ABLATE_AIR
+						// (ablation: constant irradiances, none of the atmosphere tables' fetches)
+						sun_irradiance = vec3(1.0);
+						sky_irradiance = vec3(0.2);
+#else
 						sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
 						float eclipse_x = clamp((d - CLOUD_ECLIPSE_NEAR_M)
 								/ (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0, 1.0);
@@ -1071,6 +1109,7 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 							moon_irradiance = ATM_PI * atm_moon_at(p);
 							moon_sky_irradiance = ATM_PI * atm_moon_sky_light(p, normal);
 						}
+#endif
 					}
 					float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
 					source = sky_irradiance * sky_source;
@@ -1182,9 +1221,11 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 	for (int pass = 0; pass < passes; pass++) {
 		vec3 air_transmittance = vec3(1.0);
 		vec3 air_light = vec3(0.0);
+#ifndef CLOUD_ABLATE_AIR  // (ablation: no air in front of the clouds)
 		if (pass_alpha[pass] > 1.0e-6) {
 			air_light = atm_to_point_offset(eye + dir * (pass_weighted[pass] / pass_alpha[pass]), air_transmittance);
 		}
+#endif
 		// Debug output 11: the clouds' own light zeroed, the air in front of them kept (the composite's air weight).
 		vec3 part = air_transmittance * pass_radiance[pass] * (cloud_debug_output == 11 ? 0.0 : 1.0)
 				+ pass_alpha[pass] * air_light;
@@ -1467,6 +1508,9 @@ void cloud_shade_ray(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 no
 	// The air shadow's loss in the colour: the game's image (debug output 0) and the checks' 9 (the loss alone: the
 	// march's colour zeroed) and 10 (as 9; CLOUD_EDGE_REFINE's outline pixels their own).
 	bool air = cloud_debug_output == 0 || cloud_debug_output == 9 || cloud_debug_output == 10;
+#ifdef CLOUD_ABLATE_AIR_SHADOW
+	air = false;  // (ablation: no air shadow loss)
+#endif
 	if (cloud_enabled && atmosphere_enabled) {
 		float jitter = cloud_ray_jitter(noise_pixel);
 		cloud_march(dir_earth, origin_offset, scene_m, jitter, eclipse_near, eclipse_far, false, color, alpha,
@@ -1512,8 +1556,12 @@ void cloud_shade_near(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 n
 				color, alpha, transmittance, cloud_m);
 		vec3 front;
 		vec3 behind;
+#ifdef CLOUD_ABLATE_AIR_SHADOW
+		front = vec3(0.0);  // (ablation: no air shadow loss)
+#else
 		cloud_air_shadow_parts(cloud_ray_from(dir_earth, origin_offset), dir_earth, origin_offset,
 				min(scene_m, cloud_march_end_m), alpha > 1.0e-6 ? cloud_m : 1.0e30, front, behind);
+#endif
 		color -= (1.0 - transmittance) * front;
 	}
 	color_t = cloud_stored_color(color, transmittance);
@@ -1646,6 +1694,9 @@ void main() {
 	float cloud_m = 0.0;
 	// The air shadow's loss in the colour (as cloud_shade_ray).
 	bool air = cloud_debug_output == 0 || cloud_debug_output == 9 || cloud_debug_output == 10;
+#ifdef CLOUD_ABLATE_AIR_SHADOW
+	air = false;  // (ablation: no air shadow loss)
+#endif
 	if (cloud_enabled && atmosphere_enabled) {
 		float jitter = cloud_ray_jitter(pixel);
 		// The coverage: the mean alpha of the centre ray (the first march's) and CLOUD_EDGE_SUBRAYS coverage-only rays at
@@ -1719,6 +1770,10 @@ void main() {
 #endif
 	imageStore(out_color, pixel, color_t);
 	imageStore(out_depth, pixel, vec4(scene_m, cloud_m, 0.0, 0.0));
+#if defined(CLOUD_COUNTERS) && !defined(CLOUD_EDGE_REFINE) && !defined(CLOUD_CACHE_FILL)
+	imageStore(out_counters, pixel,
+			uvec4(cloud_count_density, cloud_count_light, cloud_count_occupied, cloud_count_empty));
+#endif
 }
 #endif
 

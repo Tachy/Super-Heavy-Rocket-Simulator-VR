@@ -45,6 +45,9 @@ static func build(defines: PackedStringArray, files: PackedStringArray, with_glo
 	var header := "#version 450\n"
 	for d in defines:
 		header += "#define %s\n" % d
+	if defines.has("CLOUD_MARCH"):  # the march's kernels: the diagnostics builds (CloudEffect.counters / ablate)
+		for d in CloudEffect.diagnostic_defines():
+			header += "#define %s\n" % d
 	header += "#define PI 3.14159265358979\n"
 	if with_globals:
 		header += port._layout_block()

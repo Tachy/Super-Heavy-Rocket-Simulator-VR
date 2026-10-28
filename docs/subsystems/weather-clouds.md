@@ -934,6 +934,24 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   once settled, then exactly that many frames).
 - `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr [--cloud_scattering=table|closed]` (weather off
   otherwise).
+- March counters and ablations (world volume plan Task 0; `vr-performance.md` "Where the march's time goes"):
+  `render_check.gd --counters` compiles the march kernels with `CLOUD_COUNTERS` (`CloudEffect.counters`, set before the
+  CloudEffect exists) and, once settled, prints `render_check: counter <name> median m p90 a p99 b max c sum s` per
+  march pixel for `density_fetches` (texture fetches of the view samples: field cell, shapes, detail, threshold /
+  edge-mean tables, column tables; the air's tables are not counted), `light_fetches` (everything inside one sample's
+  light-source evaluation: light cache, light march, transfer table, far tier's light path), `occupied_steps` (a march
+  step whose sample lies inside cloud, extinction > 0; a step done again by the step-weight limit counts again) and
+  `empty_steps`, plus `<out>_counter_<name>.png` (normalised to the maximum). The texels are `RGBA32UI` (density,
+  light, occupied, empty; `CloudEffect.debug_centre_data("counters")`, set 1 binding `CloudEffect.COUNTERS_BINDING`
+  24, not in the outline pass or the cache fill). `--ablate=<names>` / `STARSIM_CLOUD_ABLATE=<names>`
+  (`CloudEffect.ablate`, names in `CloudEffect.ABLATIONS`) defines `CLOUD_ABLATE_<NAME>` in the same kernels: `density`
+  (the view samples' shape, detail and tables -> the cell's grid mean), `light` (a sample's light-source evaluation ->
+  constant), `air` (the atmosphere tables at the clouds -> constants), `field` (the field's flat-base / ice /
+  stratiform fetches), `shape` / `detail` (everywhere, the light march included), `subsamples` (1 per step),
+  `outline` (no outline pass), `air_shadow`, `far_tier` (no far pass). Each changes the image (read a time saved with
+  the counters of its own run); with neither switch the kernels are the game's (cloud_check section 15 bit-identical to
+  the reference saved before the change). Later world-volume tasks reuse the names `density`, `light`, `air` and the
+  counter names (their occupied step = inside the occupancy volume).
 - Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
   `data/perf/perf_<date>_<time>.csv`: one row per second (frame interval p50 / p99 / max, root viewport GPU / CPU render
   time, main-thread script time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every
