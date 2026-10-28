@@ -59,6 +59,39 @@ func _initialize() -> void:
 		for i in range(16):
 			worst_round = maxf(worst_round, absf(XrProjectionRecord.projection_to_array(a)[i] - XrProjectionRecord.projection_to_array(b)[i]))
 	_check(worst_round < TOLERANCE, "record -> load round trip (worst %s)" % worst_round)
+	_check(XrProjectionRecord.validate(recorded_dict) == "", "the mock's recording validates: %s" % XrProjectionRecord.validate(recorded_dict))
+	# a real runtime reports the eye pose in the origin's space, head included: eye_from_head = head^-1 * eye
+	var tracked_head := Transform3D(Basis.from_euler(Vector3(0.1, 0.4, -0.05)), Vector3(0.3, 1.5, -0.2))
+	var origin_space := XrProjectionRecord.record(mock, NEAR_M, FAR_M)
+	# synthetic: eye in origin space = head * eye_from_head; recording must give eye_from_head back
+	var synthetic := {"views": []}
+	for view in range(2):
+		var eye_from_head := Transform3D(Basis.IDENTITY, Vector3(-0.032 if view == 0 else 0.032, 0.01, -0.02))
+		var back := tracked_head.affine_inverse() * (tracked_head * eye_from_head)
+		_check((back.origin - eye_from_head.origin).length() < TOLERANCE, "view %d: head^-1 * (head * eye) = eye" % view)
+		synthetic["views"].append({"eye_from_head": XrProjectionRecord.transform_to_array(back),
+				"projection": origin_space["views"][view]["projection"]})
+	_check(XrProjectionRecord.validate(synthetic) == "", "synthetic head-relative eyes validate: %s" % XrProjectionRecord.validate(synthetic))
+	_check(XrProjectionRecord.head_pose_is_tracked(tracked_head), "a moved head counts as tracked")
+	_check(not XrProjectionRecord.head_pose_is_tracked(Transform3D.IDENTITY), "the identity head is not tracked")
+	# the failing record of the first headset run: eyes at (+-0.03, 1.5, 0), view 0 on the right
+	var bad := synthetic.duplicate(true)
+	bad["views"][0]["eye_from_head"] = XrProjectionRecord.transform_to_array(Transform3D(Basis.IDENTITY, Vector3(0.03, 1.5, 0.0)))
+	bad["views"][1]["eye_from_head"] = XrProjectionRecord.transform_to_array(Transform3D(Basis.IDENTITY, Vector3(-0.03, 1.5, 0.0)))
+	_check(XrProjectionRecord.validate(bad) != "", "head-height / swapped eyes are rejected")
+	var bad_y := synthetic.duplicate(true)
+	for view in range(2):
+		var t: Array = bad_y["views"][view]["eye_from_head"]
+		t[10] = 1.5
+	_check(XrProjectionRecord.validate(bad_y) != "", "a 1.5 m eye height is rejected")
+	var bad_ipd := synthetic.duplicate(true)
+	bad_ipd["views"][1]["eye_from_head"][9] = 0.2
+	_check(XrProjectionRecord.validate(bad_ipd) != "", "an IPD of 23 cm is rejected")
+	var bad_frusta := synthetic.duplicate(true)
+	var swapped_proj: Array = bad_frusta["views"][0]["projection"]
+	bad_frusta["views"][0]["projection"] = bad_frusta["views"][1]["projection"]
+	bad_frusta["views"][1]["projection"] = swapped_proj
+	_check(XrProjectionRecord.validate(bad_frusta) != "", "frusta not matching the eye side are rejected")
 	mock.uninitialize()
 	XRServer.remove_interface(mock)
 

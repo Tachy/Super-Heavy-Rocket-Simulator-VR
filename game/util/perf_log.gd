@@ -14,8 +14,16 @@ extends Node
 const ARG := "--perf-log"
 const PROJECTION_NEAR_M := 0.2  ## the site view's near plane (OrbitCamera)
 const PROJECTION_FAR_M := 3.0e7  ## OrbitCamera.far
+const PROJECTION_WAIT_FRAMES := 180  ## [E] 2 s at 90 Hz: the session runs and the head is tracked
+const PROJECTION_RETRY_FRAMES := 30  ## [E]
+const PROJECTION_MAX_ATTEMPTS := 40  ## [E] about 13 s of retries
 const SPIKE_MS := 22.0  ## [E] two 90 Hz frames: a frame the headset certainly had to reproject
 
+var _projection_interface: XRInterface  ## set while the headset projections are still to be recorded
+var _projection_path := ""
+var _projection_frames := 0
+var _projection_attempts := 0
+var _projection_last_reason := ""
 var _world: Node
 var _file: FileAccess
 var _vp: RID
@@ -72,23 +80,45 @@ func _ready() -> void:
 		# the per-eye size the runtime asks for: the GPU time scales with it (the desktop proxy is 1440p)
 		print("[PerfLog] XR render target per eye: ", xr_interface.get_render_target_size(),
 				", display refresh: ", xr_interface.get("display_refresh_rate"))
-		_write_projections(dir.path_join("xr_projections_%s.json" % stamp), xr_interface)
+		_projection_path = dir.path_join("xr_projections_%s.json" % stamp)
+		_projection_interface = xr_interface
 
 
-## The headset's per-eye projections and eye transforms (relative to the head) as JSON, the input of the offscreen stereo
-## harness (StereoMockXr; render_check --stereo=<json>): copy it to game/tests/data/pimax_dream_air_projections.json.
-func _write_projections(path: String, xr_interface: XRInterface) -> void:
-	var record := XrProjectionRecord.record(xr_interface, PROJECTION_NEAR_M, PROJECTION_FAR_M)
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file == null:
-		push_warning("[PerfLog] cannot write %s" % path)
+## Tries to record once the head is tracked; called every frame until it succeeded (or gave up).
+func _try_write_projections() -> void:
+	_projection_frames += 1
+	if _projection_frames < PROJECTION_WAIT_FRAMES or _projection_frames % PROJECTION_RETRY_FRAMES != 0:
 		return
-	file.store_string(JSON.stringify(record, "	"))
-	file.close()
-	print("[PerfLog] XR projections written to ", path)
+	var head := XRServer.get_hmd_transform()
+	var reason := ""
+	var record := {}
+	if not XrProjectionRecord.head_pose_is_tracked(head):
+		reason = "head pose not tracked yet"
+	else:
+		record = XrProjectionRecord.record(_projection_interface, PROJECTION_NEAR_M, PROJECTION_FAR_M, head)
+		reason = XrProjectionRecord.validate(record)
+	if reason != "":
+		if reason != _projection_last_reason:
+			print("[PerfLog] XR projections not recorded (retrying): ", reason)
+			_projection_last_reason = reason
+		_projection_attempts += 1
+		if _projection_attempts >= PROJECTION_MAX_ATTEMPTS:
+			push_warning("[PerfLog] XR projections: giving up (%s)" % reason)
+			_projection_interface = null
+		return
+	var file := FileAccess.open(_projection_path, FileAccess.WRITE)
+	if file == null:
+		push_warning("[PerfLog] cannot write %s" % _projection_path)
+	else:
+		file.store_string(JSON.stringify(record, "	"))
+		file.close()
+		print("[PerfLog] XR projections written to ", _projection_path)
+	_projection_interface = null
 
 
 func _process(delta: float) -> void:
+	if _projection_interface != null:
+		_try_write_projections()
 	var interval_ms := delta * 1000.0
 	var gpu := RenderingServer.viewport_get_measured_render_time_gpu(_vp)
 	var cpu := RenderingServer.viewport_get_measured_render_time_cpu(_vp)
