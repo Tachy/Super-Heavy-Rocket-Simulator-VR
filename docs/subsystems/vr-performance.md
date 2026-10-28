@@ -57,10 +57,10 @@ deck; budget + 2 ms never exceeded - the largest excess -3.4 / -2.1 ms); converg
 Level 0 is bound by the fill cap (`MAX_FILL_GROUPS` 1024 work groups = 256 level-0 tiles, ~6 ms of GPU a frame) after
 four frames under the unknown-latency prior (~64 tiles each). Main thread (FrameProfiler `cloud_view_cache`, every
 frame incl. the restart): median 0.04 ms, p99 0.07 ms, max 0.09 / 0.21 ms (the plan runs on a worker). Desktop preset
-(1600 x 900, budget 6 ms, face 1984; `t4_rc.sh f1g <view>`): level 0 after 0.6 / 1.7 s (12 / 30 frames, ground /
-deck), covering ended 1.2 / 2.6 s, full level 3.2 / 5.9 s, cube 17.3 / 21.6 s; fill median 3.1 / 3.8 ms, p99 8.2 / 9.1
-ms, max 9.9 / 11.0 ms - over the fixed 6 ms because one full-level deck tile alone takes up to ~8.4 ms (a fill's time
-is its slowest ray's; `weather-clouds.md`, Budget); main thread max 0.19 / 0.20 ms.
+(1600 x 900, budget 9 ms, face 1984; `t4_rc.sh f2t <view>`): deck level 0 after 0.45 s (8 frames), covering ended 0.97
+s, full level 2.3 s, cube 14.6 s; fill median 3.1 / 3.5 ms, p99 8.9 / 10.0 ms, max 9.8 / 11.4 ms (ground / deck; one
+full-level deck tile alone takes up to ~8.4 ms, a fill's time is its slowest ray's - `weather-clouds.md`, Budget);
+main thread p99 0.06 / 0.07 ms, max 0.08 / 0.14 ms.
 
 ## Measuring
 

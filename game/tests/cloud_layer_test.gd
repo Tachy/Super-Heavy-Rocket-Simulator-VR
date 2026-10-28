@@ -169,6 +169,18 @@ func _test_view_cache(camera: Vector3) -> void:
 			"view cache: a clock jump restarts it (restarts %d -> %d, highest level shown %d)"
 			% [resets, planner.resets, _highest_shown(planner)])
 	_converge_view(camera, forward)
+	# A jump arriving while the worker runs a restart is not lost: it restarts at the next plan.
+	resets = planner.resets
+	_layer.notify_view_jump()
+	_layer.update(camera, 0.0, DT)  # starts the run that restarts
+	_layer.notify_view_jump()  # the main thread, while that run goes on
+	planner.wait()
+	_frame(camera)  # the next plan starts the second restart
+	_frame(camera)
+	_check(planner.resets == resets + 2,
+			"view cache: a jump requested while the worker restarts survives to the next plan (restarts %d -> %d)"
+			% [resets, planner.resets])
+	_converge_view(camera, forward)
 	# A layout re-creation (the eyes' density 1.5 x: a new face size, built on a worker): a restart the march covers.
 	resets = planner.resets
 	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE * 3 / 2})

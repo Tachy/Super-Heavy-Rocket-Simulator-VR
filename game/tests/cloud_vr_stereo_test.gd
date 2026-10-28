@@ -412,8 +412,8 @@ func _test_cache_parallax(distance_m: float) -> void:
 			var shown: Vector3 = q * float(distance_of.call(q))  # the cached point the eye pixel shows
 			worst_px = maxf(worst_px, (shown - eye).angle_to(dir) * EYE_PX_PER_RAD)
 		var label := "view cache parallax, %s cloud at %.0f m: eyes +-%.3f m and a " \
-				% [field, distance_m, IPD_M / 2.0] + "camera %.0f m off the anchor land on the direct ray (worst %s eye px)" % [CACHE_CAMERA_OFFSET_M,
-				String.num_scientific(worst_px)]
+				% [field, distance_m, IPD_M / 2.0] + "camera %.0f m off the anchor land on the direct ray " \
+				% CACHE_CAMERA_OFFSET_M + "(worst %s eye px)" % String.num_scientific(worst_px)
 		if field == "deck" and distance_m < CACHE_DECK_ASSERTED_M:
 			print("  info  %s (not asserted: inside the near shell's reach)" % label)
 			continue

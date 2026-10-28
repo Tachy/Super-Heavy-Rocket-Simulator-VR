@@ -892,3 +892,18 @@ The validation bullet of the fill ended (before Task 4):
 >   whole image 18.1 / 14.8 / 79.0 / 20.3 %), T RMS 0.009 / 0.007 / 0.022 / 0.023. The p99 sits on cloud outlines: two
 >   point samplings of the deterministic march's hard edges (the march against itself turned by 0.5 px: p99 43 % on the
 >   ground view). Images `screenshots/cloud-view-cache/t4_<view>_ab_r3_{cache,march,ab_error}.png`.
+
+## Superseded by cloud view cache Task 4 fix round 2 (2026-10-28)
+
+> desktop 6.0 ms [E] fixed;
+
+> (desktop deck view: one full-level deck tile up to ~8.4 ms at the 6 ms desktop budget).
+
+> the A / B p99 at 20 km (9.9 %) exceeds that view's calibration (8.2 %; the other three views
+>     meet it - Validation); the desktop's fixed 6 ms fill budget is below the latency of a single full-level deck tile
+>     (~8.4 ms on the desktop deck view: fill p99 8-9 ms there; only splitting a ray's march across invocations or frames
+>     would lower it); the coarse
+
+> against the calibration's 16.5 / 43.0 / 8.2 / 66.1 % -
+>   met but at 20 km (**NOT met**: 9.9 > 8.2 %, exit code 1); T RMS 0.009 / 0.007 / 0.022 / 0.007. Images
+>   `screenshots/cloud-view-cache/t4_<view>_ab_f1_{cache,march,ab_error}.png`.

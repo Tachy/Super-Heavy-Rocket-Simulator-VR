@@ -29,3 +29,10 @@ sub-samples | divisor 4):
 > `cloud_view_cache`, desktop deck while filling): median 0.6 ms, p90 1.0, p99 1.4 ms, the first frame (cold pick) 3.0
 > ms (the layout and schedule are built on a worker: 8 ms at face 1984 before); VR proxy median 0.8-0.9 ms, max 5.5-5.9
 > ms (the cold pick at face 3200); 0 once converged.
+
+## Superseded by cloud view cache Task 4 fix round 2 (2026-10-28)
+
+> (1600 x 900, budget 6 ms, face 1984; `t4_rc.sh f1g <view>`): level 0 after 0.6 / 1.7 s (12 / 30 frames, ground /
+> deck), covering ended 1.2 / 2.6 s, full level 3.2 / 5.9 s, cube 17.3 / 21.6 s; fill median 3.1 / 3.8 ms, p99 8.2 / 9.1
+> ms, max 9.9 / 11.0 ms - over the fixed 6 ms because one full-level deck tile alone takes up to ~8.4 ms (a fill's time
+> is its slowest ray's; `weather-clouds.md`, Budget); main thread max 0.19 / 0.20 ms.

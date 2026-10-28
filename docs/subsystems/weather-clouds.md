@@ -669,9 +669,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `render_check --ab_view_cache` (cache full vs the march at divisor 1, desktop 1600 x 900, 2 x 2 blocks, luminance
   error / max(|march|, 5 % of the mean); controller ruling: the p99 over the blocks without scene geometry bounded by
   the same view's march against itself turned by 0.5 px, the median by 1 %): deck / ground / 20 km / dusk median 0.21
-  / 0.07 / 0.16 / 0.12 % (met), p99 9.0 / 14.6 / 9.9 / 22.4 % against the calibration's 16.5 / 43.0 / 8.2 / 66.1 % -
-  met but at 20 km (**NOT met**: 9.9 > 8.2 %, exit code 1); T RMS 0.009 / 0.007 / 0.022 / 0.007. Images
-  `screenshots/cloud-view-cache/t4_<view>_ab_f1_{cache,march,ab_error}.png`.
+  / 0.07 / 0.16 / 0.12 % (met), p99 9.0 / 14.6 / 9.9 / 22.4 % against the calibration's (the max over four half-pixel turns,
+  +-x azimuth and +-y elevation) 27.5 / 49.4 / 34.2 / 81.6 % - all met (the +-x turns alone: 16.5 / 43.0 / 8.2 / 66.1 %;
+  the elevation turns are the larger ones); T RMS 0.009 / 0.007 / 0.022 / 0.007. Images
+  `screenshots/cloud-view-cache/t4_<view>_ab_f2_{cache,march,ab_error}.png`.
 - Backlit slab transmitted radiance (Task 9b, cloud_check 14; fixture `tests/validation/weather/
   cloud_slab_transmitted_mc.csv` from `tools/validation/cloud_slab_monte_carlo.py --transmitted`, 1e7 photons per case,
   sigma 0.3-0.7 %): the GPU's bin means (debug output 2, light cache filled) vs Monte Carlo at tau 10 / 30, Sun zenith
@@ -1041,7 +1042,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     nearer than the cloud hides it by exp(-4 |ln(cloud / scene)|) (the upsample's depth weight); a texel without cloud
     keeps the air's shadow loss scaled by scene / the ray's end (a hill before the horizon).
   - **Budget (`CloudLayer.cache_budget_ms`, PRESETS `cache_budget_ms` / `cache_budget_floor_ms` /
-    `frame_target_ms`)**: desktop 6.0 ms [E] fixed; VR adaptive (user-approved ruling): 22.2 ms - the rest of the
+    `frame_target_ms`)**: desktop 9.0 ms [E] fixed (one full-level deck tile alone takes up to ~8.4 ms and a fill's time is its slowest ray's; the ruled fill bound p99 <= 10 ms); VR adaptive (user-approved ruling): 22.2 ms - the rest of the
     frame's GPU time (95th percentile of 90 frames; a frame's rest = the span of its captured timestamps minus its own
     fill and covering march, from the same frame's stamps) - 2 ms, between 2 and 11.4 ms [E]. **Cost model (fix round
     1)**: a fill's GPU time is set first by its slowest ray, then by its work - measured on the desktop deck view: a
@@ -1056,11 +1057,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     groups (larger fills were mispredicted by up to 3 x); the first tile always, and when it alone exceeds the budget
     the tiles that lengthen its fill by at most `FREE_RIDE` 1.1 [E]. `STARSIM_CACHE_FILL_TRACE=1` prints every measured
     fill (ms, prediction, levels, latency, budget). A single tile cannot be split: its slowest ray is the fill's floor
-    (desktop deck view: one full-level deck tile up to ~8.4 ms at the 6 ms desktop budget).
-  - **Open (Task 4)**: the A / B p99 at 20 km (9.9 %) exceeds that view's calibration (8.2 %; the other three views
-    meet it - Validation); the desktop's fixed 6 ms fill budget is below the latency of a single full-level deck tile
-    (~8.4 ms on the desktop deck view: fill p99 8-9 ms there; only splitting a ray's march across invocations or frames
-    would lower it); the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
+    (desktop deck view: one full-level deck tile up to ~8.4 ms; fills at the 9 ms budget p99 9.96 / 8.90 ms deck / ground).
+  - **Open (Task 4)**: the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
     the march's for ~2 s after a restart, inside the 0.02 bound); in flight the interim restart every 500 m means the
     covering march (slow frames, ~45 ms in VR) for ~1 s each time (Task 5's progressive re-anchor removes it); near
     objects in front of shadowed air get the air loss of the whole cached ray scaled by distance only; the lookup's

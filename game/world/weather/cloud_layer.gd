@@ -106,16 +106,17 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## orbit and the far horizon from altitude; it starts at 1.5 km: the desktop's far horizons from 9 and 20 km (~0.9 /
 ## ~1.3 km at its 2.6 mrad march pixels) keep their shapes, VR's (5.4 mrad: ~1.8 / ~2.7 km) lie in the fade.
 ## The view cache's GPU budget per frame for its fill (cloud view cache Task 4, ms): "cache_budget_ms" [E] - the
-## desktop's fixed 6.0 (no frame target); VR's cap 11.4 = the 45 Hz frame (22.2 ms with weather) - the scene without
-## the cloud pass at its worst (8.8 ms, docs/subsystems/vr-performance.md) - CACHE_MARGIN_MS. VR's budget is adaptive
-## (user-approved ruling 2026-10-27): "frame_target_ms" - the measured GPU time of the rest of the frame (its
-## CACHE_REST_PERCENTILE over CACHE_REST_FRAMES frames) - the margin, between "cache_budget_floor_ms" [E] (the cache
-## keeps converging on a heavy scene) and the cap.
+## desktop's fixed 9.0 (no frame target; one full-level deck tile alone takes up to 8.4 ms and a fill's time is set by
+## its slowest ray, so 6.0 was below the single-tile floor; a fill then stays <= 10 ms, one tile over the budget); VR's
+## cap 11.4 = the 45 Hz frame (22.2 ms with weather) - the scene without the cloud pass at its worst (8.8 ms,
+## docs/subsystems/vr-performance.md) - CACHE_MARGIN_MS. VR's budget is adaptive (user-approved ruling 2026-10-27):
+## "frame_target_ms" - the measured GPU time of the rest of the frame (its CACHE_REST_PERCENTILE over CACHE_REST_FRAMES
+## frames) - the margin, between "cache_budget_floor_ms" [E] (the cache keeps converging on a heavy scene) and the cap.
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 512, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0, "handover_m": Vector2(20000.0, 34000.0),
-			"far_fade_m": Vector2(1500.0, 3000.0), "cache_budget_ms": 6.0, "cache_budget_floor_ms": 6.0,
+			"far_fade_m": Vector2(1500.0, 3000.0), "cache_budget_ms": 9.0, "cache_budget_floor_ms": 9.0,
 			"frame_target_ms": 0.0},
 	Quality.VR: {"steps": 96, "max_steps": 384, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,

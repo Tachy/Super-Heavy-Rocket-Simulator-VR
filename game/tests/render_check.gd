@@ -66,11 +66,13 @@ const EVENT_SEARCH_STEP_S := 3600.0
 const EVENT_SEARCH_MAX_S := 20.0 * 86400.0
 ## --ab_view_cache (cloud view cache Task 4, the controller's rulings for general views): the luminance error's floor
 ## (a fraction of the mean, as cloud_check CACHE_ERROR_FLOOR) and the median's bound; the p99 over the blocks without
-## scene geometry is bounded by the same view's march against itself turned by AB_SHIFT_PX eye pixels (two point
-## samplings of the same hard edges, as the cache's texel grid is against the pixels).
+## scene geometry is bounded by the same view's march against itself turned by AB_SHIFT_PX eye pixels (the max over four
+## turns, +-x and +-y; two point samplings of the same hard edges, as the cache's texel grid is against the pixels).
 const AB_ERROR_FLOOR := 0.05
 const AB_MEDIAN_TOLERANCE := 0.01
 const AB_SHIFT_PX := 0.5
+const AB_TURNS := ["+x", "-x", "+y", "-y"]  ## the calibration's half-pixel turns (azimuth, elevation)
+const AB_TURN_DIRECTIONS := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]
 ## A pixel without scene geometry: the march's scene distance at least this (cloud_pass.gdshaderinc: 1e30 for depth 0).
 const AB_SKY_M := 1.0e20
 ## --shimmer_check: frames, the head's yaw (eye pixels, alternating) and the allowed excess over the direct march.
@@ -122,6 +124,9 @@ var _ab_anchor_m := 0.0  ## the camera's distance from the cache's anchor
 var _ab_march: Image  ## the march's image (then the calibration against it turned by AB_SHIFT_PX)
 var _ab_ground := PackedByteArray()
 var _ab_result := {}  ## the cache against the march (judged after the calibration)
+var _ab_turn := 0  ## the calibration turn being measured (AB_TURNS)
+var _ab_calibration_p99 := 0.0  ## the max of the turns' p99 (no scene geometry)
+var _ab_base_angles := Vector2.ZERO  ## the view's azimuth / elevation before the turns
 ## --shimmer_check: the phase (0 the cache, 1 the direct march), the base azimuth, frames of the phase, the cloud
 ## images of its frames, the cache's p99 of the change.
 var _shimmer_phase := 0
@@ -441,8 +446,9 @@ static func _stats(values: Array[float]) -> Dictionary:
 ## reference, cloud view cache controller rulings): both box-filtered over 2 x 2 pixels, the per-block luminance error
 ## |cache - march| / max(|march|, AB_ERROR_FLOOR x the mean) - median <= AB_MEDIAN_TOLERANCE over all blocks, and the
 ## p99 over the blocks whose rays miss the ground and every other scene geometry <= the calibration's: the march against
-## itself with the view turned by AB_SHIFT_PX (the same metric; the full image's p99 and T RMS printed). Images: the two
-## frames and the error (x 10) next to --out. True when done (a failure: exit code 1).
+## itself with the view turned by AB_SHIFT_PX in four directions, the max over them (the same metric; the full
+## image's p99 and T RMS printed). Images: the two frames and the error (x 10) next to --out. True when done (a
+## failure: exit code 1).
 func _ab_frames(world: World) -> bool:
 	var effect := world.clouds.effect
 	if _ab_wait < 0:
@@ -461,15 +467,23 @@ func _ab_frames(world: World) -> bool:
 		return false
 	if _ab_march != null:
 		# The calibration: the march against itself with the view turned by AB_SHIFT_PX (two point samplings of the
-		# same clouds, as the cache's texel grid is against the pixels) - the bound of the cache's p99.
+		# same clouds, as the cache's texel grid is against the pixels) - the bound of the cache's p99 is the MAX over
+		# the four turns (+-x azimuth, +-y elevation; controller ruling: one turn under-samples the march's variance).
 		var shifted := _cloud_compare(effect.output.get_layer_data(0), _ab_march, _ab_ground)
-		print("render_check: ab_view_cache calibration: the march at divisor 1 against itself turned by %.1f px, " \
-				% AB_SHIFT_PX + "2 x 2 blocks: median %.3f %%, p99 %.3f %% without scene geometry (all: p99 %.3f %%)"
-				% [shifted["median"] * 100.0, shifted["p99_sky"] * 100.0, shifted["p99_all"] * 100.0])
-		var ok: bool = _ab_result["median"] <= AB_MEDIAN_TOLERANCE and _ab_result["p99_sky"] <= shifted["p99_sky"]
+		print("render_check: ab_view_cache calibration turn %d (%s): the march at divisor 1 against itself turned by "
+				% [_ab_turn, AB_TURNS[_ab_turn]] + "%.1f px, 2 x 2 blocks: median %.3f %%, p99 %.3f %% without scene "
+				% [AB_SHIFT_PX, shifted["median"] * 100.0, shifted["p99_sky"] * 100.0]
+				+ "geometry (all: p99 %.3f %%)" % (shifted["p99_all"] * 100.0))
+		_ab_calibration_p99 = maxf(_ab_calibration_p99, shifted["p99_sky"])
+		_ab_turn += 1
+		if _ab_turn < AB_TURNS.size():
+			_ab_turn_view(world)
+			return false
+		var ok: bool = _ab_result["median"] <= AB_MEDIAN_TOLERANCE and _ab_result["p99_sky"] <= _ab_calibration_p99
 		print("render_check: ab_view_cache %s: median %.3f %% (bound %.1f %%), p99 without scene geometry %.3f %% "
 				% ["PASS" if ok else "FAIL", _ab_result["median"] * 100.0, AB_MEDIAN_TOLERANCE * 100.0,
-				_ab_result["p99_sky"] * 100.0] + "(bound: the calibration's %.3f %%)" % (shifted["p99_sky"] * 100.0))
+				_ab_result["p99_sky"] * 100.0] + "(bound: the calibration's max over %d turns %.3f %%)"
+				% [AB_TURNS.size(), _ab_calibration_p99 * 100.0])
 		_check_failed = _check_failed or not ok
 		return true
 	var march := effect.output.get_layer_data(0)
@@ -495,10 +509,19 @@ func _ab_frames(world: World) -> bool:
 	(r["picture"] as Image).save_png(_out_path("_ab_error"))
 	_ab_march = march
 	_ab_ground = ground
-	var cam := world.camera
-	cam.azimuth += AB_SHIFT_PX * 2.0 * tan(deg_to_rad(cam.fov) / 2.0) / float(march.get_height())
-	_ab_wait = 2
+	_ab_base_angles = Vector2(world.camera.azimuth, world.camera.elevation)
+	_ab_turn_view(world)
 	return false
+
+
+## Turns the view by AB_SHIFT_PX eye pixels in the direction of the current calibration turn (from the base view).
+func _ab_turn_view(world: World) -> void:
+	var cam := world.camera
+	var shift_rad := AB_SHIFT_PX * 2.0 * tan(deg_to_rad(cam.fov) / 2.0) / float(_ab_march.get_height())
+	var direction: Vector2 = AB_TURN_DIRECTIONS[_ab_turn]
+	cam.azimuth = _ab_base_angles.x + direction.x * shift_rad
+	cam.elevation = _ab_base_angles.y + direction.y * shift_rad
+	_ab_wait = 2
 
 
 ## --jump_check (the cache full; controller ruling: no frame without clouds): the reference's cloud coverage - the

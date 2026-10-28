@@ -64,6 +64,9 @@ const FREE_RIDE := 1.1
 ## (desktop deck view: 1 in 4 fills of 1024 - 4096 groups over budget, those below 1024 within 1.4 x at p90; a cap of
 ## 2048 left the VR proxy's deck view fills up to 19 ms at its 11.4 ms budget, 1024 at most 9.4 ms).
 const MAX_FILL_GROUPS := 1024
+## [E] Measured fills kept for take_fill_log (a few minutes of play at 45 fills / s would be ~10^4; the checks take them
+## every frame, so this only bounds a session nobody reads).
+const FILL_LOG_MAX := 4096
 ## [E] The largest face (texels per side): the cache's VRAM - 6 x 4096^2 x 12 B x (1 + 1/4 + 1/16) = 1.6 GB of the 2 GB
 ## cap with the fade slots; finer views (a narrow desktop field of view) get texels a little larger than their pixels.
 const FACE_TEXELS_MAX := 4096
@@ -88,7 +91,8 @@ var last_covering := false  ## the last plan's covering flag
 var view_missing := true  ## the last plan found a tile in the view's cone without a level (the march covers it)
 var last_fades: Array[int] = []  ## tiles whose fade started in the last plan (tests)
 var last_fade_s := -INF  ## when the latest fade started (now_s; its end: + CloudViewCache.CROSSFADE_S)
-## Measured fills (diagnostics, render_check; take_fill_log): (measured ms, predicted ms, budget ms) each.
+## Measured fills (diagnostics, render_check; take_fill_log): (measured ms, predicted ms, budget ms) each; a ring of
+## the last FILL_LOG_MAX [E] (a run without a check taking them keeps the newest).
 var fill_log: Array[Vector3] = []
 
 var _reset_pending := false
@@ -290,6 +294,8 @@ func _apply_fill_time(fill_id: int, ms: float) -> void:
 	_pending.erase(fill_id)
 	var predicted: float = fill["predicted_ms"]
 	fill_log.append(Vector3(ms, predicted, fill["budget_ms"]))
+	if fill_log.size() > FILL_LOG_MAX:
+		fill_log.remove_at(0)
 	if ms <= 0.0 or predicted <= 0.0:
 		return
 	var scale := ms / predicted
@@ -440,7 +446,7 @@ func _adopt_layout() -> void:
 ## Everything restarts from nothing at the camera: no tile shows anything (no old content after a jump), no tile's cost
 ## is known (another place, another light).
 func _restart(camera_earth_m: Vector3) -> void:
-	_reset_pending = false
+	# (_reset_pending belongs to the main thread: plan() clears it when it hands the request to the run.)
 	anchor_earth_m = camera_earth_m
 	resets += 1
 	epoch += 1
