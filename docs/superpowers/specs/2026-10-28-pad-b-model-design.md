@@ -155,8 +155,12 @@ both from the same data, the physics numbers the master. All points in this sect
   then runs a catch-guidance retuning stage (`[gnc][catch]`, SCvx catch, booster return, ship catch laws) until the
   rates on `starbase_olp2` are at least `starbase_olp1`'s (Claude's call).
 - The Starbase missions that today name `starbase_olp1` (flight 14 ascent, depot / tanker / HLS / LEO, ship returns)
-  move to `starbase_olp2` only after its catch tests are green and the retuning stage (if needed) has met the rates;
-  `starbase_olp1` stays as a site with today's box view.
+  move to `starbase_olp2` only after its catch tests are green and the retuning stage (if needed) has met the rates.
+  Then Pad A is removed completely (user 2026-10-28: "Pad B ersetzt das Draft Pad A restlos"): `starbase_olp1`, its
+  config, view and tests are deleted or migrated; olp1's rates serve only as the retuning reference before removal.
+- The Pad B tower is THE Mechazilla of the game (user 2026-10-28: "Überall werden die selben Mechazillas stehen"):
+  every site with a catch tower (e.g. LC-39A today) uses the same tower model and detail file; per-site configs carry
+  only placement and site-specific parts. The detail file and the scripts are therefore site-independent.
 - Re-run on Pad B: `test_tower_geometry`, `test_catch_arms`, `test_catch_tower`, `test_catch_trigger`,
   `test_catch_feasibility`, `test_scvx_catch`, `test_ship_catch` (+ their `[slow]` campaigns), `test_booster_return`
   and the mission tests that use the moved site.
@@ -256,7 +260,7 @@ materials, decals -> lights -> envelope check, renders, VR run -> mission switch
 5. Physics numbers are the master; visual parts are placed from them; envelope check 0.10 m (touch surfaces) /
    0.05 m (inside the envelope).
 6. New physics site `starbase_olp2` (arms ~26 m [E], square mount); catch tests re-run; Starbase missions moved to it
-   when green; `starbase_olp1` kept with the box view.
+   when green; then `starbase_olp1` (Pad A) removed completely (user decision); the same tower at every catch site.
 7. Square mount as four physics boxes (`mount_shape`); flame trench visual only (terrain mask), not a collision body.
 8. Carriage height travel and the QD arm angle become sim state in `tower_state()`; QD arm without collision.
 9. Real lighting from the start: physical units, few shadowed floodlights, obstruction lights per the FAA pattern,
@@ -317,7 +321,8 @@ materials, decals -> lights -> envelope check, renders, VR run -> mission switch
 - Independent per-arm actuation of the chopsticks (needs a per-side angle in the core).
 
 - Whether the ship QD arm and the booster QD / clamps get collision bodies later (with the vehicle spec).
-- Whether `starbase_olp1` stays selectable at all (Pad A is out of service) or is replaced by its V3 rebuild later.
+- A multi-pad site with 10 pads (user 2026-10-28, after this model is finished) - its own spec; the shared tower model
+  makes it placement work.
 - Own photos from public places (Highway 4 / Boca Chica beach) as clean references or texture sources, if the user or a
   contact can take them.
 - The FAA EA site plans (faa.gov 403 to the fetcher): one manual look by the user for the trench footprint.
