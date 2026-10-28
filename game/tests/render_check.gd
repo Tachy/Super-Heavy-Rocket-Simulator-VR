@@ -51,7 +51,8 @@
 #          _fly_<t> for the samples' cache frames.
 # World volume (world volume plan Task 5): --world_volume / --no_world_volume set the fidelity flag
 #          CloudLayer.world_volume (default: the environment STARSIM_WORLD_VOLUME=1 or the user argument --world_volume;
-#          off otherwise); on, the volume's upkeep runs (GPU interval cloud_volume_upkeep), no march reads it yet.
+#          off otherwise); on, the volume's upkeep runs (GPU intervals cloud_volume_upkeep: the bake, cloud_volume_light:
+#          the light), no march reads it yet; the settle waits for its fill and light (Task 6).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -153,6 +154,9 @@ var _terrain_idle := 0  ## consecutive frames without terrain loading
 var _found_event_tdb_s := NAN  ## --at_event: the event's instant found by flying (_fly_until_event)
 var _deterministic_left := -1  ## --deterministic: frames still to draw after the reset (-1: not yet reset)
 var _cache_settled := 0  ## --repeat_identical: consecutive frames with the light cache settled
+var _volume_upkeeps: Array[float] = []  ## the world volume's measured upkeep (ms) per frame of its cold start
+var _volume_seen := 0  ## measured frames of the world volume read so far
+var _volume_reported := false
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
@@ -422,6 +426,9 @@ func _process(_delta: float) -> bool:
 			and _frames < TERRAIN_MAX_FRAMES
 	# The cloud view cache (on unless --no_view_cache): until nothing is left to fill (its timing printed below).
 	var cache_waiting := _cache_waiting(world)
+	# The world volume (flag on): until its fill and its light are complete (world volume plan Task 6: the upkeep is
+	# measured after the cold start).
+	cache_waiting = cache_waiting or (world.clouds.world_volume and _volume_waiting(world) and _frames < TERRAIN_MAX_FRAMES)
 	if CloudSpike.failed:
 		_refuse("render_check: the spike's plan was refused (see the CloudSpike error)")
 		return true
@@ -567,6 +574,28 @@ func _gpu_frames(world: World) -> bool:
 		print("render_check: gpu pass %s median %.3f ms, p99 %.3f ms" % [name, ms[ms.size() / 2],
 				ms[mini(ms.size() - 1, int(0.99 * ms.size()))]])
 	return true
+
+
+## True while the world volume's fill or light is incomplete (CloudWorldVolumeSchedule.complete, light_stale); the
+## cold start's measured upkeep (bake + light, GPU ms) collected and printed once it is done.
+func _volume_waiting(world: World) -> bool:
+	var stats := world.clouds.world_volume_stats()
+	if int(stats["measured_frames"]) > _volume_seen:
+		_volume_seen = int(stats["measured_frames"])
+		_volume_upkeeps.append(float(stats["upkeep_ms"]))
+	var schedule: CloudWorldVolumeSchedule = world.clouds.world_volume_schedule
+	var waiting := not schedule.complete()
+	for k in CloudWorldVolumeLayout.LEVELS:
+		waiting = waiting or schedule.light_stale(k)
+	if not waiting and not _volume_reported:
+		_volume_reported = true
+		var ms := _volume_upkeeps.duplicate()
+		ms.sort()
+		print("render_check: world volume complete after %d frames; cold start upkeep (bake + light) median %.3f ms, "
+				% [_frames, ms[ms.size() / 2] if not ms.is_empty() else -1.0] + "p99 %.3f ms, max %.3f ms" % [
+				ms[mini(ms.size() - 1, int(0.99 * ms.size()))] if not ms.is_empty() else -1.0,
+				ms.max() if not ms.is_empty() else -1.0])
+	return waiting
 
 
 ## The cloud view cache's convergence (the cache on, the clouds shown): true while tiles are still filled (until

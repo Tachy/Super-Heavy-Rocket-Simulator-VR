@@ -1070,3 +1070,16 @@ it stood:
     ball is clipped to the level's window).
     each free ball: 0 with density (blend toward level k + 1 included); 1e4 points in the fade band: 0 with density in
     their free ball, 0 above the block bound (with the band ignored, as before the fix: 7-90 per level failed).
+
+## World volume schedule text before Task 6 (superseded 2026-10-28: light volume, split calibration)
+
+Superseded by: `CloudWorldVolumeLight` (light only for filled levels, write modes, settle boxes from the GPU's clamp
+counts), the calibration from two GPU intervals (`feedback_split`), a light start rate measured on the slab. Text as
+it stood (weather-clouds.md, schedule and GPU side):
+    Light refresh generations (Sun /
+    Moon / blend triggers, tiles nearest first, equal shares finest first) as in the file header.
+    `feedback(upkeep_ms,
+    bake_taps, light_cells)` calibrates; start rates 2e7 taps/ms (half the measured, below) and 1.12 M light cells/ms
+    [E];
+    CloudEffect `run()`s it (with the pass's own camera) after the set 0 is built and before the march (GPU interval
+    `cloud_volume_upkeep`), then

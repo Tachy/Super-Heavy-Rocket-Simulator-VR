@@ -5,7 +5,9 @@
 # cold start (the coarsest level baked first under the spike budget and shown once whole, light provisional from the
 # column, finer levels coarse to fine), scroll slabs baked ahead of the window (1 km/s, 7.8 km/s; with the budget
 # capped the windows wait instead of reading unbaked cells and the shown levels stay nested), the
-# layout's origins kept by the schedule, Sun / Moon / weather-blend triggers, light budget and order, pair switch (also
+# layout's origins kept by the schedule, Sun / Moon / weather-blend triggers, light budget and order, the light's write
+# modes (Task 6: real light only for filled levels, direct in spike frames, rate-limited refresh passes with settle
+# passes from the GPU's clamp counts, provisional light blended out over PROVISIONAL_FADE_S), pair switch (also
 # during a fill: no cell baked twice), jump, re-frame (one level at a time, coarsest first, a shown version in every
 # plan, spike cap), plan() cost. The schedules run at TEST_TAPS_PER_MS (world-volume Task 5: the budget counts taps).
 extends SceneTree
@@ -20,6 +22,9 @@ const FILL_FRAMES_MAX := 400
 const TEST_TAPS_PER_MS := 1.0e9
 ## The RTX 4090's measured cold-start bake rate (cloud_check.gd section 16, Task 5): the scroll flights plan at it.
 const GAME_TAPS_PER_MS := 4.3e7
+## The schedules' light rate (cells per ms) for the logic's tests (the spec's 67 M cells in 60 ms; cloud_check.gd
+## section 17 measures the GPU's).
+const TEST_LIGHT_CELLS_PER_MS := 67.0e6 / 60.0
 
 var _failures := 0
 var _rng := RandomNumberGenerator.new()
@@ -41,6 +46,7 @@ func _run() -> void:
 	_test_triggers()
 	_test_light_budget_and_order()
 	_test_moon()
+	_test_light_modes()
 	_test_pair_switch()
 	_test_jump()
 	_test_reframe_schedule()
@@ -283,6 +289,7 @@ func _test_reframe_and_memory() -> void:
 func _schedule(layout := CloudWorldVolumeLayout.new()) -> CloudWorldVolumeSchedule:
 	var s := CloudWorldVolumeSchedule.new(layout)
 	s.bake_taps_per_ms = TEST_TAPS_PER_MS
+	s.light_cells_per_ms = TEST_LIGHT_CELLS_PER_MS
 	return s
 
 
@@ -801,6 +808,118 @@ func _test_moon() -> void:
 		s.plan(_cam(0.0, 100.0), night, moon, 0.3, CLOUD_TOP_M, false, DT, [0, 1])
 	p = s.plan(_cam(0.0, 100.0), night, moon.rotated(_up(0.0), 0.3), 0.3, CLOUD_TOP_M, false, DT, [0, 1])
 	_check(not p["light"].is_empty(), "...and the Moon's motion then relights")
+
+
+## World-volume Task 6: which light the schedule writes how.
+func _test_light_modes() -> void:
+	print("light modes")
+	var M := CloudWorldVolumeLight
+	var sun := _sun(0.0, SUN_30)
+	# Cold start: real light only for levels filled in that plan's state, written directly (spike).
+	var s := _schedule()
+	var ready_ok := true
+	var direct_ok := true
+	var frames := 0
+	while frames < FILL_FRAMES_MAX:
+		var p := _plan(s, 0.0, 100.0, sun)
+		frames += 1
+		for j: Dictionary in p["light"]:
+			ready_ok = ready_ok and bool(p["lookup"]["levels"][j["level"]]["ready"])
+			direct_ok = direct_ok and j["mode"] == M.MODE_DIRECT
+		if s.complete() and p["light"].is_empty() and p["bake"].is_empty():
+			break
+	_check(ready_ok, "cold start: real light only for filled levels (their rays read their own window)")
+	_check(direct_ok, "...written directly (spike)")
+	_check(not s.light_pending(0) and not s.light_stale(7), "...and every level lit once the fill completes")
+	# A refresh generation: rate-limited, named by its generation.
+	var thr := CloudWorldVolumeSchedule.sun_threshold_rad(0, deg_to_rad(30.0), 12000.0)
+	var turned := _rotate(sun, _up(0.0), 1.1 * thr)
+	var gen := s.light_generation(0)
+	var rate_ok := true
+	var any0 := false
+	for i in 200:
+		var p := _plan(s, 0.0, 100.0, turned)
+		for j: Dictionary in p["light"]:
+			rate_ok = rate_ok and j["mode"] == M.MODE_RATE and j["generation"] == s.light_generation(j["level"])
+			any0 = any0 or j["level"] == 0
+		if not s.light_stale(0):
+			break
+	_check(any0 and rate_ok and s.light_generation(0) == gen + 1, "a Sun trigger: one generation of rate-limited "
+			+ "refresh jobs (generation %d)" % s.light_generation(0))
+	# Settle: a box whose rate-limited write clamped cells is served again, alone; an older generation's box is not.
+	var box := {"from": Vector3i(10, 10, 10), "to": Vector3i(20, 20, 20)}
+	s.light_feedback(0, gen + 1, box)
+	s.light_feedback(0, gen, {"from": Vector3i(100, 100, 10), "to": Vector3i(110, 110, 20)})  # older: ignored
+	_check(s.light_stale(0), "the GPU clamped cells of a box: level 0 stale again")
+	var more := 0
+	var settle_ok := true
+	for i in 20:
+		var p := _plan(s, 0.0, 100.0, turned)
+		for j: Dictionary in p["light"]:
+			more += _cells(j)
+			settle_ok = settle_ok and j["level"] == 0 and j["generation"] == gen + 1 and j["mode"] == M.MODE_RATE \
+					and _inside_box(j, box)
+		if not s.light_stale(0):
+			break
+	_check(settle_ok and more == _cells(box) and s.light_generation(0) == gen + 1, "...that box alone again, "
+			+ "rate-limited, same generation (%d cells of %d)" % [more, _cells(box)])
+	var after := 0
+	for i in 20:
+		after += _sum_cells(_plan(s, 0.0, 100.0, turned)["light"])
+	_check(after == 0 and not s.light_stale(0), "no clamp reported: nothing more")
+	# Provisional light shown, then blended out: a scroll with the light starved.
+	s = _schedule()
+	_settle(s, 0.0, 100.0, sun)
+	s.light_cells_per_ms = 0.0
+	var lam := 0.0
+	var seen_blend := false
+	for i in 30:
+		lam += 200.0 / (A_M + 100.0)
+		var p := _plan(s, lam, 100.0, sun)
+		for j: Dictionary in p["light"]:
+			seen_blend = seen_blend or j["mode"] == M.MODE_BLEND
+	_check(not seen_blend and _any_pending(s), "light starved: provisional light, no blend before real light")
+	s.light_cells_per_ms = TEST_LIGHT_CELLS_PER_MS
+	var spans := {}  # box -> [first plan, last plan, first weight, last weight]
+	var weights_ok := true
+	for i in 200:
+		var p := _plan(s, lam, 100.0, sun)
+		for j: Dictionary in p["light"]:
+			if j["mode"] != M.MODE_BLEND:
+				continue
+			weights_ok = weights_ok and j["weight"] > 0.0 and j["weight"] <= 1.0
+			var key := "%d %s %s" % [j["level"], j["from"], j["to"]]
+			if not spans.has(key):
+				spans[key] = [i, i, j["weight"], j["weight"]]
+			spans[key][1] = i
+			spans[key][3] = j["weight"]
+		var pending := false
+		for k in CloudWorldVolumeLayout.LEVELS:
+			pending = pending or s.light_pending(k)
+		if not pending:
+			break
+	var fade_frames := int(ceil(CloudWorldVolumeSchedule.PROVISIONAL_FADE_S / DT))
+	var span_ok := not spans.is_empty()
+	var first_ok := true
+	var last_ok := true
+	var longest := 0
+	for key: String in spans:
+		var e: Array = spans[key]
+		longest = maxi(longest, e[1] - e[0] + 1)
+		span_ok = span_ok and e[1] - e[0] + 1 == fade_frames
+		first_ok = first_ok and absf(e[2] - DT / CloudWorldVolumeSchedule.PROVISIONAL_FADE_S) < 1e-6
+		last_ok = last_ok and e[3] >= 1.0
+	_check(weights_ok and first_ok and last_ok, "provisional light that was shown is blended out: %d boxes, first "
+			% spans.size() + "weight dt / %.2f s, last 1" % CloudWorldVolumeSchedule.PROVISIONAL_FADE_S)
+	_check(span_ok, "...each over PROVISIONAL_FADE_S: %d plans (longest %d)" % [fade_frames, longest])
+
+
+## True while some level has cells with provisional light only.
+func _any_pending(s: CloudWorldVolumeSchedule) -> bool:
+	for k in CloudWorldVolumeLayout.LEVELS:
+		if s.light_pending(k):
+			return true
+	return false
 
 
 func _test_pair_switch() -> void:

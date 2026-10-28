@@ -100,6 +100,11 @@
 #      clamped bottom read at its edge, a rebake bit-identical, the GLSL grid
 #      mirror within 1e-3 of a cell, the bake binding's input forms, the pair switch (STARSIM_VOLUME_ONLY=16 runs this
 #      alone; another value exits 1). STARSIM_WORLD_VOLUME=1 turns the flag on for every GPU check.
+#  17. (world volume plan Task 6) the world volume's light over section 8's thick slab, read back: the cold start's light
+#      per level within 1 s of its density shown, tau_sun / tau_below / tau_above of cells inside the slab at levels 0,
+#      2, 5 vs the analytic slab 5 %, one refresh pass after a 5 deg Sun step moves no exp(-tau_sun) by more than 0.01,
+#      Earth's shadow (Sun >= 6 deg below a cell's horizon: the shadow value), tau_moon 5 %, no Moon jobs by day, no
+#      NaN / infinity in any level (STARSIM_VOLUME_ONLY=17 runs this alone).
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -137,7 +142,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES + VIEW_CACHE_SAMPLES + VOLUME_SAMPLES
+const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES + VIEW_CACHE_SAMPLES + VOLUME_SAMPLES + LIGHT_SAMPLES
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -516,7 +521,7 @@ func _run() -> void:
 		print("cloud_check (view cache only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
-	if OS.get_environment(VOLUME_ONLY_ENV) != "":  # section 16 alone (world volume plan Task 5)
+	if OS.get_environment(VOLUME_ONLY_ENV) != "":  # section 16 or 17 alone (world volume plan Tasks 5, 6)
 		await _volume_only(OS.get_environment(VOLUME_ONLY_ENV))
 		return
 	if OS.get_environment("STARSIM_GROUND_ONLY") != "":  # diagnostics: section 6 alone (no sample count)
@@ -643,8 +648,10 @@ func _run() -> void:
 	await _air_shadow_samples()
 	# 15. The cloud view cache's fill against the per-frame march.
 	await _view_cache_samples()
-	# 16. The cloud world volume's GPU bake, occupancy and grid (last: it leaves the flag off again).
+	# 16. The cloud world volume's GPU bake, occupancy and grid (it leaves the flag off again).
 	await _world_volume_samples()
+	# 17. The world volume's light (last: it leaves the flag off again).
+	await _volume_light_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -2946,7 +2953,7 @@ func _march_reference(path: String, bytes: PackedByteArray, label: String) -> vo
 ##   unchanged, the new pair is then the CPU's bake and the blend reaches the target.
 ## STARSIM_VOLUME_ONLY=16 runs this section alone.
 const VOLUME_ONLY_ENV := "STARSIM_VOLUME_ONLY"
-const VOLUME_SECTIONS := ["16"]
+const VOLUME_SECTIONS := ["16", LIGHT_SECTION]
 const VOLUME_ANALOG_MONTH := 10
 const VOLUME_ANALOG_HOUR := 12
 ## ERA5 hours (since 1900-01-01) 2025-10-25 15:00 and 16:00 UTC in data/weather/cache.
@@ -3005,9 +3012,15 @@ func _volume_only(value: String) -> void:
 		_clouds.shutdown()
 		quit(1)
 		return
-	await _world_volume_samples()
+	if value == LIGHT_SECTION:
+		await _volume_light_samples()
+	else:
+		await _world_volume_samples()
+	for f in _files:
+		DirAccess.remove_absolute(f)
 	_clouds.shutdown()
-	_check("sample count", _samples == VOLUME_SAMPLES + 1, "%d samples" % _samples)  # + the transfer table's
+	var expected: int = LIGHT_SAMPLES if value == LIGHT_SECTION else VOLUME_SAMPLES
+	_check("sample count", _samples == expected + 1, "%d samples" % _samples)  # + the transfer table's
 	print("cloud_check: %s (section %s, %d samples, %d failures)" % ["PASS" if _failures == 0 else "FAIL", value,
 			_samples, _failures])
 	quit(1 if _failures > 0 else 0)
@@ -3101,10 +3114,10 @@ func _volume_fill(camera: Vector3, measure: bool, label: String) -> void:
 				seen = int(stats["measured_frames"])
 				upkeeps.append(float(stats["upkeep_ms"]))
 		var after := _clouds.world_volume_stats()
-		var ms := float(after["measured_ms"]) - float(before["measured_ms"])
+		var ms := float(after["measured_bake_ms"]) - float(before["measured_bake_ms"])
 		var taps := float(after["measured_taps"]) - float(before["measured_taps"])
 		upkeeps.sort()
-		print("cloud_check: world volume cold start (%s, game budget, %d frames): gpu pass cloud_volume_upkeep " % [label,
+		print("cloud_check: world volume cold start (%s, game budget, %d frames): gpu upkeep (bake + light) " % [label,
 				VOLUME_COLD_FRAMES] + "median %.2f ms, max %.2f ms over %d measured frames; %s taps / ms = %.0f "
 				% [upkeeps[upkeeps.size() / 2] if not upkeeps.is_empty() else -1.0, upkeeps.max() if not upkeeps.is_empty()
 				else -1.0, upkeeps.size(), String.num_scientific(taps / maxf(ms, 1e-9)), taps / maxf(ms, 1e-9)
@@ -3824,3 +3837,476 @@ static func _volume_pair1_equal(a: PackedByteArray, b: PackedByteArray) -> bool:
 			if a.decode_u32(i) != b.decode_u32(i):
 				return false
 	return true
+
+
+# ---------------------------------------------------------------- section 17 (world volume plan Task 6)
+
+## Section 17 (world volume plan Task 6; STARSIM_VOLUME_ONLY=17 runs it alone): the light volume
+## (shaders/cloud_volume_light.gdshaderinc) over section 8's thick slab (1-2 km, cf 1, vertical tau ~10) at Starbase,
+## camera 2 m up, checked on the light texels read back (no march reads the volume before Task 7, ruling C12):
+## - cold start: per level the frames from its density shown to its light complete (no provisional light, no blend
+##   left), the light at the game's spike share while the bake runs at VOLUME_BUDGET_SCALE x (its time is ruled
+##   separately: Task 5 c1): every level completes; the frames against LIGHT_COLD_FRAMES (1 s at 45 Hz) and the
+##   light's GPU ms printed (ruling: where the light alone misses 1 s, reported, the spike cap kept);
+## - Sun 45 deg up: LIGHT_CELLS cells wholly inside the slab under the camera per level 0, 2, 5: tau_below, tau_above
+##   vs the trapezoid sums of the core's cell bake of the column (the GPU bake's reference; the trilinear field along
+##   the vertical is linear between centres), tau_sun vs the converged integral along the ray through the level's
+##   density read back - within LIGHT_TOLERANCE; the analytic slab's depth above / mu0 printed (the baked slab's top
+##   undulates with the bake's shape noise by tens of metres: along a slanted ray a uniform slab's depth / mu0 is off
+##   by up to ~5 %);
+## - a LIGHT_SUN_STEP_DEG Sun step: levels 0, 2, 5 read back before and as soon as each level's refresh pass is through:
+##   no texel's exp(-tau_sun) moved by more than LIGHT_STEP_T (+ the half float's rounding); the change once settled
+##   printed (the clamp's work);
+## - the Sun 8 deg below the site's horizon: every texel of levels 0, 2, 5 whose column has the Sun >= 6 deg below its
+##   own horizon (N11) holds tau_sun >= the shadow value;
+## - the Sun 10 deg below, the Moon 40 deg up: tau_moon of the slab cells vs the ray integral toward the Moon;
+## - the Sun 10 deg up: no light job carries the Moon (and light jobs ran);
+## - after every fill: no NaN and no infinity in any channel of any level (a GPU scan of every texel, its counts read
+##   back: CloudWorldVolume.scan_light).
+## Deferred to Task 7 (ruling C12: no march reads the light yet): the broken cf 0.4 views' radiance vs the converged
+## per-sample march, radiance 0 in Earth's shadow, the cold start's first frame with clouds, render_check --front_check.
+const LIGHT_SECTION := "17"
+const LIGHT_SAMPLES := 9
+const LIGHT_LEVELS := [0, 2, 5]
+const LIGHT_CELLS := 5
+const LIGHT_TOLERANCE := 0.05
+## Sun / Moon (elevation, azimuth in degrees at the site).
+const LIGHT_SUN := Vector2(45.0, 135.0)
+const LIGHT_MOON := Vector2(40.0, 200.0)
+const LIGHT_SUN_STEP_DEG := 5.0
+const LIGHT_SHADOW_SUN_DEG := -8.0
+const LIGHT_SHADOW_BELOW_DEG := 6.0
+const LIGHT_NIGHT_SUN_DEG := -10.0
+const LIGHT_DAY_SUN_DEG := 10.0
+## [S] Mean Earth-Moon distance (m): only the Moon's direction matters here.
+const LIGHT_MOON_DISTANCE_M := 3.844e8
+const LIGHT_COLD_FRAMES := 45
+const LIGHT_MAX_FRAMES := 6000
+## [E] Frames without stale light before a fill counts as settled: the GPU's clamp counts come back a few frames late.
+const LIGHT_QUIET_FRAMES := 12
+## [E] The half float holding tau rounds it by 2^-11 relative: exp(-tau) moves by up to T tau 2^-11 more (< 2e-4 for
+## tau <= 1, where a step can clamp; deeper the step is below the clamp anyway).
+const LIGHT_HALF_ROUNDING := 5.0e-4
+## [E] The ray reference integrates up to this far above the slab's top (its undulation is tens of metres).
+const LIGHT_RAY_CLEAR_M := 500.0
+## cloud_volume_light.gdshaderinc CLOUD_VOLUME_TAU_SHADOW (change together).
+const LIGHT_SHADOW_TAU := 6.0e4
+
+var _light_scan_bad := 0
+var _light_scan_text := PackedStringArray()
+
+
+func _volume_light_samples() -> void:
+	var site := SUN_CU_SITE
+	var slab := _slab("volume_light", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
+	var camera := HeightSource.geodetic_to_fixed(site.x, site.y, VOLUME_HEIGHTS_M[0])
+	var sun := _local_direction(LIGHT_SUN.x, LIGHT_SUN.y, site.x, site.y)
+	var moon := _local_direction(LIGHT_MOON.x, LIGHT_MOON.y, site.x, site.y)
+	var schedule := _clouds.world_volume_schedule
+	_clouds.world_volume = true
+	_show(slab)
+	# Cold start, then settled at the Sun 45 deg up.
+	await _light_cold_start(camera, sun, moon)
+	var frames := await _light_settle(camera, sun, moon, {})
+	if frames < 0:
+		_fail_and_quit("section 17: the light did not settle (Sun %.0f deg)" % LIGHT_SUN.x)
+		return
+	var lookup := _clouds.effect.world_volume.adopted()
+	var mu_sun := sin(deg_to_rad(LIGHT_SUN.x))
+	for k: int in LIGHT_LEVELS:
+		_light_slab_check(k, lookup, camera, Frames.to_render(sun), mu_sun, slab["file"], "level %d, Sun %.0f deg"
+				% [k, LIGHT_SUN.x])
+	_light_scan("Sun %.0f deg" % LIGHT_SUN.x)
+	# One refresh pass after a Sun step.
+	await _light_step(camera, moon)
+	_light_scan("Sun %.0f deg" % (LIGHT_SUN.x + LIGHT_SUN_STEP_DEG))
+	# Earth's shadow.
+	var shadow_sun := _local_direction(LIGHT_SHADOW_SUN_DEG, LIGHT_SUN.y, site.x, site.y)
+	_show(slab)
+	if await _light_settle(camera, shadow_sun, moon, {}) < 0:
+		_fail_and_quit("section 17: the light did not settle (Sun %.0f deg)" % LIGHT_SHADOW_SUN_DEG)
+		return
+	_light_shadow_check(_clouds.effect.world_volume.adopted(), Frames.to_render(shadow_sun))
+	_light_scan("Sun %.0f deg" % LIGHT_SHADOW_SUN_DEG)
+	# The Moon, the Sun 10 deg below.
+	var night_sun := _local_direction(LIGHT_NIGHT_SUN_DEG, LIGHT_SUN.y, site.x, site.y)
+	_show(slab)
+	var night := {}
+	if await _light_settle(camera, night_sun, moon, night) < 0:
+		_fail_and_quit("section 17: the light did not settle (Sun %.0f deg)" % LIGHT_NIGHT_SUN_DEG)
+		return
+	lookup = _clouds.effect.world_volume.adopted()
+	var mu_moon := sin(deg_to_rad(LIGHT_MOON.x))
+	var moon_ok: bool = night["moon_cells"] > 0
+	var moon_text := PackedStringArray()
+	for k: int in LIGHT_LEVELS:
+		var values := PackedStringArray()
+		var r := _light_slab_errors(k, lookup, camera, Frames.to_render(moon), mu_moon, 3, slab["file"], values)
+		moon_ok = moon_ok and r.x <= LIGHT_TOLERANCE
+		moon_text.append("level %d worst %.2f %% (%s)" % [k, 100.0 * r.x, ", ".join(values)])
+	_check("world volume light: tau_moon (Sun %.0f deg, Moon %.0f deg up) vs the ray integral" % [
+			LIGHT_NIGHT_SUN_DEG, LIGHT_MOON.x], moon_ok, "%s; %d light cells with the Moon"
+			% [", ".join(moon_text), night["moon_cells"]])
+	_light_scan("Sun %.0f deg" % LIGHT_NIGHT_SUN_DEG)
+	# The Sun 10 deg up: no Moon jobs.
+	var day_sun := _local_direction(LIGHT_DAY_SUN_DEG, LIGHT_SUN.y, site.x, site.y)
+	_show(slab)
+	var day := {}
+	if await _light_settle(camera, day_sun, moon, day) < 0:
+		_fail_and_quit("section 17: the light did not settle (Sun %.0f deg)" % LIGHT_DAY_SUN_DEG)
+		return
+	_check("world volume light: Sun %.0f deg up - no light job carries the Moon" % LIGHT_DAY_SUN_DEG,
+			day["moon_cells"] == 0 and day["light_cells"] > 0, "%d light cells with the Moon of %d"
+			% [day["moon_cells"], day["light_cells"]])
+	_light_scan("Sun %.0f deg" % LIGHT_DAY_SUN_DEG)
+	_check("world volume light: no NaN / infinity in any channel of any level", _light_scan_bad == 0,
+			"; ".join(_light_scan_text))
+	print("cloud_check: world volume light rates: calibrated %s light cells / ms, %s bake taps / ms" % [
+			String.num_scientific(schedule.light_cells_per_ms), String.num_scientific(schedule.bake_taps_per_ms)])
+	_clouds.world_volume = false
+
+
+## One frame: the Sun and the Moon (ITRF unit vectors) set, the layer updated (blend 0: the slab in both slots), drawn.
+func _light_frame(camera_itrf: Vector3, sun_itrf: Vector3, moon_itrf: Vector3) -> void:
+	_atmosphere.update(_earth_to_gcrf * camera_itrf, Vector3.ZERO, _earth_to_gcrf, _earth_to_gcrf * sun_itrf * AU_M, 0.0,
+			1.0, _earth_to_gcrf * moon_itrf * LIGHT_MOON_DISTANCE_M)
+	_clouds.update(camera_itrf, 0.0, VOLUME_DT)
+	await RenderingServer.frame_post_draw
+
+
+## Frames until the fill is complete, its last batch ran and no level's light is stale for LIGHT_QUIET_FRAMES frames,
+## at VOLUME_BUDGET_SCALE x the budget (-1 past LIGHT_MAX_FRAMES); seen: the most Moon light cells of a plan and the
+## light cells summed.
+func _light_settle(camera: Vector3, sun: Vector3, moon: Vector3, seen: Dictionary) -> int:
+	var schedule := _clouds.world_volume_schedule
+	var volume := _clouds.effect.world_volume
+	schedule.budget_scale = VOLUME_BUDGET_SCALE
+	seen["moon_cells"] = 0
+	seen["light_cells"] = 0
+	var quiet := 0
+	for n in LIGHT_MAX_FRAMES:
+		await _light_frame(camera, sun, moon)
+		var stats := _clouds.world_volume_stats()
+		seen["moon_cells"] = maxi(seen["moon_cells"], int(stats["light_moon_cells"]))
+		seen["light_cells"] += int(stats["light_cells"])
+		var busy := not schedule.complete() or volume.waiting() or not _volume_all_ready(volume.adopted())
+		for k in CloudWorldVolumeLayout.LEVELS:
+			busy = busy or schedule.light_stale(k)
+		quiet = 0 if busy else quiet + 1
+		if quiet >= LIGHT_QUIET_FRAMES:
+			schedule.budget_scale = 1.0
+			return n + 1
+	schedule.budget_scale = 1.0
+	return -1
+
+
+## The cold start: per level the frames from its density shown (the adopted lookup) to its light complete (the
+## schedule: no provisional light, no blend left), the light at the game's spike share (light_budget_scale undoes
+## budget_scale for it), the bake at VOLUME_BUDGET_SCALE x.
+func _light_cold_start(camera: Vector3, sun: Vector3, moon: Vector3) -> void:
+	var schedule := _clouds.world_volume_schedule
+	var volume := _clouds.effect.world_volume
+	schedule.budget_scale = VOLUME_BUDGET_SCALE
+	schedule.light_budget_scale = 1.0 / VOLUME_BUDGET_SCALE
+	var shown_at := {}
+	var done_at := {}
+	var light_ms: Array[float] = []
+	var rate_ms := 0.0
+	var rate_cells := 0
+	var active := 0
+	var seen := int(_clouds.world_volume_stats()["measured_frames"])
+	for n in LIGHT_MAX_FRAMES:
+		await _light_frame(camera, sun, moon)
+		var stats := _clouds.world_volume_stats()
+		var adopted := volume.adopted()
+		if adopted.is_empty():
+			continue
+		active = 0
+		var measuring := false
+		for e: Dictionary in adopted["levels"]:
+			var k: int = e["level"]
+			if not bool(e["active"]):
+				continue
+			active += 1
+			if bool(e["shown"]) and not shown_at.has(k):
+				shown_at[k] = n
+			if shown_at.has(k) and not done_at.has(k):
+				measuring = true
+				if not schedule.light_pending(k):
+					done_at[k] = n
+		if measuring and int(stats["measured_frames"]) > seen:
+			light_ms.append(float(stats["light_ms"]))
+			rate_ms += float(stats["light_ms"])
+		if measuring:
+			rate_cells += int(stats["light_cells"])
+		seen = int(stats["measured_frames"])
+		if active > 0 and done_at.size() == active:
+			break
+	schedule.light_budget_scale = 1.0
+	schedule.budget_scale = 1.0
+	var worst := 0
+	var text := PackedStringArray()
+	for k: int in range(CloudWorldVolumeLayout.LEVELS - 1, -1, -1):
+		if not done_at.has(k):
+			text.append("level %d not complete" % k)
+			worst = LIGHT_MAX_FRAMES
+			continue
+		var f: int = done_at[k] - shown_at[k] + 1
+		worst = maxi(worst, f)
+		text.append("level %d %d" % [k, f])
+	light_ms.sort()
+	# Asserted: every level's light completes (no stall); the frames against LIGHT_COLD_FRAMES are reported (ruling
+	# C7 / Task 6: where the light alone cannot meet 1 s, numbers are reported instead of bending the spike cap).
+	_check("world volume light: cold start, every level's light completes (frames from its density shown, target %d)"
+			% LIGHT_COLD_FRAMES, done_at.size() == active, ("all within the target: %s; frames %s; light GPU ms "
+			% [worst <= LIGHT_COLD_FRAMES, ", ".join(text)]) + "in those frames median %.2f, max %.2f (%d measured), ~%.0f light cells / ms" % [
+			light_ms[light_ms.size() / 2] if not light_ms.is_empty() else -1.0, light_ms.max() if not light_ms.is_empty()
+			else -1.0, light_ms.size(), rate_cells / maxf(rate_ms, 1e-9)])
+
+
+## Level k's light texels read back: 4 floats per texel (tau_sun, tau_below, tau_above, tau_moon; x fastest).
+func _light_read(k: int) -> PackedFloat32Array:
+	var rd := RenderingServer.get_rendering_device()
+	var bytes := rd.texture_get_data(_clouds.effect.world_volume.light_texture(k), 0)
+	var image := Image.create_from_data(CloudWorldVolumeLayout.CELLS_H,
+			CloudWorldVolumeLayout.CELLS_H * CloudWorldVolumeLayout.CELLS_V, false, Image.FORMAT_RGBAH, bytes)
+	image.convert(Image.FORMAT_RGBAF)
+	return image.get_data().to_float32_array()
+
+
+## LIGHT_CELLS cells of level k under the camera wholly inside the slab, spread over its height.
+func _light_slab_cells(k: int, lookup: Dictionary, camera_itrf: Vector3) -> Array[Vector3i]:
+	var L := CloudWorldVolumeLayout
+	var g := _volume_layout(lookup, k).grid_of(Frames.to_render(camera_itrf))
+	var v: float = L.CELL_V_M[k]
+	var z0 := ceili((SLAB_BOTTOM_M - L.SHELL_BOTTOM_M) / v)
+	var z1 := floori((SLAB_TOP_M - L.SHELL_BOTTOM_M) / v) - 1
+	var cells: Array[Vector3i] = []
+	for i in LIGHT_CELLS:
+		cells.append(Vector3i(floori(g.x / L.CELL_H_M[k]), floori(g.y / L.CELL_H_M[k]),
+				z0 + roundi(i * (z1 - z0) / float(LIGHT_CELLS - 1))))
+	return cells
+
+
+## The reference of level k's slab cells: the core's cell bake (weather_cloud_cell_bakes, the GPU bake's reference) of
+## the camera's column over the level's window, summed by trapezoids (the trilinear field along the vertical is linear
+## between cell centres; at the shell's ends the outer value held over the last half cell, as the reads clamp) - per
+## slab cell [height, depth above, depth below]; toward a light at cosine mu the slab's depth above / mu (horizontally
+## uniform: a straight path through it).
+func _light_slab_reference(k: int, lookup: Dictionary, camera_itrf: Vector3, file: String) -> Array:
+	var L := CloudWorldVolumeLayout
+	var v: float = L.CELL_V_M[k]
+	var slab_cells := _light_slab_cells(k, lookup, camera_itrf)
+	var z0: int = lookup["levels"][k]["origin"].z
+	var z1: int = z0 + L.window_size(k).z
+	var column: Array[Vector3i] = []
+	for z in range(z0, z1):
+		column.append(Vector3i(slab_cells[0].x, slab_cells[0].y, z))
+	var cpu := _volume_cpu(file, lookup, k, column)
+	if cpu.size() != column.size():
+		return []
+	var below := PackedFloat64Array([cpu[0].x * 0.5 * v if z0 == 0 else 0.0])
+	for i in range(1, column.size()):
+		below.append(below[i - 1] + 0.5 * (cpu[i - 1].x + cpu[i].x) * v)
+	var top_hold: float = cpu[column.size() - 1].x * 0.5 * v if z1 == L.CELLS_V else 0.0
+	var total: float = below[column.size() - 1] + top_hold
+	var out: Array = []
+	for cell in slab_cells:
+		var i := cell.z - z0
+		out.append([L.SHELL_BOTTOM_M + (cell.z + 0.5) * v, total - below[i], below[i]])
+	return out
+
+
+## Level k's density (rho of slot 0, 1/km: the slab's blend is 0) trilinear at a grid point, as the GPU's filter reads
+## it (toroidal; vertically clamped to the storage).
+static func _light_trilinear(density: PackedFloat32Array, g: Vector3, k: int) -> float:
+	var L := CloudWorldVolumeLayout
+	var c := Vector3(g.x / L.CELL_H_M[k], g.y / L.CELL_H_M[k], (g.z - L.SHELL_BOTTOM_M) / L.CELL_V_M[k]) \
+			- Vector3(0.5, 0.5, 0.5)
+	var i0 := Vector3i(floori(c.x), floori(c.y), floori(c.z))
+	var f := c - Vector3(i0)
+	var value := 0.0
+	for corner in 8:
+		var d := Vector3i(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1)
+		var cell := i0 + d
+		cell.z = clampi(cell.z, 0, L.CELLS_V - 1)
+		var w := (f.x if d.x == 1 else 1.0 - f.x) * (f.y if d.y == 1 else 1.0 - f.y) * (f.z if d.z == 1 else 1.0 - f.z)
+		value += w * density[_volume_texel_index(cell) * 4]
+	return value
+
+
+## The converged optical depth from level k's cell centre toward `dir` (render axes, unit) through level k's density
+## read back (_light_trilinear, midpoint steps of a tenth of a cell's height) until the ray is LIGHT_RAY_CLEAR_M above
+## the slab's top (clear beyond it): the reference of tau_sun / tau_moon. (The baked slab's top undulates with the
+## bake's shape noise by tens of metres - the analytic depth above the cell / mu holds only in the cell's own column.)
+func _light_ray_reference(k: int, lookup: Dictionary, cell: Vector3i, dir: Vector3, density: PackedFloat32Array) -> float:
+	var L := CloudWorldVolumeLayout
+	var layout := _volume_layout(lookup, k)
+	var h: float = L.CELL_H_M[k]
+	var v: float = L.CELL_V_M[k]
+	var p0 := layout.earth_of(Vector3((cell.x + 0.5) * h, (cell.y + 0.5) * h, L.SHELL_BOTTOM_M + (cell.z + 0.5) * v))
+	var step := 0.1 * v
+	var tau := 0.0
+	var s := 0.5 * step
+	while true:
+		var g := layout.grid_of(p0 + dir * s)
+		if g.z > SLAB_TOP_M + LIGHT_RAY_CLEAR_M:
+			break
+		tau += _light_trilinear(density, g, k) * step
+		s += step
+	return tau / CloudWorldVolume.PER_KM
+
+
+## Level k's slab cells against the references: tau_below / tau_above vs the CPU bake's column
+## (_light_slab_reference), the light's depth (`channel` 0 tau_sun, 3 tau_moon toward `dir`) vs the converged ray
+## integral (_light_ray_reference); the analytic slab's depth above / mu printed. Returns (worst relative error, its
+## channel); `text` gets the values (value (reference)).
+func _light_slab_errors(k: int, lookup: Dictionary, camera_itrf: Vector3, dir: Vector3, mu: float, channel: int,
+		file: String, text: PackedStringArray) -> Vector2:
+	var floats := _light_read(k)
+	var density: PackedFloat32Array = _volume_read(k)["floats"]
+	var reference := _light_slab_reference(k, lookup, camera_itrf, file)
+	if reference.is_empty():
+		text.append("level %d: no CPU reference" % k)
+		return Vector2(INF, -1.0)
+	var worst := Vector2(0.0, -1.0)
+	var cells := _light_slab_cells(k, lookup, camera_itrf)
+	for j in cells.size():
+		var ref: Array = reference[j]
+		var t := _volume_texel_index(cells[j]) * 4
+		var ray := _light_ray_reference(k, lookup, cells[j], dir, density)
+		var pairs: Array = [[channel, floats[t + channel], ray]]
+		if channel == 0:
+			pairs.append_array([[1, floats[t + 1], ref[2]], [2, floats[t + 2], ref[1]]])
+		var parts := PackedStringArray()
+		for pr: Array in pairs:
+			var e: float = absf(pr[1] - pr[2]) / maxf(pr[2], 1e-9)
+			if e > worst.x:
+				worst = Vector2(e, pr[0])
+			parts.append("%.3f (%.3f)" % [pr[1], pr[2]])
+		text.append("%.0f m: %s [slab / mu %.3f]" % [ref[0], " / ".join(parts), ref[1] / mu])
+	return worst
+
+
+func _light_slab_check(k: int, lookup: Dictionary, camera_itrf: Vector3, dir: Vector3, mu: float, file: String,
+		label: String) -> void:
+	var text := PackedStringArray()
+	var r := _light_slab_errors(k, lookup, camera_itrf, dir, mu, 0, file, text)
+	_check("world volume light: slab tau_sun / tau_below / tau_above vs the ray integral / the CPU column (%s)" % label,
+			r.x <= LIGHT_TOLERANCE, "worst %.2f %% (channel %d); %s" % [100.0 * r.x, int(r.y), ", ".join(text)])
+
+
+## The Sun steps by LIGHT_SUN_STEP_DEG: per level 0, 2, 5 the texels before and once the level's refresh pass of the
+## step is through (before a settle pass could follow); every exp(-tau_sun) moved by <= LIGHT_STEP_T (+ rounding).
+## Then settled: the change the clamp spread over passes printed.
+func _light_step(camera: Vector3, moon: Vector3) -> void:
+	var schedule := _clouds.world_volume_schedule
+	var site := SUN_CU_SITE
+	var stepped := _local_direction(LIGHT_SUN.x + LIGHT_SUN_STEP_DEG, LIGHT_SUN.y, site.x, site.y)
+	var before := {}
+	var generation := {}
+	for k: int in LIGHT_LEVELS:
+		before[k] = _light_read(k)
+		generation[k] = schedule.light_generation(k)
+	var after := {}
+	schedule.budget_scale = VOLUME_BUDGET_SCALE
+	var quiet := 0
+	for n in LIGHT_MAX_FRAMES:
+		await _light_frame(camera, stepped, moon)
+		var refreshing := false
+		for k: int in LIGHT_LEVELS:
+			if not after.has(k) and schedule.light_generation(k) > generation[k] and not schedule.light_refreshing(k):
+				after[k] = _light_read(k)
+			refreshing = refreshing or schedule.light_refreshing(k)
+		# levels whose threshold the step did not reach are not refreshed (LIGHT_QUIET_FRAMES without any refresh)
+		quiet = 0 if refreshing else quiet + 1
+		if after.size() == LIGHT_LEVELS.size() or quiet >= LIGHT_QUIET_FRAMES:
+			break
+	schedule.budget_scale = 1.0
+	var bound := CloudWorldVolumeSchedule.LIGHT_STEP_T + LIGHT_HALF_ROUNDING
+	var ok := after.has(0)
+	var clamped := 0
+	var text := PackedStringArray()
+	for k: int in LIGHT_LEVELS:
+		if not after.has(k):  # its threshold above the step: not refreshed, nothing moved
+			after[k] = _light_read(k)
+			text.append("level %d (not triggered)" % k)
+		var r := _light_change(before[k], after[k])
+		ok = ok and r.x <= bound
+		clamped += int(r.y)
+		text.append("level %d: max %.4f, %d clamped" % [k, r.x, int(r.y)])
+	ok = ok and clamped > 0
+	if await _light_settle(camera, stepped, moon, {}) >= 0:
+		for k: int in LIGHT_LEVELS:
+			var r := _light_change(before[k], _light_read(k))
+			text.append("level %d settled: max %.4f" % [k, r.x])
+	_check("world volume light: a %.0f deg Sun step - one refresh pass moves no exp(-tau_sun) by more than %.2f"
+			% [LIGHT_SUN_STEP_DEG, CloudWorldVolumeSchedule.LIGHT_STEP_T], ok, "; ".join(text))
+
+
+## The largest change of exp(-tau_sun) over all texels between two read-backs, and the texels that moved by at least
+## LIGHT_STEP_T less the rounding (clamped).
+static func _light_change(a: PackedFloat32Array, b: PackedFloat32Array) -> Vector2:
+	var worst := 0.0
+	var clamped := 0
+	var limit := CloudWorldVolumeSchedule.LIGHT_STEP_T - LIGHT_HALF_ROUNDING
+	for i in range(0, a.size(), 4):
+		var ta := 0.0 if a[i] >= LIGHT_SHADOW_TAU else exp(-a[i])
+		var tb := 0.0 if b[i] >= LIGHT_SHADOW_TAU else exp(-b[i])
+		var d := absf(ta - tb)
+		if d > worst:
+			worst = d
+		if d >= limit:
+			clamped += 1
+	return Vector2(worst, clamped)
+
+
+## Every texel of levels 0, 2, 5 whose column has the Sun at least LIGHT_SHADOW_BELOW_DEG below its own horizon holds
+## the shadow value.
+func _light_shadow_check(lookup: Dictionary, sun_render: Vector3) -> void:
+	var L := CloudWorldVolumeLayout
+	var checked := 0
+	var wrong := 0
+	var lowest := INF
+	var limit := sin(deg_to_rad(-LIGHT_SHADOW_BELOW_DEG))
+	for k: int in LIGHT_LEVELS:
+		var floats := _light_read(k)
+		var layout := _volume_layout(lookup, k)
+		var origin: Vector3i = lookup["levels"][k]["storage"]
+		var h: float = L.CELL_H_M[k]
+		for ty in L.CELLS_H:
+			for tx in L.CELLS_H:
+				var cell := _volume_cell_of(ty * L.CELLS_H + tx, origin)
+				if layout.up_of_grid((cell.x + 0.5) * h, (cell.y + 0.5) * h).dot(sun_render) > limit:
+					continue
+				for tz in L.CELLS_V:
+					var tau := floats[((tz * L.CELLS_H + ty) * L.CELLS_H + tx) * 4]
+					checked += 1
+					if tau < LIGHT_SHADOW_TAU:
+						wrong += 1
+						lowest = minf(lowest, tau)
+	_check(("world volume light: Earth's shadow (Sun %.0f deg at the site; texels with it >= %.0f deg below their "
+			+ "horizon)") % [LIGHT_SHADOW_SUN_DEG, LIGHT_SHADOW_BELOW_DEG], checked > 0 and wrong == 0,
+			"%d texels of levels 0, 2, 5 checked, %d below %.0f (lowest %s)" % [checked, wrong, LIGHT_SHADOW_TAU,
+			lowest])
+
+
+## Every level's light texels scanned on the GPU (NaN / infinity in any channel); the counts kept for the final check.
+func _light_scan(label: String) -> void:
+	var rd := RenderingServer.get_rendering_device()
+	var nan := 0
+	var inf := 0
+	var shadow := 0
+	var texels := 0
+	for k in CloudWorldVolumeLayout.LEVELS:
+		var c := _clouds.effect.world_volume.scan_light(rd, k)
+		if c.size() < 4:
+			_light_scan_bad += 1
+			_light_scan_text.append("%s: level %d not scanned" % [label, k])
+			continue
+		nan += c[0]
+		inf += c[1]
+		shadow += c[2]
+		texels += c[3]
+	_light_scan_bad += nan + inf
+	_light_scan_text.append("%s: %d NaN, %d infinite, %d in shadow of %d texels" % [label, nan, inf, shadow, texels])

@@ -29,10 +29,8 @@ extends RefCounted
 ## switch: a snapshot replaced in slot s is rebaked into slot s's channel pair alone, under the bake budget, coarse to
 ## fine - for a level still filling only what its fill has baked already (the rest bakes both snapshots anyway);
 ## `slot_ready[s]` tells when it may take weight (the spare included).
-## Light refresh: per level the Sun's turn (shadow shift H dtheta / sin^2 e < 1/4 cell), the Moon's (only while the Sun is
-## below MOON_SUN_ELEVATION_RAD at the level centre), the blend's step (WEATHER_REFRESH_STEP) start a new generation:
-## the level's window is queued as tiles, nearest (and in view) first, behind what an older generation left in the
-## queue (no tile starves under time warp), served in equal shares finest level first.
+## Light (CloudWorldVolumeLight, world-volume Task 6): filled levels only; blends, freshly baked cells, rate-limited
+## refresh generations (Sun / Moon / blend triggers, settle passes from the GPU's clamp counts), provisional light.
 ## Re-frame: the camera's ground point > REFRAME_M from the frame origin -> a new frame at the camera; levels are
 ## rebuilt one at a time, coarsest first, into a spare version in the new frame, shown (the old version stays shown
 ## meanwhile), cross-faded over REFRAME_FADE_S and swapped.
@@ -71,17 +69,18 @@ const MIN_REFRESH_ELEVATION_RAD := deg_to_rad(5.0)
 const MIN_HEIGHT_M := 100.0
 ## [E] Tiles in view are served before the ones behind the camera: behind counts twice as far.
 const BEHIND_FACTOR := 2
-## [E] Start rates, replaced by feedback(): the spec's 67 M light cells in 60 ms; the bake's taps per ms half the RTX
-## 4090's measured cold-start rate (4.3e7, cloud_check.gd section 16) - feedback() raises it by at most 20 % a frame,
+## [E] Start rates, replaced by feedback(): the light's the RTX 4090's measured rate on cloud_check section 17's slab
+## (every ray through tau ~10; clear rays are many times faster: the feedback raises it); the bake's taps per ms half
+## the measured cold-start rate (4.3e7, cloud_check.gd section 16) - feedback() raises them by at most 20 % a frame,
 ## and a first frame below its budget only lags.
-const INITIAL_LIGHT_CELLS_PER_MS := 67.0e6 / 60.0
+const INITIAL_LIGHT_CELLS_PER_MS := 1.25e5
 const INITIAL_BAKE_TAPS_PER_MS := 2.0e7
 ## [E] feedback() moves the rates by this fraction of the measured error per call, at most by the limits.
 const CALIBRATION_GAIN := 0.2
 const CALIBRATION_LIMITS := Vector2(0.5, 2.0)
 const MIN_CELLS_PER_MS := 1.0e4
 ## Cells of a tile's key order inside the sort key (tiles per level <= 4096).
-const _KEY_BITS := 12
+const KEY_BITS := 12
 
 ## Calibrated by feedback().
 var bake_taps_per_ms := INITIAL_BAKE_TAPS_PER_MS
@@ -90,6 +89,9 @@ var light_cells_per_ms := INITIAL_LIGHT_CELLS_PER_MS
 var view_dir_earth := Vector3.ZERO
 ## Checks only (cloud_check.gd section 16: a cold fill in few frames): scales every per-frame budget.
 var budget_scale := 1.0
+## Checks only (cloud_check.gd section 17: the light at the game's budget while the bake runs at budget_scale):
+## scales the light's budget alone.
+var light_budget_scale := 1.0
 
 
 class _Level extends RefCounted:
@@ -106,11 +108,14 @@ class _Level extends RefCounted:
 	var dirty: Array = []  # boxes {from, to} still to bake (both snapshots)
 	var baked: Array = []  # boxes a fill in progress has baked (a slot change rebakes these alone)
 	var slot_dirty: Array = [[], []]  # per snapshot slot: boxes to rebake (channel pair of that slot)
-	var prov: Array = []  # baked boxes {from, to, emitted, age_s} still to get real light
+	var prov: Array = []  # baked boxes {from, to, emitted, age_s, seen} still to get real light
+	var blend: Array = []  # boxes {from, to, t_s} blending their real light in over the provisional (Task 6)
 	var queue: Array = []  # tile keys (Vector3i) of the refresh generation(s) in progress
 	var queued := {}
 	var partial: Array = []  # boxes: the rest of the tile being served
 	var need_queue := false
+	var generation := 0  # refresh generations queued so far (the GPU's clamp counts name theirs)
+	var settle: Array = []  # boxes {from, to} whose rate-limited write clamped cells: served again once through
 	var lit_valid := false
 	var lit_sun := Vector3.ZERO
 	var lit_moon := Vector3.ZERO
@@ -134,10 +139,7 @@ var _bake_cells := 0
 var _bake_taps := 0
 var _scroll_cells := 0
 var _scroll_taps := 0
-var _light_cells := 0
-var _prov_cells := 0
-var _prov_age_max := 0.0
-var _prov_age_session_max := 0.0
+var _light := CloudWorldVolumeLight.new()
 var _camera_grid := Vector3.ZERO
 var _camera_grid_next := Vector3.ZERO
 var _camera_prev := Vector3.ZERO
@@ -163,8 +165,7 @@ func reset() -> void:
 ## Shadow shift H dtheta / sin^2 e kept below 1/4 cell: the Sun may turn this far (rad) before a level is relit.
 ## H = the cloud top above the level's lowest cell (m).
 static func sun_threshold_rad(k: int, sun_elevation_rad: float, height_above_m: float) -> float:
-	var s := sin(sun_elevation_rad)
-	return 0.25 * CloudWorldVolumeLayout.CELL_H_M[k] * s * s / height_above_m
+	return CloudWorldVolumeLight.sun_threshold_rad(k, sun_elevation_rad, height_above_m)
 
 
 ## Rate calibration from GPU timestamps: the measured upkeep time of a frame against the model's (bake taps, light
@@ -181,6 +182,17 @@ func feedback(upkeep_ms: float, bake_taps: int, light_cells: int) -> void:
 	light_cells_per_ms = maxf(light_cells_per_ms * g, MIN_CELLS_PER_MS)
 
 
+## Rate calibration from the upkeep's two GPU intervals (Task 6: the bake's and the light's, CloudWorldVolume): each rate
+## from its own interval and work (an interval without work calibrates nothing).
+func feedback_split(bake_ms: float, bake_taps: int, light_ms: float, light_cells: int) -> void:
+	if bake_ms > 0.0 and bake_taps > 0:
+		var f := clampf(bake_taps / bake_taps_per_ms / bake_ms, CALIBRATION_LIMITS.x, CALIBRATION_LIMITS.y)
+		bake_taps_per_ms = maxf(bake_taps_per_ms * (1.0 + CALIBRATION_GAIN * (f - 1.0)), MIN_CELLS_PER_MS)
+	if light_ms > 0.0 and light_cells > 0:
+		var f := clampf(light_cells / light_cells_per_ms / light_ms, CALIBRATION_LIMITS.x, CALIBRATION_LIMITS.y)
+		light_cells_per_ms = maxf(light_cells_per_ms * (1.0 + CALIBRATION_GAIN * (f - 1.0)), MIN_CELLS_PER_MS)
+
+
 ## Cold-start / jump / re-frame fill and the spare version are done; nothing is waiting to be baked or lit first
 ## (queued scroll slabs do not count: a moving camera always has some, and the spike must end).
 func complete() -> bool:
@@ -193,10 +205,52 @@ func complete() -> bool:
 	return true
 
 
-## True while level k's light is behind its target (a refresh generation or provisional light is pending).
+## True while level k's light is behind its target (a refresh generation, a settle pass, provisional light or a blend
+## is pending).
 func light_stale(k: int) -> bool:
+	return CloudWorldVolumeLight.stale(_levels[k])
+
+
+## True while cells of level k have no real light yet or still blend it in.
+func light_pending(k: int) -> bool:
+	return CloudWorldVolumeLight.pending(_levels[k])
+
+
+## True while level k has a refresh generation queued or in progress (not counting a settle pass not yet started).
+func light_refreshing(k: int) -> bool:
 	var lv: _Level = _levels[k]
-	return lv.need_queue or not lv.queue.is_empty() or not lv.partial.is_empty() or not lv.prov.is_empty()
+	return lv.need_queue or not lv.queue.is_empty() or not lv.partial.is_empty()
+
+
+## Level k's refresh generation (the light jobs' `generation`).
+func light_generation(k: int) -> int:
+	return _levels[k].generation
+
+
+## A rate-limited light job whose write clamped cells (CloudWorldVolume.take_light_feedback): level k, the generation
+## it named, its box - served again once the level's queue is through. A spare (re-frame) is written directly.
+func light_feedback(k: int, generation: int, box: Dictionary) -> void:
+	if _started and k >= 0 and k < _levels.size():
+		CloudWorldVolumeLight.feedback(_levels[k], generation, box)
+
+
+## True in cold-start, jump and re-frame frames until the fill is complete (the light writes directly then).
+func spike_frame() -> bool:
+	return _spike
+
+
+## The bake's planned time this plan (ms at the calibrated rate).
+func bake_ms_planned() -> float:
+	return _bake_taps / bake_taps_per_ms
+
+
+func is_spare(lv: _Level) -> bool:
+	return lv == _spare
+
+
+## The camera's grid point in the level's frame.
+func camera_grid_of(lv: _Level) -> Vector3:
+	return _grid_of_level(lv)
 
 
 func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vector3, blend: float,
@@ -207,9 +261,6 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	_bake_taps = 0
 	_scroll_cells = 0
 	_scroll_taps = 0
-	_light_cells = 0
-	_prov_cells = 0
-	_prov_age_max = 0.0
 	_waiting = 0
 	if jumped or not _started:
 		_cold_start(camera_earth_m, slot_ids)
@@ -232,7 +283,7 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	_bake_scroll(_scroll_items(order), int(_bake_ms() * bake_taps_per_ms) - _bake_taps, out["bake"])
 	for lv: _Level in order:
 		_advance_window(lv)
-	_light(order, sun_dir_earth, moon_dir_earth, blend, cloud_top_m, delta_s, out)
+	_light.run(self, order, sun_dir_earth, moon_dir_earth, blend, cloud_top_m, delta_s, out)
 	var reframe := _reframe_end(delta_s)
 	if _spike and complete():
 		_spike = false
@@ -243,10 +294,13 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	out["bake_scroll_cells"] = _scroll_cells
 	out["bake_scroll_taps"] = _scroll_taps
 	out["windows_waiting"] = _waiting
-	out["light_cells"] = _light_cells
-	out["provisional_cells"] = _prov_cells
-	out["provisional_age_max_s"] = _prov_age_max
-	out["provisional_max_s"] = _prov_age_session_max
+	out["light_cells"] = _light.light_cells
+	out["light_moon_cells"] = _light.moon_cells
+	out["provisional_cells"] = _light.prov_cells
+	out["provisional_age_max_s"] = _light.prov_age_max
+	out["provisional_max_s"] = _light.prov_age_session_max
+	out["sun"] = sun_dir_earth
+	out["moon"] = moon_dir_earth
 	out["spike"] = _spike
 	return out
 
@@ -427,7 +481,8 @@ func _bake_scroll(items: Array, budget: int, bake_out: Array) -> void:
 		_scroll_cells += cells
 		_scroll_taps += cells * L.cell_taps(lv.k)
 		budget -= cells * L.cell_taps(lv.k)
-		lv.prov.append({"from": sp[0]["from"], "to": sp[0]["to"], "emitted": false, "age_s": 0.0})
+		lv.prov.append({"from": sp[0]["from"], "to": sp[0]["to"], "emitted": false, "age_s": 0.0,
+				"seen": false})
 		lv.scroll.remove_at(i)
 		var rest: Array = sp[1]
 		for j in rest.size():
@@ -505,6 +560,8 @@ func _clear(lv: _Level) -> void:
 	lv.baked = []
 	lv.slot_dirty = [[], []]
 	lv.prov = []
+	lv.blend = []
+	lv.settle = []
 	lv.queue = []
 	lv.queued = {}
 	lv.partial = []
@@ -573,7 +630,8 @@ func _bake_dirty(lv: _Level, budget: int, bake_out: Array) -> int:
 			continue
 		var sp := L.box_split(box, n - used)
 		_emit_bake(lv, sp[0], -1, bake_out)
-		lv.prov.append({"from": sp[0]["from"], "to": sp[0]["to"], "emitted": false, "age_s": 0.0})
+		lv.prov.append({"from": sp[0]["from"], "to": sp[0]["to"], "emitted": false, "age_s": 0.0,
+				"seen": false})
 		lv.baked.append(sp[0])
 		used += L.box_cells(sp[0])
 		lv.dirty = sp[1] + lv.dirty
@@ -599,186 +657,6 @@ func _bake_slot(lv: _Level, s: int, budget: int, bake_out: Array) -> int:
 		list = sp[1] + list
 	lv.slot_dirty[s] = list
 	return used * L.cell_taps(lv.k)
-
-
-# ---------------------------------------------------------------- light
-
-func _light(order: Array, sun: Vector3, moon: Vector3, blend: float, cloud_top_m: float, delta_s: float,
-		out: Dictionary) -> void:
-	var L := CloudWorldVolumeLayout
-	var fine_first := order.duplicate()
-	fine_first.reverse()
-	var built := false
-	for lv: _Level in fine_first:
-		if not lv.active:
-			continue
-		_light_env(lv, sun, moon, blend, cloud_top_m)
-		for b: Dictionary in lv.prov:
-			if b["emitted"]:
-				b["age_s"] += delta_s
-				_prov_age_max = maxf(_prov_age_max, b["age_s"])
-		if lv.need_queue and not built:
-			_enqueue_tiles(lv)  # one level per plan: the sort is the main thread's cost
-			built = true
-	var light_ms := budget_scale * LIGHT_BUDGET_MS
-	if _spike:
-		light_ms = maxf(budget_scale * UPKEEP_SPIKE_MS - _bake_taps / bake_taps_per_ms, 0.0)
-	var budget := int(light_ms * light_cells_per_ms)
-	# 1. the freshly baked cells (provisional ones first in line), coarse to fine.
-	for lv: _Level in order:
-		if lv.active and not lv.prov.is_empty():
-			budget -= _light_prov(lv, budget, out["light"])
-	# 2. the refresh generations in equal shares, finest level first (nearest tiles first inside a level).
-	var stale: Array = []
-	for lv: _Level in fine_first:
-		if lv.active and (not lv.queue.is_empty() or not lv.partial.is_empty()):
-			stale.append(lv)
-	for i in stale.size():
-		if budget <= 0:
-			break
-		var share := (budget + stale.size() - i - 1) / (stale.size() - i)
-		budget -= _light_queue(stale[i], share, out["light"])
-	# 3. what got no real light yet gets provisional light now (once).
-	for lv: _Level in order:
-		if not lv.active or not lv.shown:
-			continue
-		var window := L.storage_box(lv.storage)
-		for b: Dictionary in lv.prov:
-			if b["emitted"]:
-				continue
-			var box := L.box_clip(b, window)
-			if L.box_cells(box) > 0:
-				out["provisional"].append({"level": lv.k, "from": box["from"], "to": box["to"],
-						"from_column": lv.k == L.LEVELS - 1})
-				_prov_cells += L.box_cells(box)
-			b["emitted"] = true
-
-
-func _light_job(lv: _Level, box: Dictionary) -> Dictionary:
-	_light_cells += CloudWorldVolumeLayout.box_cells(box)
-	return {"level": lv.k, "from": box["from"], "to": box["to"], "moon": lv.moon_on, "spare": lv == _spare}
-
-
-func _light_prov(lv: _Level, budget: int, jobs: Array) -> int:
-	var L := CloudWorldVolumeLayout
-	var window := L.storage_box(lv.storage)
-	var used := 0
-	while used < budget and not lv.prov.is_empty():
-		var b: Dictionary = lv.prov.pop_front()
-		var box := L.box_clip(b, window)
-		if L.box_cells(box) == 0:
-			continue
-		var sp := L.box_split(box, budget - used)
-		jobs.append(_light_job(lv, sp[0]))
-		used += L.box_cells(sp[0])
-		if b["emitted"]:
-			_prov_age_max = maxf(_prov_age_max, b["age_s"])
-			_prov_age_session_max = maxf(_prov_age_session_max, b["age_s"])
-		var rest: Array = []
-		for r: Dictionary in sp[1]:
-			rest.append({"from": r["from"], "to": r["to"], "emitted": b["emitted"], "age_s": b["age_s"]})
-		lv.prov = rest + lv.prov
-	return used
-
-
-func _light_queue(lv: _Level, budget: int, jobs: Array) -> int:
-	var L := CloudWorldVolumeLayout
-	var window := L.storage_box(lv.storage)
-	var used := 0
-	while used < budget:
-		if lv.partial.is_empty():
-			if lv.queue.is_empty():
-				break
-			var key: Vector3i = lv.queue.pop_front()
-			lv.queued.erase(key)
-			var lo := key * TILE_CELLS
-			var box := L.box_clip({"from": lo, "to": lo + Vector3i(TILE_CELLS, TILE_CELLS, TILE_CELLS)}, window)
-			if L.box_cells(box) > 0:
-				lv.partial = [box]
-			continue
-		var sp := L.box_split(lv.partial.pop_front(), budget - used)
-		jobs.append(_light_job(lv, sp[0]))
-		used += L.box_cells(sp[0])
-		lv.partial = sp[1] + lv.partial
-	return used
-
-
-## The level's light environment and refresh triggers (a trigger starts a new generation: the whole window is
-## queued again, behind what is still queued).
-func _light_env(lv: _Level, sun: Vector3, moon: Vector3, blend: float, cloud_top_m: float) -> void:
-	var L := CloudWorldVolumeLayout
-	var cx := (lv.storage.x + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
-	var cy := (lv.storage.y + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
-	var up := lv.layout.up_of_grid(cx, cy)
-	var sin_e := sun.dot(up)
-	lv.moon_on = sin_e < sin(MOON_SUN_ELEVATION_RAD)
-	if not lv.ready or not lv.lit_valid:
-		# Filling: the light computed now already is the current one.
-		lv.lit_valid = lv.ready or lv.lit_valid
-		lv.lit_sun = sun
-		lv.lit_moon = moon
-		lv.lit_blend = blend
-		lv.lit_moon_on = lv.moon_on
-		lv.lit_valid = true
-		return
-	var h := maxf(cloud_top_m - (L.SHELL_BOTTOM_M + lv.storage.z * L.CELL_V_M[lv.k]), MIN_HEIGHT_M)
-	var trigger := false
-	if (sun - lv.lit_sun).length() > sun_threshold_rad(lv.k, _refresh_elevation(sin_e), h):
-		trigger = true
-	if lv.moon_on != lv.lit_moon_on:
-		trigger = true
-	elif lv.moon_on and (moon - lv.lit_moon).length() > sun_threshold_rad(lv.k, _refresh_elevation(moon.dot(up)), h):
-		trigger = true
-	if absf(blend - lv.lit_blend) >= WEATHER_REFRESH_STEP - 1e-9:
-		trigger = true
-	if trigger:
-		lv.lit_sun = sun
-		lv.lit_moon = moon
-		lv.lit_blend = blend
-		lv.lit_moon_on = lv.moon_on
-		lv.need_queue = true
-
-
-static func _refresh_elevation(sin_e: float) -> float:
-	return maxf(absf(asin(clampf(sin_e, -1.0, 1.0))), MIN_REFRESH_ELEVATION_RAD)
-
-
-func _enqueue_tiles(lv: _Level) -> void:
-	var L := CloudWorldVolumeLayout
-	lv.need_queue = false
-	var o := lv.storage
-	var t0 := Vector3i(floori(o.x / float(TILE_CELLS)), floori(o.y / float(TILE_CELLS)), floori(o.z / float(TILE_CELLS)))
-	var t1 := Vector3i(floori((o.x + L.CELLS_H - 1) / float(TILE_CELLS)), floori((o.y + L.CELLS_H - 1) / float(TILE_CELLS)),
-			floori((o.z + L.CELLS_V - 1) / float(TILE_CELLS)))
-	var cg := _grid_of_level(lv)
-	var ch: float = L.CELL_H_M[lv.k]
-	var cv: float = L.CELL_V_M[lv.k]
-	var view := lv.layout.tangent_of(view_dir_earth)
-	var use_view := view.length_squared() > 0.0
-	if use_view:
-		view = view.normalized()
-	var tiles: Array[Vector3i] = []
-	var keys := PackedInt64Array()
-	var half := 0.5 * TILE_CELLS
-	for tz in range(t0.z, t1.z + 1):
-		for ty in range(t0.y, t1.y + 1):
-			for tx in range(t0.x, t1.x + 1):
-				var key := Vector3i(tx, ty, tz)
-				if lv.queued.has(key):
-					continue
-				var dx := (tx * TILE_CELLS + half) * ch - cg.x
-				var dy := (ty * TILE_CELLS + half) * ch - cg.y
-				var dz := L.SHELL_BOTTOM_M + (tz * TILE_CELLS + half) * cv - cg.z
-				var score := int(sqrt(dx * dx + dy * dy + dz * dz) / ch * 8.0)
-				if use_view and dx * view.x + dy * view.y < 0.0:
-					score *= BEHIND_FACTOR
-				keys.append((score << _KEY_BITS) | tiles.size())
-				tiles.append(key)
-	keys.sort()
-	for key in keys:
-		var tile := tiles[key & ((1 << _KEY_BITS) - 1)]
-		lv.queue.append(tile)
-		lv.queued[tile] = true
 
 
 # ---------------------------------------------------------------- re-frame

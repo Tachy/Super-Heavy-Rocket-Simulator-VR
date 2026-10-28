@@ -557,3 +557,22 @@ image, + s for production's sub-cell detail); 1 and 2 matter only for clear bake
 - The distance field is recomputed whole for every level a batch touches (3 passes over 64 x 64 x 32 texels,
   ~0.05 ms per level): with amortised scroll slabs up to 6 levels a frame at 7.8 km/s, ~0.3 ms inside the upkeep
   interval (the bake-rate feedback absorbs it).
+
+### World volume light (cloud world volume plan Task 6, 2026-10-28)
+
+GPU intervals now `cloud_volume_upkeep` (bake, max mip, distance field) and `cloud_volume_light` (provisional and real
+light); the upkeep is their sum. Desktop RTX 4090, `--xr-mode off`:
+- Light kernel rate (cloud_check section 17, section 8's thick slab, every ray through tau ~10: the costliest content
+  measured): ~2.8e5 cells/ms on average over the cold start, ~6e4 cells/ms at level 0 (every cell within 2.6 km of
+  the deck); clear-dominated refresh passes calibrate to 1-2e6 cells/ms. the spec's 1.1e6 cells/ms [E] holds only for
+  mostly clear content: a full refresh of the 67 M cells takes ~50 ms of GPU at the clear rate (~1 s of 1 ms frames),
+  ~0.25 s in the slab (~5 s at the 1.0 ms light budget: a refresh lags by seconds, never a front).
+- Cold start in the slab (light at the spike's share, the bake at 40 x): every level complete 16-51 frames after its
+  density is shown (level 0: 51 frames = 1.13 s, above the 1 s target; levels 1-7 within it); light GPU median
+  2.71 ms per frame (the 3 ms spike cap less the bake), max 14.7 ms (the rate calibration lags content changes).
+- `render_check --cloud_view=V1 --world_volume --gpu_time --gpu_passes` (fill and light awaited): cold start in 309
+  frames, upkeep (bake + light) median 1.74 ms, p99 13.5 ms, max 21 ms; after it (still view, clock 1 x)
+  `cloud_volume_upkeep` median 0.003 / p99 0.003 ms, `cloud_volume_light` 0.003 / 0.003 ms. V3: complete after 822
+  frames (its cold-start upkeep series was not captured: one sample); after it 0.003 / 0.004 ms and 0.003 / 0.003 ms.
+  The cold start's p99 / max exceed the 3 ms spike cap: per-frame cost follows content (clear vs cloudy cells, taps
+  skipped by the clear test) faster than the 20 %-per-frame calibration - the gate (Task 11) measures it in VR.

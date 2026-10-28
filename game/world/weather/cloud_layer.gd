@@ -271,8 +271,9 @@ var _view_cache_marched := false  ## the newest measured frame ran the near shel
 ## plan's work and the last measured upkeep.
 var _volume_reset := false
 var _volume_held_s := 0.0
-var _volume_stats := {"bake_cells": 0, "light_cells": 0, "upkeep_ms": 0.0, "measured_ms": 0.0, "measured_taps": 0,
-	"measured_frames": 0}
+var _volume_stats := {"bake_cells": 0, "light_cells": 0, "light_moon_cells": 0, "provisional_cells": 0, "upkeep_ms": 0.0,
+	"light_ms": 0.0, "measured_ms": 0.0, "measured_bake_ms": 0.0, "measured_taps": 0, "measured_light_ms": 0.0,
+	"measured_light_cells": 0, "measured_frames": 0}
 
 
 func _init() -> void:
@@ -586,12 +587,18 @@ func notify_view_jump() -> void:
 ## restart (jump, pinned pair) drops the adopted state first.
 func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 	var volume := effect.world_volume
-	for f: Vector3 in volume.take_feedback():
-		world_volume_schedule.feedback(f.x, int(f.y), int(f.z))
-		_volume_stats["upkeep_ms"] = f.x
-		_volume_stats["measured_ms"] += f.x
+	for f: Vector4 in volume.take_feedback():  # (bake ms, taps, light ms, light cells)
+		world_volume_schedule.feedback_split(f.x, int(f.y), f.z, int(f.w))
+		_volume_stats["upkeep_ms"] = f.x + f.z
+		_volume_stats["light_ms"] = f.z
+		_volume_stats["measured_ms"] += f.x + f.z
+		_volume_stats["measured_bake_ms"] += f.x
 		_volume_stats["measured_taps"] += int(f.y)
+		_volume_stats["measured_light_ms"] += f.z
+		_volume_stats["measured_light_cells"] += int(f.w)
 		_volume_stats["measured_frames"] += 1
+	for c: Array in volume.take_light_feedback():  # rate-limited light jobs that clamped cells (Task 6)
+		world_volume_schedule.light_feedback(c[0], c[1], {"from": c[2], "to": c[3]})
 	if not world_volume:
 		return
 	_volume_held_s += maxf(delta_s, 0.0)
@@ -613,11 +620,14 @@ func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 	_volume_held_s = 0.0
 	_volume_stats["bake_cells"] = batch["bake_cells"]
 	_volume_stats["light_cells"] = batch["light_cells"]
+	_volume_stats["light_moon_cells"] = batch["light_moon_cells"]
+	_volume_stats["provisional_cells"] = batch["provisional_cells"]
 	volume.submit(batch)
 
 
-## The world volume's last plan (cells to bake, cells to light), the last measured upkeep (GPU ms) and the sums of the
-## measured upkeeps (ms, taps, frames).
+## The world volume's last plan (cells to bake, to light, of them with the Moon, provisional), the last measured upkeep
+## (GPU ms: bake + light, the light's alone) and the sums of the measured upkeeps (ms in all, the bake's ms and taps,
+## the light's ms and cells, frames).
 func world_volume_stats() -> Dictionary:
 	return _volume_stats.duplicate()
 

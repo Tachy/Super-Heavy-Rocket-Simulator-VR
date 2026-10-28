@@ -1024,12 +1024,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     start, jump, level on) are baked under the budget strictly coarse to fine - the coarsest level too (Task 5: its
     8.4 M cells of 8448 taps take the GPU seconds), and nothing of the volume is shown before it is `ready`; a replaced
     snapshot slot is rebaked alone (`slot_ready`, the spare included; a level still filling rebakes only what its fill
-    baked: no cell twice). The schedule keeps the layout's `origins` (`fade_weight`). Light refresh generations (Sun /
-    Moon / blend triggers, tiles nearest first, equal shares finest first) as in the file header. Spike frames (cold
+    baked: no cell twice). The schedule keeps the layout's `origins` (`fade_weight`). Light: `CloudWorldVolumeLight` (below:
+    filled levels only, write modes, settle). Spike frames (cold
     start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms. The bake's cost unit is the
-    tap (`CloudWorldVolumeLayout.cell_taps(k)`: the core's tap rule), its rate taps per ms; `feedback(upkeep_ms,
-    bake_taps, light_cells)` calibrates; start rates 2e7 taps/ms (half the measured, below) and 1.12 M light cells/ms
-    [E]; `budget_scale` (checks only) scales every budget. Measured (headless, at a test rate of 1e9 taps/ms): fill 90
+    tap (`CloudWorldVolumeLayout.cell_taps(k)`: the core's tap rule), its rate taps per ms; `feedback_split(bake_ms,
+    bake_taps, light_ms, light_cells)` calibrates each rate from its own GPU interval (Task 6); start rates 2e7 taps/ms
+    (half the measured, below) and 1.25e5 light cells/ms (section 17's slab, the costliest content measured) [E]; `budget_scale` (checks only) scales every budget. Measured (headless, at a test rate of 1e9 taps/ms): fill 90
     frames, `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula). Scroll
     flights at the game's 4.3e7 taps/ms (`cloud_world_volume_test`, heading 30 deg, an independent model of the
     unbaked cells): 1 km/s at 10 km climbing 150 m/s (all 8 levels, 1400 frames) scroll bake mean 0.44 / worst
@@ -1047,11 +1047,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `STARSIM_WORLD_VOLUME=1` or `--world_volume`; Task 5 runs the upkeep alone, no march reads the volume yet):
   - Textures per level (index 8: the transient spare of a re-frame, created with its first job, freed at the swap):
     density RGBA16F in 1/km (RG = rho, sigma_c of slot 0's snapshot, BA = slot 1's; `channel_of_slot(s)` = s: a
-    slot's snapshot is replaced only without weight), light RGBA16F (Task 6), max-extinction mip R16F (1/km) and
+    slot's snapshot is replaced only without weight), light RGBA16F (Task 6, below), max-extinction mip R16F (1/km) and
     distance field R8 (blocks) at 64 x 64 x 32; ~1.07 GB (`texture_bytes()`).
   - Threads: CloudLayer plans each frame once the last batch was taken (held time and jumps kept), `submit()`s it;
-    CloudEffect `run()`s it (with the pass's own camera) after the set 0 is built and before the march (GPU interval
-    `cloud_volume_upkeep`), then
+    CloudEffect `run()`s it (with the pass's own camera) after the set 0 is built and before the march (GPU intervals
+    `cloud_volume_upkeep`: the bake, max mip, distance field; `cloud_volume_light`: the light, Task 6), then
     adopts its lookup. `notify_view_jump` / `notify_clock_jump` / `show_now` restart the schedule (`forget()`). The
     cross-fade is gated: while the volume runs (`running()`: a batch adopted, the last one taken - frame-based), the
     weight moves onto a slot only once the adopted state holds the slot's snapshot in its channel pair
@@ -1095,6 +1095,55 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     bound (with the band ignored: 7-90 per level failed; with level k + 1's bound taken at the grid point's block only,
     as in fix round 1: level 1 failed with 6 / 1 points at the 2 m / 9 km cameras). Clamped bottom (levels 0-1, camera
     2 m): 1e4 columns read the bottom cell below its centre (before: 9960 / 9959 read the wrapped top storage cell).
+- World volume light (world volume plan Task 6; schedule `CloudWorldVolumeLight`,
+  `game/world/weather/cloud_world_volume_light.gd`, called by the schedule; kernels
+  `game/shaders/cloud_volume_light.gdshaderinc`, run by `CloudWorldVolume` after the bake, GPU interval
+  `cloud_volume_light`; no march reads the light before Task 7):
+  - Texel (RGBA16F): tau_sun, tau_below (vertical, down to the shell's bottom: the transfer table's b), tau_above (up
+    to the shell's top: the sky's source), tau_moon - optical depths through rho (cell-mean extinction, both snapshots
+    blended by `cloud_blend`). Earth's shadow / Moon off: 6e4 (exp = 0; finite, so a filter across it stays finite).
+  - `CLOUD_VOLUME_LIGHT_COLUMN` (per column of a job box): tau_below / tau_above as exact trapezoid sums of the level's
+    own column of texels over its window (the trilinear field along the geodetic vertical is linear between centres),
+    beyond the window (levels 0-1) the coarser shown levels marched, the outer half cell held as the reads clamp.
+  - `CLOUD_VOLUME_LIGHT` (per cell, after a barrier): tau_sun / tau_moon from the cell centre - Earth's shadow when the
+    straight ray meets the ground (Gaussian sphere of the grid), the ray clipped to the shell, then steps through the
+    job's own (filled) level and the coarser levels SHOWN in its frame: free-space jumps on clear samples (distance
+    field; they add nothing), else Delta tau = max(0.5, 0.05 tau) / the block's max-extinction bound (level k + 1's too
+    in the fade band), at most 2 cells along the ray, trapezoid, a step whose ends differ by > 50 % halved up to 4 times;
+    64 samples; beyond the coarsest level or out of samples the grid-mean column (`cloud_column_mean_depth` over the
+    height to the cloud top at the ray's lowest point there, times the path). Error bound (shader header): only steps
+    across the trilinear field's kinks err, <= (cell-to-cell density change) x step / 8 per crossing. A re-frame's
+    spare reads its own textures without free-space jumps.
+  - `CLOUD_VOLUME_PROVISIONAL`: from the next coarser shown level's light at the cell centre, level 7 (or none shown)
+    from the grid-mean column (tau_sun = tau_above x path to the shell's top / height to the cloud top).
+  - Write modes: DIRECT (fresh cells; in spike frames - cold start, jump, re-frame - and for cells never shown with
+    provisional light), RATE (refresh generations: each channel's exp(-tau) moves <= `LIGHT_STEP_T` 0.01 per pass; the
+    GPU counts clamped cells per job, read back asynchronously, and a box that clamped any is served again once the
+    level's queue is through - "settle" - until it clamps none), BLEND (a box SHOWN with provisional light outside a
+    spike: the real light recomputed each plan and mixed in exp(-tau) by dt / the time left, linear over
+    `PROVISIONAL_FADE_S` 0.25 s).
+  - Schedule: light only for filled (`ready`) levels (their rays read their own window, then coarser shown levels);
+    per plan blends, fresh cells (coarse to fine), refresh generations (equal shares, finest first), provisional light
+    once. A level's light reference (Sun, Moon, blend) is set at its first real light after a fill (no overwrite while
+    filling: Task 3 minor). Triggers as before (shadow shift < 1/4 cell, Moon below -6 deg at the level centre, blend
+    0.02). Jobs: one storage buffer per batch, the job by push constant, one uniform set per written texture (a set
+    per job ran out of D3D12 descriptors at a check's 40 x budget). `light_budget_scale` (checks only).
+  - Measured (cloud_check section 17, RTX 4090; section 8's thick slab 1-2 km, tau ~10, at Starbase, camera 2 m):
+    tau_below / tau_above vs the CPU bake's column <= 0.2 %; tau_sun (Sun 45 deg) vs the converged ray integral through
+    the level's density <= 0.64 / 0.15 / 0.14 % (levels 0, 2, 5); tau_moon (Moon 40 deg) <= 0.76 / 0.08 / 0.06 % (levels
+    0, 2, 5). The analytic slab's depth above / mu0 differs by up to 4.9 % at levels 0-2: the baked slab's top undulates
+    with the bake's shape noise (tau_above varies 9.6-10.3 over 1.5 km at level 0), so a slanted ray crosses another
+    column's top (the uniform-slab reference holds only in the cell's own column). A 5 deg Sun step: one refresh pass
+    moves exp(-tau_sun) by at most 0.0103 (612 k / 125 k texels clamped at levels 0 / 2; level 5's threshold above the
+    step: no refresh), settled 0.042 / 0.042. Earth's shadow (Sun 8 deg below the site): all 24.9 M texels of levels
+    0, 2, 5 with the Sun >= 6 deg below their horizon at 6e4. No NaN / infinity in any level after five fills. Sun
+    10 deg up: no Moon jobs. Cold start (light at the spike share, bake at 40 x): every level completes, frames from
+    density shown 16 / 22 / 26 / 30 / 34 / 38 / 43 / 51 (levels 7 .. 0; level 0 misses the 1 s / 45-frame target on
+    this worst-case content: every ray through cloud, ~61 k cells/ms at level 0, ~2.9e5 cells/ms on average); light GPU
+    median 2.71 ms in those frames (the spike's 3 ms less the bake), max 14.7 ms (the calibration lags the content).
+  - Deferred to Task 7 (ruling C12: no march reads the light yet): the broken cf 0.4 views' radiance vs the converged
+    per-sample march, radiance 0 in Earth's shadow, the cold start's first frame with clouds, `render_check
+    --front_check` (C13: the front metric on the volume's change less the reference's).
 - Cell bake, CPU reference (world volume plan Task 4; the GPU bake of Task 5 is checked against it; `[weather]`
   `core/tests/test_cloud_volume_bake.cpp`):
   - `cloud_render_field.hpp` mirrors the GPU point model of ONE snapshot without the detail (`cloud_field` with the
