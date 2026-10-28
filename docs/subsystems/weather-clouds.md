@@ -1027,31 +1027,39 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     eviction; ~20-45 frames, see `vr-performance.md`). Render thread (`CloudEffect._prepare_view_cache`,
     `_cache_lookup`): the batch's tiles filled (GPU timestamp `cloud_cache_fill_<fill id>`; a refresh at the same level
     first copies the tile's shown texels to its fade slot; each entry's nearest cloud distance by `atomicMin`, read back
-    asynchronously), the shown states uploaded, while covering the march (stamped `cloud_cache_cover`), then per eye
-    `CLOUD_CACHE_LOOKUP` into the pass's result (the composite unchanged; before the first batch and while a restart is
-    pending the march alone shows the frame).
+    asynchronously), the shown states uploaded, while covering or with a cloud near the near shell's march (stamped
+    `cloud_cache_march`, `+ _cover` while covering; fix round 1: covering runs the near shell's kernel - whole rays only
+    where a tile has nothing), then per eye `CLOUD_CACHE_LOOKUP` into the pass's result (the composite unchanged; before
+    the first batch and while a restart is pending the march alone shows the frame).
   - **The lookup (`cloud_cache_lookup(eye_offset_earth, dir_earth, out cloud_m)`, eye_offset_earth: the eye's offset
     from the head)**: the anchor's direction an eye ray reads is the root of r(q(s)) = |o + s dir| along the ray (o =
     eye - anchor, r the cached distance): two fixed-point steps, then secant steps while both ends saw cloud,
     `CACHE_PARALLAX_ITERATIONS` 3 [E] (fixed-point steps alone left 25 eye px of a deck at 300 m seen 50 m off the
-    anchor). Each tile is reprojected from the anchor it was rendered from (Task 5): the lookup from the current anchor
-    first (the ring's offsets from the camera, float64 differences, in a buffer); where it lands on a tile of another
-    anchor, again from that one (a deck at R_near from an anchor 200 m off: < 0.011 eye px). The colour: the tile's finest shown level, bilinear in the
-    cube, clamped to the tile's outer texel centres on a side whose neighbour lacks that level; cross-faded over
-    `CACHE_CROSSFADE_S` 0.25 s [E] from nothing (T = 1, a first fill), the coarser level (a refinement) or the fade slot
-    (a refresh: one Sun state per tile, never an abrupt switch; 1024 slots [E], a slot still in use ends that fade). A
-    tile without a level shows the covering march's result (T = 1 when not covering; `cloud_cache_sample` returns the
-    colour without the fade from nothing and its weight, `cloud_cache_lookup` mixes it with T = 1). What a tile fades
-    from was rendered from its previous anchor: it is read at the same point of the eye ray seen from that anchor (the
-    state names both ring entries: bits 18-24 / 25-31; the fade slot bits 8-17); the bilinear tap is clamped also where
-    the neighbour shows another anchor. Scene geometry
-    nearer than the cloud hides it by exp(-4 |ln(cloud / scene)|) (the upsample's depth weight); a texel without cloud
-    keeps the air's shadow loss scaled by scene / the ray's end (a hill before the horizon).
+    anchor). Each tile is reprojected from the anchor it was rendered from (Task 5): **one rule for the near shell and
+    the lookup (`cloud_cache_pick`, fix round 1)** - the parallax lookup from the current anchor (the ring's offsets
+    from the camera, float64 differences, in a buffer); where it lands on a tile of another anchor, again from that one,
+    until the tile landed on shows the anchor solved from (`CACHE_ANCHOR_ITERATIONS` 3 [E]); a ray left unsettled lies
+    where no tile holds its point (between tiles of different anchors: about |A - B| / r wide) - the near shell /
+    covering march it whole and the lookup keeps that, a frame without them shows the last tile's edge (clamped). A deck
+    at R_near seen from an anchor 100 / 200 / 300 m off lands within 1.2e-6 / 3.8e-4 / 0.011 eye px. The colour: the
+    tile's finest shown level, bilinear in the cube, clamped to the tile's outer texel centres on a side whose neighbour
+    lacks that level; cross-faded over `CACHE_CROSSFADE_S` 0.25 s [E] from nothing (T = 1, a first fill), the coarser
+    level (a refinement) or the fade slot (a refresh: one Sun state per tile, never an abrupt switch; 1024 slots [E], a
+    slot still in use ends that fade). A tile without a level shows the covering march's result (T = 1 when not
+    covering; `cloud_cache_sample` returns the colour without the fade from nothing and its weight, `cloud_cache_lookup`
+    mixes it with T = 1). What a tile fades from was rendered from its previous anchor: it is read at the same point of
+    the eye ray seen from that anchor (the state names both ring entries: bits 18-24 / 25-31; the fade slot bits 8-17);
+    the bilinear tap is clamped also where the neighbour shows another anchor. Scene geometry nearer than the cloud
+    hides it by exp(-4 |ln(cloud / scene)|) (the upsample's depth weight); a texel without cloud keeps the air's shadow
+    loss scaled by scene / the ray's end (a hill before the horizon).
   - **Budget (`CloudLayer.cache_budget_ms`, PRESETS `cache_budget_ms` / `cache_budget_floor_ms` / `frame_target_ms`)**:
     desktop 9.0 ms [E] fixed (one full-level deck tile alone takes up to ~8.4 ms and a fill's time is its slowest ray's;
     the ruled fill bound p99 <= 10 ms); VR adaptive (user-approved ruling): 22.2 ms - the rest of the frame's GPU time
-    (95th percentile of 90 frames; a frame's rest = the span of its captured timestamps minus its own fill and covering
-    march, from the same frame's stamps) - 2 ms, between 2 and 11.4 ms [E]. **Cost model (fix round 1)**: a fill's GPU
+    (95th percentile of 90 frames of the cache shown; a frame's rest = the span of its captured timestamps minus its own
+    fill and its march with the cache shown, from the same frame's stamps) - the near shell where it is predicted (fix
+    round 1: it runs in the last measured frame or a cloud is within its reach; the largest of its last 45 non-covering
+    measurements, `CACHE_MARCH_FRAMES` [E]; never measured: the floor; a covering frame's whole rays are not predicted -
+    the fill ends them, Task 4's ruling) - 2 ms, between 2 and 11.4 ms [E]. **Cost model (fix round 1)**: a fill's GPU
     time is set first by its slowest ray, then by its work - measured on the desktop deck view: a few tiles of the deck
     seen from above ~8 ms + ~6 us per work group of 8 x 8 texels, clear sky ~0.6 ms + ~0.3 us (both ~ latency x (1 +
     groups / ~1300)); a fill of 8 groups took as long as one of 1000. So each tile has a latency per level and a fill is
@@ -1066,46 +1074,62 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     levels, latency, budget). A single tile cannot be split: its slowest ray is the fill's floor (desktop deck view: one
     full-level deck tile up to ~8.4 ms; fills at the 9 ms budget p99 9.96 / 8.90 ms deck / ground).
   - **Near shell and progressive re-anchor (Task 5)**: R_near = `CloudLayer.near_radius_m()` (`NEAR_RADIUS_M` 2000 m
-    [E], from the parallax error: a deck at R_near lands within 1e-6 eye px from the re-anchor's 100 m and within 0.011
-    px from an older anchor 200-300 m off - `cloud_vr_stereo_test`). The fill's rays start at R_near from their anchor
-    (`CloudViewCache.fill` start_m; `cloud_march_start_m`) - the air shadow's loss is still taken over the whole ray,
-    the near stretch in front of the cache's clouds at weight 1. **Near shell**: CloudLayer asks the core for the
-    field's nearest cloud every frame (`StarsimCore.weather_cloud_nearest_m` -> `environment::cloud_render_nearest_m`: a
-    lower bound - the nodes within reach plus the bilinear support that hold water, their cloudy height interval between
-    the layer centres below and above; the active pair, both snapshots whatever their blend; 0 while the core's pair is
-    not the slots') within R_near x (1 + `ANCHOR_EVICT_FRACTION`) + `NEAR_SHELL_MARGIN_M` 100 m [E]; the render thread
-    runs the near shell when it is within R_near + the farthest shown anchor's offset + the margin
-    (`CacheMode.NEAR_SHELL`): the march kernel `CLOUD_MARCH` + `CLOUD_NEAR_SHELL` (variants centre / prefilter; no
-    outline pass) at the preset's divisor marches each ray with the full march's own step layout up to its exit from the
-    sphere of R_near around the anchor of the cache tile it meets there (`cloud_near_shell_end`: the tile states and the
-    anchor ring bound at 8 / 9, push constants; a tile without a level: the whole ray, covering), and of the air loss
-    only (1 - T_near) x its part in front of the near clouds (`cloud_shade_near`): composited by the lookup as near +
-    T_near x cache, the near stretch's loss is front + T_near x behind, as the full march's. A first fill shows at once
-    under the near shell (the march's rays end at the shell: no whole-ray result to fade from). The near kernel's push
-    constant needs a list of its own (the RenderingDevice re-applies a list's push constant to the kernels bound after
-    it). **Re-anchor** (`CloudViewCachePlanner`): once the camera is `REANCHOR_FRACTION` 0.05 [E] x R_near = 100 m from
-    the anchor (`CloudViewCacheSchedule.reanchor_needed`) it becomes the anchor, the next entry of a ring of
-    `ANCHOR_RING` 128 [E]; every tile keeps what it shows from its own anchor (no restart, no tile dropped) until the
-    schedule refills it from the new one (its parallax and staleness classes, cross-faded from the fade slot). Tiles
-    whose anchor the camera left more than `ANCHOR_EVICT_FRACTION` 0.1 [E] x R_near = 200 m behind (and those of a ring
-    entry about to be reused) are dropped (`CloudViewCacheSchedule.forget`; the covering march shows them in view). The
+    [E], from the parallax error: a deck at R_near lands within 1.2e-6 eye px from the re-anchor's 100 m, 3.8e-4 px from
+    an older anchor 200 m off and 0.011 px from 300 m - `cloud_vr_stereo_test`). The fill's rays start at R_near from
+    their anchor (`CloudViewCache.fill` start_m; `cloud_march_start_m`) - the air shadow's loss is still taken over the
+    whole ray, the near stretch in front of the cache's clouds at weight 1. **Near shell**: CloudLayer asks the core for
+    the field's nearest cloud every frame (`StarsimCore.weather_cloud_nearest_m` ->
+    `environment::cloud_render_nearest_m`: a lower bound - the nodes within reach plus the bilinear support that hold
+    water, their cloudy height interval between the layer centres below and above; the active pair, both snapshots
+    whatever their blend; 0 while the core's pair is not the slots') within R_near + the keep cap (1 km, below) +
+    `NEAR_SHELL_MARGIN_M` 100 m [E]; the render thread runs the near shell when it is within R_near + the farthest shown
+    anchor's offset + the margin, or the batch covers the view (`CacheMode.NEAR_SHELL`): the march kernel `CLOUD_MARCH`
+    + `CLOUD_NEAR_SHELL` (variants centre / prefilter; no outline pass) at the preset's divisor marches each ray with
+    the full march's own step layout up to its exit from the sphere of R_near around the anchor `cloud_cache_pick` names
+    for the ray (`cloud_near_shell_end`: the tile states, the anchor ring and the cached distances bound at 8 / 9 /
+    10-12, push constants; a tile without a level or an unsettled ray: the whole ray), and of the air loss only (1 -
+    T_near) x its part in front of the near clouds (`cloud_shade_near`): composited by the lookup as near + T_near x
+    cache, the near stretch's loss is front + T_near x behind, as the full march's. A first fill shows at once under the
+    near shell (the march's rays end at the shell: no whole-ray result to fade from). The near kernel's push constant
+    needs a list of its own (the RenderingDevice re-applies a list's push constant to the kernels bound after it).
+    **Re-anchor** (`CloudViewCachePlanner`): once the camera is `REANCHOR_FRACTION` 0.05 [E] x R_near = 100 m from the
+    anchor (`CloudViewCacheSchedule.reanchor_needed`) it becomes the anchor, the next entry of a ring of `ANCHOR_RING`
+    128 [E]; every tile keeps what it shows from its own anchor (no restart, no tile dropped) until the schedule refills
+    it from the new one (its parallax class by error x nearness - a tile without a known cloud joins it only once its
+    anchor is `SKY_REFRESH_FRACTION` 0.5 [E] of its keep distance off, counted at the cap's distance - and the staleness
+    classes, cross-faded from the fade slot; blocks with tiles missing are expanded before those with a parallax only).
+    **Eviction by a tile's own parallax (fix round 1)**: a tile is dropped once the camera is farther from its anchor
+    than `CloudViewCacheSchedule.keep_distance_m` = `ANCHOR_EVICT_RATIO` 0.1 [E] x its nearest cached cloud distance
+    (200 m for a deck at R_near: the deck passage's measured best), at most `ANCHOR_KEEP_FRACTION` 0.5 [E] x R_near = 1
+    km (clear sky, far clouds: the camera stays inside the anchor's sphere); the planner keeps a tile list and the
+    nearest cloud per ring entry and scans an entry only when the camera may have left its nearest one's keep distance,
+    then hands the schedule the largest kept offset (`set_anchor_deviation`); the tiles of a ring entry about to be
+    reused are dropped too (`CloudViewCacheSchedule.forget`; the near shell's kernel marches them whole in view). The
     light cache's reach stays camera-centred: with the anchor within 100 m of the camera (tiles of older anchors within
-    200 m) its cascades (kilometres) hold the anchor's rays as the camera's - not tested separately.
-  - **Validation and open (Task 5)**: `cloud_view_cache_test` (the re-anchor at 5 % of R_near, not below; through
-    the planner a re-anchor restarts nothing, every tile that showed a level keeps one, refills take the new anchor,
-    an anchor left 200 m behind loses its tiles), `cloud_vr_stereo_test` (a tile reprojected from its own anchor 100 /
-    200 m off: a deck at R_near within 1.2e-6 / 3.8e-4 eye px), core `[weather]` "The render field's nearest cloud",
-    cloud_check with `STARSIM_MARCH_REFERENCE` (the per-frame march bit for bit as before Task 5). `render_check
-    --frames_every=0.5` (the brief's Starbase ascent through a slab 1.5-2.5 km, `--fly=25 --frames_for=80`, VR preset
-    at render scale 1.65): watched from the ground 2 km east PASS - the mean alpha over the near shell's boundary
-    annulus within 0.010 of the march's (31 samples), flight frames GPU median 5.3 / p99 18.8 ms; **on board FAIL**:
-    outside the deck within 0.003, converged inside it 0.0003, but while climbing through it at 140-160 m/s the cache
-    lags 0.04-0.06 (worst 0.059) and the flight frames' GPU p99 is 27.5 ms (median 8.7; the frame target 22.2 ms).
-    Cause (measured, the anchor held fixed): a cached volume seen from off its anchor loses coverage - 0.075 / 0.18 /
-    0.28 of the mean alpha 130 / 260 / 400 m off inside the broken deck (Task 4's cache without the near shell: 0.20 /
-    0.34 / 0.46); the re-anchor every 100 m cannot refill the view's tiles as fast as the camera moves (a whole view
-    refill takes seconds). Open for the user's VR check: the deck passage from on board (softer, partly thinner near
-    clouds for ~10 s - the spec's accepted "briefly softer").
+    1 km) its cascades (kilometres) hold the anchor's rays as the camera's - not tested separately.
+  - **Validation and open (Task 5, fix round 1)**: `cloud_view_cache_test` (the re-anchor at 5 % of R_near, not
+    below; through the planner a re-anchor restarts nothing, every tile that showed a level keeps one, refills take the
+    new anchor; eviction by a tile's own parallax: a cloud at R_near / 4 / 20 R_near and clear sky kept at 5 / 15 / 45 /
+    55 % of R_near off as [all] / [not R_near] / [only 20 R_near and sky] / [none], the schedule's bound the largest
+    kept offset; clear sky joins the parallax class only past 500 m), `cloud_vr_stereo_test` (a tile reprojected from
+    its own anchor 100 / 200 m off: a deck at R_near within 1.2e-6 / 3.8e-4 eye px, 1 km off at 5 R_near 3.8e-4;
+    the pick across two / three anchors' tiles: every settled ray read from the anchor of the tile it reads within
+    1e-6 px, the unsettled ones only where no tile holds the point - the rules before disagreed on 13 / read an
+    unchecked tile on 132 of the same rays), core `[weather]` "The render field's nearest cloud", cloud_check with
+    `STARSIM_MARCH_REFERENCE` (the per-frame march bit for bit as before Task 5). `render_check --frames_every=0.5
+    --frames_for=120` (the Starbase ascent through a slab 1.5-2.5 km, `--fly=25`, VR preset at render scale 1.65;
+    the alpha bound 0.06 while the camera is within a layer's extent +- R_near - the field's nearest cloud within
+    R_near -, else 0.02; the first frame after each sample's reference march not counted: its measured GPU time is the
+    reference's): watched from the ground PASS (worst 0.012, GPU median 6.9 / p99 15.2 ms); **on board FAIL**: GPU
+    median 12.3 / p99 24.4 ms (target 22.2; before the fix 27.5) and the deck passage's alpha worst 0.29 (bound 0.06;
+    before 0.059). The frame does not hold the near shell and a fill: the rest of the frame (scene, VR proxy) p95
+    ~14 ms (median 8) plus the near shell in the deck 8-15 ms leave the adaptive budget at its 2 ms floor, so the
+    deck's tiles are refreshed far slower than the camera moves (the anchor-held loss above) - a trade-off between the
+    frame target and the deck's look for the controller. `--jump_check` fails (deck 0.23 / ground 0.17; at c625926
+    already 0.06-0.11): the near shell's first frames after a restart (frames 2-4) show up to 0.2 less coverage than
+    the march - open. The main-thread section `cloud_view_cache` (the nearest-cloud query and the plan's hand-over)
+    over the 5400 flight frames: median 0.057 / p99 0.082 / max 0.18 ms. Open for the user's VR check: the deck
+    passage from on board.
   - **Open (Task 4)**: the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
     the march's for ~2 s after a restart, inside the 0.02 bound); near objects in front of shadowed air get the air
     loss of the whole cached ray scaled by distance only (with the near shell: a cloud texel hidden by nearer geometry

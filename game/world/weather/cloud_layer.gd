@@ -126,15 +126,23 @@ const PRESETS := {
 }
 ## [E] The adaptive budget's margin below the frame target (ms; the ruling's 2 ms), the percentile of the rest of the
 ## frame's GPU time it keeps clear of, and over how many frames. The rest of a frame: its GPU time (the span of its
-## captured timestamps) minus its own fill and covering march (CloudEffect, the same frame's timestamps).
+## captured timestamps) minus its own fill and its march with the cache shown (CloudEffect, the same frame's
+## timestamps). That march (the near shell: Task 5 fix round 1) is added where it is predicted for the frame - the
+## largest of its last CACHE_MARCH_FRAMES [E] measurements in frames that did not cover the view (1 s at 45 Hz: the
+## near shell's cost follows the deck's distance within a second); never measured: the floor. The whole rays of a
+## covering frame are not predicted: covering ends only by the fill (Task 4 ruling: slow frames while a level 0 fills;
+## measured, fix round 1: counting them held the budget at its floor and the view covered for the rest of the
+## flight).
 const CACHE_MARGIN_MS := 2.0
 const CACHE_REST_PERCENTILE := 0.95
 const CACHE_REST_FRAMES := 90
+const CACHE_MARCH_FRAMES := 45
 ## [E] The near shell's radius R_near (cloud view cache Task 5, spec decision "near shell"): closer than this the frame's
 ## march at the preset's divisor covers the clouds (when a cloud is that near), the view cache holds what lies beyond.
-## From the parallax error: the cache's lookup lands a deck at R_near within 1e-6 eye px from the re-anchor's 100 m
-## (5 % of it) and within 1e-4 px from an older tile anchor 200 m off (cloud_vr_stereo_test); a deck at 300 m seen
-## 50 m off the anchor kept 0.6 px after three iterations (Task 4) - nearer clouds stay the per-frame march's.
+## From the parallax error: the cache's lookup lands a deck at R_near within 1.2e-6 eye px from the re-anchor's
+## 100 m (5 % of it), 3.8e-4 px from an older tile anchor 200 m off and 0.011 px from 300 m (cloud_vr_stereo_test); a
+## deck at 300 m seen 50 m off the anchor kept 0.6 px after three iterations (Task 4) - nearer clouds stay the
+## per-frame march's.
 const NEAR_RADIUS_M := 2000.0
 ## [E] Added to the reach of the near shell's test (m): the field's nearest cloud is asked once per frame on the main
 ## thread; 100 m covers a few frames of flight at the deck passage's ~300 m/s.
@@ -244,6 +252,8 @@ var _view_cache_generation := 0
 var _view_cache_light_settled := false  ## the light cache was complete once since its last reset / clock jump
 var _view_cache_held_s := 0.0
 var _view_cache_rest_ms: Array[float] = []
+var _view_cache_march_ms: Array[float] = []  ## the near shell's GPU ms of the last frames that ran it, not covering
+var _view_cache_marched := false  ## the newest measured frame ran the near shell without covering
 
 
 func _init() -> void:
@@ -432,9 +442,9 @@ static func near_radius_m() -> float:
 
 
 ## The field's nearest cloud (StarsimCore.weather_cloud_nearest_m: a lower bound, m; INF: none) within the near shell's
-## largest reach - R_near from an anchor a shown tile may still have (CloudViewCachePlanner.ANCHOR_EVICT_FRACTION of
-## it from the camera) plus NEAR_SHELL_MARGIN_M. 0 (the near shell on) while the core's active pair is not the slots'
-## (a push pending): never a cloud missed.
+## largest reach - R_near from an anchor a shown tile may still have (CloudViewCacheSchedule.keep_distance_m: at most
+## ANCHOR_KEEP_FRACTION of R_near from the camera) plus NEAR_SHELL_MARGIN_M. 0 (the near shell on) while the core's
+## active pair is not the slots' (a push pending): never a cloud missed.
 func _nearest_cloud_m(camera_fixed_m: Vector3) -> float:
 	if _core == null:
 		return 0.0
@@ -444,7 +454,7 @@ func _nearest_cloud_m(camera_fixed_m: Vector3) -> float:
 	if files[0] == "" and files[1] == "":
 		return INF
 	return _core.weather_cloud_nearest_m(camera_fixed_m,
-			NEAR_RADIUS_M * (1.0 + CloudViewCachePlanner.ANCHOR_EVICT_FRACTION) + NEAR_SHELL_MARGIN_M)
+			NEAR_RADIUS_M + CloudViewCacheSchedule.keep_distance_m(INF) + NEAR_SHELL_MARGIN_M)
 
 
 ## The ids of the resident slots and the weight of slot 1 (tests).
@@ -559,6 +569,12 @@ func _update_view_cache(camera_render: Vector3, enabled: bool, delta_s: float) -
 		_view_cache_rest_ms.append_array(feedback["rests"])
 		if _view_cache_rest_ms.size() > CACHE_REST_FRAMES:
 			_view_cache_rest_ms = _view_cache_rest_ms.slice(_view_cache_rest_ms.size() - CACHE_REST_FRAMES)
+		for march: Vector2 in feedback["marches"]:
+			_view_cache_marched = march.x >= 0.0 and march.y == 0.0
+			if _view_cache_marched:
+				_view_cache_march_ms.append(march.x)
+		if _view_cache_march_ms.size() > CACHE_MARCH_FRAMES:
+			_view_cache_march_ms = _view_cache_march_ms.slice(_view_cache_march_ms.size() - CACHE_MARCH_FRAMES)
 	_view_cache_held_s += maxf(delta_s, 0.0)
 	if not (view_cache and enabled and int(ShaderGlobals.value(&"cloud_debug_output")) == 0):
 		return
@@ -581,8 +597,9 @@ func _update_view_cache(camera_render: Vector3, enabled: bool, delta_s: float) -
 
 
 ## The view cache's fill budget of this frame (ms; PRESETS cache_budget_ms): fixed on the desktop; in VR the frame
-## target minus the rest of the frame's measured GPU time (CACHE_REST_PERCENTILE) minus CACHE_MARGIN_MS, between the
-## preset's floor and cap (the cap until enough frames are measured).
+## target minus the rest of the frame's measured GPU time (CACHE_REST_PERCENTILE), minus the march that runs with the
+## cache shown where it is predicted (cache_march_ms), minus CACHE_MARGIN_MS, between the preset's floor and cap (the
+## cap until enough frames are measured).
 func cache_budget_ms() -> float:
 	var preset: Dictionary = PRESETS[quality]
 	var cap := float(preset["cache_budget_ms"])
@@ -592,7 +609,19 @@ func cache_budget_ms() -> float:
 	var sorted := _view_cache_rest_ms.duplicate()
 	sorted.sort()
 	var rest: float = sorted[mini(int(CACHE_REST_PERCENTILE * sorted.size()), sorted.size() - 1)]
-	return clampf(target - rest - CACHE_MARGIN_MS, float(preset["cache_budget_floor_ms"]), cap)
+	return clampf(target - rest - cache_march_ms() - CACHE_MARGIN_MS, float(preset["cache_budget_floor_ms"]), cap)
+
+
+## The GPU ms predicted for the near shell in the coming frames (0: none predicted): it runs while the last measured
+## frame ran it or a cloud is within its reach (R_near + the farthest shown anchor's offset + NEAR_SHELL_MARGIN_M: the
+## effect's test) - then the largest of its last CACHE_MARCH_FRAMES measurements without covering (INF before any:
+## the budget's floor).
+func cache_march_ms() -> float:
+	if not (_view_cache_marched or nearest_cloud_m < NEAR_RADIUS_M + effect.last_farthest_m + NEAR_SHELL_MARGIN_M):
+		return 0.0
+	if _view_cache_march_ms.is_empty():
+		return INF
+	return _view_cache_march_ms.max()
 
 
 ## Diagnostics (PerfLog): the tiles the last plan filled, the fraction of the cube at the full level, the last measured

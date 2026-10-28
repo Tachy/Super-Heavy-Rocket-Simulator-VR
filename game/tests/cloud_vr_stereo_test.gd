@@ -44,12 +44,22 @@ const EYE_PX_PER_RAD := 35.0 * 180.0 / PI
 const CACHE_CAMERA_OFFSET_M := 50.0
 ## The near shell's radius (CloudLayer.near_radius_m(), cloud view cache Task 5): the cache holds clouds from there on,
 ## seen from its anchor. A tile keeps the anchor it was rendered from until it is refilled; the camera's offsets from a
-## tile's anchor checked (m) with the lookup's iterations: the re-anchor's 5 % of R_near and the planner's eviction
-## distance (CloudViewCachePlanner.ANCHOR_EVICT_FRACTION 0.1 of R_near). Measured worst eye px of the deck at 2 km with
-## three iterations: 100 m 1.2e-6, 300 m 0.011, 400 m 0.13, 500 m 0.88, 600 m 4.0 (five: 600 m 0.0012, 1 km 9.5).
+## tile's anchor checked (m) with the lookup's iterations, for a cloud at R_near: the re-anchor's 5 % of R_near and the
+## eviction's keep distance (CloudViewCacheSchedule.ANCHOR_EVICT_RATIO 0.1 of the tile's cloud distance; fix round 1:
+## the same angle for a cloud at 5 R_near from 1 km, the keep cap). Measured worst eye px of the deck at 2 km with three
+## iterations: 100 m 1.2e-6, 200 m 3.8e-4, 300 m 0.011, 400 m 0.13, 500 m 0.88, 600 m 4.0 (five: 600 m 0.0012).
 const CACHE_NEAR_RADIUS_M := 2000.0
-const CACHE_TILE_ANCHOR_CASES := [Vector2(100.0, CACHE_PARALLAX_ITERATIONS),
-		Vector2(200.0, CACHE_PARALLAX_ITERATIONS)]
+const CACHE_TILE_ANCHOR_CASES := [Vector3(100.0, CACHE_PARALLAX_ITERATIONS, 1.0),
+		Vector3(200.0, CACHE_PARALLAX_ITERATIONS, 1.0), Vector3(1000.0, CACHE_PARALLAX_ITERATIONS, 5.0)]
+## cloud_view_cache.gdshaderinc CACHE_ANCHOR_ITERATIONS (Task 5 fix round 1): parallax solves of one eye ray until the
+## tile it lands on shows the anchor it was solved from.
+const CACHE_ANCHOR_ITERATIONS := 3
+## The anchor boundary case (fix round 1): tiles of up to three anchors side by side in azimuth, the camera at the
+## current one, older ones this far off (m; the eviction's keep distance at R_near) - eye rays swept across the
+## boundaries every CACHE_BOUNDARY_STEP_RAD.
+const CACHE_BOUNDARY_OFFSET_M := 200.0
+const CACHE_REANCHOR_M := 100.0  # CloudViewCacheSchedule.REANCHOR_FRACTION x R_near
+const CACHE_BOUNDARY_STEP_RAD := 0.0005
 ## The deck field is asserted from this distance on (m): a deck nearer than ~2 km seen 50 m off the anchor needs a 4th
 ## iteration (0.6 eye px left at 300 m after 3) - the near shell's reach (R_near, cloud view cache Task 5), marched per
 ## frame, not looked up. Printed below it.
@@ -73,8 +83,10 @@ func _initialize() -> void:
 	_test_edge_radius()
 	for distance_m in [300.0, 2000.0, 20000.0]:
 		_test_cache_parallax(distance_m)
-	for case: Vector2 in CACHE_TILE_ANCHOR_CASES:
-		_test_tile_anchor_parallax(case.x, int(case.y))
+	for case: Vector3 in CACHE_TILE_ANCHOR_CASES:
+		_test_tile_anchor_parallax(case.x, int(case.y), case.z)
+	for anchors in [2, 3]:
+		_test_anchor_boundary(anchors)
 	print("cloud_vr_stereo_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -432,12 +444,12 @@ func _test_cache_parallax(distance_m: float) -> void:
 
 
 ## The parallax of a tile seen from a camera off its anchor (cloud view cache Task 5, the progressive re-anchor: each
-## tile is reprojected from its own anchor): the camera offset_m off the anchor in six directions, a cloud point at the
-## near shell's radius from the anchor (the nearest the cache holds) in the two cached fields of _test_cache_parallax -
-## within CACHE_PARALLAX_TOLERANCE_PX eye pixels of the direct ray.
-func _test_tile_anchor_parallax(offset_m: float, iterations: int) -> void:
+## tile is reprojected from its own anchor): the camera offset_m off the anchor in six directions, a cloud point at
+## radii x the near shell's radius from the anchor (R_near: the nearest the cache holds) in the two cached fields of
+## _test_cache_parallax - within CACHE_PARALLAX_TOLERANCE_PX eye pixels of the direct ray.
+func _test_tile_anchor_parallax(offset_m: float, iterations: int, radii: float) -> void:
 	var point_dir := Vector3(0.3, -0.5, -0.8).normalized()
-	var point := point_dir * CACHE_NEAR_RADIUS_M  # from the anchor
+	var point := point_dir * CACHE_NEAR_RADIUS_M * radii  # from the anchor
 	var normal := Vector3.UP
 	var deck_height := point.dot(normal)
 	for field in ["shell", "deck"]:
@@ -456,7 +468,98 @@ func _test_tile_anchor_parallax(offset_m: float, iterations: int) -> void:
 			worst_px = maxf(worst_px, (shown - eye).angle_to(dir) * EYE_PX_PER_RAD)
 		_check(worst_px <= CACHE_PARALLAX_TOLERANCE_PX, "view cache parallax from a tile's own anchor, %s cloud "
 				% field + "%.0f m from it, the camera %.0f m off it, %d iterations (worst %s eye px)"
-				% [CACHE_NEAR_RADIUS_M, offset_m, iterations, String.num_scientific(worst_px)])
+				% [CACHE_NEAR_RADIUS_M * radii, offset_m, iterations, String.num_scientific(worst_px)])
+
+
+## cloud_view_cache.gdshaderinc cloud_cache_pick (mirror, Task 5 fix round 1): the one rule by which the near shell's
+## march and the lookup pick an eye ray's tile and anchor - the parallax lookup from the current anchor, again from the
+## anchor of the tile it lands on until that tile shows the anchor solved from (CACHE_ANCHOR_ITERATIONS solves).
+## anchors: the ring's positions (the head at the origin); anchor_of: q -> the anchor index of the tile at q (-1: no
+## level); distance_of: q -> the cached distance there (m, from that tile's anchor; 0 without cloud). Returns {level
+## (false: none), stable, anchor, q}.
+static func _cache_pick(eye: Vector3, dir: Vector3, anchors: Array[Vector3], current: int, anchor_of: Callable,
+		distance_of: Callable) -> Dictionary:
+	var anchor := current
+	for k in range(CACHE_ANCHOR_ITERATIONS):
+		var q := _cache_lookup(eye - anchors[anchor], dir, distance_of)
+		var shown: int = anchor_of.call(q)
+		if shown < 0:
+			return {"level": false, "stable": false, "anchor": anchor, "q": q}
+		if shown == anchor:
+			return {"level": true, "stable": true, "anchor": anchor, "q": q}
+		anchor = shown
+	return {"level": true, "stable": false, "anchor": anchor, "q": _cache_lookup(eye - anchors[anchor], dir,
+			distance_of)}
+
+
+## Tiles of n_anchors anchors side by side (cloud view cache Task 5 fix round 1, the review's I2 / I3): the current
+## anchor at the head and older ones CACHE_BOUNDARY_OFFSET_M off, each holding the tiles of its azimuth sector (its
+## cached distances its own view of one deck), the camera half a re-anchor off the current one, eye rays swept across
+## the sectors' boundaries to a deck point at 2 R_near.
+## The pick (shared by the near shell and the lookup) reads every settled ray from the anchor of the tile it reads,
+## within CACHE_PARALLAX_TOLERANCE_PX of the direct ray; a ray it leaves unsettled lies where no tile holds its point
+## (the march covers it). The rules before (the near shell: the tile at the R_near sphere's exit from the current
+## anchor; the lookup: a second solve from the landed tile's anchor, its tile read unchecked) disagree there - shown.
+func _test_anchor_boundary(n_anchors: int) -> void:
+	# The camera (head) moved half a re-anchor on (-z) from the current anchor A0; A1 left of it, A2 behind it.
+	var a0 := Vector3(0.0, 0.0, 0.5 * CACHE_REANCHOR_M)
+	var anchors: Array[Vector3] = [a0, a0 + Vector3(-CACHE_BOUNDARY_OFFSET_M, 0.0, 0.0),
+			a0 + Vector3(0.0, 0.0, CACHE_BOUNDARY_OFFSET_M)]
+	anchors.resize(n_anchors)
+	var limits := [0.0, -0.15]  # sector boundaries in azimuth (rad): A0 right of 0, A1 left of it (A2 left of -0.15)
+	var anchor_of := func(q: Vector3) -> int:
+		var azimuth := atan2(q.x, -q.z)
+		if azimuth >= limits[0]:
+			return 0
+		return 1 if n_anchors == 2 or azimuth >= limits[1] else 2
+	var depression := asin(0.5)  # 30 deg below the horizon: the deck 2 km below the head lies 2 R_near away
+	var deck_y := -2.0 * CACHE_NEAR_RADIUS_M * sin(depression)
+	var distance_of := func(q: Vector3) -> float:
+		var a: Vector3 = anchors[anchor_of.call(q)]
+		return (deck_y - a.y) / q.y if q.y < 0.0 else 0.0
+	var settled := [0, 0, 0]
+	var unsettled := 0
+	var worst_px := 0.0
+	var gap_ok := true
+	var old_near_differs := 0
+	var old_lookup_unchecked := 0
+	var azimuth := -0.35
+	while azimuth <= 0.15:
+		var dir := Vector3(sin(azimuth) * cos(depression), -sin(depression), -cos(azimuth) * cos(depression))
+		var point := dir * (deck_y / dir.y)  # the deck point on the eye ray
+		var pick := _cache_pick(Vector3.ZERO, dir, anchors, 0, anchor_of, distance_of)
+		if pick["stable"]:
+			var a: int = pick["anchor"]
+			settled[a] += 1
+			var q: Vector3 = pick["q"]
+			var shown: Vector3 = anchors[a] + q * float(distance_of.call(q))
+			worst_px = maxf(worst_px, shown.angle_to(dir) * EYE_PX_PER_RAD)
+			# The near shell's rule before: the tile at the R_near sphere's exit from the current anchor.
+			var o := -a0
+			var b := o.dot(dir)
+			var exit := -b + sqrt(b * b - o.length_squared() + CACHE_NEAR_RADIUS_M * CACHE_NEAR_RADIUS_M)
+			if anchor_of.call((o + dir * exit).normalized()) != a:
+				old_near_differs += 1
+		else:
+			unsettled += 1
+			for k in range(n_anchors):  # no tile holds the point: seen from each anchor it lies in another's sector
+				gap_ok = gap_ok and anchor_of.call((point - anchors[k]).normalized()) != k
+		# The lookup's rule before: a second solve from the landed tile's anchor, the tile it lands on read unchecked.
+		var first: int = anchor_of.call(_cache_lookup(-a0, dir, distance_of))
+		if first > 0:
+			var again := _cache_lookup(-anchors[first], dir, distance_of)
+			if anchor_of.call(again) != first:
+				old_lookup_unchecked += 1
+		azimuth += CACHE_BOUNDARY_STEP_RAD
+	var found_all: bool = settled.slice(0, n_anchors).min() > 0
+	_check(found_all and worst_px <= CACHE_PARALLAX_TOLERANCE_PX and gap_ok and unsettled > 0,
+			"view cache pick across %d anchors' tiles (older %.0f m off, deck at %.0f m): settled per anchor %s within "
+			% [n_anchors, CACHE_BOUNDARY_OFFSET_M, 2.0 * CACHE_NEAR_RADIUS_M, str(settled.slice(0, n_anchors))]
+			+ "%s eye px of the direct ray, %d unsettled rays all where no tile holds the point (%s)"
+			% [String.num_scientific(worst_px), unsettled, gap_ok])
+	print("  info  the rules before Task 5 fix round 1 on the same rays: the near shell's tile at the sphere's exit "
+			+ "named another anchor than the lookup's on %d settled rays, the lookup's second solve read a tile of a "
+			% old_near_differs + "third anchor or none unchecked on %d" % old_lookup_unchecked)
 
 
 func _check(ok: bool, message: String) -> void:

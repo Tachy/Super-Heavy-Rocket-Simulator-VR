@@ -45,9 +45,11 @@ const CACHE_VIEW_GRID := 7
 ## [E] Measured fills / frames the main thread may hold back unread (the oldest are dropped).
 const CACHE_FEEDBACK_MAX := 256
 ## The view cache's GPU timestamps (always taken: the budget control reads them): a fill's start (named by its batch's
-## fill_id), the covering march's start, the lookup's start (the end of either).
+## fill_id), the start of the march that runs with the cache shown (the near shell, + COVER_SUFFIX while the batch
+## covers the view: up to the lookup), the lookup's start (the end of either).
 const CACHE_FILL_STAMP := "cloud_cache_fill_"
-const CACHE_COVER_STAMP := "cloud_cache_cover"
+const CACHE_MARCH_STAMP := "cloud_cache_march"
+const CACHE_COVER_SUFFIX := "_cover"
 const CACHE_LOOKUP_STAMP := "cloud_pass_lookup"
 ## What the frame shows of the view cache (_prepare_view_cache): nothing yet, the lookup over the covering march (whole
 ## rays), the lookup alone, the lookup behind the near shell (its march; whole rays where a tile has nothing yet).
@@ -105,6 +107,9 @@ var view_cache_last_tiles := 0
 ## so far (the checks count them: the flag is reset at every frame's start).
 var near_shell_shown := false
 var near_shell_frames := 0
+## Render thread, the last frame with the cache shown: the farthest offset (m) of the camera from an anchor a shown tile
+## has (the near shell's reach beyond R_near; CloudLayer predicts the near shell's cost from it, fix round 1).
+var last_farthest_m := 0.0
 
 var _rd: RenderingDevice
 var _march: CloudShaderPort
@@ -133,13 +138,14 @@ var _previous_camera := Vector3.ZERO  ## float64 Earth-local camera of the previ
 var _fill_request := {}  ## {layout, anchor, tiles}: the next frame's view cache fill (render thread)
 ## The view cache's hand-overs (Task 4), guarded by _cache_mutex: the planner's batch (main -> render thread, {} =
 ## none), the view the render thread saw (render -> main: sample rays, their spacing, the face size), the measured fills
-## ((fill id, GPU ms) each), the measured frames' rest (GPU ms without the fill and the covering march), the read-back
-## nearest distances.
+## ((fill id, GPU ms) each), the measured frames' rest (GPU ms without the fill and the march run with the cache shown)
+## and that march's GPU ms (-1: none), the read-back nearest distances.
 var _cache_mutex := Mutex.new()
 var _cache_batch := {}
 var _cache_view := {}
 var _cache_fills: Array[Vector2] = []
 var _cache_rests: Array[float] = []
+var _cache_marches: Array[Vector2] = []
 var _cache_readbacks: Array[Dictionary] = []
 ## Render thread: the batch last run (anchor, now, covering), the timestamps' frame last read.
 var _cache_shown := {}
@@ -234,13 +240,16 @@ func set_view_cache_view(view: Dictionary) -> void:
 
 
 ## Main thread: what the render thread measured since the last call - {fills: Array[Vector2] (fill id, its GPU ms) per
-## fill whose timestamps came back, rests: Array[float] (a frame's GPU ms without its fill and covering march),
-## readbacks: [{epoch, tiles, bits}]}.
+## fill whose timestamps came back, rests: Array[float] (a frame's GPU ms without its fill and its march with the cache
+## shown), marches: Array[Vector2] (one per rest: that march's GPU ms, -1 without; 1 while the batch covered the
+## view, else 0), readbacks: [{epoch, tiles, bits}]}.
 func take_view_cache_feedback() -> Dictionary:
 	_cache_mutex.lock()
-	var feedback := {"fills": _cache_fills, "rests": _cache_rests, "readbacks": _cache_readbacks}
+	var feedback := {"fills": _cache_fills, "rests": _cache_rests, "marches": _cache_marches,
+		"readbacks": _cache_readbacks}
 	_cache_fills = []
 	_cache_rests = []
+	_cache_marches = []
 	_cache_readbacks = []
 	_cache_mutex.unlock()
 	return feedback
@@ -669,14 +678,19 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": true,
 				"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
 			return
-		if bool(_cache_shown.get("covering", false)) and cache_mode != CacheMode.OFF:
-			_rd.capture_timestamp(CACHE_COVER_STAMP)  # (the near shell alone is the frame's steady cost: its rest)
+		if cache_mode != CacheMode.OFF:
+			# The march with the cache shown (covering or the near shell; fix round 1): its GPU time up to the lookup is
+			# measured on its own - the budget adds it where it is predicted for the frame (never lagging in the rest).
+			_rd.capture_timestamp(CACHE_MARCH_STAMP + (CACHE_COVER_SUFFIX if bool(_cache_shown.get("covering", false))
+					else ""))
 	var near_shell := cache_mode == CacheMode.NEAR_SHELL
 	if near_shell:
 		# The near shell's kernel (its family and the prefilter choice as the march's); no outline pass.
 		march = family + "_near" + ("_prefilter" if march.ends_with("_prefilter") else "")
 		march_set0 = UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
 		march_set1.append_array([_storage(8, view_cache.states_buffer()), _storage(9, view_cache.anchors_buffer())])
+		for level in range(CloudViewCacheLayout.LEVELS):  # the lookup's distances: its tile / anchor rule (fix round 1)
+			march_set1.append(_tex(10 + level, nearest_clamp, view_cache.distance_texture(level)))
 		refine = false
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
@@ -794,8 +808,9 @@ func _ensure_view_cache(layout: CloudViewCacheLayout) -> void:
 ## steers the budget; the rays from the near shell's radius on, Task 5) and its shown states taken, the anchor ring's
 ## offsets from this frame's camera uploaded. OFF: nothing to show yet (before the first batch, or a restart planned:
 ## the march, never another place's clouds); NEAR_SHELL: a cloud within the near shell's radius (+ NEAR_SHELL_MARGIN_M)
-## of the camera plus the farthest shown anchor's offset - the near shell's march, the lookup behind it; COVERED: the
-## march runs and the lookup shows it where a tile has nothing; ALONE: the lookup alone.
+## of the camera plus the farthest shown anchor's offset, or the batch covers the view (fix round 1) - the near shell's
+## march (whole rays where a tile has nothing), the lookup behind it; COVERED (no near radius set yet): the march runs
+## and the lookup shows it where a tile has nothing; ALONE: the lookup alone.
 func _prepare_view_cache(set0: Array[RDUniform], camera: Vector3) -> CacheMode:
 	var batch := take_view_cache_batch()
 	view_cache_last_tiles = 0
@@ -835,12 +850,16 @@ func _prepare_view_cache(set0: Array[RDUniform], camera: Vector3) -> CacheMode:
 		if k == current or anchor_tiles[k] > 0:
 			farthest_m = maxf(farthest_m, offset.length())
 	view_cache.set_anchors(_rd, offsets.to_byte_array())
+	last_farthest_m = farthest_m
 	_cache_mutex.lock()
 	var nearest_m := _nearest_cloud_m
 	var radius_m := _near_radius_m
 	_cache_mutex.unlock()
 	_cache_shown["near_radius_m"] = radius_m
-	if radius_m > 0.0 and nearest_m < radius_m + farthest_m + CloudLayer.NEAR_SHELL_MARGIN_M:
+	# Covering with the near shell's kernel too (fix round 1): its whole rays only where a tile has no level (or no
+	# settled anchor), the shell elsewhere - not the whole view's march for a few tiles dropped in flight.
+	if radius_m > 0.0 and (_cache_shown["covering"]
+			or nearest_m < radius_m + farthest_m + CloudLayer.NEAR_SHELL_MARGIN_M):
 		return CacheMode.NEAR_SHELL
 	return CacheMode.COVERED if _cache_shown["covering"] else CacheMode.ALONE
 
@@ -890,8 +909,9 @@ func _on_cache_near(bits: PackedByteArray, epoch: int, order: PackedInt32Array) 
 
 
 ## The frame whose GPU timestamps came back (once per frame): its fill's interval (named by the fill id: a frame whose
-## stamps were never read loses only its own measurement) and its rest - the span of all its stamps (the frame's GPU
-## time) without the fill and the covering march (the steady frame the adaptive budget keeps clear of).
+## stamps were never read loses only its own measurement), its march with the cache shown (covering or the near shell:
+## from its stamp to the lookup's; -1 without) and its rest - the span of all its stamps (the frame's GPU time) without
+## the fill and that march (the steady frame; the budget adds the march where it is predicted for its frame).
 func _read_cache_timestamps() -> void:
 	var frame := _rd.get_captured_timestamps_frame()
 	if frame == _cache_timestamps_frame:
@@ -901,12 +921,14 @@ func _read_cache_timestamps() -> void:
 	if count < 2:
 		return
 	var fill_ms := 0.0
-	var cover_start := -1
+	var march_start := -1
+	var covering := false
 	var lookup_start := -1
 	for i in range(count):
 		var name := _rd.get_captured_timestamp_name(i)
-		if name == CACHE_COVER_STAMP:
-			cover_start = i
+		if name.begins_with(CACHE_MARCH_STAMP):
+			march_start = i
+			covering = name.ends_with(CACHE_COVER_SUFFIX)
 		elif name == CACHE_LOOKUP_STAMP:
 			lookup_start = i
 		elif name.begins_with(CACHE_FILL_STAMP) and i + 1 < count:
@@ -916,16 +938,20 @@ func _read_cache_timestamps() -> void:
 			if _cache_fills.size() > CACHE_FEEDBACK_MAX:
 				_cache_fills.remove_at(0)
 			_cache_mutex.unlock()
-	var cover_ms := 0.0
-	if cover_start >= 0 and lookup_start > cover_start:
-		cover_ms = float(_rd.get_captured_timestamp_gpu_time(lookup_start)
-				- _rd.get_captured_timestamp_gpu_time(cover_start)) / 1.0e6
+	var march_ms := -1.0  # no march with the cache shown in that frame
+	if march_start >= 0 and lookup_start > march_start:
+		march_ms = float(_rd.get_captured_timestamp_gpu_time(lookup_start)
+				- _rd.get_captured_timestamp_gpu_time(march_start)) / 1.0e6
 	var span_ms := float(_rd.get_captured_timestamp_gpu_time(count - 1)
 			- _rd.get_captured_timestamp_gpu_time(0)) / 1.0e6
+	if lookup_start < 0:
+		return  # that frame did not show the cache (before its first batch, the flag off): no rest of the cache's frame
 	_cache_mutex.lock()
-	_cache_rests.append(maxf(span_ms - fill_ms - cover_ms, 0.0))
+	_cache_rests.append(maxf(span_ms - fill_ms - maxf(march_ms, 0.0), 0.0))
+	_cache_marches.append(Vector2(march_ms, 1.0 if covering else 0.0))
 	if _cache_rests.size() > CACHE_FEEDBACK_MAX:
 		_cache_rests.remove_at(0)
+		_cache_marches.remove_at(0)
 	_cache_mutex.unlock()
 
 

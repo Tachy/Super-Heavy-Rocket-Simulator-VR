@@ -72,6 +72,12 @@ from the ground 2 km east median 5.3 ms, p99 18.8 ms, max 24.1 ms. The near shel
 (not excluded from the adaptive budget's rest of the frame; only the covering march is). Logs
 `.superpowers/sdd/2026-10-27-cloud-view-cache/t5_final_fly_{board,site}.log`.
 
+Fix round 1 (the near shell predicted in the budget, covering by the near shell's kernel, eviction by a tile's own
+parallax, `--frames_for=120`, the first frame after each sample's reference not counted): on board GPU median 12.3 /
+p99 24.4 / max 30.1 ms - still over 22.2 ms: the rest of the frame p95 ~14 ms (median 8; `opaque_and_sky` 6-11 ms)
+plus the near shell inside the deck 8-15 ms (`cloud_pass_march`) leave the fill its 2 ms floor; watched from the
+ground median 6.9 / p99 15.2 / max 19.4 ms. Logs `r1_fly_{board,site}_final2.log`.
+
 ## Measuring
 
 - `Start-VR.cmd --perf-log` (any start: `-- --perf-log`): `PerfLog` (`game/util/perf_log.gd`) writes

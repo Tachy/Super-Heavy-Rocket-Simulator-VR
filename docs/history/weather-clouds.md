@@ -937,3 +937,48 @@ The validation bullet of the fill ended (before Task 4):
 > covering march (slow frames, ~45 ms in VR) for ~1 s each time (Task 5's progressive re-anchor removes it); near
 > objects in front of shadowed air get the air loss of the whole cached ray scaled by distance only; the lookup's
 > parallax is GPU-tested only at the anchor (the GDScript mirror covers off-anchor eyes).
+
+## Superseded by cloud view cache Task 5 fix round 1 (2026-10-28: one tile / anchor rule, eviction by parallax, the near shell in the budget)
+
+>     asynchronously), the shown states uploaded, while covering the march (stamped `cloud_cache_cover`), then per eye
+>     `CLOUD_CACHE_LOOKUP` into the pass's result
+
+>     anchor). Each tile is reprojected from the anchor it was rendered from (Task 5): the lookup from the current anchor
+>     first (the ring's offsets from the camera, float64 differences, in a buffer); where it lands on a tile of another
+>     anchor, again from that one (a deck at R_near from an anchor 200 m off: < 0.011 eye px). The colour: the tile's finest shown level, bilinear in the
+>     cube,
+
+>     (95th percentile of 90 frames; a frame's rest = the span of its captured timestamps minus its own fill and covering
+>     march, from the same frame's stamps) - 2 ms, between 2 and 11.4 ms [E].
+
+> [E], from the parallax error: a deck at R_near lands within 1e-6 eye px from the re-anchor's 100 m and within 0.011
+>     px from an older anchor 200-300 m off - `cloud_vr_stereo_test`).
+
+>     not the slots') within R_near x (1 + `ANCHOR_EVICT_FRACTION`) + `NEAR_SHELL_MARGIN_M` 100 m [E]; the render thread
+>     runs the near shell when it is within R_near + the farthest shown anchor's offset + the margin
+>     (`CacheMode.NEAR_SHELL`)
+
+>     sphere of R_near around the anchor of the cache tile it meets there (`cloud_near_shell_end`: the tile states and the
+>     anchor ring bound at 8 / 9, push constants; a tile without a level: the whole ray, covering)
+
+>     schedule refills it from the new one (its parallax and staleness classes, cross-faded from the fade slot). Tiles
+>     whose anchor the camera left more than `ANCHOR_EVICT_FRACTION` 0.1 [E] x R_near = 200 m behind (and those of a ring
+>     entry about to be reused) are dropped (`CloudViewCacheSchedule.forget`; the covering march shows them in view). The
+>     light cache's reach stays camera-centred: with the anchor within 100 m of the camera (tiles of older anchors within
+>     200 m) its cascades (kilometres) hold the anchor's rays as the camera's - not tested separately.
+
+>   - **Validation and open (Task 5)**: `cloud_view_cache_test` (the re-anchor at 5 % of R_near, not below; through
+>     the planner a re-anchor restarts nothing, every tile that showed a level keeps one, refills take the new anchor,
+>     an anchor left 200 m behind loses its tiles), `cloud_vr_stereo_test` (a tile reprojected from its own anchor 100 /
+>     200 m off: a deck at R_near within 1.2e-6 / 3.8e-4 eye px), core `[weather]` "The render field's nearest cloud",
+>     cloud_check with `STARSIM_MARCH_REFERENCE` (the per-frame march bit for bit as before Task 5). `render_check
+>     --frames_every=0.5` (the brief's Starbase ascent through a slab 1.5-2.5 km, `--fly=25 --frames_for=80`, VR preset
+>     at render scale 1.65): watched from the ground 2 km east PASS - the mean alpha over the near shell's boundary
+>     annulus within 0.010 of the march's (31 samples), flight frames GPU median 5.3 / p99 18.8 ms; **on board FAIL**:
+>     outside the deck within 0.003, converged inside it 0.0003, but while climbing through it at 140-160 m/s the cache
+>     lags 0.04-0.06 (worst 0.059) and the flight frames' GPU p99 is 27.5 ms (median 8.7; the frame target 22.2 ms).
+>     Cause (measured, the anchor held fixed): a cached volume seen from off its anchor loses coverage - 0.075 / 0.18 /
+>     0.28 of the mean alpha 130 / 260 / 400 m off inside the broken deck (Task 4's cache without the near shell: 0.20 /
+>     0.34 / 0.46); the re-anchor every 100 m cannot refill the view's tiles as fast as the camera moves (a whole view
+>     refill takes seconds). Open for the user's VR check: the deck passage from on board (softer, partly thinner near
+>     clouds for ~10 s - the spec's accepted "briefly softer").

@@ -16,8 +16,8 @@ extends RefCounted
 ## it).
 ## Batches: plan() returns {layout, anchor, tiles: PackedInt32Array of (tile, level, slot), states (bytes or empty:
 ## unchanged), now_s, epoch, fill_id, covering, anchors (the ring's positions), anchor_index (the current one),
-## anchor_tiles (per ring entry the tiles showing it)}; the effect fills the tiles (GPU timestamp named by fill_id), then
-## shows the states. Picked tiles are completed in the schedule at once (the effect runs every batch it is handed:
+## anchor_tiles (per ring entry the tiles showing it)}; the effect fills the tiles (GPU timestamp named by fill_id),
+## then shows the states. Picked tiles are completed in the schedule at once (the effect runs every batch it is handed:
 ## CloudLayer plans only when the last one was taken).
 ## Covering (controller ruling, Task 4 fix round 1): while a tile in the view's cone has no level yet, or a first fill
 ## there is still fading in, the effect runs the per-frame march at the preset divisor too and the lookup shows it where
@@ -37,9 +37,9 @@ extends RefCounted
 ## near shell's radius from the anchor, the camera becomes the anchor - the next entry of a ring of ANCHOR_RING anchors.
 ## No tile is dropped: each keeps showing what it holds, from the anchor it was rendered from (its state names the ring
 ## entry, the lookup reprojects it from there), until the schedule refills it from the new anchor (its parallax and
-## staleness classes: nearest and most displaced first, cross-faded from its fade slot). A tile whose anchor the camera
-## left more than ANCHOR_EVICT_FRACTION of R_near behind is dropped (its reprojection would miss; the march covers it if
-## it is in view), as are the tiles of a ring entry about to be reused.
+## staleness classes: nearest and most displaced first, cross-faded from its fade slot). A tile is dropped by its own
+## parallax (fix round 1): once the camera is farther from its anchor than CloudViewCacheSchedule.keep_distance_m of its
+## nearest cached cloud (the march covers it if it is in view), as are the tiles of a ring entry about to be reused.
 
 ## [E] Fade slots (one full-level tile of colour each): the same-level refreshes in flight during one cross-fade - at
 ## 45 Hz a quarter second is ~11 frames of up to a few dozen full tiles; 32 x 32 cells of 64^2 RGBA16F = 32 MB.
@@ -82,14 +82,9 @@ const FACE_TEXELS_MAX := 4096
 ## field-of-view jitter and small zooms keep the cache.
 const FACE_HYSTERESIS := 0.1
 ## [E] Anchors in the ring (a tile state's 7 bits): 128 re-anchors of 100 m - 12.8 km of flight - before an entry is
-## reused; the eviction distance drops a tile long before that in a straight flight.
+## reused; the eviction drops a tile long before that in a straight flight (CloudViewCacheSchedule.keep_distance_m: at
+## most 1 km).
 const ANCHOR_RING := 128
-## [E] A tile is dropped when the camera is farther than this fraction of the near shell's radius from the anchor it
-## was rendered from (200 m): a cached volume seen from off its anchor loses coverage with the offset - the deck passage
-## (render_check --frames_every, inside a broken deck, the anchor held) lost 0.075 / 0.18 / 0.28 of the mean alpha at
-## the near shell's boundary 130 / 260 / 400 m off, and evicting at 600 m left the passage's worst sample at 0.125 (200 m:
-## 0.096); the surface mirror holds a deck at R_near within 0.011 eye px at 300 m (cloud_vr_stereo_test).
-const ANCHOR_EVICT_FRACTION := 0.1
 
 var layout: CloudViewCacheLayout
 var schedule: CloudViewCacheSchedule
@@ -124,6 +119,11 @@ var _tile_dirs := PackedVector3Array()  ## the layout's tile centre directions
 var _anchor_ring := PackedVector3Array()  ## the ring's anchors (Earth-local float64)
 var _anchor_tiles := PackedInt32Array()  ## per ring entry: the tiles showing it
 var _tile_anchor := PackedInt32Array()  ## per tile: the ring entry it shows (-1: none)
+## Per ring entry: the tiles that took it (an entry whose tile has moved on to another anchor is skipped and dropped at
+## the entry's next scan) and the nearest cached cloud among them (m; INF: none known) - _evict_far scans an entry's
+## tiles only when the camera may have left the keep distance of its nearest one.
+var _anchor_list: Array[PackedInt32Array] = []
+var _anchor_min_near_m := PackedFloat64Array()
 ## Per tile and level (tile x LEVELS + level): its latency (ms; 0: not measured since the restart).
 var _tile_latency_ms := PackedFloat32Array()
 ## Per level: the recent fills' median ratio of a tile's latency to its coarser level's, and their slowest latency.
@@ -306,6 +306,10 @@ func _apply_distances(batch_epoch: int, tiles: PackedInt32Array, bits: PackedByt
 	if batch_epoch != epoch or schedule == null:
 		return
 	schedule.set_tile_distances(tiles, bits)
+	for tile in tiles:  # the anchors' nearest clouds (the eviction's scan trigger)
+		var index := _tile_anchor[tile]
+		if index >= 0:
+			_anchor_min_near_m[index] = minf(_anchor_min_near_m[index], schedule.near_of(tile))
 
 
 ## Worker: a fill's measured GPU time scales its tiles' latencies by measured / predicted (an older epoch's fill only
@@ -486,6 +490,11 @@ func _restart(camera_earth_m: Vector3) -> void:
 	_anchor_ring.fill(camera_earth_m)
 	_anchor_tiles.resize(ANCHOR_RING)
 	_anchor_tiles.fill(0)
+	_anchor_list.resize(ANCHOR_RING)
+	for index in range(ANCHOR_RING):
+		_anchor_list[index] = PackedInt32Array()
+	_anchor_min_near_m.resize(ANCHOR_RING)
+	_anchor_min_near_m.fill(INF)
 	_tile_anchor.fill(-1)
 	resets += 1
 	epoch += 1
@@ -508,39 +517,72 @@ func _restart(camera_earth_m: Vector3) -> void:
 ## staleness).
 func _reanchor(camera_earth_m: Vector3) -> void:
 	var next := (anchor_index + 1) % ANCHOR_RING
-	if _anchor_tiles[next] > 0:
-		_evict(next)
+	_evict(next)
 	anchor_index = next
 	_anchor_ring[next] = camera_earth_m
+	_anchor_min_near_m[next] = INF
 	anchor_earth_m = camera_earth_m
 	reanchors += 1
 
 
-## Drops the tiles of every anchor the camera left more than ANCHOR_EVICT_FRACTION of the near shell's radius behind.
+## Drops each tile the camera left farther from its anchor than the tile's keep distance
+## (CloudViewCacheSchedule.keep_distance_m of its nearest cached cloud: its own parallax), then hands the schedule the
+## largest offset of a kept tile's anchor from the current one (its parallax class's bound). An entry's tiles are
+## scanned only when the camera may have left the keep distance of the entry's nearest cloud.
 func _evict_far(camera_earth_m: Vector3) -> void:
-	var limit := ANCHOR_EVICT_FRACTION * CloudLayer.near_radius_m()
+	var cap_m := CloudViewCacheSchedule.keep_distance_m(INF)
+	var deviation_m := 0.0
 	for index in range(ANCHOR_RING):
-		if _anchor_tiles[index] > 0 and index != anchor_index \
-				and camera_earth_m.distance_to(_anchor_ring[index]) > limit:
-			_evict(index)
+		if _anchor_tiles[index] <= 0 or index == anchor_index:
+			continue
+		var offset_m := camera_earth_m.distance_to(_anchor_ring[index])
+		if offset_m > CloudViewCacheSchedule.keep_distance_m(_anchor_min_near_m[index]) or offset_m > cap_m:
+			var kept := PackedInt32Array()
+			var dropped := PackedInt32Array()
+			var nearest_m := INF
+			for tile in _anchor_list[index]:
+				if _tile_anchor[tile] != index:
+					continue  # refilled from another anchor since
+				var near_m := schedule.near_of(tile)
+				if offset_m > CloudViewCacheSchedule.keep_distance_m(near_m):
+					dropped.append(tile)
+				else:
+					kept.append(tile)
+					nearest_m = minf(nearest_m, near_m)
+			_anchor_list[index] = kept
+			_anchor_min_near_m[index] = nearest_m
+			_drop(dropped)
+		if _anchor_tiles[index] > 0:
+			deviation_m = maxf(deviation_m, anchor_earth_m.distance_to(_anchor_ring[index]))
+	schedule.set_anchor_deviation(anchor_earth_m, deviation_m)
 
 
 ## The tiles showing a ring entry lose their content (no level: filled again like new ones, the march covers them in
 ## view).
 func _evict(index: int) -> void:
 	var dropped := PackedInt32Array()
-	for tile in range(_tile_anchor.size()):
+	for tile in _anchor_list[index]:
 		if _tile_anchor[tile] == index:
 			dropped.append(tile)
-			if _shown[tile] == CloudViewCacheSchedule.MAX_LEVEL:
-				_full_count -= 1
-			_shown[tile] = -1
-			_tile_anchor[tile] = -1
-			_states.encode_u32(8 * tile, 0)
-			_states.encode_float(8 * tile + 4, 0.0)
-	schedule.forget(dropped)
-	_anchor_tiles[index] = 0
-	evicted_tiles += dropped.size()
+	_drop(dropped)
+	_anchor_list[index] = PackedInt32Array()
+	_anchor_min_near_m[index] = INF
+
+
+## Tiles lose their content (no level: filled again like new ones; the march covers them in view).
+func _drop(tiles: PackedInt32Array) -> void:
+	if tiles.is_empty():
+		return
+	for tile in tiles:
+		if _shown[tile] == CloudViewCacheSchedule.MAX_LEVEL:
+			_full_count -= 1
+		_shown[tile] = -1
+		_anchor_tiles[_tile_anchor[tile]] -= 1
+		_tile_anchor[tile] = -1
+		_states.encode_u32(8 * tile, 0)
+		_states.encode_float(8 * tile + 4, 0.0)
+	schedule.forget(tiles)
+	evicted_tiles += tiles.size()
 	_states_dirty = true
 
 
@@ -577,6 +619,8 @@ func _shown_now(tile: int, level: int) -> int:
 	var from_anchor := old_anchor if old >= 0 and old_anchor >= 0 else anchor_index
 	if old_anchor >= 0:
 		_anchor_tiles[old_anchor] -= 1
+	if old_anchor != anchor_index:
+		_anchor_list[anchor_index].append(tile)
 	_tile_anchor[tile] = anchor_index
 	_anchor_tiles[anchor_index] += 1
 	_states.encode_u32(8 * tile, (level + 1) | (from << 2) | (maxi(slot, 0) << 8) | (anchor_index << 18)

@@ -15,7 +15,9 @@ extends RefCounted
 ## The parallax of class 2 is the one a new march would remove: the offset between the anchor the tile was rendered
 ## from and the CURRENT anchor (the viewpoint a march starts from). A camera that left the anchor is the re-anchor's
 ## business (it moves the anchor, and every tile then shows that offset); refilling from the same anchor cannot reduce
-## it.
+## it. A tile without a known cloud (clear sky: no parallax) joins the class only once its anchor is
+## SKY_REFRESH_FRACTION of its keep distance off, counted at the farthest cloud distance a tile is kept for
+## (keep_distance_m; Task 5 fix round 1): it is refreshed - last of its class - before the planner drops it.
 
 ## [E] A tile is stale when the Sun turned more than this from the direction it was rendered with: ~0.1 deg, one pixel
 ## of the evening light's gradient (a cloud edge's colour moves < 1 pixel).
@@ -51,6 +53,21 @@ const ANCHOR_MOVE_M := 1.0
 ## R_near (cloud_vr_stereo_test), the near shell's boundary moves by at most that, and the light cache's cascades
 ## (camera-centred, kilometres) hold the anchor's rays as the camera's.
 const REANCHOR_FRACTION := 0.05
+## [E] A tile is kept, reprojected from the anchor it was rendered from, while the camera is within this fraction of
+## its nearest cached cloud distance from that anchor (cloud view cache Task 5 fix round 1: evicted by its own
+## parallax, CloudViewCachePlanner; keep_distance_m): a parallax angle of 0.1 rad - the lookup's three iterations land
+## a cloud at R_near within 1.2e-6 eye px from 100 m, 3.8e-4 px from 200 m, 0.011 px from 300 m and 0.13 px from 400 m
+## (cloud_vr_stereo_test; the same angle at 10 km from 1 km), and the deck passage (render_check --frames_every, inside
+## a broken deck) kept its mean alpha best with 200 m at R_near (worst 0.059 against 0.125 at 600 m) - a cached volume
+## seen from off its anchor loses coverage with the angle.
+const ANCHOR_EVICT_RATIO := 0.1
+## [E] ... and at most this fraction of the near shell's radius (1 km) for any tile (a far cloud, clear sky): the camera
+## stays well inside the anchor's sphere of R_near, from which the tile's content starts (the near shell's end).
+const ANCHOR_KEEP_FRACTION := 0.5
+## [E] A tile without a known cloud is refreshed once its anchor is this fraction of its keep distance from the current
+## one (500 m): its refresh comes before its eviction (the camera another ~400 m on: 0.4 s at 1 km/s, a cheap fill
+## of clear sky), and after every 100 m re-anchor it does not compete with the cloudy tiles (it shows no parallax).
+const SKY_REFRESH_FRACTION := 0.5
 ## The full level (CloudViewCacheLayout.LEVELS - 1).
 const MAX_LEVEL := CloudViewCacheLayout.LEVELS - 1
 ## [E] Tiles per side of a block: the coarse grid pick() culls with (a block holds 64 tiles: ~300 blocks cover the
@@ -113,10 +130,15 @@ var _block_missing := PackedInt32Array()  # tiles without a level
 var _block_off := PackedInt32Array()  # tiles rendered from another anchor than the current one
 var _block_min_near_m := PackedFloat64Array()
 var _block_near_dirty := PackedByteArray()
-## Upper bound of the offset (m) between the current anchor and the anchor of any off tile; exactly 0 while no tile is off.
-## It grows by the length of every anchor move and returns to 0 when the last off tile is re-marched.
+## Upper bound of the offset (m) between the current anchor and the anchor of any off tile; exactly 0 while no tile is
+## off. It grows by the length of every anchor move, returns to 0 when the last off tile is re-marched, and the planner
+## sets it exactly after its eviction (set_anchor_deviation).
 var _max_anchor_dev_m := 0.0
 var _total_off := 0
+## The nearest cloud distance (m) a tile's parallax counts with at most: the one whose keep distance is the cap
+## (keep_distance_m) - a tile without a known cloud counts there.
+var _near_cap_m := ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m() / ANCHOR_EVICT_RATIO
+var _sky_refresh_m := SKY_REFRESH_FRACTION * ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m()
 var _cone_valid := false
 var _cone_centre := Vector3.ZERO
 var _cone_angle := 0.0
@@ -317,7 +339,28 @@ func missing_in_cone(centre: Vector3, cone_angle: float) -> bool:
 ## Whether the camera has moved REANCHOR_FRACTION of the near shell's radius from the current anchor (the one the last
 ## pick() was given; none yet: true) - the planner then moves the anchor to the camera (cloud view cache Task 5).
 func reanchor_needed(camera_earth_m: Vector3) -> bool:
-	return is_nan(_current_anchor.x) 			or camera_earth_m.distance_to(_current_anchor) > REANCHOR_FRACTION * CloudLayer.near_radius_m()
+	return is_nan(_current_anchor.x) \
+			or camera_earth_m.distance_to(_current_anchor) > REANCHOR_FRACTION * CloudLayer.near_radius_m()
+
+
+## How far (m) the camera may be from the anchor a tile was rendered from before the tile is dropped
+## (CloudViewCachePlanner; Task 5 fix round 1): ANCHOR_EVICT_RATIO of the tile's nearest cached cloud distance near_m
+## (INF: none), at most ANCHOR_KEEP_FRACTION of R_near.
+static func keep_distance_m(near_m: float) -> float:
+	return minf(ANCHOR_EVICT_RATIO * near_m, ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m())
+
+
+## The anchor (as pick's) and the largest offset (m) from it of an anchor a tile still shows (the planner, after its
+## eviction): the parallax class's exact bound (the sum of the anchor moves bounds it only loosely while old tiles are
+## kept).
+func set_anchor_deviation(anchor_earth_m: Vector3, deviation_m: float) -> void:
+	_sync_anchor(anchor_earth_m)
+	_max_anchor_dev_m = deviation_m if _total_off > 0 else 0.0
+
+
+## The nearest cached cloud distance of a tile (m; INF: none known).
+func near_of(tile: int) -> float:
+	return _near_m[tile]
 
 
 ## Forgets tiles (cloud view cache Task 5: the planner evicts the tiles of an anchor the camera left too far behind):
@@ -411,17 +454,27 @@ func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Ve
 		# The blocks a parallax can show in: the nearest cloud of the block closer than this (m).
 		var parallax_reach_m := _max_anchor_dev_m * _parallax_px_per_rad / PARALLAX_REFRESH_PX
 		# _cone_blocks is ordered nearest first: only as many blocks as pick() can expand are collected (one more
-		# urgent block says that the group is cut off), so a pass ends as soon as the nearest ones are found.
+		# urgent block says that the group is cut off), so a pass ends as soon as the nearest ones are found. Blocks
+		# with tiles missing go before those with a parallax only (Task 5 fix round 1: in flight every re-anchor makes
+		# the nearest blocks' tiles a parallax to refresh - tiles without a level farther out in the cone waited behind
+		# them, and the view stayed covered).
+		var parallax_blocks := PackedInt32Array()
+		var any_missing := _block_missing.count(0) < _block_missing.size()  # (a C++ count: the pass may end early)
 		for block in _cone_blocks:
 			if _block_open[block] <= 0:
 				continue
-			if _block_missing[block] > 0 or (_block_off[block] > 0 and (_block_min_near_m[block] < parallax_reach_m
-					if _block_near_dirty[block] == 0 else _parallax_possible(block))):
-				urgent_blocks.append(block)
-				if urgent_blocks.size() > max_expansions:
-					break
+			if _block_missing[block] > 0:
+				if urgent_blocks.size() <= max_expansions:
+					urgent_blocks.append(block)
+			elif _block_off[block] > 0 and (_possible_at(_block_min_near_m[block], parallax_reach_m)
+					if _block_near_dirty[block] == 0 else _parallax_possible(block)):
+				if parallax_blocks.size() <= max_expansions:
+					parallax_blocks.append(block)
 			elif later_blocks.size() < max_expansions:
 				later_blocks.append(block)
+			if urgent_blocks.size() > max_expansions or (not any_missing and parallax_blocks.size() > max_expansions):
+				break
+		urgent_blocks.append_array(parallax_blocks.slice(0, maxi(max_expansions + 1 - urgent_blocks.size(), 0)))
 	var classes: Array[PackedFloat64Array] = [PackedFloat64Array(), PackedFloat64Array(), PackedFloat64Array(),
 			PackedFloat64Array(), PackedFloat64Array()]
 	var expansions := 0
@@ -522,18 +575,20 @@ func _classify_block(block: int, view_dirs: Array[Vector3], zones: Vector4, clas
 			var error_px := 0.0
 			if check_parallax and visible and off:
 				var near := _near_m[tile]  # inline of parallax_error_px (the hot loop)
-				if near > 0.0 and near < INF:
+				if near > 0.0:
 					if _anchor_earth_m[tile] != last_anchor:
 						last_anchor = _anchor_earth_m[tile]
 						offset = _current_anchor - last_anchor
 						offset_sq = offset.length_squared()
 					var along := offset.dot(_dirs[tile])
-					var across_sq := offset_sq - along * along
-					error_px = sqrt(across_sq) / near * _parallax_px_per_rad if across_sq > 0.0 else 0.0
+					var across := sqrt(maxf(offset_sq - along * along, 0.0))
+					# Clear sky: counted at the cap's distance, from SKY_REFRESH_FRACTION of its keep distance on.
+					if near < INF or across > _sky_refresh_m:
+						error_px = across / minf(near, _near_cap_m) * _parallax_px_per_rad
 			if level < 0 and in_margin:
 				classes[0].append(float(key) * _TILE_RANGE + float(tile))
 			elif error_px > PARALLAX_REFRESH_PX:
-				var score := int(error_px / _near_m[tile] * _NEARNESS_SCALE)  # error times nearness
+				var score := int(error_px / minf(_near_m[tile], _near_cap_m) * _NEARNESS_SCALE)  # error times nearness
 				classes[1].append(float(_KEY_MAX - (score if score < _KEY_MAX else _KEY_MAX)) * _TILE_RANGE + float(tile))
 			elif visible and level < MAX_LEVEL:
 				classes[2].append(float(key) * _TILE_RANGE + float(tile))
@@ -739,7 +794,14 @@ func _parallax_possible(block: int) -> bool:
 				if _near_m[tile] > 0.0:
 					nearest = minf(nearest, _near_m[tile])
 		_block_min_near_m[block] = nearest
-	return _max_anchor_dev_m / _block_min_near_m[block] * 0.5 * layout.face_texels > PARALLAX_REFRESH_PX
+	return _possible_at(_block_min_near_m[block], _max_anchor_dev_m * _parallax_px_per_rad / PARALLAX_REFRESH_PX)
+
+
+## Whether a block whose nearest known cloud is near_m (INF: none) can hold a tile over PARALLAX_REFRESH_PX: its
+## nearest cloud within reach_m (the largest anchor offset's reach at that threshold), or - clear sky - the largest
+## anchor offset beyond the sky's refresh distance (_classify_block's rule).
+func _possible_at(near_m: float, reach_m: float) -> bool:
+	return minf(near_m, _near_cap_m) < reach_m if near_m < INF else _max_anchor_dev_m > _sky_refresh_m
 
 
 func _block_of(tile: int) -> int:

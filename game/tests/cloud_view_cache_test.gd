@@ -33,6 +33,7 @@ func _initialize() -> void:
 	_test_missing_in_cone()
 	_test_reanchor_trigger()
 	_test_progressive_reanchor()
+	_test_eviction_by_parallax()
 	print("cloud_view_cache_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -171,8 +172,9 @@ func _test_progressive_reanchor() -> void:
 			+ "(%s), each from an anchor of the ring (%s)" % [kept, named])
 	_check(refilled_new > 0 and refilled_old == 0, "progressive re-anchor: the refills take the new anchor (%d new, %d "
 			% [refilled_new, refilled_old] + "old)")
-	# On past the eviction distance from the first anchor: re-anchoring every step, its tiles dropped.
-	var limit := CloudViewCachePlanner.ANCHOR_EVICT_FRACTION * CloudLayer.near_radius_m()
+	# On past the keep distance of a tile without a known cloud (the cap) from the first anchor: re-anchoring every
+	# step, its tiles dropped.
+	var limit := CloudViewCacheSchedule.keep_distance_m(INF)
 	var first_anchor := planner.anchor_at(first)
 	var still_first := 0
 	while camera.distance_to(first_anchor) <= limit + step:
@@ -183,6 +185,53 @@ func _test_progressive_reanchor() -> void:
 	_check(still_first == 0 and planner.evicted_tiles > 0 and planner.resets == resets,
 			"progressive re-anchor: %.0f m on (beyond %.0f m) the first anchor's tiles are dropped (%d still show it, %d "
 			% [camera.distance_to(first_anchor), limit, still_first, planner.evicted_tiles] + "evicted), no restart")
+
+
+## The eviction by a tile's own parallax (cloud view cache Task 5 fix round 1): a tile is dropped once the camera is
+## farther from its anchor than ANCHOR_EVICT_RATIO of its nearest cached cloud, at most ANCHOR_KEEP_FRACTION of R_near
+## (a tile without a known cloud) - not at one fixed distance for all; the schedule gets the largest kept offset.
+func _test_eviction_by_parallax() -> void:
+	var planner := CloudViewCachePlanner.new()
+	var view := {"dirs": _view_grid(deg_to_rad(40.0), VIEW_STEP_RAD), "sample_rad": VIEW_SAMPLE_RAD,
+		"face_texels": 512}
+	var light := {"sun_dir": Vector3(0.3, 0.8, 0.5).normalized(), "weather_weight": 0.0, "light_generation": 1}
+	var camera := Vector3(1.0e6, 2.0e6, 3.0e6)
+	for frame in range(40):  # converge the view from the first anchor
+		_plan(planner, camera, view, light)
+	var first := planner.anchor_index
+	var shown := PackedInt32Array()
+	for tile in range(planner.layout.tile_count()):
+		if planner.shown_level(tile) >= 0 and planner.tile_anchor(tile) == first:
+			shown.append(tile)
+	# Three tiles of the first anchor with clouds at R_near, 4 R_near and 20 R_near; the others without a known cloud.
+	var r := CloudLayer.near_radius_m()
+	var near_tiles := PackedInt32Array([shown[0], shown[1], shown[2]])
+	var bits := PackedByteArray()
+	bits.resize(12)
+	for i in range(3):
+		bits.encode_float(4 * i, r * [1.0, 4.0, 20.0][i])
+	planner._apply_distances(planner.epoch, near_tiles, bits)
+	# The camera moves on along a line (re-anchoring as the planner does) without refills: the eviction alone.
+	var direction := Vector3(0.0, 0.0, 1.0)
+	var kept_at := []  # per offset: [the R_near tile, the 4 R_near tile, the 20 R_near tile, a tile without a cloud]
+	var deviations := []
+	for offset_m: float in [0.05 * r, 0.15 * r, 0.45 * r, 0.55 * r]:
+		var at := camera + direction * offset_m
+		planner._reanchor(at)
+		planner._evict_far(at)
+		var row := []
+		for tile in [near_tiles[0], near_tiles[1], near_tiles[2], shown[3]]:
+			row.append(planner.shown_level(tile) >= 0 and planner.tile_anchor(tile) == first)
+		kept_at.append(row)
+		deviations.append(planner.schedule._max_anchor_dev_m)
+	var expected := [[true, true, true, true], [false, true, true, true], [false, false, true, true],
+			[false, false, false, false]]
+	_check(kept_at == expected and planner.resets == 1,
+			"eviction by a tile's own parallax: kept (R_near / 4 R_near / 20 R_near / no cloud) at 5 / 15 / 45 / 55 % "
+			+ "of R_near off its anchor: %s (expected %s)" % [str(kept_at), str(expected)])
+	_check(absf(deviations[2] - 0.45 * r) < 1.0e-6 and deviations[3] == 0.0,
+			"eviction: the schedule's parallax bound is the largest kept offset (%.1f m with the first anchor's tiles, "
+			% deviations[2] + "%.1f m once they are dropped)" % deviations[3])
 
 
 ## One plan of the planner (its run waited for), a large budget (the fills are not measured here).
@@ -445,6 +494,22 @@ func _test_parallax() -> void:
 			and picks[0]["level"] == 2,
 			"visible tiles over %.1f px: the nearer cloud first, at its level (%s)"
 			% [CloudViewCacheSchedule.PARALLAX_REFRESH_PX, str(picks.slice(0, 2))])
+	# Clear sky (no known cloud, fix round 1): no parallax class after a small anchor move (a finer-level tile of the
+	# view goes first), but from SKY_REFRESH_FRACTION of its keep distance on it joins it (ahead of that tile).
+	var firsts := []
+	for move_m: float in [5.0, 600.0]:
+		var s3 := CloudViewCacheSchedule.new(all)
+		_complete_all(s3, 2, _state(Vector3.UP, 0.5, 1, anchor))
+		_settle(s3, Vector3.UP, 0.5, 1)
+		var at := anchor + Vector3(0.0, move_m, 0.0)
+		s3.set_anchor_deviation(at, move_m)
+		var coarse_tile := all.tile_of(Vector3(0.02, 0.0, -1.0))
+		s3.completed(coarse_tile, 1, _state(Vector3.UP, 0.5, 1, at))
+		var sky_picks := s3.pick(at, at, [Vector3(0.0, 0.0, -1.0)], 3, deg_to_rad(10.0))
+		firsts.append(not sky_picks.is_empty() and sky_picks[0]["tile"] == coarse_tile)
+	var sky_m := CloudViewCacheSchedule.SKY_REFRESH_FRACTION * CloudViewCacheSchedule.keep_distance_m(INF)
+	_check(firsts == [true, false], "clear sky: after a 5 m anchor move a finer level of the view goes first (%s), "
+			% firsts[0] + "after 600 m (> %.0f m) the clear-sky tiles' refresh does (%s)" % [sky_m, not firsts[1]])
 	_test_parallax_reanchor()
 
 

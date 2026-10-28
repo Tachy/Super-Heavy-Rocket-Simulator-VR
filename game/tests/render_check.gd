@@ -42,11 +42,13 @@
 #          the per-frame march's (exit code 1).
 #          --frames_every=0.5 [--frames_for=30] (with --vehicle and --fly; cloud view cache Task 5): once settled the
 #          flight goes on in frames of 1/45 s (the VR frame) for that many seconds, the camera on board or (with
-#          --watch_from_site) on the ground aimed at the vehicle; every 0.5 s of flight the cache's image (with the near
-#          shell when a cloud is near) against the per-frame march's (the flag off, the preset's divisor): the mean alpha
-#          over the annulus where the march's clouds lie at the near shell's radius (+-25 %) within 0.02 (no ring at
-#          R_near; exit code 1), and the flight frames' GPU time (median, p99; with the VR preset p99 <= its frame target,
-#          exit code 1). Images: --out with _fly_<t> for the samples' cache frames.
+#          --watch_from_site) on the ground aimed at the vehicle; every 0.5 s of flight the cache's image (with the
+#          near shell when a cloud is near) against the per-frame march's (the flag off, the preset's divisor): the
+#          mean alpha over the annulus where the march's clouds lie at the near shell's radius (+-25 %) within 0.02
+#          (no ring at R_near), 0.06 while the camera is within a cloud layer's vertical extent +- R_near (the field's
+#          nearest cloud within R_near: the cache's accepted lag in a deck passage; exit code 1), and the flight
+#          frames' GPU time (median, p99; with the VR preset p99 <= its frame target, exit code 1). Images: --out with
+#          _fly_<t> for the samples' cache frames.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -96,12 +98,19 @@ const JUMP_RENDER_SCALE := 1.3
 const JUMP_MAX_FRAMES := 900
 ## --frames_every (cloud view cache Task 5): the flight's frame (s; the VR frame at 45 Hz), the annulus around the near
 ## shell's radius (the march's cloud distance within this factor of it), its pixel stride, the fewest pixels a sample
-## counts with, and the bound on the mean alpha's difference there (the brief's: no ring at R_near).
+## counts with, and the bound on the mean alpha's difference there (the brief's: no ring at R_near) - with the camera
+## within a cloud layer's vertical extent +- R_near the controller's ruling's (Task 5: the cache's lag inside a deck
+## passage is the spec's "briefly softer near clouds").
 const FLY_FRAME_S := 1.0 / 45.0
 const FLY_ANNULUS_FACTOR := 1.25
 const FLY_STRIDE := 2
 const FLY_MIN_ANNULUS := 200
 const FLY_ALPHA_TOLERANCE := 0.02
+const FLY_ALPHA_IN_LAYER_TOLERANCE := 0.06
+## The flight frames after a sample's reference whose measured GPU time (the viewport's: the previous frame's) is still
+## the reference march's (measured, Task 5 fix round 1: the first one shows its outline pass, 18 - 26 ms; the second
+## the cache's) - not counted.
+const FLY_GPU_LAG_FRAMES := 1
 
 var _args := {}
 var _main: Node
@@ -169,6 +178,11 @@ var _fly_next_sample := NAN
 var _fly_march_wait := 0
 var _fly_cache_image: Image
 var _fly_samples: Array[Vector4] = []
+var _fly_in_layer: Array[bool] = []  ## per sample: the camera within a cloud layer's extent +- R_near
+var _fly_sample_gpu_from := 0  ## the first flight frame since the last sample (its frames' worst GPU time printed)
+var _fly_gpu_skip := 0  ## flight frames whose measured GPU time is still a reference march frame's
+var _fly_section_ms: Array[float] = []  ## the flight frames' main-thread section cloud_view_cache (FrameProfiler)
+var _last_section_ms := 0.0  ## the last frame's section cloud_view_cache (ms)
 var _fly_gpu_ms: Array[float] = []
 var _fly_near_frames := 0
 var _fly_near_at_sample := 0  ## CloudEffect.near_shell_frames when the sample's cache frame was taken
@@ -386,6 +400,7 @@ func _cache_waiting(world: World) -> bool:
 	var planner := clouds.view_cache_planner
 	planner.wait()  # its state is read below (the run started last frame; normally done long ago)
 	var frame_sections := FrameProfiler.take_frame()
+	_last_section_ms = int(frame_sections.get(&"cloud_view_cache", 0)) / 1000.0
 	if _cache_done or not clouds.view_cache or not bool(ShaderGlobals.value(&"cloud_enabled")) \
 			or planner.layout == null or _frames >= TERRAIN_MAX_FRAMES:
 		return false
@@ -632,13 +647,24 @@ func _fly_frames_done(world: World) -> bool:
 		var cache_alpha := _mean_alpha(_fly_cache_image, annulus)
 		var march_alpha := _mean_alpha(march, annulus)
 		_fly_samples.append(Vector4(_fly_t, annulus.size(), cache_alpha, march_alpha))
+		# The field's nearest cloud is a lower bound of the vertical gap to a cloudy layer (CloudLayer.nearest_cloud_m).
+		var in_layer: bool = clouds.nearest_cloud_m <= CloudLayer.near_radius_m()
+		_fly_in_layer.append(in_layer)
+		var since := _stats(_fly_gpu_ms.slice(_fly_sample_gpu_from))
+		_fly_sample_gpu_from = _fly_gpu_ms.size()
 		print("render_check: fly sample t %.1f s: annulus %d pixels, mean alpha cache %.4f, march %.4f (diff %.4f), "
 				% [_fly_t - _fly_end + float(_args.get("frames_for", "30")), annulus.size(), cache_alpha, march_alpha,
-				cache_alpha - march_alpha] + "near shell %s, nearest cloud %.0f m, camera %.0f m above the ellipsoid, "
-				% [_fly_near_sample, clouds.nearest_cloud_m, ShaderGlobals.value(&"cloud_camera_height_m")]
-				+ "re-anchors %d, evicted %d" % [clouds.view_cache_planner.reanchors,
-				clouds.view_cache_planner.evicted_tiles])
+				cache_alpha - march_alpha] + "near shell %s, nearest cloud %.0f m%s, camera %.0f m above the "
+				% [_fly_near_sample, clouds.nearest_cloud_m, " (in layer)" if in_layer else "",
+				ShaderGlobals.value(&"cloud_camera_height_m")] + "ellipsoid, re-anchors %d, evicted %d; frames since "
+				% [clouds.view_cache_planner.reanchors, clouds.view_cache_planner.evicted_tiles]
+				+ "GPU max %.2f ms, covering %s, "
+				% [since["max"], clouds.view_cache_planner.last_covering]
+				+ "budget %.2f ms (march %.2f ms predicted, rest median %.2f / max %.2f ms)"
+				% [clouds.cache_budget_ms(), clouds.cache_march_ms(), _stats(clouds._view_cache_rest_ms)["median"],
+				_stats(clouds._view_cache_rest_ms)["max"]])
 		clouds.view_cache = true
+		_fly_gpu_skip = FLY_GPU_LAG_FRAMES
 		return false
 	if _fly_t >= _fly_next_sample - 1.0e-6 and _fly_cache_image == null:
 		# The sample: this frame's cache image (drawn last frame at this instant), then the march's at the same instant.
@@ -655,7 +681,14 @@ func _fly_frames_done(world: World) -> bool:
 	if _fly_t >= _fly_end:
 		_fly_near_frames = clouds.effect.near_shell_frames - _fly_near_frames
 		return _fly_report()
-	_fly_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+	_fly_section_ms.append(_last_section_ms)
+	if _fly_gpu_skip > 0:
+		_fly_gpu_skip -= 1  # the measured GPU time is the previous frame's: the sample's last reference march
+	else:
+		_fly_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+		var target_ms := float(CloudLayer.PRESETS[clouds.quality]["frame_target_ms"])
+		if _args.has("gpu_passes") and _fly_gpu_ms.back() > target_ms:
+			_print_slow_frame(_fly_gpu_ms.back())
 	_fly_near_at_sample = clouds.effect.near_shell_frames
 	_fly_t += FLY_FRAME_S
 	_advance(sim, _fly_t)
@@ -665,24 +698,33 @@ func _fly_frames_done(world: World) -> bool:
 	return false
 
 
-## --frames_every's verdict: every sample with annulus pixels within FLY_ALPHA_TOLERANCE, and the flight frames' GPU
-## p99 within the VR preset's frame target.
+## --frames_every's verdict: every sample with annulus pixels within FLY_ALPHA_TOLERANCE (FLY_ALPHA_IN_LAYER_TOLERANCE
+## with the camera within a cloud layer's extent +- R_near), and the flight frames' GPU p99 within the VR preset's
+## frame target.
 func _fly_report() -> bool:
-	var worst := 0.0
-	var counted := 0
-	for sample in _fly_samples:
+	var worst := [0.0, 0.0]  # outside a layer's extent, within it
+	var counted := [0, 0]
+	for i in range(_fly_samples.size()):
+		var sample := _fly_samples[i]
 		if sample.y >= FLY_MIN_ANNULUS:
-			counted += 1
-			worst = maxf(worst, absf(sample.z - sample.w))
+			var k := 1 if _fly_in_layer[i] else 0
+			counted[k] += 1
+			worst[k] = maxf(worst[k], absf(sample.z - sample.w))
 	var gpu := _stats(_fly_gpu_ms)
 	var target := float(CloudLayer.PRESETS[(_main.get_node("World") as World).clouds.quality]["frame_target_ms"])
 	var frame_ok: bool = target <= 0.0 or gpu["p99"] <= target
-	var ok := counted > 0 and worst <= FLY_ALPHA_TOLERANCE and frame_ok
-	print("render_check: frames_every %s: %d samples (%d with >= %d annulus pixels), mean alpha over the near shell's "
-			% ["PASS" if ok else "FAIL", _fly_samples.size(), counted, FLY_MIN_ANNULUS] + "boundary within %.3f of the "
-			% FLY_ALPHA_TOLERANCE + "march's (worst %.4f); flight frames %d (near shell in %d): GPU median %.2f / p99 "
-			% [worst, gpu["n"], _fly_near_frames, gpu["median"]] + "%.2f / max %.2f ms (frame target %.1f ms)"
-			% [gpu["p99"], gpu["max"], target])
+	var ok: bool = counted[0] + counted[1] > 0 and worst[0] <= FLY_ALPHA_TOLERANCE \
+			and worst[1] <= FLY_ALPHA_IN_LAYER_TOLERANCE and frame_ok
+	print("render_check: frames_every %s: %d samples (%d with >= %d annulus pixels: %d outside a cloud layer's extent "
+			% ["PASS" if ok else "FAIL", _fly_samples.size(), counted[0] + counted[1], FLY_MIN_ANNULUS, counted[0]]
+			+ "+- R_near, %d within), mean alpha over the near shell's boundary within %.3f / %.3f of the march's " \
+			% [counted[1], FLY_ALPHA_TOLERANCE, FLY_ALPHA_IN_LAYER_TOLERANCE] + "(worst %.4f / %.4f); flight frames %d "
+			% [worst[0], worst[1], gpu["n"]] + "(near shell in %d): GPU median %.2f / p99 %.2f / max %.2f ms (frame "
+			% [_fly_near_frames, gpu["median"], gpu["p99"], gpu["max"]] + "target %.1f ms)" % target)
+	var section := _stats(_fly_section_ms)
+	print("render_check: frames_every main thread (section cloud_view_cache: the nearest cloud, the plan's hand-over) "
+			+ "over %d flight frames: median %.3f / p99 %.3f / max %.3f ms" % [section["n"], section["median"],
+			section["p99"], section["max"]])
 	_check_failed = _check_failed or not ok
 	return true
 
@@ -860,6 +902,26 @@ func _out_path(suffix: String) -> String:
 			"../screenshots/render_check.png").simplify_path())
 	DirAccess.make_dir_recursive_absolute(out.get_base_dir())
 	return out.get_basename() + suffix + "." + out.get_extension()
+
+
+## --frames_every with --gpu_passes: a flight frame over the frame target - its GPU timestamp intervals over 0.5 ms
+## (the last frame whose timestamps came back), largest first.
+func _print_slow_frame(gpu_ms: float) -> void:
+	var rd := RenderingServer.get_rendering_device()
+	var parts: Array[Vector2] = []
+	var names := {}
+	for i in range(1, rd.get_captured_timestamps_count()):
+		var ms := float(rd.get_captured_timestamp_gpu_time(i) - rd.get_captured_timestamp_gpu_time(i - 1)) / 1.0e6
+		if ms > 0.5:
+			names[parts.size()] = rd.get_captured_timestamp_name(i - 1)
+			parts.append(Vector2(ms, parts.size()))
+	parts.sort()
+	parts.reverse()
+	var text := ""
+	for p in parts:
+		text += " %s %.2f" % [names[int(p.y)], p.x]
+	print("render_check: slow flight frame t %.2f s: GPU %.2f ms;%s" % [_fly_t - _fly_end
+			+ float(_args.get("frames_for", "30")), gpu_ms, text])
 
 
 func _record_gpu_passes() -> void:
