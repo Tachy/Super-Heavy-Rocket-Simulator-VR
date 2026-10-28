@@ -45,6 +45,12 @@ const VIEW_MARGIN_RAD := 0.35
 ## [E] A tile rendered from an anchor farther than this from the current one is stale (the anchor moves by a
 ## re-anchor; 1 m is far below any parallax the anchor offset makes at cloud distances).
 const ANCHOR_MOVE_M := 1.0
+## [E] The camera's distance from the current anchor (a fraction of the near shell's radius,
+## CloudLayer.near_radius_m()) that re-anchors the cache (cloud view cache Task 5, reanchor_needed): 5 % keeps the
+## camera within 100 m of the anchor - the parallax lookup from three iterations lands within 1e-6 eye px for a deck at
+## R_near (cloud_vr_stereo_test), the near shell's boundary moves by at most that, and the light cache's cascades
+## (camera-centred, kilometres) hold the anchor's rays as the camera's.
+const REANCHOR_FRACTION := 0.05
 ## The full level (CloudViewCacheLayout.LEVELS - 1).
 const MAX_LEVEL := CloudViewCacheLayout.LEVELS - 1
 ## [E] Tiles per side of a block: the coarse grid pick() culls with (a block holds 64 tiles: ~300 blocks cover the
@@ -306,6 +312,34 @@ func missing_in_cone(centre: Vector3, cone_angle: float) -> bool:
 				if _level[tile] < 0 and _dirs[tile].dot(centre) >= cos_cone:
 					return true
 	return false
+
+
+## Whether the camera has moved REANCHOR_FRACTION of the near shell's radius from the current anchor (the one the last
+## pick() was given; none yet: true) - the planner then moves the anchor to the camera (cloud view cache Task 5).
+func reanchor_needed(camera_earth_m: Vector3) -> bool:
+	return is_nan(_current_anchor.x) 			or camera_earth_m.distance_to(_current_anchor) > REANCHOR_FRACTION * CloudLayer.near_radius_m()
+
+
+## Forgets tiles (cloud view cache Task 5: the planner evicts the tiles of an anchor the camera left too far behind):
+## each holds no level any more, its distance unknown - it is filled again like a new one.
+func forget(tiles: PackedInt32Array) -> void:
+	for tile in tiles:
+		if _level[tile] < 0:
+			continue
+		var block := _block_of(tile)
+		if _is_off(tile):
+			_block_off[block] -= 1
+			_total_off -= 1
+			if _total_off == 0:
+				_max_anchor_dev_m = 0.0
+		if not _is_open(tile):
+			_block_open[block] += 1
+		_level[tile] = -1
+		_stale[tile] = 0
+		_block_missing[block] += 1
+		if _near_m[tile] <= _block_min_near_m[block]:
+			_block_near_dirty[block] = 1
+		_near_m[tile] = INF
 
 
 ## The level a tile holds (-1: none).

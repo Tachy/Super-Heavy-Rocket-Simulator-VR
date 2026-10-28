@@ -907,3 +907,33 @@ The validation bullet of the fill ended (before Task 4):
 > against the calibration's 16.5 / 43.0 / 8.2 / 66.1 % -
 >   met but at 20 km (**NOT met**: 9.9 > 8.2 %, exit code 1); T RMS 0.009 / 0.007 / 0.022 / 0.007. Images
 >   `screenshots/cloud-view-cache/t4_<view>_ab_f1_{cache,march,ab_error}.png`.
+
+## Superseded by cloud view cache Task 5 (2026-10-28: near shell, progressive re-anchor)
+
+> - **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-4 done,
+> Task 5 near shell / progressive re-anchor and Task 6 VR acceptance open)**:
+
+> `SimClock.time_jumped` (`notify_clock_jump`), a pinned snapshot (`show_now`), and - interim until Task 5's
+> re-anchor - the camera `RESTART_DISTANCE_M` 500 m [E] from the anchor; a requested restart hands out a reset batch
+> at once (the frame shows the per-frame march until the restarted run's batch: never a tile of the old place or
+> instant).
+
+> tile has nothing and fades a first fill in from it (after a start, a jump, a layout re-creation, the interim
+> restart; ~20-45 frames, see `vr-performance.md`).
+
+> eye `CLOUD_CACHE_LOOKUP` into the pass's result (the composite unchanged; before the first batch, and with the
+> camera farther than the restart distance from the shown anchor, the march alone shows the frame).
+
+> - **The lookup (`cloud_cache_lookup(eye_offset_earth, dir_earth, out cloud_m)`)**: the anchor's direction an eye ray
+> reads is the root of r(q(s)) = |o + s dir| along the ray (o = eye - anchor, r the cached distance): two fixed-point
+> steps, then secant steps while both ends saw cloud, `CACHE_PARALLAX_ITERATIONS` 3 [E] (fixed-point steps alone left
+> 25 eye px of a deck at 300 m seen 50 m off the anchor).
+
+> tile without a level shows the covering march's result (T = 1 when not covering; `cloud_cache_sample` returns the
+> colour without the fade from nothing and its weight, `cloud_cache_lookup` mixes it with T = 1).
+
+> - **Open (Task 4)**: the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
+> the march's for ~2 s after a restart, inside the 0.02 bound); in flight the interim restart every 500 m means the
+> covering march (slow frames, ~45 ms in VR) for ~1 s each time (Task 5's progressive re-anchor removes it); near
+> objects in front of shadowed air get the air loss of the whole cached ray scaled by distance only; the lookup's
+> parallax is GPU-tested only at the anchor (the GDScript mirror covers off-anchor eyes).

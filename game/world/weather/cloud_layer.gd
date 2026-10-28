@@ -130,6 +130,15 @@ const PRESETS := {
 const CACHE_MARGIN_MS := 2.0
 const CACHE_REST_PERCENTILE := 0.95
 const CACHE_REST_FRAMES := 90
+## [E] The near shell's radius R_near (cloud view cache Task 5, spec decision "near shell"): closer than this the frame's
+## march at the preset's divisor covers the clouds (when a cloud is that near), the view cache holds what lies beyond.
+## From the parallax error: the cache's lookup lands a deck at R_near within 1e-6 eye px from the re-anchor's 100 m
+## (5 % of it) and within 1e-4 px from an older tile anchor 200 m off (cloud_vr_stereo_test); a deck at 300 m seen
+## 50 m off the anchor kept 0.6 px after three iterations (Task 4) - nearer clouds stay the per-frame march's.
+const NEAR_RADIUS_M := 2000.0
+## [E] Added to the reach of the near shell's test (m): the field's nearest cloud is asked once per frame on the main
+## thread; 100 m covers a few frames of flight at the deck passage's ~300 m/s.
+const NEAR_SHELL_MARGIN_M := 100.0
 
 var quality: Quality = Quality.DESKTOP:
 	set(value):
@@ -195,6 +204,9 @@ var view_cache := true:
 ## The view cache's plan (layout, anchor, schedule, shown states; main thread).
 var view_cache_planner := CloudViewCachePlanner.new()
 var view_cache_fill_ms := 0.0  ## the last measured fill interval (GPU, ms; diagnostics)
+## The field's nearest cloud to the camera this frame (m, a lower bound; INF: none within the near shell's reach) -
+## the effect runs the near shell when it is within R_near of an anchor a shown tile has (cloud view cache Task 5).
+var nearest_cloud_m := INF
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -408,8 +420,31 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	var shadow_ran := Time.get_ticks_msec() - shadow_effect.ran_msec <= SHADOW_RUN_WINDOW_MSEC
 	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
 	FrameProfiler.begin(&"cloud_view_cache")
+	nearest_cloud_m = _nearest_cloud_m(camera_fixed_m)
+	effect.set_nearest_cloud(nearest_cloud_m, NEAR_RADIUS_M)
 	_update_view_cache(camera_render, enabled, delta_s)
 	FrameProfiler.end(&"cloud_view_cache")
+
+
+## The near shell's radius R_near (m; cloud view cache Task 5): the view cache holds the clouds beyond it.
+static func near_radius_m() -> float:
+	return NEAR_RADIUS_M
+
+
+## The field's nearest cloud (StarsimCore.weather_cloud_nearest_m: a lower bound, m; INF: none) within the near shell's
+## largest reach - R_near from an anchor a shown tile may still have (CloudViewCachePlanner.ANCHOR_EVICT_FRACTION of
+## it from the camera) plus NEAR_SHELL_MARGIN_M. 0 (the near shell on) while the core's active pair is not the slots'
+## (a push pending): never a cloud missed.
+func _nearest_cloud_m(camera_fixed_m: Vector3) -> float:
+	if _core == null:
+		return 0.0
+	var files := [String(_slots[0].get("file", "")), String(_slots[1].get("file", ""))]
+	if not bool(_pushed_light["ok"]) or files != _pushed_light["files"]:
+		return 0.0
+	if files[0] == "" and files[1] == "":
+		return INF
+	return _core.weather_cloud_nearest_m(camera_fixed_m,
+			NEAR_RADIUS_M * (1.0 + CloudViewCachePlanner.ANCHOR_EVICT_FRACTION) + NEAR_SHELL_MARGIN_M)
 
 
 ## The ids of the resident slots and the weight of slot 1 (tests).

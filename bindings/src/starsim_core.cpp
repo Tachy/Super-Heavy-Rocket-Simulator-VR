@@ -698,6 +698,24 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
     return result;
 }
 
+double StarsimCore::weather_cloud_nearest_m(const godot::Vector3& position_itrf_m, double reach_m) const {
+    SnapshotPtr before, after;
+    {
+        const std::lock_guard<std::mutex> lock(weather_mutex_);
+        before = weather_before_;
+        after = weather_after_;
+    }
+    const frames::GeodeticPosition here = frames::fixed_to_geodetic(to_core(position_itrf_m));
+    double nearest = std::numeric_limits<double>::infinity();
+    for (const SnapshotPtr& snapshot : {before, after}) {
+        if (snapshot) {
+            nearest = std::min(nearest, environment::cloud_render_nearest_m(
+                                            *snapshot, here.latitude_rad, here.longitude_rad, here.height_m, reach_m));
+        }
+    }
+    return nearest;
+}
+
 godot::PackedStringArray StarsimCore::weather_cached_files() const {
     godot::PackedStringArray files;
     const std::lock_guard<std::mutex> lock(weather_mutex_);
@@ -943,6 +961,8 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::weather_set_active);
     ClassDB::bind_method(D_METHOD("weather_cloud_light", "position_itrf_m", "sun_direction_itrf"),
                          &StarsimCore::weather_cloud_light);
+    ClassDB::bind_method(D_METHOD("weather_cloud_nearest_m", "position_itrf_m", "reach_m"),
+                         &StarsimCore::weather_cloud_nearest_m);
     ClassDB::bind_method(D_METHOD("cloud_noise"), &StarsimCore::cloud_noise);
     ClassDB::bind_method(D_METHOD("cloud_optics_parameters"), &StarsimCore::cloud_optics_parameters);
     ClassDB::bind_method(D_METHOD("cloud_slab_radiance", "optical_depth", "sun_cos_zenith", "view_cos_zenith",

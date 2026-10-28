@@ -15,9 +15,10 @@ extends RefCounted
 ## SLOT_COUNT cells; one still fading when the ring comes round again ends that tile's fade early (slot_overflows counts
 ## it).
 ## Batches: plan() returns {layout, anchor, tiles: PackedInt32Array of (tile, level, slot), states (bytes or empty:
-## unchanged), now_s, epoch, fill_id, covering}; the effect fills the tiles (GPU timestamp named by fill_id), then shows
-## the states. Picked tiles are completed in the schedule at once (the effect runs every batch it is handed: CloudLayer
-## plans only when the last one was taken).
+## unchanged), now_s, epoch, fill_id, covering, anchors (the ring's positions), anchor_index (the current one),
+## anchor_tiles (per ring entry the tiles showing it)}; the effect fills the tiles (GPU timestamp named by fill_id), then
+## shows the states. Picked tiles are completed in the schedule at once (the effect runs every batch it is handed:
+## CloudLayer plans only when the last one was taken).
 ## Covering (controller ruling, Task 4 fix round 1): while a tile in the view's cone has no level yet, or a first fill
 ## there is still fading in, the effect runs the per-frame march at the preset divisor too and the lookup shows it where
 ## a tile has nothing (after a start, a jump, a layout re-creation, the interim restart): no frame without clouds.
@@ -32,6 +33,13 @@ extends RefCounted
 ## neighbours, nearest the view first; UNKNOWN_LATENCY_MS before any). Tiles join a fill in priority order while the
 ## prediction fits the budget; the first one always, and when it alone exceeds the budget the tiles that lengthen its
 ## fill by at most FREE_RIDE (a slow tile's fill holds more of its kind almost for free).
+## Progressive re-anchor (cloud view cache Task 5): once the camera is CloudViewCacheSchedule.REANCHOR_FRACTION of the
+## near shell's radius from the anchor, the camera becomes the anchor - the next entry of a ring of ANCHOR_RING anchors.
+## No tile is dropped: each keeps showing what it holds, from the anchor it was rendered from (its state names the ring
+## entry, the lookup reprojects it from there), until the schedule refills it from the new anchor (its parallax and
+## staleness classes: nearest and most displaced first, cross-faded from its fade slot). A tile whose anchor the camera
+## left more than ANCHOR_EVICT_FRACTION of R_near behind is dropped (its reprojection would miss; the march covers it if
+## it is in view), as are the tiles of a ring entry about to be reused.
 
 ## [E] Fade slots (one full-level tile of colour each): the same-level refreshes in flight during one cross-fade - at
 ## 45 Hz a quarter second is ~11 frames of up to a few dozen full tiles; 32 x 32 cells of 64^2 RGBA16F = 32 MB.
@@ -73,10 +81,15 @@ const FACE_TEXELS_MAX := 4096
 ## [E] Relative change of the wanted face size that re-creates the layout (and refills the cache): the runtime's
 ## field-of-view jitter and small zooms keep the cache.
 const FACE_HYSTERESIS := 0.1
-## [E] Interim (until the progressive re-anchor, cloud view cache Task 5): the cache restarts from the camera once it
-## moved this far from the anchor - the parallax lookup holds clouds beyond ~2 km within 1e-8 eye px at 50 m (the mirror
-## test; nearer clouds and larger offsets are untested until Task 5); the march covers the restart.
-const RESTART_DISTANCE_M := 500.0
+## [E] Anchors in the ring (a tile state's 7 bits): 128 re-anchors of 100 m - 12.8 km of flight - before an entry is
+## reused; the eviction distance drops a tile long before that in a straight flight.
+const ANCHOR_RING := 128
+## [E] A tile is dropped when the camera is farther than this fraction of the near shell's radius from the anchor it
+## was rendered from (200 m): a cached volume seen from off its anchor loses coverage with the offset - the deck passage
+## (render_check --frames_every, inside a broken deck, the anchor held) lost 0.075 / 0.18 / 0.28 of the mean alpha at
+## the near shell's boundary 130 / 260 / 400 m off, and evicting at 600 m left the passage's worst sample at 0.125 (200 m:
+## 0.096); the surface mirror holds a deck at R_near within 0.011 eye px at 300 m (cloud_vr_stereo_test).
+const ANCHOR_EVICT_FRACTION := 0.1
 
 var layout: CloudViewCacheLayout
 var schedule: CloudViewCacheSchedule
@@ -91,6 +104,9 @@ var last_covering := false  ## the last plan's covering flag
 var view_missing := true  ## the last plan found a tile in the view's cone without a level (the march covers it)
 var last_fades: Array[int] = []  ## tiles whose fade started in the last plan (tests)
 var last_fade_s := -INF  ## when the latest fade started (now_s; its end: + CloudViewCache.CROSSFADE_S)
+var anchor_index := 0  ## the current anchor's ring entry
+var reanchors := 0  ## re-anchors so far (tests, diagnostics)
+var evicted_tiles := 0  ## tiles dropped so far because their anchor was left too far behind or reused
 ## Measured fills (diagnostics, render_check; take_fill_log): (measured ms, predicted ms, budget ms) each; a ring of
 ## the last FILL_LOG_MAX [E] (a run without a check taking them keeps the newest).
 var fill_log: Array[Vector3] = []
@@ -105,6 +121,9 @@ var _slot_cursor := 0
 var _full_count := 0  ## tiles showing the full level
 var _built := {}  ## a built layout: {layout, schedule, dirs}
 var _tile_dirs := PackedVector3Array()  ## the layout's tile centre directions
+var _anchor_ring := PackedVector3Array()  ## the ring's anchors (Earth-local float64)
+var _anchor_tiles := PackedInt32Array()  ## per ring entry: the tiles showing it
+var _tile_anchor := PackedInt32Array()  ## per tile: the ring entry it shows (-1: none)
 ## Per tile and level (tile x LEVELS + level): its latency (ms; 0: not measured since the restart).
 var _tile_latency_ms := PackedFloat32Array()
 ## Per level: the recent fills' median ratio of a tile's latency to its coarser level's, and their slowest latency.
@@ -192,8 +211,11 @@ func _plan_now(camera_earth_m: Vector3, view: Dictionary, light: Dictionary, bud
 		_build(wanted)
 		_adopt_layout()
 		_restart(camera_earth_m)
-	elif reset or is_nan(anchor_earth_m.x) or camera_earth_m.distance_to(anchor_earth_m) > RESTART_DISTANCE_M:
+	elif reset or is_nan(anchor_earth_m.x):
 		_restart(camera_earth_m)
+	elif schedule.reanchor_needed(camera_earth_m):
+		_reanchor(camera_earth_m)
+	_evict_far(camera_earth_m)
 	var light_sun: Vector3 = light["sun_dir"]
 	schedule.mark_light(light_sun, light["weather_weight"], light["light_generation"])
 	var state := {"anchor_earth_m": anchor_earth_m, "sun_dir": light_sun.normalized(),
@@ -261,7 +283,8 @@ func _plan_now(camera_earth_m: Vector3, view: Dictionary, light: Dictionary, bud
 		if _pending.size() > PENDING_MAX:
 			_pending.erase(_pending.keys().min())
 	var batch := {"layout": layout, "anchor": anchor_earth_m, "tiles": tiles, "now_s": now_s, "epoch": epoch,
-		"fill_id": _fill_id, "covering": last_covering,
+		"fill_id": _fill_id, "covering": last_covering, "anchors": _anchor_ring.duplicate(),
+		"anchor_index": anchor_index, "anchor_tiles": _anchor_tiles.duplicate(),
 		"states": _states.duplicate() if _states_dirty else PackedByteArray()}
 	_states_dirty = false
 	return batch
@@ -353,6 +376,15 @@ func fade_weight(tile: int, t: float) -> float:
 	return clampf((t - start) / CloudViewCache.CROSSFADE_S, 0.0, 1.0)
 
 
+## The ring entry of the anchor a tile shows (-1: none), and a ring entry's anchor (tests).
+func tile_anchor(tile: int) -> int:
+	return _tile_anchor[tile]
+
+
+func anchor_at(index: int) -> Vector3:
+	return _anchor_ring[index]
+
+
 ## What a tile fades from (0 nothing, 1-3 that level + 1, 4 its fade slot).
 func fade_source(tile: int) -> int:
 	return (_states.decode_u32(8 * tile) >> 2) & 7
@@ -435,6 +467,7 @@ func _adopt_layout() -> void:
 	_built = {}
 	var n := layout.tile_count()
 	_shown.resize(n)
+	_tile_anchor.resize(n)
 	_states.resize(8 * n)
 	_tile_latency_ms.resize(n * CloudViewCacheLayout.LEVELS)
 	_level_groups.resize(CloudViewCacheLayout.LEVELS)
@@ -448,6 +481,12 @@ func _adopt_layout() -> void:
 func _restart(camera_earth_m: Vector3) -> void:
 	# (_reset_pending belongs to the main thread: plan() clears it when it hands the request to the run.)
 	anchor_earth_m = camera_earth_m
+	anchor_index = 0
+	_anchor_ring.resize(ANCHOR_RING)
+	_anchor_ring.fill(camera_earth_m)
+	_anchor_tiles.resize(ANCHOR_RING)
+	_anchor_tiles.fill(0)
+	_tile_anchor.fill(-1)
 	resets += 1
 	epoch += 1
 	schedule.invalidate_all()
@@ -464,6 +503,47 @@ func _restart(camera_earth_m: Vector3) -> void:
 	view_missing = true
 
 
+## The camera becomes the anchor: the ring's next entry (its tiles, if any still show it, dropped first). Every tile
+## keeps what it shows; the schedule sees the new anchor at the next pick (its tiles all off: refilled by parallax and
+## staleness).
+func _reanchor(camera_earth_m: Vector3) -> void:
+	var next := (anchor_index + 1) % ANCHOR_RING
+	if _anchor_tiles[next] > 0:
+		_evict(next)
+	anchor_index = next
+	_anchor_ring[next] = camera_earth_m
+	anchor_earth_m = camera_earth_m
+	reanchors += 1
+
+
+## Drops the tiles of every anchor the camera left more than ANCHOR_EVICT_FRACTION of the near shell's radius behind.
+func _evict_far(camera_earth_m: Vector3) -> void:
+	var limit := ANCHOR_EVICT_FRACTION * CloudLayer.near_radius_m()
+	for index in range(ANCHOR_RING):
+		if _anchor_tiles[index] > 0 and index != anchor_index \
+				and camera_earth_m.distance_to(_anchor_ring[index]) > limit:
+			_evict(index)
+
+
+## The tiles showing a ring entry lose their content (no level: filled again like new ones, the march covers them in
+## view).
+func _evict(index: int) -> void:
+	var dropped := PackedInt32Array()
+	for tile in range(_tile_anchor.size()):
+		if _tile_anchor[tile] == index:
+			dropped.append(tile)
+			if _shown[tile] == CloudViewCacheSchedule.MAX_LEVEL:
+				_full_count -= 1
+			_shown[tile] = -1
+			_tile_anchor[tile] = -1
+			_states.encode_u32(8 * tile, 0)
+			_states.encode_float(8 * tile + 4, 0.0)
+	schedule.forget(dropped)
+	_anchor_tiles[index] = 0
+	evicted_tiles += dropped.size()
+	_states_dirty = true
+
+
 ## A tile filled at `level` this frame: its shown state and fade; the fade slot the fill copies the old texels to (-1:
 ## none).
 func _shown_now(tile: int, level: int) -> int:
@@ -478,7 +558,7 @@ func _shown_now(tile: int, level: int) -> int:
 		_slot_cursor = (_slot_cursor + 1) % SLOT_COUNT
 		var owner := _slot_owner[slot]
 		if _slot_end_s[slot] > now_s and owner >= 0 and owner != tile and fade_source(owner) == 4 \
-				and _states.decode_u32(8 * owner) >> 8 == slot:
+				and (_states.decode_u32(8 * owner) >> 8) & 1023 == slot:
 			slot_overflows += 1
 			_states.encode_float(8 * owner + 4, now_s - CloudViewCache.CROSSFADE_S)  # its fade ends now
 		_slot_end_s[slot] = now_s + CloudViewCache.CROSSFADE_S
@@ -491,7 +571,16 @@ func _shown_now(tile: int, level: int) -> int:
 	elif old == CloudViewCacheSchedule.MAX_LEVEL and level != old:
 		_full_count -= 1
 	_shown[tile] = level
-	_states.encode_u32(8 * tile, (level + 1) | (from << 2) | (maxi(slot, 0) << 8))
+	# The anchor: the current one; what it fades from was rendered from its previous one (the lookup reads that at the
+	# same point of the eye ray).
+	var old_anchor := _tile_anchor[tile]
+	var from_anchor := old_anchor if old >= 0 and old_anchor >= 0 else anchor_index
+	if old_anchor >= 0:
+		_anchor_tiles[old_anchor] -= 1
+	_tile_anchor[tile] = anchor_index
+	_anchor_tiles[anchor_index] += 1
+	_states.encode_u32(8 * tile, (level + 1) | (from << 2) | (maxi(slot, 0) << 8) | (anchor_index << 18)
+			| (from_anchor << 25))
 	_states.encode_float(8 * tile + 4, now_s)
 	_states_dirty = true
 	last_fades.append(tile)

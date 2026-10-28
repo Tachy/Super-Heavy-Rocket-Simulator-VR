@@ -31,6 +31,8 @@ func _initialize() -> void:
 	_test_timing()
 	_test_completed_batch()
 	_test_missing_in_cone()
+	_test_reanchor_trigger()
+	_test_progressive_reanchor()
 	print("cloud_view_cache_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -111,6 +113,82 @@ func _test_missing_in_cone() -> void:
 	var edge_found := schedule.missing_in_cone(centre, cone)
 	_check(cold and filled and edge_found, "missing_in_cone: a cold cache misses, filled inside the cone (%d tiles) "
 			% inside + "it does not, one tile at the cone's edge without a level is found")
+
+
+## The re-anchor's trigger (cloud view cache Task 5): the camera REANCHOR_FRACTION (5 %) of the near shell's radius from
+## the anchor of the last pick re-anchors, a hair less does not; before any pick it does.
+func _test_reanchor_trigger() -> void:
+	var schedule := CloudViewCacheSchedule.new(_layout(1024))
+	var cold := schedule.reanchor_needed(Vector3(1.0e6, 2.0e6, 3.0e6))
+	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
+	schedule.pick(anchor, anchor, _view_grid(deg_to_rad(30.0), VIEW_STEP_RAD), 64, VIEW_SAMPLE_RAD)
+	var reach := CloudViewCacheSchedule.REANCHOR_FRACTION * CloudLayer.near_radius_m()
+	var direction := Vector3(0.6, -0.8, 0.0)
+	var below := schedule.reanchor_needed(anchor + direction * (reach - 0.01))
+	var above := schedule.reanchor_needed(anchor + direction * (reach + 0.01))
+	_check(cold and not below and above, "re-anchor: needed before any pick (%s), not %.2f m from the anchor (%s), at "
+			% [cold, reach - 0.01, below] + "%.2f m (%s; 5 %% of R_near %.0f m)" % [reach + 0.01, above,
+			CloudLayer.near_radius_m()])
+
+
+## The progressive re-anchor (cloud view cache Task 5) through the planner: the view filled, the camera moved past the
+## re-anchor distance - no restart, every tile that showed a level still shows one (the old anchor's until refilled,
+## then the new one's), every shown tile names an anchor the ring holds; refills take the new anchor. Moved on past the
+## eviction distance from the first anchor, its tiles are dropped (none shows it any more).
+func _test_progressive_reanchor() -> void:
+	var planner := CloudViewCachePlanner.new()
+	var view := {"dirs": _view_grid(deg_to_rad(40.0), VIEW_STEP_RAD), "sample_rad": VIEW_SAMPLE_RAD,
+		"face_texels": 512}
+	var light := {"sun_dir": Vector3(0.3, 0.8, 0.5).normalized(), "weather_weight": 0.0, "light_generation": 1}
+	var camera := Vector3(1.0e6, 2.0e6, 3.0e6)
+	for frame in range(40):  # converge the view
+		_plan(planner, camera, view, light)
+	var shown := PackedInt32Array()
+	for tile in range(planner.layout.tile_count()):
+		if planner.shown_level(tile) >= 0:
+			shown.append(tile)
+	var resets := planner.resets
+	var first := planner.anchor_index
+	var step := CloudViewCacheSchedule.REANCHOR_FRACTION * CloudLayer.near_radius_m() * 1.01
+	var direction := Vector3(0.0, 0.0, 1.0)
+	camera += direction * step
+	var kept := true
+	var named := true
+	var refilled_new := 0
+	var refilled_old := 0
+	for frame in range(30):
+		_plan(planner, camera, view, light)
+		for tile in shown:
+			kept = kept and planner.shown_level(tile) >= 0
+			var index := planner.tile_anchor(tile)
+			named = named and index >= 0 and planner.anchor_at(index).distance_to(camera) <= step + 1.0e-6
+		for tile in planner.last_fades:
+			refilled_new += 1 if planner.tile_anchor(tile) == planner.anchor_index else 0
+			refilled_old += 1 if planner.tile_anchor(tile) != planner.anchor_index else 0
+	_check(planner.resets == resets and planner.reanchors == 1 and planner.anchor_index != first and kept and named
+			and not shown.is_empty(), "progressive re-anchor: no restart (%d), one re-anchor (%d); all %d tiles that "
+			% [planner.resets - resets, planner.reanchors, shown.size()] + "showed a level keep one through 30 plans "
+			+ "(%s), each from an anchor of the ring (%s)" % [kept, named])
+	_check(refilled_new > 0 and refilled_old == 0, "progressive re-anchor: the refills take the new anchor (%d new, %d "
+			% [refilled_new, refilled_old] + "old)")
+	# On past the eviction distance from the first anchor: re-anchoring every step, its tiles dropped.
+	var limit := CloudViewCachePlanner.ANCHOR_EVICT_FRACTION * CloudLayer.near_radius_m()
+	var first_anchor := planner.anchor_at(first)
+	var still_first := 0
+	while camera.distance_to(first_anchor) <= limit + step:
+		camera += direction * step
+		_plan(planner, camera, view, light)
+	for tile in range(planner.layout.tile_count()):
+		still_first += 1 if planner.tile_anchor(tile) == first and planner.shown_level(tile) >= 0 else 0
+	_check(still_first == 0 and planner.evicted_tiles > 0 and planner.resets == resets,
+			"progressive re-anchor: %.0f m on (beyond %.0f m) the first anchor's tiles are dropped (%d still show it, %d "
+			% [camera.distance_to(first_anchor), limit, still_first, planner.evicted_tiles] + "evicted), no restart")
+
+
+## One plan of the planner (its run waited for), a large budget (the fills are not measured here).
+func _plan(planner: CloudViewCachePlanner, camera: Vector3, view: Dictionary, light: Dictionary) -> void:
+	planner.plan(camera, view, light, 1000.0, 1.0 / 45.0)
+	planner.wait()
 
 
 func _layout(face_texels := 3200) -> CloudViewCacheLayout:

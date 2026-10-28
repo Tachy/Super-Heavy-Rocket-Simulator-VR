@@ -105,4 +105,15 @@ std::vector<std::uint8_t> cloud_render_texels(const WeatherSnapshot& snapshot);
 // (held to it), 0 without cloud.
 double cloud_render_top_m(const WeatherSnapshot& snapshot);
 
+// A lower bound of the distance (m) from a point (geodetic latitude / longitude, height above the ellipsoid) to any
+// cloud the rendered field can draw within reach_m of it (cloud view cache Task 5: whether the near shell is needed);
+// +infinity when none is within reach_m. A field point can hold cloud only where one of the grid nodes it is
+// interpolated from holds water (either phase, as cloud_render_top_m), and only between the layer centres below and
+// above that node's layer (the vertical profile rule; the lowest layer held down, the top layer up to weather_top_m):
+// so the nodes within reach_m plus one and a half grid steps (the bilinear support, either half-texel convention) are
+// searched, over the smallest radius of curvature of the ellipsoid, and the bound is the vertical gap to their cloudy
+// height intervals (0 inside one). The flat base's cut and the shapes only take cloud away.
+double cloud_render_nearest_m(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
+                              double height_m, double reach_m);
+
 }  // namespace starsim::environment

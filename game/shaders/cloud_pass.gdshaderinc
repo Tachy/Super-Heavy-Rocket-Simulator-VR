@@ -634,6 +634,17 @@ float cloud_structure_step(CloudCell cell, float climb) {
 	return CLOUD_STRUCTURE_TEXEL_FRACTION / max(climb / up_texel_m, across / across_texel_m);
 }
 
+#ifdef CLOUD_CACHE_FILL
+// The fill's ray start (m from the anchor; cloud view cache Task 5: the near shell's radius - the cache holds what lies
+// beyond it, the near shell marches the rest per frame): set by the fill's main before it shades a ray.
+float cloud_march_start_m = 0.0;
+#endif
+#ifdef CLOUD_NEAR_SHELL
+// The near shell's end of the ray (m from the eye; <= 0: the whole ray): set by the march's main per ray
+// (cloud_near_shell_end, cloud_view_cache.gdshaderinc).
+float cloud_march_end_m = 0.0;
+#endif
+
 // The raymarch of one ray (dir: Earth-local unit; from origin: the eye's or the cache anchor's offset from the camera,
 // Earth-local, m) up to scene_m; out: premultiplied colour, alpha, weighted distance,
 // and the background's transmittance T = 1 - alpha computed without the cancellation of 1 - alpha (what the image
@@ -689,6 +700,9 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 			d0 = max(d0, bottom.y);
 		}
 	}
+#ifdef CLOUD_CACHE_FILL
+	d0 = max(d0, cloud_march_start_m);  // the cache holds what lies beyond the near shell (Task 5)
+#endif
 	bool surface = scene_m < d1;  // the ray ends on the scene, not on the cloud shell
 	d1 = min(d1, scene_m);
 	if (d1 <= d0) {
@@ -702,6 +716,18 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 	if (handover) {
 		d1 = min(d1, cloud_handover_far_m);
 	}
+#ifdef CLOUD_NEAR_SHELL
+	// The near shell (cloud view cache Task 5): the march's own steps - laid out over the whole segment, so its samples
+	// are the full march's - up to the shell's end; what lies beyond is the cache's (no far tier: it starts far beyond).
+	float steps_d1 = d1;
+	if (cloud_march_end_m > 0.0) {
+		d1 = min(d1, cloud_march_end_m);
+		end_m = min(end_m, cloud_march_end_m);
+		if (d1 <= d0) {
+			return;
+		}
+	}
+#endif
 
 	float k = cloud_transport_scale();
 	vec3 sun_dir = normalize(atmosphere_sun_direction);
@@ -749,7 +775,12 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 		float start = max(seg0, CLOUD_NEAR_START_M);
 		int n = max(cloud_steps, 1);
 		// Coarse step: the fraction of the distance that spans [start, seg1] in n steps; at most one height layer.
+#ifdef CLOUD_NEAR_SHELL
+		float steps_seg1 = far ? end_m : steps_d1;  // the near shell: the whole segment's step layout
+		float coarse_rel = steps_seg1 > start ? exp(log(steps_seg1 / start) / float(n)) - 1.0 : 1.0;
+#else
 		float coarse_rel = seg1 > start ? exp(log(seg1 / start) / float(n)) - 1.0 : 1.0;
+#endif
 		float transmittance_bg = 1.0;   // exp(-tau): the background
 		// The pass's alpha: each step's share of the pixel weighted by keep (the hand-over's cross-fade; = 1 - the
 		// background's transmittance without a band).
@@ -805,7 +836,11 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 				// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is
 				// cut).
 				float remaining = float(max(cloud_max_steps - i, 1));
+#ifdef CLOUD_NEAR_SHELL
+				float reach = max(a, start) * (exp(log(max(steps_seg1, start) / max(a, start)) / remaining) - 1.0);
+#else
 				float reach = max(a, start) * (exp(log(max(seg1, start) / max(a, start)) / remaining) - 1.0);
+#endif
 				// The dense-cloud limit overrides the reach (behind an opaque surface little of the segment is seen).
 				float fine = min(max(max(max(a, start) * cloud_fine_step_fraction, reach), CLOUD_MIN_STEP_M),
 						dense_step_m);
@@ -1455,6 +1490,39 @@ void cloud_shade_ray(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 no
 	color_t = cloud_stored_color(color, transmittance);
 }
 
+#ifdef CLOUD_NEAR_SHELL
+// The near shell's shading of a ray (cloud view cache Task 5; the game's image only - the debug outputs march the whole
+// ray without the cache): with an end (cloud_march_end_m > 0) the march up to it, and of the air shadow's loss only
+// (1 - T) x its part in front of the near clouds: the cache beyond holds the loss of its whole ray in front of its own
+// clouds - the near stretch included at weight 1 - and the composite (near + T x cache) weighs it by T, so the near
+// stretch gets front + T x behind, as the full march has it (to the near and the cache's distance weighting). Without
+// an end (the tile has no level yet: the covering march) cloud_shade_ray's whole ray.
+void cloud_shade_near(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 noise_pixel, vec3 eclipse_near,
+		vec3 eclipse_far, out vec4 color_t, out float cloud_m) {
+	if (cloud_march_end_m <= 0.0 || cloud_debug_output != 0) {
+		cloud_shade_ray(dir_earth, origin_offset, scene_m, noise_pixel, eclipse_near, eclipse_far, color_t, cloud_m);
+		return;
+	}
+	vec3 color = vec3(0.0);
+	float alpha = 0.0;
+	float transmittance = 1.0;
+	cloud_m = 0.0;
+	if (cloud_enabled && atmosphere_enabled) {
+		cloud_march(dir_earth, origin_offset, scene_m, cloud_ray_jitter(noise_pixel), eclipse_near, eclipse_far, false,
+				color, alpha, transmittance, cloud_m);
+		vec3 front;
+		vec3 behind;
+		cloud_air_shadow_parts(cloud_ray_from(dir_earth, origin_offset), dir_earth, origin_offset,
+				min(scene_m, cloud_march_end_m), alpha > 1.0e-6 ? cloud_m : 1.0e30, front, behind);
+		color -= (1.0 - transmittance) * front;
+	}
+	color_t = cloud_stored_color(color, transmittance);
+}
+
+// The eye ray's end at the near shell (m from the eye; <= 0: the whole ray), cloud_view_cache.gdshaderinc.
+float cloud_near_shell_end(vec3 eye_offset, vec3 dir);
+#endif
+
 #ifndef CLOUD_CACHE_FILL
 #ifdef CLOUD_CENTRE
 // The centre view has no depth buffer of its own: its rays take the scene distance from an eye's (VR performance
@@ -1638,8 +1706,16 @@ void main() {
 	// One ray through the pixel's centre from the eye (the centre view: the head).
 	vec4 color_t;
 	float cloud_m;
+#ifdef CLOUD_NEAR_SHELL
+	// The near shell (cloud view cache Task 5): up to the shell around the anchor of the cache tile the ray meets there.
+	vec3 dir_near = cloud_ray_earth(centre);
+	cloud_march_end_m = cloud_near_shell_end(cloud_view.eye_earth.xyz, dir_near);
+	cloud_shade_near(dir_near, cloud_view.eye_earth.xyz, scene_m, pixel, cloud_group_eclipse_near,
+			cloud_group_eclipse_far, color_t, cloud_m);
+#else
 	cloud_shade_ray(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, pixel, cloud_group_eclipse_near,
 			cloud_group_eclipse_far, color_t, cloud_m);
+#endif
 #endif
 	imageStore(out_color, pixel, color_t);
 	imageStore(out_depth, pixel, vec4(scene_m, cloud_m, 0.0, 0.0));

@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <catch2/catch_approx.hpp>
@@ -363,4 +364,37 @@ TEST_CASE("The render field's cloud top: the centre above the highest cloudy lay
     trace[texel_offset(5, 0, 1, rows, columns) + 1] = encode_weather_water(1e-6);
     CHECK(cloud_render_top_m(WeatherSnapshot::from_parts({}, rows, columns, std::vector<float>(rows * columns, 0.0f),
                                                          trace)) == Approx(layer_centre_m(6)));
+}
+
+TEST_CASE("The render field's nearest cloud: a lower bound of the distance to any cloud it can draw", "[weather]") {
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    const double deg = constants::pi / 180.0;
+    // A uniform slab 1.5 - 2.5 km (layers 6 - 9): the profile can draw cloud from centre 5 up to centre 10.
+    const WeatherSnapshot slab = WeatherSnapshot::uniform_slab(19, 36, 1500.0, 2500.0, 3e-4, 0.6);
+    CHECK(cloud_render_nearest_m(slab, 25.0 * deg, -97.0 * deg, 2.0, 2000.0) == Approx(layer_centre_m(5) - 2.0));
+    CHECK(cloud_render_nearest_m(slab, 25.0 * deg, -97.0 * deg, 2000.0, 2000.0) == 0.0);  // inside
+    CHECK(cloud_render_nearest_m(slab, 25.0 * deg, -97.0 * deg, 1400.0, 2000.0) == 0.0);  // in the base's gap
+    CHECK(cloud_render_nearest_m(slab, 25.0 * deg, -97.0 * deg, 4000.0, 2000.0) ==
+          Approx(4000.0 - layer_centre_m(10)));
+    CHECK(cloud_render_nearest_m(slab, 25.0 * deg, -97.0 * deg, 6000.0, 2000.0) == inf);  // beyond the reach
+    CHECK(cloud_render_nearest_m(slab, 89.9 * deg, 10.0 * deg, 6000.0, 4000.0) == Approx(6000.0 - layer_centre_m(10)));
+    // One cloudy node (1-deg grid, layer 7 at 30 N 20 E): found from within its bilinear support plus the reach, not
+    // from farther.
+    const int rows = 181, columns = 360;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    const std::size_t i = texel_offset(7, 60, 20, rows, columns);
+    texels[i] = encode_weather_cloud_fraction(0.5);
+    texels[i + 2] = encode_weather_water(1e-6);  // ice only counts too
+    const WeatherSnapshot one =
+        WeatherSnapshot::from_parts({}, rows, columns, std::vector<float>(rows * columns, 0.0f), texels);
+    CHECK(cloud_render_nearest_m(one, 30.0 * deg, 20.0 * deg, 100.0, 3000.0) == Approx(layer_centre_m(6) - 100.0));
+    CHECK(cloud_render_nearest_m(one, 30.9 * deg, 20.9 * deg, 100.0, 3000.0) == Approx(layer_centre_m(6) - 100.0));
+    CHECK(cloud_render_nearest_m(one, 33.0 * deg, 20.0 * deg, 100.0, 3000.0) == inf);
+    CHECK(cloud_render_nearest_m(one, 30.0 * deg, 24.0 * deg, 100.0, 3000.0) == inf);
+    // Cloud fraction without water is no cloud; no snapshot cloud at all: none.
+    std::vector<std::uint8_t> dry(texels.size(), 0);
+    dry[i] = encode_weather_cloud_fraction(1.0);
+    CHECK(cloud_render_nearest_m(WeatherSnapshot::from_parts({}, rows, columns, std::vector<float>(rows * columns, 0.0f),
+                                                             dry),
+                                 30.0 * deg, 20.0 * deg, 1800.0, 3000.0) == inf);
 }

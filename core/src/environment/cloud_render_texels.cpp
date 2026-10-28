@@ -268,4 +268,55 @@ double cloud_render_column_optical_depth(const WeatherSnapshot& snapshot, int ro
     return depth;
 }
 
+double cloud_render_nearest_m(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
+                              double height_m, double reach_m) {
+    constexpr double none = std::numeric_limits<double>::infinity();
+    const int rows = snapshot.rows();
+    const int columns = snapshot.columns();
+    if (rows < 2 || columns < 1 || !(reach_m >= 0.0)) return none;
+    // The searched nodes: within reach_m over the ellipsoid's smallest radius of curvature (meridional, at the equator:
+    // a (1 - e^2)), plus the bilinear support and either half-texel convention (1.5 grid steps).
+    constexpr double support_steps = 1.5;
+    const double radius_m = constants::wgs84_semi_major_axis_m * (1.0 - constants::wgs84_first_eccentricity_squared);
+    const double row_step = constants::pi / (rows - 1);
+    const double column_step = constants::two_pi / columns;
+    const double reach_lat = reach_m / radius_m + support_steps * row_step;
+    const int first_row = std::clamp(static_cast<int>(std::ceil((0.5 * constants::pi - latitude_rad - reach_lat) /
+                                                                row_step)), 0, rows - 1);
+    const int last_row = std::clamp(static_cast<int>(std::floor((0.5 * constants::pi - latitude_rad + reach_lat) /
+                                                               row_step)), 0, rows - 1);
+    const double polar_most = std::min(std::abs(latitude_rad) + reach_lat, 0.5 * constants::pi);
+    const double parallel_m = radius_m * std::cos(polar_most);
+    const double reach_lon = parallel_m > 0.0 ? reach_m / parallel_m + support_steps * column_step : constants::pi;
+    int first_column = 0;
+    int column_count = columns;
+    if (reach_lon < constants::pi) {
+        first_column = static_cast<int>(std::ceil((longitude_rad - reach_lon) / column_step));
+        const int last_column = static_cast<int>(std::floor((longitude_rad + reach_lon) / column_step));
+        column_count = std::min(last_column - first_column + 1, columns);
+    }
+    // Each layer's cloudy height interval: from the centre below to the centre above (held at the ends).
+    std::array<double, weather_layer_count> low{};
+    std::array<double, weather_layer_count> high{};
+    for (int layer = 0; layer < weather_layer_count; ++layer) {
+        low[layer] = layer == 0 ? -none : layer_centre_m(layer - 1);
+        high[layer] = layer == weather_layer_count - 1 ? weather_top_m : layer_centre_m(layer + 1);
+    }
+    const std::vector<std::uint8_t>& source = snapshot.texels();
+    const std::size_t cells = static_cast<std::size_t>(rows) * columns;
+    double nearest = none;
+    for (int row = first_row; row <= last_row; ++row) {
+        for (int k = 0; k < column_count; ++k) {
+            const int column = ((first_column + k) % columns + columns) % columns;
+            const std::size_t cell = static_cast<std::size_t>(row) * columns + column;
+            for (int layer = 0; layer < weather_layer_count; ++layer) {
+                const std::size_t i = (static_cast<std::size_t>(layer) * cells + cell) * channels;
+                if (source[i + 1] == 0 && source[i + 2] == 0) continue;
+                nearest = std::min(nearest, std::max({low[layer] - height_m, height_m - high[layer], 0.0}));
+            }
+        }
+    }
+    return nearest <= reach_m ? nearest : none;
+}
+
 }  // namespace starsim::environment

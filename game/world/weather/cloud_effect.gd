@@ -13,7 +13,10 @@ extends CompositorEffect
 ## Each eye's upsample then reads the one centre image at its own rays (the same noise and blur in both eyes, the
 ## cloud's disparity from its distance). Without a RenderingDevice (headless, Compatibility) it does nothing.
 ## With the cloud view cache (cloud view cache Task 4, the default: CloudLayer.view_cache) the frame instead fills the
-## planner's batch of cache tiles and each eye looks the cache up (CLOUD_CACHE_LOOKUP into the same result).
+## planner's batch of cache tiles and each eye looks the cache up (CLOUD_CACHE_LOOKUP into the same result). Task 5:
+## while a cloud is within the near shell's radius of an anchor a shown tile has (CloudLayer.nearest_cloud_m), the
+## march runs too, ended per ray at the shell around that tile's anchor (CLOUD_NEAR_SHELL, the preset's divisor), and
+## the lookup composites it in front of the cache, which holds what lies beyond (its fill starts at the radius).
 
 const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
@@ -24,11 +27,18 @@ const CACHE_FILL_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shader
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
 		"res://shaders/cloud_light.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc",
 		"res://shaders/cloud_view_cache.gdshaderinc"]
+## The near shell's march (cloud view cache Task 5; CLOUD_MARCH + CLOUD_NEAR_SHELL): the march's files and the cache's
+## (its rays end at the shell around their tile's anchor).
+const NEAR_SHELL_FILES := CACHE_FILL_FILES
+## CloudNearShell (cloud_view_cache.gdshaderinc): face texels, tiles per side, the current anchor; R_near
+const NEAR_SHELL_PUSH_SIZE := 32
 ## Its per-eye lookup (cloud view cache Task 4; CLOUD_CACHE_LOOKUP, instead of the march and the upsample).
 const CACHE_LOOKUP_FILES := ["res://shaders/cloud_pass.gdshaderinc", "res://shaders/cloud_view_cache.gdshaderinc"]
-## CloudCacheLookup: head offset + now; face texels, tiles per side, slots per row, covering (the march is in the
-## output already)
+## CloudCacheLookup: now; face texels, tiles per side, slots per row, flags (bit 0 covering: the march's whole rays are
+## in the output; bit 1 the near shell's result is; bits 8-15 the current anchor)
 const CACHE_LOOKUP_PUSH_SIZE := 32
+const CACHE_FLAG_COVERING := 1
+const CACHE_FLAG_NEAR_SHELL := 2
 ## [E] The view's sample rays per eye (CloudViewCacheSchedule.pick's view_dirs): GRID x GRID over the eye's ndc - ~17
 ## deg apart over a headset eye's ~100 deg, ~13 x 8 deg on the desktop (9 x 9 cost the pick ~0.3 ms more a frame).
 const CACHE_VIEW_GRID := 7
@@ -39,8 +49,9 @@ const CACHE_FEEDBACK_MAX := 256
 const CACHE_FILL_STAMP := "cloud_cache_fill_"
 const CACHE_COVER_STAMP := "cloud_cache_cover"
 const CACHE_LOOKUP_STAMP := "cloud_pass_lookup"
-## What the frame shows of the view cache (_prepare_view_cache).
-enum CacheMode { OFF, COVERED, ALONE }
+## What the frame shows of the view cache (_prepare_view_cache): nothing yet, the lookup over the covering march (whole
+## rays), the lookup alone, the lookup behind the near shell (its march; whole rays where a tile has nothing yet).
+enum CacheMode { OFF, COVERED, ALONE, NEAR_SHELL }
 const GROUP := 8
 const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
 const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline"]
@@ -90,6 +101,10 @@ var view_cache_fills := 0
 ## Render thread, the last frame (diagnostics): the view cache was shown; the tiles its batch filled.
 var view_cache_shown := false
 var view_cache_last_tiles := 0
+## Render thread, the last frame (diagnostics, checks): the near shell ran (cloud view cache Task 5); frames it ran in
+## so far (the checks count them: the flag is reset at every frame's start).
+var near_shell_shown := false
+var near_shell_frames := 0
 
 var _rd: RenderingDevice
 var _march: CloudShaderPort
@@ -129,6 +144,10 @@ var _cache_readbacks: Array[Dictionary] = []
 ## Render thread: the batch last run (anchor, now, covering), the timestamps' frame last read.
 var _cache_shown := {}
 var _cache_timestamps_frame := -1
+## Main -> render thread (guarded by _cache_mutex): the field's nearest cloud to the camera (m, a lower bound) and the
+## near shell's radius (CloudLayer).
+var _nearest_cloud_m := INF
+var _near_radius_m := 0.0
 ## Render-thread copies of the quality (set_quality).
 var _divisor := 2
 var _temporal_weight := 0.1
@@ -164,6 +183,15 @@ func debug_centre_data(key: String) -> PackedByteArray:
 	if _rd == null or not _centre.has(key):
 		return PackedByteArray()
 	return _rd.texture_get_data(_centre[key], 0)
+
+
+## Main thread, every frame: the field's nearest cloud to the camera (m; CloudLayer.nearest_cloud_m) and the near
+## shell's radius (m) - the render thread decides from them and the shown tiles' anchors whether the near shell runs.
+func set_nearest_cloud(nearest_m: float, radius_m: float) -> void:
+	_cache_mutex.lock()
+	_nearest_cloud_m = nearest_m
+	_near_radius_m = radius_m
+	_cache_mutex.unlock()
 
 
 ## Main thread: the planner's next batch (CloudViewCachePlanner.plan) for the render thread.
@@ -264,6 +292,16 @@ func _create() -> void:
 				defines.append(flags[i][0])
 				name += flags[i][1]
 		kernels[name] = CloudShaderPort.build(defines, PackedStringArray(MARCH_FILES)).source
+	# The near shell's variants (cloud view cache Task 5): the centre view and the shape prefilter (no outline pass).
+	for centre in ["", "_centre"]:
+		for prefilter in ["", "_prefilter"]:
+			var defines := PackedStringArray(["CLOUD_MARCH", "CLOUD_NEAR_SHELL"])
+			if centre != "":
+				defines.append("CLOUD_CENTRE")
+			if prefilter != "":
+				defines.append("CLOUD_SHAPE_PREFILTER")
+			kernels["march" + centre + "_near" + prefilter] = CloudShaderPort.build(defines,
+					PackedStringArray(NEAR_SHELL_FILES)).source
 	for name: String in kernels:
 		var src := RDShaderSource.new()
 		src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -618,20 +656,28 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# outputs are the march's per-ray quantities). Until the first batch ran, the march shows the frame; while the
 	# batch says covering, the march runs too and the lookup shows it where a tile has nothing yet (fix round 1).
 	view_cache_shown = false
+	near_shell_shown = false
 	var cache_mode := CacheMode.OFF
 	if ShaderGlobals.value(&"cloud_view_cache") == true and debug == 0:
 		_read_cache_timestamps()
 		_publish_cache_view(projections, size, view_to_world, world_to_earth)
 		cache_mode = _prepare_view_cache(set0, camera)
 		if cache_mode == CacheMode.ALONE:
-			_cache_lookup(camera, buffers, size, view_count, false)
+			_cache_lookup(camera, buffers, size, view_count, false, false)
 			view_cache_shown = true
 			_centre["valid"] = false  # the march's history restarts when it is shown again
 			stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": true,
 				"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
 			return
-		if cache_mode == CacheMode.COVERED:
-			_rd.capture_timestamp(CACHE_COVER_STAMP)
+		if bool(_cache_shown.get("covering", false)) and cache_mode != CacheMode.OFF:
+			_rd.capture_timestamp(CACHE_COVER_STAMP)  # (the near shell alone is the frame's steady cost: its rest)
+	var near_shell := cache_mode == CacheMode.NEAR_SHELL
+	if near_shell:
+		# The near shell's kernel (its family and the prefilter choice as the march's); no outline pass.
+		march = family + "_near" + ("_prefilter" if march.ends_with("_prefilter") else "")
+		march_set0 = UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
+		march_set1.append_array([_storage(8, view_cache.states_buffer()), _storage(9, view_cache.anchors_buffer())])
+		refine = false
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
 	var refine_set1 := []
@@ -657,8 +703,18 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[march])
 	_rd.compute_list_bind_uniform_set(list, march_set0, 0)
 	_rd.compute_list_bind_uniform_set(list, _set1(march, march_set1), 1)
+	if near_shell:
+		var push := PackedInt32Array([view_cache.layout.face_texels, view_cache.layout.tiles_per_side,
+				int(_cache_shown["anchor_index"]), 0, 0, 0, 0, 0]).to_byte_array()
+		push.encode_float(16, _cache_shown["near_radius_m"])
+		_rd.compute_list_set_push_constant(list, push, NEAR_SHELL_PUSH_SIZE)
 	_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
-	_rd.compute_list_add_barrier(list)
+	if near_shell:
+		# A new list: the RenderingDevice re-applies a list's push constant to the kernels bound after it (they have none).
+		_rd.compute_list_end()
+		list = _rd.compute_list_begin()
+	else:
+		_rd.compute_list_add_barrier(list)
 	if refine:
 		list = _stamp(list, "cloud_pass_outline")
 		_rd.compute_list_bind_compute_pipeline(list, _pipelines["outline"])
@@ -698,11 +754,14 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		_rd.compute_list_dispatch(list, groups_full.x, groups_full.y, 1)
 	_rd.compute_list_end()
 	_centre["valid"] = true
-	if cache_mode == CacheMode.COVERED:
-		_cache_lookup(camera, buffers, size, view_count, true)
+	if cache_mode == CacheMode.COVERED or near_shell:
+		_cache_lookup(camera, buffers, size, view_count, bool(_cache_shown["covering"]), near_shell)
 		view_cache_shown = true
-	stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": cache_mode == CacheMode.COVERED,
-		"covering": cache_mode == CacheMode.COVERED, "record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+		near_shell_shown = near_shell
+		near_shell_frames += 1 if near_shell else 0
+	stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": view_cache_shown,
+		"covering": view_cache_shown and bool(_cache_shown["covering"]), "near_shell": near_shell,
+		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
 
 
 ## The requested view cache fill (request_view_cache_fill) with this frame's set 0, before the march: the anchor's
@@ -732,9 +791,11 @@ func _ensure_view_cache(layout: CloudViewCacheLayout) -> void:
 
 
 ## The view cache's frame (Task 4): the waiting batch's tiles filled (timestamped by its fill id: the fill's GPU time
-## steers the budget) and its shown states taken. OFF: nothing to show yet (before the first batch; a camera farther
-## than the planner's restart distance from the shown anchor - a restart not yet planned: the march, never another
-## place's clouds); COVERED: the march runs and the lookup shows it where a tile has nothing; ALONE: the lookup alone.
+## steers the budget; the rays from the near shell's radius on, Task 5) and its shown states taken, the anchor ring's
+## offsets from this frame's camera uploaded. OFF: nothing to show yet (before the first batch, or a restart planned:
+## the march, never another place's clouds); NEAR_SHELL: a cloud within the near shell's radius (+ NEAR_SHELL_MARGIN_M)
+## of the camera plus the farthest shown anchor's offset - the near shell's march, the lookup behind it; COVERED: the
+## march runs and the lookup shows it where a tile has nothing; ALONE: the lookup alone.
 func _prepare_view_cache(set0: Array[RDUniform], camera: Vector3) -> CacheMode:
 	var batch := take_view_cache_batch()
 	view_cache_last_tiles = 0
@@ -746,7 +807,7 @@ func _prepare_view_cache(set0: Array[RDUniform], camera: Vector3) -> CacheMode:
 		var anchor: Vector3 = batch["anchor"]
 		if not tiles.is_empty():
 			_rd.capture_timestamp(CACHE_FILL_STAMP + str(int(batch["fill_id"])))
-			var order := view_cache.fill(_rd, tiles, anchor - camera, set0)
+			var order := view_cache.fill(_rd, tiles, anchor - camera, set0, CloudLayer.near_radius_m())
 			view_cache_fills += 1
 			view_cache_last_tiles = tiles.size() / 3
 			_rd.buffer_get_data_async(view_cache.near_buffer(), _on_cache_near.bind(int(batch["epoch"]), order), 0,
@@ -754,29 +815,50 @@ func _prepare_view_cache(set0: Array[RDUniform], camera: Vector3) -> CacheMode:
 		var states: PackedByteArray = batch["states"]
 		if not states.is_empty():
 			view_cache.set_states(_rd, states)
-		_cache_shown = {"anchor": anchor, "now_s": float(batch["now_s"]), "covering": bool(batch["covering"])}
-	if view_cache == null or _cache_shown.is_empty() \
-			or camera.distance_to(_cache_shown["anchor"]) > CloudViewCachePlanner.RESTART_DISTANCE_M:
+		_cache_shown = {"anchor": anchor, "now_s": float(batch["now_s"]), "covering": bool(batch["covering"]),
+			"anchors": batch["anchors"], "anchor_index": int(batch["anchor_index"]),
+			"anchor_tiles": batch["anchor_tiles"]}
+	if view_cache == null or _cache_shown.is_empty():
 		return CacheMode.OFF
+	# The ring's offsets from this frame's camera (float64 differences) and the farthest anchor a shown tile has.
+	var anchors: PackedVector3Array = _cache_shown["anchors"]
+	var anchor_tiles: PackedInt32Array = _cache_shown["anchor_tiles"]
+	var current: int = _cache_shown["anchor_index"]
+	var offsets := PackedFloat32Array()
+	offsets.resize(4 * anchors.size())
+	var farthest_m := 0.0
+	for k in range(anchors.size()):
+		var offset := camera - anchors[k]
+		offsets[4 * k] = offset.x
+		offsets[4 * k + 1] = offset.y
+		offsets[4 * k + 2] = offset.z
+		if k == current or anchor_tiles[k] > 0:
+			farthest_m = maxf(farthest_m, offset.length())
+	view_cache.set_anchors(_rd, offsets.to_byte_array())
+	_cache_mutex.lock()
+	var nearest_m := _nearest_cloud_m
+	var radius_m := _near_radius_m
+	_cache_mutex.unlock()
+	_cache_shown["near_radius_m"] = radius_m
+	if radius_m > 0.0 and nearest_m < radius_m + farthest_m + CloudLayer.NEAR_SHELL_MARGIN_M:
+		return CacheMode.NEAR_SHELL
 	return CacheMode.COVERED if _cache_shown["covering"] else CacheMode.ALONE
 
 
 ## Each eye's lookup into its layer of the result (covering: the march's result is there already - the lookup keeps it
-## where a tile has nothing and fades from it where a first fill fades in).
-func _cache_lookup(camera: Vector3, buffers: RenderSceneBuffersRD, size: Vector2i, view_count: int,
-		covering: bool) -> void:
+## where a tile has nothing and fades from it where a first fill fades in; near_shell: the near shell's result is there
+## - composited in front of the cache, kept where a tile has nothing).
+func _cache_lookup(_camera: Vector3, buffers: RenderSceneBuffersRD, size: Vector2i, view_count: int,
+		covering: bool, near_shell: bool) -> void:
 	var layout := view_cache.layout
-	var head := camera - (_cache_shown["anchor"] as Vector3)  # float64: the head's offset from the anchor
 	var push := PackedByteArray()
 	push.resize(CACHE_LOOKUP_PUSH_SIZE)
-	push.encode_float(0, head.x)
-	push.encode_float(4, head.y)
-	push.encode_float(8, head.z)
-	push.encode_float(12, _cache_shown["now_s"])
+	push.encode_float(0, _cache_shown["now_s"])
 	push.encode_u32(16, layout.face_texels)
 	push.encode_u32(20, layout.tiles_per_side)
 	push.encode_u32(24, CloudViewCachePlanner.SLOTS_PER_ROW)
-	push.encode_u32(28, 1 if covering else 0)
+	push.encode_u32(28, (CACHE_FLAG_COVERING if covering else 0) | (CACHE_FLAG_NEAR_SHELL if near_shell else 0)
+			| (int(_cache_shown["anchor_index"]) << 8))
 	var linear_clamp: RID = _samplers["true|false|false"]
 	var nearest_clamp: RID = _samplers["false|false|false"]
 	var groups_full := Vector2i((size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1)
@@ -790,7 +872,8 @@ func _cache_lookup(camera: Vector3, buffers: RenderSceneBuffersRD, size: Vector2
 			set1.append(_tex(2 + level, linear_clamp, view_cache.texture(level)))
 			set1.append(_tex(5 + level, nearest_clamp, view_cache.distance_texture(level)))
 		set1.append_array([_tex(8, linear_clamp, view_cache.slots_texture()),
-				_storage(9, view_cache.states_buffer()), _image(10, v["output_slice"])])
+				_storage(9, view_cache.states_buffer()), _image(10, v["output_slice"]),
+				_storage(11, view_cache.anchors_buffer())])
 		_rd.compute_list_bind_uniform_set(list, _set1("cache_lookup", set1), 1)
 		_rd.compute_list_set_push_constant(list, push, CACHE_LOOKUP_PUSH_SIZE)
 		_rd.compute_list_dispatch(list, groups_full.x, groups_full.y, 1)

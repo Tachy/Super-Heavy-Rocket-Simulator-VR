@@ -40,6 +40,13 @@
 #          frame-to-frame change p99 within 10 % of the march's at divisor 1 (exit code 1); --jump_check: after a view
 #          jump and after a layout re-creation (the render scale changed) every frame's cloud coverage within 0.02 of
 #          the per-frame march's (exit code 1).
+#          --frames_every=0.5 [--frames_for=30] (with --vehicle and --fly; cloud view cache Task 5): once settled the
+#          flight goes on in frames of 1/45 s (the VR frame) for that many seconds, the camera on board or (with
+#          --watch_from_site) on the ground aimed at the vehicle; every 0.5 s of flight the cache's image (with the near
+#          shell when a cloud is near) against the per-frame march's (the flag off, the preset's divisor): the mean alpha
+#          over the annulus where the march's clouds lie at the near shell's radius (+-25 %) within 0.02 (no ring at
+#          R_near; exit code 1), and the flight frames' GPU time (median, p99; with the VR preset p99 <= its frame target,
+#          exit code 1). Images: --out with _fly_<t> for the samples' cache frames.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -87,6 +94,14 @@ const JUMP_COVERAGE_TOLERANCE := 0.02
 const JUMP_STRIDE := 4
 const JUMP_RENDER_SCALE := 1.3
 const JUMP_MAX_FRAMES := 900
+## --frames_every (cloud view cache Task 5): the flight's frame (s; the VR frame at 45 Hz), the annulus around the near
+## shell's radius (the march's cloud distance within this factor of it), its pixel stride, the fewest pixels a sample
+## counts with, and the bound on the mean alpha's difference there (the brief's: no ring at R_near).
+const FLY_FRAME_S := 1.0 / 45.0
+const FLY_ANNULUS_FACTOR := 1.25
+const FLY_STRIDE := 2
+const FLY_MIN_ANNULUS := 200
+const FLY_ALPHA_TOLERANCE := 0.02
 
 var _args := {}
 var _main: Node
@@ -145,6 +160,20 @@ var _jump_frames := 0
 var _jump_worst := [0.0, 0.0, 0.0]
 var _jump_covering := [0, 0, 0]
 var _jump_idle := 0
+## --frames_every (cloud view cache Task 5): the flight's instant (TDB s), the next sample's, the phase (0 flying, > 0
+## frames left of the march's reference with the clock held), the sample's cache image, the samples (t, annulus pixels,
+## cache alpha, march alpha), the flight frames' GPU ms and how many of them ran the near shell.
+var _fly_t := NAN
+var _fly_end := NAN
+var _fly_next_sample := NAN
+var _fly_march_wait := 0
+var _fly_cache_image: Image
+var _fly_samples: Array[Vector4] = []
+var _fly_gpu_ms: Array[float] = []
+var _fly_near_frames := 0
+var _fly_near_at_sample := 0  ## CloudEffect.near_shell_frames when the sample's cache frame was taken
+var _fly_near_sample := false  ## the near shell ran in the frames before the sample
+var _fly_site := {}
 
 
 func _initialize() -> void:
@@ -262,6 +291,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("shimmer_check") and not _shimmer_frames(world):
 			return false
 		if _args.has("jump_check") and not _jump_frames_done(world):
+			return false
+		if _args.has("frames_every") and not _fly_frames_done(world):
 			return false
 		if _args.has("deterministic"):
 			if _deterministic_left < 0:  # the same jitter sequence and history from here in every run
@@ -577,6 +608,109 @@ func _jump_frames_done(world: World) -> bool:
 	return true
 
 
+## --frames_every=<s> (cloud view cache Task 5; header): the flight on in FLY_FRAME_S frames, every <s> a sample of
+## the cache's image against the per-frame march's over the near shell's boundary annulus. True when done (a failure:
+## exit code 1).
+func _fly_frames_done(world: World) -> bool:
+	var clouds := world.clouds
+	var sim := world.flight.sim
+	var every := float(_args["frames_every"])
+	if is_nan(_fly_end):
+		_fly_end = _fly_t + float(_args.get("frames_for", "30"))
+		_fly_next_sample = _fly_t
+		_fly_near_frames = clouds.effect.near_shell_frames  # (the flight's count from here; march frames add none)
+		RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
+	if _fly_march_wait > 0:  # the march's reference of the sample: the clock held, the flag off
+		_fly_march_wait -= 1
+		if _fly_march_wait > 0:
+			return false
+		var march := clouds.effect.output.get_layer_data(0)
+		root.get_viewport().get_texture().get_image().save_png(_out_path("_fly_%05.1f_march" % (_fly_t - _fly_end
+				+ float(_args.get("frames_for", "30")))))
+		var annulus := _near_annulus(clouds.effect.debug_centre_data("depth"), clouds.effect.centre_low,
+				march.get_size())
+		var cache_alpha := _mean_alpha(_fly_cache_image, annulus)
+		var march_alpha := _mean_alpha(march, annulus)
+		_fly_samples.append(Vector4(_fly_t, annulus.size(), cache_alpha, march_alpha))
+		print("render_check: fly sample t %.1f s: annulus %d pixels, mean alpha cache %.4f, march %.4f (diff %.4f), "
+				% [_fly_t - _fly_end + float(_args.get("frames_for", "30")), annulus.size(), cache_alpha, march_alpha,
+				cache_alpha - march_alpha] + "near shell %s, nearest cloud %.0f m, camera %.0f m above the ellipsoid, "
+				% [_fly_near_sample, clouds.nearest_cloud_m, ShaderGlobals.value(&"cloud_camera_height_m")]
+				+ "re-anchors %d, evicted %d" % [clouds.view_cache_planner.reanchors,
+				clouds.view_cache_planner.evicted_tiles])
+		clouds.view_cache = true
+		return false
+	if _fly_t >= _fly_next_sample - 1.0e-6 and _fly_cache_image == null:
+		# The sample: this frame's cache image (drawn last frame at this instant), then the march's at the same instant.
+		_fly_cache_image = clouds.effect.output.get_layer_data(0)
+		_fly_near_sample = clouds.effect.near_shell_frames > _fly_near_at_sample
+		root.get_viewport().get_texture().get_image().save_png(_out_path("_fly_%05.1f" % (_fly_t - _fly_end
+				+ float(_args.get("frames_for", "30")))))
+		clouds.view_cache = false
+		_fly_march_wait = FRAMES_TO_SETTLE
+		return false
+	if _fly_cache_image != null:
+		_fly_cache_image = null
+		_fly_next_sample += every
+	if _fly_t >= _fly_end:
+		_fly_near_frames = clouds.effect.near_shell_frames - _fly_near_frames
+		return _fly_report()
+	_fly_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+	_fly_near_at_sample = clouds.effect.near_shell_frames
+	_fly_t += FLY_FRAME_S
+	_advance(sim, _fly_t)
+	world.clock.tdb_s = _fly_t  # the clock's own advance (set_time is a jump: the view cache would restart)
+	if _args.has("watch_from_site"):
+		_aim_at_vehicle(world)
+	return false
+
+
+## --frames_every's verdict: every sample with annulus pixels within FLY_ALPHA_TOLERANCE, and the flight frames' GPU
+## p99 within the VR preset's frame target.
+func _fly_report() -> bool:
+	var worst := 0.0
+	var counted := 0
+	for sample in _fly_samples:
+		if sample.y >= FLY_MIN_ANNULUS:
+			counted += 1
+			worst = maxf(worst, absf(sample.z - sample.w))
+	var gpu := _stats(_fly_gpu_ms)
+	var target := float(CloudLayer.PRESETS[(_main.get_node("World") as World).clouds.quality]["frame_target_ms"])
+	var frame_ok: bool = target <= 0.0 or gpu["p99"] <= target
+	var ok := counted > 0 and worst <= FLY_ALPHA_TOLERANCE and frame_ok
+	print("render_check: frames_every %s: %d samples (%d with >= %d annulus pixels), mean alpha over the near shell's "
+			% ["PASS" if ok else "FAIL", _fly_samples.size(), counted, FLY_MIN_ANNULUS] + "boundary within %.3f of the "
+			% FLY_ALPHA_TOLERANCE + "march's (worst %.4f); flight frames %d (near shell in %d): GPU median %.2f / p99 "
+			% [worst, gpu["n"], _fly_near_frames, gpu["median"]] + "%.2f / max %.2f ms (frame target %.1f ms)"
+			% [gpu["p99"], gpu["max"], target])
+	_check_failed = _check_failed or not ok
+	return true
+
+
+## The eye pixels (every FLY_STRIDE-th per axis) whose march cloud distance lies within FLY_ANNULUS_FACTOR of the near
+## shell's radius, the cloud in front of the scene (the march's centre view = the view on the desktop).
+static func _near_annulus(depth: PackedByteArray, low: Vector2i, size: Vector2i) -> PackedVector2Array:
+	var pixels := PackedVector2Array()
+	if depth.size() != low.x * low.y * 8:
+		return pixels
+	var r := CloudLayer.near_radius_m()
+	for y in range(0, size.y, FLY_STRIDE):
+		for x in range(0, size.x, FLY_STRIDE):
+			var i := (mini(y * low.y / size.y, low.y - 1) * low.x + mini(x * low.x / size.x, low.x - 1)) * 8
+			var scene_m := depth.decode_float(i)
+			var cloud_m := depth.decode_float(i + 4)
+			if cloud_m >= r / FLY_ANNULUS_FACTOR and cloud_m <= r * FLY_ANNULUS_FACTOR and scene_m > cloud_m:
+				pixels.append(Vector2(x, y))
+	return pixels
+
+
+static func _mean_alpha(image: Image, pixels: PackedVector2Array) -> float:
+	var sum := 0.0
+	for p in pixels:
+		sum += 1.0 - image.get_pixel(int(p.x), int(p.y)).a
+	return sum / maxi(pixels.size(), 1)
+
+
 ## The cloud coverage of a cloud image (RGBA half: premultiplied colour + T): the mean of 1 - T over every
 ## JUMP_STRIDE-th pixel per axis.
 static func _coverage(image: Image) -> float:
@@ -878,6 +1012,8 @@ func _fly_vehicle(world: World) -> void:
 	if _args.has("pitch"): cam.pitch = float(_args["pitch"])
 	if _args.has("distance"): cam.distance_m = float(_args["distance"])
 	print("render_check: telemetry ", sim.telemetry(sim.controlled_index()))
+	_fly_t = t0 + 3.0 + fly
+	_fly_site = site
 	if _args.has("watch_from_site"):
 		_watch_from_site(world, site)
 
@@ -891,6 +1027,14 @@ func _watch_from_site(world: World, site: Dictionary) -> void:
 	world.set_ground_site({"id": "watch", "name": "watch", "latitude_deg": lat, "longitude_deg": lon,
 			"height_m": site["height_m"]})
 	world.update_world()
+	var distance := _aim_at_vehicle(world)
+	world.camera.fov = float(_args.get("fov", "50"))
+	print("render_check: watching from %.4f, %.4f: vehicle %.1f km away at elevation %.2f deg" % [lat, lon,
+			distance / 1000.0, rad_to_deg(world.camera.elevation)])
+
+
+## Aims the ground view at the controlled vehicle; its distance (m).
+func _aim_at_vehicle(world: World) -> float:
 	var sim := world.flight.sim
 	var cam := world.camera
 	var d := (sim.body_position_gcrf_m(sim.controlled_index()) - cam.position_gcrf_m)
@@ -898,9 +1042,7 @@ func _watch_from_site(world: World, site: Dictionary) -> void:
 	d /= distance
 	cam.elevation = asin(clampf(d.dot(cam.site_up_gcrf), -1.0, 1.0))
 	cam.azimuth = atan2(d.dot(cam.site_east_gcrf), d.dot(cam.site_north_gcrf))
-	cam.fov = float(_args.get("fov", "50"))
-	print("render_check: watching from %.4f, %.4f: vehicle %.1f km away at elevation %.2f deg" % [lat, lon,
-			distance / 1000.0, rad_to_deg(cam.elevation)])
+	return distance
 
 
 # Starts a mission at the clock's instant and flies it to the requested mission time or timeline event.

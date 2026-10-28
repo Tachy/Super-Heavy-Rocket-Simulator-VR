@@ -103,6 +103,10 @@ public:
     // The lookups take ITRF metres and unit directions; before a successful load they return zeros.
     godot::Vector3 atmosphere_sun_transmittance(const godot::Vector3& position_itrf_m,
                                                 const godot::Vector3& sun_direction_itrf) const;
+    // A lower bound of the distance (m) from the point to any cloud the active pair can draw within reach_m
+    // (environment::cloud_render_nearest_m, the smaller of both snapshots, whatever their blend); +inf for none within
+    // reach_m or without an active snapshot (the cloud view cache's near shell, cloud view cache Task 5).
+    double weather_cloud_nearest_m(const godot::Vector3& position_itrf_m, double reach_m) const;
     // {luminance: Vector3 cd/m^2, transmittance: Vector3}
     godot::Dictionary atmosphere_sky_luminance(const godot::Vector3& camera_itrf_m,
                                                const godot::Vector3& view_direction_itrf,

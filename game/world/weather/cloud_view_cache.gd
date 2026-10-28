@@ -6,7 +6,9 @@ extends RefCounted
 ## march's own per-ray shading (cloud_pass.gdshaderinc cloud_shade_ray) for the texels of a list of tiles, from an
 ## anchor (shaders/cloud_view_cache.gdshaderinc CLOUD_CACHE_FILL). Task 4: the fade slots' atlas (a refreshed tile's
 ## old texels, CloudViewCachePlanner), the tiles' shown state the lookup reads (CLOUD_CACHE_LOOKUP), and each fill
-## entry's nearest cloud distance (read back for the schedule's parallax error). Render thread only (CloudEffect owns
+## entry's nearest cloud distance (read back for the schedule's parallax error). Task 5: the rays start at a given
+## distance (the near shell's radius: the frame's march covers what is nearer) and the anchor ring's offsets from the
+## camera (every tile is looked up from the anchor it was rendered from). Render thread only (CloudEffect owns
 ## it). Memory at the VR face size (3456): the full level 6 x 3456^2 x 12 B = 0.86 GB, all three 1.13 GB, the slots
 ## 32 MB (cap 2 GB, spec).
 
@@ -14,7 +16,7 @@ const COLOR_FORMAT := RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
 const DISTANCE_FORMAT := RenderingDevice.DATA_FORMAT_R32_SFLOAT
 const BLOCK := 8  ## the fill's work group side (texels)
 const VIEW_BLOCK_SIZE := 4 * 64 + 5 * 16  ## CloudView (cloud_pass.gdshaderinc), as CloudEffect.VIEW_BLOCK_SIZE
-const PUSH_SIZE := 16  ## CloudCacheFill: face_texels, tiles_per_side, first, slots_per_row
+const PUSH_SIZE := 20  ## CloudCacheFill: face_texels, tiles_per_side, first, slots_per_row, start_m
 ## [E] The tile's side at the full level (texels; cloud view cache Task 2): 64^2 rays per tile and level 2, a fade
 ## slot's cell (cloud_view_cache.gdshaderinc CLOUD_CACHE_SLOT_TEXELS).
 const TILE_TEXELS := 64
@@ -32,6 +34,7 @@ var _tiles := RID()  ## the tile list ((tile, slot) per entry, sorted by level)
 var _near := RID()  ## per entry: the float bits of its nearest cloud distance
 var _slots := RID()  ## the fade slots' atlas
 var _states := RID()  ## per tile: the lookup's shown state (CloudViewCachePlanner)
+var _anchors := RID()  ## per anchor of the planner's ring: the camera - the anchor (vec4, Earth-local m)
 var _kernels := {}  ## "fill" / "fill_prefilter" -> {shader, pipeline} (CloudEffect's)
 var _prefilter_needed: Callable  ## texel angle [rad] -> whether the shape prefilter's kernel is needed
 
@@ -53,6 +56,7 @@ func _init(rd: RenderingDevice, layout_: CloudViewCacheLayout, kernels: Dictiona
 	_tiles = rd.storage_buffer_create(8 * capacity)
 	_near = rd.storage_buffer_create(4 * capacity)
 	_states = rd.storage_buffer_create(8 * layout.tile_count())
+	_anchors = rd.storage_buffer_create(16 * CloudViewCachePlanner.ANCHOR_RING)
 	var side := CloudViewCachePlanner.SLOTS_PER_ROW * TILE_TEXELS
 	var rows := ceili(float(CloudViewCachePlanner.SLOT_COUNT) / CloudViewCachePlanner.SLOTS_PER_ROW) * TILE_TEXELS
 	var tf := RDTextureFormat.new()
@@ -87,6 +91,11 @@ func states_buffer() -> RID:
 	return _states
 
 
+## The anchor ring's offsets (16 bytes per anchor: the camera - the anchor, float32 xyz + 0).
+func anchors_buffer() -> RID:
+	return _anchors
+
+
 ## The fill entries' nearest cloud distances (4 bytes each, in fill()'s order).
 func near_buffer() -> RID:
 	return _near
@@ -102,10 +111,11 @@ static func pack_tiles(tiles: Array[Dictionary]) -> PackedInt32Array:
 
 ## Fills the texels of tiles ((tile, level, slot) triples; slot: the fade slot its old texels go to, NO_SLOT: none) by
 ## the march's shading from the anchor - its Earth-local offset from the camera (float64 difference on the CPU), the
-## frame's set 0 uniforms (the march's globals: CloudEffect). Before the frame's march, in its own compute list (no
-## buffer updates inside a list). Returns the tiles in the order of the entries (near_buffer()).
+## frame's set 0 uniforms (the march's globals: CloudEffect), the rays' start from the anchor (m; the near shell's
+## radius, 0: the whole ray). Before the frame's march, in its own compute list (no buffer updates inside a list).
+## Returns the tiles in the order of the entries (near_buffer()).
 func fill(rd: RenderingDevice, tiles: PackedInt32Array, anchor_offset_earth: Vector3,
-		set0: Array[RDUniform]) -> PackedInt32Array:
+		set0: Array[RDUniform], start_m := 0.0) -> PackedInt32Array:
 	var by_level: Array[PackedInt32Array] = []
 	for level in range(CloudViewCacheLayout.LEVELS):
 		by_level.append(PackedInt32Array())
@@ -160,8 +170,10 @@ func fill(rd: RenderingDevice, tiles: PackedInt32Array, anchor_offset_earth: Vec
 				CloudEffect._image(2, _distances[level]), CloudEffect._storage(3, _tiles),
 				CloudEffect._storage(4, _near), CloudEffect._image(5, _slots)]
 		rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(kernel["shader"], 1, set1), 1)
-		var push := PackedInt32Array([texels, layout.tiles_per_side, first, CloudViewCachePlanner.SLOTS_PER_ROW])
-		rd.compute_list_set_push_constant(list, push.to_byte_array(), PUSH_SIZE)
+		var push := PackedInt32Array([texels, layout.tiles_per_side, first, CloudViewCachePlanner.SLOTS_PER_ROW,
+				0]).to_byte_array()
+		push.encode_float(16, start_m)
+		rd.compute_list_set_push_constant(list, push, PUSH_SIZE)
 		rd.compute_list_dispatch(list, blocks * blocks, count, 1)
 		first += count
 	rd.compute_list_end()
@@ -173,9 +185,14 @@ func set_states(rd: RenderingDevice, states: PackedByteArray) -> void:
 	rd.buffer_update(_states, 0, mini(states.size(), 8 * layout.tile_count()), states)
 
 
+## The anchor ring's offsets from the camera (the planner's float64 anchors differenced on the CPU; 16 bytes each).
+func set_anchors(rd: RenderingDevice, offsets: PackedByteArray) -> void:
+	rd.buffer_update(_anchors, 0, mini(offsets.size(), 16 * CloudViewCachePlanner.ANCHOR_RING), offsets)
+
+
 ## Frees the GPU resources (Object.free is not this class's to override).
 func free_resources(rd: RenderingDevice) -> void:
-	for rid: RID in _textures + _distances + _view_buffers + [_tiles, _near, _states, _slots]:
+	for rid: RID in _textures + _distances + _view_buffers + [_tiles, _near, _states, _anchors, _slots]:
 		if rid.is_valid():
 			rd.free_rid(rid)
 	_textures.clear()
@@ -184,6 +201,7 @@ func free_resources(rd: RenderingDevice) -> void:
 	_tiles = RID()
 	_near = RID()
 	_states = RID()
+	_anchors = RID()
 	_slots = RID()
 
 

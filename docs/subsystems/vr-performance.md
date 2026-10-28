@@ -62,6 +62,16 @@ s, full level 2.3 s, cube 14.6 s; fill median 3.1 / 3.5 ms, p99 8.9 / 10.0 ms, m
 full-level deck tile alone takes up to ~8.4 ms, a fill's time is its slowest ray's - `weather-clouds.md`, Budget);
 main thread p99 0.06 / 0.07 ms, max 0.08 / 0.14 ms.
 
+## Near shell and re-anchor (cloud view cache Task 5, 2026-10-28)
+
+`render_check --frames_every=0.5 --frames_for=80` (Starbase ascent, `--autopilot --fly=25`, slab 1.5-2.5 km cover
+0.6, VR preset, render scale 1.65 - the desktop VR proxy; 3600 flight frames of 1/45 s each): from on board (the near
+shell in 3529 of them: the deck within R_near of the pad already) GPU frame median 8.7 ms, p99 27.5 ms, max 32.4 ms -
+**the 22.2 ms target is missed in the deck passage** (near shell march + covering after evictions + fills); watched
+from the ground 2 km east median 5.3 ms, p99 18.8 ms, max 24.1 ms. The near shell's march is the frame's steady cost
+(not excluded from the adaptive budget's rest of the frame; only the covering march is). Logs
+`.superpowers/sdd/2026-10-27-cloud-view-cache/t5_final_fly_{board,site}.log`.
+
 ## Measuring
 
 - `Start-VR.cmd --perf-log` (any start: `-- --perf-log`): `PerfLog` (`game/util/perf_log.gd`) writes

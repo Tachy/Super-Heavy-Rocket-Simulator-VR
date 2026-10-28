@@ -42,6 +42,14 @@ const CACHE_PARALLAX_TOLERANCE_PX := 0.25
 const EYE_PX_PER_RAD := 35.0 * 180.0 / PI
 ## The camera's offset from the anchor in the parallax case (m): a moved camera before a re-anchor.
 const CACHE_CAMERA_OFFSET_M := 50.0
+## The near shell's radius (CloudLayer.near_radius_m(), cloud view cache Task 5): the cache holds clouds from there on,
+## seen from its anchor. A tile keeps the anchor it was rendered from until it is refilled; the camera's offsets from a
+## tile's anchor checked (m) with the lookup's iterations: the re-anchor's 5 % of R_near and the planner's eviction
+## distance (CloudViewCachePlanner.ANCHOR_EVICT_FRACTION 0.1 of R_near). Measured worst eye px of the deck at 2 km with
+## three iterations: 100 m 1.2e-6, 300 m 0.011, 400 m 0.13, 500 m 0.88, 600 m 4.0 (five: 600 m 0.0012, 1 km 9.5).
+const CACHE_NEAR_RADIUS_M := 2000.0
+const CACHE_TILE_ANCHOR_CASES := [Vector2(100.0, CACHE_PARALLAX_ITERATIONS),
+		Vector2(200.0, CACHE_PARALLAX_ITERATIONS)]
 ## The deck field is asserted from this distance on (m): a deck nearer than ~2 km seen 50 m off the anchor needs a 4th
 ## iteration (0.6 eye px left at 300 m after 3) - the near shell's reach (R_near, cloud view cache Task 5), marched per
 ## frame, not looked up. Printed below it.
@@ -65,6 +73,8 @@ func _initialize() -> void:
 	_test_edge_radius()
 	for distance_m in [300.0, 2000.0, 20000.0]:
 		_test_cache_parallax(distance_m)
+	for case: Vector2 in CACHE_TILE_ANCHOR_CASES:
+		_test_tile_anchor_parallax(case.x, int(case.y))
 	print("cloud_vr_stereo_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -361,7 +371,8 @@ func _test_edge_radius() -> void:
 ## secant steps on g while both ends saw cloud (a flat deck seen 50 m off the anchor converged by only ~0.4 per
 ## fixed-point step: 25 eye px left after three); CACHE_PARALLAX_ITERATIONS + 1 distance reads. distance_of: q -> r
 ## (m, 0 without cloud).
-static func _cache_lookup(offset: Vector3, dir: Vector3, distance_of: Callable) -> Vector3:
+static func _cache_lookup(offset: Vector3, dir: Vector3, distance_of: Callable,
+		iterations := CACHE_PARALLAX_ITERATIONS) -> Vector3:
 	var b := offset.dot(dir)
 	var c := offset.length_squared()
 	var r: float = distance_of.call(dir)
@@ -369,7 +380,7 @@ static func _cache_lookup(offset: Vector3, dir: Vector3, distance_of: Callable) 
 	r = distance_of.call((offset + dir * s_prev).normalized())
 	var g_prev := r - (offset + dir * s_prev).length() if r > 0.0 else NAN
 	var s := -b + sqrt(maxf(b * b - c + _cache_far(r) * _cache_far(r), 0.0))
-	for i in range(1, CACHE_PARALLAX_ITERATIONS):
+	for i in range(1, iterations):
 		r = distance_of.call((offset + dir * s).normalized())
 		var g := r - (offset + dir * s).length() if r > 0.0 else NAN
 		var next := -b + sqrt(maxf(b * b - c + _cache_far(r) * _cache_far(r), 0.0))
@@ -418,6 +429,34 @@ func _test_cache_parallax(distance_m: float) -> void:
 			print("  info  %s (not asserted: inside the near shell's reach)" % label)
 			continue
 		_check(worst_px <= CACHE_PARALLAX_TOLERANCE_PX, label)
+
+
+## The parallax of a tile seen from a camera off its anchor (cloud view cache Task 5, the progressive re-anchor: each
+## tile is reprojected from its own anchor): the camera offset_m off the anchor in six directions, a cloud point at the
+## near shell's radius from the anchor (the nearest the cache holds) in the two cached fields of _test_cache_parallax -
+## within CACHE_PARALLAX_TOLERANCE_PX eye pixels of the direct ray.
+func _test_tile_anchor_parallax(offset_m: float, iterations: int) -> void:
+	var point_dir := Vector3(0.3, -0.5, -0.8).normalized()
+	var point := point_dir * CACHE_NEAR_RADIUS_M  # from the anchor
+	var normal := Vector3.UP
+	var deck_height := point.dot(normal)
+	for field in ["shell", "deck"]:
+		var worst_px := 0.0
+		var distance_of := func(q: Vector3) -> float:
+			if field == "shell":
+				return point.length()
+			var down := q.dot(normal)
+			return deck_height / down if down < 0.0 else 0.0
+		for offset_dir: Vector3 in [Vector3.RIGHT, Vector3.FORWARD, Vector3.UP, Vector3.LEFT, Vector3.BACK,
+				Vector3.DOWN]:
+			var eye := offset_dir * offset_m
+			var dir := (point - eye).normalized()
+			var q := _cache_lookup(eye, dir, distance_of, iterations)
+			var shown: Vector3 = q * float(distance_of.call(q))
+			worst_px = maxf(worst_px, (shown - eye).angle_to(dir) * EYE_PX_PER_RAD)
+		_check(worst_px <= CACHE_PARALLAX_TOLERANCE_PX, "view cache parallax from a tile's own anchor, %s cloud "
+				% field + "%.0f m from it, the camera %.0f m off it, %d iterations (worst %s eye px)"
+				% [CACHE_NEAR_RADIUS_M, offset_m, iterations, String.num_scientific(worst_px)])
 
 
 func _check(ok: bool, message: String) -> void:
