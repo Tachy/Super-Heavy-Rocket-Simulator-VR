@@ -441,7 +441,7 @@ func _volume_bytes(lookup: Dictionary, frames: Array[Vector3], camera: Vector3) 
 	var ints := PackedInt32Array()
 	for lv: Dictionary in lookup["levels"]:
 		var origin: Vector3i = lv["origin"]
-		var flags := (FLAG_ACTIVE if bool(lv["active"]) else 0) | (FLAG_READY if bool(lv["ready"]) else 0) \
+		var flags := (FLAG_ACTIVE if bool(lv["active"]) else 0) | (FLAG_READY if bool(lv.get("shown", lv["ready"])) else 0) \
 				| (FLAG_VERTICAL_FADE if bool(lv["vertical_fade"]) else 0) \
 				| (FLAG_CLAMPED_BOTTOM if bool(lv["clamped_bottom"]) else 0)
 		flags |= maxi(frames.find(lv["frame_origin_earth_m"]), 0) << FLAG_FRAME_SHIFT

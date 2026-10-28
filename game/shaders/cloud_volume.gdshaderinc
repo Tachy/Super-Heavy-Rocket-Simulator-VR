@@ -253,12 +253,16 @@ int cloud_volume_level(vec3 grid_m, out float fade) {
 }
 
 // The texture coordinate of a grid point in texture `index` (level k): window-local cells plus the window origin's
-// texel (toroidal; the repeat sampler wraps), levels 2-7 clamped to the shell vertically (not toroidal there).
+// texel (toroidal; the repeat sampler wraps), levels 2-7 clamped to the shell vertically (not toroidal there), levels
+// 0-1 with a clamped bottom (origin z 0, texel z 0) clamped to it: below it the filter reads the bottom cell, never the
+// storage's top (guard) cell (Task 5 review round 2, N2).
 vec3 cloud_volume_uvw(int index, int k, vec3 grid_m) {
 	ivec3 o = cloud_volume.levels[index].xyz;
 	vec3 t = cloud_volume_cells(k, grid_m) - vec3(o) + vec3(cloud_volume_wrap(o, CLOUD_VOLUME_SIZE));
 	if (k >= CLOUD_VOLUME_WINDOWED_LEVELS) {
 		t.z = clamp(t.z, 0.5, float(CLOUD_VOLUME_CELLS_V) - 0.5);
+	} else if ((cloud_volume.levels[index].w & CLOUD_VOLUME_CLAMPED_BOTTOM) != 0) {
+		t.z = max(t.z, 0.5);
 	}
 	return t / vec3(CLOUD_VOLUME_SIZE);
 }
@@ -302,9 +306,44 @@ vec4 cloud_volume_fetch_light(int index, int k, vec3 grid_m) {
 #undef CLOUD_VOLUME_SAMPLE
 }
 
-// The mip texel (block) holding a grid point of level k in texture `index`.
+// A block (global mip texel) of level k clamped vertically where the level's reads clamp (cloud_volume_uvw: levels
+// 2-7 to the shell, levels 0-1 at a clamped bottom): never the wrapped block of the other end (review round 2, N2).
+ivec3 cloud_volume_block_clamp(int k, ivec3 block) {
+	if (k >= CLOUD_VOLUME_WINDOWED_LEVELS) {
+		block.z = clamp(block.z, 0, CLOUD_VOLUME_MIP_SIZE.z - 1);
+	} else if ((cloud_volume.levels[k].w & CLOUD_VOLUME_CLAMPED_BOTTOM) != 0) {
+		block.z = max(block.z, 0);
+	}
+	return block;
+}
+
+// The block (global mip texel) of level k holding a grid point (clamped as the reads).
 ivec3 cloud_volume_block(int k, vec3 grid_m) {
-	return ivec3(floor(cloud_volume_cells(k, grid_m) / float(CLOUD_VOLUME_MIP_DIV)));
+	return cloud_volume_block_clamp(k, ivec3(floor(cloud_volume_cells(k, grid_m) / float(CLOUD_VOLUME_MIP_DIV))));
+}
+
+// floor(a / b) for b > 0 (GLSL's integer division truncates).
+int cloud_volume_floor_div(int a, int b) {
+	return a >= 0 ? a / b : -((-a + b - 1) / b);
+}
+
+// A block's edge along an axis in 1/16 m from the grid's zero (horizontal) or the shell bottom (vertical): every cell
+// size is a whole number of 1/16 m (25 m .. 6400 m, 164.0625 m = 2625 / 16), so the block arithmetic is exact.
+int cloud_volume_block_16(int k, int axis) {
+	float cell = axis < 2 ? CLOUD_VOLUME_CELL_H_M[k] : CLOUD_VOLUME_CELL_V_M[k];
+	return int(round(cell * 16.0)) * CLOUD_VOLUME_MIP_DIV;
+}
+
+// The blocks of level k + 1 ([lo, hi] per axis, global) that level k's block overlaps. Horizontally and from level 0 to
+// 1 one block (cells doubling from a common origin); vertically level 1's 200 m blocks straddle level 2's 656.25 m ones
+// (~30 % of them: two blocks) - Task 5 review round 2, I1.
+void cloud_volume_up_blocks(int k, ivec3 block, out ivec3 lo, out ivec3 hi) {
+	for (int axis = 0; axis < 3; axis++) {
+		int size = cloud_volume_block_16(k, axis);
+		int size_up = cloud_volume_block_16(k + 1, axis);
+		lo[axis] = cloud_volume_floor_div(block[axis] * size, size_up);
+		hi[axis] = cloud_volume_floor_div((block[axis] + 1) * size - 1, size_up);
+	}
 }
 
 float cloud_volume_fetch_max(int index, ivec3 texel) {
@@ -355,20 +394,27 @@ bool cloud_volume_reaches_band(int k, vec3 lo, vec3 hi) {
 	return band;
 }
 
-// The max-extinction bound [1/m] of level k's block holding the grid point (CLOUD_VOLUME_OCCUPANCY).
-float cloud_volume_level_max(vec3 grid_m, int k) {
-	return cloud_volume_fetch_max(k, cloud_volume_wrap(cloud_volume_block(k, grid_m), CLOUD_VOLUME_MIP_SIZE));
-}
-
 // The max-extinction bound [1/m] over the level's block holding the grid point: no density sample in that block (any
 // snapshot blend, the trilinear filter, the fade toward level + 1, the sub-cell field up to sigma_c) exceeds it. Where
-// the block reaches the fade band, also level + 1's block bound (Task 5 review I1: the band blends level + 1, whose
-// trilinear support reaches ~3 level cells past its cloud; level + 1's block of 8 cells holds the whole block).
+// the block reaches the fade band, also the bounds of every level + 1 block it overlaps (Task 5 review I1 / round 2:
+// the band blends level + 1, whose trilinear support reaches ~3 level cells past its cloud; level 1's blocks straddle
+// level 2's vertically). Level + 1 is shown and holds the band (the schedule's nesting, N1).
 float cloud_volume_max_extinction(vec3 grid_m, int level) {
-	float bound = cloud_volume_level_max(grid_m, level);
-	vec3 lo = vec3(cloud_volume_block(level, grid_m) * CLOUD_VOLUME_MIP_DIV);
+	ivec3 block = cloud_volume_block(level, grid_m);
+	float bound = cloud_volume_fetch_max(level, cloud_volume_wrap(block, CLOUD_VOLUME_MIP_SIZE));
+	vec3 lo = vec3(block * CLOUD_VOLUME_MIP_DIV);
 	if (cloud_volume_reaches_band(level, lo, lo + float(CLOUD_VOLUME_MIP_DIV))) {
-		bound = max(bound, cloud_volume_level_max(grid_m, level + 1));
+		ivec3 up_lo;
+		ivec3 up_hi;
+		cloud_volume_up_blocks(level, block, up_lo, up_hi);
+		for (int z = up_lo.z; z <= up_hi.z; z++) {
+			for (int y = up_lo.y; y <= up_hi.y; y++) {
+				for (int x = up_lo.x; x <= up_hi.x; x++) {
+					ivec3 up = cloud_volume_block_clamp(level + 1, ivec3(x, y, z));
+					bound = max(bound, cloud_volume_fetch_max(level + 1, cloud_volume_wrap(up, CLOUD_VOLUME_MIP_SIZE)));
+				}
+			}
+		}
 	}
 	return bound;
 }
@@ -378,7 +424,7 @@ float cloud_volume_max_extinction(vec3 grid_m, int level) {
 // cells), shrunk by the grid's largest scale; 0 in an occupied block. `reach`: the box (cells) the value stands for.
 float cloud_volume_level_free_m(vec3 grid_m, int k, out vec3 reach_lo, out vec3 reach_hi) {
 	vec3 cells = cloud_volume_cells(k, grid_m);
-	ivec3 block = ivec3(floor(cells / float(CLOUD_VOLUME_MIP_DIV)));
+	ivec3 block = cloud_volume_block(k, grid_m);  // clamped: a point outside the shell gets no free space (m.z = 0)
 	float d = cloud_volume_fetch_distance(k, cloud_volume_wrap(block, CLOUD_VOLUME_MIP_SIZE));
 	reach_lo = cells;
 	reach_hi = cells;

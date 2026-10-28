@@ -3,7 +3,8 @@
 # Checked: the azimuthal-equidistant grid (round trip, distances), the level on / off heights and vertical windows,
 # toroidal addressing, exposed slabs, the fade band (also vertical for levels 0-1), the re-frame test; the schedule:
 # cold start (the coarsest level baked first under the spike budget and shown once whole, light provisional from the
-# column, finer levels coarse to fine), scroll slabs baked in the plan that adopts the origin (1 km/s, 7.8 km/s), the
+# column, finer levels coarse to fine), scroll slabs baked ahead of the window (1 km/s, 7.8 km/s; with the budget
+# capped the windows wait instead of reading unbaked cells and the shown levels stay nested), the
 # layout's origins kept by the schedule, Sun / Moon / weather-blend triggers, light budget and order, pair switch (also
 # during a fill: no cell baked twice), jump, re-frame (one level at a time, coarsest first, a shown version in every
 # plan, spike cap), plan() cost. The schedules run at TEST_TAPS_PER_MS (world-volume Task 5: the budget counts taps).
@@ -243,6 +244,15 @@ func _test_fade() -> void:
 			layout.set_origin(k, layout.window_origin(k, cg))
 			layout.set_origin(k + 1, layout.window_origin(k + 1, cg))
 			var w := layout.window_origin(k, cg)
+			var w1 := layout.window_origin(k + 1, cg)
+			if not L.nested(k, w, w1) or not _nests(k, w, w1):
+				bad += 1
+			# k + 1 left behind (horizontally; level 1 vertically when it is not clamped): no longer nested
+			if L.nested(k, w, w1 - Vector3i(60, 0, 0)) or _nests(k, w, w1 - Vector3i(60, 0, 0)):
+				bad += 1
+			var up_z := w1 + Vector3i(0, 0, 30)
+			if k == 0 and w1.z > 40 and (L.nested(k, w, up_z) or _nests(k, w, up_z)):
+				bad += 1
 			var ch := L.CELL_H_M[k]
 			var cv := L.CELL_V_M[k]
 			var ws := L.window_size(k)
@@ -254,7 +264,8 @@ func _test_fade() -> void:
 							continue
 						if layout.fade_weight(k + 1, Vector3((w.x + cx) * ch, (w.y + cy) * ch, gz)) != 1.0:
 							bad += 1
-	_check(bad == 0, "1000 random cameras: each level's window lies inside the next coarser level with weight 1 (%d bad)" % bad)
+	_check(bad == 0, "1000 random cameras: each level's window lies inside the next coarser level with weight 1, "
+			+ "nested() agrees, and not with level k + 1 left 60 cells behind (%d bad)" % bad)
 
 
 func _test_reframe_and_memory() -> void:
@@ -385,6 +396,22 @@ func _test_scroll() -> void:
 	# 0-1), 7.8 km/s in orbit (levels 2-7: 7.8 km/s occurs only above the shell). Diagonal headings: both axes scroll.
 	_scroll_flight("1 km/s at 10 km, climbing 150 m/s", 1000.0, 10000.0, 150.0, 1400)
 	_scroll_flight("7.8 km/s at 120 km", 7800.0, 120000.0, 0.0, 1200)
+	# The bake budget binding (Task 5 review round 2, I2 / N1): the windows wait (lag) instead of reading unbaked
+	# cells, and the levels stay nested in every frame (N1 ruling).
+	_capped_flight("7.8 km/s at 120 km, budget x 0.1", 7800.0, 120000.0, 0.0, 1500, 0.1)
+	_capped_flight("7.8 km/s at 120 km, budget x 0.3", 7800.0, 120000.0, 0.0, 1500, 0.3)
+	_capped_flight("1 km/s at 10 km climbing 150 m/s, budget x 0.05", 1000.0, 10000.0, 150.0, 1500, 0.05)
+	# A coarser level not ready (its fill restarted): every finer level is hidden with it (N1), shown again after.
+	var sc := _schedule()
+	_settle(sc, 0.0, 100.0, sun)
+	sc._levels[5].ready = false
+	var hid: Array = _plan(sc, 0.0, 100.0, sun)["lookup"]["levels"]
+	sc._levels[5].ready = true
+	var back: Array = _plan(sc, 0.0, 100.0, sun)["lookup"]["levels"]
+	var chain_ok := true
+	for k in CloudWorldVolumeLayout.LEVELS:
+		chain_ok = chain_ok and hid[k]["shown"] == (k > 5) and back[k]["shown"] and (k == 5 or hid[k]["ready"])
+	_check(chain_ok, "a coarser level not ready hides the finer ones (still filled), shown again once it is")
 	# 7.8 km/s at 120 km: bake cells per frame follow the layout (levels 2-7); p99 plan() cost <= 1 ms.
 	var s := _schedule()
 	_settle(s, 0.0, 120000.0, sun)
@@ -506,6 +533,123 @@ func _scroll_flight(label: String, speed_mps: float, h0_m: float, climb_mps: flo
 	_check(prov_max <= CloudWorldVolumeSchedule.PROVISIONAL_MAX_S,
 			"%s: provisional light never older than %.1f s (%.2f s)"
 			% [label, CloudWorldVolumeSchedule.PROVISIONAL_MAX_S, prov_max])
+
+
+## A flight from a settled volume with the bake budget scaled by `scale` after settling, so the scroll cap binds
+## (Task 5 review round 2: I2 test gap, N1 ruling). Independent models: the unbaked cells per level (as in
+## _scroll_flight, followed while the level is `ready` = filled) must never meet the window of a SHOWN level; every
+## frame the shown levels nest - level k shown => level k + 1 shown, and level k's window (its fade band included)
+## lies where level k + 1's weight is 1 (fade_weight_at at the window's corners). The windows must wait (> 0 frames:
+## the cap binds), counted apart from levels that are not ready (a fill restarted after a whole-extent lag).
+func _capped_flight(label: String, speed_mps: float, h0_m: float, climb_mps: float, frames: int, scale: float) -> void:
+	var L := CloudWorldVolumeLayout
+	var sun := _sun(0.0, SUN_30)
+	var moon := Vector3(0.0, 0.6, 0.8)
+	var lat := deg_to_rad(25.99)
+	var lon := deg_to_rad(-97.18)
+	var h := h0_m
+	var s := _schedule()
+	var cam := _geodetic_point(lat, lon, h)
+	for i in 3 * FILL_FRAMES_MAX:
+		var p0 := s.plan(cam, sun, moon, 0.3, CLOUD_TOP_M, false, DT, [0, 1])
+		if s.complete() and p0["bake"].is_empty() and p0["light"].is_empty():
+			break
+	s.bake_taps_per_ms = GAME_TAPS_PER_MS
+	s.budget_scale = scale
+	var first := s.plan(cam, sun, moon, 0.3, CLOUD_TOP_M, false, DT, [0, 1])
+	var storage: Array = []
+	var unbaked: Array = []
+	var was_ready: Array = []
+	for e: Dictionary in first["lookup"]["levels"]:
+		storage.append(e["storage"])
+		unbaked.append([])
+		was_ready.append(e["ready"])
+	var heading := deg_to_rad(30.0)
+	var read_unbaked := 0
+	var waiting := 0
+	var not_ready := 0
+	var hidden := 0
+	var not_nested := 0
+	var shown_over_hidden := 0
+	for f in frames:
+		var r := A_M + h
+		lat += speed_mps * cos(heading) * DT / r
+		lon += speed_mps * sin(heading) * DT / (r * cos(lat))
+		h += climb_mps * DT
+		var p := s.plan(_geodetic_point(lat, lon, h), sun, moon, 0.3, CLOUD_TOP_M, false, DT, [0, 1])
+		waiting += 1 if p["windows_waiting"] > 0 else 0
+		var lv: Array = p["lookup"]["levels"]
+		for k in L.LEVELS:
+			var e: Dictionary = lv[k]
+			var shown: bool = e.get("shown", e["ready"])
+			if not e["active"]:
+				was_ready[k] = false
+				continue
+			if not e["ready"]:
+				not_ready += 1
+				was_ready[k] = false
+				unbaked[k] = []
+				storage[k] = e["storage"]
+				continue
+			if not was_ready[k]:  # filled again: its whole storage was baked by the fill
+				was_ready[k] = true
+				storage[k] = e["storage"]
+				unbaked[k] = []
+			var st: Vector3i = e["storage"]
+			var list: Array = unbaked[k]
+			if st != storage[k]:
+				list.append_array(L.exposed_slabs(k, storage[k], st))
+				storage[k] = st
+			var kept: Array = []
+			for b: Dictionary in list:
+				var c := L.box_clip(b, L.storage_box(st))
+				if L.box_cells(c) > 0:
+					kept.append(c)
+			list = kept
+			for j: Dictionary in p["bake"]:
+				if j["level"] == k and not j["spare"]:
+					var rest: Array = []
+					for b: Dictionary in list:
+						rest.append_array(_box_subtract(b, j))
+					list = rest
+			unbaked[k] = list
+			if not shown:
+				hidden += 1
+				continue
+			var win := L.window_box(k, e["origin"])
+			var inside: bool = L.box_cells(L.box_clip(win, L.storage_box(st))) == L.box_cells(win)
+			for b: Dictionary in list:
+				inside = inside and not L.box_overlaps(win, b)
+			read_unbaked += 0 if inside else 1
+			if k + 1 < L.LEVELS:
+				var up: Dictionary = lv[k + 1]
+				if not (up["active"] and up.get("shown", up["ready"])):
+					shown_over_hidden += 1
+				elif not _nests(k, e["origin"], up["origin"]):
+					not_nested += 1
+	_check(read_unbaked == 0, "%s: no shown window holds an unbaked or foreign cell (%d level-frames do, %d frames)"
+			% [label, read_unbaked, frames])
+	_check(waiting > 0, "%s: the cap binds - the windows wait (%d frames; %d level-frames not ready, %d hidden)"
+			% [label, waiting, not_ready, hidden])
+	_check(shown_over_hidden == 0 and not_nested == 0, "%s: shown levels nest every frame (%d level-frames shown over a "
+			% [label, shown_over_hidden] + "coarser level not shown, %d with the window outside the coarser level's "
+			% not_nested + "weight-1 region)")
+
+
+## Level k's window at `origin` lies where level k + 1's weight (window at `origin_up`) is 1: its 8 corners (window
+## edges, grid m; levels 2-7 have no vertical fade: they hold the whole shell and clamp vertically).
+func _nests(k: int, origin: Vector3i, origin_up: Vector3i) -> bool:
+	var L := CloudWorldVolumeLayout
+	var size := L.window_size(k)
+	var ch: float = L.CELL_H_M[k]
+	var cv: float = L.CELL_V_M[k]
+	for cx in [0, size.x]:
+		for cy in [0, size.y]:
+			for cz in [0, size.z]:
+				var g := Vector3((origin.x + cx) * ch, (origin.y + cy) * ch, L.SHELL_BOTTOM_M + (origin.z + cz) * cv)
+				if L.fade_weight_at(k + 1, g, origin_up) < 1.0:
+					return false
+	return true
 
 
 ## a less b as disjoint boxes (a itself when they do not overlap).

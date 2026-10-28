@@ -1054,3 +1054,19 @@ conservative in the fade band). Text as it stood:
     start, jump, level on) are baked under the budget strictly coarse to fine - the coarsest level too (Task 5: its
     cap 8) to a block with a bound, separable x / y / z. Every block claimed free has no rho in its support: a sample
     there reads 0 at any blend, and the sub-cell field (it redistributes rho, peak sigma_c) is 0 too.
+
+## World volume nesting and fade-band bound before Task 5 fix round 2 (superseded 2026-10-28: nesting under lag, cross-block bound, clamped bottom)
+
+Superseded by: windows advancing coarse to fine and a nested level stepping only onto nested positions, `shown` =
+ready and nested in a shown coarser level (review round 2, N1: under a binding bake cap a finer level's fade band read
+level k + 1 outside its window or while it refilled); the fade-band bound over every level k + 1 block the block
+overlaps (I1 rest: level 1's blocks straddle level 2's vertically); clamped reads below a clamped bottom (N2). Text as
+it stood:
+
+    active / ready / frame origin; `storage`; `slot_ready`; the spare while it fades, `build_spare` while it is
+    built).
+    `cloud_volume_max_extinction` = max(level k's block bound, level k + 1's) when the block reaches the band,
+    `cloud_volume_free_m` = min(level k's free ball, level k + 1's) when level k's free ball reaches the band (the free
+    ball is clipped to the level's window).
+    each free ball: 0 with density (blend toward level k + 1 included); 1e4 points in the fade band: 0 with density in
+    their free ball, 0 above the block bound (with the band ignored, as before the fix: 7-90 per level failed).

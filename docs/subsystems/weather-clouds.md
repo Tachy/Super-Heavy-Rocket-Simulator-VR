@@ -1004,15 +1004,23 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   - `CloudWorldVolumeSchedule` (`..._schedule.gd`): `plan(camera, sun, moon, blend, cloud_top_m, jumped, delta_s,
     slot_ids)` -> `bake` ({level, from, to, snapshot_channel -1 = both | slot, spare}), `provisional` (+ `from_column`
     for the coarsest level), `light` (+ `moon`), `reframe`, `lookup` (state after the batch: per level origin /
-    active / ready / frame origin; `storage`; `slot_ready`; the spare while it fades, `build_spare` while it is
-    built). Scroll (bake ahead of exposure, Task 5 review I2): a ready level's storage moves toward the window's
+    active / ready (filled) / shown / frame origin; `storage`; `slot_ready`; the spare while it fades, `build_spare`
+    while it is built; `shown` sets the GPU's READY flag). Scroll (bake ahead of exposure, Task 5 review I2): a ready level's storage moves toward the window's
     target grown by the guard, as far as it still holds the shown window; the slabs it exposes are queued and baked
     earliest deadline first - a slab's deadline is the frames until the window, at the camera's per-axis speed
     (`MOTION_DECAY` 0.9 peak hold [E]), would reach it; the frame's scroll budget is the deadline-meeting rate x
     `SCROLL_MARGIN` 1.5 [E], capped at `SCROLL_CAP_MS` = 3.0 - 1.0 ms (the spike cap less the light), and the normal
     bake share the fills leave bakes further ahead. The window then advances toward the camera only onto baked cells
     (no frame reads an unbaked cell; a missed deadline makes the window wait = lag, counted in `windows_waiting`;
-    a move of a whole storage extent restarts the level's fill). Baked slabs are lit first. Fills (cold
+    a move of a whole storage extent restarts the level's fill). Nesting (Task 5 review round 2, N1 ruling): the
+    windows advance coarse to fine, and a level nested in the next coarser one (`CloudWorldVolumeLayout.nested`: its
+    window inside level k + 1's weight-1 region, 8.5 cells in) steps only onto positions that keep it nested - a finer
+    level waits for its coarser one (lag, the spatial fade band covers the camera leaving it; ~54 cells of level k + 1
+    of slack at the targets). A level is `shown` only while it is ready and the next coarser level is shown with this
+    window nested (transitively; the coarsest: ready): a coarser level restarting its fill hides the finer ones with
+    it, so the fade band, the bound and the free lookups never read a level that is not shown. Levels of two frames (a
+    re-frame in progress) are not compared (carry to Task 9: the old frame's band reads level k + 1 with its own
+    grid). Baked slabs are lit first. Fills (cold
     start, jump, level on) are baked under the budget strictly coarse to fine - the coarsest level too (Task 5: its
     8.4 M cells of 8448 taps take the GPU seconds), and nothing of the volume is shown before it is `ready`; a replaced
     snapshot slot is rebaked alone (`slot_ready`, the spare included; a level still filling rebakes only what its fill
@@ -1028,6 +1036,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     0.50 ms, every plan <= 0.58 ms; 7.8 km/s at 120 km (levels 2-7, 1200 frames) mean 1.36 / worst 1.94 ms, every plan
     <= 2.04 ms; no window waits, no unbaked cell read. 7.8 km/s needs ~1-1.5 ms of scroll bake per frame on average
     (taps 528-8448 per cell), above the 0.5 ms normal bake share: in orbit the upkeep runs ~2-2.5 ms with light.
+    Capped flights (budget x 0.1 / 0.3 at 7.8 km/s, x 0.05 at 1 km/s climbing, 1500 frames each: the cap binds as at
+    ~2x time warp in orbit or on a slower GPU): the windows wait in 1495 / 1484 / 1486 frames (levels not ready after
+    a whole-extent lag: 1360 / 53 / 796 level-frames), 0 unbaked cells read by a shown level, the shown levels nest
+    in every frame (before the fix 542 / 907 level-frames outside level k + 1's weight-1 region, 626 shown over a
+    level not ready); disabling the wait rule or the nesting rule fails the test.
 - World volume, GPU side (world volume plan Task 5; `CloudWorldVolume`, `game/world/weather/cloud_world_volume.gd`;
   kernels `game/shaders/cloud_volume_bake.gdshaderinc`, lookups `game/shaders/cloud_volume.gdshaderinc`; fidelity
   flag `CloudLayer.world_volume` / global `cloud_world_volume`, default false until Task 13, on with
@@ -1055,9 +1068,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     cap 8) to a block with a bound, separable x / y / z. Every block claimed free has no rho in its support: a sample
     of THAT level there reads 0 at any snapshot blend. The fade band blends level k + 1 (its trilinear support reaches
     ~3 level-k cells past its cloud), so the lookups take both levels there (Task 5 review I1):
-    `cloud_volume_max_extinction` = max(level k's block bound, level k + 1's) when the block reaches the band,
+    `cloud_volume_max_extinction` = max(level k's block bound, the bounds of every level k + 1 block it overlaps -
+    `cloud_volume_up_blocks`, exact in 1/16 m: one block horizontally and from level 0 to 1, vertically level 1's
+    200 m blocks straddle level 2's 656.25 m ones, two for ~30 %) when the block reaches the band,
     `cloud_volume_free_m` = min(level k's free ball, level k + 1's) when level k's free ball reaches the band (the free
-    ball is clipped to the level's window). Carry to Task 7: the sub-cell field must be 0 where trilinear rho = 0 and
+    ball is clipped to the level's window). Level k + 1 is shown and holds level k's band (the schedule's nesting).
+    Out of the shell the reads clamp, never wrap (review round 2, N2): levels 0-1 with a clamped bottom read their
+    bottom cell below its centre (`cloud_volume_uvw`), the blocks clamp vertically as the reads
+    (`cloud_volume_block_clamp`; the free space there is 0). Carry to Task 7: the sub-cell field must be 0 where trilinear rho = 0 and
     <= sigma_c elsewhere, else "dilated by the lift" does not hold - rerun the 1e4-point probe with the real
     per-sample density then. The distance field is recomputed whole for every level a batch touches (~0.05 ms each;
     up to 6 levels a frame at 7.8 km/s, `vr-performance.md`).
@@ -1072,8 +1090,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     edge cells scatter (taps within the 8-bit filter error of the threshold or the fraction cut flip): up to 1.7 % of
     the cells beyond 1 %, all within 0.059 sigma_c. Occupancy (levels 0, 2, 5, cameras 2 m / 9 km): the distance
     field equals the ring-dilated reference on all 131072 blocks; 1e4 points in claimed-free blocks, a random point of
-    each free ball: 0 with density (blend toward level k + 1 included); 1e4 points in the fade band: 0 with density in
-    their free ball, 0 above the block bound (with the band ignored, as before the fix: 7-90 per level failed).
+    each free ball: 0 with density (blend toward level k + 1 included). Fade band of every level 0-6 (each adjacent
+    pair; levels 0-1 also at the window top), 1e4 points each: 0 with density in their free ball, 0 above the block
+    bound (with the band ignored: 7-90 per level failed; with level k + 1's bound taken at the grid point's block only,
+    as in fix round 1: level 1 failed with 6 / 1 points at the 2 m / 9 km cameras). Clamped bottom (levels 0-1, camera
+    2 m): 1e4 columns read the bottom cell below its centre (before: 9960 / 9959 read the wrapped top storage cell).
 - Cell bake, CPU reference (world volume plan Task 4; the GPU bake of Task 5 is checked against it; `[weather]`
   `core/tests/test_cloud_volume_bake.cpp`):
   - `cloud_render_field.hpp` mirrors the GPU point model of ONE snapshot without the detail (`cloud_field` with the

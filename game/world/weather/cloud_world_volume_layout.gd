@@ -283,6 +283,28 @@ static func fade_weight_at(k: int, grid_m: Vector3, origin: Vector3i) -> float:
 	return clampf((d - 0.5) / float(FADE_CELLS), 0.0, 1.0)
 
 
+## True when level k's window at `origin` lies where level k + 1's weight (window at `origin_up`) is 1 (Task 5 review
+## round 2, N1): level k's fade band blends level k + 1, so its trilinear reads, block bounds (<= 1.5 cells of k + 1
+## past the window) and free balls stay inside k + 1's window, and the blend meets k + 1 at full weight (no seam).
+## Levels 2-7 hold the whole shell (no vertical fade, reads clamped); level 1's clamped bottom does not fade.
+static func nested(k: int, origin: Vector3i, origin_up: Vector3i) -> bool:
+	var size := window_size(k)
+	var size_up := window_size(k + 1)
+	var band := FADE_CELLS + 0.5  # fade_weight_at reaches 1 this many cells inside the window edge
+	var r := CELL_H_M[k] / CELL_H_M[k + 1]
+	for axis in 2:
+		if origin[axis] * r < origin_up[axis] + band or (origin[axis] + size[axis]) * r > origin_up[axis] \
+				+ size_up[axis] - band:
+			return false
+	if k + 1 < WINDOWED_LEVELS:
+		var rv := CELL_V_M[k] / CELL_V_M[k + 1]
+		if (origin.z + size.z) * rv > origin_up.z + size_up.z - band:
+			return false
+		if origin_up.z > 0 and origin.z * rv < origin_up.z + band:
+			return false
+	return true
+
+
 func fade_weight(k: int, grid_m: Vector3) -> float:
 	return fade_weight_at(k, grid_m, origins[k])
 

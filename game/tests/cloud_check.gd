@@ -96,7 +96,8 @@
 #      printed (STARSIM_VIEW_CACHE_ONLY=1 runs this alone).
 #  16. (world volume plan Task 5) the cloud world volume (CloudWorldVolume) of the analog and ERA5 pair over Starbase:
 #      the GPU bake vs the core's cell bake per level 0, 2, 5, level 2's water per weather cell, the max-extinction mip
-#      and the distance field conservative (exhaustively, and sampled by the probe), a rebake bit-identical, the GLSL grid
+#      and the distance field conservative (exhaustively, and sampled by the probe; the fade band of levels 0-6), a
+#      clamped bottom read at its edge, a rebake bit-identical, the GLSL grid
 #      mirror within 1e-3 of a cell, the bake binding's input forms, the pair switch (STARSIM_VOLUME_ONLY=16 runs this
 #      alone; another value exits 1). STARSIM_WORLD_VOLUME=1 turns the flag on for every GPU check.
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
@@ -2931,6 +2932,9 @@ func _march_reference(path: String, bytes: PackedByteArray, label: String) -> vo
 ##   either snapshot (no cloud within the claimed distance); on VOLUME_PROBE_POINTS points inside blocks claimed free the
 ##   trilinear rho of both snapshots (the probe kernel: what a sample reads) is 0 - so the sub-cell field (it
 ##   redistributes rho, peak sigma_c) is 0 there at any lift;
+## - per level 0-6 (every adjacent pair; review round 2) the fade band: free balls empty and the max-extinction bound
+##   above every density of the point's block (level k + 1 blended in); at the 2 m camera levels 0-1's clamped bottom
+##   reads its edge cell below the bottom cell's centre (N2);
 ## - a rebake of a level-2 box bit-identical;
 ## - the GLSL grid mirror (probe kernel cloud_volume_grid_in) vs CloudWorldVolumeLayout.grid_of for VOLUME_MIRROR_POINTS
 ##   camera offsets in a frame VOLUME_MIRROR_FRAME_M from the camera: within VOLUME_MIRROR_BOUND x the containing
@@ -2986,9 +2990,9 @@ const VOLUME_REBAKE_FROM := Vector3i(96, 96, 0)
 const VOLUME_REBAKE_SIZE := Vector3i(64, 64, 64)
 ## Points per level in the fade band (Task 5 review I1: the band blends level k + 1; the lookups must bound it too).
 const VOLUME_BAND_POINTS := 10000
-## Checks: binding 3, per camera 1 fill + 3 levels x (cells + mip + distance + free box + fade band) + 1 water, rebake,
-## mirror, switch 4.
-const VOLUME_SAMPLES := 3 + 2 * (1 + 3 * 5 + 1) + 1 + 1 + 5
+## Checks: binding 3, per camera 1 fill + 3 levels x (cells + mip + distance + free box) + 7 fade bands + 1 water, 2
+## clamped bottoms (camera 2 m), rebake, mirror, switch 4.
+const VOLUME_SAMPLES := 3 + 2 * (1 + 3 * 4 + 7 + 1) + 2 + 1 + 1 + 5
 
 var _volume_rng := RandomNumberGenerator.new()
 
@@ -3038,6 +3042,11 @@ func _world_volume_samples() -> void:
 			var blocks := _volume_blocks(reads[k]["floats"])
 			_volume_cells_vs_cpu(k, lookup, reads[k]["floats"], blocks["cloudy"], files, "%s, level %d" % [label, k])
 			_volume_occupancy(k, lookup, reads[k]["floats"], blocks, "%s, level %d" % [label, k])
+		for k in CloudWorldVolumeLayout.LEVELS - 1:
+			_volume_band(k, lookup, "%s, level %d" % [label, k])
+		if i == 0:
+			for k in CloudWorldVolumeLayout.WINDOWED_LEVELS:
+				_volume_bottom(k, lookup, "%s, level %d" % [label, k])
 		_volume_water(lookup, reads[2]["floats"], files, snapshots, label)
 		if i == VOLUME_HEIGHTS_M.size() - 1:
 			await _volume_rebake(camera, lookup, reads[2]["bytes"])
@@ -3376,8 +3385,8 @@ func _volume_water(lookup: Dictionary, floats: PackedFloat32Array, files: Array[
 
 
 ## Level k's occupancy exhaustively: the max mip and the distance field read back against the density's blocks (the
-## distance against the ring-dilated occupancy, Task 5 review M1); then the probe across claimed free boxes and in the
-## fade band (_volume_free_probe).
+## distance against the ring-dilated occupancy, Task 5 review M1); then the probe across claimed free boxes
+## (_volume_free_probe; the fade band: _volume_band).
 func _volume_occupancy(k: int, lookup: Dictionary, floats: PackedFloat32Array, blocks: Dictionary,
 		label: String) -> void:
 	var L := CloudWorldVolumeLayout
@@ -3441,8 +3450,7 @@ func _volume_occupancy(k: int, lookup: Dictionary, floats: PackedFloat32Array, b
 
 ## The occupancy lookups as the march will use them (probe mode 2 at points p, mode 3 the blended density at points q):
 ## free boxes - points p in blocks claimed free, q anywhere in the claimed free ball: no density (either snapshot, the
-## fade toward level k + 1 included); fade band (review I1) - points p within FADE_CELLS + 1/2 cells of the window edge,
-## q in the free ball (no density) and q in p's block (density <= the max-extinction bound).
+## fade toward level k + 1 included). The fade band (review I1): _volume_band.
 func _volume_free_probe(k: int, lookup: Dictionary, free_blocks: Array[int], label: String) -> void:
 	var L := CloudWorldVolumeLayout
 	var storage: Vector3i = lookup["levels"][k]["storage"]
@@ -3465,25 +3473,78 @@ func _volume_free_probe(k: int, lookup: Dictionary, free_blocks: Array[int], lab
 		var u := c - Vector3(origin)
 		if u.x >= 0.0 and u.y >= 0.0 and u.z >= 0.0 and u.x < window.x and u.y < window.y and u.z < window.z:
 			free_cells.append(c)
-	var band_cells: Array[Vector3] = []
-	var band := float(L.FADE_CELLS) + 0.5
-	for i in VOLUME_BAND_POINTS:
-		var u := Vector3(_volume_rng.randf() * window.x, _volume_rng.randf() * window.y, _volume_rng.randf() * window.z)
-		var axis := _volume_rng.randi_range(0, 1)
-		var depth := _volume_rng.randf() * band
-		u[axis] = depth if _volume_rng.randf() < 0.5 else window[axis] - depth
-		band_cells.append(Vector3(origin) + u)
 	var free := _volume_probe_pass(k, lookup, free_cells, false)
-	var in_band := _volume_probe_pass(k, lookup, band_cells, true)
 	_check("world volume free boxes sampled (%s)" % label, free["violations"] == 0 and free["free"] > 0,
 			"%d points in blocks claimed free: %d with density > 0 at a point of their free ball (either snapshot, "
 			% [free_cells.size(), free["violations"]] + "fade incl.; %d free balls, mean %.0f m)" % [free["free"],
 			free["mean_free_m"]])
-	var band_ok: bool = in_band["violations"] == 0 and in_band["bound_low"] == 0 and in_band["free"] > 0
+
+
+## The fade band of level k (every level 0-6: each adjacent pair, review round 2): VOLUME_BAND_POINTS points within
+## FADE_CELLS + 1/2 cells of the window edge - horizontally, and for levels 0-1 at the window top (and bottom unless
+## clamped) - q in the free ball (no density) and q in p's level-k block (density <= the max-extinction bound; level
+## 1's blocks straddle level 2's vertically).
+func _volume_band(k: int, lookup: Dictionary, label: String) -> void:
+	var L := CloudWorldVolumeLayout
+	var e: Dictionary = lookup["levels"][k]
+	var origin: Vector3i = e["origin"]
+	var window := Vector3(L.window_size(k))
+	var axes := 2 if k < L.WINDOWED_LEVELS else 1
+	var band_cells: Array[Vector3] = []
+	var band := float(L.FADE_CELLS) + 0.5
+	for i in VOLUME_BAND_POINTS:
+		var u := Vector3(_volume_rng.randf() * window.x, _volume_rng.randf() * window.y, _volume_rng.randf() * window.z)
+		var axis := _volume_rng.randi_range(0, axes)
+		var depth := _volume_rng.randf() * band
+		var low := _volume_rng.randf() < 0.5 and not (axis == 2 and bool(e["clamped_bottom"]))
+		u[axis] = depth if low else window[axis] - depth
+		band_cells.append(Vector3(origin) + u)
+	var in_band := _volume_probe_pass(k, lookup, band_cells, true)
+	var band_ok: bool = e["shown"] and in_band["violations"] == 0 and in_band["bound_low"] == 0 and in_band["free"] > 0
 	_check("world volume fade band bounded (%s)" % label, band_ok, "%d points in the fade band: %d with density > 0 "
 			% [band_cells.size(), in_band["violations"]] + "in their free ball (%d free balls), %d with a density in "
 			% [in_band["free"], in_band["bound_low"]] + "their block above the max-extinction bound (%d with density "
 			% in_band["dense"] + "> 0 there)")
+
+
+## Levels 0-1 with a clamped bottom (review round 2, N2): a sample below the shell bottom's cell centre reads the bottom
+## cell (the clamped edge), never the storage's top (guard) cell: VOLUME_BAND_POINTS columns, the density (probe mode 1)
+## at a random height in the lowest half cell equals the one at its centre; the columns whose top storage cell differs
+## from the bottom one (where a wrap would show) are counted.
+func _volume_bottom(k: int, lookup: Dictionary, label: String) -> void:
+	var L := CloudWorldVolumeLayout
+	var rd := RenderingServer.get_rendering_device()
+	var volume := _clouds.effect.world_volume
+	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
+	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
+	var e: Dictionary = lookup["levels"][k]
+	var origin: Vector3i = e["origin"]
+	var window := Vector3(L.window_size(k))
+	var below := PackedFloat32Array()
+	var centre := PackedFloat32Array()
+	var top := PackedFloat32Array()
+	for i in VOLUME_BAND_POINTS:
+		var c := Vector3(origin) + Vector3(_volume_rng.randf() * window.x, _volume_rng.randf() * window.y, 0.0)
+		below.append_array(_volume_grid_point(k, c + Vector3(0.0, 0.0, _volume_rng.randf() * 0.5)))
+		centre.append_array(_volume_grid_point(k, c + Vector3(0.0, 0.0, 0.5)))
+		top.append_array(_volume_grid_point(k, c + Vector3(0.0, 0.0, L.CELLS_V - 0.5)))
+	var a := volume.probe(rd, 1, below, lookup, hi + lo, k, k)
+	var b := volume.probe(rd, 1, centre, lookup, hi + lo, k, k)
+	var t := volume.probe(rd, 1, top, lookup, hi + lo, k, k)
+	var differ := 0
+	var wrap_visible := 0
+	var ok := bool(e["clamped_bottom"]) and a.size() == below.size() and b.size() == below.size()
+	for i in (VOLUME_BAND_POINTS if ok else 0):
+		var same := true
+		var top_differs := false
+		for j in 4:
+			same = same and a[4 * i + j] == b[4 * i + j]
+			top_differs = top_differs or t[4 * i + j] != b[4 * i + j]
+		differ += 0 if same else 1
+		wrap_visible += 1 if top_differs else 0
+	_check("world volume clamped bottom reads its edge (%s)" % label, ok and differ == 0,
+			"%d columns: %d read other than the bottom cell below its centre (%d whose top storage cell differs)"
+			% [VOLUME_BAND_POINTS, differ, wrap_visible])
 
 
 ## One probe round: the lookups at the points (cells of level k), then the blended density at a point of each free

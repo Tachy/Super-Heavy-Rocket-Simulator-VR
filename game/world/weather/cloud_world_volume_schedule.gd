@@ -17,13 +17,15 @@ extends RefCounted
 ## meets every deadline times SCROLL_MARGIN, capped at SCROLL_CAP_MS (the spike cap less the light's share), and the
 ## normal bake share left after fills tops it up (baking further ahead). The window then advances toward the camera
 ## only onto baked cells (never late: no frame reads an unbaked cell; a slab that misses its deadline makes the window
-## wait - lag, the coarser level shows the clouds there). Baked slabs are lit first (priority 1: they have no light
-## yet); whatever of them the light budget cannot cover gets provisional light and stays first in line
-## (PROVISIONAL_MAX_S is the gate's bound on how long that may last).
+## wait - lag, the coarser level shows the clouds there). Nesting (review round 2, N1): the windows advance coarse to
+## fine and a level nested in the next coarser one moves only to positions that keep it nested (it waits for it); a
+## level is shown (lookup `shown`) while it is ready and the next coarser level is shown with it nested. Baked slabs
+## are lit first (priority 1: they have no light yet); whatever of them the light budget cannot cover gets provisional
+## light and stays first in line (PROVISIONAL_MAX_S is the gate's bound on how long that may last).
 ## Fill (cold start, jump, level switched on, whole-window moves): the window is "dirty" and baked under the budget,
 ## coarse to fine, the coarsest level first (world-volume Task 5: its 8.4 M cells of 8448 taps take the GPU far longer
 ## than a frame's UPKEEP_SPIKE_MS, so it is budgeted too; until it is `ready` nothing of the volume is shown - the march's
-## fallback, today's per-sample march, draws the frame). A level is `ready` (shown) once its dirty list is empty. Pair
+## fallback, today's per-sample march, draws the frame). A level is `ready` (filled) once its dirty list is empty. Pair
 ## switch: a snapshot replaced in slot s is rebaked into slot s's channel pair alone, under the bake budget, coarse to
 ## fine - for a level still filling only what its fill has baked already (the rest bakes both snapshots anyway);
 ## `slot_ready[s]` tells when it may take weight (the spare included).
@@ -96,6 +98,8 @@ class _Level extends RefCounted:
 	var shown := true  # false: a re-frame's spare while it is built
 	var active := false
 	var ready := false
+	## Shown to the march (lookup "shown"): ready, and every coarser level drawn with this window nested (N1).
+	var drawn := false
 	var origin := Vector3i.ZERO  # the window's (what the lookup reads)
 	var storage := Vector3i.ZERO  # the texture's cells (CloudWorldVolumeLayout.storage_box)
 	var scroll: Array = []  # storage slabs {from, to} exposed by a scroll, still to bake (both snapshots)
@@ -434,23 +438,45 @@ func _bake_scroll(items: Array, budget: int, bake_out: Array) -> void:
 
 
 ## Moves a ready level's window toward the camera one cell at a time per axis, only while the window stays inside the
-## storage and holds no queued (unbaked) cell; a window left behind its target is counted (waiting: lag).
+## storage and holds no queued (unbaked) cell, and - while the level is nested in the next coarser one, shown -
+## only onto positions that keep it nested (N1: a finer level waits for its coarser one; called coarse to fine); a
+## window left behind its target is counted (waiting: lag). Then whether the level is drawn.
 func _advance_window(lv: _Level) -> void:
+	lv.drawn = false
 	if not lv.active or not lv.ready:
 		return
+	var up := _up_level(lv)
+	var keep := up != null and up.drawn and CloudWorldVolumeLayout.nested(lv.k, lv.origin, up.origin)
 	var target := lv.layout.window_origin(lv.k, _grid_of_level(lv))
 	var o := lv.origin
 	for axis in 3:
 		while o[axis] != target[axis]:
 			var c := o
 			c[axis] += signi(target[axis] - o[axis])
-			if not _window_holds(lv, c):
+			if not _window_holds(lv, c) or (keep and not CloudWorldVolumeLayout.nested(lv.k, c, up.origin)):
 				break
 			o = c
 	if o != lv.origin:
 		_set_origin(lv, o)
 	if o != target:
 		_waiting += 1
+	lv.drawn = _nests_in_up(lv)
+
+
+## The next coarser level a level's fade band blends (null for the coarsest and for a re-frame's spare).
+func _up_level(lv: _Level) -> _Level:
+	if lv == _spare or lv.k + 1 >= CloudWorldVolumeLayout.LEVELS:
+		return null
+	return _levels[lv.k + 1]
+
+
+## The N1 invariant for a ready level: the coarsest one, or the next coarser level drawn and (in the same frame) holding
+## this window where its weight is 1. Levels of different frames (a re-frame in progress) are not compared here.
+func _nests_in_up(lv: _Level) -> bool:
+	var up := _up_level(lv)
+	if up == null:
+		return true
+	return up.drawn and (up.layout != lv.layout or CloudWorldVolumeLayout.nested(lv.k, lv.origin, up.origin))
 
 
 func _window_holds(lv: _Level, origin: Vector3i) -> bool:
@@ -814,7 +840,7 @@ func _lookup() -> Dictionary:
 	var levels: Array = []
 	for lv: _Level in _levels:
 		levels.append({"level": lv.k, "origin": lv.origin, "storage": lv.storage, "active": lv.active,
-				"ready": lv.ready,
+				"ready": lv.ready, "shown": lv.drawn,
 				"frame_origin_earth_m": lv.layout.origin_earth_m, "vertical_fade": lv.k < L.WINDOWED_LEVELS,
 				"clamped_bottom": lv.origin.z == 0})
 	var lookup := {"levels": levels, "slot_ready": _slot_ready.duplicate(), "slot_ids": _slot_ids.duplicate()}
