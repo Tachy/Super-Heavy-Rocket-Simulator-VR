@@ -25,6 +25,7 @@
 #include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/cloud_render_texels.hpp"
 #include "starsim/environment/cloud_transfer_table.hpp"
+#include "starsim/environment/cloud_volume_bake.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/environment/weather_snapshot_build.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
@@ -716,6 +717,86 @@ double StarsimCore::weather_cloud_nearest_m(const godot::Vector3& position_itrf_
     return nearest;
 }
 
+StarsimCore::BakeInputs StarsimCore::bake_inputs(const std::string& file) {
+    const std::lock_guard<std::mutex> lock(bake_mutex_);
+    if (!bake_noise_) {
+        bake_noise_ = std::make_shared<const environment::CloudNoise>(environment::generate_cloud_noise());
+    }
+    if (!bake_field_ || bake_field_file_ != file) {
+        const SnapshotPtr snapshot = weather_snapshot_of(file);
+        if (!snapshot) return {bake_noise_, nullptr};
+        bake_field_ =
+            std::make_shared<const environment::CloudRenderField>(environment::make_cloud_render_field(*snapshot));
+        bake_field_file_ = file;
+    }
+    return {bake_noise_, bake_field_};
+}
+
+namespace {
+
+// The bake's shape frame of 3 (anchor) or 12 (anchor + the three origins) values; nullopt otherwise.
+std::optional<environment::CloudShapeFrame> bake_shape_frame(const godot::PackedFloat64Array& v) {
+    if (v.size() != 3 && v.size() != 12) return std::nullopt;
+    const auto at = [&](int64_t i) { return math::Vec3{v[i], v[i + 1], v[i + 2]}; };
+    environment::CloudShapeFrame frame = environment::make_cloud_shape_frame(at(0));
+    if (v.size() == 12) {
+        frame.shape_origin_earth_m = at(3);
+        frame.stratiform_origin_earth_m = at(6);
+        frame.ice_origin_earth_m = at(9);
+    }
+    return frame;
+}
+
+}  // namespace
+
+godot::PackedVector2Array StarsimCore::weather_cloud_cell_bakes(
+    const godot::String& snapshot_path, const godot::PackedFloat64Array& cells,
+    const godot::PackedFloat64Array& shape_origins_earth_m) {
+    constexpr int64_t stride = 12;
+    godot::PackedVector2Array out;
+    const std::optional<environment::CloudShapeFrame> frame = bake_shape_frame(shape_origins_earth_m);
+    if (!frame || cells.size() % stride != 0) {
+        godot::UtilityFunctions::push_error(godot::String::utf8(
+            "StarsimCore.weather_cloud_cell_bakes: 12 Werte je Zelle und 3 oder 12 Werte für die Rauschursprünge"));
+        return out;
+    }
+    try {
+        const BakeInputs inputs = bake_inputs(utf8_of(snapshot_path));
+        if (!inputs.field) throw std::runtime_error("Datei fehlt oder ist beschädigt: " + utf8_of(snapshot_path));
+        std::vector<environment::CloudCellBox> boxes(static_cast<std::size_t>(cells.size() / stride));
+        for (std::size_t i = 0; i < boxes.size(); ++i) {
+            const int64_t b = static_cast<int64_t>(i) * stride;
+            const auto at = [&](int64_t j) { return math::Vec3{cells[b + j], cells[b + j + 1], cells[b + j + 2]}; };
+            boxes[i] = {at(0), at(3), at(6), at(9)};
+        }
+        const std::vector<environment::CloudCellBake> bakes =
+            environment::bake_cloud_cells(*inputs.field, *inputs.noise, *frame, boxes);
+        out.resize(static_cast<int64_t>(bakes.size()));
+        for (std::size_t i = 0; i < bakes.size(); ++i) {
+            out.set(static_cast<int64_t>(i),
+                    godot::Vector2(bakes[i].mean_extinction_per_m, bakes[i].in_cloud_extinction_per_m));
+        }
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("StarsimCore.weather_cloud_cell_bakes: ") + e.what());
+        out.clear();
+    }
+    return out;
+}
+
+godot::Vector2 StarsimCore::weather_cloud_cell_bake(const godot::String& snapshot_path,
+                                                    const godot::Vector3& centre_earth_m, const godot::Vector2& cell_m,
+                                                    const godot::PackedFloat64Array& shape_origins_earth_m) {
+    const environment::CloudCellBox box = environment::cloud_cell_box(to_core(centre_earth_m), cell_m.x, cell_m.y);
+    godot::PackedFloat64Array cells;
+    for (const math::Vec3& v : {box.centre_earth_m, box.edge_x_m, box.edge_y_m, box.edge_z_m}) {
+        cells.push_back(v.x);
+        cells.push_back(v.y);
+        cells.push_back(v.z);
+    }
+    const godot::PackedVector2Array out = weather_cloud_cell_bakes(snapshot_path, cells, shape_origins_earth_m);
+    return out.is_empty() ? godot::Vector2(-1.0, -1.0) : out[0];
+}
+
 godot::PackedStringArray StarsimCore::weather_cached_files() const {
     godot::PackedStringArray files;
     const std::lock_guard<std::mutex> lock(weather_mutex_);
@@ -963,6 +1044,11 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::weather_cloud_light);
     ClassDB::bind_method(D_METHOD("weather_cloud_nearest_m", "position_itrf_m", "reach_m"),
                          &StarsimCore::weather_cloud_nearest_m);
+    ClassDB::bind_method(D_METHOD("weather_cloud_cell_bake", "snapshot_path", "centre_earth_m", "cell_m",
+                                  "shape_origins_earth_m"),
+                         &StarsimCore::weather_cloud_cell_bake);
+    ClassDB::bind_method(D_METHOD("weather_cloud_cell_bakes", "snapshot_path", "cells", "shape_origins_earth_m"),
+                         &StarsimCore::weather_cloud_cell_bakes);
     ClassDB::bind_method(D_METHOD("cloud_noise"), &StarsimCore::cloud_noise);
     ClassDB::bind_method(D_METHOD("cloud_optics_parameters"), &StarsimCore::cloud_optics_parameters);
     ClassDB::bind_method(D_METHOD("cloud_slab_radiance", "optical_depth", "sun_cos_zenith", "view_cos_zenith",

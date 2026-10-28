@@ -207,6 +207,7 @@ add_executable(starsim_core_tests
     test_cloud_optics.cpp
     test_cloud_transfer_table.cpp
     test_cloud_render_texels.cpp
+    test_cloud_volume_bake.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain tomlplusplus::tomlplusplus)
 target_compile_definitions(starsim_core_tests PRIVATE

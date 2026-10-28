@@ -13,14 +13,18 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include "starsim/environment/atmospheric_refraction.hpp"
 #include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
+#include "starsim/environment/cloud_render_field.hpp"
 #include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
 
@@ -107,6 +111,20 @@ public:
     // (environment::cloud_render_nearest_m, the smaller of both snapshots, whatever their blend); +inf for none within
     // reach_m or without an active snapshot (the cloud view cache's near shell, cloud view cache Task 5).
     double weather_cloud_nearest_m(const godot::Vector3& position_itrf_m, double reach_m) const;
+    // Checks only (cloud world volume, core cloud_volume_bake.hpp): the CPU reference of the cell bake of ONE snapshot
+    // file - (rho, sigma_c) in 1/m. Positions are Earth-local render axes (polar +Y, CloudWorldVolumeLayout's).
+    // shape_origins_earth_m: 3 values (the anchor point; its noise origins as CloudLayer computes them) or 12 (anchor,
+    // then the cumulus, stratiform and ice origins the GPU got). The snapshot's render field and the noise are loaded
+    // once and kept for the next call. Empty / (-1, -1) on an unreadable file or malformed input (error pushed).
+    // Single cell: cell_m = (horizontal, vertical) m, the box east / north / up at the centre.
+    godot::Vector2 weather_cloud_cell_bake(const godot::String& snapshot_path, const godot::Vector3& centre_earth_m,
+                                           const godot::Vector2& cell_m,
+                                           const godot::PackedFloat64Array& shape_origins_earth_m);
+    // Batched: cells with 12 values each (centre, then the full edge vectors e_x, e_y, e_z - the grid's own axes);
+    // baked in parallel, one (rho, sigma_c) per cell.
+    godot::PackedVector2Array weather_cloud_cell_bakes(const godot::String& snapshot_path,
+                                                       const godot::PackedFloat64Array& cells,
+                                                       const godot::PackedFloat64Array& shape_origins_earth_m);
     // {luminance: Vector3 cd/m^2, transmittance: Vector3}
     godot::Dictionary atmosphere_sky_luminance(const godot::Vector3& camera_itrf_m,
                                                const godot::Vector3& view_direction_itrf,
@@ -213,6 +231,16 @@ private:
     mutable std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
     SnapshotPtr weather_before_, weather_after_;
     double weather_blend_ = 0.0;
+    // The cell bake reference's inputs (weather_cloud_cell_bakes): the noise and the last file's render field.
+    struct BakeInputs {
+        std::shared_ptr<const environment::CloudNoise> noise;
+        std::shared_ptr<const environment::CloudRenderField> field;
+    };
+    BakeInputs bake_inputs(const std::string& file);
+    std::mutex bake_mutex_;  // guards the three below
+    std::shared_ptr<const environment::CloudNoise> bake_noise_;
+    std::string bake_field_file_;
+    std::shared_ptr<const environment::CloudRenderField> bake_field_;
     mutable std::mutex transfer_mutex_;  // guards transfer_table_ (loaded on a worker, read by the checks)
     std::shared_ptr<const environment::CloudTransferTable> transfer_table_;
     std::shared_ptr<const environment::CloudSlabTransmittanceLut> transmittance_lut_;  // guarded by transfer_mutex_

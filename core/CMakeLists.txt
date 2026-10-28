@@ -167,6 +167,8 @@ add_library(starsim_core STATIC
     src/environment/cloud_transfer_table.cpp
     src/environment/cloud_noise.cpp
     src/environment/cloud_render_texels.cpp
+    src/environment/cloud_render_field.cpp
+    src/environment/cloud_volume_bake.cpp
     src/environment/cache_file_io.cpp
     src/config/lunar_site_config.cpp
     src/config/geoid_config.cpp
