@@ -2,10 +2,11 @@
 # Headless: godot --headless --path game --script res://tests/cloud_world_volume_test.gd
 # Checked: the azimuthal-equidistant grid (round trip, distances), the level on / off heights and vertical windows,
 # toroidal addressing, exposed slabs, the fade band (also vertical for levels 0-1), the re-frame test; the schedule:
-# cold start (whole coarsest level baked, light provisional from the column, finer levels coarse to fine), scroll slabs
-# baked in the plan that adopts the origin (1 km/s, 7.8 km/s), Sun / Moon / weather-blend triggers, light budget and
-# order, pair switch, jump, re-frame (one level at a time, coarsest first, a shown version in every plan, spike cap),
-# plan() cost.
+# cold start (the coarsest level baked first under the spike budget and shown once whole, light provisional from the
+# column, finer levels coarse to fine), scroll slabs baked in the plan that adopts the origin (1 km/s, 7.8 km/s), the
+# layout's origins kept by the schedule, Sun / Moon / weather-blend triggers, light budget and order, pair switch (also
+# during a fill: no cell baked twice), jump, re-frame (one level at a time, coarsest first, a shown version in every
+# plan, spike cap), plan() cost. The schedules run at TEST_TAPS_PER_MS (world-volume Task 5: the budget counts taps).
 extends SceneTree
 
 const A_M := 6378137.0
@@ -14,6 +15,8 @@ const DT := 1.0 / 45.0
 const SUN_30 := 30.0
 const CLOUD_TOP_M := 11500.0  # with the camera at 100 m: H = 12000 m above level 0's lowest cell (-500 m)
 const FILL_FRAMES_MAX := 400
+## A GPU baking this many taps per ms fills the whole volume (1.24e11 taps) in ~85 spike frames: the logic's tests.
+const TEST_TAPS_PER_MS := 1.0e9
 
 var _failures := 0
 var _rng := RandomNumberGenerator.new()
@@ -256,6 +259,12 @@ func _test_reframe_and_memory() -> void:
 
 # ---------------------------------------------------------------- schedule
 
+func _schedule(layout := CloudWorldVolumeLayout.new()) -> CloudWorldVolumeSchedule:
+	var s := CloudWorldVolumeSchedule.new(layout)
+	s.bake_taps_per_ms = TEST_TAPS_PER_MS
+	return s
+
+
 func _cam(lam: float, h: float) -> Vector3:
 	return (A_M + h) * Vector3(cos(lam), 0.0, sin(lam))
 
@@ -295,48 +304,65 @@ func _sum_cells(jobs: Array, level := -1) -> int:
 
 func _test_cold_start() -> void:
 	print("cold start")
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var layout := CloudWorldVolumeLayout.new()
+	var s := _schedule(layout)
 	var sun := _sun(0.0, SUN_30)
 	var p := _plan(s, 0.0, 100.0, sun)
-	var whole := 256 * 256 * 128
-	_check(_sum_cells(p["bake"], 7) == whole, "the first plan bakes the whole coarsest level")
+	var cap: float = CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS * 0.5 * s.bake_taps_per_ms
+	_check(_sum_cells(p["bake"]) == _sum_cells(p["bake"], 7) and _sum_cells(p["bake"], 7) > 0
+			and p["bake_taps"] <= cap + CloudWorldVolumeLayout.cell_taps(7),
+			"the first plan bakes the coarsest level first, within the spike's bake budget (%d taps)" % p["bake_taps"])
 	var channels_ok := true
 	for j: Dictionary in p["bake"]:
 		channels_ok = channels_ok and j["snapshot_channel"] == -1
 	_check(channels_ok, "...both snapshots")
-	var lv: Array = p["lookup"]["levels"]
-	_check(lv[7]["ready"] and lv[7]["active"], "the coarsest level is shown in the first plan")
-	var lit7 := _sum_cells(p["light"], 7)
-	var prov7 := _sum_cells(p["provisional"], 7)
-	_check(lit7 + prov7 == whole, "its light is real or provisional everywhere (%d + %d)" % [lit7, prov7])
-	var from_column := true
-	for j: Dictionary in p["provisional"]:
-		if j["level"] == 7:
-			from_column = from_column and j["from_column"]
-	_check(prov7 > 0 and from_column, "the coarsest level's provisional light comes from the grid-mean column")
+	_check(not p["lookup"]["levels"][7]["ready"], "...and does not show it before it is baked whole")
 	_check(p["light_cells"] <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS * s.light_cells_per_ms, "first-plan light within the spike cap")
-	# Finer levels follow coarse to fine; all within the spike cap; complete in about a second.
-	var first_seen := {7: 0}
+	# Until the coarsest level is whole: every plan lights what it baked (real or provisional, the provisional light
+	# from the grid-mean column); finer levels follow coarse to fine; all within the spike cap.
+	var first_seen := {}
 	var order_ok := true
 	var spike_ok := true
+	var lit_ok := true
+	var from_column := true
+	var prov7 := 0
+	var ready7_at := -1
 	var frames := 1
-	while not s.complete() and frames < FILL_FRAMES_MAX:
-		p = _plan(s, 0.0, 100.0, sun)
-		frames += 1
+	while true:
 		for j: Dictionary in p["bake"]:
 			if not first_seen.has(j["level"]):
 				first_seen[j["level"]] = frames
-		var est: float = p["bake_cells"] / s.bake_cells_per_ms + p["light_cells"] / s.light_cells_per_ms
+		if ready7_at < 0:
+			lit_ok = lit_ok and _sum_cells(p["light"], 7) + _sum_cells(p["provisional"], 7) >= _sum_cells(p["bake"], 7)
+			prov7 += _sum_cells(p["provisional"], 7)
+			if p["lookup"]["levels"][7]["ready"]:
+				ready7_at = frames
+		for j: Dictionary in p["provisional"]:
+			if j["level"] == 7:
+				from_column = from_column and j["from_column"]
+		var est: float = p["bake_taps"] / s.bake_taps_per_ms + p["light_cells"] / s.light_cells_per_ms
 		spike_ok = spike_ok and est <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6
+		if s.complete() or frames >= FILL_FRAMES_MAX:
+			break
+		p = _plan(s, 0.0, 100.0, sun)
+		frames += 1
+	_check(ready7_at > 0 and first_seen.get(6, 0) >= ready7_at - 1, "the coarsest level is shown once baked whole (plan %d), "
+			% ready7_at + "level 6 starts in its last plan or after (%d)" % first_seen.get(6, -1))
+	_check(lit_ok and from_column, "its baked cells get real or provisional light in their plan (%d " % prov7
+			+ "provisional, from the grid-mean column)")
 	for k in range(7, 0, -1):
 		order_ok = order_ok and first_seen.has(k) and first_seen.has(k - 1) and first_seen[k] <= first_seen[k - 1]
 	_check(order_ok and first_seen.size() == 8, "finer levels are baked coarse to fine")
-	_check(spike_ok, "every later fill plan stays within UPKEEP_SPIKE_MS")
-	_check(s.complete() and frames <= 120, "the whole volume is filled within ~1 s of frames (%d at 45 Hz)" % frames)
+	_check(spike_ok, "every fill plan stays within UPKEEP_SPIKE_MS")
+	_check(s.complete() and frames <= 120, "the whole volume is filled in %d frames at %s taps per ms" % [frames,
+			String.num_scientific(TEST_TAPS_PER_MS)])
 	var all_ready := true
+	var origins_ok := true
 	for e: Dictionary in _plan(s, 0.0, 100.0, sun)["lookup"]["levels"]:
 		all_ready = all_ready and e["ready"]
+		origins_ok = origins_ok and layout.origins[e["level"]] == e["origin"]
 	_check(all_ready, "every level shown after the fill")
+	_check(origins_ok, "the layout holds every level's window origin (fade_weight)")
 	_check(not s.light_stale(0), "...and its light is up to date")
 
 
@@ -344,7 +370,7 @@ func _test_scroll() -> void:
 	print("scroll")
 	var sun := _sun(0.0, SUN_30)
 	# 1 km/s at 100 m (45 Hz): the newly exposed slabs are baked in the plan that adopts the origin, 600 frames.
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_settle(s, 0.0, 100.0, sun)
 	var ref := CloudWorldVolumeLayout.new()
 	ref.set_frame(_cam(0.0, 100.0))
@@ -374,7 +400,7 @@ func _test_scroll() -> void:
 	_check(moved > 0 and late == 0, "1 km/s: exactly the exposed slabs baked in the adopting plan (%d moves, %d late)" % [moved, late])
 	_check(prov_max <= CloudWorldVolumeSchedule.PROVISIONAL_MAX_S, "provisional light never older than %.1f s" % prov_max)
 	# 7.8 km/s at 120 km: bake cells per frame follow the layout (levels 2-7); p99 plan() cost <= 1 ms.
-	s = CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	s = _schedule()
 	_settle(s, 0.0, 120000.0, sun)
 	ref = CloudWorldVolumeLayout.new()
 	ref.set_frame(_cam(0.0, 120000.0))
@@ -436,7 +462,7 @@ func _test_triggers() -> void:
 	var sun := _sun(0.0, SUN_30)
 	var thr := CloudWorldVolumeSchedule.sun_threshold_rad(0, deg_to_rad(30.0), 12000.0)
 	_check(absf(thr - 2.6e-4) < 0.05e-4, "sun_threshold_rad(0, 30 deg, 12 km) = %s rad" % thr)
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_check(_settle(s, 0.0, 100.0, sun) > 0, "settled (fill and light queues empty)")
 	var p := _plan(s, 0.0, 100.0, _rotate(sun, _up(0.0), 0.9 * thr))
 	_check(p["light"].is_empty() and not s.light_stale(0), "Sun moved by 0.9 x threshold: no light jobs, level 0 not stale")
@@ -448,7 +474,7 @@ func _test_triggers() -> void:
 	_check(only0, "...and only level 0 (the coarser levels' thresholds are larger)")
 	_check(_settle(s, 0.0, 100.0, _rotate(sun, _up(0.0), 1.1 * thr)) > 0, "the refresh completes")
 	# Weather blend.
-	s = CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	s = _schedule()
 	_settle(s, 0.0, 100.0, sun, 0.3)
 	p = _plan(s, 0.0, 100.0, sun, 0.319)
 	_check(p["light"].is_empty() and not s.light_stale(0), "blend moved 0.019: no light jobs")
@@ -459,7 +485,7 @@ func _test_triggers() -> void:
 func _test_light_budget_and_order() -> void:
 	print("light budget, order")
 	var sun := _sun(0.0, SUN_30)
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_settle(s, 0.0, 100.0, sun, 0.3)
 	s.feedback(2.0, 400000, 800000)  # fixed GPU timings: calibrates the cells-per-ms rates
 	var cap := CloudWorldVolumeSchedule.LIGHT_BUDGET_MS * s.light_cells_per_ms
@@ -471,7 +497,7 @@ func _test_light_budget_and_order() -> void:
 		jobs += p["light"].size()
 	_check(jobs > 0 and worst <= cap, "light cells per plan %d <= the calibrated budget %.0f" % [worst, cap])
 	# Order: provisional slab first, then the nearest tile of the finest stale level.
-	s = CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	s = _schedule()
 	_settle(s, 0.0, 100.0, sun, 0.3)
 	var lam := 600.0 / (A_M + 100.0)  # 3 cells of level 2, 12 of level 0
 	var p := _plan(s, lam, 100.0, sun, 0.5)
@@ -510,7 +536,7 @@ func _test_moon() -> void:
 	print("moon")
 	var moon := Vector3(0.2, 0.5, 0.8).normalized()
 	var day := _sun(0.0, SUN_30)
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_settle(s, 0.0, 100.0, day)
 	var any_moon := false
 	var moved := moon.rotated(_up(0.0), 0.3)
@@ -536,7 +562,7 @@ func _test_moon() -> void:
 func _test_pair_switch() -> void:
 	print("pair switch")
 	var sun := _sun(0.0, SUN_30)
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_settle(s, 0.0, 100.0, sun)
 	var p := _plan(s, 0.0, 100.0, sun, 0.3, false, Vector3(0.0, 0.6, 0.8), [2, 1])
 	_check(not p["lookup"]["slot_ready"][0] and p["lookup"]["slot_ready"][1], "a new snapshot in slot 0: slot 0 not ready")
@@ -560,29 +586,55 @@ func _test_pair_switch() -> void:
 	_check(p["lookup"]["slot_ready"][0] and only0, "slot 0's channel pair is rebaked alone (slot 1 untouched)")
 	_check(total == 8 * 256 * 256 * 128, "...every active level in full (%d cells, %d frames)" % [total, frames])
 	_check(coarse_first, "...coarse to fine")
+	# During a cold fill: the slot rebake covers only what the fill baked already - no cell baked twice for slot 0.
+	s = _schedule()
+	var baked := 0
+	for i in 20:
+		baked += _sum_cells(_plan(s, 0.0, 100.0, sun)["bake"])
+	var both := baked
+	var slot_only := 0
+	frames = 0
+	p = _plan(s, 0.0, 100.0, sun, 0.3, false, Vector3(0.0, 0.6, 0.8), [2, 1])
+	while frames < FILL_FRAMES_MAX:
+		for j: Dictionary in p["bake"]:
+			if j["snapshot_channel"] == 0:
+				slot_only += _cells(j)
+			elif j["snapshot_channel"] == -1:
+				both += _cells(j)
+		if s.complete():
+			break
+		p = _plan(s, 0.0, 100.0, sun, 0.3, false, Vector3(0.0, 0.6, 0.8), [2, 1])
+		frames += 1
+	var twice := both + slot_only - 8 * 256 * 256 * 128
+	_check(s.complete() and slot_only == baked and twice == baked, "a slot change during a fill rebakes the %d cells "
+			% baked + "baked before it alone (%d rebaked, %d both-snapshot cells beyond one fill)" % [slot_only,
+			twice - baked])
 
 
 func _test_jump() -> void:
 	print("jump")
 	var sun := _sun(0.0, SUN_30)
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_settle(s, 0.0, 100.0, sun)
 	var p := _plan(s, 0.7, 9000.0, sun, 0.3, true)
 	var lv: Array = p["lookup"]["levels"]
-	_check(_sum_cells(p["bake"], 7) == 256 * 256 * 128 and lv[7]["ready"], "jumped: the coarsest level is baked and shown in the same plan")
+	_check(_sum_cells(p["bake"], 7) > 0 and _sum_cells(p["bake"]) == _sum_cells(p["bake"], 7) and not lv[7]["ready"],
+			"jumped: the coarsest level is baked first, nothing of the old place shown")
 	_check(not lv[3]["ready"] and not lv[0]["ready"], "...the finer levels follow")
-	_check(_sum_cells(p["light"], 7) + _sum_cells(p["provisional"], 7) == 256 * 256 * 128, "...with real or provisional light everywhere")
+	_check(_sum_cells(p["light"], 7) + _sum_cells(p["provisional"], 7) >= _sum_cells(p["bake"], 7),
+			"...with real or provisional light for what it baked")
 	var frames := 1
 	while not s.complete() and frames < FILL_FRAMES_MAX:
 		_plan(s, 0.7, 9000.0, sun)
 		frames += 1
-	_check(s.complete() and frames <= 120, "the full volume is back within ~1 s (%d frames)" % frames)
+	_check(s.complete() and frames <= 120, "the full volume is back in %d frames at %s taps per ms" % [frames,
+			String.num_scientific(TEST_TAPS_PER_MS)])
 
 
 func _test_reframe_schedule() -> void:
 	print("re-frame")
 	var sun := _sun(0.0, SUN_30)
-	var s := CloudWorldVolumeSchedule.new(CloudWorldVolumeLayout.new())
+	var s := _schedule()
 	_settle(s, 0.0, 100.0, sun)
 	var old_frame: Vector3 = _plan(s, 0.0, 100.0, sun)["lookup"]["levels"][7]["frame_origin_earth_m"]
 	var rate := 7800.0 * DT / (A_M + 100.0)
@@ -607,7 +659,7 @@ func _test_reframe_schedule() -> void:
 			seq.append(rf["level"])
 		for e: Dictionary in p["lookup"]["levels"]:
 			ok_shown = ok_shown and (e["ready"] or not e["active"])
-		var est: float = p["bake_cells"] / s.bake_cells_per_ms + p["light_cells"] / s.light_cells_per_ms
+		var est: float = p["bake_taps"] / s.bake_taps_per_ms + p["light_cells"] / s.light_cells_per_ms
 		spike_ok = spike_ok and est <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6
 		finished = rf["level"] < 0 and s.complete() and not (p["lookup"]["levels"][7]["frame_origin_earth_m"] == old_frame)
 	_check(finished, "the re-frame finishes (%d frames)" % done_frames)

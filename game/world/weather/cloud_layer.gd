@@ -209,6 +209,19 @@ var view_cache := true:
 	set(value):
 		view_cache = value
 		ShaderGlobals.set_value(&"cloud_view_cache", value)
+## Fidelity flag (shader global cloud_world_volume; world-volume plan, default false until Task 13): true keeps the
+## cloud world volume (CloudWorldVolume: the clipmap of baked density, its occupancy and light) planned here every
+## frame and baked by the effect before the march; false: today's per-sample march alone, the reference path. Task 5:
+## the upkeep only, no march reads the volume yet. Default: the environment STARSIM_WORLD_VOLUME=1 or the user argument
+## --world_volume (every GPU check takes the environment).
+var world_volume := OS.get_environment("STARSIM_WORLD_VOLUME") == "1" \
+		or OS.get_cmdline_user_args().has("--world_volume"):
+	set(value):
+		world_volume = value
+		ShaderGlobals.set_value(&"cloud_world_volume", value)
+## The world volume's layout and schedule (main thread; the GPU side is effect.world_volume).
+var world_volume_layout := CloudWorldVolumeLayout.new()
+var world_volume_schedule := CloudWorldVolumeSchedule.new(world_volume_layout)
 ## The view cache's plan (layout, anchor, schedule, shown states; main thread).
 var view_cache_planner := CloudViewCachePlanner.new()
 var view_cache_fill_ms := 0.0  ## the last measured fill interval (GPU, ms; diagnostics)
@@ -254,11 +267,18 @@ var _view_cache_held_s := 0.0
 var _view_cache_rest_ms: Array[float] = []
 var _view_cache_march_ms: Array[float] = []  ## the near shell's GPU ms of the last frames that ran it, not covering
 var _view_cache_marched := false  ## the newest measured frame ran the near shell without covering
+## The world volume: restart at the next plan (a jump or a pinned pair), the time held while a batch waited, the last
+## plan's work and the last measured upkeep.
+var _volume_reset := false
+var _volume_held_s := 0.0
+var _volume_stats := {"bake_cells": 0, "light_cells": 0, "upkeep_ms": 0.0, "measured_ms": 0.0, "measured_taps": 0,
+	"measured_frames": 0}
 
 
 func _init() -> void:
 	name = "CloudLayer"
 	effect.light_cache = light_cache
+	effect.world_volume = CloudWorldVolume.new()
 
 
 ## Starts the noise generation on a worker and sets the optics; the quad joins the scene.
@@ -302,6 +322,7 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_far_3d_light", far_3d_light)
 	ShaderGlobals.set_value(&"cloud_air_shadow", air_shadow)
 	ShaderGlobals.set_value(&"cloud_view_cache", view_cache)
+	ShaderGlobals.set_value(&"cloud_world_volume", world_volume)
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,
@@ -385,6 +406,7 @@ func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
 	ShaderGlobals.set_value(&"cloud_blend", _w1)
 	effect.reset_history()
 	view_cache_planner.request_reset()  # the pinned pair at once: no tile of the old one
+	_volume_reset = true  # the world volume too: baked anew from the pinned pair
 	_push_light()
 
 
@@ -424,6 +446,7 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	far_enabled = visible_weight > 0.0 and not near
 	_update_shadow_frame(camera_render, height)
 	_update_light_cache(camera_render, height)
+	_update_world_volume(camera_render, delta_s)
 	# The maps count as valid only while the effect keeps running (its render callback stamps ran_msec; the render
 	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped
 	# effect (compositor detached, device lost) turns the shadows back to the column the next moments.
@@ -547,12 +570,67 @@ func notify_clock_jump() -> void:
 	_clock_jumped = true
 	view_cache_planner.request_reset()  # the view cache restarts coarse (never a tile of the old instant)
 	_view_cache_light_settled = false
+	_volume_reset = true
 
 
 ## The view jumped (World._view_jumped: a ground site, a focus, a Tab target): the view cache restarts coarse at the new
-## camera (never a tile of the old place).
+## camera (never a tile of the old place), the world volume restarts at it (coarsest level first).
 func notify_view_jump() -> void:
 	view_cache_planner.request_reset()
+	_volume_reset = true
+
+
+## The world volume's frame (world-volume plan Task 5): the measured upkeeps calibrate the schedule; with the flag on
+## and the last batch taken by the render thread the schedule plans the next (camera, Sun, Moon, blend, the slots'
+## snapshot ids: a replaced snapshot is rebaked into its slot's channel pair) and hands it to effect.world_volume. A
+## restart (jump, pinned pair) drops the adopted state first.
+func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
+	var volume := effect.world_volume
+	for f: Vector3 in volume.take_feedback():
+		world_volume_schedule.feedback(f.x, int(f.y), int(f.z))
+		_volume_stats["upkeep_ms"] = f.x
+		_volume_stats["measured_ms"] += f.x
+		_volume_stats["measured_taps"] += int(f.y)
+		_volume_stats["measured_frames"] += 1
+	if not world_volume:
+		return
+	_volume_held_s += maxf(delta_s, 0.0)
+	if volume.waiting():
+		return
+	if _volume_reset:
+		_volume_reset = false
+		world_volume_schedule.reset()
+		volume.forget()
+	var sun_value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
+	var moon_value: Variant = ShaderGlobals.value(&"atmosphere_moon_direction")
+	var sun: Vector3 = (sun_value as Vector3).normalized() if sun_value is Vector3 else Vector3.ZERO
+	var moon: Vector3 = (moon_value as Vector3).normalized() if moon_value is Vector3 else Vector3.ZERO
+	var top := 0.0
+	for slot: Dictionary in _slots:
+		top = maxf(top, float(slot.get("top_m", 0.0)))
+	var batch := world_volume_schedule.plan(camera_render, sun, moon, _w1, top if top > 0.0 else CloudEffect.CLOUD_TOP_M, false,
+			_volume_held_s, [_slots[0]["id"], _slots[1]["id"]])
+	_volume_held_s = 0.0
+	_volume_stats["bake_cells"] = batch["bake_cells"]
+	_volume_stats["light_cells"] = batch["light_cells"]
+	volume.submit(batch)
+
+
+## The world volume's last plan (cells to bake, cells to light), the last measured upkeep (GPU ms) and the sums of the
+## measured upkeeps (ms, taps, frames).
+func world_volume_stats() -> Dictionary:
+	return _volume_stats.duplicate()
+
+
+## With the world volume running, the weight moves onto a slot only once the volume's adopted state holds the slot's
+## snapshot in its channel pair (a replaced snapshot is baked while it has no weight; Review Focus 1); else at once.
+func _volume_gate(w1: float) -> float:
+	if not world_volume or not effect.world_volume.running():
+		return w1
+	var onto := 1 if w1 > _w1 else 0
+	if is_equal_approx(w1, _w1) or effect.world_volume.slot_holds(onto, _slots[onto]["id"]):
+		return w1
+	return _w1
 
 
 ## The view cache's frame (cloud view cache Task 4): the render thread's feedback (fill times, read-back distances)
@@ -653,9 +731,9 @@ func _advance(delta_s: float) -> void:
 		# carries weight).
 		_cancel_upload()
 		if _tracking:
-			_w1 = goal
+			_w1 = _volume_gate(goal)
 		else:
-			_w1 = move_toward(_w1, goal, step)
+			_w1 = _volume_gate(move_toward(_w1, goal, step))
 			_tracking = is_equal_approx(_w1, goal)
 		_release_unused()
 		return
@@ -669,7 +747,7 @@ func _advance(delta_s: float) -> void:
 		keep = 1 - keep  # fade toward the slot that holds a wanted snapshot
 	var full := float(keep)
 	if not is_equal_approx(_w1, full):
-		_w1 = move_toward(_w1, full, step)
+		_w1 = _volume_gate(move_toward(_w1, full, step))
 		return
 	_w1 = full
 	var kept_id: String = _slots[keep]["id"]

@@ -39,6 +39,17 @@ const GEODETIC_ITERATIONS := 12
 
 const E2 := 1.0 - 1.0 / (CloudLayer.POLAR_STRETCH * CloudLayer.POLAR_STRETCH)
 
+## The cell bake's tap rule (core cloud_volume_bake.hpp cloud_cell_bake_taps and its constants, mirrored by
+## cloud_volume_bake.gdshaderinc cloud_volume_taps; change together): the upkeep's cost unit (CloudWorldVolumeSchedule).
+const BAKE_HORIZONTAL_SPACING_M := 200.0
+const BAKE_MIN_HORIZONTAL_TAPS := 4
+const BAKE_MAX_HORIZONTAL_TAPS := 8
+const BAKE_WIDEST_CELL_M := 4800.0
+const BAKE_WIDEST_CELL_HORIZONTAL_TAPS := 16
+const BAKE_VERTICAL_SPACING_M := 5.0
+const BAKE_MIN_VERTICAL_TAPS := 16
+const BAKE_TAP_COUNT_SLACK := 0.01
+
 var origin_earth_m := Vector3.ZERO
 ## The current window origin (cells) of every level, as adopted by the render thread (set_origin).
 var origins: Array[Vector3i] = []
@@ -63,6 +74,20 @@ static func memory_bytes() -> int:
 ## Texels of a level's max-extinction mip / distance field (per axis /MIP_DIV).
 static func mip_size() -> Vector3i:
 	return Vector3i(CELLS_H, CELLS_H, CELLS_V) / MIP_DIV
+
+
+## Taps per horizontal axis and vertically of a cell horizontal_m x vertical_m (the bake's tap rule).
+static func bake_taps(horizontal_m: float, vertical_m: float) -> Vector2i:
+	var slack := 1.0 - BAKE_TAP_COUNT_SLACK
+	var cap := BAKE_WIDEST_CELL_HORIZONTAL_TAPS if horizontal_m > BAKE_WIDEST_CELL_M else BAKE_MAX_HORIZONTAL_TAPS
+	return Vector2i(clampi(ceili(horizontal_m / BAKE_HORIZONTAL_SPACING_M * slack), BAKE_MIN_HORIZONTAL_TAPS, cap),
+			maxi(BAKE_MIN_VERTICAL_TAPS, ceili(vertical_m / BAKE_VERTICAL_SPACING_M * slack)))
+
+
+## Taps of one cell of level k (256, 256, 528, 528, 528, 2112, 2112, 8448).
+static func cell_taps(k: int) -> int:
+	var t := bake_taps(CELL_H_M[k], CELL_V_M[k])
+	return t.x * t.x * t.y
 
 
 func set_frame(frame_origin_earth_m: Vector3) -> void:
@@ -112,7 +137,16 @@ func tangent_of(dir_earth: Vector3) -> Vector2:
 	return Vector2(dir_earth.dot(_east), dir_earth.dot(_north))
 
 
+## The frame's axes: the origin's normal, east, north.
+func axes() -> PackedVector3Array:
+	return PackedVector3Array([_n0, _east, _north])
+
+
 ## (n.x, n.y, n.z, h): the geodetic normal and height of an Earth-local point.
+func geodetic_of(p: Vector3) -> Vector4:
+	return _geodetic(p)
+
+
 func _geodetic(p: Vector3) -> Vector4:
 	var q := sqrt(p.x * p.x + p.z * p.z)
 	var phi := atan2(p.y, q * (1.0 - E2))

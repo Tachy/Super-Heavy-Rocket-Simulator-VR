@@ -12,10 +12,13 @@ extends RefCounted
 ## Scroll: a level whose window moved bakes the exposed slabs in the plan that adopts the new origin (never late, not
 ## budgeted) and lights them first (priority 1: they have no light yet); whatever of them the light budget cannot cover
 ## gets provisional light and stays first in line (PROVISIONAL_MAX_S is the gate's bound on how long that may last).
-## Fill (cold start, jump, level switched on, whole-window moves): the window is "dirty" and baked under the budget, coarse
-## to fine; only the coarsest level is baked whole at once (it is always complete). A level is `ready` (shown) once
-## its dirty list is empty. Pair switch: a snapshot replaced in slot s is rebaked into slot s's channel pair alone,
-## under the bake budget, coarse to fine; `slot_ready[s]` tells when it may take weight.
+## Fill (cold start, jump, level switched on, whole-window moves): the window is "dirty" and baked under the budget,
+## coarse to fine, the coarsest level first (world-volume Task 5: its 8.4 M cells of 8448 taps take the GPU far longer
+## than a frame's UPKEEP_SPIKE_MS, so it is budgeted too; until it is `ready` nothing of the volume is shown - the march's
+## fallback, today's per-sample march, draws the frame). A level is `ready` (shown) once its dirty list is empty. Pair
+## switch: a snapshot replaced in slot s is rebaked into slot s's channel pair alone, under the bake budget, coarse to
+## fine - for a level still filling only what its fill has baked already (the rest bakes both snapshots anyway);
+## `slot_ready[s]` tells when it may take weight (the spare included).
 ## Light refresh: per level the Sun's turn (shadow shift H dtheta / sin^2 e < 1/4 cell), the Moon's (only while the Sun is
 ## below MOON_SUN_ELEVATION_RAD at the level centre), the blend's step (WEATHER_REFRESH_STEP) start a new generation:
 ## the level's window is queued as tiles, nearest (and in view) first, behind what an older generation left in the
@@ -24,8 +27,9 @@ extends RefCounted
 ## rebuilt one at a time, coarsest first, into a spare version in the new frame, shown (the old version stays shown
 ## meanwhile), cross-faded over REFRAME_FADE_S and swapped.
 ## Budget: UPKEEP_BUDGET_MS per frame (LIGHT_BUDGET_MS of it light); UPKEEP_SPIKE_MS in cold-start, jump and re-frame
-## frames until the fill is complete (half bake, half light). The first plan's bake of the whole coarsest level is not
-## budgeted (the frame must show clouds) - its cost is the GPU's to measure.
+## frames until the fill is complete (half bake, half light). The bake's cost is counted in taps (a cell of level k
+## costs CloudWorldVolumeLayout.cell_taps(k): 256 at level 0 to 8448 at level 7), its rate in taps per ms; scroll slabs
+## are baked in full whatever they cost (never late) and their cost is taken from the budget.
 
 const UPKEEP_BUDGET_MS := 1.5
 const LIGHT_BUDGET_MS := 1.0
@@ -47,9 +51,11 @@ const MIN_REFRESH_ELEVATION_RAD := deg_to_rad(5.0)
 const MIN_HEIGHT_M := 100.0
 ## [E] Tiles in view are served before the ones behind the camera: behind counts twice as far.
 const BEHIND_FACTOR := 2
-## [E] Start rates, replaced by feedback(): the spec's 67 M light cells in 60 ms; baking about as fast.
+## [E] Start rates, replaced by feedback(): the spec's 67 M light cells in 60 ms; the bake's taps per ms half the RTX
+## 4090's measured cold-start rate (4.3e7, cloud_check.gd section 16) - feedback() raises it by at most 20 % a frame,
+## and a first frame below its budget only lags.
 const INITIAL_LIGHT_CELLS_PER_MS := 67.0e6 / 60.0
-const INITIAL_BAKE_CELLS_PER_MS := 1.0e6
+const INITIAL_BAKE_TAPS_PER_MS := 2.0e7
 ## [E] feedback() moves the rates by this fraction of the measured error per call, at most by the limits.
 const CALIBRATION_GAIN := 0.2
 const CALIBRATION_LIMITS := Vector2(0.5, 2.0)
@@ -58,10 +64,12 @@ const MIN_CELLS_PER_MS := 1.0e4
 const _KEY_BITS := 12
 
 ## Calibrated by feedback().
-var bake_cells_per_ms := INITIAL_BAKE_CELLS_PER_MS
+var bake_taps_per_ms := INITIAL_BAKE_TAPS_PER_MS
 var light_cells_per_ms := INITIAL_LIGHT_CELLS_PER_MS
 ## Optional: the camera's view direction (Earth-local); tiles behind it are refreshed later. ZERO = ignore.
 var view_dir_earth := Vector3.ZERO
+## Checks only (cloud_check.gd section 16: a cold fill in few frames): scales every per-frame budget.
+var budget_scale := 1.0
 
 
 class _Level extends RefCounted:
@@ -72,6 +80,7 @@ class _Level extends RefCounted:
 	var ready := false
 	var origin := Vector3i.ZERO
 	var dirty: Array = []  # boxes {from, to} still to bake (both snapshots)
+	var baked: Array = []  # boxes a fill in progress has baked (a slot change rebakes these alone)
 	var slot_dirty: Array = [[], []]  # per snapshot slot: boxes to rebake (channel pair of that slot)
 	var prov: Array = []  # baked boxes {from, to, emitted, age_s} still to get real light
 	var queue: Array = []  # tile keys (Vector3i) of the refresh generation(s) in progress
@@ -98,7 +107,9 @@ var _time_s := 0.0
 var _slot_ids: Array = [0, 1]
 var _slot_ready: Array = [true, true]
 var _bake_cells := 0
+var _bake_taps := 0
 var _mandatory_cells := 0
+var _mandatory_taps := 0
 var _light_cells := 0
 var _prov_cells := 0
 var _prov_age_max := 0.0
@@ -127,16 +138,17 @@ static func sun_threshold_rad(k: int, sun_elevation_rad: float, height_above_m: 
 	return 0.25 * CloudWorldVolumeLayout.CELL_H_M[k] * s * s / height_above_m
 
 
-## Cells-per-ms calibration from GPU timestamps: the measured upkeep time of a frame against the model's.
-func feedback(upkeep_ms: float, bake_cells: int, light_cells: int) -> void:
+## Rate calibration from GPU timestamps: the measured upkeep time of a frame against the model's (bake taps, light
+## cells as the frame ran them).
+func feedback(upkeep_ms: float, bake_taps: int, light_cells: int) -> void:
 	if upkeep_ms <= 0.0:
 		return
-	var model := bake_cells / bake_cells_per_ms + light_cells / light_cells_per_ms
+	var model := bake_taps / bake_taps_per_ms + light_cells / light_cells_per_ms
 	if model <= 0.0:
 		return
 	var f := clampf(model / upkeep_ms, CALIBRATION_LIMITS.x, CALIBRATION_LIMITS.y)
 	var g := 1.0 + CALIBRATION_GAIN * (f - 1.0)
-	bake_cells_per_ms = maxf(bake_cells_per_ms * g, MIN_CELLS_PER_MS)
+	bake_taps_per_ms = maxf(bake_taps_per_ms * g, MIN_CELLS_PER_MS)
 	light_cells_per_ms = maxf(light_cells_per_ms * g, MIN_CELLS_PER_MS)
 
 
@@ -162,7 +174,9 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	_time_s += delta_s
 	var out := {"bake": [], "light": [], "provisional": []}
 	_bake_cells = 0
+	_bake_taps = 0
 	_mandatory_cells = 0
+	_mandatory_taps = 0
 	_light_cells = 0
 	_prov_cells = 0
 	_prov_age_max = 0.0
@@ -187,6 +201,7 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	out["reframe"] = reframe
 	out["lookup"] = _lookup()
 	out["bake_cells"] = _bake_cells
+	out["bake_taps"] = _bake_taps
 	out["bake_mandatory_cells"] = _mandatory_cells
 	out["light_cells"] = _light_cells
 	out["provisional_cells"] = _prov_cells
@@ -216,7 +231,8 @@ func _cold_start(camera_earth_m: Vector3, slot_ids: Array) -> void:
 	_fade_s = 0.0
 
 
-## A snapshot replaced in a slot: its channel pair is rebaked alone, in full, under the bake budget.
+## A snapshot replaced in a slot: its channel pair is rebaked alone, under the bake budget - the whole window of a
+## ready level, the part a fill has baked so far of a level still filling (its dirty rest bakes both snapshots).
 func _apply_slot_ids(slot_ids: Array) -> void:
 	for s in 2:
 		if slot_ids[s] == _slot_ids[s]:
@@ -224,7 +240,8 @@ func _apply_slot_ids(slot_ids: Array) -> void:
 		_slot_ids[s] = slot_ids[s]
 		for lv: _Level in _all_levels():
 			if lv.active:
-				lv.slot_dirty[s] = [CloudWorldVolumeLayout.window_box(lv.origin)]
+				lv.slot_dirty[s] = lv.baked.duplicate() if not lv.dirty.is_empty() \
+						else [CloudWorldVolumeLayout.window_box(lv.origin)]
 
 
 func _all_levels() -> Array:
@@ -249,32 +266,40 @@ func _scroll(lv: _Level, bake_out: Array) -> void:
 	if not lv.active:
 		_clear(lv)
 		lv.active = true
-		lv.origin = new_origin
+		_set_origin(lv, new_origin)
 		lv.dirty = [L.window_box(new_origin)]
 		return
 	if new_origin == lv.origin:
 		return
 	var slabs := L.exposed_slabs(lv.k, lv.origin, new_origin)
-	lv.origin = new_origin
+	_set_origin(lv, new_origin)
 	for slab in slabs:
 		if not lv.ready or L.box_cells(slab) >= L.CELLS_H * L.CELLS_H * L.CELLS_V:
 			if L.box_cells(slab) >= L.CELLS_H * L.CELLS_H * L.CELLS_V:  # a whole window: a fill, not a scroll
 				_clear(lv)
 				lv.active = true
-				lv.origin = new_origin
+				_set_origin(lv, new_origin)
 				lv.dirty = [L.window_box(new_origin)]
 				return
 			lv.dirty.append(slab)
 		else:
 			_emit_bake(lv, slab, -1, bake_out)
 			_mandatory_cells += L.box_cells(slab)
+			_mandatory_taps += L.box_cells(slab) * L.cell_taps(lv.k)
 			lv.prov.append({"from": slab["from"], "to": slab["to"], "emitted": false, "age_s": 0.0})
+
+
+## The level's window origin, also in its layout (fade_weight reads it there; a spare's goes to the new frame's layout).
+func _set_origin(lv: _Level, origin: Vector3i) -> void:
+	lv.origin = origin
+	lv.layout.set_origin(lv.k, origin)
 
 
 func _clear(lv: _Level) -> void:
 	lv.active = false
 	lv.ready = false
 	lv.dirty = []
+	lv.baked = []
 	lv.slot_dirty = [[], []]
 	lv.prov = []
 	lv.queue = []
@@ -287,78 +312,90 @@ func _clear(lv: _Level) -> void:
 func _emit_bake(lv: _Level, box: Dictionary, channel: int, bake_out: Array) -> void:
 	bake_out.append({"level": lv.k, "from": box["from"], "to": box["to"], "snapshot_channel": channel,
 			"spare": lv == _spare})
-	_bake_cells += CloudWorldVolumeLayout.box_cells(box)
+	var cells := CloudWorldVolumeLayout.box_cells(box)
+	_bake_cells += cells
+	_bake_taps += cells * CloudWorldVolumeLayout.cell_taps(lv.k)
 
 
 # ---------------------------------------------------------------- bake
 
 func _bake_ms() -> float:
-	return UPKEEP_SPIKE_MS * 0.5 if _spike else UPKEEP_BUDGET_MS - LIGHT_BUDGET_MS
+	return budget_scale * (UPKEEP_SPIKE_MS * 0.5 if _spike else UPKEEP_BUDGET_MS - LIGHT_BUDGET_MS)
 
 
+## The budget (taps) after the scroll slabs, spent coarse to fine on the fills, then the slot rebakes, then the spare;
+## a finer level starts only once the coarser one is done (strictly coarse first, the budget's remainder of less than
+## a cell left).
 func _bake_fill(order: Array, bake_out: Array) -> void:
-	var L := CloudWorldVolumeLayout
-	# The coarsest shown level is always complete: baked whole at once, not budgeted.
-	var coarsest: _Level = _levels[L.LEVELS - 1]
-	if coarsest.active and not coarsest.ready:
-		var n := _bake_dirty(coarsest, 1 << 60, bake_out)
-		_mandatory_cells += n
-	var budget := maxi(int((_bake_ms() - _mandatory_cells / bake_cells_per_ms) * bake_cells_per_ms), 0)
+	var budget := maxi(int((_bake_ms() - _mandatory_taps / bake_taps_per_ms) * bake_taps_per_ms), 0)
 	for lv: _Level in order:
 		if budget <= 0:
 			break
 		if lv.active and not lv.dirty.is_empty() and lv != _spare:
 			budget -= _bake_dirty(lv, budget, bake_out)
+			if not lv.dirty.is_empty():
+				break
+	var slots_done := false
 	for lv: _Level in order:
 		for s in 2:
-			if budget <= 0:
+			if budget <= 0 or slots_done:
 				break
 			if lv.active and not lv.slot_dirty[s].is_empty():
 				budget -= _bake_slot(lv, s, budget, bake_out)
+				slots_done = not lv.slot_dirty[s].is_empty()
 	if _spare != null and _spare.active and not _spare.dirty.is_empty() and budget > 0:
 		_bake_dirty(_spare, budget, bake_out)
 	for s in 2:
 		var ready := true
-		for lv: _Level in _levels:
+		for lv: _Level in _all_levels():
 			ready = ready and lv.slot_dirty[s].is_empty()
 		_slot_ready[s] = ready
 
 
-## Bakes up to `budget` cells of the level's dirty boxes (clipped to its window) and hands them to the light
-## (prov list); returns the cells baked. The level is ready once nothing is dirty.
+## Cells of level k a budget of `taps` pays for (at least one: a fill always moves).
+static func _cells_for(k: int, taps: int) -> int:
+	return maxi(taps / CloudWorldVolumeLayout.cell_taps(k), 1)
+
+
+## Bakes up to `budget` taps of the level's dirty boxes (clipped to its window) and hands them to the light (prov
+## list); returns the taps spent. The level is ready once nothing is dirty.
 func _bake_dirty(lv: _Level, budget: int, bake_out: Array) -> int:
 	var L := CloudWorldVolumeLayout
 	var window := L.window_box(lv.origin)
+	var n := _cells_for(lv.k, budget)
 	var used := 0
-	while used < budget and not lv.dirty.is_empty():
+	while used < n and not lv.dirty.is_empty():
 		var box := L.box_clip(lv.dirty.pop_front(), window)
 		if L.box_cells(box) == 0:
 			continue
-		var sp := L.box_split(box, budget - used)
+		var sp := L.box_split(box, n - used)
 		_emit_bake(lv, sp[0], -1, bake_out)
 		lv.prov.append({"from": sp[0]["from"], "to": sp[0]["to"], "emitted": false, "age_s": 0.0})
+		lv.baked.append(sp[0])
 		used += L.box_cells(sp[0])
 		lv.dirty = sp[1] + lv.dirty
 	if lv.dirty.is_empty():
 		lv.ready = true
-	return used
+		lv.baked = []
+	return used * L.cell_taps(lv.k)
 
 
 func _bake_slot(lv: _Level, s: int, budget: int, bake_out: Array) -> int:
 	var L := CloudWorldVolumeLayout
 	var window := L.window_box(lv.origin)
 	var list: Array = lv.slot_dirty[s]
+	var n := _cells_for(lv.k, budget)
 	var used := 0
-	while used < budget and not list.is_empty():
+	while used < n and not list.is_empty():
 		var box := L.box_clip(list.pop_front(), window)
 		if L.box_cells(box) == 0:
 			continue
-		var sp := L.box_split(box, budget - used)
+		var sp := L.box_split(box, n - used)
 		_emit_bake(lv, sp[0], s, bake_out)
 		used += L.box_cells(sp[0])
 		list = sp[1] + list
 	lv.slot_dirty[s] = list
-	return used
+	return used * L.cell_taps(lv.k)
 
 
 # ---------------------------------------------------------------- light
@@ -380,9 +417,9 @@ func _light(order: Array, sun: Vector3, moon: Vector3, blend: float, cloud_top_m
 		if lv.need_queue and not built:
 			_enqueue_tiles(lv)  # one level per plan: the sort is the main thread's cost
 			built = true
-	var light_ms := UPKEEP_BUDGET_MS - (UPKEEP_BUDGET_MS - LIGHT_BUDGET_MS)
+	var light_ms := budget_scale * LIGHT_BUDGET_MS
 	if _spike:
-		light_ms = maxf(UPKEEP_SPIKE_MS - _bake_cells / bake_cells_per_ms, 0.0)
+		light_ms = maxf(budget_scale * UPKEEP_SPIKE_MS - _bake_taps / bake_taps_per_ms, 0.0)
 	var budget := int(light_ms * light_cells_per_ms)
 	# 1. the freshly baked cells (provisional ones first in line), coarse to fine.
 	for lv: _Level in order:
@@ -603,6 +640,9 @@ func _lookup() -> Dictionary:
 				"frame_origin_earth_m": lv.layout.origin_earth_m, "vertical_fade": lv.k < L.WINDOWED_LEVELS,
 				"clamped_bottom": lv.origin.z == 0})
 	var lookup := {"levels": levels, "slot_ready": _slot_ready.duplicate(), "slot_ids": _slot_ids.duplicate()}
+	if _spare != null:  # the spare being built (its jobs' frame), shown or not
+		lookup["build_spare"] = {"level": _spare.k, "origin": _spare.origin,
+				"frame_origin_earth_m": _spare.layout.origin_earth_m}
 	if _spare != null and _spare.shown:
 		lookup["spare"] = {"level": _spare.k, "origin": _spare.origin, "frame_origin_earth_m": _spare.layout.origin_earth_m,
 				"fade": minf(_fade_s / REFRAME_FADE_S, 1.0), "vertical_fade": _spare.k < L.WINDOWED_LEVELS,

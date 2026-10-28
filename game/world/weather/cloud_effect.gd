@@ -116,6 +116,9 @@ var light_cache: CloudLightCache
 var view_cache: CloudViewCache
 ## World volume plan Task 2, spike S (throw-away, removed in Task 13): the far tier's spike (CloudSpike.mode).
 var spike: CloudSpike
+## The cloud world volume (world-volume plan Task 5; CloudLayer plans it, created there): its batch runs before the
+## march while the flag cloud_world_volume is on (the upkeep alone: no march reads it yet).
+var world_volume: CloudWorldVolume
 ## Fills run so far (checks: a request was served).
 var view_cache_fills := 0
 ## Render thread, the last frame (diagnostics): the view cache was shown; the tiles its batch filled.
@@ -546,6 +549,8 @@ func _notification(what: int) -> void:
 			_rd.free_rid(texture)
 		if light_cache != null:
 			light_cache.free_resources(_rd)
+		if world_volume != null:
+			world_volume.free_resources(_rd)
 		if view_cache != null:
 			view_cache.free_resources(_rd)
 		for buffer: RID in [_globals_buffer, _eyes_buffer, _centre_buffer]:
@@ -631,6 +636,10 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		set0.append(u)
 	# The shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can exceed its start: the farthest cloud
 	# sample (_shape_prefilter_needed).
+	# The world volume's upkeep (Task 5): the schedule's batch - bake, occupancy - with this frame's set 0, before the
+	# march (its GPU interval: CloudWorldVolume.UPKEEP_STAMP).
+	if world_volume != null and ShaderGlobals.value(&"cloud_world_volume") == true:
+		world_volume.run(_rd, world_volume.take(), set0)
 	var family := "march_centre" if stereo else "march"
 	var pixel_angle: float = centre_view["pixel_angle"]
 	var march := family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family

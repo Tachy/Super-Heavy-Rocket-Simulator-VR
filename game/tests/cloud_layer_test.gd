@@ -7,6 +7,9 @@
 # The view cache's frame loop (cloud view cache Task 4): a view jump and a clock jump restart the cache; a Sun step of
 # 1 deg starts cross-fades, none completing in the frame it starts; the march covers the view (the batches' covering
 # flag) from a restart and a layout re-creation on until the view has level 0 and its first fills have faded in.
+# The world volume (world-volume plan Task 5; this test runs its batches in place of the render thread): through pair
+# switches the weight never jumps, a slot's snapshot changes only without weight, and a slot with weight always has
+# its snapshot baked in the volume's channel pair of that slot (CloudWorldVolume.channel_of_slot).
 extends SceneTree
 
 const DT := 1.0 / 60.0
@@ -71,6 +74,7 @@ func _run() -> void:
 			"an empty slot binds the zero RGF base texture (no cloud base)")
 
 	_test_view_cache(camera)
+	_test_world_volume(camera)
 	_layer.shutdown()
 	print("CLOUD LAYER TEST %s" % ("PASSED" if _failures == 0 else "FAILED (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
@@ -327,3 +331,51 @@ func _check(ok: bool, label: String) -> void:
 	if not ok:
 		_failures += 1
 	print("  %s  %s" % ["ok  " if ok else "FAIL", label])
+
+
+## World volume (Task 5): the layer plans, this test takes and adopts each batch as the render thread would (no GPU).
+## A fast calibrated rate and budget keep the channel-pair rebakes to a few frames.
+func _test_world_volume(camera: Vector3) -> void:
+	var volume := _layer.effect.world_volume
+	_layer.world_volume = true
+	_layer.world_volume_schedule.bake_taps_per_ms = 1.0e9
+	_layer.world_volume_schedule.budget_scale = 20.0
+	var a := _fake("wa")
+	var b := _fake("wb")
+	var c := _fake("wc")
+	var ok := true
+	var mapped := true
+	var held := 0
+	var steps := [[a, b, 0.3, 6.0], [b, c, 0.5, 8.0], [c, a, 0.2, 8.0]]
+	for step: Array in steps:
+		_announce(step[0], step[1])
+		for i in range(int(float(step[3]) / DT)):
+			var before: Dictionary = _layer.state()
+			_layer.update(camera, step[2], DT)
+			volume.run(null, volume.take(), [])
+			var after: Dictionary = _layer.state()
+			var w0 := float(before["w1"])
+			var w1 := float(after["w1"])
+			if absf(w1 - w0) > DT / CloudLayer.FADE_S + 1e-9 and not bool(before["tracking"]):
+				ok = false
+			for s in range(2):
+				var weight := w1 if s == 1 else 1.0 - w1
+				if before["slots"][s] != after["slots"][s] and (w0 if s == 1 else 1.0 - w0) > 1e-9:
+					ok = false
+				if weight > 1e-9 and after["slots"][s] != "" and not volume.slot_holds(s, after["slots"][s]):
+					mapped = false
+			if not volume.slot_holds(0, after["slots"][0]) or not volume.slot_holds(1, after["slots"][1]):
+				held += 1
+			if after["uploading"]:
+				OS.delay_msec(1)
+		_check(_state_is_pair([_snapshot_id(step[0]), _snapshot_id(step[1])], step[2]),
+				"world volume: pair resident at its blend: %s" % _layer.state())
+	_check(ok, "world volume: the weight never jumps, a slot changes only without weight")
+	_check(mapped and held > 0, "world volume: a slot with weight always has its snapshot in its channel pair (%d " % held
+			+ "frames a new snapshot waited for its bake)")
+	_layer.world_volume = false
+
+
+static func _snapshot_id(snapshot: Dictionary) -> String:
+	return "%s|%s|%d" % [snapshot["kind"], snapshot["cache_key"], int(snapshot["rows"])]
+

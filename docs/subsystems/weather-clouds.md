@@ -998,13 +998,53 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   - `CloudWorldVolumeSchedule` (`..._schedule.gd`): `plan(camera, sun, moon, blend, cloud_top_m, jumped, delta_s,
     slot_ids)` -> `bake` ({level, from, to, snapshot_channel -1 = both | slot, spare}), `provisional` (+ `from_column`
     for the coarsest level), `light` (+ `moon`), `reframe`, `lookup` (state after the batch: per level origin /
-    active / ready / frame origin; `slot_ready`; the spare while it fades). Exposed slabs are baked in the adopting
-    plan (not budgeted) and lit first; fills (cold start, jump, level on) are baked under the budget coarse to fine
-    (only the coarsest level whole at once); a replaced snapshot slot is rebaked alone (`slot_ready`). Light
-    refresh generations (Sun / Moon / blend triggers, tiles nearest first, equal shares finest first) as in the file
-    header. Spike frames (cold start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms.
-    Calibration: `feedback()`; start rates 1 M bake and 1.12 M light cells/ms [E]. Measured (headless): fill 41 frames
-    (0.9 s at 45 Hz), `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula).
+    active / ready / frame origin; `slot_ready`; the spare while it fades, `build_spare` while it is built). Exposed
+    slabs are baked in the adopting plan (not budgeted, their cost taken from the budget) and lit first; fills (cold
+    start, jump, level on) are baked under the budget strictly coarse to fine - the coarsest level too (Task 5: its
+    8.4 M cells of 8448 taps take the GPU seconds), and nothing of the volume is shown before it is `ready`; a replaced
+    snapshot slot is rebaked alone (`slot_ready`, the spare included; a level still filling rebakes only what its fill
+    baked: no cell twice). The schedule keeps the layout's `origins` (`fade_weight`). Light refresh generations (Sun /
+    Moon / blend triggers, tiles nearest first, equal shares finest first) as in the file header. Spike frames (cold
+    start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms. The bake's cost unit is the
+    tap (`CloudWorldVolumeLayout.cell_taps(k)`: the core's tap rule), its rate taps per ms; `feedback(upkeep_ms,
+    bake_taps, light_cells)` calibrates; start rates 2e7 taps/ms (half the measured, below) and 1.12 M light cells/ms
+    [E]; `budget_scale` (checks only) scales every budget. Measured (headless, at a test rate of 1e9 taps/ms): fill 90
+    frames, `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula).
+- World volume, GPU side (world volume plan Task 5; `CloudWorldVolume`, `game/world/weather/cloud_world_volume.gd`;
+  kernels `game/shaders/cloud_volume_bake.gdshaderinc`, lookups `game/shaders/cloud_volume.gdshaderinc`; fidelity
+  flag `CloudLayer.world_volume` / global `cloud_world_volume`, default false until Task 13, on with
+  `STARSIM_WORLD_VOLUME=1` or `--world_volume`; Task 5 runs the upkeep alone, no march reads the volume yet):
+  - Textures per level (index 8: the transient spare of a re-frame, created with its first job, freed at the swap):
+    density RGBA16F in 1/km (RG = rho, sigma_c of slot 0's snapshot, BA = slot 1's; `channel_of_slot(s)` = s: a
+    slot's snapshot is replaced only without weight), light RGBA16F (Task 6), max-extinction mip R16F (1/km) and
+    distance field R8 (blocks) at 64 x 64 x 32; ~1.07 GB (`texture_bytes()`).
+  - Threads: CloudLayer plans each frame once the last batch was taken (held time and jumps kept), `submit()`s it;
+    CloudEffect `run()`s it after the set 0 is built and before the march (GPU interval `cloud_volume_upkeep`), then
+    adopts its lookup. `notify_view_jump` / `notify_clock_jump` / `show_now` restart the schedule (`forget()`). The
+    cross-fade is gated: while the volume runs (`running()`: a batch adopted, the last one taken - frame-based), the
+    weight moves onto a slot only once the adopted state holds the slot's snapshot in its channel pair
+    (`slot_holds`). Stats: `CloudLayer.world_volume_stats()`.
+  - Bake (`CLOUD_VOLUME_BAKE`): one 64-thread workgroup per cell, the taps shared and summed in shared memory in a fixed
+    order (a rebake is bit-identical); the core's tap rule and point model of each snapshot (exact bilinear weights on
+    the weather field like the CPU: the hardware's ~8-bit sub-texel weights put a 1-degree field ~1 % off); the cell
+    box is the grid's own axes at its centre (e_x / e_y from the grid points half a cell away, e_z the normal x
+    height); a snapshot whose field has no cloud in any texel the cell can read skips its taps (0 exactly).
+    `same` slots bake once. A one-slot job (`snapshot_channel` 0 / 1) keeps the other pair.
+  - Occupancy (`CLOUD_VOLUME_OCCUPANCY`): per baked box the mip blocks whose support (block + one-cell ring: the
+    trilinear filter's reach) it touches get the bound max sigma_c (and rho) over the support where any rho > 0 in
+    either snapshot, else 0 (x (1 + 2^-10): rounding up); then the whole level's toroidal Chebyshev distance (blocks,
+    cap 8) to a block with a bound, separable x / y / z. Every block claimed free has no rho in its support: a sample
+    there reads 0 at any blend, and the sub-cell field (it redistributes rho, peak sigma_c) is 0 too.
+  - Grid numerics (preflight C22): `cloud_volume_grid_in(frame, offset)` and `cloud_volume_offset_of` work on the
+    differences to the camera (geodetic fixed point for n - n_c, the AEQD by sinc / x-cosec series in theta^2, the
+    camera's normal split hi / lo, a reference grid point the series reproduce exactly), adding the camera's grid point
+    (hi + lo) last. Measured: 100 offsets with the frame 990 km away within 0.66e-3 of the containing cell (level 0:
+    3 cm). `cloud_volume_level` skips levels of the other frame during a re-frame (the march needs both grids: Task 7).
+  - Measured (cloud_check section 16, RTX 4090, Starbase, analog + ERA5 pair): cold start at the game's budget
+    `cloud_volume_upkeep` median 1.34 / max 2.84 ms per frame, 4.3e7 taps/ms (5050 level-7 cells/ms); whole fills at
+    40 x the budget 6.8-7.6e7 taps/ms. Per cell vs the CPU: water per weather cell (level 2) 0.9967-1.0005; single
+    edge cells scatter (taps within the 8-bit filter error of the threshold or the fraction cut flip): up to 1.7 % of
+    the cells beyond 1 %, all within 0.059 sigma_c.
 - Cell bake, CPU reference (world volume plan Task 4; the GPU bake of Task 5 is checked against it; `[weather]`
   `core/tests/test_cloud_volume_bake.cpp`):
   - `cloud_render_field.hpp` mirrors the GPU point model of ONE snapshot without the detail (`cloud_field` with the

@@ -49,6 +49,9 @@
 #          nearest cloud within R_near: the cache's accepted lag in a deck passage; exit code 1), and the flight
 #          frames' GPU time (median, p99; with the VR preset p99 <= its frame target, exit code 1). Images: --out with
 #          _fly_<t> for the samples' cache frames.
+# World volume (world volume plan Task 5): --world_volume / --no_world_volume set the fidelity flag
+#          CloudLayer.world_volume (default: the environment STARSIM_WORLD_VOLUME=1 or the user argument --world_volume;
+#          off otherwise); on, the volume's upkeep runs (GPU interval cloud_volume_upkeep), no march reads it yet.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -344,6 +347,10 @@ func _process(_delta: float) -> bool:
 			world.clouds.deterministic_march = false
 		if _args.has("no_view_cache"):  # the fidelity flag (CloudLayer.view_cache): the per-frame march
 			world.clouds.view_cache = false
+		if _args.has("world_volume"):  # the fidelity flag (CloudLayer.world_volume; Task 5: the upkeep alone)
+			world.clouds.world_volume = true
+		if _args.has("no_world_volume"):
+			world.clouds.world_volume = false
 		if _args.has("no_air_shadow"):  # the fidelity flag (CloudLayer.air_shadow)
 			world.clouds.air_shadow = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)

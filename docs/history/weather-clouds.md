@@ -1023,3 +1023,16 @@ The validation bullet of the fill ended (before Task 4):
 >     the march - open. The main-thread section `cloud_view_cache` (the nearest-cloud query and the plan's hand-over)
 >     over the 5400 flight frames: median 0.057 / p99 0.082 / max 0.18 ms. Open for the user's VR check: the deck
 >     passage from on board.
+
+## World volume schedule before Task 5 (superseded 2026-10-28: the coarsest level budgeted, taps as the cost unit)
+
+Text of `weather-clouds.md` (Task 3) replaced when the GPU bake measured a level-7 cell at 8448 taps (the whole level
+takes the GPU seconds, not one frame):
+
+    active / ready / frame origin; `slot_ready`; the spare while it fades). Exposed slabs are baked in the adopting
+    plan (not budgeted) and lit first; fills (cold start, jump, level on) are baked under the budget coarse to fine
+    (only the coarsest level whole at once); a replaced snapshot slot is rebaked alone (`slot_ready`). Light
+    refresh generations (Sun / Moon / blend triggers, tiles nearest first, equal shares finest first) as in the file
+    header. Spike frames (cold start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms.
+    Calibration: `feedback()`; start rates 1 M bake and 1.12 M light cells/ms [E]. Measured (headless): fill 41 frames
+    (0.9 s at 45 Hz), `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula).

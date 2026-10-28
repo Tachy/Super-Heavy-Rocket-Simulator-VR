@@ -94,6 +94,11 @@
 #      from the camera vs the march at divisor 1: on face-aligned views (pixel rays = texel rays) luminance error median
 #      1 % / p99 5 %, T RMS 0.01, cloud distance median 1 %; on general views (bilinear resampling) the medians, the rest
 #      printed (STARSIM_VIEW_CACHE_ONLY=1 runs this alone).
+#  16. (world volume plan Task 5) the cloud world volume (CloudWorldVolume) of the analog and ERA5 pair over Starbase:
+#      the GPU bake vs the core's cell bake per level 0, 2, 5, level 2's water per weather cell, the max-extinction mip
+#      and the distance field conservative (exhaustively, and sampled by the probe), a rebake bit-identical, the GLSL grid
+#      mirror within 1e-3 of a cell, the bake binding's input forms, the pair switch (STARSIM_VOLUME_ONLY=16 runs this
+#      alone; another value exits 1). STARSIM_WORLD_VOLUME=1 turns the flag on for every GPU check.
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -131,7 +136,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES + VIEW_CACHE_SAMPLES
+const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES + VIEW_CACHE_SAMPLES + VOLUME_SAMPLES
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -510,6 +515,9 @@ func _run() -> void:
 		print("cloud_check (view cache only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
+	if OS.get_environment(VOLUME_ONLY_ENV) != "":  # section 16 alone (world volume plan Task 5)
+		await _volume_only(OS.get_environment(VOLUME_ONLY_ENV))
+		return
 	if OS.get_environment("STARSIM_GROUND_ONLY") != "":  # diagnostics: section 6 alone (no sample count)
 		await _ground_light_samples()
 		_clouds.shutdown()
@@ -634,6 +642,8 @@ func _run() -> void:
 	await _air_shadow_samples()
 	# 15. The cloud view cache's fill against the per-frame march.
 	await _view_cache_samples()
+	# 16. The cloud world volume's GPU bake, occupancy and grid (last: it leaves the flag off again).
+	await _world_volume_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -2904,3 +2914,737 @@ func _march_reference(path: String, bytes: PackedByteArray, label: String) -> vo
 	_optional_samples += 1
 	_check("view cache: the march image (%s) equals the reference bit for bit" % label, differing == 0,
 			"%d of %d pixels differ (largest difference / mean colour %.6f)" % [differing, bytes.size() / 8, largest])
+
+
+# ---- Section 16 (world volume plan Task 5): the cloud world volume's GPU bake -------------------------------------
+
+## Section 16 (CloudWorldVolume; the pair (shipped analog of October 12 UTC in slot 0, ERA5 2025-10-25 15:00 in slot 1)
+## at blend 0.3 over Starbase, the camera 2 m and 9 km up):
+## - the cold start at the game's budget (the upkeep's GPU time per frame and the measured taps / cells per ms printed),
+##   then filled at VOLUME_BUDGET_SCALE x the budget;
+## - per level 0, 2, 5: 512 cells (half among the GPU's cloudy cells, half uniform) read back against
+##   StarsimCore.weather_cloud_cell_bakes for each snapshot: rho and sigma_c within VOLUME_TOLERANCE + VOLUME_FLOOR_PER_M;
+## - level 2's water per weather cell (cells assigned by centre, VOLUME_WATER_SAMPLES uniform cells of the cloud band):
+##   the GPU's sum over the CPU's in VOLUME_WATER (Task 4 ruling: two-sided);
+## - per level 0, 2, 5, exhaustively over every block: the max-extinction mip >= every cloudy cell's sigma_c (and rho) of
+##   the block, the distance field <= the true toroidal Chebyshev distance (blocks) to the nearest block with rho > 0 in
+##   either snapshot (no cloud within the claimed distance); on VOLUME_PROBE_POINTS points inside blocks claimed free the
+##   trilinear rho of both snapshots (the probe kernel: what a sample reads) is 0 - so the sub-cell field (it
+##   redistributes rho, peak sigma_c) is 0 there at any lift;
+## - a rebake of a level-2 box bit-identical;
+## - the GLSL grid mirror (probe kernel cloud_volume_grid_in) vs CloudWorldVolumeLayout.grid_of for VOLUME_MIRROR_POINTS
+##   camera offsets in a frame VOLUME_MIRROR_FRAME_M from the camera: within VOLUME_MIRROR_BOUND x the containing
+##   level's cell per axis (preflight C22);
+## - the binding (no GPU): origins of 3 and 12 values agree, the 12-value cell layout equals the single-cell form,
+##   malformed input returns nothing;
+## - the pair switch (Review Focus 1): the service moves on to (ERA5 15:00, 16:00); the new snapshot replaces the analog
+##   in slot 0 only at weight 0, its channel pair is baked while the weight stays 0, slot 1's channels read back
+##   unchanged, the new pair is then the CPU's bake and the blend reaches the target.
+## STARSIM_VOLUME_ONLY=16 runs this section alone.
+const VOLUME_ONLY_ENV := "STARSIM_VOLUME_ONLY"
+const VOLUME_SECTIONS := ["16"]
+const VOLUME_ANALOG_MONTH := 10
+const VOLUME_ANALOG_HOUR := 12
+## ERA5 hours (since 1900-01-01) 2025-10-25 15:00 and 16:00 UTC in data/weather/cache.
+const VOLUME_ERA5_FILES := ["era5_1102887.wthr", "era5_1102888.wthr"]
+const VOLUME_HEIGHTS_M := [2.0, 9000.0]
+const VOLUME_BLEND := 0.3
+const VOLUME_LEVELS := [0, 2, 5]
+const VOLUME_CELLS := 512
+## Bound GPU bake vs CPU reference (brief: 1 % + 1e-6 /m; Task 4 carry: the GPU filters the field, shape and table
+## textures with ~8-bit sub-texel weights where the CPU weighs exactly - a shape value off by <= 1/256 of a texel's
+## step moves an edge ramp, but the cell mean of 256-8448 taps averages it; the half-float store adds 2^-11).
+const VOLUME_TOLERANCE := 0.01
+const VOLUME_FLOOR_PER_M := 1.0e-6
+## Measured (Task 5 report): the cloud amount per weather cell agrees within 0.06 %, but single cells at cloud edges
+## scatter: a tap whose shape value or cloud fraction lies within the GPU filter's 8-bit weight error of the threshold or
+## of the fraction cut (CLOUD_MIN_FRACTION) flips. Hence at most VOLUME_OUTLIER_SHARE of the cells beyond the 1 % bound
+## and every cell within VOLUME_EDGE_SIGMA x its sigma_c (T4's dense tier: 0.02 sigma_c of the dense mean; 0.05 covers
+## the flips, worst measured 0.042). sigma_c of a cell without rho is not judged: there it is the mean in-cloud value of
+## taps just above the fraction cut (a ratio of two tiny numbers) and no sample can use it (the sub-cell field is 0).
+const VOLUME_OUTLIER_SHARE := 0.05
+const VOLUME_EDGE_SIGMA := 0.05
+const VOLUME_WATER := Vector2(0.996, 1.004)
+const VOLUME_WATER_SAMPLES := 6144
+const VOLUME_WATER_MIN_CELLS := 200
+const VOLUME_PROBE_POINTS := 10000
+const VOLUME_MIRROR_POINTS := 100
+const VOLUME_MIRROR_FRAME_M := 990000.0
+const VOLUME_MIRROR_BOUND := 1.0e-3
+## The cold start measured at the game's budget for this many frames (1 s at 45 Hz), then filled at this many times
+## the budget (a check, not the game: ~60 ms frames).
+const VOLUME_COLD_FRAMES := 45
+const VOLUME_BUDGET_SCALE := 40.0
+const VOLUME_FILL_FRAMES := 3000
+const VOLUME_DT := 1.0 / 45.0
+## The pair switch: the service's blend of the new pair and the frames it may take.
+const VOLUME_SWITCH_BLEND := 0.5
+const VOLUME_SWITCH_FRAMES := 2000
+const VOLUME_SWITCH_CELLS := 128
+## The rebake's box (level 2, cells from the window's origin).
+const VOLUME_REBAKE_FROM := Vector3i(96, 96, 0)
+const VOLUME_REBAKE_SIZE := Vector3i(64, 64, 64)
+## Checks: binding 3, per camera 1 fill + 3 levels x (cells + mip + distance + probe) + 1 water, rebake, mirror, switch 4.
+const VOLUME_SAMPLES := 3 + 2 * (1 + 3 * 4 + 1) + 1 + 1 + 5
+
+var _volume_rng := RandomNumberGenerator.new()
+
+
+## STARSIM_VOLUME_ONLY: the world volume's sections alone (C16: an unknown section exits 1).
+func _volume_only(value: String) -> void:
+	if not value in VOLUME_SECTIONS:
+		print("cloud_check: FAIL - %s=%s: unknown section (known: %s)" % [VOLUME_ONLY_ENV, value,
+				", ".join(VOLUME_SECTIONS)])
+		_clouds.shutdown()
+		quit(1)
+		return
+	await _world_volume_samples()
+	_clouds.shutdown()
+	_check("sample count", _samples == VOLUME_SAMPLES + 1, "%d samples" % _samples)  # + the transfer table's
+	print("cloud_check: %s (section %s, %d samples, %d failures)" % ["PASS" if _failures == 0 else "FAIL", value,
+			_samples, _failures])
+	quit(1 if _failures > 0 else 0)
+
+
+func _world_volume_samples() -> void:
+	_volume_rng.seed = 20261028
+	var cache := Paths.data_dir().path_join("weather/cache")
+	var files: Array[String] = [_analog_file(VOLUME_ANALOG_MONTH, VOLUME_ANALOG_HOUR),
+		cache.path_join(VOLUME_ERA5_FILES[0]), cache.path_join(VOLUME_ERA5_FILES[1])]
+	var snapshots: Array[Dictionary] = []
+	for f in files:
+		if f == "" or not FileAccess.file_exists(f):
+			_fail_and_quit("section 16: weather file missing: '%s'" % f)
+			return
+		var snapshot: Dictionary = _core.weather_load_snapshot(f)
+		snapshot["file"] = f
+		snapshots.append(snapshot)
+	_volume_binding_samples(files[0])
+	_clouds.world_volume = true
+	var camera := Vector3.ZERO
+	for i in VOLUME_HEIGHTS_M.size():
+		var height: float = VOLUME_HEIGHTS_M[i]
+		camera = HeightSource.geodetic_to_fixed(SUN_CU_SITE.x, SUN_CU_SITE.y, height)
+		_clouds.show_now(snapshots[0], snapshots[1], VOLUME_BLEND)
+		var label := "camera %.0f m" % height
+		await _volume_fill(camera, i == 0, label)
+		var lookup := _clouds.effect.world_volume.adopted()
+		var reads := {}
+		for k: int in VOLUME_LEVELS:
+			reads[k] = _volume_read(k)
+			var blocks := _volume_blocks(reads[k]["floats"])
+			_volume_cells_vs_cpu(k, lookup, reads[k]["floats"], blocks["cloudy"], files, "%s, level %d" % [label, k])
+			_volume_occupancy(k, lookup, reads[k]["floats"], blocks, "%s, level %d" % [label, k])
+		_volume_water(lookup, reads[2]["floats"], files, snapshots, label)
+		if i == VOLUME_HEIGHTS_M.size() - 1:
+			await _volume_rebake(camera, lookup, reads[2]["bytes"])
+	_volume_mirror()
+	await _volume_pair_switch(camera, snapshots)
+	_clouds.world_volume = false
+
+
+## The analog snapshot of a month and UTC hour slot (data/weather/analog/index.json), "" if there is none.
+func _analog_file(month: int, hour: int) -> String:
+	var dir := Paths.data_dir().path_join("weather/analog")
+	var f := FileAccess.open(dir.path_join("index.json"), FileAccess.READ)
+	if f == null:
+		return ""
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	f.close()
+	for entry: Dictionary in (parsed.get("entries", []) if parsed is Dictionary else []):
+		if int(entry["month"]) == month and int(entry["hour_utc"]) == hour:
+			return dir.path_join(String(entry["file"]))
+	return ""
+
+
+## One frame of the game's loop at the camera (ITRF): the Sun 45 deg up at the site, the layer's update with blend and
+## delta, then the frame drawn (the effect runs the volume's batch).
+func _volume_frame(camera_itrf: Vector3, blend: float, delta_s: float) -> void:
+	var sun := _local_direction(45.0, 135.0, SUN_CU_SITE.x, SUN_CU_SITE.y)
+	_atmosphere.update(_earth_to_gcrf * camera_itrf, Vector3.ZERO, _earth_to_gcrf, _earth_to_gcrf * sun * AU_M, 0.0,
+			1.0)
+	_clouds.update(camera_itrf, blend, delta_s)
+	await RenderingServer.frame_post_draw
+
+
+## The cold fill of the pinned pair: with `measure` first VOLUME_COLD_FRAMES frames at the game's budget (the
+## upkeep's GPU time per frame from its timestamps, the taps and cells per ms measured), then at VOLUME_BUDGET_SCALE x
+## the budget until the schedule is complete and its last batch ran.
+func _volume_fill(camera: Vector3, measure: bool, label: String) -> void:
+	var schedule := _clouds.world_volume_schedule
+	var volume := _clouds.effect.world_volume
+	schedule.budget_scale = 1.0
+	var frames := 0
+	if measure:
+		var before := _clouds.world_volume_stats()
+		var upkeeps: Array[float] = []
+		var planned := 0
+		var seen := int(before["measured_frames"])
+		for i in VOLUME_COLD_FRAMES:
+			await _volume_frame(camera, VOLUME_BLEND, VOLUME_DT)
+			frames += 1
+			var stats := _clouds.world_volume_stats()
+			planned += int(stats["bake_cells"])
+			if int(stats["measured_frames"]) > seen:
+				seen = int(stats["measured_frames"])
+				upkeeps.append(float(stats["upkeep_ms"]))
+		var after := _clouds.world_volume_stats()
+		var ms := float(after["measured_ms"]) - float(before["measured_ms"])
+		var taps := float(after["measured_taps"]) - float(before["measured_taps"])
+		upkeeps.sort()
+		print("cloud_check: world volume cold start (%s, game budget, %d frames): gpu pass cloud_volume_upkeep " % [label,
+				VOLUME_COLD_FRAMES] + "median %.2f ms, max %.2f ms over %d measured frames; %s taps / ms = %.0f "
+				% [upkeeps[upkeeps.size() / 2] if not upkeeps.is_empty() else -1.0, upkeeps.max() if not upkeeps.is_empty()
+				else -1.0, upkeeps.size(), String.num_scientific(taps / maxf(ms, 1e-9)), taps / maxf(ms, 1e-9)
+				/ CloudWorldVolumeLayout.cell_taps(7)] + "level-7 cells / ms; %d cells planned; calibrated rate %s taps / ms"
+				% [planned, String.num_scientific(schedule.bake_taps_per_ms)])
+	schedule.budget_scale = VOLUME_BUDGET_SCALE
+	var start := Time.get_ticks_msec()
+	var done := false
+	while frames < VOLUME_FILL_FRAMES and not done:
+		await _volume_frame(camera, VOLUME_BLEND, VOLUME_DT)
+		frames += 1
+		done = schedule.complete() and not volume.waiting() and _volume_all_ready(volume.adopted())
+	schedule.budget_scale = 1.0
+	await _volume_frame(camera, VOLUME_BLEND, VOLUME_DT)  # the batch planned last has run
+	_check("world volume fill (%s)" % label, done, "%d frames, %.1f s at %.0f x the budget, rate %s taps / ms" % [frames,
+			(Time.get_ticks_msec() - start) / 1000.0, VOLUME_BUDGET_SCALE,
+			String.num_scientific(schedule.bake_taps_per_ms)])
+
+
+static func _volume_all_ready(lookup: Dictionary) -> bool:
+	if lookup.is_empty():
+		return false
+	for lv: Dictionary in lookup["levels"]:
+		if bool(lv["active"]) and not bool(lv["ready"]):
+			return false
+	return true
+
+
+## Level k's density read back: the raw half floats and the floats (1/km), 4 per texel (x fastest, then y, z).
+func _volume_read(k: int) -> Dictionary:
+	var rd := RenderingServer.get_rendering_device()
+	var bytes := rd.texture_get_data(_clouds.effect.world_volume.density_texture(k), 0)
+	var image := Image.create_from_data(CloudWorldVolumeLayout.CELLS_H,
+			CloudWorldVolumeLayout.CELLS_H * CloudWorldVolumeLayout.CELLS_V, false, Image.FORMAT_RGBAH, bytes)
+	image.convert(Image.FORMAT_RGBAF)
+	return {"bytes": bytes, "floats": image.get_data().to_float32_array()}
+
+
+## Per block of MIP_DIV^3 texels (texel space): the largest rho and sigma_c of its cells over both snapshots (1/km),
+## and up to VOLUME_CELLS texel indices with rho > 0 (a reservoir sample).
+func _volume_blocks(floats: PackedFloat32Array) -> Dictionary:
+	var L := CloudWorldVolumeLayout
+	var mip := L.mip_size()
+	var rho := PackedFloat32Array()
+	var sigma := PackedFloat32Array()
+	rho.resize(mip.x * mip.y * mip.z)
+	sigma.resize(mip.x * mip.y * mip.z)
+	var cloudy := PackedInt32Array()
+	var seen := 0
+	var plane := L.CELLS_H * L.CELLS_H * 4
+	var zero := PackedFloat32Array()
+	zero.resize(plane)
+	for z in L.CELLS_V:
+		if floats.slice(z * plane, (z + 1) * plane) == zero:
+			continue
+		for y in L.CELLS_H:
+			var row := (z * L.CELLS_H + y) * L.CELLS_H
+			var block_row := ((z / L.MIP_DIV) * mip.y + y / L.MIP_DIV) * mip.x
+			for x in L.CELLS_H:
+				var i := (row + x) * 4
+				var r := maxf(floats[i], floats[i + 2])
+				var s := maxf(floats[i + 1], floats[i + 3])
+				if r <= 0.0 and s <= 0.0:
+					continue
+				var b := block_row + x / L.MIP_DIV
+				rho[b] = maxf(rho[b], r)
+				sigma[b] = maxf(sigma[b], s)
+				if r > 0.0:
+					seen += 1
+					if cloudy.size() < VOLUME_CELLS:
+						cloudy.append(row + x)
+					else:
+						var j := _volume_rng.randi_range(0, seen - 1)
+						if j < VOLUME_CELLS:
+							cloudy[j] = row + x
+	return {"rho": rho, "sigma": sigma, "cloudy": cloudy, "cloudy_cells": seen}
+
+
+## The global cell of texel index t of a level whose window starts at `origin` (toroidal storage).
+static func _volume_cell_of(t: int, origin: Vector3i) -> Vector3i:
+	var L := CloudWorldVolumeLayout
+	var texel := Vector3i(t % L.CELLS_H, (t / L.CELLS_H) % L.CELLS_H, t / (L.CELLS_H * L.CELLS_H))
+	var size := Vector3i(L.CELLS_H, L.CELLS_H, L.CELLS_V)
+	var o := L.texel_of(0, origin)
+	return origin + Vector3i(posmod(texel.x - o.x, size.x), posmod(texel.y - o.y, size.y), posmod(texel.z - o.z, size.z))
+
+
+static func _volume_texel_index(cell: Vector3i) -> int:
+	var L := CloudWorldVolumeLayout
+	var t := L.texel_of(0, cell)
+	return (t.z * L.CELLS_H + t.y) * L.CELLS_H + t.x
+
+
+## The layout of a level's frame (as the volume's lookup states it).
+static func _volume_layout(lookup: Dictionary, k: int) -> CloudWorldVolumeLayout:
+	var layout := CloudWorldVolumeLayout.new()
+	layout.set_frame(lookup["levels"][k]["frame_origin_earth_m"])
+	return layout
+
+
+## The cell's box for the CPU bake (12 values: centre, e_x, e_y, e_z; Earth-local render axes): the grid's own axes at
+## its centre, as the GPU bake builds it (cloud_volume_bake.gdshaderinc).
+static func _volume_box(layout: CloudWorldVolumeLayout, k: int, cell: Vector3i) -> PackedFloat64Array:
+	var L := CloudWorldVolumeLayout
+	var h: float = L.CELL_H_M[k]
+	var v: float = L.CELL_V_M[k]
+	var g := Vector3((cell.x + 0.5) * h, (cell.y + 0.5) * h, L.SHELL_BOTTOM_M + (cell.z + 0.5) * v)
+	var c := layout.earth_of(g)
+	var ex := layout.earth_of(g + Vector3(0.5 * h, 0.0, 0.0)) - layout.earth_of(g - Vector3(0.5 * h, 0.0, 0.0))
+	var ey := layout.earth_of(g + Vector3(0.0, 0.5 * h, 0.0)) - layout.earth_of(g - Vector3(0.0, 0.5 * h, 0.0))
+	var ez := layout.up_of_grid(g.x, g.y) * v
+	return PackedFloat64Array([c.x, c.y, c.z, ex.x, ex.y, ex.z, ey.x, ey.y, ey.z, ez.x, ez.y, ez.z])
+
+
+## The shape origins as the GPU has them (12 values: the camera, then the cumulus, stratiform and ice origins).
+static func _volume_origins() -> PackedFloat64Array:
+	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
+	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
+	var camera := hi + lo
+	var o := PackedFloat64Array([camera.x, camera.y, camera.z])
+	for id in [&"cloud_noise_origin", &"cloud_stratiform_origin", &"cloud_ice_origin"]:
+		var v: Vector3 = ShaderGlobals.value(id)
+		o.append_array([v.x, v.y, v.z])
+	return o
+
+
+## CPU bakes of cells (global) of level k for a snapshot file: (rho, sigma_c) per cell, 1/m.
+func _volume_cpu(file: String, lookup: Dictionary, k: int, cells: Array[Vector3i]) -> PackedVector2Array:
+	var layout := _volume_layout(lookup, k)
+	var boxes := PackedFloat64Array()
+	for c in cells:
+		boxes.append_array(_volume_box(layout, k, c))
+	return _core.weather_cloud_cell_bakes(file, boxes, _volume_origins())
+
+
+## One cell's GPU bake (texel floats from t: rho, sigma_c in 1/km) against the CPU's (1/m), into : n, beyond
+## (outside VOLUME_TOLERANCE x the value + VOLUME_FLOOR_PER_M), edge (outside VOLUME_EDGE_SIGMA x sigma_c +
+## VOLUME_FLOOR_PER_M; sigma_c judged so only where the CPU's rho > 0), the worst relative error and the worst error in
+## sigma_c; the first edge failure's text.
+static func _volume_compare(floats: PackedFloat32Array, t: int, cpu: Vector2, stats: Dictionary, what: String) -> void:
+	var gpu := Vector2(floats[t], floats[t + 1]) / CloudWorldVolume.PER_KM
+	var error := (gpu - cpu).abs()
+	var sigma := maxf(cpu.y, VOLUME_FLOOR_PER_M)
+	stats["n"] = int(stats.get("n", 0)) + 1
+	stats["worst"] = maxf(float(stats.get("worst", 0.0)), maxf(error.x / maxf(cpu.x, VOLUME_FLOOR_PER_M),
+			error.y / sigma))
+	stats["worst_sigma"] = maxf(float(stats.get("worst_sigma", 0.0)), maxf(error.x, error.y) / sigma)
+	if error.x > VOLUME_TOLERANCE * cpu.x + VOLUME_FLOOR_PER_M or error.y > VOLUME_TOLERANCE * cpu.y + VOLUME_FLOOR_PER_M:
+		stats["beyond"] = int(stats.get("beyond", 0)) + 1
+	if error.x > VOLUME_EDGE_SIGMA * cpu.y + VOLUME_FLOOR_PER_M 			or (cpu.x > 0.0 and error.y > VOLUME_EDGE_SIGMA * cpu.y + VOLUME_FLOOR_PER_M):
+		stats["edge"] = int(stats.get("edge", 0)) + 1
+		if not stats.has("detail"):
+			stats["detail"] = "; first: %s GPU (%s, %s) CPU (%s, %s) /m" % [what, String.num_scientific(gpu.x),
+					String.num_scientific(gpu.y), String.num_scientific(cpu.x), String.num_scientific(cpu.y)]
+
+
+## The bake comparison's verdict: at most VOLUME_OUTLIER_SHARE of the cells beyond the 1 % bound, none beyond the edge
+## bound.
+static func _volume_verdict(stats: Dictionary) -> bool:
+	var n := int(stats.get("n", 0))
+	return n > 0 and int(stats.get("beyond", 0)) <= floori(VOLUME_OUTLIER_SHARE * n) and int(stats.get("edge", 0)) == 0
+
+
+static func _volume_stats_text(stats: Dictionary) -> String:
+	return "%d beyond %.2f x + %s /m (allowed %.0f %%), %d beyond %.2f sigma_c; worst relative %.4f, worst %.4f sigma_c%s" 			% [int(stats.get("beyond", 0)), VOLUME_TOLERANCE, String.num_scientific(VOLUME_FLOOR_PER_M),
+			100.0 * VOLUME_OUTLIER_SHARE, int(stats.get("edge", 0)), VOLUME_EDGE_SIGMA, float(stats.get("worst", 0.0)),
+			float(stats.get("worst_sigma", 0.0)), stats.get("detail", "")]
+
+
+## 512 cells of level k (half the GPU's cloudy ones, half uniform) vs the CPU bake of each snapshot.
+func _volume_cells_vs_cpu(k: int, lookup: Dictionary, floats: PackedFloat32Array, cloudy: PackedInt32Array,
+		files: Array[String], label: String) -> void:
+	var L := CloudWorldVolumeLayout
+	var origin: Vector3i = lookup["levels"][k]["origin"]
+	var cells: Array[Vector3i] = []
+	for i in mini(cloudy.size(), VOLUME_CELLS / 2):
+		cells.append(_volume_cell_of(cloudy[i], origin))
+	while cells.size() < VOLUME_CELLS:
+		cells.append(origin + Vector3i(_volume_rng.randi_range(0, L.CELLS_H - 1), _volume_rng.randi_range(0,
+				L.CELLS_H - 1), _volume_rng.randi_range(0, L.CELLS_V - 1)))
+	var stats := {}
+	var nonzero := 0
+	var complete := true
+	for s in 2:
+		var cpu := _volume_cpu(files[s], lookup, k, cells)
+		if cpu.size() != cells.size():
+			complete = false
+			continue
+		for i in cells.size():
+			var t := _volume_texel_index(cells[i]) * 4 + 2 * CloudWorldVolume.channel_of_slot(s)
+			nonzero += 1 if cpu[i].x > 0.0 else 0
+			_volume_compare(floats, t, cpu[i], stats, "slot %d cell %s" % [s, cells[i]])
+	_check("world volume bake vs CPU (%s)" % label, complete and nonzero > 0 and _volume_verdict(stats),
+			"%d cells x 2 snapshots (%d with rho > 0 on the CPU): %s" % [cells.size(), nonzero, _volume_stats_text(stats)])
+
+
+## Level 2's water per weather cell: uniform cells of the cloud band, assigned to a weather cell by their centre; the
+## GPU's sum of rho over the CPU's for both snapshots.
+func _volume_water(lookup: Dictionary, floats: PackedFloat32Array, files: Array[String], snapshots: Array[Dictionary],
+		label: String) -> void:
+	var L := CloudWorldVolumeLayout
+	var k := 2
+	var origin: Vector3i = lookup["levels"][k]["origin"]
+	var layout := _volume_layout(lookup, k)
+	# the cloud band: the texel z range with rho > 0
+	var z_lo := L.CELLS_V
+	var z_hi := -1
+	var plane := L.CELLS_H * L.CELLS_H * 4
+	var zero := PackedFloat32Array()
+	zero.resize(plane)
+	for z in L.CELLS_V:
+		if floats.slice(z * plane, (z + 1) * plane) != zero:
+			z_lo = mini(z_lo, z)
+			z_hi = maxi(z_hi, z)
+	var cells: Array[Vector3i] = []
+	if z_hi >= z_lo:
+		for i in VOLUME_WATER_SAMPLES:
+			var tz := _volume_rng.randi_range(z_lo, z_hi)
+			cells.append(origin + Vector3i(_volume_rng.randi_range(0, L.CELLS_H - 1),
+					_volume_rng.randi_range(0, L.CELLS_H - 1), 0) + Vector3i(0, 0, tz))
+	var ratios := ""
+	var ok := not cells.is_empty()
+	var judged := 0
+	for s in 2:
+		var cpu := _volume_cpu(files[s], lookup, k, cells)
+		if cpu.size() != cells.size():
+			ok = false
+			continue
+		var rows := float(snapshots[s]["rows"])
+		var columns := float(snapshots[s]["columns"])
+		var sums := {}  # weather cell -> Vector3(gpu, cpu, count)
+		for i in cells.size():
+			var p := layout.earth_of(Vector3((cells[i].x + 0.5) * L.CELL_H_M[k], (cells[i].y + 0.5) * L.CELL_H_M[k],
+					L.SHELL_BOTTOM_M + (cells[i].z + 0.5) * L.CELL_V_M[k]))
+			var lat := atan2(p.y * CloudLayer.POLAR_STRETCH * CloudLayer.POLAR_STRETCH, Vector2(p.x, p.z).length())
+			var lon := atan2(p.x, p.z)
+			var id := Vector2i(roundi((0.5 * PI - lat) / (PI / (rows - 1.0))),
+					posmod(roundi(lon / (TAU / columns)), int(columns)))
+			var t := _volume_texel_index(cells[i]) * 4 + 2 * CloudWorldVolume.channel_of_slot(s)
+			var sum: Vector3 = sums.get(id, Vector3.ZERO)
+			sums[id] = sum + Vector3(floats[t] / CloudWorldVolume.PER_KM, cpu[i].x, 1.0)
+		for id: Vector2i in sums:
+			var sum: Vector3 = sums[id]
+			if sum.z < VOLUME_WATER_MIN_CELLS or sum.y <= 0.0:
+				continue
+			var ratio := sum.x / sum.y
+			judged += 1
+			ok = ok and ratio >= VOLUME_WATER.x and ratio <= VOLUME_WATER.y
+			ratios += " slot %d cell %s: %.5f (%d)" % [s, id, ratio, int(sum.z)]
+	_check("world volume level-2 water per weather cell (%s)" % label, ok and judged > 0,
+			"GPU / CPU in [%.3f, %.3f]:%s" % [VOLUME_WATER.x, VOLUME_WATER.y, ratios])
+
+
+## Level k's occupancy exhaustively: the max mip and the distance field read back against the density's blocks; then
+## the probe's trilinear density at points inside blocks claimed free.
+func _volume_occupancy(k: int, lookup: Dictionary, floats: PackedFloat32Array, blocks: Dictionary,
+		label: String) -> void:
+	var L := CloudWorldVolumeLayout
+	var rd := RenderingServer.get_rendering_device()
+	var volume := _clouds.effect.world_volume
+	var mip := L.mip_size()
+	var count := mip.x * mip.y * mip.z
+	var max_image := Image.create_from_data(mip.x, mip.y * mip.z, false, Image.FORMAT_RH,
+			rd.texture_get_data(volume.max_extinction_texture(k), 0))
+	max_image.convert(Image.FORMAT_RF)
+	var bound := max_image.get_data().to_float32_array()
+	var claimed := rd.texture_get_data(volume.distance_texture(k), 0)
+	var rho: PackedFloat32Array = blocks["rho"]
+	var sigma: PackedFloat32Array = blocks["sigma"]
+	var low := 0
+	var occupied := 0
+	for b in count:
+		if rho[b] > 0.0:
+			occupied += 1
+			if bound[b] < sigma[b] or bound[b] < rho[b]:
+				low += 1
+	_check("world volume max-extinction mip (%s)" % label, low == 0 and occupied > 0,
+			"%d of %d blocks with rho > 0, %d with a bound below a cell's sigma_c / rho" % [occupied, count, low])
+	# the true toroidal Chebyshev distance (blocks, capped) to the nearest block with rho > 0
+	var cap := CloudWorldVolume.DISTANCE_CAP_BLOCKS
+	var d := PackedInt32Array()
+	d.resize(count)
+	for b in count:
+		d[b] = 0 if rho[b] > 0.0 else cap + 1
+	var strides := [1, mip.x, mip.x * mip.y]
+	for axis in 3:
+		var next := PackedInt32Array()
+		next.resize(count)
+		var stride: int = strides[axis]
+		var n_axis: int = mip[axis]
+		for b in count:
+			if d[b] == 0:
+				continue  # (next[b] = 0)
+			var coord := (b / stride) % n_axis
+			var base := b - coord * stride
+			var best := cap + 1
+			for j in range(-cap, cap + 1):
+				best = mini(best, maxi(absi(j), d[base + posmod(coord + j, n_axis) * stride]))
+			next[b] = best
+		d = next
+	var over := 0
+	var free_blocks: Array[int] = []
+	for b in count:
+		if claimed[b] > d[b]:
+			over += 1
+		if claimed[b] >= 1:
+			free_blocks.append(b)
+	_check("world volume distance field (%s)" % label, over == 0 and free_blocks.size() > 0,
+			"%d blocks: %d claim more than the true distance to cloud (cap %d), %d claimed free" % [count, over, cap,
+			free_blocks.size()])
+	# the probe: trilinear rho of both snapshots at points inside blocks claimed free
+	var origin: Vector3i = lookup["levels"][k]["origin"]
+	var o := L.texel_of(k, origin)
+	var size := Vector3i(L.CELLS_H, L.CELLS_H, L.CELLS_V)
+	var points := PackedFloat32Array()
+	for i in VOLUME_PROBE_POINTS:
+		var b: int = free_blocks[_volume_rng.randi_range(0, free_blocks.size() - 1)]
+		var block := Vector3i(b % mip.x, (b / mip.x) % mip.y, b / (mip.x * mip.y))
+		var t := Vector3(block * L.MIP_DIV) + Vector3(_volume_rng.randf(), _volume_rng.randf(), _volume_rng.randf()) \
+				* L.MIP_DIV
+		# texel -> the window's continuous cell coordinate
+		var c := Vector3(origin) + Vector3(fposmod(t.x - o.x, size.x), fposmod(t.y - o.y, size.y),
+				fposmod(t.z - o.z, size.z))
+		points.append_array([c.x * L.CELL_H_M[k], c.y * L.CELL_H_M[k], L.SHELL_BOTTOM_M + c.z * L.CELL_V_M[k], 0.0])
+	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
+	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
+	var result := volume.probe(rd, 1, points, lookup, hi + lo, k, k)
+	var nonzero := 0
+	for i in VOLUME_PROBE_POINTS:
+		if result.size() < 4 * VOLUME_PROBE_POINTS or result[4 * i] > 0.0 or result[4 * i + 2] > 0.0:
+			nonzero += 1
+	_check("world volume free blocks sampled (%s)" % label, nonzero == 0,
+			"%d points in blocks claimed free: %d with trilinear rho > 0 (either snapshot)" % [VOLUME_PROBE_POINTS,
+			nonzero])
+
+
+## A level-2 box baked again (a batch of its own after the layer's): its texels bit-identical.
+func _volume_rebake(camera: Vector3, lookup: Dictionary, before: PackedByteArray) -> void:
+	var L := CloudWorldVolumeLayout
+	var origin: Vector3i = lookup["levels"][2]["origin"]
+	var from := origin + VOLUME_REBAKE_FROM
+	var to := from + VOLUME_REBAKE_SIZE
+	_atmosphere.update(_earth_to_gcrf * camera, Vector3.ZERO, _earth_to_gcrf, _earth_to_gcrf * _local_direction(45.0,
+			135.0, SUN_CU_SITE.x, SUN_CU_SITE.y) * AU_M, 0.0, 1.0)
+	_clouds.update(camera, VOLUME_BLEND, 0.0)
+	_clouds.effect.world_volume.submit({"bake": [{"level": 2, "from": from, "to": to, "snapshot_channel": -1,
+			"spare": false}], "light": [], "provisional": [], "lookup": lookup, "reframe": {"level": -1}})
+	await RenderingServer.frame_post_draw
+	var after: PackedByteArray = _volume_read(2)["bytes"]
+	var differing := 0
+	for z in range(from.z, to.z):
+		for y in range(from.y, to.y):
+			var a := _volume_texel_index(Vector3i(from.x, y, z)) * 8
+			var n := VOLUME_REBAKE_SIZE.x * 8
+			if L.texel_of(2, Vector3i(from.x, y, z)).x + VOLUME_REBAKE_SIZE.x > L.CELLS_H:
+				n = (L.CELLS_H - L.texel_of(2, Vector3i(from.x, y, z)).x) * 8  # (the row wraps: its first part)
+			if before.slice(a, a + n) != after.slice(a, a + n):
+				differing += 1
+	_check("world volume rebake bit-identical", differing == 0 and before.size() == after.size(),
+			"level 2 box %s .. %s: %d of %d rows differ" % [from, to, differing, VOLUME_REBAKE_SIZE.y
+			* VOLUME_REBAKE_SIZE.z])
+
+
+## The GLSL grid (probe kernel, cloud_volume_grid_in) against CloudWorldVolumeLayout.grid_of: the camera's frame moved
+## VOLUME_MIRROR_FRAME_M away (the worst before a re-frame); points per level inside its window, each judged by the
+## finest level containing it.
+func _volume_mirror() -> void:
+	var L := CloudWorldVolumeLayout
+	var volume := _clouds.effect.world_volume
+	var lookup: Dictionary = volume.adopted().duplicate(true)
+	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
+	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
+	var camera := hi + lo
+	var near := CloudWorldVolumeLayout.new()
+	near.set_frame(camera)
+	var far_origin := near.earth_of(Vector3(VOLUME_MIRROR_FRAME_M * cos(0.7), VOLUME_MIRROR_FRAME_M * sin(0.7), 0.0))
+	var layout := CloudWorldVolumeLayout.new()
+	layout.set_frame(far_origin)
+	var gc := layout.grid_of(camera)
+	for lv: Dictionary in lookup["levels"]:
+		lv["frame_origin_earth_m"] = far_origin
+		var k: int = lv["level"]
+		lv["origin"] = layout.window_origin(k, gc)
+		lv["active"] = layout.level_active(k, gc.z)
+	lookup.erase("spare")
+	lookup.erase("build_spare")
+	var points := PackedFloat32Array()
+	var expected: Array[Vector3] = []
+	var levels: Array[int] = []
+	for i in VOLUME_MIRROR_POINTS:
+		var k := i % L.LEVELS
+		var half := 0.5 * L.CELLS_H * L.CELL_H_M[k]
+		var g := gc + Vector3(_volume_rng.randf_range(-half, half), _volume_rng.randf_range(-half, half), 0.0)
+		if k < L.WINDOWED_LEVELS:
+			var o: Vector3i = lookup["levels"][k]["origin"]
+			g.z = L.SHELL_BOTTOM_M + (o.z + _volume_rng.randf() * L.CELLS_V) * L.CELL_V_M[k]
+		else:
+			g.z = _volume_rng.randf_range(L.SHELL_BOTTOM_M, L.SHELL_TOP_M)
+		var offset := CloudWorldVolume._f32(layout.earth_of(g) - camera)
+		points.append_array([offset.x, offset.y, offset.z, 0.0])
+		expected.append(layout.grid_of(camera + offset))
+	var result := volume.probe(RenderingServer.get_rendering_device(), 0, points, lookup, camera)
+	var bad := 0
+	var worst := 0.0
+	var worst_text := ""
+	for i in expected.size():
+		if result.size() < 4 * expected.size():
+			bad = expected.size()
+			break
+		var e := expected[i]
+		var got := Vector3(result[4 * i], result[4 * i + 1], result[4 * i + 2])
+		var k := L.LEVELS - 1
+		for j in L.LEVELS:
+			if bool(lookup["levels"][j]["active"]) and L.fade_weight_at(j, e, lookup["levels"][j]["origin"]) > 0.0:
+				k = j
+				break
+		var err := (got - e).abs()
+		var cell := Vector3(L.CELL_H_M[k], L.CELL_H_M[k], L.CELL_V_M[k])
+		var rel := maxf(maxf(err.x / cell.x, err.y / cell.y), err.z / cell.z)
+		if rel > worst:
+			worst = rel
+			worst_text = "level %d: error %s m at |g - g_c| %.0f m" % [k, err, Vector2(e.x - gc.x, e.y - gc.y).length()]
+		bad += 1 if rel > VOLUME_MIRROR_BOUND else 0
+	_check("world volume GLSL grid mirror", bad == 0,
+			"%d points, frame %.0f km away: %d beyond %s x the containing cell; worst %s cell (%s)" % [expected.size(),
+			VOLUME_MIRROR_FRAME_M / 1000.0, bad, String.num_scientific(VOLUME_MIRROR_BOUND),
+			String.num_scientific(worst), worst_text])
+
+
+## The binding alone (no GPU): 3 and 12 origin values, the 12-value cell layout against the single-cell form, the error
+## path.
+func _volume_binding_samples(file: String) -> void:
+	var site := Frames.to_render(HeightSource.geodetic_to_fixed(SUN_CU_SITE.x, SUN_CU_SITE.y, 1500.0))
+	var anchor := Frames.to_render(HeightSource.geodetic_to_fixed(SUN_CU_SITE.x, SUN_CU_SITE.y, 2.0))
+	var origins12 := PackedFloat64Array([anchor.x, anchor.y, anchor.z])
+	for tile in [[CloudLayer.SHAPE_TILE_H_M, CloudLayer.SHAPE_TILE_V_M],
+			[CloudLayer.SHAPE_TILE_H_M * CloudLayer.STRATIFORM_STRETCH, CloudLayer.SHAPE_TILE_V_M],
+			[CloudLayer.SHAPE_TILE_H_M, CloudLayer.ICE_TILE_V_M]]:
+		var stretched := Vector3(anchor.x, anchor.y * CloudLayer.POLAR_STRETCH, anchor.z)
+		var o := CloudLayer._shape_origin(anchor, stretched.length() - CloudLayer.WGS84_A_M, tile[0], tile[1])
+		origins12.append_array([o.x, o.y, o.z])
+	var origins3 := origins12.slice(0, 3)
+	# cells around the site, aligned east / north / up (the single-cell form's box)
+	var cells := PackedFloat64Array()
+	var centres: Array[Vector3] = []
+	for i in 16:
+		var c := site + Vector3(_volume_rng.randf_range(-3000.0, 3000.0), _volume_rng.randf_range(-500.0, 500.0),
+				_volume_rng.randf_range(-3000.0, 3000.0))
+		centres.append(c)
+		var up := Vector3(c.x, c.y * CloudLayer.POLAR_STRETCH * CloudLayer.POLAR_STRETCH, c.z).normalized()
+		var east := Vector3.UP.cross(up).normalized()
+		var north := up.cross(east).normalized()
+		cells.append_array([c.x, c.y, c.z, east.x * 200.0, east.y * 200.0, east.z * 200.0, north.x * 200.0,
+				north.y * 200.0, north.z * 200.0, up.x * 164.0625, up.y * 164.0625, up.z * 164.0625])
+	var a := _core.weather_cloud_cell_bakes(file, cells, origins12)
+	var b := _core.weather_cloud_cell_bakes(file, cells, origins3)
+	var same := a.size() == centres.size() and b.size() == a.size()
+	var single_ok := same
+	for i in a.size():
+		if not same:
+			break
+		var scale := maxf(maxf(absf(a[i].x), absf(a[i].y)), 1e-12)
+		same = same and (a[i] - b[i]).abs().x <= 1e-9 * scale and (a[i] - b[i]).abs().y <= 1e-9 * scale
+		var one := _core.weather_cloud_cell_bake(file, centres[i], Vector2(200.0, 164.0625), origins12)
+		single_ok = single_ok and (one - a[i]).abs().x <= 1e-12 * scale and (one - a[i]).abs().y <= 1e-12 * scale
+	_check("cell bake binding: origins of 3 and 12 values agree", same, "%d cells" % a.size())
+	_check("cell bake binding: the 12-value cell layout (centre, e_x, e_y, e_z) = the single-cell form", single_ok,
+			"%d cells, east / north / up boxes" % a.size())
+	var broken := _core.weather_cloud_cell_bakes(file, cells.slice(0, 11), origins12).size() \
+			+ _core.weather_cloud_cell_bakes(file, cells, origins12.slice(0, 5)).size() \
+			+ _core.weather_cloud_cell_bakes(file + ".missing", cells, origins12).size()
+	_check("cell bake binding: malformed input returns nothing (errors pushed)", broken == 0,
+			"11 cell values, 5 origin values, a missing file: %d results" % broken)
+
+
+## The pair switch (Review Focus 1): the service announces (ERA5 15:00, ERA5 16:00) at VOLUME_SWITCH_BLEND while the
+## pair (analog, ERA5 15:00) is shown at VOLUME_BLEND.
+func _volume_pair_switch(camera: Vector3, snapshots: Array[Dictionary]) -> void:
+	var L := CloudWorldVolumeLayout
+	var volume := _clouds.effect.world_volume
+	_clouds.show_now(snapshots[0], snapshots[1], VOLUME_BLEND)
+	await _volume_fill(camera, false, "before the pair switch")
+	var lookup := volume.adopted()
+	var watched := [2, 7]
+	var before := {}
+	for k: int in watched:
+		before[k] = _volume_read(k)["bytes"]
+	var ids_before: Array = _clouds.state()["slots"]
+	_clouds.pinned = false
+	_clouds.set_target(snapshots[1].duplicate(), snapshots[2].duplicate())
+	_clouds.world_volume_schedule.budget_scale = VOLUME_BUDGET_SCALE
+	var replaced_at_weight := -1.0
+	var weight_while_baking := 0.0
+	var baking_frames := 0
+	var mid_checked := false
+	var unchanged := true
+	var frames := 0
+	var tracking := false
+	while frames < VOLUME_SWITCH_FRAMES and not tracking:
+		var state_before: Dictionary = _clouds.state()
+		await _volume_frame(camera, VOLUME_SWITCH_BLEND, VOLUME_DT)
+		frames += 1
+		var state: Dictionary = _clouds.state()
+		if state["slots"][0] != state_before["slots"][0] and replaced_at_weight < 0.0:
+			replaced_at_weight = 1.0 - float(state_before["w1"])  # slot 0's weight when its snapshot changed
+		if state["slots"][0] != ids_before[0] and not volume.slot_holds(0, state["slots"][0]):
+			baking_frames += 1
+			weight_while_baking = maxf(weight_while_baking, 1.0 - float(state["w1"]))
+			if not mid_checked and baking_frames >= 3:  # slot 1's channels in the middle of the bake
+				mid_checked = true
+				for k: int in watched:
+					unchanged = unchanged and _volume_pair1_equal(_volume_read(k)["bytes"], before[k])
+		tracking = bool(state["tracking"]) and is_equal_approx(float(state["w1"]), 1.0 - VOLUME_SWITCH_BLEND) \
+				and state["slots"][0] != ids_before[0]
+	_clouds.world_volume_schedule.budget_scale = 1.0
+	for k: int in watched:
+		unchanged = unchanged and _volume_pair1_equal(_volume_read(k)["bytes"], before[k])
+	_check("world volume pair switch: the new snapshot replaces slot 0 at weight 0, baked while its weight stays 0",
+			replaced_at_weight == 0.0 and baking_frames > 0 and weight_while_baking == 0.0,
+			"slot 0's weight at the replacement %.3f, %d frames baking its channel pair at weight %.3f" % [
+			replaced_at_weight, baking_frames, weight_while_baking])
+	_check("world volume pair switch: slot 1's channels unchanged during and after the bake", unchanged and mid_checked,
+			"levels %s read back in the middle of the bake and after it" % str(watched))
+	# the new snapshot in slot 0's channel pair = the CPU's bake (level 2's cloudy cells of the new pair)
+	lookup = volume.adopted()
+	var read := _volume_read(2)
+	var cloudy: PackedInt32Array = _volume_blocks(read["floats"])["cloudy"]
+	var cells: Array[Vector3i] = []
+	for i in mini(cloudy.size(), VOLUME_SWITCH_CELLS):
+		cells.append(_volume_cell_of(cloudy[i], lookup["levels"][2]["origin"]))
+	var cpu := _volume_cpu(snapshots[2]["file"], lookup, 2, cells)
+	var stats := {}
+	for i in mini(cpu.size(), cells.size()):
+		var t := _volume_texel_index(cells[i]) * 4 + 2 * CloudWorldVolume.channel_of_slot(0)
+		_volume_compare(read["floats"], t, cpu[i], stats, "cell %s" % cells[i])
+	_check("world volume pair switch: slot 0's channel pair holds the new snapshot (CPU bake)",
+			cpu.size() == cells.size() and _volume_verdict(stats), "%d level-2 cells: %s" % [cells.size(),
+			_volume_stats_text(stats)])
+	_check("world volume pair switch: the blend then reaches the new pair's", tracking,
+			"%d frames, w1 %.3f, slots %s" % [frames, float(_clouds.state()["w1"]), _clouds.state()["slots"]])
+
+
+## Whether two raw RGBA16F read-backs (8 bytes per texel) hold the same channel pair 1 (BA: bytes 4-7) everywhere;
+## z planes equal as a whole are skipped.
+static func _volume_pair1_equal(a: PackedByteArray, b: PackedByteArray) -> bool:
+	if a.size() != b.size():
+		return false
+	var plane := CloudWorldVolumeLayout.CELLS_H * CloudWorldVolumeLayout.CELLS_H * 8
+	for z in a.size() / plane:
+		if a.slice(z * plane, (z + 1) * plane) == b.slice(z * plane, (z + 1) * plane):
+			continue
+		for i in range(z * plane + 4, (z + 1) * plane, 8):
+			if a.decode_u32(i) != b.decode_u32(i):
+				return false
+	return true

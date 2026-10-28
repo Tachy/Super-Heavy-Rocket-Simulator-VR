@@ -534,3 +534,17 @@ pixel in V3: no (median 7, mean 19). (b) > 10 ms: no. Per occupied step 34.6 ps 
 max fetch), but 12x fewer steps. Lever 2 alone is slower than the base (its per-step overhead on every occupied step,
 only 21 % fewer steps); lever 3 is not worth its luminance bias. The lever that closes the gap is 4 (+ t for the
 image, + s for production's sub-cell detail); 1 and 2 matter only for clear bake cells under it.
+
+## World volume upkeep (cloud world volume plan Task 5, 2026-10-28)
+
+`cloud_check.gd` section 16 (desktop RTX 4090, `--xr-mode off`; Starbase, analog October 12 UTC + ERA5 2025-10-25
+15:00 at blend 0.3, camera 2 m): GPU interval `cloud_volume_upkeep` (bake + max mip + distance field):
+- cold start at the game's budget (spike frames: 1.5 ms bake), 45 frames: median 1.34 ms, max 2.84 ms; measured
+  4.3e7 taps/ms = 5050 level-7 cells/ms (the bake's cost is content-dependent: a clear cell skips its taps);
+- whole fills at 40 x the budget: 6.8-7.6e7 taps/ms.
+- One thread per cell (first version) was latency-bound: a level-7 cell's 8448 taps take one thread ~6 ms, so a
+  frame's small batch ran 6 ms median / 17 ms max at 1e6 taps/ms; one 64-thread group per cell fixed it.
+- Consequences at the game's budget (estimates from the rate, not run): level 7 complete after ~7e10 taps / (1.5 ms x
+  ~5e7) ~ 950 frames (~21 s at 45 Hz), the whole volume (~1.24e11 nominal taps) ~25 s; a pair switch's rebake of
+  one channel pair (all levels, nominal taps) at the normal 0.5 ms bake budget ~1-2 min, the cross-fade held meanwhile. The
+  spec's "full volume within ~1 s" is not met by the bake rate; the fallback (today's march) covers the cold start.
