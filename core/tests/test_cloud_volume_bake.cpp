@@ -124,8 +124,9 @@ TEST_CASE("The point model mirror: the slab's extinction, none above it, none un
     // Between the slab's first and last layer centres the field is flat (1125 .. 2375 m).
     std::uniform_real_distribution<double> inside(1150.0, 2350.0);
     // Every point's envelope (the grid mean the field interpolates: in-cloud x m(1)) is the slab's extinction within
-    // the 8-bit water code (<= 1.97 %); the points' mean extinction too (the edge ramp thins the cloud around the shape's
-    // minima even at cf 1, the edge mean factor m(1) puts that water back: kept on average, not at every point).
+    // the 8-bit water code (<= 1.97 %); the points' mean extinction too (the edge ramp thins the cloud around the
+    // shape's minima even at cf 1, the edge mean factor m(1) puts that water back: kept on average, not at every
+    // point).
     const double m1 = cloud_edge_mean_factor(noise(), 0.0, 255);
     const int points = 4000;
     double worst = 0.0, mean = 0.0;
@@ -162,26 +163,28 @@ TEST_CASE("The point model mirror: the slab's extinction, none above it, none un
     CHECK(cloudy > 100);
 }
 
-TEST_CASE("A cell bake matches the point model's dense cell mean (tiered tap rule)", "[weather]") {
-    // Against the 16^3 stratified mean of the point model at a 10 m footprint, 200 cells per level, normalised by the
-    // cell's sigma_c (the larger of the bake's and the dense mean's in-cloud extinction: a cell at the slab's edge).
-    // Dense tier (levels 0-2): every cell within 0.02 sigma_c [E: a few taps across 20-40 m edges]. Coarse tier
-    // (levels 3-7, the mips' band limit; ruling T4 Q2): rms within 1.5 x the measured rms, every cell within
-    // 0.25 sigma_c. Every cell 0 <= rho <= sigma_c.
-    const std::array<double, levels> rms_bound = {0.0, 0.0, 0.0, 1.5 * 0.0037, 1.5 * 0.0062, 1.5 * 0.0033,
-                                                  1.5 * 0.0028, 1.5 * 0.0090};
+namespace {
+
+// The dense-mean check (tiered tap rule) of one field: 200 cells per level, centres in [bottom_m - 100, top_m + 100],
+// against the 16^3 stratified mean of the point model at a 10 m footprint, normalised by the cell's sigma_c (the
+// larger of the bake's and the dense mean's in-cloud extinction: a cell at the slab's edge). Dense tier (levels 0-2):
+// every cell within 0.02 sigma_c [E: a few taps across 20-40 m edges]. Coarse tier (levels 3-7, ruling T4 Q2): rms
+// within rms_bound, every cell within 0.25 sigma_c. Every cell 0 <= rho <= sigma_c.
+void check_dense_mean(const char* name, const CloudRenderField& field, double bottom_m, double top_m,
+                      const std::array<double, levels>& rms_bound) {
     const int cells = 200;
     for (int k = 0; k < levels; ++k) {
         std::vector<double> error(cells, 0.0);
         std::vector<int> ordered(cells, 1);
         parallel_for(cells, [&](int c) {
             std::mt19937 rng(1000u * k + c);
-            std::uniform_real_distribution<double> lat(25.0, 27.0), lon(-98.0, -96.0), h(900.0, 2600.0);
+            std::uniform_real_distribution<double> lat(25.0, 27.0), lon(-98.0, -96.0), h(bottom_m - 100.0,
+                                                                                        top_m + 100.0);
             const CloudCellBox box =
                 cloud_cell_box(at_model_height(lat(rng), lon(rng), h(rng)), cell_h_m[static_cast<std::size_t>(k)],
                                cell_v_m[static_cast<std::size_t>(k)]);
-            const CloudCellBake bake = bake_cloud_cell(broken_slab(), noise(), frame(), box);
-            const CloudCellBake dense = stratified_mean(broken_slab(), box, 16, 16, 77u + c);
+            const CloudCellBake bake = bake_cloud_cell(field, noise(), frame(), box);
+            const CloudCellBake dense = stratified_mean(field, box, 16, 16, 77u + c);
             const double sigma = std::max(bake.in_cloud_extinction_per_m, dense.in_cloud_extinction_per_m);
             error[static_cast<std::size_t>(c)] =
                 sigma > 0.0 ? (bake.mean_extinction_per_m - dense.mean_extinction_per_m) / sigma : 0.0;
@@ -196,8 +199,8 @@ TEST_CASE("A cell bake matches the point model's dense cell mean (tiered tap rul
         rms = std::sqrt(rms / cells);
         const CloudBakeTaps taps =
             cloud_cell_bake_taps(cell_h_m[static_cast<std::size_t>(k)], cell_v_m[static_cast<std::size_t>(k)]);
-        std::printf("level %d (%d x %d x %d taps, lambda %.2f): |rho - dense| / sigma_c max %.4f rms %.4f\n", k,
-                    taps.horizontal, taps.horizontal, taps.vertical, taps.prefilter_level, worst, rms);
+        std::printf("%s level %d (%d x %d x %d taps, lambda %.2f): |rho - dense| / sigma_c max %.4f rms %.4f\n", name,
+                    k, taps.horizontal, taps.horizontal, taps.vertical, taps.prefilter_level, worst, rms);
         CHECK(std::count(ordered.begin(), ordered.end(), 1) == cells);
         if (cell_h_m[static_cast<std::size_t>(k)] <= cloud_bake_dense_cell_max_m) {
             CHECK(worst <= 0.02);
@@ -208,7 +211,47 @@ TEST_CASE("A cell bake matches the point model's dense cell mean (tiered tap rul
     }
 }
 
-TEST_CASE("Each weather cell keeps the point model's water in the bake at every level", "[weather]") {
+// An ice slab (cirrus: ice share 1, the 2 km ice tile's 15.6 m vertical texel): the uniform slab's water moved from
+// the liquid to the ice code.
+WeatherSnapshot ice_slab(double bottom_m, double top_m, double ice_kg_m3, double cloud_fraction) {
+    const WeatherSnapshot liquid = WeatherSnapshot::uniform_slab(19, 36, bottom_m, top_m, ice_kg_m3, cloud_fraction);
+    std::vector<std::uint8_t> texels = liquid.texels();
+    for (std::size_t i = 0; i < texels.size(); i += 4) {
+        texels[i + 2] = texels[i + 1];
+        texels[i + 1] = 0;
+    }
+    return WeatherSnapshot::from_parts(liquid.id(), liquid.rows(), liquid.columns(), liquid.ground_heights_m(),
+                                       std::move(texels));
+}
+
+// The cirrus slab of the checks: cf 0.4, 8-10 km, 5e-5 kg/m^3 ice.
+constexpr double ice_bottom_m = 8000.0, ice_top_m = 10000.0;
+
+const CloudRenderField& cirrus_slab() {
+    static const CloudRenderField f = make_cloud_render_field(ice_slab(ice_bottom_m, ice_top_m, 5e-5, 0.4));
+    return f;
+}
+
+}  // namespace
+
+TEST_CASE("A cell bake matches the point model's dense cell mean (tiered tap rule)", "[weather]") {
+    // Coarse-tier rms bounds: 1.5 x the measured rms (ruling T4 Q2).
+    check_dense_mean("cumulus", broken_slab(), slab_bottom_m, slab_top_m,
+                     {0.0, 0.0, 0.0, 1.5 * 0.0037, 1.5 * 0.0076, 1.5 * 0.0039, 1.5 * 0.0171, 1.5 * 0.0090});
+}
+
+TEST_CASE("A cirrus cell bake matches the point model's dense cell mean", "[weather]") {
+    // Ice-dominated cloud (the cirrus type alone): its shape tile is 2 km high, a 15.6 m vertical texel against the
+    // bake's 5 m vertical taps. Coarse-tier rms bounds: 1.5 x the measured rms.
+    double latitude = 0.0, longitude = 0.0;
+    const math::Vec3 p = at_model_height(26.0, -97.0, 9000.0);
+    cloud_latitude_longitude(p, latitude, longitude);
+    REQUIRE(cloud_render_field_at(cirrus_slab(), latitude, longitude, 9000.0).ice_share == Approx(1.0));
+    check_dense_mean("cirrus", cirrus_slab(), ice_bottom_m, ice_top_m,
+                     {0.0, 0.0, 0.0, 1.5 * 0.0019, 1.5 * 0.0036, 1.5 * 0.0021, 1.5 * 0.0101, 1.5 * 0.0069});
+}
+
+TEST_CASE("Each weather cell keeps the point model's water in the bake at every level", "[weather][slow]") {
     // Ruling T4 Q1: per 0.25 deg weather cell, the sum of the level's cell bakes over the cells whose centre lies in it
     // / the dense point-model integral over the same cells (jittered strata 100 m across, 32 up: unbiased) in
     // 0.996-1.004 (the ruling's 0.996-1.000 made symmetric: the dense integral is an unbiased estimate and the bake a
@@ -216,16 +259,27 @@ TEST_CASE("Each weather cell keeps the point model's water in the bake at every 
     // statistical over the shape tile (3-7 % off per weather cell) and stays as it is.
     const double lat0 = 26.0, lon0 = -97.0, box_deg = 0.25;
     const double deg = 180.0 / constants::pi;
-    for (double cf : {0.4, 0.95}) {
-        const CloudRenderField field = make_cloud_render_field(
-            WeatherSnapshot::uniform_slab(19, 36, slab_bottom_m, slab_top_m, slab_water_kg_m3, cf));
+    struct Case {
+        const char* name;
+        CloudRenderField field;
+        double bottom_m, top_m;
+    };
+    const std::array<Case, 3> cases = {
+        Case{"cumulus cf 0.40", broken_slab(), slab_bottom_m, slab_top_m},
+        Case{"deck cf 0.95",
+             make_cloud_render_field(
+                 WeatherSnapshot::uniform_slab(19, 36, slab_bottom_m, slab_top_m, slab_water_kg_m3, 0.95)),
+             slab_bottom_m, slab_top_m},
+        Case{"cirrus cf 0.40", cirrus_slab(), ice_bottom_m, ice_top_m}};
+    for (const Case& test : cases) {
+        const CloudRenderField& field = test.field;
         for (int k = 2; k < levels; ++k) {
             const double h = cell_h_m[static_cast<std::size_t>(k)], v = cell_v_m[static_cast<std::size_t>(k)];
             const math::Vec3 centre = at_model_height(lat0 + box_deg / 2, lon0 + box_deg / 2, 0.0);
             const CloudCellBox axes = cloud_cell_box(centre, 1.0, 1.0);
             const int half = static_cast<int>(std::ceil(box_deg / deg * 6.4e6 / h / 2.0)) + 2;
-            const int z0 = static_cast<int>(std::floor((slab_bottom_m - 300.0 - shell_bottom_m) / v));
-            const int z1 = static_cast<int>(std::ceil((slab_top_m + 300.0 - shell_bottom_m) / v));
+            const int z0 = static_cast<int>(std::floor((test.bottom_m - 300.0 - shell_bottom_m) / v));
+            const int z1 = static_cast<int>(std::ceil((test.top_m + 300.0 - shell_bottom_m) / v));
             const int dense_h = std::max(2, static_cast<int>(std::ceil(h / 100.0)));
             std::vector<double> baked(static_cast<std::size_t>(2 * half), 0.0), dense(baked.size(), 0.0);
             parallel_for(2 * half, [&](int jy) {
@@ -256,7 +310,7 @@ TEST_CASE("Each weather cell keeps the point model's water in the bake at every 
                 sum_dense += dense[i];
             }
             const double ratio = sum_baked / sum_dense;
-            std::printf("cf %.2f level %d: weather cell bake / dense point-model water %.5f\n", cf, k, ratio);
+            std::printf("%s level %d: weather cell bake / dense point-model water %.5f\n", test.name, k, ratio);
             CHECK(ratio >= 0.996);
             CHECK(ratio <= 1.004);
         }
@@ -334,6 +388,17 @@ TEST_CASE("A clear column bakes exactly 0", "[weather]") {
                                                   cell_h_m[static_cast<std::size_t>(k)],
                                                   cell_v_m[static_cast<std::size_t>(k)]);
         CHECK(bake_cloud_cell(broken_slab(), noise(), frame(), above).mean_extinction_per_m == 0.0);
+    }
+    // A cell up to 1 % off its level's nominal size keeps the level's taps (real grid edges, rounding).
+    for (int k = 0; k < levels; ++k) {
+        const CloudBakeTaps nominal =
+            cloud_cell_bake_taps(cell_h_m[static_cast<std::size_t>(k)], cell_v_m[static_cast<std::size_t>(k)]);
+        for (double scale : {0.996, 1.004}) {
+            const CloudBakeTaps off = cloud_cell_bake_taps(cell_h_m[static_cast<std::size_t>(k)] * scale,
+                                                           cell_v_m[static_cast<std::size_t>(k)] * scale);
+            CHECK(off.horizontal == nominal.horizontal);
+            CHECK(off.vertical == nominal.vertical);
+        }
     }
     // The batched form gives the single bakes.
     std::vector<CloudCellBox> boxes;

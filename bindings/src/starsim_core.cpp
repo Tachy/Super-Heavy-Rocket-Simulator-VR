@@ -541,10 +541,7 @@ godot::Dictionary StarsimCore::weather_build_snapshot(const godot::Dictionary& s
         const std::filesystem::path out(utf8_of(out_file));
         if (out.has_parent_path()) std::filesystem::create_directories(out.parent_path());
         environment::write_weather_snapshot(out, built);
-        {  // a rebuilt file must not be served from the load cache
-            const std::lock_guard<std::mutex> lock(weather_mutex_);
-            std::erase_if(weather_cache_, [&](const auto& entry) { return entry.first == utf8_of(out_file); });
-        }
+        weather_evict(utf8_of(out_file));
         godot::Dictionary result;
         result["ok"] = true;
         result["error"] = godot::String();
@@ -562,6 +559,11 @@ StarsimCore::SnapshotPtr StarsimCore::weather_snapshot_cached(const std::string&
         return weather_cache_.back().second;
     }
     return nullptr;
+}
+
+void StarsimCore::weather_evict(const std::string& file) const {
+    const std::lock_guard<std::mutex> lock(weather_mutex_);
+    std::erase_if(weather_cache_, [&](const auto& entry) { return entry.first == file; });
 }
 
 StarsimCore::SnapshotPtr StarsimCore::weather_snapshot_of(const std::string& file) {
@@ -722,12 +724,14 @@ StarsimCore::BakeInputs StarsimCore::bake_inputs(const std::string& file) {
     if (!bake_noise_) {
         bake_noise_ = std::make_shared<const environment::CloudNoise>(environment::generate_cloud_noise());
     }
-    if (!bake_field_ || bake_field_file_ != file) {
-        const SnapshotPtr snapshot = weather_snapshot_of(file);
-        if (!snapshot) return {bake_noise_, nullptr};
+    // Keyed by the loaded snapshot, not the path: a file rewritten through this class is evicted from the load
+    // cache, loads as a new snapshot and gets a new render field.
+    const SnapshotPtr snapshot = weather_snapshot_of(file);
+    if (!snapshot) return {bake_noise_, nullptr};
+    if (!bake_field_ || bake_snapshot_ != snapshot) {
         bake_field_ =
             std::make_shared<const environment::CloudRenderField>(environment::make_cloud_render_field(*snapshot));
-        bake_field_file_ = file;
+        bake_snapshot_ = snapshot;
     }
     return {bake_noise_, bake_field_};
 }
@@ -951,6 +955,7 @@ bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double 
         environment::write_weather_snapshot(
             std::filesystem::path(utf8_of(file)),
             environment::WeatherSnapshot::uniform_slab(181, 360, bottom_m, top_m, liquid_water_kg_m3, cloud_fraction));
+        weather_evict(utf8_of(file));
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String::utf8("Wolkenplatte konnte nicht geschrieben werden: ") +
@@ -970,6 +975,7 @@ godot::Dictionary StarsimCore::weather_write_column_snapshot(const godot::String
             environment::WeatherSnapshot::gfs_test_column(rows, columns, cloud_top_m, liquid_kg_kg, cloud_percent,
                                                           t2m_k, td2m_k);
         environment::write_weather_snapshot(std::filesystem::path(utf8_of(file)), snapshot);
+        weather_evict(utf8_of(file));
         // The 1-deg grid's cell nearest to the point (row 0 at the north pole, column 0 at 0 deg east).
         const int row = std::clamp(static_cast<int>(std::lround(90.0 - latitude_deg)), 0, rows - 1);
         const int column = static_cast<int>(std::lround(std::fmod(std::fmod(longitude_deg, 360.0) + 360.0, 360.0))) %

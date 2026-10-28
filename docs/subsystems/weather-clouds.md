@@ -1016,26 +1016,32 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   - `cloud_volume_bake.hpp`: a cell = centre + three edge vectors (the grid's own axes can be passed); taps at the
     sub-box centres, rho = mean tap extinction, sigma_c = mean tap in-cloud extinction = grid mean / m (the extinction
     where the edge ramp is 1; grid mean / cf would let a cloud interior cell exceed it, rho <= sigma_c holds by
-    construction). Tap rule (measured, ruling T4 Q2): a tap every 200 m across (4-16 per axis), every 5 m up (at
-    least 16), the shape prefiltered (mips + prefilter tables) at the tap spacing beyond the 250 m texel. Taps per
-    cell, levels 0..7: 256, 256, 528, 528, 528, 2112, 8448, 8448 (level 7 alone at lambda 0.68). The GPU bake's cost
-    follows from these counts (each tap a full point evaluation: ~13 field fetches + 1-3 shape fetches).
-  - Accuracy (cf 0.4 slab vs the 16^3 stratified point mean at a 10 m footprint, 200 cells per level): levels 0-2
-    within 0.02 sigma_c per cell (max 0.006 / 0.005 / 0.011); levels 3-7 are a deliberate band-limit simplification
-    (fidelity note): the coarse cells keep the cover and water at weather-cell scale, not per cell - per-cell rms
-    0.004 / 0.006 / 0.003 / 0.003 / 0.009 sigma_c, max 0.033 (bounds: 1.5 x rms, 0.25). Per 0.25 deg weather cell the
-    sum of the bakes / the dense point-model integral of the same cells (assigned by centre) is 0.9985-1.0003 at every
-    level 2-7 (bound 0.996-1.004). The point model's own grid-mean water is kept only statistically over the 32 x 32
-    x 16 km shape tile: per 0.25 deg weather cell it is 3-7 % off the grid mean (0.969 / 1.068 / 1.042 at cf 0.4 /
-    0.95 / 1; a 1.5 km slab samples one slice of the tile, +7 % over 1 deg at cf 0.4) - unchanged, not renormalised.
+    construction). Tap rule (measured, ruling T4 Q2): a tap every 200 m across (4-8 per axis, 16 on the 6.4 km cells
+    of level 7: with 8 there the weather-cell water missed by 0.3 %), every 5 m up (at least 16), the shape
+    prefiltered (mips + prefilter tables) at the tap spacing beyond the 250 m texel. Taps per cell, levels 0..7: 256,
+    256, 528, 528, 528, 2112, 2112, 8448 (levels 6 and 7 at lambda 0.68). The GPU bake's cost follows from these
+    counts (each tap a full point evaluation: ~13 field fetches + 1-3 shape fetches).
+  - Accuracy (cf 0.4 cumulus slab 1-2.5 km and cf 0.4 cirrus (ice) slab 8-10 km - the ice tile's 15.6 m vertical
+    texel against the 5 m taps - vs the 16^3 stratified point mean at a 10 m footprint, 200 cells per level):
+    levels 0-2 within 0.02 sigma_c per cell (cumulus max 0.006 / 0.005 / 0.011, cirrus 0.003 / 0.004 / 0.015);
+    levels 3-7 are a deliberate band-limit simplification (fidelity note): the coarse cells keep the cover and water
+    at weather-cell scale, not per cell - per-cell rms cumulus 0.004 / 0.008 / 0.004 / 0.017 / 0.009 sigma_c (max
+    0.068 at level 6), cirrus 0.002 / 0.004 / 0.002 / 0.010 / 0.007 (bounds: 1.5 x rms, max 0.25). Per 0.25 deg
+    weather cell the sum of the bakes / the dense point-model integral of the same cells (assigned by centre) is
+    0.9985-1.0003 at every level 2-7 for the cumulus, the cf 0.95 deck and the cirrus slab (bound 0.996-1.004).
+    The point model's own grid-mean water is kept only statistically over the 32 x 32 x 16 km shape tile: per
+    0.25 deg weather cell it is 3-7 % off the grid mean (0.969 / 1.068 / 1.042 at cf 0.4 / 0.95 / 1; a 1.5 km slab
+    samples one slice of the tile, +7 % over 1 deg at cf 0.4) - unchanged, not renormalised.
     Parent vs the volume-weighted finer cells (1 -> 2: the parts of the 50 m cells inside the 164 m parent): <= 0.014
-    sigma_c on the dense tier, <= 0.051 on the coarse one. With 4 x 4 taps at the mips' band limit (the spec's "few
-    taps") levels 5-7 missed the dense mean by up to 0.24 sigma_c and the weather-cell water by 3 %; 4 vertical taps
-    missed level 2 by 0.1 sigma_c.
+    sigma_c on the dense tier, <= 0.051 on the coarse one (4 -> 5 and 6 -> 7 exactly 0: the same taps).
+    With 4 x 4 taps at the mips' band limit (the spec's "few taps") levels 5-7 missed the dense mean by up to
+    0.24 sigma_c and the weather-cell water by 3 %; 4 vertical taps missed level 2 by 0.1 sigma_c.
   - Binding (checks): `StarsimCore.weather_cloud_cell_bakes(snapshot_path, cells, shape_origins_earth_m) ->
     PackedVector2Array` ((rho, sigma_c) per cell; 12 doubles per cell: centre, e_x, e_y, e_z; origins 3 doubles = the
     anchor, or 12 = anchor + cumulus / stratiform / ice origins as uploaded); the snapshot's render field and the noise
-    are kept between calls, cells baked on the build threads (64 level-7 cells ~70 ms). Single cell:
+    are kept per loaded snapshot (a file rewritten through StarsimCore - `weather_write_*`, `weather_build_snapshot`
+    - is evicted from the load cache and baked anew; smoke_test checks it), cells baked on the build threads (64
+    level-7 cells ~70 ms). Single cell:
     `weather_cloud_cell_bake(snapshot_path, centre_earth_m, cell_m: Vector2, shape_origins_earth_m) -> Vector2`
     (box east / north / up).
 - Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
@@ -1079,8 +1085,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 - **World volume bake, coarse levels (deliberate band-limit simplification, ruling T4 Q2)**: cells of levels 3-7
   (400 m .. 6.4 km) keep the point model's cover and water at weather-cell scale, not per cell (per-cell scatter up to
-  ~0.03 sigma_c rms 0.01; Diagnostics "Cell bake"). The point model itself keeps the grid-mean water only over the
-  shape tile (3-7 % off per 0.25 deg weather cell). The bake's tap counts (up to 8448 per level-6/7 cell) set the GPU
+  0.07 sigma_c, rms 0.017; Diagnostics "Cell bake"). The point model itself keeps the grid-mean water only over the
+  shape tile (3-7 % off per 0.25 deg weather cell). The bake's tap counts (up to 8448 per level-7 cell) set the GPU
   bake's cost (Task 5 measures it).
 - **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-5 done,
   Task 6 VR acceptance open)**:

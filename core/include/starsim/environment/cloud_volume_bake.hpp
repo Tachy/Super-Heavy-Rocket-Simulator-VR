@@ -14,23 +14,24 @@
 //
 // Tap rule (cloud_cell_bake_taps; controller ruling T4 Q2, measured on a cf 0.4 slab against a 16^3 stratified point
 // mean at a 10 m footprint, test_cloud_volume_bake.cpp):
-//   n_h = clamp(ceil(h / cloud_bake_horizontal_spacing_m), cloud_bake_min_horizontal_taps,
-//               cloud_bake_max_horizontal_taps),   n_v = max(cloud_bake_min_vertical_taps, ceil(v / 5 m)),
+//   n_h = clamp(ceil(h / cloud_bake_horizontal_spacing_m), cloud_bake_min_horizontal_taps, cap(h)),
+//   cap = cloud_bake_max_horizontal_taps (cloud_bake_widest_cell_horizontal_taps beyond cloud_bake_widest_cell_m),
+//   n_v = max(cloud_bake_min_vertical_taps, ceil(v / 5 m)),
 //   lambda = clamp(log2((h / n_h) / shape texel), 0, cloud_shape_prefilter_levels)
 // (the taps' spacing beyond the shape's 250 m texel is band-limited with the box-filtered mips and their prefilter
 // tables, the far march's band limit). Per level (h x v -> taps, lambda): 50 x 25 and 100 x 50 -> 4 x 4 x 16 = 256;
-// 200 / 400 / 800 x 164 -> 4 x 4 x 33 = 528; 1600 -> 8 x 8 x 33 = 2112; 3200 -> 16 x 16 x 33 = 8448; 6400 -> 8448
-// at lambda 0.68 (the only prefiltered level).
+// 200 / 400 / 800 x 164 -> 4 x 4 x 33 = 528; 1600 -> 8 x 8 x 33 = 2112; 3200 -> 2112 at lambda 0.68; 6400 ->
+// 16 x 16 x 33 = 8448 at lambda 0.68.
 // - The vertical taps matter most: the 50 m base transition, the 30 m flat-base ramp and the 20-40 m edges (4 taps up a
 //   164 m cell missed the dense mean by 0.1 sigma_c, 16 by up to 0.03, 33 by 0.011).
 // - Accuracy tiers: cells up to cloud_bake_dense_cell_max_m (levels 0-2) are the point model's cell mean within
 //   0.02 sigma_c. Coarser cells (levels 3-7) are a deliberate band-limit simplification: their mean is held to the
 //   point model's water at weather-cell scale (0.25 deg: within 0.4 %; 4 x 4 taps at the mips' band limit missed it by
-//   3 %, 8 x 8 at level 7 by 0.3 %, hence the 16 x 16 cap), not per cell - there a cell scatters about the dense
-//   mean (rms <= 0.01 sigma_c, max 0.03 at level 7). The mips' tables keep the cover and water statistically, not per
-//   cell (a cell's mean of the thresholded unfiltered field is not a function of its box-filtered shape value); coarse
-//   cells are seen from 100 km and more at about a pixel's size, where an unbiased scatter is texture, not a coverage
-//   error.
+//   3 %, 8 x 8 at level 7 by 0.3 %, hence its 16 x 16), not per cell - there a cell scatters about the dense mean
+//   (rms <= 0.017 sigma_c, max 0.07 at level 6; cumulus and cirrus slabs). The mips' tables keep the cover and
+//   water statistically, not per cell (a cell's mean of the thresholded unfiltered field is not a function of its
+//   box-filtered shape value); coarse cells are seen from 100 km and more at about a pixel's size, where an unbiased
+//   scatter is texture, not a coverage error.
 
 #include <span>
 #include <vector>
@@ -41,14 +42,22 @@
 
 namespace starsim::environment {
 
-// [E] Tap rule (header, measured): a tap every 200 m across (4 to 16 per axis), every 5 m up (at least 16); the dense
-// accuracy tier ends at 200 m cells (level 2).
+// [E] Tap rule (header, measured): a tap every 200 m across (4 to 8 per axis, 16 at 6.4 km), every 5 m up (at
+// least 16); the dense accuracy tier ends at 200 m cells (level 2).
 inline constexpr double cloud_bake_horizontal_spacing_m = 200.0;
 inline constexpr int cloud_bake_min_horizontal_taps = 4;
-inline constexpr int cloud_bake_max_horizontal_taps = 16;
+// The cap per horizontal axis: 8, and 16 for cells wider than cloud_bake_widest_cell_m (level 7, 6.4 km; the threshold
+// lies between levels 6 and 7 so a rounded edge length cannot flip it): with 8 the level-7 taps sit at the mips'
+// lambda 1.68 and the weather-cell water missed by 0.3 %; level 6 keeps it with 8 at lambda 0.68.
+inline constexpr int cloud_bake_max_horizontal_taps = 8;
+inline constexpr double cloud_bake_widest_cell_m = 4800.0;
+inline constexpr int cloud_bake_widest_cell_horizontal_taps = 16;
 inline constexpr double cloud_bake_vertical_spacing_m = 5.0;
 inline constexpr int cloud_bake_min_vertical_taps = 16;
 inline constexpr double cloud_bake_dense_cell_max_m = 200.0;
+// [E] Relative slack of the tap counts: a cell up to 1 % longer than its level's nominal size keeps the level's taps
+// (real edges differ by up to ~0.4 %: the AEQD's azimuthal scale, the height above the projection sphere).
+inline constexpr double cloud_bake_tap_count_slack = 0.01;
 
 struct CloudCellBox {
     math::Vec3 centre_earth_m;

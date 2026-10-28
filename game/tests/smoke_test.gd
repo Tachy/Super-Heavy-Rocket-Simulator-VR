@@ -205,6 +205,17 @@ func _check_weather(core: StarsimCore) -> bool:
 	_check(absf(float(above["sun_transmittance"]) - 1.0) < 1e-9 and absf(float(above["sky_factor"]) - 1.0) < 1e-9,
 			"weather_cloud_light above the slab: 1, 1")
 	_check(loaded.get("file", "") == file, "weather_load_snapshot: names the file")
+	# The cell bake reference (world volume Task 4): a rewritten file is baked anew, not from the kept render field.
+	var bake_file := OS.get_temp_dir().path_join("starsim_smoke_bake_%d.wthr" % OS.get_process_id())
+	var centre := Vector3(0.0, 0.0, 6378137.0 + 2500.0)  # render axes: 0 N 0 E, in the 2-3 km slab
+	var anchor := PackedFloat64Array([0.0, 0.0, 6378137.0])
+	core.weather_write_slab_snapshot(bake_file, 2000.0, 3000.0, 3e-4, 1.0)
+	var in_slab: Vector2 = core.weather_cloud_cell_bake(bake_file, centre, Vector2(200.0, 164.0625), anchor)
+	core.weather_write_slab_snapshot(bake_file, 2000.0, 3000.0, 0.0, 0.0)
+	var rewritten: Vector2 = core.weather_cloud_cell_bake(bake_file, centre, Vector2(200.0, 164.0625), anchor)
+	_check(in_slab.x > 0.0 and in_slab.x <= in_slab.y and rewritten == Vector2.ZERO,
+			"weather_cloud_cell_bake: slab %s, the same file rewritten clear %s" % [in_slab, rewritten])
+	DirAccess.remove_absolute(bake_file)
 	# Final review I1 / I2: the pair is cache-only, a missing side blends toward the empty snapshot, hits become the newest.
 	var clear_file := OS.get_temp_dir().path_join("starsim_smoke_clear_%d.wthr" % OS.get_process_id())
 	_check(core.weather_write_slab_snapshot(clear_file, 2000.0, 3000.0, 0.0, 0.0), "weather_write_slab_snapshot: empty field")

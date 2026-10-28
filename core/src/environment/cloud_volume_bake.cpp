@@ -30,10 +30,16 @@ CloudCellBox cloud_cell_box(const math::Vec3& centre_earth_m, double horizontal_
 
 CloudBakeTaps cloud_cell_bake_taps(double horizontal_m, double vertical_m, int shape_size) {
     CloudBakeTaps taps;
-    taps.vertical = std::max(cloud_bake_min_vertical_taps,
-                             static_cast<int>(std::ceil(vertical_m / cloud_bake_vertical_spacing_m)));
-    taps.horizontal = std::clamp(static_cast<int>(std::ceil(horizontal_m / cloud_bake_horizontal_spacing_m)),
-                                 cloud_bake_min_horizontal_taps, cloud_bake_max_horizontal_taps);
+    // A cell's real edge length is off its level's nominal size by up to ~0.4 % (the AEQD's azimuthal scale, the
+    // height): the counts are taken with the slack so such a cell keeps its level's taps.
+    const auto count = [](double length_m, double spacing_m) {
+        return static_cast<int>(std::ceil(length_m / spacing_m * (1.0 - cloud_bake_tap_count_slack)));
+    };
+    taps.vertical = std::max(cloud_bake_min_vertical_taps, count(vertical_m, cloud_bake_vertical_spacing_m));
+    taps.horizontal = std::clamp(count(horizontal_m, cloud_bake_horizontal_spacing_m),
+                                 cloud_bake_min_horizontal_taps,
+                                 horizontal_m > cloud_bake_widest_cell_m ? cloud_bake_widest_cell_horizontal_taps
+                                                                          : cloud_bake_max_horizontal_taps);
     const double texel_m = cloud_shape_tile_horizontal_m / shape_size;
     taps.prefilter_level = std::clamp(std::log2(horizontal_m / taps.horizontal / texel_m), 0.0,
                                       static_cast<double>(cloud_shape_prefilter_levels));

@@ -227,6 +227,7 @@ private:
     using SnapshotPtr = std::shared_ptr<const environment::WeatherSnapshot>;
     SnapshotPtr weather_snapshot_cached(const std::string& file);  // load cache only (a hit becomes the newest); nullptr if absent
     SnapshotPtr weather_snapshot_of(const std::string& file);  // load cache, else reads off-lock; nullptr if unreadable
+    void weather_evict(const std::string& file) const;  // a rewritten file must not be served from the load cache
     mutable std::mutex weather_mutex_;  // guards the three below (the game calls from the main thread, loads on a worker)
     mutable std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
     SnapshotPtr weather_before_, weather_after_;
@@ -239,7 +240,7 @@ private:
     BakeInputs bake_inputs(const std::string& file);
     std::mutex bake_mutex_;  // guards the three below
     std::shared_ptr<const environment::CloudNoise> bake_noise_;
-    std::string bake_field_file_;
+    SnapshotPtr bake_snapshot_;  // the snapshot bake_field_ was built from (a rewritten file loads a new one)
     std::shared_ptr<const environment::CloudRenderField> bake_field_;
     mutable std::mutex transfer_mutex_;  // guards transfer_table_ (loaded on a worker, read by the checks)
     std::shared_ptr<const environment::CloudTransferTable> transfer_table_;
