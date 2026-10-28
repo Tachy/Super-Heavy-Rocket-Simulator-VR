@@ -35,7 +35,7 @@ Headset (Pimax Dream Air, 3534 x 2838 per eye, pad, weather on, 45 Hz, `data/per
 max, the frame interval a steady 22.22 ms. **Cache budget at 45 Hz: 22.2 - 9 (scene, max) - 2 (margin [E]) ~ 11 ms
 per frame** (the preset `cache_budget_ms`, Task 4). The per-frame pass's rate (1.3 M rays of the 1377 x 947 centre in
 ~45 ms, refine included) puts a full-resolution fill of the visible region (~9 x the rays) at ~0.4 s of GPU, i.e.
-~1 s at 11 ms per frame, the coarse level 0 (1/4 density) in ~2-3 frames.
+~1 s at 11 ms per frame (measured with the cache, Task 4 fix round 1: level 0 of the view in ~12 frames, below).
 
 ## Cloud view cache in the frame (cloud view cache Task 4, 2026-10-28)
 
@@ -48,15 +48,19 @@ cap 11.4 ms; face 3200 texels at the proxy's density), once the cache has nothin
 | ground (az 90, el 25) | 2.56 / 4.99 ms | 0.10 / 0.52 ms | 44.9 / 47.2 ms |
 | 9 km deck (el -10) | 3.63 / 8.27 ms | 0.11 / 0.46 ms | 49.8 / 56.0 ms |
 
-Convergence after a start / jump (the planner's restart; VR proxy): level 0 over the view after 0.32-0.37 s (20-23
-frames), the full level over the view after 3.2-3.3 s (191-199 frames), the whole cube after 12.8 / 16.8 s; the fill
-per frame median 4.0-4.4 ms (the level-0 / level-1 phases are capped by the pick's 128 tiles a call, not by the
-budget), max 31-34 ms (overshoot where the picks turn from clear-sky to deck tiles: the cost per full tile varies
-0.1-1.6 ms). Desktop preset (1600 x 900, budget 6 ms, face 1984): view level 0 after 0.1-0.2 s, full level after
-2.1-4.3 s, the whole cube after 6.4-13 s; fill median 4.0 ms, p90 7.5, p99 17 ms. Main thread (FrameProfiler section
-`cloud_view_cache`, desktop deck while filling): median 0.6 ms, p90 1.0, p99 1.4 ms, the first frame (cold pick) 3.0
-ms (the layout and schedule are built on a worker: 8 ms at face 1984 before); VR proxy median 0.8-0.9 ms, max 5.5-5.9
-ms (the cold pick at face 3200); 0 once converged.
+Fix round 1 (2026-10-28; the plan on a worker, the covering march, the latency cost model; `t1_prof.sh f1final
+<view>`, logs `.superpowers/sdd/2026-10-27-cloud-view-cache/t1_prof_<view>_f1final.log`). VR proxy (budget 11.4 ms,
+face 3200): level 0 over the view after 0.58-0.63 s (12 frames; the frames are slow while the march covers), the
+covering march ended after 1.21-1.22 s (23-24 frames), the full level over the view after 4.5-4.7 s (217-228 frames),
+the whole cube after 27.2 s (~1580 frames); fill median 2.0 / 2.8 ms, p99 7.1 / 8.2 ms, max 8.0 / 9.3 ms (ground /
+deck; budget + 2 ms never exceeded - the largest excess -3.4 / -2.1 ms); converged GPU frame 2.56 / 3.64 ms median.
+Level 0 is bound by the fill cap (`MAX_FILL_GROUPS` 1024 work groups = 256 level-0 tiles, ~6 ms of GPU a frame) after
+four frames under the unknown-latency prior (~64 tiles each). Main thread (FrameProfiler `cloud_view_cache`, every
+frame incl. the restart): median 0.04 ms, p99 0.07 ms, max 0.09 / 0.21 ms (the plan runs on a worker). Desktop preset
+(1600 x 900, budget 6 ms, face 1984; `t4_rc.sh f1g <view>`): level 0 after 0.6 / 1.7 s (12 / 30 frames, ground /
+deck), covering ended 1.2 / 2.6 s, full level 3.2 / 5.9 s, cube 17.3 / 21.6 s; fill median 3.1 / 3.8 ms, p99 8.2 / 9.1
+ms, max 9.9 / 11.0 ms - over the fixed 6 ms because one full-level deck tile alone takes up to ~8.4 ms (a fill's time
+is its slowest ray's; `weather-clouds.md`, Budget); main thread max 0.19 / 0.20 ms.
 
 ## Measuring
 

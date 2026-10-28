@@ -5,7 +5,8 @@
 # - a slot's content changes only while that slot has no weight;
 # - the pair ends in its real blend and then tracks the service's blend; weather off fades out the same way.
 # The view cache's frame loop (cloud view cache Task 4): a view jump and a clock jump restart the cache; a Sun step of
-# 1 deg starts cross-fades, none completing in the frame it starts.
+# 1 deg starts cross-fades, none completing in the frame it starts; the march covers the view (the batches' covering
+# flag) from a restart and a layout re-creation on until the view has level 0 and its first fills have faded in.
 extends SceneTree
 
 const DT := 1.0 / 60.0
@@ -144,29 +145,51 @@ func _test_view_cache(camera: Vector3) -> void:
 	var planner := _layer.view_cache_planner
 	var converged := _converge_view(camera, forward)
 	_check(converged, "view cache: the view's tile reaches the full level (%d frames)" % _frames_run)
+	var settle := 0
+	while planner.last_covering and settle < VIEW_CACHE_MAX_FRAMES:
+		_frame(camera)
+		settle += 1
+	_check(not planner.last_covering, "view cache: the view at level 0 and faded in, the march no longer covers (%d "
+			% settle + "frames after the view's tile was full)")
 	var resets := planner.resets
 	_layer.notify_view_jump()
-	_layer.update(camera, 0.0, DT)
-	_layer.effect.take_view_cache_batch()
+	var batch := _frame(camera)
 	_check(planner.resets == resets + 1 and _highest_shown(planner) <= 0,
 			"view cache: a view jump restarts it (restarts %d -> %d, highest level shown %d)"
 			% [resets, planner.resets, _highest_shown(planner)])
+	var covered := _covered_frames(camera, bool(batch.get("covering", false)), dirs)
+	_check(covered.x > 0 and covered.y > 0.0,
+			"view cache: after the view jump the march covers until level 0 is in view and faded in (%d frames)"
+			% covered.x)
 	_converge_view(camera, forward)
 	resets = planner.resets
 	_layer.notify_clock_jump()
-	_layer.update(camera, 0.0, DT)
-	_layer.effect.take_view_cache_batch()
+	_frame(camera)
 	_check(planner.resets == resets + 1 and _highest_shown(planner) <= 0,
 			"view cache: a clock jump restarts it (restarts %d -> %d, highest level shown %d)"
 			% [resets, planner.resets, _highest_shown(planner)])
+	_converge_view(camera, forward)
+	# A layout re-creation (the eyes' density 1.5 x: a new face size, built on a worker): a restart the march covers.
+	resets = planner.resets
+	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE * 3 / 2})
+	var first_covering := false
+	for i in range(VIEW_CACHE_MAX_FRAMES):
+		_frame(camera)
+		if planner.resets != resets:
+			first_covering = bool(_frame(camera).get("covering", false))  # the restarted run's batch
+			break
+	_check(planner.resets == resets + 1 and first_covering and planner.layout.face_texels > VIEW_CACHE_FACE,
+			"view cache: a layout re-creation (face %d) restarts it with the march covering"
+			% planner.layout.face_texels)
+	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE})
+	_converge_view(camera, forward)
 	_converge_view(camera, forward)
 	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun.rotated(Vector3(1.0, 0.0, 0.0), deg_to_rad(1.0)))
 	var started := 0
 	var refreshes := 0
 	var completed_at_once := 0
 	for i in range(int(4.0 / DT)):
-		_layer.update(camera, 0.0, DT)
-		_layer.effect.take_view_cache_batch()
+		_frame(camera)
 		for tile in planner.last_fades:
 			started += 1
 			refreshes += 1 if planner.fade_source(tile) == 4 else 0
@@ -185,13 +208,39 @@ func _converge_view(camera: Vector3, forward: Vector3) -> bool:
 	var planner := _layer.view_cache_planner
 	_frames_run = 0
 	while _frames_run < VIEW_CACHE_MAX_FRAMES:
-		_layer.update(camera, 0.0, DT)
-		_layer.effect.take_view_cache_batch()
+		_frame(camera)
 		_frames_run += 1
 		if planner.layout != null and planner.shown_level(planner.layout.tile_of(forward)) \
 				== CloudViewCacheSchedule.MAX_LEVEL:
 			return true
 	return false
+
+
+## Frames from a restart (whose batch's covering flag is given) until a batch no longer covers, and whether then
+## every sample ray's tile shows a level and no first fill is still fading in there: (frames or -1 when the restart's
+## batch did not cover or the covering never ended, 1 / 0).
+func _covered_frames(camera: Vector3, first: bool, dirs: Array[Vector3]) -> Vector2:
+	var planner := _layer.view_cache_planner
+	if not first:
+		return Vector2(-1.0, 0.0)
+	for i in range(VIEW_CACHE_MAX_FRAMES):
+		var batch := _frame(camera)
+		if not bool(batch.get("covering", true)):
+			var shown := true
+			for d in dirs:
+				var tile := planner.layout.tile_of(d)
+				shown = shown and planner.shown_level(tile) >= 0 \
+						and (planner.fade_source(tile) != 0 or planner.fade_weight(tile, planner.now_s) >= 1.0)
+			return Vector2(i + 1, 1.0 if shown else 0.0)
+	return Vector2(-1.0, 0.0)
+
+
+## One frame of the view cache's loop: the layer's update (the planner hands out the last run's batch and starts the
+## next), the planner's run waited for (its state is read next), the batch taken as the render thread would.
+func _frame(camera: Vector3) -> Dictionary:
+	_layer.update(camera, 0.0, DT)
+	_layer.view_cache_planner.wait()
+	return _layer.effect.take_view_cache_batch()
 
 
 static func _highest_shown(planner: CloudViewCachePlanner) -> int:

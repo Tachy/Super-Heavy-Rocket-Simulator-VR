@@ -652,20 +652,26 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   lengths); general 60-deg views (448^2 texels per face) median 0.09 / 0.47 %, distance median 0.04 / 0.10 % asserted,
   p99 46 / 7.8 % and T RMS 0.021 / 0.020 printed: a ray against the bilinear mean of the four texel rays around it at
   the deterministic march's hard edges and step grain (the lookup's A / B on general views: below).
-- Cloud view cache in the frame (cloud view cache Task 4): `cloud_vr_stereo_test` mirrors the parallax lookup - a
-  cloud at 300 m / 2 km / 20 km seen from each eye (IPD 0.064 m) and from a camera 50 m off the anchor lands within
-  1e-12 eye px (35 px/deg; bound 0.25) when the cached distance is the cloud's in every direction; a flat deck through
-  the point within 1e-8 px from 2 km on (0.61 px at 300 m, printed: inside the near shell's reach). `cloud_layer_test`:
-  a view jump and a clock jump restart the cache (nothing above level 0 shown afterwards); a 1 deg Sun step starts
-  cross-fades (refreshes from their fade slot), none complete in the frame they start. `cloud_view_cache_test`:
-  `completed_batch` equals `completed` per tile over 60 frames. `render_check --shimmer_check` (deck view, cache full,
-  16 frames yawed +-0.3 px): the frame-to-frame change's p99 0.237 vs the march's at divisor 1 0.257 (ratio 0.92,
-  bound 1.10). `render_check --ab_view_cache` (cache full vs the march at divisor 1, desktop 1600 x 900, 2 x 2 blocks,
-  luminance error / max(|march|, 5 % of the mean)): median deck / ground / 20 km / dusk 0.21 / 0.07 / 0.17 / 0.12 %
-  (bound 1 %, met), p99 over the blocks without scene geometry 9.0 / 14.6 / 9.9 / 22.4 % (bound 5 %, NOT met; the
-  whole image 18.1 / 14.8 / 79.0 / 20.3 %), T RMS 0.009 / 0.007 / 0.022 / 0.023. The p99 sits on cloud outlines: two
-  point samplings of the deterministic march's hard edges (the march against itself turned by 0.5 px: p99 43 % on the
-  ground view). Images `screenshots/cloud-view-cache/t4_<view>_ab_r3_{cache,march,ab_error}.png`.
+- Cloud view cache in the frame (cloud view cache Task 4, fix round 1): `cloud_vr_stereo_test` mirrors the parallax
+  lookup - a cloud at 300 m / 2 km / 20 km seen from each eye (IPD 0.064 m) and from a camera 50 m off the anchor lands
+  within 1e-12 eye px (35 px/deg; bound 0.25) when the cached distance is the cloud's in every direction; a flat deck
+  through the point within 1e-8 px from 2 km on (0.61 px at 300 m, printed: inside the near shell's reach).
+  `cloud_layer_test`: a view jump and a clock jump restart the cache (nothing above level 0 shown afterwards); after
+  the view jump and after a layout re-creation the batches say covering until the view's sample rays show a level
+  faded in, and not once converged; a 1 deg Sun step starts cross-fades (refreshes from their fade slot), none
+  complete in the frame they start. `cloud_view_cache_test`: `completed_batch` / `set_tile_distances` equal
+  `completed` / `set_tile_distance` per tile over 60 frames; `missing_in_cone` finds a cold cache, not a filled cone,
+  and one missing tile at the cone's edge. `render_check --jump_check` (desktop 1600 x 900): every frame's cloud
+  coverage (mean 1 - T) after a view jump and after a layout re-creation (render scale x 1.3) within 0.02 of the
+  per-frame march's: deck 0.0188 / 0.0111, ground 0.0121 / 0.0063 (the remaining deviation: the coarse levels show a
+  little less cloud than the full one). `render_check --shimmer_check` (deck view, cache full, 16 frames yawed +-0.3
+  px): the frame-to-frame change's p99 0.237 vs the march's at divisor 1 0.257 (ratio 0.92, bound 1.10).
+  `render_check --ab_view_cache` (cache full vs the march at divisor 1, desktop 1600 x 900, 2 x 2 blocks, luminance
+  error / max(|march|, 5 % of the mean); controller ruling: the p99 over the blocks without scene geometry bounded by
+  the same view's march against itself turned by 0.5 px, the median by 1 %): deck / ground / 20 km / dusk median 0.21
+  / 0.07 / 0.16 / 0.12 % (met), p99 9.0 / 14.6 / 9.9 / 22.4 % against the calibration's 16.5 / 43.0 / 8.2 / 66.1 % -
+  met but at 20 km (**NOT met**: 9.9 > 8.2 %, exit code 1); T RMS 0.009 / 0.007 / 0.022 / 0.007. Images
+  `screenshots/cloud-view-cache/t4_<view>_ab_f1_{cache,march,ab_error}.png`.
 - Backlit slab transmitted radiance (Task 9b, cloud_check 14; fixture `tests/validation/weather/
   cloud_slab_transmitted_mc.csv` from `tools/validation/cloud_slab_monte_carlo.py --transmitted`, 1e7 photons per case,
   sigma 0.3-0.7 %): the GPU's bin means (debug output 2, light cache filled) vs Monte Carlo at tau 10 / 30, Sun zenith
@@ -964,7 +970,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - `cloud_check.gd` with `STARSIM_SLANT_TABLE=1`: only the beam-cover fit table (shapes' direct Sun, near disc, eight
   sites, f 0.15-0.6 x e 5-75 deg).
 
-## Open points an- **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-4 done,
+## Open points and known limits
+
+- **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-4 done,
   Task 5 near shell / progressive re-anchor and Task 6 VR acceptance open)**:
   `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection),
   `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget; `cloud_view_cache_test.gd`) and the
@@ -985,30 +993,42 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `cloud_ray_from` is origin-aware only in the fill (an anchor kilometres from the camera has its own height and up);
   the per-frame march keeps the camera's ray at compile time - a run-time branch on the offset let the GPU compiler
   re-associate the camera's path (4 % of the pixels changed, up to 30 % of the mean colour: the deterministic march's
-  step grain flips with ulp-level changes). Per-frame bound of the schedule (controller ruling, tested as a maximum):
-  `mark_light` + `pick` <= 1.0 ms on every frame once level 0 is everywhere, a cold start / jump frame <= 10 ms. So the
-  schedule is amortised: the light rescan is a pass of `LIGHT_SCAN_BLOCKS` blocks per `mark_light` call (persistent
-  cursor, `light_scan_pending()`); an anchor move starts an epoch (O(blocks)), tiles of older epochs are "off" (stale,
-  parallax candidates) and counted exactly per block; `pick` expands at most `MAX_BLOCK_EXPANSIONS` blocks (2 x 64 =
-  128 tiles) per call, nearest to the view's cone first; `completed_batch` completes a pick's tiles in one call.
+  step grain flips with ulp-level changes). Main-thread bound of the schedule (controller ruling, tested as a maximum):
+  <= 1.0 ms on every frame once level 0 is in view, a cold start / jump frame <= 10 ms - held by running the plan on a
+  worker (fix round 1, below). The schedule is amortised all the same: the light rescan is a pass of
+  `LIGHT_SCAN_BLOCKS` blocks per `mark_light` call (persistent cursor, `light_scan_pending()`); an anchor move starts an
+  epoch (O(blocks)), tiles of older epochs are "off" (stale, parallax candidates) and counted exactly per block; `pick`
+  expands at most `max_expansions` blocks per call (default `MAX_BLOCK_EXPANSIONS` 2; the planner asks for 1 = 64
+  tiles), nearest to the view's cone first; `completed_batch` completes a pick's tiles and `set_tile_distances` takes a
+  fill's read-back in one call each; `missing_in_cone` says whether a tile in a cone has no level yet.
   - **The frame (Task 4)**: the cache is the game's path (`CloudLayer.view_cache`, shader global `cloud_view_cache`,
     default on; off: the per-frame march at the preset's divisor - the reference, `render_check --no_view_cache`;
-    cloud_check (but section 15) and cloud_far_check run the march; a debug output also shows the march). Main thread:
-    `CloudViewCachePlanner` (`cloud_view_cache_planner.gd`, owned by CloudLayer, FrameProfiler section
-    `cloud_view_cache`): the layout from the eyes' finest density (CloudEffect publishes 7 x 7 sample rays per eye and
-    the face size every frame; at most `FACE_TEXELS_MAX` 4096 [E] for the 2 GB cap, re-created beyond a 10 % [E]
-    change, built on a worker), the anchor (the camera at a restart), the light state (Sun, weather weight and a
-    generation that counts the light cache's resets and its first completion after one or a clock jump - tiles filled
-    while it was still filling refresh once: they differed by whole tiles of 10-30 % in the ground view's A / B), up to
-    `MAX_PICKS` 4 picks per frame while the budget lasts (a further one only within `PICK_TIME_US` 400 us of the first),
-    and per tile the shown state the lookup reads (level, what it fades from, fade slot, the fade's start). Restarts
-    (everything back to nothing, level 0 of the view first): `World._view_jumped` (`notify_view_jump`),
+    cloud_check (but section 15) and cloud_far_check run the march; a debug output also shows the march).
+    `CloudViewCachePlanner` (`cloud_view_cache_planner.gd`, owned by CloudLayer) plans on a worker
+    (`WorkerThreadPool`, fix round 1: pick, completions and shown states cost 0.5-1.4 ms of GDScript a frame): the main
+    thread (FrameProfiler section `cloud_view_cache`) hands the run the frame's inputs (camera, view, light, budget, the
+    render thread's read-backs and fill times) and takes the last finished run's batch - one frame late; a run still
+    going hands out nothing that frame. A run: the layout from the eyes' finest density (CloudEffect publishes 7 x 7
+    sample rays per eye and the face size every frame; at most `FACE_TEXELS_MAX` 4096 [E] for the 2 GB cap, re-created
+    beyond a 10 % [E] change, built in the run), the anchor (the camera at a restart), the light state (Sun, weather
+    weight and a generation that counts the light cache's resets and its first completion after one or a clock jump -
+    tiles filled while it was still filling refresh once: they differed by whole tiles of 10-30 % in the ground view's
+    A / B), up to `MAX_PICKS` 8 picks of one block each within `RUN_PICK_US` 3 ms [E] while the budget lasts, per tile
+    the shown state the lookup reads (level, what it fades from, fade slot, the fade's start), and the covering flag.
+    Restarts (everything back to nothing, level 0 of the view first): `World._view_jumped` (`notify_view_jump`),
     `SimClock.time_jumped` (`notify_clock_jump`), a pinned snapshot (`show_now`), and - interim until Task 5's
-    re-anchor - the camera `RESTART_DISTANCE_M` 500 m [E] from the anchor. Render thread (`CloudEffect._run_view_cache`):
-    the batch's tiles filled (GPU timestamp `cloud_cache_fill`; a refresh at the same level first copies the tile's shown
-    texels to its fade slot; each entry's nearest cloud distance by `atomicMin`, read back asynchronously into
-    `set_tile_distance`), the shown states uploaded, then per eye `CLOUD_CACHE_LOOKUP` into the pass's result (the
-    composite unchanged; before the first batch the march shows the frame).
+    re-anchor - the camera `RESTART_DISTANCE_M` 500 m [E] from the anchor; a requested restart hands out a reset batch
+    at once (the frame shows the per-frame march until the restarted run's batch: never a tile of the old place or
+    instant). **Covering (controller ruling, no frame without clouds)**: while a tile in the view's cone (the sample
+    rays' cone plus a tile radius; `missing_in_cone`) has no level, or a first fill there is still fading in, the batch
+    says covering: the effect runs the per-frame march at the preset's divisor and the lookup keeps its result where a
+    tile has nothing and fades a first fill in from it (after a start, a jump, a layout re-creation, the interim
+    restart; ~20-45 frames, see `vr-performance.md`). Render thread (`CloudEffect._prepare_view_cache`,
+    `_cache_lookup`): the batch's tiles filled (GPU timestamp `cloud_cache_fill_<fill id>`; a refresh at the same level
+    first copies the tile's shown texels to its fade slot; each entry's nearest cloud distance by `atomicMin`, read
+    back asynchronously), the shown states uploaded, while covering the march (stamped `cloud_cache_cover`), then per
+    eye `CLOUD_CACHE_LOOKUP` into the pass's result (the composite unchanged; before the first batch, and with the
+    camera farther than the restart distance from the shown anchor, the march alone shows the frame).
   - **The lookup (`cloud_cache_lookup(eye_offset_earth, dir_earth, out cloud_m)`)**: the anchor's direction an eye ray
     reads is the root of r(q(s)) = |o + s dir| along the ray (o = eye - anchor, r the cached distance): two fixed-point
     steps, then secant steps while both ends saw cloud, `CACHE_PARALLAX_ITERATIONS` 3 [E] (fixed-point steps alone left
@@ -1016,23 +1036,35 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     cube, clamped to the tile's outer texel centres on a side whose neighbour lacks that level; cross-faded over
     `CACHE_CROSSFADE_S` 0.25 s [E] from nothing (T = 1, a first fill), the coarser level (a refinement) or the fade slot
     (a refresh: one Sun state per tile, never an abrupt switch; 1024 slots [E], a slot still in use ends that fade). A
-    tile without a level shows no cloud (T = 1; the near shell / coarse march covers it in Task 5). Scene geometry
+    tile without a level shows the covering march's result (T = 1 when not covering; `cloud_cache_sample` returns the
+    colour without the fade from nothing and its weight, `cloud_cache_lookup` mixes it with T = 1). Scene geometry
     nearer than the cloud hides it by exp(-4 |ln(cloud / scene)|) (the upsample's depth weight); a texel without cloud
     keeps the air's shadow loss scaled by scene / the ray's end (a hill before the horizon).
   - **Budget (`CloudLayer.cache_budget_ms`, PRESETS `cache_budget_ms` / `cache_budget_floor_ms` /
     `frame_target_ms`)**: desktop 6.0 ms [E] fixed; VR adaptive (user-approved ruling): 22.2 ms - the rest of the
-    frame's GPU time (95th percentile of 90 frames: the root viewport's measured time minus the fill) - 2 ms, between 2
-    and 11.4 ms [E]. Tiles per frame from the budget over the cost per full-level tile (a level costs its texels: 1/16,
-    1/4, 1), the cost from the fills' timestamps paired in order with their tile equivalents - the larger of the last 4
-    and the last 30 fills' ratio; never below one tile. The cost per full tile varies 0.1-1.6 ms with the direction
-    (clear sky / a deck below), so the fill overshoots for a few frames where the picks turn from cheap to costly tiles
-    (desktop proxy: fill median 4.0 ms, p90 7.5, p99 17 ms at the 6 ms budget).
-  - **Open (Task 4)**: the A / B p99 bound (5 %) is not met on general views (cloud outlines: two point samplings of the
-    deterministic march's hard edges; numbers under Validation); the schedule's main-thread time during a fill is ~1 ms
-    at its median-high end (desktop: median 0.6, p90 1.0, p99 1.4 ms; the pick alone 0.5-1.3 ms in the level-0 phase);
-    in flight the interim restart every 500 m leaves ~0.2 s without clouds each time (Task 5); near objects in front of
-    shadowed air get the air loss of the whole cached ray scaled by distance only.
-ew's cone first.
+    frame's GPU time (95th percentile of 90 frames; a frame's rest = the span of its captured timestamps minus its own
+    fill and covering march, from the same frame's stamps) - 2 ms, between 2 and 11.4 ms [E]. **Cost model (fix round
+    1)**: a fill's GPU time is set first by its slowest ray, then by its work - measured on the desktop deck view: a
+    few tiles of the deck seen from above ~8 ms + ~6 us per work group of 8 x 8 texels, clear sky ~0.6 ms + ~0.3 us
+    (both ~ latency x (1 + groups / ~1300)); a fill of 8 groups took as long as one of 1000. So each tile has a latency
+    per level and a fill is predicted as max l_i + sum g_i l_i / `FILL_CAPACITY_GROUPS` 1024 [E]; a measured fill (its
+    timestamp named by the batch's fill id: a frame whose stamps were not read loses only its own measurement) scales
+    its tiles' latencies by measured / predicted; a level not yet measured takes the coarser one's times the level's
+    learned ratio (median of the recent fills' medians; a finer level marches more detail), a tile never measured the
+    largest of the recent fills' slowest at that level (`UNKNOWN_LATENCY_MS` 9 ms [E] before any). Tiles join a fill in
+    priority order while the prediction fits the budget and the fill stays within `MAX_FILL_GROUPS` 1024 [E] work
+    groups (larger fills were mispredicted by up to 3 x); the first tile always, and when it alone exceeds the budget
+    the tiles that lengthen its fill by at most `FREE_RIDE` 1.1 [E]. `STARSIM_CACHE_FILL_TRACE=1` prints every measured
+    fill (ms, prediction, levels, latency, budget). A single tile cannot be split: its slowest ray is the fill's floor
+    (desktop deck view: one full-level deck tile up to ~8.4 ms at the 6 ms desktop budget).
+  - **Open (Task 4)**: the A / B p99 at 20 km (9.9 %) exceeds that view's calibration (8.2 %; the other three views
+    meet it - Validation); the desktop's fixed 6 ms fill budget is below the latency of a single full-level deck tile
+    (~8.4 ms on the desktop deck view: fill p99 8-9 ms there; only splitting a ray's march across invocations or frames
+    would lower it); the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
+    the march's for ~2 s after a restart, inside the 0.02 bound); in flight the interim restart every 500 m means the
+    covering march (slow frames, ~45 ms in VR) for ~1 s each time (Task 5's progressive re-anchor removes it); near
+    objects in front of shadowed air get the air loss of the whole cached ray scaled by distance only; the lookup's
+    parallax is GPU-tested only at the anchor (the GDScript mirror covers off-anchor eyes).
 - **Standing decisions (user 2026-10-27, static clouds Task 10)**: with clouds the frame rate is lower - the 2.5 ms
   cloud budget is not met (cloud pass 37 / 45 ms in the proxy at the ground / the deck, `vr-performance.md`) and the
   user accepted that until a better approach exists (e.g. precomputing the static field). March sub-samples: 6 (4 fail

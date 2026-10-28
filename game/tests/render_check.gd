@@ -35,9 +35,11 @@
 # Cloud view cache (cloud view cache Task 4; on as in the game: settling waits until it has nothing left to fill and
 #          prints the time to level 0 / the full level in view and to the whole cube): --no_view_cache shows the
 #          per-frame march instead (the flag CloudLayer.view_cache). --ab_view_cache: the cache's cloud image against
-#          the march at divisor 1, 2 x 2 blocks (median 1 %, p99 5 % where the rays miss the ground; exit code 1);
-#          --shimmer_check: 16 frames yawed +-0.3 px, the cache's frame-to-frame change p99 within 10 % of the march's
-#          at divisor 1 (exit code 1).
+#          the march at divisor 1, 2 x 2 blocks: median <= 1 %, p99 where no scene geometry is <= the march's own p99
+#          against itself turned by 0.5 px (exit code 1); --shimmer_check: 16 frames yawed +-0.3 px, the cache's
+#          frame-to-frame change p99 within 10 % of the march's at divisor 1 (exit code 1); --jump_check: after a view
+#          jump and after a layout re-creation (the render scale changed) every frame's cloud coverage within 0.02 of
+#          the per-frame march's (exit code 1).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -62,13 +64,12 @@ const SIM_TICK_S := 0.005
 ## --at_event: flight chunk and limit while the event is not yet in the mission timeline (s).
 const EVENT_SEARCH_STEP_S := 3600.0
 const EVENT_SEARCH_MAX_S := 20.0 * 86400.0
-## --ab_view_cache (cloud view cache Task 4, the controller's ruling for general views): the luminance error's floor
-## (a fraction of the mean, as cloud_check CACHE_ERROR_FLOOR), the median and the p99 over the blocks missing the ground
-## (cloud_check section 15's bounds).
+## --ab_view_cache (cloud view cache Task 4, the controller's rulings for general views): the luminance error's floor
+## (a fraction of the mean, as cloud_check CACHE_ERROR_FLOOR) and the median's bound; the p99 over the blocks without
+## scene geometry is bounded by the same view's march against itself turned by AB_SHIFT_PX eye pixels (two point
+## samplings of the same hard edges, as the cache's texel grid is against the pixels).
 const AB_ERROR_FLOOR := 0.05
 const AB_MEDIAN_TOLERANCE := 0.01
-const AB_P99_TOLERANCE := 0.05
-## The calibration's turn of the view (eye pixels): the march against itself half a pixel off, printed beside the A / B.
 const AB_SHIFT_PX := 0.5
 ## A pixel without scene geometry: the march's scene distance at least this (cloud_pass.gdshaderinc: 1e30 for depth 0).
 const AB_SKY_M := 1.0e20
@@ -76,6 +77,14 @@ const AB_SKY_M := 1.0e20
 const SHIMMER_FRAMES := 16
 const SHIMMER_PX := 0.3
 const SHIMMER_EXCESS := 0.1
+## --jump_check (Task 4 fix round 1, controller ruling "no frame without clouds"): the cloud coverage (mean 1 - T over
+## the frame, every JUMP_STRIDE-th pixel per axis) of every frame after a view jump and after a layout re-creation
+## within JUMP_COVERAGE_TOLERANCE of the per-frame march's (the reference); the render scale that re-creates the layout
+## (> the planner's 10 % hysteresis) and the frames recorded per phase at most.
+const JUMP_COVERAGE_TOLERANCE := 0.02
+const JUMP_STRIDE := 4
+const JUMP_RENDER_SCALE := 1.3
+const JUMP_MAX_FRAMES := 900
 
 var _args := {}
 var _main: Node
@@ -101,7 +110,10 @@ var _cache_full := Vector2(-1.0, -1.0)
 var _cache_idle := 0
 var _cache_done := false
 var _cache_section_ms: Array[float] = []
+var _cache_section_l0_ms: Array[float] = []  ## the schedule's time in frames after level 0 was everywhere in view
 var _cache_fill_ms: Array[float] = []
+var _cache_fills: Array[Vector3] = []  ## the planner's measured fills: (measured ms, predicted ms, budget ms)
+var _cache_covered := Vector2(-1.0, -1.0)  ## when the planner stopped covering (s, frames)
 var _check_failed := false  ## --ab_view_cache / --shimmer_check failed (exit code 1)
 ## --ab_view_cache: the cache's image, its ground mask, frames left before the march's image is read.
 var _ab_cache: Image
@@ -109,6 +121,7 @@ var _ab_wait := -1
 var _ab_anchor_m := 0.0  ## the camera's distance from the cache's anchor
 var _ab_march: Image  ## the march's image (then the calibration against it turned by AB_SHIFT_PX)
 var _ab_ground := PackedByteArray()
+var _ab_result := {}  ## the cache against the march (judged after the calibration)
 ## --shimmer_check: the phase (0 the cache, 1 the direct march), the base azimuth, frames of the phase, the cloud
 ## images of its frames, the cache's p99 of the change.
 var _shimmer_phase := 0
@@ -117,6 +130,16 @@ var _shimmer_k := 0
 var _shimmer_images: Array[PackedFloat32Array] = []
 var _shimmer_cache_p99 := -1.0
 var _shimmer_wait := 0
+## --jump_check: the phase (0 converged: the reference taken, 1 after the view jump, 2 after the layout re-creation),
+## the reference coverage, the frames of the phase, the worst deviation per phase, the phase's frames with the march
+## covering.
+var _jump_phase := 0
+var _jump_reference := -1.0
+var _jump_cache_coverage := -1.0
+var _jump_frames := 0
+var _jump_worst := [0.0, 0.0, 0.0]
+var _jump_covering := [0, 0, 0]
+var _jump_idle := 0
 
 
 func _initialize() -> void:
@@ -233,6 +256,8 @@ func _process(_delta: float) -> bool:
 			return false
 		if _args.has("shimmer_check") and not _shimmer_frames(world):
 			return false
+		if _args.has("jump_check") and not _jump_frames_done(world):
+			return false
 		if _args.has("deterministic"):
 			if _deterministic_left < 0:  # the same jitter sequence and history from here in every run
 				var effect: CloudEffect = world.clouds.effect
@@ -323,6 +348,7 @@ func _gpu_frames(world: World) -> bool:
 func _cache_waiting(world: World) -> bool:
 	var clouds := world.clouds
 	var planner := clouds.view_cache_planner
+	planner.wait()  # its state is read below (the run started last frame; normally done long ago)
 	var frame_sections := FrameProfiler.take_frame()
 	if _cache_done or not clouds.view_cache or not bool(ShaderGlobals.value(&"cloud_enabled")) \
 			or planner.layout == null or _frames >= TERRAIN_MAX_FRAMES:
@@ -334,11 +360,20 @@ func _cache_waiting(world: World) -> bool:
 		_cache_start_frame = _frames
 		_cache_level0 = Vector2(-1.0, -1.0)
 		_cache_view_full = Vector2(-1.0, -1.0)
+		_cache_covered = Vector2(-1.0, -1.0)
 		_cache_section_ms.clear()
+		_cache_section_l0_ms.clear()
 		_cache_fill_ms.clear()
+		_cache_fills.clear()
 	var since := Vector2(now - _cache_start_s, _frames - _cache_start_frame)
-	_cache_section_ms.append(int(frame_sections.get(&"cloud_view_cache", 0)) / 1000.0)
+	var section_ms := int(frame_sections.get(&"cloud_view_cache", 0)) / 1000.0
+	_cache_section_ms.append(section_ms)
+	if not planner.view_missing:  # level 0 everywhere in the view's cone (the planner's own test)
+		_cache_section_l0_ms.append(section_ms)
 	_cache_fill_ms.append(clouds.view_cache_fill_ms)
+	_cache_fills.append_array(planner.take_fill_log())
+	if _cache_covered.x < 0.0 and not planner.last_covering:
+		_cache_covered = since
 	var view: Dictionary = clouds.effect.view_cache_view()
 	var lowest := CloudViewCacheSchedule.MAX_LEVEL
 	for d: Vector3 in view.get("dirs", []):
@@ -358,34 +393,62 @@ func _cache_waiting(world: World) -> bool:
 
 
 
+## The view cache's convergence and costs since the last restart: the times to level 0 in view, the end of the march's
+## covering, the full level in view and the whole cube; the main-thread schedule time (all frames, and the frames after
+## level 0 was in view: the 1.0 ms bound); the measured fills against their budget (p99, max, the largest excess, the
+## fills over budget + 2 ms) and against their prediction.
 func _print_cache_timing(world: World) -> void:
 	var clouds := world.clouds
-	var sections := _cache_section_ms.duplicate()
-	sections.sort()
-	var fills := _cache_fill_ms.duplicate()
-	fills.sort()
 	var layout := clouds.view_cache_planner.layout
-	print("render_check: view cache %d^2 texels per face: level 0 in view after %.2f s (%d frames), the full level in "
+	var sections := _stats(_cache_section_ms)
+	var settled := _stats(_cache_section_l0_ms)
+	var measured: Array[float] = []
+	var excess: Array[float] = []
+	var ratio: Array[float] = []
+	var over := 0
+	for f in _cache_fills:
+		measured.append(f.x)
+		excess.append(f.x - f.z)
+		ratio.append(f.x / maxf(f.y, 1.0e-6))
+		over += 1 if f.x > f.z + 2.0 else 0
+	var fills := _stats(measured)
+	print("render_check: view cache %d^2 texels per face: level 0 in view after %.2f s (%d frames), covering ended "
 			% [layout.face_texels if layout != null else 0, _cache_level0.x, _cache_level0.y]
-			+ "view after %.2f s (%d frames), the whole cube after %.2f s (%d frames); budget %.2f ms, schedule main "
-			% [_cache_view_full.x, _cache_view_full.y, _cache_full.x, _cache_full.y, clouds.cache_budget_ms()]
-			+ "thread median %.3f / max %.3f ms, fill median %.3f / max %.3f ms over %d frames"
-			% [sections[sections.size() / 2] if sections.size() > 0 else 0.0, sections.back() if sections.size() > 0
-				else 0.0, fills[fills.size() / 2] if fills.size() > 0 else 0.0, fills.back() if fills.size() > 0 else 0.0,
-				sections.size()])
+			+ "after %.2f s (%d frames), the full level in view after %.2f s (%d frames), the whole cube after %.2f s "
+			% [_cache_covered.x, _cache_covered.y, _cache_view_full.x, _cache_view_full.y, _cache_full.x]
+			+ "(%d frames); budget now %.2f ms" % [_cache_full.y, clouds.cache_budget_ms()])
+	print("render_check: view cache schedule main thread: all %d frames median %.3f / p99 %.3f / max %.3f ms; after "
+			% [sections["n"], sections["median"], sections["p99"], sections["max"]]
+			+ "level 0 in view (%d frames) median %.3f / p99 %.3f / max %.3f ms" % [settled["n"], settled["median"],
+			settled["p99"], settled["max"]])
+	print("render_check: view cache fills: %d measured, GPU median %.3f / p99 %.3f / max %.3f ms; over the budget: max "
+			% [fills["n"], fills["median"], fills["p99"], fills["max"]]
+			+ "%.3f ms, %d fills over budget + 2 ms; measured / predicted median %.2f, p99 %.2f, max %.2f"
+			% [_stats(excess)["max"], over, _stats(ratio)["median"], _stats(ratio)["p99"], _stats(ratio)["max"]])
+
+
+## n, median, p99 and max of a list (0 when empty).
+static func _stats(values: Array[float]) -> Dictionary:
+	if values.is_empty():
+		return {"n": 0, "median": 0.0, "p99": 0.0, "max": 0.0}
+	var sorted := values.duplicate()
+	sorted.sort()
+	return {"n": sorted.size(), "median": sorted[sorted.size() / 2],
+		"p99": sorted[mini(int(0.99 * sorted.size()), sorted.size() - 1)], "max": sorted.back()}
 
 
 ## --ab_view_cache (the cache full): the cloud image of the cache, then of the per-frame march at divisor 1 (the
-## reference, cloud view cache controller ruling): both box-filtered over 2 x 2 pixels, the per-block luminance error
-## |cache - march| / max(|march|, AB_ERROR_FLOOR x the mean) - median <= AB_MEDIAN_TOLERANCE over all blocks, p99 <=
-## AB_P99_TOLERANCE over the blocks whose rays miss the ground and every other scene geometry (the full image's
-## printed), T RMS printed. Images: the
-## two frames and the error (x 10) next to --out. True when done (a failure: exit code 1).
+## reference, cloud view cache controller rulings): both box-filtered over 2 x 2 pixels, the per-block luminance error
+## |cache - march| / max(|march|, AB_ERROR_FLOOR x the mean) - median <= AB_MEDIAN_TOLERANCE over all blocks, and the
+## p99 over the blocks whose rays miss the ground and every other scene geometry <= the calibration's: the march against
+## itself with the view turned by AB_SHIFT_PX (the same metric; the full image's p99 and T RMS printed). Images: the two
+## frames and the error (x 10) next to --out. True when done (a failure: exit code 1).
 func _ab_frames(world: World) -> bool:
 	var effect := world.clouds.effect
 	if _ab_wait < 0:
 		_ab_cache = effect.output.get_layer_data(0)
-		var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") + ShaderGlobals.value(&"atmosphere_camera_lo")
+		var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") \
+				+ ShaderGlobals.value(&"atmosphere_camera_lo")
 		_ab_anchor_m = camera.distance_to(world.clouds.view_cache_planner.anchor_earth_m)
 		root.get_viewport().get_texture().get_image().save_png(_out_path("_cache"))
 		world.clouds.view_cache = false
@@ -398,16 +461,22 @@ func _ab_frames(world: World) -> bool:
 		return false
 	if _ab_march != null:
 		# The calibration: the march against itself with the view turned by AB_SHIFT_PX (two point samplings of the
-		# same clouds, as the cache's texel grid is against the pixels).
+		# same clouds, as the cache's texel grid is against the pixels) - the bound of the cache's p99.
 		var shifted := _cloud_compare(effect.output.get_layer_data(0), _ab_march, _ab_ground)
 		print("render_check: ab_view_cache calibration: the march at divisor 1 against itself turned by %.1f px, " \
 				% AB_SHIFT_PX + "2 x 2 blocks: median %.3f %%, p99 %.3f %% without scene geometry (all: p99 %.3f %%)"
 				% [shifted["median"] * 100.0, shifted["p99_sky"] * 100.0, shifted["p99_all"] * 100.0])
+		var ok: bool = _ab_result["median"] <= AB_MEDIAN_TOLERANCE and _ab_result["p99_sky"] <= shifted["p99_sky"]
+		print("render_check: ab_view_cache %s: median %.3f %% (bound %.1f %%), p99 without scene geometry %.3f %% "
+				% ["PASS" if ok else "FAIL", _ab_result["median"] * 100.0, AB_MEDIAN_TOLERANCE * 100.0,
+				_ab_result["p99_sky"] * 100.0] + "(bound: the calibration's %.3f %%)" % (shifted["p99_sky"] * 100.0))
+		_check_failed = _check_failed or not ok
 		return true
 	var march := effect.output.get_layer_data(0)
 	root.get_viewport().get_texture().get_image().save_png(_out_path("_march"))
 	if march.get_size() != _ab_cache.get_size():
-		print("render_check: ab_view_cache FAIL: image sizes differ (%s / %s)" % [_ab_cache.get_size(), march.get_size()])
+		print("render_check: ab_view_cache FAIL: image sizes differ (%s / %s)" % [_ab_cache.get_size(),
+				march.get_size()])
 		_check_failed = true
 		return true
 	var ground := _geometry_blocks(effect.debug_centre_data("depth"), march.get_size())
@@ -417,20 +486,84 @@ func _ab_frames(world: World) -> bool:
 		_check_failed = true
 		return true
 	var r := _cloud_compare(_ab_cache, march, ground)
-	var ok: bool = r["median"] <= AB_MEDIAN_TOLERANCE and r["p99_sky"] <= AB_P99_TOLERANCE
-	print("render_check: ab_view_cache %s: cache vs the march at divisor 1, 2 x 2 blocks: luminance error median %.3f %%, "
-			% ["PASS" if ok else "FAIL", r["median"] * 100.0] + "p99 %.3f %% over %d blocks without scene geometry (all: "
+	_ab_result = r
+	print("render_check: ab_view_cache: cache vs the march at divisor 1, 2 x 2 blocks: luminance error median %.3f %%, "
+			% (r["median"] * 100.0) + "p99 %.3f %% over %d blocks without scene geometry (all: "
 			% [r["p99_sky"] * 100.0, r["sky_blocks"]] + "p99 %.3f %%), worst %.1f %%, T RMS %.5f (mean luminance %.4f)"
 			% [r["p99_all"] * 100.0, r["worst"] * 100.0, r["t_rms"], r["mean"]]
 			+ "; the camera %.2f m from the anchor" % _ab_anchor_m)
 	(r["picture"] as Image).save_png(_out_path("_ab_error"))
-	_check_failed = _check_failed or not ok
 	_ab_march = march
 	_ab_ground = ground
 	var cam := world.camera
 	cam.azimuth += AB_SHIFT_PX * 2.0 * tan(deg_to_rad(cam.fov) / 2.0) / float(march.get_height())
 	_ab_wait = 2
 	return false
+
+
+## --jump_check (the cache full; controller ruling: no frame without clouds): the reference's cloud coverage - the
+## per-frame march at the preset's divisor (the flag off for FRAMES_TO_SETTLE frames; the cache is kept) - then a view
+## jump (CloudLayer.notify_view_jump: the cache restarts, the march covers) and, once the cache is idle again, a layout
+## re-creation (the render scale changed to JUMP_RENDER_SCALE: a new face size) - every frame of both phases within
+## JUMP_COVERAGE_TOLERANCE of the reference. The output read in a frame is the previous frame's (drawn after the jump
+## from the first one on). True when done (a failure: exit code 1).
+func _jump_frames_done(world: World) -> bool:
+	var clouds := world.clouds
+	var planner := clouds.view_cache_planner
+	var coverage := _coverage(clouds.effect.output.get_layer_data(0))
+	if _jump_phase == 0:
+		if _jump_frames == 0:
+			_jump_cache_coverage = coverage  # the converged cache's (printed)
+			clouds.view_cache = false
+		_jump_frames += 1
+		if _jump_frames == FRAMES_TO_SETTLE:
+			_jump_reference = coverage
+			clouds.view_cache = true
+		if _jump_frames < 2 * FRAMES_TO_SETTLE:
+			return false
+		print("render_check: jump_check reference: the march's coverage %.4f (the converged cache's %.4f)"
+				% [_jump_reference, _jump_cache_coverage])
+		_jump_phase = 1
+		_jump_frames = 0
+		clouds.notify_view_jump()
+		return false
+	_jump_frames += 1
+	var phase := _jump_phase
+	_jump_worst[phase] = maxf(_jump_worst[phase], absf(coverage - _jump_reference))
+	_jump_covering[phase] += 1 if planner.last_covering else 0
+	var fading := planner.now_s - planner.last_fade_s < CloudViewCache.CROSSFADE_S
+	_jump_idle = _jump_idle + 1 if planner.last_tiles == 0 and not fading else 0
+	if _jump_idle < FRAMES_TO_SETTLE and _jump_frames < JUMP_MAX_FRAMES:
+		return false
+	print("render_check: jump_check phase %s: %d frames (%d covering), coverage deviation max %.4f (reference %.4f)"
+			% ["view jump" if phase == 1 else "layout re-creation", _jump_frames, _jump_covering[phase],
+			_jump_worst[phase], _jump_reference])
+	_jump_idle = 0
+	_jump_frames = 0
+	if phase == 1:
+		_jump_phase = 2
+		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		root.scaling_3d_scale = JUMP_RENDER_SCALE * (float(_args["render_scale"]) if _args.has("render_scale") else 1.0)
+		return false
+	var ok: bool = _jump_worst[1] <= JUMP_COVERAGE_TOLERANCE and _jump_worst[2] <= JUMP_COVERAGE_TOLERANCE \
+			and planner.resets >= 3
+	print("render_check: jump_check %s: coverage within %.3f of the march's after the view jump (max %.4f) "
+			% ["PASS" if ok else "FAIL", JUMP_COVERAGE_TOLERANCE, _jump_worst[1]]
+			+ "and the layout re-creation (max %.4f; restarts %d)" % [_jump_worst[2], planner.resets])
+	_check_failed = _check_failed or not ok
+	return true
+
+
+## The cloud coverage of a cloud image (RGBA half: premultiplied colour + T): the mean of 1 - T over every
+## JUMP_STRIDE-th pixel per axis.
+static func _coverage(image: Image) -> float:
+	var sum := 0.0
+	var n := 0
+	for y in range(0, image.get_height(), JUMP_STRIDE):
+		for x in range(0, image.get_width(), JUMP_STRIDE):
+			sum += 1.0 - image.get_pixel(x, y).a
+			n += 1
+	return sum / maxi(n, 1)
 
 
 ## --shimmer_check (the cache full): SHIMMER_FRAMES frames with the head yawed by +-SHIMMER_PX eye pixels alternating,
@@ -462,7 +595,8 @@ func _shimmer_frames(world: World) -> bool:
 			return false
 		var ok := _shimmer_cache_p99 <= (1.0 + SHIMMER_EXCESS) * p99
 		print("render_check: shimmer_check %s: frame-to-frame change p99 with the cache %.5f, the march at divisor 1 "
-				% ["PASS" if ok else "FAIL", _shimmer_cache_p99] + "%.5f (ratio %.3f, bound %.2f; %d frames, yaw +-%.2f px)"
+				% ["PASS" if ok else "FAIL", _shimmer_cache_p99]
+				+ "%.5f (ratio %.3f, bound %.2f; %d frames, yaw +-%.2f px)"
 				% [p99, _shimmer_cache_p99 / maxf(p99, 1.0e-12), 1.0 + SHIMMER_EXCESS, SHIMMER_FRAMES, SHIMMER_PX])
 		_check_failed = _check_failed or not ok
 		return true

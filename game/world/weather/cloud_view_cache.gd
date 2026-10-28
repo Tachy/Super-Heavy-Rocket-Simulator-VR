@@ -15,8 +15,8 @@ const DISTANCE_FORMAT := RenderingDevice.DATA_FORMAT_R32_SFLOAT
 const BLOCK := 8  ## the fill's work group side (texels)
 const VIEW_BLOCK_SIZE := 4 * 64 + 5 * 16  ## CloudView (cloud_pass.gdshaderinc), as CloudEffect.VIEW_BLOCK_SIZE
 const PUSH_SIZE := 16  ## CloudCacheFill: face_texels, tiles_per_side, first, slots_per_row
-## [E] The tile's side at the full level (texels; cloud view cache Task 2): 64^2 rays per tile and level 2, a fade slot's
-## cell (cloud_view_cache.gdshaderinc CLOUD_CACHE_SLOT_TEXELS).
+## [E] The tile's side at the full level (texels; cloud view cache Task 2): 64^2 rays per tile and level 2, a fade
+## slot's cell (cloud_view_cache.gdshaderinc CLOUD_CACHE_SLOT_TEXELS).
 const TILE_TEXELS := 64
 ## [E] A tile's cross-fade to new content (cloud_view_cache.gdshaderinc CACHE_CROSSFADE_S, mirrored here for the plan).
 const CROSSFADE_S := 0.25

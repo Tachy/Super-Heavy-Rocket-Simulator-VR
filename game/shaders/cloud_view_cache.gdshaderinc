@@ -99,8 +99,8 @@ void main() {
 	barrier();
 	vec3 dir = cloud_cache_dir(face, (vec2(texel) + 0.5) / face_size);
 	// The static world's end: the ellipsoid (the sea) ahead of the anchor; for an anchor below it (a shore below sea
-	// level: Starbase's ground lies ~25 m under the ellipsoid) a sphere CLOUD_CACHE_GROUND_BELOW_M under the anchor - the
-	// ground around it, not the air and clouds beyond the planet's limb (their shadow loss lay on the terrain).
+	// level: Starbase's ground lies ~25 m under the ellipsoid) a sphere CLOUD_CACHE_GROUND_BELOW_M under the anchor -
+	// the ground around it, not the air and clouds beyond the planet's limb (their shadow loss lay on the terrain).
 	CloudRay anchor_ray = cloud_ray_from(dir, origin);
 	vec2 ground = cloud_sphere_crossing(anchor_ray, min(0.0, anchor_ray.h_c - CLOUD_CACHE_GROUND_BELOW_M));
 	float scene_m = ground.x <= ground.y && ground.x > 0.0 ? ground.x : CLOUD_CACHE_SKY_M;
@@ -140,10 +140,13 @@ layout(set = 1, binding = 9, std430) readonly buffer CloudCacheStates {
 	// level + 1, 4 its fade slot), the slot (bits 8-31); y = the fade's start (float bits, s of the planner's clock)
 	uvec2 states[];
 } cloud_cache_states;
-layout(rgba16f, set = 1, binding = 10) uniform writeonly image2D out_image;
+// read too: while covering, the per-frame march's result is there (the lookup keeps it where a tile has nothing)
+layout(rgba16f, set = 1, binding = 10) uniform restrict image2D out_image;
 layout(push_constant, std430) uniform CloudCacheLookup {
 	vec4 head;     // xyz: the camera (head) - the anchor, Earth-local (m, differenced in float64); w: now (s)
-	uvec4 layout_; // x: the full level's texels per face side, y: tiles per side, z: fade slots per atlas row
+	// x: the full level's texels per face side, y: tiles per side, z: fade slots per atlas row, w: covering (1: the
+	// march ran into out_image this frame)
+	uvec4 layout_;
 } cloud_cache_lookup_block;
 
 // [E] Iterations of the parallax lookup (cloud_cache_lookup; cloud_vr_stereo_test mirrors it): two fixed-point steps
@@ -236,7 +239,8 @@ vec4 cloud_cache_colour(int level, vec3 q, vec3 texel_full, uint tile) {
 		for (int k = 0; k < 3; k++) {
 			// the side neighbours along x, along y, then the diagonal one
 			vec2 step_ = k == 0 ? vec2(side.x, 0.0) : (k == 1 ? vec2(0.0, side.y) : side);
-			if ((k == 0 && side.x == 0.0) || (k == 1 && side.y == 0.0) || (k == 2 && (side.x == 0.0 || side.y == 0.0))) {
+			if ((k == 0 && side.x == 0.0) || (k == 1 && side.y == 0.0)
+					|| (k == 2 && (side.x == 0.0 || side.y == 0.0))) {
 				continue;
 			}
 			vec3 beyond = cloud_cache_dir(face, (centre + step_ * tile_n) / n);
@@ -262,7 +266,17 @@ vec4 cloud_cache_colour(int level, vec3 q, vec3 texel_full, uint tile) {
 // the cached distance from the anchor), then secant steps while both ends saw cloud (cloud_vr_stereo_test mirrors it).
 // The colour: the finest level the tile has, cross-faded from what it showed before over CACHE_CROSSFADE_S; a tile
 // without a level shows no cloud (T = 1).
+vec4 cloud_cache_sample(vec3 eye_offset_earth, vec3 dir_earth, out float cloud_m, out float fresh);
 vec4 cloud_cache_lookup(vec3 eye_offset_earth, vec3 dir_earth, out float cloud_m) {
+	float fresh;
+	vec4 sampled = cloud_cache_sample(eye_offset_earth, dir_earth, cloud_m, fresh);
+	return mix(vec4(0.0, 0.0, 0.0, 1.0), sampled, fresh);
+}
+
+// cloud_cache_lookup without the fade from nothing: fresh is the weight of the returned colour against what shows
+// where the tile has nothing (0 without a level, the fade's weight while a first fill fades in, else 1) - T = 1, or the
+// covering march's result (CLOUD_CACHE_LOOKUP's main).
+vec4 cloud_cache_sample(vec3 eye_offset_earth, vec3 dir_earth, out float cloud_m, out float fresh) {
 	vec3 o = eye_offset_earth;
 	vec3 d = dir_earth;
 	float b = dot(o, d);
@@ -294,13 +308,17 @@ vec4 cloud_cache_lookup(vec3 eye_offset_earth, vec3 dir_earth, out float cloud_m
 	uvec2 state = cloud_cache_states.states[tile];
 	int level = int(state.x & 3u) - 1;
 	cloud_m = 0.0;
+	fresh = 0.0;
 	if (level < 0) {
 		return vec4(0.0, 0.0, 0.0, 1.0);
 	}
+	fresh = 1.0;
 	vec4 to = cloud_cache_colour(level, q, texel, tile);
 	float w = clamp((cloud_cache_lookup_block.head.w - uintBitsToFloat(state.y)) / CACHE_CROSSFADE_S, 0.0, 1.0);
-	if (w < 1.0) {
-		uint from = (state.x >> 2u) & 7u;
+	uint from = (state.x >> 2u) & 7u;
+	if (w < 1.0 && from == 0u) {
+		fresh = w;  // a first fill fades in from what shows without the cache
+	} else if (w < 1.0) {
 		vec4 before = vec4(0.0, 0.0, 0.0, 1.0);
 		if (from >= 1u && from <= CLOUD_CACHE_LEVELS) {
 			before = cloud_cache_colour(int(from) - 1, q, texel, tile);
@@ -331,7 +349,12 @@ void main() {
 	float scene_m = cloud_scene_distance(vec2(pixel) + 0.5, texelFetch(scene_depth, pixel, 0).r);
 	vec3 dir = cloud_ray_earth(vec2(pixel) + 0.5);
 	float cloud_m;
-	vec4 result = cloud_cache_lookup(cloud_cache_lookup_block.head.xyz + cloud_view.eye_earth.xyz, dir, cloud_m);
+	float fresh;
+	vec4 result = cloud_cache_sample(cloud_cache_lookup_block.head.xyz + cloud_view.eye_earth.xyz, dir, cloud_m, fresh);
+	bool covering = cloud_cache_lookup_block.layout_.w != 0u;
+	if (fresh <= 0.0 && covering) {
+		return;  // no level: the covering march's result stays
+	}
 	// Scene geometry in front of the cloud hides it, softly over the distance ratio (the upsample's depth weight). A
 	// texel without cloud holds the air's shadow loss along the cached ray to its static end: nearer geometry (a hill
 	// before the horizon) keeps the share of its distance.
@@ -340,6 +363,11 @@ void main() {
 		result = vec4(result.rgb * v, 1.0 - v * (1.0 - result.a));
 	} else if (cloud_m < 0.0 && scene_m < -cloud_m) {
 		result.rgb *= scene_m / -cloud_m;
+	}
+	// A first fill fades in from what shows without the cache (both after the depth test: it is affine, T = 1 stays):
+	// the covering march's result (already in the output), else no cloud.
+	if (fresh < 1.0) {
+		result = mix(covering ? imageLoad(out_image, pixel) : vec4(0.0, 0.0, 0.0, 1.0), result, fresh);
 	}
 	imageStore(out_image, pixel, result);
 }

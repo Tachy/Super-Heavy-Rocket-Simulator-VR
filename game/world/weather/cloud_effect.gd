@@ -26,14 +26,21 @@ const CACHE_FILL_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shader
 		"res://shaders/cloud_view_cache.gdshaderinc"]
 ## Its per-eye lookup (cloud view cache Task 4; CLOUD_CACHE_LOOKUP, instead of the march and the upsample).
 const CACHE_LOOKUP_FILES := ["res://shaders/cloud_pass.gdshaderinc", "res://shaders/cloud_view_cache.gdshaderinc"]
-const CACHE_LOOKUP_PUSH_SIZE := 32  ## CloudCacheLookup: head offset + now, face texels / tiles per side / slots per row
+## CloudCacheLookup: head offset + now; face texels, tiles per side, slots per row, covering (the march is in the
+## output already)
+const CACHE_LOOKUP_PUSH_SIZE := 32
 ## [E] The view's sample rays per eye (CloudViewCacheSchedule.pick's view_dirs): GRID x GRID over the eye's ndc - ~17
 ## deg apart over a headset eye's ~100 deg, ~13 x 8 deg on the desktop (9 x 9 cost the pick ~0.3 ms more a frame).
 const CACHE_VIEW_GRID := 7
-## [E] Measured fill costs the main thread may hold back unread (frames; the oldest are dropped).
+## [E] Measured fills / frames the main thread may hold back unread (the oldest are dropped).
 const CACHE_FEEDBACK_MAX := 256
-## [E] Fills waiting for their GPU interval at most (the frame queue is 2-3 frames; more: intervals were lost).
-const CACHE_PENDING_MAX := 4
+## The view cache's GPU timestamps (always taken: the budget control reads them): a fill's start (named by its batch's
+## fill_id), the covering march's start, the lookup's start (the end of either).
+const CACHE_FILL_STAMP := "cloud_cache_fill_"
+const CACHE_COVER_STAMP := "cloud_cache_cover"
+const CACHE_LOOKUP_STAMP := "cloud_pass_lookup"
+## What the frame shows of the view cache (_prepare_view_cache).
+enum CacheMode { OFF, COVERED, ALONE }
 const GROUP := 8
 const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
 const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline"]
@@ -110,18 +117,18 @@ var _garbage: Array[Dictionary] = []  ## {callback, rids}: images to free once t
 var _previous_camera := Vector3.ZERO  ## float64 Earth-local camera of the previous frame
 var _fill_request := {}  ## {layout, anchor, tiles}: the next frame's view cache fill (render thread)
 ## The view cache's hand-overs (Task 4), guarded by _cache_mutex: the planner's batch (main -> render thread, {} =
-## none), the view the render thread saw (render -> main: sample rays, their spacing, the face size), the fills' costs
-## ((GPU ms, full-level tile equivalents) each), the read-back nearest distances.
+## none), the view the render thread saw (render -> main: sample rays, their spacing, the face size), the measured fills
+## ((fill id, GPU ms) each), the measured frames' rest (GPU ms without the fill and the covering march), the read-back
+## nearest distances.
 var _cache_mutex := Mutex.new()
 var _cache_batch := {}
 var _cache_view := {}
-var _cache_costs: Array[Vector2] = []
+var _cache_fills: Array[Vector2] = []
+var _cache_rests: Array[float] = []
 var _cache_readbacks: Array[Dictionary] = []
-## Render thread: the batch last run (anchor, now), the timestamps' frame last read, the tile equivalents of the fills
-## whose timestamps have not come back yet (in order: each fill's interval comes back once, frame_queue_size frames on).
+## Render thread: the batch last run (anchor, now, covering), the timestamps' frame last read.
 var _cache_shown := {}
 var _cache_timestamps_frame := -1
-var _cache_pending_equivalents: Array[float] = []
 ## Render-thread copies of the quality (set_quality).
 var _divisor := 2
 var _temporal_weight := 0.1
@@ -198,12 +205,14 @@ func set_view_cache_view(view: Dictionary) -> void:
 	_cache_mutex.unlock()
 
 
-## Main thread: what the render thread measured since the last call - {costs: per fill whose GPU timestamps came back
-## (its interval in ms, the full-level tile equivalents it filled), readbacks: [{epoch, tiles, bits}]}.
+## Main thread: what the render thread measured since the last call - {fills: Array[Vector2] (fill id, its GPU ms) per
+## fill whose timestamps came back, rests: Array[float] (a frame's GPU ms without its fill and covering march),
+## readbacks: [{epoch, tiles, bits}]}.
 func take_view_cache_feedback() -> Dictionary:
 	_cache_mutex.lock()
-	var feedback := {"costs": _cache_costs, "readbacks": _cache_readbacks}
-	_cache_costs = []
+	var feedback := {"fills": _cache_fills, "rests": _cache_rests, "readbacks": _cache_readbacks}
+	_cache_fills = []
+	_cache_rests = []
 	_cache_readbacks = []
 	_cache_mutex.unlock()
 	return feedback
@@ -606,17 +615,23 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 				world_to_earth, Projection.IDENTITY, Vector2(size), low, camera_delta, _centre["valid"], params,
 				eye_earth).to_byte_array())
 	# The view cache (Task 4): the planner's batch filled, then each eye's lookup - instead of the march (the debug
-	# outputs are the march's per-ray quantities). Until the first batch ran, the march shows the frame.
+	# outputs are the march's per-ray quantities). Until the first batch ran, the march shows the frame; while the
+	# batch says covering, the march runs too and the lookup shows it where a tile has nothing yet (fix round 1).
 	view_cache_shown = false
+	var cache_mode := CacheMode.OFF
 	if ShaderGlobals.value(&"cloud_view_cache") == true and debug == 0:
 		_read_cache_timestamps()
 		_publish_cache_view(projections, size, view_to_world, world_to_earth)
-		if _run_view_cache(set0, camera, buffers, size, view_count):
+		cache_mode = _prepare_view_cache(set0, camera)
+		if cache_mode == CacheMode.ALONE:
+			_cache_lookup(camera, buffers, size, view_count, false)
 			view_cache_shown = true
 			_centre["valid"] = false  # the march's history restarts when it is shown again
 			stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": true,
 				"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
 			return
+		if cache_mode == CacheMode.COVERED:
+			_rd.capture_timestamp(CACHE_COVER_STAMP)
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
 	var refine_set1 := []
@@ -683,8 +698,11 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		_rd.compute_list_dispatch(list, groups_full.x, groups_full.y, 1)
 	_rd.compute_list_end()
 	_centre["valid"] = true
-	stats = {"valid": true, "low_size": low, "views": view_count,
-		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+	if cache_mode == CacheMode.COVERED:
+		_cache_lookup(camera, buffers, size, view_count, true)
+		view_cache_shown = true
+	stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": cache_mode == CacheMode.COVERED,
+		"covering": cache_mode == CacheMode.COVERED, "record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
 
 
 ## The requested view cache fill (request_view_cache_fill) with this frame's set 0, before the march: the anchor's
@@ -713,35 +731,40 @@ func _ensure_view_cache(layout: CloudViewCacheLayout) -> void:
 	_cache_shown = {}
 
 
-## The view cache's frame (Task 4): the waiting batch's tiles filled (timestamped: the fill's GPU time steers the
-## budget) and its shown states taken, then each eye's lookup into its layer of the result. False before a batch ran.
-func _run_view_cache(set0: Array[RDUniform], camera: Vector3, buffers: RenderSceneBuffersRD, size: Vector2i,
-		view_count: int) -> bool:
+## The view cache's frame (Task 4): the waiting batch's tiles filled (timestamped by its fill id: the fill's GPU time
+## steers the budget) and its shown states taken. OFF: nothing to show yet (before the first batch; a camera farther
+## than the planner's restart distance from the shown anchor - a restart not yet planned: the march, never another
+## place's clouds); COVERED: the march runs and the lookup shows it where a tile has nothing; ALONE: the lookup alone.
+func _prepare_view_cache(set0: Array[RDUniform], camera: Vector3) -> CacheMode:
 	var batch := take_view_cache_batch()
 	view_cache_last_tiles = 0
-	if not batch.is_empty():
+	if batch.has("reset"):
+		_cache_shown = {}  # a restart is planned: the march until its first batch (no tile of the old place / instant)
+	elif not batch.is_empty():
 		_ensure_view_cache(batch["layout"])
 		var tiles: PackedInt32Array = batch["tiles"]
 		var anchor: Vector3 = batch["anchor"]
 		if not tiles.is_empty():
-			_rd.capture_timestamp("cloud_cache_fill")
+			_rd.capture_timestamp(CACHE_FILL_STAMP + str(int(batch["fill_id"])))
 			var order := view_cache.fill(_rd, tiles, anchor - camera, set0)
 			view_cache_fills += 1
 			view_cache_last_tiles = tiles.size() / 3
-			var equivalents := 0.0
-			for i in range(1, tiles.size(), 3):
-				equivalents += float(CloudViewCachePlanner.LEVEL_COST[tiles[i]])
-			_cache_pending_equivalents.append(equivalents)
-			if _cache_pending_equivalents.size() > CACHE_PENDING_MAX:  # intervals lost (frames without the lookup)
-				_cache_pending_equivalents.remove_at(0)
 			_rd.buffer_get_data_async(view_cache.near_buffer(), _on_cache_near.bind(int(batch["epoch"]), order), 0,
 					4 * order.size())
 		var states: PackedByteArray = batch["states"]
 		if not states.is_empty():
 			view_cache.set_states(_rd, states)
-		_cache_shown = {"anchor": anchor, "now_s": float(batch["now_s"])}
-	if view_cache == null or _cache_shown.is_empty():
-		return false
+		_cache_shown = {"anchor": anchor, "now_s": float(batch["now_s"]), "covering": bool(batch["covering"])}
+	if view_cache == null or _cache_shown.is_empty() \
+			or camera.distance_to(_cache_shown["anchor"]) > CloudViewCachePlanner.RESTART_DISTANCE_M:
+		return CacheMode.OFF
+	return CacheMode.COVERED if _cache_shown["covering"] else CacheMode.ALONE
+
+
+## Each eye's lookup into its layer of the result (covering: the march's result is there already - the lookup keeps it
+## where a tile has nothing and fades from it where a first fill fades in).
+func _cache_lookup(camera: Vector3, buffers: RenderSceneBuffersRD, size: Vector2i, view_count: int,
+		covering: bool) -> void:
 	var layout := view_cache.layout
 	var head := camera - (_cache_shown["anchor"] as Vector3)  # float64: the head's offset from the anchor
 	var push := PackedByteArray()
@@ -753,10 +776,11 @@ func _run_view_cache(set0: Array[RDUniform], camera: Vector3, buffers: RenderSce
 	push.encode_u32(16, layout.face_texels)
 	push.encode_u32(20, layout.tiles_per_side)
 	push.encode_u32(24, CloudViewCachePlanner.SLOTS_PER_ROW)
+	push.encode_u32(28, 1 if covering else 0)
 	var linear_clamp: RID = _samplers["true|false|false"]
 	var nearest_clamp: RID = _samplers["false|false|false"]
 	var groups_full := Vector2i((size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1)
-	_rd.capture_timestamp("cloud_pass_lookup")
+	_rd.capture_timestamp(CACHE_LOOKUP_STAMP)
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines["cache_lookup"])
 	for view in range(view_count):
@@ -771,7 +795,6 @@ func _run_view_cache(set0: Array[RDUniform], camera: Vector3, buffers: RenderSce
 		_rd.compute_list_set_push_constant(list, push, CACHE_LOOKUP_PUSH_SIZE)
 		_rd.compute_list_dispatch(list, groups_full.x, groups_full.y, 1)
 	_rd.compute_list_end()
-	return true
 
 
 ## Render thread (RenderingDevice's async read-back): a fill's nearest cloud distances for the main thread.
@@ -783,24 +806,44 @@ func _on_cache_near(bits: PackedByteArray, epoch: int, order: PackedInt32Array) 
 	_cache_mutex.unlock()
 
 
-## The fill interval of the frame whose GPU timestamps came back (once per frame), paired with the oldest fill still
-## waiting for its interval.
+## The frame whose GPU timestamps came back (once per frame): its fill's interval (named by the fill id: a frame whose
+## stamps were never read loses only its own measurement) and its rest - the span of all its stamps (the frame's GPU
+## time) without the fill and the covering march (the steady frame the adaptive budget keeps clear of).
 func _read_cache_timestamps() -> void:
 	var frame := _rd.get_captured_timestamps_frame()
 	if frame == _cache_timestamps_frame:
 		return
 	_cache_timestamps_frame = frame
 	var count := _rd.get_captured_timestamps_count()
-	for i in range(count - 1):
-		if _rd.get_captured_timestamp_name(i) == "cloud_cache_fill":
-			var ms := float(_rd.get_captured_timestamp_gpu_time(i + 1) - _rd.get_captured_timestamp_gpu_time(i)) / 1.0e6
-			if _cache_pending_equivalents.is_empty():
-				continue
+	if count < 2:
+		return
+	var fill_ms := 0.0
+	var cover_start := -1
+	var lookup_start := -1
+	for i in range(count):
+		var name := _rd.get_captured_timestamp_name(i)
+		if name == CACHE_COVER_STAMP:
+			cover_start = i
+		elif name == CACHE_LOOKUP_STAMP:
+			lookup_start = i
+		elif name.begins_with(CACHE_FILL_STAMP) and i + 1 < count:
+			fill_ms = float(_rd.get_captured_timestamp_gpu_time(i + 1) - _rd.get_captured_timestamp_gpu_time(i)) / 1.0e6
 			_cache_mutex.lock()
-			_cache_costs.append(Vector2(ms, _cache_pending_equivalents.pop_front()))
-			if _cache_costs.size() > CACHE_FEEDBACK_MAX:
-				_cache_costs.remove_at(0)
+			_cache_fills.append(Vector2(name.trim_prefix(CACHE_FILL_STAMP).to_int(), fill_ms))
+			if _cache_fills.size() > CACHE_FEEDBACK_MAX:
+				_cache_fills.remove_at(0)
 			_cache_mutex.unlock()
+	var cover_ms := 0.0
+	if cover_start >= 0 and lookup_start > cover_start:
+		cover_ms = float(_rd.get_captured_timestamp_gpu_time(lookup_start)
+				- _rd.get_captured_timestamp_gpu_time(cover_start)) / 1.0e6
+	var span_ms := float(_rd.get_captured_timestamp_gpu_time(count - 1)
+			- _rd.get_captured_timestamp_gpu_time(0)) / 1.0e6
+	_cache_mutex.lock()
+	_cache_rests.append(maxf(span_ms - fill_ms - cover_ms, 0.0))
+	if _cache_rests.size() > CACHE_FEEDBACK_MAX:
+		_cache_rests.remove_at(0)
+	_cache_mutex.unlock()
 
 
 ## The view the planner picks for: CACHE_VIEW_GRID^2 sample rays per eye (Earth-local), half their largest diagonal

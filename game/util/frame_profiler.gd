@@ -7,7 +7,8 @@ class_name FrameProfiler
 ## then the UI's and the XR manager's _process; ui_overlay, ui_navball, ui_webcast_draw are _draw, after _process).
 const SECTIONS: Array[StringName] = [&"flight_advance", &"weather", &"towers_zone", &"ephemeris", &"camera",
 		&"atmosphere", &"clouds", &"cloud_view_cache", &"refraction", &"earth_terrain", &"water", &"moon",
-		&"shader_globals", &"sun", &"flight_views", &"fv_trajectory", &"fv_trail", &"fv_instruments", &"fv_vehicles", &"moon_orbit", &"ui_hud",
+		&"shader_globals", &"sun", &"flight_views", &"fv_trajectory", &"fv_trail", &"fv_instruments", &"fv_vehicles",
+		&"moon_orbit", &"ui_hud",
 		&"ui_overlay", &"ui_navball", &"ui_time_panel", &"ui_webcast", &"ui_webcast_draw", &"xr"]
 
 static var enabled := false

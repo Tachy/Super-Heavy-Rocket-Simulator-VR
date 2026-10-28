@@ -833,3 +833,62 @@ The validation bullet of the fill ended (before Task 4):
 
 >   p99 46 / 7.8 % and T RMS 0.021 / 0.020 printed: a ray against the bilinear mean of the four texel rays around it at
 >   the deterministic march's hard edges and step grain (open for Task 4's lookup).
+
+## Cloud view cache before Task 4 fix round 1 (superseded 2026-10-28: plan on a worker, covering march, latency cost model, relative A / B gate)
+
+>   step grain flips with ulp-level changes). Per-frame bound of the schedule (controller ruling, tested as a maximum):
+>   `mark_light` + `pick` <= 1.0 ms on every frame once level 0 is everywhere, a cold start / jump frame <= 10 ms. So the
+>   schedule is amortised: the light rescan is a pass of `LIGHT_SCAN_BLOCKS` blocks per `mark_light` call (persistent
+>   cursor, `light_scan_pending()`); an anchor move starts an epoch (O(blocks)), tiles of older epochs are "off" (stale,
+>   parallax candidates) and counted exactly per block; `pick` expands at most `MAX_BLOCK_EXPANSIONS` blocks (2 x 64 =
+>   128 tiles) per call, nearest to the view's cone first; `completed_batch` completes a pick's tiles in one call.
+>
+>     cloud_check (but section 15) and cloud_far_check run the march; a debug output also shows the march). Main thread:
+>     `CloudViewCachePlanner` (`cloud_view_cache_planner.gd`, owned by CloudLayer, FrameProfiler section
+>     `cloud_view_cache`): the layout from the eyes' finest density (CloudEffect publishes 7 x 7 sample rays per eye and
+>     the face size every frame; at most `FACE_TEXELS_MAX` 4096 [E] for the 2 GB cap, re-created beyond a 10 % [E]
+>     change, built on a worker), the anchor (the camera at a restart), the light state (Sun, weather weight and a
+>     generation that counts the light cache's resets and its first completion after one or a clock jump - tiles filled
+>     while it was still filling refresh once: they differed by whole tiles of 10-30 % in the ground view's A / B), up to
+>     `MAX_PICKS` 4 picks per frame while the budget lasts (a further one only within `PICK_TIME_US` 400 us of the first),
+>     and per tile the shown state the lookup reads (level, what it fades from, fade slot, the fade's start). Restarts
+>     (everything back to nothing, level 0 of the view first): `World._view_jumped` (`notify_view_jump`),
+>     `SimClock.time_jumped` (`notify_clock_jump`), a pinned snapshot (`show_now`), and - interim until Task 5's
+>     re-anchor - the camera `RESTART_DISTANCE_M` 500 m [E] from the anchor. Render thread (`CloudEffect._run_view_cache`):
+>     the batch's tiles filled (GPU timestamp `cloud_cache_fill`; a refresh at the same level first copies the tile's shown
+>     texels to its fade slot; each entry's nearest cloud distance by `atomicMin`, read back asynchronously into
+>     `set_tile_distance`), the shown states uploaded, then per eye `CLOUD_CACHE_LOOKUP` into the pass's result (the
+>     composite unchanged; before the first batch the march shows the frame).
+>
+>     (a refresh: one Sun state per tile, never an abrupt switch; 1024 slots [E], a slot still in use ends that fade). A
+>     tile without a level shows no cloud (T = 1; the near shell / coarse march covers it in Task 5). Scene geometry
+>
+>   - **Budget (`CloudLayer.cache_budget_ms`, PRESETS `cache_budget_ms` / `cache_budget_floor_ms` /
+>     `frame_target_ms`)**: desktop 6.0 ms [E] fixed; VR adaptive (user-approved ruling): 22.2 ms - the rest of the
+>     frame's GPU time (95th percentile of 90 frames: the root viewport's measured time minus the fill) - 2 ms, between 2
+>     and 11.4 ms [E]. Tiles per frame from the budget over the cost per full-level tile (a level costs its texels: 1/16,
+>     1/4, 1), the cost from the fills' timestamps paired in order with their tile equivalents - the larger of the last 4
+>     and the last 30 fills' ratio; never below one tile. The cost per full tile varies 0.1-1.6 ms with the direction
+>     (clear sky / a deck below), so the fill overshoots for a few frames where the picks turn from cheap to costly tiles
+>     (desktop proxy: fill median 4.0 ms, p90 7.5, p99 17 ms at the 6 ms budget).
+>
+>   - **Open (Task 4)**: the A / B p99 bound (5 %) is not met on general views (cloud outlines: two point samplings of the
+>     deterministic march's hard edges; numbers under Validation); the schedule's main-thread time during a fill is ~1 ms
+>     at its median-high end (desktop: median 0.6, p90 1.0, p99 1.4 ms; the pick alone 0.5-1.3 ms in the level-0 phase);
+>     in flight the interim restart every 500 m leaves ~0.2 s without clouds each time (Task 5); near objects in front of
+>     shadowed air get the air loss of the whole cached ray scaled by distance only.
+>
+> - Cloud view cache in the frame (cloud view cache Task 4): `cloud_vr_stereo_test` mirrors the parallax lookup - a
+>   cloud at 300 m / 2 km / 20 km seen from each eye (IPD 0.064 m) and from a camera 50 m off the anchor lands within
+>   1e-12 eye px (35 px/deg; bound 0.25) when the cached distance is the cloud's in every direction; a flat deck through
+>   the point within 1e-8 px from 2 km on (0.61 px at 300 m, printed: inside the near shell's reach). `cloud_layer_test`:
+>   a view jump and a clock jump restart the cache (nothing above level 0 shown afterwards); a 1 deg Sun step starts
+>   cross-fades (refreshes from their fade slot), none complete in the frame they start. `cloud_view_cache_test`:
+>   `completed_batch` equals `completed` per tile over 60 frames. `render_check --shimmer_check` (deck view, cache full,
+>   16 frames yawed +-0.3 px): the frame-to-frame change's p99 0.237 vs the march's at divisor 1 0.257 (ratio 0.92,
+>   bound 1.10). `render_check --ab_view_cache` (cache full vs the march at divisor 1, desktop 1600 x 900, 2 x 2 blocks,
+>   luminance error / max(|march|, 5 % of the mean)): median deck / ground / 20 km / dusk 0.21 / 0.07 / 0.17 / 0.12 %
+>   (bound 1 %, met), p99 over the blocks without scene geometry 9.0 / 14.6 / 9.9 / 22.4 % (bound 5 %, NOT met; the
+>   whole image 18.1 / 14.8 / 79.0 / 20.3 %), T RMS 0.009 / 0.007 / 0.022 / 0.023. The p99 sits on cloud outlines: two
+>   point samplings of the deterministic march's hard edges (the march against itself turned by 0.5 px: p99 43 % on the
+>   ground view). Images `screenshots/cloud-view-cache/t4_<view>_ab_r3_{cache,march,ab_error}.png`.

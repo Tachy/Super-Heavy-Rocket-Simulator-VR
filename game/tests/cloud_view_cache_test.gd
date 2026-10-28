@@ -30,6 +30,7 @@ func _initialize() -> void:
 	_test_budget_and_levels()
 	_test_timing()
 	_test_completed_batch()
+	_test_missing_in_cone()
 	print("cloud_view_cache_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -62,12 +63,54 @@ func _test_completed_batch() -> void:
 			tiles.append(p["tile"])
 			levels.append(p["level"])
 		batched.completed_batch(tiles, levels, state)
+		# The read-back: per tile (set_tile_distance) against the batch (set_tile_distances), clear sky among them.
+		var bits := PackedByteArray()
+		bits.resize(4 * tiles.size())
+		for i in range(tiles.size()):
+			var near := INF if i % 3 == 0 else 500.0 + 37.0 * ((frame * 7 + i) % 50)
+			bits.encode_float(4 * i, near)
+			single.set_tile_distance(tiles[i], near)
+		batched.set_tile_distances(tiles, bits)
 	for tile in range(layout.tile_count()):
 		same = same and single.level_of(tile) == batched.level_of(tile) \
 				and single.is_stale(tile) == batched.is_stale(tile)
 	same = same and single.pick(anchor, anchor, view, 500, VIEW_SAMPLE_RAD) \
 			== batched.pick(anchor, anchor, view, 500, VIEW_SAMPLE_RAD)
-	_check(same, "completed_batch: the same levels, staleness and picks as completed() per tile over 60 frames")
+	_check(same, "completed_batch / set_tile_distances: the same levels, staleness and picks as completed() / "
+			+ "set_tile_distance per tile over 60 frames")
+
+
+## missing_in_cone (the march's covering, Task 4 fix round 1): true while a tile centre inside the cone has no level -
+## also one tile inside a block on the cone's boundary - false once every tile in it has one, whatever is missing
+## outside.
+func _test_missing_in_cone() -> void:
+	var layout := _layout(1024)
+	var schedule := CloudViewCacheSchedule.new(layout)
+	var centre := Vector3(0.3, -0.2, 1.0).normalized()
+	var cone := deg_to_rad(40.0)
+	var inside := 0
+	for tile in range(layout.tile_count()):
+		if layout.tile_dir(tile).angle_to(centre) <= cone:
+			inside += 1
+	var cold := schedule.missing_in_cone(centre, cone)
+	var state := _state(Vector3.UP)
+	for tile in range(layout.tile_count()):
+		if layout.tile_dir(tile).angle_to(centre) <= cone:
+			schedule.completed(tile, 0, state)
+	var filled := not schedule.missing_in_cone(centre, cone)
+	# One tile just inside the cone's edge without a level again (a restart re-fills it): found.
+	var edge := -1
+	for tile in range(layout.tile_count()):
+		var angle := layout.tile_dir(tile).angle_to(centre)
+		if angle <= cone and (edge < 0 or angle > layout.tile_dir(edge).angle_to(centre)):
+			edge = tile
+	schedule.invalidate_all()
+	for tile in range(layout.tile_count()):
+		if tile != edge and layout.tile_dir(tile).angle_to(centre) <= cone:
+			schedule.completed(tile, 0, state)
+	var edge_found := schedule.missing_in_cone(centre, cone)
+	_check(cold and filled and edge_found, "missing_in_cone: a cold cache misses, filled inside the cone (%d tiles) "
+			% inside + "it does not, one tile at the cone's edge without a level is found")
 
 
 func _layout(face_texels := 3200) -> CloudViewCacheLayout:

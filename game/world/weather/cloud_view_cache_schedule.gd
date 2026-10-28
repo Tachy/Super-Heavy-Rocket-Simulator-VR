@@ -163,6 +163,25 @@ func set_tile_distance(tile: int, near_m: float) -> void:
 		_block_near_dirty[block] = 1
 
 
+## set_tile_distance for a fill's read-back (cloud view cache Task 4: up to a few hundred tiles a frame on the main
+## thread): tiles[i] gets the float at byte 4 i of bits (<= 0: no cloud, INF).
+func set_tile_distances(tiles: PackedInt32Array, bits: PackedByteArray) -> void:
+	var per_side := layout.tiles_per_side
+	for i in range(mini(tiles.size(), bits.size() / 4)):
+		var tile := tiles[i]
+		var near_m := bits.decode_float(4 * i)
+		if not near_m > 0.0:
+			near_m = INF
+		var old := _near_m[tile]
+		_near_m[tile] = near_m
+		var block := (tile / (per_side * per_side) * _blocks_per_side + (tile / per_side) % per_side / BLOCK_TILES) \
+				* _blocks_per_side + tile % per_side / BLOCK_TILES
+		if near_m <= _block_min_near_m[block]:
+			_block_min_near_m[block] = near_m
+		elif old <= _block_min_near_m[block]:
+			_block_near_dirty[block] = 1
+
+
 ## The current light: tiles whose rendered state differs by more than SUN_REFRESH_RAD or WEATHER_REFRESH, or by the
 ## light cache generation, become stale (compared with the state they were rendered with: slow drift adds up). The
 ## comparison is a pass over the blocks, amortised: a pass starts when the light moved LIGHT_SCAN_FRACTION of a
@@ -267,6 +286,28 @@ func completed_batch(tiles: PackedInt32Array, levels: PackedInt32Array, state: D
 				_max_anchor_dev_m = 0.0
 
 
+## True while a tile whose centre lies within cone_angle (rad) of centre (a unit direction) holds no level: the blocks
+## with tiles missing are tested against the cone, those on its boundary tile by tile (cloud view cache Task 4: the
+## per-frame march covers the view until it has level 0 everywhere).
+func missing_in_cone(centre: Vector3, cone_angle: float) -> bool:
+	var cos_cone := cos(minf(cone_angle, PI))
+	for block in range(_block_missing.size()):
+		if _block_missing[block] <= 0:
+			continue
+		var angle := acos(clampf(_block_dirs[block].dot(centre), -1.0, 1.0))
+		if angle - _block_radius[block] > cone_angle:
+			continue
+		if angle + _block_radius[block] <= cone_angle:
+			return true
+		var per_side := layout.tiles_per_side
+		for dy in range(_block_height[block]):
+			var row := _block_first_tile[block] + dy * per_side
+			for tile in range(row, row + _block_width[block]):
+				if _level[tile] < 0 and _dirs[tile].dot(centre) >= cos_cone:
+					return true
+	return false
+
+
 ## The level a tile holds (-1: none).
 func level_of(tile: int) -> int:
 	return _level[tile]
@@ -299,13 +340,13 @@ func parallax_error_px(tile: int, camera_earth_m: Vector3, anchor_earth_m: Vecto
 ## margin when within VIEW_MARGIN_RAD more.
 ## Cost, bounded per call: only blocks (BLOCK_TILES squared tiles) with something open are visited (a converged cache
 ## costs a pass over the cone's block counters), nearest to the view's cone centre first (a list cached while the view
-## stays inside CONE_PAD_RAD: approximate between blocks), and at most MAX_BLOCK_EXPANSIONS of them are classified tile
-## by tile - blocks with tiles missing or a
+## stays inside CONE_PAD_RAD: approximate between blocks), and at most max_expansions (MAX_BLOCK_EXPANSIONS) of them
+## are classified tile by tile - blocks with tiles missing or a
 ## possible parallax inside the margin first, then the other blocks of the margin, then those outside it - each group
 ## only while the budget is not met and no earlier group was cut off by the cap (so no refinement is returned while a
 ## nearer block may still hold tiles without level 0). Within the expanded blocks the order is exact.
 func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Vector3], budget_tiles: int,
-		view_sample_rad := 0.0) -> Array[Dictionary]:
+		view_sample_rad := 0.0, max_expansions := MAX_BLOCK_EXPANSIONS) -> Array[Dictionary]:
 	var picked: Array[Dictionary] = []
 	if budget_tiles <= 0:
 		return picked
@@ -343,9 +384,9 @@ func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Ve
 			if _block_missing[block] > 0 or (_block_off[block] > 0 and (_block_min_near_m[block] < parallax_reach_m
 					if _block_near_dirty[block] == 0 else _parallax_possible(block))):
 				urgent_blocks.append(block)
-				if urgent_blocks.size() > MAX_BLOCK_EXPANSIONS:
+				if urgent_blocks.size() > max_expansions:
 					break
-			elif later_blocks.size() < MAX_BLOCK_EXPANSIONS:
+			elif later_blocks.size() < max_expansions:
 				later_blocks.append(block)
 	var classes: Array[PackedFloat64Array] = [PackedFloat64Array(), PackedFloat64Array(), PackedFloat64Array(),
 			PackedFloat64Array(), PackedFloat64Array()]
@@ -354,7 +395,7 @@ func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Ve
 	for block in urgent_blocks:
 		if classes[0].size() + classes[1].size() >= budget_tiles:
 			break
-		if expansions >= MAX_BLOCK_EXPANSIONS:
+		if expansions >= max_expansions:
 			cut_off = true
 			break
 		_classify_block(block, view_dirs, zones, classes)
@@ -363,7 +404,7 @@ func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Ve
 		for block in later_blocks:
 			if classes[0].size() + classes[1].size() + classes[2].size() + classes[3].size() >= budget_tiles:
 				break
-			if expansions >= MAX_BLOCK_EXPANSIONS:
+			if expansions >= max_expansions:
 				cut_off = true
 				break
 			_classify_block(block, view_dirs, zones, classes)
@@ -387,7 +428,7 @@ func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Ve
 		var far_blocks := _far_blocks(centre, cone_angle, cos_cone, has_view)
 		far_blocks.sort()
 		for entry in far_blocks:
-			if wanted >= budget_tiles or expansions >= MAX_BLOCK_EXPANSIONS:
+			if wanted >= budget_tiles or expansions >= max_expansions:
 				break
 			wanted += _collect_far_block(int(fmod(entry, _TILE_RANGE)), int(entry / _TILE_RANGE), classes)
 			expansions += 1
@@ -468,8 +509,9 @@ func _classify_block(block: int, view_dirs: Array[Vector3], zones: Vector4, clas
 				classes[4].append(float(key) * _TILE_RANGE + float(tile))
 
 
-## Keeps _cone_blocks: the blocks that can touch the margin cone (centre, cone_angle), nearest to its centre first. The list is built with a padding
-## (CONE_PAD_RAD) and reused while the view stays inside it, so the per-frame pass visits only those blocks.
+## Keeps _cone_blocks: the blocks that can touch the margin cone (centre, cone_angle), nearest to its centre first. The
+## list is built with a padding (CONE_PAD_RAD) and reused while the view stays inside it, so the per-frame pass visits
+## only those blocks.
 func _update_cone(centre: Vector3, cone_angle: float) -> void:
 	if _cone_valid and cone_angle + acos(clampf(centre.dot(_cone_centre), -1.0, 1.0)) <= _cone_angle:
 		return

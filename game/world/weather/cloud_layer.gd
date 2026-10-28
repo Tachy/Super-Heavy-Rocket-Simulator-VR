@@ -124,16 +124,11 @@ const PRESETS := {
 			"frame_target_ms": 22.2},
 }
 ## [E] The adaptive budget's margin below the frame target (ms; the ruling's 2 ms), the percentile of the rest of the
-## frame's GPU time it keeps clear of, and over how many frames.
+## frame's GPU time it keeps clear of, and over how many frames. The rest of a frame: its GPU time (the span of its
+## captured timestamps) minus its own fill and covering march (CloudEffect, the same frame's timestamps).
 const CACHE_MARGIN_MS := 2.0
 const CACHE_REST_PERCENTILE := 0.95
 const CACHE_REST_FRAMES := 90
-## [E] The fill's cost estimate: measured fill intervals over the full-level tile equivalents they filled, the larger of
-## the last CACHE_COST_RECENT and the last CACHE_COST_FILLS fills (_cache_ms_per_tile); before any measurement
-## CACHE_INITIAL_MS_PER_TILE (the budget control corrects it within a few frames; measured 0.1-1.6 ms per full tile).
-const CACHE_COST_FILLS := 30
-const CACHE_COST_RECENT := 4
-const CACHE_INITIAL_MS_PER_TILE := 0.02
 
 var quality: Quality = Quality.DESKTOP:
 	set(value):
@@ -189,9 +184,9 @@ var air_shadow := true:
 	set(value):
 		air_shadow = value
 		ShaderGlobals.set_value(&"cloud_air_shadow", value)
-## Fidelity flag (shader global cloud_view_cache; cloud view cache Task 4): true shows the world-fixed view cache (filled
-## under a GPU budget, looked up per eye with parallax: view_cache_planner, CloudEffect); false: the per-frame march at
-## the preset's divisor (the reference; render_check --no_view_cache).
+## Fidelity flag (shader global cloud_view_cache; cloud view cache Task 4): true shows the world-fixed view cache
+## (filled under a GPU budget, looked up per eye with parallax: view_cache_planner, CloudEffect); false: the per-frame
+## march at the preset's divisor (the reference; render_check --no_view_cache).
 var view_cache := true:
 	set(value):
 		view_cache = value
@@ -231,13 +226,11 @@ var _cache_slot_ids := ["", ""]
 var _clock_jumped := false  ## notify_clock_jump since the last plan
 var _cache_usec := -1  ## wall clock of the last plan (the cross-fade runs in real time)
 ## The view cache's budget control: the light state's generation (a light cache reset), the frame time held while a
-## batch waited, the measured fill intervals / their tile equivalents, the rest of the frame's GPU times.
+## batch waited, the rest of the frame's GPU times.
 var _view_cache_generation := 0
 var _view_cache_light_settled := false  ## the light cache was complete once since its last reset / clock jump
 var _view_cache_held_s := 0.0
-var _view_cache_costs: Array[Vector2] = []  ## (GPU ms, tile equivalents) of the recent fills
 var _view_cache_rest_ms: Array[float] = []
-var _measuring_gpu := false
 
 
 func _init() -> void:
@@ -313,6 +306,7 @@ func shutdown() -> void:
 	if _noise_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_noise_task)
 		_noise_task = -1
+	view_cache_planner.wait()  # its running plan
 	_cancel_upload()
 	# The resident volumes (a Texture3DRD does not own its RID): unbound first, then freed.
 	var olds: Array = [_slots[0], _slots[1]]
@@ -516,22 +510,22 @@ func notify_view_jump() -> void:
 
 
 ## The view cache's frame (cloud view cache Task 4): the render thread's feedback (fill times, read-back distances)
-## taken, then - with the cache shown (the flag, the pass on, no debug output) and the last batch run - the planner's
-## next batch under this frame's budget, handed to the effect.
+## handed to the planner, then - with the cache shown (the flag, the pass on, no debug output) and the last batch run -
+## the planner's last finished batch handed to the effect and its next run started with this frame's budget.
 func _update_view_cache(camera_render: Vector3, enabled: bool, delta_s: float) -> void:
 	var feedback := effect.take_view_cache_feedback()
 	for r: Dictionary in feedback["readbacks"]:
 		view_cache_planner.apply_distances(r["epoch"], r["tiles"], r["bits"])
-	var costs: Array[Vector2] = feedback["costs"]
-	if not costs.is_empty():
-		view_cache_fill_ms = costs.back().x
-	_view_cache_costs.append_array(costs)
-	if _view_cache_costs.size() > CACHE_COST_FILLS:
-		_view_cache_costs = _view_cache_costs.slice(_view_cache_costs.size() - CACHE_COST_FILLS)
+	for fill: Vector2 in feedback["fills"]:  # (fill id, GPU ms)
+		view_cache_planner.apply_fill_time(int(fill.x), fill.y)
+		view_cache_fill_ms = fill.y
+	if float(PRESETS[quality]["frame_target_ms"]) > 0.0:
+		_view_cache_rest_ms.append_array(feedback["rests"])
+		if _view_cache_rest_ms.size() > CACHE_REST_FRAMES:
+			_view_cache_rest_ms = _view_cache_rest_ms.slice(_view_cache_rest_ms.size() - CACHE_REST_FRAMES)
 	_view_cache_held_s += maxf(delta_s, 0.0)
 	if not (view_cache and enabled and int(ShaderGlobals.value(&"cloud_debug_output")) == 0):
 		return
-	_measure_rest_of_frame()
 	var value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
 	if effect.view_cache_batch_waiting() or not value is Vector3 or (value as Vector3).length_squared() < 0.5:
 		return
@@ -543,8 +537,8 @@ func _update_view_cache(camera_render: Vector3, enabled: bool, delta_s: float) -
 		_view_cache_generation += 1
 	var light := {"sun_dir": (value as Vector3).normalized(), "weather_weight": _w1,
 		"light_generation": _view_cache_generation}
-	var batch := view_cache_planner.plan(camera_render, effect.view_cache_view(), light,
-			cache_budget_ms() / _cache_ms_per_tile(), _view_cache_held_s)
+	var batch := view_cache_planner.plan(camera_render, effect.view_cache_view(), light, cache_budget_ms(),
+			_view_cache_held_s)
 	_view_cache_held_s = 0.0
 	if not batch.is_empty():
 		effect.submit_view_cache_batch(batch)
@@ -570,41 +564,6 @@ func cache_budget_ms() -> float:
 func view_cache_stats() -> Dictionary:
 	return {"tiles_filled": view_cache_planner.last_tiles, "full_fraction": view_cache_planner.full_fraction(),
 		"fill_ms": view_cache_fill_ms}
-
-
-## The rest of the frame's GPU time (the root viewport's measured render time minus the last fill), for the adaptive
-## budget; only where the preset has a frame target.
-func _measure_rest_of_frame() -> void:
-	if float(PRESETS[quality]["frame_target_ms"]) <= 0.0 or not is_inside_tree():
-		return
-	var viewport := get_viewport().get_viewport_rid()
-	if not _measuring_gpu:
-		RenderingServer.viewport_set_measure_render_time(viewport, true)
-		_measuring_gpu = true
-		return
-	var gpu := RenderingServer.viewport_get_measured_render_time_gpu(viewport)
-	if gpu <= 0.0:
-		return
-	_view_cache_rest_ms.append(maxf(gpu - view_cache_fill_ms, 0.0))
-	if _view_cache_rest_ms.size() > CACHE_REST_FRAMES:
-		_view_cache_rest_ms.remove_at(0)
-
-
-## The fill's measured cost per full-level tile (ms): the fill intervals over the tile equivalents they filled - the
-## larger of the last CACHE_COST_RECENT fills' and the last CACHE_COST_FILLS' (the cost changes by an order of magnitude
-## between clear sky and a deck below: a rising cost is followed within a few fills, a falling one over the longer
-## window; each fill's own ratio as the bound converged 3x slower).
-func _cache_ms_per_tile() -> float:
-	var result := 0.0
-	var ms := 0.0
-	var equivalents := 0.0
-	var n := _view_cache_costs.size()
-	for i in range(n - 1, -1, -1):
-		ms += _view_cache_costs[i].x
-		equivalents += _view_cache_costs[i].y
-		if (i == n - CACHE_COST_RECENT or i == 0) and equivalents > 0.0:
-			result = maxf(result, ms / equivalents)
-	return result if result > 0.0 else CACHE_INITIAL_MS_PER_TILE
 
 
 static func _horizontal(v: Vector3, up: Vector3) -> float:
