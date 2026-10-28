@@ -1036,3 +1036,21 @@ takes the GPU seconds, not one frame):
     header. Spike frames (cold start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms.
     Calibration: `feedback()`; start rates 1 M bake and 1.12 M light cells/ms [E]. Measured (headless): fill 41 frames
     (0.9 s at 45 Hz), `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula).
+
+
+## World volume window, scroll and occupancy lookups before Task 5 fix round 1 (superseded 2026-10-28: guard band, bake ahead, fade-band lookups)
+
+Superseded by: storage box + window `GUARD_CELLS` inside it, scroll slabs baked earliest-deadline-first ahead of the
+window under `SCROLL_CAP_MS`, the occupancy lookups taking level k + 1 in the fade band (review I1 / I2: unbudgeted
+slabs stacked to ~3.8 / 5.4 / 12 ms upkeep frames at level 5 / 6 / 7 boundary crossings; the lookups were not
+conservative in the fade band). Text as it stood:
+
+    (polar axis +Y). A level's window is centred on the camera's ground point and snapped to the cell; levels 0-1 are
+    centred vertically on the camera height and clamped at the shell BOTTOM only (no top clamp, so level 0 switches
+    off at 22.1 km without a pop; `level_active`), and fade at their vertical window edges except at the clamped
+    bottom (`fade_weight`, 8 cells; the GLSL mirror needs `origin`, `vertical_fade`, `clamped_bottom` from the lookup).
+    active / ready / frame origin; `slot_ready`; the spare while it fades, `build_spare` while it is built). Exposed
+    slabs are baked in the adopting plan (not budgeted, their cost taken from the budget) and lit first; fills (cold
+    start, jump, level on) are baked under the budget strictly coarse to fine - the coarsest level too (Task 5: its
+    cap 8) to a block with a bound, separable x / y / z. Every block claimed free has no rho in its support: a sample
+    there reads 0 at any blend, and the sub-cell field (it redistributes rho, peak sigma_c) is 0 too.

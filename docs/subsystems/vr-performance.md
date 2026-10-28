@@ -548,3 +548,12 @@ image, + s for production's sub-cell detail); 1 and 2 matter only for clear bake
   ~5e7) ~ 950 frames (~21 s at 45 Hz), the whole volume (~1.24e11 nominal taps) ~25 s; a pair switch's rebake of
   one channel pair (all levels, nominal taps) at the normal 0.5 ms bake budget ~1-2 min, the cross-fade held meanwhile. The
   spec's "full volume within ~1 s" is not met by the bake rate; the fallback (today's march) covers the cold start.
+- Scroll (Task 5 fix round 1, bake ahead of exposure; `cloud_world_volume_test`, planned at 4.3e7 taps/ms, estimates
+  from the rate): 1 km/s at 10 km climbing, all 8 levels: scroll bake mean 0.44 ms, worst 0.50 ms, every plan
+  <= 0.58 ms; 7.8 km/s at 120 km, levels 2-7: mean 1.36 ms, worst 1.94 ms, every plan <= 2.04 ms (cap: 2.0 ms bake
+  + 1.0 ms light). Before the fix one frame baked a level-k boundary crossing of every finer level at once: ~3.8 /
+  5.4 / 12 ms at level 5 / 6 / 7. In orbit the steady upkeep is therefore ~2-2.5 ms with light, above the 1.5 ms
+  normal budget (the coarse levels' 528-8448 taps per cell; the L7 tap cut is the lever).
+- The distance field is recomputed whole for every level a batch touches (3 passes over 64 x 64 x 32 texels,
+  ~0.05 ms per level): with amortised scroll slabs up to 6 levels a frame at 7.8 km/s, ~0.3 ms inside the upkeep
+  interval (the bake-rate feedback absorbs it).

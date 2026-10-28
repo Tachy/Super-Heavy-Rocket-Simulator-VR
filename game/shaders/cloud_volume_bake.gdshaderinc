@@ -384,7 +384,8 @@ void main() {
 #ifdef CLOUD_VOLUME_PROBE
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 layout(set = 1, binding = 1, std140) uniform CloudVolumeProbe {
-	ivec4 info;  // x: points, y: mode (0 the grid of camera offsets, 1 a texture's raw density), z: texture, w: level
+	ivec4 info;  // x: points, y: mode (0 grid of camera offsets, 1 raw density, 2 occupancy, 3 blended density), z:
+	             // texture, w: level
 } probe;
 layout(set = 1, binding = 2, std430) readonly buffer CloudVolumeProbeIn {
 	vec4 probe_in[];
@@ -399,10 +400,24 @@ void main() {
 		return;
 	}
 	vec3 p = probe_in[i].xyz;
+	int k = probe.info.w;
 	if (probe.info.y == 0) {
 		probe_out[i] = vec4(cloud_volume_grid_in(int(probe_in[i].w), p), 0.0);
+	} else if (probe.info.y == 1) {
+		probe_out[i] = cloud_volume_fetch_density(probe.info.z, k, p);
+	} else if (probe.info.y == 2) {
+		// the occupancy lookups at a grid point of level k: free space [m], max-extinction bound [1/m], the weight
+		probe_out[i] = vec4(cloud_volume_free_m(p, k), cloud_volume_max_extinction(p, k), cloud_volume_fade(k, k, p),
+				0.0);
 	} else {
-		probe_out[i] = cloud_volume_fetch_density(probe.info.z, probe.info.w, p);
+		// the density both snapshots give at a grid point of level k as cloud_volume_density blends it (fade toward
+		// level + 1 by the point's own weight; 0 outside the window: level + 1 alone)
+		vec4 v = cloud_volume_fetch_density(k, k, p);
+		float fade = cloud_volume_fade(k, k, p);
+		if (fade < 1.0 && k + 1 < CLOUD_VOLUME_LEVELS) {
+			v = mix(cloud_volume_fetch_density(k + 1, k + 1, p), v, fade);
+		}
+		probe_out[i] = v;
 	}
 }
 #endif

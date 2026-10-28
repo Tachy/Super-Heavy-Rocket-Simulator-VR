@@ -17,6 +17,8 @@ const CLOUD_TOP_M := 11500.0  # with the camera at 100 m: H = 12000 m above leve
 const FILL_FRAMES_MAX := 400
 ## A GPU baking this many taps per ms fills the whole volume (1.24e11 taps) in ~85 spike frames: the logic's tests.
 const TEST_TAPS_PER_MS := 1.0e9
+## The RTX 4090's measured cold-start bake rate (cloud_check.gd section 16, Task 5): the scroll flights plan at it.
+const GAME_TAPS_PER_MS := 4.3e7
 
 var _failures := 0
 var _rng := RandomNumberGenerator.new()
@@ -109,15 +111,20 @@ func _test_levels() -> void:
 	_check(all_on, "levels 2-7 on at 400 km")
 	var o := layout.window_origin(0, Vector3(0.0, 0.0, 100.0))
 	var bottom := L.SHELL_BOTTOM_M + o.z * L.CELL_V_M[0]
-	_check(is_equal_approx(bottom, -500.0) and is_equal_approx(bottom + 128 * L.CELL_V_M[0], 2700.0),
-			"level 0 window at camera height 100 m = [-500, 2700] m (bottom clamp)")
+	_check(is_equal_approx(bottom, -500.0) and is_equal_approx(bottom + L.window_size(0).z * L.CELL_V_M[0], 2600.0),
+			"level 0 window at camera height 100 m = [-500, 2600] m (bottom clamp; storage to 2700 m)")
+	_check(L.window_size(0) == Vector3i(252, 252, 124) and L.window_size(2) == Vector3i(252, 252, 128),
+			"windows: the storage less GUARD_CELLS per side of each scrolling axis")
+	_check(L.storage_target(0, o) == Vector3i(o.x - 2, o.y - 2, 0) and L.storage_target(5, Vector3i(7, -9, 0))
+			== Vector3i(5, -11, 0), "storage target: the window grown by the guard, not below the shell")
 	var o1 := layout.window_origin(1, Vector3(0.0, 0.0, 100.0))
 	_check(o1.z == 0, "level 1 clamped at the shell bottom")
 	var oh := layout.window_origin(0, Vector3(0.0, 0.0, 22200.0))
 	_check(L.SHELL_BOTTOM_M + oh.z * L.CELL_V_M[0] >= L.SHELL_TOP_M, "at the off height level 0's window is above the shell")
 	var o_mid := layout.window_origin(0, Vector3(0.0, 0.0, 9000.0))
 	var lo := L.SHELL_BOTTOM_M + o_mid.z * L.CELL_V_M[0]
-	_check(lo < 9000.0 and lo + 3200.0 > 9000.0 and absf((lo + 1600.0) - 9000.0) <= L.CELL_V_M[0],
+	var half_v := 0.5 * L.window_size(0).z * L.CELL_V_M[0]
+	_check(lo < 9000.0 and lo + 2.0 * half_v > 9000.0 and absf((lo + half_v) - 9000.0) <= L.CELL_V_M[0],
 			"level 0 is centred on the camera height away from the shell bottom")
 	var o7 := layout.window_origin(7, Vector3(0.0, 0.0, 9000.0))
 	_check(o7.z == 0, "levels 2-7 span the whole shell")
@@ -200,11 +207,13 @@ func _test_fade() -> void:
 	var o := layout.window_origin(3, cam)
 	layout.set_origin(3, o)
 	var cell := L.CELL_H_M[3]
+	var size := L.window_size(3)
 	var y := (o.y + 100) * cell
 	var z := 3000.0
 	_check(layout.fade_weight(3, Vector3((o.x + 128) * cell, y, z)) == 1.0, "weight 1 inside")
 	_check(layout.fade_weight(3, Vector3((o.x + 0.5) * cell, y, z)) == 0.0, "weight 0 at the outermost cell")
-	_check(layout.fade_weight(3, Vector3((o.x + 256 - 0.5) * cell, y, z)) == 0.0, "weight 0 at the outermost cell (far side)")
+	_check(layout.fade_weight(3, Vector3((o.x + size.x - 0.5) * cell, y, z)) == 0.0,
+			"weight 0 at the outermost cell (far side)")
 	_check(is_equal_approx(layout.fade_weight(3, Vector3((o.x + 4.5) * cell, y, z)), 0.5), "linear: half-way over 8 cells")
 	_check(layout.fade_weight(3, Vector3((o.x + 8.5) * cell, y, z)) == 1.0, "weight 1 8 cells in")
 	_check(layout.fade_weight(3, Vector3((o.x - 2) * cell, y, z)) == 0.0, "weight 0 outside")
@@ -215,7 +224,7 @@ func _test_fade() -> void:
 	var x := (low.x + 128) * c0
 	var yy := (low.y + 128) * c0
 	_check(layout.fade_weight(0, Vector3(x, yy, -499.0)) == 1.0, "no vertical fade at the shell bottom (clamped)")
-	var top := L.SHELL_BOTTOM_M + (low.z + 128) * L.CELL_V_M[0]
+	var top := L.SHELL_BOTTOM_M + (low.z + L.window_size(0).z) * L.CELL_V_M[0]
 	_check(layout.fade_weight(0, Vector3(x, yy, top - 0.5 * L.CELL_V_M[0])) == 0.0, "level 0 fades at its window top")
 	_check(layout.fade_weight(0, Vector3(x, yy, top - 4.5 * L.CELL_V_M[0])) > 0.4, "...linearly over 8 cells")
 	var mid := layout.window_origin(0, Vector3(0.0, 0.0, 9000.0))
@@ -236,9 +245,10 @@ func _test_fade() -> void:
 			var w := layout.window_origin(k, cg)
 			var ch := L.CELL_H_M[k]
 			var cv := L.CELL_V_M[k]
-			for cx in [0.5, 255.5]:
-				for cy in [0.5, 255.5]:
-					for cz in [0.5, 127.5]:
+			var ws := L.window_size(k)
+			for cx in [0.5, ws.x - 0.5]:
+				for cy in [0.5, ws.y - 0.5]:
+					for cz in [0.5, ws.z - 0.5]:
 						var gz: float = L.SHELL_BOTTOM_M + (w.z + cz) * cv
 						if gz < L.SHELL_BOTTOM_M or gz > L.SHELL_TOP_M:
 							continue
@@ -354,8 +364,9 @@ func _test_cold_start() -> void:
 		order_ok = order_ok and first_seen.has(k) and first_seen.has(k - 1) and first_seen[k] <= first_seen[k - 1]
 	_check(order_ok and first_seen.size() == 8, "finer levels are baked coarse to fine")
 	_check(spike_ok, "every fill plan stays within UPKEEP_SPIKE_MS")
-	_check(s.complete() and frames <= 120, "the whole volume is filled in %d frames at %s taps per ms" % [frames,
-			String.num_scientific(TEST_TAPS_PER_MS)])
+	_check(s.complete() and frames <= 120, "schedule logic: whole volume filled in %d frames at test rate %s "
+			% [frames,
+			String.num_scientific(TEST_TAPS_PER_MS)] + "taps / ms (not the game's rate: section 16 measures that)")
 	var all_ready := true
 	var origins_ok := true
 	for e: Dictionary in _plan(s, 0.0, 100.0, sun)["lookup"]["levels"]:
@@ -369,40 +380,15 @@ func _test_cold_start() -> void:
 func _test_scroll() -> void:
 	print("scroll")
 	var sun := _sun(0.0, SUN_30)
-	# 1 km/s at 100 m (45 Hz): the newly exposed slabs are baked in the plan that adopts the origin, 600 frames.
-	var s := _schedule()
-	_settle(s, 0.0, 100.0, sun)
-	var ref := CloudWorldVolumeLayout.new()
-	ref.set_frame(_cam(0.0, 100.0))
-	var prev := _origins(_plan(s, 0.0, 100.0, sun))
-	var late := 0
-	var moved := 0
-	var prov_max := 0.0
-	var lam := 0.0
-	for f in 600:
-		lam += 1000.0 * DT / (A_M + 100.0)
-		var p := _plan(s, lam, 100.0, sun)
-		var cur := _origins(p)
-		prov_max = maxf(prov_max, p["provisional_age_max_s"])
-		for k in 8:
-			if not p["lookup"]["levels"][k]["active"]:
-				continue
-			var expected := ref.exposed_slabs(k, prev[k], cur[k])
-			var got := _slabs_of(p["bake"], k)
-			if expected.size() != got.size() or _sum_cells(expected) != _sum_cells(got):
-				late += 1
-			else:
-				for box: Dictionary in expected:
-					if not _has_box(got, box):
-						late += 1
-			moved += expected.size()
-		prev = cur
-	_check(moved > 0 and late == 0, "1 km/s: exactly the exposed slabs baked in the adopting plan (%d moves, %d late)" % [moved, late])
-	_check(prov_max <= CloudWorldVolumeSchedule.PROVISIONAL_MAX_S, "provisional light never older than %.1f s" % prov_max)
+	# Bake ahead of exposure (Task 5 review I2) at the game's measured rate: no frame reads an unbaked cell, the windows
+	# never wait, every plan within the spike cap; 1 km/s low and climbing (all 8 levels, the vertical scroll of levels
+	# 0-1), 7.8 km/s in orbit (levels 2-7: 7.8 km/s occurs only above the shell). Diagonal headings: both axes scroll.
+	_scroll_flight("1 km/s at 10 km, climbing 150 m/s", 1000.0, 10000.0, 150.0, 1400)
+	_scroll_flight("7.8 km/s at 120 km", 7800.0, 120000.0, 0.0, 1200)
 	# 7.8 km/s at 120 km: bake cells per frame follow the layout (levels 2-7); p99 plan() cost <= 1 ms.
-	s = _schedule()
+	var s := _schedule()
 	_settle(s, 0.0, 120000.0, sun)
-	ref = CloudWorldVolumeLayout.new()
+	var ref := CloudWorldVolumeLayout.new()
 	ref.set_frame(_cam(0.0, 120000.0))
 	var rate := 7800.0 * DT / (A_M + 120000.0)
 	var step_m := ref.grid_of(_cam(rate, 120000.0)).distance_to(ref.grid_of(_cam(0.0, 120000.0)))
@@ -412,7 +398,7 @@ func _test_scroll() -> void:
 	var total := 0
 	var times := PackedFloat64Array()
 	var frames := 1000
-	lam = 0.0
+	var lam := 0.0
 	var ok_levels := true
 	for f in frames:
 		lam += rate
@@ -428,6 +414,120 @@ func _test_scroll() -> void:
 	times.sort()
 	var p99 := times[int(0.99 * times.size())]
 	_check(p99 <= 1000.0, "plan() p99 %.0f us <= 1000 us over %d frames (median %.0f us)" % [p99, frames, times[times.size() / 2]])
+
+
+## A flight at `speed_mps` (heading 30 deg east of north, climbing at `climb_mps`) from a settled volume, planned at the
+## game's bake rate: an independent model of the unbaked cells per level (the cells the storage gained, less every bake
+## job) must never meet a shown window; the windows never wait; every plan's estimate within UPKEEP_SPIKE_MS.
+func _scroll_flight(label: String, speed_mps: float, h0_m: float, climb_mps: float, frames: int) -> void:
+	var L := CloudWorldVolumeLayout
+	var sun := _sun(0.0, SUN_30)
+	var lat0 := deg_to_rad(25.99)
+	var lon0 := deg_to_rad(-97.18)
+	var s := _schedule()
+	var cam := _geodetic_point(lat0, lon0, h0_m)
+	var n := 0
+	while n < 3 * FILL_FRAMES_MAX:
+		var p := s.plan(cam, sun, Vector3(0.0, 0.6, 0.8), 0.3, CLOUD_TOP_M, false, DT, [0, 1])
+		n += 1
+		if s.complete() and p["bake"].is_empty() and p["light"].is_empty():
+			break
+	s.bake_taps_per_ms = GAME_TAPS_PER_MS
+	var storage: Array = []
+	var unbaked: Array = []
+	var first := s.plan(cam, sun, Vector3(0.0, 0.6, 0.8), 0.3, CLOUD_TOP_M, false, DT, [0, 1])
+	for e: Dictionary in first["lookup"]["levels"]:
+		storage.append(e["storage"])
+		unbaked.append([])
+	var heading := deg_to_rad(30.0)
+	var lat := lat0
+	var lon := lon0
+	var h := h0_m
+	var read_unbaked := 0
+	var waiting := 0
+	var not_ready := 0
+	var worst_ms := 0.0
+	var scroll_ms_sum := 0.0
+	var worst_scroll_ms := 0.0
+	var prov_max := 0.0
+	var moves := 0
+	for f in frames:
+		var r := A_M + h
+		lat += speed_mps * cos(heading) * DT / r
+		lon += speed_mps * sin(heading) * DT / (r * cos(lat))
+		h += climb_mps * DT
+		var p := s.plan(_geodetic_point(lat, lon, h), sun, Vector3(0.0, 0.6, 0.8), 0.3, CLOUD_TOP_M, false, DT, [0, 1])
+		var est: float = p["bake_taps"] / GAME_TAPS_PER_MS + p["light_cells"] / s.light_cells_per_ms
+		worst_ms = maxf(worst_ms, est)
+		var scroll_ms: float = p["bake_scroll_taps"] / GAME_TAPS_PER_MS
+		scroll_ms_sum += scroll_ms
+		worst_scroll_ms = maxf(worst_scroll_ms, scroll_ms)
+		waiting += 1 if p["windows_waiting"] > 0 else 0
+		prov_max = maxf(prov_max, p["provisional_age_max_s"])
+		for k in L.LEVELS:
+			var e: Dictionary = p["lookup"]["levels"][k]
+			if not e["active"]:
+				continue
+			if not e["ready"]:
+				not_ready += 1
+				continue
+			var st: Vector3i = e["storage"]
+			var list: Array = unbaked[k]
+			if st != storage[k]:
+				moves += 1
+				list.append_array(L.exposed_slabs(k, storage[k], st))
+				storage[k] = st
+			var kept: Array = []
+			for b: Dictionary in list:  # cells that left the storage
+				var c := L.box_clip(b, L.storage_box(st))
+				if L.box_cells(c) > 0:
+					kept.append(c)
+			list = kept
+			for j: Dictionary in p["bake"]:
+				if j["level"] == k and not j["spare"]:
+					var rest: Array = []
+					for b: Dictionary in list:
+						rest.append_array(_box_subtract(b, j))
+					list = rest
+			unbaked[k] = list
+			var win := L.window_box(k, e["origin"])
+			var inside: bool = L.box_cells(L.box_clip(win, L.storage_box(st))) == L.box_cells(win)
+			for b: Dictionary in list:
+				inside = inside and not L.box_overlaps(win, b)
+			read_unbaked += 0 if inside else 1
+	_check(moves > 0 and read_unbaked == 0 and not_ready == 0,
+			"%s: no shown window holds an unbaked or foreign cell (%d storage moves, %d frames)"
+			% [label, moves, frames])
+	_check(waiting == 0, "%s: the windows never wait (%d frames with a window behind the camera)" % [label, waiting])
+	_check(worst_ms <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6,
+			"%s: every plan <= %.1f ms at %s taps / ms (worst %.2f ms; scroll bake mean %.2f ms, worst %.2f ms)"
+			% [label, CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS, String.num_scientific(GAME_TAPS_PER_MS), worst_ms,
+			scroll_ms_sum / frames, worst_scroll_ms])
+	_check(prov_max <= CloudWorldVolumeSchedule.PROVISIONAL_MAX_S,
+			"%s: provisional light never older than %.1f s (%.2f s)"
+			% [label, CloudWorldVolumeSchedule.PROVISIONAL_MAX_S, prov_max])
+
+
+## a less b as disjoint boxes (a itself when they do not overlap).
+static func _box_subtract(a: Dictionary, b: Dictionary) -> Array:
+	var L := CloudWorldVolumeLayout
+	if not L.box_overlaps(a, b):
+		return [a]
+	var out: Array = []
+	var f: Vector3i = a["from"]
+	var t: Vector3i = a["to"]
+	for axis in 3:
+		if b["from"][axis] > f[axis]:
+			var hi := t
+			hi[axis] = b["from"][axis]
+			out.append({"from": f, "to": hi})
+			f[axis] = b["from"][axis]
+		if b["to"][axis] < t[axis]:
+			var lo := f
+			lo[axis] = b["to"][axis]
+			out.append({"from": lo, "to": t})
+			t[axis] = b["to"][axis]
+	return out
 
 
 func _origins(p: Dictionary) -> Array:
@@ -627,8 +727,8 @@ func _test_jump() -> void:
 	while not s.complete() and frames < FILL_FRAMES_MAX:
 		_plan(s, 0.7, 9000.0, sun)
 		frames += 1
-	_check(s.complete() and frames <= 120, "the full volume is back in %d frames at %s taps per ms" % [frames,
-			String.num_scientific(TEST_TAPS_PER_MS)])
+	_check(s.complete() and frames <= 120, "schedule logic: full volume back in %d frames at test rate %s " % [frames,
+			String.num_scientific(TEST_TAPS_PER_MS)] + "taps / ms")
 
 
 func _test_reframe_schedule() -> void:

@@ -10,9 +10,15 @@ extends RefCounted
 ## (polar axis +Y). A cell's global index is floor(coordinate / cell size) (vertical: from SHELL_BOTTOM_M); a level's
 ## window is the CELLS_H x CELLS_H x CELLS_V block of them centred on the camera's ground point, snapped to its cell
 ## size and stored toroidally (texel = index mod size), so a move exposes only a slab (exposed_slabs).
-## Vertical: levels 2-7 hold the whole shell (164.0625 m x 128 = 21 km); levels 0-1 a 3.2 / 6.4 km window centred on
-## the camera height, clamped at the shell bottom only (no top clamp: level 0 must not pop when it switches off, see
-## level_active); both fade at their vertical window edges (fade_weight) except at the clamped shell bottom.
+## Storage and window (world-volume Task 5 review I2): the texture holds the STORAGE box of CELLS_H x CELLS_H x CELLS_V
+## cells; what the lookup reads (the WINDOW, window_size) is GUARD_CELLS smaller on each side of every scrolling axis,
+## so the slabs ahead of the camera are baked before the window reaches them (CloudWorldVolumeSchedule bakes them
+## amortised; the window advances only onto baked cells). The storage's target is the window grown by the guard
+## (storage_target); the fade band lies inside the window.
+## Vertical: levels 2-7 hold the whole shell (164.0625 m x 128 = 21 km; no vertical scroll, no guard); levels 0-1 a
+## 3.1 / 6.2 km window centred on the camera height, clamped at the shell bottom only (no top clamp: level 0 must not
+## pop when it switches off, see level_active); both fade at their vertical window edges (fade_weight) except at the
+## clamped shell bottom.
 
 const LEVELS := 8
 const CELLS_H := 256
@@ -34,6 +40,11 @@ const BYTES_PER_CELL := 16
 const MIP_DIV := 4
 ## Levels 0-1 have a vertical window; their vertical fade runs on the window edges.
 const WINDOWED_LEVELS := 2
+## [E] Cells of storage beyond the window on each side of a scrolling axis (Task 5 review I2): the slab the window
+## enters next is baked while the camera crosses the guard. 2 cells: the window may move up to 2 x GUARD_CELLS cells
+## a frame (level 2 at 7.8 km/s: 0.87, level 0 at 1 km/s: 0.44) and the slab's bake is spread over GUARD_CELLS cells
+## of motion (an L7 slab over 74 frames at 7.8 km/s); costs 1.6 % of each level's reach, no memory.
+const GUARD_CELLS := 2
 ## Iterations of the geodetic latitude fixed point (contraction e^2 = 0.0067 per step: exact to double precision).
 const GEODETIC_ITERATIONS := 12
 
@@ -173,38 +184,67 @@ func level_active(k: int, camera_height_m: float) -> bool:
 	return camera_height_m - 0.5 * CELL_V_M[k] * CELLS_V <= SHELL_TOP_M
 
 
+## The window's size (cells): the storage less GUARD_CELLS on each side of the scrolling axes.
+static func window_size(k: int) -> Vector3i:
+	return Vector3i(CELLS_H - 2 * GUARD_CELLS, CELLS_H - 2 * GUARD_CELLS,
+			CELLS_V - 2 * GUARD_CELLS if k < WINDOWED_LEVELS else CELLS_V)
+
+
 ## The window's lower corner (cells): centred on the camera's ground point; levels 0-1 vertically centred on the camera
 ## height and clamped at the shell bottom (not at the top), levels 2-7 the whole shell.
 func window_origin(k: int, camera_grid_m: Vector3) -> Vector3i:
-	var ox := floori(camera_grid_m.x / CELL_H_M[k]) - CELLS_H / 2
-	var oy := floori(camera_grid_m.y / CELL_H_M[k]) - CELLS_H / 2
+	var size := window_size(k)
+	var ox := floori(camera_grid_m.x / CELL_H_M[k]) - size.x / 2
+	var oy := floori(camera_grid_m.y / CELL_H_M[k]) - size.y / 2
 	var oz := 0
 	if k < WINDOWED_LEVELS:
-		oz = maxi(floori((camera_grid_m.z - SHELL_BOTTOM_M) / CELL_V_M[k]) - CELLS_V / 2, 0)
+		oz = maxi(floori((camera_grid_m.z - SHELL_BOTTOM_M) / CELL_V_M[k]) - size.z / 2, 0)
 	return Vector3i(ox, oy, oz)
+
+
+## The storage origin a window at `origin` wants: the window grown by the guard (vertically not below the shell).
+static func storage_target(k: int, origin: Vector3i) -> Vector3i:
+	if k < WINDOWED_LEVELS:
+		return Vector3i(origin.x - GUARD_CELLS, origin.y - GUARD_CELLS, maxi(origin.z - GUARD_CELLS, 0))
+	return Vector3i(origin.x - GUARD_CELLS, origin.y - GUARD_CELLS, 0)
+
+
+## The storage origins that still hold the whole window at `origin` (per axis [lo, hi]): the window's cells must not
+## leave the texture while the window waits.
+static func storage_range(k: int, origin: Vector3i) -> Array[Vector3i]:
+	var spare := Vector3i(CELLS_H, CELLS_H, CELLS_V) - window_size(k)
+	var lo := origin - spare
+	lo.z = maxi(lo.z, 0)
+	return [lo, origin]
 
 
 func set_origin(k: int, origin: Vector3i) -> void:
 	origins[k] = origin
 
 
-static func window_box(origin: Vector3i) -> Dictionary:
+## The texture's cells for a storage origin.
+static func storage_box(origin: Vector3i) -> Dictionary:
 	return {"from": origin, "to": origin + Vector3i(CELLS_H, CELLS_H, CELLS_V)}
+
+
+## The cells the lookup reads for a window origin.
+static func window_box(k: int, origin: Vector3i) -> Dictionary:
+	return {"from": origin, "to": origin + window_size(k)}
 
 
 static func texel_of(_k: int, cell: Vector3i) -> Vector3i:
 	return Vector3i(posmod(cell.x, CELLS_H), posmod(cell.y, CELLS_H), posmod(cell.z, CELLS_V))
 
 
-## The cells of the new window that were not in the old one, as disjoint half-open boxes {from, to}; the whole new
-## window when the move is a full window or more along an axis.
+## The cells of the new storage box that were not in the old one, as disjoint half-open boxes {from, to}; the whole
+## new storage box when the move is a full storage extent or more along an axis.
 static func exposed_slabs(_k: int, old_origin: Vector3i, new_origin: Vector3i) -> Array[Dictionary]:
 	var slabs: Array[Dictionary] = []
 	var d := new_origin - old_origin
 	if d == Vector3i.ZERO:
 		return slabs
 	if absi(d.x) >= CELLS_H or absi(d.y) >= CELLS_H or absi(d.z) >= CELLS_V:
-		slabs.append(window_box(new_origin))
+		slabs.append(storage_box(new_origin))
 		return slabs
 	var size := Vector3i(CELLS_H, CELLS_H, CELLS_V)
 	var lo := Vector3i(maxi(old_origin.x, new_origin.x), maxi(old_origin.y, new_origin.y), maxi(old_origin.z, new_origin.z))
@@ -231,12 +271,13 @@ static func exposed_slabs(_k: int, old_origin: Vector3i, new_origin: Vector3i) -
 ## FADE_CELLS cells; levels 0-1 also fade at their vertical window edges, except where the window is clamped at the
 ## shell bottom.
 static func fade_weight_at(k: int, grid_m: Vector3, origin: Vector3i) -> float:
+	var size := window_size(k)
 	var ux := grid_m.x / CELL_H_M[k]
 	var uy := grid_m.y / CELL_H_M[k]
-	var d := minf(minf(ux - origin.x, origin.x + CELLS_H - ux), minf(uy - origin.y, origin.y + CELLS_H - uy))
+	var d := minf(minf(ux - origin.x, origin.x + size.x - ux), minf(uy - origin.y, origin.y + size.y - uy))
 	if k < WINDOWED_LEVELS:
 		var uz := (grid_m.z - SHELL_BOTTOM_M) / CELL_V_M[k]
-		d = minf(d, origin.z + CELLS_V - uz)
+		d = minf(d, origin.z + size.z - uz)
 		if origin.z > 0:
 			d = minf(d, uz - origin.z)
 	return clampf((d - 0.5) / float(FADE_CELLS), 0.0, 1.0)
@@ -255,6 +296,11 @@ func reframe_needed(ground_earth_m: Vector3) -> bool:
 static func box_cells(box: Dictionary) -> int:
 	var d: Vector3i = box["to"] - box["from"]
 	return maxi(d.x, 0) * maxi(d.y, 0) * maxi(d.z, 0)
+
+
+## True when two half-open boxes share a cell.
+static func box_overlaps(a: Dictionary, b: Dictionary) -> bool:
+	return box_cells(box_clip(a, b)) > 0
 
 
 ## The intersection of two boxes (empty box when disjoint).

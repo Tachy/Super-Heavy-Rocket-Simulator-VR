@@ -10,9 +10,10 @@
 // equidistant map through the sinc / x-cosec series in theta^2 (theta <= 0.3 rad: a re-frame at 1000 km plus level 7's
 // 820 km; truncation < 1e-9) - and adds the camera's grid point last (one float32 rounding of the result).
 //
-// Layout of a level's textures (CloudWorldVolume): toroidal (texel = cell mod size), sampled with repeat; density
-// RGBA16F (1/km): x rho, y sigma_c of channel pair 0 (slot 0's snapshot), z, w those of pair 1 (slot 1); light RGBA16F
-// (Task 6); the max-extinction mip R16F (1/km) and the Chebyshev distance field R8 (blocks / 255) at
+// Layout of a level's textures (CloudWorldVolume): toroidal (texel = cell mod size) over the level's storage box; the
+// lookup reads only its window (cloud_volume_window), GUARD_CELLS inside the storage per side. Sampled with repeat;
+// density RGBA16F (1/km): x rho, y sigma_c of channel pair 0 (slot 0's snapshot), z, w those of pair 1 (slot 1); light
+// RGBA16F (Task 6); the max-extinction mip R16F (1/km) and the Chebyshev distance field R8 (blocks / 255) at
 // 1 / CLOUD_VOLUME_MIP_DIV resolution. Index 8 is the transient spare level of a re-frame.
 
 #ifndef CLOUD_VOLUME_BLOCK_BINDING
@@ -28,6 +29,9 @@ const int CLOUD_VOLUME_WINDOWED_LEVELS = 2;
 const float CLOUD_VOLUME_SHELL_BOTTOM_M = -500.0;
 const float CLOUD_VOLUME_FADE_CELLS = 8.0;
 const int CLOUD_VOLUME_MIP_DIV = 4;
+// The window the lookup reads: the storage less GUARD_CELLS per side of each scrolling axis (levels 0-1 also
+// vertically; CloudWorldVolumeLayout.window_size). The guard is baked ahead of the window (Task 5 review I2).
+const int CLOUD_VOLUME_GUARD_CELLS = 2;
 const ivec3 CLOUD_VOLUME_SIZE = ivec3(256, 256, 128);
 const ivec3 CLOUD_VOLUME_MIP_SIZE = ivec3(64, 64, 32);
 const float CLOUD_VOLUME_CELL_H_M[8] = float[8](50.0, 100.0, 200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0);
@@ -205,14 +209,22 @@ int cloud_volume_wrap1(int c, int size) {
 	return c - size * int(floor(float(c) / float(size)));
 }
 
+// The window's size (cells) of level k (CloudWorldVolumeLayout.window_size).
+vec3 cloud_volume_window(int k) {
+	float h = float(CLOUD_VOLUME_CELLS_H - 2 * CLOUD_VOLUME_GUARD_CELLS);
+	return vec3(h, h, k < CLOUD_VOLUME_WINDOWED_LEVELS ? float(CLOUD_VOLUME_CELLS_V - 2 * CLOUD_VOLUME_GUARD_CELLS)
+			: float(CLOUD_VOLUME_CELLS_V));
+}
+
 // The level's weight at a grid point (CloudWorldVolumeLayout.fade_weight_at): 1 inside, 0 at the outermost cell,
 // linear over CLOUD_VOLUME_FADE_CELLS; levels 0-1 also at their vertical window edges, except a clamped bottom.
 float cloud_volume_fade(int index, int k, vec3 grid_m) {
 	ivec4 lv = cloud_volume.levels[index];
 	vec3 u = cloud_volume_cells(k, grid_m) - vec3(lv.xyz);
-	float d = min(min(u.x, float(CLOUD_VOLUME_CELLS_H) - u.x), min(u.y, float(CLOUD_VOLUME_CELLS_H) - u.y));
+	vec3 size = cloud_volume_window(k);
+	float d = min(min(u.x, size.x - u.x), min(u.y, size.y - u.y));
 	if ((lv.w & CLOUD_VOLUME_VERTICAL_FADE) != 0) {
-		d = min(d, float(CLOUD_VOLUME_CELLS_V) - u.z);
+		d = min(d, size.z - u.z);
 		if ((lv.w & CLOUD_VOLUME_CLAMPED_BOTTOM) == 0) {
 			d = min(d, u.z);
 		}
@@ -326,29 +338,80 @@ vec4 cloud_volume_light(vec3 grid_m, int level, float fade) {
 	return v;
 }
 
-// The max-extinction bound [1/m] of the block holding the grid point: no sample of the level's density there (any
-// blend, the trilinear filter, the sub-cell field up to sigma_c) exceeds it (CLOUD_VOLUME_OCCUPANCY).
-float cloud_volume_max_extinction(vec3 grid_m, int level) {
-	return cloud_volume_fetch_max(level, cloud_volume_wrap(cloud_volume_block(level, grid_m), CLOUD_VOLUME_MIP_SIZE));
+// True when a box of level k's cells [lo, hi] reaches the level's fade band (weight < 1: cloud_volume_density blends
+// level k + 1 there; CloudWorldVolumeLayout.fade_weight_at's band, FADE_CELLS + 1/2 cells from the window edge).
+bool cloud_volume_reaches_band(int k, vec3 lo, vec3 hi) {
+	if (k + 1 >= CLOUD_VOLUME_LEVELS) {
+		return false;  // the coarsest level blends nothing
+	}
+	ivec4 lv = cloud_volume.levels[k];
+	vec3 o = vec3(lv.xyz);
+	vec3 inner_lo = o + CLOUD_VOLUME_FADE_CELLS + 0.5;
+	vec3 inner_hi = o + cloud_volume_window(k) - (CLOUD_VOLUME_FADE_CELLS + 0.5);
+	bool band = lo.x < inner_lo.x || lo.y < inner_lo.y || hi.x > inner_hi.x || hi.y > inner_hi.y;
+	if ((lv.w & CLOUD_VOLUME_VERTICAL_FADE) != 0) {
+		band = band || hi.z > inner_hi.z || ((lv.w & CLOUD_VOLUME_CLAMPED_BOTTOM) == 0 && lo.z < inner_lo.z);
+	}
+	return band;
 }
 
-// Free space (true metres) around the grid point: the box of blocks closer than the distance field's value (Chebyshev,
-// blocks) holds no density, clipped to the level's window (beyond it the texels hold other cells), shrunk by the grid's
-// largest scale. 0 in an occupied block.
-float cloud_volume_free_m(vec3 grid_m, int level) {
-	vec3 cells = cloud_volume_cells(level, grid_m);
+// The max-extinction bound [1/m] of level k's block holding the grid point (CLOUD_VOLUME_OCCUPANCY).
+float cloud_volume_level_max(vec3 grid_m, int k) {
+	return cloud_volume_fetch_max(k, cloud_volume_wrap(cloud_volume_block(k, grid_m), CLOUD_VOLUME_MIP_SIZE));
+}
+
+// The max-extinction bound [1/m] over the level's block holding the grid point: no density sample in that block (any
+// snapshot blend, the trilinear filter, the fade toward level + 1, the sub-cell field up to sigma_c) exceeds it. Where
+// the block reaches the fade band, also level + 1's block bound (Task 5 review I1: the band blends level + 1, whose
+// trilinear support reaches ~3 level cells past its cloud; level + 1's block of 8 cells holds the whole block).
+float cloud_volume_max_extinction(vec3 grid_m, int level) {
+	float bound = cloud_volume_level_max(grid_m, level);
+	vec3 lo = vec3(cloud_volume_block(level, grid_m) * CLOUD_VOLUME_MIP_DIV);
+	if (cloud_volume_reaches_band(level, lo, lo + float(CLOUD_VOLUME_MIP_DIV))) {
+		bound = max(bound, cloud_volume_level_max(grid_m, level + 1));
+	}
+	return bound;
+}
+
+// Level k's free space (true metres) around the grid point: the box of blocks closer than its distance field's value
+// (Chebyshev, blocks) holds no density of level k, clipped to the level's window (beyond it the texels hold other
+// cells), shrunk by the grid's largest scale; 0 in an occupied block. `reach`: the box (cells) the value stands for.
+float cloud_volume_level_free_m(vec3 grid_m, int k, out vec3 reach_lo, out vec3 reach_hi) {
+	vec3 cells = cloud_volume_cells(k, grid_m);
 	ivec3 block = ivec3(floor(cells / float(CLOUD_VOLUME_MIP_DIV)));
-	float d = cloud_volume_fetch_distance(level, cloud_volume_wrap(block, CLOUD_VOLUME_MIP_SIZE));
+	float d = cloud_volume_fetch_distance(k, cloud_volume_wrap(block, CLOUD_VOLUME_MIP_SIZE));
+	reach_lo = cells;
+	reach_hi = cells;
 	if (d < 1.0) {
 		return 0.0;
 	}
 	vec3 lo = (vec3(block) - (d - 1.0)) * float(CLOUD_VOLUME_MIP_DIV);
 	vec3 hi = (vec3(block) + d) * float(CLOUD_VOLUME_MIP_DIV);
-	vec3 o = vec3(cloud_volume.levels[level].xyz);
+	vec3 o = vec3(cloud_volume.levels[k].xyz);
 	lo = max(lo, o);
-	hi = min(hi, o + vec3(CLOUD_VOLUME_SIZE));
-	vec3 m = max(min(cells - lo, hi - cells), vec3(0.0))
-			* vec3(CLOUD_VOLUME_CELL_H_M[level], CLOUD_VOLUME_CELL_H_M[level], CLOUD_VOLUME_CELL_V_M[level]);
-	return min(min(m.x, m.y), m.z) / CLOUD_VOLUME_MAX_SCALE;
+	hi = min(hi, o + cloud_volume_window(k));
+	vec3 m = max(min(cells - lo, hi - cells), vec3(0.0));
+	float free_cells_h = min(m.x, m.y);
+	// the Chebyshev ball the result stands for, in cells (the march may step anywhere inside it)
+	float r = min(free_cells_h * CLOUD_VOLUME_CELL_H_M[k], m.z * CLOUD_VOLUME_CELL_V_M[k]);
+	vec3 rc = r / vec3(CLOUD_VOLUME_CELL_H_M[k], CLOUD_VOLUME_CELL_H_M[k], CLOUD_VOLUME_CELL_V_M[k]);
+	reach_lo = cells - rc;
+	reach_hi = cells + rc;
+	return r / CLOUD_VOLUME_MAX_SCALE;
+}
+
+// Free space (true metres) around the grid point: no density sample (any snapshot blend, the fade toward level + 1)
+// within it. Where the level's free ball reaches its fade band, also level + 1's free space (Task 5 review I1: the band
+// blends level + 1's density). 0 in an occupied block.
+float cloud_volume_free_m(vec3 grid_m, int level) {
+	vec3 lo;
+	vec3 hi;
+	float free_m = cloud_volume_level_free_m(grid_m, level, lo, hi);
+	if (free_m > 0.0 && cloud_volume_reaches_band(level, lo, hi)) {
+		vec3 lo1;
+		vec3 hi1;
+		free_m = min(free_m, cloud_volume_level_free_m(grid_m, level + 1, lo1, hi1));
+	}
+	return free_m;
 }
 #endif

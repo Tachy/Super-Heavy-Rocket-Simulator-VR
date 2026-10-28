@@ -2984,8 +2984,11 @@ const VOLUME_SWITCH_CELLS := 128
 ## The rebake's box (level 2, cells from the window's origin).
 const VOLUME_REBAKE_FROM := Vector3i(96, 96, 0)
 const VOLUME_REBAKE_SIZE := Vector3i(64, 64, 64)
-## Checks: binding 3, per camera 1 fill + 3 levels x (cells + mip + distance + probe) + 1 water, rebake, mirror, switch 4.
-const VOLUME_SAMPLES := 3 + 2 * (1 + 3 * 4 + 1) + 1 + 1 + 5
+## Points per level in the fade band (Task 5 review I1: the band blends level k + 1; the lookups must bound it too).
+const VOLUME_BAND_POINTS := 10000
+## Checks: binding 3, per camera 1 fill + 3 levels x (cells + mip + distance + free box + fade band) + 1 water, rebake,
+## mirror, switch 4.
+const VOLUME_SAMPLES := 3 + 2 * (1 + 3 * 5 + 1) + 1 + 1 + 5
 
 var _volume_rng := RandomNumberGenerator.new()
 
@@ -3132,7 +3135,9 @@ func _volume_read(k: int) -> Dictionary:
 
 
 ## Per block of MIP_DIV^3 texels (texel space): the largest rho and sigma_c of its cells over both snapshots (1/km),
-## and up to VOLUME_CELLS texel indices with rho > 0 (a reservoir sample).
+## `ring` 1 where a cell of the block or of its one-cell ring (toroidal) has rho > 0 (the support a trilinear sample in
+## the block reads: what the distance field must keep), and up to VOLUME_CELLS texel indices with rho > 0 (a reservoir
+## sample).
 func _volume_blocks(floats: PackedFloat32Array) -> Dictionary:
 	var L := CloudWorldVolumeLayout
 	var mip := L.mip_size()
@@ -3140,6 +3145,8 @@ func _volume_blocks(floats: PackedFloat32Array) -> Dictionary:
 	var sigma := PackedFloat32Array()
 	rho.resize(mip.x * mip.y * mip.z)
 	sigma.resize(mip.x * mip.y * mip.z)
+	var ring := PackedByteArray()
+	ring.resize(mip.x * mip.y * mip.z)
 	var cloudy := PackedInt32Array()
 	var seen := 0
 	var plane := L.CELLS_H * L.CELLS_H * 4
@@ -3161,6 +3168,10 @@ func _volume_blocks(floats: PackedFloat32Array) -> Dictionary:
 				rho[b] = maxf(rho[b], r)
 				sigma[b] = maxf(sigma[b], s)
 				if r > 0.0:
+					ring[b] = 1
+					if x % L.MIP_DIV in [0, L.MIP_DIV - 1] or y % L.MIP_DIV in [0, L.MIP_DIV - 1] \
+							or z % L.MIP_DIV in [0, L.MIP_DIV - 1]:
+						_volume_mark_ring(ring, Vector3i(x, y, z))
 					seen += 1
 					if cloudy.size() < VOLUME_CELLS:
 						cloudy.append(row + x)
@@ -3168,10 +3179,28 @@ func _volume_blocks(floats: PackedFloat32Array) -> Dictionary:
 						var j := _volume_rng.randi_range(0, seen - 1)
 						if j < VOLUME_CELLS:
 							cloudy[j] = row + x
-	return {"rho": rho, "sigma": sigma, "cloudy": cloudy, "cloudy_cells": seen}
+	return {"rho": rho, "sigma": sigma, "ring": ring, "cloudy": cloudy, "cloudy_cells": seen}
 
 
-## The global cell of texel index t of a level whose window starts at `origin` (toroidal storage).
+## Marks every block whose cells plus one-cell ring hold texel t (toroidal).
+static func _volume_mark_ring(ring: PackedByteArray, t: Vector3i) -> void:
+	var L := CloudWorldVolumeLayout
+	var mip := L.mip_size()
+	var per_axis: Array = []
+	for axis in 3:
+		var blocks := [posmod(t[axis] - 1, mip[axis] * L.MIP_DIV) / L.MIP_DIV]
+		for c in [t[axis], t[axis] + 1]:
+			var b := posmod(c, mip[axis] * L.MIP_DIV) / L.MIP_DIV
+			if not b in blocks:
+				blocks.append(b)
+		per_axis.append(blocks)
+	for bz: int in per_axis[2]:
+		for by: int in per_axis[1]:
+			for bx: int in per_axis[0]:
+				ring[(bz * mip.y + by) * mip.x + bx] = 1
+
+
+## The global cell of texel index t of a level whose storage box starts at `origin` (toroidal storage).
 static func _volume_cell_of(t: int, origin: Vector3i) -> Vector3i:
 	var L := CloudWorldVolumeLayout
 	var texel := Vector3i(t % L.CELLS_H, (t / L.CELLS_H) % L.CELLS_H, t / (L.CELLS_H * L.CELLS_H))
@@ -3266,7 +3295,7 @@ static func _volume_stats_text(stats: Dictionary) -> String:
 func _volume_cells_vs_cpu(k: int, lookup: Dictionary, floats: PackedFloat32Array, cloudy: PackedInt32Array,
 		files: Array[String], label: String) -> void:
 	var L := CloudWorldVolumeLayout
-	var origin: Vector3i = lookup["levels"][k]["origin"]
+	var origin: Vector3i = lookup["levels"][k]["storage"]
 	var cells: Array[Vector3i] = []
 	for i in mini(cloudy.size(), VOLUME_CELLS / 2):
 		cells.append(_volume_cell_of(cloudy[i], origin))
@@ -3295,7 +3324,7 @@ func _volume_water(lookup: Dictionary, floats: PackedFloat32Array, files: Array[
 		label: String) -> void:
 	var L := CloudWorldVolumeLayout
 	var k := 2
-	var origin: Vector3i = lookup["levels"][k]["origin"]
+	var origin: Vector3i = lookup["levels"][k]["storage"]
 	var layout := _volume_layout(lookup, k)
 	# the cloud band: the texel z range with rho > 0
 	var z_lo := L.CELLS_V
@@ -3346,8 +3375,9 @@ func _volume_water(lookup: Dictionary, floats: PackedFloat32Array, files: Array[
 			"GPU / CPU in [%.3f, %.3f]:%s" % [VOLUME_WATER.x, VOLUME_WATER.y, ratios])
 
 
-## Level k's occupancy exhaustively: the max mip and the distance field read back against the density's blocks; then
-## the probe's trilinear density at points inside blocks claimed free.
+## Level k's occupancy exhaustively: the max mip and the distance field read back against the density's blocks (the
+## distance against the ring-dilated occupancy, Task 5 review M1); then the probe across claimed free boxes and in the
+## fade band (_volume_free_probe).
 func _volume_occupancy(k: int, lookup: Dictionary, floats: PackedFloat32Array, blocks: Dictionary,
 		label: String) -> void:
 	var L := CloudWorldVolumeLayout
@@ -3375,8 +3405,9 @@ func _volume_occupancy(k: int, lookup: Dictionary, floats: PackedFloat32Array, b
 	var cap := CloudWorldVolume.DISTANCE_CAP_BLOCKS
 	var d := PackedInt32Array()
 	d.resize(count)
+	var ring: PackedByteArray = blocks["ring"]
 	for b in count:
-		d[b] = 0 if rho[b] > 0.0 else cap + 1
+		d[b] = 0 if ring[b] != 0 else cap + 1
 	var strides := [1, mip.x, mip.x * mip.y]
 	for axis in 3:
 		var next := PackedInt32Array()
@@ -3394,45 +3425,129 @@ func _volume_occupancy(k: int, lookup: Dictionary, floats: PackedFloat32Array, b
 			next[b] = best
 		d = next
 	var over := 0
+	var exact := 0
 	var free_blocks: Array[int] = []
 	for b in count:
 		if claimed[b] > d[b]:
 			over += 1
+		exact += 1 if claimed[b] == d[b] else 0
 		if claimed[b] >= 1:
 			free_blocks.append(b)
 	_check("world volume distance field (%s)" % label, over == 0 and free_blocks.size() > 0,
-			"%d blocks: %d claim more than the true distance to cloud (cap %d), %d claimed free" % [count, over, cap,
-			free_blocks.size()])
-	# the probe: trilinear rho of both snapshots at points inside blocks claimed free
+			"%d blocks: %d claim more than the true distance to cloud incl. the one-cell ring (cap %d), %d equal, "
+			% [count, over, cap, exact] + "%d claimed free" % free_blocks.size())
+	_volume_free_probe(k, lookup, free_blocks, label)
+
+
+## The occupancy lookups as the march will use them (probe mode 2 at points p, mode 3 the blended density at points q):
+## free boxes - points p in blocks claimed free, q anywhere in the claimed free ball: no density (either snapshot, the
+## fade toward level k + 1 included); fade band (review I1) - points p within FADE_CELLS + 1/2 cells of the window edge,
+## q in the free ball (no density) and q in p's block (density <= the max-extinction bound).
+func _volume_free_probe(k: int, lookup: Dictionary, free_blocks: Array[int], label: String) -> void:
+	var L := CloudWorldVolumeLayout
+	var storage: Vector3i = lookup["levels"][k]["storage"]
 	var origin: Vector3i = lookup["levels"][k]["origin"]
-	var o := L.texel_of(k, origin)
+	var window := Vector3(L.window_size(k))
+	var o := L.texel_of(k, storage)
 	var size := Vector3i(L.CELLS_H, L.CELLS_H, L.CELLS_V)
-	var points := PackedFloat32Array()
-	for i in VOLUME_PROBE_POINTS:
+	var mip := L.mip_size()
+	var free_cells: Array[Vector3] = []
+	var guard := 0
+	while free_cells.size() < VOLUME_PROBE_POINTS and guard < 20 * VOLUME_PROBE_POINTS:
+		guard += 1
 		var b: int = free_blocks[_volume_rng.randi_range(0, free_blocks.size() - 1)]
 		var block := Vector3i(b % mip.x, (b / mip.x) % mip.y, b / (mip.x * mip.y))
 		var t := Vector3(block * L.MIP_DIV) + Vector3(_volume_rng.randf(), _volume_rng.randf(), _volume_rng.randf()) \
 				* L.MIP_DIV
-		# texel -> the window's continuous cell coordinate
-		var c := Vector3(origin) + Vector3(fposmod(t.x - o.x, size.x), fposmod(t.y - o.y, size.y),
+		# texel -> the storage's continuous cell coordinate; the window's cells only
+		var c := Vector3(storage) + Vector3(fposmod(t.x - o.x, size.x), fposmod(t.y - o.y, size.y),
 				fposmod(t.z - o.z, size.z))
-		points.append_array([c.x * L.CELL_H_M[k], c.y * L.CELL_H_M[k], L.SHELL_BOTTOM_M + c.z * L.CELL_V_M[k], 0.0])
+		var u := c - Vector3(origin)
+		if u.x >= 0.0 and u.y >= 0.0 and u.z >= 0.0 and u.x < window.x and u.y < window.y and u.z < window.z:
+			free_cells.append(c)
+	var band_cells: Array[Vector3] = []
+	var band := float(L.FADE_CELLS) + 0.5
+	for i in VOLUME_BAND_POINTS:
+		var u := Vector3(_volume_rng.randf() * window.x, _volume_rng.randf() * window.y, _volume_rng.randf() * window.z)
+		var axis := _volume_rng.randi_range(0, 1)
+		var depth := _volume_rng.randf() * band
+		u[axis] = depth if _volume_rng.randf() < 0.5 else window[axis] - depth
+		band_cells.append(Vector3(origin) + u)
+	var free := _volume_probe_pass(k, lookup, free_cells, false)
+	var in_band := _volume_probe_pass(k, lookup, band_cells, true)
+	_check("world volume free boxes sampled (%s)" % label, free["violations"] == 0 and free["free"] > 0,
+			"%d points in blocks claimed free: %d with density > 0 at a point of their free ball (either snapshot, "
+			% [free_cells.size(), free["violations"]] + "fade incl.; %d free balls, mean %.0f m)" % [free["free"],
+			free["mean_free_m"]])
+	var band_ok: bool = in_band["violations"] == 0 and in_band["bound_low"] == 0 and in_band["free"] > 0
+	_check("world volume fade band bounded (%s)" % label, band_ok, "%d points in the fade band: %d with density > 0 "
+			% [band_cells.size(), in_band["violations"]] + "in their free ball (%d free balls), %d with a density in "
+			% [in_band["free"], in_band["bound_low"]] + "their block above the max-extinction bound (%d with density "
+			% in_band["dense"] + "> 0 there)")
+
+
+## One probe round: the lookups at the points (cells of level k), then the blended density at a point of each free
+## ball (and with `block`, at a point of each one's level-k block, against the bound).
+func _volume_probe_pass(k: int, lookup: Dictionary, cells: Array[Vector3], block: bool) -> Dictionary:
+	var L := CloudWorldVolumeLayout
+	var rd := RenderingServer.get_rendering_device()
+	var volume := _clouds.effect.world_volume
 	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
 	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
-	var result := volume.probe(rd, 1, points, lookup, hi + lo, k, k)
-	var nonzero := 0
-	for i in VOLUME_PROBE_POINTS:
-		if result.size() < 4 * VOLUME_PROBE_POINTS or result[4 * i] > 0.0 or result[4 * i + 2] > 0.0:
-			nonzero += 1
-	_check("world volume free blocks sampled (%s)" % label, nonzero == 0,
-			"%d points in blocks claimed free: %d with trilinear rho > 0 (either snapshot)" % [VOLUME_PROBE_POINTS,
-			nonzero])
+	var camera := hi + lo
+	var cell_m := Vector3(L.CELL_H_M[k], L.CELL_H_M[k], L.CELL_V_M[k])
+	var points := PackedFloat32Array()
+	for c in cells:
+		points.append_array(_volume_grid_point(k, c))
+	var lookups := volume.probe(rd, 2, points, lookup, camera, k, k)
+	var q := PackedFloat32Array()
+	var q_block := PackedFloat32Array()
+	var n_free := 0
+	var free_sum := 0.0
+	for i in cells.size():
+		var free_m := lookups[4 * i] if lookups.size() >= 4 * cells.size() else 0.0
+		var r := Vector3.ONE * free_m / cell_m  # grid metres >= true metres / CloudVolume's MAX_SCALE
+		if free_m > 0.0:
+			n_free += 1
+			free_sum += free_m
+		var offset := Vector3(_volume_rng.randf_range(-1.0, 1.0), _volume_rng.randf_range(-1.0, 1.0),
+				_volume_rng.randf_range(-1.0, 1.0)) * r
+		q.append_array(_volume_grid_point(k, cells[i] + offset))
+		var b0 := (cells[i] / float(L.MIP_DIV)).floor() * L.MIP_DIV
+		q_block.append_array(_volume_grid_point(k, b0 + Vector3(_volume_rng.randf(), _volume_rng.randf(),
+				_volume_rng.randf()) * L.MIP_DIV))
+	var dens := volume.probe(rd, 3, q, lookup, camera, k, k)
+	var violations := 0
+	for i in cells.size():
+		if dens.size() < 4 * cells.size():
+			violations = cells.size()
+			break
+		if lookups[4 * i] > 0.0 and (dens[4 * i] > 0.0 or dens[4 * i + 2] > 0.0):
+			violations += 1
+	var out := {"violations": violations, "free": n_free, "mean_free_m": free_sum / maxf(n_free, 1.0), "bound_low": 0,
+			"dense": 0}
+	if block:
+		var dens_b := volume.probe(rd, 3, q_block, lookup, camera, k, k)
+		for i in cells.size():
+			if dens_b.size() < 4 * cells.size():
+				out["bound_low"] = cells.size()
+				break
+			var rho := maxf(dens_b[4 * i], dens_b[4 * i + 2])
+			out["dense"] += 1 if rho > 0.0 else 0
+			out["bound_low"] += 1 if rho > lookups[4 * i + 1] else 0
+	return out
+
+
+## A level-k cell coordinate (continuous) as a grid point (x, y m; z m above the ellipsoid), 4 floats for the probe.
+static func _volume_grid_point(k: int, c: Vector3) -> PackedFloat32Array:
+	var L := CloudWorldVolumeLayout
+	return PackedFloat32Array([c.x * L.CELL_H_M[k], c.y * L.CELL_H_M[k], L.SHELL_BOTTOM_M + c.z * L.CELL_V_M[k], 0.0])
 
 
 ## A level-2 box baked again (a batch of its own after the layer's): its texels bit-identical.
 func _volume_rebake(camera: Vector3, lookup: Dictionary, before: PackedByteArray) -> void:
 	var L := CloudWorldVolumeLayout
-	var origin: Vector3i = lookup["levels"][2]["origin"]
+	var origin: Vector3i = lookup["levels"][2]["storage"]
 	var from := origin + VOLUME_REBAKE_FROM
 	var to := from + VOLUME_REBAKE_SIZE
 	_atmosphere.update(_earth_to_gcrf * camera, Vector3.ZERO, _earth_to_gcrf, _earth_to_gcrf * _local_direction(45.0,
@@ -3622,7 +3737,7 @@ func _volume_pair_switch(camera: Vector3, snapshots: Array[Dictionary]) -> void:
 	var cloudy: PackedInt32Array = _volume_blocks(read["floats"])["cloudy"]
 	var cells: Array[Vector3i] = []
 	for i in mini(cloudy.size(), VOLUME_SWITCH_CELLS):
-		cells.append(_volume_cell_of(cloudy[i], lookup["levels"][2]["origin"]))
+		cells.append(_volume_cell_of(cloudy[i], lookup["levels"][2]["storage"]))
 	var cpu := _volume_cpu(snapshots[2]["file"], lookup, 2, cells)
 	var stats := {}
 	for i in mini(cpu.size(), cells.size()):

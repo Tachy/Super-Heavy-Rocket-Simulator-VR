@@ -9,9 +9,17 @@ extends RefCounted
 ## grid-mean column), light (real). `lookup` is the state AFTER the batch (per level origin / active / ready / frame);
 ## the render thread adopts it only once the batch ran.
 ##
-## Scroll: a level whose window moved bakes the exposed slabs in the plan that adopts the new origin (never late, not
-## budgeted) and lights them first (priority 1: they have no light yet); whatever of them the light budget cannot cover
-## gets provisional light and stays first in line (PROVISIONAL_MAX_S is the gate's bound on how long that may last).
+## Scroll (Task 5 review I2: bake ahead of exposure): a level's texture holds its storage box, the window the lookup
+## reads is CloudWorldVolumeLayout.GUARD_CELLS smaller on each side. When the camera moves, the storage moves toward
+## the window's target grown by the guard (only as far as it still holds the shown window), and the slabs it exposes
+## are queued (`scroll`). They are baked earliest deadline first: a slab's deadline is the frames until the window,
+## at the camera's speed per axis (MOTION_DECAY peak hold), would reach it; the frame's scroll budget is the rate that
+## meets every deadline times SCROLL_MARGIN, capped at SCROLL_CAP_MS (the spike cap less the light's share), and the
+## normal bake share left after fills tops it up (baking further ahead). The window then advances toward the camera
+## only onto baked cells (never late: no frame reads an unbaked cell; a slab that misses its deadline makes the window
+## wait - lag, the coarser level shows the clouds there). Baked slabs are lit first (priority 1: they have no light
+## yet); whatever of them the light budget cannot cover gets provisional light and stays first in line
+## (PROVISIONAL_MAX_S is the gate's bound on how long that may last).
 ## Fill (cold start, jump, level switched on, whole-window moves): the window is "dirty" and baked under the budget,
 ## coarse to fine, the coarsest level first (world-volume Task 5: its 8.4 M cells of 8448 taps take the GPU far longer
 ## than a frame's UPKEEP_SPIKE_MS, so it is budgeted too; until it is `ready` nothing of the volume is shown - the march's
@@ -28,12 +36,22 @@ extends RefCounted
 ## meanwhile), cross-faded over REFRAME_FADE_S and swapped.
 ## Budget: UPKEEP_BUDGET_MS per frame (LIGHT_BUDGET_MS of it light); UPKEEP_SPIKE_MS in cold-start, jump and re-frame
 ## frames until the fill is complete (half bake, half light). The bake's cost is counted in taps (a cell of level k
-## costs CloudWorldVolumeLayout.cell_taps(k): 256 at level 0 to 8448 at level 7), its rate in taps per ms; scroll slabs
-## are baked in full whatever they cost (never late) and their cost is taken from the budget.
+## costs CloudWorldVolumeLayout.cell_taps(k): 256 at level 0 to 8448 at level 7), its rate in taps per ms; the scroll
+## bake may exceed the normal bake share up to SCROLL_CAP_MS (fast flight: 7.8 km/s needs ~1-1.5 ms at 4.3e7 taps/ms).
 
 const UPKEEP_BUDGET_MS := 1.5
 const LIGHT_BUDGET_MS := 1.0
 const UPKEEP_SPIKE_MS := 3.0
+## The scroll bake's cap per frame: the spike cap less the light's share (a frame's upkeep stays <= UPKEEP_SPIKE_MS).
+const SCROLL_CAP_MS := UPKEEP_SPIKE_MS - LIGHT_BUDGET_MS
+## [E] The scroll budget is the deadline-meeting rate times this: the speed may grow between plans and a slab is
+## baked in whole cells.
+const SCROLL_MARGIN := 1.5
+## [E] Per-axis speed estimate (grid m per plan): the larger of this plan's step and the last estimate times this
+## (a frame without motion, e.g. a paused clock, does not drop the deadlines to infinity at once).
+const MOTION_DECAY := 0.9
+## [E] Deadline (frames) of a slab while the camera stands still along its axes: baked from the spare budget only.
+const IDLE_FRAMES := 1.0e6
 const PROVISIONAL_FADE_S := 0.25
 const PROVISIONAL_MAX_S := 1.0
 const REFRAME_FADE_S := 0.5
@@ -78,7 +96,9 @@ class _Level extends RefCounted:
 	var shown := true  # false: a re-frame's spare while it is built
 	var active := false
 	var ready := false
-	var origin := Vector3i.ZERO
+	var origin := Vector3i.ZERO  # the window's (what the lookup reads)
+	var storage := Vector3i.ZERO  # the texture's cells (CloudWorldVolumeLayout.storage_box)
+	var scroll: Array = []  # storage slabs {from, to} exposed by a scroll, still to bake (both snapshots)
 	var dirty: Array = []  # boxes {from, to} still to bake (both snapshots)
 	var baked: Array = []  # boxes a fill in progress has baked (a slot change rebakes these alone)
 	var slot_dirty: Array = [[], []]  # per snapshot slot: boxes to rebake (channel pair of that slot)
@@ -108,14 +128,19 @@ var _slot_ids: Array = [0, 1]
 var _slot_ready: Array = [true, true]
 var _bake_cells := 0
 var _bake_taps := 0
-var _mandatory_cells := 0
-var _mandatory_taps := 0
+var _scroll_cells := 0
+var _scroll_taps := 0
 var _light_cells := 0
 var _prov_cells := 0
 var _prov_age_max := 0.0
 var _prov_age_session_max := 0.0
 var _camera_grid := Vector3.ZERO
 var _camera_grid_next := Vector3.ZERO
+var _camera_prev := Vector3.ZERO
+var _has_prev := false
+## The camera's speed per grid axis (m per plan, MOTION_DECAY peak hold).
+var _motion := Vector3.ZERO
+var _waiting := 0
 
 
 func _init(layout: CloudWorldVolumeLayout = null) -> void:
@@ -152,7 +177,8 @@ func feedback(upkeep_ms: float, bake_taps: int, light_cells: int) -> void:
 	light_cells_per_ms = maxf(light_cells_per_ms * g, MIN_CELLS_PER_MS)
 
 
-## Cold-start / jump / re-frame fill and the spare version are done; nothing is waiting to be baked or lit first.
+## Cold-start / jump / re-frame fill and the spare version are done; nothing is waiting to be baked or lit first
+## (queued scroll slabs do not count: a moving camera always has some, and the spike must end).
 func complete() -> bool:
 	if not _started or _spare != null or _next != null:
 		return false
@@ -175,11 +201,12 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	var out := {"bake": [], "light": [], "provisional": []}
 	_bake_cells = 0
 	_bake_taps = 0
-	_mandatory_cells = 0
-	_mandatory_taps = 0
+	_scroll_cells = 0
+	_scroll_taps = 0
 	_light_cells = 0
 	_prov_cells = 0
 	_prov_age_max = 0.0
+	_waiting = 0
 	if jumped or not _started:
 		_cold_start(camera_earth_m, slot_ids)
 	_apply_slot_ids(slot_ids)
@@ -187,13 +214,20 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	_camera_grid = _layout.grid_of(camera_earth_m)
 	if _next != null:
 		_camera_grid_next = _next.grid_of(camera_earth_m)
+	_update_motion(camera_earth_m)
 	var order := _levels.duplicate()
 	order.reverse()  # coarse to fine
 	if _spare != null:
 		order.append(_spare)
 	for lv: _Level in order:
 		_scroll(lv, out["bake"])
+	var scroll_items := _scroll_items(order)
+	_bake_scroll(scroll_items, _scroll_budget(scroll_items), out["bake"])  # what the deadlines need
 	_bake_fill(order, out["bake"])
+	# the normal bake share the fills left: further ahead (deadlines recomputed: the first pass split boxes)
+	_bake_scroll(_scroll_items(order), int(_bake_ms() * bake_taps_per_ms) - _bake_taps, out["bake"])
+	for lv: _Level in order:
+		_advance_window(lv)
 	_light(order, sun_dir_earth, moon_dir_earth, blend, cloud_top_m, delta_s, out)
 	var reframe := _reframe_end(delta_s)
 	if _spike and complete():
@@ -202,7 +236,9 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	out["lookup"] = _lookup()
 	out["bake_cells"] = _bake_cells
 	out["bake_taps"] = _bake_taps
-	out["bake_mandatory_cells"] = _mandatory_cells
+	out["bake_scroll_cells"] = _scroll_cells
+	out["bake_scroll_taps"] = _scroll_taps
+	out["windows_waiting"] = _waiting
 	out["light_cells"] = _light_cells
 	out["provisional_cells"] = _prov_cells
 	out["provisional_age_max_s"] = _prov_age_max
@@ -229,6 +265,8 @@ func _cold_start(camera_earth_m: Vector3, slot_ids: Array) -> void:
 	_started = true
 	_spike = true
 	_fade_s = 0.0
+	_has_prev = false  # a jump is no motion
+	_motion = Vector3.ZERO
 
 
 ## A snapshot replaced in a slot: its channel pair is rebaked alone, under the bake budget - the whole window of a
@@ -241,7 +279,7 @@ func _apply_slot_ids(slot_ids: Array) -> void:
 		for lv: _Level in _all_levels():
 			if lv.active:
 				lv.slot_dirty[s] = lv.baked.duplicate() if not lv.dirty.is_empty() \
-						else [CloudWorldVolumeLayout.window_box(lv.origin)]
+						else [CloudWorldVolumeLayout.storage_box(lv.storage)]
 
 
 func _all_levels() -> Array:
@@ -255,38 +293,176 @@ func _grid_of_level(lv: _Level) -> Vector3:
 	return _camera_grid_next if lv.layout == _next else _camera_grid
 
 
-func _scroll(lv: _Level, bake_out: Array) -> void:
+## The camera's speed per grid axis (m per plan) in the current frame, MOTION_DECAY peak hold.
+func _update_motion(camera_earth_m: Vector3) -> void:
+	var step := Vector3.ZERO
+	if _has_prev:
+		step = (_camera_grid - _layout.grid_of(_camera_prev)).abs()
+	_motion = Vector3(maxf(step.x, _motion.x * MOTION_DECAY), maxf(step.y, _motion.y * MOTION_DECAY),
+			maxf(step.z, _motion.z * MOTION_DECAY))
+	_camera_prev = camera_earth_m
+	_has_prev = true
+
+
+## A level's window follows the camera: a filling level's window and storage at once (the exposed cells join the fill);
+## a ready level's storage toward the window's target grown by the guard, as far as it still holds the shown window,
+## the cells it exposes queued for the scroll bake (the window follows in _advance_window).
+func _scroll(lv: _Level, _bake_out: Array) -> void:
 	var L := CloudWorldVolumeLayout
 	var cg := _grid_of_level(lv)
 	if not lv.layout.level_active(lv.k, cg.z):
 		if lv.active:
 			_clear(lv)
 		return
-	var new_origin := lv.layout.window_origin(lv.k, cg)
+	var target := lv.layout.window_origin(lv.k, cg)
 	if not lv.active:
-		_clear(lv)
-		lv.active = true
-		_set_origin(lv, new_origin)
-		lv.dirty = [L.window_box(new_origin)]
+		_restart_fill(lv, target)
 		return
-	if new_origin == lv.origin:
+	var whole := Vector3i(L.CELLS_H, L.CELLS_H, L.CELLS_V)
+	var d := (target - lv.origin).abs()
+	if d.x >= whole.x or d.y >= whole.y or d.z >= whole.z:  # a whole window: a fill, not a scroll
+		_restart_fill(lv, target)
 		return
-	var slabs := L.exposed_slabs(lv.k, lv.origin, new_origin)
-	_set_origin(lv, new_origin)
-	for slab in slabs:
-		if not lv.ready or L.box_cells(slab) >= L.CELLS_H * L.CELLS_H * L.CELLS_V:
-			if L.box_cells(slab) >= L.CELLS_H * L.CELLS_H * L.CELLS_V:  # a whole window: a fill, not a scroll
-				_clear(lv)
-				lv.active = true
-				_set_origin(lv, new_origin)
-				lv.dirty = [L.window_box(new_origin)]
-				return
-			lv.dirty.append(slab)
-		else:
-			_emit_bake(lv, slab, -1, bake_out)
-			_mandatory_cells += L.box_cells(slab)
-			_mandatory_taps += L.box_cells(slab) * L.cell_taps(lv.k)
-			lv.prov.append({"from": slab["from"], "to": slab["to"], "emitted": false, "age_s": 0.0})
+	var storage := L.storage_target(lv.k, target)
+	if lv.ready:
+		var limits := L.storage_range(lv.k, lv.origin)
+		storage = storage.clamp(limits[0], limits[1])
+	if storage == lv.storage:
+		if not lv.ready:
+			_set_origin(lv, target)
+		return
+	var slabs := L.exposed_slabs(lv.k, lv.storage, storage)
+	lv.storage = storage
+	var box := L.storage_box(storage)
+	if not lv.ready:
+		lv.dirty.append_array(slabs)
+		_set_origin(lv, target)
+		return
+	var kept: Array = []
+	for b: Dictionary in lv.scroll:  # cells that left the storage are not baked any more (their texels moved on)
+		var c := L.box_clip(b, box)
+		if L.box_cells(c) > 0:
+			kept.append(c)
+	lv.scroll = kept + slabs
+
+
+func _restart_fill(lv: _Level, target: Vector3i) -> void:
+	_clear(lv)
+	lv.active = true
+	_set_origin(lv, target)
+	lv.storage = CloudWorldVolumeLayout.storage_target(lv.k, target)
+	lv.dirty = [CloudWorldVolumeLayout.storage_box(lv.storage)]
+
+
+## Every level's queued scroll slabs [deadline frames, level, box], earliest first.
+func _scroll_items(order: Array) -> Array:
+	var items: Array = []
+	for lv: _Level in order:
+		if not lv.active or not lv.ready:
+			continue
+		var target := lv.layout.window_origin(lv.k, _grid_of_level(lv))
+		for b: Dictionary in lv.scroll:
+			items.append([_deadline_frames(lv, b, target), lv, b])
+	items.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	return items
+
+
+## Frames (this one included) until the window, at the camera's speed, would hold a cell of `box`: 1 if the target
+## window already does. Along each axis the box lies apart from the target window, the camera must cross the rest of
+## its cell and gap - 1 more cells; the window reaches the box when all those axes are crossed.
+func _deadline_frames(lv: _Level, box: Dictionary, target: Vector3i) -> float:
+	var L := CloudWorldVolumeLayout
+	var win := L.window_box(lv.k, target)
+	var cg := _grid_of_level(lv)
+	var cell := Vector3(L.CELL_H_M[lv.k], L.CELL_H_M[lv.k], L.CELL_V_M[lv.k])
+	var u := Vector3(cg.x / cell.x, cg.y / cell.y, (cg.z - L.SHELL_BOTTOM_M) / cell.z)
+	var frames := 1.0
+	for axis in 3:
+		var gap := 0
+		var partial := 0.0
+		if box["from"][axis] >= win["to"][axis]:
+			gap = box["from"][axis] - win["to"][axis] + 1
+			partial = ceilf(u[axis]) - u[axis] if u[axis] != floorf(u[axis]) else 1.0
+		elif box["to"][axis] <= win["from"][axis]:
+			gap = win["from"][axis] - box["to"][axis] + 1
+			partial = u[axis] - floorf(u[axis])
+		if gap == 0:
+			continue
+		var metres := ((gap - 1) + partial) * cell[axis]
+		var f := IDLE_FRAMES if _motion[axis] <= 0.0 else 1.0 + floorf(metres / _motion[axis])
+		frames = maxf(frames, minf(f, IDLE_FRAMES))
+	return frames
+
+
+## The taps that meet every deadline at a constant rate (earliest deadline first), times SCROLL_MARGIN, capped.
+func _scroll_budget(items: Array) -> int:
+	var need := 0.0
+	var cum := 0.0
+	for it: Array in items:
+		var lv: _Level = it[1]
+		cum += CloudWorldVolumeLayout.box_cells(it[2]) * CloudWorldVolumeLayout.cell_taps(lv.k)
+		need = maxf(need, cum / float(it[0]))
+	return int(minf(need * SCROLL_MARGIN, budget_scale * SCROLL_CAP_MS * bake_taps_per_ms))
+
+
+## Bakes queued scroll slabs earliest deadline first, up to `budget` taps (at least one cell when the budget is
+## positive); baked cells get light first (prov list).
+func _bake_scroll(items: Array, budget: int, bake_out: Array) -> void:
+	var L := CloudWorldVolumeLayout
+	for it: Array in items:
+		if budget <= 0:
+			return
+		var lv: _Level = it[1]
+		var box: Dictionary = it[2]
+		var i := lv.scroll.find(box)
+		if i < 0:
+			continue  # baked whole by an earlier call this plan
+		var sp := L.box_split(box, _cells_for(lv.k, budget))
+		_emit_bake(lv, sp[0], -1, bake_out)
+		var cells := L.box_cells(sp[0])
+		_scroll_cells += cells
+		_scroll_taps += cells * L.cell_taps(lv.k)
+		budget -= cells * L.cell_taps(lv.k)
+		lv.prov.append({"from": sp[0]["from"], "to": sp[0]["to"], "emitted": false, "age_s": 0.0})
+		lv.scroll.remove_at(i)
+		var rest: Array = sp[1]
+		for j in rest.size():
+			lv.scroll.insert(i + j, rest[j])
+		it[2] = rest[0] if not rest.is_empty() else {}
+		if not rest.is_empty():
+			return  # the budget is spent (box_split took what it paid for)
+
+
+## Moves a ready level's window toward the camera one cell at a time per axis, only while the window stays inside the
+## storage and holds no queued (unbaked) cell; a window left behind its target is counted (waiting: lag).
+func _advance_window(lv: _Level) -> void:
+	if not lv.active or not lv.ready:
+		return
+	var target := lv.layout.window_origin(lv.k, _grid_of_level(lv))
+	var o := lv.origin
+	for axis in 3:
+		while o[axis] != target[axis]:
+			var c := o
+			c[axis] += signi(target[axis] - o[axis])
+			if not _window_holds(lv, c):
+				break
+			o = c
+	if o != lv.origin:
+		_set_origin(lv, o)
+	if o != target:
+		_waiting += 1
+
+
+func _window_holds(lv: _Level, origin: Vector3i) -> bool:
+	var L := CloudWorldVolumeLayout
+	var limits := L.storage_range(lv.k, origin)
+	if lv.storage != lv.storage.clamp(limits[0], limits[1]):
+		return false
+	var win := L.window_box(lv.k, origin)
+	for b: Dictionary in lv.scroll:
+		if L.box_overlaps(win, b):
+			return false
+	return true
 
 
 ## The level's window origin, also in its layout (fade_weight reads it there; a spare's goes to the new frame's layout).
@@ -299,6 +475,7 @@ func _clear(lv: _Level) -> void:
 	lv.active = false
 	lv.ready = false
 	lv.dirty = []
+	lv.scroll = []
 	lv.baked = []
 	lv.slot_dirty = [[], []]
 	lv.prov = []
@@ -327,7 +504,7 @@ func _bake_ms() -> float:
 ## a finer level starts only once the coarser one is done (strictly coarse first, the budget's remainder of less than
 ## a cell left).
 func _bake_fill(order: Array, bake_out: Array) -> void:
-	var budget := maxi(int((_bake_ms() - _mandatory_taps / bake_taps_per_ms) * bake_taps_per_ms), 0)
+	var budget := maxi(int(_bake_ms() * bake_taps_per_ms) - _scroll_taps, 0)
 	for lv: _Level in order:
 		if budget <= 0:
 			break
@@ -361,7 +538,7 @@ static func _cells_for(k: int, taps: int) -> int:
 ## list); returns the taps spent. The level is ready once nothing is dirty.
 func _bake_dirty(lv: _Level, budget: int, bake_out: Array) -> int:
 	var L := CloudWorldVolumeLayout
-	var window := L.window_box(lv.origin)
+	var window := L.storage_box(lv.storage)
 	var n := _cells_for(lv.k, budget)
 	var used := 0
 	while used < n and not lv.dirty.is_empty():
@@ -382,7 +559,7 @@ func _bake_dirty(lv: _Level, budget: int, bake_out: Array) -> int:
 
 func _bake_slot(lv: _Level, s: int, budget: int, bake_out: Array) -> int:
 	var L := CloudWorldVolumeLayout
-	var window := L.window_box(lv.origin)
+	var window := L.storage_box(lv.storage)
 	var list: Array = lv.slot_dirty[s]
 	var n := _cells_for(lv.k, budget)
 	var used := 0
@@ -439,7 +616,7 @@ func _light(order: Array, sun: Vector3, moon: Vector3, blend: float, cloud_top_m
 	for lv: _Level in order:
 		if not lv.active or not lv.shown:
 			continue
-		var window := L.window_box(lv.origin)
+		var window := L.storage_box(lv.storage)
 		for b: Dictionary in lv.prov:
 			if b["emitted"]:
 				continue
@@ -458,7 +635,7 @@ func _light_job(lv: _Level, box: Dictionary) -> Dictionary:
 
 func _light_prov(lv: _Level, budget: int, jobs: Array) -> int:
 	var L := CloudWorldVolumeLayout
-	var window := L.window_box(lv.origin)
+	var window := L.storage_box(lv.storage)
 	var used := 0
 	while used < budget and not lv.prov.is_empty():
 		var b: Dictionary = lv.prov.pop_front()
@@ -480,7 +657,7 @@ func _light_prov(lv: _Level, budget: int, jobs: Array) -> int:
 
 func _light_queue(lv: _Level, budget: int, jobs: Array) -> int:
 	var L := CloudWorldVolumeLayout
-	var window := L.window_box(lv.origin)
+	var window := L.storage_box(lv.storage)
 	var used := 0
 	while used < budget:
 		if lv.partial.is_empty():
@@ -504,8 +681,8 @@ func _light_queue(lv: _Level, budget: int, jobs: Array) -> int:
 ## queued again, behind what is still queued).
 func _light_env(lv: _Level, sun: Vector3, moon: Vector3, blend: float, cloud_top_m: float) -> void:
 	var L := CloudWorldVolumeLayout
-	var cx := (lv.origin.x + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
-	var cy := (lv.origin.y + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
+	var cx := (lv.storage.x + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
+	var cy := (lv.storage.y + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
 	var up := lv.layout.up_of_grid(cx, cy)
 	var sin_e := sun.dot(up)
 	lv.moon_on = sin_e < sin(MOON_SUN_ELEVATION_RAD)
@@ -518,7 +695,7 @@ func _light_env(lv: _Level, sun: Vector3, moon: Vector3, blend: float, cloud_top
 		lv.lit_moon_on = lv.moon_on
 		lv.lit_valid = true
 		return
-	var h := maxf(cloud_top_m - (L.SHELL_BOTTOM_M + lv.origin.z * L.CELL_V_M[lv.k]), MIN_HEIGHT_M)
+	var h := maxf(cloud_top_m - (L.SHELL_BOTTOM_M + lv.storage.z * L.CELL_V_M[lv.k]), MIN_HEIGHT_M)
 	var trigger := false
 	if (sun - lv.lit_sun).length() > sun_threshold_rad(lv.k, _refresh_elevation(sin_e), h):
 		trigger = true
@@ -543,7 +720,7 @@ static func _refresh_elevation(sin_e: float) -> float:
 func _enqueue_tiles(lv: _Level) -> void:
 	var L := CloudWorldVolumeLayout
 	lv.need_queue = false
-	var o := lv.origin
+	var o := lv.storage
 	var t0 := Vector3i(floori(o.x / float(TILE_CELLS)), floori(o.y / float(TILE_CELLS)), floori(o.z / float(TILE_CELLS)))
 	var t1 := Vector3i(floori((o.x + L.CELLS_H - 1) / float(TILE_CELLS)), floori((o.y + L.CELLS_H - 1) / float(TILE_CELLS)),
 			floori((o.z + L.CELLS_V - 1) / float(TILE_CELLS)))
@@ -636,15 +813,16 @@ func _lookup() -> Dictionary:
 	var L := CloudWorldVolumeLayout
 	var levels: Array = []
 	for lv: _Level in _levels:
-		levels.append({"level": lv.k, "origin": lv.origin, "active": lv.active, "ready": lv.ready,
+		levels.append({"level": lv.k, "origin": lv.origin, "storage": lv.storage, "active": lv.active,
+				"ready": lv.ready,
 				"frame_origin_earth_m": lv.layout.origin_earth_m, "vertical_fade": lv.k < L.WINDOWED_LEVELS,
 				"clamped_bottom": lv.origin.z == 0})
 	var lookup := {"levels": levels, "slot_ready": _slot_ready.duplicate(), "slot_ids": _slot_ids.duplicate()}
 	if _spare != null:  # the spare being built (its jobs' frame), shown or not
-		lookup["build_spare"] = {"level": _spare.k, "origin": _spare.origin,
+		lookup["build_spare"] = {"level": _spare.k, "origin": _spare.origin, "storage": _spare.storage,
 				"frame_origin_earth_m": _spare.layout.origin_earth_m}
 	if _spare != null and _spare.shown:
-		lookup["spare"] = {"level": _spare.k, "origin": _spare.origin, "frame_origin_earth_m": _spare.layout.origin_earth_m,
-				"fade": minf(_fade_s / REFRAME_FADE_S, 1.0), "vertical_fade": _spare.k < L.WINDOWED_LEVELS,
-				"clamped_bottom": _spare.origin.z == 0}
+		lookup["spare"] = {"level": _spare.k, "origin": _spare.origin, "storage": _spare.storage,
+				"frame_origin_earth_m": _spare.layout.origin_earth_m, "fade": minf(_fade_s / REFRAME_FADE_S, 1.0),
+				"vertical_fade": _spare.k < L.WINDOWED_LEVELS, "clamped_bottom": _spare.origin.z == 0}
 	return lookup

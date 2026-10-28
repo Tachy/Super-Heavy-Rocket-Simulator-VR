@@ -271,17 +271,16 @@ func _volume(size: Vector3i, format: int) -> RID:
 
 ## Runs one batch (render thread, before the march): its bake jobs, the occupancy of the levels they touched, then
 ## adopts its lookup. Light and provisional jobs wait for Task 6. rd null (headless checks): adopts only.
-## set0: the march's set 0 of this frame (the snapshots' fields, the noise, the tables).
-func run(rd: RenderingDevice, batch: Dictionary, set0: Array[RDUniform]) -> void:
+## set0: the march's set 0 of this frame (the snapshots' fields, the noise, the tables); camera_earth_m: the camera of
+## the same pass (CloudEffect's, float64 Earth-local render axes), so the CloudVolume block and set 0 agree.
+func run(rd: RenderingDevice, batch: Dictionary, set0: Array[RDUniform], camera_earth_m: Vector3) -> void:
 	if batch.is_empty():
 		return
 	if rd != null and ensure(rd):
 		_read_timestamps()
 		_last_set0 = set0
-		var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
-		var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
 		rd.capture_timestamp(UPKEEP_STAMP)
-		_upkeep(batch, set0, hi + lo)
+		_upkeep(batch, set0, camera_earth_m)
 		rd.capture_timestamp(UPKEEP_END_STAMP)
 		_pending[Engine.get_frames_drawn()] = Vector2(last_bake_taps, last_light_cells)
 		while _pending.size() > PENDING_MAX:
@@ -540,7 +539,10 @@ func _read_timestamps() -> void:
 
 ## Diagnostics (cloud_check.gd section 16; main thread, after a frame ran a batch): mode 0 cloud_volume_grid_in of
 ## camera offsets (points: xyz the offset, w the frame index), mode 1 texture `index`'s raw density [1/m] at grid points
-## (level k); the lookup state and the camera as given. Returns 4 floats per point.
+## (level k), mode 2 the occupancy lookups at grid points of level k (cloud_volume_free_m [m],
+## cloud_volume_max_extinction [1/m], the level's weight), mode 3 the density both snapshots give at grid points of
+## level k as cloud_volume_density blends it toward level k + 1 [1/m]; the lookup state and the camera as given.
+## Returns 4 floats per point.
 func probe(rd: RenderingDevice, mode: int, points: PackedFloat32Array, lookup: Dictionary, camera: Vector3,
 		index := 0, k := 0) -> PackedFloat32Array:
 	if not ensure(rd) or _last_set0.is_empty():

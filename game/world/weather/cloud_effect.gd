@@ -639,7 +639,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# The world volume's upkeep (Task 5): the schedule's batch - bake, occupancy - with this frame's set 0, before the
 	# march (its GPU interval: CloudWorldVolume.UPKEEP_STAMP).
 	if world_volume != null and ShaderGlobals.value(&"cloud_world_volume") == true:
-		world_volume.run(_rd, world_volume.take(), set0)
+		world_volume.run(_rd, world_volume.take(), set0, camera)
 	var family := "march_centre" if stereo else "march"
 	var pixel_angle: float = centre_view["pixel_angle"]
 	var march := family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family

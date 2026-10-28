@@ -352,7 +352,7 @@ func _test_world_volume(camera: Vector3) -> void:
 		for i in range(int(float(step[3]) / DT)):
 			var before: Dictionary = _layer.state()
 			_layer.update(camera, step[2], DT)
-			volume.run(null, volume.take(), [])
+			volume.run(null, volume.take(), [], Vector3.ZERO)
 			var after: Dictionary = _layer.state()
 			var w0 := float(before["w1"])
 			var w1 := float(after["w1"])
