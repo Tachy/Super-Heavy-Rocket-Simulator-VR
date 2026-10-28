@@ -63,10 +63,20 @@
 #          writes <out>_counter_<name>.png (normalised to the maximum); --ablate=<name,...> switches work off for timing
 #          runs (CloudEffect.ABLATIONS: density, light, air, field, shape, detail, subsamples, outline, air_shadow,
 #          far_tier; the environment variable STARSIM_CLOUD_ABLATE does the same).
+# Stereo harness (world volume plan Task 1): --stereo=<json> renders through the multiview path with a stand-in headset
+#          (StereoMockXr: the recorded per-eye projections, eye transforms and render target of the JSON that PerfLog
+#          writes at a VR start, game/tests/data/pimax_dream_air_projections.json) with the VR cloud preset (unless
+#          --cloud_quality; run without --xr-mode off, which switches the multiview shader variants off), the eye
+#          images written as <out>_eye0.png / <out>_eye1.png (the intermediate progress images
+#          of --ab_view_cache / --frames_every are not written); the log shows "stereo view_count 2". --cloud_view=<id>
+#          (CloudViews: the gate views V1 .. V7, e.g. V3_era5) prepends that view's arguments; an argument given on the
+#          command line wins. --frames_every also works with --mission / --at_event (the booster catch V7).
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 6
+## --stereo: frames to wait for the eye images' read-back on the render thread.
+const STEREO_CAPTURE_FRAMES := 120
 ## --sun_through_deck: the slab's heights (m) and the extinction per liquid water content of the renderer's droplets
 ## (beta = 3 LWC / (2 rho_w r_e) = 150 LWC [1/m], r_e 10 um; as cloud_check.gd THIN_LIQUID_KG_M3).
 const SUN_DECK_BOTTOM_M := 1000
@@ -124,6 +134,8 @@ const FLY_PAD_RISE_M := 20.0
 const FLY_PHASES := ["pad", "in the layer", "outside the layer"]
 
 var _args := {}
+var _stereo: StereoMockXr  ## --stereo: the stand-in headset
+var _stereo_capture_frames := 0
 var _main: Node
 var _frames := 0
 var _start_s := 0.0
@@ -205,7 +217,10 @@ var _fly_site := {}
 
 
 func _initialize() -> void:
-	for arg in OS.get_cmdline_user_args():
+	var arguments := _with_cloud_view(OS.get_cmdline_user_args())
+	if arguments.is_empty():
+		return
+	for arg in arguments:
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
 	if _args.has("sun_through_deck"):
@@ -216,6 +231,8 @@ func _initialize() -> void:
 	CloudEffect.counters = _args.has("counters")
 	if _args.has("ablate"):
 		CloudEffect.ablate = PackedStringArray(String(_args["ablate"]).split(",", false))
+	if _args.has("stereo") and not _start_stereo(String(_args["stereo"])):
+		return
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
@@ -228,14 +245,83 @@ func _initialize() -> void:
 	FrameProfiler.enabled = true  # the view cache's main-thread schedule time (_cache_waiting)
 
 
+## The user arguments with --cloud_view=<id>'s arguments first (the command line's own win); [] and exit code 1 for an
+## unknown view id.
+func _with_cloud_view(user_args: PackedStringArray) -> PackedStringArray:
+	var result := PackedStringArray()
+	for arg in user_args:
+		if arg.begins_with("--cloud_view="):
+			var id := arg.trim_prefix("--cloud_view=")
+			var view := CloudViews.args(id)
+			if view.is_empty():
+				_refuse("render_check: unknown --cloud_view=%s (%s)" % [id, ", ".join(CloudViews.ids())])
+				return PackedStringArray()
+			result.append_array(view)
+	result.append_array(user_args)
+	return result
+
+
+## --stereo=<json>: the stand-in headset (StereoMockXr) on the XR server, before the scene tree starts (the XR manager then
+## enters VR mode on it). False (exit code 1) when the JSON cannot be used.
+func _start_stereo(path: String) -> bool:
+	var mock := StereoMockXr.new()
+	if not mock.load(path):
+		_refuse("render_check: --stereo=%s cannot be loaded" % path)
+		return false
+	XRServer.add_interface(mock)
+	if not mock.initialize():
+		_refuse("render_check: the stand-in headset does not initialise")
+		return false
+	XRServer.primary_interface = mock
+	# (XrManager._ready finds the stand-in as the primary interface and enters VR mode on it)
+	_stereo = mock
+	print("render_check: stereo harness, %s: %d views, render target %s per eye" % [path, mock._get_view_count(),
+			mock.render_target_px])
+	return true
+
+
+func _finalize() -> void:
+	if _stereo != null:  # the XR server must not keep the stand-in while the engine shuts down
+		XRServer.primary_interface = null
+		_stereo.uninitialize()
+		XRServer.remove_interface(_stereo)
+
+
+## The progress images (a --stereo run writes only the final eye images: the viewport texture is the multiview array).
+func _save_viewport_png(path: String) -> void:
+	if _stereo == null:
+		root.get_viewport().get_texture().get_image().save_png(path)
+
+
+## --stereo: the final frame's eye images <out>_eye<n>.png (read back on the render thread); true once written.
+func _save_stereo_images(world: World, out: String) -> bool:
+	if _stereo.captured.is_empty() and _stereo_capture_frames < STEREO_CAPTURE_FRAMES and _stereo.capture_error == "":
+		_stereo.capture_requested = true
+		_stereo_capture_frames += 1
+		return false
+	if _stereo.captured.is_empty():
+		_refuse("render_check: no eye image captured (%s)" % _stereo.capture_error)
+		return false
+	DirAccess.make_dir_recursive_absolute(out.get_base_dir())
+	print("render_check: stereo view_count %d (cloud pass %s), render target %s" % [_stereo.captured.size(),
+			world.clouds.effect.stats.get("views", "?"), _stereo.render_target_px])
+	print("render_check: eye images " + _stereo.capture_info)
+	for view in range(_stereo.captured.size()):
+		var path := out.get_basename() + "_eye%d." % view + out.get_extension()
+		var error := _stereo.captured[view].save_png(path)
+		print("render_check: saved %s (error %d)" % [path, error])
+	return true
+
+
 func _process(_delta: float) -> bool:
 	var world: World = _main.get_node("World")
 	world.clock.warp = 0.0
 	# Weather downloads only on request (--weather): a render check must not fetch gigabytes of cloud data.
 	world.weather.enabled = _weather_online()
 	if _frames == 0:
-		if _args.has("cloud_quality"):
-			world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
+		var quality: String = _args.get("cloud_quality", "vr" if _stereo != null else "")  # stereo: the VR preset
+		if quality != "":
+			world.clouds.quality = CloudLayer.Quality.VR if quality == "vr" else CloudLayer.Quality.DESKTOP
 		_show_weather_file(world)
 		if _args.has("cloud_divisor"):  # the march's resolution divisor (the preset's otherwise; tuning runs)
 			var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
@@ -373,8 +459,12 @@ func _process(_delta: float) -> bool:
 		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
 				"../screenshots/render_check.png").simplify_path())
 		DirAccess.make_dir_recursive_absolute(out.get_base_dir())
-		var error := root.get_viewport().get_texture().get_image().save_png(out)
-		print("render_check: saved %s (error %d)" % [out, error])
+		if _stereo != null:
+			if not _save_stereo_images(world, out):
+				return false
+		else:
+			var error := root.get_viewport().get_texture().get_image().save_png(out)
+			print("render_check: saved %s (error %d)" % [out, error])
 		if _repeat_failed or _check_failed:
 			quit(1)
 		return true  # quit
@@ -558,7 +648,7 @@ func _ab_frames(world: World) -> bool:
 		var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") \
 				+ ShaderGlobals.value(&"atmosphere_camera_lo")
 		_ab_anchor_m = camera.distance_to(world.clouds.view_cache_planner.anchor_earth_m)
-		root.get_viewport().get_texture().get_image().save_png(_out_path("_cache"))
+		_save_viewport_png(_out_path("_cache"))
 		world.clouds.view_cache = false
 		var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
 		effect.set_quality(1, float(preset["temporal_weight"]), float(preset["clip_gamma"]))
@@ -589,7 +679,7 @@ func _ab_frames(world: World) -> bool:
 		_check_failed = _check_failed or not ok
 		return true
 	var march := effect.output.get_layer_data(0)
-	root.get_viewport().get_texture().get_image().save_png(_out_path("_march"))
+	_save_viewport_png(_out_path("_march"))
 	if march.get_size() != _ab_cache.get_size():
 		print("render_check: ab_view_cache FAIL: image sizes differ (%s / %s)" % [_ab_cache.get_size(),
 				march.get_size()])
@@ -696,7 +786,7 @@ func _fly_frames_done(world: World) -> bool:
 		if _fly_march_wait > 0:
 			return false
 		var march := clouds.effect.output.get_layer_data(0)
-		root.get_viewport().get_texture().get_image().save_png(_out_path("_fly_%05.1f_march" % (_fly_t - _fly_end
+		_save_viewport_png(_out_path("_fly_%05.1f_march" % (_fly_t - _fly_end
 				+ float(_args.get("frames_for", "30")))))
 		var annulus := _near_annulus(clouds.effect.debug_centre_data("depth"), clouds.effect.centre_low,
 				march.get_size())
@@ -727,7 +817,7 @@ func _fly_frames_done(world: World) -> bool:
 		# The sample: this frame's cache image (drawn last frame at this instant), then the march's at the same instant.
 		_fly_cache_image = clouds.effect.output.get_layer_data(0)
 		_fly_near_sample = clouds.effect.near_shell_frames > _fly_near_at_sample
-		root.get_viewport().get_texture().get_image().save_png(_out_path("_fly_%05.1f" % (_fly_t - _fly_end
+		_save_viewport_png(_out_path("_fly_%05.1f" % (_fly_t - _fly_end
 				+ float(_args.get("frames_for", "30")))))
 		clouds.view_cache = false
 		_fly_march_wait = FRAMES_TO_SETTLE
@@ -1218,6 +1308,7 @@ func _fly_mission(world: World) -> void:
 	target = maxf(target, _mission_target(sim))  # T-0 is the recorded liftoff once it happened
 	_advance(sim, target)
 	world.clock.set_time(sim.advance_to(target))
+	_fly_t = world.clock.tdb_s  # --frames_every flies on from here
 	for i in int(_args.get("view", "0")):
 		world.view_target.cycle(sim, 1)
 	if _args.has("legacy_hud"):

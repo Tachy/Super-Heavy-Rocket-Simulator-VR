@@ -925,6 +925,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Diagnostics
 
+- Stereo harness (world volume plan Task 1): `render_check.gd --stereo=<json>` renders through the multiview path on a
+  stand-in headset (`StereoMockXr`: two views from recorded per-eye projections, eye transforms and render target; the JSON
+  is written by `PerfLog` at a VR start, `Start-VR.cmd --perf-log`, as `data/perf/xr_projections_<stamp>.json`, to be kept
+  as `game/tests/data/pimax_dream_air_projections.json`; until then
+  `game/tests/data/pimax_dream_air_projections_provisional.json`: the stereo test's FOV_LEFT_EYE mirrored, IPD 0.064 m, 3534 x
+  2838 per eye, NOT the headset). `XrManager._ready` enters VR mode on that interface (the main scene builds its VR panel,
+  which is in the eye images), the VR cloud preset is the default, the eye images are `<out>_eye0.png` / `_eye1.png`, the
+  log shows `stereo view_count 2`. Run it WITHOUT `--xr-mode off` (that switches the multiview shader variants off: black
+  images). `--cloud_view=<id>` prepends a gate view's arguments (`CloudViews`, ids `V1 V2 V3 V4_20km V4_80km V5_nadir
+  V5_limb V6_backlit V6_sunset V7` and, for V1 V3 V4_* V5_*, `_analog` / `_era5`; the ERA5 snapshot is
+  `data/weather/cache/era5_1102887.wthr`, 2025-10-25 15:00 UTC; V6_sunset: Sun 3.01 deg up at 2024-04-10T00:26:00 UTC; V7:
+  `--view=1` is the booster); command-line arguments win. `--frames_every` also runs with `--mission` / `--at_event`.
 - `render_check.gd --weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid kg/m^3>,<fraction>` (pinned,
   no service; the overlay shows the pinned snapshot), `--weather=analog` (the shipped analog of `--utc`, pinned),
   `--weather[=s]` / `--weather=online` online; any other value exits with an error. `--cloud_quality=desktop|vr`,

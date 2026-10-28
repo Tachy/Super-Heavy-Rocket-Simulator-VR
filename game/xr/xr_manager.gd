@@ -12,6 +12,7 @@ signal recentered
 
 const VR_ARG := "--vr"
 const DESKTOP_ARG := "--no-xr"
+const STAND_IN_NAME := &"StereoMock"  ## StereoMockXr.get_name()
 const AUTO_RECENTER_DELAY_S := 2.0  ## [E] one recentre after the start (pattern of the sibling project), so the view is in front
 ## VR frame-rate targets (user 2026-10-27: "mit Wetter immer 45 fps, ohne 90"; 45 Hz with the runtime's reprojection
 ## "ist butterweich"): the clouds' view cache gets the half-rate frame's budget.
@@ -37,6 +38,14 @@ func _ready() -> void:
 	interface = XRServer.find_interface("OpenXR")
 	var xr_ready := interface != null and interface.is_initialized()
 	var want_vr := vr_requested()
+	var stand_in := XRServer.primary_interface
+	if stand_in != null and stand_in.get_name() == STAND_IN_NAME and stand_in.is_initialized():
+		# Test harness (render_check --stereo): the stand-in headset (StereoMockXr) set up before the scene tree started
+		# runs the VR path offscreen, so the main scene builds its VR panel and the cloud pass sees two views.
+		_enter_vr(stand_in)
+		print("[XR] offscreen stereo mode (%s)" % stand_in.get_name())
+		_apply()
+		return
 	if xr_ready and not want_vr:
 		# OpenXR started although the desktop was requested: shut it down, its frame loop throttles the desktop
 		interface.uninitialize()
@@ -48,15 +57,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	if xr_ready:
-		camera = XRCamera3D.new()
-		camera.name = "XRCamera3D"
-		origin.add_child(camera)
-		origin.current = true
-		camera.current = true
-		if interface.has_signal("pose_recentered"):
-			interface.connect("pose_recentered", recenter)
-		get_viewport().use_xr = true
-		xr_active = true
+		_enter_vr(interface)
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)  # the headset paces the frames
 		_auto_recenter_timer_s = AUTO_RECENTER_DELAY_S
 		print("[XR] VR mode")
@@ -66,6 +67,19 @@ func _ready() -> void:
 		xr_active = false
 		print("[XR] desktop mode")
 	_apply()
+
+
+func _enter_vr(vr_interface: XRInterface) -> void:
+	interface = vr_interface
+	camera = XRCamera3D.new()
+	camera.name = "XRCamera3D"
+	origin.add_child(camera)
+	origin.current = true
+	camera.current = true
+	if interface.has_signal("pose_recentered"):
+		interface.connect("pose_recentered", recenter)
+	get_viewport().use_xr = true
+	xr_active = true
 
 
 ## True when this start asked for VR: the `--vr` user argument, not overridden by `--no-xr`, never in headless or

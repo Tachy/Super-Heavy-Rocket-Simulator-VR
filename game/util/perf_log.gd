@@ -12,6 +12,8 @@ extends Node
 ## its last plan filled, the cube's fraction at the full level, the last measured fill interval (GPU ms).
 
 const ARG := "--perf-log"
+const PROJECTION_NEAR_M := 0.2  ## the site view's near plane (OrbitCamera)
+const PROJECTION_FAR_M := 3.0e7  ## OrbitCamera.far
 const SPIKE_MS := 22.0  ## [E] two 90 Hz frames: a frame the headset certainly had to reproject
 
 var _world: Node
@@ -70,6 +72,20 @@ func _ready() -> void:
 		# the per-eye size the runtime asks for: the GPU time scales with it (the desktop proxy is 1440p)
 		print("[PerfLog] XR render target per eye: ", xr_interface.get_render_target_size(),
 				", display refresh: ", xr_interface.get("display_refresh_rate"))
+		_write_projections(dir.path_join("xr_projections_%s.json" % stamp), xr_interface)
+
+
+## The headset's per-eye projections and eye transforms (relative to the head) as JSON, the input of the offscreen stereo
+## harness (StereoMockXr; render_check --stereo=<json>): copy it to game/tests/data/pimax_dream_air_projections.json.
+func _write_projections(path: String, xr_interface: XRInterface) -> void:
+	var record := StereoMockXr.record(xr_interface, PROJECTION_NEAR_M, PROJECTION_FAR_M)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		push_warning("[PerfLog] cannot write %s" % path)
+		return
+	file.store_string(JSON.stringify(record, "	"))
+	file.close()
+	print("[PerfLog] XR projections written to ", path)
 
 
 func _process(delta: float) -> void:
