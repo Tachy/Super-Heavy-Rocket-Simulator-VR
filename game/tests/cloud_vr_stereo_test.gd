@@ -74,6 +74,7 @@ func _initialize() -> void:
 			for azimuth in [0.0, 0.3]:  # straight ahead and 17 deg to the right
 				_check_point(near_m, distance_m, azimuth)
 	_test_centre_view()
+	_test_centre_equiangular()
 	_test_centre_size_hysteresis()
 	for wall_m in [50.0, 2000.0, 20000.0]:
 		_test_centre_gather(wall_m)
@@ -261,6 +262,57 @@ func _test_centre_view() -> void:
 	_check(half_angle <= CloudCentreView.MAX_HALF_ANGLE_RAD + 1.0e-9,
 			"centre view of a very wide canted pair: capped at %.1f deg (%.3f deg)"
 			% [rad_to_deg(CloudCentreView.MAX_HALF_ANGLE_RAD), rad_to_deg(half_angle)])
+
+
+## CloudCentreView.equiangular (old march cost study 2026-10-29): the march's warp (cloud_pass.gdshaderinc
+## cloud_equiangular_ndc, c and h from the corner rays) and the eyes' inverse (cloud_centre_position with
+## CloudCentreView.warp) take a head direction back to itself; the image keeps the rectilinear one's density on the axis
+## and has fewer pixels; its pixel angle is uniform.
+func _test_centre_equiangular() -> void:
+	var size := Vector2i(3530, 2834)
+	var before := CloudCentreView.equiangular
+	for cant in [0.0, deg_to_rad(10.0)]:
+		var eyes := _eye_projections(1.0, cant)
+		CloudCentreView.equiangular = false
+		var rect := CloudCentreView.build(eyes, size, 3)
+		CloudCentreView.equiangular = true
+		var eq := CloudCentreView.build(eyes, size, 3)
+		var projection: Projection = eq["projection"]
+		var warp: Vector4 = eq["warp"]
+		var worst := 0.0
+		for u in [Vector2(-1, -1), Vector2(0.37, -0.81), Vector2(0, 0), Vector2(0.93, 0.5), Vector2(1, 1)]:
+			# the march: u -> ndc -> head ray (the shader's c, h from the corner rays)
+			var tp := CloudCentreView._tangents(_head_ray(projection, Vector2(1, 1)))
+			var tm := CloudCentreView._tangents(_head_ray(projection, Vector2(-1, -1)))
+			var c := 0.5 * (tp + tm)
+			var h := 0.5 * (tp - tm)
+			var ndc := Vector2.ZERO
+			for axis in [0, 1]:
+				var a := lerpf(atan(c[axis] - h[axis]), atan(c[axis] + h[axis]), 0.5 * (u[axis] + 1.0))
+				ndc[axis] = (tan(a) - c[axis]) / h[axis]
+			var ray := _head_ray(projection, ndc)
+			# the eyes: the ray's far point -> ndc -> u (CloudCentre warp)
+			var clip := _clip(projection, ray * 1.0e6)
+			var back := Vector2(clip.x / clip.w, clip.y / clip.w)
+			var cw := Vector2(warp.x, warp.z)
+			var hw := Vector2(warp.y, warp.w)
+			for axis in [0, 1]:
+				var lo := atan(cw[axis] - hw[axis])
+				back[axis] = 2.0 * (atan(cw[axis] + hw[axis] * back[axis]) - lo) / (atan(cw[axis] + hw[axis]) - lo) - 1.0
+			worst = maxf(worst, (back - u).length())
+		_check(worst < 1.0e-6, "equiangular centre, cant %.0f deg: march warp and eye inverse round trip (max %s)"
+				% [rad_to_deg(cant), String.num_scientific(worst)])
+		var low_rect: Vector2i = rect["low"]
+		var low_eq: Vector2i = eq["low"]
+		var ratio := float(low_eq.x * low_eq.y) / float(low_rect.x * low_rect.y)
+		_check(ratio < 0.8, "equiangular centre, cant %.0f deg: %s instead of %s pixels (%.2f x)"
+				% [rad_to_deg(cant), str(low_eq), str(low_rect), ratio])
+		# the axis pixel's angle: the rectilinear image's there (the same centre resolution)
+		var axis_rect: float = rect["pixel_angle"]
+		var axis_eq: float = eq["pixel_angle"]
+		_check(absf(axis_eq / axis_rect - 1.0) < 0.02,
+				"equiangular centre: pixel angle %.4f mrad (rectilinear on the axis %.4f)" % [axis_eq * 1.0e3, axis_rect * 1.0e3])
+	CloudCentreView.equiangular = before
 
 
 ## The runtime's field of view jitters by a hair from frame to frame (Pimax, VR run 2026-10-27: the centre height

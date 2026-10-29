@@ -637,6 +637,19 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference); 384 and 768 gave the same image; the
   desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %). The near / far hand-over band 20 / 34 km in both
   (above); the far tier's march takes at most the preset's max steps.
+- **Equiangular VR centre image** (fidelity flag `CloudCentreView.equiangular`, default off; user argument
+  `--cloud_equiangular`, or the environment `STARSIM_OM_EQUIANGULAR=1`; old march cost study 2026-10-29): the VR centre
+  image (march, outline pass, refine) is uniform in angle per axis at the densest eye's density on the axis, instead of
+  rectilinear (whose pixels shrink in angle toward the edges by 1 / (1 + t^2)). The march maps its image coordinate u to
+  the projection's ndc through t = c + h ndc, angle = mix(atan(c - h), atan(c + h), (u + 1) / 2)
+  (`cloud_equiangular_ndc`, c / h from the projection's corner rays; flag `CloudView.temporal.y`); the eyes' upsample
+  inverts it with the same c / h (`CloudCentre.warp`, `CloudCentreView.warp`; `cloud_centre_position`). The pixel angle
+  (band limit) is the angle span / rows. Pimax Dream Air at divisor 3: 924 x 747 instead of 1377 x 946 pixels
+  (0.53 x); the axis resolution is unchanged, the periphery gets the axis' angular resolution instead of up to 3 x it
+  (crops `screenshots/cloud-world-volume/t8_cmp_*_eq*.jpg`: 0.8-3.8 % of the eye pixels differ by more than 8 of 255,
+  softer only toward the edges). Deterministic march only (the jittered march's reprojection assumes the rectilinear
+  image). Unit check: `cloud_vr_stereo_test` (round trip march warp / eye inverse, pixel count, axis pixel angle).
+  Cost in `vr-performance.md` "Old march in VR stereo".
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

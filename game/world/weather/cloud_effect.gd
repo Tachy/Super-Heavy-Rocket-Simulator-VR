@@ -95,7 +95,7 @@ const TENT_RADIUS_DETERMINISTIC := 1.0
 const TENT_RADIUS_JITTERED := 2.0
 const VIEW_BLOCK_SIZE := 4 * 64 + 5 * 16
 const EYES_BLOCK_SIZE := 4 * 64 + 16  ## CloudEyes: two clip_from_head, two inv_projection, eye sizes
-const CENTRE_BLOCK_SIZE := 64 + 2 * 16  ## CloudCentre: clip_from_earth, sizes, params
+const CENTRE_BLOCK_SIZE := 64 + 3 * 16  ## CloudCentre: clip_from_earth, sizes, params, warp
 ## Render callbacks a replaced image waits before it is freed (frames in flight may still sample it).
 const FREE_DELAY_CALLBACKS := 3
 ## The shape prefilter's kernel choice (_shape_prefilter_needed): its start footprint (core cloud_noise.hpp
@@ -793,13 +793,19 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			else world_to_earth * (view_to_world.basis * scene.get_view_eye_offset(0))
 	var centre_full := Vector2(low) * _divisor if stereo else Vector2(size)
 	var centre_clip := centre_projection * Projection(view_to_world.affine_inverse()) * earth_to_world
-	_rd.buffer_update(_centre["buffer"], 0, VIEW_BLOCK_SIZE, _view_block(centre_projection, view_to_world,
-			world_to_earth, _centre["previous"], centre_full, low, camera_delta, _centre["valid"], params,
-			centre_eye).to_byte_array())
+	var centre_block := _view_block(centre_projection, view_to_world, world_to_earth, _centre["previous"], centre_full,
+			low, camera_delta, _centre["valid"], params, centre_eye)
+	# The equiangular centre image (CloudCentreView.equiangular; stereo only): the march's flag (CloudView temporal.y)
+	# and the eyes' warp (CloudCentre warp; 0: rectilinear).
+	var warp: Vector4 = centre_view.get("warp", Vector4.ZERO) if stereo else Vector4.ZERO
+	if warp != Vector4.ZERO:
+		centre_block[4 * 16 + 4 * 4 + 1] = 1.0
+	_rd.buffer_update(_centre["buffer"], 0, VIEW_BLOCK_SIZE, centre_block.to_byte_array())
 	_centre["previous"] = centre_clip
 	var centre_bytes := _matrix_floats(centre_clip)
 	centre_bytes.append_array([centre_full.x, centre_full.y, low.x, low.y, 1.0 if stereo else 0.0, pixel_angle,
 			tent_max, 1.0 if deterministic and debug == 0 else 0.0])
+	centre_bytes.append_array([warp.x, warp.y, warp.z, warp.w])
 	_rd.buffer_update(_centre_buffer, 0, CENTRE_BLOCK_SIZE, centre_bytes.to_byte_array())
 	var march_set1: Array = [_ubo(_centre["buffer"]), _tex(1, nearest_clamp, buffers.get_depth_layer(0, false)),
 			_image(2, _centre["color"]), _image(3, _centre["depth"])]

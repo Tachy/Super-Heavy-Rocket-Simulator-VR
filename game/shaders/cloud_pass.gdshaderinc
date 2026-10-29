@@ -65,7 +65,8 @@ layout(set = 1, binding = 0, std140) uniform CloudView {
 	vec4 eye_earth;            // xyz: the eye's offset from the head (camera), Earth-local axes (m); 0 on the desktop;
 	                           // w: the frame index mod 4096 (the sub-pixel shape offsets' sequence)
 	vec4 temporal;             // x: the history's clip - 0: the neighbourhood's min / max; > 0: its mean +- x standard
-	                           // deviations (VR: noise inside the range keeps the history; CloudLayer.PRESETS)
+	                           // deviations (VR: noise inside the range keeps the history; CloudLayer.PRESETS);
+	                           // y: 1 = the VR centre image is equiangular (CloudCentreView.equiangular)
 } cloud_view;
 
 // Distance [m] from the camera (the head) of a pixel's depth (reversed Z: 1 near, 0 far = no geometry) through a
@@ -84,14 +85,37 @@ float cloud_scene_distance(vec2 pixel_centre, float depth) {
 	return cloud_scene_distance_in(cloud_view.inv_projection, cloud_view.sizes.xy, pixel_centre, depth);
 }
 
-// Head-space (view) unit direction of the ray through a full-resolution position.
-vec3 cloud_ray_view(vec2 pixel_centre) {
-	vec2 ndc = pixel_centre / cloud_view.sizes.xy * 2.0 - 1.0;  // the renderer's projection: y down (flipped)
+// The head-space unit direction through a clip-space ndc of this view's projection.
+vec3 cloud_ray_view_ndc(vec2 ndc) {
 	// The renderer's per-eye projection already contains the eye offset (inverse: clip -> head space), so one unprojected
 	// point is not on the eye's ray. Two depths of the same pixel are: their difference is the eye's ray direction.
 	vec4 a = cloud_view.inv_projection * vec4(ndc, 0.5, 1.0);
 	vec4 b = cloud_view.inv_projection * vec4(ndc, 1.0, 1.0);
 	return normalize(a.xyz / a.w - b.xyz / b.w);
+}
+
+// The equiangular centre image (CloudCentreView.equiangular, cloud_view.temporal.y = 1): the image coordinate u in
+// [-1, 1] per axis is uniform in the angle atan(t) of the head-space tangent t = c + h ndc, which the projection makes
+// linear in its ndc; returns that ndc. c, h from the projection's corner rays (CloudCentreView.warp: the eyes' upsample
+// inverts it with the same values).
+vec2 cloud_equiangular_ndc(vec2 u) {
+	vec3 rp = cloud_ray_view_ndc(vec2(1.0));
+	vec3 rm = cloud_ray_view_ndc(vec2(-1.0));
+	vec2 tp = rp.xy / max(-rp.z, 1.0e-6);
+	vec2 tm = rm.xy / max(-rm.z, 1.0e-6);
+	vec2 c = 0.5 * (tp + tm);
+	vec2 h = 0.5 * (tp - tm);
+	vec2 angle = mix(atan(c - h), atan(c + h), 0.5 * (u + 1.0));
+	return (tan(angle) - c) / h;
+}
+
+// Head-space (view) unit direction of the ray through a full-resolution position.
+vec3 cloud_ray_view(vec2 pixel_centre) {
+	vec2 ndc = pixel_centre / cloud_view.sizes.xy * 2.0 - 1.0;  // the renderer's projection: y down (flipped)
+	if (cloud_view.temporal.y > 0.5) {
+		ndc = cloud_equiangular_ndc(ndc);
+	}
+	return cloud_ray_view_ndc(ndc);
 }
 
 // Earth-local unit direction of the ray through a full-resolution position.
@@ -1959,6 +1983,7 @@ layout(set = 1, binding = 5, std140) uniform CloudCentre {
 	mat4 clip_from_earth;
 	vec4 sizes;
 	vec4 params;
+	vec4 warp;  // the equiangular centre image: (c_x, h_x, c_y, h_y), tangent = c + h ndc (CloudCentreView.warp); 0: off
 } cloud_centre;
 
 // [E] Sharpness of the depth weight: a factor e^-1 per 1/4 of a e-fold distance ratio (|ln(D / D_i)| = 0.25: a
@@ -2000,6 +2025,13 @@ float cloud_depth_weight(float scene_m, float d) {
 vec2 cloud_centre_position(vec3 offset) {
 	vec4 clip = cloud_centre.clip_from_earth * vec4(offset, 1.0);
 	vec2 ndc = clip.w > 0.0 ? clip.xy / clip.w : vec2(0.0);
+	if (cloud_centre.warp.y != 0.0) {
+		// the equiangular centre image (cloud_equiangular_ndc's inverse)
+		vec2 c = cloud_centre.warp.xz;
+		vec2 h = cloud_centre.warp.yw;
+		vec2 lo = atan(c - h);
+		ndc = 2.0 * (atan(c + h * ndc) - lo) / (atan(c + h) - lo) - 1.0;
+	}
 	vec2 low = cloud_centre.sizes.zw;
 	return clamp((ndc * 0.5 + 0.5) * low, vec2(0.5), low - 0.5);
 }

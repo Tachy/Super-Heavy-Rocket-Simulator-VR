@@ -615,3 +615,29 @@ light fetches) / occupied steps of eye 0 (the distance-field reads of the step r
 - Stereo (22.5 MP per eye): not run (ruling R3: only with V1 desktop <= 15 ms). Extrapolated from V1's 91 ns per pixel:
   ~2.1 s per eye, V3 ~4.1 s - beyond the Windows TDR limit; the full-resolution kernel stays the tiers' reference
   (Task 8).
+
+## Old march in VR stereo (old march cost study, 2026-10-29)
+
+Stereo harness at the recorded Pimax projections (`render_check --stereo=res://tests/data/pimax_dream_air_projections.json
+--cloud_method=old --no_view_cache --fixed_exposure --gpu_time=120 --gpu_passes`; render target 3534 x 2838 per eye =
+the headset's 5294 x 4250 under Pimax FSR 1.5). Views: G = `V1_era5` (ground, ERA5 cumulus), D = `V3_era5` (9 km over
+the broken deck), H = `V1_era5 --elevation=2` (toward the horizon). With 120 frames runs repeat to +-0.5 ms (20 frames
+scattered up to +-40 %). Report `.superpowers/sdd/2026-10-28-cloud-world-volume/old-march-cost-report.md`, logs
+`t8_*.log` there, images `screenshots/cloud-world-volume/t8_*`.
+
+- Pixels: the centre image is the rectilinear union of both eyes, 4130 x 2839 = 11.7 MP at divisor 1 (1.17 x one eye's
+  width); divisor 2 2.93 MP, 3 1.30 MP, 4 0.73 MP. No supersampling beyond the runtime's target.
+- Divisor 3, ms (frame / cloud pass / march / refine): G 31.1 / 24.0 / 17.2 / 5.7, D 41.7 / 30.6 / 23.5 / 5.0,
+  H 30.3 / 23.2 / 16.0 / 5.8; upsample 1.5-2.2, the scene without clouds 2.7 (G) - 5.5 (D). Divisor 2 (20 frames):
+  G 61 / 53, D 76 / 65 ms (the user's ~10 fps at 1/2); divisor 4: G 24 / 17, D 30 / 21 ms.
+- A cloud-free sky still costs ~4 ms of march (every ray's empty steps).
+- Distance bands (masked runs, march ms incl. ~4 ms fixed): G 0-2 km 5.9, 2-10 km 7.3, 10-50 km 11.4, > 50 km 5.2;
+  D 8.1 / 6.7 / 27.4 / 6.4 - the 10-50 km band dominates.
+- Ablations, march / refine ms saved (G | D): light 6.8 / 0.1 | 9.6 / 0; sub-samples 6.0 / 3.0 | 8.2 / 2.1; far tier
+  5.4 / 2.6 | 10.5 / 2.7; detail 4.7 / 0.8 | 5.0 / 0.6; field 4.8 / 1.4 | 9.1 / 1.5; air shadow 4.1 / 0.2 |
+  5.2 / 0.2; air 0 | 0; outline pass 0.6 + 5.7 | 0.5 + 5.0. Almost every ablation saves ~5 ms whatever it removes: the
+  kernel is bound by its size (registers / occupancy), not by one fetch class. Exact clear-air shortcuts added to it
+  (2-fetch field emptiness test: G 0, D -1.6 ms; skipping the erosion deep inside a shape: +2.8 / +6.7 ms) confirm it.
+- Equiangular centre image (`CloudCentreView.equiangular`, default off; `weather-clouds.md`): divisor 3 march
+  G 16.3 -> 10.5, D 23.5 -> 14.1, H 16.0 -> 9.7 ms; frame G 30.9 -> 25.4, D 41.7 -> 31.2, H 30.3 -> 24.2 ms;
+  divisor 2 G 36.5, D 55.7 ms frame.

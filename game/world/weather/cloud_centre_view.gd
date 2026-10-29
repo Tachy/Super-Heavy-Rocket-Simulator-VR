@@ -14,6 +14,13 @@ const FALLBACK_FAR_M := 1.0e9
 ## field of view jitters by a hair per frame (Pimax, VR run 2026-10-27: 946 / 947 rows), a quality preset or a resize
 ## changes it by far more. 1 % of a march pixel's density is invisible.
 const SIZE_HYSTERESIS := 0.01
+## Fidelity flag (old march cost study 2026-10-29, default off): the centre image uniform in angle per axis at the
+## centre's pixel density instead of rectilinear (whose pixels shrink in angle toward the edges by 1 / (1 + t^2): the
+## Pimax union spends ~1.9 x the pixels of a uniform-angle image on the same centre resolution). User argument
+## --cloud_equiangular (or the environment STARSIM_OM_EQUIANGULAR=1). Needs the deterministic march (the jittered
+## march's temporal reprojection assumes the rectilinear image).
+static var equiangular := OS.get_environment("STARSIM_OM_EQUIANGULAR") == "1" \
+		or "--cloud_equiangular" in OS.get_cmdline_user_args()
 
 
 ## {projection, low, pixel_angle} of the centre view for these eye projections (clip <- head space, the renderer's
@@ -46,6 +53,14 @@ static func build(view_projections: Array[Projection], view_size: Vector2i, divi
 	var centre := Projection.create_depth_correction(true) * Projection.create_frustum(union_min.x * near_m,
 			union_max.x * near_m, union_min.y * near_m, union_max.y * near_m, near_m, FALLBACK_FAR_M)
 	var size := (union_max - union_min) * density / divisor
+	if equiangular:
+		# The pixels uniform in angle per axis at the densest eye's density (pixels per tangent unit = per radian at
+		# the axis): the angle spans instead of the tangent spans (cloud_pass.gdshaderinc cloud_equiangular_ndc).
+		var angles := Vector2(atan(union_max.x) - atan(union_min.x), atan(union_max.y) - atan(union_min.y))
+		size = angles * density / divisor
+		var low_eq := Vector2i(maxi(ceili(size.x), 1), maxi(ceili(size.y), 1))
+		return {"projection": centre, "low": low_eq, "pixel_angle": angles.y / float(low_eq.y), "angle_y": angles.y,
+			"warp": warp(centre)}
 	var low := Vector2i(maxi(ceili(size.x), 1), maxi(ceili(size.y), 1))
 	return {"projection": centre, "low": low, "pixel_angle": 2.0 / maxf(absf(centre.y.y) * low.y, 1e-6)}
 
@@ -62,8 +77,20 @@ static func keep_size(view: Dictionary, previous: Vector2i) -> Dictionary:
 	if change.x > SIZE_HYSTERESIS or change.y > SIZE_HYSTERESIS:
 		return view
 	var projection: Projection = view["projection"]
+	if view.has("warp"):
+		return {"projection": projection, "low": previous, "pixel_angle": float(view["angle_y"]) / float(previous.y),
+			"angle_y": view["angle_y"], "warp": view["warp"]}
 	return {"projection": projection, "low": previous,
 		"pixel_angle": 2.0 / maxf(absf(projection.y.y) * previous.y, 1e-6)}
+
+
+## The equiangular warp of a centre projection: (c_x, h_x, c_y, h_y) with the head-space tangent t = c + h ndc along
+## each axis (h signed: the clip's y may run against the tangent's), as cloud_pass.gdshaderinc derives it from the
+## inverse projection (cloud_equiangular_ndc).
+static func warp(projection: Projection) -> Vector4:
+	var tp := _tangents(_ray(projection, Vector2(1.0, 1.0)))
+	var tm := _tangents(_ray(projection, Vector2(-1.0, -1.0)))
+	return Vector4(0.5 * (tp.x + tm.x), 0.5 * (tp.x - tm.x), 0.5 * (tp.y + tm.y), 0.5 * (tp.y - tm.y))
 
 
 ## Head-space direction through a clip-space ndc: the difference of two unprojected depths (the eye's offset is inside

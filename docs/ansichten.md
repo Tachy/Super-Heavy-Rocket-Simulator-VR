@@ -210,7 +210,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Überspringen → alter March), **F8** die Auflösung der Wolken (1, 1/1,5, 1/2,
   1/3 der Bildpunkte je Achse). Beides gilt am Desktop und in VR und steht mit der Bildrate im Info-Text unter der
   Wetterzeile ("Wolken: ..."); mit gewähltem Verfahren ist der Sicht-Cache aus. Startwerte über die Argumente
-  `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light` und `--cloud_divisor=<n>`.
+  `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light` und `--cloud_divisor=<n>`. Mit `--cloud_equiangular` [Test 2026-10-29] rechnet
+  die VR-Wolkenmitte gleichwinklig statt rechtwinklig (gleiche Schärfe in der Bildmitte, etwa halb so viele
+  Wolken-Bildpunkte, zum Rand hin weicher).
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
   (nach F12 neu gesetzt), nicht am Kopf festgeklebt; das Zeit-Panel liegt oben links auf derselben Fläche und wird mit
   einem Mauszeiger bedient (die Maus ist gefangen; Tab, F1 und F12 gehen an das Spiel, nicht an das Panel). Die
