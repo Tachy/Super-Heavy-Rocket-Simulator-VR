@@ -84,8 +84,8 @@ func poll(surface_distance_m := 1.0e6) -> Dictionary:
 	var roll := rotation_rate_rad_s(_axis("stick", "roll"), rotation_deadzone, expo, max_rate)
 	var pitch := rotation_rate_rad_s(_axis("stick", "pitch"), rotation_deadzone, expo, max_rate)
 	var yaw := rotation_rate_rad_s(_axis("stick", "yaw"), rotation_deadzone, expo, max_rate)
-	# All three translation axes (user 2026-10-29): full deflection = the distance to the nearest surface (Earth, Moon,
-	# Sun) x speed_per_distance_hz, at least speed_floor_mps; logarithmic over speed_decades below that.
+	# All three translation axes (user 2026-10-29): full deflection = the distance to the nearest surface (Earth, Moon)
+	# x speed_per_distance_hz, at least speed_floor_mps; logarithmic over speed_decades below that.
 	var v_max := maxf(surface_distance_m * _number("speed_per_distance_hz"), _number("speed_floor_mps"))
 	var v_min := v_max * pow(10.0, -_number("speed_decades"))
 	var speed_deadzone := _number("speed_deadzone")

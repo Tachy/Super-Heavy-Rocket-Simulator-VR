@@ -432,8 +432,8 @@ func _update_free_camera() -> void:
 	camera.free_basis = pose["basis"]
 
 
-## The free camera's distance to the nearest surface of Earth (WGS84 ellipsoid, no terrain), the Moon (sphere) and the
-## Sun (sphere): its translation speed scales with it (FreeCameraControl.poll).
+## The free camera's distance to the nearest surface of Earth (WGS84 ellipsoid, no terrain) or the Moon (sphere): its
+## translation speed scales with it (FreeCameraControl.poll). The Sun is only a disc (no body to fly to): not counted.
 func _free_surface_distance_m() -> float:
 	var p := camera.position_gcrf_m
 	var r := p.length()
@@ -443,8 +443,7 @@ func _free_surface_distance_m() -> float:
 	var surface := a * b / sqrt(b * b * (1.0 - sin_lat * sin_lat) + a * a * sin_lat * sin_lat)
 	var earth := r - surface
 	var moon := (p - moon_gcrf_m).length() - MOON_RADIUS_M
-	var sun := (p - sun_apparent_from_earth_m).length() - SUN_RADIUS_M
-	return minf(earth, minf(moon, sun))
+	return minf(earth, moon)
 
 
 func _update_camera(t: float) -> void:
