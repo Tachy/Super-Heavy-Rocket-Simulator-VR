@@ -154,15 +154,19 @@ layout(rg16f, set = 1, binding = 1) uniform writeonly image3D baked_a_out;
 
 // The old march's soft-edge ramp at camera + offset (cloud_extinction_in_cell's terms, detail band-limited at
 // footprint_m): x the ramp sum (types mixed by their weights), y the largest signed edge coordinate of the types
-// present, z the extinction scale (1/m), w 1 where the field has cloud here.
-vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m) {
+// present, z the extinction scale (1/m), w 1 where the field has cloud here. extra_state: detail levels the march adds
+// per sample (CLOUD_BAKED_DETAIL: level 1 in level 0) - the threshold and the edge mean are those of the state with
+// them (their erosion is the march's), so the march's sum keeps the cloud fraction (fix 1: with the bake's own state's
+// threshold the march's erosion shrank every near outline by tens of metres and tore its rim into fragments).
+vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state) {
 	vec2 lat_lon = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset);
 	CloudCell cell = cloud_field(lat_lon, h);
 	if (cell.fraction < CLOUD_MIN_FRACTION || cell.extinction <= 0.0) {
 		return vec4(0.0, -CLOUD_BAKED_X_MAX, 0.0, 0.0);
 	}
 	float state = cloud_detail_state(footprint_m);
-	float threshold = cloud_threshold(cell.fraction, state);
+	float state_t = min(state + extra_state, float(cloud_detail_levels));
+	float threshold = cloud_threshold(cell.fraction, state_t);
 	vec3 types = cloud_type_weights(cell);
 	float detail = state > 0.0 ? cloud_detail_perturbation(offset, state) : 0.0;
 	float ramp = 0.0;
@@ -176,7 +180,7 @@ vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m) {
 			x_max = max(x_max, x);
 		}
 	}
-	float m = texture(cloud_edge_mean, cloud_table_uv(cell.fraction, state)).r;
+	float m = texture(cloud_edge_mean, cloud_table_uv(cell.fraction, state_t)).r;
 	return vec4(ramp, x_max, cell.extinction / max(m, 1.0e-4), 1.0);
 }
 
@@ -215,12 +219,19 @@ void main() {
 	float x_max = -CLOUD_BAKED_X_MAX;
 	float scale = 0.0;
 	float scale_n = 0.0;
+	// The march's per-sample detail level (level 1 in level 0): its full weight (the march's at any footprint it has
+	// in level 0, <= ~13 m at divisor 2), counted in the threshold's state.
+#ifdef CLOUD_BAKED_DETAIL
+	float extra_state = k == 0 && cloud_detail_levels > 1 ? 1.0 : 0.0;
+#else
+	const float extra_state = 0.0;
+#endif
 	for (int kz = 0; kz < taps_v; kz++) {
 		for (int ky = 0; ky < taps_h; ky++) {
 			for (int kx = 0; kx < taps_h; kx++) {
 				vec3 f = (vec3(kx, ky, kz) + 0.5) / vec3(taps_h, taps_h, taps_v) - 0.5;
 				vec3 p = g + f * vec3(c, c, dz);
-				vec4 r = cloud_baked_ramp_at(cloud_baked_offset_of(si, p.x, p.y, p.z), p.z, 0.5 * c);
+				vec4 r = cloud_baked_ramp_at(cloud_baked_offset_of(si, p.x, p.y, p.z), p.z, 0.5 * c, extra_state);
 				ramp += r.x;
 				x_max = max(x_max, r.y);
 				scale += r.z;
@@ -442,11 +453,21 @@ float cloud_baked_o(int si, ivec3 texel) {
 // The extinction (1/m) at a march point (uvw in level k, camera offset, pixel footprint): the baked field plus, with
 // CLOUD_BAKED_DETAIL in level 0, one fetch of the detail's level 1 (62.5 m cells; the bake holds level 0) at the
 // pixel's band limit near the edge - the old march's erosion term (cloud_detail_perturbation) on the edge coordinate.
-float cloud_baked_beta(int si, int k, vec3 uvw, vec3 offset, float footprint_m) {
+// gap_x: how far the point lies outside any cloud the per-sample detail could add, in edge widths (the signed edge
+// coordinate below the detail's reach; <= 0 within it) - the clear march's distance estimate.
+float cloud_baked_beta_gap(int si, int k, vec3 uvw, vec3 offset, float footprint_m, out float gap_x) {
 	vec2 a = cloud_baked_a(si, uvw);
+	gap_x = a.y > 0.0 ? -a.x : CLOUD_BAKED_X_MAX;
 #ifdef CLOUD_BAKED_DETAIL
+	// The detail's reach in edge widths: down (erosion) its full amplitude, up only its lifted part at the detail's
+	// largest value 1 (cloud_detail_lift_bound's term: ~1.8 widths against ~14 down).
 	float reach = abs(cloud_level_amplitude[1]) / max(cloud_edge_width.x, 1.0e-6);
-	if (k == 0 && a.y > 0.0 && a.x > -reach && a.x < 1.0 + reach) {
+	float lift_reach = cloud_level_lift[1] * max(cloud_level_amplitude[1], 0.0) * (1.0 - cloud_detail_mean)
+			/ max(cloud_edge_width.x, 1.0e-6);
+	if (k == 0) {
+		gap_x -= lift_reach;
+	}
+	if (k == 0 && a.y > 0.0 && a.x > -lift_reach && a.x < 1.0 + reach) {
 		float w1 = clamp(log2(CLOUD_DETAIL_TILE_M / 16.0 / max(footprint_m, 1.0e-3)) - 1.0, 0.0, 1.0);
 		if (w1 > 0.0 && cloud_detail_levels > 1) {
 			float width_noise = cloud_baked_b(si, uvw).w;
@@ -461,12 +482,28 @@ float cloud_baked_beta(int si, int k, vec3 uvw, vec3 offset, float footprint_m) 
 	return cloud_baked_extinction(a);
 }
 
+float cloud_baked_beta(int si, int k, vec3 uvw, vec3 offset, float footprint_m) {
+	float gap_x;
+	return cloud_baked_beta_gap(si, k, uvw, offset, footprint_m, gap_x);
+}
+
 // [E] Steps per ray at most; the shortest step (m); the bisections of a cloud entry; the in-cloud step weight limit
 // (the old march's CLOUD_MAX_STEP_WEIGHT: a step's share of the pixel at most 0.15 / T).
 const int CLOUD_BAKED_MAX_STEPS = 768;
 const float CLOUD_BAKED_MIN_STEP_M = 4.0;
 const int CLOUD_BAKED_BISECTIONS = 3;
 const float CLOUD_BAKED_STEP_WEIGHT = 0.15;
+// [E] The clear march near an edge (fix 1): metres per edge width of the distance estimate (the edge width is the
+// shape value's median increment over 20-40 m, constants.hpp cloud_edge_width_min_m) and the shortest clear step;
+// the in-cloud step's limit as a fraction of the cell (half a cell left wood-grain contours and facets in the near
+// rims: the trapezoid over a thin lens changes with the step's phase); both only while the ray's scaled transmittance
+// is above CLOUD_BAKED_FINE_TRANSMITTANCE (behind a dense part the coarse steps' errors are not seen). (Measured:
+// 10 m / 8 m and 1/8 cell, the finest tried, looked the same as these.)
+const float CLOUD_BAKED_EDGE_STEP_M = 20.0;
+const float CLOUD_BAKED_MIN_CLEAR_STEP_M = 16.0;
+const float CLOUD_BAKED_FINE_STEP_CELLS = 0.25;
+const float CLOUD_BAKED_COARSE_STEP_CELLS = 0.5;
+const float CLOUD_BAKED_FINE_TRANSMITTANCE = 0.3;
 // [E] How far past a block's exit a skip lands (m, relative to the cell): the next sample lies inside the next block.
 const float CLOUD_BAKED_EXIT_NUDGE = 0.01;
 // [E] The band's height tolerance (m) for the float32 heights at its crossings.
@@ -579,12 +616,18 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 				t_clear = t;
 				continue;
 			}
-			// An occupied block: one sample per cell.
-			float beta = cloud_baked_beta(si, k, cloud_baked_uvw(si, k, gx, gy, h), eye + dir * t, pixel_angle * t);
+			// An occupied block: a sample per cell far from any edge, nearer the edge coordinate's distance estimate (fix 1:
+			// one sample per 100 m cell missed the rims' thin parts ray by ray - holes, speckles and stairs at near
+			// outlines), never below the pixel's footprint.
+			float gap_x;
+			float beta = cloud_baked_beta_gap(si, k, cloud_baked_uvw(si, k, gx, gy, h), eye + dir * t, pixel_angle * t,
+					gap_x);
 			if (beta <= 0.0) {
 				CLOUD_COUNT_STEP(false)
 				t_clear = t;
-				t += cell_step;
+				t += transmittance_sc > CLOUD_BAKED_FINE_TRANSMITTANCE
+						? clamp(gap_x * CLOUD_BAKED_EDGE_STEP_M, max(CLOUD_BAKED_MIN_CLEAR_STEP_M, pixel_angle * t), cell_step)
+						: cell_step;
 				continue;
 			}
 			// The entry: bisected between the last clear sample and this one (the outline found, not sampled).
@@ -611,12 +654,14 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 			inside = true;
 			continue;
 		}
-		// In cloud: a step of at most the step weight (the old march's dense limit) and half a cell, integrated by the
-		// trapezoid over the extinction at its ends (a layer thinner than the step still counts).
+		// In cloud: a step of at most the step weight (the old march's dense limit) and a quarter / half a cell
+		// (CLOUD_BAKED_FINE_STEP_CELLS), integrated by the trapezoid over the extinction at its ends (a layer thinner than
+		// the step still counts).
 		CLOUD_COUNT_STEP(true)
 		float allowed = CLOUD_BAKED_STEP_WEIGHT / transmittance_sc;
 		float dense = allowed < 1.0 ? -log(1.0 - allowed) / (k_sc * max(beta_last, 1.0e-7)) : 1.0e30;
-		float step_m = clamp(dense, CLOUD_BAKED_MIN_STEP_M, 0.5 * cell_step);
+		float step_m = clamp(dense, CLOUD_BAKED_MIN_STEP_M, (transmittance_sc > CLOUD_BAKED_FINE_TRANSMITTANCE
+				? CLOUD_BAKED_FINE_STEP_CELLS : CLOUD_BAKED_COARSE_STEP_CELLS) * cell_step);
 		step_m = min(step_m, d1 - t);
 		float te = t + step_m;
 		float he = cloud_height_along(ray, te);

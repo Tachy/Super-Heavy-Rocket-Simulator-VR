@@ -659,11 +659,17 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (shape + detail - threshold) / edge width, box-averaged as a ramp over taps at <= half a shape texel; extinction
   scale), RGBA8 sqrt-coded light (Sun transmittance from a 32-sample march toward the Sun through the bake, the Sun's
   multiple-scattering source and the sky's source for the view from the anchor, the edge-width noise), R8 occupancy per
-  4^3 cells. Per frame: one march per ray through the levels - empty blocks skipped to their exit, cell-size steps,
-  the entry bisected 3 x, in-cloud trapezoid steps limited by the old march's step weight and half a cell, the phase
-  function per ray (J = P T_s + J_ms), one detail fetch (level 1) near edges in level 0 (`STARSIM_BAKED_DETAIL=0`
-  off), the air in front and the air shadow's loss (16 segments x 2 points in this kernel instead of 32 x 3). No outline
-  pass. Re-bake (into the second set, ~117 dispatches of <= 3.6 ms, 21-27 ms GPU in all, one per frame) when the camera
+  4^3 cells. Per frame: one march per ray through the levels - empty blocks skipped to their exit, in occupied blocks
+  clear steps from the edge coordinate's distance estimate (20 m per edge width beyond the detail's lift, >= 16 m and
+  the pixel footprint, <= a cell), the entry bisected 3 x, in-cloud trapezoid steps limited by the old march's step
+  weight and a quarter cell (half a cell and cell steps in clear air once the scaled transmittance is < 0.3), the
+  phase function per ray (J = P T_s + J_ms), one detail fetch (level 1) near edges in level 0 (`STARSIM_BAKED_DETAIL=0`
+  off; level 0's bake takes the threshold and edge mean of the state with level 1, so the march's erosion keeps the
+  cloud fraction), the air in front and the air shadow's loss (16 segments x 2 points in this kernel instead of 32 x
+  3). No outline pass (fix 1, 2026-10-29: the near rims' holes, stairs, wood-grain contours and shrunken, torn
+  outlines came from the cell-size clear steps, the half-cell in-cloud steps and the bake's threshold; march +0.3-0.5 ms
+  in the mock's fast GPU state; report `baked-fix1-report.md`). Diagnostics: `STARSIM_BAKED_DEFINES=<A,B>` (extra
+  defines on every kernel), `STARSIM_BAKED_MEMORY_MB`, `STARSIM_BAKED_CELL0`. Re-bake (into the second set, ~117 dispatches of <= 3.6 ms, 21-27 ms GPU in all, one per frame) when the camera
   is 3.2 km from the anchor, the Sun turns 0.5 deg or the weather changes; the new set is cross-faded in over 8 frames
   (both sets marched, the renders mixed). Memory 216 MB per set (two sets). Beyond level 5: no cloud. Moon light not
   baked. Stereo mock, divisor 2, equiangular, 120 frames (frame / cloud pass / march ms): old G 35.8 / 28.4 / 20.8,

@@ -13,7 +13,8 @@ extends RefCounted
 ## largest (each level doubles it up to that). [E] prototype figures: level 0 spans +-12.8 km at 100 m, level 5
 ## +-410 km at 3.2 km.
 static var columns := 256
-static var cell0_m := 100.0
+static var cell0_m := 100.0 if OS.get_environment("STARSIM_BAKED_CELL0") == "" \
+		else float(OS.get_environment("STARSIM_BAKED_CELL0"))
 static var levels := 6
 static var dz0_m := 50.0
 static var dz_max_m := 400.0
@@ -23,6 +24,11 @@ static var detail := OS.get_environment("STARSIM_BAKED_DETAIL") != "0"
 ## Checks: > 0 forces a re-bake (and its cross-fade) this many frames after the last one is shown (environment
 ## STARSIM_BAKED_REBAKE_FRAMES; the swap's cost and look in a measurement).
 static var rebake_frames := int(OS.get_environment("STARSIM_BAKED_REBAKE_FRAMES"))
+## Diagnostics (measurements only): STARSIM_BAKED_DEFINES=<A,B,..> adds shader defines to every kernel,
+## STARSIM_BAKED_MEMORY_MB overrides the memory cap, STARSIM_BAKED_CELL0 level 0's horizontal cell (m).
+static var extra_defines := OS.get_environment("STARSIM_BAKED_DEFINES").split(",", false)
+static var memory_cap_bytes := MEMORY_CAP_BYTES if OS.get_environment("STARSIM_BAKED_MEMORY_MB") == "" \
+		else float(OS.get_environment("STARSIM_BAKED_MEMORY_MB")) * 1024.0 * 1024.0
 ## [E] The volumes' memory cap (both sets; the brief's ~512 MB): the vertical cells double until a set fits half.
 const MEMORY_CAP_BYTES := 512.0 * 1024.0 * 1024.0
 ## [E] Bake budget (measured 2026-10-29: <= ~2 ms GPU per dispatch): voxels per frame per pass kind (each dispatch a slice range of one level); render_check scales it.
@@ -88,14 +94,20 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 		march.append("CLOUD_CENTRE")
 	var fade := march.duplicate()
 	fade.append("CLOUD_BAKED_FADE")
+	# The density bake knows the march's per-sample detail (its threshold state counts it).
+	var density := PackedStringArray(["CLOUD_BAKED_DENSITY"])
+	if detail:
+		density.append("CLOUD_BAKED_DETAIL")
 	var kernels := {"march": march, "march_fade": fade,
-		"density": PackedStringArray(["CLOUD_BAKED_DENSITY"]), "occupancy": PackedStringArray(["CLOUD_BAKED_OCCUPANCY"]),
+		"density": density, "occupancy": PackedStringArray(["CLOUD_BAKED_OCCUPANCY"]),
 		"light": PackedStringArray(["CLOUD_BAKED_LIGHT"]), "band": PackedStringArray(["CLOUD_BAKED_BAND"])}
 	for name: String in kernels:
+		var defines: PackedStringArray = kernels[name]
+		defines.append_array(extra_defines)
 		var start_us := Time.get_ticks_usec()
 		var src := RDShaderSource.new()
 		src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-		src.source_compute = CloudShaderPort.build(kernels[name], files).source
+		src.source_compute = CloudShaderPort.build(defines, files).source
 		var spirv := rd.shader_compile_spirv_from_source(src)
 		if spirv.compile_error_compute != "":
 			push_error("CloudBaked %s: %s" % [name, spirv.compile_error_compute])
@@ -258,7 +270,7 @@ func _levels(plan: Dictionary, bottom: float, top: float) -> void:
 		var bytes := float(columns) * columns * depth * 8.0 + float(columns / BLOCK) * (columns / BLOCK) * odepth
 		plan.merge({"band": Vector2(bottom, bottom + height), "dz": dz, "slab": slab, "oslab": oslab, "onz": onz,
 			"depth": depth, "odepth": odepth, "bytes": bytes}, true)
-		if 2.0 * bytes <= MEMORY_CAP_BYTES and depth <= 2048:
+		if 2.0 * bytes <= memory_cap_bytes and depth <= 2048:
 			return
 		dz0 *= 2.0
 
