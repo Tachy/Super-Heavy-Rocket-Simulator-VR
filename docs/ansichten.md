@@ -205,13 +205,12 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Tab wieder auf das gesteuerte Fahrzeug, folgt sie ihm erneut (ebenso, wenn das gewählte Objekt verschwindet oder
   ein neuer Flug beginnt). **F1** alter HUD. **F12** zentriert in VR neu (außerdem automatisch 2 s nach dem
   Start).
-- **Wolken-Prototyp** [Prototyp 2026-10-29, Live-Test in VR]: **F7** schaltet das Wolkenverfahren um (alter March →
-  Hybrid mit Volumenlicht und Überspringen → Hybrid mit Volumenlicht ohne Überspringen → Hybrid mit altem Licht und
-  Überspringen → alter March), **F8** die Auflösung der Wolken (1, 1/1,5, 1/2,
-  1/3 der Bildpunkte je Achse). Beides gilt am Desktop und in VR und steht mit der Bildrate im Info-Text unter der
+- **Wolken-Prototyp** [Prototyp 2026-10-29, Live-Test in VR]: **F7** vergleicht den alten March mit rechtwinkliger und
+  mit gleichwinkliger VR-Wolkenmitte ("alter March" ↔ "alter March, winkelgleich"; aus einem Hybrid zurück zum alten
+  March), **F8** die Auflösung der Wolken (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse). Beides gilt am Desktop und in VR und steht mit der Bildrate im Info-Text unter der
   Wetterzeile ("Wolken: ..."); mit gewähltem Verfahren ist der Sicht-Cache aus. Startwerte über die Argumente
-  `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light` und `--cloud_divisor=<n>`. Mit `--cloud_equiangular` [Test 2026-10-29] rechnet
-  die VR-Wolkenmitte gleichwinklig statt rechtwinklig (gleiche Schärfe in der Bildmitte, etwa halb so viele
+  `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light` und `--cloud_divisor=<n>`. Die Hybride sind nur noch über `--cloud_method` erreichbar. Mit `--cloud_equiangular` [Test 2026-10-29] startet
+  die VR-Wolkenmitte gleichwinklig: sie rechnet gleichwinklig statt rechtwinklig (gleiche Schärfe in der Bildmitte, etwa halb so viele
   Wolken-Bildpunkte, zum Rand hin weicher).
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
   (nach F12 neu gesetzt), nicht am Kopf festgeklebt; das Zeit-Panel liegt oben links auf derselben Fläche und wird mit

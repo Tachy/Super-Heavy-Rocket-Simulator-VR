@@ -237,7 +237,7 @@ var edge_curl := 1.0:
 		ShaderGlobals.set_value(&"cloud_edge_curl", value)
 ## The hybrid march prototype (2026-10-29; the user tests it live in VR): the march method (CloudEffect.MarchMethod -
 ## today's march, the hybrid with the volume's light and skipping, the same without skipping, the hybrid with today's
-## light; key F7 cycles them, user argument --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light) and the march's resolution divisor (0: the preset's; key F8 cycles
+## light; key F7 toggles the old march's equiangular centre image (from a hybrid: back to the old march), user argument --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light) and the march's resolution divisor (0: the preset's; key F8 cycles
 ## DIVISORS, user argument --cloud_divisor=<x>; spatial only). Choosing a method switches the view cache off (the
 ## user's goal: no view cache); the world volume's upkeep runs from the first hybrid frame on (volume_needed: the
 ## settled upkeep is ~0.003 ms, and a restart would refill the whole volume).
@@ -1171,8 +1171,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == METHOD_KEY:
-		march_method = ((int(march_method) + 1) % METHOD_LABELS.size()) as CloudEffect.MarchMethod
-		print("CloudLayer: march method %s" % METHOD_LABELS[march_method])
+		# User 2026-10-29: F7 compares only what is relevant - the old march with the rectilinear vs the equiangular
+		# centre image (CloudCentreView.equiangular). The hybrids stay reachable through --cloud_method.
+		if march_method != CloudEffect.MarchMethod.OLD:
+			march_method = CloudEffect.MarchMethod.OLD
+			CloudCentreView.equiangular = false
+		else:
+			CloudCentreView.equiangular = not CloudCentreView.equiangular
+		print("CloudLayer: march method %s" % _method_label())
 		get_viewport().set_input_as_handled()
 	elif key.keycode == DIVISOR_KEY:
 		var next := DIVISORS[0]
@@ -1187,12 +1193,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## The HUD's line of the live toggles (German UI): the method (and whether the hybrid draws yet), the divisor, the keys.
 func status_line() -> String:
-	var method: String = METHOD_LABELS[march_method]
+	var method := _method_label()
 	if march_method != CloudEffect.MarchMethod.OLD and not effect.hybrid_shown:
 		method += " (Volumen lädt)"
 	var view := "" if march_method != CloudEffect.MarchMethod.OLD or not view_cache else ", Sichtcache"
 	return "Wolken: %s%s, Auflösung 1/%s  [F7 Verfahren, F8 Auflösung]" % [method, view,
 			String.num(divisor(), 1).trim_suffix(".0")]
+
+
+func _method_label() -> String:
+	var label: String = METHOD_LABELS[march_method]
+	if march_method == CloudEffect.MarchMethod.OLD and CloudCentreView.equiangular:
+		label += ", winkelgleich"
+	return label
 
 
 ## Ratio r of the light march's geometric intervals: first_m (r^n - 1) / (r - 1) = near_m (core
