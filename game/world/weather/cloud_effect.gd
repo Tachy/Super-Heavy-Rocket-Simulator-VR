@@ -37,8 +37,10 @@ const HYBRID_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/cl
 		"res://shaders/cloud_hybrid.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
 ## The cloud march's method (CloudLayer.march_method, live toggle F7): today's march; the hybrid with the volume's light
 ## and its empty-space skipping; the same without the skipping (measured faster on the desktop: the skip's data-dependent
-## steps cost more than the fetches they save); the hybrid with today's light and the skipping (the comparison).
-enum MarchMethod { OLD, HYBRID, HYBRID_NO_SKIP, HYBRID_OLD_LIGHT }
+## steps cost more than the fetches they save); the hybrid with today's light and the skipping (the comparison); the
+## baked volume prototype (CloudBaked, "Weg 2" 2026-10-29: shape and light baked in a world-fixed clipmap, a cheap
+## march through it).
+enum MarchMethod { OLD, HYBRID, HYBRID_NO_SKIP, HYBRID_OLD_LIGHT, BAKED }
 ## The hybrid kernels' family names per method (the variants append _centre, _prefilter, _refine as the march's) and
 ## their defines.
 const HYBRID_FAMILIES := {MarchMethod.HYBRID: "hybridv", MarchMethod.HYBRID_NO_SKIP: "hybridn",
@@ -227,6 +229,10 @@ var _volume_upkeep := false
 var _hybrid_failed := {}
 ## Render thread, the last frame (diagnostics, checks): the hybrid march drew it.
 var hybrid_shown := false
+## The baked volume prototype (MarchMethod.BAKED; created on its first use) and whether it drew the last frame.
+var baked: CloudBaked
+var baked_shown := false
+var _baked_failed := false
 
 
 func _init() -> void:
@@ -635,6 +641,9 @@ func _notification(what: int) -> void:
 		_shaders.erase("spike_far")  # the spike's own (freed below)
 		if spike != null:
 			spike.free_all()
+		_shaders.erase("baked")  # the baked volume's own
+		if baked != null:
+			baked.free_all()
 		for shader: RID in _shaders.values():
 			_rd.free_rid(shader)  # frees the pipelines with them
 		for sampler: RID in _samplers.values():
@@ -734,12 +743,13 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# march (its GPU interval: CloudWorldVolume.UPKEEP_STAMP).
 	var t7_volume: bool = world_volume != null and ShaderGlobals.value(&"cloud_world_volume") == true \
 			and _march_method == MarchMethod.OLD
-	if world_volume != null and (t7_volume or _volume_upkeep or _march_method != MarchMethod.OLD):
+	var hybrid := _march_method != MarchMethod.OLD and _march_method != MarchMethod.BAKED
+	if world_volume != null and (t7_volume or _volume_upkeep or hybrid):
 		world_volume.run(_rd, world_volume.take(), set0, camera)
 	# The hybrid march (CLOUD_HYBRID) once the volume shows a level: its family in the march's place (the same images,
 	# outline pass, temporal copy and upsample); until then (and while a check holds the volume back) today's march.
 	var hybrid_set: Array[RDUniform] = []
-	if _march_method != MarchMethod.OLD and world_volume != null and not CloudEffect.volume_march_hold:
+	if hybrid and world_volume != null and not CloudEffect.volume_march_hold:
 		hybrid_set = world_volume.march_uniforms(camera)
 	var family := "march_centre" if stereo else "march"
 	if not hybrid_set.is_empty():
@@ -901,6 +911,26 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			march_set0 = UniformSetCacheRD.get_cache(spike.far_shader, 0, set0)
 			march_set1.append_array(extra)
 			refine = false
+	# The baked volume prototype (CloudBaked): its march in the march's place once a set is baked (its bake dispatches
+	# run in frame(), before the march); no outline pass. Until then today's march.
+	baked_shown = false
+	if _march_method == MarchMethod.BAKED and cache_mode == CacheMode.OFF and debug == 0 and not _baked_failed:
+		if baked == null:
+			baked = CloudBaked.new()
+			if not baked.setup(_rd, stereo):
+				baked = null
+				_baked_failed = true
+		if baked != null:
+			var baked_set := baked.frame(set0, _samplers, camera)
+			if not baked_set.is_empty():
+				var kernel := baked.march_kernel()
+				_shaders["baked"] = baked.shader(kernel)
+				_pipelines["baked"] = baked.pipeline(kernel)
+				march = "baked"
+				march_set0 = UniformSetCacheRD.get_cache(_shaders["baked"], 0, set0)
+				march_set1.append_array(baked_set)
+				refine = false
+				baked_shown = true
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
 	var refine_set1 := []
@@ -984,6 +1014,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		near_shell_frames += 1 if near_shell else 0
 	stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": view_cache_shown,
 		"covering": view_cache_shown and bool(_cache_shown["covering"]), "near_shell": near_shell, "hybrid": hybrid_shown,
+		"baked": baked_shown,
 		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
 
 

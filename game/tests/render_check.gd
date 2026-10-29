@@ -19,7 +19,7 @@
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
 #          resolution divisor instead, fractional allowed: 1.5),
-#          --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light (the hybrid march prototype, CloudLayer.march_method: the view cache off, the world volume's upkeep on and settled
+#          --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light|baked (the hybrid march / baked volume prototypes, CloudLayer.march_method: the view cache off, the world volume's upkeep on and settled
 #          first), --cloud_debug=1..4 (the cloud
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
@@ -629,7 +629,9 @@ func _gpu_frames(world: World) -> bool:
 		_sweep_wait -= 1
 		return false
 	if _args.has("gpu_passes"):
-		_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() else 0
+		var baked_ok := world.clouds.march_method != CloudEffect.MarchMethod.BAKED 				or (world.clouds.effect.baked != null and (world.clouds.effect.baked.settled()
+				or (CloudBaked.rebake_frames > 0 and world.clouds.effect.baked.ready)))  # forced re-bakes: measured
+		_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() and baked_ok else 0
 		if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
 			return false
 		_record_gpu_passes()

@@ -650,6 +650,26 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   softer only toward the edges). Deterministic march only (the jittered march's reprojection assumes the rectilinear
   image). Unit check: `cloud_vr_stereo_test` (round trip march warp / eye inverse, pixel count, axis pixel angle).
   Cost in `vr-performance.md` "Old march in VR stereo".
+- **Baked volume prototype ("Weg 2", 2026-10-29; live VR look)**: `CloudBaked` (`cloud_baked.gd`,
+  `cloud_baked.gdshaderinc`), `CloudEffect.MarchMethod.BAKED`, third F7 state "Volumen-Prototyp" (after "alter March,
+  winkelgleich"), user argument `--cloud_method=baked`; the default stays the old march. Shape and light are baked
+  once into a world-fixed clipmap about an anchor (the camera at the bake): 6 levels of 256 x 256 columns, level 0
+  100 m (+-12.8 km) doubling to 3.2 km (+-410 km), vertical 100 / 200 / 400 m over the band of the field's cloudy layers
+  (a band kernel scans the region; ERA5 2025-10-25: 0-16.8 km). Per voxel RG16F (signed edge coordinate x =
+  (shape + detail - threshold) / edge width, box-averaged as a ramp over taps at <= half a shape texel; extinction
+  scale), RGBA8 sqrt-coded light (Sun transmittance from a 32-sample march toward the Sun through the bake, the Sun's
+  multiple-scattering source and the sky's source for the view from the anchor, the edge-width noise), R8 occupancy per
+  4^3 cells. Per frame: one march per ray through the levels - empty blocks skipped to their exit, cell-size steps,
+  the entry bisected 3 x, in-cloud trapezoid steps limited by the old march's step weight and half a cell, the phase
+  function per ray (J = P T_s + J_ms), one detail fetch (level 1) near edges in level 0 (`STARSIM_BAKED_DETAIL=0`
+  off), the air in front and the air shadow's loss (16 segments x 2 points in this kernel instead of 32 x 3). No outline
+  pass. Re-bake (into the second set, ~117 dispatches of <= 3.6 ms, 21-27 ms GPU in all, one per frame) when the camera
+  is 3.2 km from the anchor, the Sun turns 0.5 deg or the weather changes; the new set is cross-faded in over 8 frames
+  (both sets marched, the renders mixed). Memory 216 MB per set (two sets). Beyond level 5: no cloud. Moon light not
+  baked. Stereo mock, divisor 2, equiangular, 120 frames (frame / cloud pass / march ms): old G 35.8 / 28.4 / 20.8,
+  D 78.0 / 60.6 / 48.0, H 58.5 / 45.0 / 35.3; baked G 22.0 / 8.6 / 5.1, D 27.2 / 9.7 / 5.8, H 22.1 / 8.4 / 4.8 (the
+  upsample's ~3.3 ms is in both). Details, images and rulings: `.superpowers/sdd/2026-10-28-cloud-world-volume/
+  baked-proto-report.md`; kernels in `tests/hybrid_compile_check.gd` (`-- --baked_only`).
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

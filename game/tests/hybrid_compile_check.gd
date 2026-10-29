@@ -1,5 +1,6 @@
 extends SceneTree
-## Compiles every hybrid march kernel variant (CloudEffect.HYBRID_FAMILIES x _centre / _prefilter / _refine) once and
+## Compiles every hybrid march kernel variant (CloudEffect.HYBRID_FAMILIES x _centre / _prefilter / _refine) and the
+## baked volume prototype's kernels (CloudBaked, desktop and stereo) once and
 ## exits 1 when one fails (the hybrid march prototype compiles its kernels lazily in the game: a broken variant would
 ## only show on the first toggle). Needs a GPU (no --headless):
 ## godot --path game --script res://tests/hybrid_compile_check.gd
@@ -31,7 +32,9 @@ func _compile_all() -> void:
 		push_error("hybrid_compile_check: no RenderingDevice (or the march's kernels failed)")
 		_failed = 1
 		return
-	for family: String in CloudEffect.HYBRID_FAMILIES.values():
+	# -- --baked_only: the baked volume's kernels alone (a quick check while working on them)
+	var families: Array = [] if "--baked_only" in OS.get_cmdline_user_args() else CloudEffect.HYBRID_FAMILIES.values()
+	for family: String in families:
 		for centre in ["", "_centre"]:
 			for prefilter in ["", "_prefilter"]:
 				for refine in ["", "_refine"]:
@@ -39,4 +42,11 @@ func _compile_all() -> void:
 					if not _effect._ensure_hybrid_kernel(name):
 						print("hybrid_compile_check: %s FAILED" % name)
 						failed += 1
+	# The baked volume prototype (CloudBaked; compiled on its first use in the game): desktop and stereo kernels.
+	for stereo in [false, true]:
+		var baked := CloudBaked.new()
+		if not baked.setup(_effect._rd, stereo):
+			print("hybrid_compile_check: baked (stereo %s) FAILED" % stereo)
+			failed += 1
+		baked.free_all()
 	_failed = failed

@@ -1373,11 +1373,21 @@ global uniform bool cloud_air_shadow;
 global uniform float cloud_air_shadow_top_m;
 // Checks only (cloud_check.gd section 14; -1 in the game): >= 0 replaces T_c at every point by this value.
 global uniform float cloud_debug_air_transmittance;
+#ifdef CLOUD_BAKED_MARCH
+// The baked volume prototype (cloud_baked.gdshaderinc): 16 segments x 2 points [E] - the full 32 x 3 cost ~5 ms of its
+// ~8 ms march at divisor 2 in the stereo mock (2026-10-29).
+const int CLOUD_AIR_SHADOW_SEGMENTS = 16;
+#else
 const int CLOUD_AIR_SHADOW_SEGMENTS = 32;
+#endif
 // [E] T_c per segment: the mean of this many points spread evenly over it (fixed per pixel) - one midpoint aliased the
 // near map's cloud shadows into regular stripes across the sky (the segment spacing against the shadows' spacing);
 // 3 x 32 points show the rays as 96 segments do, at a third of the table lookups.
+#ifdef CLOUD_BAKED_MARCH
+const int CLOUD_AIR_SHADOW_SUBSAMPLES = 2;
+#else
 const int CLOUD_AIR_SHADOW_SUBSAMPLES = 3;
+#endif
 
 // The single scattering (unphased Rayleigh, unphased Mie) at (r, mu, mu_s, nu) (atm_combined_scattering's lookup).
 void cloud_single_scattering(float r, float rho, float mu, float mu_s, float nu, bool ground, out vec3 rayleigh,
@@ -1680,6 +1690,10 @@ void cloud_shade_near(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 n
 // The eye ray's end at the near shell (m from the eye; <= 0: the whole ray), cloud_view_cache.gdshaderinc.
 float cloud_near_shell_end(vec3 eye_offset, vec3 dir);
 #endif
+#ifdef CLOUD_BAKED_MARCH
+// The baked volume prototype's ray (cloud_baked.gdshaderinc, compiled after this file).
+void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m);
+#endif
 #ifdef CLOUD_SPIKE_FAR
 // World volume plan Task 2, spike S (throw-away, removed in Task 13): the far tier's ray, cloud_spike.gdshaderinc.
 void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m);
@@ -1873,6 +1887,8 @@ void main() {
 	float cloud_m;
 #if defined(CLOUD_SPIKE_FAR)
 	cloud_spike_shade(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, color_t, cloud_m);  // spike S
+#elif defined(CLOUD_BAKED_MARCH)
+	cloud_baked_shade(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, color_t, cloud_m);  // baked volume
 #elif defined(CLOUD_NEAR_SHELL)
 	// The near shell (cloud view cache Task 5): up to the shell around the anchor of the cache tile the ray meets there.
 	vec3 dir_near = cloud_ray_earth(centre);

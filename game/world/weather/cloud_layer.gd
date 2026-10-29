@@ -237,18 +237,21 @@ var edge_curl := 1.0:
 		ShaderGlobals.set_value(&"cloud_edge_curl", value)
 ## The hybrid march prototype (2026-10-29; the user tests it live in VR): the march method (CloudEffect.MarchMethod -
 ## today's march, the hybrid with the volume's light and skipping, the same without skipping, the hybrid with today's
-## light; key F7 toggles the old march's equiangular centre image (from a hybrid: back to the old march), user argument --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light) and the march's resolution divisor (0: the preset's; key F8 cycles
+## light, the baked volume prototype CloudBaked; key F7 cycles the old march -> the old march with the equiangular
+## centre image -> the baked volume prototype (from a hybrid: back to the old march), user argument
+## --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light|baked) and the march's resolution divisor (0: the preset's; key F8 cycles
 ## DIVISORS, user argument --cloud_divisor=<x>; spatial only). Choosing a method switches the view cache off (the
 ## user's goal: no view cache); the world volume's upkeep runs from the first hybrid frame on (volume_needed: the
 ## settled upkeep is ~0.003 ms, and a restart would refill the whole volume).
 const DIVISORS: Array[float] = [1.0, 1.5, 2.0, 3.0, 4.0]
 const METHOD_ARGUMENTS := {"old": CloudEffect.MarchMethod.OLD, "hybrid": CloudEffect.MarchMethod.HYBRID,
 	"hybrid_no_skip": CloudEffect.MarchMethod.HYBRID_NO_SKIP,
-	"hybrid_old_light": CloudEffect.MarchMethod.HYBRID_OLD_LIGHT}
+	"hybrid_old_light": CloudEffect.MarchMethod.HYBRID_OLD_LIGHT, "baked": CloudEffect.MarchMethod.BAKED}
 const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March",
 	CloudEffect.MarchMethod.HYBRID: "Hybrid, Volumenlicht + Überspringen",
 	CloudEffect.MarchMethod.HYBRID_NO_SKIP: "Hybrid, Volumenlicht",
-	CloudEffect.MarchMethod.HYBRID_OLD_LIGHT: "Hybrid, altes Licht + Überspringen"}
+	CloudEffect.MarchMethod.HYBRID_OLD_LIGHT: "Hybrid, altes Licht + Überspringen",
+	CloudEffect.MarchMethod.BAKED: "Volumen-Prototyp"}
 ## The world volume's bake budget factor while a hybrid method waits for its first shown level (see _update_world_volume).
 const HYBRID_FILL_SCALE := 4.0
 var _fill_boosted := false
@@ -266,7 +269,7 @@ var march_method := CloudEffect.MarchMethod.OLD:
 	set(value):
 		march_method = value
 		view_cache = false
-		_volume_used = _volume_used or value != CloudEffect.MarchMethod.OLD
+		_volume_used = _volume_used or (value != CloudEffect.MarchMethod.OLD and value != CloudEffect.MarchMethod.BAKED)
 		_apply_march_method()
 var divisor_override := 0.0:
 	set(value):
@@ -683,7 +686,7 @@ func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 		top = maxf(top, float(slot.get("top_m", 0.0)))
 	# A hybrid method chosen live starts the volume cold in flight: until it shows a level it bakes at the cold-start
 	# transition budget (HYBRID_FILL_SCALE x; T5 ruling: ~6 ms), not the 1.5 ms upkeep (minutes in VR at low fps).
-	var filling := march_method != CloudEffect.MarchMethod.OLD and not effect.hybrid_shown
+	var filling := march_method != CloudEffect.MarchMethod.OLD and march_method != CloudEffect.MarchMethod.BAKED 			and not effect.hybrid_shown
 	if filling:
 		world_volume_schedule.budget_scale = HYBRID_FILL_SCALE
 		_fill_boosted = true
@@ -1183,13 +1186,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == METHOD_KEY:
-		# User 2026-10-29: F7 compares only what is relevant - the old march with the rectilinear vs the equiangular
-		# centre image (CloudCentreView.equiangular). The hybrids stay reachable through --cloud_method.
-		if march_method != CloudEffect.MarchMethod.OLD:
+		# User 2026-10-29: F7 compares only what is relevant - the old march with the rectilinear centre image, with the
+		# equiangular one (CloudCentreView.equiangular), the baked volume prototype (equiangular too: the target
+		# setting), and back. The hybrids stay reachable through --cloud_method.
+		if march_method == CloudEffect.MarchMethod.OLD and not CloudCentreView.equiangular:
+			CloudCentreView.equiangular = true
+		elif march_method == CloudEffect.MarchMethod.OLD:
+			march_method = CloudEffect.MarchMethod.BAKED
+		else:
 			march_method = CloudEffect.MarchMethod.OLD
 			CloudCentreView.equiangular = false
-		else:
-			CloudCentreView.equiangular = not CloudCentreView.equiangular
 		print("CloudLayer: march method %s" % _method_label())
 		get_viewport().set_input_as_handled()
 	elif key.keycode == CUT_KEY:
@@ -1210,7 +1216,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## The HUD's line of the live toggles (German UI): the method (and whether the hybrid draws yet), the divisor, the keys.
 func status_line() -> String:
 	var method := _method_label()
-	if march_method != CloudEffect.MarchMethod.OLD and not effect.hybrid_shown:
+	if march_method == CloudEffect.MarchMethod.BAKED and not effect.baked_shown:
+		method += " (Volumen wird gebacken)"
+	elif march_method != CloudEffect.MarchMethod.OLD and march_method != CloudEffect.MarchMethod.BAKED 			and not effect.hybrid_shown:
 		method += " (Volumen lädt)"
 	var view := "" if march_method != CloudEffect.MarchMethod.OLD or not view_cache else ", Sichtcache"
 	var cut := ", nur bis %d km" % roundi(march_cut_m / 1000.0) if march_cut_m > 0.0 else ""
@@ -1220,7 +1228,9 @@ func status_line() -> String:
 
 func _method_label() -> String:
 	var label: String = METHOD_LABELS[march_method]
-	if march_method == CloudEffect.MarchMethod.OLD and CloudCentreView.equiangular:
+	if march_method != CloudEffect.MarchMethod.BAKED and march_method != CloudEffect.MarchMethod.OLD:
+		return label
+	if CloudCentreView.equiangular:
 		label += ", winkelgleich"
 	return label
 
