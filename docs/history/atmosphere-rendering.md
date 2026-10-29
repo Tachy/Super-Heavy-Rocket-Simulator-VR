@@ -429,3 +429,15 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   `atmosphere_tables_code_version` 3); GPU "scattering / Mie / irradiance RGBAH; ~50 MB VRAM". The single Rayleigh
   scattering was only inside the scattering table (with the multiple orders); Task 9b keeps it apart for the cloud
   shadows on the air.
+
+## City lights (removed 2026-10-29, user: one Earth texture, night by lighting only)
+
+Former model, verbatim from docs/subsystems/eye-adaptation.md:
+
+  - City lights (user ruling 2026-10-25): scene-referred, L = `Atmosphere.CITY_LIGHTS_PEAK_CD_M2` x the night
+    texture's sRGB-decoded texel squared, x T and the aerial perspective (global `earth_city_lights_cd_m2`;
+    `earth.gdshader`, `terrain_earth.gdshader`; before the tables load the display value). Black Marble 2016 is an
+    8-bit visualisation, so the scale is [E]: a saturated white texel (4.9 km) is 0.3 cd/m^2 upward luminance,
+    anchored to lit roads (0.75-1.5 cd/m^2, EN 13201-2 M3-M2) and VIIRS DNB radiances of bright cores (~100-300
+    nW/(cm^2 sr), ~0.1-0.4 cd/m^2, arXiv 2510.02977). Texture stays 8192 x 4096; follow-up: Black Marble VNP46A4 at
+    15 arcsec near the sites, masked by the imagery's urban footprint.

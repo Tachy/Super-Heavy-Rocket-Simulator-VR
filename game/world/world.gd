@@ -595,7 +595,6 @@ func _warm_earth_clouds_shader() -> void:
 func _setup_bodies(data_dir: String) -> void:
 	_earth_material.shader = _earth_shader
 	_earth_material.set_shader_parameter("day_texture", _load_texture(data_dir.path_join("textures/earth_day.jpg")))
-	_earth_material.set_shader_parameter("night_texture", _load_texture(data_dir.path_join("textures/earth_night.jpg")))
 	_earth_material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
 	_earth_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	_sky_material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
@@ -651,7 +650,6 @@ func _setup_earth_terrain(data_dir: String) -> void:
 	material.shader = load("res://shaders/terrain_earth.gdshader")
 	material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
 	material.set_shader_parameter("day_texture_bound", _earth_material.get_shader_parameter("day_texture") != null)
-	material.set_shader_parameter("night_texture", _earth_material.get_shader_parameter("night_texture"))
 	material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
 	material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	ShaderGlobals.set_value("water_wave_steepness", WaterWaves.STEEPNESS)  # constant: set once

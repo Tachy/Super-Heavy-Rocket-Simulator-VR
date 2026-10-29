@@ -78,13 +78,9 @@ shaders:
     peak; half-transparent over a scene-referred background within 0.5 % (limit rgba16f; tolerance 2 % of the peak).
     Map labels (`MapLabel`) draw Label3D's black outline as eight black copies 2.5 font pixels out. The Sun disc
     clamps its scene value at 6e4 (the compute step also clamps and drops NaN).
-  - City lights (user ruling 2026-10-25): scene-referred, L = `Atmosphere.CITY_LIGHTS_PEAK_CD_M2` x the night
-    texture's sRGB-decoded texel squared, x T and the aerial perspective (global `earth_city_lights_cd_m2`;
-    `earth.gdshader`, `terrain_earth.gdshader`; before the tables load the display value). Black Marble 2016 is an
-    8-bit visualisation, so the scale is [E]: a saturated white texel (4.9 km) is 0.3 cd/m^2 upward luminance,
-    anchored to lit roads (0.75-1.5 cd/m^2, EN 13201-2 M3-M2) and VIIRS DNB radiances of bright cores (~100-300
-    nW/(cm^2 sr), ~0.1-0.4 cd/m^2, arXiv 2510.02977). Texture stays 8192 x 4096; follow-up: Black Marble VNP46A4 at
-    15 arcsec near the sites, masked by the imagery's urban footprint.
+  - No city lights (user 2026-10-29): the Earth's night side is the lighting alone (Moon, sky, twilight) on the
+    day imagery; the Black Marble night texture and `earth_city_lights_cd_m2` are removed (former model:
+    docs/history/atmosphere-rendering.md).
   - Glow (`Atmosphere._twilight_glow_luminance`, `_limb_glow_luminance`) [call: view-independent]: enters L_a at
     `GLOW_ADAPTATION_SHARE` 0.5 of the brightest sky. Twilight: Sun below the eye's horizon, brightest sky along the
     Sun's azimuth (elevations 1-40 deg, at least 8 deg from the Sun; azimuth-only sampling is an accepted limit).

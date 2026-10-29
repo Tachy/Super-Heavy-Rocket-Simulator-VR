@@ -134,14 +134,6 @@ license = "NASA Earth Observatory imagery: public domain (credit requested)"
 credit = "NASA Earth Observatory, Reto Stoeckli: Blue Marble Next Generation"
 
 [[source]]
-id = "earth_night"
-name = "Black Marble 2016, 3 km (13500x6750)"
-url = "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg"
-target = "data/raw/earth_night_3km.jpg"
-license = "NASA Earth Observatory imagery: public domain (credit requested)"
-credit = "NASA Earth Observatory, Joshua Stevens, Suomi NPP VIIRS data (Miguel Roman, NASA GSFC): Black Marble 2016"
-
-[[source]]
 id = "moon_color"
 name = "CGI Moon Kit: LROC WAC colour mosaic with polar fill, 4k"
 url = "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif"

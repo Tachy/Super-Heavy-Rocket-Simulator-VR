@@ -66,15 +66,6 @@ const REGOLITH_PHASE_MAX_DEG := 150.0
 const REGOLITH_MU_MIN := 1.0e-3
 ## [D: pi x the tables' 4.24e4 cd/m^2 white plate] TOA illuminance (lux) for the regolith scale before the tables load.
 const NOMINAL_TOA_LUX := 1.3327e5
-## City lights (night-vision fix round I6, user ruling 2026-10-25: scene-referred, through the eye model): the night
-## texture (Black Marble 2016, an 8-bit visualisation without radiometric units: tools/data_pipeline/sources.toml
-## "earth_night") as luminance = this x the sRGB-decoded texel squared (the former shaping, which suppresses the
-## dark-sky noise), so a saturated white texel - a bright urban core averaged over the 4.9 km texel - has this upward
-## luminance (cd/m^2) [E]. Anchors: lit roads have 0.75-1.5 cd/m^2 (EN 13201-2 classes M3-M2 [S]) and cover a fraction
-## of a city's area; VIIRS DNB radiances of bright urban cores, ~100-300 nW/(cm^2 sr) [S: e.g. Elvidge et al. 2017,
-## Int. J. Remote Sens. 38, 5860], are ~0.1-0.4 cd/m^2 with ~260 nW/(cm^2 sr) per lm/m^2 of emitted flux and a
-## Lambertian emitter [S: arXiv 2510.02977, their bridge calibration; site-specific] - 0.3 cd/m^2 lies in both.
-const CITY_LIGHTS_PEAK_CD_M2 := 0.3
 ## [S: NASA Earth Fact Sheet, Bond albedo 0.306] the Earth's light on the Moon (earthshine, earthshine_relative).
 const EARTH_BOND_ALBEDO := 0.306
 ## [S: Lambert-sphere phase integral q = 3/2, A_Bond = p q; e.g. Seager, Exoplanet Atmospheres (2010) ch. 3] the
@@ -273,7 +264,6 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	ShaderGlobals.set_value(&"moon_sun_scene", DAY_EXPOSURE / (sun_au * sun_au))
 	ShaderGlobals.set_value(&"moon_regolith_scale",
 			regolith_scale(float(parameters.get("toa_solar_illuminance_lux", NOMINAL_TOA_LUX))))
-	ShaderGlobals.set_value(&"earth_city_lights_cd_m2", CITY_LIGHTS_PEAK_CD_M2)
 	if not poll():
 		_set_vision(0.0)  # no rods left from an earlier state (review M4)
 		return

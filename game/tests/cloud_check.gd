@@ -710,7 +710,6 @@ func _setup_scene() -> void:
 		material.shader = load("res://shaders/terrain_earth.gdshader")
 		material.set_shader_parameter("day_texture", ImageTexture.create_from_image(albedo))
 		material.set_shader_parameter("day_texture_bound", true)
-		material.set_shader_parameter("night_texture", ImageTexture.create_from_image(black))
 		material.set_shader_parameter("moon_radius_m", 1737400.0)
 		material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	_water_material.set_shader_parameter("water_mask", ImageTexture.create_from_image(white))

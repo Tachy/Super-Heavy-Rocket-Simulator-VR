@@ -316,7 +316,6 @@ func _setup_surfaces() -> void:
 	var black := _constant_texture(Color(0, 0, 0))
 	_earth_material.shader = load("res://shaders/earth.gdshader")
 	_earth_material.set_shader_parameter("day_texture", albedo_texture)
-	_earth_material.set_shader_parameter("night_texture", black)
 	_earth_material.set_shader_parameter("moon_radius_m", 1737400.0)
 	_earth_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	_earth_body.setup(WGS84_A_M, WGS84_FLATTENING, _earth_material)
@@ -325,7 +324,6 @@ func _setup_surfaces() -> void:
 	_terrain_material.shader = load("res://shaders/terrain_earth.gdshader")
 	_terrain_material.set_shader_parameter("day_texture", albedo_texture)
 	_terrain_material.set_shader_parameter("day_texture_bound", true)
-	_terrain_material.set_shader_parameter("night_texture", black)
 	_terrain_material.set_shader_parameter("moon_radius_m", 1737400.0)
 	_terrain_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	_terrain_quad.material_override = _terrain_material

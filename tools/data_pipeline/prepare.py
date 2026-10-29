@@ -4,7 +4,6 @@ Usage: python tools/data_pipeline/prepare.py
 
 Outputs (git-ignored):
   data/textures/earth_day.jpg     equirectangular, lon -180..180, lat 90..-90
-  data/textures/earth_night.jpg   Black Marble, resampled to 8192x4096
   data/textures/moon_color.png    LROC colour mosaic (equirectangular, lon -180..180)
   data/stars/stars.csv            stars to magnitude 7.5: ra_deg, dec_deg, mag, color_index (ICRS / J2000)
 """
@@ -31,9 +30,6 @@ Image.MAX_IMAGE_PIXELS = 200_000_000  # trusted NASA mosaics exceed Pillow's def
 def prepare_textures() -> None:
     TEXTURES.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(RAW / "earth_day_5400.jpg", TEXTURES / "earth_day.jpg")
-    with Image.open(RAW / "earth_night_3km.jpg") as night:
-        night.convert("RGB").resize((8192, 4096), Image.Resampling.LANCZOS).save(
-            TEXTURES / "earth_night.jpg", quality=92)
     with Image.open(RAW / "moon_color_4k.tif") as moon:
         moon.convert("RGB").save(TEXTURES / "moon_color.png", optimize=True)
     print(f"textures -> {TEXTURES}")
