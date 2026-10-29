@@ -671,11 +671,36 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   in the mock's fast GPU state; report `baked-fix1-report.md`). Diagnostics: `STARSIM_BAKED_DEFINES=<A,B>` (extra
   defines on every kernel), `STARSIM_BAKED_MEMORY_MB`, `STARSIM_BAKED_CELL0`. Re-bake (into the second set, ~117 dispatches of <= 3.6 ms, 21-27 ms GPU in all, one per frame) when the camera
   is 3.2 km from the anchor, the Sun turns 0.5 deg or the weather changes; the new set is cross-faded in over 8 frames
-  (both sets marched, the renders mixed). Memory 216 MB per set (two sets). Beyond level 5: no cloud. Moon light not
+  (both sets marched, the renders mixed). Memory 216 MB per set (two sets). Beyond level 5: the flat outer levels (next
+  bullet). Moon light not
   baked. Stereo mock, divisor 2, equiangular, 120 frames (frame / cloud pass / march ms): old G 35.8 / 28.4 / 20.8,
   D 78.0 / 60.6 / 48.0, H 58.5 / 45.0 / 35.3; baked G 22.0 / 8.6 / 5.1, D 27.2 / 9.7 / 5.8, H 22.1 / 8.4 / 4.8 (the
   upsample's ~3.3 ms is in both). Details, images and rulings: `.superpowers/sdd/2026-10-28-cloud-world-volume/
   baked-proto-report.md`; kernels in `tests/hybrid_compile_check.gd` (`-- --baked_only`).
+- **Baked prototype: flat outer levels and the level rule (2026-10-29)**: beyond the volume, levels 6.. of 256 x 256
+  2.5D columns (6.4 km doubling), azimuthal equidistant about their own anchor, over only the visible cap (camera
+  horizon + the 20 km tops' horizon, baked for 1.25 x the height + 2 km, + 0.5 deg, + 2 deg drift; the far side is
+  never baked or fetched): ground 2 levels, ISS 4, 8 600 km 5. Geometry (shared by the sets until the cap or the
+  weather changes; `CLOUD_BAKED_FLAT`): projected cover from 4 x 4 jittered shape taps (field at 2 x 2 points, one
+  sample per field layer, 8 in ice layers) as the volume's signed edge coordinate, the cover, the grid-mean vertical
+  optical depth, top and base. Light per set (`CLOUD_BAKED_FLAT_LIGHT`, 4 dispatches): the old far tier's column model
+  (Monte Carlo table, 3D gain) for the set's anchor view, the phase per pixel; x `CLOUD_BAKED_FLAT_SUN_GAIN` 1.4 [E]
+  (the column model, within 2 % of the old far tier's, lit a deck ~15 % darker than the volume / the old march's
+  shapes). Per pixel: an entry on the top (descending) / base (ascending) shell from a guess fetch (heights only) and
+  a second fetch (F smoothed by four bilinear taps, L, H), the slant cover 1 - (1 - C)^(1 + depth cot / 2 km).
+  Level rule (all levels): l = log2(max(r / inner_0, footprint / c_0)) per sample; level ceil(l), blended toward the
+  next over a band of 0 octaves below 20 km (the approved hard switches; any band cost ~0.17 ms on the ground) growing
+  to 1 octave at 60 km (from above a level's 256 columns end long before the footprint wants the next: its border
+  showed as a square). The volume's last level blends into the flat levels over >= 0.25 octave. Levels finer than the
+  footprint at the nearest possible cloud are neither baked nor marched (bake with 0.8 x the pixel angle, back with
+  1 x): at divisor 2 in the mock (1.39 mrad) level 0 drops above 110 km (back below 92 km), 1: 200 / 164, 2: 380 /
+  308, 3: 741 / 597, 4: 1 462 / 1 174, 5: 2 904 / 2 327 km; memory per set 219 MB on the ground, 72 MB at the ISS.
+  Anchor move trigger max(3.2 km, 0.05 x height above 20 km). Beyond the scaled-space switch (~8 600 km) the far field
+  (earth_clouds.gdshader) draws as before. Stereo mock, divisor 2 (march ms before -> after): ground 1.70 -> 2.02,
+  9 km deck 2.34 -> 2.79, 100 km 0.57 -> 0.86, ISS oblique 0.31 -> 0.42, ISS nadir 0.71 -> 1.01. Bake: first 40-90 ms
+  GPU (dispatches <= 2.9 ms), re-bakes with the geometry kept ~19 ms. Diagnostics: `STARSIM_BAKED_DEFINES=
+  CLOUD_BAKED_FLAT_ONLY | CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND`. Report: `.superpowers/sdd/
+  2026-10-28-cloud-world-volume/baked-outer-report.md`.
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

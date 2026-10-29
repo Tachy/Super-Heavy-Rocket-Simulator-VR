@@ -921,7 +921,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 				baked = null
 				_baked_failed = true
 		if baked != null:
-			var baked_set := baked.frame(set0, _samplers, camera)
+			var baked_set := baked.frame(set0, _samplers, camera, pixel_angle)
 			if not baked_set.is_empty():
 				var kernel := baked.march_kernel()
 				_shaders["baked"] = baked.shader(kernel)
