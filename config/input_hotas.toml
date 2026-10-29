@@ -34,6 +34,7 @@ rotation_deadzone = 0.05
 speed_min_mps = 0.1         # just outside the dead zone
 speed_max_mps = 1.0e7       # full deflection (Earth-Moon in under a minute)
 speed_deadzone = 0.05
+shift_max_mps = 1000.0      # strafe and up/down: LINEAR, full deflection (user 2026-10-29); speed_min/max = rocker only
 roll_axis = 0               # stick left/right
 roll_invert = false
 pitch_axis = 1              # stick forward = nose down

@@ -7,7 +7,7 @@ extends RefCounted
 ## Fallbacks when the file lacks a key (same numbers as the shipped file).
 const DEFAULTS := {
 	"rotation_max_deg_s": 90.0, "rotation_expo": 0.3, "rotation_deadzone": 0.05,
-	"speed_min_mps": 0.1, "speed_max_mps": 1.0e7, "speed_deadzone": 0.05,
+	"speed_min_mps": 0.1, "speed_max_mps": 1.0e7, "speed_deadzone": 0.05, "shift_max_mps": 1000.0,
 	"roll_axis": 0, "pitch_axis": 1, "yaw_axis": 2, "forward_axis": 5, "strafe_axis": 0, "vertical_axis": 1,
 }
 
@@ -53,6 +53,14 @@ static func log_speed_mps(value: float, deadzone: float, v_min_mps: float, v_max
 	return signf(value) * v_min_mps * pow(v_max_mps / v_min_mps, t)
 
 
+## Speed of a linear axis: 0 inside the dead zone, else the dead-zone-rescaled deflection times v_max, signed.
+static func linear_speed_mps(value: float, deadzone: float, v_max_mps: float) -> float:
+	var magnitude := absf(value)
+	if magnitude <= deadzone:
+		return 0.0
+	return signf(value) * minf((magnitude - deadzone) / (1.0 - deadzone), 1.0) * v_max_mps
+
+
 ## Rotation rate of a stick axis: 0 inside the dead zone, else the dead-zone-rescaled deflection through the expo curve
 ## ((1 - expo) x + expo x^3) times the maximum rate, signed.
 static func rotation_rate_rad_s(value: float, deadzone: float, expo: float, max_rate_rad_s: float) -> float:
@@ -88,8 +96,10 @@ func poll() -> Dictionary:
 	var v_max := _number("speed_max_mps")
 	var speed_deadzone := _number("speed_deadzone")
 	var forward := log_speed_mps(_axis("throttle", "forward"), speed_deadzone, v_min, v_max)
-	var strafe := log_speed_mps(_axis("throttle", "strafe"), speed_deadzone, v_min, v_max)
-	var vertical := log_speed_mps(_axis("throttle", "vertical"), speed_deadzone, v_min, v_max)
+	# Strafe and up / down: linear (user 2026-10-29), full deflection = shift_max_mps.
+	var shift_max := _number("shift_max_mps")
+	var strafe := linear_speed_mps(_axis("throttle", "strafe"), speed_deadzone, shift_max)
+	var vertical := linear_speed_mps(_axis("throttle", "vertical"), speed_deadzone, shift_max)
 	# Right-handed rotation about the camera axes: stick forward (value -1) is nose down = negative about +x; twist / roll
 	# to the right are negative about +y / +z (the camera looks along -z, y is up).
 	return {"rates": Vector3(pitch, -yaw, -roll), "velocity": Vector3(strafe, vertical, -forward)}
