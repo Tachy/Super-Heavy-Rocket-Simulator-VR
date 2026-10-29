@@ -91,6 +91,8 @@
 #          also tau_limited_steps, extinction_steps, structure_limited_steps (occupied_steps: steps in occupied space).
 #          Round 2 (Task 2b): --spike_levers=1,2,4,s,t the step rule's levers, --spike_stop=<T> the termination
 #          (_start_spike).
+# Centre image dump: --centre_dump=<file> writes the cloud march's centre image once settled (raw RGBA16F, premultiplied
+#          colour + T, after two int32 width / height) - offline cover statistics (baked prototype step 3).
 # Stereo harness (world volume plan Task 1): --stereo=<json> renders through the multiview path with a stand-in headset
 #          (StereoMockXr: the recorded per-eye projections, eye transforms and render target of the JSON that PerfLog
 #          writes at a VR start, game/tests/data/pimax_dream_air_projections.json) with the VR cloud preset (unless
@@ -554,6 +556,8 @@ func _process(_delta: float) -> bool:
 			_print_counters(world)
 		if _args.has("spike"):
 			_print_centre_stats(world)
+		if _args.has("centre_dump"):
+			_dump_centre(world, String(_args["centre_dump"]))
 		# Default: <repo>/screenshots/ (git-ignored; every test image goes there, user 2026-10-27).
 		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
 				"../screenshots/render_check.png").simplify_path())
@@ -1617,6 +1621,23 @@ func _print_centre_stats(world: World) -> void:
 			luminance / count, _args["spike"]])
 	if CloudSpike.plan_report != "":
 		print("render_check: " + CloudSpike.plan_report)
+
+
+## --centre_dump=<file>: the centre view's march image (RGBA16F: premultiplied colour + T) as raw bytes after a header
+## of two int32 (width, height) - offline cover statistics (cloud alpha = 1 - T per pixel).
+func _dump_centre(world: World, path: String) -> void:
+	var effect: CloudEffect = world.clouds.effect
+	var data := effect.debug_centre_data("color")
+	var low := effect.centre_low
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null or data.size() < 8 * low.x * low.y:
+		print("render_check: centre dump failed (%s)" % path)
+		return
+	file.store_32(low.x)
+	file.store_32(low.y)
+	file.store_buffer(data.slice(0, 8 * low.x * low.y))
+	file.close()
+	print("render_check: centre dump %dx%d -> %s" % [low.x, low.y, path])
 
 
 ## The online wait limit [s] of --weather (900 unless --weather=<seconds>).

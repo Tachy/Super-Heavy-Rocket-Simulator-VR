@@ -1230,3 +1230,36 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   5 %); replaced by the correction at the light nodes (one per half cell): 3.3 %.
 - `CloudShadowEffect.ran_msec` / a 250 ms validity window: a ~100 ms check frame (the full-resolution march) outlasted
   it; the shadow maps switched off and on between frames of an unchanged scene (repeat_identical DIFFER, 1.1 M pixels).
+
+## Baked prototype step 2: flat outer levels (commit e8a0e4a, 2026-10-29), superseded by step 3
+
+- **Flat outer levels and the level rule (step 2)**: beyond the volume, levels 6.. of 256 x 256
+  2.5D columns (6.4 km doubling), azimuthal equidistant about their own anchor, over only the visible cap (camera
+  horizon + the 20 km tops' horizon, baked for 1.25 x the height + 2 km, + 0.5 deg, + 2 deg drift; the far side is
+  never baked or fetched): ground 2 levels, ISS 4, 8 600 km 5. Geometry (shared by the sets until the cap or the
+  weather changes; `CLOUD_BAKED_FLAT`): projected cover from 4 x 4 jittered shape taps (field at 2 x 2 points, one
+  sample per field layer, 8 in ice layers) as the volume's signed edge coordinate, the cover, the grid-mean vertical
+  optical depth, top and base. Light per set (`CLOUD_BAKED_FLAT_LIGHT`, 4 dispatches): the old far tier's column model
+  (Monte Carlo table, 3D gain) for the set's anchor view, the phase per pixel; x `CLOUD_BAKED_FLAT_SUN_GAIN` 1.4 [E]
+  (the column model, within 2 % of the old far tier's, lit a deck ~15 % darker than the volume / the old march's
+  shapes). Per pixel: an entry on the top (descending) / base (ascending) shell from a guess fetch (heights only) and
+  a second fetch (F smoothed by four bilinear taps, L, H), the slant cover 1 - (1 - C)^(1 + depth cot / 2 km).
+  Level rule (all levels): l = log2(max(r / inner_0, footprint / c_0)) per sample; level ceil(l), blended toward the
+  next over a band of 0 octaves below 20 km (the approved hard switches; any band cost ~0.17 ms on the ground) growing
+  to 1 octave at 60 km (from above a level's 256 columns end long before the footprint wants the next: its border
+  showed as a square). The volume's last level blends into the flat levels over >= 0.25 octave. Levels finer than the
+  footprint at the nearest possible cloud are neither baked nor marched (bake with 0.8 x the pixel angle, back with
+  1 x): at divisor 2 in the mock (1.39 mrad) level 0 drops above 110 km (back below 92 km), 1: 200 / 164, 2: 380 /
+  308, 3: 741 / 597, 4: 1 462 / 1 174, 5: 2 904 / 2 327 km; memory per set 219 MB on the ground, 72 MB at the ISS.
+  Anchor move trigger max(3.2 km, 0.05 x height above 20 km). Beyond the scaled-space switch (~8 600 km) the far field
+  (earth_clouds.gdshader) draws as before. Stereo mock, divisor 2 (march ms before -> after): ground 1.70 -> 2.02,
+  9 km deck 2.34 -> 2.79, 100 km 0.57 -> 0.86, ISS oblique 0.31 -> 0.42, ISS nadir 0.71 -> 1.01. Bake: first 40-90 ms
+  GPU (dispatches <= 2.9 ms), re-bakes with the geometry kept ~19 ms. Diagnostics: `STARSIM_BAKED_DEFINES=
+  CLOUD_BAKED_FLAT_ONLY | CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND`. Report: `.superpowers/sdd/
+  2026-10-28-cloud-world-volume/baked-outer-report.md`.
+- Why superseded (step 3, user findings on e8a0e4a and the ruling that the old far field's cover is correct): against
+  the far field at the same camera the step 2 flat levels drew 1.09-1.14 x its mean alpha and 1.23-1.45 x its
+  brightness (the slant cover 1 - (1 - C)^(1 + depth cot / 2 km) over the whole band, the Sun gain 1.4 [E] fitted on one
+  deck); 256-column levels ended long before the footprint wanted the next (lattice, a square at the ISS); the crisp
+  sub-cell outline of 6.4 km+ cells drew blobs. Step 2's per-tap cover itself was optically thick (98.6 % of it from taps
+  of nadir opacity > 0.9 at the ISS view): not haze.

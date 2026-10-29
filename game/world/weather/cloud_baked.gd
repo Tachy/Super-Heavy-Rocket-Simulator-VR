@@ -8,10 +8,13 @@ extends RefCounted
 ## leaves REBAKE_MOVE of the anchor, the Sun turns by REBAKE_SUN_RAD or the weather changes. Owned by CloudEffect
 ## (render thread); CloudEffect marches it in its march's place with MarchMethod.BAKED (until the first set is baked:
 ## today's march).
-## Flat outer levels (2026-10-29): beyond the volume's levels further levels of 2.5D columns (cover, depth, top / base,
-## column-model light), each doubling the cell, over the spherical cap the camera can see (FLAT_* below; the far side is
-## never baked); with the altitude the volume's finer levels drop out (the footprint rule, LEVEL_DROP), from ~4 000 km
-## up the flat levels alone draw the clouds, up to the scaled-space Earth's far field (earth_clouds.gdshader).
+## Flat levels (2026-10-29, step 3): 2.5D columns (cover, opacity-equivalent depth, top / base, column-model light) in
+## up to FLAT_COLUMNS_MAX-wide levels, each doubling the cell, over the spherical cap the camera can see (FLAT_* below;
+## the far side is never baked). Below FLAT_FINE_HEIGHT_M they start beyond the volume (level K, 6.4 km); above it at the
+## footprint's level at the nearest cloud, so from orbit the pixel footprint, not a level's extent, picks the cell, and
+## they take over from a volume level that its extent made coarser than the footprint (the shader's takeover). With the
+## altitude the volume's finer levels drop out (the footprint rule, LEVEL_DROP), up to the scaled-space Earth's far
+## field (earth_clouds.gdshader), which follows the same cover / opacity rule.
 
 ## Columns per side and level 0's horizontal cell; levels (each doubles the cell); the vertical cell of level 0 and the
 ## largest (each level doubles it up to that). [E] prototype figures: level 0 spans +-12.8 km at 100 m, level 5
@@ -55,18 +58,40 @@ const BAND_TOP_MARGIN_M := 200.0
 const SET_FLOATS := 19 * 4
 const GRID_BLOCK_SIZE := 2 * SET_FLOATS * 4 + 16
 const FILES := ["res://shaders/cloud_baked.gdshaderinc"]
-## Flat levels' bindings in the march (F, L, H per set).
-const FLAT_BINDINGS := [[57, 58, 61], [59, 60, 62]]
+## Flat levels' bindings in the march (F, L per set).
+const FLAT_BINDINGS := [[57, 58], [59, 60]]
+## [E] The flat levels' columns per side at most (from orbit the footprint picks the level where a level holds 2 / the
+## pixel angle columns: 1 440 at the mock's 1.39 mrad), their memory cap (both sets: F 8 B and T 4 B shared, L 8 B per
+## set) and the
+## camera height from which they start at the footprint's level and take over from a too-coarse volume level (below it:
+## beyond the volume, level K, as the approved ground look).
+const FLAT_COLUMNS_MAX := 1536
+const FLAT_MEMORY_CAP_BYTES := 300.0 * 1024.0 * 1024.0
+const FLAT_BYTES_PER_COLUMN := 28.0
+const FLAT_FINE_HEIGHT_M := 40000.0
+## [E] Above this camera height the volume is neither baked nor marched: from the shader's takeover heights (40-60 km,
+## cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M) the flat levels draw every cloud (a re-bake brings the
+## volume back below it while the takeover still draws the flat levels). STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER
+## keeps the volume at every height (diagnostics).
+const VOLUME_TOP_M := 62000.0
+static var takeover := not "CLOUD_BAKED_FLAT_NO_TAKEOVER" in extra_defines
+## [E] The flat geometry's height range: re-baked once the camera leaves [h / FLAT_HEIGHT_RANGE, h x FLAT_HEIGHT_RANGE]
+## of its bake height h (+- FLAT_CAP_HEIGHT_MARGIN_M): the columns a level needs follow from the footprint over that range
+## (cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_HEIGHT_RANGE).
+const FLAT_HEIGHT_RANGE := 1.25
+## [E] ... and once the pixel angle grows beyond this factor of the bake's (cloud_baked.gdshaderinc
+## CLOUD_BAKED_FLAT_PIXEL_RANGE).
+const FLAT_PIXEL_RANGE := 1.25
 ## [E] The visible cap's margins (re-bake hysteresis): the cap is baked for the camera height x FLAT_CAP_HEIGHT_FACTOR +
 ## FLAT_CAP_HEIGHT_MARGIN_M, plus the cloud tops' own horizon (CLOUD_TOP_M) and FLAT_CAP_MARGIN_RAD; a re-bake starts
 ## once the camera's own cap outgrows it.
 const FLAT_CAP_HEIGHT_FACTOR := 1.25
 const FLAT_CAP_HEIGHT_MARGIN_M := 2000.0
 const FLAT_CAP_MARGIN_RAD := 0.5 * PI / 180.0
-## [E] Flat columns per frame: of the geometry (16 shape taps x the cloudy layers, 4 field points) and of the light
-## (one column-model evaluation) - each dispatch <= ~2 ms GPU.
-const FLAT_CELLS_PER_FRAME := 4096.0
-const FLAT_LIGHT_CELLS_PER_FRAME := 32768.0
+## [E] Flat columns per frame: of the geometry (the field's column at 1-4 points, 9-16 prefiltered pattern taps; x
+## FLAT_TAP_COST by the cell) and of the light (one column-model evaluation) - each dispatch <= ~2 ms GPU.
+const FLAT_CELLS_PER_FRAME := 147456.0
+const FLAT_LIGHT_CELLS_PER_FRAME := 1048576.0
 ## [E] The flat geometry's drift allowance: its cap is baked this much wider than the visible cap, so the camera can move
 ## this far (2 deg = 220 km: ~30 s in low orbit, ~12 min at 300 m/s) before the geometry is baked anew about it.
 const FLAT_DRIFT_RAD := 2.0 * PI / 180.0
@@ -79,6 +104,10 @@ const LEVEL_DROP_HYSTERESIS := 0.8
 ## [E] The anchor's move trigger grows with the height above the clouds (the nearest cloud's view direction changes by
 ## at most this angle): REBAKE_MOVE_FRACTION's 3.2 km near the ground, 20 km at the ISS' height.
 const REBAKE_MOVE_ANGLE := 0.05
+## [E] The flat geometry's shape taps by cell (cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_TAP_CELLS_M): up to these cells
+## 3 x 3 taps at one field point, beyond 4 x 4 at 2 x 2; their columns per dispatch x FLAT_TAP_COST.
+const FLAT_TAP_CELLS_M := [1600.0, 14000.0]
+const FLAT_TAP_COST := [2.5, 2.5, 8.0]
 ## [E] The flat levels' per-pixel entry: the first guess of the cloud top's height for a ray from above every cloud.
 const FLAT_GUESS_M := 5000.0
 const STAMP := "cloud_baked_bake"
@@ -214,8 +243,7 @@ func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, pixel_
 		uniforms.append_array([CloudEffect._tex(BINDINGS[i][0], linear, s["a"]),
 			CloudEffect._tex(BINDINGS[i][1], linear, s["b"]), CloudEffect._tex(BINDINGS[i][2], nearest, s["o"]),
 			CloudEffect._tex(FLAT_BINDINGS[i][0], linear, s["geo"]["f"]),
-			CloudEffect._tex(FLAT_BINDINGS[i][1], linear, s["l"]),
-			CloudEffect._tex(FLAT_BINDINGS[i][2], linear, s["geo"]["h"])])
+			CloudEffect._tex(FLAT_BINDINGS[i][1], linear, s["l"])])
 	if _fade > 0:
 		_fade -= 1
 		if _fade == 0:
@@ -233,8 +261,8 @@ func free_all() -> void:
 		for key in ["a", "b", "o", "l"]:
 			if s.has(key):
 				rids.append(s[key])
-		if s.has("geo"):
-			rids.append_array([s["geo"]["f"], s["geo"]["h"]])
+		if s.has("geo") and s["geo"].has("f"):
+			rids.append_array([s["geo"]["f"], s["geo"]["t"]])
 		for rid: RID in rids:
 			if rid.is_valid() and not freed.has(rid):
 				freed[rid] = true
@@ -270,7 +298,7 @@ func _needs_rebake(plan: Dictionary, camera: Vector3, sun: Vector3, weather: Dic
 		return true
 	# The visible cap left the flat geometry's (climbing, or the camera drifted); the volume's dropped levels needed
 	# again (descending) or a further level droppable (climbing; both with LEVEL_DROP_HYSTERESIS).
-	if not _geo_holds(plan["geo"], camera):
+	if not _geo_holds(plan["geo"], camera) or not _geo_layout_holds(plan["geo"], height):
 		return true
 	var first: int = plan["first_level"]
 	if first_level(height, _pixel_angle) < first or first_level(height, _pixel_angle * LEVEL_DROP_HYSTERESIS) > first:
@@ -298,13 +326,15 @@ func _plan(camera: Vector3, sun: Vector3, weather: Dictionary) -> Dictionary:
 	# The flat geometry: the shown set's while it still holds the visible cap and the weather, else a new one about the
 	# camera (its cap with the height margin and the drift allowance).
 	var shown: Dictionary = _sets[_shown]["geo"] if _shown >= 0 and _sets[_shown].has("geo") else {}
-	if not shown.is_empty() and _geo_holds(shown, camera) and _same_weather(shown["weather"], weather):
+	if not shown.is_empty() and _geo_holds(shown, camera) and _geo_layout_holds(shown, height) 			and _same_weather(shown["weather"], weather):
 		plan.merge({"geo": shown, "geo_new": false})
 	else:
 		var cap := minf(visible_cap_rad(height * FLAT_CAP_HEIGHT_FACTOR + FLAT_CAP_HEIGHT_MARGIN_M) + FLAT_DRIFT_RAD, PI)
 		_geo_count += 1
+		var layout := flat_layout(height, cap, _pixel_angle * LEVEL_DROP_HYSTERESIS)
 		plan.merge({"geo": {"id": _geo_count, "anchor": camera, "up0": up0, "axis_x": axis_x, "axis_y": axis_y,
-			"cap": cap, "levels": flat_levels(cap), "weather": weather}, "geo_new": true})
+			"cap": cap, "levels": layout["levels"], "m0": layout["m0"], "n": layout["n"], "height": height,
+			"pixel_angle": _pixel_angle, "weather": weather}, "geo_new": true})
 	plan["cap"] = plan["geo"]["cap"]
 	plan["flat_levels"] = plan["geo"]["levels"]
 	_levels(plan, BAND_BOTTOM_M, CLOUD_TOP_M)
@@ -316,6 +346,18 @@ func _geo_holds(geo: Dictionary, camera: Vector3) -> bool:
 	var stretch := Vector3(1.0, CloudLayer.POLAR_STRETCH, 1.0)
 	var drift := (camera * stretch).normalized().angle_to(geo["up0"])
 	return drift + visible_cap_rad(_height_m(camera)) <= geo["cap"]
+
+
+## True while the flat geometry's levels suit this height: within its height range, its first level not coarser than
+## the footprint asks for (descending), nor the coarse layout of below FLAT_FINE_HEIGHT_M above it (climbing).
+func _geo_layout_holds(geo: Dictionary, height: float) -> bool:
+	var h: float = geo["height"]
+	if height > h * FLAT_HEIGHT_RANGE + FLAT_CAP_HEIGHT_MARGIN_M or height < h / FLAT_HEIGHT_RANGE - FLAT_CAP_HEIGHT_MARGIN_M:
+		return false
+	if _pixel_angle > float(geo["pixel_angle"]) * FLAT_PIXEL_RANGE:
+		return false  # (the bake's rule which columns can be fetched holds up to that pixel angle)
+	var want: int = flat_layout(height, geo["cap"], _pixel_angle)["m0"]
+	return want >= int(geo["m0"]) and not (want < levels and int(geo["m0"]) >= levels)
 
 
 static func _same_weather(w: Dictionary, weather: Dictionary) -> bool:
@@ -336,16 +378,43 @@ static func visible_cap_rad(height_m: float) -> float:
 	return acos(a / (a + maxf(height_m, 0.0))) + acos(a / (a + CLOUD_TOP_M)) + FLAT_CAP_MARGIN_RAD
 
 
-## The flat levels that hold a cap of this angle (azimuthal equidistant: its radius a x cap within the last level's
-## interior).
-static func flat_levels(cap_rad: float) -> int:
-	var inner := (0.5 * columns - 1.0) * cell0_m * pow(2.0, levels)
-	return maxi(1, int(ceil(log(maxf(CloudLayer.WGS84_A_M * cap_rad / inner, 1.0)) / log(2.0))) + 1)
+## The flat levels' first level (absolute: cell cell0_m 2^m) at this height: the volume's last + 1 (K) below
+## FLAT_FINE_HEIGHT_M, above it the footprint's at the nearest cloud (first_level), never coarser than K.
+static func flat_first_level(height_m: float, pixel_angle: float) -> int:
+	if height_m < FLAT_FINE_HEIGHT_M:
+		return levels
+	return clampi(footprint_level(height_m, pixel_angle), 0, levels)
+
+
+## The flat levels' layout for a cap of this angle: {m0 first level, n columns per side, levels} - n the cap's width in
+## the first level's cells (a multiple of 64, at most FLAT_COLUMNS_MAX), levels until the last one's interior holds the
+## cap (azimuthal equidistant: radius a x cap); the first level made coarser while the layout exceeds
+## FLAT_MEMORY_CAP_BYTES.
+static func flat_layout(height_m: float, cap_rad: float, pixel_angle: float) -> Dictionary:
+	var radius := CloudLayer.WGS84_A_M * cap_rad
+	var m0 := flat_first_level(height_m, pixel_angle)
+	while true:
+		var c := cell0_m * pow(2.0, m0)
+		var n := mini(FLAT_COLUMNS_MAX, int(ceil((2.0 * radius / c + 4.0) / 64.0)) * 64)
+		var inner := (0.5 * n - 1.0) * c
+		var count := maxi(1, int(ceil(log(maxf(radius / inner, 1.0)) / log(2.0))) + 1)
+		if float(n) * n * count * FLAT_BYTES_PER_COLUMN <= FLAT_MEMORY_CAP_BYTES or m0 >= levels + 4:
+			return {"m0": m0, "n": n, "levels": count}
+		m0 += 1
+	return {}
 
 
 ## The first volume level the footprint rule keeps at this height (pixel angle in rad): the finest whose cell is at least
 ## LEVEL_DROP x the footprint at the nearest possible cloud (CLOUD_TOP_M below the camera); levels: none.
 static func first_level(height_m: float, pixel_angle: float) -> int:
+	if takeover and height_m > VOLUME_TOP_M:
+		return levels  # the flat levels draw every cloud (the shader's takeover)
+	return footprint_level(height_m, pixel_angle)
+
+
+## The level whose cell is LEVEL_DROP x the footprint at the nearest possible cloud (CLOUD_TOP_M below the camera), at
+## most levels.
+static func footprint_level(height_m: float, pixel_angle: float) -> int:
 	var footprint := maxf(height_m - CLOUD_TOP_M, 0.0) * pixel_angle
 	if LEVEL_DROP * footprint <= cell0_m:
 		return 0
@@ -380,11 +449,14 @@ func _levels(plan: Dictionary, bottom: float, top: float) -> void:
 			odepth += nb
 		depth = maxi(depth, 2)  # every volume level dropped: one pair of guard slices (bound, never read)
 		odepth = maxi(odepth, 1)
-		var bytes := float(columns) * columns * depth * 8.0 + float(columns / BLOCK) * (columns / BLOCK) * odepth \
-				+ float(columns) * columns * int(plan.get("flat_levels", 0)) * 8.0 * (3.0 if plan.get("geo_new", false) else 1.0)
+		# (the volume's memory against its cap; the flat levels have their own, FLAT_MEMORY_CAP_BYTES)
+		var bytes: float = float(columns) * columns * depth * 8.0 + float(columns / BLOCK) * (columns / BLOCK) * odepth
+		var flat_n := float(plan["geo"]["n"])
+		var flat_bytes: float = flat_n * flat_n * int(plan.get("flat_levels", 0)) * 8.0 \
+				* (2.0 if plan.get("geo_new", false) else 1.0)
 		plan.merge({"band": Vector2(bottom, bottom + height), "dz": dz, "slab": slab, "oslab": oslab, "onz": onz,
-			"depth": depth, "odepth": odepth, "bytes": bytes}, true)
-		if 2.0 * bytes <= memory_cap_bytes and depth <= 2048:
+			"depth": depth, "odepth": odepth, "bytes": bytes + flat_bytes}, true)
+		if 2.0 * bytes <= memory_cap_bytes and depth <= 2048:  # (the volume's alone)
 			return
 		dz0 *= 2.0
 
@@ -406,21 +478,24 @@ func _set_floats(plan: Dictionary, camera: Vector3, fade: float) -> PackedFloat3
 		for i in range(8):
 			f.append(float(values[i]) if i < values.size() else 0.0)
 	f.append_array([plan["odepth"], fade, plan["first_level"], 0.0])
-	f.append_array([plan["flat_levels"], plan["cap"], 0.0, FLAT_GUESS_M])
 	var geo: Dictionary = plan["geo"]
+	f.append_array([plan["flat_levels"], plan["cap"], geo["m0"], FLAT_GUESS_M])
 	var flat_anchor: Vector3 = plan["anchor"] - camera  # the light's view: this set's anchor
+	var w := [geo["n"], geo["pixel_angle"], geo["height"], FLAT_DRIFT_RAD * CloudLayer.WGS84_A_M]
+	var i := 0
 	for v: Vector3 in [geo["up0"], geo["axis_x"], geo["axis_y"], flat_anchor]:
-		f.append_array([v.x, v.y, v.z, 0.0])
+		f.append_array([v.x, v.y, v.z, w[i]])
+		i += 1
 	return f
 
 
-func _flat(layers: int) -> RID:
+func _flat(n: int, layers: int, format := RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT) -> RID:
 	var tf := RDTextureFormat.new()
 	tf.texture_type = RenderingDevice.TEXTURE_TYPE_2D_ARRAY
-	tf.width = columns
-	tf.height = columns
+	tf.width = n
+	tf.height = n
 	tf.array_layers = layers
-	tf.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	tf.format = format
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
 	return _rd.texture_create(tf, RDTextureView.new())
 
@@ -474,27 +549,31 @@ func _start_volumes(lowest: int, highest: int) -> void:
 	# own light array.
 	var other: Dictionary = _sets[1 - _baking]
 	var geo: Dictionary = plan["geo"]
+	var n: int = geo["n"]
 	if plan["geo_new"]:
-		geo["f"] = _flat(geo["levels"])
-		geo["h"] = _flat(geo["levels"])
-		if not (geo["f"].is_valid() and geo["h"].is_valid()):
+		geo["f"] = _flat(n, geo["levels"])
+		geo["t"] = _flat(n, geo["levels"], RenderingDevice.DATA_FORMAT_R16G16_SFLOAT)
+		if not (geo["f"].is_valid() and geo["t"].is_valid()):
 			push_error("CloudBaked: a flat level array was not created")
 	if s.has("geo") and s["geo"]["id"] != geo["id"] and not (other.has("geo") and other["geo"]["id"] == s["geo"]["id"]):
 		_rd.free_rid(s["geo"]["f"])
-		_rd.free_rid(s["geo"]["h"])
+		_rd.free_rid(s["geo"]["t"])
 	s["geo"] = geo
-	if not s.has("l") or s["l_size"] != int(geo["levels"]):
+	if not s.has("l") or s["l_size"] != Vector2i(n, int(geo["levels"])):
 		if s.has("l") and s["l"].is_valid():
 			_rd.free_rid(s["l"])
-		s["l"] = _flat(geo["levels"])
-		s["l_size"] = int(geo["levels"])
+		s["l"] = _flat(n, geo["levels"])
+		s["l_size"] = Vector2i(n, int(geo["levels"]))
 	var area := float(columns) * columns
 	for j in range(int(geo["levels"]) if plan["geo_new"] else 0):
-		_phases.append({"kind": "flat", "level": j, "total": columns, "next": 0,
-			"step": maxi(1, int(FLAT_CELLS_PER_FRAME * bake_scale / columns))})
+		# the finer levels' columns take fewer shape taps (FLAT_TAP_CELLS_M): more columns per dispatch
+		var cell := cell0_m * pow(2.0, int(geo["m0"]) + j)
+		var cost: float = FLAT_TAP_COST[0 if cell <= FLAT_TAP_CELLS_M[0] else (1 if cell <= FLAT_TAP_CELLS_M[1] else 2)]
+		_phases.append({"kind": "flat", "level": j, "total": n, "next": 0,
+			"step": maxi(1, int(FLAT_CELLS_PER_FRAME * cost * bake_scale / n))})
 	for j in range(int(geo["levels"])):
-		_phases.append({"kind": "flat_light", "level": j, "total": columns, "next": 0,
-			"step": maxi(1, int(FLAT_LIGHT_CELLS_PER_FRAME * bake_scale / columns))})
+		_phases.append({"kind": "flat_light", "level": j, "total": n, "next": 0,
+			"step": maxi(1, int(FLAT_LIGHT_CELLS_PER_FRAME * bake_scale / n))})
 	for kind in ["density", "occupancy", "light"]:
 		for k in range(int(plan["first_level"]), levels):
 			var dz: float = plan["dz"][k]
@@ -506,8 +585,8 @@ func _start_volumes(lowest: int, highest: int) -> void:
 	print("CloudBaked: bake of set %d: field layers %d..%d, band %.0f..%.0f m, dz %s, %d slices, %.0f MB per set, "
 			% [_baking, lowest, highest, plan["band"].x, plan["band"].y, plan["dz"], plan["depth"],
 			plan["bytes"] / 1048576.0] + "anchor %s" % plan["anchor"])
-	print("CloudBaked: flat levels %d (cap %.1f deg), volume levels %d..%d, pixel angle %.6f rad"
-			% [plan["flat_levels"], rad_to_deg(plan["cap"]), plan["first_level"], levels - 1, _pixel_angle]
+	print("CloudBaked: flat levels %d from level %d, %d columns (cap %.1f deg), volume levels %d..%d, pixel angle %.6f rad"
+			% [plan["flat_levels"], geo["m0"], n, rad_to_deg(plan["cap"]), plan["first_level"], levels - 1, _pixel_angle]
 			+ (" (new flat geometry)" if plan["geo_new"] else " (flat geometry carried over, light only)"))
 
 
@@ -548,12 +627,12 @@ func _bake_step(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3) -
 		set1.append(CloudEffect._storage(1, _band_buffer))
 		groups = Vector3i(8, 8, 1)
 	elif kind == "flat":
-		set1.append_array([CloudEffect._image(1, s["geo"]["f"]), CloudEffect._image(2, s["geo"]["h"])])
-		groups = Vector3i((columns - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
+		set1.append_array([CloudEffect._image(1, s["geo"]["f"]), CloudEffect._image(2, s["geo"]["t"])])
+		groups = Vector3i((int(s["geo"]["n"]) - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
 	elif kind == "flat_light":
 		set1.append_array([CloudEffect._image(1, s["l"]), CloudEffect._tex(2, nearest, s["geo"]["f"]),
-				CloudEffect._tex(3, nearest, s["geo"]["h"])])
-		groups = Vector3i((columns - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
+				CloudEffect._tex(3, nearest, s["geo"]["t"])])
+		groups = Vector3i((int(s["geo"]["n"]) - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
 	elif kind == "density":
 		set1.append(CloudEffect._image(1, s["a"]))
 	elif kind == "occupancy":

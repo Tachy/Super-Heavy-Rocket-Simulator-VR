@@ -677,30 +677,39 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   D 78.0 / 60.6 / 48.0, H 58.5 / 45.0 / 35.3; baked G 22.0 / 8.6 / 5.1, D 27.2 / 9.7 / 5.8, H 22.1 / 8.4 / 4.8 (the
   upsample's ~3.3 ms is in both). Details, images and rulings: `.superpowers/sdd/2026-10-28-cloud-world-volume/
   baked-proto-report.md`; kernels in `tests/hybrid_compile_check.gd` (`-- --baked_only`).
-- **Baked prototype: flat outer levels and the level rule (2026-10-29)**: beyond the volume, levels 6.. of 256 x 256
-  2.5D columns (6.4 km doubling), azimuthal equidistant about their own anchor, over only the visible cap (camera
-  horizon + the 20 km tops' horizon, baked for 1.25 x the height + 2 km, + 0.5 deg, + 2 deg drift; the far side is
-  never baked or fetched): ground 2 levels, ISS 4, 8 600 km 5. Geometry (shared by the sets until the cap or the
-  weather changes; `CLOUD_BAKED_FLAT`): projected cover from 4 x 4 jittered shape taps (field at 2 x 2 points, one
-  sample per field layer, 8 in ice layers) as the volume's signed edge coordinate, the cover, the grid-mean vertical
-  optical depth, top and base. Light per set (`CLOUD_BAKED_FLAT_LIGHT`, 4 dispatches): the old far tier's column model
-  (Monte Carlo table, 3D gain) for the set's anchor view, the phase per pixel; x `CLOUD_BAKED_FLAT_SUN_GAIN` 1.4 [E]
-  (the column model, within 2 % of the old far tier's, lit a deck ~15 % darker than the volume / the old march's
-  shapes). Per pixel: an entry on the top (descending) / base (ascending) shell from a guess fetch (heights only) and
-  a second fetch (F smoothed by four bilinear taps, L, H), the slant cover 1 - (1 - C)^(1 + depth cot / 2 km).
-  Level rule (all levels): l = log2(max(r / inner_0, footprint / c_0)) per sample; level ceil(l), blended toward the
-  next over a band of 0 octaves below 20 km (the approved hard switches; any band cost ~0.17 ms on the ground) growing
-  to 1 octave at 60 km (from above a level's 256 columns end long before the footprint wants the next: its border
-  showed as a square). The volume's last level blends into the flat levels over >= 0.25 octave. Levels finer than the
-  footprint at the nearest possible cloud are neither baked nor marched (bake with 0.8 x the pixel angle, back with
-  1 x): at divisor 2 in the mock (1.39 mrad) level 0 drops above 110 km (back below 92 km), 1: 200 / 164, 2: 380 /
-  308, 3: 741 / 597, 4: 1 462 / 1 174, 5: 2 904 / 2 327 km; memory per set 219 MB on the ground, 72 MB at the ISS.
-  Anchor move trigger max(3.2 km, 0.05 x height above 20 km). Beyond the scaled-space switch (~8 600 km) the far field
-  (earth_clouds.gdshader) draws as before. Stereo mock, divisor 2 (march ms before -> after): ground 1.70 -> 2.02,
-  9 km deck 2.34 -> 2.79, 100 km 0.57 -> 0.86, ISS oblique 0.31 -> 0.42, ISS nadir 0.71 -> 1.01. Bake: first 40-90 ms
-  GPU (dispatches <= 2.9 ms), re-bakes with the geometry kept ~19 ms. Diagnostics: `STARSIM_BAKED_DEFINES=
-  CLOUD_BAKED_FLAT_ONLY | CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND`. Report: `.superpowers/sdd/
-  2026-10-28-cloud-world-volume/baked-outer-report.md`.
+- **Baked prototype: flat levels, takeover and the level rule (2026-10-29, step 3)**: 2.5D levels of up to 1536 x 1536
+  columns (`CloudBaked.FLAT_COLUMNS_MAX`; from orbit a level holds ~2 / pixel angle columns, so the footprint, not the
+  extent, picks the cell), each doubling the cell, azimuthal equidistant about their own anchor, over only the visible
+  cap (camera horizon + the 20 km tops' horizon, baked for 1.25 x the height + 2 km, + 0.5 deg, + 2 deg drift; the far
+  side never baked or fetched). Below 40 km camera height they start beyond the volume (level 6, 6.4 km; ground 1 level
+  of 320 columns); above, at the footprint's level at the nearest cloud, coarser while the layout exceeds 300 MB
+  (`FLAT_MEMORY_CAP_BYTES`; 100 km: 4 levels from 400 m, ISS: 4 from 800 m). Columns no camera of the geometry's height
+  range (x / 1.25) and pixel angle (x 1.25) can fetch are not baked (re-bake outside those ranges). Takeover: from 40 to
+  60 km camera height the flat levels replace the volume, above 62 km the volume is neither baked nor marched (below
+  40 km the volume levels are unchanged; `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER` keeps the volume at every
+  height - its coarse voxel levels close a deck's sub-voxel gaps, so their square stayed visible against the flat
+  cover). Cover and light follow the scaled-space far field (user ruling 2026-10-29: the old whole-Earth far field's
+  cover is the reference; `cloud_far.gdshaderinc` `cloud_far_layer`, gain 1): per column (`CLOUD_BAKED_FLAT`) the
+  field's column at 1 (cells <= 14 km) or 2 x 2 points - the nadir beam cover C_col of the largest fraction, the
+  grid-mean depth, the cloudy layers' top and base - and a pattern P: the share of 3 x 3 (4 x 4) taps whose prefiltered
+  shape (the largest-fraction layer's types and height, at the taps' spacing; every second tap read unaligned from
+  1.5 km cells; the taps' offsets a smooth field, no per-cell jitter) exceeds the prefilter threshold of C_col (mean
+  C_col: the old far tier's `cloud_far_cover`), faded to C_col itself from 6.4 to 12.8 km cells (the 32 km tile's
+  lattice). F (RGBA16F) = (P, depth, top P, base P), T (RG16F) = (C_col, top), L per set (RGBA16F) = the column model's
+  light (`CLOUD_BAKED_FLAT_LIGHT`, the far field's terms, the flank gain from the fraction, no extra gain) x C_col, C_col.
+  Per pixel: the entry on the top / base shell from a guess fetch, then F and L; the pattern taken to the view's slant
+  as the far field's beam cover (1 - (1 - P)^(1 + s / n_v)), the in-cloud depth the grid mean / cloud_beam_cover_of(f,
+  mu), alpha = cover (1 - exp(-tau / mu)); where the cell is 2-4 x the footprint the shapes' pattern at the footprint
+  (`cloud_baked_flat_pattern`, faded out over 2-4 km footprints). Against the far field at the same camera (diagnostic
+  define `CLOUD_BAKED_FAR_REFERENCE`, desktop nadir / 45 deg, 420 / 1 500 / 5 000 km, Sun 56 and 8 deg): mean alpha
+  0.98-1.02, brightness 1.00-1.05 (step 2: alpha 1.09-1.14, brightness 1.23-1.45). Level rule (all levels): l =
+  log2(max(r / inner, footprint / c_0)) per sample, level ceil(l), blended toward the next over a band of 0 octaves
+  below 20 km growing to 1 octave at 60 km (flat levels >= 0.25). Re-bake triggers as the volume's plus the flat cap,
+  the height / pixel-angle ranges and the first flat level; the flat geometry bakes in ~41 dispatches of <= 0.5 ms (ISS,
+  100 km: ~4.5 ms GPU in all). Diagnostics: `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_ONLY |
+  CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND | CLOUD_BAKED_FAR_REFERENCE | CLOUD_BAKED_FLAT_TAP_STATS |
+  CLOUD_BAKED_FLAT_NO_TAKEOVER`; render_check `--centre_dump=<file>` (the march image, raw RGBA16F). Numbers and
+  images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer2-report.md`.
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a
