@@ -249,6 +249,9 @@ const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March",
 	CloudEffect.MarchMethod.HYBRID: "Hybrid, Volumenlicht + Überspringen",
 	CloudEffect.MarchMethod.HYBRID_NO_SKIP: "Hybrid, Volumenlicht",
 	CloudEffect.MarchMethod.HYBRID_OLD_LIGHT: "Hybrid, altes Licht + Überspringen"}
+## The world volume's bake budget factor while a hybrid method waits for its first shown level (see _update_world_volume).
+const HYBRID_FILL_SCALE := 4.0
+var _fill_boosted := false
 const METHOD_KEY := KEY_F7
 const DIVISOR_KEY := KEY_F8
 var march_method := CloudEffect.MarchMethod.OLD:
@@ -670,6 +673,15 @@ func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 	var top := 0.0
 	for slot: Dictionary in _slots:
 		top = maxf(top, float(slot.get("top_m", 0.0)))
+	# A hybrid method chosen live starts the volume cold in flight: until it shows a level it bakes at the cold-start
+	# transition budget (HYBRID_FILL_SCALE x; T5 ruling: ~6 ms), not the 1.5 ms upkeep (minutes in VR at low fps).
+	var filling := march_method != CloudEffect.MarchMethod.OLD and not effect.hybrid_shown
+	if filling:
+		world_volume_schedule.budget_scale = HYBRID_FILL_SCALE
+		_fill_boosted = true
+	elif _fill_boosted:
+		world_volume_schedule.budget_scale = 1.0
+		_fill_boosted = false
 	var batch := world_volume_schedule.plan(camera_render, sun, moon, _w1, top if top > 0.0 else CloudEffect.CLOUD_TOP_M, false,
 			_volume_held_s, [_slots[0]["id"], _slots[1]["id"]])
 	_volume_held_s = 0.0
