@@ -207,7 +207,8 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Start).
 - **Wolken-Prototyp** [Prototyp 2026-10-29, Live-Test in VR]: **F7** vergleicht den alten March mit rechtwinkliger und
   mit gleichwinkliger VR-Wolkenmitte ("alter March" ↔ "alter March, winkelgleich"; aus einem Hybrid zurück zum alten
-  March), **F8** die Auflösung der Wolken (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse). Beides gilt am Desktop und in VR und steht mit der Bildrate im Info-Text unter der
+  March), **F8** die Auflösung der Wolken (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse). **F9** [Test 2026-10-29] schneidet die
+  Wolken bei 10 km bzw. 15 km ab (dahinter keine Wolken; misst, was der nahe Teil allein kostet). Beides gilt am Desktop und in VR und steht mit der Bildrate im Info-Text unter der
   Wetterzeile ("Wolken: ..."); mit gewähltem Verfahren ist der Sicht-Cache aus. Startwerte über die Argumente
   `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light` und `--cloud_divisor=<n>`. Die Hybride sind nur noch über `--cloud_method` erreichbar. Mit `--cloud_equiangular` [Test 2026-10-29] startet
   die VR-Wolkenmitte gleichwinklig: sie rechnet gleichwinklig statt rechtwinklig (gleiche Schärfe in der Bildmitte, etwa halb so viele

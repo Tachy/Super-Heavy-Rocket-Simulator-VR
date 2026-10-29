@@ -737,6 +737,10 @@ float cloud_march_end_m = 0.0;
 // The near / far hand-over (static clouds Task 8): two passes of these steps - the march up to cloud_handover_far_m
 // with its light cache, the far tier from cloud_handover_near_m to the segment's end with the shapes band-limited at the
 // pixel footprint and the far light path - each step weighted by its pass's hand-over weight; composited below.
+// Test switch (CloudLayer.march_cut_m, key F9; user 2026-10-29): > 0 ends every ray at this distance (m) - no cloud
+// beyond it. Measures in the headset what the near march alone costs (the planned near / far split).
+global uniform float cloud_march_cut_m;
+
 void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far,
 		bool coverage_only, out vec3 color, out float alpha, out float transmittance, out float cloud_m) {
 	color = vec3(0.0);
@@ -782,6 +786,9 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 #endif
 	bool surface = scene_m < d1;  // the ray ends on the scene, not on the cloud shell
 	d1 = min(d1, scene_m);
+	if (cloud_march_cut_m > 0.0) {
+		d1 = min(d1, cloud_march_cut_m);
+	}
 	if (d1 <= d0) {
 		return;
 	}

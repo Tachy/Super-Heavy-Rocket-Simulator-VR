@@ -254,6 +254,14 @@ const HYBRID_FILL_SCALE := 4.0
 var _fill_boosted := false
 const METHOD_KEY := KEY_F7
 const DIVISOR_KEY := KEY_F8
+## Test switch (user 2026-10-29): the march ends at this distance (m; 0 = no cut, shader global cloud_march_cut_m);
+## key F9 cycles CUTS_M. Measures in the headset what the near march alone costs.
+const CUTS_M: Array[float] = [0.0, 10000.0, 15000.0]
+const CUT_KEY := KEY_F9
+var march_cut_m := 0.0:
+	set(value):
+		march_cut_m = value
+		ShaderGlobals.set_value(&"cloud_march_cut_m", value)
 var march_method := CloudEffect.MarchMethod.OLD:
 	set(value):
 		march_method = value
@@ -1184,6 +1192,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			CloudCentreView.equiangular = not CloudCentreView.equiangular
 		print("CloudLayer: march method %s" % _method_label())
 		get_viewport().set_input_as_handled()
+	elif key.keycode == CUT_KEY:
+		march_cut_m = CUTS_M[(CUTS_M.find(march_cut_m) + 1) % CUTS_M.size()]
+		print("CloudLayer: march cut %s m" % march_cut_m)
+		get_viewport().set_input_as_handled()
 	elif key.keycode == DIVISOR_KEY:
 		var next := DIVISORS[0]
 		for d in DIVISORS:
@@ -1201,8 +1213,9 @@ func status_line() -> String:
 	if march_method != CloudEffect.MarchMethod.OLD and not effect.hybrid_shown:
 		method += " (Volumen lädt)"
 	var view := "" if march_method != CloudEffect.MarchMethod.OLD or not view_cache else ", Sichtcache"
-	return "Wolken: %s%s, Auflösung 1/%s  [F7 Verfahren, F8 Auflösung]" % [method, view,
-			String.num(divisor(), 1).trim_suffix(".0")]
+	var cut := ", nur bis %d km" % roundi(march_cut_m / 1000.0) if march_cut_m > 0.0 else ""
+	return "Wolken: %s%s, Auflösung 1/%s%s  [F7 Verfahren, F8 Auflösung, F9 Schnitt]" % [method, view,
+			String.num(divisor(), 1).trim_suffix(".0"), cut]
 
 
 func _method_label() -> String:

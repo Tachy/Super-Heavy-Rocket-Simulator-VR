@@ -585,6 +585,10 @@ cloud_air_shadow_top_m={
 "type": "float",
 "value": 20000.0
 }
+cloud_march_cut_m={
+"type": "float",
+"value": 0.0
+}
 cloud_debug_air_transmittance={
 "type": "float",
 "value": -1.0
