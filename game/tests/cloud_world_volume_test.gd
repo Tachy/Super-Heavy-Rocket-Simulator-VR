@@ -1125,10 +1125,36 @@ func _test_light_progress() -> void:
 			probe_cells = maxi(probe_cells, n)
 	_check(first >= S.LIGHT_PROBE_FRAMES - 1 and first <= S.LIGHT_PROBE_FRAMES + 2 and probes <= 2
 			and probe_cells >= S.LIGHT_CALIBRATION_MIN_CELLS and probe_ms <= S.UPKEEP_SPIKE_MS,
-			"a level skipped for LIGHT_PROBE_FRAMES plans gets a probe of >= LIGHT_CALIBRATION_MIN_CELLS cells below "
-			+ "UPKEEP_SPIKE_MS (first at plan %d, %d probe plans, %d cells, %.2f ms)" % [first, probes, probe_cells,
+			"a level skipped for LIGHT_PROBE_FRAMES plans gets a probe (a small dispatch, then one of >= "
+			+ "LIGHT_CALIBRATION_MIN_CELLS cells) below UPKEEP_SPIKE_MS (first at plan %d, %d probe plans, %d cells, %.2f ms)" % [first, probes, probe_cells,
 			probe_ms])
-	# The sample of a slow latency leaves the window: the plan recovers after faster feedback.
+	# F1 (round 3): a stale 1.2 ms latency, real latency 0.2 ms fed back (a few plans late): the probe's small dispatch
+	# measures it again and the level returns to normal service (its light drains, latency 0.2), not probe-only.
+	s = _schedule()
+	_settle(s, 0.0, 100.0, sun, 0.3)
+	s.set_light_rates(2.0e5, 4.0e6, 0.05)
+	s.light_latency_ms[0] = 1.2 * S.LIGHT_BUDGET_MS
+	var pending: Array = []
+	var served_n := 0
+	var drained_at := -1
+	var plans_max := 3 * S.LIGHT_PROBE_FRAMES
+	for i in plans_max:
+		var p := _plan(s, 0.0, 100.0, sun, 0.33)
+		var n := _sum_cells(p["light"], 0)
+		served_n += 1 if n > 0 else 0
+		pending.append(n)
+		if pending.size() > 3:  # the feedback arrives three plans late
+			var m: int = pending.pop_front()
+			if m > 0:
+				s.feedback_split({"levels": {0: {"cells": m, "cells_ms": 0.2 + m / 2.0e5, "column_cells": 0,
+						"column_ms": 0.0}}})
+		if n == 0 and served_n > 2 and drained_at < 0 and i > S.LIGHT_PROBE_FRAMES:
+			drained_at = i
+	_check(s.light_latency_ms[0] < 0.3 and drained_at >= 0 and drained_at <= 2 * S.LIGHT_PROBE_FRAMES + 20,
+			"a stale latency is measured again by the probe's small dispatch: the level returns to normal service "
+			+ "within ~2 probe periods (latency %.3f ms, light drained at plan %d, %d plans served_n)" % [
+			s.light_latency_ms[0], drained_at, served_n])
+	# The small dispatch measures the latency: a lone slow sample leaves the window after faster ones.
 	var slow := {"levels": {0: {"cells": 1000, "cells_ms": 0.9, "column_cells": 0, "column_ms": 0.0}}}
 	var quick := {"levels": {0: {"cells": 1000, "cells_ms": 0.2, "column_cells": 0, "column_ms": 0.0}}}
 	s = _schedule()
@@ -1137,8 +1163,9 @@ func _test_light_progress() -> void:
 	var slow_ms := s.light_latency_ms[0]
 	for i in 12:
 		s.feedback_split(quick)
-	_check(slow_ms > 0.8 and s.light_latency_ms[0] < 0.3, "a slow latency sample is not frozen: it is adopted at once "
-			+ "and forgotten once faster samples fill the window (%.3f, then %.3f ms)" % [slow_ms, s.light_latency_ms[0]])
+	_check(slow_ms > 0.8 and s.light_latency_ms[0] < 0.3, "a slow latency sample is adopted "
+			+ "at once and forgotten once faster samples fill the window (%.3f, then %.3f ms)" % [slow_ms,
+			s.light_latency_ms[0]])
 
 
 ## Task 6 review round 1: the light's schedule per level - light jobs are whole columns; a level's refresh relights no

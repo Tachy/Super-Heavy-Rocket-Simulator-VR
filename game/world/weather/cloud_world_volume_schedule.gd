@@ -132,6 +132,9 @@ const LIGHT_MIN_THROUGHPUT_SHARE := 0.5
 ## of LIGHT_CALIBRATION_MIN_CELLS cells even where its planned share does not cover it (bounded by what UPKEEP_SPIKE_MS
 ## leaves): its rate and latency are measured again, so a slow sample cannot freeze a level's plan.
 const LIGHT_PROBE_FRAMES := 45
+## [E] Plans a probe's small dispatch waits for its latency sample (the feedback arrives a few frames late) before the
+## large dispatch follows with the old latency.
+const LIGHT_PROBE_WAIT_FRAMES := 12
 ## [E] The least z extent of a partial column (a job that does not cover a whole column when one column's cost exceeds
 ## what is left): the column pass is paid whole, so a smaller slice is not worth its dispatch (a 4^3 block's depth x 4).
 const LIGHT_PARTIAL_MIN_CELLS := 16
@@ -262,6 +265,9 @@ var _cells_window: Array = []
 ## Per level the plans since its light kernel was last measured by a large dispatch (LIGHT_PROBE_FRAMES; the light
 ## schedule counts them up, a probe or a measurement resets them).
 var rate_age := PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0])
+## Per level the plans since a small dispatch last measured its latency (the same: a probe is a small dispatch, which
+## measures the latency, then the large one, which measures the rate).
+var latency_age := PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0])
 ## Per level: its light per plan is not capped (rates set as known: schedule tests).
 var _growth_free: Array[bool] = [false, false, false, false, false, false, false, false]
 
@@ -285,6 +291,7 @@ func set_light_rates(cells_per_ms: float, column_cells_per_ms_all: float, latenc
 	_latency_window.clear()
 	_cells_window.clear()
 	rate_age.fill(0)
+	latency_age.fill(0)
 	for k in n:
 		_rate_window.append([[], []])
 		_latency_window.append([])
@@ -410,6 +417,7 @@ func _light_sample(k: int, cells: int, cells_ms: float, column_cells: int, colum
 		var sample := maxf(cells_ms + column_ms - cells / light_cells_per_ms[k] - column_cells / column_cells_per_ms[k],
 				0.0)
 		light_latency_ms[k] = maxf(_window_quantile(_latency_window[k], sample, LIGHT_LATENCY_QUANTILE), sample)
+		latency_age[k] = 0
 		return false
 	rate_age[k] = 0
 	var measured := maxf(cells / light_cells_per_ms[k], cells_ms) >= CALIBRATION_MIN_MS

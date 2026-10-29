@@ -56,6 +56,7 @@ var _blend := 0.0
 var _charged := {}  ## levels whose light lists' latency this plan's budget paid for (light_latency_of)
 var _left := {}  ## level -> light cells the level may still take this plan (light_cells_cap; absent: uncapped)
 var _share_ms := 0.0  ## this plan's whole light budget (a partial column only where a whole one never fits it)
+var _probe_wait := {}  ## level -> plans since its probe's small dispatch (waiting for the latency sample)
 var _hard_left_ms := 0.0  ## what UPKEEP_SPIKE_MS leaves this plan after the bake and the light so far (a probe's bound)
 
 
@@ -106,6 +107,9 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 	_left = {}
 	for k in CloudWorldVolumeLayout.LEVELS:
 		s.rate_age[k] += 1
+		s.latency_age[k] += 1
+		if _probe_wait.has(k):
+			_probe_wait[k] += 1
 	for k in CloudWorldVolumeLayout.LEVELS:
 		if s.light_cells_cap(k) >= 0:
 			_left[k] = s.light_cells_cap(k)
@@ -141,6 +145,10 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 	var jobs: Array = out["light"]
 	# -1. the level longest unmeasured (at least LIGHT_PROBE_FRAMES plans, its share cannot reach a large dispatch) gets
 	# a probe (N1: a slow sample or a latency above the share must not freeze its plan for good); one level a plan.
+	for k in _probe_wait.keys():  # the latency sample came, or did not: the large dispatch follows
+		if s.latency_age[k] < S.LIGHT_PROBE_FRAMES or _probe_wait[k] >= S.LIGHT_PROBE_WAIT_FRAMES:
+			_probe_wait.erase(k)
+			s.latency_age[k] = mini(s.latency_age[k], S.LIGHT_PROBE_FRAMES - 1)
 	var probed: CloudWorldVolumeSchedule._Level = null
 	for lv: CloudWorldVolumeSchedule._Level in fine_first:
 		if lv.active and lv.ready and _probe_due(s, lv, left) 				and (probed == null or s.rate_age[lv.k] > s.rate_age[probed.k]):
@@ -260,7 +268,7 @@ func _split_partial(s: CloudWorldVolumeSchedule, k: int, box: Dictionary, ms: fl
 func _probe_due(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, left: float) -> bool:
 	var S := CloudWorldVolumeSchedule
 	var pending := not lv.prov.is_empty() or not lv.queue.is_empty() or not lv.partial.is_empty()
-	if not pending or s.rate_age[lv.k] < S.LIGHT_PROBE_FRAMES:
+	if not pending or s.rate_age[lv.k] < S.LIGHT_PROBE_FRAMES or _probe_wait.has(lv.k):
 		return false
 	var column := {"from": Vector3i.ZERO, "to": Vector3i(S.TILE_CELLS, S.TILE_CELLS,
 			CloudWorldVolumeLayout.window_size(lv.k).z)}
@@ -268,28 +276,38 @@ func _probe_due(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level
 	return s.light_cells_for(lv.k, column, left - over) < S.LIGHT_CALIBRATION_MIN_CELLS
 
 
-## The probe: level lv is served LIGHT_CALIBRATION_MIN_CELLS cells (two columns more: whole columns) even beyond its
-## share, bounded by what UPKEEP_SPIKE_MS leaves less BAKE_SPIKE_MARGIN (_hard_left_ms; a plan is measured up to that
-## much over) - its measurement refreshes the level's rate and latency. Returns the ms spent.
+## The probe (a pair): level lv is served first one small dispatch (one column, whatever the stale latency estimate says:
+## the estimate is what is verified; one per LIGHT_PROBE_FRAMES plans and level), which measures the latency; once that
+## sample arrived (or LIGHT_PROBE_WAIT_FRAMES passed) the large one: LIGHT_CALIBRATION_MIN_CELLS cells (two columns
+## more: whole columns) even beyond the share, bounded by what UPKEEP_SPIKE_MS leaves with the bake and the light both
+## BAKE_SPIKE_MARGIN over their plan (_hard_left_ms), measuring the rate. The level keeps its growth bound (_left).
+## Returns the ms spent.
 func _probe(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, spike: bool, delta_s: float,
 		jobs: Array) -> float:
 	var S := CloudWorldVolumeSchedule
 	var L := CloudWorldVolumeLayout
 	var k := lv.k
-	var cells := S.LIGHT_CALIBRATION_MIN_CELLS + 2 * L.CELLS_V
+	var small: bool = s.latency_age[k] >= S.LIGHT_PROBE_FRAMES
+	var cells: int = L.window_size(k).z if small else S.LIGHT_CALIBRATION_MIN_CELLS + 2 * L.CELLS_V
 	var columns := ceili(float(cells) / L.window_size(k).z)
-	var need := s.light_latency_of(k) + cells / s.light_cells_per_ms[k] + columns * L.window_size(k).z 			/ s.column_cells_per_ms[k]
-	var budget := minf(need, _hard_left_ms / S.BAKE_SPIKE_MARGIN)
+	var need: float = cells / s.light_cells_per_ms[k] + columns * L.window_size(k).z / s.column_cells_per_ms[k]
+	var budget: float = 1.5 * (s.light_latency_ms[k] + need) if small else minf(s.light_latency_ms[k] + need,
+			(_hard_left_ms - (S.BAKE_SPIKE_MARGIN - 1.0) * s.bake_ms_planned()) / S.BAKE_SPIKE_MARGIN)
 	if budget <= 0.0:
 		return 0.0
 	var capped := _left.has(k)
-	if capped:
-		_left.erase(k)  # a probe is the one dispatch that may exceed the growth bound
+	var cap: int = _left.get(k, 0)
+	_left[k] = cells if small else 1 << 30  # the small one is one column; the large one may exceed the growth bound
 	var used := _light_prov(s, lv, budget, spike, delta_s, jobs) if not lv.prov.is_empty() 			else _light_queue(s, lv, budget, jobs)
 	if capped:
-		_left[k] = 0
+		_left[k] = cap
+	else:
+		_left.erase(k)
 	if used > 0.0:
-		s.rate_age[k] = 0  # its measurement arrives a few frames late
+		if small:
+			_probe_wait[k] = 0
+		else:
+			s.rate_age[k] = 0  # its measurement arrives a few frames late
 	return used
 
 

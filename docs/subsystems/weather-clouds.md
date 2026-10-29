@@ -1160,9 +1160,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     whole light budget, the level is served partial columns (z slices of at least `LIGHT_PARTIAL_MIN_CELLS` 16 cells;
     the column pass is paid whole; `box_split_column_z`); a level whose light kernel no large dispatch measured for
     `LIGHT_PROBE_FRAMES` 45 plans while light is pending and whose share cannot reach `LIGHT_CALIBRATION_MIN_CELLS`
-    gets one probe of that many cells beyond its share (one level a plan, the longest unmeasured; bounded by the
-    spike cap less `BAKE_SPIKE_MARGIN`), so its rate and latency are measured again; a slow sample leaves the
-    45-sample window with new measurements (the latency quantile forgets a lone slow sample after ~10 faster ones).
+    gets a probe beyond its share (one level a plan, the longest unmeasured), a pair: first one small dispatch (one
+    column, issued even when the stale latency estimate says it does not fit - the estimate is what is verified), which
+    measures the latency again; once that sample arrived (or `LIGHT_PROBE_WAIT_FRAMES` 12 plans) the large one of that
+    many cells, if the share still cannot reach it, bounded by the spike cap with the bake and the light both
+    `BAKE_SPIKE_MARGIN` over their plan, which measures the rate. A level starved by a stale latency thus returns to
+    normal service within ~2 probe periods (tested with 1.2 ms stale, 0.2 ms real); the probe leaves the level's
+    growth bound untouched. A slow sample leaves the 45-sample window with new measurements (the latency quantile
+    forgets a lone slow sample after ~10 faster ones).
     Note: at the measured rates (>= 1e4 cells/ms floor, column pass ~1e7 cells/ms) a level-0 column costs ~12 us, so
     the partial columns only act for slivers of rates far below today's; the latency path (probe) is the live one. Spike frames: the fill bake gets `SPIKE_BAKE_SHARE` 0.5 of the 3 ms cap, `SPIKE_BAKE_SHARE_LIGHT_DUE`
     0.2 while a filled level's light is due (provisional or blending: the cold start lights each level's whole window,
