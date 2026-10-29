@@ -127,6 +127,14 @@ const LIGHT_LATENCY_QUANTILE := 0.9
 ## rate infinite; LIGHT_GROWTH bounds what the remaining optimism costs).
 const LIGHT_MIN_THROUGHPUT_SHARE := 0.5
 ## Light kernels (the rate windows' index; CloudWorldVolume's two lists per level).
+## [E] Guaranteed progress of a level's light (Task 6 review round 2, N1): a level whose light kernel was not measured by
+## a large dispatch for this many plans (a second at 45 Hz, LIGHT_COST_WINDOW) while it has light pending gets one probe
+## of LIGHT_CALIBRATION_MIN_CELLS cells even where its planned share does not cover it (bounded by what UPKEEP_SPIKE_MS
+## leaves): its rate and latency are measured again, so a slow sample cannot freeze a level's plan.
+const LIGHT_PROBE_FRAMES := 45
+## [E] The least z extent of a partial column (a job that does not cover a whole column when one column's cost exceeds
+## what is left): the column pass is paid whole, so a smaller slice is not worth its dispatch (a 4^3 block's depth x 4).
+const LIGHT_PARTIAL_MIN_CELLS := 16
 const KERNEL_LIGHT := 0
 const KERNEL_COLUMN := 1
 ## [E] The bake's cost per tap varies with the content (clear cells skip their taps; up to 1.9 x within a level in
@@ -251,6 +259,9 @@ var _rates_measured: Array[bool] = [false, false, false, false, false, false, fa
 var _rate_window: Array = []
 var _latency_window: Array = []
 var _cells_window: Array = []
+## Per level the plans since its light kernel was last measured by a large dispatch (LIGHT_PROBE_FRAMES; the light
+## schedule counts them up, a probe or a measurement resets them).
+var rate_age := PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0])
 ## Per level: its light per plan is not capped (rates set as known: schedule tests).
 var _growth_free: Array[bool] = [false, false, false, false, false, false, false, false]
 
@@ -273,6 +284,7 @@ func set_light_rates(cells_per_ms: float, column_cells_per_ms_all: float, latenc
 	_rate_window.clear()
 	_latency_window.clear()
 	_cells_window.clear()
+	rate_age.fill(0)
 	for k in n:
 		_rate_window.append([[], []])
 		_latency_window.append([])
@@ -399,6 +411,7 @@ func _light_sample(k: int, cells: int, cells_ms: float, column_cells: int, colum
 				0.0)
 		light_latency_ms[k] = maxf(_window_quantile(_latency_window[k], sample, LIGHT_LATENCY_QUANTILE), sample)
 		return false
+	rate_age[k] = 0
 	var measured := maxf(cells / light_cells_per_ms[k], cells_ms) >= CALIBRATION_MIN_MS
 	light_cells_per_ms[k] = _rate_sample(_rate_window[k][KERNEL_LIGHT], light_cells_per_ms[k], light_latency_ms[k],
 			cells, cells_ms)

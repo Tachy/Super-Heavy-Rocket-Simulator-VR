@@ -3848,7 +3848,8 @@ static func _volume_pair1_equal(a: PackedByteArray, b: PackedByteArray) -> bool:
 ## camera 2 m up, checked on the light texels read back (no march reads the volume before Task 7, ruling C12):
 ## - cold start at the game's budget (Task 6 review round 1, I1): every level's light completes (no provisional light,
 ##   no blend left), each within LIGHT_COLD_FRAMES (1 s at 45 Hz) of its density shown (the controller's binding line,
-##   round 1c); every measured frame's upkeep (bake + light, GPU ms) <= UPKEEP_SPIKE_MS;
+##   round 1c); every measured frame's upkeep (bake + light, GPU ms) <= UPKEEP_TRANSITION_MS (the cold
+##   start is a transition: 2 x UPKEEP_SPIKE_MS, see _light_cold_start);
 ## - Sun 45 deg up: LIGHT_CELLS cells wholly inside the slab under the camera per level 0, 2, 5: tau_below, tau_above
 ##   vs the trapezoid sums of the core's cell bake of the column (the GPU bake's reference; the trilinear field along
 ##   the vertical is linear between centres), tau_sun vs the converged integral along the ray through the level's
@@ -4035,7 +4036,8 @@ func _light_settle(camera: Vector3, sun: Vector3, moon: Vector3, seen: Dictionar
 ## The cold start at the game's budget (bake and light: the spike's shares): per level the frames from its density
 ## shown (the adopted lookup) to its light complete (the schedule: no provisional light, no blend left); every measured
 ## frame's upkeep (bake + light, GPU ms) and light. Asserted (Task 6 review round 1c): every level within
-## LIGHT_COLD_FRAMES, the upkeep's max <= UPKEEP_SPIKE_MS.
+## LIGHT_COLD_FRAMES, the upkeep's max <= UPKEEP_TRANSITION_MS (6 ms); only the frames of this cold start's own runs
+## count (feedback carries its run id: a late measurement of an earlier section's run is not this cold start's).
 func _light_cold_start(camera: Vector3, sun: Vector3, moon: Vector3) -> void:
 	var schedule := _clouds.world_volume_schedule
 	var volume := _clouds.effect.world_volume
@@ -4049,18 +4051,17 @@ func _light_cold_start(camera: Vector3, sun: Vector3, moon: Vector3) -> void:
 	var active := 0
 	var frames := 0
 	var seen := int(_clouds.world_volume_stats()["measured_frames"])
+	var first_run := volume.last_run_id()
 	for n in LIGHT_MAX_FRAMES:
 		await _light_frame(camera, sun, moon)
 		frames = n + 1
 		var stats := _clouds.world_volume_stats()
-		# (a frame planned above the spike cap was planned at an earlier section's budget_scale: its timestamps come back
-		# a few frames late - not this cold start's)
-		if int(stats["measured_frames"]) > seen and float((stats["last_feedback"] as Dictionary).get("planned_ms", 0.0)) \
-				<= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6:
+		# (the timestamps come back a few frames late: a frame of an earlier section's run is not this cold start's)
+		if int(stats["measured_frames"]) > seen 				and int((stats["last_feedback"] as Dictionary).get("run", 0)) > first_run:
 			upkeep_ms.append(float(stats["upkeep_ms"]))
 			light_ms.append(float(stats["light_ms"]))
 			var f: Dictionary = stats["last_feedback"]
-			if float(stats["upkeep_ms"]) > CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS and over.size() < 12:
+			if float(stats["upkeep_ms"]) > UPKEEP_TRANSITION_MS and over.size() < 12:
 				over.append("frame %d: bake %.2f (planned %.2f, %d taps), light %.2f (planned %.2f) %s" % [n,
 						f["bake_ms"], f["bake_planned_ms"], f["bake_taps"], f["light_ms"],
 						f["planned_ms"] - f["bake_planned_ms"], f["levels"]])

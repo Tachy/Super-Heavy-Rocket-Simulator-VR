@@ -579,8 +579,8 @@ RTX 4090, `--xr-mode off`:
   1.13 ms, p99 2.31, max 2.60 ms alone and 5.04 ms in the full run (the cold start is a transition: <= 6 ms =
   2 x the 3 ms cap asserted; the 3 ms cap binds in-flight load); the whole volume after 1255 frames (round 1b: 1228).
   The 5.04 ms frames are a GPU clock-state change right after the bake ends (level 0 at half the measured rate,
-  feedback 2-3 frames late). Open: a level whose latency alone exceeds the 1.0 ms light budget would starve
-  (measured <= 0.4 ms).
+  feedback 2-3 frames late). A level whose latency alone exceeds the 1.0 ms light budget is probed after 45 plans
+  (round 2: weather-clouds.md), so its cost is measured again.
 - Under load at the game's budget (section 18): the Sun at 100 x for 10 s (4.2 deg) light median 0.75 ms, p99 1.26,
   upkeep max 1.50 ms; a pair switch (analog + ERA5 -> ERA5 + ERA5, the weight 0.82 -> 0.50 over 10 s, every 0.02
   relighting all levels) light median 0.67, p99 1.29, upkeep max 1.68 ms.

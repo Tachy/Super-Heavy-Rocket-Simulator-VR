@@ -1191,3 +1191,10 @@ alone and 3.18 ms in the full run (level 0: 3.07 ms against 1.95 planned, its ra
 feedback); levels 7 .. 0 complete 34 / 48 / 43 / 52 / 38 / 37 / 88 / 30 frames after their density shown (level 1 at
 48-98 over four runs). At share 0.5 every level took 57-194 frames; planning at the slowest of the last 45 rates held
 level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with its cells.
+
+## World volume light: starvation open point (superseded 2026-10-29, Task 6 review round 2)
+- "World volume light, starvation: a level whose per-plan latency alone exceeds the 1.0 ms light budget is skipped and
+  would never be served in normal frames (measured latencies <= 0.4 ms, so not hit today)." Replaced by partial
+  columns and the probe after `LIGHT_PROBE_FRAMES` plans (weather-clouds.md, cost model). The re-review also named a
+  level-0 column costing ~1.25 ms at ~1e5 cells/ms; that mixed up cells and columns (a column is ~124 cells, ~1.2 us
+  at that rate) - the live starvation path is the latency, not the column.

@@ -1156,7 +1156,15 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     a cold start / jump starts the growth again from the probe (sizes measured on other content at another GPU load
     let level 0's first dispatches run 2 x over plan, 4.56 against 2.55 ms, in the full check).
     A level whose latency does not fit what is left of the budget is skipped and a level that fits is served (never
-    an overrun). Spike frames: the fill bake gets `SPIKE_BAKE_SHARE` 0.5 of the 3 ms cap, `SPIKE_BAKE_SHARE_LIGHT_DUE`
+    an overrun) - but never for good (round 2, N1): where one whole column (and the latency) never fits the plan's
+    whole light budget, the level is served partial columns (z slices of at least `LIGHT_PARTIAL_MIN_CELLS` 16 cells;
+    the column pass is paid whole; `box_split_column_z`); a level whose light kernel no large dispatch measured for
+    `LIGHT_PROBE_FRAMES` 45 plans while light is pending and whose share cannot reach `LIGHT_CALIBRATION_MIN_CELLS`
+    gets one probe of that many cells beyond its share (one level a plan, the longest unmeasured; bounded by the
+    spike cap less `BAKE_SPIKE_MARGIN`), so its rate and latency are measured again; a slow sample leaves the
+    45-sample window with new measurements (the latency quantile forgets a lone slow sample after ~10 faster ones).
+    Note: at the measured rates (>= 1e4 cells/ms floor, column pass ~1e7 cells/ms) a level-0 column costs ~12 us, so
+    the partial columns only act for slivers of rates far below today's; the latency path (probe) is the live one. Spike frames: the fill bake gets `SPIKE_BAKE_SHARE` 0.5 of the 3 ms cap, `SPIKE_BAKE_SHARE_LIGHT_DUE`
     0.2 while a filled level's light is due (provisional or blending: the cold start lights each level's whole window,
     up to ~70 ms of GPU at level 0 on the cloudy slab - beside a half-cap bake level 1 took 125 frames), and the light
     `LIGHT_SPIKE_SHARE` 0.85 of what the bake leaves (the bake's plan x 1.5). An upkeep over 2 x its plan halves the
@@ -1273,8 +1281,6 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Open points and known limits
 
-- **World volume light, starvation**: a level whose per-plan latency alone exceeds the 1.0 ms light budget is skipped
-  and would never be served in normal frames (measured latencies <= 0.4 ms, so not hit today).
 - **World volume bake, coarse levels (deliberate band-limit simplification, ruling T4 Q2)**: cells of levels 3-7
   (400 m .. 6.4 km) keep the point model's cover and water at weather-cell scale, not per cell (per-cell scatter up to
   0.07 sigma_c, rms 0.017; Diagnostics "Cell bake"). The point model itself keeps the grid-mean water only over the

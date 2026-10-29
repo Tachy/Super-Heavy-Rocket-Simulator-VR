@@ -48,6 +48,7 @@ func _run() -> void:
 	_test_moon()
 	_test_light_modes()
 	_test_calibration()
+	_test_light_progress()
 	_test_light_levels()
 	_test_pair_switch()
 	_test_jump()
@@ -1062,6 +1063,82 @@ func _test_calibration() -> void:
 	_check(full > 0.9 * budget and halved <= 0.5 * budget + 1e-9 and after > 0.9 * budget and below > 0.9 * budget,
 			"an upkeep over %.0f x its plan halves the next plan's budget once, not at 1.9 x (%.3f, %.3f, %.3f, %.3f ms)"
 			% [S.OVERRUN_HALVE, full, halved, after, below])
+
+
+## Task 6 review round 2 (N1): a level's light always progresses and is measured again. Where one column costs more than
+## the whole light budget the level is served partial columns (z slices) that fit what is left; a level whose latency
+## alone exceeds the budget gets a probe of LIGHT_CALIBRATION_MIN_CELLS cells after LIGHT_PROBE_FRAMES plans (below the
+## spike cap), so its rate and latency are measured again; a latency sample that was too slow ages out of the window.
+func _test_light_progress() -> void:
+	print("light progress")
+	var S := CloudWorldVolumeSchedule
+	var L := CloudWorldVolumeLayout
+	var sun := _sun(0.0, SUN_30)
+	var box := {"from": Vector3i(10, 20, 4), "to": Vector3i(14, 22, 124)}
+	var sp := L.box_split_column_z(box, 30)
+	var taken: Dictionary = sp[0]
+	var rest_cells := 0
+	for r: Dictionary in sp[1]:
+		rest_cells += _cells(r)
+	_check(taken["from"] == Vector3i(10, 20, 4) and taken["to"] == Vector3i(11, 21, 34) and _cells(taken) == 30
+			and rest_cells == _cells(box) - 30 and _cells(sp[1][0]) == 90, "box_split_column_z: 30 cells of the first "
+			+ "column; the rest of that column first, then the other columns (taken %s, rest %d cells)" % [taken, rest_cells])
+	# One column (124 cells) at 50 cells / ms costs 2.5 ms, more than the whole budget: level 0 still progresses.
+	var s := _schedule()
+	_settle(s, 0.0, 100.0, sun, 0.3)
+	s.set_light_rates(2.0e5, 4.0e6, 0.05)
+	s.light_cells_per_ms[0] = 50.0
+	s.light_latency_ms[0] = 0.4
+	var served := 0
+	var cells := 0
+	var partial := true
+	var within := true
+	var plans := 12
+	for i in plans:
+		var p := _plan(s, 0.0, 100.0, sun, 0.33)
+		within = within and p["light_ms_planned"] <= S.LIGHT_BUDGET_MS + 1e-9
+		var n := _sum_cells(p["light"], 0)
+		served += 1 if n > 0 else 0
+		cells += n
+		for j: Dictionary in p["light"]:
+			if j["level"] == 0:
+				partial = partial and j["to"].z - j["from"].z < L.window_size(0).z
+	_check(served == plans and cells >= plans * S.LIGHT_PARTIAL_MIN_CELLS and partial and within, ("a level whose one "
+			+ "column costs more than the whole budget is served partial columns every plan, within the budget (%d of %d "
+			+ "plans, %d cells, ms planned <= %.1f)") % [served, plans, cells, S.LIGHT_BUDGET_MS])
+	# A latency above the budget: a probe after LIGHT_PROBE_FRAMES plans, once, below the spike cap, then back to skipped.
+	s = _schedule()
+	_settle(s, 0.0, 100.0, sun, 0.3)
+	s.set_light_rates(2.0e5, 4.0e6, 0.05)
+	s.light_latency_ms[0] = 1.2 * S.LIGHT_BUDGET_MS
+	var first := -1
+	var probes := 0
+	var probe_ms := 0.0
+	var probe_cells := 0
+	for i in 2 * S.LIGHT_PROBE_FRAMES:
+		var p := _plan(s, 0.0, 100.0, sun, 0.33)
+		var n := _sum_cells(p["light"], 0)
+		if n > 0:
+			probes += 1
+			first = i if first < 0 else first
+			probe_ms = maxf(probe_ms, p["light_ms_planned"])
+			probe_cells = maxi(probe_cells, n)
+	_check(first >= S.LIGHT_PROBE_FRAMES - 1 and first <= S.LIGHT_PROBE_FRAMES + 2 and probes <= 2
+			and probe_cells >= S.LIGHT_CALIBRATION_MIN_CELLS and probe_ms <= S.UPKEEP_SPIKE_MS,
+			"a level skipped for LIGHT_PROBE_FRAMES plans gets a probe of >= LIGHT_CALIBRATION_MIN_CELLS cells below "
+			+ "UPKEEP_SPIKE_MS (first at plan %d, %d probe plans, %d cells, %.2f ms)" % [first, probes, probe_cells,
+			probe_ms])
+	# The sample of a slow latency leaves the window: the plan recovers after faster feedback.
+	var slow := {"levels": {0: {"cells": 1000, "cells_ms": 0.9, "column_cells": 0, "column_ms": 0.0}}}
+	var quick := {"levels": {0: {"cells": 1000, "cells_ms": 0.2, "column_cells": 0, "column_ms": 0.0}}}
+	s = _schedule()
+	s.set_light_rates(1.0e6, 1.0e7, 0.2)
+	s.feedback_split(slow)
+	var slow_ms := s.light_latency_ms[0]
+	for i in 12:
+		s.feedback_split(quick)
+	_check(slow_ms > 0.8 and s.light_latency_ms[0] < 0.3, "a slow latency sample is not frozen: it is adopted at once "
+			+ "and forgotten once faster samples fill the window (%.3f, then %.3f ms)" % [slow_ms, s.light_latency_ms[0]])
 
 
 ## Task 6 review round 1: the light's schedule per level - light jobs are whole columns; a level's refresh relights no

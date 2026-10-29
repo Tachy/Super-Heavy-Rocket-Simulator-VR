@@ -55,6 +55,8 @@ var _moon := Vector3.ZERO
 var _blend := 0.0
 var _charged := {}  ## levels whose light lists' latency this plan's budget paid for (light_latency_of)
 var _left := {}  ## level -> light cells the level may still take this plan (light_cells_cap; absent: uncapped)
+var _share_ms := 0.0  ## this plan's whole light budget (a partial column only where a whole one never fits it)
+var _hard_left_ms := 0.0  ## what UPKEEP_SPIKE_MS leaves this plan after the bake and the light so far (a probe's bound)
 
 
 ## Shadow shift H dtheta / sin^2 e kept below 1/4 cell: the Sun may turn this far (rad) before a level is relit.
@@ -103,6 +105,8 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 	_charged = {}
 	_left = {}
 	for k in CloudWorldVolumeLayout.LEVELS:
+		s.rate_age[k] += 1
+	for k in CloudWorldVolumeLayout.LEVELS:
 		if s.light_cells_cap(k) >= 0:
 			_left[k] = s.light_cells_cap(k)
 	_sun = sun
@@ -132,7 +136,17 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 				0.0)
 	light_ms *= s.light_budget_scale * s.overrun_factor()
 	var left := light_ms
+	_share_ms = light_ms
+	_hard_left_ms = s.budget_scale * S.UPKEEP_SPIKE_MS * s.overrun_factor() - s.bake_ms_planned()
 	var jobs: Array = out["light"]
+	# -1. the level longest unmeasured (at least LIGHT_PROBE_FRAMES plans, its share cannot reach a large dispatch) gets
+	# a probe (N1: a slow sample or a latency above the share must not freeze its plan for good); one level a plan.
+	var probed: CloudWorldVolumeSchedule._Level = null
+	for lv: CloudWorldVolumeSchedule._Level in fine_first:
+		if lv.active and lv.ready and _probe_due(s, lv, left) 				and (probed == null or s.rate_age[lv.k] > s.rate_age[probed.k]):
+			probed = lv
+	if probed != null:
+		left -= _probe(s, probed, spike, delta_s, jobs)
 	# 0. blends in progress.
 	for lv: CloudWorldVolumeSchedule._Level in order:
 		if lv.active and not lv.blend.is_empty():
@@ -200,9 +214,10 @@ func _job(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, box:
 		"mode": mode, "weight": weight, "generation": generation}
 
 
-## The column-shaped part of `box` a light budget of `ms` pays for at level k ([taken, rest]; taken empty when not one
-## column fits) and its cost (ms; the level's dispatch latency the first time this plan); a level takes at most
-## CloudWorldVolumeSchedule.light_cells_cap a plan (LIGHT_GROWTH).
+## The column-shaped part of `box` a light budget of `ms` pays for at level k ([taken, rest]; taken empty when nothing
+## fits) and its cost (ms; the level's dispatch latency the first time this plan); a level takes at most
+## CloudWorldVolumeSchedule.light_cells_cap a plan (LIGHT_GROWTH). Where not one whole column fits, a partial column
+## (the first z cells of its first column, LIGHT_PARTIAL_MIN_CELLS at least): a level is always served what is left.
 func _split(s: CloudWorldVolumeSchedule, k: int, box: Dictionary, ms: float) -> Array:
 	var over := 0.0 if _charged.has(k) else s.light_latency_of(k)
 	var n := s.light_cells_for(k, box, ms - over)
@@ -210,11 +225,72 @@ func _split(s: CloudWorldVolumeSchedule, k: int, box: Dictionary, ms: float) -> 
 		n = mini(n, _left[k])
 	var sp := CloudWorldVolumeLayout.box_split_columns(box, n)
 	if CloudWorldVolumeLayout.box_cells(sp[0]) == 0:
+		sp = _split_partial(s, k, box, ms - over)
+	if CloudWorldVolumeLayout.box_cells(sp[0]) == 0:
 		return [sp[0], sp[1], 0.0]
 	_charged[k] = true
 	if _left.has(k):
 		_left[k] -= CloudWorldVolumeLayout.box_cells(sp[0])
 	return [sp[0], sp[1], s.light_ms_of(k, sp[0]) + over]
+
+
+## A partial column of `box` (z slice of its first column) that `ms` pays for: the column pass whole, the light kernel
+## for the slice - only where a whole column (and the level's latency) never fits the plan's whole light budget (else a
+## sliver of the budget would fragment the jobs). [taken, rest]; taken empty when fewer than LIGHT_PARTIAL_MIN_CELLS (or
+## the box's cells) fit.
+func _split_partial(s: CloudWorldVolumeSchedule, k: int, box: Dictionary, ms: float) -> Array:
+	var d: Vector3i = box["to"] - box["from"]
+	var none := [{"from": box["from"], "to": box["from"]}, [box]]
+	if d.z <= 0 or d.x <= 0 or d.y <= 0:
+		return none
+	if s.light_latency_of(k) + s.light_ms_of(k, {"from": box["from"], "to": box["from"] + Vector3i(1, 1, d.z)}) 			<= _share_ms:
+		return none
+	var nz := int(floorf((ms - CloudWorldVolumeLayout.window_size(k).z / s.column_cells_per_ms[k])
+			* s.light_cells_per_ms[k]))
+	if _left.has(k):
+		nz = mini(nz, _left[k])
+	if nz < mini(CloudWorldVolumeSchedule.LIGHT_PARTIAL_MIN_CELLS, d.z):
+		return none
+	return CloudWorldVolumeLayout.box_split_column_z(box, mini(nz, d.z))
+
+
+## True when level lv is due a probe (LIGHT_PROBE_FRAMES): it has light pending, its light kernel was not measured by a
+## large dispatch for that many plans and `left` (what is left of the share) pays for fewer than
+## LIGHT_CALIBRATION_MIN_CELLS cells at the level's rates and latency.
+func _probe_due(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, left: float) -> bool:
+	var S := CloudWorldVolumeSchedule
+	var pending := not lv.prov.is_empty() or not lv.queue.is_empty() or not lv.partial.is_empty()
+	if not pending or s.rate_age[lv.k] < S.LIGHT_PROBE_FRAMES:
+		return false
+	var column := {"from": Vector3i.ZERO, "to": Vector3i(S.TILE_CELLS, S.TILE_CELLS,
+			CloudWorldVolumeLayout.window_size(lv.k).z)}
+	var over := 0.0 if _charged.has(lv.k) else s.light_latency_of(lv.k)
+	return s.light_cells_for(lv.k, column, left - over) < S.LIGHT_CALIBRATION_MIN_CELLS
+
+
+## The probe: level lv is served LIGHT_CALIBRATION_MIN_CELLS cells (two columns more: whole columns) even beyond its
+## share, bounded by what UPKEEP_SPIKE_MS leaves less BAKE_SPIKE_MARGIN (_hard_left_ms; a plan is measured up to that
+## much over) - its measurement refreshes the level's rate and latency. Returns the ms spent.
+func _probe(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, spike: bool, delta_s: float,
+		jobs: Array) -> float:
+	var S := CloudWorldVolumeSchedule
+	var L := CloudWorldVolumeLayout
+	var k := lv.k
+	var cells := S.LIGHT_CALIBRATION_MIN_CELLS + 2 * L.CELLS_V
+	var columns := ceili(float(cells) / L.window_size(k).z)
+	var need := s.light_latency_of(k) + cells / s.light_cells_per_ms[k] + columns * L.window_size(k).z 			/ s.column_cells_per_ms[k]
+	var budget := minf(need, _hard_left_ms / S.BAKE_SPIKE_MARGIN)
+	if budget <= 0.0:
+		return 0.0
+	var capped := _left.has(k)
+	if capped:
+		_left.erase(k)  # a probe is the one dispatch that may exceed the growth bound
+	var used := _light_prov(s, lv, budget, spike, delta_s, jobs) if not lv.prov.is_empty() 			else _light_queue(s, lv, budget, jobs)
+	if capped:
+		_left[k] = 0
+	if used > 0.0:
+		s.rate_age[k] = 0  # its measurement arrives a few frames late
+	return used
 
 
 ## A blend step for every box in the level's blend list the budget covers: weight dt / the time left, so exp(-tau) moves

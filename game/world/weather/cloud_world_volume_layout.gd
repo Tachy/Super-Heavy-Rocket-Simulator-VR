@@ -361,6 +361,22 @@ static func box_split(box: Dictionary, n: int) -> Array:
 	return [{"from": f, "to": Vector3i(f.x + n, f.y + 1, f.z + 1)}, rest]
 
 
+## The first nz cells (in z) of the box's first column - a partial column (Task 6 review round 2: where one whole
+## column costs more than the light has left; the column pass is paid whole, the light kernel only for these cells).
+## [taken, rest]: the rest of that column first (served next), then the other columns of the box.
+static func box_split_column_z(box: Dictionary, nz: int) -> Array:
+	var f: Vector3i = box["from"]
+	var t: Vector3i = box["to"]
+	if nz >= t.z - f.z:
+		return box_split_columns(box, t.z - f.z)  # the whole column
+	var rest: Array[Dictionary] = [{"from": Vector3i(f.x, f.y, f.z + nz), "to": Vector3i(f.x + 1, f.y + 1, t.z)}]
+	if t.x - f.x > 1:
+		rest.append({"from": Vector3i(f.x + 1, f.y, f.z), "to": Vector3i(t.x, f.y + 1, t.z)})
+	if t.y - f.y > 1:
+		rest.append({"from": Vector3i(f.x, f.y + 1, f.z), "to": t})
+	return [{"from": f, "to": Vector3i(f.x + 1, f.y + 1, f.z + nz)}, rest]
+
+
 ## As box_split, but column-shaped (world-volume Task 6 review round 1: the light's column pass sums a level's whole
 ## column once per job): the largest prefix of at most n cells made of whole columns of the box (its full z extent) -
 ## whole rows of columns, else part of one row; less than one column (n < the box's height) takes nothing. [taken,

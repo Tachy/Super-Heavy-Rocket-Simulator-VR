@@ -178,10 +178,14 @@ func slot_holds(slot: int, id: String) -> bool:
 	return ids[channel_of_slot(slot)] == id and bool(l["slot_ready"][channel_of_slot(slot)])
 
 
-## The upkeeps measured since the last call, per frame {bake_ms, bake_taps, light_ms, light_cells, planned_ms (bake +
-## light at the rates of the plan), bake_planned_ms, levels: {k: {cells, cells_ms, column_cells, column_ms, jobs}},
-## bake_levels: {k: {taps, ms}}}
-## (GPU ms; CloudWorldVolumeSchedule.feedback_split).
+## The id of the last upkeep run (a run's measurement carries its id as `run`: checks tell what it measured).
+func last_run_id() -> int:
+	return _run_id
+
+
+## The upkeeps measured since the last call, per frame {run (the run's id, last_run_id), bake_ms, bake_taps, light_ms,
+## light_cells, planned_ms (bake + light at the rates of the plan), bake_planned_ms, levels: {k: {cells, cells_ms,
+## column_cells, column_ms, jobs}}, bake_levels: {k: {taps, ms}}} (GPU ms; CloudWorldVolumeSchedule.feedback_split).
 func take_feedback() -> Array[Dictionary]:
 	_mutex.lock()
 	var f := _feedback
@@ -892,7 +896,7 @@ func _read_timestamps() -> void:
 		last_light_ms = _interval_ms(light, end)
 		last_upkeep_ms = bake_ms + last_light_ms
 		_mutex.lock()
-		_feedback.append({"bake_ms": bake_ms, "bake_taps": work["bake_taps"], "light_ms": last_light_ms,
+		_feedback.append({"run": id, "bake_ms": bake_ms, "bake_taps": work["bake_taps"], "light_ms": last_light_ms,
 				"light_cells": work["light_cells"], "planned_ms": work["planned_ms"],
 				"bake_planned_ms": work["bake_planned_ms"], "levels": levels, "bake_levels": bake_levels})
 		if _feedback.size() > FEEDBACK_MAX:
