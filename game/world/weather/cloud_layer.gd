@@ -241,7 +241,7 @@ var edge_curl := 1.0:
 ## DIVISORS, user argument --cloud_divisor=<x>; spatial only). Choosing a method switches the view cache off (the
 ## user's goal: no view cache); the world volume's upkeep runs from the first hybrid frame on (volume_needed: the
 ## settled upkeep is ~0.003 ms, and a restart would refill the whole volume).
-const DIVISORS: Array[float] = [1.0, 1.5, 2.0, 3.0]
+const DIVISORS: Array[float] = [1.0, 1.5, 2.0, 3.0, 4.0]
 const METHOD_ARGUMENTS := {"old": CloudEffect.MarchMethod.OLD, "hybrid": CloudEffect.MarchMethod.HYBRID,
 	"hybrid_no_skip": CloudEffect.MarchMethod.HYBRID_NO_SKIP,
 	"hybrid_old_light": CloudEffect.MarchMethod.HYBRID_OLD_LIGHT}
