@@ -16,9 +16,11 @@ const BLOCK_SIZE := 4 * 16
 ## The maps (Texture2DRD; their RD textures are made on the render thread, bound by bind_textures on the main thread).
 var near_texture := Texture2DRD.new()
 var far_texture := Texture2DRD.new()
-## Time.get_ticks_msec() of the last frame rendered with the maps (render thread writes, main thread reads); the
-## layer takes the maps as valid only shortly after it.
-var ran_msec := -1000000
+## Engine.get_frames_drawn() of the last frame rendered with the maps (render thread writes, main thread reads); the
+## layer takes the maps as valid only a few frames after it. Counted in frames, not wall-clock time (world-volume plan
+## Task 7): a slow frame (a check's ~100 ms full-resolution march) outlasted a millisecond window and switched the
+## ground's and the air's cloud shadows off and on between frames of an unchanged scene.
+var ran_frame := -1000000
 ## Checks only (cloud_check.gd): the near map with the grid mean too (the maps' machinery against the CPU's
 ## Beer-Lambert, without the shapes' local departures from the cell mean).
 var grid_mean_only := false
@@ -188,5 +190,5 @@ func _render_pass(_callback_type: int, _render_data: RenderData) -> void:
 		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shader, 1, set1), 1)
 		_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_end()
-	ran_msec = Time.get_ticks_msec()
+	ran_frame = Engine.get_frames_drawn()
 	stats = {"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}

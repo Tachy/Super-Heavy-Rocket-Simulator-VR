@@ -167,7 +167,7 @@ var far_enabled := false
 ## user argument `--no_cloud_pass` (World), render_check passes it through.
 var pass_enabled := true
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
-const SHADOW_RUN_WINDOW_MSEC := 250  ## how long after its last run the shadow effect still counts as running
+const SHADOW_RUN_WINDOW_FRAMES := 4  ## frames drawn after its last run in which the shadow effect still counts
 var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
 ## The light cache (the Sun's tau_light looked up, not marched; planned here every frame, filled by the effect on the
 ## render thread; its layout and refresh rules: CloudLightCacheSchedule).
@@ -449,10 +449,10 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	_update_shadow_frame(camera_render, height)
 	_update_light_cache(camera_render, height)
 	_update_world_volume(camera_render, delta_s)
-	# The maps count as valid only while the effect keeps running (its render callback stamps ran_msec; the render
+	# The maps count as valid only while the effect keeps running (its render callback stamps ran_frame; the render
 	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped
-	# effect (compositor detached, device lost) turns the shadows back to the column the next moments.
-	var shadow_ran := Time.get_ticks_msec() - shadow_effect.ran_msec <= SHADOW_RUN_WINDOW_MSEC
+	# effect (compositor detached, device lost) turns the shadows back to the column a few frames later.
+	var shadow_ran := Engine.get_frames_drawn() - shadow_effect.ran_frame <= SHADOW_RUN_WINDOW_FRAMES
 	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
 	FrameProfiler.begin(&"cloud_view_cache")
 	nearest_cloud_m = _nearest_cloud_m(camera_fixed_m)

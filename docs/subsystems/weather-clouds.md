@@ -1264,8 +1264,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `cloud_check.gd`'s sections 8 and 10 alone (with per-row seam profiles and the fill's per-frame times),
   `STARSIM_CACHE_VIEWS=3,4` only those cascades' section-8 views. Schedule
   logic: `tests/cloud_light_cache_test.gd` (headless).
-- `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
-  render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
+- `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_frame`: the
+  render callback's last run (`Engine.get_frames_drawn()`); `CloudLayer` takes the maps as valid (`cloud_shadow_valid`)
+  only within 4 drawn frames of it (frames, not milliseconds: a slow check frame outlasted the old 250 ms window and
+  switched the ground's / air's cloud shadows off and on in an unchanged scene - world-volume Task 7, R4).
 - `cloud_check.gd` with `STARSIM_SUN_ONLY=1`: section 13 alone (36 checks): the cloudless disk's centre = the core's
   sun transmittance x `World.sun_disc_scene_value` within 3 % per channel (13 deg up: unclipped; 55 deg up: clipped
   with its colour kept); through slabs of vertical tau 2 / 5 / 7 / 8 / 9 / 10 / 20 at 55 deg the disk's part (the
