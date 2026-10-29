@@ -47,6 +47,8 @@ func _run() -> void:
 	_test_light_budget_and_order()
 	_test_moon()
 	_test_light_modes()
+	_test_calibration()
+	_test_light_levels()
 	_test_pair_switch()
 	_test_jump()
 	_test_reframe_schedule()
@@ -289,7 +291,7 @@ func _test_reframe_and_memory() -> void:
 func _schedule(layout := CloudWorldVolumeLayout.new()) -> CloudWorldVolumeSchedule:
 	var s := CloudWorldVolumeSchedule.new(layout)
 	s.bake_taps_per_ms = TEST_TAPS_PER_MS
-	s.light_cells_per_ms = TEST_LIGHT_CELLS_PER_MS
+	s.set_light_rates(TEST_LIGHT_CELLS_PER_MS, INF)
 	return s
 
 
@@ -345,7 +347,7 @@ func _test_cold_start() -> void:
 		channels_ok = channels_ok and j["snapshot_channel"] == -1
 	_check(channels_ok, "...both snapshots")
 	_check(not p["lookup"]["levels"][7]["ready"], "...and does not show it before it is baked whole")
-	_check(p["light_cells"] <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS * s.light_cells_per_ms, "first-plan light within the spike cap")
+	_check(p["planned_ms"] <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6, "first-plan upkeep within the spike cap")
 	# Until the coarsest level is whole: every plan lights what it baked (real or provisional, the provisional light
 	# from the grid-mean column); finer levels follow coarse to fine; all within the spike cap.
 	var first_seen := {}
@@ -368,8 +370,7 @@ func _test_cold_start() -> void:
 		for j: Dictionary in p["provisional"]:
 			if j["level"] == 7:
 				from_column = from_column and j["from_column"]
-		var est: float = p["bake_taps"] / s.bake_taps_per_ms + p["light_cells"] / s.light_cells_per_ms
-		spike_ok = spike_ok and est <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6
+		spike_ok = spike_ok and p["planned_ms"] <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6
 		if s.complete() or frames >= FILL_FRAMES_MAX:
 			break
 		p = _plan(s, 0.0, 100.0, sun)
@@ -491,7 +492,7 @@ func _scroll_flight(label: String, speed_mps: float, h0_m: float, climb_mps: flo
 		lon += speed_mps * sin(heading) * DT / (r * cos(lat))
 		h += climb_mps * DT
 		var p := s.plan(_geodetic_point(lat, lon, h), sun, Vector3(0.0, 0.6, 0.8), 0.3, CLOUD_TOP_M, false, DT, [0, 1])
-		var est: float = p["bake_taps"] / GAME_TAPS_PER_MS + p["light_cells"] / s.light_cells_per_ms
+		var est: float = p["bake_taps"] / GAME_TAPS_PER_MS + p["light_ms_planned"]
 		worst_ms = maxf(worst_ms, est)
 		var scroll_ms: float = p["bake_scroll_taps"] / GAME_TAPS_PER_MS
 		scroll_ms_sum += scroll_ms
@@ -738,15 +739,88 @@ func _test_light_budget_and_order() -> void:
 	var sun := _sun(0.0, SUN_30)
 	var s := _schedule()
 	_settle(s, 0.0, 100.0, sun, 0.3)
-	s.feedback(2.0, 400000, 800000)  # fixed GPU timings: calibrates the cells-per-ms rates
-	var cap := CloudWorldVolumeSchedule.LIGHT_BUDGET_MS * s.light_cells_per_ms
-	var worst := 0
+	# (as calibrated) the light's cost: cells and column cells per level, each level's latency
+	s.set_light_rates(2.0e5, 4.0e6, 0.12)
+	s.light_cells_per_ms[0] = 5.0e4
+	var worst := 0.0
+	var model_ok := true
 	var jobs := 0
 	for i in 12:
 		var p := _plan(s, 0.0, 100.0, sun, 0.3 + 0.03 * (i + 1))
-		worst = maxi(worst, _sum_cells(p["light"]))
+		var ms := 0.0
+		var levels := {}
+		for j: Dictionary in p["light"]:
+			ms += s.light_ms_of(j["level"], j)
+			levels[j["level"]] = true
+		for k: int in levels:
+			ms += s.light_latency_of(k)
+		model_ok = model_ok and absf(ms - p["light_ms_planned"]) < 1e-6
+		worst = maxf(worst, p["light_ms_planned"])
 		jobs += p["light"].size()
-	_check(jobs > 0 and worst <= cap, "light cells per plan %d <= the calibrated budget %.0f" % [worst, cap])
+	_check(jobs > 0 and worst <= CloudWorldVolumeSchedule.LIGHT_BUDGET_MS + 1e-9 and model_ok, "light per plan %.3f ms "
+			% worst + "<= LIGHT_BUDGET_MS at the per-level cost (each job: cells and column cells at its level's rates, each "
+			+ "level its latency once)")
+	# Task 6 review round 1c: a level whose latency alone exceeds what is left of the budget is skipped, a level that
+	# fits is served (never an overrun).
+	s = _schedule()
+	_settle(s, 0.0, 100.0, sun, 0.3)
+	s.set_light_rates(2.0e5, 4.0e6, 0.05)
+	s.light_latency_ms[0] = 1.2 * CloudWorldVolumeSchedule.LIGHT_BUDGET_MS
+	var skipped_ok := true
+	var served := {}
+	for i in 12:
+		var p := _plan(s, 0.0, 100.0, sun, 0.33)  # one blend step: every level stale, queued one per plan
+		skipped_ok = skipped_ok and p["light_ms_planned"] <= CloudWorldVolumeSchedule.LIGHT_BUDGET_MS + 1e-9
+		for j: Dictionary in p["light"]:
+			served[j["level"]] = true
+	_check(skipped_ok and not served.has(0) and served.size() > 0, "a level whose latency exceeds the budget is "
+			+ "skipped, the others served within it (levels served: %s)" % [served.keys()])
+	# A level's light grows by at most LIGHT_GROWTH a plan over its measured dispatches, LIGHT_PROBE_CELLS before any.
+	s = _schedule()
+	_settle(s, 0.0, 100.0, sun, 0.3)
+	s.set_light_rates(1.0e9, INF, 0.0, false)
+	var probe_ok := true
+	var probed := 0
+	for i in 12:
+		var p := _plan(s, 0.0, 100.0, sun, 0.33)
+		var per_level := {}
+		for j: Dictionary in p["light"]:
+			per_level[j["level"]] = per_level.get(j["level"], 0) + CloudWorldVolumeLayout.box_cells(j)
+		for k: int in per_level:
+			probe_ok = probe_ok and per_level[k] <= CloudWorldVolumeSchedule.LIGHT_PROBE_CELLS
+			probed = maxi(probed, per_level[k])
+	_check(probe_ok and probed > 0, "a level not measured yet gets at most LIGHT_PROBE_CELLS light cells a plan "
+			+ "(largest %d)" % probed)
+	s.feedback_split({"light_ms": 1.0, "levels": {2: {"cells": 200000, "cells_ms": 1.0, "column_cells": 0,
+		"column_ms": 0.0}}})
+	_check(s.light_cells_cap(2) == CloudWorldVolumeSchedule.LIGHT_GROWTH * 200000 and s.light_cells_cap(3)
+			== CloudWorldVolumeSchedule.LIGHT_PROBE_CELLS, "...then LIGHT_GROWTH x its largest measured dispatch "
+			+ "(level 2: %d, level 3 not measured: %d)" % [s.light_cells_cap(2), s.light_cells_cap(3)])
+	s.reset()
+	_plan(s, 0.0, 100.0, sun, 0.33)
+	_check(s.light_cells_cap(2) == CloudWorldVolumeSchedule.LIGHT_PROBE_CELLS, "...and from LIGHT_PROBE_CELLS again "
+			+ "after a cold start (level 2: %d)" % s.light_cells_cap(2))
+	# Task 6 review round 1c: in a spike frame a filled level with light due holds the fill bake to
+	# SPIKE_BAKE_SHARE_LIGHT_DUE of the cap (its light completes within ~1 s of its density shown).
+	s = _schedule()
+	s.set_light_rates(2.0e5, INF)
+	var S := CloudWorldVolumeSchedule
+	var due_plans := 0
+	var free_plans := 0
+	var held_ok := true
+	for i in 3 * FILL_FRAMES_MAX:
+		var due: bool = s._started and s._light_due()
+		var p := _plan(s, 0.0, 100.0, sun, 0.3)
+		var cap := S.UPKEEP_SPIKE_MS * (S.SPIKE_BAKE_SHARE_LIGHT_DUE if due else S.SPIKE_BAKE_SHARE)
+		held_ok = held_ok and p["bake_ms_planned"] <= cap + 1e-9
+		if due and not p["bake"].is_empty():
+			due_plans += 1
+		elif not p["bake"].is_empty():
+			free_plans += 1
+		if s.complete():
+			break
+	_check(held_ok and due_plans > 0 and free_plans > 0, "cold start: a level's light due holds the fill bake to "
+			+ "SPIKE_BAKE_SHARE_LIGHT_DUE of the cap (%d plans held, %d at SPIKE_BAKE_SHARE)" % [due_plans, free_plans])
 	# Order: provisional slab first, then the nearest tile of the finest stale level.
 	s = _schedule()
 	_settle(s, 0.0, 100.0, sun, 0.3)
@@ -870,7 +944,7 @@ func _test_light_modes() -> void:
 	# Provisional light shown, then blended out: a scroll with the light starved.
 	s = _schedule()
 	_settle(s, 0.0, 100.0, sun)
-	s.light_cells_per_ms = 0.0
+	s.set_light_rates(0.0, INF)
 	var lam := 0.0
 	var seen_blend := false
 	for i in 30:
@@ -879,7 +953,7 @@ func _test_light_modes() -> void:
 		for j: Dictionary in p["light"]:
 			seen_blend = seen_blend or j["mode"] == M.MODE_BLEND
 	_check(not seen_blend and _any_pending(s), "light starved: provisional light, no blend before real light")
-	s.light_cells_per_ms = TEST_LIGHT_CELLS_PER_MS
+	s.set_light_rates(TEST_LIGHT_CELLS_PER_MS, INF)
 	var spans := {}  # box -> [first plan, last plan, first weight, last weight]
 	var weights_ok := true
 	for i in 200:
@@ -912,6 +986,136 @@ func _test_light_modes() -> void:
 	_check(weights_ok and first_ok and last_ok, "provisional light that was shown is blended out: %d boxes, first "
 			% spans.size() + "weight dt / %.2f s, last 1" % CloudWorldVolumeSchedule.PROVISIONAL_FADE_S)
 	_check(span_ok, "...each over PROVISIONAL_FADE_S: %d plans (longest %d)" % [fade_frames, longest])
+
+
+## Task 6 review rounds 1 / 1c (I1, M3): the production calibration (feedback_split) - an overrun adopts the measured
+## rate at once, per level; the bake: an underrun is held at the slowest of the window; the light (latency-aware): the
+## rate from large dispatches net of the latency, at the slow end of the window, the latency from small ones, at its
+## high end; an upkeep over OVERRUN_HALVE x its plan halves the next plan's budgets (once).
+func _test_calibration() -> void:
+	print("calibration")
+	var S := CloudWorldVolumeSchedule
+	var s := _schedule()
+	s.set_light_rates(1.0e6, 1.0e7, 0.0, false)
+	s.bake_taps_per_ms = 4.0e7
+	s.feedback_split({"bake_ms": 1.0, "light_ms": 1.5, "planned_ms": 1.0, "bake_levels": {
+		3: {"taps": 20000000, "ms": 1.0}}, "levels": {
+		0: {"cells": 200000, "cells_ms": 1.0, "column_cells": 1000000, "column_ms": 0.5}}})
+	_check(is_equal_approx(s.light_cells_per_ms[0], 2.0e5) and is_equal_approx(s.column_cells_per_ms[0], 2.0e6)
+			and is_equal_approx(s.bake_level_taps_per_ms[3], 2.0e7), "an overrun adopts the measured rates at once "
+			+ "(level 0: %s light cells / ms, %s column cells / ms; level 3's bake %s taps / ms)" % [
+			s.light_cells_per_ms[0], s.column_cells_per_ms[0], s.bake_level_taps_per_ms[3]])
+	_check(is_equal_approx(s.light_cells_per_ms[1], 2.0e5) and is_equal_approx(s.column_cells_per_ms[1], 2.0e6),
+			"...per level; a level not measured yet follows the slowest measured level's light (level 1)")
+	_check(is_equal_approx(s.bake_level_taps_per_ms[2], 4.0e7) and is_equal_approx(s.bake_level_taps_per_ms[0], 4.0e7),
+			"...the bake per level (Task 6 review round 1): a level not measured keeps its rate (levels 0, 2: %s, %s "
+			% [s.bake_level_taps_per_ms[0], s.bake_level_taps_per_ms[2]] + "taps / ms)")
+	_check(is_equal_approx(s.bake_ms_of(3, 1000), 2.0 * s.bake_ms_of(2, 1000) * CloudWorldVolumeLayout.cell_taps(3)
+			/ CloudWorldVolumeLayout.cell_taps(2)), "...each level's bake planned at its own rate (%.4f / %.4f ms per "
+			% [s.bake_ms_of(3, 1000), s.bake_ms_of(2, 1000)] + "1000 cells of levels 3 / 2)")
+	s.feedback_split({"bake_levels": {3: {"taps": 80000000, "ms": 1.0}}})
+	_check(is_equal_approx(s.bake_level_taps_per_ms[3], 2.0e7), "...an underrun does not lift a level's bake above the "
+			+ "slowest of its last BAKE_RATE_WINDOW measurements (%s taps / ms)" % s.bake_level_taps_per_ms[3])
+	# Task 6 review round 1c: the latency-aware light cost.
+	var fast := {"light_ms": 1.0, "levels": {0: {"cells": 1000000, "cells_ms": 1.0, "column_cells": 0,
+		"column_ms": 0.0}}}
+	s.feedback_split(fast)
+	_check(is_equal_approx(s.light_cells_per_ms[0], 2.0e5), "a faster large dispatch does not lift the light rate "
+			+ "above the slow end (LIGHT_RATE_QUANTILE) of its recent samples: %s" % s.light_cells_per_ms[0])
+	for i in S.LIGHT_COST_WINDOW:
+		s.feedback_split(fast)
+	_check(is_equal_approx(s.light_cells_per_ms[0], 1.0e6), "...it rises once the slow samples left the window "
+			+ "(LIGHT_COST_WINDOW): %s" % s.light_cells_per_ms[0])
+	s.feedback_split({"light_ms": 0.4, "levels": {0: {"cells": 1000, "cells_ms": 0.4, "column_cells": 0,
+		"column_ms": 0.0}}})
+	_check(is_equal_approx(s.light_latency_ms[0], 0.4 - 1000 / 1.0e6) and is_equal_approx(s.light_cells_per_ms[0],
+			1.0e6), "a small dispatch measures the latency (its time less its cells at the rate: %.4f ms), not the rate"
+			% s.light_latency_ms[0])
+	var whole := 1.0 + s.light_latency_ms[0]
+	s.feedback_split({"light_ms": whole, "levels": {0: {"cells": 1000000, "cells_ms": whole, "column_cells": 0,
+		"column_ms": 0.0}}})
+	var rate := s.light_cells_per_ms[0]
+	_check(is_equal_approx(rate, 1.0e6), "...and a large dispatch's rate is measured net of it (%s cells / ms)" % rate)
+	s.feedback_split({"light_ms": 0.8, "levels": {0: {"cells": 1000, "cells_ms": 0.8, "column_cells": 0,
+		"column_ms": 0.0}}})
+	var adopted := s.light_latency_ms[0]
+	s.feedback_split({"light_ms": 0.2, "levels": {0: {"cells": 1000, "cells_ms": 0.2, "column_cells": 0,
+		"column_ms": 0.0}}})
+	_check(is_equal_approx(adopted, 0.8 - 1000 / rate) and is_equal_approx(s.light_latency_ms[0], adopted),
+			"a longer latency is adopted at once and held at the high end (LIGHT_LATENCY_QUANTILE) of the recent "
+			+ "samples (%.4f, then %.4f ms)" % [adopted, s.light_latency_ms[0]])
+	_check(is_equal_approx(s.light_latency_ms[1], adopted) and is_equal_approx(s.light_cells_per_ms[1], rate)
+			and is_equal_approx(s.column_cells_per_ms[1], 2.0e6), "...a level not measured yet follows the measured "
+			+ "levels' slowest cost (level 1: %.4f ms, %s cells / ms)" % [s.light_latency_ms[1], s.light_cells_per_ms[1]])
+	# The halving: a settled volume, every level stale (a blend step) - the plan's light budget is filled.
+	var sun := _sun(0.0, SUN_30)
+	s = _schedule()
+	_settle(s, 0.0, 100.0, sun, 0.3)
+	s.set_light_rates(2.0e5, 4.0e6)
+	var full: float = _plan(s, 0.0, 100.0, sun, 0.4)["light_ms_planned"]
+	s.feedback_split({"bake_ms": 0.5, "bake_taps": 0, "light_ms": 2.6, "planned_ms": 1.5, "levels": {}})
+	var halved: float = _plan(s, 0.0, 100.0, sun, 0.4)["light_ms_planned"]
+	var after: float = _plan(s, 0.0, 100.0, sun, 0.4)["light_ms_planned"]
+	s.feedback_split({"bake_ms": 0.5, "bake_taps": 0, "light_ms": 2.4, "planned_ms": 1.5, "levels": {}})
+	var below: float = _plan(s, 0.0, 100.0, sun, 0.4)["light_ms_planned"]
+	var budget := S.LIGHT_BUDGET_MS
+	_check(full > 0.9 * budget and halved <= 0.5 * budget + 1e-9 and after > 0.9 * budget and below > 0.9 * budget,
+			"an upkeep over %.0f x its plan halves the next plan's budget once, not at 1.9 x (%.3f, %.3f, %.3f, %.3f ms)"
+			% [S.OVERRUN_HALVE, full, halved, after, below])
+
+
+## Task 6 review round 1: the light's schedule per level - light jobs are whole columns; a level's refresh relights no
+## other level (no level reads another's light); a coarser level turning drawn relights the finer levels once (M6: their
+## rays read its density beyond their own segments).
+func _test_light_levels() -> void:
+	print("light levels")
+	var L := CloudWorldVolumeLayout
+	var sun := _sun(0.0, SUN_30)
+	var s := _schedule()
+	var columns_ok := true
+	var jobs := 0
+	var n := 0
+	while n < FILL_FRAMES_MAX:  # the cold start's direct light
+		var p := _plan(s, 0.0, 100.0, sun)
+		n += 1
+		for j: Dictionary in p["light"]:
+			columns_ok = columns_ok and j["to"].z - j["from"].z == L.CELLS_V
+			jobs += 1
+		if s.complete() and p["light"].is_empty() and p["bake"].is_empty():
+			break
+	for i in 40:  # a refresh generation (the blend's step)
+		for j: Dictionary in _plan(s, 0.0, 100.0, sun, 0.4)["light"]:
+			columns_ok = columns_ok and j["to"].z - j["from"].z == L.CELLS_V
+			jobs += 1
+	_check(columns_ok and jobs > 0, "light jobs are whole columns of the storage (fill and refresh: %d jobs)" % jobs)
+	# Level 1 refreshed alone (as by its own trigger): no level reads another's light - level 0 is not relit.
+	_settle(s, 0.0, 100.0, sun, 0.4)
+	var gens := PackedInt32Array()
+	for k in L.LEVELS:
+		gens.append(s.light_generation(k))
+	s._levels[1].need_queue = true
+	for i in 400:
+		_plan(s, 0.0, 100.0, sun, 0.4)
+		if not s.light_stale(1):
+			break
+	var others_ok := true
+	for k in L.LEVELS:
+		others_ok = others_ok and (k == 1 or s.light_generation(k) == gens[k])
+	_check(s.light_generation(1) == gens[1] + 1 and others_ok, "a level's refresh relights no other level (level 1: "
+			+ "generation %d -> %d; level 0 %d -> %d)" % [gens[1], s.light_generation(1), gens[0], s.light_generation(0)])
+	# Level 2 turning drawn (it was not shown when the finer levels' cells were lit: M6) relights both finer levels.
+	var gen0 := s.light_generation(0)
+	var gen1 := s.light_generation(1)
+	var gen3 := s.light_generation(3)
+	s._levels[2].was_drawn = false
+	for i in 400:
+		_plan(s, 0.0, 100.0, sun, 0.4)
+		if s.light_generation(0) > gen0 and s.light_generation(1) > gen1 and not s.light_stale(0):
+			break
+	_check(s.light_generation(0) == gen0 + 1 and s.light_generation(1) == gen1 + 1 and s.light_generation(3) == gen3,
+			"a coarser level turning drawn relights every finer level once, no coarser one (M6: generations %d -> %d, "
+			% [gen0, s.light_generation(0)] + "%d -> %d, level 3 %d -> %d)" % [gen1, s.light_generation(1), gen3,
+			s.light_generation(3)])
 
 
 ## True while some level has cells with provisional light only.
@@ -1022,8 +1226,7 @@ func _test_reframe_schedule() -> void:
 			seq.append(rf["level"])
 		for e: Dictionary in p["lookup"]["levels"]:
 			ok_shown = ok_shown and (e["ready"] or not e["active"])
-		var est: float = p["bake_taps"] / s.bake_taps_per_ms + p["light_cells"] / s.light_cells_per_ms
-		spike_ok = spike_ok and est <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6
+		spike_ok = spike_ok and p["planned_ms"] <= CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS + 1e-6
 		finished = rf["level"] < 0 and s.complete() and not (p["lookup"]["levels"][7]["frame_origin_earth_m"] == old_frame)
 	_check(finished, "the re-frame finishes (%d frames)" % done_frames)
 	var coarse_first := not seq.is_empty() and seq[0] == 7

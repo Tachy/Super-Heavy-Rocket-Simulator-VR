@@ -10,8 +10,9 @@ extends RefCounted
 ## per level touched the max mip over the baked blocks and the whole level's distance field (CLOUD_VOLUME_OCCUPANCY), then
 ## the light (Task 6: provisional light, then the real light jobs, shaders/cloud_volume_light.gdshaderinc) - and only
 ## then adopts the batch's lookup state, so nothing is shown before its bake ran. A batch
-## not yet taken holds the schedule back. The upkeep's GPU time (timestamp UPKEEP_STAMP) comes back a few frames later
-## with the batch's tap count (take_feedback: CloudWorldVolumeSchedule.feedback).
+## not yet taken holds the schedule back. The upkeep's GPU intervals (timestamps: UPKEEP_STAMP the bake, LIGHT_STAMP the
+## provisional light, per level LIGHT_COLUMN_STAMP / LIGHT_CELLS_STAMP its column pass and its light kernel) come back a
+## few frames later with the batch's work (take_feedback: CloudWorldVolumeSchedule.feedback_split).
 ## Channel pairs follow the layer's slots one to one (channel_of_slot): a slot's snapshot is replaced only without
 ## weight, so its pair is rebaked while it shows nothing (the schedule's slot rebake; CloudLayer holds the weight off a
 ## slot until the adopted state says its pair holds it).
@@ -35,7 +36,9 @@ const PER_KM := 1000.0
 const DISTANCE_CAP_BLOCKS := 8
 ## Compute groups (cloud_volume_bake.gdshaderinc).
 const GROUP := 4
-const COLUMN_GROUP := 8
+## [S] The most workgroups of a dispatch along x (Vulkan / D3D12 maxComputeWorkGroupCount minimum): a level's light
+## dispatch (a workgroup per column or 4^3 block: up to 256 x 256 x 32) wraps into y.
+const MAX_GROUPS_X := 65535
 const PROBE_GROUP := 64
 ## The lookup's set 1 bindings (cloud_volume.gdshaderinc CLOUD_VOLUME_BLOCK_BINDING and the texture groups after it).
 const BLOCK_BINDING := 40
@@ -47,6 +50,9 @@ const PROBE_BLOCK_SIZE := 16
 const LIGHT_JOB_BLOCK_SIZE := 6 * 16
 ## The scan's counters (cloud_volume_light.gdshaderinc).
 const SCAN_COUNTS := 4
+## Counters per light job (cloud_volume_light.gdshaderinc CloudVolumeLightCounts): clamped cells, samples no level held.
+const LIGHT_JOB_COUNTERS := 2
+const REFERENCE_BLOCK_SIZE := 2 * 16
 ## Level flags (cloud_volume.gdshaderinc).
 const FLAG_ACTIVE := 1
 const FLAG_READY := 2
@@ -55,8 +61,17 @@ const FLAG_CLAMPED_BOTTOM := 8
 const FLAG_FRAME_SHIFT := 4
 ## The upkeep's GPU intervals (always stamped: the schedule's rate calibration reads them): the bake (with the max mip
 ## and the distance field), then the light (provisional and real, Task 6), and the stamp after them.
+## Each run's first stamp carries its id (suffix): the measured intervals are matched to the run's work by it (the
+## RenderingDevice's captured frame index names the frame being recorded, not the one whose results it holds).
+const RUN_STAMP := "cloud_volume_run_"
 const UPKEEP_STAMP := "cloud_volume_upkeep"
 const LIGHT_STAMP := "cloud_volume_light"
+## Per level (suffix: the level) its column pass and its light kernel (Task 6 review round 1: rates per level).
+const LIGHT_COLUMN_STAMP := "cloud_volume_light_column_"
+const LIGHT_CELLS_STAMP := "cloud_volume_light_cells_"
+## Per level (suffix: the level) its bake and the occupancy of the textures it touched (Task 6 review round 1: bake rates
+## per level).
+const BAKE_LEVEL_STAMP := "cloud_volume_bake_"
 const UPKEEP_END_STAMP := "cloud_pass"
 ## [E] Measured frames the main thread may leave unread (the oldest are dropped) and runs awaiting their timestamps.
 const FEEDBACK_MAX := 64
@@ -68,6 +83,10 @@ var last_bake_taps := 0
 var last_light_cells := 0
 var last_upkeep_ms := 0.0
 var last_light_ms := 0.0
+## Render thread: the last run's light work per level {k: Vector3i(cells, column cells, jobs)} (the feedback's).
+var _last_light_work := {}
+## Render thread: the last run's bake work per level {k: taps}.
+var _last_bake_work := {}
 
 var _rd: RenderingDevice
 var _failed := false
@@ -87,6 +106,9 @@ var _light_counts_size := 0
 ## Main thread <-> render thread (under _mutex): the rate-limited light jobs whose write clamped cells, as their counts
 ## come back: [level, generation, from, to].
 var _light_feedback: Array = []
+## Main thread <-> render thread (under _mutex): per level the light cells (and columns) with a sample of their march
+## that no shown level held (the nesting failed), summed since the start.
+var _light_fallbacks := PackedInt64Array([0, 0, 0, 0, 0, 0, 0, 0])
 var _linear := RID()
 var _nearest := RID()
 var _layouts := {}  ## frame origin (Vector3) -> CloudWorldVolumeLayout set to it
@@ -95,8 +117,9 @@ var _last_set0: Array[RDUniform] = []
 var _mutex := Mutex.new()
 var _batch := {}
 var _lookup := {}
-var _feedback: Array[Vector4] = []  ## (bake ms, bake taps, light ms, light cells)
-var _pending := {}  ## Engine frame of a run -> Vector2(bake taps, light cells), until its timestamps come back
+var _feedback: Array[Dictionary] = []  ## measured upkeeps (take_feedback)
+var _pending := {}  ## run id -> its work {bake_taps, light_cells, planned_ms, levels}, until measured
+var _run_id := 0
 
 
 ## Bytes of the levels' textures (the spare's transient 1/8 more not counted): density + light per cell, the mips.
@@ -155,11 +178,23 @@ func slot_holds(slot: int, id: String) -> bool:
 	return ids[channel_of_slot(slot)] == id and bool(l["slot_ready"][channel_of_slot(slot)])
 
 
-## The upkeeps measured since the last call: (bake GPU ms, bake taps, light GPU ms, light cells) per frame.
-func take_feedback() -> Array[Vector4]:
+## The upkeeps measured since the last call, per frame {bake_ms, bake_taps, light_ms, light_cells, planned_ms (bake +
+## light at the rates of the plan), bake_planned_ms, levels: {k: {cells, cells_ms, column_cells, column_ms, jobs}},
+## bake_levels: {k: {taps, ms}}}
+## (GPU ms; CloudWorldVolumeSchedule.feedback_split).
+func take_feedback() -> Array[Dictionary]:
 	_mutex.lock()
 	var f := _feedback
 	_feedback = []
+	_mutex.unlock()
+	return f
+
+
+## Per level the light cells (Sun or Moon ray) and columns (beyond the window) with a sample no shown level held, since
+## the start (checks: 0 while every level is shown nested).
+func light_fallbacks() -> PackedInt64Array:
+	_mutex.lock()
+	var f := _light_fallbacks.duplicate()
 	_mutex.unlock()
 	return f
 
@@ -226,6 +261,7 @@ func ensure(rd: RenderingDevice) -> bool:
 		"probe": ["CLOUD_VOLUME_PROBE", "CLOUD_VOLUME_LOOKUP"],
 		"light": ["CLOUD_VOLUME_LIGHT", "CLOUD_VOLUME_LOOKUP"],
 		"light_column": ["CLOUD_VOLUME_LIGHT_COLUMN", "CLOUD_VOLUME_LOOKUP"],
+		"light_reference": ["CLOUD_VOLUME_LIGHT_REFERENCE", "CLOUD_VOLUME_LOOKUP"],
 		"provisional": ["CLOUD_VOLUME_PROVISIONAL", "CLOUD_VOLUME_LOOKUP"],
 		"scan": ["CLOUD_VOLUME_LIGHT_SCAN"]}
 	for name: String in kernels:
@@ -310,6 +346,8 @@ func run(rd: RenderingDevice, batch: Dictionary, set0: Array[RDUniform], camera_
 	if rd != null and ensure(rd):
 		_read_timestamps()
 		_last_set0 = set0
+		_run_id += 1
+		rd.capture_timestamp(RUN_STAMP + str(_run_id))
 		rd.capture_timestamp(UPKEEP_STAMP)
 		var baked := _upkeep(batch, set0, camera_earth_m)
 		rd.capture_timestamp(LIGHT_STAMP)
@@ -319,7 +357,10 @@ func run(rd: RenderingDevice, batch: Dictionary, set0: Array[RDUniform], camera_
 			_light(batch, batch["lookup"], frames, set0)
 			_finish_reframe(batch)
 		rd.capture_timestamp(UPKEEP_END_STAMP)
-		_pending[Engine.get_frames_drawn()] = Vector2(last_bake_taps, last_light_cells)
+		_pending[_run_id] = {"bake_taps": last_bake_taps, "light_cells": last_light_cells,
+				"planned_ms": float(batch.get("planned_ms", 0.0)),
+				"bake_planned_ms": float(batch.get("bake_ms_planned", 0.0)), "levels": _last_light_work,
+				"bake_levels": _last_bake_work}
 		while _pending.size() > PENDING_MAX:
 			_pending.erase(_pending.keys().min())
 	_mutex.lock()
@@ -336,6 +377,8 @@ func _upkeep(batch: Dictionary, set0: Array[RDUniform], camera: Vector3) -> bool
 	last_bake_cells = 0
 	last_bake_taps = 0
 	last_light_cells = 0
+	_last_light_work = {}
+	_last_bake_work = {}
 	return jobs.is_empty() or _bake(jobs, lookup, frames, set0)
 
 
@@ -367,11 +410,12 @@ func _bake(jobs: Array, lookup: Dictionary, frames: Array[Vector3], set0: Array[
 	# The occupancy's blocks: per touched texture the bake boxes grown by the trilinear support, in blocks.
 	var occupancy: Array[Dictionary] = []  ## {index, kernel, first, size, pass}
 	for index: int in touched:
+		var k: int = touched[index][0]["level"]
 		for box: Dictionary in _block_boxes(touched[index]):
-			occupancy.append({"index": index, "kernel": "max", "first": box["from"], "size": box["to"] - box["from"],
-					"pass": 0})
+			occupancy.append({"index": index, "level": k, "kernel": "max", "first": box["from"],
+					"size": box["to"] - box["from"], "pass": 0})
 		for pass_index in range(1, 4):
-			occupancy.append({"index": index, "kernel": "distance", "first": Vector3i.ZERO,
+			occupancy.append({"index": index, "level": k, "kernel": "distance", "first": Vector3i.ZERO,
 					"size": CloudWorldVolumeLayout.mip_size(), "pass": pass_index})
 	while _occupancy_buffers.size() < occupancy.size():
 		_occupancy_buffers.append(_rd.uniform_buffer_create(OCCUPANCY_BLOCK_SIZE))
@@ -381,36 +425,53 @@ func _bake(jobs: Array, lookup: Dictionary, frames: Array[Vector3], set0: Array[
 		var size: Vector3i = o["size"]
 		_rd.buffer_update(_occupancy_buffers[i], 0, OCCUPANCY_BLOCK_SIZE, PackedInt32Array([first.x, first.y, first.z,
 				o["pass"], size.x, size.y, size.z, DISTANCE_CAP_BLOCKS]).to_byte_array())
-	# The bake (its own compute list: the occupancy then samples the density).
-	var list := _rd.compute_list_begin()
-	_rd.compute_list_bind_compute_pipeline(list, _pipelines["bake"])
-	_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["bake"], 0, set0), 0)
-	for i in range(jobs.size()):
-		var job: Dictionary = jobs[i]
-		var index: int = SPARE if bool(job["spare"]) else int(job["level"])
-		var size: Vector3i = (job["to"] as Vector3i) - (job["from"] as Vector3i)
-		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["bake"], 1, [
-				_ubo(0, _volume_buffer), _ubo(1, _job_buffers[i]), _image(2, _levels[index]["density"])]), 1)
-		_rd.compute_list_dispatch(list, size.x, size.y, size.z)  # one group per cell
-	_rd.compute_list_end()
-	# The max mip, then the three distance passes, level by level (the scratch volumes are shared).
-	list = _rd.compute_list_begin()
-	for i in range(occupancy.size()):
-		var o: Dictionary = occupancy[i]
-		var level: Dictionary = _levels[int(o["index"])]
-		var pass_index: int = o["pass"]
-		var input: RID = [level["density"], level["max"], _scratch[0], _scratch[1]][pass_index]
-		var output: RID = [level["max"], _scratch[0], _scratch[1], level["distance"]][pass_index]
-		var kernel: String = o["kernel"]
-		_rd.compute_list_bind_compute_pipeline(list, _pipelines[kernel])
-		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[kernel], 0, set0), 0)
-		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[kernel], 1, [
-				_ubo(0, _volume_buffer), _ubo(1, _occupancy_buffers[i]), _tex(2, _nearest, input),
-				_image(3, output)]), 1)
-		var size: Vector3i = o["size"]
-		_rd.compute_list_dispatch(list, (size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1, (size.z - 1) / GROUP + 1)
-		_rd.compute_list_add_barrier(list)
-	_rd.compute_list_end()
+	# Level by level, coarse to fine, after a GPU timestamp each (the schedule's bake rates per level, Task 6 review round
+	# 1: the cost per tap differs between levels by up to 2.4 x): the level's bake jobs (their own compute list: the
+	# occupancy then samples the density), then the max mip and the three distance passes of the textures they touched
+	# (the scratch volumes are shared).
+	var levels: Array = []
+	for job: Dictionary in jobs:
+		if not levels.has(int(job["level"])):
+			levels.append(int(job["level"]))
+	levels.sort()
+	levels.reverse()
+	for k: int in levels:
+		_rd.capture_timestamp(BAKE_LEVEL_STAMP + str(k))
+		var list := _rd.compute_list_begin()
+		_rd.compute_list_bind_compute_pipeline(list, _pipelines["bake"])
+		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["bake"], 0, set0), 0)
+		var taps := 0
+		for i in range(jobs.size()):
+			var job: Dictionary = jobs[i]
+			if int(job["level"]) != k:
+				continue
+			var index: int = SPARE if bool(job["spare"]) else k
+			var size: Vector3i = (job["to"] as Vector3i) - (job["from"] as Vector3i)
+			_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["bake"], 1, [
+					_ubo(0, _volume_buffer), _ubo(1, _job_buffers[i]), _image(2, _levels[index]["density"])]), 1)
+			_rd.compute_list_dispatch(list, size.x, size.y, size.z)  # one group per cell
+			taps += CloudWorldVolumeLayout.box_cells(job) * CloudWorldVolumeLayout.cell_taps(k)
+		_rd.compute_list_end()
+		_last_bake_work[k] = taps
+		list = _rd.compute_list_begin()
+		for i in range(occupancy.size()):
+			var o: Dictionary = occupancy[i]
+			if int(o["level"]) != k:
+				continue
+			var level: Dictionary = _levels[int(o["index"])]
+			var pass_index: int = o["pass"]
+			var input: RID = [level["density"], level["max"], _scratch[0], _scratch[1]][pass_index]
+			var output: RID = [level["max"], _scratch[0], _scratch[1], level["distance"]][pass_index]
+			var kernel: String = o["kernel"]
+			_rd.compute_list_bind_compute_pipeline(list, _pipelines[kernel])
+			_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[kernel], 0, set0), 0)
+			_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[kernel], 1, [
+					_ubo(0, _volume_buffer), _ubo(1, _occupancy_buffers[i]), _tex(2, _nearest, input),
+					_image(3, output)]), 1)
+			var size: Vector3i = o["size"]
+			_rd.compute_list_dispatch(list, (size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1, (size.z - 1) / GROUP + 1)
+			_rd.compute_list_add_barrier(list)
+		_rd.compute_list_end()
 	return true
 
 
@@ -422,17 +483,18 @@ func _job_target(job: Dictionary, lookup: Dictionary, frames: Array[Vector3]) ->
 	return Vector2i(SPARE if spare else int(job["level"]), maxi(frames.find(origin), 0))
 
 
-## A light / provisional job's CloudVolumeLightJob (std430, LIGHT_JOB_BLOCK_SIZE bytes).
-static func _light_job_bytes(job: Dictionary, index: int, frame: int, sun: Vector3, moon: Vector3, slot := 0) \
-		-> PackedByteArray:
+## A light / provisional job's CloudVolumeLightJob (std430, LIGHT_JOB_BLOCK_SIZE bytes); slot: its counters, first: its
+## first column (x) and 4^3 block (y) in its level's dispatch (light jobs).
+static func _light_job_bytes(job: Dictionary, index: int, frame: int, sun: Vector3, moon: Vector3, slot := 0,
+		cloud_top_m := CloudEffect.CLOUD_TOP_M, first := Vector2i.ZERO) -> PackedByteArray:
 	var from: Vector3i = job["from"]
 	var size: Vector3i = (job["to"] as Vector3i) - from
 	var bytes := PackedInt32Array([from.x, from.y, from.z, int(job["level"]), size.x, size.y, size.z, index,
 			frame, int(job.get("mode", CloudWorldVolumeLight.MODE_DIRECT)), 1 if bool(job.get("moon", false)) else 0,
 			1 if bool(job.get("from_column", false)) else 0]).to_byte_array()
 	bytes.append_array(PackedFloat32Array([sun.x, sun.y, sun.z, float(job.get("weight", 1.0)), moon.x, moon.y, moon.z,
-			0.0]).to_byte_array())
-	bytes.append_array(PackedInt32Array([slot, 0, 0, 0]).to_byte_array())
+			cloud_top_m]).to_byte_array())
+	bytes.append_array(PackedInt32Array([slot, first.x, first.y, 0]).to_byte_array())
 	return bytes
 
 
@@ -507,29 +569,62 @@ func _provisional(batch: Dictionary, lookup: Dictionary, frames: Array[Vector3],
 		_rd.compute_list_end()
 
 
-## The light jobs in one compute list (disjoint boxes; they sample densities and mips only): every box's columns
-## (CLOUD_VOLUME_LIGHT_COLUMN: tau_below, tau_above), a barrier, every box's cells (CLOUD_VOLUME_LIGHT: tau_sun, tau_moon);
-## then the clamp counts of the rate-limited ones read back asynchronously (take_light_feedback).
+## The light jobs level by level, coarse to fine (no level reads another's light: the order is only the schedule's),
+## each level in its own compute lists - its jobs' columns (CLOUD_VOLUME_LIGHT_COLUMN: tau_below, tau_above), then its
+## jobs' cells (CLOUD_VOLUME_LIGHT: tau_sun, tau_moon) - each list after a GPU timestamp (the schedule's rates per
+## level); then the jobs' counters read back asynchronously (clamped cells: take_light_feedback; samples no level held:
+## light_fallbacks).
 func _light(batch: Dictionary, lookup: Dictionary, frames: Array[Vector3], set0: Array[RDUniform]) -> void:
 	var jobs: Array = batch.get("light", [])
 	if jobs.is_empty():
 		return
 	var sun: Vector3 = batch.get("sun", Vector3.UP)
 	var moon: Vector3 = batch.get("moon", Vector3.UP)
-	var light_of: Array[RID] = []
-	for t in range(TEXTURES):
-		light_of.append((_levels[t] if not _levels[t].is_empty() else _levels[0])["density"])
-	var lookup_set := _lookup_uniforms(light_of)
-	var rate_jobs: Array = []  ## per job [level, generation, from, to] (null: not rate-limited)
-	var targets: Array[Vector2i] = []
+	var rate_jobs: Array = []  ## per job (buffer order) [level, generation, from, to] (null: not rate-limited)
+	var job_levels := PackedInt32Array()
 	var bytes := PackedByteArray()
-	for i in range(jobs.size()):  # (no buffer update inside a compute list)
-		targets.append(_job_target(jobs[i], lookup, frames))
-		bytes.append_array(_light_job_bytes(jobs[i], targets[i].x, targets[i].y, sun, moon, i))
-		var rate: bool = int(jobs[i].get("mode", 0)) == CloudWorldVolumeLight.MODE_RATE and targets[i].x != SPARE
-		rate_jobs.append([int(jobs[i]["level"]), int(jobs[i]["generation"]), jobs[i]["from"], jobs[i]["to"]] if rate
-				else null)
-	var counts_size := jobs.size() * 4
+	var cloud_top_m := float(batch.get("cloud_top_m", CloudEffect.CLOUD_TOP_M))
+	# The jobs grouped by level and written texture (contiguous in the buffer: one dispatch per group, a workgroup per
+	# column, each job holding its first column of the group), levels coarse to fine.
+	var groups := {}  ## level -> {texture index -> [job indices]}
+	var targets := {}  ## job index -> Vector2i(texture index, frame)
+	for i in range(jobs.size()):
+		var t := _job_target(jobs[i], lookup, frames)
+		if _levels[t.x].is_empty():
+			continue
+		targets[i] = t
+		var k: int = jobs[i]["level"]
+		if not groups.has(k):
+			groups[k] = {}
+		if not groups[k].has(t.x):
+			groups[k][t.x] = []
+		groups[k][t.x].append(i)
+	var levels: Array = groups.keys()
+	levels.sort()
+	levels.reverse()
+	var dispatches := {}  ## level -> [[texture index, first job, jobs, columns, 4^3 blocks]]
+	var slot := 0
+	for k: int in levels:
+		dispatches[k] = []
+		for index: int in groups[k]:
+			var first := slot
+			var columns := 0
+			var blocks := 0
+			for i: int in groups[k][index]:  # (no buffer update inside a compute list)
+				var job: Dictionary = jobs[i]
+				var size: Vector3i = (job["to"] as Vector3i) - (job["from"] as Vector3i)
+				bytes.append_array(_light_job_bytes(job, index, targets[i].y, sun, moon, slot, cloud_top_m,
+						Vector2i(columns, blocks)))
+				columns += size.x * size.y
+				blocks += ((size.x - 1) / GROUP + 1) * ((size.y - 1) / GROUP + 1) * ((size.z - 1) / GROUP + 1)
+				var rate: bool = int(job.get("mode", 0)) == CloudWorldVolumeLight.MODE_RATE and index != SPARE
+				rate_jobs.append([k, int(job["generation"]), job["from"], job["to"]] if rate else null)
+				job_levels.append(k)
+				slot += 1
+			dispatches[k].append([index, first, slot - first, columns, blocks])
+	if slot == 0:
+		return
+	var counts_size := slot * LIGHT_JOB_COUNTERS * 4
 	if counts_size > _light_counts_size:
 		if _light_counts.is_valid():
 			_rd.free_rid(_light_counts)
@@ -537,49 +632,56 @@ func _light(batch: Dictionary, lookup: Dictionary, frames: Array[Vector3], set0:
 		_light_counts = _rd.storage_buffer_create(_light_counts_size)
 	_rd.buffer_clear(_light_counts, 0, _light_counts_size)
 	var store := _store_jobs("light", bytes)
-	var sets := {}  ## kernel -> texture index -> set 1 (the written texture's light as the image)
-	for kernel: String in ["light_column", "light"]:
-		var per_index := {}
-		for i in range(jobs.size()):
-			var index := targets[i].x
-			if _levels[index].is_empty() or per_index.has(index):
-				continue
-			var set1 := lookup_set.duplicate()
-			set1.append(_storage(1, store))
-			set1.append(_image(2, _levels[index]["light"]))
-			set1.append(_storage(3, _light_counts))
-			per_index[index] = UniformSetCacheRD.get_cache(_shaders[kernel], 1, set1)
-		sets[kernel] = per_index
-	# The columns' tau_below / tau_above first, then (after a barrier: the same texels) tau_sun / tau_moon.
-	var list := _rd.compute_list_begin()
-	for kernel: String in ["light_column", "light"]:
-		_rd.compute_list_bind_compute_pipeline(list, _pipelines[kernel])
-		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[kernel], 0, set0), 0)
-		for i in range(jobs.size()):
-			var job: Dictionary = jobs[i]
-			if _levels[targets[i].x].is_empty():
-				continue
-			_rd.compute_list_bind_uniform_set(list, sets[kernel][targets[i].x], 1)
-			_rd.compute_list_set_push_constant(list, _push(i), 16)
-			var size: Vector3i = (job["to"] as Vector3i) - (job["from"] as Vector3i)
-			if kernel == "light_column":
-				_rd.compute_list_dispatch(list, (size.x - 1) / COLUMN_GROUP + 1, (size.y - 1) / COLUMN_GROUP + 1, 1)
-				continue
-			_rd.compute_list_dispatch(list, (size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1, (size.z - 1) / GROUP + 1)
-			last_light_cells += CloudWorldVolumeLayout.box_cells(job)
-		_rd.compute_list_add_barrier(list)
-	_rd.compute_list_end()
-	if rate_jobs.any(func(r: Variant) -> bool: return r != null):
-		_rd.buffer_get_data_async(_light_counts, _on_light_counts.bind(rate_jobs), 0, counts_size)
+	# Per written texture its set 1 per kernel: both kernels read only density, so the light group binds the densities
+	# (a texture written as an image is never sampled in the same list).
+	var sets := {"light_column": {}, "light": {}}
+	for i: int in targets:
+		var index: int = targets[i].x
+		if sets["light"].has(index):
+			continue
+		var light_of: Array[RID] = []
+		for t in range(TEXTURES):
+			var level: Dictionary = _levels[t] if not _levels[t].is_empty() else _levels[0]
+			light_of.append(level["density"])
+		var set1 := _lookup_uniforms(light_of)
+		set1.append(_storage(1, store))
+		set1.append(_image(2, _levels[index]["light"]))
+		set1.append(_storage(3, _light_counts))
+		for kernel: String in ["light_column", "light"]:
+			sets[kernel][index] = UniformSetCacheRD.get_cache(_shaders[kernel], 1, set1)
+	for k: int in levels:
+		var work := Vector3i(0, 0, 0)  # (cells, column cells, jobs)
+		for i: int in targets:
+			if int(jobs[i]["level"]) == k:
+				work.x += CloudWorldVolumeLayout.box_cells(jobs[i])
+				work.z += 1
+		for d: Array in dispatches[k]:
+			work.y += d[3] * CloudWorldVolumeLayout.window_size(k).z
+		for kernel: String in ["light_column", "light"]:
+			_rd.capture_timestamp((LIGHT_COLUMN_STAMP if kernel == "light_column" else LIGHT_CELLS_STAMP) + str(k))
+			var list := _rd.compute_list_begin()
+			_rd.compute_list_bind_compute_pipeline(list, _pipelines[kernel])
+			_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[kernel], 0, set0), 0)
+			for d: Array in dispatches[k]:
+				_rd.compute_list_bind_uniform_set(list, sets[kernel][d[0]], 1)
+				_rd.compute_list_set_push_constant(list, PackedInt32Array([d[1], d[2], d[3], d[4]]).to_byte_array(), 16)
+				var units: int = d[3] if kernel == "light_column" else d[4]  # a workgroup per column / per 4^3 block
+				var x := mini(units, MAX_GROUPS_X)
+				_rd.compute_list_dispatch(list, x, (units - 1) / x + 1, 1)
+			_rd.compute_list_end()
+		last_light_cells += work.x
+		_last_light_work[k] = work
+	_rd.buffer_get_data_async(_light_counts, _on_light_counts.bind(rate_jobs, job_levels), 0, counts_size)
 
 
-## The clamp counts of a batch came back (render thread): the rate-limited jobs that clamped cells.
-func _on_light_counts(data: PackedByteArray, rate_jobs: Array) -> void:
+## The counters of a batch came back (render thread): the rate-limited jobs that clamped cells, the unheld samples.
+func _on_light_counts(data: PackedByteArray, rate_jobs: Array, job_levels: PackedInt32Array) -> void:
 	var counts := data.to_int32_array()
 	_mutex.lock()
-	for i in range(mini(rate_jobs.size(), counts.size())):
-		if rate_jobs[i] != null and counts[i] > 0:
+	for i in range(mini(rate_jobs.size(), counts.size() / LIGHT_JOB_COUNTERS)):
+		if rate_jobs[i] != null and counts[LIGHT_JOB_COUNTERS * i] > 0:
 			_light_feedback.append(rate_jobs[i])
+		_light_fallbacks[job_levels[i]] += counts[LIGHT_JOB_COUNTERS * i + 1]
 	_mutex.unlock()
 
 
@@ -746,27 +848,95 @@ static func _job_bytes(level: int, first: Vector3i, size: Vector3i, channel: int
 			maxi(frame, 0), 1 if same else 0, 0, 0]).to_byte_array()
 
 
-## The upkeep intervals of earlier frames whose timestamps came back, with the work they ran (take_feedback).
+## The upkeep intervals of earlier frames whose timestamps came back, with the work they ran (take_feedback): the bake
+## (UPKEEP_STAMP to LIGHT_STAMP) and per level its bake, the light (LIGHT_STAMP to the end) and per level its column
+## pass and its light kernel (each stamp's interval runs to the next stamp).
 func _read_timestamps() -> void:
-	var frame := _rd.get_captured_timestamps_frame()
-	if not _pending.has(frame):
-		return
-	var work: Vector2 = _pending[frame]
-	_pending.erase(frame)
 	var count := _rd.get_captured_timestamps_count()
-	for i in range(count - 2):
-		if _rd.get_captured_timestamp_name(i) == UPKEEP_STAMP and _rd.get_captured_timestamp_name(i + 1) == LIGHT_STAMP:
-			var bake_ms := float(_rd.get_captured_timestamp_gpu_time(i + 1)
-					- _rd.get_captured_timestamp_gpu_time(i)) / 1.0e6
-			last_light_ms = float(_rd.get_captured_timestamp_gpu_time(i + 2)
-					- _rd.get_captured_timestamp_gpu_time(i + 1)) / 1.0e6
-			last_upkeep_ms = bake_ms + last_light_ms
-			_mutex.lock()
-			_feedback.append(Vector4(bake_ms, work.x, last_light_ms, work.y))
-			if _feedback.size() > FEEDBACK_MAX:
-				_feedback = _feedback.slice(_feedback.size() - FEEDBACK_MAX)
-			_mutex.unlock()
+	for r in range(count - 3):
+		var run_name := _rd.get_captured_timestamp_name(r)
+		if not run_name.begins_with(RUN_STAMP):
+			continue
+		var id := int(run_name.substr(RUN_STAMP.length()))
+		var i := r + 1
+		if not _pending.has(id) or _rd.get_captured_timestamp_name(i) != UPKEEP_STAMP:
 			return
+		var light := i + 1
+		var bake_levels := {}
+		var work: Dictionary = _pending[id]
+		while light < count and _rd.get_captured_timestamp_name(light).begins_with(BAKE_LEVEL_STAMP):
+			var bk := int(_rd.get_captured_timestamp_name(light).substr(BAKE_LEVEL_STAMP.length()))
+			bake_levels[bk] = {"taps": int((work.get("bake_levels", {}) as Dictionary).get(bk, 0)),
+				"ms": _interval_ms(light, light + 1)}
+			light += 1
+		if light >= count or _rd.get_captured_timestamp_name(light) != LIGHT_STAMP:
+			return
+		for old: int in _pending.keys():  # this run's and older runs' (never measured) entries
+			if old <= id:
+				_pending.erase(old)
+		var bake_ms := _interval_ms(i, light)
+		var levels := {}
+		var end := light + 1
+		while end < count and _rd.get_captured_timestamp_name(end) != UPKEEP_END_STAMP:
+			var name := _rd.get_captured_timestamp_name(end)
+			var column := name.begins_with(LIGHT_COLUMN_STAMP)
+			if column or name.begins_with(LIGHT_CELLS_STAMP):
+				var k := int(name.substr((LIGHT_COLUMN_STAMP if column else LIGHT_CELLS_STAMP).length()))
+				var w: Vector3i = (work["levels"] as Dictionary).get(k, Vector3i.ZERO)
+				if not levels.has(k):
+					levels[k] = {"cells": w.x, "cells_ms": 0.0, "column_cells": w.y, "column_ms": 0.0, "jobs": w.z}
+				levels[k]["column_ms" if column else "cells_ms"] = _interval_ms(end, end + 1)
+			end += 1
+		if end >= count:
+			return
+		last_light_ms = _interval_ms(light, end)
+		last_upkeep_ms = bake_ms + last_light_ms
+		_mutex.lock()
+		_feedback.append({"bake_ms": bake_ms, "bake_taps": work["bake_taps"], "light_ms": last_light_ms,
+				"light_cells": work["light_cells"], "planned_ms": work["planned_ms"],
+				"bake_planned_ms": work["bake_planned_ms"], "levels": levels, "bake_levels": bake_levels})
+		if _feedback.size() > FEEDBACK_MAX:
+			_feedback = _feedback.slice(_feedback.size() - FEEDBACK_MAX)
+		_mutex.unlock()
+		return
+
+
+## GPU ms between two captured timestamps of the last measured frame.
+func _interval_ms(from: int, to: int) -> float:
+	return float(_rd.get_captured_timestamp_gpu_time(to) - _rd.get_captured_timestamp_gpu_time(from)) / 1.0e6
+
+
+## Diagnostics (cloud_check.gd section 17; main thread, after a frame ran): the converged tau from cells toward `dir`
+## (render axes) through the finest level at each point (CLOUD_VOLUME_LIGHT_REFERENCE; the field clear above
+## clear_height_m), next to the stored texel's `channel` (0 tau_sun, 3 tau_moon). cells: 4 ints per cell (x, y, z, the
+## level; frame 0). Returns 4 floats per cell: converged tau, stored tau, steps, 1 if the column took a rest.
+func light_reference(rd: RenderingDevice, cells: PackedInt32Array, dir: Vector3, clear_height_m: float, channel: int,
+		lookup: Dictionary, camera: Vector3) -> PackedFloat32Array:
+	if not ensure(rd) or _last_set0.is_empty():
+		return PackedFloat32Array()
+	var count := cells.size() / 4
+	rd.buffer_update(_volume_buffer, 0, VOLUME_BLOCK_SIZE, globals_bytes(lookup, camera))
+	var block := PackedFloat32Array([dir.x, dir.y, dir.z, clear_height_m]).to_byte_array()
+	block.append_array(PackedInt32Array([count, channel, 0, 0]).to_byte_array())
+	var ubo := rd.uniform_buffer_create(REFERENCE_BLOCK_SIZE, block)
+	var input := rd.storage_buffer_create(cells.size() * 4, cells.to_byte_array())
+	var output := rd.storage_buffer_create(count * 16)
+	var light_of: Array[RID] = []
+	for t in range(TEXTURES):
+		light_of.append((_levels[t] if not _levels[t].is_empty() else _levels[0])["light"])
+	var set1 := _lookup_uniforms(light_of)
+	set1.append_array([_ubo(1, ubo), _storage(2, input), _storage(3, output)])
+	var list := rd.compute_list_begin()
+	rd.compute_list_bind_compute_pipeline(list, _pipelines["light_reference"])
+	rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["light_reference"], 0, _last_set0), 0)
+	rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["light_reference"], 1, set1), 1)
+	rd.compute_list_dispatch(list, (count - 1) / PROBE_GROUP + 1, 1, 1)
+	rd.compute_list_end()
+	var result := rd.buffer_get_data(output).to_float32_array()
+	rd.free_rid(input)
+	rd.free_rid(output)
+	rd.free_rid(ubo)
+	return result
 
 
 ## Diagnostics (cloud_check.gd section 16; main thread, after a frame ran a batch): mode 0 cloud_volume_grid_in of

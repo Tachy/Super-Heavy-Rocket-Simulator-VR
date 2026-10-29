@@ -4,23 +4,35 @@ extends RefCounted
 ## CloudWorldVolumeSchedule, which owns the levels and calls run() once per plan after the bake and the windows' advance;
 ## the GPU side is CloudWorldVolume / shaders/cloud_volume_light.gdshaderinc).
 ##
+## The light is a distance-stepped march through baked density (Task 6 review round 1): a level's rays march a fixed
+## number of cells of their own level, then as many of each coarser level - no level reads another's light, so the
+## levels are lit independently; a level whose coarser level turned drawn (its rays held other density before: its
+## `light_epoch`) is relit once. Its cost per cell is a constant per level: the budget is in ms, a job's cost its cells
+## and its column cells at its level's calibrated rates (CloudWorldVolumeSchedule.light_ms_of) plus, once per level and
+## plan, the level's dispatch latency (light_latency_of: a level whose latency does not fit what is left of the budget
+## is skipped and a level that fits is served); jobs are column-shaped (whole columns of their box: the column pass sums
+## a level's whole column once per job).
+##
 ## A level is lit only once it is filled (`ready`: its rays read its own window, then the coarser SHOWN levels; a level
 ## still filling would light its cells from the coarser levels alone). Per plan, in this order and under the light
-## budget (LIGHT_BUDGET_MS, in spike frames what the bake left of UPKEEP_SPIKE_MS):
+## budget (LIGHT_BUDGET_MS, in spike frames LIGHT_SPIKE_SHARE of what the bake left of UPKEEP_SPIKE_MS with
+## BAKE_SPIKE_MARGIN; halved after an overrun):
 ## 0. blends in progress: a box that was SHOWN with provisional light gets its real light blended in over
 ##    PROVISIONAL_FADE_S (the light kernel recomputed each plan, exp(-tau) mixed by dt / the time left: linear in time);
 ## 1. freshly baked cells (the `prov` list, coarse to fine): written directly, except a box shown with provisional light
 ##    outside a spike (cold start, jump, re-frame), which starts a blend;
-## 2. refresh generations in equal shares, finest level first, nearest tiles first: rate-limited (exp(-tau) of every
-##    channel moves by at most LIGHT_STEP_T per pass: lag, never a front). The GPU counts the cells each job clamped
+## 2. refresh generations one level after the other, fine to coarse, nearest tiles (whole columns) first: rate-limited
+##    (exp(-tau) of every channel moves by at most LIGHT_STEP_T per pass: lag, never a front; into or out of "no light"
+##    - Earth's shadow, the Moon off - directly, the shader's header). The GPU counts the cells each job clamped
 ##    (light_feedback): a box that clamped any is served again once the level's queue is through ("settle"), until it
 ##    clamps none;
 ## 3. what got no real light yet gets provisional light once (copied from the next coarser level, the coarsest level's
 ##    from the grid-mean column), written directly.
 ## Triggers per ready level (a new generation: its storage queued as tiles behind what is still queued): the Sun's turn
 ## since the level's light (shadow shift H dtheta / sin^2 e < 1/4 cell), the Moon's (only with the Sun below
-## MOON_SUN_ELEVATION_RAD at the level centre: then jobs carry `moon`), the Moon switching, the blend's step. The
-## level's light reference (Sun, Moon, blend) is the one of its first real light after a fill (the oldest its cells hold).
+## MOON_SUN_ELEVATION_RAD at the level centre: then jobs carry `moon`), the Moon switching, the blend's step, a coarser
+## level turning drawn. The level's light reference (Sun, Moon, blend, coarser epochs) is the one of its first real
+## light after a fill (the oldest its cells hold).
 
 ## Write modes (shaders/cloud_volume_light.gdshaderinc CLOUD_VOLUME_LIGHT_*; change together).
 const MODE_DIRECT := 0
@@ -35,10 +47,14 @@ var moon_cells := 0
 var prov_cells := 0
 var prov_age_max := 0.0
 var prov_age_session_max := 0.0
+## This plan's light GPU time at the calibrated rates (ms).
+var ms_planned := 0.0
 
 var _sun := Vector3.ZERO
 var _moon := Vector3.ZERO
 var _blend := 0.0
+var _charged := {}  ## levels whose light lists' latency this plan's budget paid for (light_latency_of)
+var _left := {}  ## level -> light cells the level may still take this plan (light_cells_cap; absent: uncapped)
 
 
 ## Shadow shift H dtheta / sin^2 e kept below 1/4 cell: the Sun may turn this far (rad) before a level is relit.
@@ -67,6 +83,15 @@ static func feedback(lv: CloudWorldVolumeSchedule._Level, generation: int, box: 
 		lv.settle.append({"from": box["from"], "to": box["to"]})
 
 
+## The sum of the coarser levels' light epochs (each counts the times its level turned drawn): a change means the
+## level's rays now hold other density beyond their own segment.
+static func coarser_epoch(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level) -> int:
+	var sum := 0
+	for j in range(lv.k + 1, mini(CloudWorldVolumeLayout.LEVELS, s._levels.size())):
+		sum += (s._levels[j] as CloudWorldVolumeSchedule._Level).light_epoch
+	return sum
+
+
 func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3, blend: float, cloud_top_m: float,
 		delta_s: float, out: Dictionary) -> void:
 	var L := CloudWorldVolumeLayout
@@ -75,17 +100,25 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 	moon_cells = 0
 	prov_cells = 0
 	prov_age_max = 0.0
+	_charged = {}
+	_left = {}
+	for k in CloudWorldVolumeLayout.LEVELS:
+		if s.light_cells_cap(k) >= 0:
+			_left[k] = s.light_cells_cap(k)
 	_sun = sun
 	_moon = moon
 	_blend = blend
 	var spike: bool = s.spike_frame()
+	for lv: CloudWorldVolumeSchedule._Level in order:
+		if lv.active:
+			lv.moon_on = _moon_wanted(lv, sun)
+	var built := false
 	var fine_first := order.duplicate()
 	fine_first.reverse()
-	var built := false
-	for lv: CloudWorldVolumeSchedule._Level in fine_first:
+	for lv: CloudWorldVolumeSchedule._Level in fine_first:  # the finest level's tiles queued first (the nearest light)
 		if not lv.active:
 			continue
-		_env(lv, sun, moon, blend, cloud_top_m)
+		_env(lv, coarser_epoch(s, lv), sun, moon, blend, cloud_top_m)
 		for b: Dictionary in lv.prov:
 			if b["emitted"]:
 				b["age_s"] += delta_s
@@ -95,27 +128,29 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 			built = true
 	var light_ms: float = s.budget_scale * S.LIGHT_BUDGET_MS
 	if spike:
-		light_ms = maxf(s.budget_scale * S.UPKEEP_SPIKE_MS - s.bake_ms_planned(), 0.0)
-	var budget := int(light_ms * s.light_budget_scale * s.light_cells_per_ms)
+		light_ms = S.LIGHT_SPIKE_SHARE * maxf(s.budget_scale * S.UPKEEP_SPIKE_MS - S.BAKE_SPIKE_MARGIN * s.bake_ms_planned(),
+				0.0)
+	light_ms *= s.light_budget_scale * s.overrun_factor()
+	var left := light_ms
 	var jobs: Array = out["light"]
 	# 0. blends in progress.
 	for lv: CloudWorldVolumeSchedule._Level in order:
 		if lv.active and not lv.blend.is_empty():
-			budget -= _light_blend(s, lv, budget, delta_s, jobs)
+			left -= _light_blend(s, lv, left, delta_s, jobs)
 	# 1. the freshly baked cells of filled levels (provisional ones first in line), coarse to fine.
 	for lv: CloudWorldVolumeSchedule._Level in order:
 		if lv.active and lv.ready and not lv.prov.is_empty():
-			budget -= _light_prov(s, lv, budget, spike, delta_s, jobs)
-	# 2. the refresh generations in equal shares, finest level first (nearest tiles first inside a level).
-	var stale_levels: Array = []
+			left -= _light_prov(s, lv, left, spike, delta_s, jobs)
+	# 2. the refresh generations one level after the other, fine to coarse (the nearest light first; nearest tiles first
+	# inside a level): a level's light dispatch costs at least the latency of its longest ray (~0.25 ms on cloudy content:
+	# cloud_check section 18), so equal shares over many stale levels (a blend step makes all eight stale) paid that floor
+	# eight times a frame.
 	for lv: CloudWorldVolumeSchedule._Level in fine_first:
-		if lv.active and lv.ready and (not lv.queue.is_empty() or not lv.partial.is_empty()):
-			stale_levels.append(lv)
-	for i in stale_levels.size():
-		if budget <= 0:
+		if left <= 0.0:
 			break
-		var share := (budget + stale_levels.size() - i - 1) / (stale_levels.size() - i)
-		budget -= _light_queue(s, stale_levels[i], share, jobs)
+		if lv.active and lv.ready and (not lv.queue.is_empty() or not lv.partial.is_empty()):
+			left -= _light_queue(s, lv, left, jobs)
+	ms_planned = light_ms - left
 	# 3. what got no real light yet gets provisional light now (once); boxes left with provisional light on a shown
 	# level are marked: their real light will be blended in.
 	for lv: CloudWorldVolumeSchedule._Level in order:
@@ -133,6 +168,19 @@ func run(s: CloudWorldVolumeSchedule, order: Array, sun: Vector3, moon: Vector3,
 				prov_cells += L.box_cells(box)
 			b["emitted"] = true
 			b["seen"] = lv.drawn
+	# The epochs: a level that turned drawn relights the finer ones (_env; M6).
+	for lv: CloudWorldVolumeSchedule._Level in s._levels:
+		if lv.drawn and not lv.was_drawn:
+			lv.light_epoch += 1
+		lv.was_drawn = lv.drawn
+
+
+## True when the Sun is below MOON_SUN_ELEVATION_RAD at the level's centre.
+static func _moon_wanted(lv: CloudWorldVolumeSchedule._Level, sun: Vector3) -> bool:
+	var L := CloudWorldVolumeLayout
+	var cx := (lv.storage.x + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
+	var cy := (lv.storage.y + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
+	return sun.dot(lv.layout.up_of_grid(cx, cy)) < sin(CloudWorldVolumeSchedule.MOON_SUN_ELEVATION_RAD)
 
 
 func _job(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, box: Dictionary, mode: int,
@@ -147,29 +195,48 @@ func _job(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, box:
 		lv.lit_moon = _moon
 		lv.lit_blend = _blend
 		lv.lit_moon_on = lv.moon_on
+		lv.lit_up_epoch = coarser_epoch(s, lv)
 	return {"level": lv.k, "from": box["from"], "to": box["to"], "moon": lv.moon_on, "spare": s.is_spare(lv),
 		"mode": mode, "weight": weight, "generation": generation}
 
 
+## The column-shaped part of `box` a light budget of `ms` pays for at level k ([taken, rest]; taken empty when not one
+## column fits) and its cost (ms; the level's dispatch latency the first time this plan); a level takes at most
+## CloudWorldVolumeSchedule.light_cells_cap a plan (LIGHT_GROWTH).
+func _split(s: CloudWorldVolumeSchedule, k: int, box: Dictionary, ms: float) -> Array:
+	var over := 0.0 if _charged.has(k) else s.light_latency_of(k)
+	var n := s.light_cells_for(k, box, ms - over)
+	if _left.has(k):  # the model is exact only near the sizes it measured (LIGHT_GROWTH)
+		n = mini(n, _left[k])
+	var sp := CloudWorldVolumeLayout.box_split_columns(box, n)
+	if CloudWorldVolumeLayout.box_cells(sp[0]) == 0:
+		return [sp[0], sp[1], 0.0]
+	_charged[k] = true
+	if _left.has(k):
+		_left[k] -= CloudWorldVolumeLayout.box_cells(sp[0])
+	return [sp[0], sp[1], s.light_ms_of(k, sp[0]) + over]
+
+
 ## A blend step for every box in the level's blend list the budget covers: weight dt / the time left, so exp(-tau) moves
 ## linearly from the provisional to the real light over PROVISIONAL_FADE_S; a box not served waits (its time too).
-func _light_blend(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, budget: int, delta_s: float,
-		jobs: Array) -> int:
+## Returns the ms spent.
+func _light_blend(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, budget_ms: float, delta_s: float,
+		jobs: Array) -> float:
 	var L := CloudWorldVolumeLayout
 	var window := L.storage_box(lv.storage)
-	var used := 0
+	var used := 0.0
 	var kept: Array = []
 	for b: Dictionary in lv.blend:
 		var box := L.box_clip(b, window)
 		if L.box_cells(box) == 0:
 			continue
-		if used >= budget:
+		var sp := _split(s, lv.k, box, budget_ms - used)
+		if L.box_cells(sp[0]) == 0:
 			kept.append(b)
 			continue
-		var sp := L.box_split(box, budget - used)
 		var weight := _blend_weight(b["t_s"], delta_s)
 		jobs.append(_job(s, lv, sp[0], MODE_BLEND, weight, NO_GENERATION))
-		used += L.box_cells(sp[0])
+		used += sp[2]
 		if weight < 1.0:
 			kept.append({"from": sp[0]["from"], "to": sp[0]["to"], "t_s": b["t_s"] + delta_s})
 		for r: Dictionary in sp[1]:
@@ -184,17 +251,20 @@ static func _blend_weight(t_s: float, delta_s: float) -> float:
 	return 1.0 if left <= delta_s else clampf(delta_s / left, 0.0, 1.0)
 
 
-func _light_prov(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, budget: int, spike: bool,
-		delta_s: float, jobs: Array) -> int:
+func _light_prov(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, budget_ms: float, spike: bool,
+		delta_s: float, jobs: Array) -> float:
 	var L := CloudWorldVolumeLayout
 	var window := L.storage_box(lv.storage)
-	var used := 0
-	while used < budget and not lv.prov.is_empty():
+	var used := 0.0
+	while used < budget_ms and not lv.prov.is_empty():
 		var b: Dictionary = lv.prov.pop_front()
 		var box := L.box_clip(b, window)
 		if L.box_cells(box) == 0:
 			continue
-		var sp := L.box_split(box, budget - used)
+		var sp := _split(s, lv.k, box, budget_ms - used)
+		if L.box_cells(sp[0]) == 0:
+			lv.prov.push_front(b)
+			break
 		if b["emitted"] and b["seen"] and not spike:
 			var weight := _blend_weight(0.0, delta_s)
 			jobs.append(_job(s, lv, sp[0], MODE_BLEND, weight, NO_GENERATION))
@@ -202,7 +272,7 @@ func _light_prov(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Leve
 				lv.blend.append({"from": sp[0]["from"], "to": sp[0]["to"], "t_s": delta_s})
 		else:
 			jobs.append(_job(s, lv, sp[0], MODE_DIRECT, 1.0, NO_GENERATION))
-		used += L.box_cells(sp[0])
+		used += sp[2]
 		if b["emitted"]:
 			prov_age_max = maxf(prov_age_max, b["age_s"])
 			prov_age_session_max = maxf(prov_age_session_max, b["age_s"])
@@ -214,57 +284,67 @@ func _light_prov(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Leve
 	return used
 
 
-func _light_queue(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, budget: int, jobs: Array) -> int:
+func _light_queue(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level, budget_ms: float,
+		jobs: Array) -> float:
 	var L := CloudWorldVolumeLayout
 	var T := CloudWorldVolumeSchedule.TILE_CELLS
 	var window := L.storage_box(lv.storage)
-	var used := 0
-	while used < budget:
+	var used := 0.0
+	while used < budget_ms:
 		if lv.partial.is_empty():
 			if lv.queue.is_empty():
 				break
 			var key: Vector3i = lv.queue.pop_front()
 			lv.queued.erase(key)
-			var lo := key * T
-			var box := L.box_clip({"from": lo, "to": lo + Vector3i(T, T, T)}, window)
+			var lo := Vector3i(key.x * T, key.y * T, lv.storage.z)  # a tile: whole columns of the storage
+			var box := L.box_clip({"from": lo, "to": lo + Vector3i(T, T, L.CELLS_V)}, window)
 			if L.box_cells(box) > 0:
 				lv.partial = [box]
 			continue
-		var sp := L.box_split(lv.partial.pop_front(), budget - used)
+		var sp := _split(s, lv.k, lv.partial[0], budget_ms - used)
+		if L.box_cells(sp[0]) == 0:
+			break
+		lv.partial.pop_front()
 		jobs.append(_job(s, lv, sp[0], MODE_RATE, 1.0, lv.generation))
-		used += L.box_cells(sp[0])
+		used += sp[2]
 		lv.partial = sp[1] + lv.partial
 	return used
 
 
 ## The level's light environment and refresh triggers (a trigger starts a new generation: the whole storage is queued
 ## again, behind what is still queued); boxes whose rate-limited write clamped cells are served again once the queue is
-## through (settle). Nothing before the level's first real light (its reference is set then: _job).
-func _env(lv: CloudWorldVolumeSchedule._Level, sun: Vector3, moon: Vector3, blend: float, cloud_top_m: float) -> void:
+## through (settle). Nothing before the level's first real light (its reference is set then: _job). up_epoch: the
+## coarser levels' epochs (coarser_epoch).
+func _env(lv: CloudWorldVolumeSchedule._Level, up_epoch: int, sun: Vector3, moon: Vector3,
+		blend: float, cloud_top_m: float) -> void:
 	var L := CloudWorldVolumeLayout
 	var S := CloudWorldVolumeSchedule
-	var cx := (lv.storage.x + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
-	var cy := (lv.storage.y + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
-	var up := lv.layout.up_of_grid(cx, cy)
-	var sin_e := sun.dot(up)
-	lv.moon_on = sin_e < sin(S.MOON_SUN_ELEVATION_RAD)
 	if not lv.ready or not lv.lit_valid:
 		return
+	var cx := (lv.storage.x + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
+	var cy := (lv.storage.y + L.CELLS_H / 2) * L.CELL_H_M[lv.k]
+	var level_up := lv.layout.up_of_grid(cx, cy)
+	var sin_e := sun.dot(level_up)
 	var h := maxf(cloud_top_m - (L.SHELL_BOTTOM_M + lv.storage.z * L.CELL_V_M[lv.k]), S.MIN_HEIGHT_M)
 	var trigger := false
 	if (sun - lv.lit_sun).length() > sun_threshold_rad(lv.k, _refresh_elevation(sin_e), h):
 		trigger = true
 	if lv.moon_on != lv.lit_moon_on:
 		trigger = true
-	elif lv.moon_on and (moon - lv.lit_moon).length() > sun_threshold_rad(lv.k, _refresh_elevation(moon.dot(up)), h):
+	elif lv.moon_on and (moon - lv.lit_moon).length() > sun_threshold_rad(lv.k, _refresh_elevation(moon.dot(level_up)),
+			h):
 		trigger = true
 	if absf(blend - lv.lit_blend) >= S.WEATHER_REFRESH_STEP - 1e-9:
 		trigger = true
+	var idle := not lv.need_queue and lv.queue.is_empty() and lv.partial.is_empty()
+	if up_epoch != lv.lit_up_epoch and idle:
+		trigger = true  # a coarser level turned drawn: the rays' part beyond the level reads it now (M6)
 	if trigger:
 		lv.lit_sun = sun
 		lv.lit_moon = moon
 		lv.lit_blend = blend
 		lv.lit_moon_on = lv.moon_on
+		lv.lit_up_epoch = up_epoch
 		lv.need_queue = true
 		lv.settle = []  # the new generation recomputes every cell anyway
 	elif not lv.settle.is_empty() and not lv.need_queue and lv.queue.is_empty() and lv.partial.is_empty():
@@ -276,6 +356,8 @@ static func _refresh_elevation(sin_e: float) -> float:
 	return maxf(absf(asin(clampf(sin_e, -1.0, 1.0))), CloudWorldVolumeSchedule.MIN_REFRESH_ELEVATION_RAD)
 
 
+## The level's storage queued as tiles of whole columns (TILE_CELLS x TILE_CELLS, the storage's height), nearest the
+## camera first, behind the camera later.
 func _enqueue_tiles(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._Level) -> void:
 	var L := CloudWorldVolumeLayout
 	var S := CloudWorldVolumeSchedule
@@ -283,12 +365,10 @@ func _enqueue_tiles(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._L
 	lv.need_queue = false
 	lv.generation += 1
 	var o := lv.storage
-	var t0 := Vector3i(floori(o.x / float(T)), floori(o.y / float(T)), floori(o.z / float(T)))
-	var t1 := Vector3i(floori((o.x + L.CELLS_H - 1) / float(T)), floori((o.y + L.CELLS_H - 1) / float(T)),
-			floori((o.z + L.CELLS_V - 1) / float(T)))
+	var t0 := Vector2i(floori(o.x / float(T)), floori(o.y / float(T)))
+	var t1 := Vector2i(floori((o.x + L.CELLS_H - 1) / float(T)), floori((o.y + L.CELLS_H - 1) / float(T)))
 	var cg: Vector3 = s.camera_grid_of(lv)
 	var ch: float = L.CELL_H_M[lv.k]
-	var cv: float = L.CELL_V_M[lv.k]
 	var view := lv.layout.tangent_of(s.view_dir_earth)
 	var use_view := view.length_squared() > 0.0
 	if use_view:
@@ -296,20 +376,18 @@ func _enqueue_tiles(s: CloudWorldVolumeSchedule, lv: CloudWorldVolumeSchedule._L
 	var tiles: Array[Vector3i] = []
 	var keys := PackedInt64Array()
 	var half := 0.5 * T
-	for tz in range(t0.z, t1.z + 1):
-		for ty in range(t0.y, t1.y + 1):
-			for tx in range(t0.x, t1.x + 1):
-				var key := Vector3i(tx, ty, tz)
-				if lv.queued.has(key):
-					continue
-				var dx := (tx * T + half) * ch - cg.x
-				var dy := (ty * T + half) * ch - cg.y
-				var dz := L.SHELL_BOTTOM_M + (tz * T + half) * cv - cg.z
-				var score := int(sqrt(dx * dx + dy * dy + dz * dz) / ch * 8.0)
-				if use_view and dx * view.x + dy * view.y < 0.0:
-					score *= S.BEHIND_FACTOR
-				keys.append((score << S.KEY_BITS) | tiles.size())
-				tiles.append(key)
+	for ty in range(t0.y, t1.y + 1):
+		for tx in range(t0.x, t1.x + 1):
+			var key := Vector3i(tx, ty, 0)
+			if lv.queued.has(key):
+				continue
+			var dx := (tx * T + half) * ch - cg.x
+			var dy := (ty * T + half) * ch - cg.y
+			var score := int(sqrt(dx * dx + dy * dy) / ch * 8.0)
+			if use_view and dx * view.x + dy * view.y < 0.0:
+				score *= S.BEHIND_FACTOR
+			keys.append((score << S.KEY_BITS) | tiles.size())
+			tiles.append(key)
 	keys.sort()
 	for key in keys:
 		var tile := tiles[key & ((1 << S.KEY_BITS) - 1)]

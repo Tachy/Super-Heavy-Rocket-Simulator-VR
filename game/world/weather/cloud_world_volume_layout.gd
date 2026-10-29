@@ -359,3 +359,27 @@ static func box_split(box: Dictionary, n: int) -> Array:
 	if d.z > 1:
 		rest.append({"from": Vector3i(f.x, f.y, f.z + 1), "to": t})
 	return [{"from": f, "to": Vector3i(f.x + n, f.y + 1, f.z + 1)}, rest]
+
+
+## As box_split, but column-shaped (world-volume Task 6 review round 1: the light's column pass sums a level's whole
+## column once per job): the largest prefix of at most n cells made of whole columns of the box (its full z extent) -
+## whole rows of columns, else part of one row; less than one column (n < the box's height) takes nothing. [taken,
+## rest]; an empty taken box (no cells) when nothing fits.
+static func box_split_columns(box: Dictionary, n: int) -> Array:
+	var f: Vector3i = box["from"]
+	var t: Vector3i = box["to"]
+	var d := t - f
+	if n >= box_cells(box):
+		return [box, []]
+	var columns := n / maxi(d.z, 1)
+	if columns < 1:
+		return [{"from": f, "to": f}, [box]]
+	var rest: Array[Dictionary] = []
+	var rows := columns / d.x
+	if rows >= 1:
+		rest.append({"from": Vector3i(f.x, f.y + rows, f.z), "to": t})
+		return [{"from": f, "to": Vector3i(t.x, f.y + rows, t.z)}, rest]
+	rest.append({"from": Vector3i(f.x + columns, f.y, f.z), "to": Vector3i(t.x, f.y + 1, t.z)})
+	if d.y > 1:
+		rest.append({"from": Vector3i(f.x, f.y + 1, f.z), "to": t})
+	return [{"from": f, "to": Vector3i(f.x + columns, f.y + 1, t.z)}, rest]

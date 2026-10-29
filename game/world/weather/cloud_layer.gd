@@ -273,7 +273,8 @@ var _volume_reset := false
 var _volume_held_s := 0.0
 var _volume_stats := {"bake_cells": 0, "light_cells": 0, "light_moon_cells": 0, "provisional_cells": 0, "upkeep_ms": 0.0,
 	"light_ms": 0.0, "measured_ms": 0.0, "measured_bake_ms": 0.0, "measured_taps": 0, "measured_light_ms": 0.0,
-	"measured_light_cells": 0, "measured_frames": 0}
+	"measured_light_cells": 0, "measured_frames": 0, "light_levels": {}, "measured_levels": {},
+	"last_feedback": {}}
 
 
 func _init() -> void:
@@ -587,16 +588,24 @@ func notify_view_jump() -> void:
 ## restart (jump, pinned pair) drops the adopted state first.
 func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 	var volume := effect.world_volume
-	for f: Vector4 in volume.take_feedback():  # (bake ms, taps, light ms, light cells)
-		world_volume_schedule.feedback_split(f.x, int(f.y), f.z, int(f.w))
-		_volume_stats["upkeep_ms"] = f.x + f.z
-		_volume_stats["light_ms"] = f.z
-		_volume_stats["measured_ms"] += f.x + f.z
-		_volume_stats["measured_bake_ms"] += f.x
-		_volume_stats["measured_taps"] += int(f.y)
-		_volume_stats["measured_light_ms"] += f.z
-		_volume_stats["measured_light_cells"] += int(f.w)
+	for f: Dictionary in volume.take_feedback():  # measured upkeeps (CloudWorldVolume.take_feedback)
+		world_volume_schedule.feedback_split(f)
+		_volume_stats["upkeep_ms"] = f["bake_ms"] + f["light_ms"]
+		_volume_stats["light_ms"] = f["light_ms"]
+		_volume_stats["measured_ms"] += f["bake_ms"] + f["light_ms"]
+		_volume_stats["measured_bake_ms"] += f["bake_ms"]
+		_volume_stats["measured_taps"] += int(f["bake_taps"])
+		_volume_stats["measured_light_ms"] += f["light_ms"]
+		_volume_stats["measured_light_cells"] += int(f["light_cells"])
 		_volume_stats["measured_frames"] += 1
+		_volume_stats["light_levels"] = f["levels"]
+		_volume_stats["last_feedback"] = f
+		var sums: Dictionary = _volume_stats["measured_levels"]  # per level [cells, ms, column cells, column ms]
+		for k: int in f["levels"]:
+			var e: Dictionary = f["levels"][k]
+			var acc: Array = sums.get(k, [0, 0.0, 0, 0.0])
+			sums[k] = [acc[0] + int(e["cells"]), acc[1] + float(e["cells_ms"]), acc[2] + int(e["column_cells"]),
+					acc[3] + float(e["column_ms"])]
 	for c: Array in volume.take_light_feedback():  # rate-limited light jobs that clamped cells (Task 6)
 		world_volume_schedule.light_feedback(c[0], c[1], {"from": c[2], "to": c[3]})
 	if not world_volume:
@@ -626,10 +635,11 @@ func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 
 
 ## The world volume's last plan (cells to bake, to light, of them with the Moon, provisional), the last measured upkeep
-## (GPU ms: bake + light, the light's alone) and the sums of the measured upkeeps (ms in all, the bake's ms and taps,
-## the light's ms and cells, frames).
+## (GPU ms: bake + light, the light's alone; light_levels: per level its cells, column cells and their GPU ms) and the
+## sums of the measured upkeeps (ms in all, the bake's ms and taps, the light's ms and cells, frames; measured_levels:
+## per level [cells, light kernel ms, column cells, column pass ms]).
 func world_volume_stats() -> Dictionary:
-	return _volume_stats.duplicate()
+	return _volume_stats.duplicate(true)
 
 
 ## With the world volume running, the weight moves onto a slot only once the volume's adopted state holds the slot's

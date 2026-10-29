@@ -558,21 +558,34 @@ image, + s for production's sub-cell detail); 1 and 2 matter only for clear bake
   ~0.05 ms per level): with amortised scroll slabs up to 6 levels a frame at 7.8 km/s, ~0.3 ms inside the upkeep
   interval (the bake-rate feedback absorbs it).
 
-### World volume light (cloud world volume plan Task 6, 2026-10-28)
+### World volume light (cloud world volume plan Task 6 and its review rounds 1 / 1c, 2026-10-28 / 29)
 
-GPU intervals now `cloud_volume_upkeep` (bake, max mip, distance field) and `cloud_volume_light` (provisional and real
-light); the upkeep is their sum. Desktop RTX 4090, `--xr-mode off`:
-- Light kernel rate (cloud_check section 17, section 8's thick slab, every ray through tau ~10: the costliest content
-  measured): ~2.8e5 cells/ms on average over the cold start, ~6e4 cells/ms at level 0 (every cell within 2.6 km of
-  the deck); clear-dominated refresh passes calibrate to 1-2e6 cells/ms. the spec's 1.1e6 cells/ms [E] holds only for
-  mostly clear content: a full refresh of the 67 M cells takes ~50 ms of GPU at the clear rate (~1 s of 1 ms frames),
-  ~0.25 s in the slab (~5 s at the 1.0 ms light budget: a refresh lags by seconds, never a front).
-- Cold start in the slab (light at the spike's share, the bake at 40 x): every level complete 16-51 frames after its
-  density is shown (level 0: 51 frames = 1.13 s, above the 1 s target; levels 1-7 within it); light GPU median
-  2.71 ms per frame (the 3 ms spike cap less the bake), max 14.7 ms (the rate calibration lags content changes).
-- `render_check --cloud_view=V1 --world_volume --gpu_time --gpu_passes` (fill and light awaited): cold start in 309
-  frames, upkeep (bake + light) median 1.74 ms, p99 13.5 ms, max 21 ms; after it (still view, clock 1 x)
-  `cloud_volume_upkeep` median 0.003 / p99 0.003 ms, `cloud_volume_light` 0.003 / 0.003 ms. V3: complete after 822
-  frames (its cold-start upkeep series was not captured: one sample); after it 0.003 / 0.004 ms and 0.003 / 0.003 ms.
-  The cold start's p99 / max exceed the 3 ms spike cap: per-frame cost follows content (clear vs cloudy cells, taps
-  skipped by the clear test) faster than the 20 %-per-frame calibration - the gate (Task 11) measures it in VR.
+GPU intervals `cloud_volume_upkeep` (bake, max mip, distance field; per level `cloud_volume_bake_<k>`) and
+`cloud_volume_light` (provisional and real light; per level `cloud_volume_light_column_<k>` /
+`cloud_volume_light_cells_<k>`); the upkeep is their sum. Light: the distance-stepped density march (32 cells per
+level), one dispatch per level and kernel, planned by the latency-aware cost model (`weather-clouds.md`). Desktop
+RTX 4090, `--xr-mode off`:
+- Light kernel rate, whole-level refresh on the thick slab at 40 x the budget (cloud_check section 18, every ray
+  through tau ~10), cells per ms, levels 0 .. 7: 3.8e5, 8.5e5, 2.4e6, 4.6e6, 4.5e6, 4.0e6, 3.2e6, 5.4e6; the column
+  pass 3.1-8.8e6 column cells per ms. A full refresh of the 67 M cells ~46 ms of GPU light kernel (+ ~12 ms column).
+- The test GPU's rates depend on its load: in the cold start at the game's budget (frames of 1-3 ms GPU) the same
+  kernel runs at ~1e5 cells/ms at level 0, ~2-3e5 at level 1, ~0.5-1e6 at levels 2-7. Latency (a small dispatch's
+  time less its cells at the rate): ~0.05 ms at level 7, ~0.2-0.3 ms at levels 2-6, none measurable at level 0. The
+  bake's last work often lands in the light's first list (~0.2 ms, also in frames with no light job; the sum is
+  unchanged).
+- Cold start in the slab (section 17, the game's budget; the fill bake held to 0.2 of the 3 ms cap while a filled
+  level's light is due, the light at 0.85 of what the bake leaves): every level's light complete 17-39 frames after
+  its density is shown (levels 7 .. 0: 18 / 23 / 18 / 19 / 17 / 19 / 33 / 39; <= 45 frames asserted); upkeep median
+  1.13 ms, p99 2.31, max 2.60 ms alone and 5.04 ms in the full run (the cold start is a transition: <= 6 ms =
+  2 x the 3 ms cap asserted; the 3 ms cap binds in-flight load); the whole volume after 1255 frames (round 1b: 1228).
+  The 5.04 ms frames are a GPU clock-state change right after the bake ends (level 0 at half the measured rate,
+  feedback 2-3 frames late). Open: a level whose latency alone exceeds the 1.0 ms light budget would starve
+  (measured <= 0.4 ms).
+- Under load at the game's budget (section 18): the Sun at 100 x for 10 s (4.2 deg) light median 0.75 ms, p99 1.26,
+  upkeep max 1.50 ms; a pair switch (analog + ERA5 -> ERA5 + ERA5, the weight 0.82 -> 0.50 over 10 s, every 0.02
+  relighting all levels) light median 0.67, p99 1.29, upkeep max 1.68 ms.
+- Bake rates per level (render_check V1 cold start, taps per ms, occupancy included): L0 3.7e7, L1 4.6e7, L2-L4
+  7.0-8.6e7, L5-L7 1.0-1.8e8 (section 17's slab: L0 1.7e7 .. L7 1.7e8).
+- `render_check --cloud_view=V1 --world_volume --gpu_time --gpu_passes`: cold start complete after 881 frames, upkeep
+  median 1.08 ms, p99 1.60, max 1.95 ms; after it `cloud_volume_upkeep` median 0.003 ms. V3: complete after 822
+  frames (its cold-start series one sample), after it 0.003 / 0.003 ms.

@@ -595,6 +595,32 @@ func _volume_waiting(world: World) -> bool:
 				% [_frames, ms[ms.size() / 2] if not ms.is_empty() else -1.0] + "p99 %.3f ms, max %.3f ms" % [
 				ms[mini(ms.size() - 1, int(0.99 * ms.size()))] if not ms.is_empty() else -1.0,
 				ms.max() if not ms.is_empty() else -1.0])
+		# Task 6 review round 1d: the cold start is a transition - its upkeep stays within 2 x the spike cap (the cap
+		# itself binds in-flight load) in every measured frame.
+		var transition_ms := 2.0 * CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS
+		if not ms.is_empty() and ms.max() > transition_ms:
+			print("render_check: FAIL - world volume cold start upkeep max %.3f ms > transition cap %.1f ms" % [ms.max(),
+					transition_ms])
+			_check_failed = true
+		var parts := PackedStringArray()
+		var sums: Dictionary = stats["measured_levels"]
+		for k: int in range(CloudWorldVolumeLayout.LEVELS - 1, -1, -1):
+			if sums.has(k):
+				var m: Array = sums[k]
+				parts.append("L%d %s / %s" % [k, String.num_scientific(m[0] / maxf(m[1], 1e-9)),
+						String.num_scientific(m[2] / maxf(m[3], 1e-9))])
+		print("render_check: world volume cold start light rates (cells / ms, column cells / ms): %s" % ", ".join(parts))
+		var bake := PackedStringArray()
+		for k: int in range(CloudWorldVolumeLayout.LEVELS - 1, -1, -1):
+			bake.append("L%d %s" % [k, String.num_scientific(schedule.bake_level_taps_per_ms[k])])
+		print("render_check: world volume calibrated bake rates (taps / ms): %s" % ", ".join(bake))
+		var cost := PackedStringArray()
+		for k: int in range(CloudWorldVolumeLayout.LEVELS - 1, -1, -1):
+			cost.append("L%d %.3f + %s / %s" % [k, schedule.light_latency_ms[k],
+					String.num_scientific(schedule.light_cells_per_ms[k]),
+					String.num_scientific(schedule.column_cells_per_ms[k])])
+		print("render_check: world volume planned light cost (latency ms + cells / ms / column cells / ms): %s"
+				% ", ".join(cost))
 	return waiting
 
 
@@ -1164,6 +1190,8 @@ func _record_gpu_passes() -> void:
 	var frame := {}
 	for i in range(1, rd.get_captured_timestamps_count()):
 		var name := rd.get_captured_timestamp_name(i - 1)
+		if name.begins_with(CloudWorldVolume.RUN_STAMP):
+			continue  # the world volume's run id (an empty interval)
 		var ms := float(rd.get_captured_timestamp_gpu_time(i) - rd.get_captured_timestamp_gpu_time(i - 1)) / 1.0e6
 		frame[name] = float(frame.get(name, 0.0)) + ms
 		if name.begins_with("cloud_pass_"):

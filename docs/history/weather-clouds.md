@@ -1083,3 +1083,111 @@ it stood (weather-clouds.md, schedule and GPU side):
     [E];
     CloudEffect `run()`s it (with the pass's own camera) after the set 0 is built and before the march (GPU interval
     `cloud_volume_upkeep`), then
+
+## World volume light before Task 6 review round 1 (superseded 2026-10-28: distance-stepped density march)
+
+Superseded by: the distance-stepped march through baked density (16 cells of each level, controller ruling
+alternative B), no level reading another's light, one dispatch per level, per-level light and bake rates, the
+refresh one level at a time. Superseded on the way (never committed): the constant-cost cascade (16 / 8 cells of
+the level, then the next coarser level's own tau read at the exit point): exp(-tau) p99 0.35 / 0.016 / 0.0077 at
+levels 0 / 2 / 5 (N 16, Sun 45 deg, broken cf 0.4) but 0.99 / 0.78 / 0.24 at 15 deg (N 8) - trilinear
+interpolation of other rays' tau across cloud gaps and the slab top's kink (Sun 10 deg: top cell 0.54-0.70
+against 1.39). Text as it stood (calibration line, then the light bullet):
+
+    its rate taps per ms; `feedback_split(bake_ms,
+    bake_taps, light_ms, light_cells)` calibrates each rate from its own GPU interval (Task 6); start rates 2e7 taps/ms
+    (half the measured, below) and 1.25e5 light cells/ms (section 17's slab, the costliest content measured) [E];
+
+    - World volume light (world volume plan Task 6; schedule `CloudWorldVolumeLight`,
+      `game/world/weather/cloud_world_volume_light.gd`, called by the schedule; kernels
+      `game/shaders/cloud_volume_light.gdshaderinc`, run by `CloudWorldVolume` after the bake, GPU interval
+      `cloud_volume_light`; no march reads the light before Task 7):
+      - Texel (RGBA16F): tau_sun, tau_below (vertical, down to the shell's bottom: the transfer table's b), tau_above (up
+        to the shell's top: the sky's source), tau_moon - optical depths through rho (cell-mean extinction, both snapshots
+        blended by `cloud_blend`). Earth's shadow / Moon off: 6e4 (exp = 0; finite, so a filter across it stays finite).
+      - `CLOUD_VOLUME_LIGHT_COLUMN` (per column of a job box): tau_below / tau_above as exact trapezoid sums of the level's
+        own column of texels over its window (the trilinear field along the geodetic vertical is linear between centres),
+        beyond the window (levels 0-1) the coarser shown levels marched, the outer half cell held as the reads clamp.
+      - `CLOUD_VOLUME_LIGHT` (per cell, after a barrier): tau_sun / tau_moon from the cell centre - Earth's shadow when the
+        straight ray meets the ground (Gaussian sphere of the grid), the ray clipped to the shell, then steps through the
+        job's own (filled) level and the coarser levels SHOWN in its frame: free-space jumps on clear samples (distance
+        field; they add nothing), else Delta tau = max(0.5, 0.05 tau) / the block's max-extinction bound (level k + 1's too
+        in the fade band), at most 2 cells along the ray, trapezoid, a step whose ends differ by > 50 % halved up to 4 times;
+        64 samples; beyond the coarsest level or out of samples the grid-mean column (`cloud_column_mean_depth` over the
+        height to the cloud top at the ray's lowest point there, times the path). Error bound (shader header): only steps
+        across the trilinear field's kinks err, <= (cell-to-cell density change) x step / 8 per crossing. A re-frame's
+        spare reads its own textures without free-space jumps.
+      - `CLOUD_VOLUME_PROVISIONAL`: from the next coarser shown level's light at the cell centre, level 7 (or none shown)
+        from the grid-mean column (tau_sun = tau_above x path to the shell's top / height to the cloud top).
+      - Write modes: DIRECT (fresh cells; in spike frames - cold start, jump, re-frame - and for cells never shown with
+        provisional light), RATE (refresh generations: each channel's exp(-tau) moves <= `LIGHT_STEP_T` 0.01 per pass; the
+        GPU counts clamped cells per job, read back asynchronously, and a box that clamped any is served again once the
+        level's queue is through - "settle" - until it clamps none), BLEND (a box SHOWN with provisional light outside a
+        spike: the real light recomputed each plan and mixed in exp(-tau) by dt / the time left, linear over
+        `PROVISIONAL_FADE_S` 0.25 s).
+      - Schedule: light only for filled (`ready`) levels (their rays read their own window, then coarser shown levels);
+        per plan blends, fresh cells (coarse to fine), refresh generations (equal shares, finest first), provisional light
+        once. A level's light reference (Sun, Moon, blend) is set at its first real light after a fill (no overwrite while
+        filling: Task 3 minor). Triggers as before (shadow shift < 1/4 cell, Moon below -6 deg at the level centre, blend
+        0.02). Jobs: one storage buffer per batch, the job by push constant, one uniform set per written texture (a set
+        per job ran out of D3D12 descriptors at a check's 40 x budget). `light_budget_scale` (checks only).
+      - Measured (cloud_check section 17, RTX 4090; section 8's thick slab 1-2 km, tau ~10, at Starbase, camera 2 m):
+        tau_below / tau_above vs the CPU bake's column <= 0.2 %; tau_sun (Sun 45 deg) vs the converged ray integral through
+        the level's density <= 0.64 / 0.15 / 0.14 % (levels 0, 2, 5); tau_moon (Moon 40 deg) <= 0.76 / 0.08 / 0.06 % (levels
+        0, 2, 5). The analytic slab's depth above / mu0 differs by up to 4.9 % at levels 0-2: the baked slab's top undulates
+        with the bake's shape noise (tau_above varies 9.6-10.3 over 1.5 km at level 0), so a slanted ray crosses another
+        column's top (the uniform-slab reference holds only in the cell's own column). A 5 deg Sun step: one refresh pass
+        moves exp(-tau_sun) by at most 0.0103 (612 k / 125 k texels clamped at levels 0 / 2; level 5's threshold above the
+        step: no refresh), settled 0.042 / 0.042. Earth's shadow (Sun 8 deg below the site): all 24.9 M texels of levels
+        0, 2, 5 with the Sun >= 6 deg below their horizon at 6e4. No NaN / infinity in any level after five fills. Sun
+        10 deg up: no Moon jobs. Cold start (light at the spike share, bake at 40 x): every level completes, frames from
+        density shown 16 / 22 / 26 / 30 / 34 / 38 / 43 / 51 (levels 7 .. 0; level 0 misses the 1 s / 45-frame target on
+        this worst-case content: every ray through cloud, ~61 k cells/ms at level 0, ~2.9e5 cells/ms on average); light GPU
+        median 2.71 ms in those frames (the spike's 3 ms less the bake), max 14.7 ms (the calibration lags the content).
+      - Deferred to Task 7 (ruling C12: no march reads the light yet): the broken cf 0.4 views' radiance vs the converged
+        per-sample march, radiance 0 in Earth's shadow, the cold start's first frame with clouds, `render_check
+        --front_check` (C13: the front metric on the volume's change less the reference's).
+
+## World volume light cost model and N = 16 before Task 6 review round 1c (superseded 2026-10-29: N = 32, latency-aware cost model)
+
+Superseded by: 32 cells per level per march segment (controller ruling, round 1c: level 2 at a 15 deg Sun read 400 m
+cells for the cumulus 1.35-2 km up), and a per-level cost of latency + cells / rate learned at the slow end of the
+window, with growth bounds and the fill bake held while a filled level's light is due.
+
+```
+    from the cell centre CLOUD_LIGHT_LEVEL_CELLS = 16 cells of the cell's own level along the ray (a cell along the ray
+    = the shorter of its horizontal and vertical crossing), then 16 cells of each coarser level, 2 midpoint samples per
+```
+```
+    quadratic through its exact grid points at its ends and middle (no geodetic transform per sample). Cost: a
+    constant per level (2 x 16 samples x the levels on the path), shortened by the top exit.
+```
+```
+  - Cost model (`CloudWorldVolumeSchedule`): budgets in ms; a light job costs its cells at the level's light-kernel
+    rate plus its column cells at the level's column rate, each level `LIGHT_LEVEL_OVERHEAD_MS` 0.05 once a plan.
+    `feedback_split` calibrates every rate from its own GPU interval: an overrun adopts the measured rate at once, an
+    underrun raises it by 20 % of the gap (at most x2); a light dispatch below `LIGHT_CALIBRATION_MIN_CELLS` 65536 may
+    only raise a rate (its time is its longest ray's latency: adopting it spiralled the plans down to one column per
+    level); an unmeasured level takes the slowest measured level's light rates. Spike frames give the light
+    `LIGHT_SPIKE_SHARE` 0.65 of what the bake leaves of 3 ms (level 0's rate jitters by up to ~40 % between frames).
+    An upkeep over 2 x its plan halves the next plan once.
+```
+```
+    - Slab, Sun 45 deg: tau_sun worst 0.18 % (levels 0, 2, 5); tau_below / tau_above vs the CPU bake's column
+      <= 0.17 %; tau_moon (Moon 40 deg) <= 0.14 %. Sun 10 deg: worst 1.39 % (the top cell 1.391 vs 1.393 at level 0,
+      9.172 vs 9.192 at level 2; the cascade's slab-top kink error is gone).
+    - Broken field, exp(-tau_sun) error (4096 random cells per level inside the window, 0-2.5 km), p90 / p99:
+      Sun 45 deg level 0 0.0000 / 0.22, level 2 0.0004 / 0.0046, level 5 0.0006 / 0.0024; Sun 15 deg level 0
+      0.0016 / 0.85, level 2 0.0017 / 0.18, level 5 0.0006 / 0.0044. Shadow edges (exp(-tau) = 1/2 crossings at 500 m)
+      45 deg: levels 2 / 5 0.08 / 0.03 cells (level 0 none); 15 deg: level 0 5.2, level 2 8.3, level 5 0.02 cells.
+      Open (controller): level 2 at 15 deg misses p99 <= 0.02 and the 2-cell edge bound - its rays' far part reads
+      level 3+ (400 m and coarser cells) where the reference keeps level 2's 200 m; with 32 cells per level it passes
+      (level 2 p99 0.0060, edges 0.03 cells; level 0 p99 0.50) at about half the light rate (level 0 0.62e6 cells/ms)
+      and a pair switch's light median 1.06 ms (over the 1.0 ms budget).
+```
+
+Round 1b's numbers with this model (cloud_check sections 17 / 18 / full): cold start share 0.65, upkeep max 2.27 ms
+alone and 3.18 ms in the full run (level 0: 3.07 ms against 1.95 planned, its rate jittering faster than the
+feedback); levels 7 .. 0 complete 34 / 48 / 43 / 52 / 38 / 37 / 88 / 30 frames after their density shown (level 1 at
+48-98 over four runs). At share 0.5 every level took 57-194 frames; planning at the slowest of the last 45 rates held
+level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with its cells.
