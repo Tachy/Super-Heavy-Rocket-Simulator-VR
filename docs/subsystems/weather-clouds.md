@@ -637,6 +637,29 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference); 384 and 768 gave the same image; the
   desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %). The near / far hand-over band 20 / 34 km in both
   (above); the far tier's march takes at most the preset's max steps.
+- **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
+  (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
+  `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a
+  method turns the view cache off; the world volume's upkeep runs from the first hybrid frame on. The hybrid kernels
+  (`cloud_hybrid.gdshaderinc`, defines `CLOUD_HYBRID`, `CLOUD_HYBRID_SKIP`, `CLOUD_HYBRID_VOLUME_LIGHT`; compiled on
+  first use, 1-5 s each; `tests/hybrid_compile_check.gd` compiles all 24) are today's march - shape, detail and
+  weather per sample, its step schedule, outline pass, temporal copy and upsample - with: (a) the skip of the volume's
+  proven-empty ball behind a clear sample (distance field of the finest frame-0 level holding the point, the grid
+  carried as a quadratic through three geodetic solves per 40 km, margin 2 m + 1e-4 x distance; no free-box exit), and
+  (b) the light from one trilinear fetch of the volume's baked (tau_sun, tau_below, tau_above, tau_moon) at the step's
+  light point (faded toward level + 1; beyond the volume the far tier's light path). The T7 world-volume march stays
+  behind `--world_volume` (with the method "old").
+  Desktop 1600 x 900, march kernel ms (cloud_pass_march, median of 20 frames; refine adds 3.4-6.7 ms):
+
+  | view / divisor | old 3 / 2 / 1.5 / 1 | hybrid (vol. light + skip) | hybrid, old light + skip | vol. light, no skip (3 / 1) |
+  |---|---|---|---|---|
+  | V1 | 4.6 / 7.0 / 12.9 / 28.2 | 3.3 / 6.6 / 7.8 / 20.6 | 6.7 / 8.6 / 16.5 / 33.7 | - |
+  | V3 | 6.8 / 11.0 / 18.3 / 39.3 | 5.9 / 8.5 / 15.9 / 33.0 | 8.3 / 15.1 / 25.3 / 51.1 | 4.6 / 27.1 |
+
+  The skip works (V3 divisor 1: density fetches 5.97 G -> 2.12 G, empty steps 364 M -> 109 M, the image within 1 % of
+  pixels of today's) but costs time (its data-dependent steps: the latency chain of the cost diagnosis); hence the
+  method `hybrid_no_skip`. The volume light looks different: plastic domes on the deck from above, blotchy dark patches
+  on cumulus flanks from the ground (the light volume's cells vs the per-sample shapes; the T7 march showed them too).
 
 ## Validation
 
@@ -1044,7 +1067,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - World volume, GPU side (world volume plan Task 5; `CloudWorldVolume`, `game/world/weather/cloud_world_volume.gd`;
   kernels `game/shaders/cloud_volume_bake.gdshaderinc`, lookups `game/shaders/cloud_volume.gdshaderinc`; fidelity
   flag `CloudLayer.world_volume` / global `cloud_world_volume`, default false until Task 13, on with
-  `STARSIM_WORLD_VOLUME=1` or `--world_volume`; Task 5 runs the upkeep alone, no march reads the volume yet):
+  `STARSIM_WORLD_VOLUME=1` or `--world_volume`; the march reads it from Task 7 on, below):
   - Textures per level (index 8: the transient spare of a re-frame, created with its first job, freed at the swap):
     density RGBA16F in 1/km (RG = rho, sigma_c of slot 0's snapshot, BA = slot 1's; `channel_of_slot(s)` = s: a
     slot's snapshot is replaced only without weight), light RGBA16F (Task 6, below), max-extinction mip R16F (1/km) and
@@ -1098,8 +1121,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - World volume light (world volume plan Task 6, review round 1 (controller ruling: alternative B, N 16); schedule
   `CloudWorldVolumeLight`, `game/world/weather/cloud_world_volume_light.gd`, called by the schedule; kernels
   `game/shaders/cloud_volume_light.gdshaderinc`, run by `CloudWorldVolume` after the bake, GPU interval
-  `cloud_volume_light` with per level `cloud_volume_light_column_<k>` / `cloud_volume_light_cells_<k>`; no march reads
-  the light before Task 7):
+  `cloud_volume_light` with per level `cloud_volume_light_column_<k>` / `cloud_volume_light_cells_<k>`; read by the
+  march from Task 7 on):
   - Texel (RGBA16F): tau_sun, tau_below (vertical, down to the shell's bottom: the transfer table's b), tau_above (up
     to the shell's top: the sky's source), tau_moon - optical depths through rho (cell-mean extinction, both snapshots
     blended by `cloud_blend`). Earth's shadow / Moon off: 6e4 (exp = 0; finite, so a filter across it stays finite).
@@ -1204,10 +1227,68 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     - Earth's shadow (Sun 8 deg below the site): all 24.9 M texels of levels 0, 2, 5 with the Sun >= 6 deg below their
       horizon at 6e4. No NaN / infinity in any level after five fills. Sun 10 deg up: no Moon jobs. No sample of the
       march through the levels unheld (`light_fallbacks` 0).
-  - Deferred to Task 7 (ruling C12: no march reads the light yet): the broken cf 0.4 views' radiance vs the converged
-    per-sample march, radiance 0 in Earth's shadow, the cold start's first frame with clouds, `render_check
-    --front_check` (C13: the front metric on the volume's change less the reference's); the Moon's ramp-in (its
-    channel is gated by the level's Moon flag, which switches with the jobs that write it).
+  - The radiance checks deferred from Task 6 (C12 / C13) run with the march (Task 7, below: cloud_check section 19,
+    `render_check --front_check`). The Moon's channel is read with the level's lookup `moon_weight` (below).
+- World volume march (world volume plan Task 7; `game/shaders/cloud_volume_march.gdshaderinc`, kernel
+  `CLOUD_VOLUME_FULL` compiled by `CloudEffect` with the march's files (one set 0) and the volume's lookups; GPU
+  interval `cloud_volume_full`): with the flag on and a level shown (`CloudWorldVolume.march_uniforms`: the adopted
+  state at the frame's camera in its own CloudVolume block) the frame is one ray per eye pixel over [0, scene], written
+  into the eye's layer of the result (no temporal pass, no upsample: the full-resolution reference of Task 8's tiers);
+  until a level is shown, and for the debug outputs it does not draw (3, 5, 6, 8-11), today's march. The curl texture
+  (core `cloud_curl_field`: `CloudNoise.curl_rgb`, 32^3 RGB8, global `cloud_noise_curl`), the flags
+  `CloudLayer.light_entry_samples` (4; global `cloud_light_entry_samples`) and `CloudLayer.edge_curl` (1.0; global
+  `cloud_edge_curl`) are declared in `clouds.gdshaderinc` so every kernel of the march's files shares one set 0.
+  - Steps (STOP-1 ruling): empty space by the free ball of the finest shown level (and of level k + 1 where the ball
+    reaches k's fade band: then k's ball WITHOUT the window clip - beyond the window k + 1 alone holds the density -,
+    so rays cross window edges in one step) or, further, the exit of the free box along the ray (horizontally linear /
+    `CLOUD_VOLUME_MAX_SCALE`, vertically the exact crossings of the box's heights less `CLOUD_VOLUME_BOX_MARGIN` 0.4 %:
+    rays grazing a base or a window top left the ball geometrically, p99 914 -> 157 empty steps at V1); occupied space
+    one step to the exact exit of the level's cell (the cell picked with a 1e-4-cell nudge along the ray), capped by
+    `CLOUD_STRUCTURE_TEXEL_FRACTION` of the finest sub-cell structure where the sub-cell field acts (a cell entered
+    from clear or solid space whose sample shows the field acting is taken again from its start with the cap: one
+    sample of a sharp field per cell drew the cells' faces as blocks; the first occupied step after an empty one is
+    the structure's), >= 2 m; one density sample at the middle, Beer-Lambert over the step; the source linear between
+    the step's ends in closed form, the ends' sources from light NODES `CLOUD_VOLUME_LIGHT_NODE_CELLS` 0.5 of the
+    level's cell apart along the ray (or at a longer step's end), linear between them (Task 7 ruling R3: one light
+    evaluation per half cell, not per structure step - V1 light fetches per occupied step 9.6 -> 0.46); silhouette
+    bisection 4 x; termination as today (Sun-ray exception to 1e-9). The air shadow's loss is composited on every ray,
+    with or without cloud on it (as `cloud_shade_ray`; skipping it on clear rays was V6_backlit's 34 % median). Error bound of the mid-step trilinear sample: the trilinear field along a ray inside a
+    cell is a cubic, |tau_mid - tau| <= Delta L / 4 for a full-cell step (Delta the cell's corner spread).
+  - Levels: the finest shown level whose window holds the point, each level in its own frame's grid during a
+    re-frame (`cloud_volume_at`; cross-frame nesting and the spare's cross-fade are Task 9's); beyond the coarsest
+    shown level the ray ends (Task 8 / 10: the far field).
+  - Sub-cell field (decision 6; Task 7 ruling R1, the threshold form): density = sigma_c Phi((v - t) / s_e),
+    t = -sqrt(s_e^2 + sigma_v^2) Phi^-1(c), c = rho / sigma_c (trilinear): the cell's cover kept as a cover at full
+    in-cloud extinction (not spread into haze), graded (= the bake) where sigma_v -> 0, sharp where sigma_v >> s_e.
+    v = w_s (s_f - s_cell) + P_g: the shape's residual above the cell's scale (s_cell at the cell's shape level, 0 below
+    the 250 m texel; through a fade band the cell size mixed geometrically by the fade, ruling R5) plus the detail
+    perturbation Gaussianised by the core's table (`CloudNoise.detail_gaussian`, the eroded Worley octaves are not
+    Gaussian: with the Gaussian t alone the real cover was off by up to 0.053); sigma_v^2 = w_s^2 (R(l_cell) - R(l_f)) +
+    sigma_P^2 from the core's statistics (`detail_level_mean / _variance`, `shape_residual_variance`; globals
+    `cloud_detail_gaussian`, `cloud_detail_level_mean / _variance`, `cloud_shape_residual_variance_lo / _hi`);
+    s_e = edge width / sqrt(20) (the smoothstep ramp's slope spread). Core test "The sub-cell threshold field keeps the
+    cell's cover": Gaussian v: |mean - c| <= 3.3e-8 over c 0.05-0.95 and sigma_v / s_e 0-100; the real detail values
+    Gaussianised 1.0e-3 / 1.2e-3 (states 3 / 1.3, 5e5 points: sampling noise 7e-4), with the real shape residual
+    2.4e-3 / 3.6e-3. The curl distortion of the detail lookup (edge_curl x the level-0 detail's middle cell x w_0).
+    0 where rho = 0, <= sigma_c, rho exactly with all weights 0. History (`docs/history/weather-clouds.md`): the
+    spreading form sigma_c ramp(ramp^-1(c) + 4 c (1 - c) v / w) raised V3's alpha by 0.04 (water as haze).
+  - Light per sample: the light volume's taus (faded as the density): the table / closed form with tau_sun and the
+    columns, the sky with tau_above x the sky irradiance (refresh as today), the Moon's J x the levels' `moon_weight`
+    (the schedule moves it toward the level's Moon flag over `MOON_RAMP_S` 1 s; rate-limited jobs leave tau_moon stale
+    once the Moon is off). A tau of >= `CLOUD_VOLUME_UNLIT_TAU` (half the stored 6e4) is no light: J = 0 (the table's
+    3D entry cosine is > 0 below the horizon). Surface correction (`light_entry_samples` 4) at each light node: where
+    T (1 - e^-dtau) > 1e-3 and the cell is coarser than the footprint, tau_sun = 4 midpoints of the per-sample density
+    over 2 cells (the shorter crossing) of the level whose light the sample reads (level k + 1 in the fade band) plus
+    the volume's tau_sun there. (Ruling R3's "first 4 steps of the ray only" broke section 19's slab at Sun 20 deg:
+    worst 11.8 % vs the converged light, bound 5 %; at the nodes 3.3 %.) `light_entry_samples` < 0 (checks): the
+    converged per-sample light march to the shell's top.
+  - Checks: cloud_check section 19 (`STARSIM_VOLUME_ONLY=19`); with `STARSIM_WORLD_VOLUME=1` the other sections'
+    renders march the volume, filled and lit first (`_volume_settle_render`, 40 x the budget; a camera moved > 50 km is
+    a view jump); `render_check --ab_reference / --edge_check / --front_check / --volume_fill_scale /
+    --light_entry_samples / --edge_curl / --world_volume_unsplit` (header), the settle holding the volume's march
+    (`CloudEffect.volume_march_hold`) until the scene and the volume are settled; `cloud_grain_check` with
+    `STARSIM_WORLD_VOLUME=1` (ours: the volume, the reference: the reference path, grain at 1 px). Results: Task 7
+    report (`vr-performance.md` "World volume march").
 - Cell bake, CPU reference (world volume plan Task 4; the GPU bake of Task 5 is checked against it; `[weather]`
   `core/tests/test_cloud_volume_bake.cpp`):
   - `cloud_render_field.hpp` mirrors the GPU point model of ONE snapshot without the detail (`cloud_field` with the

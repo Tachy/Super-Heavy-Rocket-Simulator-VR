@@ -121,6 +121,21 @@ global uniform vec3 cloud_transfer_theta_map;
 // clouds' own light (the air in front of them kept, no air shadow); 12 = (cloud distance [m], alpha, 0), opaque.
 global uniform int cloud_debug_output;
 global uniform float cloud_debug_height_m;
+// The world volume's march (cloud_volume_march.gdshaderinc, world-volume plan Task 7), declared here so every kernel of
+// the march's files shares one set 0: the curl field (cloud_noise.hpp, RGB8), the fidelity flags edge_curl (the curl
+// distortion's amplitude in level-0 detail middle cells; 0: without) and light_entry_samples (the surface correction's
+// Sun samples; 0: the volume's light alone).
+global uniform sampler3D cloud_noise_curl : filter_linear, repeat_enable;
+global uniform float cloud_edge_curl;
+global uniform int cloud_light_entry_samples;
+// The sub-cell field's statistics (core cloud_noise.hpp "Sub-cell field", ruling R1): the Gaussianising table G (rows:
+// detail states r / 4, columns: the standardised perturbation over +-CLOUD_SUB_CELL_STANDARD_RANGE), the detail
+// levels' eroded terms' means and variances, the shape residual's variance R(l) at shape levels 0 .. 7.
+global uniform sampler2D cloud_detail_gaussian : filter_linear, repeat_disable;
+global uniform vec3 cloud_detail_level_mean;
+global uniform vec3 cloud_detail_level_variance;
+global uniform vec4 cloud_shape_residual_variance_lo;
+global uniform vec4 cloud_shape_residual_variance_hi;
 
 // [S] WGS84 equatorial radius (core constants.hpp wgs84_a_m); the stretch is ATM_STRETCH (atmosphere.gdshaderinc).
 const float CLOUD_A_M = 6378137.0;
@@ -137,6 +152,12 @@ const float CLOUD_LAYERS = 32.0;
 const float CLOUD_SHAPE_TILE_H_M = 32000.0;
 const float CLOUD_SHAPE_TILE_V_M = 16000.0;
 const float CLOUD_DETAIL_TILE_M = 1000.0;  // level 0; level k: / 4^k
+// The sub-cell field (core cloud_noise.hpp, mirrored; smoke_test.gd compares): the edge spread per edge width, the
+// Gaussianising table's rows per detail state, its rows and its standardised range.
+const float CLOUD_SUB_CELL_EDGE_SPREAD = 0.22360679774997896;
+const float CLOUD_SUB_CELL_ROWS_PER_STATE = 4.0;
+const float CLOUD_SUB_CELL_ROWS = 13.0;
+const float CLOUD_SUB_CELL_STANDARD_RANGE = 6.0;
 const int CLOUD_DETAIL_LEVELS = 3;          // core cloud_detail_levels
 const float CLOUD_DETAIL_STATES = 4.0;      // core cloud_detail_states (the table rows)
 // Shape prefilter (core cloud_noise.hpp cloud_shape_prefilter_*; texels of the shape texture across the tile).

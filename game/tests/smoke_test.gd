@@ -279,6 +279,15 @@ func _check_weather(core: StarsimCore) -> bool:
 			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS_PER_LEVEL") == float(noise["prefilter_rows_per_level"])
 			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS") == float(rows),
 			"clouds.gdshaderinc prefilter constants equal the core's")
+	# The world volume's sub-cell field (Task 7 ruling R1): the shader's mirrors and the uploaded statistics' sizes.
+	var sub_rows := int(noise["sub_cell_rows"])
+	_check(_shader_constant("CLOUD_SUB_CELL_ROWS") == float(sub_rows)
+			and _shader_constant("CLOUD_SUB_CELL_ROWS_PER_STATE") == float(sub_rows - 1) / 3.0
+			and _shader_constant("CLOUD_SUB_CELL_STANDARD_RANGE") == float(noise["sub_cell_standard_range"])
+			and is_equal_approx(_shader_constant("CLOUD_SUB_CELL_EDGE_SPREAD"), float(noise["sub_cell_edge_spread"]))
+			and (noise["detail_gaussian"] as PackedFloat32Array).size() == 256 * sub_rows
+			and (noise["shape_residual_variance"] as PackedFloat32Array).size() == 8,
+			"clouds.gdshaderinc sub-cell field constants equal the core's")
 	# The cloud types (static clouds Task 5 fix round 1): the shader's band constants and CloudLayer's tiles.
 	var types: Dictionary = noise["type_constants"]
 	var types_ok := types.size() == 7 and (noise["level_lift"] as PackedFloat32Array).size() == 3

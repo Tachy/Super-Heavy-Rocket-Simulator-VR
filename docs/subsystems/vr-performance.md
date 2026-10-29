@@ -589,3 +589,29 @@ RTX 4090, `--xr-mode off`:
 - `render_check --cloud_view=V1 --world_volume --gpu_time --gpu_passes`: cold start complete after 881 frames, upkeep
   median 1.08 ms, p99 1.60, max 1.95 ms; after it `cloud_volume_upkeep` median 0.003 ms. V3: complete after 822
   frames (its cold-start series one sample), after it 0.003 / 0.003 ms.
+
+## World volume march (cloud world volume plan Task 7, 2026-10-29)
+
+`render_check --cloud_view=<V> --world_volume --volume_fill_scale=40 --counters --gpu_time=20 --gpu_passes
+--fixed_exposure` (desktop RTX 4090, `--xr-mode off`, 1600 x 900 = 1.44 MP, one eye; GPU interval
+`cloud_volume_full`, the full-resolution reference kernel `CLOUD_VOLUME_FULL`). Fetches per occupied step = (density +
+light fetches) / occupied steps of eye 0 (the distance-field reads of the step rule are not counted).
+
+| state | V1 ms | V1 fetches / occ. step | V1 occ. steps (sum) | V3 ms | V3 fetches / occ. step |
+|---|---|---|---|---|---|
+| round 0 (spreading sub-cell field, correction every step) | 95.6 | 18 (8.3 + 9.6) | 44.1 M | - | - |
+| threshold field + correction on the first 4 evaluations | 139.6 | 8.4 (6.9 + 1.5) | 98.6 M | - | - |
+| + light nodes (0.5 cell) | 141.1 | 7.8 (7.0 + 0.86) | 98.6 M | 300.2 | 9.2 (9.0 + 0.26) |
+| + structure-capped first step after empty space, 1-fetch s_cell | 138.3 | 7.7 (6.8 + 0.85) | 99.4 M | 297.2 | 9.0 (8.7 + 0.25) |
+| + surface correction at the light nodes (final) | 131.6 | 7.3 (6.8 + 0.46) | 99.4 M | 264.8 | 8.8 (8.7 + 0.06) |
+
+- The threshold field keeps the gaps open (the spreading field's haze ended rays early): the occupied steps doubled
+  (V1 mean 31 -> 69 per pixel; V3 202, p99 1904) - the steps through partial cover at the structure scale (0.25 x the
+  finest active structure: 3.9 m at V1's near footprint, 62 m at V3's 40 km) dominate, worst at the horizon rows.
+- Ablations at V1 (the state before the light nodes): light ablated 55 ms (of 143); air ablated 131; without the
+  surface correction 117; no silhouette bisection: unchanged; structure fraction 0.5: 116 ms, 58 M steps. The light
+  costs ~60 % of the pass although only ~1 light fetch per occupied step remains: register pressure / warp
+  divergence of the large source code in the loop (the light nodes cut its evaluations 6 x without a time change).
+- Stereo (22.5 MP per eye): not run (ruling R3: only with V1 desktop <= 15 ms). Extrapolated from V1's 91 ns per pixel:
+  ~2.1 s per eye, V3 ~4.1 s - beyond the Windows TDR limit; the full-resolution kernel stays the tiers' reference
+  (Task 8).

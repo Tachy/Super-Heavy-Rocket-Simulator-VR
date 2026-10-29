@@ -18,7 +18,9 @@
 #          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
-#          resolution divisor instead), --cloud_debug=1..4 (the cloud
+#          resolution divisor instead, fractional allowed: 1.5),
+#          --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light (the hybrid march prototype, CloudLayer.march_method: the view cache off, the world volume's upkeep on and settled
+#          first), --cloud_debug=1..4 (the cloud
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
 #          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
@@ -52,7 +54,22 @@
 # World volume (world volume plan Task 5): --world_volume / --no_world_volume set the fidelity flag
 #          CloudLayer.world_volume (default: the environment STARSIM_WORLD_VOLUME=1 or the user argument --world_volume;
 #          off otherwise); on, the volume's upkeep runs (GPU intervals cloud_volume_upkeep: the bake, cloud_volume_light:
-#          the light), no march reads it yet; the settle waits for its fill and light (Task 6).
+#          the light); the settle waits for its fill and light (Task 6). Task 7: with a level shown the frame is the
+#          volume's march (CLOUD_VOLUME_FULL: one ray per eye pixel; GPU interval cloud_volume_full).
+#          --volume_fill_scale=<x> fills the volume at x times the upkeep budget (checks of the march, not of the
+#          upkeep: the cold start's upkeep verdict is then skipped).
+#          --world_volume_unsplit forces CLOUD_VOLUME_FULL once Task 8's tiers exist (Task 7: the only path).
+#          --light_entry_samples=<n> / --edge_curl=<a>: the fidelity flags (surface correction, curl distortion).
+#          --ab_reference: the volume's cloud image against the reference path (world_volume and view_cache off,
+#          divisor 1, 8 x steps): median <= 1 %, p99 without scene geometry <= the reference's own p99 turned by
+#          0.5 px (the max over four turns; exit code 1). --edge_check: on the same frames, the edge pixels' (alpha
+#          0.05-0.95) band width <= 1.5 x the reference's and alpha high-pass energy >= 0.7 x the reference's (no blur
+#          regression, ruling R2; exit code 1); the reference's own change under the turns is printed.
+#          --front_check=W,S: the clock at W x for S s in 1/45 s frames, once with the volume and
+#          once with the reference path from the same instant; per frame the 16 x 16-block means of the cloud image's
+#          frame-to-frame radiance change; the front step = the largest difference of (volume change - reference
+#          change) between neighbouring blocks / the mean radiance, <= 1 % (and no frame whose mean alpha drops below
+#          half the reference's); prints "front_check: max step <x> % lag <deg>" (exit code 1).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -111,6 +128,22 @@ const AB_TURNS := ["+x", "-x", "+y", "-y"]  ## the calibration's half-pixel turn
 const AB_TURN_DIRECTIONS := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]
 ## A pixel without scene geometry: the march's scene distance at least this (cloud_pass.gdshaderinc: 1e30 for depth 0).
 const AB_SKY_M := 1.0e20
+## --ab_reference (world volume plan Task 7, ruling C23): the reference path's steps x this (cloud_grain_check.gd
+## REFERENCE_STEP_FACTOR: the converged march along the ray).
+const AB_REFERENCE_STEP_FACTOR := 8
+## --edge_check (spec "feathery edges"; Task 7 ruling R2: no blur regression - the user wants feathery, detailed edges,
+## appearance otherwise goes to the user as images): edge pixels have alpha in this range; the candidate's band width
+## at most EDGE_WIDTH_MAX x the reference's, its high-pass energy at least EDGE_ENERGY_MIN x the reference's.
+const EDGE_ALPHA := Vector2(0.05, 0.95)
+const EDGE_WIDTH_MAX := 1.5
+const EDGE_ENERGY_MIN := 0.7
+## --front_check=W,S (Task 7, C13): the frame (s; the VR frame at 45 Hz), the blocks' size (pixels), the bound on the
+## step of (volume change - reference change) between neighbouring blocks relative to the mean radiance; a frame is
+## "black" when its mean alpha falls below FRONT_BLACK_SHARE of the reference's at the same instant.
+const FRONT_FRAME_S := 1.0 / 45.0
+const FRONT_BLOCK_PX := 16
+const FRONT_TOLERANCE := 0.01
+const FRONT_BLACK_SHARE := 0.5
 ## --shimmer_check: frames, the head's yaw (eye pixels, alternating) and the allowed excess over the direct march.
 const SHIMMER_FRAMES := 16
 const SHIMMER_PX := 0.3
@@ -157,10 +190,13 @@ var _cache_settled := 0  ## --repeat_identical: consecutive frames with the ligh
 var _volume_upkeeps: Array[float] = []  ## the world volume's measured upkeep (ms) per frame of its cold start
 var _volume_seen := 0  ## measured frames of the world volume read so far
 var _volume_reported := false
+var _volume_release := -1  ## frames of the volume's march left before the measurement (-1: still held, 0: drawn)
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
 var _gpu_passes := {}  ## --gpu_passes: timestamp name -> Array of the measured frames' GPU ms
+var _sweep_left: Array[float] = []  ## --divisor_sweep: the divisors still to measure
+var _sweep_wait := -1  ## --divisor_sweep: frames left to settle at the current divisor (-1: not started)
 ## The cloud view cache's convergence (cloud view cache Task 4; the cache on): the wall clock its timing started at (the
 ## planner's last restart), when the view's tiles had level 0 / the full level and the whole cube was done (s, -1: not
 ## yet), frames without a filled tile, the frames' main-thread schedule time (FrameProfiler) and fill intervals.
@@ -188,6 +224,19 @@ var _ab_result := {}  ## the cache against the march (judged after the calibrati
 var _ab_turn := 0  ## the calibration turn being measured (AB_TURNS)
 var _ab_calibration_p99 := 0.0  ## the max of the turns' p99 (no scene geometry)
 var _ab_base_angles := Vector2.ZERO  ## the view's azimuth / elevation before the turns
+## --edge_check: the candidate's and the reference's edge metrics, the reference's largest change under the turns.
+var _edge_candidate := {}
+var _edge_reference := {}
+var _edge_turn_change := {}
+## --front_check: the phase (0 the volume's run, 1 the reference's), the frame, the start instant, the runs' per-frame
+## block means and mean alpha, the Sun's elevation per frame.
+var _front_phase := -1
+var _front_frame := 0
+var _front_t0 := 0.0
+var _front_blocks := [[], []]
+var _front_alpha := [[], []]
+var _front_sun_deg: Array[float] = []
+var _front_row_blocks := 1  ## blocks per row of the cloud image
 ## --shimmer_check: the phase (0 the cache, 1 the direct march), the base azimuth, frames of the phase, the cloud
 ## images of its frames, the cache's p99 of the change.
 var _shimmer_phase := 0
@@ -341,7 +390,7 @@ func _process(_delta: float) -> bool:
 		_show_weather_file(world)
 		if _args.has("cloud_divisor"):  # the march's resolution divisor (the preset's otherwise; tuning runs)
 			var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
-			world.clouds.effect.set_quality(int(_args["cloud_divisor"]), float(preset["temporal_weight"]),
+			world.clouds.effect.set_quality(float(_args["cloud_divisor"]), float(preset["temporal_weight"]),
 					float(preset["clip_gamma"]))
 		if _args.has("cloud_detail_levels"):  # the detail levels used (the preset's otherwise)
 			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
@@ -355,6 +404,12 @@ func _process(_delta: float) -> bool:
 			world.clouds.world_volume = true
 		if _args.has("no_world_volume"):
 			world.clouds.world_volume = false
+		if _args.has("world_volume_unsplit"):  # Task 8's tiers off: the full-resolution march per eye
+			CloudEffect.volume_unsplit = true
+		if _args.has("light_entry_samples"):  # the fidelity flag (CloudLayer.light_entry_samples)
+			world.clouds.light_entry_samples = int(_args["light_entry_samples"])
+		if _args.has("edge_curl"):  # the fidelity flag (CloudLayer.edge_curl)
+			world.clouds.edge_curl = float(_args["edge_curl"])
 		if _args.has("no_air_shadow"):  # the fidelity flag (CloudLayer.air_shadow)
 			world.clouds.air_shadow = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
@@ -428,14 +483,25 @@ func _process(_delta: float) -> bool:
 	var cache_waiting := _cache_waiting(world)
 	# The world volume (flag on): until its fill and its light are complete (world volume plan Task 6: the upkeep is
 	# measured after the cold start).
-	cache_waiting = cache_waiting or (world.clouds.world_volume and _volume_waiting(world) and _frames < TERRAIN_MAX_FRAMES)
+	cache_waiting = cache_waiting or (world.clouds.volume_needed() and _volume_waiting(world) and _frames < TERRAIN_MAX_FRAMES)
 	if CloudSpike.failed:
 		_refuse("render_check: the spike's plan was refused (see the CloudSpike error)")
 		return true
 	cache_waiting = cache_waiting or (CloudSpike.mode != CloudSpike.Mode.OFF and not CloudSpike.ready)  # spike S's build
-	if _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting and not cache_waiting \
-			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
-		if _args.has("ab_view_cache") and not _ab_frames(world):
+	var settled := _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting and not cache_waiting \
+			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES)
+	# The world volume's march draws the frame once the scene and the volume are settled (CloudEffect.volume_march_hold:
+	# the settle runs at today's march's frame rate), then FRAMES_TO_SETTLE frames of it before anything is measured.
+	if world.clouds.volume_needed() and _volume_release != 0:
+		CloudEffect.volume_march_hold = not settled
+		if settled:
+			_volume_release = FRAMES_TO_SETTLE if _volume_release < 0 else _volume_release - 1
+		return false
+	if settled:
+		if (_args.has("ab_view_cache") or _args.has("ab_reference") or _args.has("edge_check")) \
+				and not _ab_frames(world):
+			return false
+		if _args.has("front_check") and not _front_frames(world):
 			return false
 		if _args.has("shimmer_check") and not _shimmer_frames(world):
 			return false
@@ -510,7 +576,7 @@ func _process(_delta: float) -> bool:
 func _print_counters(world: World) -> void:
 	var effect: CloudEffect = world.clouds.effect
 	var data := effect.debug_centre_data("counters")
-	var low := effect.centre_low
+	var low := effect.counters_size
 	if data.is_empty() or low.x * low.y == 0:
 		print("render_check: counters: no data (no cloud pass ran)")
 		return
@@ -551,8 +617,17 @@ func _print_counters(world: World) -> void:
 ## frame the GPU time between the RenderingDevice's captured timestamps of the previous frame, per name (the interval
 ## a timestamp starts; CloudEffect.capture_timestamps: cloud_light_fill, cloud_pass_<kernel>, shadow_pass; their
 ## cloud_pass_* summed as cloud_pass), printed as median and p99 per name.
+## --divisor_sweep=3,2,1.5,1 (with --gpu_time; the hybrid march prototype): the measurement repeated per cloud march
+## divisor (CloudLayer.divisor_override), each after FRAMES_TO_SETTLE frames at it; the image is the last divisor's.
 func _gpu_frames(world: World) -> bool:
 	var wanted: int = int(_args["gpu_time"]) if _args["gpu_time"].is_valid_int() else 120
+	if _args.has("divisor_sweep") and _sweep_wait < 0:
+		for d in _args["divisor_sweep"].split(",", false):
+			_sweep_left.append(float(d))
+		_next_sweep_divisor(world)
+	if _sweep_wait > 0:
+		_sweep_wait -= 1
+		return false
 	if _args.has("gpu_passes"):
 		_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() else 0
 		if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
@@ -573,7 +648,21 @@ func _gpu_frames(world: World) -> bool:
 		ms.sort()
 		print("render_check: gpu pass %s median %.3f ms, p99 %.3f ms" % [name, ms[ms.size() / 2],
 				ms[mini(ms.size() - 1, int(0.99 * ms.size()))]])
+	if _args.has("divisor_sweep"):
+		print("render_check: divisor_sweep divisor %s method %s hybrid_shown %s (the lines above)" % [
+				world.clouds.divisor(), world.clouds.march_method, world.clouds.effect.hybrid_shown])
+		if not _sweep_left.is_empty():
+			_next_sweep_divisor(world)
+			return false
 	return true
+
+
+## --divisor_sweep: the next divisor, its settle frames, the measurement restarted.
+func _next_sweep_divisor(world: World) -> void:
+	world.clouds.divisor_override = _sweep_left.pop_front()
+	_sweep_wait = FRAMES_TO_SETTLE
+	_gpu_ms.clear()
+	_gpu_passes.clear()
 
 
 ## True while the world volume's fill or light is incomplete (CloudWorldVolumeSchedule.complete, light_stale); the
@@ -584,9 +673,11 @@ func _volume_waiting(world: World) -> bool:
 		_volume_seen = int(stats["measured_frames"])
 		_volume_upkeeps.append(float(stats["upkeep_ms"]))
 	var schedule: CloudWorldVolumeSchedule = world.clouds.world_volume_schedule
+	var fill_scale := float(_args.get("volume_fill_scale", "1"))
 	var waiting := not schedule.complete()
 	for k in CloudWorldVolumeLayout.LEVELS:
 		waiting = waiting or schedule.light_stale(k)
+	schedule.budget_scale = fill_scale if waiting else 1.0
 	if not waiting and not _volume_reported:
 		_volume_reported = true
 		var ms := _volume_upkeeps.duplicate()
@@ -598,7 +689,10 @@ func _volume_waiting(world: World) -> bool:
 		# Task 6 review round 1d: the cold start is a transition - its upkeep stays within 2 x the spike cap (the cap
 		# itself binds in-flight load) in every measured frame.
 		var transition_ms := 2.0 * CloudWorldVolumeSchedule.UPKEEP_SPIKE_MS
-		if not ms.is_empty() and ms.max() > transition_ms:
+		if fill_scale != 1.0:
+			print("render_check: world volume filled at %.0f x the budget (--volume_fill_scale): no upkeep verdict"
+					% fill_scale)
+		elif not ms.is_empty() and ms.max() > transition_ms:
 			print("render_check: FAIL - world volume cold start upkeep max %.3f ms > transition cap %.1f ms" % [ms.max(),
 					transition_ms])
 			_check_failed = true
@@ -721,76 +815,111 @@ static func _stats(values: Array[float]) -> Dictionary:
 		"p99": sorted[mini(int(0.99 * sorted.size()), sorted.size() - 1)], "max": sorted.back()}
 
 
-## --ab_view_cache (the cache full): the cloud image of the cache, then of the per-frame march at divisor 1 (the
-## reference, cloud view cache controller rulings): both box-filtered over 2 x 2 pixels, the per-block luminance error
-## |cache - march| / max(|march|, AB_ERROR_FLOOR x the mean) - median <= AB_MEDIAN_TOLERANCE over all blocks, and the
-## p99 over the blocks whose rays miss the ground and every other scene geometry <= the calibration's: the march against
-## itself with the view turned by AB_SHIFT_PX in four directions, the max over them (the same metric; the full
-## image's p99 and T RMS printed). Images: the two frames and the error (x 10) next to --out. True when done (a
-## failure: exit code 1).
+## The A / B check shared by --ab_view_cache, --ab_reference and --edge_check (world volume plan Task 7, N5: the shared
+## code moved out of --ab_view_cache, which Task 13 deletes): the candidate's cloud image (the current settings: the
+## cache, or the world volume), then the reference's (_ab_to_reference: --ab_view_cache the per-frame march at divisor
+## 1; --ab_reference / --edge_check the reference path - world_volume off, view_cache off, divisor 1, the grain check's
+## REFERENCE_STEP_FACTOR x steps, ruling C23), both box-filtered over 2 x 2 pixels, the per-block luminance error
+## |candidate - reference| / max(|reference|, AB_ERROR_FLOOR x the mean) - median <= AB_MEDIAN_TOLERANCE over all
+## blocks, and the p99 over the blocks whose rays miss the ground and every other scene geometry <= the calibration's:
+## the reference against itself with the view turned by AB_SHIFT_PX in four directions, the max over them (the same
+## metric; the full image's p99 and T RMS printed). --edge_check (_edge_metrics): the edge pixels' (alpha 0.05-0.95)
+## band width and alpha high-pass energy of the candidate against the reference's: at most EDGE_WIDTH_MAX / at least
+## EDGE_ENERGY_MIN x the reference's (its own change under the turns printed). Images: the two frames and the error
+## (x 10) next to --out. True when done (a failure: exit code 1).
 func _ab_frames(world: World) -> bool:
 	var effect := world.clouds.effect
+	var label := "ab_view_cache" if _args.has("ab_view_cache") else "ab_reference"
 	if _ab_wait < 0:
 		_ab_cache = effect.output.get_layer_data(0)
-		var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") \
-				+ ShaderGlobals.value(&"atmosphere_camera_lo")
-		_ab_anchor_m = camera.distance_to(world.clouds.view_cache_planner.anchor_earth_m)
-		_save_viewport_png(_out_path("_cache"))
-		world.clouds.view_cache = false
-		var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
-		effect.set_quality(1, float(preset["temporal_weight"]), float(preset["clip_gamma"]))
+		if _args.has("ab_view_cache"):
+			var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") \
+					+ ShaderGlobals.value(&"atmosphere_camera_lo")
+			_ab_anchor_m = camera.distance_to(world.clouds.view_cache_planner.anchor_earth_m)
+			_save_viewport_png(_out_path("_cache"))
+		else:
+			_save_viewport_png(_out_path("_volume"))
+		_ab_to_reference(world)
 		_ab_wait = FRAMES_TO_SETTLE
 		return false
 	if _ab_wait > 0:
 		_ab_wait -= 1
 		return false
+	if not world.clouds.light_cache.settled() and _frames < TERRAIN_MAX_FRAMES:
+		return false  # the reference's light cache (its Sun light) complete first
 	if _ab_march != null:
-		# The calibration: the march against itself with the view turned by AB_SHIFT_PX (two point samplings of the
-		# same clouds, as the cache's texel grid is against the pixels) - the bound of the cache's p99 is the MAX over
-		# the four turns (+-x azimuth, +-y elevation; controller ruling: one turn under-samples the march's variance).
-		var shifted := _cloud_compare(effect.output.get_layer_data(0), _ab_march, _ab_ground)
-		print("render_check: ab_view_cache calibration turn %d (%s): the march at divisor 1 against itself turned by "
-				% [_ab_turn, AB_TURNS[_ab_turn]] + "%.1f px, 2 x 2 blocks: median %.3f %%, p99 %.3f %% without scene "
+		# The calibration: the reference against itself with the view turned by AB_SHIFT_PX (two point samplings of
+		# the same clouds) - the bound of the candidate's p99 is the MAX over the four turns (+-x azimuth, +-y
+		# elevation; controller ruling: one turn under-samples the reference's variance).
+		var turned := effect.output.get_layer_data(0)
+		var shifted := _cloud_compare(turned, _ab_march, _ab_ground)
+		print("render_check: %s calibration turn %d (%s): the reference against itself turned by " % [label, _ab_turn,
+				AB_TURNS[_ab_turn]] + "%.1f px, 2 x 2 blocks: median %.3f %%, p99 %.3f %% without scene "
 				% [AB_SHIFT_PX, shifted["median"] * 100.0, shifted["p99_sky"] * 100.0]
 				+ "geometry (all: p99 %.3f %%)" % (shifted["p99_all"] * 100.0))
 		_ab_calibration_p99 = maxf(_ab_calibration_p99, shifted["p99_sky"])
+		if _args.has("edge_check"):
+			var e := _edge_metrics(turned)
+			for key in ["width", "energy"]:
+				_edge_turn_change[key] = maxf(float(_edge_turn_change.get(key, 0.0)),
+						absf(e[key] - _edge_reference[key]) / maxf(_edge_reference[key], 1.0e-9))
 		_ab_turn += 1
 		if _ab_turn < AB_TURNS.size():
 			_ab_turn_view(world)
 			return false
-		var ok: bool = _ab_result["median"] <= AB_MEDIAN_TOLERANCE and _ab_result["p99_sky"] <= _ab_calibration_p99
-		print("render_check: ab_view_cache %s: median %.3f %% (bound %.1f %%), p99 without scene geometry %.3f %% "
-				% ["PASS" if ok else "FAIL", _ab_result["median"] * 100.0, AB_MEDIAN_TOLERANCE * 100.0,
-				_ab_result["p99_sky"] * 100.0] + "(bound: the calibration's max over %d turns %.3f %%)"
-				% [AB_TURNS.size(), _ab_calibration_p99 * 100.0])
-		_check_failed = _check_failed or not ok
+		if _args.has("ab_view_cache") or _args.has("ab_reference"):
+			var ok: bool = _ab_result["median"] <= AB_MEDIAN_TOLERANCE \
+					and _ab_result["p99_sky"] <= _ab_calibration_p99
+			print("render_check: %s %s: median %.3f %% (bound %.1f %%), p99 without scene geometry %.3f %% "
+					% [label, "PASS" if ok else "FAIL", _ab_result["median"] * 100.0, AB_MEDIAN_TOLERANCE * 100.0,
+					_ab_result["p99_sky"] * 100.0] + "(bound: the calibration's max over %d turns %.3f %%)"
+					% [AB_TURNS.size(), _ab_calibration_p99 * 100.0])
+			_check_failed = _check_failed or not ok
+		if _args.has("edge_check"):
+			_edge_verdict()
 		return true
 	var march := effect.output.get_layer_data(0)
-	_save_viewport_png(_out_path("_march"))
+	_save_viewport_png(_out_path("_march" if _args.has("ab_view_cache") else "_reference"))
 	if march.get_size() != _ab_cache.get_size():
-		print("render_check: ab_view_cache FAIL: image sizes differ (%s / %s)" % [_ab_cache.get_size(),
+		print("render_check: %s FAIL: image sizes differ (%s / %s)" % [label, _ab_cache.get_size(),
 				march.get_size()])
 		_check_failed = true
 		return true
 	var ground := _geometry_blocks(effect.debug_centre_data("depth"), march.get_size())
 	if ground.is_empty():
-		print("render_check: ab_view_cache FAIL: the march's scene distances are not the image's size (%s)"
-				% effect.centre_low)
+		print("render_check: %s FAIL: the reference's scene distances are not the image's size (%s)"
+				% [label, effect.centre_low])
 		_check_failed = true
 		return true
 	var r := _cloud_compare(_ab_cache, march, ground)
 	_ab_result = r
-	print("render_check: ab_view_cache: cache vs the march at divisor 1, 2 x 2 blocks: luminance error median %.3f %%, "
-			% (r["median"] * 100.0) + "p99 %.3f %% over %d blocks without scene geometry (all: "
-			% [r["p99_sky"] * 100.0, r["sky_blocks"]] + "p99 %.3f %%), worst %.1f %%, T RMS %.5f (mean luminance %.4f)"
-			% [r["p99_all"] * 100.0, r["worst"] * 100.0, r["t_rms"], r["mean"]]
-			+ "; the camera %.2f m from the anchor" % _ab_anchor_m)
+	print("render_check: %s: %s vs the reference at divisor 1, 2 x 2 blocks: luminance error median %.3f %%, "
+			% [label, "cache" if _args.has("ab_view_cache") else "world volume", r["median"] * 100.0]
+			+ "p99 %.3f %% over %d blocks without scene geometry (all: " % [r["p99_sky"] * 100.0, r["sky_blocks"]]
+			+ "p99 %.3f %%), worst %.1f %%, T RMS %.5f, mean T %.4f / %.4f (mean luminance %.4f)" % [r["p99_all"]
+			* 100.0, r["worst"] * 100.0, r["t_rms"], r["t_mean_a"], r["t_mean_b"], r["mean"]]
+			+ ("; the camera %.2f m from the anchor" % _ab_anchor_m if _args.has("ab_view_cache") else ""))
 	(r["picture"] as Image).save_png(_out_path("_ab_error"))
+	if _args.has("edge_check"):
+		_edge_candidate = _edge_metrics(_ab_cache)
+		_edge_reference = _edge_metrics(march)
 	_ab_march = march
 	_ab_ground = ground
 	_ab_base_angles = Vector2(world.camera.azimuth, world.camera.elevation)
 	_ab_turn_view(world)
 	return false
+
+
+## Switches the frame to the A / B reference (_ab_frames).
+func _ab_to_reference(world: World) -> void:
+	var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
+	world.clouds.view_cache = false
+	world.clouds.effect.set_quality(1, float(preset["temporal_weight"]), float(preset["clip_gamma"]))
+	if _args.has("ab_view_cache"):
+		return
+	world.clouds.world_volume = false
+	ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]) * AB_REFERENCE_STEP_FACTOR)
+	ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]) * AB_REFERENCE_STEP_FACTOR)
 
 
 ## Turns the view by AB_SHIFT_PX eye pixels in the direction of the current calibration turn (from the base view).
@@ -801,6 +930,188 @@ func _ab_turn_view(world: World) -> void:
 	cam.azimuth = _ab_base_angles.x + direction.x * shift_rad
 	cam.elevation = _ab_base_angles.y + direction.y * shift_rad
 	_ab_wait = 2
+
+
+## --edge_check: the edge pixels of a cloud image (alpha = 1 - T in 0.05-0.95, EDGE_ALPHA) - their count per alpha 0.5
+## crossing between horizontal and vertical neighbours (the edge band's mean width, pixels) and the mean |Laplacian| of
+## alpha over them (the edges' high-pass energy).
+static func _edge_metrics(image: Image) -> Dictionary:
+	var w := image.get_width()
+	var h := image.get_height()
+	var alpha := PackedFloat32Array()
+	alpha.resize(w * h)
+	for y in range(h):
+		for x in range(w):
+			alpha[y * w + x] = 1.0 - clampf(image.get_pixel(x, y).a, 0.0, 1.0)
+	var edges := 0
+	var crossings := 0
+	var energy := 0.0
+	for y in range(1, h - 1):
+		for x in range(1, w - 1):
+			var a := alpha[y * w + x]
+			if (a - 0.5) * (alpha[y * w + x + 1] - 0.5) < 0.0:
+				crossings += 1
+			if (a - 0.5) * (alpha[(y + 1) * w + x] - 0.5) < 0.0:
+				crossings += 1
+			if a > EDGE_ALPHA.x and a < EDGE_ALPHA.y:
+				edges += 1
+				energy += absf(4.0 * a - alpha[y * w + x - 1] - alpha[y * w + x + 1] - alpha[(y - 1) * w + x]
+						- alpha[(y + 1) * w + x])
+	return {"width": float(edges) / maxf(float(crossings), 1.0), "energy": energy / maxf(float(edges), 1.0),
+		"edges": edges, "crossings": crossings}
+
+
+## --edge_check's verdict (ruling R2): the candidate's band width <= EDGE_WIDTH_MAX x the reference's and its energy >=
+## EDGE_ENERGY_MIN x the reference's (_ab_frames); the reference's own change under the turns for scale.
+func _edge_verdict() -> void:
+	var width_ratio: float = _edge_candidate["width"] / maxf(_edge_reference["width"], 1.0e-9)
+	var energy_ratio: float = _edge_candidate["energy"] / maxf(_edge_reference["energy"], 1.0e-9)
+	var ok := width_ratio <= EDGE_WIDTH_MAX and energy_ratio >= EDGE_ENERGY_MIN
+	print(("render_check: edge_check %s: width %.4f vs %.4f px: %.3f x (bound <= %.2f x), energy %.4f vs %.4f: %.3f x "
+			+ "(bound >= %.2f x); the reference's own change under the turns: width %.1f %%, energy %.1f %%; edge pixels "
+			+ "%d / %d, crossings %d / %d") % ["PASS" if ok else "FAIL", _edge_candidate["width"],
+			_edge_reference["width"], width_ratio, EDGE_WIDTH_MAX, _edge_candidate["energy"], _edge_reference["energy"],
+			energy_ratio, EDGE_ENERGY_MIN, float(_edge_turn_change.get("width", 0.0)) * 100.0,
+			float(_edge_turn_change.get("energy", 0.0)) * 100.0, _edge_candidate["edges"], _edge_reference["edges"],
+			_edge_candidate["crossings"], _edge_reference["crossings"]])
+	_check_failed = _check_failed or not ok
+
+
+## --front_check=W,S (world volume plan Task 7, C13; header): the volume's run, then the reference path's from the same
+## instant (the clock jumped back, its light cache settled first), each over S s of clock at W x in FRONT_FRAME_S frames
+## (the clock advanced without a jump); per frame the FRONT_BLOCK_PX block means of the cloud image's luminance. The
+## verdict compares the frame-to-frame changes (_front_report). True when done.
+func _front_frames(world: World) -> bool:
+	var parts: PackedStringArray = String(_args["front_check"]).split(",")
+	var warp := float(parts[0])
+	var frames := int(round(float(parts[1]) / FRONT_FRAME_S))
+	if _front_phase < 0:
+		_front_phase = 0
+		_front_frame = 0
+		_front_t0 = world.clock.tdb_s
+	if _front_frame < 0:  # the reference waits for its light cache at the start instant
+		_front_frame = _front_frame + 1 if world.clouds.light_cache.settled() else -FRAMES_TO_SETTLE
+		return false
+	if _front_frame > 0:  # the image of the instant set a frame before
+		var image := world.clouds.effect.output.get_layer_data(0)
+		_front_row_blocks = image.get_width() / FRONT_BLOCK_PX
+		_front_blocks[_front_phase].append(_front_block_means(image))
+		_front_alpha[_front_phase].append(1.0 - _mean_t(image))
+		if _front_phase == 0:
+			_front_sun_deg.append(_sun_elevation_deg(world))
+	if _front_frame >= frames:
+		if _front_phase == 1:
+			return _front_report(warp)
+		_front_phase = 1
+		_front_frame = -FRAMES_TO_SETTLE
+		world.clouds.world_volume = false
+		world.clouds.view_cache = false
+		world.clock.set_time(_front_t0)
+		return false
+	_front_frame += 1
+	world.clock.tdb_s = _front_t0 + warp * FRONT_FRAME_S * _front_frame
+	return false
+
+
+## The block means (FRONT_BLOCK_PX square, luminance of the premultiplied cloud image) of an image.
+static func _front_block_means(image: Image) -> PackedFloat32Array:
+	var blocks := image.get_size() / FRONT_BLOCK_PX
+	var means := PackedFloat32Array()
+	means.resize(blocks.x * blocks.y)
+	for by in range(blocks.y):
+		for bx in range(blocks.x):
+			var sum := 0.0
+			for j in range(0, FRONT_BLOCK_PX, 2):  # every other pixel: the block's mean to 1/4 of its pixels
+				for i in range(0, FRONT_BLOCK_PX, 2):
+					var c := image.get_pixel(bx * FRONT_BLOCK_PX + i, by * FRONT_BLOCK_PX + j)
+					sum += 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+			means[by * blocks.x + bx] = sum / float(FRONT_BLOCK_PX * FRONT_BLOCK_PX / 4)
+	return means
+
+
+## The mean of an image's .a (the cloud image's background transmittance T).
+static func _mean_t(image: Image) -> float:
+	var sum := 0.0
+	var count := 0
+	for y in range(0, image.get_height(), 4):
+		for x in range(0, image.get_width(), 4):
+			sum += image.get_pixel(x, y).a
+			count += 1
+	return sum / maxf(float(count), 1.0)
+
+
+## The Sun's elevation at the eye (deg).
+static func _sun_elevation_deg(world: World) -> float:
+	var eye := world.camera.position_gcrf_m
+	var up := world.camera.site_up_gcrf if world.camera.mode == OrbitCamera.Mode.GROUND else eye.normalized()
+	var to_sun := (world.sun_apparent_from_earth_m - eye).normalized()
+	return rad_to_deg(asin(clampf(to_sun.dot(up), -1.0, 1.0)))
+
+
+## --front_check's verdict: per frame D = (volume change - reference change) per block; the step = the largest |D|
+## difference between horizontally / vertically neighbouring blocks over the frame's mean radiance (the reference's),
+## its max over the frames <= FRONT_TOLERANCE; no "black" frame (FRONT_BLACK_SHARE); the lag = the frame offset that
+## best aligns the two runs' mean changes, as Sun angle. True (done).
+func _front_report(warp: float) -> bool:
+	var vol: Array = _front_blocks[0]
+	var ref: Array = _front_blocks[1]
+	var n := mini(vol.size(), ref.size())
+	var worst := 0.0
+	var worst_frame := -1
+	var black := 0
+	var mean_changes := [PackedFloat32Array(), PackedFloat32Array()]
+	for f in range(1, n):
+		var a0: PackedFloat32Array = vol[f - 1]
+		var a1: PackedFloat32Array = vol[f]
+		var b0: PackedFloat32Array = ref[f - 1]
+		var b1: PackedFloat32Array = ref[f]
+		var mean := 0.0
+		for k in range(b1.size()):
+			mean += absf(b1[k]) / b1.size()
+		var d := PackedFloat32Array()
+		d.resize(a1.size())
+		var mv := 0.0
+		var mr := 0.0
+		for k in range(a1.size()):
+			d[k] = (a1[k] - a0[k]) - (b1[k] - b0[k])
+			mv += (a1[k] - a0[k]) / a1.size()
+			mr += (b1[k] - b0[k]) / a1.size()
+		mean_changes[0].append(mv)
+		mean_changes[1].append(mr)
+		var row := _front_row_blocks
+		for k in range(d.size()):
+			var x := k % row
+			if x + 1 < row and k + 1 < d.size():
+				var s := absf(d[k + 1] - d[k]) / maxf(mean, 1.0e-6)
+				if s > worst:
+					worst = s
+					worst_frame = f
+			if k + row < d.size():
+				var s2 := absf(d[k + row] - d[k]) / maxf(mean, 1.0e-6)
+				if s2 > worst:
+					worst = s2
+					worst_frame = f
+		if float(_front_alpha[0][f]) < FRONT_BLACK_SHARE * float(_front_alpha[1][f]):
+			black += 1
+	# lag: the offset (frames, 0 .. 1 s) minimising the squared difference of the mean-change series
+	var best := 0
+	var best_err := INF
+	for lag in range(0, mini(45, n / 2)):
+		var err := 0.0
+		for f in range(lag, mean_changes[0].size()):
+			err += pow(mean_changes[0][f] - mean_changes[1][f - lag], 2.0)
+		err /= maxf(float(mean_changes[0].size() - lag), 1.0)
+		if err < best_err:
+			best_err = err
+			best = lag
+	var sun_rate := (_front_sun_deg[_front_sun_deg.size() - 1] - _front_sun_deg[0]) \
+			/ maxf(float(_front_sun_deg.size() - 1), 1.0)
+	var ok := worst <= FRONT_TOLERANCE and black == 0
+	print("front_check: max step %.3f %% lag %.4f deg (%s: %d frames at %.0f x, worst at frame %d, %d black frames, "
+			% [worst * 100.0, absf(best * sun_rate), "PASS" if ok else "FAIL", n, warp, worst_frame, black]
+			+ "Sun %.3f -> %.3f deg)" % [_front_sun_deg[0], _front_sun_deg[_front_sun_deg.size() - 1]])
+	_check_failed = _check_failed or not ok
+	return true
 
 
 ## --jump_check (the cache full; controller ruling: no frame without clouds): the reference's cloud coverage - the
@@ -1126,6 +1437,8 @@ static func _cloud_compare(a: Image, b: Image, ground: PackedByteArray) -> Dicti
 	la.resize(n)
 	lb.resize(n)
 	var t_sq := 0.0
+	var t_a := 0.0
+	var t_b := 0.0
 	var mean := 0.0
 	for by in range(blocks.y):
 		for bx in range(blocks.x):
@@ -1139,6 +1452,8 @@ static func _cloud_compare(a: Image, b: Image, ground: PackedByteArray) -> Dicti
 			la[k] = 0.2126 * ca.r + 0.7152 * ca.g + 0.0722 * ca.b
 			lb[k] = 0.2126 * cb.r + 0.7152 * cb.g + 0.0722 * cb.b
 			t_sq += (ca.a - cb.a) * (ca.a - cb.a)
+			t_a += ca.a
+			t_b += cb.a
 			mean += absf(lb[k]) / n
 	var errors := PackedFloat32Array()
 	var sky := PackedFloat32Array()
@@ -1153,6 +1468,7 @@ static func _cloud_compare(a: Image, b: Image, ground: PackedByteArray) -> Dicti
 	errors.sort()
 	sky.sort()
 	return {"median": errors[n / 2], "p99_all": errors[int(0.99 * (n - 1))], "worst": errors[n - 1],
+		"t_mean_a": t_a / n, "t_mean_b": t_b / n,
 		"p99_sky": sky[int(0.99 * (sky.size() - 1))] if sky.size() > 0 else 0.0, "sky_blocks": sky.size(),
 		"t_rms": sqrt(t_sq / n), "mean": mean, "picture": picture}
 
@@ -1230,6 +1546,8 @@ func _repeat_frames(world: World) -> bool:
 			"" if worst == 0 else ", within %s" % box])
 	if worst > 0:
 		_repeat_failed = true
+		if _args.has("out"):  # the first frame beside the saved last one (the difference is diagnosed from both)
+			first.save_png(String(_args["out"]).get_basename() + "_first.png")
 	return true
 
 

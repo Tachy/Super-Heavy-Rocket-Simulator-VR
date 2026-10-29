@@ -70,6 +70,10 @@ const WEATHER_REFRESH_STEP := 0.02
 ## [E] The 1 % front bound: a refresh moves a cell's exp(-tau) by at most this (the GPU's step per refresh).
 const LIGHT_STEP_T := 0.01
 const MOON_SUN_ELEVATION_RAD := deg_to_rad(-6.0)
+## [E] The march's weight of a level's tau_moon (lookup "moon_weight", Task 7) follows the level's Moon flag over this
+## time: the light's own replacement time (spec C: provisional light replaced within 1 s) - the Moon's light comes in
+## and goes as a lag, never as a front (rate-limited jobs leave tau_moon stale once the Moon is off: gated to 0).
+const MOON_RAMP_S := 1.0
 
 ## [E] Light-refresh tile (cells per axis): ~0.03 ms of light at the calibrated rate; 405 tiles at most per level.
 const TILE_CELLS := 32
@@ -217,6 +221,7 @@ class _Level extends RefCounted:
 	var lit_blend := 0.0
 	var lit_moon_on := false
 	var moon_on := false
+	var moon_weight := 0.0  ## the march's weight of tau_moon (MOON_RAMP_S toward moon_on)
 	## M6 (Task 6 review round 1): the level turning drawn counts up `light_epoch`; a finer level whose `lit_up_epoch`
 	## (the coarser levels' epochs summed at its last relight: CloudWorldVolumeLight.coarser_epoch) differs relights once
 	## (its rays' part beyond its own segment reads the drawn level's density now).
@@ -564,6 +569,8 @@ func plan(camera_earth_m: Vector3, sun_dir_earth: Vector3, moon_dir_earth: Vecto
 	for lv: _Level in order:
 		_advance_window(lv)
 	_light.run(self, order, sun_dir_earth, moon_dir_earth, blend, cloud_top_m, delta_s, out)
+	for lv: _Level in order:
+		lv.moon_weight = move_toward(lv.moon_weight, 1.0 if lv.moon_on else 0.0, maxf(delta_s, 0.0) / MOON_RAMP_S)
 	_overrun = false  # the halving holds for one plan (the next measurement decides again)
 	var reframe := _reframe_end(delta_s)
 	if _spike and complete():
@@ -1033,7 +1040,7 @@ func _lookup() -> Dictionary:
 	var levels: Array = []
 	for lv: _Level in _levels:
 		levels.append({"level": lv.k, "origin": lv.origin, "storage": lv.storage, "active": lv.active,
-				"ready": lv.ready, "shown": lv.drawn,
+				"ready": lv.ready, "shown": lv.drawn, "moon_weight": lv.moon_weight,
 				"frame_origin_earth_m": lv.layout.origin_earth_m, "vertical_fade": lv.k < L.WINDOWED_LEVELS,
 				"clamped_bottom": lv.origin.z == 0})
 	var lookup := {"levels": levels, "slot_ready": _slot_ready.duplicate(), "slot_ids": _slot_ids.duplicate()}

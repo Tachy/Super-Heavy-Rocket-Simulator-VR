@@ -20,6 +20,10 @@
 # repeat_identical compares the whole frame, whose sea differs between frames at the Cape without any cloud change): the
 # clouds' shadows on the air (static clouds Task 9b) integrate their loss to the scene, so the sea's frame-to-frame
 # depth changes move it there; the rows from HORIZON_IDENTITY_MARGIN above the horizon down are left out.
+# World volume (world volume plan Task 7; STARSIM_WORLD_VOLUME=1, the flag CloudLayer.world_volume): "ours" is the
+# volume's march (full resolution per eye), the reference the reference path - world_volume and view_cache off, divisor
+# 1, REFERENCE_STEP_FACTOR x steps (ruling C23) - and the grain is measured at a spacing of one pixel; the settle waits
+# for the volume's fill and light.
 # Needs a GPU (no --headless): godot --xr-mode off --path game --script res://tests/cloud_grain_check.gd
 # [-- --only=cape] (one view) [--save=<dir>] (the cloud images as EXR) [--quality=desktop] (the desktop preset instead
 # of the VR one, Task 10). Exit code 1 on failure.
@@ -115,7 +119,8 @@ func _run() -> void:
 	_world.atmosphere.eye_adaptation_enabled = false
 	_world.set_focus(World.FOCUS_EARTH)
 	var preset: Dictionary = CloudLayer.PRESETS[_quality]
-	var divisor := int(preset["divisor"])
+	var volume: bool = _world.clouds.world_volume
+	var divisor := 1 if volume else int(preset["divisor"])
 	print("cloud_grain_check: %s, %s preset (steps %d / %d, divisor %d), reference x%d" % [file,
 			"desktop" if _quality == CloudLayer.Quality.DESKTOP else "VR", preset["steps"],
 			preset["max_steps"], divisor, REFERENCE_STEP_FACTOR])
@@ -147,12 +152,20 @@ func _run() -> void:
 			var copy := first.duplicate() as Image
 			copy.convert(Image.FORMAT_RGBAF)
 			copy.save_exr(_save_dir.path_join("grain_%s.exr" % name))
+		if volume:  # the reference path (header)
+			_world.clouds.world_volume = false
+			_world.clouds.view_cache = false
+			_world.clouds.effect.set_quality(1, float(preset["temporal_weight"]), float(preset["clip_gamma"]))
 		ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]) * REFERENCE_STEP_FACTOR)
 		ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]) * REFERENCE_STEP_FACTOR)
 		var reference_settled: bool = await _settle()
 		var reference_image := _world.clouds.effect.output.get_layer_data(0)
 		ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]))
 		ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]))
+		if volume:
+			_world.clouds.quality = _quality  # the preset's march again
+			_world.clouds.view_cache = true
+			_world.clouds.world_volume = true
 		if not reference_settled or first == null or reference_image == null:
 			_fail_and_quit("%s: the x%d reference did not settle" % [name, REFERENCE_STEP_FACTOR])
 			return
@@ -255,11 +268,23 @@ func _settle() -> bool:
 		var loading: int = _world.earth_terrain.stats["nodes_loading"]
 		var clouds: Dictionary = _world.clouds.state()
 		var ready: bool = loading == 0 and not _world.atmosphere.loading and _world.clouds.noise_ready \
-				and not clouds["uploading"] and clouds["tracking"] and _world.clouds.light_cache.settled()
+				and not clouds["uploading"] and clouds["tracking"] and _world.clouds.light_cache.settled() \
+				and (not _world.clouds.world_volume or _volume_settled())
 		settled = settled + 1 if ready else 0
 		if settled >= FRAMES_TO_SETTLE:
 			return true
 	return false
+
+
+## The world volume filled and lit (its schedule complete, no level's light stale) and its march drawing the frame.
+func _volume_settled() -> bool:
+	var schedule := _world.clouds.world_volume_schedule
+	if not schedule.complete() or not _world.clouds.effect.volume_shown:
+		return false
+	for k in CloudWorldVolumeLayout.LEVELS:
+		if schedule.light_stale(k):
+			return false
+	return true
 
 
 func _check(label: String, ok: bool, detail: String) -> void:

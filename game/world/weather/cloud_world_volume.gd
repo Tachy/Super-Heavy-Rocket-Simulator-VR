@@ -43,7 +43,9 @@ const PROBE_GROUP := 64
 ## The lookup's set 1 bindings (cloud_volume.gdshaderinc CLOUD_VOLUME_BLOCK_BINDING and the texture groups after it).
 const BLOCK_BINDING := 40
 const FRAME_VEC4S := 9
-const VOLUME_BLOCK_SIZE := (2 * FRAME_VEC4S + TEXTURES + 1) * 16
+## The levels' Moon weights (cloud_volume.gdshaderinc moon_weight: 8 floats in two vec4).
+const MOON_VEC4S := 2
+const VOLUME_BLOCK_SIZE := (2 * FRAME_VEC4S + TEXTURES + 1 + MOON_VEC4S) * 16
 const JOB_BLOCK_SIZE := 3 * 16
 const OCCUPANCY_BLOCK_SIZE := 2 * 16
 const PROBE_BLOCK_SIZE := 16
@@ -95,6 +97,7 @@ var _pipelines := {}
 var _levels: Array[Dictionary] = []  ## per texture index: {density, light, max, distance} RIDs ({} = none)
 var _scratch: Array[RID] = []  ## the distance passes' two R8 volumes (shared by the levels)
 var _volume_buffer := RID()
+var _march_buffer := RID()  ## the march's CloudVolume block (Task 7: the adopted state at the frame's camera)
 var _job_buffers: Array[RID] = []
 var _occupancy_buffers: Array[RID] = []
 var _probe_buffer := RID()
@@ -285,6 +288,7 @@ func ensure(rd: RenderingDevice) -> bool:
 		_shaders[name] = shader
 		_pipelines[name] = rd.compute_pipeline_create(shader)
 	_volume_buffer = rd.uniform_buffer_create(VOLUME_BLOCK_SIZE)
+	_march_buffer = rd.uniform_buffer_create(VOLUME_BLOCK_SIZE)
 	_probe_buffer = rd.uniform_buffer_create(PROBE_BLOCK_SIZE)
 	for linear in [true, false]:
 		var state := RDSamplerState.new()
@@ -794,6 +798,11 @@ func _volume_bytes(lookup: Dictionary, frames: Array[Vector3], camera: Vector3) 
 	bytes.append_array(ints.to_byte_array())
 	bytes.append_array(PackedFloat32Array([float(spare.get("level", -1)), float(spare.get("fade", 0.0)), 0.0, 0.0])
 			.to_byte_array())
+	var moon := PackedFloat32Array()
+	moon.resize(4 * MOON_VEC4S)
+	for lv: Dictionary in lookup["levels"]:
+		moon[int(lv["level"])] = float(lv.get("moon_weight", 0.0))
+	bytes.append_array(moon.to_byte_array())
 	return bytes
 
 
@@ -843,6 +852,34 @@ static func frame_floats(layout: CloudWorldVolumeLayout, camera: Vector3) -> Pac
 static func _f32(v: Vector3) -> Vector3:
 	var f := PackedFloat32Array([v.x, v.y, v.z])
 	return Vector3(f[0], f[1], f[2])
+
+
+## The march's set 1 (Task 7; render thread, outside a compute list): the CloudVolume block of the adopted state at
+## this frame's camera (camera_earth_m: float64 Earth-local render axes, the march's own) and the lookup textures
+## (density, light, max mip, distance field); [] while no level is shown (the frame falls back to today's march: the
+## first cold-start frames, T5 c1).
+func march_uniforms(camera_earth_m: Vector3) -> Array[RDUniform]:
+	var lookup := adopted()
+	if _rd == null or _shaders.is_empty() or not shows_any(lookup):
+		return []
+	_rd.buffer_update(_march_buffer, 0, VOLUME_BLOCK_SIZE, _volume_bytes(lookup, _frames_of(lookup), camera_earth_m))
+	var light_of: Array[RID] = []
+	for i in range(TEXTURES):
+		var level: Dictionary = _levels[i] if not _levels[i].is_empty() else _levels[0]
+		light_of.append(level["light"])
+	var set1 := _lookup_uniforms(light_of)
+	set1[0] = _ubo(BLOCK_BINDING, _march_buffer)
+	return set1
+
+
+## Whether a lookup state shows any level to the march (active and shown).
+static func shows_any(lookup: Dictionary) -> bool:
+	if lookup.is_empty():
+		return false
+	for lv: Dictionary in lookup["levels"]:
+		if bool(lv["active"]) and bool(lv.get("shown", lv["ready"])):
+			return true
+	return false
 
 
 ## A bake job's CloudVolumeJob block.
@@ -985,8 +1022,8 @@ func free_resources(rd: RenderingDevice) -> void:
 		for rid: RID in level.values():
 			rd.free_rid(rid)
 	_levels.clear()
-	var rids: Array = _scratch + _job_buffers + _occupancy_buffers + _job_store.values() + [_volume_buffer, _probe_buffer,
-			_linear, _nearest]
+	var rids: Array = _scratch + _job_buffers + _occupancy_buffers + _job_store.values() + [_volume_buffer, _march_buffer,
+			_probe_buffer, _linear, _nearest]
 	if _light_counts.is_valid():
 		rd.free_rid(_light_counts)
 		_light_counts = RID()

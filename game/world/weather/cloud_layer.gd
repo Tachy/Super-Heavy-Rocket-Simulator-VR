@@ -211,14 +211,57 @@ var view_cache := true:
 		ShaderGlobals.set_value(&"cloud_view_cache", value)
 ## Fidelity flag (shader global cloud_world_volume; world-volume plan, default false until Task 13): true keeps the
 ## cloud world volume (CloudWorldVolume: the clipmap of baked density, its occupancy and light) planned here every
-## frame and baked by the effect before the march; false: today's per-sample march alone, the reference path. Task 5:
-## the upkeep only, no march reads the volume yet. Default: the environment STARSIM_WORLD_VOLUME=1 or the user argument
+## frame and baked by the effect before the march, which then marches it (Task 7: CLOUD_VOLUME_FULL, one ray per eye
+## pixel); false: today's per-sample march alone, the reference path. Default: the environment STARSIM_WORLD_VOLUME=1 or the user argument
 ## --world_volume (every GPU check takes the environment).
 var world_volume := OS.get_environment("STARSIM_WORLD_VOLUME") == "1" \
 		or OS.get_cmdline_user_args().has("--world_volume"):
 	set(value):
 		world_volume = value
 		ShaderGlobals.set_value(&"cloud_world_volume", value)
+		_apply_march_method()
+## Fidelity flag (shader global cloud_light_entry_samples; world-volume plan Task 7, spec C): the surface correction's
+## Sun samples - at a light node of the march (half a cell apart along the ray) whose level's cell is coarser than the
+## pixel footprint, the Sun's optical depth through the per-sample density (bake + sub-cell field) over the level's
+## first two cells, then the light volume's; 0: the light volume alone (cloud_volume_march.gdshaderinc).
+var light_entry_samples := 4:
+	set(value):
+		light_entry_samples = value
+		ShaderGlobals.set_value(&"cloud_light_entry_samples", value)
+## Fidelity flag (shader global cloud_edge_curl; Task 7, spec D, Nubis): the curl distortion of the sub-cell detail
+## lookup [E: amplitude 1 x the detail cell size - the level-0 detail's middle cell, band-limited by its weight];
+## 0: without. The default is the user's call from the side-by-side images.
+var edge_curl := 1.0:
+	set(value):
+		edge_curl = value
+		ShaderGlobals.set_value(&"cloud_edge_curl", value)
+## The hybrid march prototype (2026-10-29; the user tests it live in VR): the march method (CloudEffect.MarchMethod -
+## today's march, the hybrid with the volume's light and skipping, the same without skipping, the hybrid with today's
+## light; key F7 cycles them, user argument --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light) and the march's resolution divisor (0: the preset's; key F8 cycles
+## DIVISORS, user argument --cloud_divisor=<x>; spatial only). Choosing a method switches the view cache off (the
+## user's goal: no view cache); the world volume's upkeep runs from the first hybrid frame on (volume_needed: the
+## settled upkeep is ~0.003 ms, and a restart would refill the whole volume).
+const DIVISORS: Array[float] = [1.0, 1.5, 2.0, 3.0]
+const METHOD_ARGUMENTS := {"old": CloudEffect.MarchMethod.OLD, "hybrid": CloudEffect.MarchMethod.HYBRID,
+	"hybrid_no_skip": CloudEffect.MarchMethod.HYBRID_NO_SKIP,
+	"hybrid_old_light": CloudEffect.MarchMethod.HYBRID_OLD_LIGHT}
+const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March",
+	CloudEffect.MarchMethod.HYBRID: "Hybrid, Volumenlicht + Überspringen",
+	CloudEffect.MarchMethod.HYBRID_NO_SKIP: "Hybrid, Volumenlicht",
+	CloudEffect.MarchMethod.HYBRID_OLD_LIGHT: "Hybrid, altes Licht + Überspringen"}
+const METHOD_KEY := KEY_F7
+const DIVISOR_KEY := KEY_F8
+var march_method := CloudEffect.MarchMethod.OLD:
+	set(value):
+		march_method = value
+		view_cache = false
+		_volume_used = _volume_used or value != CloudEffect.MarchMethod.OLD
+		_apply_march_method()
+var divisor_override := 0.0:
+	set(value):
+		divisor_override = value
+		_apply_quality()
+var _volume_used := false
 ## The world volume's layout and schedule (main thread; the GPU side is effect.world_volume).
 var world_volume_layout := CloudWorldVolumeLayout.new()
 var world_volume_schedule := CloudWorldVolumeSchedule.new(world_volume_layout)
@@ -325,6 +368,9 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_air_shadow", air_shadow)
 	ShaderGlobals.set_value(&"cloud_view_cache", view_cache)
 	ShaderGlobals.set_value(&"cloud_world_volume", world_volume)
+	ShaderGlobals.set_value(&"cloud_light_entry_samples", light_entry_samples)
+	ShaderGlobals.set_value(&"cloud_edge_curl", edge_curl)
+	_apply_cloud_arguments(OS.get_cmdline_user_args())
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,
@@ -608,7 +654,7 @@ func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
 					acc[3] + float(e["column_ms"])]
 	for c: Array in volume.take_light_feedback():  # rate-limited light jobs that clamped cells (Task 6)
 		world_volume_schedule.light_feedback(c[0], c[1], {"from": c[2], "to": c[3]})
-	if not world_volume:
+	if not volume_needed():
 		return
 	_volume_held_s += maxf(delta_s, 0.0)
 	if volume.waiting():
@@ -645,7 +691,7 @@ func world_volume_stats() -> Dictionary:
 ## With the world volume running, the weight moves onto a slot only once the volume's adopted state holds the slot's
 ## snapshot in its channel pair (a replaced snapshot is baked while it has no weight; Review Focus 1); else at once.
 func _volume_gate(w1: float) -> float:
-	if not world_volume or not effect.world_volume.running():
+	if not volume_needed() or not effect.world_volume.running():
 		return w1
 	var onto := 1 if w1 > _w1 else 0
 	if is_equal_approx(w1, _w1) or effect.world_volume.slot_holds(onto, _slots[onto]["id"]):
@@ -963,6 +1009,19 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_noise_shape_mips", _noise_textures[5])
 	ShaderGlobals.set_value(&"cloud_prefilter_threshold", _noise_textures[6])
 	ShaderGlobals.set_value(&"cloud_prefilter_edge_mean", _noise_textures[7])
+	# The world volume's curl field (Task 7, cloud_noise.hpp): RGB8, the edge_curl distortion of the sub-cell detail.
+	_noise_textures.append(_noise_texture(noise["curl"], int(noise["curl_size"]), Image.FORMAT_RGB8))
+	ShaderGlobals.set_value(&"cloud_noise_curl", _noise_textures[8])
+	# The sub-cell field's statistics (Task 7 ruling R1, cloud_noise.hpp): the Gaussianising table and the moments.
+	_noise_textures.append(_table(noise["detail_gaussian"], int(noise["sub_cell_rows"])))
+	ShaderGlobals.set_value(&"cloud_detail_gaussian", _noise_textures[9])
+	ShaderGlobals.set_value(&"cloud_detail_level_mean", noise["detail_level_mean"])
+	ShaderGlobals.set_value(&"cloud_detail_level_variance", noise["detail_level_variance"])
+	var residual: PackedFloat32Array = noise["shape_residual_variance"]
+	ShaderGlobals.set_value(&"cloud_shape_residual_variance_lo", Vector4(residual[0], residual[1], residual[2],
+			residual[3]))
+	ShaderGlobals.set_value(&"cloud_shape_residual_variance_hi", Vector4(residual[4], residual[5], residual[6],
+			residual[7]))
 	ShaderGlobals.set_value(&"cloud_edge_width", Vector2(noise["edge_width_min_value"], noise["edge_width_max_value"]))
 	ShaderGlobals.set_value(&"cloud_detail_mean", float(noise["detail_mean"]))
 	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
@@ -1033,14 +1092,13 @@ static func _mip_texture(levels: Array, size: int) -> ImageTexture3D:
 	return texture
 
 
-static func _noise_texture(texels: PackedByteArray, size: int) -> ImageTexture3D:
+static func _noise_texture(texels: PackedByteArray, size: int, format := Image.FORMAT_RGBA8) -> ImageTexture3D:
 	var images: Array[Image] = []
-	var slice := size * size * 4
+	var slice := size * size * (3 if format == Image.FORMAT_RGB8 else 4)
 	for z in range(size):
-		images.append(Image.create_from_data(size, size, false, Image.FORMAT_RGBA8, texels.slice(z * slice,
-				(z + 1) * slice)))
+		images.append(Image.create_from_data(size, size, false, format, texels.slice(z * slice, (z + 1) * slice)))
 	var texture := ImageTexture3D.new()
-	texture.create(Image.FORMAT_RGBA8, size, size, size, false, images)
+	texture.create(format, size, size, size, false, images)
 	return texture
 
 
@@ -1064,7 +1122,65 @@ func _apply_quality() -> void:
 	ShaderGlobals.set_value(&"cloud_detail_levels", int(preset["detail_levels"]))
 	light_cache.march_first_m = first_m
 	light_cache.march_near_m = near_m
-	effect.set_quality(int(preset["divisor"]), float(preset["temporal_weight"]), float(preset["clip_gamma"]))
+	var divisor := divisor_override if divisor_override > 0.0 else float(preset["divisor"])
+	effect.set_quality(divisor, float(preset["temporal_weight"]), float(preset["clip_gamma"]))
+
+
+## The march's resolution divisor in use (divisor_override or the preset's).
+func divisor() -> float:
+	return divisor_override if divisor_override > 0.0 else float(PRESETS[quality]["divisor"])
+
+
+## True while the world volume's upkeep runs: the T7 flag, or a hybrid method chosen once (see march_method).
+func volume_needed() -> bool:
+	return world_volume or _volume_used
+
+
+func _apply_march_method() -> void:
+	effect.set_march_method(march_method, volume_needed())
+
+
+## --cloud_method=old|hybrid|hybrid_old_light and --cloud_divisor=<x> (the live toggles' start values).
+func _apply_cloud_arguments(args: PackedStringArray) -> void:
+	for arg in args:
+		if arg.begins_with("--cloud_method="):
+			var name := arg.trim_prefix("--cloud_method=")
+			if METHOD_ARGUMENTS.has(name):
+				march_method = METHOD_ARGUMENTS[name]
+			else:
+				push_error("CloudLayer: unknown --cloud_method=%s (%s)" % [name, ", ".join(METHOD_ARGUMENTS.keys())])
+		elif arg.begins_with("--cloud_divisor="):
+			divisor_override = maxf(float(arg.trim_prefix("--cloud_divisor=")), 1.0)
+
+
+## The live toggles (desktop and VR: the overlay passes unhandled keys on): F7 the next method, F8 the next divisor.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == METHOD_KEY:
+		march_method = ((int(march_method) + 1) % METHOD_LABELS.size()) as CloudEffect.MarchMethod
+		print("CloudLayer: march method %s" % METHOD_LABELS[march_method])
+		get_viewport().set_input_as_handled()
+	elif key.keycode == DIVISOR_KEY:
+		var next := DIVISORS[0]
+		for d in DIVISORS:
+			if d > divisor() + 1.0e-3:
+				next = d
+				break
+		divisor_override = next
+		print("CloudLayer: march divisor %s" % next)
+		get_viewport().set_input_as_handled()
+
+
+## The HUD's line of the live toggles (German UI): the method (and whether the hybrid draws yet), the divisor, the keys.
+func status_line() -> String:
+	var method: String = METHOD_LABELS[march_method]
+	if march_method != CloudEffect.MarchMethod.OLD and not effect.hybrid_shown:
+		method += " (Volumen lädt)"
+	var view := "" if march_method != CloudEffect.MarchMethod.OLD or not view_cache else ", Sichtcache"
+	return "Wolken: %s%s, Auflösung 1/%s  [F7 Verfahren, F8 Auflösung]" % [method, view,
+			String.num(divisor(), 1).trim_suffix(".0")]
 
 
 ## Ratio r of the light march's geometric intervals: first_m (r^n - 1) / (r - 1) = near_m (core

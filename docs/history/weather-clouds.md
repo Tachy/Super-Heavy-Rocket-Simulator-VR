@@ -1198,3 +1198,35 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   columns and the probe after `LIGHT_PROBE_FRAMES` plans (weather-clouds.md, cost model). The re-review also named a
   level-0 column costing ~1.25 ms at ~1e5 cells/ms; that mixed up cells and columns (a column is ~124 cells, ~1.2 us
   at that rate) - the live starvation path is the latency, not the column.
+
+## World volume text before Task 7 (superseded 2026-10-29: the march reads the volume)
+
+```
+  `STARSIM_WORLD_VOLUME=1` or `--world_volume`; Task 5 runs the upkeep alone, no march reads the volume yet):
+```
+```
+  `cloud_volume_light` with per level `cloud_volume_light_column_<k>` / `cloud_volume_light_cells_<k>`; no march reads
+  the light before Task 7):
+```
+```
+  - Deferred to Task 7 (ruling C12: no march reads the light yet): the broken cf 0.4 views' radiance vs the converged
+    per-sample march, radiance 0 in Earth's shadow, the cold start's first frame with clouds, `render_check
+    --front_check` (C13: the front metric on the volume's change less the reference's); the Moon's ramp-in (its
+    channel is gated by the level's Moon flag, which switches with the jobs that write it).
+```
+
+## World volume march, Task 7 round 1 (2026-10-29): superseded approaches and numbers
+
+- Sub-cell field, spreading form (superseded by the threshold form, controller ruling R1): density = sigma_c
+  ramp(ramp^-1(c) + 4 c (1 - c) v / w), v = w_s (s_f - s_cell) + P_L + t(0.5, 0) - t(0.5, L) (the detail made
+  zero-mean by the tables' threshold shift at the median fraction). It spread the cell's water as haze over the cell:
+  V3 alpha +0.04 against the reference (mean T 0.487 / 0.527), edges 3 x wider (2.37 vs 0.79 px). Before it, an offset
+  w ramp^-1(c) with the tables' shift at a fraction estimated from c eroded cells next to solid ones into dark blocks.
+- The air shadow's loss was composited only on rays with cloud: V6_backlit's clear sky lost the loss the reference has
+  (clouds in front of the Sun shade the air along clear rays) - A/B median 34 % (round 0) / 19.9 %; V3 9.4 %, V1 0.5 %.
+  With the loss on every ray: 0.39 / 0.88 / 0.00 %.
+- Surface correction on every step (round 0: ~9.6 light fetches per occupied step, ~40 % of the 95.6 ms V1 pass), then
+  on the ray's first 4 light evaluations only (ruling R3's text): section 19's slab at Sun 20 deg worst 11.8 % (bound
+  5 %); replaced by the correction at the light nodes (one per half cell): 3.3 %.
+- `CloudShadowEffect.ran_msec` / a 250 ms validity window: a ~100 ms check frame (the full-resolution march) outlasted
+  it; the shadow maps switched off and on between frames of an unchanged scene (repeat_identical DIFFER, 1.1 M pixels).

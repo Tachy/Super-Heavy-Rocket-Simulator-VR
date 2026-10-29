@@ -18,10 +18,10 @@ const SIZE_HYSTERESIS := 0.01
 
 ## {projection, low, pixel_angle} of the centre view for these eye projections (clip <- head space, the renderer's
 ## convention: reversed Z in [0, 1], 1 = near, y down), each eye's full-resolution size `view_size` and the cloud pass's
-## resolution divisor. `low`: the centre image size at the eyes' pixel density / divisor; `pixel_angle`: its pixel's
-## angle (the march's band limit), as CloudEffect computes it for a view.
-static func build(view_projections: Array[Projection], view_size: Vector2i, divisor: int) -> Dictionary:
-	divisor = maxi(divisor, 1)
+## resolution divisor (fractional allowed: 1.5). `low`: the centre image size at the eyes' pixel density / divisor;
+## `pixel_angle`: its pixel's angle (the march's band limit), as CloudEffect computes it for a view.
+static func build(view_projections: Array[Projection], view_size: Vector2i, divisor: float) -> Dictionary:
+	divisor = maxf(divisor, 1.0)
 	if view_projections.size() == 1:
 		var only := view_projections[0]
 		var low := Vector2i(ceili(float(view_size.x) / divisor), ceili(float(view_size.y) / divisor))

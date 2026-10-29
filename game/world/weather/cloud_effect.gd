@@ -22,6 +22,33 @@ const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clo
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
 		"res://shaders/cloud_light.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
+## The world volume's march (world-volume plan Task 7; CLOUD_MARCH + CLOUD_VOLUME_FULL + CLOUD_VOLUME_LOOKUP): the
+## march's files (one set 0 with the march), the volume's lookups and its march.
+const VOLUME_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
+		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
+		"res://shaders/cloud_light.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc",
+		"res://shaders/cloud_volume.gdshaderinc", "res://shaders/cloud_volume_march.gdshaderinc"]
+## The hybrid march (live VR prototype 2026-10-29; CLOUD_MARCH + CLOUD_HYBRID + CLOUD_VOLUME_LOOKUP): the march's files
+## with the volume's lookups and cloud_hybrid.gdshaderinc before cloud_pass.gdshaderinc (no new globals: set 0 is the
+## march's).
+const HYBRID_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
+		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
+		"res://shaders/cloud_light.gdshaderinc", "res://shaders/cloud_volume.gdshaderinc",
+		"res://shaders/cloud_hybrid.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
+## The cloud march's method (CloudLayer.march_method, live toggle F7): today's march; the hybrid with the volume's light
+## and its empty-space skipping; the same without the skipping (measured faster on the desktop: the skip's data-dependent
+## steps cost more than the fetches they save); the hybrid with today's light and the skipping (the comparison).
+enum MarchMethod { OLD, HYBRID, HYBRID_NO_SKIP, HYBRID_OLD_LIGHT }
+## The hybrid kernels' family names per method (the variants append _centre, _prefilter, _refine as the march's) and
+## their defines.
+const HYBRID_FAMILIES := {MarchMethod.HYBRID: "hybridv", MarchMethod.HYBRID_NO_SKIP: "hybridn",
+	MarchMethod.HYBRID_OLD_LIGHT: "hybrido"}
+const HYBRID_DEFINES := {"hybridv": ["CLOUD_HYBRID_VOLUME_LIGHT", "CLOUD_HYBRID_SKIP"],
+	"hybridn": ["CLOUD_HYBRID_VOLUME_LIGHT"], "hybrido": ["CLOUD_HYBRID_SKIP"]}
+## The debug outputs the volume's march draws itself (cloud_volume_march.gdshaderinc); the others are today's march.
+const VOLUME_DEBUG_OUTPUTS := [0, 1, 2, 4, 7, 12]
+## The volume march's GPU timestamp (one dispatch per eye).
+const VOLUME_FULL_STAMP := "cloud_volume_full"
 ## The cloud view cache's fill (cloud view cache Task 3): the march's files and its kernel (CLOUD_CACHE_FILL).
 const CACHE_FILL_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
@@ -92,6 +119,12 @@ static var capture_timestamps := false
 ## Checks only (cloud_check.gd): >= 0 pins the frame index of the march's jitter (the same noise in two renders that
 ## differ in one setting); -1 in the game.
 static var pinned_frame := -1
+## Checks only (render_check --world_volume_unsplit; world volume plan Task 8 gives the volume tiers): true forces the
+## volume's full-resolution march per eye (CLOUD_VOLUME_FULL, the tiers' reference). Task 7 has no other path.
+static var volume_unsplit := false
+## Checks only (render_check's settle with the world volume on): true keeps today's march drawing the frame while the
+## volume's upkeep runs - the terrain and the fill settle at the cheap march's frame rate; false in the game.
+static var volume_march_hold := false
 ## Diagnostics (world volume plan Task 0; set before the first CloudEffect is created: the kernels are compiled then):
 ## counters adds the march's counters (clouds.gdshaderinc CLOUD_COUNTERS: density / light fetches, occupied / empty
 ## steps per march pixel; debug_centre_data("counters"), render_check --counters). ablate lists ABLATIONS to switch
@@ -102,9 +135,10 @@ static var ablate := _ablate_from_environment()
 ## The ablation names (see clouds.gdshaderinc and cloud_pass.gdshaderinc for what each removes): the fetch classes
 ## density (the view samples' shape, detail and tables), light (a sample's light-source evaluation) and air (the
 ## atmosphere tables at the clouds); field (the field's secondary fetches), shape and detail (everywhere, the light
-## march included), subsamples (one sample per step), outline (the outline pass), air_shadow, far_tier.
+## march included), subsamples (one sample per step), outline (the outline pass), air_shadow, far_tier, hybrid_skip
+## (the hybrid march without its empty-space skipping).
 const ABLATIONS := ["density", "light", "air", "field", "shape", "detail", "subsamples", "outline", "air_shadow",
-		"far_tier"]
+		"far_tier", "hybrid_skip"]
 ## Set 1 binding of the counters image (cloud_pass.gdshaderinc out_counters).
 const COUNTERS_BINDING := 24
 ## The light cache (CloudLayer's; filled on the render thread before the march, cloud_light_cache.gd); null: none.
@@ -117,8 +151,14 @@ var view_cache: CloudViewCache
 ## World volume plan Task 2, spike S (throw-away, removed in Task 13): the far tier's spike (CloudSpike.mode).
 var spike: CloudSpike
 ## The cloud world volume (world-volume plan Task 5; CloudLayer plans it, created there): its batch runs before the
-## march while the flag cloud_world_volume is on (the upkeep alone: no march reads it yet).
+## march while the flag cloud_world_volume is on; once a level is shown the frame marches it (Task 7:
+## CLOUD_VOLUME_FULL per eye at full resolution, no temporal pass, no upsample), until then today's march.
 var world_volume: CloudWorldVolume
+## Render thread, the last frame (diagnostics, checks): the world volume's march drew it; frames it drew so far.
+var volume_shown := false
+var volume_frames := 0
+## The size of the image debug_centre_data("counters") returns (the centre image's, or the eye's after the volume).
+var counters_size := Vector2i.ZERO
 ## Fills run so far (checks: a request was served).
 var view_cache_fills := 0
 ## Render thread, the last frame (diagnostics): the view cache was shown; the tiles its batch filled.
@@ -146,6 +186,7 @@ var _eyes_buffer := RID()  ## CloudEyes (the centre march's depth lookup in the 
 var _centre_buffer := RID()  ## CloudCentre (the eyes' upsample into the centre)
 var _size := Vector2i.ZERO
 var _view_count := 0
+var _volume_counters := RID()  ## the volume march's counters of eye 0 (CloudEffect.counters), full resolution
 var _output_rd := RID()  ## the result the pass writes
 var _output_mutex := Mutex.new()  ## guards the three below (render thread / main thread)
 var _pending_output := RID()  ## a re-created result not yet shown
@@ -175,10 +216,17 @@ var _cache_timestamps_frame := -1
 ## near shell's radius (CloudLayer).
 var _nearest_cloud_m := INF
 var _near_radius_m := 0.0
-## Render-thread copies of the quality (set_quality).
-var _divisor := 2
+## Render-thread copies of the quality (set_quality; the divisor may be fractional: 1.5).
+var _divisor := 2.0
 var _temporal_weight := 0.1
 var _clip_gamma := 0.0
+## Render-thread copies of the march method (set_march_method) and whether the world volume's upkeep runs (the T7 flag
+## or a hybrid method); the hybrid kernels that failed to compile.
+var _march_method := MarchMethod.OLD
+var _volume_upkeep := false
+var _hybrid_failed := {}
+## Render thread, the last frame (diagnostics, checks): the hybrid march drew it.
+var hybrid_shown := false
 
 
 func _init() -> void:
@@ -189,8 +237,15 @@ func _init() -> void:
 
 ## Main thread: the quality preset's resolution divisor, temporal weight floor and the history's clip (0: the
 ## neighbourhood's min / max; > 0: its mean +- that many standard deviations), applied on the render thread.
-func set_quality(divisor: int, temporal_weight: float, clip_gamma := 0.0) -> void:
+func set_quality(divisor: float, temporal_weight: float, clip_gamma := 0.0) -> void:
 	RenderingServer.call_on_render_thread(_set_quality.bind(divisor, temporal_weight, clip_gamma))
+
+
+## Main thread: the march method (MarchMethod) and whether the world volume's upkeep runs, applied on the render thread.
+func set_march_method(method: MarchMethod, volume_upkeep: bool) -> void:
+	RenderingServer.call_on_render_thread(func() -> void:
+		_march_method = method
+		_volume_upkeep = volume_upkeep)
 
 
 ## Main thread: forget the history (a jump of the camera, a pinned snapshot shown at once).
@@ -207,6 +262,8 @@ func request_view_cache_fill(layout: CloudViewCacheLayout, anchor_earth_m: Vecto
 ## Checks: the raw bytes of one of the centre view's images ("color": the march's colour + T, "depth": its scene and
 ## cloud distances) - empty before the first frame.
 func debug_centre_data(key: String) -> PackedByteArray:
+	if _rd != null and key == "counters" and volume_shown and _volume_counters.is_valid():
+		return _rd.texture_get_data(_volume_counters, 0)  # the volume march's, eye 0
 	if _rd == null or not _centre.has(key):
 		return PackedByteArray()
 	return _rd.texture_get_data(_centre[key], 0)
@@ -280,10 +337,10 @@ func _set_fill_request(layout: CloudViewCacheLayout, anchor_earth_m: Vector3, ti
 	_fill_request = {"layout": layout, "anchor": anchor_earth_m, "tiles": tiles}
 
 
-func _set_quality(divisor: int, temporal_weight: float, clip_gamma: float) -> void:
-	if maxi(divisor, 1) != _divisor:
+func _set_quality(divisor: float, temporal_weight: float, clip_gamma: float) -> void:
+	if maxf(divisor, 1.0) != _divisor:
 		_size = Vector2i.ZERO  # another resolution: re-create the images
-	_divisor = maxi(divisor, 1)
+	_divisor = maxf(divisor, 1.0)
 	_temporal_weight = clampf(temporal_weight, 0.0, 1.0)
 	_clip_gamma = maxf(clip_gamma, 0.0)
 
@@ -345,6 +402,8 @@ func _create() -> void:
 				defines.append(flags[i][0])
 				name += flags[i][1]
 		kernels[name] = CloudShaderPort.build(defines, PackedStringArray(MARCH_FILES)).source
+	kernels["volume_full"] = CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_VOLUME_FULL",
+			"CLOUD_VOLUME_LOOKUP"]), PackedStringArray(VOLUME_FILES)).source
 	# The near shell's variants (cloud view cache Task 5): the centre view and the shape prefilter (no outline pass).
 	for centre in ["", "_centre"]:
 		for prefilter in ["", "_prefilter"]:
@@ -356,21 +415,9 @@ func _create() -> void:
 			kernels["march" + centre + "_near" + prefilter] = CloudShaderPort.build(defines,
 					PackedStringArray(NEAR_SHELL_FILES)).source
 	for name: String in kernels:
-		var src := RDShaderSource.new()
-		src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-		src.source_compute = kernels[name]
-		var spirv := _rd.shader_compile_spirv_from_source(src)
-		if spirv.compile_error_compute != "":
-			push_error("CloudEffect %s: %s" % [name, spirv.compile_error_compute])
+		if not _compile(name, kernels[name]):
 			_rd = null
 			return
-		var shader := _rd.shader_create_from_spirv(spirv)
-		if not shader.is_valid():
-			push_error("CloudEffect %s: shader not created" % name)
-			_rd = null
-			return
-		_shaders[name] = shader
-		_pipelines[name] = _rd.compute_pipeline_create(shader)
 	_globals_buffer = _rd.uniform_buffer_create(_march.block_size)
 	_eyes_buffer = _rd.uniform_buffer_create(EYES_BLOCK_SIZE)
 	_centre_buffer = _rd.uniform_buffer_create(CENTRE_BLOCK_SIZE)
@@ -392,6 +439,46 @@ func _create() -> void:
 			RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, PackedByteArray([0, 0, 0, 0]))
 	_fallback["sampler3D"] = _texture(RenderingDevice.TEXTURE_TYPE_3D, Vector2i(1, 1), 1,
 			RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, PackedByteArray([0, 0, 0, 0]))
+
+
+## Compiles one kernel (GLSL source) into _shaders / _pipelines; false (and an error) when it fails.
+func _compile(name: String, source: String) -> bool:
+	var src := RDShaderSource.new()
+	src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
+	src.source_compute = source
+	var spirv := _rd.shader_compile_spirv_from_source(src)
+	if spirv.compile_error_compute != "":
+		push_error("CloudEffect %s: %s" % [name, spirv.compile_error_compute])
+		return false
+	var shader := _rd.shader_create_from_spirv(spirv)
+	if not shader.is_valid():
+		push_error("CloudEffect %s: shader not created" % name)
+		return false
+	_shaders[name] = shader
+	_pipelines[name] = _rd.compute_pipeline_create(shader)
+	return true
+
+
+## The hybrid march's kernel `name` (HYBRID_FAMILIES + the march's variant suffixes _centre, _prefilter, _refine in
+## that order), compiled on its first use (a toggle costs one compile of the variants it needs, not every variant at
+## start-up); false when it does not compile (the frame then takes today's march).
+func _ensure_hybrid_kernel(name: String) -> bool:
+	if _shaders.has(name):
+		return true
+	if _hybrid_failed.has(name):
+		return false
+	var defines := PackedStringArray(["CLOUD_MARCH", "CLOUD_HYBRID", "CLOUD_VOLUME_LOOKUP"])
+	defines.append_array(PackedStringArray(HYBRID_DEFINES[name.substr(0, 7)]))
+	for flag: Array in [["_centre", "CLOUD_CENTRE"], ["_prefilter", "CLOUD_SHAPE_PREFILTER"],
+			["_refine", "CLOUD_EDGE_REFINE"]]:
+		if name.contains(flag[0]):
+			defines.append(flag[1])
+	var start_us := Time.get_ticks_usec()
+	if not _compile(name, CloudShaderPort.build(defines, PackedStringArray(HYBRID_FILES)).source):
+		_hybrid_failed[name] = true
+		return false
+	print("CloudEffect: hybrid kernel %s compiled in %.1f s" % [name, (Time.get_ticks_usec() - start_us) / 1.0e6])
+	return true
 
 
 func _texture(type: int, size: Vector2i, layers: int, format: int, data := PackedByteArray()) -> RID:
@@ -418,8 +505,11 @@ func _free_images() -> void:
 	for key in CENTRE_IMAGES:
 		if _centre.has(key) and (_centre[key] as RID).is_valid():
 			rids.append(_centre[key])
+	if _volume_counters.is_valid():
+		rids.append(_volume_counters)
+		_volume_counters = RID()
 	for v in _views:
-		for key in ["output_slice", "buffer"]:
+		for key in ["output_slice", "buffer", "volume_buffer"]:
 			if v.has(key) and (v[key] as RID).is_valid():
 				rids.append(v[key])
 	_centre = {}
@@ -471,7 +561,11 @@ func _ensure_images(size: Vector2i, view_count: int, low: Vector2i) -> void:
 	_centre = c
 	for i in range(view_count):
 		_views.append({"output_slice": _rd.texture_create_shared_from_slice(RDTextureView.new(), _output_rd, i, 0),
-				"buffer": _rd.uniform_buffer_create(VIEW_BLOCK_SIZE)})
+				"buffer": _rd.uniform_buffer_create(VIEW_BLOCK_SIZE),
+				"volume_buffer": _rd.uniform_buffer_create(VIEW_BLOCK_SIZE)})
+	if CloudEffect.counters:  # the volume march's per pixel of eye 0
+		_volume_counters = _texture(RenderingDevice.TEXTURE_TYPE_2D, size, 1,
+				RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT)
 	# The new result is shown from the main thread (swap_output, before a frame is drawn): replacing the resource's
 	# texture inside this callback would invalidate the composite's material in the middle of the frame (a renderer
 	# error and a frame without clouds). Until then the quad shows the old one (one frame stale); a result never shown
@@ -638,11 +732,29 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# sample (_shape_prefilter_needed).
 	# The world volume's upkeep (Task 5): the schedule's batch - bake, occupancy - with this frame's set 0, before the
 	# march (its GPU interval: CloudWorldVolume.UPKEEP_STAMP).
-	if world_volume != null and ShaderGlobals.value(&"cloud_world_volume") == true:
+	var t7_volume: bool = world_volume != null and ShaderGlobals.value(&"cloud_world_volume") == true \
+			and _march_method == MarchMethod.OLD
+	if world_volume != null and (t7_volume or _volume_upkeep or _march_method != MarchMethod.OLD):
 		world_volume.run(_rd, world_volume.take(), set0, camera)
+	# The hybrid march (CLOUD_HYBRID) once the volume shows a level: its family in the march's place (the same images,
+	# outline pass, temporal copy and upsample); until then (and while a check holds the volume back) today's march.
+	var hybrid_set: Array[RDUniform] = []
+	if _march_method != MarchMethod.OLD and world_volume != null and not CloudEffect.volume_march_hold:
+		hybrid_set = world_volume.march_uniforms(camera)
 	var family := "march_centre" if stereo else "march"
+	if not hybrid_set.is_empty():
+		var hybrid_family: String = HYBRID_FAMILIES[_march_method] + ("_centre" if stereo else "")
+		if _ensure_hybrid_kernel(hybrid_family):
+			family = hybrid_family
+		else:
+			hybrid_set = []
 	var pixel_angle: float = centre_view["pixel_angle"]
 	var march := family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family
+	if not hybrid_set.is_empty() and not (_ensure_hybrid_kernel(march) and _ensure_hybrid_kernel(march + "_refine")):
+		hybrid_set = []
+		family = "march_centre" if stereo else "march"
+		march = family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family
+	hybrid_shown = not hybrid_set.is_empty()
 	var march_set0 := UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
 	if not _fill_request.is_empty():
 		_fill_view_cache(set0, camera)
@@ -679,7 +791,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var centre_projection: Projection = centre_view["projection"]
 	var centre_eye := Vector3.ZERO if stereo \
 			else world_to_earth * (view_to_world.basis * scene.get_view_eye_offset(0))
-	var centre_full := Vector2(low * _divisor) if stereo else Vector2(size)
+	var centre_full := Vector2(low) * _divisor if stereo else Vector2(size)
 	var centre_clip := centre_projection * Projection(view_to_world.affine_inverse()) * earth_to_world
 	_rd.buffer_update(_centre["buffer"], 0, VIEW_BLOCK_SIZE, _view_block(centre_projection, view_to_world,
 			world_to_earth, _centre["previous"], centre_full, low, camera_delta, _centre["valid"], params,
@@ -702,6 +814,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		eyes.append_array([size.x, size.y, 0.0, 0.0])
 		_rd.buffer_update(_eyes_buffer, 0, EYES_BLOCK_SIZE, eyes.to_byte_array())
 		march_set1.append_array([_tex(4, nearest_clamp, buffers.get_depth_layer(1, false)), _ubo(_eyes_buffer, 5)])
+	if hybrid_shown:  # the volume's block and textures (bindings 40 on; the outline pass's set copies them)
+		march_set1.append_array(hybrid_set)
 
 	var slot: int = _centre["slot"]
 	var history_in: RID = _centre["history%d" % slot]
@@ -718,13 +832,27 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		_rd.buffer_update(_views[view]["buffer"], 0, VIEW_BLOCK_SIZE, _view_block(projections[view], view_to_world,
 				world_to_earth, Projection.IDENTITY, Vector2(size), low, camera_delta, _centre["valid"], params,
 				eye_earth).to_byte_array())
+	# The world volume (Task 7): with a level shown, its march per eye at full resolution draws the frame (the debug
+	# outputs it does not draw: today's march); the view cache, the march, the temporal pass and the upsample rest.
+	volume_shown = false
+	counters_size = low
+	if t7_volume and debug in VOLUME_DEBUG_OUTPUTS \
+			and not CloudEffect.volume_march_hold:
+		var volume_set := world_volume.march_uniforms(camera)
+		if not volume_set.is_empty():
+			_volume_march(volume_set, set0, buffers, projections, view_to_world, world_to_earth, size, view_count,
+					camera_delta, debug, scene)
+			_centre["valid"] = false  # the march's history restarts when it is shown again
+			stats = {"valid": true, "low_size": size, "views": view_count, "view_cache": false, "volume": true,
+				"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+			return
 	# The view cache (Task 4): the planner's batch filled, then each eye's lookup - instead of the march (the debug
 	# outputs are the march's per-ray quantities). Until the first batch ran, the march shows the frame; while the
 	# batch says covering, the march runs too and the lookup shows it where a tile has nothing yet (fix round 1).
 	view_cache_shown = false
 	near_shell_shown = false
 	var cache_mode := CacheMode.OFF
-	if ShaderGlobals.value(&"cloud_view_cache") == true and debug == 0:
+	if ShaderGlobals.value(&"cloud_view_cache") == true and debug == 0 and not hybrid_shown:
 		_read_cache_timestamps()
 		_publish_cache_view(projections, size, view_to_world, world_to_earth)
 		cache_mode = _prepare_view_cache(set0, camera)
@@ -770,7 +898,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
 	var refine_set1 := []
-	var warm_now := not _prefilter_warm and march == family  # the pre-warm below binds the refine set too
+	var warm_now := not _prefilter_warm and march == family and not hybrid_shown  # the pre-warm below binds the refine set too
 	if refine or warm_now:
 		refine_set1 = march_set1.filter(func(u: RDUniform) -> bool: return u.binding != COUNTERS_BINDING)  # no counters
 		refine_set1[2] = _image(2, _centre["refined"])
@@ -849,8 +977,40 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		near_shell_shown = near_shell
 		near_shell_frames += 1 if near_shell else 0
 	stats = {"valid": true, "low_size": low, "views": view_count, "view_cache": view_cache_shown,
-		"covering": view_cache_shown and bool(_cache_shown["covering"]), "near_shell": near_shell,
+		"covering": view_cache_shown and bool(_cache_shown["covering"]), "near_shell": near_shell, "hybrid": hybrid_shown,
 		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+
+
+## The world volume's march (Task 7): per eye one ray per pixel (CLOUD_VOLUME_FULL) into the eye's layer of the result,
+## its view block with the eye's own pixel angle (the footprint's: 2 / (P[1][1] x height) at the axis).
+func _volume_march(volume_set: Array[RDUniform], set0: Array[RDUniform], buffers: RenderSceneBuffersRD,
+		projections: Array[Projection], view_to_world: Transform3D, world_to_earth: Basis, size: Vector2i,
+		view_count: int, camera_delta: Vector3, debug: int, scene: RenderSceneData) -> void:
+	var nearest_clamp: RID = _samplers["false|false|false"]
+	for view in range(view_count):
+		var eye_earth := world_to_earth * (view_to_world.basis * scene.get_view_eye_offset(view))
+		var pixel_rad: float = 2.0 / (projections[view].y.y * float(size.y))
+		_rd.buffer_update(_views[view]["volume_buffer"], 0, VIEW_BLOCK_SIZE, _view_block(projections[view],
+				view_to_world, world_to_earth, Projection.IDENTITY, Vector2(size), size, camera_delta, false,
+				Vector4(0.0, 1.0, debug, pixel_rad), eye_earth).to_byte_array())
+	var groups := Vector2i((size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1)
+	var set0_rid := UniformSetCacheRD.get_cache(_shaders["volume_full"], 0, set0)
+	var list := _rd.compute_list_begin()
+	list = _stamp(list, VOLUME_FULL_STAMP)
+	_rd.compute_list_bind_compute_pipeline(list, _pipelines["volume_full"])
+	_rd.compute_list_bind_uniform_set(list, set0_rid, 0)
+	for view in range(view_count):
+		var set1: Array = [_ubo(_views[view]["volume_buffer"]), _tex(1, nearest_clamp,
+				buffers.get_depth_layer(view, false)), _image(2, _views[view]["output_slice"])]
+		if CloudEffect.counters:  # eye 0's are read back; eye 1 writes the (unread) centre image, its excess dropped
+			set1.append(_image(COUNTERS_BINDING, _volume_counters if view == 0 else _centre["counters"]))
+		set1.append_array(volume_set)
+		_rd.compute_list_bind_uniform_set(list, _set1("volume_full", set1), 1)
+		_rd.compute_list_dispatch(list, groups.x, groups.y, 1)
+	_rd.compute_list_end()
+	volume_shown = true
+	volume_frames += 1
+	counters_size = size
 
 
 ## The requested view cache fill (request_view_cache_fill) with this frame's set 0, before the march: the anchor's

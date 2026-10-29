@@ -100,6 +100,12 @@
 #      clamped bottom read at its edge, a rebake bit-identical, the GLSL grid
 #      mirror within 1e-3 of a cell, the bake binding's input forms, the pair switch (STARSIM_VOLUME_ONLY=16 runs this
 #      alone; another value exits 1). STARSIM_WORLD_VOLUME=1 turns the flag on for every GPU check.
+#  19. (world volume plan Task 7) the world volume's march (CLOUD_VOLUME_FULL): the cold start's frames all show clouds
+#      (the first ones today's march until a level is shown), no level seam (the radiance profile across every
+#      level's fade band - horizontal and the vertical window edges of levels 0-1 - steps <= 1 %), the Sun's
+#      radiance with the volume's light (light_entry_samples 0 and 4) against the converged per-sample light march
+#      (section 8's bounds), radiance 0 in Earth's shadow (STARSIM_VOLUME_ONLY=19 runs this alone). With
+#      STARSIM_WORLD_VOLUME=1 the other sections' renders march the volume (filled and lit before each render).
 #  17. (world volume plan Task 6) the world volume's light over section 8's thick slab, read back: the cold start's light
 #      per level within 1 s of its density shown, tau_sun / tau_below / tau_above of cells inside the slab at levels 0,
 #      2, 5 vs the analytic slab 5 %, one refresh pass after a 5 deg Sun step moves no exp(-tau_sun) by more than 0.01,
@@ -865,6 +871,8 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 		up = Vector3.UP if absf(view_render.y) < 0.9 else Vector3.RIGHT
 	_camera.transform = Transform3D(Basis.looking_at(view_render, up) * Basis(Vector3.BACK, deg_to_rad(roll_deg)),
 			Vector3.ZERO)
+	if _clouds.world_volume:
+		await _volume_settle_render(camera_itrf_m)
 	for i in range(SETTLE_FRAMES):
 		await RenderingServer.frame_post_draw
 		_clouds.update(camera_itrf_m, 0.0, 0.0)  # as the world does every frame (a re-created result is shown)
@@ -2953,7 +2961,7 @@ func _march_reference(path: String, bytes: PackedByteArray, label: String) -> vo
 ##   unchanged, the new pair is then the CPU's bake and the blend reaches the target.
 ## STARSIM_VOLUME_ONLY=16 runs this section alone.
 const VOLUME_ONLY_ENV := "STARSIM_VOLUME_ONLY"
-const VOLUME_SECTIONS := ["16", LIGHT_SECTION, LOAD_SECTION]
+const VOLUME_SECTIONS := ["16", LIGHT_SECTION, LOAD_SECTION, MARCH_SECTION]
 const VOLUME_ANALOG_MONTH := 10
 const VOLUME_ANALOG_HOUR := 12
 ## ERA5 hours (since 1900-01-01) 2025-10-25 15:00 and 16:00 UTC in data/weather/cache.
@@ -3002,6 +3010,9 @@ const VOLUME_BAND_POINTS := 10000
 const VOLUME_SAMPLES := 3 + 2 * (1 + 3 * 4 + 7 + 1) + 2 + 1 + 1 + 5
 
 var _volume_rng := RandomNumberGenerator.new()
+## The camera of the last render with the world volume on (_volume_settle_render) and the move that restarts it.
+var _volume_last_camera := Vector3(INF, INF, INF)
+const VOLUME_JUMP_M := 50000.0
 
 
 ## STARSIM_VOLUME_ONLY: the world volume's sections alone (C16: an unknown section exits 1).
@@ -3016,12 +3027,15 @@ func _volume_only(value: String) -> void:
 		await _volume_light_samples()
 	elif value == LOAD_SECTION:
 		await _volume_load_samples()
+	elif value == MARCH_SECTION:
+		await _volume_march_samples()
 	else:
 		await _world_volume_samples()
 	for f in _files:
 		DirAccess.remove_absolute(f)
 	_clouds.shutdown()
-	var expected: int = {LIGHT_SECTION: LIGHT_SAMPLES, LOAD_SECTION: LOAD_SAMPLES}.get(value, VOLUME_SAMPLES)
+	var expected: int = {LIGHT_SECTION: LIGHT_SAMPLES, LOAD_SECTION: LOAD_SAMPLES, MARCH_SECTION: MARCH_SAMPLES} \
+			.get(value, VOLUME_SAMPLES)
 	_check("sample count", _samples == expected + 1, "%d samples" % _samples)  # + the transfer table's
 	print("cloud_check: %s (section %s, %d samples, %d failures)" % ["PASS" if _failures == 0 else "FAIL", value,
 			_samples, _failures])
@@ -3092,6 +3106,31 @@ func _volume_frame(camera_itrf: Vector3, blend: float, delta_s: float) -> void:
 			1.0)
 	_clouds.update(camera_itrf, blend, delta_s)
 	await RenderingServer.frame_post_draw
+
+
+## With the world volume on (STARSIM_WORLD_VOLUME=1, world volume plan Task 7: the sections' renders march the
+## volume): before a render the volume is filled and lit at VOLUME_BUDGET_SCALE x the budget for the camera and the
+## light set (a camera moved by more than VOLUME_JUMP_M restarts it: a view jump) until the schedule is complete, no
+## level's light is stale and the plans carry no light work for LIGHT_QUIET_FRAMES frames.
+func _volume_settle_render(camera_itrf_m: Vector3) -> void:
+	var schedule := _clouds.world_volume_schedule
+	var volume := _clouds.effect.world_volume
+	if _volume_last_camera.distance_to(camera_itrf_m) > VOLUME_JUMP_M:
+		_clouds.notify_view_jump()
+	_volume_last_camera = camera_itrf_m
+	schedule.budget_scale = VOLUME_BUDGET_SCALE
+	var quiet := 0
+	for n in LIGHT_MAX_FRAMES:
+		_clouds.update(camera_itrf_m, 0.0, VOLUME_DT)
+		await RenderingServer.frame_post_draw
+		var busy := not schedule.complete() or volume.waiting() or not _volume_all_ready(volume.adopted()) \
+				or int(_clouds.world_volume_stats()["light_cells"]) > 0
+		for k in CloudWorldVolumeLayout.LEVELS:
+			busy = busy or schedule.light_stale(k)
+		quiet = 0 if busy else quiet + 1
+		if quiet >= LIGHT_QUIET_FRAMES:
+			break
+	schedule.budget_scale = 1.0
 
 
 ## The cold fill of the pinned pair: with `measure` first VOLUME_COLD_FRAMES frames at the game's budget (the
@@ -4727,3 +4766,298 @@ func _accuracy_edges(k: int, origin: Vector3i, camera: Vector3, dir: Vector3) ->
 	if offsets.is_empty():
 		return Vector3(0.0, 0.0, 0.0)
 	return Vector3(_p99(offsets), offsets.back(), offsets.size())
+
+
+## Section 19 (world volume plan Task 7; STARSIM_VOLUME_ONLY=19): the world volume's march (CLOUD_VOLUME_FULL), at the
+## default site with section 8's slabs (the thick slab 1-2 km, tau ~10; the broken cf 0.4 field):
+## - cold start (ruling T5 c1): after a view jump every one of MARCH_COLD_FRAMES frames at the game's budget shows
+##   clouds - mean alpha >= MARCH_COLD_SHARE x the reference path's (today's march: the frames before a level is
+##   shown) - and the volume's march draws the frame within them;
+## - no level seam (section 10's pattern; C8): along a tall column of pixels whose rays meet the thick slab's base at
+##   0.5 - 13.5 deg (its base entry crosses the fade bands of levels 0 -> 1 -> 2 -> 3 -> 4) and along one seen from
+##   3 km down through the vertical window edge of level 0, the radiance's step at the scale of a band
+##   (MARCH_SEAM_ROWS: the change of the row means' slope over two windows) relative to the mean <=
+##   MARCH_SEAM_TOLERANCE;
+## - the Sun's scattered radiance (debug 2: the bake; 7: with the sub-cell field) of the 5 km view down at 80 deg with
+##   the light volume against the converged per-sample light march (light_entry_samples < 0: the Sun's optical depth
+##   marched through the per-sample density), Sun 45 / 20 deg: the slab with light_entry_samples 4 worst pixel <=
+##   CACHE_SLAB_TOLERANCE, the broken field with 0 and with 4 p99 <= CACHE_P99_TOLERANCE, worst <=
+##   CACHE_WORST_TOLERANCE (section 8's bounds, rulings C12 / C13);
+## - the Sun 8 deg below the horizon (Earth's shadow, N11): the Sun's radiance (debug 2) of every pixel <=
+##   MARCH_SHADOW_MAX.
+const MARCH_SECTION := "19"
+const MARCH_SAMPLES := 11
+const MARCH_COLD_FRAMES := 90
+const MARCH_COLD_SHARE := 0.5
+const MARCH_SEAM_SIZE := Vector2i(8, 512)
+const MARCH_SEAM_ROWS := 12
+const MARCH_SEAM_TOLERANCE := 0.01
+## The seam view's rays are followed this far for their crossing of the slab's surface (m).
+const MARCH_SEAM_REACH_M := 400000.0
+## The rows' visible depth (optical depths) sampled for fade bands (MARCH_SEAM_DEPTH_SAMPLES points); the slabs'
+## extinction (section 8's thick slab tau ~10 over 1 km, the thin one tau ~1: beta = 150 LWC).
+const MARCH_SEAM_DEPTH_TAU := 3.0
+const MARCH_SEAM_DEPTH_SAMPLES := 16
+const MARCH_THICK_EXTINCTION_PER_M := 150.0 * THICK_LIQUID_KG_M3
+const MARCH_THIN_EXTINCTION_PER_M := 150.0 * THIN_LIQUID_KG_M3
+const MARCH_SHADOW_MAX := 1.0e-6
+## The radiance error's floor (a fraction of the converged image's mean: dark pixels' relative errors are noise).
+const MARCH_ERROR_FLOOR := 0.05
+
+
+func _volume_march_samples() -> void:
+	_clouds.world_volume = true
+	var broken := _slab("march_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
+	var thick := _slab("march_thick", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
+	var sun45 := _local_direction(45.0, 135.0)
+	var size := _viewport.size
+	var fov := _camera.fov
+	# Cold start.
+	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
+	_camera.fov = 60.0
+	_show(broken)
+	var camera := _point(2.0)
+	var view := _local_direction(30.0, 0.0)
+	_clouds.world_volume = false
+	await _render(camera, view, sun45, 0)
+	var reference_alpha := 1.0 - _output_mean_t()
+	_clouds.world_volume = true
+	await _render(camera, view, sun45, 0)  # filled, then restarted:
+	_clouds.notify_view_jump()
+	var worst_share := INF
+	var first_volume := -1
+	var shown_before := _clouds.effect.volume_frames
+	for i in MARCH_COLD_FRAMES:
+		_clouds.update(camera, 0.0, VOLUME_DT)
+		await RenderingServer.frame_post_draw
+		worst_share = minf(worst_share, (1.0 - _output_mean_t()) / maxf(reference_alpha, 1.0e-6))
+		if first_volume < 0 and _clouds.effect.volume_frames > shown_before:
+			first_volume = i
+	_check("march: every cold-start frame shows clouds (mean alpha >= %.1f x the reference's)" % MARCH_COLD_SHARE,
+			worst_share >= MARCH_COLD_SHARE, "worst frame %.3f x the reference's alpha %.4f" % [worst_share,
+			reference_alpha])
+	_check("march: the volume draws the frame within the cold start", first_volume >= 0,
+			"first volume frame %d of %d" % [first_volume, MARCH_COLD_FRAMES])
+	# No level seam.
+	_viewport.size = MARCH_SEAM_SIZE
+	_show(thick)
+	_camera.fov = 13.0
+	await _march_seam("horizontal bands (thick slab, camera 2 m, base entry 0.5 - 13.5 deg)", _point(2.0),
+			_local_direction(7.0, 90.0), sun45, SLAB_BOTTOM_M, MARCH_THICK_EXTINCTION_PER_M)
+	# The thin slab (tau ~1): the light comes from its whole depth, through level 0's bottom window edge (~1.45 km).
+	_show(_slab("march_thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0))
+	_camera.fov = 20.0
+	await _march_seam("vertical window edge of level 0 (thin slab, camera 3 km, 10 - 30 deg down)", _point(3000.0),
+			_local_direction(-20.0, 90.0), sun45, SLAB_TOP_M, MARCH_THIN_EXTINCTION_PER_M)
+	# The light volume against the converged per-sample light march.
+	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
+	_camera.fov = 24.0
+	var down := _local_direction(-80.0, 10.0)
+	for sun_deg: float in [45.0, 20.0]:
+		var sun := _local_direction(sun_deg, 135.0)
+		_show(thick)
+		var converged := await _march_light_image(_point(5000.0), down, sun, 2, -1)
+		var with4 := await _march_light_image(_point(5000.0), down, sun, 2, 4)
+		var e := _march_errors(with4, converged)
+		_check("march light: slab, Sun %.0f deg, light_entry_samples 4 vs converged" % sun_deg,
+				_cache_case_ok(e["mean"], e["p99"], e["worst"], true), _march_error_text(e))
+		_show(broken)
+		converged = await _march_light_image(_point(5000.0), down, sun, 7, -1)
+		for samples: int in [0, 4]:
+			var got := await _march_light_image(_point(5000.0), down, sun, 7, samples)
+			e = _march_errors(got, converged)
+			_check("march light: broken cf %.1f, Sun %.0f deg, light_entry_samples %d vs converged" % [BROKEN_FRACTION,
+					sun_deg, samples], _cache_case_ok(e["mean"], e["p99"], e["worst"], false), _march_error_text(e))
+	_clouds.light_entry_samples = 4
+	# Earth's shadow.
+	_show(broken)
+	_camera.fov = 60.0
+	var shadow := await _march_light_image(_point(2.0), _local_direction(30.0, 0.0),
+			_local_direction(LIGHT_SHADOW_SUN_DEG, 135.0), 2, 4)
+	var brightest := 0.0
+	for y in range(shadow.get_height()):
+		for x in range(shadow.get_width()):
+			brightest = maxf(brightest, shadow.get_pixel(x, y).r)
+	_check("march: the Sun's radiance 0 in Earth's shadow (Sun %.0f deg)" % LIGHT_SHADOW_SUN_DEG,
+			brightest <= MARCH_SHADOW_MAX, "brightest pixel %s /sr" % String.num_scientific(brightest))
+	_viewport.size = size
+	_camera.fov = fov
+
+
+## The mean T (.a) of the cloud pass's result (layer 0).
+func _output_mean_t() -> float:
+	var image := _clouds.effect.output.get_layer_data(0)
+	if image == null:
+		return 1.0
+	var sum := 0.0
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			sum += clampf(image.get_pixel(x, y).a, 0.0, 1.0)
+	return sum / float(image.get_width() * image.get_height())
+
+
+## A debug render of the volume's march with the light set (light_entry_samples; < 0: converged).
+func _march_light_image(camera: Vector3, view: Vector3, sun: Vector3, mode: int, entry_samples: int) -> Image:
+	_clouds.light_entry_samples = entry_samples
+	await _render(camera, view, sun, mode)
+	return _viewport.get_texture().get_image()
+
+
+## Per-pixel relative errors of a radiance image against the converged one (floor: MARCH_ERROR_FLOOR x its mean).
+func _march_errors(got: Image, reference: Image) -> Dictionary:
+	var mean := 0.0
+	var n := got.get_width() * got.get_height()
+	for y in range(got.get_height()):
+		for x in range(got.get_width()):
+			mean += reference.get_pixel(x, y).r / n
+	var errors := PackedFloat32Array()
+	for y in range(got.get_height()):
+		for x in range(got.get_width()):
+			var r := reference.get_pixel(x, y).r
+			errors.append(absf(got.get_pixel(x, y).r - r) / maxf(absf(r), MARCH_ERROR_FLOOR * mean))
+	errors.sort()
+	return {"mean": mean, "p99": errors[int(0.99 * (n - 1))], "worst": errors[n - 1]}
+
+
+static func _march_error_text(e: Dictionary) -> String:
+	return "p99 %.2f %%, worst %.2f %% (converged mean %.5f /sr)" % [e["p99"] * 100.0, e["worst"] * 100.0, e["mean"]]
+
+
+## The seam metric along the image's rows: the row means of the luminance over the columns, of the volume's image over
+## the reference path's (world_volume off: the same view's smooth physics divides out - the slab's base receding to the
+## horizon, the haze), D = volume / reference - 1; at each row the change of D's slope between the MARCH_SEAM_ROWS
+## windows above and below (a step spread over a band shows as its height; a smooth profile as ~0); the largest <=
+## MARCH_SEAM_TOLERANCE. The images go to screenshots/cloud-world-volume/t7_s19_seam_<view>_<path>.png.
+func _march_seam(label: String, camera: Vector3, view: Vector3, sun: Vector3, entry_m: float,
+		extinction_per_m: float) -> void:
+	_clouds.light_entry_samples = 4
+	var profiles: Array[PackedFloat32Array] = []
+	for volume: bool in [true, false]:
+		_clouds.world_volume = volume
+		await _render(camera, view, sun, 0)
+		var image := _viewport.get_texture().get_image()
+		var name := "t7_s19_seam_%s_%s.png" % [label.left(label.find(" ")), "volume" if volume else "reference"]
+		var path := ProjectSettings.globalize_path("res://").path_join("../screenshots/cloud-world-volume/" + name) 				.simplify_path()
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		image.save_png(path)
+		var rows := PackedFloat32Array()
+		for y in range(image.get_height()):
+			var sum := 0.0
+			for x in range(image.get_width()):
+				var px := image.get_pixel(x, y)
+				sum += _luminance(Vector3(px.r, px.g, px.b))
+			rows.append(sum / image.get_width())
+		profiles.append(rows)
+	_clouds.world_volume = true
+	# The rows whose ray meets the slab's surface (entry_m) inside a level's fade band (weight in (0, 1)).
+	var band := _seam_band_rows(camera, entry_m, extinction_per_m, profiles[0].size())
+	var steps := _seam_steps(profiles[0])
+	var at_band := 0.0
+	var band_row := -1
+	var elsewhere := 0.0
+	for y in range(steps.size()):
+		if band[y] >= 0:
+			if steps[y] > at_band:
+				at_band = steps[y]
+				band_row = y
+		else:
+			elsewhere = maxf(elsewhere, steps[y])
+	var bound := maxf(MARCH_SEAM_TOLERANCE, elsewhere)
+	var levels := {}
+	for y in range(band.size()):
+		if band[y] >= 0:
+			levels[band[y]] = true
+	_check("march: no level seam, %s" % label, at_band <= bound and not levels.is_empty(),
+			("largest step across a fade band %.3f %% at row %d (bands of levels %s crossed); bound %.3f %%: %.1f %% or "
+			+ "the profile's own largest step away from the bands %.3f %% (the slab's undulating surface); the "
+			+ "reference path's profile's largest step %.3f %%") % [at_band * 100.0, band_row, levels.keys(),
+			bound * 100.0, MARCH_SEAM_TOLERANCE * 100.0, elsewhere * 100.0, _largest(_seam_steps(profiles[1])) * 100.0])
+
+
+## Per row the change of a profile's slope between the MARCH_SEAM_ROWS windows around it over the profile's mean (0
+## within 2 windows of the ends).
+static func _seam_steps(rows: PackedFloat32Array) -> PackedFloat32Array:
+	var mean := 0.0
+	for v in rows:
+		mean += v / rows.size()
+	var w := MARCH_SEAM_ROWS
+	var steps := PackedFloat32Array()
+	steps.resize(rows.size())
+	for y in range(2 * w, rows.size() - 2 * w):
+		var a := _row_mean(rows, y - 2 * w, y - w)
+		var b := _row_mean(rows, y - w, y)
+		var c := _row_mean(rows, y, y + w)
+		var d := _row_mean(rows, y + w, y + 2 * w)
+		steps[y] = absf((d - c) - (b - a)) / maxf(mean, 1.0e-9)
+	return steps
+
+
+static func _largest(values: PackedFloat32Array) -> float:
+	var m := 0.0
+	for v in values:
+		m = maxf(m, v)
+	return m
+
+
+## Height above WGS84 (m) of an ITRF point (the world volume layout's grid z).
+func _seam_height(p_itrf: Vector3) -> float:
+	return _clouds.world_volume_layout.grid_of(Frames.to_render(p_itrf)).z
+
+
+## Per row of the seam view the level whose fade band holds the point where the centre column's ray meets the height
+## entry_m (-1: none, or no crossing): the ray from the camera's render-frame direction, the crossing by bisection on
+## the geodetic height, the level weights of CloudWorldVolumeLayout.fade_weight_at at the adopted windows; a row counts
+## within MARCH_SEAM_ROWS of a band row.
+func _seam_band_rows(camera: Vector3, entry_m: float, extinction_per_m: float, rows: int) -> PackedInt32Array:
+	var lookup := _clouds.effect.world_volume.adopted()
+	var band := PackedInt32Array()
+	band.resize(rows)
+	band.fill(-1)
+	var marked := PackedInt32Array()
+	marked.resize(rows)
+	marked.fill(-1)
+	var basis := _camera.transform.basis
+	var tan_half := tan(deg_to_rad(_camera.fov * 0.5))
+	for y in range(rows):
+		var tan_y := (0.5 * rows - (y + 0.5)) / (0.5 * rows) * tan_half
+		var ray_render := (basis * Vector3(0.0, tan_y, -1.0)).normalized()
+		var dir: Vector3 = (_earth_to_gcrf.inverse() * Frames.from_render(ray_render)).normalized()
+		var h0: float = _seam_height(camera)
+		var lo := 0.0
+		var hi := MARCH_SEAM_REACH_M
+		var h_hi: float = _seam_height(camera + dir * hi)
+		if signf(h_hi - entry_m) == signf(h0 - entry_m):
+			continue
+		for i in range(40):
+			var mid := 0.5 * (lo + hi)
+			var h: float = _seam_height(camera + dir * mid)
+			if signf(h - entry_m) == signf(h0 - entry_m):
+				lo = mid
+			else:
+				hi = mid
+		# the visible depth of the slab along the ray (MARCH_SEAM_DEPTH_TAU optical depths at its extinction, at most
+		# through it): a fade band anywhere there marks the row
+		var rate := absf(_seam_height(camera + dir * (hi + 100.0)) - entry_m) / 100.0
+		var length_m := minf((SLAB_TOP_M - SLAB_BOTTOM_M) / maxf(rate, 1.0e-3), MARCH_SEAM_DEPTH_TAU / extinction_per_m)
+		for j in range(MARCH_SEAM_DEPTH_SAMPLES):
+			var at_m := hi + length_m * float(j) / float(MARCH_SEAM_DEPTH_SAMPLES - 1)
+			var grid := _clouds.world_volume_layout.grid_of(Frames.to_render(camera + dir * at_m))
+			for lv: Dictionary in lookup["levels"]:
+				var k: int = lv["level"]
+				var w := CloudWorldVolumeLayout.fade_weight_at(k, grid, lv["origin"])
+				if bool(lv["active"]) and w > 0.0:
+					if w < 1.0:
+						marked[y] = k
+					break
+	for y in range(rows):
+		for j in range(maxi(y - MARCH_SEAM_ROWS, 0), mini(y + MARCH_SEAM_ROWS + 1, rows)):
+			if marked[j] >= 0:
+				band[y] = marked[j]
+	return band
+
+
+static func _row_mean(rows: PackedFloat32Array, from: int, to: int) -> float:
+	var sum := 0.0
+	for i in range(from, to):
+		sum += rows[i]
+	return sum / float(to - from)

@@ -151,8 +151,7 @@ func _process_unprofiled(_delta: float) -> void:
 	lines.append(world.weather.status_text())
 	if world.free_camera_text != "":
 		lines.append(world.free_camera_text)
-	if world.weather.enabled:
-		lines.append(world.clouds.status_line())  # the cloud march's live toggles (F7 / F8, CloudLayer)
+	lines.append(world.clouds.status_line())  # the cloud march's live toggles (F7 / F8, CloudLayer)
 	var frame_rate := frame_rate_line(Engine.get_frames_per_second()) if show_frame_rate else ""
 	if frame_rate != "":
 		lines.append(frame_rate)

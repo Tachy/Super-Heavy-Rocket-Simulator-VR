@@ -77,6 +77,7 @@ layout(set = 1, binding = CLOUD_VOLUME_BLOCK_BINDING, std140) uniform CloudVolum
 	CloudVolumeFrame frames[2];  // per level its frame (flags): two during a re-frame
 	ivec4 levels[9];             // xyz: the window's origin (cells); w: flags (frame << CLOUD_VOLUME_FRAME_SHIFT)
 	vec4 spare;                  // x: the spare's level (-1: none), y: its cross-fade weight (0 while built)
+	vec4 moon_weight[2];         // per level (k / 4, k % 4) the weight of its tau_moon (Task 7: gated and ramped)
 } cloud_volume;
 
 // sinc(t) = sin(t) / t and t / sin(t) as series in t^2, and their differences between t_p and t_c given p2 = t_p^2,
