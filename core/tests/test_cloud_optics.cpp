@@ -1051,6 +1051,102 @@ TEST_CASE("The curl texture is divergence-free and tileable", "[weather]") {
     CHECK(cloud_curl_field() == field);  // deterministic
 }
 
+TEST_CASE("The sub-cell threshold field keeps the cell's cover", "[weather]") {
+    // cloud_noise.hpp "Sub-cell field" (world-volume Task 7, ruling R1): the mean of sigma_c Phi((v - t) / s_e) over
+    // the cell is sigma_c c for a Gaussian v of any sigma_v - graded at sigma_v = 0, binary at sigma_v >> s_e.
+    REQUIRE(cloud_normal_quantile(0.975) == Approx(1.959963984540054).epsilon(1e-12));
+    REQUIRE(cloud_normal_cdf(cloud_normal_quantile(0.01)) == Approx(0.01).epsilon(1e-10));
+    const double spread = 0.01;  // s_e (value units; the field depends on sigma_v / s_e only)
+    constexpr int samples = 200001;  // stratified Gaussian values: v_i = sigma Phi^-1((i + 0.5) / N)
+    std::vector<double> unit(samples);
+    for (int i = 0; i < samples; ++i) unit[static_cast<std::size_t>(i)] = cloud_normal_quantile((i + 0.5) / samples);
+    double worst = 0.0;
+    for (double ratio : {0.0, 0.25, 1.0, 4.0, 16.0, 100.0}) {
+        const double sigma = ratio * spread;
+        for (int ci = 1; ci <= 19; ++ci) {
+            const double cover = 0.05 * ci;
+            const double t = cloud_sub_cell_threshold(cover, spread, sigma);
+            double sum = 0.0, partial = 0.0;
+            for (double u : unit) {
+                const double share = cloud_sub_cell_share(sigma * u, t, spread);
+                sum += share;
+                partial += share > 0.01 && share < 0.99 ? 1.0 : 0.0;
+            }
+            worst = std::max(worst, std::abs(sum / samples - cover));
+            if (ratio == 0.0) {
+                CHECK(cloud_sub_cell_share(0.0, t, spread) == Approx(cover).margin(1e-12));  // graded: the bake
+            }
+            if (ratio == 100.0) {
+                CHECK(partial / samples < 0.05);  // binary: (almost) every point clear or in cloud
+            }
+        }
+    }
+    report("sub-cell field: worst |mean - c| over c = 0.05 .. 0.95, sigma_v / s_e = 0 .. 100: %.2e\n", worst);
+    CHECK(worst <= 1e-3);
+
+    // The real field (cloud_noise.hpp): the uploaded statistics against the summed perturbation, and the cover with
+    // the REAL detail values Gaussianised by the table plus the real shape residual (the shape at level 0 less its
+    // mip 2, a 1 km cell) at the median edge width - at the full and a fractional detail state. Bound: the Gaussian
+    // field's 1e-3 above plus the sampling noise of the means (binary limit: sqrt(0.25 / 5e5) = 7e-4, times 2.5).
+    const CloudNoise noise = generate_cloud_noise();
+    REQUIRE(noise.shape_residual_variance.size() == static_cast<std::size_t>(std::log2(noise.shape_size) + 1.5));
+    CHECK(noise.shape_residual_variance[0] == 0.0f);
+    for (std::size_t l = 1; l < noise.shape_residual_variance.size(); ++l) {
+        CHECK(noise.shape_residual_variance[l] >= noise.shape_residual_variance[l - 1]);  // coarser: more residual
+    }
+    CHECK(cloud_shape_residual_sigma(noise, 2.0, 1.0) == 0.0);  // the cell is not coarser: no residual
+    const double residual_sigma = cloud_shape_residual_sigma(noise, 0.0, 2.0);
+    CHECK(residual_sigma > 0.0);
+    const double edge = cloud_sub_cell_edge_spread * cloud_edge_width_value(noise, 0.5);
+    std::mt19937 random(17u);
+    std::uniform_real_distribution<double> uniform(0.0, 1.0);
+    for (double state : {3.0, 1.3}) {
+        const double mean = cloud_detail_perturbation_mean(noise, state);
+        const double sigma = cloud_detail_perturbation_sigma(noise, state);
+        std::vector<double> raw, gaussian, residual;
+        double sum = 0.0, sum_sq = 0.0, residual_sq = 0.0;
+        for (int i = 0; i < 500000; ++i) {
+            const math::Vec3 position{uniform(random), uniform(random), uniform(random)};
+            const double p = cloud_shape_value(noise, 0.0, position * (1000.0 * cloud_detail_tile_m), state);
+            raw.push_back(p - mean);
+            gaussian.push_back(cloud_detail_gaussianised(noise, p, state));
+            sum += p;
+            sum_sq += p * p;
+            const math::Vec3 texel = position * static_cast<double>(noise.shape_size);
+            const double r = sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, texel) -
+                             sample_noise_trilinear(noise.shape_mips[1], noise.shape_size / 4, 0, texel / 4.0);
+            residual.push_back(r);
+            residual_sq += r * r;
+        }
+        const double n = static_cast<double>(raw.size());
+        const double measured_mean = sum / n;
+        const double measured_sigma = std::sqrt(sum_sq / n - measured_mean * measured_mean);
+        CHECK(std::abs(measured_mean - mean) <= 0.05 * sigma);
+        CHECK(measured_sigma == Approx(sigma).epsilon(0.1));
+        const double total_sigma = std::sqrt(sigma * sigma + residual_sigma * residual_sigma);
+        double worst_raw = 0.0, worst_gaussian = 0.0, worst_both = 0.0;
+        for (int ci = 1; ci <= 19; ++ci) {
+            const double cover = 0.05 * ci;
+            const double t = cloud_sub_cell_threshold(cover, edge, sigma);
+            const double t_both = cloud_sub_cell_threshold(cover, edge, total_sigma);
+            double s_raw = 0.0, s_gaussian = 0.0, s_both = 0.0;
+            for (std::size_t i = 0; i < raw.size(); ++i) {
+                s_raw += cloud_sub_cell_share(raw[i], t, edge);
+                s_gaussian += cloud_sub_cell_share(gaussian[i], t, edge);
+                s_both += cloud_sub_cell_share(gaussian[i] + residual[i], t_both, edge);
+            }
+            worst_raw = std::max(worst_raw, std::abs(s_raw / n - cover));
+            worst_gaussian = std::max(worst_gaussian, std::abs(s_gaussian / n - cover));
+            worst_both = std::max(worst_both, std::abs(s_both / n - cover));
+        }
+        report("sub-cell field: state %.1f (sigma_v / s_e %.2f; residual sigma %.4f, measured %.4f): worst |mean - c| "
+               "raw %.4f, Gaussianised %.4f, with the shape residual %.4f\n",
+               state, sigma / edge, residual_sigma, std::sqrt(residual_sq / n), worst_raw, worst_gaussian, worst_both);
+        CHECK(worst_gaussian <= 2.75e-3);
+        CHECK(worst_both <= 5e-3);  // + the residual used as is (not Gaussianised: measured 2.4e-3 / 3.6e-3)
+    }
+}
+
 TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
     // A cumulus-shaped blob: a sphere of radius 600 m with the soft edge ramp over the outer 100 m, in-cloud extinction
     // 0.004 /m (tau 4.4 across). The Sun 30 deg above the horizon from +x. Points 50 m inside the sunlit and the shadowed

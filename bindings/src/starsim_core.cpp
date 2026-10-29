@@ -869,6 +869,18 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         result["blue_noise_size"] = static_cast<int64_t>(noise.blue_noise_size);
         result["curl"] = bytes(noise.curl_rgb);
         result["curl_size"] = static_cast<int64_t>(environment::cloud_curl_size);
+        // The sub-cell field's statistics (cloud_noise.hpp; world-volume Task 7 ruling R1).
+        result["detail_level_mean"] =
+            godot::Vector3(noise.detail_level_mean[0], noise.detail_level_mean[1], noise.detail_level_mean[2]);
+        result["detail_level_variance"] = godot::Vector3(noise.detail_level_variance[0],
+                                                         noise.detail_level_variance[1], noise.detail_level_variance[2]);
+        godot::PackedFloat32Array residual;
+        for (float v : noise.shape_residual_variance) residual.push_back(v);
+        result["shape_residual_variance"] = residual;
+        result["detail_gaussian"] = rows(noise.detail_gaussian);
+        result["sub_cell_rows"] = static_cast<int64_t>(environment::cloud_sub_cell_rows);
+        result["sub_cell_standard_range"] = environment::cloud_sub_cell_standard_range;
+        result["sub_cell_edge_spread"] = environment::cloud_sub_cell_edge_spread;
         godot::Array mips;
         for (const auto& level : noise.shape_mips) mips.push_back(bytes(level));
         result["shape_mips"] = mips;

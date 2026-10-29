@@ -47,6 +47,9 @@ constexpr std::uint32_t prefilter_sample_seed = 0x9u;
 // Increment statistics (detail amplitude, edge widths): sample pairs and seed.
 constexpr int increment_pairs = 200000;
 constexpr std::uint32_t increment_seed = 0x8u;
+// Sub-cell field statistics (header): uniform random positions per statistic (the variances to ~0.3 %).
+constexpr int sub_cell_samples = 400000;
+constexpr std::uint32_t sub_cell_sample_seed = 0xBu;
 // The finest Perlin period of the shape [m] (the lag where its spectrum is joined, header).
 constexpr double shape_finest_period_m = cloud_shape_tile_horizontal_m / (perlin_base_period << (perlin_octaves - 1));
 // Worley fBm weights of the three octaves c, 2c, 4c (Schneider 2015 / TileableVolumeNoise).
@@ -965,7 +968,149 @@ CloudNoise generate_cloud_noise() {
         noise.prefilter_threshold[r] = quantile_thresholds(prefiltered, row);
         noise.prefilter_edge_mean[r] = joint_edge_mean_factors(noise, prefiltered, row, noise.prefilter_threshold[r]);
     }
+
+    // The sub-cell field's statistics (header): the detail levels' eroded terms and the shape levels' variances.
+    HashSequence random{hash32(sub_cell_sample_seed)};
+    for (int k = 0; k < cloud_detail_levels; ++k) {
+        double sum = 0.0, sum_sq = 0.0;
+        const double a = noise.level_amplitude[static_cast<std::size_t>(k)];
+        for (int i = 0; i < sub_cell_samples; ++i) {
+            const math::Vec3 tile{random.next(), random.next(), random.next()};
+            const double e = cloud_detail_erosion(k, a * (cloud_detail_value(noise, tile) - noise.detail_mean));
+            sum += e;
+            sum_sq += e * e;
+        }
+        const double mean = sum / sub_cell_samples;
+        noise.detail_level_mean[static_cast<std::size_t>(k)] = static_cast<float>(mean);
+        noise.detail_level_variance[static_cast<std::size_t>(k)] =
+            static_cast<float>(std::max(sum_sq / sub_cell_samples - mean * mean, 0.0));
+    }
+    for (int level = 0; (1 << level) <= n; ++level) {
+        double sum = 0.0, sum_sq = 0.0;
+        for (int i = 0; i < sub_cell_samples && level > 0; ++i) {
+            const math::Vec3 texel{random.next() * n, random.next() * n, random.next() * n};
+            const double v = sample_noise_trilinear(noise.shape_rgba, n, 0, texel) -
+                             sample_noise_trilinear(noise.shape_mips[static_cast<std::size_t>(level - 1)], n >> level, 0,
+                                                    texel / static_cast<double>(1 << level));
+            sum += v;
+            sum_sq += v * v;
+        }
+        const double mean = sum / sub_cell_samples;
+        noise.shape_residual_variance.push_back(
+            static_cast<float>(std::max(sum_sq / sub_cell_samples - mean * mean, 0.0)));
+    }
+    // The Gaussianising table (header): per row the empirical CDF (mid-ranks) of the standardised perturbation.
+    std::vector<double> standard(sub_cell_samples);
+    for (int row = 1; row < cloud_sub_cell_rows; ++row) {
+        const double state = static_cast<double>(row) / cloud_sub_cell_rows_per_state;
+        const double mu = cloud_detail_perturbation_mean(noise, state);
+        const double sigma = cloud_detail_perturbation_sigma(noise, state);
+        for (double& x : standard) {
+            const math::Vec3 position{random.next(), random.next(), random.next()};
+            x = (cloud_shape_value(noise, 0.0, position * cloud_detail_tile_m, state) - mu) / sigma;
+        }
+        std::sort(standard.begin(), standard.end());
+        auto& out = noise.detail_gaussian[static_cast<std::size_t>(row)];
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            const double x = cloud_sub_cell_standard_range * (2.0 * static_cast<double>(i) / (out.size() - 1) - 1.0);
+            const auto first = standard.begin(), last = standard.end();
+            const double below = static_cast<double>(std::lower_bound(first, last, x) - first);
+            const double at_or_below = static_cast<double>(std::upper_bound(first, last, x) - first);
+            const double cdf = std::clamp(0.5 * (below + at_or_below) / sub_cell_samples, 0.5 / sub_cell_samples,
+                                          1.0 - 0.5 / sub_cell_samples);
+            out[i] = static_cast<float>(cloud_normal_quantile(cdf));
+        }
+    }
+    // Up to state 1 only level 0 acts, P scales with its weight: the standardised distribution is row 1's.
+    noise.detail_gaussian[0] = noise.detail_gaussian[1];
     return noise;
+}
+
+double cloud_detail_gaussianised(const CloudNoise& noise, double perturbation, double detail_state) {
+    const double sigma = cloud_detail_perturbation_sigma(noise, detail_state);
+    if (!(sigma > 0.0)) return 0.0;
+    const double x = (perturbation - cloud_detail_perturbation_mean(noise, detail_state)) / sigma;
+    const auto& table = noise.detail_gaussian;
+    const double columns = static_cast<double>(table[0].size() - 1);
+    const double u = std::clamp((x / cloud_sub_cell_standard_range + 1.0) * 0.5 * columns, 0.0, columns);
+    const double r = std::clamp(detail_state * cloud_sub_cell_rows_per_state, 0.0, cloud_sub_cell_rows - 1.0);
+    const int u0 = std::min(static_cast<int>(u), static_cast<int>(columns) - 1);
+    const int r0 = std::min(static_cast<int>(r), cloud_sub_cell_rows - 2);
+    const auto at = [&](int row, int col) {
+        return static_cast<double>(table[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)]);
+    };
+    const double fu = u - u0, fr = r - r0;
+    const double lo = lerp(at(r0, u0), at(r0, u0 + 1), fu), hi = lerp(at(r0 + 1, u0), at(r0 + 1, u0 + 1), fu);
+    return sigma * lerp(lo, hi, fr);
+}
+
+double cloud_normal_cdf(double x) { return 0.5 * std::erfc(-x / std::sqrt(2.0)); }
+
+double cloud_normal_quantile(double p) {
+    // Acklam's rational approximation (relative error 1.15e-9), one Halley step on the CDF.
+    static constexpr double a[6] = {-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+                                    1.383577518672690e+02,  -3.066479806614716e+01, 2.506628277459239e+00};
+    static constexpr double b[5] = {-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+                                    6.680131188771972e+01,  -1.328068155288572e+01};
+    static constexpr double c[6] = {-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+                                    -2.549732539343734e+00, 4.374664141464968e+00,  2.938163982698783e+00};
+    static constexpr double d[4] = {7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+                                    3.754408661907416e+00};
+    p = std::clamp(p, 1e-300, 1.0 - 1e-16);
+    const double low = 0.02425;
+    double x;
+    if (p < low) {
+        const double q = std::sqrt(-2.0 * std::log(p));
+        x = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0);
+    } else if (p <= 1.0 - low) {
+        const double q = p - 0.5, r = q * q;
+        x = (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+            (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0);
+    } else {
+        const double q = std::sqrt(-2.0 * std::log(1.0 - p));
+        x = -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0);
+    }
+    const double e = cloud_normal_cdf(x) - p;
+    const double u = e * std::sqrt(2.0 * constants::pi) * std::exp(0.5 * x * x);
+    return x - u / (1.0 + 0.5 * x * u);
+}
+
+double cloud_sub_cell_threshold(double cover, double edge_spread, double value_sigma) {
+    return -std::sqrt(edge_spread * edge_spread + value_sigma * value_sigma) * cloud_normal_quantile(cover);
+}
+
+double cloud_sub_cell_share(double value, double threshold, double edge_spread) {
+    return cloud_normal_cdf((value - threshold) / edge_spread);
+}
+
+double cloud_detail_perturbation_mean(const CloudNoise& noise, double detail_state) {
+    double mean = 0.0;
+    for (int k = 0; k < cloud_detail_levels; ++k) {
+        mean += std::clamp(detail_state - k, 0.0, 1.0) * noise.detail_level_mean[static_cast<std::size_t>(k)];
+    }
+    return mean;
+}
+
+double cloud_detail_perturbation_sigma(const CloudNoise& noise, double detail_state) {
+    double variance = 0.0;
+    for (int k = 0; k < cloud_detail_levels; ++k) {
+        const double w = std::clamp(detail_state - k, 0.0, 1.0);
+        variance += w * w * noise.detail_level_variance[static_cast<std::size_t>(k)];
+    }
+    return std::sqrt(variance);
+}
+
+double cloud_shape_residual_sigma(const CloudNoise& noise, double footprint_level, double cell_level) {
+    const auto variance_at = [&](double level) {
+        const double top = static_cast<double>(noise.shape_residual_variance.size() - 1);
+        const double l = std::clamp(level, 0.0, top);
+        const int lo = static_cast<int>(std::floor(l)), hi = std::min(lo + 1, static_cast<int>(top));
+        return lerp(noise.shape_residual_variance[static_cast<std::size_t>(lo)],
+                    noise.shape_residual_variance[static_cast<std::size_t>(hi)], l - lo);
+    };
+    return std::sqrt(std::max(variance_at(cell_level) - variance_at(footprint_level), 0.0));
 }
 
 }  // namespace starsim::environment

@@ -91,6 +91,31 @@
 // features, the level-0 detail's middle cell): the distortion is a smooth field at the detail's coarsest scale; 8 bits
 // resolve the displacement to 1/127 of its amplitude (2 m at 250 m), below the finest detail cell (8 m).
 //
+// Sub-cell field (cloud world-volume plan Task 7, controller ruling R1): the world volume bakes each cell's mean
+// density rho and in-cloud extinction sigma_c; below the cell's scale the march redistributes the cover c = rho /
+// sigma_c by a threshold (probit) field
+//   density = sigma_c Phi((v - t) / s_e),   t = -sqrt(s_e^2 + sigma_v^2) Phi^-1(c),
+// v the zero-mean sub-cell value (the shape's residual above the cell's scale plus the detail perturbation less its
+// mean), sigma_v its standard deviation, s_e the edge's spread in value units (the smoothstep ramp of width w has the
+// slope distribution 6 x (1 - x) of standard deviation w / sqrt(20): s_e = w / sqrt(20), cloud_sub_cell_edge_spread).
+// For a Gaussian v the cell mean is exactly c (E Phi((v - t) / s) = Phi(-t / sqrt(s^2 + sigma_v^2))): the water is
+// kept per cell, the field is graded (= c everywhere, the bake) as sigma_v -> 0 and a binary cover c as sigma_v >> s_e,
+// and continuous at c = 0 and 1. The spreading form (graded c + v) put the same water into thin haze and raised the
+// alpha (the cover fraction is what the bake's partial cells mean: a cover c at full density, not haze).
+// v is not Gaussian (eroded Worley octaves: with the Gaussian t the real cover was off by up to 0.053 at the detail's
+// full state), so the detail perturbation P is Gaussianised by its own distribution before it enters v - a monotone
+// map, the field's level sets (the shapes) stay: P_g = sigma_P G_L((P - mu_P) / sigma_P), G_L = Phi^-1 o F_L with F_L
+// the CDF of the standardised P at the state L (table detail_gaussian: rows at L = r / 4, columns the standardised
+// value over +-cloud_sub_cell_standard_range, linear in both as the GPU's filter). mu_P = sum_k w_k mu_k and
+// sigma_P^2 = sum_k w_k^2 var_k from the levels' eroded terms e_k(a_k (d - detail_mean)) at uniform random positions
+// (trilinear, as the GPU reads them; the levels are 4 x apart in scale: independent to the test's 10 %). The shape's
+// residual above the cell's scale (the shape at the footprint's level less the cell's) has the variance R(l_cell) of
+// s_0 - s_l (s_l: the R channel at shape level l, 0 the texture, l >= 1 its mips; trilinear at the same point; linear
+// in l between the integer levels) - exact for the footprint's level 0, which is the volume's case (the shape
+// prefilter starts at a 3.5 km footprint); above it sqrt(max(R(l_cell) - R(l_f), 0)) (the variance of s_0 - s_l is not
+// var(s_0) - var(s_l): the trilinear mip is no projection - that form gave 0.136 for a measured 0.072). The residual
+// is used as is (a difference of smooth Perlin octaves: near Gaussian).
+
 // Blue noise (task 8 amendment, no grain): a size^2 tileable rank mask (void-and-cluster, Ulichney 1993, "The
 // void-and-cluster method for dither array generation", Proc. SPIE 1913, 332; Gaussian energy sigma 1.5 on the
 // torus), byte = rank x 256 / size^2 (each value equally often). The shader offsets the raymarch start per pixel by it
@@ -215,6 +240,13 @@ inline constexpr int cloud_shape_prefilter_rows = cloud_shape_prefilter_levels *
 // [E] The curl texture (header): texels per axis and the potential's lattice period over the tile.
 inline constexpr int cloud_curl_size = 32;
 inline constexpr int cloud_curl_period = 4;
+// The sub-cell field (header): the edge spread per edge width (1 / sqrt(20)).
+inline constexpr double cloud_sub_cell_edge_spread = 0.22360679774997896;  // 1 / sqrt(20) (above)
+// [E] The Gaussianising table (above): rows per detail state, the standardised range (the table's tails clamp: P
+// beyond 6 sigma has a share below 1e-6 at any c in 0.05 .. 0.95).
+inline constexpr int cloud_sub_cell_rows_per_state = 4;
+inline constexpr int cloud_sub_cell_rows = cloud_detail_levels * cloud_sub_cell_rows_per_state + 1;
+inline constexpr double cloud_sub_cell_standard_range = 6.0;
 
 struct CloudNoise {
     int shape_size = 128, detail_size = 32, blue_noise_size = 64;
@@ -233,6 +265,11 @@ struct CloudNoise {
     std::array<std::array<float, 256>, cloud_shape_prefilter_rows> prefilter_edge_mean{};
     // The curl texture (header): cloud_curl_size^3 RGB8, x fastest.
     std::vector<std::uint8_t> curl_rgb;
+    // Sub-cell field statistics (header): per detail level the mean and variance of its eroded term; per shape level
+    // l = 0 .. log2(shape_size) the variance of the R channel's residual s_0 - s_l (0 at l = 0).
+    std::array<float, cloud_detail_levels> detail_level_mean{}, detail_level_variance{};
+    std::vector<float> shape_residual_variance;
+    std::array<std::array<float, 256>, cloud_sub_cell_rows> detail_gaussian{};  // [row][column] G (header)
 };
 
 CloudNoise generate_cloud_noise();
@@ -279,6 +316,21 @@ double cloud_prefilter_edge_mean(const CloudNoise& noise, double level, int code
 // The curl field (header) before its 8-bit storage: size^3 vectors (x, y, z interleaved, x fastest), the largest
 // component 1.
 std::vector<float> cloud_curl_field(int size = cloud_curl_size, int period = cloud_curl_period);
+
+// Sub-cell field (header): the standard normal CDF Phi and its inverse (Acklam's rational approximation refined by one
+// Halley step: |error| < 1e-12 on (0, 1)); the threshold t of the cover c in (0, 1) for the edge spread s_e and the
+// value's standard deviation sigma_v; the share of in-cloud extinction Phi((v - t) / s_e) at the value v; the
+// perturbation's mean and standard deviation at the detail state (from the per-level statistics); its Gaussianised
+// value P_g at the state (the table, bilinear as the GPU); the shape residual's standard deviation between the
+// footprint's and the cell's shape level (0 where the cell's is not coarser).
+double cloud_normal_cdf(double x);
+double cloud_normal_quantile(double p);
+double cloud_sub_cell_threshold(double cover, double edge_spread, double value_sigma);
+double cloud_sub_cell_share(double value, double threshold, double edge_spread);
+double cloud_detail_perturbation_mean(const CloudNoise& noise, double detail_state);
+double cloud_detail_perturbation_sigma(const CloudNoise& noise, double detail_state);
+double cloud_detail_gaussianised(const CloudNoise& noise, double perturbation, double detail_state);
+double cloud_shape_residual_sigma(const CloudNoise& noise, double footprint_level, double cell_level);
 
 // Void-and-cluster blue-noise rank mask (header) of size x size, deterministic.
 std::vector<std::uint8_t> generate_blue_noise(int size);
