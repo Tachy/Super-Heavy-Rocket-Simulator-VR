@@ -22,3 +22,27 @@ throttle_invert = true
 
 # Keyboard (always active): W/S pitch, A/D yaw, Q/E roll, Shift/Ctrl throttle up/down,
 # I ignition, L release clamps (liftoff), K engine cutoff, G stage separation, M control mode.
+
+# Free camera (view "Freie Kamera" in the time panel): 6 DOF, rotation on the stick, translation on the throttle.
+# [E] Axis indices follow the measured table above (stick 0/1/2, throttle mini-stick 0/1, rocker 5); the signs of the
+# throttle axes are not measured - flip *_invert when a direction is wrong (the free camera shows a live axis readout).
+# Speed per axis: 0 inside the dead zone, else v_min * (v_max / v_min)^((|d| - dz) / (1 - dz)) (logarithmic).
+[free_camera]
+rotation_max_deg_s = 90.0   # full deflection
+rotation_expo = 0.3         # 0 = linear, 1 = cubic
+rotation_deadzone = 0.05
+speed_min_mps = 0.1         # just outside the dead zone
+speed_max_mps = 1.0e7       # full deflection (Earth-Moon in under a minute)
+speed_deadzone = 0.05
+roll_axis = 0               # stick left/right
+roll_invert = false
+pitch_axis = 1              # stick forward = nose down
+pitch_invert = false
+yaw_axis = 2                # stick twist
+yaw_invert = false
+forward_axis = 5            # throttle rocker: right = forward
+forward_invert = false
+strafe_axis = 0             # throttle mini-stick left/right
+strafe_invert = false
+vertical_axis = 1           # throttle mini-stick up/down (up = -1)
+vertical_invert = true

@@ -117,6 +117,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   throttle lever) only exist when `config/sdl_gamecontrollerdb.txt` is loaded BEFORE engine start via
   `SDL_GAMECONTROLLERCONFIG_FILE` (done by `Start-Desktop.cmd`); Godot's built-in mappings drop them and
   `Input.add_joy_mapping` at runtime has no effect. Probe axes: `res://tests/joy_probe.gd`.
+- Free camera (time panel view "Freie Kamera", `World.FOCUS_FREE`): 6 DOF on the HOTAS (`game/world/free_camera_control.gd`,
+  curves/defaults `[free_camera]` in `input_hotas.toml`); pose kept body-fixed near Earth/Moon (`free_camera_pose.gd`);
+  setup wizard "Achsen einrichten" (`ui/free_camera_wizard.gd`, logic `free_camera_calibration.gd`) saves the measured
+  axes to `user://free_camera_axes.json`, which replaces the file's indices. Tests: `tests/free_camera_test.gd`.
 - Start the game with `Start-Desktop.cmd` (repo root); `Start-VR.cmd` starts the OpenXR mode (`openxr/enabled=false` in
   project.godot: headless runs never touch the runtime).
 - External view (plan 2026-10-22): `game/xr/` (`xr_manager.gd`: start modes, F12 recentre + automatic 2 s after start;

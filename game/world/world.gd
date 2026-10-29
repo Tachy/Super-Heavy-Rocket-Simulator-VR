@@ -29,6 +29,7 @@ const FOCUS_EARTH := "earth"
 const FOCUS_MOON := "moon"
 const FOCUS_EARTH_MOON := "earth_moon"
 const FOCUS_VEHICLE := "vehicle"
+const FOCUS_FREE := "free_camera"  ## detached camera flown with the HOTAS (FreeCameraControl)
 
 var core := StarsimCore.new()
 var clock := SimClock.new()
@@ -52,6 +53,10 @@ var earth_label := MapLabel.new()
 var moon_label := MapLabel.new()
 var sites: Array = []  ## launch sites from config/launch_sites.toml
 var focus := FOCUS_EARTH
+var free_control := FreeCameraControl.new()  ## HOTAS mapping of the free camera
+var free_pose := FreeCameraPose.new()  ## its pose (body-fixed near a body)
+var free_wizard_requested := false  ## set on entering the free camera while no axis mapping exists (a joypad is connected)
+var free_camera_text := ""  ## German axis readout while the free camera is the view, else ""
 var ground_site: Dictionary = {}
 var spice_ok := false  ## SPICE kernels opened in _ready
 var terrain_loaded: Dictionary = {}  ## core.load_terrain's result: {earth, moon}
@@ -81,6 +86,7 @@ func _ready() -> void:
 	spice_ok = true
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	flight.setup(Paths.config_dir())
+	free_control.setup(Paths.config_dir())
 	add_child(flight)
 	add_child(view_target)
 
@@ -339,8 +345,13 @@ func set_ground_site(site: Dictionary) -> void:
 
 func set_focus(new_focus: String) -> void:
 	_view_jumped()
+	var was_free := focus == FOCUS_FREE
 	focus = new_focus
 	ground_site = {}
+	free_camera_text = ""
+	if new_focus == FOCUS_FREE:
+		_enter_free_camera(was_free)
+		return
 	camera.mode = OrbitCamera.Mode.ORBIT
 	moon_orbit.visible = focus == FOCUS_EARTH_MOON
 	earth_label.visible = moon_orbit.visible
@@ -399,8 +410,35 @@ func _aim_ground_camera_at(site: Dictionary) -> void:
 	camera.elevation = asin(clampf(d.dot(up), -1.0, 1.0)) + deg_to_rad(VIEWPOINT_AIM_RAISE_DEG)
 
 
+## The free camera starts where the view is now (position and orientation); selecting it again keeps its pose.
+func _enter_free_camera(already_free: bool) -> void:
+	moon_orbit.visible = false
+	earth_label.visible = false
+	moon_label.visible = false
+	if already_free:
+		return
+	free_wizard_requested = not free_control.has_calibration() and not Input.get_connected_joypads().is_empty()
+	free_pose.reset_to(camera.position_gcrf_m, camera.basis, earth.fixed_to_gcrf, moon.fixed_to_gcrf, moon_gcrf_m)
+	camera.mode = OrbitCamera.Mode.FREE
+	camera.free_basis = camera.basis
+
+
+## One frame of the free camera: the HOTAS command (real-time delta, independent of the time warp) moves its pose.
+func _update_free_camera() -> void:
+	var command := free_control.poll()
+	free_pose.turn(camera.free_look_rad)  # mouse look (desktop)
+	camera.free_look_rad = Vector3.ZERO
+	var pose := free_pose.step(command["rates"], command["velocity"], _delta, earth.fixed_to_gcrf, moon.fixed_to_gcrf,
+			moon_gcrf_m)
+	camera.position_gcrf_m = pose["position_gcrf_m"]
+	camera.free_basis = pose["basis"]
+	free_camera_text = free_control.readout_text()
+
+
 func _update_camera(t: float) -> void:
-	if camera.mode == OrbitCamera.Mode.GROUND:
+	if camera.mode == OrbitCamera.Mode.FREE:
+		_update_free_camera()
+	elif camera.mode == OrbitCamera.Mode.GROUND:
 		var lat := deg_to_rad(ground_site["latitude_deg"])
 		var lon := deg_to_rad(ground_site["longitude_deg"])
 		var eye_m: float = ground_site["height_m"] + float(ground_site.get("eye_height_m", GROUND_EYE_HEIGHT_M))

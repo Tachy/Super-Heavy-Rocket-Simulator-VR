@@ -9,13 +9,16 @@ extends Camera3D
 ## around (ground); wheel = zoom x1.15 per notch (orbit modes); the left button stays free.
 ## VR: this camera is not current; its pose is the XR base pose (XrManager.set_base), the headset moves on top.
 
-enum Mode { ORBIT, GROUND }
+## FREE: the pose is the camera's own (position_gcrf_m, free_basis), flown by World with the HOTAS (FreeCameraControl).
+enum Mode { ORBIT, GROUND, FREE }
 
 ## [E] Wheel zoom limits: a few metres from a vehicle out to ~10 lunar distances.
 const MIN_DISTANCE_M := 5.0
 const MAX_DISTANCE_M := 4.0e9
 ## [E] Mouse drag rate, rad per pixel.
 const DRAG_RAD_PER_PX := 0.005
+## [E] Near plane of the free camera (m): it flies through clouds and close past surfaces.
+const FREE_NEAR_M := 0.5
 ## [E] Ground mode elevation limit (rad).
 const GROUND_ELEVATION_LIMIT := 1.5
 
@@ -37,6 +40,8 @@ var site_east_gcrf := Vector3.RIGHT
 var azimuth := deg_to_rad(90.0)
 var elevation := deg_to_rad(5.0)
 
+var free_basis := Basis.IDENTITY  ## free mode: orientation in render axes
+var free_look_rad := Vector3.ZERO  ## free mode: mouse turn (pitch, yaw) since World last took it
 var position_gcrf_m := Vector3.ZERO  ## true camera position, read by the world after update()
 
 var _rotating := false
@@ -69,7 +74,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				distance_m = CameraMath.zoom(distance_m, -1, MIN_DISTANCE_M, MAX_DISTANCE_M)
 	elif event is InputEventMouseMotion and _rotating:
 		var motion := (event as InputEventMouseMotion).relative * DRAG_RAD_PER_PX
-		if mode == Mode.ORBIT:
+		if mode == Mode.FREE:
+			free_look_rad += Vector3(-motion.y, -motion.x, 0.0)
+		elif mode == Mode.ORBIT:
 			yaw -= motion.x
 			pitch = clampf(pitch - motion.y, -CameraMath.PITCH_LIMIT, CameraMath.PITCH_LIMIT)
 		else:
@@ -86,6 +93,9 @@ func update_pose(delta_s: float = 0.0) -> void:
 		position_gcrf_m = target_gcrf_m + Frames.from_render(CameraMath.orbit_offset(_frame, yaw, pitch, distance_m))
 		view = CameraMath.orbit_basis(_frame, yaw, pitch)
 		near = clampf(distance_m * 1e-4, 1.0, 1000.0)
+	elif mode == Mode.FREE:
+		view = free_basis
+		near = FREE_NEAR_M
 	else:
 		position_gcrf_m = site_gcrf_m
 		var horizontal := site_north_gcrf * cos(azimuth) + site_east_gcrf * sin(azimuth)

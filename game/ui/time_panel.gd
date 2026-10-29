@@ -8,6 +8,7 @@ const FOCUS_OPTIONS := [
 	["Mond", World.FOCUS_MOON],
 	["Erde-Mond-System", World.FOCUS_EARTH_MOON],
 	["Fahrzeug", World.FOCUS_VEHICLE],
+	["Freie Kamera", World.FOCUS_FREE],  ## HOTAS 6 DOF (config/input_hotas.toml [free_camera])
 ]
 const VEHICLE_FOCUS_INDEX := 3  ## FOCUS_OPTIONS entry "Fahrzeug"
 const PRESETS := [
@@ -37,6 +38,8 @@ var _mission_list: Array[Dictionary] = []
 var _start_button: Button
 var _start_status := Label.new()
 var _warp_before_pause := 1.0
+var _axes_button: Button
+var _wizard := FreeCameraWizard.new()
 var _rate := UiRate.new()  ## the readouts at 15 Hz (UiRate)
 
 
@@ -71,6 +74,11 @@ func _ready() -> void:
 		_focus.add_item("%s (%s)" % [site["name"], "Aussicht" if site.has("viewpoint") else "Boden"])
 	_focus.item_selected.connect(_on_focus_selected)
 	box.add_child(_focus)
+	_axes_button = _button("Achsen einrichten", func() -> void: _wizard.open())
+	_axes_button.visible = false
+	box.add_child(_axes_button)
+	_wizard.control = world.free_control
+	box.add_child(_wizard)
 
 	for preset in PRESETS:
 		_presets.add_item(preset[0])
@@ -117,6 +125,12 @@ func _process_unprofiled(_delta: float) -> void:
 	if not world.core.is_open():
 		_utc_label.text = "SPICE-Daten fehlen: python tools/data_pipeline/fetch.py"
 		return
+	_axes_button.visible = world.focus == World.FOCUS_FREE
+	if world.focus != World.FOCUS_FREE:
+		_wizard.cancel()
+	elif world.free_wizard_requested:  # first use without a saved mapping
+		world.free_wizard_requested = false
+		_wizard.open()
 	var t := world.clock.tdb_s
 	if not _rate.due(_delta, t, world.clock.warp):
 		return
@@ -135,6 +149,10 @@ func _process_unprofiled(_delta: float) -> void:
 	if world.atmosphere.status_text != "":
 		lines.append(world.atmosphere.status_text)
 	lines.append(world.weather.status_text())
+	if world.free_camera_text != "":
+		lines.append(world.free_camera_text)
+	if world.weather.enabled:
+		lines.append(world.clouds.status_line())  # the cloud march's live toggles (F7 / F8, CloudLayer)
 	var frame_rate := frame_rate_line(Engine.get_frames_per_second()) if show_frame_rate else ""
 	if frame_rate != "":
 		lines.append(frame_rate)
