@@ -1152,8 +1152,12 @@ func _apply_march_method() -> void:
 	effect.set_march_method(march_method, volume_needed())
 
 
-## --cloud_method=old|hybrid|hybrid_old_light and --cloud_divisor=<x> (the live toggles' start values).
+## --cloud_method=old|hybrid|hybrid_old_light and --cloud_divisor=<x> (the live toggles' start values). The VR game
+## (--vr, Start-VR.cmd) starts on the old march without the view cache (user 2026-10-29: the plain start command runs
+## the current version).
 func _apply_cloud_arguments(args: PackedStringArray) -> void:
+	if "--vr" in args:
+		march_method = CloudEffect.MarchMethod.OLD
 	for arg in args:
 		if arg.begins_with("--cloud_method="):
 			var name := arg.trim_prefix("--cloud_method=")
