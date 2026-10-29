@@ -67,6 +67,8 @@ var clouds := CloudLayer.new()  ## the volumetric clouds near the camera from th
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
+var _earth_heights: HeightSource  ## the terrains' height sources (SurfaceClearance)
+var _moon_heights: HeightSource
 var sun_apparent_from_earth_m := Vector3.ZERO
 var moon_apparent_from_earth_m := Vector3.ZERO
 
@@ -469,6 +471,23 @@ func _update_camera(t: float) -> void:
 		camera.target_gcrf_m = moon_gcrf_m if focus == FOCUS_MOON else Vector3.ZERO
 		camera.reference_body = ""
 	camera.update_pose(_delta)
+	_keep_camera_above_surface()
+
+
+## No camera closer than SurfaceClearance.MIN_CLEARANCE_M to the Earth's or the Moon's terrain (user 2026-10-29): a
+## pose below it is moved out along the local vertical; the free camera's own pose follows (no drift into the ground).
+func _keep_camera_above_surface() -> void:
+	var p := camera.position_gcrf_m
+	var on_moon := (p - moon_gcrf_m).length() - MOON_RADIUS_M < p.length() - EARTH_SEMI_MAJOR_AXIS_M
+	var rotation := moon.fixed_to_gcrf if on_moon else earth.fixed_to_gcrf
+	var center := moon_gcrf_m if on_moon else Vector3.ZERO
+	var fixed := rotation.transposed() * (p - center)
+	var kept := SurfaceClearance.clamp_fixed(fixed, _moon_heights if on_moon else _earth_heights)
+	if kept == fixed:
+		return
+	camera.position_gcrf_m = center + rotation * kept
+	if camera.mode == OrbitCamera.Mode.FREE:
+		free_pose.reset_to(camera.position_gcrf_m, camera.free_basis, earth.fixed_to_gcrf, moon.fixed_to_gcrf, moon_gcrf_m)
 
 
 ## Orbit camera on the viewed object's CG, with the local vertical of the body it is flying around.
@@ -624,6 +643,7 @@ func _setup_bodies(data_dir: String) -> void:
 func _setup_earth_terrain(data_dir: String) -> void:
 	terrain_loaded = core.load_terrain(Paths.config_dir())  # once, on the main thread, before any worker build
 	var heights := HeightSource.new()
+	_earth_heights = heights
 	heights.body = "earth"
 	heights.core = core
 	heights.sites = sites
@@ -648,6 +668,7 @@ func _setup_earth_terrain(data_dir: String) -> void:
 ## After _setup_earth_terrain (which loads the core's terrain).
 func _setup_moon_terrain() -> void:
 	var heights := HeightSource.new()
+	_moon_heights = heights
 	heights.body = "moon"
 	heights.core = core
 	var material := ShaderMaterial.new()
