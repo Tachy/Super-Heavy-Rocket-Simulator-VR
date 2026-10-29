@@ -56,7 +56,6 @@ var focus := FOCUS_EARTH
 var free_control := FreeCameraControl.new()  ## HOTAS mapping of the free camera
 var free_pose := FreeCameraPose.new()  ## its pose (body-fixed near a body)
 var free_wizard_requested := false  ## set on entering the free camera while no axis mapping exists (a joypad is connected)
-var free_camera_text := ""  ## German axis readout while the free camera is the view, else ""
 var ground_site: Dictionary = {}
 var spice_ok := false  ## SPICE kernels opened in _ready
 var terrain_loaded: Dictionary = {}  ## core.load_terrain's result: {earth, moon}
@@ -348,7 +347,6 @@ func set_focus(new_focus: String) -> void:
 	var was_free := focus == FOCUS_FREE
 	focus = new_focus
 	ground_site = {}
-	free_camera_text = ""
 	if new_focus == FOCUS_FREE:
 		_enter_free_camera(was_free)
 		return
@@ -425,14 +423,28 @@ func _enter_free_camera(already_free: bool) -> void:
 
 ## One frame of the free camera: the HOTAS command (real-time delta, independent of the time warp) moves its pose.
 func _update_free_camera() -> void:
-	var command := free_control.poll()
+	var command := free_control.poll(_free_surface_distance_m())
 	free_pose.turn(camera.free_look_rad)  # mouse look (desktop)
 	camera.free_look_rad = Vector3.ZERO
 	var pose := free_pose.step(command["rates"], command["velocity"], _delta, earth.fixed_to_gcrf, moon.fixed_to_gcrf,
 			moon_gcrf_m)
 	camera.position_gcrf_m = pose["position_gcrf_m"]
 	camera.free_basis = pose["basis"]
-	free_camera_text = free_control.readout_text()
+
+
+## The free camera's distance to the nearest surface of Earth (WGS84 ellipsoid, no terrain), the Moon (sphere) and the
+## Sun (sphere): its translation speed scales with it (FreeCameraControl.poll).
+func _free_surface_distance_m() -> float:
+	var p := camera.position_gcrf_m
+	var r := p.length()
+	var sin_lat := p.z / maxf(r, 1.0)  # geocentric; GCRF z ~ Earth's axis (precession is far below this use)
+	var b := Atmosphere.WGS84_A_M / Atmosphere.POLAR_STRETCH
+	var a := Atmosphere.WGS84_A_M
+	var surface := a * b / sqrt(b * b * (1.0 - sin_lat * sin_lat) + a * a * sin_lat * sin_lat)
+	var earth := r - surface
+	var moon := (p - moon_gcrf_m).length() - MOON_RADIUS_M
+	var sun := (p - sun_apparent_from_earth_m).length() - SUN_RADIUS_M
+	return minf(earth, minf(moon, sun))
 
 
 func _update_camera(t: float) -> void:

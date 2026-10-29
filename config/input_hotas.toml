@@ -31,10 +31,13 @@ throttle_invert = true
 rotation_max_deg_s = 90.0   # full deflection
 rotation_expo = 0.3         # 0 = linear, 1 = cubic
 rotation_deadzone = 0.05
-speed_min_mps = 0.1         # just outside the dead zone
-speed_max_mps = 1.0e7       # full deflection (Earth-Moon in under a minute)
+# Translation (all three axes, user 2026-10-29): full deflection = distance to the nearest surface (Earth ellipsoid,
+# Moon, Sun) x speed_per_distance_hz (at least speed_floor_mps); logarithmic over speed_decades below full deflection.
+# 1 Hz: at 9 km altitude 9 km/s; flying at a surface slows down exponentially.
+speed_per_distance_hz = 1.0
+speed_floor_mps = 0.5
+speed_decades = 3.0
 speed_deadzone = 0.05
-shift_max_mps = 1000.0      # strafe and up/down: LINEAR, full deflection (user 2026-10-29); speed_min/max = rocker only
 roll_axis = 0               # stick left/right
 roll_invert = false
 pitch_axis = 1              # stick forward = nose down

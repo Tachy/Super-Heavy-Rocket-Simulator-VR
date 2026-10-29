@@ -7,7 +7,7 @@ extends RefCounted
 ## Fallbacks when the file lacks a key (same numbers as the shipped file).
 const DEFAULTS := {
 	"rotation_max_deg_s": 90.0, "rotation_expo": 0.3, "rotation_deadzone": 0.05,
-	"speed_min_mps": 0.1, "speed_max_mps": 1.0e7, "speed_deadzone": 0.05, "shift_max_mps": 1000.0,
+	"speed_min_mps": 0.1, "speed_max_mps": 1.0e7, "speed_deadzone": 0.05, "speed_per_distance_hz": 1.0, "speed_floor_mps": 0.5, "speed_decades": 3.0,
 	"roll_axis": 0, "pitch_axis": 1, "yaw_axis": 2, "forward_axis": 5, "strafe_axis": 0, "vertical_axis": 1,
 }
 
@@ -53,14 +53,6 @@ static func log_speed_mps(value: float, deadzone: float, v_min_mps: float, v_max
 	return signf(value) * v_min_mps * pow(v_max_mps / v_min_mps, t)
 
 
-## Speed of a linear axis: 0 inside the dead zone, else the dead-zone-rescaled deflection times v_max, signed.
-static func linear_speed_mps(value: float, deadzone: float, v_max_mps: float) -> float:
-	var magnitude := absf(value)
-	if magnitude <= deadzone:
-		return 0.0
-	return signf(value) * minf((magnitude - deadzone) / (1.0 - deadzone), 1.0) * v_max_mps
-
-
 ## Rotation rate of a stick axis: 0 inside the dead zone, else the dead-zone-rescaled deflection through the expo curve
 ## ((1 - expo) x + expo x^3) times the maximum rate, signed.
 static func rotation_rate_rad_s(value: float, deadzone: float, expo: float, max_rate_rad_s: float) -> float:
@@ -82,7 +74,7 @@ static func rotate_local(basis: Basis, rates: Vector3, delta_s: float) -> Basis:
 
 ## The current command: {rates: Vector3 (pitch, yaw, roll about the camera's axes, rad/s; stick forward = nose down,
 ## twist right = turn right, stick right = roll right), velocity: Vector3 (camera axes x right, y up, z back; m/s)}.
-func poll() -> Dictionary:
+func poll(surface_distance_m := 1.0e6) -> Dictionary:
 	_missing_devices = PackedStringArray()
 	_devices["stick"] = _find_device(_stick.get("device_name", ""))
 	_devices["throttle"] = _find_device(_throttle.get("device_name", ""))
@@ -92,14 +84,14 @@ func poll() -> Dictionary:
 	var roll := rotation_rate_rad_s(_axis("stick", "roll"), rotation_deadzone, expo, max_rate)
 	var pitch := rotation_rate_rad_s(_axis("stick", "pitch"), rotation_deadzone, expo, max_rate)
 	var yaw := rotation_rate_rad_s(_axis("stick", "yaw"), rotation_deadzone, expo, max_rate)
-	var v_min := _number("speed_min_mps")
-	var v_max := _number("speed_max_mps")
+	# All three translation axes (user 2026-10-29): full deflection = the distance to the nearest surface (Earth, Moon,
+	# Sun) x speed_per_distance_hz, at least speed_floor_mps; logarithmic over speed_decades below that.
+	var v_max := maxf(surface_distance_m * _number("speed_per_distance_hz"), _number("speed_floor_mps"))
+	var v_min := v_max * pow(10.0, -_number("speed_decades"))
 	var speed_deadzone := _number("speed_deadzone")
 	var forward := log_speed_mps(_axis("throttle", "forward"), speed_deadzone, v_min, v_max)
-	# Strafe and up / down: linear (user 2026-10-29), full deflection = shift_max_mps.
-	var shift_max := _number("shift_max_mps")
-	var strafe := linear_speed_mps(_axis("throttle", "strafe"), speed_deadzone, shift_max)
-	var vertical := linear_speed_mps(_axis("throttle", "vertical"), speed_deadzone, shift_max)
+	var strafe := log_speed_mps(_axis("throttle", "strafe"), speed_deadzone, v_min, v_max)
+	var vertical := log_speed_mps(_axis("throttle", "vertical"), speed_deadzone, v_min, v_max)
 	# Right-handed rotation about the camera axes: stick forward (value -1) is nose down = negative about +x; twist / roll
 	# to the right are negative about +y / +z (the camera looks along -z, y is up).
 	return {"rates": Vector3(pitch, -yaw, -roll), "velocity": Vector3(strafe, vertical, -forward)}
