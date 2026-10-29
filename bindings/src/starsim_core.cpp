@@ -867,6 +867,8 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         result["edge_width_max_value"] = noise.edge_width_max_value;
         result["blue_noise"] = bytes(noise.blue_noise);
         result["blue_noise_size"] = static_cast<int64_t>(noise.blue_noise_size);
+        result["curl"] = bytes(noise.curl_rgb);
+        result["curl_size"] = static_cast<int64_t>(environment::cloud_curl_size);
         godot::Array mips;
         for (const auto& level : noise.shape_mips) mips.push_back(bytes(level));
         result["shape_mips"] = mips;

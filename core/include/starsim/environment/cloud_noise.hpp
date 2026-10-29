@@ -81,6 +81,16 @@
 // lambda = r / cloud_shape_prefilter_rows_per_level, linear between them; row 0 is the state-0 row (the unfiltered
 // shape). The detail is gone long before f_s (level 0 fades out at 125 m), so the prefilter acts on the shape alone.
 //
+// Curl texture (cloud world-volume plan Task 7, Nubis 2015-2023 practice: wispy, torn edges): a divergence-free vector
+// field c = curl(psi) that distorts the detail lookup (the shader's edge_curl); psi = three tileable Perlin noises
+// (another seed each) of lattice period cloud_curl_period over the tile, the curl taken by central differences on the
+// periodic curl_size^3 grid (the discrete operators commute: the stored field's central-difference divergence is 0 up
+// to float rounding), scaled so its largest component is 1, stored as RGB8 (byte = 127.5 (1 + c)). A divergence-free
+// displacement moves the detail without compressing it: its statistics, hence the tables' coverage and water, stay.
+// [E] curl_size 32 (RGB8, 98 KB) over the level-0 detail tile (1000 m: 31 m texels) with lattice period 4 (~250 m
+// features, the level-0 detail's middle cell): the distortion is a smooth field at the detail's coarsest scale; 8 bits
+// resolve the displacement to 1/127 of its amplitude (2 m at 250 m), below the finest detail cell (8 m).
+//
 // Blue noise (task 8 amendment, no grain): a size^2 tileable rank mask (void-and-cluster, Ulichney 1993, "The
 // void-and-cluster method for dither array generation", Proc. SPIE 1913, 332; Gaussian energy sigma 1.5 on the
 // torus), byte = rank x 256 / size^2 (each value equally often). The shader offsets the raymarch start per pixel by it
@@ -202,6 +212,9 @@ inline constexpr double cloud_shape_prefilter_start_m = 3500.0;
 inline constexpr int cloud_shape_prefilter_levels = 2;
 inline constexpr int cloud_shape_prefilter_rows_per_level = 4;
 inline constexpr int cloud_shape_prefilter_rows = cloud_shape_prefilter_levels * cloud_shape_prefilter_rows_per_level + 1;
+// [E] The curl texture (header): texels per axis and the potential's lattice period over the tile.
+inline constexpr int cloud_curl_size = 32;
+inline constexpr int cloud_curl_period = 4;
 
 struct CloudNoise {
     int shape_size = 128, detail_size = 32, blue_noise_size = 64;
@@ -218,6 +231,8 @@ struct CloudNoise {
     std::vector<std::vector<std::uint8_t>> shape_mips;
     std::array<std::array<float, 256>, cloud_shape_prefilter_rows> prefilter_threshold{};
     std::array<std::array<float, 256>, cloud_shape_prefilter_rows> prefilter_edge_mean{};
+    // The curl texture (header): cloud_curl_size^3 RGB8, x fastest.
+    std::vector<std::uint8_t> curl_rgb;
 };
 
 CloudNoise generate_cloud_noise();
@@ -260,6 +275,10 @@ double cloud_shape_prefilter_level(double footprint_m, int shape_size = 128);
 double sample_shape_prefiltered(const CloudNoise& noise, int channel, const math::Vec3& texel, double level);
 double cloud_prefilter_threshold(const CloudNoise& noise, double level, int code);
 double cloud_prefilter_edge_mean(const CloudNoise& noise, double level, int code);
+
+// The curl field (header) before its 8-bit storage: size^3 vectors (x, y, z interleaved, x fastest), the largest
+// component 1.
+std::vector<float> cloud_curl_field(int size = cloud_curl_size, int period = cloud_curl_period);
 
 // Void-and-cluster blue-noise rank mask (header) of size x size, deterministic.
 std::vector<std::uint8_t> generate_blue_noise(int size);

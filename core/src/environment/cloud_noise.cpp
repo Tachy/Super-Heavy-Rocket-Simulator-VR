@@ -29,6 +29,8 @@ constexpr int width_noise_base_period = 16;
 constexpr int width_noise_octaves = 3;
 constexpr double width_noise_gain = 0.5;
 constexpr std::uint32_t width_noise_seed = 0x6u;
+// The curl texture's potential (header): the seed of its first component (the others follow).
+constexpr std::uint32_t curl_potential_seed = 0xAu;
 
 // The composite tables (header): jittered samples per shape texel cell, fine bins per unit value (thresholds), joint
 // bins per unit value x width-noise bins (edge mean factors), the sample seed and the chunks of the parallel pass.
@@ -365,6 +367,52 @@ double tileable_perlin(const math::Vec3& p, int period, std::uint32_t seed) {
     const double x00 = lerp(corner(0, 0, 0), corner(1, 0, 0), u), x10 = lerp(corner(0, 1, 0), corner(1, 1, 0), u);
     const double x01 = lerp(corner(0, 0, 1), corner(1, 0, 1), u), x11 = lerp(corner(0, 1, 1), corner(1, 1, 1), u);
     return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
+}
+
+std::vector<float> cloud_curl_field(int size, int period) {
+    // The potential psi on the grid: one tileable Perlin noise per component (lattice period `period` over the tile).
+    const std::size_t texels = static_cast<std::size_t>(size) * size * size;
+    std::vector<double> psi(3 * texels);
+    detail::for_each_row(size, [&](int z) {
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                const std::size_t i = (static_cast<std::size_t>(z) * size + y) * size + x;
+                const math::Vec3 p = texel_uv(x, y, z, size) * static_cast<double>(period);
+                for (int c = 0; c < 3; ++c) {
+                    psi[3 * i + static_cast<std::size_t>(c)] =
+                        tileable_perlin(p, period, curl_potential_seed + static_cast<std::uint32_t>(c));
+                }
+            }
+        }
+    });
+    auto at = [&](int x, int y, int z, int c) {
+        const std::size_t i = (static_cast<std::size_t>(wrap(z, size)) * size + wrap(y, size)) * size + wrap(x, size);
+        return psi[3 * i + static_cast<std::size_t>(c)];
+    };
+    // c = curl(psi) by central differences on the periodic grid (in texels; the scale is normalised below).
+    std::vector<double> curl(3 * texels);
+    double largest = 0.0;
+    for (int z = 0; z < size; ++z) {
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                // d(psi_c) / d(axis a) x 2: dzy = d psi_z / dy, ...
+                const double dzy = at(x, y + 1, z, 2) - at(x, y - 1, z, 2);
+                const double dyz = at(x, y, z + 1, 1) - at(x, y, z - 1, 1);
+                const double dxz = at(x, y, z + 1, 0) - at(x, y, z - 1, 0);
+                const double dzx = at(x + 1, y, z, 2) - at(x - 1, y, z, 2);
+                const double dyx = at(x + 1, y, z, 1) - at(x - 1, y, z, 1);
+                const double dxy = at(x, y + 1, z, 0) - at(x, y - 1, z, 0);
+                const std::size_t i = (static_cast<std::size_t>(z) * size + y) * size + x;
+                curl[3 * i] = 0.5 * (dzy - dyz);
+                curl[3 * i + 1] = 0.5 * (dxz - dzx);
+                curl[3 * i + 2] = 0.5 * (dyx - dxy);
+                for (std::size_t c = 0; c < 3; ++c) largest = std::max(largest, std::abs(curl[3 * i + c]));
+            }
+        }
+    }
+    std::vector<float> field(3 * texels);
+    for (std::size_t i = 0; i < field.size(); ++i) field[i] = static_cast<float>(curl[i] / std::max(largest, 1e-12));
+    return field;
 }
 
 double tileable_worley(const math::Vec3& p, int period, std::uint32_t seed) {
@@ -852,6 +900,9 @@ CloudNoise generate_cloud_noise() {
         noise.shape_rgba[channels * i + 3] = width[i];
     }
     noise.blue_noise = generate_blue_noise(noise.blue_noise_size);
+    const std::vector<float> curl = cloud_curl_field();
+    noise.curl_rgb.resize(curl.size());
+    for (std::size_t i = 0; i < curl.size(); ++i) noise.curl_rgb[i] = to_byte(0.5 * (1.0 + curl[i]));
 
     noise.detail_rgba.assign(static_cast<std::size_t>(d) * d * d * channels, 0);
     detail::for_each_row(d, [&](int z) {

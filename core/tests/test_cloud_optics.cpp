@@ -991,6 +991,66 @@ TEST_CASE("Blue noise mask is uniform and blue", "[weather]") {
     CHECK(generate_blue_noise(size) == mask);  // deterministic
 }
 
+TEST_CASE("The curl texture is divergence-free and tileable", "[weather]") {
+    // Bound on the FLOAT field (preflight N12): the RGB8 storage alone moves each component by up to 1/255 of its
+    // range (~4e-3 of the gradient's scale), which says nothing about the field itself - its quantised divergence is
+    // only reported.
+    const int n = cloud_curl_size;
+    const std::vector<float> field = cloud_curl_field();
+    REQUIRE(field.size() == static_cast<std::size_t>(3 * n * n * n));
+    auto at = [&](const auto& data, int x, int y, int z, int c, auto decode) {
+        const int i = (((z % n + n) % n) * n + ((y % n + n) % n)) * n + ((x % n + n) % n);
+        return decode(static_cast<double>(data[static_cast<std::size_t>(3 * i + c)]));
+    };
+    auto divergence_ratio = [&](const auto& data, auto decode) {
+        double max_div = 0.0, gradient_sq = 0.0;
+        for (int z = 0; z < n; ++z) {
+            for (int y = 0; y < n; ++y) {
+                for (int x = 0; x < n; ++x) {
+                    double jacobian_sq = 0.0, div = 0.0;
+                    for (int c = 0; c < 3; ++c) {
+                        for (int a = 0; a < 3; ++a) {
+                            const int dx = a == 0, dy = a == 1, dz = a == 2;
+                            const double d = 0.5 * (at(data, x + dx, y + dy, z + dz, c, decode) -
+                                                    at(data, x - dx, y - dy, z - dz, c, decode));
+                            jacobian_sq += d * d;
+                            if (a == c) div += d;
+                        }
+                    }
+                    max_div = std::max(max_div, std::abs(div));
+                    gradient_sq += jacobian_sq;
+                }
+            }
+        }
+        return max_div / std::sqrt(gradient_sq / (n * n * n));  // worst |div| / the RMS gradient magnitude
+    };
+    const double float_ratio = divergence_ratio(field, [](double v) { return v; });
+    const CloudNoise noise = generate_cloud_noise();
+    REQUIRE(noise.curl_rgb.size() == field.size());
+    const double byte_ratio = divergence_ratio(noise.curl_rgb, [](double b) { return b / 127.5 - 1.0; });
+    double largest = 0.0;
+    for (float v : field) largest = std::max(largest, static_cast<double>(std::abs(v)));
+    report("curl texture: worst |div| / RMS gradient %.2e (float), %.2e (RGB8 storage)\n", float_ratio, byte_ratio);
+    CHECK(float_ratio <= 1e-2);
+    CHECK(largest == Approx(1.0));
+    // Tileable: the potential repeats with the tile, so the curl at the far edge continues into the first texel
+    // (central differences across the wrap are as smooth as inside: the largest step between neighbours anywhere).
+    double inner = 0.0, seam = 0.0;
+    for (int z = 0; z < n; ++z) {
+        for (int y = 0; y < n; ++y) {
+            for (int c = 0; c < 3; ++c) {
+                auto value = [](double v) { return v; };
+                seam = std::max(seam, std::abs(at(field, 0, y, z, c, value) - at(field, n - 1, y, z, c, value)));
+                inner = std::max(inner,
+                                 std::abs(at(field, n / 2, y, z, c, value) - at(field, n / 2 - 1, y, z, c, value)));
+            }
+        }
+    }
+    report("curl texture: largest neighbour step %.3f inside, %.3f across the tile's seam\n", inner, seam);
+    CHECK(seam <= 1.5 * inner);
+    CHECK(cloud_curl_field() == field);  // deterministic
+}
+
 TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
     // A cumulus-shaped blob: a sphere of radius 600 m with the soft edge ramp over the outer 100 m, in-cloud extinction
     // 0.004 /m (tau 4.4 across). The Sun 30 deg above the horizon from +x. Points 50 m inside the sunlit and the shadowed
