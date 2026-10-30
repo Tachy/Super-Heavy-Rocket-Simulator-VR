@@ -691,14 +691,15 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   cover). Cover and light follow the scaled-space far field (user ruling 2026-10-29: the old whole-Earth far field's
   cover is the reference; `cloud_far.gdshaderinc` `cloud_far_layer`, gain 1): per column (`CLOUD_BAKED_FLAT`) the
   field's column at 1 (cells <= 14 km) or 2 x 2 points - the nadir beam cover C_col of the largest fraction, the
-  grid-mean depth, the cloudy layers' top and base - and a pattern P: the share of 3 x 3 (4 x 4) taps whose prefiltered
-  shape (the largest-fraction layer's types and height, at the taps' spacing; every second tap read unaligned from
+  grid-mean depth, the far field's heights (steps 4-5 below) - and a pattern P: the share of 3 x 3 (4 x 4) taps whose prefiltered
+  shape (the layers' depth-weighted types at the nadir height, at the taps' spacing; every second tap read unaligned from
   1.5 km cells; the taps' offsets a smooth field, no per-cell jitter) exceeds the prefilter threshold of C_col (mean
   C_col: the old far tier's `cloud_far_cover`), faded to C_col itself from 6.4 to 12.8 km cells (the 32 km tile's
-  lattice). F (RGBA16F) = (P, depth, top P, base P), T (RG16F) = (C_col, top) (both shared by the sets).
-  Per pixel: the entry on the top / base shell from a guess fetch, then F and T; the pattern taken to the view's slant
+  lattice). F (RGBA16F) = (P, depth, nadir / grazing height x depth), T (RG16F) = (C_col, optical top x C_col) (both
+  shared by the sets).
+  Per pixel: the crossing of the column's height (steps 4-5 below), then F and T; the pattern taken to the view's slant
   as the far field's beam cover (1 - (1 - P)^(1 + s / n_v)), the in-cloud depth the grid mean / cloud_beam_cover_of(f,
-  mu), alpha = cover (1 - exp(-tau / mu)); the per-pixel pattern, reconstruction and light: step 4 below. Against the
+  mu), alpha = cover (1 - exp(-tau / mu)); the per-pixel pattern, reconstruction and light: steps 4-5 below. Against the
   far field at the same camera (step 3's numbers; diagnostic
   define `CLOUD_BAKED_FAR_REFERENCE`, desktop nadir / 45 deg, 420 / 1 500 / 5 000 km, Sun 56 and 8 deg): mean alpha
   0.98-1.02, brightness 1.00-1.05 (step 2: alpha 1.09-1.14, brightness 1.23-1.45). Level rule (all levels): l =
@@ -707,22 +708,34 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   the height / pixel-angle ranges and the first flat level; the flat geometry bakes in ~41 dispatches of <= 0.5 ms (ISS,
   100 km: ~4.5 ms GPU in all). Diagnostics: `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_ONLY |
   CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND | CLOUD_BAKED_FAR_REFERENCE | CLOUD_BAKED_FLAT_TAP_STATS |
-  CLOUD_BAKED_FLAT_NO_TAKEOVER`; render_check `--centre_dump=<file>` (the march image, raw RGBA16F). Numbers and
+  CLOUD_BAKED_FLAT_NO_TAKEOVER | CLOUD_BAKED_DIAG_NO_BAKE_PATTERN | CLOUD_BAKED_DIAG_NO_PIXEL_PATTERN |
+  CLOUD_BAKED_DIAG_LEVEL` (the last: flat level / blend / optical top as colour); render_check `--centre_dump=<file>` (the march image, raw RGBA16F). Numbers and
   images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer2-report.md`.
-- **Baked prototype step 4: no squares, light per pixel, crisp at every distance (2026-10-30)**: (a) the flat bake takes
-  the field's column with the cubic B-spline (`cloud_column_mean_depth_smooth`, as the far tier's column model); the
-  march reconstructs F and T with the cubic B-spline (four bilinear fetches each, `cloud_baked_flat_bspline`) - no cell
-  drawn as a square or plateau. (b) The light is the far field's column model evaluated at the pixel for its own view
-  (`cloud_far_cloudy_radiance`: the Sun's transmittance, the 3D gain, the sky and the Moon), at the far field's slab
-  point (the depth of `cloud_far_seen_depth` below the entry, the column's depth taken as even between top and base);
-  the per-set light arrays and their kernel are gone. (c) The sub-cell pattern (`cloud_baked_flat_pattern`) at every
-  cell size and footprint up to 8-16 km (then faded to the cover, the old far tier's fade): 2 x 2 prefiltered shape taps
-  over the footprint against the threshold of the reconstructed cover; beyond the shapes' last prefilter level the shape
-  read scaled up by powers of two (two octaves cross-faded): features a few pixels wide at every distance. Inside a closed
-  cover the in-cloud depth is textured by the taps' mean shape value: x 1 + 3 (s - s_50), clamped 0.25-1.75 (decks no
-  longer a smooth sheet). (d) Domain warp of the shape coordinates (`cloud_baked_warp`: the shape's coarsest mip read at
-  0.19 x the coordinates, +-0.35 tile) in the bake's taps and the pixel's - no repeating 32 km tile. Numbers, images:
-  `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer3-report.md`.
+- **Baked prototype steps 4-5: flat levels per pixel (2026-10-30)**: (a) the flat bake takes the field's column with
+  the cubic B-spline (`cloud_column_mean_depth_smooth`, as the far tier's column model); the march reconstructs F and T
+  with the cubic B-spline (four bilinear fetches each, `cloud_baked_flat_bspline`) - no cell drawn as a square.
+  (b) Heights (step 5): per column the far field's own placement (`cloud_far_depth_height` of `cloud_far_seen_depth`)
+  for a nadir view and for mu = 0.2, depth-weighted (F.z / F.w = height km x depth, so a clear neighbour does not lower
+  them and RGBA16F does not overflow), and the optical top (5 % of the depth, T.y x C_col); the pattern's types are the
+  layers' depth-weighted mix. The march finds the ray's crossing of the column's height for its view (heights-only
+  fetches: fixed-point steps until bracketed, then false position, <= 4) - no entry on the highest layer's top any more
+  (that top jumped by kilometres where an upper layer set in: a seam); behind the scene (the field's layers under high
+  terrain) the cloud is drawn on the scene's point while its optical top is in front or it lies < 3 km (vertically)
+  behind. (c) Light: the far field's column model at that
+  point for the pixel's own view (`cloud_far_cloudy_radiance`), with the shapes' depth; within 0.08 of the Sun's horizon
+  cosine the mean of the slab's light at its optical top, its point and as far below (the Earth's shadow edge spread
+  over the column's heights instead of one sharp line). (d) The sub-cell pattern (`cloud_baked_flat_pattern`) at every
+  footprint up to 8-16 km and below 5 500-8 000 km camera height (faded out before the scaled-space far field, which
+  has none): 2 x 2 prefiltered shape taps over the footprint (read on a 2 km sphere: no shapes dragged along steep
+  height changes) against the threshold of the reconstructed cover, anti-aliased (a tap covers clamp((s - thr) / g +
+  0.5), g the shape's change across a tap: edges one pixel wide); beyond the last prefilter level the shape read scaled
+  up by powers of two. The depth inside the shapes: the volume's edge ramp of the shape's excess, k = (0.3 + 0.7 r) /
+  (0.3 + 0.7 E[r | covered]) with E from `cloud_prefilter_edge_mean` (thick cores, translucent margins where thin; mean
+  kept), toward a closed cover (0.7-0.95) the deck texture x 1 + 3 (s - s_50); per pixel the mean opacity of the taps
+  and the light for their mean depth. (e) Tile breaking: the shape read twice (as is and turned) and blended by a
+  large-scale weight, histogram-preserving (`cloud_baked_shape`; step 4's domain warp sheared the shapes into marbled
+  streaks). Numbers, images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer3-report.md` (step 4),
+  `baked-outer4-report.md` (step 5).
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

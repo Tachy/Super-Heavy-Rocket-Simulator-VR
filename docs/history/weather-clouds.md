@@ -1277,3 +1277,19 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   field reference shows the same squares - with no sub-cell shape at 3-30 km footprints), cells lit orange next to
   white ones (the light per cell for the anchor's view, the entry height jumping per cell), blur at intermediate
   distances and a dotted texture at 600-1500 km (the 32 km shape tile's period in the 3.2 km cells' pattern).
+
+## Baked prototype step 4: entry on the top shell, domain warp, uniform shapes (commit 0bee596, 2026-10-30), superseded by step 5
+- What it was: F = (P, depth, top P, base P), T = (C_col, top): top / base the highest cloudy layer's top and the lowest
+  one's base (fraction >= CLOUD_MIN_FRACTION) at the cell's field points; the bake's pattern read the largest-fraction
+  layer's types at its height. The march entered on the top shell (descending) or the base shell (ascending) of the
+  fetched column, rejecting entries outside top / base +- (50 m + 1e-4 x distance), and lit the far field's seen depth
+  below the entry. Shape coordinates domain-warped (`cloud_baked_warp`: the shape's coarsest mip at 0.19 x q, +-0.35
+  tile). The per-pixel pattern was a soft step (+-0.03 of the shape value) per tap: inside the shapes the depth was
+  even (in decks textured x 1 + 3 (s - s_50)).
+- Why superseded (step 5, controller's review of the approach sheets): a seam of displaced shapes and pixel garbage
+  along a line at 60-250 km - a latitude near 26 N in the ERA5 test field where an upper layer's fraction crossed
+  CLOUD_MIN_FRACTION: the top (and the largest-fraction layer) jumped by kilometres, so the entry point, hence the
+  pattern's point, jumped (diagnosed by colouring Y = 0 of the flat grid, then moving the camera 1 deg south: the seam
+  stayed at the latitude); a straight "roof" edge at 1 500 km low Sun (the Earth's shadow edge on one height per column,
+  kinked where the height jumped; the far-field reference shows it too); staircase outlines (binary per pixel at divisor
+  2); uniform white / grey paper cut-outs; marbled streaks at 1 500-4 000 km (the warp's shear).
