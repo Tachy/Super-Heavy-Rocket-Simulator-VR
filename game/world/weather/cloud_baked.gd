@@ -234,6 +234,11 @@ func settled() -> bool:
 	return _shown >= 0 and _baking < 0 and _fade == 0
 
 
+## The shown set's anchor (Earth-local render axes, m; checks: render_check --climb), zero while none is shown.
+func shown_anchor() -> Vector3:
+	return _sets[_shown]["plan"]["anchor"] if _shown >= 0 else Vector3.ZERO
+
+
 ## Render thread, per frame before the march: re-bake triggers, the next bake dispatches, the march's block. Returns the
 ## march's extra set 1 uniforms, empty while no set is baked yet. pixel_angle: the march's (rad, the footprint rule).
 func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, pixel_angle: float) -> Array[RDUniform]:
@@ -685,6 +690,12 @@ func _bake_step(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3) -
 		var layers := _rd.buffer_get_data(_band_buffer).to_int32_array()
 		_phases.pop_front()
 		_start_volumes(layers[0], layers[1])
+		if _phases.is_empty():
+			# Nothing to bake: every volume level dropped (above VOLUME_TOP_M) and the flat geometry carried over. The
+			# set is done (its anchor and Sun new); before 2026-10-30 this indexed the empty list, the script error left
+			# _baking set and no re-bake ever started again (the frozen centre in VR above ~90 km).
+			_finish_bake()
+			return
 		phase = _phases[0]
 		kind = phase["kind"]
 	var first: int = phase["next"]

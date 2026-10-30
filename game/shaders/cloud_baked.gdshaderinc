@@ -1666,6 +1666,17 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	if (t_hit < 0.0) {
 		return false;
 	}
+	// Behind the Earth (VR bugs 2026-10-30): a crossing beyond the ray's own crossing of the model sphere (sea level)
+	// lies behind the Earth's curvature - from below a deck the far side's crossing of the column's height (x.y, the
+	// ray through the Earth) passed where the scene's depth let it (the 3 km vertical rule at grazing rays, no depth
+	// at the horizon's sky / ground blocks) and drew far cap parts just under the horizon line.
+	vec2 ground = cloud_sphere_crossing(ray, 0.0);
+	bool behind_earth = ground.x <= ground.y && ground.x > 0.0 && t_hit > ground.x;
+#ifndef CLOUD_BAKED_DIAG_BEHIND_EARTH
+	if (behind_earth) {
+		return false;
+	}
+#endif
 	vec3 up = cloud_geodetic_up(p);
 	float mu = max(abs(dot(dir, up)), CLOUD_FAR_MU_MIN);
 	float footprint = pixel_angle * t_hit / sqrt(max(mu, 0.04));
@@ -1720,6 +1731,13 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	if (!(alpha > 1.0e-6)) {
 		return false;
 	}
+#ifdef CLOUD_BAKED_DIAG_BEHIND_EARTH
+	if (behind_earth) {
+		color = vec3(alpha, 0.0, 0.0);  // (diagnostic: the old behaviour's hits behind the Earth in red)
+		dist = t_hit;
+		return true;
+	}
+#endif
 	vec3 radiance = cloud_far_cloudy_radiance(p, up, -dir, tau_light, fraction, vec3(1.0));
 	// near the Earth's shadow edge: the slab's light at three heights (CLOUD_BAKED_FLAT_TERMINATOR_MU)
 	vec3 pm = p * ATM_STRETCH;

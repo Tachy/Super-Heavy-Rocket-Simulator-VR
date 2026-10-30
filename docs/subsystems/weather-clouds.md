@@ -793,6 +793,16 @@ old world volume - removed when the baked volume became the default).
   left limb). Diagnostics: `CLOUD_DIAG_SUN_ONLY` / `CLOUD_DIAG_SKY_ONLY` (one light alone, far field and baked
   march), `CLOUD_DIAG_NO_FACETS`, `CLOUD_BAKED_DIAG_NO_SCENE` (the scene's depth ignored). Numbers, images:
   `baked-lowsun-report.md`.
+- **Baked volume: VR bugs 1 (2026-10-30)**: (a) a re-bake with nothing to bake (above 62 km every volume level
+  dropped and the flat geometry carried over) finishes at once (`CloudBaked._bake_step`); it indexed the empty phase
+  list before, the script error left the bake "running" and no re-bake ever started again - the centre stayed where
+  the camera crossed ~90 km. (b) A flat-level crossing beyond the ray's own crossing of the model sphere (sea level)
+  is behind the Earth and never drawn (`cloud_baked_flat_shade`): from below a deck the far side's crossing of the
+  column's height (the ray through the Earth) passed where the scene depth let it (the 3 km vertical rule at grazing
+  rays, depth-less horizon blocks) - far cap parts drawn just under the horizon line. Diagnostics:
+  `STARSIM_BAKED_DEFINES=CLOUD_BAKED_DIAG_BEHIND_EARTH` (the old behaviour, those hits in red); render_check
+  `--climb=<eye height m>,... [--climb_lon=<deg>]` (each step must re-bake about the new eye). Report, images:
+  `vr-bugs1-report.md`, `screenshots/cloud_vr_bugs1/`.
 - **Baked volume: cloud shadows from the bake (2026-10-30)**: the ground's / terrain's cloud shadows and the air
   shadow come from the baked shapes. Per set S (`cloud_baked.gdshaderinc` `CLOUD_BAKED_SHADOW`, RGBA16F 2-D array, one
   layer per volume level at 2 x the columns: 50 m in level 0; +4 MB per set): per column the line toward the Sun from

@@ -21,7 +21,9 @@
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
 #          resolution divisor instead, fractional allowed: 1.5),
 #          --cloud_method=old|baked (CloudLayer.march_method; default baked: the settle waits until its first set is baked
-#          and shown), --cloud_debug=1..4 (the cloud
+#          and shown), --climb=<eye height m>,... [--climb_lon=<deg per step>] (a ground view: after the first settle
+#          the eye moves to each height in turn, each step waiting until the baked volume has re-baked about the new eye;
+#          a step that does not within CLIMB_MAX_FRAMES fails the run, exit code 1), --cloud_debug=1..4 (the cloud
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
 #          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
@@ -81,7 +83,14 @@ const SIM_TICK_S := 0.005
 ## --at_event: flight chunk and limit while the event is not yet in the mission timeline (s).
 const EVENT_SEARCH_STEP_S := 3600.0
 const EVENT_SEARCH_MAX_S := 20.0 * 86400.0
+## --climb: frames a step may take to re-bake and settle.
+const CLIMB_MAX_FRAMES := 1500
 var _args := {}
+var _climb_next := 0  ## --climb: the next step (0: none moved yet)
+var _climb_move_frame := 0  ## --climb: the frame of the last move
+var _climb_bakes := 0  ## --climb: CloudBaked.bakes_done at the last move
+var _climb_failed := false
+var _climb_finished := false  ## --climb: every step done (the image may take a few more frames)
 var _stereo: StereoMockXr  ## --stereo: the stand-in headset
 var _stereo_capture_frames := 0
 var _main: Node
@@ -289,6 +298,8 @@ func _process(_delta: float) -> bool:
 	var bake_waiting := _bake_waiting(world)
 	var settled := _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting and not bake_waiting \
 			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES)
+	if _args.has("climb") and (settled or _climb_next > 0) and not _climb_done(world, settled):
+		return false
 	if settled:
 		if _args.has("deterministic"):
 			if _deterministic_left < 0:  # the same jitter sequence and history from here in every run
@@ -444,6 +455,43 @@ func _next_sweep_divisor(world: World) -> void:
 
 ## True while the baked volume (CloudLayer.march_method BAKED, the clouds shown) has no set shown yet or a bake / its
 ## cross-fade still runs (CloudBaked.settled; TERRAIN_MAX_FRAMES at most): the image shows the settled volume.
+## --climb: the climb's state machine on a settled frame (or a step's wait): the last move's check (re-baked, settled,
+## the shown set's anchor at the eye), then the next move. True once every step is done; a step that does not settle
+## within CLIMB_MAX_FRAMES quits with exit code 1.
+func _climb_done(world: World, settled: bool) -> bool:
+	if _climb_finished:
+		return true
+	if _climb_failed:
+		return false
+	var heights: PackedFloat64Array = String(_args["climb"]).split_floats(",", false)
+	var baked := world.clouds.effect.baked
+	if _climb_next > 0:
+		var rebaked := baked != null and baked.bakes_done > _climb_bakes
+		if not (settled and rebaked):
+			if _frames - _climb_move_frame > CLIMB_MAX_FRAMES:
+				print("render_check: climb FAIL: the step to %.0f m did not re-bake within %d frames (bakes %d -> %d)"
+						% [heights[_climb_next - 1], CLIMB_MAX_FRAMES, _climb_bakes,
+						baked.bakes_done if baked != null else -1])
+				_climb_failed = true
+				quit(1)
+			return false
+		var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") + ShaderGlobals.value(&"atmosphere_camera_lo")
+		print("render_check: climb step %d at %.0f m: %d frames, bakes %d -> %d, shown anchor %.0f m from the eye" % [
+				_climb_next, heights[_climb_next - 1], _frames - _climb_move_frame, _climb_bakes, baked.bakes_done,
+				baked.shown_anchor().distance_to(camera)])
+	if _climb_next < heights.size():
+		var site: Dictionary = world.ground_site.duplicate()
+		site["eye_height_m"] = heights[_climb_next]
+		site["longitude_deg"] = float(site["longitude_deg"]) + float(_args.get("climb_lon", "0"))
+		world.set_ground_site(site)
+		_climb_bakes = baked.bakes_done if baked != null else 0
+		_climb_move_frame = _frames
+		_climb_next += 1
+		return false
+	_climb_finished = true
+	return true
+
+
 func _bake_waiting(world: World) -> bool:
 	var clouds := world.clouds
 	if clouds.march_method != CloudEffect.MarchMethod.BAKED or not bool(ShaderGlobals.value(&"cloud_enabled")) \
