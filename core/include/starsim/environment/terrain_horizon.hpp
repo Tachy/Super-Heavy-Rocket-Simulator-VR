@@ -21,8 +21,9 @@ struct HorizonMarch {
 
 // Terrain horizon elevation (rad, + above the local horizontal of the point's sphere direction) seen from a point at
 // (latitude_rad, longitude_rad) at height_m above the terrain's reference sphere, along the great circle in
-// azimuth_rad (clockwise from north); throws std::invalid_argument for march.first_step_m <= 0. Samples terrain from min_distance_m outwards until the relief bound
-// (Terrain::max_height_m) cannot beat the running maximum any more, or the antipode. Thread-safe (reads only).
+// azimuth_rad (clockwise from north); throws std::invalid_argument for march.first_step_m <= 0. Samples terrain from
+// min_distance_m outwards until the relief bound (Terrain::max_height_m) cannot beat the running maximum any more, or
+// the antipode. Thread-safe (reads only).
 // The latitude / longitude are the terrain's own (Moon: planetocentric on the sphere); at a pole the longitude fixes
 // what north and east mean.
 double horizon_elevation_rad(const Terrain& terrain, double sphere_radius_m, double latitude_rad, double longitude_rad,

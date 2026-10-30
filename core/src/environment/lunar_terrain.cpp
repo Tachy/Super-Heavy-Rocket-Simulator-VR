@@ -116,6 +116,9 @@ double LunarTerrain::resolution_m(double latitude_rad, double longitude_rad) con
 
 double LunarTerrain::finest_resolution_within_m(double latitude_rad, double longitude_rad, double radius_m) const {
     double finest = resolution_m(latitude_rad, longitude_rad);
+    // The tiles are south polar crops: on the northern hemisphere the projection's scale at the point no longer
+    // converts distances to them (near the north pole a projected ~4R/delta times delta^2/4 looks close).
+    if (latitude_rad > 0.0) return finest;
     // The stereographic projection is conformal with the scale sec^2(colatitude / 2) = 2 / (1 + cos colatitude) at the
     // point (cos colatitude = -sin latitude), so a true distance is the projected one times (1 - sin latitude) / 2.
     const double true_per_projected = 0.5 * (1.0 - std::sin(latitude_rad));
