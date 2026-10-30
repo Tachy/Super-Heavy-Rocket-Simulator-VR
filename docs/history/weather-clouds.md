@@ -1311,3 +1311,16 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   edge ends by the Sun's grazing-path transmittance, its disc's visible fraction and the twilight sky, all continuous.
   The old march's far tier keeps the switch (old march unchanged). A camera faster than the re-bake saw the clouds end
   at the old geometry's cap (a circle inside the disc): now the far field's column beyond it.
+
+## Baked prototype step 7: the light bake's Sun path (06e8e43 and earlier, superseded 2026-10-30)
+- What it was: the light bake integrated the Sun's optical depth through the baked shapes along the whole Sun path
+  (32 quadratically spaced samples to the band's top, at most 300 km; the grid mean only beyond the levels).
+- Why superseded: toward a 5 deg Sun through broken cirrus (debug ice slab 9-11 km, cf 0.5) the baked path was 1.14 x
+  the old march's brightness per alpha (away from the Sun 1.01 x): on a grazing path of ~100 km through the layer the
+  shapes' gaps let the Sun through, while the old march and the core take the shapes over the first 6 km and the grid
+  mean beyond. Evidence: 128 samples -0.2 %; the shapes over 6 km only 1.14 -> 1.02 x (`baked-lowsun-report.md`).
+- Also superseded by step 7: the far field's column light (flat levels, scaled-space far field) lit the clouds under
+  a low Sun as the slab with the 0.15 entry turn alone; at the 40-60 km takeover from the Sun's side its cloud radiance
+  was 0.49 / 0.40 / 0.39 / 0.42 x the volume levels' at Sun 15 / 8 / 5 / 2 deg (high Sun 0.90; brightest 30 % of the
+  50 km crop at 8 deg 137 / 120 / 116 sRGB against the volume's 191 / 164 / 145), a dull pink-grey. The flat levels'
+  early exit dropped every pixel whose scene depth lay in front of the 20 km shell's entry (striped holes at the limb).

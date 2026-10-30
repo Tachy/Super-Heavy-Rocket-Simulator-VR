@@ -446,13 +446,21 @@ layout(rgba8, set = 1, binding = 1) uniform writeonly image3D baked_b_out;
 layout(set = 1, binding = 2) uniform sampler3D baked_a_in;  // linear
 layout(set = 1, binding = 3) uniform sampler3D baked_o_in;  // nearest
 
-// [E] Samples of the Sun's path (quadratic spacing: dense at the voxel, the first interval L / n^2), its cap.
-const int CLOUD_BAKED_SUN_SAMPLES = 32;
+// [E] Samples of the Sun's path: CLOUD_BAKED_SUN_NEAR_SAMPLES through the baked shapes over its first
+// CLOUD_BAKED_SUN_SHAPE_PATH_M (quadratic spacing: dense at the voxel, the first interval L / n^2), then
+// CLOUD_BAKED_SUN_FAR_SAMPLES equal intervals through the field's grid mean to the band's top (at most
+// CLOUD_BAKED_SUN_PATH_MAX_M). The split is the light model of the old march and the core
+// (cloud_light_optical_depth: near_m 6 km through the shapes, the presets' light_near_m, then the grid mean): through
+// the shapes all the way, a grazing Sun path (low Sun, broken cirrus: 10-100 km in the layer) found the shapes' gaps
+// and the baked cirrus was 1.14 x the old march's brightness per alpha toward a 5 deg Sun (step 7).
+const int CLOUD_BAKED_SUN_NEAR_SAMPLES = 24;
+const int CLOUD_BAKED_SUN_FAR_SAMPLES = 8;
+const float CLOUD_BAKED_SUN_SHAPE_PATH_M = 6000.0;
 const float CLOUD_BAKED_SUN_PATH_MAX_M = 300000.0;
 
 // The optical depth toward the Sun from camera + offset (height h): the baked volume's extinction where a level holds
-// the point, the field's grid mean beyond; up to the band's top (0 when the path meets the ground: Earth's shadow is
-// atm_sunlit's / the Sun's transmittance's).
+// the point over the near part, the field's grid mean beyond; up to the band's top (0 when the path meets the ground:
+// Earth's shadow is atm_sunlit's / the Sun's transmittance's).
 float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 	vec3 axis_x = baked.sets[si].axis_x.xyz * ATM_STRETCH;
 	vec3 axis_y = baked.sets[si].axis_y.xyz * ATM_STRETCH;
@@ -477,10 +485,11 @@ float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 	float gdx = dot(sun, axis_x);
 	float gdy = dot(sun, axis_y);
 	float tau = 0.0;
-	float n = float(CLOUD_BAKED_SUN_SAMPLES);
-	for (int i = 0; i < CLOUD_BAKED_SUN_SAMPLES; i++) {
-		float a = length_m * float(i * i) / (n * n);
-		float b = length_m * float((i + 1) * (i + 1)) / (n * n);
+	float near_m = min(length_m, CLOUD_BAKED_SUN_SHAPE_PATH_M);
+	float n = float(CLOUD_BAKED_SUN_NEAR_SAMPLES);
+	for (int i = 0; i < CLOUD_BAKED_SUN_NEAR_SAMPLES; i++) {
+		float a = near_m * float(i * i) / (n * n);
+		float b = near_m * float((i + 1) * (i + 1)) / (n * n);
 		float t = 0.5 * (a + b);
 		float h = cloud_height_along(ray, t);
 		float gx = gx0 + t * gdx;
@@ -493,6 +502,13 @@ float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 			beta = cloud_mean_extinction_at(offset + sun * t, h);
 		}
 		tau += beta * (b - a);
+	}
+	if (length_m > near_m) {
+		float step_m = (length_m - near_m) / float(CLOUD_BAKED_SUN_FAR_SAMPLES);
+		for (int i = 0; i < CLOUD_BAKED_SUN_FAR_SAMPLES; i++) {
+			float t = near_m + (float(i) + 0.5) * step_m;
+			tau += cloud_mean_extinction_at(offset + sun * t, cloud_height_along(ray, t)) * step_m;
+		}
 	}
 	return tau;
 }
@@ -1337,7 +1353,12 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 		}
 		t1 = x.x;
 	}
-	if (t1 >= scene_m) {
+	// the scene in front of the shell's entry: by the same vertical rule as the crossing behind the scene below (step 7:
+	// near the limb the scene's depth - grazing, half resolution - landed in front of the entry along rows and columns
+	// of the depth buffer, a striped staircase of holes in the clouds at 3 000 km; a descending ray meets the shell
+	// before any ground under it)
+	if (t1 >= scene_m && (t1 - scene_m) * max(abs(dot(dir, cloud_geodetic_up(camera + eye + dir * t1))),
+			CLOUD_FAR_MU_MIN) > CLOUD_BAKED_FLAT_SCENE_DEPTH_M) {
 		return false;
 	}
 	vec4 f;
@@ -1712,6 +1733,12 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 					1.0);
 			sky_irradiance = ATM_PI * atm_sky_light(p, normal)
 					* mix(cloud_group_eclipse_near, cloud_group_eclipse_far, eclipse_x);
+#ifdef CLOUD_DIAG_SUN_ONLY
+			sky_irradiance = vec3(0.0);
+#endif
+#ifdef CLOUD_DIAG_SKY_ONLY
+			sun_irradiance = vec3(0.0);
+#endif
 		}
 		float tau = beta * step_m;
 		float scaled_step = exp(-k_sc * tau);
@@ -1810,6 +1837,9 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 // colour (cloud_stored_color: premultiplied colour with the air in front and the air shadow's loss, T in .a) and the
 // alpha-weighted cloud distance.
 void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m) {
+#ifdef CLOUD_BAKED_DIAG_NO_SCENE
+	scene_m = 1.0e30;  // (diagnostic: the scene's depth ignored)
+#endif
 	cloud_m = 0.0;
 	color_t = vec4(0.0, 0.0, 0.0, 1.0);
 	if (!cloud_enabled || !atmosphere_enabled) {

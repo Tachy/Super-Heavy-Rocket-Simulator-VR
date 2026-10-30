@@ -544,6 +544,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     round 2 with the constants unchanged: cf 0.12 under the high Sun and cf 0.4 under a 24 deg Sun (section 6) within
     6 %, and the scaled-space far field against the converged volume (section 3); the plane-parallel slab alone
     (`--no_3d_light`) is 17-31 % dark in every broken case;
+  - the shapes' sunlit faces under a low Sun (baked step 7, 2026-10-30; the scaled-space far field and the baked
+    march's kernels above 40 km camera height, `CLOUD_BAKED_FAR_FALLBACK` - in the one kernel the code cost the ground
+    views +0.17 ms even untaken; the old march's far tier, `CLOUD_MARCH` without `CLOUD_BAKED_MARCH`, unchanged):
+    `cloud_far_facet_weight` mixes into the Sun's slab radiance (one copy of the light function, a loop over the two
+    normals), by w = `CLOUD_FAR_FACET_SHARE` 0.75 x s / (s +
+    `CLOUD_FAR_FACET_ONSET` 0.1) x (1 + cos alpha) / 2, the radiance of a slab whose normal is the bisector of the Sun
+    and the view (the faces seen lit, facing both on average); s the beam cover's slant term (0.21 max(cot e - 1.8, 0):
+    0 above a 29 deg Sun - the high-Sun look bit for bit), alpha the phase angle (the lit share of a convex shape's
+    visible area). Cause: the slab turned 0.15 toward the Sun (mu_e 0.27 at 8 deg) against the volume's faces lit near
+    normally (`cloud_entry_cosine`); from the Sun's side the volume's Sun light was 3.2 x the slab's at 8 deg (50 km
+    takeover, ERA5, mean cloud radiance flat / volume 0.40 at 8 deg, 0.49 at 15 deg; high Sun 0.90). The constants
+    [E] were fitted to the volume at 8 deg; numbers per Sun elevation: `baked-lowsun-report.md`;
   Approximations: no light between columns (no shadows on neighbouring columns; the lit sides only as that mean gain),
   the light taken at one point, a Sun below the cloud's local horizon at the entry floor 0.02, view cosine floor 0.02
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
@@ -657,7 +669,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   100 m (+-12.8 km) doubling to 3.2 km (+-410 km), vertical 100 / 200 / 400 m over the band of the field's cloudy layers
   (a band kernel scans the region; ERA5 2025-10-25: 0-16.8 km). Per voxel RG16F (signed edge coordinate x =
   (shape + detail - threshold) / edge width, box-averaged as a ramp over taps at <= half a shape texel; extinction
-  scale), RGBA8 sqrt-coded light (Sun transmittance from a 32-sample march toward the Sun through the bake, the Sun's
+  scale), RGBA8 sqrt-coded light (Sun transmittance from a march toward the Sun: 24 quadratically spaced samples
+  through the bake over the first 6 km, then 8 through the field's grid mean to the band's top - the old march's and
+  the core's light model, `cloud_light_optical_depth`; step 7, 2026-10-30: through the shapes all the way a grazing
+  Sun path found the gaps of broken cirrus, 1.14 x the old march's brightness per alpha toward a 5 deg Sun), the Sun's
   multiple-scattering source and the sky's source for the view from the anchor, the edge-width noise), R8 occupancy per
   4^3 cells. Per frame: one march per ray through the levels - empty blocks skipped to their exit, in occupied blocks
   clear steps from the edge coordinate's distance estimate (20 m per edge width beyond the detail's lift, >= 16 m and
@@ -765,6 +780,17 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   transmittance and its disc's visible fraction over the Earth's horizon seen from the cloud (`atm_sun_at`; higher
   tops lit longer), the twilight sky's light going on; daytime (mu0 > 0) unchanged bit for bit. The volume levels'
   light (`cloud_entry_cosine`) was continuous already. Numbers, images: `baked-outer5-report.md`.
+- **Baked prototype step 7: low Sun, the limb (2026-10-30)**: (a) the light bake's Sun path through the shapes over
+  6 km only, then the grid mean (bullet above; cirrus toward a 5 deg Sun 1.14 -> 1.02 x the old march per alpha).
+  (b) The far field's column light gets the shapes' sunlit faces below a 29 deg Sun (`cloud_far_facet_weight`, far
+  field section): at the 40-60 km takeover the flat levels matched the volume at a high Sun but were 0.40 x its cloud
+  radiance at 8 deg (from the Sun's side), now 0.86 / 0.92 / 1.01 / 1.20 x at 15 / 8 / 5 / 2 deg. (c) The flat
+  levels' early exit "the scene in front of the 20 km shell's entry" now uses the vertical rule of the crossing
+  behind the scene (`CLOUD_BAKED_FLAT_SCENE_DEPTH_M`): near the limb the scene's depth landed in front of the entry
+  along rows and columns of the depth buffer - a striped staircase of holes at 3 000 km (nadir: south limb; 60 deg:
+  left limb). Diagnostics: `CLOUD_DIAG_SUN_ONLY` / `CLOUD_DIAG_SKY_ONLY` (one light alone, far field and baked
+  march), `CLOUD_DIAG_NO_FACETS`, `CLOUD_BAKED_DIAG_NO_SCENE` (the scene's depth ignored). Numbers, images:
+  `baked-lowsun-report.md`.
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

@@ -210,6 +210,35 @@ float cloud_far_seen_depth(vec2 column, float mu) {
 	return cover * mu * mean_ray;
 }
 
+// [E] Low Sun: the shapes' sunlit faces (baked step 7). The slab's normal turned 0.15 of the way toward the Sun
+// (CLOUD_FAR_ENTRY_TURN, fitted at Sun 24-73 deg) lights it at mu_e 0.27 under an 8 deg Sun; the volume's shapes take
+// the low Sun through faces turned toward it (cloud_entry_cosine -> 1), and a view from the Sun's side sees those lit
+// faces: at 8 deg the volume's Sun light was 3.2 x the slab's (50 km, ERA5 cumulus; baked-lowsun-report.md). A share w
+// of the Sun's slab radiance is replaced by that of a slab whose normal is the bisector of the Sun and the view (the
+// faces seen lit face both on average), w = CLOUD_FAR_FACET_SHARE x s / (s + CLOUD_FAR_FACET_ONSET) x (1 + cos alpha)
+// / 2: s the beam cover's slant term (cloud_beam_cover_of: CLOUD_OVERLAP_SLANT max(cot - CLOUD_OVERLAP_ONSET_COT, 0),
+// the beam meeting the shapes through their sides; 0 above a 29 deg Sun - the high-Sun fit bit for bit), (1 + cos
+// alpha) / 2 the lit share of a convex shape's visible area at the phase angle alpha (Sun - cloud - camera). The share
+// and the onset were fitted to the volume levels at 8 deg (from the Sun's side), held out at 2, 5 and 15 deg and
+// toward the Sun. The flat levels and the scaled-space far field only (the old march's far tier unchanged).
+const float CLOUD_FAR_FACET_SHARE = 0.75;
+const float CLOUD_FAR_FACET_ONSET = 0.1;
+// The facets' weight w (0: none) and their normal (the bisector of the Sun and the view).
+float cloud_far_facet_weight(vec3 sun_dir, vec3 view_prop, float mu0, out vec3 normal) {
+	normal = vec3(0.0, 0.0, 1.0);
+	float m = max(mu0, CLOUD_ENTRY_COSINE_MIN);
+	float cot = sqrt(max(1.0 - m * m, 0.0)) / m;
+	float s = CLOUD_OVERLAP_SLANT * max(cot - CLOUD_OVERLAP_ONSET_COT, 0.0);
+	float lit = 0.5 * (1.0 + dot(sun_dir, view_prop));
+	vec3 h = sun_dir + view_prop;
+	float h_norm = length(h);
+	if (!(s > 0.0) || !(h_norm > 1.0e-4) || !(lit > 0.0)) {
+		return 0.0;
+	}
+	normal = h / h_norm;
+	return CLOUD_FAR_FACET_SHARE * s / (s + CLOUD_FAR_FACET_ONSET) * lit;
+}
+
 // The radiance of a cloudy slab of in-cloud vertical depth tau at the cloud point p (Earth-local, up its geodetic up)
 // toward the camera (view_prop: the propagation toward it; from above or from below by its sign against up): the
 // lights at the cloud as the cloud pass takes them (irradiance normal to the light; the sky's horizontal), not yet
@@ -239,8 +268,32 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, up) * sky_eclipse;
 	float sky_radiance = cloud_far_sky_radiance(tau, dot(view_prop, up));
 	vec3 radiance = sky_irradiance * sky_radiance;
+// (diagnostics, STARSIM_BAKED_DEFINES: the Sun's or the sky's light alone; CLOUD_DIAG_NO_FACETS: the slab alone)
+#ifdef CLOUD_DIAG_SUN_ONLY
+	radiance = vec3(0.0);
+#endif
+#ifdef CLOUD_DIAG_SKY_ONLY
+	sun_irradiance = vec3(0.0);
+#endif
 	if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-		radiance += sun_irradiance * gain * cloud_far_light_radiance(tau, sun_dir, view_prop, entry);
+// (not the old march's far tier; in the baked march only its kernels above 40 km camera height - the takeover, orbit -
+// where CLOUD_BAKED_FAR_FALLBACK is defined: in the one kernel the code raised the march's register peak, ground and
+// deck +0.15 ms even with w 0; elsewhere the code as before step 7)
+#if !(defined(CLOUD_MARCH) && !defined(CLOUD_BAKED_MARCH)) && !defined(CLOUD_DIAG_NO_FACETS) && (!defined(CLOUD_BAKED_MARCH) || defined(CLOUD_BAKED_FAR_FALLBACK))
+		vec3 facet = up;
+		float w_facet = cloud_far_3d_light ? cloud_far_facet_weight(sun_dir, view_prop, mu0, facet) : 0.0;
+		// the slab and (w_facet > 0) the facets through one copy of the light function (a loop: a second inlined call
+		// raised the register peak)
+		float sun_radiance = 0.0;
+		int normals = w_facet > 0.0 ? 2 : 1;
+		for (int k = 0; k < normals; k++) {
+			sun_radiance += (k == 0 ? 1.0 - w_facet : w_facet)
+					* cloud_far_light_radiance(tau, sun_dir, view_prop, k == 0 ? entry : facet);
+		}
+#else
+		float sun_radiance = cloud_far_light_radiance(tau, sun_dir, view_prop, entry);
+#endif
+		radiance += sun_irradiance * gain * sun_radiance;
 	}
 	if (atm_moonlit()) {
 		vec3 moon_dir = normalize(atmosphere_moon_direction);
