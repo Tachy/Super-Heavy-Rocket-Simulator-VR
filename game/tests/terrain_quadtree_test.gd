@@ -52,6 +52,7 @@ func _initialize() -> void:
 	_check_jump()
 	_check_fresh_checkout()
 	_check_moon_without_water()
+	_check_no_horizon_without_terrain()
 	if _terrain:
 		_check_data()
 	else:
@@ -59,6 +60,7 @@ func _initialize() -> void:
 				+ "core' skipped")
 	if _moon_terrain:
 		_check_moon_data()
+		_check_moon_horizon()
 	else:
 		print("  note  data/ Moon terrain absent: 'moon refines to the 20 m tile' and 'moon finest mesh matches the "
 				+ "core' skipped")
@@ -364,6 +366,95 @@ func _check_moon_without_water() -> void:
 			and converged and absf(_coverage(tree) - 4.0 * PI) < 1e-9,
 			"moon: no water mask built (earth node has one: %s), tree uploads and covers without one" % earth_has_mask)
 	tree.queue_free()
+
+
+# Earth nodes and Moon nodes without the core's terrain build no horizon map (nothing changes in their path).
+func _check_no_horizon_without_terrain() -> void:
+	var key := CubeSphere.key_at(CubeSphere.geodetic_direction(10.0, 20.0), 6)
+	var earth := TerrainNodeBuilder.build(key, HeightSource.new(), null, EARTH_RADIUS_M)
+	var moon := TerrainNodeBuilder.build(key, _moon_heights(), null, MOON_RADIUS_M)
+	var earth_water: bool = (earth["custom2"] as PackedFloat32Array)[2] < 1.0  # water mask uv, not a grid position
+	_check(earth["horizon"] == null and moon["horizon"] == null and earth_water,
+			"no horizon map on an Earth node or on a Moon node without the core's terrain")
+
+
+# With the Moon terrain: a node at the IM-2 site (leaf and level 7) bakes a horizon map of the stated size; its texels
+# are the core's elevations (half-float precision, single-ray reference within the banded bake's accuracy), the shared
+# edge of two neighbours is identical, the vertices' CUSTOM2 is their grid position, skirts take their edge vertex's.
+func _check_moon_horizon() -> void:
+	var site: Dictionary = TomlLite.load_file(_config_dir.path_join("lunar_sites.toml"))["site"][0]
+	var lat := float(site["latitude_deg"])
+	var lon := float(site["longitude_deg"])
+	var heights := _moon_heights()
+	heights.core = _core
+	var direction := CubeSphere.geodetic_direction(lat, lon)
+	var leaf_level := 7
+	while CubeSphere.node_size_m(CubeSphere.key_at(direction, leaf_level), MOON_RADIUS_M) / CELLS > 12.0:
+		leaf_level += 1
+	for level in [leaf_level, 7]:
+		var key := CubeSphere.key_at(direction, level)
+		var node := TerrainNodeBuilder.build(key, heights, null, MOON_RADIUS_M)
+		var image: Image = node["horizon"]
+		_check(image != null and image.get_width() == ROW * TerrainNodeBuilder.HORIZON_BLOCKS
+				and image.get_height() == ROW and image.get_format() == Image.FORMAT_RGBAH,
+				"moon level %d: horizon map %s (%.0f ms bake and encode)" % [level, "%dx%d" % [image.get_width(),
+				image.get_height()] if image != null else "missing", node["horizon_ms"]])
+		if image == null:
+			continue
+		var worst_deg := 0.0
+		var sum_deg := 0.0
+		var count := 0
+		var max_elevation_deg := 0.0
+		for point: Vector2i in [Vector2i(32, 32), Vector2i(10, 50), Vector2i(0, 0), Vector2i(64, 64), Vector2i(20, 3)]:
+			var vertex_lat_lon := _vertex_lat_lon(key, point.x, point.y)
+			var samples: Dictionary = _core.surface_samples("moon", PackedFloat64Array([vertex_lat_lon.x]),
+					PackedFloat64Array([vertex_lat_lon.y]))
+			var height: float = (samples["height_m"] as PackedFloat64Array)[0]
+			for k in TerrainNodeBuilder.N_AZ:
+				var reference: float = _core.horizon_elevation_rad("moon", vertex_lat_lon.x, vertex_lat_lon.y, height,
+						k * TAU / TerrainNodeBuilder.N_AZ)
+				var stored := TerrainNodeBuilder.horizon_value(image, point.x, point.y, k)
+				max_elevation_deg = maxf(max_elevation_deg, absf(rad_to_deg(stored)))
+				if absf(reference) < deg_to_rad(5.0):
+					var error_deg := absf(rad_to_deg(stored - reference))
+					worst_deg = maxf(worst_deg, error_deg)
+					sum_deg += error_deg
+					count += 1
+		# The single ray starts from the data resolution, the bake from the node spacing: at the 373 m spacing the two
+		# sample sets differ (the reference itself moves by up to 3 deg when the observer shifts by 3 m, core task 2a).
+		var worst_limit_deg := 0.5 if level == leaf_level else 5.0
+		var mean_limit_deg := 0.1 if level == leaf_level else 1.0
+		_check(count > 0 and worst_deg < worst_limit_deg and sum_deg / count < mean_limit_deg,
+				"moon level %d: horizon texels match the core's "
+				% level + "single-ray march (%d samples below 5 deg: worst %.2f deg, mean %.3f deg; largest stored "
+				% [count, worst_deg, sum_deg / maxf(count, 1)] + "elevation %.1f deg)" % max_elevation_deg)
+		var vertices_ok := true
+		var custom2: PackedFloat32Array = node["custom2"]
+		for s in TerrainNodeBuilder.SKIRT_EDGE.size():
+			var e := TerrainNodeBuilder.SKIRT_EDGE[s]
+			var v := TerrainNodeBuilder.GRID_VERTICES + s
+			vertices_ok = vertices_ok and custom2[2 * v] == custom2[2 * e] and custom2[2 * v + 1] == custom2[2 * e + 1] 					and custom2[2 * e] == float(e % ROW) and custom2[2 * e + 1] == float(e / ROW)
+		_check(vertices_ok, "moon level %d: CUSTOM2 is the grid position, skirts take their edge vertex's" % level)
+	var key := CubeSphere.key_at(direction, 7)
+	var east_key := Vector4i(key.x, key.y, key.z + 1, key.w)
+	var west := TerrainNodeBuilder.build(key, heights, null, MOON_RADIUS_M)["horizon"] as Image
+	var east := TerrainNodeBuilder.build(east_key, heights, null, MOON_RADIUS_M)["horizon"] as Image
+	# In half-float steps (2^-10 of the value): the two nodes' vertex coordinates differ by ~1e-12 (measured: 2 steps).
+	var seam := 0.0
+	for b in ROW:
+		for k in TerrainNodeBuilder.N_AZ:
+			var west_value := TerrainNodeBuilder.horizon_value(west, CELLS, b, k)
+			var difference := absf(west_value - TerrainNodeBuilder.horizon_value(east, 0, b, k))
+			seam = maxf(seam, difference / maxf(absf(west_value) / 1024.0, 1e-7))
+	_check(seam <= 4.0, "moon: the shared edge of two neighbouring nodes has the same horizons (max %.2f half-float "
+			% seam + "steps)")
+
+
+## Selenographic (lat, lon) in deg of grid vertex (a, b) of a node.
+static func _vertex_lat_lon(key: Vector4i, a: int, b: int) -> Vector2:
+	var s := CubeSphere.warp(CubeSphere.lattice_coordinate(key.z, key.y, a, CELLS))
+	var t := CubeSphere.warp(CubeSphere.lattice_coordinate(key.w, key.y, b, CELLS))
+	return CubeSphere.lat_lon_deg(CubeSphere.direction_warped(key.x, s, t))
 
 
 # Camera jumps (pad -> 1000 km up -> the far side of the Earth) with one upload per frame: coverage on every frame.

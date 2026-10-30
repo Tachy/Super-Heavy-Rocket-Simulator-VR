@@ -58,6 +58,22 @@ func has_water() -> bool:
 	return body == "earth"
 
 
+## Whether nodes get terrain horizon maps (terrain shadows): the Moon with the core's lunar terrain (the core returns
+## nothing without it; the Earth has no horizon support).
+func has_horizon() -> bool:
+	return body == "moon" and core != null
+
+
+## Horizon elevations (rad, + above the local horizontal) of an n x n vertex lattice (row-major, n - 1 divisible by 16)
+## at azimuth_count azimuths k 2 pi / azimuth_count clockwise from each vertex's north: point-major, azimuth-minor
+## (StarsimCore.horizon_elevations); empty without horizon support. spacing_m: the lattice's vertex spacing.
+func horizon_elevations(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array, heights_m: PackedFloat64Array,
+		azimuth_count: int, spacing_m: float) -> PackedFloat32Array:
+	if not has_horizon():
+		return PackedFloat32Array()
+	return core.horizon_elevations(body, lats_deg, lons_deg, heights_m, azimuth_count, spacing_m)
+
+
 ## The finest horizontal resolution of the surface data (m) over the given points (a node's lattice: a site tile
 ## covering part of it counts); INF without terrain data.
 func finest_resolution_m(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> float:

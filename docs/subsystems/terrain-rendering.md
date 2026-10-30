@@ -78,10 +78,25 @@ on top; it replaced the interim `GroundPatch`.
   under the deck. Its ~15 extra global samplers per node need `rendering_device/d3d12/max_resource_descriptors`
   262144 in project.godot.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
-  colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine). Leaf level 12, 10.4 m spacing at
+  colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine + terrain shadows). Leaf level 12, 10.4 m spacing at
   the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m,
   level 7). The lander's CG is drawn 18.11 m above the drawn surface = the session's `altitude_terrain_m`, 0.8 m from
   the site.
+  **Terrain shadows:** the node builder bakes the core's horizon (`StarsimCore.horizon_elevations`, banded bake, observer =
+  the vertex on the terrain surface) for 16 azimuths per grid vertex into a half-float RGBAH image of 260 x 65 texels
+  (texel `a * 4 + c`, row `b` = vertex (a, b), azimuths 4c .. 4c+3; the core's order reinterpreted, no copy; half floats
+  0.004 deg at 5 deg, range +-pi/2 so no clamp). CUSTOM2 carries the vertex's grid position (a, b) (the Moon has no
+  water mask), skirts take their edge vertex's. The shader filters bilinearly itself (`texelFetch`, so shared edges read
+  identical texels) and takes the horizon in the light's azimuth (linear between the two sectors); the visible fraction
+  is the exact circular segment of the disc (angular radius r / distance) above that straight horizon; it multiplies
+  the Sun term, the umbra glow and (own horizon, the Earth's disc) the earthshine. Local east / north come from the
+  Moon-fixed position (pole +Y, any east at a pole). Nodes with spacing > `HORIZON_MAX_SPACING_M` (1000 m, level <= 5)
+  build none (`horizon_enabled` false: lit as before). Bake: 32 ms per leaf node (level 12), 43-46 ms at level 7, 0.06 s
+  at 666 m, 0.2 s at 1.3 km, 0.8-1.4 s at 2.7 km and coarser (hence the cap; one worker, idle machine). Lunar site load
+  (IM-2, worker threads, headless, to idle): 4.9 s without horizons, 40 s with horizons on all levels, 11.3 s with the cap.
+  Upload: one 135 KB ImageTexture per node inside the existing upload budget. GPU (1600 x 900, `--gpu_time`, median):
+  15 km view over rough terrain 0.724 -> 1.018 ms (+0.29 ms, fragment ALU / fetch of the horizon test; per-vertex
+  pre-computation was slower), 2 m ground view 0.608 -> 0.649 ms, stereo mock 2.93 -> 3.20 ms.
 
 ## Code
 
@@ -123,7 +138,10 @@ on top; it replaced the interim `GroundPatch`.
   coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.
 - Terrain-load draw stall (~1 run in 3 shows one 11-17 ms frame inside the RenderingServer draw; engine-internal,
   worker-pool dependent; see CLAUDE.md known issues).
-- Moon: no cast shadows (crater rims, polar shadows): a polar site with the Sun ~1 deg high is dark by its normals
-  only - a later part.
+- Moon shadows: shadow edges are as sharp as the grid (vertex spacing, 10 m at the sites, 333 m on the far side; the
+  bake's banded interpolation is within 0.3-1 deg worst case of a single-ray march); the horizon is taken in the disc
+  centre's azimuth; nodes coarser than 1 km and nodes without terrain data have none; no shadows of vehicles or of
+  structures; the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
+  consistent but arbitrary north.
 - A fine imagery patch smaller than ~0.1 x viewing distance fades out from far away; S2 brightness steps over open
   water remain.

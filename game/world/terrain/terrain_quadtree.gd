@@ -504,6 +504,9 @@ func _upload(result: Dictionary) -> void:
 		material.set_shader_parameter(crop_name + "_coverage_deg", Vector4(coverage.position.x, coverage.position.y,
 				coverage.end.x, coverage.end.y))
 		material.set_shader_parameter(crop_name + "_fade_m", float(crop["fade_m"]))
+	if result["horizon"] != null:  # bodies without horizon maps (the Earth) build none
+		material.set_shader_parameter("horizon_map", ImageTexture.create_from_image(result["horizon"]))
+		material.set_shader_parameter("horizon_enabled", true)
 	if result["water_mask"] != null:  # bodies without water (the Moon) build none
 		material.set_shader_parameter("water_mask", ImageTexture.create_from_image(result["water_mask"]))
 

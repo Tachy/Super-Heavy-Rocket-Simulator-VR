@@ -5,7 +5,8 @@ class_name TerrainNodeBuilder
 ## Vertex layout: 65 x 65 grid vertices (index b * ROW + a, a along the face's s axis, b along t), then the skirt ring
 ## (SKIRT_EDGE[k] is the grid vertex above skirt vertex k). Positions are relative to `center_fixed` in render axes.
 ## Per-vertex channels: CUSTOM0 = `morph` (xyz: offset to the parent-level surface, w: 1 on skirt vertices),
-## CUSTOM1 = `custom1` (2/vertex: global equirect u, v), CUSTOM2 = `custom2` (water mask uv),
+## CUSTOM1 = `custom1` (2/vertex: global equirect u, v), CUSTOM2 = `custom2` (water mask uv; on a body with horizon
+## maps the vertex's grid position (a, b) instead: the texel of the horizon map, see `_horizon_image`),
 ## CUSTOM3 = `custom3` (3/vertex: the parent-level normal the shader blends towards with the morph factor).
 
 const CELLS := 64
@@ -16,6 +17,14 @@ const GRID_VERTICES := ROW * ROW
 ## [E] Skirt depth in grid cells of the node edge: hides cracks between neighbours one level apart.
 const SKIRT_DEPTH_CELLS := 2.0
 const WATER_MASK_PX := 128
+## Horizon azimuths per vertex (k * 2 pi / N_AZ clockwise from north); N_AZ / 4 = HORIZON_BLOCKS RGBA texels per vertex.
+const N_AZ := 16
+const HORIZON_BLOCKS := N_AZ / 4
+## [E] Nodes with a vertex spacing above this get no horizon map: the bake's cost grows steeply with the spacing (IM-2,
+## one node: 0.06 s at 666 m, 0.2 s at 1.3 km, 0.8-1.4 s from 2.7 km up to the 40 km of level 1; the first load of a
+## site went 5 s -> 40 s with all levels), and a grid coarser than ~1 km (the LDEM_16 data: 1.9 km) holds no shadow
+## detail a viewer of such a node (an orbit view of a whole region) could see. Such nodes light without terrain shadows.
+const HORIZON_MAX_SPACING_M := 1000.0
 ## [E] Imagery texels wanted across a node (4 per grid cell); ImagerySource picks the level from it.
 const IMAGERY_TEXELS := 256.0
 const INV_360 := 1.0 / 360.0
@@ -80,6 +89,10 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	var mask_u_scale := 1.0 / box.size.x
 	var mask_v_scale := 1.0 / box.size.y
 
+	var horizon_start_us := Time.get_ticks_usec()
+	var horizon := _horizon_image(key, heights, radius_m, lats, lons, height_m)
+	var horizon_ms := (Time.get_ticks_usec() - horizon_start_us) / 1000.0
+
 	var total := GRID_VERTICES + SKIRT_EDGE.size()
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -107,6 +120,7 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	var b_ov := base_map[3]
 	var mask_west := box.position.x
 	var mask_north := box.end.y
+	var grid_uv := heights.has_horizon()  # CUSTOM2: the grid position (horizon map texel) instead of the water mask uv
 	# Raw longitudes are already continuous unless the node touches the antimeridian.
 	var unwrap := box.position.x <= -180.0 or box.end.x >= 180.0
 	var v := 0
@@ -140,8 +154,12 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 			uv2[v] = Vector2(lon * b_su + b_ou, lat * b_sv + b_ov)
 			custom1[2 * v] = (lon + 180.0) * INV_360
 			custom1[2 * v + 1] = (90.0 - lat) * INV_180
-			custom2[2 * v] = (lon - mask_west) * mask_u_scale
-			custom2[2 * v + 1] = (mask_north - lat) * mask_v_scale
+			if grid_uv:
+				custom2[2 * v] = a
+				custom2[2 * v + 1] = b
+			else:
+				custom2[2 * v] = (lon - mask_west) * mask_u_scale
+				custom2[2 * v + 1] = (mask_north - lat) * mask_v_scale
 			v += 1
 
 	# Parent-level normals: even vertices keep their own; odd ones the normalised mean of the neighbours their morph target
@@ -204,11 +222,48 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		"imagery_fine": fine,
 		"imagery_base": base,
 		"water_mask": _water_mask(heights, box) if heights.has_water() else null,  # null: a body without water
+		"horizon": horizon,  # null: a body without horizon maps (or without terrain data)
+		"horizon_ms": horizon_ms,
 		"lat_lon_box": box,
 		# The finest data anywhere on the lattice: the quadtree stops splitting where even this is coarser than the mesh;
 		# a site tile covering only part of the node still counts (a lattice cell or more of it).
 		"max_resolution_m": heights.finest_resolution_m(lats, lons),
 	}
+
+
+## The node's horizon map: RGBAH, (ROW * HORIZON_BLOCKS) x ROW texels; texel (a * HORIZON_BLOCKS + c, b) holds the
+## elevations (rad above the local horizontal, half floats: 0.004 deg at 5 deg, range +-pi/2 needs no clamp) of vertex
+## (a, b) at azimuths 4 c .. 4 c + 3 (k * 2 pi / N_AZ clockwise from north), the core's order (vertex-major,
+## azimuth-minor) reinterpreted without a copy. The observer is the vertex on the terrain surface. The shader filters
+## bilinearly between the vertices itself (texelFetch), so a shared edge reads identical texels. Null without horizon
+## support and on nodes coarser than HORIZON_MAX_SPACING_M.
+static func _horizon_image(key: Vector4i, heights: HeightSource, radius_m: float, lats: PackedFloat64Array,
+		lons: PackedFloat64Array, height_m: PackedFloat64Array) -> Image:
+	if not heights.has_horizon():
+		return null
+	var grid_lats := PackedFloat64Array()
+	var grid_lons := PackedFloat64Array()
+	var grid_heights := PackedFloat64Array()
+	for b in ROW:
+		var k := (b + 1) * LATTICE + 1
+		grid_lats.append_array(lats.slice(k, k + ROW))
+		grid_lons.append_array(lons.slice(k, k + ROW))
+		grid_heights.append_array(height_m.slice(k, k + ROW))
+	var spacing_m := CubeSphere.node_size_m(key, radius_m) / CELLS
+	if spacing_m > HORIZON_MAX_SPACING_M:
+		return null
+	var elevations := heights.horizon_elevations(grid_lats, grid_lons, grid_heights, N_AZ, spacing_m)
+	if elevations.size() != GRID_VERTICES * N_AZ:
+		return null
+	var image := Image.create_from_data(ROW * HORIZON_BLOCKS, ROW, false, Image.FORMAT_RGBAF,
+			elevations.to_byte_array())
+	image.convert(Image.FORMAT_RGBAH)
+	return image
+
+
+## Elevation (rad) of vertex (a, b) at azimuth index k of a node's horizon map (the encoding of _horizon_image).
+static func horizon_value(horizon: Image, a: int, b: int, k: int) -> float:
+	return horizon.get_pixel(a * HORIZON_BLOCKS + (k >> 2), b)[k & 3]
 
 
 ## Per-crop constants for the vertex loop: [u scale, u offset, v scale, v offset] (uv = lon * su + ou, lat * sv + ov).
