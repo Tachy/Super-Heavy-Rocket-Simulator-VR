@@ -427,6 +427,11 @@ double StarsimCore::horizon_elevation_rad(const godot::String& body, double lati
                                               azimuth_rad, environment::HorizonMarch{first_step_m, first_step_m});
 }
 
+double StarsimCore::terrain_max_height_m(const godot::String& body) const {
+    if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    return moon_terrain_->max_height_m();
+}
+
 std::shared_ptr<const environment::AtmosphereScattering> StarsimCore::atmosphere() const {
     const std::lock_guard<std::mutex> lock(atmosphere_mutex_);
     return atmosphere_;
@@ -1070,6 +1075,7 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("horizon_elevation_rad", "body", "latitude_deg", "longitude_deg", "height_m",
                                   "azimuth_rad"),
                          &StarsimCore::horizon_elevation_rad);
+    ClassDB::bind_method(D_METHOD("terrain_max_height_m", "body"), &StarsimCore::terrain_max_height_m);
     ClassDB::bind_method(D_METHOD("surface_finest_resolution_m", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_finest_resolution_m);
     ClassDB::bind_method(D_METHOD("load_atmosphere", "config_dir", "cache_dir"), &StarsimCore::load_atmosphere);

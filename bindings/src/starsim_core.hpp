@@ -114,6 +114,8 @@ public:
     // One full march (environment::horizon_elevation_rad, from the data resolution there); NAN without the terrain.
     double horizon_elevation_rad(const godot::String& body, double latitude_deg, double longitude_deg, double height_m,
                                  double azimuth_rad) const;
+    // The terrain's highest point above its reference sphere (Terrain::max_height_m); NAN without the terrain.
+    double terrain_max_height_m(const godot::String& body) const;
 
     // Atmosphere (M8): loads <cache_dir>/earth_atmosphere.bin or precomputes it (config_dir/atmosphere/earth_optics.toml)
     // and keeps the lookups for the calls below. {ok, error, transmittance / scattering / single_mie /
