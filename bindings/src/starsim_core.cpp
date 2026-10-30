@@ -701,24 +701,6 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
     return result;
 }
 
-double StarsimCore::weather_cloud_nearest_m(const godot::Vector3& position_itrf_m, double reach_m) const {
-    SnapshotPtr before, after;
-    {
-        const std::lock_guard<std::mutex> lock(weather_mutex_);
-        before = weather_before_;
-        after = weather_after_;
-    }
-    const frames::GeodeticPosition here = frames::fixed_to_geodetic(to_core(position_itrf_m));
-    double nearest = std::numeric_limits<double>::infinity();
-    for (const SnapshotPtr& snapshot : {before, after}) {
-        if (snapshot) {
-            nearest = std::min(nearest, environment::cloud_render_nearest_m(
-                                            *snapshot, here.latitude_rad, here.longitude_rad, here.height_m, reach_m));
-        }
-    }
-    return nearest;
-}
-
 StarsimCore::BakeInputs StarsimCore::bake_inputs(const std::string& file) {
     const std::lock_guard<std::mutex> lock(bake_mutex_);
     if (!bake_noise_) {
@@ -869,18 +851,6 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         result["blue_noise_size"] = static_cast<int64_t>(noise.blue_noise_size);
         result["curl"] = bytes(noise.curl_rgb);
         result["curl_size"] = static_cast<int64_t>(environment::cloud_curl_size);
-        // The sub-cell field's statistics (cloud_noise.hpp; world-volume Task 7 ruling R1).
-        result["detail_level_mean"] =
-            godot::Vector3(noise.detail_level_mean[0], noise.detail_level_mean[1], noise.detail_level_mean[2]);
-        result["detail_level_variance"] = godot::Vector3(noise.detail_level_variance[0],
-                                                         noise.detail_level_variance[1], noise.detail_level_variance[2]);
-        godot::PackedFloat32Array residual;
-        for (float v : noise.shape_residual_variance) residual.push_back(v);
-        result["shape_residual_variance"] = residual;
-        result["detail_gaussian"] = rows(noise.detail_gaussian);
-        result["sub_cell_rows"] = static_cast<int64_t>(environment::cloud_sub_cell_rows);
-        result["sub_cell_standard_range"] = environment::cloud_sub_cell_standard_range;
-        result["sub_cell_edge_spread"] = environment::cloud_sub_cell_edge_spread;
         godot::Array mips;
         for (const auto& level : noise.shape_mips) mips.push_back(bytes(level));
         result["shape_mips"] = mips;
@@ -1062,8 +1032,6 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::weather_set_active);
     ClassDB::bind_method(D_METHOD("weather_cloud_light", "position_itrf_m", "sun_direction_itrf"),
                          &StarsimCore::weather_cloud_light);
-    ClassDB::bind_method(D_METHOD("weather_cloud_nearest_m", "position_itrf_m", "reach_m"),
-                         &StarsimCore::weather_cloud_nearest_m);
     ClassDB::bind_method(D_METHOD("weather_cloud_cell_bake", "snapshot_path", "centre_earth_m", "cell_m",
                                   "shape_origins_earth_m"),
                          &StarsimCore::weather_cloud_cell_bake);

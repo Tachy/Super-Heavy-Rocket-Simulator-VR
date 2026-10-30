@@ -1,4 +1,4 @@
-// The baked cloud volume prototype ("Weg 2", 2026-10-29): the clouds' shape and light precomputed once in a world-fixed
+// The baked cloud volume ("Weg 2", 2026-10-29; the default march since 2026-10-30): the clouds' shape and light precomputed once in a world-fixed
 // volume around an anchor (the camera when the bake started) - static clouds, independent of the view direction - and
 // each frame a cheap march through it. GLSL 450 only - compiled by CloudBaked (game/world/weather/cloud_baked.gd) after
 // CloudEffect's march files (cloud_pass.gdshaderinc's main calls cloud_baked_shade), never included by a Godot shader.

@@ -52,9 +52,10 @@ const CENTRE_BLOCK_SIZE := 64 + 3 * 16  ## CloudCentre: clip_from_earth, sizes, 
 const FREE_DELAY_CALLBACKS := 3
 ## The shape prefilter's kernel choice (_shape_prefilter_needed): its start footprint (core cloud_noise.hpp
 ## cloud_shape_prefilter_start_m, clouds.gdshaderinc), the WGS84 ellipsoid's largest radius of curvature a^2 / b (at
-## the poles; conservative for the farthest cloud sample) and the cloud top above the ellipsoid.
+## the poles; conservative for the farthest cloud sample) and the cloud top above the ellipsoid (clouds.gdshaderinc
+## CLOUD_TOP_M; the game's one copy, CloudBaked and CloudLayer read it).
 const SHAPE_PREFILTER_START_M := 3500.0
-const CURVATURE_RADIUS_MAX_M := 6378137.0 * 6378137.0 / 6356752.314
+const CURVATURE_RADIUS_MAX_M := CloudLayer.WGS84_A_M * CloudLayer.POLAR_STRETCH
 const CLOUD_TOP_M := 20000.0
 
 ## The full-resolution result for the composite quad (layer = view); re-created when the size changes and shown by
@@ -135,6 +136,7 @@ var _old_wanted_us := 0  ## when a frame first wanted the old march before it wa
 var baked: CloudBaked
 var baked_shown := false
 var _baked_failed := false
+var _baked_stereo := false  ## the stereo flag `baked` was created for
 
 
 func _init() -> void:
@@ -316,21 +318,28 @@ func _request_baked(stereo: bool) -> CloudKernels:
 	return kernels
 
 
-## Creates the shaders and pipelines of a built kernel set; false (errors pushed) when one fails.
-func _create_kernels(kernels: CloudKernels) -> bool:
+## Creates the shaders and pipelines of a built kernel set: 1, or (errors pushed, the set's shaders freed) 0 when a
+## rejected cached binary is being rebuilt (CloudKernels.rebuild_rejected: poll and create again), -1 when it failed.
+func _create_kernels(kernels: CloudKernels) -> int:
+	var created: Array[String] = []
 	for name: String in kernels.names():
 		var shader := kernels.create_shader(_rd, name)
 		if not shader.is_valid():
-			return false
+			for n in created:
+				_rd.free_rid(_shaders[n])  # (frees its pipeline with it)
+				_shaders.erase(n)
+				_pipelines.erase(n)
+			return 0 if kernels.rebuild_rejected() else -1
 		_shaders[name] = shader
 		_pipelines[name] = _rd.compute_pipeline_create(shader)
-	return true
+		created.append(name)
+	return 1
 
 
 ## Render thread: the temporal pass and the upsample created once built (false while building or failed).
 func _pass_ready() -> bool:
 	if _pass_state == 0 and _pass_kernels.done():
-		_pass_state = 1 if _create_kernels(_pass_kernels) else -1
+		_pass_state = _create_kernels(_pass_kernels)
 	return _pass_state == 1
 
 
@@ -346,24 +355,27 @@ func _old_march_ready() -> bool:
 			_old_wanted_us = Time.get_ticks_usec()
 		return false
 	var start_us := Time.get_ticks_usec()
-	_old_state = 1 if _create_kernels(kernels) else -1
+	_old_state = _create_kernels(kernels)
+	if _old_state == 0:
+		return false  # (a rejected cached binary being rebuilt)
 	print("CloudEffect: old march ready (waited for its build %.2f s, shaders created in %.2f s)" % [
 			(start_us - _old_wanted_us) / 1.0e6 if _old_wanted_us > 0 else 0.0,
 			(Time.get_ticks_usec() - start_us) / 1.0e6])
 	return _old_state == 1
 
 
-## Render thread: the baked volume created once its kernels are built (false while building or failed: then
-## _baked_failed); the old march's build starts in the background then.
+## Render thread: the baked volume created once its kernels are built (false while building, while a rejected cached
+## binary is rebuilt, or failed: then _baked_failed); the old march's build starts in the background then.
 func _create_baked(stereo: bool) -> bool:
 	var kernels := _request_baked(stereo)
 	if not kernels.done():
 		return false
 	var start_us := Time.get_ticks_usec()
 	baked = CloudBaked.new()
+	_baked_stereo = stereo
 	if not baked.setup(_rd, kernels):
 		baked = null
-		_baked_failed = true
+		_baked_failed = not kernels.rebuild_rejected()
 		return false
 	print("CloudEffect: baked volume's shaders created in %.2f s" % ((Time.get_ticks_usec() - start_us) / 1.0e6))
 	return true
@@ -652,6 +664,11 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# (also standing in while the old march's kernels are still being built after an F7 switch).
 	var old_ok := (_march_method == MarchMethod.OLD or debug != 0 or _baked_failed) and _old_march_ready()
 	if not old_ok and debug == 0 and not _baked_failed:
+		if baked != null and _baked_stereo != stereo:  # the view count changed (an XR session started or ended)
+			_shaders.erase("baked")
+			_pipelines.erase("baked")
+			baked.free_all()
+			baked = null
 		if baked == null and not _create_baked(stereo) and not _baked_failed:
 			_skip_frame(view_count)  # its kernels are being built
 			return

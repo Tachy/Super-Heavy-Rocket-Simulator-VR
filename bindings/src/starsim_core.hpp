@@ -107,10 +107,6 @@ public:
     // The lookups take ITRF metres and unit directions; before a successful load they return zeros.
     godot::Vector3 atmosphere_sun_transmittance(const godot::Vector3& position_itrf_m,
                                                 const godot::Vector3& sun_direction_itrf) const;
-    // A lower bound of the distance (m) from the point to any cloud the active pair can draw within reach_m
-    // (environment::cloud_render_nearest_m, the smaller of both snapshots, whatever their blend); +inf for none within
-    // reach_m or without an active snapshot (the cloud view cache's near shell, cloud view cache Task 5).
-    double weather_cloud_nearest_m(const godot::Vector3& position_itrf_m, double reach_m) const;
     // Checks only (cloud world volume, core cloud_volume_bake.hpp): the CPU reference of the cell bake of ONE snapshot
     // file - (rho, sigma_c) in 1/m. Positions are Earth-local render axes (polar +Y).
     // shape_origins_earth_m: 3 values (the anchor point; its noise origins as CloudLayer computes them) or 12 (anchor,

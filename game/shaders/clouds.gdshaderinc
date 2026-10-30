@@ -136,12 +136,6 @@ const float CLOUD_LAYERS = 32.0;
 const float CLOUD_SHAPE_TILE_H_M = 32000.0;
 const float CLOUD_SHAPE_TILE_V_M = 16000.0;
 const float CLOUD_DETAIL_TILE_M = 1000.0;  // level 0; level k: / 4^k
-// The sub-cell field (core cloud_noise.hpp, mirrored; smoke_test.gd compares): the edge spread per edge width, the
-// Gaussianising table's rows per detail state, its rows and its standardised range.
-const float CLOUD_SUB_CELL_EDGE_SPREAD = 0.22360679774997896;
-const float CLOUD_SUB_CELL_ROWS_PER_STATE = 4.0;
-const float CLOUD_SUB_CELL_ROWS = 13.0;
-const float CLOUD_SUB_CELL_STANDARD_RANGE = 6.0;
 const int CLOUD_DETAIL_LEVELS = 3;          // core cloud_detail_levels
 const float CLOUD_DETAIL_STATES = 4.0;      // core cloud_detail_states (the table rows)
 // Shape prefilter (core cloud_noise.hpp cloud_shape_prefilter_*; texels of the shape texture across the tile).

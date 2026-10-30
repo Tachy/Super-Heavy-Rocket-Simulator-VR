@@ -9,6 +9,7 @@ extends RefCounted
 ## lists the RD textures of the sampler globals - so the compute pass reads exactly what the Godot shaders read.
 
 const SAMPLER_TYPES := ["sampler2D", "sampler3D", "sampler2DArray", "samplerCube"]
+const INCLUDE_PATTERN := "(?m)^[ \\t]*#include[ \\t]+\"([^\"]+)\"[^\\n]*$"
 
 var source := ""  ## the GLSL compute source
 var members: Array[Dictionary] = []  ## {name, id (StringName), type, offset} of the uniform block, std140
@@ -18,13 +19,15 @@ var _defaults := {}  ## project.godot defaults of the members never set, looked 
 
 
 ## defines: preprocessor names (e.g. "CLOUD_MARCH"); files: res:// include paths in order. with_globals: false for
-## kernels without the includes' globals (their `global uniform` lines are dropped).
-static func build(defines: PackedStringArray, files: PackedStringArray, with_globals := true) -> CloudShaderPort:
+## kernels without the includes' globals (their `global uniform` lines are dropped). codes: the include files' text
+## (include_codes) - a worker thread must not load() them (a worker's load can wait for the main thread: CloudKernels).
+static func build(defines: PackedStringArray, files: PackedStringArray, with_globals := true,
+		codes := {}) -> CloudShaderPort:
 	var port := CloudShaderPort.new()
 	var seen := {}
 	var body := ""
 	for file in files:
-		body += port._inline(file, seen) + "\n"
+		body += port._inline(file, seen, codes) + "\n"
 	var regex := RegEx.new()
 	regex.compile("(?m)^[ \\t]*global[ \\t]+uniform[ \\t]+(\\w+)[ \\t]+(\\w+)[ \\t]*(?::([^;]*))?;[^\\n]*$")
 	var declared := {}
@@ -70,14 +73,36 @@ static func mipmap_sampler_state() -> RDSamplerState:
 	return state
 
 
-func _inline(file: String, seen: Dictionary) -> String:
-	var include := load(file) as ShaderInclude
-	if include == null:
-		push_error("CloudShaderPort: include missing: " + file)
-		return ""
+## The text of `files` and of every file they include (path -> code), loaded on the calling thread into `codes`.
+static func include_codes(files: PackedStringArray, codes: Dictionary) -> void:
 	var regex := RegEx.new()
-	regex.compile("(?m)^[ \\t]*#include[ \\t]+\"([^\"]+)\"[^\\n]*$")
-	var code := include.code
+	regex.compile(INCLUDE_PATTERN)
+	for file in files:
+		if codes.has(file):
+			continue
+		var include := load(file) as ShaderInclude
+		if include == null:
+			push_error("CloudShaderPort: include missing: " + file)
+			continue
+		codes[file] = include.code
+		var nested := PackedStringArray()
+		for m in regex.search_all(include.code):
+			nested.append(m.get_string(1))
+		include_codes(nested, codes)
+
+
+func _inline(file: String, seen: Dictionary, codes: Dictionary) -> String:
+	var code := ""
+	if codes.has(file):
+		code = codes[file]
+	else:
+		var include := load(file) as ShaderInclude
+		if include == null:
+			push_error("CloudShaderPort: include missing: " + file)
+			return ""
+		code = include.code
+	var regex := RegEx.new()
+	regex.compile(INCLUDE_PATTERN)
 	var out := ""
 	var at := 0
 	for m in regex.search_all(code):
@@ -85,7 +110,7 @@ func _inline(file: String, seen: Dictionary) -> String:
 		var path := m.get_string(1)
 		if not seen.has(path):
 			seen[path] = true
-			out += _inline(path, seen)
+			out += _inline(path, seen, codes)
 		at = m.get_end()
 	return out + code.substr(at)
 

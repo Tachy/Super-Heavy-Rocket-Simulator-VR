@@ -15,7 +15,7 @@ const DESKTOP_ARG := "--no-xr"
 const STAND_IN_NAME := &"StereoMock"  ## StereoMockXr.get_name()
 const AUTO_RECENTER_DELAY_S := 2.0  ## [E] one recentre after the start (pattern of the sibling project), so the view is in front
 ## VR frame-rate targets (user 2026-10-27: "mit Wetter immer 45 fps, ohne 90"; 45 Hz with the runtime's reprojection
-## "ist butterweich"): the clouds' view cache gets the half-rate frame's budget.
+## "ist butterweich"): with weather the frame budget is the half-rate frame's.
 const TARGET_HZ_WEATHER := 45.0
 const TARGET_HZ_CLEAR := 90.0
 

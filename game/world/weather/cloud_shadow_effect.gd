@@ -24,8 +24,7 @@ const BAKED_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clo
 var near_texture := Texture2DRD.new()
 var far_texture := Texture2DRD.new()
 ## Engine.get_frames_drawn() of the last frame rendered with the maps (render thread writes, main thread reads); the
-## layer takes the maps as valid only a few frames after it. Counted in frames, not wall-clock time (world-volume plan
-## Task 7): a slow frame (a check's ~100 ms full-resolution march) outlasted a millisecond window and switched the
+## layer takes the maps as valid only a few frames after it. Counted in frames, not wall-clock time: a slow frame (a check's ~100 ms full-resolution march) outlasted a millisecond window and switched the
 ## ground's and the air's cloud shadows off and on between frames of an unchanged scene.
 var ran_frame := -1000000
 ## Checks only (cloud_check.gd): the near map with the grid mean too (the maps' machinery against the CPU's
@@ -39,7 +38,8 @@ var cloud_effect: CloudEffect
 var baked_fill := false
 
 var _rd: RenderingDevice
-var _kernels: CloudKernels  ## the map's kernel and the baked fill's, being built (null once created)
+var _kernels: CloudKernels  ## the map's kernel and the baked fill's, being built (null once created; under _mutex)
+var _failed := false  ## the map's kernel failed: the pass stays off (the RIDs are kept for the predelete)
 var _port: CloudShaderPort
 var _shader := RID()
 var _pipeline := RID()
@@ -87,7 +87,10 @@ func _create() -> void:
 		var defines := PackedStringArray(["CLOUD_SHADOW_BAKED_FILL"])
 		defines.append_array(CloudBaked.extra_defines)  # (diagnostics: CLOUD_SHADOW_BAKED_DIAG)
 		specs.append(["baked_fill", defines, PackedStringArray(BAKED_FILES), true])
-	_kernels = CloudKernels.new(specs, "shadow maps")
+	var kernels := CloudKernels.new(specs, "shadow maps")
+	_mutex.lock()
+	_kernels = kernels
+	_mutex.unlock()
 	for linear in [false, true]:
 		for repeat in [false, true]:
 			var state := RDSamplerState.new()
@@ -125,32 +128,48 @@ func _create() -> void:
 	_mutex.unlock()
 
 
-## Render thread: the kernels created once built (false while building; the map's failing switches the pass off).
+## Render thread: the kernels created once built (false while building or while a rejected cached binary is rebuilt;
+## the map's failing switches the pass off, the baked fill's only the fill).
 func _kernels_ready() -> bool:
+	if _failed:
+		return false
 	if _kernels == null:
 		return true
 	if not _kernels.done():
 		return false
-	_port = _kernels.port("map")
-	_shader = _kernels.create_shader(_rd, "map")
-	if not _shader.is_valid():
-		_rd = null
+	var shader := _kernels.create_shader(_rd, "map")
+	var baked_shader := _kernels.create_shader(_rd, "baked_fill") if CloudBaked.shadow else RID()
+	if (not shader.is_valid() or (CloudBaked.shadow and not baked_shader.is_valid())) and _kernels.rebuild_rejected():
+		for rid: RID in [shader, baked_shader]:
+			if rid.is_valid():
+				_rd.free_rid(rid)
 		return false
+	var kernels := _kernels
+	_mutex.lock()
+	_kernels = null
+	_mutex.unlock()
+	if not shader.is_valid():
+		_failed = true
+		if baked_shader.is_valid():
+			_rd.free_rid(baked_shader)
+		return false
+	_port = kernels.port("map")
+	_shader = shader
 	_pipeline = _rd.compute_pipeline_create(_shader)
 	_globals_buffer = _rd.uniform_buffer_create(_port.block_size)
-	if CloudBaked.shadow:
-		_baked_port = _kernels.port("baked_fill")
-		_baked_shader = _kernels.create_shader(_rd, "baked_fill")
-		if _baked_shader.is_valid():
-			_baked_pipeline = _rd.compute_pipeline_create(_baked_shader)
-			_baked_globals = _rd.uniform_buffer_create(_baked_port.block_size)
-	_kernels = null
+	if baked_shader.is_valid():
+		_baked_port = kernels.port("baked_fill")
+		_baked_shader = baked_shader
+		_baked_pipeline = _rd.compute_pipeline_create(_baked_shader)
+		_baked_globals = _rd.uniform_buffer_create(_baked_port.block_size)
 	return true
 
 
 ## Main thread (the loading screen's hold): true while the kernels are being built.
 func building() -> bool:
+	_mutex.lock()
 	var kernels := _kernels
+	_mutex.unlock()
 	return kernels != null and not kernels.done()
 
 

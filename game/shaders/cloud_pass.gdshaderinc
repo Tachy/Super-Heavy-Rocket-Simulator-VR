@@ -1518,7 +1518,7 @@ vec4 cloud_stored_color(vec3 color, float transmittance) {
 	return vec4(color, clamp(transmittance, 0.0, 1.0));
 }
 
-// The shading of one view ray (cloud view cache Task 3: the per-frame march and the cache's fill share it):
+// The shading of one view ray (the old march's per-pixel shading):
 // dir_earth (Earth-local unit) from origin_offset (the eye's or the anchor's offset from the camera, Earth-local, m) up
 // to scene_m - the march (cloud_ray_jitter at noise_pixel), the air shadow's loss in the colour, the debug outputs.
 // Out: the stored colour (cloud_stored_color: premultiplied colour + the background's transmittance T in .a) and the

@@ -839,12 +839,24 @@ old world volume - removed when the baked volume became the default).
   WorkerThreadPool workers, one task per kernel in parallel: glslang to SPIR-V, then the driver binary
   (`shader_compile_binary_from_spirv`; on D3D12 the SPIR-V -> DXIL translation, which was as slow as glslang: creating
   the old march's 9 shaders from cached SPIR-V still took 6.8 s, from the binary 0.02 s). The binary is cached under
-  `user://shader_cache/clouds/<sha256>.bin`, the key the final GLSL source (defines in its header) + Godot version +
-  rendering driver + device name; written to a unique temp name and renamed (parallel checks). At start only the temporal
+  `user://shader_cache/clouds/<sha256>.bin`, the key the final GLSL source (defines in its header) + Godot version and
+  build hash + rendering driver + device name; written to a unique temp name and renamed (parallel checks) only when the
+  write succeeded and the file has the full length. A cached binary the RenderingDevice rejects (truncated, corrupt, a
+  container the engine no longer reads) makes the owner call `rebuild_rejected`: every kernel of that set read from the
+  cache is compiled again and its file replaced (once per set; log `CloudKernels <set>: a cached binary was rejected -
+  rebuilding n kernels without the cache`), the frame meanwhile as while building. Pruning: once per process (first
+  worker) binaries not used for 30 days and temp files older than an hour are removed (a hit older than a day rewrites
+  its file, so the file time is the last use). The build state is a job object the worker tasks hold a strong reference
+  to (never a freed object), and a set freed with its group still running (quitting during a build: the scene tree goes
+  before the engine waits for the workers) waits for it in its predelete - the one blocking wait; an unreleased running
+  group hung the engine's exit (cold build, quit at frame 5; now a clean exit after ~4 s). Workers load nothing: the
+  include files' text is read on the creating thread (a worker's `load()` can wait for the main thread's queue, the
+  likely cause of the earlier deadlocks of a blocking wait). At start only the temporal
   pass, the upsample, the active method's kernels (the baked volume's for the stereo march when an XR interface is up;
-  the first frame corrects a wrong guess) and the shadow maps' are built; once they are, the other method's build starts
-  in the background. Shaders are created from the binaries on the render thread when first needed. Nothing ever blocks
-  on the workers (a render- / main-thread wait for them deadlocked in the checks): until the kernels and the baked
+  the first frame corrects a wrong guess; a later change of the view count re-creates the baked volume for it) and the
+  shadow maps' are built; once they are, the other method's build starts
+  in the background. Shaders are created from the binaries on the render thread when first needed. No frame blocks on
+  the workers (owners poll `done()`; only a freed set's predelete waits): until the kernels and the baked
   volume's first set are ready the frame shows no clouds (`CloudEffect._skip_frame` clears the result to T = 1); an F7
   switch to the old march before its build finished keeps drawing the baked volume until it has. The loading screen
   holds "Wolken-Shader übersetzen (einmalig nach einer Änderung, einige Sekunden)" (a kernel had to be compiled) or

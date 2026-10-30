@@ -1,13 +1,13 @@
 class_name CloudBaked
 extends RefCounted
-## The baked cloud volume prototype ("Weg 2", user 2026-10-29): the clouds' shape and light precomputed once in a
+## The baked cloud volume ("Weg 2", user 2026-10-29; the default march since 2026-10-30): the clouds' shape and light precomputed once in a
 ## world-fixed clipmap around an anchor (the camera when the bake starts; static clouds, independent of the view
 ## direction) and each frame a cheap march through it (shaders/cloud_baked.gdshaderinc). The bake runs off the march in
 ## slices (a few dispatches per frame) into the second of two volume sets; a finished set is cross-faded in over
 ## FADE_FRAMES frames (both sets marched, their renders mixed: no pop, never a hole). A re-bake starts when the camera
 ## leaves REBAKE_MOVE of the anchor, the Sun turns by REBAKE_SUN_RAD or the weather changes. Owned by CloudEffect
-## (render thread); CloudEffect marches it in its march's place with MarchMethod.BAKED (until the first set is baked:
-## today's march).
+## (render thread); CloudEffect marches it in its march's place with MarchMethod.BAKED (until the first set is baked
+## the frame shows no clouds).
 ## Flat levels (2026-10-29, steps 3-4): 2.5D columns (pattern, cover, grid-mean depth, top / base; light per pixel) in
 ## up to FLAT_COLUMNS_MAX-wide levels, each doubling the cell, over the spherical cap the camera can see (FLAT_* below;
 ## the far side is never baked). Below FLAT_FINE_HEIGHT_M they start beyond the volume (level K, 6.4 km); above it at the
@@ -66,7 +66,7 @@ const GRID_BINDING := 53
 const BINDINGS := [[50, 51, 52], [54, 55, 56]]
 ## The band's floor and the cloud shell's top (clouds.gdshaderinc CLOUD_TOP_M); the band's margin above the field's top.
 const BAND_BOTTOM_M := 0.0
-const CLOUD_TOP_M := 20000.0
+const CLOUD_TOP_M := CloudEffect.CLOUD_TOP_M
 const BAND_TOP_MARGIN_M := 200.0
 const SET_FLOATS := 19 * 4
 const GRID_BLOCK_SIZE := 2 * SET_FLOATS * 4 + 16
@@ -328,7 +328,8 @@ func free_all() -> void:
 				_rd.free_rid(rid)
 		s.clear()
 	for rid: RID in _shaders.values():
-		_rd.free_rid(rid)
+		if rid.is_valid():  # (a failed setup's last one is not)
+			_rd.free_rid(rid)
 	_shaders.clear()
 	_pipelines.clear()
 	for rid in [_march_buffer, _bake_buffer, _band_buffer, _shadow_buffer]:
