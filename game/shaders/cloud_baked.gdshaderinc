@@ -25,21 +25,20 @@
 // (cloud_baked_flat_weight_at). A level's columns no camera of the geometry's height range can fetch are not baked.
 // Coordinates: azimuthal equidistant about flat_up0, (X, Y) = a theta (unit tangent . axis_x, . axis_y), theta the
 // angle from up0 (any cap up to the whole globe). Per column (RGBA16F 2-D arrays, one layer per flat level):
-//   F  x: the projected cover C (the share of shape taps with cloud), y: the opacity-equivalent in-cloud vertical
-//         depth x C, z / w: the cloud top / base x C (shared by both sets)
-//   L  the column-model light (cloud_far.gdshaderinc: plane-parallel slab, Monte Carlo table, the shapes' 3D gain)
-//         for the view from the anchor x C: x the Sun's single scattering / P(theta) (P per pixel), y its multiple
-//         scattering, z the sky's; w C (per set)
-// (premultiplied by C: divided by the interpolated C, clear columns do not darken or lower their neighbours).
-// Per pixel one entry point on the cloud's top / base shell (two fetches: a guess, then the shell of the fetched
-// height); the far field's cover / opacity rule (slant beam cover, alpha = C_v (1 - exp(-tau / mu))) and, where a cell
-// is coarser than the pixel, the shapes' prefiltered pattern of its cover at the footprint (the old far tier's).
+//   F  x: the pattern P (the cell's share of shape taps with cloud), y: the grid-mean vertical depth, z / w: the cloud
+//         top / base x P (premultiplied: a clear neighbour does not lower them)
+//   T  x: the column's nadir cover C_col, y: the cloud top (both shared by the two sets)
+// Per pixel (step 4): F and T reconstructed by the cubic B-spline (no cell drawn as a square), one entry point on the
+// cloud's top / base shell (two fetches: a guess, then the shell of the fetched height); the far field's cover / opacity
+// rule (slant beam cover, alpha = C_v (1 - exp(-tau / mu))); the shapes' prefiltered pattern of that cover at the
+// pixel's footprint (crisp edges at every distance; domain-warped: no repeating tile); the column-model light evaluated
+// at the pixel for its own view (cloud_far.gdshaderinc: plane-parallel slab, Monte Carlo table, the shapes' 3D gain).
 // Kernels: CLOUD_BAKED_BAND (the field's lowest and highest cloudy layer over the region: the band),
 // CLOUD_BAKED_DENSITY (A), CLOUD_BAKED_OCCUPANCY (O), CLOUD_BAKED_LIGHT (B; marches toward the Sun through A),
-// CLOUD_BAKED_FLAT (F of one flat level, a range of rows), CLOUD_BAKED_FLAT_LIGHT (L of one flat level, a set's),
+// CLOUD_BAKED_FLAT (F and T of one flat level, a range of rows),
 // CLOUD_BAKED_MARCH (with CLOUD_MARCH; CLOUD_BAKED_FADE: two sets marched and cross-faded - a re-bake's swap).
 
-#if defined(CLOUD_BAKED_DENSITY) || defined(CLOUD_BAKED_OCCUPANCY) || defined(CLOUD_BAKED_LIGHT) || defined(CLOUD_BAKED_BAND) 		|| defined(CLOUD_BAKED_FLAT) || defined(CLOUD_BAKED_FLAT_LIGHT)
+#if defined(CLOUD_BAKED_DENSITY) || defined(CLOUD_BAKED_OCCUPANCY) || defined(CLOUD_BAKED_LIGHT) || defined(CLOUD_BAKED_BAND) 		|| defined(CLOUD_BAKED_FLAT)
 #define CLOUD_BAKED_BUILD
 #endif
 #if defined(CLOUD_BAKED_BUILD) || defined(CLOUD_BAKED_MARCH)
@@ -202,6 +201,22 @@ float cloud_baked_fraction_of(float c) {
 // The edge coordinate whose ramp is r (0 < r < 1): the inverse smoothstep.
 float cloud_baked_unramp(float r) {
 	return 0.5 - sin(asin(1.0 - 2.0 * r) / 3.0);
+}
+
+// [E] The flat levels' domain warp of the shape coordinates (step 4): over the hundreds of km of an orbit view the
+// 32 km shape tile's period drew a regular lattice of dots. The shape coordinate q (tile units) is offset by a smooth,
+// large-scale field - the shape itself read at CLOUD_BAKED_WARP_SCALE of q at its coarsest mip, centred, times
+// CLOUD_BAKED_WARP_AMPLITUDE tiles - so neighbouring tiles are read at different offsets. Smooth and slow against the
+// pattern (locally a translation): the pattern's statistics, hence the prefilter thresholds and the mean cover, are
+// kept.
+const float CLOUD_BAKED_WARP_SCALE = 0.1931;
+const float CLOUD_BAKED_WARP_AMPLITUDE = 0.35;
+
+vec3 cloud_baked_warp(vec3 q) {
+	vec3 w = q * CLOUD_BAKED_WARP_SCALE;
+	float u = textureLod(cloud_noise_shape_mips, w + vec3(0.137, 0.713, 0.371), 1.0).r;
+	float v = textureLod(cloud_noise_shape_mips, w.yzx + vec3(0.529, 0.241, 0.883), 1.0).r;
+	return q + CLOUD_BAKED_WARP_AMPLITUDE * vec3(u - 0.5, v - 0.5, 0.0) * 2.0;
 }
 
 #endif
@@ -520,7 +535,7 @@ void main() {
 }
 #endif
 
-#if defined(CLOUD_BAKED_FLAT) || defined(CLOUD_BAKED_FLAT_LIGHT)
+#ifdef CLOUD_BAKED_FLAT
 // [E] The flat geometry's shape taps per column (the bake's cost: from orbit every level holds ~2 / pixel angle columns
 // across): 3 x 3 at one field point up to CLOUD_BAKED_FLAT_TAP_CELLS_M.y of cell (CloudBaked FLAT_TAP_CELLS_M; 2 x 2
 // left a deck mottled at 800 m cells: the 250 m shape texels undersampled), beyond 4 x 4 at 2 x 2 field points (the
@@ -696,7 +711,7 @@ void main() {
 		for (int fx = 0; fx < fp; fx++) {
 			vec3 radial_f = cloud_baked_flat_radial(si, g + ((vec2(fx, fy) + 0.5) / float(fp) - 0.5) * c) / ATM_STRETCH;
 			vec2 lat_lon = cloud_lat_lon(CLOUD_A_M * radial_f);
-			column += cloud_column_mean_depth(lat_lon, 0.0);
+			column += cloud_column_mean_depth_smooth(lat_lon, 0.0);  // (B-spline: no field-cell squares, step 4)
 			float p_top = -1.0;
 			float p_base = 1.0e9;
 			for (int layer = 0; layer < int(CLOUD_LAYERS); layer++) {
@@ -756,6 +771,7 @@ void main() {
 						if (turned) {
 							q = CLOUD_BAKED_FLAT_UNALIGNED_ROTATION * q / CLOUD_BAKED_FLAT_UNALIGNED_SCALE;
 						}
+						q = cloud_baked_warp(q);
 						float s = cloud_shape_prefiltered(q, level).r;
 						covered += types[type] * smoothstep(threshold - CLOUD_BAKED_FLAT_TAP_SOFT,
 								threshold + CLOUD_BAKED_FLAT_TAP_SOFT, s);
@@ -768,101 +784,6 @@ void main() {
 	}
 	imageStore(baked_f_out, texel, vec4(pattern, depth, top * pattern, base * pattern));
 	imageStore(baked_t_out, texel, vec4(c_col, top, 0.0, 0.0));
-}
-#endif
-
-#ifdef CLOUD_BAKED_FLAT_LIGHT
-// The flat levels' light for one set (its anchor's view, the Sun now): L = (single / P, multiple, sky) x C_col, w C_col
-// - the far field's column model (cloud_far_cloudy_radiance) as it is, no extra gain (user ruling 2026-10-29: the far
-// field is the reference; step 2's Sun gain 1.4 [E] is gone).
-layout(rgba16f, set = 1, binding = 1) uniform writeonly image2DArray baked_l_out;
-layout(set = 1, binding = 2) uniform sampler2DArray baked_f_in;  // nearest
-layout(set = 1, binding = 3) uniform sampler2DArray baked_t_in;  // nearest
-
-// The column-model light of a cloudy slab of in-cloud vertical depth tau and cover C at a point of geodetic up `up`,
-// seen along view_prop (the propagation toward the viewer; from above or from below by its sign): x the Sun's single
-// scattering / P(theta), y its multiple scattering (both per unit irradiance normal to the Sun, with the shapes' 3D
-// gain of the old far tier: CLOUD_FAR_ENTRY_TURN, CLOUD_FAR_FLANK_GAIN), z the sky's (per unit horizontal sky
-// irradiance) - cloud_far_cloudy_radiance's terms with the phase taken out of the single scattering. The closed form
-// (cloud_scattering_model != 1) keeps its single scattering inside y. fraction: the column's largest cloud fraction
-// (the flank gain's, as the far field takes it).
-vec3 cloud_baked_flat_light(vec3 up, vec3 view_prop, float tau, float fraction) {
-	if (!(tau > 0.0)) {
-		return vec3(0.0);
-	}
-	vec3 sun_dir = normalize(atmosphere_sun_direction);
-	float mu0_up = dot(sun_dir, up);
-	vec3 entry = up;
-	float gain = 1.0;
-	if (cloud_far_3d_light) {
-		entry = mu0_up > 0.0 ? cloud_entry_normal(sun_dir, up, mu0_up, mu0_up + (1.0 - mu0_up) * CLOUD_FAR_ENTRY_TURN)
-				: up;
-		gain = 1.0 + CLOUD_FAR_FLANK_GAIN * (1.0 - clamp(fraction, 0.0, 1.0));
-	}
-	float sky = cloud_far_sky_radiance(tau, dot(view_prop, up));
-	if (cloud_scattering_model != 1) {
-		return vec3(0.0, gain * cloud_far_light_radiance(tau, sun_dir, view_prop, entry), sky);
-	}
-	// cloud_far_light_radiance's table branch, its single scattering without the phase
-	float mu_signed = dot(view_prop, entry);
-	bool below = mu_signed < 0.0;
-	float mu = max(abs(mu_signed), CLOUD_FAR_MU_MIN);
-	float mu0 = max(dot(sun_dir, entry), CLOUD_ENTRY_COSINE_MIN);
-	vec3 angles = cloud_far_angles(sun_dir, view_prop, entry);
-	float w = cloud_phase.w;
-	float r = w / mu;
-	float single;
-	if (below) {
-		float a = 1.0 / mu0 - r;
-		single = abs(a * tau) < 1.0e-4 ? tau * exp(-r * tau) / mu : (exp(-r * tau) - exp(-tau / mu0)) / (mu * a);
-	} else {
-		float a = 1.0 / mu0 + r;
-		single = (1.0 - exp(-tau * a)) / (mu * a);
-	}
-	float u_end = 1.0 - exp(-r * tau);
-	float multiple = 0.0;
-	for (int i = 0; i < CLOUD_FAR_NODES; i++) {
-		float s = min(-log(1.0 - u_end * CLOUD_FAR_GL_X[i]) / r, tau);
-		float t = below ? tau - s : s;
-		multiple += CLOUD_FAR_GL_W[i] * cloud_transfer_lookup(t, tau - t, mu0, angles.x, angles.y);
-	}
-	return vec3(gain * single, gain * multiple * u_end / w, sky);
-}
-
-void main() {
-	const int si = 0;
-	int j = baked.build.x;
-	int n = int(baked.sets[si].flat_up0.w);
-	ivec2 cell = ivec2(gl_GlobalInvocationID.x, int(gl_GlobalInvocationID.y) + baked.build.y);
-	if (cell.x >= n || cell.y >= n || int(gl_GlobalInvocationID.y) >= baked.build.z) {
-		return;
-	}
-	ivec3 texel = ivec3(cell, j);
-	vec4 f = texelFetch(baked_f_in, texel, 0);
-	vec2 t_col = texelFetch(baked_t_in, texel, 0).rg;
-	float cover = t_col.x;  // C_col
-	if (!(cover > 0.0)) {
-		imageStore(baked_l_out, texel, vec4(0.0));
-		return;
-	}
-	float c = baked.sets[si].axis_x.w * exp2(baked.sets[si].outer.z + float(j));
-	vec2 g = (vec2(cell) + 0.5 - 0.5 * float(n)) * c;
-	float tau = f.y / cover;  // the cloudy part's vertical depth (the far field's at nadir)
-	float top = f.x > 1.0e-3 ? f.z / f.x : t_col.y;
-	float base = f.x > 1.0e-3 ? f.w / f.x : t_col.y - 1000.0;
-	// The light for the view from the anchor at the column's entry: its top seen from above, its base from below, the
-	// middle from within.
-	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
-	vec3 radial = cloud_baked_flat_radial(si, g) / ATM_STRETCH;
-	vec3 anchor = camera + baked.sets[si].flat_anchor.xyz;
-	float h_anchor = length(anchor * ATM_STRETCH) - CLOUD_A_M;
-	float h_e = h_anchor >= top ? top : (h_anchor <= base ? base : 0.5 * (top + base));
-	vec3 p_e = (CLOUD_A_M + h_e) * radial;
-	vec3 to_anchor = anchor - p_e;
-	vec3 up = cloud_geodetic_up(p_e);
-	vec3 view_prop = length(to_anchor) > 1.0 ? normalize(to_anchor) : up;
-	imageStore(baked_l_out, texel, vec4(cloud_baked_flat_light(up, view_prop, tau, cloud_baked_fraction_of(cover))
-			* cover, cover));
 }
 #endif
 
@@ -1019,10 +940,10 @@ CloudBakedRay cloud_baked_ray(int si, vec3 eye, vec3 dir) {
 
 // ---- The flat levels in the march ----
 layout(set = 1, binding = 57) uniform sampler2DArray baked_f0;  // linear
-layout(set = 1, binding = 58) uniform sampler2DArray baked_l0;  // linear
+layout(set = 1, binding = 58) uniform sampler2DArray baked_t0;  // linear (T: C_col, top)
 #ifdef CLOUD_BAKED_FADE
 layout(set = 1, binding = 59) uniform sampler2DArray baked_f1;
-layout(set = 1, binding = 60) uniform sampler2DArray baked_l1;
+layout(set = 1, binding = 60) uniform sampler2DArray baked_t1;
 #endif
 
 // [E] How far outside the fetched column's heights the entry may lie (m; float32 heights at the shell crossings).
@@ -1040,32 +961,44 @@ const float CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE = 0.01;
 // sub-voxel gaps: a whiter deck than the far field's cover). Diagnostics: define CLOUD_BAKED_FLAT_NO_TAKEOVER keeps the
 // volume at every height (step 2's hand-over at its last level only).
 const vec2 CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M = vec2(40000.0, 60000.0);
-// [E] The sub-cell pattern (step 3; the old far tier's cloud_far_cover): where the flat level's cell is coarser than the
-// pixel footprint (from CLOUD_BAKED_FLAT_PATTERN_RATIO.x to .y x it fully) the pixel's cover is the share of 2 x 2 taps
-// over its footprint (x CLOUD_FAR_COVER_FOOTPRINT_SCALE, / mu along the view) where the shapes' prefiltered value at the
-// taps' mip exceeds the prefilter threshold of the cell's cover - the shapes' pattern covering that share of the layer
-// (its mean the cell's cover: no lattice of cells, no blobs); faded out over CLOUD_BAKED_FLAT_PATTERN_FADE_M of
-// footprint (the shapes' mips end at 1 km texels: beyond, the cells are footprint-sized anyway). The tap's step is
-// softened over CLOUD_BAKED_FLAT_PATTERN_SOFT of the shape value (no single-tap speckle).
-const vec2 CLOUD_BAKED_FLAT_PATTERN_RATIO = vec2(2.0, 4.0);
-const vec2 CLOUD_BAKED_FLAT_PATTERN_FADE_M = vec2(2000.0, 4000.0);
+// [E] The sub-cell pattern (step 3; at every cell size since step 4): the pixel's cover is the share of 2 x 2 taps over
+// its footprint (x CLOUD_FAR_COVER_FOOTPRINT_SCALE, / mu along the view) where the shapes' prefiltered value at the
+// taps' mip exceeds the prefilter threshold of the cell's (B-spline reconstructed) cover - the shapes' pattern covering
+// that share of the layer (its mean the cell's cover), its edges as sharp as the footprint at every distance; the shape
+// coordinates domain-warped (cloud_baked_warp: no repeating tile). Faded out over CLOUD_BAKED_FLAT_PATTERN_FADE_M of
+// footprint (the old far tier's CLOUD_FAR_COVER_FADE_M: from a quarter of the tile on the taps average the layer's
+// mean; the scaled-space far field takes over beyond). The tap's step is softened over CLOUD_BAKED_FLAT_PATTERN_SOFT of
+// the shape value (no single-tap speckle). (Step 3 faded it in from cells 2 x the footprint and out over 2-4 km
+// footprints: the cells' bilinear / smoothed cover alone drew blurred blobs and field-cell squares from 600 km up.)
+const vec2 CLOUD_BAKED_FLAT_PATTERN_FADE_M = vec2(8000.0, 16000.0);
 const float CLOUD_BAKED_FLAT_PATTERN_SOFT = 0.03;
 
 vec4 cloud_baked_flat_tex(int si, int which, vec3 uvl) {
 #ifdef CLOUD_BAKED_FADE
 	if (si == 1) {
-		return which == 0 ? texture(baked_f1, uvl) : texture(baked_l1, uvl);
+		return which == 0 ? texture(baked_f1, uvl) : texture(baked_t1, uvl);
 	}
 #endif
-	return which == 0 ? texture(baked_f0, uvl) : texture(baked_l0, uvl);
+	return which == 0 ? texture(baked_f0, uvl) : texture(baked_t0, uvl);
 }
 
-// F smoothed: the mean of four bilinear fetches half a texel apart (a quadratic B-spline's support; the bilinear's
-// creases drew the columns as a lattice of rounded squares where a cell spans many pixels).
-vec4 cloud_baked_flat_f_smooth(int si, vec3 uvl, float n) {
-	float d = 0.5 / n;
-	return 0.25 * (cloud_baked_flat_tex(si, 0, uvl + vec3(-d, -d, 0.0)) + cloud_baked_flat_tex(si, 0, uvl + vec3(d, -d, 0.0))
-			+ cloud_baked_flat_tex(si, 0, uvl + vec3(-d, d, 0.0)) + cloud_baked_flat_tex(si, 0, uvl + vec3(d, d, 0.0)));
+// A flat level's texture (which: 0 F, 1 T) reconstructed by the cubic B-spline at uvl (n columns per side): four
+// bilinear fetches at the B-spline's weighted positions (C2, non-negative weights: the cells' mean kept; step 4 - the
+// bilinear's creases and plateaus drew every cell as a square where it spans several pixels).
+vec4 cloud_baked_flat_bspline(int si, int which, vec3 uvl, float n) {
+	vec2 x = uvl.xy * n - 0.5;
+	vec2 i = floor(x);
+	vec2 t = x - i;
+	vec4 wx = cloud_bspline_weights(t.x);
+	vec4 wy = cloud_bspline_weights(t.y);
+	vec2 g0 = vec2(wx.x + wx.y, wy.x + wy.y);
+	vec2 g1 = vec2(wx.z + wx.w, wy.z + wy.w);
+	vec2 h0 = (i - 0.5 + vec2(wx.y, wy.y) / g0) / n;
+	vec2 h1 = (i + 1.5 + vec2(wx.w, wy.w) / g1) / n;
+	return g0.y * (g0.x * cloud_baked_flat_tex(si, which, vec3(h0.x, h0.y, uvl.z))
+					+ g1.x * cloud_baked_flat_tex(si, which, vec3(h1.x, h0.y, uvl.z)))
+			+ g1.y * (g0.x * cloud_baked_flat_tex(si, which, vec3(h0.x, h1.y, uvl.z))
+					+ g1.x * cloud_baked_flat_tex(si, which, vec3(h1.x, h1.y, uvl.z)));
 }
 
 // The flat levels' weight at a volume sample of continuous level l (cloud_baked_lod; 0 the volume alone, 1 the flat
@@ -1133,16 +1066,13 @@ float cloud_baked_flat_start(int si, CloudBakedRay g, float pixel_angle) {
 	return min(t, baked.sets[si].axis_x.w * exp2(l0) / (CLOUD_BAKED_LEVEL_DROP * max(pixel_angle, 1.0e-9)));
 }
 
-// The flat levels at the Earth-local point p (from the Earth's centre) for a pixel footprint (m): F (one bilinear fetch,
-// or smoothed while the cell spans several pixels), L, the level rule's l = max(the footprint's, the levels' extent:
-// m0 + log2(r / inner)) - level ceil(l), at least m0, blended toward the next over cloud_baked_band() (at least
-// CLOUD_BAKED_FLAT_SEAM_BAND) - and the cell / footprint ratio (ratio). heights_only: F alone, unsmoothed. false beyond
-// the baked cap (the far side is never fetched).
-bool cloud_baked_flat_fetch(int si, vec3 p, float footprint_m, bool heights_only, out vec4 f, out vec4 l,
-		out float ratio) {
+// The flat levels at the Earth-local point p (from the Earth's centre) for a pixel footprint (m): F and T (the cubic
+// B-spline, cloud_baked_flat_bspline), the level rule's l = max(the footprint's, the levels' extent: m0 + log2(r /
+// inner)) - level ceil(l), at least m0, blended toward the next over cloud_baked_band() (at least
+// CLOUD_BAKED_FLAT_SEAM_BAND). heights_only: F alone. false beyond the baked cap (the far side is never fetched).
+bool cloud_baked_flat_fetch(int si, vec3 p, float footprint_m, bool heights_only, out vec4 f, out vec2 t) {
 	f = vec4(0.0);
-	l = vec4(0.0);
-	ratio = 1.0;
+	t = vec2(0.0);
 	int flat_levels = int(baked.sets[si].outer.x + 0.5);
 	if (flat_levels <= 0) {
 		return false;
@@ -1165,29 +1095,64 @@ bool cloud_baked_flat_fetch(int si, vec3 p, float footprint_m, bool heights_only
 		blend = 0.0;
 	}
 	float c = c0 * exp2(m0 + float(j));
-	ratio = c / max(footprint_m, 1.0e-3);
-	bool smooth_f = !heights_only && ratio > CLOUD_BAKED_FLAT_PATTERN_RATIO.x;
 	vec3 uvl = vec3(xyt.xy / (c * n) + 0.5, float(j));
-	f = smooth_f ? cloud_baked_flat_f_smooth(si, uvl, n) : cloud_baked_flat_tex(si, 0, uvl);
+	f = cloud_baked_flat_bspline(si, 0, uvl, n);
 	if (!heights_only) {
-		l = cloud_baked_flat_tex(si, 1, uvl);
+		t = cloud_baked_flat_bspline(si, 1, uvl, n).xy;
 	}
 	if (blend > 0.0) {
 		uvl = vec3(xyt.xy / (2.0 * c * n) + 0.5, float(j + 1));
-		f = mix(f, smooth_f ? cloud_baked_flat_f_smooth(si, uvl, n) : cloud_baked_flat_tex(si, 0, uvl), blend);
+		f = mix(f, cloud_baked_flat_bspline(si, 0, uvl, n), blend);
 		if (!heights_only) {
-			l = mix(l, cloud_baked_flat_tex(si, 1, uvl), blend);
+			t = mix(t, cloud_baked_flat_bspline(si, 1, uvl, n).xy, blend);
 		}
-		ratio *= exp2(blend);
 	}
 	return true;
 }
 
-// The sub-cell pattern's cover (CLOUD_BAKED_FLAT_PATTERN_*) at the Earth-local point p (geodetic up `up`) for a view
-// dir of |cosine| mu, a pixel footprint and the cell's cover along the view (its mean).
-float cloud_baked_flat_pattern(vec3 p, vec3 up, vec3 dir, float mu, float footprint_m, float cover) {
-	if (cover <= 0.004 || cover >= 0.996) {
-		return cover;
+// [E] The depth's texture inside a closed cover (step 4: an overcast deck drew as a smooth, blurred sheet from orbit):
+// the in-cloud depth x 1 + CLOUD_BAKED_FLAT_DEPTH_TEXTURE (s - s_50) (clamped to CLOUD_BAKED_FLAT_DEPTH_RANGE), s the
+// taps' mean prefiltered shape value and s_50 the prefilter threshold of cover 0.5 (the median: the factor's mean ~1,
+// the column's water kept) - thicker and thinner patches with the shapes' outlines at the footprint.
+const float CLOUD_BAKED_FLAT_DEPTH_TEXTURE = 3.0;
+const vec2 CLOUD_BAKED_FLAT_DEPTH_RANGE = vec2(0.25, 1.75);
+
+// One reading of the sub-cell pattern: x the share of the 2 x 2 taps (t1 along, t2 across; along_m x across_m) about p
+// whose prefiltered shape value exceeds the threshold of `cover`, y the depth factor (CLOUD_BAKED_FLAT_DEPTH_TEXTURE);
+// the shape scaled up by `scale` (the coordinates divided by it; the tap spacing in the scaled shape picks its
+// prefilter level).
+vec2 cloud_baked_flat_pattern_at(vec3 p, vec3 t1, vec3 t2, float along_m, float across_m, float spacing_m, float scale,
+		float cover) {
+	float level = clamp(log2(spacing_m / scale * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M), 0.0,
+			CLOUD_SHAPE_PREFILTER_LEVELS);
+	float threshold = texture(cloud_prefilter_threshold, cloud_prefilter_uv(clamp(cover, 0.004, 0.996), level)).r;
+	float median = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.5, level)).r;
+	float unit = 1.0 / (CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_COVER_UNALIGNED_SCALE * scale);
+	vec3 q0 = CLOUD_FAR_COVER_UNALIGNED_ROTATION * p * unit;
+	vec3 warp = cloud_baked_warp(q0) - q0;  // (smooth: once per pixel)
+	float sum = 0.0;
+	float mean = 0.0;
+	for (int j = 0; j < 2; j++) {
+		for (int i = 0; i < 2; i++) {
+			vec2 u = (vec2(i, j) + 0.5) * 0.5 - 0.5;
+			vec3 q = q0 + CLOUD_FAR_COVER_UNALIGNED_ROTATION * (t1 * (u.x * along_m) + t2 * (u.y * across_m)) * unit;
+			float v = cloud_shape_prefiltered(q + warp, level).r;
+			sum += smoothstep(threshold - CLOUD_BAKED_FLAT_PATTERN_SOFT, threshold + CLOUD_BAKED_FLAT_PATTERN_SOFT, v);
+			mean += v;
+		}
+	}
+	return vec2(0.25 * sum, clamp(1.0 + CLOUD_BAKED_FLAT_DEPTH_TEXTURE * (0.25 * mean - median),
+			CLOUD_BAKED_FLAT_DEPTH_RANGE.x, CLOUD_BAKED_FLAT_DEPTH_RANGE.y));
+}
+
+// The sub-cell pattern (CLOUD_BAKED_FLAT_PATTERN_*) at the Earth-local point p (geodetic up `up`) for a view dir of
+// |cosine| mu, a pixel footprint and the cell's cover along the view (its mean): x the pixel's cover, y the depth factor.
+// Where the taps' spacing passes the shapes' last prefilter level (1 km texels) the shape is read scaled up by powers
+// of two (two octaves cross-faded by the spacing's fraction; each with the cover's mean): its features stay a few
+// pixels wide at every distance - crisp, no speckle of sub-pixel shapes (step 4).
+vec2 cloud_baked_flat_pattern(vec3 p, vec3 up, vec3 dir, float mu, float footprint_m, float cover) {
+	if (cover <= 0.004) {
+		return vec2(cover, 1.0);
 	}
 	vec3 along = dir - up * dot(dir, up);
 	float along_norm = length(along);
@@ -1197,19 +1162,18 @@ float cloud_baked_flat_pattern(vec3 p, vec3 up, vec3 dir, float mu, float footpr
 	float across_m = footprint_m * CLOUD_FAR_COVER_FOOTPRINT_SCALE;
 	float along_m = min(across_m / mu, max(CLOUD_FAR_COVER_ALONG_MAX_M, across_m));
 	float spacing_m = 0.5 * max(along_m, across_m);
-	float level = clamp(log2(spacing_m * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M), 0.0, CLOUD_SHAPE_PREFILTER_LEVELS);
-	float threshold = texture(cloud_prefilter_threshold, cloud_prefilter_uv(cover, level)).r;
-	float sum = 0.0;
-	for (int j = 0; j < 2; j++) {
-		for (int i = 0; i < 2; i++) {
-			vec2 u = (vec2(i, j) + 0.5) * 0.5 - 0.5;
-			vec3 q = p + t1 * (u.x * along_m) + t2 * (u.y * across_m);
-			vec4 s = cloud_shape_prefiltered(CLOUD_FAR_COVER_UNALIGNED_ROTATION * q
-					/ (CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_COVER_UNALIGNED_SCALE), level);
-			sum += smoothstep(threshold - CLOUD_BAKED_FLAT_PATTERN_SOFT, threshold + CLOUD_BAKED_FLAT_PATTERN_SOFT, s.r);
-		}
+	float octave = max(log2(spacing_m * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M) - CLOUD_SHAPE_PREFILTER_LEVELS, 0.0);
+	float k = floor(octave);
+	float w = octave - k;
+	vec2 result = cloud_baked_flat_pattern_at(p, t1, t2, along_m, across_m, spacing_m, exp2(k), cover);
+	if (w > 0.0) {
+		result = mix(result, cloud_baked_flat_pattern_at(p, t1, t2, along_m, across_m, spacing_m, exp2(k + 1.0), cover),
+				w);
 	}
-	return 0.25 * sum;
+	if (cover >= 0.996) {
+		result.x = cover;
+	}
+	return result;
 }
 
 // The flat levels along the ray from t_from (inside the 20 km shell): one entry point - a first fetch where the ray is
@@ -1218,8 +1182,10 @@ float cloud_baked_flat_pattern(vec3 p, vec3 up, vec3 dir, float mu, float footpr
 // cloud_far_layer): the cell's cover C seen along the view as the beam cover's slant growth 1 - (1 - C)^(1 + s),
 // s = CLOUD_OVERLAP_SLANT max(cot - CLOUD_OVERLAP_ONSET_COT, 0) (cloud_beam_cover_of's slant term; its vertical term is in
 // C already: the shapes' projected cover), the water kept (in-cloud depth tau_e C / C_v), alpha = C_v (1 - exp(-tau /
-// mu)) - thin cloud translucent; the sub-cell pattern where the cell is coarser than the footprint. Out: premultiplied
-// colour with the air in front, alpha, the distance; false: none.
+// mu)) - thin cloud translucent; the sub-cell pattern at the footprint; the light the far field's column model at the
+// pixel for its own view (cloud_far_cloudy_radiance: the Sun's transmittance, its 3D gain, the sky and the Moon at the
+// entry point - smooth per pixel; step 3 baked it per cell for the anchor's view: cells lit orange next to white ones at
+// a low Sun). Out: premultiplied colour with the air in front, alpha, the distance; false: none.
 bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_from, float scene_m, float pixel_angle,
 		out vec3 color, out float alpha, out float dist) {
 	color = vec3(0.0);
@@ -1240,9 +1206,8 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 		return false;
 	}
 	vec4 f;
-	vec4 l;
-	float ratio;
-	if (!cloud_baked_flat_fetch(si, camera + eye + dir * t1, pixel_angle * t1, true, f, l, ratio)) {
+	vec2 t_col;
+	if (!cloud_baked_flat_fetch(si, camera + eye + dir * t1, pixel_angle * t1, true, f, t_col)) {
 		return false;
 	}
 	float t_hit = t1;
@@ -1270,10 +1235,10 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	vec3 up = cloud_geodetic_up(p);
 	float mu = max(abs(dot(dir, up)), CLOUD_FAR_MU_MIN);
 	float footprint = pixel_angle * t_hit / sqrt(max(mu, 0.04));
-	if (!cloud_baked_flat_fetch(si, p, footprint, false, f, l, ratio)) {
+	if (!cloud_baked_flat_fetch(si, p, footprint, false, f, t_col)) {
 		return false;
 	}
-	float c_col = l.w;  // the column rule's nadir cover (the cell's mean of the pattern f.x)
+	float c_col = t_col.x;  // the column rule's nadir cover (the cell's mean of the pattern f.x)
 	if (c_col < CLOUD_MIN_FRACTION || !(f.y > 0.0)) {
 		return false;
 	}
@@ -1285,23 +1250,25 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	float slant = CLOUD_OVERLAP_SLANT * max(sqrt(max(1.0 - mu * mu, 0.0)) / mu - CLOUD_OVERLAP_ONSET_COT, 0.0);
 	float cov = 1.0 - pow(max(1.0 - clamp(f.x, 0.0, 1.0), 0.0), 1.0 + slant / n_v);
 	float tau_v = f.y / max(cover_v, CLOUD_MIN_FRACTION);
-	float w_pattern = smoothstep(CLOUD_BAKED_FLAT_PATTERN_RATIO.x, CLOUD_BAKED_FLAT_PATTERN_RATIO.y, ratio)
-			* (1.0 - smoothstep(CLOUD_BAKED_FLAT_PATTERN_FADE_M.x, CLOUD_BAKED_FLAT_PATTERN_FADE_M.y, footprint));
+	float w_pattern = 1.0 - smoothstep(CLOUD_BAKED_FLAT_PATTERN_FADE_M.x, CLOUD_BAKED_FLAT_PATTERN_FADE_M.y, footprint);
 	if (w_pattern > 0.0) {
-		cov = mix(cov, cloud_baked_flat_pattern(p, up, dir, mu, footprint, cov), w_pattern);
+		vec2 pattern = cloud_baked_flat_pattern(p, up, dir, mu, footprint, cov);
+		cov = mix(cov, pattern.x, w_pattern);
+		tau_v *= mix(1.0, pattern.y, w_pattern);
 	}
 	alpha = cov * (1.0 - exp(-tau_v / mu));
 	if (!(alpha > 1.0e-6)) {
 		return false;
 	}
-	vec3 light = l.xyz / c_col;
-	vec3 sun_dir = normalize(atmosphere_sun_direction);
-	vec3 diff = sun_dir - dir;
-	float one_minus_cos = 0.5 * dot(diff, diff);
-	float phase = cloud_phase_function(1.0 - one_minus_cos, one_minus_cos);
-	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
-	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, up);
-	vec3 radiance = sun_irradiance * (phase * light.x + light.y) + sky_irradiance * light.z;
+	// The light's point: where the far field places the slab - the depth from the side seen of the visible light's
+	// transmittance-weighted mean (cloud_far_seen_depth), the column's grid-mean depth taken as even between top and
+	// base (the entry's top lit at a low Sun was brighter than the far field: the Sun's air path shorter up there).
+	float top_p = f.x > 1.0e-3 ? f.z / f.x : t_col.y;
+	float base_p = f.x > 1.0e-3 ? f.w / f.x : t_col.y - 1000.0;
+	float seen = clamp(cloud_far_seen_depth(vec2(f.y, fraction), mu) / f.y, 0.0, 1.0) * max(top_p - base_p, 0.0);
+	float h_p = cloud_height_along(ray, t_hit);
+	vec3 p_light = p - up * (dot(dir, up) < 0.0 ? min(seen, max(h_p - base_p, 0.0)) : -min(seen, max(top_p - h_p, 0.0)));
+	vec3 radiance = cloud_far_cloudy_radiance(p_light, up, -dir, tau_v, fraction, vec3(1.0));
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(eye + dir * t_hit, air_transmittance);
 	color = air_transmittance * radiance * cov + alpha * air_light;
@@ -1599,10 +1566,9 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 		// it from taps of opacity < 0.1, < 0.3; a = 1 - the mean opacity)
 		vec2 x = cloud_sphere_crossing(ray, 5000.0);
 		vec4 f;
-		vec4 l;
-		float ratio;
+		vec2 t_col;
 		if (x.x <= x.y && x.x > 0.0 && cloud_baked_flat_fetch(si, atmosphere_camera_hi + atmosphere_camera_lo + eye
-				+ dir * x.x, cloud_view.params.w * x.x, true, f, l, ratio)) {
+				+ dir * x.x, cloud_view.params.w * x.x, true, f, t_col)) {
 			color_t = vec4(f.xyz, 1.0 - f.w);
 		}
 		return;

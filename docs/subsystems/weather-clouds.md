@@ -695,12 +695,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   shape (the largest-fraction layer's types and height, at the taps' spacing; every second tap read unaligned from
   1.5 km cells; the taps' offsets a smooth field, no per-cell jitter) exceeds the prefilter threshold of C_col (mean
   C_col: the old far tier's `cloud_far_cover`), faded to C_col itself from 6.4 to 12.8 km cells (the 32 km tile's
-  lattice). F (RGBA16F) = (P, depth, top P, base P), T (RG16F) = (C_col, top), L per set (RGBA16F) = the column model's
-  light (`CLOUD_BAKED_FLAT_LIGHT`, the far field's terms, the flank gain from the fraction, no extra gain) x C_col, C_col.
-  Per pixel: the entry on the top / base shell from a guess fetch, then F and L; the pattern taken to the view's slant
+  lattice). F (RGBA16F) = (P, depth, top P, base P), T (RG16F) = (C_col, top) (both shared by the sets).
+  Per pixel: the entry on the top / base shell from a guess fetch, then F and T; the pattern taken to the view's slant
   as the far field's beam cover (1 - (1 - P)^(1 + s / n_v)), the in-cloud depth the grid mean / cloud_beam_cover_of(f,
-  mu), alpha = cover (1 - exp(-tau / mu)); where the cell is 2-4 x the footprint the shapes' pattern at the footprint
-  (`cloud_baked_flat_pattern`, faded out over 2-4 km footprints). Against the far field at the same camera (diagnostic
+  mu), alpha = cover (1 - exp(-tau / mu)); the per-pixel pattern, reconstruction and light: step 4 below. Against the
+  far field at the same camera (step 3's numbers; diagnostic
   define `CLOUD_BAKED_FAR_REFERENCE`, desktop nadir / 45 deg, 420 / 1 500 / 5 000 km, Sun 56 and 8 deg): mean alpha
   0.98-1.02, brightness 1.00-1.05 (step 2: alpha 1.09-1.14, brightness 1.23-1.45). Level rule (all levels): l =
   log2(max(r / inner, footprint / c_0)) per sample, level ceil(l), blended toward the next over a band of 0 octaves
@@ -710,6 +709,20 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND | CLOUD_BAKED_FAR_REFERENCE | CLOUD_BAKED_FLAT_TAP_STATS |
   CLOUD_BAKED_FLAT_NO_TAKEOVER`; render_check `--centre_dump=<file>` (the march image, raw RGBA16F). Numbers and
   images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer2-report.md`.
+- **Baked prototype step 4: no squares, light per pixel, crisp at every distance (2026-10-30)**: (a) the flat bake takes
+  the field's column with the cubic B-spline (`cloud_column_mean_depth_smooth`, as the far tier's column model); the
+  march reconstructs F and T with the cubic B-spline (four bilinear fetches each, `cloud_baked_flat_bspline`) - no cell
+  drawn as a square or plateau. (b) The light is the far field's column model evaluated at the pixel for its own view
+  (`cloud_far_cloudy_radiance`: the Sun's transmittance, the 3D gain, the sky and the Moon), at the far field's slab
+  point (the depth of `cloud_far_seen_depth` below the entry, the column's depth taken as even between top and base);
+  the per-set light arrays and their kernel are gone. (c) The sub-cell pattern (`cloud_baked_flat_pattern`) at every
+  cell size and footprint up to 8-16 km (then faded to the cover, the old far tier's fade): 2 x 2 prefiltered shape taps
+  over the footprint against the threshold of the reconstructed cover; beyond the shapes' last prefilter level the shape
+  read scaled up by powers of two (two octaves cross-faded): features a few pixels wide at every distance. Inside a closed
+  cover the in-cloud depth is textured by the taps' mean shape value: x 1 + 3 (s - s_50), clamped 0.25-1.75 (decks no
+  longer a smooth sheet). (d) Domain warp of the shape coordinates (`cloud_baked_warp`: the shape's coarsest mip read at
+  0.19 x the coordinates, +-0.35 tile) in the bake's taps and the pixel's - no repeating 32 km tile. Numbers, images:
+  `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer3-report.md`.
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

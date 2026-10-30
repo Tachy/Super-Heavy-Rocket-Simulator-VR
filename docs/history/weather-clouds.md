@@ -1263,3 +1263,17 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   deck); 256-column levels ended long before the footprint wanted the next (lattice, a square at the ISS); the crisp
   sub-cell outline of 6.4 km+ cells drew blobs. Step 2's per-tap cover itself was optically thick (98.6 % of it from taps
   of nadir opacity > 0.9 at the ISS view): not haze.
+
+## Baked prototype step 3: flat levels' per-cell light and footprint-limited pattern (commit 2103a65, 2026-10-29), superseded by step 4
+- What it was: per set an L array (RGBA16F per flat level, kernel `CLOUD_BAKED_FLAT_LIGHT`) = the column model's light
+  (single scattering / P, multiple, sky) for the view from the set's anchor at the column's entry height x C_col, and
+  C_col; the march divided the bilinear L by C_col and applied the phase and `atm_sun_at` / `atm_sunlit` at the pixel.
+  The field's column in the flat bake was bilinear (`cloud_column_mean_depth`); F was fetched bilinear (heights) or as
+  the mean of four bilinear fetches half a texel apart (where the cell spanned > 2 pixels). The per-pixel sub-cell
+  pattern only where the cell was 2-4 x the footprint, faded out over 2-4 km footprints; P faded to C_col from 6.4 to
+  12.8 km cells, so beyond that each cell was an even cover.
+- Why superseded (step 4, the user's headset view on 2103a65, GFS 29.10. 18 UTC +4 h, low Sun, a few thousand km up):
+  large square cells with staircase outlines (the field's 0.25 deg cells drawn as bilinear tents and plateaus - the far
+  field reference shows the same squares - with no sub-cell shape at 3-30 km footprints), cells lit orange next to
+  white ones (the light per cell for the anchor's view, the entry height jumping per cell), blur at intermediate
+  distances and a dotted texture at 600-1500 km (the 32 km shape tile's period in the 3.2 km cells' pattern).
