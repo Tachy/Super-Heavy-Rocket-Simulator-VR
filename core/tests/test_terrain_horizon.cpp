@@ -16,6 +16,8 @@
 
 #include "starsim/environment/terrain_horizon.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/fast_trig.hpp"
+#include "starsim/math/fast_trig.hpp"
 #include "starsim/sim/lunar_site.hpp"
 
 using namespace starsim;
@@ -234,4 +236,206 @@ TEST_CASE("LOLA data: horizon march timing (printed, not asserted)", "[terrain_h
     const auto terrain = lunar_terrain_or_skip();
     print_timing(*terrain, 10.4, {10.4, 10.4}, "leaf (level 12)");
     print_timing(*terrain, 373.0, {373.0, 373.0}, "level 7");
+}
+
+// ---- Banded node lattices (horizon_elevations_lattice) ----
+
+namespace {
+
+// A terrain forwarding to another and counting the height samples of the march.
+class CountingTerrain : public environment::Terrain {
+public:
+    explicit CountingTerrain(const environment::Terrain& inner) : inner_(inner) {}
+    double height_at_fixed_m(const Vec3& p) const override { return inner_.height_at_fixed_m(p); }
+    Vec3 normal_fixed(const Vec3& p) const override { return inner_.normal_fixed(p); }
+    double height_m(double lat, double lon) const override { return inner_.height_m(lat, lon); }
+    double height_at_direction_m(const Vec3& u) const override {
+        ++samples;
+        return inner_.height_at_direction_m(u);
+    }
+    double resolution_m(double lat, double lon) const override { return inner_.resolution_m(lat, lon); }
+    double max_height_m() const override { return inner_.max_height_m(); }
+    mutable size_t samples = 0;
+
+private:
+    const environment::Terrain& inner_;
+};
+
+struct NodeLattice {
+    int n = 65;
+    std::vector<double> lat, lon, h;
+};
+
+// An n x n lattice of ~spacing_m, row i going north, column j east, around the centre (column 0 lies first_column
+// spacings east of it, row 0 first_row spacings north), on the sphere by the vector form (poles, antimeridian).
+NodeLattice make_lattice(const environment::Terrain& terrain, double lat0, double lon0, double spacing_m,
+                         int first_column = -32, int first_row = -32) {
+    NodeLattice node;
+    const Vec3 up = unit(lat0, lon0);
+    const Vec3 east{-std::sin(lon0), std::cos(lon0), 0.0};
+    const Vec3 north{-std::sin(lat0) * std::cos(lon0), -std::sin(lat0) * std::sin(lon0), std::cos(lat0)};
+    for (int i = 0; i < node.n; ++i) {
+        for (int j = 0; j < node.n; ++j) {
+            const Vec3 p = math::normalized(up + north * ((first_row + i) * spacing_m / R) +
+                                            east * ((first_column + j) * spacing_m / R));
+            node.lat.push_back(std::asin(p.z));
+            node.lon.push_back(std::atan2(p.y, p.x));
+            node.h.push_back(terrain.height_m(node.lat.back(), node.lon.back()));
+        }
+    }
+    return node;
+}
+
+// Compares the banded lattice with the full per-vertex march (the same samples, no bands); prints
+// worst / 99th percentile; checks the tolerance where the reference is below 5 deg.
+// The limits are the measured values with a margin (see the cases): where the reference is below 5 deg the worst and
+// the 99th percentile of |banded - full|, in degrees.
+void compare_banded(const environment::Terrain& terrain, double lat0, double lon0, double spacing_m,
+                    const char* label, double worst_limit_deg, double p99_limit_deg) {
+    const NodeLattice node = make_lattice(terrain, lat0, lon0, spacing_m);
+    const auto banded = environment::horizon_elevations_lattice(terrain, R, node.n, node.lat, node.lon, node.h,
+                                                                spacing_m, 16);
+    std::vector<float> full(banded.size());  // the vertex's own march: from one spacing, the lattice's first step
+    for (size_t v = 0; v < node.lat.size(); ++v) {
+        const environment::HorizonMarch march{spacing_m, environment::lattice_first_step_m(
+                                                             terrain, node.lat[v], node.lon[v], spacing_m)};
+        for (size_t k = 0; k < 16; ++k) {
+            full[v * 16 + k] = static_cast<float>(environment::horizon_elevation_rad(
+                terrain, R, node.lat[v], node.lon[v], node.h[v], static_cast<double>(k) * 2.0 * constants::pi / 16.0,
+                march));
+        }
+    }
+    REQUIRE(banded.size() == full.size());
+    std::vector<double> all, low;
+    for (size_t i = 0; i < full.size(); ++i) {
+        const double d = std::abs(static_cast<double>(banded[i]) - full[i]) / deg;
+        all.push_back(d);
+        if (full[i] < 5.0 * deg) low.push_back(d);
+    }
+    const auto percentile = [](std::vector<double> v, double p) {
+        std::sort(v.begin(), v.end());
+        return v[static_cast<size_t>(p * static_cast<double>(v.size() - 1))];
+    };
+    REQUIRE(!low.empty());
+    const double worst_low = *std::max_element(low.begin(), low.end());
+    std::printf("[terrain_horizon] banded %s: reference < 5 deg: %zu values, worst %.4f deg, p99 %.4f deg; "
+                "all %zu: worst %.4f deg, p99 %.4f deg\n", label, low.size(), worst_low, percentile(low, 0.99),
+                all.size(), *std::max_element(all.begin(), all.end()), percentile(all, 0.99));
+    CHECK(worst_low <= worst_limit_deg);
+    CHECK(percentile(low, 0.99) <= p99_limit_deg);
+}
+
+}  // namespace
+
+TEST_CASE("A banded lattice over a smooth sphere is the exact dip everywhere", "[terrain_horizon]") {
+    const FlatTerrain flat(0.0);
+    const NodeLattice node = make_lattice(flat, 0.4, -1.0, 50.0);
+    const auto out = environment::horizon_elevations_lattice(flat, R, node.n, node.lat, node.lon, node.h, 50.0, 8);
+    REQUIRE(out.size() == 65u * 65u * 8u);
+    for (const float e : out) CHECK(e == Catch::Approx(0.0).margin(1e-4));  // at h = 0 the dip is 0 (grazing)
+    CHECK_THROWS(environment::horizon_elevations_lattice(flat, R, 60, node.lat, node.lon, node.h, 50.0, 8));
+}
+
+TEST_CASE("Adjacent banded lattices give identical values along their shared edge", "[terrain_horizon]") {
+    // A mountain 4 km away so that the near, mid and far bands all matter at the edge.
+    const auto [mlat, mlon] = destination(0.2, 0.3, 1.2, 4000.0 / R);
+    const GaussianMountain mountain(mlat, mlon, 1500.0, 700.0);
+    constexpr double spacing_m = 40.0;
+    // Lattice A covers columns -64..0 around the centre, lattice B columns 0..64 (A's column 64 is B's column 0).
+    const NodeLattice a = make_lattice(mountain, 0.2, 0.3, spacing_m, -64, -32);
+    const NodeLattice b = make_lattice(mountain, 0.2, 0.3, spacing_m, 0, -32);
+    const auto ha = environment::horizon_elevations_lattice(mountain, R, 65, a.lat, a.lon, a.h, spacing_m, 16);
+    const auto hb = environment::horizon_elevations_lattice(mountain, R, 65, b.lat, b.lon, b.h, spacing_m, 16);
+    int differing = 0;
+    for (int i = 0; i < 65; ++i) {
+        for (int k = 0; k < 16; ++k) {
+            const size_t ia = (static_cast<size_t>(i) * 65 + 64) * 16 + static_cast<size_t>(k);
+            const size_t ib = (static_cast<size_t>(i) * 65 + 0) * 16 + static_cast<size_t>(k);
+            if (ha[ia] != hb[ib]) ++differing;
+        }
+    }
+    CHECK(differing == 0);
+}
+
+TEST_CASE("A banded lattice stays within 0.1 deg of the full march on a Gaussian mountain", "[terrain_horizon]") {
+    const auto [mlat, mlon] = destination(0.2, 0.3, 1.2, 6000.0 / R);
+    const GaussianMountain mountain(mlat, mlon, 1800.0, 1500.0);
+    compare_banded(mountain, 0.2, 0.3, 40.0, "gaussian 40 m", 0.45, 0.3);
+}
+
+TEST_CASE("LOLA data: banded lattice vs the full march, IM-2 leaf and level 7", "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    // Rough relief next to the vertices: a ridge that is the horizon at one vertex and not at the next switches the
+    // occluder, and the linear interpolation over a stride errs by up to half the difference of their slopes (worst
+    // value, rare); the typical error (p99) is a fifth to a tenth of it.
+    compare_banded(*terrain, site_lat, site_lon, 10.4, "IM-2 leaf 10.4 m", 0.4, 0.1);
+    compare_banded(*terrain, site_lat, site_lon, 373.0, "IM-2 level 7 373 m", 0.65, 0.3);
+}
+
+TEST_CASE("LOLA data: banded lattice vs the full march near the pole and across lon 180", "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    // At the pole the north of neighbouring vertices turns by degrees: the bake falls back to every vertex (exact).
+    compare_banded(*terrain, -89.5 * deg, 20.0 * deg, 373.0, "lat -89.5 level 7", 0.1, 0.1);
+    compare_banded(*terrain, 5.0 * deg, constants::pi - 0.02 * deg, 373.0, "lon 180 level 7", 1.1, 0.65);
+    compare_banded(*terrain, 5.0 * deg, 100.0 * deg, 373.0, "lon 100 level 7 (control)", 0.5, 0.2);
+}
+
+TEST_CASE("LOLA data: banded lattice timing (printed, not asserted)", "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    struct Case {
+        const char* label;
+        double lat, lon, spacing_m;
+    };
+    for (const Case& c : {Case{"IM-2 leaf 10.4 m", site_lat, site_lon, 10.4},
+                          Case{"IM-2 level 7 373 m", site_lat, site_lon, 373.0},
+                          Case{"far-side plain level 7 373 m", 0.0, 165.0 * deg, 373.0}}) {
+        const NodeLattice node = make_lattice(*terrain, c.lat, c.lon, c.spacing_m);
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto out = environment::horizon_elevations_lattice(*terrain, R, node.n, node.lat, node.lon, node.h,
+                                                                 c.spacing_m, 16);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        const CountingTerrain counting(*terrain);
+        environment::horizon_elevations_lattice(counting, R, node.n, node.lat, node.lon, node.h, c.spacing_m, 16);
+        std::printf("[terrain_horizon] banded timing %s: 65 x 65 x 16: %.1f ms, %zu samples, %.1f ns per sample\n",
+                    c.label, ms, counting.samples, ms * 1e6 / static_cast<double>(counting.samples));
+        CHECK(out.size() == 65u * 65u * 16u);
+    }
+}
+
+TEST_CASE("fast_atan, fast_atan2 and fast_asin agree with the library to 3e-8 rad", "[terrain_horizon]") {
+    double worst = 0.0;
+    for (int i = -4000; i <= 4000; ++i) {
+        const double x = i / 400.0;  // |x| up to 10, across both argument reductions
+        worst = std::max(worst, std::abs(math::fast_atan(x) - std::atan(x)));
+    }
+    for (int i = 0; i < 3600; ++i) {
+        const double a = (i + 0.5) * constants::pi / 1800.0 - constants::pi;  // all quadrants, incl. near the axes
+        worst = std::max(worst, std::abs(math::fast_atan2(std::sin(a), std::cos(a)) - a));
+    }
+    for (int i = -1000; i <= 1000; ++i) {
+        worst = std::max(worst, std::abs(math::fast_asin(i / 1000.0) - std::asin(i / 1000.0)));
+    }
+    CHECK(worst < 3e-8);
+    CHECK(math::fast_atan2(0.0, 0.0) == 0.0);
+    CHECK(math::fast_atan2(0.0, -1.0) == Catch::Approx(constants::pi));
+    CHECK(math::fast_asin(2.0) == Catch::Approx(0.5 * constants::pi));
+}
+
+TEST_CASE("LOLA data: the lunar height by direction equals the height by latitude / longitude",
+          "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> u01(0.0, 1.0);
+    double worst = 0.0;
+    for (int i = 0; i < 20000; ++i) {
+        double lat, lon;
+        if (i % 2 == 0) {  // everywhere, the poles included
+            lat = std::asin(2.0 * u01(rng) - 1.0);
+            lon = (2.0 * u01(rng) - 1.0) * constants::pi;
+        } else {  // in and around the IM-2 tile (20 km square, 1 km blend at its edge)
+            std::tie(lat, lon) = destination(site_lat, site_lon, 2.0 * constants::pi * u01(rng), 14e3 * u01(rng) / R);
+        }
+        worst = std::max(worst, std::abs(terrain->height_at_direction_m(unit(lat, lon)) - terrain->height_m(lat, lon)));
+    }
+    CHECK(worst < 0.1);  // 2e-8 rad of fast_atan2 is 3.5 cm of position
 }

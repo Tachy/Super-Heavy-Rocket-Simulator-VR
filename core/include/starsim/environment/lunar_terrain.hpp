@@ -23,6 +23,9 @@ struct PolarStereographicTile {
 
     // Grid position (line, sample) in the crop of a latitude / longitude.
     std::pair<double, double> position(double latitude_rad, double longitude_rad) const;
+    // The same by the unit direction (no trigonometry: X = 2 R y / (1 - z), Y = -2 R x / (1 - z)); (inf, inf) at the
+    // north pole, which no south polar crop contains.
+    std::pair<double, double> position_of_direction(const math::Vec3& unit) const;
     bool inside(double line, double sample) const;
     double edge_distance_px(double line, double sample) const;  // to the crop's nearest edge
 };
@@ -36,6 +39,10 @@ struct CylindricalGrid {
     double zero_sample = 0.0;
 
     double height_m(double latitude_rad, double longitude_rad) const;  // bilinear; longitude wraps, poles clamped
+    // The same by the unit direction (fast_atan2 / fast_asin instead of the library's: 2e-8 rad, 3 cm).
+    double height_at_direction(const math::Vec3& unit) const;
+    // Bilinear at grid position (line clamped, sample wrapping).
+    double height_at_grid(double line, double sample) const;
 };
 
 // Terrain of the Moon (lunar l2): the global grid everywhere, the site tiles where present, blended over blend_m at a
@@ -48,6 +55,8 @@ public:
     LunarTerrain(CylindricalGrid global, std::vector<PolarStereographicTile> tiles, double sphere_radius_m);
 
     double height_m(double latitude_rad, double longitude_rad) const override;
+    // Same value as height_m; the tiles are located without trigonometry, the global grid only when needed.
+    double height_at_direction_m(const math::Vec3& unit) const override;
     // A site tile's pixel scale inside a tile, the global grid's spacing elsewhere.
     double resolution_m(double latitude_rad, double longitude_rad) const override;
     // The highest sample of the global grid and the tiles (the blend never exceeds its two inputs).

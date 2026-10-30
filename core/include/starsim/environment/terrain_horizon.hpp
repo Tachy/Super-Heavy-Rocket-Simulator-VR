@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <vector>
 
 #include "starsim/environment/terrain.hpp"
@@ -9,9 +10,13 @@ namespace starsim::environment {
 // The sampling of a horizon march along a great circle: the first terrain sample lies min_distance_m (> 0) from the
 // observer, the following steps start at first_step_m and grow geometrically (constant angular resolution as seen from
 // the observer, a few % of the distance).
+// The march ends at max_distance_m when that is > 0 (a distance band), else when the relief bound cannot beat the
+// running maximum any more. With sample_from_m / max_distance_m one march sequence splits into distance bands.
 struct HorizonMarch {
     double min_distance_m = 0.0;
     double first_step_m = 0.0;
+    double max_distance_m = 0.0;
+    double sample_from_m = 0.0;  // samples before this distance are walked but not evaluated (a band of the sequence)
 };
 
 // Terrain horizon elevation (rad, + above the local horizontal of the point's sphere direction) seen from a point at
@@ -27,6 +32,29 @@ double horizon_elevation_rad(const Terrain& terrain, double sphere_radius_m, dou
 // of shared mutable state: several calls may run on different threads at once.
 std::vector<float> horizon_elevations(const Terrain& terrain, double sphere_radius_m,
                                       const std::vector<double>& latitude_rad, const std::vector<double>& longitude_rad,
-                                      const std::vector<double>& height_m, int azimuth_count, const HorizonMarch& march);
+                                      const std::vector<double>& height_m, int azimuth_count,
+                                      const HorizonMarch& march);
+
+// First step of a lattice vertex's march: half the data resolution there or the lattice spacing, whichever is larger
+// (no use sampling a 1.9 km grid every 10 m). It depends on the vertex only, so shared vertices agree.
+inline double lattice_first_step_m(const Terrain& terrain, double latitude_rad, double longitude_rad,
+                                   double spacing_m) {
+    return std::max(0.5 * terrain.resolution_m(latitude_rad, longitude_rad), spacing_m);
+}
+
+// Horizons for an n x n vertex lattice (row-major, n - 1 divisible by 16, typically 65) of one terrain node whose
+// vertices are spaced ~spacing_m apart (latitude_rad / longitude_rad / height_m per vertex, height above the sphere).
+// Same output layout and meaning as horizon_elevations (vertex-major, azimuth-minor; azimuth from each vertex's own
+// north); the march of a vertex is horizon_elevations' with HorizonMarch{spacing_m, lattice_first_step_m(...)}: the
+// near terrain closer than one spacing is the relief normal's job. The samples are split into distance bands (the
+// maximum of them per vertex / azimuth): every vertex from one spacing to 16 spacings, every 2nd vertex to 32, every
+// 4th to 64, every 8th to 128, every 16th beyond; the sparse bands are bilinearly interpolated (the azimuth profile
+// re-sampled where the local norths differ, as near the poles). Vertices shared by neighbouring nodes get identical
+// values along the shared edge. Serial and thread-safe.
+std::vector<float> horizon_elevations_lattice(const Terrain& terrain, double sphere_radius_m, int n,
+                                              const std::vector<double>& latitude_rad,
+                                              const std::vector<double>& longitude_rad,
+                                              const std::vector<double>& height_m, double spacing_m,
+                                              int azimuth_count);
 
 }  // namespace starsim::environment
