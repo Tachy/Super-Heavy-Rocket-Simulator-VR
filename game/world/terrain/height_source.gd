@@ -67,11 +67,18 @@ func has_horizon() -> bool:
 ## Horizon elevations (rad, + above the local horizontal) of an n x n vertex lattice (row-major, n - 1 divisible by 16)
 ## at azimuth_count azimuths k 2 pi / azimuth_count clockwise from each vertex's north: point-major, azimuth-minor
 ## (StarsimCore.horizon_elevations); empty without horizon support. spacing_m: the lattice's vertex spacing.
+## layer_major: (azimuth / 4, point, azimuth % 4) instead, one contiguous RGBA image per group of four azimuths.
 func horizon_elevations(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array, heights_m: PackedFloat64Array,
-		azimuth_count: int, spacing_m: float) -> PackedFloat32Array:
+		azimuth_count: int, spacing_m: float, layer_major := false) -> PackedFloat32Array:
 	if not has_horizon():
 		return PackedFloat32Array()
-	return core.horizon_elevations(body, lats_deg, lons_deg, heights_m, azimuth_count, spacing_m)
+	return core.horizon_elevations(body, lats_deg, lons_deg, heights_m, azimuth_count, spacing_m, layer_major)
+
+
+## Whether the core actually holds this body's terrain (has_horizon() only says the body could): one probe sample.
+func horizon_available() -> bool:
+	return has_horizon() and bool(core.surface_samples(body, PackedFloat64Array([0.0]),
+			PackedFloat64Array([0.0]))["present"])
 
 
 ## The finest horizontal resolution of the surface data (m) over the given points (a node's lattice: a site tile

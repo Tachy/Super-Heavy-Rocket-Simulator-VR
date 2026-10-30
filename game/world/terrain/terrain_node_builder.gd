@@ -22,14 +22,18 @@ const N_AZ := 16
 const HORIZON_LAYERS := N_AZ / 4
 ## [E] The horizon map samples every HORIZON_STRIDE-th grid vertex. 1: every vertex (65 x 65 texels). 2 (33 x 33):
 ## 4x less bake time and memory and -1.5 % GPU time at 15 km, but the shadow edge errs up to 1 deg against the
-## single-ray march (0.11 deg at stride 1), so the full resolution is kept. Must match the shader's HORIZON_STRIDE /
-## HORIZON_ROW; a shared edge keeps its samples (the stride divides CELLS, edge vertices are sampled).
+## single-ray march (0.11 deg at stride 1), so the full resolution is kept. The quadtree passes it to the shader
+## (horizon_stride); a shared edge keeps its samples (the stride divides CELLS, edge vertices are sampled).
 const HORIZON_STRIDE := 1
 const HORIZON_ROW := CELLS / HORIZON_STRIDE + 1
 const HORIZON_TEXELS := HORIZON_ROW * HORIZON_ROW
-## [E] Margin (rad, 0.006 deg) added to a node's highest horizon for the shader's "light clear of every horizon" test:
-## covers the half-float rounding of the stored elevations (2^-11 relative, 0.0004 deg at 11 deg).
+## Margin added to a node's highest horizon for the shader's "light clear of every horizon" test: relative, covers
+## the half-float rounding of the stored elevations (at most 2^-11 of the value, taken as 2^-10) at any elevation,
+## plus [E] an absolute 1e-4 rad (0.006 deg) for the filter's blend of neighbouring texels and the float32 sum.
+const HORIZON_MAX_REL_MARGIN := 1.0 / 1024.0
 const HORIZON_MAX_MARGIN_RAD := 1.0e-4
+## [E] A grid vertex within this angle of a pole (rad) is the pole itself: its longitude is arbitrary (atan2 of ~0).
+const POLE_VERTEX_RAD := 1.0e-7
 ## [E] Imagery texels wanted across a node (4 per grid cell); ImagerySource picks the level from it.
 const IMAGERY_TEXELS := 256.0
 const INV_360 := 1.0 / 360.0
@@ -239,44 +243,52 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 
 ## The node's horizon map as HORIZON_LAYERS images (the layers of a Texture2DArray) of HORIZON_ROW x HORIZON_ROW
 ## texels, RGBAH: texel (i, j) of layer c holds the elevations (rad above the local horizontal, half floats: 0.004 deg
-## at 5 deg, range +-pi/2 needs no clamp) of vertex (i, j) * HORIZON_STRIDE at azimuths 4 c .. 4 c + 3 (k * 2 pi / N_AZ
-## clockwise from north). Texel centres are those vertices, so the GPU's bilinear filtering interpolates between them
-## and a shared edge reads identical texels. The observer is the vertex on the terrain surface. Returns {"layers": the images (null without
-## horizon support), "max_rad": the highest stored elevation over all vertices and azimuths plus
+## at 5 deg, range +-pi/2 needs no clamp) of vertex (i, j) * HORIZON_STRIDE at azimuths 4 c .. 4 c + 3 (k * 2 pi /
+## N_AZ clockwise from north). Texel centres are those vertices, so the GPU's bilinear filtering interpolates between
+## them and a shared edge reads identical texels. The observer is the vertex on the terrain surface. A vertex at a
+## pole is baked in the frame of the longitude of its neighbour toward the node centre (the pole's own is arbitrary).
+## Returns {"layers": the images (null without horizon support or lunar terrain data), "max_rad": the highest stored
+## elevation over all vertices and azimuths, plus its half-float rounding (HORIZON_MAX_REL_MARGIN) and
 ## HORIZON_MAX_MARGIN_RAD}.
 static func _horizon_layers(key: Vector4i, heights: HeightSource, radius_m: float, lats: PackedFloat64Array,
 		lons: PackedFloat64Array, height_m: PackedFloat64Array) -> Dictionary:
 	var none := {"layers": null, "max_rad": 0.0}
-	if not heights.has_horizon():
+	if not heights.horizon_available():
 		return none
 	var grid_lats := PackedFloat64Array()
 	var grid_lons := PackedFloat64Array()
 	var grid_heights := PackedFloat64Array()
+	var pole_lat_deg := 90.0 - rad_to_deg(POLE_VERTEX_RAD)
+	var half := HORIZON_ROW / 2
 	for j in HORIZON_ROW:
 		var row := (j * HORIZON_STRIDE + 1) * LATTICE + 1
 		for i in HORIZON_ROW:
 			var k := row + i * HORIZON_STRIDE
+			var lon := lons[k]
+			if absf(lats[k]) > pole_lat_deg:
+				# Pole vertex: the neighbour one step toward the node centre (diagonal when off the centre lines).
+				var toward := (signi(half - i) + signi(half - j) * LATTICE) * HORIZON_STRIDE
+				if toward == 0:  # the pole is the node centre (a level 0 face): any neighbour
+					toward = HORIZON_STRIDE
+				lon = lons[k + toward]
 			grid_lats.append(lats[k])
-			grid_lons.append(lons[k])
+			grid_lons.append(lon)
 			grid_heights.append(height_m[k])
 	var spacing_m := CubeSphere.node_size_m(key, radius_m) / CELLS * HORIZON_STRIDE
-	var elevations := heights.horizon_elevations(grid_lats, grid_lons, grid_heights, N_AZ, spacing_m)
+	var elevations := heights.horizon_elevations(grid_lats, grid_lons, grid_heights, N_AZ, spacing_m, true)
 	if elevations.size() != HORIZON_TEXELS * N_AZ:
 		return none
 	var max_rad := -PI
 	var layers: Array[Image] = []
+	var layer_floats := HORIZON_TEXELS * 4
 	for c in HORIZON_LAYERS:
-		var texels := PackedFloat32Array()
-		texels.resize(HORIZON_TEXELS * 4)
-		for v in HORIZON_TEXELS:
-			for j in 4:
-				var e := elevations[v * N_AZ + c * 4 + j]
-				texels[v * 4 + j] = e
-				max_rad = maxf(max_rad, e)
+		var texels := elevations.slice(c * layer_floats, (c + 1) * layer_floats)
+		for e in texels:
+			max_rad = maxf(max_rad, e)
 		var image := Image.create_from_data(HORIZON_ROW, HORIZON_ROW, false, Image.FORMAT_RGBAF, texels.to_byte_array())
 		image.convert(Image.FORMAT_RGBAH)
 		layers.append(image)
-	return {"layers": layers, "max_rad": max_rad + HORIZON_MAX_MARGIN_RAD}
+	return {"layers": layers, "max_rad": max_rad + absf(max_rad) * HORIZON_MAX_REL_MARGIN + HORIZON_MAX_MARGIN_RAD}
 
 
 ## Elevation (rad) of texel (i, j) at azimuth index k of a node's horizon layers (the encoding of _horizon_layers).

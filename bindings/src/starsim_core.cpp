@@ -380,17 +380,18 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
                                                           const godot::PackedFloat64Array& latitudes_deg,
                                                           const godot::PackedFloat64Array& longitudes_deg,
                                                           const godot::PackedFloat64Array& heights_m, int azimuth_count,
-                                                          double spacing_m) const {
+                                                          double spacing_m, bool layer_major) const {
     godot::PackedFloat32Array result;
     if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return result;
     const auto count = static_cast<size_t>(latitudes_deg.size());
     const int n = static_cast<int>(std::lround(std::sqrt(static_cast<double>(count))));
     if (longitudes_deg.size() != latitudes_deg.size() || heights_m.size() != latitudes_deg.size() ||
         static_cast<size_t>(n) * static_cast<size_t>(n) != count || azimuth_count < 1 || azimuth_count > 64 ||
-        spacing_m <= 0.0 || n < 2 || (n - 1) % 16 != 0) {
+        spacing_m <= 0.0 || n < 2 || (n - 1) % 16 != 0 || (layer_major && azimuth_count % 4 != 0)) {
         godot::UtilityFunctions::push_error(
             "StarsimCore.horizon_elevations: n x n Gitter mit (n - 1) teilbar durch 16, gleich lange Felder, "
-            "azimuth_count in 1..64 und spacing_m > 0 erwartet");
+            "azimuth_count in 1..64 (durch 4 teilbar bei layer_major) und spacing_m > 0 "
+            "erwartet");
         return result;
     }
     std::vector<double> lat(count), lon(count), height(count);
@@ -402,7 +403,17 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
     const auto elevations = environment::horizon_elevations_lattice(*moon_terrain_, moon_terrain_->sphere_radius_m(), n,
                                                                     lat, lon, height, spacing_m, azimuth_count);
     result.resize(static_cast<int64_t>(elevations.size()));
-    for (size_t i = 0; i < elevations.size(); ++i) result[static_cast<int64_t>(i)] = elevations[i];
+    if (!layer_major) {
+        for (size_t i = 0; i < elevations.size(); ++i) result[static_cast<int64_t>(i)] = elevations[i];
+        return result;
+    }
+    // Pure reorder: (point, azimuth) -> (azimuth / 4, point, azimuth % 4), one RGBA texel row per layer.
+    const auto az = static_cast<size_t>(azimuth_count);
+    for (size_t p = 0; p < count; ++p) {
+        for (size_t k = 0; k < az; ++k) {
+            result[static_cast<int64_t>(((k / 4) * count + p) * 4 + k % 4)] = elevations[p * az + k];
+        }
+    }
     return result;
 }
 
@@ -1054,8 +1065,8 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
                          &StarsimCore::surface_resolution_m);
     ClassDB::bind_method(D_METHOD("horizon_elevations", "body", "latitudes_deg", "longitudes_deg", "heights_m",
-                                  "azimuth_count", "spacing_m"),
-                         &StarsimCore::horizon_elevations);
+                                  "azimuth_count", "spacing_m", "layer_major"),
+                         &StarsimCore::horizon_elevations, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("horizon_elevation_rad", "body", "latitude_deg", "longitude_deg", "height_m",
                                   "azimuth_rad"),
                          &StarsimCore::horizon_elevation_rad);

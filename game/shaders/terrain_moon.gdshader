@@ -23,13 +23,14 @@ global uniform vec3 moon_earth_position_local;  // from the Moon's centre (World
 // The camera's Moon-local render position, float32 hi + lo parts (TerrainQuadtree.camera_global, once per frame).
 global uniform vec3 moon_terrain_camera_hi;
 global uniform vec3 moon_terrain_camera_lo;
-// The node's horizon map: layer c (RGBAH, 65 x 65) texel (i, j) = grid vertex (i, j), azimuths 4 c .. 4 c + 3 (elevation,
-// rad); texel centres are the vertices, so the filter interpolates between them.
-const float HORIZON_STRIDE = 1.0;  // TerrainNodeBuilder.HORIZON_STRIDE
-const float HORIZON_ROW = 65.0;  // TerrainNodeBuilder.HORIZON_ROW
+// The node's horizon map: layer c (RGBAH, row x row) texel (i, j) = grid vertex (i, j) * horizon_stride, azimuths
+// 4 c .. 4 c + 3 (elevation, rad); texel centres are the vertices, so the filter interpolates between them.
+uniform float horizon_stride = 1.0;  // grid vertices per texel (TerrainNodeBuilder.HORIZON_STRIDE, set by the quadtree)
 uniform sampler2DArray horizon_map : filter_linear, repeat_disable;
 uniform float horizon_max_rad = 0.0;  // the highest elevation in the map (with margin): a light above it is not hidden
 uniform bool horizon_enabled = false;  // a node without a horizon (no terrain data) lights without terrain shadows
+// [E] |east| of the unnormalised east (cos latitude) below which the fragment counts as at a pole (within ~1e-6 rad).
+const float POLE_EAST_MIN = 1e-6;
 // Set from GDScript (World: the Sun's and the Earth's radius).
 uniform float sun_radius_m;
 uniform float earth_radius_m;
@@ -50,7 +51,8 @@ void vertex() {
 	local_position = VERTEX + vertex_offset;
 	local_normal = NORMAL;
 	global_uv = CUSTOM1.xy;
-	horizon_uv = (CUSTOM2.xy / HORIZON_STRIDE + 0.5) / HORIZON_ROW;  // texel centres are the grid vertices
+	// Texel centres are the grid vertices.
+	horizon_uv = (CUSTOM2.xy / horizon_stride + 0.5) / float(textureSize(horizon_map, 0).x);
 	camera_offset = VERTEX - camera_local;
 }
 
@@ -100,7 +102,7 @@ void fragment() {
 		// Local axes at the fragment in the Moon-fixed render frame (the pole is +Y; at a pole any east will do).
 		vec3 up = normalize(local_position);
 		vec3 east = vec3(up.z, 0.0, -up.x);
-		east = length(east) > 1e-6 ? normalize(east) : vec3(0.0, 0.0, 1.0);
+		east = length(east) > POLE_EAST_MIN ? normalize(east) : vec3(0.0, 0.0, 1.0);
 		vec3 north = cross(up, east);
 		if (sun_matters) {
 			sun_visible = terrain_visible_fraction(to_sun, sun_radius_m, east, north, up, horizon_uv);

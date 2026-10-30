@@ -61,6 +61,7 @@ func _initialize() -> void:
 	if _moon_terrain:
 		_check_moon_data()
 		_check_moon_horizon()
+		_check_horizon_pole_and_margin()
 	else:
 		print("  note  data/ Moon terrain absent: 'moon refines to the 20 m tile' and 'moon finest mesh matches the "
 				+ "core' skipped")
@@ -381,6 +382,48 @@ func _check_no_horizon_without_terrain() -> void:
 # With the Moon terrain: a node at the IM-2 site (leaf and level 7) bakes a horizon map of the stated size; its texels
 # are the core's elevations (half-float precision, single-ray reference within the banded bake's accuracy), the shared
 # edge of two neighbours is identical, the vertices' CUSTOM2 is their grid position, skirts take their edge vertex's.
+## The early-out margin covers the half-float rounding at high elevations, and a node with the exact pole as a vertex
+## bakes finite horizons there (in a neighbour's frame, equal to its neighbour's elevations to within the vertex shift).
+func _check_horizon_pole_and_margin() -> void:
+	var margin_ok := true
+	var worst_excess := 0.0
+	for elevation_deg in [11.0, 20.0, 35.0, 40.0, 60.0, 85.0]:
+		var e := deg_to_rad(elevation_deg)
+		var image := Image.create_from_data(1, 1, false, Image.FORMAT_RGBAF,
+				PackedFloat32Array([e, e, e, e]).to_byte_array())
+		image.convert(Image.FORMAT_RGBAH)
+		var bound := e + absf(e) * TerrainNodeBuilder.HORIZON_MAX_REL_MARGIN + TerrainNodeBuilder.HORIZON_MAX_MARGIN_RAD
+		var stored := image.get_pixel(0, 0).r
+		worst_excess = maxf(worst_excess, stored - e)
+		margin_ok = margin_ok and bound >= stored
+	_check(margin_ok, "horizon_max margin covers the half-float rounding up to 85 deg (largest rounding up %.5f deg)"
+			% rad_to_deg(worst_excess))
+	var heights := _moon_heights()
+	heights.core = _core
+	var node := TerrainNodeBuilder.build(CubeSphere.key_at(Vector3(0.0, 0.0, 1.0), 7), heights, null, MOON_RADIUS_M)
+	var layers: Array = node["horizon"] if node["horizon"] != null else []
+	var finite := layers.size() == TerrainNodeBuilder.HORIZON_LAYERS
+	var pole_i := -1
+	var pole_j := -1
+	for j in TerrainNodeBuilder.HORIZON_ROW:
+		for i in TerrainNodeBuilder.HORIZON_ROW:
+			var ll := _vertex_lat_lon(CubeSphere.key_at(Vector3(0.0, 0.0, 1.0), 7), i, j)
+			if absf(ll.x) > 89.99999:
+				pole_i = i
+				pole_j = j
+	finite = finite and pole_i >= 0
+	if finite:
+		var spread_deg := 0.0
+		for k in TerrainNodeBuilder.N_AZ:
+			var e: float = TerrainNodeBuilder.horizon_value(layers, pole_i, pole_j, k)
+			finite = finite and is_finite(e)
+			spread_deg = maxf(spread_deg, absf(rad_to_deg(e)))
+		_check(finite, "moon pole node: the pole vertex (%d, %d) has finite horizons (largest %.2f deg)"
+				% [pole_i, pole_j, spread_deg])
+	else:
+		_check(false, "moon pole node: horizon layers built and a pole vertex found")
+
+
 func _check_moon_horizon() -> void:
 	var site: Dictionary = TomlLite.load_file(_config_dir.path_join("lunar_sites.toml"))["site"][0]
 	var lat := float(site["latitude_deg"])
@@ -409,7 +452,7 @@ func _check_moon_horizon() -> void:
 		var count := 0
 		var max_elevation_deg := 0.0
 		for point: Vector2i in [Vector2i(16, 16), Vector2i(5, 25), Vector2i(0, 0), Vector2i(32, 32), Vector2i(10, 1)]:
-			# texel (i, j) = grid vertex (2 i, 2 j)
+			# texel (i, j) = grid vertex (i, j) * HORIZON_STRIDE
 			var vertex_lat_lon := _vertex_lat_lon(key, point.x * TerrainNodeBuilder.HORIZON_STRIDE,
 					point.y * TerrainNodeBuilder.HORIZON_STRIDE)
 			var samples: Dictionary = _core.surface_samples("moon", PackedFloat64Array([vertex_lat_lon.x]),
@@ -427,7 +470,7 @@ func _check_moon_horizon() -> void:
 					count += 1
 		# The single ray starts from the data resolution, the bake from the node spacing: at the 373 m spacing the two
 		# sample sets differ (the reference itself moves by up to 3 deg when the observer shifts by 3 m, core task 2a).
-		var worst_limit_deg := 0.5 if level == leaf_level else 5.0
+		var worst_limit_deg := 0.5 if level == leaf_level else 2.0
 		var mean_limit_deg := 0.1 if level == leaf_level else 1.0
 		_check(count > 0 and worst_deg < worst_limit_deg and sum_deg / count < mean_limit_deg,
 				"moon level %d: horizon texels match the core's "
@@ -441,7 +484,8 @@ func _check_moon_horizon() -> void:
 					var texel := layer.get_pixel(a, b)
 					map_max = maxf(map_max, maxf(maxf(texel.r, texel.g), maxf(texel.b, texel.a)))
 		var bound: float = node["horizon_max_rad"]
-		_check(bound >= map_max and bound - map_max < 2.0 * TerrainNodeBuilder.HORIZON_MAX_MARGIN_RAD,
+		_check(bound >= map_max and bound - map_max < 2.0 * (TerrainNodeBuilder.HORIZON_MAX_MARGIN_RAD
+				+ absf(map_max) * TerrainNodeBuilder.HORIZON_MAX_REL_MARGIN),
 				"moon level %d: horizon_max_rad %.5f covers the map's highest %.5f" % [level, bound, map_max])
 		var vertices_ok := true
 		var custom2: PackedFloat32Array = node["custom2"]

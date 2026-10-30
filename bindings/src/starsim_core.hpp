@@ -102,13 +102,15 @@ public:
     // elevations (rad, + above the local horizontal) of an n x n vertex lattice of a terrain node (row-major,
     // n = sqrt(size), n - 1 divisible by 16; latitudes / longitudes in degrees, heights in metres above the sphere,
     // spacing_m the vertex spacing) at azimuth_count azimuths k 2 pi / azimuth_count (clockwise from each vertex's
-    // north): vertex-major, azimuth-minor, banded bake (environment::horizon_elevations_lattice). Empty without the
-    // terrain or on invalid sizes. Thread-safe like surface_samples.
+    // north): vertex-major, azimuth-minor, banded bake (environment::horizon_elevations_lattice). layer_major
+    // (azimuth_count divisible by 4): the same values reordered (azimuth / 4, vertex, azimuth % 4), so each group of
+    // four azimuths is one contiguous RGBA image. Empty without the terrain or on invalid sizes. Thread-safe like
+    // surface_samples.
     godot::PackedFloat32Array horizon_elevations(const godot::String& body,
                                                  const godot::PackedFloat64Array& latitudes_deg,
                                                  const godot::PackedFloat64Array& longitudes_deg,
                                                  const godot::PackedFloat64Array& heights_m, int azimuth_count,
-                                                 double spacing_m) const;
+                                                 double spacing_m, bool layer_major = false) const;
     // One full march (environment::horizon_elevation_rad, from the data resolution there); NAN without the terrain.
     double horizon_elevation_rad(const godot::String& body, double latitude_deg, double longitude_deg, double height_m,
                                  double azimuth_rad) const;

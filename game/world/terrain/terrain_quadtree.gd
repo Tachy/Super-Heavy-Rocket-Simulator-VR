@@ -508,6 +508,7 @@ func _upload(result: Dictionary) -> void:
 		var horizon_map := Texture2DArray.new()
 		horizon_map.create_from_images(result["horizon"])
 		material.set_shader_parameter("horizon_map", horizon_map)
+		material.set_shader_parameter("horizon_stride", float(TerrainNodeBuilder.HORIZON_STRIDE))
 		material.set_shader_parameter("horizon_max_rad", float(result["horizon_max_rad"]))
 		material.set_shader_parameter("horizon_enabled", true)
 	if result["water_mask"] != null:  # bodies without water (the Moon) build none

@@ -87,8 +87,11 @@ on top; it replaced the interim `GroundPatch`.
   (layer c, texel (a, b) = vertex (a, b), azimuths 4c .. 4c+3; half floats 0.004 deg at 5 deg, range +-pi/2 so no clamp;
   `HORIZON_STRIDE` 2 would halve the resolution: 4x less bake time and memory but up to 1 deg shadow-edge error, kept 1).
   The layers become one `Texture2DArray` (filter_linear, texel centres = vertices: hardware bilinear between the
-  vertices, shared edges read identical texels) and a material parameter `horizon_max_rad` (the node's highest horizon +
-  `HORIZON_MAX_MARGIN_RAD`). CUSTOM2 carries the vertex's grid position (the Moon has no water mask; the vertex stage
+  vertices, shared edges read identical texels) and material parameters `horizon_max_rad` (the node's highest horizon
+  + its half-float rounding `HORIZON_MAX_REL_MARGIN` 2^-10 relative + `HORIZON_MAX_MARGIN_RAD` 1e-4, conservative at
+  any elevation) and `horizon_stride` (from the builder's constant; the row length is `textureSize`). The binding returns
+  the values layer-major (`layer_major` flag, a pure reorder in C++), so each layer image is a slice. A pole vertex
+  (within `POLE_VERTEX_RAD` 1e-7) is baked in the frame of its neighbour's longitude toward the node centre. CUSTOM2 carries the vertex's grid position (the Moon has no water mask; the vertex stage
   turns it into the map's uv), skirts take their edge vertex's. The shader takes the horizon in the light's azimuth
   (one filtered sample, a second only after a layer's last azimuth; linear between the two sectors); a light whose disc
   lies wholly above `horizon_max_rad` skips every fetch, and a light that cannot reach the fragment (below its normal's
@@ -97,8 +100,8 @@ on top; it replaced the interim `GroundPatch`.
   the Earth's disc) the earthshine. `sun_radius_m` / `earth_radius_m` are set from World (no shader defaults). Local
   east / north come from the Moon-fixed position (pole +Y, any east at a pole). All levels get a horizon: the lattice
   march's step cap is max(1000 m, spacing / 2) (core), a single-point query keeps 1000 m. Bake per node (one worker,
-  idle, IM-2): 175 ms at level 5 (1.3 km), 104 ms level 4, 58 ms level 3, ~30 ms levels 1-2 and 6-12 (half of it the
-  GDScript layer split, ~20 ms at stride 1). Levels 3-5 stay expensive because their coarse lattice marches out to
+  idle, IM-2, stride 2): 175 ms at level 5 (1.3 km), 104 ms level 4, 58 ms level 3, ~30 ms levels 1-2 and 6-12; at
+  stride 1 the leaf bake and encode is ~40 ms (53 before the layer-major output), level 7 ~57 ms. Levels 3-5 stay expensive because their coarse lattice marches out to
   hundreds of km from small first steps (2 % growth: ~260 samples per ray at 3 km spacing, 17.8 M samples per node);
   the step cap bites only beyond ~50 km. Lunar site load (IM-2, worker threads, headless, to idle): 3.7 s without
   horizons, 9.4 s with them (measured at stride 2, stride 1 not re-measured; 16 builds in flight instead of 8 did not help: 9.1 s). GPU (1600 x 900,
@@ -152,6 +155,6 @@ on top; it replaced the interim `GroundPatch`.
   bake's banded interpolation is within 0.3-1 deg worst case of a single-ray march); the horizon is taken in the disc
   centre's azimuth; nodes without terrain data have none; no shadows of vehicles or of
   structures; the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
-  consistent but arbitrary north.
+  consistent but arbitrary north (the shader's pole fallback east; the baked pole vertex follows its neighbour).
 - A fine imagery patch smaller than ~0.1 x viewing distance fades out from far away; S2 brightness steps over open
   water remain.
