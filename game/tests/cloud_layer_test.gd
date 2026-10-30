@@ -136,6 +136,7 @@ func _test_light_follows_fade(core: StarsimCore, camera: Vector3) -> void:
 ## (refreshes at the same level fade from their slot) and none completes in the frame it starts.
 func _test_view_cache(camera: Vector3) -> void:
 	var snapshot := _fake("view_cache")
+	_layer.view_cache = true  # the baked volume (the default since 2026-10-30) switched it off
 	_layer.set_target(snapshot, snapshot)
 	_drive(camera, 0.0, 4.0)
 	var sun := Vector3(0.3, 0.8, 0.5).normalized()

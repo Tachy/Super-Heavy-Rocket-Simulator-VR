@@ -251,7 +251,7 @@ const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March",
 	CloudEffect.MarchMethod.HYBRID: "Hybrid, Volumenlicht + Überspringen",
 	CloudEffect.MarchMethod.HYBRID_NO_SKIP: "Hybrid, Volumenlicht",
 	CloudEffect.MarchMethod.HYBRID_OLD_LIGHT: "Hybrid, altes Licht + Überspringen",
-	CloudEffect.MarchMethod.BAKED: "Volumen-Prototyp"}
+	CloudEffect.MarchMethod.BAKED: "Volumen"}
 ## The world volume's bake budget factor while a hybrid method waits for its first shown level (see _update_world_volume).
 const HYBRID_FILL_SCALE := 4.0
 var _fill_boosted := false
@@ -265,7 +265,7 @@ var march_cut_m := 0.0:
 	set(value):
 		march_cut_m = value
 		ShaderGlobals.set_value(&"cloud_march_cut_m", value)
-var march_method := CloudEffect.MarchMethod.OLD:
+var march_method := CloudEffect.MarchMethod.BAKED:
 	set(value):
 		march_method = value
 		view_cache = false
@@ -1164,12 +1164,11 @@ func _apply_march_method() -> void:
 	effect.set_march_method(march_method, volume_needed())
 
 
-## --cloud_method=old|hybrid|hybrid_old_light and --cloud_divisor=<x> (the live toggles' start values). The VR game
-## (--vr, Start-VR.cmd) starts on the old march without the view cache (user 2026-10-29: the plain start command runs
-## the current version).
+## --cloud_method=old|hybrid|hybrid_old_light|baked and --cloud_divisor=<x> (the live toggles' start values). Every
+## start - Start-VR.cmd, Start-Desktop.cmd, the checks - draws the baked volume (user 2026-10-30) with the equiangular
+## centre image (its target setting) unless --cloud_method says otherwise.
 func _apply_cloud_arguments(args: PackedStringArray) -> void:
-	if "--vr" in args:
-		march_method = CloudEffect.MarchMethod.OLD
+	march_method = CloudEffect.MarchMethod.BAKED
 	for arg in args:
 		if arg.begins_with("--cloud_method="):
 			var name := arg.trim_prefix("--cloud_method=")
@@ -1179,6 +1178,8 @@ func _apply_cloud_arguments(args: PackedStringArray) -> void:
 				push_error("CloudLayer: unknown --cloud_method=%s (%s)" % [name, ", ".join(METHOD_ARGUMENTS.keys())])
 		elif arg.begins_with("--cloud_divisor="):
 			divisor_override = maxf(float(arg.trim_prefix("--cloud_divisor=")), 1.0)
+	if march_method == CloudEffect.MarchMethod.BAKED:
+		CloudCentreView.equiangular = true
 
 
 ## The live toggles (desktop and VR: the overlay passes unhandled keys on): F7 the next method, F8 the next divisor.
@@ -1187,9 +1188,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == METHOD_KEY:
-		# User 2026-10-29: F7 compares only what is relevant - the old march with the rectilinear centre image, with the
-		# equiangular one (CloudCentreView.equiangular), the baked volume prototype (equiangular too: the target
-		# setting), and back. The hybrids stay reachable through --cloud_method.
+		# User 2026-10-29 / 10-30: F7 compares only what is relevant - the baked volume (the default; equiangular: its
+		# target setting), the old march with the rectilinear centre image, with the equiangular one
+		# (CloudCentreView.equiangular), and back. The hybrids stay reachable through --cloud_method.
 		if march_method == CloudEffect.MarchMethod.OLD and not CloudCentreView.equiangular:
 			CloudCentreView.equiangular = true
 		elif march_method == CloudEffect.MarchMethod.OLD:
@@ -1229,7 +1230,7 @@ func status_line() -> String:
 
 func _method_label() -> String:
 	var label: String = METHOD_LABELS[march_method]
-	if march_method != CloudEffect.MarchMethod.BAKED and march_method != CloudEffect.MarchMethod.OLD:
+	if march_method != CloudEffect.MarchMethod.OLD:
 		return label
 	if CloudCentreView.equiangular:
 		label += ", winkelgleich"
