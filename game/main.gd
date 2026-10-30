@@ -17,12 +17,16 @@ var legacy_hud := CanvasLayer.new()  ## FlightOverlay, NavBall, FlightHud (F1)
 
 
 func _ready() -> void:
+	var loading := LoadingScreen.start(self)  # null in tests, headless and the self-check
 	world.name = "World"
 	add_child(world)
+	if not world.booted and LoadingScreen.yielding():
+		await world.boot_finished  # VR: the world's setup spans rendered frames (the loading screen's steps)
 	get_window().title = "%s %s" % [ProjectSettings.get_setting("application/config/name"), GameVersion.VERSION]
 	if OS.get_cmdline_user_args().has(SELF_CHECK_ARG):
 		_self_check()
 		return
+	await LoadingScreen.step("Oberfläche aufbauen")
 	overlay_host.overlay.world = world
 	add_child(overlay_host)
 	var xr := get_node_or_null("/root/XrManager")
@@ -68,6 +72,9 @@ func _ready() -> void:
 	var hud := FlightHud.new()
 	hud.world = world
 	legacy_hud.add_child(hud)
+	if loading != null:  # stays while the atmosphere tables load (first run: about a minute), then a few world frames
+		loading.finish_when_idle(func() -> String:
+			return world.atmosphere.status_text if world.atmosphere.loading else "")
 
 
 ## One line `SELF-CHECK OK ...` (exit code 0) or `SELF-CHECK FAIL <reason>` (exit code 1).

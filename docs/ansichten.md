@@ -329,6 +329,16 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   sehen.
 - Wolken und Wetter: siehe die Wetterzeile und den Schalter "Wetter" im Overlay-Abschnitt. Noch nicht: Regen, Nebel, Gewitter, Dunst, Wind (kommt nach dem Sehen), Luftleuchten.
 
+### Startbildschirm [Entschieden, umgesetzt 2026-10-30]
+
+Beim Hochfahren zeigt ein schwarzer Bildschirm in hellem Text, was gerade passiert: oben der Titel, in der Mitte der
+laufende Schritt groß (z. B. "Erdgelände und Satellitenbilder einrichten"), darüber die letzten vier fertigen Schritte
+kleiner und abgedunkelt. Kein Fortschrittsbalken. Auf dem Desktop ist es eine Vollbild-Ebene, in VR eine native
+OpenXR-Quad-Ebene etwa 2 m vor der Startkopfhaltung (Welt dahinter schwarz). Der Bildschirm bleibt, solange die
+Atmosphärentabellen laden (erster Start: etwa eine Minute, die Zeile sagt das), und verschwindet dann nach wenigen
+gerenderten Weltbildern (am Desktop mit kurzer Blende). Der Teil vor dem ersten Schritt (Engine- und GPU-Start, auf
+dem Desktop rund 20 s) ist ohne Text.
+
 ### Weitere Außenansichten
 
 [Vorschlag] Umschaltbar per Taste / Bildschirm:
