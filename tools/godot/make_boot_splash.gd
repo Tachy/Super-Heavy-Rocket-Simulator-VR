@@ -17,7 +17,7 @@ func _initialize() -> void:
 	background.color = LoadingView.BACKGROUND
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_viewport.add_child(background)
-	_add_row(str(ProjectSettings.get_setting("application/config/name")), LoadingView.TITLE_SIZE,
+	_add_row(GameTitle.DISPLAY, LoadingView.TITLE_SIZE,
 			LoadingView.TITLE_COLOR, LoadingView.TITLE_OFFSET)
 	_add_row("wird gestartet ...", LoadingView.SUBTITLE_SIZE, LoadingView.SUBTITLE_COLOR, LoadingView.SUBTITLE_OFFSET)
 	root.add_child(_viewport)

@@ -22,7 +22,7 @@ func _ready() -> void:
 	add_child(world)
 	if not world.booted and LoadingScreen.yielding():
 		await world.boot_finished  # VR: the world's setup spans rendered frames (the loading screen's steps)
-	get_window().title = "%s %s" % [ProjectSettings.get_setting("application/config/name"), GameVersion.VERSION]
+	get_window().title = "%s %s" % [GameTitle.DISPLAY, GameVersion.VERSION]
 	if OS.get_cmdline_user_args().has(SELF_CHECK_ARG):
 		_self_check()
 		return

@@ -96,7 +96,7 @@ static func _mode_for(host: Node) -> Mode:
 func _build() -> void:
 	name = "LoadingScreen"
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	steps.title = str(ProjectSettings.get_setting("application/config/name"))
+	steps.title = GameTitle.DISPLAY
 	_view = LoadingView.new()
 	if mode == Mode.VR:
 		_vr = VrLoadingLayer.new()

@@ -21,7 +21,7 @@ var _images: Array[Image] = []
 
 
 func _initialize() -> void:
-	_steps.title = str(ProjectSettings.get_setting("application/config/name"))
+	_steps.title = GameTitle.DISPLAY
 	for i in TEXTS.size() - 1:
 		_steps.add(TEXTS[i], 0)
 	_view.set_process(false)
