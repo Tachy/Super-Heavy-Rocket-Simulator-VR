@@ -541,46 +541,6 @@ cloud_deterministic_march={
 "type": "bool",
 "value": true
 }
-cloud_view_cache={
-"type": "bool",
-"value": true
-}
-cloud_world_volume={
-"type": "bool",
-"value": false
-}
-cloud_noise_curl={
-"type": "sampler3D",
-"value": ""
-}
-cloud_edge_curl={
-"type": "float",
-"value": 1.0
-}
-cloud_light_entry_samples={
-"type": "int",
-"value": 4
-}
-cloud_detail_gaussian={
-"type": "sampler2D",
-"value": ""
-}
-cloud_detail_level_mean={
-"type": "vec3",
-"value": Vector3(0, 0, 0)
-}
-cloud_detail_level_variance={
-"type": "vec3",
-"value": Vector3(0, 0, 0)
-}
-cloud_shape_residual_variance_lo={
-"type": "vec4",
-"value": Vector4(0, 0, 0, 0)
-}
-cloud_shape_residual_variance_hi={
-"type": "vec4",
-"value": Vector4(0, 0, 0, 0)
-}
 cloud_air_shadow={
 "type": "bool",
 "value": true

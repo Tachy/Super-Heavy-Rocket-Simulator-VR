@@ -2,14 +2,9 @@
 // (game/world/weather/cloud_effect.gd) through CloudShaderPort, never included by a Godot shader. One of CLOUD_MARCH,
 // CLOUD_TEMPORAL, CLOUD_UPSAMPLE, CLOUD_OUTLINE, CLOUD_EDGE_REFINE, CLOUD_CENTRE or
 // CLOUD_SHAPE_PREFILTER is defined per kernel; CLOUD_MARCH also gets atmosphere.gdshaderinc and
-// clouds.gdshaderinc (translated: their `global uniform`s in set 0). With CLOUD_CACHE_FILL (cloud view cache Task 3)
-// the march's machinery is compiled without its images and main for cloud_view_cache.gdshaderinc's fill kernel; the
-// march and the fill shade a ray by the one function cloud_shade_ray. CLOUD_CACHE_LOOKUP (Task 4) gets the CloudView
-// block and the ray helpers below for cloud_view_cache.gdshaderinc's per-eye lookup. With CLOUD_VOLUME_FULL (world
-// volume plan Task 7) the march's machinery without its images and main, for cloud_volume_march.gdshaderinc's kernel.
-// With CLOUD_HYBRID (the hybrid march prototype, 2026-10-29) the march's kernels skip the world volume's proven-empty
-// space and, with CLOUD_HYBRID_VOLUME_LIGHT, take the light from its baked terms (cloud_hybrid.gdshaderinc, included
-// before this file).
+// clouds.gdshaderinc (translated: their `global uniform`s in set 0); the march shades a ray by the one function
+// cloud_shade_ray. With CLOUD_BAKED_MARCH (CloudBaked, cloud_baked.gdshaderinc included after this file) the march's
+// kernel shades its ray through the baked volume instead (cloud_baked_shade).
 //
 // The march and the temporal accumulation run once per frame in the centre view (VR: the head, a frustum covering both
 // eyes, CloudCentreView; the desktop: the view itself), the upsample once per eye (VR performance part 2: two marches
@@ -48,8 +43,7 @@
 //    with the same depth weight. Out: the full-resolution
 //    image the composite quad (cloud_layer.gdshader) blends over the scene.
 
-#if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE) || defined(CLOUD_OUTLINE) \
-		|| defined(CLOUD_CACHE_LOOKUP)
+#if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE) || defined(CLOUD_OUTLINE)
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -187,7 +181,6 @@ void main() {
 // =====================================================================================================================
 #ifdef CLOUD_MARCH
 
-#if !defined(CLOUD_CACHE_FILL) && !defined(CLOUD_VOLUME_FULL)
 layout(set = 1, binding = 1) uniform sampler2D scene_depth;  // full resolution, nearest
 layout(rgba16f, set = 1, binding = 2) uniform writeonly image2D out_color;
 #ifdef CLOUD_EDGE_REFINE
@@ -195,8 +188,7 @@ layout(rg32f, set = 1, binding = 3) uniform image2D out_depth;  // read too: the
 #else
 layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
 #endif
-#endif
-#if defined(CLOUD_COUNTERS) && !defined(CLOUD_EDGE_REFINE) && !defined(CLOUD_CACHE_FILL) && !defined(CLOUD_VOLUME_FULL)
+#if defined(CLOUD_COUNTERS) && !defined(CLOUD_EDGE_REFINE)
 // The counters of the march (clouds.gdshaderinc): density fetches, light fetches, occupied steps, empty steps.
 layout(rgba32ui, set = 1, binding = 24) uniform writeonly uimage2D out_counters;
 #endif
@@ -349,24 +341,10 @@ const vec2 CLOUD_FAR_COVER_FADE_M = vec2(8000.0, 16000.0);
 // [E] Behind a march transmittance below this the far tier is not evaluated (< 0.1 % of its light).
 const float CLOUD_FAR_MIN_TRANSMITTANCE = 1.0e-3;
 
-// The ray dir (Earth-local unit) from a point offset from the camera (Earth-local, m). The cache fill
-// (CLOUD_CACHE_FILL: the anchor, metres to kilometres from the camera): the ray's height is the camera's plus the
-// offset's along its own direction (the cloud_height_along form: exact in float32 where |M p| - a would lose ~0.5 m),
-// its up the anchor's model up. The per-frame march: the camera's ray (cloud_ray) - its origin is an eye at most a few
-// centimetres from the head (cloud_vr_stereo_test), the head's height and up; kept apart at compile time so the
-// march's code stays bit-identical (a run-time branch on the offset let the GPU compiler re-associate the camera's
-// path: 4 % of the pixels changed, up to 30 % of the mean colour).
+// The ray dir (Earth-local unit) from a point offset from the camera (Earth-local, m): the camera's ray (cloud_ray) -
+// its origin is an eye at most a few centimetres from the head (cloud_vr_stereo_test), the head's height and up.
 CloudRay cloud_ray_from(vec3 dir_local, vec3 origin_offset) {
 	CloudRay ray = cloud_ray(dir_local);
-#ifdef CLOUD_CACHE_FILL
-	float offset_m = length(origin_offset);
-	if (offset_m > 0.0) {
-		ray.h_c = cloud_height_along(cloud_ray(origin_offset / offset_m), offset_m);
-		ray.r_c = CLOUD_A_M + ray.h_c;
-		vec3 up_o = normalize((atmosphere_camera_hi + atmosphere_camera_lo + origin_offset) * ATM_STRETCH);
-		ray.mu = dot(up_o, dir_local * ATM_STRETCH / ray.scale);
-	}
-#endif
 	return ray;
 }
 
@@ -656,9 +634,6 @@ float cloud_sample_light_source(bool far, vec3 light_dir, vec3 normal, vec3 dir,
 #endif
 	CLOUD_LIGHT_BEGIN
 	float source;
-#ifdef CLOUD_HYBRID_VOLUME_LIGHT
-	far = true;  // the hybrid's volume light: beyond the volume the far tier's light path (no cache, no light march)
-#endif
 	if (!far) {
 		source = cloud_light_source(light_dir, normal, dir, offset, height_m, distance_m, column, jitter, pixel_angle,
 				sun);
@@ -675,25 +650,6 @@ float cloud_sample_light_source(bool far, vec3 light_dir, vec3 normal, vec3 dir,
 	return source;
 }
 
-#ifdef CLOUD_HYBRID_VOLUME_LIGHT
-// The hybrid's source of one light (cloud_hybrid.gdshaderinc): lit (a level holds the point) the transfer table / the
-// closed form on the volume's optical depth tau_l toward the light (none where the volume marks it unlit: Earth's
-// shadow, the Moon off); else the far tier's light path (cloud_sample_light_source).
-float cloud_hybrid_light_source(bool lit, float tau_l, vec3 light_dir, vec3 normal, vec3 dir, vec3 offset,
-		float height_m, float distance_m, vec2 column, float jitter, float pixel_angle, bool sun) {
-	if (!lit) {
-		return cloud_sample_light_source(true, light_dir, normal, dir, offset, height_m, distance_m, column, jitter,
-				pixel_angle, sun);
-	}
-	if (tau_l >= CLOUD_HYBRID_UNLIT_TAU) {
-		return 0.0;
-	}
-	if (cloud_scattering_model == 1) {
-		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_l, column.x, column.y);
-	}
-	return cloud_scattering_source_3d(light_dir, -dir, normal, tau_l, column.x, column.y);
-}
-#endif
 
 // The deterministic march's structure step in a cell for a ray climbing at climb (|dh/ds|):
 // CLOUD_STRUCTURE_TEXEL_FRACTION of the distance over which the ray crosses one texel of the finest shape present
@@ -708,16 +664,6 @@ float cloud_structure_step(CloudCell cell, float climb) {
 	return CLOUD_STRUCTURE_TEXEL_FRACTION / max(climb / up_texel_m, across / across_texel_m);
 }
 
-#ifdef CLOUD_CACHE_FILL
-// The fill's ray start (m from the anchor; cloud view cache Task 5: the near shell's radius - the cache holds what lies
-// beyond it, the near shell marches the rest per frame): set by the fill's main before it shades a ray.
-float cloud_march_start_m = 0.0;
-#endif
-#ifdef CLOUD_NEAR_SHELL
-// The near shell's end of the ray (m from the eye; <= 0: the whole ray): set by the march's main per ray
-// (cloud_near_shell_end, cloud_view_cache.gdshaderinc).
-float cloud_march_end_m = 0.0;
-#endif
 
 // The raymarch of one ray (dir: Earth-local unit; from origin: the eye's or the cache anchor's offset from the camera,
 // Earth-local, m) up to scene_m; out: premultiplied colour, alpha, weighted distance,
@@ -778,12 +724,6 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 			d0 = max(d0, bottom.y);
 		}
 	}
-#ifdef CLOUD_CACHE_FILL
-	d0 = max(d0, cloud_march_start_m);  // the cache holds what lies beyond the near shell (Task 5)
-#endif
-#ifdef CLOUD_SPIKE_CLIP_M
-	d0 = max(d0, CLOUD_SPIKE_CLIP_M);  // spike S's reference: the far part [R_near, end] alone (CloudSpike, Task 13 removes)
-#endif
 	bool surface = scene_m < d1;  // the ray ends on the scene, not on the cloud shell
 	d1 = min(d1, scene_m);
 	if (cloud_march_cut_m > 0.0) {
@@ -800,18 +740,6 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 	if (handover) {
 		d1 = min(d1, cloud_handover_far_m);
 	}
-#ifdef CLOUD_NEAR_SHELL
-	// The near shell (cloud view cache Task 5): the march's own steps - laid out over the whole segment, so its samples
-	// are the full march's - up to the shell's end; what lies beyond is the cache's (no far tier: it starts far beyond).
-	float steps_d1 = d1;
-	if (cloud_march_end_m > 0.0) {
-		d1 = min(d1, cloud_march_end_m);
-		end_m = min(end_m, cloud_march_end_m);
-		if (d1 <= d0) {
-			return;
-		}
-	}
-#endif
 
 	float k = cloud_transport_scale();
 	vec3 sun_dir = normalize(atmosphere_sun_direction);
@@ -863,12 +791,7 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 		float start = max(seg0, CLOUD_NEAR_START_M);
 		int n = max(cloud_steps, 1);
 		// Coarse step: the fraction of the distance that spans [start, seg1] in n steps; at most one height layer.
-#ifdef CLOUD_NEAR_SHELL
-		float steps_seg1 = far ? end_m : steps_d1;  // the near shell: the whole segment's step layout
-		float coarse_rel = steps_seg1 > start ? exp(log(steps_seg1 / start) / float(n)) - 1.0 : 1.0;
-#else
 		float coarse_rel = seg1 > start ? exp(log(seg1 / start) / float(n)) - 1.0 : 1.0;
-#endif
 		float transmittance_bg = 1.0;   // exp(-tau): the background
 		// The pass's alpha: each step's share of the pixel weighted by keep (the hand-over's cross-fade; = 1 - the
 		// background's transmittance without a band).
@@ -896,9 +819,6 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 		bool outside = true;
 		// the last clear step ended in the field's cloudy region: the next steps are fine ones
 		bool cloud_ahead = false;
-#ifdef CLOUD_HYBRID
-		CloudHybridTrack hybrid = cloud_hybrid_track();  // the hybrid march's volume grid along the ray
-#endif
 		if (cloud_deterministic_march) {
 			float h0 = cloud_height_along(ray, seg0);
 			float slope = cloud_height_slope(ray, seg0);
@@ -910,20 +830,6 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 			phase_m = seg0 + step0_m * (to_shell > 1.0e-3 ? to_shell : 1.0);
 		}
 		for (int i = 0; i < cloud_max_steps && a < seg1; i++) {
-#if defined(CLOUD_HYBRID_SKIP) && !defined(CLOUD_ABLATE_HYBRID_SKIP)
-			// The hybrid march (cloud_hybrid.gdshaderinc): behind a clear sample the volume's proven-empty ball is
-			// skipped when it is longer than a fine step; inside occupied space the steps below are today's.
-			if (outside && carried_tau <= 0.0 && a >= hybrid.quiet_until_m) {
-				float skip_m = cloud_hybrid_skip(hybrid, eye, dir, a, max(a, start) * cloud_fine_step_fraction);
-				if (skip_m > 0.0) {
-					CLOUD_COUNT_STEP(false)
-					a += skip_m;
-					dense_step_m = 1.0e30;  // clear air: the steps grow back
-					cloud_ahead = false;
-					continue;
-				}
-			}
-#endif
 			float h_a = cloud_height_along(ray, a);
 			float climb = abs(cloud_height_slope(ray, a));
 			float layer_m = h_a < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
@@ -941,11 +847,7 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 				// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is
 				// cut).
 				float remaining = float(max(cloud_max_steps - i, 1));
-#ifdef CLOUD_NEAR_SHELL
-				float reach = max(a, start) * (exp(log(max(steps_seg1, start) / max(a, start)) / remaining) - 1.0);
-#else
 				float reach = max(a, start) * (exp(log(max(seg1, start) / max(a, start)) / remaining) - 1.0);
-#endif
 				// The dense-cloud limit overrides the reach (behind an opaque surface little of the segment is seen).
 				float fine = min(max(max(max(a, start) * cloud_fine_step_fraction, reach), CLOUD_MIN_STEP_M),
 						dense_step_m);
@@ -1158,17 +1060,7 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 			if (!coverage_only && transmittance_sc >= CLOUD_MIN_SCALED_TRANSMITTANCE) {
 				vec3 p = camera + offset;
 				vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
-#ifdef CLOUD_HYBRID_VOLUME_LIGHT
-				// The hybrid's light (cloud_hybrid.gdshaderinc): the volume's baked terms at the light point; the column
-				// terms from the same fetch. Beyond the volume the far tier's light path and the field's columns.
-				vec4 hybrid_tau;
-				float hybrid_moon;
-				bool hybrid_lit = cloud_hybrid_light_terms(hybrid, eye, dir, d, hybrid_tau, hybrid_moon);
-				vec2 column = hybrid_lit ? vec2(hybrid_tau.z, hybrid_tau.z + hybrid_tau.y)
-						: cloud_column_depths(cell, lat_lon, height, in_cloud);
-#else
 				vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
-#endif
 				// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one
 				// ray average its noise instead of sharing one light-march error. The deterministic march: the light
 				// march's midpoints too (the Moon's; the Sun's where no cache holds it).
@@ -1176,13 +1068,8 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 				vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
 				vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
 				if (cloud_debug_output == 2 || cloud_debug_output == 7) {
-#ifdef CLOUD_HYBRID_VOLUME_LIGHT
-					light_source = vec3(cloud_hybrid_light_source(hybrid_lit, hybrid_tau.x, sun_dir, normal, dir, offset,
-							height, d, column, light_jitter, pixel_angle, true));
-#else
 					light_source = vec3(cloud_sample_light_source(far, sun_dir, normal, dir, offset, height, d, column,
 							light_jitter, pixel_angle, true));
-#endif
 				} else {
 					// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
 					// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over
@@ -1206,22 +1093,6 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 					}
 					float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
 					source = sky_irradiance * sky_source;
-#ifdef CLOUD_HYBRID_VOLUME_LIGHT
-					if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-						light_source += sun_irradiance * cloud_hybrid_light_source(hybrid_lit, hybrid_tau.x, sun_dir,
-								normal, dir, offset, height, d, column, light_jitter, pixel_angle, true);
-					}
-					// (the volume's Moon light only where its levels have it: their Moon weight, as the volume's march)
-					float moon_weight = hybrid_lit ? hybrid_moon : 1.0;
-					if (moonlit && moon_weight > 0.0) {
-						light_source += moon_weight * moon_irradiance * cloud_hybrid_light_source(hybrid_lit,
-								hybrid_tau.w, moon_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle,
-								false);
-					}
-					if (moonlit) {
-						source += moon_sky_irradiance * sky_source;
-					}
-#else
 					if (dot(sun_irradiance, sun_irradiance) > 0.0) {
 						light_source += sun_irradiance
 								* cloud_sample_light_source(far, sun_dir, normal, dir, offset, height, d, column,
@@ -1233,7 +1104,6 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 								light_jitter, pixel_angle, false);
 						source += moon_sky_irradiance * sky_source;
 					}
-#endif
 				}
 				if (cloud_scattering_model == 1) {
 					// The lights' source with the table (exact single scattering + the tabulated Draine part of the
@@ -1688,52 +1558,11 @@ void cloud_shade_ray(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 no
 	color_t = cloud_stored_color(color, transmittance);
 }
 
-#ifdef CLOUD_NEAR_SHELL
-// The near shell's shading of a ray (cloud view cache Task 5; the game's image only - the debug outputs march the whole
-// ray without the cache): with an end (cloud_march_end_m > 0) the march up to it, and of the air shadow's loss only
-// (1 - T) x its part in front of the near clouds: the cache beyond holds the loss of its whole ray in front of its own
-// clouds - the near stretch included at weight 1 - and the composite (near + T x cache) weighs it by T, so the near
-// stretch gets front + T x behind, as the full march has it (to the near and the cache's distance weighting). Without
-// an end (the tile has no level yet: the covering march) cloud_shade_ray's whole ray.
-void cloud_shade_near(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 noise_pixel, vec3 eclipse_near,
-		vec3 eclipse_far, out vec4 color_t, out float cloud_m) {
-	if (cloud_march_end_m <= 0.0 || cloud_debug_output != 0) {
-		cloud_shade_ray(dir_earth, origin_offset, scene_m, noise_pixel, eclipse_near, eclipse_far, color_t, cloud_m);
-		return;
-	}
-	vec3 color = vec3(0.0);
-	float alpha = 0.0;
-	float transmittance = 1.0;
-	cloud_m = 0.0;
-	if (cloud_enabled && atmosphere_enabled) {
-		cloud_march(dir_earth, origin_offset, scene_m, cloud_ray_jitter(noise_pixel), eclipse_near, eclipse_far, false,
-				color, alpha, transmittance, cloud_m);
-		vec3 front;
-		vec3 behind;
-#ifdef CLOUD_ABLATE_AIR_SHADOW
-		front = vec3(0.0);  // (ablation: no air shadow loss)
-#else
-		cloud_air_shadow_parts(cloud_ray_from(dir_earth, origin_offset), dir_earth, origin_offset,
-				min(scene_m, cloud_march_end_m), alpha > 1.0e-6 ? cloud_m : 1.0e30, front, behind);
-#endif
-		color -= (1.0 - transmittance) * front;
-	}
-	color_t = cloud_stored_color(color, transmittance);
-}
-
-// The eye ray's end at the near shell (m from the eye; <= 0: the whole ray), cloud_view_cache.gdshaderinc.
-float cloud_near_shell_end(vec3 eye_offset, vec3 dir);
-#endif
 #ifdef CLOUD_BAKED_MARCH
 // The baked volume prototype's ray (cloud_baked.gdshaderinc, compiled after this file).
 void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m);
 #endif
-#ifdef CLOUD_SPIKE_FAR
-// World volume plan Task 2, spike S (throw-away, removed in Task 13): the far tier's ray, cloud_spike.gdshaderinc.
-void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m);
-#endif
 
-#if !defined(CLOUD_CACHE_FILL) && !defined(CLOUD_VOLUME_FULL)
 #ifdef CLOUD_CENTRE
 // The centre view has no depth buffer of its own: its rays take the scene distance from an eye's (VR performance
 // part 2).
@@ -1919,16 +1748,8 @@ void main() {
 	// One ray through the pixel's centre from the eye (the centre view: the head).
 	vec4 color_t;
 	float cloud_m;
-#if defined(CLOUD_SPIKE_FAR)
-	cloud_spike_shade(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, color_t, cloud_m);  // spike S
-#elif defined(CLOUD_BAKED_MARCH)
+#if defined(CLOUD_BAKED_MARCH)
 	cloud_baked_shade(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, color_t, cloud_m);  // baked volume
-#elif defined(CLOUD_NEAR_SHELL)
-	// The near shell (cloud view cache Task 5): up to the shell around the anchor of the cache tile the ray meets there.
-	vec3 dir_near = cloud_ray_earth(centre);
-	cloud_march_end_m = cloud_near_shell_end(cloud_view.eye_earth.xyz, dir_near);
-	cloud_shade_near(dir_near, cloud_view.eye_earth.xyz, scene_m, pixel, cloud_group_eclipse_near,
-			cloud_group_eclipse_far, color_t, cloud_m);
 #else
 	cloud_shade_ray(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, pixel, cloud_group_eclipse_near,
 			cloud_group_eclipse_far, color_t, cloud_m);
@@ -1936,12 +1757,11 @@ void main() {
 #endif
 	imageStore(out_color, pixel, color_t);
 	imageStore(out_depth, pixel, vec4(scene_m, cloud_m, 0.0, 0.0));
-#if defined(CLOUD_COUNTERS) && !defined(CLOUD_EDGE_REFINE) && !defined(CLOUD_CACHE_FILL) && !defined(CLOUD_VOLUME_FULL)
+#if defined(CLOUD_COUNTERS) && !defined(CLOUD_EDGE_REFINE)
 	imageStore(out_counters, pixel,
 			uvec4(cloud_count_density, cloud_count_light, cloud_count_occupied, cloud_count_empty));
 #endif
 }
-#endif
 
 #endif
 

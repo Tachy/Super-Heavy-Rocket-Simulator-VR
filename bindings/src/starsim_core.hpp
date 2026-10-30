@@ -112,7 +112,7 @@ public:
     // reach_m or without an active snapshot (the cloud view cache's near shell, cloud view cache Task 5).
     double weather_cloud_nearest_m(const godot::Vector3& position_itrf_m, double reach_m) const;
     // Checks only (cloud world volume, core cloud_volume_bake.hpp): the CPU reference of the cell bake of ONE snapshot
-    // file - (rho, sigma_c) in 1/m. Positions are Earth-local render axes (polar +Y, CloudWorldVolumeLayout's).
+    // file - (rho, sigma_c) in 1/m. Positions are Earth-local render axes (polar +Y).
     // shape_origins_earth_m: 3 values (the anchor point; its noise origins as CloudLayer computes them) or 12 (anchor,
     // then the cumulus, stratiform and ice origins the GPU got). The snapshot's render field and the noise are loaded
     // once and kept for the next call. Empty / (-1, -1) on an unreadable file or malformed input (error pushed).

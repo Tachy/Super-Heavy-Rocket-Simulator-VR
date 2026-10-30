@@ -121,22 +121,6 @@ global uniform vec3 cloud_transfer_theta_map;
 // clouds' own light (the air in front of them kept, no air shadow); 12 = (cloud distance [m], alpha, 0), opaque.
 global uniform int cloud_debug_output;
 global uniform float cloud_debug_height_m;
-// The world volume's march (cloud_volume_march.gdshaderinc, world-volume plan Task 7), declared here so every kernel of
-// the march's files shares one set 0: the curl field (cloud_noise.hpp, RGB8), the fidelity flags edge_curl (the curl
-// distortion's amplitude in level-0 detail middle cells; 0: without) and light_entry_samples (the surface correction's
-// Sun samples; 0: the volume's light alone).
-global uniform sampler3D cloud_noise_curl : filter_linear, repeat_enable;
-global uniform float cloud_edge_curl;
-global uniform int cloud_light_entry_samples;
-// The sub-cell field's statistics (core cloud_noise.hpp "Sub-cell field", ruling R1): the Gaussianising table G (rows:
-// detail states r / 4, columns: the standardised perturbation over +-CLOUD_SUB_CELL_STANDARD_RANGE), the detail
-// levels' eroded terms' means and variances, the shape residual's variance R(l) at shape levels 0 .. 7.
-global uniform sampler2D cloud_detail_gaussian : filter_linear, repeat_disable;
-global uniform vec3 cloud_detail_level_mean;
-global uniform vec3 cloud_detail_level_variance;
-global uniform vec4 cloud_shape_residual_variance_lo;
-global uniform vec4 cloud_shape_residual_variance_hi;
-
 // [S] WGS84 equatorial radius (core constants.hpp wgs84_a_m); the stretch is ATM_STRETCH (atmosphere.gdshaderinc).
 const float CLOUD_A_M = 6378137.0;
 // (a / b)^2 of WGS84: geodetic latitude from the position.
@@ -222,8 +206,8 @@ vec2 cloud_lat_lon(vec3 p_local) {
 	return vec2(atan(CLOUD_AB2 * p_local.y, s), atan(p_local.x, p_local.z));
 }
 
-// The ray's origin in model space - the camera (cloud_ray), or a point offset from it (cloud_pass.gdshaderinc
-// cloud_ray_from: the cloud view cache's anchor): its height h_c, radius r_c = a + h_c, its up and the model-space ray
+// The ray's origin in model space - the camera (cloud_ray; cloud_pass.gdshaderinc cloud_ray_from): its height h_c,
+// radius r_c = a + h_c, its up and the model-space ray
 // (unit) with the length factor of the stretch (model distance = distance x scale).
 struct CloudRay {
 	vec3 dir_local;   // unit, Earth-local render axes

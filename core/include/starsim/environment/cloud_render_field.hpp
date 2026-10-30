@@ -6,8 +6,8 @@
 // together. The reference of the world volume's cell bake (cloud_volume_bake.hpp), which the GPU bake is checked
 // against.
 //
-// Positions are Earth-local render axes, metres (ITRF (x, y, z) -> (y, z, x), polar axis +Y; the shader's and
-// CloudWorldVolumeLayout's axes). As the shader: the height is the model-space height |M p| - a (the WGS84 ellipsoid
+// Positions are Earth-local render axes, metres (ITRF (x, y, z) -> (y, z, x), polar axis +Y; the shader's and the
+// former world volume's axes). As the shader: the height is the model-space height |M p| - a (the WGS84 ellipsoid
 // stretched to the sphere of radius a along the polar axis), the latitude geodetic from tan(phi) = (a / b)^2 y / s, the
 // longitude atan2(x, z).
 //

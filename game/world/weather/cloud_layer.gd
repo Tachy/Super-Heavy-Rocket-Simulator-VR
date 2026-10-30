@@ -105,48 +105,16 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## texels, so the fade ends before 3.5 km (spec decision 4) - beyond, a point sample of them speckled the limb from
 ## orbit and the far horizon from altitude; it starts at 1.5 km: the desktop's far horizons from 9 and 20 km (~0.9 /
 ## ~1.3 km at its 2.6 mrad march pixels) keep their shapes, VR's (5.4 mrad: ~1.8 / ~2.7 km) lie in the fade.
-## The view cache's GPU budget per frame for its fill (cloud view cache Task 4, ms): "cache_budget_ms" [E] - the
-## desktop's fixed 9.0 (no frame target; one full-level deck tile alone takes up to 8.4 ms and a fill's time is set by
-## its slowest ray, so 6.0 was below the single-tile floor; a fill then stays <= 10 ms, one tile over the budget); VR's
-## cap 11.4 = the 45 Hz frame (22.2 ms with weather) - the scene without the cloud pass at its worst (8.8 ms,
-## docs/subsystems/vr-performance.md) - CACHE_MARGIN_MS. VR's budget is adaptive (user-approved ruling 2026-10-27):
-## "frame_target_ms" - the measured GPU time of the rest of the frame (its CACHE_REST_PERCENTILE over CACHE_REST_FRAMES
-## frames) - the margin, between "cache_budget_floor_ms" [E] (the cache keeps converging on a heavy scene) and the cap.
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 512, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0, "handover_m": Vector2(20000.0, 34000.0),
-			"far_fade_m": Vector2(1500.0, 3000.0), "cache_budget_ms": 9.0, "cache_budget_floor_ms": 9.0,
-			"frame_target_ms": 0.0},
+			"far_fade_m": Vector2(1500.0, 3000.0)},
 	Quality.VR: {"steps": 96, "max_steps": 384, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
 			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5, "handover_m": Vector2(20000.0, 34000.0),
-			"far_fade_m": Vector2(1500.0, 3000.0), "cache_budget_ms": 11.4, "cache_budget_floor_ms": 2.0,
-			"frame_target_ms": 22.2},
+			"far_fade_m": Vector2(1500.0, 3000.0)},
 }
-## [E] The adaptive budget's margin below the frame target (ms; the ruling's 2 ms), the percentile of the rest of the
-## frame's GPU time it keeps clear of, and over how many frames. The rest of a frame: its GPU time (the span of its
-## captured timestamps) minus its own fill and its march with the cache shown (CloudEffect, the same frame's
-## timestamps). That march (the near shell: Task 5 fix round 1) is added where it is predicted for the frame - the
-## largest of its last CACHE_MARCH_FRAMES [E] measurements in frames that did not cover the view (1 s at 45 Hz: the
-## near shell's cost follows the deck's distance within a second); never measured: the floor. The whole rays of a
-## covering frame are not predicted: covering ends only by the fill (Task 4 ruling: slow frames while a level 0 fills;
-## measured, fix round 1: counting them held the budget at its floor and the view covered for the rest of the
-## flight).
-const CACHE_MARGIN_MS := 2.0
-const CACHE_REST_PERCENTILE := 0.95
-const CACHE_REST_FRAMES := 90
-const CACHE_MARCH_FRAMES := 45
-## [E] The near shell's radius R_near (cloud view cache Task 5, spec decision "near shell"): closer than this the frame's
-## march at the preset's divisor covers the clouds (when a cloud is that near), the view cache holds what lies beyond.
-## From the parallax error: the cache's lookup lands a deck at R_near within 1.2e-6 eye px from the re-anchor's
-## 100 m (5 % of it), 3.8e-4 px from an older tile anchor 200 m off and 0.011 px from 300 m (cloud_vr_stereo_test); a
-## deck at 300 m seen 50 m off the anchor kept 0.6 px after three iterations (Task 4) - nearer clouds stay the
-## per-frame march's.
-const NEAR_RADIUS_M := 2000.0
-## [E] Added to the reach of the near shell's test (m): the field's nearest cloud is asked once per frame on the main
-## thread; 100 m covers a few frames of flight at the deck passage's ~300 m/s.
-const NEAR_SHELL_MARGIN_M := 100.0
 
 var quality: Quality = Quality.DESKTOP:
 	set(value):
@@ -163,7 +131,7 @@ var field_texture_bytes := 0  ## both resident snapshots (field + ice share texe
 var pinned := false  ## show_now was used: set_target is ignored
 ## The scaled-space Earth draws the clouds (weather shown, the camera beyond RAYMARCH_MAX_DISTANCE_M; Task 10).
 var far_enabled := false
-## Diagnostics (cloud view cache plan Task 1): false skips the near cloud pass (the scene's GPU time without it);
+## Diagnostics: false skips the near cloud pass (the scene's GPU time without it);
 ## user argument `--no_cloud_pass` (World), render_check passes it through.
 var pass_enabled := true
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
@@ -202,59 +170,13 @@ var air_shadow := true:
 	set(value):
 		air_shadow = value
 		ShaderGlobals.set_value(&"cloud_air_shadow", value)
-## Fidelity flag (shader global cloud_view_cache; cloud view cache Task 4): true shows the world-fixed view cache
-## (filled under a GPU budget, looked up per eye with parallax: view_cache_planner, CloudEffect); false: the per-frame
-## march at the preset's divisor (the reference; render_check --no_view_cache).
-var view_cache := true:
-	set(value):
-		view_cache = value
-		ShaderGlobals.set_value(&"cloud_view_cache", value)
-## Fidelity flag (shader global cloud_world_volume; world-volume plan, default false until Task 13): true keeps the
-## cloud world volume (CloudWorldVolume: the clipmap of baked density, its occupancy and light) planned here every
-## frame and baked by the effect before the march, which then marches it (Task 7: CLOUD_VOLUME_FULL, one ray per eye
-## pixel); false: today's per-sample march alone, the reference path. Default: the environment STARSIM_WORLD_VOLUME=1 or the user argument
-## --world_volume (every GPU check takes the environment).
-var world_volume := OS.get_environment("STARSIM_WORLD_VOLUME") == "1" \
-		or OS.get_cmdline_user_args().has("--world_volume"):
-	set(value):
-		world_volume = value
-		ShaderGlobals.set_value(&"cloud_world_volume", value)
-		_apply_march_method()
-## Fidelity flag (shader global cloud_light_entry_samples; world-volume plan Task 7, spec C): the surface correction's
-## Sun samples - at a light node of the march (half a cell apart along the ray) whose level's cell is coarser than the
-## pixel footprint, the Sun's optical depth through the per-sample density (bake + sub-cell field) over the level's
-## first two cells, then the light volume's; 0: the light volume alone (cloud_volume_march.gdshaderinc).
-var light_entry_samples := 4:
-	set(value):
-		light_entry_samples = value
-		ShaderGlobals.set_value(&"cloud_light_entry_samples", value)
-## Fidelity flag (shader global cloud_edge_curl; Task 7, spec D, Nubis): the curl distortion of the sub-cell detail
-## lookup [E: amplitude 1 x the detail cell size - the level-0 detail's middle cell, band-limited by its weight];
-## 0: without. The default is the user's call from the side-by-side images.
-var edge_curl := 1.0:
-	set(value):
-		edge_curl = value
-		ShaderGlobals.set_value(&"cloud_edge_curl", value)
-## The hybrid march prototype (2026-10-29; the user tests it live in VR): the march method (CloudEffect.MarchMethod -
-## today's march, the hybrid with the volume's light and skipping, the same without skipping, the hybrid with today's
-## light, the baked volume prototype CloudBaked; key F7 cycles the old march -> the old march with the equiangular
-## centre image -> the baked volume prototype (from a hybrid: back to the old march), user argument
-## --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light|baked) and the march's resolution divisor (0: the preset's; key F8 cycles
-## DIVISORS, user argument --cloud_divisor=<x>; spatial only). Choosing a method switches the view cache off (the
-## user's goal: no view cache); the world volume's upkeep runs from the first hybrid frame on (volume_needed: the
-## settled upkeep is ~0.003 ms, and a restart would refill the whole volume).
+## The march method (CloudEffect.MarchMethod: the baked volume CloudBaked, the default; the old per-sample march, the
+## reference; key F7 cycles the baked volume -> the old march -> the old march with the equiangular centre image ->
+## back, user argument --cloud_method=old|baked) and the march's resolution divisor (0: the preset's; key F8 cycles
+## DIVISORS, user argument --cloud_divisor=<x>; spatial only).
 const DIVISORS: Array[float] = [1.0, 1.5, 2.0, 3.0, 4.0]
-const METHOD_ARGUMENTS := {"old": CloudEffect.MarchMethod.OLD, "hybrid": CloudEffect.MarchMethod.HYBRID,
-	"hybrid_no_skip": CloudEffect.MarchMethod.HYBRID_NO_SKIP,
-	"hybrid_old_light": CloudEffect.MarchMethod.HYBRID_OLD_LIGHT, "baked": CloudEffect.MarchMethod.BAKED}
-const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March",
-	CloudEffect.MarchMethod.HYBRID: "Hybrid, Volumenlicht + Überspringen",
-	CloudEffect.MarchMethod.HYBRID_NO_SKIP: "Hybrid, Volumenlicht",
-	CloudEffect.MarchMethod.HYBRID_OLD_LIGHT: "Hybrid, altes Licht + Überspringen",
-	CloudEffect.MarchMethod.BAKED: "Volumen"}
-## The world volume's bake budget factor while a hybrid method waits for its first shown level (see _update_world_volume).
-const HYBRID_FILL_SCALE := 4.0
-var _fill_boosted := false
+const METHOD_ARGUMENTS := {"old": CloudEffect.MarchMethod.OLD, "baked": CloudEffect.MarchMethod.BAKED}
+const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March", CloudEffect.MarchMethod.BAKED: "Volumen"}
 const METHOD_KEY := KEY_F7
 const DIVISOR_KEY := KEY_F8
 ## Test switch (user 2026-10-29): the march ends at this distance (m; 0 = no cut, shader global cloud_march_cut_m);
@@ -268,23 +190,11 @@ var march_cut_m := 0.0:
 var march_method := CloudEffect.MarchMethod.BAKED:
 	set(value):
 		march_method = value
-		view_cache = false
-		_volume_used = _volume_used or (value != CloudEffect.MarchMethod.OLD and value != CloudEffect.MarchMethod.BAKED)
-		_apply_march_method()
+		effect.set_march_method(value)
 var divisor_override := 0.0:
 	set(value):
 		divisor_override = value
 		_apply_quality()
-var _volume_used := false
-## The world volume's layout and schedule (main thread; the GPU side is effect.world_volume).
-var world_volume_layout := CloudWorldVolumeLayout.new()
-var world_volume_schedule := CloudWorldVolumeSchedule.new(world_volume_layout)
-## The view cache's plan (layout, anchor, schedule, shown states; main thread).
-var view_cache_planner := CloudViewCachePlanner.new()
-var view_cache_fill_ms := 0.0  ## the last measured fill interval (GPU, ms; diagnostics)
-## The field's nearest cloud to the camera this frame (m, a lower bound; INF: none within the near shell's reach) -
-## the effect runs the near shell when it is within R_near of an anchor a shown tile has (cloud view cache Task 5).
-var nearest_cloud_m := INF
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -316,28 +226,11 @@ var _cache_key := []
 var _cache_slot_ids := ["", ""]
 var _clock_jumped := false  ## notify_clock_jump since the last plan
 var _cache_usec := -1  ## wall clock of the last plan (the cross-fade runs in real time)
-## The view cache's budget control: the light state's generation (a light cache reset), the frame time held while a
-## batch waited, the rest of the frame's GPU times.
-var _view_cache_generation := 0
-var _view_cache_light_settled := false  ## the light cache was complete once since its last reset / clock jump
-var _view_cache_held_s := 0.0
-var _view_cache_rest_ms: Array[float] = []
-var _view_cache_march_ms: Array[float] = []  ## the near shell's GPU ms of the last frames that ran it, not covering
-var _view_cache_marched := false  ## the newest measured frame ran the near shell without covering
-## The world volume: restart at the next plan (a jump or a pinned pair), the time held while a batch waited, the last
-## plan's work and the last measured upkeep.
-var _volume_reset := false
-var _volume_held_s := 0.0
-var _volume_stats := {"bake_cells": 0, "light_cells": 0, "light_moon_cells": 0, "provisional_cells": 0, "upkeep_ms": 0.0,
-	"light_ms": 0.0, "measured_ms": 0.0, "measured_bake_ms": 0.0, "measured_taps": 0, "measured_light_ms": 0.0,
-	"measured_light_cells": 0, "measured_frames": 0, "light_levels": {}, "measured_levels": {},
-	"last_feedback": {}}
 
 
 func _init() -> void:
 	name = "CloudLayer"
 	effect.light_cache = light_cache
-	effect.world_volume = CloudWorldVolume.new()
 	shadow_effect.cloud_effect = effect  # the baked volume fills the shadow maps while it draws
 
 
@@ -381,10 +274,6 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_deterministic_march", deterministic_march)
 	ShaderGlobals.set_value(&"cloud_far_3d_light", far_3d_light)
 	ShaderGlobals.set_value(&"cloud_air_shadow", air_shadow)
-	ShaderGlobals.set_value(&"cloud_view_cache", view_cache)
-	ShaderGlobals.set_value(&"cloud_world_volume", world_volume)
-	ShaderGlobals.set_value(&"cloud_light_entry_samples", light_entry_samples)
-	ShaderGlobals.set_value(&"cloud_edge_curl", edge_curl)
 	_apply_cloud_arguments(OS.get_cmdline_user_args())
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
@@ -413,7 +302,6 @@ func shutdown() -> void:
 	if _noise_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_noise_task)
 		_noise_task = -1
-	view_cache_planner.wait()  # its running plan
 	_cancel_upload()
 	# The resident volumes (a Texture3DRD does not own its RID): unbound first, then freed.
 	var olds: Array = [_slots[0], _slots[1]]
@@ -468,8 +356,6 @@ func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
 	_bind_slots()
 	ShaderGlobals.set_value(&"cloud_blend", _w1)
 	effect.reset_history()
-	view_cache_planner.request_reset()  # the pinned pair at once: no tile of the old one
-	_volume_reset = true  # the world volume too: baked anew from the pinned pair
 	_push_light()
 
 
@@ -509,38 +395,11 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	far_enabled = visible_weight > 0.0 and not near
 	_update_shadow_frame(camera_render, height)
 	_update_light_cache(camera_render, height)
-	_update_world_volume(camera_render, delta_s)
 	# The maps count as valid only while the effect keeps running (its render callback stamps ran_frame; the render
 	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped
 	# effect (compositor detached, device lost) turns the shadows back to the column a few frames later.
 	var shadow_ran := Engine.get_frames_drawn() - shadow_effect.ran_frame <= SHADOW_RUN_WINDOW_FRAMES
 	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
-	FrameProfiler.begin(&"cloud_view_cache")
-	nearest_cloud_m = _nearest_cloud_m(camera_fixed_m)
-	effect.set_nearest_cloud(nearest_cloud_m, NEAR_RADIUS_M)
-	_update_view_cache(camera_render, enabled, delta_s)
-	FrameProfiler.end(&"cloud_view_cache")
-
-
-## The near shell's radius R_near (m; cloud view cache Task 5): the view cache holds the clouds beyond it.
-static func near_radius_m() -> float:
-	return NEAR_RADIUS_M
-
-
-## The field's nearest cloud (StarsimCore.weather_cloud_nearest_m: a lower bound, m; INF: none) within the near shell's
-## largest reach - R_near from an anchor a shown tile may still have (CloudViewCacheSchedule.keep_distance_m: at most
-## ANCHOR_KEEP_FRACTION of R_near from the camera) plus NEAR_SHELL_MARGIN_M. 0 (the near shell on) while the core's
-## active pair is not the slots' (a push pending): never a cloud missed.
-func _nearest_cloud_m(camera_fixed_m: Vector3) -> float:
-	if _core == null:
-		return 0.0
-	var files := [String(_slots[0].get("file", "")), String(_slots[1].get("file", ""))]
-	if not bool(_pushed_light["ok"]) or files != _pushed_light["files"]:
-		return 0.0
-	if files[0] == "" and files[1] == "":
-		return INF
-	return _core.weather_cloud_nearest_m(camera_fixed_m,
-			NEAR_RADIUS_M + CloudViewCacheSchedule.keep_distance_m(INF) + NEAR_SHELL_MARGIN_M)
 
 
 ## The ids of the resident slots and the weight of slot 1 (tests).
@@ -619,8 +478,6 @@ func _update_light_cache(camera_render: Vector3, height: float) -> void:
 	if reset:
 		_cache_key = key
 		light_cache.reset()
-		_view_cache_generation += 1  # the view cache's tiles refresh (cross-faded) in the new light
-		_view_cache_light_settled = false
 	var now := Time.get_ticks_usec()
 	var delta_s := 0.0 if _cache_usec < 0 else (now - _cache_usec) * 1.0e-6
 	_cache_usec = now
@@ -631,172 +488,6 @@ func _update_light_cache(camera_render: Vector3, height: float) -> void:
 ## The clock jumped (SimClock.time_jumped): the light cache re-anchors and refills (the Sun and the field moved).
 func notify_clock_jump() -> void:
 	_clock_jumped = true
-	view_cache_planner.request_reset()  # the view cache restarts coarse (never a tile of the old instant)
-	_view_cache_light_settled = false
-	_volume_reset = true
-
-
-## The view jumped (World._view_jumped: a ground site, a focus, a Tab target): the view cache restarts coarse at the new
-## camera (never a tile of the old place), the world volume restarts at it (coarsest level first).
-func notify_view_jump() -> void:
-	view_cache_planner.request_reset()
-	_volume_reset = true
-
-
-## The world volume's frame (world-volume plan Task 5): the measured upkeeps calibrate the schedule; with the flag on
-## and the last batch taken by the render thread the schedule plans the next (camera, Sun, Moon, blend, the slots'
-## snapshot ids: a replaced snapshot is rebaked into its slot's channel pair) and hands it to effect.world_volume. A
-## restart (jump, pinned pair) drops the adopted state first.
-func _update_world_volume(camera_render: Vector3, delta_s: float) -> void:
-	var volume := effect.world_volume
-	for f: Dictionary in volume.take_feedback():  # measured upkeeps (CloudWorldVolume.take_feedback)
-		world_volume_schedule.feedback_split(f)
-		_volume_stats["upkeep_ms"] = f["bake_ms"] + f["light_ms"]
-		_volume_stats["light_ms"] = f["light_ms"]
-		_volume_stats["measured_ms"] += f["bake_ms"] + f["light_ms"]
-		_volume_stats["measured_bake_ms"] += f["bake_ms"]
-		_volume_stats["measured_taps"] += int(f["bake_taps"])
-		_volume_stats["measured_light_ms"] += f["light_ms"]
-		_volume_stats["measured_light_cells"] += int(f["light_cells"])
-		_volume_stats["measured_frames"] += 1
-		_volume_stats["light_levels"] = f["levels"]
-		_volume_stats["last_feedback"] = f
-		var sums: Dictionary = _volume_stats["measured_levels"]  # per level [cells, ms, column cells, column ms]
-		for k: int in f["levels"]:
-			var e: Dictionary = f["levels"][k]
-			var acc: Array = sums.get(k, [0, 0.0, 0, 0.0])
-			sums[k] = [acc[0] + int(e["cells"]), acc[1] + float(e["cells_ms"]), acc[2] + int(e["column_cells"]),
-					acc[3] + float(e["column_ms"])]
-	for c: Array in volume.take_light_feedback():  # rate-limited light jobs that clamped cells (Task 6)
-		world_volume_schedule.light_feedback(c[0], c[1], {"from": c[2], "to": c[3]})
-	if not volume_needed():
-		return
-	_volume_held_s += maxf(delta_s, 0.0)
-	if volume.waiting():
-		return
-	if _volume_reset:
-		_volume_reset = false
-		world_volume_schedule.reset()
-		volume.forget()
-	var sun_value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
-	var moon_value: Variant = ShaderGlobals.value(&"atmosphere_moon_direction")
-	var sun: Vector3 = (sun_value as Vector3).normalized() if sun_value is Vector3 else Vector3.ZERO
-	var moon: Vector3 = (moon_value as Vector3).normalized() if moon_value is Vector3 else Vector3.ZERO
-	var top := 0.0
-	for slot: Dictionary in _slots:
-		top = maxf(top, float(slot.get("top_m", 0.0)))
-	# A hybrid method chosen live starts the volume cold in flight: until it shows a level it bakes at the cold-start
-	# transition budget (HYBRID_FILL_SCALE x; T5 ruling: ~6 ms), not the 1.5 ms upkeep (minutes in VR at low fps).
-	var filling := march_method != CloudEffect.MarchMethod.OLD and march_method != CloudEffect.MarchMethod.BAKED 			and not effect.hybrid_shown
-	if filling:
-		world_volume_schedule.budget_scale = HYBRID_FILL_SCALE
-		_fill_boosted = true
-	elif _fill_boosted:
-		world_volume_schedule.budget_scale = 1.0
-		_fill_boosted = false
-	var batch := world_volume_schedule.plan(camera_render, sun, moon, _w1, top if top > 0.0 else CloudEffect.CLOUD_TOP_M, false,
-			_volume_held_s, [_slots[0]["id"], _slots[1]["id"]])
-	_volume_held_s = 0.0
-	_volume_stats["bake_cells"] = batch["bake_cells"]
-	_volume_stats["light_cells"] = batch["light_cells"]
-	_volume_stats["light_moon_cells"] = batch["light_moon_cells"]
-	_volume_stats["provisional_cells"] = batch["provisional_cells"]
-	volume.submit(batch)
-
-
-## The world volume's last plan (cells to bake, to light, of them with the Moon, provisional), the last measured upkeep
-## (GPU ms: bake + light, the light's alone; light_levels: per level its cells, column cells and their GPU ms) and the
-## sums of the measured upkeeps (ms in all, the bake's ms and taps, the light's ms and cells, frames; measured_levels:
-## per level [cells, light kernel ms, column cells, column pass ms]).
-func world_volume_stats() -> Dictionary:
-	return _volume_stats.duplicate(true)
-
-
-## With the world volume running, the weight moves onto a slot only once the volume's adopted state holds the slot's
-## snapshot in its channel pair (a replaced snapshot is baked while it has no weight; Review Focus 1); else at once.
-func _volume_gate(w1: float) -> float:
-	if not volume_needed() or not effect.world_volume.running():
-		return w1
-	var onto := 1 if w1 > _w1 else 0
-	if is_equal_approx(w1, _w1) or effect.world_volume.slot_holds(onto, _slots[onto]["id"]):
-		return w1
-	return _w1
-
-
-## The view cache's frame (cloud view cache Task 4): the render thread's feedback (fill times, read-back distances)
-## handed to the planner, then - with the cache shown (the flag, the pass on, no debug output) and the last batch run -
-## the planner's last finished batch handed to the effect and its next run started with this frame's budget.
-func _update_view_cache(camera_render: Vector3, enabled: bool, delta_s: float) -> void:
-	var feedback := effect.take_view_cache_feedback()
-	for r: Dictionary in feedback["readbacks"]:
-		view_cache_planner.apply_distances(r["epoch"], r["tiles"], r["bits"])
-	for fill: Vector2 in feedback["fills"]:  # (fill id, GPU ms)
-		view_cache_planner.apply_fill_time(int(fill.x), fill.y)
-		view_cache_fill_ms = fill.y
-	if float(PRESETS[quality]["frame_target_ms"]) > 0.0:
-		_view_cache_rest_ms.append_array(feedback["rests"])
-		if _view_cache_rest_ms.size() > CACHE_REST_FRAMES:
-			_view_cache_rest_ms = _view_cache_rest_ms.slice(_view_cache_rest_ms.size() - CACHE_REST_FRAMES)
-		for march: Vector2 in feedback["marches"]:
-			_view_cache_marched = march.x >= 0.0 and march.y == 0.0
-			if _view_cache_marched:
-				_view_cache_march_ms.append(march.x)
-		if _view_cache_march_ms.size() > CACHE_MARCH_FRAMES:
-			_view_cache_march_ms = _view_cache_march_ms.slice(_view_cache_march_ms.size() - CACHE_MARCH_FRAMES)
-	_view_cache_held_s += maxf(delta_s, 0.0)
-	if not (view_cache and enabled and int(ShaderGlobals.value(&"cloud_debug_output")) == 0):
-		return
-	var value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
-	if effect.view_cache_batch_waiting() or not value is Vector3 or (value as Vector3).length_squared() < 0.5:
-		return
-	# Tiles filled while the light cache was still filling (after a start, a reset, a clock jump: the march's fallback
-	# or a partial cascade) refresh once when it is complete (their light differed from the converged one by up to
-	# whole tiles of 10-30 % in the ground view's A / B).
-	if not _view_cache_light_settled and light_cache.settled():
-		_view_cache_light_settled = true
-		_view_cache_generation += 1
-	var light := {"sun_dir": (value as Vector3).normalized(), "weather_weight": _w1,
-		"light_generation": _view_cache_generation}
-	var batch := view_cache_planner.plan(camera_render, effect.view_cache_view(), light, cache_budget_ms(),
-			_view_cache_held_s, nearest_cloud_m)
-	_view_cache_held_s = 0.0
-	if not batch.is_empty():
-		effect.submit_view_cache_batch(batch)
-
-
-## The view cache's fill budget of this frame (ms; PRESETS cache_budget_ms): fixed on the desktop; in VR the frame
-## target minus the rest of the frame's measured GPU time (CACHE_REST_PERCENTILE), minus the march that runs with the
-## cache shown where it is predicted (cache_march_ms), minus CACHE_MARGIN_MS, between the preset's floor and cap (the
-## cap until enough frames are measured).
-func cache_budget_ms() -> float:
-	var preset: Dictionary = PRESETS[quality]
-	var cap := float(preset["cache_budget_ms"])
-	var target := float(preset["frame_target_ms"])
-	if target <= 0.0 or _view_cache_rest_ms.size() < CACHE_REST_FRAMES:
-		return cap
-	var sorted := _view_cache_rest_ms.duplicate()
-	sorted.sort()
-	var rest: float = sorted[mini(int(CACHE_REST_PERCENTILE * sorted.size()), sorted.size() - 1)]
-	return clampf(target - rest - cache_march_ms() - CACHE_MARGIN_MS, float(preset["cache_budget_floor_ms"]), cap)
-
-
-## The GPU ms predicted for the near shell in the coming frames (0: none predicted): it runs while the last measured
-## frame ran it or a cloud is within its reach (R_near + the farthest shown anchor's offset + NEAR_SHELL_MARGIN_M: the
-## effect's test) - then the largest of its last CACHE_MARCH_FRAMES measurements without covering (INF before any:
-## the budget's floor).
-func cache_march_ms() -> float:
-	if not (_view_cache_marched or nearest_cloud_m < NEAR_RADIUS_M + effect.last_farthest_m + NEAR_SHELL_MARGIN_M):
-		return 0.0
-	if _view_cache_march_ms.is_empty():
-		return INF
-	return _view_cache_march_ms.max()
-
-
-## Diagnostics (PerfLog): the tiles the last plan filled, the fraction of the cube at the full level, the last measured
-## fill interval (ms).
-func view_cache_stats() -> Dictionary:
-	return {"tiles_filled": view_cache_planner.last_tiles, "full_fraction": view_cache_planner.full_fraction(),
-		"fill_ms": view_cache_fill_ms}
 
 
 static func _horizontal(v: Vector3, up: Vector3) -> float:
@@ -821,9 +512,9 @@ func _advance(delta_s: float) -> void:
 		# carries weight).
 		_cancel_upload()
 		if _tracking:
-			_w1 = _volume_gate(goal)
+			_w1 = goal
 		else:
-			_w1 = _volume_gate(move_toward(_w1, goal, step))
+			_w1 = move_toward(_w1, goal, step)
 			_tracking = is_equal_approx(_w1, goal)
 		_release_unused()
 		return
@@ -837,7 +528,7 @@ func _advance(delta_s: float) -> void:
 		keep = 1 - keep  # fade toward the slot that holds a wanted snapshot
 	var full := float(keep)
 	if not is_equal_approx(_w1, full):
-		_w1 = _volume_gate(move_toward(_w1, full, step))
+		_w1 = move_toward(_w1, full, step)
 		return
 	_w1 = full
 	var kept_id: String = _slots[keep]["id"]
@@ -1033,19 +724,6 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_noise_shape_mips", _noise_textures[5])
 	ShaderGlobals.set_value(&"cloud_prefilter_threshold", _noise_textures[6])
 	ShaderGlobals.set_value(&"cloud_prefilter_edge_mean", _noise_textures[7])
-	# The world volume's curl field (Task 7, cloud_noise.hpp): RGB8, the edge_curl distortion of the sub-cell detail.
-	_noise_textures.append(_noise_texture(noise["curl"], int(noise["curl_size"]), Image.FORMAT_RGB8))
-	ShaderGlobals.set_value(&"cloud_noise_curl", _noise_textures[8])
-	# The sub-cell field's statistics (Task 7 ruling R1, cloud_noise.hpp): the Gaussianising table and the moments.
-	_noise_textures.append(_table(noise["detail_gaussian"], int(noise["sub_cell_rows"])))
-	ShaderGlobals.set_value(&"cloud_detail_gaussian", _noise_textures[9])
-	ShaderGlobals.set_value(&"cloud_detail_level_mean", noise["detail_level_mean"])
-	ShaderGlobals.set_value(&"cloud_detail_level_variance", noise["detail_level_variance"])
-	var residual: PackedFloat32Array = noise["shape_residual_variance"]
-	ShaderGlobals.set_value(&"cloud_shape_residual_variance_lo", Vector4(residual[0], residual[1], residual[2],
-			residual[3]))
-	ShaderGlobals.set_value(&"cloud_shape_residual_variance_hi", Vector4(residual[4], residual[5], residual[6],
-			residual[7]))
 	ShaderGlobals.set_value(&"cloud_edge_width", Vector2(noise["edge_width_min_value"], noise["edge_width_max_value"]))
 	ShaderGlobals.set_value(&"cloud_detail_mean", float(noise["detail_mean"]))
 	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
@@ -1155,16 +833,7 @@ func divisor() -> float:
 	return divisor_override if divisor_override > 0.0 else float(PRESETS[quality]["divisor"])
 
 
-## True while the world volume's upkeep runs: the T7 flag, or a hybrid method chosen once (see march_method).
-func volume_needed() -> bool:
-	return world_volume or _volume_used
-
-
-func _apply_march_method() -> void:
-	effect.set_march_method(march_method, volume_needed())
-
-
-## --cloud_method=old|hybrid|hybrid_old_light|baked and --cloud_divisor=<x> (the live toggles' start values). Every
+## --cloud_method=old|baked and --cloud_divisor=<x> (the live toggles' start values). Every
 ## start - Start-VR.cmd, Start-Desktop.cmd, the checks - draws the baked volume (user 2026-10-30) with the equiangular
 ## centre image (its target setting) unless --cloud_method says otherwise.
 func _apply_cloud_arguments(args: PackedStringArray) -> void:
@@ -1190,7 +859,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == METHOD_KEY:
 		# User 2026-10-29 / 10-30: F7 compares only what is relevant - the baked volume (the default; equiangular: its
 		# target setting), the old march with the rectilinear centre image, with the equiangular one
-		# (CloudCentreView.equiangular), and back. The hybrids stay reachable through --cloud_method.
+		# (CloudCentreView.equiangular), and back.
 		if march_method == CloudEffect.MarchMethod.OLD and not CloudCentreView.equiangular:
 			CloudCentreView.equiangular = true
 		elif march_method == CloudEffect.MarchMethod.OLD:
@@ -1215,16 +884,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-## The HUD's line of the live toggles (German UI): the method (and whether the hybrid draws yet), the divisor, the keys.
+## The HUD's line of the live toggles (German UI): the method (and whether the volume draws yet), the divisor, the keys.
 func status_line() -> String:
 	var method := _method_label()
 	if march_method == CloudEffect.MarchMethod.BAKED and not effect.baked_shown:
 		method += " (Volumen wird gebacken)"
-	elif march_method != CloudEffect.MarchMethod.OLD and march_method != CloudEffect.MarchMethod.BAKED 			and not effect.hybrid_shown:
-		method += " (Volumen lädt)"
-	var view := "" if march_method != CloudEffect.MarchMethod.OLD or not view_cache else ", Sichtcache"
 	var cut := ", nur bis %d km" % roundi(march_cut_m / 1000.0) if march_cut_m > 0.0 else ""
-	return "Wolken: %s%s, Auflösung 1/%s%s  [F7 Verfahren, F8 Auflösung, F9 Schnitt]" % [method, view,
+	return "Wolken: %s, Auflösung 1/%s%s  [F7 Verfahren, F8 Auflösung, F9 Schnitt]" % [method,
 			String.num(divisor(), 1).trim_suffix(".0"), cut]
 
 

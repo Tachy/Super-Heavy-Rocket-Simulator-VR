@@ -1,7 +1,8 @@
 #pragma once
 
 // The cloud world volume's per-cell density bake, CPU reference (world-volume plan Task 4; spec section A "Baked
-// density"): the GPU bake (game/shaders/cloud_volume_bake.gdshaderinc) is checked against it - change both together.
+// density"). The GPU world volume was removed (2026-10-30, docs/history/weather-clouds.md); the reference stays for the
+// checks (StarsimCore.weather_cloud_cell_bake, smoke_test).
 //
 // A cell is the parallelepiped centre + u e_x + v e_y + w e_z, u, v, w in [-1/2, 1/2] (e_x, e_y the horizontal edges,
 // e_z the vertical one, Earth-local render axes as cloud_render_field.hpp). Its bake averages the point model

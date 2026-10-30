@@ -28,7 +28,7 @@ using Catch::Approx;
 
 namespace {
 
-// The world volume's levels (CloudWorldVolumeLayout CELL_H_M / CELL_V_M, SHELL_BOTTOM_M).
+// The former world volume's levels (its layout's CELL_H_M / CELL_V_M, SHELL_BOTTOM_M; removed 2026-10-30).
 constexpr int levels = 8;
 constexpr std::array<double, levels> cell_h_m = {50.0, 100.0, 200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0};
 constexpr std::array<double, levels> cell_v_m = {25.0, 50.0, 164.0625, 164.0625, 164.0625, 164.0625, 164.0625,

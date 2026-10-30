@@ -4,18 +4,9 @@
 # - the weight of slot 1 moves by at most dt / FADE_S (no jump of the visible mix);
 # - a slot's content changes only while that slot has no weight;
 # - the pair ends in its real blend and then tracks the service's blend; weather off fades out the same way.
-# The view cache's frame loop (cloud view cache Task 4): a view jump and a clock jump restart the cache; a Sun step of
-# 1 deg starts cross-fades, none completing in the frame it starts; the march covers the view (the batches' covering
-# flag) from a restart and a layout re-creation on until the view has level 0 and its first fills have faded in.
-# The world volume (world-volume plan Task 5; this test runs its batches in place of the render thread): through pair
-# switches the weight never jumps, a slot's snapshot changes only without weight, and a slot with weight always has
-# its snapshot baked in the volume's channel pair of that slot (CloudWorldVolume.channel_of_slot).
 extends SceneTree
 
 const DT := 1.0 / 60.0
-## The view cache case: a small cube (8 x 8 tiles of 64 per face) and the frames it may take to converge the view.
-const VIEW_CACHE_FACE := 512
-const VIEW_CACHE_MAX_FRAMES := 600
 
 var _failures := 0
 var _layer: CloudLayer
@@ -73,8 +64,6 @@ func _run() -> void:
 			and _layer._empty_base.get_format() == Image.FORMAT_RGF,
 			"an empty slot binds the zero RGF base texture (no cloud base)")
 
-	_test_view_cache(camera)
-	_test_world_volume(camera)
 	_layer.shutdown()
 	print("CLOUD LAYER TEST %s" % ("PASSED" if _failures == 0 else "FAILED (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
@@ -128,143 +117,6 @@ func _test_light_follows_fade(core: StarsimCore, camera: Vector3) -> void:
 	core.weather_set_active("", "", 0.0)
 	DirAccess.remove_absolute(slab_file)
 	DirAccess.remove_absolute(clear_file)
-
-
-## The view cache's frame loop (cloud view cache Task 4; headless: this test takes the batches in place of the render
-## thread and hands the layer a view): the view's tiles reach the full level; a view jump and a clock jump restart the
-## cache (every tile back to nothing or the first level, the restart counted); a Sun step of 1 deg starts cross-fades
-## (refreshes at the same level fade from their slot) and none completes in the frame it starts.
-func _test_view_cache(camera: Vector3) -> void:
-	var snapshot := _fake("view_cache")
-	_layer.view_cache = true  # the baked volume (the default since 2026-10-30) switched it off
-	_layer.set_target(snapshot, snapshot)
-	_drive(camera, 0.0, 4.0)
-	var sun := Vector3(0.3, 0.8, 0.5).normalized()
-	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun)
-	var forward := Vector3(0.0, 0.0, -1.0)
-	var dirs: Array[Vector3] = []
-	for ix in range(-2, 3):
-		for iy in range(-2, 3):
-			dirs.append(Vector3(0.15 * ix, 0.15 * iy, -1.0).normalized())
-	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE})
-	var planner := _layer.view_cache_planner
-	var converged := _converge_view(camera, forward)
-	_check(converged, "view cache: the view's tile reaches the full level (%d frames)" % _frames_run)
-	var settle := 0
-	while planner.last_covering and settle < VIEW_CACHE_MAX_FRAMES:
-		_frame(camera)
-		settle += 1
-	_check(not planner.last_covering, "view cache: the view at level 0 and faded in, the march no longer covers (%d "
-			% settle + "frames after the view's tile was full)")
-	var resets := planner.resets
-	_layer.notify_view_jump()
-	var batch := _frame(camera)
-	_check(planner.resets == resets + 1 and _highest_shown(planner) <= 0,
-			"view cache: a view jump restarts it (restarts %d -> %d, highest level shown %d)"
-			% [resets, planner.resets, _highest_shown(planner)])
-	var covered := _covered_frames(camera, bool(batch.get("covering", false)), dirs)
-	_check(covered.x > 0 and covered.y > 0.0,
-			"view cache: after the view jump the march covers until level 0 is in view and faded in (%d frames)"
-			% covered.x)
-	_converge_view(camera, forward)
-	resets = planner.resets
-	_layer.notify_clock_jump()
-	_frame(camera)
-	_check(planner.resets == resets + 1 and _highest_shown(planner) <= 0,
-			"view cache: a clock jump restarts it (restarts %d -> %d, highest level shown %d)"
-			% [resets, planner.resets, _highest_shown(planner)])
-	_converge_view(camera, forward)
-	# A jump arriving while the worker runs a restart is not lost: it restarts at the next plan.
-	resets = planner.resets
-	_layer.notify_view_jump()
-	_layer.update(camera, 0.0, DT)  # starts the run that restarts
-	_layer.notify_view_jump()  # the main thread, while that run goes on
-	planner.wait()
-	_frame(camera)  # the next plan starts the second restart
-	_frame(camera)
-	_check(planner.resets == resets + 2,
-			"view cache: a jump requested while the worker restarts survives to the next plan (restarts %d -> %d)"
-			% [resets, planner.resets])
-	_converge_view(camera, forward)
-	# A layout re-creation (the eyes' density 1.5 x: a new face size, built on a worker): a restart the march covers.
-	resets = planner.resets
-	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE * 3 / 2})
-	var first_covering := false
-	for i in range(VIEW_CACHE_MAX_FRAMES):
-		_frame(camera)
-		if planner.resets != resets:
-			first_covering = bool(_frame(camera).get("covering", false))  # the restarted run's batch
-			break
-	_check(planner.resets == resets + 1 and first_covering and planner.layout.face_texels > VIEW_CACHE_FACE,
-			"view cache: a layout re-creation (face %d) restarts it with the march covering"
-			% planner.layout.face_texels)
-	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE})
-	_converge_view(camera, forward)
-	_converge_view(camera, forward)
-	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun.rotated(Vector3(1.0, 0.0, 0.0), deg_to_rad(1.0)))
-	var started := 0
-	var refreshes := 0
-	var completed_at_once := 0
-	for i in range(int(4.0 / DT)):
-		_frame(camera)
-		for tile in planner.last_fades:
-			started += 1
-			refreshes += 1 if planner.fade_source(tile) == 4 else 0
-			completed_at_once += 1 if planner.fade_weight(tile, planner.now_s) >= 1.0 else 0
-	_check(refreshes > 0 and completed_at_once == 0, "view cache: a 1 deg Sun step starts cross-fades (%d, %d of them "
-			% [started, refreshes] + "refreshes from a fade slot), none complete in the frame they start (%d)"
-			% completed_at_once)
-	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun)
-
-
-var _frames_run := 0
-
-
-## Frames (the batches taken) until the tile ahead shows the full level; false after VIEW_CACHE_MAX_FRAMES.
-func _converge_view(camera: Vector3, forward: Vector3) -> bool:
-	var planner := _layer.view_cache_planner
-	_frames_run = 0
-	while _frames_run < VIEW_CACHE_MAX_FRAMES:
-		_frame(camera)
-		_frames_run += 1
-		if planner.layout != null and planner.shown_level(planner.layout.tile_of(forward)) \
-				== CloudViewCacheSchedule.MAX_LEVEL:
-			return true
-	return false
-
-
-## Frames from a restart (whose batch's covering flag is given) until a batch no longer covers, and whether then
-## every sample ray's tile shows a level and no first fill is still fading in there: (frames or -1 when the restart's
-## batch did not cover or the covering never ended, 1 / 0).
-func _covered_frames(camera: Vector3, first: bool, dirs: Array[Vector3]) -> Vector2:
-	var planner := _layer.view_cache_planner
-	if not first:
-		return Vector2(-1.0, 0.0)
-	for i in range(VIEW_CACHE_MAX_FRAMES):
-		var batch := _frame(camera)
-		if not bool(batch.get("covering", true)):
-			var shown := true
-			for d in dirs:
-				var tile := planner.layout.tile_of(d)
-				shown = shown and planner.shown_level(tile) >= 0 \
-						and (planner.fade_source(tile) != 0 or planner.fade_weight(tile, planner.now_s) >= 1.0)
-			return Vector2(i + 1, 1.0 if shown else 0.0)
-	return Vector2(-1.0, 0.0)
-
-
-## One frame of the view cache's loop: the layer's update (the planner hands out the last run's batch and starts the
-## next), the planner's run waited for (its state is read next), the batch taken as the render thread would.
-func _frame(camera: Vector3) -> Dictionary:
-	_layer.update(camera, 0.0, DT)
-	_layer.view_cache_planner.wait()
-	return _layer.effect.take_view_cache_batch()
-
-
-static func _highest_shown(planner: CloudViewCachePlanner) -> int:
-	var highest := -1
-	for tile in range(planner.layout.tile_count()):
-		highest = maxi(highest, planner.shown_level(tile))
-	return highest
 
 
 ## What the service does: every announcement carries snapshot dictionaries with their texels (the layer strips them once
@@ -333,50 +185,4 @@ func _check(ok: bool, label: String) -> void:
 		_failures += 1
 	print("  %s  %s" % ["ok  " if ok else "FAIL", label])
 
-
-## World volume (Task 5): the layer plans, this test takes and adopts each batch as the render thread would (no GPU).
-## A fast calibrated rate and budget keep the channel-pair rebakes to a few frames.
-func _test_world_volume(camera: Vector3) -> void:
-	var volume := _layer.effect.world_volume
-	_layer.world_volume = true
-	_layer.world_volume_schedule.bake_taps_per_ms = 1.0e9
-	_layer.world_volume_schedule.budget_scale = 20.0
-	var a := _fake("wa")
-	var b := _fake("wb")
-	var c := _fake("wc")
-	var ok := true
-	var mapped := true
-	var held := 0
-	var steps := [[a, b, 0.3, 12.0], [b, c, 0.5, 8.0], [c, a, 0.2, 8.0]]
-	for step: Array in steps:
-		_announce(step[0], step[1])
-		for i in range(int(float(step[3]) / DT)):
-			var before: Dictionary = _layer.state()
-			_layer.update(camera, step[2], DT)
-			volume.run(null, volume.take(), [], Vector3.ZERO)
-			var after: Dictionary = _layer.state()
-			var w0 := float(before["w1"])
-			var w1 := float(after["w1"])
-			if absf(w1 - w0) > DT / CloudLayer.FADE_S + 1e-9 and not bool(before["tracking"]):
-				ok = false
-			for s in range(2):
-				var weight := w1 if s == 1 else 1.0 - w1
-				if before["slots"][s] != after["slots"][s] and (w0 if s == 1 else 1.0 - w0) > 1e-9:
-					ok = false
-				if weight > 1e-9 and after["slots"][s] != "" and not volume.slot_holds(s, after["slots"][s]):
-					mapped = false
-			if not volume.slot_holds(0, after["slots"][0]) or not volume.slot_holds(1, after["slots"][1]):
-				held += 1
-			if after["uploading"]:
-				OS.delay_msec(1)
-		_check(_state_is_pair([_snapshot_id(step[0]), _snapshot_id(step[1])], step[2]),
-				"world volume: pair resident at its blend: %s" % _layer.state())
-	_check(ok, "world volume: the weight never jumps, a slot changes only without weight")
-	_check(mapped and held > 0, "world volume: a slot with weight always has its snapshot in its channel pair (%d " % held
-			+ "frames a new snapshot waited for its bake)")
-	_layer.world_volume = false
-
-
-static func _snapshot_id(snapshot: Dictionary) -> String:
-	return "%s|%s|%d" % [snapshot["kind"], snapshot["cache_key"], int(snapshot["rows"])]
 

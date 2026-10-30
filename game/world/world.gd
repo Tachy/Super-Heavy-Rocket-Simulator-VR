@@ -343,7 +343,6 @@ func _on_mission_started(ok: bool, _message: String) -> void:
 func _view_jumped() -> void:
 	atmosphere.snap_adaptation()
 	clouds.effect.reset_history()
-	clouds.notify_view_jump()  # the cloud view cache restarts at the new place
 
 
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
