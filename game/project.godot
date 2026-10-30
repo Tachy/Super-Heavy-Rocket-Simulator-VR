@@ -2,7 +2,7 @@ config_version=5
 
 [application]
 
-config/name="Super Heavy Rocket Simulator VR"
+config/name="Super-Heavy-Rocket-Simulator-VR"
 run/main_scene="res://boot.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 boot_splash/show_image=true

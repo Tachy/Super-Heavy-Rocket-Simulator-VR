@@ -4,9 +4,9 @@
 #   3. the exe (PCK embedded) with the version stamped in, plus the GDExtension and D3D12 DLLs
 #   4. the package folder: exe, launchers, config/, the base data (with data/weather/analog), CREDITS.md, READMEs; the parts terrain
 #      (data/terrain/earth) and imagery (data/imagery); a self-check of the exported exe with and without the parts
-#   5. ZIPs: build/SuperHeavyRocketSimulatorVR-<version>-windows.zip (playable, base data),
+#   5. ZIPs: build/Super-Heavy-Rocket-Simulator-VR-<version>-windows.zip (playable, base data),
 #      ...-data-terrain.zip, ...-data-imagery.zip (each unpacks into the game folder); none may reach 2 GB
-#   6. build/SuperHeavyRocketSimulatorVR-<version>-setup.exe (Inno Setup, everything; installed once if missing)
+#   6. build/Super-Heavy-Rocket-Simulator-VR-<version>-setup.exe (Inno Setup, everything; installed once if missing)
 #
 #   powershell -ExecutionPolicy Bypass -File tools/package.ps1 [-Version 1.2.3] [-SkipTests] [-NoInstaller]
 #
@@ -26,8 +26,8 @@ $Root = Split-Path $PSScriptRoot -Parent
 $Build = Join-Path $Root "build"
 $Game = Join-Path $Root "game"
 $Data = Join-Path $Root "data"
-$ExeName = "SuperHeavyRocketSimulatorVR.exe"
-$Prefix = "SuperHeavyRocketSimulatorVR"
+$ExeName = "Super-Heavy-Rocket-Simulator-VR.exe"
+$Prefix = "Super-Heavy-Rocket-Simulator-VR"
 $GodotBin = Join-Path $Root "external\godot\bin"
 $Template = Join-Path $GodotBin "godot.windows.template_release.double.x86_64.exe"
 $AssetLimit = 2GB  # GitHub's limit per release asset

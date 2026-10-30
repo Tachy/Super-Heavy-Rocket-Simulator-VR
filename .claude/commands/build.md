@@ -34,7 +34,7 @@ once. The repository is private: the release and its assets are visible to colla
   ZIP `...-windows.zip` is playable on its own, `...-data-terrain.zip` and `...-data-imagery.zip` unpack into the same
   folder (Earth terrain and aerial imagery of the launch sites).
 - `git checkout main`.
-- Show the user the files with sizes - `build/SuperHeavyRocketSimulatorVR-X.Y.Z-setup.exe`, `...-windows.zip`,
+- Show the user the files with sizes - `build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-setup.exe`, `...-windows.zip`,
   `...-data-terrain.zip`, `...-data-imagery.zip` - and the release notes, and ask (AskUserQuestion) whether to
   publish: they may first want to try `build\package\Start-Desktop.cmd` / `Start-VR.cmd` or the installer. Without a
   yes: stop here, the build stays in `build/`.
@@ -46,7 +46,7 @@ once. The repository is private: the release and its assets are visible to colla
 - Create tag and release with all files in one step (gh uploads the files to a draft and publishes it only then, so
   the release never shows up without them; the four files are ~1-2 GB, the upload takes a while - run it in the
   background):
-  `gh release create vX.Y.Z --target <merge commit> --title vX.Y.Z --notes-file build/release-notes-X.Y.Z.md --latest build/SuperHeavyRocketSimulatorVR-X.Y.Z-setup.exe build/SuperHeavyRocketSimulatorVR-X.Y.Z-windows.zip build/SuperHeavyRocketSimulatorVR-X.Y.Z-data-terrain.zip build/SuperHeavyRocketSimulatorVR-X.Y.Z-data-imagery.zip`
+  `gh release create vX.Y.Z --target <merge commit> --title vX.Y.Z --notes-file build/release-notes-X.Y.Z.md --latest build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-setup.exe build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-windows.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-terrain.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-imagery.zip`
 - Mark the PR as released, as release-please itself would (otherwise it stops preparing the next release PR:
   "untagged, merged release PRs outstanding"):
   `gh pr edit <number> --remove-label "autorelease: pending" --add-label "autorelease: tagged"`

@@ -1,7 +1,7 @@
-﻿; Installer of Super Heavy Rocket Simulator VR (Inno Setup 6), built by tools/package.ps1:
+﻿; Installer of Super Heavy: Rocket Simulator VR (Inno Setup 6), built by tools/package.ps1:
 ;   ISCC /DAppVersion=1.2.3 /DFileVersion=1.2.3.0 /DSourceDir=<build\package> /DTerrainDir=<build\part_terrain>
 ;        /DImageryDir=<build\part_imagery> /DOutputDir=<build> installer.iss
-; Per user, no admin rights: %LOCALAPPDATA%\Programs\Super Heavy Rocket Simulator VR.
+; Per user, no admin rights: %LOCALAPPDATA%\Programs\Super-Heavy-Rocket-Simulator-VR.
 ; Everything is inside (the repository is private, so the installer cannot fetch the data from the release); the
 ; Earth terrain and the aerial imagery are optional components. A newer installer installs over an older one (same
 ; AppId); the two data parts are removed first, so a component deselected later does not stay half there.
@@ -24,8 +24,13 @@
 #ifndef OutputDir
   #define OutputDir "..\build"
 #endif
-#define AppName "Super Heavy Rocket Simulator VR"
-#define AppExe "SuperHeavyRocketSimulatorVR.exe"
+; Two names only: the visible title (game/util/game_title.gd) and the technical name with hyphens (folders, files,
+; exe). Shortcut and Start-menu names are file names, where Windows forbids ':' - they show the title with the
+; look-alike U+A789 (MODIFIER LETTER COLON). Existing installs keep their folder (Inno's UsePreviousAppDir).
+#define AppName "Super Heavy: Rocket Simulator VR"
+#define AppDirName "Super-Heavy-Rocket-Simulator-VR"
+#define AppLinkName "Super Heavy꞉ Rocket Simulator VR"
+#define AppExe "Super-Heavy-Rocket-Simulator-VR.exe"
 
 [Setup]
 AppId={{E3D12D35-3755-4AB8-9250-C39341ED3268}
@@ -37,14 +42,14 @@ AppPublisherURL=https://github.com/Tachy/Super-Heavy-Rocket-Simulator-VR
 AppSupportURL=https://github.com/Tachy/Super-Heavy-Rocket-Simulator-VR/issues
 AppUpdatesURL=https://github.com/Tachy/Super-Heavy-Rocket-Simulator-VR/releases
 VersionInfoVersion={#FileVersion}
-DefaultDirName={localappdata}\Programs\{#AppName}
-DefaultGroupName={#AppName}
+DefaultDirName={localappdata}\Programs\{#AppDirName}
+DefaultGroupName={#AppLinkName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=SuperHeavyRocketSimulatorVR-{#AppVersion}-setup
+OutputBaseFilename=Super-Heavy-Rocket-Simulator-VR-{#AppVersion}-setup
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 Compression=lzma2
@@ -93,10 +98,10 @@ Source: "{#TerrainDir}\*"; DestDir: "{app}"; Components: terrain; Flags: ignorev
 Source: "{#ImageryDir}\*"; DestDir: "{app}"; Components: imagery; Flags: ignoreversion recursesubdirs
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\Start-VR.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized
-Name: "{group}\{#AppName} ({cm:DesktopMode})"; Filename: "{app}\Start-Desktop.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized
-Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\Start-VR.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized; Tasks: desktopicon
+Name: "{group}\{#AppLinkName}"; Filename: "{app}\Start-VR.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized
+Name: "{group}\{#AppLinkName} ({cm:DesktopMode})"; Filename: "{app}\Start-Desktop.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized
+Name: "{group}\{cm:UninstallProgram,{#AppLinkName}}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#AppLinkName}"; Filename: "{app}\Start-VR.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Start-Desktop.cmd"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#AppName} ({cm:DesktopMode})}"; Flags: nowait postinstall skipifsilent unchecked runminimized

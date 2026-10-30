@@ -143,7 +143,7 @@ tests/     validation fixtures (JPL Horizons, webcast telemetry, reference solve
 ## Installation (Windows)
 
 Each GitHub release carries:
-- `SuperHeavyRocketSimulatorVR-<version>-setup.exe` - the installer with everything (per user, no admin rights). The
+- `Super-Heavy-Rocket-Simulator-VR-<version>-setup.exe` - the installer with everything (per user, no admin rights). The
   Earth terrain and the aerial imagery of the launch sites are optional components; without them the ground near the
   pads is flat and untextured. Start menu: the simulator (VR, OpenXR runtime running) and its desktop mode.
 - `...-windows.zip` - the same game without installer, playable with the base data (`Start-VR.cmd`,
