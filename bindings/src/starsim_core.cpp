@@ -386,11 +386,11 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
     const auto count = static_cast<size_t>(latitudes_deg.size());
     const int n = static_cast<int>(std::lround(std::sqrt(static_cast<double>(count))));
     if (longitudes_deg.size() != latitudes_deg.size() || heights_m.size() != latitudes_deg.size() ||
-        static_cast<size_t>(n) * static_cast<size_t>(n) != count || azimuth_count < 1 || spacing_m <= 0.0 ||
-        n < 2 || (n - 1) % 16 != 0) {
+        static_cast<size_t>(n) * static_cast<size_t>(n) != count || azimuth_count < 1 || azimuth_count > 64 ||
+        spacing_m <= 0.0 || n < 2 || (n - 1) % 16 != 0) {
         godot::UtilityFunctions::push_error(
             "StarsimCore.horizon_elevations: n x n Gitter mit (n - 1) teilbar durch 16, gleich lange Felder, "
-            "azimuth_count >= 1 und spacing_m > 0 erwartet");
+            "azimuth_count in 1..64 und spacing_m > 0 erwartet");
         return result;
     }
     std::vector<double> lat(count), lon(count), height(count);
@@ -410,7 +410,8 @@ double StarsimCore::horizon_elevation_rad(const godot::String& body, double lati
                                           double height_m, double azimuth_rad) const {
     if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return std::numeric_limits<double>::quiet_NaN();
     const double lat = latitude_deg * constants::deg_to_rad, lon = longitude_deg * constants::deg_to_rad;
-    const double first_step_m = std::max(0.5 * moon_terrain_->resolution_m(lat, lon), 1.0);
+    // The first step of a lattice vertex with 1 m spacing (half the finest data within the near range).
+    const double first_step_m = environment::lattice_first_step_m(*moon_terrain_, lat, lon, 1.0);
     return environment::horizon_elevation_rad(*moon_terrain_, moon_terrain_->sphere_radius_m(), lat, lon, height_m,
                                               azimuth_rad, environment::HorizonMarch{first_step_m, first_step_m});
 }

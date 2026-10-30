@@ -21,7 +21,7 @@ struct HorizonMarch {
 
 // Terrain horizon elevation (rad, + above the local horizontal of the point's sphere direction) seen from a point at
 // (latitude_rad, longitude_rad) at height_m above the terrain's reference sphere, along the great circle in
-// azimuth_rad (clockwise from north). Samples terrain from min_distance_m outwards until the relief bound
+// azimuth_rad (clockwise from north); throws std::invalid_argument for march.first_step_m <= 0. Samples terrain from min_distance_m outwards until the relief bound
 // (Terrain::max_height_m) cannot beat the running maximum any more, or the antipode. Thread-safe (reads only).
 // The latitude / longitude are the terrain's own (Moon: planetocentric on the sphere); at a pole the longitude fixes
 // what north and east mean.
@@ -35,11 +35,19 @@ std::vector<float> horizon_elevations(const Terrain& terrain, double sphere_radi
                                       const std::vector<double>& height_m, int azimuth_count,
                                       const HorizonMarch& march);
 
-// First step of a lattice vertex's march: half the data resolution there or the lattice spacing, whichever is larger
-// (no use sampling a 1.9 km grid every 10 m). It depends on the vertex only, so shared vertices agree.
+// [E] The range around a march's start within which the finest data sets its first step: the march's step grows by
+// 2 % of the distance, so it reaches half the coarse 1.9 km grid's resolution (950 m) at ~ 950 / 0.02 = 48 km; finer
+// data (a 20 m site tile) further out than that is reached with steps that large anyway.
+constexpr double first_step_data_range_m = 50e3;
+
+// First step of a vertex's march: half the finest data resolution within first_step_data_range_m or the lattice
+// spacing, whichever is larger (no use sampling a 1.9 km grid every 10 m, but a start just outside a 20 m tile must
+// not step over the tile's relief: no jump of the horizon along the tile's outline). It depends on the vertex only
+// (not on the node), so shared vertices agree.
 inline double lattice_first_step_m(const Terrain& terrain, double latitude_rad, double longitude_rad,
                                    double spacing_m) {
-    return std::max(0.5 * terrain.resolution_m(latitude_rad, longitude_rad), spacing_m);
+    return std::max(0.5 * terrain.finest_resolution_within_m(latitude_rad, longitude_rad, first_step_data_range_m),
+                    spacing_m);
 }
 
 // Horizons for an n x n vertex lattice (row-major, n - 1 divisible by 16, typically 65) of one terrain node whose

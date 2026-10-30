@@ -122,12 +122,18 @@ double march_ray(const Terrain& terrain, double sphere_radius_m, const Vec3& up,
     return best_d > 0.0 ? best_n / best_d : -std::numeric_limits<double>::infinity();
 }
 
+// A march without a positive first step would never advance.
+void require_first_step(const HorizonMarch& march) {
+    if (!(march.first_step_m > 0.0)) throw std::invalid_argument("horizon march: first_step_m must be > 0");
+}
+
 double elevation_rad(double tan_elevation) { return std::atan(tan_elevation); }
 
 }  // namespace
 
 double horizon_elevation_rad(const Terrain& terrain, double sphere_radius_m, double latitude_rad, double longitude_rad,
                              double height_m, double azimuth_rad, const HorizonMarch& march) {
+    require_first_step(march);
     const LocalFrame frame = local_frame(latitude_rad, longitude_rad);
     const Vec3 direction = frame.north * std::cos(azimuth_rad) + frame.east * std::sin(azimuth_rad);
     MarchSequence sequence(sphere_radius_m, march);
@@ -141,6 +147,7 @@ std::vector<float> horizon_elevations(const Terrain& terrain, double sphere_radi
     if (latitude_rad.size() != longitude_rad.size() || latitude_rad.size() != height_m.size() || azimuth_count < 1) {
         throw std::invalid_argument("horizon_elevations: point arrays differ in length or azimuth_count < 1");
     }
+    require_first_step(march);
     std::vector<float> result(latitude_rad.size() * static_cast<size_t>(azimuth_count));
     MarchSequence sequence(sphere_radius_m, march);
     for (size_t i = 0; i < latitude_rad.size(); ++i) {
@@ -245,38 +252,68 @@ double profile_at(const double* profile, int azimuth_count, double azimuth_rad) 
     return profile[i0] * (1.0 - f) + profile[i1] * f;
 }
 
-// Bilinear interpolation of a stride-lattice band to every vertex, merged into result by maximum.
-void merge_band(const Lattice& lat, const std::vector<double>& band, int stride, std::vector<double>& result) {
+// The stride a band of nominal stride `stride` uses where the local north turns by turn_rad per vertex: halved until
+// the azimuth shift over one stride stays within max_resampled_shift_rad.
+int stride_for_turn(int stride, double turn_rad) {
+    while (stride > 1 && stride * turn_rad > max_resampled_shift_rad) stride /= 2;
+    return stride;
+}
+
+// The lattice's four edges: row 0, row n - 1, column 0, column n - 1.
+constexpr int edge_count = 4;
+
+// Interpolation of a stride-lattice band to every vertex, merged into result by maximum. Interior vertices
+// interpolate bilinearly over the band's `stride`; the vertices of an edge (corners excepted) interpolate along the
+// edge only, between multiples of edge_stride[edge] (>= stride, a multiple of it): that stride is decided from the
+// edge's vertices alone, so two nodes sharing the edge agree on it whatever their interiors need.
+void merge_band(const Lattice& lat, const std::vector<double>& band, int stride, const int (&edge_stride)[edge_count],
+                std::vector<double>& result) {
     const int n = lat.n, m = (n - 1) / stride + 1, az = lat.azimuth_count;
+    const auto index = [n](int i, int j) {
+        return static_cast<size_t>(i) * static_cast<size_t>(n) + static_cast<size_t>(j);
+    };
     std::vector<double> value(static_cast<size_t>(az));
+    // Adds w x the band's profile of stride vertex (si, sj), seen from vertex v, to value.
+    const auto accumulate = [&](size_t v, int si, int sj, double w) {
+        const double* profile = &band[(static_cast<size_t>(si / stride) * static_cast<size_t>(m) +
+                                       static_cast<size_t>(sj / stride)) * static_cast<size_t>(az)];
+        const size_t sv = index(si, sj);
+        const double alpha = sv == v ? 0.0 : north_transport_angle(lat.frames[v], lat.frames[sv]);
+        if (std::abs(alpha) < min_resampled_shift_rad) {
+            for (int k = 0; k < az; ++k) value[static_cast<size_t>(k)] += w * profile[k];
+            return;
+        }
+        for (int k = 0; k < az; ++k) {
+            value[static_cast<size_t>(k)] += w * profile_at(profile, az, k * 2.0 * constants::pi / az + alpha);
+        }
+    };
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
-            const int I0 = std::min(i / stride, m - 2), J0 = std::min(j / stride, m - 2);
-            const double fi = static_cast<double>(i - I0 * stride) / stride;
-            const double fj = static_cast<double>(j - J0 * stride) / stride;
-            const size_t v = static_cast<size_t>(i) * static_cast<size_t>(n) + static_cast<size_t>(j);
+            const size_t v = index(i, j);
             std::fill(value.begin(), value.end(), 0.0);
-            for (int di = 0; di < 2; ++di) {
-                for (int dj = 0; dj < 2; ++dj) {
-                    const double w = (di ? fi : 1.0 - fi) * (dj ? fj : 1.0 - fj);
-                    if (w == 0.0) continue;  // also keeps an edge's values independent of the lattice's interior
-                    const int I = I0 + di, J = J0 + dj;
-                    const double* profile = &band[(static_cast<size_t>(I) * static_cast<size_t>(m) +
-                                                   static_cast<size_t>(J)) * static_cast<size_t>(az)];
-                    const size_t sv = static_cast<size_t>(I * stride) * static_cast<size_t>(n) +
-                                      static_cast<size_t>(J * stride);
-                    if (sv == v) {
-                        for (int k = 0; k < az; ++k) value[static_cast<size_t>(k)] += w * profile[k];
-                        continue;
-                    }
-                    const double alpha = north_transport_angle(lat.frames[v], lat.frames[sv]);
-                    if (std::abs(alpha) < min_resampled_shift_rad) {
-                        for (int k = 0; k < az; ++k) value[static_cast<size_t>(k)] += w * profile[k];
-                        continue;
-                    }
-                    for (int k = 0; k < az; ++k) {
-                        value[static_cast<size_t>(k)] +=
-                            w * profile_at(profile, az, k * 2.0 * constants::pi / az + alpha);
+            const bool row_edge = i == 0 || i == n - 1, column_edge = j == 0 || j == n - 1;
+            if (row_edge != column_edge) {  // an edge vertex, not a corner: along the edge only
+                const int along = row_edge ? j : i;
+                const int se = edge_stride[row_edge ? (i == 0 ? 0 : 1) : (j == 0 ? 2 : 3)];
+                const int t0 = along / se * se;
+                const double f = static_cast<double>(along - t0) / se;
+                if (f == 0.0) {
+                    accumulate(v, i, j, 1.0);
+                } else if (row_edge) {
+                    accumulate(v, i, t0, 1.0 - f);
+                    accumulate(v, i, t0 + se, f);
+                } else {
+                    accumulate(v, t0, j, 1.0 - f);
+                    accumulate(v, t0 + se, j, f);
+                }
+            } else {
+                const int I0 = std::min(i / stride, m - 2), J0 = std::min(j / stride, m - 2);
+                const double fi = static_cast<double>(i - I0 * stride) / stride;
+                const double fj = static_cast<double>(j - J0 * stride) / stride;
+                for (int di = 0; di < 2; ++di) {
+                    for (int dj = 0; dj < 2; ++dj) {
+                        const double w = (di ? fi : 1.0 - fi) * (dj ? fj : 1.0 - fj);
+                        if (w != 0.0) accumulate(v, (I0 + di) * stride, (J0 + dj) * stride, w);
                     }
                 }
             }
@@ -308,18 +345,28 @@ std::vector<float> horizon_elevations_lattice(const Terrain& terrain, double sph
         lat.azimuth_cos.push_back(std::cos(k * 2.0 * constants::pi / azimuth_count));
         lat.azimuth_sin.push_back(std::sin(k * 2.0 * constants::pi / azimuth_count));
     }
-    double north_turn_per_vertex_rad = 0.0;  // the largest turn of the local north between neighbouring vertices
+    // The largest turn of the local north between neighbouring vertices: over the whole lattice (interior strides),
+    // and along each edge alone (edge strides).
+    const auto turn = [&](size_t v, size_t w) {
+        return std::abs(north_transport_angle(lat.frames[v], lat.frames[w]));
+    };
+    double north_turn_per_vertex_rad = 0.0;
+    double edge_turn_rad[edge_count] = {0.0, 0.0, 0.0, 0.0};
+    const auto nn = static_cast<size_t>(n);
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
-            const size_t v = static_cast<size_t>(i) * static_cast<size_t>(n) + static_cast<size_t>(j);
+            const size_t v = static_cast<size_t>(i) * nn + static_cast<size_t>(j);
             if (j + 1 < n) {
-                north_turn_per_vertex_rad = std::max(north_turn_per_vertex_rad,
-                                                     std::abs(north_transport_angle(lat.frames[v], lat.frames[v + 1])));
+                const double t = turn(v, v + 1);
+                north_turn_per_vertex_rad = std::max(north_turn_per_vertex_rad, t);
+                if (i == 0) edge_turn_rad[0] = std::max(edge_turn_rad[0], t);
+                if (i == n - 1) edge_turn_rad[1] = std::max(edge_turn_rad[1], t);
             }
             if (i + 1 < n) {
-                north_turn_per_vertex_rad = std::max(
-                    north_turn_per_vertex_rad,
-                    std::abs(north_transport_angle(lat.frames[v], lat.frames[v + static_cast<size_t>(n)])));
+                const double t = turn(v, v + nn);
+                north_turn_per_vertex_rad = std::max(north_turn_per_vertex_rad, t);
+                if (j == 0) edge_turn_rad[2] = std::max(edge_turn_rad[2], t);
+                if (j == n - 1) edge_turn_rad[3] = std::max(edge_turn_rad[3], t);
             }
         }
     }
@@ -328,9 +375,11 @@ std::vector<float> horizon_elevations_lattice(const Terrain& terrain, double sph
     for (int b = 0; b < band_count; ++b) {
         const double start_m = band_specs[b].start_spacings * spacing_m;
         const double end_m = b + 1 < band_count ? band_specs[b + 1].start_spacings * spacing_m : 0.0;
-        int stride = band_specs[b].stride;
-        while (stride > 1 && stride * north_turn_per_vertex_rad > max_resampled_shift_rad) stride /= 2;
-        merge_band(lat, band_elevations(terrain, sphere_radius_m, lat, stride, start_m, end_m), stride, result);
+        const int stride = stride_for_turn(band_specs[b].stride, north_turn_per_vertex_rad);
+        int edge_stride[edge_count];
+        for (int e = 0; e < edge_count; ++e) edge_stride[e] = stride_for_turn(band_specs[b].stride, edge_turn_rad[e]);
+        merge_band(lat, band_elevations(terrain, sphere_radius_m, lat, stride, start_m, end_m), stride, edge_stride,
+                   result);
     }
     return std::vector<float>(result.begin(), result.end());
 }

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <tuple>
 #include <vector>
 
@@ -16,7 +17,6 @@
 
 #include "starsim/environment/terrain_horizon.hpp"
 #include "starsim/math/constants.hpp"
-#include "starsim/math/fast_trig.hpp"
 #include "starsim/math/fast_trig.hpp"
 #include "starsim/sim/lunar_site.hpp"
 
@@ -374,8 +374,9 @@ TEST_CASE("LOLA data: banded lattice vs the full march, IM-2 leaf and level 7", 
 
 TEST_CASE("LOLA data: banded lattice vs the full march near the pole and across lon 180", "[terrain_horizon][data]") {
     const auto terrain = lunar_terrain_or_skip();
-    // At the pole the north of neighbouring vertices turns by degrees: the bake falls back to every vertex (exact).
-    compare_banded(*terrain, -89.5 * deg, 20.0 * deg, 373.0, "lat -89.5 level 7", 0.1, 0.1);
+    // At the pole the north of neighbouring vertices turns by degrees: the bake falls back to smaller strides (exact
+    // inside; the edge vertices interpolate over an edge stride decided from the edge alone, for the seams: worst 0.30).
+    compare_banded(*terrain, -89.5 * deg, 20.0 * deg, 373.0, "lat -89.5 level 7", 0.35, 0.1);
     compare_banded(*terrain, 5.0 * deg, constants::pi - 0.02 * deg, 373.0, "lon 180 level 7", 1.1, 0.65);
     compare_banded(*terrain, 5.0 * deg, 100.0 * deg, 373.0, "lon 100 level 7 (control)", 0.5, 0.2);
 }
@@ -438,4 +439,175 @@ TEST_CASE("LOLA data: the lunar height by direction equals the height by latitud
         worst = std::max(worst, std::abs(terrain->height_at_direction_m(unit(lat, lon)) - terrain->height_m(lat, lon)));
     }
     CHECK(worst < 0.1);  // 2e-8 rad of fast_atan2 is 3.5 cm of position
+}
+
+// ---- Seams at polar strides, first step at a site tile's edge ----
+
+namespace {
+
+// Transposed copy of a lattice (vertex (i, j) -> (j, i)); reversed: the new rows run backwards (i -> 64 - i).
+NodeLattice transposed(const NodeLattice& a, bool reversed) {
+    NodeLattice t;
+    for (int i = 0; i < t.n; ++i) {
+        for (int j = 0; j < t.n; ++j) {
+            const size_t from = static_cast<size_t>(j) * 65 + static_cast<size_t>(reversed ? 64 - i : i);
+            t.lat.push_back(a.lat[from]);
+            t.lon.push_back(a.lon[from]);
+            t.h.push_back(a.h[from]);
+        }
+    }
+    return t;
+}
+
+}  // namespace
+
+TEST_CASE("Banded lattices straddling a polar stride threshold agree along the shared edge", "[terrain_horizon]") {
+    // 373 m spacing at -86 deg: the local north turns 0.18 deg per vertex. The lattice poleward of the shared row (A)
+    // needs smaller strides than the one equatorward (B), but the shared row must come out identical: as a row edge,
+    // as a column edge (transposed lattice) and in reversed orientation.
+    constexpr double spacing_m = 373.0;
+    const auto [mlat, mlon] = destination(-86.0 * deg, 0.3, 1.0, 60e3 / R);
+    const GaussianMountain mountain(mlat, mlon, 3000.0, 10e3);
+    const NodeLattice a = make_lattice(mountain, -86.0 * deg, 0.3, spacing_m, -32, -64);  // rows poleward of the centre
+    const NodeLattice b = make_lattice(mountain, -86.0 * deg, 0.3, spacing_m, -32, 0);    // B's row 0 is A's row 64
+    const auto ha = environment::horizon_elevations_lattice(mountain, R, 65, a.lat, a.lon, a.h, spacing_m, 16);
+    const auto hb = environment::horizon_elevations_lattice(mountain, R, 65, b.lat, b.lon, b.h, spacing_m, 16);
+    int differing = 0;
+    for (size_t j = 0; j < 65; ++j) {
+        for (size_t k = 0; k < 16; ++k) differing += ha[(64 * 65 + j) * 16 + k] != hb[j * 16 + k] ? 1 : 0;
+    }
+    CHECK(differing == 0);
+    for (const bool reversed : {false, true}) {
+        const NodeLattice bt = transposed(b, reversed);  // the shared row is now column 0
+        const auto hbt = environment::horizon_elevations_lattice(mountain, R, 65, bt.lat, bt.lon, bt.h, spacing_m, 16);
+        int differing_t = 0;
+        for (size_t j = 0; j < 65; ++j) {
+            const size_t i = reversed ? 64 - j : j;
+            for (size_t k = 0; k < 16; ++k) differing_t += ha[(64 * 65 + j) * 16 + k] != hbt[i * 65 * 16 + k] ? 1 : 0;
+        }
+        INFO("reversed " << reversed);
+        CHECK(differing_t == 0);
+    }
+}
+
+TEST_CASE("The first step reads the finest data nearby; a march needs a positive first step", "[terrain_horizon]") {
+    const FlatTerrain flat(0.0);
+    CHECK(flat.finest_resolution_within_m(0.3, 0.4, 1e6) == 100.0);  // the default: resolution_m at the point
+    CHECK(environment::lattice_first_step_m(flat, 0.3, 0.4, 10.0) == 50.0);
+    CHECK_THROWS_AS(environment::horizon_elevation_rad(flat, R, 0.0, 0.0, 1.0, 0.0, HorizonMarch{0.0, 0.0}),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(environment::horizon_elevations(flat, R, {0.0}, {0.0}, {1.0}, 4, HorizonMarch{10.0, -1.0}),
+                    std::invalid_argument);
+}
+
+namespace {
+
+using Point = std::pair<double, double>;  // latitude, longitude (rad)
+
+// Where the IM-2 tile ends along `azimuth` from the site: the distance from the site (m), bisected to 1 m.
+double tile_edge_distance_m(const environment::LunarTerrain& terrain, double azimuth) {
+    double lo = 0.0, hi = 100e3;
+    while (hi - lo > 1.0) {
+        const double mid = 0.5 * (lo + hi);
+        const auto [la, lon] = destination(site_lat, site_lon, azimuth, mid / R);
+        (terrain.in_tile(la, lon) ? lo : hi) = mid;
+    }
+    return lo;
+}
+
+// The point `metres` outside (negative: inside) the tile's edge along `azimuth` from the site.
+Point at_edge(const environment::LunarTerrain& terrain, double azimuth, double metres) {
+    return destination(site_lat, site_lon, azimuth, (tile_edge_distance_m(terrain, azimuth) + metres) / R);
+}
+
+}  // namespace
+
+TEST_CASE("LOLA data: terrain queries find the tile within a radius", "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    const double global_m = terrain->resolution_m(0.0, 1.0);
+    for (const double azimuth : {0.3, 2.0, 3.5, 5.0}) {
+        const auto inside = at_edge(*terrain, azimuth, -5.0);
+        CHECK(terrain->finest_resolution_within_m(inside.first, inside.second, 1.0) == Catch::Approx(20.0));
+        for (const double d : {10.0, 500.0, 5000.0, 40e3}) {
+            const auto p = at_edge(*terrain, azimuth, d);
+            INFO("azimuth " << azimuth << " distance outside " << d);
+            CHECK(terrain->finest_resolution_within_m(p.first, p.second, environment::first_step_data_range_m) ==
+                  Catch::Approx(20.0));
+            CHECK(terrain->finest_resolution_within_m(p.first, p.second, 0.5 * d) == Catch::Approx(global_m));
+            CHECK(terrain->finest_resolution_within_m(p.first, p.second, 1.5 * d) == Catch::Approx(20.0));
+        }
+        const auto far = at_edge(*terrain, azimuth, 80e3);
+        CHECK(terrain->finest_resolution_within_m(far.first, far.second, environment::first_step_data_range_m) ==
+              Catch::Approx(global_m));
+    }
+}
+
+TEST_CASE("LOLA data: horizons just outside and inside the tile edge match the brute force",
+          "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    int compared = 0;
+    double worst_rad = 0.0;
+    for (const double azimuth : {0.3, 2.0, 3.5, 5.0}) {
+        for (const double d : {-200.0, -20.0, 20.0, 200.0}) {  // metres from the edge, + outside
+            const auto [la, lo] = at_edge(*terrain, azimuth, d);
+            const double h = terrain->height_m(la, lo) + 2.0;
+            const HorizonMarch march{10.0, environment::lattice_first_step_m(*terrain, la, lo, 10.0)};
+            for (int k = 0; k < 16; ++k) {
+                const double az = k * 2.0 * constants::pi / 16.0;
+                const double marched = environment::horizon_elevation_rad(*terrain, R, la, lo, h, az, march);
+                const double brute = brute_force_elevation_rad(*terrain, la, lo, h, az);
+                INFO("edge azimuth " << azimuth << " d " << d << " ray " << k << " marched " << marched / deg
+                                     << " brute " << brute / deg);
+                CHECK(marched - brute <= tolerance_rad);
+                if (brute < 5.0 * deg) {
+                    CHECK(std::abs(marched - brute) <= tolerance_rad);
+                    worst_rad = std::max(worst_rad, std::abs(marched - brute));
+                    ++compared;
+                }
+            }
+        }
+    }
+    std::printf("[terrain_horizon] tile edge: %d rays compared, worst |march - brute| = %.4f deg\n", compared,
+                worst_rad / deg);
+    CHECK(compared > 100);
+}
+
+TEST_CASE("LOLA data: the horizon is continuous across the tile edge", "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    constexpr double spacing_m = 10.0;
+    const auto horizon = [&](Point p, int k) {
+        const double h = terrain->height_m(p.first, p.second) + 2.0;
+        const HorizonMarch march{spacing_m, environment::lattice_first_step_m(*terrain, p.first, p.second, spacing_m)};
+        return environment::horizon_elevation_rad(*terrain, R, p.first, p.second, h, k * 2.0 * constants::pi / 16.0,
+                                                  march);
+    };
+    for (const double azimuth : {0.3, 2.0, 3.5, 5.0}) {
+        double across = 0.0, within = 0.0;
+        for (int k = 0; k < 16; ++k) {
+            // Two points one spacing apart: straddling the edge, and (as the reference) well inside the tile.
+            across = std::max(across, std::abs(horizon(at_edge(*terrain, azimuth, 0.5 * spacing_m), k) -
+                                               horizon(at_edge(*terrain, azimuth, -0.5 * spacing_m), k)));
+            for (const double d : {-3000.0, -5000.0}) {
+                within = std::max(within, std::abs(horizon(at_edge(*terrain, azimuth, d), k) -
+                                                   horizon(at_edge(*terrain, azimuth, d - spacing_m), k)));
+            }
+        }
+        std::printf("[terrain_horizon] tile edge azimuth %.1f: across %.4f deg, inside %.4f deg\n", azimuth,
+                    across / deg, within / deg);
+        CHECK(across <= within + 0.02 * deg);
+    }
+}
+
+TEST_CASE("LOLA data: banded lattice timing of a leaf node straddling the tile edge (printed)",
+          "[terrain_horizon][data]") {
+    const auto terrain = lunar_terrain_or_skip();
+    constexpr double spacing_m = 10.4;
+    const auto [lat, lon] = at_edge(*terrain, 0.3, 0.0);
+    const NodeLattice node = make_lattice(*terrain, lat, lon, spacing_m);
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto out = environment::horizon_elevations_lattice(*terrain, R, node.n, node.lat, node.lon, node.h,
+                                                             spacing_m, 16);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("[terrain_horizon] banded timing leaf node at the tile edge: 65 x 65 x 16: %.1f ms\n", ms);
+    CHECK(out.size() == 65u * 65u * 16u);
 }

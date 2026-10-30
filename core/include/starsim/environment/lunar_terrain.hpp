@@ -59,6 +59,8 @@ public:
     double height_at_direction_m(const math::Vec3& unit) const override;
     // A site tile's pixel scale inside a tile, the global grid's spacing elsewhere.
     double resolution_m(double latitude_rad, double longitude_rad) const override;
+    // A site tile's pixel scale when the tile (its rectangle) lies within radius_m of the point, else resolution_m.
+    double finest_resolution_within_m(double latitude_rad, double longitude_rad, double radius_m) const override;
     // The highest sample of the global grid and the tiles (the blend never exceeds its two inputs).
     double max_height_m() const override { return max_height_m_; }
     double height_at_fixed_m(const math::Vec3& fixed_m) const override;  // below the point's direction

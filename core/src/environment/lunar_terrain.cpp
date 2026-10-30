@@ -114,6 +114,21 @@ double LunarTerrain::resolution_m(double latitude_rad, double longitude_rad) con
     return sphere_radius_m_ * constants::deg_to_rad / global_.pixels_per_degree;
 }
 
+double LunarTerrain::finest_resolution_within_m(double latitude_rad, double longitude_rad, double radius_m) const {
+    double finest = resolution_m(latitude_rad, longitude_rad);
+    // The stereographic projection is conformal with the scale sec^2(colatitude / 2) = 2 / (1 + cos colatitude) at the
+    // point (cos colatitude = -sin latitude), so a true distance is the projected one times (1 - sin latitude) / 2.
+    const double true_per_projected = 0.5 * (1.0 - std::sin(latitude_rad));
+    for (const auto& tile : tiles_) {
+        const auto [line, sample] = tile.position(latitude_rad, longitude_rad);
+        const double outside_lines = std::max({0.0, -line, line - (tile.grid.lines - 1.0)});
+        const double outside_samples = std::max({0.0, -sample, sample - (tile.grid.samples - 1.0)});
+        const double distance_m = std::hypot(outside_lines, outside_samples) * tile.scale_m * true_per_projected;
+        if (distance_m <= radius_m) finest = std::min(finest, tile.scale_m);
+    }
+    return finest;
+}
+
 bool LunarTerrain::in_tile(double latitude_rad, double longitude_rad) const {
     for (const auto& tile : tiles_) {
         const auto [line, sample] = tile.position(latitude_rad, longitude_rad);

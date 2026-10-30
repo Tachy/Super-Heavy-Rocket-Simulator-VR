@@ -26,6 +26,12 @@ public:
     virtual double height_at_direction_m(const math::Vec3& unit) const;
     // Spacing in metres of the finest data grid covering the point (the level of detail the terrain really holds).
     virtual double resolution_m(double latitude_rad, double longitude_rad) const = 0;
+    // The finest resolution_m of any data within radius_m (great-circle distance) of the point, including the point
+    // itself (a march starting just outside a high-resolution tile must not step over the tile's relief).
+    // Default: resolution_m at the point.
+    virtual double finest_resolution_within_m(double latitude_rad, double longitude_rad, double /*radius_m*/) const {
+        return resolution_m(latitude_rad, longitude_rad);
+    }
     // Upper bound of height_m over the whole body (the relief bound of the terrain horizon march).
     virtual double max_height_m() const = 0;
 };
