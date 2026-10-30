@@ -28,6 +28,7 @@ func _initialize() -> void:
 
 	var view := LoadingView.new()
 	steps.title = "Titel"
+	view.size = Vector2(1600, 900)
 	view.show_steps(steps)
 	var labels := view.find_children("*", "Label", false, false)
 	var texts: Array[String] = []
@@ -35,6 +36,18 @@ func _initialize() -> void:
 		texts.append(label.text)
 	_check(texts.has("Titel") and texts.has("Schritt 8") and texts.has("Schritt 7") and texts.has("Schritt 4"),
 			"view: title, current and history rows filled (%s)" % [texts])
+	_check(not view.is_animating(), "view: the first picture does not scroll")
+	var live := LoadingSteps.new()
+	live.add("A", 0)
+	view.show_steps(live)
+	live.add("B", 1)
+	view.show_steps(live)
+	_check(view.is_animating(), "view: a new step starts the scroll")
+	view._process(LoadingView.SCROLL_S * 2.0)
+	_check(not view.is_animating(), "view: the scroll ends after SCROLL_S")
+	_check(is_equal_approx(LoadingView.slot_alpha(0.0), 1.0) and LoadingView.slot_alpha(1.0) < 1.0
+			and LoadingView.slot_alpha(1.0) > LoadingView.slot_alpha(2.0) and LoadingView.slot_alpha(99.0) == 0.0
+			and LoadingView.slot_alpha(-1.0) == 0.0, "view: older rows are fainter and vanish")
 	view.free()
 
 	# Without a screen (tests, headless): reporting is a no-op, also when awaited.

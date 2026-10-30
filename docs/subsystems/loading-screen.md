@@ -1,12 +1,12 @@
 # Startup loading screen
 
-Current state (2026-10-30, fix 1). Shows which boot step runs right now, in German, light text on black, no progress bar.
+Current state (2026-10-30, boot-splash style). Shows which boot step runs right now, in German, light text on black, no progress bar.
 
 ## Code
 - `game/ui/loading_steps.gd` (`LoadingSteps`): the data. Step list with start ticks, the running step, the last
   `HISTORY_MAX` = 4 finished steps, durations, the end-of-boot table. Pure logic, unit-tested.
-- `game/ui/loading_view.gd` (`LoadingView`): the picture (title top, current step 64 px, history 32 px dimmed). Same view
-  for both targets.
+- `game/ui/loading_view.gd` (`LoadingView`): the picture in the boot splash's style (see Look). Same view for both
+  targets; it animates in its own `_process`.
 - `game/ui/loading_screen.gd` (`LoadingScreen`): the reporter and the lifecycle. The boot scene creates it (`start`;
   `create` builds one directly, used by the test with a stand-in XrManager), the boot code calls
   `await LoadingScreen.step("...")` (a no-op without a screen), `Main` arms it with `finish_when_idle`.
@@ -25,6 +25,19 @@ Current state (2026-10-30, fix 1). Shows which boot step runs right now, in Germ
 - `game/assets/boot_splash.png`: the engine's boot splash (black, name, "wird gestartet ..."), made by
   `tools/godot/make_boot_splash.gd` (GPU run); project settings `boot_splash/image`, `show_image`, `fullsize=false`.
 - Boot steps live in `World._ready` / `_setup_bodies` (`world.gd`) and `Main._ready` (`main.gd`).
+
+## Look (2026-10-30)
+- Modelled on the boot splash (1600x900 reference; everything scales with the view's height, so desktop and the 1920x1080
+  VR SubViewport match): the title is the splash's name row (64 px, light, centre 25.6 px above the middle: the
+  hand-over splash -> screen does not jump); the running step is 40 px (splash line: 32 px) at +220 px, light;
+  finished steps above it at 0.8 scale, pitch 50 px, opacity by slot 0.62 / 0.36 / 0.14 / 0 (`SLOT_ALPHA`, interpolated),
+  so the oldest vanish just below the title. The splash script uses `TITLE_*` / `SUBTITLE_*` of `LoadingView`.
+- A new step scrolls the finished rows up over `SCROLL_S` = 0.3 s (new row rises from below, fades in; a backlog scrolls
+  faster). Desktop: steps block the main thread, so `_report` calls `snap()` (no half-scrolled picture; animation only
+  plays where frames flow, e.g. the boot scene's load polling and the armed hold). VR: `_present_vr` waits until the
+  scroll is over before the step's work starts (about 0.3 s per step added to the boot).
+- Layout render: `game/tests/loading_view_shot.gd` -> `screenshots/loading_screen/loading_view_sheet.png` (splash + rest
+  + three scroll moments).
 
 ## Behaviour (standing decisions)
 - No screen (`LoadingScreen.start` returns null) for headless, `--script` runs (all tests), `--self-check`,
@@ -71,11 +84,11 @@ stay a blocking call on the main thread (a static screen; moving them off-thread
 | Atmosphäre wird geladen (background, until the tables are up) | 0.16 s here |
 
 ## Open points
-- The ~20 s cloud shader build blocks the main thread: in VR no frame is submitted meanwhile (whether the runtime keeps
-  showing the last quad frame is unverified; VR was not measured). Fix would be compiling the cloud compute shaders
+- The ~20 s cloud shader build blocks the main thread: in VR no frame is submitted meanwhile; verified on the headset
+  (user, 2026-10-30, commit 614f6c4): the Pimax runtime keeps the quad stable in the room, free 6DOF head movement, no
+  freeze. Fix (to shorten it) would be compiling the cloud compute shaders
   lazily / threaded in `CloudEffect` (weather-clouds subsystem).
-- VR after the 2026-10-30 fix is unverified on the headset (the log lines above show the sequence); the quad's size
-  and distance are unreviewed. The engine error `Condition "image_acquired" is true` early in VR is harmless: Godot
+- The quad's size and distance are unreviewed; the new scroll animation in VR is not yet seen on the headset. The engine error `Condition "image_acquired" is true` early in VR is harmless: Godot
   releases a composition layer's swapchain image only when the frame submits layers, so a frame without a valid pose
   leaves it acquired and the next acquire reuses it.
 - Weather downloads and the cloud bake run after the boot and are not steps of this screen.

@@ -123,6 +123,7 @@ func _report(text: String) -> void:
 	print("[Boot] %+7.2f s  %s" % [now_ms / 1000.0, text])
 	_view.show_steps(steps)
 	if mode == Mode.DESKTOP:
+		_view.snap()  # the step blocks the main thread right after: no half-scrolled picture
 		RenderingServer.force_draw()
 	elif mode == Mode.VR:
 		await _present_vr(first)
@@ -153,6 +154,8 @@ func _present_vr(first: bool) -> void:
 				% [_session_visible, (Time.get_ticks_msec() - waited_ms) / 1000.0])
 	await get_tree().process_frame
 	if first:
+		await get_tree().process_frame
+	while _view.is_animating():  # the history scrolls up (0.3 s) before the step's blocking work starts
 		await get_tree().process_frame
 
 

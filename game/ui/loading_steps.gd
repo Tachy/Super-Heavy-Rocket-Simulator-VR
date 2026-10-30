@@ -31,6 +31,11 @@ func count() -> int:
 	return _texts.size()
 
 
+## The text of step `index` (0 = the first reported).
+func text_at(index: int) -> String:
+	return _texts[index]
+
+
 ## The running step ("" before the first).
 func current() -> String:
 	return "" if _texts.is_empty() else _texts[-1]
