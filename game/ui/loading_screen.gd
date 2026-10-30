@@ -35,8 +35,11 @@ var _placed := false
 var _session_visible := false
 
 
-## Creates the screen as a child of `host` (null result: none wanted - self-check, tests, headless).
+## Creates the screen as a child of `host` (null result: none wanted - self-check, tests, headless). The boot scene
+## starts it first; Main's call then returns that one.
 static func start(host: Node) -> LoadingScreen:
+	if current != null:
+		return current
 	var wanted := _mode_for(host)
 	if wanted == Mode.NONE:
 		return null

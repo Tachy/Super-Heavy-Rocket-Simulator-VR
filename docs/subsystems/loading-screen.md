@@ -11,6 +11,14 @@ Current state (2026-10-30). Shows which boot step runs right now, in German, lig
   code calls `await LoadingScreen.step("...")` (a no-op without a screen), `Main` arms it with `finish_when_idle`.
 - `game/xr/vr_loading_layer.gd` (`VrLoadingLayer`): `OpenXRCompositionLayerQuad` (2 m wide, 2 m in front of the head
   pose of the first visible frame, upright, sort order 1) fed by a 1920x1080 SubViewport with the view.
+- `game/boot.gd` + `boot.tscn` (`Boot`): the project's start scene (`run/main_scene`). Starts the screen first, loads
+  `main.tscn` with `ResourceLoader.load_threaded_request` (polled per frame), reports "Hauptszene laden" and
+  "Wolken-Shader übersetzen ...", instantiates Main, reparents the screen to the root and switches
+  (`Boot.switch_to`, deferred add). Without a screen (headless, `--self-check`) it loads synchronously and switches.
+  `LoadingScreen.start` returns the existing screen when Main calls it. Tests (`--script`, `load("res://main.tscn")`)
+  never pass through it.
+- `game/assets/boot_splash.png`: the engine's boot splash (black, name, "wird gestartet ..."), made by
+  `tools/godot/make_boot_splash.gd` (GPU run); project settings `boot_splash/image`, `show_image`, `fullsize=false`.
 - Boot steps live in `World._ready` / `_setup_bodies` (`world.gd`) and `Main._ready` (`main.gd`).
 
 ## Behaviour (standing decisions)
@@ -27,8 +35,11 @@ Current state (2026-10-30). Shows which boot step runs right now, in German, lig
 - Every step is logged: `[Boot] +s  text`, and a table with durations when it ends.
 
 ## Boot steps (desktop, RTX 4090, warm cache, 2026-10-30; time from engine start)
-Engine/GPU start before the first step: about 21-22 s (D3D12 and project start, not reportable from script; headless
-the whole start is 5 s). Then:
+Measured split of the former 21.5 s before the first step (ticks from engine start): driver/renderer/project load and
+all autoloads 0.9 s; `main.tscn` load 0.7 s; instantiating Main 20.1 s, almost all of it `World`'s member
+`CloudLayer.new()` (the `CloudEffect` / `CloudShadowEffect` compute shaders compiled at construction on the render
+thread; consistent over runs); first frame right after. Now the Boot scene shows its first text at 0.77 s. The 20 s
+stay a blocking call on the main thread (a static screen; moving them off-thread needs a change in the cloud code). Then:
 
 | Step | Duration |
 |---|---|
@@ -45,6 +56,9 @@ the whole start is 5 s). Then:
 | Atmosphäre wird geladen (background, until the tables are up) | 0.16 s here |
 
 ## Open points
+- The ~20 s cloud shader build blocks the main thread: in VR no frame is submitted meanwhile (whether the runtime keeps
+  showing the last quad frame is unverified; VR was not measured). Fix would be compiling the cloud compute shaders
+  lazily / threaded in `CloudEffect` (weather-clouds subsystem).
 - VR is unverified on the headset: whether the Pimax runtime keeps showing the last quad frame during a blocking
   step of 0.5-0.7 s (no frames submitted), whether `session_visible` arrives early enough, the quad's size and distance.
 - Weather downloads and the cloud bake run after the boot and are not steps of this screen.

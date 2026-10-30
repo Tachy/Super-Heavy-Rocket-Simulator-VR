@@ -43,6 +43,21 @@ func _initialize() -> void:
 	await LoadingScreen.step("ignoriert")
 	_check(Engine.get_process_frames() == frames, "step() without a screen does not suspend the caller")
 
+	# The boot scene's hand-over: Main becomes the current scene, the boot scene goes, a screen reparented to the root stays.
+	var boot := Node.new()
+	root.add_child(boot)
+	var kept := Node.new()
+	boot.add_child(kept)
+	kept.reparent(root)
+	var main := Node.new()
+	main.name = "FakeMain"
+	Boot.switch_to(self, main, boot)
+	await process_frame
+	_check(current_scene == main and main.get_parent() == root, "boot: the main scene is the current scene")
+	_check(not is_instance_valid(boot) and is_instance_valid(kept), "boot: the boot scene is freed, the reparented node stays")
+	main.free()
+	kept.free()
+
 	print("loading_steps_test: ", "FAILED" if _failures > 0 else "OK")
 	quit(1 if _failures > 0 else 0)
 
