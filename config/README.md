@@ -403,3 +403,11 @@ the CPUs usable by the process (`os.process_cpu_count()` / `os.cpu_count()`), ca
 The renderer (`game/world/terrain/imagery_source.gd`) reads `index.toml`: per terrain node the finest source covering it at
 about 256 texels across the node (levels between `min_level` and `max_level`) plus the next coarser source as base, blended
 over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad) (`docs/subsystems.md` "Terrain rendering").
+
+## Structure detail files (`structures/`)
+- `structures/starbase_olp2.toml`: the site-independent Pad B tower and chopstick detail (draft from first measurements):
+  `[tower] height_m` + `[[tower.sections]]` (`height_m`, `face_width_m`, `pitch_m`, `pattern`, `leg_profile`,
+  `brace_profile`), `[profiles.<name>]` (`kind` h_beam / tube / angle / box, `size_m`, `wall_m`), `[chopstick]`
+  (`length_m`, `width_m`, `depth_m`, `truss_pitch_m`, rail / chord / brace profile). Every value line carries
+  `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/detail_file.py` (`python -m pytest tools/structures/tests`).
+  Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.
