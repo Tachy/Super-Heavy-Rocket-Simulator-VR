@@ -32,9 +32,7 @@ const EYES_BLOCK_SIZE := 4 * 64 + 16  ## CloudEyes: two clip_from_head, two inv_
 const CENTRE_BLOCK_SIZE := 64 + 3 * 16  ## CloudCentre: clip_from_earth, sizes, params, warp
 ## Render callbacks a replaced image waits before it is freed (frames in flight may still sample it).
 const FREE_DELAY_CALLBACKS := 3
-## The WGS84 ellipsoid's largest radius of curvature a^2 / b (at the poles) and the cloud top above the ellipsoid
-## (clouds.gdshaderinc CLOUD_TOP_M; the game's one copy, CloudBaked and CloudLayer read it).
-const CURVATURE_RADIUS_MAX_M := CloudLayer.WGS84_A_M * CloudLayer.POLAR_STRETCH
+## The cloud top above the ellipsoid (clouds.gdshaderinc CLOUD_TOP_M; the game's one copy, CloudBaked and CloudLayer read it).
 const CLOUD_TOP_M := 20000.0
 
 ## The full-resolution result for the composite quad (layer = view); re-created when the size changes and shown by

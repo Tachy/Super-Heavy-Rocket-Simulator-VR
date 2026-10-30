@@ -29,7 +29,7 @@ static var dz_max_m := 400.0
 static var detail := OS.get_environment("STARSIM_BAKED_DETAIL") != "0"
 ## The clouds' shadows from the bake (shadow step 2026-10-30): S, the line toward the Sun from the band's floor per
 ## column (cloud_baked.gdshaderinc CLOUD_BAKED_SHADOW), feeds the cloud shadow maps (CloudShadowEffect), the march's air
-## shadow and the vehicles' direct Sun (sun_transmittance_at) - one method at every camera height: above VOLUME_TOP_M
+## shadow and the vehicles' direct Sun (CloudLayer.direct_sun_transmittance) - one method at every camera height: above VOLUME_TOP_M
 ## the volume levels the footprint keeps are still baked for S (shape and S, not the light) but not marched.
 ## Checks: > 0 forces a re-bake (and its cross-fade) this many frames after the last one is shown (environment
 ## STARSIM_BAKED_REBAKE_FRAMES; the swap's cost and look in a measurement).
@@ -349,9 +349,12 @@ static func _model() -> int:
 ## What a re-bake follows of the weather: the snapshot pair (its field textures: a new snapshot of the same grid
 ## replaces them - CloudLayer.show_now), its blend, sizes, top and the scattering model.
 static func _weather_key() -> Dictionary:
-	return {"blend": float(ShaderGlobals.value(&"cloud_blend")),
+	var blend := float(ShaderGlobals.value(&"cloud_blend"))
+	# (a slot without weight cannot change the image: its background upload's new texture is no reason to re-bake)
+	return {"blend": blend,
 		"before": ShaderGlobals.value(&"cloud_field_before_size"), "after": ShaderGlobals.value(&"cloud_field_after_size"),
-		"fields": [_texture_rid(&"cloud_field_before"), _texture_rid(&"cloud_field_after")],
+		"fields": [_texture_rid(&"cloud_field_before") if blend < 1.0 else RID(),
+			_texture_rid(&"cloud_field_after") if blend > 0.0 else RID()],
 		"top": float(ShaderGlobals.value(&"cloud_air_shadow_top_m")), "model": _model()}
 
 

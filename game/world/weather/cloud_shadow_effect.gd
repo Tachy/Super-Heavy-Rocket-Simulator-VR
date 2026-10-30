@@ -56,13 +56,15 @@ class Probe:
 	var request := {}  ## key -> the point (Earth-local render axes, float64 m), the main thread's latest
 	var results := {}  ## key -> the last read-back transmittance (-1: beyond the volume levels)
 	var busy := false  ## a read-back is in flight
+	var generation := 0  ## raised by every clear: a read-back dispatched before it is dropped
 
 	## The read-back of the transmittances of `keys` (in their order).
-	func take(data: PackedByteArray, keys: Array) -> void:
+	func take(data: PackedByteArray, keys: Array, dispatched_generation: int) -> void:
 		var values := data.to_float32_array()
 		mutex.lock()
-		for i in range(mini(keys.size(), values.size())):
-			results[keys[i]] = values[i]
+		if dispatched_generation == generation:
+			for i in range(mini(keys.size(), values.size())):
+				results[keys[i]] = values[i]
 		busy = false
 		mutex.unlock()
 var _samplers := {}
@@ -209,6 +211,9 @@ func sun_probe(key: String) -> float:
 	_probe.mutex.lock()
 	var t: float = _probe.results.get(key, -1.0)
 	_probe.mutex.unlock()
+	# (a value counts only while the pass keeps running: a stopped compositor must not leave the last one for good)
+	if Engine.get_frames_drawn() - ran_frame > CloudLayer.SHADOW_RUN_WINDOW_FRAMES:
+		return NAN
 	return t if t >= 0.0 else NAN
 
 
@@ -235,6 +240,7 @@ func _render_pass(_callback_type: int, _render_data: RenderData) -> void:
 	if fill.is_empty():  # (the maps go invalid: the layer takes the column; the probe has no value)
 		_probe.mutex.lock()
 		_probe.results.clear()
+		_probe.generation += 1
 		_probe.mutex.unlock()
 		return
 	var start_us := Time.get_ticks_usec()
@@ -282,6 +288,7 @@ func _dispatch_probe(set0: Array[RDUniform], fill: Dictionary) -> void:
 	var keys: Array = _probe.request.keys()
 	var points: Array = _probe.request.values()
 	var busy := _probe.busy
+	var generation := _probe.generation
 	_probe.mutex.unlock()
 	if busy or keys.is_empty() or not _probe_pipeline.is_valid():
 		return
@@ -305,4 +312,8 @@ func _dispatch_probe(set0: Array[RDUniform], fill: Dictionary) -> void:
 	_probe.mutex.lock()
 	_probe.busy = true
 	_probe.mutex.unlock()
-	_rd.buffer_get_data_async(_probe_out, _probe.take.bind(keys), 0, 4 * keys.size())
+	var error := _rd.buffer_get_data_async(_probe_out, _probe.take.bind(keys, generation), 0, 4 * keys.size())
+	if error != OK:  # (no callback is queued: free the probe for the next frame)
+		_probe.mutex.lock()
+		_probe.busy = false
+		_probe.mutex.unlock()

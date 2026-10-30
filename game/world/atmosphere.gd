@@ -611,7 +611,8 @@ static func regolith_reflectance(n: Vector3, to_light: Vector3, to_eye: Vector3)
 func moon_light_at(position_itrf_m: Vector3) -> Array:
 	if not ready or not moonlight_active or _moon_direction_fixed == Vector3.ZERO:
 		return [Color.WHITE, 0.0]
-	return sun_light_at(position_itrf_m, _moon_direction_fixed, moonlight_relative_value)
+	# No probe key: S is baked toward the Sun only, the Moon takes the grid mean along its own direction.
+	return sun_light_at(position_itrf_m, _moon_direction_fixed, moonlight_relative_value, "")
 
 
 ## Night vision's state into the shaders and the post step: the rods' scale and the cones' chroma factor
@@ -968,8 +969,9 @@ func snap_adaptation() -> void:
 ## incidence renders it; in luminance that is DAY_EXPOSURE / d_AU^2 x T under the TOA Sun. Godot multiplies a
 ## directional light's energy by pi and its Lambert BRDF divides by pi, so energy = the brightest channel's value and
 ## colour = the channels over it, sRGB-encoded (Godot linearises light colours). Before the tables are loaded: the
-## vacuum Sun (white, DAY_EXPOSURE).
-func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float) -> Array:
+## vacuum Sun (white, DAY_EXPOSURE). probe_key: the drawn shapes' S probe (Sun direction only; "" for other lights).
+func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float,
+		probe_key := "sun_light") -> Array:
 	var scene := Vector3.ONE * DAY_EXPOSURE
 	if ready:
 		var transmittance := _core.atmosphere_sun_transmittance(position_itrf_m, sun_direction_itrf)
@@ -977,7 +979,7 @@ func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible
 		var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 		scene = solar * sun_factor * transmittance * (luminance_scale / PI)
 		# The direct beam through the clouds (the drawn shapes' S, else the grid mean along the ray; 1 with weather off).
-		scene *= cloud_light_at(position_itrf_m, sun_direction_itrf, "sun_light").x
+		scene *= cloud_light_at(position_itrf_m, sun_direction_itrf, probe_key).x
 	scene *= visible_fraction
 	var peak := maxf(scene.x, maxf(scene.y, scene.z))
 	var color := Color.WHITE

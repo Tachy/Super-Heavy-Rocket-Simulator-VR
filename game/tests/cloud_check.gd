@@ -85,7 +85,7 @@ const VEHICLE_POINTS := 41
 const VEHICLE_HEIGHT_M := 10.0
 const VEHICLE_MAP_TOLERANCE := Vector2(0.02, 0.15)  ## mean and worst |probe - map| (the map's 62.5 m texels at edges)
 const VEHICLE_MIN_CONTRAST := 0.5
-const EXPECTED_SAMPLES := 61
+const EXPECTED_SAMPLES := 62
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -720,6 +720,22 @@ func _vehicle_samples() -> void:
 			contrast >= VEHICLE_MIN_CONTRAST and absf(float(cpu[0]) - float(cpu[1])) < 0.05,
 			"T %.3f / %.3f (probe), Sun light energy %.3f / %.3f (%.2f of the clear %.3f); CPU grid mean %.3f / %.3f" % [
 			probe[dark], probe[bright], lit[0], lit[1], contrast, clear, cpu[0], cpu[1]])
+	# The Moon's light takes no Sun-direction probe (S is baked toward the Sun only; I1, 2026-10-30): at the shadowed
+	# point (the Moon placed along the Sun's line) it equals the keyless light, i.e. the grid mean along its own ray,
+	# not the probe's value.
+	var saved := [_atmosphere.moonlight_active, _atmosphere.moonlight_relative_value, _atmosphere._moon_direction_fixed]
+	_atmosphere.moonlight_active = true
+	_atmosphere.moonlight_relative_value = 1.0
+	_atmosphere._moon_direction_fixed = sun
+	var moon: float = _atmosphere.moon_light_at(points[dark])[1]
+	var keyless: float = _atmosphere.sun_light_at(points[dark], sun, 1.0, "")[1]
+	var keyed: float = _atmosphere.sun_light_at(points[dark], sun, 1.0)[1]
+	_atmosphere.moonlight_active = saved[0]
+	_atmosphere.moonlight_relative_value = saved[1]
+	_atmosphere._moon_direction_fixed = saved[2]
+	_check("moonlight under the deck: the grid mean along the Moon's ray, not the Sun probe's S",
+			absf(moon - keyless) <= 1.0e-9 * maxf(keyless, 1.0) and absf(keyless - keyed) > 1.0e-6 * maxf(keyed, 1.0),
+			"moon %.4f keyless %.4f (CPU T %.3f) keyed %.4f (probe T %.3f)" % [moon, keyless, cpu[0], keyed, probe[dark]])
 
 
 ## The Sun probe at each point (Earth-fixed m; one key each), read back after a few frames; NAN where none came.
