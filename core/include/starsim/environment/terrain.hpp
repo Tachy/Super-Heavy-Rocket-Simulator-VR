@@ -20,6 +20,8 @@ public:
     virtual bool water(double /*latitude_rad*/, double /*longitude_rad*/) const { return false; }
     // Spacing in metres of the finest data grid covering the point (the level of detail the terrain really holds).
     virtual double resolution_m(double latitude_rad, double longitude_rad) const = 0;
+    // Upper bound of height_m over the whole body (the relief bound of the terrain horizon march).
+    virtual double max_height_m() const = 0;
 };
 
 }  // namespace starsim::environment

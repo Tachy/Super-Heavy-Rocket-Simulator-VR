@@ -50,6 +50,8 @@ public:
     double height_m(double latitude_rad, double longitude_rad) const override;
     // A site tile's pixel scale inside a tile, the global grid's spacing elsewhere.
     double resolution_m(double latitude_rad, double longitude_rad) const override;
+    // The highest sample of the global grid and the tiles (the blend never exceeds its two inputs).
+    double max_height_m() const override { return max_height_m_; }
     double height_at_fixed_m(const math::Vec3& fixed_m) const override;  // below the point's direction
     math::Vec3 normal_fixed(const math::Vec3& fixed_m) const override;  // outward unit normal of the surface there
     bool in_tile(double latitude_rad, double longitude_rad) const;
@@ -61,6 +63,7 @@ private:
     CylindricalGrid global_;
     std::vector<PolarStereographicTile> tiles_;
     double sphere_radius_m_;
+    double max_height_m_ = 0.0;
 };
 
 }  // namespace starsim::environment

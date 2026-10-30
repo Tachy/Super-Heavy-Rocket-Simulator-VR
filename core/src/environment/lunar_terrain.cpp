@@ -49,7 +49,13 @@ double CylindricalGrid::height_m(double latitude_rad, double longitude_rad) cons
 }
 
 LunarTerrain::LunarTerrain(CylindricalGrid global, std::vector<PolarStereographicTile> tiles, double sphere_radius_m)
-    : global_(std::move(global)), tiles_(std::move(tiles)), sphere_radius_m_(sphere_radius_m) {}
+    : global_(std::move(global)), tiles_(std::move(tiles)), sphere_radius_m_(sphere_radius_m) {
+    const auto grid_max = [](const HeightGrid& g) {
+        return g.dn.empty() ? 0.0 : g.dn_scale_m * *std::max_element(g.dn.begin(), g.dn.end());
+    };
+    max_height_m_ = grid_max(global_.grid);
+    for (const auto& tile : tiles_) max_height_m_ = std::max(max_height_m_, grid_max(tile.grid));
+}
 
 double LunarTerrain::height_m(double latitude_rad, double longitude_rad) const {
     for (const auto& tile : tiles_) {
