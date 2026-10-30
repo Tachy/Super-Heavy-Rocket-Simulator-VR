@@ -83,20 +83,30 @@ on top; it replaced the interim `GroundPatch`.
   level 7). The lander's CG is drawn 18.11 m above the drawn surface = the session's `altitude_terrain_m`, 0.8 m from
   the site.
   **Terrain shadows:** the node builder bakes the core's horizon (`StarsimCore.horizon_elevations`, banded bake, observer =
-  the vertex on the terrain surface) for 16 azimuths per grid vertex into a half-float RGBAH image of 260 x 65 texels
-  (texel `a * 4 + c`, row `b` = vertex (a, b), azimuths 4c .. 4c+3; the core's order reinterpreted, no copy; half floats
-  0.004 deg at 5 deg, range +-pi/2 so no clamp). CUSTOM2 carries the vertex's grid position (a, b) (the Moon has no
-  water mask), skirts take their edge vertex's. The shader filters bilinearly itself (`texelFetch`, so shared edges read
-  identical texels) and takes the horizon in the light's azimuth (linear between the two sectors); the visible fraction
-  is the exact circular segment of the disc (angular radius r / distance) above that straight horizon; it multiplies
-  the Sun term, the umbra glow and (own horizon, the Earth's disc) the earthshine. Local east / north come from the
-  Moon-fixed position (pole +Y, any east at a pole). Nodes with spacing > `HORIZON_MAX_SPACING_M` (1000 m, level <= 5)
-  build none (`horizon_enabled` false: lit as before). Bake: 32 ms per leaf node (level 12), 43-46 ms at level 7, 0.06 s
-  at 666 m, 0.2 s at 1.3 km, 0.8-1.4 s at 2.7 km and coarser (hence the cap; one worker, idle machine). Lunar site load
-  (IM-2, worker threads, headless, to idle): 4.9 s without horizons, 40 s with horizons on all levels, 11.3 s with the cap.
-  Upload: one 135 KB ImageTexture per node inside the existing upload budget. GPU (1600 x 900, `--gpu_time`, median):
-  15 km view over rough terrain 0.724 -> 1.018 ms (+0.29 ms, fragment ALU / fetch of the horizon test; per-vertex
-  pre-computation was slower), 2 m ground view 0.608 -> 0.649 ms, stereo mock 2.93 -> 3.20 ms.
+  the vertex on the terrain surface) for 16 azimuths per grid vertex into 4 half-float RGBAH layers of 65 x 65 texels
+  (layer c, texel (a, b) = vertex (a, b), azimuths 4c .. 4c+3; half floats 0.004 deg at 5 deg, range +-pi/2 so no clamp;
+  `HORIZON_STRIDE` 2 would halve the resolution: 4x less bake time and memory but up to 1 deg shadow-edge error, kept 1).
+  The layers become one `Texture2DArray` (filter_linear, texel centres = vertices: hardware bilinear between the
+  vertices, shared edges read identical texels) and a material parameter `horizon_max_rad` (the node's highest horizon +
+  `HORIZON_MAX_MARGIN_RAD`). CUSTOM2 carries the vertex's grid position (the Moon has no water mask; the vertex stage
+  turns it into the map's uv), skirts take their edge vertex's. The shader takes the horizon in the light's azimuth
+  (one filtered sample, a second only after a layer's last azimuth; linear between the two sectors); a light whose disc
+  lies wholly above `horizon_max_rad` skips every fetch, and a light that cannot reach the fragment (below its normal's
+  horizon, the Sun with no umbra glow) skips its horizon. The visible fraction is the exact circular segment of the disc
+  (angular radius r / distance) above that straight horizon; it multiplies the Sun term, the umbra glow and (own horizon,
+  the Earth's disc) the earthshine. `sun_radius_m` / `earth_radius_m` are set from World (no shader defaults). Local
+  east / north come from the Moon-fixed position (pole +Y, any east at a pole). All levels get a horizon: the lattice
+  march's step cap is max(1000 m, spacing / 2) (core), a single-point query keeps 1000 m. Bake per node (one worker,
+  idle, IM-2): 175 ms at level 5 (1.3 km), 104 ms level 4, 58 ms level 3, ~30 ms levels 1-2 and 6-12 (half of it the
+  GDScript layer split, ~20 ms at stride 1). Levels 3-5 stay expensive because their coarse lattice marches out to
+  hundreds of km from small first steps (2 % growth: ~260 samples per ray at 3 km spacing, 17.8 M samples per node);
+  the step cap bites only beyond ~50 km. Lunar site load (IM-2, worker threads, headless, to idle): 3.7 s without
+  horizons, 9.4 s with them (measured at stride 2, stride 1 not re-measured; 16 builds in flight instead of 8 did not help: 9.1 s). GPU (1600 x 900,
+  `--gpu_time`, median; the machine's GPU state flips between runs, so before / after are interleaved): 15 km view over
+  rough terrain +9 % (0.446 -> 0.488 ms), 2 m ground view +7 % (0.347 -> 0.370), stereo mock +6-8 % (2.85-2.94 ->
+  3.10). The cost is the horizon fetch's cache misses (the same shader with every fetch at one fixed texel: +0 %; the
+  ALU of atan / asin / segment: < 1 %); per-vertex pre-computation and skipping the earthshine's horizon where the Sun
+  dominates were slower.
 
 ## Code
 
@@ -140,7 +150,7 @@ on top; it replaced the interim `GroundPatch`.
   worker-pool dependent; see CLAUDE.md known issues).
 - Moon shadows: shadow edges are as sharp as the grid (vertex spacing, 10 m at the sites, 333 m on the far side; the
   bake's banded interpolation is within 0.3-1 deg worst case of a single-ray march); the horizon is taken in the disc
-  centre's azimuth; nodes coarser than 1 km and nodes without terrain data have none; no shadows of vehicles or of
+  centre's azimuth; nodes without terrain data have none; no shadows of vehicles or of
   structures; the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
   consistent but arbitrary north.
 - A fine imagery patch smaller than ~0.1 x viewing distance fades out from far away; S2 brightness steps over open

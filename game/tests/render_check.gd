@@ -350,9 +350,13 @@ func _gpu_frames(world: World) -> bool:
 		return false
 	var sorted := _gpu_ms.duplicate()
 	sorted.sort()
-	print("render_check: GPU render time over %d frames: median %.3f ms, p99 %.3f ms (render scale %.2f, %s)" % [
-			wanted, sorted[wanted / 2], sorted[mini(wanted - 1, int(0.99 * wanted))], root.scaling_3d_scale,
-			root.size])
+	var total := 0.0
+	for ms: float in sorted:
+		total += ms
+	# The mean beside the median: a frame time that alternates between two levels flips the median between them.
+	print("render_check: GPU render time over %d frames: median %.3f ms, p99 %.3f ms, mean %.3f ms (render scale %.2f, %s)"
+			% [wanted, sorted[wanted / 2], sorted[mini(wanted - 1, int(0.99 * wanted))], total / wanted,
+			root.scaling_3d_scale, root.size])
 	for name: String in _gpu_passes:
 		var ms: Array = _gpu_passes[name]
 		while ms.size() < wanted:  # frames without that interval

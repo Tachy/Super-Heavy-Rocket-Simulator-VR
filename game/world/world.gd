@@ -688,6 +688,7 @@ func _setup_moon_terrain() -> void:
 	material.shader = load("res://shaders/terrain_moon.gdshader")
 	material.set_shader_parameter("albedo_texture", _moon_material.get_shader_parameter("albedo_texture"))
 	material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)
+	material.set_shader_parameter("sun_radius_m", SUN_RADIUS_M)
 	moon_terrain.name = "MoonTerrain"
 	moon_terrain.camera_global = "moon_terrain_camera"  # project.godot [shader_globals], read by terrain_moon.gdshader
 	moon.add_child(moon_terrain)

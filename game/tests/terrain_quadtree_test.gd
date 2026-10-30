@@ -394,26 +394,31 @@ func _check_moon_horizon() -> void:
 	for level in [leaf_level, 7]:
 		var key := CubeSphere.key_at(direction, level)
 		var node := TerrainNodeBuilder.build(key, heights, null, MOON_RADIUS_M)
-		var image: Image = node["horizon"]
-		_check(image != null and image.get_width() == ROW * TerrainNodeBuilder.HORIZON_BLOCKS
-				and image.get_height() == ROW and image.get_format() == Image.FORMAT_RGBAH,
-				"moon level %d: horizon map %s (%.0f ms bake and encode)" % [level, "%dx%d" % [image.get_width(),
-				image.get_height()] if image != null else "missing", node["horizon_ms"]])
-		if image == null:
+		var layers: Array = node["horizon"] if node["horizon"] != null else []
+		var layers_ok := layers.size() == TerrainNodeBuilder.HORIZON_LAYERS
+		for layer: Image in layers:
+			layers_ok = layers_ok and layer.get_width() == TerrainNodeBuilder.HORIZON_ROW \
+					and layer.get_height() == TerrainNodeBuilder.HORIZON_ROW \
+					and layer.get_format() == Image.FORMAT_RGBAH
+		_check(layers_ok, "moon level %d: %d horizon layers of %d x %d RGBAH (%.0f ms bake and encode)"
+				% [level, layers.size(), TerrainNodeBuilder.HORIZON_ROW, TerrainNodeBuilder.HORIZON_ROW, node["horizon_ms"]])
+		if not layers_ok:
 			continue
 		var worst_deg := 0.0
 		var sum_deg := 0.0
 		var count := 0
 		var max_elevation_deg := 0.0
-		for point: Vector2i in [Vector2i(32, 32), Vector2i(10, 50), Vector2i(0, 0), Vector2i(64, 64), Vector2i(20, 3)]:
-			var vertex_lat_lon := _vertex_lat_lon(key, point.x, point.y)
+		for point: Vector2i in [Vector2i(16, 16), Vector2i(5, 25), Vector2i(0, 0), Vector2i(32, 32), Vector2i(10, 1)]:
+			# texel (i, j) = grid vertex (2 i, 2 j)
+			var vertex_lat_lon := _vertex_lat_lon(key, point.x * TerrainNodeBuilder.HORIZON_STRIDE,
+					point.y * TerrainNodeBuilder.HORIZON_STRIDE)
 			var samples: Dictionary = _core.surface_samples("moon", PackedFloat64Array([vertex_lat_lon.x]),
 					PackedFloat64Array([vertex_lat_lon.y]))
 			var height: float = (samples["height_m"] as PackedFloat64Array)[0]
 			for k in TerrainNodeBuilder.N_AZ:
 				var reference: float = _core.horizon_elevation_rad("moon", vertex_lat_lon.x, vertex_lat_lon.y, height,
 						k * TAU / TerrainNodeBuilder.N_AZ)
-				var stored := TerrainNodeBuilder.horizon_value(image, point.x, point.y, k)
+				var stored := TerrainNodeBuilder.horizon_value(layers, point.x, point.y, k)
 				max_elevation_deg = maxf(max_elevation_deg, absf(rad_to_deg(stored)))
 				if absf(reference) < deg_to_rad(5.0):
 					var error_deg := absf(rad_to_deg(stored - reference))
@@ -428,6 +433,16 @@ func _check_moon_horizon() -> void:
 				"moon level %d: horizon texels match the core's "
 				% level + "single-ray march (%d samples below 5 deg: worst %.2f deg, mean %.3f deg; largest stored "
 				% [count, worst_deg, sum_deg / maxf(count, 1)] + "elevation %.1f deg)" % max_elevation_deg)
+		# The early-out bound: the highest horizon of the whole map, with the margin, and tight to it.
+		var map_max := -PI
+		for layer: Image in layers:
+			for b in TerrainNodeBuilder.HORIZON_ROW:
+				for a in TerrainNodeBuilder.HORIZON_ROW:
+					var texel := layer.get_pixel(a, b)
+					map_max = maxf(map_max, maxf(maxf(texel.r, texel.g), maxf(texel.b, texel.a)))
+		var bound: float = node["horizon_max_rad"]
+		_check(bound >= map_max and bound - map_max < 2.0 * TerrainNodeBuilder.HORIZON_MAX_MARGIN_RAD,
+				"moon level %d: horizon_max_rad %.5f covers the map's highest %.5f" % [level, bound, map_max])
 		var vertices_ok := true
 		var custom2: PackedFloat32Array = node["custom2"]
 		for s in TerrainNodeBuilder.SKIRT_EDGE.size():
@@ -437,13 +452,13 @@ func _check_moon_horizon() -> void:
 		_check(vertices_ok, "moon level %d: CUSTOM2 is the grid position, skirts take their edge vertex's" % level)
 	var key := CubeSphere.key_at(direction, 7)
 	var east_key := Vector4i(key.x, key.y, key.z + 1, key.w)
-	var west := TerrainNodeBuilder.build(key, heights, null, MOON_RADIUS_M)["horizon"] as Image
-	var east := TerrainNodeBuilder.build(east_key, heights, null, MOON_RADIUS_M)["horizon"] as Image
+	var west: Array = TerrainNodeBuilder.build(key, heights, null, MOON_RADIUS_M)["horizon"]
+	var east: Array = TerrainNodeBuilder.build(east_key, heights, null, MOON_RADIUS_M)["horizon"]
 	# In half-float steps (2^-10 of the value): the two nodes' vertex coordinates differ by ~1e-12 (measured: 2 steps).
 	var seam := 0.0
-	for b in ROW:
+	for b in TerrainNodeBuilder.HORIZON_ROW:
 		for k in TerrainNodeBuilder.N_AZ:
-			var west_value := TerrainNodeBuilder.horizon_value(west, CELLS, b, k)
+			var west_value := TerrainNodeBuilder.horizon_value(west, TerrainNodeBuilder.HORIZON_ROW - 1, b, k)
 			var difference := absf(west_value - TerrainNodeBuilder.horizon_value(east, 0, b, k))
 			seam = maxf(seam, difference / maxf(absf(west_value) / 1024.0, 1e-7))
 	_check(seam <= 4.0, "moon: the shared edge of two neighbouring nodes has the same horizons (max %.2f half-float "

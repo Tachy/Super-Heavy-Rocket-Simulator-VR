@@ -114,3 +114,6 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   our [E] site coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.
 - **Moon without cast shadows (superseded by the horizon maps, 2026-10-30):** "Moon: no cast shadows (crater rims,
   polar shadows): a polar site with the Sun ~1 deg high is dark by its normals only - a later part."
+- **Horizon maps only up to 1 km spacing (superseded 2026-10-30):** nodes coarser than `HORIZON_MAX_SPACING_M` = 1000 m
+  (level <= 5) had none because their bake cost 0.2-1.4 s each (the first site load went 5 s -> 40 s with all levels);
+  the lattice step cap now follows the spacing and the maps are 4 half-float layers of a Texture2DArray, so every level has one.
