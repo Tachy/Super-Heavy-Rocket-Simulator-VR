@@ -17,8 +17,9 @@ using math::Vec3;
 // [E] Growth of the march step per sample (2 % of the distance). Chosen so the march stays within 0.1 deg of a
 // brute-force march with half-pixel steps on the LDEM_16 and the 20 m site tile (test_terrain_horizon.cpp).
 constexpr double step_growth = 1.02;
-// [E] Largest step: half the 1.9 km spacing of LDEM_16, so that far ridges are not stepped over.
-constexpr double max_step_m = 1000.0;
+// [E] Largest step of a single-point march: half the 1.9 km spacing of LDEM_16, so that far ridges are not stepped
+// over. A lattice march raises it to half the lattice spacing (the drawn mesh resolves nothing finer).
+constexpr double horizon_max_step_m = 1000.0;
 
 // Local frame of a point on the unit sphere: up, east, north.
 struct LocalFrame {
@@ -44,8 +45,9 @@ public:
         double csc;   // 1 / s
     };
 
-    MarchSequence(double sphere_radius_m, const HorizonMarch& march)
-        : inv_radius_(1.0 / sphere_radius_m),
+    MarchSequence(double sphere_radius_m, const HorizonMarch& march, double max_step_m = horizon_max_step_m)
+        : max_step_m_(max_step_m),
+          inv_radius_(1.0 / sphere_radius_m),
           end_m_(march.max_distance_m > 0.0 ? march.max_distance_m : std::numeric_limits<double>::infinity()),
           distance_m_(march.min_distance_m > 0.0 ? march.min_distance_m : march.first_step_m),
           step_m_(march.first_step_m),
@@ -82,11 +84,11 @@ private:
         const double c_next = c_ * cd - s_ * sd;
         s_ = s_ * cd + c_ * sd;
         c_ = c_next;
-        step_m_ = std::min(step_m_ * step_growth, max_step_m);
+        step_m_ = std::min(step_m_ * step_growth, max_step_m_);
         valid_ = is_valid();
     }
 
-    double inv_radius_, end_m_, distance_m_, step_m_, c_, s_;
+    double max_step_m_, inv_radius_, end_m_, distance_m_, step_m_, c_, s_;
     bool valid_ = false;
     size_t first_ = 0;
     std::vector<Sample> samples_;
@@ -214,7 +216,8 @@ std::vector<double> band_elevations(const Terrain& terrain, double sphere_radius
                                       [&](const auto& entry) { return entry.first == first_step_m; });
             if (found == sequences.end()) {
                 sequences.emplace_back(first_step_m, MarchSequence(sphere_radius_m,
-                    HorizonMarch{lat.spacing_m, first_step_m, end_m, start_m}));
+                    HorizonMarch{lat.spacing_m, first_step_m, end_m, start_m},
+                    std::max(horizon_max_step_m, 0.5 * lat.spacing_m)));
                 found = sequences.end() - 1;
             }
             MarchSequence& sequence = found->second;

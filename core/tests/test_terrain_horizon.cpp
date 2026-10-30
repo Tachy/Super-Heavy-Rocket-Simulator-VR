@@ -389,7 +389,11 @@ TEST_CASE("LOLA data: banded lattice timing (printed, not asserted)", "[terrain_
     };
     for (const Case& c : {Case{"IM-2 leaf 10.4 m", site_lat, site_lon, 10.4},
                           Case{"IM-2 level 7 373 m", site_lat, site_lon, 373.0},
-                          Case{"far-side plain level 7 373 m", 0.0, 165.0 * deg, 373.0}}) {
+                          Case{"far-side plain level 7 373 m", 0.0, 165.0 * deg, 373.0},
+                          Case{"IM-2 level 5 1.5 km", site_lat, site_lon, 1492.0},
+                          Case{"IM-2 level 4 3 km", site_lat, site_lon, 2984.0},
+                          Case{"IM-2 level 2 12 km", site_lat, site_lon, 11936.0},
+                          Case{"IM-2 level 1 24 km", site_lat, site_lon, 23872.0}}) {
         const NodeLattice node = make_lattice(*terrain, c.lat, c.lon, c.spacing_m);
         const auto t0 = std::chrono::steady_clock::now();
         const auto out = environment::horizon_elevations_lattice(*terrain, R, node.n, node.lat, node.lon, node.h,
