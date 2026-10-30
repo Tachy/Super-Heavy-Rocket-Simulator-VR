@@ -826,7 +826,9 @@ func _away_from_earth_samples() -> void:
 func _moon_terrain_sun_samples() -> void:
 	var present: Dictionary = _core.load_terrain(Paths.config_dir())
 	if not present.get("moon", false):
+		# both samples still count, so that EXPECTED_SAMPLES holds without data
 		_check("terrain Sun, IM-2 site", true, "skipped: no lunar terrain data")
+		_check("terrain Sun, between two sectors", true, "skipped: no lunar terrain data")
 		return
 	var lat := deg_to_rad(IM2_LAT_DEG)
 	var lon := deg_to_rad(IM2_LON_DEG)
@@ -863,11 +865,10 @@ func _terrain_sun_fraction(point: Vector3, up: Vector3, toward: Vector3, elevati
 	return MoonSunHorizon.sun_visible_fraction(_core, point, point + direction * AU_M)
 
 
-## IM-2 site (smoke_test.gd's horizon checks), the Sun's margin about the terrain horizon, the orbit's height.
+## IM-2 site (smoke_test.gd's horizon checks), the Sun's margin about the terrain horizon.
 const IM2_LAT_DEG := -84.79
 const IM2_LON_DEG := 29.19
 const TERRAIN_SUN_MARGIN_DEG := 1.0
-const ORBIT_HEIGHT_M := 100000.0
 
 
 ## Earthshine: the full Earth's light at the Moon (Atmosphere.earthshine_relative x the TOA illuminance) within this

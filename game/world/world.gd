@@ -574,7 +574,7 @@ func _moon_terrain_sun_fraction(point_gcrf_m: Vector3) -> float:
 
 ## The DirectionalLight's colour and energy: the Sun transmitted through the atmosphere to the followed body (the
 ## camera when no vehicle is followed), with the part of the solar disc the Moon leaves (Atmosphere.sun_light_at; near
-## the Moon on its ground sphere, Atmosphere.moon_visible_fraction).
+## the Moon on the lunar terrain's horizon, _moon_terrain_sun_fraction; Atmosphere.moon_visible_fraction otherwise).
 func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 	var lit_gcrf := camera_gcrf_m
 	if focus == FOCUS_VEHICLE and flight.sim.is_active():

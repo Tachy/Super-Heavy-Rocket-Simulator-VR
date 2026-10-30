@@ -6,6 +6,7 @@
 #include "starsim/environment/geographic_grid.hpp"
 #include "starsim/environment/geoid.hpp"
 #include "starsim/environment/terrain.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::environment {
@@ -47,9 +48,8 @@ public:
     bool water(double latitude_rad, double longitude_rad) const override;
     // Latitude step of the finest grid covering the point (local, regional, global relief) in metres.
     double resolution_m(double latitude_rad, double longitude_rad) const override;
-    // [S] Everest 8,848.86 m orthometric (Nepal / China 2020) + the largest geoid undulation +85 m (EGM2008), rounded
-    // up: an ellipsoidal-height bound without scanning the grids (site plateaus lie far below it).
-    double max_height_m() const override { return 9000.0; }
+    // An ellipsoidal-height bound without scanning the grids (source: constants::earth_terrain_max_height_m).
+    double max_height_m() const override { return constants::earth_terrain_max_height_m; }
     const Geoid& geoid() const { return geoid_; }
     const std::vector<Plateau>& plateaus() const { return plateaus_; }
 

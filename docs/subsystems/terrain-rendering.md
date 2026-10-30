@@ -79,15 +79,17 @@ on top; it replaced the interim `GroundPatch`.
   262144 in project.godot.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
   colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine + terrain shadows). Leaf level 12, 10.4 m spacing at
-  the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m,
-  level 7). The lander's CG is drawn 18.11 m above the drawn surface = the session's `altitude_terrain_m`, 0.8 m from
+  the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m;
+  level 7, spacing 333 m). The lander's CG is drawn 18.11 m above the drawn surface = the session's `altitude_terrain_m`, 0.8 m from
   the site.
   **Terrain shadows:** the node builder bakes the core's horizon (`StarsimCore.horizon_elevations`, banded bake, observer =
   the vertex on the terrain surface) for 16 azimuths per grid vertex into 4 half-float RGBAH layers of 65 x 65 texels
   (layer c, texel (a, b) = vertex (a, b), azimuths 4c .. 4c+3; half floats 0.004 deg at 5 deg, range +-pi/2 so no clamp;
   `HORIZON_STRIDE` 2 would halve the resolution: 4x less bake time and memory but up to 1 deg shadow-edge error, kept 1).
   The layers become one `Texture2DArray` (filter_linear, texel centres = vertices: hardware bilinear between the
-  vertices, shared edges read identical texels) and material parameters `horizon_max_rad` (the node's highest horizon
+  vertices, shared edges of same-level neighbours read identical texels: the march's `spacing_m` is one value per
+  level, R x pi / 2 / 2^level / 64 x `HORIZON_STRIDE` [E], not the node's own longest edge, which differs per node;
+  measured 0.00 half-float steps off the face centre at (-60, 40) L7, (35, 45) L4 and across a cube-face edge) and material parameters `horizon_max_rad` (the node's highest horizon
   + its half-float rounding `HORIZON_MAX_REL_MARGIN` 2^-10 relative + `HORIZON_MAX_MARGIN_RAD` 1e-4, conservative at
   any elevation) and `horizon_stride` (from the builder's constant; the row length is `textureSize`). The binding returns
   the values layer-major (`layer_major` flag, a pure reorder in C++), so each layer image is a slice. A pole vertex
@@ -99,12 +101,15 @@ on top; it replaced the interim `GroundPatch`.
   (angular radius r / distance) above that straight horizon; it multiplies the Sun term, the umbra glow and (own horizon,
   the Earth's disc) the earthshine. `sun_radius_m` / `earth_radius_m` are set from World (no shader defaults). Local
   east / north come from the Moon-fixed position (pole +Y, any east at a pole). All levels get a horizon: the lattice
-  march's step cap is max(1000 m, spacing / 2) (core), a single-point query keeps 1000 m. Bake per node (one worker,
-  idle, IM-2, stride 2): 175 ms at level 5 (1.3 km), 104 ms level 4, 58 ms level 3, ~30 ms levels 1-2 and 6-12; at
-  stride 1 the leaf bake and encode is ~40 ms (53 before the layer-major output), level 7 ~57 ms. Levels 3-5 stay expensive because their coarse lattice marches out to
-  hundreds of km from small first steps (2 % growth: ~260 samples per ray at 3 km spacing, 17.8 M samples per node);
-  the step cap bites only beyond ~50 km. Lunar site load (IM-2, worker threads, headless, to idle): 3.7 s without
-  horizons, 9.4 s with them (measured at stride 2, stride 1 not re-measured; 16 builds in flight instead of 8 did not help: 9.1 s). GPU (1600 x 900,
+  march's step cap is max(1000 m, spacing / 2) (core), a single-point query keeps 1000 m. Bake and encode per node (one thread,
+  idle machine, IM-2, stride 1, 2026-10-30): level 1 109 ms, 2 210, 3 385, 4 662, 5 220, 6 67, 7 54, 8 46, 9-12 38-39
+  (the leaf 38 ms, of which the GDScript maximum loop ~5 ms). Levels 1-4 are expensive because their coarse lattice
+  marches out to hundreds of km from small first steps (2 % growth: ~260 samples per ray at 3 km spacing, 17.8 M samples
+  per node); the step cap bites only beyond ~50 km. Lunar site load (IM-2, 915 nodes, 8 builds in flight, to idle):
+  3.7 s without horizons; with them 31.3 s headless (a bare quadtree, no World, no clouds) and ~20 s in a real window
+  (render_check, 1600 x 900: loading starts at 5 s, ends at ~25 s; the cloud volume is off there: `cloud_enabled`
+  false, no baked set, no bake running). The earlier 9.4 s was measured at stride 2 (4x cheaper at the coarse levels);
+  16 builds in flight instead of 8 did not help at stride 2: 9.1 s. GPU (1600 x 900,
   `--gpu_time`, median; the machine's GPU state flips between runs, so before / after are interleaved): 15 km view over
   rough terrain +9 % (0.446 -> 0.488 ms), 2 m ground view +7 % (0.347 -> 0.370), stereo mock +6-8 % (2.85-2.94 ->
   3.10). The cost is the horizon fetch's cache misses (the same shader with every fetch at one fixed texel: +0 %; the
@@ -155,6 +160,17 @@ on top; it replaced the interim `GroundPatch`.
   bake's banded interpolation is within 0.3-1 deg worst case of a single-ray march); the horizon is taken in the disc
   centre's azimuth; nodes without terrain data have none; no shadows of vehicles or of
   structures; the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
-  consistent but arbitrary north (the shader's pole fallback east; the baked pole vertex follows its neighbour).
+  consistent but arbitrary north (the shader's pole fallback east; the baked pole vertex follows its neighbour);
+  near-pole nodes (not only the pole vertex) bilinearly mix horizons of vertices whose norths differ by degrees (the
+  azimuth profile is re-sampled in the bake, not by the GPU's filter), so shadow edges there are less accurate than
+  the stated bound (worst 0.30 deg at lat -89.5 in the bake itself).
+- Moon shadows, nodes one level apart: the horizon map is per level (its marches depend on the level's spacing), with no
+  morph of the horizon, so a split or merge swaps the horizons at once. Child edge vs parent at IM-2: 15-24 % of the
+  low-horizon (< 5 deg) values differ by more than the Sun's disc radius (0.267 deg), worst 6.7-17.6 deg, medians
+  0.003-0.28 deg. Seen (IM-2, 2 km up, Sun 3.6 deg above the local horizontal, 0.5 m camera steps across a node
+  split, same view, `screenshots/moon_shadows/pop_*`): an L10 -> L11 split (node 9 km away) changes 0.098 % of the
+  pixels by more than 2/255 (0.005 % by more than 8, max 25) and an L11 -> L12 split (4.6 km) 0.43 % (0.012 %, max
+  25); the same step with no split: 0.014 % (0.002 %, max 25). No step or pop is visible at 1:1; the change sits
+  along the shadow edges inside the split node. Not a visible defect at these views; a horizon morph stays open.
 - A fine imagery patch smaller than ~0.1 x viewing distance fades out from far away; S2 brightness steps over open
   water remain.

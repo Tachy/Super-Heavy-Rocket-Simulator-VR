@@ -4,6 +4,9 @@
 extends SceneTree
 
 const IM2_LAT_DEG := -84.79
+## Lowest lunar relief below the mean sphere [S: ~9.1 km, the Antoniadi crater floor in the South Pole-Aitken basin,
+## LOLA], rounded up.
+const DEEPEST_BASIN_M := 9500.0
 const IM2_LON_DEG := 29.19
 const AU_M := 149597870700.0
 ## Earth - Moon distance for the eclipse geometry (m, mean).
@@ -167,7 +170,8 @@ func _check_rim_sweep() -> void:
 
 
 ## From 2 m to 200 km over one site, the Sun fixed just below the ground's horizon: the fraction rises from 0 to 1
-## without a jump (the pre-check's exit at the relief's top included), and far up equals the mean sphere's value.
+## without a jump (the pre-check's exit at the relief's top included); far up, with the Sun's centre on the mean
+## sphere's limb (a partial fraction), the terrain's fraction lies between the spheres R and R + max height.
 func _check_height_continuity() -> void:
 	var up := _up(IM2_LAT_DEG, IM2_LON_DEG)
 	var north := _north(up)
@@ -191,11 +195,24 @@ func _check_height_continuity() -> void:
 		previous = f
 		last = f
 		h *= 1.05
-	var far := up * (Atmosphere.MOON_RADIUS_M + 200000.0)
-	var mean := 1.0 - Atmosphere.occulted_fraction(_sun_at(far, up, north, elevation) - far, Atmosphere.SUN_RADIUS_M,
-			-far, Atmosphere.MOON_RADIUS_M)
-	_check("height sweep 2 m - 200 km continuous", first == 0.0 and absf(last - mean) < 1e-9 and max_jump < 0.1,
-			"first %.3f, last %.3f (mean sphere %.3f), max step %.4f" % [first, last, mean, max_jump])
+	_check("height sweep 2 m - 200 km continuous", first == 0.0 and last == 1.0 and max_jump < 0.1,
+			"first %.3f, last %.3f, max step %.4f" % [first, last, max_jump])
+	# Far up, the Sun's centre on the mean sphere's limb: the terrain's fraction lies between those of the sphere raised
+	# by the relief's maximum and of the sphere lowered to the deepest basin (the terrain is lower than the mean sphere
+	# at the pole: more Sun than the mean sphere gives).
+	var far_m := 200000.0
+	var far := up * (Atmosphere.MOON_RADIUS_M + far_m)
+	var limb_sun := _sun_at(far, up, north, -acos(Atmosphere.MOON_RADIUS_M / (Atmosphere.MOON_RADIUS_M + far_m)))
+	var terrain := MoonSunHorizon.sun_visible_fraction(_core, far, limb_sun)
+	var mean := 1.0 - Atmosphere.occulted_fraction(limb_sun - far, Atmosphere.SUN_RADIUS_M, -far, Atmosphere.MOON_RADIUS_M)
+	var lowered := 1.0 - Atmosphere.occulted_fraction(limb_sun - far, Atmosphere.SUN_RADIUS_M, -far,
+			Atmosphere.MOON_RADIUS_M - DEEPEST_BASIN_M)
+	var raised := 1.0 - Atmosphere.occulted_fraction(limb_sun - far, Atmosphere.SUN_RADIUS_M, -far,
+			Atmosphere.MOON_RADIUS_M + float(_core.terrain_max_height_m("moon")))
+	_check("200 km, Sun on the mean limb",
+			mean > 0.3 and mean < 0.7 and terrain <= lowered + 1e-9 and terrain >= raised - 1e-9,
+			"terrain %.4f between the raised sphere %.4f and the lowered sphere %.4f (mean sphere %.4f)" % [terrain,
+			raised, lowered, mean])
 
 
 ## Lunar eclipse near the ground: a point 2 m above the IM-2 ground, the Sun 30 deg up (far above the terrain

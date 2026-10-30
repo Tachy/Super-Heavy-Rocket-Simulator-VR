@@ -235,7 +235,7 @@ void print_timing(const environment::LunarTerrain& terrain, double spacing_m, co
 TEST_CASE("LOLA data: horizon march timing (printed, not asserted)", "[terrain_horizon][data]") {
     const auto terrain = lunar_terrain_or_skip();
     print_timing(*terrain, 10.4, {10.4, 10.4}, "leaf (level 12)");
-    print_timing(*terrain, 373.0, {373.0, 373.0}, "level 7");
+    print_timing(*terrain, 333.0, {333.0, 333.0}, "level 7");
 }
 
 // ---- Banded node lattices (horizon_elevations_lattice) ----
@@ -357,10 +357,17 @@ TEST_CASE("Adjacent banded lattices give identical values along their shared edg
     CHECK(differing == 0);
 }
 
-TEST_CASE("A banded lattice stays within 0.1 deg of the full march on a Gaussian mountain", "[terrain_horizon]") {
+TEST_CASE("A banded lattice stays within 0.45 deg of the full march on a Gaussian mountain", "[terrain_horizon]") {
     const auto [mlat, mlon] = destination(0.2, 0.3, 1.2, 6000.0 / R);
     const GaussianMountain mountain(mlat, mlon, 1800.0, 1500.0);
     compare_banded(mountain, 0.2, 0.3, 40.0, "gaussian 40 m", 0.45, 0.3);
+}
+
+TEST_CASE("A coarse-level lattice (3 km spacing, step cap spacing / 2) matches the full march", "[terrain_horizon]") {
+    const auto [mlat, mlon] = destination(0.2, 0.3, 1.2, 60000.0 / R);
+    const GaussianMountain mountain(mlat, mlon, 1800.0, 1500.0);  // a 1.5 km wide ridge: found at the 1.5 km step cap
+    // worst 1.28 deg (a 1.8 km peak seen at an interpolated azimuth), p99 0
+    compare_banded(mountain, 0.2, 0.3, 3000.0, "gaussian 3 km", 1.4, 0.05);
 }
 
 TEST_CASE("LOLA data: banded lattice vs the full march, IM-2 leaf and level 7", "[terrain_horizon][data]") {
@@ -369,16 +376,16 @@ TEST_CASE("LOLA data: banded lattice vs the full march, IM-2 leaf and level 7", 
     // occluder, and the linear interpolation over a stride errs by up to half the difference of their slopes (worst
     // value, rare); the typical error (p99) is a fifth to a tenth of it.
     compare_banded(*terrain, site_lat, site_lon, 10.4, "IM-2 leaf 10.4 m", 0.4, 0.1);
-    compare_banded(*terrain, site_lat, site_lon, 373.0, "IM-2 level 7 373 m", 0.65, 0.3);
+    compare_banded(*terrain, site_lat, site_lon, 333.0, "IM-2 level 7 333 m", 0.65, 0.3);
 }
 
 TEST_CASE("LOLA data: banded lattice vs the full march near the pole and across lon 180", "[terrain_horizon][data]") {
     const auto terrain = lunar_terrain_or_skip();
     // At the pole the north of neighbouring vertices turns by degrees: the bake falls back to smaller strides (exact
     // inside; the edge vertices interpolate over an edge stride decided from the edge alone, for the seams: worst 0.30).
-    compare_banded(*terrain, -89.5 * deg, 20.0 * deg, 373.0, "lat -89.5 level 7", 0.35, 0.1);
-    compare_banded(*terrain, 5.0 * deg, constants::pi - 0.02 * deg, 373.0, "lon 180 level 7", 1.1, 0.65);
-    compare_banded(*terrain, 5.0 * deg, 100.0 * deg, 373.0, "lon 100 level 7 (control)", 0.5, 0.2);
+    compare_banded(*terrain, -89.5 * deg, 20.0 * deg, 333.0, "lat -89.5 level 7", 0.35, 0.1);
+    compare_banded(*terrain, 5.0 * deg, constants::pi - 0.02 * deg, 333.0, "lon 180 level 7", 1.1, 0.65);
+    compare_banded(*terrain, 5.0 * deg, 100.0 * deg, 333.0, "lon 100 level 7 (control)", 0.5, 0.2);
 }
 
 TEST_CASE("LOLA data: banded lattice timing (printed, not asserted)", "[terrain_horizon][data]") {
@@ -388,8 +395,8 @@ TEST_CASE("LOLA data: banded lattice timing (printed, not asserted)", "[terrain_
         double lat, lon, spacing_m;
     };
     for (const Case& c : {Case{"IM-2 leaf 10.4 m", site_lat, site_lon, 10.4},
-                          Case{"IM-2 level 7 373 m", site_lat, site_lon, 373.0},
-                          Case{"far-side plain level 7 373 m", 0.0, 165.0 * deg, 373.0},
+                          Case{"IM-2 level 7 333 m", site_lat, site_lon, 333.0},
+                          Case{"far-side plain level 7 333 m", 0.0, 165.0 * deg, 333.0},
                           Case{"IM-2 level 5 1.5 km", site_lat, site_lon, 1492.0},
                           Case{"IM-2 level 4 3 km", site_lat, site_lon, 2984.0},
                           Case{"IM-2 level 2 12 km", site_lat, site_lon, 11936.0},
@@ -466,10 +473,10 @@ NodeLattice transposed(const NodeLattice& a, bool reversed) {
 }  // namespace
 
 TEST_CASE("Banded lattices straddling a polar stride threshold agree along the shared edge", "[terrain_horizon]") {
-    // 373 m spacing at -86 deg: the local north turns 0.18 deg per vertex. The lattice poleward of the shared row (A)
+    // 333 m spacing at -86 deg: the local north turns 0.18 deg per vertex. The lattice poleward of the shared row (A)
     // needs smaller strides than the one equatorward (B), but the shared row must come out identical: as a row edge,
     // as a column edge (transposed lattice) and in reversed orientation.
-    constexpr double spacing_m = 373.0;
+    constexpr double spacing_m = 333.0;
     const auto [mlat, mlon] = destination(-86.0 * deg, 0.3, 1.0, 60e3 / R);
     const GaussianMountain mountain(mlat, mlon, 3000.0, 10e3);
     const NodeLattice a = make_lattice(mountain, -86.0 * deg, 0.3, spacing_m, -32, -64);  // rows poleward of the centre

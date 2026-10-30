@@ -391,7 +391,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 ##   alone is the Sun's centre ray, a sharp edge) [call: where both act, within the Sun's radius of the limb, the
 ##   penumbra is counted twice - a little too dark there]. For an eye within MOON_EYE_MIN_HEIGHT_M of the lunar mean
 ##   sphere or below it, the Moon's part is recomputed on its ground sphere (_moon_ground_radius: an eye below the mean
-##   sphere stands on the terrain; the passed fraction uses the mean sphere, which would hide the Sun from it).
+##   sphere stands on the terrain; the passed fraction uses the mean sphere, which would hide the Sun from it) unless
+##   eye_terrain_sun_fraction is finite (the lunar terrain's horizon, world.gd), which replaces the Moon's part.
 ## - up: the Earth in view x the part of its disc the Moon leaves (a lunar eye with the Earth below its horizon);
 ## - Moon in view (_moon_in_view_luminance, with moon_itrf_m): the sunlit and earthshine-lit regolith x its view factor.
 ## The result is the largest of the three (as down / up: plates facing the Sun, the Earth, the Moon).

@@ -32,7 +32,9 @@ shaders:
     0.65 at 200 / 400 / 1000 / 2000 km from the umbra's centre; kept physical [call]).
   - Away from the Earth (eye above the top of the atmosphere only): down: transmittance 1 (or the grazing ray's), the
     visible fraction also takes the Earth's disc in front of the Sun (within the Sun's radius of the limb the penumbra
-    is counted twice [call]). Up: the Earth in view x the part of its disc the Moon leaves. Third term, the Moon in
+    is counted twice [call]); near the Moon the Sun's fraction at the eye is the lunar terrain's
+    (`eye_terrain_sun_fraction`, `MoonSunHorizon`, see atmosphere-scattering.md) in place of the Moon's mean-sphere
+    part. Up: the Earth in view x the part of its disc the Moon leaves. Third term, the Moon in
     view (`Atmosphere._moon_in_view_luminance`, needs `update(..., moon_gcrf_m)`): regolith luminance as the Moon
     shaders draw it - mean texture albedo 0.30 [D: `moon_color.png` area-weighted, sRGB-decoded, BT.709] x the regolith
     reflectance (R x LS x f(g) for the Sun, x the solar disc the Earth leaves at the ground point, and the same for the

@@ -230,4 +230,9 @@ inline constexpr double cloud_ice_water_max_kg_m3 = 1.0e-3;
 // total cloud cover leaves it alone so that it does not become a cloud (and a cloud base) below the data's.
 inline constexpr double cloud_trace_fraction = 0.01;
 
+// Upper bound of Earth terrain heights above the WGS84 ellipsoid (EarthTerrain::max_height_m, the horizon march's ray
+// ceiling) [S: Everest 8,848.86 m orthometric (Nepal / China 2020) + the largest geoid undulation +85 m (EGM2008),
+// rounded up; site plateaus lie far below it].
+inline constexpr double earth_terrain_max_height_m = 9000.0;
+
 }  // namespace starsim::constants

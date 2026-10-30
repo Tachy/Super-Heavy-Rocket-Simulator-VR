@@ -83,8 +83,11 @@ vehicles still fly through `Us76Atmosphere`).
   -acos((R + max_height) / (R + h)) (`StarsimCore.terrain_max_height_m`, 10 686 m; none at or below it); a Sun disc
   wholly above that bound is 1 without a march (the mean sphere lies below it too). A point under the terrain (vehicle in
   contact) is marched from 0.5 m above the surface [E]. No lunar terrain data (NAN) or beyond the distance: the
-  mean / ground-sphere value `Atmosphere.moon_visible_fraction` as before (its step at 66 000 km < 0.009 deg, < 2 % of
-  the disc). `world.gd::_moon_terrain_sun_fraction`; the camera's value is computed once per frame (eye adaptation and,
+  mean / ground-sphere value `Atmosphere.moon_visible_fraction` as before. The step at the 66 000 km gate is about
+  4 % of the Sun's disc (the relief ~2 % plus the straight terrain horizon against the sphere's limb ~1.9 %; 0.009 deg
+  is the limb part). Known limits at the gate: the vehicles' path jumps there by the Earth's penumbral share (the
+  core's `solar_eclipse_fraction_gcrf`, used beyond the gate, knows only the Moon; a rare configuration); inside the
+  gate the Earth's penumbra counts twice with the atmosphere transmittance, as the eye path's documented call. `world.gd::_moon_terrain_sun_fraction`; the camera's value is computed once per frame (eye adaptation and,
   without a followed vehicle, the light). Cost, main thread, one fraction (two marches) over rough highlands with the
   Sun at the horizon: 0.02 / 0.04 / 0.05 / 0.08 / 0.15 ms at 2 m / 5 km / 20 km / 100 km / 1000 km: uncached. Tests:
   `tests/moon_sun_test.gd` (headless: bound exact over 7 sites x 5 heights x 16 sectors, rim sweep, height sweep 2 m - 200
