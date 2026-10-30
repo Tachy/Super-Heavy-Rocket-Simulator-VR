@@ -243,6 +243,7 @@ func update_world() -> void:
 	FrameProfiler.begin(&"atmosphere")
 	var adaptation_dt := maxf(_delta, absf(t - _last_world_tdb_s)) if not is_nan(_last_world_tdb_s) else 0.0
 	_last_world_tdb_s = t
+	atmosphere.eye_terrain_sun_fraction = _moon_terrain_sun_fraction(cam)
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			1.0 - core.solar_eclipse_fraction_gcrf(cam, t), moon_apparent_from_earth_m, t, moon_gcrf_m)
 	FrameProfiler.end(&"atmosphere")
@@ -557,6 +558,17 @@ func _place_sun(sun_from_camera_m: Vector3) -> void:
 	sun_light.basis = Basis.looking_at(-direction, Vector3.UP if absf(direction.y) < 0.99 else Vector3.RIGHT)
 
 
+## The Sun's visible fraction at a point from the lunar terrain's horizon (MoonSunHorizon) near the Moon's ground
+## (Atmosphere.moon_terrain_sun_applies: below 20 km); NAN elsewhere or without lunar terrain data (the ground sphere's
+## occultation stays).
+func _moon_terrain_sun_fraction(point_gcrf_m: Vector3) -> float:
+	if not Atmosphere.moon_terrain_sun_applies(point_gcrf_m, moon_gcrf_m):
+		return NAN
+	var gcrf_to_moon_fixed := moon.fixed_to_gcrf.transposed()
+	return MoonSunHorizon.sun_visible_fraction(core, gcrf_to_moon_fixed * (point_gcrf_m - moon_gcrf_m),
+			gcrf_to_moon_fixed * (sun_apparent_from_earth_m - moon_gcrf_m))
+
+
 ## The DirectionalLight's colour and energy: the Sun transmitted through the atmosphere to the followed body (the
 ## camera when no vehicle is followed), with the part of the solar disc the Moon leaves (Atmosphere.sun_light_at; near
 ## the Moon on its ground sphere, Atmosphere.moon_visible_fraction).
@@ -570,6 +582,9 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 	# The core's fraction uses the Moon's mean sphere: on lunar terrain below it the Sun would be hidden at lunar day.
 	var visible := Atmosphere.moon_visible_fraction(lit_gcrf, sun_apparent_from_earth_m, moon_gcrf_m,
 			1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t))
+	var terrain_visible := _moon_terrain_sun_fraction(lit_gcrf)
+	if is_finite(terrain_visible):
+		visible = terrain_visible
 	var light := atmosphere.sun_light_at(gcrf_to_fixed * lit_gcrf, (gcrf_to_fixed * sun_apparent_from_earth_m).normalized(),
 			visible)
 	sun_light.light_color = light[0]

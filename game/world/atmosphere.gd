@@ -104,6 +104,9 @@ const GLOW_ADAPTATION_SHARE := 0.5
 const LIMB_GLOW_HEIGHTS_M := [2000.0, 5000.0, 10000.0, 20000.0, 40000.0]
 ## [call] An eye on the Moon stands at least this high above its ground sphere (render ground views: 2 m).
 const MOON_EYE_MIN_HEIGHT_M := 2.0
+## [E] Above this height over the Moon's mean sphere the terrain's horizon no longer decides the Sun (the highest relief
+## is ~10.8 km above the mean radius [LOLA]; twice that, a vehicle in a low lunar orbit stays at the mean sphere).
+const MOON_TERRAIN_SUN_MAX_HEIGHT_M := 20000.0
 ## [call] The lunar cap's quadrature: rings uniform in sin^2 of the nadir angle (cosine weights), directions per ring.
 const MOON_VIEW_RINGS := 4
 const MOON_VIEW_AZIMUTHS := 8
@@ -156,6 +159,9 @@ var last_earthshine_lux := 0.0
 ## atmosphere_exposure_gain to the whole Moon); 0 without a Moon.
 var earthshine_scene := 0.0
 var last_adaptation_visible_fraction := 1.0
+## The Sun's visible fraction at the camera from the lunar terrain's horizon (MoonSunHorizon; world.gd sets it per
+## frame, NAN: no terrain or not near the lunar ground): there it replaces the ground sphere's occultation.
+var eye_terrain_sun_fraction := NAN
 ## The twilight glow at the last update (cd/m^2; 0 with the Sun up or outside the atmosphere).
 var last_adaptation_glow_cd_m2 := 0.0
 ## Night vision at the last update: the scotopic adaptation luminance (scotopic cd/m^2, paced), the rods' scale of the
@@ -408,6 +414,8 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	if lunar:
 		moon_ground_m = _moon_ground_radius((moon_itrf_m - eye_itrf_m).length())
 		visible = moon_visible_fraction(eye_itrf_m, sun_itrf_m, moon_itrf_m, visible_fraction)
+		if is_finite(eye_terrain_sun_fraction) and moon_terrain_sun_applies(eye_itrf_m, moon_itrf_m):
+			visible = eye_terrain_sun_fraction
 	if outside:
 		visible *= 1.0 - occulted_fraction(sun_itrf_m - eye_itrf_m, SUN_RADIUS_M, -eye_itrf_m, EARTH_MEAN_RADIUS_M)
 	last_adaptation_visible_fraction = visible
@@ -637,10 +645,18 @@ static func _moon_ground_radius(eye_distance_m: float) -> float:
 	return minf(MOON_RADIUS_M, eye_distance_m - MOON_EYE_MIN_HEIGHT_M)
 
 
+## Whether the lunar terrain's horizon (MoonSunHorizon) decides the Sun at a point: it stands no higher than
+## MOON_TERRAIN_SUN_MAX_HEIGHT_M above the mean sphere (terrain above the sphere hides the Sun from its own ground,
+## which the mean-sphere fraction cannot know) or below it; higher up the mean sphere stays.
+static func moon_terrain_sun_applies(point_m: Vector3, moon_m: Vector3) -> bool:
+	return (moon_m - point_m).length() - MOON_RADIUS_M < MOON_TERRAIN_SUN_MAX_HEIGHT_M
+
+
 ## The Sun's visible fraction past the Moon at a point (vectors in any one frame and origin, m) for the eye adaptation
 ## and the vehicles' Sun light (world.gd): mean_sphere_visible is the core's (StarsimCore.solar_eclipse_fraction_gcrf,
 ## the Moon's mean sphere); a point within MOON_EYE_MIN_HEIGHT_M of that sphere or below it - on lunar terrain under the
 ## mean radius, where the mean sphere would hide the Sun - gets it on its own ground sphere (_moon_ground_radius).
+## The callers replace that ground-sphere value by MoonSunHorizon.sun_visible_fraction (moon_terrain_sun_applies).
 static func moon_visible_fraction(point_m: Vector3, sun_m: Vector3, moon_m: Vector3, mean_sphere_visible: float) -> float:
 	var ground_m := _moon_ground_radius((moon_m - point_m).length())
 	if ground_m >= MOON_RADIUS_M:

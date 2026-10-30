@@ -74,9 +74,16 @@ vehicles still fly through `Us76Atmosphere`).
 - **Sun light.** One DirectionalLight: colour and energy per channel = TOA solar RGB x the core's
   `atmosphere_sun_transmittance` x luminance scale / pi x the Moon's visible fraction, at one point: the followed
   vehicle (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Near the Moon
-  the visible fraction comes from `Atmosphere.moon_visible_fraction` (shared with the eye adaptation): within 2 m of
-  the lunar mean sphere or below it the Moon's occultation is taken on the point's own ground sphere (GPU check:
-  1551 m below the mean radius, Sun 60 deg up: light = the open sky's). Clouds (Task 9, `weather-clouds.md` "Light"):
+  the visible fraction comes from `Atmosphere.moon_visible_fraction` (shared with the eye adaptation), and below 20 km
+  over the mean sphere (`MOON_TERRAIN_SUN_MAX_HEIGHT_M` [E]; `Atmosphere.moon_terrain_sun_applies`) from the terrain's
+  horizon instead (`MoonSunHorizon.sun_visible_fraction`, the same geometry as `terrain_moon.gdshader`: the core's
+  `horizon_elevation_rad` march in the two sectors k * 2 pi / 16 around the Sun's azimuth, linear between them, the
+  exact circular segment of the solar disc above that horizon; `world.gd::_moon_terrain_sun_fraction`, also feeds
+  `Atmosphere.eye_terrain_sun_fraction` for the eye adaptation). No lunar terrain data (NAN): the ground-sphere
+  occultation (within 2 m of the mean sphere or below it, on the point's own ground sphere) as before. Cost: one march
+  0.04 ms at IM-2 (2 m above ground), two per point, camera and lit body: uncached. GPU checks: IM-2 site 2 m above the
+  ground, Sun 1 deg below / above / at the horizon: 0 / 1 / 0.5; 1551 m below the mean radius, Sun 60 deg up: light =
+  the open sky's; 100 km orbit: the mean-sphere fraction. Clouds (Task 9, `weather-clouds.md` "Light"):
   x the direct beam's cloud transmittance at that point (`Atmosphere.cloud_light_at`, the Moon's light likewise), and
   `Environment.ambient_light_energy` = the diffuse light under the clouds over the clear sky's there
   (`Atmosphere.cloud_ambient_factor`; exactly 1 with weather off). Earth surfaces (`terrain_earth.gdshader`): the Sun

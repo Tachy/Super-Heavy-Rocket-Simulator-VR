@@ -441,3 +441,10 @@ Former model, verbatim from docs/subsystems/eye-adaptation.md:
     anchored to lit roads (0.75-1.5 cd/m^2, EN 13201-2 M3-M2) and VIIRS DNB radiances of bright cores (~100-300
     nW/(cm^2 sr), ~0.1-0.4 cd/m^2, arXiv 2510.02977). Texture stays 8192 x 4096; follow-up: Black Marble VNP46A4 at
     15 arcsec near the sites, masked by the imagery's urban footprint.
+
+## Vehicles' Sun light near the lunar ground, superseded 2026-10-30 (terrain horizon)
+Was in atmosphere-scattering.md (Sun light): "Near the Moon the visible fraction comes from
+`Atmosphere.moon_visible_fraction` (shared with the eye adaptation): within 2 m of the lunar mean sphere or below it the
+Moon's occultation is taken on the point's own ground sphere (GPU check: 1551 m below the mean radius, Sun 60 deg up:
+light = the open sky's)." Now the ground-sphere value stays only as the fallback without lunar terrain data and above
+20 km; terrain above the mean sphere is covered, which the ground sphere (min(mean radius, distance - 2 m)) never was.

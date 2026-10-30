@@ -53,7 +53,7 @@ var _environment := Environment.new()  ## the check viewport's environment (ambi
 var _failures := 0
 var _samples := 0
 ## Every sample of a complete run (_check / _compare calls and the inline checks): a run with fewer ended a sample early.
-const EXPECTED_SAMPLES := 86
+const EXPECTED_SAMPLES := 89
 var _last_image: Image  ## the last _render's frame
 
 
@@ -257,6 +257,7 @@ func _run() -> void:
 	# halfway to the Moon, sunlit (gain 1); the earthshine (full Earth in lux, the Moon shader's dark side at two phases)
 	# and the vehicles' Sun light on lunar terrain below the mean sphere at lunar day.
 	await _away_from_earth_samples()
+	_moon_terrain_sun_samples()
 
 	# 13. Night vision (user decision 2026-10-25): day frames unchanged (the adapted day = the fixed exposure x the
 	# gain, no rods, no moonlight), the twilight zenith at Sun -8 deg visible and blue, a moonless night dark with a
@@ -816,6 +817,66 @@ func _away_from_earth_samples() -> void:
 			"energy %s of the unobstructed %s (mean-sphere visible fraction %.3f, %.0f m below the mean radius)" % [
 			_num(lit), _num(open_sky), mean_visible, LOW_SITE_DEPTH_M])
 	_moon_center_gcrf = Vector3.ZERO
+
+
+## The vehicles' direct Sun on the lunar ground from the terrain's horizon (MoonSunHorizon): a point 2 m above the
+## ground at the IM-2 site, the Sun TERRAIN_SUN_MARGIN_DEG below / above / at the horizon in a sector's azimuth, and
+## halfway between two sectors (the horizon interpolated like terrain_moon.gdshader); in lunar orbit the ground
+## sphere does not apply, so the mean-sphere fraction stays. Moon-fixed frame, the Sun at 1 AU.
+func _moon_terrain_sun_samples() -> void:
+	var present: Dictionary = _core.load_terrain(Paths.config_dir())
+	if not present.get("moon", false):
+		_check("terrain Sun, IM-2 site", true, "skipped: no lunar terrain data")
+		return
+	var lat := deg_to_rad(IM2_LAT_DEG)
+	var lon := deg_to_rad(IM2_LON_DEG)
+	var up := Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+	var east := Vector3(-sin(lon), cos(lon), 0.0)
+	var north := up.cross(east)
+	var ground: Dictionary = _core.surface_samples("moon", PackedFloat64Array([IM2_LAT_DEG]),
+			PackedFloat64Array([IM2_LON_DEG]))
+	var height_m := float(ground["height_m"][0]) + 2.0
+	var point := up * (Atmosphere.MOON_RADIUS_M + height_m)
+	var started := Time.get_ticks_usec()
+	var horizon_0: float = _core.horizon_elevation_rad("moon", IM2_LAT_DEG, IM2_LON_DEG, height_m, 0.0)
+	var horizon_ms := (Time.get_ticks_usec() - started) / 1000.0
+	var horizon_1: float = _core.horizon_elevation_rad("moon", IM2_LAT_DEG, IM2_LON_DEG, height_m, TAU / 16.0)
+	var margin := deg_to_rad(TERRAIN_SUN_MARGIN_DEG)
+	# Sector 0 (north): the fraction against the horizon there.
+	var below := _terrain_sun_fraction(point, up, north, horizon_0 - margin)
+	var above := _terrain_sun_fraction(point, up, north, horizon_0 + margin)
+	var at_horizon := _terrain_sun_fraction(point, up, north, horizon_0)
+	_check("terrain Sun, IM-2 site", below == 0.0 and above == 1.0 and absf(at_horizon - 0.5) <= 0.05,
+			"horizon %.3f deg north: %.0f deg below %.3f, above %.3f, at the horizon %.3f (%.2f ms per march)" % [
+			rad_to_deg(horizon_0), TERRAIN_SUN_MARGIN_DEG, below, above, at_horizon, horizon_ms])
+	# Halfway between sector 0 and 1: the mean of the two horizons.
+	var between := cos(TAU / 32.0) * north + sin(TAU / 32.0) * east
+	var halfway := _terrain_sun_fraction(point, up, between, 0.5 * (horizon_0 + horizon_1))
+	_check("terrain Sun, between two sectors", absf(halfway - 0.5) <= 0.05, "horizons %.3f / %.3f deg, fraction %.3f" % [
+			rad_to_deg(horizon_0), rad_to_deg(horizon_1), halfway])
+	# Lunar orbit: no ground sphere, the mean-sphere fraction is the result.
+	var orbit := up * (Atmosphere.MOON_RADIUS_M + ORBIT_HEIGHT_M)
+	var sun := north * AU_M
+	var mean_visible := 1.0 - Atmosphere.occulted_fraction(sun - orbit, Atmosphere.SUN_RADIUS_M, -orbit,
+			Atmosphere.MOON_RADIUS_M)
+	_check("terrain Sun, lunar orbit", not Atmosphere.moon_terrain_sun_applies(orbit, Vector3.ZERO)
+			and Atmosphere.moon_terrain_sun_applies(point, Vector3.ZERO)
+			and Atmosphere.moon_visible_fraction(orbit, sun, Vector3.ZERO, mean_visible) == mean_visible,
+			"mean-sphere fraction %.4f at %.0f km" % [mean_visible, ORBIT_HEIGHT_M / 1000.0])
+
+
+## The terrain Sun fraction at `point` for the Sun at 1 AU in the horizontal direction `toward` raised to
+## elevation_rad above the local horizontal.
+func _terrain_sun_fraction(point: Vector3, up: Vector3, toward: Vector3, elevation_rad: float) -> float:
+	var direction := cos(elevation_rad) * toward + sin(elevation_rad) * up
+	return MoonSunHorizon.sun_visible_fraction(_core, point, point + direction * AU_M)
+
+
+## IM-2 site (smoke_test.gd's horizon checks), the Sun's margin about the terrain horizon, the orbit's height.
+const IM2_LAT_DEG := -84.79
+const IM2_LON_DEG := 29.19
+const TERRAIN_SUN_MARGIN_DEG := 1.0
+const ORBIT_HEIGHT_M := 100000.0
 
 
 ## Earthshine: the full Earth's light at the Moon (Atmosphere.earthshine_relative x the TOA illuminance) within this
