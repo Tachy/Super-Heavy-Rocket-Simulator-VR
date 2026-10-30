@@ -15,6 +15,10 @@ const ROW := TerrainNodeBuilder.ROW
 
 var _failures := 0
 var _sites: Array = []
+var _core: StarsimCore = null
+var _terrain := false
+var _moon_terrain := false
+var _config_dir := ""
 
 
 ## Rolling relief (+-300 m, ~20 km wavelength): parent and child meshes differ by tens of metres between their vertices.
@@ -30,10 +34,6 @@ class WaveSource extends HeightSource:
 		for k in lats_deg.size():
 			heights[k] = AMPLITUDE_M * sin(TAU * WAVES_PER_DEG * lats_deg[k]) * cos(TAU * WAVES_PER_DEG * lons_deg[k])
 		return {"height_m": heights, "water": water}
-var _core: StarsimCore = null
-var _terrain := false
-var _moon_terrain := false
-var _config_dir := ""
 
 
 func _initialize() -> void:
@@ -492,21 +492,30 @@ func _check_moon_horizon() -> void:
 		for s in TerrainNodeBuilder.SKIRT_EDGE.size():
 			var e := TerrainNodeBuilder.SKIRT_EDGE[s]
 			var v := TerrainNodeBuilder.GRID_VERTICES + s
-			vertices_ok = vertices_ok and custom2[2 * v] == custom2[2 * e] and custom2[2 * v + 1] == custom2[2 * e + 1] 					and custom2[2 * e] == float(e % ROW) and custom2[2 * e + 1] == float(e / ROW)
+			vertices_ok = vertices_ok and custom2[2 * v] == custom2[2 * e] and custom2[2 * v + 1] == custom2[2 * e + 1] \
+					and custom2[2 * e] == float(e % ROW) and custom2[2 * e + 1] == float(e / ROW)
 		_check(vertices_ok, "moon level %d: CUSTOM2 is the grid position, skirts take their edge vertex's" % level)
-	var key := CubeSphere.key_at(direction, 7)
+	# Neighbours of the same level share their edge: on the face centre (IM-2) and off it, where the node sizes differ.
+	for spot: Vector3 in [Vector3(lat, lon, 7), Vector3(-60.0, 40.0, 7), Vector3(35.0, 45.0, 4)]:
+		var spot_key := CubeSphere.key_at(CubeSphere.geodetic_direction(spot.x, spot.y), int(spot.z))
+		var seam := _horizon_seam_steps(spot_key, heights)
+		_check(seam <= 4.0, "moon (%.0f, %.0f) level %d: the shared edge of two neighbouring nodes has the same horizons "
+				% [spot.x, spot.y, spot.z] + "(max %.2f half-float steps)" % seam)
+
+
+## Largest difference, in half-float steps (2^-10 of the value), between the horizons on the east edge of a node and the
+## west edge of its eastern neighbour (their vertex coordinates differ by ~1e-12: 2 steps).
+func _horizon_seam_steps(key: Vector4i, heights: HeightSource) -> float:
 	var east_key := Vector4i(key.x, key.y, key.z + 1, key.w)
 	var west: Array = TerrainNodeBuilder.build(key, heights, null, MOON_RADIUS_M)["horizon"]
 	var east: Array = TerrainNodeBuilder.build(east_key, heights, null, MOON_RADIUS_M)["horizon"]
-	# In half-float steps (2^-10 of the value): the two nodes' vertex coordinates differ by ~1e-12 (measured: 2 steps).
 	var seam := 0.0
 	for b in TerrainNodeBuilder.HORIZON_ROW:
 		for k in TerrainNodeBuilder.N_AZ:
 			var west_value := TerrainNodeBuilder.horizon_value(west, TerrainNodeBuilder.HORIZON_ROW - 1, b, k)
 			var difference := absf(west_value - TerrainNodeBuilder.horizon_value(east, 0, b, k))
 			seam = maxf(seam, difference / maxf(absf(west_value) / 1024.0, 1e-7))
-	_check(seam <= 4.0, "moon: the shared edge of two neighbouring nodes has the same horizons (max %.2f half-float "
-			% seam + "steps)")
+	return seam
 
 
 ## Selenographic (lat, lon) in deg of grid vertex (a, b) of a node.

@@ -274,7 +274,9 @@ static func _horizon_layers(key: Vector4i, heights: HeightSource, radius_m: floa
 			grid_lats.append(lats[k])
 			grid_lons.append(lon)
 			grid_heights.append(height_m[k])
-	var spacing_m := CubeSphere.node_size_m(key, radius_m) / CELLS * HORIZON_STRIDE
+	# One spacing per level (a cube face edge, pi / 2 of arc, halved per level), not this node's own longest edge: the
+	# march depends on it, so neighbours of a level must use the same value for their shared edge to match.
+	var spacing_m := radius_m * (PI / 2.0) / float(1 << key.y) / CELLS * HORIZON_STRIDE
 	var elevations := heights.horizon_elevations(grid_lats, grid_lons, grid_heights, N_AZ, spacing_m, true)
 	if elevations.size() != HORIZON_TEXELS * N_AZ:
 		return none

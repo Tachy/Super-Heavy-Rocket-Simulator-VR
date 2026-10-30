@@ -57,9 +57,11 @@ inline double lattice_first_step_m(const Terrain& terrain, double latitude_rad, 
 // north); the march of a vertex is horizon_elevations' with HorizonMarch{spacing_m, lattice_first_step_m(...)}: the
 // near terrain closer than one spacing is the relief normal's job. The samples are split into distance bands (the
 // maximum of them per vertex / azimuth): every vertex from one spacing to 16 spacings, every 2nd vertex to 32, every
-// 4th to 64, every 8th to 128, every 16th beyond; the sparse bands are bilinearly interpolated (the azimuth profile
+// 4th to 64, every 8th to 128, every 16th beyond (the march's step is capped at max(1000 m, spacing_m / 2), so a
+// coarse level samples at least every half spacing); the sparse bands are bilinearly interpolated (the azimuth profile
 // re-sampled where the local norths differ, as near the poles). Vertices shared by neighbouring nodes get identical
-// values along the shared edge. Serial and thread-safe.
+// values along the shared edge, provided both are called with the same spacing_m (the game passes one value per
+// level; nodes of different levels never match, see terrain-rendering.md). Serial and thread-safe.
 std::vector<float> horizon_elevations_lattice(const Terrain& terrain, double sphere_radius_m, int n,
                                               const std::vector<double>& latitude_rad,
                                               const std::vector<double>& longitude_rad,
