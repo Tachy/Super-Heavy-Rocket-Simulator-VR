@@ -845,7 +845,7 @@ old world volume - removed when the baked volume became the default).
   container the engine no longer reads) makes the owner call `rebuild_rejected`: every kernel of that set read from the
   cache is compiled again and its file replaced (once per set; log `CloudKernels <set>: a cached binary was rejected -
   rebuilding n kernels without the cache`), the frame meanwhile as while building. Pruning: once per process (first
-  worker) binaries not used for 30 days and temp files older than an hour are removed (a hit older than a day rewrites
+  worker) binaries last used 30 days before the newest one (not before now: a long break keeps the cache) and temp files older than an hour are removed (a hit older than a day rewrites
   its file, so the file time is the last use). The build state is a job object the worker tasks hold a strong reference
   to (never a freed object), and a set freed with its group still running (quitting during a build: the scene tree goes
   before the engine waits for the workers) waits for it in its predelete - the one blocking wait; an unreleased running

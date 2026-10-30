@@ -1244,7 +1244,7 @@ global uniform float cloud_air_shadow_top_m;
 // Checks only (cloud_check.gd section 14; -1 in the game): >= 0 replaces T_c at every point by this value.
 global uniform float cloud_debug_air_transmittance;
 #ifdef CLOUD_BAKED_MARCH
-// The baked volume prototype (cloud_baked.gdshaderinc): 16 segments x 2 points [E] - the full 32 x 3 cost ~5 ms of its
+// The baked volume (cloud_baked.gdshaderinc): 16 segments x 2 points [E] - the full 32 x 3 cost ~5 ms of its
 // ~8 ms march at divisor 2 in the stereo mock (2026-10-29).
 const int CLOUD_AIR_SHADOW_SEGMENTS = 16;
 #else
@@ -1559,7 +1559,7 @@ void cloud_shade_ray(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 no
 }
 
 #ifdef CLOUD_BAKED_MARCH
-// The baked volume prototype's ray (cloud_baked.gdshaderinc, compiled after this file).
+// The baked volume's ray (cloud_baked.gdshaderinc, compiled after this file).
 void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m);
 #endif
 

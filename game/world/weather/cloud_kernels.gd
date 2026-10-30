@@ -17,7 +17,8 @@ extends RefCounted
 ## The compiled kernels; environment STARSIM_CLOUD_SHADER_CACHE=0 neither reads nor writes them (measurements).
 const CACHE_DIR := "user://shader_cache/clouds"
 ## Cache hygiene (once per process, on the first worker, _prune_once): a binary not used for CACHE_MAX_AGE_S is
-## removed (a cache hit older than CACHE_REFRESH_AGE_S is written anew, so the file time is the last use) - every
+## removed (a cache hit older than CACHE_REFRESH_AGE_S is written anew, so the file time is the last use; the age is
+## counted back from the newest binary, not from now, so a game left unstarted for months keeps its cache) - every
 ## shader edit leaves the old binaries behind and tracking which keys are live is not worth it: a wrongly dropped one
 ## costs one recompile on the workers. A temporary file older than TEMP_MAX_AGE_S is a killed process's (a live one's
 ## exists for milliseconds).
@@ -267,8 +268,16 @@ static func _prune_once() -> void:
 	if dir == null:
 		return
 	var now := Time.get_unix_time_from_system()
-	for file in dir.get_files():
-		var limit := TEMP_MAX_AGE_S if file.ends_with(".tmp") else CACHE_MAX_AGE_S if file.ends_with(".bin") else -1
+	var files := dir.get_files()
+	var newest_bin := 0
+	for file in files:
+		if file.ends_with(".bin"):
+			newest_bin = maxi(newest_bin, FileAccess.get_modified_time(CACHE_DIR.path_join(file)))
+	for file in files:
 		var path := CACHE_DIR.path_join(file)
-		if limit > 0 and now - FileAccess.get_modified_time(path) > limit:
+		var age := now - FileAccess.get_modified_time(path)
+		if file.ends_with(".bin"):
+			age = newest_bin - FileAccess.get_modified_time(path)
+		var limit := TEMP_MAX_AGE_S if file.ends_with(".tmp") else CACHE_MAX_AGE_S if file.ends_with(".bin") else -1
+		if limit > 0 and age > limit:
 			DirAccess.remove_absolute(path)
