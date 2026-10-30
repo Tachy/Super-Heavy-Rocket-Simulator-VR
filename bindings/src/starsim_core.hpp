@@ -66,6 +66,9 @@ public:
     // GCRF metres (Earth-centred) -> WGS84 geodetic Vector3(latitude_deg, longitude_deg, height_m above the
     // ellipsoid), e.g. the camera's local time zone.
     godot::Vector3 gcrf_to_geodetic(const godot::Vector3& position_gcrf_m, double tdb_s) const;
+    // Height in metres of a GCRF point above mean sea level (the EGM2008 geoid: the Earth terrain's when loaded, else
+    // the committed 1-degree grid); NAN without either (load_terrain not called / no config).
+    double sea_level_height_m(const godot::Vector3& position_gcrf_m, double tdb_s) const;
 
     // Fraction of the solar disk hidden by the Moon for a ground observer (0 = none, 1 = total).
     double solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;
@@ -218,6 +221,7 @@ private:
 
     std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
+    std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;
     using SnapshotPtr = std::shared_ptr<const environment::WeatherSnapshot>;

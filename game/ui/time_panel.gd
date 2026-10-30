@@ -138,6 +138,13 @@ func _process_unprofiled(_delta: float) -> void:
 	var lines := PackedStringArray()
 	lines.append("Zeitraffer: %sx" % _format_warp(world.clock.warp))
 	lines.append("Mond-Distanz: %.0f km" % (world.moon_gcrf_m.length() / 1000.0))
+	if world.focus == World.FOCUS_FREE:
+		var p := world.camera.position_gcrf_m
+		var on_moon := world.free_pose.frame == FreeCameraPose.FRAME_MOON
+		var height := camera_height_line((p - world.moon_gcrf_m).length() - World.MOON_RADIUS_M if on_moon
+				else world.core.sea_level_height_m(p, t), on_moon)
+		if height != "":
+			lines.append(height)
 	for site in world.sites:
 		var fraction: float = world.core.solar_eclipse_fraction(site["latitude_deg"], site["longitude_deg"], site["height_m"], t)
 		if fraction > 0.0:
@@ -162,6 +169,15 @@ static func frame_rate_line(fps: float) -> String:
 	if fps <= 0.0:
 		return ""
 	return "Bildrate: %d fps (%.1f ms)" % [roundi(fps), 1000.0 / fps]
+
+
+## The free camera's height (user 2026-10-30): above mean sea level (EGM2008 geoid), or - in the Moon's frame
+## (FreeCameraPose.FRAME_MOON) - above the mean lunar sphere; metres below 10 km. "" for a NAN height (no geoid).
+static func camera_height_line(height_m: float, on_moon: bool) -> String:
+	if is_nan(height_m):
+		return ""
+	var value := "%.0f m" % height_m if absf(height_m) < 1.0e4 else "%.1f km" % (height_m / 1000.0)
+	return "Kamerahöhe: %s %s" % [value, "über mittlerem Mondradius" if on_moon else "über NN"]
 
 
 ## The sea state and deck motion while a drone ship is the landing zone (FlightSim.landing_zone), else "".

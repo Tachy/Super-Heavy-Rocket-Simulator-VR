@@ -42,6 +42,12 @@ func _initialize() -> void:
 	# Terrain through the shared cache (M8 Plan B): StarsimCore samples what FlightSim's physics uses.
 	var terrain_present: Dictionary = core.load_terrain(config_dir)
 	_check(terrain_present.has("earth") and terrain_present.has("moon"), "load_terrain returns {earth, moon}")
+	# The free camera's height over sea level: 1000 m above the ellipsoid at 0 N 80 E (the geoid's low, N ~ -100 m).
+	var above_low := core.sea_level_height_m(core.geodetic_to_gcrf_m(0.0, 80.0, 1000.0, 0.0), 0.0)
+	_check(above_low > 1050.0 and above_low < 1150.0, "sea_level_height_m applies the geoid (%.1f m)" % above_low)
+	_check(TimePanel.camera_height_line(2500.0, false) == "Kamerahöhe: 2500 m über NN"
+			and TimePanel.camera_height_line(1.2345e5, true) == "Kamerahöhe: 123.5 km über mittlerem Mondradius"
+			and TimePanel.camera_height_line(NAN, false) == "", "TimePanel.camera_height_line formats the height")
 	var starbase := _site(config_dir, "starbase_olp1")
 	var lat_arr := PackedFloat64Array([float(starbase.get("latitude_deg", 0.0))])
 	var lon_arr := PackedFloat64Array([float(starbase.get("longitude_deg", 0.0))])

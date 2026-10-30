@@ -33,6 +33,7 @@
 #include "starsim/environment/surface_samples.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/config/geoid_config.hpp"
 #include "starsim/sim/earth_terrain_loader.hpp"
 #include "starsim/sim/terrain_cache.hpp"
 
@@ -221,6 +222,16 @@ godot::Vector3 StarsimCore::gcrf_to_geodetic(const godot::Vector3& position_gcrf
     }, godot::Vector3());
 }
 
+double StarsimCore::sea_level_height_m(const godot::Vector3& position_gcrf_m, double tdb_s) const {
+    const environment::Geoid* geoid = earth_terrain_ ? &earth_terrain_->geoid() : coarse_geoid_.get();
+    if (geoid == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    return guarded(*this, [&] {
+        const math::Vec3 fixed = transpose(earth_.fixed_to_gcrf(epoch(tdb_s)).rotation) * to_core(position_gcrf_m);
+        const frames::GeodeticPosition site = frames::fixed_to_geodetic(fixed);
+        return site.height_m - geoid->undulation_m(site.latitude_rad, site.longitude_rad);
+    }, std::numeric_limits<double>::quiet_NaN());
+}
+
 double StarsimCore::solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m,
                                            double tdb_s) const {
     return guarded(*this, [&] {
@@ -269,6 +280,12 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
     const auto say = [](const std::string& message) { godot::UtilityFunctions::print(godot::String::utf8(message.c_str())); };
     earth_terrain_.reset();
     moon_terrain_.reset();
+    coarse_geoid_.reset();
+    try {
+        coarse_geoid_ = std::make_shared<const environment::Geoid>(config::load_coarse_geoid(config));
+    } catch (const std::exception& e) {
+        say(std::string("Geoid nicht ladbar - keine Höhe über NN: ") + e.what());
+    }
     if (!sim::earth_terrain_available(data_dir)) {
         say("Erdgelände fehlt - flacher Boden (python tools/data_pipeline/fetch.py)");
     } else {
@@ -992,6 +1009,7 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("geodetic_to_gcrf_m", "latitude_deg", "longitude_deg", "height_m", "tdb_s"),
                          &StarsimCore::geodetic_to_gcrf_m);
     ClassDB::bind_method(D_METHOD("gcrf_to_geodetic", "position_gcrf_m", "tdb_s"), &StarsimCore::gcrf_to_geodetic);
+    ClassDB::bind_method(D_METHOD("sea_level_height_m", "position_gcrf_m", "tdb_s"), &StarsimCore::sea_level_height_m);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction", "latitude_deg", "longitude_deg", "height_m", "tdb_s"),
                          &StarsimCore::solar_eclipse_fraction);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction_gcrf", "position_gcrf_m", "tdb_s"),
