@@ -338,6 +338,7 @@ func _init() -> void:
 	name = "CloudLayer"
 	effect.light_cache = light_cache
 	effect.world_volume = CloudWorldVolume.new()
+	shadow_effect.cloud_effect = effect  # the baked volume fills the shadow maps while it draws
 
 
 ## Starts the noise generation on a worker and sets the optics; the quad joins the scene.

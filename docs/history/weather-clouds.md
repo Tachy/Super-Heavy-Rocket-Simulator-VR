@@ -1324,3 +1324,14 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   was 0.49 / 0.40 / 0.39 / 0.42 x the volume levels' at Sun 15 / 8 / 5 / 2 deg (high Sun 0.90; brightest 30 % of the
   50 km crop at 8 deg 137 / 120 / 116 sRGB against the volume's 191 / 164 / 145), a dull pink-grey. The flat levels'
   early exit dropped every pixel whose scene depth lay in front of the 20 km shell's entry (striped holes at the limb).
+
+## Baked prototype: cloud shadows from the old maps (59bd8ea and earlier, superseded 2026-10-30)
+- What it was: with the baked volume drawing, the ground's cloud shadows and its march's air shadow still came from
+  the old shadow maps: the near map (+-16 km) marched the old march's field shapes per frame, the far map (+-200 km) the
+  grid mean as the beam cover of the cell fraction (no shapes), the slanted column beyond 120-140 km; the air shadow
+  took the near map's shapes within 9-11 km and the grid mean beyond. The shadow pass cost ~0.6 ms per frame (stereo
+  mock, G view; 1.3 ms in the mock's slow state).
+- Why superseded: the shadows did not come from the shapes the baked march draws (its box-filtered bake with level-1
+  detail; its own light bake), and beyond 9-11 km neither the ground nor the air saw any cloud's shape - crepuscular
+  rays of clouds 20-40 km up-Sun and the shapes' shadows on distant ground were a smooth grid-mean dimming. Now S, the
+  bake's line toward the Sun per column (`baked-shadow-report.md`).

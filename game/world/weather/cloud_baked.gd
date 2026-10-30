@@ -28,6 +28,10 @@ static var dz_max_m := 400.0
 ## The march's per-sample detail (one fetch of the detail's level 1 near the edges in level 0; CLOUD_BAKED_DETAIL).
 ## Environment STARSIM_BAKED_DETAIL=0 switches it off (measurements).
 static var detail := OS.get_environment("STARSIM_BAKED_DETAIL") != "0"
+## The clouds' shadows from the bake (shadow step 2026-10-30): S, the line toward the Sun from the band's floor per
+## column (cloud_baked.gdshaderinc CLOUD_BAKED_SHADOW), feeds the cloud shadow maps (CloudShadowEffect's baked fill)
+## and the march's air shadow. Environment STARSIM_BAKED_SHADOW=0 keeps the old maps and air shadow (comparisons).
+static var shadow := OS.get_environment("STARSIM_BAKED_SHADOW") != "0"
 ## Checks: > 0 forces a re-bake (and its cross-fade) this many frames after the last one is shown (environment
 ## STARSIM_BAKED_REBAKE_FRAMES; the swap's cost and look in a measurement).
 static var rebake_frames := int(OS.get_environment("STARSIM_BAKED_REBAKE_FRAMES"))
@@ -45,6 +49,11 @@ const MEMORY_CAP_BYTES := 512.0 * 1024.0 * 1024.0
 ## [E] Bake budget (measured 2026-10-29: <= ~2 ms GPU per dispatch): voxels per frame per pass kind (each dispatch a slice range of one level); render_check scales it.
 static var bake_scale := 1.0
 const VOXELS_PER_FRAME := {"density": 0.75e6, "occupancy": 8.0e6, "light": 0.4e6}
+## [E] S columns per frame (one dispatch: a range of rows of one level; 128 occupancy lookups per column and 8 A
+## samples per interval near cloud) and S's columns per volume column and axis (cloud_baked.gdshaderinc
+## CLOUD_BAKED_SHADOW_SUPERSAMPLE).
+const SHADOW_COLUMNS_PER_FRAME := 65536.0
+const SHADOW_SUPERSAMPLE := 2
 ## [E] Re-bake triggers: the camera's distance from the anchor (a quarter of level 0's half-size), the Sun's turn, the
 ## weather's blend.
 const REBAKE_MOVE_FRACTION := 0.25
@@ -64,6 +73,8 @@ const GRID_BLOCK_SIZE := 2 * SET_FLOATS * 4 + 16
 const FILES := ["res://shaders/cloud_baked.gdshaderinc"]
 ## Flat levels' bindings in the march (F, L per set).
 const FLAT_BINDINGS := [[57, 58], [59, 60]]
+## S's binding in the march per set (cloud_baked.gdshaderinc baked_s0 / baked_s1).
+const SHADOW_BINDINGS := [61, 62]
 ## [E] The flat levels' columns per side at most (from orbit the footprint picks the level where a level holds 2 / the
 ## pixel angle columns: 1 440 at the mock's 1.39 mrad), their memory cap (both sets: F 8 B and T 4 B shared, L 8 B per
 ## set) and the
@@ -125,6 +136,7 @@ var _pipelines := {}
 var _march_buffer := RID()
 var _bake_buffer := RID()
 var _band_buffer := RID()  ## the band kernel's lowest / highest cloudy field layer
+var _shadow_buffer := RID()  ## the grid block of CloudShadowEffect's baked fill (shadow_fill)
 var _sets: Array[Dictionary] = [{}, {}]  ## {plan, a, b, o}
 var _shown := -1  ## the set the march reads (-1: none yet)
 var _baking := -1  ## the set being baked (-1: none)
@@ -157,6 +169,8 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 			ShaderGlobals.set_value(&"cloud_debug_height_m", -float(OS.get_environment("STARSIM_BAKED_DEBUG_H")))
 	if stereo:
 		march.append("CLOUD_CENTRE")
+	if not shadow:
+		march.append("CLOUD_BAKED_SHADOW_OFF")
 	var fade := march.duplicate()
 	fade.append("CLOUD_BAKED_FADE")
 	# The density bake knows the march's per-sample detail (its threshold state counts it).
@@ -172,7 +186,7 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 	var kernels := {"march": march, "march_fade": fade, "march_far": march_far, "march_fade_far": fade_far,
 		"density": density, "occupancy": PackedStringArray(["CLOUD_BAKED_OCCUPANCY"]),
 		"light": PackedStringArray(["CLOUD_BAKED_LIGHT"]), "band": PackedStringArray(["CLOUD_BAKED_BAND"]),
-		"flat": PackedStringArray(["CLOUD_BAKED_FLAT"])}
+		"flat": PackedStringArray(["CLOUD_BAKED_FLAT"]), "shadow": PackedStringArray(["CLOUD_BAKED_SHADOW"])}
 	for name: String in kernels:
 		var defines: PackedStringArray = kernels[name]
 		defines.append_array(extra_defines)
@@ -195,6 +209,7 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 	_march_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
 	_bake_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
 	_band_buffer = rd.storage_buffer_create(8)
+	_shadow_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
 	return true
 
 
@@ -254,12 +269,42 @@ func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, pixel_
 		uniforms.append_array([CloudEffect._tex(BINDINGS[i][0], linear, s["a"]),
 			CloudEffect._tex(BINDINGS[i][1], linear, s["b"]), CloudEffect._tex(BINDINGS[i][2], nearest, s["o"]),
 			CloudEffect._tex(FLAT_BINDINGS[i][0], linear, s["geo"]["f"]),
-			CloudEffect._tex(FLAT_BINDINGS[i][1], linear, s["geo"]["t"])])
+			CloudEffect._tex(FLAT_BINDINGS[i][1], linear, s["geo"]["t"]),
+			CloudEffect._tex(SHADOW_BINDINGS[i], linear, s["s"])])
 	if _fade > 0:
 		_fade -= 1
 		if _fade == 0:
 			_finish_fade()
 	return uniforms
+
+
+## Render thread (CloudShadowEffect, before the opaque pass): the baked fill's set 1 uniforms for this frame's camera -
+## the grid block (binding 2: the shown set, and the set fading in with its weight) and S (bindings 3, 4) - and whether
+## a cross-fade's second set is bound. Empty while no set with volume levels and S is shown (the old maps then).
+func shadow_fill(camera: Vector3, linear: RID) -> Dictionary:
+	if not shadow or _shown < 0 or _rd == null or not _shadow_buffer.is_valid():
+		return {}
+	var shown: Dictionary = _sets[_shown]
+	if not shown.has("s") or int(shown["plan"]["first_level"]) >= levels:
+		return {}
+	var order: Array[int] = [_shown]
+	var weight := 0.0
+	if _fade > 0:
+		order.append(1 - _shown)
+		weight = 1.0 - float(_fade) / float(FADE_FRAMES + 1)
+	var floats := PackedFloat32Array()
+	for i in range(2):
+		floats.append_array(_set_floats(_sets[order[mini(i, order.size() - 1)]]["plan"], camera,
+				weight if i == 0 else 0.0))
+	var bytes := floats.to_byte_array()
+	bytes.append_array(PackedInt32Array([0, 0, 0, _model()]).to_byte_array())
+	_rd.buffer_update(_shadow_buffer, 0, GRID_BLOCK_SIZE, bytes)
+	var second: Dictionary = _sets[order[order.size() - 1]]
+	var uniforms: Array[RDUniform] = [CloudEffect._ubo(_shadow_buffer, 2), CloudEffect._tex(3, linear, shown["s"]),
+		CloudEffect._tex(4, linear, second["s"])]
+	if "CLOUD_SHADOW_BAKED_DIAG" in extra_defines:  # (checks: the reference march's volumes)
+		uniforms.append_array([CloudEffect._tex(5, linear, shown["a"]), CloudEffect._tex(6, linear, shown["b"])])
+	return {"fade": order.size() > 1, "uniforms": uniforms}
 
 
 ## Frees the kernels and volumes.
@@ -269,7 +314,7 @@ func free_all() -> void:
 	var freed := {}
 	for s in _sets:
 		var rids: Array = []
-		for key in ["a", "b", "o"]:
+		for key in ["a", "b", "o", "s"]:
 			if s.has(key):
 				rids.append(s[key])
 		if s.has("geo") and s["geo"].has("f"):
@@ -283,12 +328,13 @@ func free_all() -> void:
 		_rd.free_rid(rid)
 	_shaders.clear()
 	_pipelines.clear()
-	for rid in [_march_buffer, _bake_buffer, _band_buffer]:
+	for rid in [_march_buffer, _bake_buffer, _band_buffer, _shadow_buffer]:
 		if rid.is_valid():
 			_rd.free_rid(rid)
 	_march_buffer = RID()
 	_bake_buffer = RID()
 	_band_buffer = RID()
+	_shadow_buffer = RID()
 
 
 static func _model() -> int:
@@ -570,6 +616,10 @@ func _start_volumes(lowest: int, highest: int) -> void:
 		s["size"] = Vector2i(plan["depth"], plan["odepth"])
 		if not (s["a"].is_valid() and s["b"].is_valid() and s["o"].is_valid()):
 			push_error("CloudBaked: a volume was not created")
+	if not s.has("s"):  # S: one layer per volume level, the same size for every plan
+		s["s"] = _flat(columns * SHADOW_SUPERSAMPLE, levels)
+		if not s["s"].is_valid():
+			push_error("CloudBaked: the shadow array was not created")
 	# The flat levels: a new geometry's arrays (the set's old geometry freed unless the other set shows it).
 	var other: Dictionary = _sets[1 - _baking]
 	var geo: Dictionary = plan["geo"]
@@ -598,6 +648,10 @@ func _start_volumes(lowest: int, highest: int) -> void:
 			var per_slice := area / (BLOCK * BLOCK) if kind == "occupancy" else area
 			var step := maxi(1, int(VOXELS_PER_FRAME[kind] * bake_scale / per_slice))
 			_phases.append({"kind": kind, "level": k, "total": slices, "next": 0, "step": step})
+	var shadow_n := columns * SHADOW_SUPERSAMPLE
+	for k in range(int(plan["first_level"]), levels if shadow else 0):
+		_phases.append({"kind": "shadow", "level": k, "total": shadow_n, "next": 0,
+			"step": maxi(1, int(SHADOW_COLUMNS_PER_FRAME * bake_scale / shadow_n))})
 	print("CloudBaked: bake of set %d: field layers %d..%d, band %.0f..%.0f m, dz %s, %d slices, %.0f MB per set, "
 			% [_baking, lowest, highest, plan["band"].x, plan["band"].y, plan["dz"], plan["depth"],
 			plan["bytes"] / 1048576.0] + "anchor %s" % plan["anchor"])
@@ -647,6 +701,11 @@ func _bake_step(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3) -
 		groups = Vector3i((int(s["geo"]["n"]) - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
 	elif kind == "density":
 		set1.append(CloudEffect._image(1, s["a"]))
+	elif kind == "shadow":
+		set1.append_array([CloudEffect._image(1, s["s"]), CloudEffect._tex(2, linear, s["a"]),
+				CloudEffect._tex(3, nearest, s["o"])])
+		var shadow_n := columns * SHADOW_SUPERSAMPLE
+		groups = Vector3i((shadow_n - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
 	elif kind == "occupancy":
 		set1.append_array([CloudEffect._image(1, s["o"]), CloudEffect._tex(2, nearest, s["a"])])
 		groups = Vector3i((columns / BLOCK - 1) / 8 + 1, (columns / BLOCK - 1) / 8 + 1, slices)

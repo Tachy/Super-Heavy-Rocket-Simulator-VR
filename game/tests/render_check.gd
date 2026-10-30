@@ -92,6 +92,9 @@
 #          also tau_limited_steps, extinction_steps, structure_limited_steps (occupied_steps: steps in occupied space).
 #          Round 2 (Task 2b): --spike_levers=1,2,4,s,t the step rule's levers, --spike_stop=<T> the termination
 #          (_start_spike).
+# Shadow map dump: --shadow_dump=<file> writes the cloud shadow maps (near, far; raw RGBA32F) once settled and prints
+#          their frame (baked shadow step; with STARSIM_BAKED_DEFINES=CLOUD_SHADOW_BAKED_DIAG the baked fill's check
+#          values instead of the maps, cloud_baked.gdshaderinc cloud_shadow_fill_diag).
 # Centre image dump: --centre_dump=<file> writes the cloud march's centre image once settled (raw RGBA16F, premultiplied
 #          colour + T, after two int32 width / height) - offline cover statistics (baked prototype step 3).
 # Stereo harness (world volume plan Task 1): --stereo=<json> renders through the multiview path with a stand-in headset
@@ -559,6 +562,8 @@ func _process(_delta: float) -> bool:
 			_print_centre_stats(world)
 		if _args.has("centre_dump"):
 			_dump_centre(world, String(_args["centre_dump"]))
+		if _args.has("shadow_dump"):
+			_dump_shadow_maps(world, String(_args["shadow_dump"]))
 		# Default: <repo>/screenshots/ (git-ignored; every test image goes there, user 2026-10-27).
 		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
 				"../screenshots/render_check.png").simplify_path())
@@ -1639,6 +1644,38 @@ func _dump_centre(world: World, path: String) -> void:
 	file.store_buffer(data.slice(0, 8 * low.x * low.y))
 	file.close()
 	print("render_check: centre dump %dx%d -> %s" % [low.x, low.y, path])
+
+
+## --shadow_dump=<file>: the cloud shadow maps (near, then far: RGBA32F each, CloudShadowEffect) as raw bytes after a
+## header (int32 size, int32 baked fill 0 / 1), and their frame (anchors, axes, Sun, extents, the camera's up) printed.
+func _dump_shadow_maps(world: World, path: String) -> void:
+	var shadow: CloudShadowEffect = world.clouds.shadow_effect
+	var near := shadow.debug_map_data(0)
+	var far := shadow.debug_map_data(1)
+	var size := int(round(sqrt(near.size() / 16.0)))
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null or near.is_empty() or far.size() != near.size():
+		print("render_check: shadow dump failed (%s)" % path)
+		return
+	file.store_32(size)
+	file.store_32(1 if shadow.baked_fill else 0)
+	file.store_buffer(near)
+	file.store_buffer(far)
+	file.close()
+	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
+	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
+	var camera := hi + lo
+	var up := (camera * Vector3(1.0, CloudLayer.POLAR_STRETCH, 1.0)).normalized()
+	print("render_check: shadow dump %d (baked fill %s) -> %s" % [size, shadow.baked_fill, path])
+	print("render_check: shadow frame %s" % JSON.stringify({"near_anchor": _v(ShaderGlobals.value(&"cloud_shadow_near_anchor")),
+		"far_anchor": _v(ShaderGlobals.value(&"cloud_shadow_far_anchor")), "e1": _v(ShaderGlobals.value(&"cloud_shadow_e1")),
+		"e2": _v(ShaderGlobals.value(&"cloud_shadow_e2")), "sun": _v(ShaderGlobals.value(&"cloud_shadow_sun")),
+		"extent": [ShaderGlobals.value(&"cloud_shadow_extent").x, ShaderGlobals.value(&"cloud_shadow_extent").y],
+		"up": _v(up), "camera": _v(camera)}))
+
+
+static func _v(v: Vector3) -> Array:
+	return [v.x, v.y, v.z]
 
 
 ## The online wait limit [s] of --weather (900 unless --weather=<seconds>).

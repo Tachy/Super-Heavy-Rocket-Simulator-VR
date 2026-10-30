@@ -16,6 +16,11 @@
 //              Sun's multiple-scattering source J_ms / J_MAX, z the sky's source J_sky / J_MAX (both for the view from
 //              the anchor), w unused
 //   O  R8      occupancy per block of 4 x 4 x 4 cells (the block or a neighbouring cell may hold cloud): the empty skip
+//   S  RGBA16F 2-D array, one layer per volume level at CLOUD_BAKED_SHADOW_SUPERSAMPLE x the columns (shadow step,
+//              2026-10-30): the line toward the Sun from the band's floor at each column through the baked shapes (the
+//              field's grid mean beyond the levels): x T = exp(-tau), y tau (clamped), z / w tau x the lowest / highest
+//              cloudy height on the line (km; premultiplied: a clear neighbour does not move them). The cloud shadow
+//              maps (CLOUD_SHADOW_BAKED_FILL, CloudShadowEffect) and the air shadow (cloud_baked_air_sun) read it.
 // The phase function is applied per frame (per ray: one cosine), J = P(theta) T_s + J_ms.
 // Flat levels (2.5D, 2026-10-29; step 3): levels m0, m0 + 1, ... of N_f x N_f columns (N_f up to CloudBaked
 // FLAT_COLUMNS_MAX), each doubling the cell (c0 2^m), over only the spherical cap the camera can see (the far side is
@@ -41,13 +46,16 @@
 // CLOUD_BAKED_FLAT (F and T of one flat level, a range of rows),
 // CLOUD_BAKED_MARCH (with CLOUD_MARCH; CLOUD_BAKED_FADE: two sets marched and cross-faded - a re-bake's swap).
 
-#if defined(CLOUD_BAKED_DENSITY) || defined(CLOUD_BAKED_OCCUPANCY) || defined(CLOUD_BAKED_LIGHT) || defined(CLOUD_BAKED_BAND) 		|| defined(CLOUD_BAKED_FLAT)
+#if defined(CLOUD_BAKED_DENSITY) || defined(CLOUD_BAKED_OCCUPANCY) || defined(CLOUD_BAKED_LIGHT) || defined(CLOUD_BAKED_BAND) 		|| defined(CLOUD_BAKED_FLAT) || defined(CLOUD_BAKED_SHADOW)
 #define CLOUD_BAKED_BUILD
 #endif
-#if defined(CLOUD_BAKED_BUILD) || defined(CLOUD_BAKED_MARCH)
+#if defined(CLOUD_BAKED_BUILD) || defined(CLOUD_BAKED_MARCH) || defined(CLOUD_SHADOW_BAKED_FILL)
 
 #ifdef CLOUD_BAKED_MARCH
 #define CLOUD_BAKED_GRID_BINDING 53
+#elif defined(CLOUD_SHADOW_BAKED_FILL)
+#define CLOUD_BAKED_GRID_BINDING 2
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #else
 #define CLOUD_BAKED_GRID_BINDING 0
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -245,6 +253,101 @@ vec2 cloud_baked_shape(vec3 q, float level, float w, float median) {
 	float a = 1.0 - w;
 	return vec2(median + (a * (s1.r - median) + w * (s2.r - median)) * inversesqrt(a * a + w * w), mix(s1.a, s2.a, w));
 }
+
+// ---- The Sun's transmittance from the bake (S; shadow step 2026-10-30) ----------------------------------------------
+// [E] S columns per volume column and axis: level 0's 100 m cells give 50 m shadow texels (the old near map: 62.5 m);
+// the shapes' sub-cell edges survive through the edge coordinate's interpolation in the march toward the Sun.
+const int CLOUD_BAKED_SHADOW_SUPERSAMPLE = 2;
+// [E] The optical depth S keeps at most (exp(-64): black) - the premultiplied heights stay within half-float range.
+const float CLOUD_BAKED_SHADOW_TAU_MAX = 64.0;
+
+// The ray from camera + offset (Earth-local, m) along dir (unit, Earth-local): cloud_ray with the point's own height
+// and up (distances along it in Earth-local metres, as cloud_sphere_crossing / cloud_height_along return them).
+CloudRay cloud_baked_point_ray(vec3 offset, vec3 dir) {
+	CloudRay ray = cloud_ray(dir);
+	vec3 pm = (atmosphere_camera_hi + atmosphere_camera_lo + offset) * ATM_STRETCH;
+	ray.r_c = length(pm);
+	ray.h_c = ray.r_c - CLOUD_A_M;
+	ray.mu = dot(pm / ray.r_c, dir * ATM_STRETCH / ray.scale);
+	return ray;
+}
+
+// The S texture coordinate (normalised x, y; the layer) of grid point (gx, gy) (m) in volume level k.
+vec3 cloud_baked_s_uvl(int si, int k, float gx, float gy) {
+	float n = baked.sets[si].up0.w * float(CLOUD_BAKED_SHADOW_SUPERSAMPLE);
+	float c = baked.sets[si].axis_x.w * exp2(float(k)) / float(CLOUD_BAKED_SHADOW_SUPERSAMPLE);
+	vec2 g = clamp(vec2(gx, gy) / c + 0.5 * n, vec2(0.5), vec2(n - 0.5));
+	return vec3(g / n, float(k));
+}
+
+#if defined(CLOUD_BAKED_MARCH) || defined(CLOUD_SHADOW_BAKED_FILL)
+#ifdef CLOUD_BAKED_MARCH
+layout(set = 1, binding = 61) uniform sampler2DArray baked_s0;  // linear
+#ifdef CLOUD_BAKED_FADE
+layout(set = 1, binding = 62) uniform sampler2DArray baked_s1;
+#define CLOUD_BAKED_S_TWO_SETS
+#endif
+#else
+layout(set = 1, binding = 3) uniform sampler2DArray baked_s0;  // linear
+layout(set = 1, binding = 4) uniform sampler2DArray baked_s1;  // (set 0's again without a cross-fade)
+#define CLOUD_BAKED_S_TWO_SETS
+#endif
+
+vec4 cloud_baked_s(int si, vec3 uvl) {
+#ifdef CLOUD_BAKED_S_TWO_SETS
+	if (si == 1) {
+		return textureLod(baked_s1, uvl, 0.0);
+	}
+#endif
+	return textureLod(baked_s0, uvl, 0.0);
+}
+
+// The line toward the Sun (sun: unit, Earth-local) through camera + offset in set si's S, read where it rises through
+// the band's floor (the closest approach to it when the line passes above the floor: a grazing Sun): x its cloud
+// transmittance (below its clouds), y / z the lowest / highest cloudy height on it (m), w the floor point's distance
+// along the line from the point (m, negative behind it). False where that point lies beyond the volume levels (or all
+// of them are dropped): no shapes baked there. footprint_m: the lookup's footprint at the floor (m; 0: the finest
+// level holding the point) - a coarser level whose S cell covers it (each level's S is baked through its own or
+// coarser shapes: a prefiltered shadow), so sparse samples of a far stretch do not alias the shapes' shadows.
+bool cloud_baked_shadow_line(int si, vec3 offset, vec3 sun, float footprint_m, out vec4 line) {
+	CloudRay ray = cloud_baked_point_ray(offset, sun);
+	vec2 floor_c = cloud_sphere_crossing(ray, baked.sets[si].band.x);
+	float t0 = floor_c.x <= floor_c.y ? floor_c.y : -ray.r_c * ray.mu / ray.scale;
+	vec3 q = offset + sun * t0;
+	float gx = baked.sets[si].band.z + dot(q, baked.sets[si].axis_x.xyz * ATM_STRETCH);
+	float gy = baked.sets[si].band.w + dot(q, baked.sets[si].axis_y.xyz * ATM_STRETCH);
+	int levels = int(baked.sets[si].axis_y.w);
+	int k = max(cloud_baked_level(si, gx, gy), int(baked.sets[si].misc.z));
+	// the footprint's continuous level (blended between its two levels: no step between pixel rows)
+	float s_cell0 = baked.sets[si].axis_x.w / float(CLOUD_BAKED_SHADOW_SUPERSAMPLE);
+	float l = footprint_m > s_cell0 ? log2(footprint_m / s_cell0) : 0.0;
+	int k0 = max(k, int(floor(l)));
+	float blend = k0 > k || l >= float(k) ? fract(l) : 0.0;
+	if (k0 >= levels) {
+		line = vec4(1.0, 0.0, 0.0, t0);
+		return false;
+	}
+	vec4 s = cloud_baked_s(si, cloud_baked_s_uvl(si, k0, gx, gy));
+	if (blend > 0.0 && k0 + 1 < levels) {
+		s = mix(s, cloud_baked_s(si, cloud_baked_s_uvl(si, k0 + 1, gx, gy)), blend);
+	}
+	float tau = max(s.y, 1.0e-6);
+	line = vec4(clamp(s.x, 0.0, 1.0), 1000.0 * s.z / tau, 1000.0 * s.w / tau, t0);
+	return true;
+}
+
+// The Sun's cloud transmittance at height h (m) on a line of cloud_baked_shadow_line: the whole line's below its lowest
+// cloud, 1 above its highest, exp(-tau) scaled linearly in the height between (the old maps' rule inside a cloud).
+float cloud_baked_shadow_at_height(vec4 line, float h) {
+	if (line.x >= 1.0 || h <= line.y) {
+		return line.x;
+	}
+	if (h >= line.z) {
+		return 1.0;
+	}
+	return pow(max(line.x, 1.0e-30), (line.z - h) / max(line.z - line.y, 1.0));
+}
+#endif
 
 #endif
 
@@ -578,6 +681,136 @@ void main() {
 }
 #endif
 
+#ifdef CLOUD_BAKED_SHADOW
+// S of one volume level, a range of rows (baked.build: x the level, y the first row, z the rows). Per column the line
+// toward the Sun from the band's floor to its top (at most CLOUD_BAKED_SHADOW_PATH_MAX_M) through the baked shapes -
+// the extinction the march draws, in this level or the coarser one holding each point (a prefiltered shadow: the
+// whole level is baked, so a coarser level's S also serves the air shadow's far, sparse samples inside the finer
+// levels' extent) - and the field's grid mean beyond the levels (as the light bake's far part). The light bake's own T_s (B.x) is no shadow volume: it exists only around occupied
+// blocks (clear voxels store 1) and takes the shapes over the first 6 km only (the core's light model for a cloud's
+// own light); a cloud's shadow is the line through its shapes, however long.
+// March: CLOUD_BAKED_SHADOW_COARSE intervals, each looked up in the occupancy blocks; an interval whose block or a
+// neighbouring interval's may hold cloud is sampled CLOUD_BAKED_SHADOW_FINE times through A (midpoint rule), the
+// others are clear; intervals beyond the levels take one grid-mean sample. Stops once tau > CLOUD_BAKED_SHADOW_TAU_STOP.
+// A line meeting the ground before its top (the Sun below the floor's horizon) stores no cloud: that light is the
+// Earth's shadow (the atmosphere's), not the clouds'.
+layout(rgba16f, set = 1, binding = 1) uniform writeonly image2DArray baked_s_out;
+layout(set = 1, binding = 2) uniform sampler3D baked_a_in;  // linear
+layout(set = 1, binding = 3) uniform sampler3D baked_o_in;  // nearest
+
+// [E] Coarse intervals per line (a 2 km layer at 45 deg: ~45 m apart through the 0-16.8 km ERA5 band ~190 m, below the
+// occupancy block's 400 m), fine samples per interval near occupied blocks, the optical depth to stop at, the longest
+// line (a grazing Sun; the light bake's CLOUD_BAKED_SUN_PATH_MAX_M).
+const int CLOUD_BAKED_SHADOW_COARSE = 128;
+const int CLOUD_BAKED_SHADOW_FINE = 8;
+const float CLOUD_BAKED_SHADOW_TAU_STOP = 30.0;
+const float CLOUD_BAKED_SHADOW_PATH_MAX_M = 300000.0;
+
+// What the line meets at grid point (gx, gy), height h: 0 clear (an empty occupancy block, or outside the band), 1 a
+// block that may hold cloud, 2 beyond the volume levels.
+int cloud_baked_shadow_kind(int si, float gx, float gy, float h) {
+	int levels = int(baked.sets[si].axis_y.w);
+	int k = max(cloud_baked_level(si, gx, gy), baked.build.x);
+	if (k >= levels) {
+		return 2;
+	}
+	float n = baked.sets[si].up0.w;
+	float c = baked.sets[si].axis_x.w * exp2(float(k));
+	float dz = baked.sets[si].dz[k >> 2][k & 3];
+	float z = (h - baked.sets[si].band.x) / dz;
+	int nbz = int(baked.sets[si].onz[k >> 2][k & 3]);
+	if (z < 0.0 || int(z) / CLOUD_BAKED_BLOCK >= nbz) {
+		return 0;
+	}
+	int nb = int(n) / CLOUD_BAKED_BLOCK;
+	ivec2 b = clamp(ivec2(floor(vec2(gx, gy) / c + 0.5 * n)) / CLOUD_BAKED_BLOCK, ivec2(0), ivec2(nb - 1));
+	return texelFetch(baked_o_in, ivec3(b, int(baked.sets[si].oslab[k >> 2][k & 3]) + int(z) / CLOUD_BAKED_BLOCK), 0).r
+			> 0.5 ? 1 : 0;
+}
+
+// The extinction (1/m) the line meets at camera + offset (grid point gx, gy; height h): the baked shapes in the finest
+// level holding the point, the grid mean beyond the levels.
+float cloud_baked_shadow_beta(int si, vec3 offset, float gx, float gy, float h) {
+	int k = max(cloud_baked_level(si, gx, gy), baked.build.x);
+	if (k >= int(baked.sets[si].axis_y.w)) {
+		return cloud_mean_extinction_at(offset, h);
+	}
+	return cloud_baked_extinction(texture(baked_a_in, cloud_baked_uvw(si, k, gx, gy, h)).rg);
+}
+
+void main() {
+	const int si = 0;
+	int k = baked.build.x;
+	int ns = int(baked.sets[si].up0.w) * CLOUD_BAKED_SHADOW_SUPERSAMPLE;
+	ivec2 col = ivec2(gl_GlobalInvocationID.x, int(gl_GlobalInvocationID.y) + baked.build.y);
+	if (col.x >= ns || col.y >= ns || int(gl_GlobalInvocationID.y) >= baked.build.z) {
+		return;
+	}
+	ivec3 texel = ivec3(col, k);
+	float c = baked.sets[si].axis_x.w * exp2(float(k)) / float(CLOUD_BAKED_SHADOW_SUPERSAMPLE);
+	vec2 g = (vec2(col) + 0.5 - 0.5 * float(ns)) * c;
+	float z_lo = baked.sets[si].band.x;
+	vec3 offset = cloud_baked_offset_of(si, g.x, g.y, z_lo);
+	vec3 sun = normalize(atmosphere_sun_direction);
+	CloudRay ray = cloud_baked_point_ray(offset, sun);
+	float length_m = min(max(cloud_sphere_crossing(ray, baked.sets[si].band.y).y, 0.0), CLOUD_BAKED_SHADOW_PATH_MAX_M);
+	vec2 ground = cloud_sphere_crossing(ray, -1.0);
+	if (length_m <= 0.0 || (ground.x <= ground.y && ground.x > 0.0 && ground.x < length_m)) {
+		imageStore(baked_s_out, texel, vec4(1.0, 0.0, 0.0, 0.0));
+		return;
+	}
+	float gdx = dot(sun, baked.sets[si].axis_x.xyz * ATM_STRETCH);
+	float gdy = dot(sun, baked.sets[si].axis_y.xyz * ATM_STRETCH);
+	float dt = length_m / float(CLOUD_BAKED_SHADOW_COARSE);
+	float tau = 0.0;
+	float h_lo = 1.0e9;
+	float h_hi = -1.0e9;
+	int kind_prev = 0;
+	float t_c = 0.5 * dt;
+	int kind = cloud_baked_shadow_kind(si, g.x + t_c * gdx, g.y + t_c * gdy, cloud_height_along(ray, t_c));
+	for (int i = 0; i < CLOUD_BAKED_SHADOW_COARSE; i++) {
+		int kind_next = 0;
+		if (i + 1 < CLOUD_BAKED_SHADOW_COARSE) {
+			float t_n = (float(i) + 1.5) * dt;
+			kind_next = cloud_baked_shadow_kind(si, g.x + t_n * gdx, g.y + t_n * gdy, cloud_height_along(ray, t_n));
+		}
+		if (kind == 2) {
+			float t = (float(i) + 0.5) * dt;
+			float h = cloud_height_along(ray, t);
+			float beta = cloud_mean_extinction_at(offset + sun * t, h);
+			if (beta > 0.0) {
+				tau += beta * dt;
+				h_lo = min(h_lo, h);
+				h_hi = max(h_hi, h);
+			}
+		} else if (kind_prev == 1 || kind == 1 || kind_next == 1) {
+			float step_m = dt / float(CLOUD_BAKED_SHADOW_FINE);
+			for (int j = 0; j < CLOUD_BAKED_SHADOW_FINE; j++) {
+				float t = float(i) * dt + (float(j) + 0.5) * step_m;
+				float h = cloud_height_along(ray, t);
+				float beta = cloud_baked_shadow_beta(si, offset + sun * t, g.x + t * gdx, g.y + t * gdy, h);
+				if (beta > 0.0) {
+					tau += beta * step_m;
+					h_lo = min(h_lo, h);
+					h_hi = max(h_hi, h);
+				}
+			}
+		}
+		if (tau > CLOUD_BAKED_SHADOW_TAU_STOP) {
+			break;
+		}
+		kind_prev = kind;
+		kind = kind_next;
+	}
+	if (tau <= 0.0) {
+		imageStore(baked_s_out, texel, vec4(1.0, 0.0, 0.0, 0.0));
+		return;
+	}
+	float tau_c = min(tau, CLOUD_BAKED_SHADOW_TAU_MAX);
+	imageStore(baked_s_out, texel, vec4(exp(-tau), tau_c, tau_c * h_lo / 1000.0, tau_c * h_hi / 1000.0));
+}
+#endif
+
 #ifdef CLOUD_BAKED_FLAT
 // [E] The flat geometry's shape taps per column (the bake's cost: from orbit every level holds ~2 / pixel angle columns
 // across): 3 x 3 at one field point up to CLOUD_BAKED_FLAT_TAP_CELLS_M.y of cell (CloudBaked FLAT_TAP_CELLS_M; 2 x 2
@@ -876,6 +1109,25 @@ float cloud_baked_o(int si, ivec3 texel) {
 #endif
 	return texelFetch(baked_o0, texel, 0).r;
 }
+
+#ifndef CLOUD_BAKED_SHADOW_OFF
+// The air shadow's T_c at camera + offset (height m): the line toward the Sun through the point read from S (both sets
+// by the cross-fade's weight while a new set fades in). False beyond the volume levels (the caller's column).
+bool cloud_baked_air_sun(vec3 offset_local, float height_m, vec3 sun_dir, out float t) {
+	vec4 line;
+	bool inside = cloud_baked_shadow_line(0, offset_local, sun_dir, cloud_baked_air_footprint_m, line);
+	t = cloud_baked_shadow_at_height(line, height_m);
+#ifdef CLOUD_BAKED_FADE
+	vec4 line1;
+	if (cloud_baked_shadow_line(1, offset_local, sun_dir, cloud_baked_air_footprint_m, line1)) {
+		float t1 = cloud_baked_shadow_at_height(line1, height_m);
+		t = inside ? mix(t, t1, baked.sets[0].misc.y) : t1;
+		inside = true;
+	}
+#endif
+	return inside;
+}
+#endif
 
 float cloud_baked_flat_weight_at(int si, float l);
 
@@ -1991,5 +2243,169 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 	}
 #endif
 	color_t = cloud_stored_color(color, transmittance);
+}
+#endif
+
+// ---- The cloud shadow maps from the bake (CloudShadowEffect; shadow step 2026-10-30) ------------------------------
+#ifdef CLOUD_SHADOW_BAKED_FILL
+// One map texel per invocation, the texel semantics of cloud_shadow.gdshaderinc (cloud_light.gdshaderinc reads it
+// unchanged): along the texel's line toward the Sun (t from the map plane) the first and last t with cloud, the optical
+// depth between, the cover (1: the shapes). The line is read from S once (cloud_baked_shadow_line; two sets mixed by
+// the cross-fade's weight while a new set fades in); its cloudy heights give t_front / t_back. Where the line's floor
+// point lies beyond the volume levels: the field's slanted column there (cloud_column_direct, as the maps' far rule).
+layout(set = 1, binding = 0, std140) uniform CloudShadowFillBlock {
+	vec4 anchor;  // xyz anchor - camera (m), w half extent (m)
+	vec4 e1;      // xyz map axis (unit), w -
+	vec4 e2;      // xyz map axis (unit), w the map's size (texels)
+	vec4 sun;     // xyz the Sun direction (unit), w 1: a cross-fade's second set is bound (baked.sets[0].misc.y its weight)
+} shadow;
+
+layout(rgba32f, set = 1, binding = 1) uniform writeonly image2D out_map;
+
+// t (m from the map plane) where the line rises through height h (its closest approach when it stays above h).
+float cloud_shadow_fill_t(CloudRay ray, float h) {
+	vec2 c = cloud_sphere_crossing(ray, h);
+	return c.x <= c.y ? c.y : -ray.r_c * ray.mu / ray.scale;
+}
+
+#ifdef CLOUD_SHADOW_BAKED_DIAG
+// Checks only (STARSIM_BAKED_DEFINES=CLOUD_SHADOW_BAKED_DIAG; render_check --shadow_dump): the texel holds instead
+// x the map's transmittance for a receiver on the ground (height 0) of this line, y the reference - a dense march
+// (CLOUD_SHADOW_DIAG_SAMPLES) from that ground point toward the Sun through the baked shapes (A, set 0; the grid mean
+// beyond the levels), z the bake's own light T_s (B.x^2) half a level-0 cell below the line's lowest cloud (-1: no
+// cloud), w the horizontal distance of the line's optical-depth-weighted cloud point from the ground point over its
+// height (tan of the Sun's zenith for a straight line over a flat Earth; -1: no cloud; -2: the line serves no ground
+// receiver - it passes above the ground or meets it beyond 140 km from the camera).
+layout(set = 1, binding = 5) uniform sampler3D baked_a_diag;  // linear
+layout(set = 1, binding = 6) uniform sampler3D baked_b_diag;  // linear
+const int CLOUD_SHADOW_DIAG_SAMPLES = 2048;
+
+float cloud_shadow_diag_beta(vec3 offset, float h) {
+	vec3 axis_x = baked.sets[0].axis_x.xyz * ATM_STRETCH;
+	vec3 axis_y = baked.sets[0].axis_y.xyz * ATM_STRETCH;
+	float gx = baked.sets[0].band.z + dot(offset, axis_x);
+	float gy = baked.sets[0].band.w + dot(offset, axis_y);
+	int k = max(cloud_baked_level(0, gx, gy), int(baked.sets[0].misc.z));
+	if (k >= int(baked.sets[0].axis_y.w)) {
+		return cloud_mean_extinction_at(offset, h);
+	}
+	return cloud_baked_extinction(texture(baked_a_diag, cloud_baked_uvw(0, k, gx, gy, h)).rg);
+}
+
+vec4 cloud_shadow_fill_diag(CloudRay ray, vec3 origin, vec3 s, vec4 texel) {
+	float t_g = cloud_shadow_fill_t(ray, 0.0);
+	float fraction = clamp((texel.y - t_g) / max(texel.y - texel.x, 1.0e-3), 0.0, 1.0);
+	float t_map = exp(-texel.z * fraction);
+	vec3 g = origin + s * t_g;
+	CloudRay rg = cloud_baked_point_ray(g, s);
+	float length_m = min(max(cloud_sphere_crossing(rg, baked.sets[0].band.y).y, 0.0), 300000.0);
+	float dt = length_m / float(CLOUD_SHADOW_DIAG_SAMPLES);
+	float tau = 0.0;
+	float h_lo = 1.0e9;
+	float t_lo = 0.0;
+	vec3 cloud_point = vec3(0.0);
+	for (int i = 0; i < CLOUD_SHADOW_DIAG_SAMPLES; i++) {
+		float t = (float(i) + 0.5) * dt;
+		float h = cloud_height_along(rg, t);
+		float beta = cloud_shadow_diag_beta(g + s * t, h);
+		if (beta > 0.0) {
+			tau += beta * dt;
+			cloud_point += beta * dt * vec3(t, h, 0.0);
+			if (h < h_lo) {
+				h_lo = h;
+				t_lo = t;
+			}
+		}
+	}
+	// -2: the line meets no ground receiver the map serves (none, or its ground point beyond the far map's use,
+	// CloudLayer.SHADOW_FAR_FADE_M's 140 km from the camera: the lines grazing the Earth toward the terminator)
+	vec2 ground_c = cloud_sphere_crossing(ray, 0.0);
+	vec3 up_c = normalize((atmosphere_camera_hi + atmosphere_camera_lo) * ATM_STRETCH);
+	float flag = ground_c.x <= ground_c.y && length(g - up_c * dot(g, up_c)) < 140000.0 ? -1.0 : -2.0;
+	if (tau <= 0.0 || flag < -1.5) {
+		return vec4(t_map, exp(-tau), -1.0, flag);
+	}
+	cloud_point /= tau;
+	// the bake's light just below the lowest cloud on the line
+	float t_b = max(t_lo - 0.5 * baked.sets[0].dz[0][0] / max(rg.mu, 0.05), 0.0);
+	vec3 pb = g + s * t_b;
+	float hb = cloud_height_along(rg, t_b);
+	vec3 axis_x = baked.sets[0].axis_x.xyz * ATM_STRETCH;
+	vec3 axis_y = baked.sets[0].axis_y.xyz * ATM_STRETCH;
+	float gx = baked.sets[0].band.z + dot(pb, axis_x);
+	float gy = baked.sets[0].band.w + dot(pb, axis_y);
+	int k = max(cloud_baked_level(0, gx, gy), int(baked.sets[0].misc.z));
+	float t_bake = -1.0;
+	if (k < int(baked.sets[0].axis_y.w)) {
+		float b = texture(baked_b_diag, cloud_baked_uvw(0, k, gx, gy, hb)).x;
+		t_bake = b * b;
+	}
+	// horizontal distance of the cloud_point point from the ground point over its height
+	vec3 pc = g + s * cloud_point.x;
+	vec3 up = normalize((atmosphere_camera_hi + atmosphere_camera_lo + g) * ATM_STRETCH);
+	vec3 d = (pc - g) * ATM_STRETCH;
+	float horizontal = length(d - up * dot(d, up));
+	return vec4(t_map, exp(-tau), t_bake, horizontal / max(cloud_point.y, 1.0));
+}
+#endif
+
+void main() {
+	int size = int(shadow.e2.w);
+	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+	if (texel.x >= size || texel.y >= size) {
+		return;
+	}
+	float half_extent = shadow.anchor.w;
+	float texel_m = 2.0 * half_extent / float(size);
+	vec2 uv = (vec2(texel) + 0.5) * texel_m - half_extent;
+	vec3 s = shadow.sun.xyz;
+	vec3 origin = shadow.anchor.xyz + uv.x * shadow.e1.xyz + uv.y * shadow.e2.xyz;  // t = 0, from the camera
+	CloudRay ray = cloud_baked_point_ray(origin, s);
+	vec4 line;
+	bool inside = cloud_baked_shadow_line(0, origin, s, 0.0, line);
+	float w = baked.sets[0].misc.y;
+	if (shadow.sun.w > 0.5 && w > 0.0) {
+		vec4 line1;
+		if (cloud_baked_shadow_line(1, origin, s, 0.0, line1) && inside) {
+			// heights weighted by each set's optical depth (a clear set's do not count)
+			float tau0 = -log(max(line.x, 1.0e-30)) * (1.0 - w);
+			float tau1 = -log(max(line1.x, 1.0e-30)) * w;
+			float t_mix = mix(line.x, line1.x, w);
+			if (tau0 + tau1 > 0.0) {
+				line.yz = (tau0 * line.yz + tau1 * line1.yz) / (tau0 + tau1);
+			}
+			line.x = t_mix;
+		}
+	}
+	float od;
+	float h_lo;
+	float h_hi;
+	if (inside) {
+		if (line.x >= 1.0) {
+			float t_top = cloud_shadow_fill_t(ray, baked.sets[0].band.y);
+			vec4 clear = vec4(t_top, t_top, 0.0, 1.0);
+#ifdef CLOUD_SHADOW_BAKED_DIAG
+			clear = cloud_shadow_fill_diag(ray, origin, s, clear);
+#endif
+			imageStore(out_map, texel, clear);
+			return;
+		}
+		od = -log(max(line.x, 1.0e-30));
+		h_lo = line.y;
+		h_hi = max(line.z, line.y + 1.0);
+	} else {
+		vec3 q = origin + s * line.w;
+		vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + q;
+		float mu0 = dot(cloud_geodetic_up(p), s);
+		float analytic = cloud_column_direct(cloud_column_mean_depth(cloud_lat_lon(p), baked.sets[0].band.x), mu0);
+		od = -log(max(analytic, 1.0e-30));
+		h_lo = baked.sets[0].band.x;
+		h_hi = baked.sets[0].band.y;
+	}
+	vec4 result = vec4(cloud_shadow_fill_t(ray, h_lo), cloud_shadow_fill_t(ray, h_hi), od, 1.0);
+#ifdef CLOUD_SHADOW_BAKED_DIAG
+	result = cloud_shadow_fill_diag(ray, origin, s, result);
+#endif
+	imageStore(out_map, texel, result);
 }
 #endif

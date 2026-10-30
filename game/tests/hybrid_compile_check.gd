@@ -1,11 +1,12 @@
 extends SceneTree
 ## Compiles every hybrid march kernel variant (CloudEffect.HYBRID_FAMILIES x _centre / _prefilter / _refine) and the
-## baked volume prototype's kernels (CloudBaked, desktop and stereo) once and
+## baked volume prototype's kernels (CloudBaked, desktop and stereo; the shadow maps' baked fill) once and
 ## exits 1 when one fails (the hybrid march prototype compiles its kernels lazily in the game: a broken variant would
 ## only show on the first toggle). Needs a GPU (no --headless):
 ## godot --path game --script res://tests/hybrid_compile_check.gd
 
 var _effect: CloudEffect
+var _shadow: CloudShadowEffect
 var _frames := 0
 var _failed := -1
 
@@ -14,6 +15,7 @@ func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames == 1:
 		_effect = CloudEffect.new()  # compiles the march's kernels on the render thread
+		_shadow = CloudShadowEffect.new()  # the shadow maps' kernels (old and baked fill), likewise
 		return false
 	if _frames == 3:
 		RenderingServer.call_on_render_thread(_compile_all)
@@ -22,6 +24,7 @@ func _process(_delta: float) -> bool:
 		return false
 	print("hybrid_compile_check: %s" % ("PASSED" if _failed == 0 else "FAILED (%d)" % _failed))
 	_effect = null
+	_shadow = null
 	quit(0 if _failed == 0 else 1)
 	return true
 
@@ -49,4 +52,8 @@ func _compile_all() -> void:
 			print("hybrid_compile_check: baked (stereo %s) FAILED" % stereo)
 			failed += 1
 		baked.free_all()
+	if not (_shadow._pipeline.is_valid() and _shadow._baked_pipeline.is_valid()):
+		print("hybrid_compile_check: shadow maps (old %s, baked fill %s) FAILED"
+				% [_shadow._pipeline.is_valid(), _shadow._baked_pipeline.is_valid()])
+		failed += 1
 	_failed = failed

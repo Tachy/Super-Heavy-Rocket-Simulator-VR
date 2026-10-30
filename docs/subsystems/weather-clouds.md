@@ -425,7 +425,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     1 for the shapes, the beam's cover of the cell fraction for the mean part), the far map (+-200 km) the grid mean with
     the beam's cover of the largest cloud fraction on the line. Distance rule (horizontal distance of the receiver from the camera): near -> far over 9-11 km, far -> the
     column slanted to the Sun (1 - C + C exp(-tau / (C mu0))) over 120-140 km; smooth, no pop. World space: the same for
-    both VR eyes. The Moon's direct light uses the slanted column.
+    both VR eyes. The Moon's direct light uses the slanted column. While the baked volume draws, both maps are filled
+    from its own Sun transmittance instead (same texels; "Baked prototype: cloud shadows from the bake").
   - CPU (`StarsimCore.weather_cloud_light` -> {sun_transmittance, sky_factor, sun_diffuse}, i.e. (direct, sky, Sun's
     diffuse) in the dictionary; (1, 1, 0) without weather. `Atmosphere.cloud_light_at` and the Vector3s of the
     GPU-side checks use the order (direct, Sun's diffuse, sky): (1, 0, 1) without weather): the vehicles'
@@ -791,6 +792,39 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   left limb). Diagnostics: `CLOUD_DIAG_SUN_ONLY` / `CLOUD_DIAG_SKY_ONLY` (one light alone, far field and baked
   march), `CLOUD_DIAG_NO_FACETS`, `CLOUD_BAKED_DIAG_NO_SCENE` (the scene's depth ignored). Numbers, images:
   `baked-lowsun-report.md`.
+- **Baked prototype: cloud shadows from the bake (2026-10-30)**: the ground's / terrain's cloud shadows and the air
+  shadow come from the baked shapes. Per set S (`cloud_baked.gdshaderinc` `CLOUD_BAKED_SHADOW`, RGBA16F 2-D array, one
+  layer per volume level at 2 x the columns: 50 m in level 0; +4 MB per set): per column the line toward the Sun from
+  the band's floor to its top (<= 300 km) through the baked shapes (A, every level it crosses; the grid mean beyond the
+  levels) - 128 intervals looked up in the occupancy blocks, 8 A samples per interval near an occupied one, stop at
+  tau 30 - storing T = exp(-tau) and tau x the lowest / highest cloudy height (premultiplied). Each level is baked
+  whole, through its own or coarser levels' A (a prefiltered shadow for the air's far samples). Not the light bake's B.x:
+  that exists only around occupied blocks (clear voxels store 1) and takes the shapes over 6 km only (a cloud's own
+  light); a shadow is the whole line through the shapes. Baked after the light (6 more phases, 4 dispatches per
+  level of 65 536 columns, `CloudBaked.SHADOW_COLUMNS_PER_FRAME`). Readers, both one S read per point: (a)
+  `CloudShadowEffect` fills both maps with `CLOUD_SHADOW_BAKED_FILL` while the baked volume draws
+  (`CloudBaked.shadow_fill`; the line's floor crossing -> level -> S; t_front / t_back = the line's crossings of the
+  cloudy heights; beyond the levels the slanted column) - the maps' texel semantics, the terrain shaders and the
+  distance rule (near -> far 9-11 km, far -> column 120-140 km) unchanged, the old kernel otherwise (before the first
+  set, the old march, above 62 km); (b) the baked march's air shadow (`cloud_air_sun_transmittance` ->
+  `cloud_baked_air_sun`): T_c from S within the levels (+-410 km: crepuscular rays of clouds tens of km away; the old
+  maps' shapes reached 9-11 km), the slanted column beyond; a point inside the cloudy heights takes exp(-tau) scaled
+  linearly in the height (the maps' rule). The air's lookup is prefiltered: S's level from the footprint at the floor
+  (the samples' spacing x the rate the Sun line moves at the floor along the ray, and distance x pixel angle / max(sin
+  Sun elevation, 0.1)), blended between its two levels - read at the finest level, the 16 x 2 samples aliased the
+  shapes' shadows into horizontal stripes between pixel rows toward a low Sun (`s1_sunbeams_nolod_stripes.png`). Cross-fade: both sets' S mixed by its weight. A line passing above the
+  floor (grazing Sun) reads the column under its lowest point. Check (diagnostic define `CLOUD_SHADOW_BAKED_DIAG` +
+  render_check `--shadow_dump`): the near map against a dense 2048-sample march through A from each texel's ground
+  point, V1_era5 Sun 56 / 8 deg: mean |dT| 0.008 / 0.020 (8 x 8 blocks 0.0025 / 0.008), lit / shadowed agreement
+  99.6 / 98.9 %, clear lines 2 texels from any shadow lit fully on 100 / 98.0 %; the cloud's offset over its height
+  0.999 / 0.994 x tan(zenith); the bake's own T_s just below the line's lowest cloud equal on median. Environment
+  `STARSIM_BAKED_SHADOW=0` keeps the old maps and air shadow (comparisons); diagnostics `CLOUD_BAKED_DIAG_AIR_NO_LOD`,
+  `CLOUD_BAKED_DIAG_AIR_SHARP`. Cost (stereo mock, divisor 2, G / D / H): the shadow pass 0.59 -> 0.016 ms, the cloud
+  pass -0.1 / -0.36 / -0.31 ms, S's bake ~4-5 ms GPU in 24 dispatches of <= 0.56 ms. Crepuscular-ray residual (on /
+  off over its 61-column running median, p90 - p10): cf 0.4 slab, Sun ~3 deg 2.5 % (old maps 5.5 %); ERA5 V1 toward a
+  5 deg Sun 0.4 % (old 0.8 %): under a broken layer a 5 deg Sun line crosses ~10 cells, so nearly all air below it is
+  shadowed by the shapes (the old far map's grid mean let 1 - C through everywhere). Numbers, images:
+  `baked-shadow-report.md`.
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

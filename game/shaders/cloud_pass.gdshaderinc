@@ -1405,9 +1405,24 @@ void cloud_single_scattering(float r, float rho, float mu, float mu_s, float nu,
 			lerp_nu);
 }
 
+#if defined(CLOUD_BAKED_MARCH) && !defined(CLOUD_BAKED_SHADOW_OFF)
+// The baked volume's own Sun transmittance (cloud_baked.gdshaderinc S): false beyond its levels. Its lookup footprint
+// (m at the band's floor), set per air sample by cloud_air_shadow_parts: the samples' spacing along the ray (times the
+// rate its Sun line moves at the floor) and the pixel's footprint there, the latter over the Sun's sine (a pixel step moves the line's floor point by that much
+// more under a low Sun) - the shapes' shadows prefiltered at it, not aliased into stripes between pixel rows.
+float cloud_baked_air_footprint_m = 0.0;
+#ifdef CLOUD_BAKED_DIAG_AIR_SHARP
+const float CLOUD_BAKED_AIR_MIN_SUN_SINE = 1.0;  // (diagnostics: the pixel's footprint alone, no low-Sun growth)
+#else
+const float CLOUD_BAKED_AIR_MIN_SUN_SINE = 0.1;  // [E] the footprint's growth stops below a ~6 deg Sun
+#endif
+bool cloud_baked_air_sun(vec3 offset_local, float height_m, vec3 sun_dir, out float t);
+#endif
+
 // The direct Sun's cloud transmittance at an air point (offset from the camera, Earth-local render axes; up_c the
 // camera's model-space up); inside the near map's range the map alone (cloud_shadow_transmittance's weights there: no
-// column lookup).
+// column lookup). The baked volume (CLOUD_BAKED_MARCH): its own S within its levels (the shapes it draws, +-410 km),
+// the field's slanted column beyond.
 float cloud_air_sun_transmittance(vec3 offset_local, vec3 sun_dir, vec3 up_c) {
 	if (cloud_debug_air_transmittance >= 0.0) {
 		return cloud_debug_air_transmittance;
@@ -1417,6 +1432,13 @@ float cloud_air_sun_transmittance(vec3 offset_local, vec3 sun_dir, vec3 up_c) {
 	if (height_m > CLOUD_TOP_M) {
 		return 1.0;
 	}
+#if defined(CLOUD_BAKED_MARCH) && !defined(CLOUD_BAKED_SHADOW_OFF)
+	float baked_t;
+	if (cloud_baked_air_sun(offset_local, height_m, sun_dir, baked_t)) {
+		return baked_t;
+	}
+	return cloud_column_direct(cloud_column_mean_depth(cloud_lat_lon(p), height_m), dot(cloud_geodetic_up(p), sun_dir));
+#endif
 	if (cloud_shadow_valid && length(offset_local - up_c * dot(offset_local, up_c)) <= cloud_shadow_extent.z) {
 		return cloud_shadow_map_transmittance(cloud_shadow_near, cloud_shadow_near_anchor, cloud_shadow_extent.x,
 				offset_local);
@@ -1511,6 +1533,11 @@ void cloud_air_shadow_parts(CloudRay ray, vec3 dir, vec3 eye, float end_m, float
 	vec3 s_prev = vec3(0.0);
 	float prev_m = a.from_m;
 	float inv_n = 1.0 / float(CLOUD_AIR_SHADOW_SEGMENTS);
+#if defined(CLOUD_BAKED_MARCH) && !defined(CLOUD_BAKED_SHADOW_OFF)
+	// How fast the air point's Sun line moves at the floor per metre along the ray: dir less its part along the Sun
+	// line (dir - sun (dir . up) / mu_s, horizontal) - looking along the Sun's azimuth the far samples share lines.
+	float floor_rate = length(dir - sun_dir * dot(dir, up_c) / max(dot(sun_dir, up_c), CLOUD_BAKED_AIR_MIN_SUN_SINE));
+#endif
 	for (int i = 0; i <= CLOUD_AIR_SHADOW_SEGMENTS; i++) {
 		float f = float(i) * inv_n;
 		float at_m = a.from_m + (a.to_m - a.from_m) * f * f;
@@ -1519,6 +1546,13 @@ void cloud_air_shadow_parts(CloudRay ray, vec3 dir, vec3 eye, float end_m, float
 			float shadow = 0.0;
 			for (int k = 0; k < CLOUD_AIR_SHADOW_SUBSAMPLES; k++) {
 				float at_k = mix(prev_m, at_m, (float(k) + 0.5) / float(CLOUD_AIR_SHADOW_SUBSAMPLES));
+#if defined(CLOUD_BAKED_MARCH) && !defined(CLOUD_BAKED_SHADOW_OFF)
+				cloud_baked_air_footprint_m = max((at_m - prev_m) / float(CLOUD_AIR_SHADOW_SUBSAMPLES) * floor_rate,
+						at_k * cloud_view.params.w / max(a.mu_s, CLOUD_BAKED_AIR_MIN_SUN_SINE));
+#ifdef CLOUD_BAKED_DIAG_AIR_NO_LOD
+				cloud_baked_air_footprint_m = 0.0;  // (diagnostics: the finest level at every air sample)
+#endif
+#endif
 				shadow += 1.0 - cloud_air_sun_transmittance(eye + dir * at_k, sun_dir, up_c);
 			}
 			shadow /= float(CLOUD_AIR_SHADOW_SUBSAMPLES);
