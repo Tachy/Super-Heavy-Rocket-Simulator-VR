@@ -66,6 +66,23 @@ func _initialize() -> void:
 				and is_inf(core.surface_resolution_m("earth", 0.0, 0.0)), "no Earth terrain: surface_samples not present")
 	if not terrain_present.get("moon", false):
 		_check(not core.surface_samples("moon", lat_arr, lon_arr).get("present", true), "no Moon terrain: not present")
+	# Terrain horizon bindings: an n x n lattice with 16 azimuths, a single march; none without the terrain.
+	var h_lat := PackedFloat64Array()
+	var h_lon := PackedFloat64Array()
+	for i in 17:
+		for j in 17:
+			h_lat.append(-84.79 + (i - 8) * 1e-4)
+			h_lon.append(29.19 + (j - 8) * 1e-4)
+	var h_heights := PackedFloat64Array()
+	h_heights.resize(17 * 17)
+	if terrain_present.get("moon", false):
+		var horizons: PackedFloat32Array = core.horizon_elevations("moon", h_lat, h_lon, h_heights, 16, 3.0)
+		_check(horizons.size() == 17 * 17 * 16 and is_finite(horizons[0]),
+				"horizon_elevations: 17 x 17 x 16 values (%d)" % horizons.size())
+		_check(is_finite(core.horizon_elevation_rad("moon", -84.79, 29.19, 3000.0, 1.0)),
+				"horizon_elevation_rad finite at the IM-2 site")
+	_check(core.horizon_elevations("earth", h_lat, h_lon, h_heights, 16, 3.0).is_empty()
+			and is_nan(core.horizon_elevation_rad("earth", 0.0, 0.0, 0.0, 0.0)), "no horizon for Earth")
 	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
 	_check(_check_terrain_streaming(core, starbase, bool(terrain_present.get("earth", false))) == true,
 			"terrain streaming checks ran to the end")

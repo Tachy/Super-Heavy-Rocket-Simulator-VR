@@ -31,6 +31,7 @@
 #include "starsim/environment/weather_snapshot_file.hpp"
 #include "starsim/environment/weather_source.hpp"
 #include "starsim/environment/surface_samples.hpp"
+#include "starsim/environment/terrain_horizon.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/config/geoid_config.hpp"
@@ -373,6 +374,45 @@ double StarsimCore::surface_finest_resolution_m(const godot::String& body,
         lon[i] = lon_deg[i] * constants::deg_to_rad;
     }
     return environment::finest_resolution_m(*terrain, lat, lon);
+}
+
+godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& body,
+                                                          const godot::PackedFloat64Array& latitudes_deg,
+                                                          const godot::PackedFloat64Array& longitudes_deg,
+                                                          const godot::PackedFloat64Array& heights_m, int azimuth_count,
+                                                          double spacing_m) const {
+    godot::PackedFloat32Array result;
+    if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return result;
+    const auto count = static_cast<size_t>(latitudes_deg.size());
+    const int n = static_cast<int>(std::lround(std::sqrt(static_cast<double>(count))));
+    if (longitudes_deg.size() != latitudes_deg.size() || heights_m.size() != latitudes_deg.size() ||
+        static_cast<size_t>(n) * static_cast<size_t>(n) != count || azimuth_count < 1 || spacing_m <= 0.0 ||
+        n < 2 || (n - 1) % 16 != 0) {
+        godot::UtilityFunctions::push_error(
+            "StarsimCore.horizon_elevations: n x n Gitter mit (n - 1) teilbar durch 16, gleich lange Felder, "
+            "azimuth_count >= 1 und spacing_m > 0 erwartet");
+        return result;
+    }
+    std::vector<double> lat(count), lon(count), height(count);
+    for (size_t i = 0; i < count; ++i) {
+        lat[i] = latitudes_deg[static_cast<int64_t>(i)] * constants::deg_to_rad;
+        lon[i] = longitudes_deg[static_cast<int64_t>(i)] * constants::deg_to_rad;
+        height[i] = heights_m[static_cast<int64_t>(i)];
+    }
+    const auto elevations = environment::horizon_elevations_lattice(*moon_terrain_, moon_terrain_->sphere_radius_m(), n,
+                                                                    lat, lon, height, spacing_m, azimuth_count);
+    result.resize(static_cast<int64_t>(elevations.size()));
+    for (size_t i = 0; i < elevations.size(); ++i) result[static_cast<int64_t>(i)] = elevations[i];
+    return result;
+}
+
+double StarsimCore::horizon_elevation_rad(const godot::String& body, double latitude_deg, double longitude_deg,
+                                          double height_m, double azimuth_rad) const {
+    if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    const double lat = latitude_deg * constants::deg_to_rad, lon = longitude_deg * constants::deg_to_rad;
+    const double first_step_m = std::max(0.5 * moon_terrain_->resolution_m(lat, lon), 1.0);
+    return environment::horizon_elevation_rad(*moon_terrain_, moon_terrain_->sphere_radius_m(), lat, lon, height_m,
+                                              azimuth_rad, environment::HorizonMarch{first_step_m, first_step_m});
 }
 
 std::shared_ptr<const environment::AtmosphereScattering> StarsimCore::atmosphere() const {
@@ -1012,6 +1052,12 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::surface_samples);
     ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
                          &StarsimCore::surface_resolution_m);
+    ClassDB::bind_method(D_METHOD("horizon_elevations", "body", "latitudes_deg", "longitudes_deg", "heights_m",
+                                  "azimuth_count", "spacing_m"),
+                         &StarsimCore::horizon_elevations);
+    ClassDB::bind_method(D_METHOD("horizon_elevation_rad", "body", "latitude_deg", "longitude_deg", "height_m",
+                                  "azimuth_rad"),
+                         &StarsimCore::horizon_elevation_rad);
     ClassDB::bind_method(D_METHOD("surface_finest_resolution_m", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_finest_resolution_m);
     ClassDB::bind_method(D_METHOD("load_atmosphere", "config_dir", "cache_dir"), &StarsimCore::load_atmosphere);
