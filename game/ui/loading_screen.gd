@@ -2,13 +2,16 @@ class_name LoadingScreen
 extends Node
 ## Startup loading screen: shows which boot step runs right now (light text on black, no progress bar). The boot code
 ## reports each step with `await LoadingScreen.step("Wetter laden ...")` (a no-op without a screen, so tests and
-## headless runs never notice). Main creates it (`start`) before the world is built and arms it at the end
-## (`finish_when_idle`); it disappears for good after the first rendered world frames.
+## headless runs never notice). The boot scene creates it (`start`) before Main exists, Main's `start` call returns the
+## same screen, and Main arms it at the end (`finish_when_idle`); it disappears for good after the first rendered
+## world frames.
 ##   Desktop: a full-screen CanvasLayer; the text reaches the window at once (RenderingServer.force_draw), so the
 ##            blocking boot steps stay synchronous.
 ##   VR:      a native OpenXR quad layer (VrLoadingLayer). Only rendered frames reach the headset, so a step waits one
 ##            frame after its text is set (`yielding()`: World._ready then suspends and Main waits for it).
-## Every step is also logged with its start and duration (`[Boot] ...`, the table at the end).
+## Every step is also logged with its start and duration (`[Boot] ...`, the table at the end), and so is the screen's
+## life (created, world shown, removed; in VR the quad and the XR camera's blanking).
+## Safety: once armed, the screen goes at the latest ARMED_TIMEOUT_S later, whatever it still waits for.
 
 enum Mode { NONE, DESKTOP, VR }
 
@@ -17,18 +20,24 @@ const LAYER := 100  ## above every other canvas layer
 const READY_FRAMES := 6  ## rendered world frames under the screen before it goes (the cloud shader warm-up takes 4)
 const FADE_S := 0.3  ## desktop only
 const SESSION_WAIT_MS := 4000  ## VR: how long the first step waits for the headset session to be visible
+## [E] latest removal after arming; covers the atmosphere's first-run precomputation (about a minute) with margin.
+const ARMED_TIMEOUT_S := 180.0
 
+## The one screen of this start. Survives the reparent to the root at the boot scene's hand-over (cleared only when the
+## screen finishes or is deleted, not on leaving the tree), so Main's `start` finds it and never builds a second one.
 static var current: LoadingScreen
 
 var steps := LoadingSteps.new()
 var mode := Mode.NONE
+var armed_timeout_ms := int(ARMED_TIMEOUT_S * 1000.0)  ## a variable for the test
 
 var _view: LoadingView
 var _layer: CanvasLayer  ## desktop
 var _vr: VrLoadingLayer
-var _xr: Node  ## the XrManager autoload
+var _xr: Node  ## the XrManager autoload (origin, camera, interface)
 var _hold: Callable
 var _armed := false
+var _armed_ms := 0
 var _world_shown := false
 var _frames_left := READY_FRAMES
 var _placed := false
@@ -43,11 +52,19 @@ static func start(host: Node) -> LoadingScreen:
 	var wanted := _mode_for(host)
 	if wanted == Mode.NONE:
 		return null
+	return create(host, wanted, host.get_node_or_null("/root/XrManager") if wanted == Mode.VR else null)
+
+
+## Builds the screen in `wanted` mode under `host`; `xr` provides origin, camera and interface (VR). Used by `start`
+## and directly by the test (with a stand-in for the XrManager).
+static func create(host: Node, wanted: Mode, xr: Node) -> LoadingScreen:
 	var screen := LoadingScreen.new()
 	screen.mode = wanted
+	screen._xr = xr
 	host.add_child(screen)
 	screen._build()
 	current = screen
+	print("[Boot] loading screen created (%s)" % ("VR" if wanted == Mode.VR else "desktop"))
 	return screen
 
 
@@ -82,12 +99,12 @@ func _build() -> void:
 	steps.title = str(ProjectSettings.get_setting("application/config/name"))
 	_view = LoadingView.new()
 	if mode == Mode.VR:
-		_xr = get_node("/root/XrManager")
 		_vr = VrLoadingLayer.new()
 		_xr.origin.add_child(_vr)
 		_vr.setup(_view, _xr.camera)
-		if _xr.interface.has_signal("session_visible"):
-			_xr.interface.connect("session_visible", func() -> void: _session_visible = true)
+		var interface: Object = _xr.interface
+		if interface != null and interface.has_signal("session_visible"):
+			interface.connect("session_visible", func() -> void: _session_visible = true)
 		else:
 			_session_visible = true
 	else:
@@ -111,15 +128,29 @@ func _report(text: String) -> void:
 		await _present_vr(first)
 
 
+## True once the headset shows the app's frames. The state is read directly too: the signal may have come before the
+## screen connected to it.
+func _session_is_visible() -> bool:
+	if _session_visible:
+		return true
+	var interface: Object = _xr.interface
+	if interface != null and interface.has_method("get_session_state"):
+		var state: int = interface.get_session_state()
+		_session_visible = state == OpenXRInterface.SESSION_STATE_VISIBLE or state == OpenXRInterface.SESSION_STATE_FOCUSED
+	return _session_visible
+
+
 ## VR: the text set above reaches the headset with the next rendered frame; the step's work starts after it.
 func _present_vr(first: bool) -> void:
 	if not _placed:
 		_placed = true
 		var waited_ms := Time.get_ticks_msec()
-		while not _session_visible and Time.get_ticks_msec() - waited_ms < SESSION_WAIT_MS:
+		while not _session_is_visible() and Time.get_ticks_msec() - waited_ms < SESSION_WAIT_MS:
 			await get_tree().process_frame
 		await get_tree().process_frame  # one frame with a valid head pose
 		_vr.place(_xr.camera.transform)
+		print("[Boot] VR loading quad placed (session visible: %s, waited %.2f s)"
+				% [_session_visible, (Time.get_ticks_msec() - waited_ms) / 1000.0])
 	await get_tree().process_frame
 	if first:
 		await get_tree().process_frame
@@ -130,10 +161,24 @@ func _present_vr(first: bool) -> void:
 func finish_when_idle(hold_text: Callable) -> void:
 	_hold = hold_text
 	_armed = true
+	_armed_ms = Time.get_ticks_msec()
+
+
+## True while the screen is armed and has not gone yet.
+func is_armed() -> bool:
+	return _armed
 
 
 func _process(_delta: float) -> void:
 	if not _armed:
+		return
+	if Time.get_ticks_msec() - _armed_ms > armed_timeout_ms:
+		push_warning("LoadingScreen: still up %.0f s after the boot - removed" % (armed_timeout_ms / 1000.0))
+		print("[Boot] loading screen timeout after %.0f s: removing it" % (armed_timeout_ms / 1000.0))
+		if not _world_shown:
+			_world_shown = true
+			_show_world()
+		_finish()
 		return
 	var holding := _hold.call() as String if _hold.is_valid() else ""
 	if not holding.is_empty():
@@ -153,6 +198,7 @@ func _process(_delta: float) -> void:
 
 
 func _show_world() -> void:
+	print("[Boot] world shown under the loading screen")
 	if mode == Mode.VR:
 		_vr.release()
 	else:
@@ -166,16 +212,23 @@ func _finish() -> void:
 	print("[Boot] done after %.2f s:" % (now_ms / 1000.0))
 	for line in steps.report_lines(now_ms):
 		print("[Boot] ", line)
-	current = null
+	if current == self:
+		current = null
 	if mode == Mode.VR:
-		_vr.queue_free()
+		_vr.remove()
+		_vr = null
+		print("[Boot] loading screen removed")
 		queue_free()
 	else:
 		var tween := create_tween()
 		tween.tween_property(_view, "modulate:a", 0.0, FADE_S)
 		tween.tween_callback(queue_free)
+		print("[Boot] loading screen fading out")
 
 
-func _exit_tree() -> void:
-	if current == self:
-		current = null
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		if current == self:
+			current = null
+		if _vr != null and is_instance_valid(_vr):  # never leave the quad up or the XR camera blank
+			_vr.remove()
