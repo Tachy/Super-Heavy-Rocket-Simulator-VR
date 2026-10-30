@@ -16,7 +16,7 @@ far fade. Measurement first: instrumentation, Spike S (STOP 1), prototype behind
 **Tech Stack:** Godot 4.7.2 double, GDScript, RenderingDevice compute (GLSL compiled by `CloudShaderPort`), D3D12,
 OpenXR; C++20 core (Catch2, tag `[weather]`) and the GDExtension `StarsimCore`.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-cloud-world-volume-design.md` (approved by the user 2026-10-28; read
+**Spec:** `docs/superpowers/archive/specs/2026-10-28-cloud-world-volume-design.md` (approved by the user 2026-10-28; read
 "The design (decided)", "Decisions taken for the builder" and "Measures of success"). Inputs:
 `.superpowers/sdd/2026-10-28-cloud-architecture/` (`user-decisions.md` binding; `recon-current.md` for file:line refs).
 
@@ -629,8 +629,8 @@ Controller-led; measurement and judgement, code only for fall-backs.
 - Docs: `weather-clouds.md` (world volume = current state; the view cache's record and lessons, the light cache, the
   hybrid light march, sub-samples, outline pass, 20 / 34 km band moved verbatim to `docs/history/weather-clouds.md`),
   `vr-performance.md`, `docs/known-issues.md`, `docs/architecture.md` (game structure line if it names the view
-  cache); archive `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md` and
-  `docs/superpowers/plans/2026-10-27-cloud-view-cache.md` to `docs/superpowers/archive/`
+  cache); archive `docs/superpowers/archive/specs/2026-10-27-cloud-view-cache-design.md` and
+  `docs/superpowers/archive/plans/2026-10-27-cloud-view-cache.md` to `docs/superpowers/archive/`
 
 - [ ] **Step 1: Test:** `grep -rn "view_cache\|ViewCache" game/ docs/subsystems/` returns nothing outside history.
 - [ ] **Step 2: Default flip** + presets; run `smoke_test`, `cloud_layer_test`, `cloud_vr_stereo_test`,

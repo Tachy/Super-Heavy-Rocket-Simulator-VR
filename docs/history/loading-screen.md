@@ -22,3 +22,17 @@ Fix: `current` cleared only on finish / PREDELETE; the session wait also reads `
 layer (camera restored, SubViewport detached, hidden, freed, all logged); an armed timeout of 180 s; the headless VR
 lifecycle test in `loading_steps_test.gd`. The quad's properties are now set after it is in the tree (the
 `!is_inside_tree()` error in `setup`).
+
+## The blocking cloud shader build (superseded 2026-10-30: kernels built on workers)
+
+Measured split of the former 21.5 s before the first step (ticks from engine start): driver/renderer/project load and
+all autoloads 0.9 s; `main.tscn` load 0.7 s; instantiating Main 20.1 s, almost all of it `World`'s member
+`CloudLayer.new()` (the `CloudEffect` / `CloudShadowEffect` compute shaders compiled at construction on the render
+thread; consistent over runs); first frame right after. Now the Boot scene shows its first text at 0.77 s. The 20 s
+stay a blocking call on the main thread (a static screen; moving them off-thread needs a change in the cloud code). Then:
+
+Open point then:
+- The ~20 s cloud shader build blocks the main thread: in VR no frame is submitted meanwhile; verified on the headset
+  (user, 2026-10-30, commit 614f6c4): the Pimax runtime keeps the quad stable in the room, free 6DOF head movement, no
+  freeze. Fix (to shorten it) would be compiling the cloud compute shaders
+  lazily / threaded in `CloudEffect` (weather-clouds subsystem).

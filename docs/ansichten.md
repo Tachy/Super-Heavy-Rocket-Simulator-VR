@@ -205,16 +205,15 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Tab wieder auf das gesteuerte Fahrzeug, folgt sie ihm erneut (ebenso, wenn das gewählte Objekt verschwindet oder
   ein neuer Flug beginnt). **F1** alter HUD. **F12** zentriert in VR neu (außerdem automatisch 2 s nach dem
   Start).
-- **Wolken-Prototyp** [Prototyp 2026-10-29, Live-Test in VR]: **F7** schaltet reihum: alter March mit rechtwinkliger
-  VR-Wolkenmitte → "alter March, winkelgleich" → "Volumen-Prototyp, winkelgleich" [Prototyp "Weg 2" 2026-10-29: Form und
-  Licht der Wolken einmal fest im Raum vorberechnet, pro Bild nur nachgeschlagen; bis das erste Volumen gebacken ist,
-  zeigt die Zeile "(Volumen wird gebacken)" und der alte March malt] → zurück zum alten March (aus einem Hybrid zurück
-  zum alten March), **F8** die Auflösung der Wolken (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse). **F9** [Test 2026-10-29] schneidet die
-  Wolken bei 10 km bzw. 15 km ab (dahinter keine Wolken; misst, was der nahe Teil allein kostet). Beides gilt am Desktop und in VR und steht mit der Bildrate im Info-Text unter der
-  Wetterzeile ("Wolken: ..."); mit gewähltem Verfahren ist der Sicht-Cache aus. Startwerte über die Argumente
-  `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light|baked` und `--cloud_divisor=<n>`. Die Hybride sind nur noch über `--cloud_method` erreichbar. Mit `--cloud_equiangular` [Test 2026-10-29] startet
-  die VR-Wolkenmitte gleichwinklig: sie rechnet gleichwinklig statt rechtwinklig (gleiche Schärfe in der Bildmitte, etwa halb so viele
-  Wolken-Bildpunkte, zum Rand hin weicher).
+- **Wolkenverfahren** [Entschieden 2026-10-30]: die Wolken kommen bei jedem Start aus dem **Volumen** (Form und Licht
+  der Wolken einmal fest im Raum vorberechnet, pro Bild nur nachgeschlagen; VR-Wolkenmitte winkelgleich); bis das erste
+  Volumen gebacken ist, zeigt die Zeile "(Volumen wird gebacken)" und es sind noch keine Wolken zu sehen. **F7** schaltet
+  reihum: "Volumen" → "alter March" (der frühere Weg, Wolken pro Bild entlang jedes Strahls gerechnet, rechtwinklige
+  VR-Wolkenmitte; Vergleich) → "alter March, winkelgleich" → zurück zum Volumen. **F8** die Auflösung der Wolken (1,
+  1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse). **F9** [Test 2026-10-29] schneidet die Wolken bei 10 km bzw. 15 km ab
+  (dahinter keine Wolken; misst, was der nahe Teil allein kostet). Alles gilt am Desktop und in VR und steht mit der
+  Bildrate im Info-Text unter der Wetterzeile ("Wolken: ..."). Startwerte über die Argumente `--cloud_method=old|baked`
+  und `--cloud_divisor=<n>`; `--cloud_equiangular` startet auch den alten March gleichwinklig.
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
   (nach F12 neu gesetzt), nicht am Kopf festgeklebt; das Zeit-Panel liegt oben links auf derselben Fläche und wird mit
   einem Mauszeiger bedient (die Maus ist gefangen; Tab, F1 und F12 gehen an das Spiel, nicht an das Panel). Die
@@ -336,8 +335,10 @@ laufende Schritt groß (z. B. "Erdgelände und Satellitenbilder einrichten"), da
 kleiner und abgedunkelt. Kein Fortschrittsbalken. Auf dem Desktop ist es eine Vollbild-Ebene, in VR eine native
 OpenXR-Quad-Ebene etwa 2 m vor der Startkopfhaltung (Welt dahinter schwarz). Der Bildschirm bleibt, solange die
 Atmosphärentabellen laden (erster Start: etwa eine Minute, die Zeile sagt das), und verschwindet dann nach wenigen
-gerenderten Weltbildern (am Desktop mit kurzer Blende). Der Teil vor dem ersten Schritt (Engine- und GPU-Start, auf
-dem Desktop rund 20 s) ist ohne Text.
+gerenderten Weltbildern (am Desktop mit kurzer Blende). Er bleibt auch, solange die Wolken-Shader noch übersetzt werden
+("Wolken-Shader übersetzen ...": nur beim ersten Start oder nach einer Änderung, wenige Sekunden; danach liegen sie
+fertig auf der Platte). Der Teil vor dem ersten Schritt (Engine- und GPU-Start, unter einer Sekunde) ist ohne Text; der
+ganze Start bis zur Welt dauert am Desktop etwa 4 s (vorher rund 24 s).
 
 ### Weitere Außenansichten
 

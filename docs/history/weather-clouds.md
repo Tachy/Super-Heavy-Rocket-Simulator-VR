@@ -798,14 +798,14 @@ Static clouds final review (2026-10-27), weather-service.md file-format version 
 
 ## Cloud view cache before its fill (superseded by cloud view cache Task 3, 2026-10-27)
 
-> **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`)**: pure logic so far -
+> **Cloud view cache (in progress, `docs/superpowers/archive/specs/2026-10-27-cloud-view-cache-design.md`)**: pure logic so far -
 >   `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection) and
 >   `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget); `cloud_view_cache_test.gd`. Not wired
 >   into the renderer yet.
 
 ## Cloud view cache before its lookup (superseded by cloud view cache Task 4, 2026-10-28)
 
-> - **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`)**:
+> - **Cloud view cache (in progress, `docs/superpowers/archive/specs/2026-10-27-cloud-view-cache-design.md`)**:
 >   `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection),
 >   `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget; `cloud_view_cache_test.gd`) and the
 >   fill (Task 3): `CloudViewCache` (`game/world/weather/cloud_view_cache.gd`) holds per level a cube texture of colour + T
@@ -910,7 +910,7 @@ The validation bullet of the fill ended (before Task 4):
 
 ## Superseded by cloud view cache Task 5 (2026-10-28: near shell, progressive re-anchor)
 
-> - **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-4 done,
+> - **Cloud view cache (in progress, `docs/superpowers/archive/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-4 done,
 > Task 5 near shell / progressive re-anchor and Task 6 VR acceptance open)**:
 
 > `SimClock.time_jumped` (`notify_clock_jump`), a pinned snapshot (`show_now`), and - interim until Task 5's
@@ -1335,3 +1335,602 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   detail; its own light bake), and beyond 9-11 km neither the ground nor the air saw any cloud's shape - crepuscular
   rays of clouds 20-40 km up-Sun and the shapes' shadows on distant ground were a smooth grid-mean dimming. Now S, the
   bake's line toward the Sun per column (`baked-shadow-report.md`).
+
+## Removed 2026-10-30: cloud view cache, spike S, hybrid march, old world volume
+
+The baked volume became the default of every start (user 2026-10-30); the direction view cache
+(`cloud_view_cache*.gd`, `cloud_view_cache.gdshaderinc`, its test, `--ab_view_cache` / `--no_view_cache` /
+`--shimmer_check` / `--jump_check` / `--frames_every`, the `cloud_view_cache` flag, PerfLog's cache columns), spike S
+(`cloud_spike.gd` / `.gdshaderinc`, `--spike*`), the hybrid march (`cloud_hybrid.gdshaderinc`, `--cloud_method=hybrid*`)
+and the old world volume (`cloud_world_volume*.gd`, `cloud_volume*.gdshaderinc`, its test, cloud_check sections 15-19,
+`STARSIM_WORLD_VOLUME`, `--world_volume*`, `--ab_reference`, `--edge_check`, `--front_check`, the globals
+`cloud_edge_curl`, `cloud_light_entry_samples`, `cloud_noise_curl` and the sub-cell statistics) were deleted in one
+refactor commit. Their sections of the subsystem file follow verbatim. Before the switch the cloud kernels were built
+serially at CloudLayer construction (~20 s of a GPU start; `.superpowers/sdd/loading-screen2-report.md`).
+
+### Hybrid march (model)
+
+- **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
+  (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
+  `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a
+  method turns the view cache off; the world volume's upkeep runs from the first hybrid frame on. The hybrid kernels
+  (`cloud_hybrid.gdshaderinc`, defines `CLOUD_HYBRID`, `CLOUD_HYBRID_SKIP`, `CLOUD_HYBRID_VOLUME_LIGHT`; compiled on
+  first use, 1-5 s each; `tests/hybrid_compile_check.gd` compiles all 24) are today's march - shape, detail and
+  weather per sample, its step schedule, outline pass, temporal copy and upsample - with: (a) the skip of the volume's
+  proven-empty ball behind a clear sample (distance field of the finest frame-0 level holding the point, the grid
+  carried as a quadratic through three geodetic solves per 40 km, margin 2 m + 1e-4 x distance; no free-box exit), and
+  (b) the light from one trilinear fetch of the volume's baked (tau_sun, tau_below, tau_above, tau_moon) at the step's
+  light point (faded toward level + 1; beyond the volume the far tier's light path). The T7 world-volume march stays
+  behind `--world_volume` (with the method "old").
+  Desktop 1600 x 900, march kernel ms (cloud_pass_march, median of 20 frames; refine adds 3.4-6.7 ms):
+
+  | view / divisor | old 3 / 2 / 1.5 / 1 | hybrid (vol. light + skip) | hybrid, old light + skip | vol. light, no skip (3 / 1) |
+  |---|---|---|---|---|
+  | V1 | 4.6 / 7.0 / 12.9 / 28.2 | 3.3 / 6.6 / 7.8 / 20.6 | 6.7 / 8.6 / 16.5 / 33.7 | - |
+  | V3 | 6.8 / 11.0 / 18.3 / 39.3 | 5.9 / 8.5 / 15.9 / 33.0 | 8.3 / 15.1 / 25.3 / 51.1 | 4.6 / 27.1 |
+
+  The skip works (V3 divisor 1: density fetches 5.97 G -> 2.12 G, empty steps 364 M -> 109 M, the image within 1 % of
+  pixels of today's) but costs time (its data-dependent steps: the latency chain of the cost diagnosis); hence the
+  method `hybrid_no_skip`. The volume light looks different: plastic domes on the deck from above, blotchy dark patches
+  on cumulus flanks from the ground (the light volume's cells vs the per-sample shapes; the T7 march showed them too).
+
+### Cloud view cache (validation)
+
+- Cloud view cache fill (cloud view cache Task 3, cloud_check 15, `STARSIM_VIEW_CACHE_ONLY=1`): the march image of a
+  static view twice bit-identical (a broken cumulus layer from the ground, a deck from above; 256^2, desktop preset);
+  `STARSIM_MARCH_REFERENCE=<dir>` compares the march images (desktop preset; divisor 1, debug 0 / 12) with a directory
+  written before a refactoring - the extraction of `cloud_shade_ray`: 0 differing pixels in all six. The whole cube
+  filled at the full level from the camera vs the march at divisor 1, each pixel's ray sampled bilinearly through
+  `CloudViewCacheLayout.texel_of`: face-aligned views (90 deg on 256^2 texels per face: pixel rays = texel rays; the
+  zenith from the ground under cf 0.4, the nadir above a deck) luminance error median 0.000 / 0.217 %, p99 2.7 / 1.4 %
+  (bound 1 / 5 %), T RMS 0.0039 / 0.0000 (0.01), cloud distance median 0.000 / 0.220 % (1 %) - the deck's 0.2 % is
+  the static end (the fill ends at the ellipsoid, the depth-less check's march at the -500 m shell: other step
+  lengths); general 60-deg views (448^2 texels per face) median 0.09 / 0.47 %, distance median 0.04 / 0.10 % asserted,
+  p99 46 / 7.8 % and T RMS 0.021 / 0.020 printed: a ray against the bilinear mean of the four texel rays around it at
+  the deterministic march's hard edges and step grain (the lookup's A / B on general views: below).
+- Cloud view cache in the frame (cloud view cache Task 4, fix round 1): `cloud_vr_stereo_test` mirrors the parallax
+  lookup - a cloud at 300 m / 2 km / 20 km seen from each eye (IPD 0.064 m) and from a camera 50 m off the anchor lands
+  within 1e-12 eye px (35 px/deg; bound 0.25) when the cached distance is the cloud's in every direction; a flat deck
+  through the point within 1e-8 px from 2 km on (0.61 px at 300 m, printed: inside the near shell's reach).
+  `cloud_layer_test`: a view jump and a clock jump restart the cache (nothing above level 0 shown afterwards); after
+  the view jump and after a layout re-creation the batches say covering until the view's sample rays show a level
+  faded in, and not once converged; a 1 deg Sun step starts cross-fades (refreshes from their fade slot), none
+  complete in the frame they start. `cloud_view_cache_test`: `completed_batch` / `set_tile_distances` equal
+  `completed` / `set_tile_distance` per tile over 60 frames; `missing_in_cone` finds a cold cache, not a filled cone,
+  and one missing tile at the cone's edge. `render_check --jump_check` (desktop 1600 x 900): every frame's cloud
+  coverage (mean 1 - T) after a view jump and after a layout re-creation (render scale x 1.3) within 0.02 of the
+  per-frame march's: deck 0.0188 / 0.0111, ground 0.0121 / 0.0063 (the remaining deviation: the coarse levels show a
+  little less cloud than the full one). `render_check --shimmer_check` (deck view, cache full, 16 frames yawed +-0.3
+  px): the frame-to-frame change's p99 0.237 vs the march's at divisor 1 0.257 (ratio 0.92, bound 1.10).
+  `render_check --ab_view_cache` (cache full vs the march at divisor 1, desktop 1600 x 900, 2 x 2 blocks, luminance
+  error / max(|march|, 5 % of the mean); controller ruling: the p99 over the blocks without scene geometry bounded by
+  the same view's march against itself turned by 0.5 px, the median by 1 %): deck / ground / 20 km / dusk median 0.21
+  / 0.07 / 0.16 / 0.12 % (met), p99 9.0 / 14.6 / 9.9 / 22.4 % against the calibration's (the max over four half-pixel turns,
+  +-x azimuth and +-y elevation) 27.5 / 49.4 / 34.2 / 81.6 % - all met (the +-x turns alone: 16.5 / 43.0 / 8.2 / 66.1 %;
+  the elevation turns are the larger ones); T RMS 0.009 / 0.007 / 0.022 / 0.007. Images
+  `screenshots/cloud-view-cache/t4_<view>_ab_f2_{cache,march,ab_error}.png`.
+
+### Spike S and the world volume (diagnostics)
+
+- Spike S (world volume plan Task 2; throw-away, removed in Task 13; numbers in `vr-performance.md` "Spike S"):
+  `render_check.gd --spike=a|b [--spike_scale=0.5|1.0]` (with `--stereo`, a slab `--cloud_view`, `--handover=0,0`)
+  replaces the march by `CloudSpike` (`game/world/weather/cloud_spike.gd`, `game/shaders/cloud_spike.gdshaderinc`):
+  the far tier alone, rays [2 km, end] from the cyclops point over the centre view (divisor 2 / 1), over scratch
+  volumes built over the first frames (one dispatch per frame; render_check waits for `CloudSpike.ready`): an
+  occupancy over the view's band region (200 m cells, 4^3 taps of `cloud_extinction_at` at each tap's own footprint +
+  the lift-bound shape test, Chebyshev distance field capped at 16 cells, max extinction dilated by one cell; grid
+  azimuthal-equidistant about the camera, model height; tiles of 2048 texels stacked in depth for D3D12's 3-D limit),
+  for (b) a 100 m bake of the cell-mean extinction and a dummy RGBA16F light volume. Steps: sphere tracing where the
+  distance is >= 2 cells, else min(Delta tau 0.3 from the max extinction, half a cell, 1/4 of the finest structure at
+  the footprint) >= 2 m, one sample per step, constant light (per-ray Sun irradiance / 4 pi), today's termination; no air.
+  (a) samples `cloud_extinction_at`, (b) one bake fetch + one light fetch. `--spike=ref` is the sanity check's
+  reference: today's march with `CLOUD_SPIKE_CLIP_M` (its rays start at 2 km). The log prints the plan
+  (`spike plan: ...`) and `spike centre <w>x<h> mean alpha a mean luminance l`; with `--counters` the channels carry
+  extra counts in their high 16 bits (`tau_limited_steps`, `extinction_steps`, `structure_limited_steps`;
+  `occupied_steps` = steps in occupied space, the dilated occupancy).
+  Round 2 (Task 2b): `--spike_levers=1,2,4,s,t` / `--spike_stop=<T>` switch the step rule's levers (a bake max volume:
+  the 3^3-texel max per bake cell, or minus the Chebyshev distance of a clear cell; Delta tau from it, sphere tracing on
+  it, one analytic step per bake cell, trilinear / structure options); numbers in `vr-performance.md` round 2.
+- World volume layout and upkeep schedule (world volume plan Task 3; pure logic, no GPU; headless
+  `res://tests/cloud_world_volume_test.gd`, ~80 checks, prints `cloud_world_volume_test: PASS`):
+  - `CloudWorldVolumeLayout` (`game/world/weather/cloud_world_volume_layout.gd`): 8 levels of 256 x 256 x 128 toroidal
+    cells (cell sizes `CELL_H_M` 50 m .. 6.4 km, `CELL_V_M` 25 / 50 / 164.0625 m over the shell -500 .. 20 500 m); the
+    horizontal axes are the azimuthal-equidistant projection about the frame origin on the Gaussian-radius sphere
+    (geodetic normal of the point, so no flat-tangent miss), z = ellipsoid height (round trip < 1e-6 m). Render axes
+    (polar axis +Y). A level's texture holds its STORAGE box (256 x 256 x 128 cells, `storage_box`); the WINDOW the
+    lookup reads (`window_size`: 252 x 252, x 124 at levels 0-1, x 128 at levels 2-7) lies `GUARD_CELLS` = 2 [E]
+    inside it on each side of every scrolling axis, so the slabs ahead of the camera are baked before the window
+    reaches them (Task 5 review I2; no memory, 1.6 % of each level's reach). The window is centred on the camera's
+    ground point and snapped to the cell (`window_origin`); the storage's target is the window grown by the guard
+    (`storage_target`, not below the shell; `storage_range`: the storage origins that still hold a window). Levels 0-1
+    are centred vertically on the camera height and clamped at the shell BOTTOM only (no top clamp, so level 0
+    switches off at 22.1 km without a pop; `level_active`), and fade at their vertical window edges except at the
+    clamped bottom (`fade_weight`, 8 cells inside the window; the GLSL mirror needs `origin` (the window's),
+    `vertical_fade`, `clamped_bottom` from the lookup).
+    `exposed_slabs` gives disjoint half-open boxes; `box_split` / `box_clip` are the shared box helpers.
+    Max-extinction mip / distance field: `MIP_DIV` 4 -> `mip_size()` 64 x 64 x 32 texels per level.
+  - `CloudWorldVolumeSchedule` (`..._schedule.gd`): `plan(camera, sun, moon, blend, cloud_top_m, jumped, delta_s,
+    slot_ids)` -> `bake` ({level, from, to, snapshot_channel -1 = both | slot, spare}), `provisional` (+ `from_column`
+    for the coarsest level), `light` (+ `moon`), `reframe`, `lookup` (state after the batch: per level origin /
+    active / ready (filled) / shown / frame origin; `storage`; `slot_ready`; the spare while it fades, `build_spare`
+    while it is built; `shown` sets the GPU's READY flag). Scroll (bake ahead of exposure, Task 5 review I2): a ready level's storage moves toward the window's
+    target grown by the guard, as far as it still holds the shown window; the slabs it exposes are queued and baked
+    earliest deadline first - a slab's deadline is the frames until the window, at the camera's per-axis speed
+    (`MOTION_DECAY` 0.9 peak hold [E]), would reach it; the frame's scroll budget is the deadline-meeting rate x
+    `SCROLL_MARGIN` 1.5 [E], capped at `SCROLL_CAP_MS` = 3.0 - 1.0 ms (the spike cap less the light), and the normal
+    bake share the fills leave bakes further ahead. The window then advances toward the camera only onto baked cells
+    (no frame reads an unbaked cell; a missed deadline makes the window wait = lag, counted in `windows_waiting`;
+    a move of a whole storage extent restarts the level's fill). Nesting (Task 5 review round 2, N1 ruling): the
+    windows advance coarse to fine, and a level nested in the next coarser one (`CloudWorldVolumeLayout.nested`: its
+    window inside level k + 1's weight-1 region, 8.5 cells in) steps only onto positions that keep it nested - a finer
+    level waits for its coarser one (lag, the spatial fade band covers the camera leaving it; ~54 cells of level k + 1
+    of slack at the targets). A level is `shown` only while it is ready and the next coarser level is shown with this
+    window nested (transitively; the coarsest: ready): a coarser level restarting its fill hides the finer ones with
+    it, so the fade band, the bound and the free lookups never read a level that is not shown. Levels of two frames (a
+    re-frame in progress) are not compared (carry to Task 9: the old frame's band reads level k + 1 with its own
+    grid). Baked slabs are lit first. Fills (cold
+    start, jump, level on) are baked under the budget strictly coarse to fine - the coarsest level too (Task 5: its
+    8.4 M cells of 8448 taps take the GPU seconds), and nothing of the volume is shown before it is `ready`; a replaced
+    snapshot slot is rebaked alone (`slot_ready`, the spare included; a level still filling rebakes only what its fill
+    baked: no cell twice). The schedule keeps the layout's `origins` (`fade_weight`). Light: `CloudWorldVolumeLight` (below:
+    filled levels only, write modes, settle). Spike frames (cold
+    start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms. The bake's cost unit is the
+    tap (`CloudWorldVolumeLayout.cell_taps(k)`: the core's tap rule), its rate taps per ms per level
+    (`bake_level_taps_per_ms`; light: per-level rates, below); `feedback_split(m)` calibrates each rate from its own GPU
+    interval (Task 6 review round 1); start rates 2e7 taps/ms (half the measured, below) and 1e6 light cells/ms [E]; `budget_scale` (checks only) scales every budget. Measured (headless, at a test rate of 1e9 taps/ms): fill 90
+    frames, `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula). Scroll
+    flights at the game's 4.3e7 taps/ms (`cloud_world_volume_test`, heading 30 deg, an independent model of the
+    unbaked cells): 1 km/s at 10 km climbing 150 m/s (all 8 levels, 1400 frames) scroll bake mean 0.44 / worst
+    0.50 ms, every plan <= 0.58 ms; 7.8 km/s at 120 km (levels 2-7, 1200 frames) mean 1.36 / worst 1.94 ms, every plan
+    <= 2.04 ms; no window waits, no unbaked cell read. 7.8 km/s needs ~1-1.5 ms of scroll bake per frame on average
+    (taps 528-8448 per cell), above the 0.5 ms normal bake share: in orbit the upkeep runs ~2-2.5 ms with light.
+    Capped flights (budget x 0.1 / 0.3 at 7.8 km/s, x 0.05 at 1 km/s climbing, 1500 frames each: the cap binds as at
+    ~2x time warp in orbit or on a slower GPU): the windows wait in 1495 / 1484 / 1486 frames (levels not ready after
+    a whole-extent lag: 1360 / 53 / 796 level-frames), 0 unbaked cells read by a shown level, the shown levels nest
+    in every frame (before the fix 542 / 907 level-frames outside level k + 1's weight-1 region, 626 shown over a
+    level not ready); disabling the wait rule or the nesting rule fails the test.
+- World volume, GPU side (world volume plan Task 5; `CloudWorldVolume`, `game/world/weather/cloud_world_volume.gd`;
+  kernels `game/shaders/cloud_volume_bake.gdshaderinc`, lookups `game/shaders/cloud_volume.gdshaderinc`; fidelity
+  flag `CloudLayer.world_volume` / global `cloud_world_volume`, default false until Task 13, on with
+  `STARSIM_WORLD_VOLUME=1` or `--world_volume`; the march reads it from Task 7 on, below):
+  - Textures per level (index 8: the transient spare of a re-frame, created with its first job, freed at the swap):
+    density RGBA16F in 1/km (RG = rho, sigma_c of slot 0's snapshot, BA = slot 1's; `channel_of_slot(s)` = s: a
+    slot's snapshot is replaced only without weight), light RGBA16F (Task 6, below), max-extinction mip R16F (1/km) and
+    distance field R8 (blocks) at 64 x 64 x 32; ~1.07 GB (`texture_bytes()`).
+  - Threads: CloudLayer plans each frame once the last batch was taken (held time and jumps kept), `submit()`s it;
+    CloudEffect `run()`s it (with the pass's own camera) after the set 0 is built and before the march (GPU intervals
+    `cloud_volume_upkeep`: the bake, max mip, distance field; `cloud_volume_light`: the light, Task 6), then
+    adopts its lookup. `notify_view_jump` / `notify_clock_jump` / `show_now` restart the schedule (`forget()`). The
+    cross-fade is gated: while the volume runs (`running()`: a batch adopted, the last one taken - frame-based), the
+    weight moves onto a slot only once the adopted state holds the slot's snapshot in its channel pair
+    (`slot_holds`). Stats: `CloudLayer.world_volume_stats()`.
+  - Bake (`CLOUD_VOLUME_BAKE`): one 64-thread workgroup per cell, the taps shared and summed in shared memory in a fixed
+    order (a rebake is bit-identical); the core's tap rule and point model of each snapshot (exact bilinear weights on
+    the weather field like the CPU: the hardware's ~8-bit sub-texel weights put a 1-degree field ~1 % off); the cell
+    box is the grid's own axes at its centre (e_x / e_y from the grid points half a cell away, e_z the normal x
+    height); a snapshot whose field has no cloud in any texel the cell can read skips its taps (0 exactly).
+    `same` slots bake once. A one-slot job (`snapshot_channel` 0 / 1) keeps the other pair.
+  - Occupancy (`CLOUD_VOLUME_OCCUPANCY`): per baked box the mip blocks whose support (block + one-cell ring: the
+    trilinear filter's reach) it touches get the bound max sigma_c (and rho) over the support where any rho > 0 in
+    either snapshot, else 0 (x (1 + 2^-10): rounding up); then the whole level's toroidal Chebyshev distance (blocks,
+    cap 8) to a block with a bound, separable x / y / z. Every block claimed free has no rho in its support: a sample
+    of THAT level there reads 0 at any snapshot blend. The fade band blends level k + 1 (its trilinear support reaches
+    ~3 level-k cells past its cloud), so the lookups take both levels there (Task 5 review I1):
+    `cloud_volume_max_extinction` = max(level k's block bound, the bounds of every level k + 1 block it overlaps -
+    `cloud_volume_up_blocks`, exact in 1/16 m: one block horizontally and from level 0 to 1, vertically level 1's
+    200 m blocks straddle level 2's 656.25 m ones, two for ~30 %) when the block reaches the band,
+    `cloud_volume_free_m` = min(level k's free ball, level k + 1's) when level k's free ball reaches the band (the free
+    ball is clipped to the level's window). Level k + 1 is shown and holds level k's band (the schedule's nesting).
+    Out of the shell the reads clamp, never wrap (review round 2, N2): levels 0-1 with a clamped bottom read their
+    bottom cell below its centre (`cloud_volume_uvw`), the blocks clamp vertically as the reads
+    (`cloud_volume_block_clamp`; the free space there is 0). Carry to Task 7: the sub-cell field must be 0 where trilinear rho = 0 and
+    <= sigma_c elsewhere, else "dilated by the lift" does not hold - rerun the 1e4-point probe with the real
+    per-sample density then. The distance field is recomputed whole for every level a batch touches (~0.05 ms each;
+    up to 6 levels a frame at 7.8 km/s, `vr-performance.md`).
+  - Grid numerics (preflight C22): `cloud_volume_grid_in(frame, offset)` and `cloud_volume_offset_of` work on the
+    differences to the camera (geodetic fixed point for n - n_c, the AEQD by sinc / x-cosec series in theta^2, the
+    camera's normal split hi / lo, a reference grid point the series reproduce exactly), adding the camera's grid point
+    (hi + lo) last. Measured: 100 offsets with the frame 990 km away within 0.66e-3 of the containing cell (level 0:
+    3 cm). `cloud_volume_level` skips levels of the other frame during a re-frame (the march needs both grids: Task 7).
+  - Measured (cloud_check section 16, RTX 4090, Starbase, analog + ERA5 pair): cold start at the game's budget
+    `cloud_volume_upkeep` median 1.34 / max 2.84 ms per frame, 4.3e7 taps/ms (5050 level-7 cells/ms); whole fills at
+    40 x the budget 6.8-7.6e7 taps/ms. Per cell vs the CPU: water per weather cell (level 2) 0.9967-1.0005; single
+    edge cells scatter (taps within the 8-bit filter error of the threshold or the fraction cut flip): up to 1.7 % of
+    the cells beyond 1 %, all within 0.059 sigma_c. Occupancy (levels 0, 2, 5, cameras 2 m / 9 km): the distance
+    field equals the ring-dilated reference on all 131072 blocks; 1e4 points in claimed-free blocks, a random point of
+    each free ball: 0 with density (blend toward level k + 1 included). Fade band of every level 0-6 (each adjacent
+    pair; levels 0-1 also at the window top), 1e4 points each: 0 with density in their free ball, 0 above the block
+    bound (with the band ignored: 7-90 per level failed; with level k + 1's bound taken at the grid point's block only,
+    as in fix round 1: level 1 failed with 6 / 1 points at the 2 m / 9 km cameras). Clamped bottom (levels 0-1, camera
+    2 m): 1e4 columns read the bottom cell below its centre (before: 9960 / 9959 read the wrapped top storage cell).
+- World volume light (world volume plan Task 6, review round 1 (controller ruling: alternative B, N 16); schedule
+  `CloudWorldVolumeLight`, `game/world/weather/cloud_world_volume_light.gd`, called by the schedule; kernels
+  `game/shaders/cloud_volume_light.gdshaderinc`, run by `CloudWorldVolume` after the bake, GPU interval
+  `cloud_volume_light` with per level `cloud_volume_light_column_<k>` / `cloud_volume_light_cells_<k>`; read by the
+  march from Task 7 on):
+  - Texel (RGBA16F): tau_sun, tau_below (vertical, down to the shell's bottom: the transfer table's b), tau_above (up
+    to the shell's top: the sky's source), tau_moon - optical depths through rho (cell-mean extinction, both snapshots
+    blended by `cloud_blend`). Earth's shadow / Moon off: 6e4 (exp = 0; finite, so a filter across it stays finite).
+  - No kernel reads any level's light (provisional light aside): only baked density. The levels are lit independently;
+    one dispatch per level and kernel (jobs contiguous in the batch's buffer, each holding its first column / 4^3 block;
+    a workgroup finds its job by binary search) - a dispatch per job serialised the jobs (one image written) at the
+    latency of each job's longest ray.
+  - `CLOUD_VOLUME_LIGHT_COLUMN` (a workgroup of 128 per column): tau_below / tau_above as exact trapezoid sums of the
+    level's own column over its window (shared-memory prefix scan; the trilinear field along the geodetic vertical is
+    linear between centres); beyond the window (levels 0-1) the coarser shown levels' density marched along the
+    vertical, one midpoint sample per invocation above (up to the field's top) and one below (down to the shell's
+    bottom), the grid-mean column if no coarser level holds them; levels 2-7 hold the outer half cell as the reads clamp.
+  - `CLOUD_VOLUME_LIGHT` (a workgroup per 4^3 block, after a barrier): tau_sun / tau_moon by the distance-stepped march
+    (a clipmap cone march): Earth's shadow when the straight ray meets the ground (Gaussian sphere of the grid); else
+    from the cell centre CLOUD_LIGHT_LEVEL_CELLS = 32 cells of the cell's own level along the ray (a cell along the ray
+    = the shorter of its horizontal and vertical crossing), then 32 cells of each coarser level, 2 midpoint samples per
+    cell; a sample of segment j reads the finest level >= j whose window holds it (its own level, else a coarser one
+    shown in either frame), faded toward the next coarser level as the march's density; the march ends at the shell's
+    top or, lower, the field's cloud top (`environment::cloud_render_top_m` of both snapshots, carried in the job, plus
+    1.5 of level 7's vertical cells of trilinear support: no density above, so it only shortens the march); beyond
+    level 7's segment, or from a sample no window holds, the grid-mean column. Each segment's grid path is the
+    quadratic through its exact grid points at its ends and middle (no geodetic transform per sample). Cost: a
+    constant per level (2 x 32 samples x the levels on the path), shortened by the top exit. N = 32 (controller ruling,
+    round 1c): with 16 a level-2 ray at a 15 deg Sun left level 2 after 3.3 km and read 400 m cells for the cumulus
+    1.35-2 km up (p99 0.18).
+  - `CLOUD_VOLUME_PROVISIONAL`: from the next coarser shown level's light at the cell centre, level 7 (or none shown)
+    from the grid-mean column (tau_sun = tau_above x the path below the cloud top / the height to it).
+  - Write modes: DIRECT (fresh cells; in spike frames - cold start, jump, re-frame - and for cells never shown with
+    provisional light), RATE (refresh generations: each channel's exp(-tau) moves <= `LIGHT_STEP_T` 0.01 per pass, the
+    step shortened by the half float's storage error; into or out of "no light" - Earth's shadow, the Moon off -
+    directly; the GPU counts clamped cells per job, read back asynchronously, and a box that clamped any is served
+    again once the level's queue is through - "settle" - until it clamps none), BLEND (a box SHOWN with provisional
+    light outside a spike: the real light recomputed each plan and mixed in exp(-tau) by dt / the time left, linear
+    over `PROVISIONAL_FADE_S` 0.25 s).
+  - Schedule: light only for filled (`ready`) levels; per plan blends, fresh cells (coarse to fine), refresh
+    generations one level after the other, fine to coarse (the nearest light first; equal shares over eight stale
+    levels paid each dispatch's latency floor eight times a frame), provisional light once. Triggers: shadow shift
+    H dtheta / sin^2 e < 1/4 cell, the Moon (Sun below -6 deg at the level's own centre), blend 0.02, and a coarser
+    level turning drawn (M6: `light_epoch`, the coarser epochs summed - the rays read its density now). A level's
+    refresh relights no other level. Jobs and refresh tiles are whole columns (32 x 32 x the storage height).
+  - Cost model (`CloudWorldVolumeSchedule`, latency-aware, review round 1c): budgets in ms; a level's light lists
+    cost its latency (`light_latency_of`, once a plan) plus its cells at the level's light-kernel rate plus its column
+    cells at its column rate (`light_ms_of`). `feedback_split` learns them per level from the level's own GPU
+    intervals over the last `LIGHT_COST_WINDOW` 45 samples: a dispatch of >= `LIGHT_CALIBRATION_MIN_CELLS` 65536 cells
+    measures the light kernel's rate net of the latency (its time less the latency, taken as at least
+    `LIGHT_MIN_THROUGHPUT_SHARE` 0.5 of it) and the column pass's as its column cells over its time; a smaller one
+    measures the latency (its two lists' time less their units at the rates). Planned at the slow end: the rates'
+    `LIGHT_RATE_QUANTILE` 0.1, the latency's `LIGHT_LATENCY_QUANTILE` 0.9, or the newest sample when it is worse (an
+    overrun is adopted at once). Start: 1e6 cells/ms, 1e7 column cells/ms, latency `INITIAL_LIGHT_LATENCY_MS` 0.1 ms
+    (measured: ~0.05 ms at level 7 to ~0.2-0.3 ms at levels 2-6, none at level 0, whose time is proportional to its
+    cells); a level not measured yet takes the slowest measured level's cost. Growth (`light_cells_cap`): a level takes
+    at most `LIGHT_GROWTH` 2 x its largest measured dispatch a plan, `LIGHT_PROBE_CELLS` 131072 before any - the model
+    holds at the sizes it measured (a finer level's first jobs at the coarser levels' cost overran 2-3.5 x at N = 32);
+    a cold start / jump starts the growth again from the probe (sizes measured on other content at another GPU load
+    let level 0's first dispatches run 2 x over plan, 4.56 against 2.55 ms, in the full check).
+    A level whose latency does not fit what is left of the budget is skipped and a level that fits is served (never
+    an overrun) - but never for good (round 2, N1): where one whole column (and the latency) never fits the plan's
+    whole light budget, the level is served partial columns (z slices of at least `LIGHT_PARTIAL_MIN_CELLS` 16 cells;
+    the column pass is paid whole; `box_split_column_z`); a level whose light kernel no large dispatch measured for
+    `LIGHT_PROBE_FRAMES` 45 plans while light is pending and whose share cannot reach `LIGHT_CALIBRATION_MIN_CELLS`
+    gets a probe beyond its share (one level a plan, the longest unmeasured), a pair: first one small dispatch (one
+    column, issued even when the stale latency estimate says it does not fit - the estimate is what is verified), which
+    measures the latency again; once that sample arrived (or `LIGHT_PROBE_WAIT_FRAMES` 12 plans) the large one of that
+    many cells, if the share still cannot reach it, bounded by the spike cap with the bake and the light both
+    `BAKE_SPIKE_MARGIN` over their plan, which measures the rate. A level starved by a stale latency thus returns to
+    normal service within ~2 probe periods (tested with 1.2 ms stale, 0.2 ms real); the probe leaves the level's
+    growth bound untouched. A slow sample leaves the 45-sample window with new measurements (the latency quantile
+    forgets a lone slow sample after ~10 faster ones).
+    Note: at the measured rates (>= 1e4 cells/ms floor, column pass ~1e7 cells/ms) a level-0 column costs ~12 us, so
+    the partial columns only act for slivers of rates far below today's; the latency path (probe) is the live one. Spike frames: the fill bake gets `SPIKE_BAKE_SHARE` 0.5 of the 3 ms cap, `SPIKE_BAKE_SHARE_LIGHT_DUE`
+    0.2 while a filled level's light is due (provisional or blending: the cold start lights each level's whole window,
+    up to ~70 ms of GPU at level 0 on the cloudy slab - beside a half-cap bake level 1 took 125 frames), and the light
+    `LIGHT_SPIKE_SHARE` 0.85 of what the bake leaves (the bake's plan x 1.5). An upkeep over 2 x its plan halves the
+    next plan once.
+    - The bake's last work often lands after the light's first stamp (~0.2 ms in the first light list of a frame that
+      baked - also in frames without light jobs; the sum bake + light is unchanged): the light's quantiles absorb it.
+    - The test GPU's rates depend on its load (clock state): the cold start's small dispatches run at ~1e5 (level 0) to
+      ~1e6 cells/ms, the 40 x settles at 0.4-5e6 - the model learns whichever holds.
+  - Bake per level (review round 1): each level's bake jobs and the occupancy of the textures they touched in their own
+    compute lists after a timestamp `cloud_volume_bake_<k>`; per-level rates in taps per ms (`bake_level_taps_per_ms`;
+    the cost per tap differs between levels by up to ~10 x, occupancy included: 1.4-5e7 at levels 0-4, 0.5-1.8e8 at
+    levels 5-7), each planned at the slowest of its last 45 measurements, an unmeasured level at the start rate 2e7.
+  - Measured (cloud_check sections 17 / 18, RTX 4090; section 8's thick slab 1-2 km, tau ~10, and its broken cf 0.4
+    field, at Starbase, camera 2 m; the reference: midpoint steps of a tenth of a cell through the finest level at
+    each point):
+    - Slab, Sun 45 deg: tau_sun worst 0.18 % (levels 0, 2, 5); tau_below / tau_above vs the CPU bake's column
+      <= 0.17 %; tau_moon (Moon 40 deg) <= 0.22 %. Sun 10 deg: worst 1.87 % (the top cell 1.391 vs 1.393 at level 0,
+      9.180 vs 9.192 at level 2, 10.039 vs 10.052 at level 5).
+    - Broken field, exp(-tau_sun) error (4096 random cells per level inside the window, 0-2.5 km), p90 / p99:
+      Sun 45 deg level 0 0.0000 / 0.020, level 2 0.0002 / 0.0021, level 5 0.0004 / 0.0020; Sun 15 deg level 0
+      0.0001 / 0.50, level 2 0.0004 / 0.0060, level 5 0.0005 / 0.0028. Shadow edges (exp(-tau) = 1/2 crossings at
+      500 m) 45 deg: levels 2 / 5 0.01 / 0.01 cells (level 0 none); 15 deg: level 0 3.8, level 2 0.03, level 5 0.02
+      cells. Level 0's p99 is distant cloud-edge grazing at 50 m vs the coarser levels' resolution (Task 7's radiance
+      check and `light_entry_samples` judge it).
+    - Cold start at the game's budget (section 17): every level's light complete 17-39 frames after its density is
+      shown (levels 7 .. 0: 18 / 23 / 18 / 19 / 17 / 19 / 33 / 39; asserted <= 45), upkeep max 2.60 ms alone, 5.04 ms in
+      the full run. The cold start is a transition (T5 ruling c1: cold start / jumps run behind the load state under a
+      raised budget): asserted <= `UPKEEP_TRANSITION_MS` 6 ms (2 x `UPKEEP_SPIKE_MS`); the 3 ms cap binds in-flight load
+      (Sun motion, pair switch, scroll, re-frame; measured max 1.50 / 1.68 ms). The 5.04 ms frames came from a GPU
+      clock-state change right after the bake ended (level 0 ran at half the rate the window had measured; the
+      feedback arrives 2-3 frames late). The whole volume after 1255 frames. Light rates per level: `vr-performance.md`.
+    - Earth's shadow (Sun 8 deg below the site): all 24.9 M texels of levels 0, 2, 5 with the Sun >= 6 deg below their
+      horizon at 6e4. No NaN / infinity in any level after five fills. Sun 10 deg up: no Moon jobs. No sample of the
+      march through the levels unheld (`light_fallbacks` 0).
+  - The radiance checks deferred from Task 6 (C12 / C13) run with the march (Task 7, below: cloud_check section 19,
+    `render_check --front_check`). The Moon's channel is read with the level's lookup `moon_weight` (below).
+- World volume march (world volume plan Task 7; `game/shaders/cloud_volume_march.gdshaderinc`, kernel
+  `CLOUD_VOLUME_FULL` compiled by `CloudEffect` with the march's files (one set 0) and the volume's lookups; GPU
+  interval `cloud_volume_full`): with the flag on and a level shown (`CloudWorldVolume.march_uniforms`: the adopted
+  state at the frame's camera in its own CloudVolume block) the frame is one ray per eye pixel over [0, scene], written
+  into the eye's layer of the result (no temporal pass, no upsample: the full-resolution reference of Task 8's tiers);
+  until a level is shown, and for the debug outputs it does not draw (3, 5, 6, 8-11), today's march. The curl texture
+  (core `cloud_curl_field`: `CloudNoise.curl_rgb`, 32^3 RGB8, global `cloud_noise_curl`), the flags
+  `CloudLayer.light_entry_samples` (4; global `cloud_light_entry_samples`) and `CloudLayer.edge_curl` (1.0; global
+  `cloud_edge_curl`) are declared in `clouds.gdshaderinc` so every kernel of the march's files shares one set 0.
+  - Steps (STOP-1 ruling): empty space by the free ball of the finest shown level (and of level k + 1 where the ball
+    reaches k's fade band: then k's ball WITHOUT the window clip - beyond the window k + 1 alone holds the density -,
+    so rays cross window edges in one step) or, further, the exit of the free box along the ray (horizontally linear /
+    `CLOUD_VOLUME_MAX_SCALE`, vertically the exact crossings of the box's heights less `CLOUD_VOLUME_BOX_MARGIN` 0.4 %:
+    rays grazing a base or a window top left the ball geometrically, p99 914 -> 157 empty steps at V1); occupied space
+    one step to the exact exit of the level's cell (the cell picked with a 1e-4-cell nudge along the ray), capped by
+    `CLOUD_STRUCTURE_TEXEL_FRACTION` of the finest sub-cell structure where the sub-cell field acts (a cell entered
+    from clear or solid space whose sample shows the field acting is taken again from its start with the cap: one
+    sample of a sharp field per cell drew the cells' faces as blocks; the first occupied step after an empty one is
+    the structure's), >= 2 m; one density sample at the middle, Beer-Lambert over the step; the source linear between
+    the step's ends in closed form, the ends' sources from light NODES `CLOUD_VOLUME_LIGHT_NODE_CELLS` 0.5 of the
+    level's cell apart along the ray (or at a longer step's end), linear between them (Task 7 ruling R3: one light
+    evaluation per half cell, not per structure step - V1 light fetches per occupied step 9.6 -> 0.46); silhouette
+    bisection 4 x; termination as today (Sun-ray exception to 1e-9). The air shadow's loss is composited on every ray,
+    with or without cloud on it (as `cloud_shade_ray`; skipping it on clear rays was V6_backlit's 34 % median). Error bound of the mid-step trilinear sample: the trilinear field along a ray inside a
+    cell is a cubic, |tau_mid - tau| <= Delta L / 4 for a full-cell step (Delta the cell's corner spread).
+  - Levels: the finest shown level whose window holds the point, each level in its own frame's grid during a
+    re-frame (`cloud_volume_at`; cross-frame nesting and the spare's cross-fade are Task 9's); beyond the coarsest
+    shown level the ray ends (Task 8 / 10: the far field).
+  - Sub-cell field (decision 6; Task 7 ruling R1, the threshold form): density = sigma_c Phi((v - t) / s_e),
+    t = -sqrt(s_e^2 + sigma_v^2) Phi^-1(c), c = rho / sigma_c (trilinear): the cell's cover kept as a cover at full
+    in-cloud extinction (not spread into haze), graded (= the bake) where sigma_v -> 0, sharp where sigma_v >> s_e.
+    v = w_s (s_f - s_cell) + P_g: the shape's residual above the cell's scale (s_cell at the cell's shape level, 0 below
+    the 250 m texel; through a fade band the cell size mixed geometrically by the fade, ruling R5) plus the detail
+    perturbation Gaussianised by the core's table (`CloudNoise.detail_gaussian`, the eroded Worley octaves are not
+    Gaussian: with the Gaussian t alone the real cover was off by up to 0.053); sigma_v^2 = w_s^2 (R(l_cell) - R(l_f)) +
+    sigma_P^2 from the core's statistics (`detail_level_mean / _variance`, `shape_residual_variance`; globals
+    `cloud_detail_gaussian`, `cloud_detail_level_mean / _variance`, `cloud_shape_residual_variance_lo / _hi`);
+    s_e = edge width / sqrt(20) (the smoothstep ramp's slope spread). Core test "The sub-cell threshold field keeps the
+    cell's cover": Gaussian v: |mean - c| <= 3.3e-8 over c 0.05-0.95 and sigma_v / s_e 0-100; the real detail values
+    Gaussianised 1.0e-3 / 1.2e-3 (states 3 / 1.3, 5e5 points: sampling noise 7e-4), with the real shape residual
+    2.4e-3 / 3.6e-3. The curl distortion of the detail lookup (edge_curl x the level-0 detail's middle cell x w_0).
+    0 where rho = 0, <= sigma_c, rho exactly with all weights 0. History (`docs/history/weather-clouds.md`): the
+    spreading form sigma_c ramp(ramp^-1(c) + 4 c (1 - c) v / w) raised V3's alpha by 0.04 (water as haze).
+  - Light per sample: the light volume's taus (faded as the density): the table / closed form with tau_sun and the
+    columns, the sky with tau_above x the sky irradiance (refresh as today), the Moon's J x the levels' `moon_weight`
+    (the schedule moves it toward the level's Moon flag over `MOON_RAMP_S` 1 s; rate-limited jobs leave tau_moon stale
+    once the Moon is off). A tau of >= `CLOUD_VOLUME_UNLIT_TAU` (half the stored 6e4) is no light: J = 0 (the table's
+    3D entry cosine is > 0 below the horizon). Surface correction (`light_entry_samples` 4) at each light node: where
+    T (1 - e^-dtau) > 1e-3 and the cell is coarser than the footprint, tau_sun = 4 midpoints of the per-sample density
+    over 2 cells (the shorter crossing) of the level whose light the sample reads (level k + 1 in the fade band) plus
+    the volume's tau_sun there. (Ruling R3's "first 4 steps of the ray only" broke section 19's slab at Sun 20 deg:
+    worst 11.8 % vs the converged light, bound 5 %; at the nodes 3.3 %.) `light_entry_samples` < 0 (checks): the
+    converged per-sample light march to the shell's top.
+  - Checks: cloud_check section 19 (`STARSIM_VOLUME_ONLY=19`); with `STARSIM_WORLD_VOLUME=1` the other sections'
+    renders march the volume, filled and lit first (`_volume_settle_render`, 40 x the budget; a camera moved > 50 km is
+    a view jump); `render_check --ab_reference / --edge_check / --front_check / --volume_fill_scale /
+    --light_entry_samples / --edge_curl / --world_volume_unsplit` (header), the settle holding the volume's march
+    (`CloudEffect.volume_march_hold`) until the scene and the volume are settled; `cloud_grain_check` with
+    `STARSIM_WORLD_VOLUME=1` (ours: the volume, the reference: the reference path, grain at 1 px). Results: Task 7
+    report (`vr-performance.md` "World volume march").
+- Cell bake, CPU reference (world volume plan Task 4; the GPU bake of Task 5 is checked against it; `[weather]`
+  `core/tests/test_cloud_volume_bake.cpp`):
+  - `cloud_render_field.hpp` mirrors the GPU point model of ONE snapshot without the detail (`cloud_field` with the
+    profile rule, flat-base cut, ice share, stratiform weight; `cloud_extinction_in_cell` state 0 and
+    `cloud_extinction_prefiltered` without the sub-pixel jitter; tables read linearly in the fraction as the GPU's
+    filter). Render axes, model-space height |M p| - a, the shader's latitude / longitude. `CloudShapeFrame` holds the
+    three wrapped noise origins AND their anchor point (`anchor_earth_m`): the GPU differences positions from the
+    camera / frame origin, so the origins alone do not place a point.
+  - `cloud_volume_bake.hpp`: a cell = centre + three edge vectors (the grid's own axes can be passed); taps at the
+    sub-box centres, rho = mean tap extinction, sigma_c = mean tap in-cloud extinction = grid mean / m (the extinction
+    where the edge ramp is 1; grid mean / cf would let a cloud interior cell exceed it, rho <= sigma_c holds by
+    construction). Tap rule (measured, ruling T4 Q2): a tap every 200 m across (4-8 per axis, 16 on the 6.4 km cells
+    of level 7: with 8 there the weather-cell water missed by 0.3 %), every 5 m up (at least 16), the shape
+    prefiltered (mips + prefilter tables) at the tap spacing beyond the 250 m texel. Taps per cell, levels 0..7: 256,
+    256, 528, 528, 528, 2112, 2112, 8448 (levels 6 and 7 at lambda 0.68). The GPU bake's cost follows from these
+    counts (each tap a full point evaluation: ~13 field fetches + 1-3 shape fetches).
+  - Accuracy (cf 0.4 cumulus slab 1-2.5 km and cf 0.4 cirrus (ice) slab 8-10 km - the ice tile's 15.6 m vertical
+    texel against the 5 m taps - vs the 16^3 stratified point mean at a 10 m footprint, 200 cells per level):
+    levels 0-2 within 0.02 sigma_c per cell (cumulus max 0.006 / 0.005 / 0.011, cirrus 0.003 / 0.004 / 0.015);
+    levels 3-7 are a deliberate band-limit simplification (fidelity note): the coarse cells keep the cover and water
+    at weather-cell scale, not per cell - per-cell rms cumulus 0.004 / 0.008 / 0.004 / 0.017 / 0.009 sigma_c (max
+    0.068 at level 6), cirrus 0.002 / 0.004 / 0.002 / 0.010 / 0.007 (bounds: 1.5 x rms, max 0.25). Per 0.25 deg
+    weather cell the sum of the bakes / the dense point-model integral of the same cells (assigned by centre) is
+    0.9985-1.0003 at every level 2-7 for the cumulus, the cf 0.95 deck and the cirrus slab (bound 0.996-1.004).
+    The point model's own grid-mean water is kept only statistically over the 32 x 32 x 16 km shape tile: per
+    0.25 deg weather cell it is 3-7 % off the grid mean (0.969 / 1.068 / 1.042 at cf 0.4 / 0.95 / 1; a 1.5 km slab
+    samples one slice of the tile, +7 % over 1 deg at cf 0.4) - unchanged, not renormalised.
+    Parent vs the volume-weighted finer cells (1 -> 2: the parts of the 50 m cells inside the 164 m parent): <= 0.014
+    sigma_c on the dense tier, <= 0.051 on the coarse one (4 -> 5 and 6 -> 7 exactly 0: the same taps).
+    With 4 x 4 taps at the mips' band limit (the spec's "few taps") levels 5-7 missed the dense mean by up to
+    0.24 sigma_c and the weather-cell water by 3 %; 4 vertical taps missed level 2 by 0.1 sigma_c.
+  - Binding (checks): `StarsimCore.weather_cloud_cell_bakes(snapshot_path, cells, shape_origins_earth_m) ->
+    PackedVector2Array` ((rho, sigma_c) per cell; 12 doubles per cell: centre, e_x, e_y, e_z; origins 3 doubles = the
+    anchor, or 12 = anchor + cumulus / stratiform / ice origins as uploaded); the snapshot's render field and the noise
+    are kept per loaded snapshot (a file rewritten through StarsimCore - `weather_write_*`, `weather_build_snapshot`
+    - is evicted from the load cache and baked anew; smoke_test checks it), cells baked on the build threads (64
+    level-7 cells ~70 ms). Single cell:
+    `weather_cloud_cell_bake(snapshot_path, centre_earth_m, cell_m: Vector2, shape_origins_earth_m) -> Vector2`
+    (box east / north / up).
+
+### World volume and view cache (open points)
+
+- **World volume bake, coarse levels (deliberate band-limit simplification, ruling T4 Q2)**: cells of levels 3-7
+  (400 m .. 6.4 km) keep the point model's cover and water at weather-cell scale, not per cell (per-cell scatter up to
+  0.07 sigma_c, rms 0.017; Diagnostics "Cell bake"). The point model itself keeps the grid-mean water only over the
+  shape tile (3-7 % off per 0.25 deg weather cell). The bake's tap counts (up to 8448 per level-7 cell) set the GPU
+  bake's cost (Task 5 measures it).
+- **Cloud view cache (in progress, `docs/superpowers/archive/specs/2026-10-27-cloud-view-cache-design.md`; Tasks 2-5 done,
+  Task 6 VR acceptance open)**:
+  `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection),
+  `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget; `cloud_view_cache_test.gd`) and the
+  fill (Task 3): `CloudViewCache` (`game/world/weather/cloud_view_cache.gd`) holds per level a cube texture of colour + T
+  (RGBA16F) and one of the cloud distance (R32F) (3456 per face for the VR run: 0.86 GB full level, 1.13 GB all three;
+  the fade slots 32 MB) and fills the texels of a tile list ((tile, level, slot) triples; one dispatch per level, push
+  constants, the list sorted by level) with the kernel `CLOUD_CACHE_FILL` (`shaders/cloud_view_cache.gdshaderinc`: the
+  march's code with `CLOUD_MARCH` + `CLOUD_CACHE_FILL`, its own images instead of the march's). Each texel's ray
+  (`dir_of`'s mirror in GLSL) starts at the anchor - its offset from the camera in the fill's CloudView `eye_earth`
+  (float64 difference on the CPU) - and ends at the ellipsoid / sea crossing seen from there, for an anchor below the
+  ellipsoid (Starbase's ground lies ~25 m under it) at a sphere `CLOUD_CACHE_GROUND_BELOW_M` 2 m [E] under the anchor
+  (before Task 4: no end - the downward rays marched the air and clouds beyond the limb, whose shadow loss then lay on
+  the terrain), else the sky (1e30); never the frame's depth. The distance texel holds the alpha-weighted cloud distance,
+  without cloud minus the ray's static end (at most 1e7 m). The texel angle at a face centre (2 / level face texels)
+  is the detail's band limit. The march and the fill shade a ray with the one function `cloud_shade_ray`
+  (`cloud_pass.gdshaderinc`: march, air shadow loss, debug outputs, the stored colour; with `cloud_ray_jitter`,
+  `cloud_stored_color`, `cloud_eclipse_factors`); `cloud_march` and `CloudRay` take the ray's origin (`h_c`: its height).
+  `cloud_ray_from` is origin-aware only in the fill (an anchor kilometres from the camera has its own height and up);
+  the per-frame march keeps the camera's ray at compile time - a run-time branch on the offset let the GPU compiler
+  re-associate the camera's path (4 % of the pixels changed, up to 30 % of the mean colour: the deterministic march's
+  step grain flips with ulp-level changes). Main-thread bound of the schedule (controller ruling, tested as a maximum):
+  <= 1.0 ms on every frame once level 0 is in view, a cold start / jump frame <= 10 ms - held by running the plan on a
+  worker (fix round 1, below). The schedule is amortised all the same: the light rescan is a pass of
+  `LIGHT_SCAN_BLOCKS` blocks per `mark_light` call (persistent cursor, `light_scan_pending()`); an anchor move starts an
+  epoch (O(blocks)), tiles of older epochs are "off" (stale, parallax candidates) and counted exactly per block; `pick`
+  expands at most `max_expansions` blocks per call (default `MAX_BLOCK_EXPANSIONS` 2; the planner asks for 1 = 64
+  tiles), nearest to the view's cone first; `completed_batch` completes a pick's tiles and `set_tile_distances` takes a
+  fill's read-back in one call each; `missing_in_cone` says whether a tile in a cone has no level yet.
+  - **The frame (Task 4)**: the cache is the game's path (`CloudLayer.view_cache`, shader global `cloud_view_cache`,
+    default on; off: the per-frame march at the preset's divisor - the reference, `render_check --no_view_cache`;
+    cloud_check (but section 15) and cloud_far_check run the march; a debug output also shows the march).
+    `CloudViewCachePlanner` (`cloud_view_cache_planner.gd`, owned by CloudLayer) plans on a worker (`WorkerThreadPool`,
+    fix round 1: pick, completions and shown states cost 0.5-1.4 ms of GDScript a frame): the main thread (FrameProfiler
+    section `cloud_view_cache`) hands the run the frame's inputs (camera, view, light, budget, the render thread's
+    read-backs and fill times) and takes the last finished run's batch - one frame late; a run still going hands out
+    nothing that frame. A run: the layout from the eyes' finest density (CloudEffect publishes 7 x 7 sample rays per eye
+    and the face size every frame; at most `FACE_TEXELS_MAX` 4096 [E] for the 2 GB cap, re-created beyond a 10 % [E]
+    change, built in the run), the anchor (the camera at a restart), the light state (Sun, weather weight and a
+    generation that counts the light cache's resets and its first completion after one or a clock jump - tiles filled
+    while it was still filling refresh once: they differed by whole tiles of 10-30 % in the ground view's A / B), up to
+    `MAX_PICKS` 8 picks of one block each within `RUN_PICK_US` 3 ms [E] while the budget lasts, per tile the shown state
+    the lookup reads (level, what it fades from, fade slot, the fade's start), and the covering flag. Restarts
+    (everything back to nothing, level 0 of the view first): `World._view_jumped` (`notify_view_jump`),
+    `SimClock.time_jumped` (`notify_clock_jump`) and a pinned snapshot (`show_now`); a requested restart hands out a
+    reset batch at once (the frame shows the per-frame march until the restarted run's batch: never a tile of the old
+    place or instant). A moving camera re-anchors progressively instead (Task 5, below). **Covering (controller ruling,
+    no frame without clouds)**: while a tile in the view's cone (the sample rays' cone plus a tile radius;
+    `missing_in_cone`) has no level, or a first fill there is still fading in, the batch says covering: the effect runs
+    the per-frame march at the preset's divisor and the lookup keeps its result where a tile has nothing and fades a
+    first fill in from it (after a start, a jump, a layout re-creation, tiles in view dropped by the re-anchor's
+    eviction; ~20-45 frames, see `vr-performance.md`). Render thread (`CloudEffect._prepare_view_cache`,
+    `_cache_lookup`): the batch's tiles filled (GPU timestamp `cloud_cache_fill_<fill id>`; a refresh at the same level
+    first copies the tile's shown texels to its fade slot; each entry's nearest cloud distance by `atomicMin`, read back
+    asynchronously), the shown states uploaded, while covering or with a cloud near the near shell's march (stamped
+    `cloud_cache_march`, `+ _cover` while covering; fix round 1: covering runs the near shell's kernel - whole rays only
+    where a tile has nothing), then per eye `CLOUD_CACHE_LOOKUP` into the pass's result (the composite unchanged; before
+    the first batch and while a restart is pending the march alone shows the frame).
+  - **The lookup (`cloud_cache_lookup(eye_offset_earth, dir_earth, out cloud_m)`, eye_offset_earth: the eye's offset
+    from the head)**: the anchor's direction an eye ray reads is the root of r(q(s)) = |o + s dir| along the ray (o =
+    eye - anchor, r the cached distance): two fixed-point steps, then secant steps while both ends saw cloud,
+    `CACHE_PARALLAX_ITERATIONS` 3 [E] (fixed-point steps alone left 25 eye px of a deck at 300 m seen 50 m off the
+    anchor). Each tile is reprojected from the anchor it was rendered from (Task 5): **one rule for the near shell and
+    the lookup (`cloud_cache_pick`, fix round 1)** - the parallax lookup from the current anchor (the ring's offsets
+    from the camera, float64 differences, in a buffer); where it lands on a tile of another anchor, again from that one,
+    until the tile landed on shows the anchor solved from (`CACHE_ANCHOR_ITERATIONS` 3 [E]); a ray left unsettled lies
+    where no tile holds its point (between tiles of different anchors: about |A - B| / r wide) - the near shell /
+    covering march it whole and the lookup keeps that, a frame without them shows the last tile's edge (clamped). A deck
+    at R_near seen from an anchor 100 / 200 / 300 m off lands within 1.2e-6 / 3.8e-4 / 0.011 eye px. The colour: the
+    tile's finest shown level, bilinear in the cube, clamped to the tile's outer texel centres on a side whose neighbour
+    lacks that level; cross-faded over `CACHE_CROSSFADE_S` 0.25 s [E] from nothing (T = 1, a first fill), the coarser
+    level (a refinement) or the fade slot (a refresh: one Sun state per tile, never an abrupt switch; 1024 slots [E], a
+    slot still in use ends that fade). A tile without a level shows the covering march's result (T = 1 when not
+    covering; `cloud_cache_sample` returns the colour without the fade from nothing and its weight, `cloud_cache_lookup`
+    mixes it with T = 1). What a tile fades from was rendered from its previous anchor: it is read at the same point of
+    the eye ray seen from that anchor (the state names both ring entries: bits 18-24 / 25-31; the fade slot bits 8-17);
+    the bilinear tap is clamped also where the neighbour shows another anchor. Scene geometry nearer than the cloud
+    hides it by exp(-4 |ln(cloud / scene)|) (the upsample's depth weight); a texel without cloud keeps the air's shadow
+    loss scaled by scene / the ray's end (a hill before the horizon).
+  - **Budget (`CloudLayer.cache_budget_ms`, PRESETS `cache_budget_ms` / `cache_budget_floor_ms` / `frame_target_ms`)**:
+    desktop 9.0 ms [E] fixed (one full-level deck tile alone takes up to ~8.4 ms and a fill's time is its slowest ray's;
+    the ruled fill bound p99 <= 10 ms); VR adaptive (user-approved ruling): 22.2 ms - the rest of the frame's GPU time
+    (95th percentile of 90 frames of the cache shown; a frame's rest = the span of its captured timestamps minus its own
+    fill and its march with the cache shown, from the same frame's stamps) - the near shell where it is predicted (fix
+    round 1: it runs in the last measured frame or a cloud is within its reach; the largest of its last 45 non-covering
+    measurements, `CACHE_MARCH_FRAMES` [E]; never measured: the floor; a covering frame's whole rays are not predicted -
+    the fill ends them, Task 4's ruling) - 2 ms, between 2 and 11.4 ms [E]. **Cost model (fix round 1)**: a fill's GPU
+    time is set first by its slowest ray, then by its work - measured on the desktop deck view: a few tiles of the deck
+    seen from above ~8 ms + ~6 us per work group of 8 x 8 texels, clear sky ~0.6 ms + ~0.3 us (both ~ latency x (1 +
+    groups / ~1300)); a fill of 8 groups took as long as one of 1000. So each tile has a latency per level and a fill is
+    predicted as max l_i + sum g_i l_i / `FILL_CAPACITY_GROUPS` 1024 [E]; a measured fill (its timestamp named by the
+    batch's fill id: a frame whose stamps were not read loses only its own measurement) scales its tiles' latencies by
+    measured / predicted; a level not yet measured takes the coarser one's times the level's learned ratio (median of
+    the recent fills' medians; a finer level marches more detail), a tile never measured the largest of the recent
+    fills' slowest at that level (`UNKNOWN_LATENCY_MS` 9 ms [E] before any). Tiles join a fill in priority order while
+    the prediction fits the budget and the fill stays within `MAX_FILL_GROUPS` 1024 [E] work groups (larger fills were
+    mispredicted by up to 3 x); the first tile always, and when it alone exceeds the budget the tiles that lengthen its
+    fill by at most `FREE_RIDE` 1.1 [E]. `STARSIM_CACHE_FILL_TRACE=1` prints every measured fill (ms, prediction,
+    levels, latency, budget). A single tile cannot be split: its slowest ray is the fill's floor (desktop deck view: one
+    full-level deck tile up to ~8.4 ms; fills at the 9 ms budget p99 9.96 / 8.90 ms deck / ground).
+  - **Near shell and progressive re-anchor (Task 5)**: R_near = `CloudLayer.near_radius_m()` (`NEAR_RADIUS_M` 2000 m
+    [E], from the parallax error: a deck at R_near lands within 1.2e-6 eye px from the re-anchor's 100 m, 3.8e-4 px from
+    an older anchor 200 m off and 0.011 px from 300 m - `cloud_vr_stereo_test`). The fill's rays start at R_near from
+    their anchor (`CloudViewCache.fill` start_m; `cloud_march_start_m`) - the air shadow's loss is still taken over the
+    whole ray, the near stretch in front of the cache's clouds at weight 1. **Near shell**: CloudLayer asks the core for
+    the field's nearest cloud every frame (`StarsimCore.weather_cloud_nearest_m` ->
+    `environment::cloud_render_nearest_m`: a lower bound - the nodes within reach plus the bilinear support that hold
+    water, their cloudy height interval between the layer centres below and above; the active pair, both snapshots
+    whatever their blend; 0 while the core's pair is not the slots') within R_near + the keep cap (1 km, below) +
+    `NEAR_SHELL_MARGIN_M` 100 m [E]; the render thread runs the near shell when it is within R_near + the farthest shown
+    anchor's offset + the margin, or the batch covers the view (`CacheMode.NEAR_SHELL`): the march kernel `CLOUD_MARCH`
+    + `CLOUD_NEAR_SHELL` (variants centre / prefilter; no outline pass) at the preset's divisor marches each ray with
+    the full march's own step layout up to its exit from the sphere of R_near around the anchor `cloud_cache_pick` names
+    for the ray (`cloud_near_shell_end`: the tile states, the anchor ring and the cached distances bound at 8 / 9 /
+    10-12, push constants; a tile without a level or an unsettled ray: the whole ray), and of the air loss only (1 -
+    T_near) x its part in front of the near clouds (`cloud_shade_near`): composited by the lookup as near + T_near x
+    cache, the near stretch's loss is front + T_near x behind, as the full march's. A first fill shows at once under the
+    near shell (the march's rays end at the shell: no whole-ray result to fade from). The near kernel's push constant
+    needs a list of its own (the RenderingDevice re-applies a list's push constant to the kernels bound after it).
+    **Re-anchor** (`CloudViewCachePlanner`): once the camera is `REANCHOR_FRACTION` 0.05 [E] x R_near = 100 m from the
+    anchor (`CloudViewCacheSchedule.reanchor_needed`) it becomes the anchor, the next entry of a ring of `ANCHOR_RING`
+    128 [E]; every tile keeps what it shows from its own anchor (no restart, no tile dropped) until the schedule refills
+    it from the new one (its parallax class by error x nearness - a tile without a known cloud joins it only once its
+    anchor is `SKY_REFRESH_FRACTION` 0.5 [E] of its keep distance off, counted at the cap's distance, and only while a
+    cloud is in the near shell's reach - and the staleness classes; blocks with tiles missing are expanded before those
+    with a parallax only). **Refreshes because of motion at level 0 (fix round 2, controller ruling)**: a tile picked by
+    the parallax class or rendered from another anchor is refilled at level 0 (1/16 of a full tile's rays) and refined
+    by the finer-level classes from what the budget leaves; it fades from the finer level it showed (that level's texels
+    stay until the tile is refined to it again: no fade slot); light / weather refreshes keep their level (fade slot).
+    **Eviction by a tile's own parallax (fix round 1)**: a tile is dropped once the camera is farther from its anchor
+    than `CloudViewCacheSchedule.keep_distance_m` = `ANCHOR_EVICT_RATIO` 0.1 [E] x its nearest cached cloud distance
+    (200 m for a deck at R_near: the deck passage's measured best), at most `ANCHOR_KEEP_FRACTION` 0.5 [E] x R_near = 1
+    km while a cloud is within the near shell's reach of the camera (`set_cloud_in_reach`, from CloudLayer's nearest
+    cloud; fix round 2: the camera then stays inside the anchor's sphere). With no cloud in reach the near shell does
+    not run and there is no cap: a clear tile (no cloud along its rays) needs no refresh for the camera's motion and is
+    kept until its ring entry is reused. The planner keeps a tile list and the nearest cloud per ring entry and scans an
+    entry only when the camera may have left its nearest one's keep distance, then hands the schedule the largest kept
+    offset (`set_anchor_deviation`); the tiles of a ring entry about to be reused are dropped too
+    (`CloudViewCacheSchedule.forget`; the near shell's kernel marches them whole in view). The light cache's reach stays
+    camera-centred: with the anchor within 100 m of the camera (tiles of older anchors within 1 km while a cloud is
+    near) its cascades (kilometres) hold the anchor's rays as the camera's - not tested separately.
+    **Lookup under the near shell (fix round 2)**: the lookup keeps the near kernel's result alone exactly where that
+    kernel marched the whole ray (`cloud_cache_pick` unsettled or no level); a first fill (fade weight 0 in the frame it
+    is shown) is composited behind the shell's segment - keeping the segment alone dropped the clouds beyond R_near in
+    the frames after a restart (`--jump_check` deck 0.23 / ground 0.17 since c625926).
+  - **Validation and open (Task 5, fix round 2)**: `cloud_view_cache_test` (the re-anchor at 5 % of R_near, not
+    below; through the planner a re-anchor restarts nothing, every tile that showed a level keeps one, refills take the
+    new anchor; eviction by a tile's own parallax: a cloud at R_near / 4 / 20 R_near and clear sky kept at 5 / 15 / 45 /
+    55 % of R_near off as [all] / [not R_near] / [only 20 R_near and sky] / [none], the schedule's bound the largest
+    kept offset; clear sky joins the parallax class only past 500 m; motion refreshes at level 0, light refreshes at
+    their level, a refresh fades from level 2 and the tile converges again; no cloud in reach: a clear tile kept 10 km
+    off, a cloud at 20 R_near dropped by its parallax, no clear-sky refresh), `cloud_vr_stereo_test` (a tile reprojected
+    from its own anchor 100 / 200 m off: a deck at R_near within 1.2e-6 / 3.8e-4 eye px, 1 km off at 5 R_near 3.8e-4;
+    the pick across two / three anchors' tiles: every settled ray read from the anchor of the tile it reads within
+    1e-6 px, the unsettled ones only where no tile holds the point), core `[weather]` "The render field's nearest
+    cloud", cloud_check with `STARSIM_MARCH_REFERENCE` (the per-frame march bit for bit as before Task 5),
+    `render_check --jump_check` PASS (deck 0.019 / 0.011, ground 0.012 / 0.006). `render_check --frames_every=0.5
+    --frames_for=120` (the Starbase ascent through a slab 1.5-2.5 km, `--fly=25`, VR preset at render scale 1.65;
+    the alpha bound 0.06 while the camera is within a layer's extent +- R_near, else 0.02; the first frame after each
+    sample's reference march not counted; per phase: pad / in the layer / outside it): watched from the ground PASS
+    (worst 0.012, GPU p99 15.3 / 14.9 ms); **on board FAIL**: GPU p99 pad 15.9 / in the layer 25.3 / above the deck
+    23.7 ms (target 22.2), the deck passage's alpha worst 0.26 (bound 0.06). Over-target frames are the near shell's
+    march (in the deck 11 ms mean, up to 15; above the deck covering 9 ms) plus the scene (~9.6 ms), not the fill (the
+    budget sits at its 2 ms floor in the deck): the frame does not hold the near shell / covering march and a refresh
+    rate that keeps the view's tiles on an anchor moving 150 m/s - open, a ruling for the controller. The re-anchor
+    timing case of `cloud_view_cache_test` (pick <= 1.0 ms a frame) is flaky at 0.97-1.13 ms since the level-0 refreshes
+    add the refinement frames (509 instead of 213 frames; ~0.35-0.45 ms per classified block, unchanged). The
+    main-thread section `cloud_view_cache` over the 5400 flight frames: median 0.056 / p99 0.079 ms.
+  - **Open (Task 4)**: the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
+    the march's for ~2 s after a restart, inside the 0.02 bound); near objects in front of shadowed air get the air
+    loss of the whole cached ray scaled by distance only (with the near shell: a cloud texel hidden by nearer geometry
+    drops the near stretch's loss too); the lookup's parallax is GPU-tested only at the anchor (the GDScript mirror
+    covers off-anchor eyes).

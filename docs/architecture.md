@@ -89,10 +89,13 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   `res://tests/atmosphere_check.gd [-- --f32]`; the table cache is built by `build/core/atmosphere_tables.exe`
   (~62 s) or on the first game start.
 - Clouds (M8): `game/world/weather/cloud_layer.gd` (`CloudLayer`: field textures, cross-fade, presets),
-  `cloud_effect.gd` (`CloudEffect`: the compute cloud pass in the world's Compositor), `cloud_field_texture.gd`,
-  `cloud_shader_port.gd`, `cloud_shadow_effect.gd` (the Sun's shadow maps on the ground); shaders `clouds.gdshaderinc`
-  (port of the core's cloud optics / noise / texels - change both together), `cloud_pass.gdshaderinc` (compute
-  kernels), `cloud_layer.gdshader` (composite), `cloud_light.gdshaderinc` / `cloud_shadow.gdshaderinc` (light under the
+  `cloud_effect.gd` (`CloudEffect`: the compute cloud pass in the world's Compositor; method BAKED by default, the old
+  march as the F7 reference), `cloud_baked.gd` (`CloudBaked`: the baked cloud volume), `cloud_kernels.gd`
+  (`CloudKernels`: the compute kernels built on workers, binaries cached in `user://shader_cache/clouds`),
+  `cloud_field_texture.gd`, `cloud_shader_port.gd`, `cloud_shadow_effect.gd` (the Sun's shadow maps on the ground);
+  shaders `clouds.gdshaderinc` (port of the core's cloud optics / noise / texels - change both together),
+  `cloud_pass.gdshaderinc` (the old march's compute kernels), `cloud_baked.gdshaderinc` (the baked volume's),
+  `cloud_layer.gdshader` (composite), `cloud_light.gdshaderinc` / `cloud_shadow.gdshaderinc` (light under the
   clouds in the terrain and sea shaders), `cloud_far.gdshaderinc` + `earth_clouds.gdshader` (far field on the
   scaled-space Earth). Weather service: `game/world/weather/weather_service.gd` (choice, downloads, cache, cross-fade
   feed) and `weather_fetcher.gd` (HTTP, injectable); UI line in the overlay (`top_bar`) and the "Wetter" switch in the

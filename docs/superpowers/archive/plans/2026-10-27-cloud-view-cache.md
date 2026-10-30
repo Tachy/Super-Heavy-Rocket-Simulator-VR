@@ -13,7 +13,7 @@ stays the reference path behind a flag.
 
 **Tech Stack:** Godot 4.7 double GDScript, RenderingDevice compute (GLSL via `CloudShaderPort`), D3D12, OpenXR.
 
-**Spec:** `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md` (approved by the user 2026-10-27; read its
+**Spec:** `docs/superpowers/archive/specs/2026-10-27-cloud-view-cache-design.md` (approved by the user 2026-10-27; read its
 "Decisions taken for the builder" first).
 
 ## Global Constraints

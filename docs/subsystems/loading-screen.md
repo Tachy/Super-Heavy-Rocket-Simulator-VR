@@ -18,7 +18,7 @@ Current state (2026-10-30, boot-splash style). Shows which boot step runs right 
   screen's PREDELETE calls `remove` too, so the camera is never left blank.
 - `game/boot.gd` + `boot.tscn` (`Boot`): the project's start scene (`run/main_scene`). Starts the screen first, loads
   `main.tscn` with `ResourceLoader.load_threaded_request` (polled per frame), reports "Hauptszene laden" and
-  "Wolken-Shader übersetzen ...", instantiates Main, reparents the screen to the root (it stays `current`) and switches
+  "Hauptszene aufbauen", instantiates Main, reparents the screen to the root (it stays `current`) and switches
   (`Boot.switch_to`, deferred add). Without a screen (headless, `--self-check`) it loads synchronously and switches.
   `LoadingScreen.start` returns the existing screen when Main calls it. Tests (`--script`, `load("res://main.tscn")`)
   never pass through it.
@@ -63,11 +63,13 @@ Current state (2026-10-30, boot-splash style). Shows which boot step runs right 
   plus the timeout.
 
 ## Boot steps (desktop, RTX 4090, warm cache, 2026-10-30; time from engine start)
-Measured split of the former 21.5 s before the first step (ticks from engine start): driver/renderer/project load and
-all autoloads 0.9 s; `main.tscn` load 0.7 s; instantiating Main 20.1 s, almost all of it `World`'s member
-`CloudLayer.new()` (the `CloudEffect` / `CloudShadowEffect` compute shaders compiled at construction on the render
-thread; consistent over runs); first frame right after. Now the Boot scene shows its first text at 0.77 s. The 20 s
-stay a blocking call on the main thread (a static screen; moving them off-thread needs a change in the cloud code). Then:
+First text at 0.77 s (driver/renderer/project load and all autoloads 0.9 s, `main.tscn` load 0.7 s); instantiating
+Main ("Hauptszene aufbauen") 0.1 s since the cloud compute kernels are built on workers (2026-10-30,
+`weather-clouds.md` "Kernel build and fast start"; before: 20.1 s, the serial build in `CloudLayer.new()`). Main's hold
+also waits for the active cloud method's kernels (`CloudLayer.kernels_status`: "Wolken-Shader übersetzen ..." when one
+had to be compiled, else "Wolken-Shader laden"); on the desktop they are built before the other steps end, so the step
+does not show. Engine start to "[Boot] done": 23.70 s before, 4.06 s on a first start (empty kernel cache), 4.37 s with
+the cache. Then:
 
 | Step | Duration |
 |---|---|
@@ -84,10 +86,6 @@ stay a blocking call on the main thread (a static screen; moving them off-thread
 | Atmosphäre wird geladen (background, until the tables are up) | 0.16 s here |
 
 ## Open points
-- The ~20 s cloud shader build blocks the main thread: in VR no frame is submitted meanwhile; verified on the headset
-  (user, 2026-10-30, commit 614f6c4): the Pimax runtime keeps the quad stable in the room, free 6DOF head movement, no
-  freeze. Fix (to shorten it) would be compiling the cloud compute shaders
-  lazily / threaded in `CloudEffect` (weather-clouds subsystem).
 - The quad's size and distance are unreviewed; the new scroll animation in VR is not yet seen on the headset. The engine error `Condition "image_acquired" is true` early in VR is harmless: Godot
   releases a composition layer's swapchain image only when the frame submits layers, so a frame without a valid pose
   leaves it acquired and the next acquire reuses it.
