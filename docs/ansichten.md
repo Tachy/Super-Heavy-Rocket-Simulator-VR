@@ -287,8 +287,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - Kein Aufpoppen: Detailstufen gehen gleitend ineinander über (Geomorphing); spät geladene Kacheln gleiten in einer
   halben Sekunde aus der gröberen Fläche heraus. Ein Sprung zu einem anderen Ort (Tab) lädt in rund 8 s nach,
   grob zuerst.
-- Mond: keine Schlagschatten (Kraterränder, Polschatten) - ein späterer Teil; am Pol bei tiefer Sonne ist der
-  Boden daher sehr dunkel.
+- Mond: Kraterränder, Berge und die Mondkrümmung werfen Schlagschatten, jenseits des Terminators leuchten nur noch
+  Gipfel; der weiche Rand kommt von der Sonnenscheibe. Die Kanten sind so fein wie das Terrain-Gitter (10 m in
+  Kameranähe). Fahrzeuge in Bodennähe liegen als Ganzes im selben Geländeschatten und werfen selbst noch keinen.
 
 ### Himmel, Dunst und Dämmerung [Entschieden, umgesetzt 2026-10-25, M8 Atmosphäre]
 
