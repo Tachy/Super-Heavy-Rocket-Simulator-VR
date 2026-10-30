@@ -207,13 +207,11 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Start).
 - **Wolkenverfahren** [Entschieden 2026-10-30]: die Wolken kommen bei jedem Start aus dem **Volumen** (Form und Licht
   der Wolken einmal fest im Raum vorberechnet, pro Bild nur nachgeschlagen; VR-Wolkenmitte winkelgleich); bis das erste
-  Volumen gebacken ist, zeigt die Zeile "(Volumen wird gebacken)" und es sind noch keine Wolken zu sehen. **F7** schaltet
-  reihum: "Volumen" → "alter March" (der frühere Weg, Wolken pro Bild entlang jedes Strahls gerechnet, rechtwinklige
-  VR-Wolkenmitte; Vergleich) → "alter March, winkelgleich" → zurück zum Volumen. **F8** die Auflösung der Wolken (1,
-  1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse). **F9** [Test 2026-10-29] schneidet die Wolken bei 10 km bzw. 15 km ab
-  (dahinter keine Wolken; misst, was der nahe Teil allein kostet). Alles gilt am Desktop und in VR und steht mit der
-  Bildrate im Info-Text unter der Wetterzeile ("Wolken: ..."). Startwerte über die Argumente `--cloud_method=old|baked`
-  und `--cloud_divisor=<n>`; `--cloud_equiangular` startet auch den alten March gleichwinklig.
+  Volumen gebacken ist, zeigt die Zeile "(Volumen wird gebacken)" und es sind noch keine Wolken zu sehen. Das Volumen
+  ist das einzige Wolkenverfahren [Entschieden 2026-10-30; F7 und F9 entfallen]. **F8** schaltet die Auflösung der
+  Wolken reihum (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse); gilt am Desktop und in VR und steht mit der Bildrate
+  im Info-Text unter der Wetterzeile ("Wolken: ..."). Startwert über das Argument `--cloud_divisor=<n>`. Die
+  Wolkenschatten auf Boden, Luft und Fahrzeugen (direkte Sonne) folgen in jeder Höhe den gezeichneten Wolken.
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
   (nach F12 neu gesetzt), nicht am Kopf festgeklebt; das Zeit-Panel liegt oben links auf derselben Fläche und wird mit
   einem Mauszeiger bedient (die Maus ist gefangen; Tab, F1 und F12 gehen an das Spiel, nicht an das Panel). Die

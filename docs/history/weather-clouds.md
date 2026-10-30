@@ -1934,3 +1934,660 @@ serially at CloudLayer construction (~20 s of a GPU start; `.superpowers/sdd/loa
     loss of the whole cached ray scaled by distance only (with the near shell: a cloud texel hidden by nearer geometry
     drops the near stretch's loss too); the lookup's parallax is GPU-tested only at the anchor (the GDScript mirror
     covers off-anchor eyes).
+
+## Removed 2026-10-30 (cleanup): the old march, F7 / F9, the light cache, the old shadow maps
+
+The user ruled the baked volume the only cloud method (2026-10-30); the last state with the old march is the tag `clouds-old-march-last` (fe5edde). The sections below are the subsystem file's text of that state, verbatim.
+
+### Model
+
+- **Light**: the Sun's optical depth toward the light tau_light comes from the **light cache** (static clouds Tasks
+  1-2; `CloudLightCache`, `CloudLightCacheSchedule`, `shaders/cloud_light_cache.gdshaderinc`): a x2 clipmap of 5
+  cascades (8 / 16 / 32 / 64 / 128 km across, each 128 x 128 x 512 voxels over the shell -0.5 .. 20 km: 62.5 .. 1000 m
+  across, 40 m up everywhere), R16F, two generation slots each (10 3D textures, 160 MB; the cache's VRAM budget 192 MB
+  [E], controller ruling 2026-10-26), all on one Earth-fixed frame (the tangent plane at a ground point; re-framed
+  after 1000 km or on any invalidation). Global voxel indices never move; each cascade's window is stored toroidally
+  and re-anchored per axis when the camera's ground point is > 20 voxels from its centre - only the uncovered strip is
+  refilled. The `CLOUD_LIGHT_FILL` kernel evaluates `cloud_light_optical_depth_with` at each voxel centre (96 near +
+  32 far samples at the stratified midpoints, deterministic; detail band-limited at the voxel's size; the point solved
+  for the march's exact model height; the field mixed at the generation's blend). The fill is progressive: the
+  schedule hands the render thread exactly min(98 304, what is missing) voxels of jobs per frame (<= 0.5 ms GPU,
+  measured below; whole layers, rows or part of a row of a strip), a full refresh of all 42 M voxels takes 427 frames
+  (4.7 s at 90 Hz). A slot's held part is a rectangle growing strip by strip: a 16 x 16-voxel square around the ground
+  point first (every cascade holds its ground point after 6 frames of a first fill), then strips <= 16 voxels wide
+  along the side nearest the ground point; a strip in progress keeps its finished layers through a re-anchor; cascade
+  k starts each strip at layer k x 512 / 5
+  (wrapping), so the cascades of a first fill do not reach the costly in-cloud layers in the same frames. Each
+  frame's budget goes first to the shown slots' missing parts, shared fairly (a cascade needing less than an equal
+  share gets all of it, the rest split the remainder), then to fading-out slots, then to the one generation being
+  built. Refresh: the Sun turned by 0.25 deg or the blend moved by 0.05 -> one cascade at a time (the stalest first,
+  its shown slot complete) fills its other slot completely while the old one stays shown alone, then the lookup
+  cross-fades over 0.5 s; a front that has not received a voxel takes the new light at once, a partly filled one is
+  finished first. A clock jump (`CloudLayer.notify_clock_jump`, `SimClock.time_jumped`) or a change of quality /
+  detail / debug output / noise / the content of a slot with weight invalidates everything: the march takes over until
+  filled. A cascade whose shown light is more than 25 deg off the Sun drops it (a fading-out slot ends its fade, the
+  front gives way to the generation in progress - shown as far as filled - or to an empty slot). Staleness bound
+  (`cloud_light_cache_test.gd`): a light is shown until its cascade's next one has faded in, at most two full refreshes
+  and a fade (~10 s): at 100x warp every cascade's shown light within 2.2-3.6 deg of the Sun (bound 4.4 deg), its
+  ground point held in every frame; at 1000x (~42 deg unbounded) the 25-deg drop holds it (24.6-25.0 deg, ground
+  point held in every frame). Flight: at 1 and 2 km/s every cascade keeps its ground point; at 7.8 km/s the
+  re-anchor slabs of all cascades need ~1.8x the budget - cascades 2-4 keep it, 0 and 1 fall behind (held 6 / 53 % of
+  the frames; the next cascade or the march takes their samples). Lookup (`cloud_cached_light_depth` -> (weighted
+  cached tau, weight of the hybrid cascades, weight left) and the
+  hybrid cascades' weights):
+  cascade k has weight 1 within 34 voxels of the ground point (Chebyshev), falling to 0 at 42 (a band of 8 voxels:
+  0.5 .. 8 km), the rest goes to the next cascade and after the last (beyond 34-42 km) to the per-sample march. The
+  cache thus covers the volume march's full range (the near / far hand-over ends it at 34 km, static clouds Task 8). Cascade 0
+  is read at the sample; cascades 1-4 are hybrid (controller ruling 2026-10-26): the sample marches the first 1 / 3 /
+  2 / 2 km (cascades 1 / 2 / 3 / 4) of its light path through the shapes and adds the cascade's tau read where that
+  march ends (the fill's tau starts there, so nothing is counted twice) - a far cascade's voxel can hold neither a
+  cumulus' self-shadowing nor the sharp shadow of its neighbours. `cloud_near_light_depth`: one march per sample for
+  all its hybrid cascades, each weighted with its own partial sum; 12 geometric intervals over the first km from the
+  preset's first interval, then 100 m each (12 / 32 / 22 / 22 samples), the stratified midpoints. A clear-air
+  early-out (stop where the field's column code above the sample is 0 at both ends of the segment) was exact on case 8
+  but cost more than it saved (`vr-performance.md`) and is not used. The per-sample march
+  (`cloud_light_optical_depth`: near samples over 6 km in geometric intervals from 20 m through the shapes, then far
+  samples to the cloud top through the grid mean; stratified, unbiased over the jitter) - no seam; the weights depend
+  only on the ground point, never on a re-anchor. The Moon always marches. Where the cache holds nothing the result is
+  the march's bit for bit (one call site). Threads: `CloudLayer` plans every frame (main thread: the schedule's jobs and
+  the lookup state they lead to, one batch; a batch with jobs not yet run holds the schedule back); `CloudEffect` runs
+  the batch's jobs before the march and only then adopts its state (`CloudShaderPort.pack` overrides
+  `cloud_light_cache_valid / _origin / _east / _north / _shell / _cascade0..4`). Fidelity flag
+  `CloudLayer.light_cache_enabled` (global `cloud_light_cache_enabled`; off = the per-sample march everywhere, the
+  reference; the cache keeps planning, so it is current when switched back on). The closed-form source (the fidelity
+  flag's CLOSED_FORM) is the core's `cloud_scattering_source_3d`: TMS on the delta-Eddington source function of the
+  surface the light entered through (entry cosine mu_e = clamp((t_v + mu0) / (tau_s + 1), max(mu0, 0.02), 1); a slab
+  gives mu_e = mu0 exactly, a sunlit flank or a base under a Sun below the local horizon gets its true incidence; tilted
+  independent column, Varnai & Davies 1999). The light march band-limits the detail at the larger of the pixel footprint
+  and its interval. Plus the sky source (`cloud_sky_scattering_source`, vertical column). Column depths use one
+  convention in core and shader: the covered area's in-cloud mean mean / cf (the A channel's), continuous through the
+  layer centres. The air's Sun / sky irradiance at the cloud from `atmosphere.gdshaderinc`, re-evaluated every 500 m / 5
+  % along a ray; the eclipse acts on both: the Sun through `atm_sunlit`, the sky light through `atm_sky_eclipse_factor`,
+  evaluated per 8 x 8 work group at 5 km and 150 km along its centre ray and interpolated in distance (per sample it
+  cost 10 ms at the eclipse epoch; the penumbra changes by ~3 % per 100 km).
+- **Cloud pass** (`CloudEffect`, a compositor effect before the transparent pass; kernels in
+  `shaders/cloud_pass.gdshaderinc` with `atmosphere.gdshaderinc` + `clouds.gdshaderinc` compiled as GLSL compute by
+  `CloudShaderPort`, which turns their `global uniform`s into one uniform block + sampler bindings filled from
+  `ShaderGlobals` - every script sets globals through `ShaderGlobals.set_value`, since
+  `global_shader_parameter_get` is editor-only):
+  1. raymarch at 1/2 resolution (desktop) or, in VR, once in a centre view covering both eyes at 1/3 (the shell
+     -0.5..20 km to the scene depth, in VR read from the eyes' depth buffers; the block's depth in a checkerboard
+     of nearest / farthest, or the block's mean when its four distances lie within 5 % (`CLOUD_ONE_SURFACE_SPREAD`
+     [E]: one surface - the ground seen from far, where the nearest depth cut every other ray short of the low clouds
+     by the block's depth extent, several km from 8 600 km; Task 10); coarse steps outside the field's cloudy region,
+     fine steps inside. **Deterministic march** (fidelity flag `CloudLayer.deterministic_march`, shader global
+     `cloud_deterministic_march`, default on; static clouds Task 3): an unchanged view gives a bit-identical image -
+     the first step ends on an Earth-fixed height shell (spacing: the first coarse step's height extent, |dh/ds| at
+     least `CLOUD_PHASE_MIN_CLIMB` 1e-3 [E]), every sample - the view's, the Moon's light march, the Sun's where no
+     cache holds it - at its step's midpoint; a clear sample whose coarse step ends in the field's cloudy region ends
+     the step there and marches on with fine steps (a fixed point skipped up to a coarse step of a cloud top or base
+     in every frame); where a sample's extinction crosses `CLOUD_SILHOUETTE_EXTINCTION_PER_M` 1e-4 /m [E] from below,
+     the entry is bisected `CLOUD_SILHOUETTE_BISECTIONS` 4 [E] times between the step's start and the sample and the
+     in-cloud steps start there (the clear stretch skipped holds tau < 0.1); the detail is band-limited at the larger
+     of the pixel footprint and `CLOUD_DETAIL_STEP_FRACTION` 0.5 [E] x the step (a level enters from one step per
+     cell: finer detail at fixed points aliased into static salt-and-pepper holes in near cumuli). **Sub-samples**
+     (static clouds Task 5c, fix round 1): a step longer than the structure step (`cloud_structure_step`:
+     `CLOUD_STRUCTURE_TEXEL_FRACTION` 0.25 [E] of the distance over which the ray crosses one texel of the finest shape
+     in the cell - cumulus 250 m across / 125 m high, stratiform 1 km / 125 m, cirrus 250 m / 16 m; a horizontal ray
+     through cumulus every 62.5 m) is ceil(step / structure step) equal sub-steps, at most `CLOUD_MAX_SUBSTEPS` 6 [E]
+     (longer steps: 1/6 of the step), each sampled at its midpoint in its own field cell (a thin cirrus sheet changes
+     over a slant step: the step's cell lost 4 % of its alpha); the step's optical depth is their sum, its mean
+     extinction that over the step (the step-weight test). The detail is band-limited at the larger of the pixel
+     footprint and `CLOUD_DETAIL_STEP_FRACTION` x min(step, the structure step or step / 8) - continuous in the step
+     length (at the sub-step itself it halved where a step crossed the structure step: a contour on near cumuli). One
+     light sample per step at the sub-samples' extinction-weighted centre (also the step's distance for the air light).
+     A silhouette is bisected from the first sub-sample over the threshold (between it and the one before); the thin
+     cloud in front of it (the sub-steps taken and the stretch to the entry, at the bracket's clear end's extinction) is
+     carried into the next step's optical depth if all of it is below the threshold - for a single-sample step too;
+     cloud the ray left and re-enters within one step ends that step at the entry with its own light (carried, it
+     darkened the next step's light into black specks). One point per step hit or skipped thin
+     and broken cloud on long oblique paths with each ray's fixed step phase - static salt-and-pepper at the march pixel
+     (the user's t7_cape view) that the jittered march's history had averaged away, gone with 8 x the steps; and the
+     sub-threshold thin cloud before every entry was dropped. Not for the grid-mean debug outputs (1 / 2 / 6) nor the
+     jittered march. The jittered march
+     (the reference path, flag off): blue-noise start jitter, 64 x 64 void-and-cluster mask offset per frame by the
+     golden ratio - the same for both eyes, the light march's jitter decorrelated per step; background through
+     exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
+     transmittance-weighted cloud distance; a step whose weight in the scattered light T_sc (1 - exp(-(1 - f) tau))
+     exceeds 0.15 [E] (0.3 tried in Task 10, reverted) is marched again with steps of that weight (one sample deciding a whole deep step was the grain
+     at cloud surfaces and at bases seen at a grazing angle; the step's intended length is compared, not the float32
+     difference of the distances, whose 1 m ulp at 8 600 km retried the same step until the budget ran out - Task 10);
+  1b. **outline pass** (static clouds Task 5b, fix round 1; the deterministic march only, not the debug outputs), two
+     kernels. `CLOUD_OUTLINE` (one invocation per march pixel) copies the march's image (binding 6) into the centre's
+     `refined` image (the temporal kernel takes it instead) and appends every pixel whose alpha differs from one of
+     its 8 neighbours' by more than `CLOUD_EDGE_ALPHA_STEP` 0.25 [E] to the outline list (a storage buffer: count +
+     packed pixels, the count reset by the CPU each frame). The march kernel with `CLOUD_EDGE_REFINE` (`CloudEffect`:
+     its `_refine` variants) then runs one invocation per list entry (a direct 2-D dispatch for a full list - width capped at 65535 groups, the D3D12 limit per dimension; groups past
+     the count end at once - the indirect dispatch over a GPU-written group count read the reset value on D3D12): full
+     waves of outline pixels, which spread over the screen's work groups had kept whole groups waiting. Each entry
+     gets 3 coverage-only rays (`cloud_march(..., coverage_only)`: the same steps and transmittance without light
+     samples and air light, ended at `CLOUD_COVERAGE_MIN_TRANSMITTANCE` 0.01 [E]: alpha within 0.01 of the full
+     march's) at fixed rotated-grid offsets that, with the centre ray, take four distinct eighths of a march pixel in x
+     and in y ({-3, 0, 1, 2}/8) and average to the pixel centre in both axes (centre 0, (-3, 1), (1, 2), (2, -3) / 8
+     march pixel: no shift of the outline). Alpha: the mean of the centre's and the
+     three; the cloud distance alpha-weighted (the centre's from the march's depth image); the scene distance the
+     block's as before. Colour: the centre ray's colour per alpha scaled to that alpha, or - where the centre's alpha
+     is below `CLOUD_EDGE_COLOUR_ALPHA_RATIO` 0.5 [E] of the pixel's (a rim it barely touches) - the most opaque 3 x 3
+     neighbour's (alpha > 0.25 on any outline). The binary edge of one centre ray per march pixel made outlines follow
+     the march grid (stairs and beads of a march pixel that the Catmull-Rom upsample only rounded); now an outline
+     pixel holds its covered fraction in quarters - smooth along the edge, still one march pixel wide across it
+     (crisp), the same in every frame (no jitter, no noise pattern; the list's order varies, each entry's result does
+     not). Cost: the VR proxy's cloud pass +26-46 % over the medians before Task 5b (`vr-performance.md`; was ~3x
+     with four full marches per outline pixel in place; inside the accepted frame-rate cost, see the standing
+     decisions in Open points);
+  2. temporal accumulation per eye: reprojection of the cloud distance (sky: rotation only) with the camera's float64
+     motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
+     mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
+     kept 23 % of one frame's noise); a clamped history keeps at most 4 frames. `World` resets the history on view and
+     clock jumps (`_view_jumped`, `SimClock.time_jumped`). With the deterministic march the weight is 1: the kernel
+     copies the frame (nothing to average);
+  3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view); a VR eye's
+     tent gather has the largest radius 2 with the jittered march (`CloudEffect.TENT_RADIUS_*`, the centre block's
+     params.z). With the deterministic march the final gather (eyes and desktop) is a 4 x 4 Catmull-Rom filter (the
+     centre block's params.w; depth weights as above, T clamped to [0, 1], colour >= 0; T >= 0.5 from 1 - the gathered
+     alpha, below from the gathered T - the normalised sum of T = 1 taps with cancelling lobes flickered one half-float
+     step below 1 on the moving sea, fix round 1 of Task 9): bilinear left 1-march-pixel
+     stair steps on the binary cumulus outlines, Catmull-Rom rounds their corners at no march cost (Task 3 fix round 1).
+     Debug outputs stay bilinear (the checks' quantities: the filter's overshoot raised section 8's worst pixels at
+     dark silhouettes from 12 to 38 %). Where the taps' depth weights differ by more than a factor 2
+     (`CLOUD_DEPTH_MIXED_WEIGHT` [E]: two surfaces, e.g. the march's nearest / farthest checkerboard along the
+     terrain's horizon seen from altitude) only the kernel's positive part is used (static clouds Task 8 fix round 1):
+     the negative lobes, renormalised over the taps of one depth, alternated with the checkerboard and dotted the
+     horizon row with dark and bright pixels.
+  The composite quad (`cloud_layer.gdshader` x T, its next pass `cloud_layer_light.gdshader` + the colour: first in the
+  transparent pass, premultiplied; the images' .a is T, see the Sun's disk) blends it over the scene;
+  plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space: the far field below). A new size
+  (resize, divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
+  replacing it inside the render callback broke the composite's material for a frame), the old images are freed three
+  render callbacks later (no renderer error, no frame without clouds). `CloudLayer.shutdown` frees the resident volumes.
+- **Near / far hand-over in the cloud pass** (static clouds Task 8; `cloud_pass.gdshaderinc` `cloud_march` (two
+  passes), `cloud_far_slab` / `cloud_far_column`; `CloudLayer.PRESETS` `handover_m` -> globals
+  `cloud_handover_near_m` / `_far_m`, both presets 20 / 34 km [E]): the march ends at 34 km - inside the light cache's
+  full weight (Task 2) and below the footprints that need the shape prefilter (VR 0.18 km at 34 km, f_s 3.5 km: the
+  far cumulus' cover no longer beats with the 32 km tile, Task 3 follow-up). The far tier takes the ray from 20 km to the scene or the shell; over the
+  band the far tier's weight w(d) = smoothstep(20 km, 34 km, d) (an empty band: a step; both beyond the scene: the
+  march alone, 0 / 0: the far tier alone - the checks' switches, render_check `--handover`):
+  - the march weights every step's share of the pixel (its light and its alpha after the clouds in front of it) by
+    1 - w at the step's distance; a faded opacity per step compounded over the many steps inside one cloud like a
+    faded density (a thick cloud stayed opaque to the band's end);
+  - the far tier is a second pass of the same steps (`cloud_march` pass 1, over [20 km, end]; its steps weighted by w):
+    the march's machinery - coarse steps spanning the segment, fine steps in the field's cloudy region that still
+    reach its end within the preset's max steps, sub-samples, bisected silhouette entries, dense refinement, the
+    deterministic step phase on Earth-fixed height shells - with the shapes band-limited at the pixel footprint
+    (`cloud_sample_extinction`: beyond a shape texel, 250 m, the shape's box-filtered mips at that level -
+    deterministic, no sub-pixel offset, spec decision 4 - the sub-samples' structure step scaled with the mip) and the
+    light from `cloud_far_light_depth` (`cloud_sample_light_source`: no light cache there): 5 geometric intervals
+    20 m .. 1.5 km [E] through the same shapes (the far cumuli's lit and shaded flanks; equal intervals put the first
+    sample 250 m out, above a deck's top: 25 % dark; 3 intervals: 7 %), then the column's grid-mean depth above that
+    point along the light. A separate simpler far march (fixed 0.5 % steps) needed the full step budget in the analog
+    weather and still lost far deck against cloud_grain_check's 8 x reference (alpha -12 % in the deck view); a single
+    slab per pixel (the column model, or the shapes sampled along its chord) drew far cumulus as flat slabs, lost a
+    low layer's cloud under a higher one and needed per-cloud weight heuristics;
+  - composite: the march's (1 - w)-weighted image plus the march's transmittance at 20 km times the far tier's
+    w-weighted one - both march the same clouds, so a cloud in the band, or two behind each other, is the exact linear
+    cross-fade of the two renders; the cloud distance weighted by each part's alpha;
+  - the far tier's shapes fade to the far field's column model over the LATERAL pixel footprint at the ray's crossing
+    of 2 km (`cloud_far_reference_m`; its lowest point when it stays above: continuous over the pixels) from 1.5 to
+    3 km (`CloudLayer.PRESETS` `far_fade_m` -> global `cloud_far_pattern_fade_m` [E]; render_check `--far_fade`, the
+    checks' 1e9 / 0 switches; static clouds Task 8 fix round 1): the shapes' mips stop at 1 km texels, so no shape is
+    drawn beyond 3 km (spec decision 4: < 3.5 km) - a point sample of them at the limb's 2-11 km footprints was a
+    speckled band. Seen from above the footprint counts up to 3 x (x max(1, 3 |cos|), `CLOUD_FAR_STEEP_FOOTPRINT_FACTOR`
+    [E]): a steep ray crosses the layer within its footprint, so from low orbit at ~1 km the thresholded shapes flicker
+    per pixel into grain, while a grazing ray averages them over km of its path. The start keeps the shapes at the
+    desktop's far horizons from 9 and 20 km (~0.9 / ~1.3 km at its 2.6 mrad march pixels); VR's (5.4 mrad: ~1.8 /
+    ~2.7 km) lie in the fade, mostly the column model with its sub-grid cover;
+  - the column model (`cloud_far_slab`: the far field's slab placement along the ray, from above or from below, a
+    crossing in front of the band taken at its start; `cloud_far_column`), weighted by w at the slab: the column's
+    grid-mean depth and largest fraction from the column texels' cubic B-spline (`cloud_column_mean_depth_smooth`,
+    `cloud_column_texel_smooth`: from orbit a 0.25 deg cell spans tens of pixels and the bilinear's creases drew a
+    lattice of soft squares; the slab heights stay bilinear); the even cover C_v (the beam cover of the largest
+    fraction at the view's cosine) distributed by the sub-grid cover (`cloud_far_cover`, spec decision 4's
+    deterministic footprint average): the share of 4 x 8 fixed taps over the pixel's footprint x 2 across the view and
+    / mu along it (at most 32 km) where the shapes' prefiltered value exceeds the prefilter threshold of C_v itself, at
+    the mip of the taps' spacing - the pattern covers C_v of the layer, so the mean cover is C_v at every footprint and
+    view angle (spec decision 3; fix round 2: the share of the fraction's threshold x C_v / f, clamped at 1, lost 9-15 %
+    of the cover where whole footprints were covered; the deck's cover is C_v), half of it from a second, unaligned
+    reading of the shape (Earth-fixed, turned 37 deg about (1, 2, 3), x 1.37) faded in from 1 to 3 km of footprint (the
+    32 km tile's period showed as a regular lattice over the hundreds of km of an orbit view), and C_v itself beyond
+    8-16 km footprints (the scaled-space far field's even cover); the in-cloud depth the even cover's; the radiance the
+    plane-parallel slab's with the shapes' 3D Sun light (below, far field). From 420 km every pixel is the far
+    tier's (the march segment is empty): below ~1 km
+    footprints (nadir) the shapes' fade from above, then the column model with its sub-grid cover: a broken cumulus
+    field down to the limb, no cell lattice, no speckle (`t8f_orbit*`).
+  The debug outputs march the whole segment without the far tier (the checks' physical quantities of the volume). The
+  column texture reaches the compute kernels through the same swizzled view as Godot's shaders (cover in .a).
+- **Quality presets** [E]: desktop 128 coarse / 512 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 96 / 384,
+  2.5 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps; case 9 passes
+  with the 2.5 % fine step; cost and the Task 10 profile in `vr-performance.md`: kept, every cheaper setting
+  changes the look - user decision); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
+  1/96 (jittered march only). Max steps 4 x the coarse ones (Task 5c fix round 1): with 192 the VR fine steps through
+  a broken layer's cloudy region (mostly clear between the shapes) ran out before the far cloud - 7-16 % of the deck
+  view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference); 384 and 768 gave the same image; the
+  desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %). The near / far hand-over band 20 / 34 km in both
+  (above); the far tier's march takes at most the preset's max steps.
+- **Equiangular VR centre image** (fidelity flag `CloudCentreView.equiangular`, default off; user argument
+  `--cloud_equiangular`, or the environment `STARSIM_OM_EQUIANGULAR=1`; old march cost study 2026-10-29): the VR centre
+  image (march, outline pass, refine) is uniform in angle per axis at the densest eye's density on the axis, instead of
+  rectilinear (whose pixels shrink in angle toward the edges by 1 / (1 + t^2)). The march maps its image coordinate u to
+  the projection's ndc through t = c + h ndc, angle = mix(atan(c - h), atan(c + h), (u + 1) / 2)
+  (`cloud_equiangular_ndc`, c / h from the projection's corner rays; flag `CloudView.temporal.y`); the eyes' upsample
+  inverts it with the same c / h (`CloudCentre.warp`, `CloudCentreView.warp`; `cloud_centre_position`). The pixel angle
+  (band limit) is the angle span / rows. Pimax Dream Air at divisor 3: 924 x 747 instead of 1377 x 946 pixels
+  (0.53 x); the axis resolution is unchanged, the periphery gets the axis' angular resolution instead of up to 3 x it
+  (crops `screenshots/cloud-world-volume/t8_cmp_*_eq*.jpg`: 0.8-3.8 % of the eye pixels differ by more than 8 of 255,
+  softer only toward the edges). Deterministic march only (the jittered march's reprojection assumes the rectilinear
+  image). Unit check: `cloud_vr_stereo_test` (round trip march warp / eye inverse, pixel count, axis pixel angle).
+  Cost in `vr-performance.md` "Old march in VR stereo".
+- **March method (F7) and divisor (F8)** (2026-10-29 / 10-30): `CloudLayer.march_method` (`CloudEffect.MarchMethod`
+  BAKED, the default of every start - Start-VR.cmd, Start-Desktop.cmd, the checks -, or OLD; user argument
+  `--cloud_method=old|baked`); F7 (`CloudLayer.cycle_method`) cycles "Volumen" (the baked volume, equiangular centre
+  image) -> "alter March" (rectilinear) -> "alter March, winkelgleich" -> back; the HUD line (`status_line`) shows "(Volumen
+  wird gebacken)" until the first set is shown. `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3, 4; `--cloud_divisor=<x>`,
+  fractional allowed) and the march cut (F9: 0 / 10 / 15 km, `cloud_march_cut_m`) are the other live toggles. The old
+  march stays as the F7 reference and for the checks' debug outputs (cloud_check, cloud_grain_check, cloud_far_check
+  set `march_method = OLD`).
+
+### Validation
+
+- Backlit slab transmitted radiance (Task 9b, cloud_check 14; fixture `tests/validation/weather/
+  cloud_slab_transmitted_mc.csv` from `tools/validation/cloud_slab_monte_carlo.py --transmitted`, 1e7 photons per case,
+  sigma 0.3-0.7 %): the GPU's bin means (debug output 2, light cache filled) vs Monte Carlo at tau 10 / 30, Sun zenith
+  75 / 45 deg, view zenith 0 / 30 / 60 toward, across and away from the Sun: within 4.9 % (tolerance 7 % [E]). The
+  cloud shadows on the air: section 14's backlit cumulus, crepuscular rays (+ ray-free control), segment sum vs the
+  scene's single scattering, outline, front weight, no-negative and clear-sky cases (numbers in the Model section);
+  core `[weather]`: `cloud_render_top_m`; core `[atmosphere]`: the single Rayleigh table = the raymarch's single
+  Rayleigh within 1 % and below the scattering table's total.
+- Reference values at Task 10 follow-up (ff62126 with 6 sub-samples and step weight 0.3 - reverted to 0.15,
+  the far check re-run at 0.15 in sdd `final_fix/`; RTX 4090; sdd `t10_checks_e3/`): `cloud_check.gd` PASS, 208 samples, 393 s for the whole run (section 6 alone,
+  `STARSIM_GROUND_ONLY=1`: 12 s; the Sun through the shipped analog June cumulus at Starbase: 6 disks through gaps at
+  0.9999 of the cloudless disk, 2 behind cores at the march's T 3e-6 / 0, the mean transmittance of the shapes over 60
+  directions 0.727 vs the grid mean 0.730); `cloud_far_check.gd` at step weight 0.15 (`final_fix/far_w015.log`): passes, hand-over fade column / shapes
+  1.0936 (scattered cf 0.12 nadir) and 1.0849 (broken cf 0.4 low Sun 45 deg) of 10 % (0.3 gave 1.1085 / 1.1024:
+  why it was reverted); speckle RMS vs the sub-pixel supersampled reference:
+  limb from 420 km 5.0 %, 50 km horizon 9.4 % (limit 10 %), at the VR pixel angle (1.8 mrad, 3 x 3 reference) the limb
+  6.2 % and the 50 km horizon 11.0 % (listed, not asserted: open point); `cloud_grain_check.gd` VR PASS (grain ratio
+  1.01-1.05, alpha grain 0.995-1.165 (Cape the largest), RMS 0.033-0.057) and `--quality=desktop` PASS (grain
+  1.01-1.05, alpha 0.97-1.03, covered / mean alpha within 0.9 %, RMS 0.036-0.081, ground the largest); stereo, layer,
+  smoke and repeat_identical (ground, deck) green.
+- Reference values at Task 10 (6b9149e; with 8 sub-samples and step weight 0.15): `cloud_far_check.gd`: slab radiance
+  vs Monte Carlo worst 0.34 % (72 geometries), deck tau 10 inside / outside 2.68 % (grid mean), 0.22 % (far tier),
+  8.16 % (converged shapes, limit 10 %), deck tau 2 3.17 / 0.60 / 1.54 %, broken cf 0.4 2.28 %, far field / converged
+  volume 0.925 and 0.951 (limit 10 %), far tier / march 0.990 (both cases), cross-fade worst 2.48 % / 0.38 %,
+  hand-over step 2.52 % / 0.58 % (limits 3 %), from 420 km 0 pixels differ.
+- GPU `game/tests/cloud_check.gd` (the cloud pass; grid-mean field in debug outputs 1 / 2): background transmittance
+  below / inside / above a tau-1 slab vs the CPU Beer-Lambert within 1.5 %; Sun radiance from above a tau-10 slab vs
+  `slab_reflected_radiance` within 1.4 % with a converged light march (24 samples, 8 frames), the preset's 6-sample
+  march +10 % at Sun 60 deg (Jensen bias of exp(-tau_s), tolerance 15 %); with the table vs
+  `slab_reflected_radiance_mc` within 1.9 % (tolerance 3 %) at six geometries incl. a Sun 10 deg up seen forward (view
+  75 deg: 0.368 /sr), the preset's march +5.7 % there; filtered coverage 0.1036 / 0.5057 / 0.9021 at
+  full resolution (state 0, detail levels off for all numbers); climbing out in 50 m steps (temporal weight 1) <= 4.81 %
+  of the brightest value per step; inside finite and non-black; transmittance to an occluder 2 km ahead inside the
+  slab exp(-beta 2 km) within 0.7 % (depth -> distance); a near "mountain" edge through a half-resolution block: the
+  occluder column T = 1.000, the sky column the slab's within 1.5 % (upsampling). (These sections run with the light
+  cache on and the deterministic march; section 10 with the jittered one - it compares against independent jitter's
+  noise.) Section 9 (static clouds Task 3): a cf 0.3 layer of the thick
+  slab seen from 5 km above its top, straight down, 96 x 96 px at 30 deg; the deterministic march's 50 % background
+  transmittance contour (debug 4) vs the converged reference (jittered, fine 0.2 %, 512 coarse / 1024 max steps, 16
+  frames): farthest mismatched pixel 2 px desktop / 3 px VR from the reference's contour (limit one march pixel: 2 /
+  3 px; reference contour 342 / 333 px); without the entry bisection 3 / 5 px (RED). `render_check.gd
+  --repeat_identical=2` (VR preset, analog weather, Starbase 2024-06-15 21 UTC): two consecutive frames of the ground,
+  9 km and 20 km views bit-identical (0 of 1 440 000 pixels differ; the jittered march: 410 808). Section 11 (static
+  clouds Task 5b): the thick slab at cf 1 seen at its top's limb from 2 km above it, the camera rolled 7 deg (the limb
+  a straight edge crossing the march grid at a shallow angle), VR preset (divisor 3), 192 x 96 px at 20 deg, the
+  pass's result's alpha read back: over the 20 rows the edge crosses, the largest alpha step between neighbouring
+  pixels 0.194 over 20 rows (limit 0.35 [E]; without the outline pass 0.407 - RED; four full sub-ray marches gave
+  0.102), against the row's trend 0.019 (limit 0.03 [E]); a second render bit-identical; the same view at divisor 1, 2400 x 1800 (67 500 groups, beyond the 65535 of one dispatch
+  dimension): the pass still acts (partial alphas on the rim rows). Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
+  midpoints), on the game's deterministic march (one frame each, the same view samples; Task 3 fix round 1), at every
+  pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
+  / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
+  error relative to max(pixel, 5 % of the view mean)), the fill at 1/16 of the voxels per frame (complete after 16
+  frames): a tau-10 slab (debug 2) worst pixel within 5 % (measured 0.07-0.71 % in every cascade); a cf 0.4 broken
+  layer (debug 7, the shapes): the 99th percentile of the per-pixel error within 10 % and the worst pixel within 20 %
+  (the interior / silhouette split, alpha < 0.3 within one march pixel, debug 4, is printed only). Worst pixel at Sun
+  45 / 20 deg: cascade 0 2.78 / 6.71 %, 1 4.81 / 16.00 %, 2 6.00 / 11.45 %, 3 8.13 / 9.52 %, 4 9.95 / 12.08 % (p99
+  1.6-6.8 %, mean errors 0.16-0.95 %). A self-test of the verdict (`_cache_case_ok`: a slab with a 10 % worst pixel
+  fails) runs first. The cascade-1 view's failing pixels are interior pixels held by cascade 0
+  (read at the sample, 62.5 m voxels) at the low Sun: the voxel interpolation of a cumulus' self-shadowing at a fixed
+  sample - the jittered march's 8-frame mean had brought it to 9.58 %; without the entry bisection it stays 12.7 %
+  (not the bisection). Open: a user decision (finer cascade 0 / a near march for it, or a tolerance). `info` lines:
+  the worst pixel's cascade shares along its ray and the worst pixel by the cascade holding each pixel's slab middle;
+  Task 2's runs (jittered): the 1-km near march left cascade 2 32 %, 3 39.6 %, 4 15.1 % there; a view beyond
+  every cascade (complete fill) and the frames right after a clock
+  jump bit-identical to the march; the fill at the game's budget (98 304 voxels) with the 95th percentile <= 0.5 ms over the
+  427 frames of a full refresh from nothing (fix round 3: median, p95 and the worst frame printed; the worst frame is
+  an isolated spike at a GPU clock-state transition in a lightly loaded test, 0.43-0.65 ms in fix rounds 1-2, median
+  0.09-0.12, p95 0.32 ms; the per-frame times flip between ~0.09 and ~0.30 ms for alike jobs, the GPU's clock state;
+  the per-frame worst under load is measured in the headset in Task 10). Round 3: median 0.099, worst 0.454 ms. Section 10 (no seam; the march
+  with the cache's sample
+  count): the row-to-row step of (cache - march) / mean along a line of pixels over each edge band within the image
+  noise: 0 -> 1 0.046 / 0.071 %, 1 -> 2 0.030 / 0.050 %, 2 -> 3 0.021 / 0.048 %, 3 -> 4 0.061 / 0.074 %, 4 -> march
+  0.051 / 0.502 %; the same view before / after a re-anchor of cascade 3: 0.0000 %. Measured on the way: 64 / 256 / 512
+  voxels up worst 78 / 23 / 8 % (Task 1, broken, Sun 20 deg); 24 + 8 fill samples 30 % off the converged integral at a
+  pixel, 48 + 16 10.6 %; a x8 layout (8 / 64 / 512 km) broken worst 42 / 193 % (64 km) and 129 / 1005 % (512 km); the x2
+  layout read at the sample 12.7-107.7 %; the hybrid's near lengths and their measurements in
+  `CloudLightCacheSchedule` (`NEAR_INTERVAL_M`). The
+  earlier 3 -> 4 "seam" (0.29 % against 0.19 %) was the preset march's own pattern (6 + 3 samples) as reference, not a
+  seam: against the cache's sample count the step is 0.061 %.
+- GPU `game/tests/cloud_grain_check.gd` (static clouds Task 5c, fix round 1; the main scene, analog weather 2024-06-15
+  21 UTC, VR preset) against the 8 x steps reference (768 / 3072) in four views - the Cape (28.57 N, 80.65 W, 20 deg
+  up), the ground at Starbase, the deck from 9 km, cirrus from 9 km off Peru (18 S, 78 W, 15 deg up): the grain (mean
+  |Laplacian| of the cloud image's premultiplied luminance at a spacing of one march pixel over the pixels with alpha
+  > 0.1 and their four neighbours, relative to their mean luminance) and the same on alpha within 25 % [E] both ways
+  (no salt-and-pepper, no blur); the covered pixels (alpha > 0.1), the mean alpha and the mean luminance within 3 %
+  [E]; the RMS luminance difference over the cloud mask relative to the reference's mean there <= 0.1 [E] (the
+  reference band-limits the near detail more finely: lobe-scale shading differences up to ~0.09 by design); the
+  cloud image of the next frame bit-identical; the check fails if the reference does not settle. Values: see
+  `.superpowers/sdd/2026-10-26-static-clouds/task-5c-report.md` (fix round 1); before it (cb65707) the deck's alpha
+  -8.5 %, alpha grain 1.30, cover -5.3 %, RMS 0.14-0.17 on ground / deck / cirrus. `render_check --repeat_identical`
+  at the Cape: the frames differ in the sea below the horizon only (y >= 825; the base too) - the check prints the
+  differing pixels' bounding box.
+- GPU `cloud_check.gd` section 6 (terrain_earth.gdshader on a quad 300 m from a camera 2 m up; slabs tau 1 / deck tau
+  3 / broken cf 0.4; Sun 45 / 20 deg; debug output 5 = the three factors): with the near map of the grid mean
+  (`CloudShadowEffect.grid_mean_only`) direct vs the CPU within 1.3 %, diffuse within 0.6 %, sky within 0.3 %, the
+  rendered ground's luminance ratio weather on / off vs (T_s E_dir + T_sd E_sun,h + T_d E_sky) / (E_dir + E_sky) within
+  0.9 % (tolerance 5 %); with the game's map (the shapes) under the cf 1 slabs the ground's total light vs the vehicle's
+  CPU light at the same spot within 5.7 % (tolerance 10 %; under a deck tau 3 0.4 % / 0.1 %; the shapes' direct differs
+  from the grid mean by up to 2.3x at Sun 20 deg through tau 1 - their low octaves vary along a 3 km path); with weather
+  off land and sea bit-identical to the shader without its cloud blocks. atmosphere_check 86/86.
+- GPU `cloud_check.gd` section 7 (fix round 1; `tests/cloud_light_probe.gdshader` evaluates the surfaces' cloud-light
+  functions at receivers on annuli around the camera, means over eight sites ~55 km apart = independent realisations of
+  the shape noise; 93 samples in all): the shapes' area mean of the direct Sun over the near disc (r < 8 km) vs the CPU's
+  cell, cf 0.15 / 0.3 / 0.4 at Sun 45 / 8 deg: within 6.1 % (the worst, cf 0.3 at 45 deg; ground 0.795 / 0.657 vs CPU 0.777 / 0.649 at cf 0.15, 0.627 /
+  0.404 vs 0.592 / 0.396 at cf 0.3, 0.517 / 0.277 vs 0.490 / 0.277 at cf 0.4; tolerance 8 %); the near map's mean vs the
+  far map's over the same receivers likewise; the column terms (Sun's diffuse, sky) within 0.6 %; the vehicle's total light
+  vs the ground's mean within 3.3 % (cf 0.4 at Sun 8 deg: 0.715 vs 0.714; tolerance 10 %; asserted, no longer only
+  reported). Hand-overs: near -> far (9-11 km, annuli 8 / 10 / 12 km, a cf 0.3 layer, Sun 45 / 8 deg) steps 0.02 / 0.08 against
+  an allowance of 0.05 + 3 standard errors over the sites (0.11-0.18 for the broken layer: one annulus holds only a few
+  cells, so this check is weak; the disc check above carries the agreement); a deck: 0.003 / 0.005. Far -> the column
+  slanted (110 / 130 / 150 km): steps <= 0.002, the far map within 0.003 of the column (tolerance 0.03). Before the
+  beam-cover fit the same checks failed: the near mean was 10 % below the far / CPU at 45 deg and 40 % at 8 deg.
+  `STARSIM_SLANT_TABLE=1` prints the fit table. Render: `tmp/weather_t9f_sunset_handover.png` (cf 0.4 layer, Sun 9 deg,
+  looking away from the Sun and 4 deg down from 700 m: the ground at ~10 km): no ring.
+- GPU `game/tests/cloud_far_check.gd` (Task 10; the game's scene, HDR, linear tone map, fixed exposure): the far
+  field's slab radiance vs the core's `slab_reflected_radiance_mc` at 72 geometries (tau 0.5-30, Sun 0-80 deg, views
+  0-75 deg forward / side / back) within 0.34 % (tolerance 3 %; `tests/cloud_far_probe.gdshader`); weather off: the
+  scaled-space Earth drawn with `earth.gdshader`, bit-identical to the pre-Task-10 shader as one file (0 of 8.6e6
+  bytes); the hand-over just inside / outside 1.5e7 m (2024-04-08 14:00 UTC, camera over 0 N 45 W, seven Earth points
+  0-45 deg away, Sun 20-75 deg up): decks of tau 10 / 2 (cf 1, 1-2 km) with the volume on the grid mean (cloud debug
+  output 6: the far field's physics without the shapes) within 2.95 % / 3.89 % (tolerance 5 %); the volume pass only
+  inside, `earth_clouds.gdshader` only outside, the CPU light factors (1, 0, 1) outside; from 384 400 km with the ERA5
+  hour of 2024-04-08 18:00 five cloudy cells (vertical transmittance < 0.05) 5.3-8.2x brighter with the weather on,
+  five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). The game's cloud pass inside (static clouds
+  Task 8: every cloud there lies beyond the near / far hand-over; its far tier draws them with the column model at
+  these footprints) against the far field outside, tolerance 5 %: deck tau 10 within 0.22 %, tau 2 within 0.62 %,
+  broken cf 0.4 (21 x 21 block means) within 2.30 % at the six points off the sub-camera point; the converged volume
+  with the shapes (the march alone, 8 x its steps) against the far field (the column model's own error, tolerance 10 %,
+  the M8 ruling) deck tau 10 within 8.15 % (before fix round 1 11.98 %), tau 2 within 1.49 % (a broken layer's volume
+  beats with the 32 km tile at these ~17 km footprints, 17-32 % either way: section 6); the broken layer (cf 0.4) in
+  a 1 deg view (~1 km march pixels resolve the shapes; fix round 2), the whole image's mean at nadir, far field /
+  converged volume 0.925 (Sun 54 deg, 25 S 45 W) and 0.951 (Sun 24 deg, 0 N 95 W) (the plane-parallel slab alone
+  0.736 at 24 deg), at 0 N 45 W (Sun 73 deg) 0.968 listed, not asserted (the ground alone steps 55 %); there the
+  ground alone
+  steps across the limit (weather off: 0.157 inside / 0.069 outside, the terrain's sea glint, which the scaled-space
+  Earth lacks; seen through a broken layer's gaps it was 11 % of the pixel) - points whose ground steps by more than
+  the tolerance are listed, not asserted. Every placement resets the cloud history and the frame counter and draws
+  exactly 64 frames (Task 11). Static clouds Task 8, section 5 (`--only=handover`; the cloud pass's own image,
+  desktop preset): from 420 km the game's image equals the far tier's alone (0 of 1.44e6 pixels differ); a broken
+  layer (cf 0.4) and a deck (tau 10, 1-2 km) seen from 9 km (0 N 45 W, 10 deg down to the north, Sun ~60 deg up): the
+  far tier's mean radiance at 30-50 km vs the march alone 0.9905 / 0.9900 (tolerance 10 %, the M8 ruling), the game's
+  image the linear cross-fade of the two within 2.38 % / 0.39 % in every 2 km bin from 14 to 60 km (3 %), the band's
+  own step between bins, measured on the game's image relative to the march's, 2.45 % / 0.57 % (3 %); a camera at
+  20 km moved by 100 m: 4 interior cover flips in 646 130 covered pixels against 0 of a static pair (allowance 0.1 %
+  of the covered pixels [E]). Section 6 (`--only=column`, fix rounds 1 and 2): from 420 km at nadir / 45 deg, the
+  central square's means over three sites 1 deg apart (a single site's column cover is off by up to +-6 %: the
+  sub-grid cover reads the 32 km tile at one height), tolerance 10 %; the column model vs the converged volume,
+  radiance / alpha: broken cf 0.4 (Sun 73 deg) 0.986 / 0.993 and 0.967 / 0.936, deck tau 10 0.989 / 1.001 and
+  1.007 / 1.001; held out of the 3D Sun light's fit: scattered cf 0.12 (Sun 73 deg) 1.013 / 1.059 and 0.949 / 0.931,
+  broken cf 0.4 under a 24 deg Sun (0 N 95 W) 0.940 / 1.001 and 1.011 / 0.942 (at 8153ed5, the clamped sub-grid
+  cover: radiance 0.857 / 0.924, 0.888 / 0.928, 0.838 / 0.960, alpha down to 0.861; `--no_3d_light`: radiance
+  0.68-0.83); vs the far tier's shapes (the brightness across the fade) 1.041 / 1.023, 0.993 / 1.004, 1.094 / 1.015,
+  1.002 / 1.084; no speckle - the game's image against its 2 x 2
+  sub-pixel supersampled reference (the camera turned by whole screen pixels, aligned back), RMS over the far band:
+  the limb from 420 km 5.0 % (fix round 1 6.0 %, before 16.1 %), the far horizon from 50 km 9.3 %
+  (before 10.3 %; tolerance 10 % [E]).
+  cloud_grain_check (the far pass included, its 8 x reference too): Cape / ground / deck / cirrus cover within 0.02 /
+  1.00 / 0.16 / 0.10 %; the deck view's horizon row (fix round 1): 38 isolated outlier pixels within 3 rows of the
+  terrain's horizon against ~116 expected from the rows 8-40 away (before the mixed-depth gather 272; limit 1.5 x +
+  3).
+- Image identity of the shape prefilter (`render_check.gd --fixed_exposure --deterministic=64`: the cloud history
+  and frame counter reset, then exactly 64 frames; ERA5 2024-04-08 18:00; identity holds at the check window (1600 x
+  900) and the views' FOV used there - a larger window or a narrower FOV shrinks the pixel angle and keeps the
+  unfiltered kernel up to a higher view; a wider pixel prefilters from lower): the Starbase ground view and an ascent
+  view at 25 km toward the horizon are bit-identical to the commit before (a7d52e1); two runs of a7d52e1 itself
+  differ in 0 / at most 1 pixel by 1. The low-orbit oblique view (420 km) differs at the limb only, where the
+  footprint exceeds f_s.
+
+### Diagnostics
+
+- March counters and ablations (world volume plan Task 0; `vr-performance.md` "Where the march's time goes"):
+  `render_check.gd --counters` compiles the march kernels with `CLOUD_COUNTERS` (`CloudEffect.counters`, set before the
+  CloudEffect exists) and, once settled, prints `render_check: counter <name> median m p90 a p99 b max c sum s` per
+  march pixel for `density_fetches` (texture fetches of the view samples: field cell, shapes, detail, threshold /
+  edge-mean tables, column tables; the air's tables are not counted), `light_fetches` (everything inside one sample's
+  light-source evaluation: light cache, light march, transfer table, far tier's light path), `occupied_steps` (a march
+  step whose sample lies inside cloud, extinction > 0; a step done again by the step-weight limit counts again) and
+  `empty_steps`, plus `<out>_counter_<name>.png` (normalised to the maximum). The texels are `RGBA32UI` (density,
+  light, occupied, empty; `CloudEffect.debug_centre_data("counters")`, set 1 binding `CloudEffect.COUNTERS_BINDING`
+  24, not in the outline pass or the cache fill). `--ablate=<names>` / `STARSIM_CLOUD_ABLATE=<names>`
+  (`CloudEffect.ablate`, names in `CloudEffect.ABLATIONS`) defines `CLOUD_ABLATE_<NAME>` in the same kernels: `density`
+  (the view samples' shape, detail and tables -> the cell's grid mean), `light` (a sample's light-source evaluation ->
+  constant), `air` (the atmosphere tables at the clouds -> constants), `field` (the field's flat-base / ice /
+  stratiform fetches), `shape` / `detail` (everywhere, the light march included), `subsamples` (1 per step),
+  `outline` (no outline pass), `air_shadow`, `far_tier` (no far pass). Each changes the image (read a time saved with
+  the counters of its own run); with neither switch the kernels are the game's.
+- `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
+  `cloud_debug_height_m`, background transmittance with the shapes; 5: the terrain draws its cloud factors (direct,
+  the Sun's diffuse share, the sky's) as its colour (`render_check.gd --cloud_debug=5 --fixed_exposure`); 6: the
+  full image on the grid-mean field without the shapes (the far field's physics; `cloud_far_check.gd`); 7: as 2 with
+  the shapes (the light cache vs the march on broken cloud, `cloud_check.gd` section 8).
+- Light cache: `render_check.gd --no_light_cache` (the per-sample march, for before / after images);
+  `CloudEffect.pinned_frame` (checks: the march's jitter of a fixed frame); with `CloudEffect.capture_timestamps`
+  (`terrain_perf.gd --gpu_passes`) the fill is its own interval `cloud_light_fill`; `CloudLightCache.settled()`,
+  `planned_fill_frames`, `last_fill_voxels`, `schedule.lookup_state()` (windows, held rectangles, weights);
+  `schedule.budget_voxels` (the checks fill at 1/16 of the voxels per frame); `STARSIM_LIGHT_CACHE_ONLY=1` runs
+  `cloud_check.gd`'s sections 8 and 10 alone (with per-row seam profiles and the fill's per-frame times),
+  `STARSIM_CACHE_VIEWS=3,4` only those cascades' section-8 views. Schedule
+  logic: `tests/cloud_light_cache_test.gd` (headless).
+- `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_frame`: the
+  render callback's last run (`Engine.get_frames_drawn()`); `CloudLayer` takes the maps as valid (`cloud_shadow_valid`)
+  only within 4 drawn frames of it (frames, not milliseconds: a slow check frame outlasted the old 250 ms window and
+  switched the ground's / air's cloud shadows off and on in an unchanged scene - world-volume Task 7, R4).
+- `cloud_check.gd` with `STARSIM_SUN_ONLY=1`: section 13 alone (36 checks): the cloudless disk's centre = the core's
+  sun transmittance x `World.sun_disc_scene_value` within 3 % per channel (13 deg up: unclipped; 55 deg up: clipped
+  with its colour kept); through slabs of vertical tau 2 / 5 / 7 / 8 / 9 / 10 / 20 at 55 deg the disk's part (the
+  render with the disk less without it) within 5 % of the march's shapes transmittance (debug 4; and the two renders'
+  half-float resolution at most half of it), at or above exp(-tau / mu) of the core, exactly 0 where the march's T is
+  below the store (tau 20: and the core's T there too), the march's slant tau within 8 % of the core's, brighter than
+  the terrain while expected to, the aureole >= 100 x (303 x) the radiance 60 deg off; near march and far tier alone
+  (tau 5 / 20). `render_check.gd --sun_through_deck=<tau> --lat= --lon=` renders the view
+  (`.superpowers/sdd/.../img/t9f_tau*.png`, `t9f_edge.png`); `--gpu_time[=120]` prints the root viewport's GPU render
+  time (median, p99), `--render_scale=1.65` with `--resolution 2560x1440` the VR pixel proxy.
+- `cloud_check.gd` with `STARSIM_OUTLINE_ONLY=1`: section 11 alone (`STARSIM_VERBOSE=1` prints the worst row's alpha).
+- `cloud_check.gd` with `STARSIM_LCL_ONLY=1`: section 12 alone (the flat cloud base on a snapshot built from fields,
+  `StarsimCore.weather_write_column_snapshot`: optical depth straight up 0.9993 of the core's column (1 % allowed), no
+  cloud 100 m below the base (the fog column has it), above the base's layer as without the base texture).
+- `cloud_grain_check.gd -- --only=cape` (or `ground`, `deck`, `cirrus`): one view of the grain check.
+
+### Open points and known limits
+
+- **Speckle margin at the VR pixel angle (Task 10)**: cloud_far_check's 50 km horizon band at the VR march pixel (5.4
+  mrad, 3 x 3 reference) is 11.0 % RMS against the 10 % bound (9.4 % at the check window's 2.6 mrad pixels: a thin
+  margin there too). The band is 5 rows; the RMS is the march pixel's outline position against the sub-pixel mean (no
+  speckle visible, `t10b_far/t8fcheck_speckle_vr_horizon_from_50_km.png`), so it is listed, not asserted, and the bound
+  is not widened. The limb at the VR angle (6.2 %) is asserted.
+- **Fade reference point (Task 10, review Minor 3)**: the far tier's shapes fade at the footprint at the ray's 2 km
+  crossing, or at its lowest point when it stays above. A ray from 9 km with its tangent point at 2 km (d = 299 km)
+  meets 15 km high cloud at 706 km: the footprint there is 2.4 x the reference's (VR 5.4 mrad: 3.8 km against 1.6 km;
+  the desktop's 2.6 mrad 1.8 against 0.8 km), i.e. past the shapes' 1 km mips where the fade has not started. Seen only
+  as a far cirrus / Cb horizon from altitude in VR (the cirrus grain check passes); not changed - fading at the
+  farthest cloud would change the look of the horizon cirrus (user decision).
+- **Cloud shadows on the air (Task 9b)**: shapes' shadows (rays) only within the near map's 9-11 km; beyond, the far
+  map's grid mean shades the air smoothly (no individual rays from far clouds). Cameras above the atmosphere's top
+  (~100 km) get no air shadow: the loss switches off there during an ascent (the tables' parametrisation needs the ray
+  moved to its top-of-atmosphere entry, as `atm_sky` does; not done). The outline pass takes the source's loss at this
+  pixel's cloud distance (p99 1.7 %, max 7 % of the pixel's loss). Backlit rim / body: 2-4 x is the
+  photographic range [E] (cloud-visual-reference.md 5.3), not a physical bound; the ratio rises with nearness to the
+  Sun (the rim's forward peak) and the body's optical depth, so the 2-6 deg band is accepted at 2-5 x [E] (measured
+  4.01-4.03), 6-10 / 10-15 deg at 2-4 x. Re-measured in Task 10 (cloud_check section 14's bands pass, 208 of 208). Twilight cloud shadows above the cloud
+  top are not modelled: the ray clip to the cloud top assumes the Sun looks up from the air point; with the Sun
+  below the point's horizon by dep the Sun ray first descends ~dep^2 R / 2 (2 deg: ~3.9 km), so the real shadow
+  of a low deck at dusk lies above its top (review N3; a fix would clip at top + R (1 - cos dep)). Higher orders of the light scattered into
+  the shadowed air are not followed (the multiple scattering is the clear sky's: slightly too bright in large shadows).
+  The scaled-space far field has none.
+- **Per-sample light march for thick slabs seen from below (Task 9b)**: with the light cache off (or a view the cache
+  has not filled yet: the fallback) the transmitted radiance of a backlit slab is +25..+92 % above the Monte Carlo
+  reference (tau 10 / 30, Sun zenith 45 / 75; `STARSIM_SLAB_NO_CACHE=1` in cloud_check 14); with the cache filled
+  within 5 %. Open: the fallback's light-march length for low Suns.
+- The stochastic light march (outside the light cache, and for the Moon) is unbiased in tau_s but exp(-tau_s) per
+  sample is brighter on average (+10 % at the worst checked geometry with the preset's samples); more near samples
+  reduce it.
+- Light cache: the hybrid near march (1 / 3 / 2 / 2 km, 12-32 samples) costs the cloud pass +35-42 % in the VR proxy
+  over round 3's 1 km in every cascade, which itself was +45-65 % over the pure lookup (`vr-performance.md`): over the
+  2.5 ms budget in VR (accepted, see the standing decisions). The fill's GPU time per voxel depends on the GPU's clock state and the
+  weather (real weather ~2x the slab's); at the budget (98 304 voxels) single frames of a first fill reach 0.43-0.65
+  ms (clock-state transitions; `cloud_check` section 8 asserts the 95th percentile, the worst frame under load is
+  an open headset measurement). Under 1000x
+  warp every cascade's shown light lags the Sun by up to 25 deg (the drop bound; 100x: <= 3.6 deg); at 7.8 km/s
+  cascades 0-1 fall behind their re-anchors. Beyond 34-42 km the light is marched (the volume march ends at <= 34
+  km).
+- Light (Task 9): the vehicles' light and the eye adaptation are the grid mean at one point (a vehicle in a gap
+  between cumuli gets its cell's mean, not the shadow next to it; under a deck the same within 0.4 %); one light point
+  as before (the booster far below the ship gets the followed body's light). Ambient on vehicles = Godot's clear-sky
+  cubemap x one factor (its angular shape and the reflections stay the clear sky's). The shadow maps are plane-parallel
+  inside clouds (a receiver inside one gets a linear share), the Moon's direct light the column's (no shapes). The
+  sky's diffuse transmittance and the Sun's diffuse light are the local column's (no light from neighbouring columns,
+  no cloud-side glow in gaps). The scaled-space Earth takes the column (the far field: no shapes, no shadow maps).
+- Near / far hand-over (static clouds Task 8; standing decision, controller ruling 2026-10-27 on review I1): the far
+  tier beyond the band is a second march pass through the shapes with its own cheaper per-sample light
+  (`cloud_far_light_depth`), not a per-pixel column model - the cheaper variants failed the look (the column model
+  alone drew far broken cumulus as an even haze ~25 % dark; a separate far march lost far deck, alpha -12 %). This
+  supersedes Task 2's ruling that the light beyond the march is never marched per sample and that in orbit every cloud
+  is the far field: the column model draws only beyond the far fade's footprints. The cost (+29-35 % VR proxy) is inside
+  the accepted frame-rate cost. The far tier's light is the column's beyond 1.5 km of the light path (no light cache beyond the march:
+  no far neighbours' shadows past 1.5 km); its shapes are band-limited at the pixel footprint (no detail beyond
+  ~125 m footprints, as the march). The column model's sub-grid cover is the shape tile's (with a second unaligned
+  reading): realistic cumulus texture from orbit, not the real clouds' positions below the 0.25 deg grid; its sun
+  gain for broken cloud is a fit (above). The speckle check's far horizon from 50 km passes with a thin margin (9.4 %
+  of 10 %; the shapes' march-pixel outline at ~1 km footprints dominates it). The scaled-space limit: the ground's sea
+  glint steps there (terrain vs scaled-space Earth, weather off), seen through broken cloud.
+- **March sub-samples (Task 5c fix round 1, Task 10)**: at most 6 per step (8 before Task 10); the step-weight limit stays 0.15
+  (0.3 saved 4.7 / 5.2 ms but pushed two far hand-over fade cases to 1.108 / 1.102 of 10 %): the VR proxy's cloud pass
+  at the ground / the deck 40.9 / 48.9 -> 36.9 / 45.3 ms
+  (`vr-performance.md`), still over the budget like the base. 4 sub-samples (-9 ms) fail the grain check at the Cape
+  (alpha grain 1.375 x the 8 x reference's, bound 1.25; the user's ruling to use 4 could not be kept without widening
+  the bound), 5 pass with no margin (1.241), 6 at 1.16. One light sample per step.
+- **Deterministic march (Task 3, outline pass Task 5b)**: a cloud edge is binary per ray; the outline pass (cloud
+  pass 1b) averages the centre and three fixed coverage-only sub-rays on outline pixels, so outlines no longer follow the march grid (no stairs,
+  `t5b_*` vs `t5f_*` images), but they stay one march pixel wide across the edge (crisp; at divisor 3 ~3 screen
+  pixels), and a pixel's cover is resolved in quarters only. Some mid-distance cumuli (the 20 km view's frayed ones)
+  keep static per-march-pixel holes inside - the shape field's own structure at the step / pixel scale sampled at
+  fixed points (not the scene-depth step grid: deriving the grid from the layer segment changed nothing; not the
+  upsample); interior pixels whose neighbours differ by more than 0.25 are marched again too, which softens but does
+  not remove them. A checkerboard remains where the block's nearest / farthest scene distances alternate under a
+  cloud (the sub-rays take the block's distance). On a rim pixel the neighbour's colour may come from a farther surface
+  (bounded: it is taken only where the centre's alpha is below half the pixel's mean). Tried in Task 3 fix round 1 and dropped: a sub-pixel coverage at
+  the first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
+  1.44 M pixels by > 20/255 with no visible softening. Far cumulus fields at 20-40 km show faint horizontal bands (the
+  steps' iso-distance shells). The VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
+
+### Model: removed sentences of kept bullets
+
+- (Shape prefilter at large pixel footprints (from 'Beyond that')) Beyond that, each ray reads the shape at a
+  horizontal offset drawn from the pixel's tent filter (half-width f, faded in from f_s to 2 f_s; blue noise + the R4
+  sequence per frame) and the temporal mean averages the pixel's transmittance over its footprint - the
+  coverage-preserving mean in transmittance (a mean density would make broken cloud a fog); the cell (fraction,
+  water) stays the true point's. The deterministic march (the default, static clouds Task 3) reads the footprint's
+  centre (no offset, the same in every frame): the mips' box filter there is the footprint's mean cover (spec
+  decision 4); the near / far hand-over (static clouds Task 8, below) ends the march at 34 km, so with the presets no
+  march footprint reaches f_s any more (VR 5.4 mrad x 34 km = 0.18 km) and the prefilter kernel runs only for the
+  debug outputs (they march the whole segment) or a band moved out (checks). Deeper mips (level 4, 4 km texels) were tried: their few features per horizontal
+  slice of the tile showed as rings around the sub-camera point (cf 0.4 hand-over 10.7 % instead of 7.5 %). The
+  code sits under `CLOUD_SHAPE_PREFILTER`: `CloudEffect` runs that march kernel only when a footprint on the frame's
+  clouds can exceed f_s (largest pixel angle x (the horizon distances of the camera and of the 20 km cloud top on the
+  largest radius of curvature + the light march's 6 km)), else the unfiltered kernel - bit for bit the code before
+  (one added branch alone moved results by an ulp through the compiler). With the 1600 x 900 check window (pixel
+  3.1e-3 rad at half resolution) that keeps the ground and an ascent up to ~30 km unfiltered; the limb from higher
+  (an ascent near the Karman line, low orbit) is prefiltered where its footprint exceeds f_s (there the shape aliased
+  as at the hand-over). Shadow maps never prefilter.
+- (Light on the ground, vehicles and the eye (file list)) under the clouds", `cloud_light.gdshaderinc`, `cloud_shadow.gdshaderinc`). Three factors
+- (Light on the ground: the shadow maps' fill (old kernel)) -0.5..20 km: 64 grid-mean samples find the cloudy part (every 312 m of height), 64 samples over it give (t_front,
+    t_back, optical depth, cover); a receiver at t_r gets 1 - C + C exp(-od / C x clamp((t_back - t_r) / (t_back -
+    t_front))) - exact below the clouds, linear inside them; the four texels' transmittances bilinear. The near map
+    (+-16 km, 62.5 m texels) marches the visible clouds' density (the shapes, detail band-limited at the larger of the
+    texel and the step, the shapes' mean for steps > 0.5-2 km: its cover and depth mix toward the cell's own - cover
+    1 for the shapes, the beam's cover of the cell fraction for the mean part), the far map (+-200 km) the grid mean with
+    the beam's cover of the largest cloud fraction on the line. Distance rule (horizontal distance of the receiver from the camera): near -> far over 9-11 km, far -> the
+    column slanted to the Sun (1 - C + C exp(-tau / (C mu0))) over 120-140 km; smooth, no pop. World space: the same for
+    both VR eyes. The Moon's direct light uses the slanted column. While the baked volume draws, both maps are filled
+    from its own Sun transmittance instead (same texels; "Baked prototype: cloud shadows from the bake").
+- (Cloud shadows on the air (mechanics with the old maps / old march)) (i / n)^2 [E], Bruneton's difference form per segment without a clamp per piece (a piece the tables' interpolation
+  makes negative belongs to the telescoping sum; the front and behind parts are >= 0 as a whole), T_c = the mean of 3
+  fixed points per segment [E] from the cloud shadow maps (`cloud_shadow_transmittance`: near map's shapes within
+  9-11 km, far map's grid mean to 120-140 km, slanted column beyond; inside the near range the near map alone) - one
+  midpoint per segment aliased the near map's shadows into regular stripes across the sky, 3 x 32 points look as 96
+  segments. The segment's part in front of the clouds' weighted distance is seen directly, the rest through the
+  background's T (linear split: a step at the midpoint stair-stepped the loss along the clouds' distance contours); the
+  two parts are returned apart (loss = front + T x behind). The composite adds the air in front of a cloud at weight 1
+  (`cloud_march`'s alpha x `atm_to_point_offset` to the clouds' distance plus T x the scene), the same weight as the
+  loss's front part (cloud_check 14: 1.000). The pass's colour carries -L (the march clamps to +-65000; the composite's
+  additive pass adds it). The outline pass (`CLOUD_EDGE_REFINE`) takes the source's loss off with the source's T and
+  adds this pixel's with its own (one parts call per outline pixel at this pixel's cloud distance). The upsample's
+  undershoot floor: the inner 2 x 2 taps of this pixel's scene depth (depth weight within `CLOUD_DEPTH_MIXED_WEIGHT` of
+  the best), the larger of their lowest colour and this pixel's T x their lowest colour per T (`CLOUD_FLOOR_MIN_T`): a
+  negative colour belongs to its T x scene, so a cloud body next to the shadowed sky cannot take the sky's -L; 0
+  without air shadow, as before. Static (fixed points, `repeat_identical`), world space (both VR eyes), the eclipse's
+  unocculted fraction applied. Weather off or no cloud in the Sun's way: L = 0 exactly (cloud_check 14: 0.0000 %).
+- (Cloud shadows on the air (bit-identity note)) - The bit-identity of the cloud image (cloud_grain_check) is checked with the air shadow on, above the horizon (8
+    rows margin): below it the sea's depth changes between frames and the loss is integrated to the scene.
+- (Far field (facets: the old march's far tier)) views +0.17 ms even untaken; the old march's far tier, `CLOUD_MARCH` without `CLOUD_BAKED_MARCH`, unchanged):
+- (The Sun's disk through cloud (stages)) Every stage (edge refine mean, temporal mix / clamp, tent /
+  Catmull-Rom gather) is linear in T.
+- (Baked volume: cloud shadows (the old kernel's cases)) distance rule (near -> far 9-11 km, far -> column 120-140 km) unchanged, the old kernel otherwise (before the first
+  set, the old march, above 62 km); (b)
+- (Baked volume: cloud shadows (STARSIM_BAKED_SHADOW=0)) `STARSIM_BAKED_SHADOW=0` keeps the old maps and air shadow (comparisons);
+- (Kernel build (the old march's shaders)) the old march's 9 shaders from cached SPIR-V still took 6.8 s, from the binary 0.02 s).
+- (Kernel build and fast start (start kernels, F7 switch)) At start only the temporal
+  pass, the upsample, the active method's kernels (the baked volume's for the stereo march when an XR interface is up;
+  the first frame corrects a wrong guess; a later change of the view count re-creates the baked volume for it) and the
+  shadow maps' are built; once they are, the other method's build starts
+  in the background. Shaders are created from the binaries on the render thread when first needed. No frame blocks on
+  the workers (owners poll `done()`; only a freed set's predelete waits): until the kernels and the baked
+  volume's first set are ready the frame shows no clouds (`CloudEffect._skip_frame` clears the result to T = 1); an F7
+  switch to the old march before its build finished keeps drawing the baked volume until it has.
+- (Kernel build and fast start (measurements)) "Wolken-Shader laden" while the active method's kernels build (`CloudLayer.kernels_status`, Main's hold); Boot's step
+  before instantiating Main is "Hauptszene aufbauen". Measured (desktop RTX 4090, Start-Desktop args, engine start to
+  "[Boot] done" = the first world frames): before 23.70 s (19.6 s of it the serial build in Main's instantiation), first
+  start after 4.06 s (cache empty: the start kernels built in 1.2 s in parallel, the old march's 9 in 2.5 s in the
+  background), second start 4.37 s (all from the cache in 0.02 s; the rest of the boot dominates). F7 to the old march:
+  0.02 s with its build done; 1.69 s of baked frames when switched at frame 40 of a cold-cache run.
+- (Baked volume (method switch)) - **Baked volume (the default since 2026-10-30; "Weg 2", 2026-10-29)**: `CloudBaked` (`cloud_baked.gd`,
+  `cloud_baked.gdshaderinc`), `CloudEffect.MarchMethod.BAKED`, F7 state "Volumen" (next bullet but one for the
+  toggles; `--cloud_method=old` starts on the old march). Shape and light are baked
+- (Baked volume (compile check)) every kernel of both methods in `tests/cloud_compile_check.gd` (`-- --baked_only`).
+- (Baked volume step 6 (the old march's far tier)) field's column light (`cloud_far_cloudy_radiance`, flat levels and scaled-space far field; the old march's far tier
+  unchanged under `CLOUD_MARCH` without `CLOUD_BAKED_MARCH`) turns
+- (cloud_layer_test (exit leak check)) Exit leak check: `render_check` (default and
+  `--cloud_method=baked`) prints no "RID leaked" warning
+- (render_check options) `--cloud_detail_levels=0..3`, `--cloud_scattering=table|closed`, `--no_light_cache`,
+- (render_check identity) `--fixed_exposure --deterministic[=64]` for before / after image identity (cloud history and frame counter reset
+  once settled, then exactly that many frames).
+- (Kernel build diagnostics (old march line)) `CloudEffect: old march ready (waited for its build x s, shaders created in y s)` and `baked volume's shaders
+  created in y s` on first use.
+- (Kernel build diagnostics (compile check)) `tests/cloud_compile_check.gd` (GPU) builds and creates every kernel of both methods (desktop and stereo baked, the
+  shadow maps') by polling, exit 1 on a failure. `render_check.gd --f7_at_frame=<n>`: the F7 switch at frame n.
+- (Deferred minors (old march)) - Outline pass colour on semi-transparent rims (the centre ray's colour per alpha, or the most opaque neighbour's)
+    is not checked against full marches (Task 5b M4); bound unknown.
+- (Deferred minors (old march)) - Light cache: the outside-cascade check does not assert a complete fill; the cache's 62.5 m detail floor against the
+    march's finer detail is not measured (section 8 runs detail off); one stale cache frame when the flag is switched
+    back (Task 1).
+- (Deferred minors (old march)) - `near_samples` is written from the main thread by cloud_check's diagnostics (render-thread contract, Task 2).
+- (Deferred minors (old march)) - `cloud_structure_step` switches on a type weight > 0: any cirrus share makes the cell's step fine (a sharpness
+    change at type-band edges); the redone dense step keeps the sub-loop's `outside` flag (Task 5c).
+- (Deferred minors (old march)) - Temporal variance clip: fp32 cancellation on the jittered path only (Task 9).
+- (Deferred minors (old march)) - cloud_far_check: the 50 km horizon speckle at the VR angle is capped at 13 % (measured 11.0 %).
+- (Open: the vehicles' direct Sun) - The Sun's direct beam: the drawn disk follows the shapes (above exp(-tau / mu), the plane-parallel bias), the CPU's
+  `weather_cloud_light` `sun_transmittance` is the grid mean's exp(-tau / mu) (tau 5 at 55 deg: 0.00235 vs the disk's
+  0.00331). That CPU value lights the vehicles (direct Sun) and enters the eye adaptation (`Atmosphere`
+  `cloud_light_at`); the ground and the clouds themselves take the GPU paths (shadow maps, march). Open: whether the
+  vehicles' and the eye's direct Sun should follow the drawn shapes' transmittance at the light point.

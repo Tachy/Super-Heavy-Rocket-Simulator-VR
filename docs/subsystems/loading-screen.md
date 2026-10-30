@@ -66,10 +66,11 @@ Current state (2026-10-30, boot-splash style). Shows which boot step runs right 
 First text at 0.77 s (driver/renderer/project load and all autoloads 0.9 s, `main.tscn` load 0.7 s); instantiating
 Main ("Hauptszene aufbauen") 0.1 s since the cloud compute kernels are built on workers (2026-10-30,
 `weather-clouds.md` "Kernel build and fast start"; before: 20.1 s, the serial build in `CloudLayer.new()`). Main's hold
-also waits for the active cloud method's kernels (`CloudLayer.kernels_status`: "Wolken-Shader übersetzen ..." when one
+also waits for the cloud kernels (`CloudLayer.kernels_status`: "Wolken-Shader übersetzen ..." when one
 had to be compiled, else "Wolken-Shader laden"); on the desktop they are built before the other steps end, so the step
 does not show. Engine start to "[Boot] done": 23.70 s before, 4.06 s on a first start (empty kernel cache), 4.37 s with
-the cache. Then:
+the cache; 3.96 s with the cache after the cloud cleanup (2026-10-30: the baked volume's kernels only, the world shown
+at 3.91 s). Then:
 
 | Step | Duration |
 |---|---|

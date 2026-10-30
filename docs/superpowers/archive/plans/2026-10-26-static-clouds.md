@@ -14,7 +14,7 @@ column model. One path for desktop and VR.
 **Tech Stack:** C++20 core (environment module, Catch2 `[weather]`), Godot 4.7 double GDScript, RenderingDevice compute
 (GLSL via CloudShaderPort), D3D12.
 
-**Spec:** `docs/superpowers/specs/2026-10-26-static-clouds-design.md` (approved by the user 2026-10-26; read its
+**Spec:** `docs/superpowers/archive/specs/2026-10-26-static-clouds-design.md` (approved by the user 2026-10-26; read its
 "user's definition of a cloud" and "Decisions taken for the builder" first).
 
 ## Global Constraints
