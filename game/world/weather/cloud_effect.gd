@@ -14,6 +14,11 @@ extends CompositorEffect
 ## cloud's disparity from its distance). Without a RenderingDevice (headless, Compatibility) it does nothing.
 ## With MarchMethod.BAKED (the default, CloudLayer.march_method) the baked volume's march (CloudBaked) takes the
 ## march's place once its first set is baked; the temporal pass and the upsample are the same.
+## Fast start (2026-10-30): the kernels are built off the main and the render thread (CloudKernels: glslang in
+## parallel on workers, the driver binaries cached on disk) - at start the temporal pass, the upsample and the active
+## method's kernels; the other method's in the background once those are built (an F7 switch to the old march before
+## that keeps the baked volume for the few frames until they are). Until the kernels and the baked volume's first set are
+## ready the frame shows no clouds.
 
 const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
@@ -23,6 +28,11 @@ const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
 ## baked volume (CloudBaked, "Weg 2" 2026-10-29, the default since 2026-10-30: shape and light baked in a world-fixed
 ## clipmap, a cheap march through it).
 enum MarchMethod { OLD, BAKED }
+## The loading screen's step texts while the kernels are built (kernels_status; German UI).
+const STATUS_COMPILING := "Wolken-Shader übersetzen (einmalig nach einer Änderung, einige Sekunden)"
+const STATUS_LOADING := "Wolken-Shader laden"
+## The kernels every method runs (the temporal pass, the upsample; CloudKernels specs from kernel_spec).
+const PASS_KERNELS := ["temporal", "upsample"]
 const GROUP := 8
 const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
 const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline",
@@ -111,6 +121,16 @@ var _temporal_weight := 0.1
 var _clip_gamma := 0.0
 ## Render-thread copy of the march method (set_march_method).
 var _march_method := MarchMethod.BAKED
+## The kernel builds (CloudKernels; render thread, read by kernels_status on the main thread under _kernel_mutex): the
+## temporal pass and the upsample, the old march (outline list + the march's variants), the baked volume's per stereo
+## flag; whether each set's shaders are created (or failed).
+var _kernel_mutex := Mutex.new()
+var _pass_kernels: CloudKernels
+var _old_kernels: CloudKernels
+var _baked_kernels := {}
+var _pass_state := 0  ## 0 waiting, 1 created, -1 failed
+var _old_state := 0
+var _old_wanted_us := 0  ## when a frame first wanted the old march before it was built (its wait, printed)
 ## The baked volume (MarchMethod.BAKED; created on its first use) and whether it drew the last frame.
 var baked: CloudBaked
 var baked_shown := false
@@ -129,9 +149,42 @@ func set_quality(divisor: float, temporal_weight: float, clip_gamma := 0.0) -> v
 	RenderingServer.call_on_render_thread(_set_quality.bind(divisor, temporal_weight, clip_gamma))
 
 
-## Main thread: the march method (MarchMethod), applied on the render thread.
+## Main thread: the march method (MarchMethod), applied on the render thread; its kernels' build starts (the baked
+## volume's for the stereo march when an XR interface is up - the first frame corrects a wrong guess).
 func set_march_method(method: MarchMethod) -> void:
-	RenderingServer.call_on_render_thread(func() -> void: _march_method = method)
+	var xr := XRServer.primary_interface
+	var stereo_guess := xr != null and xr.is_initialized()
+	RenderingServer.call_on_render_thread(func() -> void:
+		_march_method = method
+		if method == MarchMethod.OLD:
+			_request_old()
+		else:
+			_request_baked(stereo_guess))
+
+
+## Main thread (the loading screen's hold): a step text while the active method's kernels are still being built - the
+## compile's when SPIR-V had to be compiled (no cached copy: the first start, a changed shader), else the cache read's;
+## "" once they are built (or without a RenderingDevice).
+func kernels_status() -> String:
+	_kernel_mutex.lock()
+	var sets: Array[CloudKernels] = []
+	if _pass_kernels != null:
+		sets.append(_pass_kernels)
+	if _march_method == MarchMethod.OLD and _old_kernels != null:
+		sets.append(_old_kernels)
+	elif _march_method == MarchMethod.BAKED:
+		for k: CloudKernels in _baked_kernels.values():
+			sets.append(k)
+	_kernel_mutex.unlock()
+	var waiting := false
+	var compiling := false
+	for k in sets:
+		if not k.done():
+			waiting = true
+			compiling = compiling or k.misses() > 0
+	if not waiting:
+		return ""
+	return STATUS_COMPILING if compiling else STATUS_LOADING
 
 
 ## Main thread: forget the history (a jump of the camera, a pinned snapshot shown at once).
@@ -186,10 +239,9 @@ func _create() -> void:
 	if _rd == null:
 		return
 	_march = CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH"]), PackedStringArray(MARCH_FILES))
-	for name: String in old_march_kernel_names():
-		if not _compile(name, kernel_source(name)):
-			_rd = null
-			return
+	_kernel_mutex.lock()
+	_pass_kernels = CloudKernels.new(kernel_specs(PackedStringArray(PASS_KERNELS)), "pass")
+	_kernel_mutex.unlock()
 	_globals_buffer = _rd.uniform_buffer_create(_march.block_size)
 	_eyes_buffer = _rd.uniform_buffer_create(EYES_BLOCK_SIZE)
 	_centre_buffer = _rd.uniform_buffer_create(CENTRE_BLOCK_SIZE)
@@ -213,11 +265,10 @@ func _create() -> void:
 			RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, PackedByteArray([0, 0, 0, 0]))
 
 
-## The kernels of the old march: the march and its variants (one set 0: the centre view (VR) _centre, the shape
-## prefilter _prefilter, the outline pass's re-march _refine, in that order), the temporal pass, the upsample, the
-## outline list.
+## The old march's kernels: the outline list and the march with its variants (one set 0: the centre view (VR)
+## _centre, the shape prefilter _prefilter, the outline pass's re-march _refine, in that order).
 static func old_march_kernel_names() -> PackedStringArray:
-	var names := PackedStringArray(["temporal", "upsample", "outline"])
+	var names := PackedStringArray(["outline"])
 	for centre in ["", "_centre"]:
 		for prefilter in ["", "_prefilter"]:
 			for refine in ["", "_refine"]:
@@ -225,35 +276,125 @@ static func old_march_kernel_names() -> PackedStringArray:
 	return names
 
 
-## The GLSL source of the kernel `name` (old_march_kernel_names).
-static func kernel_source(name: String) -> String:
-	if not name.begins_with("march"):
-		return CloudShaderPort.build(PackedStringArray(["CLOUD_" + name.to_upper()]), PackedStringArray(PASS_FILES),
-				false).source
-	var defines := PackedStringArray(["CLOUD_MARCH"])
-	for flag: Array in [["_centre", "CLOUD_CENTRE"], ["_prefilter", "CLOUD_SHAPE_PREFILTER"],
-			["_refine", "CLOUD_EDGE_REFINE"]]:
-		if name.contains(flag[0]):
-			defines.append(flag[1])
-	return CloudShaderPort.build(defines, PackedStringArray(MARCH_FILES)).source
+## CloudKernels specs of the kernels `names` (PASS_KERNELS, old_march_kernel_names).
+static func kernel_specs(names: PackedStringArray) -> Array:
+	var specs := []
+	for name in names:
+		if not name.begins_with("march"):
+			specs.append([name, PackedStringArray(["CLOUD_" + name.to_upper()]), PackedStringArray(PASS_FILES), false])
+			continue
+		var defines := PackedStringArray(["CLOUD_MARCH"])
+		for flag: Array in [["_centre", "CLOUD_CENTRE"], ["_prefilter", "CLOUD_SHAPE_PREFILTER"],
+				["_refine", "CLOUD_EDGE_REFINE"]]:
+			if name.contains(flag[0]):
+				defines.append(flag[1])
+		specs.append([name, defines, PackedStringArray(MARCH_FILES), true])
+	return specs
 
 
-## Compiles one kernel (GLSL source) into _shaders / _pipelines; false (and an error) when it fails.
-func _compile(name: String, source: String) -> bool:
-	var src := RDShaderSource.new()
-	src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-	src.source_compute = source
-	var spirv := _rd.shader_compile_spirv_from_source(src)
-	if spirv.compile_error_compute != "":
-		push_error("CloudEffect %s: %s" % [name, spirv.compile_error_compute])
-		return false
-	var shader := _rd.shader_create_from_spirv(spirv)
-	if not shader.is_valid():
-		push_error("CloudEffect %s: shader not created" % name)
-		return false
-	_shaders[name] = shader
-	_pipelines[name] = _rd.compute_pipeline_create(shader)
+## Render thread: the old march's kernel build (started once; a background build after the start's kernels).
+func _request_old() -> CloudKernels:
+	if _rd == null:
+		return null
+	_kernel_mutex.lock()
+	if _old_kernels == null:
+		_old_kernels = CloudKernels.new(kernel_specs(old_march_kernel_names()), "old march")
+	var kernels := _old_kernels
+	_kernel_mutex.unlock()
+	return kernels
+
+
+## Render thread: the baked volume's kernel build for a desktop or a stereo march (started once each).
+func _request_baked(stereo: bool) -> CloudKernels:
+	if _rd == null:
+		return null
+	_kernel_mutex.lock()
+	if not _baked_kernels.has(stereo):
+		_baked_kernels[stereo] = CloudKernels.new(CloudBaked.kernel_specs(stereo), "baked" + (" stereo" if stereo else ""))
+	var kernels: CloudKernels = _baked_kernels[stereo]
+	_kernel_mutex.unlock()
+	return kernels
+
+
+## Creates the shaders and pipelines of a built kernel set; false (errors pushed) when one fails.
+func _create_kernels(kernels: CloudKernels) -> bool:
+	for name: String in kernels.names():
+		var shader := kernels.create_shader(_rd, name)
+		if not shader.is_valid():
+			return false
+		_shaders[name] = shader
+		_pipelines[name] = _rd.compute_pipeline_create(shader)
 	return true
+
+
+## Render thread: the temporal pass and the upsample created once built (false while building or failed).
+func _pass_ready() -> bool:
+	if _pass_state == 0 and _pass_kernels.done():
+		_pass_state = 1 if _create_kernels(_pass_kernels) else -1
+	return _pass_state == 1
+
+
+## Render thread: the old march's kernels created once built (in the background, or requested now: the first switch
+## to it before its background build finished waits a few frames, the baked volume standing in). Never blocks: a
+## render-thread wait for the workers deadlocked (the checks' measurements, 2026-10-30). False while building or failed.
+func _old_march_ready() -> bool:
+	if _old_state != 0:
+		return _old_state == 1
+	var kernels := _request_old()
+	if not kernels.done():
+		if _old_wanted_us == 0:
+			_old_wanted_us = Time.get_ticks_usec()
+		return false
+	var start_us := Time.get_ticks_usec()
+	_old_state = 1 if _create_kernels(kernels) else -1
+	print("CloudEffect: old march ready (waited for its build %.2f s, shaders created in %.2f s)" % [
+			(start_us - _old_wanted_us) / 1.0e6 if _old_wanted_us > 0 else 0.0,
+			(Time.get_ticks_usec() - start_us) / 1.0e6])
+	return _old_state == 1
+
+
+## Render thread: the baked volume created once its kernels are built (false while building or failed: then
+## _baked_failed); the old march's build starts in the background then.
+func _create_baked(stereo: bool) -> bool:
+	var kernels := _request_baked(stereo)
+	if not kernels.done():
+		return false
+	var start_us := Time.get_ticks_usec()
+	baked = CloudBaked.new()
+	if not baked.setup(_rd, kernels):
+		baked = null
+		_baked_failed = true
+		return false
+	print("CloudEffect: baked volume's shaders created in %.2f s" % ((Time.get_ticks_usec() - start_us) / 1.0e6))
+	return true
+
+
+## Render thread, every frame: once the active method's kernels are built, the other method's build starts in the
+## background (the F7 switch then only creates its shaders) - the old march's after the baked volume's, the baked
+## volume's (for the last frame's stereo flag) after the old march's.
+func _warm_other_method() -> void:
+	if _pass_kernels == null or not _pass_kernels.done():
+		return
+	if _march_method == MarchMethod.BAKED:
+		if _old_kernels != null:
+			_old_kernels.done()  # (releases its finished worker group)
+			return
+		_kernel_mutex.lock()
+		var built := not _baked_kernels.is_empty()
+		for k: CloudKernels in _baked_kernels.values():
+			built = built and k.done()
+		_kernel_mutex.unlock()
+		if built:
+			_request_old()
+	elif _old_kernels != null and _old_kernels.done():
+		_request_baked(_view_count > 1).done()  # (the poll releases its finished worker group)
+
+
+## A frame without clouds (kernels or the first baked set not ready): the result cleared to T = 1, no history.
+func _skip_frame(view_count: int) -> void:
+	_rd.texture_clear(_output_rd, Color(0.0, 0.0, 0.0, 1.0), 0, 1, 0, maxi(view_count, 2))
+	_centre["valid"] = false
+	stats = {"valid": false, "waiting": true}
 
 
 func _texture(type: int, size: Vector2i, layers: int, format: int, data := PackedByteArray()) -> RID:
@@ -266,7 +407,8 @@ func _texture(type: int, size: Vector2i, layers: int, format: int, data := Packe
 	tf.format = format
 	# Copy-from: the checks read the result back (cloud_check section 11: its alpha).
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT \
-			| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+			| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT \
+			| RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT  # (copy-to: _skip_frame clears the result)
 	if not data.is_empty():
 		tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 		return _rd.texture_create(tf, RDTextureView.new(), [data])
@@ -430,6 +572,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		_callbacks += 1
 		_retire_outputs()
 		_collect_garbage()
+		_warm_other_method()
 	if _rd == null or not ShaderGlobals.value(&"cloud_enabled"):
 		stats = {"valid": false}
 		_reset_history()
@@ -492,11 +635,39 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			texture = light_cache.texture(0 if slot_cascade.begins_with("a") else 1, slot_cascade.substr(1).to_int())
 		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
 		set0.append(u)
-	# The shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can exceed its start: the farthest cloud
-	# sample (_shape_prefilter_needed).
+	# The march: the baked volume's (CloudBaked; its bake dispatches run in frame(), before the march) once a set is
+	# baked, else the old march - with the shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can
+	# exceed its start: the farthest cloud sample (_shape_prefilter_needed). No old march stands in while the baked
+	# volume's kernels or its first set are not ready: the frame shows no clouds then (_skip_frame).
+	var debug := int(ShaderGlobals.value(&"cloud_debug_output"))
 	var family := "march_centre" if stereo else "march"
 	var pixel_angle: float = centre_view["pixel_angle"]
 	var march := family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family
+	var baked_set: Array[RDUniform] = []
+	baked_shown = false
+	if not _pass_ready():
+		_skip_frame(view_count)
+		return
+	# The old march when chosen (or for the debug outputs, or without the baked volume) and built; else the baked volume
+	# (also standing in while the old march's kernels are still being built after an F7 switch).
+	var old_ok := (_march_method == MarchMethod.OLD or debug != 0 or _baked_failed) and _old_march_ready()
+	if not old_ok and debug == 0 and not _baked_failed:
+		if baked == null and not _create_baked(stereo) and not _baked_failed:
+			_skip_frame(view_count)  # its kernels are being built
+			return
+		if baked != null:
+			baked_set = baked.frame(set0, _samplers, camera, pixel_angle)
+			if baked_set.is_empty():
+				_skip_frame(view_count)  # its first set is being baked
+				return
+			var kernel := baked.march_kernel()
+			_shaders["baked"] = baked.shader(kernel)
+			_pipelines["baked"] = baked.pipeline(kernel)
+			march = "baked"
+			baked_shown = true
+	if not baked_shown and not old_ok:
+		_skip_frame(view_count)  # the old march's kernels are being built
+		return
 	var march_set0 := UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
 
 	# The camera's motion since the last frame.
@@ -505,7 +676,6 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var world_to_earth: Basis = ShaderGlobals.value(&"atmosphere_world_to_earth")
 	# Earth-local offsets from the camera -> render world (the camera's world position: the floating origin's offset).
 	var earth_to_world := Projection(Transform3D(world_to_earth.transposed(), scene.get_cam_transform().origin))
-	var debug := int(ShaderGlobals.value(&"cloud_debug_output"))
 	# The deterministic march (CloudLayer.deterministic_march) has nothing to average: the temporal kernel copies the
 	# current frame, and the upsample is a Catmull-Rom filter (the soft-edge tent hid the jitter's noise; bilinear left
 	# stair steps of a march pixel at the silhouettes). The debug outputs (the checks' physical quantities) stay
@@ -577,26 +747,9 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 				world_to_earth, Projection.IDENTITY, Vector2(size), low, camera_delta, _centre["valid"], params,
 				eye_earth).to_byte_array())
 	counters_size = low
-	# The baked volume (CloudBaked): its march in the march's place once a set is baked (its bake dispatches run in
-	# frame(), before the march); no outline pass. Until then the old march.
-	baked_shown = false
-	if _march_method == MarchMethod.BAKED and debug == 0 and not _baked_failed:
-		if baked == null:
-			baked = CloudBaked.new()
-			if not baked.setup(_rd, stereo):
-				baked = null
-				_baked_failed = true
-		if baked != null:
-			var baked_set := baked.frame(set0, _samplers, camera, pixel_angle)
-			if not baked_set.is_empty():
-				var kernel := baked.march_kernel()
-				_shaders["baked"] = baked.shader(kernel)
-				_pipelines["baked"] = baked.pipeline(kernel)
-				march = "baked"
-				march_set0 = UniformSetCacheRD.get_cache(_shaders["baked"], 0, set0)
-				march_set1.append_array(baked_set)
-				refine = false
-				baked_shown = true
+	if baked_shown:  # the baked volume's set 1 (its grids, volumes, flat levels); no outline pass
+		march_set1.append_array(baked_set)
+		refine = false
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
 	var refine_set1 := []

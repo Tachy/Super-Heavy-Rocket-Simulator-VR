@@ -397,6 +397,10 @@ func _run() -> void:
 		return
 	_clouds.quality = CloudLayer.Quality.DESKTOP
 	_clouds.march_method = CloudEffect.MarchMethod.OLD  # the old march is what these sections check
+	for i in range(6000):  # the old march's kernels built (CloudKernels, workers) before anything is rendered
+		await process_frame
+		if i > 2 and _clouds.kernels_status() == "":
+			break
 	_detail_off()
 	_check("transfer table loaded", _clouds.transfer_ready, "config/" + CloudLayer.TRANSFER_TABLE)
 

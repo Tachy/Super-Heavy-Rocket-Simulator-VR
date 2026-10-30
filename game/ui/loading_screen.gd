@@ -201,7 +201,7 @@ func _process(_delta: float) -> void:
 
 
 func _show_world() -> void:
-	print("[Boot] world shown under the loading screen")
+	print("[Boot] %+7.2f s  world shown under the loading screen" % (Time.get_ticks_msec() / 1000.0))
 	if mode == Mode.VR:
 		_vr.release()
 	else:

@@ -185,6 +185,10 @@ func _run() -> void:
 	_world = _main.get_node("World")
 	_world.weather.enabled = false
 	_world.clouds.march_method = CloudEffect.MarchMethod.OLD  # the old march's far tier is what this checks
+	for i in range(6000):  # the old march's kernels built (CloudKernels, workers) before anything is rendered
+		await process_frame
+		if i > 2 and _world.clouds.kernels_status() == "":
+			break
 	_world.clouds.far_3d_light = not _no_3d_light
 	for i in range(MAX_FRAMES):
 		await process_frame

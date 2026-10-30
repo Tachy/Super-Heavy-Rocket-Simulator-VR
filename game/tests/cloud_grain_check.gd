@@ -118,6 +118,10 @@ func _run() -> void:
 	_world.set_focus(World.FOCUS_EARTH)
 	var preset: Dictionary = CloudLayer.PRESETS[_quality]
 	_world.clouds.march_method = CloudEffect.MarchMethod.OLD
+	for i in range(6000):  # the old march's kernels built (CloudKernels, workers) before anything is rendered
+		await process_frame
+		if i > 2 and _world.clouds.kernels_status() == "":
+			break
 	var divisor := int(preset["divisor"])
 	print("cloud_grain_check: %s, %s preset (steps %d / %d, divisor %d), reference x%d" % [file,
 			"desktop" if _quality == CloudLayer.Quality.DESKTOP else "VR", preset["steps"],

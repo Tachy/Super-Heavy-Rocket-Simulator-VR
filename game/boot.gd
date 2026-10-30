@@ -1,16 +1,16 @@
 class_name Boot
 extends Node
 ## The project's start scene (`run/main_scene`): a few lines that put the loading screen up at once and then bring in
-## `main.tscn`. Creating the Main node is slow (about 20 s with a GPU: its World builds the cloud compute shaders), and
-## nothing could be shown before the engine had finished it. Now the screen is visible about a second after the process
-## start and says what happens ("Hauptszene laden", "Wolken-Shader übersetzen"). The later boot steps (World._ready,
+## `main.tscn`. Creating the Main node blocks this thread for a moment (the cloud compute shaders are built on
+## workers since 2026-10-30; it took about 20 s before), so the screen is visible about a second after the process start
+## and says what happens ("Hauptszene laden", "Hauptszene aufbauen"). The later boot steps (World._ready,
 ## Main._ready) report into the same screen, which moves to the root when Main takes over.
 ## Tests and tools that load main.tscn themselves (--script) never see this scene; without a screen (headless,
 ## --self-check, --no-loading-screen) it just loads and switches.
 
 const MAIN_SCENE := "res://main.tscn"
 const STEP_LOAD := "Hauptszene laden"
-const STEP_SHADERS := "Wolken-Shader übersetzen (nur beim Start, dauert einige Sekunden)"
+const STEP_BUILD := "Hauptszene aufbauen"
 
 
 func _ready() -> void:
@@ -22,7 +22,7 @@ func _ready() -> void:
 	else:
 		await LoadingScreen.step(STEP_LOAD)
 		packed = await _load_threaded(MAIN_SCENE)
-		await LoadingScreen.step(STEP_SHADERS)  # the next call blocks this thread: say so first
+		await LoadingScreen.step(STEP_BUILD)  # the next call blocks this thread: say so first
 	if packed == null:
 		push_error("Boot: %s could not be loaded" % MAIN_SCENE)
 		get_tree().quit(1)

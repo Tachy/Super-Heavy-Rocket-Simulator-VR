@@ -27,6 +27,8 @@
 #          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
 #          --handover=<near m>,<far m> (the near / far hand-over band; 1e9,1e9: the march alone, 0,0: the far tier).
 #          --far_fade=<start m>,<end m> (the far tier's shapes-to-column fade; 1e9,1e9: the shapes, 0,0: the column).
+#          --f7_at_frame=<n>: at frame n the F7 key's switch to the next cloud march method (CloudLayer.cycle_method; the
+#          log shows the old march's kernel wait / creation, CloudEffect).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
 #          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
@@ -271,6 +273,8 @@ func _process(_delta: float) -> bool:
 				if child is VrOverlayPanel:
 					child.visible = false
 	_frames += 1
+	if _args.has("f7_at_frame") and _frames == int(_args["f7_at_frame"]):  # the F7 key's method switch (its cost)
+		world.clouds.cycle_method()
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
 	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables

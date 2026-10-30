@@ -10,6 +10,8 @@ extends CompositorEffect
 ## The baked clouds (CloudEffect.MarchMethod.BAKED, shadow step 2026-10-30): while the baked volume draws, the maps are
 ## filled from its own Sun transmittance instead (cloud_baked.gdshaderinc CLOUD_SHADOW_BAKED_FILL: one S read per
 ## texel, the same texel semantics) - the shadows of the shapes it draws, out to the far map's edge.
+## Its kernels are built on workers (CloudKernels: SPIR-V cached on disk; fast start 2026-10-30): until they are
+## created the pass does not run (the layer then takes the shadows from the column, cloud_shadow_valid off).
 
 const FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
 		"res://shaders/cloud_shadow.gdshaderinc"]
@@ -37,6 +39,7 @@ var cloud_effect: CloudEffect
 var baked_fill := false
 
 var _rd: RenderingDevice
+var _kernels: CloudKernels  ## the map's kernel and the baked fill's, being built (null once created)
 var _port: CloudShaderPort
 var _shader := RID()
 var _pipeline := RID()
@@ -79,32 +82,12 @@ func _create() -> void:
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
 		return
-	_port = CloudShaderPort.build(PackedStringArray(["CLOUD_SHADOW_MAP"]), PackedStringArray(FILES))
-	var src := RDShaderSource.new()
-	src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-	src.source_compute = _port.source
-	var spirv := _rd.shader_compile_spirv_from_source(src)
-	if spirv.compile_error_compute != "":
-		push_error("CloudShadowEffect: " + spirv.compile_error_compute)
-		_rd = null
-		return
-	_shader = _rd.shader_create_from_spirv(spirv)
-	_pipeline = _rd.compute_pipeline_create(_shader)
-	_globals_buffer = _rd.uniform_buffer_create(_port.block_size)
+	var specs := [["map", PackedStringArray(["CLOUD_SHADOW_MAP"]), PackedStringArray(FILES), true]]
 	if CloudBaked.shadow:
 		var defines := PackedStringArray(["CLOUD_SHADOW_BAKED_FILL"])
 		defines.append_array(CloudBaked.extra_defines)  # (diagnostics: CLOUD_SHADOW_BAKED_DIAG)
-		_baked_port = CloudShaderPort.build(defines, PackedStringArray(BAKED_FILES))
-		var baked_src := RDShaderSource.new()
-		baked_src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-		baked_src.source_compute = _baked_port.source
-		var baked_spirv := _rd.shader_compile_spirv_from_source(baked_src)
-		if baked_spirv.compile_error_compute != "":
-			push_error("CloudShadowEffect (baked fill): " + baked_spirv.compile_error_compute)
-		else:
-			_baked_shader = _rd.shader_create_from_spirv(baked_spirv)
-			_baked_pipeline = _rd.compute_pipeline_create(_baked_shader)
-			_baked_globals = _rd.uniform_buffer_create(_baked_port.block_size)
+		specs.append(["baked_fill", defines, PackedStringArray(BAKED_FILES), true])
+	_kernels = CloudKernels.new(specs, "shadow maps")
 	for linear in [false, true]:
 		for repeat in [false, true]:
 			var state := RDSamplerState.new()
@@ -140,6 +123,35 @@ func _create() -> void:
 	_mutex.lock()
 	_maps = maps
 	_mutex.unlock()
+
+
+## Render thread: the kernels created once built (false while building; the map's failing switches the pass off).
+func _kernels_ready() -> bool:
+	if _kernels == null:
+		return true
+	if not _kernels.done():
+		return false
+	_port = _kernels.port("map")
+	_shader = _kernels.create_shader(_rd, "map")
+	if not _shader.is_valid():
+		_rd = null
+		return false
+	_pipeline = _rd.compute_pipeline_create(_shader)
+	_globals_buffer = _rd.uniform_buffer_create(_port.block_size)
+	if CloudBaked.shadow:
+		_baked_port = _kernels.port("baked_fill")
+		_baked_shader = _kernels.create_shader(_rd, "baked_fill")
+		if _baked_shader.is_valid():
+			_baked_pipeline = _rd.compute_pipeline_create(_baked_shader)
+			_baked_globals = _rd.uniform_buffer_create(_baked_port.block_size)
+	_kernels = null
+	return true
+
+
+## Main thread (the loading screen's hold): true while the kernels are being built.
+func building() -> bool:
+	var kernels := _kernels
+	return kernels != null and not kernels.done()
 
 
 func _notification(what: int) -> void:
@@ -205,7 +217,7 @@ func _baked_fill_uniforms() -> Dictionary:
 
 
 func _render_pass(_callback_type: int, _render_data: RenderData) -> void:
-	if _rd == null or _maps.size() != 2 or not ShaderGlobals.value(&"cloud_enabled"):
+	if _rd == null or _maps.size() != 2 or not ShaderGlobals.value(&"cloud_enabled") or not _kernels_ready():
 		return
 	var start_us := Time.get_ticks_usec()
 	var fill := _baked_fill_uniforms()

@@ -402,6 +402,15 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
 
 
+## The loading screen's hold (Main): a step text while the cloud kernels of the active method or the shadow maps are
+## still being built (CloudEffect.kernels_status), "" once they are.
+func kernels_status() -> String:
+	var text := effect.kernels_status()
+	if text == "" and shadow_effect.building():
+		text = CloudEffect.STATUS_LOADING
+	return text
+
+
 ## The ids of the resident slots and the weight of slot 1 (tests).
 func state() -> Dictionary:
 	return {"slots": [_slots[0]["id"], _slots[1]["id"]], "w1": _w1, "tracking": _tracking,
@@ -857,17 +866,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == METHOD_KEY:
-		# User 2026-10-29 / 10-30: F7 compares only what is relevant - the baked volume (the default; equiangular: its
-		# target setting), the old march with the rectilinear centre image, with the equiangular one
-		# (CloudCentreView.equiangular), and back.
-		if march_method == CloudEffect.MarchMethod.OLD and not CloudCentreView.equiangular:
-			CloudCentreView.equiangular = true
-		elif march_method == CloudEffect.MarchMethod.OLD:
-			march_method = CloudEffect.MarchMethod.BAKED
-		else:
-			march_method = CloudEffect.MarchMethod.OLD
-			CloudCentreView.equiangular = false
-		print("CloudLayer: march method %s" % _method_label())
+		cycle_method()
 		get_viewport().set_input_as_handled()
 	elif key.keycode == CUT_KEY:
 		march_cut_m = CUTS_M[(CUTS_M.find(march_cut_m) + 1) % CUTS_M.size()]
@@ -882,6 +881,20 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		divisor_override = next
 		print("CloudLayer: march divisor %s" % next)
 		get_viewport().set_input_as_handled()
+
+
+## F7 (render_check --f7_at_frame): the next method. User 2026-10-29 / 10-30: F7 compares only what is relevant - the
+## baked volume (the default; equiangular: its target setting), the old march with the rectilinear centre image, with
+## the equiangular one (CloudCentreView.equiangular), and back.
+func cycle_method() -> void:
+	if march_method == CloudEffect.MarchMethod.OLD and not CloudCentreView.equiangular:
+		CloudCentreView.equiangular = true
+	elif march_method == CloudEffect.MarchMethod.OLD:
+		march_method = CloudEffect.MarchMethod.BAKED
+	else:
+		march_method = CloudEffect.MarchMethod.OLD
+		CloudCentreView.equiangular = false
+	print("CloudLayer: march method %s" % _method_label())
 
 
 ## The HUD's line of the live toggles (German UI): the method (and whether the volume draws yet), the divisor, the keys.

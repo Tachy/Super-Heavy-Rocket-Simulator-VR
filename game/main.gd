@@ -72,9 +72,11 @@ func _ready() -> void:
 	var hud := FlightHud.new()
 	hud.world = world
 	legacy_hud.add_child(hud)
-	if loading != null:  # stays while the atmosphere tables load (first run: about a minute), then a few world frames
+	# The screen stays while the atmosphere tables load (first run: about a minute) and while the cloud kernels are
+	# built (CloudKernels: seconds when their SPIR-V is not cached yet), then a few world frames.
+	if loading != null:
 		loading.finish_when_idle(func() -> String:
-			return world.atmosphere.status_text if world.atmosphere.loading else "")
+			return world.atmosphere.status_text if world.atmosphere.loading else world.clouds.kernels_status())
 
 
 ## One line `SELF-CHECK OK ...` (exit code 0) or `SELF-CHECK FAIL <reason>` (exit code 1).

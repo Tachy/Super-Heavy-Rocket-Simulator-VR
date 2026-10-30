@@ -153,9 +153,30 @@ var _geo_count := 0  ## flat geometries made (their ids)
 var _pixel_angle := 1.0e-3  ## the march's pixel angle (rad) of the last frame (the footprint rule)
 
 
-## Compiles the kernels (the march's files + cloud_baked.gdshaderinc; set 0 is the march's). false on an error.
-func setup(rd: RenderingDevice, stereo: bool) -> bool:
+## Creates the kernels from `kernels` (a CloudKernels of kernel_specs(stereo) that is done; the stereo flag is
+## its). false on an error.
+func setup(rd: RenderingDevice, kernels: CloudKernels) -> bool:
 	_rd = rd
+	if not kernels.done():
+		push_error("CloudBaked: setup before its kernels are built")
+		return false
+	for name: String in kernels.names():
+		_shaders[name] = kernels.create_shader(rd, name)
+		if not _shaders[name].is_valid():
+			push_error("CloudBaked %s: shader not created" % name)
+			free_all()
+			return false
+		_pipelines[name] = rd.compute_pipeline_create(_shaders[name])
+	_march_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
+	_bake_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
+	_band_buffer = rd.storage_buffer_create(8)
+	_shadow_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
+	return true
+
+
+## The kernels (CloudKernels specs: the march's files + cloud_baked.gdshaderinc; set 0 is the march's) for a desktop
+## or a stereo (CLOUD_CENTRE) march.
+static func kernel_specs(stereo: bool) -> Array:
 	var files := PackedStringArray(CloudEffect.MARCH_FILES + FILES)
 	var march := PackedStringArray(["CLOUD_MARCH", "CLOUD_BAKED_MARCH"])
 	march.append_array(CloudEffect.diagnostic_defines())
@@ -187,30 +208,12 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 		"density": density, "occupancy": PackedStringArray(["CLOUD_BAKED_OCCUPANCY"]),
 		"light": PackedStringArray(["CLOUD_BAKED_LIGHT"]), "band": PackedStringArray(["CLOUD_BAKED_BAND"]),
 		"flat": PackedStringArray(["CLOUD_BAKED_FLAT"]), "shadow": PackedStringArray(["CLOUD_BAKED_SHADOW"])}
+	var specs := []
 	for name: String in kernels:
 		var defines: PackedStringArray = kernels[name]
 		defines.append_array(extra_defines)
-		var start_us := Time.get_ticks_usec()
-		var src := RDShaderSource.new()
-		src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-		src.source_compute = CloudShaderPort.build(defines, files).source
-		var spirv := rd.shader_compile_spirv_from_source(src)
-		if spirv.compile_error_compute != "":
-			push_error("CloudBaked %s: %s" % [name, spirv.compile_error_compute])
-			free_all()
-			return false
-		_shaders[name] = rd.shader_create_from_spirv(spirv)
-		if not _shaders[name].is_valid():
-			push_error("CloudBaked %s: shader not created" % name)
-			free_all()
-			return false
-		_pipelines[name] = rd.compute_pipeline_create(_shaders[name])
-		print("CloudBaked: kernel %s compiled in %.1f s" % [name, (Time.get_ticks_usec() - start_us) / 1.0e6])
-	_march_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
-	_bake_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
-	_band_buffer = rd.storage_buffer_create(8)
-	_shadow_buffer = rd.uniform_buffer_create(GRID_BLOCK_SIZE)
-	return true
+		specs.append([name, defines, files, true])
+	return specs
 
 
 ## The march kernel's shader / pipeline of this frame (the cross-fade's while a new set fades in).
