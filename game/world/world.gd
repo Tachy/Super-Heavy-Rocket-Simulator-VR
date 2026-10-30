@@ -67,6 +67,8 @@ var clouds := CloudLayer.new()  ## the volumetric clouds near the camera from th
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
+## The Sun's visible fraction at the camera from the lunar terrain (this frame; NAN: not applicable).
+var _camera_terrain_sun_fraction := NAN
 var _earth_heights: HeightSource  ## the terrains' height sources (SurfaceClearance)
 var _moon_heights: HeightSource
 var sun_apparent_from_earth_m := Vector3.ZERO
@@ -243,7 +245,8 @@ func update_world() -> void:
 	FrameProfiler.begin(&"atmosphere")
 	var adaptation_dt := maxf(_delta, absf(t - _last_world_tdb_s)) if not is_nan(_last_world_tdb_s) else 0.0
 	_last_world_tdb_s = t
-	atmosphere.eye_terrain_sun_fraction = _moon_terrain_sun_fraction(cam)
+	_camera_terrain_sun_fraction = _moon_terrain_sun_fraction(cam)
+	atmosphere.eye_terrain_sun_fraction = _camera_terrain_sun_fraction
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			1.0 - core.solar_eclipse_fraction_gcrf(cam, t), moon_apparent_from_earth_m, t, moon_gcrf_m)
 	FrameProfiler.end(&"atmosphere")
@@ -559,8 +562,8 @@ func _place_sun(sun_from_camera_m: Vector3) -> void:
 
 
 ## The Sun's visible fraction at a point from the lunar terrain's horizon (MoonSunHorizon) near the Moon's ground
-## (Atmosphere.moon_terrain_sun_applies: below 20 km); NAN elsewhere or without lunar terrain data (the ground sphere's
-## occultation stays).
+## (Atmosphere.moon_terrain_sun_applies: within the Moon's sphere of influence, at any height); NAN elsewhere or without
+## lunar terrain data (the mean sphere's occultation stays).
 func _moon_terrain_sun_fraction(point_gcrf_m: Vector3) -> float:
 	if not Atmosphere.moon_terrain_sun_applies(point_gcrf_m, moon_gcrf_m):
 		return NAN
@@ -579,14 +582,13 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 		if index >= 0:
 			lit_gcrf = flight.sim.body_position_gcrf_m(index)
 	var gcrf_to_fixed := earth.fixed_to_gcrf.transposed()
-	# The core's fraction uses the Moon's mean sphere: on lunar terrain below it the Sun would be hidden at lunar day.
-	var visible := Atmosphere.moon_visible_fraction(lit_gcrf, sun_apparent_from_earth_m, moon_gcrf_m,
-			1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t))
-	var terrain_visible := _moon_terrain_sun_fraction(lit_gcrf)
-	if is_finite(terrain_visible):
-		# The terrain replaces the Moon's part only: the Earth (at the GCRF origin) still eclipses the Sun.
-		visible = terrain_visible * (1.0 - Atmosphere.occulted_fraction(sun_apparent_from_earth_m - lit_gcrf,
-				Atmosphere.SUN_RADIUS_M, -lit_gcrf, Atmosphere.EARTH_MEAN_RADIUS_M))
+	# The camera's fraction is already computed this frame (eye adaptation); a followed vehicle gets its own march.
+	var terrain_visible := _camera_terrain_sun_fraction
+	if lit_gcrf != camera_gcrf_m:
+		terrain_visible = _moon_terrain_sun_fraction(lit_gcrf)
+	# The core's fraction uses the Moon's mean sphere (the fallback without terrain data).
+	var visible := Atmosphere.sun_visible_near_moon(lit_gcrf, sun_apparent_from_earth_m, moon_gcrf_m,
+			1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t), terrain_visible)
 	var light := atmosphere.sun_light_at(gcrf_to_fixed * lit_gcrf, (gcrf_to_fixed * sun_apparent_from_earth_m).normalized(),
 			visible)
 	sun_light.light_color = light[0]

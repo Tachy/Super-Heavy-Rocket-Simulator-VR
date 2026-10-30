@@ -74,16 +74,23 @@ vehicles still fly through `Us76Atmosphere`).
 - **Sun light.** One DirectionalLight: colour and energy per channel = TOA solar RGB x the core's
   `atmosphere_sun_transmittance` x luminance scale / pi x the Moon's visible fraction, at one point: the followed
   vehicle (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Near the Moon
-  the visible fraction comes from `Atmosphere.moon_visible_fraction` (shared with the eye adaptation), and below 20 km
-  over the mean sphere (`MOON_TERRAIN_SUN_MAX_HEIGHT_M` [E]; `Atmosphere.moon_terrain_sun_applies`) from the terrain's
-  horizon instead (`MoonSunHorizon.sun_visible_fraction`, the same geometry as `terrain_moon.gdshader`: the core's
-  `horizon_elevation_rad` march in the two sectors k * 2 pi / 16 around the Sun's azimuth, linear between them, the
-  exact circular segment of the solar disc above that horizon; `world.gd::_moon_terrain_sun_fraction`, also feeds
-  `Atmosphere.eye_terrain_sun_fraction` for the eye adaptation). No lunar terrain data (NAN): the ground-sphere
-  occultation (within 2 m of the mean sphere or below it, on the point's own ground sphere) as before. Cost: one march
-  0.04 ms at IM-2 (2 m above ground), two per point, camera and lit body: uncached. GPU checks: IM-2 site 2 m above the
-  ground, Sun 1 deg below / above / at the horizon: 0 / 1 / 0.5; 1551 m below the mean radius, Sun 60 deg up: light =
-  the open sky's; 100 km orbit: the mean-sphere fraction. Clouds (Task 9, `weather-clouds.md` "Light"):
+  the visible fraction is `Atmosphere.sun_visible_near_moon` (one combination for the vehicles and the eye adaptation):
+  the terrain's fraction (`MoonSunHorizon.sun_visible_fraction`, at every height within `MOON_TERRAIN_SUN_MAX_DISTANCE_M`
+  = 66 000 km of the Moon [E], no height switch; the same geometry as `terrain_moon.gdshader`: the core's
+  `horizon_elevation_rad` march in the two sectors k * 2 pi / 16 around the Sun's azimuth, linear between them, the exact
+  circular segment of the solar disc above that horizon) x the Earth's disc in front of the Sun (lunar eclipse; the
+  terrain knows only the Moon). Exact pre-check: from height h over the reference sphere no relief rises above
+  -acos((R + max_height) / (R + h)) (`StarsimCore.terrain_max_height_m`, 10 686 m; none at or below it); a Sun disc
+  wholly above that bound is 1 without a march (the mean sphere lies below it too). A point under the terrain (vehicle in
+  contact) is marched from 0.5 m above the surface [E]. No lunar terrain data (NAN) or beyond the distance: the
+  mean / ground-sphere value `Atmosphere.moon_visible_fraction` as before (its step at 66 000 km < 0.009 deg, < 2 % of
+  the disc). `world.gd::_moon_terrain_sun_fraction`; the camera's value is computed once per frame (eye adaptation and,
+  without a followed vehicle, the light). Cost, main thread, one fraction (two marches) over rough highlands with the
+  Sun at the horizon: 0.02 / 0.04 / 0.05 / 0.08 / 0.15 ms at 2 m / 5 km / 20 km / 100 km / 1000 km: uncached. Tests:
+  `tests/moon_sun_test.gd` (headless: bound exact over 7 sites x 5 heights x 16 sectors, rim sweep, height sweep 2 m - 200
+  km continuous, Earth umbra 0 / penumbra = 1 - occulted fraction, orbit, NAN, below-ground clamp) and the GPU
+  `atmosphere_check.gd` (IM-2 2 m above ground, Sun 1 deg below / above / at the horizon: 0 / 1 / 0.5; 1551 m below the
+  mean radius, Sun 60 deg up: light = the open sky's). Clouds (Task 9, `weather-clouds.md` "Light"):
   x the direct beam's cloud transmittance at that point (`Atmosphere.cloud_light_at`, the Moon's light likewise), and
   `Environment.ambient_light_energy` = the diffuse light under the clouds over the clear sky's there
   (`Atmosphere.cloud_ambient_factor`; exactly 1 with weather off). Earth surfaces (`terrain_earth.gdshader`): the Sun

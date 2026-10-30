@@ -448,3 +448,10 @@ Was in atmosphere-scattering.md (Sun light): "Near the Moon the visible fraction
 Moon's occultation is taken on the point's own ground sphere (GPU check: 1551 m below the mean radius, Sun 60 deg up:
 light = the open sky's)." Now the ground-sphere value stays only as the fallback without lunar terrain data and above
 20 km; terrain above the mean sphere is covered, which the ground sphere (min(mean radius, distance - 2 m)) never was.
+
+## Vehicles' Sun from the terrain only below 20 km, superseded 2026-10-30 (fix 1)
+Was in atmosphere-scattering.md (Sun light): "...and below 20 km over the mean sphere (`MOON_TERRAIN_SUN_MAX_HEIGHT_M`
+[E]; `Atmosphere.moon_terrain_sun_applies`) from the terrain's horizon instead (...). Cost: one march 0.04 ms at IM-2 (2 m
+above ground), two per point, camera and lit body: uncached. GPU checks: ...; 100 km orbit: the mean-sphere fraction."
+The switch jumped 0 <-> 1 for a Sun between the sphere's and the terrain's horizon when a vehicle crossed 20 km near the
+terminator, and relief still shadows above 20 km. Now no height switch (exact relief pre-check), see the current text.

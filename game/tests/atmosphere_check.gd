@@ -53,7 +53,7 @@ var _environment := Environment.new()  ## the check viewport's environment (ambi
 var _failures := 0
 var _samples := 0
 ## Every sample of a complete run (_check / _compare calls and the inline checks): a run with fewer ended a sample early.
-const EXPECTED_SAMPLES := 89
+const EXPECTED_SAMPLES := 88
 var _last_image: Image  ## the last _render's frame
 
 
@@ -821,8 +821,8 @@ func _away_from_earth_samples() -> void:
 
 ## The vehicles' direct Sun on the lunar ground from the terrain's horizon (MoonSunHorizon): a point 2 m above the
 ## ground at the IM-2 site, the Sun TERRAIN_SUN_MARGIN_DEG below / above / at the horizon in a sector's azimuth, and
-## halfway between two sectors (the horizon interpolated like terrain_moon.gdshader); in lunar orbit the ground
-## sphere does not apply, so the mean-sphere fraction stays. Moon-fixed frame, the Sun at 1 AU.
+## halfway between two sectors (the horizon interpolated like terrain_moon.gdshader). Moon-fixed frame, the Sun at 1 AU.
+## Heights, pre-check, eclipse, orbit: tests/moon_sun_test.gd (headless).
 func _moon_terrain_sun_samples() -> void:
 	var present: Dictionary = _core.load_terrain(Paths.config_dir())
 	if not present.get("moon", false):
@@ -854,15 +854,6 @@ func _moon_terrain_sun_samples() -> void:
 	var halfway := _terrain_sun_fraction(point, up, between, 0.5 * (horizon_0 + horizon_1))
 	_check("terrain Sun, between two sectors", absf(halfway - 0.5) <= 0.05, "horizons %.3f / %.3f deg, fraction %.3f" % [
 			rad_to_deg(horizon_0), rad_to_deg(horizon_1), halfway])
-	# Lunar orbit: no ground sphere, the mean-sphere fraction is the result.
-	var orbit := up * (Atmosphere.MOON_RADIUS_M + ORBIT_HEIGHT_M)
-	var sun := north * AU_M
-	var mean_visible := 1.0 - Atmosphere.occulted_fraction(sun - orbit, Atmosphere.SUN_RADIUS_M, -orbit,
-			Atmosphere.MOON_RADIUS_M)
-	_check("terrain Sun, lunar orbit", not Atmosphere.moon_terrain_sun_applies(orbit, Vector3.ZERO)
-			and Atmosphere.moon_terrain_sun_applies(point, Vector3.ZERO)
-			and Atmosphere.moon_visible_fraction(orbit, sun, Vector3.ZERO, mean_visible) == mean_visible,
-			"mean-sphere fraction %.4f at %.0f km" % [mean_visible, ORBIT_HEIGHT_M / 1000.0])
 
 
 ## The terrain Sun fraction at `point` for the Sun at 1 AU in the horizontal direction `toward` raised to
