@@ -73,7 +73,8 @@ struct CloudBakedSet {
 	vec4 oslab[2]; // per level: the occupancy texture's first slice
 	vec4 onz[2];   // per level: occupancy blocks along the height
 	vec4 misc;     // x: occupancy texture depth, y: (set 0) the cross-fade weight of set 1 (CLOUD_BAKED_FADE), z: the
-	               // first volume level baked and marched (the finer ones dropped with the altitude), w: -
+	               // first volume level marched (the finer ones dropped with the altitude; all of them above 62 km), w:
+	               // the first level with shapes and S (<= z: above 62 km the shadows' levels are baked, not marched)
 	vec4 outer;    // x: flat levels, y: the baked cap's angle from up0 (rad), z: the first flat level m0 (absolute: cell
 	               // c0 2^m0), w: the per-pixel entry's first guess of the cloud top's height (m)
 	// The flat levels' own frame (re-baked less often than the volume): their up, axes (model space, unit) and the
@@ -317,7 +318,7 @@ bool cloud_baked_shadow_line(int si, vec3 offset, vec3 sun, float footprint_m, o
 	float gx = baked.sets[si].band.z + dot(q, baked.sets[si].axis_x.xyz * ATM_STRETCH);
 	float gy = baked.sets[si].band.w + dot(q, baked.sets[si].axis_y.xyz * ATM_STRETCH);
 	int levels = int(baked.sets[si].axis_y.w);
-	int k = max(cloud_baked_level(si, gx, gy), int(baked.sets[si].misc.z));
+	int k = max(cloud_baked_level(si, gx, gy), int(baked.sets[si].misc.w));
 	// the footprint's continuous level (blended between its two levels: no step between pixel rows)
 	float s_cell0 = baked.sets[si].axis_x.w / float(CLOUD_BAKED_SHADOW_SUPERSAMPLE);
 	float l = footprint_m > s_cell0 ? log2(footprint_m / s_cell0) : 0.0;
@@ -1110,7 +1111,6 @@ float cloud_baked_o(int si, ivec3 texel) {
 	return texelFetch(baked_o0, texel, 0).r;
 }
 
-#ifndef CLOUD_BAKED_SHADOW_OFF
 // The air shadow's T_c at camera + offset (height m): the line toward the Sun through the point read from S (both sets
 // by the cross-fade's weight while a new set fades in). False beyond the volume levels (the caller's column).
 bool cloud_baked_air_sun(vec3 offset_local, float height_m, vec3 sun_dir, out float t) {
@@ -1127,7 +1127,6 @@ bool cloud_baked_air_sun(vec3 offset_local, float height_m, vec3 sun_dir, out fl
 #endif
 	return inside;
 }
-#endif
 
 float cloud_baked_flat_weight_at(int si, float l);
 
@@ -1249,11 +1248,6 @@ layout(set = 1, binding = 59) uniform sampler2DArray baked_f1;
 layout(set = 1, binding = 60) uniform sampler2DArray baked_t1;
 #endif
 
-// [E] How far outside the fetched column's heights the entry may lie (m; float32 heights at the shell crossings).
-const float CLOUD_BAKED_FLAT_ENTRY_TOLERANCE_M = 50.0;
-// [E] ... plus this per metre of distance (the float32 shell crossings from thousands of km: streaks of rejected
-// entries along the image rows at 1e-5).
-const float CLOUD_BAKED_FLAT_ENTRY_TOLERANCE_PER_M = 1.0e-4;
 // [E] Behind a volume transmittance below this the flat levels are not fetched (< 1 % of their light).
 const float CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE = 0.01;
 // [E] The takeover (step 3; the brief: the footprint-matched flat levels beat a volume level its clipmap's extent made
@@ -1844,7 +1838,6 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 		if (h > baked.sets[si].band.y + CLOUD_BAKED_BAND_TOLERANCE_M
 				|| h < baked.sets[si].band.x - CLOUD_BAKED_BAND_TOLERANCE_M) {
 			// Outside the band (a ray grazing its bottom): on to where it enters again.
-			CLOUD_COUNT_STEP(false)
 			vec2 x = cloud_sphere_crossing(ray, h > baked.sets[si].band.y ? baked.sets[si].band.y : baked.sets[si].band.x);
 			float enter = x.x > t ? x.x : (x.y > t ? x.y : 1.0e30);
 			if (enter >= d1) {
@@ -1892,7 +1885,6 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 						+ clamp(b1.z, 0, int(baked.sets[si].onz[k1 >> 2][k1 & 3]) - 1)));
 			}
 			if (occ < 0.5) {
-				CLOUD_COUNT_STEP(false)
 				float bs = float(CLOUD_BAKED_BLOCK);
 				float exit_m = 1.0e30;
 				if (g.gdx != 0.0) {
@@ -1929,7 +1921,6 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 			float gap_x;
 			float beta = cloud_baked_beta_gap(si, q, eye + dir * t, pixel_angle * t, gap_x);
 			if (beta <= 0.0) {
-				CLOUD_COUNT_STEP(false)
 				t_clear = t;
 				t += transmittance_sc > CLOUD_BAKED_FINE_TRANSMITTANCE
 						? clamp(gap_x * CLOUD_BAKED_EDGE_STEP_M, max(CLOUD_BAKED_MIN_CLEAR_STEP_M, pixel_angle * t), cell_step)
@@ -1967,7 +1958,6 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 		// In cloud: a step of at most the step weight (the old march's dense limit) and a quarter / half a cell
 		// (CLOUD_BAKED_FINE_STEP_CELLS), integrated by the trapezoid over the extinction at its ends (a layer thinner than
 		// the step still counts).
-		CLOUD_COUNT_STEP(true)
 		float allowed = CLOUD_BAKED_STEP_WEIGHT / transmittance_sc;
 		float dense = allowed < 1.0 ? -log(1.0 - allowed) / (k_sc * max(beta_last, 1.0e-7)) : 1.0e30;
 		float step_m = clamp(dense, CLOUD_BAKED_MIN_STEP_M, (transmittance_sc > CLOUD_BAKED_FINE_TRANSMITTANCE
@@ -2163,9 +2153,6 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 			}
 		}
 		d1 = min(d1, scene_m);
-		if (cloud_march_cut_m > 0.0) {
-			d1 = min(d1, cloud_march_cut_m);
-		}
 #ifdef CLOUD_BAKED_DEBUG
 		{
 			// debug: the grid map's round trip at the band segment's middle (m of error / 10 in red), the field there
@@ -2220,9 +2207,6 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 				}
 			}
 			e1 = min(e1, scene_m);
-			if (cloud_march_cut_m > 0.0) {
-				e1 = min(e1, cloud_march_cut_m);
-			}
 		}
 		vec3 color1;
 		float transmittance1;
@@ -2255,19 +2239,58 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 	color_t = vec4(alpha, isnan(transmittance) ? 1.0 : 0.0, dot(color, vec3(1.0)) > 0.0 ? 0.5 : 0.0, 0.0);
 	return;
 #endif
-#ifndef CLOUD_ABLATE_AIR_SHADOW
-	if (cloud_debug_output == 0) {
+	if (cloud_debug_output == 0) {  // (the surfaces' debug output 5 - cloud_check - shows no air loss over it)
 		color -= cloud_air_shadow_loss(ray, dir, eye, scene_m, alpha > 1.0e-6 ? cloud_m : 1.0e30, transmittance);
 	}
-#endif
 	color_t = cloud_stored_color(color, transmittance);
 }
 #endif
 
+// ---- The vehicles' and the eye's direct Sun from the bake (CloudShadowEffect's probe, 2026-10-30) ----------------
+#if defined(CLOUD_SHADOW_BAKED_FILL) && defined(CLOUD_BAKED_SUN_PROBE)
+// One point per invocation (one work group of 64): the Sun's cloud transmittance at camera + the point's offset from
+// S, as the air shadow reads it (cloud_baked_air_sun, at the finest level holding the point); -1 beyond the volume
+// levels (the caller takes the CPU's grid mean there); 1 above the cloud shell.
+layout(std430, set = 1, binding = 0) readonly buffer CloudSunProbeIn {
+	vec4 sun;       // xyz the Sun direction (Earth-local, unit), w 1: a cross-fade's second set is bound
+	vec4 count;     // x the points
+	vec4 points[];  // xyz the point's offset from the camera (Earth-local render axes, m)
+} probe_in;
+layout(std430, set = 1, binding = 1) writeonly buffer CloudSunProbeOut {
+	float t[];
+} probe_out;
+
+void main() {
+	uint i = gl_LocalInvocationIndex;
+	if (i >= uint(probe_in.count.x)) {
+		return;
+	}
+	vec3 offset = probe_in.points[i].xyz;
+	vec3 s = probe_in.sun.xyz;
+	float h = cloud_height_of(atmosphere_camera_hi + atmosphere_camera_lo + offset);
+	if (h > CLOUD_TOP_M) {
+		probe_out.t[i] = 1.0;
+		return;
+	}
+	vec4 line;
+	bool inside = cloud_baked_shadow_line(0, offset, s, 0.0, line);
+	float t = cloud_baked_shadow_at_height(line, h);
+	float w = baked.sets[0].misc.y;
+	if (probe_in.sun.w > 0.5 && w > 0.0) {
+		vec4 line1;
+		if (cloud_baked_shadow_line(1, offset, s, 0.0, line1)) {
+			float t1 = cloud_baked_shadow_at_height(line1, h);
+			t = inside ? mix(t, t1, w) : t1;
+			inside = true;
+		}
+	}
+	probe_out.t[i] = inside ? t : -1.0;
+}
+#endif
+
 // ---- The cloud shadow maps from the bake (CloudShadowEffect; shadow step 2026-10-30) ------------------------------
-#ifdef CLOUD_SHADOW_BAKED_FILL
-// One map texel per invocation, the texel semantics of cloud_shadow.gdshaderinc (cloud_light.gdshaderinc reads it
-// unchanged): along the texel's line toward the Sun (t from the map plane) the first and last t with cloud, the optical
+#if defined(CLOUD_SHADOW_BAKED_FILL) && !defined(CLOUD_BAKED_SUN_PROBE)
+// One map texel per invocation, the texel semantics cloud_light.gdshaderinc reads (its header): along the texel's line toward the Sun (t from the map plane) the first and last t with cloud, the optical
 // depth between, the cover (1: the shapes). The line is read from S once (cloud_baked_shadow_line; two sets mixed by
 // the cross-fade's weight while a new set fades in); its cloudy heights give t_front / t_back. Where the line's floor
 // point lies beyond the volume levels: the field's slanted column there (cloud_column_direct, as the maps' far rule).
@@ -2303,7 +2326,7 @@ float cloud_shadow_diag_beta(vec3 offset, float h) {
 	vec3 axis_y = baked.sets[0].axis_y.xyz * ATM_STRETCH;
 	float gx = baked.sets[0].band.z + dot(offset, axis_x);
 	float gy = baked.sets[0].band.w + dot(offset, axis_y);
-	int k = max(cloud_baked_level(0, gx, gy), int(baked.sets[0].misc.z));
+	int k = max(cloud_baked_level(0, gx, gy), int(baked.sets[0].misc.w));
 	if (k >= int(baked.sets[0].axis_y.w)) {
 		return cloud_mean_extinction_at(offset, h);
 	}

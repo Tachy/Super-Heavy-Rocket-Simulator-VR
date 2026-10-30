@@ -1,33 +1,29 @@
 class_name CloudCentreView
 ## The clouds' centre view for VR (VR performance part 2, user 2026-10-26): one frustum at the head covering both eyes,
-## in which the clouds are marched, accumulated and filtered once per frame; each eye's upsample reads that image at its
-## own rays. Both eyes then see the same noise, history and blur (two marches with their own jitter and history looked
+## in which the clouds are marched once per frame; each eye's upsample reads that image at its
+## own rays. Both eyes then see the same image (two marches with their own jitter and history looked
 ## grainy and different per eye). The eyes' frusta come from the renderer's projections (which hold each eye's offset
 ## and, on canted displays, its rotation), never from assumed parallel eyes. One view (the desktop) is its own centre.
 
 ## [E] Cap of the union per side: a canted pair can span more, and a rectilinear image near 90 deg wastes its pixels.
 const MAX_HALF_ANGLE_RAD := deg_to_rad(75.0)
 ## [E] The centre projection's far plane where the eyes' is infinite or unreadable (only directions and the clip xy of
-## the temporal reprojection use it).
+## the eyes' upsample use it).
 const FALLBACK_FAR_M := 1.0e9
 ## [E] Relative change of the centre image size per axis that is kept as the previous size (keep_size): the runtime's
 ## field of view jitters by a hair per frame (Pimax, VR run 2026-10-27: 946 / 947 rows), a quality preset or a resize
 ## changes it by far more. 1 % of a march pixel's density is invisible.
 const SIZE_HYSTERESIS := 0.01
-## Fidelity flag (old march cost study 2026-10-29, default off): the centre image uniform in angle per axis at the
-## centre's pixel density instead of rectilinear (whose pixels shrink in angle toward the edges by 1 / (1 + t^2): the
-## Pimax union spends ~1.9 x the pixels of a uniform-angle image on the same centre resolution). User argument
-## --cloud_equiangular (or the environment STARSIM_OM_EQUIANGULAR=1). Needs the deterministic march (the jittered
-## march's temporal reprojection assumes the rectilinear image).
-static var equiangular := OS.get_environment("STARSIM_OM_EQUIANGULAR") == "1" \
-		or "--cloud_equiangular" in OS.get_cmdline_user_args()
-
-
 ## {projection, low, pixel_angle} of the centre view for these eye projections (clip <- head space, the renderer's
 ## convention: reversed Z in [0, 1], 1 = near, y down), each eye's full-resolution size `view_size` and the cloud pass's
 ## resolution divisor (fractional allowed: 1.5). `low`: the centre image size at the eyes' pixel density / divisor;
 ## `pixel_angle`: its pixel's angle (the march's band limit), as CloudEffect computes it for a view.
-static func build(view_projections: Array[Projection], view_size: Vector2i, divisor: float) -> Dictionary:
+## Two or more views: the centre image is uniform in angle per axis at the centre's pixel density (`equiangular`, the
+## game's; + angle_y, warp) - a rectilinear image's pixels shrink in angle toward the edges by 1 / (1 + t^2): the
+## Pimax union spent ~1.9 x the pixels on the same centre resolution (cost study 2026-10-29). equiangular false: the
+## rectilinear image (cloud_vr_stereo_test's comparison).
+static func build(view_projections: Array[Projection], view_size: Vector2i, divisor: float,
+		equiangular := true) -> Dictionary:
 	divisor = maxf(divisor, 1.0)
 	if view_projections.size() == 1:
 		var only := view_projections[0]

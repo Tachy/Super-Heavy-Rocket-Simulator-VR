@@ -176,7 +176,11 @@ var last_target_scotopic_cd_m2 := 0.0
 ## Night vision's rod step on the HDR scene (attached to the WorldEnvironment's Compositor: world.gd, the GPU check).
 var vision_effect := VisionEffect.new()
 var _moon_direction_fixed := Vector3.ZERO
-var _cloud_cache := {}  ## cloud_light_at per frame: [position, direction, frame] -> Vector3
+var _cloud_cache := {}  ## cloud_light_at per frame: [position, direction, probe, frame] -> Vector3
+## The direct Sun through the clouds as drawn (World: CloudLayer.direct_sun_transmittance(key, position_itrf_m) -> T or
+## NAN): replaces the grid mean's direct beam of the Sun light and the eye's plate where it has a value. Unset (checks):
+## the grid mean.
+var direct_sun: Callable
 ## The umbra's light (_update_umbra_light) at the last evaluation: the eclipsed sky's fluence (scalar irradiance, cd/m^2 x
 ## sr per channel at 1 AU) at UMBRA_HEIGHTS_M (tests).
 var umbra_fluence: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
@@ -410,7 +414,7 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	# Clouds (Task 9): the plate's direct Sun through them, the Sun's light diffused through the column (isotropic from
 	# above: mu0 x its normal-incidence irradiance on the horizontal) and the sky's diffuse transmittance
 	# (StarsimCore.weather_cloud_light: 1, 0, 1 with weather off - the same numbers as before).
-	var clouds := cloud_light_at(eye_itrf_m, sun_direction_itrf)
+	var clouds := cloud_light_at(eye_itrf_m, sun_direction_itrf, "eye")
 	var sun_plate: Vector3 = solar * sun_factor * transmittance
 	var down_rgb := (sun_plate * (clouds.x + clouds.y * maxf(sun_direction_itrf.dot(up), 0.0)) + sky * clouds.z) \
 			* visible / (PI * d_au * d_au)
@@ -972,8 +976,8 @@ func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible
 		var solar: Vector3 = parameters["solar_illuminance_rgb"]
 		var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 		scene = solar * sun_factor * transmittance * (luminance_scale / PI)
-		# The direct beam through the clouds (grid mean along the ray; 1 with weather off). Task 9.
-		scene *= cloud_light_at(position_itrf_m, sun_direction_itrf).x
+		# The direct beam through the clouds (the drawn shapes' S, else the grid mean along the ray; 1 with weather off).
+		scene *= cloud_light_at(position_itrf_m, sun_direction_itrf, "sun_light").x
 	scene *= visible_fraction
 	var peak := maxf(scene.x, maxf(scene.y, scene.z))
 	var color := Color.WHITE
@@ -985,9 +989,11 @@ func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible
 ## The clouds' light at an Earth-fixed point for the light from light_direction_itrf (StarsimCore.weather_cloud_light,
 ## the active weather pair's grid mean, Task 9): x the direct beam's transmittance, y the light's diffuse part through
 ## the column per unit of its horizontal irradiance, z the sky's diffuse transmittance; (1, 0, 1) without weather.
-## Cached per frame (the same point and direction several times: Sun light, ambient, adaptation).
-func cloud_light_at(position_itrf_m: Vector3, light_direction_itrf: Vector3) -> Vector3:
-	var key := [position_itrf_m, light_direction_itrf, Engine.get_process_frames()]
+## sun_probe (the Sun's direct beam only): x from the drawn clouds' shapes instead (direct_sun under that key, 2026-10-30)
+## where they have a value. Cached per frame (the same point and direction several times: Sun light, ambient,
+## adaptation).
+func cloud_light_at(position_itrf_m: Vector3, light_direction_itrf: Vector3, sun_probe := "") -> Vector3:
+	var key := [position_itrf_m, light_direction_itrf, sun_probe, Engine.get_process_frames()]
 	if _cloud_cache.has(key):
 		return _cloud_cache[key]
 	if _cloud_cache.size() > 8:
@@ -998,6 +1004,10 @@ func cloud_light_at(position_itrf_m: Vector3, light_direction_itrf: Vector3) -> 
 	var light: Dictionary = _core.weather_cloud_light(position_itrf_m, light_direction_itrf) if _core != null and shown else {}
 	var result := Vector3(float(light.get("sun_transmittance", 1.0)), float(light.get("sun_diffuse", 0.0)),
 			float(light.get("sky_factor", 1.0)))
+	if shown and sun_probe != "" and direct_sun.is_valid():
+		var shaped: float = direct_sun.call(sun_probe, position_itrf_m)
+		if not is_nan(shaped):
+			result.x = shaped
 	_cloud_cache[key] = result
 	return result
 

@@ -3,14 +3,15 @@
 // atmosphere.gdshaderinc and clouds.gdshaderinc first. Surfaces and the cloud pass's march (the cloud shadows on the
 // air, cloud_pass.gdshaderinc cloud_air_shadow_loss); never the shadow kernel (it writes the maps sampled here).
 //
-// Shadow maps (CloudShadowEffect, before the opaque pass; shaders/cloud_shadow.gdshaderinc): orthographic along the
+// Shadow maps (CloudShadowEffect, before the opaque pass; cloud_baked.gdshaderinc CLOUD_SHADOW_BAKED_FILL): orthographic along the
 // Sun, a plane perpendicular to it through an anchor near the ground under the camera (Earth-fixed between re-anchors:
 // no swimming), axes e1, e2. A texel holds, along its line toward the Sun (parameter t from the plane, t = (p - A) . s),
 // the first and last t with cloud, the optical depth between and the cover C (the beam cover of the largest cloud fraction on the line;
 // 1 for the shapes): a receiver at t_r gets 1 - C + C exp(-od / C x clamp((t_back - t_r) / (t_back - t_front))) -
-// exact below the clouds (the ground), linear inside them. The near map (+-16 km, 62.5 m texels) holds the visible
-// clouds' density (the shapes), the far map (+-200 km) the grid mean as independent columns (cloud_optics.hpp: no
-// plane-parallel bias for broken cloud); beyond it the column slanted to the Sun, 1 - C + C exp(-tau / (C mu0)). Distance rule (horizontal distance of
+// exact below the clouds (the ground), linear inside them. Both maps (the near one +-16 km at 62.5 m texels, the far
+// one +-200 km) hold the baked volume's Sun transmittance S - the shapes it draws (C = 1), the field's slanted column
+// where a line's floor point lies beyond its levels; beyond the far map the column slanted to the Sun,
+// 1 - C + C exp(-tau / (C mu0)). Distance rule (horizontal distance of
 // the receiver from the camera; CloudLayer.SHADOW_*): near -> far between 9 and 11 km, far -> column between 120 and
 // 140 km, smooth weights: no pop, and a ground shadow near the camera matches the cloud above it. Both maps are world
 // space: the same for both VR eyes.

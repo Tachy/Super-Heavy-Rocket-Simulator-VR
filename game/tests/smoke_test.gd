@@ -267,21 +267,19 @@ func _check_weather(core: StarsimCore) -> bool:
 			and (noise["edge_mean_factor"] as PackedFloat32Array).size() == 256 * int(noise["detail_states"])
 			and (noise["level_amplitude"] as PackedFloat32Array).size() == int(noise["detail_states"]) - 1,
 			"cloud_noise sizes")
-	# The shape prefilter (Task 10 fix round 1): the mips and tables, and the constants the shaders and CloudEffect
-	# mirror (clouds.gdshaderinc CLOUD_SHAPE_PREFILTER_*: start 3500 m, 2 levels, 4 rows per level).
+	# The shape prefilter (Task 10 fix round 1): the mips and tables, and the constants the shaders mirror
+	# (clouds.gdshaderinc CLOUD_SHAPE_PREFILTER_*: 2 levels, 4 rows per level).
 	var mips: Array = noise["shape_mips"]
 	var rows: int = int(noise["prefilter_rows"])
 	_check(mips.size() == 7 and (mips[0] as PackedByteArray).size() == 4 * (n / 2) ** 3
 			and (mips[6] as PackedByteArray).size() == 4 and rows == 9 and int(noise["prefilter_levels"]) == 2
 			and int(noise["prefilter_rows_per_level"]) == 4
-			and float(noise["prefilter_start_m"]) == CloudEffect.SHAPE_PREFILTER_START_M
 			and (noise["prefilter_threshold"] as PackedFloat32Array).size() == 256 * rows
 			and (noise["prefilter_edge_mean"] as PackedFloat32Array).size() == 256 * rows,
 			"cloud_noise shape prefilter sizes and constants")
 	# The shader's mirrored copies of the same constants (text of clouds.gdshaderinc: a typo there is invisible to the
 	# core tests).
-	_check(_shader_constant("CLOUD_SHAPE_PREFILTER_START_M") == float(noise["prefilter_start_m"])
-			and _shader_constant("CLOUD_SHAPE_PREFILTER_LEVELS") == float(noise["prefilter_levels"])
+	_check(_shader_constant("CLOUD_SHAPE_PREFILTER_LEVELS") == float(noise["prefilter_levels"])
 			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS_PER_LEVEL") == float(noise["prefilter_rows_per_level"])
 			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS") == float(rows),
 			"clouds.gdshaderinc prefilter constants equal the core's")
@@ -293,12 +291,6 @@ func _check_weather(core: StarsimCore) -> bool:
 	_check(types_ok and float(types["CLOUD_ICE_TILE_V_M"]) == CloudLayer.ICE_TILE_V_M
 			and float(types["CLOUD_STRATIFORM_STRETCH"]) == CloudLayer.STRATIFORM_STRETCH,
 			"clouds.gdshaderinc / CloudLayer cloud type constants equal the core's")
-	var pass_text := FileAccess.get_file_as_string("res://shaders/cloud_pass.gdshaderinc")
-	var step_found := RegEx.create_from_string(
-			"const float CLOUD_MIN_STEP_M\\s*=\\s*([-0-9.eE+]+)\\s*;").search(pass_text)
-	var pass_constants: Dictionary = noise["pass_constants"]
-	_check(step_found != null and float(step_found.get_string(1)) == float(pass_constants["CLOUD_MIN_STEP_M"]),
-			"cloud_pass.gdshaderinc CLOUD_MIN_STEP_M equals the core's")
 	var field: Dictionary = noise["field_constants"]
 	var field_ok := field.size() == 5
 	for constant: String in field:

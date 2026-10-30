@@ -170,14 +170,12 @@ func _state_is_pair(pair: Array, blend: float) -> bool:
 	return false
 
 
-## VR flicker (user 2026-10-26): the VR history keeps longer than the desktop's and is clipped statistically (variance
-## clip, clip_gamma > 0) instead of to the noisy neighbourhood's min / max; the desktop keeps its min / max (0).
+## The presets: the VR centre view (both eyes) marches at a coarser divisor than the desktop's view.
 func _test_presets() -> void:
 	var vr: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.VR]
 	var desktop: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
-	_check(float(vr.get("clip_gamma", 0.0)) > 0.0 and float(desktop.get("clip_gamma", -1.0)) == 0.0,
-			"presets: VR variance clip, desktop min / max")
-	_check(float(vr["temporal_weight"]) < float(desktop["temporal_weight"]), "presets: the VR history keeps longer")
+	_check(float(vr["divisor"]) > float(desktop["divisor"]) and int(vr["detail_levels"]) > 0,
+			"presets: VR divisor %s, desktop %s" % [vr["divisor"], desktop["divisor"]])
 
 
 func _check(ok: bool, label: String) -> void:

@@ -120,8 +120,7 @@ func _ready() -> void:
 	weather.light_driven_by_layer = true  # the layer pushes the CPU light's pair with its cross-fade
 	weather.snapshots_changed.connect(clouds.set_target)
 	clouds.core_cache_missed.connect(weather.reload_into_core_cache)
-	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.effect.reset_history())  # a clock jump: no history
-	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.notify_clock_jump())  # the light cache refills
+	atmosphere.direct_sun = clouds.direct_sun_transmittance  # the vehicles' and the eye's direct Sun: the drawn shapes
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: _sim_target_tdb_s = NAN)  # no lag after a jump
 	await _setup_bodies(data_dir)
 	await LoadingScreen.step("Wolken-Shader vorwärmen, Sternkatalog laden")
@@ -338,11 +337,9 @@ func _on_mission_started(ok: bool, _message: String) -> void:
 	set_focus(FOCUS_VEHICLE)
 
 
-## A new view (ground site, focus, Tab target): the viewer is taken as adapted to it, and the clouds' temporal history
-## (reprojected from the last frame's camera) is dropped.
+## A new view (ground site, focus, Tab target): the viewer is taken as adapted to it.
 func _view_jumped() -> void:
 	atmosphere.snap_adaptation()
-	clouds.effect.reset_history()
 
 
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m

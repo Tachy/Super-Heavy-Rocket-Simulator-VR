@@ -1,13 +1,12 @@
 class_name CloudBaked
 extends RefCounted
-## The baked cloud volume ("Weg 2", user 2026-10-29; the default march since 2026-10-30): the clouds' shape and light precomputed once in a
-## world-fixed clipmap around an anchor (the camera when the bake starts; static clouds, independent of the view
+## The baked cloud volume ("Weg 2", user 2026-10-29; the clouds' only march since 2026-10-30): the clouds' shape and
+## light precomputed once in a world-fixed clipmap around an anchor (the camera when the bake starts; static clouds, independent of the view
 ## direction) and each frame a cheap march through it (shaders/cloud_baked.gdshaderinc). The bake runs off the march in
 ## slices (a few dispatches per frame) into the second of two volume sets; a finished set is cross-faded in over
 ## FADE_FRAMES frames (both sets marched, their renders mixed: no pop, never a hole). A re-bake starts when the camera
 ## leaves REBAKE_MOVE of the anchor, the Sun turns by REBAKE_SUN_RAD or the weather changes. Owned by CloudEffect
-## (render thread); CloudEffect marches it in its march's place with MarchMethod.BAKED (until the first set is baked
-## the frame shows no clouds).
+## (render thread; until the first set is baked the frame shows no clouds).
 ## Flat levels (2026-10-29, steps 3-4): 2.5D columns (pattern, cover, grid-mean depth, top / base; light per pixel) in
 ## up to FLAT_COLUMNS_MAX-wide levels, each doubling the cell, over the spherical cap the camera can see (FLAT_* below;
 ## the far side is never baked). Below FLAT_FINE_HEIGHT_M they start beyond the volume (level K, 6.4 km); above it at the
@@ -29,9 +28,9 @@ static var dz_max_m := 400.0
 ## Environment STARSIM_BAKED_DETAIL=0 switches it off (measurements).
 static var detail := OS.get_environment("STARSIM_BAKED_DETAIL") != "0"
 ## The clouds' shadows from the bake (shadow step 2026-10-30): S, the line toward the Sun from the band's floor per
-## column (cloud_baked.gdshaderinc CLOUD_BAKED_SHADOW), feeds the cloud shadow maps (CloudShadowEffect's baked fill)
-## and the march's air shadow. Environment STARSIM_BAKED_SHADOW=0 keeps the old maps and air shadow (comparisons).
-static var shadow := OS.get_environment("STARSIM_BAKED_SHADOW") != "0"
+## column (cloud_baked.gdshaderinc CLOUD_BAKED_SHADOW), feeds the cloud shadow maps (CloudShadowEffect), the march's air
+## shadow and the vehicles' direct Sun (sun_transmittance_at) - one method at every camera height: above VOLUME_TOP_M
+## the volume levels the footprint keeps are still baked for S (shape and S, not the light) but not marched.
 ## Checks: > 0 forces a re-bake (and its cross-fade) this many frames after the last one is shown (environment
 ## STARSIM_BAKED_REBAKE_FRAMES; the swap's cost and look in a measurement).
 static var rebake_frames := int(OS.get_environment("STARSIM_BAKED_REBAKE_FRAMES"))
@@ -84,9 +83,9 @@ const FLAT_COLUMNS_MAX := 1536
 const FLAT_MEMORY_CAP_BYTES := 300.0 * 1024.0 * 1024.0
 const FLAT_BYTES_PER_COLUMN := 28.0
 const FLAT_FINE_HEIGHT_M := 40000.0
-## [E] Above this camera height the volume is neither baked nor marched: from the shader's takeover heights (40-60 km,
-## cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M) the flat levels draw every cloud (a re-bake brings the
-## volume back below it while the takeover still draws the flat levels). STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER
+## [E] Above this camera height the volume is not marched (its light not baked; its shape and S are, for the shadows):
+## from the shader's takeover heights (40-60 km, cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M) the flat
+## levels draw every cloud (a re-bake brings the volume back below it while the takeover still draws the flat levels). STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER
 ## keeps the volume at every height (diagnostics).
 const VOLUME_TOP_M := 62000.0
 static var takeover := not "CLOUD_BAKED_FLAT_NO_TAKEOVER" in extra_defines
@@ -179,7 +178,6 @@ func setup(rd: RenderingDevice, kernels: CloudKernels) -> bool:
 static func kernel_specs(stereo: bool) -> Array:
 	var files := PackedStringArray(CloudEffect.MARCH_FILES + FILES)
 	var march := PackedStringArray(["CLOUD_MARCH", "CLOUD_BAKED_MARCH"])
-	march.append_array(CloudEffect.diagnostic_defines())
 	if detail:
 		march.append("CLOUD_BAKED_DETAIL")
 	if OS.get_environment("STARSIM_BAKED_DEBUG") == "alpha":
@@ -190,8 +188,6 @@ static func kernel_specs(stereo: bool) -> Array:
 			ShaderGlobals.set_value(&"cloud_debug_height_m", -float(OS.get_environment("STARSIM_BAKED_DEBUG_H")))
 	if stereo:
 		march.append("CLOUD_CENTRE")
-	if not shadow:
-		march.append("CLOUD_BAKED_SHADOW_OFF")
 	var fade := march.duplicate()
 	fade.append("CLOUD_BAKED_FADE")
 	# The density bake knows the march's per-sample detail (its threshold state counts it).
@@ -288,12 +284,12 @@ func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, pixel_
 
 ## Render thread (CloudShadowEffect, before the opaque pass): the baked fill's set 1 uniforms for this frame's camera -
 ## the grid block (binding 2: the shown set, and the set fading in with its weight) and S (bindings 3, 4) - and whether
-## a cross-fade's second set is bound. Empty while no set with volume levels and S is shown (the old maps then).
+## a cross-fade's second set is bound. Empty while no set with S is shown (the surfaces take the column then).
 func shadow_fill(camera: Vector3, linear: RID) -> Dictionary:
-	if not shadow or _shown < 0 or _rd == null or not _shadow_buffer.is_valid():
+	if _shown < 0 or _rd == null or not _shadow_buffer.is_valid():
 		return {}
 	var shown: Dictionary = _sets[_shown]
-	if not shown.has("s") or int(shown["plan"]["first_level"]) >= levels:
+	if not shown.has("s") or int(shown["plan"]["shadow_first"]) >= levels:
 		return {}
 	var order: Array[int] = [_shown]
 	var weight := 0.0
@@ -350,11 +346,18 @@ static func _model() -> int:
 	return int(ShaderGlobals.value(&"cloud_scattering_model"))
 
 
-## What a re-bake follows of the weather: the snapshot pair's blend, sizes, top and the scattering model.
+## What a re-bake follows of the weather: the snapshot pair (its field textures: a new snapshot of the same grid
+## replaces them - CloudLayer.show_now), its blend, sizes, top and the scattering model.
 static func _weather_key() -> Dictionary:
 	return {"blend": float(ShaderGlobals.value(&"cloud_blend")),
 		"before": ShaderGlobals.value(&"cloud_field_before_size"), "after": ShaderGlobals.value(&"cloud_field_after_size"),
+		"fields": [_texture_rid(&"cloud_field_before"), _texture_rid(&"cloud_field_after")],
 		"top": float(ShaderGlobals.value(&"cloud_air_shadow_top_m")), "model": _model()}
+
+
+static func _texture_rid(global: StringName) -> RID:
+	var texture: Variant = ShaderGlobals.value(global)
+	return (texture as Texture).get_rid() if texture is Texture else RID()
 
 
 func _needs_rebake(plan: Dictionary, camera: Vector3, sun: Vector3, weather: Dictionary) -> bool:
@@ -369,12 +372,14 @@ func _needs_rebake(plan: Dictionary, camera: Vector3, sun: Vector3, weather: Dic
 	var first: int = plan["first_level"]
 	if first_level(height, _pixel_angle) < first or first_level(height, _pixel_angle * LEVEL_DROP_HYSTERESIS) > first:
 		return true
+	var shadow_first: int = plan["shadow_first"]
+	if footprint_level(height, _pixel_angle) < shadow_first \
+			or footprint_level(height, _pixel_angle * LEVEL_DROP_HYSTERESIS) > shadow_first:
+		return true
 	if sun.normalized().angle_to(plan["sun"]) > REBAKE_SUN_RAD:
 		return true
 	var w: Dictionary = plan["weather"]
-	return absf(float(w["blend"]) - float(weather["blend"])) > REBAKE_BLEND or w["before"] != weather["before"] \
-			or w["after"] != weather["after"] or absf(float(w["top"]) - float(weather["top"])) > 1.0 \
-			or w["model"] != weather["model"]
+	return not _same_weather(w, weather)
 
 
 ## The layout of a set anchored at the camera: its axes; the band and levels follow from the band kernel (_levels).
@@ -388,7 +393,8 @@ func _plan(camera: Vector3, sun: Vector3, weather: Dictionary) -> Dictionary:
 	var axis_y := up0.cross(axis_x)
 	var height := _height_m(camera)
 	var plan := {"anchor": camera, "sun": sun.normalized(), "weather": weather, "up0": up0, "axis_x": axis_x,
-		"axis_y": axis_y, "first_level": first_level(height, _pixel_angle * LEVEL_DROP_HYSTERESIS)}
+		"axis_y": axis_y, "first_level": first_level(height, _pixel_angle * LEVEL_DROP_HYSTERESIS),
+		"shadow_first": footprint_level(height, _pixel_angle * LEVEL_DROP_HYSTERESIS)}
 	# The flat geometry: the shown set's while it still holds the visible cap and the weather, else a new one about the
 	# camera (its cap with the height margin and the drift allowance).
 	var shown: Dictionary = _sets[_shown]["geo"] if _shown >= 0 and _sets[_shown].has("geo") else {}
@@ -442,8 +448,8 @@ func _geo_layout_holds(geo: Dictionary, height: float) -> bool:
 
 static func _same_weather(w: Dictionary, weather: Dictionary) -> bool:
 	return absf(float(w["blend"]) - float(weather["blend"])) <= REBAKE_BLEND and w["before"] == weather["before"] \
-			and w["after"] == weather["after"] and absf(float(w["top"]) - float(weather["top"])) <= 1.0 \
-			and w["model"] == weather["model"]
+			and w["after"] == weather["after"] and w["fields"] == weather["fields"] \
+			and absf(float(w["top"]) - float(weather["top"])) <= 1.0 and w["model"] == weather["model"]
 
 
 ## The camera's height above the model sphere (the ellipsoid stretched to a sphere of radius a, m).
@@ -520,7 +526,7 @@ func _levels(plan: Dictionary, bottom: float, top: float) -> void:
 			dz.append(d)
 			slab.append(depth)
 			oslab.append(odepth)
-			if k < int(plan.get("first_level", 0)):
+			if k < int(plan.get("shadow_first", 0)):
 				onz.append(0)  # dropped (the footprint rule): no slices
 				continue
 			depth += nz + 2
@@ -557,7 +563,7 @@ func _set_floats(plan: Dictionary, camera: Vector3, fade: float) -> PackedFloat3
 		var values: Array = plan[key]
 		for i in range(8):
 			f.append(float(values[i]) if i < values.size() else 0.0)
-	f.append_array([plan["odepth"], fade, plan["first_level"], 0.0])
+	f.append_array([plan["odepth"], fade, plan["first_level"], plan["shadow_first"]])
 	var geo: Dictionary = plan["geo"]
 	f.append_array([plan["flat_levels"], plan["cap"], geo["m0"], FLAT_GUESS_M])
 	var flat_anchor: Vector3 = plan["anchor"] - camera  # the light's view: this set's anchor
@@ -650,7 +656,8 @@ func _start_volumes(lowest: int, highest: int) -> void:
 		_phases.append({"kind": "flat", "level": j, "total": n, "next": 0,
 			"step": maxi(1, int(FLAT_CELLS_PER_FRAME * cost * bake_scale / n))})
 	for kind in ["density", "occupancy", "light"]:
-		for k in range(int(plan["first_level"]), levels):
+		# the light only for the marched levels; the shape (density, occupancy) for S's too
+		for k in range(int(plan["first_level"] if kind == "light" else plan["shadow_first"]), levels):
 			var dz: float = plan["dz"][k]
 			var nz := roundi((plan["band"].y - plan["band"].x) / dz)
 			var slices: int = plan["onz"][k] if kind == "occupancy" else nz
@@ -658,14 +665,15 @@ func _start_volumes(lowest: int, highest: int) -> void:
 			var step := maxi(1, int(VOXELS_PER_FRAME[kind] * bake_scale / per_slice))
 			_phases.append({"kind": kind, "level": k, "total": slices, "next": 0, "step": step})
 	var shadow_n := columns * SHADOW_SUPERSAMPLE
-	for k in range(int(plan["first_level"]), levels if shadow else 0):
+	for k in range(int(plan["shadow_first"]), levels):
 		_phases.append({"kind": "shadow", "level": k, "total": shadow_n, "next": 0,
 			"step": maxi(1, int(SHADOW_COLUMNS_PER_FRAME * bake_scale / shadow_n))})
 	print("CloudBaked: bake of set %d: field layers %d..%d, band %.0f..%.0f m, dz %s, %d slices, %.0f MB per set, "
 			% [_baking, lowest, highest, plan["band"].x, plan["band"].y, plan["dz"], plan["depth"],
 			plan["bytes"] / 1048576.0] + "anchor %s" % plan["anchor"])
-	print("CloudBaked: flat levels %d from level %d, %d columns (cap %.1f deg), volume levels %d..%d, pixel angle %.6f rad"
-			% [plan["flat_levels"], geo["m0"], n, rad_to_deg(plan["cap"]), plan["first_level"], levels - 1, _pixel_angle]
+	print(("CloudBaked: flat levels %d from level %d, %d columns (cap %.1f deg), volume levels %d..%d (marched from %d), "
+			+ "pixel angle %.6f rad") % [plan["flat_levels"], geo["m0"], n, rad_to_deg(plan["cap"]), plan["shadow_first"],
+			levels - 1, plan["first_level"], _pixel_angle]
 			+ (" (new flat geometry)" if plan["geo_new"] else " (flat geometry carried over)"))
 
 

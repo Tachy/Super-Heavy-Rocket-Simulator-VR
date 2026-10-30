@@ -20,39 +20,25 @@
 #          debug view); any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
 #          resolution divisor instead, fractional allowed: 1.5),
-#          --cloud_method=old|baked (CloudLayer.march_method; default baked: the settle waits until its first set is baked
-#          and shown), --climb=<eye height m>,... [--climb_lon=<deg per step>] (a ground view: after the first settle
+#          the settle waits until the baked volume's first set is baked and shown;
+#          --climb=<eye height m>,... [--climb_lon=<deg per step>] (a ground view: after the first settle
 #          the eye moves to each height in turn, each step waiting until the baked volume has re-baked about the new eye;
-#          a step that does not within CLIMB_MAX_FRAMES fails the run, exit code 1), --cloud_debug=1..4 (the cloud
-#          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
-#          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
-#          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
-#          --handover=<near m>,<far m> (the near / far hand-over band; 1e9,1e9: the march alone, 0,0: the far tier).
-#          --far_fade=<start m>,<end m> (the far tier's shapes-to-column fade; 1e9,1e9: the shapes, 0,0: the column).
-#          --f7_at_frame=<n>: at frame n the F7 key's switch to the next cloud march method (CloudLayer.cycle_method; the
-#          log shows the old march's kernel wait / creation, CloudEffect).
+#          a step that does not within CLIMB_MAX_FRAMES fails the run, exit code 1), --cloud_detail_levels=0..3 (the
+#          detail levels), --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default;
+#          closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
-# Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
-#          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
-#          --repeat_identical[=2] once settled and the light cache complete compares that many consecutive frames of
-#          the unchanged scene (no history reset): any differing pixel fails (exit code 1; the deterministic march,
-#          static clouds Task 3; the HUD's frame-rate line hidden). --jittered_march: the jittered march with
-#          temporal accumulation (the flag CloudLayer.deterministic_march off). --no_air_shadow: the clouds' shadows on the air off (the flag
-#          CloudLayer.air_shadow).
+# Image identity: --deterministic[=64] once settled saves after exactly that many more frames (with --fixed_exposure,
+#          for before / after comparisons; the HUD's frame-rate line hidden). --repeat_identical[=2] once settled compares that many consecutive frames
+#          of the unchanged scene: any differing pixel fails (exit code 1; the HUD's frame-rate line hidden).
+#          --no_air_shadow: the clouds' shadows on the air off (the flag CloudLayer.air_shadow).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
 #          optical depth (liquid = tau / 150 000 kg/m^3: beta = 150 LWC) and the view aimed at the Sun (static clouds Task 9).
 # GPU time: --gpu_time[=120] once settled, the root viewport's measured GPU render time over that many frames (median,
 #          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy);
-#          --gpu_passes: also per GPU timestamp interval (the cloud pass's kernels, fill, shadow maps), the light cache
-#          settled first.
-# March counters / ablations (world volume plan Task 0): --counters adds the march's counters (CloudEffect.counters)
-#          and prints, once settled, "counter <name> median / p90 / p99 / max / sum" per march pixel of density_fetches,
-#          light_fetches, occupied_steps (a step whose sample lies inside cloud: extinction > 0) and empty_steps, and
-#          writes <out>_counter_<name>.png (normalised to the maximum); --ablate=<name,...> switches work off for timing
-#          runs (CloudEffect.ABLATIONS: density, light, air, field, shape, detail, subsamples, outline, air_shadow,
-#          far_tier; the environment variable STARSIM_CLOUD_ABLATE does the same).
+#          --gpu_passes: also per GPU timestamp interval (the cloud pass's kernels, the bake, shadow maps), the baked
+#          volume settled first.
 # Shadow map dump: --shadow_dump=<file> writes the cloud shadow maps (near, far; raw RGBA32F) once settled and prints
 #          their frame (baked shadow step; with STARSIM_BAKED_DEFINES=CLOUD_SHADOW_BAKED_DIAG the baked fill's check
 #          values instead of the maps, cloud_baked.gdshaderinc cloud_shadow_fill_diag).
@@ -118,10 +104,6 @@ func _initialize() -> void:
 		_args["weather"] = "slab:%d,%d,%s,1" % [SUN_DECK_BOTTOM_M, SUN_DECK_TOP_M,
 				float(_args["sun_through_deck"]) / SUN_DECK_EXTINCTION_PER_LWC / (SUN_DECK_TOP_M - SUN_DECK_BOTTOM_M)]
 		_args["look_at_sun"] = ""
-	# The cloud pass's diagnostics builds (compiled when the CloudEffect is created, i.e. with the main scene).
-	CloudEffect.counters = _args.has("counters")
-	if _args.has("ablate"):
-		CloudEffect.ablate = PackedStringArray(String(_args["ablate"]).split(",", false))
 	if _args.has("stereo") and not _start_stereo(String(_args["stereo"])):
 		return
 	_main = load("res://main.tscn").instantiate()
@@ -214,31 +196,16 @@ func _process(_delta: float) -> bool:
 			world.clouds.quality = CloudLayer.Quality.VR if quality == "vr" else CloudLayer.Quality.DESKTOP
 		_show_weather_file(world)
 		if _args.has("cloud_divisor"):  # the march's resolution divisor (the preset's otherwise; tuning runs)
-			var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
-			world.clouds.effect.set_quality(float(_args["cloud_divisor"]), float(preset["temporal_weight"]),
-					float(preset["clip_gamma"]))
+			world.clouds.effect.set_quality(float(_args["cloud_divisor"]))
 		if _args.has("cloud_detail_levels"):  # the detail levels used (the preset's otherwise)
 			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
-		if _args.has("no_light_cache"):  # the fidelity flag (CloudLayer.light_cache_enabled)
-			world.clouds.light_cache_enabled = false
-		if _args.has("jittered_march"):  # the fidelity flag (CloudLayer.deterministic_march)
-			world.clouds.deterministic_march = false
 		if _args.has("no_air_shadow"):  # the fidelity flag (CloudLayer.air_shadow)
 			world.clouds.air_shadow = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
 			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
-		if _args.has("handover"):  # the near / far hand-over band (CloudLayer.PRESETS handover_m): "<near m>,<far m>"
-			var band: PackedStringArray = _args["handover"].split(",")
-			ShaderGlobals.set_value(&"cloud_handover_near_m", float(band[0]))
-			ShaderGlobals.set_value(&"cloud_handover_far_m", float(band[1]))
-		if _args.has("far_fade"):  # the far tier's shapes-to-column fade (PRESETS far_fade_m): "<start m>,<end m>"
-			var fade: PackedStringArray = _args["far_fade"].split(",")
-			ShaderGlobals.set_value(&"cloud_far_pattern_fade_m", Vector2(float(fade[0]), float(fade[1])))
-		if _args.has("repeat_identical"):  # the HUD's frame-rate line changes from frame to frame
+		if _args.has("repeat_identical") or _args.has("deterministic"):  # the HUD's frame-rate line changes per frame
 			TimePanel.show_frame_rate = false
-		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
-			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
 		world.refraction.enabled = not _args.has("no_refraction")
@@ -282,8 +249,6 @@ func _process(_delta: float) -> bool:
 				if child is VrOverlayPanel:
 					child.visible = false
 	_frames += 1
-	if _args.has("f7_at_frame") and _frames == int(_args["f7_at_frame"]):  # the F7 key's method switch (its cost)
-		world.clouds.cycle_method()
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
 	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables
@@ -294,7 +259,7 @@ func _process(_delta: float) -> bool:
 	var clouds_waiting: bool = (_args.has("weather") and _args["weather"] != "off") \
 			and (not world.clouds.noise_ready or world.clouds.state()["uploading"] or not world.clouds.state()["tracking"]) \
 			and _frames < TERRAIN_MAX_FRAMES
-	# The baked volume (the default method, clouds shown): until its first set is baked and shown, no bake running.
+	# The baked volume (clouds shown): until its first set is baked and shown, no bake running.
 	var bake_waiting := _bake_waiting(world)
 	var settled := _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting and not bake_waiting \
 			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES)
@@ -302,10 +267,7 @@ func _process(_delta: float) -> bool:
 		return false
 	if settled:
 		if _args.has("deterministic"):
-			if _deterministic_left < 0:  # the same jitter sequence and history from here in every run
-				var effect: CloudEffect = world.clouds.effect
-				effect.reset_history()
-				RenderingServer.call_on_render_thread(func() -> void: effect._frame = 0)
+			if _deterministic_left < 0:  # the same number of frames from here in every run
 				_deterministic_left = int(_args["deterministic"]) if _args["deterministic"].is_valid_int() else 64
 			if _deterministic_left > 0:
 				_deterministic_left -= 1
@@ -340,8 +302,6 @@ func _process(_delta: float) -> bool:
 		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s, brightness %.4f, chroma %.4f" % [
 				a.last_adaptation_glow_cd_m2, a.scotopic_cd_m2, a.rod_scale, a.moonlight_relative_value, "on" if a.moonlight_active else "off",
 				world.moon_light.light_energy if world.moon_light.visible else 0.0, a.brightness, a.chroma])
-		if _args.has("counters"):
-			_print_counters(world)
 		if _args.has("centre_dump"):
 			_dump_centre(world, String(_args["centre_dump"]))
 		if _args.has("shadow_dump"):
@@ -362,46 +322,10 @@ func _process(_delta: float) -> bool:
 	return false
 
 
-## --counters: the march counters of the last frame per march pixel (CloudEffect.debug_centre_data "counters", RGBA32UI:
-## density fetches, light fetches, occupied steps, empty steps) - median, p90, p99, max and sum of each over all march
-## pixels (clear-sky pixels count as 0), and <out>_counter_<name>.png, normalised to the maximum.
-func _print_counters(world: World) -> void:
-	var effect: CloudEffect = world.clouds.effect
-	var data := effect.debug_centre_data("counters")
-	var low := effect.counters_size
-	if data.is_empty() or low.x * low.y == 0:
-		print("render_check: counters: no data (no cloud pass ran)")
-		return
-	var values := data.to_int32_array()  # the texels' uints (counts stay far below 2^31)
-	var names := ["density_fetches", "light_fetches", "occupied_steps", "empty_steps"]
-	var count := low.x * low.y
-	for channel in range(names.size()):
-		var column := PackedInt32Array()
-		column.resize(count)
-		var sum := 0
-		var largest := 0
-		for i in range(count):
-			var v := values[4 * i + channel]
-			column[i] = v
-			sum += v
-			largest = maxi(largest, v)
-		var sorted := column.duplicate()
-		sorted.sort()
-		print("render_check: counter %s median %d p90 %d p99 %d max %d sum %d" % [names[channel],
-				sorted[count / 2], sorted[int(0.9 * (count - 1))], sorted[int(0.99 * (count - 1))], largest, sum])
-		var bytes := PackedByteArray()
-		bytes.resize(count)
-		for i in range(count):
-			bytes[i] = int(round(255.0 * column[i] / maxf(largest, 1.0)))
-		var path := _out_path("_counter_" + names[channel])
-		Image.create_from_data(low.x, low.y, false, Image.FORMAT_L8, bytes).save_png(path)
-		print("render_check: saved %s" % path)
-
-
 ## --gpu_time[=120]: collects the root viewport's GPU render time of that many frames; true when done (printed).
-## --gpu_passes (with --gpu_time): the frames are collected once the light cache is settled (steady state), and per
+## --gpu_passes (with --gpu_time): the frames are collected once the baked volume is settled (steady state), and per
 ## frame the GPU time between the RenderingDevice's captured timestamps of the previous frame, per name (the interval
-## a timestamp starts; CloudEffect.capture_timestamps: cloud_light_fill, cloud_pass_<kernel>, shadow_pass; their
+## a timestamp starts; CloudEffect.capture_timestamps: cloud_pass_<kernel>, cloud_baked_bake, shadow_pass; their
 ## cloud_pass_* summed as cloud_pass), printed as median and p99 per name.
 ## --divisor_sweep=3,2,1.5,1 (with --gpu_time): the measurement repeated per cloud march
 ## divisor (CloudLayer.divisor_override), each after FRAMES_TO_SETTLE frames at it; the image is the last divisor's.
@@ -415,9 +339,9 @@ func _gpu_frames(world: World) -> bool:
 		_sweep_wait -= 1
 		return false
 	if _args.has("gpu_passes"):
-		var baked_ok := world.clouds.march_method != CloudEffect.MarchMethod.BAKED 				or (world.clouds.effect.baked != null and (world.clouds.effect.baked.settled()
-				or (CloudBaked.rebake_frames > 0 and world.clouds.effect.baked.ready)))  # forced re-bakes: measured
-		_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() and baked_ok else 0
+		var baked_ok := world.clouds.effect.baked != null and (world.clouds.effect.baked.settled()
+				or (CloudBaked.rebake_frames > 0 and world.clouds.effect.baked.ready))  # forced re-bakes: measured
+		_cache_settled = _cache_settled + 1 if baked_ok else 0
 		if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
 			return false
 		_record_gpu_passes()
@@ -437,8 +361,8 @@ func _gpu_frames(world: World) -> bool:
 		print("render_check: gpu pass %s median %.3f ms, p99 %.3f ms" % [name, ms[ms.size() / 2],
 				ms[mini(ms.size() - 1, int(0.99 * ms.size()))]])
 	if _args.has("divisor_sweep"):
-		print("render_check: divisor_sweep divisor %s method %s baked_shown %s (the lines above)" % [
-				world.clouds.divisor(), world.clouds.march_method, world.clouds.effect.baked_shown])
+		print("render_check: divisor_sweep divisor %s baked_shown %s (the lines above)" % [
+				world.clouds.divisor(), world.clouds.effect.baked_shown])
 		if not _sweep_left.is_empty():
 			_next_sweep_divisor(world)
 			return false
@@ -453,7 +377,7 @@ func _next_sweep_divisor(world: World) -> void:
 	_gpu_passes.clear()
 
 
-## True while the baked volume (CloudLayer.march_method BAKED, the clouds shown) has no set shown yet or a bake / its
+## True while the baked volume (the clouds shown) has no set shown yet or a bake / its
 ## cross-fade still runs (CloudBaked.settled; TERRAIN_MAX_FRAMES at most): the image shows the settled volume.
 ## --climb: the climb's state machine on a settled frame (or a step's wait): the last move's check (re-baked, settled,
 ## the shown set's anchor at the eye), then the next move. True once every step is done; a step that does not settle
@@ -494,8 +418,7 @@ func _climb_done(world: World, settled: bool) -> bool:
 
 func _bake_waiting(world: World) -> bool:
 	var clouds := world.clouds
-	if clouds.march_method != CloudEffect.MarchMethod.BAKED or not bool(ShaderGlobals.value(&"cloud_enabled")) \
-			or _frames >= TERRAIN_MAX_FRAMES:
+	if not bool(ShaderGlobals.value(&"cloud_enabled")) or _frames >= TERRAIN_MAX_FRAMES:
 		return false
 	var baked := clouds.effect.baked
 	return baked == null or not baked.settled()
@@ -524,11 +447,11 @@ func _record_gpu_passes() -> void:
 		_gpu_passes[name].append(frame[name])
 
 
-## --repeat_identical[=2]: once the light cache is settled (no fill, no cross-fade), collects that many consecutive
-## frames of the unchanged scene (no history reset) and compares them; true when all are collected (then the last one
+## --repeat_identical[=2]: once the baked volume is settled (no bake, no cross-fade), collects that many consecutive
+## frames of the unchanged scene and compares them; true when all are collected (then the last one
 ## is saved). Frames that differ fail the check (exit code 1 after the save).
 func _repeat_frames(world: World) -> bool:
-	_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() else 0
+	_cache_settled = _cache_settled + 1 if not _bake_waiting(world) else 0
 	if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
 		return false
 	var wanted: int = maxi(int(_args["repeat_identical"]) if _args["repeat_identical"].is_valid_int() else 2, 2)

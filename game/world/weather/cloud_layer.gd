@@ -1,7 +1,7 @@
 class_name CloudLayer
 extends Node3D
 ## The volumetric clouds near the camera (M8 weather and clouds, Task 8): owns the cloud pass (CloudEffect, a
-## compositor effect: raymarch at reduced resolution, per-eye temporal accumulation, depth-aware upsampling), the
+## compositor effect: the baked volume's march at reduced resolution, depth-aware upsampling), the
 ## full-screen composite quad (shaders/cloud_layer.gdshader: blends the pass's result over the scene first in the
 ## transparent pass) and every `cloud_*` global uniform (project.godot [shader_globals]) - the two field textures and
 ## their ice shares with the blend, the noise textures and tables, the optics numbers, the camera's float64-derived
@@ -13,8 +13,8 @@ extends Node3D
 ## layers over frames), and cloud_base_texels (static clouds Task 7: each cell's flat cloud base at its lifting
 ## condensation level and its layer's extinction scale, RG32F columns x rows, one 2-D texture created at once - 8 MB at
 ## 0.25 deg). Only two snapshots are resident (a 0.25-deg one is 133 + 33 + 66 + 8 MB).
-## Light on the ground (Task 9): the cloud shadow maps (shadow_effect, CloudShadowEffect before the opaque pass) and
-## their frame (`cloud_shadow_*` globals, set here every frame: anchors near the ground under the camera, re-anchored
+## Light on the ground (Task 9): the cloud shadow maps (shadow_effect, CloudShadowEffect before the opaque pass: filled
+## from the baked volume's Sun transmittance S) and their frame (`cloud_shadow_*` globals, set here every frame: anchors near the ground under the camera, re-anchored
 ## only when the camera moved SHADOW_*_REANCHOR_M away - the maps are Earth-fixed in between, no swimming), the slab
 ## transmittance table of the Sun's diffuse light (`cloud_slab_transmittance`).
 ## No pop on a pair or source change (anti-goal; controller ruling 2026-10-25): the visible state is
@@ -73,47 +73,12 @@ enum Quality { DESKTOP, VR }
 ## The multiple-scattering model (fidelity flag, shader global cloud_scattering_model): the Monte Carlo transfer table
 ## (the reference) or the closed form (TMS on the delta-Eddington source function) for comparison.
 enum ScatteringModel { CLOSED_FORM, TABLE }
-## [E] Quality presets: coarse steps spanning the segment, the cap on all steps, the fine step (fraction of the
-## distance) inside the field's cloudy region; the light march toward the Sun / Moon (near samples over near_m through
-## the shapes, geometric from first_m; far samples to the cloud top through the grid mean); the detail levels used
-## (each band-limited at the pixel footprint, cloud_noise.hpp); the cloud pass's resolution divisor and the floor of the
-## temporal weight of a new frame (a running mean of up to 32 frames; cloud_check.gd, terrain_perf.gd measure them).
-## VR divisor 3 of the centre view (VR performance part 2): one march for both eyes over ~1.24 x one eye's width at
-## 1/9 of its pixels costs about what two eyes at divisor 4 did (1/16 each; divisor 2 per eye cost 11-13 ms of GPU at
-## the headset's 20 MP, docs/subsystems/vr-performance.md), sharper and the same in both eyes. VR flicker (user
-## 2026-10-26: the clouds need not look new every frame, only volumetric and in perspective): the history keeps up to 96
-## frames (noise floor sqrt(w / (2 - w)): 7 % of one frame's instead of 13 % at 32) and is clipped to the
-## neighbourhood's mean +- clip_gamma standard deviations instead of its min / max (which threw the history away at
-## every motion: the flicker); clip_gamma 0 keeps the min / max (the desktop's approved look). The temporal weight and
-## clip apply only to the jittered march (deterministic_march off). VR steps (static clouds Task 3, deterministic
-## march): 48 coarse steps (4.3 % of the distance) lost cumulus bases at a fixed sample point - cloud_check case 9 off
-## by 5 px, the deck view at 9 km thinned: 96 / 192 coarse / max steps. The fine fraction stays 0.025 (case 9 passes
-## with it; 0.012 was a look choice at about twice the in-cloud samples, cost in docs/subsystems/vr-performance.md).
-## Max steps 4 x the coarse steps (static clouds Task 5c fix round 1): with 192 (VR) the fine steps through a
-## broken layer's cloudy region (2.5 % of the distance each, mostly clear between the shapes) ran out before far cloud -
-## 7-16 % of the deck view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference, cloud_grain_check); 384 and
-## 768 gave the same image. The desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %).
-## The near / far hand-over (static clouds Task 8; "handover_m": the band's start and end): the march ends at the end,
-## the far tier (cloud_pass.gdshaderinc cloud_march's pass 1: the shapes with a cheaper light march, the far field's
-## column model with a sub-grid cover at large footprints) takes the ray from the start, cross-faded between. The end
-## stays inside the light cache's full weight (<= 34 km, ruling of static clouds Task 2) and below the footprints that
-## need the shape prefilter (VR 1/3 of the centre view: 5.4 mrad x 34 km = 0.18 km, far below its 3.5 km start - the
-## march's cover beat with the 32 km tile there, Task 3 follow-up); the start leaves a band of 14 km, so a 10 % difference between
-## the two models (the M8 ruling) changes the image by <= 3 % per 2 km of distance (smoothstep's slope 1.5 / 14 km).
-## "far_fade_m" [E]: the lateral pixel footprints over which the far tier's shapes fade to the column model
-## (cloud_pass.gdshaderinc cloud_far_pattern_fade_m; static clouds Task 8 fix round 1): the shapes' mips stop at 1 km
-## texels, so the fade ends before 3.5 km (spec decision 4) - beyond, a point sample of them speckled the limb from
-## orbit and the far horizon from altitude; it starts at 1.5 km: the desktop's far horizons from 9 and 20 km (~0.9 /
-## ~1.3 km at its 2.6 mrad march pixels) keep their shapes, VR's (5.4 mrad: ~1.8 / ~2.7 km) lie in the fade.
+## [E] Quality presets: the detail levels used (each band-limited at the pixel footprint, cloud_noise.hpp) and the cloud
+## pass's resolution divisor. VR divisor 3 of the centre view (VR performance part 2): one march for both eyes over
+## ~1.24 x one eye's width at 1/9 of its pixels (docs/subsystems/vr-performance.md), the same in both eyes.
 const PRESETS := {
-	Quality.DESKTOP: {"steps": 128, "max_steps": 512, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
-			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
-			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0, "handover_m": Vector2(20000.0, 34000.0),
-			"far_fade_m": Vector2(1500.0, 3000.0)},
-	Quality.VR: {"steps": 96, "max_steps": 384, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
-			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
-			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5, "handover_m": Vector2(20000.0, 34000.0),
-			"far_fade_m": Vector2(1500.0, 3000.0)},
+	Quality.DESKTOP: {"detail_levels": 3, "divisor": 2},
+	Quality.VR: {"detail_levels": 3, "divisor": 3},
 }
 
 var quality: Quality = Quality.DESKTOP:
@@ -137,60 +102,25 @@ var pass_enabled := true
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
 const SHADOW_RUN_WINDOW_FRAMES := 4  ## frames drawn after its last run in which the shadow effect still counts
 var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
-## The light cache (the Sun's tau_light looked up, not marched; planned here every frame, filled by the effect on the
-## render thread; its layout and refresh rules: CloudLightCacheSchedule).
-var light_cache := CloudLightCache.new()
-## Fidelity flag (shader global cloud_light_cache_enabled): false marches the light per sample everywhere (the
-## reference the cache reproduces, cloud_check.gd section 8).
-var light_cache_enabled := true:
-	set(value):
-		light_cache_enabled = value
-		ShaderGlobals.set_value(&"cloud_light_cache_enabled", value)
-## Fidelity flag (shader global cloud_deterministic_march; static clouds Task 3): true marches every ray at fixed
-## sample points (the step phase on Earth-fixed height shells, the stratified midpoints, the silhouette refined by
-## bisection, the shape prefilter at its footprint's centre) - an unchanged view gives a bit-identical image - and the
-## temporal kernel only copies the current frame; false: the per-pixel and per-frame jitter averaged by the temporal
-## accumulation (the reference of the converged image, cloud_check.gd case 9).
-var deterministic_march := true:
-	set(value):
-		deterministic_march = value
-		ShaderGlobals.set_value(&"cloud_deterministic_march", value)
-## Fidelity flag (shader global cloud_far_3d_light; static clouds Task 8 fix round 2): the far tier's column model and
-## the scaled-space far field light their plane-parallel slab with the shapes' 3D Sun light (cloud_far.gdshaderinc
+## Fidelity flag (shader global cloud_far_3d_light; static clouds Task 8 fix round 2): the flat levels' column model
+## and the scaled-space far field light their plane-parallel slab with the shapes' 3D Sun light (cloud_far.gdshaderinc
 ## CLOUD_FAR_ENTRY_TURN, CLOUD_FAR_FLANK_GAIN); false: the plane-parallel slab alone.
 var far_3d_light := true:
 	set(value):
 		far_3d_light = value
 		ShaderGlobals.set_value(&"cloud_far_3d_light", value)
 ## Fidelity flag (shader global cloud_air_shadow; static clouds Task 9b): the clouds' shadows on the air - the single
-## scattering of the Sun's direct beam along the view ray weighted by its cloud transmittance from the shadow maps
+## scattering of the Sun's direct beam along the view ray weighted by its cloud transmittance from the baked volume's S
 ## (cloud_pass.gdshaderinc cloud_air_shadow_loss: shadowed haze before backlit clouds, crepuscular rays); false: the
 ## clear sky's air light everywhere.
 var air_shadow := true:
 	set(value):
 		air_shadow = value
 		ShaderGlobals.set_value(&"cloud_air_shadow", value)
-## The march method (CloudEffect.MarchMethod: the baked volume CloudBaked, the default; the old per-sample march, the
-## reference; key F7 cycles the baked volume -> the old march -> the old march with the equiangular centre image ->
-## back, user argument --cloud_method=old|baked) and the march's resolution divisor (0: the preset's; key F8 cycles
-## DIVISORS, user argument --cloud_divisor=<x>; spatial only).
+## The march's resolution divisor (0: the preset's; key F8 cycles DIVISORS, user argument --cloud_divisor=<x>; spatial
+## only).
 const DIVISORS: Array[float] = [1.0, 1.5, 2.0, 3.0, 4.0]
-const METHOD_ARGUMENTS := {"old": CloudEffect.MarchMethod.OLD, "baked": CloudEffect.MarchMethod.BAKED}
-const METHOD_LABELS := {CloudEffect.MarchMethod.OLD: "alter March", CloudEffect.MarchMethod.BAKED: "Volumen"}
-const METHOD_KEY := KEY_F7
 const DIVISOR_KEY := KEY_F8
-## Test switch (user 2026-10-29): the march ends at this distance (m; 0 = no cut, shader global cloud_march_cut_m);
-## key F9 cycles CUTS_M. Measures in the headset what the near march alone costs.
-const CUTS_M: Array[float] = [0.0, 10000.0, 15000.0]
-const CUT_KEY := KEY_F9
-var march_cut_m := 0.0:
-	set(value):
-		march_cut_m = value
-		ShaderGlobals.set_value(&"cloud_march_cut_m", value)
-var march_method := CloudEffect.MarchMethod.BAKED:
-	set(value):
-		march_method = value
-		effect.set_march_method(value)
 var divisor_override := 0.0:
 	set(value):
 		divisor_override = value
@@ -221,16 +151,10 @@ var _slab_transmittance: ImageTexture
 ## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
 var _near_anchor := Vector3(NAN, NAN, NAN)
 var _far_anchor := Vector3(NAN, NAN, NAN)
-## The light cache's view of the field: the settings it was filled with and the slots' ids (_update_light_cache).
-var _cache_key := []
-var _cache_slot_ids := ["", ""]
-var _clock_jumped := false  ## notify_clock_jump since the last plan
-var _cache_usec := -1  ## wall clock of the last plan (the cross-fade runs in real time)
 
 
 func _init() -> void:
 	name = "CloudLayer"
-	effect.light_cache = light_cache
 	shadow_effect.cloud_effect = effect  # the baked volume fills the shadow maps while it draws
 
 
@@ -270,8 +194,6 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_enabled", false)
 	ShaderGlobals.set_value(&"cloud_shadow_valid", false)
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
-	ShaderGlobals.set_value(&"cloud_light_cache_enabled", light_cache_enabled)
-	ShaderGlobals.set_value(&"cloud_deterministic_march", deterministic_march)
 	ShaderGlobals.set_value(&"cloud_far_3d_light", far_3d_light)
 	ShaderGlobals.set_value(&"cloud_air_shadow", air_shadow)
 	_apply_cloud_arguments(OS.get_cmdline_user_args())
@@ -332,7 +254,7 @@ func set_target(before: Dictionary, after: Dictionary) -> void:
 				_strip_texels(snapshot)
 
 
-## Checks and render_check: shows a pair at once (uploads completed now, no cross-fade, the history reset) and pins it
+## Checks and render_check: shows a pair at once (uploads completed now, no cross-fade) and pins it
 ## (the service's announcements are ignored from then on). The caller's dictionaries keep their texels (checks show the
 ## same one again).
 func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
@@ -355,7 +277,6 @@ func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
 	_tracking = true
 	_bind_slots()
 	ShaderGlobals.set_value(&"cloud_blend", _w1)
-	effect.reset_history()
 	_push_light()
 
 
@@ -394,7 +315,6 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	# The far field needs only the field and column textures (no noise, no shadow maps).
 	far_enabled = visible_weight > 0.0 and not near
 	_update_shadow_frame(camera_render, height)
-	_update_light_cache(camera_render, height)
 	# The maps count as valid only while the effect keeps running (its render callback stamps ran_frame; the render
 	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped
 	# effect (compositor detached, device lost) turns the shadows back to the column a few frames later.
@@ -402,13 +322,23 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
 
 
-## The loading screen's hold (Main): a step text while the cloud kernels of the active method or the shadow maps are
-## still being built (CloudEffect.kernels_status), "" once they are.
+## The loading screen's hold (Main): a step text while the cloud kernels or the shadow maps are still being built
+## (CloudEffect.kernels_status), "" once they are.
 func kernels_status() -> String:
 	var text := effect.kernels_status()
 	if text == "" and shadow_effect.building():
 		text = CloudEffect.STATUS_LOADING
 	return text
+
+
+## The direct Sun's cloud transmittance at an Earth-fixed point (ITRF, m) through the clouds as drawn - the baked
+## volume's S there (CloudShadowEffect's Sun probe, the shapes the march draws: a vehicle under a cumulus is in its
+## shadow, one in the gap beside it is not), the probe named `key` (one per light point: the vehicles' light, the eye).
+## Its value lags one to two frames (an asynchronous read-back); NAN while none (no set shown, the point beyond the
+## volume levels, +-410 km): the caller takes the CPU's grid mean then.
+func direct_sun_transmittance(key: String, position_itrf_m: Vector3) -> float:
+	shadow_effect.request_sun_probe(key, Frames.to_render(position_itrf_m))
+	return shadow_effect.sun_probe(key)
 
 
 ## The ids of the resident slots and the weight of slot 1 (tests).
@@ -463,40 +393,6 @@ func _update_shadow_frame(camera_render: Vector3, height: float) -> void:
 	ShaderGlobals.set_value(&"cloud_shadow_e2", sun.cross(e1).normalized())
 	ShaderGlobals.set_value(&"cloud_shadow_near_anchor", _near_anchor - camera_render)
 	ShaderGlobals.set_value(&"cloud_shadow_far_anchor", _far_anchor - camera_render)
-
-
-## Plans the light cache's frame (CloudLightCacheSchedule): the ground point under the camera, the Sun, the blend; a
-## reset when what the fill depends on changed - the quality, the detail levels, the debug output, the noise, or the
-## content of a slot that has weight (a slot is only refilled without weight; its weight then comes through the blend
-## steps). Runs with the fidelity flag off too (the flag gates only the lookup: switched back on, the cache is current).
-func _update_light_cache(camera_render: Vector3, height: float) -> void:
-	var value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
-	if not value is Vector3 or (value as Vector3).length_squared() < 0.5:
-		return
-	var sun := (value as Vector3).normalized()
-	var up := Vector3(camera_render.x, camera_render.y * POLAR_STRETCH * POLAR_STRETCH, camera_render.z).normalized()
-	var ground := camera_render - up * height
-	var key := [noise_ready, quality, ShaderGlobals.value(&"cloud_detail_levels"),
-			ShaderGlobals.value(&"cloud_debug_output")]
-	var reset := key != _cache_key
-	for i in range(2):
-		var weight := _w1 if i == 1 else 1.0 - _w1
-		if _slots[i]["id"] != _cache_slot_ids[i] and weight > 0.0:
-			reset = true
-		_cache_slot_ids[i] = _slots[i]["id"]
-	if reset:
-		_cache_key = key
-		light_cache.reset()
-	var now := Time.get_ticks_usec()
-	var delta_s := 0.0 if _cache_usec < 0 else (now - _cache_usec) * 1.0e-6
-	_cache_usec = now
-	light_cache.plan(ground, sun, _w1, _clock_jumped, delta_s)
-	_clock_jumped = false
-
-
-## The clock jumped (SimClock.time_jumped): the light cache re-anchors and refills (the Sun and the field moved).
-func notify_clock_jump() -> void:
-	_clock_jumped = true
 
 
 static func _horizontal(v: Vector3, up: Vector3) -> float:
@@ -714,25 +610,21 @@ func _upload_noise() -> void:
 	if not noise.has("shape"):
 		push_error("Wolken: Rauschtexturen fehlen: " + str(noise.get("error", "")))
 		return
-	var blue_size := int(noise["blue_noise_size"])
 	var states := int(noise["detail_states"])
 	_noise_textures = [_noise_texture(noise["shape"], int(noise["shape_size"])),
 			_noise_texture(noise["detail"], int(noise["detail_size"])), _table(noise["coverage_threshold"], states),
-			_table(noise["edge_mean_factor"], states),
-			ImageTexture.create_from_image(Image.create_from_data(blue_size, blue_size, false, Image.FORMAT_R8,
-					noise["blue_noise"]))]
+			_table(noise["edge_mean_factor"], states)]
 	ShaderGlobals.set_value(&"cloud_noise_shape", _noise_textures[0])
 	ShaderGlobals.set_value(&"cloud_noise_detail", _noise_textures[1])
 	ShaderGlobals.set_value(&"cloud_coverage_threshold", _noise_textures[2])
 	ShaderGlobals.set_value(&"cloud_edge_mean", _noise_textures[3])
-	ShaderGlobals.set_value(&"cloud_blue_noise", _noise_textures[4])
 	# The shape prefilter (Task 10 fix round 1, cloud_noise.hpp): the mip levels 1.. of the shape and their tables.
 	var prefilter_rows := int(noise["prefilter_rows"])
 	_noise_textures.append_array([_mip_texture(noise["shape_mips"], int(noise["shape_size"]) / 2),
 			_table(noise["prefilter_threshold"], prefilter_rows), _table(noise["prefilter_edge_mean"], prefilter_rows)])
-	ShaderGlobals.set_value(&"cloud_noise_shape_mips", _noise_textures[5])
-	ShaderGlobals.set_value(&"cloud_prefilter_threshold", _noise_textures[6])
-	ShaderGlobals.set_value(&"cloud_prefilter_edge_mean", _noise_textures[7])
+	ShaderGlobals.set_value(&"cloud_noise_shape_mips", _noise_textures[4])
+	ShaderGlobals.set_value(&"cloud_prefilter_threshold", _noise_textures[5])
+	ShaderGlobals.set_value(&"cloud_prefilter_edge_mean", _noise_textures[6])
 	ShaderGlobals.set_value(&"cloud_edge_width", Vector2(noise["edge_width_min_value"], noise["edge_width_max_value"]))
 	ShaderGlobals.set_value(&"cloud_detail_mean", float(noise["detail_mean"]))
 	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
@@ -817,24 +709,8 @@ static func _noise_texture(texels: PackedByteArray, size: int, format := Image.F
 
 func _apply_quality() -> void:
 	var preset: Dictionary = PRESETS[quality]
-	ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]))
-	ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]))
-	ShaderGlobals.set_value(&"cloud_fine_step_fraction", float(preset["fine_step_fraction"]))
-	var handover: Vector2 = preset["handover_m"]
-	ShaderGlobals.set_value(&"cloud_handover_near_m", handover.x)
-	ShaderGlobals.set_value(&"cloud_handover_far_m", handover.y)
-	ShaderGlobals.set_value(&"cloud_far_pattern_fade_m", preset["far_fade_m"])
-	var near := int(preset["light_near"])
-	var first_m := float(preset["light_first_m"])
-	var near_m := float(preset["light_near_m"])
-	ShaderGlobals.set_value(&"cloud_light_march", Vector4(first_m, light_march_ratio(first_m, near_m, near),
-			near_m, 0.0))
-	ShaderGlobals.set_value(&"cloud_light_samples", Vector2i(near, int(preset["light_far"])))
 	ShaderGlobals.set_value(&"cloud_detail_levels", int(preset["detail_levels"]))
-	light_cache.march_first_m = first_m
-	light_cache.march_near_m = near_m
-	var divisor := divisor_override if divisor_override > 0.0 else float(preset["divisor"])
-	effect.set_quality(divisor, float(preset["temporal_weight"]), float(preset["clip_gamma"]))
+	effect.set_quality(divisor())
 
 
 ## The march's resolution divisor in use (divisor_override or the preset's).
@@ -842,97 +718,32 @@ func divisor() -> float:
 	return divisor_override if divisor_override > 0.0 else float(PRESETS[quality]["divisor"])
 
 
-## --cloud_method=old|baked and --cloud_divisor=<x> (the live toggles' start values). Every
-## start - Start-VR.cmd, Start-Desktop.cmd, the checks - draws the baked volume (user 2026-10-30) with the equiangular
-## centre image (its target setting) unless --cloud_method says otherwise.
+## --cloud_divisor=<x> (the live toggle's start value; fractional allowed).
 func _apply_cloud_arguments(args: PackedStringArray) -> void:
-	march_method = CloudEffect.MarchMethod.BAKED
 	for arg in args:
-		if arg.begins_with("--cloud_method="):
-			var name := arg.trim_prefix("--cloud_method=")
-			if METHOD_ARGUMENTS.has(name):
-				march_method = METHOD_ARGUMENTS[name]
-			else:
-				push_error("CloudLayer: unknown --cloud_method=%s (%s)" % [name, ", ".join(METHOD_ARGUMENTS.keys())])
-		elif arg.begins_with("--cloud_divisor="):
+		if arg.begins_with("--cloud_divisor="):
 			divisor_override = maxf(float(arg.trim_prefix("--cloud_divisor=")), 1.0)
-	if march_method == CloudEffect.MarchMethod.BAKED:
-		CloudCentreView.equiangular = true
 
 
-## The live toggles (desktop and VR: the overlay passes unhandled keys on): F7 the next method, F8 the next divisor.
+## The live toggle (desktop and VR: the overlay passes unhandled keys on): F8 the next divisor.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
+	if key == null or not key.pressed or key.echo or key.keycode != DIVISOR_KEY:
 		return
-	if key.keycode == METHOD_KEY:
-		cycle_method()
-		get_viewport().set_input_as_handled()
-	elif key.keycode == CUT_KEY:
-		march_cut_m = CUTS_M[(CUTS_M.find(march_cut_m) + 1) % CUTS_M.size()]
-		print("CloudLayer: march cut %s m" % march_cut_m)
-		get_viewport().set_input_as_handled()
-	elif key.keycode == DIVISOR_KEY:
-		var next := DIVISORS[0]
-		for d in DIVISORS:
-			if d > divisor() + 1.0e-3:
-				next = d
-				break
-		divisor_override = next
-		print("CloudLayer: march divisor %s" % next)
-		get_viewport().set_input_as_handled()
+	var next := DIVISORS[0]
+	for d in DIVISORS:
+		if d > divisor() + 1.0e-3:
+			next = d
+			break
+	divisor_override = next
+	print("CloudLayer: march divisor %s" % next)
+	get_viewport().set_input_as_handled()
 
 
-## F7 (render_check --f7_at_frame): the next method. User 2026-10-29 / 10-30: F7 compares only what is relevant - the
-## baked volume (the default; equiangular: its target setting), the old march with the rectilinear centre image, with
-## the equiangular one (CloudCentreView.equiangular), and back.
-func cycle_method() -> void:
-	if march_method == CloudEffect.MarchMethod.OLD and not CloudCentreView.equiangular:
-		CloudCentreView.equiangular = true
-	elif march_method == CloudEffect.MarchMethod.OLD:
-		march_method = CloudEffect.MarchMethod.BAKED
-	else:
-		march_method = CloudEffect.MarchMethod.OLD
-		CloudCentreView.equiangular = false
-	print("CloudLayer: march method %s" % _method_label())
-
-
-## The HUD's line of the live toggles (German UI): the method (and whether the volume draws yet), the divisor, the keys.
+## The HUD's line of the live toggle (German UI): the divisor (and whether the volume draws yet), the key.
 func status_line() -> String:
-	var method := _method_label()
-	if march_method == CloudEffect.MarchMethod.BAKED and not effect.baked_shown:
-		method += " (Volumen wird gebacken)"
-	var cut := ", nur bis %d km" % roundi(march_cut_m / 1000.0) if march_cut_m > 0.0 else ""
-	return "Wolken: %s, Auflösung 1/%s%s  [F7 Verfahren, F8 Auflösung, F9 Schnitt]" % [method,
-			String.num(divisor(), 1).trim_suffix(".0"), cut]
-
-
-func _method_label() -> String:
-	var label: String = METHOD_LABELS[march_method]
-	if march_method != CloudEffect.MarchMethod.OLD:
-		return label
-	if CloudCentreView.equiangular:
-		label += ", winkelgleich"
-	return label
-
-
-## Ratio r of the light march's geometric intervals: first_m (r^n - 1) / (r - 1) = near_m (core
-## cloud_light_march_ratio, change both together); 1 for equal intervals.
-static func light_march_ratio(first_m: float, near_m: float, n: int) -> float:
-	var target := near_m / maxf(first_m, 1e-9)
-	if target <= n:
-		return 1.0
-	var lo := 1.0
-	var hi := 2.0
-	while (pow(hi, n) - 1.0) / (hi - 1.0) < target:
-		hi *= 2.0
-	for i in range(100):
-		var mid := 0.5 * (lo + hi)
-		if (pow(mid, n) - 1.0) / (mid - 1.0) < target:
-			lo = mid
-		else:
-			hi = mid
-	return 0.5 * (lo + hi)
+	var baking := "" if effect.baked_shown else " (Volumen wird gebacken)"
+	return "Wolken: Auflösung 1/%s%s  [F8 Auflösung]" % [String.num(divisor(), 1).trim_suffix(".0"), baking]
 
 
 static func _wrap(q: Vector3) -> Vector3:

@@ -1,7 +1,7 @@
 # Terrain renderer performance run (needs a GPU and a desktop window, no --headless):
 # godot --path game --script res://tests/terrain_perf.gd [-- --utc=2024-04-10T18:00:00 --warp=1 --descent_s=60
 #       --pan_s=20 --cape_s=20 --shots=<dir> --spikes --weather=<abs path .wthr> --cloud_quality=desktop|vr
-#       --cloud_scattering=table|closed --render_scale=<f>]
+#       --cloud_scattering=table|closed --cloud_divisor=<x> --render_scale=<f>]
 # --render_scale=<f>: the root viewport renders at f x the window per axis (bilinear, Viewport.scaling_3d_scale): the
 # VR proxy is 1.65 (2560 x 1440 x 1.65^2 = 20 MP, the two 3530 x 2834 eyes of the user's headset at Pimax FSR 1.5;
 # docs/subsystems/vr-performance.md).
@@ -167,29 +167,6 @@ func _log_gpu_passes(t: float) -> void:
 	_gpu_pass_frames = 0
 
 
-## --cloud_tune=steps=48,max_steps=96,fine=0.03,light_near=4,light_far=2,divisor=3: overrides single preset values of
-## the clouds
-## (the shader globals the preset sets) for a tuning run; the game's preset is CloudLayer.PRESETS.
-func _tune_clouds(spec: String) -> void:
-	var light: Vector2i = ShaderGlobals.value(&"cloud_light_samples")
-	for item in spec.split(","):
-		var kv := item.split("=")
-		match kv[0]:
-			"steps": ShaderGlobals.set_value(&"cloud_steps", int(kv[1]))
-			"max_steps": ShaderGlobals.set_value(&"cloud_max_steps", int(kv[1]))
-			"fine": ShaderGlobals.set_value(&"cloud_fine_step_fraction", float(kv[1]))
-			"light_near":
-				light.x = int(kv[1])
-				ShaderGlobals.set_value(&"cloud_light_march", Vector4(20.0, CloudLayer.light_march_ratio(20.0, 6000.0,
-						light.x), 6000.0, 0.0))
-			"light_far": light.y = int(kv[1])
-			"divisor":
-				var preset: Dictionary = CloudLayer.PRESETS[_world.clouds.quality]
-				_world.clouds.effect.set_quality(int(kv[1]), float(preset["temporal_weight"]),
-						float(preset["clip_gamma"]))
-	ShaderGlobals.set_value(&"cloud_light_samples", light)
-
-
 func _setup() -> void:
 	_world = _main.get_node("World")
 	_world.clock.warp = float(_args.get("warp", "1"))
@@ -204,8 +181,8 @@ func _setup() -> void:
 		_world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 				if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
 	CloudEffect.capture_timestamps = _args.has("gpu_passes")
-	if _args.has("cloud_tune"):  # tuning runs: steps=, max_steps=, fine=, light_near=, light_far=, divisor= (comma list)
-		_tune_clouds(String(_args["cloud_tune"]))
+	if _args.has("cloud_divisor"):  # tuning runs: the march's resolution divisor (the preset's otherwise)
+		_world.clouds.divisor_override = float(_args["cloud_divisor"])
 	if String(_args.get("weather", "")).ends_with(".wthr"):
 		var snapshot: Dictionary = _world.core.weather_load_snapshot(_args["weather"])
 		if snapshot.get("ok", false):
