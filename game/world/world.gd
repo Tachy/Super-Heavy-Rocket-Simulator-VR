@@ -584,7 +584,9 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 			1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t))
 	var terrain_visible := _moon_terrain_sun_fraction(lit_gcrf)
 	if is_finite(terrain_visible):
-		visible = terrain_visible
+		# The terrain replaces the Moon's part only: the Earth (at the GCRF origin) still eclipses the Sun.
+		visible = terrain_visible * (1.0 - Atmosphere.occulted_fraction(sun_apparent_from_earth_m - lit_gcrf,
+				Atmosphere.SUN_RADIUS_M, -lit_gcrf, Atmosphere.EARTH_MEAN_RADIUS_M))
 	var light := atmosphere.sun_light_at(gcrf_to_fixed * lit_gcrf, (gcrf_to_fixed * sun_apparent_from_earth_m).normalized(),
 			visible)
 	sun_light.light_color = light[0]
