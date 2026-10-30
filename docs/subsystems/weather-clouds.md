@@ -1055,7 +1055,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   the known limits. Source: NOAA GOES-R series ABI Level 2 CMIPF, `s3://noaa-goes16/ABI-L2-CMIPF/2024/099/18/`
   (`OR_ABI-L2-CMIPF-M6C02_G16_s20240991800204_...`), public domain (NOAA Open Data Dissemination; GOES-16 was the
   GOES-East satellite on that date); not shipped, not in the repo (the reprojection script lived in `tmp/`).
-- `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot.
+- `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot. Also passes
+  with a GPU (non-headless): there the slot uploads take real frames, so the world-volume case's first pair gets 12 s (it
+  failed on "pair resident at its blend" at 6 s, 2026-10-30). Exit leak check: `render_check` (default and
+  `--cloud_method=baked`) prints no "RID leaked" warning (the effect's per-view `volume_buffer` was not freed, fixed 2026-10-30).
 
 ## Diagnostics
 

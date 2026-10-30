@@ -346,7 +346,7 @@ func _test_world_volume(camera: Vector3) -> void:
 	var ok := true
 	var mapped := true
 	var held := 0
-	var steps := [[a, b, 0.3, 6.0], [b, c, 0.5, 8.0], [c, a, 0.2, 8.0]]
+	var steps := [[a, b, 0.3, 12.0], [b, c, 0.5, 8.0], [c, a, 0.2, 8.0]]
 	for step: Array in steps:
 		_announce(step[0], step[1])
 		for i in range(int(float(step[3]) / DT)):

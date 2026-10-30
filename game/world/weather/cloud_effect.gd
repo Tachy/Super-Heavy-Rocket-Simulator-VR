@@ -631,6 +631,7 @@ func _notification(what: int) -> void:
 				_rd.free_rid(_centre[key])
 		for v in _views:
 			_rd.free_rid(v["buffer"])
+			_rd.free_rid(v["volume_buffer"])  # the volume march's block (made with the view)
 		var outputs: Array[RID] = [_output_rd]
 		for rid: RID in _retired_outputs + [_shown_output, _pending_output]:
 			if rid.is_valid() and not outputs.has(rid):
