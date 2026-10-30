@@ -222,7 +222,17 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 	vec3 entry = up;
 	float gain = 1.0;
 	if (cloud_far_3d_light) {
+#if defined(CLOUD_MARCH) && !defined(CLOUD_BAKED_MARCH)
+		// (the old march's far tier: unchanged - the turn ends at the local horizon, a step of the light there)
 		entry = mu0 > 0.0 ? cloud_entry_normal(sun_dir, up, mu0, mu0 + (1.0 - mu0) * CLOUD_FAR_ENTRY_TURN) : up;
+#else
+		// continuous through the local horizon (baked step 6; the switch to the bare up at mu0 = 0 dropped the light
+		// ~7 x there: a hard day / night edge on the clouds): a Sun below it still lights the tops turned toward it
+		// until the Earth's horizon seen from the cloud hides it - the Sun's grazing-path transmittance and its disc's
+		// visible fraction (atm_sun_at) end the light, the twilight sky's (atm_sky_light) goes on
+		entry = cloud_entry_normal(sun_dir, up, mu0, max(mu0 + (1.0 - mu0) * CLOUD_FAR_ENTRY_TURN,
+				CLOUD_ENTRY_COSINE_MIN));
+#endif
 		gain = 1.0 + CLOUD_FAR_FLANK_GAIN * (1.0 - clamp(fraction, 0.0, 1.0));
 	}
 	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);

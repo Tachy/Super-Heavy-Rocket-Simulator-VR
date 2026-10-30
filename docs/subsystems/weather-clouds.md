@@ -748,6 +748,23 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   large-scale weight, histogram-preserving (`cloud_baked_shape`; step 4's domain warp sheared the shapes into marbled
   streaks). Numbers, images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer3-report.md` (step 4),
   `baked-outer4-report.md` (step 5).
+- **Baked prototype step 6: beyond the cap, the terminator (2026-10-30)**: (a) beyond the shown flat geometry's cap
+  the far field's column draws the clouds (`cloud_baked_flat_far_weight` / `_layer`: `cloud_far_layer` at the ray's
+  ground point, blended in over 0.5 deg up to 3 of the last level's cells inside the cap, the flat levels faded out by
+  the same weight; nothing where the scene is > 3 km (vertically) in front; evaluated once per pixel after the sets, only in
+  the march kernels `march_far` / `march_fade_far` (define `CLOUD_BAKED_FAR_FALLBACK`) chosen above 40 km camera
+  height - its code raised the march's register peak, ground +0.14 ms even untaken; below 40 km a camera moves at
+  most ~40 km/s, the 2 deg drift allowance lasts > 5 s against a re-bake's ~0.3 s) - a camera that outran the re-bake (the free camera moves up to its distance to the surface
+  per second, a re-bake takes ~0.3 s) saw the clouds end at the old geometry's cap, a circle inside the disc. A settled
+  view never reaches the band (the visible cap ends 2 deg inside it). Diagnostics: `STARSIM_BAKED_STALE_GEO=<height
+  m>,<offset deg>` bakes the flat geometry for that height and that far from the camera and keeps it. (b) The far
+  field's column light (`cloud_far_cloudy_radiance`, flat levels and scaled-space far field; the old march's far tier
+  unchanged under `CLOUD_MARCH` without `CLOUD_BAKED_MARCH`) turns its entry normal continuously through the cloud's
+  local horizon (mu_e = max(mu0 + (1 - mu0) 0.15, 0.02) for every mu0): the switch to the bare up at mu0 = 0 dropped
+  the Sun's light ~7 x there - a hard day / night edge on the clouds. The edge now ends by the Sun's grazing-path
+  transmittance and its disc's visible fraction over the Earth's horizon seen from the cloud (`atm_sun_at`; higher
+  tops lit longer), the twilight sky's light going on; daytime (mu0 > 0) unchanged bit for bit. The volume levels'
+  light (`cloud_entry_cosine`) was continuous already. Numbers, images: `baked-outer5-report.md`.
 - **Hybrid march (prototype, 2026-10-29; the user tests it live in VR)**: `CloudLayer.march_method`
   (`CloudEffect.MarchMethod`; key F7, user argument `--cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light`) and
   `CloudLayer.divisor_override` (F8: 1, 1.5, 2, 3; `--cloud_divisor=<x>`; the divisor may be fractional). Choosing a

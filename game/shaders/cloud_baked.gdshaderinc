@@ -1471,6 +1471,50 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	return true;
 }
 
+// [E] Beyond the flat geometry's cap the far field's column draws the clouds (step 6: a camera that outran the re-bake -
+// the free camera moves up to its distance to the surface per second, a re-bake takes ~0.3 s - saw the clouds end at
+// the shown geometry's cap, a circle inside the disc): cloud_far_layer (the scaled-space Earth's: the same cover rule
+// and light) at the ray's ground point, blended in over CLOUD_BAKED_FLAT_FAR_BAND_RAD up to
+// CLOUD_BAKED_FLAT_FAR_EDGE_CELLS of the last level's cells inside the cap (the bake's columns end 0.71 cell beyond it,
+// the B-spline reads 2 cells around a point). In a settled view the visible cap ends FLAT_DRIFT_RAD (2 deg) inside the
+// band: no pixel pays for it.
+const float CLOUD_BAKED_FLAT_FAR_BAND_RAD = 0.0087;
+const float CLOUD_BAKED_FLAT_FAR_EDGE_CELLS = 3.0;
+
+// The far field's weight (0..1) for the ray in this set: 0 without a ground crossing.
+float cloud_baked_flat_far_weight(int si, CloudRay ray, vec3 dir, vec3 eye) {
+	vec2 ground = cloud_sphere_crossing(ray, 0.0);
+	if (baked.sets[si].outer.x < 0.5 || !(ground.x <= ground.y && ground.x > 0.0)) {
+		return 0.0;
+	}
+	vec3 g = atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * ground.x;
+	float c_last = baked.sets[si].axis_x.w * exp2(baked.sets[si].outer.z + baked.sets[si].outer.x - 1.0);
+	float edge = baked.sets[si].outer.y - CLOUD_BAKED_FLAT_FAR_EDGE_CELLS * c_last / CLOUD_A_M;
+	return smoothstep(edge - CLOUD_BAKED_FLAT_FAR_BAND_RAD, edge, cloud_baked_flat_xy(si, g).z);
+}
+
+// The far field's layer for the ray (premultiplied colour with the air in front, alpha) at the distance dist (the
+// ray's crossing of CLOUD_BAKED_FLAT_PATTERN_HEIGHT_M); none where the scene is in front by more than
+// CLOUD_BAKED_FLAT_SCENE_DEPTH_M (vertically). Evaluated once per pixel after the sets (cloud_baked_shade), and only in
+// the march kernels with CLOUD_BAKED_FAR_FALLBACK (CloudBaked: above FLAT_FINE_HEIGHT_M - a camera below moves at most
+// ~40 km/s, the 2 deg drift allowance lasts > 5 s against a re-bake's ~0.3 s): its code raised the march's register
+// peak - ground +0.14 ms even when not taken (inside the set's function ground / deck +0.15 / +0.5 ms).
+vec4 cloud_baked_flat_far_layer(CloudRay ray, vec3 dir, vec3 eye, float scene_m, out float dist) {
+	dist = 0.0;
+	vec2 ground = cloud_sphere_crossing(ray, 0.0);
+	if (!(ground.x <= ground.y && ground.x > 0.0)) {
+		return vec4(0.0);
+	}
+	vec3 g = atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * ground.x;
+	vec2 x = cloud_sphere_crossing(ray, CLOUD_BAKED_FLAT_PATTERN_HEIGHT_M);
+	dist = x.x <= x.y && x.x > 0.0 ? x.x : ground.x;
+	float mu = max(abs(dot(dir, cloud_geodetic_up(g))), CLOUD_FAR_MU_MIN);
+	if ((dist - scene_m) * mu > CLOUD_BAKED_FLAT_SCENE_DEPTH_M) {
+		return vec4(0.0);
+	}
+	return cloud_far_layer(g, vec3(1.0));
+}
+
 // The march of one set: dir (Earth-local unit) from eye over [d0, d1] of the band. Out: radiance (before the air in
 // front), the background's transmittance and the alpha-weighted distance.
 void cloud_baked_march(int si, CloudRay ray, vec3 dir,
@@ -1694,10 +1738,11 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 // out toward the flat levels) and the flat levels behind it. Out: premultiplied colour with the air in front, the
 // background's transmittance and the alpha-weighted cloud distance.
 void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d1, bool volume, float scene_m,
-		out vec3 color, out float transmittance, out float cloud_m) {
+		out vec3 color, out float transmittance, out float cloud_m, out float far_w) {
 	color = vec3(0.0);
 	transmittance = 1.0;
 	cloud_m = 0.0;
+	far_w = 0.0;
 	float alpha = 0.0;
 	if (volume && int(baked.sets[si].misc.z) < int(baked.sets[si].axis_y.w) && cloud_baked_takeover_weight(si) < 1.0) {
 		vec3 radiance;
@@ -1727,12 +1772,18 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 	vec3 color_f = vec3(0.0);
 	float alpha_f = 0.0;
 	float dist_f = 0.0;
-	if (shell.x > shell.y || shell.y <= t_from || t_from >= scene_m
+	// beyond the flat geometry's cap the far field's column takes over (its share far_w: cloud_baked_shade adds it)
+#ifdef CLOUD_BAKED_FAR_FALLBACK
+	far_w = cloud_baked_flat_far_weight(si, ray, dir, eye);
+#endif
+	if (far_w >= 1.0 || shell.x > shell.y || shell.y <= t_from || t_from >= scene_m
 			|| !cloud_baked_flat_shade(si, ray, dir, eye, max(t_from, shell.x), scene_m, pixel_angle, color_f, alpha_f,
 					dist_f)) {
 		color_f = vec3(0.0);
 		alpha_f = 0.0;
 	}
+	color_f *= 1.0 - far_w;
+	alpha_f *= 1.0 - far_w;
 	if (alpha_f > 0.0 && transmittance >= CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
 		float w = cloud_baked_flat_weight_at(si, cloud_baked_lod(si, max(abs(g.gx0 + dist_f * g.gdx),
 				abs(g.gy0 + dist_f * g.gdy)), pixel_angle * dist_f));
@@ -1846,7 +1897,8 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 #endif
 	}
 	bool volume = d1 > d0;
-	cloud_baked_set(0, ray, dir, eye, d0, d1, volume, scene_m, color, transmittance, cloud_m);
+	float far_w;
+	cloud_baked_set(0, ray, dir, eye, d0, d1, volume, scene_m, color, transmittance, cloud_m, far_w);
 #ifdef CLOUD_BAKED_FADE
 	{
 		// A re-bake's swap: the set fading in too, the two renders cross-faded (premultiplied).
@@ -1875,13 +1927,27 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 		vec3 color1;
 		float transmittance1;
 		float cloud_m1;
-		cloud_baked_set(1, ray, dir, eye, e0, e1, e1 > e0, scene_m, color1, transmittance1, cloud_m1);
+		float far_w1;
+		cloud_baked_set(1, ray, dir, eye, e0, e1, e1 > e0, scene_m, color1, transmittance1, cloud_m1, far_w1);
+		far_w = mix(far_w, far_w1, w);
 		float a0 = 1.0 - transmittance;
 		float a1 = 1.0 - transmittance1;
 		float a = mix(a0, a1, w);
 		cloud_m = a > 1.0e-6 ? mix(a0 * cloud_m, a1 * cloud_m1, w) / a : 0.0;
 		color = mix(color, color1, w);
 		transmittance = mix(transmittance, transmittance1, w);
+	}
+#endif
+#ifdef CLOUD_BAKED_FAR_FALLBACK
+	if (far_w > 0.0) {
+		// beyond the flat geometry's cap (cloud_baked_flat_far_weight): the far field's share, behind the rest
+		float dist_far;
+		vec4 far = cloud_baked_flat_far_layer(ray, dir, eye, scene_m, dist_far);
+		float a_far = transmittance * far_w * far.a;
+		float a_rest = 1.0 - transmittance;
+		cloud_m = a_rest + a_far > 1.0e-6 ? (a_rest * cloud_m + a_far * dist_far) / (a_rest + a_far) : 0.0;
+		color += transmittance * far_w * far.rgb;
+		transmittance -= a_far;
 	}
 #endif
 	float alpha = 1.0 - transmittance;

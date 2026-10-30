@@ -36,6 +36,10 @@ static var rebake_frames := int(OS.get_environment("STARSIM_BAKED_REBAKE_FRAMES"
 static var extra_defines := OS.get_environment("STARSIM_BAKED_DEFINES").split(",", false)
 static var memory_cap_bytes := MEMORY_CAP_BYTES if OS.get_environment("STARSIM_BAKED_MEMORY_MB") == "" \
 		else float(OS.get_environment("STARSIM_BAKED_MEMORY_MB")) * 1024.0 * 1024.0
+## STARSIM_BAKED_STALE_GEO=<height m>,<offset deg> bakes the flat geometry as if for a camera at that height and that
+## far (great circle) from the real one and keeps it: the state a camera that outran the re-bake shows (the free camera
+## moves up to its distance to the surface per second; a re-bake takes ~0.3 s).
+static var stale_geo := OS.get_environment("STARSIM_BAKED_STALE_GEO").split_floats(",", false)
 ## [E] The volumes' memory cap (both sets; the brief's ~512 MB): the vertical cells double until a set fits half.
 const MEMORY_CAP_BYTES := 512.0 * 1024.0 * 1024.0
 ## [E] Bake budget (measured 2026-10-29: <= ~2 ms GPU per dispatch): voxels per frame per pass kind (each dispatch a slice range of one level); render_check scales it.
@@ -132,6 +136,7 @@ var _bake_gpu_ms := 0.0
 var _bake_dispatches := 0
 var _shown_frames := 0  ## frames since the shown set was swapped in
 var _read_frame := -1  ## the frame whose captured timestamps were read last
+var _camera_height_m := 0.0  ## this frame's (the march kernel's choice)
 var _geo_count := 0  ## flat geometries made (their ids)
 var _pixel_angle := 1.0e-3  ## the march's pixel angle (rad) of the last frame (the footprint rule)
 
@@ -158,7 +163,13 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 	var density := PackedStringArray(["CLOUD_BAKED_DENSITY"])
 	if detail:
 		density.append("CLOUD_BAKED_DETAIL")
-	var kernels := {"march": march, "march_fade": fade,
+	# The far field beyond the flat cap (cloud_baked.gdshaderinc CLOUD_BAKED_FAR_FALLBACK): own kernels, used above
+	# FLAT_FINE_HEIGHT_M (its code cost the ground views' march 0.14 ms even untaken).
+	var march_far := march.duplicate()
+	march_far.append("CLOUD_BAKED_FAR_FALLBACK")
+	var fade_far := fade.duplicate()
+	fade_far.append("CLOUD_BAKED_FAR_FALLBACK")
+	var kernels := {"march": march, "march_fade": fade, "march_far": march_far, "march_fade_far": fade_far,
 		"density": density, "occupancy": PackedStringArray(["CLOUD_BAKED_OCCUPANCY"]),
 		"light": PackedStringArray(["CLOUD_BAKED_LIGHT"]), "band": PackedStringArray(["CLOUD_BAKED_BAND"]),
 		"flat": PackedStringArray(["CLOUD_BAKED_FLAT"])}
@@ -189,7 +200,7 @@ func setup(rd: RenderingDevice, stereo: bool) -> bool:
 
 ## The march kernel's shader / pipeline of this frame (the cross-fade's while a new set fades in).
 func march_kernel() -> String:
-	return "march_fade" if _fade > 0 else "march"
+	return ("march_fade" if _fade > 0 else "march") + ("_far" if _camera_height_m > FLAT_FINE_HEIGHT_M else "")
 
 
 func shader(kernel: String) -> RID:
@@ -210,6 +221,7 @@ func settled() -> bool:
 func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, pixel_angle: float) -> Array[RDUniform]:
 	_read_bake_time()
 	_pixel_angle = maxf(pixel_angle, 1.0e-6)
+	_camera_height_m = _height_m(camera)
 	var sun: Vector3 = ShaderGlobals.value(&"atmosphere_sun_direction")
 	var weather := _weather_key()
 	_shown_frames += 1
@@ -328,11 +340,21 @@ func _plan(camera: Vector3, sun: Vector3, weather: Dictionary) -> Dictionary:
 	if not shown.is_empty() and _geo_holds(shown, camera) and _geo_layout_holds(shown, height) 			and _same_weather(shown["weather"], weather):
 		plan.merge({"geo": shown, "geo_new": false})
 	else:
-		var cap := minf(visible_cap_rad(height * FLAT_CAP_HEIGHT_FACTOR + FLAT_CAP_HEIGHT_MARGIN_M) + FLAT_DRIFT_RAD, PI)
+		var geo_height := height
+		var geo_up := up0
+		var geo_x := axis_x
+		var geo_y := axis_y
+		if stale_geo.size() == 2:  # (diagnostics, STARSIM_BAKED_STALE_GEO)
+			geo_height = stale_geo[0]
+			geo_up = up0.rotated(axis_y, deg_to_rad(stale_geo[1]))
+			geo_x = Vector3(0.0, 1.0, 0.0).cross(geo_up).normalized()
+			geo_y = geo_up.cross(geo_x)
+		var cap := minf(visible_cap_rad(geo_height * FLAT_CAP_HEIGHT_FACTOR + FLAT_CAP_HEIGHT_MARGIN_M) + FLAT_DRIFT_RAD,
+				PI)
 		_geo_count += 1
-		var layout := flat_layout(height, cap, _pixel_angle * LEVEL_DROP_HYSTERESIS)
-		plan.merge({"geo": {"id": _geo_count, "anchor": camera, "up0": up0, "axis_x": axis_x, "axis_y": axis_y,
-			"cap": cap, "levels": layout["levels"], "m0": layout["m0"], "n": layout["n"], "height": height,
+		var layout := flat_layout(geo_height, cap, _pixel_angle * LEVEL_DROP_HYSTERESIS)
+		plan.merge({"geo": {"id": _geo_count, "anchor": camera, "up0": geo_up, "axis_x": geo_x, "axis_y": geo_y,
+			"cap": cap, "levels": layout["levels"], "m0": layout["m0"], "n": layout["n"], "height": geo_height,
 			"pixel_angle": _pixel_angle, "weather": weather}, "geo_new": true})
 	plan["cap"] = plan["geo"]["cap"]
 	plan["flat_levels"] = plan["geo"]["levels"]
@@ -342,6 +364,8 @@ func _plan(camera: Vector3, sun: Vector3, weather: Dictionary) -> Dictionary:
 
 ## True while the flat geometry's cap holds the camera's visible cap.
 func _geo_holds(geo: Dictionary, camera: Vector3) -> bool:
+	if stale_geo.size() == 2:
+		return true  # (diagnostics: kept)
 	var stretch := Vector3(1.0, CloudLayer.POLAR_STRETCH, 1.0)
 	var drift := (camera * stretch).normalized().angle_to(geo["up0"])
 	return drift + visible_cap_rad(_height_m(camera)) <= geo["cap"]
@@ -350,6 +374,8 @@ func _geo_holds(geo: Dictionary, camera: Vector3) -> bool:
 ## True while the flat geometry's levels suit this height: within its height range, its first level not coarser than
 ## the footprint asks for (descending), nor the coarse layout of below FLAT_FINE_HEIGHT_M above it (climbing).
 func _geo_layout_holds(geo: Dictionary, height: float) -> bool:
+	if stale_geo.size() == 2:
+		return true  # (diagnostics: kept)
 	var h: float = geo["height"]
 	if height > h * FLAT_HEIGHT_RANGE + FLAT_CAP_HEIGHT_MARGIN_M or height < h / FLAT_HEIGHT_RANGE - FLAT_CAP_HEIGHT_MARGIN_M:
 		return false

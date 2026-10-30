@@ -1299,3 +1299,15 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   the two renders (tried) kept the mean but drew both uncorrelated shape sets at half alpha everywhere. The empty-block
   skip took the first sphere root ahead of t for the block's height exit; the roots' ~1 m float32 rounding let a ray
   just under a top shell miss both and skip to an x / y face (pixel holes in square rings in cirrus overhead).
+
+## Baked prototype step 5 terminator ruling and the far field's entry switch (commits 85bd9f5 / earlier, superseded 2026-10-30 by step 6)
+- What it was: the far field's column light (`cloud_far_cloudy_radiance`) turned its entry normal toward the Sun only
+  while mu0 > 0 (`entry = mu0 > 0 ? cloud_entry_normal(...) : up`); below the cloud's local horizon it lit the bare
+  slab at the 0.02 floor. Step 5 ruled the remaining day / night edge on the flat levels "the Earth's true shadow edge,
+  as sharp as in the far-field reference" and only spread it over the column's heights (`CLOUD_BAKED_FLAT_TERMINATOR_MU`,
+  kept). The flat levels drew nothing beyond the shown geometry's cap.
+- Why superseded (step 6, user in VR): the switch dropped the light ~7 x at mu0 = 0 (entry cosine 0.15 -> 0.02): a
+  step x 1.4 in a nadir view (3 000 km, overcast slab) and a hard cut toward the Sun at the terminator; physically the
+  edge ends by the Sun's grazing-path transmittance, its disc's visible fraction and the twilight sky, all continuous.
+  The old march's far tier keeps the switch (old march unchanged). A camera faster than the re-bake saw the clouds end
+  at the old geometry's cap (a circle inside the disc): now the far field's column beyond it.
