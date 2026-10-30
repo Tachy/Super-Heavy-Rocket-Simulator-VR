@@ -208,7 +208,7 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - **Wolkenverfahren** [Entschieden 2026-10-30]: die Wolken kommen bei jedem Start aus dem **Volumen** (Form und Licht
   der Wolken einmal fest im Raum vorberechnet, pro Bild nur nachgeschlagen; VR-Wolkenmitte winkelgleich); bis das erste
   Volumen gebacken ist, zeigt die Zeile "(Volumen wird gebacken)" und es sind noch keine Wolken zu sehen. Das Volumen
-  ist das einzige Wolkenverfahren [Entschieden 2026-10-30; F7 und F9 entfallen]. **F8** schaltet die Auflösung der
+  ist das einzige Wolkenverfahren [Entschieden 2026-10-30]. **F8** schaltet die Auflösung der
   Wolken reihum (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse); gilt am Desktop und in VR und steht mit der Bildrate
   im Info-Text unter der Wetterzeile ("Wolken: ..."). Startwert über das Argument `--cloud_divisor=<n>`. Die
   Wolkenschatten auf Boden, Luft und Fahrzeugen (direkte Sonne) folgen in jeder Höhe den gezeichneten Wolken.

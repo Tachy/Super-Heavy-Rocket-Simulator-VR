@@ -54,7 +54,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   profile (the vertical profile rule, as `cloud_snapshot_cell` at the column) over the base layer's above-ground part
   divided by that of the profile times the ramp (Simpson on the pieces between the kinks: exact up to rounding), so
   what the cut removes under the base is put back above it and the rendered column keeps its water path (cloud_check
-  section 12 on a built snapshot: 0.9993 of the core's optical depth; the uncut layers 0.9992). The far tier, the CPU
+  section 12 on a built snapshot: 0.9993 of the core's optical depth; the uncut layers 0.9992). The CPU
   light and the shadow maps read the layer means without the cut: their column water path is the same. Flat sharp
   bases, nothing hangs below them, silhouettes above the base's layer untouched; nothing is fetched above 12 km
   (Everest 8.85 km + the 3 km boundary layer, rounded up).
@@ -338,26 +338,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   the larger of their lowest colour and this pixel's T x their lowest colour per T (`CLOUD_FLOOR_MIN_T`): a negative
   colour belongs to its T x scene, so a cloud body next to the shadowed sky cannot take the sky's -L; 0 without air
   shadow. Static (fixed points), world space (both VR eyes), the eclipse's unocculted fraction applied. Weather off or
-  no cloud in the Sun's way: L = 0 exactly. The numbers below are the old march's (static clouds Task 9b) with the
-  old maps; the baked air shadow's: "Baked volume: cloud shadows from the bake".
-- Backlit cumulus (cloud_check 14: cf 0.5, in-cloud tau 50, 1-2 km, Sun 15 deg up, HDR medians; air shadow off ->
-    on): 2-6 deg from the Sun sky 2.59 -> 1.72, body 2.27 -> 0.586 (body / sky 0.88 -> 0.34), rim p90 / body 1.77 ->
-    4.01 (4.03 in the full run; accepted 2-5 x [E] in this band, see the open points); converged (128
-    segments: 4.01); 6-10 deg sky
-    1.86 -> 1.40, body 1.72 -> 0.69 (0.49), rim / body 1.63 -> 2.77; 10-15 deg sky 1.17 -> 0.80, body 1.12 -> 0.56
-    (0.70), rim / body 1.87 -> 2.84. Under a cf 0.5 deck at a 15-deg Sun the beam crosses ~3.7 km of the cloud layer:
-    the air below it lies ~70 % in shadow (beam cover 0.70), so the aureole of the air in front of the body nearly
-    vanishes.
-  - Crepuscular rays (cloud_check 14: cf 0.4 deck, Sun 4 deg, the sky's on / off ratio per column over its running
-    median of 61 columns = 7.6 deg [E]): toward the Sun p90 - p10 of the residual 3.6 % (>= 2 % [E]: the eye's contrast
-    threshold for extended bands); the ray-free control (T_c 0.5 everywhere, the same deck and view) 1.1 %. Away from the Sun the mean loss is 6.8 % but the columns differ
-    by 0.15 % only: the long rays through many shadows average the anti-crepuscular rays out (checked as presence:
-    loss >= 1 %).
-  - The segment sum against the scene's single scattering over the same stretch (debug output 8, T_c 0.5 uniform,
-    clear sky pixels away from clouds): median within 0.03 %, p5 / p95 within 0.2 % (Sun 4 deg, view 1 / 3 deg up),
-    0.6 % (view 30 deg), 1.6 % (Sun +0.3 deg); Sun -0.5 deg: S1 ~0, |loss - S1| p95 0.08 % of the pixel.
-  - No negative final HDR in section 14's scenes (backlit, rays, setting Sun +0.3 / -0.5 deg with the horizon in view).
-  - Cost (VR proxy, whole frame, `vr-performance.md`): +1.0-1.1 ms backlit cumulus, +4.0 ms the 9 km deck view (analog weather, tops up to the upper layers: no gain).
+  no cloud in the Sun's way: L = 0 exactly. The baked air shadow's numbers: "Baked volume: cloud shadows from the bake"
+  (the earlier march's with the old maps: `docs/history/weather-clouds.md`).
   
 - **Far field** (Task 10; `cloud_far.gdshaderinc`, `earth_clouds.gdshader` = `earth_surface.gdshaderinc` with
   `EARTH_CLOUDS`): beyond 1.5e7 m from the Earth's centre (`CelestialBody.SCALED_SPACE_DISTANCE_M`, the same distance
@@ -379,7 +361,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     the closed form likewise under the fidelity flag; plus the sky's source (closed form, linear in depth: integrated
     exactly; its slope from the source at the slab's base - a unit depth beyond a slab thinner than 1 was clamped to
     the slab and underestimated it) x the sky irradiance there; seen from below (view cosine < 0, the cloud pass's
-    far tier under a far layer) the same sources integrated from the slab's base, attenuated by exp(-w (tau - t) /
+    flat-level column model under a layer above the eye) the same sources integrated from the slab's base, attenuated by exp(-w (tau - t) /
     |mu|): the diffusely transmitted light of the base;
   - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
     (1 - alpha) x the ground; the ground lit through the column (`cloud_ground_light`'s column tier, the terrain's
@@ -490,8 +472,9 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   noise of 20 km cells against the height's weight, each region switching over 0.08 of the noise, so a pixel shows one
   render - the volume with the hand-over behind it, or the flat levels alone; cirrus check 2026-10-30: scaling the
   volume's extinction by 1 - w kept its shapes opaque while the flat levels' half-alpha shapes filled the gaps - grey
-  translucent shapes, lower-half mean alpha 0.40 at 50 km against 0.32 old march; now 0.31), above 62 km the volume
-  is neither baked nor marched (below
+  translucent shapes, lower-half mean alpha 0.40 at 50 km now 0.31), above 62 km the volume is not marched and its
+  light is not baked; the levels the footprint keeps are baked for S only (shape, occupancy, S - the shadows' source at
+  every height; a re-bake every ~2.6 s in orbit, ~20 bake frames at 400 km, cost not yet measured in the headset) (below
   40 km the volume levels are unchanged; `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER` keeps the volume at every
   height - its coarse voxel levels close a deck's sub-voxel gaps, so their square stayed visible against the flat
   cover). Cover and light follow the scaled-space far field (user ruling 2026-10-29: the old whole-Earth far field's
@@ -500,7 +483,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   grid-mean depth, the far field's heights (steps 4-5 below) - and a pattern P: the share of 3 x 3 (4 x 4) taps whose prefiltered
   shape (the layers' depth-weighted types at the nadir height, at the taps' spacing; every second tap read unaligned from
   1.5 km cells; the taps' offsets a smooth field, no per-cell jitter) exceeds the prefilter threshold of C_col (mean
-  C_col: the old far tier's `cloud_far_cover`), faded to C_col itself from 6.4 to 12.8 km cells (the 32 km tile's
+  C_col: the scaled-space far field's `cloud_far_cover`), faded to C_col itself from 6.4 to 12.8 km cells (the 32 km tile's
   lattice). F (RGBA16F) = (P, depth, nadir / grazing height x depth), T (RG16F) = (C_col, optical top x C_col) (both
   shared by the sets).
   Per pixel: the crossing of the column's height (steps 4-5 below), then F and T; the pattern taken to the view's slant
@@ -518,7 +501,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   CLOUD_BAKED_DIAG_LEVEL` (the last: flat level / blend / optical top as colour); render_check `--centre_dump=<file>` (the march image, raw RGBA16F). Numbers and
   images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer2-report.md`.
 - **Baked volume steps 4-5: flat levels per pixel (2026-10-30)**: (a) the flat bake takes the field's column with
-  the cubic B-spline (`cloud_column_mean_depth_smooth`, as the far tier's column model); the march reconstructs F and T
+  the cubic B-spline (`cloud_column_mean_depth_smooth`, as the scaled-space far field's column model); the march reconstructs F and T
   with the cubic B-spline (four bilinear fetches each, `cloud_baked_flat_bspline`) - no cell drawn as a square.
   (b) Heights (step 5): per column the far field's own placement (`cloud_far_depth_height` of `cloud_far_seen_depth`)
   for a nadir view and for mu = 0.2, depth-weighted (F.z / F.w = height km x depth, so a clear neighbour does not lower

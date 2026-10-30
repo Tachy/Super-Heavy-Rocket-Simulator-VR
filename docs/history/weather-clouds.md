@@ -2591,3 +2591,22 @@ The user ruled the baked volume the only cloud method (2026-10-30); the last sta
   0.00331). That CPU value lights the vehicles (direct Sun) and enters the eye adaptation (`Atmosphere`
   `cloud_light_at`); the ground and the clouds themselves take the GPU paths (shadow maps, march). Open: whether the
   vehicles' and the eye's direct Sun should follow the drawn shapes' transmittance at the light point.
+- (Air shadow numbers of the earlier march with the old shadow maps, moved from the subsystem file 2026-10-30) Verbatim:
+- Backlit cumulus (cloud_check 14: cf 0.5, in-cloud tau 50, 1-2 km, Sun 15 deg up, HDR medians; air shadow off ->
+    on): 2-6 deg from the Sun sky 2.59 -> 1.72, body 2.27 -> 0.586 (body / sky 0.88 -> 0.34), rim p90 / body 1.77 ->
+    4.01 (4.03 in the full run; accepted 2-5 x [E] in this band, see the open points); converged (128
+    segments: 4.01); 6-10 deg sky
+    1.86 -> 1.40, body 1.72 -> 0.69 (0.49), rim / body 1.63 -> 2.77; 10-15 deg sky 1.17 -> 0.80, body 1.12 -> 0.56
+    (0.70), rim / body 1.87 -> 2.84. Under a cf 0.5 deck at a 15-deg Sun the beam crosses ~3.7 km of the cloud layer:
+    the air below it lies ~70 % in shadow (beam cover 0.70), so the aureole of the air in front of the body nearly
+    vanishes.
+  - Crepuscular rays (cloud_check 14: cf 0.4 deck, Sun 4 deg, the sky's on / off ratio per column over its running
+    median of 61 columns = 7.6 deg [E]): toward the Sun p90 - p10 of the residual 3.6 % (>= 2 % [E]: the eye's contrast
+    threshold for extended bands); the ray-free control (T_c 0.5 everywhere, the same deck and view) 1.1 %. Away from the Sun the mean loss is 6.8 % but the columns differ
+    by 0.15 % only: the long rays through many shadows average the anti-crepuscular rays out (checked as presence:
+    loss >= 1 %).
+  - The segment sum against the scene's single scattering over the same stretch (debug output 8, T_c 0.5 uniform,
+    clear sky pixels away from clouds): median within 0.03 %, p5 / p95 within 0.2 % (Sun 4 deg, view 1 / 3 deg up),
+    0.6 % (view 30 deg), 1.6 % (Sun +0.3 deg); Sun -0.5 deg: S1 ~0, |loss - S1| p95 0.08 % of the pixel.
+  - No negative final HDR in section 14's scenes (backlit, rays, setting Sun +0.3 / -0.5 deg with the horizon in view).
+  - Cost (VR proxy, whole frame, `vr-performance.md`): +1.0-1.1 ms backlit cumulus, +4.0 ms the 9 km deck view (analog weather, tops up to the upper layers: no gain).
