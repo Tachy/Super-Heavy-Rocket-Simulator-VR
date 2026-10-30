@@ -1293,3 +1293,9 @@ level 0 back 74 frames - below ~0.4 ms a level's dispatch did not shrink with it
   stayed at the latitude); a straight "roof" edge at 1 500 km low Sun (the Earth's shadow edge on one height per column,
   kinked where the height jumped; the far-field reference shows it too); staircase outlines (binary per pixel at divisor
   2); uniform white / grey paper cut-outs; marbled streaks at 1 500-4 000 km (the warp's shear).
+- Baked prototype, superseded 2026-10-30 (cirrus check, `baked-cirrus-report.md`): the takeover (40-60 km) scaled the
+  volume's extinction by 1 - w and drew the flat levels' alpha x w behind it (dense volume shapes stayed opaque, the
+  flat shapes filled the gaps at half alpha: grey translucent shapes, mean alpha +23 % at 50 km); a plain cross-fade of
+  the two renders (tried) kept the mean but drew both uncorrelated shape sets at half alpha everywhere. The empty-block
+  skip took the first sphere root ahead of t for the block's height exit; the roots' ~1 m float32 rounding let a ray
+  just under a top shell miss both and skip to an x / y face (pixel holes in square rings in cirrus overhead).

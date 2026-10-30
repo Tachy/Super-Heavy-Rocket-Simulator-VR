@@ -876,7 +876,7 @@ struct CloudBakedPoint {
 CloudBakedPoint cloud_baked_point(int si, float gx, float gy, float h, float footprint_m, int k_min) {
 	CloudBakedPoint q;
 	float l = cloud_baked_lod(si, max(abs(gx), abs(gy)), footprint_m);
-	q.keep = 1.0 - cloud_baked_flat_weight_at(si, l);
+	q.keep = 1.0 - cloud_baked_flat_weight_at(si, l);  // (the takeover: region by region, cloud_baked_set)
 	q.k = cloud_baked_level_of(si, l, k_min, q.blend);
 	int levels = int(baked.sets[si].axis_y.w);
 	q.uvw = cloud_baked_uvw(si, min(q.k, levels - 1), gx, gy, h);
@@ -1040,9 +1040,9 @@ vec4 cloud_baked_flat_bspline(int si, int which, vec3 uvl, float n) {
 }
 
 // The flat levels' weight at a volume sample of continuous level l (cloud_baked_lod; 0 the volume alone, 1 the flat
-// levels alone; the volume's extinction scaled by 1 - w, the flat levels' alpha by w): the larger of the hand-over
-// beyond the volume's last level K - 1 (across the same band as any level to the next) and the takeover
-// (CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M; while the flat levels start finer than the volume's end).
+// levels alone; the volume's extinction scaled by 1 - w, the flat levels' alpha by w): the hand-over beyond the
+// volume's last level K - 1 (across the same band as any level to the next). The takeover is a cross-fade of the
+// renders (cloud_baked_takeover_weight).
 float cloud_baked_flat_weight_at(int si, float l) {
 	if (baked.sets[si].outer.x < 0.5) {
 		return 0.0;
@@ -1055,15 +1055,71 @@ float cloud_baked_flat_weight_at(int si, float l) {
 	return 0.0;
 #endif
 	float last = baked.sets[si].axis_y.w - 1.0;
-	float w = smoothstep(last - max(cloud_baked_band(), CLOUD_BAKED_FLAT_SEAM_BAND), last, l);
-	float m0 = baked.sets[si].outer.z;
-	if (m0 < last + 1.0) {
-#ifndef CLOUD_BAKED_FLAT_NO_TAKEOVER
-		w = max(w, smoothstep(CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.x, CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.y,
-				cloud_camera_height_m));
-#endif
+	return smoothstep(last - max(cloud_baked_band(), CLOUD_BAKED_FLAT_SEAM_BAND), last, l);
+}
+
+// The takeover's weight (camera height; 0 below CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.x, 1 above .y): the two renders -
+// the volume with the flat levels' hand-over behind it, and the flat levels alone - switched region by region by it
+// (cloud_baked_takeover_local; cirrus check
+// 2026-10-30: scaling the volume's extinction by 1 - w kept its dense shapes nearly opaque at w 0.5 while the flat
+// levels' half-alpha shapes filled the gaps - grey translucent shapes at 50 km, the lower half's mean alpha 0.40
+// against 0.31 (volume) / 0.34 (flat) alone).
+float cloud_baked_takeover_weight(int si) {
+	if (baked.sets[si].outer.x < 0.5) {
+		return 0.0;
 	}
-	return w;
+#ifdef CLOUD_BAKED_FLAT_ONLY
+	return 1.0;
+#endif
+#ifdef CLOUD_BAKED_VOLUME_ONLY
+	return 0.0;
+#endif
+#ifdef CLOUD_BAKED_FLAT_NO_TAKEOVER
+	return 0.0;
+#endif
+	if (baked.sets[si].outer.z >= baked.sets[si].axis_y.w) {
+		return 0.0;
+	}
+	return smoothstep(CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.x, CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.y,
+			cloud_camera_height_m);
+}
+
+// [E] The takeover's regions: a value noise of the Earth-fixed point (cells of CLOUD_BAKED_TAKEOVER_CELL_M, smooth
+// trilinear between hashed corners) against the takeover's weight, each region switching over CLOUD_BAKED_TAKEOVER_SOFT
+// of the noise. A plain cross-fade of the two renders showed both shape sets (uncorrelated: the flat levels' tile
+// breaking) at half alpha everywhere - grey translucent shapes at 50 km; per region one render is drawn, the mean over
+// the regions still follows the weight (0 / 1 at the band's ends).
+const float CLOUD_BAKED_TAKEOVER_CELL_M = 20000.0;
+const float CLOUD_BAKED_TAKEOVER_SOFT = 0.08;
+
+float cloud_baked_hash(ivec3 c) {
+	uint h = uint(c.x) * 0x8da6b343u ^ uint(c.y) * 0xd8163841u ^ uint(c.z) * 0xcb1ab31fu;
+	h ^= h >> 16;
+	h *= 0x7feb352du;
+	h ^= h >> 15;
+	h *= 0x846ca68bu;
+	h ^= h >> 16;
+	return float(h) * (1.0 / 4294967295.0);
+}
+
+// The local takeover weight at the Earth-local point p (from the Earth's centre, m) for the band's weight w.
+float cloud_baked_takeover_local(vec3 p, float w) {
+	if (w <= 0.0 || w >= 1.0) {
+		return w;
+	}
+	vec3 x = p / CLOUD_BAKED_TAKEOVER_CELL_M;
+	vec3 i = floor(x);
+	vec3 f = x - i;
+	f = f * f * (3.0 - 2.0 * f);
+	ivec3 b = ivec3(i);
+	float n = mix(mix(mix(cloud_baked_hash(b), cloud_baked_hash(b + ivec3(1, 0, 0)), f.x),
+					mix(cloud_baked_hash(b + ivec3(0, 1, 0)), cloud_baked_hash(b + ivec3(1, 1, 0)), f.x), f.y),
+			mix(mix(cloud_baked_hash(b + ivec3(0, 0, 1)), cloud_baked_hash(b + ivec3(1, 0, 1)), f.x),
+					mix(cloud_baked_hash(b + ivec3(0, 1, 1)), cloud_baked_hash(b + ivec3(1, 1, 1)), f.x), f.y), f.z);
+	n = smoothstep(0.15, 0.85, n);  // (the trilinear mix of uniform corners clusters about 0.5: spread toward uniform)
+	float s = CLOUD_BAKED_TAKEOVER_SOFT;
+	float level = mix(-s, 1.0 + s, w);
+	return smoothstep(n - s, n + s, level);
 }
 
 // The footprint's continuous level (cell c0 2^l = the footprint; the flat levels' rule).
@@ -1512,12 +1568,22 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 					float edge = ((float(b.y) + (g.gdy > 0.0 ? 1.0 : 0.0)) * bs - 0.5 * n) * c;
 					exit_m = min(exit_m, (edge - gy) / g.gdy);
 				}
+				// The block's height exit by the ray's direction (cirrus check): rising, the top shell's forward crossing;
+				// descending, the bottom's first crossing, else (it turns back up above the bottom) the top's. Taken by
+				// the direction, never by "the first root ahead of t": the roots' float32 rounding (~1 m at 6 378 km
+				// radii) against cloud_height_along's put a ray just under the top shell past both roots, so the
+				// skip went to an x / y face kilometres away - straight through the sheet (pixel holes in cirrus
+				// overhead, square rings along the blocks). A root just behind t means the shell is here (exit 0).
 				float z_lo = baked.sets[si].band.x + float(b.z) * bs * dz;
-				vec2 lo = cloud_sphere_crossing(ray, z_lo);
 				vec2 hi = cloud_sphere_crossing(ray, z_lo + bs * dz);
-				float next_lo = lo.x > t ? lo.x : (lo.y > t ? lo.y : 1.0e30);
-				float next_hi = hi.x > t ? hi.x : (hi.y > t ? hi.y : 1.0e30);
-				exit_m = min(exit_m, min(next_lo, next_hi) - t);
+				float next_z = hi.y;
+				if (slope < 0.0) {
+					vec2 lo = cloud_sphere_crossing(ray, z_lo);
+					if (lo.x <= lo.y && lo.x > t - CLOUD_BAKED_BAND_TOLERANCE_M) {
+						next_z = lo.x;
+					}
+				}
+				exit_m = min(exit_m, max(next_z, t) - t);
 				t += max(exit_m, 0.0) + max(CLOUD_BAKED_EXIT_NUDGE * c, 1.0);
 				t_clear = t;
 				continue;
@@ -1633,7 +1699,7 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 	transmittance = 1.0;
 	cloud_m = 0.0;
 	float alpha = 0.0;
-	if (volume && int(baked.sets[si].misc.z) < int(baked.sets[si].axis_y.w)) {
+	if (volume && int(baked.sets[si].misc.z) < int(baked.sets[si].axis_y.w) && cloud_baked_takeover_weight(si) < 1.0) {
 		vec3 radiance;
 		float weighted;
 		cloud_baked_march(si, ray, dir, eye, d0, d1, radiance, transmittance, weighted);
@@ -1645,8 +1711,10 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 			color = air_transmittance * radiance + alpha * air_light;
 		}
 	}
-	// The flat levels from where their weight starts, inside the 20 km shell, behind the volume.
-	if (baked.sets[si].outer.x < 0.5 || transmittance < CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
+	// The flat levels from where their weight starts, inside the 20 km shell: behind the volume by the hand-over's
+	// weight (render A), alone (render B), A and B cross-faded by the takeover's weight.
+	float wt = cloud_baked_takeover_weight(si);
+	if (baked.sets[si].outer.x < 0.5 || (transmittance < CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE && wt <= 0.0)) {
 		return;
 	}
 #ifdef CLOUD_BAKED_VOLUME_ONLY
@@ -1656,23 +1724,35 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 	CloudBakedRay g = cloud_baked_ray(si, eye, dir);
 	float t_from = cloud_baked_flat_start(si, g, pixel_angle);
 	vec2 shell = cloud_sphere_crossing(ray, CLOUD_TOP_M);
-	if (shell.x > shell.y || shell.y <= t_from || t_from >= scene_m) {
-		return;
+	vec3 color_f = vec3(0.0);
+	float alpha_f = 0.0;
+	float dist_f = 0.0;
+	if (shell.x > shell.y || shell.y <= t_from || t_from >= scene_m
+			|| !cloud_baked_flat_shade(si, ray, dir, eye, max(t_from, shell.x), scene_m, pixel_angle, color_f, alpha_f,
+					dist_f)) {
+		color_f = vec3(0.0);
+		alpha_f = 0.0;
 	}
-	vec3 color_f;
-	float alpha_f;
-	float dist_f;
-	if (!cloud_baked_flat_shade(si, ray, dir, eye, max(t_from, shell.x), scene_m, pixel_angle, color_f, alpha_f,
-			dist_f)) {
-		return;
+	if (alpha_f > 0.0 && transmittance >= CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
+		float w = cloud_baked_flat_weight_at(si, cloud_baked_lod(si, max(abs(g.gx0 + dist_f * g.gdx),
+				abs(g.gy0 + dist_f * g.gdy)), pixel_angle * dist_f));
+		float alpha_w = alpha_f * w;
+		float alpha_all = alpha + transmittance * alpha_w;
+		cloud_m = alpha_all > 1.0e-6 ? (alpha * cloud_m + transmittance * alpha_w * dist_f) / alpha_all : 0.0;
+		color += transmittance * w * color_f;
+		transmittance *= 1.0 - alpha_w;
 	}
-	float w = cloud_baked_flat_weight_at(si, cloud_baked_lod(si, max(abs(g.gx0 + dist_f * g.gdx), abs(g.gy0 + dist_f * g.gdy)),
-			pixel_angle * dist_f));
-	alpha_f *= w;
-	float alpha_all = alpha + transmittance * alpha_f;
-	cloud_m = alpha_all > 1.0e-6 ? (alpha * cloud_m + transmittance * alpha_f * dist_f) / alpha_all : 0.0;
-	color += transmittance * w * color_f;
-	transmittance *= 1.0 - alpha_f;
+	if (wt > 0.0) {
+		// Region by region (cloud_baked_takeover_local): each ground patch shows one render, its edge soft.
+		vec2 x2 = cloud_sphere_crossing(ray, CLOUD_BAKED_FLAT_PATTERN_HEIGHT_M);
+		float t_p = x2.x <= x2.y && x2.x > 0.0 ? x2.x : (x2.y > 0.0 ? x2.y : CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.y);
+		wt = cloud_baked_takeover_local(atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * t_p, wt);
+		float alpha_a = 1.0 - transmittance;
+		float alpha_mix = mix(alpha_a, alpha_f, wt);
+		cloud_m = alpha_mix > 1.0e-6 ? mix(alpha_a * cloud_m, alpha_f * dist_f, wt) / alpha_mix : 0.0;
+		color = mix(color, color_f, wt);
+		transmittance = 1.0 - alpha_mix;
+	}
 }
 
 // One ray of the baked volume and its flat outer levels: dir (Earth-local unit) from eye up to scene_m. Out: the stored

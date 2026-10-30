@@ -668,7 +668,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   cloud fraction), the air in front and the air shadow's loss (16 segments x 2 points in this kernel instead of 32 x
   3). No outline pass (fix 1, 2026-10-29: the near rims' holes, stairs, wood-grain contours and shrunken, torn
   outlines came from the cell-size clear steps, the half-cell in-cloud steps and the bake's threshold; march +0.3-0.5 ms
-  in the mock's fast GPU state; report `baked-fix1-report.md`). Diagnostics: `STARSIM_BAKED_DEFINES=<A,B>` (extra
+  in the mock's fast GPU state; report `baked-fix1-report.md`). Empty blocks exit through the height shell in the
+  ray's direction (rising: the top's forward crossing; descending: the bottom's first, else the top's), a root just
+  behind t counting as "here" (cirrus check 2026-10-30: taking the first root ahead of t let the roots' ~1 m float32
+  rounding put a ray just under a top shell past both roots, the skip then ran to an x / y face kilometres away -
+  pixel holes in square rings in cirrus overhead). Ice: the bake keeps no ice channel; the ice share only picks the
+  shapes (cirrus sheets) and the finer vertical taps, and ice scatters with the liquid phase function in both marches
+  (`cloud_optics.hpp`'s documented simplification); report `baked-cirrus-report.md`. Diagnostics:
+  `STARSIM_BAKED_DEFINES=<A,B>` (extra
   defines on every kernel), `STARSIM_BAKED_MEMORY_MB`, `STARSIM_BAKED_CELL0`. Re-bake (into the second set, ~117 dispatches of <= 3.6 ms, 21-27 ms GPU in all, one per frame) when the camera
   is 3.2 km from the anchor, the Sun turns 0.5 deg or the weather changes; the new set is cross-faded in over 8 frames
   (both sets marched, the renders mixed). Memory 216 MB per set (two sets). Beyond level 5: the flat outer levels (next
@@ -685,7 +692,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   of 320 columns); above, at the footprint's level at the nearest cloud, coarser while the layout exceeds 300 MB
   (`FLAT_MEMORY_CAP_BYTES`; 100 km: 4 levels from 400 m, ISS: 4 from 800 m). Columns no camera of the geometry's height
   range (x / 1.25) and pixel angle (x 1.25) can fetch are not baked (re-bake outside those ranges). Takeover: from 40 to
-  60 km camera height the flat levels replace the volume, above 62 km the volume is neither baked nor marched (below
+  60 km camera height the flat levels replace the volume region by region (`cloud_baked_takeover_local`: a value
+  noise of 20 km cells against the height's weight, each region switching over 0.08 of the noise, so a pixel shows one
+  render - the volume with the hand-over behind it, or the flat levels alone; cirrus check 2026-10-30: scaling the
+  volume's extinction by 1 - w kept its shapes opaque while the flat levels' half-alpha shapes filled the gaps - grey
+  translucent shapes, lower-half mean alpha 0.40 at 50 km against 0.32 old march; now 0.31), above 62 km the volume
+  is neither baked nor marched (below
   40 km the volume levels are unchanged; `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER` keeps the volume at every
   height - its coarse voxel levels close a deck's sub-voxel gaps, so their square stayed visible against the flat
   cover). Cover and light follow the scaled-space far field (user ruling 2026-10-29: the old whole-Earth far field's

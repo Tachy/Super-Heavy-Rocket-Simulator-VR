@@ -16,7 +16,8 @@
 #          [--legacy_hud] (F1: the old HUD too)
 # Weather: off in a render check unless --weather[=900 / =online] (online: waits for the downloads, at most 900 s or
 #          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
-#          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
+#          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>[,ice] (ice: the slab drawn as ice, cirrus; a
+#          debug view); any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
 #          resolution divisor instead, fractional allowed: 1.5),
 #          --cloud_method=old|hybrid|hybrid_no_skip|hybrid_old_light|baked (the hybrid march / baked volume prototypes, CloudLayer.march_method: the view cache off, the world volume's upkeep on and settled
@@ -1675,6 +1676,13 @@ func _show_weather_file(world: World) -> void:
 	if not snapshot.get("ok", false):
 		_refuse("render_check: " + str(snapshot.get("error", "")))
 		return
+	if value.begins_with("slab:") and value.trim_prefix("slab:").split(",").size() > 4 			and value.trim_prefix("slab:").split(",")[4] == "ice":
+		# Debug (baked cirrus check): the slab's extinction marked as ice (ice share 1 everywhere) - the renderer's
+		# cirrus look (shapes, bake taps); the extinction stays the given water's.
+		var ice := PackedByteArray()
+		ice.resize((snapshot["cloud_ice_texels"] as PackedByteArray).size())
+		ice.fill(255)
+		snapshot["cloud_ice_texels"] = ice
 	world.clouds.wait_until_ready()
 	world.clouds.show_now(snapshot, snapshot, 0.0)
 	world.core.weather_set_active(file, file, 0.0)
