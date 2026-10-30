@@ -148,24 +148,8 @@ func _create() -> void:
 	_globals_buffer = _rd.uniform_buffer_create(_march.block_size)
 	_eyes_buffer = _rd.uniform_buffer_create(EYES_BLOCK_SIZE)
 	_centre_buffer = _rd.uniform_buffer_create(CENTRE_BLOCK_SIZE)
-	for linear in [false, true]:
-		for repeat in [false, true]:
-			var state := RDSamplerState.new()
-			var filter := RenderingDevice.SAMPLER_FILTER_LINEAR if linear else RenderingDevice.SAMPLER_FILTER_NEAREST
-			state.min_filter = filter
-			state.mag_filter = filter
-			state.mip_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
-			var mode := RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT if repeat \
-					else RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
-			state.repeat_u = mode
-			state.repeat_v = mode
-			state.repeat_w = mode
-			_samplers["%s|%s|false" % [linear, repeat]] = _rd.sampler_create(state)
-	_samplers["true|true|true"] = _rd.sampler_create(CloudShaderPort.mipmap_sampler_state())
-	_fallback["sampler2D"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, Vector2i(1, 1), 1,
-			RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, PackedByteArray([0, 0, 0, 0]))
-	_fallback["sampler3D"] = _texture(RenderingDevice.TEXTURE_TYPE_3D, Vector2i(1, 1), 1,
-			RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, PackedByteArray([0, 0, 0, 0]))
+	_samplers = CloudRD.create_samplers(_rd)
+	_fallback = CloudRD.create_fallbacks(_rd)
 
 
 ## CloudKernels specs of the pass's kernels `names` (PASS_KERNELS): CLOUD_<NAME>, no globals of the includes needed.
@@ -237,7 +221,7 @@ func _skip_frame(view_count: int) -> void:
 	stats = {"valid": false, "waiting": true}
 
 
-func _texture(type: int, size: Vector2i, layers: int, format: int, data := PackedByteArray()) -> RID:
+func _texture(type: int, size: Vector2i, layers: int, format: int) -> RID:
 	var tf := RDTextureFormat.new()
 	tf.texture_type = type
 	tf.width = size.x
@@ -249,9 +233,6 @@ func _texture(type: int, size: Vector2i, layers: int, format: int, data := Packe
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT \
 			| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT \
 			| RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT  # (copy-to: _skip_frame clears the result)
-	if not data.is_empty():
-		tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
-		return _rd.texture_create(tf, RDTextureView.new(), [data])
 	return _rd.texture_create(tf, RDTextureView.new())
 
 
@@ -427,23 +408,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var camera := hi + lo
 
 	# Set 0 of the march: the globals' block and samplers.
-	_rd.buffer_update(_globals_buffer, 0, _march.block_size, _march.pack())
-	var set0: Array[RDUniform] = []
-	var block := RDUniform.new()
-	block.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
-	block.binding = 0
-	block.add_id(_globals_buffer)
-	set0.append(block)
-	var textures := _march.sampler_textures()
-	for i in range(_march.samplers.size()):
-		var s: Dictionary = _march.samplers[i]
-		var u := RDUniform.new()
-		u.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
-		u.binding = s["binding"]
-		u.add_id(_samplers["%s|%s|%s" % [s["linear"], s["repeat"], s["mipmap"]]])
-		var texture: RID = textures[i]
-		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
-		set0.append(u)
+	var set0 := CloudRD.set0(_rd, _march, _globals_buffer, _samplers, _fallback)
 	# The march: the baked volume's (CloudBaked; its bake dispatches run in frame(), before the march). The frame shows
 	# no clouds while its kernels or its first set are not ready (_skip_frame).
 	var pixel_angle: float = centre_view["pixel_angle"]
@@ -492,8 +457,9 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	centre_bytes.append_array([centre_full.x, centre_full.y, low.x, low.y, 1.0 if stereo else 0.0, 0.0, 0.0, 0.0])
 	centre_bytes.append_array([warp.x, warp.y, warp.z, warp.w])
 	_rd.buffer_update(_centre_buffer, 0, CENTRE_BLOCK_SIZE, centre_bytes.to_byte_array())
-	var march_set1: Array = [_ubo(_centre["buffer"]), _tex(1, nearest_clamp, buffers.get_depth_layer(0, false)),
-			_image(2, _centre["color"]), _image(3, _centre["depth"])]
+	var march_set1: Array = [CloudRD.ubo(_centre["buffer"]),
+			CloudRD.tex(1, nearest_clamp, buffers.get_depth_layer(0, false)), CloudRD.image(2, _centre["color"]),
+			CloudRD.image(3, _centre["depth"])]
 	if stereo:
 		var eyes := PackedFloat32Array()
 		for view in range(2):
@@ -502,7 +468,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			eyes.append_array(_matrix_floats(projections[view].inverse()))
 		eyes.append_array([size.x, size.y, 0.0, 0.0])
 		_rd.buffer_update(_eyes_buffer, 0, EYES_BLOCK_SIZE, eyes.to_byte_array())
-		march_set1.append_array([_tex(4, nearest_clamp, buffers.get_depth_layer(1, false)), _ubo(_eyes_buffer, 5)])
+		march_set1.append_array([CloudRD.tex(4, nearest_clamp, buffers.get_depth_layer(1, false)),
+				CloudRD.ubo(_eyes_buffer, 5)])
 	march_set1.append_array(baked_set)  # the baked volume's set 1 (its grids, volumes, flat levels, S)
 
 	var groups_low := Vector2i((low.x - 1) / GROUP + 1, (low.y - 1) / GROUP + 1)
@@ -524,9 +491,10 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	for view in range(view_count):
 		var v: Dictionary = _views[view]
 		_rd.compute_list_bind_compute_pipeline(list, _pipelines["upsample"])
-		_rd.compute_list_bind_uniform_set(list, _set1("upsample", [_ubo(v["buffer"]),
-				_tex(1, nearest_clamp, buffers.get_depth_layer(view, false)), _tex(2, nearest_clamp, _centre["color"]),
-				_tex(3, nearest_clamp, _centre["depth"]), _image(4, v["output_slice"]), _ubo(_centre_buffer, 5)]), 1)
+		_rd.compute_list_bind_uniform_set(list, _set1("upsample", [CloudRD.ubo(v["buffer"]),
+				CloudRD.tex(1, nearest_clamp, buffers.get_depth_layer(view, false)),
+				CloudRD.tex(2, nearest_clamp, _centre["color"]), CloudRD.tex(3, nearest_clamp, _centre["depth"]),
+				CloudRD.image(4, v["output_slice"]), CloudRD.ubo(_centre_buffer, 5)]), 1)
 		_rd.compute_list_dispatch(list, groups_full.x, groups_full.y, 1)
 	_rd.compute_list_end()
 	stats = {"valid": true, "low_size": low, "views": view_count, "baked": baked_shown,
@@ -570,35 +538,3 @@ func _set1(kernel: String, uniforms: Array) -> RID:
 	typed.assign(uniforms)
 	return UniformSetCacheRD.get_cache(_shaders[kernel], 1, typed)
 
-
-static func _ubo(buffer: RID, binding := 0) -> RDUniform:
-	var u := RDUniform.new()
-	u.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
-	u.binding = binding
-	u.add_id(buffer)
-	return u
-
-
-static func _tex(binding: int, sampler: RID, texture: RID) -> RDUniform:
-	var u := RDUniform.new()
-	u.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
-	u.binding = binding
-	u.add_id(sampler)
-	u.add_id(texture)
-	return u
-
-
-static func _storage(binding: int, buffer: RID) -> RDUniform:
-	var u := RDUniform.new()
-	u.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-	u.binding = binding
-	u.add_id(buffer)
-	return u
-
-
-static func _image(binding: int, texture: RID) -> RDUniform:
-	var u := RDUniform.new()
-	u.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
-	u.binding = binding
-	u.add_id(texture)
-	return u

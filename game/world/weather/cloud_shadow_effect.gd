@@ -108,28 +108,8 @@ func _create() -> void:
 	_mutex.lock()
 	_kernels = kernels
 	_mutex.unlock()
-	for linear in [false, true]:
-		for repeat in [false, true]:
-			var state := RDSamplerState.new()
-			var filter := RenderingDevice.SAMPLER_FILTER_LINEAR if linear else RenderingDevice.SAMPLER_FILTER_NEAREST
-			state.min_filter = filter
-			state.mag_filter = filter
-			var mode := RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT if repeat \
-					else RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
-			state.repeat_u = mode
-			state.repeat_v = mode
-			state.repeat_w = mode
-			_samplers["%s|%s|false" % [linear, repeat]] = _rd.sampler_create(state)
-	_samplers["true|true|true"] = _rd.sampler_create(CloudShaderPort.mipmap_sampler_state())
-	for type in ["sampler2D", "sampler3D"]:
-		var tf := RDTextureFormat.new()
-		tf.texture_type = RenderingDevice.TEXTURE_TYPE_2D if type == "sampler2D" else RenderingDevice.TEXTURE_TYPE_3D
-		tf.width = 1
-		tf.height = 1
-		tf.depth = 1
-		tf.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
-		tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
-		_fallback[type] = _rd.texture_create(tf, RDTextureView.new(), [PackedByteArray([0, 0, 0, 0])])
+	_samplers = CloudRD.create_samplers(_rd)
+	_fallback = CloudRD.create_fallbacks(_rd)
 	var maps: Array[RID] = []
 	for i in range(2):
 		var tf := RDTextureFormat.new()
@@ -239,28 +219,6 @@ func debug_map_data(i: int) -> PackedByteArray:
 	return _rd.texture_get_data(_maps[i], 0)
 
 
-## Set 0 of a port's kernel: its globals block (filled now) and its sampler globals.
-func _set0(port: CloudShaderPort, buffer: RID) -> Array[RDUniform]:
-	_rd.buffer_update(buffer, 0, port.block_size, port.pack())
-	var set0: Array[RDUniform] = []
-	var block := RDUniform.new()
-	block.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
-	block.binding = 0
-	block.add_id(buffer)
-	set0.append(block)
-	var textures := port.sampler_textures()
-	for i in range(port.samplers.size()):
-		var s: Dictionary = port.samplers[i]
-		var u := RDUniform.new()
-		u.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
-		u.binding = s["binding"]
-		u.add_id(_samplers["%s|%s|%s" % [s["linear"], s["repeat"], s["mipmap"]]])
-		var texture: RID = textures[i]
-		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
-		set0.append(u)
-	return set0
-
-
 ## The baked volume's fill uniforms (CloudBaked.shadow_fill) while it draws; empty otherwise.
 func _baked_fill_uniforms() -> Dictionary:
 	if cloud_effect == null or cloud_effect.baked == null or not cloud_effect.baked_shown:
@@ -280,7 +238,7 @@ func _render_pass(_callback_type: int, _render_data: RenderData) -> void:
 		_probe.mutex.unlock()
 		return
 	var start_us := Time.get_ticks_usec()
-	var set0 := _set0(_port, _globals_buffer)
+	var set0 := CloudRD.set0(_rd, _port, _globals_buffer, _samplers, _fallback)
 	var uniform_set0 := UniformSetCacheRD.get_cache(_shader, 0, set0)
 	var e1: Vector3 = ShaderGlobals.value(&"cloud_shadow_e1")
 	var e2: Vector3 = ShaderGlobals.value(&"cloud_shadow_e2")
@@ -336,7 +294,7 @@ func _dispatch_probe(set0: Array[RDUniform], fill: Dictionary) -> void:
 		var offset := point - camera  # (float64: the offset is exact before it becomes float32)
 		floats.append_array([offset.x, offset.y, offset.z, 0.0])
 	_rd.buffer_update(_probe_in, 0, floats.size() * 4, floats.to_byte_array())
-	var set1: Array[RDUniform] = [CloudEffect._storage(0, _probe_in), CloudEffect._storage(1, _probe_out)]
+	var set1: Array[RDUniform] = [CloudRD.storage(0, _probe_in), CloudRD.storage(1, _probe_out)]
 	set1.append_array(fill["uniforms"])
 	var list := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(list, _probe_pipeline)

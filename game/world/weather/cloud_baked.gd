@@ -267,14 +267,14 @@ func frame(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3, pixel_
 	var bytes := floats.to_byte_array()
 	bytes.append_array(PackedInt32Array([0, 0, 0, _model()]).to_byte_array())
 	_rd.buffer_update(_march_buffer, 0, GRID_BLOCK_SIZE, bytes)
-	var uniforms: Array[RDUniform] = [CloudEffect._ubo(_march_buffer, GRID_BINDING)]
+	var uniforms: Array[RDUniform] = [CloudRD.ubo(_march_buffer, GRID_BINDING)]
 	for i in range(order.size()):
 		var s: Dictionary = _sets[order[i]]
-		uniforms.append_array([CloudEffect._tex(BINDINGS[i][0], linear, s["a"]),
-			CloudEffect._tex(BINDINGS[i][1], linear, s["b"]), CloudEffect._tex(BINDINGS[i][2], nearest, s["o"]),
-			CloudEffect._tex(FLAT_BINDINGS[i][0], linear, s["geo"]["f"]),
-			CloudEffect._tex(FLAT_BINDINGS[i][1], linear, s["geo"]["t"]),
-			CloudEffect._tex(SHADOW_BINDINGS[i], linear, s["s"])])
+		uniforms.append_array([CloudRD.tex(BINDINGS[i][0], linear, s["a"]),
+			CloudRD.tex(BINDINGS[i][1], linear, s["b"]), CloudRD.tex(BINDINGS[i][2], nearest, s["o"]),
+			CloudRD.tex(FLAT_BINDINGS[i][0], linear, s["geo"]["f"]),
+			CloudRD.tex(FLAT_BINDINGS[i][1], linear, s["geo"]["t"]),
+			CloudRD.tex(SHADOW_BINDINGS[i], linear, s["s"])])
 	if _fade > 0:
 		_fade -= 1
 		if _fade == 0:
@@ -304,10 +304,10 @@ func shadow_fill(camera: Vector3, linear: RID) -> Dictionary:
 	bytes.append_array(PackedInt32Array([0, 0, 0, _model()]).to_byte_array())
 	_rd.buffer_update(_shadow_buffer, 0, GRID_BLOCK_SIZE, bytes)
 	var second: Dictionary = _sets[order[order.size() - 1]]
-	var uniforms: Array[RDUniform] = [CloudEffect._ubo(_shadow_buffer, 2), CloudEffect._tex(3, linear, shown["s"]),
-		CloudEffect._tex(4, linear, second["s"])]
+	var uniforms: Array[RDUniform] = [CloudRD.ubo(_shadow_buffer, 2), CloudRD.tex(3, linear, shown["s"]),
+		CloudRD.tex(4, linear, second["s"])]
 	if "CLOUD_SHADOW_BAKED_DIAG" in extra_defines:  # (checks: the reference march's volumes)
-		uniforms.append_array([CloudEffect._tex(5, linear, shown["a"]), CloudEffect._tex(6, linear, shown["b"])])
+		uniforms.append_array([CloudRD.tex(5, linear, shown["a"]), CloudRD.tex(6, linear, shown["b"])])
 	return {"fade": order.size() > 1, "uniforms": uniforms}
 
 
@@ -713,28 +713,28 @@ func _bake_step(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3) -
 	var bytes := floats.to_byte_array()
 	bytes.append_array(PackedInt32Array([phase["level"], first, slices, _model()]).to_byte_array())
 	_rd.buffer_update(_bake_buffer, 0, GRID_BLOCK_SIZE, bytes)
-	var set1: Array[RDUniform] = [CloudEffect._ubo(_bake_buffer)]
+	var set1: Array[RDUniform] = [CloudRD.ubo(_bake_buffer)]
 	var groups := Vector3i((columns - 1) / 8 + 1, (columns - 1) / 8 + 1, slices)
 	if kind == "band":
 		_rd.buffer_update(_band_buffer, 0, 8, PackedInt32Array([32, -1]).to_byte_array())
-		set1.append(CloudEffect._storage(1, _band_buffer))
+		set1.append(CloudRD.storage(1, _band_buffer))
 		groups = Vector3i(8, 8, 1)
 	elif kind == "flat":
-		set1.append_array([CloudEffect._image(1, s["geo"]["f"]), CloudEffect._image(2, s["geo"]["t"])])
+		set1.append_array([CloudRD.image(1, s["geo"]["f"]), CloudRD.image(2, s["geo"]["t"])])
 		groups = Vector3i((int(s["geo"]["n"]) - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
 	elif kind == "density":
-		set1.append(CloudEffect._image(1, s["a"]))
+		set1.append(CloudRD.image(1, s["a"]))
 	elif kind == "shadow":
-		set1.append_array([CloudEffect._image(1, s["s"]), CloudEffect._tex(2, linear, s["a"]),
-				CloudEffect._tex(3, nearest, s["o"])])
+		set1.append_array([CloudRD.image(1, s["s"]), CloudRD.tex(2, linear, s["a"]),
+				CloudRD.tex(3, nearest, s["o"])])
 		var shadow_n := columns * SHADOW_SUPERSAMPLE
 		groups = Vector3i((shadow_n - 1) / 8 + 1, (slices - 1) / 8 + 1, 1)
 	elif kind == "occupancy":
-		set1.append_array([CloudEffect._image(1, s["o"]), CloudEffect._tex(2, nearest, s["a"])])
+		set1.append_array([CloudRD.image(1, s["o"]), CloudRD.tex(2, nearest, s["a"])])
 		groups = Vector3i((columns / BLOCK - 1) / 8 + 1, (columns / BLOCK - 1) / 8 + 1, slices)
 	else:
-		set1.append_array([CloudEffect._image(1, s["b"]), CloudEffect._tex(2, linear, s["a"]),
-				CloudEffect._tex(3, nearest, s["o"])])
+		set1.append_array([CloudRD.image(1, s["b"]), CloudRD.tex(2, linear, s["a"]),
+				CloudRD.tex(3, nearest, s["o"])])
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp(STAMP)
 	var list := _rd.compute_list_begin()
