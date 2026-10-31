@@ -409,62 +409,106 @@ def mount(detail: dict) -> Surfaces:
     return S
 
 
-def _x_range(poly, y):
-    """x interval of the convex polygon `poly` at height y (plan), or None outside."""
-    xs = []
-    for i, a in enumerate(poly):
-        b = poly[(i + 1) % len(poly)]
-        if min(a[1], b[1]) - 1e-9 <= y <= max(a[1], b[1]) + 1e-9:
-            if abs(b[1] - a[1]) < 1e-12:
-                xs += [a[0], b[0]]
-            else:
-                xs.append(a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]))
-    return (min(xs), max(xs)) if xs else None
-
-
 def hardstand_outline(detail: dict) -> list:
-    """The concrete outline in the mount frame (X at bearing azimuth + plan yaw, Y 90 deg clockwise of it): the triangle of the south
-    tip and the two ends of its edges on the road (measured edges: tip, SW edge end, SE edge end). Convex."""
-    t, site = detail["trench"], detail["site_tower"]
+    """The concrete outline in the mount frame (X at bearing azimuth + plan yaw, Y 90 deg clockwise of it): the user's sketch
+    `hardstand_outline_m` ("east,north east,north ..." in metres from the ring centre: a string, Blender's TOML reader has no arrays) rotated into that frame. Not convex."""
+    site = detail["site_tower"]
     base = math.radians(site["azimuth_deg"] + site["plan_yaw_deg"])
+    return [(e * math.sin(base) + n * math.cos(base),
+             e * math.sin(base + 0.5 * math.pi) + n * math.cos(base + 0.5 * math.pi))
+            for e, n in (tuple(float(c) for c in pair.split(",")) for pair in detail["trench"]["hardstand_outline_m"].split())]
 
-    def to_mount(east, north):
-        return (east * math.sin(base) + north * math.cos(base),
-                east * math.sin(base + 0.5 * math.pi) + north * math.cos(base + 0.5 * math.pi))
 
-    tip = (t["hardstand_tip_east_m"], t["hardstand_tip_north_m"])
+def polygon_area(poly) -> float:
+    return 0.5 * abs(sum(p[0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * p[1] for i, p in enumerate(poly)))
 
-    def along(bearing_deg, length):
-        b = math.radians(bearing_deg)
-        return (tip[0] + length * math.sin(b), tip[1] + length * math.cos(b))
 
-    sw_end = along(t["hardstand_sw_bearing_deg"] + 180.0, t["hardstand_sw_length_m"])  # the SW edge runs road -> tip
-    se_end = along(t["hardstand_se_bearing_deg"], t["hardstand_se_length_m"])
-    return [to_mount(*p) for p in (tip, sw_end, se_end)]
+def _signed_area(poly) -> float:
+    return 0.5 * sum(p[0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * p[1] for i, p in enumerate(poly))
+
+
+def _cross2(o, a, b):
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+
+def triangulate(poly) -> list:
+    """Ear clipping of a simple polygon: counter-clockwise triangles."""
+    pts = list(poly) if _signed_area(poly) > 0.0 else list(reversed(poly))
+    tris = []
+    while len(pts) > 3:
+        for i in range(len(pts)):
+            a, b, c = pts[i - 1], pts[i], pts[(i + 1) % len(pts)]
+            if _cross2(a, b, c) <= 1e-12:
+                continue
+            if any(q not in (a, b, c) and _cross2(a, b, q) >= 0.0 and _cross2(b, c, q) >= 0.0 and _cross2(c, a, q) >= 0.0
+                   for q in pts):
+                continue
+            tris.append((a, b, c))
+            del pts[i]
+            break
+        else:
+            raise ValueError("outline is not a simple polygon")
+    tris.append(tuple(pts))
+    return tris
+
+
+def clip_halfplane(poly, nx, ny, d):
+    """The part of the convex `poly` with nx x + ny y <= d (Sutherland-Hodgman)."""
+    out = []
+    for i, p in enumerate(poly):
+        q = poly[(i + 1) % len(poly)]
+        fp, fq = nx * p[0] + ny * p[1] - d, nx * q[0] + ny * q[1] - d
+        if fp <= 0.0:
+            out.append(p)
+        if (fp < 0.0 < fq) or (fq < 0.0 < fp):
+            t = fp / (fp - fq)
+            out.append((p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])))
+    return out if len(out) >= 3 and polygon_area(out) > 1e-6 else []
+
+
+def clip_rect(poly, x0, x1, y0, y1):
+    for nx, ny, d in ((1.0, 0.0, x1), (-1.0, 0.0, -x0), (0.0, 1.0, y1), (0.0, -1.0, -y0)):
+        poly = clip_halfplane(poly, nx, ny, d) if poly else poly
+    return poly
+
+
+def minus_rect(poly, x0, x1, y0, y1):
+    """The convex `poly` minus the rectangle: up to four convex pieces."""
+    pieces = []
+    for nx, ny, d in ((-1.0, 0.0, -x1), (1.0, 0.0, x0), (0.0, -1.0, -y1), (0.0, 1.0, y0)):  # beyond one side of the rectangle
+        part = clip_halfplane(poly, nx, ny, d)
+        if part:
+            pieces.append(part)
+        poly = clip_halfplane(poly, -nx, -ny, -d)
+        if not poly:
+            break
+    return pieces
+
+
+def hardstand_holes(sh) -> list:
+    """Rectangles (x0, x1, y0, y1) the apron leaves open: the block with its annex and the two ramps with their walls."""
+    ramps = [(sh.wall_out[-1.0], sh.wall_out[1.0], sy0, sy1) for sy0, sy1 in ((sh.half_y, sh.ramp_end), (-sh.ramp_end, -sh.half_y))]
+    return [(-sh.annex_x, sh.x_front, -sh.half_y, sh.half_y)] + ramps
+
+
+def hardstand_pieces(detail: dict, holes=None) -> list:
+    """The apron as convex pieces (mount frame, plan): the outline's ear triangles minus `holes` (default the mount's block, annex and ramps)."""
+    holes = hardstand_holes(Shape(detail)) if holes is None else holes
+    pieces = []
+    for tri in triangulate(hardstand_outline(detail)):
+        parts = [list(tri)]
+        for hole in holes:
+            parts = [q for part in parts for q in minus_rect(part, *hole)]
+        pieces += parts
+    return pieces
 
 
 def _hardstand(S, sh, detail):
-    """The flat light concrete apron: the measured outline minus the mount's block and the tunnel with its walls, cut in Y bands
-    (the annex's flanks lie under it)."""
-    t = sh.t
-    poly = hardstand_outline(detail)
-    lift = t["hardstand_lift_m"]
-    cuts = sorted({p[1] for p in poly} | {-sh.ramp_end, -sh.half_y, sh.half_y, sh.ramp_end})
-    up = (0.0, 0.0, 1.0)
-    for y0, y1 in zip(cuts, cuts[1:]):
-        r0, r1 = _x_range(poly, y0), _x_range(poly, y1)
-        if r0 is None or r1 is None:
-            continue
-        mid = abs(0.5 * (y0 + y1))
-        if mid < sh.half_y:
-            hole = (-sh.annex_x, sh.x_front)
-        elif mid < sh.ramp_end:
-            hole = (sh.wall_out[-1.0], sh.wall_out[1.0])
-        else:
-            S.add("hardstand", [(r0[0], y0, lift), (r0[1], y0, lift), (r1[1], y1, lift), (r1[0], y1, lift)], up, _uv_plan)
-            continue
-        S.add("hardstand", [(r0[0], y0, lift), (hole[0], y0, lift), (hole[0], y1, lift), (r1[0], y1, lift)], up, _uv_plan)
-        S.add("hardstand", [(hole[1], y0, lift), (r0[1], y0, lift), (r1[1], y1, lift), (hole[1], y1, lift)], up, _uv_plan)
+    """The flat light concrete apron at `hardstand_lift_m` over the site height (the area is graded: one plane, no terrain following;
+    the terrain under it is masked, see hardstand_mask): the user's outline minus the block, annex and ramps."""
+    lift = sh.t["hardstand_lift_m"]
+    for piece in hardstand_pieces(detail):
+        S.add("hardstand", [(x, y, lift) for x, y in piece], (0.0, 0.0, 1.0), _uv_plan)
 
 
 def trench(detail: dict) -> Surfaces:

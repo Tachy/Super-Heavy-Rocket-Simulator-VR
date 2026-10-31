@@ -60,6 +60,11 @@ global uniform vec3 trench_axis_t;
 global uniform vec3 trench_axis_a;
 global uniform vec4 trench_shape;
 global uniform float trench_range_m;
+// Apron mask (TowerView, Pad B): the hardstand is graded and drawn as one plane, so the terrain is not drawn inside its
+// outline. apron_mask is a square coverage map in the mount's axes about the site (half side apron_mask_half_m, row =
+// across, column = along the mount-tower axis), already eroded by a texel; apron_mask_half_m 0 = off.
+global uniform sampler2D apron_mask : filter_linear, repeat_disable;
+global uniform float apron_mask_half_m;
 
 varying vec3 trench_rel;  // vertex - site (node-local axes, metres)
 varying vec3 local_position;
@@ -98,6 +103,12 @@ void fragment() {
 		float along = abs(dot(trench_rel, trench_axis_t));
 		float across = abs(dot(trench_rel, trench_axis_a));
 		if ((along < trench_shape.x && across < trench_shape.y) || (along < trench_shape.z && across < trench_shape.w)) {
+			discard;
+		}
+	}
+	if (apron_mask_half_m > 0.0 && camera_distance < trench_range_m) {
+		vec2 apron_uv = vec2(dot(trench_rel, trench_axis_t), dot(trench_rel, trench_axis_a)) / (2.0 * apron_mask_half_m) + 0.5;
+		if (apron_uv.x > 0.0 && apron_uv.x < 1.0 && apron_uv.y > 0.0 && apron_uv.y < 1.0 && texture(apron_mask, apron_uv).r > 0.5) {
 			discard;
 		}
 	}

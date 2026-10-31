@@ -24,6 +24,7 @@ const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 const MOUNT_SHADER := preload("res://shaders/mount_shell.gdshader")
 const MOUNT_MAP := "models/starbase_olp2/mount_panels.png"
 const CONCRETE_MAP := "models/starbase_olp2/pad_concrete.png"
+const APRON_MASK_MAP := "models/starbase_olp2/apron_mask.png"
 ## [E] Mount plates without their generated map: grey to tan, linear (person-scale frame, images.jpeg).
 const MOUNT_PLAIN := Color(0.34, 0.30, 0.23)
 ## [E] Hardstand without its generated map: light concrete, linear (images.jpeg).
@@ -51,6 +52,15 @@ static func mount_shell(tile_m: float) -> Material:
 ## Light concrete of the hardstand and the exit ramps: the generated map (pad_concrete.png), tile in metres.
 static func pad_concrete(tile_m: float) -> Material:
 	return _mapped(CONCRETE_MAP, CONCRETE_PLAIN, tile_m)
+
+
+## Coverage map of the hardstand (apron_mask.png, terrain_earth.gdshader), null without the generated file.
+static func apron_mask() -> Texture2D:
+	var path := Paths.data_dir().path_join(APRON_MASK_MAP)
+	var image := Image.load_from_file(path) if FileAccess.file_exists(path) else null
+	if image == null or image.is_empty():
+		return null
+	return ImageTexture.create_from_image(image)
 
 
 static func _mapped(map: String, plain: Color, tile_m: float) -> Material:

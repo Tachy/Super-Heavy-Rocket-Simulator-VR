@@ -7,9 +7,15 @@ Deterministic (fixed seed, fixed zlib level). sRGB data (the shader samples `sou
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 
 import hull_textures
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blender"))
+import mount_layout  # noqa: E402
 
 SEED = 20261031
 TAN = np.array([0.62, 0.58, 0.50])       # [E] sRGB plate, grey to tan: between the sunlit person-scale frame and images.jpeg
@@ -18,11 +24,14 @@ TONE_SPREAD = 0.09                       # [E] plate-to-plate brightness spread 
 GREY_SHIFT = 0.10                        # [E] share of plates with the tan pulled to grey, images.jpeg
 STREAK_DARKEN = 0.20                     # [E] strongest dirt streak
 STAIN_DARKEN = 0.18                      # [E] strongest blotch
-CONCRETE = np.array([0.73, 0.73, 0.71])  # [E] sRGB sunlit hardstand, images.jpeg and padb_aerial_ship39_on_mount_2026-04
+CONCRETE = np.array([0.4365, 0.4135, 0.3258])  # [E] sRGB base of the hardstand: the map's mean (0.912 x the base after stains and joints) is the
+# 95th luminance percentile of the terrain imagery around the site (NAIP z17, +-250 m: 0.398, 0.377, 0.297 in the colours the terrain shows)
+TERRAIN_BRIGHT = np.array([0.398, 0.377, 0.297])  # [E] same percentile, the target of the map's mean (tests)
 JOINT_DARKEN = 0.86                      # [E] slab joint as a share of the slab
 SLAB_SPREAD = 0.05                       # [E] slab-to-slab brightness spread (+-)
 FILE_NAME = "mount_panels.png"
 CONCRETE_FILE_NAME = "pad_concrete.png"
+APRON_MASK_FILE_NAME = "apron_mask.png"
 
 
 def bake(m: dict) -> np.ndarray:
@@ -80,7 +89,33 @@ def _write_png(path, rgb: np.ndarray) -> None:
     path.write_bytes(hull_textures.png_bytes(rgba))
 
 
+def bake_apron_mask(detail: dict) -> np.ndarray:
+    """Coverage of the apron (the pieces of `mount_layout.hardstand_pieces`) as a square map in the mount frame about the site: half side
+    `hardstand_mask_half_m`, texel `hardstand_mask_px_m`, row = Y, column = X. A texel is 255 only when its whole 3 x 3 neighbourhood
+    lies on the apron (eroded by one texel): the terrain stops a texel inside the plate's edge, the plate shows no terrain beside it."""
+    t = detail["trench"]
+    half, px = t["hardstand_mask_half_m"], t["hardstand_mask_px_m"]
+    n = int(round(2.0 * half / px))
+    c = -half + (np.arange(n) + 0.5) * px
+    xs, ys = np.meshgrid(c, c)
+    inside = np.zeros((n, n), bool)
+    for piece in mount_layout.hardstand_pieces(detail):  # convex, counter-clockwise or clockwise
+        sign = 1.0 if mount_layout._signed_area(piece) > 0.0 else -1.0
+        ok = np.ones((n, n), bool)
+        for i, a in enumerate(piece):
+            b = piece[(i + 1) % len(piece)]
+            ok &= sign * ((b[0] - a[0]) * (ys - a[1]) - (b[1] - a[1]) * (xs - a[0])) >= 0.0
+        inside |= ok
+    eroded = inside.copy()
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            eroded &= np.roll(np.roll(inside, dy, axis=0), dx, axis=1)
+    eroded[0, :] = eroded[-1, :] = eroded[:, 0] = eroded[:, -1] = False
+    return np.repeat(eroded[:, :, None].astype(np.uint8) * 255, 3, axis=2)
+
+
 def write(out_dir, detail: dict) -> dict:
+    _write_png(out_dir / APRON_MASK_FILE_NAME, bake_apron_mask(detail))
     _write_png(out_dir / FILE_NAME, bake(detail["mount"]))
     _write_png(out_dir / CONCRETE_FILE_NAME, bake_concrete(detail["trench"]))
     return {"file": FILE_NAME, "tile_m": detail["mount"]["tile_m"], "concrete_file": CONCRETE_FILE_NAME,

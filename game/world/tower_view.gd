@@ -89,6 +89,7 @@ func build(geometry: Dictionary) -> void:
 		if had_models:
 			ShaderGlobals.set_value(&"trench_range_m", 0.0)  # this view stopped masking the terrain
 	else:
+			ShaderGlobals.set_value(&"apron_mask_half_m", 0.0)
 		_build_mount_model(models, geometry)
 	for i in range(2):
 		var pivot := Node3D.new()
@@ -461,6 +462,12 @@ func _set_trench_mask(detail: Dictionary, geometry: Dictionary) -> void:
 	ShaderGlobals.set_value(&"trench_site_lo", split[1])
 	ShaderGlobals.set_value(&"trench_axis_t", (basis * Frames.to_render(axes.x)).normalized())
 	ShaderGlobals.set_value(&"trench_axis_a", (basis * Frames.to_render(axes.y)).normalized())
+	var apron := TowerMaterial.apron_mask()  # the graded hardstand is one plane: no terrain inside its outline
+	if apron != null:
+		ShaderGlobals.set_value(&"apron_mask", apron)
+		ShaderGlobals.set_value(&"apron_mask_half_m", float(t["hardstand_mask_half_m"]))
+	else:
+		ShaderGlobals.set_value(&"apron_mask_half_m", 0.0)
 	# Only the tunnel lies below the ground: the mask is its plan (inside the walls), under the block and out to the ramp ends.
 	var half_w: float = 0.5 * float(t["width_m"]) - MASK_INSET_M
 	var half_y: float = float(m["block_half_y_m"])

@@ -320,12 +320,11 @@ centre_m = 25.5           # [E] middle of a ramp: block end 9.4 m + half of the 
 width_m = 15.2            # [E] +-1 m tunnel inner width, the same under the block and on the ramps (user ruling 2026-10-31, DSC05957)
 length_m = 32.1           # [E] +-2 m block end to the ramp end at Y +-41.5, same photo
 wall_height_m = 0.5       # [E] user estimate 2026-10-31 (CRL05690): small wall along the open trench edge from the end of the annex slope to the ramp end
-hardstand_tip_east_m = -36.0   # [E] +-8 m the south tip of the concrete (25.9961 N, 97.1584 W, water basin) east of the ring centre 25.99677 N, 97.15804 W; Wayback release 43291, DSC06000 / DSC05957
-hardstand_tip_north_m = -74.6  # [E] +-8 m the same tip north of the ring centre
-hardstand_sw_bearing_deg = 167.0  # [E] +-3 SW edge, road to the tip, north-referenced (the outline is converted with the site's azimuth and plan yaw)
-hardstand_sw_length_m = 218.0     # [E] +-10 m SW edge, road to the tip
-hardstand_se_bearing_deg = 63.0   # [E] +-3 SE edge, tip to the road (interior angle at the tip 76 deg)
-hardstand_se_length_m = 203.0     # [E] +-10 m SE edge; the third side is the road
+# The concrete as the user drew it on a Google Maps screenshot (2026-10-31, up to the road; nothing of the image is stored): [east, north] metres
+# from the ring centre, clockwise from the south tip. Scale 3.3 px/m (ring to tip 82 m), image up = bearing 33 deg; the mount frame follows with the site azimuth and plan yaw.
+hardstand_outline_m = "-35.7,-74.4 -1.0,-57.2 35.7,-34.0 99.3,-13.9 152.4,9.4 157.9,9.5 171.5,33.2 183.9,82.9 178.9,111.4 152.3,128.8 125.3,137.3 65.4,156.3 3.2,155.1 -29.7,160.2 -59.8,147.2 -63.4,138.8 -59.9,122.0 -63.4,102.6 -45.9,40.6 -43.4,-22.4"  # [E] +-15 m user sketch
+hardstand_mask_half_m = 256.0  # [E] half side of the apron mask map about the site (the outline reaches 211 m)
+hardstand_mask_px_m = 1.0 # [E] texel of the terrain mask under the apron (eroded by one texel, so no terrain edge shows beside the plate)
 hardstand_lift_m = 0.05   # [E] above the terrain plateau, against z-fighting
 concrete_tile_m = 48.0    # [E] period of the concrete map: 6 slabs, long so the stains do not repeat visibly
 slab_m = 8.0              # [E] cast slab, joint pattern on the hardstand of images.jpeg

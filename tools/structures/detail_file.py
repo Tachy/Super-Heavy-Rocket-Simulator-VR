@@ -42,9 +42,7 @@ MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_
               "tile_m", "course_m", "panel_m", "seam_m", "map_size")
 TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "hardstand_lift_m", "concrete_tile_m", "slab_m",
                "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_near_x_m", "foot_far_x_m", "foot_width_m",
-               "foot_height_m", "mask_range_m", "hardstand_sw_bearing_deg",
-               "hardstand_sw_length_m", "hardstand_se_bearing_deg", "hardstand_se_length_m")
-TRENCH_SIGNED_KEYS = ("hardstand_tip_east_m", "hardstand_tip_north_m")  # offsets from the ring centre: either sign
+               "foot_height_m", "mask_range_m", "hardstand_mask_px_m", "hardstand_mask_half_m")
 COUNT_KEYS = ("count", "columns", "louvre_count")
 
 
@@ -144,10 +142,15 @@ def load(path) -> dict:
         _need(data[table], keys, table)
         for k in keys:
             _positive(data[table], k, table)
-    _need(data["trench"], TRENCH_SIGNED_KEYS, "trench")
-    for k in TRENCH_SIGNED_KEYS:
-        if isinstance(data["trench"][k], bool) or not isinstance(data["trench"][k], (int, float)):
-            raise DetailFileError(f"trench.{k}: must be a number in metres")
+    _need(data["trench"], ("hardstand_outline_m",), "trench")
+    outline = data["trench"]["hardstand_outline_m"]  # "east,north east,north ...": metres from the ring centre, either sign
+    try:
+        pairs = [[float(c) for c in pair.split(",")] for pair in outline.split()]
+        ok = len(pairs) >= 3 and all(len(q) == 2 for q in pairs)
+    except (AttributeError, ValueError):
+        ok = False
+    if not ok:
+        raise DetailFileError("trench.hardstand_outline_m: a string of at least 3 'east,north' pairs in metres")
     for k in ("chord_profile", "brace_profile", "thin_profile"):
         if chop[k] not in profiles:
             raise DetailFileError(f"chopstick.{k}: unknown profile '{chop[k]}'")

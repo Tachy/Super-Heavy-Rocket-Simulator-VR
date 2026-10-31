@@ -37,3 +37,6 @@ the water up at once.
 ## Hardstand and site name before the Pad B alignment (2026-10-31)
 Hardstand: convex 7-point plate `-48,-40 -20,-85 92,-85 112,-50 112,70 10,85 -48,35` (m, mount frame), +-15 m, from wide-angle views, low confidence.
 Site id `starbase_olp1`, display name "Starbase OLP-1" (the OLP-1 imagery position); now `starbase_pad2` / "Starbase Pad 2".
+
+## Hardstand triangle (2026-10-31, superseded the same day)
+Triangle from the south tip -36 E / -74.6 N (+-8 m) and two edges (SW bearing 167 deg 218 m, SE bearing 63 deg 203 m), keys `hardstand_tip_*`, `hardstand_sw_*`, `hardstand_se_*`, cut in Y bands (`_x_range`, convex only). Replaced by the user's sketched 20-point outline `hardstand_outline_m`.

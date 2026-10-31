@@ -341,36 +341,56 @@ def _compass_to_mount(detail, east, north):
             east * math.sin(bearing + math.pi / 2) + north * math.cos(bearing + math.pi / 2))
 
 
-def test_hardstand_is_the_measured_outline(detail):
-    """Esri Wayback release 43291 / DSC05957: SW edge bearing 167 (3) deg, 218 (10) m road to the south tip; SE edge 63 (3) deg,
-    203 (10) m from the tip; the third side is the road."""
-    poly = ml.hardstand_outline(detail)
-    assert len(poly) == 3
-    tip, sw_end, se_end = poly
-    base = math.radians(detail["site_tower"]["azimuth_deg"] + detail["site_tower"]["plan_yaw_deg"])
-
-    def compass(p, q):  # bearing and length of the mount-frame segment p -> q
-        dx, dy = q[0] - p[0], q[1] - p[1]
-        return (math.degrees(base + math.atan2(dy, dx)) % 360.0, math.hypot(dx, dy))
-
-    bearing, length = compass(sw_end, tip)
-    assert bearing == pytest.approx(167.0, abs=3.0) and length == pytest.approx(218.0, abs=10.0)
-    bearing, length = compass(tip, se_end)
-    assert bearing == pytest.approx(63.0, abs=3.0) and length == pytest.approx(203.0, abs=10.0)
-    east, north = -36.0, -74.6  # the tip: 25.9961 N, 97.1584 W against the ring centre 25.99677 N, 97.15804 W
-    assert tip == pytest.approx(_compass_to_mount(detail, east, north), abs=8.0)
-    # Concrete up to the road: the road side lies beyond the tower foot, and the site lies inside the outline.
-    foot = (detail["trench"]["foot_x_m"], detail["trench"]["foot_y_m"])
-    assert min(sw_end[0], se_end[0]) > detail["trench"]["foot_far_x_m"]  # the road lies beyond the tower foot
-    sh = ml.Shape(detail)
-    for p in [(0.0, 0.0), foot, (-sh.annex_x, sh.annex_half_y), (-sh.annex_x, -sh.annex_half_y),
-              (0.0, ml.ramp_end_m(detail)), (0.0, -ml.ramp_end_m(detail))]:
-        assert _inside_triangle(p, poly), p
-
-
-def _inside_triangle(p, poly):
-    signs = []
+def _inside(p, poly):
+    """Ray casting, any simple polygon."""
+    inside = False
     for i, a in enumerate(poly):
         b = poly[(i + 1) % len(poly)]
-        signs.append((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0.0)
-    return all(signs) or not any(signs)
+        if (a[1] > p[1]) != (b[1] > p[1]) and p[0] < a[0] + (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]):
+            inside = not inside
+    return inside
+
+
+def test_hardstand_is_the_users_sketch(detail):
+    """User sketch 2026-10-31 (Google Maps screenshot, about 3.3 px/m, up = bearing 33 deg): the south tip at about -36 E / -74 N
+    (Wayback tip 25.9961 N, 97.1584 W: 8 m), the road side 150-160 m north of the ring, and the site, the foot and the ramps inside."""
+    t = detail["trench"]
+    poly = ml.hardstand_outline(detail)
+    assert len(poly) == len(t["hardstand_outline_m"].split()) >= 10
+    tip_mount = _compass_to_mount(detail, -36.0, -74.6)
+    assert min(math.dist(p, tip_mount) for p in poly) < 8.0, "covers the south tip"
+    norths = [float(pair.split(",")[1]) for pair in t["hardstand_outline_m"].split()]
+    assert 150.0 < max(norths) < 165.0, "the road corners"
+    sh = ml.Shape(detail)
+    ramp = ml.ramp_end_m(detail)
+    for p in [(0.0, 0.0), (t["foot_x_m"], t["foot_y_m"]), (-sh.annex_x, sh.annex_half_y), (-sh.annex_x, -sh.annex_half_y),
+              (0.0, ramp), (0.0, -ramp)]:
+        assert _inside(p, poly), p
+    assert not _inside(_compass_to_mount(detail, 300.0, 300.0), poly)
+
+
+def test_hardstand_triangulation_keeps_the_area_of_the_outline(detail):
+    poly = ml.hardstand_outline(detail)
+    area = ml.polygon_area(poly)
+    assert sum(ml.polygon_area(t) for t in ml.triangulate(poly)) == pytest.approx(area, rel=1e-6)
+    cut = sum(ml.polygon_area(p) for p in ml.hardstand_pieces(detail, holes=[]))
+    assert cut == pytest.approx(area, rel=0.01)  # the pieces cover the polygon, nothing more
+    assert 35000.0 < area < 45000.0  # about 4 ha
+
+
+def test_hardstand_leaves_block_annex_ramps_and_tunnel_open(detail):
+    sh = ml.Shape(detail)
+    pieces = ml.hardstand_pieces(detail)
+    holes = ml.hardstand_holes(sh)
+    open_area = sum(ml.polygon_area(p) for p in ml.hardstand_pieces(detail, holes=[])) - sum(ml.polygon_area(p) for p in pieces)
+    outline = ml.hardstand_outline(detail)
+    assert all(_inside(c, outline) for x0, x1, y0, y1 in holes for c in ((x0, y0), (x0, y1), (x1, y0), (x1, y1)))
+    expected = sum((h[1] - h[0]) * (h[3] - h[2]) for h in holes)  # every hole lies inside the outline
+    assert open_area == pytest.approx(expected, rel=0.01)
+    for piece in pieces:
+        for x, y in piece:
+            for x0, x1, y0, y1 in holes:  # no vertex inside a hole
+                assert not (x0 + 1e-6 < x < x1 - 1e-6 and y0 + 1e-6 < y < y1 - 1e-6), (x, y)
+        cx, cy = sum(p[0] for p in piece) / len(piece), sum(p[1] for p in piece) / len(piece)
+        for x0, x1, y0, y1 in holes:
+            assert not (x0 < cx < x1 and y0 < cy < y1)

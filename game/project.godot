@@ -94,6 +94,14 @@ trench_range_m={
 "type": "float",
 "value": 0.0
 }
+apron_mask={
+"type": "sampler2D",
+"value": ""
+}
+apron_mask_half_m={
+"type": "float",
+"value": 0.0
+}
 earth_terrain_camera_hi={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
