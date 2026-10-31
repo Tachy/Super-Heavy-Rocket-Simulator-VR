@@ -5,23 +5,25 @@ class_name LatticeBuilder
 ## Local frame of the returned node = the frame of TowerView's tower box: origin at the centre of the footprint on the
 ## ground, +X across, +Y up, +Z away from the pad. Face 0 is the face at -Z (toward the pad); faces 1..3 follow by
 ## 90 degrees about Y.
-## Distance hand-over per section (visibility ranges with dithered fades, anti-goal: a visible band):
+## Distance hand-over (visibility ranges, hard swap; all sections of the tower swap at the same distance, see
+## _share_range_centre):
 ##   near  (< NEAR_END_M)            the MultiMeshes (every member an instance),
-##   mid   (NEAR_END_M .. MID_END_M) one merged mesh of the same geometry: 2 draw calls instead of ~10,
+##   mid   (NEAR_END_M .. MID_END_M) one merged mesh of the same geometry: 2 draw calls instead of ~10 per section,
 ##   far   (> MID_END_M)             a box with the lattice shader tower_far.gdshader (analytic, filtered coverage of the
 ##                                   measured pitch: members thinner than a pixel become a density, never shimmer).
-## Members cast no shadow; a per-section proxy box with the lattice shader casts the lattice's shadow instead.
+## Members cast no shadow: the game's Sun has no shadow maps (the ground shader is unshaded), so nothing would receive it.
 
 const FACES := 4
 const LEGS := 4
 ## Braces per panel: two diagonals and the horizontal at the panel's lower edge (the topmost section adds one at its top).
 const BRACES_PER_PANEL := 3
 ## [E] Hand-over ranges. A brace (0.4 m) is 1 px wide at ~310 m on a 60 deg / 900 px desktop view (779 px focal length)
-## and 1.7 px on a VR eye (~1300 px): individual members go at 300 m. The corner legs (2.2 m) stay >= 1.5 px to ~1100 m
-## (desktop); the merged mesh ends at 1000 m, where the lattice shader (filtered) takes over: there the tiers' mean
-## luminance agree within ~1 % (800 m: 0.0 %, 950 m: 0.9 %, 1050 m: 1.2 %).
+## and 2 px on a VR eye (1500 px): individual members go at 300 m. The merged mesh (same geometry, 2 draw calls per
+## section) runs to 5 km, where the tower is only 2 px (desktop) to 3.6 px (VR) wide and the lattice shader (filtered)
+## takes over: the tiers' mean luminance agree within 1.6 % at 4.5-6.5 km (tower_handover_check, both focal lengths).
+## At 1 km, where the far tier began before, it showed visibly less truss than the merged mesh at VR focal lengths.
 const NEAR_END_M := 300.0
-const MID_END_M := 1000.0
+const MID_END_M := 5000.0
 ## Dither fade length each side of a range boundary (Godot: both neighbours fade over boundary +- this). 0 = hard swap:
 ## measured (tower_handover_check): with 60 m the two dithered neighbours were not complementary (the tower's rectangle
 ## 2.6 % brighter before the boundary and 3.6 % darker after it), while the tiers shown alone agree within 0.3 % (members /
@@ -30,7 +32,10 @@ const FADE_MARGIN_M := 0.0
 ## Visible share of a deck seen through the lattice at a grazing angle (far shader): thickness x this.
 const FAR_DECK_VIEW_FACTOR := 1.6
 const FAR_SHADER := preload("res://shaders/tower_far.gdshader")
-const LATTICE_SHADER := preload("res://shaders/lattice.gdshader")
+## Half extent (m) of the shared range box across the tower: the corner legs, the foot ring and the roof cap sit inside it.
+const RANGE_HALF_WIDTH_M := 12.0
+## Margin (m) of the shared range box above the tower's top and below its base (roof frame).
+const RANGE_MARGIN_M := 10.0
 
 
 ## Panels of a section: its height over the gusset pitch, at least one.
@@ -62,18 +67,19 @@ static func build(detail: Dictionary, profiles: Dictionary, steel: Material, dar
 	root.name = "Lattice"
 	var sections: Array = detail["tower.sections"]
 	var base_m := 0.0
-	var proxy_materials := {}  ## one shadow-proxy material per (pitch, member fraction)
+	var total_m := total_height_m(detail)
 	for i in range(sections.size()):
-		var node := _build_section(detail, i, profiles, steel, dark, proxy_materials)
+		var node := _build_section(detail, i, profiles, steel, dark)
 		node.name = "section_%d" % i
 		node.position = Vector3(0.0, base_m, 0.0)
+		_share_range_centre(node, total_m, base_m)
 		root.add_child(node)
 		base_m += float(sections[i]["height_m"])
 	return root
 
 
 static func _build_section(detail: Dictionary, index: int, profiles: Dictionary, steel: Material,
-		dark: Material, proxy_materials: Dictionary) -> Node3D:
+		dark: Material) -> Node3D:
 	var sections: Array = detail["tower.sections"]
 	var section: Dictionary = sections[index]
 	var is_top := index == sections.size() - 1
@@ -133,7 +139,6 @@ static func _build_section(detail: Dictionary, index: int, profiles: Dictionary,
 	set_range(far, MID_END_M, 0.0)
 	node.add_child(far)
 
-	node.add_child(_shadow_proxy(width, height, float(section["pitch_m"]), brace_size, proxy_materials))
 	return node
 
 
@@ -281,13 +286,27 @@ static func _merged(groups: Array, materials: Array) -> ArrayMesh:
 	return result
 
 
+## Godot measures a visibility range from the centre of the instance's bounding box, so tiers of sections at different heights
+## (and the four faces' MultiMeshes, whose boxes are ~5 m off the middle) would swap at different distances: a tower half in
+## one tier and half in the other. Every tier node of the tower gets the same box centre, the tower's middle, so the whole
+## tower swaps at once. `node` is the section node (at `base_m` above the lattice origin); the box holds all members.
+static func _share_range_centre(node: Node3D, total_m: float, base_m: float) -> void:
+	var half := Vector3(RANGE_HALF_WIDTH_M, 0.5 * total_m + RANGE_MARGIN_M, RANGE_HALF_WIDTH_M)
+	var centre := Vector3(0.0, 0.5 * total_m - base_m, 0.0)
+	for child in node.get_children():
+		var geometry := child as GeometryInstance3D
+		if geometry != null:
+			geometry.custom_aabb = AABB(centre - geometry.position - half, 2.0 * half)  # in the node's own frame
+
+
 ## Visibility range [begin, end] (0: open), dither-fading each side by FADE_MARGIN_M when that is above 0.
 static func set_range(instance: GeometryInstance3D, begin_m: float, end_m: float) -> void:
 	instance.visibility_range_begin = begin_m
 	instance.visibility_range_end = end_m
 	instance.visibility_range_begin_margin = FADE_MARGIN_M if begin_m > 0.0 else 0.0
 	instance.visibility_range_end_margin = FADE_MARGIN_M if end_m > 0.0 else 0.0
-	instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF if FADE_MARGIN_M > 0.0 			else GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+	instance.visibility_range_fade_mode = (GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF if FADE_MARGIN_M > 0.0
+			else GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED)
 
 
 static func _far_material(detail: Dictionary, section: Dictionary, leg_size: float, brace_size: float,
@@ -305,26 +324,3 @@ static func _far_material(detail: Dictionary, section: Dictionary, leg_size: flo
 	material.set_shader_parameter("core_m", detail["tower.core"]["size_m"])
 	material.set_shader_parameter("crossed", section["pattern"] == "x_brace")
 	return material
-
-
-## Box of the section with the lattice shader: invisible to the camera, its alpha-cut pattern casts the shadow.
-static func _shadow_proxy(width: float, height: float, pitch_m: float, brace_size: float,
-		materials: Dictionary) -> MeshInstance3D:
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(width, height, width)
-	var fraction := 0.5 * brace_size / pitch_m
-	var key := Vector2(pitch_m, fraction)
-	if not materials.has(key):
-		var created := ShaderMaterial.new()
-		created.shader = LATTICE_SHADER
-		created.set_shader_parameter("bay_m", pitch_m)
-		created.set_shader_parameter("member_fraction", fraction)
-		materials[key] = created
-	var material: ShaderMaterial = materials[key]
-	var proxy := MeshInstance3D.new()
-	proxy.name = "shadow_proxy"
-	proxy.mesh = mesh
-	proxy.material_override = material
-	proxy.position = Vector3(0.0, 0.5 * height, 0.0)
-	proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
-	return proxy

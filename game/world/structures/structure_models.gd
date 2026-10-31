@@ -11,8 +11,6 @@ const PROTOTYPE_SITE_ID := "starbase_olp1"
 const DETAIL_FILE := "structures/starbase_olp2.toml"
 const MODEL_DIR := "models/starbase_olp2"
 const MANIFEST := "manifest.json"
-## Generator sources a model must not be older than (repo checkouts only; a packaged install has none and counts as fresh).
-const SOURCE_FILES: Array[String] = [DETAIL_FILE]
 const SOURCE_SCRIPTS: Array[String] = ["common.py", "gen_profiles.py", "gen_chopstick.py"]
 ## Blender (X, Y, Z) -> render (Y, Z, X): arm along +X becomes +Z (the arm pivot's forward axis), Z up becomes +Y.
 const BLENDER_TO_RENDER := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))

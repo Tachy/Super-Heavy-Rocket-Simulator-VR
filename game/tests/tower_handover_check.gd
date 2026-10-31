@@ -1,7 +1,13 @@
 # Distance hand-over of the Pad B tower (LatticeBuilder: members -> merged mesh -> lattice shader). Needs a GPU (no
 # --headless) and data/models/starbase_olp2 (tools/structures/build_models.py).
-# godot --path game --script res://tests/tower_handover_check.gd -- [--out=<dir>] [--steps=1.05] [--quick] [--tiers_only] [--dump_tiers]
-# 1. Dolly: the camera backs away from the tower from 50 m to 5 km (ratio --steps per step, aimed at the tower's middle),
+# godot --path game --script res://tests/tower_handover_check.gd -- [--out=<dir>] [--steps=1.05] [--quick] [--tiers_only]
+#     [--dump_tiers] [--bands_only] [--focal=desktop|vr|both]
+# Run for the desktop view (60 deg, 900 px: 779 px focal length) and a VR-like one (focal 1500 px; --focal selects).
+# 0. Bands: the camera steps finely through each boundary (BAND_SCAN_*); per step the tower's structure (mean 3x3
+#    high-pass of the luminance) is measured in vertical windows up the tower, as built and with each neighbouring tier
+#    shown alone; every window that tells the tiers apart must show the same tier (all sections swap at once, no
+#    half-swapped tower). The structure of the tiers shown alone at the far boundary agrees within MAX_STRUCTURE_JUMP.
+# 1. Dolly: the camera backs away from the tower from 50 m to LAST_M (ratio --steps per step, aimed at the tower's middle),
 #    per step the mean luminance of the tower's rectangle (30 m .. 140 m, the lattice and what shows through it; the
 #    table also lists the tower's own pixels, the frame with the tower differing from the one without it, and their
 #    count). A hand-over band is judged by the second difference of that luminance, |L_i - (L_i-1 + L_i+1) / 2| / L_i:
@@ -10,7 +16,7 @@
 # 2. Shimmer: still camera, a head turn in 0.25 px steps; mean absolute frame-to-frame pixel change over the tower's
 #    rectangle with the hand-over, divided by the same with the unreduced geometry (every member, no ranges) at the same
 #    distances. Pass: <= 1.10 (the hand-over adds at most 10 % flicker to what the raw geometry has).
-# 3. Member width at the start of its fade: >= 1 px (brace at the end of the near range, leg at the end of the mid range).
+# 3. Member width where the near range ends: brace >= 1 px (the leg's width at the end of the mid range is only reported).
 # Images and the table go to --out (default screenshots/pad-b/handover; git-ignored).
 extends SceneTree
 
@@ -23,7 +29,9 @@ const EYE_HEIGHT_M := 15.0
 const START_UTC := "2026-10-12T14:10:00"
 const FOV_DEG := 60.0
 const FIRST_M := 50.0
-const LAST_M := 5000.0
+const LAST_M := 9000.0
+const FOCAL_DESKTOP_PX := 779.4  ## 60 deg over 900 px
+const FOCAL_VR_PX := 1500.0  ## a VR eye: Pimax Dream Air ~1300-1500 px (StereoMockXr projections)
 const FRAMES_TO_SETTLE := 5
 const TERRAIN_MAX_FRAMES := 600
 const MASK_THRESHOLD := 0.02
@@ -32,8 +40,20 @@ const BAND_WINDOWS := [[0.8, 1.25, "near -> mid", LatticeBuilder.NEAR_END_M],
 const MAX_JUMP := 0.02
 const TIER_NAMES := ["members", "merged", "shader"]
 ## [tier a, tier b, distances] compared alone.
-const TIER_PAIRS := [[0, 1, [250.0, 330.0, 380.0, 420.0, 450.0, 480.0]], [1, 2, [900.0, 1000.0, 1100.0, 1300.0]]]
-const SHIMMER_DISTANCES := [280.0, 330.0, 600.0, 1000.0, 1500.0, 2500.0, 4000.0]
+const TIER_PAIRS := [[0, 1, [0.83, 1.1, 1.27, 1.4, 1.5, 1.6]], [1, 2, [0.9, 1.0, 1.1, 1.3]]]  ## x the boundary
+const SHIMMER_DISTANCES := [280.0, 330.0, 600.0, 1000.0, 1500.0, 2500.0, 4000.0, 6000.0, 8000.0]
+## Band scan: camera distances around each boundary (x the boundary), fine steps.
+const BAND_SCAN_NEAR := [0.9, 0.97, 1.0, 1.02, 1.04, 1.06, 1.08, 1.1, 1.13]
+const BAND_SCAN_FAR := [0.97, 0.995, 1.0, 1.002, 1.004, 1.006, 1.01, 1.02, 1.05]
+## [E] windows whose structure differs less than this between two tiers shown alone cannot tell them apart.
+const TIER_GAP := 0.12
+## [E] The structure strip: this fraction of the tower's width, and a comparison only from this many px half width on
+## (a one-pixel strip is noise: the far tier starts where the tower is 2-4 px wide).
+const STRIP_FRACTION := 0.4
+const TOWER_WIDTH_M := 12.0
+const MIN_STRIP_PX := 3
+const STRUCTURE_WINDOWS := 7  ## vertical windows over the tower rectangle (the roof-cap window left out)
+const MAX_STRUCTURE_JUMP := 0.35  ## [E] structure of two tiers shown alone at one boundary, relative difference
 const SHIMMER_STEPS := 12
 const SHIMMER_STEP_PX := 0.25
 const MAX_SHIMMER_RATIO := 1.10
@@ -45,6 +65,8 @@ var _out := ""
 var _failures := 0
 var _dump := false
 var _focal_px := 1.0
+var _fov_deg := FOV_DEG
+var _bands_only := false
 
 
 func _initialize() -> void:
@@ -58,10 +80,17 @@ func _initialize() -> void:
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_dump = args.has("dump_tiers")
-	_run(float(args.get("steps", "1.05")), args.has("quick"), args.has("tiers_only"))
+	_bands_only = args.has("bands_only")
+	var focals: Array[float] = []
+	var which: String = args.get("focal", "both")
+	if which != "vr":
+		focals.append(FOCAL_DESKTOP_PX)
+	if which != "desktop":
+		focals.append(FOCAL_VR_PX)
+	_run(float(args.get("steps", "1.05")), args.has("quick"), args.has("tiers_only"), focals)
 
 
-func _run(ratio: float, quick: bool, tiers_only: bool) -> void:
+func _run(ratio: float, quick: bool, tiers_only: bool, focals: Array[float]) -> void:
 	await process_frame
 	_world = _main.get_node("World")
 	_world.clock.warp = 0.0
@@ -70,18 +99,32 @@ func _run(ratio: float, quick: bool, tiers_only: bool) -> void:
 	_world.clock.set_time(_world.core.utc_to_tdb_s(START_UTC))
 	_world.atmosphere.eye_adaptation_enabled = false
 	_world.set_focus(World.FOCUS_EARTH)
-	_world.camera.fov = FOV_DEG
 	var tower := _world.towers[0] if not _world.towers.is_empty() else null
 	if tower == null or tower.get_node_or_null("Lattice") == null:
 		print("tower_handover_check: no Pad B lattice (models missing?): nothing to check")
 		quit(1)
 		return
-	_focal_px = 0.5 * root.size.y / tan(deg_to_rad(0.5 * FOV_DEG))
 	var lattice: Node3D = tower.get_node("Lattice")
+	for focal in focals:
+		_set_focal(focal)
+		print("=== focal length %.0f px (fov %.1f deg) ===" % [_focal_px, _fov_deg])
+		await _run_focal(tower, lattice, ratio, quick, tiers_only)
+	print("TOWER HANDOVER CHECK ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
+	quit(0 if _failures == 0 else 1)
 
+
+func _set_focal(focal_px: float) -> void:
+	_focal_px = focal_px
+	_fov_deg = rad_to_deg(2.0 * atan(0.5 * root.size.y / focal_px))
+	_world.camera.fov = _fov_deg
+
+
+func _run_focal(tower: Node3D, lattice: Node3D, ratio: float, quick: bool, tiers_only: bool) -> void:
 	if tiers_only:
 		await _report_tiers(tower, lattice)
-		quit(0 if _failures == 0 else 1)
+		return
+	await _report_bands(tower, lattice)
+	if _bands_only:
 		return
 	var distances: Array[float] = []
 	var d := FIRST_M
@@ -110,8 +153,6 @@ func _run(ratio: float, quick: bool, tiers_only: bool) -> void:
 	await _report_tiers(tower, lattice)
 	await _report_shimmer(tower, lattice)
 	_report_member_widths(lattice)
-	print("TOWER HANDOVER CHECK ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
-	quit(0 if _failures == 0 else 1)
 
 
 ## Moves the camera `distance` m from the tower along the pad -> camera azimuth and aims at the tower's middle.
@@ -126,7 +167,7 @@ func _place(tower: Node3D, distance: float) -> void:
 	_world.set_ground_site({"id": "custom", "name": "custom", "body": "earth", "latitude_deg": lat,
 			"longitude_deg": lon, "height_m": height, "eye_height_m": EYE_HEIGHT_M})
 	_world.update_world()
-	_world.camera.fov = FOV_DEG
+	_world.camera.fov = _fov_deg
 	_world.camera.azimuth = deg_to_rad(TOWER_AZIMUTH_DEG)
 	_world.camera.elevation = atan2(70.0 - EYE_HEIGHT_M, distance)
 	_world.atmosphere.snap_adaptation()
@@ -201,15 +242,19 @@ func _report_dolly(distances: Array[float], luminance: Array[float]) -> void:
 ## Each tier shown alone at distances around its boundary: the rectangle's mean luminance must agree (<= MAX_JUMP).
 func _report_tiers(tower: Node3D, lattice: Node3D) -> void:
 	for pair: Array in TIER_PAIRS:
-		for distance: float in pair[2]:
+		var boundary := LatticeBuilder.NEAR_END_M if pair[0] == 0 else LatticeBuilder.MID_END_M
+		for factor: float in pair[2]:
+			var distance := boundary * factor
 			await _place(tower, distance)
 			var rect := _tower_rect(tower, distance)
 			var values: Array[float] = []
+			var structures: Array[float] = []
 			for tier: int in [pair[0], pair[1]]:
 				_force_tier(lattice, tier)
 				await _frames(3)
 				var image := root.get_viewport().get_texture().get_image().get_region(rect)
 				values.append(_mean_luminance(image))
+				structures.append(_mean_of(_structure_windows(image, distance)))
 			if _dump:
 				_force_tier(lattice, pair[1])
 				await _frames(3)
@@ -227,6 +272,85 @@ func _report_tiers(tower: Node3D, lattice: Node3D) -> void:
 					+ TIER_NAMES[pair[1]], distance, values[0], values[1], 100.0 * difference, as_built])
 			_check(difference <= MAX_JUMP, "%s at %.0f m agree within %.0f %%" % [TIER_NAMES[pair[0]] + " / "
 					+ TIER_NAMES[pair[1]], distance, 100.0 * MAX_JUMP])
+			var structure_jump := absf(structures[0] - structures[1]) / maxf(structures[0], 1.0e-6)
+			print("tiers: structure %.4f vs %.4f, difference %.1f %%" % [structures[0], structures[1],
+					100.0 * structure_jump])
+			if pair[0] == 1 and _strip_px(distance) >= MIN_STRIP_PX:
+				_check(structure_jump <= MAX_STRUCTURE_JUMP, "%s at %.0f m: structure agrees within %.0f %%" % [
+						TIER_NAMES[pair[0]] + " / " + TIER_NAMES[pair[1]], distance, 100.0 * MAX_STRUCTURE_JUMP])
+
+
+## Fine steps through each boundary: the structure up the tower must be uniform (every section in the same tier).
+func _report_bands(tower: Node3D, lattice: Node3D) -> void:
+	var tiers := [[0, 1, LatticeBuilder.NEAR_END_M, BAND_SCAN_NEAR], [1, 2, LatticeBuilder.MID_END_M, BAND_SCAN_FAR]]
+	for band: Array in tiers:
+		for factor: float in band[3]:
+			var distance: float = band[2] * factor
+			await _place(tower, distance)
+			var built := _structure_windows(await _tower_image(tower, distance), distance)
+			var alone: Array[PackedFloat32Array] = []
+			for tier: int in [band[0], band[1]]:
+				_force_tier(lattice, tier)
+				alone.append(_structure_windows(await _tower_image(tower, distance), distance))
+			_force_tier(lattice, -1)
+			# Per window: which tier it shows (-1: the tiers look alike there, any is fine).
+			var shown: Array[int] = []
+			for w in range(STRUCTURE_WINDOWS):
+				var gap := absf(alone[0][w] - alone[1][w]) / maxf(maxf(alone[0][w], alone[1][w]), 1.0e-6)
+				var d0 := absf(built[w] - alone[0][w]) / maxf(alone[0][w], 1.0e-6)
+				var d1 := absf(built[w] - alone[1][w]) / maxf(alone[1][w], 1.0e-6)
+				shown.append(-1 if gap < TIER_GAP else (0 if d0 < d1 else 1))
+			var mixed := shown.has(0) and shown.has(1)
+			print("band %.0f m x%.4f: tier per window %s%s" % [band[2], factor, str(shown), "  MIXED" if mixed else ""])
+			_check(not mixed, "band %.0f m x%.4f: all sections in the same tier" % [band[2], factor])
+
+
+func _tower_image(tower: Node3D, distance: float) -> Image:
+	await _frames(3)
+	return root.get_viewport().get_texture().get_image().get_region(_tower_rect(tower, distance))
+
+
+## Mean absolute difference of the luminance to its 3x3 mean (structure: rows, members) per vertical window, in the strip
+## of the tower between its corner legs (the arms hang outside it).
+func _structure_windows(image: Image, distance: float) -> PackedFloat32Array:
+	var width := image.get_width()
+	var height := image.get_height()
+	var luminance := PackedFloat32Array()
+	luminance.resize(width * height)
+	for y in range(height):
+		for x in range(width):
+			var p := image.get_pixel(x, y)
+			luminance[y * width + x] = 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b
+	var centre := width / 2
+	var strip := _strip_px(distance)
+	var windows := PackedFloat32Array()
+	var first_row := int(float(height) * 0.14)  # the rect spans 140 m (row 0) .. 30 m: leave out the roof window
+	var window_rows := maxi((height - first_row) / STRUCTURE_WINDOWS, 1)
+	for w in range(STRUCTURE_WINDOWS):
+		var sum := 0.0
+		var count := 0
+		for y in range(maxi(first_row + w * window_rows, 1), mini(first_row + (w + 1) * window_rows, height - 1)):
+			for x in range(maxi(centre - strip, 1), mini(centre + strip + 1, width - 1)):
+				var mean := 0.0
+				for dy in range(-1, 2):
+					for dx in range(-1, 2):
+						mean += luminance[(y + dy) * width + x + dx]
+				sum += absf(luminance[y * width + x] - mean / 9.0)
+				count += 1
+		windows.append(sum / maxi(count, 1))
+	return windows
+
+
+## Half width (px) of the strip between the legs (arms and legs left out), >= 1.
+func _strip_px(distance: float) -> int:
+	return maxi(int(STRIP_FRACTION * TOWER_WIDTH_M * _focal_px / distance), 1)
+
+
+func _mean_of(values: PackedFloat32Array) -> float:
+	var sum := 0.0
+	for v in values:
+		sum += v
+	return sum / maxi(values.size(), 1)
 
 
 func _mean_luminance(image: Image) -> float:
@@ -310,7 +434,7 @@ func _tower_rect(tower: Node3D, distance: float) -> Rect2i:
 	var camera := _world.camera
 	var low := camera.unproject_position(base + up * 30.0)
 	var high := camera.unproject_position(base + up * 140.0)
-	var half_width := 0.5 * 12.0 * _focal_px / distance * 1.4 + 3.0
+	var half_width := 0.5 * TOWER_WIDTH_M * _focal_px / distance * 1.4 + 3.0
 	var x0 := clampi(int(minf(low.x, high.x) - half_width), 0, root.size.x - 2)
 	var x1 := clampi(int(maxf(low.x, high.x) + half_width), x0 + 1, root.size.x)
 	var y0 := clampi(int(minf(low.y, high.y)), 0, root.size.y - 2)
@@ -342,8 +466,9 @@ func _report_member_widths(lattice: Node3D) -> void:
 	print("members: focal %.0f px: brace %.2f px where its fade starts (%.0f m), leg %.2f px where its fade starts (%.0f m)" % [
 			_focal_px, brace_px, LatticeBuilder.NEAR_END_M - LatticeBuilder.FADE_MARGIN_M, leg_px,
 			LatticeBuilder.MID_END_M - LatticeBuilder.FADE_MARGIN_M])
-	_check(brace_px >= 1.0, "brace >= 1 px at the start of its fade")
-	_check(leg_px >= 1.0, "leg >= 1 px at the start of its fade")
+	_check(brace_px >= 1.0, "brace >= 1 px where the members end")
+	# The merged mesh keeps the members' geometry, so its end is judged by the tiers' luminance / structure / shimmer, not
+	# by the leg's width (sub-pixel there by design: the far shader takes over where the tower is 2-4 px wide).
 
 
 func _check(condition: bool, message: String) -> void:

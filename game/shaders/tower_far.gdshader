@@ -1,11 +1,13 @@
 shader_type spatial;
-render_mode cull_disabled;
+render_mode cull_disabled, alpha_to_coverage;
 // Far range of the Pad B tower (LatticeBuilder, beyond MID_END_M): one box per section whose faces carry the lattice as
 // an analytic pattern of the detail file's measured numbers - bright corner columns, a dark deck at every brace row, the
 // dark column bundle in the middle and the chevron / X braces. Every member's coverage is the box-filtered share of the
 // pixel footprint it covers (fwidth of the face coordinates), so a member thinner than a pixel dims towards its mean
-// density instead of flickering; the coverage is the alpha (blended: stable under a head turn, a hashed alpha flickered
-// 20-60 % more than the geometry it replaces). Seen through the atmosphere like the other structures (atm_fog, as lit_aerial.gdshader).
+// density instead of flickering. The coverage is the alpha, resolved by MSAA alpha-to-coverage: the box stays in the
+// OPAQUE pass (an alpha-blended draw lands after the clouds: CloudEffect runs before the transparent pass, so the tower
+// would be painted over a cloud in front of it); a hashed alpha flickered 20-60 % more than the geometry it replaces.
+// Seen through the atmosphere like the other structures (atm_fog, as lit_aerial.gdshader).
 
 #include "res://shaders/atmosphere.gdshaderinc"
 
@@ -19,7 +21,7 @@ uniform float deck_half_m = 2.4;  // half width of the deck slabs
 uniform float deck_m = 0.8;    // visible thickness of a deck seen through the lattice
 uniform float core_m = 3.6;
 uniform float blur = 2.0;  // [E] filter width over the pixel footprint (tower_handover_check: shimmer)
-uniform float alpha_scale = 1.0;  // coverage multiplier (1: the measured pattern as is)
+uniform float alpha_scale = 0.85;  // [E] coverage multiplier, fitted so the far tier matches the merged mesh at 4.5-6.5 km
 uniform bool crossed = false;  // X braces instead of chevrons
 uniform vec4 steel_colour : source_color = vec4(0.55, 0.58, 0.63, 1.0);
 uniform vec4 leg_colour : source_color = vec4(0.69, 0.72, 0.77, 1.0);

@@ -54,9 +54,8 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 		var half := LatticeBuilder.leg_line_m(float(section["face_width_m"]), leg_size)
 		for member: Array in LatticeBuilder.face_members(section, half, i == sections.size() - 1):
 			top_m = maxf(top_m, node.position.y + maxf(member[0].y, member[1].y))
-		_check_hand_over(node, section, i, sections.size())
-		_check((node.get_node("shadow_proxy") as MeshInstance3D).cast_shadow
-				== GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY, "section %d: shadow proxy" % i)
+		_check_hand_over(node, section, i, sections.size(), LatticeBuilder.total_height_m(models["detail"]))
+		_check(node.get_node_or_null("shadow_proxy") == null, "section %d: no shadow proxy (the Sun casts no shadows)" % i)
 		_check((node.get_node("face_0") as MultiMeshInstance3D).cast_shadow
 				== GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "section %d: members cast no shadow" % i)
 	_check(rows >= 34 and rows <= 38, "about 35 brace rows over the tower (pitch ~4 m): %d" % rows)
@@ -87,21 +86,22 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	var bounds := AABB()
 	for part in ["truss", "rail"]:
 		var mesh_node := chopstick.get_node(part) as MeshInstance3D
-		bounds = bounds.merge(chopstick.transform * mesh_node.get_aabb()) if bounds.has_surface() else \
-				chopstick.transform * mesh_node.get_aabb()
+		var part_bounds: AABB = chopstick.transform * mesh_node.get_aabb()
+		bounds = bounds.merge(part_bounds) if bounds.has_surface() else part_bounds
 	var arm: Dictionary = models["detail"]["chopstick"]
 	_check(absf(bounds.position.z) < 0.05 and absf(bounds.end.z - float(arm["length_m"])) < 0.05,
 			"chopstick: hinge at 0, tip at %.1f m along +Z" % float(arm["length_m"]))
 	_check(absf(bounds.end.y) < 0.05 and absf(bounds.size.y - float(arm["depth_m"])) < 0.05,
 			"chopstick: top rails at Y = 0, %.2f m deep below" % float(arm["depth_m"]))
 	_check(absf(bounds.size.x - float(arm["width_m"])) < 0.05, "chopstick: %.1f m wide" % float(arm["width_m"]))
-	var paint := ((chopstick.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial) 			.get_shader_parameter("albedo") as Color
+	var paint_material := (chopstick.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial
+	var paint := paint_material.get_shader_parameter("albedo") as Color
 	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
 
 
 ## Tiers of one section: near MultiMeshes up to NEAR_END_M, the merged mesh to MID_END_M, the lattice shader beyond;
 ## decks / column bundle / roof cap / foot ring as dark solids.
-func _check_hand_over(node: Node, section: Dictionary, index: int, count: int) -> void:
+func _check_hand_over(node: Node, section: Dictionary, index: int, count: int, total_m: float) -> void:
 	var panels := LatticeBuilder.panel_count(section)
 	var decks := node.get_node("decks") as MultiMeshInstance3D
 	var expected := panels + 1 + (2 if index == count - 1 else 0) + (4 if index == 0 else 0)
@@ -120,6 +120,14 @@ func _check_hand_over(node: Node, section: Dictionary, index: int, count: int) -
 	_check(absf(float(far_material.get_shader_parameter("panel_m")) * panels - float(section["height_m"])) < 1.0e-4,
 			"section %d: far shader rows = the section's brace rows" % index)
 	_check((node.get_node("face_0") as MultiMeshInstance3D).material_override is ShaderMaterial, "section %d: steel" % index)
+	# Every tier node measures its range from the tower's middle (one swap for the whole tower); local transforms only
+	# (the global ones are Earth-fixed, ~6.4e6 m: float32 noise).
+	var middle := Vector3(0.0, 0.5 * total_m, 0.0)
+	for child in node.get_children():
+		var geometry := child as GeometryInstance3D
+		var centre: Vector3 = (node as Node3D).transform * (geometry.transform * geometry.custom_aabb.get_center())
+		_check(geometry.custom_aabb.has_volume() and centre.is_equal_approx(middle),
+				"section %d %s: range centre = the tower's middle" % [index, child.name])
 
 
 func _pivot(view: TowerView, arm: int) -> Node3D:
