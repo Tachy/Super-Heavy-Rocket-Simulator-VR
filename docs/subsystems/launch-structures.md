@@ -9,8 +9,8 @@ State: prototype plan `docs/superpowers/plans/2026-10-31-pad-b-prototype.md`, ta
   file never duplicates them. Keys: `config/README.md`.
 - Every value is tagged `[E]` (own estimate with its method) or `[S]` (published, URL).
 - Draft numbers (look correction, task 4; scale 10.6 px/m from the 144.5 m tower photo): 12 sections x 12.04 m = 144.5 m,
-  face width 12 m, brace row pitch 4 m (~36 rows), leg box 2.2 m (bright closed corner column), brace H 0.5 m, deck
-  slabs 0.5 m thick at every row, dark column bundle 3.6 m, roof cap 0.6 m + 5 m pyramid frame, foot ring 3 m wide;
+  face width 12 m, brace row pitch 4 m (~36 rows), leg box 2.2 m (bright closed corner column), brace H 0.4 m, deck
+  slabs 0.4 m thick at every row, 2.5 m inside the leg line (inset), dark column bundle 3.6 m, roof cap 0.6 m + 5 m pyramid frame, foot ring 3 m wide;
   chopstick length 26 m, width 3 m, depth 8.75 m, truss pitch 6.5 m, tube chords 1.0 m, diagonals 0.7 m, rails 0.9 m.
   Patterns: `x_brace` for the two lowest sections, `chevron` (Lambda per row) above.
 
@@ -27,7 +27,7 @@ State: prototype plan `docs/superpowers/plans/2026-10-31-pad-b-prototype.md`, ta
   `shadow_proxy` box with the lattice shader casts. Footprint on the physics box's pad-side face and base; height
   144.5 m vs the box's 146 m.
 - Distance hand-over per section (visibility ranges, no fade): near `legs`/`face_n`/`decks`/`roof` up to
-  `NEAR_END_M` = 380 m; `mid` (the same geometry merged into 2 surfaces, 2 draw calls) 380 .. `MID_END_M` = 1000 m;
+  `NEAR_END_M` = 300 m; `mid` (the same geometry merged into 2 surfaces, 2 draw calls) 300 .. `MID_END_M` = 1000 m;
   `far` box with `shaders/tower_far.gdshader` beyond (analytic chevron / deck / leg coverage of the measured pitch,
   filtered by the pixel footprint, alpha-blended). Why these ranges and why no dither: `tower_handover_check.gd` below.
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
@@ -50,17 +50,25 @@ State: prototype plan `docs/superpowers/plans/2026-10-31-pad-b-prototype.md`, ta
 ## Validation
 - `game/tests/tower_view_test.gd` (headless), `smoke_test.gd`.
 - `game/tests/tower_handover_check.gd` (GPU, ~90 s): dolly 50 m .. 5 km (ratio 1.05): second difference of the mean
-  luminance of the tower's rectangle <= 2 % in the windows -20 %/+25 % around both boundaries (measured 0.62 % at
-  380 m, 0.41 % at 1000 m; the median elsewhere 0.17 %, the maximum 3.9 % at 52 m where the rectangle clips the frame);
-  tiers shown alone agree within 0.3 % (members / merged, 250-480 m) and <= 1.9 % (merged / shader, 900-1300 m;
-  0.2 % at 1000 m); shimmer (head turn in 0.25 px steps) of the hand-over over the unreduced geometry 0.82-1.00 at
-  600-4000 m (<= 1.10); brace 1.03 px / leg 1.71 px wide where their range ends (60 deg, 900 px = 779 px focal length).
+  luminance of the tower's rectangle <= 2 % in the windows -20 %/+25 % around both boundaries (measured 0.40 % at
+  300 m, 0.79 % at 1000 m; the median elsewhere 0.14 %, the maximum 3.6 % at 52 m where the rectangle clips the frame);
+  tiers shown alone agree within 0.3 % (members / merged, 250-480 m) and <= 1.75 % (merged / shader, 900-1300 m;
+  0.6 % at 1000 m); shimmer (head turn in 0.25 px steps) of the hand-over over the unreduced geometry 0.83-1.01 at
+  280-4000 m (<= 1.10; 280 / 330 m straddle the near / mid swap: 1.006 / 0.999); brace 1.04 px / leg 1.71 px wide where their range ends (60 deg, 900 px = 779 px focal length).
   Findings behind the design: Godot's dither fade of two tiers (60 m each side) was not complementary (rectangle 2.6 %
   brighter before and 3.6 % darker after the boundary) and a hashed alpha in the far shader flickered 20-60 % more
   than the geometry: hard swap of matched tiers and a blended coverage instead; `blur` / colours of the far shader are
   fitted to the merged tier.
 - `python -m pytest tools/structures/tests -q`: required keys, sections sum to 144.5 m within 1 %, every value line
   tagged, loader raises on missing keys / bad units.
+
+## Prototype evidence (task 5, `screenshots/pad-b/t5_*.png`, `tools/structures/measure/render_views.sh`)
+- Look pass: narrower decks (2.5 m inset), thinner chevrons (0.4 m), darker core; seen diagonally the tower now reads as
+  an open lattice with bright corner columns and a dark interior (`t5_look2.png`); face-on it is still paler than the photo.
+- Desktop GPU frame time (RTX 4090, 1600x900, 120 frames, median / mean, ms) boxes -> models: catch view 1.34 / 1.53 ->
+  1.35 / 1.55, 1 km 0.81 / 0.94 -> 0.82 / 0.94, pad 2 m 0.33 / 0.37 -> 0.35 / 0.40: no measurable cost. Headset run open.
+- Not verified: the tower's shadow on the ground (the proxy casts, but no tower shadow shows in `t5_shadow.png`: probably
+  beyond the sun shadow range or too faint to read), texture pop at 300 m (only luminance checked).
 
 ## Open points
 - Render vs the 2025-08 tower photo (task 4, `screenshots/pad-b/t4_*.png`): rows, chevrons, decks, bright corner
