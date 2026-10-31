@@ -431,3 +431,13 @@ target = "core/src/weather_decode/grib2.cpp"
 kind = "weather_licence"
 license = "WMO code tables used as a published specification; algorithm written by this project, no third-party code"
 credit = "WMO Manual on Codes (WMO-No. 306), Volume I.2, FM 92 GRIB"
+
+[[source]]
+id = "ambientcg_metal032"
+name = "ambientCG Metal032 (1K JPG: Color + Roughness maps, brushed steel; triplanar tower material of the Pad B prototype)"
+url = "https://ambientcg.com/get?file=Metal032_1K-JPG.zip"
+target = "data/materials/Metal032_1K-JPG.zip"
+extract = true
+extract_to = "data/materials/metal032"
+license = "CC0 1.0 Universal (ambientCG, https://docs.ambientcg.com/license/)"
+credit = "Metal032, ambientCG.com (CC0)"

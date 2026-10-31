@@ -43,7 +43,7 @@ func build(geometry: Dictionary) -> void:
 		if i == 0 and not models.is_empty():
 			# One chopstick (spec H), on the +across arm; its hinge is the pivot, its top-rail plane the arm top. Its visual
 			# length is Pad B's (~26 m), the physics arm stays arm_length_m: a known prototype mismatch.
-			pivot.add_child(StructureModels.chopstick_node(models["chopstick"], _steel))
+			pivot.add_child(StructureModels.chopstick_node(models["chopstick"], TowerMaterial.black_paint()))
 		else:
 			pivot.add_child(_box(Vector3(length, geometry["arm_width_m"], thickness), Basis(),
 					Vector3(0.5 * length, 0.0, -0.5 * thickness), _steel))
@@ -57,7 +57,8 @@ func build(geometry: Dictionary) -> void:
 func _pad_b_lattice(models: Dictionary, geometry: Dictionary, axes: Basis) -> Node3D:
 	var size: Vector3 = geometry["tower_size_m"]
 	var face_width: float = models["detail"]["tower.sections"][0]["face_width_m"]
-	var lattice := LatticeBuilder.build(models["detail"], models["profiles"], _steel)
+	var lattice := LatticeBuilder.build(models["detail"], models["profiles"], TowerMaterial.steel(),
+			TowerMaterial.dark())
 	var up := Vector3(0.0, 0.0, 1.0)
 	var toward: Vector3 = axes.x
 	var centre_site: Vector3 = geometry["tower_center_m"] - up * (0.5 * size.z) + toward * (0.5 * (face_width - size.x))

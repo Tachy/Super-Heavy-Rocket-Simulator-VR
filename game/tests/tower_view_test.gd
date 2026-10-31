@@ -38,23 +38,28 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(lattice.get_child_count() == sections.size(), "one node per section")
 	var top_m := 0.0
 	var instances := 0
+	var rows := 0
 	for i in range(sections.size()):
 		var section: Dictionary = sections[i]
 		var node := lattice.get_node("section_%d" % i)
 		var panels := maxi(1, roundi(float(section["height_m"]) / float(section["pitch_m"])))
+		rows += panels
 		var expected := panels * 3 + (1 if i == sections.size() - 1 else 0)  # 2 diagonals + 1 horizontal, top cap
 		_check((node.get_node("legs") as MultiMeshInstance3D).multimesh.instance_count == 4, "section %d: 4 legs" % i)
 		for face in range(4):
 			var multimesh := (node.get_node("face_%d" % face) as MultiMeshInstance3D).multimesh
 			_check(multimesh.instance_count == expected, "section %d face %d: %d braces" % [i, face, expected])
 			instances += multimesh.instance_count
-		var half := 0.5 * float(section["face_width_m"]) - 0.5 * 1.6  # leg centre line: profiles.leg size_m
+		var leg_size: float = models["profiles"]["leg"].get_aabb().size.x
+		var half := LatticeBuilder.leg_line_m(float(section["face_width_m"]), leg_size)
 		for member: Array in LatticeBuilder.face_members(section, half, i == sections.size() - 1):
 			top_m = maxf(top_m, node.position.y + maxf(member[0].y, member[1].y))
+		_check_hand_over(node, section, i, sections.size())
 		_check((node.get_node("shadow_proxy") as MeshInstance3D).cast_shadow
 				== GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY, "section %d: shadow proxy" % i)
 		_check((node.get_node("face_0") as MultiMeshInstance3D).cast_shadow
 				== GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "section %d: members cast no shadow" % i)
+	_check(rows >= 34 and rows <= 38, "about 35 brace rows over the tower (pitch ~4 m): %d" % rows)
 	var detail_height: float = models["detail"]["tower"]["height_m"]
 	_check(absf(top_m - detail_height) < 0.01 * detail_height,
 			"lattice top %.2f m = detail height %.2f m" % [top_m, detail_height])
@@ -89,6 +94,31 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(absf(bounds.end.y) < 0.05 and absf(bounds.size.y - 8.75) < 0.05,
 			"chopstick: top rails at Y = 0, 8.75 m deep below")
 	_check(absf(bounds.size.x - 3.0) < 0.05, "chopstick: 3 m wide")
+	var paint := ((chopstick.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial) 			.get_shader_parameter("albedo") as Color
+	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
+
+
+## Tiers of one section: near MultiMeshes up to NEAR_END_M, the merged mesh to MID_END_M, the lattice shader beyond;
+## decks / column bundle / roof cap / foot ring as dark solids.
+func _check_hand_over(node: Node, section: Dictionary, index: int, count: int) -> void:
+	var panels := LatticeBuilder.panel_count(section)
+	var decks := node.get_node("decks") as MultiMeshInstance3D
+	var expected := panels + 1 + (2 if index == count - 1 else 0) + (4 if index == 0 else 0)
+	_check(decks.multimesh.instance_count == expected, "section %d: %d solids (decks, column, roof, ring)" % [index, expected])
+	_check((node.get_node_or_null("roof") != null) == (index == count - 1), "section %d: pyramid frame only on top" % index)
+	var near := node.get_node("legs") as GeometryInstance3D
+	var mid := node.get_node("mid") as GeometryInstance3D
+	var far := node.get_node("far") as GeometryInstance3D
+	_check(near.visibility_range_begin == 0.0 and near.visibility_range_end == LatticeBuilder.NEAR_END_M,
+			"section %d: members up to %.0f m" % [index, LatticeBuilder.NEAR_END_M])
+	_check(mid.visibility_range_begin == LatticeBuilder.NEAR_END_M and mid.visibility_range_end == LatticeBuilder.MID_END_M,
+			"section %d: merged mesh %.0f .. %.0f m" % [index, LatticeBuilder.NEAR_END_M, LatticeBuilder.MID_END_M])
+	_check(far.visibility_range_begin == LatticeBuilder.MID_END_M and far.visibility_range_end == 0.0,
+			"section %d: lattice shader beyond %.0f m" % [index, LatticeBuilder.MID_END_M])
+	var far_material := far.material_override as ShaderMaterial
+	_check(absf(float(far_material.get_shader_parameter("panel_m")) * panels - float(section["height_m"])) < 1.0e-4,
+			"section %d: far shader rows = the section's brace rows" % index)
+	_check((node.get_node("face_0") as MultiMeshInstance3D).material_override is ShaderMaterial, "section %d: steel" % index)
 
 
 func _pivot(view: TowerView, arm: int) -> Node3D:

@@ -1,138 +1,156 @@
-# Pad B (Starbase OLP-2) tower and chopstick detail file - DRAFT from first measurements (prototype plan task 1).
+# Pad B (Starbase OLP-2) tower and chopstick detail file - DRAFT from first measurements (prototype plan tasks 1 and 4).
 # Site-independent: placement and the physics numbers (arm length, tower height, hinge) stay in launch_sites.toml.
 # Every value carries [E] (own estimate, method named) or [S] (published, URL). Reference images: git-ignored
 # screenshots/mechazilla/pad-b/ (INDEX.md); scale = booster diameter 9 m [S] (spacex.com/vehicles/starship)
 # the images (points files), script tools/structures/measure/ratio.py. Single-view ratios only: no camera solve yet (full build).
+# Task 4 look correction: scale of padb_tower_full_with_chopsticks_2025-08 = 1530 px lattice height / 144.5 m = 10.6 px/m.
 
 [tower]
 height_m = 144.5          # [E] count of sections x section height; matches 144.5 m of the spec (NAIP shadow + imagery)
 
+[tower.deck]              # floor / platform at every brace row: dark slabs seen through the lattice
+thickness_m = 0.5         # [E] dark bands ~5 px thick on padb_tower_full_with_chopsticks_2025-08 / 10.6 px/m, oblique view
+inset_m = 1.0             # [E] slab edge to the leg centre line: the decks reach the corner columns, ~1 m of leg width each
+
+[tower.core]              # dark column bundle (pipes, stairs) in the middle of the lattice
+size_m = 3.6              # [E] ~35 px of the 120 px wide face on padb_tower_full_with_chopsticks_2025-08 = 0.3 x 12 m
+
+[tower.roof]              # flat roof cap with a shallow pyramid frame on top
+plate_thickness_m = 0.6   # [E] padb_tower_full_with_chopsticks_2025-08, top 60 px: cap ~6 px thick
+overhang_m = 0.6          # [E] cap edge beyond the face, same image
+pyramid_height_m = 5.0    # [E] pyramid frame ~55 px high on padb_tower_full_with_chopsticks_2025-08
+pyramid_top_fraction = 0.3  # [E] flat top width / face width, same image
+
+[tower.foot]              # wider platform ring at the tower foot
+ring_width_m = 3.0        # [E] ring protrudes ~30 px beyond the face on padb_tower_full_with_chopsticks_2025-08
+ring_thickness_m = 1.2    # [E] same image, ~13 px thick
+
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "x_brace"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "x_brace"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "x_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 12.04          # [E] 144.5 m / 12 sections (rows in padb_tower_full_with_chopsticks_2025-08)
 face_width_m = 12.0       # [E] ratio to 9 m booster, image padb_full_stack_on_mount_2026-05: 11.5 m, oblique -> 12
-pitch_m = 8.0             # [E] estimate: gusset row spacing ~0.7 x face width, nsf_padb_chopsticks_2025-02
-pattern = "k_brace"            # [E] layout read from nsf_padb_chopsticks_2025-02 / padb_tower_top_cabin_2026-04
+pitch_m = 4.0             # [E] ratio method: ~36 floor rows over 1530 px lattice height on padb_tower_full_with_chopsticks_2025-08 = 4.0 m
+pattern = "chevron"            # [E] nested chevron per row (Lambda between the corner columns), X at the foot: same image
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
-[profiles.leg]            # white main chord: square box column
-kind = "box"              # [E] reads as a hollow box column in nsf_padb_chopsticks_2025-02
-size_m = 1.6              # [E] estimate: ~1/7.5 of the 12 m face, image nsf_padb_chopsticks_2025-02 (oblique)
-wall_m = 0.04             # [E] estimate: plate column, no way to measure a wall from photos
+[profiles.leg]            # closed bright main corner column: square box
+kind = "box"              # [E] closed box column, galvanised: padb_tower_full_with_chopsticks_2025-08
+size_m = 2.2              # [E] bright corner column ~25 px wide at 10.6 px/m = 2.4 m in padb_tower_full_with_chopsticks_2025-08, oblique -> 2.2
+wall_m = 0.05             # [E] estimate: plate column, no way to measure a wall from photos
 
-[profiles.brace]          # dark K/X brace between gusset plates
+[profiles.brace]          # bracing between the columns, clearly thinner than the legs
 kind = "h_beam"           # [E] reads as an I/H section with gusset plates in nsf_padb_chopsticks_2025-02
-size_m = 0.7              # [E] ratio to the 12 m face, image nsf_padb_chopsticks_2025-02, ~0.6-0.8 m
-wall_m = 0.03             # [E] estimate: flange thickness, not measurable
+size_m = 0.5              # [E] brace ~5 px wide at 10.6 px/m on padb_tower_full_with_chopsticks_2025-08
+wall_m = 0.04             # [E] estimate: flange thickness, not measurable
 
 [profiles.chopstick_rail]
 kind = "tube"             # [E] catch rail on the arm top is a round tube in padb_chopsticks_around_booster_top_2026-03
-size_m = 0.65             # [E] ratio to 9 m booster, image padb_chopsticks_around_booster_top_2026-03 (0.63 m)
-wall_m = 0.025            # [E] estimate: tube wall, not measurable
+size_m = 0.9              # [E] heavier than Task 2: rails ~1/10 of the 9 m booster in padb_chopsticks_around_booster_top_2026-03
+wall_m = 0.04             # [E] estimate: tube wall, not measurable
 
 [profiles.chopstick_chord]
 kind = "tube"             # [E] truss chords are round tubes (same image)
-size_m = 0.65             # [E] ratio to 9 m booster, image padb_chopsticks_around_booster_top_2026-03 (0.63 m)
-wall_m = 0.025            # [E] estimate: tube wall, not measurable
+size_m = 1.0              # [E] chord tubes ~1/9 of the 9 m booster in padb_chopsticks_around_booster_top_2026-03
+wall_m = 0.04             # [E] estimate: tube wall, not measurable
 
 [profiles.chopstick_brace]
 kind = "tube"             # [E] diagonals are round tubes (same image)
-size_m = 0.5              # [E] ratio to 9 m booster, image padb_chopsticks_around_booster_top_2026-03 (0.51 m)
-wall_m = 0.02             # [E] estimate: tube wall, not measurable
+size_m = 0.7              # [E] diagonals ~0.7 of the chord, same image
+wall_m = 0.03             # [E] estimate: tube wall, not measurable
 
 [chopstick]
 length_m = 26.0           # [E] spec A: ~26 m hinge-to-tip from image ratios; physics arm stays 36 m (prototype)
 width_m = 3.0             # [E] estimate: ~1/3 of the truss depth, padb_chopstick_arm_backlit_2026-04
 depth_m = 8.75            # [E] ratio to 9 m booster, image padb_chopsticks_around_booster_top_2026-03
-truss_pitch_m = 4.5       # [E] estimate: diagonal spacing ~ half the truss depth, same image
+truss_pitch_m = 6.5       # [E] fewer panels: ~4 W-panels over the arm in padb_chopsticks_around_booster_top_2026-03 (Task 2: 4.5)
 rail_profile = "chopstick_rail"     # [E] see profiles
 chord_profile = "chopstick_chord"   # [E] see profiles
 brace_profile = "chopstick_brace"   # [E] see profiles

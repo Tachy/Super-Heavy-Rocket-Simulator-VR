@@ -407,7 +407,8 @@ over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad)
 ## Structure detail files (`structures/`)
 - `structures/starbase_olp2.toml`: the site-independent Pad B tower and chopstick detail (draft from first measurements):
   `[tower] height_m` + `[[tower.sections]]` (`height_m`, `face_width_m`, `pitch_m`, `pattern`, `leg_profile`,
-  `brace_profile`), `[profiles.<name>]` (`kind` h_beam / tube / angle / box, `size_m`, `wall_m`), `[chopstick]`
+  `brace_profile`; `pattern` x_brace / k_brace / chevron), `[tower.deck]` (`thickness_m`, `inset_m`), `[tower.core]`
+  (`size_m`), `[tower.roof]`, `[tower.foot]`, `[profiles.<name>]` (`kind` h_beam / tube / angle / box, `size_m`, `wall_m`), `[chopstick]`
   (`length_m`, `width_m`, `depth_m`, `truss_pitch_m`, rail / chord / brace profile). Every value line carries
   `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/detail_file.py` (`python -m pytest tools/structures/tests`).
   Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.
