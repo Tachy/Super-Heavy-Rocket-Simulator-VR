@@ -80,32 +80,38 @@ port_radius_m = 0.4                # [E] round fitting (the 1:100 part is a 0.9 
 port_height_m = 0.45               # [E] model
 
 [booster.grid_fin_fairing]
-length_frac = 0.25                 # [E] small housing at the root: aerial 2026-04 and f12 1804 s show only a short stem
-width_m = 0.9                      # [E] housing width, same frames (not resolved better)
-height_m = 0.5                     # [E] housing height out of the hull
+length_frac = 0.25                 # [E] unused since the round mount ring (kept for the spec check)
+width_m = 1.4                      # [E] +-0.3 m: round mount ring diameter, B19 image (dark ring ~14 px of 9.1 px/m)
+height_m = 0.12                    # [E] mount ring height out of the hull (the fin plate starts at 0.15 m)
 
 [grid_fin]
-# Outline from the factory photo (a real fin on its fixture, `tools/structures/measure/fin_*.py`: wall vanishing points ->
-# rectified view; vertices read by eye +-0.06 m, lattice pitch from the spectrum peak 75.7 px +-5 %, scale 0.49 m per pitch from the
-# 4.1 m overall width). Not a regular octagon but a chamfered square with unequal chamfers. (z chord, y span from the root vertex.)
-outline_z_m = [-1.793, -0.409, 0.409, 1.7, 2.088, 2.283, 2.059, -0.297, -1.825]   # [E] +-0.06 m
-outline_y_m = [0.549, 0.0, 0.324, 1.076, 1.618, 2.931, 3.478, 3.844, 2.552]       # [E] +-0.06 m; B-C (vertices 1-2) is the root chamfer under the pylon
+# Plan geometry from the 1:100 model's plain fin STL (screenshots/starship_v3_ref/ss3-grid-fin.stl, x 0.1; measured by
+# tools/structures/measure/fin_stl_outline.py, nothing of the mesh is copied): an irregular octagon, exactly mirror-symmetric about the
+# hinge axis (axis error 0.000 m), wall lattice at 45 deg to the axis, square cells, a crossing on the axis. Checked against the
+# installed-fin image: its outline holds 102.9 cells = the STL's 102.9 cells (pitch 0.350 m), rows of 11 cells match. (z chord, y span from the root.)
+outline_z_m = [-0.173, 0.173, 1.766, 1.764, 0.990, -0.990, -1.764, -1.766]   # [E] STL 1:100 model root chamfer 0.35, tapers, parallel sides, tail chamfers, tail 1.98
+outline_y_m = [0.0, 0.0, 1.751, 3.762, 4.536, 4.536, 3.762, 1.751]           # [E] STL 1:100 model root at the hinge; cross rib at 1.751 (corner to corner)
 thickness_m = 0.50                 # [E] +-0.1 m: rim band 0.43 m + cusp tips, NSF photo 2026-03 at 17 deg elevation (model 0.4 / 0.7)
-cell_pitch_m = 0.49                # [E] +-0.05 m wall pitch (diamond lattice, walls +-45 deg to the outline's axes): 8.3 pitches over the 4.1 m width in the factory photo; f12 file 1804 s gave 0.46 +-0.07
+cell_pitch_m = 0.350               # [E] STL 1:100 model +-0.005 m wall pitch (square cells, walls +-45 deg to the axis); the installed-fin image gives the same: 102.9 cells in the outline
 wall_m = 0.04                      # [E] wall thickness not resolved in any frame (model 0.045): upper bound
 frame_m = 0.10                     # [E] rim plate thickness (not resolved; model 0.05-0.07, heavier in IE-Photo-44)
-band_m = 0.20                      # [E] +-0.05 m: light flat band on the upper rim face (installed-fin photo, user 2026-10-31)
-edge_tooth_pitch_m = 0.35          # [E] rim scallops = one per wall end = pitch / sqrt 2 (factory photo; person photo: 0.33 m)
-edge_tooth_depth_m = 0.22          # [E] +-0.08 m: rim scallop depth
-cusp_dip_m = 0.19                  # [E] +-0.05 m: free edge of every wall dips this far from the cusp tip on each face (person photo: valley at ~0.4 of the depth)
-cusp_steps = 5                     # [E] profile segments per wall between two crossings (triangle budget)
-rib_y_m = 1.05                     # [E] +-0.15 m: heavier cross rib across the whole fin 0.27 of the span from the root (person photo)
+band_m = 0.08                      # [E] +-0.03 m: thin light band on the upper rim face, only along band_edges (template image, user 2026-10-31)
+band_edges = [7, 0, 1]             # [E] outline edges with the thin light band and the rim plate: left taper, root chamfer, right taper (all other edges are bare wall ends)
+lattice_inset_m = 0.02             # [E] the walls end this far inside the outline
+edge_tooth_pitch_m = 0.2475         # [E] rim scallops = one per wall end = pitch / sqrt 2
+edge_tooth_depth_m = 0.10          # [E] +-0.08 m: rim scallop depth
+cusp_dip_m = 0.10                  # [E] +-0.05 m: free edge of every wall dips this far from the cusp tip on each face (person photo: valley at ~0.4 of the depth)
+cusp_steps = 3                     # [E] profile segments per wall between two crossings (triangle budget)
+rib_y_m = 1.751                    # [E] STL 1:100 model cross rib corner to corner, 1.75 m from the root chamfer
 rib_thickness_m = 0.06             # [E] cross rib wall
 rib_wave_m = 0.13                  # [E] cross rib wave amplitude of its free edges
-hinge_ring_radius_m = 0.32               # [E] +-0.08 m: round bolted hinge ring at the root (installed-fin photo)
-ring_length_m = 0.16               # [E] ring height along the hinge axis
+hinge_ring_radius_m = 0.40               # [E] +-0.08 m: round bolted hinge ring at the root (installed-fin photo)
+ring_length_m = 0.15               # [E] ring height along the hinge axis: its top touches the root chamfer
 ring_bolts = 12                    # [E] bolt heads on the ring
-strut_count = 3                    # [E] fan of triangular struts from the ring into the plate (installed-fin photo)
+strut_beam_m = 0.05                # [E] +-0.02 m: wall of the mount housing
+lattice_axis_y_m = 5.003          # [E] STL 1:100 model a wall crossing on the axis this far from the root vertex (crossings every 0.495)
+housing_half_root_m = 0.173       # [E] mount housing half width at the root chamfer
+housing_half_rib_m = 0.45         # [E] +-0.1 m: half width at the cross rib (factory photo from the root side: ~0.9 m)
 catch_fin_azimuths_deg = [0.0, 180.0]   # [E] fins that carry the flat bar under the root: the bar is seen on one fin of the opposite pair, the 90 deg fin has none (user images 2026-10-31); the second opposite fin is unseen: fallback 0 / 180
 bearing_length_m = 0.50            # [E] +-0.2 m: flat bar under the root, oblique view of the installed fin, ~170 px/m
 bearing_width_m = 0.15             # [E] +-0.06 m

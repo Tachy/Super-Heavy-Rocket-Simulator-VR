@@ -204,14 +204,12 @@ def da_mid(c, profile):
 def _build_fin_fairings(stage, detail, profile):
     f = detail["booster"]["grid_fin_fairing"]
     gf = stage["grid_fins"]
-    span = 2.0 * (gf["radius_m"] - profile.R)
-    chord = gf["area_m2"] / span
     mesh = vc.VMesh()
     for az in gf["azimuths_deg"]:
         a = math.radians(az)
-        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
-        half = (chord * f["length_frac"] / 2.0, f["width_m"] / 2.0, f["height_m"] / 2.0)
-        vc.box(mesh, vc.pt(gf["station_m"], a, profile.R + f["height_m"] / 2.0 - EMBED_M), X_AXIS, et, er, half)
+        # V3: a round mount ring on the barrel (B17 vs B19 image, user 2026-10-31), not the V2 block
+        vc.tube(mesh, vc.pt(gf["station_m"], a, profile.R - EMBED_M), vc.pt(gf["station_m"], a, profile.R + f["height_m"]),
+                f["width_m"] / 2.0, 24, ("mount", az))
     return mesh
 
 
@@ -446,7 +444,7 @@ def build_stage(spec, stage_id):
         parts["hinge_covers"] = _build_hinge_covers(stage, detail, profile)
         parts["raceway"] = _build_raceway(stage, detail, profile)
         parts["ports"] = _build_ports(stage, detail, profile)
-    if stage.get("catch_pins"):
+    if stage.get("catch_pins") and stage_id != "booster":  # the booster's bearing is the fins' flat bar, no frame shows a pin
         parts["catch_pins"] = _build_catch_pins(stage, detail, profile)
     tris = {}
     for name, mesh in parts.items():

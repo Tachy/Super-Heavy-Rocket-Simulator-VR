@@ -30,12 +30,6 @@ SHAFT_SIDES = 12  # [E]
 RING_SIDES = 20  # [E]
 TOOTH_STEPS = 3  # [E] rim scallop segments per tooth
 RIB_STEPS_PER_WAVE = 8  # [E]
-STRUT_HALF_DEPTH_FRAC = 0.36  # [E] strut base half width / thickness_m
-STRUT_END_Y_M = 1.1  # [E] strut tips end this far (span) from the hull: inside the lattice
-STRUT_END_Z_M = 0.85  # [E] fan half spread at the strut tips
-STRUT_THICK_M = 0.04  # [E]
-BLOCK_HALF_Z_M = 0.25  # [E] root block width at the ring
-BLOCK_HALF_X_M = 0.12  # [E] root block depth at the ring
 
 
 def outline_points(d):
@@ -98,8 +92,14 @@ def clip_line(outline, pz, py, dz, dy):
 
 
 def horn(u):
-    """Cusp profile 0 at the tip (u = 0, 1) to 1 in the middle: vertical tangent at the tips (sharp horns)."""
-    return math.sqrt(max(0.0, math.sin(math.pi * u)))
+    """Cusp profile 0 at the tip (u = 0, 1) to 1 in the middle: a pointed cusp with a finite angle (the walls stay tall
+    at the crossings, the scoop between is a smooth arch)."""
+    return math.sin(math.pi * u)
+
+
+def scallop(u):
+    """Soft round rim scallop 0..1..0: rounded tips, no horns."""
+    return 0.5 * (1.0 - math.cos(2.0 * math.pi * u))
 
 
 def _rim_side(frame, a, b, centre, d, x_top, x_aft):
@@ -117,7 +117,7 @@ def _rim_side(frame, a, b, centre, d, x_top, x_aft):
 
     def edge(i):
         u = (i % TOOTH_STEPS) / TOOTH_STEPS
-        return at(i, x_aft + d["edge_tooth_depth_m"] * horn(u))
+        return at(i, x_aft + d["edge_tooth_depth_m"] * scallop(u))
 
     for i in range(steps):
         e0, e1 = edge(i), edge(i + 1)
@@ -152,28 +152,49 @@ def _saddle_wall(mesh, p0, p1, s0, s1, d, x_top, x_aft):
         mesh.face(quad, [(0.0, 0.0)] * 4, -side)
 
 
+def ensure_ccw(pts):
+    return pts if signed_area(pts) > 0.0 else list(reversed(pts))
+
+
+def housing_points(d):
+    """Half width of the mount housing at the root (y from the root vertex) and at the cross rib."""
+    return d["housing_half_root_m"], d["housing_half_rib_m"]
+
+
 def _lattice(lat, outline, d, x_top, x_aft):
     pitch = d["cell_pitch_m"]
-    cz = sum(p[0] for p in outline) / len(outline)
-    cy = sum(p[1] for p in outline) / len(outline)
-    inner = offset_polygon(outline, d["frame_m"])
+    root_gap, y_rib = d["root_gap_m"], d["root_gap_m"] + d["rib_y_m"]
+    inset = d["lattice_inset_m"]
+    zs = [p[0] for p in outline]
+    z_rib_l = min(p[0] for p in outline if abs(p[1] - y_rib) < 1e-3)
+    z_rib_r = max(p[0] for p in outline if abs(p[1] - y_rib) < 1e-3)
+    h_root, h_rib = housing_points(d)
+    tail = [p for p in outline if p[1] >= y_rib - 1e-3]  # tail side of the cross rib
+    root = [p for p in outline if p[1] <= y_rib + 1e-3]
+    regions = [ensure_ccw(tail)]
+    left = [root[0], (-h_rib, y_rib), (z_rib_l, y_rib)]  # flank between the housing wall and the outline, root side
+    right = [root[1], (z_rib_r, y_rib), (h_rib, y_rib)]
+    regions += [ensure_ccw(left), ensure_ccw(right)]
     s2 = math.sqrt(0.5)
-    reach = int(max(max(p[0] for p in outline) - min(p[0] for p in outline),
-                    max(p[1] for p in outline) - min(p[1] for p in outline)) / pitch) + 2
-    for sign in (-1.0, 1.0):  # the two wall families, +-45 deg
-        dz, dy = sign * s2, s2
-        across_z, across_y = s2, -sign * s2
-        for k in range(-reach, reach + 1):
-            pz, py = cz + k * pitch * across_z, cy + k * pitch * across_y
-            span = clip_line(inner, pz, py, dz, dy)
-            if span is None or span[1] - span[0] < 0.02:
-                continue
-            first, last = math.floor(span[0] / pitch + 1e-9), math.ceil(span[1] / pitch - 1e-9)
-            for m in range(first, last):  # saddle from crossing m to crossing m + 1, cut at the rim
-                sa, sb = max(span[0], m * pitch), min(span[1], (m + 1) * pitch)
-                if sb - sa < 0.02:
+    y_origin = root_gap + d["lattice_axis_y_m"]  # a crossing of the two wall families lies here on the symmetry axis
+    reach = int((max(zs) - min(zs) + 6.0) / pitch)
+    for region in regions:
+        inner = offset_polygon(region, inset)
+        for sign in (-1.0, 1.0):  # the two wall families, +-45 deg to the axis
+            dz, dy = sign * s2, s2
+            across_z, across_y = s2, -sign * s2
+            for k in range(-reach, reach + 1):
+                pz, py = k * pitch * across_z, y_origin + k * pitch * across_y
+                span = clip_line(inner, pz, py, dz, dy)
+                if span is None or span[1] - span[0] < 0.02:
                     continue
-                _saddle_wall(lat, (pz + dz * sa, py + dy * sa), (pz + dz * sb, py + dy * sb), sa, sb, d, x_top, x_aft)
+                first, last = math.floor(span[0] / pitch + 1e-9), math.ceil(span[1] / pitch - 1e-9)
+                for m in range(first, last):  # saddle from crossing m to crossing m + 1, cut at the rim
+                    sa, sb = max(span[0], m * pitch), min(span[1], (m + 1) * pitch)
+                    if sb - sa < 0.02:
+                        continue
+                    _saddle_wall(lat, (pz + dz * sa, py + dy * sa), (pz + dz * sb, py + dy * sb), sa, sb, d, x_top, x_aft)
+    inner = offset_polygon(ensure_ccw(list(outline)), inset)
     # heavier cross rib across the whole fin with its own wave (person photo: just above the root box)
     y_rib = d["root_gap_m"] + d["rib_y_m"]
     span = clip_line(inner, 0.0, y_rib, 1.0, 0.0)
@@ -196,8 +217,18 @@ def _lattice(lat, outline, d, x_top, x_aft):
                   Vector((aa, y_rib + half_t, za))], [(0.0, 0.0)] * 4, Vector((-1, 0, 0)))
 
 
+def _wall_box(mesh, p0, p1, half_x, half_t, x_mid):
+    """Upright wall between (z, y) points p0 and p1: height 2 half_x about x_mid, thickness 2 half_t."""
+    v = Vector((0.0, p1[1] - p0[1], p1[0] - p0[0]))
+    direction = v.normalized()
+    side = Vector((1.0, 0.0, 0.0)).cross(direction)
+    vc.box(mesh, Vector((x_mid, (p0[1] + p1[1]) / 2.0, (p0[0] + p1[0]) / 2.0)), Vector((1, 0, 0)), direction, side,
+           (half_x, v.length / 2.0, half_t))
+
+
 def _pylon(mesh, outline, d, x_top):
-    """Round bolted ring on the hinge axis, a tapered root block up to the root chamfer, a fan of triangular struts."""
+    """Round bolted ring on the hinge axis and the mount housing: an open tray between the ring and the cross rib
+    (two upright walls, root wall, floor on the aft side), as in the factory photo of the fin from the root side."""
     t = d["thickness_m"]
     y_top = d["ring_length_m"]
     vc.tube(mesh, (0.0, 0.0, 0.0), (0.0, y_top, 0.0), d["hinge_ring_radius_m"], RING_SIDES, "ring")
@@ -207,32 +238,14 @@ def _pylon(mesh, outline, d, x_top):
         a = 2.0 * math.pi * i / d["ring_bolts"]
         r = d["hinge_ring_radius_m"] * 0.8
         vc.box(mesh, (math.cos(a) * r, y_top + bolt, math.sin(a) * r), ex, ey, ez, (bolt, bolt, bolt))
-    (zb, yb), (zc, yc) = outline[1], outline[2]  # the root chamfer
-    inset = 0.04
-
-    def chamfer_y(z):
-        return yb + (yc - yb) * (z - zb) / (zc - zb)
-
-    za, zz = zb + inset, zc - inset
-    bottom = [Vector((-BLOCK_HALF_X_M, y_top, -BLOCK_HALF_Z_M)), Vector((BLOCK_HALF_X_M, y_top, -BLOCK_HALF_Z_M)),
-              Vector((BLOCK_HALF_X_M, y_top, BLOCK_HALF_Z_M)), Vector((-BLOCK_HALF_X_M, y_top, BLOCK_HALF_Z_M))]
-    top = [Vector((-0.4 * t, chamfer_y(za), za)), Vector((0.4 * t, chamfer_y(za), za)),
-           Vector((0.4 * t, chamfer_y(zz), zz)), Vector((-0.4 * t, chamfer_y(zz), zz))]
-    centre = sum(bottom + top, Vector((0, 0, 0))) / 8.0
-    for i in range(4):
-        j = (i + 1) % 4
-        quad = [bottom[i], bottom[j], top[j], top[i]]
-        mesh.face(quad, [(0.0, 0.0)] * 4, sum(quad, Vector((0, 0, 0))) / 4.0 - centre)
-    apex = Vector((0.0, y_top, 0.0))
-    count = int(d["strut_count"])
-    for i in range(count):
-        zt = STRUT_END_Z_M * (2.0 * i / (count - 1) - 1.0) if count > 1 else 0.0
-        tip = Vector((0.0, d["root_gap_m"] + STRUT_END_Y_M, zt))
-        along = (tip - apex).normalized()
-        perp = Vector((1.0, 0.0, 0.0)).cross(along) * (STRUT_THICK_M / 2.0)
-        w = ex * (STRUT_HALF_DEPTH_FRAC * t)
-        for sgn in (-1.0, 1.0):
-            mesh.face([apex - w + perp * sgn, apex + w + perp * sgn, tip + perp * sgn], [(0.0, 0.0)] * 3, perp * sgn)
+    h_root, h_rib = housing_points(d)
+    y0, y1 = outline[0][1], d["root_gap_m"] + d["rib_y_m"]
+    wall = d["strut_beam_m"] / 2.0
+    for sign in (-1.0, 1.0):
+        _wall_box(mesh, (sign * h_root, y0), (sign * h_rib, y1), t / 2.0, wall, 0.0)
+    _wall_box(mesh, (-h_root, y0), (h_root, y0), t / 2.0, wall, 0.0)  # root wall at the chamfer
+    vc.box(mesh, (-t / 2.0 + wall / 2.0, (y0 + y1) / 2.0, 0.0), ex, ey, ez,
+           (wall / 2.0, (y1 - y0) / 2.0, (h_root + h_rib) / 2.0))  # floor on the aft side
 
 
 def build_fin(spec):
@@ -245,12 +258,13 @@ def build_fin(spec):
     x_top, x_aft = t / 2.0, -t / 2.0
     n = len(outline)
     frame = vc.VMesh()
-    for i in range(n):
+    band_edges = set(int(i) for i in d["band_edges"])
+    for i in band_edges:
         _rim_side(frame, outline[i], outline[(i + 1) % n], (cz, cy), d, x_top, x_aft)
 
     band = vc.VMesh()  # light flat face of the rim on the forward side, wider than the rim plate
     inner = offset_polygon(outline, d["band_m"])
-    for i in range(n):
+    for i in sorted(band_edges):
         j = (i + 1) % n
         band.face([Vector((x_top, outline[i][1], outline[i][0])), Vector((x_top, outline[j][1], outline[j][0])),
                    Vector((x_top, inner[j][1], inner[j][0])), Vector((x_top, inner[i][1], inner[i][0]))],

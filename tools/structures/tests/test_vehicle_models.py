@@ -232,12 +232,7 @@ def test_hull_is_a_plain_lathe_without_ring_beads(built, spec, stage_id):
 def test_pins_fins_and_ship_features_sit_at_the_config_numbers(built, spec):
     b, s = spec["stages"]["booster"], spec["stages"]["ship"]
     parts = _meshes(built / "booster.gltf")
-    pos, _, _ = parts["catch_pins"]
-    lo, hi = _bounds(pos)
-    assert (lo[0] + hi[0]) / 2.0 == pytest.approx(b["catch_pins"]["station_m"], abs=0.01)
-    reach = max(p[1] * math.cos(math.radians(a)) + p[2] * math.sin(math.radians(a))
-                for p in pos for a in b["catch_pins"]["azimuths_deg"])  # radial reach of the pin heads
-    assert reach == pytest.approx(b["diameter_m"] / 2 + b["catch_pins"]["protrusion_m"], abs=0.01)
+    assert "catch_pins" not in parts  # no frame shows a pin on the booster (the bearing is the fins' flat bar); config kept
     pos, _, _ = parts["fin_fairings"]
     lo, hi = _bounds(pos)
     assert (lo[0] + hi[0]) / 2.0 == pytest.approx(b["grid_fins"]["station_m"], abs=0.01)
@@ -291,7 +286,7 @@ def test_grid_fin_pivot_on_the_hinge_and_measured_outline(built, spec):
     b = spec["stages"]["booster"]
     parts = _meshes(built / "grid_fin.gltf")
     d = spec["detail"]["grid_fin"]
-    lo, hi = _bounds(parts["frame"][0])
+    lo, hi = _bounds(list(parts["frame"][0]) + list(parts["lattice"][0]) + list(parts["band"][0]))  # the rim only on the band edges
     t = d["thickness_m"]
     # the plate lies across the station axis: the cells open along X (frames, core/src/aero/grid_fin.cpp), chord along Z
     assert hi[0] - lo[0] == pytest.approx(t, abs=BOUND_TOL_M)
@@ -300,11 +295,13 @@ def test_grid_fin_pivot_on_the_hinge_and_measured_outline(built, spec):
     assert lo[2] == pytest.approx(min(zs), abs=BOUND_TOL_M) and hi[2] == pytest.approx(max(zs), abs=BOUND_TOL_M)
     assert lo[1] == pytest.approx(d["root_gap_m"] + min(ys), abs=1e-4)
     assert hi[1] == pytest.approx(d["root_gap_m"] + max(ys), abs=BOUND_TOL_M)
-    assert max(zs) - min(zs) == pytest.approx(4.1, abs=0.15)  # NSF photo 2026-03: 4.1 m wide
+    assert max(zs) - min(zs) == pytest.approx(3.53, abs=0.05)  # STL 1:100: 4.03 m across the cell axes = 3.53 m across the symmetry axis
+    assert all(abs(zs[i] + zs[(1 - i) % len(zs)]) < 1e-6 and abs(ys[i] - ys[(1 - i) % len(zs)]) < 1e-6
+               for i in range(len(zs)))  # mirror symmetric about the hinge axis
     n = len(zs)
     area = 0.5 * sum(zs[i] * ys[(i + 1) % n] - zs[(i + 1) % n] * ys[i] for i in range(n))
     assert 10.0 < area < 13.5  # gross planform, documented against the physics 13.5 m^2
-    assert len(set(round(math.hypot(zs[(i + 1) % n] - zs[i], ys[(i + 1) % n] - ys[i]), 2) for i in range(n))) >= 6  # unequal sides
+    assert len(set(round(math.hypot(zs[(i + 1) % n] - zs[i], ys[(i + 1) % n] - ys[i]), 2) for i in range(n))) >= 5  # irregular octagon
     # cusp tips reach both faces; the cross rib and the pylon exist
     llo, lhi = _bounds(parts["lattice"][0])
     assert llo[0] == pytest.approx(-t / 2.0, abs=1e-4) and lhi[0] == pytest.approx(t / 2.0, abs=1e-4)
