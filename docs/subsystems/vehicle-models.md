@@ -116,13 +116,13 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   flaps 90 / 81 / 24.6 / 22.4 deg).
 
 ## Open points
-- Free camera (`FOCUS_FREE`) and a low camera looking up at a hull's shade side: that side is black with the old LitAerial steel and
-  the tower too; the orbit camera from above / level shows the sky's reflection. Not caused by the hull shader. Checked in the final
-  fix round: the sky's radiance cubemap is NOT frozen after load (a lit diffuse sphere in the free camera goes black when the clock
-  jumps 12 h to night and returns to the identical values when it jumps back, `Sky.PROCESS_MODE_INCREMENTAL` re-renders on the
-  changed Sun light / sky uniforms); so the cause is not a stale ambient and stays open (candidates: the reflection direction of a
-  near-vertical shade side hitting the dark ground half of the cubemap; the metallic share of the steel; the atmosphere's
-  `colour_factor`). A real-session probe (stack on the pad, clock +12 h) is not possible: the flight session resets the clock.
+- Black shade sides in a static scene (user decision, lighting unchanged): the sky's radiance cubemap (ambient and reflections) stays
+  black after the atmosphere tables load: `world.gd` uses `Sky.PROCESS_MODE_INCREMENTAL` and `sky.gdshader` reads only global uniforms,
+  so Godot does not re-render it. In a real flight session a white diffuse hull's shade side reads `0 1 2`, after one sky-material write
+  74-92, with REALTIME ~80. Not the hull shader, the camera or its height. An earlier probe seemed to refute this because its clock jump
+  dirtied the cube; whether a running clock refreshes it in the real game is unchecked. Smallest fix: write a `radiance_serial` uniform on
+  the sky material after the tables load and as the Sun moves; it brightens the shade side of every lit object. Evidence:
+  `game/tests/shade_probe.gd`, `vehicle_look_shots.gd --poke / --sky_realtime`.
 - Coverage vs thermal (user decision): the shield is drawn 75 / 65 / 55 / 30 deg either side of the belly (stations 0 / 20 / 35 /
   52 m), the aero heating model treats the full windward half (90 deg); the visible steel strip at the aft flaps' roots stays. The
   drawing follows the photographs, the physics the conservative heating; neither is changed.
