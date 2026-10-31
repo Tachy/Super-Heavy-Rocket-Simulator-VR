@@ -16,3 +16,8 @@ Superseded numbers and earlier approaches of the Pad B tower model. Current stat
   ~0.15); far tier colours (0.69 / 0.55 sRGB) never refitted after the user's darkening call of 2026-10-31. Replaced by
   bright legs (linear albedo ~0.15) and dark braces (~0.04), far tier refitted (real-frames item 11).
 - Hand-over numbers at 12 sections (brace 1.04 px at 300 m desktop, 2.0 px VR): with the 0.5 m brace 1.30 px / 2.4 px.
+
+## Chopstick before fine build task 2
+Draft model: straight open truss from the hinge, length 26 m, width 3 m, depth 8.75 m, truss pitch 6.5 m, top rails 0.9 m, W diagonals, one
+arm only (-across stayed a box). Replaced by the measured Pad 2 arm. The measurement rows "QD arm deck 122 m" and "carriage parked arm top 88 m"
+had the two parts swapped (`launch-structures-measurements.md`, Arm research); the plan's `gen_qd_arm` at deck 122 m followed that error.

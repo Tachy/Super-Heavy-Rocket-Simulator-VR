@@ -203,6 +203,14 @@ class MeshBuilder:
         return ob, tris
 
 
+def add_layout(members, root) -> int:
+    """Members of mechazilla_layout (node, kind, size, p0, p1, size_y) as one mesh object per node; returns the triangles."""
+    builders = {}
+    for node, kind, size, p0, p1, size_y in members:
+        builders.setdefault(node, MeshBuilder()).add_member(kind, size, 0.04, p0, p1, size_y=size_y)
+    return sum(builder.to_object(node, root)[1] for node, builder in builders.items())
+
+
 def export_gltf(path) -> None:
     """glTF (.gltf + .bin), Blender axes kept (export_yup off): arm along +X, top plane at Z = 0."""
     bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLTF_SEPARATE", export_yup=False,

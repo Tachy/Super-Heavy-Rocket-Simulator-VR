@@ -108,33 +108,59 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(again.get_child_count() == view.get_child_count(), "second build: same child count")
 
 	# Arm pivots follow the physics state exactly like the boxes' pivots.
-	_check(_pivot(view, 0).get_node_or_null("Chopstick") != null, "+across arm is the chopstick")
+	for arm_index in range(2):
+		_check(_pivot(view, arm_index).get_node_or_null("Chopstick") != null, "arm %d is a chopstick" % arm_index)
 	_check(_pivot(boxes, 0).get_node_or_null("Chopstick") == null, "box path has no chopstick")
-	var second_arm := _pivot(view, 1).get_child(0) as MeshInstance3D
-	_check(second_arm != null and second_arm.mesh is BoxMesh, "-across arm stays a box")
+	var plus_arm := _pivot(view, 0).get_node("Chopstick") as Node3D
+	var minus_arm := _pivot(view, 1).get_node("Chopstick") as Node3D
+	_check(plus_arm.basis.determinant() > 0.0 and minus_arm.basis.determinant() < 0.0, "-across arm mirrored")
+	var geometry := _geometry()
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
 	for state in STATES:
 		view.update_state(state)
 		boxes.update_state(state)
-		for arm in range(2):
-			var a := _pivot(view, arm)
-			var b := _pivot(boxes, arm)
-			_check(a.transform.is_equal_approx(b.transform), "state %s arm %d: pivot equals the box path" % [state, arm])
-	# The chopstick's hinge is the pivot origin and it points along the pivot's forward axis.
-	var chopstick := _pivot(view, 0).get_node("Chopstick")
-	var bounds := AABB()
-	for part in ["truss", "rail"]:
-		var mesh_node := chopstick.get_node(part) as MeshInstance3D
-		var part_bounds: AABB = chopstick.transform * mesh_node.get_aabb()
-		bounds = bounds.merge(part_bounds) if bounds.has_surface() else part_bounds
-	var arm: Dictionary = models["detail"]["chopstick"]
-	_check(absf(bounds.position.z) < 0.05 and absf(bounds.end.z - float(arm["length_m"])) < 0.05,
-			"chopstick: hinge at 0, tip at %.1f m along +Z" % float(arm["length_m"]))
-	_check(absf(bounds.end.y) < 0.05 and absf(bounds.size.y - float(arm["depth_m"])) < 0.05,
-			"chopstick: top rails at Y = 0, %.2f m deep below" % float(arm["depth_m"]))
-	_check(absf(bounds.size.x - float(arm["width_m"])) < 0.05, "chopstick: %.1f m wide" % float(arm["width_m"]))
-	var paint_material := (chopstick.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial
-	var paint := paint_material.get_shader_parameter("albedo") as Color
+		var opening: float = state.get("opening_rad", geometry["arm_open_rad"])
+		var offset: float = state.get("carriage_offset_m", 0.0)
+		for arm_index in range(2):
+			var a := _pivot(view, arm_index)
+			var b := _pivot(boxes, arm_index)
+			_check(a.transform.is_equal_approx(b.transform), "state %s arm %d: pivot = box path" % [state, arm_index])
+			# TowerGeometry::arm_direction in site axes; the pivot's forward axis in render axes (+Z).
+			var side := 1.0 if arm_index == 0 else -1.0
+			var expected := Frames.to_render(-toward * cos(opening) + across * (side * sin(opening)))
+			var angle := rad_to_deg(a.basis.z.normalized().angle_to(expected))
+			_check(angle < 0.1, "state %s arm %d: %.3f deg from arm_direction" % [state, arm_index, angle])
+		var carriage := view.get_node("CarriageMount") as Node3D
+		var height_m := Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(carriage.position)
+		var want_m: float = float(geometry["hinge_plus_m"].z) + offset
+		_check(absf(height_m - want_m) < 0.01, "state %s: carriage %.3f m = height + offset %.3f m" % [state, height_m, want_m])
+		var cable := view.get_node("cable_0") as MeshInstance3D
+		var cable_top_m: float = Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(cable.position) + 0.5 * cable.basis.y.length()
+		_check(absf(cable_top_m - float(models["detail"]["tower.roof"]["block_base_m"])) < 0.01, "cable reaches the roof block")
+	# The closed arm: with the pivot at the hinge the +across arm's inner face and its reach against the catch axis.
+	var c: Dictionary = models["detail"]["chopstick"]
+	var lateral: float = float(geometry["hinge_plus_m"].dot(across))
+	var half_gap: float = lateral - 0.5 * float(geometry["arm_width_m"])
+	_check(absf(lateral - float(c["inner_face_y_m"]) - half_gap) < 0.05, "inner face at the physics half gap %.2f m" % half_gap)
+	var hinge_to_axis: float = float(geometry["hinge_plus_m"].dot(toward))
+	_check(float(c["length_m"]) >= hinge_to_axis, "closed arm reaches the catch axis (%.1f m >= %.1f m)" % [c["length_m"], hinge_to_axis])
+	# Bounds of the model in the pivot's frame: hinge at 0, deck plane at Y = 0, the pad under it.
+	var deck := plus_arm.get_node("deck") as MeshInstance3D
+	var deck_bounds: AABB = plus_arm.transform * deck.get_aabb()
+	_check(absf(deck_bounds.end.y) < 0.01, "deck top at the arm top plane (%.3f m)" % deck_bounds.end.y)
+	_check(absf(deck_bounds.position.z) < 0.5 and absf(deck_bounds.end.z - float(c["length_m"])) < 1.0,
+			"deck from the hinge to the tip (%.1f .. %.1f m)" % [deck_bounds.position.z, deck_bounds.end.z])
+	var truss_bounds: AABB = plus_arm.transform * (plus_arm.get_node("truss") as MeshInstance3D).get_aabb()
+	_check(absf(truss_bounds.position.y + float(c["foot_depth_m"])) < 1.0, "root columns' foot %.1f m" % truss_bounds.position.y)
+	var pad_bounds: AABB = plus_arm.transform * (plus_arm.get_node("pad") as MeshInstance3D).get_aabb()
+	_check(pad_bounds.end.y < 0.0 and absf(pad_bounds.get_center().z - float(c["pad_x_m"])) < 0.01, "contact pad at the axis")
+	var paint := ((plus_arm.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial).get_shader_parameter("albedo") as Color
 	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
+	# The QD arm stands at its deck height, static.
+	var qd := view.get_node("QdArmMount") as Node3D
+	var qd_deck_m := Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(qd.position)
+	_check(absf(qd_deck_m - float(models["detail"]["qd_arm"]["deck_m"])) < 0.01, "QD arm deck at %.2f m" % qd_deck_m)
 
 
 ## Tiers of one section: near MultiMeshes up to NEAR_END_M, the merged mesh to MID_END_M, the lattice shader beyond;
@@ -213,8 +239,8 @@ func _geometry() -> Dictionary:
 		"tower_center_m": centre, "tower_size_m": Vector3(12.0, 12.0, 146.0),
 		"mount_height_m": 20.0, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_plus_m": toward * 24.0 + across * 2.8 + up * 45.0,
-		"hinge_minus_m": toward * 24.0 - across * 2.8 + up * 45.0,
+		"hinge_plus_m": toward * 24.0 + across * 5.8 + up * 95.0,
+		"hinge_minus_m": toward * 24.0 - across * 5.8 + up * 95.0,
 	}
 
 

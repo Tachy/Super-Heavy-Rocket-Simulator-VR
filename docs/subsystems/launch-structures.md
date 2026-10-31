@@ -1,9 +1,9 @@
 # Launch structures (Pad B tower and chopstick model)
 
-State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.md`, task 1 done (measured lattice and tower
-body); tasks 2-5 (carriage and chopsticks, mount and trench, lights, acceptance) open. The prototype plan
+State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.md`, tasks 1-2 done (lattice and tower body;
+carriage, both chopsticks, QD arm); tasks 3-5 (mount and trench, lights, acceptance) open. The prototype plan
 (`2026-10-31-pad-b-prototype.md`) built the hybrid pipeline. Spec: `docs/superpowers/specs/2026-10-28-pad-b-model-design.md`.
-The lattice and one chopstick render at `starbase_olp1`; everything the physics touches stays on the physics numbers (table
+The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`; everything the physics touches stays on the physics numbers (table
 "Physics deviations" below).
 
 ## Model
@@ -18,8 +18,17 @@ The lattice and one chopstick render at `starbase_olp1`; everything the physics 
   box, braces 0.5 m H), plinth 12.2 m (12.4 m wide), light-grey cladding plates on the pad-side face from 12.2 to 79 m
   (courses of 5.35 m, two plates across, 0.1 m seams), roof deck 144 m with a louvred 8 x 8 x 7 m block (139.9-146.9 m) and
   a railing (silhouette top 146.9 m, the physics box is 146 m), zig-zag stair flights on one side face and two cable trays
-  on the back face, dark deck slabs 0.4 m at every floor, column bundle 3.6 m. Chopstick (task 2 replaces it): length 26 m,
-  width 3 m, depth 8.75 m, truss pitch 6.5 m, tube chords 1.0 m, diagonals 0.7 m, rails 0.9 m.
+  on the back face, dark deck slabs 0.4 m at every floor, column bundle 3.6 m.
+- Chopstick (task 2, Pad 2 arm; evidence "Arm research" in the measurements): `mechazilla_layout.chopstick`, frame of round
+  black tubes, 27 m, 4 m wide, V section: two top chords, one lower chord (knee 11 m at 0.21 L, 8.6 m at 0.35 L, 7 m at its end
+  0.87 L), root columns to a foot 17 m below the deck. In plan the top chords bend inward at 5.2 m (5 deg, from the geometry) and
+  at 24.8 m (28 +-15 deg); the main beam between runs along the arm's X, so both are parallel at the closed pose (`opening_rad` 0).
+  Grey contact pad at the axis station (under the catch fin at the closed pose), two telescopic pushers on the deck at the tip,
+  hanging stabilizer probe with its thin brace, ladders, platform, railing, mast, tan deck strip. Deck grating not drawn (plain plate).
+- Carriage (`mechazilla_layout.carriage`): black frame 13.5 x 9 m, hinge frames at the corners (6.75 m), grey actuator drums, walkway
+  past the corners, 3.8 m sheave block; four hoist cables to the roof block, stretched in `TowerView` with the carriage offset.
+- QD arm (`mechazilla_layout.qd_arm`): THE ship QD arm, one arm; deep root truss with light cabinets, shallow tip platform, connector
+  head; tip deck 86.8 m, static, head 1 m clear of the 4.5 m hull on the tower's centre plane, fits between the closed arms.
 - Open part of the lattice: `x_brace` on all eight lower sections, `chevron` on the top one. Which brace pitch the frames
   decide: the Ship 42 photo shows diamonds 7-8 m between crossings (6.4 px/m, ~50 px), confirming the webcast pass; the floors
   stay at 5.3 m, so a brace panel spans 1.5 floors and the sections hold 3 floors = 2 panels.
@@ -65,8 +74,10 @@ The lattice and one chopstick render at `starbase_olp1`; everything the physics 
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
   frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`).
-- `TowerView.build` frees its children first (no duplicates on a rebuild); the chopstick replaces the `+across` arm box
-  only, its hinge is the pivot, so `update_state` is unchanged. Test: `game/tests/tower_view_test.gd` (headless; the dummy
+- `TowerView.build` frees its children first (no duplicates on a rebuild); both arm boxes are chopsticks (the model's +Y points
+  to the axis; the -across arm is mirrored by a negative scale), the pivot is the physics hinge. `update_state` also places the
+  carriage (hinge height + offset) and the cables. `render_check --catch_hull=<station>` hangs a static hull with fins in the arms for
+  comparisons (`game/tests/catch_pose_hull.gd`, no flight). Test: `game/tests/tower_view_test.gd` (headless; the dummy
   renderer keeps no MultiMesh transforms, so layout is read from `LatticeBuilder.face_members` and the `*_solids`
   functions). Task 1 cases: lattice top 139 m, 26 floors of 5.3 m, roof deck 144 m, plinth top 12.2 m, cladding plates
   12.2-79 m on the pad-side face only, silhouette <= 148 m (146.9 m), four frame members and no pyramid under the roof.
@@ -104,6 +115,9 @@ The lattice and one chopstick render at `starbase_olp1`; everything the physics 
   than the geometry: hard swap of matched tiers and a coverage (alpha-to-coverage) instead; `alpha_scale` 0.85 and the
   colours of the far shader are fitted to the merged tier at 4.5-6.5 km (alpha 1.0 / 1.15 left the far tier up to 2.3 %
   brighter at VR focal length).
+- `tools/structures/tests/test_mechazilla_layout.py`: main beams parallel at the closed pose, bends inward, closed arm's surfaces >= 0.03 m
+  off the hull, pad 0.1 m from it, QD head 1 m off and between the arms. `python tools/structures/check_envelope.py`: inner face on the
+  physics half gap (0.05 m), tower width (0.10 m); only table rows are exceptions, listed by name.
 - `python -m pytest tools/structures/tests -q`: required keys, sections sum to the 139.1 m lattice (139 +-0.2), 26 floors of
   5.3 +-0.1 m, leg 2.2 / brace 0.5 m, plinth 12.2 m, cladding 12.2-79 m, X-brace pitch 7-8 m, no pyramid keys, silhouette
   <= 148 m, every value line tagged, loader raises on missing keys / bad units / unknown pattern and checks the deck, core, roof and foot tables;
@@ -147,15 +161,19 @@ The lattice and one chopstick render at `starbase_olp1`; everything the physics 
 |---|---|---|---|
 | Mount deck | 20 m (physics); plan, faces, courses as measured (task 3) | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
-| Arm length | 27 m, closed tips at the catch axis (task 2) | 36 m | hinge-to-axis 24.5 +-2 m |
+| Arm length | 27 m, closed arm past the catch axis (physics hinge 24 m from it; real tips about at the axis) | 36 m | hinge-to-axis 24.5 +-2 m |
+| Hinge position | drawn hinge frames at 6.75 m, the arm turns about the physics pivot at 5.8 m: the root moves up to 0.95 m against the frame when open | 5.8 m | measured corners; the inner face stays on the physics half gap 4.8 m |
+| Fins against the arm | pins 66.5 m put the deck 2-2.5 m above the fin plates, the arm's top 2.5 m and truss run through the 0 / 180 fins at a catch: visible overlap, NOT hidden. Pad at the closed pose under where the fin bars come down | pins 66.5 m, azimuths 45 / 225, fins without contact | V3 user view: deck 0-0.9 m under the fins; proposal in the measurements |
 | Tower face, height | width 12 m, roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 12 / 146 m | within the error |
 | Leg spacing | outer width 12 m (leg centres 9.8 m) | box 12 m | measured leg centres 11.9 +-1 m (outer 13.3-14): the legs stay inside the physics box |
-| QD arm | static, swung clear (task 2) | no state | needs the core's `qd_arm_angle_rad` |
+| QD arm | static, deck 86.8 m, head 1 m off the hull (not attached, not swung off); stack on the 20 m deck stands 5.5 m higher than measured | no state | needs the core's `qd_arm_angle_rad` and mount height |
 | Azimuth, distance | physics 315 deg, 30 m | measured 345 +-25, 32 +-3 m | low confidence |
 
 ## Open points
-- Render vs the frames (task 1): still different: no carriage / mount frustum (tasks 2-3; the old mount cylinder), the
-  -across arm is a box (task 2), no platforms with grating and no cross braces inside the face, the plinth is a plain box,
+- Arm: the pad position along the arm (real block at the arm's end, drawn at the axis station); root bend and width from weak
+  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 7.9k triangles per arm, far tier unchanged (cost:
+  task 5); hinge visual offset 0.95 m (table); shock absorbers and the fin's station undecided.
+- Render vs the frames (task 1): still different: no mount frustum (task 3; the old mount cylinder), no platforms with grating and no cross braces inside the face, the plinth is a plain box,
   the hoist cables and side members of the roof block are missing, grime is not tuned.
 - The far shader's `blur`, `alpha_scale` and colours are fitted to the merged tier at 900-1300 m for one sun / sky
   condition; other light may show a small step (< 2 % luminance measured).

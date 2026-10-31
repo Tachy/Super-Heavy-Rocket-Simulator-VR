@@ -11,7 +11,8 @@ const PROTOTYPE_SITE_ID := "starbase_olp1"
 const DETAIL_FILE := "structures/starbase_olp2.toml"
 const MODEL_DIR := "models/starbase_olp2"
 const MANIFEST := "manifest.json"
-const SOURCE_SCRIPTS: Array[String] = ["common.py", "gen_profiles.py", "gen_chopstick.py"]
+const SOURCE_SCRIPTS: Array[String] = ["common.py", "mechazilla_layout.py", "gen_profiles.py", "gen_chopstick.py",
+		"gen_carriage.py", "gen_qd_arm.py"]
 ## Blender (X, Y, Z) -> render (Y, Z, X): arm along +X becomes +Z (the arm pivot's forward axis), Z up becomes +Y.
 const BLENDER_TO_RENDER := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
 
@@ -20,7 +21,7 @@ static var _logged: Dictionary = {}
 static var _load_error := ""
 
 
-## {} or {"detail": TomlLite dictionary, "profiles": {name: Mesh}, "chopstick": {"truss": Mesh, "rail": Mesh}}.
+## {} or {"detail": TomlLite dictionary, "profiles": {name: Mesh}, "chopstick" / "carriage" / "qd_arm": {node name: Mesh}}.
 static func load_for(site_id: String) -> Dictionary:
 	if site_id != PROTOTYPE_SITE_ID:
 		return {}
@@ -34,27 +35,30 @@ static func load_for(site_id: String) -> Dictionary:
 	var detail := TomlLite.load_file(detail_path)
 	var profiles := _meshes_of(model_dir.path_join("profiles.gltf"), "profile_")
 	var chopstick := _meshes_of(model_dir.path_join("chopstick.gltf"), "")
-	if profiles.is_empty() or chopstick.is_empty():
+	var carriage := _meshes_of(model_dir.path_join("carriage.gltf"), "")
+	var qd_arm := _meshes_of(model_dir.path_join("qd_arm.gltf"), "")
+	if profiles.is_empty() or chopstick.is_empty() or carriage.is_empty() or qd_arm.is_empty():
 		return _fallback(site_id, _load_error)
 	for section: Dictionary in detail.get("tower.sections", []):
 		for key: String in ["leg_profile", "brace_profile"]:
 			if not profiles.has(section[key]):
 				return _fallback(site_id, "profile %s missing in profiles.gltf" % section[key])
-	if not (chopstick.has("truss") and chopstick.has("rail")):
-		return _fallback(site_id, "chopstick.gltf lacks the nodes truss / rail")
-	return {"detail": detail, "profiles": profiles, "chopstick": chopstick}
+	if not (chopstick.has("truss") and chopstick.has("pad")):
+		return _fallback(site_id, "chopstick.gltf lacks the nodes truss / pad")
+	return {"detail": detail, "profiles": profiles, "chopstick": chopstick, "carriage": carriage, "qd_arm": qd_arm}
 
 
-## The chopstick as a node in the arm pivot's frame (hinge at the origin, +Z along the arm, +Y up, top rails at Y = 0).
-static func chopstick_node(chopstick: Dictionary, material: Material) -> Node3D:
+## A model as a node: glTF frame (X forward, Y side, Z up) under BLENDER_TO_RENDER, so its parent's +Z is X, +Y is Z.
+## materials: {node name: Material}, others take `fallback`. For the arm pivot: hinge at the origin, deck top at Y = 0.
+static func model_node(node_name: String, meshes: Dictionary, materials: Dictionary, fallback: Material) -> Node3D:
 	var root := Node3D.new()
-	root.name = "Chopstick"
+	root.name = node_name
 	root.basis = BLENDER_TO_RENDER
-	for part: String in ["truss", "rail"]:
+	for part: String in meshes:
 		var node := MeshInstance3D.new()
 		node.name = part
-		node.mesh = chopstick[part]
-		node.material_override = material
+		node.mesh = meshes[part]
+		node.material_override = materials.get(part, fallback)
 		root.add_child(node)
 	return root
 
@@ -66,12 +70,13 @@ static func _fallback(site_id: String, reason: String) -> Dictionary:
 	return {}
 
 
-## "" when manifest and both glTFs exist and are not older than the sources; otherwise the reason.
+## "" when manifest and all glTFs exist and are not older than the sources; otherwise the reason.
 static func _missing_or_stale(model_dir: String) -> String:
 	var manifest := model_dir.path_join(MANIFEST)
 	if not FileAccess.file_exists(manifest):
 		return "no models in " + model_dir
-	for file in ["profiles.gltf", "profiles.bin", "chopstick.gltf", "chopstick.bin"]:
+	for file in ["profiles.gltf", "profiles.bin", "chopstick.gltf", "chopstick.bin", "carriage.gltf",
+			"carriage.bin", "qd_arm.gltf", "qd_arm.bin"]:
 		if not FileAccess.file_exists(model_dir.path_join(file)):
 			return "model file %s missing" % file
 	var built := FileAccess.get_modified_time(manifest)

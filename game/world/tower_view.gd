@@ -6,12 +6,18 @@ extends Node3D
 ## site frame (east, north, up) mapped to render axes like every body frame (Frames.to_render).
 
 const MOUNT_SEGMENTS := 24
+const ARM_STRIP := Color(0.45, 0.36, 0.24)  ## [E] tan strip on the arm deck, images.jpeg
 
 var site_id := ""
 ## render_check: fixed arm opening (radians) instead of the flight state.
 var preview_opening_rad := NAN
 var _geometry: Dictionary = {}
 var _arms: Array[Node3D] = []  ## pivots at the hinges: [+across, -across]
+var _carriage: Node3D = null  ## models only: follows the carriage offset
+var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the roof block
+var _cable_lateral_m: Array[float] = []
+var _cable_top_m := 0.0  ## height of the cables' upper end above the site
+var _cable_base_m := 0.0  ## height of the sheave block's top above the deck plane
 var _steel := LitAerial.material(Color(0.42, 0.43, 0.45), 0.5, 0.5)  # [E] albedo ~0.15 as TowerMaterial
 var _concrete := LitAerial.material(Color(0.62, 0.61, 0.58), 0.9, 0.0)
 var _lattice := ShaderMaterial.new()
@@ -23,6 +29,9 @@ func build(geometry: Dictionary) -> void:
 		remove_child(child)
 		child.queue_free()
 	_arms.clear()
+	_carriage = null
+	_cables.clear()
+	_cable_lateral_m.clear()
 	_geometry = geometry
 	_lattice.shader = load("res://shaders/lattice.gdshader")
 	position = Frames.to_render(geometry["origin_itrf_m"])
@@ -38,17 +47,24 @@ func build(geometry: Dictionary) -> void:
 	_build_mount(geometry)
 	for i in range(2):
 		var pivot := Node3D.new()
-		var length: float = geometry["arm_length_m"]
-		var thickness: float = geometry["arm_thickness_m"]
-		if i == 0 and not models.is_empty():
-			# One chopstick (spec H), on the +across arm; its hinge is the pivot, its top-rail plane the arm top. Its visual
-			# length is Pad B's (~26 m), the physics arm stays arm_length_m: a known prototype mismatch.
-			pivot.add_child(StructureModels.chopstick_node(models["chopstick"], TowerMaterial.black_paint()))
-		else:
+		if models.is_empty():
+			var length: float = geometry["arm_length_m"]
+			var thickness: float = geometry["arm_thickness_m"]
 			pivot.add_child(_box(Vector3(length, geometry["arm_width_m"], thickness), Basis(),
 					Vector3(0.5 * length, 0.0, -0.5 * thickness), _steel))
+		else:
+			# The model is drawn for the +across arm (+Y toward the axis). The arm frame's Y = up x u points to -across at
+			# the closed pose, so it stands as drawn only on +across; the -across arm mirrors it. Length: Pad 2's 27 m, the
+			# physics arm stays arm_length_m (deviation table).
+			var arm := StructureModels.model_node("Chopstick", models["chopstick"], _arm_materials(), TowerMaterial.black_paint())
+			if i == 1:
+				arm.basis = arm.basis * Basis.from_scale(Vector3(1.0, -1.0, 1.0))
+			pivot.add_child(arm)
 		add_child(pivot)
 		_arms.append(pivot)
+	if not models.is_empty():
+		_build_carriage(models)
+		_build_qd_arm(models, geometry)
 	update_state({})
 
 
@@ -88,6 +104,81 @@ func update_state(state: Dictionary) -> void:
 		var u := -toward * cos(opening) + across * (side * sin(opening))  # mirrors TowerGeometry::arm_direction
 		_arms[i].basis = Frames.basis_to_render(Basis(u, up.cross(u), up))
 		_arms[i].position = Frames.to_render(hinge + up * offset)
+	if _carriage != null:
+		_place_carriage(offset)
+
+
+func _arm_materials() -> Dictionary:
+	var light := TowerMaterial.clad()
+	return {"pad": light, "hardware": light, "strip": LitAerial.material(ARM_STRIP, 0.8, 0.0)}
+
+
+## The carriage across the tower face (its origin in the hinge line, centre plane, deck plane) and its hoist cables.
+func _build_carriage(models: Dictionary) -> void:
+	_carriage = Node3D.new()
+	_carriage.name = "CarriageMount"
+	var toward: Vector3 = _geometry["tower_direction"]
+	var across: Vector3 = _geometry["across"]
+	_carriage.basis = Frames.basis_to_render(Basis(-toward, -across, Vector3(0.0, 0.0, 1.0)))
+	_carriage.add_child(StructureModels.model_node("Carriage", models["carriage"], {"hardware": TowerMaterial.clad()},
+			TowerMaterial.black_paint()))
+	add_child(_carriage)
+	var k: Dictionary = models["detail"]["carriage"]
+	var count := int(k["cable_count"])
+	var size: float = k["cable_size_m"]
+	var pitch: float = k["cable_spacing_m"]
+	# The sheave block's top, as in mechazilla_layout.carriage_drum_top_z; cables run to the roof block's underside.
+	_cable_base_m = float(k["top_z_m"]) + 0.6 + float(k["drum_diameter_m"])
+	_cable_top_m = float(models["detail"]["tower.roof"]["block_base_m"])
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.5 * size
+	mesh.bottom_radius = 0.5 * size
+	mesh.height = 1.0
+	mesh.radial_segments = 6
+	mesh.rings = 1
+	for c in range(count):
+		var cable := MeshInstance3D.new()
+		cable.name = "cable_%d" % c
+		cable.mesh = mesh
+		cable.material_override = TowerMaterial.dark()
+		add_child(cable)
+		_cables.append(cable)
+		_cable_lateral_m.append((c - 0.5 * (count - 1)) * pitch)
+
+
+## Carriage node and cables at the carriage offset; the hinge line's height comes from the hinges.
+func _place_carriage(offset: float) -> void:
+	var up := Vector3(0.0, 0.0, 1.0)
+	var across: Vector3 = _geometry["across"]
+	var plus: Vector3 = _geometry["hinge_plus_m"]
+	var minus: Vector3 = _geometry["hinge_minus_m"]
+	var centre: Vector3 = 0.5 * (plus + minus) + up * offset
+	_carriage.position = Frames.to_render(centre)
+	var low_m: float = centre.z + _cable_base_m
+	var length := maxf(0.1, _cable_top_m - low_m)
+	for i in range(_cables.size()):
+		var at: Vector3 = centre + across * _cable_lateral_m[i]
+		at.z = low_m + 0.5 * length
+		_cables[i].position = Frames.to_render(at)
+		# The cylinder's axis (local Y) is the column that basis_to_render sends to render Y: the site's up.
+		_cables[i].basis = Frames.basis_to_render(Basis(across, up.cross(across), up)) * Basis.from_scale(Vector3(1.0, length, 1.0))
+
+
+## The ship QD arm, static with its tip clear of the hull (no core state yet: deviation table). Its X runs to the pad from
+## the physics box's pad-side face, on the centre plane, its tip deck at the measured height.
+func _build_qd_arm(models: Dictionary, geometry: Dictionary) -> void:
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
+	var size: Vector3 = geometry["tower_size_m"]
+	var centre: Vector3 = geometry["tower_center_m"]
+	var face: Vector3 = toward * (centre.dot(toward) - 0.5 * size.x)
+	var mount := Node3D.new()
+	mount.name = "QdArmMount"
+	mount.basis = Frames.basis_to_render(Basis(-toward, -across, Vector3(0.0, 0.0, 1.0)))
+	mount.position = Frames.to_render(face + Vector3(0.0, 0.0, float(models["detail"]["qd_arm"]["deck_m"])))
+	mount.add_child(StructureModels.model_node("QdArm", models["qd_arm"], {"hardware": TowerMaterial.clad()},
+			TowerMaterial.black_paint()))
+	add_child(mount)
 
 
 ## Box with `size_local` along the columns of `axes` (site frame), centred at `center_site`.

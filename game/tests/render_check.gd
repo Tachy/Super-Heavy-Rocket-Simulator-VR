@@ -6,7 +6,8 @@
 # Ground view: --lat= --lon= [--height=] [--body=moon] (selenographic, MOON_ME; --height defaults to the core's
 #          surface there, the Earth's or the Moon's, --eye_height=2 above it) with --azimuth / --elevation / --fov
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
-# Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
+# Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed); with it [--catch_hull=<station m>] a
+#          static booster hull with that hull station on the arm deck (a picture of the closed pose, no flight).
 # Drone ship: a mission with a deck (--mission=falcon9_asds_sea --at_event=landed,20 --view=1) prints the viewed CG above
 #          the drawn deck against its height above the feet.
 # Webcast overlay: --webcast [--mission=starship_leo] (start the mission at --utc) [--t_plus=75] (advance to T+75 s)
@@ -241,6 +242,8 @@ func _process(_delta: float) -> bool:
 			for view in world.towers:
 				view.preview_opening_rad = deg_to_rad(float(_args["tower_arms_deg"]))
 				view.update_state({})
+				if _args.has("catch_hull"):
+					CatchPoseHull.attach(view, float(_args["catch_hull"]))
 		# The view is placed: the eye is adapted to it. _view_from and _aim_at_moon run update_world while placing the
 		# camera, which used up set_focus's snap at the pre-aim pose (--view_from=moon: 22 000 km on the night side, gain
 		# 25, then ~0.24 s of light adaptation over the settle frames: ~7.5 on a sunlit view). The world's own update this

@@ -413,7 +413,7 @@ over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad)
   `bottom_m`, `top_m`, `course_m`, `columns`, `seam_m`, `thickness_m`, `recess_m`), `[tower.stairs]` (flights, cable
   trays), `[tower.roof]` (deck, louvred block, railing; no pyramid), `[profiles.<name>]` (`kind` h_beam / tube / angle /
   box, `size_m`, `wall_m`), `[chopstick]`
-  (`length_m`, `width_m`, `depth_m`, `truss_pitch_m`, rail / chord / brace profile). Every value line carries
+  (length, width, depths, chord breaks, pads, pushers, probe, profiles), `[carriage]`, `[qd_arm]` (`tools/structures/blender/mechazilla_layout.py`). Every value line carries
   `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/detail_file.py` (`python -m pytest tools/structures/tests`).
   Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.
 

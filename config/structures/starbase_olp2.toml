@@ -151,11 +151,88 @@ kind = "tube"             # [E] diagonals are round tubes (same image)
 size_m = 0.7              # [E] diagonals ~0.7 of the chord, same image
 wall_m = 0.03             # [E] estimate: tube wall, not measurable
 
-[chopstick]
-length_m = 26.0           # [E] spec A: ~26 m hinge-to-tip from image ratios; physics arm stays 36 m (prototype)
-width_m = 3.0             # [E] estimate: ~1/3 of the truss depth, padb_chopstick_arm_backlit_2026-04
-depth_m = 8.75            # [E] ratio to 9 m booster, image padb_chopsticks_around_booster_top_2026-03
-truss_pitch_m = 6.5       # [E] fewer panels: ~4 W-panels over the arm in padb_chopsticks_around_booster_top_2026-03 (Task 2: 4.5)
+[profiles.chopstick_thin]
+kind = "tube"             # [E] ties and thin braces, NSF 2026-03
+size_m = 0.3              # [E] ~12 px at 40.6 px/m
+wall_m = 0.02             # [E] estimate: tube wall, not measurable
+
+[chopstick]               # Pad 2 arm, not the Pad 1 / V2 arm; chords, bends, evidence: launch-structures-measurements.md "Arm research"
+length_m = 27.0           # [E] 27 +-2 m hinge to tip (NSF 2026-03 ratio); [S] ~10 m shorter than Pad 1 (NSF 2025-08); physics arm 36 m
+width_m = 4.0             # [E] 4 +-1 m, images.jpeg deck strip against the tower face (no true top view)
+depth_m = 8.6             # [E] 8.6 +-0.8 m deck to the lower chord where its rise ends (NSF 2026-03; side view 2025-08 8.4 m)
+end_depth_m = 7.0         # [E] 6.9 +-0.7 m at the lower node near the tip: user view of the held V3 booster (45.6 px/m)
+knee_depth_m = 11.0       # [E] +-1.5 m lower chord's knee, side view padb_mount_and_chopsticks_side_2025-08 (14.3 px/m)
+foot_depth_m = 17.0       # [E] +-2 m root columns' foot below the deck, same view
+knee_frac = 0.21          # [E] +-0.03 station of the knee, same view
+kink_frac = 0.35          # [E] +-0.05 the lower chord stops rising here, same view
+lower_end_frac = 0.87     # [E] +-0.04 lower chord's end, same view
+root_kink_x_m = 5.2       # [E] 0.19 +-0.03 L: top chord breaks in NSF 2026-03 and 2026-05; flat in the side view, so the break is in plan
+root_kink_deg = 5.0       # [E] +-5 deg, not measured: hinge at the tower corner (6.75 m) to the main beam (6.3 m) over the root
+tip_kink_x_m = 24.8       # [E] 0.92 +-0.03 L: the top chord breaks again, NSF 2026-03 and 2026-05
+tip_kink_deg = 28.0       # [E] +-15 deg: image slopes 5.6 / 32 deg at ~11 deg view from below; inward (recedes from a camera outside the arm)
+inner_face_y_m = 1.0      # [E] main beam's inner face from the hinge line: lateral 4.8 m = arm_closed_gap_m / 2 (physics)
+cap_scale = 1.1           # [E] round end caps a little proud of the tube (user view)
+column_x_m = 0.8          # [E] hinge column at the root, side view 2025-08
+column_size_m = 1.2       # [E] heavier than the chords, same view
+deck_thickness_m = 0.15   # [E] not measurable
+tip_deck_frac = 0.8       # [E] the bent tip plate narrows so its corner clears the hull at the closed pose, not measurable
+strip_width_m = 0.8       # [E] tan strip on the deck, images.jpeg
+railing_height_m = 1.1    # [E] standard guard rail
+railing_post_pitch_m = 3.0  # [E] not measurable
+pad_x_m = 24.0            # [E] at the catch axis' station: under the catch fin at the closed pose (user view: grey block at the hull)
+pad_length_m = 2.1        # [E] +-0.3 m user view, 98 px at 45.6 px/m
+pad_width_m = 0.6         # [E] not measurable (edge-on)
+pad_height_m = 1.2        # [E] +-0.2 m user view, 55 px
+pad_top_depth_m = 0.6     # [E] +-0.2 m pad top below the deck top, user view
+pad_proud_m = 0.2         # [E] proud of the inner face: 0.1 m from the 4.5 m hull, not measurable
+pusher_start_x_m = 22.0   # [E] on top at the tip, NSF 2026-03 / 2026-05
+pusher_end_x_m = 27.6     # [E] passes the tip a little, night view 2025-09 and side view 2025-08
+pusher_size_m = 0.5       # [E] ~20 px at 40.6 px/m
+pusher_spacing_m = 0.9    # [E] two cylinders, same views
+probe_length_m = 5.0      # [E] +-1 m hanging stabilizer arm below the lower chord, NSF 2026-03 (200 px at 40.6 px/m)
+probe_size_m = 0.4        # [E] same view
+probe_brace_frac = 0.61   # [E] the long thin brace starts here, same view
+ladder_a_frac = 0.60      # [E] ladder positions, NSF 2026-03
+ladder_b_frac = 0.78      # [E] same view
+platform_frac = 0.70      # [E] small platform with railing, NSF 2026-05
+mast_x_m = 13.5           # [E] thin mast on the deck, NSF 2026-03
+mast_height_m = 3.0       # [E] same view
 rail_profile = "chopstick_rail"     # [E] see profiles
 chord_profile = "chopstick_chord"   # [E] see profiles
 brace_profile = "chopstick_brace"   # [E] see profiles
+thin_profile = "chopstick_thin"     # [E] see profiles
+
+[carriage]                # frame across the tower at the arm roots
+width_m = 13.5            # [E] spans the tower, Ship 42 (measurements)
+top_z_m = 1.0             # [E] frame top above the deck plane, NSF 2026-05
+bottom_depth_m = 8.0      # [E] about 9 m high in all, Ship 42
+frame_x_m = 0.8           # [E] frame plane in front of the hinge line (the line is the physics box's face, the frame stays outside it)
+beam_m = 1.0              # [E] reads as ~1 m box beams on the carriage photo 2025-12
+hinge_y_m = 6.75          # [E] hinges at the corners, measurements; physics pivot at 5.8 m: deviation table
+hinge_lower_m = 7.0       # [E] lower hinge arm, same frame
+actuator_x_m = 1.8        # [E] grey drum beside the arm root, NSF 2026-05
+actuator_z_m = 3.5        # [E] same view
+actuator_inset_m = 1.6    # [E] same view
+drum_small_m = 1.7        # [E] same view, ~60 px at 36 px/m
+platform_reach_m = 1.7    # [E] walkway beam past the corner, NSF 2026-05 (60 px at 36 px/m)
+platform_width_m = 1.6    # [E] not measurable
+drum_diameter_m = 3.8     # [E] +-0.4 m sheave block, carriage photo 2025-12 with a worker (1.8 m = 180 px)
+drum_width_m = 2.5        # [E] same photo, cheeks NSF 2026-03
+cable_count = 4           # [E] the photo shows 8+ thin cables; 4 at the size that reads
+cable_size_m = 0.16       # [E] ~6 px at 40.6 px/m
+cable_spacing_m = 0.7     # [E] same view
+
+[qd_arm]                  # THE ship QD arm (one arm: measurements "Arm research", no separate upper arm exists)
+deck_m = 86.8             # [E] +-3 m tip deck: Ship 42 lower structure y 445 at 6.4 px/m (88 m), f14 frames at the ring
+reach_m = 18.5            # [E] 1 m short of the hull (face 24 m from the axis, hull 4.5 m): static, deviation table
+root_length_m = 12.0      # [E] 64 % of the reach: QD photo 2026-05
+root_width_m = 7.0        # [E] not measurable; fits between the closed chopsticks (9.6 m)
+tip_width_m = 4.0         # [E] not measurable
+root_rise_m = 3.5         # [E] top chord above the tip deck at the root, QD photo
+root_depth_m = 5.5        # [E] lower chord below the tip deck at the root, QD photo
+tip_depth_m = 3.5         # [E] tip platform's depth, QD photo
+foot_depth_m = 11.0       # [E] column foot, Ship 42 (root to y 520)
+panel_m = 4.0             # [E] 3 panels, QD photo
+head_length_m = 2.0       # [E] connector head, QD photo
+head_width_m = 1.4        # [E] same photo
+head_z_m = 2.7            # [E] head above the tip deck (2-3 m), same photo

@@ -37,16 +37,15 @@ def built(tmp_path_factory):
 
 
 def test_chopstick_bounds_and_hinge(built):
-    # the glTF is in Blender axes (export_yup off): X along the arm, Y across, Z up with the rail plane at 0
+    # the glTF is in Blender axes (export_yup off): X along the arm, Y across, Z up with the deck plane at 0
     detail = detail_file.load(build_models.DEFAULT_CONFIG)["chopstick"]
     g, lo, hi = _bounds(built / "chopstick.gltf")
-    assert lo[0] == pytest.approx(0.0, abs=BOUND_TOL_M)          # hinge end at the origin
-    assert hi[0] == pytest.approx(detail["length_m"], abs=BOUND_TOL_M)
-    assert hi[1] - lo[1] == pytest.approx(detail["width_m"], abs=BOUND_TOL_M)
-    assert hi[2] == pytest.approx(0.0, abs=BOUND_TOL_M)           # top of the catch rails
-    assert hi[2] - lo[2] == pytest.approx(detail["depth_m"], abs=BOUND_TOL_M)
+    assert abs(lo[0]) < 1.0                                      # hinge end at the origin (tube radii around it)
+    assert hi[0] == pytest.approx(detail["pusher_end_x_m"], abs=0.2)  # pushers and the bent tip plate
+    assert lo[2] == pytest.approx(-detail["foot_depth_m"], abs=1.0)  # the root columns' foot
+    assert hi[2] == pytest.approx(detail["mast_height_m"], abs=BOUND_TOL_M)  # the mast above the deck plane
     names = {n["name"] for n in g["nodes"]}
-    assert {"chopstick", "truss", "rail"} <= names
+    assert {"chopstick", "truss", "deck", "strip", "pad", "hardware"} <= names
     root = next(n for n in g["nodes"] if n["name"] == "chopstick")
     assert "translation" not in root or root["translation"] == [0.0, 0.0, 0.0]
 

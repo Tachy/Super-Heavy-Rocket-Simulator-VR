@@ -11,7 +11,11 @@ from pathlib import Path
 
 PROFILE_KINDS = ("h_beam", "tube", "angle", "box")
 SECTION_KEYS = ("height_m", "face_width_m", "pitch_m", "pattern", "leg_profile", "brace_profile")
-CHOPSTICK_KEYS = ("length_m", "width_m", "depth_m", "truss_pitch_m", "rail_profile", "chord_profile", "brace_profile")
+CHOPSTICK_KEYS = ("length_m", "width_m", "depth_m", "end_depth_m", "knee_depth_m", "foot_depth_m", "root_kink_x_m",
+                  "root_kink_deg", "tip_kink_x_m", "tip_kink_deg", "inner_face_y_m", "rail_profile", "chord_profile",
+                  "brace_profile", "thin_profile")
+CARRIAGE_KEYS = ("width_m", "bottom_depth_m", "hinge_y_m", "drum_diameter_m", "cable_count", "cable_size_m")
+QD_ARM_KEYS = ("deck_m", "reach_m", "root_length_m", "root_width_m", "tip_width_m", "foot_depth_m")
 TOWER_KEYS = ("height_m", "lattice_height_m", "sections", "floors", "deck", "core", "plinth", "cladding", "stairs",
               "roof")
 PATTERNS = ("x_brace", "k_brace", "chevron")
@@ -47,7 +51,7 @@ def _positive(table: dict, key: str, where: str) -> None:
 def load(path) -> dict:
     with open(Path(path), "rb") as f:
         data = tomllib.load(f)
-    _need(data, ("tower", "profiles", "chopstick"), "file")
+    _need(data, ("tower", "profiles", "chopstick", "carriage", "qd_arm"), "file")
     tower, profiles, chop = data["tower"], data["profiles"], data["chopstick"]
     _need(tower, TOWER_KEYS, "tower")
     _positive(tower, "height_m", "tower")
@@ -86,9 +90,14 @@ def load(path) -> dict:
             if s[k] not in profiles:
                 raise DetailFileError(f"{where}.{k}: unknown profile '{s[k]}'")
     _need(chop, CHOPSTICK_KEYS, "chopstick")
-    for k in ("length_m", "width_m", "depth_m", "truss_pitch_m"):
-        _positive(chop, k, "chopstick")
-    for k in ("rail_profile", "chord_profile", "brace_profile"):
+    for k in CHOPSTICK_KEYS:
+        if not k.endswith("_profile"):
+            _positive(chop, k, "chopstick")
+    for table, keys in (("carriage", CARRIAGE_KEYS), ("qd_arm", QD_ARM_KEYS)):
+        _need(data[table], keys, table)
+        for k in keys:
+            _positive(data[table], k, table)
+    for k in ("rail_profile", "chord_profile", "brace_profile", "thin_profile"):
         if chop[k] not in profiles:
             raise DetailFileError(f"chopstick.{k}: unknown profile '{chop[k]}'")
     return data
