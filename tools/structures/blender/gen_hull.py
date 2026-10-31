@@ -30,6 +30,11 @@ SKIRT_SEGMENTS = 64  # [E] the skirt rings are thin flanges: sagitta 5.6 mm at R
 CHINE_STEP_M = 0.5  # [E] sweep step of the chine along the barrel
 DOME_SAMPLES = 12  # segments of the booster's forward dome
 EMBED_M = 0.01  # [E] details start this far inside the shell (no gap on the curved hull)
+ROD_STATIONS = (0.0, 0.15, 0.5, 0.82, 1.0)  # [E] along a V rod from ring to valley, NSF photo 2026-03: thin ends, a long spindle
+ROD_MID_RADII = (0.8, 1.0, 0.8)  # [E] radius / tube_radius_m at the inner stations above
+FORK_BLOCK_M = 0.2  # [E] dark block under the valley, same photo
+FORK_HALF_M = 0.15  # [E] half distance of the fork legs (0.3 m wide overall)
+FORK_RADIUS_M = 0.03  # [E] thin legs
 X_AXIS = Vector((1.0, 0.0, 0.0))
 
 
@@ -164,6 +169,38 @@ def _build_engine_bay(stage, detail, profile):
     return mesh
 
 
+def _build_hinge_covers(stage, detail, profile):
+    """Tiled covers over the flap hinges, fixed to the hull on the belly side of each hinge line: the flap turns from
+    the lee-side tangent to the radial, so nothing here is in its way (test). Frames: f12 file 1804 s, f14 file 4949 s."""
+    c = detail["flap"]["hinge_cover"]
+    belly = math.radians(stage["belly_azimuth_deg"])
+    mesh = vc.VMesh()
+    for f in stage["flaps"]:
+        h = math.radians(f["hinge_azimuth_deg"])
+        side = -1.0 if math.sin(belly - h) < 0.0 else 1.0  # toward the belly
+        x0, x1 = f["station_aft_m"] - c["overhang_m"], f["station_fwd_m"] + c["overhang_m"]
+        xs = [x0, x0 + c["fade_m"], x1 - c["fade_m"], x1]
+        fades = [0.0, 1.0, 1.0, 0.0]
+
+        def section(x, fade):
+            r = profile.base(x) - EMBED_M
+            da = c["width_m"] / max(r, 0.5)
+            hgt = c["height_m"] * fade + EMBED_M
+            return [vc.pt(x, h, r), vc.pt(x, h, r + hgt), vc.pt(x, h + side * da * 0.45, r + hgt * 0.8),
+                    vc.pt(x, h + side * da, r)]
+
+        for k in range(3):
+            s0, s1 = section(xs[k], fades[k]), section(xs[k + 1], fades[k + 1])
+            for q in range(3):
+                uvs = [(0.0, 1.0 - xs[k]), (0.1, 1.0 - xs[k]), (0.1, 1.0 - xs[k + 1]), (0.0, 1.0 - xs[k + 1])]
+                mesh.face([s0[q], s0[q + 1], s1[q + 1], s1[q]], uvs, vc.radial_dir(h + side * da_mid(c, profile)))
+    return mesh
+
+
+def da_mid(c, profile):
+    return 0.5 * c["width_m"] / profile.R
+
+
 def _build_fin_fairings(stage, detail, profile):
     f = detail["booster"]["grid_fin_fairing"]
     gf = stage["grid_fins"]
@@ -203,16 +240,18 @@ def _build_top_truss(stage, detail, profile):
         a0, a1 = 2.0 * math.pi * i / n, 2.0 * math.pi * (i + 1) / n
         am = 0.5 * (a0 + a1)
         valley = vc.pt(L - t["height_m"], am, R)
-        # tapered rods (chopsticks photo 2026-03): slender at the ring, stouter at the valley
-        vc.tube(mesh, vc.pt(x_top, a0, R), valley, rr * t["taper_top"], 6, ("strut", i, 0),
-                radius1=rr * t["taper_foot"])
-        vc.tube(mesh, vc.pt(x_top, a1, R), valley, rr * t["taper_top"], 6, ("strut", i, 1),
-                radius1=rr * t["taper_foot"])
+        for side, a_end in enumerate((a0, a1)):  # spindle rods (NSF photo 2026-03): thin ends, thickest in the middle
+            top = vc.pt(x_top, a_end, R)
+            radii = [rr * t["taper_top"]] + [rr * f for f in ROD_MID_RADII] + [rr * t["taper_foot"]]
+            for s in range(len(ROD_STATIONS) - 1):
+                vc.tube(mesh, top.lerp(valley, ROD_STATIONS[s]), top.lerp(valley, ROD_STATIONS[s + 1]), radii[s], 6,
+                        ("strut", i, side, s), radius1=radii[s + 1])
         et = Vector((0.0, -math.sin(am), math.cos(am)))
         foot = vc.pt(L - t["height_m"] - t["post_height_m"], am, R - 0.02)
-        vc.tube(mesh, valley, foot, rr, 6, ("post", i))
-        for sgn in (-1.0, 1.0):  # forked foot (1:100 model photo): two short prongs on the shoulder
-            vc.tube(mesh, foot, foot + et * (sgn * 0.12) - X_AXIS * 0.35, rr * 0.7, 5, ("prong", i, sgn))
+        vc.tube(mesh, valley, valley - X_AXIS * FORK_BLOCK_M, rr * 1.1, 6, ("post", i))
+        for sgn in (-1.0, 1.0):  # forked foot (same photo): two thin parallel legs down the hull, 0.3 m apart
+            top = valley - X_AXIS * FORK_BLOCK_M + et * (sgn * FORK_HALF_M)
+            vc.tube(mesh, top, foot + et * (sgn * FORK_HALF_M), FORK_RADIUS_M, 5, ("prong", i, sgn))
     return mesh
 
 
@@ -404,6 +443,7 @@ def build_stage(spec, stage_id):
     else:
         parts["engine_bay"] = _build_engine_bay(stage, detail, profile)
         parts["chine"] = _build_chine(stage, detail, profile)
+        parts["hinge_covers"] = _build_hinge_covers(stage, detail, profile)
         parts["raceway"] = _build_raceway(stage, detail, profile)
         parts["ports"] = _build_ports(stage, detail, profile)
     if stage.get("catch_pins"):

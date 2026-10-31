@@ -20,21 +20,23 @@ def build_engine(spec, eid):
     e = spec["engines"][eid]
     r_e, r_t = e["nozzle_exit_diameter_m"] / 2.0, e["throat_diameter_m"] / 2.0
     length, wall, n = e["bell_length_m"], e["wall_m"], int(e["segments"])
+    throat = e["throat_from_exit_m"]  # the bell proper; from there to the gimbal point the chamber (frames: f14 2515 s)
     exp = e["contour_exponent"]
-    zs = [length * i / BELL_RINGS for i in range(BELL_RINGS + 1)]  # distance from the throat along the bell
+    zs = [throat * i / BELL_RINGS for i in range(BELL_RINGS + 1)]  # distance from the throat along the bell
+    x_throat = throat - length  # X of the throat (exit plane at -length)
 
     def r_out(z):
-        return r_t + (r_e - r_t) * (z / length) ** exp
+        return r_t + (r_e - r_t) * (z / throat) ** exp
 
-    outer = [(-z, r_out(z)) for z in reversed(zs)]  # exit -> throat, X increasing
-    inner = [(-z, r_out(z) - wall) for z in zs]  # throat -> exit
+    outer = [(x_throat - z, r_out(z)) for z in reversed(zs)]  # exit -> throat, X increasing
+    inner = [(x_throat - z, r_out(z) - wall) for z in zs]  # throat -> exit
     bell = vc.VMesh()
-    vc.revolve(bell, [([(0.0, 0.0), (0.0, inner[0][1])], (-1.0, 0.0, 0.0)), (inner, "in"),
+    vc.revolve(bell, [([(x_throat, 0.0), (x_throat, inner[0][1])], (-1.0, 0.0, 0.0)), (inner, "in"),
                       ([(-length, r_e - wall), (-length, r_e)], (-1.0, 0.0, 0.0)), (outer, "out")], n, r_e, "bell")
     housing = vc.VMesh()
     rh = max(e["mount_radius_frac"] * r_e, r_t * 1.1)
     h = e["mount_height_m"]
-    vc.revolve(housing, [([(0.0, r_t), (0.0, rh)], (-1.0, 0.0, 0.0)), ([(0.0, rh), (h, rh)], "out"),
+    vc.revolve(housing, [([(x_throat, r_t), (0.0, rh)], "out"), ([(0.0, rh), (h, rh)], "out"),
                          ([(h, rh), (h, 0.0)], (1.0, 0.0, 0.0))], n, r_e, "housing")
     root = vc.empty(Path(e["file"]).stem)
     tris = {"bell": bell.to_object("bell", root)[1], "housing": housing.to_object("housing", root)[1]}

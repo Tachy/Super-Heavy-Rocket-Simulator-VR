@@ -53,10 +53,10 @@ def test_missing_key_and_bad_value_raise(tmp_path):
     (bad / "detail").mkdir(parents=True)
     (bad / f"{VEHICLE}.toml").write_text((vehicle_spec.VEHICLES / f"{VEHICLE}.toml").read_text(encoding="utf-8"),
                                          encoding="utf-8")
-    (bad / "detail" / f"{VEHICLE}.toml").write_text(data.replace("ring_pitch_m = 1.8", ""), encoding="utf-8")
+    (bad / "detail" / f"{VEHICLE}.toml").write_text(data.replace("ring_pitch_m = 2.0", ""), encoding="utf-8")
     with pytest.raises(vehicle_spec.VehicleSpecError, match="ring_pitch_m"):
         vehicle_spec.load(VEHICLE, bad)
-    (bad / "detail" / f"{VEHICLE}.toml").write_text(data.replace("ring_pitch_m = 1.8", "ring_pitch_m = -1.0"),
+    (bad / "detail" / f"{VEHICLE}.toml").write_text(data.replace("ring_pitch_m = 2.0", "ring_pitch_m = -1.0"),
                                                     encoding="utf-8")
     with pytest.raises(vehicle_spec.VehicleSpecError, match="ring_pitch_m"):
         vehicle_spec.load(VEHICLE, bad)
@@ -291,13 +291,21 @@ def test_grid_fin_pivot_on_the_hinge_and_drawn_octagon(built, spec):
     b = spec["stages"]["booster"]
     a = spec["detail"]["grid_fin"]["across_flats_m"]
     parts = _meshes(built / "grid_fin.gltf")
-    lo, hi = _bounds(parts["lattice"][0])
-    assert (lo[0] + hi[0]) / 2.0 == pytest.approx(0.0, abs=1e-4) and (lo[2] + hi[2]) / 2.0 == pytest.approx(0.0, abs=1e-4)
-    assert lo[1] == pytest.approx(0.0, abs=1e-4) and hi[1] == pytest.approx(a, abs=BOUND_TOL_M)  # root flat at Y = 0
-    assert hi[0] - lo[0] == pytest.approx(a, abs=BOUND_TOL_M)
-    # the lattice is an octagon: the corner of its bounding box is cut (no vertex there), the physics area is not drawn
-    corner = [p for p in parts["lattice"][0] if p[0] > a / 2 - 0.3 and p[1] > a - 0.3]
-    assert not corner
+    d = spec["detail"]["grid_fin"]
+    lo, hi = _bounds(parts["frame"][0])
+    t = d["thickness_m"]
+    # the plate lies across the station axis: the cells open along X (frames, core/src/aero/grid_fin.cpp), chord along Z
+    assert hi[0] - lo[0] == pytest.approx(t, abs=BOUND_TOL_M)
+    assert hi[2] - lo[2] == pytest.approx(a / math.cos(math.pi / 8.0), abs=BOUND_TOL_M) and (lo[2] + hi[2]) / 2.0 == pytest.approx(0.0, abs=1e-3)
+    # hung on a corner: the rim's vertex on the radial axis, span = the octagon's vertex diameter
+    assert lo[1] == pytest.approx(d["root_gap_m"], abs=1e-4)
+    assert hi[1] == pytest.approx(d["root_gap_m"] + a / math.cos(math.pi / 8.0), abs=BOUND_TOL_M)
+    root_row = [p for p in parts["frame"][0] if p[1] < d["root_gap_m"] + 1e-3]
+    assert root_row and max(abs(p[2]) for p in root_row) < 1e-3
+    # spikes reach the aft plane below the walls
+    llo, lhi = _bounds(parts["lattice"][0])
+    assert llo[0] == pytest.approx(-t / 2.0, abs=1e-4) and lhi[0] == pytest.approx(t / 2.0, abs=1e-4)
+    assert "plate" in parts and "hooks" not in parts  # f12 file 1804 s: no bars under any fin
     slo, shi = _bounds(parts["shaft"][0])  # hinge shaft on the radial axis through the origin
     assert (slo[0] + shi[0]) / 2.0 == pytest.approx(0.0, abs=1e-4) and (slo[2] + shi[2]) / 2.0 == pytest.approx(0.0, abs=1e-4)
     assert slo[1] < 0.0
@@ -314,8 +322,26 @@ def test_engine_exit_diameter_and_gimbal_origin(built, spec, eid):
     assert lo[0] == pytest.approx(-e["bell_length_m"], abs=1e-4)  # exit plane
     rim = max(math.hypot(p[1], p[2]) for p in pos if abs(p[0] - lo[0]) < 1e-4)
     assert 2.0 * rim == pytest.approx(e["nozzle_exit_diameter_m"], abs=0.01)  # = config/engines value
-    assert hi[0] == pytest.approx(0.0, abs=1e-4)  # the bell ends at the gimbal point
-    assert _bounds(parts["housing"][0])[0][0] == pytest.approx(0.0, abs=1e-4)
+    x_throat = e["throat_from_exit_m"] - e["bell_length_m"]
+    assert hi[0] == pytest.approx(x_throat, abs=1e-4)  # the bell ends at the throat, the chamber goes on to the gimbal
+    assert _bounds(parts["housing"][0])[0][0] == pytest.approx(x_throat, abs=1e-4)
+
+
+@needs_blender
+def test_hinge_covers_lie_on_the_belly_side_of_every_hinge_clear_of_the_flap(built, spec):
+    ship = spec["stages"]["ship"]
+    pos = _meshes(built / "ship.gltf")["hinge_covers"][0]
+    belly = math.radians(ship["belly_azimuth_deg"])
+    c = spec["detail"]["flap"]["hinge_cover"]
+    for f in ship["flaps"]:
+        h = math.radians(f["hinge_azimuth_deg"])
+        side = 1.0 if math.sin(belly - h) >= 0.0 else -1.0
+        near = [p for p in pos if f["station_aft_m"] - 1.0 < p[0] < f["station_fwd_m"] + 1.0
+                and abs(math.remainder(math.atan2(p[2], p[1]) - h, 2.0 * math.pi)) < 0.5]
+        assert near, f["id"]
+        offsets = [side * math.remainder(math.atan2(p[2], p[1]) - h, 2.0 * math.pi) for p in near]
+        assert min(offsets) > -1e-3, f["id"]  # the flap sweeps the other side of the hinge line
+        assert max(math.hypot(p[1], p[2]) for p in near) <= ship["diameter_m"] / 2.0 + c["height_m"] + 0.02
 
 
 def _dome_station(hull_pos, length_m, radius_m):
@@ -439,12 +465,13 @@ def test_steel_map_is_deterministic_seamless_and_has_the_weld_at_v_zero(spec):
     # the bead: slope +-weld_height / half width either side of v = 0 (row 0 and the last row), HAZ coverage there
     peak = hull["weld_height_m"] / hull["weld_half_width_m"]
     assert abs(slope[1, 40, 1]) == pytest.approx(peak, abs=0.05) and slope[1, 40, 1] * slope[-2, 40, 1] < 0.0
-    assert a[0, 0, 3] == 255 and a[hull_textures.SIZE_V // 2, hull_textures.SIZE_U // 2, 3] == 0
+    assert a[0, 0, 3] == 255 and a[hull_textures.SIZE_V // 2, hull_textures.SIZE_U // 2 + 20, 3] == 0
     mean = a[..., 3].mean() / 255.0  # heat-affected band share of the ring: 2 x 1.2 x half width / pitch
     pu, pv = hull_textures.periods_m(radius, hull["ring_pitch_m"])
     ring, seam = (2.0 * hull_textures.HAZ_FACTOR * hull["weld_half_width_m"] / p for p in (pv, pu))
     seam *= hull_textures.SEAM_HAZ_SHARE  # coverage 0.3 over the seam's width
-    assert mean == pytest.approx(ring + seam - ring * seam, rel=0.08)
+    dots = hull_textures.DOT_COVERAGE * math.pi * hull_textures.DOT_RADIUS_M ** 2 / (pu / hull_textures.STRINGERS_PER_TILE * hull_textures.DOT_PITCH_M)
+    assert mean == pytest.approx(ring + seam - ring * seam + dots, rel=0.08)
 
 
 def test_steel_map_needs_one_hull_radius(spec):

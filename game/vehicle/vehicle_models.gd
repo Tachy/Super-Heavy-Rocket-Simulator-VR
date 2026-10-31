@@ -19,7 +19,25 @@ const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
 const DEFAULT_EXIT_DEPTH_M := 3.0
 const HULL_SHADER := preload("res://shaders/vehicle_hull.gdshader")
 ## "booster" = the booster hull: mode 0 with the baked steel map (the ship's hull carries it in mode 1).
-const HULL_MODE := {"steel": 0, "booster": 0, "ship": 1, "flap": 2}
+const HULL_MODE := {"steel": 0, "booster": 0, "ship": 1, "flap": 2, "fin_frame": 0, "fin_cells": 0, "dark": 0}
+## [E] Sunlit frames (NSF photo 2026-03, aerial 2026-04, f12 file 1804 s): the fin rim reads dark grey, the cells black. Albedo
+## linear from the sRGB of the sunlit rim (~75 / 255) against the bright hull: 0.07 +-0.03; cells 0.025 +-0.01.
+const DARK_PARTS := {
+	"fin_frame": {"albedo": Color(0.29, 0.29, 0.30), "roughness": 0.7, "metallic": 0.2, "mottle": 0.18, "scale": 1.3},
+	"fin_cells": {"albedo": Color(0.17, 0.17, 0.175), "roughness": 0.8, "metallic": 0.1, "mottle": 0.1, "scale": 1.3},
+	"dark": {"albedo": Color(0.2, 0.2, 0.21), "roughness": 0.6, "metallic": 0.2, "mottle": 0.0, "scale": 0.12},
+}
+## Beyond this distance a fin draws its opaque `plate` instead of the walls and spikes (wall 4 cm = 1 px of the Pimax at
+## about 100 m; the walls alias against the sky). Rim, hooks and shaft stay.
+const FIN_LATTICE_RANGE_M := 120.0
+const ENGINE_SHADER := preload("res://shaders/vehicle_engine.gdshader")
+const RIB_FILE_SIZE := 32
+## [E] Bells in sky light (f14 file 2563 s, booster, soot free after the boostback) and hot-staging light (f14 file 2515 s): sea-level
+## bells near black, albedo 0.05 +-0.03; RVac grey metal with flutes (0.25 +-0.1): the RVac is NOT black in those frames.
+const ENGINE_LOOK := {
+	false: {"albedo": Color(0.25, 0.25, 0.26), "roughness": 0.55, "metallic": 0.3, "rib_slope": 0.25, "rib_top_x_m": -0.75},
+	true: {"albedo": Color(0.54, 0.54, 0.55), "roughness": 0.5, "metallic": 0.7, "rib_slope": 0.4, "rib_top_x_m": -1.74},
+}
 ## Kinds whose surface is the hull's UV (arc metres, station metres) and so can carry the steel map.
 const STEEL_MAP_KINDS: Array[String] = ["booster", "ship"]
 ## Entries of the shader's coverage table arrays.
@@ -82,7 +100,7 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 	var materials := {}
 	var steel_map := _steel_map(look.get("steel_map", {}), model_dir, vehicle_id)
 	var tile_maps := _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
-	for key: String in ["steel", "booster", "ship", "flap"]:
+	for key: String in ["steel", "booster", "ship", "flap", "fin_frame", "fin_cells", "dark"]:
 		var material := ShaderMaterial.new()
 		material.shader = HULL_SHADER
 		material.set_shader_parameter("mode", HULL_MODE[key])
@@ -96,6 +114,24 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 			material.set_shader_parameter("steel_period_m", Vector2(info["period_u_m"], info["period_v_m"]))
 			material.set_shader_parameter("steel_slope_range", float(info["slope_range"]))
 			material.set_shader_parameter("steel_energy_range", float(info["slope_energy_range"]))
+			material.set_shader_parameter("steel_shift_steps", float(info.get("shift_steps", 0)))
+		if key == "flap" and steel_map != null:  # the panel lines of the lee face (same channels, no ring shift, no weld gate)
+			var info: Dictionary = look["steel_map"]
+			var flap_map := _steel_map({"file": info.get("flap_file", "")}, model_dir, vehicle_id)
+			if flap_map != null:
+				material.set_shader_parameter("steel_textured", true)
+				material.set_shader_parameter("steel_map", flap_map)
+				material.set_shader_parameter("steel_period_m", Vector2(info["flap_period_m"][0], info["flap_period_m"][1]))
+				material.set_shader_parameter("steel_slope_range", float(info["slope_range"]))
+				material.set_shader_parameter("steel_energy_range", float(info["slope_energy_range"]))
+				material.set_shader_parameter("weld_first_m", -1.0e6)
+		if DARK_PARTS.has(key):
+			var dark: Dictionary = DARK_PARTS[key]
+			material.set_shader_parameter("steel_albedo", dark["albedo"])
+			material.set_shader_parameter("steel_roughness", dark["roughness"])
+			material.set_shader_parameter("steel_metallic", dark["metallic"])
+			material.set_shader_parameter("steel_mottle", dark["mottle"])
+			material.set_shader_parameter("mottle_scale", dark["scale"])
 		var tiles: Dictionary = look.get("tiles", {})
 		if not tiles.is_empty():
 			var stations := PackedFloat32Array(tiles["coverage_station_m"])
@@ -127,6 +163,39 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 ## The baked steel map (tools/structures/hull_textures.py) with a full mip chain made here: a plain box average of
 ## slope, slope energy and weld coverage, which is what the map's channels are designed for. null without the file
 ## (plain steel, one log line).
+## Bell material of one engine kind: ribs map (one rib, mipmapped, baked here: a plain 1D profile), dark per ENGINE_LOOK.
+static func engine_material(vacuum: bool, models: Dictionary) -> ShaderMaterial:
+	var look: Dictionary = ENGINE_LOOK[vacuum]
+	var m := ShaderMaterial.new()
+	m.shader = ENGINE_SHADER
+	m.set_shader_parameter("albedo", look["albedo"])
+	m.set_shader_parameter("base_roughness", look["roughness"])
+	m.set_shader_parameter("metallic_value", look["metallic"])
+	m.set_shader_parameter("rib_slope", look["rib_slope"])
+	var manifest_look: Dictionary = models["manifest"].get("look", {})
+	var counts: Dictionary = manifest_look.get("rib_counts", {})
+	var engine: Dictionary = models["manifest"]["engines"].get(ENGINE_ID[vacuum], {})
+	var depth := -float(engine.get("exit_plane_x_m", -DEFAULT_EXIT_DEPTH_M))
+	m.set_shader_parameter("rib_count", float(counts.get(ENGINE_FILE[vacuum], 0.0)))
+	m.set_shader_parameter("exit_x_m", -depth)
+	m.set_shader_parameter("rib_top_x_m", float(look["rib_top_x_m"]))  # Raptor: the whole bell; RVac: the lower 62 % (f14 2515 s)
+	m.set_shader_parameter("rib_map", _rib_texture())
+	return m
+
+
+## One rib across the texture: R the slope along the circumference, G its energy; the box mips average the slope to zero
+## and keep the energy, so a far bell only gets rougher.
+static func _rib_texture() -> ImageTexture:
+	var data := PackedByteArray()
+	for i in RIB_FILE_SIZE:
+		var slope := cos(TAU * (i + 0.5) / RIB_FILE_SIZE)
+		data.append(int(round((0.5 + 0.5 * slope) * 255.0)))
+		data.append(int(round(slope * slope * 255.0)))
+	var image := Image.create_from_data(RIB_FILE_SIZE, 1, false, Image.FORMAT_RG8, data)
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
+
+
 static func _steel_map(info: Dictionary, model_dir: String, vehicle_id: String) -> ImageTexture:
 	var path := model_dir.path_join(String(info.get("file", "hull_steel.png")))
 	var image := Image.load_from_file(path) if not info.is_empty() and FileAccess.file_exists(path) else null

@@ -7,33 +7,33 @@
 
 [hull]
 segments = 128                     # [E] radial segments of the plain lathe: sagitta 1.4 mm at R = 4.5 m (the silhouette at close range)
-ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; photo 108: ~33 px between welds = 1.8 m
+ring_pitch_m = 2.0                 # [E] +-0.15 m: NSF photo 2026-03 (9 m = 41 px/m): rings 81 px apart on Booster 19; photo 108 (Block 2) read 1.8
 weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
 weld_half_width_m = 0.05           # [E] half width of the bead
 dent_slope_rms = 0.012             # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
 dome_start_m = 2.88                # [E] booster: barrel end below the top = hot-stage ring 0.6 + dome height (section of ss3-booster-tank-top: shoulder y 20.7, apex 22.98 = the ring seat)
-dome_height_m = 2.28               # [E] booster: forward dome, half ellipse, section of the 1:100 model; apex under the ring (f13 file 2253.6 s: the dome right below the bell rims)
+dome_height_m = 2.56               # [E] booster: forward dome from the shoulder to the ring's foot (0.32 m ring): NSF photo 2026-03 shoulder 3.07 +-0.15 m below the top; apex not visible
 nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across; model tip radius 0.55)
 nose_tip_cap_m = 0.25              # [E] model: the tip closes within 0.2 m axially (blunt, not a ball); photo 108 ~1 m across
 nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the physics nose_length_m of the config (17 m) is NOT drawn
 base_chamfer_m = 0.25              # [E] aft edge chamfer of the skirt (radial and axial)
 
 [booster.hot_stage]
-height_m = 4.4                     # [E] hot-stage truss section below the top: photo 108 band of 80 px = 4.4 m (the "vents" of the first pass are this V truss)
-flange_height_m = 0.35             # [E] collar ring at the lower edge of the section (photo: collars where the posts end)
-flange_proud_m = 0.08              # [E] collar stands this far out of the hull
+height_m = 4.0                     # [E] +-0.15 m: NSF photo 2026-03: top of the ring to the fork feet 157 px at 41 px/m, elevation 17 deg
+flange_height_m = 0.10             # [E] photo 2026-03: only a thin line at the shoulder, no collar
+flange_proud_m = 0.02              # [E] same photo
 
 [booster.hot_stage_ring]
-height_m = 0.6                     # [E] ss3-hot-stage-ring: 9 m ring 0.6 m high, top of the truss; the ship's aft rim sits on it; shape from the model only, no real image of it
+height_m = 0.32                    # [E] +-0.05 m: NSF photo 2026-03: flat band 13 px at 41 px/m (Booster 19, unstacked); replaces the model's 0.6
 inner_radius_m = 4.15              # [E] same part: r 4.15 .. 4.50
 
 [booster.top_truss]
 tooth_count = 20                   # [E] model: model: 20 V teeth around the top ring, 18 deg pitch (photo: zigzag ring on the booster top)
-height_m = 4.0                     # [E] photo (booster top 2026-03): V struts ~4.9 m of 9 m dia; model view 2.8 m; 4.0 m so that struts + posts fill the 4.4 m section
-tube_radius_m = 0.15               # [E] top ring tube and strut radius (photo: struts ~0.3 m thick rods)
-post_height_m = 0.4                # [E] short vertical post below every valley (photo)
-taper_top = 0.8                    # [E] rod radius at the ring as a fraction of tube_radius_m (chopsticks photo 2026-03: slender rods)
-taper_foot = 1.3                   # [E] rod radius at the valley as a fraction of tube_radius_m (stouter toward the posts)
+height_m = 3.05                    # [E] +-0.15 m: ring top to the V valley, same photo (rods 2.72 m)
+tube_radius_m = 0.13               # [E] +-0.02 m: largest rod radius: 10.7 px wide at 41.1 px/m = 0.26 m (9 m ratio, NSF photo 2026-03)
+post_height_m = 0.95               # [E] fork legs below the valley block, same photo (0.97 m)
+taper_top = 0.58                   # [E] rod end at the ring: 6 px = 0.15 m wide (same photo; a spindle)
+taper_foot = 0.42                  # [E] rod end at the valley: 4.7 px = 0.11 m wide
 
 [booster.skirt]
 base_ring_radius_m = 0.15          # [E] model: base ring 4.65 m
@@ -80,24 +80,23 @@ port_radius_m = 0.4                # [E] round fitting (the 1:100 part is a 0.9 
 port_height_m = 0.45               # [E] model
 
 [booster.grid_fin_fairing]
-length_frac = 0.9                  # [E] actuator housing length as a fraction of the fin chord
-width_m = 1.2                      # [E] housing width (tangential)
-height_m = 0.4                     # [E] housing height out of the hull
+length_frac = 0.25                 # [E] small housing at the root: aerial 2026-04 and f12 1804 s show only a short stem
+width_m = 0.9                      # [E] housing width, same frames (not resolved better)
+height_m = 0.5                     # [E] housing height out of the hull
 
 [grid_fin]
-across_flats_m = 4.03              # [E] model: 1:100 model: octagonal lattice 4.03 x 4.03 m (physics: 13.5 m^2 at a 3.0 m span = 4.5 chord)
-thickness_m = 0.40                 # [E] model: lattice depth (model 0.4; the catch version 0.7 with the hardware)
-cell_pitch_m = 0.35                # [E] model: measured vertex lattice 0.35 m (11 walls across the 4.03 m flats)
-wall_m = 0.04                      # [E] lattice wall thickness (model 0.045)
-frame_m = 0.07                     # [E] outer frame bar thickness (model 0.05-0.07)
-edge_tooth_pitch_m = 0.70          # [E] serrated outer edge: tooth period along the tip bar (photo of the booster catch, IE-Photo-44: stepped notches, ~2 cells)
-edge_tooth_depth_m = 0.20          # [E] notch depth along the lattice depth
-catch_fin_azimuths_deg = [0.0, 180.0]   # [E] fins that carry the catch hardware (model: two catch fins + one plain); opposite pair, the plain fin at 90 deg; real azimuth unconfirmed
+across_flats_m = 3.8                # [E] +-0.2 m: regular octagon on a corner: width = 3.8 / cos 22.5 deg = 4.11 m, NSF photo 2026-03 near fin 168 px at 41 px/m (the model's 4.03 is a root-flat fit)
+thickness_m = 0.50                 # [E] +-0.1 m: rim band 0.43 m + spike tips, NSF photo 2026-03 at 17 deg elevation (model 0.4 / 0.7)
+cell_pitch_m = 0.47                # [E] +-0.05 m wall pitch: f12 file 1804 s: rows 0.67 m apart along the span = pitch x sqrt 2, ~60 spikes per fin; the STL's 0.35 m is not what flies
+wall_m = 0.04                      # [E] wall thickness not resolved in any frame (model 0.045)
+frame_m = 0.10                     # [E] rim plate thickness (not resolved; model 0.05-0.07, heavier in IE-Photo-44)
+edge_tooth_pitch_m = 0.66          # [E] rim teeth: NSF photo 2026-03: 0.61 m; = the cell diagonal
+edge_tooth_depth_m = 0.25          # [E] +-0.08 m: same photo
+spike_length_m = 0.22              # [E] +-0.08 m: spike under every wall crossing, f12 file 1804 s (length from the rim teeth: not measurable directly)
+spike_base_frac = 0.32             # [E] base half diagonal / pitch: the pale faces fill about 2/3 of a cell in that frame
+root_gap_m = 0.15                  # [E] the corner hangs just off the hull on the stem (aerial 2026-04)
 shaft_radius_m = 0.12              # [E] hinge shaft, along the radial axis
 shaft_inset_m = 0.6                # [E] the shaft continues this far into the hull
-catch_hook_radius_m = 0.17         # [E] model: catch hardware: four half-round hooks along one edge (model section view)
-catch_hook_count = 4               # [E] model
-catch_hook_pitch_m = 0.37          # [E] model
 
 # Flaps redrawn from the 1:100 model (Printables "I am Darth", CC BY-NC-SA 4.0; geometry measured, nothing copied). Planform
 # in the hinge frame: u along the hinge from its aft end, v = span away from the hinge (u may be < 0 = the panel overhangs the
@@ -105,7 +104,7 @@ catch_hook_pitch_m = 0.37          # [E] model
 [flap]
 root_thickness_m = 0.45            # [E] wedge section: thickness at the hinge (model: slab 0.45 at the hinge)
 tip_thickness_m = 0.20             # [E] thickness at the outer edge (model 0.2-0.25)
-hinge_radius_m = 0.30              # [E] hinge fairing tube along the hinge line (rounded fairing in photos)
+hinge_radius_m = 0.20              # [E] no proud tube in f14 5099 s / 5299 s: the hinge sits in the cover
 lug_length_m = 0.6                 # [E] hinge lug along the hinge (model pegs 0.5)
 lug_height_m = 0.7                 # [E] lug height normal to the hinge (model lugs 0.3-0.5 out of the panel)
 
@@ -113,13 +112,13 @@ lug_height_m = 0.7                 # [E] lug height normal to the hinge (model l
 hinge_drawn_length_m = 12.0        # [E] model: 1:100 model hinge edge 11.99 m (physics 12 m)
 outline_u_m = [0.0, 12.0, 12.0, 7.2, 0.0]     # [E] model: model x 0.1: hinge edge, forward tip, swept outer edge, outer corner
 outline_v_m = [0.0, 0.0, 0.44, 3.69, 3.69]    # [E] model: span 3.69 m (physics 4.0 m); area 36.5 m^2 (physics 48)
-lug_u_m = [0.75, 4.2, 7.7, 11.2]   # [E] model: four hinge lugs along the hinge (model pegs)
+lug_u_m = [0.8, 5.0, 10.7]         # [E] +-0.7 m: f14 file 5099 / 5299 s: two V brackets and one central actuator T (the model's 4 pegs are not on the flap)
 
 [flap.fwd]
 hinge_drawn_length_m = 5.8         # [E] model: model hinge edge 5.8 m (physics 8 m); the real hinge also leans 19 deg along the ogive
 outline_u_m = [0.0, 5.8, 5.7, 0.48, -1.49]    # [E] model: model x 0.1 (swept quad with an aft foot beyond the hinge's aft end)
 outline_v_m = [0.0, 0.0, 0.2, 3.04, 2.31]     # [E] model: span 3.04 m (physics 3.0 m); area 13.8 m^2 (physics 24)
-lug_u_m = [0.46, 1.9, 5.3]         # [E] model: three hinge lugs
+lug_u_m = [0.46, 5.3]              # [E] two brackets assumed like the aft flap, f12 1804 s does not resolve them
 
 [catch_pin]
 radius_m = 0.25                    # [E] pin shaft radius
@@ -147,6 +146,12 @@ stringer_count = 96                # [E] dense stringers in frame f13 2262 s (no
 stringer_width_m = 0.05            # [E]
 stringer_depth_m = 0.09            # [E]
 
+[flap.hinge_cover]
+width_m = 1.3                      # [E] tiled cover on the hull, belly side of the hinge, flap motion clear: f12 1804 s, f14 4949 s (not measurable better than +-0.3 m)
+height_m = 0.5                     # [E] +-0.2 m: bulge out of the hull at the hinge, same frames
+fade_m = 1.0                       # [E] tapers into the hull at both ends
+overhang_m = 0.8                   # [E] continues beyond the hinge ends
+
 [ship.chine]
 width_m = 0.30                     # [E] strake width along the tile boundary
 height_m = 0.12                    # [E] strake height out of the hull
@@ -170,12 +175,14 @@ last_station_m = 36.0              # [E] ends below the nose
 [ship.tiles]
 hex_across_flats_m = 0.30          # [E] research-models 7.2: forum estimate, no official size
 gap_m = 0.006                      # [E] gap between tiles
-coverage_station_m = [0.0, 12.0, 14.0, 20.0, 38.0, 41.0, 52.1]       # [E] model: stations of the table below
-coverage_half_angle_deg = [90.0, 90.0, 84.0, 78.0, 78.0, 180.0, 180.0]  # [E] model: shield edge: +-90 on the aft shield, +-78 on the upper one, the nose wraps
+coverage_station_m = [0.0, 13.0, 13.5, 21.5, 22.0, 38.0, 41.0, 52.1]    # [E] see vehicle-models.md "Tile boundary": Ship 42 photo 2026-09
+coverage_half_angle_deg = [90.0, 90.0, 112.0, 112.0, 105.0, 105.0, 180.0, 180.0]  # [E] +-10 deg: read on one side, the other taken symmetric (stack photo 2026-05: both silhouettes black)
 
 [engines.raptor3]
 file = "raptor.gltf"               # [E] model file name
 bell_length_m = 2.1                # [E] gimbal point to exit plane (Raptor 3 is ~3.1 m tall incl. chamber and pumps)
+throat_from_exit_m = 1.35          # [E] +-0.3 m: f14 file 2515 s: bell height / exit width 1.04 (model 1.3); above it the chamber
+rib_count = 200                    # [E] fine regen ribs, f14 file 2563 s (not countable); read only up close
 throat_diameter_m = 0.30           # [E]
 contour_exponent = 0.5             # [E] bell radius r = r_t + (r_e - r_t) * (z / L)^exponent (parabola-like, quick opening)
 wall_m = 0.02                      # [E] bell wall
@@ -186,6 +193,8 @@ segments = 32                      # [E]
 [engines.raptor_vacuum3]
 file = "rvac.gltf"                 # [E] model file name
 bell_length_m = 3.6                # [E] gimbal point to exit plane incl. the nozzle extension
+throat_from_exit_m = 3.0           # [E] +-0.4 m: f14 file 2515 s: height / rim width 1.37 x perspective (model 2.8)
+rib_count = 80                     # [E] flutes, f14 file 2515 s: ~40 on the visible half
 throat_diameter_m = 0.30           # [E]
 contour_exponent = 0.5             # [E]
 wall_m = 0.02                      # [E]

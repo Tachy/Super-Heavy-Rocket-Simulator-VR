@@ -13,8 +13,8 @@ shader_type spatial;
 #include "res://shaders/hull_noise.gdshaderinc"
 
 // [E] Large-scale variation of the sheets: +-3 % (+-10 % read as blotches once the ambient was right).
-const float STEEL_MOTTLE = 0.015;
-const float STEEL_MOTTLE_BASE = 1.0 - STEEL_MOTTLE;
+uniform float steel_mottle = 0.015;
+uniform float mottle_scale = 0.12;       // cycles per metre of the mottle noise
 uniform int mode = 0;
 // F0 of bare iron-based steel, linear (0.56, 0.57, 0.58) [S: Filament material guide, Iron], sRGB-encoded here.
 uniform vec3 steel_albedo : source_color = vec3(0.773, 0.780, 0.786);
@@ -30,6 +30,7 @@ uniform sampler2D steel_map : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec2 steel_period_m = vec2(4.712, 1.8);   // one map repeat along u (arc) and v (station), metres
 uniform float steel_slope_range = 0.6;
 uniform float steel_energy_range = 0.1;
+uniform float steel_shift_steps = 0.0;    // > 0: rings shift by whole stringers; 0: no shift (the flaps' fixed panel map)
 uniform float weld_first_m = 0.35;        // no weld seams on the chamfer below this station
 const float WELD_DARKEN = 0.25;           // [E] heat-affected band: albedo drop and roughness gain
 const float WELD_ROUGHER = 0.22;
@@ -108,19 +109,19 @@ void fragment() {
 	float slope_var = 0.0;
 	if (steel_textured) {
 		vec2 uv_t = UV / steel_period_m;
-		float shift = hull_hash3(vec3(ring, 9.1, 2.7));
+		float shift = steel_shift_steps > 0.0 ? floor(hull_hash3(vec3(ring, 9.1, 2.7)) * steel_shift_steps) / steel_shift_steps : 0.0;
 		vec4 t = textureGrad(steel_map, uv_t + vec2(shift, 0.0), dFdx(uv_t) * footprint_scale, dFdy(uv_t) * footprint_scale);
 		float on = step(weld_first_m, local_pos.x);
 		vec2 slope = (t.rg - 0.5) * steel_slope_range * on;
 		slope_var = max(t.b * steel_energy_range - dot(slope, slope), 0.0) * on;
 		weld = t.a * on;
-		vec3 tangent_u = normalize(vec3(0.0, -local_pos.z, local_pos.y) + vec3(1e-6, 0.0, 0.0));
+		vec3 tangent_u = mode == 2 ? vec3(1.0, 0.0, 0.0) : normalize(vec3(0.0, -local_pos.z, local_pos.y) + vec3(1e-6, 0.0, 0.0));
 		vec3 tangent_v = cross(n, tangent_u);
 		n_steel = normalize(n - tangent_u * slope.x - tangent_v * slope.y);
 	}
 	vec3 steel = steel_albedo * (1.0 + panel_fade * (ring_hash - 0.5) * 0.10);
 	steel *= 1.0 - WELD_DARKEN * weld;
-	steel *= mix(1.0, STEEL_MOTTLE_BASE + 2.0 * STEEL_MOTTLE * hull_noise3(local_pos * 0.12), panel_fade);
+	steel *= mix(1.0, 1.0 - steel_mottle + 2.0 * steel_mottle * hull_noise3(local_pos * mottle_scale), panel_fade);
 	float steel_rough = steel_roughness + panel_fade * (ring_hash - 0.5) * 0.08 + WELD_ROUGHER * weld;
 	float alpha_steel = steel_rough * steel_rough;  // GGX alpha (Godot: roughness^2) widened by the lost slope variance
 	steel_rough = sqrt(sqrt(alpha_steel * alpha_steel + slope_var));

@@ -36,9 +36,11 @@ DETAIL_TABLES = {
     "booster.strakes": ("ridge_azimuth_deg", "from_m", "to_m", "height_m", "base_width_m", "top_width_m", "chamfer_m"),
     "booster.grid_fin_fairing": ("length_frac", "width_m", "height_m"),
     "grid_fin": ("across_flats_m", "thickness_m", "cell_pitch_m", "wall_m", "frame_m", "shaft_radius_m",
-                 "shaft_inset_m", "catch_hook_radius_m", "catch_hook_count", "catch_hook_pitch_m",
-                 "edge_tooth_pitch_m", "edge_tooth_depth_m", "catch_fin_azimuths_deg"),
+                 "shaft_inset_m",
+                 "edge_tooth_pitch_m", "edge_tooth_depth_m", "spike_length_m",
+                 "spike_base_frac", "root_gap_m"),
     "flap": ("root_thickness_m", "tip_thickness_m", "hinge_radius_m", "lug_length_m", "lug_height_m"),
+    "flap.hinge_cover": ("width_m", "height_m", "fade_m", "overhang_m"),
     "flap.aft": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
     "flap.fwd": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
     "catch_pin": ("radius_m", "head_radius_m", "head_length_m"),
@@ -52,9 +54,9 @@ DETAIL_TABLES = {
                         "stringer_width_m", "stringer_depth_m"),
     "ship.tiles": ("hex_across_flats_m", "gap_m", "coverage_station_m", "coverage_half_angle_deg"),
 }
-ENGINE_KEYS = ("file", "bell_length_m", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
+ENGINE_KEYS = ("file", "bell_length_m", "throat_from_exit_m", "rib_count", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
                "mount_radius_frac", "segments")
-SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m", "catch_fin_azimuths_deg")  # may be zero / negative; others > 0
+SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m")  # may be zero / negative; others > 0
 
 
 def _table(data: dict, dotted: str) -> dict:

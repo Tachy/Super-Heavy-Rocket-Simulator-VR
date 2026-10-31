@@ -12,6 +12,7 @@ hinge's stow direction points to the belly side; the deflection d rotates the pa
 `rotation_sign_about_plus_x` * d (manifest, from core/src/aero/flap.cpp), zero = rest pose. UV = (X metres, Z metres):
 glTF v is Z. Nodes: `flap` (root) with `panel` and `hinge` (the hinge fairing tube, centred on the X axis).
 """
+import math
 import sys
 from pathlib import Path
 
@@ -21,6 +22,11 @@ import vehicle_common as vc  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
 HINGE_SIDES = 16  # [E]
+COVER_COUNT = 6  # f14 file 5099 s
+COVER_U_M = (1.9, 1.2)  # [E] +-0.4 m along the hinge from its aft end: inner and outer cover (fisheye frame)
+COVER_V_M = (0.6, 3.0)  # [E] +-0.3 m span
+COVER_R_M = 0.2  # [E] about 0.35-0.4 m across, against the ~0.95 m panels
+COVER_H_M = 0.05  # [E]
 
 
 def flap_dims(spec, kind):
@@ -71,6 +77,20 @@ def build_flap(spec, kind):
                Vector((0.0, 0.0, 1.0)), half)
     root = vc.empty("flap")
     tris = {"panel": mesh.to_object("panel", root)[1], "hinge": hinge.to_object("hinge", root)[1]}
+    if kind == "aft":  # row of six dark hexagon covers on the lee face (f14 file 5099 s, 4699 s)
+        covers = vc.VMesh()
+        for k in range(COVER_COUNT):
+            t = k / (COVER_COUNT - 1)
+            x, z = h0 + COVER_U_M[0] + (COVER_U_M[1] - COVER_U_M[0]) * t, COVER_V_M[0] + (COVER_V_M[1] - COVER_V_M[0]) * t
+            y = -half_t(z)
+            ring = [(x + COVER_R_M * math.cos(math.pi * i / 3.0), z + COVER_R_M * math.sin(math.pi * i / 3.0)) for i in range(6)]
+            covers.face([Vector((a, y - COVER_H_M, b)) for a, b in ring], [(0.0, 0.0)] * 6, Vector((0.0, -1.0, 0.0)))
+            for i in range(6):
+                a, b = ring[i], ring[(i + 1) % 6]
+                covers.face([Vector((a[0], y, a[1])), Vector((b[0], y, b[1])), Vector((b[0], y - COVER_H_M, b[1])),
+                             Vector((a[0], y - COVER_H_M, a[1]))], [(0.0, 0.0)] * 4,
+                            Vector(((a[0] + b[0]) / 2 - x, 0.0, (a[1] + b[1]) / 2 - z)))
+        tris["covers"] = covers.to_object("covers", root)[1]
     return root, tris
 
 

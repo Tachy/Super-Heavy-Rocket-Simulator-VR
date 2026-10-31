@@ -33,6 +33,18 @@ HAZ_FACTOR = 1.2          # [E] heat-affected band half width / bead half width
 DENT_OCTAVES = ((4, 2, 1.0), (12, 5, 1.085))  # [E] (cells along u, cells along v, weight): ~1.2 m and ~0.38 m waves
 SEED = 20241031
 FILE_NAME = "hull_steel.png"
+STRINGERS_PER_TILE = 12   # [E] 0.39 m pitch: NSF photos: dotted vertical lines ~0.35 +-0.1 m apart on booster and ship
+DOT_PITCH_M = 0.09        # [E] +-0.02 m along the line, same photo (3.7 px at 41 px/m)
+DOT_RADIUS_M = 0.018      # [E] ~4 texels: not resolved in the frames, reads as a faint line beyond ~30 m
+DOT_COVERAGE = 0.7        # [E] darkening share of a dot in the A channel
+FLAP_FILE_NAME = "flap_lee.png"
+FLAP_SIZE = (1024, 342)   # texels along the hinge, span: the aft flap's 12 x 4 m
+FLAP_PERIOD_M = (12.0, 4.0)
+FLAP_COLUMN_M = 0.95      # [E] panel width: f14 file 5099 s: 115 px against the 7.2 m outer edge of 875 px
+FLAP_ROW_M = 0.74         # [E] five rows over the 3.69 m span, same frame
+FLAP_DIAGONALS_M = (((4.7, 0.0), (1.2, 3.69)), ((4.7, 0.0), (6.3, 3.69)))  # [E] +-0.5 m: the two stiffeners, same frame
+FLAP_LINE_HALF_M = 0.025  # [E]
+FLAP_SLOPE = 0.08         # [E] rise of the panel lines
 
 
 def _lattice(rng, nu, nv):
@@ -84,6 +96,15 @@ def bake(radius_m: float, hull: dict) -> np.ndarray:
     haz_v = np.clip((haz_half - np.abs(v)) / dv + 0.5, 0.0, 1.0)  # box-filtered at the texel
     haz_u = np.clip((HAZ_FACTOR * seam_half - np.abs(u)) / du + 0.5, 0.0, 1.0)
     haz = np.maximum(haz_v[:, None], SEAM_HAZ_SHARE * haz_u[None, :])
+    # dotted stringer lines (spot-weld rows): at every multiple of period / STRINGERS_PER_TILE; the shader shifts rings by
+    # whole stringers, so the lines run on across the rings as in the photos
+    s_pitch = pu / STRINGERS_PER_TILE
+    us = ((np.arange(SIZE_U) + 0.5) * du + s_pitch / 2.0) % s_pitch - s_pitch / 2.0
+    n_dots = max(1, round(pv / DOT_PITCH_M))
+    d_pitch = pv / n_dots
+    vs = ((np.arange(SIZE_V) + 0.5) * dv + d_pitch / 2.0) % d_pitch - d_pitch / 2.0
+    dots = np.clip((DOT_RADIUS_M - np.hypot(us[None, :], vs[:, None])) / du + 0.5, 0.0, 1.0)
+    haz = np.maximum(haz, DOT_COVERAGE * dots)
     energy = sx * sx + sy * sy
     out = np.empty((SIZE_V, SIZE_U, 4))
     out[..., 0] = 0.5 + sx / SLOPE_RANGE
@@ -93,6 +114,36 @@ def bake(radius_m: float, hull: dict) -> np.ndarray:
     if out[..., :3].min() < 0.0 or out[..., :3].max() > 1.0:
         raise ValueError("steel map: slope exceeds the stored range")
     return np.rint(out * 255.0).astype(np.uint8)
+
+
+def bake_flap() -> np.ndarray:
+    """Panel lines of the flaps' bare lee face, same channels as the hull map, not tiling: columns, rows, two stiffeners."""
+    w, h = FLAP_SIZE
+    du, dv = FLAP_PERIOD_M[0] / w, FLAP_PERIOD_M[1] / h
+    u = (np.arange(w) + 0.5) * du
+    v = (np.arange(h) + 0.5) * dv
+    uu, vv = np.meshgrid(u, v)
+    col = (uu + FLAP_COLUMN_M / 2.0) % FLAP_COLUMN_M - FLAP_COLUMN_M / 2.0
+    row = (vv + FLAP_ROW_M / 2.0) % FLAP_ROW_M - FLAP_ROW_M / 2.0
+    on_col, on_row = np.abs(col) < FLAP_LINE_HALF_M, np.abs(row) < FLAP_LINE_HALF_M
+    sx = -np.sign(col) * on_col * FLAP_SLOPE
+    sy = -np.sign(row) * on_row * FLAP_SLOPE
+    line = np.maximum(on_col, on_row).astype(float) * 0.6
+    for (u0, v0), (u1, v1) in FLAP_DIAGONALS_M:
+        eu, ev = u1 - u0, v1 - v0
+        length = math.hypot(eu, ev)
+        dist = ((uu - u0) * ev - (vv - v0) * eu) / length
+        along = ((uu - u0) * eu + (vv - v0) * ev) / length
+        on = (np.abs(dist) < 2.0 * FLAP_LINE_HALF_M) & (along > 0.0) & (along < length)
+        sx = sx + np.sign(dist) * on * FLAP_SLOPE * ev / length
+        sy = sy - np.sign(dist) * on * FLAP_SLOPE * eu / length
+        line = np.maximum(line, on * 0.8)
+    out = np.empty((h, w, 4))
+    out[..., 0] = 0.5 + sx / SLOPE_RANGE
+    out[..., 1] = 0.5 + sy / SLOPE_RANGE
+    out[..., 2] = (sx * sx + sy * sy) / SLOPE_ENERGY_RANGE
+    out[..., 3] = line
+    return np.rint(np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
 def png_bytes(rgba: np.ndarray) -> bytes:
@@ -116,5 +167,7 @@ def write(out_dir, spec: dict) -> dict:
     hull = spec["detail"]["hull"]
     (out_dir / FILE_NAME).write_bytes(png_bytes(bake(radius, hull)))
     pu, pv = periods_m(radius, hull["ring_pitch_m"])
-    return {"file": FILE_NAME, "period_u_m": pu, "period_v_m": pv, "size": [SIZE_U, SIZE_V], "slope_range": SLOPE_RANGE,
+    (out_dir / FLAP_FILE_NAME).write_bytes(png_bytes(bake_flap()))
+    return {"file": FILE_NAME, "flap_file": FLAP_FILE_NAME, "flap_period_m": list(FLAP_PERIOD_M),
+            "shift_steps": STRINGERS_PER_TILE, "period_u_m": pu, "period_v_m": pv, "size": [SIZE_U, SIZE_V], "slope_range": SLOPE_RANGE,
             "slope_energy_range": SLOPE_ENERGY_RANGE, "texel_m": [pu / SIZE_U, pv / SIZE_V]}
