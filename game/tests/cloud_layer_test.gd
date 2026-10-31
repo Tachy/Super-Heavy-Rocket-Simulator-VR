@@ -170,11 +170,11 @@ func _state_is_pair(pair: Array, blend: float) -> bool:
 	return false
 
 
-## The presets: the VR centre view (both eyes) marches at a coarser divisor than the desktop's view.
+## The presets: desktop and VR both start at divisor 2 (user 2026-10-31).
 func _test_presets() -> void:
 	var vr: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.VR]
 	var desktop: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
-	_check(float(vr["divisor"]) > float(desktop["divisor"]) and int(vr["detail_levels"]) > 0,
+	_check(float(vr["divisor"]) == 2.0 and float(desktop["divisor"]) == 2.0 and int(vr["detail_levels"]) > 0,
 			"presets: VR divisor %s, desktop %s" % [vr["divisor"], desktop["divisor"]])
 
 

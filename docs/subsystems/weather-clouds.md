@@ -419,7 +419,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   the plane-parallel bias of unresolved inhomogeneity - exp(-tau) is convex, so the mean transmittance through a
   variable cloud exceeds exp(-mean tau) (Cahalan et al. 1994, J. Atmos. Sci. 51, 2434) - accepted as physics (controller
   ruling 2026-10-27; open point below for the CPU's grid-mean value).
-- **Quality presets** [E] (`CloudLayer.PRESETS`): desktop divisor 2, VR divisor 3 (the centre view; one march for both
+- **Quality presets** [E] (`CloudLayer.PRESETS`): start divisor 2 on desktop and in VR (user 2026-10-31; VR: of the centre view, one march for both
   eyes, `vr-performance.md`), 3 detail levels each.
 - **Baked volume (the only method since 2026-10-30; "Weg 2", 2026-10-29)**: `CloudBaked` (`cloud_baked.gd`,
   `cloud_baked.gdshaderinc`: its header and the includes `cloud_baked_grid` (the sets' grid block, level rule),

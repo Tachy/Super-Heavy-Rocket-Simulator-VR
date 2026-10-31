@@ -210,7 +210,7 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Volumen gebacken ist, zeigt die Zeile "(Volumen wird gebacken)" (nur solange wirklich gebacken wird; ohne aktive Wolken steht dort "(keine Wolken aktiv)") und es sind noch keine Wolken zu sehen. Das Volumen
   ist das einzige Wolkenverfahren [Entschieden 2026-10-30]. **F8** schaltet die Auflösung der
   Wolken reihum (1, 1/1,5, 1/2, 1/3, 1/4 der Bildpunkte je Achse); gilt am Desktop und in VR und steht mit der Bildrate
-  im Info-Text unter der Wetterzeile ("Wolken: ..."). Startwert über das Argument `--cloud_divisor=<n>`. Die
+  im Info-Text unter der Wetterzeile ("Wolken: ..."). Start immer bei 1/2, anders über das Argument `--cloud_divisor=<n>`. Die
   Wolkenschatten auf Boden, Luft und Fahrzeugen (direkte Sonne) folgen in jeder Höhe den gezeichneten Wolken.
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
   (nach F12 neu gesetzt), nicht am Kopf festgeklebt; das Zeit-Panel liegt oben links auf derselben Fläche und wird mit

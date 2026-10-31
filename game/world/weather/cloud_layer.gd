@@ -74,11 +74,11 @@ enum Quality { DESKTOP, VR }
 ## (the reference) or the closed form (TMS on the delta-Eddington source function) for comparison.
 enum ScatteringModel { CLOSED_FORM, TABLE }
 ## [E] Quality presets: the detail levels used (each band-limited at the pixel footprint, cloud_noise.hpp) and the cloud
-## pass's resolution divisor. VR divisor 3 of the centre view (VR performance part 2): one march for both eyes over
-## ~1.24 x one eye's width at 1/9 of its pixels (docs/subsystems/vr-performance.md), the same in both eyes.
+## pass's resolution divisor, 2 at start on desktop and in VR (user 2026-10-31). VR: of the centre view, one march for both
+## eyes over ~1.24 x one eye's width at 1/4 of its pixels (docs/subsystems/vr-performance.md), the same in both eyes.
 const PRESETS := {
 	Quality.DESKTOP: {"detail_levels": 3, "divisor": 2},
-	Quality.VR: {"detail_levels": 3, "divisor": 3},
+	Quality.VR: {"detail_levels": 3, "divisor": 2},
 }
 
 var quality: Quality = Quality.DESKTOP:
