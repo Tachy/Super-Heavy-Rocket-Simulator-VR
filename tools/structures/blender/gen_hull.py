@@ -1,4 +1,7 @@
-"""Hulls of Super Heavy and Starship: plain lathe hull, nose, hot-stage section, chine, raceway, pins.
+"""Hulls of Super Heavy and Starship: plain lathe hull, nose, hot-stage section, top truss, skirt, chine, raceway, pins.
+
+The shapes follow the 1:100 reference model (tools/structures/measure/stl_measure.py; geometry measured, nothing
+copied): the ship's drawn ogive is 13.4 m (config physics nose: 17 m), the booster's top has a 20-tooth V truss.
 
 Run: blender -b --factory-startup -P gen_hull.py -- --spec <json> --out <dir>
 Writes booster.gltf and ship.gltf. Frame (see vehicle_common): X = station axis with the stage's station 0 at X = 0, the
@@ -20,6 +23,7 @@ NOSE_SAMPLES = 20  # [E] profile samples along the ogive (chord error < 5 mm on 
 MERGE_M = 1e-4  # profile stations closer than this are one
 PIN_SIDES = 12  # [E]
 RACEWAY_SIDES = 8  # [E]
+SKIRT_SEGMENTS = 64  # [E] the skirt rings are thin flanges: sagitta 5.6 mm at R = 4.5 m
 CHINE_STEP_M = 0.5  # [E] sweep step of the chine along the barrel
 EMBED_M = 0.01  # [E] details start this far inside the shell (no gap on the curved hull)
 X_AXIS = Vector((1.0, 0.0, 0.0))
@@ -30,10 +34,12 @@ class Profile:
 
     def __init__(self, stage, hull):
         self.L, self.R = stage["length_m"], stage["diameter_m"] / 2.0
-        self.nose = stage["nose_length_m"]
+        # the DRAWN ogive is the 1:100 model's (13.4 m), not the config's physics nose_length_m (17 m): a documented
+        # deviation
+        self.nose = hull["nose_drawn_length_m"] if stage["nose_length_m"] > 0.0 else 0.0
         self.chamfer = hull["base_chamfer_m"]
         self.tip_r = hull["nose_tip_radius_m"]
-        self.cap_h = self.tip_r if self.nose > 0.0 else 0.0
+        self.cap_h = hull["nose_tip_cap_m"] if self.nose > 0.0 else 0.0
         if self.nose > 0.0:
             R, Ln = self.R, self.nose
             self.rho = (R * R + Ln * Ln) / (2.0 * R)
@@ -102,6 +108,7 @@ def _build_hull(stage, detail, profile):
 
 
 def _build_hot_stage(stage, detail, profile):
+    """Collar ring at the lower edge of the hot-stage section; the section itself is the V truss (`top_truss`)."""
     hs = detail["booster"]["hot_stage"]
     mesh = vc.VMesh()
     R, L = profile.R, profile.L
@@ -111,18 +118,6 @@ def _build_hot_stage(stage, detail, profile):
     seg = int(detail["hull"]["segments"])
     vc.revolve(mesh, [([(x0, R + p), (x1, R + p)], "out"), ([(x1, R + p), (x1, R - EMBED_M)], (1.0, 0.0, 0.0)),
                       ([(x0, R - EMBED_M), (x0, R + p)], (-1.0, 0.0, 0.0))], seg, R, "flange")
-    n = int(hs["vent_count"])
-    vp, rp = hs["vent_proud_m"], hs["vent_rib_proud_m"]
-    xc = L - hs["height_m"] * 0.5
-    for i in range(n):
-        a = 2.0 * math.pi * (i + 0.5) / n
-        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
-        half = (hs["vent_height_m"] / 2.0, hs["vent_width_m"] / 2.0, (vp + EMBED_M) / 2.0)
-        vc.box(mesh, vc.pt(xc, a, R + (vp - EMBED_M) / 2.0), X_AXIS, et, er, half)
-        for j in range(int(hs["vent_ribs"])):
-            xr = xc - hs["vent_height_m"] / 2.0 + hs["vent_height_m"] * (j + 0.5) / hs["vent_ribs"]
-            half = (hs["vent_height_m"] / hs["vent_ribs"] * 0.25, hs["vent_width_m"] / 2.0 - 0.05, rp / 2.0)
-            vc.box(mesh, vc.pt(xr, a, R + vp + rp / 2.0 - 0.001), X_AXIS, et, er, half)
     return mesh
 
 
@@ -137,6 +132,93 @@ def _build_fin_fairings(stage, detail, profile):
         er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
         half = (chord * f["length_frac"] / 2.0, f["width_m"] / 2.0, f["height_m"] / 2.0)
         vc.box(mesh, vc.pt(gf["station_m"], a, profile.R + f["height_m"] / 2.0 - EMBED_M), X_AXIS, et, er, half)
+    return mesh
+
+
+def _ring_points(x, r, segments):
+    return [vc.pt(x, 2.0 * math.pi * i / segments, r) for i in range(segments + 1)]
+
+
+def _build_top_truss(stage, detail, profile):
+    """Open V-truss ring on the booster top (1:100 model: 20 teeth, 18 deg pitch; photos: a zigzag ring)."""
+    t = detail["booster"]["top_truss"]
+    mesh = vc.VMesh()
+    n, R, L, rr = int(t["tooth_count"]), profile.R + 0.04, profile.L, t["tube_radius_m"]
+    sub = 3
+    pts = _ring_points(L - rr, R, n * sub)
+    for k in range(len(pts) - 1):
+        vc.tube(mesh, pts[k], pts[k + 1], rr, 6, ("ring", 0), cap0=False, cap1=False)
+    for i in range(n):
+        a0, a1 = 2.0 * math.pi * i / n, 2.0 * math.pi * (i + 1) / n
+        am = 0.5 * (a0 + a1)
+        valley = vc.pt(L - t["height_m"], am, R)
+        vc.tube(mesh, vc.pt(L - rr, a0, R), valley, rr, 6, ("strut", i, 0))
+        vc.tube(mesh, valley, vc.pt(L - rr, a1, R), rr, 6, ("strut", i, 1))
+        vc.tube(mesh, valley, vc.pt(L - t["height_m"] - t["post_height_m"], am, R - 0.02), rr, 6, ("post", i))
+    return mesh
+
+
+def _build_skirt(stage, detail, profile):
+    """Engine skirt: base ring, four thin ring flanges, a comb of posts between them, side ports (1:100 model)."""
+    s = detail["booster"]["skirt"]
+    R, e = profile.R, EMBED_M
+    br, rp, rt = s["base_ring_radius_m"], s["ring_proud_m"], s["ring_thickness_m"]
+    mesh = vc.VMesh()
+    runs = [([(0.0, R - e), (0.0, R + br)], (-1.0, 0.0, 0.0)), ([(0.0, R + br), (0.4, R + br)], "out"),
+            ([(0.4, R + br), (0.4, R - e)], (1.0, 0.0, 0.0))]
+    for x in s["ring_stations_m"]:
+        runs += [([(x - rt / 2, R - e), (x - rt / 2, R + rp)], (-1.0, 0.0, 0.0)),
+                 ([(x - rt / 2, R + rp), (x + rt / 2, R + rp)], "out"),
+                 ([(x + rt / 2, R + rp), (x + rt / 2, R - e)], (1.0, 0.0, 0.0))]
+    vc.revolve(mesh, runs, SKIRT_SEGMENTS, R, "skirt")
+    n = int(s["tooth_count"])
+    for i in range(n):
+        a = 2.0 * math.pi * (i + 0.5) / n
+        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+        half = (s["tooth_height_m"] / 2.0, 0.06, (s["tooth_proud_m"] + e) / 2.0)
+        vc.box(mesh, vc.pt(s["tooth_station_m"], a, R + (s["tooth_proud_m"] - e) / 2.0), X_AXIS, et, er, half)
+    n = int(s["port_count"])
+    for i in range(n):
+        a = math.radians(45.0 + 360.0 * i / n)
+        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+        half = (s["port_height_m"] / 2.0, s["port_width_m"] / 2.0, (s["port_proud_m"] + e) / 2.0)
+        vc.box(mesh, vc.pt(s["port_station_m"], a, R + (s["port_proud_m"] - e) / 2.0), X_AXIS, et, er, half)
+    return mesh
+
+
+def _build_booster_raceway(stage, detail, profile):
+    """Thin line rail along the booster and one pill-shaped line fairing per tank section (1:100 model)."""
+    rw = detail["booster"]["raceway"]
+    a = math.radians(rw["azimuth_deg"])
+    mesh = vc.VMesh()
+    er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+    off = math.radians(8.0)
+    vc.tube(mesh, vc.pt(2.0, a + off, profile.R + rw["rail_radius_m"] * 0.5),
+            vc.pt(profile.L - 4.0, a + off, profile.R + rw["rail_radius_m"] * 0.5), rw["rail_radius_m"], 6,
+            ("rail", 0))
+    k = 0
+    x_top = profile.L - 3.9
+    while x_top - rw["pill_length_m"] > 3.0:
+        half = (rw["pill_length_m"] / 2.0, rw["pill_width_m"] / 2.0, rw["height_m"] / 2.0)
+        xc = x_top - rw["pill_length_m"] / 2.0
+        vc.box(mesh, vc.pt(xc, a - off, profile.R + rw["height_m"] / 2.0 - EMBED_M), X_AXIS, et, er, half)
+        x_top -= rw["pill_pitch_m"]
+        k += 1
+    return mesh
+
+
+def _build_ports(stage, detail, profile):
+    """Propellant transfer ports: two blocks on the lee side below the nose (position estimated)."""
+    p = detail["ship"]["ports"]
+    mesh = vc.VMesh()
+    base = math.radians(stage["belly_azimuth_deg"] + p["azimuth_from_belly_deg"])
+    n = int(p["port_count"])
+    for i in range(n):
+        a = base + math.radians(p["spread_deg"]) * (2.0 * i / max(n - 1, 1) - 1.0) if n > 1 else base
+        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+        half = (p["port_length_m"] / 2.0, p["port_width_m"] / 2.0, (p["port_height_m"] + EMBED_M) / 2.0)
+        x = p["placed_at_m"]
+        vc.box(mesh, vc.pt(x, a, profile.base(x) + p["port_height_m"] / 2.0 - EMBED_M / 2.0), X_AXIS, et, er, half)
     return mesh
 
 
@@ -157,7 +239,7 @@ def _build_chine(stage, detail, profile):
     c, tiles = detail["ship"]["chine"], detail["ship"]["tiles"]
     mesh = vc.VMesh()
     x_first = c["first_station_m"]
-    x_last = profile.L - profile.cap_h - 0.5
+    x_last = min(c["last_station_m"], profile.L - profile.cap_h - 0.5)
     xs = []
     x = x_first
     while x < x_last:
@@ -210,11 +292,15 @@ def build_stage(spec, stage_id):
     parts = {"hull": _build_hull(stage, detail, profile)}
     if stage_id == "booster":
         parts["hot_stage"] = _build_hot_stage(stage, detail, profile)
+        parts["top_truss"] = _build_top_truss(stage, detail, profile)
+        parts["skirt"] = _build_skirt(stage, detail, profile)
+        parts["raceway"] = _build_booster_raceway(stage, detail, profile)
         if stage.get("grid_fins"):
             parts["fin_fairings"] = _build_fin_fairings(stage, detail, profile)
     else:
         parts["chine"] = _build_chine(stage, detail, profile)
         parts["raceway"] = _build_raceway(stage, detail, profile)
+        parts["ports"] = _build_ports(stage, detail, profile)
     if stage.get("catch_pins"):
         parts["catch_pins"] = _build_catch_pins(stage, detail, profile)
     tris = {}

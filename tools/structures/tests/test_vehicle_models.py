@@ -240,40 +240,56 @@ def test_pins_fins_and_ship_features_sit_at_the_config_numbers(built, spec):
     pos, _, _ = ship["chine"]
     az = [math.degrees(math.atan2(p[2], p[1])) % 360.0 for p in pos if 10.0 < p[0] < 11.0]
     assert min(az) < 270.0 - 60.0 and max(az) > 270.0 + 60.0
-    for name in ("hot_stage",):
-        assert name in parts and len(parts[name][2]) > 1000  # the vents are geometry
+    assert "hot_stage" in parts and len(parts["top_truss"][2]) > 400  # the V truss of the hot-stage section is geometry
+    assert {"top_truss", "skirt", "raceway"} <= set(parts)
+    tlo, thi = _bounds(parts["top_truss"][0])
+    assert thi[0] == pytest.approx(b["length_m"], abs=0.2) and thi[0] - tlo[0] > spec["detail"]["booster"]["top_truss"]["height_m"]
+    slo, shi = _bounds(parts["skirt"][0])
+    assert math.hypot(shi[1], shi[2]) > b["diameter_m"] / 2 + 0.3  # the ring flanges stand out of the hull
     assert "raceway" in ship
 
 
 @needs_blender
-def test_flaps_hinge_at_origin_and_sizes_from_config(built, spec):
+def test_flaps_hinge_on_the_axis_and_drawn_shape_from_the_detail_file(built, spec):
     for kind in ("fwd", "aft"):
         f = next(f for st in spec["stages"].values() for f in st["flaps"] if f["kind"] == kind)
+        d = spec["detail"]["flap"][kind]
         length = f["station_fwd_m"] - f["station_aft_m"]
+        u0 = (length - d["hinge_drawn_length_m"]) / 2.0  # the drawn hinge edge is centred on the physics hinge
         parts = _meshes(built / f"flap_{kind}.gltf")
         plo, phi = _bounds(parts["panel"][0])
-        assert plo[0] == pytest.approx(0.0, abs=BOUND_TOL_M) and phi[0] == pytest.approx(length, abs=BOUND_TOL_M)
-        assert plo[2] == pytest.approx(0.0, abs=BOUND_TOL_M) and phi[2] == pytest.approx(f["span_m"], abs=BOUND_TOL_M)
-        hlo, hhi = _bounds(parts["hinge"][0])  # the hinge tube is centred on the X axis through the origin
-        assert (hlo[1] + hhi[1]) / 2.0 == pytest.approx(0.0, abs=1e-4) and (hlo[2] + hhi[2]) / 2.0 == pytest.approx(0.0, abs=1e-4)
-        assert hlo[0] == pytest.approx(0.0, abs=1e-4) and hhi[0] == pytest.approx(length, abs=BOUND_TOL_M)
-        planform = (phi[0] - plo[0]) * (phi[2] - plo[2])
-        assert planform == pytest.approx(f["area_m2"], rel=0.02)  # the model keeps the physics area (within chamfers)
+        assert plo[0] == pytest.approx(u0 + min(d["outline_u_m"]), abs=BOUND_TOL_M)
+        assert phi[0] == pytest.approx(u0 + max(d["outline_u_m"]), abs=BOUND_TOL_M)
+        assert plo[2] == pytest.approx(0.0, abs=BOUND_TOL_M) and phi[2] == pytest.approx(max(d["outline_v_m"]), abs=BOUND_TOL_M)
+        hlo, hhi = _bounds(parts["hinge"][0])  # the hinge fairing is centred on the X axis through the origin plane
+        assert (hlo[1] + hhi[1]) / 2.0 == pytest.approx(0.0, abs=1e-4)
+        assert hlo[0] == pytest.approx(u0, abs=BOUND_TOL_M) and hhi[0] == pytest.approx(u0 + d["hinge_drawn_length_m"], abs=0.5)
+        # the panel's hinge edge lies on the X axis (v = 0 at Y = 0): the pivot stays on the hinge
+        edge = [p for p in parts["panel"][0] if abs(p[2]) < 1e-6]
+        assert edge and max(abs(p[1]) for p in edge) <= spec["detail"]["flap"]["root_thickness_m"] / 2.0 + 1e-6
         assert _signed_volume(*[parts["panel"][0], parts["panel"][2]]) > 0.0
+        # drawn planform area (shoelace) vs the physics area: the deviation is documented, but stays within a factor 3
+        pts = list(zip(d["outline_u_m"], d["outline_v_m"]))
+        area = 0.5 * abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1])))
+        assert 0.25 * f["area_m2"] < area < 1.1 * f["area_m2"]
 
 
 @needs_blender
-def test_grid_fin_pivot_on_the_hinge_and_area_from_config(built, spec):
+def test_grid_fin_pivot_on_the_hinge_and_drawn_octagon(built, spec):
     b = spec["stages"]["booster"]
-    span = 2.0 * (b["grid_fins"]["radius_m"] - b["diameter_m"] / 2.0)
+    a = spec["detail"]["grid_fin"]["across_flats_m"]
     parts = _meshes(built / "grid_fin.gltf")
     lo, hi = _bounds(parts["lattice"][0])
     assert (lo[0] + hi[0]) / 2.0 == pytest.approx(0.0, abs=1e-4) and (lo[2] + hi[2]) / 2.0 == pytest.approx(0.0, abs=1e-4)
-    assert lo[1] == pytest.approx(0.0, abs=1e-4) and hi[1] == pytest.approx(span, abs=BOUND_TOL_M)
-    assert (hi[0] - lo[0]) * (hi[1] - lo[1]) == pytest.approx(b["grid_fins"]["area_m2"], rel=0.01)
+    assert lo[1] == pytest.approx(0.0, abs=1e-4) and hi[1] == pytest.approx(a, abs=BOUND_TOL_M)  # root flat at Y = 0
+    assert hi[0] - lo[0] == pytest.approx(a, abs=BOUND_TOL_M)
+    # the lattice is an octagon: the corner of its bounding box is cut (no vertex there), the physics area is not drawn
+    corner = [p for p in parts["lattice"][0] if p[0] > a / 2 - 0.3 and p[1] > a - 0.3]
+    assert not corner
     slo, shi = _bounds(parts["shaft"][0])  # hinge shaft on the radial axis through the origin
     assert (slo[0] + shi[0]) / 2.0 == pytest.approx(0.0, abs=1e-4) and (slo[2] + shi[2]) / 2.0 == pytest.approx(0.0, abs=1e-4)
     assert slo[1] < 0.0
+    assert b["grid_fins"]["radius_m"] > b["diameter_m"] / 2.0
 
 
 @needs_blender

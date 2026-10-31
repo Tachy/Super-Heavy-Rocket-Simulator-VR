@@ -24,20 +24,29 @@ class VehicleSpecError(ValueError):
 
 DETAIL_TABLES = {
     "hull": ("segments", "ring_pitch_m", "weld_height_m", "weld_half_width_m", "dent_slope_rms", "nose_tip_radius_m",
-             "base_chamfer_m"),
-    "booster.hot_stage": ("height_m", "flange_height_m", "flange_proud_m", "vent_count", "vent_width_m",
-                          "vent_height_m", "vent_proud_m", "vent_ribs", "vent_rib_proud_m"),
+             "nose_tip_cap_m", "nose_drawn_length_m", "base_chamfer_m"),
+    "booster.hot_stage": ("height_m", "flange_height_m", "flange_proud_m"),
+    "booster.top_truss": ("tooth_count", "height_m", "tube_radius_m", "post_height_m"),
+    "booster.skirt": ("base_ring_radius_m", "ring_stations_m", "ring_proud_m", "ring_thickness_m", "tooth_count",
+                      "tooth_height_m", "tooth_station_m", "tooth_proud_m", "port_count", "port_width_m",
+                      "port_height_m", "port_proud_m", "port_station_m"),
+    "booster.raceway": ("azimuth_deg", "pill_width_m", "pill_length_m", "pill_pitch_m", "height_m", "rail_radius_m"),
     "booster.grid_fin_fairing": ("length_frac", "width_m", "height_m"),
-    "grid_fin": ("thickness_m", "cell_pitch_m", "wall_m", "frame_m", "shaft_radius_m", "shaft_inset_m"),
-    "flap": ("thickness_m", "corner_chamfer_m", "hinge_radius_m"),
+    "grid_fin": ("across_flats_m", "thickness_m", "cell_pitch_m", "wall_m", "frame_m", "shaft_radius_m",
+                 "shaft_inset_m", "catch_hook_radius_m", "catch_hook_count", "catch_hook_pitch_m"),
+    "flap": ("root_thickness_m", "tip_thickness_m", "hinge_radius_m", "lug_length_m", "lug_height_m"),
+    "flap.aft": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
+    "flap.fwd": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
     "catch_pin": ("radius_m", "head_radius_m", "head_length_m"),
-    "ship.chine": ("width_m", "height_m", "fade_m", "first_station_m"),
+    "ship.chine": ("width_m", "height_m", "fade_m", "first_station_m", "last_station_m"),
     "ship.raceway": ("azimuth_from_belly_deg", "radius_m", "first_station_m", "last_station_m"),
+    "ship.ports": ("port_count", "placed_at_m", "azimuth_from_belly_deg", "spread_deg", "port_width_m",
+                   "port_length_m", "port_height_m"),
     "ship.tiles": ("hex_across_flats_m", "gap_m", "coverage_station_m", "coverage_half_angle_deg"),
 }
 ENGINE_KEYS = ("file", "bell_length_m", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
                "mount_radius_frac", "segments")
-SIGNED_KEYS = ("azimuth_from_belly_deg",)  # may be zero / negative; everything else must be > 0
+SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "outline_u_m", "outline_v_m")  # may be zero / negative; others > 0
 
 
 def _table(data: dict, dotted: str) -> dict:
@@ -61,7 +70,7 @@ def validate_detail(detail: dict) -> None:
                 raise VehicleSpecError(f"[{name}]: missing key '{k}'")
             v = t[k]
             if isinstance(v, list):
-                if not v or not all(_number(x) and x >= 0.0 for x in v):
+                if not v or not all(_number(x) and (x >= 0.0 or k in SIGNED_KEYS) for x in v):
                     raise VehicleSpecError(f"[{name}].{k}: must be a non-empty list of numbers >= 0")
             elif not _number(v) or (v <= 0.0 and k not in SIGNED_KEYS):
                 raise VehicleSpecError(f"[{name}].{k}: must be a positive number, got {v!r}")
@@ -72,6 +81,10 @@ def validate_detail(detail: dict) -> None:
         raise VehicleSpecError("[ship.tiles].coverage_station_m: must be ascending")
     if any(a > 180.0 for a in tiles["coverage_half_angle_deg"]):
         raise VehicleSpecError("[ship.tiles].coverage_half_angle_deg: above 180")
+    for kind in ("aft", "fwd"):
+        f = detail["flap"][kind]
+        if len(f["outline_u_m"]) != len(f["outline_v_m"]) or len(f["outline_u_m"]) < 3:
+            raise VehicleSpecError(f"[flap.{kind}]: outline_u_m / outline_v_m: equal-length lists of >= 3 points")
     for eid, e in _table(detail, "engines").items():
         for k in ENGINE_KEYS:
             if k not in e:

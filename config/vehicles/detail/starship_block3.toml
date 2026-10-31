@@ -11,19 +11,53 @@ ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; phot
 weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
 weld_half_width_m = 0.05           # [E] half width of the bead
 dent_slope_rms = 0.03              # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
-nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across)
+nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across; model tip radius 0.55)
+nose_tip_cap_m = 0.25              # [E] model: the tip closes within 0.2 m axially (blunt, not a ball); photo 108 ~1 m across
+nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the physics nose_length_m of the config (17 m) is NOT drawn
 base_chamfer_m = 0.25              # [E] aft edge chamfer of the skirt (radial and axial)
 
 [booster.hot_stage]
-height_m = 4.4                     # [E] vented hot-stage section below the top: photo 108 band of 80 px = 4.4 m
-flange_height_m = 0.35             # [E] flange ring at the lower edge of the section
-flange_proud_m = 0.08              # [E] flange stands this far out of the hull
-vent_count = 24                    # [E] counted around the section in photo 108 (about half visible: 11-12)
-vent_width_m = 0.7                 # [E] vent plate width (tangential)
-vent_height_m = 3.2                # [E] vent plate height (along the axis)
-vent_proud_m = 0.05                # [E] plate stands this far out of the hull
-vent_ribs = 9                      # [E] louvre ribs per plate
-vent_rib_proud_m = 0.04            # [E] extra height of a rib over the plate
+height_m = 4.4                     # [E] hot-stage truss section below the top: photo 108 band of 80 px = 4.4 m (the "vents" of the first pass are this V truss)
+flange_height_m = 0.35             # [E] collar ring at the lower edge of the section (photo: collars where the posts end)
+flange_proud_m = 0.08              # [E] collar stands this far out of the hull
+
+[booster.top_truss]
+tooth_count = 20                   # [E] model: model: 20 V teeth around the top ring, 18 deg pitch (photo: zigzag ring on the booster top)
+height_m = 4.0                     # [E] photo (booster top 2026-03): V struts ~4.9 m of 9 m dia; model view 2.8 m; 4.0 m so that struts + posts fill the 4.4 m section
+tube_radius_m = 0.15               # [E] top ring tube and strut radius (photo: struts ~0.3 m thick rods)
+post_height_m = 0.4                # [E] short vertical post below every valley (photo)
+
+[booster.skirt]
+base_ring_radius_m = 0.15          # [E] model: base ring 4.65 m
+ring_stations_m = [0.7, 1.05, 1.95, 2.35]   # [E] model: four thin ring tubes around the skirt (r 4.9), seen in the model view
+ring_proud_m = 0.35                # [E] model: the ring tubes stand 0.35-0.4 m out of the 4.5 m hull
+ring_thickness_m = 0.12            # [E] model: tube ~0.1 m
+tooth_count = 48                   # [E] model: comb of posts between the middle rings, counted ~24 on the visible half
+tooth_height_m = 0.7               # [E] model
+tooth_station_m = 1.5              # [E] model: tooth band centre above the base
+tooth_proud_m = 0.28               # [E] model
+port_count = 4                     # [E] one skirt port in the model; the count is not known, four drawn
+port_width_m = 0.57                # [E] model: model port 0.57 x 0.74 x 0.8
+port_height_m = 0.80               # [E] model
+port_proud_m = 0.25                # [E] model
+port_station_m = 3.3               # [E] model: port centre above the base (model 2.87 .. 3.67)
+
+[booster.raceway]
+azimuth_deg = 270.0                # [E] pill-shaped line fairing seen along the booster in the model (tank-top part); side unknown
+pill_width_m = 0.7                 # [E] model: pill seen in the tank-top part, 0.7 wide
+pill_length_m = 5.0                # [E] model: pill length (view of the tank-top part)
+pill_pitch_m = 23.1                # [E] one pill per tank section (model: tank parts 23.1 m)
+height_m = 0.12                    # [E]
+rail_radius_m = 0.04               # [E] thin rail next to the pills
+
+[ship.ports]
+port_count = 2                     # [E] transfer ports (model 0.9 x 0.45 x 0.8 m part); position not known, drawn on the lee side
+placed_at_m = 44.0                 # [E] port station
+azimuth_from_belly_deg = 180.0     # [E]
+spread_deg = 14.0                  # [E] the two ports straddle the lee line by this angle
+port_width_m = 0.9                 # [E] model
+port_length_m = 0.8                # [E] model
+port_height_m = 0.45               # [E] model
 
 [booster.grid_fin_fairing]
 length_frac = 0.9                  # [E] actuator housing length as a fraction of the fin chord
@@ -31,17 +65,38 @@ width_m = 1.2                      # [E] housing width (tangential)
 height_m = 0.4                     # [E] housing height out of the hull
 
 [grid_fin]
-thickness_m = 0.35                 # [E] depth of the lattice, tangential at the rest pose (the cells open this way)
-cell_pitch_m = 0.45                # [E] lattice cell pitch, both directions
-wall_m = 0.025                     # [E] lattice wall thickness
+across_flats_m = 4.03              # [E] model: 1:100 model: octagonal lattice 4.03 x 4.03 m (physics: 13.5 m^2 at a 3.0 m span = 4.5 chord)
+thickness_m = 0.40                 # [E] model: lattice depth (model 0.4; the catch version 0.7 with the hardware)
+cell_pitch_m = 0.40                # [E] model: model: 10 cells across the flats
+wall_m = 0.03                      # [E] lattice wall thickness (the model's print walls are thicker)
 frame_m = 0.12                     # [E] outer frame bar thickness
 shaft_radius_m = 0.12              # [E] hinge shaft, along the radial axis
 shaft_inset_m = 0.6                # [E] the shaft continues this far into the hull
+catch_hook_radius_m = 0.17         # [E] model: catch hardware: four half-round hooks along one edge (model section view)
+catch_hook_count = 4               # [E] model
+catch_hook_pitch_m = 0.37          # [E] model
 
+# Flaps redrawn from the 1:100 model (Printables "I am Darth", CC BY-NC-SA 4.0; geometry measured, nothing copied). Planform
+# in the hinge frame: u along the hinge from its aft end, v = span away from the hinge (u may be < 0 = the panel overhangs the
+# hinge's aft end). The drawn hinge edge is centred on the physics hinge.
 [flap]
-thickness_m = 0.35                 # [E] flap slab thickness
-corner_chamfer_m = 0.6             # [E] chamfer of the two outer corners (photo 108: tapered, rounded flaps)
-hinge_radius_m = 0.3               # [E] hinge fairing tube along the hinge line
+root_thickness_m = 0.45            # [E] wedge section: thickness at the hinge (model: slab 0.45 at the hinge)
+tip_thickness_m = 0.20             # [E] thickness at the outer edge (model 0.2-0.25)
+hinge_radius_m = 0.30              # [E] hinge fairing tube along the hinge line (rounded fairing in photos)
+lug_length_m = 0.6                 # [E] hinge lug along the hinge (model pegs 0.5)
+lug_height_m = 0.7                 # [E] lug height normal to the hinge (model lugs 0.3-0.5 out of the panel)
+
+[flap.aft]
+hinge_drawn_length_m = 12.0        # [E] model: 1:100 model hinge edge 11.99 m (physics 12 m)
+outline_u_m = [0.0, 12.0, 12.0, 7.2, 0.0]     # [E] model: model x 0.1: hinge edge, forward tip, swept outer edge, outer corner
+outline_v_m = [0.0, 0.0, 0.44, 3.69, 3.69]    # [E] model: span 3.69 m (physics 4.0 m); area 36.5 m^2 (physics 48)
+lug_u_m = [0.75, 4.2, 7.7, 11.2]   # [E] model: four hinge lugs along the hinge (model pegs)
+
+[flap.fwd]
+hinge_drawn_length_m = 5.8         # [E] model: model hinge edge 5.8 m (physics 8 m); the real hinge also leans 19 deg along the ogive
+outline_u_m = [0.0, 5.8, 5.7, 0.48, -1.49]    # [E] model: model x 0.1 (swept quad with an aft foot beyond the hinge's aft end)
+outline_v_m = [0.0, 0.0, 0.2, 3.04, 2.31]     # [E] model: span 3.04 m (physics 3.0 m); area 13.8 m^2 (physics 24)
+lug_u_m = [0.46, 1.9, 5.3]         # [E] model: three hinge lugs
 
 [catch_pin]
 radius_m = 0.25                    # [E] pin shaft radius
@@ -53,6 +108,7 @@ width_m = 0.30                     # [E] strake width along the tile boundary
 height_m = 0.12                    # [E] strake height out of the hull
 fade_m = 1.5                       # [E] the strake grows from the hull over this length at both ends
 first_station_m = 1.0              # [E] starts above the skirt
+last_station_m = 38.5              # [E] ends where the nose is wrapped completely (the model's nose shield closes round the ogive)
 
 [ship.raceway]
 azimuth_from_belly_deg = 180.0     # [E] on the lee side, opposite the belly (position not verified against Block 3)
@@ -61,13 +117,14 @@ first_station_m = 1.5              # [E]
 last_station_m = 36.0              # [E] ends below the nose
 
 # Heat-shield layout for the tile shader (task 3) and the chine: tile coverage around the belly per station from the
-# ship's base. [E] photos 108 / mdr-100: the dark tile field reaches about half way round the barrel and narrows on the
-# nose.
+# ship's base. [E] model from the 1:100 model's three shield shells (half angle around the belly: aft shell +-90, upper shell
+# +-78, nose shell closes all round); photos 108 / 2026-05 agree (the nose is dark all round). Replaces the earlier [E]
+# table 75 / 65 / 55 / 30.
 [ship.tiles]
 hex_across_flats_m = 0.30          # [E] research-models 7.2: forum estimate, no official size
 gap_m = 0.006                      # [E] gap between tiles
-coverage_station_m = [0.0, 2.0, 20.0, 35.1, 52.1]       # [E] stations of the table below
-coverage_half_angle_deg = [75.0, 75.0, 65.0, 55.0, 30.0]  # [E] half angle around the belly azimuth at those stations
+coverage_station_m = [0.0, 12.0, 14.0, 20.0, 38.0, 41.0, 52.1]       # [E] model: stations of the table below
+coverage_half_angle_deg = [90.0, 90.0, 84.0, 78.0, 78.0, 180.0, 180.0]  # [E] model: shield edge: +-90 on the aft shield, +-78 on the upper one, the nose wraps
 
 [engines.raptor3]
 file = "raptor.gltf"               # [E] model file name
