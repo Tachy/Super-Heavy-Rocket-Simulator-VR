@@ -249,8 +249,8 @@ head_width_m = 1.4        # [E] same photo
 head_z_m = 2.7            # [E] head above the tip deck (2-3 m), same photo
 
 [mount]                   # Pad B launch mount: four sloped corner piers and a deck, each +-Y side one big portal; launch-structures.md "Mount"
-deck_height_m = 20.0      # [E] ring top = the physics mount_height_m (check_envelope); measured 14.5 +-1.2: only the vertical scale is stretched
-measured_height_m = 14.5  # [E] +-1.2 m person scale 14.9, booster scale 13.7, Ship 42 14.1: reported, not drawn
+deck_height_m = 14.5      # [E] ring top as measured (user 2026-10-31: reality first); the physics mount_height_m 20 follows once in the physics plan
+measured_height_m = 14.5  # [E] +-1.2 m person scale 14.9, booster scale 13.7, Ship 42 14.1
 base_across_m = 44.6      # [E] +-2.5 m front face width at the base (across the mount-tower line), person scale + NOAA 2026-01
 base_toward_m = 40.0      # [E] +-5 m depth along the mount-tower line, NOAA 2026-01
 top_across_m = 18.7       # [E] +-2 m top deck width, ship-on-mount top view
@@ -269,12 +269,12 @@ clamp_height_m = 0.9      # [E] above the ring top; test: 1 m above the top only
 clamp_inner_radius_m = 4.55  # [E] 0.05 m off the hull
 opening_width_ground_m = 26.0 # [E] portal at the ground = ramp width (bay 0.65 of the 40 m face, tower_foot_mount_2026-09: 26 m; the ramp's +-4)
 opening_width_deck_m = 11.0   # [E] where the opening's sides reach the deck; spandrel about 16-18 m at the lintel, images.jpeg, tower_foot_mount_2026-09
-opening_top_m = 10.0      # [E] opening top: 7.2 m of 14.5 m (dusk 2025-09 at 41 px/m), scaled with the stretched deck
+opening_top_m = 7.2       # [E] opening top of the 14.5 m mount (dusk 2025-09 at 41 px/m)
 lintel_depth_m = 1.6      # [E] heavy beam over the opening, images.jpeg
 lintel_height_m = 1.2     # [E] same
 duct_radius_m = 0.9       # [E] ribbed duct along the deck edge above the spandrel (1.5 m + ribs at 41 px/m, dusk 2025-09)
 duct_rib_m = 0.07         # [E] height and half thickness of a rib ring
-ridge_top_m = 9.7         # [E] ridge of the flame deflector just under the ceiling: no photo looks through the bucket; floor runs down both ways to the pit, topdown_2025-09
+ridge_top_m = 6.9         # [E] ridge of the flame deflector just under the ceiling: no photo looks through the bucket; floor runs down both ways to the pit, topdown_2025-09
 rib_pitch_m = 1.0         # [E] ribs running down the deflector (about 26 across), topdown_2025-09
 rib_depth_m = 0.25        # [E] same
 hood_inner_y_m = 3.9      # [E] two ducts 12 m apart, each 5 m wide, on the front side: person-scale photo, ship39 top view

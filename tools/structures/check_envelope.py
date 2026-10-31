@@ -52,10 +52,9 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
         elif row not in exceptions:
             exceptions.append(row)
 
-    # Mount: the ring top (what the stack stands on) is the physics height; the frustum's slope is stretched from the
-    # measured 14.5 m, so the drawn shape differs from the measurement (deviations table, "Mount deck").
-    within("Mount deck", detail["mount"]["deck_height_m"], phys["mount_height_m"], SURFACE_TOL_M)
-    within("Mount deck", detail["mount"]["deck_height_m"], detail["mount"]["measured_height_m"], LENGTH_TOL_M, "Mount deck")
+    # Mount: drawn as measured; the physics height differs until the physics plan (deviations table, "Mount deck").
+    within("Mount deck", detail["mount"]["deck_height_m"], detail["mount"]["measured_height_m"], SURFACE_TOL_M)
+    within("Mount deck", detail["mount"]["deck_height_m"], phys["mount_height_m"], LENGTH_TOL_M, "Mount deck")
     c = detail["chopstick"]
     half_gap = 0.5 * phys["arm_closed_gap_m"]
     pivot = half_gap + 0.5 * phys["arm_width_m"]

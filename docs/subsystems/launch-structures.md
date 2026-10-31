@@ -36,10 +36,9 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 - QD arm (`mechazilla_layout.qd_arm`): THE ship QD arm, one arm; deep root truss with light cabinets, shallow tip platform, connector
   head; tip deck 86.8 m, static, head 1 m clear of the 4.5 m hull on the tower's centre plane, fits between the closed arms.
 - Mount (`mount_layout.py` -> `gen_mount.py` -> `mount.gltf`, `[mount]` of the detail file): four sloped corner piers and a deck, no stepped
-  pyramid. Base 44.6 x 40 m, deck 18.7 m wide, slopes 55 deg (measured 48 deg: the ring top is the physics 20 m, measured 14.5 m; only the
-  vertical scale is stretched). Closed plated faces only on +-X. Each +-Y side is one portal: 26 m wide at the ground, sides following the
-  piers (18.8 m at the 10 m top), a vertical spandrel, a lintel and a ribbed duct above it; inside, a ribbed deflector curves from a ridge
-  (9.7 m) under the ring to the pit floor 9 m below the ground. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps; 7 m
+  pyramid. Base 44.6 x 40 m, deck 18.7 m wide, ring top 14.5 m as measured, slopes 45 deg (measured 48 (5)). Closed plated faces only on
+  +-X. Each +-Y side is one portal: 26 m wide at the ground, sides following the piers up to the 7.2 m top, a vertical spandrel, a lintel
+  and a ribbed duct above it; inside, a ribbed deflector curves from a ridge (6.9 m) under the ring to the pit floor 9 (2) m below the ground. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps; 7 m
   chamber under it. Front (-X) face: two bent hood ducts (roof 4 m above the deck, box 6.5 m down the face), two rectangular grey doors, six
   vents (padb_mount_pyramid_front_person_scale_2026-05); two booster QD cabinets between the ducts (static). 5.5k triangles. Plate map
   `mount_panels.png` (`mount_textures.py`: stacked plates 6 x 2 m, rust-tan seams, grey to tan, stains; `shaders/mount_shell.gdshader`).
@@ -186,7 +185,7 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 ## Physics deviations (what is drawn as measured differs from the physics; input to the physics plan)
 | Part | Drawn now | Physics stays | Why |
 |---|---|---|---|
-| Mount deck | ring top 20 m (physics); plan as measured, slope stretched from 14.5 m (55 deg instead of 48; deck / base width 0.45 instead of 0.33; portal top 10 m instead of 7.2), courses as measured | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck; `check_envelope` lists the row |
+| Mount deck | ring top 14.5 m as measured (user 2026-10-31: reality first), portal top 7.2 m, slope 45 deg | physics 20 m until the physics plan | **until then a stack on the pad hangs 5.5 m above the ring**; `check_envelope` lists the row |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
 | Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; kept from the earlier fit; the flat bearing piece clears the hull at any length |
 | Hinge position | resolved in the fix round: drawn hinge frames on the physics pivot 5.8 m (the corner hinges read 6.75 m: not drawn); `check_envelope` compares them, no exception | 5.8 m | the inner face stays on the physics half gap 4.8 m |

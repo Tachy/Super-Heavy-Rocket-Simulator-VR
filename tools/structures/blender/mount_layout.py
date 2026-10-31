@@ -11,8 +11,7 @@ The +-X faces (front -X with two grey doors, vents and the two hood ducts; tower
 Each +-Y side is one big portal: the piers' faces flank a trapezoid opening whose sides follow the piers, a vertical
 spandrel with a heavy lintel and a ribbed duct above it, and inside the bucket: a ribbed flame deflector curving down
 from a ridge under the ring to the pit floor, which runs out into the exit ramp.
-The vertical scale is the physics deck height (deck_height_m) over the 14.5 m measured: only the slopes' steepness and
-the opening's height differ from the photos, the plan sizes are the measured ones.
+Heights and plan sizes are the measured ones (deck_height_m 14.5 m); the physics mount height follows in the physics plan.
 """
 from __future__ import annotations
 

@@ -213,12 +213,13 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 	_check(absf(plinth.size.y - 44.6) < 0.1 and absf(plinth.size.x - 40.0) < 0.1, "base 44.6 x 40 m (%s)" % plinth.size)
 	_check(absf(plinth.position.z + float(m["pit_depth_m"])) < 0.01, "pit floor %.1f m below the ground" % -plinth.position.z)
 	var shell: AABB = (parts.get_node("shell") as MeshInstance3D).mesh.get_aabb()
-	var deck_z := float(geometry["mount_height_m"]) - float(m["deck_drop_m"])
-	_check(absf(shell.end.z - deck_z) < 0.01, "deck at the physics mount height (%.3f, want %.3f)" % [shell.end.z, deck_z])
+	var ring_top := float(m["deck_height_m"])  # as measured; the physics mount height follows in the physics plan
+	var deck_z := ring_top - float(m["deck_drop_m"])
+	_check(absf(shell.end.z - deck_z) < 0.01, "deck at the measured height (%.3f, want %.3f)" % [shell.end.z, deck_z])
 	var top_half := 0.5 * float(m["top_across_m"])
 	_check(absf(shell.size.y - float(m["base_across_m"])) < 0.05, "slope foot across %.2f m" % shell.size.y)
 	var hardware: AABB = (parts.get_node("hardware") as MeshInstance3D).mesh.get_aabb()
-	_check(hardware.end.z > float(geometry["mount_height_m"]), "ring and clamps above the deck")
+	_check(hardware.end.z > ring_top, "ring and clamps above the deck")
 	# Stack clearance on the generated vertices: nothing of the mount inside the 4.5 m hull above the ring top, the ring
 	# opening is the hull's radius at the ring top.
 	var min_r_above := INF
@@ -227,9 +228,9 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 		var arrays := ((node as MeshInstance3D).mesh as ArrayMesh).surface_get_arrays(0)
 		for v: Vector3 in arrays[Mesh.ARRAY_VERTEX]:
 			var r := Vector2(v.x, v.y).length()
-			if v.z > float(geometry["mount_height_m"]) + 1.0e-4:
+			if v.z > ring_top + 1.0e-4:
 				min_r_above = minf(min_r_above, r)
-			elif absf(v.z - float(geometry["mount_height_m"])) < 1.0e-4:
+			elif absf(v.z - ring_top) < 1.0e-4:
 				min_r_ring = minf(min_r_ring, r)
 	_check(min_r_above >= 4.5 + 0.04 - 1.0e-4, "nothing of the mount inside the hull above the ring (%.3f m)" % min_r_above)
 	_check(absf(min_r_ring - 0.5 * float(m["ring_opening_diameter_m"])) < 0.01, "ring opening %.3f m radius" % min_r_ring)

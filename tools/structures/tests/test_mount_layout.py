@@ -57,11 +57,10 @@ def test_mount_keys_are_positive_and_tagged(detail):
     assert detail_file.value_lines_without_tag(DETAIL) == []
 
 
-def test_ring_top_is_the_physics_deck(detail, mount):
-    h = _physics()["mount_height_m"]
+def test_ring_top_is_the_measured_deck(detail, mount):
+    h = detail["mount"]["measured_height_m"]
     assert detail["mount"]["deck_height_m"] == pytest.approx(h, abs=0.01)
-    lo, hi = mount.extent("hardware")
-    # the ring's top annulus and the clamps start at the physics height: some hardware polygon lies in that plane
+    # the ring's top annulus and the clamps start at that height: some hardware polygon lies in that plane
     tops = [v[2] for verts, _ in mount.nodes["hardware"] for v in verts]
     assert any(abs(z - h) < 1e-9 for z in tops)
 
@@ -76,13 +75,12 @@ def test_base_and_top_plan_are_the_measured_ones(detail, mount):
     assert detail["mount"]["measured_height_m"] == 14.5
 
 
-def test_slope_is_the_stretched_measured_frustum(detail):
+def test_slope_is_the_measured_frustum(detail):
     sh = ml.Shape(detail)
-    # plan run of the slope over the height above the foot band: the vertical scale is the physics deck / 14.5 m
     assert sh.run == pytest.approx(12.95, abs=0.01)
     assert sh.top_half_t == pytest.approx(7.05, abs=0.01)
     angle = math.degrees(math.atan2(sh.deck_z - sh.plinth_z, sh.run))
-    assert 50.0 < angle < 62.0  # 48 deg measured at 14.5 m, steeper when stretched to the physics deck
+    assert 43.0 < angle < 50.0  # 48 (5) deg measured
 
 
 def test_ring_outer_and_opening(detail, mount):
@@ -90,7 +88,7 @@ def test_ring_outer_and_opening(detail, mount):
     radii = [math.hypot(v[0], v[1]) for v in pts]
     assert min(radii) == pytest.approx(4.5, abs=0.01) and max(radii) == pytest.approx(5.2 + 0.0, abs=0.7)
     ring_top = [math.hypot(v[0], v[1]) for verts, _ in mount.nodes["hardware"] for v in verts
-                if abs(v[2] - detail["mount"]["deck_height_m"]) < 1e-9 and abs(v[2] - 20.0) < 1e-9]
+                if abs(v[2] - detail["mount"]["deck_height_m"]) < 1e-9]
     assert max(r for r in ring_top if r < 5.3) == pytest.approx(5.2, abs=0.01)
     clamp_tops = {round(v[2], 6) for verts, _ in mount.nodes["hardware"] for v in verts
                   if abs(v[2] - (detail["mount"]["deck_height_m"] + detail["mount"]["clamp_height_m"])) < 1e-9}
@@ -193,7 +191,7 @@ def _inside_xz(verts, x, z):
 
 def test_booster_stack_clears_deck_ring_and_hoods(detail, mount):
     """Hull above the ring top and every bell of the booster's 33 engines below it clear every mount surface."""
-    h = _physics()["mount_height_m"]
+    h = detail["mount"]["deck_height_m"]
     bad = ml.stack_violations(mount, h, 4.5, _ring_radii(), _engine())
     assert bad == [], f"{len(bad)} mount points inside the stack, first {bad[:3]}"
 
@@ -201,7 +199,7 @@ def test_booster_stack_clears_deck_ring_and_hoods(detail, mount):
 def test_clearance_test_catches_a_wrong_ring(detail):
     narrow = dict(detail)
     narrow["mount"] = dict(detail["mount"], ring_opening_diameter_m=8.0)
-    bad = ml.stack_violations(ml.mount(narrow), _physics()["mount_height_m"], 4.5, _ring_radii(), _engine())
+    bad = ml.stack_violations(ml.mount(narrow), detail["mount"]["deck_height_m"], 4.5, _ring_radii(), _engine())
     assert bad, "a 8 m opening must hit the hull and the outer engines"
 
 
