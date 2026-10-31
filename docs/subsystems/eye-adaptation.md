@@ -21,7 +21,7 @@ shaders:
   ~1.24e4 by the t.v.i. floor). Pacing [E]: light tau 0.5 s, dark 110 s (Pattanaik et al. 2000), exponential in log
   luminance; time step = max(frame time, simulated step) (paused: real time, time warp: a time-lapse, a clock jump or
   a view change: adapted at once); the photopic target is capped at L_ref before pacing. Values: pad noon gain 1.10,
-  400 km by day 1.000 (GPU check: = L_ref / L_a within 1e-9), Sun -3 deg at the pad 464 (half the glow, 90.8 cd/m^2).
+  400 km by day 1.000 (GPU check: = L_ref / L_a within 1e-9), Sun -3 deg at the pad 557 (half the glow, 74.8 cd/m^2).
   - Up part: 13 directions below the eye in model space (nadir, a ring at 0.6 x the Earth disc's angular radius, a ring
     grazing the limb 10 km up), each the plate equivalent of what it shows, x the Sun's visible fraction there, times
     the view factor (R / r)^2; view-independent (VR-stable). While the Moon's penumbra touches the atmosphere the sky
@@ -84,8 +84,8 @@ shaders:
     day imagery; the Black Marble night texture and `earth_city_lights_cd_m2` are removed (former model:
     docs/history/atmosphere-rendering.md).
   - Glow (`Atmosphere._twilight_glow_luminance`, `_limb_glow_luminance`) [call: view-independent]: enters L_a at
-    `GLOW_ADAPTATION_SHARE` 0.5 of the brightest sky. Twilight: Sun below the eye's horizon, brightest sky along the
-    Sun's azimuth (elevations 1-40 deg, at least 8 deg from the Sun; azimuth-only sampling is an accepted limit).
+    `GLOW_ADAPTATION_SHARE` 0.5 of the brightest sky. Twilight: Sun below about +5 deg (faded, see "Continuous through sunset"), brightest sky along the
+    Sun's azimuth (elevations 1-40 deg, soft exclusion 8-14 deg from the Sun; azimuth-only sampling is an accepted limit).
     Solar eclipse at the eye (its own visible fraction < 1): the same over 8 azimuths x 1 / 3 / 6 / 12 deg of the
     eclipsed sky (`_eclipsed_in_scatter`). Orbit: above the atmosphere with the Sun behind the Earth and the eye not
     near the Moon (its disc smaller than the Earth's), the brightest limb toward the Sun (tangent heights 2-40 km).
@@ -130,11 +130,19 @@ shaders:
   Pad by day: gain 1.1, shade side of a white hull `73 89 105` beside a lit side of 132-221. Dark adapted, gain 12 602,
   moonless pad `0 0 0`: no ambient is invented.
 
-- **Open: a step at sunset.** The twilight glow term is gated on the Sun below the eye's horizon and has a hard exclusion
-  around the Sun (`TWILIGHT_GLOW_MIN_SUN_DEG`): at Sun 0 deg the target jumps (499 -> 920 cd/m^2, gain 85 -> 47). In real
-  time the adaptation smooths it within ~1 s; at warp 120 it is a visible step. Opening the gate to +10 deg only moved the
-  jump (the exclusion's edge), so the fix is a soft exclusion, not done (a user decision; the reviewer's idea: fade the
-  exclusion instead of a hard edge; edges seen at about Sun -2, -5 and -7 deg). `sky_radiance_check --timelapse` counts the step.
+- **Continuous through sunset** (user approved 2026-10-31). The twilight glow has no on / off gate and no hard cutoff:
+  each sample's luminance is weighted by a smoothstep of its angle from the Sun (0 up to `TWILIGHT_GLOW_MIN_SUN_DEG` 8
+  deg, 1 from `TWILIGHT_GLOW_FULL_SUN_DEG` 14 deg [E]) before the maximum, and the whole term fades with the Sun's
+  elevation (1 up to +3 deg, 0 from +8 deg, `TWILIGHT_GLOW_FADE_START_DEG` / `_END_DEG` [E]; the eye's own eclipse
+  keeps it at any elevation). The fade is needed because by day the aureole itself is brighter than the plate (38 000
+  cd/m^2 at Sun 15 deg); from +3 deg on the plate is the larger term, so no day value changes. Rule test
+  `game/tests/sunset_adaptation_test.gd` (headless): Sun +8 .. -18 deg in 0.1 deg steps at the pad and 20 km up; the
+  largest step of ln target / gain per step 0.16 / 0.19 (limit 0.35, natural fall of the darkest twilight) and the
+  largest second difference of ln glow 0.07 / 0.13 (limit 0.15, the floor's kink included; before: 0.9 / 1.4 and 13 / 12).
+  Pad values (target cd/m^2, gain): Sun +1 deg 804 (53), 0 deg 410 (103), -2 deg 126 (337), -3 deg 75 (557), -6 deg 5.7
+  (2950), -12 deg 0.04 (11 200). `sky_radiance_check --timelapse` counts no gain step and leaves no frame out. Limits:
+  the glow now exceeds the plate from about Sun +2 deg (the sky near the horizon, half of it, against a reddened
+  Sun's plate); the aureole inside 8-14 deg is under-weighted by the fade (a smoothstep, not a glare model).
 
 ## Standing decisions
 

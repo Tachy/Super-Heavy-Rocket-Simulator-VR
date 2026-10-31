@@ -66,7 +66,6 @@ const TIMELAPSE_READ_LEVEL := 16.0 / 255.0  # below this a code value is too coa
 # [E] Largest frame-to-frame step in sRGB code values that reads as a smooth change, not as a flicker.
 const TIMELAPSE_MAX_STEP := 6.0 / 255.0
 const TIMELAPSE_GAIN_STEP_LOG := 0.1  # [E] a frame's change of the gain that is a jump of its target, not the adaptation
-const TIMELAPSE_SETTLE_FRAMES := 40  # [E] the refilter's 8 to 16 frames, twice, and margin
 # [E] At the fixed gain the ratio (cube's plate / sky_lux) drifts legitimately as the ground and the colour of the twilight
 # change. A frozen cube keeps its pixel while the sky falls, so its ratio rises with the sky's whole fall in the read span
 # (at least LIVE_MIN_SKY_SPAN, else the run has not shown anything).
@@ -148,7 +147,6 @@ var _timelapse_last := -1.0
 var _timelapse_max_step := 0.0
 var _timelapse_gain := 0.0
 var _timelapse_gain_steps := 0
-var _timelapse_settle := 0
 var _live_ratio_min := INF
 var _live_ratio_max := 0.0
 var _serial_at_start := 0
@@ -660,15 +658,12 @@ func _timelapse_step() -> bool:
 	var cam_to := (_world.camera.global_position - _sphere.global_position).normalized()
 	var pixel := _read(image, cam_to)
 	var value := pixel.g
-	# The eye adaptation's glow term sets in with a step at the instant of sunset (eye-adaptation.md, open points): the pixel
-	# follows it with the cube's refresh. Not the cube's flicker: that step is counted, its settling left out.
+	# The eye's gain follows the sky continuously through sunset (eye-adaptation.md): no step of it, no frames left out.
 	var gain: float = _world.atmosphere.exposure_gain
 	if _timelapse_gain > 0.0 and absf(log(gain / _timelapse_gain)) > TIMELAPSE_GAIN_STEP_LOG:
 		_timelapse_gain_steps += 1
-		_timelapse_settle = TIMELAPSE_SETTLE_FRAMES
 	_timelapse_gain = gain
-	_timelapse_settle -= 1
-	if _timelapse_frame > 20 and _timelapse_settle < 0:  # the snap of the jump is over
+	if _timelapse_frame > 20:  # the first frames settle the cube
 		if _timelapse_last >= 0.0:
 			_timelapse_max_step = maxf(_timelapse_max_step, absf(value - _timelapse_last))
 		if _timelapse_fixed_gain:
@@ -684,13 +679,12 @@ func _timelapse_step() -> bool:
 	if _timelapse_frame < TIMELAPSE_FRAMES:
 		return false
 	_expect(_timelapse_max_step <= TIMELAPSE_MAX_STEP, "largest frame step %.1f code values" % (_timelapse_max_step * 255.0))
-	_expect(_timelapse_gain_steps <= 1, "%d step(s) of the eye's gain (the known one at sunset)" % _timelapse_gain_steps)
+	_expect(_timelapse_gain_steps == 0, "%d step(s) of the eye's gain" % _timelapse_gain_steps)
 	if not _timelapse_fixed_gain:
 		_timelapse_fixed_gain = true
 		_timelapse_last = -1.0
 		_timelapse_max_step = 0.0
 		_timelapse_gain = 0.0
-		_timelapse_settle = 0
 		_start_timelapse()
 		return false
 	_finish_live()

@@ -200,7 +200,7 @@ vehicles still fly through `Us76Atmosphere`).
   estimate 0.749; back at the pad the same pixels (+-2 code values). Decks: optical depth 3 and 15, up 1.016 and 1.016, down
   1.027 and 1.027 of clear x factor + the sky's leak (+-15 %; with the ground's half off a down plate still reads 0.075 of the
   sky's plate: the coarsest level); opaque deck in the moonlight up / the Moon's sky x factor 0.915 (+-30 %; 0.099 with T_d alone).
-  `--timelapse`: sunset into twilight at warp 120, adapted: frame step at most 2.1 code values (limit 6); fixed gain: 177
+  `--timelapse`: sunset into twilight at warp 120, adapted: frame step at most 1.0 code values (limit 6), no step of the eye's gain; fixed gain: 177
   refreshes, up / sky 0.625 .. 0.709 (band 1.6) while the sky falls x 5.6. `--steady`: far Earth over 8 h in 30 min steps, range
   0.6 % of the mean (limit 5 %, set before measuring: a texel crossing at warp is a flicker). `--flight`: white hull entered
   from the opposite light, values in `vehicle-models.md`; `--flight --live`: fixed gain, the clock running through the ascent,

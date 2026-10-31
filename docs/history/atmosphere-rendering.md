@@ -455,3 +455,12 @@ Was in atmosphere-scattering.md (Sun light): "...and below 20 km over the mean s
 above ground), two per point, camera and lit body: uncached. GPU checks: ...; 100 km orbit: the mean-sphere fraction."
 The switch jumped 0 <-> 1 for a Sun between the sphere's and the terrain's horizon when a vehicle crossed 20 km near the
 terminator, and relief still shadows above 20 km. Now no height switch (exact relief pre-check), see the current text.
+
+## Eye adaptation's hard twilight gate and cutoff, superseded 2026-10-31
+Was in eye-adaptation.md (open point): "The twilight glow term is gated on the Sun below the eye's horizon and has a hard
+exclusion around the Sun (`TWILIGHT_GLOW_MIN_SUN_DEG`): at Sun 0 deg the target jumps (499 -> 920 cd/m^2, gain 85 -> 47).
+In real time the adaptation smooths it within ~1 s; at warp 120 it is a visible step. Opening the gate to +10 deg only
+moved the jump (the exclusion's edge) ... edges seen at about Sun -2, -5 and -7 deg. `sky_radiance_check --timelapse`
+counts the step." Measured by the sweep test before the fix: pad jump 0.92 in ln target at Sun 0 deg, 20 km up 0.66 at
+-7.1 deg and 0.62 in the glow at -5.0 deg (a sample entering the 8 deg cutoff). Old values: Sun -3 deg at the pad 464
+(half the glow, 90.8 cd/m^2). Now a soft exclusion and a fade with the Sun's elevation.

@@ -89,10 +89,18 @@ const MOON_MEAN_DISTANCE_M := 384400000.0
 ## (an eclipse) it is off - day frames stay exactly as before, at no cost.
 const MOONLIGHT_MIN_SHARE := 1.0e-3
 ## [call] The twilight glow (_twilight_glow_luminance): elevations sampled along the Sun's azimuth (deg; the glow is
-## brightest low over the horizon) and the least angle from the Sun (deg) - outside the Sun's aureole, so the term grows
-## from below the white plate at sunset instead of jumping.
+## brightest low over the horizon) and the soft exclusion around the Sun: a sample's luminance is weighted by a smoothstep
+## of its angle from the Sun, 0 up to TWILIGHT_GLOW_MIN_SUN_DEG (inside the aureole) and 1 from TWILIGHT_GLOW_FULL_SUN_DEG
+## [E: the aureole's glare has faded to the sky's own level by ~12-15 deg]. A hard cutoff made the target jump whenever a
+## sample crossed it (eye-adaptation.md).
 const TWILIGHT_GLOW_ELEVATIONS_DEG := [1.0, 3.0, 6.0, 10.0, 20.0, 40.0]
 const TWILIGHT_GLOW_MIN_SUN_DEG := 8.0
+const TWILIGHT_GLOW_FULL_SUN_DEG := 14.0
+## [E] By day the brightest sky is the Sun's aureole (38 000 cd/m^2 at Sun 15 deg, above the white plate): the glow is a
+## twilight term, so it fades out with the Sun's elevation, full up to the first and gone from the second (deg). The plate
+## is the larger term from Sun +3 deg on (4800 vs 6800 cd/m^2 at +5), so the fade changes no day value and no target steps.
+const TWILIGHT_GLOW_FADE_START_DEG := 3.0
+const TWILIGHT_GLOW_FADE_END_DEG := 8.0
 ## [call] In a solar eclipse at the eye (night-vision fix round I2) the brightest sky is the ring around the umbra: the
 ## glow then samples these azimuths (evenly from the Sun's) at these elevations, the eclipsed sky (_eclipsed_in_scatter).
 const ECLIPSE_GLOW_AZIMUTHS := 8
@@ -461,9 +469,15 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	# behind the Earth (orbital night) and the eye not near the Moon, the brightest limb toward the Sun.
 	var glow_rgb := Vector3.ZERO
 	var eclipsed := visible < 1.0 and not is_nan(_tdb_s)
-	if not outside and (sun_direction_itrf.dot(up) < 0.0 or eclipsed):
-		glow_rgb = _twilight_glow_luminance(eye_itrf_m, up, sun_direction_itrf, eclipsed) * (GLOW_ADAPTATION_SHARE
-				/ (d_au * d_au))
+	if not outside:
+		# (the eye's own eclipse keeps the glow at any Sun elevation)
+		var fade := 1.0
+		if not eclipsed:
+			fade = 1.0 - smoothstep(TWILIGHT_GLOW_FADE_START_DEG, TWILIGHT_GLOW_FADE_END_DEG,
+					rad_to_deg(asin(clampf(sun_direction_itrf.dot(up), -1.0, 1.0))))
+		if fade > 0.0:
+			glow_rgb = _twilight_glow_luminance(eye_itrf_m, up, sun_direction_itrf, eclipsed) * (fade
+					* GLOW_ADAPTATION_SHARE / (d_au * d_au))
 	elif outside and transmittance == Vector3.ZERO and not near_moon_eye:
 		glow_rgb = _limb_glow_luminance(eye_itrf_m, sun_direction_itrf) * (GLOW_ADAPTATION_SHARE / (d_au * d_au))
 	last_adaptation_down_cd_m2 = down_rgb.dot(LUMINANCE_WEIGHTS)
@@ -516,13 +530,16 @@ func _twilight_glow_luminance(eye_itrf_m: Vector3, up: Vector3, sun_direction_it
 			directions.append((horizontal * cos(e) + up * sin(e)).normalized())
 	var brightest := Vector3.ZERO
 	for v in directions:
-		if rad_to_deg(v.angle_to(sun_direction_itrf)) < TWILIGHT_GLOW_MIN_SUN_DEG:
+		var weight := smoothstep(TWILIGHT_GLOW_MIN_SUN_DEG, TWILIGHT_GLOW_FULL_SUN_DEG,
+				rad_to_deg(v.angle_to(sun_direction_itrf)))
+		if weight == 0.0:
 			continue
 		var sky: Vector3
 		if eclipsed:
 			sky = _eclipsed_in_scatter(eye_itrf_m, v, _top_exit_distance(eye_itrf_m, v), false, sun_direction_itrf, [])
 		else:
 			sky = _core.atmosphere_sky_luminance(eye_itrf_m, v, sun_direction_itrf)["luminance"]
+		sky *= weight
 		if sky.dot(LUMINANCE_WEIGHTS) > brightest.dot(LUMINANCE_WEIGHTS):
 			brightest = sky
 	return brightest
