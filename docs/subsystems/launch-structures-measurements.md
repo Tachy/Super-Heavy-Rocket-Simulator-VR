@@ -184,6 +184,34 @@ the arm ends in `f7_3060` (fins or arm pads), which two fins are the catch fins.
 Crops with grid: `screenshots/mechazilla/webcast/catch/v3_padb_arms_fins_grid.png`, `v3_f12_1804_fins_grid.png`,
 `v3_stl_guide_top.png`, `v2_f7_3060_grid.png`.
 
+## Arm member map (user ruling and re-check, 2026-10-31)
+All [E] by eye from photos, no top view of a Pad 2 arm exists in the sources; schematic `screenshots/pad-b/fine/arm_members.png`.
+Readings: `teslaoracle_padb_chopsticks_2025-03` (both arms from below: near arm's outer side, far arm's inner side), RGV aerial (user image, plan),
+`padb_chopsticks_around_booster_top_2026-03`, `padb_chopsticks_above_mount_2026-05`, `nsf_padb_chopsticks_2025-02`, worker close-up 2025-12.
+
+| Member | From - to (arm frame, m) | Diameter | Evidence, uncertainty |
+|---|---|---|---|
+| A root, outer (chord) | hinge - bend (5.2, -3.6) | 1.1 | RGV: bend 5-6 m out, 9-10 m off the axis, angle to leg 50 +-15 deg; drawn 35 (physics hinge) |
+| B leg, outer (chord) | bend - cap (19.5, -2.2) | 1.1 | Photos: parallel to the bearing line within +-5; drawn 5.6 in |
+| C connector | (19.5, -2.2) - (23, 0.2) | 1.1 | NSF 2026-03: 28 +-15 in plan: the old "tip bend" |
+| D inner root | hinge - (13, 0.2) | 1.1 | RGV curved tube (drawn straight), far arm of teslaoracle |
+| E bearing tube + plate | (13, 0.2) - 25.9 | 1.3, plate 1.4 high | Worker photo (bare tube, cap); plate only on the inner side, teslaoracle; length 12 +-2 |
+| F lower chord (2) | knee 0.21 L, -11 - 0.35 L, -8.6 - 0.87 L, -7 | 1.1 | Side views; under the bearing line in plan: RGV shift 7 m straight below the strip |
+| G knee strut | knee - foot | 1.1 | All side views |
+| H hinge column | (0.8, 0) - foot 17 down | 1.4 | Same |
+| I root columns (2) | bend and inner root at 5.2 - foot | 1.1 | Fan at the foot, teslaoracle (real fan has more: drawn 4 in all) |
+| J posts (4) | 0.25, 0.36, 0.575, 0.82 L | 0.8 | teslaoracle far arm: four |
+| K diagonals (3) | post top - next post foot | 0.8 | Same: all fall outward |
+| ties (2) | leg - bearing line at 5.2 and 13 | 0.8 | RGV |
+| L probe | 0.87 L hanging 5 m | 0.4 | Only structure thinner than 0.8: a mechanism |
+
+Section: one truss plane per arm: the near arm in teslaoracle shows open sky behind its plane, so the V section (fix round) is rejected.
+Small real things that are not structure: ladders, platform, mast, pushers, probe brace, supply lines (one along the leg, one along the
+bearing tube, one along the lower chord; photos show more, not read as members).
+Plan check, RGV rectified: strips 15.4 +-3 m apart at about 8 deg opening each = 9.6 closed: consistent with standby. Both strips parallel 3 +-10 deg.
+Real hinge: the rigid 50 deg root 10 m long puts it 2 +-3 m off the centre plane, not 5.8. Not measurable further.
+Sources searched: Sketchfab / Printables / CGTrader listings (not opened, not a source of truth), Ringwatchers / Corey Clancy / Blazer360 and Reddit: nothing retrievable.
+
 ## Arm research (Pad 2 / V3, fine build task 2, 2026-10-31)
 Separates what is **[S] sourced** from what is **[R] read from an image**. Pad 1 / V2 facts do not carry over: V2 had its fin block at the very top of the barrel and pins near the rim (B17), V3 has a round mount ring clearly lower on the barrel (B19, user comparison; about 7.4-8 m below the rim of the 72.3 m hull, station ~64.3-65, low camera so +-1 m). The mount moved down, the arm deck goes with it; every old catch-height reading (`f5`, `f7`, `f8`, deck at the rim) is V2 only.
 

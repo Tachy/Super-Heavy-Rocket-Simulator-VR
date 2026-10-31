@@ -19,17 +19,15 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   (courses of 5.35 m, two plates across, 0.1 m seams), roof deck 144 m with a louvred 8 x 8 x 7 m block (139.9-146.9 m) and
   a railing (silhouette top 146.9 m, the physics box is 146 m), zig-zag stair flights on one side face and two cable trays
   on the back face, dark deck slabs 0.4 m at every floor, column bundle 3.6 m.
-- Chopstick (task 2 + fix round, Pad 2 arm; evidence "Arm research" in the measurements): `mechazilla_layout.chopstick`, an OPEN frame
-  of few big round black tubes (16-sided, 6.4k triangles; chords 1.1 m, diagonals 0.8 m, root columns 1.4 m), 25.9 m, 4 m wide,
-  V section: two top chords, one lower chord (knee 11 m at 0.21 L, 8.6 m at 0.35 L, 7 m at its end 0.87 L), root columns to a foot 17 m
-  below the deck. Per arm: 3 V posts, 2 W diagonals per side, the last strut, 3 ties on top (the real outer frame shows about 3 posts and
-  4 diagonals in NSF 2026-03 / 05; the old drawing had 27 of them). No deck slab: only a narrow tan strip (0.8 m) on the inner top
-  chord, top at Z = 0. Ladders are one flat panel each. In plan the top chords bend inward at 5.2 m (5 deg, from the geometry) and at 24.8 m
-  (28 +-15 deg); the MAIN BEAMS between run along the arm's X and are parallel at the closed pose (`opening_rad` 0); the OUTER PIECES (tips)
-  are not parallel: each bends 28 deg toward the other. The tip bend is only 1.1 m long: a longer one would reach into the 9 m hull
-  (the hinge sits 24 m from the axis). Grey contact pad at the arm's end, spanning the axis station (under the catch fin at the closed
-  pose), two telescopic pushers on the deck at the tip, hanging stabilizer probe with its thin brace, ladders, platform, railing, mast.
-  Deck grating not drawn (it does not read at any distance the game shows).
+- Chopstick (user ruling 2026-10-31; member map: measurements "Arm member map"): `mechazilla_layout.chopstick`, a U of large
+  round black tubes only (4.3k triangles, 24 truss members incl. 3 caps, table `ARM_MEMBERS`), 25.9 m. Plan: root out from the
+  hinge to the bend (5.2 m, 3.6 m outward), leg back in 5.6 deg to its capped end (19.5 m), connector to the bearing tube
+  (23 m; this is what was once read as a "28 deg tip bend"), inner root tube from the hinge to the bearing tube's start (13 m).
+  The BEARING PIECE (1.3 m tube, flat 0.15 x 1.4 m plate on its inner side, tan strip on top, contact pad at the axis station) runs
+  along the arm's X: at the core's closed pose (`opening_rad` 0) both faces are parallel and `arm_closed_gap_m` 9.6 apart, centred on
+  the catch axis. One truss plane under the bearing line (not a V): lower chord, 4 posts, 3 diagonals; knee strut, hinge column and two
+  root columns to one foot 17 m down. Thin: at most 3 supply lines; black ladders and probe brace (`fittings`), platform, mast, short
+  pushers, hanging probe. No railing, no deck, no lattice.
 - Carriage (`mechazilla_layout.carriage`): black frame 13.5 x 9 m, hinge frames on the physics pivot (5.8 m), walkway past the corners,
   3.8 m sheave block; four hoist cables to the roof block, stretched in `TowerView` with the carriage offset. Per arm an
   electromechanical actuator (NSF 2026-05: no longer hydraulic): barrel on the carriage, rod to a lug on the arm's inclined root column,
@@ -139,8 +137,8 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   than the geometry: hard swap of matched tiers and a coverage (alpha-to-coverage) instead; `alpha_scale` 0.85 and the
   colours of the far shader are fitted to the merged tier at 4.5-6.5 km (alpha 1.0 / 1.15 left the far tier up to 2.3 %
   brighter at VR focal length).
-- `tools/structures/tests/test_mechazilla_layout.py`: both arms' chord lines built at the closed pose from the PHYSICS hinge (not from the
-  layout's own numbers): main beams parallel and the physics gap apart, tips bend toward each other by 28 deg, root pieces fan out; closed
+- `tools/structures/tests/test_mechazilla_layout.py`: the bearing faces of both arms built at the closed pose from the PHYSICS hinge (not from the
+  layout's own numbers): bearing faces parallel within 0.5 deg, the physics gap apart, centred on the axis; U plan, member table; closed
   arm's surfaces >= 0.03 m off the hull, pad 0.1 m from it and ending at the arm tip, open frame (no deck, strip <= 0.8 m, top at Z = 0).
   `tower_view_test`: the pad meshes' centres through the pivots against hinge + pad station (0.05 m), the pad centres 9.8 m apart, the
   actuators' ends on the carriage and the lug, length follows the opening. `python tools/structures/check_envelope.py`: inner face on the
@@ -190,8 +188,9 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 |---|---|---|---|
 | Mount deck | ring top 20 m (physics); plan as measured, slope stretched from 14.5 m (55 deg instead of 48; deck / base width 0.45 instead of 0.33; portal top 10 m instead of 7.2), courses as measured | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck; `check_envelope` lists the row |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
-| Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; 25.9 is the longest arm whose 28 deg bent tip still clears the hull by 3 cm |
+| Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; kept from the earlier fit; the flat bearing piece clears the hull at any length |
 | Hinge position | resolved in the fix round: drawn hinge frames on the physics pivot 5.8 m (the corner hinges read 6.75 m: not drawn); `check_envelope` compares them, no exception | 5.8 m | the inner face stays on the physics half gap 4.8 m |
+| Root of the U | root 35 deg, 6.3 m from the physics hinge (5.8 m off the axis) to the bend 9.4 m off it | photos: 50 +-15 deg, about 10 m, so a real hinge about 2 +-3 m off the centre plane | hinge stays on the physics number; a physics plan moving the hinge needs `arm_closed_gap_m` 9.6 unchanged and opening 0 unchanged |
 | Fins against the arm | pins 66.5 m put the deck 2-2.5 m above the fin plates, the arm's top 2.5 m and truss run through the 0 / 180 fins at a catch: visible overlap, NOT hidden. Pad at the closed pose under where the fin bars come down | pins 66.5 m, azimuths 45 / 225, fins without contact | V3 user view: deck 0-0.9 m under the fins; proposal in the measurements |
 | Tower face, height | width 12 m, roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 12 / 146 m | within the error |
 | Leg spacing | outer width 12 m (leg centres 9.8 m) | box 12 m | measured leg centres 11.9 +-1 m (outer 13.3-14): the legs stay inside the physics box |
@@ -200,7 +199,7 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 
 ## Open points
 - Arm: root bend and width from weak
-  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 6.4k triangles per arm, far tier unchanged (cost:
+  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 4.3k triangles per arm, far tier unchanged (cost:
   task 5); shock absorbers and the fin's station undecided.
 - Render vs the frames (`sf_*.png`): mount taller and steeper than the photos (the 20 m deck), plates cleaner and more regular, hoods without
   the chamfered facets, vents plain wedges, no scaffolds, vehicles, recessed door bays or the deck's fine hardware; hardstand outline and portal

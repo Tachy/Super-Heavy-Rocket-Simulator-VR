@@ -59,15 +59,18 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
     c = detail["chopstick"]
     half_gap = 0.5 * phys["arm_closed_gap_m"]
     pivot = half_gap + 0.5 * phys["arm_width_m"]
-    # What the hull touches: the arm's inner face at the closed pose; deck top on the pivot plane is Z = 0 by the layout.
-    within("Arm inner face at the closed pose", pivot - c["inner_face_y_m"], half_gap, SURFACE_TOL_M)
+    # What the hull touches: the bearing plate at the closed pose; deck top on the pivot plane is Z = 0 by the layout.
+    members = mechazilla_layout.chopstick(detail)
+    plates = [m for m in members if m[0] == "bearing"]
+    for p in plates[0][3], plates[0][4]:  # both ends of the drawn plate: the flat face is parallel and on the gap
+        within("Arm bearing face at the closed pose", pivot - (p[1] + 0.5 * plates[0][2]), half_gap, SURFACE_TOL_M)
     within("Arm length", c["length_m"], phys["arm_length_m"], LENGTH_TOL_M, "Arm length")
     within("Hinge position", detail["carriage"]["hinge_y_m"], pivot, LENGTH_TOL_M, "Hinge position")
     within("Tower width", detail["tower"]["sections"][0]["face_width_m"], phys["width_m"], LENGTH_TOL_M)
     within("Tower height", detail["tower"]["roof"]["block_base_m"] + detail["tower"]["roof"]["block_height_m"],
            phys["height_m"], LENGTH_TOL_M, "Tower face, height")
     # Arm tops: the deck strip's top is the physics arm's top plane (Z = 0 at the hinge height) the pins land on.
-    strips = [m for m in mechazilla_layout.chopstick(detail) if m[0] == "strip"]
+    strips = [m for m in members if m[0] == "strip"]
     within("Arm top plane", max(max(m[3][2], m[4][2]) + 0.5 * (m[5] or 0.0) for m in strips), 0.0, SURFACE_TOL_M)
     # Leg spacing: the outer width must stay inside the physics box; centres against the measurement.
     leg = detail["profiles"][detail["tower"]["sections"][0]["leg_profile"]]["size_m"]

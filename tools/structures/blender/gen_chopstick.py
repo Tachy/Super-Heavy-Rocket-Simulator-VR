@@ -1,8 +1,8 @@
-"""Chopstick arm of Pad 2: frame of big round black tubes (layout and frame: mechazilla_layout.py, references there).
+"""Chopstick arm of Pad 2: U of big round black tubes, flat bearing plate (layout and frame: mechazilla_layout.py, references there).
 
 Run: blender -b --factory-startup -P gen_chopstick.py -- --config <toml> --out <dir> [--preview <png>]
-Nodes: `truss` (black tubes), `deck`, `strip` (tan strip), `pad` (grey contact pads), `hardware` (light grey: railing,
-ladders, pushers, probe head).
+Nodes: `truss` (black tubes), `bearing` (flat bearing plate), `strip` (tan strip), `pad` (grey contact pad), `hardware`
+(light grey: platform, pushers, probe head, thin supply lines), `fittings` (black: ladders, probe brace).
 """
 import sys
 from pathlib import Path

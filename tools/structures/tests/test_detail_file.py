@@ -103,8 +103,8 @@ def test_load_raises_on_missing_table(tmp_path, drop):
 def test_load_raises_on_missing_key_and_bad_unit(tmp_path):
     text = DRAFT.read_text(encoding="utf-8")
     f = tmp_path / "a.toml"
-    f.write_text(text.replace("tip_kink_x_m", "pitch_typo_m"), encoding="utf-8")
-    with pytest.raises(detail_file.DetailFileError, match="tip_kink_x_m"):
+    f.write_text(text.replace("leg_end_x_m", "pitch_typo_m"), encoding="utf-8")
+    with pytest.raises(detail_file.DetailFileError, match="leg_end_x_m"):
         detail_file.load(f)
     f.write_text(text.replace("length_m = 25.9", "length_m = -25.9"), encoding="utf-8")
     with pytest.raises(detail_file.DetailFileError, match="positive"):

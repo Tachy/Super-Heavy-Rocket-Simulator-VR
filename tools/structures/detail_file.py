@@ -11,9 +11,10 @@ from pathlib import Path
 
 PROFILE_KINDS = ("h_beam", "tube", "angle", "box")
 SECTION_KEYS = ("height_m", "face_width_m", "pitch_m", "pattern", "leg_profile", "brace_profile")
-CHOPSTICK_KEYS = ("length_m", "width_m", "depth_m", "end_depth_m", "knee_depth_m", "foot_depth_m", "root_kink_x_m",
-                  "root_kink_deg", "tip_kink_x_m", "tip_kink_deg", "inner_face_y_m", "rail_profile", "chord_profile",
-                  "brace_profile", "thin_profile")
+CHOPSTICK_KEYS = ("length_m", "depth_m", "end_depth_m", "knee_depth_m", "foot_depth_m", "root_kink_x_m", "bend_out_m",
+                  "leg_end_x_m", "connector_end_x_m", "leg_offset_m", "bearing_start_x_m", "bearing_tube_m",
+                  "plate_thickness_m", "plate_height_m", "plate_end_x_m", "supply_line_m", "inner_face_y_m",
+                  "chord_profile", "brace_profile", "thin_profile")
 CARRIAGE_KEYS = ("width_m", "bottom_depth_m", "hinge_y_m", "drum_diameter_m", "drum_gap_m", "cable_count", "cable_size_m",
                  "actuator_anchor_x_m", "actuator_anchor_in_m", "actuator_anchor_depth_m", "actuator_lug_x_m",
                  "actuator_lug_out_m", "actuator_lug_depth_m", "actuator_barrel_m", "actuator_rod_m",
@@ -110,7 +111,7 @@ def load(path) -> dict:
         _need(data[table], keys, table)
         for k in keys:
             _positive(data[table], k, table)
-    for k in ("rail_profile", "chord_profile", "brace_profile", "thin_profile"):
+    for k in ("chord_profile", "brace_profile", "thin_profile"):
         if chop[k] not in profiles:
             raise DetailFileError(f"chopstick.{k}: unknown profile '{chop[k]}'")
     return data

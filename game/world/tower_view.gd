@@ -197,7 +197,7 @@ func update_state(state: Dictionary) -> void:
 
 func _arm_materials() -> Dictionary:
 	var light := TowerMaterial.clad()
-	return {"pad": light, "hardware": light, "strip": LitAerial.material(ARM_STRIP, 0.8, 0.0)}
+	return {"pad": light, "bearing": light, "hardware": light, "strip": LitAerial.material(ARM_STRIP, 0.8, 0.0)}
 
 
 ## The carriage across the tower face (its origin in the hinge line, centre plane, deck plane) and its hoist cables.

@@ -151,8 +151,10 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	var deck := plus_arm.get_node("strip") as MeshInstance3D
 	var deck_bounds: AABB = plus_arm.transform * deck.get_aabb()
 	_check(absf(deck_bounds.end.y) < 0.01, "strip top at the arm top plane (%.3f m)" % deck_bounds.end.y)
-	_check(absf(deck_bounds.position.z) < 0.5 and absf(deck_bounds.end.z - float(c["length_m"])) < 1.0,
-			"strip from the hinge to the tip (%.1f .. %.1f m)" % [deck_bounds.position.z, deck_bounds.end.z])
+	_check(absf(deck_bounds.position.z - float(c["bearing_start_x_m"])) < 0.5 and absf(deck_bounds.end.z - float(c["plate_end_x_m"])) < 0.5,
+			"strip on the bearing piece (%.1f .. %.1f m)" % [deck_bounds.position.z, deck_bounds.end.z])
+	var plate_bounds: AABB = plus_arm.transform * (plus_arm.get_node("bearing") as MeshInstance3D).get_aabb()
+	_check(plate_bounds.size.x < 0.2, "bearing plate is flat and along the arm (%.3f m thick)" % plate_bounds.size.x)
 	_check(plus_arm.get_node_or_null("deck") == null, "open frame: no deck slab")
 	var truss_bounds: AABB = plus_arm.transform * (plus_arm.get_node("truss") as MeshInstance3D).get_aabb()
 	_check(absf(truss_bounds.position.y + float(c["foot_depth_m"])) < 1.0, "root columns' foot %.1f m" % truss_bounds.position.y)
@@ -172,7 +174,7 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 ## Real poses at the closed pose (opening 0): the pads' centres, taken from the drawn meshes through the pivots, lie where
 ## the physics puts them: at the hinge, `pad_x` toward the pad, across by the gap. Both arms (mirror) on the same station,
 ## so the main beams are parallel; the physics gap between the inner pad faces is arm_closed_gap_m - 2 x proud.
-## The outer pieces are not parallel: the tip bend is `tip_kink_deg` inward (checked on the layout in pytest).
+## The bearing pieces are parallel: their plan is checked on the layout in pytest).
 func _check_closed_pose(view: TowerView, detail: Dictionary, geometry: Dictionary) -> void:
 	view.update_state({"opening_rad": 0.0, "carriage_offset_m": 0.0})
 	var c: Dictionary = detail["chopstick"]
