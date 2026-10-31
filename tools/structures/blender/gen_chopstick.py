@@ -18,12 +18,14 @@ def main() -> None:
     detail = common.load_detail(args["config"])
     out = Path(args["out"])
     out.mkdir(parents=True, exist_ok=True)
-    common.clear_scene()
-    root = bpy.data.objects.new("chopstick", None)
-    bpy.context.scene.collection.objects.link(root)
-    tris = common.add_layout(mechazilla_layout.chopstick(detail), root)
-    print(f"TRIANGLES chopstick {tris}")
-    common.export_gltf(out / "chopstick.gltf")
+    # The two arms differ at the root (the common axis lies off the catch line): chopstick_minus is the -across arm, unmirrored.
+    for name, side in (("chopstick_minus", -1.0), ("chopstick", 1.0)):
+        common.clear_scene()
+        root = bpy.data.objects.new("chopstick", None)
+        bpy.context.scene.collection.objects.link(root)
+        tris = common.add_layout(mechazilla_layout.chopstick(detail, side), root)
+        print(f"TRIANGLES {name} {tris}")
+        common.export_gltf(out / f"{name}.gltf")
     if "preview" in args:
         c = detail["chopstick"]
         Path(args["preview"]).parent.mkdir(parents=True, exist_ok=True)

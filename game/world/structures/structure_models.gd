@@ -35,12 +35,13 @@ static func load_for(site_id: String) -> Dictionary:
 	var detail := TomlLite.load_file(detail_path)
 	var profiles := _meshes_of(model_dir.path_join("profiles.gltf"), "profile_")
 	var chopstick := _meshes_of(model_dir.path_join("chopstick.gltf"), "")
+	var chopstick_minus := _meshes_of(model_dir.path_join("chopstick_minus.gltf"), "")
 	var carriage := _meshes_of(model_dir.path_join("carriage.gltf"), "")
 	var rails := _meshes_of(model_dir.path_join("rails.gltf"), "")
 	var qd_arm := _meshes_of(model_dir.path_join("qd_arm.gltf"), "")
 	var mount := _meshes_of(model_dir.path_join("mount.gltf"), "")
 	var trench := _meshes_of(model_dir.path_join("trench.gltf"), "")
-	if profiles.is_empty() or chopstick.is_empty() or carriage.is_empty() or rails.is_empty() or qd_arm.is_empty() or mount.is_empty() \
+	if profiles.is_empty() or chopstick.is_empty() or chopstick_minus.is_empty() or carriage.is_empty() or rails.is_empty() or qd_arm.is_empty() or mount.is_empty() \
 			or trench.is_empty():
 		return _fallback(site_id, _load_error)
 	for section: Dictionary in detail.get("tower.sections", []):
@@ -49,7 +50,7 @@ static func load_for(site_id: String) -> Dictionary:
 				return _fallback(site_id, "profile %s missing in profiles.gltf" % section[key])
 	if not (chopstick.has("truss") and chopstick.has("pad")):
 		return _fallback(site_id, "chopstick.gltf lacks the nodes truss / pad")
-	return {"detail": detail, "profiles": profiles, "chopstick": chopstick, "carriage": carriage, "rails": rails, "qd_arm": qd_arm,
+	return {"detail": detail, "profiles": profiles, "chopstick": chopstick, "chopstick_minus": chopstick_minus, "carriage": carriage, "rails": rails, "qd_arm": qd_arm,
 			"mount": mount, "trench": trench}
 
 
@@ -80,7 +81,7 @@ static func _missing_or_stale(model_dir: String) -> String:
 	var manifest := model_dir.path_join(MANIFEST)
 	if not FileAccess.file_exists(manifest):
 		return "no models in " + model_dir
-	for file in ["profiles.gltf", "profiles.bin", "chopstick.gltf", "chopstick.bin", "carriage.gltf",
+	for file in ["profiles.gltf", "profiles.bin", "chopstick.gltf", "chopstick.bin", "chopstick_minus.gltf", "chopstick_minus.bin", "carriage.gltf",
 			"carriage.bin", "rails.gltf", "rails.bin", "qd_arm.gltf", "qd_arm.bin", "mount.gltf", "mount.bin", "trench.gltf", "trench.bin"]:
 		if not FileAccess.file_exists(model_dir.path_join(file)):
 			return "model file %s missing" % file

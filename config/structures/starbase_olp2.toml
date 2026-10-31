@@ -157,16 +157,13 @@ size_m = 0.35             # [E] ~14 px at 40.6 px/m
 wall_m = 0.02             # [E] estimate: tube wall, not measurable
 
 [chopstick]               # Pad 2 arm, not the Pad 1 / V2 arm; chords, bends, evidence: launch-structures-measurements.md "Arm research"
-length_m = 25.9           # [E] 26 +-2 m hinge to tip, 1.9 m past the catch axis; [S] ~10 m shorter than Pad 1; physics arm 36 m
-depth_m = 8.6             # [E] 8.6 +-0.8 m deck to the lower chord where its rise ends (NSF 2026-03; side view 2025-08 8.4 m)
+length_m = 25.98          # [E] 26 +-2 m common axis to tip, 3.6 m past the catch axis = physics arm_length_m; [S] ~10 m shorter than Pad 1
+depth_m = 8.6             # [E] 8.6 +-1.2 m deck to the lower chord at the bearing piece's start (NSF 2026-03; crop_rail_colleen 0.6 of the foot depth at 41 % of the length)
 end_depth_m = 7.0         # [E] 6.9 +-0.7 m at the lower node near the tip: user view of the held V3 booster (45.6 px/m)
-knee_depth_m = 11.0       # [E] +-1.5 m lower chord's knee, side view padb_mount_and_chopsticks_side_2025-08 (14.3 px/m)
-foot_depth_m = 17.0       # [E] +-2 m root columns' foot below the deck, same view
-knee_frac = 0.21          # [E] +-0.03 station of the knee, same view
-kink_frac = 0.35          # [E] +-0.05 the lower chord stops rising here, same view
+foot_depth_m = 15.0       # [E] +-2 m the root columns' foot on the common axis, under the lower collar's level (crop_rail_colleen: foot and lower collar corner at one height; side view 2025-08 gave 17 +-2)
 lower_end_frac = 0.87     # [E] +-0.04 lower chord's end, same view
 root_kink_x_m = 5.2       # [E] +-1 bend of the U 5-6 m out from the root: RGV plan (rectified), NSF 2026-03 / 05
-bend_out_m = 3.6          # [E] +-1.5 bend 9.4 m from the axis = 5.8 + 3.6: RGV plan 9-10 m closed. Root heading 35 deg (photos 50 +-15 from a hinge further in; the physics hinge decides)
+bend_out_m = 3.6          # [E] +-1.5 bend 9.4 m from the catch axis = 5.8 + 3.6: RGV plan 9-10 m closed. Root from the common axis 64 deg (+across) / 57 deg (-across) off the arm; photos 50 +-15 deg
 leg_end_x_m = 19.5        # [E] +-1.5 the leg ends with a round cap before the tip, teslaoracle 2025-03, NSF 2026-03
 connector_end_x_m = 23.0  # [E] +-1 leg-to-bearing connector, 34 deg in plan: the piece first read as a "28 deg tip bend"
 leg_offset_m = 2.4        # [E] +-0.5 leg's end to the bearing line, RGV plan (2.2 m strip to outer edge)
@@ -175,23 +172,20 @@ bearing_tube_m = 1.3      # [E] +-0.2 round tube behind the plate, worker photo 
 plate_thickness_m = 0.15  # [E] not measurable: flat plate on the inner side, its face is the U's bearing surface
 plate_height_m = 1.4      # [E] +-0.3 length : height about 8 : 1, teslaoracle 2025-03
 plate_inset_m = 0.4       # [E] plate starts a little after the tube, same view
-plate_end_x_m = 25.2      # [E] past the catch axis station 24 m (physics hinge); the real plate ends at the last post
-foot_y_m = 0.5            # [E] +-1 common foot of the root fan, Y from the hinge line toward the axis, teslaoracle 2025-03
+plate_end_x_m = 25.2      # [E] past the catch axis station 22.4 m; the real plate ends at the last post
 inner_face_y_m = 1.0      # [E] main beam's inner face from the hinge line: lateral 4.8 m = arm_closed_gap_m / 2 (physics)
 cap_scale = 1.04          # [E] round end caps a little proud of the tube (user view)
-column_x_m = 0.8          # [E] hinge column at the root, side view 2025-08
-column_size_m = 1.4       # [E] heavier than the chords, same view
 strip_width_m = 0.8       # [E] tan strip on the bearing piece only, RGV plan
-pad_x_m = 23.15   # [E] pad spans the catch axis station 22.3 m (hinge distance) with 0.85 m past it, as before: under the fin at the closed pose
+pad_x_m = 23.23   # [E] pad spans the catch axis station 22.38 m (common axis) with 0.85 m past it: under the fin at the closed pose
 pad_length_m = 2.1        # [E] +-0.3 m user view, 98 px at 45.6 px/m
 pad_width_m = 0.6         # [E] not measurable (edge-on)
 pad_height_m = 1.2        # [E] +-0.2 m user view, 55 px
 pad_top_depth_m = 0.6     # [E] +-0.2 m pad top below the deck top, user view
 pad_proud_m = 0.2         # [E] proud of the inner face: 0.1 m from the 4.5 m hull, not measurable
-pusher_start_x_m = 22.6    # [E] short units on the tip, about 3.5 m, NSF 2026-05 / teslaoracle 2025-03
-pusher_end_x_m = 26.2      # [E] passes the tip a little, night view 2025-09 and side view 2025-08
-pusher_size_m = 0.5       # [E] ~20 px at 40.6 px/m
-pusher_spacing_m = 0.9    # [E] two cylinders, same views
+tip_box_start_x_m = 22.6   # [E] +-0.5 closed box on the tip, about 3.5-4 m, crop_rail_colleen, NSF 2026-05
+tip_box_end_x_m = 26.2     # [E] passes the tube's end a little, crop_rail_colleen
+tip_box_m = 1.6            # [E] +-0.3 square section, a little wider than the 1.3 m tube, crop_rail_colleen
+tip_box_y_m = 0.2          # [E] on the bearing tube's axis, against the arm's line: inner side flush with the bearing face
 probe_length_m = 5.0      # [E] +-1 m hanging stabilizer arm below the lower chord, NSF 2026-03 (200 px at 40.6 px/m)
 supply_line_m = 0.12      # [E] thin lines along the arm, drawn where they read, NSF 2026-05
 mast_size_m = 0.15        # [E] thin mast
@@ -207,24 +201,20 @@ chord_profile = "chopstick_chord"   # [E] see profiles
 brace_profile = "chopstick_brace"   # [E] see profiles
 thin_profile = "chopstick_thin"     # [E] see profiles
 
-[carriage]                # two collars wrapping the tower corner toward the mount on corner rails, hinge columns between them (CRL05690, DSC06000)
-collar_gap_m = 13.0       # [E] +-3 m upper chord (walkway level) to lower chord: ~600 px between the two collars on crop_rail_colleen at ~46 px/m (the 5.35 m plate course rows as scale)
+[carriage]                # two collars from the common hinge axis back along both side faces to the next corners, 6 rollers on three corner rails (user 2026-10-31; CRL05690, DSC06000)
+collar_gap_m = 15.0       # [E] +-3 m carriage top to lower chord: ~600 px between the collars on crop_rail_colleen at ~46 px/m gave 13; 15 puts the lower collar at the root's foot (photo: same height)
 collar_chord_m = 0.5      # [E] collar chord, ends inside the 0.3 m tolerance of the rails
 truss_depth_m = 1.8       # [E] lower collar is a truss, 1.8 m deep, CRL05690
 truss_panel_m = 2.2       # [E] its diagonal pitch
-rail_size_m = 0.4         # [E] rail box on the corner leg, not measurable
-rail_offset_m = 0.2       # [E] rail axis outside the face line: the rails hug the corner
-hinge_column_m = 0.5      # [E] vertical hinge pin column between the collars
+rail_size_m = 0.4         # [E] rail box let into the corner leg, not measurable
+roller_size_m = 0.6       # [E] roller housing at a rail, not resolved on the photos (user 2026-10-31: 6 points)
+hinge_column_m = 1.4      # [E] rotary hinge column on the common axis, heavier than the chords: the vertical column of crop_rail_colleen
 drum_gap_m = 0.6          # [E] gap between the carriage top and the sheave block
 top_z_m = 1.0             # [E] frame top above the deck plane, NSF 2026-05
-beam_m = 1.0              # [E] outrigger from the hinge column to the collar, ~1 m box beams on the carriage photo 2025-12
-hinge_y_m = 5.8   # [E] hinge columns on the physics pivots 5.8 m = arm_closed_gap / 2 + arm_width / 2 (the real corner hinges read 6.75 m: not used); the tower corner lies 1.2 m across the catch line, the hinges stay on the physics points
-actuator_anchor_x_m = 0.8   # [E] fixed end on the carriage frame plane, NSF 2026-05 (hinge / actuator pylon at the root)
-actuator_anchor_in_m = 1.2  # [E] inboard of the hinge line: the white drum sits on the hinge pylon, NSF 2026-05 / CRL05690
-actuator_anchor_depth_m = 6.0  # [E] below the deck plane: the drum at mid height between the collars
-actuator_lug_x_m = 3.0      # [E] lug on the arm's inclined root column, along the arm
-actuator_lug_out_m = 1.6    # [E] on the outer root column's line at this depth
-actuator_lug_depth_m = 8.6  # [E] below the deck plane: on the column's line (bend 5.2 m to foot 17 m)
+actuator_anchor_x_m = 2.0   # [E] drum in front of the hinge column, crop_rail_colleen
+actuator_anchor_y_m = 1.2   # [E] one drum per arm beside the axis (the photo shows one, the other hidden)
+actuator_anchor_depth_m = 3.0  # [E] +-1 below the deck plane: the drum high under the upper collar, crop_rail_colleen
+actuator_lug_depth_m = 3.5  # [E] +-1 lug at the top of the outer root column: the rod runs about level, crop_rail_colleen
 actuator_barrel_m = 0.5     # [E] ~20 px at 40.6 px/m: electromechanical (screw) actuator, NSF 2026-05, not hydraulic
 actuator_rod_m = 0.3        # [E] same view
 actuator_barrel_length_m = 2.4  # [E] fixed length of the barrel, the rod takes the rest
@@ -236,7 +226,7 @@ drum_diameter_m = 3.8     # [E] +-0.4 m sheave block, carriage photo 2025-12 wit
 drum_width_m = 2.5        # [E] same photo, cheeks NSF 2026-03
 cable_count = 4           # [E] the photo shows 8+ thin cables; 4 at the size that reads
 cable_size_m = 0.16       # [E] ~6 px at 40.6 px/m
-cable_spacing_m = 0.3     # [E] the cables hang side by side in one bundle at the corner, CRL05690 (<= 0.5 m over the rail, test)
+cable_spacing_m = 0.16    # [E] one tight bundle on the hinge axis (0.3 m test); the photo shows two groups, see launch-structures.md
 
 [qd_arm]                  # THE ship QD arm (one arm: measurements "Arm research", no separate upper arm exists)
 deck_m = 81.3             # [E] +-3 m tip deck: Ship 42 y 445 at 6.4 px/m gave 86.8 with the 20 m deck; the ship stands 5.5 m lower on the 14.5 m ring, so does its QD station

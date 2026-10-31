@@ -22,7 +22,6 @@ TEST_CASE("Launch sites load with their catch tower", "[config]") {
     CHECK_THAT(t.plan_yaw_rad, WithinAbs(37.4 * constants::deg_to_rad, 1e-12));
     CHECK_THAT(t.distance_m, WithinAbs(31.7, 1e-12));
     CHECK_THAT(t.width_m, WithinAbs(13.3, 1e-12));
-    CHECK_THAT(t.hinge_distance_m, WithinAbs(22.3, 1e-12));
     CHECK(t.catch_height_m > t.mount_height_m);
     CHECK(t.arm_closed_gap_m > 9.0);  // wider than the 9 m booster hull
     CHECK(t.mount_inner_radius_m < t.mount_outer_radius_m);
@@ -32,7 +31,7 @@ TEST_CASE("Launch sites load with their catch tower", "[config]") {
     CHECK_THAT(site.sea->shoreline_distance_m, WithinAbs(765.0, 1e-12));  // 3DEP grid, from the measured ring
     CHECK_THAT(t.mount_height_m, WithinAbs(14.5, 1e-12));
     CHECK_THAT(t.catch_height_m, WithinAbs(133.0, 1e-12));
-    CHECK_THAT(t.arm_length_m, WithinAbs(25.9, 1e-12));
+    CHECK_THAT(t.arm_length_m, WithinAbs(25.98, 1e-12));
     CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "ksc_lc39a").tower.has_value());
     CHECK_THROWS_AS(config::load_launch_site(STARSIM_CONFIG_DIR, "nowhere"), config::ConfigError);
 }

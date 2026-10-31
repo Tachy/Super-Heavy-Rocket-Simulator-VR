@@ -237,6 +237,6 @@ func _geometry() -> Dictionary:
 		"tower_center_m": centre, "tower_size_m": Vector3(13.3, 13.3, 146.0),
 		"mount_height_m": 14.5, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_plus_m": toward * 22.3 + across * 5.8 + up * 133.0,
-		"hinge_minus_m": toward * 22.3 - across * 5.8 + up * 133.0,
+		"hinge_pivot_m": toward * 22.378 - across * 1.2436 + up * 133.0,
+		"arm_line_offset_plus_m": 5.8 + 1.2436, "arm_line_offset_minus_m": 5.8 - 1.2436,
 	}

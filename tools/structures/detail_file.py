@@ -11,13 +11,13 @@ from pathlib import Path
 
 PROFILE_KINDS = ("h_beam", "tube", "angle", "box")
 SECTION_KEYS = ("height_m", "face_width_m", "pitch_m", "pattern", "leg_profile", "brace_profile")
-CHOPSTICK_KEYS = ("length_m", "depth_m", "end_depth_m", "knee_depth_m", "foot_depth_m", "root_kink_x_m", "bend_out_m",
+CHOPSTICK_KEYS = ("length_m", "depth_m", "end_depth_m", "foot_depth_m", "root_kink_x_m", "bend_out_m",
                   "leg_end_x_m", "connector_end_x_m", "leg_offset_m", "bearing_start_x_m", "bearing_tube_m",
                   "plate_thickness_m", "plate_height_m", "plate_end_x_m", "supply_line_m", "inner_face_y_m",
                   "chord_profile", "brace_profile", "thin_profile")
-CARRIAGE_KEYS = ("collar_gap_m", "collar_chord_m", "truss_depth_m", "truss_panel_m", "rail_size_m", "rail_offset_m", "hinge_column_m", "platform_width_m", "rail_height_m", "rail_post_pitch_m", "brace_drop_m", "beam_m", "top_z_m", "hinge_y_m", "drum_diameter_m", "drum_gap_m", "cable_count", "cable_size_m",
-                 "actuator_anchor_x_m", "actuator_anchor_in_m", "actuator_anchor_depth_m", "actuator_lug_x_m",
-                 "actuator_lug_out_m", "actuator_lug_depth_m", "actuator_barrel_m", "actuator_rod_m",
+CARRIAGE_KEYS = ("collar_gap_m", "collar_chord_m", "truss_depth_m", "truss_panel_m", "rail_size_m", "roller_size_m", "hinge_column_m", "platform_width_m", "rail_height_m", "rail_post_pitch_m", "brace_drop_m", "top_z_m", "drum_diameter_m", "drum_gap_m", "cable_count", "cable_size_m",
+                 "actuator_anchor_x_m", "actuator_anchor_y_m", "actuator_anchor_depth_m",
+                 "actuator_lug_depth_m", "actuator_barrel_m", "actuator_rod_m",
                  "actuator_barrel_length_m")
 QD_ARM_KEYS = ("deck_m", "head_gap_m", "root_beyond_m", "root_length_m", "root_width_m", "tip_width_m", "foot_depth_m")
 TOWER_KEYS = ("height_m", "lattice_height_m", "sections", "floors", "deck", "core", "plinth", "cladding", "stairs",
@@ -76,7 +76,7 @@ def plan_yaw_deg(sites_file=SITES_FILE, site_id=SITE_ID) -> float:
     raise DetailFileError(f"{sites_file}: no site '{site_id}'")
 
 
-SITE_TOWER_KEYS = ("azimuth_deg", "distance_m", "width_m", "plan_yaw_deg", "hinge_distance_m", "arm_length_m", "arm_closed_gap_m",
+SITE_TOWER_KEYS = ("azimuth_deg", "distance_m", "width_m", "plan_yaw_deg", "arm_length_m", "arm_closed_gap_m",
                    "arm_width_m", "catch_height_m", "carriage_stroke_m", "arm_open_deg")
 
 

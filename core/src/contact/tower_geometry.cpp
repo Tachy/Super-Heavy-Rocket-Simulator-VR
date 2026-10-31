@@ -36,10 +36,15 @@ Annulus TowerGeometry::mount() const {
     return {config_.mount_inner_radius_m, config_.mount_outer_radius_m, config_.mount_height_m};
 }
 
-Vec3 TowerGeometry::hinge(int side) const {
+Vec3 TowerGeometry::hinge_pivot() const {
+    const auto box = tower_box();
+    const Vec3 corner = box.center - math::column(box.axes, 0) * box.half_extents.x - math::column(box.axes, 1) * box.half_extents.y;
+    return {corner.x, corner.y, config_.catch_height_m};
+}
+
+double TowerGeometry::arm_line_offset_m(int side) const {
     const double lateral = 0.5 * config_.arm_closed_gap_m + 0.5 * config_.arm_width_m;
-    return toward_tower_ * config_.hinge_distance_m + across_ * (side * lateral) +
-           up * config_.catch_height_m;
+    return lateral - side * dot(hinge_pivot(), across_);
 }
 
 Vec3 TowerGeometry::arm_direction(int side, double opening_rad) const {
@@ -48,9 +53,10 @@ Vec3 TowerGeometry::arm_direction(int side, double opening_rad) const {
 
 OrientedBox TowerGeometry::arm_box(int side, double opening_rad, double carriage_offset_m) const {
     const Vec3 u = arm_direction(side, opening_rad);
-    const Vec3 center = hinge(side) + u * (0.5 * config_.arm_length_m) +
+    const Vec3 v = cross(up, u);  // -across at the closed pose
+    const Vec3 center = hinge_pivot() + u * (0.5 * config_.arm_length_m) - v * (side * arm_line_offset_m(side)) +
                         up * (carriage_offset_m - 0.5 * config_.arm_thickness_m);
-    return {center, from_columns(u, cross(up, u), up),
+    return {center, from_columns(u, v, up),
             {0.5 * config_.arm_length_m, 0.5 * config_.arm_width_m, 0.5 * config_.arm_thickness_m}};
 }
 

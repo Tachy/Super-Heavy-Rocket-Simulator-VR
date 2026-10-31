@@ -96,7 +96,7 @@ std::array<contact::ArmContactState, 2> CatchTowerSim::arm_states() const {
         const int side = i == 0 ? 1 : -1;
         auto& st = states[static_cast<size_t>(i)];
         st.box = geometry_.arm_box(side, arms_.opening_rad(), arms_.carriage_offset_m());
-        st.hinge_m = geometry_.hinge(side) + Vec3{0.0, 0.0, arms_.carriage_offset_m()};
+        st.hinge_m = geometry_.hinge_pivot() + Vec3{0.0, 0.0, arms_.carriage_offset_m()};
         st.yaw_rate_radps = -side * arms_.opening_rate_rad_s();  // arm direction turns by -side * dopening/dt
         st.carriage_velocity_mps = arms_.carriage_velocity_mps();
         st.outward = geometry_.across() * side;

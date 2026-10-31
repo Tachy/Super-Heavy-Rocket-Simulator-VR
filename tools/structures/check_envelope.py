@@ -57,14 +57,15 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
     within("Mount deck", detail["mount"]["deck_height_m"], phys["mount_height_m"], LENGTH_TOL_M)
     c = detail["chopstick"]
     half_gap = 0.5 * phys["arm_closed_gap_m"]
-    pivot = half_gap + 0.5 * phys["arm_width_m"]
     # What the hull touches: the bearing plate at the closed pose; deck top on the pivot plane is Z = 0 by the layout.
     members = mechazilla_layout.chopstick(detail)
     plates = [m for m in members if m[0] == "bearing"]
-    for p in plates[0][3], plates[0][4]:  # both ends of the drawn plate: the flat face is parallel and on the gap
-        within("Arm bearing face at the closed pose", pivot - (p[1] + 0.5 * plates[0][2]), half_gap, SURFACE_TOL_M)
+    across = mechazilla_layout.pivot_site(phys)[1]
+    for side in (1.0, -1.0):
+        plate = [m for m in mechazilla_layout.chopstick(detail, side) if m[0] == "bearing"][0]
+        for p in plate[3], plate[4]:  # both ends of the drawn plate: the flat face is parallel and on the gap
+            within("Arm bearing face at the closed pose", side * across - (p[1] + 0.5 * plate[2]), half_gap, SURFACE_TOL_M)
     within("Arm length", c["length_m"], phys["arm_length_m"], LENGTH_TOL_M, "Arm length")
-    within("Hinge position", detail["carriage"]["hinge_y_m"], pivot, LENGTH_TOL_M, "Hinge position")
     within("Tower width", detail["tower"]["sections"][0]["face_width_m"], phys["width_m"], LENGTH_TOL_M, "Tower face, height")
     within("Tower height", detail["tower"]["roof"]["block_base_m"] + detail["tower"]["roof"]["block_height_m"],
            phys["height_m"], LENGTH_TOL_M, "Tower face, height")
@@ -78,7 +79,7 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
         failures.append(f"Leg spacing: outer width {outer:.2f} m exceeds the physics box {phys['width_m']:.2f} m")
     within("Leg spacing", outer - leg, MEASURED_LEG_CENTRES_M, LEG_CENTRES_TOL_M, "Leg spacing")
     # QD arm: the head must not reach into the hull; a gap means it is static and not attached (no physics state).
-    hinge_to_axis = phys["hinge_distance_m"]
+    hinge_to_axis = mechazilla_layout.pivot_site(phys)[0]
     geo = mechazilla_layout.qd_geometry(detail)
     gap = geo["distance_m"] - geo["reach_m"] - HULL_RADIUS_M
     if gap < 0.0:

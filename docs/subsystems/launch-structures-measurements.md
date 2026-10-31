@@ -189,6 +189,9 @@ the arm ends in `f7_3060` (fins or arm pads), which two fins are the catch fins.
 Crops with grid: `screenshots/mechazilla/webcast/catch/v3_padb_arms_fins_grid.png`, `v3_f12_1804_fins_grid.png`,
 `v3_stl_guide_top.png`, `v2_f7_3060_grid.png`.
 
+## Common hinge axis and root (crop_rail_colleen, 2026-10-31; one oblique photo, no pixel solve)
+Deck line 31 px/m along the arm (810 px = 26 m). Depth deck to lower chord: 460 px at the foot, 275 px at 41 % of the span, 160 px at the tip: ratio to the foot 0.60, 0.35 (+-0.1). Foot on the column under the white drum, in the image at the height of the lower collar's corner: the foot belongs to the hinge. Foot 15 +-2 m (side view 2025-08 17 +-2), collar distance 15 +-3 m (plate courses 13 +-3); both moved inside their errors to meet. Drum about 15 % of the collar distance below the upper collar, rod about level. Tip box 130 px, about 4 m. Hanging strut 200 px, about 4.5 m. Rail strips about 1 m inboard of the corner edge on both visible corners; two cable groups about 1.5 m apart beside the block; block and drum about 2 +-1 m outside the corner; rollers not resolved.
+
 ## Arm member map (user ruling and re-check, 2026-10-31)
 All [E] by eye from photos, no top view of a Pad 2 arm exists in the sources; schematic `screenshots/pad-b/fine/arm_members.png`.
 Readings: `teslaoracle_padb_chopsticks_2025-03` (both arms from below: near arm's outer side, far arm's inner side), RGV aerial (user image, plan),

@@ -40,3 +40,6 @@ Site id `starbase_olp1`, display name "Starbase OLP-1" (the OLP-1 imagery positi
 
 ## Hardstand triangle (2026-10-31, superseded the same day)
 Triangle from the south tip -36 E / -74.6 N (+-8 m) and two edges (SW bearing 167 deg 218 m, SE bearing 63 deg 203 m), keys `hardstand_tip_*`, `hardstand_sw_*`, `hardstand_se_*`, cut in Y bands (`_x_range`, convex only). Replaced by the user's sketched 20-point outline `hardstand_outline_m`.
+
+## Two hinges on outriggers (until 2026-10-31)
+Physics: `hinge_distance_m` 22.3 and one hinge per arm at +-5.8 m across, each arm turning about its own hinge; arm 25.9 m. Drawn: hinge columns 3.7 / 4.3 m in front of the faces, tied to the collars by outriggers (`hinge_y_m`, `beam_m`); root 35 deg, lower chord with a knee (11 m at 21 %, 8.6 m at 35 %), knee strut, foot 17 m at the arm's line, collar distance 13 m, pushers on the tip, rails 0.2 m outside the faces, cables from the sheave block's side at 0.3 m pitch. Replaced by the user's ruling of one axis on the corner.

@@ -4,7 +4,7 @@ State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.
 carriage, both chopsticks, QD arm; square mount, trench, terrain mask; lights); task 5 (acceptance) open. The prototype plan
 (`2026-10-31-pad-b-prototype.md`) built the hybrid pipeline. Spec: `docs/superpowers/specs/2026-10-28-pad-b-model-design.md`.
 The lattice, carriage, both chopsticks and the QD arm render at `starbase_pad2`; the physics stands on the measured Pad B since the physics plan's Tasks 1-3
-(`docs/superpowers/plans/2026-10-31-pad-b-physics-alignment.md`): ring 25.99677 N, 97.15804 W, deck 14.5 m, tower azimuth 349, 31.7 m, box yaw 37.4, hinges 22.3 m, arm 25.9 m (3.6 m past the axis: margin, user 2026-10-31), catch 133 m, pins 63.0 at 0 / 180. Open differences: table "Physics deviations" below.
+(`docs/superpowers/plans/2026-10-31-pad-b-physics-alignment.md`): ring 25.99677 N, 97.15804 W, deck 14.5 m, tower azimuth 349, 31.7 m, box yaw 37.4, one hinge axis on the box corner toward the mount (22.38 m along the line, 1.24 m across), arm 25.98 m (3.6 m past the axis: margin, user 2026-10-31), catch 133 m, pins 63.0 at 0 / 180. Open differences: table "Physics deviations" below.
 Sea: `[site.sea]` 90 deg, 765 m [D]: first water along that bearing in the 3DEP grid, the nearest shore of bearings 60-130. An abort first checks from the live state whether the water is in reach (`gnc::estimate_sea_reach`, a lower bound, x `sea_reach_margin` 1.5). A booster reaches it from 1500 and 800 m with 5.2 and 4.1 t left; from 400 m it gives the water up and comes down soft on land (500 m was an estimate from the old position).
 Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catch_roll_reference(CatchTarget, ...)`); a ship keeps the nearer of its two rolls.
 
@@ -21,23 +21,18 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   (courses of 5.35 m, two plates across, 0.1 m seams), roof deck 144 m with a louvred 8 x 8 x 7 m block (139.9-146.9 m) and
   a railing (silhouette top 146.9 m, the physics box is 146 m), zig-zag stair flights on one side face and two cable trays
   on the back face, dark deck slabs 0.4 m at every floor, column bundle 3.6 m.
-- Chopstick (user ruling 2026-10-31; member map: measurements "Arm member map"): `mechazilla_layout.chopstick`, a U of large
-  round black tubes only (4.3k triangles, 24 truss members incl. 3 caps, table `ARM_MEMBERS`), 25.9 m = the physics arm (26 +-2 m measured). Plan: root out from the
-  hinge to the bend (5.2 m, 3.6 m outward), leg back in 5.6 deg to its capped end (19.5 m), connector to the bearing tube
-  (23 m; this is what was once read as a "28 deg tip bend"), inner root tube from the hinge to the bearing tube's start (13 m).
+- Common hinge axis (user ruling 2026-10-31): both arms turn about ONE vertical axis on the physics box's corner toward the mount, `TowerGeometry::hinge_pivot` (22.378 m along the line, 1.244 m across, from `distance_m`, `width_m`, `plan_yaw_deg`; `layout.pivot_site` is the same formula). The arm box is the closed arm turned rigidly about it: each side keeps a fixed offset to its line (`arm_line_offset_m`: 7.04 m +across, 4.56 m -across; they differ by 2 x 1.24 m), at opening 0 both faces are parallel to the line, 9.6 m apart, centred on the catch axis. Standby stays 6.5 deg: hull clear 2.83 m per side. No `hinge_distance_m`, no per-side hinge.
+- Chopstick (member map: measurements "Arm member map"): `mechazilla_layout.chopstick(detail, side)` in two models (`chopstick.gltf`, `chopstick_minus.gltf`: the roots differ, the -across model is mirrored in the view), large
+  round black tubes only (4.1k triangles, 23 truss members incl. 3 caps, table `ARM_MEMBERS`), 25.98 m = the physics arm (26 +-2 m measured). Plan: root out from the
+  common axis to the bend (5.2 m along, 9.4 m off the catch axis: 64 / 57 deg off the arm), leg back in to its capped end (19.5 m), connector to the bearing tube
+  (23 m), inner root tube from the axis to the bearing tube's start (13 m).
   The BEARING PIECE (1.3 m tube, flat 0.15 x 1.4 m plate on its inner side, tan strip on top, contact pad at the axis station) runs
-  along the arm's X: at the core's closed pose (`opening_rad` 0) both faces are parallel and `arm_closed_gap_m` 9.6 apart, centred on
-  the catch axis. One truss plane under the bearing line (not a V): lower chord, 4 posts, 3 diagonals; knee strut, hinge column and two
-  root columns to one foot 17 m down. Thin: at most 3 supply lines; black ladders and probe brace (`fittings`), platform, mast, short
-  pushers, hanging probe. No railing, no deck, no lattice.
-- Carriage (`mechazilla_layout.carriage`, `rails`; frame X toward the pad, Y = -across, origin between the physics hinges): the tower box of the physics
-  (13.3 m, yaw 37.4) is the drawn lattice (face width 13.3 = leg outer width); its corner toward the mount lies 22.4 m along the line and 1.2 m across it. The carriage
-  is drawn on that REAL corner, the hinges stay on the physics points (5.8 m across the line, 22.3 m): the hinge columns stand 3.7 and 4.3 m in front of the faces and
-  are tied to the collars by outriggers (this is the visible offset between corner and hinge). Two collars (chords on rails `rail_offset_m` 0.2 outside the faces), each
-  wrapping the corner and both side faces to the neighbouring corners (the 4 chord members end within 0.3 m of the rails and leg lines); upper = walkway with railing, lower =
-  truss 1.8 m deep, collar distance 13.0 +-3 m (measured on crop_rail_colleen against the 5.35 m plate courses: ~600 px at ~46 px/m); three static corner rails
-  (`rails.gltf`, plinth top to lattice top); white actuator drums on the hinges; a 3.8 m sheave block outside the corner whose tangent is the rail line, four hoist cables
-  in one bundle (0.3 m pitch) from it straight up at the corner (`TowerView.corner_rail_site`, `_cable_*`). Actuators as before (`actuator_*` keys, anchor at the drum).
+  along the arm's X. One truss plane under the inner root and bearing line (not a V): lower chord from the foot rising to the tip (side view a long triangle: 15 m at the foot, 8.6 m at 13 m, 7 m at 22.6 m), 4 posts, 3 diagonals; three thick
+  root columns from the top to one foot on the common axis, 15 m down (the axis itself is the carriage's hinge column). Closed 1.6 m box on the tip (`tip_box_*`), thin hanging probe. Thin: at most 3 supply lines; black ladders and probe brace (`fittings`), platform, mast. No railing, no deck, no lattice.
+- Carriage (`mechazilla_layout.carriage`, `rails`, `rollers`; frame X toward the pad, Y = -across, origin on the common axis): the tower box of the physics
+  (13.3 m, yaw 37.4) is the drawn lattice. One rotary hinge column (1.4 m) on the axis, no outriggers. Two collars: horizontal struts at top and bottom from the axis back along both side faces to the next corners; upper = walkway with railing, lower =
+  truss 1.8 m deep, 15 m below the carriage top (+-3 m; `collar_gap_m`, at the root's foot). The whole carriage runs on 6 roller points (`rollers`, 3 per level) on three corners (the hinge corner and its two neighbours), rails let into these corners (`rails.gltf`, plinth top to lattice top); the rear corner has no carriage rail.
+  White actuator drums beside the axis, one per arm (`actuator_*` keys), rod to a lug at the top of the outer root column, about level. A 3.8 m sheave block outside the corner, its tangent on the axis; four hoist cables in one tight bundle (0.16 m pitch) straight down on the axis onto the hinge's top (`TowerView.hinge_axis_site`, `_cable_*`; statics, user 2026-10-31).
 - QD arm (`mechazilla_layout.qd_geometry`, `qd_arm`): THE ship QD arm, FIXED in height (tip deck 81.3 m = 86.8 - 5.5, the stack stands 5.5 m lower) on the tower's rear
   side: swing axis `root_x_m` / `root_beyond_m` (-3.0 / 2.0 m in the box axes, 31.9 m from the ring axis), heading to the catch axis, reach 26.5 m so that the head's face is 1 m
   off the 4.5 m hull (connected pose, default). Walkway on a deep root truss, shallow tip platform, connector head; a swing drum under the root and a fixed bracket (`bracket` node)
@@ -106,8 +101,8 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
   frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`).
-- `TowerView.build` frees its children first (no duplicates on a rebuild); both arm boxes are chopsticks (the model's +Y points
-  to the axis; the -across arm is mirrored by a negative scale), the pivot is the physics hinge. `update_state` also places the
+- `TowerView.build` frees its children first (no duplicates on a rebuild); both arm boxes are chopsticks (the models' +Y points
+  to the axis; the -across arm is mirrored by a negative scale), both pivots stand on the common axis `hinge_pivot_m`. `update_state` also places the
   carriage (hinge height + offset) and the cables. `render_check --catch_hull=<station>` hangs a static hull with fins in the arms for
   comparisons (`game/tests/catch_pose_hull.gd`, no flight). Test: `game/tests/tower_view_test.gd` (headless; the dummy
   renderer keeps no MultiMesh transforms, so layout is read from `LatticeBuilder.face_members` and the `*_solids`
@@ -147,12 +142,12 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   than the geometry: hard swap of matched tiers and a coverage (alpha-to-coverage) instead; `alpha_scale` 0.85 and the
   colours of the far shader are fitted to the merged tier at 4.5-6.5 km (alpha 1.0 / 1.15 left the far tier up to 2.3 %
   brighter at VR focal length).
-- `tools/structures/tests/test_mechazilla_layout.py`: the bearing faces of both arms built at the closed pose from the PHYSICS hinge (not from the
+- `tools/structures/tests/test_mechazilla_layout.py`: the bearing faces of both arms built at the closed pose from the PHYSICS axis (not from the
   layout's own numbers): bearing faces parallel within 0.5 deg, the physics gap apart, centred on the axis; U plan, member table; closed
   arm's surfaces >= 0.03 m off the hull, pad 0.1 m from it and ending at the arm tip, open frame (no deck, strip <= 0.8 m, top at Z = 0).
-  `tower_view_test`: the pad meshes' centres through the pivots against hinge + pad station (0.05 m), the pad centres 9.8 m apart, the
+  `tower_view_test`: the pad meshes' centres through the pivots against axis + line offset + pad station (0.05 m), the pad centres 9.8 m apart, the
   actuators' ends on the carriage and the lug, length follows the opening. `python tools/structures/check_envelope.py`: inner face on the
-  physics half gap, arm length, hinge, tower width / height, arm top plane, leg outer width, QD head against the hull, drawn structure under the
+  physics half gap, arm length, tower width / height, arm top plane, leg outer width, QD head against the hull, drawn structure under the
   deck against the pin-to-fin distance (vehicle config); a row is listed only when the compared numbers differ (exceptions = table rows).
   Mount deck and azimuth / distance have no drawn number in the detail file (the view reads the physics geometry).
 - `python -m pytest tools/structures/tests -q`: required keys, sections sum to the 139.1 m lattice (139 +-0.2), 26 floors of
@@ -196,15 +191,15 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 ## Physics deviations (what is drawn as measured differs from the physics; input to the physics plan)
 | Part | Drawn now | Physics stays | Why |
 |---|---|---|---|
-| Root of the U | root 35 deg, 6.3 m from the physics hinge (5.8 m off the axis) to the bend 9.4 m off it | photos: 50 +-15 deg, about 10 m, so a real hinge about 2 +-3 m off the centre plane | hinge stays on the physics number; a physics plan moving the hinge needs `arm_closed_gap_m` 9.6 unchanged and opening 0 unchanged |
+| Hinge, root | one axis on the box corner, as the physics; root 64 / 57 deg, 11.8 / 9.6 m to the bend | same axis | photos read the root 50 +-15 deg (within the error) and the drum / block about 2 +-1 m outside the corner (crop_rail_colleen, no pixel solve): user ruling holds the axis on the corner, the sheave block stands outside it |
 | Fins against the arm | drawn pins and deck at the fine build's place until Task 4 | pins at station 63.0 (fin hinge 64.0 - 1.0), azimuths 0 / 180 across the arms, the 90 deg fin away from the tower; fins without contact | the drawn arm's top reaches the 0 / 180 fin plates at a catch: visible, NOT hidden |
 | Tower height | roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 146 m | within the error |
 | QD arm | static at the connected pose, deck 81.3 m, head 1 m off the hull (swing key in the view only) | no state | needs the core's `qd_arm_angle_rad` |
 
 ## Open points
-- QD arm swing over time: needs the core's `qd_arm_angle_rad` state (the view has the key `qd_arm_swing_rad`, default connected). Collar distance 13 +-3 m and the QD root position +-1.5 m are single-photo readings; photo differences of Task 4b: no hoist-cable bundle of 8+, no stairs / grating on the collars, no tower platforms; lamps: masts of the mount banks are drawn (none in the photos), lamp aims now go to the stack.
+- QD arm swing over time: needs the core's `qd_arm_angle_rad` state (the view has the key `qd_arm_swing_rad`, default connected). Collar distance 15 +-3 m (photo reading 13, moved to the root's foot) and the QD root position +-1.5 m are single-photo readings; photo differences of Task 4b: one hoist-cable bundle of 4 on the axis where crop_rail_colleen shows two groups about 1.5 m apart, rollers not resolved on the photos, no stairs / grating on the collars, no tower platforms; lamps: masts of the mount banks are drawn (none in the photos), lamp aims now go to the stack.
 - Arm: root bend and width from weak
-  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 4.3k triangles per arm, far tier unchanged (cost:
+  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 4.1k triangles per arm, far tier unchanged (cost:
   task 5); shock absorbers and the fin's station undecided.
 - Mount render vs DSC06000 / DSC06022 / CRL05690 (`screenshots/pad-b-plan/4a_*.png`, Task 4a): the annex lacks its stepped courses and recessed door bays, vent plates and louvre boxes are plain boxes, no tunnel-floor surface detail (ribbed dark steel), no inner wall panels in the round opening, the ramp walls are drawn without the photo's plating; water in the underpass: user note 2026-10-31, probably let in and evaporating at ignition, not verified, not drawn (the floor is closed for it). Hardstand edges of the annex flanks lie under the plate (Task 5).
 - Earlier render vs the frames (`sf_*.png`, before Task 4a): mount taller and steeper than the photos (the 20 m deck), plates cleaner and more regular, hoods without

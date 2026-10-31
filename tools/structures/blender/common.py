@@ -86,7 +86,7 @@ def site_plan_yaw_deg(sites_path, site_id=SITE_ID) -> float:
     raise KeyError(f"{sites_path}: no plan_yaw_deg for site {site_id}")
 
 
-SITE_TOWER_KEYS = ("azimuth_deg", "distance_m", "width_m", "plan_yaw_deg", "hinge_distance_m", "arm_length_m", "arm_closed_gap_m",
+SITE_TOWER_KEYS = ("azimuth_deg", "distance_m", "width_m", "plan_yaw_deg", "arm_length_m", "arm_closed_gap_m",
                    "arm_width_m", "catch_height_m", "carriage_stroke_m", "arm_open_deg")
 
 

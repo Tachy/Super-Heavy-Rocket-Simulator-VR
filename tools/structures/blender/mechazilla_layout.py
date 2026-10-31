@@ -5,11 +5,11 @@ for the clearance and parallel bearing cases (Blender's Python 3.10 and the tool
 
 A member is (node, kind, size_m, p0, p1, size_y_m) in the model frame; size_y_m only for 'rect'. Node names are the glTF
 mesh nodes, one material each.
-Chopstick frame: hinge (physics pivot) at the origin, the bearing piece along +X, +Y toward the catch axis (the arm
-closes that way; the game mirrors the -across arm), strip top Z = 0 (the plane the catch pins land on).
-Carriage frame (also the rails'): X toward the pad, Y = -across, Z up, origin on the line to the catch axis at the hinge
-distance, between the two physics hinges, in the deck plane (carriage offset 0). The tower box (physics `[site.tower]`, yaw
-`plan_yaw_deg`) is drawn on it: its corner toward the mount lies 1.2 m across the line, the hinges stay on the physics points.
+Chopstick frame: the common hinge axis at the origin, the bearing piece along +X, +Y toward the catch axis (the game mirrors
+the -across arm), strip top Z = 0 (the plane the catch pins land on). The corner lies off the catch line, so the two arms'
+roots differ: `chopstick(detail, side)`, everything beyond the root is the same at `arm_line_offset`.
+Carriage frame (also the rails'): X toward the pad, Y = -across, Z up, origin on the common hinge axis (the tower box's corner
+toward the mount, physics `[site.tower]`) in the deck plane (carriage offset 0).
 QD arm frame: X along the arm toward the catch axis, Y left of it, Z up, origin on the swing axis at the tip deck's height.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 
 # Member map of one arm, from the photos: launch-structures-measurements.md "Arm member map". Large tubes only.
-ARM_MEMBERS = {"top": 5, "caps": 3, "lower_chord": 2, "knee_strut": 1, "root_columns": 3, "ties": 2, "posts": 4,
+ARM_MEMBERS = {"top": 5, "caps": 3, "lower_chord": 2, "root_columns": 3, "ties": 2, "posts": 4,
                "diagonals": 3, "probe": 1}
 SUPPLY_LINES = 3  # thin lines that read as supply lines, never as structure
 SMALLEST_STRUCTURE_M = 0.4  # the hanging probe; every other member is at least 0.8 m
@@ -28,24 +28,41 @@ def _member(node, kind, size, p0, p1, size_y=None):
     return (node, kind, size, tuple(p0), tuple(p1), size_y)
 
 
+def pivot_site(t: dict) -> tuple:
+    """The common hinge axis in (along the pad -> tower line, across): the physics box's corner toward the mount, as core
+    TowerGeometry::hinge_pivot. `t` is a `[site.tower]` table."""
+    yaw = math.radians(t["plan_yaw_deg"])
+    c, s, half = math.cos(yaw), math.sin(yaw), 0.5 * t["width_m"]
+    return (t["distance_m"] - half * (c + s), -half * (c - s))
+
+
+def arm_line_offset(t: dict, side: float) -> float:
+    """From the axis outward to the arm's centre line, arm `side` (+1 +across, -1 -across), as core arm_line_offset_m."""
+    return 0.5 * t["arm_closed_gap_m"] + 0.5 * t["arm_width_m"] - side * pivot_site(t)[1]
+
+
+def _line_y(detail: dict, side: float) -> float:
+    return -arm_line_offset(detail["site_tower"], side)
+
+
 def bearing_tube_y(c: dict) -> float:
-    """Axis of the bearing tube: the flat plate on its inner side has its face on `inner_face_y_m`."""
+    """Axis of the bearing tube against the arm's line: the flat plate on its inner side has its face on `inner_face_y_m`."""
     return c["inner_face_y_m"] - c["plate_thickness_m"] - 0.5 * c["bearing_tube_m"]
 
 
-def top_plan(detail: dict) -> list:
-    """Plan polyline (x, y) of the U's outer top tube: hinge, bend, end of the leg, connector's end on the bearing tube."""
+def top_plan(detail: dict, side: float = 1.0) -> list:
+    """Plan polyline (x, y) of the U's outer top tube: axis, bend, end of the leg, connector's end on the bearing tube."""
     c = detail["chopstick"]
-    leg_y = bearing_tube_y(c) - c["leg_offset_m"]
-    return [(0.0, 0.0), (c["root_kink_x_m"], -c["bend_out_m"]), (c["leg_end_x_m"], leg_y),
-            (c["connector_end_x_m"], bearing_tube_y(c))]
+    y_line = _line_y(detail, side)
+    y_b = y_line + bearing_tube_y(c)
+    return [(0.0, 0.0), (c["root_kink_x_m"], y_line - c["bend_out_m"]), (c["leg_end_x_m"], y_b - c["leg_offset_m"]),
+            (c["connector_end_x_m"], y_b)]
 
 
 def lower_chord_z(c: dict, x: float) -> float:
-    """Lower chord axis: rises from the knee to the kink (the 'inclined lower chord'), then gently to its tip end."""
-    length = c["length_m"]
-    pts = [(c["knee_frac"] * length, -c["knee_depth_m"]), (c["kink_frac"] * length, -c["depth_m"]),
-           (c["lower_end_frac"] * length, -c["end_depth_m"])]
+    """Lower chord axis: rises from the root's foot to the start of the bearing piece, then gently to its tip end."""
+    pts = [(0.0, -c["foot_depth_m"]), (c["bearing_start_x_m"], -c["depth_m"]),
+           (c["lower_end_frac"] * c["length_m"], -c["end_depth_m"])]
     for (x0, z0), (x1, z1) in zip(pts, pts[1:]):
         if x <= x1:
             return z0 + (z1 - z0) * (x - x0) / (x1 - x0)
@@ -57,30 +74,31 @@ def _on_leg(plan: list, x: float) -> float:
     return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
 
 
-def chopstick(detail: dict) -> list:
+def chopstick(detail: dict, side: float = 1.0) -> list:
     c, prof = detail["chopstick"], detail["profiles"]
     chord, brace, thin = (prof[c["chord_profile"]]["size_m"], prof[c["brace_profile"]]["size_m"],
                           prof[c["thin_profile"]]["size_m"])
     length, bearing = c["length_m"], c["bearing_tube_m"]
-    y_b, x_b = bearing_tube_y(c), c["bearing_start_x_m"]
+    y_line = _line_y(detail, side)
+    y_b, x_b = y_line + bearing_tube_y(c), c["bearing_start_x_m"]
     z_top = -0.5 * bearing - c["strip_thickness_m"] + 0.05  # the strip lies on the bearing tube (0.05 m weld), top Z = 0
-    plan = top_plan(detail)
-    x_knee, x_kink, x_end = c["knee_frac"] * length, c["kink_frac"] * length, c["lower_end_frac"] * length
+    plan = top_plan(detail, side)
+    x_end = c["lower_end_frac"] * length
     ms = []
 
     def tube(node, size, p0, p1):
         ms.append(_member(node, "tube", size, p0, p1))
 
-    def inner_y(x):  # the truss plane's top: inner root tube, then the bearing tube
+    def inner_y(x):  # the truss plane in plan: from the axis along the inner root tube, then the bearing tube
         return y_b * min(x, x_b) / x_b
 
     def top(x, y):
         return (x, y, z_top)
 
     def low(x):
-        return (x, y_b, lower_chord_z(c, x))
+        return (x, inner_y(x), lower_chord_z(c, x))
 
-    # The U in plan: root out from the hinge, leg back in, connector to the bearing tube; inner root tube to the bearing
+    # The U in plan: root out from the common axis, leg back in, connector to the bearing tube; inner root tube to the bearing
     # tube's start; the bearing tube runs along the arm's X, so both are parallel at the core's closed pose (opening 0).
     for a, b in zip(plan, plan[1:]):
         tube("truss", chord, top(*a), top(*b))
@@ -92,9 +110,10 @@ def chopstick(detail: dict) -> list:
          top(x1 + 0.1 * (x1 - x0) / run, y1 + 0.1 * (y1 - y0) / run))
     tube("truss", bearing * c["cap_scale"], top(length - 0.1, y_b), top(length + 0.1, y_b))
 
-    # One truss plane under the bearing line: lower chord, 4 posts, 3 diagonals falling outward (not a V section).
-    tube("truss", chord, low(x_knee), low(x_kink))
-    tube("truss", chord, low(x_kink), low(x_end))
+    # One truss plane under the inner root and bearing line: lower chord from the foot (side view a long triangle), 4 posts,
+    # 3 diagonals.
+    tube("truss", chord, low(0.0), low(x_b))
+    tube("truss", chord, low(x_b), low(x_end))
     tube("truss", chord * c["cap_scale"], low(x_end - 0.1), low(x_end + 0.1))
     posts = [f * length for f in POST_FRACTIONS]
     for x in posts:
@@ -104,15 +123,15 @@ def chopstick(detail: dict) -> list:
     for x, y_outer in ((c["root_kink_x_m"], plan[1][1]), (x_b, _on_leg(plan, x_b))):  # the two ties across the top
         tube("truss", brace, top(x, y_outer), top(x, inner_y(x)))
 
-    # Root: hinge column, outer and inner root columns and the knee strut, all to one foot.
-    foot = (c["column_x_m"], c["foot_y_m"], -c["foot_depth_m"])
-    tube("truss", c["column_size_m"], top(c["column_x_m"], 0.0), foot)
+    # Root: three thick columns from the top to one foot on the common axis (the axis itself is the carriage's hinge column).
+    foot = (0.0, 0.0, -c["foot_depth_m"])
+    x_r = c["root_kink_x_m"]
     tube("truss", chord, top(*plan[1]), foot)
-    tube("truss", chord, top(c["root_kink_x_m"], inner_y(c["root_kink_x_m"])), foot)
-    tube("truss", chord, low(x_knee), foot)
+    tube("truss", chord, top(x_r, 0.5 * (plan[1][1] + inner_y(x_r))), foot)
+    tube("truss", chord, top(x_r, inner_y(x_r)), foot)
 
     # Flat bearing plate on the inner side of the bearing tube, tan strip on top of it, contact pad on the plate.
-    y_plate = c["inner_face_y_m"] - 0.5 * c["plate_thickness_m"]
+    y_plate = y_line + c["inner_face_y_m"] - 0.5 * c["plate_thickness_m"]
     z_plate = -c["strip_thickness_m"] - 0.5 * c["plate_height_m"]
     ms.append(_member("bearing", "rect", c["plate_thickness_m"], (x_b + c["plate_inset_m"], y_plate, z_plate),
                       (c["plate_end_x_m"], y_plate, z_plate), c["plate_height_m"]))
@@ -120,18 +139,15 @@ def chopstick(detail: dict) -> list:
     ms.append(_member("strip", "rect", c["strip_width_m"], (x_b, y_b, z_strip), (c["plate_end_x_m"], y_b, z_strip),
                       c["strip_thickness_m"]))
     pad = c["pad_length_m"], c["pad_width_m"], c["pad_height_m"]
-    x_pad, y_pad = c["pad_x_m"], c["inner_face_y_m"] + c["pad_proud_m"] - pad[1] / 2.0
+    x_pad, y_pad = c["pad_x_m"], y_line + c["inner_face_y_m"] + c["pad_proud_m"] - pad[1] / 2.0
     z_pad = -c["pad_top_depth_m"] - pad[2] / 2.0
     ms.append(_member("pad", "rect", pad[1], (x_pad - pad[0] / 2.0, y_pad, z_pad),
                       (x_pad + pad[0] / 2.0, y_pad, z_pad), pad[2]))
 
-    # Telescopic pushers: short cylinders on top of the tip [S NSF 2025-08], in two stages.
-    x0, x1 = c["pusher_start_x_m"], c["pusher_end_x_m"]
-    z = c["pusher_size_m"] / 2.0
-    for dy in (0.0, c["pusher_spacing_m"]):
-        y0 = y_b - dy
-        tube("hardware", c["pusher_size_m"], (x0, y0, z), (0.5 * (x0 + x1), y0, z))
-        tube("hardware", c["pusher_size_m"] * 0.6, (0.5 * (x0 + x1), y0, z), (x1, y0, z))
+    # Closed box on the tip, on the bearing tube's line, its top on the arm's plane (crop_rail_colleen).
+    box = c["tip_box_m"]
+    ms.append(_member("fittings", "rect", box, (c["tip_box_start_x_m"], c["tip_box_y_m"] + y_line, -0.5 * box),
+                      (c["tip_box_end_x_m"], c["tip_box_y_m"] + y_line, -0.5 * box), box))
 
     # Stabilizer arm: a hanging probe at the lower chord's end and its long thin brace [S NSF 2025-08 "stabilizer arms"].
     x_probe = x_end - 0.4
@@ -145,7 +161,7 @@ def chopstick(detail: dict) -> list:
     d = c["supply_line_m"]
     tube("hardware", d, top(plan[1][0], plan[1][1] - 0.6), top(plan[2][0], plan[2][1] - 0.6))
     tube("hardware", d, (x_b, y_b - 0.7, z_top - 0.5), (length - 0.5, y_b - 0.7, z_top - 0.5))
-    tube("hardware", d, (x_kink, y_b - 0.6, lower_chord_z(c, x_kink) + 0.3), (x_end, y_b - 0.6, -c["end_depth_m"] + 0.3))
+    tube("hardware", d, (x_b, y_b - 0.6, lower_chord_z(c, x_b) + 0.3), (x_end, y_b - 0.6, -c["end_depth_m"] + 0.3))
 
     # Two ladders from the leg to the lower chord as one flat black panel each, a platform on the leg's outer side, a mast.
     for frac in c["ladder_a_frac"], c["ladder_b_frac"]:
@@ -170,22 +186,22 @@ def _unit_axes(detail: dict):
 
 
 def tower_corner(detail: dict) -> dict:
-    """The box corner toward the mount (C) in the carriage frame, the face axes and the face width W (physics box)."""
-    t = detail["site_tower"]
+    """The box corner toward the mount (the frame's origin), the face axes and the face width W (physics box)."""
     ex, ey = _unit_axes(detail)
-    half, centre = 0.5 * t["width_m"], (t["hinge_distance_m"] - t["distance_m"], 0.0)
-    corner = (centre[0] - half * (ex[0] + ey[0]), centre[1] - half * (ex[1] + ey[1]))
-    return {"c": corner, "ex": ex, "ey": ey, "w": t["width_m"]}
+    return {"c": (0.0, 0.0), "ex": ex, "ey": ey, "w": detail["site_tower"]["width_m"]}
 
 
 def rail_points(detail: dict) -> dict:
-    """Axes (X, Y) of the three corner rails: on the corner toward the mount and on both neighbour corners, each
-    `rail_offset_m` outside the face line."""
-    g, r = tower_corner(detail), detail["carriage"]["rail_offset_m"]
-    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
-    return {"corner": (cx - r * (ex[0] + ey[0]), cy - r * (ex[1] + ey[1])),
-            "a": (cx + w * ex[0] - r * ey[0], cy + w * ex[1] - r * ey[1]),
-            "b": (cx + w * ey[0] - r * ex[0], cy + w * ey[1] - r * ex[1])}
+    """Axes (X, Y) of the three rails let into the corners: the hinge corner and both neighbours. The rear corner has none."""
+    g = tower_corner(detail)
+    ex, ey, w = g["ex"], g["ey"], g["w"]
+    return {"corner": g["c"], "a": (w * ex[0], w * ex[1]), "b": (w * ey[0], w * ey[1])}
+
+
+def rollers(detail: dict) -> list:
+    """The carriage's 6 roller points (X, Y, Z, rail key): upper and lower level on the three rails."""
+    z_up, z_lo = collar_levels(detail)
+    return [(p[0], p[1], z, key) for z in (z_up, z_lo) for key, p in rail_points(detail).items()]
 
 
 def collar_levels(detail: dict) -> tuple:
@@ -194,13 +210,9 @@ def collar_levels(detail: dict) -> tuple:
     return k["top_z_m"] - 0.5 * k["collar_chord_m"], k["top_z_m"] - k["collar_gap_m"]
 
 
-def hinge_points(detail: dict) -> list:
-    return [(0.0, -detail["carriage"]["hinge_y_m"]), (0.0, detail["carriage"]["hinge_y_m"])]
-
-
 def hoist_anchor(detail: dict) -> tuple:
-    """Plan point (X, Y) the hoist cables pull from: straight above the corner rail."""
-    return rail_points(detail)["corner"]
+    """Plan point (X, Y) the hoist cables hang on: the top of the rotary hinge, on the common axis."""
+    return (0.0, 0.0)
 
 
 def rails(detail: dict) -> list:
@@ -251,22 +263,10 @@ def carriage(detail: dict) -> list:
             b = tuple(p0[j] + (p1[j] - p0[j]) * (i + 1) / n for j in range(2))
             lo, hi = (a, b) if i % 2 == 0 else (b, a)
             tube("frame", 0.3, at(lo, z_lo), at(hi, z_hi))
-    # Hinge columns between the collars on the physics hinge points, an outrigger from each to the nearer face's chords.
-    for hx, hy in hinge_points(detail):
-        tube("frame", k["hinge_column_m"], (hx, hy, z_lo), (hx, hy, top))
-        best = None
-        for _, _, axis, other in faces:
-            rel = (hx - g["c"][0], hy - g["c"][1])
-            along = rel[0] * axis[0] + rel[1] * axis[1]
-            out = -(rel[0] * other[0] + rel[1] * other[1])
-            if 0.0 <= along <= w and out > 0.0 and (best is None or out < best[0]):
-                best = (out, along, axis, other)
-        assert best, "a hinge lies in front of neither side face"
-        _, along, axis, other = best
-        foot = (g["c"][0] + along * axis[0] - k["rail_offset_m"] * other[0],
-                g["c"][1] + along * axis[1] - k["rail_offset_m"] * other[1])
-        for z in (z_up, z_lo):
-            rect("frame", at((hx, hy), z), at(foot, z), k["beam_m"], cc)
+    # The rotary hinge: one column on the common axis, from the arms' foot to the top; the 6 rollers on the rails.
+    tube("frame", k["hinge_column_m"], (0.0, 0.0, -detail["chopstick"]["foot_depth_m"]), (0.0, 0.0, top))
+    for x, y, z, _ in rollers(detail):
+        tube("frame", k["roller_size_m"], (x, y, z - 0.5 * k["roller_size_m"]), (x, y, z + 0.5 * k["roller_size_m"]))
     # Walkway on the upper collar, outside the face, as dark steel (crop_rail_colleen: grating deck, railing, knee braces down to the
     # face), closed round the corner: each deck runs one walkway width past the corner rail so the two overlap there.
     width = k["platform_width_m"]
@@ -287,13 +287,13 @@ def carriage(detail: dict) -> list:
             tube("frame", 0.2, at(off(q, d_edge), z_up), at(q, z_up - k["brace_drop_m"]))  # knee brace to the face
         for h in (k["rail_height_m"], 0.5 * k["rail_height_m"]):
             tube("frame", 0.08, at(off(start, d_edge), z_deck + h), at(off(p1, d_edge), z_deck + h))
-    # White actuator drum on each hinge (the arm's rod pulls from its anchor, `actuator_anchor_*`).
+    # White actuator drum at the hinge, one per arm, both beside the axis (the arm's rod pulls from its anchor, `actuator_*`).
     for sign in (-1.0, 1.0):
-        y = sign * (k["hinge_y_m"] - k["actuator_anchor_in_m"])
+        y = sign * k["actuator_anchor_y_m"]
         tube("hardware", k["actuator_barrel_m"] * 3.0, (k["actuator_anchor_x_m"] - 1.2, y, -k["actuator_anchor_depth_m"]),
              (k["actuator_anchor_x_m"] + 0.4, y, -k["actuator_anchor_depth_m"]))
-    # The sheave block above the corner, outside the face (its tangent is the rail line): the hoist cables pull from it
-    # straight up at the rail (carriage photo 2025-12: worker for scale).
+    # The sheave block above the hinge, outside the faces (its tangent is the common axis): the hoist cables come straight
+    # down past it onto the hinge's top (carriage photo 2025-12: worker for scale; statics: user 2026-10-31).
     d, wd = k["drum_diameter_m"], k["drum_width_m"]
     nx, ny = -(ex[0] + ey[0]), -(ex[1] + ey[1])
     nl = math.hypot(nx, ny)

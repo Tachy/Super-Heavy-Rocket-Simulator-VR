@@ -7,8 +7,8 @@ namespace starsim::contact {
 
 // Catch tower in the site frame: origin at the pad centre on the ground, x east, y north, z up (geodetic
 // vertical); the catch axis is the vertical through the origin. Closed arms are parallel, pointing from the
-// tower over the pad, their inner edges `arm_closed_gap_m / 2` from the catch axis; an arm swings outward
-// about a vertical hinge on the tower face.
+// tower over the pad, their inner edges `arm_closed_gap_m / 2` from the catch axis; both arms swing outward
+// about one vertical axis on the tower's corner toward the mount.
 class TowerGeometry {
 public:
     TowerGeometry(const config::TowerConfig& config, double latitude_rad, double longitude_rad, double height_m);
@@ -23,12 +23,15 @@ public:
 
     OrientedBox tower_box() const;
     Annulus mount() const;
-    // Hinge of arm `side` (+1: on the +across side, -1: opposite) at the arm top height, carriage at rest.
-    math::Vec3 hinge(int side) const;
+    // The common hinge axis on the box corner toward the mount, at the arm top height, carriage at rest.
+    math::Vec3 hinge_pivot() const;
+    // Arm `side` (+1: on the +across side, -1: opposite): from the pivot outward to the arm box's centre line, in the
+    // arm frame. Fixed per side; the two differ because the corner lies off the catch line.
+    double arm_line_offset_m(int side) const;
     double arm_top_height_m(double carriage_offset_m) const { return config_.catch_height_m + carriage_offset_m; }
     // How far the closed arm tips reach beyond the catch axis, away from the tower.
-    double arm_tip_beyond_axis_m() const { return config_.arm_length_m - config_.hinge_distance_m; }
-    // Horizontal unit from the hinge towards the tip; opening 0 = closed.
+    double arm_tip_beyond_axis_m() const { return config_.arm_length_m - dot(hinge_pivot(), toward_tower_); }
+    // Horizontal unit along the arm towards the tip; opening 0 = closed.
     math::Vec3 arm_direction(int side, double opening_rad) const;
     OrientedBox arm_box(int side, double opening_rad, double carriage_offset_m) const;
 

@@ -34,11 +34,12 @@ var has_models := false
 ## render_check: fixed arm opening (radians) instead of the flight state.
 var preview_opening_rad := NAN
 var _geometry: Dictionary = {}
-var _arms: Array[Node3D] = []  ## pivots at the hinges: [+across, -across]
+var _chopstick_detail: Dictionary = {}  ## the detail file's [chopstick]: the actuator's lug follows the arm's root
+var _arms: Array[Node3D] = []  ## pivots, both on the common hinge axis: [+across, -across]
 var _carriage: Node3D = null  ## models only: follows the carriage offset
 var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the roof block
 var _cable_lateral_m: Array[float] = []
-var _cable_anchor_site := Vector3.ZERO  ## the corner rail's axis (site frame, horizontal): the cables pull from straight above it
+var _cable_anchor_site := Vector3.ZERO  ## the common hinge axis (site frame, horizontal): the cables come straight down onto it
 var _cable_spread := Vector3.ZERO  ## unit vector along the sheave's axis (site frame): the bundle lies along it
 var _qd_arm: Node3D = null  ## the ship QD arm's model node (its swinging parts rotate about the swing axis)
 ## Swing of the ship QD arm about its vertical axis, radians: 0 = connected (head 1 m off the hull), positive turns the head
@@ -88,27 +89,28 @@ func build(geometry: Dictionary) -> void:
 		_build_mount(geometry)
 		if had_models:
 			ShaderGlobals.set_value(&"trench_range_m", 0.0)  # this view stopped masking the terrain
-	else:
 			ShaderGlobals.set_value(&"apron_mask_half_m", 0.0)
+	else:
 		_build_mount_model(models, geometry)
 	for i in range(2):
 		var pivot := Node3D.new()
 		if models.is_empty():
 			var length: float = geometry["arm_length_m"]
 			var thickness: float = geometry["arm_thickness_m"]
+			var line_y: float = -geometry["arm_line_offset_plus_m"] if i == 0 else geometry["arm_line_offset_minus_m"]
 			pivot.add_child(_box(Vector3(length, geometry["arm_width_m"], thickness), Basis(),
-					Vector3(0.5 * length, 0.0, -0.5 * thickness), _steel))
+					Vector3(0.5 * length, line_y, -0.5 * thickness), _steel))
 		else:
-			# The model is drawn for the +across arm (+Y toward the axis). The arm frame's Y = up x u points to -across at
-			# the closed pose, so it stands as drawn only on +across; the -across arm mirrors it. Length: Pad 2's 27 m, the
-			# physics arm stays arm_length_m (deviation table).
-			var arm := StructureModels.model_node("Chopstick", models["chopstick"], _arm_materials(), TowerMaterial.black_paint())
+			# Both models are drawn with +Y toward the catch axis. The arm frame's Y = up x u points to -across at the closed
+			# pose, so the +across arm stands as drawn; the -across arm (its own root: the axis lies off the catch line) is mirrored.
+			var arm := StructureModels.model_node("Chopstick", models["chopstick" if i == 0 else "chopstick_minus"], _arm_materials(), TowerMaterial.black_paint())
 			if i == 1:
 				arm.basis = arm.basis * Basis.from_scale(Vector3(1.0, -1.0, 1.0))
 			pivot.add_child(arm)
 		add_child(pivot)
 		_arms.append(pivot)
 	if not models.is_empty():
+		_chopstick_detail = models["detail"]["chopstick"]
 		_build_carriage(models)
 		_build_rails(models)
 		_build_qd_arm(models, geometry)
@@ -205,10 +207,10 @@ func update_state(state: Dictionary) -> void:
 	var up := Vector3(0.0, 0.0, 1.0)
 	for i in range(_arms.size()):
 		var side := 1.0 if i == 0 else -1.0
-		var hinge: Vector3 = _geometry["hinge_plus_m" if i == 0 else "hinge_minus_m"]
+		var pivot: Vector3 = _geometry["hinge_pivot_m"]
 		var u := -toward * cos(opening) + across * (side * sin(opening))  # mirrors TowerGeometry::arm_direction
 		_arms[i].basis = Frames.basis_to_render(Basis(u, up.cross(u), up))
-		_arms[i].position = Frames.to_render(hinge + up * offset)
+		_arms[i].position = Frames.to_render(pivot + up * offset)
 	if _carriage != null:
 		_place_carriage(offset)
 		_place_actuators()
@@ -219,7 +221,7 @@ func _arm_materials() -> Dictionary:
 	return {"pad": light, "bearing": light, "hardware": light, "strip": LitAerial.material(ARM_STRIP, 0.8, 0.0)}
 
 
-## The carriage across the tower face (its origin in the hinge line, centre plane, deck plane) and its hoist cables.
+## The carriage round the tower corner (its origin on the common hinge axis, deck plane) and its hoist cables.
 func _build_carriage(models: Dictionary) -> void:
 	_carriage = Node3D.new()
 	_carriage.name = "CarriageMount"
@@ -233,12 +235,10 @@ func _build_carriage(models: Dictionary) -> void:
 	var count := int(k["cable_count"])
 	var size: float = k["cable_size_m"]
 	var pitch: float = k["cable_spacing_m"]
-	# The sheave block's top (the layout puts its centre at top + gap + diameter / 2); cables run to the roof block's underside.
-	# The cables leave the sheave block at its side on the rail line, at the block's centre height (the layout puts the centre at
-	# top + gap + diameter / 2); they run to the roof block's underside.
-	_cable_base_m = float(k["top_z_m"]) + float(k["drum_gap_m"]) + 0.5 * float(k["drum_diameter_m"])
+	# The cables come straight down past the sheave block onto the rotary hinge's top; they run to the roof block's underside.
+	_cable_base_m = float(k["top_z_m"])
 	var axes := _plan_axes(models["detail"], _geometry)
-	_cable_anchor_site = corner_rail_site(models["detail"], _geometry)
+	_cable_anchor_site = hinge_axis_site(_geometry)
 	_cable_spread = (axes.y - axes.x).normalized()
 	_cable_top_m = float(models["detail"]["tower.roof"]["block_base_m"])
 	var mesh := CylinderMesh.new()
@@ -285,11 +285,13 @@ func _build_actuators(k: Dictionary) -> void:
 func actuator_ends(arm: int) -> Array[Vector3]:
 	var side := 1.0 if arm == 0 else -1.0
 	var k := _actuator
-	var anchor_local := Vector3(k["actuator_anchor_x_m"], -side * (float(k["hinge_y_m"]) - float(k["actuator_anchor_in_m"])),
-			-float(k["actuator_anchor_depth_m"]))
-	# Model coordinates of the arm as drawn for +across (+Y toward the axis): the lug lies outboard, Y < 0 (the mirrored
-	# -across arm's node flips it).
-	var lug_local := Vector3(k["actuator_lug_x_m"], -float(k["actuator_lug_out_m"]), -float(k["actuator_lug_depth_m"]))
+	var anchor_local := Vector3(k["actuator_anchor_x_m"], -side * float(k["actuator_anchor_y_m"]), -float(k["actuator_anchor_depth_m"]))
+	# Model coordinates of this arm (+Y toward the catch axis, the -across arm's node mirrors it): the lug on the outer root column,
+	# from the foot on the axis to the bend (mechazilla_layout.chopstick), at the lug's depth.
+	var c: Dictionary = _chopstick_detail
+	var line_offset: float = _geometry["arm_line_offset_plus_m" if arm == 0 else "arm_line_offset_minus_m"]
+	var f := 1.0 - float(k["actuator_lug_depth_m"]) / float(c["foot_depth_m"])
+	var lug_local := Vector3(f * float(c["root_kink_x_m"]), -f * (line_offset + float(c["bend_out_m"])), -float(k["actuator_lug_depth_m"]))
 	var carriage_model := _carriage.get_node("Carriage") as Node3D
 	var arm_model := _arms[arm].get_node("Chopstick") as Node3D
 	var a: Vector3 = _carriage.transform * (carriage_model.transform * anchor_local)
@@ -315,13 +317,11 @@ func _place_actuators() -> void:
 			node.basis = tilt * Basis.from_scale(Vector3(1.0, maxf(len_part, 0.01), 1.0))
 
 
-## Carriage node and cables at the carriage offset; the hinge line's height comes from the hinges.
+## Carriage node and cables at the carriage offset; on the common axis.
 func _place_carriage(offset: float) -> void:
 	var up := Vector3(0.0, 0.0, 1.0)
 	var across: Vector3 = _geometry["across"]
-	var plus: Vector3 = _geometry["hinge_plus_m"]
-	var minus: Vector3 = _geometry["hinge_minus_m"]
-	var centre: Vector3 = 0.5 * (plus + minus) + up * offset
+	var centre: Vector3 = (_geometry["hinge_pivot_m"] as Vector3) + up * offset
 	_carriage.position = Frames.to_render(centre)
 	var low_m: float = centre.z + _cable_base_m
 	var length := maxf(0.1, _cable_top_m - low_m)
@@ -333,27 +333,22 @@ func _place_carriage(offset: float) -> void:
 		_cables[i].basis = Frames.basis_to_render(Basis(across, up.cross(across), up)) * Basis.from_scale(Vector3(1.0, length, 1.0))
 
 
-## The axis of the corner rail on the tower box's corner toward the mount (site frame, z = 0): the box corner of the physics
-## geometry (plan axes rotated by plan_yaw_deg) moved `rail_offset_m` outward along both faces' normals.
-func corner_rail_site(detail: Dictionary, geometry: Dictionary) -> Vector3:
-	var axes := _plan_axes(detail, geometry)
-	var size: Vector3 = geometry["tower_size_m"]
-	var centre: Vector3 = geometry["tower_center_m"]
-	var offset := 0.5 * size.x + float(detail["carriage"]["rail_offset_m"])
-	var at := centre - axes.x * offset - axes.y * offset
+## The common hinge axis (site frame, z = 0).
+func hinge_axis_site(geometry: Dictionary) -> Vector3:
+	var at: Vector3 = geometry["hinge_pivot_m"]
 	at.z = 0.0
 	return at
 
 
-## The corner rails: three static vertical rails on the corner toward the mount and its neighbours, in the carriage's frame
-## at the hinge height (the carriage rides up and down on them).
+## The corner rails: three static vertical rails let into the corner toward the mount and its neighbours, in the carriage's
+## frame at the hinge height (the carriage rides up and down on them).
 func _build_rails(models: Dictionary) -> void:
 	var rails := Node3D.new()
 	rails.name = "RailsMount"
 	var toward: Vector3 = _geometry["tower_direction"]
 	var across: Vector3 = _geometry["across"]
 	rails.basis = Frames.basis_to_render(Basis(-toward, -across, Vector3(0.0, 0.0, 1.0)))
-	rails.position = Frames.to_render(0.5 * ((_geometry["hinge_plus_m"] as Vector3) + (_geometry["hinge_minus_m"] as Vector3)))
+	rails.position = Frames.to_render(_geometry["hinge_pivot_m"])
 	rails.add_child(StructureModels.model_node("Rails", models["rails"], {}, TowerMaterial.black_paint()))
 	add_child(rails)
 
@@ -462,14 +457,14 @@ func _set_trench_mask(detail: Dictionary, geometry: Dictionary) -> void:
 	ShaderGlobals.set_value(&"trench_site_lo", split[1])
 	ShaderGlobals.set_value(&"trench_axis_t", (basis * Frames.to_render(axes.x)).normalized())
 	ShaderGlobals.set_value(&"trench_axis_a", (basis * Frames.to_render(axes.y)).normalized())
+	# Only the tunnel lies below the ground: the mask is its plan (inside the walls), under the block and out to the ramp ends.
+	var half_w: float = 0.5 * float(t["width_m"]) - MASK_INSET_M
+	var half_y: float = float(m["block_half_y_m"])
+	ShaderGlobals.set_value(&"trench_shape", Vector4(half_w, half_y - MASK_INSET_M, half_w, half_y + float(t["length_m"]) - MASK_INSET_M))
+	ShaderGlobals.set_value(&"trench_range_m", float(t["mask_range_m"]))
 	var apron := TowerMaterial.apron_mask()  # the graded hardstand is one plane: no terrain inside its outline
 	if apron != null:
 		ShaderGlobals.set_value(&"apron_mask", apron)
 		ShaderGlobals.set_value(&"apron_mask_half_m", float(t["hardstand_mask_half_m"]))
 	else:
 		ShaderGlobals.set_value(&"apron_mask_half_m", 0.0)
-	# Only the tunnel lies below the ground: the mask is its plan (inside the walls), under the block and out to the ramp ends.
-	var half_w: float = 0.5 * float(t["width_m"]) - MASK_INSET_M
-	var half_y: float = float(m["block_half_y_m"])
-	ShaderGlobals.set_value(&"trench_shape", Vector4(half_w, half_y - MASK_INSET_M, half_w, half_y + float(t["length_m"]) - MASK_INSET_M))
-	ShaderGlobals.set_value(&"trench_range_m", float(t["mask_range_m"]))

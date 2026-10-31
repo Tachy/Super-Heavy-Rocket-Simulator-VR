@@ -135,17 +135,17 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 		# geometry) plus the state's offset: a live catch flight is not started here.
 		var carriage := view.get_node("CarriageMount") as Node3D
 		var height_m := Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(carriage.position)
-		var want_m: float = float(geometry["hinge_plus_m"].z) + offset
+		var want_m: float = float(geometry["hinge_pivot_m"].z) + offset
 		_check(absf(height_m - want_m) < 0.01, "state %s: carriage %.3f m = height + offset %.3f m" % [state, height_m, want_m])
 		var cable := view.get_node("cable_0") as MeshInstance3D
 		var cable_top_m: float = Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(cable.position) + 0.5 * cable.basis.y.length()
 		_check(absf(cable_top_m - float(models["detail"]["tower.roof"]["block_base_m"])) < 0.01, "cable reaches the roof block")
 	# The closed arm: with the pivot at the hinge the +across arm's inner face and its reach against the catch axis.
 	var c: Dictionary = models["detail"]["chopstick"]
-	var lateral: float = float(geometry["hinge_plus_m"].dot(across))
+	var lateral: float = 0.5 * (float(geometry["arm_line_offset_plus_m"]) + float(geometry["arm_line_offset_minus_m"]))
 	var half_gap: float = lateral - 0.5 * float(geometry["arm_width_m"])
 	_check(absf(lateral - float(c["inner_face_y_m"]) - half_gap) < 0.05, "inner face at the physics half gap %.2f m" % half_gap)
-	var hinge_to_axis: float = float(geometry["hinge_plus_m"].dot(toward))
+	var hinge_to_axis: float = float(geometry["hinge_pivot_m"].dot(toward))
 	_check(float(c["length_m"]) >= hinge_to_axis, "closed arm reaches the catch axis (%.1f m >= %.1f m)" % [c["length_m"], hinge_to_axis])
 	# Bounds of the model in the pivot's frame: hinge at 0, deck plane at Y = 0, the pad under it.
 	var deck := plus_arm.get_node("strip") as MeshInstance3D
@@ -190,14 +190,14 @@ func _check_closed_pose(view: TowerView, detail: Dictionary, geometry: Dictionar
 		var bounds: AABB = pivot.transform * (arm.transform * (arm.get_node("pad") as MeshInstance3D).get_aabb())
 		var y_pad: float = float(c["inner_face_y_m"]) + float(c["pad_proud_m"]) - 0.5 * float(c["pad_width_m"])
 		var z_pad: float = -float(c["pad_top_depth_m"]) - 0.5 * float(c["pad_height_m"])
-		var hinge: Vector3 = geometry["hinge_plus_m" if arm_index == 0 else "hinge_minus_m"]
-		var want := Frames.to_render(hinge - toward * float(c["pad_x_m"]) - across * (side * y_pad) + up * z_pad)
+		var line_offset: float = geometry["arm_line_offset_plus_m" if arm_index == 0 else "arm_line_offset_minus_m"]
+		var want := Frames.to_render((geometry["hinge_pivot_m"] as Vector3) - toward * float(c["pad_x_m"]) + across * (side * (line_offset - y_pad)) + up * z_pad)
 		_check(bounds.get_center().distance_to(want) < 0.05, "closed pose arm %d: pad at %s, want %s" % [arm_index, bounds.get_center(), want])
 		centres.append(bounds.get_center())
 	var gap := (centres[0] - centres[1]).length()
 	# Pad centres: 2 x (gap / 2 + width / 2 - y_pad) apart, from the physics numbers
 	var y_c: float = float(c["inner_face_y_m"]) + float(c["pad_proud_m"]) - 0.5 * float(c["pad_width_m"])
-	var lateral: float = float(geometry["hinge_plus_m"].dot(across))  # = gap / 2 + width / 2 of the physics hinge
+	var lateral: float = 0.5 * (float(geometry["arm_line_offset_plus_m"]) + float(geometry["arm_line_offset_minus_m"]))  # = gap / 2 + width / 2
 	var want_gap := 2.0 * (lateral - y_c)
 	_check(absf(gap - want_gap) < 0.05, "closed pose: pad centres %.3f m apart (want %.3f)" % [gap, want_gap])
 
@@ -273,7 +273,8 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 	corner.z = 0.0
 	_check(absf(corner.dot(toward) - 22.4) < 0.1 and absf(absf(corner.dot(across)) - 1.24) < 0.05,
 			"box corner toward the mount at %.2f m along, %.2f m across" % [corner.dot(toward), corner.dot(across)])
-	# Hoist cables: the bundle's centre over the corner rail within 0.5 m, every cable within 0.5 m of the corner.
+	_check(Vector3(corner.x, corner.y, 0.0).distance_to(view.hinge_axis_site(geometry)) < 1e-3, "the common hinge axis is that corner")
+	# Hoist cables: vertical, straight down onto the hinge's top on the axis, every cable within 0.3 m of it.
 	var up_r := Frames.to_render(up)
 	var sum := Vector3.ZERO
 	var cables := 0
@@ -283,12 +284,16 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 			break
 		var at := cable.position
 		var h := up_r.dot(at)
-		_check(Frames.to_render(corner + up * h).distance_to(at) < 0.5 + 0.3, "hoist cable %d pulls from the corner (%.2f m)" % [c, Frames.to_render(corner + up * h).distance_to(at)])
+		_check(Frames.to_render(corner + up * h).distance_to(at) < 0.3, "hoist cable %d on the axis (%.2f m)" % [c, Frames.to_render(corner + up * h).distance_to(at)])
+		_check(cable.basis.y.normalized().distance_to(up_r) < 1e-6, "hoist cable %d vertical" % c)
+		var low_m: float = h - 0.5 * cable.basis.y.length()
+		var carriage_m: float = up_r.dot((view.get_node("CarriageMount") as Node3D).position) + float(detail["carriage"]["top_z_m"])
+		_check(absf(low_m - carriage_m) < 0.01, "hoist cable %d ends on the hinge's top (%.2f m)" % [c, low_m - carriage_m])
 		sum += at
 		cables += 1
 	_check(cables == int(detail["carriage"]["cable_count"]), "%d hoist cables" % cables)
 	var centre := sum / float(cables)
-	_check(Frames.to_render(corner + up * up_r.dot(centre)).distance_to(centre) < 0.5, "cable bundle over the corner rail")
+	_check(Frames.to_render(corner + up * up_r.dot(centre)).distance_to(centre) < 0.3, "cable bundle on the axis")
 	# Rails: three static nodes' boxes at the corner and its two neighbours, from the plinth top up to the lattice top.
 	var rails := view.get_node_or_null("RailsMount/Rails/rail") as MeshInstance3D
 	_check(rails != null, "corner rails built")
@@ -410,8 +415,8 @@ func _geometry() -> Dictionary:
 		"tower_center_m": centre, "tower_size_m": Vector3(13.3, 13.3, 146.0),
 		"mount_height_m": 20.0, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_plus_m": toward * 22.3 + across * 5.8 + up * 95.0,
-		"hinge_minus_m": toward * 22.3 - across * 5.8 + up * 95.0,
+		"hinge_pivot_m": toward * 22.378 - across * 1.2436 + up * 95.0,
+		"arm_line_offset_plus_m": 5.8 + 1.2436, "arm_line_offset_minus_m": 5.8 - 1.2436,
 	}
 
 

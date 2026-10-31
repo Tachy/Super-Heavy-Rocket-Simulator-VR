@@ -41,7 +41,7 @@ def test_chopstick_bounds_and_hinge(built):
     detail = detail_file.load(build_models.DEFAULT_CONFIG)["chopstick"]
     g, lo, hi = _bounds(built / "chopstick.gltf")
     assert abs(lo[0]) < 1.0                                      # hinge end at the origin (tube radii around it)
-    assert hi[0] == pytest.approx(detail["pusher_end_x_m"], abs=0.2)  # pushers and the bent tip plate
+    assert hi[0] == pytest.approx(detail["tip_box_end_x_m"], abs=0.2)  # the closed box on the tip
     assert lo[2] == pytest.approx(-detail["foot_depth_m"], abs=1.0)  # the root columns' foot
     assert hi[2] == pytest.approx(detail["mast_height_m"], abs=BOUND_TOL_M)  # the mast above the deck plane
     names = {n["name"] for n in g["nodes"]}

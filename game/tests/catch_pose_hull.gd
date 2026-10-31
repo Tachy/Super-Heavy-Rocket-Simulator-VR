@@ -26,7 +26,7 @@ static func attach(view: TowerView, deck_station_m: float) -> void:
 	var mount := Node3D.new()
 	mount.name = "CatchHull"
 	mount.basis = Frames.basis_to_render(Basis(up, across, -toward))  # body X up the axis, azimuth 0 = +across, 90 = away
-	mount.position = Frames.to_render(up * (float(geometry["hinge_plus_m"].z) - deck_station_m))
+	mount.position = Frames.to_render(up * (float(geometry["hinge_pivot_m"].z) - deck_station_m))
 	var body := StructureModels.model_node("Hull", hull, {}, steel)
 	mount.add_child(body)
 	for azimuth_deg in FIN_AZIMUTHS_DEG:

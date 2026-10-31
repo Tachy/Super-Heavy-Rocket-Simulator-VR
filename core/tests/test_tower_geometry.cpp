@@ -55,18 +55,10 @@ TEST_CASE("Tower box is parallel to the measured squares", "[contact]") {
     CHECK(norm(box.center - (tower.tower_direction() * c.distance_m + up * (0.5 * c.height_m))) < 1e-9);
 }
 
-TEST_CASE("Hinges straddle the corner toward the mount", "[contact]") {
+TEST_CASE("Both arms turn about the one corner axis", "[contact]") {
     const auto tower = starbase_tower();
     const auto& c = tower.config();
-    CHECK_THAT(c.hinge_distance_m, WithinAbs(22.3, 1e-12));
-    const double lateral = 0.5 * c.arm_closed_gap_m + 0.5 * c.arm_width_m;
-    for (const int side : {1, -1}) {
-        const Vec3 h = tower.hinge(side);
-        CHECK_THAT(dot(h, tower.tower_direction()), WithinAbs(22.3, 1e-9));
-        CHECK_THAT(dot(h, tower.across()), WithinAbs(side * lateral, 1e-9));
-        CHECK_THAT(h.z, WithinAbs(c.catch_height_m, 1e-9));
-    }
-    // The box corner nearest the catch axis lies within 2 m of the line at 22.3 +- 0.1 m.
+    // The box corner nearest the catch axis, independent of the pivot's formula.
     const auto box = tower.tower_box();
     double best = 1e9;
     Vec3 corner{};
@@ -81,8 +73,59 @@ TEST_CASE("Hinges straddle the corner toward the mount", "[contact]") {
             }
         }
     }
-    CHECK_THAT(dot(corner, tower.tower_direction()), WithinAbs(22.3, 0.1));
-    CHECK(std::abs(dot(corner, tower.across())) < 2.0);
+    const Vec3 pivot = tower.hinge_pivot();
+    CHECK_THAT(pivot.x, WithinAbs(corner.x, 1e-9));
+    CHECK_THAT(pivot.y, WithinAbs(corner.y, 1e-9));
+    CHECK_THAT(pivot.z, WithinAbs(c.catch_height_m, 1e-9));
+    CHECK_THAT(dot(pivot, tower.tower_direction()), WithinAbs(22.378, 0.001));
+    CHECK_THAT(std::abs(dot(pivot, tower.across())), WithinAbs(1.244, 0.001));
+    for (const int side : {1, -1}) {
+        for (const double opening : {0.0, c.arm_standby_rad, c.arm_open_rad}) {
+            // A rigid turn: the box centre keeps its distance from the axis through the pivot and turns by the opening.
+            const auto closed = tower.arm_box(side, 0.0, 0.0);
+            const auto turned = tower.arm_box(side, opening, 0.0);
+            const Vec3 a = closed.center - pivot, b = turned.center - pivot;
+            CHECK_THAT(std::hypot(a.x, a.y), WithinAbs(std::hypot(b.x, b.y), 1e-9));
+            CHECK_THAT(std::atan2(cross(a, b).z, a.x * b.x + a.y * b.y), WithinAbs(-side * opening, 1e-9));
+            CHECK(norm(math::column(turned.axes, 0) - tower.arm_direction(side, opening)) < 1e-12);
+        }
+    }
+}
+
+TEST_CASE("Closed faces are parallel and centred on the catch axis", "[contact]") {
+    const auto tower = starbase_tower();
+    const auto& c = tower.config();
+    for (const int side : {1, -1}) {
+        const auto arm = tower.arm_box(side, 0.0, 0.0);
+        CHECK(norm(math::column(arm.axes, 0) + tower.tower_direction()) < 1e-12);  // parallel to the catch line
+        CHECK_THAT(side * dot(arm.center, tower.across()) - arm.half_extents.y, WithinAbs(0.5 * c.arm_closed_gap_m, 1e-9));
+        CHECK_THAT(side * dot(arm.center - tower.hinge_pivot(), tower.across()), WithinAbs(tower.arm_line_offset_m(side), 1e-9));
+    }
+    // The two sides' offsets differ by twice the corner's distance across the line.
+    CHECK_THAT(tower.arm_line_offset_m(1) - tower.arm_line_offset_m(-1), WithinAbs(-2.0 * dot(tower.hinge_pivot(), tower.across()), 1e-9));
+    // The tip stays where it was: 3.6 m past the axis.
+    CHECK_THAT(tower.arm_tip_beyond_axis_m(), WithinAbs(3.6, 0.01));
+}
+
+TEST_CASE("Opening moves a bearing face away from the hull", "[contact]") {
+    const auto tower = starbase_tower();
+    const auto& c = tower.config();
+    const double hull_radius_m = 4.5;
+    auto clearance = [&](int side, double opening) {
+        const auto arm = tower.arm_box(side, opening, 0.0);
+        const Vec3 y = math::column(arm.axes, 1);
+        return std::abs(dot(arm.center, y)) - arm.half_extents.y - hull_radius_m;
+    };
+    for (const int side : {1, -1}) {
+        double previous = clearance(side, 0.0);
+        CHECK_THAT(previous, WithinAbs(0.3, 1e-9));
+        for (double deg = 1.0; deg <= c.arm_open_rad / constants::deg_to_rad + 1e-9; deg += 1.0) {
+            const double now = clearance(side, deg * constants::deg_to_rad);
+            CHECK(now > previous);
+            previous = now;
+        }
+        CHECK_THAT(clearance(side, c.arm_standby_rad), WithinAbs(2.83, 0.05));  // about 3 m per side at the axis
+    }
 }
 
 TEST_CASE("Closed arms hold the pins but not the hull", "[contact]") {
@@ -90,7 +133,7 @@ TEST_CASE("Closed arms hold the pins but not the hull", "[contact]") {
     const double top = tower.arm_top_height_m(0.0);
     for (const int side : {1, -1}) {
         const auto arm = tower.arm_box(side, 0.0, 0.0);
-        for (const double along : {-1.5, 0.0, 5.0}) {  // along the arms: the tip lies 1.9 m beyond the axis
+        for (const double along : {-1.5, 0.0, 5.0}) {  // along the arms: the tip lies 3.6 m beyond the axis
             for (const double r : {4.9, 5.2, 5.45}) {   // pin (hull radius 4.5 + 1 m)
                 CHECK(point_in_box(arm, tower.across() * (side * r) + tower.tower_direction() * along + up * (top - 0.05)).inside);
             }
@@ -136,7 +179,7 @@ TEST_CASE("Pins at 0 and 180 rest on both closed arms", "[contact]") {
     std::array<ArmContactState, 2> arms;
     for (int i = 0; i < 2; ++i) {
         const int side = i == 0 ? 1 : -1;
-        arms[static_cast<size_t>(i)] = {tower.arm_box(side, 0.0, 0.0), tower.hinge(side), 0.0, 0.0, tower.across() * side};
+        arms[static_cast<size_t>(i)] = {tower.arm_box(side, 0.0, 0.0), tower.hinge_pivot(), 0.0, 0.0, tower.across() * side};
     }
     const double sink_in_m = 0.01;  // pins that far into the arm tops
     SitePose pose;
