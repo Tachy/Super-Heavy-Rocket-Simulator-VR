@@ -37,7 +37,7 @@ DEFAULT_OUT = ROOT / "data" / "models" / "starbase_olp2"
 BLENDER_DEFAULT = Path(r"C:\Program Files\Blender Foundation\Blender 3.4\blender.exe")
 GENERATORS = ("gen_profiles.py", "gen_chopstick.py", "gen_carriage.py", "gen_qd_arm.py", "gen_mount.py", "gen_trench.py")
 OUTPUTS = ("profiles.gltf", "chopstick.gltf", "carriage.gltf", "qd_arm.gltf", "mount.gltf", "trench.gltf",
-           mount_textures.FILE_NAME)
+           mount_textures.FILE_NAME, mount_textures.CONCRETE_FILE_NAME)
 MANIFEST = "manifest.json"
 VEHICLE_GENERATORS = ("gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py")
 VEHICLE_FIXED_OUTPUTS = ("booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",

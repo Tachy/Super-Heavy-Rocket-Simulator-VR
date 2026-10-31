@@ -21,3 +21,9 @@ Superseded numbers and earlier approaches of the Pad B tower model. Current stat
 Draft model: straight open truss from the hinge, length 26 m, width 3 m, depth 8.75 m, truss pitch 6.5 m, top rails 0.9 m, W diagonals, one
 arm only (-across stayed a box). Replaced by the measured Pad 2 arm. The measurement rows "QD arm deck 122 m" and "carriage parked arm top 88 m"
 had the two parts swapped (`launch-structures-measurements.md`, Arm research); the plan's `gen_qd_arm` at deck 122 m followed that error.
+
+## Mount shape: pyramid replaced (2026-10-31)
+The first square mount was a closed stepped pyramid (plinth 1.6 m, ledge 0.8 m, tan running-bond courses of 1.6 x 3.2 m) with 12 m tunnel mouths, two door
+arches, a diagonal stair strip, hoods on the tower side, 12 clamps, a 6 m pit, 20 m ramps with a 0.15 m curb and a 55 x 5.5 m dark wall beside the ramp. Photos show
+four piers with open portals, rectangular doors, hoods on the front side, large plates; the stair strip was a pier, and the dark wall is unsupported near the
+mount (the only long low wall in the frames is the site's perimeter wall, person-scale photo), so it was removed.

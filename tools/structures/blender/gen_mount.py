@@ -1,8 +1,8 @@
-"""Pad B launch mount (pyramid, ring, hoods, QDs, tunnels, chamber): static, see mount_layout.py.
+"""Pad B launch mount (piers, portals, deck, ring, hoods, QDs, bucket, chamber): static, see mount_layout.py.
 
 Run: blender -b --factory-startup -P gen_mount.py -- --config <toml> --out <dir>
-Frame: X toward the tower, Y across, Z up, origin on the mount axis at the ground. Nodes: shell, plinth, interior,
-deflector, hood, hardware, stair, door.
+Frame: X toward the tower, Y across, Z up, origin on the mount axis at the ground. Nodes: shell, plinth, pier, interior,
+deflector, hood, hardware, door.
 """
 import sys
 from pathlib import Path

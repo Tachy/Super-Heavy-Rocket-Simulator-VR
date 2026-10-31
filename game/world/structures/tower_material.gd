@@ -23,8 +23,11 @@ const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 
 const MOUNT_SHADER := preload("res://shaders/mount_shell.gdshader")
 const MOUNT_MAP := "models/starbase_olp2/mount_panels.png"
-## [E] Mount shell without its generated map: plain tan steel.
-const MOUNT_PLAIN := Color(0.60, 0.50, 0.37)
+const CONCRETE_MAP := "models/starbase_olp2/pad_concrete.png"
+## [E] Mount plates without their generated map: grey to tan, linear (person-scale frame, images.jpeg).
+const MOUNT_PLAIN := Color(0.34, 0.30, 0.23)
+## [E] Hardstand without its generated map: light concrete, linear (images.jpeg).
+const CONCRETE_PLAIN := Color(0.45, 0.43, 0.38)
 
 static var _texture: Texture2D
 static var _texture_tried := false
@@ -40,12 +43,21 @@ static func brace_steel() -> ShaderMaterial:
 	return _steel_material(BRACE_TINT, PLAIN_BRACE)
 
 
-## Tan panels of the launch mount's shell: the generated map (data/models/starbase_olp2/mount_panels.png), tile in metres.
+## Plates of the launch mount's faces: the generated map (data/models/starbase_olp2/mount_panels.png), tile in metres.
 static func mount_shell(tile_m: float) -> Material:
-	var path := Paths.data_dir().path_join(MOUNT_MAP)
+	return _mapped(MOUNT_MAP, MOUNT_PLAIN, tile_m)
+
+
+## Light concrete of the hardstand and the exit ramps: the generated map (pad_concrete.png), tile in metres.
+static func pad_concrete(tile_m: float) -> Material:
+	return _mapped(CONCRETE_MAP, CONCRETE_PLAIN, tile_m)
+
+
+static func _mapped(map: String, plain: Color, tile_m: float) -> Material:
+	var path := Paths.data_dir().path_join(map)
 	var image := Image.load_from_file(path) if FileAccess.file_exists(path) else null
 	if image == null or image.is_empty():
-		return LitAerial.material(MOUNT_PLAIN, 0.75, 0.15)
+		return LitAerial.material(plain, 0.75, 0.15)
 	image.generate_mipmaps()
 	var m := ShaderMaterial.new()
 	m.shader = MOUNT_SHADER

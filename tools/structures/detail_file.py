@@ -33,12 +33,14 @@ ROOF_KEYS = ("deck_top_m", "plate_thickness_m", "overhang_m", "block_size_m", "b
              "louvre_count", "louvre_height_m", "louvre_depth_m", "railing_height_m", "railing_member_m",
              "railing_post_pitch_m")
 MOUNT_KEYS = ("deck_height_m", "measured_height_m", "base_across_m", "base_toward_m", "top_across_m", "plinth_height_m",
-              "ledge_m", "deck_drop_m", "pit_depth_m", "ring_outer_diameter_m", "ring_opening_diameter_m",
-              "ring_thickness_m", "chamber_radius_m", "clamp_count", "tunnel_width_m", "tunnel_top_m", "hood_inner_y_m",
-              "hood_outer_y_m", "hood_height_front_m", "hood_height_back_m", "qd_count", "qd_head_radius_m", "tile_m",
-              "course_m", "panel_m", "seam_m", "map_size")
-TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "deluge_length_m", "deluge_height_m",
-               "deluge_thickness_m", "mask_range_m")
+              "deck_drop_m", "deck_plate_m", "pit_depth_m", "ring_outer_diameter_m", "ring_opening_diameter_m",
+              "ring_thickness_m", "chamber_radius_m", "clamp_count", "opening_width_ground_m", "opening_width_deck_m",
+              "opening_top_m", "lintel_depth_m", "lintel_height_m", "duct_radius_m", "ridge_top_m", "rib_pitch_m",
+              "hood_inner_y_m", "hood_outer_y_m", "hood_height_m", "hood_drop_m", "door_width_m", "door_height_m",
+              "qd_count", "qd_head_radius_m", "tile_m", "course_m", "panel_m", "seam_m", "map_size")
+TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "wall_thickness_m", "hardstand_lift_m",
+               "concrete_tile_m", "slab_m", "joint_m", "concrete_map_size", "foot_x_m", "foot_width_m", "foot_height_m",
+               "mask_range_m")
 COUNT_KEYS = ("count", "columns", "louvre_count")
 
 

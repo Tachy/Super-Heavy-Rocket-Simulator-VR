@@ -1,4 +1,4 @@
-"""Pad B exit ramps and the deluge wall: static, see mount_layout.py.
+"""Pad B exit ramps, hardstand and the tower's foot block: static, see mount_layout.py.
 
 Run: blender -b --factory-startup -P gen_trench.py -- --config <toml> --out <dir>
 Frame: as gen_mount.py (the ramps lie on the +-Y sides).

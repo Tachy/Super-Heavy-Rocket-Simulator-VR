@@ -214,7 +214,7 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 	var deck_z := float(geometry["mount_height_m"]) - float(m["deck_drop_m"])
 	_check(absf(shell.end.z - deck_z) < 0.01, "deck at the physics mount height (%.3f, want %.3f)" % [shell.end.z, deck_z])
 	var top_half := 0.5 * float(m["top_across_m"])
-	_check(absf(shell.size.y - float(m["base_across_m"]) + 2.0 * float(m["ledge_m"])) < 0.05, "slope foot across %.2f m" % shell.size.y)
+	_check(absf(shell.size.y - float(m["base_across_m"])) < 0.05, "slope foot across %.2f m" % shell.size.y)
 	var hardware: AABB = (parts.get_node("hardware") as MeshInstance3D).mesh.get_aabb()
 	_check(hardware.end.z > float(geometry["mount_height_m"]), "ring and clamps above the deck")
 	# Stack clearance on the generated vertices: nothing of the mount inside the 4.5 m hull above the ring top, the ring
@@ -231,7 +231,9 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 				min_r_ring = minf(min_r_ring, r)
 	_check(min_r_above >= 4.5 + 0.04 - 1.0e-4, "nothing of the mount inside the hull above the ring (%.3f m)" % min_r_above)
 	_check(absf(min_r_ring - 0.5 * float(m["ring_opening_diameter_m"])) < 0.01, "ring opening %.3f m radius" % min_r_ring)
-	# Exits: the trench's ramps run across the mount-tower line, 20 m wide, 33 m from the axis.
+	# Exits: the trench's ramps run across the mount-tower line, 33 m from the axis; the hardstand stays out of the pit.
+	var hardstand: AABB = (view.get_node("TrenchModel/Trench/hardstand") as MeshInstance3D).mesh.get_aabb()
+	_check(hardstand.position.z > 0.0 and hardstand.size.z < 0.001, "hardstand a flat plate above the ground (%s)" % hardstand)
 	var ramp: AABB = (view.get_node("TrenchModel/Trench/concrete") as MeshInstance3D).mesh.get_aabb()
 	_check(absf(ramp.size.x - float(t["width_m"])) < 0.01, "ramps %.2f m wide" % ramp.size.x)
 	var mid := 0.5 * (0.5 * float(m["base_across_m"]) + ramp.end.y)

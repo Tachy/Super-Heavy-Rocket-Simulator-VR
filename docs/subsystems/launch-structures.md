@@ -37,18 +37,18 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   (5.3 m closed, 6.5 m at 0.7 rad). Its numbers are the `actuator_*` keys of `[carriage]`.
 - QD arm (`mechazilla_layout.qd_arm`): THE ship QD arm, one arm; deep root truss with light cabinets, shallow tip platform, connector
   head; tip deck 86.8 m, static, head 1 m clear of the 4.5 m hull on the tower's centre plane, fits between the closed arms.
-- Mount (task 3, `mount_layout.py` -> `gen_mount.py` -> `mount.gltf`, `[mount]` of the detail file): stepped pyramid, plinth 1.6 m + 0.8 m ledge,
-  base 44.6 x 40 m, deck 18.7 m wide, slope face 56 deg (the measured 48 deg stretched: the ring top is the physics 20 m, the measured
-  frustum is 14.5 m; only the vertical scale is stretched, plan sizes are the measured ones). Ring: outer 10.4 m, opening 9 m (the hull
-  radius), 0.8 m thick, 12 clamps; deck 0.35 m below the ring top. Below it a 7 m-radius engine chamber with a flame ridge and, in the
-  two side (+-Y) faces, 12 m wide tunnel mouths (top 9 m) that lead to the exits. Two grey hoods flank the deck on the tower side, two
-  vent boxes, a grey panel over each mouth, two door arches and a diagonal tan stair strip in the front (-X) face, two booster QD
-  cabinets with a boom and a head 0.4 m off the hull (static, not attached). 800 triangles. The shell uses a generated panel map
-  (`mount_textures.py`, `mount_panels.png`: tan courses of 1.6 m, panels 3.2 m in running bond, seams, streaks, stains; sampled by
-  `shaders/mount_shell.gdshader`), the rest plain materials; the old concrete pad disc is hidden for a site with models.
-- Trench (`trench.gltf`, `[trench]`): two ramps opposite each other across the mount-tower line, 20 m wide, floor rising from the pit
-  (6 m below the ground) to the ground, side walls with a 0.15 m curb, centre 33 m from the axis; a 55 x 5.5 m dark wall on the
-  front side beside the ramp (low confidence: one oblique crop).
+- Mount (`mount_layout.py` -> `gen_mount.py` -> `mount.gltf`, `[mount]` of the detail file): four sloped corner piers and a deck, no stepped
+  pyramid. Base 44.6 x 40 m, deck 18.7 m wide, slopes 55 deg (measured 48 deg: the ring top is the physics 20 m, measured 14.5 m; only the
+  vertical scale is stretched). Closed plated faces only on +-X. Each +-Y side is one portal: 26 m wide at the ground, sides following the
+  piers (18.8 m at the 10 m top), a vertical spandrel, a lintel and a ribbed duct above it; inside, a ribbed deflector curves from a ridge
+  (9.7 m) under the ring to the pit floor 9 m below the ground. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps; 7 m
+  chamber under it. Front (-X) face: two bent hood ducts (roof 4 m above the deck, box 6.5 m down the face), two rectangular grey doors, six
+  vents (padb_mount_pyramid_front_person_scale_2026-05); two booster QD cabinets between the ducts (static). 5.5k triangles. Plate map
+  `mount_panels.png` (`mount_textures.py`: stacked plates 6 x 2 m, rust-tan seams, grey to tan, stains; `shaders/mount_shell.gdshader`).
+- Trench and ground (`trench.gltf`, `[trench]`): two flat aprons 26 m wide, floor rising from the pit to the ground, centre 33 m from the
+  axis, 1 m side walls, tan-brown floor. Hardstand: a flat convex plate of light concrete all round mount and tower foot (outline +-15 m,
+  low confidence: wide-angle views only), `pad_concrete.png`, satellite terrain beyond its edge; the old pad disc stays hidden, so past the
+  20 km visibility range the site is terrain imagery only. Tower foot: an 18 m block, 7 m walls, chamfered roof up to the legs' plinth.
 - Terrain mask: `terrain_earth.gdshader` does not draw the terrain inside the footprint (central rectangle + both ramps, 0.05 m inside
   the walls) within `mask_range_m` = 20 km of the camera; the pit model is drawn 150 m beyond. Globals `trench_*` (project.godot) set by
   `TowerView._set_trench_mask`; the site position is a hi / lo pair like the camera's, so the offset stays exact. Physics ground stays flat.
@@ -188,7 +188,7 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 ## Physics deviations (what is drawn as measured differs from the physics; input to the physics plan)
 | Part | Drawn now | Physics stays | Why |
 |---|---|---|---|
-| Mount deck | ring top 20 m (physics); plan as measured, slope stretched from 14.5 m (56 deg instead of 48), courses as measured | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck; `check_envelope` lists the row |
+| Mount deck | ring top 20 m (physics); plan as measured, slope stretched from 14.5 m (55 deg instead of 48; deck / base width 0.45 instead of 0.33; portal top 10 m instead of 7.2), courses as measured | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck; `check_envelope` lists the row |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
 | Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; 25.9 is the longest arm whose 28 deg bent tip still clears the hull by 3 cm |
 | Hinge position | resolved in the fix round: drawn hinge frames on the physics pivot 5.8 m (the corner hinges read 6.75 m: not drawn); `check_envelope` compares them, no exception | 5.8 m | the inner face stays on the physics half gap 4.8 m |
@@ -202,7 +202,9 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 - Arm: root bend and width from weak
   views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 6.4k triangles per arm, far tier unchanged (cost:
   task 5); shock absorbers and the fin's station undecided.
-- Render vs the frames: the mount is lighter and more orange than the aerial (concrete grey around it, tan panels lower on the pyramid), its slope steeper and the mouths smaller than in `images.jpeg`; no scaffolds, no curved ribbed deflector floor, hoods are plain wedges; still different: no platforms with grating and no cross braces inside the face, the plinth is a plain box,
+- Render vs the frames (`sf_*.png`): mount taller and steeper than the photos (the 20 m deck), plates cleaner and more regular, hoods without
+  the chamfered facets, vents plain wedges, no scaffolds, vehicles, recessed door bays or the deck's fine hardware; hardstand outline and portal
+  width carry the largest plan errors (ship39 reads the ramp 15 m, tower foot 26 m, NOAA 20 +-4). Still different on the tower: no platforms with grating and no cross braces inside the face, the plinth is a plain box,
   the hoist cables and side members of the roof block are missing, grime is not tuned.
 - The far shader's `blur`, `alpha_scale` and colours are fitted to the merged tier at 900-1300 m for one sun / sky
   condition; other light may show a small step (< 2 % luminance measured).
@@ -214,14 +216,13 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   measures; recorded as a deviation from the spec's number.
 
 ## Fine build task 3 evidence (`screenshots/pad-b/fine/`, `.superpowers/sdd/2026-10-31-pad-b-prototype/fine3_*.txt`)
-- `tools/structures/tests/test_mount_layout.py` (12 cases): base 44.6 x 40 m, deck 18.7 m, ring top = physics height, ring 9 / 10.4 m, 12 clamps, ramps
-  20 m wide / 33 m out, floor -6 m, mouths open, hoods on the tower side, every polygon planar. Stack clearance (Review Focus 1): sampled points of
+- `tools/structures/tests/test_mount_layout.py`: base 44.6 x 40 m, deck 18.7 m, ring top = physics height, ring 9 / 10.4 m, 20 clamps, aprons 26 m wide / 33 m
+  out as wide as the portal foot, floor -9 m, portal open over its whole width on both sides, rectangular doors, hoods down the front face, hardstand round the site and off the pit, foot on the physics axis, every polygon planar. Stack clearance (Review Focus 1): sampled points of
   every mount polygon (6 per triangle) against the hull (4.5 m radius above the ring top, +0.04 m) and the 33 booster engines' bells below it
   (rings 1.0 / 2.6 / 4.1 m, exact bell contour, margin 0.04 m): none inside; a 8 m opening is caught (negative control). `tower_view_test`
-  (308 cases): model dimensions, deck at 19.65 m, ring opening 4.5 m, mask equals the drawn footprint (+-0.06 m), no script error in the log.
+  (309 cases): model dimensions, deck at 19 m, ring opening 4.5 m, mask equals the drawn footprint (+-0.06 m), no script error in the log.
 - `game/tests/trench_mask_check.gd` (Review Focus 4; GPU): per distance 30 m .. 400 km three frames (terrain alone / mask on, no models / as drawn);
   the pixels the mask changes (isolated noise filtered, 150 frames wait for the node morph) lie on the projected footprint (+3 px) at every
-  distance (0 px outside), >= 99 % of them are covered by the model, none beyond 20 km. `fine3_trench_mask.txt`.
-- Cost (`tower_cost_check`, RTX 4090, 1600x900): the whole tower incl. mount and trench adds +0.22 ms GPU at the 60 m close-up (0.83 vs 0.61), +0.11 ms at 4x
-  pixels, 0.00-0.01 ms from 300 m; the terrain mask itself +0.000 .. +0.014 ms (noise level), CPU render +0.00-0.014 ms.
+  distance (0 px outside), 100 % of them are covered by the model (per colour channel: the hazed dark ramp matched the hole's luminance at 5-12 km, frame read), none beyond 20 km. `fine3f_trench_mask.txt`.
+- Cost (`tower_cost_check`, RTX 4090, 1600x900): the whole tower incl. mount and trench adds +0.08 ms GPU at the 60 m close-up (0.68 vs 0.60), 0.01 ms at 6 km; the terrain mask itself within +-0.01 ms (noise level).
   The discard removes early-z on the terrain (not measurable here). `TowerView.build` 144 ms.

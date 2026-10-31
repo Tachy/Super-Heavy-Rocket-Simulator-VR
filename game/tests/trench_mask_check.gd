@@ -33,7 +33,7 @@ const MIN_NEIGHBOURS := 4  ## [E] neighbours (of 8) that must differ too
 const MIN_HOLE_PX := 40  ## the footprint must be at least this large on screen for check 4
 const HALF_ALONG_M := 20.0
 const HALF_ACROSS_M := 22.3
-const RAMP_HALF_M := 10.0
+const RAMP_HALF_M := 13.0
 const RAMP_END_M := 43.7
 
 var _main: Node
@@ -216,7 +216,11 @@ func _check_distance(distance: float) -> void:
 			if polygons.is_empty() or not _on_footprint(Vector2(x + 0.5, y + 0.5), polygons):
 				outside += 1
 				outside_box = outside_box.expand(Vector2(x, y)) if outside > 1 else Rect2(Vector2(x, y), Vector2.ZERO)
-			if absf(c.get_pixel(x, y).get_luminance() - lb) > DIFF_THRESHOLD * maxf(lb, 0.05):
+			# Per channel: the hazed dark ramp floor can match the hole's luminance while its colour differs.
+			var drawn := c.get_pixel(x, y)
+			var hole := b.get_pixel(x, y)
+			var channel := maxf(absf(drawn.r - hole.r), maxf(absf(drawn.g - hole.g), absf(drawn.b - hole.b)))
+			if channel > DIFF_THRESHOLD * maxf(lb, 0.05):
 				covered += 1
 	if outside > 0:
 		print("  outside pixels in %s; footprint polygons %s" % [outside_box, polygons])

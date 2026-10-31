@@ -14,7 +14,7 @@
 #          or [--at_event=entry_interface,<offset s>[,<n>]] (to the n-th event of that kind in the mission timeline,
 #          recorded first, else predicted; flies until it appears)
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
-#          [--legacy_hud] (F1: the old HUD too)
+#          [--legacy_hud] (F1: the old HUD too) [--hide_ui] (no panels in the image)
 # Weather: off in a render check unless --weather[=900 / =online] (online: waits for the downloads, at most 900 s or
 #          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>[,ice] (ice: the slab drawn as ice, cirrus; a
@@ -244,6 +244,11 @@ func _process(_delta: float) -> bool:
 				view.update_state({})
 				if _args.has("catch_hull"):
 					CatchPoseHull.attach(view, float(_args["catch_hull"]))
+		if _args.has("hide_ui"):  # comparison shots without the panels and overlays
+			for layer in _main.find_children("*", "CanvasLayer", true, false):
+				(layer as CanvasLayer).visible = false
+			for control in _main.find_children("*", "Control", true, false):
+				(control as Control).visible = false
 		# The view is placed: the eye is adapted to it. _view_from and _aim_at_moon run update_world while placing the
 		# camera, which used up set_focus's snap at the pre-aim pose (--view_from=moon: 22 000 km on the night side, gain
 		# 25, then ~0.24 s of light adaptation over the settle frames: ~7.5 on a sunlit view). The world's own update this

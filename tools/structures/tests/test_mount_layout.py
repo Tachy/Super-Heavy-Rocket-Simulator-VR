@@ -1,4 +1,4 @@
-"""Mount and trench layout (task 3): measured plan, physics deck height, ring, exits, stack clearance."""
+"""Mount, trench and hardstand layout: measured plan, physics deck height, ring, portals, stack clearance."""
 from __future__ import annotations
 
 import math
@@ -78,8 +78,8 @@ def test_base_and_top_plan_are_the_measured_ones(detail, mount):
 
 def test_slope_is_the_stretched_measured_frustum(detail):
     sh = ml.Shape(detail)
-    # plan run of the slope (12.15 m) over the 18.4 m above the plinth: the vertical scale is the physics deck / 14.5 m
-    assert sh.run == pytest.approx(12.15, abs=0.01)
+    # plan run of the slope over the height above the foot band: the vertical scale is the physics deck / 14.5 m
+    assert sh.run == pytest.approx(12.95, abs=0.01)
     assert sh.top_half_t == pytest.approx(7.05, abs=0.01)
     angle = math.degrees(math.atan2(sh.deck_z - sh.plinth_z, sh.run))
     assert 50.0 < angle < 62.0  # 48 deg measured at 14.5 m, steeper when stretched to the physics deck
@@ -95,35 +95,90 @@ def test_ring_outer_and_opening(detail, mount):
     clamp_tops = {round(v[2], 6) for verts, _ in mount.nodes["hardware"] for v in verts
                   if abs(v[2] - (detail["mount"]["deck_height_m"] + detail["mount"]["clamp_height_m"])) < 1e-9}
     assert clamp_tops, "clamps on the ring"
-    assert detail["mount"]["clamp_count"] == 12
+    assert detail["mount"]["clamp_count"] == 20
 
 
 def test_two_exit_ramps_opposite_and_perpendicular_to_the_tower_line(detail, trench):
     lo, hi = trench.extent("concrete")
     # ramps on both +-Y sides (across), none along the mount-tower line (X)
     assert lo[1] < -40.0 and hi[1] > 40.0
-    assert max(abs(lo[0]), abs(hi[0])) == pytest.approx(10.0, abs=0.01)  # 20 m wide
+    assert max(abs(lo[0]), abs(hi[0])) == pytest.approx(0.5 * detail["trench"]["width_m"], abs=0.01)
     sh = ml.Shape(detail)
     mid = 0.5 * (sh.half_a + ml.ramp_end_m(detail))
     assert mid == pytest.approx(detail["trench"]["centre_m"], abs=0.5)  # 33 m from the axis
-    assert detail["trench"]["width_m"] == pytest.approx(20.0, abs=0.01)
-    floor = [v for verts, _ in trench.nodes["concrete"] for v in verts]
-    assert min(v[2] for v in floor) == pytest.approx(-detail["mount"]["pit_depth_m"], abs=1e-9)
-    assert max(v[2] for v in floor) == pytest.approx(detail["trench"]["wall_height_m"], abs=1e-9)  # curb above the ground
+    assert lo[2] == pytest.approx(-detail["mount"]["pit_depth_m"], abs=1e-9)
+    assert hi[2] == pytest.approx(0.0, abs=1e-9)
+    assert trench.extent("wall")[1][2] == pytest.approx(detail["trench"]["wall_height_m"], abs=1e-9)  # low wall
 
 
-def test_tunnel_mouths_open_in_the_side_faces_only(detail, mount):
-    w = detail["mount"]["tunnel_width_m"] / 2.0
-    # no shell polygon covers the mouth: sample the face plane in the mouth and test it is not inside a shell polygon
+def test_ramps_are_as_wide_as_the_portal_foot(detail):
+    assert detail["mount"]["opening_width_ground_m"] == pytest.approx(detail["trench"]["width_m"], abs=0.01)
+
+
+def _covering(mount, nodes, y_sign, x, z):
+    """Polygons of `nodes` across the portal plane in front of the bucket at (x, z)."""
+    out = []
+    for node in nodes:
+        for verts, _ in mount.nodes[node]:
+            if min(v[1] * y_sign for v in verts) > 5.0 and _inside_xz(verts, x, z):
+                out.append(node)
+    return out
+
+
+def test_the_portal_is_one_big_opening_on_both_sides(detail, mount):
     sh = ml.Shape(detail)
+    nodes = ("shell", "plinth", "pier", "hood")
     for sy in (-1.0, 1.0):
-        z = 4.0
-        y = sy * sh.hy(z)
-        covering = [1 for verts, _ in mount.nodes["shell"]
-                    if all(abs(v[1] - verts[0][1]) < 1e-6 or True for v in verts)
-                    and min(v[1] for v in verts) * sy > 0 and _inside_xz(verts, 0.0, z) and abs(verts[0][1]) > 10.0]
-        assert covering == [], "the mouth in the face must be open"
-    assert w * 2.0 == pytest.approx(12.0)
+        for z in (0.5 * sh.plinth_z + 1.0, 0.5 * sh.open_top, sh.open_top - 0.2):
+            for frac in (-0.95, 0.0, 0.95):
+                assert _covering(mount, nodes, sy, frac * sh.xi(z), z) == [], f"opening blocked at z {z}, side {frac}"
+        # above the opening: the spandrel; outside it: the pier
+        assert _covering(mount, nodes, sy, 0.0, sh.open_top + 2.0)
+        assert _covering(mount, ("pier",), sy, sh.xi(2.0) + 1.0, 2.0)
+    assert sh.open_top / sh.deck_z == pytest.approx(0.5, abs=0.05)  # the opening is half the height (dusk 2025-09)
+    assert 2.0 * sh.xi(0.0) / detail["mount"]["base_toward_m"] > 0.6  # and most of the width
+
+
+def test_front_face_is_closed_with_rectangular_doors(detail, mount):
+    doors = mount.nodes["door"]
+    assert len(doors) == 2 and all(len(verts) == 4 for verts, _ in doors)  # no arches
+    assert all(max(v[0] for v in verts) < -10.0 for verts, _ in doors)  # in the -X face
+
+
+def test_no_bar_outside_the_apron(detail, trench):
+    assert "wall" in trench.nodes
+    lo, hi = trench.extent("wall")
+    assert max(abs(lo[0]), abs(hi[0])) == pytest.approx(0.5 * detail["trench"]["width_m"] + detail["trench"]["wall_thickness_m"])
+    assert hi[1] == pytest.approx(ml.ramp_end_m(detail))  # the walls end with the ramp: no separate long wall
+
+
+def test_bucket_floor_runs_from_the_ridge_to_the_pit(detail, mount):
+    lo, hi = mount.extent("deflector")
+    sh = ml.Shape(detail)
+    assert lo[2] == pytest.approx(sh.floor_z, abs=1e-9)
+    assert hi[2] == pytest.approx(detail["mount"]["ridge_top_m"] + detail["mount"]["rib_depth_m"], abs=1e-9)
+    assert hi[2] < sh.open_top  # the ridge stays below the ceiling
+
+
+def test_hardstand_surrounds_the_site_and_leaves_the_pit_open(detail, trench):
+    lo, hi = trench.extent("hardstand")
+    sh = ml.Shape(detail)
+    assert lo[2] == hi[2] == pytest.approx(detail["trench"]["hardstand_lift_m"])
+    assert lo[0] < -sh.half_t - 10.0 and hi[0] > detail["trench"]["foot_x_m"] + 30.0
+    assert lo[1] < -ml.ramp_end_m(detail) - 10.0 and hi[1] > ml.ramp_end_m(detail) + 10.0
+    for verts, _ in trench.nodes["hardstand"]:
+        cx = sum(v[0] for v in verts) / len(verts)
+        cy = sum(v[1] for v in verts) / len(verts)
+        assert not (abs(cx) < sh.half_t and abs(cy) < sh.half_a), "hardstand over the mount"
+        assert not (abs(cx) < 0.5 * detail["trench"]["width_m"] and abs(cy) < ml.ramp_end_m(detail)), "hardstand over a ramp"
+
+
+def test_tower_foot_stands_on_the_physics_axis_and_off_the_mount(detail, trench):
+    t = detail["trench"]
+    assert t["foot_x_m"] == pytest.approx(_physics()["distance_m"], abs=0.01)
+    lo, hi = trench.extent("foot")
+    assert lo[0] >= ml.Shape(detail).half_t  # off the mount's base
+    assert hi[2] == pytest.approx(t["foot_roof_height_m"])
 
 
 def _inside_xz(verts, x, z):
@@ -162,11 +217,16 @@ def test_hoods_and_qd_heads_stand_off_the_hull(detail, mount):
     assert min(qd_heads) >= hull + 0.3
 
 
-def test_hoods_flank_the_deck_on_the_tower_side(detail, mount):
-    xs = [v[0] for verts, _ in mount.nodes["hood"] for v in verts if v[2] > detail["mount"]["deck_height_m"]]
-    assert max(xs) <= ml.Shape(detail).top_half_t
-    ys = {math.copysign(1.0, v[1]) for verts, _ in mount.nodes["hood"] for v in verts if abs(v[1]) > 5.0}
+def test_hoods_are_bent_ducts_down_the_front_face(detail, mount):
+    m = detail["mount"]
+    above = [v for verts, _ in mount.nodes["hood"] for v in verts if v[2] > m["deck_height_m"]]
+    assert max(v[0] for v in above) < 0.0  # on the front side of the ring, none toward the tower
+    ys = {math.copysign(1.0, v[1]) for v in above if abs(v[1]) > 3.0}
     assert ys == {-1.0, 1.0}
+    deck = ml.Shape(detail).deck_z
+    box = [v for verts, _ in mount.nodes["hood"] for v in verts if v[0] == m["hood_front_x_m"]]
+    assert min(v[2] for v in box) == pytest.approx(deck - m["hood_drop_m"])  # the box runs down the sloped face
+    assert max(abs(v[1]) for v in box) < ml.Shape(detail).top_half_a
 
 
 def test_every_polygon_is_planar_and_outward_hinted(mount, trench):

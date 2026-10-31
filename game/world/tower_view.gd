@@ -9,16 +9,19 @@ const MOUNT_SEGMENTS := 24
 ## [E] Mount materials (linear albedo from the photos: weathered concrete, dark tunnel interiors, grey hoods).
 const PLINTH_CONCRETE := Color(0.50, 0.49, 0.46)
 const INTERIOR_DARK := Color(0.14, 0.13, 0.12)
-const DEFLECTOR_DARK := Color(0.09, 0.09, 0.10)
+const DEFLECTOR_DARK := Color(0.20, 0.16, 0.12)  ## [E] rust-brown ribbed steel, topdown_2025-09
 const MOUNT_STEEL := Color(0.30, 0.30, 0.31)
-const STAIR_TAN := Color(0.46, 0.38, 0.27)
-const TRENCH_WALL := Color(0.12, 0.12, 0.13)
+const PIER_CONCRETE := Color(0.27, 0.26, 0.24)  ## [E] sloped corner piers, grey concrete: person-scale frame, dusk 2025-09
+const TRENCH_WALL := Color(0.36, 0.35, 0.32)  ## [E] low side walls of the aprons, images.jpeg
+const RAMP_FLOOR := Color(0.27, 0.24, 0.19)  ## [E] tan-brown apron floor, darker than the hardstand: images.jpeg
+const DOOR_STEEL := Color(0.30, 0.31, 0.32)  ## [E] grey doors in the front face, person-scale frame
+const FOOT_CONCRETE := Color(0.30, 0.29, 0.27)  ## [E] the tower's foot block, images.jpeg
 const MASK_INSET_M := 0.05  ## [E] the terrain mask ends this far inside the walls, so no sliver of ground shows beside them
 const MASK_VISIBLE_MARGIN_M := 150.0  ## the pit model is drawn this much beyond the mask's camera range
 const ARM_STRIP := Color(0.45, 0.36, 0.24)  ## [E] tan strip on the arm deck, images.jpeg
 
 var site_id := ""
-## True when the Pad B models were built (the mount pyramid, the trench and the terrain mask), false for the boxes.
+## True when the Pad B models were built (the mount, the trench and the terrain mask), false for the boxes.
 var has_models := false
 ## render_check: fixed arm opening (radians) instead of the flight state.
 var preview_opening_rad := NAN
@@ -297,9 +300,10 @@ func _build_mount_model(models: Dictionary, geometry: Dictionary) -> void:
 	var shell := TowerMaterial.mount_shell(float(detail["mount"]["tile_m"]))
 	var materials := {
 		"shell": shell, "plinth": LitAerial.material(PLINTH_CONCRETE, 0.9, 0.0),
+		"pier": LitAerial.material(PIER_CONCRETE, 0.9, 0.0),
 		"interior": LitAerial.material(INTERIOR_DARK, 0.9, 0.0), "deflector": LitAerial.material(DEFLECTOR_DARK, 0.6, 0.4),
 		"hood": TowerMaterial.clad(), "hardware": LitAerial.material(MOUNT_STEEL, 0.5, 0.5),
-		"stair": LitAerial.material(STAIR_TAN, 0.8, 0.0), "door": TowerMaterial.dark()}
+		"door": LitAerial.material(DOOR_STEEL, 0.6, 0.3)}
 	var mount := Node3D.new()
 	mount.name = "MountModel"
 	mount.basis = frame
@@ -308,8 +312,10 @@ func _build_mount_model(models: Dictionary, geometry: Dictionary) -> void:
 	var trench := Node3D.new()
 	trench.name = "TrenchModel"
 	trench.basis = frame
-	var parts := StructureModels.model_node("Trench", models["trench"], {"concrete": _concrete,
-			"wall": LitAerial.material(TRENCH_WALL, 0.9, 0.0)}, _concrete)
+	var pad_concrete := TowerMaterial.pad_concrete(float(detail["trench"]["concrete_tile_m"]))
+	var parts := StructureModels.model_node("Trench", models["trench"], {"concrete": LitAerial.material(RAMP_FLOOR, 0.9, 0.0),
+			"hardstand": pad_concrete, "wall": LitAerial.material(TRENCH_WALL, 0.9, 0.0),
+			"foot": LitAerial.material(FOOT_CONCRETE, 0.9, 0.0)}, _concrete)
 	var range_m: float = float(detail["trench"]["mask_range_m"]) + MASK_VISIBLE_MARGIN_M
 	for part in parts.get_children():
 		(part as GeometryInstance3D).visibility_range_end = range_m
