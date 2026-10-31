@@ -23,7 +23,8 @@ class VehicleSpecError(ValueError):
 
 
 DETAIL_TABLES = {
-    "hull": ("segments", "ring_pitch_m", "weld_height_m", "weld_half_width_m", "nose_tip_radius_m", "base_chamfer_m"),
+    "hull": ("segments", "ring_pitch_m", "weld_height_m", "weld_half_width_m", "dent_slope_rms", "nose_tip_radius_m",
+             "base_chamfer_m"),
     "booster.hot_stage": ("height_m", "flange_height_m", "flange_proud_m", "vent_count", "vent_width_m",
                           "vent_height_m", "vent_proud_m", "vent_ribs", "vent_rib_proud_m"),
     "booster.grid_fin_fairing": ("length_frac", "width_m", "height_m"),

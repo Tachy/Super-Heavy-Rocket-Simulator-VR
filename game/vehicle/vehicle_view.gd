@@ -39,6 +39,13 @@ func _hull_material(kind: String) -> Material:
 	return _models["materials"][kind]
 
 
+## "ship" / "booster" for a stage's hull node (they carry the steel map), "steel" for every other part.
+func _hull_kind(part: String, stage: Dictionary) -> String:
+	if part != "hull":
+		return "steel"
+	return "ship" if stage["id"] == "ship" else "booster"
+
+
 ## Rebuilds geometry when the stage list changed (e.g. after separation), then places the body.
 func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
 	var stages: Array = sim.body_stages(body_index)
@@ -148,7 +155,7 @@ func _add_stage_node(stage: Dictionary, hull: Dictionary) -> Node3D:
 		var instance := MeshInstance3D.new()
 		instance.name = part
 		instance.mesh = hull[part]
-		instance.material_override = _hull_material("ship" if part == "hull" and stage["id"] == "ship" else "steel")
+		instance.material_override = _hull_material(_hull_kind(part, stage))
 		node.add_child(instance)
 	return node
 

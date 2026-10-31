@@ -25,6 +25,7 @@ renderer/rendering_method="forward_plus"
 rendering_device/driver.windows="d3d12"
 rendering_device/d3d12/max_resource_descriptors=262144
 anti_aliasing/quality/msaa_3d=2
+textures/default_filters/anisotropic_filtering_level=3
 limits/spatial_indexer/threaded_cull_minimum_instances=1000000
 
 [shader_globals]

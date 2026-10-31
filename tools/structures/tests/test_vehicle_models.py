@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build_models  # noqa: E402
+import hull_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 
 VEHICLE = "starship_block3"
@@ -181,7 +182,7 @@ def test_hull_bounds_nose_and_uv(built, spec, stage_id):
     assert lo[0] == pytest.approx(0.0, abs=BOUND_TOL_M)
     assert hi[0] - lo[0] == pytest.approx(st["length_m"], abs=BOUND_TOL_M)  # length, station axis = X
     radius = st["diameter_m"] / 2.0
-    assert hi[1] - lo[1] == pytest.approx(st["diameter_m"], abs=BOUND_TOL_M)  # diameter incl. the weld beads
+    assert hi[1] - lo[1] == pytest.approx(st["diameter_m"], abs=BOUND_TOL_M)  # the plain lathe: radius = config radius
     assert hi[2] - lo[2] == pytest.approx(st["diameter_m"], abs=BOUND_TOL_M)
 
     def ring(x0):  # radius of the profile station nearest to x0
@@ -203,6 +204,19 @@ def test_hull_bounds_nose_and_uv(built, spec, stage_id):
     assert max(v for _, v in uv) == pytest.approx(st["length_m"], abs=BOUND_TOL_M)
     # outward winding: the closed shell has a positive volume (~ the cylinder's)
     assert _signed_volume(pos, tri) > 0.8 * math.pi * radius ** 2 * (st["length_m"] - 0.5 * nose)
+
+
+@needs_blender
+@pytest.mark.parametrize("stage_id", ["booster", "ship"])
+def test_hull_is_a_plain_lathe_without_ring_beads(built, spec, stage_id):
+    st = spec["stages"][stage_id]
+    pos, _, tri = _meshes(built / f"{stage_id}.gltf")["hull"]
+    barrel_end = st["length_m"] - st["nose_length_m"]
+    barrel_rings = {round(p[0], 3) for p in pos if p[0] <= barrel_end + 1e-3}
+    assert len(barrel_rings) <= 4  # the base, the chamfer's end and the barrel's end: no weld rings in between
+    assert len(tri) < 8500  # booster 768, ship 7,680 (the nose rings); the whole stage was ~21,000 with the beads
+    segments = spec["detail"]["hull"]["segments"]
+    assert segments >= 96  # the silhouette at close range: sagitta < 2.5 mm at R = 4.5 m
 
 
 @needs_blender
@@ -279,7 +293,10 @@ def test_engine_exit_diameter_and_gimbal_origin(built, spec, eid):
 def test_manifest_and_triangle_counts(built, spec):
     manifest = json.loads((built / "manifest.json").read_text(encoding="utf-8"))
     assert set(manifest["files"]) == {"booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
-                                      "raptor.gltf", "rvac.gltf"}
+                                      "raptor.gltf", "rvac.gltf", "hull_steel.png"}
+    steel = manifest["look"]["steel_map"]
+    assert steel["file"] == "hull_steel.png" and (built / steel["file"]).is_file()
+    assert steel["period_v_m"] == spec["detail"]["hull"]["ring_pitch_m"]
     assert manifest["engines"]["raptor3"]["exit_plane_x_m"] < 0.0
     look = manifest["look"]  # what the game's hull shader reads (task 3)
     assert look["ship_belly_azimuth_deg"] == spec["stages"]["ship"]["belly_azimuth_deg"]
@@ -304,6 +321,42 @@ def test_generation_is_deterministic_and_up_to_date_check(built, tmp_path):
         for node in a:
             assert a[node] == b[node], (name, node)
     assert {p.name for p in built.iterdir()} == {p.name for p in second.iterdir()}
+    assert (built / "hull_steel.png").read_bytes() == (second / "hull_steel.png").read_bytes()  # the baked map too
     manifest_time = (second / "manifest.json").stat().st_mtime
     assert build_models.build_vehicle(VEHICLE, second) == 0  # up to date: nothing regenerated
     assert (second / "manifest.json").stat().st_mtime >= manifest_time
+
+
+# ------------------------------------------------------------------------------ baked steel map (no Blender)
+
+def test_steel_map_is_deterministic_seamless_and_has_the_weld_at_v_zero(spec):
+    hull = spec["detail"]["hull"]
+    radius = spec["stages"]["ship"]["diameter_m"] / 2.0
+    a, b = hull_textures.bake(radius, hull), hull_textures.bake(radius, hull)
+    assert a.shape == (hull_textures.SIZE_V, hull_textures.SIZE_U, 4)
+    assert (a == b).all() and hull_textures.png_bytes(a) == hull_textures.png_bytes(b)
+    slope = (a[..., :2].astype(float) / 255.0 - 0.5) * hull_textures.SLOPE_RANGE
+    # seamless: the step across the wrap is no larger than the largest step between neighbours (v: the dents' slope
+    # along u only - the weld's apex sits exactly on the seam, so the v slope flips sign there by design)
+    for axis, channels in ((0, [0]), (1, [0, 1])):
+        part = slope[..., channels]
+        inner = abs(part.take(range(1, part.shape[axis]), axis) - part.take(range(0, part.shape[axis] - 1), axis))
+        wrap = abs(part.take(0, axis) - part.take(-1, axis))
+        assert wrap.max() <= inner.max() + 1e-9
+    dent_rows = slice(hull_textures.SIZE_V // 4, 3 * hull_textures.SIZE_V // 4)
+    assert slope[dent_rows, :, 0].std() == pytest.approx(hull["dent_slope_rms"] / math.sqrt(2.0), rel=0.6)
+    # the bead: slope +-weld_height / half width either side of v = 0 (row 0 and the last row), HAZ coverage there
+    peak = hull["weld_height_m"] / hull["weld_half_width_m"]
+    assert abs(slope[1, 0, 1]) == pytest.approx(peak, abs=0.05) and slope[1, 0, 1] * slope[-2, 0, 1] < 0.0
+    assert a[0, 0, 3] == 255 and a[hull_textures.SIZE_V // 2, 0, 3] == 0
+    mean = a[..., 3].mean() / 255.0  # heat-affected band share of the ring: 2 x 1.2 x half width / pitch
+    assert mean == pytest.approx(2.0 * hull_textures.HAZ_FACTOR * hull["weld_half_width_m"] / hull["ring_pitch_m"],
+                                 rel=0.05)
+
+
+def test_steel_map_needs_one_hull_radius(spec):
+    import copy
+    bad = copy.deepcopy(spec)
+    bad["stages"]["booster"]["diameter_m"] = 8.0
+    with pytest.raises(ValueError, match="one hull radius"):
+        hull_textures.write(Path("."), bad)

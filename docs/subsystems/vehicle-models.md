@@ -17,8 +17,9 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   at X = 0, nose +X), (Y, Z) = r (cos a, sin a), belly azimuth 270 = -Z. The game maps body (x, y, z) to render (y, z, x)
   like `Frames.to_render`; `vehicle_view.gd` places stage geometry at station along render +Z, so the models need that one
   permutation and no other offset.
-- `booster.gltf`, `ship.gltf`: nodes `hull` (lathe, ring-weld beads from the ring pitch, radius = config radius + bead only;
-  ship: tangent ogive of the config's nose length with a blunt tip; booster: flat top), `hot_stage` (flange + 24 vent plates
+- `booster.gltf`, `ship.gltf`: nodes `hull` (a PLAIN lathe: rings only at the section ends - base, chamfer end, barrel end - and on the nose, 128
+  segments around (sagitta 1.4 mm at R = 4.5 m); the weld seams and dents are the baked steel map, not mesh; radius = config
+  radius; ship: tangent ogive of the config's nose length with a blunt tip; booster: flat top), `hot_stage` (flange + 24 vent plates
   with louvre ribs), `fin_fairings`, `catch_pins` at the config stations / azimuths / protrusion, ship `chine` (swept strake
   along the tile boundary, azimuth = belly +- the coverage half angle of the tile table) and `raceway`. Hull UV = (arc metres
   at the barrel radius, station metres): glTF u = arc, v = station (Blender v = 1 - station).
@@ -51,35 +52,54 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   the radial Y by +deflection. Both are tested against re-implementations of `flap_span_direction` and the grid-fin normal.
 - Plumes start at the model's exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the gimbal point); cylinders keep 3.0 m.
 
+## Steel map (`tools/structures/hull_textures.py` -> `data/models/starship_block3/hull_steel.png`)
+- Baked by the driver (numpy, no Blender), procedural from the detail file's `[hull]` numbers (ring pitch, weld height / half
+  width, `dent_slope_rms`; no photo pixels), covered by the manifest's input hash (the script is hashed), deterministic (fixed
+  lattice seed, fixed zlib level, test: byte-identical PNG). One RGBA8 PNG, 1024 x 512 texels, tiling: u = circumference / 6
+  (4.71 m, 4.6 mm per texel, closes around the R = 4.5 m hull), v = the 1.8 m ring pitch (3.5 mm per texel) with the weld bead
+  at v = 0 (a weld at every multiple of the pitch). Channels: R, G slope along u / v (bead: triangle 12 mm high, 10 cm wide;
+  dents: two noise octaves, ~1.2 m and ~0.38 m, rms slope 0.03), B slope energy sx^2 + sy^2, A heat-affected band coverage.
+  The manifest's `look.steel_map` holds file, periods, ranges.
+- VRAM: 2.0 MiB + mips = 2.7 MiB (RGBA8, the full chain built by the game with `Image.generate_mipmaps`: box averages, which is
+  what the channels are designed for); the file is 180 kB. Sampled with trilinear + anisotropic filtering (project setting
+  `textures/default_filters/anisotropic_filtering_level` = 3, 8x; it holds for every texture of the project).
+- Roughness carries the lost normal variance: on a mip the shader takes `B - |mean slope|^2` (zero on mip 0, the slope variance
+  the averaging removed) and widens the GGX alpha (`alpha_eff^2 = alpha^2 + variance`, Godot's roughness = sqrt(alpha)), so
+  the glints do not shimmer. Missing file / not the hull: `steel_textured` false, plain steel, one log line.
+
 ## Hull shader (`game/shaders/vehicle_hull.gdshader` + `heat_shield_tiles.gdshaderinc`)
 - One opaque spatial shader (LitAerial's atmosphere fog, Godot PBR lighting: the clouds draw behind it, nothing goes to the
-  transparent pass), three materials made by `VehicleModels` from the manifest's `look` block (ring pitch, weld bead size, tile
-  size / gap, coverage table, belly azimuth, barrel end): mode 0 bare steel (booster, chine, raceway, fins, flap edges), 1 ship hull,
-  2 flap (tiles on the outer +Y face). Coordinates are the node's LOCAL body frame, no baked texture, nothing view dependent: both
-  eyes of a stereo frame evaluate the same surface function.
+  transparent pass), four materials made by `VehicleModels` from the manifest's `look` block (ring pitch, first weld station, steel
+  map, tile size / gap, coverage table, belly azimuth, barrel end): `steel` plain (chine, raceway, fins, hot stage, flap edges),
+  `booster` mode 0 with the steel map, `ship` mode 1 with the steel map (tiles on the windward side), `flap` mode 2 (tiles on the
+  outer +Y face). The steel map is addressed by the hull's UV, the tiles by the LOCAL body position; nothing is view dependent:
+  both eyes of a stereo frame sample the same maps with their own derivatives.
 - Steel: metallic 0.8, roughness 0.27 [E] (a diffuse share stands in for the sky's weak reflection), per-ring tint / roughness from a
-  hash of the ring index, darker rougher heat-affected band either side of each weld, oil-canning dents as the gradient of two noise
-  octaves tilting the normal (fade with the pixel footprint from 0.06 m; the second octave, wavelength ~0.38 m, is gone from 0.19 m =
-  Nyquist; skipped under full tiles). The weld bead's mesh-normal slope is subtracted from the steel normal as well, fading in from
-  px = the bead's half width to 3 x (sub-pixel beyond ~280 m in VR, where the normals alias); the radius used for the tile arc is the
-  profile radius without the bead's height; tile ids are exact lattice integers.
+  hash of the ring index (the only analytic steel detail left: it fades to its mean from 0.06 m, panel_fade), the steel map's weld
+  bead + dents as a tangent-space normal (frame: circumferential tangent, cross(n, tangent), the mesh normal, so it also follows the
+  ogive), its heat-affected band darkening the albedo (0.25) and roughening (0.22) [E], a per-ring shift of u so every ring panel has
+  its own dents (derivatives from the unshifted UV: no mip seam). No seams below `look.weld_first_m` (the chamfer). The seams
+  continue over the ogive at the 1.8 m station pitch. The old footprint fades of the dents / bead slope and the profile-radius
+  workaround are gone (the tile arc uses the local radius; the mesh is a plain lathe).
 - Tiles: axial hex cells (0.30 m across flats, 6 mm gap, config values) of (arc length, station) with the arc taken at the local
   radius; coverage = half angle around the belly azimuth from the detail file's table (cut by the smooth boundary like the chine
-  strake); gap mask, bevel normal, per-tile shade hash, 0.6 % lighter "repaired" tiles. The weld beads' slope is taken out of the
-  normal under the shield (barrel: radial; ogive: the profile slope minus the bead). Anti-aliasing: the pixel footprint (derivatives
+  strake); gap mask, bevel normal, per-tile shade hash, 0.6 % lighter "repaired" tiles. Under the shield the normal is the barrel's
+  radial or the ogive's profile slope. Anti-aliasing: the pixel footprint (derivatives
   of the local position) box-filters the gap and edge, the per-tile detail fades to the mean colour between 0.12 and 0.35 tile widths
   per pixel, the bevel (a highlight, no mean) fades out at 1-3 bevel widths. Flaps: planar (span, hinge) coordinates.
 - Known limit: s = angle x local radius shears the lattice a little on the ogive; real tiles are cut there anyway.
 
 ## Standing decisions
-- Detail in geometry only where it reads (beads, vents, lattice, strakes); the tiles are the shader above. Engines keep the
+- Detail in geometry only where the silhouette needs it (vents, lattice, strakes, hot-stage flange, nose); fine structure (welds,
+  dents) is texture, the tiles are analytic in the shader above (user 2026-10-31: everything gets mipmapped textures). Engines keep the
   view's LitAerial steel. Staying data-driven: nothing is typed into a generator that the configs carry.
 - The deterministic check compares positions, UVs and indices byte-for-byte; Blender's smooth normals differ in the 7th digit
   between runs, so the `.bin` files as a whole are not byte-identical.
 
 ## Validation
-- `python -m pytest tools/structures/tests/test_vehicle_models.py -q` (34 tests with the Pad B ones; Blender cases skip
-  without Blender): hull bounds / diameter / nose / UV / outward winding, pins, fin fairings, chine azimuth, flap and fin
+- `python -m pytest tools/structures/tests/test_vehicle_models.py -q` (43 tests in the folder; Blender cases skip
+  without Blender): hull bounds / diameter / nose / UV / outward winding / no weld rings in the barrel, steel map (deterministic,
+  seamless, weld bead and band at v = 0, rms slope; no Blender needed), pins, fin fairings, chine azimuth, flap and fin
   hinge at the origin and sizes, engine exit diameter, manifest, determinism, up-to-date skip, spec validation, flap sign.
 - `godot --headless --path game --script res://tests/vehicle_view_test.gd` (synthetic snapshots from the vehicle config): node
   sets of other vehicle / no models / no `vehicle_id`, 33 + 6 engines and their ring-formula poses, gimbal follow, flap poses at
@@ -87,19 +107,25 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   (The headless renderer keeps no MultiMesh transforms: the view keeps the last engine poses for the test.)
 - Preview: `blender -b --factory-startup -P tools/structures/blender/preview_vehicle.py -- --spec <json> --out
   screenshots/vehicles` (stack, ship top / base, booster base / top, fin close-up; `--flap-deg`, `--fin-deg`).
-- Triangles: booster 21,252, ship 21,020, flap 84 each, grid fin 924, Raptor 2,048, RVac 2,560 (33 + 6 engines are instances).
+- Triangles: booster 4,644 (hull 768, hot stage 1,216), ship 9,372 (hull 7,680, of it the nose; chine 404, raceway 96); before the
+  plain lathe 21,252 / 21,020 (72 segments, a bead ring every 1.8 m). Flap 84 each, grid fin 924, Raptor 2,048, RVac 2,560 (33 + 6 engines are instances).
 
 - `godot --path game --script res://tests/tile_shimmer_check.gd -- --surface=tiles|steel` (GPU, one surface per run): VR focal
   2900 px (FOV 17.6 deg on the 900 px window), fixed exposure, 5 to 500 m, a 2 m patch (> the ring pitch, so beads count), 8 frames of
   0.3 px head motion, each at scale 1 (A) and at scale 2 (B: the supersampled reference, `footprint_scale` 2 so it evaluates the SAME
   filtered pattern, only sampled more densely). Gated: per-pixel temporal flicker (mean |dL| between motion frames / L) of A <=
   1.5 x the reference's own + 0.004; per-pixel RMS of A - B over L <= 0.15 [E]; tiles: luminance ratio max / min <= 1.10. Tiles: ratio
-  1.081, temporal 0.0001-0.010 (ref 0.0000-0.0098), error <= 0.124 (40 m); steel (booster barrel, sunlit): temporal <= 0.0006, error
-  <= 0.128 (500 m, 10 px patch, mean drifts 0.30 -> 0.35 with distance, also with the dents or the bead slope switched off, not examined: probably the haze; ratio not gated). Before the fix round the
+  1.081, temporal 0.0001-0.010 (ref 0.0000-0.0098), error <= 0.124 (40 m); steel (booster barrel, sunlit, now the mipmapped steel map):
+  temporal <= 0.0007 (ref <= 0.0007), error <= 0.043 (500 m; it was 0.128 with the analytic weld / dent fades), mean 0.29 -> 0.31
+  with distance; ratio 1.074 (not gated). Logs of this state: `hs_shimmer_tiles.log`, `hs_shimmer_steel.log`. Before the fix round the
   check averaged a 1 m patch (blind to moire) and gated only the ratio; with the per-pixel metrics the first shader failed (steel
   500 m error 0.131, tiles 320 m 0.375 / ratio 1.117; logs `.superpowers/sdd/2026-10-31-starship-prototype/shimmer_red_*.log`, the
-  reference there still evaluated finer footprints). Logs of the final state: `shimmer_final_tiles.log`, `shimmer_final_steel.log`.
-- Cost (`vehicle_cost_check.gd`, RTX 4090, 1600 x 900 window, stack on the pad, terrain settled, 3 repeats of 120-frame GPU medians
+  reference there still evaluated finer footprints). Logs before the steel map: `shimmer_final_tiles.log`, `shimmer_final_steel.log`.
+- Cost with the plain lathe and the steel map (`hs_cost.log`; the older numbers below are the 21k-triangle meshes with analytic steel):
+  close-up scale 1 0.933 / 0.909 / 0.905 / 1.088 ms (hull / steel / cyl / hidden), scale 2 1.777 / 1.689 / 1.678 / 2.033; shader vs old
+  LitAerial on the same meshes +0.024 / +0.088 ms (+0.015 ms per MP, as before), models vs cylinders +0.028 / +0.099; stack 100 m
+  scale 2 2.159 / 2.147 / 2.107 / 2.138; frame primitives: the models add 29 k at 100 m (were 58 k).
+- Cost before (`vehicle_cost_check.gd`, RTX 4090, 1600 x 900 window, stack on the pad, terrain settled, 3 repeats of 120-frame GPU medians
   with the variants interleaved, scales 1 and 2 per axis; 2 is the engine's maximum): `hull` shader vs `steel` (old LitAerial on the
   SAME meshes) vs `cyl` (old cylinders) vs `hidden`. Frame-filling close-up (10 m from the belly): scale 1 0.929 / 0.909 / 0.903 /
   1.081 ms; scale 2 (5.8 MP) 1.764 / 1.685 / 1.674 / 2.031 ms: the shader costs +0.079 ms on the same meshes (+0.014 ms per MP), the
@@ -116,6 +142,12 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   flaps 90 / 81 / 24.6 / 22.4 deg).
 
 ## Open points
+- Mipmapped tile set (estimate, not built): one periodic map over the hex lattice's rectangular repeat (0.30 x 0.52 m, two tiles),
+  256 x 512 RGBA8 (1.2 x 1.0 mm per texel, resolves the 6 mm gap), slope + bevel, slope energy, gap mask: 0.5 MiB + mips = 0.67 MiB;
+  the gap / bevel then filter by mip + anisotropy and the `stripe_cover` / bevel fades go. The per-tile shade and the repaired
+  tiles need the cell id (lattice integers, still analytic) or a 128 x 256 R8 id-shade map (32 kB, nearest per cell, mips to the
+  mean); a texture with the per-tile variation baked in would need ~2.4 x 4.2 m at 1.2 mm = 28 MiB, so no. The coverage boundary
+  (smooth cut by the half-angle table) and the ogive's arc shear stay analytic.
 - Black shade sides in a static scene (user decision, lighting unchanged): the sky's radiance cubemap (ambient and reflections) stays
   black after the atmosphere tables load: `world.gd` uses `Sky.PROCESS_MODE_INCREMENTAL` and `sky.gdshader` reads only global uniforms,
   so Godot does not re-render it. In a real flight session a white diffuse hull's shade side reads `0 1 2`, after one sky-material write

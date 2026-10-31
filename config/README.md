@@ -418,5 +418,6 @@ over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad)
   vents, grid-fin lattice, flap slab, catch-pin heads, chine, raceway, tile layout, engine bell contour). Placement and
   size always come from `vehicles/<id>.toml` and `engines/*.toml` (length, diameter, nose, flaps, fins, pins, engine
   rings, nozzle exit diameters, belly azimuth); the detail file repeats none of them. Every value line ends in
-  `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/vehicle_spec.py`
+  `# [E] <method>` or `# [S] <url>`. `[hull]`: `segments` of the plain lathe; ring pitch, weld height / half width and
+  `dent_slope_rms` are baked into the steel map (`tools/structures/hull_textures.py`). Validated by `tools/structures/vehicle_spec.py`
   (`python -m pytest tools/structures/tests/test_vehicle_models.py`). State: `docs/subsystems/vehicle-models.md`.

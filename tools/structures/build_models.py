@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hull_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,7 +36,8 @@ GENERATORS = ("gen_profiles.py", "gen_chopstick.py")
 OUTPUTS = ("profiles.gltf", "chopstick.gltf")
 MANIFEST = "manifest.json"
 VEHICLE_GENERATORS = ("gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py")
-VEHICLE_FIXED_OUTPUTS = ("booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf")
+VEHICLE_FIXED_OUTPUTS = ("booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
+                         hull_textures.FILE_NAME)
 VEHICLE_FRAME = ("Blender axes in glTF (export_yup off) = the config's body frame: X station axis (station 0 at X = 0, "
                  "nose +X), (Y, Z) = r (cos a, sin a), belly azimuth 270 = -Z; game maps body (x, y, z) to render "
                  "(y, z, x). Hull UV = (arc metres at the barrel radius, 1 - station) in Blender = (u, station) in glTF. "
@@ -120,7 +122,8 @@ def vehicle_hash(spec_text: str, version: str) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
     h.update(spec_text.encode())
-    for p in [SCRIPT_DIR / "common.py", SCRIPT_DIR / "vehicle_common.py", *(SCRIPT_DIR / g for g in VEHICLE_GENERATORS)]:
+    for p in [SCRIPT_DIR / "common.py", SCRIPT_DIR / "vehicle_common.py", Path(hull_textures.__file__),
+              *(SCRIPT_DIR / g for g in VEHICLE_GENERATORS)]:
         h.update(p.name.encode())
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()
@@ -138,8 +141,8 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> 
     engines = {eid: {"file": e["file"], "exit_plane_x_m": -e["bell_length_m"],
                      "exit_diameter_m": e["nozzle_exit_diameter_m"]} for eid, e in sorted(spec["engines"].items())}
     detail = spec["detail"]
-    look = {"ring_pitch_m": detail["hull"]["ring_pitch_m"],  # the shader's weld bands and per-ring panels
-            "weld_height_m": detail["hull"]["weld_height_m"], "weld_half_width_m": detail["hull"]["weld_half_width_m"],
+    look = {"ring_pitch_m": detail["hull"]["ring_pitch_m"],  # the shader's per-ring panels and the steel map's period
+            "weld_first_m": detail["hull"]["base_chamfer_m"] + 2.0 * detail["hull"]["weld_half_width_m"],
             "ship_barrel_end_m": spec["stages"]["ship"]["length_m"] - spec["stages"]["ship"]["nose_length_m"],
             "ship_belly_azimuth_deg": spec["stages"]["ship"]["belly_azimuth_deg"],
             "tiles": {k: detail["ship"]["tiles"][k] for k in ("hex_across_flats_m", "gap_m", "coverage_station_m",
@@ -176,6 +179,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     spec_file.write_text(spec_text, encoding="utf-8")
     triangles: dict[str, int] = {}
     try:
+        steel_map = hull_textures.write(staging, spec)
         for gen in VEHICLE_GENERATORS:
             cmd = [str(exe), "-b", "--factory-startup", "-P", str(SCRIPT_DIR / gen), "--", "--spec", str(spec_file),
                    "--out", str(staging)]
@@ -191,6 +195,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     finally:
         spec_file.unlink(missing_ok=True)
     manifest = vehicle_manifest(spec, digest, version, triangles)
+    manifest["look"]["steel_map"] = steel_map
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if out.exists():
         shutil.rmtree(out)

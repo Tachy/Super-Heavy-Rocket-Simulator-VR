@@ -6,10 +6,11 @@
 # screenshots/mechazilla/; no photo pixels are used. Keys: config/README.md.
 
 [hull]
-segments = 72                      # [E] radial segments: sagitta 4.3 mm at R = 4.5 m, smooth shading hides the rest
+segments = 128                     # [E] radial segments of the plain lathe: sagitta 1.4 mm at R = 4.5 m (the silhouette at close range)
 ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; photo 108: ~33 px between welds = 1.8 m
-weld_height_m = 0.012              # [E] weld bead height, reads as a normal-map-like ridge at 5-30 m
+weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
 weld_half_width_m = 0.05           # [E] half width of the bead
+dent_slope_rms = 0.03              # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
 nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across)
 base_chamfer_m = 0.25              # [E] aft edge chamfer of the skirt (radial and axial)
 

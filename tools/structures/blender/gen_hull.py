@@ -1,10 +1,11 @@
-"""Hulls of Super Heavy and Starship: lathe hull with weld beads, nose, hot-stage section, chine, raceway, pins.
+"""Hulls of Super Heavy and Starship: plain lathe hull, nose, hot-stage section, chine, raceway, pins.
 
 Run: blender -b --factory-startup -P gen_hull.py -- --spec <json> --out <dir>
 Writes booster.gltf and ship.gltf. Frame (see vehicle_common): X = station axis with the stage's station 0 at X = 0, the
 nose at X = length; (Y, Z) = r (cos a, sin a). Root node = the stage id (identity transform), children: `hull` (the
-shell: radius = config radius + weld bead only; UV = (arc metres at the barrel radius, station metres) - glTF v is the
-station), `hot_stage`, `fin_fairings`, `catch_pins`, `chine`, `raceway` where the stage has them.
+shell: a plain lathe, no weld rings - welds and dents are the baked steel maps; UV = (arc metres at the
+barrel radius, station metres), glTF v is the station), `hot_stage`, `fin_fairings`, `catch_pins`, `chine`,
+`raceway` where the stage has them.
 """
 import math
 import sys
@@ -15,7 +16,7 @@ import bpy  # noqa: E402
 import vehicle_common as vc  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-NOSE_SAMPLES = 40  # [E] profile samples along the ogive
+NOSE_SAMPLES = 20  # [E] profile samples along the ogive (chord error < 5 mm on the 17 m / rho 35 m ogive)
 MERGE_M = 1e-4  # profile stations closer than this are one
 PIN_SIDES = 12  # [E]
 RACEWAY_SIDES = 8  # [E]
@@ -25,13 +26,12 @@ X_AXIS = Vector((1.0, 0.0, 0.0))
 
 
 class Profile:
-    """Radius of the hull over the station: chamfer, barrel with weld beads, tangent ogive nose with a blunt tip."""
+    """Radius of the hull over the station: chamfer, plain barrel, tangent ogive nose with a blunt tip."""
 
     def __init__(self, stage, hull):
         self.L, self.R = stage["length_m"], stage["diameter_m"] / 2.0
         self.nose = stage["nose_length_m"]
         self.chamfer = hull["base_chamfer_m"]
-        self.pitch, self.weld_h, self.weld_w = hull["ring_pitch_m"], hull["weld_height_m"], hull["weld_half_width_m"]
         self.tip_r = hull["nose_tip_radius_m"]
         self.cap_h = self.tip_r if self.nose > 0.0 else 0.0
         if self.nose > 0.0:
@@ -43,7 +43,7 @@ class Profile:
         self.x_barrel_end = self.L - self.nose
 
     def base(self, x):
-        """Radius without weld beads."""
+        """Radius of the shell."""
         if x < self.chamfer:
             return self.R - self.chamfer + x
         if self.nose <= 0.0 or x <= self.x_barrel_end:
@@ -52,26 +52,11 @@ class Profile:
         s = self.s_t + (s_new - self.cap_h) * (self.nose - self.s_t) / (self.nose - self.cap_h)
         return math.sqrt(max(self.rho ** 2 - (self.nose - s) ** 2, 0.0)) + self.R - self.rho
 
-    def bead(self, x):
-        h = 0.0
-        k = round(x / self.pitch)
-        for kk in (k - 1, k, k + 1):
-            xk = kk * self.pitch
-            lo, hi = self.chamfer + 2.0 * self.weld_w, self.L - max(self.cap_h, 0.4) - self.weld_w
-            if lo < xk < hi:
-                h = max(h, self.weld_h * max(0.0, 1.0 - abs(x - xk) / self.weld_w))
-        return h
-
     def radius(self, x):
-        return self.base(x) + self.bead(x)
+        return self.base(x)
 
     def stations(self):
-        xs = {0.0, self.chamfer, self.x_barrel_end if self.nose > 0 else self.L}
-        k = 1
-        while k * self.pitch < self.L:
-            xk = k * self.pitch
-            xs.update((xk - self.weld_w, xk, xk + self.weld_w))
-            k += 1
+        xs = {0.0, self.chamfer, self.x_barrel_end if self.nose > 0 else self.L}  # a straight barrel: its two ends only
         if self.nose > 0.0:
             x_end = self.L - self.cap_h
             for i in range(NOSE_SAMPLES + 1):  # denser toward the tip
@@ -92,7 +77,8 @@ class Profile:
             for i in range(1, 9):
                 t = 0.5 * math.pi * i / 8.0
                 main.append((x_e + self.cap_h * math.sin(t), r_e * math.cos(t)))
-        runs = [([(0.0, 0.0), (0.0, main[0][1])], (-1.0, 0.0, 0.0)), (main, "out")]
+        # the chamfer is its own smooth group: one long barrel strip must not inherit the chamfer corner's normal
+        runs = [([(0.0, 0.0), (0.0, main[0][1])], (-1.0, 0.0, 0.0)), (main[:2], "out"), (main[1:], "out")]
         if self.nose <= 0.0:
             runs.append(([(self.L, main[-1][1]), (self.L, 0.0)], (1.0, 0.0, 0.0)))
         return runs

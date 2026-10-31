@@ -1,12 +1,12 @@
 shader_type spatial;
-// Hull of the detailed Starship / Super Heavy models (game/vehicle/vehicle_models.gd): bare stainless steel (ring
-// weld bands, per-ring panel tint, oil-canning dents in the normal, soot-free) and, on the ship's windward side and the
-// flaps' outer faces, the heat-shield tiles of heat_shield_tiles.gdshaderinc. Lit like LitAerial (Godot's PBR lighting
+// Hull of the detailed Starship / Super Heavy models (game/vehicle/vehicle_models.gd): bare stainless steel (weld seams
+// and oil-canning dents from the baked, mipmapped steel map, per-ring panel tint, soot-free) and, on the ship's
+// windward side and the flaps' outer faces, the heat-shield tiles of heat_shield_tiles.gdshaderinc. Lit like LitAerial (Godot's PBR lighting
 // and the sky's reflections, seen through the atmosphere as FOG), opaque: it must stay in the opaque pass, which the
 // cloud layer draws behind (a transparent draw would hide from the clouds).
 //
-// All coordinates are the node's LOCAL ones = the config's body frame (X station, nose +X; flaps: X hinge axis, Y outer
-// face, Z span), so the pattern is a function of the surface and needs no baked texture. Mode 0 steel only (booster,
+// Coordinates are the node's LOCAL ones = the config's body frame (X station, nose +X; flaps: X hinge axis, Y outer
+// face, Z span); the steel map is addressed by the hull's UV (arc metres, station metres), the tiles are analytic. Mode 0 steel only (booster,
 // chine, raceway, flap edges), 1 ship hull (tiles within the coverage table around the belly), 2 flap (tiles on +Y).
 
 #include "res://shaders/atmosphere.gdshaderinc"
@@ -17,12 +17,18 @@ uniform vec3 steel_albedo : source_color = vec3(0.80, 0.81, 0.83);
 uniform float steel_metallic : hint_range(0.0, 1.0) = 0.8;  // < 1: a diffuse share stands in for the sky's weak reflection
 uniform float steel_roughness : hint_range(0.0, 1.0) = 0.27;
 uniform float ring_pitch_m = 1.8;
-uniform float weld_half_width_m = 0.06;   // heat-affected band either side of a weld
 uniform float barrel_end_m = 1.0e9;      // ship: the nose starts here (below it the shield's profile is straight)
-uniform float weld_bead_half_m = 0.05;    // the weld bead's geometry (detail file): half width and slope = height / half width
-uniform float weld_bead_slope = 0.24;
-uniform float dent_gain = 0.07;           // slope amplitude of the oil-canning dents (normal tilt)
 uniform float footprint_scale = 1.0;      // test hook: tile_shimmer_check's supersampled reference sees px * its scale
+
+// Baked steel map (tools/structures/hull_textures.py): R, G slope along u / v, B slope energy, A weld band coverage.
+uniform bool steel_textured = false;      // false (no map, flaps, chine, fins ...): plain steel
+uniform sampler2D steel_map : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform vec2 steel_period_m = vec2(4.712, 1.8);   // one map repeat along u (arc) and v (station), metres
+uniform float steel_slope_range = 0.6;
+uniform float steel_energy_range = 0.1;
+uniform float weld_first_m = 0.35;        // no weld seams on the chamfer below this station
+const float WELD_DARKEN = 0.25;           // [E] heat-affected band: albedo drop and roughness gain
+const float WELD_ROUGHER = 0.22;
 
 uniform float tile_across_flats_m = 0.30;
 uniform float tile_gap_m = 0.006;
@@ -61,12 +67,6 @@ float coverage_half_angle(float station_m) {
 	return coverage_half_angle_rad[coverage_count - 1];
 }
 
-// Dent height in slope units: two octaves of smooth 3D noise, a different phase per ring panel.
-float dent_height(vec3 p, float ring, float second_octave) {
-	vec3 q = p * vec3(0.55, 0.85, 0.85) + vec3(ring * 7.31, ring * 3.17, ring * 1.93);
-	return (hull_noise3(q) - 0.5) + 0.35 * second_octave * (hull_noise3(q * 3.1 + 11.7) - 0.5);
-}
-
 void fragment() {
 	vec4 fog;
 	vec3 colour_factor;
@@ -80,28 +80,36 @@ void fragment() {
 	// Hull ring structure: station -> ring index, distance to the weld at the ring's edge.
 	float ring_pos = local_pos.x / ring_pitch_m;
 	float ring = floor(ring_pos);
-	float weld_d = abs(ring_pos - round(ring_pos)) * ring_pitch_m;
-	float panel_fade = 1.0 - smoothstep(0.06, 0.8, px);  // dents and per-ring variation fade to their mean
-	// The dents' second octave (wavelength ~0.38 m) is undersampled from px ~0.19 m (Nyquist): gone before that.
-	float second_octave = 1.0 - smoothstep(0.06, 0.19, px);
+	float panel_fade = 1.0 - smoothstep(0.06, 0.8, px);  // the per-ring tint (a hash of the ring index) fades to its mean
 	float ring_hash = hull_hash3(vec3(ring, 1.7, 4.3));
 
-	// Steel: albedo with a per-ring tint, heat-affected weld bands (darker, rougher), low-frequency tint drift.
-	float weld = stripe_cover(weld_d, weld_half_width_m, px);
-	float weld_mean = min(2.0 * weld_half_width_m / ring_pitch_m, 1.0);
-	weld = mix(weld, weld_mean, smoothstep(0.1 * ring_pitch_m, 0.4 * ring_pitch_m, px));
+	// Steel map: weld bead + dents as a tangent-space slope, the weld's heat-affected band, all mipmapped (the engine's
+	// trilinear + anisotropic filtering replaces the old footprint fades). The slope energy lost on the coarser mips
+	// widens the roughness (Toksvig / LEAN style), so the glints do not shimmer. A per-ring shift along u gives every
+	// ring panel its own dents; the derivatives come from the unshifted coordinates.
+	float weld = 0.0;
+	vec3 n_steel = n;
+	float slope_var = 0.0;
+	if (steel_textured) {
+		vec2 uv_t = UV / steel_period_m;
+		float shift = hull_hash3(vec3(ring, 9.1, 2.7));
+		vec4 t = textureGrad(steel_map, uv_t + vec2(shift, 0.0), dFdx(uv_t) * footprint_scale, dFdy(uv_t) * footprint_scale);
+		float on = step(weld_first_m, local_pos.x);
+		vec2 slope = (t.rg - 0.5) * steel_slope_range * on;
+		slope_var = max(t.b * steel_energy_range - dot(slope, slope), 0.0) * on;
+		weld = t.a * on;
+		vec3 tangent_u = normalize(vec3(0.0, -local_pos.z, local_pos.y) + vec3(1e-6, 0.0, 0.0));
+		vec3 tangent_v = cross(n, tangent_u);
+		n_steel = normalize(n - tangent_u * slope.x - tangent_v * slope.y);
+	}
 	vec3 steel = steel_albedo * (1.0 + panel_fade * (ring_hash - 0.5) * 0.10);
-	steel *= 1.0 - 0.25 * weld;
+	steel *= 1.0 - WELD_DARKEN * weld;
 	steel *= vec3(1.0, 0.985, 0.96) * mix(1.0, 0.9 + 0.2 * hull_noise3(local_pos * 0.12), panel_fade);
-	float steel_rough = steel_roughness + panel_fade * (ring_hash - 0.5) * 0.08 + 0.22 * weld;
+	float steel_rough = steel_roughness + panel_fade * (ring_hash - 0.5) * 0.08 + WELD_ROUGHER * weld;
+	float alpha_steel = steel_rough * steel_rough;  // GGX alpha (Godot: roughness^2) widened by the lost slope variance
+	steel_rough = sqrt(sqrt(alpha_steel * alpha_steel + slope_var));
 
-	// Weld bead (a triangle of known size at every ring, carried by the mesh normals): its signed slope along X and the
-	// radial direction; `r_profile` is the hull's radius without the bead's height.
-	float to_weld_m = (ring_pos - round(ring_pos)) * ring_pitch_m;
-	float bead_slope = abs(to_weld_m) < weld_bead_half_m ? -sign(to_weld_m) * weld_bead_slope : 0.0;
-	float bead_height_m = max(1.0 - abs(to_weld_m) / weld_bead_half_m, 0.0) * weld_bead_slope * weld_bead_half_m;
 	float r = length(local_pos.yz);
-	float r_profile = r - bead_height_m;
 	vec3 radial = vec3(0.0, local_pos.y, local_pos.z) / max(r, 1e-4);
 	float n_radial = dot(n, radial);
 
@@ -113,42 +121,18 @@ void fragment() {
 	if (mode == 1) {
 		float theta = atan(local_pos.z, local_pos.y) - belly_azimuth_rad;
 		theta = mod(theta + PI, 2.0 * PI) - PI;  // 0 on the belly line, the seam on the lee side (no tiles there)
-		surface_m = vec2(theta * r_profile, local_pos.x);
+		surface_m = vec2(theta * r, local_pos.x);
 		tangent_s = normalize(vec3(0.0, -local_pos.z, local_pos.y));
-		float limit_m = coverage_half_angle(local_pos.x) * r_profile;
+		float limit_m = coverage_half_angle(local_pos.x) * r;
 		tiles = clamp((limit_m - abs(surface_m.x)) / max(px, 1e-5) + 0.5, 0.0, 1.0);
 		tiles *= step(0.5, n_radial);  // not on the base cap / chamfer
-		// The shield lies over the hull: no weld beads under it. The bead's slope is taken out of the mesh normal's
-		// profile slope.
-		float profile_slope = -n.x / max(n_radial, 0.1) - bead_slope;
+		float profile_slope = -n.x / max(n_radial, 0.1);
 		n_tile_base = normalize(vec3(-(local_pos.x < barrel_end_m ? 0.0 : profile_slope), 0.0, 0.0) + radial);
 	} else if (mode == 2) {
 		surface_m = vec2(local_pos.z, local_pos.x);
 		tangent_s = vec3(0.0, 0.0, 1.0);
 		tiles = smoothstep(0.6, 0.9, n.y);  // the outer face (the flaps' stowed-outward side) carries the shield
 	}
-
-	// Steel normal. The weld bead is geometry (slope 0.24 over its 10 cm), sub-pixel beyond ~280 m in VR where the mesh
-	// normals alias: its slope is taken out as under the tiles, fading in from a pixel of the bead's half width (the
-	// bead's shading then goes with the weld band's albedo and roughness, which are filtered). Only where the mesh normal
-	// really carries a bead (the flaps' and the chine's meshes have none).
-	vec3 n_steel_base = n;
-	if (bead_slope != 0.0 && abs(n.x) > 0.5 * abs(bead_slope) * max(n_radial, 0.1)) {
-		float remove = smoothstep(weld_bead_half_m, 3.0 * weld_bead_half_m, px);
-		n_steel_base = normalize(n + vec3(bead_slope * n_radial * remove, 0.0, 0.0));
-	}
-	// Oil-canning: the normal tilted by the gradient of the dent height (finite differences, in local space). Not under
-	// the tiles (they hide it).
-	vec3 g = vec3(0.0);
-	if (panel_fade > 0.0 && tiles < 1.0) {
-		float e = 0.12;
-		float h0 = dent_height(local_pos, ring, second_octave);
-		g = vec3(dent_height(local_pos + vec3(e, 0, 0), ring, second_octave) - h0,
-				dent_height(local_pos + vec3(0, e, 0), ring, second_octave) - h0,
-				dent_height(local_pos + vec3(0, 0, e), ring, second_octave) - h0) / e;
-		g -= n_steel_base * dot(g, n_steel_base);
-	}
-	vec3 n_steel = normalize(n_steel_base - dent_gain * panel_fade * g);
 
 	vec3 albedo_out = steel;
 	float rough_out = steel_rough;
