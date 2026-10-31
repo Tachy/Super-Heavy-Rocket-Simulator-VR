@@ -110,6 +110,28 @@ func _scan(sim: FlightSim) -> void:
 		t += float(spec[2])
 
 
+## --override=white|mirror|std: replaces the shader materials of every mesh under node (hull, tower, lattice, steel) by a
+## white LitAerial diffuse / a metallic mirror / a StandardMaterial3D (grey, metallic 0.65, roughness 0.38).
+func _override_materials(node: Node, kind: String) -> void:
+	var mesh := node as MeshInstance3D
+	if mesh != null and mesh.material_override is ShaderMaterial:
+		var path: String = (mesh.material_override as ShaderMaterial).shader.resource_path
+		if path.contains("vehicle_hull") or path.contains("lit_aerial") or path.contains("lattice") 				or path.contains("tower_steel"):
+			match kind:
+				"white":
+					mesh.material_override = LitAerial.material(Color.WHITE, 1.0, 0.0)
+				"mirror":
+					mesh.material_override = LitAerial.material(Color.WHITE, 0.05, 1.0)
+				_:
+					var m := StandardMaterial3D.new()
+					m.albedo_color = Color(0.74, 0.75, 0.77)
+					m.metallic = 0.65
+					m.roughness = 0.38
+					mesh.material_override = m
+	for child in node.get_children():
+		_override_materials(child, kind)
+
+
 func _shoot() -> bool:
 	if _shot_index >= _shots.size():
 		quit(0)
@@ -117,12 +139,32 @@ func _shoot() -> bool:
 	var sim := _world.flight.sim
 	var shot: PackedStringArray = _shots[_shot_index]
 	if _shot_wait == 0:
+		if _args.has("override"):  # night investigation 1: every steel material of the world replaced (diagnostic)
+			_override_materials(_world, String(_args["override"]))
 		var sun := float(shot[7].trim_prefix("sun")) if shot.size() > 7 and shot[7].begins_with("sun") else NAN
 		_rig.place(sim, int(shot[1]), float(shot[2]), Vector3(float(shot[3]), float(shot[4]), float(shot[5])),
 				float(shot[6]), sun)
 	_shot_wait += 1
+	if _shot_wait == 2:
+		var env: Environment = _world._environment
+		print("vehicle_look_shots: ambient energy %s, sky mode %s, reflected %s, ambient src %s, sun energy %.3f, focus %s" % [
+				env.ambient_light_energy, env.sky.process_mode, env.reflected_light_source, env.ambient_light_source,
+				_world.sun_light.light_energy, _world.focus])
+		if _args.has("nudge"):  # the clock moved by that many seconds once (the Sun moves, the sky uniforms change)
+			_world.clock.set_time(_world.clock.tdb_s + float(_args["nudge"]))
+		match String(_args.get("poke", "")):  # which change makes Godot re-render the radiance cubemap
+			"sky_param":
+				_world._sky_material.set_shader_parameter("poke", 1.0)
+			"light_dir":
+				_world.sun_light.rotate_y(0.01)
+			"light_energy":
+				_world.sun_light.light_energy *= 0.9
+		if _args.has("sky_realtime"):  # night investigation 1: the radiance cubemap re-rendered every frame
+			env.sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	if _args.has("free") and _shot_wait == 3:  # night investigation 1: the same pose through the free camera
+		_world.set_focus(World.FOCUS_FREE)
 	var loading: int = _world.earth_terrain.stats["nodes_loading"]
-	if _shot_wait < FRAMES_TO_SETTLE or (loading > 0 and _frames < TERRAIN_MAX_FRAMES):  # the streamed terrain
+	if _shot_wait < int(_args.get("settle", FRAMES_TO_SETTLE)) or (loading > 0 and _frames < TERRAIN_MAX_FRAMES):  # the streamed terrain
 		return false
 	var out_dir := String(_args.get("out_dir", ProjectSettings.globalize_path("res://").path_join("../screenshots/vehicles")))
 	DirAccess.make_dir_recursive_absolute(out_dir)

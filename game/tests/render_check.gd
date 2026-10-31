@@ -88,6 +88,7 @@ var _deterministic_left := -1  ## --deterministic: frames still to draw after th
 var _cache_settled := 0  ## --repeat_identical: consecutive frames with the light cache settled
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
+var _gpu_wall_us: Array[int] = []  ## --gpu_series: the wall clock of each measured frame
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
 var _gpu_passes := {}  ## --gpu_passes: timestamp name -> Array of the measured frames' GPU ms
 var _sweep_left: Array[float] = []  ## --divisor_sweep: the divisors still to measure
@@ -346,8 +347,18 @@ func _gpu_frames(world: World) -> bool:
 			return false
 		_record_gpu_passes()
 	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+	_gpu_wall_us.append(Time.get_ticks_usec())
 	if _gpu_ms.size() < wanted:
 		return false
+	if _args.has("gpu_series"):  # --gpu_series=<file>: per frame "GPU ms, wall ms since the previous frame" (diagnosis)
+		var lines := PackedStringArray()
+		for i in range(_gpu_ms.size()):
+			lines.append("%.4f,%.3f" % [_gpu_ms[i], (_gpu_wall_us[i] - _gpu_wall_us[maxi(i - 1, 0)]) / 1000.0])
+		DirAccess.make_dir_recursive_absolute(String(_args["gpu_series"]).get_base_dir())
+		var file := FileAccess.open(String(_args["gpu_series"]), FileAccess.WRITE)
+		file.store_string("
+".join(lines) + "
+")
 	var sorted := _gpu_ms.duplicate()
 	sorted.sort()
 	var total := 0.0
@@ -378,6 +389,7 @@ func _next_sweep_divisor(world: World) -> void:
 	world.clouds.divisor_override = _sweep_left.pop_front()
 	_sweep_wait = FRAMES_TO_SETTLE
 	_gpu_ms.clear()
+	_gpu_wall_us.clear()
 	_gpu_passes.clear()
 
 
