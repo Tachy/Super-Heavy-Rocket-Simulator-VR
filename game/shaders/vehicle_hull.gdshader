@@ -22,6 +22,7 @@ uniform float barrel_end_m = 1.0e9;      // ship: the nose starts here (below it
 uniform float weld_bead_half_m = 0.05;    // the weld bead's geometry (detail file): half width and slope = height / half width
 uniform float weld_bead_slope = 0.24;
 uniform float dent_gain = 0.07;           // slope amplitude of the oil-canning dents (normal tilt)
+uniform float footprint_scale = 1.0;      // test hook: tile_shimmer_check's supersampled reference sees px * its scale
 
 uniform float tile_across_flats_m = 0.30;
 uniform float tile_gap_m = 0.006;
@@ -61,9 +62,9 @@ float coverage_half_angle(float station_m) {
 }
 
 // Dent height in slope units: two octaves of smooth 3D noise, a different phase per ring panel.
-float dent_height(vec3 p, float ring) {
+float dent_height(vec3 p, float ring, float second_octave) {
 	vec3 q = p * vec3(0.55, 0.85, 0.85) + vec3(ring * 7.31, ring * 3.17, ring * 1.93);
-	return (hull_noise3(q) - 0.5) + 0.35 * (hull_noise3(q * 3.1 + 11.7) - 0.5);
+	return (hull_noise3(q) - 0.5) + 0.35 * second_octave * (hull_noise3(q * 3.1 + 11.7) - 0.5);
 }
 
 void fragment() {
@@ -74,13 +75,15 @@ void fragment() {
 
 	vec3 n = normalize(local_normal);
 	// Footprint of a pixel on the surface (m): the continuous local position's derivatives.
-	float px = max(length(dFdx(local_pos)), length(dFdy(local_pos)));
+	float px = footprint_scale * max(length(dFdx(local_pos)), length(dFdy(local_pos)));
 
 	// Hull ring structure: station -> ring index, distance to the weld at the ring's edge.
 	float ring_pos = local_pos.x / ring_pitch_m;
 	float ring = floor(ring_pos);
 	float weld_d = abs(ring_pos - round(ring_pos)) * ring_pitch_m;
-	float panel_fade = 1.0 - smoothstep(0.25, 0.8, px);  // dents and per-ring variation fade to their mean
+	float panel_fade = 1.0 - smoothstep(0.06, 0.8, px);  // dents and per-ring variation fade to their mean
+	// The dents' second octave (wavelength ~0.38 m) is undersampled from px ~0.19 m (Nyquist): gone before that.
+	float second_octave = 1.0 - smoothstep(0.06, 0.19, px);
 	float ring_hash = hull_hash3(vec3(ring, 1.7, 4.3));
 
 	// Steel: albedo with a per-ring tint, heat-affected weld bands (darker, rougher), low-frequency tint drift.
@@ -92,22 +95,15 @@ void fragment() {
 	steel *= vec3(1.0, 0.985, 0.96) * mix(1.0, 0.9 + 0.2 * hull_noise3(local_pos * 0.12), panel_fade);
 	float steel_rough = steel_roughness + panel_fade * (ring_hash - 0.5) * 0.08 + 0.22 * weld;
 
-	// Oil-canning: the normal tilted by the gradient of the dent height (finite differences, in local space).
-	vec3 g = vec3(0.0);
-	if (panel_fade > 0.0) {
-		float e = 0.12;
-		float h0 = dent_height(local_pos, ring);
-		g = vec3(dent_height(local_pos + vec3(e, 0, 0), ring) - h0, dent_height(local_pos + vec3(0, e, 0), ring) - h0,
-				dent_height(local_pos + vec3(0, 0, e), ring) - h0) / e;
-		g -= n * dot(g, n);
-	}
-	vec3 n_steel = normalize(n - dent_gain * panel_fade * g);
-
-	vec3 albedo_out = steel;
-	float rough_out = steel_rough;
-	float metal_out = steel_metallic;
-	float spec_out = 0.5;
-	vec3 n_out = n_steel;
+	// Weld bead (a triangle of known size at every ring, carried by the mesh normals): its signed slope along X and the
+	// radial direction; `r_profile` is the hull's radius without the bead's height.
+	float to_weld_m = (ring_pos - round(ring_pos)) * ring_pitch_m;
+	float bead_slope = abs(to_weld_m) < weld_bead_half_m ? -sign(to_weld_m) * weld_bead_slope : 0.0;
+	float bead_height_m = max(1.0 - abs(to_weld_m) / weld_bead_half_m, 0.0) * weld_bead_slope * weld_bead_half_m;
+	float r = length(local_pos.yz);
+	float r_profile = r - bead_height_m;
+	vec3 radial = vec3(0.0, local_pos.y, local_pos.z) / max(r, 1e-4);
+	float n_radial = dot(n, radial);
 
 	vec3 n_tile_base = n;
 	float tiles = 0.0;  // 1 where the shield covers
@@ -115,26 +111,50 @@ void fragment() {
 	vec3 tangent_s = vec3(0.0);
 	vec3 axial = vec3(1.0, 0.0, 0.0);
 	if (mode == 1) {
-		float r = length(local_pos.yz);
 		float theta = atan(local_pos.z, local_pos.y) - belly_azimuth_rad;
 		theta = mod(theta + PI, 2.0 * PI) - PI;  // 0 on the belly line, the seam on the lee side (no tiles there)
-		surface_m = vec2(theta * r, local_pos.x);
+		surface_m = vec2(theta * r_profile, local_pos.x);
 		tangent_s = normalize(vec3(0.0, -local_pos.z, local_pos.y));
-		float limit_m = coverage_half_angle(local_pos.x) * r;
+		float limit_m = coverage_half_angle(local_pos.x) * r_profile;
 		tiles = clamp((limit_m - abs(surface_m.x)) / max(px, 1e-5) + 0.5, 0.0, 1.0);
-		vec3 radial = vec3(0.0, local_pos.y, local_pos.z) / r;
-		tiles *= step(0.5, dot(n, radial));  // not on the base cap / chamfer
-		// The shield lies over the hull: no weld beads under it. The bead's slope (a triangle of known size at every
-		// ring) is taken out of the mesh normal's profile slope.
-		float to_weld_m = (ring_pos - round(ring_pos)) * ring_pitch_m;
-		float bead_slope = abs(to_weld_m) < weld_bead_half_m ? -sign(to_weld_m) * weld_bead_slope : 0.0;
-		float profile_slope = -n.x / max(dot(n, radial), 0.1) - bead_slope;
+		tiles *= step(0.5, n_radial);  // not on the base cap / chamfer
+		// The shield lies over the hull: no weld beads under it. The bead's slope is taken out of the mesh normal's
+		// profile slope.
+		float profile_slope = -n.x / max(n_radial, 0.1) - bead_slope;
 		n_tile_base = normalize(vec3(-(local_pos.x < barrel_end_m ? 0.0 : profile_slope), 0.0, 0.0) + radial);
 	} else if (mode == 2) {
 		surface_m = vec2(local_pos.z, local_pos.x);
 		tangent_s = vec3(0.0, 0.0, 1.0);
 		tiles = smoothstep(0.6, 0.9, n.y);  // the outer face (the flaps' stowed-outward side) carries the shield
 	}
+
+	// Steel normal. The weld bead is geometry (slope 0.24 over its 10 cm), sub-pixel beyond ~280 m in VR where the mesh
+	// normals alias: its slope is taken out as under the tiles, fading in from a pixel of the bead's half width (the
+	// bead's shading then goes with the weld band's albedo and roughness, which are filtered). Only where the mesh normal
+	// really carries a bead (the flaps' and the chine's meshes have none).
+	vec3 n_steel_base = n;
+	if (bead_slope != 0.0 && abs(n.x) > 0.5 * abs(bead_slope) * max(n_radial, 0.1)) {
+		float remove = smoothstep(weld_bead_half_m, 3.0 * weld_bead_half_m, px);
+		n_steel_base = normalize(n + vec3(bead_slope * n_radial * remove, 0.0, 0.0));
+	}
+	// Oil-canning: the normal tilted by the gradient of the dent height (finite differences, in local space). Not under
+	// the tiles (they hide it).
+	vec3 g = vec3(0.0);
+	if (panel_fade > 0.0 && tiles < 1.0) {
+		float e = 0.12;
+		float h0 = dent_height(local_pos, ring, second_octave);
+		g = vec3(dent_height(local_pos + vec3(e, 0, 0), ring, second_octave) - h0,
+				dent_height(local_pos + vec3(0, e, 0), ring, second_octave) - h0,
+				dent_height(local_pos + vec3(0, 0, e), ring, second_octave) - h0) / e;
+		g -= n_steel_base * dot(g, n_steel_base);
+	}
+	vec3 n_steel = normalize(n_steel_base - dent_gain * panel_fade * g);
+
+	vec3 albedo_out = steel;
+	float rough_out = steel_rough;
+	float metal_out = steel_metallic;
+	float spec_out = 0.5;
+	vec3 n_out = n_steel;
 
 	if (tiles > 0.0) {
 		Tile t = tile_cell(surface_m, tile_across_flats_m);
@@ -146,7 +166,7 @@ void fragment() {
 		float shade = 0.75 + 0.5 * h;
 		float repaired = step(0.994, tile_hash(t.id + 17.0));
 		vec3 tile_col = tile_albedo * mix(1.0, shade, detail_fade);
-		tile_col = mix(tile_col, vec3(0.12, 0.12, 0.125), repaired * detail_fade);
+		tile_col = mix(tile_col, vec3(0.075, 0.075, 0.078), repaired * detail_fade);
 		float gap_mean = clamp(2.0 * tile_gap_m / tile_across_flats_m, 0.0, 1.0);
 		gap = mix(gap, gap_mean, 1.0 - detail_fade);
 		vec3 tile_final = mix(tile_col, gap_albedo, gap);

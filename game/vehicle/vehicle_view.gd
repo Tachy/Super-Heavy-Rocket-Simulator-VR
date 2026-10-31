@@ -43,11 +43,12 @@ func _hull_material(kind: String) -> Material:
 func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
 	var stages: Array = sim.body_stages(body_index)
 	var modelled := not VehicleModels.load_for(_vehicle_id(stages)).is_empty()
-	sync(stages, sim.body_engines(body_index), sim.body_flaps(body_index) if modelled else [],
-			sim.body_grid_fins(body_index) if modelled else [], sim.telemetry(body_index).get("altitude_m", 0.0))
-
 	var offset := Frames.to_render(sim.body_position_gcrf_m(body_index) - camera_gcrf_m)
 	visible = offset.length() < HIDE_BEYOND_M
+	if not visible and _signature(stages) == _built_signature:
+		return  # nothing to draw: no posing, no plumes (a new stage list is still built, so the next view is right)
+	sync(stages, sim.body_engines(body_index), sim.body_flaps(body_index) if modelled else [],
+			sim.body_grid_fins(body_index) if modelled else [], sim.telemetry(body_index).get("altitude_m", 0.0))
 	if not visible:
 		return
 	var attitude := Basis(sim.body_attitude_gcrf(body_index))
@@ -86,7 +87,7 @@ static func _vehicle_id(stages: Array) -> String:
 
 func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> void:
 	for child in _stage_root.get_children():
-		child.free()
+		child.free()  # immediately (not queue_free): the rebuilt nodes reuse the names, and nothing here is in a callback
 	_plumes.clear()
 	_stage_bases_m.clear()
 	_engine_slots.clear()
@@ -157,7 +158,7 @@ func _build_engines(stages: Array, engines: Array, stage_nodes: Array[Node3D]) -
 	var batches := {}  # "stage:vacuum" -> {"node", "vacuum", "count"}
 	for engine: Dictionary in engines:
 		var stage: int = engine["stage"]
-		if stage_nodes[stage] == null:
+		if stage < 0 or stage >= stage_nodes.size() or stage_nodes[stage] == null:
 			_engine_slots.append({})
 			continue
 		var vacuum: bool = engine["vacuum"]

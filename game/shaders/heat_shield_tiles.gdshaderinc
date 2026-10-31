@@ -7,7 +7,7 @@
 const float TILE_SQRT3 = 1.7320508;
 
 struct Tile {
-	vec2 id;        // lattice id of the cell (stable hash input)
+	vec2 id;        // integer-valued lattice id of the cell (exact hash input)
 	vec2 offset_m;  // from the cell centre, surface metres
 	float edge_m;   // distance to the nearest cell edge (m), 0 on the edge
 };
@@ -19,9 +19,11 @@ Tile tile_cell(vec2 p_m, float across_flats_m) {
 	vec2 h = r * 0.5;
 	vec2 a = mod(p, r) - h;
 	vec2 b = mod(p - h, r) - h;
-	vec2 g = dot(a, a) < dot(b, b) ? a : b;  // from the nearest centre of the two interleaved rectangular lattices
+	bool first = dot(a, a) < dot(b, b);
+	vec2 g = first ? a : b;  // from the nearest centre of the two interleaved rectangular lattices
 	Tile t;
-	t.id = p - g;
+	// Lattice integers (no float difference of two large numbers): 2 x cell index, +1 on the shifted lattice.
+	t.id = first ? 2.0 * floor(p / r) : 2.0 * floor((p - h) / r) + 1.0;
 	t.offset_m = g * across_flats_m;
 	float flats = max(abs(g.x), max(abs(dot(g, vec2(0.5, 0.5 * TILE_SQRT3))), abs(dot(g, vec2(-0.5, 0.5 * TILE_SQRT3)))));
 	t.edge_m = (0.5 - flats) * across_flats_m;

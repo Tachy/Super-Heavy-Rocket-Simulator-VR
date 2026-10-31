@@ -12,6 +12,7 @@ const FIN_STATES_DEG: Array[float] = [0.0, -20.0, 30.0]
 const EPS := 1e-4
 
 var _failures := 0
+var _views: Array[VehicleView] = []
 
 
 func _initialize() -> void:
@@ -37,11 +38,17 @@ func _initialize() -> void:
 		fallback.sync(snapshot["stages"], lit, [], [], 0.0)
 		_check(_plume_top(fallback, 0).is_equal_approx(Frames.to_render(lit[0]["position_m"] - Vector3(3.0, 0.0, 0.0))),
 				"cylinders: plume starts 3 m below the gimbal point (former value)")
+	for view in _views:  # free what the cases built, so the engine's exit report stays free of leaked objects
+		view.free()
 	print("VEHICLE VIEW TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
 
 func _check_models(stages: Array, snapshot: Dictionary, models: Dictionary) -> void:
+	var ship_material: ShaderMaterial = models["materials"]["ship"]
+	_check(is_equal_approx(ship_material.get_shader_parameter("belly_azimuth_rad"),
+			deg_to_rad(_piece(stages, "ship")["stage"][0]["aero"]["belly_azimuth_deg"])),
+			"the hull shader's belly azimuth is the vehicle config's (aero.belly_azimuth_deg)")
 	var view := _view(snapshot, VEHICLE)
 	var root: Node3D = view.get_child(0)
 	_check(_cylinders(view) == 0, "models replace the cylinders")
@@ -270,6 +277,7 @@ func _view(snapshot: Dictionary, vehicle_id: String) -> VehicleView:
 			copy["vehicle_id"] = vehicle_id
 		stages.append(copy)
 	var view := VehicleView.new()
+	_views.append(view)
 	root.add_child(view)
 	view.sync(stages, snapshot["engines"], snapshot["flaps"], snapshot["grid_fins"], 0.0)
 	return view
