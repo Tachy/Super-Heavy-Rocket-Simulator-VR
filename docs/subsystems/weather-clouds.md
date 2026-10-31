@@ -606,7 +606,9 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   energy), the grid mean 0.490 at both.
 - **Divisor (F8)** (2026-10-29 / 10-30): `CloudLayer.divisor_override` (F8 cycles 1, 1.5, 2, 3, 4;
   `--cloud_divisor=<x>`, fractional allowed) - the one live toggle; the HUD line (`status_line`) shows the divisor and
-  "(Volumen wird gebacken)" until the first set is shown. The baked volume is the only cloud method (user ruling
+  "(Volumen wird gebacken)" only while a bake really runs (kernels built, no set shown yet); "(Wolken-Shader werden
+  gebaut)" while the kernels build, "(keine Wolken aktiv)" when `cloud_enabled` is off (nothing bakes), "(Wolkenvolumen
+  nicht verfügbar)" after a kernel failure. The baked volume is the only cloud method (user ruling
   2026-10-30; F7's method switch and F9's march cut removed with the old march).
 - **Kernel build and fast start** (2026-10-30; `CloudKernels`, `game/world/weather/cloud_kernels.gd`): every cloud
   compute kernel (the cloud pass's, the baked volume's, the shadow maps') is ported (CloudShaderPort) and compiled on

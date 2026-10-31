@@ -213,6 +213,11 @@ func _create_baked(stereo: bool) -> bool:
 	return true
 
 
+## True when the baked volume's kernels failed for good (the HUD says so).
+func baked_failed() -> bool:
+	return _baked_failed
+
+
 ## A frame without clouds (kernels or the first baked set not ready): the result cleared to T = 1.
 func _skip_frame(view_count: int) -> void:
 	_rd.texture_clear(_output_rd, Color(0.0, 0.0, 0.0, 1.0), 0, 1, 0, maxi(view_count, 2))

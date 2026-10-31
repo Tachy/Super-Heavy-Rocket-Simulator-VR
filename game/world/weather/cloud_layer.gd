@@ -740,10 +740,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## The HUD's line of the live toggle (German UI): the divisor (and whether the volume draws yet), the key.
+## The HUD's line of the live toggle (German UI): the divisor (and what the volume does now), the key.
 func status_line() -> String:
-	var baking := "" if effect.baked_shown else " (Volumen wird gebacken)"
-	return "Wolken: Auflösung 1/%s%s  [F8 Auflösung]" % [String.num(divisor(), 1).trim_suffix(".0"), baking]
+	var note := ""
+	if effect.baked_failed():
+		note = " (Wolkenvolumen nicht verfügbar)"
+	elif not ShaderGlobals.value(&"cloud_enabled"):
+		note = " (keine Wolken aktiv)"  # none in sight / far away / pass off: nothing bakes
+	elif not effect.baked_shown:
+		note = " (Volumen wird gebacken)" if effect.baked != null else " (Wolken-Shader werden gebaut)"
+	return "Wolken: Auflösung 1/%s%s  [F8 Auflösung]" % [String.num(divisor(), 1).trim_suffix(".0"), note]
 
 
 static func _wrap(q: Vector3) -> Vector3:
