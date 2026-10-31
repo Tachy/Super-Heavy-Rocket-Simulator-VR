@@ -117,9 +117,40 @@ f14 2149 s (clock in the frame).
   front face, steam venting at the foot; sand-coloured pad apron.
 - Neighbours: tank farm (two grey tall cylinders, two spheres, a dome) behind the mount at about 0.8 mount lengths.
 
+## Catch arms from the Pad A catch webcasts (2026-10-31, flights 5 / 7 / 8)
+Source: local streams `data/webcasts/flight5_2024-10-13.mp4`, `flight7_2025-01-16.mp4`, `flight8_2025-03-06.mp4`
+(720p, git-ignored). Frames in git-ignored `screenshots/mechazilla/webcast/catch/` (`f5_*`, `f7_*`, `f8_*` = video
+second; contact sheets `*_sheet_*`, `*_catch_*`). Only geometry and look were read; the catch sequence, timing, engines
+and motion are in the physics and were not measured.
+- **All three catches happened** (booster standing in the arms, not on the mount, for minutes): flight 5 (T+7:00
+  close-up `f5_2405`, T+8:10 `f5_2475`, crowd reaction), flight 7 (booster hung T+9:23 to T+13:23, `f7_2970`,
+  `f7_3060`, `f7_3210`), flight 8 (`f8_2572` T+7:14, `f8_2580`, `f8_2588`). Liftoff (T-0) in video seconds: f5 1983,
+  f7 2407, f8 2138 (clock in the frame, +-2 s).
+- **Old hardware, not Block 3 / Pad B.** These are Block 1 / 2 boosters (4 grid fins, other catch fittings) at the old
+  Pad A tower with longer arms. Scale: 9 m diameter and known old booster length 71 m (Block 3 / Pad B frames: 72.3 m).
+  The 146 m tower height of Pad A was not assumed: in `f7_3210` the 71 m booster gives a tower of 147 m (check).
+  Each value carries a transfer tag: [T] transfers as a principle, [A] assumption needed, [N] old only, do not use.
+
+| Value | Old catch (frame, time, +-) | Block 3 / Pad B estimate, transfer | Physics now |
+|---|---|---|---|
+| Arm deck (top chord) height at the catch | 133 (4) m above ground; booster held with the same deck height `f7_3210` (T+13:23, tower 332 px = 147 m, deck y 210); `f8_2572` T+7:14 gives 130-136 m | [A] about 130-134 m: Pad B parks the stacked arms at 134 (4) m, so the carriage reaches this height; the catch height is set by the tower top, not by the booster | arm 95 m above ground: differs by about 38 m |
+| Booster bottom above ground when held | 64 (4) m (`f7_3210`: bell at y 365, tower foot y 510, 2.25 px/m); consistent with `f7_2970` | [A] deck 132 m minus length 72.3 m plus 2 m (see next row) = about 62 m | 28.5 m (8.5 m above the 20 m mount): differs by about 35 m |
+| Booster top against the arm deck | rim of the hot-stage ring at the deck, 0 to 2 m above or below (`f5_2405`, `f7_3060`: ring rim level with the arm decks; `f8_2572`: top 1.6 (1.0) m above deck) | [T] the arms close at the top end of the booster, on the hot-stage ring; deck about 2 m below the top of the ring | pins at 66.5 m of 67.9 m collar (about 1.4 m below the collar): agrees |
+| Arm length, tower face to tip | about 24-27 m: `f7_2280` T-2:07, arms parked fully open, tip to tip 153 px = 59.5 m at 2.57 px/m (tower 12 m wide); `f8_2572` oblique gives 35 m (nearer tower, perspective: not used) | [N] old arms are longer; Pad B arms are shorter (about 27 m, olp1 measurements above) | `[site.tower]` 36 m (olp1) |
+| Arm truss depth | tip 6.5 (1.5) m, root at the tower 12-16 m (inclined lower chord, `f8_2572`, `f5_2475`) | [A] same layout (deep Warren truss with sloped lower chord), depth scales with the arm length | not in physics |
+| Arm plan: two arms, left and right of the booster | arms parallel and straight while holding, about one booster diameter plus walkway apart; inner faces at the ring (`f5_2405`, `f7_3060`) | [T] two parallel arms; opening and closing as chopsticks about a corner hinge | pins at 45 / 225 deg (see catch check) |
+| Walkway and rail on the arm top | flat deck with railing; diamond mesh grating pads at the inner end of each arm (left: 3, right: 2 pads) and along the top; a long ladder-like rail strip (rack, about 1 m wide) along the inner top edge, sloping to the tower (`f7_3060`, `f5_2405`) | [T] drawn as grated deck and strip on the arm top; pad count [N] | not in physics |
+| Where the booster is held | at the hot-stage ring and the cylinder below it; the arms stay level with the ring, above the grid fins (fins not visible behind the arms: hardware relation to the fins **not resolved**) | [A] block 3 has 3 fins: relation open, same as in the catch check | pins between fins (45 / 225 deg), open |
+| Carriage and mount on the tower | black frame with platform at the tower face; hinge frame at the arm root; top box (hoist / winch room) above the arms; tower top box 146 m with a mast (`f5_2475`, `f7_3210`) | [A] carriage as at Pad B: static frame at the face, arms hinge at the corners | not in physics |
+| Paint | arms: black / dark charcoal steel, no paint colours; tan / orange scorch on the arm inner faces and hot-stage ring after the catch (`f7_3060`); tower legs silver bare steel with white hexagon X-bracing in sun (`f8_2580`), dark in shade (`f5_2450`) | [T] as above (Pad B finding: silver legs, dark braces) | not in physics |
+| Booster top look | open ring: vertical stringers (corrugated wall about 3 m tall), dome and plumbing visible inside, stainless with soot streaks (`f7_3060`) | [N] Block 3 hot-stage / top differs | not in physics |
+
+Open: the grid fin to arm relation (needs a view below the arm), the pad shapes on the inner faces, the arm width at the
+tip (about 8 m at the end of the booster ring, one view).
+
 ## Open, needs more than these references
-- Booster return and catch (carriage heights, rate, arm angles and timing, arm height at the catch) are absent from the
-  flight 12-14 webcasts (see the webcast pass); another source is needed.
+- Booster return and catch: the flight 12-14 webcasts have none (see the webcast pass); the catch arm geometry from
+  the Pad A catches is above (old hardware, transfer tags).
 - Section splices and section count; chopstick plan width; carriage vertical travel and rate; hinge height of the QD arm
   (a plan view or a dated survey is needed); trench depth (no side view of the ramps); azimuth and distance on a
   georeferenced image newer than 2025-05 (a NAIP flight after 2025-05 or the FAA EA site plan).
