@@ -46,9 +46,9 @@ struct Fixture {
 
 bool verbose() { return std::getenv("STARSIM_VERBOSE") != nullptr; }
 
-// Starbase tower (config/launch_sites.toml starbase_olp1) on the ground, ITRF
+// Starbase tower (config/launch_sites.toml starbase_pad2) on the ground, ITRF
 Vec3 starbase_itrf() {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     return frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
 }
 

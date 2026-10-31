@@ -22,7 +22,7 @@ TEST_CASE("Attitude bench: 13 engines following a turning axis", "[.bench]") {
     static const auto earth = spice::SpiceOrientation::earth();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     vehicle::FlightBody body(std::make_unique<vehicle::Vehicle>(test::booster_config("starship_block3", 70000.0), STARSIM_CONFIG_DIR),
                              test::state_over_site(session.launch_site(), earth, t0, {0.0, 0.0, 900.0}, {0.0, 0.0, -200.0}));
     const auto& env = session.environment();

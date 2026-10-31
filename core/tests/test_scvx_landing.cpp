@@ -39,7 +39,7 @@ struct Fixture {
         test::spice_session();
         t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
         session = std::make_unique<sim::FlightSession>(ephemeris(), earth(), STARSIM_CONFIG_DIR);
-        const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+        const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2"));
         session->set_launch_site(site);
         body = std::make_unique<vehicle::FlightBody>(
             std::make_unique<vehicle::Vehicle>(test::booster_config("starship_block3", 70000.0), STARSIM_CONFIG_DIR),

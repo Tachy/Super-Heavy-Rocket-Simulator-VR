@@ -390,7 +390,7 @@ TEST_CASE("A plain launch after a mission does not inherit its autopilot", "[sim
     const auto t0 = start();
     sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
     session.launch_from_pad("starship_block3",
-                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")),
+                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")),
                             0.0, t0 + 10.0);
     CHECK(session.autopilot().state == sim::AutopilotState::Off);
     CHECK(session.ascent_guidance() == nullptr);

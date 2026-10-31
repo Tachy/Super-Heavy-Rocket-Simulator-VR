@@ -52,7 +52,7 @@ TEST_CASE("The explicit fallback guidance ditches the booster at sea next to the
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
-    const auto pad = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    const auto pad = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2"));
     const std::string vehicle_id = GENERATE(as<std::string>{}, "starship_block3");
     CAPTURE(vehicle_id);
     session.launch_from_pad(vehicle_id, pad, 90.0 * deg, t0);

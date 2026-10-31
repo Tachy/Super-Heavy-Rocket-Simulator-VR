@@ -7,7 +7,7 @@ class_name StructureModels
 
 ## Prototype: only this site shows the Pad B models, placed at its tower box (spec H). A named constant, not a config key,
 ## until the full build gives Pad B a site of its own.
-const PROTOTYPE_SITE_ID := "starbase_olp1"
+const PROTOTYPE_SITE_ID := "starbase_pad2"
 const DETAIL_FILE := "structures/starbase_olp2.toml"
 const MODEL_DIR := "models/starbase_olp2"
 const MANIFEST := "manifest.json"

@@ -35,7 +35,7 @@ TEST_CASE("The tower waits half open and closes the arms just before the pins ar
 // The final closing is allowed only where the pins still land on the arms: at the limit, displaced away from the tower
 // (the only direction that runs off the tips), every pin point lies on a closed arm; just beyond the tip none does.
 TEST_CASE("The arms close only where the pins land on the tips", "[contact]") {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     const sim::CatchTowerSim sim(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
     const auto& tower = sim.geometry();
     const double limit_m = sim.trigger().max_axis_offset_m;
@@ -56,7 +56,7 @@ TEST_CASE("The arms close only where the pins land on the tips", "[contact]") {
 }
 
 TEST_CASE("Hull collisions with the tower and the launch mount", "[contact]") {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     const TowerGeometry tower(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
     const Vec3 up{0.0, 0.0, 1.0};
     const double mount = site.tower->mount_height_m;
@@ -78,7 +78,7 @@ TEST_CASE("Hull penetration by an arm box", "[contact]") {
 // The hull on the catch axis never touches the rotated tower box or an arm, at any opening and carriage offset the arms
 // pass through while it comes down (plan Review Focus 2; a 0.25 m axis offset stays inside the 0.3 m per side).
 TEST_CASE("Arm sweep clears the rotated tower corner", "[contact]") {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     const TowerGeometry tower(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
     const auto& c = *site.tower;
     const double hull_radius_m = 4.5;
@@ -101,7 +101,7 @@ TEST_CASE("Arm sweep clears the rotated tower corner", "[contact]") {
 // The roll of the booster's catch is one-way: fins 0, 90, 180, the 90 deg fin away from the tower, the pins across the
 // arms; a ship (no such azimuth) keeps the nearer of the two rolls.
 TEST_CASE("Catch ends with the 90 deg fin away from the tower", "[contact]") {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     const TowerGeometry tower(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
     const auto vehicle = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     const auto& pins = vehicle.stages.front().catch_pins;

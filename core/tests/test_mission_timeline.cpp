@@ -542,7 +542,7 @@ vehicle::RigidBodyState belly_state(const sim::FlightSession& session, const con
 }
 
 void set_starbase(sim::FlightSession& session) {
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
 }
 
 size_t count_of(const sim::MissionTimeline& t, MissionEventKind kind) {

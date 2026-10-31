@@ -347,7 +347,7 @@ ganze Start bis zur Welt dauert am Desktop etwa 4 s (vorher rund 24 s).
 - Bodenbeobachter an Startplatz/Landeplatz [Entschieden, umgesetzt 2026-10-25]: Die Fokusliste der Zeitleiste bietet
   je Platz "<Platz> (Aussicht)": der Beobachter steht auf einer Aussichtsplattform beim nächsten Kontrollzentrum
   (`[site.viewpoint]` in `config/launch_sites.toml`), nicht in der Rampe. Augenhöhe = Gelände dort + Dach-/Deckhöhe
-  + 1,7 m; der Blick zeigt anfangs zur Rampe, leicht angehoben (Rampe und Turm im Bild). Starbase OLP-1: Dach des
+  + 1,7 m; der Blick zeigt anfangs zur Rampe, leicht angehoben (Rampe und Turm im Bild). Starbase Pad 2: Dach des
   (früheren) Startkontrollzentrums auf dem Produktionsgelände, ~3,6 km; KSC LC-39A: Dach des Launch Control Center
   neben dem VAB, ~5,1 km; CCSFS SLC-40 und Landezone LZ-40: Aussichtsplattform LC-39 Gantry am Banana Creek (KSC),
   ~5,5 km (je mit eigenem Ziel). Plätze ohne Aussichtspunkt bleiben "(Boden)" an der Rampe.

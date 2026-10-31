@@ -5,7 +5,7 @@
 # --render_scale=<f>: the root viewport renders at f x the window per axis (bilinear, Viewport.scaling_3d_scale): the
 # VR proxy is 1.65 (2560 x 1440 x 1.65^2 = 20 MP, the two 3530 x 2834 eyes of the user's headset at Pimax FSR 1.5;
 # docs/subsystems/vr-performance.md).
-# Phases: "descent" - a ground camera above OLP-1 descends from 400 km to 2 m in descent_s (eye height logarithmic in
+# Phases: "descent" - a ground camera above Pad 2 descends from 400 km to 2 m in descent_s (eye height logarithmic in
 # time, looking 20 deg down); "pan_low" - 360 deg pan at 2 m eye height on the plateau PAN_LOW_OFFSET_M from the mount
 # (free view, not blocked by the mount); "pan_high" - 360 deg pan PAN_HIGH_EYE_M above the pad, looking 10 deg down (the
 # whole site and the coast); "cape" - Tab-style jump to LC-39A (one frame) at 2 m, held cape_s. The clock runs (warp 1:
@@ -25,7 +25,7 @@ const WINDOW_SIZE := Vector2i(2560, 1440)
 const START_EYE_HEIGHT_M := 4.0e5
 const END_EYE_HEIGHT_M := 2.0
 const DESCENT_ELEVATION_DEG := -20.0
-## Low pan: on the OLP-1 plateau this far east of the mount (m): open view over the site, the flats and the coast.
+## Low pan: on the Pad 2 plateau this far east of the mount (m): open view over the site, the flats and the coast.
 const PAN_LOW_OFFSET_M := Vector2(180.0, 0.0)  ## (east, north)
 const PAN_HIGH_EYE_M := 50.0
 const PAN_HIGH_ELEVATION_DEG := -10.0
@@ -37,7 +37,7 @@ const WARMUP_FRAMES := 30
 const GATE_P99_MS := 8.0
 const GATE_P99_CLOUDS_MS := 11.0
 const GATE_MAX_MS := 16.0
-const PAD_SITE := "starbase_olp1"
+const PAD_SITE := "starbase_pad2"
 const CAPE_SITE := "ksc_lc39a"
 ## --spikes: the viewport's measured CPU / GPU render times of this many frames after a spike (they arrive late).
 const SPIKE_FOLLOWUP_FRAMES := 4
@@ -256,7 +256,7 @@ func _enter(phase: String, t: float) -> void:
 			_skip_frame = _frames + 1  # the next frame draws the new site first
 
 
-## A ground site offset (east, north; m) from OLP-1, at the core's surface height there.
+## A ground site offset (east, north; m) from Pad 2, at the core's surface height there.
 func _ground_site(id: String, offset_m: Vector2) -> Dictionary:
 	var lat: float = _pad["latitude_deg"] + offset_m.y / METRES_PER_DEG
 	var lon: float = _pad["longitude_deg"] + offset_m.x / (METRES_PER_DEG * cos(deg_to_rad(lat)))

@@ -8,8 +8,8 @@
 # heights (height - undulation) are +0.9 m (Pad B), +13.8 m (LC-39A mound), +6.4 m (SLC-40), +3.7 m (LZ-40).
 
 [[site]]
-id = "starbase_olp1"
-name = "Starbase OLP-1"
+id = "starbase_pad2"
+name = "Starbase Pad 2"
 vehicles = ["starship_block3", "starship_depot", "starship_tanker", "starship_hls_launch"]  # start choices of the mission panel
 latitude_deg = 25.99677     # [E] centre of the measured Pad B ring (user 2026-10-31); was 25.99686, -97.15394 (OLP-1 imagery)
 longitude_deg = -97.15804

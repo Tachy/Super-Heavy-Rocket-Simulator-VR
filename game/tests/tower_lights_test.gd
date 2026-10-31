@@ -3,7 +3,7 @@
 # Run: godot --headless --path game --script res://tests/tower_lights_test.gd
 extends SceneTree
 
-const MODEL_SITE := "starbase_olp1"
+const MODEL_SITE := "starbase_pad2"
 const SCENE_PER_CD := 3.0e-4  ## a typical night value of the game's exposure (cone gain x brightness x day base)
 const DECK_TOLERANCE := 0.30  ## plan Task 4: the lit deck's illuminance within 30 % of the fixture model
 const FAA_FPM_MIN := 20.0  ## [S] AC 150/5345-43 L-864
@@ -222,7 +222,7 @@ func _check(ok: bool, what: String) -> void:
 		_failures += 1
 
 
-## starbase_olp1's tower as FlightSim.site_tower reports it (site frame), as tower_view_test.gd.
+## starbase_pad2's tower as FlightSim.site_tower reports it (site frame), as tower_view_test.gd.
 func _geometry() -> Dictionary:
 	var azimuth := deg_to_rad(349.0)
 	var toward := Vector3(sin(azimuth), cos(azimuth), 0.0)

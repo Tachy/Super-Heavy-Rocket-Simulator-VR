@@ -295,7 +295,7 @@ TEST_CASE("stale local tile is refused", "[environment][terrain][earth_terrain]"
         const auto t = sim::load_earth_terrain(root / "config", root / "data");
         REQUIRE(t);
         CHECK(t->height_ellipsoid_m(25.5 * deg, -95.0 * deg) == Catch::Approx(10.0));  // global relief
-        const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");  // a plateau of every site
+        const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");  // a plateau of every site
         CHECK(t->height_ellipsoid_m(site.latitude_rad, site.longitude_rad) == Catch::Approx(site.height_m));
     }
     // The area centre moved by two cells of the local grid (0.002 deg): the local tile no longer fits.

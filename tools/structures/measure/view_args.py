@@ -1,4 +1,4 @@
-"""Prints render_check.gd ground-view arguments for a camera D metres from the Pad B tower (placed at starbase_olp1).
+"""Prints render_check.gd ground-view arguments for a camera D metres from the Pad B tower (placed at starbase_pad2).
 
     python tools/structures/measure/view_args.py <distance_m> [eye_height_m] [aim_height_m] [camera_azimuth_deg]
 

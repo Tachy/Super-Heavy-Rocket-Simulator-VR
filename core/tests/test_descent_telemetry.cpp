@@ -116,7 +116,7 @@ TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 13 a
     static const auto earth = spice::SpiceOrientation::earth();
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     session.place_body(test::booster_config(vehicle_id, propellant_kg),
                        test::state_over_site(session.launch_site(), earth, t0, {20.0e3, 0.0, h0}, {-vh0, 0.0, vz0}), t0);
 

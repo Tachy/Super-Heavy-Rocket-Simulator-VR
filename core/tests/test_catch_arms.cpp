@@ -9,7 +9,7 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-config::TowerConfig tower() { return *config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").tower; }
+config::TowerConfig tower() { return *config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").tower; }
 
 void run(contact::CatchArms& arms, double seconds, double push_n, double load_n) {
     for (int i = 0; i < static_cast<int>(seconds / 0.005 + 0.5); ++i) arms.step(0.005, push_n, load_n);

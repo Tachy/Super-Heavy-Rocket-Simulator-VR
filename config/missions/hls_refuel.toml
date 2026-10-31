@@ -3,7 +3,7 @@
 [mission]
 # where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
 # by test_mission_start_places)
-start_place = "starbase_olp1"
+start_place = "starbase_pad2"
 start_vehicle = "starship_hls_launch"
 name = "HLS: Betankung am Depot und Mondmission"
 display_name = "Mondlander: Betankung am Depot und Mondmission" # shown in the webcast overlay (no trademarks)

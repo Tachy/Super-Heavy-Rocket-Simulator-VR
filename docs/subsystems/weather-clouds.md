@@ -719,7 +719,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   (72 geometries), weather off bit-identical, the scaled-space hand-over against the baked volume's flat levels: deck
   tau 10 / tau 2 worst 0.26 / 0.51 %, broken cf 0.4 (21 x 21 blocks) 2.27 % (tolerance 5 %), the Moon's distance.
 - Visual set (Task 11, `render_check.gd --weather=online --cloud_quality=vr`, ERA5 hours downloaded at run time; PNGs
-  `tmp/weather_t11_*.png`, read by eye): overcast vs clear at Starbase (OLP-1, 2 m eye, 2025-08-15 18:00 UTC: a thick
+  `tmp/weather_t11_*.png`, read by eye): overcast vs clear at Starbase (Pad 2, 2 m eye, 2025-08-15 18:00 UTC: a thick
   anvil deck, the Sun hidden, vertical T_s 0.05 on the 1-degree analog / 2025-03-15 18:00 UTC: clear, deep blue sky);
   ascent at Starbase on the first date, below (500 m: a high deck over the sea), inside (9 km: white-out, no black frame,
   no banding) and above (20 km: the deck's top below the dark sky, a blue limb); the Cape from 100 km (2025-07-15 18:00,

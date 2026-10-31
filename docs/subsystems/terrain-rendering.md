@@ -20,7 +20,7 @@ on top; it replaced the interim `GroundPatch`.
   coarser or absent, than the curvature limit sqrt(8 R x 1 cm) (714 m Earth, 373 m Moon: cells sag <= 1 cm, so
   vehicles stand on the drawn ground); it merges beyond `MERGE_FACTOR` 1.15 x that distance; `MAX_LEVEL` 21;
   `LOD_FACTOR` 2.5. A parent stays drawn until all four children are uploaded (the drawn leaves always tile the
-  sphere). At OLP-1 with data the leaf under the camera reaches level 18 (1 m 3DEP cells).
+  sphere). At Pad 2 with data the leaf under the camera reaches level 18 (1 m 3DEP cells).
 - **Morph.** Odd vertices carry the offset to the parent level's surface (CUSTOM0) and the parent-level normal
   (CUSTOM3); the shader blends both by the camera distance between `morph_start_m` and `morph_end_m`, set per node from
   `LOD_FACTOR` / `MERGE_FACTOR` so that a node is unmorphed whenever its children appear or vanish and a child is
@@ -136,7 +136,7 @@ on top; it replaced the interim `GroundPatch`.
 - Camera-precision test: relative error < 3e-7. Quadtree test: morph start < end for every level >= 2 on both bodies.
 - Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface.
 - Performance (`terrain_perf.gd`, RTX 4090, D3D12, 2560 x 1440, vsync off, the editor binary the game runs with, clock
-  at warp 1): descent above OLP-1 400 km -> 2 m in 60 s, 360 deg pan at 2 m on the plateau 180 m east of the mount,
+  at warp 1): descent above Pad 2 400 km -> 2 m in 60 s, 360 deg pan at 2 m on the plateau 180 m east of the mount,
   360 deg pan 50 m above the pad, jump to LC-39A. Final (K 2.5), frame ms p50 / p99 / max: descent 3.3 / 6.3 / 10.9,
   pan low 4.3 / 6.9 / 8.9, pan high 4.3 / 6.0 / 9.0, Cape 4.4 / 8.1 / 11.2, all p99 7.1 / max 11.2; VRAM 2.3 GB;
   gate PASS (a repeat run: p99 7.26 / max 12.27 ms, Cape p99 8.25 ms while loading); up to 1875 drawn leaves, full

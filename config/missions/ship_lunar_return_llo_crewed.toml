@@ -14,7 +14,7 @@ display_name = "Rückkehr vom Mond (LLO, bemannt)" # shown in the webcast overla
 kind = "lunar_return"            # FlightSim.start_mission dispatches on it
 vehicle = "starship_block3"
 stage = "ship"
-site = "starbase_olp1"
+site = "starbase_pad2"
 crew_escape = "starship_crew"   # crewed: ejection seats on every give-up (config/crew_escape/, crew escape spec 2026-10-22)
 boil_off = false                # refuelling r2 (user 2026-10-20): the bare Block 3 hull cannot keep its propellant
                                 # for days; off until r5 (Moon radiation, thermal attitude)

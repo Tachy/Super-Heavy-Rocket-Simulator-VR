@@ -61,7 +61,7 @@ time::Epoch t0() {
 }
 
 const Vec3 to_tower = [] {
-    const double azimuth = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").tower->azimuth_rad;
+    const double azimuth = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").tower->azimuth_rad;
     return Vec3{std::sin(azimuth), std::cos(azimuth), 0.0};
 }();
 
@@ -78,7 +78,7 @@ vehicle::RigidBodyState belly_state(const sim::FlightSession& session, const con
 }
 
 void set_starbase(sim::FlightSession& session) {
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
 }
 
 void fail_group(sim::FlightSession& session, const std::string& group) {

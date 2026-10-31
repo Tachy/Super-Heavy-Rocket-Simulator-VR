@@ -36,7 +36,7 @@ TEST_CASE("A booster coming down beyond the shoreline splashes down, on land it 
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
-    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2"));
     REQUIRE(site.sea.has_value());
     const auto cfg = test::booster_config("starship_block3", 5000.0);
     const vehicle::Vehicle probe(cfg, STARSIM_CONFIG_DIR);

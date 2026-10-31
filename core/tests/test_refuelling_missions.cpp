@@ -87,7 +87,7 @@ TEST_CASE("release_tower refuses without a caught body", "[refuelling][catch]") 
     place_depot_ship(f);
     CHECK_FALSE(f.session.release_tower());  // no tower
     f.session.set_launch_site(
-        sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_olp1")));
+        sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_pad2")));
     CHECK_FALSE(f.session.release_tower());  // tower Open
     CHECK(f.session.body_count() == 1u);
 }
@@ -311,7 +311,7 @@ struct DockedAtDepot : refuelling_test::TankerAtPort {
     explicit DockedAtDepot(const config::VehicleConfig& chaser = refuelling_test::tanker_config(200.0e3))
         : TankerAtPort({0.0, 0.0, 0.0}, {}, chaser) {
         session.set_launch_site(
-            sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_olp1")));
+            sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_pad2")));
         session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
         session.dock_in_place();
     }
@@ -491,7 +491,7 @@ TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuel
     INFO(s.refusal);
     REQUIRE(s.refusal.empty());
     CHECK(s.kind == config::MissionKind::DepotLaunch);
-    CHECK(s.site_id == "starbase_olp1");
+    CHECK(s.site_id == "starbase_pad2");
     CHECK(s.epoch == f.t0);  // the mission's epoch_utc
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ascent);
     CHECK_FALSE(f.session.station_index());
@@ -549,7 +549,7 @@ TEST_CASE("tanker_flight_orbit starts behind the depot and plans the phasing", "
     CHECK(f.session.body(f.session.controlled_index()).vehicle().main_propellant_kg() ==
           Catch::Approx(m.start_propellant_kg));
     CHECK(f.session.launch_site().latitude_rad ==
-          Catch::Approx(config::load_launch_site(refuelling_test::config_dir, "starbase_olp1").latitude_rad));
+          Catch::Approx(config::load_launch_site(refuelling_test::config_dir, "starbase_pad2").latitude_rad));
 }
 
 TEST_CASE("tanker_flight finds a launch window into the depot plane within the uncrewed limit",
@@ -646,7 +646,7 @@ TEST_CASE("Refuelling flights: the window's separation estimate matches the flow
     const auto& ship = session.body(session.controlled_index());
     const Vec3 r = ship.state().position_gcrf_m, v = ship.state().velocity_gcrf_mps;
     const Vec3 n = math::normalized(cross(r, v));
-    const auto site = config::load_launch_site(refuelling_test::config_dir, "starbase_olp1");
+    const auto site = config::load_launch_site(refuelling_test::config_dir, "starbase_pad2");
     const Vec3 pad = f.earth.fixed_to_gcrf(w.liftoff).rotation *
                      frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
     const Vec3 pad_in_plane = pad - dot(pad, n) * n;

@@ -39,7 +39,7 @@ time::Epoch start() {
 
 // FlightSession is not movable in practice (its environment refers to its own members): set it up in place.
 void use_starbase(sim::FlightSession& session) {
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
 }
 
 // Block 3 booster with 4 t of propellant left, upright over the catch axis, pins facing the arms. `pin_offset_m`
@@ -200,7 +200,7 @@ TEST_CASE("A stack released without thrust stays on the launch mount", "[contact
     const auto t0 = start();
     sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
     session.launch_from_pad("starship_block3",
-                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")),
+                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")),
                             90.0 * constants::deg_to_rad, t0);
     session.release_clamps();
     for (double t = 0.5; t <= 10.0; t += 0.5) session.advance_to(t0 + t, 1000);
@@ -236,7 +236,7 @@ TEST_CASE("Striking the tower is recorded", "[contact][catch]") {
 TEST_CASE("A stack stands on the 14.5 m ring", "[contact]") {
     const auto t0 = start();
     sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
-    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2"));
     session.set_launch_site(site);
     session.launch_from_pad("starship_block3", site, 90.0 * constants::deg_to_rad, t0);
     const auto& stack = session.body(0);

@@ -135,7 +135,7 @@ func _leaf_at(tree: TerrainQuadtree, lat_deg: float, lon_deg: float) -> Vector4i
 # drawn surface there is at the site height; coverage holds.
 func _check_flat_rule() -> void:
 	var tree := _make_tree(false)
-	var site := _site("starbase_olp1")
+	var site := _site("starbase_pad2")
 	var covered := _converge(tree, _above(site["latitude_deg"], site["longitude_deg"], site["height_m"] + EYE_HEIGHT_M))
 	_check(covered and absf(_coverage(tree) - 4.0 * PI) < 1e-9, "coverage is complete (flat rule, %d leaves)"
 			% tree.drawn_keys().size())
@@ -528,7 +528,7 @@ static func _vertex_lat_lon(key: Vector4i, a: int, b: int) -> Vector2:
 # Camera jumps (pad -> 1000 km up -> the far side of the Earth) with one upload per frame: coverage on every frame.
 func _check_jump() -> void:
 	var tree := _make_tree(false)
-	var site := _site("starbase_olp1")
+	var site := _site("starbase_pad2")
 	var lat: float = site["latitude_deg"]
 	var lon: float = site["longitude_deg"]
 	_converge(tree, _above(lat, lon, site["height_m"] + EYE_HEIGHT_M))
@@ -557,20 +557,20 @@ func _check_jump() -> void:
 	tree.queue_free()
 
 
-# With the Earth terrain: level >= 17 under the OLP-1 camera; the finest mesh equals core.surface_samples at the pad
-# centre, an LZ-40 plateau point and a dune point 2 km west of OLP-1.
+# With the Earth terrain: level >= 17 under the Pad 2 camera; the finest mesh equals core.surface_samples at the pad
+# centre, an LZ-40 plateau point and a dune point 2 km west of Pad 2.
 func _check_data() -> void:
 	var tree := _make_tree(true)
-	var olp := _site("starbase_olp1")
+	var olp := _site("starbase_pad2")
 	var lz := _site("ccsfs_lz40")
 	var t0 := Time.get_ticks_msec()
 	_converge(tree, _above(olp["latitude_deg"], olp["longitude_deg"], olp["height_m"] + EYE_HEIGHT_M))
 	var leaf := _leaf_at(tree, olp["latitude_deg"], olp["longitude_deg"])
-	_check(leaf.y >= 17, "refines towards the camera: leaf level %d at OLP-1 with data (%d leaves, %d ms)"
+	_check(leaf.y >= 17, "refines towards the camera: leaf level %d at Pad 2 with data (%d leaves, %d ms)"
 			% [leaf.y, tree.drawn_keys().size(), Time.get_ticks_msec() - t0])
 	var metres_per_deg_lon := EARTH_RADIUS_M * PI / 180.0 * cos(deg_to_rad(olp["latitude_deg"]))
-	var points := [["OLP-1 pad centre", olp["latitude_deg"], olp["longitude_deg"]],
-			["dune 2 km west of OLP-1", olp["latitude_deg"], olp["longitude_deg"] - 2000.0 / metres_per_deg_lon],
+	var points := [["Pad 2 pad centre", olp["latitude_deg"], olp["longitude_deg"]],
+			["dune 2 km west of Pad 2", olp["latitude_deg"], olp["longitude_deg"] - 2000.0 / metres_per_deg_lon],
 			["LZ-40 plateau", lz["latitude_deg"], lz["longitude_deg"] + 20.0 / metres_per_deg_lon]]
 	for point: Array in points:
 		var lat: float = point[1]

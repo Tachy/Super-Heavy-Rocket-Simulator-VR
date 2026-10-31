@@ -41,7 +41,7 @@ using sim::IssMissionLeg;
 namespace {
 
 constexpr const char* tanker_stack = "starship_tanker";  // tanker_ascent's vehicle
-constexpr const char* tanker_site = "starbase_olp1";     // tanker_ascent's site
+constexpr const char* tanker_site = "starbase_pad2";     // tanker_ascent's site
 
 sim::LaunchSite starbase() {
     return sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, tanker_site));

@@ -25,8 +25,8 @@ Part of the atmosphere docs; index `docs/subsystems/atmosphere-rendering.md`.
   0.0031 > -12 deg 0.0015; 2026-11-12 crescent glow 16 % above the sky beside it; limb glow on the game's path (>0),
   adapted totality takes the glow (> 1.5 x the zenith), twilight eye off the shadow on the eclipse day keeps its glow
   (90.8 cd/m^2).
-- Render values (adapted, snapped; B / S: OLP-1 Sun -3 deg 0.377 / 0.675, -8 and below 0.368 / 0.521, totality
-  0.368 / 0.553, orbit sunset 0.368 / 0.603, full Moon 0.368 / 0.521): pad noon 1.10 (OLP-1 noon view 1.123); Sun -3 deg
+- Render values (adapted, snapped; B / S: Pad 2 Sun -3 deg 0.377 / 0.675, -8 and below 0.368 / 0.521, totality
+  0.368 / 0.553, orbit sunset 0.368 / 0.603, full Moon 0.368 / 0.521): pad noon 1.10 (Pad 2 noon view 1.123); Sun -3 deg
   L_a 90.8, gain 464; Sun -8 deg L_a 1.44, gain 5324, rod scale 0.025, zenith (0.0036, 0.0083, 0.025); Sun -12 deg
   gain 11 235, rod scale 5.5; moonless night L_a at the 1e-6 floor, gain 12 368, rod scale 138, magnitude-6 star
   visible; full Moon at the Cape (2024-10-17 05:00, phase ~3 deg, moonlight 2.84e-6 of the Sun): L_a 0.12, gain 9977,

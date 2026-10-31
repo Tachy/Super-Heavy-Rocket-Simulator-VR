@@ -89,7 +89,7 @@ constexpr double nominal_range_m = 7.5e6;      // [E] Starbase from the entry in
 constexpr double arrival_back_azimuth = 280.0 * deg;  // the ship comes from the west-northwest (over Mexico)
 
 Outcome fly(const Case& c, int index) {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     const LatLon pad{site.latitude_rad, site.longitude_rad};
     const LatLon nominal_start = destination(pad, arrival_back_azimuth, nominal_range_m + c.range_offset_m);
     const double heading = bearing(nominal_start, pad);
@@ -207,7 +207,7 @@ TEST_CASE("Entry guidance brings the ship to the Starbase flip gate from dispers
 // The corridor constraints cut the bank back: a steep entry whose guided peak load is known flies again with the
 // load limit lowered below that peak - the guidance keeps it (giving up range) and the ship does not break up.
 TEST_CASE("Entry guidance holds the load limit", "[ship][guidance][validation]") {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     const LatLon pad{site.latitude_rad, site.longitude_rad};
     const LatLon start_point = destination(pad, arrival_back_azimuth, 0.6 * nominal_range_m);
     test::EntryStart start;

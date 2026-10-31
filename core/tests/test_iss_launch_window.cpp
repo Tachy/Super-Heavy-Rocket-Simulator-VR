@@ -140,7 +140,7 @@ const double re = constants::wgs84_semi_major_axis_m;
 struct TankerFixture {
     const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
     const spice::SpiceTimeConverter clock;
-    const config::LaunchSiteConfig site = config::load_launch_site(rendezvous_test::config_dir, "starbase_olp1");
+    const config::LaunchSiteConfig site = config::load_launch_site(rendezvous_test::config_dir, "starbase_pad2");
     const time::Epoch start = clock.from_utc({2026, 10, 20, 0, 0, 0.0});
     config::DepotOrbitConfig depot_config() const {
         config::DepotOrbitConfig d;

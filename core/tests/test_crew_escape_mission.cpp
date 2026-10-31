@@ -170,7 +170,7 @@ TEST_CASE("Crewed lunar direct return with an engine failed in the entry", "[cre
 
 TEST_CASE("Crew outside the envelope is lost", "[crew_escape][mission]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
     config::fill_tanks(cfg.stages[0], 35000.0);

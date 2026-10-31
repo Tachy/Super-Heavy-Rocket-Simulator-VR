@@ -20,7 +20,7 @@ const VIEWS := {
 	"V1": ["--lat=25.997", "--lon=-97.157", "--utc=2024-06-15T21:00:00", "--weather=slab:1000,2500,0.0003,0.5",
 			"--azimuth=90", "--elevation=10", "--fov=100"],
 	# ascent through the deck
-	"V2": ["--vehicle=starship_block3", "--site=starbase_olp1", "--autopilot", "--fly=25",
+	"V2": ["--vehicle=starship_block3", "--site=starbase_pad2", "--autopilot", "--fly=25",
 			"--weather=slab:1500,2500,0.0003,0.6", "--frames_every=0.5", "--frames_for=120"],
 	# 9 km above a broken deck
 	"V3": ["--lat=25.997", "--lon=-97.157", "--utc=2024-06-15T21:00:00", "--weather=slab:1500,2500,0.0003,0.5",

@@ -165,7 +165,7 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
 
 TEST_CASE("Ship return mission loads", "[ship][mission]") {
     const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
-    CHECK(m.site_id == "starbase_olp1");
+    CHECK(m.site_id == "starbase_pad2");
     CHECK(m.stage_id == "ship");
     CHECK(m.periapsis_height_m == 200000.0);
     CHECK(std::abs(m.deorbit.entry_flight_path_rad + 1.0 * deg) < 1e-12);

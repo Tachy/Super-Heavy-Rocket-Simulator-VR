@@ -23,7 +23,7 @@ and on the geoid at sea; the renderer (`docs/subsystems/terrain-rendering.md`) d
   500 m from each finer grid's edge; `sim::load_earth_terrain(config_dir, data_dir)` loads it and refuses stale tiles
   (area, level, centre or half size off by more than one cell).
 - **Datum chain.** 3DEP: NAVD88 orthometric + GEOID18 -> NAD83(2011) ellipsoidal -> ITRF2014 (EPSG 7912 Helmert,
-  -1.36 m at OLP-1, -1.54 m at the Cape; WGS84(G2139) = ITRF2014 at the cm level). GLO-30 and ETOPO: + the EGM2008
+  -1.36 m at Pad 2, -1.54 m at the Cape; WGS84(G2139) = ITRF2014 at the cm level). GLO-30 and ETOPO: + the EGM2008
   undulation. Horizontal NAD83(2011) -> ITRF2014 shift of the 3DEP grids (`earth_terrain.py`
   `nad83_horizontal_shift_deg`, pyproj; the grid origin moves by the shift at the grid centre, header
   `horizontal_shift_m`): Starbase -0.892 m east / +0.439 m north (0.995 m), Cape -0.453 / +0.641 m (0.785 m); the
@@ -84,7 +84,7 @@ and on the geoid at sea; the renderer (`docs/subsystems/terrain-rendering.md`) d
 - Guidance aims at the baked site height; the flat comparison mode stays the default and the test mode.
 - Entry guidance: in the terminal phase the online drag / lift scales are kept when the attitude error (largest over
   the 2 s cycle) exceeds `scale_max_attitude_error_rad` 2 deg [E] (steady terminal flight <= 0.3 deg).
-- Webcast comparison altitudes are above the pad (flight 14 at OLP-1, CRS-35 at SLC-40), not ellipsoidal.
+- Webcast comparison altitudes are above the pad (flight 14 at Pad 2, CRS-35 at SLC-40), not ellipsoidal.
 
 ## Validation
 

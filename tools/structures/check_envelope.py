@@ -21,7 +21,7 @@ import mechazilla_layout  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DETAIL = ROOT / "config" / "structures" / "starbase_olp2.toml"
-SITE_ID = "starbase_olp1"
+SITE_ID = "starbase_pad2"
 LENGTH_TOL_M = 0.10
 SURFACE_TOL_M = 0.05
 VEHICLE = ROOT / "config" / "vehicles" / "starship_block3.toml"

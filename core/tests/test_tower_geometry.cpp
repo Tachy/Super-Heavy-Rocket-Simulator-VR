@@ -18,7 +18,7 @@ using math::Vec3;
 namespace {
 
 const config::LaunchSiteConfig& starbase() {
-    static const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
+    static const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
     return site;
 }
 

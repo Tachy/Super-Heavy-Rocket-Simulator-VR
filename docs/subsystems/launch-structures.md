@@ -3,7 +3,7 @@
 State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.md`, tasks 1-4 done (lattice and tower body;
 carriage, both chopsticks, QD arm; square mount, trench, terrain mask; lights); task 5 (acceptance) open. The prototype plan
 (`2026-10-31-pad-b-prototype.md`) built the hybrid pipeline. Spec: `docs/superpowers/specs/2026-10-28-pad-b-model-design.md`.
-The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`; the physics stands on the measured Pad B since the physics plan's Tasks 1-3
+The lattice, carriage, both chopsticks and the QD arm render at `starbase_pad2`; the physics stands on the measured Pad B since the physics plan's Tasks 1-3
 (`docs/superpowers/plans/2026-10-31-pad-b-physics-alignment.md`): ring 25.99677 N, 97.15804 W, deck 14.5 m, tower azimuth 349, 31.7 m, box yaw 37.4, hinges 22.3 m, arm 25.9 m (3.6 m past the axis: margin, user 2026-10-31), catch 133 m, pins 63.0 at 0 / 180. Open differences: table "Physics deviations" below.
 Sea: `[site.sea]` 90 deg, 765 m [D]: first water along that bearing in the 3DEP grid, the nearest shore of bearings 60-130. An abort first checks from the live state whether the water is in reach (`gnc::estimate_sea_reach`, a lower bound, x `sea_reach_margin` 1.5). A booster reaches it from 1500 and 800 m with 5.2 and 4.1 t left; from 400 m it gives the water up and comes down soft on land (500 m was an estimate from the old position).
 Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catch_roll_reference(CatchTarget, ...)`); a ship keeps the nearer of its two rolls.
@@ -55,8 +55,10 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   no cabinets or booms on the deck). 1.1k triangles. Plate map `mount_panels.png` (`mount_textures.py`; `shaders/mount_shell.gdshader`).
 - Trench and ground (`trench.gltf`, `[trench]`): the tunnel's floor is one closed surface: level at -9 m (`pit_depth_m`) for |Y| < 9.4 under the ring,
   straight ramps up to the ground at Y +-41.5, 15.2 m wide; the walls outside the block run from the inner face (X +-7.6) out to the deck plate's side edges (X -10.9 / +10.3); their top falls from the deck height (13.5 m) at the block to a 0.5 m small wall (`wall_height_m`) where the annex footprint ends (Y 22.3), then runs level to the ramp end. Tan-brown floor (the ribbed dark look is a surface matter, not drawn). The floor
-  stays closed so that a water layer can be added later. Hardstand: a flat convex plate of light concrete around the block, tunnel and tower foot (outline
-  +-15 m, low confidence: wide-angle views only; Task 5 redraws it), `pad_concrete.png`, satellite terrain beyond its edge. Tower foot: a block cut vertically
+  stays closed so that a water layer can be added later. Hardstand: a flat triangle of light concrete (Task 5): the measured outline of the finished concrete (Esri Wayback release 43291, DSC05957 / DSC06000): south
+  tip with the water basin 36 m W / 74.6 m S of the ring centre (+-8 m), SW edge bearing 167 (3) deg 218 (10) m, SE edge 63 (3) deg 203 (10) m, the third side
+  is the road; `[trench] hardstand_*` keys, converted with the site's azimuth and plan yaw (`mount_layout.hardstand_outline`), minus the block, tunnel and walls
+  (the annex flanks stand on it); the road side lies up to ~170 m from the ring, the terrain plateau (150 m + 50 m blend) carries it; `pad_concrete.png`, satellite terrain beyond its edge. Tower foot: a block cut vertically
   on the side toward the mount (X 17.6, 7.3 m from the block's wall), far side X 37.6, 18 m across, 7 m walls, chamfered roof up to the legs' plinth.
 - Terrain mask: `terrain_earth.gdshader` does not draw the terrain inside the tunnel's plan (X +-7.55, Y out to 41.45; only the tunnel lies below the ground)
   within `mask_range_m` = 20 km of the camera; the pit model is drawn 150 m beyond. Globals `trench_*` (project.godot) set by
@@ -68,7 +70,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 
 ## Game side (task 3)
 - `StructureModels.load_for(site_id)` (`game/world/structures/structure_models.gd`): `{}` unless the site is the
-  prototype's (`PROTOTYPE_SITE_ID = "starbase_olp1"`), the detail file exists and `data/models/starbase_olp2/` is not
+  prototype's (`PROTOTYPE_SITE_ID = "starbase_pad2"`), the detail file exists and `data/models/starbase_olp2/` is not
   older than the detail file / generator scripts (file mtimes; the manifest's Blender hash cannot be reproduced in
   GDScript). Otherwise one log line per site and `TowerView` keeps its boxes. glTF is loaded at run time (`GLTFDocument`);
   the Blender axes (arm +X, Z up) become render axes once, in `BLENDER_TO_RENDER`.
@@ -123,7 +125,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 - Hybrid pipeline: lattice instanced by Godot from the file, non-repeating modules by headless Blender (glTF in
   git-ignored `data/models/starbase_olp2/`), boxes as fallback. Physics numbers are the master (envelope check 0.10 m /
   0.05 m, full build).
-- Prototype: placed at `starbase_olp1`'s tower box; arm visual length 26 m vs. physics 36 m is a known mismatch.
+- Prototype: placed at `starbase_pad2`'s tower box (site renamed from `starbase_olp1` / "Starbase OLP-1" in Task 5, 2026-10-31; ids mechanical in config, tests and tools).
 
 ## Validation
 - `game/tests/tower_view_test.gd` (headless), `smoke_test.gd`.
@@ -209,8 +211,8 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   task 5); shock absorbers and the fin's station undecided.
 - Mount render vs DSC06000 / DSC06022 / CRL05690 (`screenshots/pad-b-plan/4a_*.png`, Task 4a): the annex lacks its stepped courses and recessed door bays, vent plates and louvre boxes are plain boxes, no tunnel-floor surface detail (ribbed dark steel), no inner wall panels in the round opening, the ramp walls are drawn without the photo's plating; water in the underpass: user note 2026-10-31, probably let in and evaporating at ignition, not verified, not drawn (the floor is closed for it). Hardstand edges of the annex flanks lie under the plate (Task 5).
 - Earlier render vs the frames (`sf_*.png`, before Task 4a): mount taller and steeper than the photos (the 20 m deck), plates cleaner and more regular, hoods without
-  the chamfered facets, vents plain wedges, no scaffolds, vehicles, recessed door bays or the deck's fine hardware; hardstand outline and portal
-  width carry the largest plan errors (ship39 reads the ramp 15 m, tower foot 26 m, NOAA 20 +-4). Still different on the tower: no platforms with grating and no cross braces inside the face, the plinth is a plain box,
+  the chamfered facets, vents plain wedges, no scaffolds, vehicles, recessed door bays or the deck's fine hardware; portal
+  width carries the largest plan error (ship39 reads the ramp 15 m, tower foot 26 m, NOAA 20 +-4). Still different on the tower: no platforms with grating and no cross braces inside the face, the plinth is a plain box,
   the hoist cables and side members of the roof block are missing, grime is not tuned.
 - The far shader's `blur`, `alpha_scale` and colours are fitted to the merged tier at 900-1300 m for one sun / sky
   condition; other light may show a small step (< 2 % luminance measured).

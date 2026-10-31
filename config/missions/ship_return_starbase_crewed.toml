@@ -9,7 +9,7 @@ display_name = "Rückkehr zum Startturm (bemannt)" # shown in the webcast overla
 kind = "ship_return"            # FlightSim.start_mission dispatches on it (absent: "ascent")
 vehicle = "starship_block3"
 stage = "ship"
-site = "starbase_olp1"
+site = "starbase_pad2"
 crew_escape = "starship_crew"   # crewed: ejection seats on every give-up (config/crew_escape/, crew escape spec 2026-10-22)
 
 [orbit]

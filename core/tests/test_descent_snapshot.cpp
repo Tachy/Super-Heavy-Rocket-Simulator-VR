@@ -19,7 +19,7 @@ TEST_CASE("The descent snapshot puts the booster into the plan frame", "[gnc][de
     static const auto earth = spice::SpiceOrientation::earth();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
-    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2"));
     session.set_launch_site(site);
     const auto cfg = test::booster_config("starship_block3", 70000.0);
     const vehicle::FlightBody body(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR),

@@ -15,8 +15,8 @@ import site_heights  # noqa: E402
 SITES_TEXT = """# Launch and landing sites.
 
 [[site]]
-id = "starbase_olp1"
-name = "Starbase OLP-1"
+id = "starbase_pad2"
+name = "Starbase Pad 2"
 height_m = 10.0               # [E]
 plateau_radius_m = 150.0      # [E]
 
@@ -72,7 +72,7 @@ def test_median_inside_radius():
 
 
 def test_write_keeps_comments():
-    new = {"starbase_olp1": (-19.87, "3DEP", 150.0), "ksc_lc39a": (-14.1, "3DEP", 150.0),
+    new = {"starbase_pad2": (-19.87, "3DEP", 150.0), "ksc_lc39a": (-14.1, "3DEP", 150.0),
            "ccsfs_slc40": (-24.2, "3DEP", 100.0), "ccsfs_lz40": (-25.0, "3DEP", 61.0)}
     out = site_heights.replace_site_heights(SITES_TEXT, new, "2026-10-23")
     old_lines, new_lines = SITES_TEXT.split("\n"), out.split("\n")

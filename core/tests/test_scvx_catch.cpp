@@ -58,7 +58,7 @@ math::Quat catch_roll(const sim::LaunchSite& site) {
 test::CatchRun fly(const Vec3& offset_enu_m, const Vec3& velocity_offset_mps) {
     const auto t0 = start();
     sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
     const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
     session.place_returning_booster(cfg,
@@ -95,7 +95,7 @@ TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea
     CAPTURE(abort_height_m);
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
     const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
     session.place_returning_booster(cfg,
@@ -141,7 +141,7 @@ TEST_CASE("An abort the guidance cannot fly leaves the tower's arms alone", "[gn
     // open under a booster that keeps aiming at them.
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2"));
     site.sea.reset();  // a tower site without a coastline
     session.set_launch_site(site);
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
@@ -193,7 +193,7 @@ Dispersion dispersion(unsigned seed) {
 test::CatchRun fly_dispersed(const Dispersion& d) {
     const auto t0 = start();
     sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto parameters = gnc::BoosterReturnParameters{};
     const auto nominal = test::booster_config("starship_block3", nominal_propellant_kg);
     const double h = test::ignition_height_m(session, nominal, earth(), t0, nominal_sink_mps, parameters);
@@ -251,7 +251,7 @@ namespace {
 double roll_error_at_ignition_deg(double start_roll_deg = 60.0) {
     const auto t0 = start();
     sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
     // Measured from the catch roll (body +z away from the tower).
     const auto rolled = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, start_roll_deg * constants::deg_to_rad) *
@@ -286,7 +286,7 @@ TEST_CASE("SCvx catches with the residual roll error of a flown return", "[gnc][
     const double sign = GENERATE(1.0, -1.0);
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
     const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
     const auto residual = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, sign * test::flown_ignition_roll_error_bound_deg * constants::deg_to_rad);
@@ -313,7 +313,7 @@ TEST_CASE("A booster half a turn off in roll still lights the burn rolled for th
 TEST_CASE("The landing burn ends with the 90 deg fin away from the tower", "[gnc][catch]") {
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
     const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},

@@ -422,13 +422,34 @@ def _x_range(poly, y):
     return (min(xs), max(xs)) if xs else None
 
 
-def _hardstand(S, sh):
-    """The flat light concrete apron: the convex outline minus the mount's block and the tunnel with its walls, cut in Y bands
-    (the annex's flanks lie under it, the outline is Task 5's)."""
+def hardstand_outline(detail: dict) -> list:
+    """The concrete outline in the mount frame (X at bearing azimuth + plan yaw, Y 90 deg clockwise of it): the triangle of the south
+    tip and the two ends of its edges on the road (measured edges: tip, SW edge end, SE edge end). Convex."""
+    t, site = detail["trench"], detail["site_tower"]
+    base = math.radians(site["azimuth_deg"] + site["plan_yaw_deg"])
+
+    def to_mount(east, north):
+        return (east * math.sin(base) + north * math.cos(base),
+                east * math.sin(base + 0.5 * math.pi) + north * math.cos(base + 0.5 * math.pi))
+
+    tip = (t["hardstand_tip_east_m"], t["hardstand_tip_north_m"])
+
+    def along(bearing_deg, length):
+        b = math.radians(bearing_deg)
+        return (tip[0] + length * math.sin(b), tip[1] + length * math.cos(b))
+
+    sw_end = along(t["hardstand_sw_bearing_deg"] + 180.0, t["hardstand_sw_length_m"])  # the SW edge runs road -> tip
+    se_end = along(t["hardstand_se_bearing_deg"], t["hardstand_se_length_m"])
+    return [to_mount(*p) for p in (tip, sw_end, se_end)]
+
+
+def _hardstand(S, sh, detail):
+    """The flat light concrete apron: the measured outline minus the mount's block and the tunnel with its walls, cut in Y bands
+    (the annex's flanks lie under it)."""
     t = sh.t
-    poly = [tuple(float(c) for c in pair.split(",")) for pair in t["hardstand_outline_m"].split()]
+    poly = hardstand_outline(detail)
     lift = t["hardstand_lift_m"]
-    cuts = sorted({round(p[1], 6) for p in poly} | {-sh.ramp_end, -sh.half_y, sh.half_y, sh.ramp_end})
+    cuts = sorted({p[1] for p in poly} | {-sh.ramp_end, -sh.half_y, sh.half_y, sh.ramp_end})
     up = (0.0, 0.0, 1.0)
     for y0, y1 in zip(cuts, cuts[1:]):
         r0, r1 = _x_range(poly, y0), _x_range(poly, y1)
@@ -470,7 +491,7 @@ def trench(detail: dict) -> Surfaces:
             S.add("wall", [(x, sy * y0, zd), (xo, sy * y0, zd), (xo, sy * yl, zl), (x, sy * yl, zl)], up, _uv_plan)
             S.add("wall", [(x, sy * yl, zl), (xo, sy * yl, zl), (xo, sy * y1, zl), (x, sy * y1, zl)], up, _uv_plan)
             S.add("wall", [(x, sy * y1, 0.0), (xo, sy * y1, 0.0), (xo, sy * y1, zl), (x, sy * y1, zl)], (0.0, sy, 0.0), _uv_x)
-    _hardstand(S, sh)
+    _hardstand(S, sh, detail)
     # The tower's foot: a block cut vertically on the side toward the mount, its far side chamfered up to the legs' plinth.
     cx, cy, half, top = t["foot_x_m"], t["foot_y_m"], 0.5 * t["foot_width_m"], t["foot_height_m"]
     near, far = t["foot_near_x_m"], t["foot_far_x_m"]

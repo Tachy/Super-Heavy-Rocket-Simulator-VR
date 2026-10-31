@@ -40,7 +40,7 @@ ARTEMIS_ARCS = [
 
 SITES = {
     # name: (east longitude deg, geodetic latitude deg, height above WGS84 km)
-    "starbase_olp1": (-97.15394, 25.99686, 0.010),
+    "starbase_pad2": (-97.15394, 25.99686, 0.010),
     "ksc_lc39a": (-80.60410, 28.60822, 0.015),
 }
 

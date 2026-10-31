@@ -20,7 +20,7 @@ const TOLERANCE := 0.02
 const RELATIVE_FLOOR := 1e-3
 const VIEW_SIZE := 65  ## odd: the centre pixel's ray is the camera axis
 const SETTLE_FRAMES := 3
-## OLP-1 (config/launch_sites.toml, height [D] ellipsoidal).
+## Pad 2 (config/launch_sites.toml, height [D] ellipsoidal).
 const PAD_LAT_DEG := 25.9967
 const PAD_LON_DEG := -97.1543
 const PAD_HEIGHT_M := -21.11

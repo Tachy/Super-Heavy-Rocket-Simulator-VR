@@ -8,10 +8,10 @@ var _failures := 0
 func _initialize() -> void:
 	var catalogue := MissionCatalogue.load_from(Paths.config_dir())
 	var place_ids := _ids(catalogue.places())
-	for id in ["starbase_olp1", "ccsfs_slc40", "earth_orbit", "iss_docked", "lunar_orbit"]:
+	for id in ["starbase_pad2", "ccsfs_slc40", "earth_orbit", "iss_docked", "lunar_orbit"]:
 		_check(place_ids.has(id), "place %s listed" % id)
 	_check(not place_ids.has("ccsfs_lz40"), "landing zone is not a place")
-	_check(place_ids.find("starbase_olp1") < place_ids.find("earth_orbit"), "pads before start places")
+	_check(place_ids.find("starbase_pad2") < place_ids.find("earth_orbit"), "pads before start places")
 	for place in catalogue.places():
 		if place["id"] == "ccsfs_slc40":
 			_check(not (place["site"] as Dictionary).is_empty(), "pad carries its site entry")

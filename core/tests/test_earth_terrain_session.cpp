@@ -209,7 +209,7 @@ TEST_CASE("impact on terrain away from the site", "[session][earth_terrain]") {
 }
 
 TEST_CASE("crew escape touchdown over water from terrain", "[session][earth_terrain][crew_escape]") {
-    const auto starbase = site("starbase_olp1");
+    const auto starbase = site("starbase_pad2");
     // sea everywhere (orthometric -10 m: water at the geoid) except a small pad plateau
     auto terrain = std::make_shared<const EarthTerrain>(constant_geoid(geoid_n), constant_global(geoid_n - 10.0, 1.0),
                                                         std::vector<GeographicGrid>{}, std::vector<GeographicGrid>{},
@@ -387,7 +387,7 @@ TEST_CASE("flat model unchanged without terrain", "[session][earth_terrain]") {
 }
 
 TEST_CASE("sea height uses the coarse geoid without terrain", "[session][earth_terrain]") {
-    const auto starbase = site("starbase_olp1");
+    const auto starbase = site("starbase_pad2");
     const auto coarse = config::load_coarse_geoid(STARSIM_CONFIG_DIR);
     sim::FlightSession session(env().ephemeris, env().earth, STARSIM_CONFIG_DIR);
     const double n = coarse.undulation_m(starbase.latitude_rad, starbase.longitude_rad);

@@ -42,7 +42,9 @@ MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_
               "tile_m", "course_m", "panel_m", "seam_m", "map_size")
 TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "hardstand_lift_m", "concrete_tile_m", "slab_m",
                "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_near_x_m", "foot_far_x_m", "foot_width_m",
-               "foot_height_m", "mask_range_m")
+               "foot_height_m", "mask_range_m", "hardstand_sw_bearing_deg",
+               "hardstand_sw_length_m", "hardstand_se_bearing_deg", "hardstand_se_length_m")
+TRENCH_SIGNED_KEYS = ("hardstand_tip_east_m", "hardstand_tip_north_m")  # offsets from the ring centre: either sign
 COUNT_KEYS = ("count", "columns", "louvre_count")
 
 
@@ -63,7 +65,7 @@ def _positive(table: dict, key: str, where: str) -> None:
 
 
 SITES_FILE = Path(__file__).resolve().parents[2] / "config" / "launch_sites.toml"
-SITE_ID = "starbase_olp1"  # the site whose [site.tower] the structures are drawn on
+SITE_ID = "starbase_pad2"  # the site whose [site.tower] the structures are drawn on
 
 
 def plan_yaw_deg(sites_file=SITES_FILE, site_id=SITE_ID) -> float:
@@ -76,7 +78,7 @@ def plan_yaw_deg(sites_file=SITES_FILE, site_id=SITE_ID) -> float:
     raise DetailFileError(f"{sites_file}: no site '{site_id}'")
 
 
-SITE_TOWER_KEYS = ("distance_m", "width_m", "plan_yaw_deg", "hinge_distance_m", "arm_length_m", "arm_closed_gap_m",
+SITE_TOWER_KEYS = ("azimuth_deg", "distance_m", "width_m", "plan_yaw_deg", "hinge_distance_m", "arm_length_m", "arm_closed_gap_m",
                    "arm_width_m", "catch_height_m", "carriage_stroke_m", "arm_open_deg")
 
 
@@ -142,6 +144,10 @@ def load(path) -> dict:
         _need(data[table], keys, table)
         for k in keys:
             _positive(data[table], k, table)
+    _need(data["trench"], TRENCH_SIGNED_KEYS, "trench")
+    for k in TRENCH_SIGNED_KEYS:
+        if isinstance(data["trench"][k], bool) or not isinstance(data["trench"][k], (int, float)):
+            raise DetailFileError(f"trench.{k}: must be a number in metres")
     for k in ("chord_profile", "brace_profile", "thin_profile"):
         if chop[k] not in profiles:
             raise DetailFileError(f"chopstick.{k}: unknown profile '{chop[k]}'")

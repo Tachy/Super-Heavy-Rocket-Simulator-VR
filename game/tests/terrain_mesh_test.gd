@@ -343,7 +343,7 @@ func _check_flat_rule() -> void:
 	source.sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	var starbase := {}
 	for site: Dictionary in source.sites:
-		if site["id"] == "starbase_olp1":
+		if site["id"] == "starbase_pad2":
 			starbase = site
 	var site_height: float = starbase.get("height_m", NAN)
 	for place: Array in [[starbase.get("latitude_deg", 0.0), starbase.get("longitude_deg", 0.0), site_height, "Starbase"],

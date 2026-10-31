@@ -1,6 +1,6 @@
 # Renders the main scene at a fixed instant and camera, saves a PNG and quits (needs a GPU, no --headless).
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
-# Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
+# Vehicle: --vehicle=starship_block3 --site=starbase_pad2 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
 #          [--watch_from_site[=2000]] (afterwards: seen from the ground 2000 m east of the site, aimed at the vehicle)
 # Ground view: --lat= --lon= [--height=] [--body=moon] (selenographic, MOON_ME; --height defaults to the core's

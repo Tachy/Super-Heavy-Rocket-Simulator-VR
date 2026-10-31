@@ -48,7 +48,7 @@ config::VehicleConfig entering_ship() {
 // energy to spare the belly flop falls steeply and turns the nose to the tower; from 33-39 km (most lift to reach the
 // gate) the fall stays shallow too long and the gate is missed by up to 0.8 km (b3 ledger).
 void place_supersonic_ship(sim::FlightSession& session, time::Epoch t0) {
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = entering_ship();
     const double speed = 780.0, gamma = -8.0 * deg;
     auto state = test::state_over_site(session.launch_site(), earth(), t0, Vec3{-28000.0, 0.0, 26000.0},

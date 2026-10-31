@@ -332,3 +332,45 @@ def test_every_polygon_is_planar_and_outward_hinted(mount, trench):
                 for v in verts[3:]:  # planarity
                     d = sum((v[k] - verts[0][k]) * n[k] / length for k in range(3))
                     assert abs(d) < 1e-6
+
+
+def _compass_to_mount(detail, east, north):
+    """Compass offsets (m east / north of the ring centre) in the mount frame: X at bearing azimuth + yaw, Y 90 deg clockwise of it."""
+    bearing = math.radians(detail["site_tower"]["azimuth_deg"] + detail["site_tower"]["plan_yaw_deg"])
+    return (east * math.sin(bearing) + north * math.cos(bearing),
+            east * math.sin(bearing + math.pi / 2) + north * math.cos(bearing + math.pi / 2))
+
+
+def test_hardstand_is_the_measured_outline(detail):
+    """Esri Wayback release 43291 / DSC05957: SW edge bearing 167 (3) deg, 218 (10) m road to the south tip; SE edge 63 (3) deg,
+    203 (10) m from the tip; the third side is the road."""
+    poly = ml.hardstand_outline(detail)
+    assert len(poly) == 3
+    tip, sw_end, se_end = poly
+    base = math.radians(detail["site_tower"]["azimuth_deg"] + detail["site_tower"]["plan_yaw_deg"])
+
+    def compass(p, q):  # bearing and length of the mount-frame segment p -> q
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        return (math.degrees(base + math.atan2(dy, dx)) % 360.0, math.hypot(dx, dy))
+
+    bearing, length = compass(sw_end, tip)
+    assert bearing == pytest.approx(167.0, abs=3.0) and length == pytest.approx(218.0, abs=10.0)
+    bearing, length = compass(tip, se_end)
+    assert bearing == pytest.approx(63.0, abs=3.0) and length == pytest.approx(203.0, abs=10.0)
+    east, north = -36.0, -74.6  # the tip: 25.9961 N, 97.1584 W against the ring centre 25.99677 N, 97.15804 W
+    assert tip == pytest.approx(_compass_to_mount(detail, east, north), abs=8.0)
+    # Concrete up to the road: the road side lies beyond the tower foot, and the site lies inside the outline.
+    foot = (detail["trench"]["foot_x_m"], detail["trench"]["foot_y_m"])
+    assert min(sw_end[0], se_end[0]) > detail["trench"]["foot_far_x_m"]  # the road lies beyond the tower foot
+    sh = ml.Shape(detail)
+    for p in [(0.0, 0.0), foot, (-sh.annex_x, sh.annex_half_y), (-sh.annex_x, -sh.annex_half_y),
+              (0.0, ml.ramp_end_m(detail)), (0.0, -ml.ramp_end_m(detail))]:
+        assert _inside_triangle(p, poly), p
+
+
+def _inside_triangle(p, poly):
+    signs = []
+    for i, a in enumerate(poly):
+        b = poly[(i + 1) % len(poly)]
+        signs.append((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0.0)
+    return all(signs) or not any(signs)

@@ -67,7 +67,7 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
     test::spice_session();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = ship_with(gate.propellant_kg);
     auto state = test::state_over_site(session.launch_site(), earth(), t0, gate.offset_enu_m + Vec3{0.0, 0.0, gate.height_m},
                                        gate.velocity_enu_mps);
@@ -113,7 +113,7 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
 // pins lie across the arms without a roll.
 static Gate nominal_gate() {
     Gate g;
-    const double azimuth = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").tower->azimuth_rad;
+    const double azimuth = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").tower->azimuth_rad;
     const Vec3 to_tower{std::sin(azimuth), std::cos(azimuth), 0.0};
     g.offset_enu_m = to_tower * -220.0;
     g.velocity_enu_mps = to_tower * 3.0 + Vec3{0.0, 0.0, -100.0};

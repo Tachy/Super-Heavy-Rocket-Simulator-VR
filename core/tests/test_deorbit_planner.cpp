@@ -59,7 +59,7 @@ Setup setup(double phase_rad, double propellant_kg = 45000.0) {
     Setup s;
     s.t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
     s.session = std::make_unique<sim::FlightSession>(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    s.session->set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    s.session->set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const double gm = s.session->gm_earth_m3ps2();
     const orbit::KeplerianElements elements{6378137.0 + 200e3, 0.0, 26.5 * deg, 0.0, 0.0, phase_rad};
     s.orbit = orbit::state_from_elements(elements, gm);

@@ -4,7 +4,7 @@
 # Run: godot --headless --path game --script res://tests/tower_view_test.gd
 extends SceneTree
 
-const MODEL_SITE := "starbase_olp1"
+const MODEL_SITE := "starbase_pad2"
 const OTHER_SITE := "lc39a"  ## keeps its boxes
 const STATES: Array[Dictionary] = [
 	{},
@@ -394,7 +394,7 @@ func _count(node: Node, class_name_: String) -> int:
 	return node.find_children("*", class_name_, true, false).size()
 
 
-## starbase_olp1's tower as FlightSim.site_tower reports it (site frame), hand-computed.
+## starbase_pad2's tower as FlightSim.site_tower reports it (site frame), hand-computed.
 func _geometry() -> Dictionary:
 	var azimuth := deg_to_rad(349.0)
 	var toward := Vector3(sin(azimuth), cos(azimuth), 0.0)

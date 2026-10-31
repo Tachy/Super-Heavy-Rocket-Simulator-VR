@@ -52,7 +52,7 @@ double max_site_error_m(const char* fixture) {
 }  // namespace
 
 TEST_CASE("Starbase position in GCRF matches Horizons within 15 cm", "[frames][validation]") {
-    CHECK(max_site_error_m("horizons_moon_topocentric_starbase_olp1.csv") < 0.15);
+    CHECK(max_site_error_m("horizons_moon_topocentric_starbase_pad2.csv") < 0.15);
 }
 
 TEST_CASE("KSC LC-39A position in GCRF matches Horizons within 15 cm", "[frames][validation]") {

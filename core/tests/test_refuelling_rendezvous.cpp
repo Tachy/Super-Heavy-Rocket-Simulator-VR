@@ -147,7 +147,7 @@ TEST_CASE("Depot launch window from Starbase: the plane passes the pad about onc
           "[refuelling][launch_window]") {
     test::spice_session();
     refuelling_test::DepotSession f;
-    const auto site = config::load_launch_site(refuelling_test::config_dir, "starbase_olp1");
+    const auto site = config::load_launch_site(refuelling_test::config_dir, "starbase_pad2");
     const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
     mission::LaunchWindowParameters p;
     p.inclination_rad = 26.5 * deg;

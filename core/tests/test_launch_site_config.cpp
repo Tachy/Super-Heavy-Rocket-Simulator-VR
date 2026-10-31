@@ -12,8 +12,8 @@ using namespace starsim;
 using Catch::Matchers::WithinAbs;
 
 TEST_CASE("Launch sites load with their catch tower", "[config]") {
-    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
-    CHECK(site.name == "Starbase OLP-1");
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
+    CHECK(site.name == "Starbase Pad 2");
     CHECK_THAT(site.latitude_rad, WithinAbs(25.99677 * constants::deg_to_rad, 1e-12));  // measured Pad B ring centre
     CHECK_THAT(site.longitude_rad, WithinAbs(-97.15804 * constants::deg_to_rad, 1e-12));
     REQUIRE(site.tower.has_value());
@@ -68,5 +68,5 @@ TEST_CASE("SLC-40 and its landing zone LZ-40 load", "[config][falcon9]") {
     const auto a = frames::geodetic_to_fixed({pad.latitude_rad, pad.longitude_rad, pad.height_m});
     const auto b = frames::geodetic_to_fixed({lz.latitude_rad, lz.longitude_rad, lz.height_m});
     CHECK(norm(a - b) < 1500.0);
-    CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").kind == "launch_pad");
+    CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").kind == "launch_pad");
 }

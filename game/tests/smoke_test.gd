@@ -36,7 +36,7 @@ func _initialize() -> void:
 	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
 	var tower_sim := FlightSim.new()
 	tower_sim.setup(config_dir)
-	var tower: Dictionary = tower_sim.site_tower("starbase_olp1")
+	var tower: Dictionary = tower_sim.site_tower("starbase_pad2")
 	_check(tower.get("present", false), "Starbase has a catch tower")
 
 	# Terrain through the shared cache (M8 Plan B): StarsimCore samples what FlightSim's physics uses.
@@ -48,7 +48,7 @@ func _initialize() -> void:
 	_check(TimePanel.camera_height_line(2500.0, false) == "Kamerahöhe: 2500 m über NN"
 			and TimePanel.camera_height_line(1.2345e5, true) == "Kamerahöhe: 123.5 km über mittlerem Mondradius"
 			and TimePanel.camera_height_line(NAN, false) == "", "TimePanel.camera_height_line formats the height")
-	var starbase := _site(config_dir, "starbase_olp1")
+	var starbase := _site(config_dir, "starbase_pad2")
 	var lat_arr := PackedFloat64Array([float(starbase.get("latitude_deg", 0.0))])
 	var lon_arr := PackedFloat64Array([float(starbase.get("longitude_deg", 0.0))])
 	var earth_samples: Dictionary = core.surface_samples("earth", lat_arr, lon_arr)
@@ -127,7 +127,7 @@ func _advance(sim: FlightSim, tdb_s: float) -> void:
 
 
 # Terrain renderer (M8 Plan B): the quadtree builds nodes on WorkerThreadPool threads through the core's surface
-# samples (after load_terrain) and refines under a camera 2 m above OLP-1.
+# samples (after load_terrain) and refines under a camera 2 m above Pad 2.
 func _check_terrain_streaming(core: StarsimCore, starbase: Dictionary, with_data: bool) -> bool:
 	var heights := HeightSource.new()
 	heights.core = core
@@ -152,7 +152,7 @@ func _check_terrain_streaming(core: StarsimCore, starbase: Dictionary, with_data
 				key.y):
 			level = key.y
 	_check(tree.stats["nodes_loading"] == 0 and level >= (17 if with_data else 8),
-			"terrain streamed on worker threads: leaf level %d at OLP-1, %d leaves, %d frames, %d ms"
+			"terrain streamed on worker threads: leaf level %d at Pad 2, %d leaves, %d frames, %d ms"
 			% [level, tree.drawn_keys().size(), frames, Time.get_ticks_msec() - t0])
 	tree.free()
 	return true
@@ -359,7 +359,7 @@ func _check_thread(config_dir: String, tdb: float) -> bool:
 	# a fresh sim: the old one still has its advance target
 	var countdown_sim := FlightSim.new()
 	countdown_sim.setup(config_dir)
-	_check(_ok(countdown_sim, countdown_sim.launch_from_site("starship_block3", "starbase_olp1", 0.0, tdb, 30.0)), "countdown launch starts")
+	_check(_ok(countdown_sim, countdown_sim.launch_from_site("starship_block3", "starbase_pad2", 0.0, tdb, 30.0)), "countdown launch starts")
 	var clock = countdown_sim.mission_timeline().get("clock_s")
 	_check(clock != null and absf(float(clock) + 30.0) < 1e-3, "countdown launch: T-30 clock at the start (%s)" % str(clock))
 	for i in 10:  # past T-0 without the autopilot: nobody releases the clamps
@@ -411,12 +411,12 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 			else (sea_m < -20.0 and sea_m > -50.0)
 	_check(zone.get("has_deck", false) and absf(float(zone.get("deck_length_m", 0.0)) - 91.0) < 1e-9 and sea_ok,
 			"ASDS: the drone ship's deck from the config, on the geoid")
-	if ship_sea.get("present", false):  # the Earth terrain (data/ fetched): the ship's sea is water, OLP-1 its plateau
-		var olp_site := _site(config_dir, "starbase_olp1")  # the plateau height and position come from the config
+	if ship_sea.get("present", false):  # the Earth terrain (data/ fetched): the ship's sea is water, Pad 2 its plateau
+		var olp_site := _site(config_dir, "starbase_pad2")  # the plateau height and position come from the config
 		var olp := f9.earth_surface(float(olp_site.get("latitude_deg", 0.0)), float(olp_site.get("longitude_deg", 0.0)))
 		_check(not olp_site.is_empty() and ship_sea.get("water", false) and not olp.get("water", true)
 				and absf(float(olp.get("height_m", INF)) - float(olp_site.get("height_m", NAN))) < 1e-6,
-				"Earth terrain: sea at the ship, pad plateau at OLP-1")
+				"Earth terrain: sea at the ship, pad plateau at Pad 2")
 	else:
 		print("  (Erdgelände fehlt: earth_surface not checked)")
 	# Sea state and deck motion (Task 6): falcon9_asds is calm (no sea state, level deck); the hull from drone_ships.toml
@@ -480,11 +480,11 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 			and not refused.autopilot_status().get("planning", true), "refused launch: on the pad, autopilot off, not planning")
 	var ship := FlightSim.new()
 	ship.setup(config_dir)
-	_check(_ok(ship, ship.launch_from_site("starship_block3", "starbase_olp1", 0.0, tdb)), "Starship launches")
+	_check(_ok(ship, ship.launch_from_site("starship_block3", "starbase_pad2", 0.0, tdb)), "Starship launches")
 	_check(not ship.landing_zone().get("present", true), "Starship: no landing zone")
 	_check(not ship.body_legs(0).get("present", true), "Starship: no legs")
 	_check(ship.body_grid_fins(0).size() == 3, "Super Heavy: three grid fins")
-	_check(_ok(ship, ship.start_mission("starship_leo", tdb)) and ship.mission_site_id() == "starbase_olp1",
+	_check(_ok(ship, ship.start_mission("starship_leo", tdb)) and ship.mission_site_id() == "starbase_pad2",
 			"Starship LEO mission starts at Starbase")
 	_check(not _ok(ship, ship.abort_landing(0)), "abort refused for a body that is not returning")
 	_check(ship.is_active() and ship.tower_state().get("phase", "") != "Abbruch",

@@ -33,7 +33,7 @@ func _run(config_dir: String, tdb: float) -> bool:
 	sim.setup(config_dir)
 	var target := ViewTarget.new()
 	_check(target.resolve(sim) == -1, "no flight: nothing to view")
-	_check(_ok(sim, sim.launch_from_site("starship_block3", "starbase_olp1", 0.0, tdb)), "Starship launches")
+	_check(_ok(sim, sim.launch_from_site("starship_block3", "starbase_pad2", 0.0, tdb)), "Starship launches")
 	_check(sim.body_count() == 1, "one body on the pad")
 	var index := target.resolve(sim)
 	_check(index == sim.controlled_index() and target.serial == sim.body_serial(index), "serial 0: the controlled body")

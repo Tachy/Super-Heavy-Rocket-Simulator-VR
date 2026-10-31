@@ -5,12 +5,12 @@
 [mission]
 # where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
 # by test_mission_start_places)
-start_place = "starbase_olp1"
+start_place = "starbase_pad2"
 start_vehicle = "starship_tanker"
 name = "Tanker in den Phasenorbit"
 display_name = "Tanker in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_tanker"
-site = "starbase_olp1"
+site = "starbase_pad2"
 heading_deg = 90.0
 payload_t = 0.0
 fairing = false

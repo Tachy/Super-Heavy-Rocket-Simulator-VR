@@ -97,7 +97,7 @@ TEST_CASE("The truth thrust factor scales the force, not the performance the gui
     static const auto earth = spice::SpiceOrientation::earth();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
-    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto start = test::state_over_site(session.launch_site(), earth, t0, {0.0, 0.0, 2.0e6}, {});  // vacuum
     const auto body = [&](double factor) {
         auto v = std::make_unique<vehicle::Vehicle>(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls"),
