@@ -6,12 +6,18 @@ extends RefCounted
 
 const SHADER := preload("res://shaders/tower_steel.gdshader")
 const TEXTURE_FILE := "materials/metal032/Metal032_1K-JPG_Color.jpg"
-## [E] Tower steel, albedo about 0.15 (+-0.08): darkened (user 2026-10-31). Frames do not make it black: bare legs read
-## bright in direct sun (f8 file 2580 s, f12 file 1804 s) and near black in shade (stack photo 2026-05: sRGB 17 18 23);
-## the mean of legs and dark braces is taken. The texture's mean is ~(0.49, 0.53, 0.58) sRGB.
-const STEEL_TINT := Color(0.65, 0.64, 0.63)
-const PLAIN_STEEL := Color(0.42, 0.43, 0.45)
+## [E] Tower steel, user ruling 2026-10-31 on the real frames (vehicle-models.md "Black parts", real-frames item 11): the
+## legs are bare steel of linear albedo ~0.15 (+-0.08), bright in direct sun and near black in shade; the braces, decks
+## and platforms are dark, linear albedo ~0.04. The tints below give those means with the texture (linear mean
+## (0.205, 0.248, 0.294), `tools` check 2026-10-31: tint = albedo / 0.91 grime / texture mean) and are sRGB values for the
+## shader's source_color uniform. Without the texture the plain colours are the albedos themselves.
+const LEG_TINT := Color(0.908, 0.834, 0.774)
+const BRACE_TINT := Color(0.500, 0.458, 0.423)
+const PLAIN_LEG := Color(0.42, 0.42, 0.42)
+const PLAIN_BRACE := Color(0.22, 0.22, 0.22)
 const DARK := Color(0.035, 0.038, 0.042)
+## [E] Light-grey plinth, cladding plates and roof block: linear albedo ~0.30 (frames: light-grey plates, lit grey in sun).
+const CLAD := Color(0.58, 0.58, 0.57)
 ## [E] chopstick arms and carriage are painted matte black (padb_chopsticks_around_booster_top_2026-03).
 const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 
@@ -19,16 +25,35 @@ static var _texture: Texture2D
 static var _texture_tried := false
 
 
+## Bare steel of the legs.
 static func steel() -> ShaderMaterial:
+	return _steel_material(LEG_TINT, PLAIN_LEG)
+
+
+## Dark steel of the braces.
+static func brace_steel() -> ShaderMaterial:
+	return _steel_material(BRACE_TINT, PLAIN_BRACE)
+
+
+static func clad() -> ShaderMaterial:
+	return LitAerial.material(CLAD, 0.7, 0.3)
+
+
+## The material set of LatticeBuilder.build.
+static func lattice_set() -> Dictionary:
+	return {"leg": steel(), "brace": brace_steel(), "dark": dark(), "clad": clad()}
+
+
+static func _steel_material(textured_tint: Color, plain: Color) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = SHADER
 	var texture := _steel_texture()
 	m.set_shader_parameter("use_texture", texture != null)
 	if texture != null:
 		m.set_shader_parameter("steel_albedo", texture)
-		m.set_shader_parameter("tint", STEEL_TINT)
+		m.set_shader_parameter("tint", textured_tint)
 	else:
-		m.set_shader_parameter("tint", PLAIN_STEEL)
+		m.set_shader_parameter("tint", plain)
 	return m
 
 

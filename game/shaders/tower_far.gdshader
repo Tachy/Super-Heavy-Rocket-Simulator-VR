@@ -13,7 +13,8 @@ render_mode cull_disabled, alpha_to_coverage;
 
 uniform float face_width_m = 12.0;
 uniform float height_m = 12.0;
-uniform float panel_m = 4.0;   // brace row pitch
+uniform float panel_m = 8.0;   // brace panel pitch (X crossings 7-8 m)
+uniform float floor_m = 5.35;  // floor level pitch (decks)
 uniform float half_m = 4.9;    // centre line of legs and braces
 uniform float leg_m = 2.2;
 uniform float brace_m = 0.5;
@@ -23,9 +24,15 @@ uniform float core_m = 3.6;
 uniform float blur = 2.0;  // [E] filter width over the pixel footprint (tower_handover_check: shimmer)
 uniform float alpha_scale = 0.85;  // [E] coverage multiplier, fitted so the far tier matches the merged mesh at 4.5-6.5 km
 uniform bool crossed = false;  // X braces instead of chevrons
-uniform vec4 steel_colour : source_color = vec4(0.55, 0.58, 0.63, 1.0);
-uniform vec4 leg_colour : source_color = vec4(0.69, 0.72, 0.77, 1.0);
-uniform vec4 dark_colour : source_color = vec4(0.06, 0.065, 0.07, 1.0);
+uniform float plinth_m = 0.0;  // closed plinth up to this height (section-relative), all faces
+uniform float clad_lo_m = 0.0;  // cladding plates on the pad-side face (-Z) between these section-relative heights
+uniform float clad_hi_m = 0.0;
+uniform float clad_half_m = 3.8;  // plates reach to this |u| (between the legs)
+// Colours of the merged tier (tower_material.gd): braces linear albedo ~0.04, legs ~0.15, deck / bundle black, plates ~0.30.
+uniform vec4 steel_colour : source_color = vec4(0.22, 0.22, 0.22, 1.0);
+uniform vec4 leg_colour : source_color = vec4(0.42, 0.42, 0.42, 1.0);
+uniform vec4 dark_colour : source_color = vec4(0.035, 0.038, 0.042, 1.0);
+uniform vec4 clad_colour : source_color = vec4(0.58, 0.58, 0.57, 1.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;

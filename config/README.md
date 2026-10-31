@@ -405,10 +405,14 @@ about 256 texels across the node (levels between `min_level` and `max_level`) pl
 over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad) (`docs/subsystems.md` "Terrain rendering").
 
 ## Structure detail files (`structures/`)
-- `structures/starbase_olp2.toml`: the site-independent Pad B tower and chopstick detail (draft from first measurements):
-  `[tower] height_m` + `[[tower.sections]]` (`height_m`, `face_width_m`, `pitch_m`, `pattern`, `leg_profile`,
-  `brace_profile`; `pattern` x_brace / k_brace / chevron), `[tower.deck]` (`thickness_m`, `inset_m`), `[tower.core]`
-  (`size_m`), `[tower.roof]`, `[tower.foot]`, `[profiles.<name>]` (`kind` h_beam / tube / angle / box, `size_m`, `wall_m`), `[chopstick]`
+- `structures/starbase_olp2.toml`: the site-independent Pad B tower and chopstick detail (measured, fine build task 1):
+  `[tower] height_m` (roof deck) + `lattice_height_m` + `[[tower.sections]]` (`height_m`, `face_width_m`, `pitch_m` =
+  brace panel pitch, `pattern`, `leg_profile`, `brace_profile`; `pattern` x_brace / k_brace / chevron), `[tower.floors]`
+  (`pitch_m`, `count`: the deck levels, independent of the brace pitch), `[tower.deck]` (`thickness_m`, `inset_m`),
+  `[tower.core]` (`size_m`), `[tower.plinth]` (`height_m`, `width_m`), `[tower.cladding]` (plates on the pad-side face:
+  `bottom_m`, `top_m`, `course_m`, `columns`, `seam_m`, `thickness_m`, `recess_m`), `[tower.stairs]` (flights, cable
+  trays), `[tower.roof]` (deck, louvred block, railing; no pyramid), `[profiles.<name>]` (`kind` h_beam / tube / angle /
+  box, `size_m`, `wall_m`), `[chopstick]`
   (`length_m`, `width_m`, `depth_m`, `truss_pitch_m`, rail / chord / brace profile). Every value line carries
   `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/detail_file.py` (`python -m pytest tools/structures/tests`).
   Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.

@@ -38,30 +38,68 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(lattice.get_child_count() == sections.size(), "one node per section")
 	var top_m := 0.0
 	var instances := 0
-	var rows := 0
+	var floors := 0
+	var silhouette_m := 0.0
+	var plates_lo_m := INF
+	var plates_hi_m := 0.0
+	var plates := 0
+	var deck_top_m := 0.0
+	var plinth_top_m := 0.0
+	var leg_size: float = models["profiles"]["leg"].get_aabb().size.x
+	var brace_size: float = models["profiles"]["brace"].get_aabb().size.x
+	_check(absf(leg_size - 2.2) < 0.01, "leg 2.2 m (%.3f)" % leg_size)
+	_check(absf(brace_size - 0.5) < 0.01, "brace 0.5 m (%.3f)" % brace_size)
 	for i in range(sections.size()):
 		var section: Dictionary = sections[i]
 		var node := lattice.get_node("section_%d" % i)
 		var panels := maxi(1, roundi(float(section["height_m"]) / float(section["pitch_m"])))
-		rows += panels
+		floors += LatticeBuilder.floor_count(models["detail"], section)
 		var expected := panels * 3 + (1 if i == sections.size() - 1 else 0)  # 2 diagonals + 1 horizontal, top cap
 		_check((node.get_node("legs") as MultiMeshInstance3D).multimesh.instance_count == 4, "section %d: 4 legs" % i)
 		for face in range(4):
 			var multimesh := (node.get_node("face_%d" % face) as MultiMeshInstance3D).multimesh
 			_check(multimesh.instance_count == expected, "section %d face %d: %d braces" % [i, face, expected])
 			instances += multimesh.instance_count
-		var leg_size: float = models["profiles"]["leg"].get_aabb().size.x
 		var half := LatticeBuilder.leg_line_m(float(section["face_width_m"]), leg_size)
-		for member: Array in LatticeBuilder.face_members(section, half, i == sections.size() - 1):
+		var is_top := i == sections.size() - 1
+		for member: Array in LatticeBuilder.face_members(section, half, is_top):
 			top_m = maxf(top_m, node.position.y + maxf(member[0].y, member[1].y))
-		_check_hand_over(node, section, i, sections.size(), LatticeBuilder.total_height_m(models["detail"]))
+		var detail: Dictionary = models["detail"]
+		var darks := LatticeBuilder.dark_solids(detail, section, node.position.y, half, is_top)
+		var clads := LatticeBuilder.clad_solids(detail, section, node.position.y, half, leg_size, i == 0, is_top)
+		for t in darks:
+			silhouette_m = maxf(silhouette_m, node.position.y + _bounds(t).end.y)
+		for t in clads:
+			var b := _bounds(t)
+			silhouette_m = maxf(silhouette_m, node.position.y + b.end.y)
+			if b.get_center().z < -half - 0.1:  # a plate on the pad-side face
+				plates += 1
+				plates_lo_m = minf(plates_lo_m, node.position.y + b.position.y)
+				plates_hi_m = maxf(plates_hi_m, node.position.y + b.end.y)
+			elif i == 0 and b.size.y > 10.0 and absf(b.get_center().x) < 0.01:
+				plinth_top_m = node.position.y + b.end.y
+		if is_top:
+			for t in darks:  # the roof deck plate: the widest flat box
+				var b := _bounds(t)
+				if b.size.x > 12.5 and b.size.z > 12.5:
+					deck_top_m = node.position.y + b.end.y
+			for t in LatticeBuilder.top_frame_members(detail, section, node.position.y, half):
+				silhouette_m = maxf(silhouette_m, node.position.y + t.origin.y)
+			var roof_node := node.get_node("roof") as MultiMeshInstance3D
+			_check(roof_node.multimesh.instance_count == 4, "top: four frame members under the roof deck, no pyramid")
+		_check_hand_over(node, models["detail"], section, i, sections.size(), LatticeBuilder.total_height_m(models["detail"]))
 		_check(node.get_node_or_null("shadow_proxy") == null, "section %d: no shadow proxy (the Sun casts no shadows)" % i)
 		_check((node.get_node("face_0") as MultiMeshInstance3D).cast_shadow
 				== GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "section %d: members cast no shadow" % i)
-	_check(rows >= 34 and rows <= 38, "about 35 brace rows over the tower (pitch ~4 m): %d" % rows)
-	var detail_height: float = models["detail"]["tower"]["height_m"]
-	_check(absf(top_m - detail_height) < 0.01 * detail_height,
-			"lattice top %.2f m = detail height %.2f m" % [top_m, detail_height])
+	var detail_lattice: float = models["detail"]["tower"]["lattice_height_m"]
+	_check(absf(top_m - 139.0) < 0.2 and absf(top_m - detail_lattice) < 0.01, "lattice panels end at %.2f m (139)" % top_m)
+	_check(floors == 26, "26 floors: %d" % floors)
+	_check(absf(top_m / floors - 5.3) < 0.1, "floor pitch %.3f m (5.3)" % (top_m / floors))
+	_check(absf(deck_top_m - 144.0) < 0.01, "roof deck top at %.2f m (144)" % deck_top_m)
+	_check(absf(plinth_top_m - 12.2) < 0.01, "plinth top at %.2f m (12.2)" % plinth_top_m)
+	_check(plates > 0 and absf(plates_lo_m - 12.2) < 0.15 and absf(plates_hi_m - 79.0) < 0.15,
+			"cladding %d plates on the pad-side face from %.2f to %.2f m (12.2 .. 79)" % [plates, plates_lo_m, plates_hi_m])
+	_check(silhouette_m <= 148.0, "silhouette top %.2f m <= 148" % silhouette_m)
 	print("  lattice: %d sections, %d brace instances" % [sections.size(), instances])
 
 	var again := _view(MODEL_SITE)
@@ -101,12 +139,20 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 
 ## Tiers of one section: near MultiMeshes up to NEAR_END_M, the merged mesh to MID_END_M, the lattice shader beyond;
 ## decks / column bundle / roof cap / foot ring as dark solids.
-func _check_hand_over(node: Node, section: Dictionary, index: int, count: int, total_m: float) -> void:
+func _check_hand_over(node: Node, detail: Dictionary, section: Dictionary, index: int, count: int,
+		total_m: float) -> void:
 	var panels := LatticeBuilder.panel_count(section)
 	var decks := node.get_node("decks") as MultiMeshInstance3D
-	var expected := panels + 1 + (2 if index == count - 1 else 0) + (4 if index == 0 else 0)
-	_check(decks.multimesh.instance_count == expected, "section %d: %d solids (decks, column, roof, ring)" % [index, expected])
-	_check((node.get_node_or_null("roof") != null) == (index == count - 1), "section %d: pyramid frame only on top" % index)
+	var leg_size := 2.2
+	var half := LatticeBuilder.leg_line_m(float(section["face_width_m"]), leg_size)
+	var is_top := index == count - 1
+	var base_m: float = (node as Node3D).position.y
+	var expected := LatticeBuilder.dark_solids(detail, section, base_m, half, is_top).size()
+	_check(decks.multimesh.instance_count == expected, "section %d: %d dark solids (decks, column, stairs, roof)" % [index, expected])
+	var clad_count := LatticeBuilder.clad_solids(detail, section, base_m, half, leg_size, index == 0, is_top).size()
+	_check((node.get_node_or_null("clad") != null) == (clad_count > 0), "section %d: clad node iff there are light solids" % index)
+	_check((node.get_node_or_null("roof") != null) == is_top, "section %d: roof frame only on top" % index)
+	_check((node.get_node_or_null("far_roof") != null) == is_top, "section %d: far roof boxes only on top" % index)
 	var near := node.get_node("legs") as GeometryInstance3D
 	var mid := node.get_node("mid") as GeometryInstance3D
 	var far := node.get_node("far") as GeometryInstance3D
@@ -128,6 +174,12 @@ func _check_hand_over(node: Node, section: Dictionary, index: int, count: int, t
 		var centre: Vector3 = (node as Node3D).transform * (geometry.transform * geometry.custom_aabb.get_center())
 		_check(geometry.custom_aabb.has_volume() and centre.is_equal_approx(middle),
 				"section %d %s: range centre = the tower's middle" % [index, child.name])
+
+
+## Axis-aligned bounds of a unit box scaled by a transform without rotation (the solids' boxes; stair slabs are tilted).
+func _bounds(t: Transform3D) -> AABB:
+	var size := Vector3(t.basis.x.length(), t.basis.y.length(), t.basis.z.length())
+	return AABB(t.origin - 0.5 * size, size)
 
 
 func _pivot(view: TowerView, arm: int) -> Node3D:

@@ -1,0 +1,18 @@
+# Launch structures: history
+
+Superseded numbers and earlier approaches of the Pad B tower model. Current state: `docs/subsystems/launch-structures.md`.
+
+## Prototype draft numbers (prototype plan tasks 1-5, replaced 2026-10-31 by fine build task 1)
+- 12 sections x 12.04 m = 144.5 m of lattice, brace row pitch 4.0 m (~36 rows), `x_brace` for the two lowest sections and
+  `chevron` above, one pitch for braces and floor decks. Measured instead: lattice 139.1 m, 26 floors of 5.35 m, X-brace
+  panel 8.025 m.
+- Brace H 0.4 m (look correction: thinner chevrons); measured 0.5 +-0.15 m (QD arm photo), 0.5 m again.
+- Roof: 0.6 m cap with a 5 m pyramid frame on top reached 150.1 m (144.5 + 0.6 + 5), 4 % over the measured silhouette.
+  Measured: flat roof deck at 144 m with a louvred block and a railing, no pyramid.
+- Foot ring 3 m wide x 1.2 m high around the tower foot; measured: a closed plinth 12.2 m high; the ring is dropped
+  (not resolved in the frames).
+- No cladding, stairs, cable trays: the open lattice reached the ground.
+- Tower steel: one material for legs and braces, sRGB tint 0.65 of the Metal032 map = linear albedo ~0.09 (comment said
+  ~0.15); far tier colours (0.69 / 0.55 sRGB) never refitted after the user's darkening call of 2026-10-31. Replaced by
+  bright legs (linear albedo ~0.15) and dark braces (~0.04), far tier refitted (real-frames item 11).
+- Hand-over numbers at 12 sections (brace 1.04 px at 300 m desktop, 2.0 px VR): with the 0.5 m brace 1.30 px / 2.4 px.

@@ -57,8 +57,7 @@ func build(geometry: Dictionary) -> void:
 func _pad_b_lattice(models: Dictionary, geometry: Dictionary, axes: Basis) -> Node3D:
 	var size: Vector3 = geometry["tower_size_m"]
 	var face_width: float = models["detail"]["tower.sections"][0]["face_width_m"]
-	var lattice := LatticeBuilder.build(models["detail"], models["profiles"], TowerMaterial.steel(),
-			TowerMaterial.dark())
+	var lattice := LatticeBuilder.build(models["detail"], models["profiles"], TowerMaterial.lattice_set())
 	var up := Vector3(0.0, 0.0, 1.0)
 	var toward: Vector3 = axes.x
 	var centre_site: Vector3 = geometry["tower_center_m"] - up * (0.5 * size.z) + toward * (0.5 * (face_width - size.x))

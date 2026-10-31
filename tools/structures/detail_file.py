@@ -12,13 +12,20 @@ from pathlib import Path
 PROFILE_KINDS = ("h_beam", "tube", "angle", "box")
 SECTION_KEYS = ("height_m", "face_width_m", "pitch_m", "pattern", "leg_profile", "brace_profile")
 CHOPSTICK_KEYS = ("length_m", "width_m", "depth_m", "truss_pitch_m", "rail_profile", "chord_profile", "brace_profile")
-TOWER_KEYS = ("height_m", "sections", "deck", "core", "roof", "foot")
+TOWER_KEYS = ("height_m", "lattice_height_m", "sections", "floors", "deck", "core", "plinth", "cladding", "stairs",
+              "roof")
 PATTERNS = ("x_brace", "k_brace", "chevron")
-## Per table: the keys that are lengths in metres (> 0); roof.pyramid_top_fraction is a fraction in (0, 1].
+## Per table: the keys that are lengths in metres (> 0); counts are integers >= 1 (COUNT_KEYS).
+FLOORS_KEYS = ("pitch_m", "count")
 DECK_KEYS = ("thickness_m", "inset_m")
 CORE_KEYS = ("size_m",)
-ROOF_KEYS = ("plate_thickness_m", "overhang_m", "pyramid_height_m")
-FOOT_KEYS = ("ring_width_m", "ring_thickness_m")
+PLINTH_KEYS = ("height_m", "width_m")
+CLADDING_KEYS = ("bottom_m", "top_m", "course_m", "columns", "seam_m", "thickness_m", "recess_m")
+STAIRS_KEYS = ("width_m", "thickness_m", "run_m", "tray_width_m", "tray_depth_m")
+ROOF_KEYS = ("deck_top_m", "plate_thickness_m", "overhang_m", "block_size_m", "block_base_m", "block_height_m",
+             "louvre_count", "louvre_height_m", "louvre_depth_m", "railing_height_m", "railing_member_m",
+             "railing_post_pitch_m")
+COUNT_KEYS = ("count", "columns", "louvre_count")
 
 
 class DetailFileError(ValueError):
@@ -46,16 +53,22 @@ def load(path) -> dict:
     _positive(tower, "height_m", "tower")
     if not tower["sections"]:
         raise DetailFileError("tower.sections: empty")
-    for table, keys in (("deck", DECK_KEYS), ("core", CORE_KEYS), ("roof", ROOF_KEYS), ("foot", FOOT_KEYS)):
-        if not isinstance(tower[table], dict):
+    _positive(tower, "lattice_height_m", "tower")
+    tables = (("floors", FLOORS_KEYS), ("deck", DECK_KEYS), ("core", CORE_KEYS), ("plinth", PLINTH_KEYS),
+              ("cladding", CLADDING_KEYS), ("stairs", STAIRS_KEYS), ("roof", ROOF_KEYS))
+    for table, keys in tables:
+        if not isinstance(tower.get(table), dict):
             raise DetailFileError(f"tower.{table}: must be a table")
         _need(tower[table], keys, f"tower.{table}")
         for k in keys:
-            _positive(tower[table], k, f"tower.{table}")
-    _need(tower["roof"], ("pyramid_top_fraction",), "tower.roof")
-    fraction = tower["roof"]["pyramid_top_fraction"]
-    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or not 0.0 < fraction <= 1.0:
-        raise DetailFileError(f"tower.roof.pyramid_top_fraction: must be a fraction in (0, 1], got {fraction!r}")
+            if k in COUNT_KEYS:
+                v = tower[table][k]
+                if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                    raise DetailFileError(f"tower.{table}.{k}: must be an integer >= 1, got {v!r}")
+            else:
+                _positive(tower[table], k, f"tower.{table}")
+    if tower["cladding"]["top_m"] <= tower["cladding"]["bottom_m"]:
+        raise DetailFileError("tower.cladding: top_m must be above bottom_m")
     for name, p in profiles.items():
         _need(p, ("kind", "size_m", "wall_m"), f"profiles.{name}")
         if p["kind"] not in PROFILE_KINDS:

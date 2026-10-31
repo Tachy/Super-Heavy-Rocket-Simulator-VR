@@ -429,7 +429,7 @@ func _mean_abs_difference(a: Image, b: Image) -> float:
 func _tower_rect(tower: Node3D, distance: float) -> Rect2i:
 	var lattice: Node3D = tower.get_node("Lattice")
 	var base: Vector3 = (lattice.get_node("section_0") as Node3D).global_position
-	var top: Vector3 = (lattice.get_node("section_11") as Node3D).global_position
+	var top: Vector3 = (lattice.get_child(lattice.get_child_count() - 1) as Node3D).global_position
 	var up: Vector3 = (top - base).normalized()
 	var camera := _world.camera
 	var low := camera.unproject_position(base + up * 30.0)

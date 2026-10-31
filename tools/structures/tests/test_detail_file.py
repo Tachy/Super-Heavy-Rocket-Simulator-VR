@@ -13,7 +13,9 @@ import detail_file  # noqa: E402
 import ratio  # noqa: E402
 
 DRAFT = ROOT / "config" / "structures" / "starbase_olp2.toml"
-TOWER_HEIGHT_M = 144.5  # [E] spec A
+ROOF_DECK_M = 144.0  # [E] measurements: roof deck 144 +-5 m
+LATTICE_TOP_M = 139.0  # [E] measurements: lattice panels end at 139 +-5 m
+SILHOUETTE_MAX_M = 148.0  # plan task 1: silhouette top incl. railing
 
 
 def test_required_keys_present():
@@ -24,11 +26,51 @@ def test_required_keys_present():
     assert d["profiles"]
 
 
-def test_section_heights_sum_to_tower_height():
+def test_section_heights_sum_to_lattice_height():
     d = detail_file.load(DRAFT)
     total = sum(s["height_m"] for s in d["tower"]["sections"])
-    assert total == pytest.approx(TOWER_HEIGHT_M, rel=0.01)
-    assert d["tower"]["height_m"] == pytest.approx(TOWER_HEIGHT_M, rel=0.01)
+    assert total == pytest.approx(LATTICE_TOP_M, abs=0.2)
+    assert d["tower"]["lattice_height_m"] == pytest.approx(total, abs=1.0e-6)
+    assert d["tower"]["height_m"] == pytest.approx(ROOF_DECK_M, abs=0.01)
+
+
+def test_floors_are_26_of_5_3_m_and_fill_the_lattice():
+    d = detail_file.load(DRAFT)
+    floors = d["tower"]["floors"]
+    assert floors["count"] == 26
+    assert floors["pitch_m"] == pytest.approx(5.3, abs=0.1)
+    assert floors["count"] * floors["pitch_m"] == pytest.approx(d["tower"]["lattice_height_m"], abs=0.2)
+    for s in d["tower"]["sections"]:  # a section holds a whole number of floors
+        n = s["height_m"] / floors["pitch_m"]
+        assert n == pytest.approx(round(n), abs=0.01)
+
+
+def test_member_sizes_plinth_and_cladding_follow_the_measurements():
+    d = detail_file.load(DRAFT)
+    assert d["profiles"]["leg"]["size_m"] == pytest.approx(2.2)
+    assert d["profiles"]["brace"]["size_m"] == pytest.approx(0.5)
+    assert d["tower"]["plinth"]["height_m"] == pytest.approx(12.2)
+    clad = d["tower"]["cladding"]
+    assert (clad["bottom_m"], clad["top_m"]) == (pytest.approx(12.2), pytest.approx(79.0))
+    assert clad["bottom_m"] >= d["tower"]["plinth"]["height_m"] - 1.0e-6  # the plates start on the plinth
+
+
+def test_x_brace_crossings_7_to_8_m_in_the_open_part():
+    d = detail_file.load(DRAFT)
+    open_sections = [s for s in d["tower"]["sections"] if s["pattern"] == "x_brace"]
+    assert open_sections
+    assert all(7.0 <= s["pitch_m"] <= 8.1 for s in open_sections)
+
+
+def test_flat_roof_block_no_pyramid_and_silhouette_below_148_m():
+    d = detail_file.load(DRAFT)
+    roof = d["tower"]["roof"]
+    assert not any("pyramid" in k for k in roof)
+    block_top = roof["block_base_m"] + roof["block_height_m"]
+    rail_top = roof["deck_top_m"] + roof["railing_height_m"]
+    assert max(block_top, rail_top) <= SILHOUETTE_MAX_M
+    assert roof["deck_top_m"] == pytest.approx(d["tower"]["height_m"])
+    assert roof["block_base_m"] >= d["tower"]["lattice_height_m"] - 1.0e-6  # the block stands on the lattice top
 
 
 def test_every_value_line_is_tagged():
@@ -71,12 +113,14 @@ def test_load_raises_on_missing_key_and_bad_unit(tmp_path):
 
 @pytest.mark.parametrize("old, new, match", [
     ("[tower.deck]", "[tower.dek]", "deck"),
-    ("ring_width_m", "ring_wdth_m", "ring_width_m"),
+    ("[tower.plinth]", "[tower.plnth]", "plinth"),
+    ("top_m = 79.0", "top_m = -79.0", "positive"),
+    ("columns = 2", "columns = 0", "columns"),
     ("size_m = 3.6 ", "size_m = -3.6 ", "positive"),
-    ("pyramid_top_fraction = 0.3", "pyramid_top_fraction = 1.5", "fraction"),
+    ("louvre_count = 6", "louvre_count = 0", "louvre_count"),
     ('pattern = "x_brace"', 'pattern = "zigzag"', "pattern"),
 ])
-def test_load_validates_deck_core_roof_foot_and_pattern(tmp_path, old, new, match):
+def test_load_validates_tower_tables_and_pattern(tmp_path, old, new, match):
     text = DRAFT.read_text(encoding="utf-8")
     assert old in text
     f = tmp_path / "bad.toml"
