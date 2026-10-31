@@ -91,10 +91,10 @@ def clip_line(outline, pz, py, dz, dy):
     return (lo, hi) if hi > lo else None
 
 
-def horn(u):
-    """Cusp profile 0 at the tip (u = 0, 1) to 1 in the middle: a pointed cusp with a finite angle (the walls stay tall
-    at the crossings, the scoop between is a smooth arch)."""
-    return math.sin(math.pi * u)
+def horn(u, soft):
+    """Cusp profile 0 at the tip (u = 0, 1) to 1 in the middle: sin = pointed cusp with a finite angle, `soft` blends in the
+    rounded scallop (0 = pointed, 1 = round tip, zero slope)."""
+    return (1.0 - soft) * math.sin(math.pi * u) + soft * scallop(u)
 
 
 def scallop(u):
@@ -102,11 +102,19 @@ def scallop(u):
     return 0.5 * (1.0 - math.cos(2.0 * math.pi * u))
 
 
-def _rim_side(frame, a, b, centre, d, x_top, x_aft):
-    """One side of the rim: outer + inner skin; the aft edge is a row of horns (scallops between tips)."""
+def wall_end_spacing(d, direction):
+    """Spacing along a rim edge of the wall ends of both families (walls at +-45 deg to the axes, pitch p): an edge at angle
+    th to a family meets its walls every p / |sin th|; the two families interleave."""
+    rate = sum(abs(math.sin(math.atan2(direction[1], direction[0]) - sign * math.pi / 4.0)) for sign in (-1.0, 1.0))
+    return d["cell_pitch_m"] / rate
+
+
+def _rim_side(frame, a, b, centre, d, x_top, x_aft, cap):
+    """One side of the rim wall (outer + inner skin, closed top when `cap`): the aft edge is a row of soft arcs, one per wall
+    end (cell), 0 at both corners so the wall runs closed round the outline."""
     (z0, y0), (z1, y1) = a, b
     length = math.hypot(z1 - z0, y1 - y0)
-    teeth = max(1, round(length / d["edge_tooth_pitch_m"]))
+    teeth = max(1, round(length / wall_end_spacing(d, ((z1 - z0) / length, (y1 - y0) / length))))
     steps = teeth * TOOTH_STEPS
     out = Vector((0.0, (y0 + y1) / 2.0 - centre[1], (z0 + z1) / 2.0 - centre[0])).normalized()
     inner = -out * d["frame_m"]
@@ -126,11 +134,13 @@ def _rim_side(frame, a, b, centre, d, x_top, x_aft):
         frame.face([e0, e1, top1, top0], uv, out)
         frame.face([e0 + inner, e1 + inner, top1 + inner, top0 + inner], uv, -out)
         frame.face([e0, e1, e1 + inner, e0 + inner], uv, Vector((-1.0, 0.0, 0.0)))
+        if cap:
+            frame.face([top0, top1, top1 + inner, top0 + inner], uv, Vector((1.0, 0.0, 0.0)))
 
 
 def _saddle_wall(mesh, p0, p1, s0, s1, d, x_top, x_aft):
     """Wall between points p0 (at along-coordinate s0) and p1 (s1), cusped on both faces; double-sided."""
-    pitch, dip = d["cell_pitch_m"], d["cusp_dip_m"]
+    pitch, dip, dip_aft = d["cell_pitch_m"], d["cusp_dip_fwd_m"], d["cusp_dip_aft_m"]
     (z0, y0), (z1, y1) = p0, p1
     along = Vector((0.0, y1 - y0, z1 - z0)).normalized()
     side = Vector((1.0, 0.0, 0.0)).cross(along)
@@ -143,8 +153,8 @@ def _saddle_wall(mesh, p0, p1, s0, s1, d, x_top, x_aft):
         u = s / pitch - math.floor(s / pitch + 1e-9)
         if abs(u - 1.0) < 1e-6:
             u = 0.0
-        h = dip * horn(u)
-        pts.append((Vector((0.0, y0 + (y1 - y0) * t, z0 + (z1 - z0) * t)), x_top - h, x_aft + h))
+        h = horn(u, d["cusp_soft"])
+        pts.append((Vector((0.0, y0 + (y1 - y0) * t, z0 + (z1 - z0) * t)), x_top - dip * h, x_aft + dip_aft * h))
     for j in range(pieces):
         (c0, t0, a0), (c1, t1, a1) = pts[j], pts[j + 1]
         quad = [c0 + Vector((a0, 0, 0)), c1 + Vector((a1, 0, 0)), c1 + Vector((t1, 0, 0)), c0 + Vector((t0, 0, 0))]
@@ -259,8 +269,8 @@ def build_fin(spec):
     n = len(outline)
     frame = vc.VMesh()
     band_edges = set(int(i) for i in d["band_edges"])
-    for i in band_edges:
-        _rim_side(frame, outline[i], outline[(i + 1) % n], (cz, cy), d, x_top, x_aft)
+    for i in range(n):  # the closed rim wall all round the outline
+        _rim_side(frame, outline[i], outline[(i + 1) % n], (cz, cy), d, x_top, x_aft, i not in band_edges)
 
     band = vc.VMesh()  # light flat face of the rim on the forward side, wider than the rim plate
     inner = offset_polygon(outline, d["band_m"])
@@ -284,7 +294,7 @@ def build_fin(spec):
            (d["bearing_thickness_m"] / 2.0, d["bearing_length_m"] / 2.0, d["bearing_width_m"] / 2.0))
 
     plate = vc.VMesh()  # far stand-in: opaque polygon on the aft side of the walls' valleys
-    plate.face([Vector((x_aft + d["cusp_dip_m"], y, z)) for z, y in outline], [(0.0, 0.0)] * n, Vector((-1.0, 0.0, 0.0)))
+    plate.face([Vector((x_aft + d["cusp_dip_aft_m"], y, z)) for z, y in outline], [(0.0, 0.0)] * n, Vector((-1.0, 0.0, 0.0)))
     plate.face([Vector((x_top, y, z)) for z, y in outline], [(0.0, 0.0)] * n, Vector((1.0, 0.0, 0.0)))
 
     shaft = vc.VMesh()

@@ -94,13 +94,14 @@ outline_y_m = [0.0, 0.0, 1.751, 3.762, 4.536, 4.536, 3.762, 1.751]           # [
 thickness_m = 0.50                 # [E] +-0.1 m: rim band 0.43 m + cusp tips, NSF photo 2026-03 at 17 deg elevation (model 0.4 / 0.7)
 cell_pitch_m = 0.350               # [E] STL 1:100 model +-0.005 m wall pitch (square cells, walls +-45 deg to the axis); the installed-fin image gives the same: 102.9 cells in the outline
 wall_m = 0.04                      # [E] wall thickness not resolved in any frame (model 0.045): upper bound
-frame_m = 0.10                     # [E] rim plate thickness (not resolved; model 0.05-0.07, heavier in IE-Photo-44)
+frame_m = 0.07                     # [E] +-0.03 m: outer frame wall thickness, closed all round the outline (template 333b32ea and factory 3ef6737f: about as thick as 1.5-2 lattice walls; not resolved)
 band_m = 0.08                      # [E] +-0.03 m: thin light band on the upper rim face, only along band_edges (template image, user 2026-10-31)
-band_edges = [7, 0, 1]             # [E] outline edges with the thin light band and the rim plate: left taper, root chamfer, right taper (all other edges are bare wall ends)
+band_edges = [7, 0, 1]             # [E] outline edges with the thin light band: left taper, root chamfer, right taper (the frame wall runs round all 8 edges)
 lattice_inset_m = 0.02             # [E] the walls end this far inside the outline
-edge_tooth_pitch_m = 0.2475         # [E] rim scallops = one per wall end = pitch / sqrt 2
-edge_tooth_depth_m = 0.10          # [E] +-0.08 m: rim scallop depth
-cusp_dip_m = 0.10                  # [E] +-0.05 m: free edge of every wall dips this far from the cusp tip on each face (person photo: valley at ~0.4 of the depth)
+edge_tooth_depth_m = 0.22          # [E] +-0.05 m: depth of the frame's soft free-edge arcs (one per wall end, wave in the template's lower edge)
+cusp_dip_aft_m = 0.30             # [E] +-0.08 m: saddle scoop of the aft face (the face seen from below), measured against the template hearts: a scoop of 0.3 of the 0.5 m depth turns the openings into hearts at a 25-30 deg view (ray test `measure/fin_hearts.py`); factory photo 3ef6737f shows deep scoops on the visible face
+cusp_dip_fwd_m = 0.0              # [E] forward face: flat (not seen in any photo; hearts need one flat and one scooped face, the other combinations give lenses or chevrons)
+cusp_soft = 0.3                   # [E] 0 = pointed saddle tips (sin), 1 = round tips; template tips are crisp but not needles
 cusp_steps = 3                     # [E] profile segments per wall between two crossings (triangle budget)
 rib_y_m = 1.751                    # [E] STL 1:100 model cross rib corner to corner, 1.75 m from the root chamfer
 rib_thickness_m = 0.06             # [E] cross rib wall

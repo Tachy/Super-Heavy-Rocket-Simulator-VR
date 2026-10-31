@@ -36,7 +36,7 @@ DETAIL_TABLES = {
     "booster.strakes": ("ridge_azimuth_deg", "from_m", "to_m", "height_m", "base_width_m", "top_width_m", "chamfer_m"),
     "booster.grid_fin_fairing": ("length_frac", "width_m", "height_m"),
     "grid_fin": ("outline_z_m", "outline_y_m", "thickness_m", "cell_pitch_m", "wall_m", "frame_m", "band_m",
-                 "edge_tooth_pitch_m", "edge_tooth_depth_m", "cusp_dip_m", "cusp_steps", "rib_y_m", "rib_thickness_m",
+                 "edge_tooth_depth_m", "cusp_dip_fwd_m", "cusp_dip_aft_m", "cusp_soft", "cusp_steps", "rib_y_m", "rib_thickness_m",
                  "rib_wave_m", "bearing_length_m", "bearing_width_m", "bearing_thickness_m", "bearing_slant_deg",
                  "catch_fin_azimuths_deg", "hinge_ring_radius_m", "ring_length_m", "ring_bolts", "band_edges", "lattice_inset_m", "strut_beam_m", "lattice_axis_y_m",
                  "housing_half_root_m", "housing_half_rib_m", "root_gap_m",
@@ -58,7 +58,7 @@ DETAIL_TABLES = {
 }
 ENGINE_KEYS = ("file", "bell_length_m", "throat_from_exit_m", "rib_count", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
                "mount_radius_frac", "segments")
-SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m", "outline_z_m", "outline_y_m",
+SIGNED_KEYS = ("cusp_dip_fwd_m", "azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m", "outline_z_m", "outline_y_m",
                "catch_fin_azimuths_deg")  # may be zero / negative; others > 0
 
 

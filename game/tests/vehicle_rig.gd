@@ -15,9 +15,12 @@ var _zero_override := NAN
 ## The orbit camera's target: a station of the viewed body instead of its CG.
 class AimedTarget extends ViewTarget:
 	var aim_station_m := NAN
+	## Aim point off the axis (body frame, from the station): lets a close view centre on a fin out of the hull.
+	var aim_offset_body := Vector3.ZERO
 
 	func cg_gcrf_m(sim: FlightSim, index: int) -> Vector3:
-		return station_gcrf_m(sim, index, sim.body_cg_station_m(index) if is_nan(aim_station_m) else aim_station_m)
+		var at := station_gcrf_m(sim, index, sim.body_cg_station_m(index) if is_nan(aim_station_m) else aim_station_m)
+		return at + Basis(sim.body_attitude_gcrf(index)) * aim_offset_body
 
 
 func _init(world_: World, args_: Dictionary) -> void:
@@ -103,11 +106,12 @@ func view_body(sim: FlightSim, index: int) -> void:
 ## not NAN instead from the Sun's side, turned about the vehicle axis by that angle, at the offset's distance; `yaw_step_rad`
 ## turns the camera about the target on top (a sub-pixel head motion).
 func place(sim: FlightSim, index: int, station_m: float, offset_body: Vector3, fov_deg: float, sun_turn_deg := NAN,
-		yaw_step_rad := 0.0) -> void:
+		yaw_step_rad := 0.0, aim_offset_body := Vector3.ZERO) -> void:
 	view_body(sim, index)
 	var attitude := Basis(sim.body_attitude_gcrf(index))
 	var anchor := sim.body_position_gcrf_m(index) + attitude * Vector3(station_m - sim.body_cg_station_m(index), 0.0, 0.0)
 	aim.aim_station_m = station_m
+	aim.aim_offset_body = aim_offset_body
 	var from_target := attitude * offset_body
 	if not is_nan(sun_turn_deg):
 		var sun := (world.sun_apparent_from_earth_m - anchor).normalized()

@@ -3,7 +3,7 @@
 # placed relative to a body (VehicleRig). Needs a GPU (no --headless). Images go to screenshots/vehicles/<label>.png.
 # godot --path game --script res://tests/vehicle_look_shots.gd -- --mission=starship_leo --t_plus=148 --hide_ui
 #   "--shots=label,body,station_m,dx,dy,dz,fov[,sun<deg>];..."  camera at (station + offset in the body frame), aimed at the
-#     station; `sun<deg>`: from the Sun's side, turned about the vehicle axis by <deg>, at the offset's distance;
+#     station; `aimy<m>` / `aimz<m>` (extra fields): aim point off the axis; `sun<deg>`: from the Sun's side, turned about the vehicle axis by <deg>, at the offset's distance;
 #     body = index in the snapshot (printed at the start)
 #   --scan=<from>,<to>,<step>  (s after T-0) prints, per step and body, the largest flap / grid fin deflection and exits
 #   --at_event=<kind>,<offset s>  instead of --t_plus (e.g. entry_interface,120)
@@ -141,8 +141,14 @@ func _shoot() -> bool:
 		if _args.has("override"):  # night investigation 1: every steel material of the world replaced (diagnostic)
 			_override_materials(_world, String(_args["override"]))
 		var sun := float(shot[7].trim_prefix("sun")) if shot.size() > 7 and shot[7].begins_with("sun") else NAN
+		var aim_body := Vector3.ZERO  # optional fields aimy<m> / aimz<m>: the aim point off the axis (centre on a fin)
+		for field in shot:
+			if field.begins_with("aimy"):
+				aim_body.y = float(field.trim_prefix("aimy"))
+			elif field.begins_with("aimz"):
+				aim_body.z = float(field.trim_prefix("aimz"))
 		_rig.place(sim, int(shot[1]), float(shot[2]), Vector3(float(shot[3]), float(shot[4]), float(shot[5])),
-				float(shot[6]), sun)
+				float(shot[6]), sun, 0.0, aim_body)
 	_shot_wait += 1
 	if _shot_wait == 2:
 		var env: Environment = _world._environment

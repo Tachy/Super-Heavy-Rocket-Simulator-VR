@@ -235,7 +235,7 @@ func _build_fins(stages: Array, grid_fins: Array, stage_nodes: Array[Node3D]) ->
 			instance.name = part
 			instance.mesh = _models["grid_fin"][part]
 			var material_key := "fin_frame"
-			if part == "lattice" or part == "plate":
+			if part == "lattice" or part == "plate" or part == "frame":  # the frame wall is black like the lattice
 				material_key = "fin_cells"
 			elif part == "band" or part == "bearing":
 				material_key = "fin_band"

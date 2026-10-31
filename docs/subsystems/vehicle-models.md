@@ -28,7 +28,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   the rotation about +X by `rotation_sign_about_plus_x` x deflection are derived from `core/src/aero/flap.cpp` and tested
   against a re-implementation of it. Planform = the 1:100 model's (swept, wedge section, hinge lugs, `[flap.aft|fwd]`), the drawn hinge
   edge centred on the physics hinge; it does NOT keep the physics area (see "Physics deviations for the user").
-- `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The plate lies across the station axis and its cells open along X: at deflection 0 an axial flow passes through them (the core's "normal" in `grid_fin.cpp` is the lift normal, the tangent at d = 0; a right-handed rotation by +d about the radial axis turns it toward +X). Plan geometry from the 1:100 plain fin STL (irregular octagon, exactly mirror-symmetric about the hinge axis, square cells at 45 deg to it, a wall crossing on the axis, cross rib corner to corner 1.75 m from the root), walls cut into cusped saddles (pointed tips at the crossings on both faces), soft round rim scallops, thin light band only on the two root tapers and the root chamfer, mount housing (open tray) between the ring and the rib, flank cells beside it. Nodes `frame` (rim plate on the band edges only), `band`, `lattice`, `pylon` (bolted ring, housing), `bearing` (flat bar under the root, only on `catch_fin_azimuths_deg`), `plate` (far stand-in), `shaft`. 3,448 triangles. The booster carries no catch-pin geometry any more (config kept). See "Fin plan round".
+- `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The plate lies across the station axis and its cells open along X: at deflection 0 an axial flow passes through them (the core's "normal" in `grid_fin.cpp` is the lift normal, the tangent at d = 0; a right-handed rotation by +d about the radial axis turns it toward +X). Plan geometry from the 1:100 plain fin STL (irregular octagon, exactly mirror-symmetric about the hinge axis, square cells at 45 deg to it, a wall crossing on the axis, cross rib corner to corner 1.75 m from the root), walls cut into cusped saddles (scooped on the AFT face only, 0.30 of the 0.50 m depth, tips slightly rounded; forward face flat), a closed outer frame wall (0.07 m thick, black like the lattice, full depth) round all 8 outline edges with soft arcs on its aft edge (one per wall end, 0.22 m deep), thin light band only on the two root tapers and the root chamfer, mount housing (open tray) between the ring and the rib, flank cells beside it. Nodes `frame` (closed wall round the whole outline), `band`, `lattice`, `pylon` (bolted ring, housing), `bearing` (flat bar under the root, only on `catch_fin_azimuths_deg`), `plate` (far stand-in), `shaft`. 4,060 triangles. The booster carries no catch-pin geometry any more (config kept). See "Fin plan round".
   toward +X: a right-handed rotation by +d about the radial axis, zero = rest. Drawn size = the STL's outline (see "Fin plan round"), not the config area / span. Egg-crate lattice, cells open along the tangent.
 - `raptor.gltf`, `rvac.gltf`: origin = gimbal point, thrust +X, bell opens toward -X, exit plane at X = -`bell_length_m`
   (manifest `exit_plane_x_m`: the plume re-anchor of task 2), exit rim diameter = config value (tested), bare bell +
@@ -404,3 +404,19 @@ Scripts: `measure/fin_stl_outline.py` (outline, axis, pitch), `fin_stl_rib.py` (
 
 Triangles 3,448 per fin (cusp_steps 3; 4,872 at 5). Chirality: the STL is symmetric, so no chamfer "faces forward"; the band is on the
 forward face of the root tapers.
+
+### Fin frame and hearts (2026-10-31)
+- Frame: the lattice walls end inside a continuous closed wall (`frame_m` 0.07 +-0.03 m: about 1.5-2 wall thicknesses in the template and
+  the factory photo, not resolved; wall depth = the full fin depth, the free aft edge a row of soft arcs, one per wall end, 0.22 +-0.05 m
+  deep, so the frame is no deeper than the saddle valleys at its arcs). Black (`fin_cells` material); the light band only on the root
+  chamfer and the two tapers. Free wall ends / star spikes at the outline are gone; the cusps remain only inside as saddle tips
+  (`cusp_soft` 0.3: sin profile blended with the round scallop).
+- Hearts: view tilt of the template `333b32ea` from the lattice fit (`measure/fin_tilt.py`, weak-perspective reading of the
+  nearest-neighbour basis, Jacobian of the homography at the fin centre): 37.7 deg off the cell axis (+-6 deg), tilted along the
+  chord, vehicle axis vertical, from below / aft. Ray test of the openings (`measure/fin_hearts.py`): symmetric scoops on both faces
+  give lenses at any tilt (the earlier look, tips at both faces cancel the notch); hearts need ONE scooped and ONE flat face
+  (scoop 0.3 of 0.5 m) and a tilt of 25-30 deg (at 38 deg the hearts shrink to chevrons). Adopted: aft face scooped (the factory photo shows
+  the deep scoops on the visible face), forward face flat, `cusp_dip_aft_m` 0.30 / `cusp_dip_fwd_m` 0, view 30 deg. Hypothesis, not seen:
+  the forward face of a real fin.
+- Look shot of the view: `vehicle_look_shots.gd` `--t_plus=54`, `fr3,0,64,-87,0,-50,3,aimy7` (booster, station 64, 100 m away from the
+  fin at the 30 deg tilt, `aimy<m>` / `aimz<m>` move the aim point off the axis onto a fin); side by side `real/cmp_fin_template.png`.
