@@ -18,10 +18,13 @@ var _steel := LitAerial.material(Color(0.74, 0.75, 0.77), 0.38, 0.65)
 ## Additive glow, seen through the atmosphere's transmittance (shaders/plume.gdshader; its former unshaded
 ## StandardMaterial3D drew the albedo only - the emission settings it carried had no effect).
 var _plume_material := ShaderMaterial.new()
+## The ship's engine bay: black plate and sooted wall (frames f12 138.9 s, f13 2262 s) [E].
+var _engine_bay_material := LitAerial.material(Color(0.035, 0.035, 0.04), 0.55, 0.3)
 var _built_signature := ""
 ## Detail models of this vehicle ({} = cylinders) and the nodes posed from the snapshot, in snapshot order.
 var _models := {}
 var _stage_bases_m: Array[float] = []
+var _stage_ids: Array[String] = []
 var _engine_slots: Array[Dictionary] = []  # per engine: {"multimesh", "slot", "stage"}
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "stage", "sign"}; the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
@@ -97,6 +100,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> vo
 		child.free()  # immediately (not queue_free): the rebuilt nodes reuse the names, and nothing here is in a callback
 	_plumes.clear()
 	_stage_bases_m.clear()
+	_stage_ids.clear()
 	_engine_slots.clear()
 	_engine_poses.clear()
 	_engine_poses.resize(engines.size())
@@ -106,6 +110,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> vo
 	var staged: Array[bool] = []
 	for stage: Dictionary in stages:
 		_stage_bases_m.append(stage["base_station_m"])
+		_stage_ids.append(String(stage["id"]))
 		var hull: Dictionary = _models.get("hulls", {}).get(stage["id"], {})
 		staged.append(not hull.is_empty())
 		if hull.is_empty():
@@ -155,7 +160,8 @@ func _add_stage_node(stage: Dictionary, hull: Dictionary) -> Node3D:
 		var instance := MeshInstance3D.new()
 		instance.name = part
 		instance.mesh = hull[part]
-		instance.material_override = _hull_material(_hull_kind(part, stage))
+		instance.material_override = _engine_bay_material if part == "engine_bay" \
+				else _hull_material(_hull_kind(part, stage))
 		node.add_child(instance)
 	return node
 
@@ -252,7 +258,7 @@ func _pose_models(stages: Array, engines: Array, flaps: Array, grid_fins: Array)
 			continue
 		var engine: Dictionary = engines[i]
 		var pose := VehicleModels.engine_transform(engine["position_m"], engine["direction"],
-				_stage_bases_m[slot["stage"]])
+				_stage_bases_m[slot["stage"]], _engine_axial_offset_m(engine))
 		(slot["multimesh"] as MultiMesh).set_instance_transform(slot["slot"], pose)
 		_engine_poses[i] = pose
 	for i in mini(flaps.size(), _flap_nodes.size()):
@@ -267,6 +273,14 @@ func _pose_models(stages: Array, engines: Array, flaps: Array, grid_fins: Array)
 			var stage: int = entry["stage"]
 			(entry["node"] as Node3D).transform = VehicleModels.fin_transform(grid_fins[i], _stage_bases_m[stage],
 					stages[stage]["diameter_m"] * 0.5)
+
+
+## The drawn engine's offset from the physics gimbal point (VehicleModels.axial_offset_m), from its stage's id.
+func _engine_axial_offset_m(engine: Dictionary) -> float:
+	var stage: int = engine["stage"]
+	if stage < 0 or stage >= _stage_ids.size():
+		return 0.0
+	return VehicleModels.axial_offset_m(_models, _stage_ids[stage], engine["vacuum"])
 
 
 func _update_plumes(engines: Array, altitude_m: float) -> void:
@@ -295,12 +309,13 @@ func _update_plumes(engines: Array, altitude_m: float) -> void:
 		cone.height = length
 		cone.top_radius = 0.6 if not engine["vacuum"] else 1.1
 		cone.bottom_radius = (1.0 + 6.0 * expansion) * (1.6 if engine["vacuum"] else 1.0)
-		# Exhaust leaves opposite to the thrust direction, starting at the nozzle exit: the model's exit plane below
-		# the gimbal point (manifest; Raptor 2.1 m, RVac 3.6 m), ~3 m for the cylinders.
+		# Exhaust leaves opposite to the thrust direction, starting at the DRAWN nozzle exit: the model's exit plane below
+		# the drawn gimbal point (manifest; Raptor 2.1 m, RVac 3.6 m), ~3 m for the cylinders.
 		var direction: Vector3 = engine["direction"]
 		var exhaust := Frames.to_render(-direction).normalized()
 		var depth := VehicleModels.exit_depth_m(_models, engine["vacuum"])
-		var nozzle_exit: Vector3 = engine["position_m"] - direction * depth
+		var nozzle_exit: Vector3 = engine["position_m"] + Vector3(_engine_axial_offset_m(engine), 0.0, 0.0) \
+				- direction * depth
 		var center := Frames.to_render(nozzle_exit) + exhaust * length * 0.5
 		plume.transform = Transform3D(_basis_from_y(-exhaust), center)
 

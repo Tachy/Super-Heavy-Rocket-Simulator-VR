@@ -51,7 +51,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   (mirrored when the manifest sign is +1), then rotation about +X by sign * deflection; manifest entry matched by stage id,
   hinge azimuth and aft station. Fin pose: pivot at (station, hull radius, azimuth), rotation about +X by the azimuth, then about
   the radial Y by +deflection. Both are tested against re-implementations of `flap_span_direction` and the grid-fin normal.
-- Plumes start at the model's exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the gimbal point); cylinders keep 3.0 m.
+- Plumes start at the DRAWN exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the drawn gimbal point; ship engines drawn higher, see "Stage interface"); cylinders keep 3.0 m.
 
 ## Steel map (`tools/structures/hull_textures.py` -> `data/models/starship_block3/hull_steel.png`)
 - Baked by the driver (numpy, no Blender), procedural from the detail file's `[hull]` numbers (ring pitch, weld height / half
@@ -201,6 +201,10 @@ The drawn shape sits on the physics' pivots; nothing in `config/` was changed. W
 | Forward flap hinge | straight, parallel to the axis, 38-46 m | leans 19 deg along the ogive, 5.8 m | the flap normal at rest differs by ~19 deg (in the game the flap lies on the tangent plane) |
 | Catch pins | booster 45 / 225 deg at 66.5 m | model: catch hardware at the grid-fin corners (hooks) | the drawn hooks are on the fins; the pins stay as configured (a decision on the physics numbers is open) |
 | Shield coverage | heating model: full windward half | drawn +-78 .. 90 deg, nose all round | unchanged (drawing only) |
+| Ship gimbal station | station 0 of the ship (stack 72.3 m) | Raptor 2.1 m, RVac 3.6 m above it (exit planes at station 0) | thrust acts 2.1 / 3.6 m further aft than drawn: lever arm to the dry CG (23.5 m) 23.5 m in the physics, 21.4 m for the gimbaled Raptors as drawn, so TVC authority +10 % against the drawing; RVacs fixed. Stack length 124.4 m holds, the ship's and booster's lengths are unchanged |
+| Ship tank bases | LOX main at station 3.5 m | engine plate at 3.7 m, housings up to 3.1 (Raptor) / 4.6 m (RVac) | the tank base lies 0.2 m below the plate, the RVac housing 1.1 m into it; nothing of it visible (CG / masses unchanged) |
+| Booster dome top | tank volumes in the config, no dome | apex 71.7 m under the 0.6 m ring | CH4 tank top not compared: drawing only |
+| Sea-level ring | 1.3 m | drawn from the config, real 0.89 +-0.04 m (fit) | the Raptor gimbal's roll / yaw lever is ~46 % longer than the real one; a config decision for the user |
 
 ### Evidence
 Side by side (ours | model view | photo): `screenshots/vehicles/shapes_flaps.png`, `shapes_fins.png`, `shapes_booster_top.png`, `shapes_skirt.png`,
@@ -220,13 +224,7 @@ the photo, the catch height itself is not measurable from the photos (no photo o
 Triangles: booster 10,224, ship 9,100, flap 128 aft / 116 fwd, grid fin 552 (was 924).
 
 ## Finish pass (2026-10-31)
-- Dome: the "bumps" inside the truss were the SHIP's engine bells (RVac exit plane 3.6 m, Raptor 2.1 m below the ship's base at 72.3 m)
-  reaching into the dome space. The dome now starts at the truss foot (`dome_start_m` 4.4) with height 2.25 m [E, 2:1 ellipse]: apex 70.15 m, the
-  lowest bell exit plane is at 68.7 m, so no bell reaches it. Evidence: the 1:100 ship engine plate is 4.6 m high, its bells hang 3.6 m below a
-  4.2 m ring plate; webcast frame `webcast/f13_t2255_ship_base_hotstage.jpg` (flight 13 file time 2255 s = T+2:29): three RVac and three sea-level
-  bells below the base. The config's gimbal station (= the ship's base) is unchanged, plume anchors untouched. No public photo of an unstacked V3
-  base was found; if the real bells sit partly recessed in the aft skirt, the drawn bells are too long by the recess (physics keeps the bell
-  lengths): open, user to check against his own frames.
+- Dome and bells: see "Stage interface" (the finish pass's lowered dome is superseded, `docs/history/vehicle-models.md`).
 - Grid fins: pitch 0.35 m from the vertex lattice of `ss3-grid-fin.stl`, serrated edge, catch hooks only on `catch_fin_azimuths_deg` (detail
   file, manifest `look.catch_fin_azimuths_deg`, `vehicle_view._build_fins`). Azimuths: the opposite pair 0 / 180 (fallback; the pins in the
   config stay at 45 / 225 and so disagree with the hardware on the fins: user decision).
@@ -251,7 +249,37 @@ Triangles: booster 10,224, ship 9,100, flap 128 aft / 116 fwd, grid fin 552 (was
 
   The booster is still ~30 m above its final position in the frame; the arm height carries +-10 m and a perspective bias. No physics change.
 
+## Stage interface (2026-10-31)
+The ship's engines hang inside the hull (user 2026-10-31: "die Triebwerke sind in der Hülle versenkt"). Every bell ends about at the hull's aft
+edge; the ship's rim sits on the booster's hot-stage ring; the forward dome lies below that ring.
+
+Exit planes, station above the ship's aft end (+ = inside the hull). The rims of both kinds lie in ONE plane, the sea-level bells are not deeper:
+
+| Engine kind | Exit plane (drawn) | Uncertainty [E] | Real images | 1:100 `ss3-ship-engine-plate` (shape only) |
+|---|---|---|---|---|
+| RVac (`raptor_vacuum3`) | 0.0 m | +-0.15 m | Ship 39 photo from below, near-orthographic, 143 px/m: mean of the 3 cover planes -0.07 m against the hull rim (covers stand a little proud); camera fit below: hull rim +0.04 +-0.07 m against the RVac rims | y 0, flush with `ss3-ship-tank-bottom` y 0; rim r 1.15, ring 3.0; throat y 2.8; housing to y 3.7 / 4.6 |
+| Sea level (`raptor3`) | 0.0 m | +-0.3 m | Camera fit to frame f12 138.9 s: +0.02 +-0.08 m (fit error; the lens is not modelled, hence +-0.3 m). Ship 39 photo with lifted shadows: faint rims at -0.1 m +-0.3 m. f13 2262 s: back Raptor rims, far hull edge and near rims follow one plane (y = 766 + 534 / d predicts the far edge at 826 px, seen 825 px) | y 0; rim r 0.65, ring 0.95; throat y 1.3; housing to y 2.7 |
+
+Method of the fit (`.superpowers/sdd/2026-10-31-starship-prototype/ifc_bayfit.py`): pinhole camera, position, rotation, focal length, sea-level ring, sea-level plane and hull plane free, 5 rim ellipses and 5 aft-edge points read by eye (+-10 px), config rim diameters: rms 0.85 sigma; a mirrored assignment fails (rms 10). Forcing the sea-level plane to 0 fits about as well as the free fit (rms 0.87): the data carry no sign of an offset, the error stays what is stated. The fit also gives the real sea-level ring: 0.89 +-0.04 m (config 1.3 m, see deviations).
+
+Stack-up (stations of the stack, booster base = 0; physics numbers unchanged):
+
+| Station m | What | Source |
+|---|---|---|
+| 67.9 | truss foot (`hot_stage.height_m` 4.4) | photo estimate, earlier pass |
+| 69.42 | barrel end / dome shoulder (`dome_start_m` 2.88) | section of `ss3-booster-tank-top`: shoulder y 20.7 |
+| 71.7 | dome apex (`dome_height_m` 2.28) and foot of the hot-stage ring | same section: apex 22.98; `ss3-hot-stage-ring`; real frames show only that the dome lies right below the rims (f13 2253.6 s), no gap measurable |
+| 72.3 | top of the ring = booster length = ship's aft rim = both exit planes | `length_m`; ring 0.6 m high: model only, no real image of a V3 stack close-up was found |
+| 72.3 + 3.7 = 76.0 | engine plate; centre puck at 75.0 (r < 1.4) | model section; the puck in f13 2256.5 s |
+| 72.3 + 2.1 = 74.4 / + 3.6 = 75.9 | drawn gimbal points Raptor / RVac | exit plane + `bell_length_m` |
+| 124.4 | nose tip | config: the stack length holds |
+
+Open truss above the shoulder: 2.88 m = the model's 2.8 m teeth; the rods run on 1.5 m in front of the barrel (photo height 4.4 m). Clearance rim to dome, stacked (test, config gimbal limits): Raptor 0.559 m at 15 deg, RVac 0.793 m (no gimbal).
+
+Drawing: `[ship.engine_recess]` holds one exit station per kind, the manifest gives `ship_exit_station_m` and `ship_axial_offset_m` (= recess + bell length), `VehicleModels.axial_offset_m` applies it once for the bell pose and the plume (`vehicle_view._engine_axial_offset_m`); the direction stays the snapshot's. The booster's engines keep their stations (their bells stand out of its skirt: photos, unchanged). The ship's hull has no base disc any more; node `engine_bay` (rim, wall, 3 frames, 96 stringers, plate with centre cone, 4,100 triangles; dark own material) closes it.
+
 ## Open points
+- Interface look (verdict of the renders `screenshots/vehicles/ifc/cmp_*.png`): the arrangement agrees (open dark base, rims in the aft plane, bells inside, ring on the truss). Still different: the sea-level cluster is too wide (config ring 1.3 m, real 0.89 m); bells are smooth cones without regen ribs and with no visible chamber / pump detail; drawn throats sit 0.8 m higher than the model's (bell 2.1 / 3.6 m vs 1.3 / 2.8 m from throat to exit, the bell's `bell_length_m` also sets the plume anchor); the plate has no ribs, port rings or the two open covers of f12 138.9 s; the outer comb of stringer slots on the real aft skirt is not drawn; ship plumes pass through the booster at hot staging (no interaction, no vent effects). No real side close-up of the V3 stack exists in the references: the ring and its 0.6 m rest on the printed model.
 - Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that
   read tan under a low Sun are the black tile (albedo 0.03) in direct, reddened Sun (~14 deg): diffuse, specular only
   ~10 %, AgX lifts it (probe in `sky-fix-report.md` Fix 2). Not a bug. Steel luminance ratio gated at 1.18.

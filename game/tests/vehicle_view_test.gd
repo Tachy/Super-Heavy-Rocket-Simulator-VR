@@ -77,7 +77,8 @@ func _check_models(stages: Array, snapshot: Dictionary, models: Dictionary) -> v
 		var engine: Dictionary = snapshot["engines"][i]
 		var base: float = stages[engine["stage"]]["base_station_m"]
 		var pose: Transform3D = view.engine_pose(i)
-		_check(pose.origin.is_equal_approx(engine["position_m"] - Vector3(base, 0.0, 0.0))
+		var drawn := VehicleModels.axial_offset_m(models, stages[engine["stage"]]["id"], engine["vacuum"])
+		_check(pose.origin.is_equal_approx(engine["position_m"] + Vector3(drawn - base, 0.0, 0.0))
 				and (pose.basis * Vector3.RIGHT).is_equal_approx(engine["direction"]), "engine %d: ring position, thrust axis" % i)
 	_check_gimbal(view, snapshot)
 	_check_flaps(stages, snapshot, view, root)
@@ -181,13 +182,34 @@ func _check_plumes(snapshot: Dictionary, view: VehicleView, models: Dictionary) 
 		engine["throttle"] = 1.0
 	view.sync(snapshot["stages"], engines, [], [], 0.0)
 	var depths := {false: 2.1, true: 3.6}  # manifest exit_plane_x_m (Raptor, RVac)
+	var stages: Array = snapshot["stages"]
+	var manifest_engines: Dictionary = models["manifest"]["engines"]
 	for i in engines.size():
 		var engine: Dictionary = engines[i]
-		var exit_m: Vector3 = engine["position_m"] - engine["direction"] * depths[engine["vacuum"]]
+		var stage: Dictionary = stages[engine["stage"]]
+		var drawn := VehicleModels.axial_offset_m(models, stage["id"], engine["vacuum"])
+		var exit_m: Vector3 = engine["position_m"] + Vector3(drawn, 0.0, 0.0) - engine["direction"] * depths[engine["vacuum"]]
 		if not _plume_top(view, i).is_equal_approx(Frames.to_render(exit_m)):
-			_check(false, "engine %d: plume starts at the exit plane" % i)
+			_check(false, "engine %d: plume starts at the drawn exit plane" % i)
 			return
-	_check(true, "all %d plumes start at the exit planes (Raptor 2.1 m, RVac 3.6 m)" % engines.size())
+		if stage["id"] == "ship":  # the plume starts at the stated station above the ship's aft end
+			var eid: String = "raptor_vacuum3" if engine["vacuum"] else "raptor3"
+			if not is_equal_approx(exit_m.x - stage["base_station_m"], float(manifest_engines[eid]["ship_exit_station_m"])):
+				_check(false, "ship engine %d: exit plane at the stated station" % i)
+				return
+		elif drawn != 0.0:
+			_check(false, "booster engine %d: drawn at its physics station" % i)
+			return
+	_check(true, "all %d plumes start at the drawn exit planes (ship: at the stated recess)" % engines.size())
+	# A gimbaled ship engine: the plume leaves the tilted bell's rim.
+	var last := engines.size() - 1
+	var tilt := Vector3(0.99, 0.0, 0.14).normalized()
+	engines[last]["direction"] = tilt
+	view.sync(snapshot["stages"], engines, [], [], 0.0)
+	var pose := view.engine_pose(last)
+	var base_m := Vector3(stages[engines[last]["stage"]]["base_station_m"], 0.0, 0.0)
+	_check(_plume_top(view, last).is_equal_approx(Frames.to_render(base_m + pose.origin
+			- tilt * depths[engines[last]["vacuum"]])), "gimbaled: the plume stays on the drawn bell")
 	_check(is_equal_approx(VehicleModels.exit_depth_m(models, false), 2.1) and is_equal_approx(
 			VehicleModels.exit_depth_m(models, true), 3.6), "exit depths come from the manifest")
 

@@ -3,6 +3,7 @@ import json
 import math
 import struct
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -315,6 +316,66 @@ def test_engine_exit_diameter_and_gimbal_origin(built, spec, eid):
     assert 2.0 * rim == pytest.approx(e["nozzle_exit_diameter_m"], abs=0.01)  # = config/engines value
     assert hi[0] == pytest.approx(0.0, abs=1e-4)  # the bell ends at the gimbal point
     assert _bounds(parts["housing"][0])[0][0] == pytest.approx(0.0, abs=1e-4)
+
+
+def _dome_station(hull_pos, length_m, radius_m):
+    """Highest station of the booster's hull mesh at or beyond a radius (linear between the profile's rings)."""
+    rings = sorted({(round(p[0], 4), round(math.hypot(p[1], p[2]), 4)) for p in hull_pos if p[0] > length_m - 6.0})
+    best = rings[0][0]
+    for (x0, r0), (x1, r1) in zip(rings, rings[1:]):
+        if min(r0, r1) <= radius_m <= max(r0, r1) and r0 != r1:
+            best = max(best, x0 + (x1 - x0) * (radius_m - r0) / (r1 - r0))
+    return best
+
+
+@needs_blender
+def test_ship_engines_sit_inside_the_hull_and_clear_the_dome_at_any_gimbal(built, spec):
+    b, s, detail = spec["stages"]["booster"], spec["stages"]["ship"], spec["detail"]
+    manifest = json.loads((built / "manifest.json").read_text(encoding="utf-8"))
+    hull = _meshes(built / "booster.gltf")["hull"][0]
+    L = b["length_m"]
+    # true dome: apex under the hot-stage ring, the ring's top at the booster's top
+    ring_h = detail["booster"]["hot_stage_ring"]["height_m"]
+    assert max(p[0] for p in hull) == pytest.approx(L - ring_h, abs=BOUND_TOL_M)
+    assert detail["hull"]["dome_start_m"] - detail["hull"]["dome_height_m"] == pytest.approx(ring_h)
+    truss = _meshes(built / "booster.gltf")["top_truss"][0]
+    assert max(p[0] for p in truss) == pytest.approx(L, abs=BOUND_TOL_M)  # the truss's ring carries the ship
+    # the bay: open aft end, the plate above every drawn exit plane
+    bay = _meshes(built / "ship.gltf")["engine_bay"][0]
+    assert min(p[0] for p in bay) == pytest.approx(0.0, abs=BOUND_TOL_M)
+    assert max(p[0] for p in bay) == pytest.approx(detail["ship"]["engine_bay"]["plate_station_m"], abs=BOUND_TOL_M)
+    ship_hull = _meshes(built / "ship.gltf")["hull"][0]
+    assert min(math.hypot(p[1], p[2]) for p in ship_hull if p[0] < 0.01) > 4.0  # no base disc any more
+    for group in s["engines"]:
+        eid = group["engine"]
+        e = spec["engines"][eid]
+        m = manifest["engines"][eid]
+        recess = detail["ship"]["engine_recess"][eid]
+        assert m["ship_exit_station_m"] == recess  # one recess per engine kind
+        assert m["ship_axial_offset_m"] == pytest.approx(recess + e["bell_length_m"])
+        assert m["ship_axial_offset_m"] + m["exit_plane_x_m"] == pytest.approx(recess)  # exit above the aft end by it
+        rim = e["nozzle_exit_diameter_m"] / 2.0
+        ring = group["ring_radius_m"]
+        assert ring + rim < detail["ship"]["engine_bay"]["wall_inner_radius_m"]  # inside the hull
+        # both bell kinds, at the largest gimbal of the config (RVac: its [gimbal] too, although the group is fixed)
+        with open(vehicle_spec.ENGINES / f"{eid}.toml", "rb") as f:
+            max_deg = tomllib.load(f)["gimbal"]["max_angle_deg"]
+        t = math.radians(max_deg)
+        clearance = math.inf
+        for k in range(72):  # direction of the tilt
+            phi = 2.0 * math.pi * k / 72
+            for j in range(36):  # rim point
+                psi = 2.0 * math.pi * j / 36
+                # rim point in the engine frame (gimbal at the origin, thrust +x), tilted by t toward phi
+                radial = rim * math.cos(psi - phi)
+                x_e = -e["bell_length_m"] * math.cos(t) - radial * math.sin(t)
+                u = -e["bell_length_m"] * math.sin(t) + radial * math.cos(t)
+                v = rim * math.sin(psi - phi)
+                y, z = ring + u * math.cos(phi) - v * math.sin(phi), u * math.sin(phi) + v * math.cos(phi)
+                station = L + m["ship_axial_offset_m"] + x_e
+                clearance = min(clearance, station - _dome_station(hull, L, min(math.hypot(y, z), 4.5)))
+        print(f"{eid}: rim to dome clearance at {max_deg} deg: {clearance:.3f} m")
+        assert clearance > 0.0
 
 
 @needs_blender

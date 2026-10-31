@@ -26,6 +26,7 @@ DETAIL_TABLES = {
     "hull": ("segments", "ring_pitch_m", "weld_height_m", "weld_half_width_m", "dent_slope_rms", "nose_tip_radius_m",
              "nose_tip_cap_m", "nose_drawn_length_m", "base_chamfer_m", "dome_start_m", "dome_height_m"),
     "booster.hot_stage": ("height_m", "flange_height_m", "flange_proud_m"),
+    "booster.hot_stage_ring": ("height_m", "inner_radius_m"),
     "booster.top_truss": ("tooth_count", "height_m", "tube_radius_m", "post_height_m", "taper_top",
                           "taper_foot"),
     "booster.skirt": ("base_ring_radius_m", "ring_stations_m", "ring_proud_m", "ring_thickness_m", "tooth_count",
@@ -46,6 +47,9 @@ DETAIL_TABLES = {
                      "foot_length_m", "foot_height_m"),
     "ship.ports": ("port_count", "placed_at_m", "azimuth_from_belly_deg", "spread_deg", "port_radius_m",
                    "port_height_m"),
+    "ship.engine_bay": ("aft_chamfer_m", "wall_inner_radius_m", "plate_station_m", "plate_radius_m",
+                        "plate_cone_station_m", "ring_stations_m", "ring_height_m", "ring_depth_m", "stringer_count",
+                        "stringer_width_m", "stringer_depth_m"),
     "ship.tiles": ("hex_across_flats_m", "gap_m", "coverage_station_m", "coverage_half_angle_deg"),
 }
 ENGINE_KEYS = ("file", "bell_length_m", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
@@ -89,7 +93,13 @@ def validate_detail(detail: dict) -> None:
         f = detail["flap"][kind]
         if len(f["outline_u_m"]) != len(f["outline_v_m"]) or len(f["outline_u_m"]) < 3:
             raise VehicleSpecError(f"[flap.{kind}]: outline_u_m / outline_v_m: equal-length lists of >= 3 points")
+    bay = detail["ship"]["engine_bay"]
+    if len(bay["plate_radius_m"]) != len(bay["plate_cone_station_m"]):
+        raise VehicleSpecError("[ship.engine_bay]: plate_radius_m / plate_cone_station_m: equal-length lists")
+    recess = _table(detail, "ship").get("engine_recess", {})
     for eid, e in _table(detail, "engines").items():
+        if not _number(recess.get(eid)) or recess[eid] < 0.0:
+            raise VehicleSpecError(f"[ship.engine_recess].{eid}: must be a number >= 0")
         for k in ENGINE_KEYS:
             if k not in e:
                 raise VehicleSpecError(f"[engines.{eid}]: missing key '{k}'")

@@ -36,12 +36,12 @@ X_AXIS = Vector((1.0, 0.0, 0.0))
 class Profile:
     """Radius of the hull over the station: chamfer, plain barrel, tangent ogive nose with a blunt tip."""
 
-    def __init__(self, stage, hull):
+    def __init__(self, stage, hull, aft_chamfer_m=None):
         self.L, self.R = stage["length_m"], stage["diameter_m"] / 2.0
         # the DRAWN ogive is the 1:100 model's (13.4 m), not the config's physics nose_length_m (17 m): a documented
         # deviation
         self.nose = hull["nose_drawn_length_m"] if stage["nose_length_m"] > 0.0 else 0.0
-        self.chamfer = hull["base_chamfer_m"]
+        self.chamfer = hull["base_chamfer_m"] if aft_chamfer_m is None else aft_chamfer_m
         self.tip_r = hull["nose_tip_radius_m"]
         self.cap_h = hull["nose_tip_cap_m"] if self.nose > 0.0 else 0.0
         if self.nose > 0.0:
@@ -102,8 +102,9 @@ class Profile:
                 t = 0.5 * math.pi * i / 8.0
                 main.append((x_e + self.cap_h * math.sin(t), r_e * math.cos(t)))
         # the chamfer is its own smooth group: one long barrel strip must not inherit the chamfer corner's normal
-        runs = [([(0.0, 0.0), (0.0, main[0][1])], (-1.0, 0.0, 0.0)), (main[:2], "out"), (main[1:], "out")]
+        runs = [(main[:2], "out"), (main[1:], "out")]  # a nose: the aft end is open (`engine_bay` closes it)
         if self.nose <= 0.0:
+            runs.insert(0, ([(0.0, 0.0), (0.0, main[0][1])], (-1.0, 0.0, 0.0)))
             runs.append(([(self.L, main[-1][1]), (self.L, 0.0)], (1.0, 0.0, 0.0)))
         return runs
 
@@ -139,6 +140,30 @@ def _build_hot_stage(stage, detail, profile):
     return mesh
 
 
+def _build_engine_bay(stage, detail, profile):
+    """The ship's open aft end: rim, inner wall with frames and stringers, the engine plate with its centre cone. The
+    engines hang from the plate inside the hull (frames f12 138.9 s, f13 2262 s; shapes of ss3-ship-engine-plate)."""
+    b = detail["ship"]["engine_bay"]
+    ri, top = b["wall_inner_radius_m"], b["plate_station_m"]
+    seg = int(detail["hull"]["segments"])
+    mesh = vc.VMesh()
+    plate = [(top, ri)] + list(zip(b["plate_cone_station_m"], b["plate_radius_m"]))
+    vc.revolve(mesh, [([(0.0, ri), (0.0, profile.base(0.0))], (-1.0, 0.0, 0.0)), ([(0.0, ri), (top, ri)], "in"),
+                      (plate, (-1.0, 0.0, 0.0))], seg, profile.R, "bay")
+    h, d = b["ring_height_m"], b["ring_depth_m"]
+    for i, x in enumerate(b["ring_stations_m"]):
+        vc.revolve(mesh, [([(x, ri), (x, ri - d)], (-1.0, 0.0, 0.0)), ([(x, ri - d), (x + h, ri - d)], "in"),
+                          ([(x + h, ri - d), (x + h, ri)], (1.0, 0.0, 0.0))],
+                   SKIRT_SEGMENTS, profile.R, ("bay_ring", i))
+    n, half_d = int(b["stringer_count"]), b["stringer_depth_m"] / 2.0
+    for i in range(n):
+        a = 2.0 * math.pi * i / n
+        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+        vc.box(mesh, vc.pt(top / 2.0, a, ri - half_d + EMBED_M), X_AXIS, et, er,
+               (top / 2.0, b["stringer_width_m"] / 2.0, half_d))
+    return mesh
+
+
 def _build_fin_fairings(stage, detail, profile):
     f = detail["booster"]["grid_fin_fairing"]
     gf = stage["grid_fins"]
@@ -162,8 +187,16 @@ def _build_top_truss(stage, detail, profile):
     t = detail["booster"]["top_truss"]
     mesh = vc.VMesh()
     n, R, L, rr = int(t["tooth_count"]), profile.R + 0.04, profile.L, t["tube_radius_m"]
+    ring = detail["booster"]["hot_stage_ring"]
+    # the hot-stage ring carries the ship: its top is the booster's top station, the V rods end under it
+    x_ring, ri = L - ring["height_m"], ring["inner_radius_m"]
+    vc.revolve(mesh, [([(x_ring, ri), (x_ring, profile.R)], (-1.0, 0.0, 0.0)),
+                      ([(x_ring, profile.R), (L, profile.R)], "out"),
+                      ([(L, profile.R), (L, ri)], (1.0, 0.0, 0.0)), ([(L, ri), (x_ring, ri)], "in")],
+               int(detail["hull"]["segments"]), profile.R, "hot_stage_ring")
+    x_top = x_ring - rr
     sub = 3
-    pts = _ring_points(L - rr, R, n * sub)
+    pts = _ring_points(x_top, R, n * sub)
     for k in range(len(pts) - 1):
         vc.tube(mesh, pts[k], pts[k + 1], rr, 6, ("ring", 0), cap0=False, cap1=False)
     for i in range(n):
@@ -171,8 +204,10 @@ def _build_top_truss(stage, detail, profile):
         am = 0.5 * (a0 + a1)
         valley = vc.pt(L - t["height_m"], am, R)
         # tapered rods (chopsticks photo 2026-03): slender at the ring, stouter at the valley
-        vc.tube(mesh, vc.pt(L - rr, a0, R), valley, rr * t["taper_top"], 6, ("strut", i, 0), radius1=rr * t["taper_foot"])
-        vc.tube(mesh, vc.pt(L - rr, a1, R), valley, rr * t["taper_top"], 6, ("strut", i, 1), radius1=rr * t["taper_foot"])
+        vc.tube(mesh, vc.pt(x_top, a0, R), valley, rr * t["taper_top"], 6, ("strut", i, 0),
+                radius1=rr * t["taper_foot"])
+        vc.tube(mesh, vc.pt(x_top, a1, R), valley, rr * t["taper_top"], 6, ("strut", i, 1),
+                radius1=rr * t["taper_foot"])
         et = Vector((0.0, -math.sin(am), math.cos(am)))
         foot = vc.pt(L - t["height_m"] - t["post_height_m"], am, R - 0.02)
         vc.tube(mesh, valley, foot, rr, 6, ("post", i))
@@ -354,7 +389,8 @@ def _build_raceway(stage, detail, profile):
 def build_stage(spec, stage_id):
     """Builds the stage's objects in the current scene; returns (root object, {node name: triangles})."""
     stage, detail = spec["stages"][stage_id], spec["detail"]
-    profile = Profile(stage, detail["hull"])
+    aft = detail["ship"]["engine_bay"]["aft_chamfer_m"] if stage_id == "ship" else None
+    profile = Profile(stage, detail["hull"], aft)
     root = vc.empty(stage_id)
     parts = {"hull": _build_hull(stage, detail, profile)}
     if stage_id == "booster":
@@ -366,6 +402,7 @@ def build_stage(spec, stage_id):
         if stage.get("grid_fins"):
             parts["fin_fairings"] = _build_fin_fairings(stage, detail, profile)
     else:
+        parts["engine_bay"] = _build_engine_bay(stage, detail, profile)
         parts["chine"] = _build_chine(stage, detail, profile)
         parts["raceway"] = _build_raceway(stage, detail, profile)
         parts["ports"] = _build_ports(stage, detail, profile)

@@ -21,3 +21,8 @@ to the cell edge box-filtered by the pixel footprint for the gap, a bevel normal
 the shade and the repaired tiles, all faded to the mean by the footprint. Shimmer: tiles ratio 1.081, error <= 0.124 (40 m), temporal
 0.0001-0.010; cost vs the old steel in the belly close-up +0.024 / +0.087 ms (scale 1 / 2). Replaced by the baked maps (see the
 hull shader section); the file is now `hull_noise.gdshaderinc` (hash and value noise of the steel only).
+
+## Lowered dome and bells below the ship's base (finish pass, superseded 2026-10-31)
+The ship's engines hung below its base (gimbal at station 0, exit planes 2.1 / 3.6 m below it, a closed base disc), so bells stuck into the booster
+and looked like bumps in the dome. The finish pass moved the dome down instead (start 4.4 m below the top, 2.25 m high, apex 70.15 m), which only
+moved the symptom. Replaced by the true arrangement: "Stage interface" in the subsystem file.

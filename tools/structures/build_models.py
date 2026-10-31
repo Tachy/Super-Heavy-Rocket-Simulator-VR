@@ -139,9 +139,13 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> 
     flaps = {st_id: [{k: f[k] for k in ("id", "kind", "hinge_azimuth_deg", "station_aft_m", "station_fwd_m", "span_m",
                                           "rotation_sign_about_plus_x")} for f in st["flaps"]]
              for st_id, st in spec["stages"].items() if st["flaps"]}
-    engines = {eid: {"file": e["file"], "exit_plane_x_m": -e["bell_length_m"],
-                     "exit_diameter_m": e["nozzle_exit_diameter_m"]} for eid, e in sorted(spec["engines"].items())}
     detail = spec["detail"]
+    recess = detail["ship"]["engine_recess"]
+    # ship_axial_offset_m: the drawn engine sits this far up the station axis from the physics gimbal point (ship only)
+    engines = {eid: {"file": e["file"], "exit_plane_x_m": -e["bell_length_m"],
+                     "exit_diameter_m": e["nozzle_exit_diameter_m"], "ship_exit_station_m": recess[eid],
+                     "ship_axial_offset_m": recess[eid] + e["bell_length_m"]}
+               for eid, e in sorted(spec["engines"].items())}
     look = {"ring_pitch_m": detail["hull"]["ring_pitch_m"],  # the shader's per-ring panels and the steel map's period
             "weld_first_m": detail["hull"]["base_chamfer_m"] + 2.0 * detail["hull"]["weld_half_width_m"],
             "ship_barrel_end_m": spec["stages"]["ship"]["length_m"] - spec["stages"]["ship"]["nose_length_m"],

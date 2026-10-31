@@ -230,9 +230,22 @@ static func body_to_render() -> Basis:
 
 ## Engine model (origin = gimbal point, thrust +X) in stage-local body coordinates; the snapshot's thrust direction
 ## carries the real gimbal (nothing is faked here).
-static func engine_transform(position_m: Vector3, direction: Vector3, base_station_m: float) -> Transform3D:
+## `axial_offset_m`: the visual offset along the station axis (see axial_offset_m below); the gimbal direction stays
+## the snapshot's.
+static func engine_transform(position_m: Vector3, direction: Vector3, base_station_m: float,
+		axial_offset_m := 0.0) -> Transform3D:
 	var axis := direction.normalized() if direction.length() > 0.5 else Vector3.RIGHT
-	return Transform3D(Basis(Quaternion(Vector3.RIGHT, axis)), position_m - Vector3(base_station_m, 0.0, 0.0))
+	return Transform3D(Basis(Quaternion(Vector3.RIGHT, axis)),
+			position_m + Vector3(axial_offset_m - base_station_m, 0.0, 0.0))
+
+
+## How far up the station axis an engine is DRAWN from the physics gimbal point: the ship's engines hang inside the hull
+## (manifest, per engine kind; the physics keeps its gimbal at the ship's station 0: docs "Stage interface"). Applied in
+## one place for the bell pose and the plume. 0 for the booster and without models.
+static func axial_offset_m(models: Dictionary, stage_id: String, vacuum: bool) -> float:
+	if models.is_empty() or stage_id != "ship":
+		return 0.0
+	return float(models["manifest"]["engines"][ENGINE_ID[vacuum]]["ship_axial_offset_m"])
 
 
 ## Exhaust start below the gimbal point along the thrust axis: the model's exit plane, else the former 3 m.

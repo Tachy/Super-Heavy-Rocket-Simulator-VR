@@ -11,8 +11,8 @@ ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; phot
 weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
 weld_half_width_m = 0.05           # [E] half width of the bead
 dent_slope_rms = 0.012             # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
-dome_start_m = 4.4                 # [E] booster: the barrel ends this far below the top (truss shoulder; photo of the printed 1:100 model)
-dome_height_m = 2.25               # [E] booster: the forward dome (half ellipse) rises inside the V truss up to the top ring (inside the physics length)
+dome_start_m = 2.88                # [E] booster: barrel end below the top = hot-stage ring 0.6 + dome height (section of ss3-booster-tank-top: shoulder y 20.7, apex 22.98 = the ring seat)
+dome_height_m = 2.28               # [E] booster: forward dome, half ellipse, section of the 1:100 model; apex under the ring (f13 file 2253.6 s: the dome right below the bell rims)
 nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across; model tip radius 0.55)
 nose_tip_cap_m = 0.25              # [E] model: the tip closes within 0.2 m axially (blunt, not a ball); photo 108 ~1 m across
 nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the physics nose_length_m of the config (17 m) is NOT drawn
@@ -22,6 +22,10 @@ base_chamfer_m = 0.25              # [E] aft edge chamfer of the skirt (radial a
 height_m = 4.4                     # [E] hot-stage truss section below the top: photo 108 band of 80 px = 4.4 m (the "vents" of the first pass are this V truss)
 flange_height_m = 0.35             # [E] collar ring at the lower edge of the section (photo: collars where the posts end)
 flange_proud_m = 0.08              # [E] collar stands this far out of the hull
+
+[booster.hot_stage_ring]
+height_m = 0.6                     # [E] ss3-hot-stage-ring: 9 m ring 0.6 m high, top of the truss; the ship's aft rim sits on it; shape from the model only, no real image of it
+inner_radius_m = 4.15              # [E] same part: r 4.15 .. 4.50
 
 [booster.top_truss]
 tooth_count = 20                   # [E] model: model: 20 V teeth around the top ring, 18 deg pitch (photo: zigzag ring on the booster top)
@@ -121,6 +125,27 @@ lug_u_m = [0.46, 1.9, 5.3]         # [E] model: three hinge lugs
 radius_m = 0.25                    # [E] pin shaft radius
 head_radius_m = 0.4                # [E] pin head radius
 head_length_m = 0.25               # [E] pin head length (the protrusion beyond the hull is the config's)
+
+# Exit plane of each engine kind above the ship's aft end (0 = rim flush with the aft edge; a bell is wholly inside the hull).
+# Drawn gimbal station = this + bell_length_m; the physics keeps its own gimbal at station 0 (docs: deviations table).
+# Measured: docs/subsystems/vehicle-models.md "Stage interface".
+[ship.engine_recess]
+raptor3 = 0.0                      # [E] +-0.3 m: camera fit to frame f12 file 138.9 s gives +0.02 +-0.08 m (fit error) against the RVac rims; model section 0.0
+raptor_vacuum3 = 0.0               # [E] +-0.15 m: Ship 39 from below (stack_S39_base_gamma): cover plane -0.07 m; hull rim fit +0.04 +-0.07 m; model section 0.0
+
+# The open aft end (user 2026-10-31, frames f12 138.9 s, f13 2262 s, Ship 39 photo; shapes from ss3-ship-engine-plate).
+[ship.engine_bay]
+aft_chamfer_m = 0.05               # [E] the rim is nearly square in the Ship 39 photo (replaces the hull's base_chamfer_m on the ship)
+wall_inner_radius_m = 4.41         # [E] model section: wall 0.09 m at the aft end
+plate_station_m = 3.7              # [E] model section: flat engine plate 3.7 m above the aft end
+plate_radius_m = [2.8, 1.8, 1.4, 0.0]      # [E] model section: flat from the wall to r 2.8, then the cone of the centre puck (f13 2256.5 s shows the puck)
+plate_cone_station_m = [3.7, 2.95, 2.7, 2.7]  # [E] model section, stations of the radii above
+ring_stations_m = [0.9, 1.8, 2.8]  # [E] three inner frames above the rim: f12 138.9 s, three stringer rows on the far wall
+ring_height_m = 0.06               # [E]
+ring_depth_m = 0.14                # [E]
+stringer_count = 96                # [E] dense stringers in frame f13 2262 s (not counted; about 30 cm pitch)
+stringer_width_m = 0.05            # [E]
+stringer_depth_m = 0.09            # [E]
 
 [ship.chine]
 width_m = 0.30                     # [E] strake width along the tile boundary
