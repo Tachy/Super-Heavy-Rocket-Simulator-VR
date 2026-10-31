@@ -22,6 +22,7 @@ Older code comments refer to sections of this file by their former titles; the t
 | VR frame budget, perf log, main-thread sections | `subsystems/vr-performance.md` | - |
 | Startup loading screen (desktop layer, VR quad layer, boot steps) | `subsystems/loading-screen.md` | `history/loading-screen.md` |
 | Launch structures (Pad B tower and chopstick model, detail file) | `subsystems/launch-structures.md` | - |
+| Launch structures measurements (Pad B reference measurement pass) | `subsystems/launch-structures-measurements.md` | - |
 | Vehicle detail models (Super Heavy / Starship hull, flaps, grid fins, engines; prototype) | `subsystems/vehicle-models.md` | - |
 
 New subsystems get their own `docs/subsystems/<slug>.md`.

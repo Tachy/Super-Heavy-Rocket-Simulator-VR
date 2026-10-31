@@ -97,7 +97,7 @@ def main() -> int:
 
             weather.fetch(source, REPO_ROOT, args.force)
             continue
-        if source.get("kind") == "weather_licence":  # licence-only entries (GFS, GRIB2 library): nothing to download
+        if source.get("kind") in ("weather_licence", "licence_only"):  # licence-only entries (GFS, GRIB2, OpenCV): no download
             continue
         if source.get("kind") == "timezones_rules":  # read from the tzdata package by the "timezones" step
             continue

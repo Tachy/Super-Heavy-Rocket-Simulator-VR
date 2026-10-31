@@ -441,3 +441,12 @@ extract = true
 extract_to = "data/materials/metal032"
 license = "CC0 1.0 Universal (ambientCG, https://docs.ambientcg.com/license/)"
 credit = "Metal032, ambientCG.com (CC0)"
+
+[[source]]
+id = "opencv_python"
+name = "OpenCV (opencv-python wheel; solvePnP camera solve of the Pad B reference measurement, tools/structures/measure/camera_solve.py; dev tool, not shipped)"
+url = "https://github.com/opencv/opencv/blob/4.x/LICENSE"
+target = "tools/structures/measure/camera_solve.py"
+kind = "licence_only"
+license = "Apache-2.0 for OpenCV 4.5+ (BSD-3-Clause up to 4.4); the opencv-python wheel's own scripts are MIT"
+credit = "OpenCV, Copyright (C) the OpenCV Team"
