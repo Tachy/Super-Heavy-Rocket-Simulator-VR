@@ -40,6 +40,7 @@ State: prototype plan `docs/superpowers/plans/2026-10-31-pad-b-prototype.md`, pr
   length) to 3.6 px (VR eye, 1500 px) wide; at 1 km, where it began before, it lost the truss at VR focal lengths.
   Nothing else of this plan draws in the transparent pass (steel / dark / chopstick materials have no alpha).
   Why these ranges and why no dither: `tower_handover_check.gd` below.
+- Tower steel albedo ~0.15 +-0.08 [E] (2026-10-31: darkened on the user's call; bare legs read bright in direct sun, near black in shade, see `vehicle-models.md` "Black parts"; far tier colours not refit).
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
   frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`).

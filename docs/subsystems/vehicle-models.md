@@ -28,7 +28,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   the rotation about +X by `rotation_sign_about_plus_x` x deflection are derived from `core/src/aero/flap.cpp` and tested
   against a re-implementation of it. Planform = the 1:100 model's (swept, wedge section, hinge lugs, `[flap.aft|fwd]`), the drawn hinge
   edge centred on the physics hinge; it does NOT keep the physics area (see "Physics deviations for the user").
-- `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The core turns the lattice normal from the tangent
+- `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The plate lies across the station axis and its cells open along X: at deflection 0 an axial flow passes through them (the core's "normal" in `grid_fin.cpp` is the lift normal, the tangent at d = 0; a right-handed rotation by +d about the radial axis turns it toward +X). Regular octagon hung on a corner, walls at +-45 deg, a spike under every wall crossing, toothed rim. Nodes `frame`, `lattice`, `plate` (far stand-in), `shaft`. See "Real-frames round".
   toward +X: a right-handed rotation by +d about the radial axis, zero = rest. Drawn size = the model's octagon (4.03 m across flats,
   root flat on the hull), not the config area / span. Egg-crate lattice, cells open along the tangent, `hooks` = catch hardware.
 - `raptor.gltf`, `rvac.gltf`: origin = gimbal point, thrust +X, bell opens toward -X, exit plane at X = -`bell_length_m`
@@ -59,7 +59,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   lattice seed, fixed zlib level, test: byte-identical PNG). One RGBA8 PNG, 1024 x 512 texels, tiling: u = circumference / 6
   (4.71 m, 4.6 mm per texel, closes around the R = 4.5 m hull), v = the 1.8 m ring pitch (3.5 mm per texel) with the weld bead
   at v = 0 (a weld at every multiple of the pitch). Channels: R, G slope along u / v (bead: triangle 12 mm high, 10 cm wide;
-  dents: two noise octaves, ~1.2 m and ~0.38 m, rms slope 0.03), B slope energy sx^2 + sy^2, A heat-affected band coverage.
+  dents: two noise octaves, ~1.2 m and ~0.38 m, rms slope 0.012), B slope energy sx^2 + sy^2, A heat-affected band coverage + the dotted stringer lines (12 per tile = 0.39 m apart, a dot every 0.09 m; rings shift by whole stringers, so the lines run on across rings). `flap_lee.png`: panel lines of the flaps' lee face, same channels, not tiling, no ring shift.
   The manifest's `look.steel_map` holds file, periods, ranges.
 - VRAM: 2.0 MiB + mips = 2.7 MiB (RGBA8, the full chain built by the game with `Image.generate_mipmaps`: box averages, which is
   what the channels are designed for); the file is 180 kB. Sampled with trilinear + anisotropic filtering (project setting
@@ -178,13 +178,13 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 |---|---|---|---|---|
 | Hull diameter | 9.0 m (tank parts r 4.50) | 9.0 | agrees | plain lathe, unchanged |
 | Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 17 (physics) | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
-| Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m; 4 lugs at 0.75 / 4.2 / 7.7 / 11.2 m | hinge 12 m, span 4, 48 m^2, thickness 0.35, chamfered rectangle | photo 108: the trapezoid with the cut forward corner agrees | model planform, wedge, 4 lugs, hinge fairing |
+| Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m | hinge 12 m, span 4, 48 m^2 | f14 file 5099 / 4699 / 5299 s: planform agrees (fisheye, not fitted); 2 V brackets + 1 central actuator instead of the model's 4 pegs | model planform, wedge, 3 lugs, hinge cover |
 | Forward flap | hinge edge 5.8 m (leans 19 deg along the ogive), span 3.04 m, swept quad with an aft foot beyond the hinge end (-1.49 m), area 13.8 m^2, 3 lugs | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); model kept | model planform centred on the physics hinge, hinge kept straight |
-| Grid fin | regular octagon 4.03 x 4.03 m, 10 cells across (0.4 pitch), depth 0.4 (catch version 0.7: hardware), curved catch corner, shaft 0.3 m | 13.5 m^2 at span 3.0 (chord 4.5), depth 0.35, rectangular | photos 2026-03: fins read as dark slabs with a SCALLOPED outer edge; the lattice cannot be seen | octagon lattice at the model's measured pitch 0.35 m (11 walls, wall 0.04, frame 0.07), serrated tip edge (every second cell capped at the rim, photo IE-Photo-44), 4 catch hooks only on the two catch fins (0 / 180 deg, plain fin at 90: the model has 2 catch + 1 plain; azimuths unconfirmed) |
-| Booster top / hot stage | 20 V teeth (18 deg pitch) between a top ring (y 22.98) and the hull, ~2.8 m high in the model view; no vent plates | 24 vent plates 3.2 m tall + louvres (first pass, read from photo 108) | chopsticks photo 2026-03: V truss ring with rod struts ~4.9 m high, posts + collars at the hull; the "louvres" of photo 108 are this truss | vent plates removed; V truss 20 teeth, 4.0 m + 0.4 m posts (photo height), collar ring; rods 0.3 m thick (the real ones are tapered) |
+| Grid fin | regular octagon 4.03 x 4.03 m, 10 cells across, depth 0.4 (catch 0.7) | 13.5 m^2 at span 3.0 | frames win, see "Real-frames round" | octagon on a corner, width 4.11 m, wall pitch 0.47 m |
+| Booster top / hot stage | 20 V teeth, ~2.8 m high in the model view | | NSF photo 2026-03 measured, see "Real-frames round" | 20 spindle rods pairs, fork feet, ring 0.32 m |
 | Booster skirt | base ring r 4.65, four thin ring tubes at r 4.9 (stations 0.7 / 1.05 / 1.95 / 2.35), a comb of posts between them, one port 0.57 x 0.74 x 0.8 m at 2.9-3.7 m | flat skirt | no photo of the base | base ring, 4 ring flanges, 48 posts, 4 ports (count unknown) |
 | Booster raceway | pill 0.7 x 5 m + a thin rail along the tank part | none | none | rail + one pill per tank section (side and spacing estimated) |
-| Shield edge | aft shell +-90 deg (to ~12 m), upper shell +-78 deg (14-38 m), nose shell closes all round (from ~38.5 m) | 75 / 65 / 55 / 30 deg at 0 / 20 / 35 / 52 m | photos 108 / 2026-05: the nose is dark all round and the barrel's sides are dark nearly to the edge: model | table replaced: 90 / 90 / 84 / 78 / 78 / 180 / 180 deg at 0 / 12 / 14 / 20 / 38 / 41 / 52.1 m; chine ends at 38.5 m |
+| Shield edge | aft +-90, upper +-78, nose all round | | superseded by frames, see "Tile boundary" | 90 / 112 / 105 / 180 deg |
 | Transfer ports | block 0.9 x 0.45 x 0.8 m | none | no photo | two on the lee side at station 44 (position estimated) |
 | Engines | plate heights 3.34 m (Raptor) / 4.6 m (RVac) = bell 2.1 + housing 1.0 / 3.6 + 1.0; RVac exit blobs 2.8-3.2 m on a 3.0 m ring | bell 2.1 / 3.6 m | n/a | unchanged (they already agree) |
 | Hot-stage ring part | 9.0 m ring 0.6 m high, 3 pads | collar | n/a | collar kept |
@@ -196,11 +196,14 @@ The drawn shape sits on the physics' pivots; nothing in `config/` was changed. W
 |---|---|---|---|
 | Aft flap | 12 x 4 m, 48 m^2 | 12 x 3.69 m swept, 36.5 m^2 (-24 %) | the aero model has 31 % more aft flap area (control authority, flap heating area) than the drawn flap; matching the model would mean ~36 m^2 |
 | Forward flap | 8 x 3 m, 24 m^2 | 5.8 x 3.04 m swept, 13.8 m^2 (-43 %) | the forward flaps are the most overstated; hinge moment arm and pitch trim are affected |
-| Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | octagon 4.03 x 4.03 m (about 13.5 m^2 gross, ~85 % lattice cover), root at the hull: centre at 4.5 + 2.0 = 6.5 m | the area agrees, the lever arm is 0.5 m longer in the drawing |
+| Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | octagon on a corner, 4.11 m wide, gross 11.9 m^2, hull to tip 4.26 m: centre at r ~6.6 m | the physics has about 13 % more area and a 0.6 m shorter lever arm than the drawing; rest attitude agrees (cells axial at d = 0) |
 | Ship nose | `nose_length_m` 17 | ogive 13.4 m | drag / nose-radius numbers use the longer, sharper nose; the drawn one is blunter |
-| Forward flap hinge | straight, parallel to the axis, 38-46 m | leans 19 deg along the ogive, 5.8 m | the flap normal at rest differs by ~19 deg (in the game the flap lies on the tangent plane) |
-| Catch pins | booster 45 / 225 deg at 66.5 m | model: catch hardware at the grid-fin corners (hooks) | the drawn hooks are on the fins; the pins stay as configured (a decision on the physics numbers is open) |
-| Shield coverage | heating model: full windward half | drawn +-78 .. 90 deg, nose all round | unchanged (drawing only) |
+| Forward flap hinge | straight, parallel to the axis, 38-46 m, azimuth belly +-110 | straight on the physics line; the frames agree with the azimuth: the tile edge sits at ~+-105 next to it | the real hinge leans along the ogive (model 19 deg; not measurable in frames) |
+| Fin azimuths | 0 / 90 / 180 (90 / 90 / 180) | as configured | aerial 2026-04, f12 1804 s: the spacing agrees, the middle fin points away from the tower |
+| Fin station | 64 m | as configured | NSF 2026-03: 64.6 +-1 m: agrees |
+| Hull ring pitch | n/a | 2.0 +-0.15 m (photo 108 Block 2: 1.8) | drawing only |
+| Catch pins | booster 45 / 225 deg at 66.5 m | none drawn differently: pins stay as configured | frames (f12 1804 s, aerial 2026-04, NSF 2026-03) show no pin standing out of the silhouette; the arms lie under the opposite fin pair. Hooks on fins are gone: none under any fin in f12 1804 s. Pin azimuth and existence: physics decision for the user |
+| Shield coverage | heating model: full windward half | drawn +-90 aft, +-112 at 13.5-21.5 m, +-105 up to 38 m, nose all round (+-10 deg) | the real shield is WIDER than the half the heating model treats above the aft part; drawing only |
 | Ship gimbal station | station 0 of the ship (stack 72.3 m) | Raptor 2.1 m, RVac 3.6 m above it (exit planes at station 0) | thrust acts 2.1 / 3.6 m further aft than drawn: lever arm to the dry CG (23.5 m) 23.5 m in the physics, 21.4 m for the gimbaled Raptors as drawn, so TVC authority +10 % against the drawing; RVacs fixed. Stack length 124.4 m holds, the ship's and booster's lengths are unchanged |
 | Ship tank bases | LOX main at station 3.5 m | engine plate at 3.7 m, housings up to 3.1 (Raptor) / 4.6 m (RVac) | the tank base lies 0.2 m below the plate, the RVac housing 1.1 m into it; nothing of it visible (CG / masses unchanged) |
 | Booster dome top | tank volumes in the config, no dome | apex 71.7 m under the 0.6 m ring | CH4 tank top not compared: drawing only |
@@ -278,16 +281,63 @@ Open truss above the shoulder: 2.88 m = the model's 2.8 m teeth; the rods run on
 
 Drawing: `[ship.engine_recess]` holds one exit station per kind, the manifest gives `ship_exit_station_m` and `ship_axial_offset_m` (= recess + bell length), `VehicleModels.axial_offset_m` applies it once for the bell pose and the plume (`vehicle_view._engine_axial_offset_m`); the direction stays the snapshot's. The booster's engines keep their stations (their bells stand out of its skirt: photos, unchanged). The ship's hull has no base disc any more; node `engine_bay` (rim, wall, 3 frames, 96 stringers, plate with centre cone, 4,100 triangles; dark own material) closes it.
 
+## Real-frames round (2026-10-31)
+Evidence `screenshots/vehicles/real/cmp_*.png` (real | engine). Frames: `data/webcasts` file seconds (`screenshots/mechazilla/webcast/real/`), NSF photos in `screenshots/mechazilla/pad-b/`. Earlier statements that the streams show no booster cameras are wrong: flights 12 / 13 / 14 show booster side and base cameras from T+3 min.
+
+| Item | Reading (frame) | Drawn | Uncertainty |
+|---|---|---|---|
+| Fin attitude on the pad / in ascent | plate across the axis, cells axial (aerial 2026-04, f12 1804 s just after liftoff, stack photo 2026-05). No frame shows a folded fin | d = 0 = cells along X; before this round the drawing was turned 90 deg about the radial (cells tangential), which was wrong | certain |
+| Fin mounting | regular octagon hung on a corner on a short stem, near the hull (aerial, f12 1804 s) | vertex at r = 4.65 m, shaft + small dark housing | housing not resolved |
+| Fin size | near fin 168 px at 41 px/m = 4.1 m wide (NSF 2026-03) | across flats 3.8, width 4.11 m | +-0.2 m |
+| Cells | diamond, rows 0.67 m apart along the span = wall pitch 0.47 m, about 60 spikes per fin (f12 1804 s; the STL's 0.35 m is not what flies) | walls +-45 deg, pitch 0.47 m | +-0.05 m |
+| Spikes | a four-sided pyramid under every wall crossing, pointing aft, pale faces lit in f12 1804 s | one pyramid per crossing, 0.22 m long | length +-0.08 m (from the rim teeth, not measurable directly) |
+| Rim | deep band 0.43 m, aft edge toothed 0.61 m pitch (NSF 2026-03) | depth 0.5 m incl. teeth 0.25 m, pitch 0.66 m | +-0.1 m |
+| Plain / catch fins | spacing 90 / 90 / 180: the opposite pair lies at the arms, the middle fin points away from the tower (aerial 2026-04, NSF 2026-03). No catch hardware visible on any fin from below (f12 1804 s), the fallback hooks were invented: removed | no hooks; fins differ in nothing | hardware on the upper side not seen |
+| V rods | spindles: 0.26 m at the middle, 0.15 m at the ring, 0.11 m at the valley (9 m = 370 px, 10.7 / 6 / 4.7 px); rods 2.72 m, fork legs 0.97 m 0.3 m wide, ring band 0.32 m | so | +-0.02 m width |
+| Flaps | aft planform agrees; bare lee face with panels ~0.95 x 0.74 m, two diagonal stiffeners, six dark hexagon covers near the aft end, 2 V brackets + 1 central actuator (f14 5099, 4699, 5299 s) | map `flap_lee.png`, 6 covers, 3 lugs; forward flap uses the same map (not verified), 2 lugs assumed | fisheye: +-0.5 m |
+| Hinge heat protection | thick black tiled bulges along the hinges on the belly side (f12 1804 s, f13 5905 s, f14 4949 s) | `hinge_covers` in the ship: 1.3 m wide, 0.5 m high, 0.8 m beyond the hinge ends, tapered, tiled by the coverage; wholly on the belly side, so the flap's sweep (lee tangent to radial) is clear (test) | +-0.3 / +-0.2 m |
+| Hull lines | dotted stringer lines ~0.35 m apart, dots ~0.09 m, rings 2.0 m; solid lines only at rings; a faint line beyond ~30 m, gone beyond ~100 m | steel map | +-0.1 m |
+| Bells | Raptor: throat 1.35 m above the exit (1.04 x width), chamber + powerhead above; fine ribs. RVac: 80 flutes on the lower ~62 %, smooth cone above, throat 3.0 m (f14 2515, 2563 s) | throat in the mesh, gimbal / exit / rims unchanged; plume anchor unchanged; `vehicle_engine.gdshader` with a rib map (**the ribs do not show in the renders yet, cause not found**) | +-0.3 / +-0.4 m |
+| Aft skirt comb | ribbed band at about 3-4 m on the ship + a ring of arched slots below (QD photo 2026-05, f12 5674 s); also the ladders beside the name and around the payload door | not drawn (location-bound; no generic map) | n/a |
+
+### Tile boundary
+Measured on the Ship 42 photo (2026-09, telephoto, hull 58 px x 2 scaled, stations 19.4 px/m in the crop): boundary offsets from the axis -0.17 R (22-38 m), +0.09 R (below 13.4 m), a wider patch -0.43 R at 13.4-21.6 m; anchor: the aft flap hinge lies on the boundary (f14 4949 s, f12 5674 s) and config azimuth belly +-90, and the stack photo 2026-05 shows both silhouettes black to the base. Solving gives the view 85 deg off the belly; check: the forward flap hinge at x -0.42 R gives 110 deg (config +-110).
+
+| Station m | Half angle now | Before | +- |
+|---|---|---|---|
+| 0-13 | 90 | 90 | 8 |
+| 13.5-21.5 | 112 | 84-78 | 10 |
+| 22-38 | 105 | 78 | 10 |
+| 41-52.1 | 180 | 180 | n/a |
+
+Only one side is measured; the other side is taken symmetric (both silhouettes in the stack photo; entry frames from both aft cameras look alike, not measured). The QD photo (Ship 39, 2026-05) shows a lee-side patch of tiles around the raceway from ~6.5 m upward (herringbone + hexagons) and bare steel below it, not drawn: the table cannot hold it, and its azimuth is not determined. The chine follows the table.
+
+### Black parts (sunlit frames)
+Albedo [E] from the sRGB of sunlit parts against known surfaces:
+
+| Part | Frames | Albedo |
+|---|---|---|
+| Fin rim / cells | NSF 2026-03 (sun), aerial, f12 1804 s: dark grey / black | 0.07 +-0.03 / 0.025 +-0.01 |
+| Raptor bells | f14 2563 s (sky light): near black. Soot possible, no clean sunlit view | 0.05 +-0.03 |
+| RVac | f14 2515 s: grey metal: **contradicts black** | 0.25 +-0.1 |
+| Chopstick arms | NSF 2026-03: black paint (already) | 0.035 |
+| Tower | legs bare steel, **bright in direct sun** (f8 2580 s, f12 1804 s), near black in shade (stack photo sRGB 17 18 23); braces dark. "Black" holds only in shade | 0.15 +-0.08 (mean) |
+
+Tower material lowered accordingly (`tower_material.gd`, `tower_view.gd`, also `launch-structures.md`); the far tier's fitted colours were not refit.
+
+### Fin aliasing
+Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax pixel at ~100 m), beyond that the opaque `plate`. A hard swap; a shimmer measurement of the fin itself does not exist (the check covers hull surfaces). Not seen in the headset.
+
 ## Open points
-- Interface look (verdict of the renders `screenshots/vehicles/ifc/cmp_*.png`): the arrangement agrees (open dark base, rims in the aft plane, bells inside, ring on the truss). Still different: the sea-level cluster is too wide (config ring 1.3 m, real 0.89 m); bells are smooth cones without regen ribs and with no visible chamber / pump detail; drawn throats sit 0.8 m higher than the model's (bell 2.1 / 3.6 m vs 1.3 / 2.8 m from throat to exit, the bell's `bell_length_m` also sets the plume anchor); the plate has no ribs, port rings or the two open covers of f12 138.9 s; the outer comb of stringer slots on the real aft skirt is not drawn; ship plumes pass through the booster at hot staging (no interaction, no vent effects). No real side close-up of the V3 stack exists in the references: the ring and its 0.6 m rest on the printed model.
+- Interface look: the arrangement agrees. Still different: the sea-level cluster is too wide (config ring 1.3 m, real 0.89 m); no powerhead detail above the throat (plain cylinder against the pump and pipe bundle of f14 2515 s); plate: dark, the real one is crumpled foil with bolt rings (f14 2515 s), not drawn; the bay wall's real corrugation and four frames are only partly drawn; ship plumes pass through the booster at hot staging.
 - Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that
   read tan under a low Sun are the black tile (albedo 0.03) in direct, reddened Sun (~14 deg): diffuse, specular only
   ~10 %, AgX lifts it (probe in `sky-fix-report.md` Fix 2). Not a bug. Steel luminance ratio gated at 1.18.
 - Shade sides: lit by the sky's radiance cubemap, which follows the Sun and the place since 2026-10-31 (`atmosphere-scattering.md`, "Radiance cubemap"). A white hull's
   shade side in a real flight session on the pad: `73 89 105` by day (was `0 0 1`), `0 0 0` on a moonless night (`sky_radiance_check.gd --flight`).
-- Coverage vs thermal: the shield is drawn from the 1:100 model (see "Shapes redrawn": +-90 / +-78 deg, nose all round); the aero heating
+- Coverage vs thermal: see the deviations table and "Tile boundary".
   model treats the full windward half (90 deg). The earlier 75 / 65 / 55 / 30 table is superseded (the user was asked; numbers in the table).
-- Catch pins: the config has booster pins at 45 / 225 deg between the fins at station 66.5 m [E]; web reports for V3 put the
+- Catch pins: see the deviations table: the pins stay as configured, frames give no sign of them.
   catch features at / integrated with the grid-fin mechanisms (unconfirmed, partly older designs). Modelled as in the config
   (physics and visual agree); a check against Block 3 photos and a decision on the physics numbers are open.
 - Config numbers that look odd next to the references: the 13.5 m^2 fin at a 3.0 m span (radius_m 6.0) gives a 4.5 m chord;
