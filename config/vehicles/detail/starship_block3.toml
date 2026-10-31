@@ -1,0 +1,89 @@
+# Visual detail of starship_block3 (Super Heavy Block 3 + Starship Block 3): what the physics does not need.
+# Placement and size come from config/vehicles/starship_block3.toml and config/engines/*.toml (length, diameter, nose,
+# flap hinges / spans, fin station / radius / area, catch pins, engine rings, nozzle exit diameters, belly azimuth); this
+# file never repeats them. Every value line carries [E] (own estimate, method named) or [S] (published, URL).
+# Photo scale: spacex-starship-108 (9 m hull = 165 px, 18.3 px/m), references only in the git-ignored
+# screenshots/mechazilla/; no photo pixels are used. Keys: config/README.md.
+
+[hull]
+segments = 72                      # [E] radial segments: sagitta 4.3 mm at R = 4.5 m, smooth shading hides the rest
+ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; photo 108: ~33 px between welds = 1.8 m
+weld_height_m = 0.012              # [E] weld bead height, reads as a normal-map-like ridge at 5-30 m
+weld_half_width_m = 0.05           # [E] half width of the bead
+nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across)
+base_chamfer_m = 0.25              # [E] aft edge chamfer of the skirt (radial and axial)
+
+[booster.hot_stage]
+height_m = 4.4                     # [E] vented hot-stage section below the top: photo 108 band of 80 px = 4.4 m
+flange_height_m = 0.35             # [E] flange ring at the lower edge of the section
+flange_proud_m = 0.08              # [E] flange stands this far out of the hull
+vent_count = 24                    # [E] counted around the section in photo 108 (about half visible: 11-12)
+vent_width_m = 0.7                 # [E] vent plate width (tangential)
+vent_height_m = 3.2                # [E] vent plate height (along the axis)
+vent_proud_m = 0.05                # [E] plate stands this far out of the hull
+vent_ribs = 9                      # [E] louvre ribs per plate
+vent_rib_proud_m = 0.04            # [E] extra height of a rib over the plate
+
+[booster.grid_fin_fairing]
+length_frac = 0.9                  # [E] actuator housing length as a fraction of the fin chord
+width_m = 1.2                      # [E] housing width (tangential)
+height_m = 0.4                     # [E] housing height out of the hull
+
+[grid_fin]
+thickness_m = 0.35                 # [E] depth of the lattice, tangential at the rest pose (the cells open this way)
+cell_pitch_m = 0.45                # [E] lattice cell pitch, both directions
+wall_m = 0.025                     # [E] lattice wall thickness
+frame_m = 0.12                     # [E] outer frame bar thickness
+shaft_radius_m = 0.12              # [E] hinge shaft, along the radial axis
+shaft_inset_m = 0.6                # [E] the shaft continues this far into the hull
+
+[flap]
+thickness_m = 0.35                 # [E] flap slab thickness
+corner_chamfer_m = 0.6             # [E] chamfer of the two outer corners (photo 108: tapered, rounded flaps)
+hinge_radius_m = 0.3               # [E] hinge fairing tube along the hinge line
+
+[catch_pin]
+radius_m = 0.25                    # [E] pin shaft radius
+head_radius_m = 0.4                # [E] pin head radius
+head_length_m = 0.25               # [E] pin head length (the protrusion beyond the hull is the config's)
+
+[ship.chine]
+width_m = 0.30                     # [E] strake width along the tile boundary
+height_m = 0.12                    # [E] strake height out of the hull
+fade_m = 1.5                       # [E] the strake grows from the hull over this length at both ends
+first_station_m = 1.0              # [E] starts above the skirt
+
+[ship.raceway]
+azimuth_from_belly_deg = 180.0     # [E] on the lee side, opposite the belly (position not verified against Block 3)
+radius_m = 0.12                    # [E] cable raceway tube
+first_station_m = 1.5              # [E]
+last_station_m = 36.0              # [E] ends below the nose
+
+# Heat-shield layout for the tile shader (task 3) and the chine: tile coverage around the belly per station from the
+# ship's base. [E] photos 108 / mdr-100: the dark tile field reaches about half way round the barrel and narrows on the
+# nose.
+[ship.tiles]
+hex_across_flats_m = 0.30          # [E] research-models 7.2: forum estimate, no official size
+gap_m = 0.006                      # [E] gap between tiles
+coverage_station_m = [0.0, 2.0, 20.0, 35.1, 52.1]       # [E] stations of the table below
+coverage_half_angle_deg = [75.0, 75.0, 65.0, 55.0, 30.0]  # [E] half angle around the belly azimuth at those stations
+
+[engines.raptor3]
+file = "raptor.gltf"               # [E] model file name
+bell_length_m = 2.1                # [E] gimbal point to exit plane (Raptor 3 is ~3.1 m tall incl. chamber and pumps)
+throat_diameter_m = 0.30           # [E]
+contour_exponent = 0.5             # [E] bell radius r = r_t + (r_e - r_t) * (z / L)^exponent (parabola-like, quick opening)
+wall_m = 0.02                      # [E] bell wall
+mount_height_m = 1.0               # [E] chamber / pump housing above the gimbal point (inside the stage's skirt)
+mount_radius_frac = 0.45           # [E] housing radius as a fraction of the exit radius
+segments = 32                      # [E]
+
+[engines.raptor_vacuum3]
+file = "rvac.gltf"                 # [E] model file name
+bell_length_m = 3.6                # [E] gimbal point to exit plane incl. the nozzle extension
+throat_diameter_m = 0.30           # [E]
+contour_exponent = 0.5             # [E]
+wall_m = 0.02                      # [E]
+mount_height_m = 1.0               # [E]
+mount_radius_frac = 0.30           # [E]
+segments = 40                      # [E]

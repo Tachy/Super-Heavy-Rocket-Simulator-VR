@@ -412,3 +412,11 @@ over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad)
   (`length_m`, `width_m`, `depth_m`, `truss_pitch_m`, rail / chord / brace profile). Every value line carries
   `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/detail_file.py` (`python -m pytest tools/structures/tests`).
   Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.
+
+## Vehicle detail files (`vehicles/detail/`)
+- `vehicles/detail/<vehicle id>.toml`: visual detail of one vehicle for the Blender model generators (weld pitch, hot-stage
+  vents, grid-fin lattice, flap slab, catch-pin heads, chine, raceway, tile layout, engine bell contour). Placement and
+  size always come from `vehicles/<id>.toml` and `engines/*.toml` (length, diameter, nose, flaps, fins, pins, engine
+  rings, nozzle exit diameters, belly azimuth); the detail file repeats none of them. Every value line ends in
+  `# [E] <method>` or `# [S] <url>`. Validated by `tools/structures/vehicle_spec.py`
+  (`python -m pytest tools/structures/tests/test_vehicle_models.py`). State: `docs/subsystems/vehicle-models.md`.
