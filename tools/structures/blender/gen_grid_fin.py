@@ -182,9 +182,7 @@ def _lattice(lat, outline, d, x_top, x_aft):
     tail = [p for p in outline if p[1] >= y_rib - 1e-3]  # tail side of the cross rib
     root = [p for p in outline if p[1] <= y_rib + 1e-3]
     regions = [ensure_ccw(tail)]
-    left = [root[0], (-h_rib, y_rib), (z_rib_l, y_rib)]  # flank between the housing wall and the outline, root side
-    right = [root[1], (z_rib_r, y_rib), (h_rib, y_rib)]
-    regions += [ensure_ccw(left), ensure_ccw(right)]
+    regions += [ensure_ccw(root)]  # the root triangle carries cells too, between the fan struts (template)
     s2 = math.sqrt(0.5)
     y_origin = root_gap + d["lattice_axis_y_m"]  # a crossing of the two wall families lies here on the symmetry axis
     reach = int((max(zs) - min(zs) + 6.0) / pitch)
@@ -237,8 +235,7 @@ def _wall_box(mesh, p0, p1, half_x, half_t, x_mid):
 
 
 def _pylon(mesh, outline, d, x_top):
-    """Round bolted ring on the hinge axis and the mount housing: an open tray between the ring and the cross rib
-    (two upright walls, root wall, floor on the aft side), as in the factory photo of the fin from the root side."""
+    """Round bolted ring on the hinge axis and a fan of two struts to the cross rib; cells between and beside them."""
     t = d["thickness_m"]
     y_top = d["ring_length_m"]
     vc.tube(mesh, (0.0, 0.0, 0.0), (0.0, y_top, 0.0), d["hinge_ring_radius_m"], RING_SIDES, "ring")
@@ -251,11 +248,8 @@ def _pylon(mesh, outline, d, x_top):
     h_root, h_rib = housing_points(d)
     y0, y1 = outline[0][1], d["root_gap_m"] + d["rib_y_m"]
     wall = d["strut_beam_m"] / 2.0
-    for sign in (-1.0, 1.0):
+    for sign in (-1.0, 1.0):  # fan of two struts from the ring to the cross rib, full depth (open triangular frame)
         _wall_box(mesh, (sign * h_root, y0), (sign * h_rib, y1), t / 2.0, wall, 0.0)
-    _wall_box(mesh, (-h_root, y0), (h_root, y0), t / 2.0, wall, 0.0)  # root wall at the chamfer
-    vc.box(mesh, (-t / 2.0 + wall / 2.0, (y0 + y1) / 2.0, 0.0), ex, ey, ez,
-           (wall / 2.0, (y1 - y0) / 2.0, (h_root + h_rib) / 2.0))  # floor on the aft side
 
 
 def build_fin(spec):
