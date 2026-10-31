@@ -96,7 +96,8 @@ vehicles still fly through `Us76Atmosphere`).
   mean radius, Sun 60 deg up: light = the open sky's). Clouds (Task 9, `weather-clouds.md` "Light"):
   x the direct beam's cloud transmittance at that point (`Atmosphere.cloud_light_at`, the Moon's light likewise), and
   the sky's radiance cube x the light under the clouds over the clear sky's there
-  (`Atmosphere.cloud_radiance_factors`, one factor for its sky, one for its ground; exactly 1 with weather off). Earth surfaces (`terrain_earth.gdshader`): the Sun
+  (`Atmosphere.cloud_radiance_factors`, by channel, one for its sky, one for its ground; exactly 1 with weather off).
+  Earth surfaces (`terrain_earth.gdshader`): the Sun
   through the cloud shadow maps, the Sun's light diffused through the column and the sky x its diffuse transmittance.
 - **Exposure.** One exposure: scene value = luminance x `DAY_EXPOSURE` (1.5) x pi / E_v,TOA / d_AU^2 - a white
   Lambertian under the TOA Sun renders 1.5 in every material.
@@ -178,10 +179,25 @@ vehicles still fly through `Us76Atmosphere`).
   around it; vehicles' shadows do not enter the cube; terrain does not shape the ground sphere.
 - **Weather.** The cube has no clouds: over a deck the ground half shows the cloudless ground (sea ~0.06 against a cloud
   top ~0.7, estimated up to ~10 x too dark on a belly over an overcast sea). Not small, so documented, not fixed. Under the
-  deck, reflections included, its sky x (T_d E_sky + T_sd E_h) / E_sky and its ground, which already holds the direct light, x
-  (E_h (T_s + T_sd) + E_sky T_d) / (E_h + E_sky), each a sum over the Sun and, while the cube shows it, the Moon. At the pad by day:
-  optical depth 3 sky 4.77, ground 0.83; depth 15 sky 2.74, ground 0.46 (the one factor before gave the ground 5.8 x too much).
-  The sky's half is the mean: the brighter part of a deck towards the Sun is not modelled.
+  deck, reflections included, by channel (linear sRGB; the droplets are grey, the clear sky is blue, the light under a
+  deck
+  mostly the Sun's), its sky x (T_d E_sky + T_sd E_h) / E_sky and its ground, which already holds the direct light, x
+  (E_h (T_s + T_sd) + E_sky T_d) / (E_h + E_sky), each a sum over the Sun and, while the cube shows it, the Moon; E_sky
+  and E_h
+  at the eye, so the air under the base is in the colour. At the pad by day (R G B): optical depth 3 sky 7.01 4.77 2.96,
+  ground
+  0.83 (grey within 1 %); depth 15 sky 4.05 2.74 1.69, ground 0.46. A scalar factor kept the clear sky's colour under a
+  deck: B/G
+  1.49 on a white plate against 0.90, a blue pad and hull. A white plate under a deck is warm, R/G 1.19 B/G 0.90: the
+  Sun's
+  colour without a white balance, like a white plate in the open Sun. The sky's half is the mean: the brighter part of a
+  deck
+  towards the Sun is not modelled. The cube's users are `LitAerial` (the pad's concrete, the tower, the drone ship) and
+  `vehicle_hull`, through Godot's ambient and reflections; the terrain and the sea do not read it (their own cloud light
+  adds the
+  Sun's diffuse light in its colour). Limits: the aerial perspective (`atm_fog`) keeps the cloudless in-scattering under
+  a deck;
+  the sea's reflected moonlit sky (`terrain_earth.gdshader`) has no cloud term.
 - **Moon light.** `World.moon_light` is off near the Moon (it lit objects from the Moon's centre through the ground); the
   one switch `near_moon` also turns on the cube's ground and flat Earth. Limit at that border (~67 000 km from the Moon): the
   Moon is ~2 texels of the cube there (undersampled, not widened) and `moon_light` before the border is still the
@@ -199,7 +215,15 @@ vehicles still fly through `Us76Atmosphere`).
   are the eye's (0.196 before, height over the sphere counted twice); transit (eye 200 000 km up, display gain 700) down /
   estimate 0.749; back at the pad the same pixels (+-2 code values). Decks: optical depth 3 and 15, up 1.016 and 1.016, down
   1.027 and 1.027 of clear x factor + the sky's leak (+-15 %; with the ground's half off a down plate still reads 0.075 of the
-  sky's plate: the coarsest level); opaque deck in the moonlight up / the Moon's sky x factor 0.915 (+-30 %; 0.099 with T_d alone).
+  sky's plate: the coarsest level); opaque deck in the moonlight up / the Moon's sky x factor 0.854 (+-30 %; 0.099 with
+  T_d alone).
+  Colour under the decks, R/G and B/G of the plate against the computed colour (+-5 %, set before measuring; the clear
+  plate against
+  the sky's colour, the same read, 0.795 1.478 / 0.808 1.463): depth 3 up 1.166 0.926 / 1.188 0.906, down 1.000 0.758 /
+  1.008 0.767;
+  depth 15 up 1.167 0.919 / 1.192 0.900, down 1.007 0.761 / 1.013 0.765; the Moon's deck, up at display gain 8, 1.170
+  0.936 / 1.184
+  0.904 (+-10 %). With scalar factors every deck plate fails (depth 15 up 0.793 1.491, down 0.784 1.099).
   `--timelapse`: sunset into twilight at warp 120, adapted: frame step at most 1.0 code values (limit 6), no step of the eye's gain; fixed gain: 177
   refreshes, up / sky 0.625 .. 0.709 (band 1.6) while the sky falls x 5.6. `--steady`: far Earth over 8 h in 30 min steps, range
   0.6 % of the mean (limit 5 %, set before measuring: a texel crossing at warp is a flicker). `--flight`: white hull entered

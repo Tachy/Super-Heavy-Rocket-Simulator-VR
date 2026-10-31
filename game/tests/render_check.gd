@@ -281,8 +281,8 @@ func _process(_delta: float) -> bool:
 		print("render_check: ", world.weather.status_text())
 		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
 				world.clouds.field_texture_bytes / 1.0e6, world.clouds.last_upload_ms])
-		print("render_check: the cube under the clouds: sky factor %.3f, ground factor %.3f" % [world._radiance_cloud_factors.x,
-				world._radiance_cloud_factors.y])
+		print("render_check: the cube under the clouds, by channel: sky factor %s, ground factor %s" % [
+				world._radiance_cloud_factors[0], world._radiance_cloud_factors[1]])
 		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
 				world.moon_terrain.stats])
 		if _args.has("webcast"):

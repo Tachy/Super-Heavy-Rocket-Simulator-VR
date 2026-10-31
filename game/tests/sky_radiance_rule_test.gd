@@ -30,6 +30,16 @@ func _initialize() -> void:
 	_check("tables loaded", rule.due(true, up, 10.0, up, -1.0, sun, 1.0, 0.0, CLEAR), true)
 	_check("no repeat", rule.due(true, up, 10.0, up, -1.0, sun, 1.0, 0.0, CLEAR), false)
 
+	# The cloud factors are colour-resolved: one channel alone is enough (the sky's blue falls while red and green stay).
+	var colour_rule := SkyRadianceRefresh.new()
+	var factors := [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+	colour_rule.due(true, up, 10.0, up, -1.0, sun, 1.0, 0.0, factors)
+	for k in range(factors.size()):
+		var one := factors.duplicate()
+		one[k] = 1.02
+		_check("cloud factor channel %d" % k, colour_rule.due(true, up, 10.0, up, -1.0, sun, 1.0, 0.0, one), true)
+		_check("cloud factor channel %d, back" % k, colour_rule.due(true, up, 10.0, up, -1.0, sun, 1.0, 0.0, factors), true)
+
 	var small := deg_to_rad(0.02)
 	var large := deg_to_rad(0.05)
 	_check("Sun 0.02 deg", rule.due(true, up, 10.0, up, -1.0, sun.rotated(Vector3.UP, small), 1.0, 0.0, CLEAR), false)

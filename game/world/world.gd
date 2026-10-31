@@ -80,7 +80,7 @@ var _earth_clouds_shader: Shader = load("res://shaders/earth_clouds.gdshader")  
 var _moon_material := ShaderMaterial.new()
 var _sky_material := ShaderMaterial.new()
 var _radiance_refresh := SkyRadianceRefresh.new()
-var _radiance_cloud_factors := Vector2.ONE
+var _radiance_cloud_factors: Array[Vector3] = [Vector3.ONE, Vector3.ONE]  # the sky's half, the ground's: by channel
 ## [E] The Earth's terrain horizon is marched anew past these: 50 m at a horizon some km away is well under 1 % of the Earth's
 ## disc (radius 0.95 deg, 1 % ~ 0.02 deg), as is 0.02 deg of the Earth itself.
 const EARTH_HORIZON_EYE_STEP_M := 50.0
@@ -650,7 +650,9 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 			camera_gcrf_m.length() - Atmosphere.EARTH_MEAN_RADIUS_M, moon_zenith,
 			moon_distance_m - moon_radius_m if near_moon else -1.0, atmosphere.sun_direction_local,
 			atmosphere.luminance_scale, atmosphere.moonlight_relative_value if atmosphere.moonlight_active else 0.0,
-			[sun_fraction, earth_visible, ground_sun, ground_earth, _radiance_cloud_factors.x, _radiance_cloud_factors.y])
+			[sun_fraction, earth_visible, ground_sun, ground_earth, _radiance_cloud_factors[0].x, _radiance_cloud_factors[0].y,
+			_radiance_cloud_factors[0].z, _radiance_cloud_factors[1].x, _radiance_cloud_factors[1].y,
+			_radiance_cloud_factors[1].z])
 	if not due:
 		return
 	_radiance_serial += 1
@@ -662,8 +664,8 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 			Frames.to_render(RadianceFarEarth.lifted_direction(to_earth_m, to_moon_m, lift)))
 	_sky_material.set_shader_parameter("radiance_moon_sun_visible", ground_sun)
 	_sky_material.set_shader_parameter("radiance_moon_earth_visible", ground_earth)
-	_sky_material.set_shader_parameter("radiance_cloud_sky_factor", _radiance_cloud_factors.x)
-	_sky_material.set_shader_parameter("radiance_cloud_ground_factor", _radiance_cloud_factors.y)
+	_sky_material.set_shader_parameter("radiance_cloud_sky_factor", _radiance_cloud_factors[0])
+	_sky_material.set_shader_parameter("radiance_cloud_ground_factor", _radiance_cloud_factors[1])
 	_sky_material.set_shader_parameter("radiance_moon_radius_m", moon_radius_m if near_moon else 0.0)
 	_sky_material.set_shader_parameter("radiance_moon_distance_m", moon_distance_m)
 	_sky_material.set_shader_parameter("radiance_moon_zenith", moon_zenith)

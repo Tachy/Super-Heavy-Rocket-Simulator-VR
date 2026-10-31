@@ -44,6 +44,16 @@ const LIMB_UTC := "2026-11-12T06:00:00"  # three days after new Moon: a nearly f
 const THIN_DECK := [1000.0, 2000.0, 2.0e-5, 1.0]
 const OPAQUE_DECK := [1000.0, 2000.0, 1.0e-4, 1.0]
 const OVERCAST_TOLERANCE := 0.15
+# [E] A white plate's R/G and B/G against the computed colour under a deck, set before measuring: 5 % is about the
+# smallest
+# tint that shows on a large neutral surface (concrete, a white hull); a blue sky scaled as a whole misses by far more.
+const DECK_CHROMA_TOLERANCE := 0.05
+# [E] The Moon's sky reads dark: the display's gain lifts its plate clear of the lowest codes, and rounding counts for
+# more.
+const MOON_DECK_READ_EXPOSURE := 8.0
+const THIN_DECK_READ_EXPOSURE := 0.6  # the other way: the thin deck's plate would touch the display's top
+const MOON_DECK_CHROMA_TOLERANCE := 0.10
+const CLIP_LEVEL := 250.0 / 255.0  # above this a channel is the display's limit, no colour
 const SHACKLETON := {"lat": -89.66, "lon": 129.2}  # a crater floor kilometres below the mean sphere, in shadow
 const BELOW_SPHERE_MIN_M := 1000.0
 const FRACTION_TOLERANCE := 0.02
@@ -120,11 +130,11 @@ var _phases := [
 	{"label": "pad_day_ground_off", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
 			"ground_off": true, "check": "ground_leak"},
 	{"label": "pad_day_thin_deck", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
-			"deck": THIN_DECK, "check": "deck"},
+			"exposure": THIN_DECK_READ_EXPOSURE, "deck": THIN_DECK, "check": "deck"},
 	{"label": "pad_day_overcast", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
 			"deck": OPAQUE_DECK, "check": "deck"},
 	{"label": "pad_night_moon_overcast", "utc": "2026-11-24T06:00:00", "lat": STARBASE.lat, "lon": STARBASE.lon,
-			"adapt": true, "deck": OPAQUE_DECK, "check": "moon_deck"},
+			"adapt": true, "exposure": MOON_DECK_READ_EXPOSURE, "deck": OPAQUE_DECK, "check": "moon_deck"},
 ]
 
 var _args := {}
@@ -158,6 +168,7 @@ var _live_sky_max := 0.0
 var _opposite_frame := 0
 var _display_exposure := 1.0
 var _ground_leak := 0.0
+var _ground_leak_down := Color.BLACK  # the down plate with the ground's half off
 
 
 ## The refresh rule of a frozen cube (--stale).
@@ -219,7 +230,7 @@ func _process(_delta: float) -> bool:
 	_place_sphere()
 	_wait += 1
 	if _wait == 2 and _phases[_phase].get("ground_off", false):
-		_world._sky_material.set_shader_parameter("radiance_cloud_ground_factor", 0.0)  # itself a write: the cube is redrawn
+		_world._sky_material.set_shader_parameter("radiance_cloud_ground_factor", Vector3.ZERO)  # itself a write: a redraw
 	if _wait < FRAMES_PER_VIEW:
 		return false
 	var image := root.get_viewport().get_texture().get_image()
@@ -509,6 +520,11 @@ func _finish_phase(up: Color, side: Color, down: Color) -> void:
 		"irradiance":
 			_expect(side.g >= LIT_LEVEL and down.g >= LIT_LEVEL, "shade side and ground side lit")
 			_expect_ratio("up plate vs sky_lux / pi", _cd(up), _sky_cd(), IRRADIANCE_TOLERANCE)
+			var eye_itrf: Vector3 = _world.earth.fixed_to_gcrf.transposed() * _world.camera.position_gcrf_m
+			var to_sun: Vector3 = _world.earth.fixed_to_gcrf.transposed() * _world.sun_apparent_from_earth_m
+			# What the chroma gate can claim: the clear plate against the sky's colour, the same read without a deck.
+			_expect_chroma("clear up plate", up, _world.core.atmosphere_illuminance(eye_itrf, eye_itrf.normalized(),
+					to_sun.normalized())["sky_lux"], DECK_CHROMA_TOLERANCE)
 			_first = {"up": up, "side": side, "down": down}
 		"same_as_first":
 			var same := absf(up.g - _first.up.g) <= SAME_CODE_VALUES and absf(side.g - _first.side.g) <= SAME_CODE_VALUES \
@@ -552,22 +568,30 @@ func _finish_phase(up: Color, side: Color, down: Color) -> void:
 						SMALL_SOURCE_TOLERANCE)
 		"ground_leak":
 			_ground_leak = _cd(down) / _cd(_first.up)
+			_ground_leak_down = down
 			_expect(_ground_leak <= GROUND_LEAK_LIMIT, "the ground's half off: the down plate still reads %.3f of the sky's plate"
 					% _ground_leak)
 		"deck":
 			var gcrf_to_fixed: Basis = _world.earth.fixed_to_gcrf.transposed()
 			var day := _deck_terms((gcrf_to_fixed * _world.sun_apparent_from_earth_m).normalized())
+			# The clear plates were read at display gain 1.
+			var clear_up := _cd(_first.up) * _display_exposure
+			var clear_down := _cd(_first.down) * _display_exposure
 			_expect_ratio("up plate vs the clear sky x (T_d E_sky + T_sd E_sun,h) / E_sky", _cd(up),
-					_cd(_first.up) * day[2] / day[0], OVERCAST_TOLERANCE)
+					clear_up * day[2].y / day[0].y, OVERCAST_TOLERANCE)
 			# The clear down plate is the ground plus the coarsest level's leak of the sky (measured with the ground's half off).
-			var leak := _ground_leak * _cd(_first.up)
+			var leak := _ground_leak * clear_up
 			_expect_ratio("down plate vs the clear ground x (E_sun,h (T_s + T_sd) + E_sky T_d) / (E_sun,h + E_sky), + the leak",
-					_cd(down), (_cd(_first.down) - leak) * day[3] / (day[0] + day[1]) + leak * day[2] / day[0], OVERCAST_TOLERANCE)
+					_cd(down), (clear_down - leak) * day[3].y / (day[0].y + day[1].y) + leak * day[2].y / day[0].y,
+					OVERCAST_TOLERANCE)
+			_expect_chroma("up plate", up, day[2], DECK_CHROMA_TOLERANCE)
+			_expect_chroma("down plate", down, _down_plate_colour(day), DECK_CHROMA_TOLERANCE)
 		"moon_deck":
 			var to_fixed: Basis = _world.earth.fixed_to_gcrf.transposed()
 			var night := _deck_terms((to_fixed * _world.moon_gcrf_m).normalized())
 			_expect_ratio("up plate vs the Moon's sky x (T_d E_sky + T_sd E_moon,h) / E_sky", _cd(up),
-					_moon_sky_cd() * night[2] / night[0], SMALL_SOURCE_TOLERANCE)
+					_moon_sky_cd() * night[2].y / night[0].y, SMALL_SOURCE_TOLERANCE)
+			_expect_chroma("up plate", up, night[2], MOON_DECK_CHROMA_TOLERANCE)
 		"below_sphere":
 			var surface: Dictionary = _world.core.surface_samples("moon", PackedFloat64Array([p["lat"]]),
 					PackedFloat64Array([p["lon"]]))
@@ -586,19 +610,46 @@ func _finish_phase(up: Color, side: Color, down: Color) -> void:
 
 
 ## The deck's light at the eye for one source along direction_itrf, the core's own numbers: [E_sky, E_h, the diffuse light under
-## the deck, the ground's light under the deck], green channel as the pixels read. Independent of what the game computes.
+## the deck, the ground's light under the deck], each by channel (linear sRGB lux). Independent of what the game
+## computes.
 func _deck_terms(direction_itrf: Vector3) -> Array:
 	var eye_itrf: Vector3 = _world.earth.fixed_to_gcrf.transposed() * _world.camera.position_gcrf_m
 	var lux: Dictionary = _world.core.atmosphere_illuminance(eye_itrf, eye_itrf.normalized(), direction_itrf)
 	var light: Dictionary = _world.core.weather_cloud_light(eye_itrf, direction_itrf)
-	var sky: float = lux["sky_lux"].y
-	var beam: float = lux["sun_lux"].y
+	var sky: Vector3 = lux["sky_lux"]
+	var beam: Vector3 = lux["sun_lux"]
 	var t_s: float = light["sun_transmittance"]
 	var t_sd: float = light["sun_diffuse"]
 	var t_d: float = light["sky_factor"]
-	print("sky_radiance_check:   deck: T_s %.4f T_sd %.4f T_d %.4f, E_sky %.1f E_h %.1f; sky factor %.3f, ground factor %.3f" % [t_s, t_sd,
-			t_d, sky, beam, (t_d * sky + t_sd * beam) / sky, (beam * (t_s + t_sd) + sky * t_d) / (beam + sky)])
-	return [sky, beam, t_d * sky + t_sd * beam, beam * (t_s + t_sd) + sky * t_d]
+	var diffuse: Vector3 = t_d * sky + t_sd * beam
+	var ground: Vector3 = (t_s + t_sd) * beam + t_d * sky
+	print("sky_radiance_check:   deck: T_s %.4f T_sd %.4f T_d %.4f, E_sky %s E_h %s; sky factor %s, ground factor %s" % [
+			t_s, t_sd, t_d, sky, beam, diffuse / sky, ground / (beam + sky)])
+	return [sky, beam, diffuse, ground]
+
+
+## The down plate's colour under a deck from the clear measurements (linear, by channel): the clear ground without the
+## sky's
+## leak x the ground's factor, + the leak x the sky's factor.
+func _down_plate_colour(terms: Array) -> Vector3:
+	var clear_down: Color = (_first.down as Color).srgb_to_linear()
+	var leak := _ground_leak_down.srgb_to_linear()
+	var clear := Vector3(clear_down.r, clear_down.g, clear_down.b)
+	var leaked := Vector3(leak.r, leak.g, leak.b)
+	return (clear - leaked) * terms[3] / (terms[0] + terms[1]) + leaked * terms[2] / terms[0]
+
+
+## A plate's R/G and B/G against a reference colour (linear), and that the pixel can say so: not clipped, clear of the
+## lowest codes.
+func _expect_chroma(what: String, pixel: Color, reference: Vector3, tolerance: float) -> void:
+	var c := pixel.srgb_to_linear()
+	var measured := Vector2(c.r / maxf(c.g, 1.0e-30), c.b / maxf(c.g, 1.0e-30))
+	var expected := Vector2(reference.x / reference.y, reference.z / reference.y)
+	_expect(pixel.g >= READ_MIN_LEVEL and maxf(maxf(pixel.r, pixel.g), pixel.b) <= CLIP_LEVEL,
+			"%s readable: %s" % [what, _fmt(pixel)])
+	_expect(absf(measured.x / expected.x - 1.0) <= tolerance and absf(measured.y / expected.y - 1.0) <= tolerance,
+			"%s colour: R/G %.3f, B/G %.3f, expected %.3f, %.3f (+- %.2f)" % [what, measured.x, measured.y, expected.x,
+			expected.y, tolerance])
 
 
 ## What "no earthshine" reads: DARK_LEVEL as a luminance at this gain.

@@ -18,7 +18,7 @@ const HEIGHT_FRACTION := 0.02
 ## (scene_forward_clustered.glsl mixes it out at ambient_light_sky_contribution 1), so a change of gain needs a redraw.
 const SCALE_LOG := 0.02
 ## [E] A fraction of a light (the solar disc the Moon leaves, the Earth's disc and both lights on the lunar ground, the
-## factor under the clouds).
+## factors under the clouds, each channel).
 const FRACTION_STEP := 0.01
 
 var _drawn := false

@@ -41,11 +41,12 @@ uniform float radiance_earth_min_radius_rad = 0.07;
 uniform float radiance_earth_flux = 1.0;
 uniform bool radiance_earth_flat = false;
 uniform vec3 radiance_earth_drawn = vec3(0.0, 1.0, 0.0);  // from the eye, render world axes
-// The light under the clouds over the clear sky's (Atmosphere.cloud_radiance_factors), 1 with weather off, for the sky's half
-// and the ground's: the ground's light holds the direct Sun, the sky's does not. In the cube because Godot's
+// The light under the clouds over the clear sky's by channel (Atmosphere.cloud_radiance_factors), 1 with weather off,
+// for the
+// sky's half and the ground's: the ground's light holds the direct Sun, the sky's does not. In the cube because Godot's
 // ambient_light_energy does not reach a sky's cube.
-uniform float radiance_cloud_sky_factor = 1.0;
-uniform float radiance_cloud_ground_factor = 1.0;
+uniform vec3 radiance_cloud_sky_factor = vec3(1.0);
+uniform vec3 radiance_cloud_ground_factor = vec3(1.0);
 
 // The model ground seen along v from the camera, lit and attenuated (scene units).
 vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
