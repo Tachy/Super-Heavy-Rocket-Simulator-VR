@@ -64,6 +64,7 @@ after the user's go. Tools: `tools/structures/measure/` (`ratio.py`, `camera_sol
 | Catch axis to tower face plane | 24 (2) m (projected, lower bound 23.7) | olp1: 30 - 6 = 24 | 0 | Ship 42 |
 | Tower centre to catch axis (`distance_m`) | 32 (3) m | 30 m | +7 %, within error | Ship 42 33.9 m (projection), tower_foot 30-33 m |
 | Azimuth pad to tower | 345 (25) deg, low confidence | 315 deg | **-30 deg, unresolved** | NOAA frame direction, assumes north from the shadow |
+| Tower azimuth against the pad line | mount / catch axis 34 (8) deg off the foot square's face normal (0 = face on, 45 = corner): 28 / 36 / 38 deg in three plan views; Ship 42 silhouette 18.8 m = 13.3 m * sqrt2 gives the camera on a diagonal, 45 (15) deg; mount and tower squares 15 (8) deg apart | face on (0 deg, box and drawing) | **face-on rejected, corner (45) not excluded**; proposal in the report, config untouched | `.superpowers/sdd/2026-10-31-pad-b-prototype/tower-azimuth-report.md` |
 | Arm geometry check | arms 26 m, hinges at the corners (lateral 6.75), closed tips +-4.8 m reach 25.9 m vs measured 24.5 (2) m | `arm_standby_deg`, `arm_closed_gap_m` derived for 24 m | consistent, no fudge | physics rule of spec B |
 
 ## Biggest deviations from the olp1-based numbers
