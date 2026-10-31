@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -83,6 +84,24 @@ def test_manifest_follows_config_and_current_run_is_skipped(built, tmp_path, cap
     assert build_models.build(build_models.DEFAULT_CONFIG, built) == 0
     assert "up to date" in capsys.readouterr().out
     assert manifest.stat().st_mtime > 1.0e9 + 1.0e6, "the up-to-date branch touches the manifest (game mtime check)"
+
+
+def test_failed_generator_leaves_the_old_models_and_manifest(built, tmp_path, monkeypatch, capsys):
+    out = tmp_path / "models"
+    shutil.copytree(built, out)
+    before = {f.name: f.read_bytes() for f in out.iterdir()}
+    real_run = subprocess.run
+
+    def run(cmd, *args, **kwargs):  # the second generator (the chopstick) fails after the first one has written
+        if any("gen_chopstick" in str(c) for c in cmd):
+            return subprocess.CompletedProcess(cmd, 3, stdout="", stderr="boom")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(build_models.subprocess, "run", run)
+    assert build_models.build(build_models.DEFAULT_CONFIG, out, force=True) == 1
+    assert {f.name: f.read_bytes() for f in out.iterdir()} == before
+    assert not (tmp_path / "models.new").exists()
+    assert "left as it was" in capsys.readouterr().out
 
 
 def test_missing_blender_exits_zero(monkeypatch, tmp_path, capsys):

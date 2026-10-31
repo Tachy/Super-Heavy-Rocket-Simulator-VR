@@ -12,7 +12,13 @@ from pathlib import Path
 PROFILE_KINDS = ("h_beam", "tube", "angle", "box")
 SECTION_KEYS = ("height_m", "face_width_m", "pitch_m", "pattern", "leg_profile", "brace_profile")
 CHOPSTICK_KEYS = ("length_m", "width_m", "depth_m", "truss_pitch_m", "rail_profile", "chord_profile", "brace_profile")
-TOWER_KEYS = ("height_m", "sections")
+TOWER_KEYS = ("height_m", "sections", "deck", "core", "roof", "foot")
+PATTERNS = ("x_brace", "k_brace", "chevron")
+## Per table: the keys that are lengths in metres (> 0); roof.pyramid_top_fraction is a fraction in (0, 1].
+DECK_KEYS = ("thickness_m", "inset_m")
+CORE_KEYS = ("size_m",)
+ROOF_KEYS = ("plate_thickness_m", "overhang_m", "pyramid_height_m")
+FOOT_KEYS = ("ring_width_m", "ring_thickness_m")
 
 
 class DetailFileError(ValueError):
@@ -40,6 +46,16 @@ def load(path) -> dict:
     _positive(tower, "height_m", "tower")
     if not tower["sections"]:
         raise DetailFileError("tower.sections: empty")
+    for table, keys in (("deck", DECK_KEYS), ("core", CORE_KEYS), ("roof", ROOF_KEYS), ("foot", FOOT_KEYS)):
+        if not isinstance(tower[table], dict):
+            raise DetailFileError(f"tower.{table}: must be a table")
+        _need(tower[table], keys, f"tower.{table}")
+        for k in keys:
+            _positive(tower[table], k, f"tower.{table}")
+    _need(tower["roof"], ("pyramid_top_fraction",), "tower.roof")
+    fraction = tower["roof"]["pyramid_top_fraction"]
+    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or not 0.0 < fraction <= 1.0:
+        raise DetailFileError(f"tower.roof.pyramid_top_fraction: must be a fraction in (0, 1], got {fraction!r}")
     for name, p in profiles.items():
         _need(p, ("kind", "size_m", "wall_m"), f"profiles.{name}")
         if p["kind"] not in PROFILE_KINDS:
@@ -51,6 +67,8 @@ def load(path) -> dict:
         _need(s, SECTION_KEYS, where)
         for k in ("height_m", "face_width_m", "pitch_m"):
             _positive(s, k, where)
+        if s["pattern"] not in PATTERNS:
+            raise DetailFileError(f"{where}.pattern: '{s['pattern']}' not in {PATTERNS}")
         for k in ("leg_profile", "brace_profile"):
             if s[k] not in profiles:
                 raise DetailFileError(f"{where}.{k}: unknown profile '{s[k]}'")

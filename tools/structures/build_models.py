@@ -72,22 +72,31 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
         (out / MANIFEST).touch()
         print(f"build_models: models up to date ({out})")
         return 0
-    out.mkdir(parents=True, exist_ok=True)
+    # Generate into a sibling directory and swap it in only when every generator succeeded: a failure must not leave new
+    # glTF next to an old manifest (or half-written files in place of the models the game loads).
+    staging = out.parent / (out.name + ".new")
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
     triangles: dict[str, int] = {}
     for gen in GENERATORS:
         cmd = [str(exe), "-b", "--factory-startup", "-P", str(SCRIPT_DIR / gen), "--", "--config", str(config),
-               "--out", str(out)]
+               "--out", str(staging)]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             sys.stderr.write(res.stdout[-2000:] + res.stderr[-2000:])
-            print(f"build_models: {gen} failed (exit {res.returncode})")
+            print(f"build_models: {gen} failed (exit {res.returncode}); {out} left as it was")
+            shutil.rmtree(staging, ignore_errors=True)
             return 1
         for m in re.finditer(r"^TRIANGLES (\S+) (\d+)$", res.stdout, re.M):
             triangles[m.group(1)] = int(m.group(2))
     manifest = {"input_hash": digest, "blender": version, "config": config.name, "files": list(OUTPUTS),
                 "triangles": triangles,
                 "frame": "Blender axes in glTF (export_yup off): arm along +X, rail plane Z = 0, hinge at origin"}
-    (out / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if out.exists():
+        shutil.rmtree(out)
+    staging.rename(out)
     print(f"build_models: generated {', '.join(OUTPUTS)} in {out}; triangles {triangles}")
     return 0
 

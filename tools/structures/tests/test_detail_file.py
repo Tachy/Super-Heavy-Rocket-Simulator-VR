@@ -69,6 +69,22 @@ def test_load_raises_on_missing_key_and_bad_unit(tmp_path):
         detail_file.load(f)
 
 
+@pytest.mark.parametrize("old, new, match", [
+    ("[tower.deck]", "[tower.dek]", "deck"),
+    ("ring_width_m", "ring_wdth_m", "ring_width_m"),
+    ("size_m = 3.6 ", "size_m = -3.6 ", "positive"),
+    ("pyramid_top_fraction = 0.3", "pyramid_top_fraction = 1.5", "fraction"),
+    ('pattern = "x_brace"', 'pattern = "zigzag"', "pattern"),
+])
+def test_load_validates_deck_core_roof_foot_and_pattern(tmp_path, old, new, match):
+    text = DRAFT.read_text(encoding="utf-8")
+    assert old in text
+    f = tmp_path / "bad.toml"
+    f.write_text(text.replace(old, new, 1), encoding="utf-8")
+    with pytest.raises(detail_file.DetailFileError, match=match):
+        detail_file.load(f)
+
+
 def test_ratio_scale():
     pts = {"scale": {"a": [0, 0], "b": [90, 0], "length_m": 9.0},
            "measure": {"w": {"a": [0, 0], "b": [0, 120]}}}
