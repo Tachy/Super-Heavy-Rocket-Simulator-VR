@@ -12,10 +12,14 @@ shader_type spatial;
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/heat_shield_tiles.gdshaderinc"
 
+// [E] Large-scale variation of the sheets: +-3 % (+-10 % read as blotches once the ambient was right).
+const float STEEL_MOTTLE = 0.03;
+const float STEEL_MOTTLE_BASE = 0.97;
 uniform int mode = 0;
-uniform vec3 steel_albedo : source_color = vec3(0.80, 0.81, 0.83);
-uniform float steel_metallic : hint_range(0.0, 1.0) = 0.8;  // < 1: a diffuse share stands in for the sky's weak reflection
-uniform float steel_roughness : hint_range(0.0, 1.0) = 0.27;
+// F0 of bare iron-based steel, linear (0.56, 0.57, 0.58) [S: Filament material guide, Iron], sRGB-encoded here.
+uniform vec3 steel_albedo : source_color = vec3(0.773, 0.780, 0.786);
+uniform float steel_metallic : hint_range(0.0, 1.0) = 1.0;  // a metal: no diffuse, sky and ground from the radiance cube
+uniform float steel_roughness : hint_range(0.0, 1.0) = 0.35;  // [E] cold-rolled sheet: hazy reflections (photos)
 uniform float ring_pitch_m = 1.8;
 uniform float barrel_end_m = 1.0e9;      // ship: the nose starts here (below it the shield's profile is straight)
 uniform float footprint_scale = 1.0;      // test hook: tile_shimmer_check's supersampled reference sees px * its scale
@@ -104,7 +108,7 @@ void fragment() {
 	}
 	vec3 steel = steel_albedo * (1.0 + panel_fade * (ring_hash - 0.5) * 0.10);
 	steel *= 1.0 - WELD_DARKEN * weld;
-	steel *= vec3(1.0, 0.985, 0.96) * mix(1.0, 0.9 + 0.2 * hull_noise3(local_pos * 0.12), panel_fade);
+	steel *= mix(1.0, STEEL_MOTTLE_BASE + 2.0 * STEEL_MOTTLE * hull_noise3(local_pos * 0.12), panel_fade);
 	float steel_rough = steel_roughness + panel_fade * (ring_hash - 0.5) * 0.08 + WELD_ROUGHER * weld;
 	float alpha_steel = steel_rough * steel_rough;  // GGX alpha (Godot: roughness^2) widened by the lost slope variance
 	steel_rough = sqrt(sqrt(alpha_steel * alpha_steel + slope_var));

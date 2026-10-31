@@ -74,7 +74,8 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   `booster` mode 0 with the steel map, `ship` mode 1 with the steel map (tiles on the windward side), `flap` mode 2 (tiles on the
   outer +Y face). The steel map is addressed by the hull's UV, the tiles by the LOCAL body position; nothing is view dependent:
   both eyes of a stereo frame sample the same maps with their own derivatives.
-- Steel: metallic 0.8, roughness 0.27 [E] (a diffuse share stands in for the sky's weak reflection), per-ring tint / roughness from a
+- Steel: a metal lit by the sun's lobe and the sky's radiance cube: F0 linear 0.56 / 0.57 / 0.58 [S: Filament guide, Iron], metallic 1.0, roughness
+  0.35 [E], large-scale mottle +-3 % [E], per-ring tint / roughness from a
   hash of the ring index (the only analytic steel detail left: it fades to its mean from 0.06 m, panel_fade), the steel map's weld
   bead + dents as a tangent-space normal (frame: circumferential tangent, cross(n, tangent), the mesh normal, so it also follows the
   ogive), its heat-affected band darkening the albedo (0.25) and roughening (0.22) [E], a per-ring shift of u so every ring panel has
@@ -148,6 +149,8 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   tiles need the cell id (lattice integers, still analytic) or a 128 x 256 R8 id-shade map (32 kB, nearest per cell, mips to the
   mean); a texture with the per-tile variation baked in would need ~2.4 x 4.2 m at 1.2 mm = 28 MiB, so no. The coverage boundary
   (smooth cut by the half-angle table) and the ogive's arc shear stay analytic.
+- Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). Open: flat flap / tile
+  patches read tan under a low Sun (`steel_new.png`), not investigated.
 - Shade sides: lit by the sky's radiance cubemap, which follows the Sun and the place since 2026-10-31 (`atmosphere-scattering.md`, "Radiance cubemap"). A white hull's
   shade side in a real flight session on the pad: `73 89 105` by day (was `0 0 1`), `0 0 0` on a moonless night (`sky_radiance_check.gd --flight`).
 - Coverage vs thermal (user decision): the shield is drawn 75 / 65 / 55 / 30 deg either side of the belly (stations 0 / 20 / 35 /
