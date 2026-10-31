@@ -125,9 +125,15 @@ shaders:
     value per view, no Bezold-Bruecke hue shift (lunar day keeps B = S = 1).
 
 - **Ambient and the gain.** The sky's radiance cubemap holds scene values, so it is redrawn at a 2 % change of
-  `luminance_scale`; during a fast light adaptation (tau 0.5 s) the ambient lags the gain by the ~8 frames of the redraw.
+  `luminance_scale`; during a fast light adaptation (tau 0.5 s) the ambient lags the gain by the 8 to 16 frames of the redraw
+  (no scaling instead: `atmosphere-scattering.md`, "Why the gain needs a redraw").
   Pad by day: gain 1.1, shade side of a white hull `73 89 105` beside a lit side of 132-221. Dark adapted, gain 12 602,
   moonless pad `0 0 0`: no ambient is invented.
+
+- **Open: a step at sunset.** The twilight glow term is gated on the Sun below the eye's horizon and has a hard exclusion
+  around the Sun (`TWILIGHT_GLOW_MIN_SUN_DEG`): at Sun 0 deg the target jumps (499 -> 920 cd/m^2, gain 85 -> 47). In real
+  time the adaptation smooths it within ~1 s; at warp 120 it is a visible step. Opening the gate to +10 deg only moved the
+  jump (the exclusion's edge), so the fix is a soft exclusion, not done. `sky_radiance_check --timelapse` counts the step.
 
 ## Standing decisions
 

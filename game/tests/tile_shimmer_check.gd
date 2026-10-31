@@ -34,6 +34,9 @@ const FRAMES_SETTLE := 6
 const FRAMES_CAPTURE := 3
 const REFERENCE_SCALE := 2.0
 const RATIO_LIMIT := 1.10
+# [E] Steel: a metal has no diffuse term, its mean follows what the sky's reflection and the dents show at each distance (the
+# sky's gradient across the barrel). Measured 1.134 (2026-10-31); beyond this limit a mip level or the map changes brightness.
+const STEEL_RATIO_LIMIT := 1.18
 const TEMPORAL_FACTOR := 1.5
 const TEMPORAL_FLOOR := 0.004
 const ERROR_LIMIT := 0.15  ## [E] measured band of the filtered shader 0.00-0.13 (the old one 0.375); see vehicle-models.md
@@ -184,10 +187,10 @@ func _report() -> void:
 		lo = minf(lo, r["luminance"])
 		hi = maxf(hi, r["luminance"])
 	var ratio := hi / maxf(lo, 1e-9)
-	var ratio_gated := _surface == "tiles"  # steel: the sky's reflection and the dents legitimately vary with the view
-	var ratio_ok := ratio <= RATIO_LIMIT or not ratio_gated
+	var ratio_limit := RATIO_LIMIT if _surface == "tiles" else STEEL_RATIO_LIMIT
+	var ratio_ok := ratio <= ratio_limit
 	failed = failed or not ratio_ok
-	print("tile_shimmer_check: %s luminance ratio max/min %.3f (limit %.2f%s) -> %s" % [_surface, ratio, RATIO_LIMIT,
-			"" if ratio_gated else ", not gated for steel", "PASS" if ratio_ok else "FAIL"])
+	print("tile_shimmer_check: %s luminance ratio max/min %.3f (limit %.2f) -> %s" % [_surface, ratio, ratio_limit,
+			"PASS" if ratio_ok else "FAIL"])
 	print("tile_shimmer_check: %s %s" % [_surface, "FAIL" if failed else "PASS"])
 	quit(1 if failed else 0)

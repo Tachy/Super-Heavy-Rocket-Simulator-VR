@@ -149,8 +149,9 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   tiles need the cell id (lattice integers, still analytic) or a 128 x 256 R8 id-shade map (32 kB, nearest per cell, mips to the
   mean); a texture with the per-tile variation baked in would need ~2.4 x 4.2 m at 1.2 mm = 28 MiB, so no. The coverage boundary
   (smooth cut by the half-angle table) and the ogive's arc shear stay analytic.
-- Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). Open: flat flap / tile
-  patches read tan under a low Sun (`steel_new.png`), not investigated.
+- Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that
+  read tan under a low Sun are the black tile (albedo 0.03) in direct, reddened Sun (~14 deg): diffuse, specular only
+  ~10 %, AgX lifts it (probe in `sky-fix-report.md` Fix 2). Not a bug. Steel luminance ratio gated at 1.18.
 - Shade sides: lit by the sky's radiance cubemap, which follows the Sun and the place since 2026-10-31 (`atmosphere-scattering.md`, "Radiance cubemap"). A white hull's
   shade side in a real flight session on the pad: `73 89 105` by day (was `0 0 1`), `0 0 0` on a moonless night (`sky_radiance_check.gd --flight`).
 - Coverage vs thermal (user decision): the shield is drawn 75 / 65 / 55 / 30 deg either side of the belly (stations 0 / 20 / 35 /

@@ -134,7 +134,7 @@ measurements (light cache, outline pass, sub-samples, near / far hand-over, prof
 ## Radiance cubemap and anisotropy (2026-10-31)
 
 RTX 4090, `render_check --render_scale=2 --gpu_time=600`, means (medians) of 2-3 runs, ms. The sky's cube marked dirty
-every frame (`--radiance_every_frame`, its largest duty cycle; the game's rule: every 1.5-24 s): pad 1.86 (1.70) -> 1.86
+every frame (`--radiance_every_frame`, its largest duty cycle; the game's rule: every 0.5-8 s): pad 1.86 (1.70) -> 1.86
 (1.73); Dallas in the 2024 eclipse (8 sky segments) 3.02 (2.82) -> 3.08 (2.85). So at most +0.03-0.06 ms; no spike in the
 per-frame series (`--gpu_series`), REALTIME not needed. The p99 of 5-7 ms is in the static runs as well, not the cube.
 Project-wide anisotropy 8x (level 3) against the former default 4x (level 2): Earth terrain 2.96 (2.74) vs 2.94 (2.73),

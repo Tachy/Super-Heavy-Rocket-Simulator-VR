@@ -27,10 +27,25 @@ uniform vec3 radiance_moon_zenith = vec3(0.0, 1.0, 0.0);  // from the Moon's cen
 uniform vec3 radiance_moon_to_sun = vec3(1.0, 0.0, 0.0);
 uniform vec3 radiance_moon_to_earth = vec3(1.0, 0.0, 0.0);
 uniform float radiance_moon_albedo = 0.3;
-// [E] Below this angular radius the Earth's disc (with its air) is drawn this large in the cube at the same flux: it is
-// about one texel of the octahedral 128 px cube from the Moon (radius 0.95 deg, texel ~1.6 deg), so point sampling would
-// give the earthshine 0 to 3 texels, jumping as the Earth moves. Five texels across sample it steadily.
-const float RADIANCE_EARTH_MIN_RADIUS_RAD = 0.07;
+// The parts of the Sun's and the Earth's discs the eye sees, for the ground around it (RadianceFarEarth.ground_fraction):
+// the terrain's shadows at the eye stand for the ground in view.
+uniform float radiance_moon_sun_visible = 1.0;
+uniform float radiance_moon_earth_visible = 1.0;
+// Below this angular radius the Earth's disc (with its air) is drawn this large in the cube at the same flux
+// (RadianceFarEarth.MIN_RADIUS_RAD, the rationale there), x radiance_earth_flux (the part of the true disc the eye sees).
+// Near the Moon (radiance_earth_flat) it is a uniform disc of the earthshine the regolith and the eye adaptation get
+// (moon_earthshine, Atmosphere.earthshine_relative), not the cloudless model Earth (0.37 x that, measured): one earthshine.
+// A disc that would cross the cube's lunar horizon is drawn lifted clear of it around radiance_earth_drawn: only the true
+// fraction decides, not where the wide disc is cut.
+uniform float radiance_earth_min_radius_rad = 0.07;
+uniform float radiance_earth_flux = 1.0;
+uniform bool radiance_earth_flat = false;
+uniform bool radiance_earth_lifted = false;
+uniform vec3 radiance_earth_true = vec3(0.0, 1.0, 0.0);  // from the eye, render world axes
+uniform vec3 radiance_earth_drawn = vec3(0.0, 1.0, 0.0);
+// The diffuse light under the clouds over the clear sky's (Atmosphere.cloud_ambient_factor): 1 with weather off. In the cube
+// because Godot's ambient_light_energy does not reach a sky's cube.
+uniform float radiance_cloud_factor = 1.0;
 
 // The model ground seen along v from the camera, lit and attenuated (scene units).
 vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
@@ -86,8 +101,9 @@ bool radiance_moon_ground(vec3 v, out vec3 color) {
 	}
 	float t = c / (-d * mu + sqrt(disc));
 	vec3 n = normalize(radiance_moon_zenith * d + v * t);
-	float light = moon_regolith_scale * (regolith_reflectance(n, radiance_moon_to_sun, -v) * moon_sun_scene
-			+ regolith_reflectance(n, radiance_moon_to_earth, -v) * moon_earthshine);
+	float light = moon_regolith_scale * (regolith_reflectance(n, radiance_moon_to_sun, -v) * radiance_moon_sun_visible
+			* moon_sun_scene + regolith_reflectance(n, radiance_moon_to_earth, -v) * radiance_moon_earth_visible
+			* moon_earthshine);
 	color = vec3(radiance_moon_albedo * light * atmosphere_exposure_gain);
 	return true;
 }
@@ -98,28 +114,40 @@ void sky() {
 		COLOR = vec3(0.0);
 	} else if (AT_CUBEMAP_PASS && radiance_moon_ground(EYEDIR, lunar_ground)) {
 		COLOR = lunar_ground;
+	} else if (AT_CUBEMAP_PASS && radiance_earth_lifted && dot(EYEDIR, radiance_earth_drawn) < cos(radiance_earth_min_radius_rad)
+			&& dot(EYEDIR, radiance_earth_true) > cos(radiance_earth_min_radius_rad)) {
+		COLOR = vec3(0.0);  // the wide disc's place, left for the lifted one
+	} else if (AT_CUBEMAP_PASS && radiance_earth_flat) {
+		// A white plate facing the disc reads L x solid angle / pi = moon_earthshine x the gain, grey as the regolith's light.
+		float solid_angle = 2.0 * ATM_PI * (1.0 - cos(radiance_earth_min_radius_rad));
+		bool on_disc = dot(EYEDIR, radiance_earth_drawn) >= cos(radiance_earth_min_radius_rad);
+		COLOR = on_disc ? vec3(radiance_earth_flux * moon_earthshine * atmosphere_exposure_gain * ATM_PI / solid_angle) : vec3(0.0);
 	} else {
 		vec3 camera_local = atm_camera_local();
-		vec3 view_local = normalize(atmosphere_world_to_earth * EYEDIR);
+		vec3 ray = EYEDIR;
+		if (AT_CUBEMAP_PASS && radiance_earth_lifted && dot(ray, radiance_earth_drawn) >= cos(radiance_earth_min_radius_rad)) {
+			ray = normalize(ray - radiance_earth_drawn + radiance_earth_true);  // the lifted disc shows the Earth (small angles)
+		}
+		vec3 view_local = normalize(atmosphere_world_to_earth * ray);
 		// A ray into the model ground shows the ground (both passes), every other ray the sky.
 		vec3 v = normalize(view_local * ATM_STRETCH);
 		vec3 up;
 		float r;
 		float rho;
 		atm_camera_model(camera_local, up, r, rho);
-		// The cube's far Earth: a small disc widened to a steady size, the flux kept (RADIANCE_EARTH_MIN_RADIUS_RAD).
+		// The cube's far Earth: a small disc widened to a steady size, the flux kept.
 		float flux_factor = 1.0;
 		if (AT_CUBEMAP_PASS && r > atmosphere_top_radius_m) {
 			float radius_rad = asin(atmosphere_top_radius_m / r);
 			float angle = acos(clamp(-dot(up, v), -1.0, 1.0));
-			if (radius_rad < RADIANCE_EARTH_MIN_RADIUS_RAD && angle < RADIANCE_EARTH_MIN_RADIUS_RAD) {
-				float shrink = radius_rad / RADIANCE_EARTH_MIN_RADIUS_RAD;
+			if (radius_rad < radiance_earth_min_radius_rad && angle < radiance_earth_min_radius_rad) {
+				float shrink = radius_rad / radiance_earth_min_radius_rad;
 				vec3 side = v - up * dot(up, v);
 				float side_length = length(side);
 				side = side_length > 1.0e-6 ? side / side_length : vec3(0.0);
 				v = normalize(-up * cos(angle * shrink) + side * sin(angle * shrink));
 				view_local = normalize(v / ATM_STRETCH);
-				flux_factor = shrink * shrink;
+				flux_factor = shrink * shrink * radiance_earth_flux;
 			}
 		}
 		bool hits_ground;
@@ -140,5 +168,8 @@ void sky() {
 			}
 		}
 		COLOR *= flux_factor;
+		if (AT_CUBEMAP_PASS) {
+			COLOR *= radiance_cloud_factor;
+		}
 	}
 }

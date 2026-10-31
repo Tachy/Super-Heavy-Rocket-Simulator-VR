@@ -286,8 +286,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     diffuse) in the dictionary; (1, 1, 0) without weather. `Atmosphere.cloud_light_at` and the Vector3s of the
     GPU-side checks use the order (direct, Sun's diffuse, sky): (1, 0, 1) without weather): the vehicles'
     DirectionalLight x T_s (`Atmosphere.sun_light_at`, the Moon's light likewise),
-    `Environment.ambient_light_energy` = (T_d E_sky + T_sd E_sun,h) / E_sky at the followed body (above 1 under a
-    bright thin deck; reflections keep the clear sky), the eye adaptation's down plate (E_n T_s + E_n mu0 T_sd + E_sky
+    the sky's radiance cube x (T_d E_sky + T_sd E_sun,h) / E_sky at the followed body (above 1 under a
+    bright thin deck; reflections with it; `atmosphere-scattering.md`), the eye adaptation's down plate (E_n T_s + E_n mu0 T_sd + E_sky
     T_d) / pi, also for the Moon. All grid mean along the ray / column (independent columns).
   - The CPU light follows the cross-fade (final review I1): `CloudLayer` pushes (slot 0 file, slot 1 file, w1) to
     `weather_set_active` after every `_advance` when a slot changes or w1 moves by 0.01 (an empty slot is "", the empty

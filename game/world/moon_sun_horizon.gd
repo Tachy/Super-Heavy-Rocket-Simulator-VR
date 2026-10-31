@@ -20,16 +20,22 @@ const MIN_HEIGHT_ABOVE_GROUND_M := 0.5
 ## centre, m) with the Sun at sun_fixed_m (Moon-fixed, from the Moon's centre, m); NAN where the core has no lunar
 ## terrain (the caller keeps the mean / ground sphere's occultation).
 static func sun_visible_fraction(core: StarsimCore, point_fixed_m: Vector3, sun_fixed_m: Vector3) -> float:
+	return disc_visible_fraction(core, point_fixed_m, sun_fixed_m, Atmosphere.SUN_RADIUS_M)
+
+
+## The same for any distant disc of the given radius (the Sun, the Earth in the sky's radiance cube).
+static func disc_visible_fraction(core: StarsimCore, point_fixed_m: Vector3, source_fixed_m: Vector3,
+		source_radius_m: float) -> float:
 	var max_height_m: float = core.terrain_max_height_m("moon")
 	if not is_finite(max_height_m):
 		return NAN
 	var radius_m := point_fixed_m.length()
 	var up := point_fixed_m / radius_m
-	var to_sun_m := sun_fixed_m - point_fixed_m
+	var to_sun_m := source_fixed_m - point_fixed_m
 	var distance_m := to_sun_m.length()
 	var direction := to_sun_m / distance_m
 	var elevation_rad := asin(clampf(direction.dot(up), -1.0, 1.0))
-	var sun_radius_rad := asin(minf(Atmosphere.SUN_RADIUS_M / distance_m, 1.0))
+	var sun_radius_rad := asin(minf(source_radius_m / distance_m, 1.0))
 	var height_m := radius_m - Atmosphere.MOON_RADIUS_M
 	# Exact: above the bound no relief stands in front of the Sun's disc (nor does the mean sphere, which lies below it).
 	if elevation_rad - sun_radius_rad > relief_horizon_bound_rad(height_m, max_height_m):
