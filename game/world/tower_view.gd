@@ -12,7 +12,7 @@ var site_id := ""
 var preview_opening_rad := NAN
 var _geometry: Dictionary = {}
 var _arms: Array[Node3D] = []  ## pivots at the hinges: [+across, -across]
-var _steel := LitAerial.material(Color(0.55, 0.56, 0.58), 0.45, 0.6)
+var _steel := LitAerial.material(Color(0.42, 0.43, 0.45), 0.5, 0.5)  # [E] albedo ~0.15 as TowerMaterial
 var _concrete := LitAerial.material(Color(0.62, 0.61, 0.58), 0.9, 0.0)
 var _lattice := ShaderMaterial.new()
 

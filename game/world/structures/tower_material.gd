@@ -6,10 +6,11 @@ extends RefCounted
 
 const SHADER := preload("res://shaders/tower_steel.gdshader")
 const TEXTURE_FILE := "materials/metal032/Metal032_1K-JPG_Color.jpg"
-## [E] light galvanised steel of the tower (padb_tower_full_with_chopsticks_2025-08): the texture's mean is ~(0.49, 0.53,
-## 0.58) sRGB, this lifts it to the photo's bright steel.
-const STEEL_TINT := Color(1.25, 1.2, 1.15)
-const PLAIN_STEEL := Color(0.62, 0.64, 0.67)
+## [E] Tower steel, albedo about 0.15 (+-0.08): darkened (user 2026-10-31). Frames do not make it black: bare legs read
+## bright in direct sun (f8 file 2580 s, f12 file 1804 s) and near black in shade (stack photo 2026-05: sRGB 17 18 23);
+## the mean of legs and dark braces is taken. The texture's mean is ~(0.49, 0.53, 0.58) sRGB.
+const STEEL_TINT := Color(0.65, 0.64, 0.63)
+const PLAIN_STEEL := Color(0.42, 0.43, 0.45)
 const DARK := Color(0.035, 0.038, 0.042)
 ## [E] chopstick arms and carriage are painted matte black (padb_chopsticks_around_booster_top_2026-03).
 const BLACK_PAINT := Color(0.035, 0.035, 0.04)
