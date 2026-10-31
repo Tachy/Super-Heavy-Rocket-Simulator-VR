@@ -4,16 +4,33 @@ shader_type sky;
 // ground show the model ground (the WGS84 ellipsoid lowered to the model's ground radius, below every camera and
 // every drawn surface): the day texture lit by the transmitted Sun and the sky light, seen through the atmosphere. In
 // the radiance-cubemap pass this ground gives Godot's ambient and reflections the ground bounce and the earthshine;
-// in the background pass the terrain and the Earth mesh normally cover it.
+// in the background pass the terrain and the Earth mesh normally cover it. The cube is drawn anew only after a write to
+// this material (World._update_sky_radiance, SkyRadianceRefresh).
 // At night (atmosphere_moon_light > 0) the Moon lights the sky and the model ground as a second, weak source.
 // Until the tables are uploaded (atmosphere_enabled false) the sky is black, as before the atmosphere existed.
 
 #include "res://shaders/atmosphere.gdshaderinc"
+#include "res://shaders/moon_regolith.gdshaderinc"
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap, repeat_enable;
 uniform bool day_texture_bound = false;
 // Albedo without the day texture: the precomputation's ground albedo, atmosphere_ground_albedo (the tables' parameters,
 // config/atmosphere/earth_optics.toml).
+
+// Written to mark the material updated: only that makes Godot redraw the cube. No value is read.
+uniform float radiance_serial = 0.0;
+// The lunar ground in the cube, for an eye near the Moon (radius 0: none): a sphere of the mean texture albedo under the
+// Sun and the earthshine, in front of the Earth. Set with each refresh (render world axes).
+uniform float radiance_moon_radius_m = 0.0;
+uniform float radiance_moon_distance_m = 0.0;
+uniform vec3 radiance_moon_zenith = vec3(0.0, 1.0, 0.0);  // from the Moon's centre to the eye
+uniform vec3 radiance_moon_to_sun = vec3(1.0, 0.0, 0.0);
+uniform vec3 radiance_moon_to_earth = vec3(1.0, 0.0, 0.0);
+uniform float radiance_moon_albedo = 0.3;
+// [E] Below this angular radius the Earth's disc (with its air) is drawn this large in the cube at the same flux: it is
+// about one texel of the octahedral 128 px cube from the Moon (radius 0.95 deg, texel ~1.6 deg), so point sampling would
+// give the earthshine 0 to 3 texels, jumping as the Earth moves. Five texels across sample it steadily.
+const float RADIANCE_EARTH_MIN_RADIUS_RAD = 0.07;
 
 // The model ground seen along v from the camera, lit and attenuated (scene units).
 vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
@@ -53,9 +70,34 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 	return albedo * (sun_light + sky_light + moon_light) * transmittance + in_scatter;
 }
 
+// The lunar ground along the unit world ray v; false: the ray misses it.
+bool radiance_moon_ground(vec3 v, out vec3 color) {
+	color = vec3(0.0);
+	if (radiance_moon_radius_m <= 0.0) {
+		return false;
+	}
+	float mu = dot(radiance_moon_zenith, v);
+	float d = radiance_moon_distance_m;
+	float R = radiance_moon_radius_m;
+	float c = (d - R) * (d + R);  // d^2 - R^2 without the cancellation near the ground
+	float disc = d * d * mu * mu - c;
+	if (mu >= 0.0 || disc < 0.0) {
+		return false;
+	}
+	float t = c / (-d * mu + sqrt(disc));
+	vec3 n = normalize(radiance_moon_zenith * d + v * t);
+	float light = moon_regolith_scale * (regolith_reflectance(n, radiance_moon_to_sun, -v) * moon_sun_scene
+			+ regolith_reflectance(n, radiance_moon_to_earth, -v) * moon_earthshine);
+	color = vec3(radiance_moon_albedo * light * atmosphere_exposure_gain);
+	return true;
+}
+
 void sky() {
+	vec3 lunar_ground;
 	if (!atmosphere_enabled) {
 		COLOR = vec3(0.0);
+	} else if (AT_CUBEMAP_PASS && radiance_moon_ground(EYEDIR, lunar_ground)) {
+		COLOR = lunar_ground;
 	} else {
 		vec3 camera_local = atm_camera_local();
 		vec3 view_local = normalize(atmosphere_world_to_earth * EYEDIR);
@@ -65,6 +107,21 @@ void sky() {
 		float r;
 		float rho;
 		atm_camera_model(camera_local, up, r, rho);
+		// The cube's far Earth: a small disc widened to a steady size, the flux kept (RADIANCE_EARTH_MIN_RADIUS_RAD).
+		float flux_factor = 1.0;
+		if (AT_CUBEMAP_PASS && r > atmosphere_top_radius_m) {
+			float radius_rad = asin(atmosphere_top_radius_m / r);
+			float angle = acos(clamp(-dot(up, v), -1.0, 1.0));
+			if (radius_rad < RADIANCE_EARTH_MIN_RADIUS_RAD && angle < RADIANCE_EARTH_MIN_RADIUS_RAD) {
+				float shrink = radius_rad / RADIANCE_EARTH_MIN_RADIUS_RAD;
+				vec3 side = v - up * dot(up, v);
+				float side_length = length(side);
+				side = side_length > 1.0e-6 ? side / side_length : vec3(0.0);
+				v = normalize(-up * cos(angle * shrink) + side * sin(angle * shrink));
+				view_local = normalize(v / ATM_STRETCH);
+				flux_factor = shrink * shrink;
+			}
+		}
 		bool hits_ground;
 		if (r > atmosphere_top_radius_m) {
 			vec3 camera_model = up * r;
@@ -82,5 +139,6 @@ void sky() {
 				COLOR += atm_moon_sky(camera_local, view_local);  // the moonlit sky (night only)
 			}
 		}
+		COLOR *= flux_factor;
 	}
 }

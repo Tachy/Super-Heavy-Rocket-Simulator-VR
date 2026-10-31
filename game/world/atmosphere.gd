@@ -390,7 +390,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 ##   fraction also takes the Earth's disc in front of the Sun (an eye in the Earth's shadow far out: the transmittance
 ##   alone is the Sun's centre ray, a sharp edge) [call: where both act, within the Sun's radius of the limb, the
 ##   penumbra is counted twice - a little too dark there]. For an eye within MOON_EYE_MIN_HEIGHT_M of the lunar mean
-##   sphere or below it, the Moon's part is recomputed on its ground sphere (_moon_ground_radius: an eye below the mean
+##   sphere or below it, the Moon's part is recomputed on its ground sphere (moon_ground_radius: an eye below the mean
 ##   sphere stands on the terrain; the passed fraction uses the mean sphere, which would hide the Sun from it) unless
 ##   eye_terrain_sun_fraction is finite (the lunar terrain's horizon, world.gd), which replaces the Moon's part.
 ## - up: the Earth in view x the part of its disc the Moon leaves (a lunar eye with the Earth below its horizon);
@@ -408,14 +408,12 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	var outside := _stretch(eye_itrf_m).length() > float(parameters["top_radius_m"])
 	# The Moon's parts above the atmosphere (its occultations, the Moon in view): physical anywhere, negligible far out.
 	var lunar := outside and moon_itrf_m != Vector3.ZERO
-	# Near the Moon: its disc larger than the Earth's (review I1: an eye in LEO is not near it and keeps the limb glow).
-	var near_moon := lunar and MOON_RADIUS_M * eye_itrf_m.length() > EARTH_MEAN_RADIUS_M * (moon_itrf_m
-			- eye_itrf_m).length()
+	var near_moon_eye := lunar and near_moon(eye_itrf_m.length(), (moon_itrf_m - eye_itrf_m).length())
 	var sun_itrf_m := sun_direction_itrf * (d_au * ASTRONOMICAL_UNIT_M)
 	var visible := visible_fraction
 	var moon_ground_m := 0.0
 	if lunar:
-		moon_ground_m = _moon_ground_radius((moon_itrf_m - eye_itrf_m).length())
+		moon_ground_m = moon_ground_radius((moon_itrf_m - eye_itrf_m).length())
 		visible = sun_visible_near_moon(eye_itrf_m, sun_itrf_m, moon_itrf_m, visible_fraction, eye_terrain_sun_fraction)
 	# (the terrain's fraction comes with the Earth's occultation already)
 	if outside and not (lunar and is_finite(eye_terrain_sun_fraction)):
@@ -466,7 +464,7 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	if not outside and (sun_direction_itrf.dot(up) < 0.0 or eclipsed):
 		glow_rgb = _twilight_glow_luminance(eye_itrf_m, up, sun_direction_itrf, eclipsed) * (GLOW_ADAPTATION_SHARE
 				/ (d_au * d_au))
-	elif outside and transmittance == Vector3.ZERO and not near_moon:
+	elif outside and transmittance == Vector3.ZERO and not near_moon_eye:
 		glow_rgb = _limb_glow_luminance(eye_itrf_m, sun_direction_itrf) * (GLOW_ADAPTATION_SHARE / (d_au * d_au))
 	last_adaptation_down_cd_m2 = down_rgb.dot(LUMINANCE_WEIGHTS)
 	last_adaptation_up_cd_m2 = earth_rgb.dot(LUMINANCE_WEIGHTS)
@@ -641,9 +639,14 @@ func _set_vision(scale: float, chroma_factor := 1.0) -> void:
 	vision_effect.set_rods(scale, chroma_factor)
 
 
+## Near the Moon: its disc larger than the Earth's (review I1: an eye in LEO is not near it and keeps the limb glow).
+static func near_moon(eye_from_earth_m: float, eye_from_moon_m: float) -> bool:
+	return MOON_RADIUS_M * eye_from_earth_m > EARTH_MEAN_RADIUS_M * eye_from_moon_m
+
+
 ## [call] The lunar ground sphere of the eye adaptation (m about the Moon's centre) for an eye this far from it: the
 ## mean sphere, or MOON_EYE_MIN_HEIGHT_M below the eye when the eye stands below it (terrain under the mean radius).
-static func _moon_ground_radius(eye_distance_m: float) -> float:
+static func moon_ground_radius(eye_distance_m: float) -> float:
 	return minf(MOON_RADIUS_M, eye_distance_m - MOON_EYE_MIN_HEIGHT_M)
 
 
@@ -667,10 +670,10 @@ static func sun_visible_near_moon(point_m: Vector3, sun_m: Vector3, moon_m: Vect
 ## The Sun's visible fraction past the Moon at a point (vectors in any one frame and origin, m) for the eye adaptation
 ## and the vehicles' Sun light (world.gd): mean_sphere_visible is the core's (StarsimCore.solar_eclipse_fraction_gcrf,
 ## the Moon's mean sphere); a point within MOON_EYE_MIN_HEIGHT_M of that sphere or below it - on lunar terrain under the
-## mean radius, where the mean sphere would hide the Sun - gets it on its own ground sphere (_moon_ground_radius).
+## mean radius, where the mean sphere would hide the Sun - gets it on its own ground sphere (moon_ground_radius).
 ## Near the Moon the callers use sun_visible_near_moon (the terrain's horizon replaces this).
 static func moon_visible_fraction(point_m: Vector3, sun_m: Vector3, moon_m: Vector3, mean_sphere_visible: float) -> float:
-	var ground_m := _moon_ground_radius((moon_m - point_m).length())
+	var ground_m := moon_ground_radius((moon_m - point_m).length())
 	if ground_m >= MOON_RADIUS_M:
 		return mean_sphere_visible
 	return 1.0 - occulted_fraction(sun_m - point_m, SUN_RADIUS_M, moon_m - point_m, ground_m)

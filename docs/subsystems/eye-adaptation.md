@@ -124,6 +124,11 @@ shaders:
     integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
     value per view, no Bezold-Bruecke hue shift (lunar day keeps B = S = 1).
 
+- **Ambient and the gain.** The sky's radiance cubemap holds scene values, so it is redrawn at a 2 % change of
+  `luminance_scale`; during a fast light adaptation (tau 0.5 s) the ambient lags the gain by the ~8 frames of the redraw.
+  Pad by day: gain 1.1, shade side of a white hull `73 89 105` beside a lit side of 132-221. Dark adapted, gain 12 602,
+  moonless pad `0 0 0`: no ambient is invented.
+
 ## Standing decisions
 
 - Eye model: Ferwerda 1996 cone/rod t.v.i. with Jensen 2000 rod saturation, CIECAM02 brightness / chroma terms,

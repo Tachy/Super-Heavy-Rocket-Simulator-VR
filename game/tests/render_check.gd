@@ -37,6 +37,7 @@
 #          optical depth (liquid = tau / 150 000 kg/m^3: beta = 150 LWC) and the view aimed at the Sun (static clouds Task 9).
 # GPU time: --gpu_time[=120] once settled, the root viewport's measured GPU render time over that many frames (median,
 #          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy);
+#          --radiance_every_frame: the sky's radiance cubemap marked dirty each frame (its largest duty cycle);
 #          --gpu_passes: also per GPU timestamp interval (the cloud pass's kernels, the bake, shadow maps), the baked
 #          volume settled first.
 # Shadow map dump: --shadow_dump=<file> writes the cloud shadow maps (near, far; raw RGBA32F) once settled and prints
@@ -346,6 +347,8 @@ func _gpu_frames(world: World) -> bool:
 		if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
 			return false
 		_record_gpu_passes()
+	if _args.has("radiance_every_frame"):
+		world._sky_material.set_shader_parameter("radiance_serial", float(_frames))
 	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
 	_gpu_wall_us.append(Time.get_ticks_usec())
 	if _gpu_ms.size() < wanted:

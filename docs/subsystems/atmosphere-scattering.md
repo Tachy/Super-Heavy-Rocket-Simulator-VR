@@ -57,7 +57,7 @@ vehicles still fly through `Us76Atmosphere`).
   approach (the limb is right from the Moon).
 - **Where it is used.** Sky: `sky.gdshader` (Environment BG_SKY, every pixel from the camera's true position; the
   radiance cubemap also draws the model ground, so Godot's ambient and reflections carry sky light, ground bounce and
-  earthshine; PROCESS_MODE_INCREMENTAL, radiance 128). Earth: `earth.gdshader` (scaled space; with the far-field
+  earthshine; PROCESS_MODE_INCREMENTAL, radiance 128; see "Radiance cubemap"). Earth: `earth.gdshader` (scaled space; with the far-field
   clouds `earth_clouds.gdshader`), `terrain_earth.gdshader`, `water.gdshaderinc` (the sea's reflected sky is the
   model's sky along the reflected ray; a ray reflected below the horizontal takes its upward mirror [E]): Sun
   transmitted to the point x cos + the sky irradiance on the normal, then transmittance + in-scattering to the camera;
@@ -142,3 +142,29 @@ vehicles still fly through `Us76Atmosphere`).
   view, e.g. the booster far below the ship or the tower seen from orbit, get the followed point's light); the totality
   approximation; night vision's limits (above); the 256 x 128 Earth mesh in scaled space sits up to ~0.6 km below the
   ellipsoid (-2 % in its aerial perspective).
+
+## Radiance cubemap (ambient and reflections of every lit object)
+
+- **Refresh.** The sky reads global uniforms only and Godot redraws a sky's cube only after a write to its material, so
+  `World._update_sky_radiance` writes `radiance_serial` when `SkyRadianceRefresh.due` says the sky changed. Thresholds
+  [E, rationale in the file]: tables loaded; Sun (Earth-local) or the eye's zenith (cube axes) 0.1 deg; eye height
+  max(200 m, 2 %); `luminance_scale` 2 % (the cube holds scene values, i.e. times the eye's gain); Moon light 2 %; visible
+  solar disc 1 %. Cadence: ~24 s at rest on the Earth, ~1.5 s in low orbit, a clock or site jump at once. The cube
+  takes about 8 frames after the write (one base render, then one roughness layer per frame; the ambient reads the last).
+- **Content.** Sky and model ground of the same model, so the shade side sees the real sky and the lit ground below
+  the horizon. A cube of the eye's place: a hull far from the eye is lit as at the eye.
+- **Only in the cube pass (`AT_CUBEMAP_PASS`).** Near the Moon (`Atmosphere.near_moon`) a lunar ground sphere (mean texture
+  albedo 0.30, regolith reflectance under Sun and earthshine, `moon_ground_radius`) stands in front of the Earth: the
+  ground bounce on the Moon, and no Earth through the Moon. A far Earth smaller than 0.07 rad radius is drawn at that
+  radius at the same flux [E]: from the Moon it is ~1 texel and point sampling made the earthshine jump. Limit: with the
+  Earth within 4 deg of the horizon the widened disc shows a part of it that is really below. Terrain does not enter
+  the ground sphere, shadows of terrain and vehicles do not enter the cube.
+- **Moon light.** `World.moon_light` is off near the Moon (it lit objects from the Moon's centre through the ground).
+- **Validation** (`game/tests/sky_radiance_check.gd`, GPU; `sky_radiance_rule_test.gd`, headless). White sphere, direct
+  lights excluded, tables first, then a chain of jumps: pad by day, plate facing up / `sky_lux` / pi = 0.906 (tolerance
+  30 %: Godot's ambient is the roughest GGX mip, no cosine convolution); moonless night `0 0 0` on all sides; full Moon up
+  `12 18 29`; orbit up / side / down `3 / 47 / 84`; Moon by day down `98`, up `8` (the lobe's leak); lunar night under
+  the Earth up `45`, down `12`; Earth below the horizon `0 0 0`; back at the pad the same values as before. Sunset at warp
+  120: largest frame step 1.3 code values (limit 6). `--flight`: white hull, values in `vehicle-models.md`.
+- `render_check` never showed the stale cube: it blocks until everything is set, so its first cube is already right
+  (before / after pairs of its views are pixel-identical). Only a session whose view follows the tables showed it.

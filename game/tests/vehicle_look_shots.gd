@@ -12,7 +12,6 @@
 #   --stereo=<json>  renders through the multiview path with the stand-in headset (StereoMockXr, as render_check.gd
 #     --stereo) and saves <label>_eye0.png / <label>_eye1.png per shot (the fov field is then the headset's)
 #   --utc=2024-04-08T18:42:00  --out_dir=<dir>
-# The orbit camera is used (not the free one): in the free camera the hull's shade side stays black (no ambient).
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 10

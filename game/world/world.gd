@@ -79,6 +79,8 @@ var _earth_shader: Shader = load("res://shaders/earth.gdshader")
 var _earth_clouds_shader: Shader = load("res://shaders/earth_clouds.gdshader")  ## with the far-field clouds (Task 10)
 var _moon_material := ShaderMaterial.new()
 var _sky_material := ShaderMaterial.new()
+var _radiance_refresh := SkyRadianceRefresh.new()
+var _radiance_serial := 0
 
 
 ## Emitted when `_ready` has run through (or stopped at the missing SPICE kernels). `_ready` only suspends (between its
@@ -247,8 +249,10 @@ func update_world() -> void:
 	_last_world_tdb_s = t
 	_camera_terrain_sun_fraction = _moon_terrain_sun_fraction(cam)
 	atmosphere.eye_terrain_sun_fraction = _camera_terrain_sun_fraction
+	var camera_sun_fraction := 1.0 - core.solar_eclipse_fraction_gcrf(cam, t)
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
-			1.0 - core.solar_eclipse_fraction_gcrf(cam, t), moon_apparent_from_earth_m, t, moon_gcrf_m)
+			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
+	_update_sky_radiance(cam, camera_sun_fraction)
 	FrameProfiler.end(&"atmosphere")
 
 	FrameProfiler.begin(&"camera")
@@ -599,12 +603,39 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 		_environment.ambient_light_energy = atmosphere.cloud_ambient_factor(gcrf_to_fixed * lit_gcrf,
 				(gcrf_to_fixed * sun_apparent_from_earth_m).normalized())
 	var moon_lit: Array = atmosphere.moon_light_at(gcrf_to_fixed * lit_gcrf)
-	moon_light.visible = moon_lit[1] > 0.0
+	# Near the Moon its light is the ground in the sky's cube: no second light from the Moon's centre through the ground.
+	moon_light.visible = moon_lit[1] > 0.0 and not Atmosphere.near_moon(lit_gcrf.length(), (moon_gcrf_m - lit_gcrf).length())
 	if moon_light.visible:
 		var to_moon := Frames.to_render((moon_gcrf_m - lit_gcrf).normalized())
 		moon_light.basis = Basis.looking_at(-to_moon, Vector3.UP if absf(to_moon.y) < 0.99 else Vector3.RIGHT)
 		moon_light.light_color = moon_lit[0]
 		moon_light.light_energy = moon_lit[1]
+
+
+## Draws the radiance cubemap anew when the sky has really changed (SkyRadianceRefresh): the write to the sky material is
+## what makes Godot do it, over a few frames (INCREMENTAL). Near the Moon the cube also shows the lunar ground, whose place
+## and lights are set with that write, for the cube alone (sky.gdshader).
+func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
+	var eye_from_moon := camera_gcrf_m - moon_gcrf_m
+	var moon_distance_m := eye_from_moon.length()
+	var near_moon := Atmosphere.near_moon(camera_gcrf_m.length(), moon_distance_m)
+	var moon_radius_m := Atmosphere.moon_ground_radius(moon_distance_m)
+	var moon_zenith := Frames.to_render(eye_from_moon / moon_distance_m)
+	var due := _radiance_refresh.due(atmosphere.ready, Frames.to_render(camera_gcrf_m.normalized()),
+			camera_gcrf_m.length() - Atmosphere.EARTH_MEAN_RADIUS_M, moon_zenith,
+			moon_distance_m - moon_radius_m if near_moon else -1.0, atmosphere.sun_direction_local,
+			atmosphere.luminance_scale, atmosphere.moonlight_relative_value if atmosphere.moonlight_active else 0.0,
+			sun_fraction)
+	if not due:
+		return
+	_radiance_serial += 1
+	_sky_material.set_shader_parameter("radiance_serial", float(_radiance_serial))
+	_sky_material.set_shader_parameter("radiance_moon_radius_m", moon_radius_m if near_moon else 0.0)
+	_sky_material.set_shader_parameter("radiance_moon_distance_m", moon_distance_m)
+	_sky_material.set_shader_parameter("radiance_moon_zenith", moon_zenith)
+	_sky_material.set_shader_parameter("radiance_moon_to_sun",
+			Frames.to_render((sun_apparent_from_earth_m - moon_gcrf_m).normalized()))
+	_sky_material.set_shader_parameter("radiance_moon_to_earth", Frames.to_render((-moon_gcrf_m).normalized()))
 
 
 ## Draws earth_clouds.gdshader on a sub-pixel quad in front of the camera for a few frames at load, so the scaled-space
@@ -766,11 +797,13 @@ func _setup_label(label: MapLabel, text: String) -> void:
 ## light, ground bounce and earthshine from the same model. Black until the tables are loaded (atmosphere_enabled).
 func _setup_environment() -> void:
 	_sky_material.shader = load("res://shaders/sky.gdshader")
+	_sky_material.set_shader_parameter("radiance_moon_albedo", Atmosphere.MOON_MEAN_TEXTURE_ALBEDO)
 	var sky := Sky.new()
 	sky.sky_material = _sky_material
 	# [call, Task 5 fix round 1: performance] The radiance cubemap (ambient + reflections) is refreshed over a few
 	# frames at 128 px: the sky changes slowly at flight rates, a few frames of lag in the ambient are invisible, and
-	# REALTIME would force 256 px every frame. The background pass is unaffected (drawn per pixel each frame).
+	# REALTIME would force 256 px every frame. The background pass is unaffected (drawn per pixel each frame). The sky
+	# reads global uniforms only, so Godot redraws the cube only after a material write: _update_sky_radiance.
 	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	var environment := Environment.new()
