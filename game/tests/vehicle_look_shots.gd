@@ -166,6 +166,10 @@ func _shoot() -> bool:
 	if _shot_wait < int(_args.get("settle", FRAMES_TO_SETTLE)) or (loading > 0 and _frames < TERRAIN_MAX_FRAMES):  # the streamed terrain
 		return false
 	var out_dir := String(_args.get("out_dir", ProjectSettings.globalize_path("res://").path_join("../screenshots/vehicles")))
+	if not out_dir.is_absolute_path():  # a relative path once created a stray directory on the drive root
+		push_error("vehicle_look_shots: --out_dir must be an absolute path, got %s" % out_dir)
+		quit(1)
+		return true
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	var path := out_dir.path_join(shot[0] + ".png")
 	if _stereo != null:

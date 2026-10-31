@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import re
+import os
 import sys
 from pathlib import Path
 
@@ -27,6 +28,9 @@ def script_args() -> dict:
     for i, a in enumerate(argv):
         if a.startswith("--") and i + 1 < len(argv):
             out[a[2:]] = argv[i + 1]
+    for key in ("out", "preview"):  # a relative path lands in Blender's cwd (once created C:\screenshots)
+        if key in out and not os.path.isabs(out[key]):
+            raise SystemExit(f"--{key} must be an absolute path, got {out[key]!r}")
     return out
 
 

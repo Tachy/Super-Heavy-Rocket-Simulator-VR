@@ -25,6 +25,7 @@ PIN_SIDES = 12  # [E]
 RACEWAY_SIDES = 8  # [E]
 SKIRT_SEGMENTS = 64  # [E] the skirt rings are thin flanges: sagitta 5.6 mm at R = 4.5 m
 CHINE_STEP_M = 0.5  # [E] sweep step of the chine along the barrel
+DOME_SAMPLES = 12  # segments of the booster's forward dome
 EMBED_M = 0.01  # [E] details start this far inside the shell (no gap on the curved hull)
 X_AXIS = Vector((1.0, 0.0, 0.0))
 
@@ -47,11 +48,18 @@ class Profile:
             # remaining length is squeezed so that truncated ogive + cap ends exactly at X = length
             self.s_t = Ln - math.sqrt(self.rho ** 2 - (self.rho - R + self.tip_r) ** 2)
         self.x_barrel_end = self.L - self.nose
+        # a booster's forward dome (1:100 model photo): the barrel ends at the truss shoulder, a half ellipse closes it
+        # below the ring under the ship, inside the physics length
+        self.dome_h = hull.get("dome_height_m", 0.0) if self.nose <= 0.0 else 0.0
+        if self.dome_h > 0.0:
+            self.x_barrel_end = self.L - hull["dome_start_m"]
 
     def base(self, x):
         """Radius of the shell."""
         if x < self.chamfer:
             return self.R - self.chamfer + x
+        if self.dome_h > 0.0 and x > self.x_barrel_end:
+            return self.R * math.sqrt(max(1.0 - ((x - self.x_barrel_end) / self.dome_h) ** 2, 0.0))
         if self.nose <= 0.0 or x <= self.x_barrel_end:
             return self.R
         s_new = self.L - x  # distance from the tip along the axis
@@ -62,6 +70,8 @@ class Profile:
         return self.base(x)
 
     def stations(self):
+        if self.dome_h > 0.0:
+            return [0.0, self.chamfer, self.x_barrel_end]
         xs = {0.0, self.chamfer, self.x_barrel_end if self.nose > 0 else self.L}  # a straight barrel: its two ends only
         if self.nose > 0.0:
             x_end = self.L - self.cap_h
@@ -78,6 +88,11 @@ class Profile:
 
     def runs(self):
         main = [(x, self.radius(x)) for x in self.stations()]
+        if self.dome_h > 0.0:
+            for i in range(1, DOME_SAMPLES + 1):
+                t = 0.5 * math.pi * i / DOME_SAMPLES
+                main.append((self.x_barrel_end + self.dome_h * math.sin(t), self.R * math.cos(t)))
+            return [([(0.0, 0.0), (0.0, main[0][1])], (-1.0, 0.0, 0.0)), (main[:2], "out"), (main[1:], "out")]
         if self.nose > 0.0:  # blunt tip: a quarter ellipse (axial cap_h, radial tip_r) closes the shell at X = length
             x_e, r_e = main[-1]
             for i in range(1, 9):
@@ -154,7 +169,11 @@ def _build_top_truss(stage, detail, profile):
         valley = vc.pt(L - t["height_m"], am, R)
         vc.tube(mesh, vc.pt(L - rr, a0, R), valley, rr, 6, ("strut", i, 0))
         vc.tube(mesh, valley, vc.pt(L - rr, a1, R), rr, 6, ("strut", i, 1))
-        vc.tube(mesh, valley, vc.pt(L - t["height_m"] - t["post_height_m"], am, R - 0.02), rr, 6, ("post", i))
+        et = Vector((0.0, -math.sin(am), math.cos(am)))
+        foot = vc.pt(L - t["height_m"] - t["post_height_m"], am, R - 0.02)
+        vc.tube(mesh, valley, foot, rr, 6, ("post", i))
+        for sgn in (-1.0, 1.0):  # forked foot (1:100 model photo): two short prongs on the shoulder
+            vc.tube(mesh, foot, foot + et * (sgn * 0.12) - X_AXIS * 0.35, rr * 0.7, 5, ("prong", i, sgn))
     return mesh
 
 
@@ -204,6 +223,34 @@ def _build_booster_raceway(stage, detail, profile):
         vc.box(mesh, vc.pt(xc, a - off, profile.R + rw["height_m"] / 2.0 - EMBED_M), X_AXIS, et, er, half)
         x_top -= rw["pill_pitch_m"]
         k += 1
+    return mesh
+
+
+def _build_strakes(stage, detail, profile):
+    """Long line fairings along the lower booster (1:100 model: four ridges, photo 2026-05: two tall boxes with a
+    sloped top at the silhouette): trapezoid section, full height from the lower end, sloped top over `chamfer_m`."""
+    sk = detail["booster"]["strakes"]
+    mesh = vc.VMesh()
+    for ri, (az, x0, x1) in enumerate(zip(sk["ridge_azimuth_deg"], sk["from_m"], sk["to_m"])):
+        a = math.radians(az)
+        et = Vector((0.0, -math.sin(a), math.cos(a)))
+        stations = [(x0, sk["height_m"]), (x1 - sk["chamfer_m"], sk["height_m"]), (x1, 0.05)]
+        secs = []
+        for x, h in stations:
+            t = h / sk["height_m"]
+            wb, wt = sk["base_width_m"] / 2.0, sk["top_width_m"] / 2.0 * t + 0.02
+            base = profile.R - EMBED_M
+            secs.append([vc.pt(x, a, base) - et * wb, vc.pt(x, a, base) + et * wb,
+                         vc.pt(x, a, profile.R + h) + et * wt, vc.pt(x, a, profile.R + h) - et * wt])
+        for k in range(len(secs) - 1):
+            for i in range(4):
+                j = (i + 1) % 4
+                quad = [secs[k][i], secs[k][j], secs[k + 1][j], secs[k + 1][i]]
+                centre = sum((secs[k][m] + secs[k + 1][m] for m in range(4)), Vector((0.0, 0.0, 0.0))) / 8.0
+                mid = sum(quad, Vector((0.0, 0.0, 0.0))) / 4.0
+                mesh.face(quad, [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], mid - centre)
+        for sec, sign in ((secs[0], -1.0), (secs[-1], 1.0)):
+            mesh.face(sec, [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], X_AXIS * sign)
     return mesh
 
 
@@ -295,6 +342,7 @@ def build_stage(spec, stage_id):
         parts["top_truss"] = _build_top_truss(stage, detail, profile)
         parts["skirt"] = _build_skirt(stage, detail, profile)
         parts["raceway"] = _build_booster_raceway(stage, detail, profile)
+        parts["strakes"] = _build_strakes(stage, detail, profile)
         if stage.get("grid_fins"):
             parts["fin_fairings"] = _build_fin_fairings(stage, detail, profile)
     else:

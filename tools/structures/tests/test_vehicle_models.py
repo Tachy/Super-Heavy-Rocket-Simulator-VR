@@ -197,7 +197,9 @@ def test_hull_bounds_nose_and_uv(built, spec, stage_id):
         tip = max(p[0] for p in pos)
         assert max(math.hypot(p[1], p[2]) for p in pos if p[0] > tip - 0.05) < 1.0  # blunt tip, not a flat top
     else:
-        assert ring(st["length_m"] - 0.01) == pytest.approx(radius, abs=BOUND_TOL_M)
+        shoulder = st["length_m"] - spec["detail"]["hull"]["dome_start_m"]  # the booster's forward dome follows here
+        assert ring(shoulder - 0.01) == pytest.approx(radius, abs=BOUND_TOL_M)
+        assert ring(st["length_m"] - 0.01) < 0.5  # closed at the top
     # UV = (arc metres at the barrel radius, station metres): glTF v is the station
     assert min(u for u, _ in uv) == pytest.approx(0.0, abs=1e-3)
     assert max(u for u, _ in uv) == pytest.approx(2.0 * math.pi * radius, abs=0.05)
@@ -213,6 +215,8 @@ def test_hull_is_a_plain_lathe_without_ring_beads(built, spec, stage_id):
     st = spec["stages"][stage_id]
     pos, _, tri = _meshes(built / f"{stage_id}.gltf")["hull"]
     barrel_end = st["length_m"] - st["nose_length_m"]
+    if stage_id == "booster":  # the barrel ends at the truss shoulder, the forward dome follows
+        barrel_end = st["length_m"] - spec["detail"]["hull"]["dome_start_m"]
     barrel_rings = {round(p[0], 3) for p in pos if p[0] <= barrel_end + 1e-3}
     assert len(barrel_rings) <= 4  # the base, the chamfer's end and the barrel's end: no weld rings in between
     assert len(tri) < 8500  # booster 768, ship 7,680 (the nose rings); the whole stage was ~21,000 with the beads
@@ -247,6 +251,10 @@ def test_pins_fins_and_ship_features_sit_at_the_config_numbers(built, spec):
     slo, shi = _bounds(parts["skirt"][0])
     assert math.hypot(shi[1], shi[2]) > b["diameter_m"] / 2 + 0.3  # the ring flanges stand out of the hull
     assert "raceway" in ship
+    pos, _, _ = parts["strakes"]  # the long line fairings of the lower booster stand out of the hull, up to station ~34 m
+    lo, hi = _bounds(pos)
+    assert lo[0] == pytest.approx(3.2 - 0.0, abs=0.3) and hi[0] == pytest.approx(34.4, abs=0.3)
+    assert max(math.hypot(p[1], p[2]) for p in pos) == pytest.approx(b["diameter_m"] / 2 + 1.2, abs=0.1)
 
 
 @needs_blender

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import struct
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +40,8 @@ def load_triangles(path: str, node: str | None = None) -> np.ndarray:
 
 
 def render(tris: np.ndarray, out: str, u: int, v: int, px: float) -> None:
+    if not os.path.isabs(out):
+        raise SystemExit(f"output path must be absolute, got {out!r}")
     w = 3 - u - v
     lo, hi = tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0)
     pad = 10

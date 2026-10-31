@@ -11,6 +11,8 @@ ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; phot
 weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
 weld_half_width_m = 0.05           # [E] half width of the bead
 dent_slope_rms = 0.03              # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
+dome_start_m = 3.6                 # [E] booster: the barrel ends this far below the top (truss shoulder; photo of the printed 1:100 model)
+dome_height_m = 3.6                # [E] booster: the forward dome (half ellipse) rises inside the V truss up to the top ring (inside the physics length)
 nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across; model tip radius 0.55)
 nose_tip_cap_m = 0.25              # [E] model: the tip closes within 0.2 m axially (blunt, not a ball); photo 108 ~1 m across
 nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the physics nose_length_m of the config (17 m) is NOT drawn
@@ -49,6 +51,19 @@ pill_length_m = 5.0                # [E] model: pill length (view of the tank-to
 pill_pitch_m = 23.1                # [E] one pill per tank section (model: tank parts 23.1 m)
 height_m = 0.12                    # [E]
 rail_radius_m = 0.04               # [E] thin rail next to the pills
+
+[booster.strakes]
+# 1:100 model (tank-bottom / tank-center STL, hull r 4.5): four long ridges, 0.82 m high / ~1 m wide, with 1.7 m brackets at
+# the ends, at azimuth 67 / 113 / -21 / -159 (+-23 deg about +90 deg, +-69 deg about -90 deg); the +90 pair continues 8 m
+# into the centre tank part. Photo 2026-05 (full stack on the mount): two tall boxes with a sloped top, up to ~25.6 m above
+# the base, ~1.5 m out of the silhouette. Height 1.2 m = between model and photo (+-0.4 m).
+ridge_azimuth_deg = [67.0, 113.0, 339.0, 201.0]   # [E] model (azimuth of the model's x / z axes taken as ours)
+from_m = [3.2, 3.2, 3.2, 3.2]                # [E] lower end: the tank-bottom part starts here (skirt top)
+to_m = [34.4, 34.4, 25.8, 25.8]              # [E] model: 23.1 m (bottom tank) + 8 m (centre tank) / photo end 25.6 m
+height_m = 1.2                               # [E] see above
+base_width_m = 1.0                           # [E] model: section at 10.5 m, azimuth 60-72 deg
+top_width_m = 0.7                            # [E] flank slope in the model section (0.54 -> 0.82 m)
+chamfer_m = 1.8                              # [E] sloped top end (photo)
 
 [ship.ports]
 port_count = 2                     # [E] transfer ports (model 0.9 x 0.45 x 0.8 m part); position not known, drawn on the lee side

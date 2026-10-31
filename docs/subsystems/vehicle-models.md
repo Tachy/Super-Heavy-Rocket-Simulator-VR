@@ -207,7 +207,17 @@ Side by side (ours | model view | photo): `screenshots/vehicles/shapes_flaps.png
 `shapes_nose.png`. What still differs: the model's grid fin has its catch corner (curved cells + a shaft at the corner) which we draw as four
 hooks; the real fins show a serrated outer edge we do not draw; the V-truss rods are cylinders, not tapered; the forward flap hinge is
 straight; the nose is fuller near the tip in the model; the number of skirt ports and posts is a guess; the skirt has no photo.
-Triangles: booster 6,528, ship 9,100, flap 128 aft / 116 fwd, grid fin 552 (was 924).
+Engine look pass (2026-10-31, `vehicle_look_shots.gd` from real sessions, `screenshots/vehicles/lk_*`, `d_*`, `e_*`, `f_*`, `g_*`): the
+truss, hinges, lugs, skirt rings and posts, aft / forward flaps and the all-round nose shield read as in the references. Added from the
+model STLs (`tank-bottom` / `tank-center` sections) and the photo of the stack on the mount: four long line fairings `strakes` (0.82 m
+high in the model, 1.2 m drawn, photo ~1.5 m; stations 3.2 .. 25.8 m on the -90 side and 3.2 .. 34.4 m on the +90 side, sloped top) and, from
+the printed-model photos, the booster's forward dome inside the V truss (`dome_start_m` 3.6 / `dome_height_m` 3.6: inside the physics
+length) and forked feet of the V teeth. Not drawn yet: the grid fin's serrated outer edge, tapered truss rods, the ship's thick raceway
+tubes widening at their foot, black round fittings, the ribs ring and panel lines (textures), the 1.7 m brackets on the strakes.
+Catch: arm tops 95 m above the pad ground, pins at 66.5 m -> booster bottom 28.5 m above the pad ground = 8.5 m above the 20 m mount; the
+photo of the stack on the mount puts the arm ledge at the pin level ~65-66.5 m above the mount top (+-1 m), so the pin station agrees with
+the photo, the catch height itself is not measurable from the photos (no photo of a booster catch in `screenshots/mechazilla/`).
+Triangles: booster 10,224, ship 9,100, flap 128 aft / 116 fwd, grid fin 552 (was 924).
 
 ## Open points
 - Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that

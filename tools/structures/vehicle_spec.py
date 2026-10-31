@@ -24,13 +24,14 @@ class VehicleSpecError(ValueError):
 
 DETAIL_TABLES = {
     "hull": ("segments", "ring_pitch_m", "weld_height_m", "weld_half_width_m", "dent_slope_rms", "nose_tip_radius_m",
-             "nose_tip_cap_m", "nose_drawn_length_m", "base_chamfer_m"),
+             "nose_tip_cap_m", "nose_drawn_length_m", "base_chamfer_m", "dome_start_m", "dome_height_m"),
     "booster.hot_stage": ("height_m", "flange_height_m", "flange_proud_m"),
     "booster.top_truss": ("tooth_count", "height_m", "tube_radius_m", "post_height_m"),
     "booster.skirt": ("base_ring_radius_m", "ring_stations_m", "ring_proud_m", "ring_thickness_m", "tooth_count",
                       "tooth_height_m", "tooth_station_m", "tooth_proud_m", "port_count", "port_width_m",
                       "port_height_m", "port_proud_m", "port_station_m"),
     "booster.raceway": ("azimuth_deg", "pill_width_m", "pill_length_m", "pill_pitch_m", "height_m", "rail_radius_m"),
+    "booster.strakes": ("ridge_azimuth_deg", "from_m", "to_m", "height_m", "base_width_m", "top_width_m", "chamfer_m"),
     "booster.grid_fin_fairing": ("length_frac", "width_m", "height_m"),
     "grid_fin": ("across_flats_m", "thickness_m", "cell_pitch_m", "wall_m", "frame_m", "shaft_radius_m",
                  "shaft_inset_m", "catch_hook_radius_m", "catch_hook_count", "catch_hook_pitch_m"),
@@ -46,7 +47,7 @@ DETAIL_TABLES = {
 }
 ENGINE_KEYS = ("file", "bell_length_m", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
                "mount_radius_frac", "segments")
-SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "outline_u_m", "outline_v_m")  # may be zero / negative; others > 0
+SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m")  # may be zero / negative; others > 0
 
 
 def _table(data: dict, dotted: str) -> dict:

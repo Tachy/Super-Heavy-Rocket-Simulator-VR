@@ -313,6 +313,10 @@ func _process(_delta: float) -> bool:
 		# Default: <repo>/screenshots/ (git-ignored; every test image goes there, user 2026-10-27).
 		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
 				"../screenshots/render_check.png").simplify_path())
+		if not out.is_absolute_path():
+			push_error("render_check: --out must be an absolute path, got %s" % out)
+			quit(1)
+			return true
 		DirAccess.make_dir_recursive_absolute(out.get_base_dir())
 		if _stereo != null:
 			if not _save_stereo_images(world, out):

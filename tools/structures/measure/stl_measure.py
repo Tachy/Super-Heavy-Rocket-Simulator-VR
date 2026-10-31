@@ -11,6 +11,7 @@ The numbers only guide our own redraw (the model is partly adapted for printing:
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -85,6 +86,8 @@ def cmd_azimuth(path, axis, lo, hi, bins):
 
 
 def cmd_view(out, paths, opts):
+    if not os.path.isabs(out):
+        raise SystemExit(f"output path must be absolute, got {out!r}")
     from PIL import Image, ImageDraw
     u, v, px = int(opts.get("--u", 0)), int(opts.get("--v", 1)), float(opts.get("--px", 40))
     cap = int(opts.get("--max", 200000))
