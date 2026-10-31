@@ -35,8 +35,8 @@ SCRIPT_DIR = ROOT / "tools" / "structures" / "blender"
 DEFAULT_CONFIG = ROOT / "config" / "structures" / "starbase_olp2.toml"
 DEFAULT_OUT = ROOT / "data" / "models" / "starbase_olp2"
 BLENDER_DEFAULT = Path(r"C:\Program Files\Blender Foundation\Blender 3.4\blender.exe")
-GENERATORS = ("gen_profiles.py", "gen_chopstick.py", "gen_carriage.py", "gen_qd_arm.py", "gen_mount.py", "gen_trench.py")
-OUTPUTS = ("profiles.gltf", "chopstick.gltf", "carriage.gltf", "qd_arm.gltf", "mount.gltf", "trench.gltf",
+GENERATORS = ("gen_profiles.py", "gen_chopstick.py", "gen_carriage.py", "gen_rails.py", "gen_qd_arm.py", "gen_mount.py", "gen_trench.py")
+OUTPUTS = ("profiles.gltf", "chopstick.gltf", "carriage.gltf", "rails.gltf", "qd_arm.gltf", "mount.gltf", "trench.gltf",
            mount_textures.FILE_NAME, mount_textures.CONCRETE_FILE_NAME)
 MANIFEST = "manifest.json"
 VEHICLE_GENERATORS = ("gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py")
@@ -65,7 +65,7 @@ def blender_version(blender: Path) -> str:
 def input_hash(config: Path, version: str) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
-    h.update(f"plan_yaw_deg={detail_file.plan_yaw_deg()}".encode())  # drawn on the physics value, not in the detail file
+    h.update(f"site_tower={sorted(detail_file.site_tower().items())}".encode())  # drawn on the physics values, not in the detail file
     for p in [config, SCRIPT_DIR / "common.py", SCRIPT_DIR / "mechazilla_layout.py", SCRIPT_DIR / "mount_layout.py",
               Path(mount_textures.__file__), *(SCRIPT_DIR / g for g in GENERATORS)]:
         h.update(p.name.encode())

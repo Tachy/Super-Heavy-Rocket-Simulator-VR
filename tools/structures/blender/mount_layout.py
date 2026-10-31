@@ -10,7 +10,7 @@ shape"): a BLOCK with straight vertical walls (X from -block_x_back to +block_x_
 opening with the ring), a pyramid ANNEX only on the side away from the tower (trapezoid footprint, plated slopes, door
 group at its foot, white vent plates, dark louvre boxes), and ONE tunnel of one width end to end through the block along
 Y: level floor at -pit_depth under the ring, straight ramps up to the ground at both ends, vertical walls, the walls
-outside the block as wedges whose top falls from the deck height to the ground at the ramp end. No deflector, no flare.
+outside the block with a top that falls from the deck height with the annex to a 0.5 m wall at its end (`wall_height_m`), then runs level to the ramp end. No deflector, no flare.
 The two booster QD heads stand on the ring under the two hoods (no cabinets on the deck). The floor is one closed surface.
 Heights and plan sizes are the measured ones (deck_height_m 14.5 m); the physics mount height follows in the physics plan.
 """
@@ -127,12 +127,14 @@ class Shape:
         self.annex_half_y = m["annex_half_y_m"]
         self.annex_tip_half_y = m["annex_tip_half_y_m"]
         self.half_w = 0.5 * self.t["width_m"]  # tunnel half width: one value from end to end
-        self.wall_t = self.t["wall_thickness_m"]
         self.ring_r = 0.5 * m["ring_outer_diameter_m"]
         self.open_r = 0.5 * m["ring_opening_diameter_m"]
         self.ring_bottom = self.height - m["ring_thickness_m"]
         self.open_top = m["opening_top_m"]
         self.ramp_end = self.half_y + self.t["length_m"]
+        self.wall_out = {-1.0: -self.x_back, 1.0: self.x_front}  # the walls' outer faces are flush with the deck plate's side edges
+        self.lip_y = self.annex_half_y  # the wall top has fallen to the small wall where the annex footprint ends
+        self.lip_z = self.t["wall_height_m"]  # small wall of this height above the ground, level to the ramp end
 
     def back_z(self, x):
         """Height of the annex's back slope at x (x from -annex_x to -x_back)."""
@@ -426,7 +428,6 @@ def _hardstand(S, sh):
     t = sh.t
     poly = [tuple(float(c) for c in pair.split(",")) for pair in t["hardstand_outline_m"].split()]
     lift = t["hardstand_lift_m"]
-    hw = sh.half_w + sh.wall_t
     cuts = sorted({round(p[1], 6) for p in poly} | {-sh.ramp_end, -sh.half_y, sh.half_y, sh.ramp_end})
     up = (0.0, 0.0, 1.0)
     for y0, y1 in zip(cuts, cuts[1:]):
@@ -437,7 +438,7 @@ def _hardstand(S, sh):
         if mid < sh.half_y:
             hole = (-sh.annex_x, sh.x_front)
         elif mid < sh.ramp_end:
-            hole = (-hw, hw)
+            hole = (sh.wall_out[-1.0], sh.wall_out[1.0])
         else:
             S.add("hardstand", [(r0[0], y0, lift), (r0[1], y0, lift), (r1[1], y1, lift), (r1[0], y1, lift)], up, _uv_plan)
             continue
@@ -446,24 +447,29 @@ def _hardstand(S, sh):
 
 
 def trench(detail: dict) -> Surfaces:
-    """The tunnel's closed floor (level under the block, straight ramps to both ends), the wedge walls outside the block,
+    """The tunnel's closed floor (level under the block, straight ramps to both ends), the tunnel walls outside the block (falling with the annex to a low lip, then level),
     the hardstand and the tower's foot block; frame as the mount."""
     sh = Shape(detail)
     t = sh.t
     S = Surfaces()
     zf, zd = sh.floor_z, sh.deck_z
     y0, y1 = sh.half_y, sh.ramp_end
-    hw, wt = sh.half_w, sh.wall_t
+    hw = sh.half_w
     up = (0.0, 0.0, 1.0)
     S.add("concrete", [(-hw, -y0, zf), (hw, -y0, zf), (hw, y0, zf), (-hw, y0, zf)], up, _uv_plan)  # under the ring
     for sy in (-1.0, 1.0):
         S.add("concrete", [(-hw, sy * y0, zf), (hw, sy * y0, zf), (hw, sy * y1, 0.0), (-hw, sy * y1, 0.0)], up, _uv_plan)
         for side in (-1.0, 1.0):
-            x, xo = side * hw, side * (hw + wt)
-            # Wedge: the top falls from the deck height at the block to the ground at the ramp end.
-            S.add("wall", [(x, sy * y0, zf), (x, sy * y1, 0.0), (x, sy * y0, zd)], (-side, 0.0, 0.0), _uv_y)
-            S.add("wall", [(xo, sy * y0, 0.0), (xo, sy * y1, 0.0), (xo, sy * y0, zd)], (side, 0.0, 0.0), _uv_y)
-            S.add("wall", [(x, sy * y0, zd), (xo, sy * y0, zd), (xo, sy * y1, 0.0), (x, sy * y1, 0.0)], up, _uv_plan)
+            x, xo = side * hw, sh.wall_out[side]
+            # Wall top (photo CRL05690): from the deck edge it falls with the annex to the low lip, then runs level to the ramp end.
+            yl, zl = sh.lip_y, sh.lip_z
+            for xs, z_bottom, out in ((x, None, -side), (xo, 0.0, side)):
+                low0 = zf if z_bottom is None else z_bottom
+                S.add("wall", [(xs, sy * y0, low0), (xs, sy * y1, 0.0), (xs, sy * y1, zl), (xs, sy * yl, zl)], (out, 0.0, 0.0), _uv_y)
+                S.add("wall", [(xs, sy * y0, low0), (xs, sy * yl, zl), (xs, sy * y0, zd)], (out, 0.0, 0.0), _uv_y)
+            S.add("wall", [(x, sy * y0, zd), (xo, sy * y0, zd), (xo, sy * yl, zl), (x, sy * yl, zl)], up, _uv_plan)
+            S.add("wall", [(x, sy * yl, zl), (xo, sy * yl, zl), (xo, sy * y1, zl), (x, sy * y1, zl)], up, _uv_plan)
+            S.add("wall", [(x, sy * y1, 0.0), (xo, sy * y1, 0.0), (xo, sy * y1, zl), (x, sy * y1, zl)], (0.0, sy, 0.0), _uv_x)
     _hardstand(S, sh)
     # The tower's foot: a block cut vertically on the side toward the mount, its far side chamfered up to the legs' plinth.
     cx, cy, half, top = t["foot_x_m"], t["foot_y_m"], 0.5 * t["foot_width_m"], t["foot_height_m"]

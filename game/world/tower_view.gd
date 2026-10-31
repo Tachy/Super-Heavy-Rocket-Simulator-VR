@@ -38,6 +38,15 @@ var _arms: Array[Node3D] = []  ## pivots at the hinges: [+across, -across]
 var _carriage: Node3D = null  ## models only: follows the carriage offset
 var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the roof block
 var _cable_lateral_m: Array[float] = []
+var _cable_anchor_site := Vector3.ZERO  ## the corner rail's axis (site frame, horizontal): the cables pull from straight above it
+var _cable_spread := Vector3.ZERO  ## unit vector along the sheave's axis (site frame): the bundle lies along it
+var _qd_arm: Node3D = null  ## the ship QD arm's model node (its swinging parts rotate about the swing axis)
+## Swing of the ship QD arm about its vertical axis, radians: 0 = connected (head 1 m off the hull), positive turns the head
+## away from the catch line. The core has no `qd_arm_angle_rad` state yet (docs/subsystems/launch-structures.md, Open points).
+var qd_arm_swing_rad := 0.0:
+	set(value):
+		qd_arm_swing_rad = value
+		_apply_qd_swing()
 var _cable_top_m := 0.0  ## height of the cables' upper end above the site
 var _cable_base_m := 0.0  ## height of the sheave block's top above the deck plane
 var _actuators: Array[Array] = []  ## per arm: [barrel, rod] cylinders from the carriage to the arm's root column
@@ -58,6 +67,7 @@ func build(geometry: Dictionary) -> void:
 	_carriage = null
 	tower_lights = null
 	_cables.clear()
+	_qd_arm = null
 	_cable_lateral_m.clear()
 	_actuators.clear()
 	var had_models := has_models
@@ -99,6 +109,7 @@ func build(geometry: Dictionary) -> void:
 		_arms.append(pivot)
 	if not models.is_empty():
 		_build_carriage(models)
+		_build_rails(models)
 		_build_qd_arm(models, geometry)
 		_build_lights(geometry)
 	update_state({})
@@ -222,7 +233,12 @@ func _build_carriage(models: Dictionary) -> void:
 	var size: float = k["cable_size_m"]
 	var pitch: float = k["cable_spacing_m"]
 	# The sheave block's top (the layout puts its centre at top + gap + diameter / 2); cables run to the roof block's underside.
-	_cable_base_m = float(k["top_z_m"]) + float(k["drum_gap_m"]) + float(k["drum_diameter_m"])
+	# The cables leave the sheave block at its side on the rail line, at the block's centre height (the layout puts the centre at
+	# top + gap + diameter / 2); they run to the roof block's underside.
+	_cable_base_m = float(k["top_z_m"]) + float(k["drum_gap_m"]) + 0.5 * float(k["drum_diameter_m"])
+	var axes := _plan_axes(models["detail"], _geometry)
+	_cable_anchor_site = corner_rail_site(models["detail"], _geometry)
+	_cable_spread = (axes.y - axes.x).normalized()
 	_cable_top_m = float(models["detail"]["tower.roof"]["block_base_m"])
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.5 * size
@@ -309,28 +325,73 @@ func _place_carriage(offset: float) -> void:
 	var low_m: float = centre.z + _cable_base_m
 	var length := maxf(0.1, _cable_top_m - low_m)
 	for i in range(_cables.size()):
-		var at: Vector3 = centre + across * _cable_lateral_m[i]
+		var at: Vector3 = _cable_anchor_site + _cable_spread * _cable_lateral_m[i]
 		at.z = low_m + 0.5 * length
 		_cables[i].position = Frames.to_render(at)
 		# The cylinder's axis (local Y) is the column that basis_to_render sends to render Y: the site's up.
 		_cables[i].basis = Frames.basis_to_render(Basis(across, up.cross(across), up)) * Basis.from_scale(Vector3(1.0, length, 1.0))
 
 
-## The ship QD arm, static with its tip clear of the hull (no core state yet: deviation table). Its X runs to the pad from
-## the physics box's pad-side face, on the centre plane, its tip deck at the measured height.
-func _build_qd_arm(models: Dictionary, geometry: Dictionary) -> void:
-	var toward: Vector3 = geometry["tower_direction"]
-	var across: Vector3 = geometry["across"]
+## The axis of the corner rail on the tower box's corner toward the mount (site frame, z = 0): the box corner of the physics
+## geometry (plan axes rotated by plan_yaw_deg) moved `rail_offset_m` outward along both faces' normals.
+func corner_rail_site(detail: Dictionary, geometry: Dictionary) -> Vector3:
+	var axes := _plan_axes(detail, geometry)
 	var size: Vector3 = geometry["tower_size_m"]
 	var centre: Vector3 = geometry["tower_center_m"]
-	var face: Vector3 = toward * (centre.dot(toward) - 0.5 * size.x)
+	var offset := 0.5 * size.x + float(detail["carriage"]["rail_offset_m"])
+	var at := centre - axes.x * offset - axes.y * offset
+	at.z = 0.0
+	return at
+
+
+## The corner rails: three static vertical rails on the corner toward the mount and its neighbours, in the carriage's frame
+## at the hinge height (the carriage rides up and down on them).
+func _build_rails(models: Dictionary) -> void:
+	var rails := Node3D.new()
+	rails.name = "RailsMount"
+	var toward: Vector3 = _geometry["tower_direction"]
+	var across: Vector3 = _geometry["across"]
+	rails.basis = Frames.basis_to_render(Basis(-toward, -across, Vector3(0.0, 0.0, 1.0)))
+	rails.position = Frames.to_render(0.5 * ((_geometry["hinge_plus_m"] as Vector3) + (_geometry["hinge_minus_m"] as Vector3)))
+	rails.add_child(StructureModels.model_node("Rails", models["rails"], {}, TowerMaterial.black_paint()))
+	add_child(rails)
+
+
+## The ship QD arm on the tower's rear side: fixed in height, swinging about the vertical axis at its root (the swing key
+## `qd_arm_swing_rad`). Frame: X along the connected arm to the catch axis, Y left of it, the tip deck at Z = 0.
+func qd_arm_root_site(detail: Dictionary, geometry: Dictionary) -> Vector3:
+	var axes := _plan_axes(detail, geometry)
+	var size: Vector3 = geometry["tower_size_m"]
+	var centre: Vector3 = geometry["tower_center_m"]
+	var q: Dictionary = detail["qd_arm"]
+	var corner := centre - axes.x * (0.5 * size.x) - axes.y * (0.5 * size.x)
+	var root := corner + axes.x * float(q["root_x_m"]) + axes.y * (size.x + float(q["root_beyond_m"]))
+	root.z = 0.0
+	return root
+
+
+func _build_qd_arm(models: Dictionary, geometry: Dictionary) -> void:
+	var root_site := qd_arm_root_site(models["detail"], geometry)
+	var heading := (-root_site).normalized()
+	var up := Vector3(0.0, 0.0, 1.0)
 	var mount := Node3D.new()
 	mount.name = "QdArmMount"
-	mount.basis = Frames.basis_to_render(Basis(-toward, -across, Vector3(0.0, 0.0, 1.0)))
-	mount.position = Frames.to_render(face + Vector3(0.0, 0.0, float(models["detail"]["qd_arm"]["deck_m"])))
-	mount.add_child(StructureModels.model_node("QdArm", models["qd_arm"], {"hardware": TowerMaterial.clad()},
-			TowerMaterial.black_paint()))
+	mount.basis = Frames.basis_to_render(Basis(heading, up.cross(heading), up))
+	mount.position = Frames.to_render(root_site + up * float(models["detail"]["qd_arm"]["deck_m"]))
+	_qd_arm = StructureModels.model_node("QdArm", models["qd_arm"], {"hardware": TowerMaterial.clad()},
+			TowerMaterial.black_paint())
+	mount.add_child(_qd_arm)
 	add_child(mount)
+	_apply_qd_swing()
+
+
+## Rotates everything of the arm except the fixed bracket on the tower about the swing axis (model Z).
+func _apply_qd_swing() -> void:
+	if _qd_arm == null or not is_instance_valid(_qd_arm):
+		return
+	for part in _qd_arm.get_children():
+		if part.name != &"bracket":
+			(part as Node3D).basis = Basis(Vector3(0.0, 0.0, 1.0), -qd_arm_swing_rad)
 
 
 ## Box with `size_local` along the columns of `axes` (site frame), centred at `center_site`.

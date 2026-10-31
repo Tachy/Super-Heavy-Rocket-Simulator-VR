@@ -62,6 +62,7 @@ def load_detail(path) -> dict:
         v = v.strip()
         cur[k.strip()] = v[1:-1] if v.startswith('"') else float(v)
     root.setdefault("mount", {})["plan_yaw_deg"] = site_plan_yaw_deg(SITES_FILE)
+    root["site_tower"] = site_tower(SITES_FILE)
     return root
 
 
@@ -83,6 +84,31 @@ def site_plan_yaw_deg(sites_path, site_id=SITE_ID) -> float:
         elif table == "site.tower" and current == site_id and line.startswith("plan_yaw_deg"):
             return float(line.partition("=")[2])
     raise KeyError(f"{sites_path}: no plan_yaw_deg for site {site_id}")
+
+
+SITE_TOWER_KEYS = ("distance_m", "width_m", "plan_yaw_deg", "hinge_distance_m", "arm_length_m", "arm_closed_gap_m",
+                   "arm_width_m", "catch_height_m", "carriage_stroke_m", "arm_open_deg")
+
+
+def site_tower(sites_path, site_id=SITE_ID) -> dict:
+    """The physics numbers of `[site.tower]` the drawn corner, collars and QD arm are placed with (same keys as detail_file.site_tower)."""
+    current, table, out = None, None, {}
+    for raw in Path(sites_path).read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line == "[[site]]":
+            current, table = None, "site"
+        elif line.startswith("["):
+            table = line.strip("[]")
+        elif table == "site" and line.startswith("id") and "=" in line:
+            current = line.partition("=")[2].strip().strip('"')
+        elif table == "site.tower" and current == site_id and "=" in line:
+            k, _, v = line.partition("=")
+            if k.strip() in SITE_TOWER_KEYS:
+                out[k.strip()] = float(v)
+    missing = [k for k in SITE_TOWER_KEYS if k not in out]
+    if missing:
+        raise KeyError(f"{sites_path}: [site.tower] of {site_id} lacks {missing}")
+    return out
 
 
 def clear_scene() -> None:

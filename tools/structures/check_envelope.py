@@ -28,7 +28,7 @@ VEHICLE = ROOT / "config" / "vehicles" / "starship_block3.toml"
 HULL_RADIUS_M = 4.5  # [S] 9 m booster diameter
 MEASURED_LEG_CENTRES_M = 11.9  # [E] measured leg centre spacing, launch-structures-measurements.md (+-1 m)
 LEG_CENTRES_TOL_M = 1.0
-ALLOWED = ("Arm length", "Tower face, height", "Leg spacing", "Hinge position", "QD arm", "Fins against the arm")
+ALLOWED = ("Tower face, height", "QD arm", "Fins against the arm")
 
 
 def tower(sites: dict) -> dict:
@@ -79,7 +79,8 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
     within("Leg spacing", outer - leg, MEASURED_LEG_CENTRES_M, LEG_CENTRES_TOL_M, "Leg spacing")
     # QD arm: the head must not reach into the hull; a gap means it is static and not attached (no physics state).
     hinge_to_axis = phys["hinge_distance_m"]
-    gap = hinge_to_axis - detail["qd_arm"]["reach_m"] - HULL_RADIUS_M
+    geo = mechazilla_layout.qd_geometry(detail)
+    gap = geo["distance_m"] - geo["reach_m"] - HULL_RADIUS_M
     if gap < 0.0:
         failures.append(f"QD arm: head {-gap:.2f} m inside the hull")
     within("QD arm", gap, 0.0, SURFACE_TOL_M, "QD arm")

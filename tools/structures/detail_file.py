@@ -15,11 +15,11 @@ CHOPSTICK_KEYS = ("length_m", "depth_m", "end_depth_m", "knee_depth_m", "foot_de
                   "leg_end_x_m", "connector_end_x_m", "leg_offset_m", "bearing_start_x_m", "bearing_tube_m",
                   "plate_thickness_m", "plate_height_m", "plate_end_x_m", "supply_line_m", "inner_face_y_m",
                   "chord_profile", "brace_profile", "thin_profile")
-CARRIAGE_KEYS = ("width_m", "bottom_depth_m", "hinge_y_m", "drum_diameter_m", "drum_gap_m", "cable_count", "cable_size_m",
+CARRIAGE_KEYS = ("collar_gap_m", "collar_chord_m", "truss_depth_m", "truss_panel_m", "rail_size_m", "rail_offset_m", "hinge_column_m", "platform_width_m", "beam_m", "top_z_m", "hinge_y_m", "drum_diameter_m", "drum_gap_m", "cable_count", "cable_size_m",
                  "actuator_anchor_x_m", "actuator_anchor_in_m", "actuator_anchor_depth_m", "actuator_lug_x_m",
                  "actuator_lug_out_m", "actuator_lug_depth_m", "actuator_barrel_m", "actuator_rod_m",
                  "actuator_barrel_length_m")
-QD_ARM_KEYS = ("deck_m", "reach_m", "root_length_m", "root_width_m", "tip_width_m", "foot_depth_m")
+QD_ARM_KEYS = ("deck_m", "head_gap_m", "root_beyond_m", "root_length_m", "root_width_m", "tip_width_m", "foot_depth_m")
 TOWER_KEYS = ("height_m", "lattice_height_m", "sections", "floors", "deck", "core", "plinth", "cladding", "stairs",
               "roof")
 PATTERNS = ("x_brace", "k_brace", "chevron")
@@ -40,7 +40,7 @@ MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_
               "hood_height_m", "louvre_count", "louvre_width_m", "louvre_height_m", "louvre_depth_m", "door_width_m",
               "door_height_m", "qd_count", "qd_head_radius_m", "qd_head_depth_m", "qd_head_width_m", "qd_head_height_m",
               "tile_m", "course_m", "panel_m", "seam_m", "map_size")
-TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_thickness_m", "hardstand_lift_m", "concrete_tile_m", "slab_m",
+TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "hardstand_lift_m", "concrete_tile_m", "slab_m",
                "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_near_x_m", "foot_far_x_m", "foot_width_m",
                "foot_height_m", "mask_range_m")
 COUNT_KEYS = ("count", "columns", "louvre_count")
@@ -76,11 +76,26 @@ def plan_yaw_deg(sites_file=SITES_FILE, site_id=SITE_ID) -> float:
     raise DetailFileError(f"{sites_file}: no site '{site_id}'")
 
 
+SITE_TOWER_KEYS = ("distance_m", "width_m", "plan_yaw_deg", "hinge_distance_m", "arm_length_m", "arm_closed_gap_m",
+                   "arm_width_m", "catch_height_m", "carriage_stroke_m", "arm_open_deg")
+
+
+def site_tower(sites_file=SITES_FILE, site_id=SITE_ID) -> dict:
+    """The physics numbers of `[site.tower]` the drawn corner, collars and QD arm are placed with."""
+    with open(Path(sites_file), "rb") as f:
+        sites = tomllib.load(f)
+    for site in sites["site"]:
+        if site["id"] == site_id:
+            return {k: float(site["tower"][k]) for k in SITE_TOWER_KEYS}
+    raise DetailFileError(f"{sites_file}: no site '{site_id}'")
+
+
 def load(path) -> dict:
     with open(Path(path), "rb") as f:
         data = tomllib.load(f)
     _need(data, ("tower", "profiles", "chopstick", "carriage", "qd_arm", "mount", "trench"), "file")
     data["mount"]["plan_yaw_deg"] = plan_yaw_deg()  # not stored here: one value for physics and drawing
+    data["site_tower"] = site_tower()
     tower, profiles, chop = data["tower"], data["profiles"], data["chopstick"]
     _need(tower, TOWER_KEYS, "tower")
     _positive(tower, "height_m", "tower")
@@ -165,8 +180,10 @@ def load_lights(path) -> dict:
         if g["ref"] not in ("face", "axis"):
             raise DetailFileError(f"{where}.ref: must be 'face' or 'axis'")
         _positive(g, "range_m", where)
-        extra = {"flood": ("lumens", "cct_k", "half_angle_deg", "aim"), "omni": ("lumens", "cct_k"), "obstruction": ()}
+        extra = {"flood": ("lumens", "cct_k", "half_angle_deg"), "omni": ("lumens", "cct_k"), "obstruction": ()}
         _need(g, extra[g["kind"]], where)
+        if g["kind"] == "flood" and "aim" not in g and "aim_at_axis_m" not in g:
+            raise DetailFileError(f"{where}: a flood needs `aim` or `aim_at_axis_m`")
         for k in ("lumens", "cct_k", "half_angle_deg"):
             if k in g:
                 _positive(g, k, where)

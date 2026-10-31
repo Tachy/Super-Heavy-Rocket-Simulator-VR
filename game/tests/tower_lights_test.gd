@@ -70,6 +70,7 @@ func _check_view(lamps: Dictionary) -> void:
 	_check(lights != null, "view builds the lamps")
 	if lights == null:
 		return
+	_check_attached(lights, geometry)
 	var sun_up: Vector3 = geometry["up"]  # the Sun straight overhead
 	var sun_low: Vector3 = (geometry["up"] * -0.2 + geometry["east"]).normalized()  # -11.5 deg
 	# Day: no lamp burns, no light adds to the scene; the obstruction lenses flash (white).
@@ -162,6 +163,46 @@ func _check_view(lamps: Dictionary) -> void:
 	_check(boxes.tower_lights == null, "a box site has no lamps")
 
 
+## No lamp floats: each one is within 1 m of the tower box, the tower's foot block, the mount's deck block, the ground or a mast /
+## cross arm (TowerLights.supports()).
+func _check_attached(lights: TowerLights, _geometry_: Dictionary) -> void:
+	var detail: Dictionary = StructureModels.load_for(MODEL_SITE)["detail"]
+	var ax := lights.plan_axes().x
+	var ay := lights.plan_axes().y
+	var corner := lights.corner_site()
+	var width := 13.3
+	var height := 146.0
+	var t: Dictionary = detail["trench"]
+	var m: Dictionary = detail["mount"]
+	var worst := 0.0
+	var floating := 0
+	for fixture: Dictionary in lights.fixtures():
+		var p: Vector3 = fixture["site"]
+		var rel := p - corner
+		var xb := rel.dot(ax)
+		var yb := rel.dot(ay)
+		var best := Vector3(maxf(maxf(-xb, xb - width), 0.0), maxf(maxf(-yb, yb - width), 0.0), maxf(maxf(-p.z, p.z - height), 0.0)).length()
+		var xp := p.dot(ax)
+		var yp := p.dot(ay)
+		var foot := Vector3(maxf(maxf(float(t["foot_near_x_m"]) - xp, xp - float(t["foot_far_x_m"])), 0.0),
+				maxf(absf(yp - float(t["foot_y_m"])) - 0.5 * float(t["foot_width_m"]), 0.0), maxf(maxf(-p.z, p.z - float(t["foot_height_m"])), 0.0))
+		best = minf(best, foot.length())
+		var deck := Vector3(maxf(maxf(-float(m["block_x_back_m"]) - xp, xp - float(m["block_x_tower_m"])), 0.0),
+				maxf(absf(yp) - float(m["block_half_y_m"]), 0.0), maxf(p.z - float(m["deck_height_m"]), 0.0))
+		best = minf(best, deck.length() if p.z >= float(m["deck_height_m"]) - float(m["deck_drop_m"]) else INF)
+		best = minf(best, maxf(p.z, 0.0))  # the ground
+		for support: Dictionary in lights.supports():
+			var a: Vector3 = support["a"]
+			var b: Vector3 = support["b"]
+			var f := clampf((p - a).dot(b - a) / maxf((b - a).length_squared(), 1.0e-9), 0.0, 1.0)
+			best = minf(best, p.distance_to(a + (b - a) * f) - float(support["r"]))
+		worst = maxf(worst, best)
+		if best > 1.0:
+			floating += 1
+			print("    floating: %s at %s (%.2f m from any part)" % [fixture["group"], p, best])
+	_check(floating == 0, "no lamp floats: every one within 1 m of a part (worst %.2f m of %d)" % [worst, lights.fixtures().size()])
+
+
 func _range_of(light: Light3D) -> float:
 	return (light as SpotLight3D).spot_range if light is SpotLight3D else (light as OmniLight3D).omni_range
 
@@ -183,19 +224,19 @@ func _check(ok: bool, what: String) -> void:
 
 ## starbase_olp1's tower as FlightSim.site_tower reports it (site frame), as tower_view_test.gd.
 func _geometry() -> Dictionary:
-	var azimuth := deg_to_rad(315.0)
+	var azimuth := deg_to_rad(349.0)
 	var toward := Vector3(sin(azimuth), cos(azimuth), 0.0)
 	var across := Vector3(-toward.y, toward.x, 0.0)
 	var up := Vector3(0.0, 0.0, 1.0)
-	var centre := toward * 30.0 + up * 73.0
+	var centre := toward * 31.7 + up * 73.0
 	return {
-		"present": true,
+		"present": true, "plan_yaw_deg": 37.4,
 		"origin_itrf_m": Vector3(-5.5e6, -0.7e6, 2.8e6),
 		"east": Vector3(0.0, 1.0, 0.0), "north": Vector3(0.0, 0.0, 1.0), "up": Vector3(1.0, 0.0, 0.0),
 		"tower_direction": toward, "across": across,
-		"tower_center_m": centre, "tower_size_m": Vector3(12.0, 12.0, 146.0),
-		"mount_height_m": 20.0, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
+		"tower_center_m": centre, "tower_size_m": Vector3(13.3, 13.3, 146.0),
+		"mount_height_m": 14.5, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_plus_m": toward * 24.0 + across * 5.8 + up * 95.0,
-		"hinge_minus_m": toward * 24.0 - across * 5.8 + up * 95.0,
+		"hinge_plus_m": toward * 22.3 + across * 5.8 + up * 133.0,
+		"hinge_minus_m": toward * 22.3 - across * 5.8 + up * 133.0,
 	}

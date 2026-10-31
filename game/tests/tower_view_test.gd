@@ -162,6 +162,7 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(pad_bounds.end.y < 0.0 and absf(pad_bounds.get_center().z - float(c["pad_x_m"])) < 0.01, "contact pad at the tip")
 	_check_closed_pose(view, models["detail"], geometry)
 	_check_actuators(view, geometry)
+	_check_corner(view, models, geometry)
 	_check_mount(view, models, geometry)
 	var paint := ((plus_arm.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial).get_shader_parameter("albedo") as Color
 	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
@@ -255,6 +256,64 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 	_check(Basis(geometry["tower_direction"], geometry["across"], Vector3(0.0, 0.0, 1.0)).determinant() > 0.0, "site axes right-handed")
 	var boxes_view := _view(OTHER_SITE)
 	_check(not boxes_view.has_models, "a site without models keeps the old mount cylinder")
+
+
+## The tower box's corner toward the mount (from the physics numbers): the rails, the hoist cables and the QD arm stand on it.
+func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) -> void:
+	var detail: Dictionary = models["detail"]
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
+	var up := Vector3(0.0, 0.0, 1.0)
+	var size: Vector3 = geometry["tower_size_m"]
+	var yaw := deg_to_rad(float(geometry["plan_yaw_deg"]))
+	var ax := toward * cos(yaw) - across * sin(yaw)
+	var ay := toward * sin(yaw) + across * cos(yaw)
+	var half := 0.5 * size.x
+	var corner: Vector3 = (geometry["tower_center_m"] as Vector3) - ax * half - ay * half
+	corner.z = 0.0
+	_check(absf(corner.dot(toward) - 22.4) < 0.1 and absf(absf(corner.dot(across)) - 1.24) < 0.05,
+			"box corner toward the mount at %.2f m along, %.2f m across" % [corner.dot(toward), corner.dot(across)])
+	# Hoist cables: the bundle's centre over the corner rail within 0.5 m, every cable within 0.5 m of the corner.
+	var up_r := Frames.to_render(up)
+	var sum := Vector3.ZERO
+	var cables := 0
+	for c in range(8):
+		var cable := view.get_node_or_null("cable_%d" % c) as MeshInstance3D
+		if cable == null:
+			break
+		var at := cable.position
+		var h := up_r.dot(at)
+		_check(Frames.to_render(corner + up * h).distance_to(at) < 0.5 + 0.3, "hoist cable %d pulls from the corner (%.2f m)" % [c, Frames.to_render(corner + up * h).distance_to(at)])
+		sum += at
+		cables += 1
+	_check(cables == int(detail["carriage"]["cable_count"]), "%d hoist cables" % cables)
+	var centre := sum / float(cables)
+	_check(Frames.to_render(corner + up * up_r.dot(centre)).distance_to(centre) < 0.5, "cable bundle over the corner rail")
+	# Rails: three static nodes' boxes at the corner and its two neighbours, from the plinth top up to the lattice top.
+	var rails := view.get_node_or_null("RailsMount/Rails/rail") as MeshInstance3D
+	_check(rails != null, "corner rails built")
+	if rails != null:
+		var box: AABB = (rails.get_parent().get_parent() as Node3D).transform * ((rails.get_parent() as Node3D).transform * rails.get_aabb())
+		_check(box.size.y > float(detail["tower"]["lattice_height_m"]) - float(detail["tower.plinth"]["height_m"]) - 0.5,
+				"rails %.1f m long" % box.size.y)
+	# QD arm: its head's face 1 m off the 4.5 m hull on the catch axis, the swing turns the head away, the bracket stays.
+	var qd := view.get_node("QdArmMount") as Node3D
+	var root_site := view.qd_arm_root_site(detail, geometry)
+	var heading := (-root_site).normalized()
+	var qd_model := qd.get_node("QdArm") as Node3D
+	var head_x: float = ((qd_model.get_node("hardware") as MeshInstance3D).get_aabb()).end.x
+	var tip := root_site + heading * head_x
+	_check(absf(tip.length() - 4.5 - 1.0) < 0.05, "QD head face %.2f m off the hull" % (tip.length() - 4.5))
+	_check(root_site.length() > 22.3 + 0.5 * size.x, "QD root on the rear side, %.1f m from the axis" % root_site.length())
+	view.qd_arm_swing_rad = deg_to_rad(90.0)
+	var swung_truss := qd_model.get_node("truss") as MeshInstance3D
+	var bracket := qd_model.get_node("bracket") as MeshInstance3D
+	_check(not swung_truss.basis.is_equal_approx(Basis.IDENTITY) and bracket.basis.is_equal_approx(Basis.IDENTITY),
+			"QD swing turns the arm, not the bracket on the tower")
+	var away := (swung_truss.transform * Vector3(head_x, 0.0, 0.0))
+	view.qd_arm_swing_rad = 0.0
+	var home := (swung_truss.transform * Vector3(head_x, 0.0, 0.0))
+	_check(away.distance_to(home) > 0.5 * head_x, "the swung head is %.1f m from the connected one" % away.distance_to(home))
 
 
 ## The actuators run from the carriage to the arm's root column and follow the opening angle.

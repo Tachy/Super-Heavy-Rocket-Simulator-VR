@@ -3,9 +3,12 @@
 # Every value carries [E] (own estimate, method named) or [S] (published, source). Positions of the real lamps are read
 # from NSF / SpaceX photos (git-ignored screenshots/mechazilla/: padb_night_*, spacex-starship-mdr-100.webp,
 # HN635FUWYAAzbOB.webp) at the tower's metric scale (144 m roof, 12 m face), stated per group.
-# Site frame: z above the site origin (the tower's foot), `along_m` along the pad -> tower line from the reference
-# (ref "face": the tower's pad-side face, negative = out toward the pad; ref "axis": the mount axis), `across_m` across it.
-# `mirror` repeats the group at -across_m. `aim` = direction (along, across, up) of the beam, not normalised.
+# Site frame: z above the site origin (the tower's foot). The axes are the measured squares' (mount, trench, tower foot and
+# lattice are parallel, `plan_yaw_deg` off the pad -> tower line): ref "face" = the tower box's pad-side face (`along_m` into the
+# tower from its plane, negative = out; `across_m` from the face's centre), ref "axis" = the ring axis (`along_m` toward the tower
+# side in the squares' axes, `across_m` across). Every group stands on a real part: tower faces and corners, the roof, the foot
+# block, the mount deck, or a mast on the ground (`mast_m` = mast width, tested). `mirror` repeats the group at -across_m.
+# `aim` = direction (along, across, up) of the beam in those axes, not normalised; `aim_at_axis_m` = aim at the ring axis at that height.
 
 [lights]
 dusk_deg = -6.0            # [S] civil dusk / dawn: the Sun's centre 6 deg below the horizon (switch-on / switch-off)
@@ -109,7 +112,7 @@ across_m = 6.4            # [E] lamp layout of this group (comment above)
 z_m = 89.0                # [E] lamp layout of this group (comment above)
 count = 2                 # [E] lamp layout of this group (comment above)
 step_z_m = -6.0           # [E] 89 and 83 m, mdr-100
-aim = [-1.0, -0.35, -0.15]# [E] lamp layout of this group (comment above)
+aim_at_axis_m = 85.0      # [E] the lamps light the ship's upper half from the face's edge, mdr-100
 lumens = 20000.0          # [E] 150 W LED flood class
 cct_k = 5000.0            # [E] slightly warm white of the two lamps in mdr-100
 half_angle_deg = 35.0     # [E] lamp layout of this group (comment above)
@@ -142,7 +145,7 @@ along_m = -1.0            # [E] lamp layout of this group (comment above)
 across_m = 5.0            # [E] lamp layout of this group (comment above)
 z_m = 7.0                 # [E] lamp layout of this group (comment above)
 mirror = true
-aim = [-1.0, -0.4, -0.2]  # [E] lamp layout of this group (comment above)
+aim_at_axis_m = 25.0      # [E] aimed at the mount and the booster's lower half
 lumens = 30000.0          # [E] industrial flood class
 cct_k = 6500.0            # [E] lamp layout of this group (comment above)
 half_angle_deg = 45.0     # [E] lamp layout of this group (comment above)
@@ -156,13 +159,14 @@ lens_m = 0.4              # [E] lamp layout of this group (comment above)
 name = "mount_banks"
 kind = "flood"
 ref = "axis"
-along_m = 8.0             # [E] masts on the tower side of the mount
-across_m = 21.0           # [E] between the mount's base (+-22.3 m) and the ramps' walls
+along_m = 13.0            # [E] masts on the tower side of the mount, beside the block (X 10.3) and short of the tower foot (X 17.6), on the ground
+across_m = 24.0           # [E] outside the tunnel walls (X +-10.3), level with the ramps
+mast_m = 0.6              # [E] mast width, the row of four on a cross arm
 z_m = 27.0                # [E] masts ~25-30 m: the bank looks down on the 20 m deck (photo: the lamps stand level with the deck's upper edge)
 count = 4                 # [E] lamp layout of this group (comment above)
 step_across_m = 1.0       # [E] row of four, ~1 m apart in the photo (lamps ~ 0.7 m)
 mirror = true
-aim = [-0.35, -1.0, -0.33]# [E] lamp layout of this group (comment above)
+aim_at_axis_m = 18.0      # [E] the stack's lower part, the lamps look down on the deck
 lumens = 40000.0          # [E] stadium-class LED panel 300 W
 cct_k = 6500.0            # [E] the cold white of the photo
 half_angle_deg = 30.0     # [E] lamp layout of this group (comment above)
@@ -175,9 +179,9 @@ lens_m = 0.5              # [E] lamp layout of this group (comment above)
 name = "deck_lamps"
 kind = "omni"
 ref = "axis"
-along_m = 12.0            # [E] lamp layout of this group (comment above)
-across_m = 11.0           # [E] lamp layout of this group (comment above)
-z_m = 21.5                # [E] lamp layout of this group (comment above)
+along_m = 9.8             # [E] wall packs on the posts of the deck's tower-side edge (X 10.3), outside the 5.2 m ring
+across_m = 2.0            # [E] lamp layout of this group (comment above)
+z_m = 14.7                # [E] 1.2 m above the deck plane (13.5 m)
 count = 2                 # [E] lamp layout of this group (comment above)
 step_across_m = 6.0       # [E] lamp layout of this group (comment above)
 mirror = true

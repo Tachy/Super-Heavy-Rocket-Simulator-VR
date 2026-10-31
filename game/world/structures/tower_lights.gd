@@ -24,6 +24,9 @@ var config: Dictionary = {}
 var lights: Array[Light3D] = []
 var lenses: Array[MeshInstance3D] = []
 var _fixtures: Array[Dictionary] = []  ## per fixture: {kind, light, lens, cd, tint, position (site frame), aim, lumens}
+var _supports: Array[Dictionary] = []  ## masts and cross arms: {a, b, r} segments in the site frame
+var _axes := Basis()  ## the squares' axes (site frame)
+var _corner_site := Vector3.ZERO  ## the tower box corner toward the mount (z = 0)
 var _night_factor := 0.0
 var _flash_on := false
 var _last_scene_per_cd := -1.0
@@ -129,6 +132,7 @@ func build(lamps: Dictionary, geometry: Dictionary) -> void:
 	lights.clear()
 	lenses.clear()
 	_fixtures.clear()
+	_supports.clear()
 	_shadowed = 0
 	config = lamps
 	_lens_mesh.size = Vector2(1.0, 1.0)
@@ -137,28 +141,52 @@ func build(lamps: Dictionary, geometry: Dictionary) -> void:
 	var across: Vector3 = geometry["across"]
 	var size: Vector3 = geometry["tower_size_m"]
 	var centre: Vector3 = geometry["tower_center_m"]
-	var face_m: float = centre.dot(toward) - 0.5 * size.x
+	var up := Vector3(0.0, 0.0, 1.0)
+	# Every lamp stands on a real part of the Pad B site: the measured squares' axes (the tower box and the mount are parallel
+	# to them, `plan_yaw_deg` off the pad -> tower line) give both references: "face" = the tower box's pad-side face (along =
+	# into the tower from its plane, across from the face centre), "axis" = the ring axis (along / across in the squares' axes).
+	var yaw := deg_to_rad(float(geometry["plan_yaw_deg"]))
+	var ax := toward * cos(yaw) - across * sin(yaw)
+	var ay := toward * sin(yaw) + across * cos(yaw)
+	var half := 0.5 * size.x
+	var corner := centre - ax * half - ay * half
+	corner.z = 0.0
+	_axes = Basis(ax, ay, up)
+	_corner_site = corner
 	var settings: Dictionary = lamps["lights"]
 	var budget := int(settings["max_shadowed"])
 	for group: Dictionary in lamps["lights.group"]:
-		var ref_m := face_m if str(group.get("ref", "face")) == "face" else 0.0
+		var on_face := str(group.get("ref", "face")) == "face"
 		var mirrors := [1.0, -1.0] if bool(group.get("mirror", false)) else [1.0]
 		var count := int(group.get("count", 1))
 		for side: float in mirrors:
+			var first := Vector3.ZERO
+			var last := Vector3.ZERO
 			for i in range(count):
 				var along: float = float(group["along_m"])
 				var lateral: float = float(group["across_m"]) + i * float(group.get("step_across_m", 0.0))
 				var z: float = float(group["z_m"]) + i * float(group.get("step_z_m", 0.0))
-				var site := toward * (ref_m + along) + across * (side * lateral) + Vector3(0.0, 0.0, z)
+				var site: Vector3
+				if on_face:
+					site = corner + ax * along + ay * (half + side * lateral) + up * z
+				else:
+					site = ax * along + ay * (side * lateral) + up * z
 				var aim := Vector3.ZERO
-				if group.has("aim"):
+				if group.has("aim_at_axis_m"):
+					aim = (Vector3(0.0, 0.0, float(group["aim_at_axis_m"])) - site).normalized()
+				elif group.has("aim"):
 					var a: Array = group["aim"]
-					aim = (toward * float(a[0]) + across * (side * float(a[1])) + Vector3(0.0, 0.0, float(a[2]))).normalized()
+					aim = (ax * float(a[0]) + ay * (side * float(a[1])) + Vector3(0.0, 0.0, float(a[2]))).normalized()
 				var shadowed := false
 				if int(group.get("shadow", 0)) > i and budget > _shadowed:
 					shadowed = true
 					_shadowed += 1
 				_add_fixture(group, site, aim, shadowed, settings)
+				if i == 0:
+					first = site
+				last = site
+			if group.has("mast_m"):
+				_add_mast(group, first, last)
 	deck_luminance_cd = DECK_ALBEDO / PI * deck_illuminance_model_lux(Vector3(0.0, 0.0, float(geometry["mount_height_m"])))
 
 
@@ -180,6 +208,46 @@ func deck_illuminance_model_lux(deck_site: Vector3) -> float:
 		else:
 			lux += illuminance_lux(float(fixture["cd"]), distance, cos_incidence)
 	return lux
+
+
+## A mast on the ground behind the middle of a lamp row and a cross arm along it (`mast_m` = the mast's width).
+func _add_mast(group: Dictionary, first: Vector3, last: Vector3) -> void:
+	var width := float(group["mast_m"])
+	var top := maxf(first.z, last.z)
+	var mid := 0.5 * (first + last)
+	var base := Vector3(mid.x, mid.y, 0.0)
+	_supports.append({"a": base, "b": Vector3(mid.x, mid.y, top), "r": 0.5 * width})
+	_supports.append({"a": first, "b": last, "r": 0.5 * width})
+	_support_box(base + Vector3(0.0, 0.0, 0.5 * top), Vector3(width, width, top))
+	var arm := last - first
+	var arm_basis := Basis(arm.normalized(), Vector3(0.0, 0.0, 1.0).cross(arm.normalized()), Vector3(0.0, 0.0, 1.0))
+	_support_box(mid, Vector3(maxf(arm.length(), 0.1) + 0.4, width * 0.6, width * 0.6), arm_basis)
+
+
+func _support_box(centre: Vector3, size_local: Vector3, axes := Basis()) -> void:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(size_local.y, size_local.z, size_local.x)  # local (a, b, c) -> render (b, c, a)
+	var node := MeshInstance3D.new()
+	node.name = "mast_%d" % _supports.size()
+	node.mesh = mesh
+	node.material_override = _housing_material
+	node.basis = Frames.basis_to_render(axes)
+	node.position = Frames.to_render(centre)
+	add_child(node)
+
+
+## Segments {a, b, r} (site frame) that carry lamps without a part of the tower or the mount: masts and their cross arms.
+func supports() -> Array[Dictionary]:
+	return _supports
+
+
+## The squares' axes (columns: along the pad-side face's direction, across, up) and the tower box's corner toward the mount.
+func plan_axes() -> Basis:
+	return _axes
+
+
+func corner_site() -> Vector3:
+	return _corner_site
 
 
 func night_factor_now() -> float:

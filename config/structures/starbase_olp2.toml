@@ -22,7 +22,7 @@ size_m = 3.6              # [E] ~35 px of the 120 px wide face on padb_tower_ful
 
 [tower.plinth]            # closed base block the legs stand on
 height_m = 12.2           # [E] 12.2 +-1 m, foot y 927 on Ship 42 (measurements)
-width_m = 12.4            # [E] a little wider than the 12 m tower face so the legs do not z-fight with it
+width_m = 13.7            # [E] a little wider than the 13.3 m leg box so the legs do not z-fight with it
 
 [tower.cladding]          # solid plates on the pad-side face above the plinth (open lattice above)
 bottom_m = 12.2           # [E] clad face from the plinth top ...
@@ -56,7 +56,7 @@ railing_post_pitch_m = 3.3  # [E] post spacing, not measurable
 
 [[tower.sections]]        # eight identical X-braced sections of three floors ...
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] leg centre to centre 11.9 +-1 m measured, outer 13.3-14; physics box 12 m (measurements)
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] X-brace crossings 7-8 m in the open part (webcast pass; confirmed on the Ship 42 diamonds)
 pattern = "x_brace"       # [E] diamond pattern on all faces: Ship 42, tower_full 2025-08
 leg_profile = "leg"       # [E] see profiles.leg
@@ -64,7 +64,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -72,7 +72,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -80,7 +80,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -88,7 +88,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -96,7 +96,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -104,7 +104,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -112,7 +112,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]
 height_m = 16.05          # [E] 3 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 8.025           # [E] see above
 pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
@@ -120,7 +120,7 @@ brace_profile = "brace"   # [E] see profiles.brace
 
 [[tower.sections]]        # ... and a denser top section of two floors under the roof
 height_m = 10.7           # [E] 2 floors x 5.35 m
-face_width_m = 12.0       # [E] see above
+face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
 pitch_m = 5.35            # [E] one chevron per floor under the roof deck (Ship 42 top: denser members)
 pattern = "chevron"       # [E] Lambda per floor, Ship 42 top
 leg_profile = "leg"       # [E] see profiles.leg
@@ -182,7 +182,7 @@ cap_scale = 1.04          # [E] round end caps a little proud of the tube (user 
 column_x_m = 0.8          # [E] hinge column at the root, side view 2025-08
 column_size_m = 1.4       # [E] heavier than the chords, same view
 strip_width_m = 0.8       # [E] tan strip on the bearing piece only, RGV plan
-pad_x_m = 24.85   # [E] pad ends at the arm tip and spans the catch axis station 24 m: under the fin at the closed pose
+pad_x_m = 23.15   # [E] pad spans the catch axis station 22.3 m (hinge distance) with 0.85 m past it, as before: under the fin at the closed pose
 pad_length_m = 2.1        # [E] +-0.3 m user view, 98 px at 45.6 px/m
 pad_width_m = 0.6         # [E] not measurable (edge-on)
 pad_height_m = 1.2        # [E] +-0.2 m user view, 55 px
@@ -207,37 +207,41 @@ chord_profile = "chopstick_chord"   # [E] see profiles
 brace_profile = "chopstick_brace"   # [E] see profiles
 thin_profile = "chopstick_thin"     # [E] see profiles
 
-[carriage]                # frame across the tower at the arm roots
+[carriage]                # two collars wrapping the tower corner toward the mount on corner rails, hinge columns between them (CRL05690, DSC06000)
+collar_gap_m = 13.0       # [E] +-3 m upper chord (walkway level) to lower chord: ~600 px between the two collars on crop_rail_colleen at ~46 px/m (the 5.35 m plate course rows as scale)
+collar_chord_m = 0.5      # [E] collar chord, ends inside the 0.3 m tolerance of the rails
+truss_depth_m = 1.8       # [E] lower collar is a truss, 1.8 m deep, CRL05690
+truss_panel_m = 2.2       # [E] its diagonal pitch
+rail_size_m = 0.4         # [E] rail box on the corner leg, not measurable
+rail_offset_m = 0.2       # [E] rail axis outside the face line: the rails hug the corner
+hinge_column_m = 0.5      # [E] vertical hinge pin column between the collars
 drum_gap_m = 0.6          # [E] gap between the carriage top and the sheave block
-width_m = 13.5            # [E] spans the tower, Ship 42 (measurements)
 top_z_m = 1.0             # [E] frame top above the deck plane, NSF 2026-05
-bottom_depth_m = 8.0      # [E] about 9 m high in all, Ship 42
-frame_x_m = 0.8           # [E] frame plane in front of the hinge line (the line is the physics box's face, the frame stays outside it)
-beam_m = 1.0              # [E] reads as ~1 m box beams on the carriage photo 2025-12
-hinge_y_m = 5.8   # [E] on the physics pivot 5.8 m = arm_closed_gap / 2 + arm_width / 2 (the real corner hinges read 6.75 m: not used)
-hinge_lower_m = 7.0       # [E] lower hinge arm, same frame
+beam_m = 1.0              # [E] outrigger from the hinge column to the collar, ~1 m box beams on the carriage photo 2025-12
+hinge_y_m = 5.8   # [E] hinge columns on the physics pivots 5.8 m = arm_closed_gap / 2 + arm_width / 2 (the real corner hinges read 6.75 m: not used); the tower corner lies 1.2 m across the catch line, the hinges stay on the physics points
 actuator_anchor_x_m = 0.8   # [E] fixed end on the carriage frame plane, NSF 2026-05 (hinge / actuator pylon at the root)
-actuator_anchor_in_m = 3.5  # [E] inboard of the hinge line, not measurable
-actuator_anchor_depth_m = 7.0  # [E] below the deck plane, on the lower hinge arm
+actuator_anchor_in_m = 1.2  # [E] inboard of the hinge line: the white drum sits on the hinge pylon, NSF 2026-05 / CRL05690
+actuator_anchor_depth_m = 6.0  # [E] below the deck plane: the drum at mid height between the collars
 actuator_lug_x_m = 3.0      # [E] lug on the arm's inclined root column, along the arm
 actuator_lug_out_m = 1.6    # [E] on the outer root column's line at this depth
 actuator_lug_depth_m = 8.6  # [E] below the deck plane: on the column's line (bend 5.2 m to foot 17 m)
 actuator_barrel_m = 0.5     # [E] ~20 px at 40.6 px/m: electromechanical (screw) actuator, NSF 2026-05, not hydraulic
 actuator_rod_m = 0.3        # [E] same view
 actuator_barrel_length_m = 2.4  # [E] fixed length of the barrel, the rod takes the rest
-platform_reach_m = 1.7    # [E] walkway beam past the corner, NSF 2026-05 (60 px at 36 px/m)
-platform_width_m = 1.6    # [E] not measurable
+platform_width_m = 1.6    # [E] walkway on the upper collar, CRL05690 (not measurable)
 drum_diameter_m = 3.8     # [E] +-0.4 m sheave block, carriage photo 2025-12 with a worker (1.8 m = 180 px)
 drum_width_m = 2.5        # [E] same photo, cheeks NSF 2026-03
 cable_count = 4           # [E] the photo shows 8+ thin cables; 4 at the size that reads
 cable_size_m = 0.16       # [E] ~6 px at 40.6 px/m
-cable_spacing_m = 0.7     # [E] same view
+cable_spacing_m = 0.3     # [E] the cables hang side by side in one bundle at the corner, CRL05690 (<= 0.5 m over the rail, test)
 
 [qd_arm]                  # THE ship QD arm (one arm: measurements "Arm research", no separate upper arm exists)
-deck_m = 86.8             # [E] +-3 m tip deck: Ship 42 lower structure y 445 at 6.4 px/m (88 m), f14 frames at the ring
-reach_m = 18.5            # [E] 1 m short of the hull (face 24 m from the axis, hull 4.5 m): static, deviation table
-root_length_m = 12.0      # [E] 64 % of the reach: QD photo 2026-05
-root_width_m = 7.0        # [E] not measurable; fits between the closed chopsticks (9.6 m)
+deck_m = 81.3             # [E] +-3 m tip deck: Ship 42 y 445 at 6.4 px/m gave 86.8 with the 20 m deck; the ship stands 5.5 m lower on the 14.5 m ring, so does its QD station
+head_gap_m = 1.0            # [E] head face to the 4.5 m hull; the reach follows from the root position (mechazilla_layout.qd_geometry)
+root_x_m = -3.0           # [E] +-1.5 m swing axis in the tower box axes (X = along the mount-facing face B), beyond the face: CRL05690 / 06022 crops, QD on the rear side
+root_beyond_m = 2.0       # [E] +-1.5 m swing axis beyond the rear face of the box, same crops
+root_length_m = 17.0      # [E] 64 % of the 26.5 m reach: QD photo 2026-05
+root_width_m = 3.0        # [E] the walkway bridge is about 1/4 of the tower face wide, crop_qd_06022
 tip_width_m = 4.0         # [E] not measurable
 root_rise_m = 3.5         # [E] top chord above the tip deck at the root, QD photo
 root_depth_m = 5.5        # [E] lower chord below the tip deck at the root, QD photo
@@ -312,7 +316,7 @@ map_size = 1024           # [E] texels per side of the plate map
 centre_m = 25.5           # [E] middle of a ramp: block end 9.4 m + half of the 32.1 m ramp
 width_m = 15.2            # [E] +-1 m tunnel inner width, the same under the block and on the ramps (user ruling 2026-10-31, DSC05957)
 length_m = 32.1           # [E] +-2 m block end to the ramp end at Y +-41.5, same photo
-wall_thickness_m = 1.4    # [E] +-0.5 m wedge walls outside the block: inner face X 7.6, outer X 9.0, DSC05957
+wall_height_m = 0.5       # [E] user estimate 2026-10-31 (CRL05690): small wall along the open trench edge from the end of the annex slope to the ramp end
 hardstand_outline_m = "-48,-40 -20,-85 92,-85 112,-50 112,70 10,85 -48,35" # [E] +-15 m convex apron outline, x,y pairs, from images.jpeg, ship39, site 2025-09 (wide-angle views, low confidence); Task 5 redraws it
 hardstand_lift_m = 0.05   # [E] above the terrain plateau, against z-fighting
 concrete_tile_m = 48.0    # [E] period of the concrete map: 6 slabs, long so the stains do not repeat visibly

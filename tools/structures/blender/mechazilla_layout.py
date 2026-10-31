@@ -7,8 +7,10 @@ A member is (node, kind, size_m, p0, p1, size_y_m) in the model frame; size_y_m 
 mesh nodes, one material each.
 Chopstick frame: hinge (physics pivot) at the origin, the bearing piece along +X, +Y toward the catch axis (the arm
 closes that way; the game mirrors the -across arm), strip top Z = 0 (the plane the catch pins land on).
-Carriage frame: X toward the pad, Y across, Z up, origin in the hinge line, on the tower's centre plane, in the deck plane.
-QD arm frame: X toward the pad, Y across, Z up, origin at the tower's pad-side face, on the centre plane, in the tip deck.
+Carriage frame (also the rails'): X toward the pad, Y = -across, Z up, origin on the line to the catch axis at the hinge
+distance, between the two physics hinges, in the deck plane (carriage offset 0). The tower box (physics `[site.tower]`, yaw
+`plan_yaw_deg`) is drawn on it: its corner toward the mount lies 1.2 m across the line, the hinges stay on the physics points.
+QD arm frame: X along the arm toward the catch axis, Y left of it, Z up, origin on the swing axis at the tip deck's height.
 """
 from __future__ import annotations
 
@@ -157,63 +159,193 @@ def chopstick(detail: dict) -> list:
     return ms
 
 
+def _unit_axes(detail: dict):
+    """Box axes of the tower in the carriage frame (X, Y): ex along the face from the corner toward the mount, ey along the other."""
+    yaw = math.radians(detail["site_tower"]["plan_yaw_deg"])
+    c, s = math.cos(yaw), math.sin(yaw)
+    return (-c, s), (-s, -c)
+
+
+def tower_corner(detail: dict) -> dict:
+    """The box corner toward the mount (C) in the carriage frame, the face axes and the face width W (physics box)."""
+    t = detail["site_tower"]
+    ex, ey = _unit_axes(detail)
+    half, centre = 0.5 * t["width_m"], (t["hinge_distance_m"] - t["distance_m"], 0.0)
+    corner = (centre[0] - half * (ex[0] + ey[0]), centre[1] - half * (ex[1] + ey[1]))
+    return {"c": corner, "ex": ex, "ey": ey, "w": t["width_m"]}
+
+
+def rail_points(detail: dict) -> dict:
+    """Axes (X, Y) of the three corner rails: on the corner toward the mount and on both neighbour corners, each
+    `rail_offset_m` outside the face line."""
+    g, r = tower_corner(detail), detail["carriage"]["rail_offset_m"]
+    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
+    return {"corner": (cx - r * (ex[0] + ey[0]), cy - r * (ex[1] + ey[1])),
+            "a": (cx + w * ex[0] - r * ey[0], cy + w * ex[1] - r * ey[1]),
+            "b": (cx + w * ey[0] - r * ex[0], cy + w * ey[1] - r * ex[1])}
+
+
+def collar_levels(detail: dict) -> tuple:
+    """Chord heights (Z) of the upper and the lower collar."""
+    k = detail["carriage"]
+    return k["top_z_m"] - 0.5 * k["collar_chord_m"], k["top_z_m"] - k["collar_gap_m"]
+
+
+def hinge_points(detail: dict) -> list:
+    return [(0.0, -detail["carriage"]["hinge_y_m"]), (0.0, detail["carriage"]["hinge_y_m"])]
+
+
+def hoist_anchor(detail: dict) -> tuple:
+    """Plan point (X, Y) the hoist cables pull from: straight above the corner rail."""
+    return rail_points(detail)["corner"]
+
+
+def rails(detail: dict) -> list:
+    """Static corner rails of the carriage: three vertical boxes from the plinth top to the lattice top (carriage frame, offset 0)."""
+    k, t = detail["carriage"], detail["site_tower"]
+    z0 = detail["tower"]["plinth"]["height_m"] - t["catch_height_m"]
+    z1 = detail["tower"]["lattice_height_m"] - t["catch_height_m"]
+    return [_member("rail", "rect", k["rail_size_m"], (x, y, z0), (x, y, z1), k["rail_size_m"])
+            for x, y in rail_points(detail).values()]
+
+
+def carriage_faces(detail: dict) -> list:
+    """(from rail, to rail, face direction, other axis) of the two side faces the collars wrap."""
+    g, rp = tower_corner(detail), rail_points(detail)
+    return [(rp["corner"], rp["a"], g["ex"], g["ey"]), (rp["corner"], rp["b"], g["ey"], g["ex"])]
+
+
 def carriage(detail: dict) -> list:
     k, prof = detail["carriage"], detail["profiles"]
     chord = prof[detail["chopstick"]["chord_profile"]]["size_m"]
-    half, top, bottom = k["width_m"] / 2.0, k["top_z_m"], -k["bottom_depth_m"]
-    x_face = k["frame_x_m"]
+    g, rp = tower_corner(detail), rail_points(detail)
+    ex, ey, w = g["ex"], g["ey"], g["w"]
+    z_up, z_lo = collar_levels(detail)
+    top, cc = k["top_z_m"], k["collar_chord_m"]
+    faces = carriage_faces(detail)
     ms = []
-    box = k["beam_m"]
 
-    def beam(node, p0, p1, size=box):
-        ms.append(_member(node, "rect", size, p0, p1, size))
-
-    for z in (top - box / 2.0, bottom + box / 2.0):
-        beam("frame", (x_face, -half, z), (x_face, half, z))
-    for y in (-half, half):
-        beam("frame", (x_face, y, bottom), (x_face, y, top))
-    beam("frame", (x_face, -half, bottom), (x_face, 0.0, top), box * 0.6)
-    beam("frame", (x_face, half, bottom), (x_face, 0.0, top), box * 0.6)
-    # Hinge frame at each corner: a box out to the hinge line (the arm-following actuator is drawn by the game).
-    for sign in (-1.0, 1.0):
-        y = sign * k["hinge_y_m"]
-        beam("frame", (x_face, y, -box / 2.0), (0.0, y, -box / 2.0), box * 1.2)
-        beam("frame", (x_face, y, bottom + box / 2.0), (0.0, y, -k["hinge_lower_m"]), box * 0.8)
-    # Platforms: the walkway beam across the face reaching past the corner, with railing.
-    p_end = half + k["platform_reach_m"]
-    ms.append(_member("frame", "rect", k["platform_width_m"], (x_face, -p_end, top + 0.1), (x_face, p_end, top + 0.1),
-                      0.2))
-    for sign in (-1.0, 1.0):
-        y0 = sign * (k["width_m"] / 2.0 + k["platform_reach_m"])
-        ms.append(_member("hardware", "tube", 0.08, (x_face + k["platform_width_m"] / 2.0, y0, top + 1.2),
-                          (x_face + k["platform_width_m"] / 2.0, 0.0, top + 1.2)))
-    # The drum / sheave block above the carriage with the hoist cables (carriage photo 2025-12: worker for scale).
-    d, w, z_d = k["drum_diameter_m"], k["drum_width_m"], top + k["drum_diameter_m"] / 2.0 + k["drum_gap_m"]
-    ms.append(_member("frame", "tube", d, (x_face, -w / 2.0, z_d), (x_face, w / 2.0, z_d)))
-    beam("frame", (x_face, 0.0, top), (x_face, 0.0, z_d), chord)
-    return ms
-
-
-def qd_arm(detail: dict) -> list:
-    q, prof = detail["qd_arm"], detail["profiles"]
-    chord, brace = prof[detail["chopstick"]["chord_profile"]]["size_m"] * 0.7, prof["chopstick_brace"]["size_m"] * 0.6
-    reach, x_step = q["reach_m"], q["root_length_m"]
-    half_root, half_tip = q["root_width_m"] / 2.0, q["tip_width_m"] / 2.0
-    rise, low_tip, low_root, foot = q["root_rise_m"], -q["tip_depth_m"], -q["root_depth_m"], -q["foot_depth_m"]
-    ms = []
+    def rect(node, p0, p1, size, size_y=None):
+        ms.append(_member(node, "rect", size, p0, p1, size if size_y is None else size_y))
 
     def tube(node, size, p0, p1):
         ms.append(_member(node, "tube", size, p0, p1))
 
+    def at(xy, z):
+        return (xy[0], xy[1], z)
+
+    # Two collars, each wrapping the corner and both side faces, from the corner rail to the neighbour rails.
+    for z in (z_up, z_lo):
+        for p0, p1, _, _ in faces:
+            rect("collar", at(p0, z), at(p1, z), cc)
+    # The lower collar is a truss (second chord and diagonals).
+    z_hi = z_lo + k["truss_depth_m"]
+    n = max(2, round(w / k["truss_panel_m"]))
+    for p0, p1, _, _ in faces:
+        rect("frame", at(p0, z_hi), at(p1, z_hi), 0.8 * cc)
+        for i in range(n):
+            a = tuple(p0[j] + (p1[j] - p0[j]) * i / n for j in range(2))
+            b = tuple(p0[j] + (p1[j] - p0[j]) * (i + 1) / n for j in range(2))
+            lo, hi = (a, b) if i % 2 == 0 else (b, a)
+            tube("frame", 0.3, at(lo, z_lo), at(hi, z_hi))
+    # Hinge columns between the collars on the physics hinge points, an outrigger from each to the nearer face's chords.
+    for hx, hy in hinge_points(detail):
+        tube("frame", k["hinge_column_m"], (hx, hy, z_lo), (hx, hy, top))
+        best = None
+        for _, _, axis, other in faces:
+            rel = (hx - g["c"][0], hy - g["c"][1])
+            along = rel[0] * axis[0] + rel[1] * axis[1]
+            out = -(rel[0] * other[0] + rel[1] * other[1])
+            if 0.0 <= along <= w and out > 0.0 and (best is None or out < best[0]):
+                best = (out, along, axis, other)
+        assert best, "a hinge lies in front of neither side face"
+        _, along, axis, other = best
+        foot = (g["c"][0] + along * axis[0] - k["rail_offset_m"] * other[0],
+                g["c"][1] + along * axis[1] - k["rail_offset_m"] * other[1])
+        for z in (z_up, z_lo):
+            rect("frame", at((hx, hy), z), at(foot, z), k["beam_m"], cc)
+    # Walkway on the upper collar, outside, with a railing.
+    for p0, p1, _, other in faces:
+        out = k["rail_offset_m"] + 0.5 * k["platform_width_m"]
+        q0 = (p0[0] - out * other[0], p0[1] - out * other[1])
+        q1 = (p1[0] - out * other[0], p1[1] - out * other[1])
+        z_deck = z_up + 0.5 * cc + 0.05
+        ms.append(_member("hardware", "rect", k["platform_width_m"], at(q0, z_deck), at(q1, z_deck), 0.1))
+        r0 = (p0[0] - 2.0 * out * other[0], p0[1] - 2.0 * out * other[1])
+        r1 = (p1[0] - 2.0 * out * other[0], p1[1] - 2.0 * out * other[1])
+        tube("hardware", 0.08, at(r0, z_up + 1.2), at(r1, z_up + 1.2))
+    # White actuator drum on each hinge (the arm's rod pulls from its anchor, `actuator_anchor_*`).
+    for sign in (-1.0, 1.0):
+        y = sign * (k["hinge_y_m"] - k["actuator_anchor_in_m"])
+        tube("hardware", k["actuator_barrel_m"] * 3.0, (k["actuator_anchor_x_m"] - 1.2, y, -k["actuator_anchor_depth_m"]),
+             (k["actuator_anchor_x_m"] + 0.4, y, -k["actuator_anchor_depth_m"]))
+    # The sheave block above the corner, outside the face (its tangent is the rail line): the hoist cables pull from it
+    # straight up at the rail (carriage photo 2025-12: worker for scale).
+    d, wd = k["drum_diameter_m"], k["drum_width_m"]
+    nx, ny = -(ex[0] + ey[0]), -(ex[1] + ey[1])
+    nl = math.hypot(nx, ny)
+    nx, ny = nx / nl, ny / nl
+    z_d = top + k["drum_gap_m"] + d / 2.0
+    centre = (rp["corner"][0] + 0.5 * d * nx, rp["corner"][1] + 0.5 * d * ny)
+    tx, ty = -ny, nx
+    tube("frame", d, (centre[0] - 0.5 * wd * tx, centre[1] - 0.5 * wd * ty, z_d),
+         (centre[0] + 0.5 * wd * tx, centre[1] + 0.5 * wd * ty, z_d))
+    tube("frame", chord, at(centre, top), at(centre, z_d))
+    tube("frame", chord, at(rp["corner"], z_up), at(centre, top))
+    return ms
+
+
+HULL_RADIUS_M = 4.5  # [S] 9 m booster diameter
+
+
+def qd_geometry(detail: dict) -> dict:
+    """The ship QD arm on the tower's rear side in the site frame (X toward the pad, Y across the line): the swing axis
+    `root`, the heading to the catch axis, the reach to the head's face, the tower corner the bearing bracket stands on
+    (`corner_model`, in the arm frame)."""
+    t, q = detail["site_tower"], detail["qd_arm"]
+    yaw = math.radians(t["plan_yaw_deg"])
+    c, s = math.cos(yaw), math.sin(yaw)
+    ex, ey = (c, -s), (s, c)  # box axes in (toward, across)
+    half, w = 0.5 * t["width_m"], t["width_m"]
+    corner0 = (t["distance_m"] - half * (ex[0] + ey[0]), -half * (ex[1] + ey[1]))
+    corner = (corner0[0] + w * ey[0], corner0[1] + w * ey[1])  # the neighbour corner on the rear side
+    bx, by = q["root_x_m"], w + q["root_beyond_m"]
+    root = (corner0[0] + bx * ex[0] + by * ey[0], corner0[1] + bx * ex[1] + by * ey[1])
+    dist = math.hypot(*root)
+    heading = (-root[0] / dist, -root[1] / dist)
+    left = (-heading[1], heading[0])
+    rel = (corner[0] - root[0], corner[1] - root[1])
+    return {"root": root, "heading": heading, "left": left, "distance_m": dist, "reach_m": dist - HULL_RADIUS_M - q["head_gap_m"],
+            "corner_model": (rel[0] * heading[0] + rel[1] * heading[1], rel[0] * left[0] + rel[1] * left[1])}
+
+
+def qd_swung(x: float, y: float, swing_rad: float) -> tuple:
+    """Plan point of the arm frame after a swing: positive turns the head away from the catch line (to the right, -Y)."""
+    c, s = math.cos(swing_rad), math.sin(swing_rad)
+    return (x * c + y * s, -x * s + y * c)
+
+
+def qd_arm(detail: dict, swing_rad: float = 0.0) -> list:
+    q, prof = detail["qd_arm"], detail["profiles"]
+    chord, brace = prof[detail["chopstick"]["chord_profile"]]["size_m"] * 0.7, prof["chopstick_brace"]["size_m"] * 0.6
+    geo = qd_geometry(detail)
+    reach, x_step = geo["reach_m"], q["root_length_m"]
+    half_root, half_tip = q["root_width_m"] / 2.0, q["tip_width_m"] / 2.0
+    rise, low_tip, low_root, foot = q["root_rise_m"], -q["tip_depth_m"], -q["root_depth_m"], -q["foot_depth_m"]
+    moving, fixed = [], []
+
+    def tube(node, size, p0, p1):
+        moving.append(_member(node, "tube", size, p0, p1))
+
     def box(node, a, b, w, h):
-        ms.append(_member(node, "rect", w, a, b, h))
+        moving.append(_member(node, "rect", w, a, b, h))
 
     n = max(2, round(x_step / q["panel_m"]))
     for side in (-1.0, 1.0):
         y = side * half_root
         tube("truss", chord, (0.0, y, rise), (x_step, y, 0.0))  # top chord falling to the tip part
         tube("truss", chord, (0.0, y, low_root), (x_step, y, low_tip))  # lower chord
-        tube("truss", chord, (0.0, y, low_root), (0.0, y, foot))  # column at the face, the big curved tube's line
+        tube("truss", chord, (0.0, y, low_root), (0.0, y, foot))  # column at the swing bearing
         tube("truss", chord, (x_step * 0.45, y, low_root * 0.75 + low_tip * 0.25), (0.0, y, foot))
         tube("truss", brace, (0.0, y, rise), (0.0, y, low_root))
         for i in range(n):
@@ -225,9 +357,11 @@ def qd_arm(detail: dict) -> list:
             lo, hi = ((x0, z_b0), (x1, z_t1)) if i % 2 else ((x0, z_t0), (x1, z_b1))
             tube("truss", brace, (lo[0], y, lo[1]), (hi[0], y, hi[1]))
     # White cabinets inside the root truss (QD photo 2026-05).
-    for side in (-1.0, 1.0):  # two small cabinets beside the centre line, not one slab across the root
+    for side in (-1.0, 1.0):
         box("hardware", (x_step * 0.25, side * half_root * 0.5, rise * 0.4 - 1.2),
-            (x_step * 0.5, side * half_root * 0.5, rise * 0.25 - 1.2), 1.8, 2.4)
+            (x_step * 0.5, side * half_root * 0.5, rise * 0.25 - 1.2), 0.8, 2.4)
+    # Swing bearing: a round drum on the axis under the root.
+    tube("hardware", q["root_width_m"] * 0.8, (0.0, 0.0, low_root - 0.5), (0.0, 0.0, low_root))
     # Tip part: a shallow lattice platform, deck on top, stair up to it, connector head at the end.
     for side in (-1.0, 1.0):
         y = side * half_tip
@@ -242,4 +376,11 @@ def qd_arm(detail: dict) -> list:
     for side in (-1.0, 1.0):
         tube("hardware", 0.08, (0.0, side * half_root, rise + 1.1), (x_step, side * half_root, 1.1))
         tube("hardware", 0.08, (x_step, side * half_tip, 1.1), (reach, side * half_tip, 1.1))
-    return ms
+    # Fixed bracket from the swing bearing to the tower's rear corner (does not swing): beams at the top and the foot of the root.
+    cx, cy = geo["corner_model"]
+    for z in (rise, low_root):
+        fixed.append(_member("bracket", "rect", 0.8, (0.0, 0.0, z), (cx, cy, z), 0.8))
+    fixed.append(_member("bracket", "tube", 1.0, (0.0, 0.0, low_root - 0.5), (0.0, 0.0, rise + 0.5)))
+    swung = [(m[0], m[1], m[2], (*qd_swung(m[3][0], m[3][1], swing_rad), m[3][2]),
+              (*qd_swung(m[4][0], m[4][1], swing_rad), m[4][2]), m[5]) for m in moving]
+    return swung + fixed

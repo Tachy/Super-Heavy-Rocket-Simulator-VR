@@ -164,16 +164,31 @@ def test_floor_is_straight_and_level_under_the_ring(detail, trench, mount):
     assert "ridge_top_m" not in detail["mount"]
 
 
-def test_trench_walls_are_wedges(detail, trench):
+def test_trench_wall_falls_with_the_annex_then_runs_level(detail, trench):
     sh = ml.Shape(detail)
-    tops = [p for v, _ in trench.nodes["wall"] for p in v if p[2] > 0.0]
-    assert max(p[2] for p in tops) == pytest.approx(sh.deck_z)  # from the deck height at the block ...
-    for p in tops:
-        assert p[2] == pytest.approx(sh.deck_z * (1.0 - (abs(p[1]) - sh.half_y) / (ml.ramp_end_m(detail) - sh.half_y)))
-    ends = [p for v, _ in trench.nodes["wall"] for p in v if abs(abs(p[1]) - ml.ramp_end_m(detail)) < 1e-9]
-    assert ends and all(abs(p[2]) < 1e-9 for p in ends)  # ... to the ground at the ramp end
-    outer = max(abs(p[0]) for v, _ in trench.nodes["wall"] for p in v)
-    assert outer == pytest.approx(0.5 * detail["trench"]["width_m"] + detail["trench"]["wall_thickness_m"])
+    lip = detail["trench"]["wall_height_m"]  # 0.5 m (user estimate)
+    assert sh.lip_y == detail["mount"]["annex_half_y_m"]  # the slope ends where the annex footprint ends
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            side = [p for v, _ in trench.nodes["wall"] for p in v if p[0] * sx > 0.0 and p[1] * sy > 0.0 and p[2] > 0.0]
+            assert max(p[2] for p in side) == pytest.approx(sh.deck_z)  # deck height at the block edge ...
+            for p in side:
+                y = abs(p[1])
+                if y <= sh.lip_y + 1e-9:  # ... falling linearly to the 0.5 m top at the annex end
+                    assert p[2] <= sh.deck_z - (sh.deck_z - lip) * (y - sh.half_y) / (sh.lip_y - sh.half_y) + 1e-6
+                else:  # then level at 0.5 m to the ramp end
+                    assert p[2] == pytest.approx(lip)
+            at_lip = [p for p in side if abs(abs(p[1]) - sh.lip_y) < 1e-9]
+            assert at_lip and all(p[2] == pytest.approx(lip) for p in at_lip)
+            ends = [p for p in side if abs(abs(p[1]) - ml.ramp_end_m(detail)) < 1e-9]
+            assert ends and all(p[2] == pytest.approx(lip) for p in ends)  # the floor has come up to the ground there
+    assert lip == pytest.approx(0.5)
+    # The outer faces are flush with the deck plate's side edges (user 2026-10-31), both sides, 0.01 m.
+    xs = [p[0] for v, _ in trench.nodes["wall"] for p in v]
+    assert min(xs) == pytest.approx(-detail["mount"]["block_x_back_m"], abs=0.01)
+    assert max(xs) == pytest.approx(detail["mount"]["block_x_tower_m"], abs=0.01)
+    inner = sorted({round(abs(x), 6) for x in xs} - {round(sh.half_w, 6)})
+    assert 0.5 * detail["trench"]["width_m"] in {abs(x) for x in xs}  # inner faces on the tunnel's width
 
 
 def test_two_exit_ramps_opposite_and_perpendicular_to_the_tower_line(detail, trench):
@@ -219,7 +234,8 @@ def test_qd_heads_stand_on_the_ring_under_their_hoods(detail, mount):
 
 def test_no_bar_outside_the_apron(detail, trench):
     lo, hi = trench.extent("wall")
-    assert max(abs(lo[0]), abs(hi[0])) == pytest.approx(0.5 * detail["trench"]["width_m"] + detail["trench"]["wall_thickness_m"])
+    assert lo[0] == pytest.approx(-detail["mount"]["block_x_back_m"], abs=0.01)
+    assert hi[0] == pytest.approx(detail["mount"]["block_x_tower_m"], abs=0.01)
     assert hi[1] == pytest.approx(ml.ramp_end_m(detail))  # the walls end with the ramp: no separate long wall
 
 
@@ -229,12 +245,11 @@ def test_hardstand_surrounds_the_site_and_leaves_the_pit_open(detail, trench):
     assert lo[2] == hi[2] == pytest.approx(detail["trench"]["hardstand_lift_m"])
     assert lo[0] < -sh.annex_x - 10.0 and hi[0] > detail["trench"]["foot_x_m"] + 30.0
     assert lo[1] < -ml.ramp_end_m(detail) - 10.0 and hi[1] > ml.ramp_end_m(detail) + 10.0
-    reach = sh.half_w + sh.wall_t
     for verts, _ in trench.nodes["hardstand"]:
         cx = sum(v[0] for v in verts) / len(verts)
         cy = sum(v[1] for v in verts) / len(verts)
         assert not (-sh.x_back < cx < sh.x_front and abs(cy) < sh.half_y), "hardstand over the block"
-        assert not (abs(cx) < reach and abs(cy) < ml.ramp_end_m(detail)), "hardstand over a ramp"
+        assert not (sh.wall_out[-1.0] < cx < sh.wall_out[1.0] and abs(cy) < ml.ramp_end_m(detail)), "hardstand over a ramp"
 
 
 def test_tower_foot_is_at_the_measured_place_and_off_the_mount(detail, trench):
