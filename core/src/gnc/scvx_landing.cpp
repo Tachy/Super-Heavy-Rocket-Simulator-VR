@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/sea_reach.hpp"
 
 namespace starsim::gnc {
 
@@ -132,6 +133,38 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     return r;
 }
 
+void ScvxLandingGuidance::check_sea_reach(const DescentSnapshot& snapshot, int engine_set) {
+    if (!aborting_ || sea_reach_checked_ || !sea_required_ || !site_.sea) return;
+    sea_reach_checked_ = true;  // once, at the abort: the plans then fly it (their cost is not this bound)
+    const auto& x = snapshot.initial;
+    const auto& target = snapshot.abort_target;
+    const Vec3 seaward = math::normalized(target.sea_target_m);
+    const auto& set = snapshot.model.engine_sets[static_cast<size_t>(engine_set)];
+    const auto& limits = parameters_.settings.limits;
+    SeaReachInput in;
+    in.distance_m = target.sea_min_distance_m - dot(state_position(x), seaward);
+    in.seaward_speed_mps = dot(state_velocity(x), seaward);
+    in.height_m = x[descent_index::position] - target.ground_cg_height_m;
+    in.sink_mps = -x[descent_index::velocity];
+    in.mass_kg = x[descent_index::mass];
+    in.max_accel_mps2 = set.thrust_max_n / in.mass_kg;
+    in.exhaust_velocity_mps = 1.0 / set.mass_flow_per_thrust_s_m;
+    in.gravity_mps2 = norm(snapshot.model.gravity_mps2);
+    in.tilt_max_rad = limits.tilt_max_rad[static_cast<size_t>(engine_set)];
+    in.tilt_rate_radps = limits.rate_max_radps[static_cast<size_t>(engine_set)];
+    const auto estimate = estimate_sea_reach(in);
+    // The propellant above the floor the abort plans keep (the part of the reserve they may not use).
+    const double floor_kg = snapshot.min_mass_kg - parameters_.abort_reserve_fraction * parameters_.snapshot.reserve_kg;
+    const double usable_kg = in.mass_kg - floor_kg;
+    if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: the reach decision
+        std::printf("[reach] distance %.0f speed %.1f h %.0f sink %.1f m %.0f: T %.1f s dv %.0f need %.0f usable %.0f kg\n",
+                    in.distance_m, in.seaward_speed_mps, in.height_m, in.sink_mps, in.mass_kg, estimate.time_s,
+                    estimate.delta_v_mps, estimate.propellant_kg, usable_kg);
+    }
+    if (estimate.propellant_kg * parameters_.sea_reach_margin <= usable_kg) return;
+    sea_required_ = false;
+}
+
 void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking
         const auto& p = *outcome.plan;
@@ -159,6 +192,9 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     if (outcome.plan->converged && !beyond) return;
     ++stats_.failures;
     if (outcome.plan->goal == DescentGoal::Abort && sea_required_) {
+        // One failed re-plan does not make the water unreachable while a converged abort plan to it is being flown
+        // (a far shore leaves little margin: the re-plan at the end of the tilt-up stalls for a cycle or two).
+        if (plan_ && plan_->goal == DescentGoal::Abort && ++consecutive_unconverged_ < parameters_.unconverged_before_abort) return;
         // The water beyond the shoreline is out of reach from here: the next abort plans only pull towards it.
         sea_required_ = false;
         next_request_ = plan_epoch_;
@@ -194,6 +230,7 @@ bool ScvxLandingGuidance::request_abort() {
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
     const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
     model_ = snapshot.model;
+    check_sea_reach(snapshot, 0);  // an abort requested before the first plan
     auto outcome = replanner_.plan_now(request(snapshot, 0));
     if ((!outcome.plan->converged || beyond_limits(*outcome.plan)) && site_.sea && !aborting_) {
         if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: the refused catch plan
@@ -209,6 +246,7 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
         ++stats_.plans;
         ++stats_.failures;
         aborting_ = true;
+        check_sea_reach(snapshot, 0);
         outcome = replanner_.plan_now(request(snapshot, 0));
     }
     if (!outcome.plan->converged && aborting_ && sea_required_) {
@@ -253,6 +291,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
         const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
         model_ = snapshot.model;
         const int phase = std::max(engine_set_, plan_->phase_at(t + parameters_.plan_latency_s));
+        check_sea_reach(snapshot, phase);
         replanner_.submit(request(snapshot, phase));
         next_request_ = epoch + parameters_.replan_interval_s;
     }
@@ -311,8 +350,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
     if (site_.catch_target && !aborting_) {
         const Vec3 up_itrf = frame_.direction_to_itrf({1.0, 0.0, 0.0});
         const Vec3 body_y = transpose(earth.rotation) * body.state().attitude.rotate({0.0, 1.0, 0.0});
-        cmd.roll_reference_gcrf = earth.rotation * catch_roll_reference(site_.catch_target->across_itrf, up_itrf,
-                                                                        site_.catch_target->pin_azimuth_rad, body_y);
+        cmd.roll_reference_gcrf = earth.rotation * catch_roll_reference(*site_.catch_target, up_itrf, body_y);
     }
     if (parameters_.lqr_lateral) {
         // Lateral LQR per plan axis (position, velocity, tilt, tilt rate against the plan; input: tilt acceleration),

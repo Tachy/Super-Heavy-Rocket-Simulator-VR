@@ -61,7 +61,28 @@ def load_detail(path) -> dict:
         k, _, v = line.partition("=")
         v = v.strip()
         cur[k.strip()] = v[1:-1] if v.startswith('"') else float(v)
+    root.setdefault("mount", {})["plan_yaw_deg"] = site_plan_yaw_deg(SITES_FILE)
     return root
+
+
+SITE_ID = "starbase_olp1"  # the site whose [site.tower] the structures are drawn on (same as detail_file.SITE_ID)
+SITES_FILE = Path(__file__).resolve().parents[3] / "config" / "launch_sites.toml"
+
+
+def site_plan_yaw_deg(sites_path, site_id=SITE_ID) -> float:
+    """`plan_yaw_deg` of `[site.tower]` of the site in config/launch_sites.toml (the physics value; not in the detail file)."""
+    current, table = None, None
+    for raw in Path(sites_path).read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line == "[[site]]":
+            current, table = None, "site"
+        elif line.startswith("["):
+            table = line.strip("[]")
+        elif table == "site" and line.startswith("id") and "=" in line:
+            current = line.partition("=")[2].strip().strip('"')
+        elif table == "site.tower" and current == site_id and line.startswith("plan_yaw_deg"):
+            return float(line.partition("=")[2])
+    raise KeyError(f"{sites_path}: no plan_yaw_deg for site {site_id}")
 
 
 def clear_scene() -> None:

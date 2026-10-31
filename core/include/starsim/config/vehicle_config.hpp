@@ -220,6 +220,9 @@ struct CatchPinConfig {
     double station_m = 0.0;            // from the bottom of the stage
     double protrusion_m = 0.0;         // beyond the hull radius
     double max_load_n = 0.0;           // structural limit per pin
+    // Body azimuth (from +y towards +z) that faces away from the tower when caught; none: either of the two rolls
+    // that lay the pins across the arms, whichever is nearer.
+    std::optional<double> away_from_tower_azimuth_rad;
 };
 
 // Landing legs of a stage that lands on the ground or a deck (Falcon 9). Deployed geometry and the crush-core contact

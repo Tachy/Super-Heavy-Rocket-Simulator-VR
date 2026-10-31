@@ -178,8 +178,7 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     cmd.axis_gcrf = transform.rotation * axis_fixed;
     if (catching) {
         const Vec3 body_y = to_fixed * s.attitude.rotate(Vec3{0.0, 1.0, 0.0});
-        cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
-                                                                            site_.catch_target->pin_azimuth_rad, body_y);
+        cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(*site_.catch_target, site_up, body_y);
     }
     cmd.abort = ditch_;  // the tower keeps its arms open
     // Throttle for that thrust (nozzle pressure loss, engines still starting or running down).

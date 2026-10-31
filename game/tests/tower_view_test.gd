@@ -209,15 +209,14 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 	_check(view.has_models and view.get_node_or_null("MountModel/Mount") != null, "mount model built")
 	_check(view.get_node_or_null("TrenchModel/Trench") != null, "trench model built")
 	var parts := view.get_node("MountModel/Mount")
-	var plinth: AABB = (parts.get_node("plinth") as MeshInstance3D).mesh.get_aabb()  # glTF axes: X tower, Y across, Z up
-	_check(absf(plinth.size.y - 44.6) < 0.1 and absf(plinth.size.x - 40.0) < 0.1, "base 44.6 x 40 m (%s)" % plinth.size)
-	_check(absf(plinth.position.z + float(m["pit_depth_m"])) < 0.01, "pit floor %.1f m below the ground" % -plinth.position.z)
-	var shell: AABB = (parts.get_node("shell") as MeshInstance3D).mesh.get_aabb()
+	var shell: AABB = (parts.get_node("shell") as MeshInstance3D).mesh.get_aabb()  # glTF axes: X tower, Y across, Z up
 	var ring_top := float(m["deck_height_m"])  # as measured; the physics mount height follows in the physics plan
 	var deck_z := ring_top - float(m["deck_drop_m"])
 	_check(absf(shell.end.z - deck_z) < 0.01, "deck at the measured height (%.3f, want %.3f)" % [shell.end.z, deck_z])
-	var top_half := 0.5 * float(m["top_across_m"])
-	_check(absf(shell.size.y - float(m["base_across_m"])) < 0.05, "slope foot across %.2f m" % shell.size.y)
+	_check(absf(shell.end.x - float(m["block_x_tower_m"])) < 0.01, "block's vertical wall on the tower side at X %.2f m" % shell.end.x)
+	_check(absf(shell.position.x + float(m["annex_end_x_m"])) < 0.01, "annex foot at X %.2f m" % shell.position.x)
+	_check(absf(shell.size.y - 2.0 * float(m["annex_half_y_m"])) < 0.05, "annex width across %.2f m" % shell.size.y)
+	_check(parts.get_node_or_null("pier") == null and parts.get_node_or_null("deflector") == null, "no piers, no deflector")
 	var hardware: AABB = (parts.get_node("hardware") as MeshInstance3D).mesh.get_aabb()
 	_check(hardware.end.z > ring_top, "ring and clamps above the deck")
 	# Stack clearance on the generated vertices: nothing of the mount inside the 4.5 m hull above the ring top, the ring
@@ -234,26 +233,26 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 				min_r_ring = minf(min_r_ring, r)
 	_check(min_r_above >= 4.5 + 0.04 - 1.0e-4, "nothing of the mount inside the hull above the ring (%.3f m)" % min_r_above)
 	_check(absf(min_r_ring - 0.5 * float(m["ring_opening_diameter_m"])) < 0.01, "ring opening %.3f m radius" % min_r_ring)
-	# Exits: the trench's ramps run across the mount-tower line, 33 m from the axis; the hardstand stays out of the pit.
+	# Exits: the trench's ramps run across the mount-tower line, 25.5 m from the axis; the hardstand stays out of the pit.
 	var hardstand: AABB = (view.get_node("TrenchModel/Trench/hardstand") as MeshInstance3D).mesh.get_aabb()
 	_check(hardstand.position.z > 0.0 and hardstand.size.z < 0.001, "hardstand a flat plate above the ground (%s)" % hardstand)
 	var ramp: AABB = (view.get_node("TrenchModel/Trench/concrete") as MeshInstance3D).mesh.get_aabb()
+	_check(absf(ramp.position.z + float(m["pit_depth_m"])) < 0.01, "tunnel floor %.1f m below the ground" % -ramp.position.z)
 	_check(absf(ramp.size.x - float(t["width_m"])) < 0.01, "ramps %.2f m wide" % ramp.size.x)
-	var mid := 0.5 * (0.5 * float(m["base_across_m"]) + ramp.end.y)
+	var mid := 0.5 * (float(m["block_half_y_m"]) + ramp.end.y)
 	_check(absf(mid - float(t["centre_m"])) < 0.5, "ramp middle %.2f m from the axis" % mid)
-	# The terrain mask lies on the drawn footprint: central rectangle = the plinth, ramp = the ramp's plan.
+	# The terrain mask lies on the drawn tunnel: central rectangle = under the block, ramp = the ramp's plan.
 	var shape: Vector4 = ShaderGlobals.value(&"trench_shape")
-	_check(absf(shape.x - 0.5 * plinth.size.x) < TowerView.MASK_INSET_M + 0.01, "mask along %.2f m, plinth %.2f" % [shape.x, 0.5 * plinth.size.x])
-	_check(absf(shape.y - 0.5 * plinth.size.y) < TowerView.MASK_INSET_M + 0.01, "mask across %.2f m" % shape.y)
+	_check(absf(shape.x - 0.5 * ramp.size.x) < TowerView.MASK_INSET_M + 0.01, "mask along %.2f m: the tunnel's width" % shape.x)
+	_check(absf(shape.y - float(m["block_half_y_m"])) < TowerView.MASK_INSET_M + 0.01, "mask across %.2f m: the block's end" % shape.y)
 	_check(absf(shape.z - 0.5 * ramp.size.x) < TowerView.MASK_INSET_M + 0.01, "mask ramp half width %.2f m" % shape.z)
 	_check(absf(shape.w - ramp.end.y) < TowerView.MASK_INSET_M + 0.01, "mask ramp end %.2f m, ramp %.2f" % [shape.w, ramp.end.y])
 	_check(float(ShaderGlobals.value(&"trench_range_m")) == float(t["mask_range_m"]), "mask range set")
 	var axis_t: Vector3 = ShaderGlobals.value(&"trench_axis_t")
-	var yaw := deg_to_rad(float(m["plan_yaw_deg"]))
+	var yaw := deg_to_rad(float(geometry["plan_yaw_deg"]))
 	var square_x: Vector3 = geometry["tower_direction"] * cos(yaw) - geometry["across"] * sin(yaw)
 	_check(axis_t.is_equal_approx((view.basis * Frames.to_render(square_x)).normalized()), "mask axis along the measured square")
 	_check(Basis(geometry["tower_direction"], geometry["across"], Vector3(0.0, 0.0, 1.0)).determinant() > 0.0, "site axes right-handed")
-	_check(top_half > 0.0, "top half width %.2f" % top_half)
 	var boxes_view := _view(OTHER_SITE)
 	_check(not boxes_view.has_models, "a site without models keeps the old mount cylinder")
 
@@ -338,21 +337,22 @@ func _count(node: Node, class_name_: String) -> int:
 
 ## starbase_olp1's tower as FlightSim.site_tower reports it (site frame), hand-computed.
 func _geometry() -> Dictionary:
-	var azimuth := deg_to_rad(315.0)
+	var azimuth := deg_to_rad(349.0)
 	var toward := Vector3(sin(azimuth), cos(azimuth), 0.0)
 	var across := Vector3(-toward.y, toward.x, 0.0)
 	var up := Vector3(0.0, 0.0, 1.0)
-	var centre := toward * 30.0 + up * 73.0
+	var centre := toward * 31.7 + up * 73.0
 	return {
 		"present": true,
+		"plan_yaw_deg": 37.4,
 		"origin_itrf_m": Vector3(-5.5e6, -0.7e6, 2.8e6),
 		"east": Vector3(0.0, 1.0, 0.0), "north": Vector3(0.0, 0.0, 1.0), "up": Vector3(1.0, 0.0, 0.0),
 		"tower_direction": toward, "across": across,
-		"tower_center_m": centre, "tower_size_m": Vector3(12.0, 12.0, 146.0),
+		"tower_center_m": centre, "tower_size_m": Vector3(13.3, 13.3, 146.0),
 		"mount_height_m": 20.0, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_plus_m": toward * 24.0 + across * 5.8 + up * 95.0,
-		"hinge_minus_m": toward * 24.0 - across * 5.8 + up * 95.0,
+		"hinge_plus_m": toward * 22.3 + across * 5.8 + up * 95.0,
+		"hinge_minus_m": toward * 22.3 - across * 5.8 + up * 95.0,
 	}
 
 

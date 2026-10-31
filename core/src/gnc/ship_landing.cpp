@@ -137,8 +137,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             // pins across the arms already in the flip, while three engines and the flaps can roll the ship (two
             // off-axis engines in the burn have little roll authority)
             const Vec3 body_y = transpose(transform.rotation) * body.state().attitude.rotate(Vec3{0.0, 1.0, 0.0});
-            cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
-                                                                                site_.catch_target->pin_azimuth_rad, body_y);
+            cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(*site_.catch_target, site_up, body_y);
         }
         const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
         const double tilt = std::acos(std::clamp(dot(axis, up_gcrf), -1.0, 1.0));
@@ -225,7 +224,9 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                                                            constants::standard_gravity_mps2, thrust.exhaust_velocity_mps,
                                                            parameters_.upright_descent);
             const bool short_of_propellant = usable < parameters_.descent_propellant_margin * need;
-            if (no_plan || short_of_propellant || tilt > parameters_.upright_guard_tilt_rad) upright_descent_ = true;
+            if (no_plan || short_of_propellant || tilt > parameters_.upright_guard_tilt_rad) {
+                upright_descent_ = true;
+            }
         }
     }
     if (upright_descent_ && phase_ != ReturnPhase::Landed) fly_upright_descent(body, env, transform, site_up, cmd);

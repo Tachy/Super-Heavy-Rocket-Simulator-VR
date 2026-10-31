@@ -24,7 +24,11 @@ TowerGeometry::TowerGeometry(const config::TowerConfig& config, double latitude_
 }
 
 OrientedBox TowerGeometry::tower_box() const {
-    return {toward_tower_ * config_.distance_m + up * (0.5 * config_.height_m), from_columns(toward_tower_, across_, up),
+    // Same axes as TowerView._plan_axes: the measured squares lie plan_yaw off the pad -> tower line.
+    const double c = std::cos(config_.plan_yaw_rad), s = std::sin(config_.plan_yaw_rad);
+    const Vec3 x = toward_tower_ * c - across_ * s;
+    const Vec3 y = toward_tower_ * s + across_ * c;
+    return {toward_tower_ * config_.distance_m + up * (0.5 * config_.height_m), from_columns(x, y, up),
             {0.5 * config_.width_m, 0.5 * config_.width_m, 0.5 * config_.height_m}};
 }
 
@@ -34,7 +38,7 @@ Annulus TowerGeometry::mount() const {
 
 Vec3 TowerGeometry::hinge(int side) const {
     const double lateral = 0.5 * config_.arm_closed_gap_m + 0.5 * config_.arm_width_m;
-    return toward_tower_ * (config_.distance_m - 0.5 * config_.width_m) + across_ * (side * lateral) +
+    return toward_tower_ * config_.hinge_distance_m + across_ * (side * lateral) +
            up * config_.catch_height_m;
 }
 

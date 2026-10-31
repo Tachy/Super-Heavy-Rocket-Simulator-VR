@@ -60,7 +60,10 @@ time::Epoch t0() {
     return spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
 }
 
-const Vec3 to_tower{std::sin(315.0 * deg), std::cos(315.0 * deg), 0.0};
+const Vec3 to_tower = [] {
+    const double azimuth = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").tower->azimuth_rad;
+    return Vec3{std::sin(azimuth), std::cos(azimuth), 0.0};
+}();
 
 // A belly-first ship `offset_enu_m` from the pad (height in z) falling with `velocity_enu_mps`.
 vehicle::RigidBodyState belly_state(const sim::FlightSession& session, const config::VehicleConfig& cfg,

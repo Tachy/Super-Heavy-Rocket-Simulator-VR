@@ -65,6 +65,7 @@ def blender_version(blender: Path) -> str:
 def input_hash(config: Path, version: str) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
+    h.update(f"plan_yaw_deg={detail_file.plan_yaw_deg()}".encode())  # drawn on the physics value, not in the detail file
     for p in [config, SCRIPT_DIR / "common.py", SCRIPT_DIR / "mechazilla_layout.py", SCRIPT_DIR / "mount_layout.py",
               Path(mount_textures.__file__), *(SCRIPT_DIR / g for g in GENERATORS)]:
         h.update(p.name.encode())

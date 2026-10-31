@@ -14,6 +14,7 @@
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/contact/primitives.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
@@ -474,7 +475,9 @@ namespace {
 // The flip and catch of a full flight's gate, replayed in seconds: g = the 16 numbers of a "[gate] state" line
 // (STARSIM_DEBUG_FLIP: TDB, GCRF position and velocity, attitude w x y z, body rates, fuel and oxidiser kg) and the
 // flight's truth factors.
-test::CatchRun replay_gate(const double (&g)[16], double aero, double density, double thrust) {
+// `moved_from_olp1`: a gate printed before the pad moved (2026-10-31): carried rigidly with the pad, from the old
+// position and tower azimuth to the site's, so that it keeps its place relative to pad and tower.
+test::CatchRun replay_gate(const double (&g)[16], double aero, double density, double thrust, bool moved_from_olp1 = false) {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
@@ -483,6 +486,33 @@ test::CatchRun replay_gate(const double (&g)[16], double aero, double density, d
     config::fill_tanks(ship.stages.front(), g[15], g[14]);  // the gate's oxidiser and fuel
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(g[0]);
     vehicle::RigidBodyState state{{g[1], g[2], g[3]}, {g[4], g[5], g[6]}, math::Quat{g[7], g[8], g[9], g[10]}, {g[11], g[12], g[13]}};
+    if (moved_from_olp1) {
+        constexpr double deg = constants::deg_to_rad;
+        const auto& site = t.session.launch_site();
+        const auto frame = [](double lat, double lon) {  // columns east, north, up
+            const double sl = std::sin(lat), cl = std::cos(lat), so = std::sin(lon), co = std::cos(lon);
+            return contact::from_columns({-so, co, 0.0}, {-sl * co, -sl * so, cl}, {cl * co, cl * so, sl});
+        };
+        // Fixture provenance: the pad and tower azimuth the state was printed for.
+        const double old_lat = 25.99686 * deg, old_lon = -97.15394 * deg, old_height_m = -21.11, old_azimuth = 315.0 * deg;
+        const double turn = site.tower->azimuth_rad - old_azimuth;  // clockwise from north: about -up
+        const math::Mat3 about_up = contact::from_columns({std::cos(turn), -std::sin(turn), 0.0},
+                                                          {std::sin(turn), std::cos(turn), 0.0}, {0.0, 0.0, 1.0});
+        const math::Mat3 move = frame(site.latitude_rad, site.longitude_rad) * about_up * transpose(frame(old_lat, old_lon));
+        const auto tr = t.earth.fixed_to_gcrf(epoch);
+        const math::Mat3 gcrf_move = tr.rotation * move * transpose(tr.rotation);
+        const math::Vec3 omega = vehicle::earth_rotation_vector(tr);
+        const math::Vec3 old_pad = frames::geodetic_to_fixed({old_lat, old_lon, old_height_m});
+        const math::Vec3 new_pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+        const math::Vec3 r_fixed = transpose(tr.rotation) * state.position_gcrf_m;
+        const math::Vec3 v_ground = state.velocity_gcrf_mps - cross(omega, state.position_gcrf_m);
+        state.position_gcrf_m = tr.rotation * (new_pad + move * (r_fixed - old_pad));
+        state.velocity_gcrf_mps = gcrf_move * v_ground + cross(omega, state.position_gcrf_m);
+        const math::Vec3 x = gcrf_move * state.attitude.rotate({1.0, 0.0, 0.0}), y = gcrf_move * state.attitude.rotate({0.0, 1.0, 0.0});
+        const math::Vec3 w_inertial = state.attitude.rotate(state.angular_velocity_body_radps);
+        state.attitude = math::Quat::from_matrix(contact::from_columns(x, y, cross(x, y)));
+        state.angular_velocity_body_radps = state.attitude.inverse_rotate(gcrf_move * (w_inertial - omega) + omega);
+    }
     if (const char* raise = std::getenv("STARSIM_GATE_RAISE_M")) {  // diagnostics: the same gate this much higher
         state.position_gcrf_m = state.position_gcrf_m * (1.0 + std::atof(raise) / norm(state.position_gcrf_m));
     }
@@ -549,7 +579,7 @@ TEST_CASE("Lunar return seed-18 gate is caught", "[ship][catch][lunar]") {
                                -344.80324421150925,  -241.62089640034384, -35.169364115429531, 0.75127393148601607,
                                -0.59132762504812575, -0.23785828951925145, -0.17129668365576775, -0.075085288294500299,
                                0.018449976961259034, -0.025684817876441189, 8443.9801185259676, 30406.388246525152};
-    const auto run = replay_gate(seed18, 1.014, 1.105, 1.019);  // the flight's aero, density and thrust factors
+    const auto run = replay_gate(seed18, 1.014, 1.105, 1.019, true);  // the flight's aero, density and thrust factors
     CHECK(run.result == sim::ReturnResult::Caught);
     CHECK(run.caught_within_tolerance());
 }

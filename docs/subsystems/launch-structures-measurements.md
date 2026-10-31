@@ -247,6 +247,31 @@ Image 1179 x 1240, hull 415 px wide at the rim = 45.6 px/m; horizon y ~960, rim 
 - The same view gives the fin itself higher than the config: fin root 7.1 m below the near arc, +-0.8, station ~65.2 against the config's hinge 64.0 (NSF 2026-03: 64.6 +-1; B19 comparison 64.3-65).
 - Pin proposal test: **62.5 m ties the deck to the fin correctly only with the fin at 64.0** (deck 62.2 is then 1.3 m below the neutral fin edge, the view says 0-0.9 m). Better: the deck follows the fin: deck top = hinge station - 0.5 - (0..0.9) m. With the hinge 64.0: pin line ~63.0 (deck 62.7); with the hinge at the view's 65.2: pin ~64.2. Recommended for the physics plan: first settle the fin station (fin agent), then the pin at hinge - 1.0 m +-0.5. Azimuths 0 / 180 are confirmed by the view: both arms lie under two opposite fins, the third is behind the hull.
 
+## Mount shape 2026-10-31 (Task 4a: block, annex, tunnel, foot)
+
+Sources: user rulings `rulings-mount-shape.md` / `rulings-cut-mount.md` (reading on DSC05957, +-1.5 m, scale Cybertruck 5.68 m), cross-checked by proportion on the
+originals `DSC06000` (from above), `DSC06022` (front on), `CRL05690` (annex front); local, git-ignored, nothing of them in the repo. The cross-check is by
+ratio in the oblique views (no pixel solve): its error is about 15 %, so the DSC05957 numbers stand and the other photos confirm the shape and proportions.
+
+| Quantity | Value | Error | Basis |
+|---|---|---|---|
+| Block X, tower side wall (vertical) | +10.3 m | 1.5 | DSC05957; DSC06000 reads it flush and vertical |
+| Block X, deck edge away from the tower | -10.9 m | 1.5 | DSC05957 |
+| Block Y (end faces, portals) | +-9.4 m | 1.5 | DSC05957; ring opening 11.6 m across the deck there against the 9 m hull (ratio block / ring 1.6 on DSC06000) |
+| Annex footprint | Y +-22.3 at X -10.9, +-9.2 at X -20 | 2 | DSC05957; DSC06000 and CRL05690 show the trapezoid narrowing away |
+| Deck above the ground | 13.5 m (ring top 14.5 m) | 1.2 | kept (Ship 42, person scale) |
+| Tunnel inner width, same everywhere | 15.2 m | 1 | DSC05957 portal; user ruling: no flare, no narrower portal |
+| Wall thickness outside the block | 1.4 m (X 7.6 .. 9.0) | 0.5 | DSC05957 |
+| Portal top above the ground | 7.2 m | 1 | dusk 2025-09 at 41 px/m |
+| Floor | level -9 m under the ring, straight to 0 at Y +-41.5 | 2 | user ruling; the dark ribbed look is surface |
+| Wall tops | wedge: deck height at the block, ground at the ramp end | - | DSC06000, DSC06022 (long slanted wall tops) |
+| Foot, vertical cut face toward the mount | X 17.6 m (7.3 m from the block wall); far side 37.6 | 1.5 | DSC05957 |
+| Door group | two doors, 3.0 m off the axis, 2.6 x 3.4 m | 0.5 | CRL05690 (about 15 px/m near the Cybertruck) |
+
+Seen and kept as a report: the deck is flat and plain with a round opening; no proud ring or clamps are visible on these views (clamps kept until the seat is
+decided); the old four-pier pyramid, the spandrel, lintel, ribbed duct and the deflector are gone. DSC06000 and the older `padb_mount_side_pyramid_dusk_2025-09`
+do not contradict the block-and-annex reading; the dusk view's piers were the wedge walls and the annex flanks seen obliquely.
+
 ## Open, needs more than these references
 - Booster return and catch: the flight 12-14 webcasts have none (see the webcast pass); the catch arm geometry from
   the Pad A catches is above (old hardware, transfer tags).

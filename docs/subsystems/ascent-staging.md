@@ -170,7 +170,7 @@ CRS-35 cargo 2,860 kg [S: space.com 2026-10-13]; Dragon 2 dry 7,700 kg + propell
   `ScvxLandingGuidance` for start phase 0 when the next set drops engines (Super Heavy; not Falcon 9; not in an abort).
 - **`ScvxSettings::fresh_max_iterations` 60 [E]** (re-plans keep 10): ASDS MECO seed 107 needs 42-44 iterations. A
   non-converging fresh plan is refused after ~1.58 s (~25 ms/iteration; the simulation thread stands that long).
-  **`fresh_stall_iterations` 4 [E]** (re-plans keep 3): Super Heavy's sea abort from ~350 m passes a transient of its
+  **`fresh_stall_iterations` 8 [E]** (re-plans keep 3): the first abort plan to the 765 m shore stalled at the sixth iteration (vc 2.3) and converges at the 12th; Super Heavy's sea abort from ~350 m passes a transient of its
   virtual control (fixture `tests/validation/fixtures/scvx/superheavy_abort_sea_353m.txt`).
 - **Reserve** (`SnapshotSettings::reserve_kg`): our tanks burn to empty, so for Super Heavy (5 t [E]), Falcon 9 (5 t) and
   the HLS (5 t [E]) the reserve is planning margin; the ship's landing is fed by the header tanks, so its 1 t stays a hard

@@ -24,6 +24,7 @@ public:
     CatchTowerSim(const config::TowerConfig& config, double latitude_rad, double longitude_rad, double height_m);
 
     const contact::TowerGeometry& geometry() const { return geometry_; }
+    const contact::CatchTrigger& trigger() const { return trigger_; }
     const contact::CatchArms& arms() const { return arms_; }
     CatchPhase phase() const { return phase_; }
     void close_arms(bool instantly);

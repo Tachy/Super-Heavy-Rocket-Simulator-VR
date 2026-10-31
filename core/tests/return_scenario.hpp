@@ -17,6 +17,9 @@
 #include "starsim/sim/landing_outcome.hpp"
 
 namespace starsim::test {
+// A booster at landing-burn ignition stays within this of the catch roll (full return, "Booster return to the catch
+// tower ends on the arms"); the landing-burn fixtures start at the catch roll and one case at this error.
+inline constexpr double flown_ignition_roll_error_bound_deg = 12.0;  // flown: 11.09 deg
 
 // Single-stage booster of `vehicle_id` with its main tanks scaled to `propellant_kg` in total (RCS supplies stay full).
 inline config::VehicleConfig booster_config(const std::string& vehicle_id, double propellant_kg) {

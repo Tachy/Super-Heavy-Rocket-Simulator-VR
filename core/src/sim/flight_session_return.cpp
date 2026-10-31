@@ -356,7 +356,8 @@ gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) con
                                                     tower_keep_out_margin_m,
                                                 c.mount_outer_radius_m + 0.5 * booster.diameter_m() + tower_keep_out_margin_m,
                                                 c.mount_height_m,
-                                                c.height_m};
+                                                c.height_m,
+                                                stage.config.catch_pins.away_from_tower_azimuth_rad};
     }
     if (launch_site_.sea) {
         landing.sea = gnc::SeaSide{launch_site_.sea->direction_rad, launch_site_.sea->shoreline_distance_m};

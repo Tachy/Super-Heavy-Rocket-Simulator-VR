@@ -188,6 +188,7 @@ add_executable(starsim_core_tests
     test_descent_tracking.cpp
     test_scvx_landing.cpp
     test_scvx_catch.cpp
+    test_sea_reach.cpp
     test_attitude_bench.cpp
     test_tvc_lateral.cpp
     test_clohessy_wiltshire.cpp

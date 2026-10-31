@@ -3,8 +3,10 @@
 State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.md`, tasks 1-4 done (lattice and tower body;
 carriage, both chopsticks, QD arm; square mount, trench, terrain mask; lights); task 5 (acceptance) open. The prototype plan
 (`2026-10-31-pad-b-prototype.md`) built the hybrid pipeline. Spec: `docs/superpowers/specs/2026-10-28-pad-b-model-design.md`.
-The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`; everything the physics touches stays on the physics numbers (table
-"Physics deviations" below).
+The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`; the physics stands on the measured Pad B since the physics plan's Tasks 1-3
+(`docs/superpowers/plans/2026-10-31-pad-b-physics-alignment.md`): ring 25.99677 N, 97.15804 W, deck 14.5 m, tower azimuth 349, 31.7 m, box yaw 37.4, hinges 22.3 m, arm 24.2 m, catch 133 m, pins 63.0 at 0 / 180. Open differences: table "Physics deviations" below.
+Sea: `[site.sea]` 90 deg, 765 m [D]: first water along that bearing in the 3DEP grid, the nearest shore of bearings 60-130. An abort first checks from the live state whether the water is in reach (`gnc::estimate_sea_reach`, a lower bound, x `sea_reach_margin` 1.5). A booster reaches it from 1500 and 800 m with 5.2 and 4.1 t left; from 400 m it gives the water up and comes down soft on land (500 m was an estimate from the old position).
+Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catch_roll_reference(CatchTarget, ...)`); a ship keeps the nearer of its two rolls.
 
 ## Model
 - `config/structures/starbase_olp2.toml`: site-independent detail of THE Mechazilla (tower sections, member profiles,
@@ -35,20 +37,23 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   (5.3 m closed, 6.5 m at 0.7 rad). Its numbers are the `actuator_*` keys of `[carriage]`.
 - QD arm (`mechazilla_layout.qd_arm`): THE ship QD arm, one arm; deep root truss with light cabinets, shallow tip platform, connector
   head; tip deck 86.8 m, static, head 1 m clear of the 4.5 m hull on the tower's centre plane, fits between the closed arms.
-- Mount (`mount_layout.py` -> `gen_mount.py` -> `mount.gltf`, `[mount]` of the detail file): four sloped corner piers and a deck, no stepped
-  pyramid. Base 44.6 x 40 m, deck 18.7 m wide, ring top 14.5 m as measured, slopes 45 deg (measured 48 (5)). Closed plated faces only on
-  +-X. Each +-Y side is one portal: 26 m wide at the ground, sides following the piers up to the 7.2 m top, a vertical spandrel, a lintel
-  and a ribbed duct above it; inside, a ribbed deflector curves from a ridge (6.9 m) under the ring to the pit floor 9 (2) m below the ground. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps; 7 m
-  chamber under it. Two hoods 70 deg apart, symmetric about the line away from the tower (roof 4 m above the deck): the long one over the
-  closed -X face with a box 6.5 m down the slope, the short one ending at the -Y deck edge. -X face: two rectangular grey doors, six
-  vents (padb_mount_pyramid_front_person_scale_2026-05); two booster QD cabinets between the ducts (static). 5.5k triangles. Plate map
-  `mount_panels.png` (`mount_textures.py`: stacked plates 6 x 2 m, rust-tan seams, grey to tan, stains; `shaders/mount_shell.gdshader`).
-- Trench and ground (`trench.gltf`, `[trench]`): two flat aprons 26 m wide, floor rising from the pit to the ground, centre 33 m from the
-  axis, 1 m side walls, tan-brown floor. Hardstand: a flat convex plate of light concrete all round mount and tower foot (outline +-15 m,
-  low confidence: wide-angle views only), `pad_concrete.png`, satellite terrain beyond its edge; the old pad disc stays hidden, so past the
-  20 km visibility range the site is terrain imagery only. Tower foot: an 18 m block, 7 m walls, chamfered roof up to the legs' plinth.
-- Terrain mask: `terrain_earth.gdshader` does not draw the terrain inside the footprint (central rectangle + both ramps, 0.05 m inside
-  the walls) within `mask_range_m` = 20 km of the camera; the pit model is drawn 150 m beyond. Globals `trench_*` (project.godot) set by
+- Mount (`mount_layout.py` -> `gen_mount.py` -> `mount.gltf`, `[mount]` of the detail file; shape ruling 2026-10-31, numbers: launch-structures-measurements.md
+  "Mount shape 2026-10-31"): a BLOCK with straight vertical walls (X -10.9 .. +10.3 in the square axes, Y +-9.4, flat plain deck 13.5 m, ring top 14.5 m)
+  and a pyramid ANNEX only on the side away from the tower (plated slopes, trapezoid footprint Y +-22.3 at X -10.9 narrowing to +-9.2 at X -20; two doors at
+  its foot, white vent plates, dark louvre boxes along the slanted edges). Nothing of the mount lies beyond X +10.3. The block is crossed along Y by ONE
+  tunnel of one width (15.2 m) from end to end: rectangular portals (top 7.2 m above the ground), vertical walls, ceiling with the 7 m chamber under the
+  ring, no deflector, no ridge, no flare. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps (the originals show no proud ring or
+  clamps: kept until the seat is decided). Two hoods 70 deg apart, symmetric about the line away from the tower (roof 4 m above the deck): the long one
+  down the middle of the annex, the short one ending at the -Y deck edge; a booster QD head stands on the ring under each (0.35 m off the hull, static;
+  no cabinets or booms on the deck). 1.1k triangles. Plate map `mount_panels.png` (`mount_textures.py`; `shaders/mount_shell.gdshader`).
+- Trench and ground (`trench.gltf`, `[trench]`): the tunnel's floor is one closed surface: level at -9 m (`pit_depth_m`) for |Y| < 9.4 under the ring,
+  straight ramps up to the ground at Y +-41.5, 15.2 m wide; the walls outside the block are WEDGES 1.4 m thick (inner X +-7.6, outer +-9.0) whose top falls
+  from the deck height (13.5 m) at the block to the ground at the ramp end. Tan-brown floor (the ribbed dark look is a surface matter, not drawn). The floor
+  stays closed so that a water layer can be added later. Hardstand: a flat convex plate of light concrete around the block, tunnel and tower foot (outline
+  +-15 m, low confidence: wide-angle views only; Task 5 redraws it), `pad_concrete.png`, satellite terrain beyond its edge. Tower foot: a block cut vertically
+  on the side toward the mount (X 17.6, 7.3 m from the block's wall), far side X 37.6, 18 m across, 7 m walls, chamfered roof up to the legs' plinth.
+- Terrain mask: `terrain_earth.gdshader` does not draw the terrain inside the tunnel's plan (X +-7.55, Y out to 41.45; only the tunnel lies below the ground)
+  within `mask_range_m` = 20 km of the camera; the pit model is drawn 150 m beyond. Globals `trench_*` (project.godot) set by
   `TowerView._set_trench_mask`; the site position is a hi / lo pair like the camera's, so the offset stays exact. Physics ground stays flat.
   Beyond 20 km the footprint (< 6 px at a 60 deg view) is terrain again (no hole, a step in the ground colour only).
 - Open part of the lattice: `x_brace` on all eight lower sections, `chevron` on the top one. Which brace pitch the frames
@@ -186,23 +191,21 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 ## Physics deviations (what is drawn as measured differs from the physics; input to the physics plan)
 | Part | Drawn now | Physics stays | Why |
 |---|---|---|---|
-| Tower, carriage and arms | lattice, foot, mount and trench parallel at `plan_yaw_deg` 36.5, tower centre 36.1 m from the axis; the corner toward the mount lies about 3.7 m beyond the physics pivot plane | physics box and pivots at 30 m, face-on | **carriage and arms stand off the corner until the physics plan moves the pivots onto it** (user 2026-10-31: the hinge sits on the corner; rail bracing at top and bottom back to the two neighbouring corners, not modelled); tower lamps still placed from the physics face |
-| Mount deck | ring top 14.5 m as measured (user 2026-10-31: reality first), portal top 7.2 m, slope 45 deg | physics 20 m until the physics plan | **until then a stack on the pad hangs 5.5 m above the ring**; `check_envelope` lists the row |
-| Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
-| Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; kept from the earlier fit; the flat bearing piece clears the hull at any length |
+| Tower, carriage and arms | carriage, arms, rails and bracing still at the drawn positions of the fine build | physics at the measured numbers (`plan_yaw_deg` 37.4, tower 31.7 m at azimuth 349, `hinge_distance_m` 22.3) | **Task 4 of the physics plan draws them on the corner**; the box corner toward the mount lies at 22.4 m along the line, 1.2 m across it |
+| Arm length | 25.9 m until Task 4 | 24.2 m (hinge to axis 22.3 + tip 1.9) | Task 4 shortens the drawn legs by 1.7 m and cuts mount and foot on the sides facing each other (DSC05957, user 2026-10-31) |
 | Hinge position | resolved in the fix round: drawn hinge frames on the physics pivot 5.8 m (the corner hinges read 6.75 m: not drawn); `check_envelope` compares them, no exception | 5.8 m | the inner face stays on the physics half gap 4.8 m |
 | Root of the U | root 35 deg, 6.3 m from the physics hinge (5.8 m off the axis) to the bend 9.4 m off it | photos: 50 +-15 deg, about 10 m, so a real hinge about 2 +-3 m off the centre plane | hinge stays on the physics number; a physics plan moving the hinge needs `arm_closed_gap_m` 9.6 unchanged and opening 0 unchanged |
-| Fins against the arm | pins 66.5 m put the deck 2-2.5 m above the fin plates, the arm's top 2.5 m and truss run through the 0 / 180 fins at a catch: visible overlap, NOT hidden. Pad at the closed pose under where the fin bars come down | pins 66.5 m, azimuths 45 / 225, fins without contact | V3 user view: deck 0-0.9 m under the fins; proposal in the measurements |
-| Tower face, height | width 12 m, roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 12 / 146 m | within the error |
-| Leg spacing | outer width 12 m (leg centres 9.8 m) | box 12 m | measured leg centres 11.9 +-1 m (outer 13.3-14): the legs stay inside the physics box |
-| QD arm | static, deck 86.8 m, head 1 m off the hull (not attached, not swung off); stack on the 20 m deck stands 5.5 m higher than measured | no state | needs the core's `qd_arm_angle_rad` and mount height |
-| Azimuth, distance | physics 315 deg, 30 m | measured 345 +-25, 32 +-3 m | low confidence |
+| Fins against the arm | drawn pins and deck at the fine build's place until Task 4 | pins at station 63.0 (fin hinge 64.0 - 1.0), azimuths 0 / 180 across the arms, the 90 deg fin away from the tower; fins without contact | the drawn arm's top reaches the 0 / 180 fin plates at a catch: visible, NOT hidden |
+| Tower face, height | width 12 m, roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 13.3 / 146 m | within the error |
+| Leg spacing | outer width 12 m (leg centres 9.8 m) | box 13.3 m | measured leg centres 11.9 +-1 m (outer 13.3-14) |
+| QD arm | static, deck 86.8 m, head 1 m off the hull (not attached, not swung off) | no state | needs the core's `qd_arm_angle_rad` |
 
 ## Open points
 - Arm: root bend and width from weak
   views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 4.3k triangles per arm, far tier unchanged (cost:
   task 5); shock absorbers and the fin's station undecided.
-- Render vs the frames (`sf_*.png`): mount taller and steeper than the photos (the 20 m deck), plates cleaner and more regular, hoods without
+- Mount render vs DSC06000 / DSC06022 / CRL05690 (`screenshots/pad-b-plan/4a_*.png`, Task 4a): the annex lacks its stepped courses and recessed door bays, vent plates and louvre boxes are plain boxes, no tunnel-floor surface detail (ribbed dark steel), no inner wall panels in the round opening, the ramp walls are drawn without the photo's plating; water in the underpass: user note 2026-10-31, probably let in and evaporating at ignition, not verified, not drawn (the floor is closed for it). Hardstand edges of the annex flanks lie under the plate (Task 5).
+- Earlier render vs the frames (`sf_*.png`, before Task 4a): mount taller and steeper than the photos (the 20 m deck), plates cleaner and more regular, hoods without
   the chamfered facets, vents plain wedges, no scaffolds, vehicles, recessed door bays or the deck's fine hardware; hardstand outline and portal
   width carry the largest plan errors (ship39 reads the ramp 15 m, tower foot 26 m, NOAA 20 +-4). Still different on the tower: no platforms with grating and no cross braces inside the face, the plinth is a plain box,
   the hoist cables and side members of the roof block are missing, grime is not tuned.

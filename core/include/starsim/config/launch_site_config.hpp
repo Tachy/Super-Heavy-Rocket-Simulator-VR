@@ -15,6 +15,8 @@ namespace starsim::config {
 struct TowerConfig {
     double azimuth_rad = 0.0;           // pad centre -> tower centre, clockwise from north
     double distance_m = 0.0;            // pad centre -> tower centre, horizontal
+    double plan_yaw_rad = 0.0;          // tower box (and the measured squares) turned from the pad->tower line toward +across
+    double hinge_distance_m = 0.0;      // pad axis -> arm hinges along the pad->tower line (default distance - width / 2)
     double width_m = 0.0;               // square cross-section
     double height_m = 0.0;
     double mount_height_m = 0.0;        // top of the launch mount: a stack on the pad stands here

@@ -26,6 +26,8 @@ public:
     // Hinge of arm `side` (+1: on the +across side, -1: opposite) at the arm top height, carriage at rest.
     math::Vec3 hinge(int side) const;
     double arm_top_height_m(double carriage_offset_m) const { return config_.catch_height_m + carriage_offset_m; }
+    // How far the closed arm tips reach beyond the catch axis, away from the tower.
+    double arm_tip_beyond_axis_m() const { return config_.arm_length_m - config_.hinge_distance_m; }
     // Horizontal unit from the hinge towards the tip; opening 0 = closed.
     math::Vec3 arm_direction(int side, double opening_rad) const;
     OrientedBox arm_box(int side, double opening_rad, double carriage_offset_m) const;

@@ -597,6 +597,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.catch_pins.station_m = doc.number(*pins, "station_m");
         s.catch_pins.protrusion_m = doc.positive(*pins, "protrusion_m");
         s.catch_pins.max_load_n = doc.positive(*pins, "max_load_n");
+        if ((*pins).contains("away_from_tower_azimuth_deg")) {
+            s.catch_pins.away_from_tower_azimuth_rad =
+                doc.number(*pins, "away_from_tower_azimuth_deg") * constants::deg_to_rad;
+        }
     }
     if (auto legs = t["landing_legs"].as_table()) {
         const auto* azimuths = (*legs)["azimuths_deg"].as_array();

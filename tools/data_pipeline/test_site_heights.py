@@ -114,7 +114,7 @@ def test_gate_waiver_covers_only_its_check():
 def test_lc39a_waiver_is_ruling_6():
     reason = site_heights.GATE_WAIVERS["ksc_lc39a"]["spread"]
     assert "Ruling 6" in reason
-    failures, waived = site_heights.gate([row("ksc_lc39a", 13.84, 12.9), row("starbase_olp1", 1.41, 3.1)])
+    failures, waived = site_heights.gate([row("ksc_lc39a", 13.84, 12.9), row("ccsfs_slc40", 6.41, 3.1)])
     assert failures == [] and len(waived) == 1
-    failures, _ = site_heights.gate([row("starbase_olp1", 1.41, 12.9)])  # the waiver is per site
+    failures, _ = site_heights.gate([row("ccsfs_slc40", 6.41, 12.9)])  # the waiver is per site
     assert len(failures) == 1

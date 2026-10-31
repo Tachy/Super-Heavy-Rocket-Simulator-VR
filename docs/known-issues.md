@@ -2,6 +2,14 @@
 
 Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also live in `docs/subsystems/<slug>.md`.
 
+- Red by decision since the Pad B physics alignment (user 2026-10-31: no campaign tuning before the vehicle plan, plan
+  `docs/superpowers/plans/2026-10-31-pad-b-physics-alignment.md`): the lunar direct campaign has no robust gate height, 21 seeds
+  (800 m: seed 3 lost, arm in the hull with 20.7 t; 815 m: all caught, one on 0.0 t; 825-850 m: seed 11 upright abort), cause not
+  found; `tanker_flight` and the refuelling inputs digest need the re-measure; ship case 20 ends upright on 0.0 t below the
+  1 t reserve, unexplained. Not verified: that a ship abort with the water out of reach never strikes the tower, and that the
+  booster's 400 m abort point (loss, 28 m from the pad centre) clears the drawn tower, mount, foot and ramps; the wide run did
+  not finish (aerocapture at gate 800, the flown depot campaign). `check_envelope` QD arm 0.70 m inside the hull: until Task 4.
+
 - `optim` (SOCP solver, ECOS-style HSDE): dense Nesterov-Todd blocks per cone, so cones should stay small
   (dimension <= ~20); ordering is minimum degree on the explicit elimination graph (not full AMD). Solution
   vectors are accurate to roughly sqrt(tolerance) near cone boundaries; objective and feasibility to the tolerance.
@@ -55,3 +63,5 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Planned (user 2026-10-27): milestone M11 (after M7 cockpit and M10 sound design) holds the rest of the weather - part
   2 rain / snow / fog / lightning / weather-dependent haze (small variant: climatology AOD plus humidity growth, a few
   precomputed table sets) / city light on clouds; part 3 GOES patterns; part 4 wind / density and launch rules.
+- Blender generators of `tools/structures` exit 0 when their script raises: `build_models` does not notice a generator
+  that leaves no file (found 2026-10-31; not fixed).

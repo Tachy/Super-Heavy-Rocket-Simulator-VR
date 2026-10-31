@@ -25,15 +25,15 @@
 | Key (`[site.tower]` unless noted) | Old | New | Source |
 |---|---|---|---|
 | site `latitude_deg`, `longitude_deg` | 25.99686, -97.15394 | 25.99677, -97.15804 | above |
-| `azimuth_deg` | 315 | 350 | squares: X axis bearing 26.5 (mean of trench 113 - 90 and foot normal 30) minus `plan_yaw_deg` 36.5; measured line 334-348 |
-| `plan_yaw_deg` (new, moved from `[mount]`) | - | 36.5 | squares against the ring line |
-| `distance_m` | 30 | 36.1 | 35 (3), 36 (4) |
+| `azimuth_deg` | 315 | 349 | squares: X axis bearing 26.5 (mean of trench 113 - 90 and foot normal 30) minus `plan_yaw_deg` 37.4; measured line 334-348 |
+| `plan_yaw_deg` (new, moved from `[mount]`) | - | 37.4 | squares against the ring line |
+| `distance_m` | 30 | 31.7 | measured on DSC05957: mount and foot are cut off vertically on the sides facing each other (user 2026-10-31) |
 | `width_m` | 12 | 13.3 | outer leg width 13.3-14; box of the lattice |
-| `hinge_distance_m` (new) | 24 (derived) | 26.3 | outer corner toward the mount along the line, from the two numbers above |
-| `arm_length_m` | 36 | 28.2 | hinge to axis + the tip's 1.9 m |
+| `hinge_distance_m` (new) | 24 (derived) | 22.3 | outer corner toward the mount along the line; it lies 1.2 m across the line |
+| `arm_length_m` | 36 | 24.2 | hinge to axis + the tip's 1.9 m |
 | `mount_height_m` | 20 | 14.5 | measured |
 | `catch_height_m` | 95 | 133 | measured 133 (4) |
-| `arm_standby_deg` | 6.5 | keep | about 3 m clear per side at 26.3 m |
+| `arm_standby_deg` | 6.5 | keep | about 2.8 m clear per side at 22.3 m |
 | `[stage.catch_pins]` station, azimuths | 66.5, 45 / 225 | hinge station of the fins - 1.0 = 63.0, 0 / 180 | user 2026-10-31; fin station stays 64.0 here |
 
 Parked height 134 m, carriage stroke and travel: Task 3 confirms the travel reaches them.
@@ -61,7 +61,7 @@ Parked height 134 m, carriage stroke and travel: Task 3 confirms the travel reac
 - [ ] **Step 2: Run** `tools/build.ps1 -NoBindings -TestFilter "[contact]"`. Expected: FAIL (unknown keys).
 - [ ] **Step 3: Implement** the keys of "Decided numbers"; `plan_yaw_deg` is read in `[site.tower]`, removed from `[mount]`; `tools/structures` and `tower_view.gd` read it from the geometry dictionary (add to the binding's tower dictionary).
 - [ ] **Step 4: Move the site data:** `python tools/data_pipeline/site_heights.py --write`; the terrain centre in `config/earth_terrain.toml` follows, tiles regenerated only if the area no longer covers the 5.5 km.
-- [ ] **Step 5: Add** to `test_launch_site_config.cpp` the position, azimuth 350 and `[site.sea]`; the sea shoreline value is re-read from the mosaic and updated (Review Focus 5). Run `[contact]`, `[config]` tags, then Commit `feat(contact): tower at the measured Pad B ...`.
+- [ ] **Step 5: Add** to `test_launch_site_config.cpp` the position, azimuth 349 and `[site.sea]`; the sea shoreline value is re-read from the mosaic and updated (Review Focus 5). Run `[contact]`, `[config]` tags, then Commit `feat(contact): tower at the measured Pad B ...`.
 
 ### Task 2: Mount height and pad start
 
@@ -104,7 +104,7 @@ Parked height 134 m, carriage stroke and travel: Task 3 confirms the travel reac
 
 - [ ] **Step 1: Write failing tests:** `test_rail_runs_on_the_corner`, `test_bracing_top_and_bottom_reach_both_neighbour_corners` (4 members, ends within 0.3 m of the corner rail and the leg lines), `test_hoist_cable_meets_the_corner` (top anchor over the rail within 0.5 m), `test_qd_arm_is_below_the_arms` (QD deck < lowest arm point at every carriage position used in a stack).
 - [ ] **Step 2: Run** them. Expected: FAIL.
-- [ ] **Step 3: Implement** in the layout; lengthen the arm legs from 25.9 to 28.2 m; drawn hinge = physics hinge; lamps from the corner instead of `face_m`; remove the fixed deviation rows.
+- [ ] **Step 3: Implement** in the layout; shorten the arm legs from 25.9 to 24.2 m; cut the mount and the tower foot vertically on the sides facing each other (`rulings-cut-mount.md`); drawn hinge = physics hinge; lamps from the corner instead of `face_m`; remove the fixed deviation rows.
 - [ ] **Step 4: Render** `render_check` top and side views into `screenshots/pad-b-plan/`, send the PNGs, compare with `DSC_6301`, `DSC05957`.
 - [ ] **Step 5: Run** `tower_view_test`, `tower_lights_test`, `smoke_test`, `check_envelope`; Commit.
 

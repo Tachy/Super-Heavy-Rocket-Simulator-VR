@@ -109,11 +109,12 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
 
 }  // namespace
 
-// Gate back along the line pad -> tower (azimuth 315 deg), nose to the tower: the flip pushes towards it and the side
+// Gate back along the line pad -> tower (the site's azimuth), nose to the tower: the flip pushes towards it and the side
 // pins lie across the arms without a roll.
 static Gate nominal_gate() {
     Gate g;
-    const Vec3 to_tower{std::sin(315.0 * deg), std::cos(315.0 * deg), 0.0};
+    const double azimuth = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").tower->azimuth_rad;
+    const Vec3 to_tower{std::sin(azimuth), std::cos(azimuth), 0.0};
     g.offset_enu_m = to_tower * -220.0;
     g.velocity_enu_mps = to_tower * 3.0 + Vec3{0.0, 0.0, -100.0};
     return g;

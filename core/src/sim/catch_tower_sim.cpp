@@ -30,6 +30,8 @@ constexpr double coast_acceleration_bound_mps2 = 10.0;
 // The arms are force limited (they stall against the hull): damage comes from the hull being driven into an arm.
 constexpr double hull_damage_force_n = 6.0e6;  // [E] hull against one arm, ~3x the arm actuator force
 constexpr double hull_overlap_m = 1.0;         // [E] gross overlap of hull and arm the contact points cannot see
+// A pin must land on the arm, not beside its tip: the final closing stops this short of the tip (pin width and sway).
+constexpr double pin_tip_margin_m = 0.4;       // [E]
 
 }  // namespace
 
@@ -46,7 +48,9 @@ const char* to_string(CatchPhase phase) {
 }
 
 CatchTowerSim::CatchTowerSim(const config::TowerConfig& config, double latitude_rad, double longitude_rad, double height_m)
-    : geometry_(config, latitude_rad, longitude_rad, height_m), arms_(config) {}
+    : geometry_(config, latitude_rad, longitude_rad, height_m), arms_(config) {
+    trigger_.max_axis_offset_m = std::min(trigger_.max_axis_offset_m, geometry_.arm_tip_beyond_axis_m() - pin_tip_margin_m);
+}
 
 void CatchTowerSim::close_arms(bool instantly) {
     if (instantly) arms_.set_closed();

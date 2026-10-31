@@ -281,6 +281,7 @@ godot::Dictionary FlightSim::site_tower(const godot::String& site_id) const {
         d["north"] = to_godot(math::column(g.site_to_itrf(), 1));
         d["up"] = to_godot(math::column(g.site_to_itrf(), 2));
         d["tower_direction"] = to_godot(g.tower_direction());
+        d["plan_yaw_deg"] = c.plan_yaw_rad * constants::rad_to_deg;
         d["across"] = to_godot(g.across());
         d["tower_center_m"] = to_godot(g.tower_box().center);
         d["tower_size_m"] = godot::Vector3(c.width_m, c.width_m, c.height_m);

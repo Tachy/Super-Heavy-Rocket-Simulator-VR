@@ -1,6 +1,7 @@
 // Catch tower scenarios: a booster placed above the arms with its engines off, full force model, real tower
 // contact. The arms are closed beforehand where the scenario needs it (no guidance involved).
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "return_scenario.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -229,4 +231,18 @@ TEST_CASE("Striking the tower is recorded", "[contact][catch]") {
     const auto& booster = session.body(0);
     run(session, t0, 10.0, [&] { return booster.impacted(); });
     CHECK(session.tower()->tower_struck());
+}
+
+TEST_CASE("A stack stands on the 14.5 m ring", "[contact]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    session.set_launch_site(site);
+    session.launch_from_pad("starship_block3", site, 90.0 * constants::deg_to_rad, t0);
+    const auto& stack = session.body(0);
+    const auto tr = spice_earth().fixed_to_gcrf(t0);
+    const Vec3 cg_site = sim::site_enu_m(site, transpose(tr.rotation) * stack.state().position_gcrf_m);
+    // Stage bottom (station 0) on the deck, the stack on the pad axis.
+    CHECK(cg_site.z - stack.vehicle().mass_properties().cg_station_m == Catch::Approx(14.5).margin(1e-3));
+    CHECK(std::hypot(cg_site.x, cg_site.y) < 1e-3);
 }

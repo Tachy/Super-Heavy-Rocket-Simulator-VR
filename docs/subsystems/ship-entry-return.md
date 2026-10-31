@@ -61,6 +61,10 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   and its rate is fed forward (`EntryCommand::rate_gcrf_radps`); entry controller actuator delay 0.5 s [E].
 - Catch from lunar gates: catch plans keep a soft half-plane 18 m off the tower while the hull bottom is below the
   tower top; the gate hands over higher when the sink exceeds 100 m/s [E] (gate x (sink / 100)^2), only below 40 km.
+- Reach at the abort (`gnc::estimate_sea_reach`, once, from the live state): lower bound of the flight to the water and
+  the stop on it (bang-bang at the tilt limit); beyond the usable propellant / `sea_reach_margin` 1.5 [D] the abort plans
+  no longer have to end in the water. The ship keeps flying those plans (not the upright law at once): right after the
+  flip it carries ~31 m/s towards the tower, which 15 deg of tilt near hover cannot stop in 150 m.
 - Upright abort (`gnc::upright_descent`, deterministic: tilt <= 15 deg, away from the tower inside 60 m, sink profile
   sqrt(2^2 + 2 * 0.5 * (a_max - g) * h) with deceleration fed forward, never below the engines' minimum thrust): takes
   over an abort with no converged abort plan 2 s after the abort, an abort leaning beyond 35 deg, an abort whose usable

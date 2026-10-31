@@ -83,7 +83,7 @@ func _initialize() -> void:
 				"horizon_elevation_rad finite at the IM-2 site")
 	_check(core.horizon_elevations("earth", h_lat, h_lon, h_heights, 16, 3.0).is_empty()
 			and is_nan(core.horizon_elevation_rad("earth", 0.0, 0.0, 0.0, 0.0)), "no horizon for Earth")
-	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
+	_check(absf(float(tower.get("mount_height_m", 0.0)) - 14.5) < 1e-9, "tower geometry from the core config")
 	_check(_check_terrain_streaming(core, starbase, bool(terrain_present.get("earth", false))) == true,
 			"terrain streaming checks ran to the end")
 	_check(_check_atmosphere(core) == true, "atmosphere checks ran to the end")

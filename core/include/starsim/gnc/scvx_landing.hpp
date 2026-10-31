@@ -30,6 +30,11 @@ struct ScvxLandingParameters {
     // [D] abort plans (to the sea): the stage is given up, the water beyond the shoreline is what matters - the whole
     // margin is theirs (Falcon 9 lit 900 m beyond its zone: the abort reaches the water only with ~3.3 t of the 5 t).
     double abort_reserve_fraction = 1.0;
+    // The water counts as in reach while this x the estimated cost (estimate_sea_reach, a lower bound) fits the usable
+    // propellant; beyond, the abort gives the water up from the live state instead of finding out late.
+    // [D] flown propellant over the estimate from the abort on (Block 3 booster, shore 765 m): 1.45 from 1500 m, 1.39 from
+    // 800 m; from 400 m (needs 1.34+) it ran out 55 m short of the water. 1.5: those two go, 400 m gives the water up.
+    double sea_reach_margin = 1.5;
     // [E] A plan for the target may tilt the final set at most this far beyond its soft limit (more than the start
     // state already does); beyond, the target counts as out of reach (abort where there is a sea). The soft limits keep
     // re-plans from violating states feasible; Falcon 9 lit 900 m beyond its zone once got a converged pad plan that
@@ -96,6 +101,8 @@ public:
     bool aborting() const { return aborting_; }
     // A converged abort plan is being flown.
     bool has_abort_plan() const { return plan_ && plan_->goal == DescentGoal::Abort && plan_->converged; }
+    // Abort plans must still end in the water (false: the reach estimate or a failed plan gave it up).
+    bool sea_required() const { return sea_required_; }
     int engine_set() const { return engine_set_; }  // phase whose engine set runs
     // End of the active plan (the catch or touchdown it flies to); none before the first plan.
     std::optional<time::Epoch> plan_end_epoch() const;
@@ -127,6 +134,8 @@ private:
     // the active plan's thrust (the engines fly that plan meanwhile).
     PlanRequest request(const DescentSnapshot& snapshot, int start_phase) const;
     void accept(const PlanOutcome& outcome);
+    // While an abort still aims at the water: gives it up (sticky) if the live state cannot reach it on the propellant left.
+    void check_sea_reach(const DescentSnapshot& snapshot, int engine_set);
     // A plan for the target that reaches it only by tilting beyond its limits (DescentPlan::planned_tilt_excess): the
     // target is out of reach, as for a plan that does not converge.
     bool beyond_limits(const DescentPlan& plan) const;
@@ -144,6 +153,7 @@ private:
     int consecutive_failures_ = 0;
     int consecutive_unconverged_ = 0;
     bool sea_required_ = true;  // abort plans must end beyond the shoreline; false once that proved unreachable
+    bool sea_reach_checked_ = false;
     Statistics stats_;
     TvcLateralGains lqr_gains_;  // cached for (lqr_a_, lqr_c_)
     double lqr_a_ = -1.0;

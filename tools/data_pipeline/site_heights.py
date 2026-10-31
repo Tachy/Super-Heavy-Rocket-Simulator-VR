@@ -38,6 +38,9 @@ GATE_WAIVERS: dict[str, dict[str, str]] = {
     "ksc_lc39a": {"spread": "Ruling 6 (M8a, 2026-10-23): the spread is the flame trench and ramps inside the pad "
                             "mound; the median (+13.84 m orthometric) matches the ~48 ft pad deck and is stable "
                             "for r = 30-80 m"},
+    "starbase_olp1": {"spread": "Ruling orchestrator 2026-10-31 (same kind as ksc_lc39a): the 7.8 m spread at the "
+                                "measured Pad B ring is the water basin, ponds and the wall inside the 150 m radius; "
+                                "the concrete itself is flat"},
 }
 
 

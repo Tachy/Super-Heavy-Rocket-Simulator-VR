@@ -28,7 +28,7 @@ VEHICLE = ROOT / "config" / "vehicles" / "starship_block3.toml"
 HULL_RADIUS_M = 4.5  # [S] 9 m booster diameter
 MEASURED_LEG_CENTRES_M = 11.9  # [E] measured leg centre spacing, launch-structures-measurements.md (+-1 m)
 LEG_CENTRES_TOL_M = 1.0
-ALLOWED = ("Mount deck", "Arm length", "Tower face, height", "Leg spacing", "Hinge position", "QD arm", "Fins against the arm")
+ALLOWED = ("Arm length", "Tower face, height", "Leg spacing", "Hinge position", "QD arm", "Fins against the arm")
 
 
 def tower(sites: dict) -> dict:
@@ -52,9 +52,9 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
         elif row not in exceptions:
             exceptions.append(row)
 
-    # Mount: drawn as measured; the physics height differs until the physics plan (deviations table, "Mount deck").
+    # Mount: drawn as measured, the physics deck on the same height.
     within("Mount deck", detail["mount"]["deck_height_m"], detail["mount"]["measured_height_m"], SURFACE_TOL_M)
-    within("Mount deck", detail["mount"]["deck_height_m"], phys["mount_height_m"], LENGTH_TOL_M, "Mount deck")
+    within("Mount deck", detail["mount"]["deck_height_m"], phys["mount_height_m"], LENGTH_TOL_M)
     c = detail["chopstick"]
     half_gap = 0.5 * phys["arm_closed_gap_m"]
     pivot = half_gap + 0.5 * phys["arm_width_m"]
@@ -65,7 +65,7 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
         within("Arm bearing face at the closed pose", pivot - (p[1] + 0.5 * plates[0][2]), half_gap, SURFACE_TOL_M)
     within("Arm length", c["length_m"], phys["arm_length_m"], LENGTH_TOL_M, "Arm length")
     within("Hinge position", detail["carriage"]["hinge_y_m"], pivot, LENGTH_TOL_M, "Hinge position")
-    within("Tower width", detail["tower"]["sections"][0]["face_width_m"], phys["width_m"], LENGTH_TOL_M)
+    within("Tower width", detail["tower"]["sections"][0]["face_width_m"], phys["width_m"], LENGTH_TOL_M, "Tower face, height")
     within("Tower height", detail["tower"]["roof"]["block_base_m"] + detail["tower"]["roof"]["block_height_m"],
            phys["height_m"], LENGTH_TOL_M, "Tower face, height")
     # Arm tops: the deck strip's top is the physics arm's top plane (Z = 0 at the hinge height) the pins land on.
@@ -78,7 +78,7 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
         failures.append(f"Leg spacing: outer width {outer:.2f} m exceeds the physics box {phys['width_m']:.2f} m")
     within("Leg spacing", outer - leg, MEASURED_LEG_CENTRES_M, LEG_CENTRES_TOL_M, "Leg spacing")
     # QD arm: the head must not reach into the hull; a gap means it is static and not attached (no physics state).
-    hinge_to_axis = phys["distance_m"] - 0.5 * phys["width_m"]
+    hinge_to_axis = phys["hinge_distance_m"]
     gap = hinge_to_axis - detail["qd_arm"]["reach_m"] - HULL_RADIUS_M
     if gap < 0.0:
         failures.append(f"QD arm: head {-gap:.2f} m inside the hull")

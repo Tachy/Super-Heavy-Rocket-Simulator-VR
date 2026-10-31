@@ -24,6 +24,7 @@ struct CatchTarget {
     double mount_keep_out_radius_m = 0.0; // around the pad centre (launch mount), incl. hull radius and margin
     double mount_height_m = 0.0;          // launch mount top above the pad ground
     double tower_height_m = 0.0;          // tower top above the pad ground (catch keep-out; 0: none)
+    std::optional<double> away_from_tower_azimuth_rad;  // body azimuth facing away from the tower; none: nearest roll
 };
 
 // Touchdown on landing legs on a pad (landing zone) at the site's centre.
@@ -44,6 +45,9 @@ struct LandingSite {
 
 // Body +y direction (same frame as the inputs) that turns the first pin along +-across, upright body (x = up);
 // of the two solutions the one nearer `current_body_y` (the pins are symmetric).
+// Body +y for the catch of `target`: its away_from_tower azimuth if it has one, else the nearest pin roll (below).
+math::Vec3 catch_roll_reference(const CatchTarget& target, const math::Vec3& up, const math::Vec3& current_body_y);
+
 math::Vec3 catch_roll_reference(const math::Vec3& across, const math::Vec3& up, double pin_azimuth_rad,
                                 const math::Vec3& current_body_y);
 

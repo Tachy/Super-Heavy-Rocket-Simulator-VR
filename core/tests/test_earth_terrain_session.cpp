@@ -217,7 +217,8 @@ TEST_CASE("crew escape touchdown over water from terrain", "[session][earth_terr
     sim::FlightSession session(env().ephemeris, env().earth, STARSIM_CONFIG_DIR);
     session.set_earth_terrain(terrain);
     session.set_launch_site(starbase);
-    const Vec3 to_tower{std::sin(315.0 * deg), std::cos(315.0 * deg), 0.0};
+    const double tower_azimuth = starbase.tower->azimuth_rad;
+    const Vec3 to_tower{std::sin(tower_azimuth), std::cos(tower_azimuth), 0.0};
     const auto cfg = ship_with(20000.0);  // below min_catch_propellant_kg: the give-up fires at once
     session.place_entering_ship(cfg, belly_state(session, cfg, to_tower * -300.0 + Vec3{0, 0, 1200}, {0.0, 0.0, -95.0}),
                                 t0());

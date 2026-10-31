@@ -41,7 +41,8 @@ struct ScvxSettings {
     // [E] Fresh plans start from a guess far from the dynamics and pass through larger transients: Super Heavy's sea
     // abort from ~350 m (fixture superheavy_abort_sea_353m.txt) runs 37.3, 2.72, 6.19, 6.59, 2.27 and converges at the
     // 17th iteration; 3 called it stalled at the fifth.
-    int fresh_stall_iterations = 4;
+    // 8 (was 4): the first abort plan to a 765 m shore from 738 m stalled at the sixth iteration (vc 2.3) and converges at the 12th.
+    int fresh_stall_iterations = 8;
     double stall_ratio = 0.5;
     double stall_virtual_control = 1.0;
     DescentLimits limits;

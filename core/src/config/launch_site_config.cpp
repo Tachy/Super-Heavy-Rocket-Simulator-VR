@@ -15,6 +15,8 @@ TowerConfig load_tower(const Document& doc, const toml::table& t) {
     c.azimuth_rad = doc.number(t, "azimuth_deg") * deg;
     c.distance_m = doc.positive(t, "distance_m");
     c.width_m = doc.positive(t, "width_m");
+    c.plan_yaw_rad = doc.number_or(t, "plan_yaw_deg", 0.0) * deg;
+    c.hinge_distance_m = doc.number_or(t, "hinge_distance_m", c.distance_m - 0.5 * c.width_m);
     c.height_m = doc.positive(t, "height_m");
     c.mount_height_m = doc.positive(t, "mount_height_m");
     c.mount_outer_radius_m = doc.positive(t, "mount_outer_radius_m");

@@ -1,6 +1,7 @@
 // Return to launch site: after hot staging the booster flips, boosts back, coasts engines first and is caught by
 // the tower after its landing burn (Super Heavy has no legs: always caught, project decision 2026-10-13).
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -14,6 +15,7 @@
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -194,6 +196,7 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
 
     bool landing = false;
     double ignition_propellant_kg = -1.0;
+    double ignition_roll_error_deg = -1.0;
     for (double t = 0.0; t < 1200.0;) {
         t += landing ? sim::FlightSession::tick_s : 0.5;
         session.advance_to(t0 + t, 1000);
@@ -202,7 +205,11 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
         const auto& booster = session.body(0);
         const auto* status = session.return_status(0);
         const bool burning = status && status->phase >= gnc::ReturnPhase::LandingBurn;
-        if (burning && !landing) ignition_propellant_kg = booster.vehicle().propellant_kg();
+        if (burning && !landing) {
+            ignition_propellant_kg = booster.vehicle().propellant_kg();
+            const math::Vec3 body_y = booster.state().attitude.rotate({0.0, 1.0, 0.0});
+            ignition_roll_error_deg = std::acos(std::clamp(dot(body_y, status->roll_reference_gcrf), -1.0, 1.0)) / constants::deg_to_rad;
+        }
         landing = burning;
         if (booster.caught() || booster.impacted() || booster.resting()) break;
     }
@@ -216,6 +223,10 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
     std::printf("%s: tower %s, booster %.1f m from the catch axis, max pin load %.2f MN\n", vehicle_id.c_str(),
                 sim::to_string(phase), std::hypot(p.x, p.y), tower->max_pin_load_n() / 1e6);
     std::printf("%s: propellant at landing-burn ignition %.1f t\n", vehicle_id.c_str(), ignition_propellant_kg / 1e3);
+    std::printf("%s: roll error at landing-burn ignition %.2f deg\n", vehicle_id.c_str(), ignition_roll_error_deg);
+    // The landing-burn fixtures of test_scvx_catch start at the catch roll: the real coast has to bring it there.
+    CHECK(ignition_roll_error_deg >= 0.0);
+    CHECK(ignition_roll_error_deg < test::flown_ignition_roll_error_bound_deg);
 }
 
 // The ascent autopilot plans MECO from what the return needs (flip, boostback, the propellant kept for the landing

@@ -39,6 +39,7 @@ add_library(starsim_core STATIC
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
     src/gnc/peg_steering.cpp
+    src/gnc/sea_reach.cpp
     src/gnc/apollo_braking.cpp
     src/gnc/lunar_ascent_guidance.cpp
     src/gnc/lunar_landing_guidance.cpp

@@ -9,10 +9,9 @@ const MOUNT_SEGMENTS := 24
 ## [E] Mount materials (linear albedo from the photos: weathered concrete, dark tunnel interiors, grey hoods).
 const PLINTH_CONCRETE := Color(0.50, 0.49, 0.46)
 const INTERIOR_DARK := Color(0.14, 0.13, 0.12)
-const DEFLECTOR_DARK := Color(0.20, 0.16, 0.12)  ## [E] rust-brown ribbed steel, topdown_2025-09
+const VENT_WHITE := Color(0.82, 0.82, 0.80)  ## [E] white vent plates on the annex, DSC06000
 const MOUNT_STEEL := Color(0.30, 0.30, 0.31)
-const PIER_CONCRETE := Color(0.27, 0.26, 0.24)  ## [E] sloped corner piers, grey concrete: person-scale frame, dusk 2025-09
-const TRENCH_WALL := Color(0.36, 0.35, 0.32)  ## [E] low side walls of the aprons, images.jpeg
+const TRENCH_WALL := Color(0.36, 0.35, 0.32)  ## [E] wedge walls of the tunnel, DSC06000
 const RAMP_FLOOR := Color(0.27, 0.24, 0.19)  ## [E] tan-brown apron floor, darker than the hardstand: images.jpeg
 const DOOR_STEEL := Color(0.30, 0.31, 0.32)  ## [E] grey doors in the front face, person-scale frame
 const FOOT_CONCRETE := Color(0.30, 0.29, 0.27)  ## [E] the tower's foot block, images.jpeg
@@ -108,7 +107,7 @@ func build(geometry: Dictionary) -> void:
 ## The axes of the measured squares (mount, trench, tower foot, lattice: parallel), site frame: the line to the physics
 ## tower direction lies `plan_yaw_deg` off their X axis, toward +Y.
 func _plan_axes(detail: Dictionary, geometry: Dictionary) -> Basis:
-	var yaw := deg_to_rad(float(detail["mount"]["plan_yaw_deg"]))
+	var yaw := deg_to_rad(float(geometry["plan_yaw_deg"]))
 	var toward: Vector3 = geometry["tower_direction"]
 	var across: Vector3 = geometry["across"]
 	return Basis(toward * cos(yaw) - across * sin(yaw), toward * sin(yaw) + across * cos(yaw), Vector3(0.0, 0.0, 1.0))
@@ -368,8 +367,7 @@ func _build_mount_model(models: Dictionary, geometry: Dictionary) -> void:
 	var shell := TowerMaterial.mount_shell(float(detail["mount"]["tile_m"]))
 	var materials := {
 		"shell": shell, "plinth": LitAerial.material(PLINTH_CONCRETE, 0.9, 0.0),
-		"pier": LitAerial.material(PIER_CONCRETE, 0.9, 0.0),
-		"interior": LitAerial.material(INTERIOR_DARK, 0.9, 0.0), "deflector": LitAerial.material(DEFLECTOR_DARK, 0.6, 0.4),
+		"interior": LitAerial.material(INTERIOR_DARK, 0.9, 0.0), "vent": LitAerial.material(VENT_WHITE, 0.7, 0.1),
 		"hood": TowerMaterial.clad(), "hardware": LitAerial.material(MOUNT_STEEL, 0.5, 0.5),
 		"door": LitAerial.material(DOOR_STEEL, 0.6, 0.3)}
 	var mount := Node3D.new()
@@ -392,7 +390,7 @@ func _build_mount_model(models: Dictionary, geometry: Dictionary) -> void:
 	_set_trench_mask(detail, geometry)
 
 
-## Terrain mask globals (terrain_earth.gdshader): the footprint of the mount and the two ramps, in the site's axes.
+## Terrain mask globals (terrain_earth.gdshader): the tunnel under the mount and its two ramps, in the site's axes.
 func _set_trench_mask(detail: Dictionary, geometry: Dictionary) -> void:
 	var m: Dictionary = detail["mount"]
 	var t: Dictionary = detail["trench"]
@@ -402,8 +400,8 @@ func _set_trench_mask(detail: Dictionary, geometry: Dictionary) -> void:
 	ShaderGlobals.set_value(&"trench_site_lo", split[1])
 	ShaderGlobals.set_value(&"trench_axis_t", (basis * Frames.to_render(axes.x)).normalized())
 	ShaderGlobals.set_value(&"trench_axis_a", (basis * Frames.to_render(axes.y)).normalized())
-	var half_a: float = 0.5 * float(m["base_across_m"])
-	ShaderGlobals.set_value(&"trench_shape", Vector4(0.5 * float(m["base_toward_m"]) - MASK_INSET_M,
-			half_a - MASK_INSET_M, 0.5 * float(t["width_m"]) - MASK_INSET_M,
-			half_a + float(t["length_m"]) - MASK_INSET_M))
+	# Only the tunnel lies below the ground: the mask is its plan (inside the walls), under the block and out to the ramp ends.
+	var half_w: float = 0.5 * float(t["width_m"]) - MASK_INSET_M
+	var half_y: float = float(m["block_half_y_m"])
+	ShaderGlobals.set_value(&"trench_shape", Vector4(half_w, half_y - MASK_INSET_M, half_w, half_y + float(t["length_m"]) - MASK_INSET_M))
 	ShaderGlobals.set_value(&"trench_range_m", float(t["mask_range_m"]))

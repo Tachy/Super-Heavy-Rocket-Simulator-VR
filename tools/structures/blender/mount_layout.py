@@ -5,28 +5,34 @@ Frame (both models): X toward the tower, Y across, Z up, origin on the mount axi
 A surface is (verts, uvs): planar polygon, counter-clockwise seen from outside (the winding is fixed by an outward hint
 in `Surfaces.add`, so the glTF normals point out). UV in metres on the surface; the shell shader repeats the panel map.
 
-Shape (launch-structures-measurements.md "Mount shape", images.jpeg, padb_mount_pyramid_front_person_scale_2026-05,
-padb_mount_side_pyramid_dusk_2025-09, padb_aerial_mount_trench_topdown_2025-09): four sloped corner piers and a deck.
-The +-X faces (front -X with two grey doors, vents and the two hood ducts; tower side +X) are closed plated slopes.
-Each +-Y side is one big portal: the piers' faces flank a trapezoid opening whose sides follow the piers, a vertical
-spandrel with a heavy lintel and a ribbed duct above it, and inside the bucket: a ribbed flame deflector curving down
-from a ridge under the ring to the pit floor, which runs out into the exit ramp.
+Shape (rulings-mount-shape.md, photos DSC06000 / DSC06022 / CRL05690 / DSC05957; launch-structures-measurements.md "Mount
+shape"): a BLOCK with straight vertical walls (X from -block_x_back to +block_x_tower, Y +-block_half_y, flat deck, round
+opening with the ring), a pyramid ANNEX only on the side away from the tower (trapezoid footprint, plated slopes, door
+group at its foot, white vent plates, dark louvre boxes), and ONE tunnel of one width end to end through the block along
+Y: level floor at -pit_depth under the ring, straight ramps up to the ground at both ends, vertical walls, the walls
+outside the block as wedges whose top falls from the deck height to the ground at the ramp end. No deflector, no flare.
+The two booster QD heads stand on the ring under the two hoods (no cabinets on the deck). The floor is one closed surface.
 Heights and plan sizes are the measured ones (deck_height_m 14.5 m); the physics mount height follows in the physics plan.
 """
 from __future__ import annotations
 
 import math
 
-SHELL, PLINTH, PIER, INTERIOR, DEFLECTOR, HOOD, HARDWARE, DOOR = (
-    "shell", "plinth", "pier", "interior", "deflector", "hood", "hardware", "door")
+SHELL, PLINTH, INTERIOR, HOOD, HARDWARE, DOOR, VENT = (
+    "shell", "plinth", "interior", "hood", "hardware", "door", "vent")
 CIRCLE_SEGMENTS = 32  # [E] ring, chamber: the opening reads round at the 9 m size
-DEFLECTOR_SEGMENTS = 14  # [E] per side: the curve of the bucket floor reads smooth
-DUCT_SIDES = 10  # [E] the duct above the lintel reads round
-DUCT_RIB_FINS = 18  # [E] rib rings on the duct, images padb_mount_side_pyramid_dusk_2025-09
 
 
 def _sub(a, b):
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _add(a, b):
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+
+
+def _mul(a, k):
+    return (a[0] * k, a[1] * k, a[2] * k)
 
 
 def _cross(a, b):
@@ -35,6 +41,11 @@ def _cross(a, b):
 
 def _dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _unit(a):
+    n = math.sqrt(_dot(a, a))
+    return (a[0] / n, a[1] / n, a[2] / n)
 
 
 def newell_normal(verts):
@@ -109,41 +120,45 @@ class Shape:
         self.height = m["deck_height_m"]  # ring top
         self.deck_z = self.height - m["deck_drop_m"]
         self.floor_z = -m["pit_depth_m"]
-        self.plinth_z = m["plinth_height_m"]
-        self.half_a = 0.5 * m["base_across_m"]
-        self.half_t = 0.5 * m["base_toward_m"]
-        self.run = self.half_a - 0.5 * m["top_across_m"]
-        self.top_half_a = 0.5 * m["top_across_m"]
-        self.top_half_t = self.half_t - self.run
-        self.slope_len = math.hypot(self.run, self.deck_z - self.plinth_z) / (self.deck_z - self.plinth_z)
+        self.x_front = m["block_x_tower_m"]  # the vertical wall toward the tower
+        self.x_back = m["block_x_back_m"]  # deck edge away from the tower, the annex starts here
+        self.half_y = m["block_half_y_m"]  # the block's end faces, the portals
+        self.annex_x = m["annex_end_x_m"]
+        self.annex_half_y = m["annex_half_y_m"]
+        self.annex_tip_half_y = m["annex_tip_half_y_m"]
+        self.half_w = 0.5 * self.t["width_m"]  # tunnel half width: one value from end to end
+        self.wall_t = self.t["wall_thickness_m"]
         self.ring_r = 0.5 * m["ring_outer_diameter_m"]
         self.open_r = 0.5 * m["ring_opening_diameter_m"]
         self.ring_bottom = self.height - m["ring_thickness_m"]
         self.open_top = m["opening_top_m"]
-        self.open_half_ground = 0.5 * m["opening_width_ground_m"]
-        self.open_half_deck = 0.5 * m["opening_width_deck_m"]
+        self.ramp_end = self.half_y + self.t["length_m"]
 
-    def _slope(self, z):
-        return self.run * (z - self.plinth_z) / (self.deck_z - self.plinth_z)
+    def back_z(self, x):
+        """Height of the annex's back slope at x (x from -annex_x to -x_back)."""
+        return self.deck_z * (x + self.annex_x) / (self.annex_x - self.x_back)
 
-    def hx(self, z):  # half extent along the mount-tower line at height z on the slope
-        return self.half_t - self._slope(z)
+    def back_x(self, z):
+        return -self.annex_x + (self.annex_x - self.x_back) * z / self.deck_z
 
-    def hy(self, z):
-        return self.half_a - self._slope(z)
-
-    def xi(self, z):  # half width of the portal opening at height z: its sides follow the piers
-        return self.open_half_ground + (self.open_half_deck - self.open_half_ground) * z / self.deck_z
+    def floor_at(self, y):
+        """Tunnel floor height at |y|: level under the block, straight up to the ground at the ramp end."""
+        a = abs(y)
+        if a <= self.half_y:
+            return self.floor_z
+        return self.floor_z * max(0.0, 1.0 - (a - self.half_y) / (self.ramp_end - self.half_y))
 
 
 def _circle(r, z, angles):
     return [(r * math.cos(a), r * math.sin(a), z) for a in angles]
 
 
-def _rect_point(a, hx, hy, z):
-    """Where the ray at angle a leaves the rectangle |x| <= hx, |y| <= hy."""
+def _box_point(a, x0, x1, y0, y1, z):
+    """Where the ray at angle a from the origin leaves the rectangle x0..x1, y0..y1 (origin inside)."""
     c, s = math.cos(a), math.sin(a)
-    t = min(hx / abs(c) if abs(c) > 1e-12 else 1e9, hy / abs(s) if abs(s) > 1e-12 else 1e9)
+    tx = (x1 / c if c > 1e-12 else x0 / c) if abs(c) > 1e-12 else 1e9
+    ty = (y1 / s if s > 1e-12 else y0 / s) if abs(s) > 1e-12 else 1e9
+    t = min(tx, ty)
     return (t * c, t * s, z)
 
 
@@ -159,98 +174,113 @@ def _uv_plan(p):
     return (p[0], p[1])
 
 
-def _annulus_to_rect(S, node, radius, hx, hy, z, hint):
+def _plane_frame(p0, p1, p2, hint):
+    """(a, b, n) of a planar face: a horizontal along it, b up the face, n out (towards `hint`)."""
+    n = _unit(_cross(_sub(p1, p0), _sub(p2, p0)))
+    if _dot(n, hint) < 0.0:
+        n = _mul(n, -1.0)
+    a = _unit(_cross((0.0, 0.0, 1.0), n))
+    b = _cross(n, a)
+    if b[2] < 0.0:
+        a, b = _mul(a, -1.0), _mul(b, -1.0)
+    return a, b, n
+
+
+def _plane_uv(frame, origin):
+    a, b, _ = frame
+    return lambda p: (_dot(_sub(p, origin), a), _dot(_sub(p, origin), b))
+
+
+def _annulus_to_box(S, node, radius, x0, x1, y0, y1, z, hint):
     """Flat ring between a circle and the rectangle around it, as a fan of quads (corner angles included)."""
     base = [2.0 * math.pi * k / CIRCLE_SEGMENTS for k in range(CIRCLE_SEGMENTS)]
-    corner = math.atan2(hy, hx)
-    angles = sorted(base + [corner, math.pi - corner, math.pi + corner, -corner + 2.0 * math.pi])
+    corners = [math.atan2(y, x) % (2.0 * math.pi) for x, y in ((x1, y1), (x0, y1), (x0, y0), (x1, y0))]
+    angles = sorted(base + corners)
     for i, a in enumerate(angles):
         b = angles[(i + 1) % len(angles)] + (2.0 * math.pi if i == len(angles) - 1 else 0.0)
-        S.add(node, [_circle(radius, z, [a])[0], _circle(radius, z, [b])[0], _rect_point(b, hx, hy, z),
-                     _rect_point(a, hx, hy, z)], hint, _uv_plan)
+        S.add(node, [_circle(radius, z, [a])[0], _circle(radius, z, [b])[0], _box_point(b, x0, x1, y0, y1, z),
+                     _box_point(a, x0, x1, y0, y1, z)], hint, _uv_plan)
 
 
-def _closed_slopes(S, sh):
-    """The plated +-X faces and the low foot band all round the base."""
-    zp, zd, zf = sh.plinth_z, sh.deck_z, sh.floor_z
-    for sx in (-1.0, 1.0):
-        S.add(SHELL, [(sx * sh.hx(zp), -sh.hy(zp), zp), (sx * sh.hx(zp), sh.hy(zp), zp),
-                      (sx * sh.hx(zd), sh.hy(zd), zd), (sx * sh.hx(zd), -sh.hy(zd), zd)], (sx, 0.0, 0.4),
-              lambda p: (p[1], p[2] * sh.slope_len))
-        S.add(PLINTH, [(sx * sh.half_t, -sh.half_a, zf), (sx * sh.half_t, sh.half_a, zf),
-                       (sx * sh.half_t, sh.half_a, zp), (sx * sh.half_t, -sh.half_a, zp)], (sx, 0.0, 0.0), _uv_y)
-
-
-def _portal(S, sh):
-    """Both +-Y sides: pier faces, foot band, spandrel, lintel, duct and the opening's side walls."""
-    m = sh.m
-    zp, zd, zf, zo = sh.plinth_z, sh.deck_z, sh.floor_z, sh.open_top
-    yb = sh.hy(zd)  # the spandrel stands under the deck edge
+def _block(S, sh):
+    """The vertical walls of the block: the tower side, and both ends (+-Y) with the tunnel's rectangular portal."""
+    zd, zo, hw = sh.deck_z, sh.open_top, sh.half_w
+    S.add(SHELL, [(sh.x_front, -sh.half_y, 0.0), (sh.x_front, sh.half_y, 0.0), (sh.x_front, sh.half_y, zd),
+                  (sh.x_front, -sh.half_y, zd)], (1.0, 0.0, 0.0), _uv_y)
     for sy in (-1.0, 1.0):
-        for side in (-1.0, 1.0):
-            # Pier face in the sloped plane between the corner edge and the opening.
-            S.add(PIER, [(side * sh.hx(zp), sy * sh.hy(zp), zp), (side * sh.xi(zp), sy * sh.hy(zp), zp),
-                         (side * sh.xi(zd), sy * sh.hy(zd), zd), (side * sh.hx(zd), sy * sh.hy(zd), zd)],
-                  (0.0, sy, 0.4), lambda p: (p[0], p[2] * sh.slope_len))
-            lo, hi = sorted((side * sh.open_half_ground, side * sh.half_t))
-            S.add(PLINTH, [(lo, sy * sh.half_a, zf), (hi, sy * sh.half_a, zf), (hi, sy * sh.half_a, zp),
-                           (lo, sy * sh.half_a, zp)], (0.0, sy, 0.0), _uv_x)
-            # The opening's side wall: a wedge in the plane x = xi(z) from the sloped face back to the spandrel.
-            S.add(INTERIOR, [(side * sh.xi(zp), sy * yb, zp), (side * sh.xi(zp), sy * sh.hy(zp), zp),
-                             (side * sh.xi(zd), sy * yb, zd)], (-side, 0.0, 0.0), _uv_y)
-        # Spandrel: flat plate between the piers, opening top to the deck edge.
-        S.add(HOOD, [(-sh.xi(zo), sy * yb, zo), (sh.xi(zo), sy * yb, zo), (sh.xi(zd), sy * yb, zd),
-                     (-sh.xi(zd), sy * yb, zd)], (0.0, sy, 0.0), _uv_x)
-        # Heavy lintel along the opening's top, standing out of the spandrel.
-        ld, lh = m["lintel_depth_m"], m["lintel_height_m"]
-        hw = sh.xi(zo)
-        S.box(PLINTH, (-hw, min(sy * yb, sy * (yb + ld)), zo), (hw, max(sy * yb, sy * (yb + ld)), zo + lh), _uv_x)
-        # Ribbed duct along the deck edge above the spandrel: a prism with a rib ring every few metres.
-        _duct(S, sh, sy * (yb + m["duct_radius_m"]), zd - m["duct_radius_m"], sh.xi(zd) + 0.5 * m["duct_radius_m"])
+        y = sy * sh.half_y
+        n = (0.0, sy, 0.0)
+        S.add(SHELL, [(-sh.x_back, y, 0.0), (-hw, y, 0.0), (-hw, y, zd), (-sh.x_back, y, zd)], n, _uv_x)
+        S.add(SHELL, [(hw, y, 0.0), (sh.x_front, y, 0.0), (sh.x_front, y, zd), (hw, y, zd)], n, _uv_x)
+        S.add(SHELL, [(-hw, y, zo), (hw, y, zo), (hw, y, zd), (-hw, y, zd)], n, _uv_x)
 
 
-def _duct(S, sh, yc, zc, half_x):
+def _annex(S, sh):
+    """The pyramid on the side away from the tower: the back slope, the two side slopes and the flank triangles."""
+    zd = sh.deck_z
+    xb, xa = -sh.x_back, -sh.annex_x
+    top = [(xb, sy * sh.half_y, zd) for sy in (-1.0, 1.0)]
+    tips = [(xa, sy * sh.annex_tip_half_y, 0.0) for sy in (-1.0, 1.0)]
+    back = [top[0], top[1], tips[1], tips[0]]
+    f = _plane_frame(back[0], back[1], back[2], (-1.0, 0.0, 0.4))
+    S.add(SHELL, back, f[2], _plane_uv(f, back[3]))
+    for sy in (-1.0, 1.0):
+        t = (xb, sy * sh.half_y, zd)
+        foot = (xb, sy * sh.annex_half_y, 0.0)
+        tip = (xa, sy * sh.annex_tip_half_y, 0.0)
+        f = _plane_frame(t, foot, tip, (-0.4, sy, 0.4))
+        S.add(SHELL, [t, foot, tip], f[2], _plane_uv(f, tip))
+        S.add(SHELL, [t, (xb, sy * sh.half_y, 0.0), foot], (1.0, 0.0, 0.0), _uv_y)  # the flank against the block
+
+
+def _slab_on_face(S, node, p0, p1, p2, hint, centre, w, h, depth):
+    """A thin box of w x h (metres, in the face) standing `depth` out of the planar face p0-p1-p2, at `centre` on it."""
+    a, b, n = _plane_frame(p0, p1, p2, hint)
+    pts = []
+    for sa, sb in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        pts.append(_add(centre, _add(_mul(a, 0.5 * w * sa), _mul(b, 0.5 * h * sb))))
+    S.solid(node, pts + [_add(p, _mul(n, depth)) for p in pts], _plane_uv((a, b, n), centre))
+
+
+def _annex_details(S, sh):
+    """Door group at the foot of the back slope, white vent plates on it and on the flanks, dark louvre boxes along the
+    slanted edges (CRL05690, DSC06000)."""
     m = sh.m
-    r = m["duct_radius_m"]
-    a = [2.0 * math.pi * k / DUCT_SIDES for k in range(DUCT_SIDES + 1)]
+    zd = sh.deck_z
+    xb, xa = -sh.x_back, -sh.annex_x
+    lift = m["door_lift_m"]
+    for sy in (-1.0, 1.0):
+        yc, half = sy * m["door_y_m"], 0.5 * m["door_width_m"]
+        pts = [(yc - half, 0.0), (yc + half, 0.0), (yc + half, m["door_height_m"]), (yc - half, m["door_height_m"])]
+        S.add(DOOR, [(sh.back_x(z) - lift, y, z) for y, z in pts], (-1.0, 0.0, 0.7), _uv_y)
+    back = [(xb, -sh.half_y, zd), (xb, sh.half_y, zd), (xa, sh.annex_tip_half_y, 0.0)]
+    vent_w, vent_h = m["vent_width_m"], m["vent_height_m"]
+    for sy in (-1.0, 1.0):
+        for yv, zc in ((sy * m["vent_y_m"], zd - m["vent_below_deck_m"]), (sy * m["vent_outer_y_m"] * 0.7, zd - m["vent_outer_below_deck_m"])):
+            centre = (sh.back_x(zc), yv, zc)
+            _slab_on_face(S, VENT, back[0], back[1], back[2], (-1.0, 0.0, 0.7), centre, vent_w, vent_h, m["vent_depth_m"])
+        t = (xb, sy * sh.half_y, zd)
+        foot = (xb, sy * sh.annex_half_y, 0.0)
+        tip = (xa, sy * sh.annex_tip_half_y, 0.0)
+        for k in range(int(m["louvre_count"])):
+            w = (k + 1.0) / (m["louvre_count"] + 1.0)
+            # along the slanted edge from the top corner to the foot corner, a little inside it
+            centre = _add(_add(_mul(t, 0.8 * (1.0 - w) + 0.1), _mul(foot, 0.8 * w)), _mul(tip, 0.1))
+            _slab_on_face(S, INTERIOR, t, foot, tip, (-0.4, sy, 0.4), centre, m["louvre_width_m"], m["louvre_height_m"],
+                          m["louvre_depth_m"])
+        centre = _add(_add(_mul(t, 0.25), _mul(foot, 0.35)), _mul(tip, 0.4))  # a white plate in the flank's middle
+        _slab_on_face(S, VENT, t, foot, tip, (-0.4, sy, 0.4), centre, vent_w, vent_h, m["vent_depth_m"])
 
-    def rim(x, radius, k):
-        return (x, yc + radius * math.cos(a[k]), zc + radius * math.sin(a[k]))
 
-    for k in range(DUCT_SIDES):
-        mid = 0.5 * (a[k] + a[k + 1])
-        out = (0.0, math.cos(mid), math.sin(mid))
-        S.add(PLINTH, [rim(-half_x, r, k), rim(half_x, r, k), rim(half_x, r, k + 1), rim(-half_x, r, k + 1)], out, _uv_y)
-    fin = m["duct_rib_m"]
-    for j in range(DUCT_RIB_FINS):
-        x = -half_x + 2.0 * half_x * (j + 0.5) / DUCT_RIB_FINS
-        for k in range(DUCT_SIDES):
-            mid = 0.5 * (a[k] + a[k + 1])
-            out = (0.0, math.cos(mid), math.sin(mid))
-            S.add(PLINTH, [rim(x - fin, r + fin, k), rim(x + fin, r + fin, k), rim(x + fin, r + fin, k + 1),
-                           rim(x - fin, r + fin, k + 1)], out, _uv_y)
-            for sx in (-1.0, 1.0):
-                S.add(PLINTH, [rim(x + sx * fin, r, k), rim(x + sx * fin, r + fin, k), rim(x + sx * fin, r + fin, k + 1),
-                               rim(x + sx * fin, r, k + 1)], (sx, 0.0, 0.0), _uv_y)
-
-
-def _bucket(S, sh):
-    """Below the opening: side walls, ceiling with the chamber, the ribbed deflector with its ridge under the ring."""
+def _tunnel(S, sh):
+    """The part of the tunnel inside the block: side walls, ceiling with the chamber hole, chamber wall, deck plate."""
     m = sh.m
-    zf, zo, zd, zp = sh.floor_z, sh.open_top, sh.deck_z, sh.plinth_z
-    xw = sh.open_half_ground
-    yb = sh.hy(zd)
+    zf, zo, zd, hw = sh.floor_z, sh.open_top, sh.deck_z, sh.half_w
     for side in (-1.0, 1.0):
-        x = side * xw
-        S.add(INTERIOR, [(x, -sh.half_a, zf), (x, sh.half_a, zf), (x, sh.half_a, 0.0), (x, -sh.half_a, 0.0)],
-              (-side, 0.0, 0.0), _uv_y)  # the pit's side walls
-        S.add(INTERIOR, [(x, -sh.half_a, 0.0), (x, sh.half_a, 0.0), (side * sh.xi(zp), sh.hy(zp), zp),
-                         (side * sh.xi(zp), -sh.hy(zp), zp)], (-side, 0.0, 0.0), _uv_y)
-        # Above the foot band the wall leans with the opening's sides, up to the ceiling.
-        S.add(INTERIOR, [(side * sh.xi(zp), -yb, zp), (side * sh.xi(zp), yb, zp), (side * sh.xi(zo), yb, zo),
-                         (side * sh.xi(zo), -yb, zo)], (-side, 0.0, 0.0), _uv_y)
-    _annulus_to_rect(S, INTERIOR, m["chamber_radius_m"], sh.xi(zo), yb, zo, (0.0, 0.0, -1.0))  # ceiling
-    # Chamber wall from the ceiling to the deck's underside, and the plate between ring and chamber.
+        x = side * hw
+        S.add(INTERIOR, [(x, -sh.half_y, zf), (x, sh.half_y, zf), (x, sh.half_y, zo), (x, -sh.half_y, zo)],
+              (-side, 0.0, 0.0), _uv_y)
+    _annulus_to_box(S, INTERIOR, m["chamber_radius_m"], -hw, hw, -sh.half_y, sh.half_y, zo, (0.0, 0.0, -1.0))  # ceiling
     ring_angles = [2.0 * math.pi * k / CIRCLE_SEGMENTS for k in range(CIRCLE_SEGMENTS + 1)]
     r_c = m["chamber_radius_m"]
     z_top = zd - m["deck_plate_m"]
@@ -261,37 +291,13 @@ def _bucket(S, sh):
               _uv_y)
         ia, ib = _circle(sh.ring_r, z_top, [a])[0], _circle(sh.ring_r, z_top, [b])[0]
         S.add(INTERIOR, [ia, ib, (pb[0], pb[1], z_top), (pa[0], pa[1], z_top)], (0.0, 0.0, -1.0), _uv_plan)
-    _deflector(S, sh)
-
-
-def _deflector_z(sh, y):
-    """Height of the bucket floor at |y|: a parabola, steep under the ring, flat at the pit floor."""
-    frac = max(0.0, 1.0 - abs(y) / sh.half_a)
-    return sh.floor_z + (sh.m["ridge_top_m"] - sh.floor_z) * frac ** 2
-
-
-def _deflector(S, sh):
-    """Ribs run down the slope; each is a shallow V seen across, so the floor reads ribbed in the raking sun."""
-    pitch, depth = sh.m["rib_pitch_m"], sh.m["rib_depth_m"]
-    xw = sh.open_half_ground
-    count = int(round(2.0 * xw / pitch))
-    step = 2.0 * xw / count
-    up = (0.0, 0.0, 1.0)
-    for sy in (-1.0, 1.0):
-        ys = [sy * sh.half_a * k / DEFLECTOR_SEGMENTS for k in range(DEFLECTOR_SEGMENTS + 1)]
-        for y0, y1 in zip(ys, ys[1:]):
-            z0, z1 = _deflector_z(sh, y0), _deflector_z(sh, y1)
-            for i in range(count):
-                xa, xm, xb = -xw + i * step, -xw + (i + 0.5) * step, -xw + (i + 1) * step
-                S.add(DEFLECTOR, [(xa, y0, z0), (xm, y0, z0 + depth), (xm, y1, z1 + depth), (xa, y1, z1)], up, _uv_plan)
-                S.add(DEFLECTOR, [(xm, y0, z0 + depth), (xb, y0, z0), (xb, y1, z1), (xm, y1, z1 + depth)], up, _uv_plan)
 
 
 def _deck_and_ring(S, sh):
     m = sh.m
     zd = sh.deck_z
     up = (0.0, 0.0, 1.0)
-    _annulus_to_rect(S, SHELL, sh.ring_r, sh.hx(zd), sh.hy(zd), zd, up)  # the flat deck, the ring stands in its middle
+    _annulus_to_box(S, SHELL, sh.ring_r, -sh.x_back, sh.x_front, -sh.half_y, sh.half_y, zd, up)  # flat deck
     z_low = zd - m["deck_plate_m"]
     ring_angles = [2.0 * math.pi * k / CIRCLE_SEGMENTS for k in range(CIRCLE_SEGMENTS + 1)]
     r_in, r_out, z_t, z_b = sh.open_r, sh.ring_r, sh.height, sh.ring_bottom
@@ -353,70 +359,51 @@ def _hood(S, sh, profile, half_width, turn):
             _radial_uv)
 
 
+def hood_yaws(detail: dict) -> tuple:
+    """The two hoods' turns about the ring axis (rad): symmetric about the line away from the tower."""
+    m = detail["mount"]
+    yaw, half_split = math.radians(m["plan_yaw_deg"]), 0.5 * math.radians(m["hood_split_deg"])
+    return yaw - half_split, yaw + half_split
+
+
 def _hoods(S, sh):
-    """Two ducts `hood_split_deg` apart, symmetric about the line away from the tower (DSC05957): the long one runs over
-    the closed -X face with its box down the slope, the short one ends at the -Y deck edge above the portal."""
+    """Two ducts `hood_split_deg` apart (DSC05957): the long one runs over the deck edge and down the middle of the annex,
+    the short one ends at the -Y deck edge above the portal. Each covers a booster QD head standing on the ring."""
     m = sh.m
     zd = sh.deck_z
     x_root, x_roof, x_front = m["hood_root_x_m"], m["hood_roof_x_m"], m["hood_front_x_m"]
-    top, shoulder, drop = zd + m["hood_height_m"], zd + m["hood_shoulder_m"], zd - m["hood_drop_m"]
-    yaw, half_split = math.radians(m["plan_yaw_deg"]), 0.5 * math.radians(m["hood_split_deg"])
-    x_foot = -sh.hx(drop)  # where the box's bottom meets the sloped face
-    _hood(S, sh, [(x_root, zd), (x_root, top), (x_roof, top), (x_front, shoulder), (x_front, drop), (x_foot, drop)],
-          0.5 * m["hood_long_width_m"], yaw - half_split)
+    top, shoulder = zd + m["hood_height_m"], zd + m["hood_shoulder_m"]
+    turn_long, turn_short = hood_yaws({"mount": m})
+    z_slope = sh.back_z(x_front)  # the box stands on the annex's back slope
+    _hood(S, sh, [(x_root, zd), (x_root, top), (x_roof, top), (x_front, shoulder), (x_front, z_slope)],
+          0.5 * m["hood_long_width_m"], turn_long)
     x_short = -m["hood_short_front_m"]
     _hood(S, sh, [(x_root, zd), (x_root, top), (-m["hood_short_roof_m"], top), (x_short, shoulder), (x_short, zd)],
-          0.5 * m["hood_short_width_m"], yaw + half_split)
+          0.5 * m["hood_short_width_m"], turn_short)
 
 
-def _front_details(S, sh):
-    """Doors and vent boxes in the front (-X) face, person-scale photo, and the booster QDs on the deck."""
+def _qd_heads(S, sh):
+    """Booster QD heads on the launch ring, one under each hood, `qd_head_radius_m` from the axis (0.35 m off the hull);
+    static (whether the covers move at liftoff is unknown)."""
     m = sh.m
-    zp, zd = sh.plinth_z, sh.deck_z
-    for sy in (-1.0, 1.0):
-        yc, half = sy * m["door_y_m"], 0.5 * m["door_width_m"]
-        pts = [(yc - half, zp), (yc + half, zp), (yc + half, m["door_height_m"]), (yc - half, m["door_height_m"])]
-        S.add(DOOR, [(-(sh.hx(z) + m["door_lift_m"]), y, z) for y, z in pts], (-1.0, 0.0, 0.4), _uv_y)
-        for yv, zc, width in ((sy * m["door_y_m"], m["door_height_m"] + 0.3, m["vent_lower_width_m"]),
-                              (sy * m["vent_y_m"], zd - m["vent_below_deck_m"], m["vent_width_m"]),
-                              (sy * m["vent_outer_y_m"], zd - m["vent_outer_below_deck_m"], m["vent_width_m"])):
-            hw = 0.5 * width
-            ztop = zc + m["vent_height_m"]
-            xb, xt = -sh.hx(zc), -sh.hx(ztop)
-            xout = xt - m["vent_depth_m"]
-            # A wedge standing off the sloped face: its top flat, its underside open-looking (dark louvres in the map).
-            S.solid(HOOD, [(xb + 0.05, yv - hw, zc), (xout, yv - hw, zc), (xout, yv + hw, zc), (xb + 0.05, yv + hw, zc),
-                           (xt + 0.05, yv - hw, ztop), (xout, yv - hw, ztop), (xout, yv + hw, ztop),
-                           (xt + 0.05, yv + hw, ztop)])
-    r_head = m["qd_head_radius_m"]
-    yaw = math.radians(m["plan_yaw_deg"])
-
-    def turned_box(lo, hi):
-        x0, y0, z0 = lo
-        x1, y1, z1 = hi
-        S.solid(HARDWARE, [_about_z(p, yaw) for p in ((x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
-                                                      (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1))])
-
-    for sy in (-1.0, 1.0):  # static cabinets with a boom and a head at 4.9 m from the axis, between the hoods
-        cx, cy = m["qd_x_m"], sy * m["qd_y_m"]
-        hx_, hy_ = 0.5 * m["qd_size_x_m"], 0.5 * m["qd_size_y_m"]
-        turned_box((cx - hx_, cy - hy_, zd), (cx + hx_, cy + hy_, zd + m["qd_size_z_m"]))
-        zb = zd + m["qd_boom_z_m"]
-        half = 0.5 * m["qd_boom_size_m"]
-        x_h = -math.sqrt(max(r_head ** 2 - (abs(cy) - 2.0 * half) ** 2, 0.0))  # the head's corner nearest the axis
-        turned_box((cx + hx_, cy - half, zb - half), (x_h - 0.2, cy + half, zb + half))
-        turned_box((x_h - 0.3, cy - 2.0 * half, zb - 2.0 * half), (x_h, cy + 2.0 * half, zb + 2.0 * half))
+    front, depth = m["qd_head_radius_m"], m["qd_head_depth_m"]
+    hw, zb, zt = 0.5 * m["qd_head_width_m"], sh.height, sh.height + m["qd_head_height_m"]
+    for turn in hood_yaws({"mount": m}):
+        S.solid(HARDWARE, [_about_z(p, turn) for p in (
+            (-front, -hw, zb), (-front - depth, -hw, zb), (-front - depth, hw, zb), (-front, hw, zb),
+            (-front, -hw, zt), (-front - depth, -hw, zt), (-front - depth, hw, zt), (-front, hw, zt))])
 
 
 def mount(detail: dict) -> Surfaces:
     sh = Shape(detail)
     S = Surfaces()
-    _closed_slopes(S, sh)
-    _portal(S, sh)
-    _bucket(S, sh)
+    _block(S, sh)
+    _annex(S, sh)
+    _annex_details(S, sh)
+    _tunnel(S, sh)
     _deck_and_ring(S, sh)
     _hoods(S, sh)
-    _front_details(S, sh)
+    _qd_heads(S, sh)
     return S
 
 
@@ -434,62 +421,63 @@ def _x_range(poly, y):
 
 
 def _hardstand(S, sh):
-    """The flat light concrete apron: the convex outline minus the mount's footprint and the ramps, cut in Y bands."""
+    """The flat light concrete apron: the convex outline minus the mount's block and the tunnel with its walls, cut in Y bands
+    (the annex's flanks lie under it, the outline is Task 5's)."""
     t = sh.t
     poly = [tuple(float(c) for c in pair.split(",")) for pair in t["hardstand_outline_m"].split()]
     lift = t["hardstand_lift_m"]
-    y_end = sh.half_a + t["length_m"]
-    hw = 0.5 * t["width_m"]
-    cuts = sorted({round(p[1], 6) for p in poly} | {-y_end, -sh.half_a, sh.half_a, y_end})
+    hw = sh.half_w + sh.wall_t
+    cuts = sorted({round(p[1], 6) for p in poly} | {-sh.ramp_end, -sh.half_y, sh.half_y, sh.ramp_end})
     up = (0.0, 0.0, 1.0)
     for y0, y1 in zip(cuts, cuts[1:]):
         r0, r1 = _x_range(poly, y0), _x_range(poly, y1)
         if r0 is None or r1 is None:
             continue
         mid = abs(0.5 * (y0 + y1))
-        hole = sh.half_t if mid < sh.half_a else hw if mid < y_end else None
-        if hole is None:
+        if mid < sh.half_y:
+            hole = (-sh.annex_x, sh.x_front)
+        elif mid < sh.ramp_end:
+            hole = (-hw, hw)
+        else:
             S.add("hardstand", [(r0[0], y0, lift), (r0[1], y0, lift), (r1[1], y1, lift), (r1[0], y1, lift)], up, _uv_plan)
             continue
-        S.add("hardstand", [(r0[0], y0, lift), (-hole, y0, lift), (-hole, y1, lift), (r1[0], y1, lift)], up, _uv_plan)
-        S.add("hardstand", [(hole, y0, lift), (r0[1], y0, lift), (r1[1], y1, lift), (hole, y1, lift)], up, _uv_plan)
+        S.add("hardstand", [(r0[0], y0, lift), (hole[0], y0, lift), (hole[0], y1, lift), (r1[0], y1, lift)], up, _uv_plan)
+        S.add("hardstand", [(hole[1], y0, lift), (r0[1], y0, lift), (r1[1], y1, lift), (hole[1], y1, lift)], up, _uv_plan)
 
 
 def trench(detail: dict) -> Surfaces:
-    """The two flat exit ramps with their low side walls, the hardstand and the tower's foot block; frame as the mount."""
+    """The tunnel's closed floor (level under the block, straight ramps to both ends), the wedge walls outside the block,
+    the hardstand and the tower's foot block; frame as the mount."""
     sh = Shape(detail)
     t = sh.t
     S = Surfaces()
-    zf = sh.floor_z
-    y0, y1 = sh.half_a, sh.half_a + t["length_m"]
-    hw = 0.5 * t["width_m"]
-    lip, wt = t["wall_height_m"], t["wall_thickness_m"]
+    zf, zd = sh.floor_z, sh.deck_z
+    y0, y1 = sh.half_y, sh.ramp_end
+    hw, wt = sh.half_w, sh.wall_t
     up = (0.0, 0.0, 1.0)
+    S.add("concrete", [(-hw, -y0, zf), (hw, -y0, zf), (hw, y0, zf), (-hw, y0, zf)], up, _uv_plan)  # under the ring
     for sy in (-1.0, 1.0):
         S.add("concrete", [(-hw, sy * y0, zf), (hw, sy * y0, zf), (hw, sy * y1, 0.0), (-hw, sy * y1, 0.0)], up, _uv_plan)
         for side in (-1.0, 1.0):
-            x = side * hw
-            S.add("wall", [(x, sy * y0, zf), (x, sy * y1, 0.0), (x, sy * y1, lip), (x, sy * y0, lip)],
-                  (-side, 0.0, 0.0), _uv_y)
-            xo = side * (hw + wt)
-            S.add("wall", [(x, sy * y0, lip), (x, sy * y1, lip), (xo, sy * y1, lip), (xo, sy * y0, lip)], up, _uv_plan)
-            S.add("wall", [(xo, sy * y0, 0.0), (xo, sy * y1, 0.0), (xo, sy * y1, lip), (xo, sy * y0, lip)],
-                  (side, 0.0, 0.0), _uv_y)
-            S.add("wall", [(x, sy * y1, 0.0), (xo, sy * y1, 0.0), (xo, sy * y1, lip), (x, sy * y1, lip)], (0.0, sy, 0.0), _uv_x)
+            x, xo = side * hw, side * (hw + wt)
+            # Wedge: the top falls from the deck height at the block to the ground at the ramp end.
+            S.add("wall", [(x, sy * y0, zf), (x, sy * y1, 0.0), (x, sy * y0, zd)], (-side, 0.0, 0.0), _uv_y)
+            S.add("wall", [(xo, sy * y0, 0.0), (xo, sy * y1, 0.0), (xo, sy * y0, zd)], (side, 0.0, 0.0), _uv_y)
+            S.add("wall", [(x, sy * y0, zd), (xo, sy * y0, zd), (xo, sy * y1, 0.0), (x, sy * y1, 0.0)], up, _uv_plan)
     _hardstand(S, sh)
-    # The tower's foot: a low block with a chamfered roof up to the legs' plinth.
+    # The tower's foot: a block cut vertically on the side toward the mount, its far side chamfered up to the legs' plinth.
     cx, cy, half, top = t["foot_x_m"], t["foot_y_m"], 0.5 * t["foot_width_m"], t["foot_height_m"]
+    near, far = t["foot_near_x_m"], t["foot_far_x_m"]
     roof, roof_half = t["foot_roof_height_m"], t["foot_roof_half_m"]
-    S.box("foot", (cx - half, cy - half, 0.0), (cx + half, cy + half, top), _uv_x)
-    S.solid("foot", [(cx - half, cy - half, top), (cx + half, cy - half, top), (cx + half, cy + half, top), (cx - half, cy + half, top),
-                     (cx - roof_half, cy - roof_half, roof), (cx + roof_half, cy - roof_half, roof),
-                     (cx + roof_half, cy + roof_half, roof), (cx - roof_half, cy + roof_half, roof)], _uv_x)
+    S.box("foot", (near, cy - half, 0.0), (far, cy + half, top), _uv_x)
+    S.solid("foot", [(near, cy - half, top), (far, cy - half, top), (far, cy + half, top), (near, cy + half, top),
+                     (near, cy - roof_half, roof), (cx + roof_half, cy - roof_half, roof),
+                     (cx + roof_half, cy + roof_half, roof), (near, cy + roof_half, roof)], _uv_x)
     return S
 
 
 def ramp_end_m(detail: dict) -> float:
-    sh = Shape(detail)
-    return sh.half_a + sh.t["length_m"]
+    return Shape(detail).ramp_end
 
 
 # ---------------------------------------------------------------- clearance of the stack

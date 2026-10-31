@@ -27,3 +27,9 @@ The first square mount was a closed stepped pyramid (plinth 1.6 m, ledge 0.8 m, 
 arches, a diagonal stair strip, hoods on the tower side, 12 clamps, a 6 m pit, 20 m ramps with a 0.15 m curb and a 55 x 5.5 m dark wall beside the ramp. Photos show
 four piers with open portals, rectangular doors, hoods on the front side, large plates; the stair strip was a pier, and the dark wall is unsupported near the
 mount (the only long low wall in the frames is the site's perimeter wall, person-scale photo), so it was removed.
+
+## Physics before the Pad B alignment (2026-10-31)
+Site 25.99686, -97.15394 (the imagery point, on the tank farm), height -21.11 m (orthometric +1.41, spread 3.1 m). Tower azimuth 315, 30 m, width 12,
+box face-on, hinges derived 24 m, arm 36 m, mount 20 m, catch 95 m. Booster pins station 66.5, azimuths 45 / 225, either of the two rolls. Sea 90 deg,
+500 m [E]. Abort test then: 1500 m 553 m / 12.3 t, 800 m 549 m / 10.0 t, 400 m 532 m / 6.0 t. Fresh SCvx stall window 4; one failed abort re-plan gave
+the water up at once.

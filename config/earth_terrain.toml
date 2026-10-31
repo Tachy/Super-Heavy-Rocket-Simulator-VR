@@ -4,7 +4,7 @@
 
 [[area]]
 id = "starbase"
-latitude_deg = 25.99686          # [S] centre: OLP-1
+latitude_deg = 25.99686          # [S] centre: OLP-1 imagery position; kept (tiles cut around it): the measured Pad B ring (25.99677, -97.15804) lies 410 m west, still inside the 5 km tile
 longitude_deg = -97.15394
 local_half_size_m = 5000.0       # [E] level 1 (spec: ~10 x 10 km)
 regional_half_size_m = 100000.0  # [E] level 2 (spec: ~200 x 200 km)

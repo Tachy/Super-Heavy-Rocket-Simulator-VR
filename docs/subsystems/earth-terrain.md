@@ -45,7 +45,7 @@ and on the geoid at sea; the renderer (`docs/subsystems/terrain-rendering.md`) d
 
   | Site | Height | Orthometric | Spread | Radius |
   |---|---|---|---|---|
-  | Starbase OLP-1 | -21.11 m | +1.41 m | 3.1 m | 150 m |
+  | Starbase Pad B ring (waiver: basin, ponds, wall inside the radius) | -21.65 m | +0.87 m | 7.8 m | 150 m |
   | KSC LC-39A | -15.85 m | +13.84 m | 12.9 m | 150 -> 60 m |
   | CCSFS SLC-40 | -23.29 m | +6.41 m | 3.3 m | 100 -> 30 m |
   | CCSFS LZ-40 | -26.03 m | +3.67 m | 3.6 m | 61 m |

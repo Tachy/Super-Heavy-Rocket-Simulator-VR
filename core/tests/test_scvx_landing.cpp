@@ -29,7 +29,7 @@ const frames::BodyOrientation& earth() {
     return e;
 }
 
-// Block 3 booster 1.3 km over Starbase, falling at 250 m/s, 30 m east / 15 m south of the pad, engines off.
+// Block 3 booster 1.3 km above the catch's old CG target (arm tops 133 m, pins 63 m: 41.5 m higher than 95 / 66.5), falling at 250 m/s, 30 m east / 15 m south of the pad, engines off.
 struct Fixture {
     time::Epoch t0;
     std::unique_ptr<sim::FlightSession> session;
@@ -43,7 +43,7 @@ struct Fixture {
         session->set_launch_site(site);
         body = std::make_unique<vehicle::FlightBody>(
             std::make_unique<vehicle::Vehicle>(test::booster_config("starship_block3", 70000.0), STARSIM_CONFIG_DIR),
-            test::state_over_site(site, earth(), t0, {30.0, -15.0, 1300.0}, {4.0, -2.0, -250.0}));
+            test::state_over_site(site, earth(), t0, {30.0, -15.0, 1341.5}, {4.0, -2.0, -250.0}));
     }
 
     gnc::ScvxLandingParameters parameters() const {

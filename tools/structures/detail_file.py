@@ -33,16 +33,16 @@ STAIRS_KEYS = ("width_m", "thickness_m", "run_m", "tray_width_m", "tray_depth_m"
 ROOF_KEYS = ("deck_top_m", "plate_thickness_m", "overhang_m", "block_size_m", "block_base_m", "block_height_m",
              "louvre_count", "louvre_height_m", "louvre_depth_m", "railing_height_m", "railing_member_m",
              "railing_post_pitch_m")
-MOUNT_KEYS = ("deck_height_m", "measured_height_m", "base_across_m", "base_toward_m", "top_across_m", "plinth_height_m",
-              "deck_drop_m", "deck_plate_m", "pit_depth_m", "ring_outer_diameter_m", "ring_opening_diameter_m",
-              "ring_thickness_m", "chamber_radius_m", "clamp_count", "opening_width_ground_m", "opening_width_deck_m",
-              "opening_top_m", "lintel_depth_m", "lintel_height_m", "duct_radius_m", "ridge_top_m", "rib_pitch_m",
-              "plan_yaw_deg", "hood_split_deg", "hood_long_width_m", "hood_short_width_m", "hood_short_front_m",
-              "hood_short_roof_m", "hood_height_m", "hood_drop_m", "door_width_m", "door_height_m",
-              "qd_count", "qd_head_radius_m", "tile_m", "course_m", "panel_m", "seam_m", "map_size")
-TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "wall_thickness_m", "hardstand_lift_m",
-               "concrete_tile_m", "slab_m", "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_width_m", "foot_height_m",
-               "mask_range_m")
+MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_back_m", "block_half_y_m", "annex_end_x_m",
+              "annex_half_y_m", "annex_tip_half_y_m", "deck_drop_m", "deck_plate_m", "pit_depth_m", "ring_outer_diameter_m",
+              "ring_opening_diameter_m", "ring_thickness_m", "chamber_radius_m", "clamp_count", "opening_top_m",
+              "hood_split_deg", "hood_long_width_m", "hood_short_width_m", "hood_short_front_m", "hood_short_roof_m",
+              "hood_height_m", "louvre_count", "louvre_width_m", "louvre_height_m", "louvre_depth_m", "door_width_m",
+              "door_height_m", "qd_count", "qd_head_radius_m", "qd_head_depth_m", "qd_head_width_m", "qd_head_height_m",
+              "tile_m", "course_m", "panel_m", "seam_m", "map_size")
+TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_thickness_m", "hardstand_lift_m", "concrete_tile_m", "slab_m",
+               "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_near_x_m", "foot_far_x_m", "foot_width_m",
+               "foot_height_m", "mask_range_m")
 COUNT_KEYS = ("count", "columns", "louvre_count")
 
 
@@ -62,10 +62,25 @@ def _positive(table: dict, key: str, where: str) -> None:
         raise DetailFileError(f"{where}.{key}: must be a positive number in metres, got {v!r}")
 
 
+SITES_FILE = Path(__file__).resolve().parents[2] / "config" / "launch_sites.toml"
+SITE_ID = "starbase_olp1"  # the site whose [site.tower] the structures are drawn on
+
+
+def plan_yaw_deg(sites_file=SITES_FILE, site_id=SITE_ID) -> float:
+    """The squares' yaw against the pad -> tower line: `plan_yaw_deg` of the site's `[site.tower]` (the physics value)."""
+    with open(Path(sites_file), "rb") as f:
+        sites = tomllib.load(f)
+    for site in sites["site"]:
+        if site["id"] == site_id:
+            return float(site["tower"]["plan_yaw_deg"])
+    raise DetailFileError(f"{sites_file}: no site '{site_id}'")
+
+
 def load(path) -> dict:
     with open(Path(path), "rb") as f:
         data = tomllib.load(f)
     _need(data, ("tower", "profiles", "chopstick", "carriage", "qd_arm", "mount", "trench"), "file")
+    data["mount"]["plan_yaw_deg"] = plan_yaw_deg()  # not stored here: one value for physics and drawing
     tower, profiles, chop = data["tower"], data["profiles"], data["chopstick"]
     _need(tower, TOWER_KEYS, "tower")
     _positive(tower, "height_m", "tower")
