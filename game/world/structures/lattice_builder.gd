@@ -62,8 +62,9 @@ static func build(detail: Dictionary, profiles: Dictionary, steel: Material, dar
 	root.name = "Lattice"
 	var sections: Array = detail["tower.sections"]
 	var base_m := 0.0
+	var proxy_materials := {}  ## one shadow-proxy material per (pitch, member fraction)
 	for i in range(sections.size()):
-		var node := _build_section(detail, i, profiles, steel, dark)
+		var node := _build_section(detail, i, profiles, steel, dark, proxy_materials)
 		node.name = "section_%d" % i
 		node.position = Vector3(0.0, base_m, 0.0)
 		root.add_child(node)
@@ -72,7 +73,7 @@ static func build(detail: Dictionary, profiles: Dictionary, steel: Material, dar
 
 
 static func _build_section(detail: Dictionary, index: int, profiles: Dictionary, steel: Material,
-		dark: Material) -> Node3D:
+		dark: Material, proxy_materials: Dictionary) -> Node3D:
 	var sections: Array = detail["tower.sections"]
 	var section: Dictionary = sections[index]
 	var is_top := index == sections.size() - 1
@@ -132,7 +133,7 @@ static func _build_section(detail: Dictionary, index: int, profiles: Dictionary,
 	set_range(far, MID_END_M, 0.0)
 	node.add_child(far)
 
-	node.add_child(_shadow_proxy(width, height, float(section["pitch_m"]), brace_size))
+	node.add_child(_shadow_proxy(width, height, float(section["pitch_m"]), brace_size, proxy_materials))
 	return node
 
 
@@ -306,13 +307,19 @@ static func _far_material(detail: Dictionary, section: Dictionary, leg_size: flo
 
 
 ## Box of the section with the lattice shader: invisible to the camera, its alpha-cut pattern casts the shadow.
-static func _shadow_proxy(width: float, height: float, pitch_m: float, brace_size: float) -> MeshInstance3D:
+static func _shadow_proxy(width: float, height: float, pitch_m: float, brace_size: float,
+		materials: Dictionary) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(width, height, width)
-	var material := ShaderMaterial.new()
-	material.shader = LATTICE_SHADER
-	material.set_shader_parameter("bay_m", pitch_m)
-	material.set_shader_parameter("member_fraction", 0.5 * brace_size / pitch_m)
+	var fraction := 0.5 * brace_size / pitch_m
+	var key := Vector2(pitch_m, fraction)
+	if not materials.has(key):
+		var created := ShaderMaterial.new()
+		created.shader = LATTICE_SHADER
+		created.set_shader_parameter("bay_m", pitch_m)
+		created.set_shader_parameter("member_fraction", fraction)
+		materials[key] = created
+	var material: ShaderMaterial = materials[key]
 	var proxy := MeshInstance3D.new()
 	proxy.name = "shadow_proxy"
 	proxy.mesh = mesh

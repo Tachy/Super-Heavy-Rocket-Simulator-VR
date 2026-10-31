@@ -89,11 +89,12 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 		var mesh_node := chopstick.get_node(part) as MeshInstance3D
 		bounds = bounds.merge(chopstick.transform * mesh_node.get_aabb()) if bounds.has_surface() else \
 				chopstick.transform * mesh_node.get_aabb()
-	_check(absf(bounds.position.z) < 0.05 and absf(bounds.end.z - 26.0) < 0.05,
-			"chopstick: hinge at 0, tip at 26 m along +Z")
-	_check(absf(bounds.end.y) < 0.05 and absf(bounds.size.y - 8.75) < 0.05,
-			"chopstick: top rails at Y = 0, 8.75 m deep below")
-	_check(absf(bounds.size.x - 3.0) < 0.05, "chopstick: 3 m wide")
+	var arm: Dictionary = models["detail"]["chopstick"]
+	_check(absf(bounds.position.z) < 0.05 and absf(bounds.end.z - float(arm["length_m"])) < 0.05,
+			"chopstick: hinge at 0, tip at %.1f m along +Z" % float(arm["length_m"]))
+	_check(absf(bounds.end.y) < 0.05 and absf(bounds.size.y - float(arm["depth_m"])) < 0.05,
+			"chopstick: top rails at Y = 0, %.2f m deep below" % float(arm["depth_m"]))
+	_check(absf(bounds.size.x - float(arm["width_m"])) < 0.05, "chopstick: %.1f m wide" % float(arm["width_m"]))
 	var paint := ((chopstick.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial) 			.get_shader_parameter("albedo") as Color
 	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
 
@@ -122,7 +123,7 @@ func _check_hand_over(node: Node, section: Dictionary, index: int, count: int) -
 
 
 func _pivot(view: TowerView, arm: int) -> Node3D:
-	return view.get_child(view.get_child_count() - 2 + arm) as Node3D
+	return view.arm_pivot(arm)
 
 
 func _view(site_id: String) -> TowerView:

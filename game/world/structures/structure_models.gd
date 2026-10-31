@@ -18,6 +18,8 @@ const SOURCE_SCRIPTS: Array[String] = ["common.py", "gen_profiles.py", "gen_chop
 const BLENDER_TO_RENDER := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
 
 static var _logged: Dictionary = {}
+## Reason of the last failed glTF load (set by _meshes_of), for the fallback log line.
+static var _load_error := ""
 
 
 ## {} or {"detail": TomlLite dictionary, "profiles": {name: Mesh}, "chopstick": {"truss": Mesh, "rail": Mesh}}.
@@ -34,6 +36,8 @@ static func load_for(site_id: String) -> Dictionary:
 	var detail := TomlLite.load_file(detail_path)
 	var profiles := _meshes_of(model_dir.path_join("profiles.gltf"), "profile_")
 	var chopstick := _meshes_of(model_dir.path_join("chopstick.gltf"), "")
+	if profiles.is_empty() or chopstick.is_empty():
+		return _fallback(site_id, _load_error)
 	for section: Dictionary in detail.get("tower.sections", []):
 		for key: String in ["leg_profile", "brace_profile"]:
 			if not profiles.has(section[key]):
@@ -87,10 +91,13 @@ static func _meshes_of(path: String, prefix: String) -> Dictionary:
 	var meshes := {}
 	var document := GLTFDocument.new()
 	var state := GLTFState.new()
-	if document.append_from_file(path, state) != OK:
+	var err := document.append_from_file(path, state)
+	if err != OK:
+		_load_error = "%s: glTF load failed (%s)" % [path.get_file(), error_string(err)]
 		return meshes
 	var scene := document.generate_scene(state)
 	if scene == null:
+		_load_error = "%s: glTF scene could not be generated" % path.get_file()
 		return meshes
 	for node in scene.find_children("*", "MeshInstance3D", true, false):
 		var mesh_node := node as MeshInstance3D

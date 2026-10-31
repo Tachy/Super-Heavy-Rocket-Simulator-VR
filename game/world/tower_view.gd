@@ -67,6 +67,11 @@ func _pad_b_lattice(models: Dictionary, geometry: Dictionary, axes: Basis) -> No
 	return lattice
 
 
+## Pivot node at the hinge of arm `index` (0 = +across, 1 = -across).
+func arm_pivot(index: int) -> Node3D:
+	return _arms[index]
+
+
 ## state: FlightSim.tower_state() of the flight at this site, or {} (arms open, carriage at rest).
 func update_state(state: Dictionary) -> void:
 	if _geometry.is_empty():
