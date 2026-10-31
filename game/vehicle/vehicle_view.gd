@@ -217,7 +217,14 @@ func _build_fins(stages: Array, grid_fins: Array, stage_nodes: Array[Node3D]) ->
 			continue
 		var node := Node3D.new()
 		node.name = "grid_fin_%d" % i
+		var catch_azimuths: Array = (_models["manifest"].get("look", {}) as Dictionary).get("catch_fin_azimuths_deg", [])
+		var is_catch_fin := false  # the model has two catch fins (hardware `hooks`) and one plain fin
+		for az: float in catch_azimuths:
+			if absf(fposmod(az - float(grid_fins[i]["azimuth_deg"]) + 180.0, 360.0) - 180.0) < 1.0:
+				is_catch_fin = true
 		for part: String in _models["grid_fin"]:
+			if part == "hooks" and not is_catch_fin:
+				continue
 			var instance := MeshInstance3D.new()
 			instance.name = part
 			instance.mesh = _models["grid_fin"][part]

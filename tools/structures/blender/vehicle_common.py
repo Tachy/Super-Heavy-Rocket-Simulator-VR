@@ -138,8 +138,9 @@ def box(mesh: VMesh, centre, ex, ey, ez, half, uv_scale=1.0) -> None:
             mesh.face(pts, uvs, axes[ai] * sign)
 
 
-def tube(mesh: VMesh, p0, p1, radius, sides, group, cap0=True, cap1=True) -> None:
-    """Round bar between two points, smooth sides, flat caps."""
+def tube(mesh: VMesh, p0, p1, radius, sides, group, cap0=True, cap1=True, radius1=None) -> None:
+    """Round bar between two points, smooth sides, flat caps; `radius1` (default = radius) tapers the far end."""
+    r1 = radius if radius1 is None else radius1
     p0, p1 = Vector(p0), Vector(p1)
     z = (p1 - p0).normalized()
     x = Vector((1.0, 0.0, 0.0)).cross(z)
@@ -154,12 +155,12 @@ def tube(mesh: VMesh, p0, p1, radius, sides, group, cap0=True, cap1=True) -> Non
         d1 = x * math.cos(a1) + y * math.sin(a1)
         u0, u1 = a0 * radius, a1 * radius
         mid = (d0 + d1).normalized()
-        mesh.face([p0 + d0 * radius, p0 + d1 * radius, p1 + d1 * radius, p1 + d0 * radius],
+        mesh.face([p0 + d0 * radius, p0 + d1 * radius, p1 + d1 * r1, p1 + d0 * r1],
                   [(u0, 1.0), (u1, 1.0), (u1, 1.0 - length), (u0, 1.0 - length)], mid, group)
         if cap0:
             mesh.face([p0, p0 + d0 * radius, p0 + d1 * radius], [(0, 0), (u0, 0), (u1, 0)], -z)
         if cap1:
-            mesh.face([p1, p1 + d0 * radius, p1 + d1 * radius], [(0, 0), (u0, 0), (u1, 0)], z)
+            mesh.face([p1, p1 + d0 * r1, p1 + d1 * r1], [(0, 0), (u0, 0), (u1, 0)], z)
 
 
 def export_selected(path, objects) -> None:

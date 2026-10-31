@@ -181,7 +181,10 @@ def test_hull_bounds_nose_and_uv(built, spec, stage_id):
     pos, uv, tri = _meshes(built / f"{stage_id}.gltf")["hull"]
     lo, hi = _bounds(pos)
     assert lo[0] == pytest.approx(0.0, abs=BOUND_TOL_M)
-    assert hi[0] - lo[0] == pytest.approx(st["length_m"], abs=BOUND_TOL_M)  # length, station axis = X
+    top = st["length_m"]  # length, station axis = X; the booster's dome closes below the truss ring, clear of the ship's bells
+    if stage_id == "booster":
+        top -= spec["detail"]["hull"]["dome_start_m"] - spec["detail"]["hull"]["dome_height_m"]
+    assert hi[0] - lo[0] == pytest.approx(top, abs=BOUND_TOL_M)
     radius = st["diameter_m"] / 2.0
     assert hi[1] - lo[1] == pytest.approx(st["diameter_m"], abs=BOUND_TOL_M)  # the plain lathe: radius = config radius
     assert hi[2] - lo[2] == pytest.approx(st["diameter_m"], abs=BOUND_TOL_M)
@@ -199,14 +202,14 @@ def test_hull_bounds_nose_and_uv(built, spec, stage_id):
     else:
         shoulder = st["length_m"] - spec["detail"]["hull"]["dome_start_m"]  # the booster's forward dome follows here
         assert ring(shoulder - 0.01) == pytest.approx(radius, abs=BOUND_TOL_M)
-        assert ring(st["length_m"] - 0.01) < 0.5  # closed at the top
+        assert ring(top - 0.01) < 0.7  # the dome is closed at its apex
     # UV = (arc metres at the barrel radius, station metres): glTF v is the station
     assert min(u for u, _ in uv) == pytest.approx(0.0, abs=1e-3)
     assert max(u for u, _ in uv) == pytest.approx(2.0 * math.pi * radius, abs=0.05)
     assert min(v for _, v in uv) == pytest.approx(0.0, abs=1e-3)
-    assert max(v for _, v in uv) == pytest.approx(st["length_m"], abs=BOUND_TOL_M)
+    assert max(v for _, v in uv) == pytest.approx(top, abs=BOUND_TOL_M)
     # outward winding: the closed shell has a positive volume (~ the cylinder's)
-    assert _signed_volume(pos, tri) > 0.8 * math.pi * radius ** 2 * (st["length_m"] - 0.5 * nose)
+    assert _signed_volume(pos, tri) > 0.8 * math.pi * radius ** 2 * (top - 0.5 * nose)
 
 
 @needs_blender
@@ -364,20 +367,23 @@ def test_steel_map_is_deterministic_seamless_and_has_the_weld_at_v_zero(spec):
     slope = (a[..., :2].astype(float) / 255.0 - 0.5) * hull_textures.SLOPE_RANGE
     # seamless: the step across the wrap is no larger than the largest step between neighbours (v: the dents' slope
     # along u only - the weld's apex sits exactly on the seam, so the v slope flips sign there by design)
-    for axis, channels in ((0, [0]), (1, [0, 1])):
+    for axis, channels in ((0, [0]), (1, [1])):  # the u slope flips at the longitudinal seam by design, like v at the ring weld
         part = slope[..., channels]
         inner = abs(part.take(range(1, part.shape[axis]), axis) - part.take(range(0, part.shape[axis] - 1), axis))
         wrap = abs(part.take(0, axis) - part.take(-1, axis))
         assert wrap.max() <= inner.max() + 1e-9
     dent_rows = slice(hull_textures.SIZE_V // 4, 3 * hull_textures.SIZE_V // 4)
-    assert slope[dent_rows, :, 0].std() == pytest.approx(hull["dent_slope_rms"] / math.sqrt(2.0), rel=0.6)
+    cols = slice(hull_textures.SIZE_U // 4, 3 * hull_textures.SIZE_U // 4)  # away from the longitudinal seam
+    assert slope[dent_rows, cols, 0].std() == pytest.approx(hull["dent_slope_rms"] / math.sqrt(2.0), rel=0.6)
     # the bead: slope +-weld_height / half width either side of v = 0 (row 0 and the last row), HAZ coverage there
     peak = hull["weld_height_m"] / hull["weld_half_width_m"]
-    assert abs(slope[1, 0, 1]) == pytest.approx(peak, abs=0.05) and slope[1, 0, 1] * slope[-2, 0, 1] < 0.0
-    assert a[0, 0, 3] == 255 and a[hull_textures.SIZE_V // 2, 0, 3] == 0
+    assert abs(slope[1, 40, 1]) == pytest.approx(peak, abs=0.05) and slope[1, 40, 1] * slope[-2, 40, 1] < 0.0
+    assert a[0, 0, 3] == 255 and a[hull_textures.SIZE_V // 2, hull_textures.SIZE_U // 2, 3] == 0
     mean = a[..., 3].mean() / 255.0  # heat-affected band share of the ring: 2 x 1.2 x half width / pitch
-    assert mean == pytest.approx(2.0 * hull_textures.HAZ_FACTOR * hull["weld_half_width_m"] / hull["ring_pitch_m"],
-                                 rel=0.05)
+    pu, pv = hull_textures.periods_m(radius, hull["ring_pitch_m"])
+    ring, seam = (2.0 * hull_textures.HAZ_FACTOR * hull["weld_half_width_m"] / p for p in (pv, pu))
+    seam *= hull_textures.SEAM_HAZ_SHARE  # coverage 0.3 over the seam's width
+    assert mean == pytest.approx(ring + seam - ring * seam, rel=0.08)
 
 
 def test_steel_map_needs_one_hull_radius(spec):

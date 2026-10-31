@@ -27,6 +27,8 @@ SIZE_U = 1024             # [E] texels along u: 4.6 mm at R = 4.5 m
 SIZE_V = 512              # [E] texels along v: 3.5 mm at the 1.8 m ring pitch
 SLOPE_RANGE = 0.6         # slopes are stored over +-SLOPE_RANGE / 2 (the bead's 0.24 plus dents fit)
 SLOPE_ENERGY_RANGE = 0.1
+SEAM_FRACTION = 0.2       # [E] longitudinal seam bead height as a fraction of the ring weld's (photos: fainter than the rings)
+SEAM_HAZ_SHARE = 0.3      # [E] heat-affected darkening of the longitudinal seam relative to the ring weld's
 HAZ_FACTOR = 1.2          # [E] heat-affected band half width / bead half width
 DENT_OCTAVES = ((4, 2, 1.0), (12, 5, 1.085))  # [E] (cells along u, cells along v, weight): ~1.2 m and ~0.38 m waves
 SEED = 20241031
@@ -73,14 +75,21 @@ def bake(radius_m: float, hull: dict) -> np.ndarray:
     half, height = hull["weld_half_width_m"], hull["weld_height_m"]
     bead_slope = -np.sign(v) * (np.abs(v) < half) * (height / half)
     sy = sy + bead_slope[:, None]
+    # vertical (longitudinal) seam at u = 0: the stainless sheets of a ring meet there (one per period = 4.71 m of arc);
+    # the shader shifts u per ring, so the seams stagger from ring to ring like the real panels (photos: faint vertical lines)
+    u = ((np.arange(SIZE_U) + 0.5) * du + 0.5 * pu) % pu - 0.5 * pu
+    seam_half, seam_height = half, SEAM_FRACTION * height
+    sx = sx - (np.sign(u) * (np.abs(u) < seam_half) * (seam_height / seam_half))[None, :]
     haz_half = HAZ_FACTOR * half
-    haz = np.clip((haz_half - np.abs(v)) / dv + 0.5, 0.0, 1.0)  # box-filtered at the texel
+    haz_v = np.clip((haz_half - np.abs(v)) / dv + 0.5, 0.0, 1.0)  # box-filtered at the texel
+    haz_u = np.clip((HAZ_FACTOR * seam_half - np.abs(u)) / du + 0.5, 0.0, 1.0)
+    haz = np.maximum(haz_v[:, None], SEAM_HAZ_SHARE * haz_u[None, :])
     energy = sx * sx + sy * sy
     out = np.empty((SIZE_V, SIZE_U, 4))
     out[..., 0] = 0.5 + sx / SLOPE_RANGE
     out[..., 1] = 0.5 + sy / SLOPE_RANGE
     out[..., 2] = energy / SLOPE_ENERGY_RANGE
-    out[..., 3] = np.broadcast_to(haz[:, None], (SIZE_V, SIZE_U))
+    out[..., 3] = haz
     if out[..., :3].min() < 0.0 or out[..., :3].max() > 1.0:
         raise ValueError("steel map: slope exceeds the stored range")
     return np.rint(out * 255.0).astype(np.uint8)

@@ -26,7 +26,8 @@ DETAIL_TABLES = {
     "hull": ("segments", "ring_pitch_m", "weld_height_m", "weld_half_width_m", "dent_slope_rms", "nose_tip_radius_m",
              "nose_tip_cap_m", "nose_drawn_length_m", "base_chamfer_m", "dome_start_m", "dome_height_m"),
     "booster.hot_stage": ("height_m", "flange_height_m", "flange_proud_m"),
-    "booster.top_truss": ("tooth_count", "height_m", "tube_radius_m", "post_height_m"),
+    "booster.top_truss": ("tooth_count", "height_m", "tube_radius_m", "post_height_m", "taper_top",
+                          "taper_foot"),
     "booster.skirt": ("base_ring_radius_m", "ring_stations_m", "ring_proud_m", "ring_thickness_m", "tooth_count",
                       "tooth_height_m", "tooth_station_m", "tooth_proud_m", "port_count", "port_width_m",
                       "port_height_m", "port_proud_m", "port_station_m"),
@@ -34,20 +35,22 @@ DETAIL_TABLES = {
     "booster.strakes": ("ridge_azimuth_deg", "from_m", "to_m", "height_m", "base_width_m", "top_width_m", "chamfer_m"),
     "booster.grid_fin_fairing": ("length_frac", "width_m", "height_m"),
     "grid_fin": ("across_flats_m", "thickness_m", "cell_pitch_m", "wall_m", "frame_m", "shaft_radius_m",
-                 "shaft_inset_m", "catch_hook_radius_m", "catch_hook_count", "catch_hook_pitch_m"),
+                 "shaft_inset_m", "catch_hook_radius_m", "catch_hook_count", "catch_hook_pitch_m",
+                 "edge_tooth_pitch_m", "edge_tooth_depth_m", "catch_fin_azimuths_deg"),
     "flap": ("root_thickness_m", "tip_thickness_m", "hinge_radius_m", "lug_length_m", "lug_height_m"),
     "flap.aft": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
     "flap.fwd": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
     "catch_pin": ("radius_m", "head_radius_m", "head_length_m"),
     "ship.chine": ("width_m", "height_m", "fade_m", "first_station_m", "last_station_m"),
-    "ship.raceway": ("azimuth_from_belly_deg", "radius_m", "first_station_m", "last_station_m"),
-    "ship.ports": ("port_count", "placed_at_m", "azimuth_from_belly_deg", "spread_deg", "port_width_m",
-                   "port_length_m", "port_height_m"),
+    "ship.raceway": ("azimuth_from_belly_deg", "radius_m", "first_station_m", "last_station_m", "foot_width_m",
+                     "foot_length_m", "foot_height_m"),
+    "ship.ports": ("port_count", "placed_at_m", "azimuth_from_belly_deg", "spread_deg", "port_radius_m",
+                   "port_height_m"),
     "ship.tiles": ("hex_across_flats_m", "gap_m", "coverage_station_m", "coverage_half_angle_deg"),
 }
 ENGINE_KEYS = ("file", "bell_length_m", "throat_diameter_m", "contour_exponent", "wall_m", "mount_height_m",
                "mount_radius_frac", "segments")
-SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m")  # may be zero / negative; others > 0
+SIGNED_KEYS = ("azimuth_from_belly_deg", "azimuth_deg", "ridge_azimuth_deg", "ridge_azimuth_deg", "outline_u_m", "outline_v_m", "catch_fin_azimuths_deg")  # may be zero / negative; others > 0
 
 
 def _table(data: dict, dotted: str) -> dict:

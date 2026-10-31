@@ -46,7 +46,15 @@ def build_fin(spec):
     for sx in (-1.0, 1.0):  # axis-aligned flat bars: root / tip (along X) and the two sides (along Y)
         slab(sx * (a / 2 - frame), sx * a / 2, a / 2 - s / 2 - frame * 0.5, a / 2 + s / 2 + frame * 0.5)
     slab(-s / 2 - frame * 0.5, s / 2 + frame * 0.5, 0.0, frame)
-    slab(-s / 2 - frame * 0.5, s / 2 + frame * 0.5, a - frame, a)
+    # serrated outer edge (photo of the caught booster: stepped notches along the tip): the tip bar sits `depth` inside,
+    # the lattice walls run on to the edge, and only every second cell is closed by a cap plate at the rim
+    depth = d["edge_tooth_depth_m"]
+    slab(-s / 2 - frame * 0.5, s / 2 + frame * 0.5, a - depth - frame, a - depth)
+    pitch_e = d["edge_tooth_pitch_m"]
+    for i in range(int(s / pitch_e) + 1):
+        xc = -s / 2 + frame + (i + 0.5) * pitch_e
+        if abs(xc) < s / 2 - frame:
+            slab(xc - pitch_e / 4.0, xc + pitch_e / 4.0, a - frame, a)
     edge_len = (a - s) * math.sqrt(2.0) / 2.0
     for sx in (-1.0, 1.0):  # the four chamfer bars
         for sy in (-1.0, 1.0):
@@ -54,13 +62,13 @@ def build_fin(spec):
             ey = Vector((sx / math.sqrt(2.0), sy / math.sqrt(2.0), 0.0))
             mid = Vector((sx * (s + a) / 4.0, a / 2 + sy * (s + a) / 4.0, 0.0)) - ey * (frame / 2.0)
             vc.box(lat, mid, ex, ey, Vector((0.0, 0.0, 1.0)), (edge_len / 2.0, frame / 2.0, t / 2.0))
-    n = max(1, round(a / d["cell_pitch_m"]))
-    for i in range(1, n):  # walls across the chord, clipped by the octagon
-        x = -a / 2 + a * i / n
+    pitch = d["cell_pitch_m"]  # the model's measured lattice: walls every 0.35 m, centred on the fin
+    walls = int((a - 2.0 * frame) / pitch)
+    offsets = [(i - (walls - 1) / 2.0) * pitch for i in range(walls)]
+    for x in offsets:  # walls across the chord, clipped by the octagon
         half = min(a / 2 - inner, k - abs(x) - inner * 1.3)
         slab(x - wall / 2, x + wall / 2, a / 2 - half, a / 2 + half)
-    for j in range(1, n):  # walls along the chord
-        yc = -a / 2 + a * j / n
+    for yc in offsets:  # walls along the chord
         half = min(a / 2 - inner, k - abs(yc) - inner * 1.3)
         slab(-half, half, a / 2 + yc - wall / 2, a / 2 + yc + wall / 2)
     hooks = vc.VMesh()  # catch hardware: half-round hooks along the -Z face next to the root

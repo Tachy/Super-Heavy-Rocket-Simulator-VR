@@ -180,7 +180,7 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 17 (physics) | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
 | Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m; 4 lugs at 0.75 / 4.2 / 7.7 / 11.2 m | hinge 12 m, span 4, 48 m^2, thickness 0.35, chamfered rectangle | photo 108: the trapezoid with the cut forward corner agrees | model planform, wedge, 4 lugs, hinge fairing |
 | Forward flap | hinge edge 5.8 m (leans 19 deg along the ogive), span 3.04 m, swept quad with an aft foot beyond the hinge end (-1.49 m), area 13.8 m^2, 3 lugs | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); model kept | model planform centred on the physics hinge, hinge kept straight |
-| Grid fin | regular octagon 4.03 x 4.03 m, 10 cells across (0.4 pitch), depth 0.4 (catch version 0.7: hardware), curved catch corner, shaft 0.3 m | 13.5 m^2 at span 3.0 (chord 4.5), depth 0.35, rectangular | photos 2026-03: fins read as dark slabs with a SCALLOPED outer edge; the lattice cannot be seen | octagon lattice + 4 catch hooks on the root side; the serrated edge is not drawn (open) |
+| Grid fin | regular octagon 4.03 x 4.03 m, 10 cells across (0.4 pitch), depth 0.4 (catch version 0.7: hardware), curved catch corner, shaft 0.3 m | 13.5 m^2 at span 3.0 (chord 4.5), depth 0.35, rectangular | photos 2026-03: fins read as dark slabs with a SCALLOPED outer edge; the lattice cannot be seen | octagon lattice at the model's measured pitch 0.35 m (11 walls, wall 0.04, frame 0.07), serrated tip edge (every second cell capped at the rim, photo IE-Photo-44), 4 catch hooks only on the two catch fins (0 / 180 deg, plain fin at 90: the model has 2 catch + 1 plain; azimuths unconfirmed) |
 | Booster top / hot stage | 20 V teeth (18 deg pitch) between a top ring (y 22.98) and the hull, ~2.8 m high in the model view; no vent plates | 24 vent plates 3.2 m tall + louvres (first pass, read from photo 108) | chopsticks photo 2026-03: V truss ring with rod struts ~4.9 m high, posts + collars at the hull; the "louvres" of photo 108 are this truss | vent plates removed; V truss 20 teeth, 4.0 m + 0.4 m posts (photo height), collar ring; rods 0.3 m thick (the real ones are tapered) |
 | Booster skirt | base ring r 4.65, four thin ring tubes at r 4.9 (stations 0.7 / 1.05 / 1.95 / 2.35), a comb of posts between them, one port 0.57 x 0.74 x 0.8 m at 2.9-3.7 m | flat skirt | no photo of the base | base ring, 4 ring flanges, 48 posts, 4 ports (count unknown) |
 | Booster raceway | pill 0.7 x 5 m + a thin rail along the tank part | none | none | rail + one pill per tank section (side and spacing estimated) |
@@ -211,13 +211,45 @@ Engine look pass (2026-10-31, `vehicle_look_shots.gd` from real sessions, `scree
 truss, hinges, lugs, skirt rings and posts, aft / forward flaps and the all-round nose shield read as in the references. Added from the
 model STLs (`tank-bottom` / `tank-center` sections) and the photo of the stack on the mount: four long line fairings `strakes` (0.82 m
 high in the model, 1.2 m drawn, photo ~1.5 m; stations 3.2 .. 25.8 m on the -90 side and 3.2 .. 34.4 m on the +90 side, sloped top) and, from
-the printed-model photos, the booster's forward dome inside the V truss (`dome_start_m` 3.6 / `dome_height_m` 3.6: inside the physics
+the printed-model photos, the booster's forward dome (first inside the V truss, `dome_start_m` 3.6 / `dome_height_m` 3.6, since moved below it, see "Finish pass"; inside the physics
 length) and forked feet of the V teeth. Not drawn yet: the grid fin's serrated outer edge, tapered truss rods, the ship's thick raceway
 tubes widening at their foot, black round fittings, the ribs ring and panel lines (textures), the 1.7 m brackets on the strakes.
 Catch: arm tops 95 m above the pad ground, pins at 66.5 m -> booster bottom 28.5 m above the pad ground = 8.5 m above the 20 m mount; the
 photo of the stack on the mount puts the arm ledge at the pin level ~65-66.5 m above the mount top (+-1 m), so the pin station agrees with
 the photo, the catch height itself is not measurable from the photos (no photo of a booster catch in `screenshots/mechazilla/`).
 Triangles: booster 10,224, ship 9,100, flap 128 aft / 116 fwd, grid fin 552 (was 924).
+
+## Finish pass (2026-10-31)
+- Dome: the "bumps" inside the truss were the SHIP's engine bells (RVac exit plane 3.6 m, Raptor 2.1 m below the ship's base at 72.3 m)
+  reaching into the dome space. The dome now starts at the truss foot (`dome_start_m` 4.4) with height 2.25 m [E, 2:1 ellipse]: apex 70.15 m, the
+  lowest bell exit plane is at 68.7 m, so no bell reaches it. Evidence: the 1:100 ship engine plate is 4.6 m high, its bells hang 3.6 m below a
+  4.2 m ring plate; webcast frame `webcast/f13_t2255_ship_base_hotstage.jpg` (flight 13 file time 2255 s = T+2:29): three RVac and three sea-level
+  bells below the base. The config's gimbal station (= the ship's base) is unchanged, plume anchors untouched. No public photo of an unstacked V3
+  base was found; if the real bells sit partly recessed in the aft skirt, the drawn bells are too long by the recess (physics keeps the bell
+  lengths): open, user to check against his own frames.
+- Grid fins: pitch 0.35 m from the vertex lattice of `ss3-grid-fin.stl`, serrated edge, catch hooks only on `catch_fin_azimuths_deg` (detail
+  file, manifest `look.catch_fin_azimuths_deg`, `vehicle_view._build_fins`). Azimuths: the opposite pair 0 / 180 (fallback; the pins in the
+  config stay at 45 / 225 and so disagree with the hardware on the fins: user decision).
+- Strakes: soft end, a 5 m straight ramp from 1.2 m to flush at constant width (the pointed tip was a taper of width AND height). Height 1.2 m =
+  model 0.82 / photo (stack on the mount) ~1.5 m, uncertainty +-0.4 m.
+- Steel: dent slope rms 0.03 -> 0.012 and the shader's large-scale mottle 3 % -> 1.5 % (bare stainless in photo 108 and the webcast is nearly
+  smooth); NO tint or colour compensation: the blue cast is the reflected sky (F0 stays neutral). New faint longitudinal seams in the steel
+  map (one per 4.71 m of arc, bead 0.2 x the ring weld, staggered by the per-ring shift of u).
+- Booster truss rods are tapered (0.8 -> 1.3 x 0.15 m), the ship raceway has saddle feet every 2 m (0.7 x 0.4 m), the transfer ports are round
+  fittings (r 0.4 m: collar, neck, cap; one steel material, not black). Skirt port / post counts: no photo exists, unchanged.
+- Ribbed ring (photo 108) is the Block 2 interstage; the Block 3 booster has the open V truss (photos 116 and 2026-03), nothing drawn.
+- Ship parts: flaps, hinges, nose, shield edge, chine, raceway, ports covered earlier; nothing further undrawn that a photo shows (the
+  forward flap hinge lean of 19 deg stays undrawn on purpose).
+- Catch (frame IE-Photo-41-2, Flight 5, https://cms.interestingengineering.com/wp-content/uploads/2024/10/IE-Photo-41-2.jpg; scale: tower
+  ~146 m = 715 px, ~4.9 px/m [E]; the webcasts of flights 13 / 14 show only ship cameras):
+
+  | Quantity | From the frame | Config |
+  |---|---|---|
+  | Arm truss above the ground | tower top 325 px, arm truss ~470 px: 145 px = ~30 m below the tower top: ~113 m +-10 m | 95 m |
+  | Pins | just under the hot-stage ring, both sides of the hull | 66.5 m (booster top 72.3) |
+  | Hardware azimuth | not decidable from this view | 45 / 225 deg |
+
+  The booster is still ~30 m above its final position in the frame; the arm height carries +-10 m and a perspective bias. No physics change.
 
 ## Open points
 - Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that

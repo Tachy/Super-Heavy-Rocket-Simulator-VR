@@ -10,9 +10,9 @@ segments = 128                     # [E] radial segments of the plain lathe: sag
 ring_pitch_m = 1.8                 # [E] barrel ring (weld to weld) height; photo 108: ~33 px between welds = 1.8 m
 weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
 weld_half_width_m = 0.05           # [E] half width of the bead
-dent_slope_rms = 0.03              # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
-dome_start_m = 3.6                 # [E] booster: the barrel ends this far below the top (truss shoulder; photo of the printed 1:100 model)
-dome_height_m = 3.6                # [E] booster: the forward dome (half ellipse) rises inside the V truss up to the top ring (inside the physics length)
+dent_slope_rms = 0.012             # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
+dome_start_m = 4.4                 # [E] booster: the barrel ends this far below the top (truss shoulder; photo of the printed 1:100 model)
+dome_height_m = 2.25               # [E] booster: the forward dome (half ellipse) rises inside the V truss up to the top ring (inside the physics length)
 nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across; model tip radius 0.55)
 nose_tip_cap_m = 0.25              # [E] model: the tip closes within 0.2 m axially (blunt, not a ball); photo 108 ~1 m across
 nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the physics nose_length_m of the config (17 m) is NOT drawn
@@ -28,6 +28,8 @@ tooth_count = 20                   # [E] model: model: 20 V teeth around the top
 height_m = 4.0                     # [E] photo (booster top 2026-03): V struts ~4.9 m of 9 m dia; model view 2.8 m; 4.0 m so that struts + posts fill the 4.4 m section
 tube_radius_m = 0.15               # [E] top ring tube and strut radius (photo: struts ~0.3 m thick rods)
 post_height_m = 0.4                # [E] short vertical post below every valley (photo)
+taper_top = 0.8                    # [E] rod radius at the ring as a fraction of tube_radius_m (chopsticks photo 2026-03: slender rods)
+taper_foot = 1.3                   # [E] rod radius at the valley as a fraction of tube_radius_m (stouter toward the posts)
 
 [booster.skirt]
 base_ring_radius_m = 0.15          # [E] model: base ring 4.65 m
@@ -63,15 +65,14 @@ to_m = [34.4, 34.4, 25.8, 25.8]              # [E] model: 23.1 m (bottom tank) +
 height_m = 1.2                               # [E] see above
 base_width_m = 1.0                           # [E] model: section at 10.5 m, azimuth 60-72 deg
 top_width_m = 0.7                            # [E] flank slope in the model section (0.54 -> 0.82 m)
-chamfer_m = 1.8                              # [E] sloped top end (photo)
+chamfer_m = 5.0                              # [E] soft fairing ramp at the upper end, straight to flush (photos: stack on the mount, sloped soft end, no point)
 
 [ship.ports]
 port_count = 2                     # [E] transfer ports (model 0.9 x 0.45 x 0.8 m part); position not known, drawn on the lee side
 placed_at_m = 44.0                 # [E] port station
 azimuth_from_belly_deg = 180.0     # [E]
 spread_deg = 14.0                  # [E] the two ports straddle the lee line by this angle
-port_width_m = 0.9                 # [E] model
-port_length_m = 0.8                # [E] model
+port_radius_m = 0.4                # [E] round fitting (the 1:100 part is a 0.9 x 0.8 m block: print form; photos show round couplings)
 port_height_m = 0.45               # [E] model
 
 [booster.grid_fin_fairing]
@@ -82,9 +83,12 @@ height_m = 0.4                     # [E] housing height out of the hull
 [grid_fin]
 across_flats_m = 4.03              # [E] model: 1:100 model: octagonal lattice 4.03 x 4.03 m (physics: 13.5 m^2 at a 3.0 m span = 4.5 chord)
 thickness_m = 0.40                 # [E] model: lattice depth (model 0.4; the catch version 0.7 with the hardware)
-cell_pitch_m = 0.40                # [E] model: model: 10 cells across the flats
-wall_m = 0.03                      # [E] lattice wall thickness (the model's print walls are thicker)
-frame_m = 0.12                     # [E] outer frame bar thickness
+cell_pitch_m = 0.35                # [E] model: measured vertex lattice 0.35 m (11 walls across the 4.03 m flats)
+wall_m = 0.04                      # [E] lattice wall thickness (model 0.045)
+frame_m = 0.07                     # [E] outer frame bar thickness (model 0.05-0.07)
+edge_tooth_pitch_m = 0.70          # [E] serrated outer edge: tooth period along the tip bar (photo of the booster catch, IE-Photo-44: stepped notches, ~2 cells)
+edge_tooth_depth_m = 0.20          # [E] notch depth along the lattice depth
+catch_fin_azimuths_deg = [0.0, 180.0]   # [E] fins that carry the catch hardware (model: two catch fins + one plain); opposite pair, the plain fin at 90 deg; real azimuth unconfirmed
 shaft_radius_m = 0.12              # [E] hinge shaft, along the radial axis
 shaft_inset_m = 0.6                # [E] the shaft continues this far into the hull
 catch_hook_radius_m = 0.17         # [E] model: catch hardware: four half-round hooks along one edge (model section view)
@@ -128,6 +132,9 @@ last_station_m = 38.5              # [E] ends where the nose is wrapped complete
 [ship.raceway]
 azimuth_from_belly_deg = 180.0     # [E] on the lee side, opposite the belly (position not verified against Block 3)
 radius_m = 0.12                    # [E] cable raceway tube
+foot_width_m = 0.7                 # [E] the wider saddle feet under the tube (ship aft photos: the raceway widens at its brackets)
+foot_length_m = 0.4                # [E]
+foot_height_m = 0.06               # [E]
 first_station_m = 1.5              # [E]
 last_station_m = 36.0              # [E] ends below the nose
 

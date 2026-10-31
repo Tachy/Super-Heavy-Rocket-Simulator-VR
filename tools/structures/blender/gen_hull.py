@@ -23,6 +23,9 @@ NOSE_SAMPLES = 20  # [E] profile samples along the ogive (chord error < 5 mm on 
 MERGE_M = 1e-4  # profile stations closer than this are one
 PIN_SIDES = 12  # [E]
 RACEWAY_SIDES = 8  # [E]
+STRAKE_RAMP_STEPS = 5  # [E] segments of the strake's soft end ramp
+PORT_SIDES = 16  # [E] round transfer fittings
+FOOT_STEP_M = 2.0  # [E] spacing of the raceway tube's feet (brackets)
 SKIRT_SEGMENTS = 64  # [E] the skirt rings are thin flanges: sagitta 5.6 mm at R = 4.5 m
 CHINE_STEP_M = 0.5  # [E] sweep step of the chine along the barrel
 DOME_SAMPLES = 12  # segments of the booster's forward dome
@@ -167,8 +170,9 @@ def _build_top_truss(stage, detail, profile):
         a0, a1 = 2.0 * math.pi * i / n, 2.0 * math.pi * (i + 1) / n
         am = 0.5 * (a0 + a1)
         valley = vc.pt(L - t["height_m"], am, R)
-        vc.tube(mesh, vc.pt(L - rr, a0, R), valley, rr, 6, ("strut", i, 0))
-        vc.tube(mesh, valley, vc.pt(L - rr, a1, R), rr, 6, ("strut", i, 1))
+        # tapered rods (chopsticks photo 2026-03): slender at the ring, stouter at the valley
+        vc.tube(mesh, vc.pt(L - rr, a0, R), valley, rr * t["taper_top"], 6, ("strut", i, 0), radius1=rr * t["taper_foot"])
+        vc.tube(mesh, vc.pt(L - rr, a1, R), valley, rr * t["taper_top"], 6, ("strut", i, 1), radius1=rr * t["taper_foot"])
         et = Vector((0.0, -math.sin(am), math.cos(am)))
         foot = vc.pt(L - t["height_m"] - t["post_height_m"], am, R - 0.02)
         vc.tube(mesh, valley, foot, rr, 6, ("post", i))
@@ -234,11 +238,15 @@ def _build_strakes(stage, detail, profile):
     for ri, (az, x0, x1) in enumerate(zip(sk["ridge_azimuth_deg"], sk["from_m"], sk["to_m"])):
         a = math.radians(az)
         et = Vector((0.0, -math.sin(a), math.cos(a)))
-        stations = [(x0, sk["height_m"]), (x1 - sk["chamfer_m"], sk["height_m"]), (x1, 0.05)]
+        # soft fairing: a straight ramp from full height down to the hull over `chamfer_m` (no pointed tip: the
+        # width stays, only the height dies away flush with the shell, as the sloped end in the photos)
+        ramp = [(x1 - sk["chamfer_m"] * (1.0 - j / STRAKE_RAMP_STEPS),
+                 sk["height_m"] * (1.0 - j / STRAKE_RAMP_STEPS)) for j in range(STRAKE_RAMP_STEPS + 1)]
+        stations = [(x0, sk["height_m"])] + ramp[:-1] + [(x1, 0.03)]
         secs = []
         for x, h in stations:
-            t = h / sk["height_m"]
-            wb, wt = sk["base_width_m"] / 2.0, sk["top_width_m"] / 2.0 * t + 0.02
+            t = max(h, 0.03) / sk["height_m"]
+            wb, wt = sk["base_width_m"] / 2.0, sk["top_width_m"] / 2.0
             base = profile.R - EMBED_M
             secs.append([vc.pt(x, a, base) - et * wb, vc.pt(x, a, base) + et * wb,
                          vc.pt(x, a, profile.R + h) + et * wt, vc.pt(x, a, profile.R + h) - et * wt])
@@ -262,10 +270,15 @@ def _build_ports(stage, detail, profile):
     n = int(p["port_count"])
     for i in range(n):
         a = base + math.radians(p["spread_deg"]) * (2.0 * i / max(n - 1, 1) - 1.0) if n > 1 else base
-        er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
-        half = (p["port_length_m"] / 2.0, p["port_width_m"] / 2.0, (p["port_height_m"] + EMBED_M) / 2.0)
         x = p["placed_at_m"]
-        vc.box(mesh, vc.pt(x, a, profile.base(x) + p["port_height_m"] / 2.0 - EMBED_M / 2.0), X_AXIS, et, er, half)
+        r0 = profile.base(x) - EMBED_M
+        h = p["port_height_m"]
+        # round fitting (photos: a round coupling): collar, neck and a flanged cap, along the local normal
+        vc.tube(mesh, vc.pt(x, a, r0), vc.pt(x, a, r0 + h * 0.45), p["port_radius_m"], PORT_SIDES, ("port_collar", i))
+        vc.tube(mesh, vc.pt(x, a, r0 + h * 0.45), vc.pt(x, a, r0 + h * 0.8), p["port_radius_m"] * 0.7, PORT_SIDES,
+                ("port_neck", i))
+        vc.tube(mesh, vc.pt(x, a, r0 + h * 0.8), vc.pt(x, a, r0 + h), p["port_radius_m"] * 0.85, PORT_SIDES,
+                ("port_cap", i))
     return mesh
 
 
@@ -328,6 +341,13 @@ def _build_raceway(stage, detail, profile):
         p0 = vc.pt(xs[k], a, profile.base(xs[k]) + r * 0.5)
         p1 = vc.pt(xs[k + 1], a, profile.base(xs[k + 1]) + r * 0.5)
         vc.tube(mesh, p0, p1, r, RACEWAY_SIDES, ("raceway", 0), cap0=k == 0, cap1=k == len(xs) - 2)
+    er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+    foot = rw["foot_width_m"] / 2.0  # wider feet: flat saddles under the tube every FOOT_STEP_M
+    x = first + 0.5 * FOOT_STEP_M
+    while x < last:
+        vc.box(mesh, vc.pt(x, a, profile.base(x) + rw["foot_height_m"] / 2.0 - EMBED_M), X_AXIS, et, er,
+               (rw["foot_length_m"] / 2.0, foot, rw["foot_height_m"] / 2.0 + EMBED_M / 2.0))
+        x += FOOT_STEP_M
     return mesh
 
 

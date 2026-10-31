@@ -13,7 +13,7 @@ shader_type spatial;
 #include "res://shaders/hull_noise.gdshaderinc"
 
 // [E] Large-scale variation of the sheets: +-3 % (+-10 % read as blotches once the ambient was right).
-const float STEEL_MOTTLE = 0.03;
+const float STEEL_MOTTLE = 0.015;
 const float STEEL_MOTTLE_BASE = 1.0 - STEEL_MOTTLE;
 uniform int mode = 0;
 // F0 of bare iron-based steel, linear (0.56, 0.57, 0.58) [S: Filament material guide, Iron], sRGB-encoded here.
