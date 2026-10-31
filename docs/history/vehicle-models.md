@@ -43,3 +43,8 @@ The fins were drawn root-flat with cells along the tangent (a misreading of the 
     - Interface look (verdict of the renders `screenshots/vehicles/ifc/cmp_*.png`): the arrangement agrees (open dark base, rims in the aft plane, bells inside, ring on the truss). Still different: the sea-level cluster is too wide (config ring 1.3 m, real 0.89 m); bells are smooth cones without regen ribs and with no visible chamber / pump detail; drawn throats sit 0.8 m higher than the model's (bell 2.1 / 3.6 m vs 1.3 / 2.8 m from throat to exit, the bell's `bell_length_m` also sets the plume anchor); the plate has no ribs, port rings or the two open covers of f12 138.9 s; the outer comb of stringer slots on the real aft skirt is not drawn; ship plumes pass through the booster at hot staging (no interaction, no vent effects). No real side close-up of the V3 stack exists in the references: the ring and its 0.6 m rest on the printed model.
     - Catch pins: the config has booster pins at 45 / 225 deg between the fins at station 66.5 m [E]; web reports for V3 put the
     - Coverage vs thermal: the shield is drawn from the 1:100 model (see "Shapes redrawn": +-90 / +-78 deg, nose all round); the aero heating
+
+## Superseded 2026-10-31 (fix round after the real-frames round)
+- Weld bead 12 mm x 10 cm wide (half width 5 cm), heat band 1.2 x; shader weld darkening 0.25 + roughness gain 0.22; dotted stringer lines on every line in a regular grid at 0.09 m (0.7 coverage).
+- Bells: "the ribs do not show, cause not found" (the view never applied the engine material).
+- Fin aliasing: "no shimmer measurement of the fin".

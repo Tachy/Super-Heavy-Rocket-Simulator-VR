@@ -193,7 +193,7 @@ func _build_engines(stages: Array, engines: Array, stage_nodes: Array[Node3D]) -
 		var instance := MultiMeshInstance3D.new()
 		instance.name = "engines_" + ("rvac" if batch["vacuum"] else "raptor")
 		instance.multimesh = multimesh
-		instance.material_override = _steel
+		instance.material_override = VehicleModels.engine_material(batch["vacuum"], _models)
 		stage_nodes[batch["stage"]].add_child(instance)
 
 

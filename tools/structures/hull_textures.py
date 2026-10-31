@@ -36,7 +36,9 @@ FILE_NAME = "hull_steel.png"
 STRINGERS_PER_TILE = 12   # [E] 0.39 m pitch: NSF photos: dotted vertical lines ~0.35 +-0.1 m apart on booster and ship
 DOT_PITCH_M = 0.09        # [E] +-0.02 m along the line, same photo (3.7 px at 41 px/m)
 DOT_RADIUS_M = 0.018      # [E] ~4 texels: not resolved in the frames, reads as a faint line beyond ~30 m
-DOT_COVERAGE = 0.7        # [E] darkening share of a dot in the A channel
+DOT_LINE_SHARE = 0.6     # [E] share of the stringer lines that carry dots: frames (booster and ship, f12 / NSF photos): bands, not a grid
+DOT_DROPOUT = 0.2        # [E] share of dots missing along a line (same frames: broken rows)
+DOT_COVERAGE = 0.8        # [E] darkening share of a dot in the A channel
 FLAP_FILE_NAME = "flap_lee.png"
 FLAP_SIZE = (1024, 342)   # texels along the hinge, span: the aft flap's 12 x 4 m
 FLAP_PERIOD_M = (12.0, 4.0)
@@ -99,11 +101,22 @@ def bake(radius_m: float, hull: dict) -> np.ndarray:
     # dotted stringer lines (spot-weld rows): at every multiple of period / STRINGERS_PER_TILE; the shader shifts rings by
     # whole stringers, so the lines run on across the rings as in the photos
     s_pitch = pu / STRINGERS_PER_TILE
-    us = ((np.arange(SIZE_U) + 0.5) * du + s_pitch / 2.0) % s_pitch - s_pitch / 2.0
-    n_dots = max(1, round(pv / DOT_PITCH_M))
-    d_pitch = pv / n_dots
-    vs = ((np.arange(SIZE_V) + 0.5) * dv + d_pitch / 2.0) % d_pitch - d_pitch / 2.0
-    dots = np.clip((DOT_RADIUS_M - np.hypot(us[None, :], vs[:, None])) / du + 0.5, 0.0, 1.0)
+    rng = np.random.default_rng(SEED + 7)
+    dots = np.zeros((SIZE_V, SIZE_U))
+    u_all = (np.arange(SIZE_U) + 0.5) * du
+    v_all = (np.arange(SIZE_V) + 0.5) * dv
+    # frames: dotted rows come in irregular groups with bare sheet between them
+    for line in rng.choice(STRINGERS_PER_TILE, round(DOT_LINE_SHARE * STRINGERS_PER_TILE), replace=False):
+        n_dots = max(1, round(pv / (DOT_PITCH_M * rng.uniform(0.8, 1.25))))
+        d_pitch = pv / n_dots
+        phase = rng.uniform(0.0, d_pitch)
+        keep = rng.random(n_dots) > DOT_DROPOUT
+        du_line = (u_all - (line + 0.5) * s_pitch + 0.5 * pu) % pu - 0.5 * pu
+        columns = np.abs(du_line) < 2.0 * DOT_RADIUS_M
+        k = np.floor((v_all - phase) / d_pitch + 0.5).astype(int)
+        vs = v_all - phase - k * d_pitch
+        field = np.clip((DOT_RADIUS_M - np.hypot(du_line[columns][None, :], vs[:, None])) / du + 0.5, 0.0, 1.0)
+        dots[:, columns] = np.maximum(dots[:, columns], field * keep[k % n_dots][:, None])
     haz = np.maximum(haz, DOT_COVERAGE * dots)
     energy = sx * sx + sy * sy
     out = np.empty((SIZE_V, SIZE_U, 4))

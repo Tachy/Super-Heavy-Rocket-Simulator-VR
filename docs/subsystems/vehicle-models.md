@@ -58,8 +58,8 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   width, `dent_slope_rms`; no photo pixels), covered by the manifest's input hash (the script is hashed), deterministic (fixed
   lattice seed, fixed zlib level, test: byte-identical PNG). One RGBA8 PNG, 1024 x 512 texels, tiling: u = circumference / 6
   (4.71 m, 4.6 mm per texel, closes around the R = 4.5 m hull), v = the 1.8 m ring pitch (3.5 mm per texel) with the weld bead
-  at v = 0 (a weld at every multiple of the pitch). Channels: R, G slope along u / v (bead: triangle 12 mm high, 10 cm wide;
-  dents: two noise octaves, ~1.2 m and ~0.38 m, rms slope 0.012), B slope energy sx^2 + sy^2, A heat-affected band coverage + the dotted stringer lines (12 per tile = 0.39 m apart, a dot every 0.09 m; rings shift by whole stringers, so the lines run on across rings). `flap_lee.png`: panel lines of the flaps' lee face, same channels, not tiling, no ring shift.
+  at v = 0 (a weld at every multiple of the pitch). Channels: R, G slope along u / v (bead: triangle 5 mm high, 4 cm wide (was 12 mm / 10 cm; fix round 2026-10-31: frames show hairlines <= 5 cm, upper bound, not resolved); heat band 1.2 x the bead;
+  dents: two noise octaves, ~1.2 m and ~0.38 m, rms slope 0.012), B slope energy sx^2 + sy^2, A heat-affected band coverage + the dotted stringer lines (12 per tile = 0.39 m apart, 60 % of the lines carry dots (seeded choice, no regular grid), pitch 0.07-0.11 m per line, 20 % of the dots missing; rings shift by whole stringers). Shader: weld / dot darkening 0.25, roughness gain 0.08 (was 0.22: the dots glinted white, frames show them dark). `flap_lee.png`: panel lines of the flaps' lee face, same channels, not tiling, no ring shift.
   The manifest's `look.steel_map` holds file, periods, ranges.
 - VRAM: 2.0 MiB + mips = 2.7 MiB (RGBA8, the full chain built by the game with `Image.generate_mipmaps`: box averages, which is
   what the channels are designed for); the file is 180 kB. Sampled with trilinear + anisotropic filtering (project setting
@@ -297,10 +297,12 @@ Evidence `screenshots/vehicles/real/cmp_*.png` (real | engine). Frames: `data/we
 | Flaps | aft planform agrees; bare lee face with panels ~0.95 x 0.74 m, two diagonal stiffeners, six dark hexagon covers near the aft end, 2 V brackets + 1 central actuator (f14 5099, 4699, 5299 s) | map `flap_lee.png`, 6 covers, 3 lugs; forward flap uses the same map (not verified), 2 lugs assumed | fisheye: +-0.5 m |
 | Hinge heat protection | thick black tiled bulges along the hinges on the belly side (f12 1804 s, f13 5905 s, f14 4949 s) | `hinge_covers` in the ship: 1.3 m wide, 0.5 m high, 0.8 m beyond the hinge ends, tapered, tiled by the coverage; wholly on the belly side, so the flap's sweep (lee tangent to radial) is clear (test) | +-0.3 / +-0.2 m |
 | Hull lines | dotted stringer lines ~0.35 m apart, dots ~0.09 m, rings 2.0 m; solid lines only at rings; a faint line beyond ~30 m, gone beyond ~100 m | steel map | +-0.1 m |
-| Bells | Raptor: throat 1.35 m above the exit (1.04 x width), chamber + powerhead above; fine ribs. RVac: 80 flutes on the lower ~62 %, smooth cone above, throat 3.0 m (f14 2515, 2563 s) | throat in the mesh, gimbal / exit / rims unchanged; plume anchor unchanged; `vehicle_engine.gdshader` with a rib map (**the ribs do not show in the renders yet, cause not found**) | +-0.3 / +-0.4 m |
+| Bells | Raptor: throat 1.35 m above the exit (1.04 x width), chamber + powerhead above; fine ribs. RVac: 80 flutes on the lower ~62 %, smooth cone above, throat 3.0 m (f14 2515, 2563 s) | throat in the mesh, gimbal / exit / rims unchanged; plume anchor unchanged; `vehicle_engine.gdshader` with a rib map (ribs show since the fix round 2026-10-31: `VehicleView._build_engines` never applied `VehicleModels.engine_material`, the bells wore the hull steel; the hot spot on the shoulder was that steel's sun glint) | +-0.3 / +-0.4 m |
 | Aft skirt comb | ribbed band at about 3-4 m on the ship + a ring of arched slots below (QD photo 2026-05, f12 5674 s); also the ladders beside the name and around the payload door | not drawn (location-bound; no generic map) | n/a |
 
 ### Tile boundary
+Second side (fix round 2026-10-31): f14 2100 s (ship seen belly-on at the pad, both flaps at the silhouette) shows both edges black to the silhouette; f13 1940 s shows a thin bright strip on the left edge along the barrel (~0.6 m of apparent width, which would be a boundary near 60 deg from the belly on that side, or just a sky glint on the tile: ambiguous, 1 of 3 frames). No consistent asymmetry, so the table stays symmetric (+-10 deg); the other side is read as symmetric within that tolerance, not as measured. The QD photo's lee tile patch around the raceway is not drawn.
+
 Measured on the Ship 42 photo (2026-09, telephoto, hull 58 px x 2 scaled, stations 19.4 px/m in the crop): boundary offsets from the axis -0.17 R (22-38 m), +0.09 R (below 13.4 m), a wider patch -0.43 R at 13.4-21.6 m; anchor: the aft flap hinge lies on the boundary (f14 4949 s, f12 5674 s) and config azimuth belly +-90, and the stack photo 2026-05 shows both silhouettes black to the base. Solving gives the view 85 deg off the belly; check: the forward flap hinge at x -0.42 R gives 110 deg (config +-110).
 
 | Station m | Half angle now | Before | +- |
@@ -326,11 +328,11 @@ Albedo [E] from the sRGB of sunlit parts against known surfaces:
 Tower material lowered accordingly (`tower_material.gd`, `tower_view.gd`, also `launch-structures.md`); the far tier's fitted colours were not refit.
 
 ### Fin aliasing
-Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax pixel at ~100 m), beyond that the opaque `plate`. A hard swap; a shimmer measurement of the fin itself does not exist (the check covers hull surfaces). Not seen in the headset.
+Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax pixel at ~100 m), beyond that the opaque `plate`. A hard swap, measured 2026-10-31 (`tile_shimmer_check.gd --surface=fin`, booster fin 0 from above, 20-320 m, patch on the projected fin): luminance step 115 -> 125 m 1.014 (gate 1.10), temporal <= 0.0012 (ref 0.0012), error <= 0.037 (gate 0.15). Not seen in the headset. Cell pitch: frame f12 1804 s counts ~9 +-1.5 columns over the 4.1 m width = 0.46 +-0.07 m, so the config's 0.47 stays.
 
 ## Open points
 - Interface look: the arrangement agrees. Still different: the sea-level cluster is too wide (config ring 1.3 m, real 0.89 m); no powerhead detail above the throat (plain cylinder against the pump and pipe bundle of f14 2515 s); plate: dark, the real one is crumpled foil with bolt rings (f14 2515 s), not drawn; the bay wall's real corrugation and four frames are only partly drawn; ship plumes pass through the booster at hot staging.
-- Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that
+- Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel); after the thinner welds / dots 1.180, exactly at the gate (the 20 m patch dips; no headroom left). The flat flap / tile patches that
   read tan under a low Sun are the black tile (albedo 0.03) in direct, reddened Sun (~14 deg): diffuse, specular only
   ~10 %, AgX lifts it (probe in `sky-fix-report.md` Fix 2). Not a bug. Steel luminance ratio gated at 1.18.
 - Shade sides: lit by the sky's radiance cubemap, which follows the Sun and the place since 2026-10-31 (`atmosphere-scattering.md`, "Radiance cubemap"). A white hull's

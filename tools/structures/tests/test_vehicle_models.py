@@ -471,6 +471,7 @@ def test_steel_map_is_deterministic_seamless_and_has_the_weld_at_v_zero(spec):
     ring, seam = (2.0 * hull_textures.HAZ_FACTOR * hull["weld_half_width_m"] / p for p in (pv, pu))
     seam *= hull_textures.SEAM_HAZ_SHARE  # coverage 0.3 over the seam's width
     dots = hull_textures.DOT_COVERAGE * math.pi * hull_textures.DOT_RADIUS_M ** 2 / (pu / hull_textures.STRINGERS_PER_TILE * hull_textures.DOT_PITCH_M)
+    dots *= hull_textures.DOT_LINE_SHARE * (1.0 - hull_textures.DOT_DROPOUT)
     assert mean == pytest.approx(ring + seam - ring * seam + dots, rel=0.08)
 
 

@@ -33,7 +33,7 @@ uniform float steel_energy_range = 0.1;
 uniform float steel_shift_steps = 0.0;    // > 0: rings shift by whole stringers; 0: no shift (the flaps' fixed panel map)
 uniform float weld_first_m = 0.35;        // no weld seams on the chamfer below this station
 const float WELD_DARKEN = 0.25;           // [E] heat-affected band: albedo drop and roughness gain
-const float WELD_ROUGHER = 0.22;
+const float WELD_ROUGHER = 0.08;  // [E] weld pits and dots read dark in the frames, not glinting (was 0.22 / 0.25)
 
 uniform float belly_azimuth_rad = -1.5707963;   // -Z in the body frame
 uniform int coverage_count = 5;

@@ -8,8 +8,8 @@
 [hull]
 segments = 128                     # [E] radial segments of the plain lathe: sagitta 1.4 mm at R = 4.5 m (the silhouette at close range)
 ring_pitch_m = 2.0                 # [E] +-0.15 m: NSF photo 2026-03 (9 m = 41 px/m): rings 81 px apart on Booster 19; photo 108 (Block 2) read 1.8
-weld_height_m = 0.012              # [E] weld bead height (baked into the steel normal map, not mesh)
-weld_half_width_m = 0.05           # [E] half width of the bead
+weld_height_m = 0.005              # [E] weld bead height (baked into the steel normal map, not mesh); same bead slope 0.25 as before
+weld_half_width_m = 0.02           # [E] half width of the bead: 4 cm line; frames (ref_steel_q, f12 / f13 close hull) show hairlines of 1-3 px at 41 px/m, i.e. <= 5 cm (upper bound, not resolved); was 10 cm
 dent_slope_rms = 0.012             # [E] oil-canning dents of the steel map: rms slope (old analytic dents ~0.03-0.04)
 dome_start_m = 2.88                # [E] booster: barrel end below the top = hot-stage ring 0.6 + dome height (section of ss3-booster-tank-top: shoulder y 20.7, apex 22.98 = the ring seat)
 dome_height_m = 2.56               # [E] booster: forward dome from the shoulder to the ring's foot (0.32 m ring): NSF photo 2026-03 shoulder 3.07 +-0.15 m below the top; apex not visible

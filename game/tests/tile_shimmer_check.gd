@@ -22,7 +22,14 @@ const SURFACES := {
 			Vector3(0.0, 0.0, -1.0), NAN],
 	"steel": [{"mission": "starship_leo", "t_plus": "100", "utc": "2026-10-31T19:00:00"}, 0, 30.0,
 			Vector3(0.0, 0.0, -1.0), 0.0],
+	# fin: grid fin 0 (azimuth 0, +Y) of the booster, seen from above and the side (the stack hides the plume); the patch sits
+	# on the fin's projected centre. The distances straddle the lattice -> plate swap (FIN_LATTICE_RANGE_M).
+	"fin": [{"mission": "starship_leo", "t_plus": "100", "utc": "2026-10-31T19:00:00"}, 0, 64.0,
+			Vector3(0.5, 0.85, 0.0), 0.0],
 }
+const FIN_DISTANCES_M := [20.0, 60.0, 100.0, 115.0, 125.0, 140.0, 200.0, 320.0]
+## Step limit between the two distances either side of the swap (luminance ratio).
+const SWAP_STEP_LIMIT := 1.10
 const WINDOW_HEIGHT_PX := 900.0
 const FOCAL_PX := 2900.0
 const PATCH_M := 2.0  ## > the ring pitch (1.8 m): every patch from 16 m on holds a weld bead
@@ -96,7 +103,7 @@ func _run() -> void:
 	var spec: Array = SURFACES[_surface]
 	var body: int = spec[1]
 	var station: float = spec[2]
-	for distance: float in DISTANCES_M:
+	for distance: float in (FIN_DISTANCES_M if _surface == "fin" else DISTANCES_M):
 		var offset: Vector3 = spec[3] * (distance + HULL_RADIUS_M)
 		_set_scale(1.0)
 		_rig.place(_sim, body, station, offset, fov_deg, spec[4])
@@ -108,11 +115,11 @@ func _run() -> void:
 			_set_scale(1.0)
 			await _n(FRAMES_CAPTURE)
 			var image_a := root.get_viewport().get_texture().get_image()
-			frames_a.append(_patch(image_a, distance))
+			frames_a.append(_patch(image_a, distance, _centre()))
 			_set_scale(REFERENCE_SCALE)
 			await _n(FRAMES_CAPTURE)
-			frames_b.append(_patch(root.get_viewport().get_texture().get_image(), distance))
-			if step == 0 and distance == DISTANCES_M[0]:
+			frames_b.append(_patch(root.get_viewport().get_texture().get_image(), distance, _centre()))
+			if step == 0 and distance == (FIN_DISTANCES_M if _surface == "fin" else DISTANCES_M)[0]:
 				image_a.save_png(ProjectSettings.globalize_path("res://").path_join(
 						"../screenshots/vehicles/shimmer_%s_5m.png" % _surface))
 		_results.append(_stats(_surface, distance, frames_a, frames_b))
@@ -133,12 +140,22 @@ func _set_scale(scale: float) -> void:
 
 
 ## Linear luminance of the central physical patch (row-major).
-func _patch(image: Image, distance_m: float) -> PackedFloat32Array:
+## Patch centre in render pixels: the image centre, for the fin the projected fin node.
+func _centre() -> Vector2:
+	var size := Vector2(root.get_viewport().get_visible_rect().size)
+	if _surface != "fin":
+		return size * 0.5
+	var fin := _main.find_child("grid_fin_0", true, false) as Node3D
+	var camera := root.get_viewport().get_camera_3d()
+	return camera.unproject_position(fin.global_position)
+
+
+func _patch(image: Image, distance_m: float, centre := Vector2.ZERO) -> PackedFloat32Array:
 	image.convert(Image.FORMAT_RGBA8)
 	var half := int(clampf(0.5 * PATCH_M * FOCAL_PX / distance_m, 0.5 * PATCH_MIN_PX, 0.5 * PATCH_MAX_PX))
 	var width := image.get_width()
-	var cx := width / 2
-	var cy := image.get_height() / 2
+	var cx := clampi(int(centre.x), half, width - half)
+	var cy := clampi(int(centre.y), half, image.get_height() - half)
 	var data := image.get_data()
 	var out := PackedFloat32Array()
 	for y in range(cy - half, cy + half):
@@ -189,6 +206,16 @@ func _report() -> void:
 		hi = maxf(hi, r["luminance"])
 	var ratio := hi / maxf(lo, 1e-9)
 	var ratio_limit := RATIO_LIMIT if _surface == "tiles" else STEEL_RATIO_LIMIT
+	if _surface == "fin":  # the luminance falls with distance by design here; the swap is gated by its own step
+		var below := 0.0
+		var above := 0.0
+		for r: Dictionary in _results:
+			below = r["luminance"] if r["distance_m"] == 115.0 else below
+			above = r["luminance"] if r["distance_m"] == 125.0 else above
+		var step := maxf(below, above) / maxf(minf(below, above), 1e-9)
+		print("tile_shimmer_check: fin swap 115 -> 125 m luminance step %.3f (limit %.2f)" % [step, SWAP_STEP_LIMIT])
+		failed = failed or step > SWAP_STEP_LIMIT
+		ratio_limit = INF
 	var ratio_ok := ratio <= ratio_limit
 	failed = failed or not ratio_ok
 	print("tile_shimmer_check: %s luminance ratio max/min %.3f (limit %.2f) -> %s" % [_surface, ratio, ratio_limit,
