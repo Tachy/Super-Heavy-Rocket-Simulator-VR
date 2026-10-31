@@ -1,7 +1,7 @@
 # Vehicle detail models (Super Heavy Block 3 + Starship Block 3, prototype)
 
-State: plan `docs/superpowers/plans/2026-10-31-starship-booster-prototype.md`, tasks 1 (models generated) and 2 (game side) done; the
-tile shader (task 3) is open. Only `starship_block3`; depot, tanker, HLS and Falcon 9 keep today's view.
+State: plan `docs/superpowers/plans/2026-10-31-starship-booster-prototype.md`, tasks 1 (models generated), 2 (game side) and 3 (hull / tile shader,
+look pass, evidence) done; the prototype awaits the user's verdict and a headset run. Only `starship_block3`; depot, tanker, HLS and Falcon 9 keep today's view.
 
 ## Model
 - Physics numbers are the master: `config/vehicles/starship_block3.toml` and `config/engines/*.toml` (length, diameter, nose,
@@ -51,9 +51,26 @@ tile shader (task 3) is open. Only `starship_block3`; depot, tanker, HLS and Fal
   the radial Y by +deflection. Both are tested against re-implementations of `flap_span_direction` and the grid-fin normal.
 - Plumes start at the model's exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the gimbal point); cylinders keep 3.0 m.
 
+## Hull shader (`game/shaders/vehicle_hull.gdshader` + `heat_shield_tiles.gdshaderinc`)
+- One opaque spatial shader (LitAerial's atmosphere fog, Godot PBR lighting: the clouds draw behind it, nothing goes to the
+  transparent pass), three materials made by `VehicleModels` from the manifest's `look` block (ring pitch, weld bead size, tile
+  size / gap, coverage table, belly azimuth, barrel end): mode 0 bare steel (booster, chine, raceway, fins, flap edges), 1 ship hull,
+  2 flap (tiles on the outer +Y face). Coordinates are the node's LOCAL body frame, no baked texture, nothing view dependent: both
+  eyes of a stereo frame evaluate the same surface function.
+- Steel: metallic 0.8, roughness 0.27 [E] (a diffuse share stands in for the sky's weak reflection), per-ring tint / roughness from a
+  hash of the ring index, darker rougher heat-affected band either side of each weld, oil-canning dents as the gradient of two noise
+  octaves tilting the normal (fade with the pixel footprint).
+- Tiles: axial hex cells (0.30 m across flats, 6 mm gap, config values) of (arc length, station) with the arc taken at the local
+  radius; coverage = half angle around the belly azimuth from the detail file's table (cut by the smooth boundary like the chine
+  strake); gap mask, bevel normal, per-tile shade hash, 0.6 % lighter "repaired" tiles. The weld beads' slope is taken out of the
+  normal under the shield (barrel: radial; ogive: the profile slope minus the bead). Anti-aliasing: the pixel footprint (derivatives
+  of the local position) box-filters the gap and edge, the per-tile detail fades to the mean colour between 0.12 and 0.35 tile widths
+  per pixel, the bevel (a highlight, no mean) fades out at 1-3 bevel widths. Flaps: planar (span, hinge) coordinates.
+- Known limit: s = angle x local radius shears the lattice a little on the ogive; real tiles are cut there anyway.
+
 ## Standing decisions
-- Detail in geometry only where it reads (beads, vents, lattice, strakes); tiles are the task 3 shader (UV and coverage table
-  are ready). Staying data-driven: nothing is typed into a generator that the configs carry.
+- Detail in geometry only where it reads (beads, vents, lattice, strakes); the tiles are the shader above. Engines keep the
+  view's LitAerial steel. Staying data-driven: nothing is typed into a generator that the configs carry.
 - The deterministic check compares positions, UVs and indices byte-for-byte; Blender's smooth normals differ in the 7th digit
   between runs, so the `.bin` files as a whole are not byte-identical.
 
@@ -69,7 +86,22 @@ tile shader (task 3) is open. Only `starship_block3`; depot, tanker, HLS and Fal
   screenshots/vehicles` (stack, ship top / base, booster base / top, fin close-up; `--flap-deg`, `--fin-deg`).
 - Triangles: booster 21,252, ship 21,020, flap 84 each, grid fin 924, Raptor 2,048, RVac 2,560 (33 + 6 engines are instances).
 
+- `godot --path game --script res://tests/tile_shimmer_check.gd` (GPU): ship return entry state at 60 km (vacuum, belly lit),
+  5 to 500 m, 1500 px focal, fixed exposure: mean luminance of a 1 m patch max / min 1.065 (limit 1.10), flicker under 0.3 px
+  head motion <= 0.0013 (sigma / mean). The first version (bevel 0.7, fading with the tile detail) failed at 1.111 with flicker 0.0075:
+  the bevel highlights were lost in the fade.
+- Cost (`vehicle_cost_check.gd`, RTX 4090, 1600x900 window, stack on the pad, vehicle view shown / hidden, 3 repeats of 120-frame
+  medians, scale 1 and 2 per axis): GPU render time at 100 m 1.185 / 1.184 ms (scale 1) and 2.177 / 2.143 ms (scale 2); at 400 m
+  1.243 / 1.211 and 2.216 / 2.181 ms: +0.00 to +0.04 ms, the added draw calls 17-24 and 59-127 k primitives. Close-up (10 m from the
+  ship's belly, hull filling the frame): scale 2 1.848 / 2.034 ms, i.e. 0.19 ms LESS with the stack (the hull hides sky / ground pixels);
+  at scale 1 the three repeats scatter (0.63 / 0.51, 0.64 / 0.76, 0.94 / 1.10 ms): no sign can be read from them. Main-thread
+  process time is the 60 Hz sync (16.9 ms) with and without. Within the plan's 1.0 ms [E] on this machine; not measured in VR.
+- Evidence tools: `vehicle_look_shots.gd` (real mission, orbit camera relative to a body, `--stereo=` for eye images, `--scan`
+  for flap / fin deflections over time), `vehicle_cost_check.gd`, `vehicle_rig.gd` (the common mission / camera rig).
+
 ## Open points
+- Free camera (`FOCUS_FREE`) and a low camera looking up at a hull's shade side: that side is black (no ambient) with the old LitAerial
+  steel and the tower too; the orbit camera from above / level shows the sky's reflection. Not caused by the hull shader; unexplained.
 - Catch pins: the config has booster pins at 45 / 225 deg between the fins at station 66.5 m [E]; web reports for V3 put the
   catch features at / integrated with the grid-fin mechanisms (unconfirmed, partly older designs). Modelled as in the config
   (physics and visual agree); a check against Block 3 photos and a decision on the physics numbers are open.

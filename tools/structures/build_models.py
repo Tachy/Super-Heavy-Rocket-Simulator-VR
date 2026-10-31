@@ -137,8 +137,15 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> 
              for st_id, st in spec["stages"].items() if st["flaps"]}
     engines = {eid: {"file": e["file"], "exit_plane_x_m": -e["bell_length_m"],
                      "exit_diameter_m": e["nozzle_exit_diameter_m"]} for eid, e in sorted(spec["engines"].items())}
+    detail = spec["detail"]
+    look = {"ring_pitch_m": detail["hull"]["ring_pitch_m"],  # the shader's weld bands and per-ring panels
+            "weld_height_m": detail["hull"]["weld_height_m"], "weld_half_width_m": detail["hull"]["weld_half_width_m"],
+            "ship_barrel_end_m": spec["stages"]["ship"]["length_m"] - spec["stages"]["ship"]["nose_length_m"],
+            "ship_belly_azimuth_deg": spec["stages"]["ship"]["belly_azimuth_deg"],
+            "tiles": {k: detail["ship"]["tiles"][k] for k in ("hex_across_flats_m", "gap_m", "coverage_station_m",
+                                                               "coverage_half_angle_deg")}}
     return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec)),
-            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": flaps, "engines": engines}
+            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": flaps, "engines": engines, "look": look}
 
 
 def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False, blender: str | None = None,

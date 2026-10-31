@@ -17,6 +17,10 @@ const ENGINE_FILE := {false: "raptor", true: "rvac"}
 const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
 ## Nozzle exit below the gimbal point when no model says better (the former view's value).
 const DEFAULT_EXIT_DEPTH_M := 3.0
+const HULL_SHADER := preload("res://shaders/vehicle_hull.gdshader")
+const HULL_MODE := {"steel": 0, "ship": 1, "flap": 2}
+## Entries of the shader's coverage table arrays.
+const HULL_TABLE_SIZE := 8
 const AZIMUTH_TOLERANCE_DEG := 0.5
 const STATION_TOLERANCE_M := 0.01
 
@@ -27,7 +31,8 @@ static var _load_error := ""
 
 
 ## {} or {"manifest": Dictionary, "hulls": {stage_id: {node: Mesh}}, "flap": {"fwd"|"aft": {node: Mesh}},
-## "grid_fin": {node: Mesh}, "engine": {false|true: Mesh}} (the engine meshes merged to one multi-surface mesh).
+## "grid_fin": {node: Mesh}, "engine": {false|true: Mesh}, "materials": {"steel"|"ship"|"flap": ShaderMaterial}} (the
+## engine meshes merged to one multi-surface mesh).
 static func load_for(vehicle_id: String) -> Dictionary:
 	if vehicle_id != PROTOTYPE_VEHICLE_ID:
 		return {}
@@ -63,7 +68,42 @@ static func _load(vehicle_id: String) -> Dictionary:
 		"flap": {"fwd": parts["flap_fwd"], "aft": parts["flap_aft"]},
 		"grid_fin": parts["grid_fin"],
 		"engine": {false: parts["raptor"], true: parts["rvac"]},
+		"materials": _hull_materials(manifest.get("look", {})),
 	}
+
+
+## Hull shader materials (shaders/vehicle_hull.gdshader) sharing the manifest's "look" numbers (ring pitch, tile size and
+## gap, the coverage table around the belly): "steel" (bare), "ship" (steel + tiles in the coverage), "flap" (tiles on the
+## outer face). Opaque, like every vehicle surface.
+static func _hull_materials(look: Dictionary) -> Dictionary:
+	var materials := {}
+	for key: String in ["steel", "ship", "flap"]:
+		var material := ShaderMaterial.new()
+		material.shader = HULL_SHADER
+		material.set_shader_parameter("mode", HULL_MODE[key])
+		material.set_shader_parameter("ring_pitch_m", float(look.get("ring_pitch_m", 1.8)))
+		material.set_shader_parameter("barrel_end_m", float(look.get("ship_barrel_end_m", 1.0e9)))
+		var bead_half := float(look.get("weld_half_width_m", 0.05))
+		material.set_shader_parameter("weld_bead_half_m", bead_half)
+		material.set_shader_parameter("weld_bead_slope", float(look.get("weld_height_m", 0.012)) / bead_half)
+		var tiles: Dictionary = look.get("tiles", {})
+		if not tiles.is_empty():
+			var stations := PackedFloat32Array(tiles["coverage_station_m"])
+			var half_angles := PackedFloat32Array()
+			for degrees: float in tiles["coverage_half_angle_deg"]:
+				half_angles.append(deg_to_rad(degrees))
+			var count := mini(stations.size(), HULL_TABLE_SIZE)
+			stations.resize(HULL_TABLE_SIZE)
+			half_angles.resize(HULL_TABLE_SIZE)
+			material.set_shader_parameter("tile_across_flats_m", float(tiles["hex_across_flats_m"]))
+			material.set_shader_parameter("tile_gap_m", float(tiles["gap_m"]))
+			material.set_shader_parameter("coverage_count", count)
+			material.set_shader_parameter("coverage_station_m", stations)
+			material.set_shader_parameter("coverage_half_angle_rad", half_angles)
+			material.set_shader_parameter("belly_azimuth_rad",
+					deg_to_rad(float(look.get("ship_belly_azimuth_deg", 270.0))))
+		materials[key] = material
+	return materials
 
 
 static func _fallback(vehicle_id: String, reason: String) -> Dictionary:

@@ -281,6 +281,10 @@ def test_manifest_and_triangle_counts(built, spec):
     assert set(manifest["files"]) == {"booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
                                       "raptor.gltf", "rvac.gltf"}
     assert manifest["engines"]["raptor3"]["exit_plane_x_m"] < 0.0
+    look = manifest["look"]  # what the game's hull shader reads (task 3)
+    assert look["ship_belly_azimuth_deg"] == spec["stages"]["ship"]["belly_azimuth_deg"]
+    assert look["ring_pitch_m"] == spec["detail"]["hull"]["ring_pitch_m"]
+    assert look["tiles"]["coverage_station_m"] == spec["detail"]["ship"]["tiles"]["coverage_station_m"]
     assert {f["rotation_sign_about_plus_x"] for f in manifest["flaps"]["ship"]} == {-1, 1}
     print("triangle counts:", manifest["triangles"])
     for name, n in manifest["triangles"].items():

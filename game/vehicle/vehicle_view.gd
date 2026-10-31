@@ -34,6 +34,11 @@ func _init() -> void:  # not _ready: sync() may run before the view enters the t
 	_plume_material.set_shader_parameter("color", Color(1.0, 0.55, 0.25, 0.55))
 
 
+## The hull shader's material of a model part (bare steel, ship hull with tiles, flap face with tiles).
+func _hull_material(kind: String) -> Material:
+	return _models["materials"][kind]
+
+
 ## Rebuilds geometry when the stage list changed (e.g. after separation), then places the body.
 func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
 	var stages: Array = sim.body_stages(body_index)
@@ -142,7 +147,7 @@ func _add_stage_node(stage: Dictionary, hull: Dictionary) -> Node3D:
 		var instance := MeshInstance3D.new()
 		instance.name = part
 		instance.mesh = hull[part]
-		instance.material_override = _steel
+		instance.material_override = _hull_material("ship" if part == "hull" and stage["id"] == "ship" else "steel")
 		node.add_child(instance)
 	return node
 
@@ -190,7 +195,7 @@ func _build_flaps(stages: Array, flaps: Array, stage_nodes: Array[Node3D]) -> vo
 			var instance := MeshInstance3D.new()
 			instance.name = part
 			instance.mesh = parts[part]
-			instance.material_override = _steel
+			instance.material_override = _hull_material("flap" if part == "panel" else "steel")
 			node.add_child(instance)
 		stage_nodes[stage].add_child(node)
 		_flap_nodes.append({"node": node, "stage": stage, "sign": int(entry["rotation_sign_about_plus_x"])})
@@ -208,7 +213,7 @@ func _build_fins(stages: Array, grid_fins: Array, stage_nodes: Array[Node3D]) ->
 			var instance := MeshInstance3D.new()
 			instance.name = part
 			instance.mesh = _models["grid_fin"][part]
-			instance.material_override = _steel
+			instance.material_override = _hull_material("steel")
 			node.add_child(instance)
 		stage_nodes[stage].add_child(node)
 		_fin_nodes.append({"node": node, "stage": stage})
