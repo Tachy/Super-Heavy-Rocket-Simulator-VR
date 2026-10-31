@@ -1,8 +1,9 @@
 # Pad B (Starbase OLP-2) tower and chopstick detail file - DRAFT from first measurements (prototype plan tasks 1 and 4).
 # Site-independent: placement and the physics numbers (arm length, tower height, hinge) stay in launch_sites.toml.
 # Every value carries [E] (own estimate, method named) or [S] (published, URL). Reference images: git-ignored
-# screenshots/mechazilla/pad-b/ (INDEX.md); scale = booster diameter 9 m [S] (spacex.com/vehicles/starship)
-# the images (points files), script tools/structures/measure/ratio.py. Single-view ratios only: no camera solve yet (full build).
+# screenshots/mechazilla/pad-b/ (INDEX.md); scale = booster diameter 9 m [S] (spacex.com/vehicles/starship).
+# Measured on the images by points files and tools/structures/measure/ratio.py. Single-view ratios only: no camera
+# solve yet (full build).
 # Task 4 look correction: scale of padb_tower_full_with_chopsticks_2025-08 = 1530 px lattice height / 144.5 m = 10.6 px/m.
 
 [tower]

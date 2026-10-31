@@ -67,6 +67,9 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
     version = blender_version(exe)
     digest = input_hash(config, version)
     if not force and is_current(out, digest):
+        # The game compares the manifest's mtime with the sources': a checkout that makes a source newer than the
+        # (still matching) models must not pin the game on its boxes.
+        (out / MANIFEST).touch()
         print(f"build_models: models up to date ({out})")
         return 0
     out.mkdir(parents=True, exist_ok=True)

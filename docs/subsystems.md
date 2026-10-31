@@ -21,7 +21,6 @@ Older code comments refer to sections of this file by their former titles; the t
 | Weather clouds (M8 weather and clouds) | `subsystems/weather-clouds.md` (field, optics, light, far field, performance, known limits), `subsystems/weather-service.md` (sources, downloads, cache, UI line) | `history/weather-clouds.md` |
 | VR frame budget, perf log, main-thread sections | `subsystems/vr-performance.md` | - |
 | Startup loading screen (desktop layer, VR quad layer, boot steps) | `subsystems/loading-screen.md` | `history/loading-screen.md` |
-
 | Launch structures (Pad B tower and chopstick model, detail file) | `subsystems/launch-structures.md` | - |
 
 New subsystems get their own `docs/subsystems/<slug>.md`.

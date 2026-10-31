@@ -1,6 +1,7 @@
 """Tests of the headless Blender model generator (skipped without Blender)."""
 import hashlib
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -77,8 +78,11 @@ def test_manifest_follows_config_and_current_run_is_skipped(built, tmp_path, cap
     assert build_models.input_hash(cfg, version) != h0
     assert json.loads((built / "manifest.json").read_text(encoding="utf-8"))["input_hash"] == h0
     capsys.readouterr()
+    manifest = built / "manifest.json"
+    os.utime(manifest, (1.0e9, 1.0e9))
     assert build_models.build(build_models.DEFAULT_CONFIG, built) == 0
     assert "up to date" in capsys.readouterr().out
+    assert manifest.stat().st_mtime > 1.0e9 + 1.0e6, "the up-to-date branch touches the manifest (game mtime check)"
 
 
 def test_missing_blender_exits_zero(monkeypatch, tmp_path, capsys):
