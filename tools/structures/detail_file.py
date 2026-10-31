@@ -32,6 +32,13 @@ STAIRS_KEYS = ("width_m", "thickness_m", "run_m", "tray_width_m", "tray_depth_m"
 ROOF_KEYS = ("deck_top_m", "plate_thickness_m", "overhang_m", "block_size_m", "block_base_m", "block_height_m",
              "louvre_count", "louvre_height_m", "louvre_depth_m", "railing_height_m", "railing_member_m",
              "railing_post_pitch_m")
+MOUNT_KEYS = ("deck_height_m", "measured_height_m", "base_across_m", "base_toward_m", "top_across_m", "plinth_height_m",
+              "ledge_m", "deck_drop_m", "pit_depth_m", "ring_outer_diameter_m", "ring_opening_diameter_m",
+              "ring_thickness_m", "chamber_radius_m", "clamp_count", "tunnel_width_m", "tunnel_top_m", "hood_inner_y_m",
+              "hood_outer_y_m", "hood_height_front_m", "hood_height_back_m", "qd_count", "qd_head_radius_m", "tile_m",
+              "course_m", "panel_m", "seam_m", "map_size")
+TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "deluge_length_m", "deluge_height_m",
+               "deluge_thickness_m", "mask_range_m")
 COUNT_KEYS = ("count", "columns", "louvre_count")
 
 
@@ -54,7 +61,7 @@ def _positive(table: dict, key: str, where: str) -> None:
 def load(path) -> dict:
     with open(Path(path), "rb") as f:
         data = tomllib.load(f)
-    _need(data, ("tower", "profiles", "chopstick", "carriage", "qd_arm"), "file")
+    _need(data, ("tower", "profiles", "chopstick", "carriage", "qd_arm", "mount", "trench"), "file")
     tower, profiles, chop = data["tower"], data["profiles"], data["chopstick"]
     _need(tower, TOWER_KEYS, "tower")
     _positive(tower, "height_m", "tower")
@@ -96,7 +103,8 @@ def load(path) -> dict:
     for k in CHOPSTICK_KEYS:
         if not k.endswith("_profile"):
             _positive(chop, k, "chopstick")
-    for table, keys in (("carriage", CARRIAGE_KEYS), ("qd_arm", QD_ARM_KEYS)):
+    for table, keys in (("carriage", CARRIAGE_KEYS), ("qd_arm", QD_ARM_KEYS), ("mount", MOUNT_KEYS),
+                        ("trench", TRENCH_KEYS)):
         _need(data[table], keys, table)
         for k in keys:
             _positive(data[table], k, table)

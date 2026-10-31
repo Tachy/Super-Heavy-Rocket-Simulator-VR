@@ -21,6 +21,11 @@ const CLAD := Color(0.58, 0.58, 0.57)
 ## [E] chopstick arms and carriage are painted matte black (padb_chopsticks_around_booster_top_2026-03).
 const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 
+const MOUNT_SHADER := preload("res://shaders/mount_shell.gdshader")
+const MOUNT_MAP := "models/starbase_olp2/mount_panels.png"
+## [E] Mount shell without its generated map: plain tan steel.
+const MOUNT_PLAIN := Color(0.60, 0.50, 0.37)
+
 static var _texture: Texture2D
 static var _texture_tried := false
 
@@ -33,6 +38,20 @@ static func steel() -> ShaderMaterial:
 ## Dark steel of the braces.
 static func brace_steel() -> ShaderMaterial:
 	return _steel_material(BRACE_TINT, PLAIN_BRACE)
+
+
+## Tan panels of the launch mount's shell: the generated map (data/models/starbase_olp2/mount_panels.png), tile in metres.
+static func mount_shell(tile_m: float) -> Material:
+	var path := Paths.data_dir().path_join(MOUNT_MAP)
+	var image := Image.load_from_file(path) if FileAccess.file_exists(path) else null
+	if image == null or image.is_empty():
+		return LitAerial.material(MOUNT_PLAIN, 0.75, 0.15)
+	image.generate_mipmaps()
+	var m := ShaderMaterial.new()
+	m.shader = MOUNT_SHADER
+	m.set_shader_parameter("panels", ImageTexture.create_from_image(image))
+	m.set_shader_parameter("tile_m", tile_m)
+	return m
 
 
 static func clad() -> ShaderMaterial:

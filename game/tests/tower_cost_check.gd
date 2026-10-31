@@ -23,6 +23,7 @@ const BUILD_REPEATS := 5
 var _world: World
 var _frames := 120
 var _repeats := 3
+var _mask_range := 0.0
 
 
 func _initialize() -> void:
@@ -54,6 +55,7 @@ func _run(scales: Array[float]) -> void:
 		print("tower_cost_check: no Pad B lattice (models missing?)")
 		quit(1)
 		return
+	_mask_range = float(ShaderGlobals.value(&"trench_range_m"))
 	RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
 
 	var builds: Array[float] = []
@@ -78,7 +80,8 @@ func _run(scales: Array[float]) -> void:
 			for repeat in range(_repeats):
 				var shown := await _measure(tower, true)
 				var hidden := await _measure(tower, false)
-				rows.append([shown, hidden])
+				var bare := await _measure(tower, false, false)
+				rows.append([shown, hidden, bare])
 			print("view %s (%.0f m):" % [view[0], view[1]])
 			for r in range(rows.size()):
 				var s: Dictionary = rows[r][0]
@@ -87,14 +90,22 @@ func _run(scales: Array[float]) -> void:
 						% [r + 1, s["gpu"], h["gpu"], s["cpu"], h["cpu"], s["process"], h["process"]])
 			var s0: Dictionary = rows[0][0]
 			var h0: Dictionary = rows[0][1]
+			var mask_gpu: Array[float] = []
+			var mask_cpu: Array[float] = []
+			for r in range(rows.size()):
+				mask_gpu.append(rows[r][1]["gpu"] - rows[r][2]["gpu"])
+				mask_cpu.append(rows[r][1]["cpu"] - rows[r][2]["cpu"])
+			print("  terrain mask (hidden tower, mask on minus off): GPU %+.3f ms, CPU render %+.3f ms (median of repeats)"
+					% [_median(mask_gpu), _median(mask_cpu)])
 			print("  tower adds %d draw calls, %d primitives" % [s0["calls"] - h0["calls"], s0["primitives"] - h0["primitives"]])
 	root.scaling_3d_scale = 1.0
 	quit(0)
 
 
 ## Median GPU / CPU render time (ms), main-thread process time (ms) and the draw calls / primitives of the last frame.
-func _measure(tower: Node3D, shown: bool) -> Dictionary:
+func _measure(tower: Node3D, shown: bool, mask_on := true) -> Dictionary:
 	tower.visible = shown
+	ShaderGlobals.set_value(&"trench_range_m", _mask_range if mask_on else 0.0)
 	await _frames_n(FRAMES_TO_SETTLE)
 	var gpu: Array[float] = []
 	var cpu: Array[float] = []
@@ -106,6 +117,7 @@ func _measure(tower: Node3D, shown: bool) -> Dictionary:
 		cpu.append(RenderingServer.viewport_get_measured_render_time_cpu(vp))
 		process.append(1000.0 * Performance.get_monitor(Performance.TIME_PROCESS))
 	tower.visible = true
+	ShaderGlobals.set_value(&"trench_range_m", _mask_range)
 	return {"gpu": _median(gpu), "cpu": _median(cpu), "process": _median(process),
 			"calls": int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)),
 			"primitives": int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME))}

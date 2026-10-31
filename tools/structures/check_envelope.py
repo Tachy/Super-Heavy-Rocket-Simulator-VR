@@ -5,8 +5,8 @@
 Tolerances 0.10 m (lengths) / 0.05 m (surfaces the vehicle touches). The only allowed exceptions are the rows of the
 "Physics deviations" table in docs/subsystems/launch-structures.md (ALLOWED); they are listed by name. Exit 1 on a failure.
 Every row is a comparison of real numbers: it is listed only when the drawn value differs from the physics / the reference.
-Mount deck height and azimuth / distance have no drawn number in the detail file (TowerView reads them from the physics
-geometry); tower_view_test checks them in the scene.
+Mount deck: the detail file's `deck_height_m` against the physics `mount_height_m`; azimuth / distance have no drawn
+number in the detail file (TowerView reads them from the physics geometry); tower_view_test checks them in the scene.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ VEHICLE = ROOT / "config" / "vehicles" / "starship_block3.toml"
 HULL_RADIUS_M = 4.5  # [S] 9 m booster diameter
 MEASURED_LEG_CENTRES_M = 11.9  # [E] measured leg centre spacing, launch-structures-measurements.md (+-1 m)
 LEG_CENTRES_TOL_M = 1.0
-ALLOWED = ("Arm length", "Tower face, height", "Leg spacing", "Hinge position", "QD arm", "Fins against the arm")
+ALLOWED = ("Mount deck", "Arm length", "Tower face, height", "Leg spacing", "Hinge position", "QD arm", "Fins against the arm")
 
 
 def tower(sites: dict) -> dict:
@@ -52,6 +52,10 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
         elif row not in exceptions:
             exceptions.append(row)
 
+    # Mount: the ring top (what the stack stands on) is the physics height; the frustum's slope is stretched from the
+    # measured 14.5 m, so the drawn shape differs from the measurement (deviations table, "Mount deck").
+    within("Mount deck", detail["mount"]["deck_height_m"], phys["mount_height_m"], SURFACE_TOL_M)
+    within("Mount deck", detail["mount"]["deck_height_m"], detail["mount"]["measured_height_m"], LENGTH_TOL_M, "Mount deck")
     c = detail["chopstick"]
     half_gap = 0.5 * phys["arm_closed_gap_m"]
     pivot = half_gap + 0.5 * phys["arm_width_m"]

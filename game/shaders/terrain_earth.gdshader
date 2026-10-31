@@ -49,6 +49,19 @@ uniform float moon_radius_m = 1737400.0;
 // City lights before the atmosphere tables are loaded (display value of a white texel); with them: scene-referred.
 uniform float day_exposure;  // set from Atmosphere.DAY_EXPOSURE (world.gd): the one exposure of every surface
 
+// Launch-mount mask (TowerView._set_trench_mask, Pad B): inside the footprint of the mount and its two exit ramps the
+// terrain is not drawn (the model's own pit floor lies there). Site position as hi / lo parts like the camera, so the
+// fragment's offset from the site stays exact near it; only within trench_range_m of the camera (the model is drawn
+// 150 m beyond that). trench_shape = (half extent along the mount-tower axis, half extent across, ramp half width, ramp
+// end across); trench_range_m 0 = off (no Pad B models).
+global uniform vec3 trench_site_hi;
+global uniform vec3 trench_site_lo;
+global uniform vec3 trench_axis_t;
+global uniform vec3 trench_axis_a;
+global uniform vec4 trench_shape;
+global uniform float trench_range_m;
+
+varying vec3 trench_rel;  // vertex - site (node-local axes, metres)
 varying vec3 local_position;
 varying vec3 local_normal;
 varying vec2 global_uv;  // equirectangular u (continuous in the node), v
@@ -65,6 +78,7 @@ void vertex() {
 	VERTEX += CUSTOM0.xyz * morph;
 	NORMAL = normalize(mix(NORMAL, CUSTOM3.xyz, morph));
 	local_position = VERTEX + vertex_offset;
+	trench_rel = VERTEX - ((trench_site_hi - vertex_offset) + (trench_site_lo - vertex_offset_lo));
 	local_normal = NORMAL;
 	sky_eclipse_factor = atmosphere_enabled ? atm_sky_eclipse_factor(local_position) : vec3(1.0);
 	global_uv = CUSTOM1.xy;
@@ -80,6 +94,13 @@ float coverage_fade(vec4 box_deg, float lat, float lon, float cos_lat, float wid
 }
 
 void fragment() {
+	if (trench_range_m > 0.0 && camera_distance < trench_range_m && dot(trench_rel, trench_rel) < 10000.0) {
+		float along = abs(dot(trench_rel, trench_axis_t));
+		float across = abs(dot(trench_rel, trench_axis_a));
+		if ((along < trench_shape.x && across < trench_shape.y) || (along < trench_shape.z && across < trench_shape.w)) {
+			discard;
+		}
+	}
 	vec3 n = normalize(local_normal);
 	vec3 to_sun = earth_sun_position_local - local_position;
 	float cos_sun = dot(n, normalize(to_sun));

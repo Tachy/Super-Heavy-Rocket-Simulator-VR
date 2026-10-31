@@ -160,6 +160,7 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(pad_bounds.end.y < 0.0 and absf(pad_bounds.get_center().z - float(c["pad_x_m"])) < 0.01, "contact pad at the tip")
 	_check_closed_pose(view, models["detail"], geometry)
 	_check_actuators(view, geometry)
+	_check_mount(view, models, geometry)
 	var paint := ((plus_arm.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial).get_shader_parameter("albedo") as Color
 	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
 	# The QD arm stands at its deck height, static.
@@ -196,6 +197,58 @@ func _check_closed_pose(view: TowerView, detail: Dictionary, geometry: Dictionar
 	var lateral: float = float(geometry["hinge_plus_m"].dot(across))  # = gap / 2 + width / 2 of the physics hinge
 	var want_gap := 2.0 * (lateral - y_c)
 	_check(absf(gap - want_gap) < 0.05, "closed pose: pad centres %.3f m apart (want %.3f)" % [gap, want_gap])
+
+
+## The mount model: measured plan, the physics deck height, ring, exits, the terrain mask on its footprint, the stack's
+## clearance (the full surface sampling is in test_mount_layout.py; here the generated vertices).
+func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> void:
+	var m: Dictionary = models["detail"]["mount"]
+	var t: Dictionary = models["detail"]["trench"]
+	_check(view.has_models and view.get_node_or_null("MountModel/Mount") != null, "mount model built")
+	_check(view.get_node_or_null("TrenchModel/Trench") != null, "trench model built")
+	var parts := view.get_node("MountModel/Mount")
+	var plinth: AABB = (parts.get_node("plinth") as MeshInstance3D).mesh.get_aabb()  # glTF axes: X tower, Y across, Z up
+	_check(absf(plinth.size.y - 44.6) < 0.1 and absf(plinth.size.x - 40.0) < 0.1, "base 44.6 x 40 m (%s)" % plinth.size)
+	_check(absf(plinth.position.z + float(m["pit_depth_m"])) < 0.01, "pit floor %.1f m below the ground" % -plinth.position.z)
+	var shell: AABB = (parts.get_node("shell") as MeshInstance3D).mesh.get_aabb()
+	var deck_z := float(geometry["mount_height_m"]) - float(m["deck_drop_m"])
+	_check(absf(shell.end.z - deck_z) < 0.01, "deck at the physics mount height (%.3f, want %.3f)" % [shell.end.z, deck_z])
+	var top_half := 0.5 * float(m["top_across_m"])
+	_check(absf(shell.size.y - float(m["base_across_m"]) + 2.0 * float(m["ledge_m"])) < 0.05, "slope foot across %.2f m" % shell.size.y)
+	var hardware: AABB = (parts.get_node("hardware") as MeshInstance3D).mesh.get_aabb()
+	_check(hardware.end.z > float(geometry["mount_height_m"]), "ring and clamps above the deck")
+	# Stack clearance on the generated vertices: nothing of the mount inside the 4.5 m hull above the ring top, the ring
+	# opening is the hull's radius at the ring top.
+	var min_r_above := INF
+	var min_r_ring := INF
+	for node in parts.get_children():
+		var arrays := ((node as MeshInstance3D).mesh as ArrayMesh).surface_get_arrays(0)
+		for v: Vector3 in arrays[Mesh.ARRAY_VERTEX]:
+			var r := Vector2(v.x, v.y).length()
+			if v.z > float(geometry["mount_height_m"]) + 1.0e-4:
+				min_r_above = minf(min_r_above, r)
+			elif absf(v.z - float(geometry["mount_height_m"])) < 1.0e-4:
+				min_r_ring = minf(min_r_ring, r)
+	_check(min_r_above >= 4.5 + 0.04 - 1.0e-4, "nothing of the mount inside the hull above the ring (%.3f m)" % min_r_above)
+	_check(absf(min_r_ring - 0.5 * float(m["ring_opening_diameter_m"])) < 0.01, "ring opening %.3f m radius" % min_r_ring)
+	# Exits: the trench's ramps run across the mount-tower line, 20 m wide, 33 m from the axis.
+	var ramp: AABB = (view.get_node("TrenchModel/Trench/concrete") as MeshInstance3D).mesh.get_aabb()
+	_check(absf(ramp.size.x - float(t["width_m"])) < 0.01, "ramps %.2f m wide" % ramp.size.x)
+	var mid := 0.5 * (0.5 * float(m["base_across_m"]) + ramp.end.y)
+	_check(absf(mid - float(t["centre_m"])) < 0.5, "ramp middle %.2f m from the axis" % mid)
+	# The terrain mask lies on the drawn footprint: central rectangle = the plinth, ramp = the ramp's plan.
+	var shape: Vector4 = ShaderGlobals.value(&"trench_shape")
+	_check(absf(shape.x - 0.5 * plinth.size.x) < TowerView.MASK_INSET_M + 0.01, "mask along %.2f m, plinth %.2f" % [shape.x, 0.5 * plinth.size.x])
+	_check(absf(shape.y - 0.5 * plinth.size.y) < TowerView.MASK_INSET_M + 0.01, "mask across %.2f m" % shape.y)
+	_check(absf(shape.z - 0.5 * ramp.size.x) < TowerView.MASK_INSET_M + 0.01, "mask ramp half width %.2f m" % shape.z)
+	_check(absf(shape.w - ramp.end.y) < TowerView.MASK_INSET_M + 0.01, "mask ramp end %.2f m, ramp %.2f" % [shape.w, ramp.end.y])
+	_check(float(ShaderGlobals.value(&"trench_range_m")) == float(t["mask_range_m"]), "mask range set")
+	var axis_t: Vector3 = ShaderGlobals.value(&"trench_axis_t")
+	_check(axis_t.is_equal_approx((view.basis * Frames.to_render(geometry["tower_direction"])).normalized()), "mask axis toward the tower")
+	_check(Basis(geometry["tower_direction"], geometry["across"], Vector3(0.0, 0.0, 1.0)).determinant() > 0.0, "site axes right-handed")
+	_check(top_half > 0.0, "top half width %.2f" % top_half)
+	var boxes_view := _view(OTHER_SITE)
+	_check(not boxes_view.has_models, "a site without models keeps the old mount cylinder")
 
 
 ## The actuators run from the carriage to the arm's root column and follow the opening angle.

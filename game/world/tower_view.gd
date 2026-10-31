@@ -6,9 +6,20 @@ extends Node3D
 ## site frame (east, north, up) mapped to render axes like every body frame (Frames.to_render).
 
 const MOUNT_SEGMENTS := 24
+## [E] Mount materials (linear albedo from the photos: weathered concrete, dark tunnel interiors, grey hoods).
+const PLINTH_CONCRETE := Color(0.50, 0.49, 0.46)
+const INTERIOR_DARK := Color(0.14, 0.13, 0.12)
+const DEFLECTOR_DARK := Color(0.09, 0.09, 0.10)
+const MOUNT_STEEL := Color(0.30, 0.30, 0.31)
+const STAIR_TAN := Color(0.46, 0.38, 0.27)
+const TRENCH_WALL := Color(0.12, 0.12, 0.13)
+const MASK_INSET_M := 0.05  ## [E] the terrain mask ends this far inside the walls, so no sliver of ground shows beside them
+const MASK_VISIBLE_MARGIN_M := 150.0  ## the pit model is drawn this much beyond the mask's camera range
 const ARM_STRIP := Color(0.45, 0.36, 0.24)  ## [E] tan strip on the arm deck, images.jpeg
 
 var site_id := ""
+## True when the Pad B models were built (the mount pyramid, the trench and the terrain mask), false for the boxes.
+var has_models := false
 ## render_check: fixed arm opening (radians) instead of the flight state.
 var preview_opening_rad := NAN
 var _geometry: Dictionary = {}
@@ -35,6 +46,8 @@ func build(geometry: Dictionary) -> void:
 	_cables.clear()
 	_cable_lateral_m.clear()
 	_actuators.clear()
+	var had_models := has_models
+	has_models = false
 	_geometry = geometry
 	_lattice.shader = load("res://shaders/lattice.gdshader")
 	position = Frames.to_render(geometry["origin_itrf_m"])
@@ -47,7 +60,12 @@ func build(geometry: Dictionary) -> void:
 		add_child(_box(geometry["tower_size_m"], Basis(toward, across, up), geometry["tower_center_m"], _lattice))
 	else:
 		add_child(_pad_b_lattice(models, geometry, Basis(toward, across, up)))
-	_build_mount(geometry)
+	if models.is_empty():
+		_build_mount(geometry)
+		if had_models:
+			ShaderGlobals.set_value(&"trench_range_m", 0.0)  # this view stopped masking the terrain
+	else:
+		_build_mount_model(models, geometry)
 	for i in range(2):
 		var pivot := Node3D.new()
 		if models.is_empty():
@@ -267,3 +285,52 @@ func _build_mount(geometry: Dictionary) -> void:
 		var tangent := Vector3(-sin(a), cos(a), 0.0)
 		add_child(_box(Vector3(outer - inner, segment * 1.02, height), Basis(radial, tangent, Vector3(0.0, 0.0, 1.0)),
 				radial * radius + Vector3(0.0, 0.0, 0.5 * height), _concrete))
+
+
+## The Pad B mount (X toward the tower) and the trench, at the site origin; the terrain is not drawn inside their footprint.
+func _build_mount_model(models: Dictionary, geometry: Dictionary) -> void:
+	has_models = true
+	var detail: Dictionary = models["detail"]
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
+	var frame := Frames.basis_to_render(Basis(toward, across, Vector3(0.0, 0.0, 1.0)))
+	var shell := TowerMaterial.mount_shell(float(detail["mount"]["tile_m"]))
+	var materials := {
+		"shell": shell, "plinth": LitAerial.material(PLINTH_CONCRETE, 0.9, 0.0),
+		"interior": LitAerial.material(INTERIOR_DARK, 0.9, 0.0), "deflector": LitAerial.material(DEFLECTOR_DARK, 0.6, 0.4),
+		"hood": TowerMaterial.clad(), "hardware": LitAerial.material(MOUNT_STEEL, 0.5, 0.5),
+		"stair": LitAerial.material(STAIR_TAN, 0.8, 0.0), "door": TowerMaterial.dark()}
+	var mount := Node3D.new()
+	mount.name = "MountModel"
+	mount.basis = frame
+	mount.add_child(StructureModels.model_node("Mount", models["mount"], materials, _concrete))
+	add_child(mount)
+	var trench := Node3D.new()
+	trench.name = "TrenchModel"
+	trench.basis = frame
+	var parts := StructureModels.model_node("Trench", models["trench"], {"concrete": _concrete,
+			"wall": LitAerial.material(TRENCH_WALL, 0.9, 0.0)}, _concrete)
+	var range_m: float = float(detail["trench"]["mask_range_m"]) + MASK_VISIBLE_MARGIN_M
+	for part in parts.get_children():
+		(part as GeometryInstance3D).visibility_range_end = range_m
+	trench.add_child(parts)
+	add_child(trench)
+	_set_trench_mask(detail, geometry)
+
+
+## Terrain mask globals (terrain_earth.gdshader): the footprint of the mount and the two ramps, in the site's axes.
+func _set_trench_mask(detail: Dictionary, geometry: Dictionary) -> void:
+	var m: Dictionary = detail["mount"]
+	var t: Dictionary = detail["trench"]
+	var split := TerrainQuadtree.split_float32(position)
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
+	ShaderGlobals.set_value(&"trench_site_hi", split[0])
+	ShaderGlobals.set_value(&"trench_site_lo", split[1])
+	ShaderGlobals.set_value(&"trench_axis_t", (basis * Frames.to_render(toward)).normalized())
+	ShaderGlobals.set_value(&"trench_axis_a", (basis * Frames.to_render(across)).normalized())
+	var half_a: float = 0.5 * float(m["base_across_m"])
+	ShaderGlobals.set_value(&"trench_shape", Vector4(0.5 * float(m["base_toward_m"]) - MASK_INSET_M,
+			half_a - MASK_INSET_M, 0.5 * float(t["width_m"]) - MASK_INSET_M,
+			half_a + float(t["length_m"]) - MASK_INSET_M))
+	ShaderGlobals.set_value(&"trench_range_m", float(t["mask_range_m"]))

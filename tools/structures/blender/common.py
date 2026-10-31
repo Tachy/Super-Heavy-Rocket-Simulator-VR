@@ -211,6 +211,21 @@ def add_layout(members, root) -> int:
     return sum(builder.to_object(node, root)[1] for node, builder in builders.items())
 
 
+def add_surfaces(surfaces, root) -> int:
+    """Polygons of mount_layout.Surfaces (verts, uvs per node, winding already outward) as one mesh object per node."""
+    total = 0
+    for node, polys in sorted(surfaces.nodes.items()):
+        builder = MeshBuilder()
+        for verts, uvs in polys:
+            bv = [builder.bm.verts.new(Vector(p)) for p in verts]
+            face = builder.bm.faces.new(bv)
+            face.smooth = False
+            for loop, uv in zip(face.loops, uvs):
+                loop[builder.uv].uv = uv
+        total += builder.to_object(node, root)[1]
+    return total
+
+
 def export_gltf(path) -> None:
     """glTF (.gltf + .bin), Blender axes kept (export_yup off): arm along +X, top plane at Z = 0."""
     bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLTF_SEPARATE", export_yup=False,

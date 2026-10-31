@@ -25,7 +25,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hull_textures  # noqa: E402
+import detail_file  # noqa: E402
 import hull_tiles  # noqa: E402
+import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,8 +35,9 @@ SCRIPT_DIR = ROOT / "tools" / "structures" / "blender"
 DEFAULT_CONFIG = ROOT / "config" / "structures" / "starbase_olp2.toml"
 DEFAULT_OUT = ROOT / "data" / "models" / "starbase_olp2"
 BLENDER_DEFAULT = Path(r"C:\Program Files\Blender Foundation\Blender 3.4\blender.exe")
-GENERATORS = ("gen_profiles.py", "gen_chopstick.py", "gen_carriage.py", "gen_qd_arm.py")
-OUTPUTS = ("profiles.gltf", "chopstick.gltf", "carriage.gltf", "qd_arm.gltf")
+GENERATORS = ("gen_profiles.py", "gen_chopstick.py", "gen_carriage.py", "gen_qd_arm.py", "gen_mount.py", "gen_trench.py")
+OUTPUTS = ("profiles.gltf", "chopstick.gltf", "carriage.gltf", "qd_arm.gltf", "mount.gltf", "trench.gltf",
+           mount_textures.FILE_NAME)
 MANIFEST = "manifest.json"
 VEHICLE_GENERATORS = ("gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py")
 VEHICLE_FIXED_OUTPUTS = ("booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
@@ -62,7 +65,8 @@ def blender_version(blender: Path) -> str:
 def input_hash(config: Path, version: str) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
-    for p in [config, SCRIPT_DIR / "common.py", SCRIPT_DIR / "mechazilla_layout.py", *(SCRIPT_DIR / g for g in GENERATORS)]:
+    for p in [config, SCRIPT_DIR / "common.py", SCRIPT_DIR / "mechazilla_layout.py", SCRIPT_DIR / "mount_layout.py",
+              Path(mount_textures.__file__), *(SCRIPT_DIR / g for g in GENERATORS)]:
         h.update(p.name.encode())
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()
@@ -97,6 +101,7 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     triangles: dict[str, int] = {}
+    panel_map = mount_textures.write(staging, detail_file.load(config))
     for gen in GENERATORS:
         cmd = [str(exe), "-b", "--factory-startup", "-P", str(SCRIPT_DIR / gen), "--", "--config", str(config),
                "--out", str(staging)]
@@ -109,7 +114,7 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
         for m in re.finditer(r"^TRIANGLES (\S+) (\d+)$", res.stdout, re.M):
             triangles[m.group(1)] = int(m.group(2))
     manifest = {"input_hash": digest, "blender": version, "config": config.name, "files": list(OUTPUTS),
-                "triangles": triangles,
+                "triangles": triangles, "mount_map": panel_map,
                 "frame": "Blender axes in glTF (export_yup off); per model: mechazilla_layout.py"}
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if out.exists():

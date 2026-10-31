@@ -70,6 +70,30 @@ water_wave_steepness={
 "type": "float",
 "value": 0.0
 }
+trench_site_hi={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+trench_site_lo={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+trench_axis_t={
+"type": "vec3",
+"value": Vector3(1, 0, 0)
+}
+trench_axis_a={
+"type": "vec3",
+"value": Vector3(0, 0, 1)
+}
+trench_shape={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+trench_range_m={
+"type": "float",
+"value": 0.0
+}
 earth_terrain_camera_hi={
 "type": "vec3",
 "value": Vector3(0, 0, 0)

@@ -737,6 +737,8 @@ func _setup_bodies(data_dir: String) -> void:
 			earth.add_child(view)
 			view.build(geometry)
 			towers.append(view)
+			if view.has_models:  # the mount model has its own ground (pit, ramps): no concrete disc over the footprint
+				earth.get_node("Pad_" + str(site["id"])).visible = false
 
 	await LoadingScreen.step("Mond und Mondgelände aufbauen")
 	_moon_material.shader = load("res://shaders/moon.gdshader")
