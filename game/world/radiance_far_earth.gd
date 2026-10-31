@@ -6,7 +6,7 @@ extends RefCounted
 
 ## [E] The Earth's disc (with its air) is drawn at least this large in the cube: from the Moon it is about one texel of the
 ## octahedral 128 px cube (radius 0.95 deg, texel ~1.6 deg), so point sampling would give the earthshine 0 to 3 texels,
-## jumping as the Earth moves. Five texels across sample it steadily.
+## jumping as the Earth moves. Five texels across, under sky.gdshader's smooth profile, sample it steadily.
 const MIN_RADIUS_RAD := 0.07
 ## [E] The eye's own shadows stand for the ground around it up to GROUND_SHADOW_FULL_M above the ground: 90 % of a plate's
 ## view factor lies within 3 x its height, inside a polar crater's shadow (tens of km) up there. By GROUND_SHADOW_NONE_M the

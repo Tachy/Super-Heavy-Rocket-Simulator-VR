@@ -67,7 +67,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
   `--lat= --lon= --look_at_moon --fov=`; clouds with `--weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid>,<fraction>`
   and `--cloud_quality=desktop|vr`, `--cloud_divisor=<x>` (`docs/subsystems/weather-clouds.md` "Diagnostics"). Read the PNG to verify rendering changes.
-- Sky radiance checks (GPU, `res://tests/sky_radiance_check.gd`): no options (phases against references), `-- --steady`,
+- Sky radiance checks (GPU, `res://tests/sky_radiance_check.gd`, `--stale` in any mode freezes the cube: must exit 1): no
+  options (phases against references; `-- --only=<phase>`), `-- --steady`,
   `-- --timelapse`, `-- --flight --utc=2026-10-12T17:30:00 --expect=lit --t_plus=1`, `-- --flight
   --utc=2026-11-09T06:00:00 --expect=dark --t_plus=1`, `-- --flight --live --utc=2026-10-12T17:30:00 --t_plus=1`; headless
   rule test `res://tests/sky_radiance_rule_test.gd` (`docs/subsystems/atmosphere-scattering.md`).

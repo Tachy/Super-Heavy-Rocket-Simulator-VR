@@ -80,7 +80,7 @@ var _earth_clouds_shader: Shader = load("res://shaders/earth_clouds.gdshader")  
 var _moon_material := ShaderMaterial.new()
 var _sky_material := ShaderMaterial.new()
 var _radiance_refresh := SkyRadianceRefresh.new()
-var _radiance_cloud_factor := 1.0
+var _radiance_cloud_factors := Vector2.ONE
 ## [E] The Earth's terrain horizon is marched anew past these: 50 m at a horizon some km away is well under 1 % of the Earth's
 ## disc (radius 0.95 deg, 1 % ~ 0.02 deg), as is 0.02 deg of the Earth itself.
 const EARTH_HORIZON_EYE_STEP_M := 50.0
@@ -606,9 +606,8 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 			visible)
 	sun_light.light_color = light[0]
 	sun_light.light_energy = light[1]
-	# The sky's ambient under the clouds (Task 9): the diffuse light at the lit body over the clear sky's (1 without
-	# weather).
-	_radiance_cloud_factor = atmosphere.cloud_ambient_factor(gcrf_to_fixed * lit_gcrf,
+	# The sky's cube under the clouds at the lit body: the light there over the clear sky's (1 without weather).
+	_radiance_cloud_factors = atmosphere.cloud_radiance_factors(gcrf_to_fixed * lit_gcrf,
 			(gcrf_to_fixed * sun_apparent_from_earth_m).normalized())
 	var moon_lit: Array = atmosphere.moon_light_at(gcrf_to_fixed * lit_gcrf)
 	# Near the Moon its light is the ground in the sky's cube: no second light from the Moon's centre through the ground.
@@ -644,14 +643,14 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 				to_earth_m, Atmosphere.EARTH_MEAN_RADIUS_M)
 		var moon_on_sun := _camera_terrain_sun_fraction if is_finite(_camera_terrain_sun_fraction) \
 				else Atmosphere.moon_visible_fraction(camera_gcrf_m, sun_apparent_from_earth_m, moon_gcrf_m, sun_fraction)
-		var height_m := moon_distance_m - moon_radius_m - _earth_horizon_ground_height_m
+		var height_m := moon_distance_m - Atmosphere.MOON_RADIUS_M - _earth_horizon_ground_height_m
 		ground_sun = earth_on_sun * RadianceFarEarth.ground_fraction(moon_on_sun, height_m)
 		ground_earth = RadianceFarEarth.ground_fraction(earth_visible, height_m)
 	var due := _radiance_refresh.due(atmosphere.ready, Frames.to_render(camera_gcrf_m.normalized()),
 			camera_gcrf_m.length() - Atmosphere.EARTH_MEAN_RADIUS_M, moon_zenith,
 			moon_distance_m - moon_radius_m if near_moon else -1.0, atmosphere.sun_direction_local,
 			atmosphere.luminance_scale, atmosphere.moonlight_relative_value if atmosphere.moonlight_active else 0.0,
-			[sun_fraction, earth_visible, ground_sun, ground_earth, _radiance_cloud_factor])
+			[sun_fraction, earth_visible, ground_sun, ground_earth, _radiance_cloud_factors.x, _radiance_cloud_factors.y])
 	if not due:
 		return
 	_radiance_serial += 1
@@ -659,13 +658,12 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 	var lift := RadianceFarEarth.lift_rad(to_earth_m, to_moon_m, moon_radius_m) if near_moon else 0.0
 	_sky_material.set_shader_parameter("radiance_earth_flux", earth_visible)
 	_sky_material.set_shader_parameter("radiance_earth_flat", near_moon)
-	_sky_material.set_shader_parameter("radiance_earth_lifted", lift > 0.0)
-	_sky_material.set_shader_parameter("radiance_earth_true", Frames.to_render(to_earth_m.normalized()))
 	_sky_material.set_shader_parameter("radiance_earth_drawn",
 			Frames.to_render(RadianceFarEarth.lifted_direction(to_earth_m, to_moon_m, lift)))
 	_sky_material.set_shader_parameter("radiance_moon_sun_visible", ground_sun)
 	_sky_material.set_shader_parameter("radiance_moon_earth_visible", ground_earth)
-	_sky_material.set_shader_parameter("radiance_cloud_factor", _radiance_cloud_factor)
+	_sky_material.set_shader_parameter("radiance_cloud_sky_factor", _radiance_cloud_factors.x)
+	_sky_material.set_shader_parameter("radiance_cloud_ground_factor", _radiance_cloud_factors.y)
 	_sky_material.set_shader_parameter("radiance_moon_radius_m", moon_radius_m if near_moon else 0.0)
 	_sky_material.set_shader_parameter("radiance_moon_distance_m", moon_distance_m)
 	_sky_material.set_shader_parameter("radiance_moon_zenith", moon_zenith)

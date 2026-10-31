@@ -47,7 +47,7 @@ func _initialize() -> void:
 	_check("gain 1 %", rule.due(true, up, 400000.0, up, -1.0, sun, 1.01, 0.0, CLEAR), false)
 	_check("gain 3 %", rule.due(true, up, 400000.0, up, -1.0, sun, 1.03, 0.0, CLEAR), true)
 	_check("the Moon lights up", rule.due(true, up, 400000.0, up, -1.0, sun, 1.03, 1.0e-6, CLEAR), true)
-	# Each fraction: the eclipse's solar disc, the Earth's disc, both lights on the lunar ground, the cloud factor.
+	# Each fraction: the eclipse's solar disc, the Earth's disc, both lights on the lunar ground, the cloud factors.
 	for k in range(CLEAR.size()):
 		var state := CLEAR.duplicate()
 		state[k] = 0.995

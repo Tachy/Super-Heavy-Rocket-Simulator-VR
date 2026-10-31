@@ -35,7 +35,8 @@ const FRAMES_CAPTURE := 3
 const REFERENCE_SCALE := 2.0
 const RATIO_LIMIT := 1.10
 # [E] Steel: a metal has no diffuse term, its mean follows what the sky's reflection and the dents show at each distance (the
-# sky's gradient across the barrel). Measured 1.134 (2026-10-31); beyond this limit a mip level or the map changes brightness.
+# sky's gradient across the barrel; presumed, not isolated). Measured 1.134 (2026-10-31); beyond this limit a mip level or the
+# map changes brightness.
 const STEEL_RATIO_LIMIT := 1.18
 const TEMPORAL_FACTOR := 1.5
 const TEMPORAL_FLOOR := 0.004

@@ -1045,21 +1045,30 @@ func cloud_light_at(position_itrf_m: Vector3, light_direction_itrf: Vector3, sun
 	return result
 
 
-## The factor on Godot's sky ambient (Environment.ambient_light_energy) at an Earth-fixed point under the clouds: the
-## diffuse light there over the clear sky's, (T_d E_sky + T_sd E_sun,h) / E_sky - above 1 under a thin bright deck,
-## exactly 1 with weather off (T_d = 1, T_sd = 0). Reflections keep the clear sky (a documented limit). Task 9.
-func cloud_ambient_factor(position_itrf_m: Vector3, sun_direction_itrf: Vector3) -> float:
-	var clouds := cloud_light_at(position_itrf_m, sun_direction_itrf)
-	if clouds.y <= 0.0 or not ready:
-		return clouds.z
+## The factors of the sky's radiance cube at an Earth-fixed point under the clouds, the light there over the clear sky's:
+## x for the sky's half, the diffuse light, (T_d E_sky + T_sd E_h) / E_sky (above 1 under a bright deck: the Sun's light,
+## scattered, now comes from the sky); y for the ground's half, which already holds the direct light,
+## (E_h (T_s + T_sd) + E_sky T_d) / (E_h + E_sky). Each sum over the Sun and, while the cube shows it, the Moon (their light
+## relative to the Sun's); (1, 1) with weather off (T_s = T_d = 1, T_sd = 0).
+func cloud_radiance_factors(position_itrf_m: Vector3, sun_direction_itrf: Vector3) -> Vector2:
+	if not ready or not ShaderGlobals.value(&"cloud_enabled"):
+		return Vector2.ONE
 	var up := _geodetic_up(position_itrf_m)
-	var mu0 := sun_direction_itrf.dot(up)
-	var lux: Dictionary = _core.atmosphere_illuminance(position_itrf_m, up, sun_direction_itrf)
-	var sky := (lux["sky_lux"] as Vector3).dot(LUMINANCE_WEIGHTS)
-	if mu0 <= 0.0 or sky <= 0.0:
-		return clouds.z
-	var sun_horizontal := (lux["sun_lux"] as Vector3).dot(LUMINANCE_WEIGHTS)
-	return clouds.z + clouds.y * sun_horizontal / sky
+	var terms := _cloud_light_terms(position_itrf_m, up, sun_direction_itrf, 1.0)
+	if moonlight_active and _moon_direction_fixed != Vector3.ZERO:
+		terms += _cloud_light_terms(position_itrf_m, up, _moon_direction_fixed, moonlight_relative_value)
+	var column_sky := cloud_light_at(position_itrf_m, sun_direction_itrf).z  # no light at all: what the column passes
+	return Vector2(terms.z / terms.x if terms.x > 0.0 else column_sky,
+			terms.w / (terms.x + terms.y) if terms.x + terms.y > 0.0 else column_sky)
+
+
+## One source's light for cloud_radiance_factors: (E_sky, E_h, the diffuse light under the deck, the ground's light under it).
+func _cloud_light_terms(position_itrf_m: Vector3, up: Vector3, direction_itrf: Vector3, relative: float) -> Vector4:
+	var clouds := cloud_light_at(position_itrf_m, direction_itrf)
+	var lux: Dictionary = _core.atmosphere_illuminance(position_itrf_m, up, direction_itrf)
+	var sky := (lux["sky_lux"] as Vector3).dot(LUMINANCE_WEIGHTS) * relative
+	var beam := (lux["sun_lux"] as Vector3).dot(LUMINANCE_WEIGHTS) * relative if direction_itrf.dot(up) > 0.0 else 0.0
+	return Vector4(sky, beam, clouds.z * sky + clouds.y * beam, (clouds.x + clouds.y) * beam + clouds.z * sky)
 
 
 func _load_task(config_dir: String, cache_dir: String) -> void:

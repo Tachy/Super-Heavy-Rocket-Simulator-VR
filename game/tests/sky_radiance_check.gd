@@ -5,14 +5,18 @@
 #   so a pixel / scene_per_cd_m2 is a luminance. Each lit phase against its own reference (a stale cube misses by orders of
 #   magnitude): pad by day (the core's sky irradiance), moonlit night (the Moon's sky), orbit (an estimate of the ground in
 #   view), the Moon by day (the regolith's analytic radiance), under the Earth (earthshine), the Earth at the lunar horizon
-#   (its true visible fraction), an eye in terrain shadow at IM-2, overcast, back at the pad (the same pixels as before).
+#   (its true visible fraction), an eye in terrain shadow at IM-2 and below the mean sphere, back at the pad (the same
+#   pixels as before), thin and opaque decks by day, an opaque deck in the moonlight.
 #   godot --path game --script res://tests/sky_radiance_check.gd [-- --only=<phase>] [--shots=<dir>]
-# - --timelapse: a sunset at warp 120 through twilight: no flicker (largest frame step), the cube live (against the sky's
-#   irradiance all the way; a frozen cube fails). --steady: the far Earth moving through the cube's texels, the earthshine
-#   steady.
+# - --timelapse: a sunset at warp 120 through twilight, twice: with the eye's adaptation no flicker (largest frame step); at
+#   a fixed gain the cube live (a pixel is then the cube's radiance, against the sky's irradiance all the way).
+#   --steady: the far Earth moving through the cube's texels, the earthshine steady.
 # - --flight --utc=<day or night> --expect=lit|dark: a real flight session (VehicleRig, starship_leo on the pad, clock
-#   paused, every hull white): the centre pixel of the hull's shade side (camera on the side away from the Sun). With
-#   --live the clock runs through the ascent: the cube must refresh and follow the sky at the eye.
+#   paused, every hull white) entered from the opposite light, so the cube must change: the centre pixel of the hull's shade
+#   side (camera on the side away from the Sun). With --live the clock runs through the ascent at a fixed gain: the cube must
+#   refresh and follow the sky at the eye.
+# --stale, in every mode: the cube is frozen (World's refresh rule replaced), and the run must exit 1: a check that cannot
+#   fail is worthless.
 extends SceneTree
 
 const FRAMES_PER_VIEW := 50  # [E] two refilter passes of the incremental cube (8 to 16 frames each) and margin
@@ -36,8 +40,26 @@ const STARBASE := {"lat": 25.9966694, "lon": -97.153728}
 const IM2 := {"lat": -84.7906, "lon": 29.1957}
 const EARTH_REFERENCE_ELEVATION_DEG := 10.0
 const LIMB_UTC := "2026-11-12T06:00:00"  # three days after new Moon: a nearly full Earth, the limb site in the night
-const OVERCAST_SLAB := [1000.0, 2000.0, 1.0e-4, 1.0]  # bottom m, top m, liquid kg/m^3, fraction: a thin bright deck
+# Decks: bottom m, top m, liquid kg/m^3, fraction. 1000 m x beta = 150 LWC: optical depth 3 and 15.
+const THIN_DECK := [1000.0, 2000.0, 2.0e-5, 1.0]
+const OPAQUE_DECK := [1000.0, 2000.0, 1.0e-4, 1.0]
 const OVERCAST_TOLERANCE := 0.15
+const SHACKLETON := {"lat": -89.66, "lon": 129.2}  # a crater floor kilometres below the mean sphere, in shadow
+const BELOW_SPHERE_MIN_M := 1000.0
+const FRACTION_TOLERANCE := 0.02
+# What --only needs from an earlier phase (its reference).
+const PHASE_NEEDS := {"pad_day_again": ["pad_day"], "pad_day_ground_off": ["pad_day"],
+		"pad_day_thin_deck": ["pad_day", "pad_day_ground_off"], "pad_day_overcast": ["pad_day", "pad_day_ground_off"],
+		"earth_elevation_+1": ["earth_elevation_ref"], "earth_elevation_-1": ["earth_elevation_ref"]}
+# [E] Display gain of a dim phase (tonemap_exposure on the linear curve): lifts the plate clear of the display's lowest codes,
+# where a ratio is only quantisation; no effect on the cube.
+const IM2_READ_EXPOSURE := 2.0
+const TRANSIT_READ_EXPOSURE := 700.0
+const STEADY_READ_EXPOSURE := 4.0
+const READ_MIN_LEVEL := 50.0 / 255.0
+# [E] What the cube's coarsest level leaks from the sky into a plate facing the ground, as a share of the sky's plate: above
+# this the ground's half would not decide a down plate any more.
+const GROUND_LEAK_LIMIT := 0.15
 const TIMELAPSE_WARP := 120.0
 const TIMELAPSE_FRAMES := 900  # ~7.5 deg of the Sun: from +4 deg into twilight
 const TIMELAPSE_READ_LEVEL := 16.0 / 255.0  # below this a code value is too coarse for a ratio
@@ -45,17 +67,25 @@ const TIMELAPSE_READ_LEVEL := 16.0 / 255.0  # below this a code value is too coa
 const TIMELAPSE_MAX_STEP := 6.0 / 255.0
 const TIMELAPSE_GAIN_STEP_LOG := 0.1  # [E] a frame's change of the gain that is a jump of its target, not the adaptation
 const TIMELAPSE_SETTLE_FRAMES := 40  # [E] the refilter's 8 to 16 frames, twice, and margin
-# [E] The ratio (cube's plate / sky_lux) drifts legitimately as the ground and the colour of the twilight change; a frozen
-# cube leaves this band within seconds (the sky falls by a decade per 4 deg of the Sun).
+# [E] At the fixed gain the ratio (cube's plate / sky_lux) drifts legitimately as the ground and the colour of the twilight
+# change. A frozen cube keeps its pixel while the sky falls, so its ratio rises with the sky's whole fall in the read span
+# (at least LIVE_MIN_SKY_SPAN, else the run has not shown anything).
 const LIVE_RATIO_BAND := 1.6
+const LIVE_MIN_SKY_SPAN := 3.0
 const LIVE_FLIGHT_FRAMES := 900
 const LIVE_WARP := 4.0  # ~1 min of the ascent, to ~20 km
 const LIVE_MIN_REFRESHES := 5
+const LIVE_SETTLE_FRAMES := 120  # the view has turned to its running state (the probe's normal moves once, frame 50 to 170)
 const LIVE_MIN_CHANGE_LOG := 0.2  # [E] the sky overhead falls far more than 20 % over that climb
-const STEADY_STEPS := 10
-const STEADY_STEP_H := 1  # the Earth moves ~0.55 deg per hour in the cube's axes: 5.5 deg, over 3 texels
-const STEADY_MAX_RANGE := 0.15  # [E] (max - min) / mean of the earthshine, reached over hours: no visible pumping
+const STEADY_STEPS := 16
+const STEADY_STEP_MIN := 30  # the Earth moves ~0.55 deg per hour in the cube's axes: 4.4 deg, over 2.5 texels
+# [E] (max - min) / mean of the earthshine. Set before measuring: the Earth crosses a texel in ~3 h, at warp a fraction of a
+# second, so this is a flicker's and a refresh's pop, not a slow drift: 5 % of the shade's light is about the smallest step
+# seen on a dark surface.
+const STEADY_MAX_RANGE := 0.05
 const SCAN_STEP_H := 6
+const OPPOSITE_LIT_UTC := "2026-10-12T17:30:00"
+const OPPOSITE_DARK_UTC := "2026-11-09T06:00:00"  # moonless
 const SCAN_STEPS := 120
 
 # label, utc, site (lat, lon, body, eye height), adaptation, what is expected of (up, side, down).
@@ -79,13 +109,23 @@ var _phases := [
 	{"label": "earth_elevation_+1", "utc": LIMB_UTC, "limb_deg": 1.0, "body": "moon", "adapt": true, "check": "far_earth"},
 	{"label": "earth_elevation_-1", "utc": LIMB_UTC, "limb_deg": -1.0, "body": "moon", "adapt": true, "check": "far_earth"},
 	{"label": "im2_sunlit", "shadow": false, "lat": IM2.lat, "lon": IM2.lon, "body": "moon", "adapt": true,
-			"check": "regolith"},
+			"exposure": IM2_READ_EXPOSURE, "check": "regolith"},
 	{"label": "im2_terrain_shadow", "shadow": true, "lat": IM2.lat, "lon": IM2.lon, "body": "moon", "adapt": true,
 			"check": "regolith"},
+	{"label": "moon_below_mean_sphere", "utc": "2026-11-24T06:00:00", "lat": SHACKLETON.lat, "lon": SHACKLETON.lon,
+			"body": "moon", "adapt": true, "check": "below_sphere"},
+	{"label": "transit_day", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": true,
+			"height": 2.0e8, "exposure": TRANSIT_READ_EXPOSURE, "check": "orbit"},
 	{"label": "pad_day_again", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
 			"check": "same_as_first"},
+	{"label": "pad_day_ground_off", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
+			"ground_off": true, "check": "ground_leak"},
+	{"label": "pad_day_thin_deck", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
+			"deck": THIN_DECK, "check": "deck"},
 	{"label": "pad_day_overcast", "utc": "2026-10-12T17:30:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": false,
-			"overcast": true, "check": "overcast"},
+			"deck": OPAQUE_DECK, "check": "deck"},
+	{"label": "pad_night_moon_overcast", "utc": "2026-11-24T06:00:00", "lat": STARBASE.lat, "lon": STARBASE.lon,
+			"adapt": true, "deck": OPAQUE_DECK, "check": "moon_deck"},
 ]
 
 var _args := {}
@@ -114,6 +154,21 @@ var _live_ratio_max := 0.0
 var _serial_at_start := 0
 var _live_first := 0.0
 var _steady_values: Array[float] = []
+var _timelapse_fixed_gain := false
+var _live_sky_min := INF
+var _live_sky_max := 0.0
+var _opposite_frame := 0
+var _display_exposure := 1.0
+var _ground_leak := 0.0
+
+
+## The refresh rule of a frozen cube (--stale).
+class NeverDue:
+	extends SkyRadianceRefresh
+
+	func due(_tables_ready: bool, _earth_zenith: Vector3, _earth_height_m: float, _moon_zenith: Vector3, _moon_height_m: float,
+			_sun_local: Vector3, _luminance_scale: float, _moon_light: float, _fractions: Array) -> bool:
+		return false
 
 
 func _initialize() -> void:
@@ -121,13 +176,15 @@ func _initialize() -> void:
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
 	if _args.has("only"):
-		_phases = _phases.filter(func(p: Dictionary) -> bool: return p["label"] == _args["only"])
+		var wanted: Array = PHASE_NEEDS.get(_args["only"], []) + [_args["only"]]
+		_phases = _phases.filter(func(p: Dictionary) -> bool: return p["label"] in wanted)
 	if _args.has("timelapse") or _args.has("steady"):
 		_phases.clear()
 	if _args.has("steady"):
 		for k in range(STEADY_STEPS):
-			_phases.append({"label": "steady_%d" % k, "utc": "2026-11-09T%02d:00:00" % (6 + k * STEADY_STEP_H), "lat": 0.0,
-					"lon": 0.0, "body": "moon", "adapt": true, "check": "steady"})
+			var minutes := k * STEADY_STEP_MIN
+			_phases.append({"label": "steady_%d" % k, "utc": "2026-11-09T%02d:%02d:00" % [6 + minutes / 60, minutes % 60],
+					"lat": 0.0, "lon": 0.0, "body": "moon", "adapt": true, "exposure": STEADY_READ_EXPOSURE, "check": "steady"})
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 
@@ -142,11 +199,19 @@ func _process(_delta: float) -> bool:
 		_started = true
 		TimePanel.show_frame_rate = false
 		if _args.has("flight"):
-			_start_flight()
+			if _args.has("live"):
+				_start_flight()
+			else:
+				_add_sphere()
+				_opposite_frame = 1
 		else:
+			if not _args.has("timelapse"):
+				_freeze_if_stale()
 			_add_sphere()
 			_next_phase()
 		return false
+	if _opposite_frame > 0:
+		return _opposite_step()
 	if _args.has("flight"):
 		return _flight_step()
 	if _timelapse_frame >= 0:
@@ -155,6 +220,8 @@ func _process(_delta: float) -> bool:
 	_face_earth()
 	_place_sphere()
 	_wait += 1
+	if _wait == 2 and _phases[_phase].get("ground_off", false):
+		_world._sky_material.set_shader_parameter("radiance_cloud_ground_factor", 0.0)  # itself a write: the cube is redrawn
 	if _wait < FRAMES_PER_VIEW:
 		return false
 	var image := root.get_viewport().get_texture().get_image()
@@ -173,6 +240,12 @@ func _process(_delta: float) -> bool:
 	var side_n := (to_cam - render_up * to_cam.dot(render_up)).normalized()
 	_finish_phase(_up, _read(image, side_n), down)
 	return _next_phase()
+
+
+func _freeze_if_stale() -> void:
+	if _args.has("stale"):
+		_world._radiance_refresh = NeverDue.new()
+		print("sky_radiance_check: --stale: the cube is frozen from here on")
 
 
 func _render_up() -> Vector3:
@@ -253,8 +326,9 @@ func _limb_site(utc: String, elevation_deg: float) -> Dictionary:
 	return {"lat": rad_to_deg(asin(site.z)), "lon": rad_to_deg(atan2(site.y, site.x))}
 
 
-## The first instant from the mission's month on with the Sun above the mean horizon at the site, and hidden by the terrain
-## (shadow) or fully above it (not shadow).
+## An instant from the mission's month on: the first with the Sun above the mean horizon and hidden by the terrain (shadow),
+## else the one with the Sun highest and fully above the terrain (~5 to 6 deg at this latitude: the plate well above the
+## display's lowest codes, where a ratio is only quantisation).
 func _im2_utc(shadow: bool) -> String:
 	var core: StarsimCore = _world.core
 	var surface: Dictionary = core.surface_samples("moon", PackedFloat64Array([IM2.lat]), PackedFloat64Array([IM2.lon]))
@@ -263,6 +337,8 @@ func _im2_utc(shadow: bool) -> String:
 	var radius: float = Atmosphere.MOON_RADIUS_M + float(surface["height_m"][0]) + EYE_HEIGHT_M
 	var point := Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)) * radius
 	var unix := Time.get_unix_time_from_datetime_string("2026-11-01T00:00:00")
+	var best := ""
+	var best_cosine := 0.0
 	for k in range(SCAN_STEPS):
 		var utc := Time.get_datetime_string_from_unix_time(int(unix) + k * SCAN_STEP_H * 3600)
 		var t: float = core.utc_to_tdb_s(utc)
@@ -270,8 +346,15 @@ func _im2_utc(shadow: bool) -> String:
 		var sun: Vector3 = core.moon_fixed_to_gcrf(t).transposed() \
 				* (core.apparent_body_position_gcrf_m("sun", t, Vector3.ZERO, Vector3.ZERO) - moon)
 		var fraction := MoonSunHorizon.sun_visible_fraction(core, point, sun)
-		if sun.normalized().dot(point.normalized()) > 0.0 and fraction == (0.0 if shadow else 1.0):
+		var cosine := sun.normalized().dot(point.normalized())
+		if shadow and cosine > 0.0 and fraction == 0.0:
 			return utc
+		if not shadow and cosine > best_cosine and fraction == 1.0:
+			best = utc
+			best_cosine = cosine
+	if best != "":
+		print("sky_radiance_check: IM-2 sunlit at %s, Sun %.2f deg over the mean horizon" % [best, rad_to_deg(asin(best_cosine))])
+		return best
 	push_error("sky_radiance_check: no instant found at IM-2")
 	return "2026-11-01T00:00:00"
 
@@ -285,6 +368,8 @@ func _go_to(p: Dictionary) -> void:
 	# Scene values on the display: no tone curve, no glow, no rod step; the luminance comes back through scene_per_cd_m2.
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	environment.glow_enabled = false
+	_display_exposure = p.get("exposure", 1.0)
+	environment.tonemap_exposure = _display_exposure
 	_world.atmosphere.vision_effect.enabled = false
 	_world.atmosphere.eye_adaptation_enabled = p["adapt"]
 	_world.clock.warp = 0.0
@@ -297,18 +382,18 @@ func _go_to(p: Dictionary) -> void:
 			"eye_height_m": p.get("height", EYE_HEIGHT_M)})
 	_set_view(-LOOK_DEG)
 	_world.atmosphere.snap_adaptation()
-	if p.get("overcast", false):
-		_set_overcast()
+	if p.has("deck"):
+		_set_deck(p["deck"])
 
 
-func _set_overcast() -> void:
+func _set_deck(slab: Array) -> void:
 	var file := OS.get_temp_dir().path_join("starsim_sky_radiance_slab_%d.wthr" % OS.get_process_id())
-	var slab: Array = OVERCAST_SLAB
 	_world.core.weather_write_slab_snapshot(file, slab[0], slab[1], slab[2], slab[3])
 	var snapshot: Dictionary = _world.core.weather_load_snapshot(file)
 	_world.clouds.wait_until_ready()
 	_world.clouds.show_now(snapshot, snapshot, 0.0)
 	_world.core.weather_set_active(file, file, 0.0)
+	DirAccess.remove_absolute(file)
 
 
 func _read(image: Image, n: Vector3) -> Color:
@@ -338,7 +423,7 @@ func _expect(ok: bool, what: String) -> void:
 
 ## A display pixel as a luminance (cd/m^2): linear tone curve, so the pixel is scene_per_cd_m2 x the luminance.
 func _cd(c: Color) -> float:
-	return c.srgb_to_linear().g / _world.atmosphere.scene_per_cd_m2
+	return c.srgb_to_linear().g / (_world.atmosphere.scene_per_cd_m2 * _display_exposure)
 
 
 func _expect_ratio(what: String, measured_cd: float, expected_cd: float, tolerance: float) -> void:
@@ -449,6 +534,7 @@ func _finish_phase(up: Color, side: Color, down: Color) -> void:
 				var limit: float = _world.atmosphere.last_earthshine_lux / PI
 				_expect(_cd(down) <= limit, "an eye in terrain shadow: no sunlit ground: down plate %.3f cd/m^2 <= %.3f" % [_cd(down), limit])
 			else:
+				_expect(down.g >= READ_MIN_LEVEL, "the plate reads clear of the lowest codes: %s" % _fmt(down))
 				_expect_ratio("down plate vs the regolith", _cd(down), _regolith_cd(sun_visible, _earth_true_fraction()),
 						SMALL_SOURCE_TOLERANCE)
 		"earthshine":
@@ -466,14 +552,55 @@ func _finish_phase(up: Color, side: Color, down: Color) -> void:
 			elif _earth_reference > 0.0:
 				_expect_ratio("side plate vs the true fraction x the reference", value, _earth_reference * fraction,
 						SMALL_SOURCE_TOLERANCE)
-		"overcast":
+		"ground_leak":
+			_ground_leak = _cd(down) / _cd(_first.up)
+			_expect(_ground_leak <= GROUND_LEAK_LIMIT, "the ground's half off: the down plate still reads %.3f of the sky's plate"
+					% _ground_leak)
+		"deck":
 			var gcrf_to_fixed: Basis = _world.earth.fixed_to_gcrf.transposed()
-			var factor: float = _world.atmosphere.cloud_ambient_factor(gcrf_to_fixed * _world.camera.position_gcrf_m,
-					(gcrf_to_fixed * _world.sun_apparent_from_earth_m).normalized())
-			_expect(absf(factor - 1.0) > 2.0 * OVERCAST_TOLERANCE, "the deck changes the diffuse light: factor %.3f" % factor)
-			_expect_ratio("up plate vs the clear sky x the cloud factor", _cd(up), _cd(_first.up) * factor, OVERCAST_TOLERANCE)
+			var day := _deck_terms((gcrf_to_fixed * _world.sun_apparent_from_earth_m).normalized())
+			_expect_ratio("up plate vs the clear sky x (T_d E_sky + T_sd E_sun,h) / E_sky", _cd(up),
+					_cd(_first.up) * day[2] / day[0], OVERCAST_TOLERANCE)
+			# The clear down plate is the ground plus the coarsest level's leak of the sky (measured with the ground's half off).
+			var leak := _ground_leak * _cd(_first.up)
+			_expect_ratio("down plate vs the clear ground x (E_sun,h (T_s + T_sd) + E_sky T_d) / (E_sun,h + E_sky), + the leak",
+					_cd(down), (_cd(_first.down) - leak) * day[3] / (day[0] + day[1]) + leak * day[2] / day[0], OVERCAST_TOLERANCE)
+		"moon_deck":
+			var to_fixed: Basis = _world.earth.fixed_to_gcrf.transposed()
+			var night := _deck_terms((to_fixed * _world.moon_gcrf_m).normalized())
+			_expect_ratio("up plate vs the Moon's sky x (T_d E_sky + T_sd E_moon,h) / E_sky", _cd(up),
+					_moon_sky_cd() * night[2] / night[0], SMALL_SOURCE_TOLERANCE)
+		"below_sphere":
+			var surface: Dictionary = _world.core.surface_samples("moon", PackedFloat64Array([p["lat"]]),
+					PackedFloat64Array([p["lon"]]))
+			var height_m: float = surface["height_m"][0]
+			_expect(height_m < -BELOW_SPHERE_MIN_M, "the site lies below the mean sphere: %.0f m" % height_m)
+			var eye_sun: float = _world._camera_terrain_sun_fraction
+			var ground_sun: float = _world._sky_material.get_shader_parameter("radiance_moon_sun_visible")
+			var ground_earth: float = _world._sky_material.get_shader_parameter("radiance_moon_earth_visible")
+			_expect(absf(ground_sun - eye_sun) <= FRACTION_TOLERANCE,
+					"20 m over the terrain the ground's Sun is the eye's: %.3f vs %.3f" % [ground_sun, eye_sun])
+			_expect(absf(ground_earth - _earth_true_fraction()) <= FRACTION_TOLERANCE,
+					"and its Earth: %.3f vs %.3f" % [ground_earth, _earth_true_fraction()])
 		"steady":
-			_steady_values.append(_cd(up) / _world.atmosphere.last_earthshine_lux)
+			var cosine := eye_moon.normalized().dot((-_world.moon_gcrf_m).normalized())
+			_steady_values.append(_cd(up) / (_world.atmosphere.last_earthshine_lux * cosine))
+
+
+## The deck's light at the eye for one source along direction_itrf, the core's own numbers: [E_sky, E_h, the diffuse light under
+## the deck, the ground's light under the deck], green channel as the pixels read. Independent of what the game computes.
+func _deck_terms(direction_itrf: Vector3) -> Array:
+	var eye_itrf: Vector3 = _world.earth.fixed_to_gcrf.transposed() * _world.camera.position_gcrf_m
+	var lux: Dictionary = _world.core.atmosphere_illuminance(eye_itrf, eye_itrf.normalized(), direction_itrf)
+	var light: Dictionary = _world.core.weather_cloud_light(eye_itrf, direction_itrf)
+	var sky: float = lux["sky_lux"].y
+	var beam: float = lux["sun_lux"].y
+	var t_s: float = light["sun_transmittance"]
+	var t_sd: float = light["sun_diffuse"]
+	var t_d: float = light["sky_factor"]
+	print("sky_radiance_check:   deck: T_s %.4f T_sd %.4f T_d %.4f, E_sky %.1f E_h %.1f; sky factor %.3f, ground factor %.3f" % [t_s, t_sd,
+			t_d, sky, beam, (t_d * sky + t_sd * beam) / sky, (beam * (t_s + t_sd) + sky * t_d) / (beam + sky)])
+	return [sky, beam, t_d * sky + t_sd * beam, beam * (t_s + t_sd) + sky * t_d]
 
 
 ## What "no earthshine" reads: DARK_LEVEL as a luminance at this gain.
@@ -487,15 +614,15 @@ func _finish_steady() -> void:
 	var mean := 0.0
 	for v in _steady_values:
 		mean += v / _steady_values.size()
-	print("sky_radiance_check: far Earth, up plate / earthshine over %d h: %s" % [STEADY_STEPS * STEADY_STEP_H, str(_steady_values)])
+	print("sky_radiance_check: far Earth, up plate / (earthshine x cos) over %d min: %s" % [STEADY_STEPS * STEADY_STEP_MIN, str(_steady_values)])
 	_expect((hi - lo) / mean <= STEADY_MAX_RANGE, "far Earth steady: range %.3f of the mean (limit %.2f)" % [(hi - lo) / mean,
 			STEADY_MAX_RANGE])
 
 
 ## A sunset as a time-lapse: the camera's site at Sun ~+4 deg, warp TIMELAPSE_WARP, on into the twilight.
 func _start_timelapse() -> void:
-	var p := {"label": "timelapse", "utc": "2026-10-12T23:40:00", "lat": STARBASE.lat, "lon": STARBASE.lon, "adapt": true,
-			"check": "none"}
+	var p := {"label": "timelapse", "utc": "2026-10-12T23:40:00", "lat": STARBASE.lat, "lon": STARBASE.lon,
+			"adapt": not _timelapse_fixed_gain, "check": "none"}
 	_phases.append(p)
 	_go_to(p)
 	_set_view(0.0)
@@ -508,7 +635,10 @@ func _start_timelapse() -> void:
 func _track_live(pixel: Color) -> void:
 	if pixel.g < TIMELAPSE_READ_LEVEL:
 		return
-	var ratio := _cd(pixel) / _sky_cd()
+	var sky := _sky_cd()
+	_live_sky_min = minf(_live_sky_min, sky)
+	_live_sky_max = maxf(_live_sky_max, sky)
+	var ratio := _cd(pixel) / sky
 	_live_ratio_min = minf(_live_ratio_min, ratio)
 	_live_ratio_max = maxf(_live_ratio_max, ratio)
 
@@ -519,6 +649,8 @@ func _finish_live() -> void:
 	_expect(_live_ratio_max > 0.0 and _live_ratio_max / _live_ratio_min <= LIVE_RATIO_BAND,
 			"the plate follows the sky: plate / (sky_lux / pi) %.3f .. %.3f (band x %.2f)" % [_live_ratio_min, _live_ratio_max,
 			LIVE_RATIO_BAND])
+	_expect(_live_sky_max > 0.0 and _live_sky_max / _live_sky_min >= LIVE_MIN_SKY_SPAN, "the sky fell x %.1f in the read span"
+			% (_live_sky_max / maxf(_live_sky_min, 1.0e-30)))
 
 
 func _timelapse_step() -> bool:
@@ -539,9 +671,13 @@ func _timelapse_step() -> bool:
 	if _timelapse_frame > 20 and _timelapse_settle < 0:  # the snap of the jump is over
 		if _timelapse_last >= 0.0:
 			_timelapse_max_step = maxf(_timelapse_max_step, absf(value - _timelapse_last))
-		_track_live(pixel)
+		if _timelapse_fixed_gain:
+			_track_live(pixel)
 	if _timelapse_frame > 20:
 		_timelapse_last = value
+	if _timelapse_fixed_gain and _timelapse_frame == 20:
+		_freeze_if_stale()  # a cube right so far, from here on frozen
+		_serial_at_start = _world._radiance_serial
 	if _timelapse_frame % 60 == 0:
 		print("sky_radiance_check: timelapse frame %d value %.3f gain %.1f plate / sky %.3f serial %d" % [_timelapse_frame, value,
 				_world.atmosphere.exposure_gain, _cd(pixel) / _sky_cd(), _world._radiance_serial])
@@ -549,9 +685,51 @@ func _timelapse_step() -> bool:
 		return false
 	_expect(_timelapse_max_step <= TIMELAPSE_MAX_STEP, "largest frame step %.1f code values" % (_timelapse_max_step * 255.0))
 	_expect(_timelapse_gain_steps <= 1, "%d step(s) of the eye's gain (the known one at sunset)" % _timelapse_gain_steps)
+	if not _timelapse_fixed_gain:
+		_timelapse_fixed_gain = true
+		_timelapse_last = -1.0
+		_timelapse_max_step = 0.0
+		_timelapse_gain = 0.0
+		_timelapse_settle = 0
+		_start_timelapse()
+		return false
 	_finish_live()
+	print("sky_radiance_check: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
 	return true
+
+
+## Before a flight check: the same pad in the opposite light, the cube settled there (a stale cube would stay so).
+func _opposite_step() -> bool:
+	var expect_lit: bool = _args.get("expect", "lit") == "lit"
+	if _opposite_frame == 1:
+		_go_to_opposite(expect_lit)
+	_opposite_frame += 1
+	_world.clock.warp = 0.0
+	_place_sphere()
+	if _opposite_frame < FRAMES_PER_VIEW:
+		return false
+	var image := root.get_viewport().get_texture().get_image()
+	var pixel := _read(image, (_world.camera.global_position - _sphere.global_position).normalized())
+	_expect(pixel.g <= DARK_LEVEL if expect_lit else pixel.g >= LIT_LEVEL, "the session starts from the opposite light: %s"
+			% _fmt(pixel))
+	_freeze_if_stale()
+	_sphere.visible = false
+	_opposite_frame = 0
+	_start_flight()
+	return false
+
+
+func _go_to_opposite(expect_lit: bool) -> void:
+	_world.clock.set_time(_world.core.utc_to_tdb_s(OPPOSITE_DARK_UTC if expect_lit else OPPOSITE_LIT_UTC))
+	_world.set_focus(World.FOCUS_EARTH)
+	var surface: Dictionary = _world.core.surface_samples("earth", PackedFloat64Array([STARBASE.lat]),
+			PackedFloat64Array([STARBASE.lon]))
+	_world.set_ground_site({"id": "custom", "name": "custom", "body": "earth", "latitude_deg": STARBASE.lat,
+			"longitude_deg": STARBASE.lon, "height_m": surface["height_m"][0] if bool(surface["present"]) else 0.0,
+			"eye_height_m": EYE_HEIGHT_M})
+	_set_view(-LOOK_DEG)
+	_world.atmosphere.snap_adaptation()
 
 
 func _start_flight() -> void:
@@ -589,6 +767,7 @@ func _flight_step() -> bool:
 		if live:
 			_world._environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 			_world._environment.glow_enabled = false
+			_world.atmosphere.eye_adaptation_enabled = false  # the fixed gain: a frozen cube's pixel then stays as it was
 	if _flight_frame < FRAMES_PER_VIEW:
 		return false
 	if live:
@@ -607,17 +786,19 @@ func _flight_step() -> bool:
 	return true
 
 
-## The clock runs through the real ascent: height and Sun cross the thresholds, the cube must follow. A probe sphere in front
-## of the camera (direct lights off) shows the cube alone: the sky falls with the height, a frozen cube stays as it was.
+## The clock runs through the real ascent at a fixed gain: height and Sun cross the thresholds, the cube must follow. A probe
+## sphere in front of the camera (direct lights off) shows the cube alone: the sky falls with the height, a frozen cube's pixel
+## stays as it was.
 func _live_flight_step() -> bool:
 	_place_sphere()
 	if _flight_frame == FRAMES_PER_VIEW:
 		_world.clock.warp = LIVE_WARP
 		_serial_at_start = _world._radiance_serial
+		_freeze_if_stale()
 	var image := root.get_viewport().get_texture().get_image()
 	var to_cam := (_world.camera.global_position - _sphere.global_position).normalized()
 	var pixel := _read(image, to_cam)
-	if _flight_frame == FRAMES_PER_VIEW:
+	if _flight_frame == FRAMES_PER_VIEW + LIVE_SETTLE_FRAMES:
 		_live_first = _cd(pixel)
 	if (_flight_frame - FRAMES_PER_VIEW) % 120 == 0:
 		print("sky_radiance_check: live frame %d probe %s %.0f cd/m^2 altitude %.0f m serial %d" % [_flight_frame, _fmt(pixel), _cd(pixel),
@@ -628,5 +809,6 @@ func _live_flight_step() -> bool:
 			% (_world._radiance_serial - _serial_at_start))
 	_expect(absf(log(_cd(pixel) / _live_first)) >= LIVE_MIN_CHANGE_LOG, "the probe changed with the climb: %.0f -> %.0f cd/m^2"
 			% [_live_first, _cd(pixel)])
+	print("sky_radiance_check: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
 	return true

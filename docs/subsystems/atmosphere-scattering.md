@@ -95,8 +95,8 @@ vehicles still fly through `Us76Atmosphere`).
   `atmosphere_check.gd` (IM-2 2 m above ground, Sun 1 deg below / above / at the horizon: 0 / 1 / 0.5; 1551 m below the
   mean radius, Sun 60 deg up: light = the open sky's). Clouds (Task 9, `weather-clouds.md` "Light"):
   x the direct beam's cloud transmittance at that point (`Atmosphere.cloud_light_at`, the Moon's light likewise), and
-  the sky's radiance cube x the diffuse light under the clouds over the clear sky's there
-  (`Atmosphere.cloud_ambient_factor`, `radiance_cloud_factor`; exactly 1 with weather off). Earth surfaces (`terrain_earth.gdshader`): the Sun
+  the sky's radiance cube x the light under the clouds over the clear sky's there
+  (`Atmosphere.cloud_radiance_factors`, one factor for its sky, one for its ground; exactly 1 with weather off). Earth surfaces (`terrain_earth.gdshader`): the Sun
   through the cloud shadow maps, the Sun's light diffused through the column and the sky x its diffuse transmittance.
 - **Exposure.** One exposure: scene value = luminance x `DAY_EXPOSURE` (1.5) x pi / E_v,TOA / d_AU^2 - a white
   Lambertian under the TOA Sun renders 1.5 in every material.
@@ -150,24 +150,27 @@ vehicles still fly through `Us76Atmosphere`).
   [E, rationale in the file]: tables loaded; Sun (Earth-local) or the eye's zenith (cube axes) 0.035 deg (a 2 % step in the
   deepest twilight); eye height max(200 m, 2 %); `luminance_scale` 2 % (the cube holds scene values, i.e. times the eye's
   gain); Moon light 2 %; 1 % of a fraction (visible solar disc, the Earth's disc, both lights on the lunar ground, the
-  cloud factor). Cadence: ~8 s at rest on the Earth, ~0.5 s in low orbit, a clock or site jump at once. The cube takes 8 to
+  cloud factors). Cadence: ~8 s at rest on the Earth, ~0.5 s in low orbit, a clock or site jump at once. The cube takes 8 to
   16 frames after the write (one base render, then one roughness layer per frame; a write during a pass waits for its end).
 - **Why the gain needs a redraw.** Godot 4.7's `ambient_light_energy` does not reach a sky's cube: at
   `ambient_light_sky_contribution` 1 `scene_forward_clustered.glsl` mixes it out, and the cube's ambient and reflections are
   scaled by `background_energy_multiplier` only, which also scales the sky's own pass. Scaling instead of redrawing is
-  therefore not available; the cloud factor (dead on that property until 2026-10-31) now sits in the cube pass.
+  therefore not available; the cloud factors sit in the cube pass.
 - **Content.** Sky and model ground of the same model, so the shade side sees the real sky and the lit ground below
   the horizon. A cube of the eye's place: a hull far from the eye is lit as at the eye.
 - **Only in the cube pass (`AT_CUBEMAP_PASS`).** Near the Moon (`Atmosphere.near_moon`) a lunar ground sphere (mean texture
   albedo 0.30, regolith reflectance under Sun and earthshine, `moon_ground_radius`) stands in front of the Earth: the
   ground bounce on the Moon, and no Earth through the Moon. A far Earth smaller than 0.07 rad radius is drawn at that
-  radius at the same flux [E, `RadianceFarEarth`]: from the Moon it is ~1 texel and point sampling made the earthshine jump.
+  radius at the same flux [E, `RadianceFarEarth`], radiance 3 (1 - x)^2 with x = (1 - cos angle) / (1 - cos radius), whose
+  integral is exactly the uniform disc's: from the Moon it is ~1 texel; point sampling made the earthshine jump, and a uniform
+  disc's hard edge still did (range 10.6 % over 10 h).
 - **The Earth from the Moon.** One earthshine: near the Moon the disc is uniform and grey with the flux of
   `Atmosphere.earthshine_relative` (Bond albedo), the regolith's and the eye's; the cube's cloudless model Earth gave
   0.37 x that. Its flux x the Earth's true visible fraction at the eye (terrain horizon via
   `MoonSunHorizon.disc_visible_fraction`, marched anew past 50 m of the eye or 0.02 deg of the Earth; else the ground
-  sphere). A wide disc that would cross the cube's horizon is drawn lifted clear of it (up to ~5 deg high: a plate's cosine
-  sees it slightly too high, a limit); before, e = +1 deg lost 34 % and e = -1 deg kept 35 % although hidden.
+  sphere). A wide disc that would cross the cube's horizon is drawn lifted clear of it, its centre 4 deg high (computed, not measured: for a
+  true e = 1 deg a side plate reads cos 4 / cos 1, 0.2 % too little, a zenith plate 0.070 instead of 0.017 of the earthshine's
+  plate), a limit; before, e = +1 deg lost 34 % and e = -1 deg kept 35 % although hidden.
 - **Shadows on the lunar ground.** The ground's Sun term x the Sun's visible fraction at the eye x the Earth's disc in front
   of the Sun, its earthshine term x the Earth's fraction [E, `RadianceFarEarth.ground_fraction`]: the eye's shadows stand for
   the ground in view up to 1 km over the terrain, fading out by 10 km (an orbiter in shadow still sees the sunlit ground
@@ -175,7 +178,10 @@ vehicles still fly through `Us76Atmosphere`).
   around it; vehicles' shadows do not enter the cube; terrain does not shape the ground sphere.
 - **Weather.** The cube has no clouds: over a deck the ground half shows the cloudless ground (sea ~0.06 against a cloud
   top ~0.7, estimated up to ~10 x too dark on a belly over an overcast sea). Not small, so documented, not fixed. Under the
-  deck the whole cube x the cloud factor, reflections included (a thin bright deck: 2.85 x in `sky_radiance_check`).
+  deck, reflections included, its sky x (T_d E_sky + T_sd E_h) / E_sky and its ground, which already holds the direct light, x
+  (E_h (T_s + T_sd) + E_sky T_d) / (E_h + E_sky), each a sum over the Sun and, while the cube shows it, the Moon. At the pad by day:
+  optical depth 3 sky 4.77, ground 0.83; depth 15 sky 2.74, ground 0.46 (the one factor before gave the ground 5.8 x too much).
+  The sky's half is the mean: the brighter part of a deck towards the Sun is not modelled.
 - **Moon light.** `World.moon_light` is off near the Moon (it lit objects from the Moon's centre through the ground); the
   one switch `near_moon` also turns on the cube's ground and flat Earth. Limit at that border (~67 000 km from the Moon): the
   Moon is ~2 texels of the cube there (undersampled, not widened) and `moon_light` before the border is still the
@@ -184,13 +190,24 @@ vehicles still fly through `Us76Atmosphere`).
   lights excluded, linear display, tables first, then a chain of jumps, each lit phase against a reference, as measured /
   reference: pad by day, up / (`sky_lux` / pi) 0.906 (+-15 %); moonless night `0 0 0`; full Moon, up / the Moon's sky 0.881
   (+-30 %); orbit, down / estimate of the ground in view 0.686 (factor 2); Moon by day, down / analytic regolith 0.948
-  (+-30 %); lunar night under the Earth, up / (earthshine / pi) 0.78 (+-30 %, was 0.372); Earth below the horizon `0 0 0`;
-  Earth at e = +1 deg against e = +10 deg x true fraction 0.983, e = -1 deg `0 0 0`; IM-2 sunlit / shadowed eye (down
-  6.2 cd/m^2 before, below the earthshine's plate now); back at the pad the same pixels (+-2 code values); overcast slab,
-  up / clear x factor 1.001. `--timelapse`: sunset into twilight at warp 120, frame step at most 2.4 code values (limit 6),
-  185 refreshes, up / sky within a band of 1.6. `--steady`: far Earth over 10 h, range 10.6 % of the mean (limit 15 %).
-  `--flight`: white hull, values in `vehicle-models.md`; `--flight --live`: the clock running through the ascent, 43
-  refreshes, probe 2542 -> 1507 cd/m^2.
+  (+-30 %); lunar night under the Earth, up / (earthshine / pi) 0.742 (+-30 %, was 0.372; the side plate at e = +10 deg reads
+  1.11: steady over time, so not aliasing, but direction-dependent: the coarsest level's lobe on a small source, not isolated);
+  Earth below the horizon `0 0 0`;
+  Earth at e = +1 deg against e = +10 deg x true fraction 0.983, e = -1 deg `0 0 0`; IM-2 sunlit, Sun 6.75 deg, display gain 2, code 60, 1.026
+  (+-30 %; the reference is the same mean sphere as the cube, so it shares the sphere's simplification and says nothing about
+  the terrain); IM-2 shadowed eye below the earthshine's plate; a crater floor 2758 m below the mean sphere: the ground's lights
+  are the eye's (0.196 before, height over the sphere counted twice); transit (eye 200 000 km up, display gain 700) down /
+  estimate 0.749; back at the pad the same pixels (+-2 code values). Decks: optical depth 3 and 15, up 1.016 and 1.016, down
+  1.027 and 1.027 of clear x factor + the sky's leak (+-15 %; with the ground's half off a down plate still reads 0.075 of the
+  sky's plate: the coarsest level); opaque deck in the moonlight up / the Moon's sky x factor 0.915 (+-30 %; 0.099 with T_d alone).
+  `--timelapse`: sunset into twilight at warp 120, adapted: frame step at most 2.1 code values (limit 6); fixed gain: 177
+  refreshes, up / sky 0.625 .. 0.709 (band 1.6) while the sky falls x 5.6. `--steady`: far Earth over 8 h in 30 min steps, range
+  0.6 % of the mean (limit 5 %, set before measuring: a texel crossing at warp is a flicker). `--flight`: white hull entered
+  from the opposite light, values in `vehicle-models.md`; `--flight --live`: fixed gain, the clock running through the ascent,
+  43 refreshes, probe 3419 -> 1516 cd/m^2.
+- **The checks can fail.** `--stale` freezes the cube (the refresh rule replaced in the test): phases 18 failures, `--timelapse`
+  up / sky 0.655 .. 9.5 and 0 refreshes, `--flight --live` 3410 -> 3419 cd/m^2 and 0 refreshes, flight by day `0 0 1`, flight by
+  night `251 253 255` (a day cube kept into the night), all exit 1.
 - `render_check` never showed the stale cube: it blocks until everything is set, so its first cube is already right. Of
   its before / after pairs four are pixel-identical, pad differs in 254 px and pad_ground in 1308 px, local patches, not
   the cube (a cube change moves every lit pixel; `sky-fix-report.md` Fix 2).

@@ -133,7 +133,8 @@ shaders:
 - **Open: a step at sunset.** The twilight glow term is gated on the Sun below the eye's horizon and has a hard exclusion
   around the Sun (`TWILIGHT_GLOW_MIN_SUN_DEG`): at Sun 0 deg the target jumps (499 -> 920 cd/m^2, gain 85 -> 47). In real
   time the adaptation smooths it within ~1 s; at warp 120 it is a visible step. Opening the gate to +10 deg only moved the
-  jump (the exclusion's edge), so the fix is a soft exclusion, not done. `sky_radiance_check --timelapse` counts the step.
+  jump (the exclusion's edge), so the fix is a soft exclusion, not done (a user decision; the reviewer's idea: fade the
+  exclusion instead of a hard edge; edges seen at about Sun -2, -5 and -7 deg). `sky_radiance_check --timelapse` counts the step.
 
 ## Standing decisions
 
