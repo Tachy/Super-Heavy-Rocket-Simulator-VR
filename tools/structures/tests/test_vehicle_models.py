@@ -287,25 +287,34 @@ def test_flaps_hinge_on_the_axis_and_drawn_shape_from_the_detail_file(built, spe
 
 
 @needs_blender
-def test_grid_fin_pivot_on_the_hinge_and_drawn_octagon(built, spec):
+def test_grid_fin_pivot_on_the_hinge_and_measured_outline(built, spec):
     b = spec["stages"]["booster"]
-    a = spec["detail"]["grid_fin"]["across_flats_m"]
     parts = _meshes(built / "grid_fin.gltf")
     d = spec["detail"]["grid_fin"]
     lo, hi = _bounds(parts["frame"][0])
     t = d["thickness_m"]
     # the plate lies across the station axis: the cells open along X (frames, core/src/aero/grid_fin.cpp), chord along Z
     assert hi[0] - lo[0] == pytest.approx(t, abs=BOUND_TOL_M)
-    assert hi[2] - lo[2] == pytest.approx(a / math.cos(math.pi / 8.0), abs=BOUND_TOL_M) and (lo[2] + hi[2]) / 2.0 == pytest.approx(0.0, abs=1e-3)
-    # hung on a corner: the rim's vertex on the radial axis, span = the octagon's vertex diameter
-    assert lo[1] == pytest.approx(d["root_gap_m"], abs=1e-4)
-    assert hi[1] == pytest.approx(d["root_gap_m"] + a / math.cos(math.pi / 8.0), abs=BOUND_TOL_M)
-    root_row = [p for p in parts["frame"][0] if p[1] < d["root_gap_m"] + 1e-3]
-    assert root_row and max(abs(p[2]) for p in root_row) < 1e-3
-    # spikes reach the aft plane below the walls
+    # the measured chamfered outline (factory photo): chord and span extents, the root vertex on the root gap
+    zs, ys = d["outline_z_m"], d["outline_y_m"]
+    assert lo[2] == pytest.approx(min(zs), abs=BOUND_TOL_M) and hi[2] == pytest.approx(max(zs), abs=BOUND_TOL_M)
+    assert lo[1] == pytest.approx(d["root_gap_m"] + min(ys), abs=1e-4)
+    assert hi[1] == pytest.approx(d["root_gap_m"] + max(ys), abs=BOUND_TOL_M)
+    assert max(zs) - min(zs) == pytest.approx(4.1, abs=0.15)  # NSF photo 2026-03: 4.1 m wide
+    n = len(zs)
+    area = 0.5 * sum(zs[i] * ys[(i + 1) % n] - zs[(i + 1) % n] * ys[i] for i in range(n))
+    assert 10.0 < area < 13.5  # gross planform, documented against the physics 13.5 m^2
+    assert len(set(round(math.hypot(zs[(i + 1) % n] - zs[i], ys[(i + 1) % n] - ys[i]), 2) for i in range(n))) >= 6  # unequal sides
+    # cusp tips reach both faces; the cross rib and the pylon exist
     llo, lhi = _bounds(parts["lattice"][0])
     assert llo[0] == pytest.approx(-t / 2.0, abs=1e-4) and lhi[0] == pytest.approx(t / 2.0, abs=1e-4)
-    assert "plate" in parts and "hooks" not in parts  # f12 file 1804 s: no bars under any fin
+    assert {"plate", "band", "pylon", "bearing", "shaft"} <= set(parts) and "hooks" not in parts
+    blo, bhi = _bounds(parts["band"][0])
+    assert blo[0] == pytest.approx(t / 2.0, abs=1e-4) and bhi[0] == pytest.approx(t / 2.0, abs=1e-4)  # flat face
+    plo, phi = _bounds(parts["pylon"][0])  # the ring sits on the hinge axis at the hull
+    assert (plo[0] + phi[0]) / 2.0 == pytest.approx(0.0, abs=0.02) and plo[1] == pytest.approx(0.0, abs=1e-4)
+    # triangle budget at the near tier: 3 fins of the booster stay under 4,500 triangles each
+    assert sum(len(m[2]) for m in parts.values()) < 4500
     slo, shi = _bounds(parts["shaft"][0])  # hinge shaft on the radial axis through the origin
     assert (slo[0] + shi[0]) / 2.0 == pytest.approx(0.0, abs=1e-4) and (slo[2] + shi[2]) / 2.0 == pytest.approx(0.0, abs=1e-4)
     assert slo[1] < 0.0

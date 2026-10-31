@@ -19,12 +19,14 @@ const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
 const DEFAULT_EXIT_DEPTH_M := 3.0
 const HULL_SHADER := preload("res://shaders/vehicle_hull.gdshader")
 ## "booster" = the booster hull: mode 0 with the baked steel map (the ship's hull carries it in mode 1).
-const HULL_MODE := {"steel": 0, "booster": 0, "ship": 1, "flap": 2, "fin_frame": 0, "fin_cells": 0, "dark": 0}
+const HULL_MODE := {"steel": 0, "booster": 0, "ship": 1, "flap": 2, "fin_frame": 0, "fin_cells": 0, "fin_band": 0, "dark": 0}
 ## [E] Sunlit frames (NSF photo 2026-03, aerial 2026-04, f12 file 1804 s): the fin rim reads dark grey, the cells black. Albedo
 ## linear from the sRGB of the sunlit rim (~75 / 255) against the bright hull: 0.07 +-0.03; cells 0.025 +-0.01.
 const DARK_PARTS := {
 	"fin_frame": {"albedo": Color(0.29, 0.29, 0.30), "roughness": 0.7, "metallic": 0.2, "mottle": 0.18, "scale": 1.3},
 	"fin_cells": {"albedo": Color(0.17, 0.17, 0.175), "roughness": 0.8, "metallic": 0.1, "mottle": 0.1, "scale": 1.3},
+	## Light flat rim face and catch bar: the installed-fin photo (user 2026-10-31) shows a white band along the upper edge.
+	"fin_band": {"albedo": Color(0.52, 0.52, 0.54), "roughness": 0.45, "metallic": 0.5, "mottle": 0.05, "scale": 1.3},
 	"dark": {"albedo": Color(0.2, 0.2, 0.21), "roughness": 0.6, "metallic": 0.2, "mottle": 0.0, "scale": 0.12},
 }
 ## Beyond this distance a fin draws its opaque `plate` instead of the walls and spikes (wall 4 cm = 1 px of the Pimax at
@@ -100,7 +102,7 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 	var materials := {}
 	var steel_map := _steel_map(look.get("steel_map", {}), model_dir, vehicle_id)
 	var tile_maps := _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
-	for key: String in ["steel", "booster", "ship", "flap", "fin_frame", "fin_cells", "dark"]:
+	for key: String in ["steel", "booster", "ship", "flap", "fin_frame", "fin_cells", "fin_band", "dark"]:
 		var material := ShaderMaterial.new()
 		material.shader = HULL_SHADER
 		material.set_shader_parameter("mode", HULL_MODE[key])

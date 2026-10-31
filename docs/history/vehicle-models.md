@@ -48,3 +48,8 @@ The fins were drawn root-flat with cells along the tangent (a misreading of the 
 - Weld bead 12 mm x 10 cm wide (half width 5 cm), heat band 1.2 x; shader weld darkening 0.25 + roughness gain 0.22; dotted stringer lines on every line in a regular grid at 0.09 m (0.7 coverage).
 - Bells: "the ribs do not show, cause not found" (the view never applied the engine material).
 - Fin aliasing: "no shimmer measurement of the fin".
+
+## Superseded 2026-10-31 (fin outline round)
+- Grid fin: regular octagon on a corner (across flats 3.8 m, width 4.11 m), walls through the octagon's centre at pitch 0.47 m, a
+  four-sided pyramid spike (0.22 m) under every crossing, toothed rim 0.66 m pitch / 0.25 m deep, 552 triangles, no cross rib,
+  no band, no ring or struts, gross 11.9 m^2, lever arm r ~6.6 m. Replaced by the measured chamfered outline and cusped saddle walls.

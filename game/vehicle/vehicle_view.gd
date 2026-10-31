@@ -227,11 +227,19 @@ func _build_fins(stages: Array, grid_fins: Array, stage_nodes: Array[Node3D]) ->
 			continue
 		var node := Node3D.new()
 		node.name = "grid_fin_%d" % i
+		var catch_azimuths: Array = _models["manifest"].get("look", {}).get("catch_fin_azimuths_deg", [])
 		for part: String in _models["grid_fin"]:
+			if part == "bearing" and not _is_catch_fin(float(grid_fins[i]["azimuth_deg"]), catch_azimuths):
+				continue
 			var instance := MeshInstance3D.new()
 			instance.name = part
 			instance.mesh = _models["grid_fin"][part]
-			instance.material_override = _hull_material("fin_cells" if part == "lattice" or part == "plate" else "fin_frame")
+			var material_key := "fin_frame"
+			if part == "lattice" or part == "plate":
+				material_key = "fin_cells"
+			elif part == "band" or part == "bearing":
+				material_key = "fin_band"
+			instance.material_override = _hull_material(material_key)
 			if part == "lattice":
 				instance.visibility_range_end = VehicleModels.FIN_LATTICE_RANGE_M
 			elif part == "plate":
@@ -239,6 +247,14 @@ func _build_fins(stages: Array, grid_fins: Array, stage_nodes: Array[Node3D]) ->
 			node.add_child(instance)
 		stage_nodes[stage].add_child(node)
 		_fin_nodes.append({"node": node, "stage": stage})
+
+
+## True when `azimuth_deg` equals one of the manifest's catch fin azimuths (the fins with the flat bar under the root).
+static func _is_catch_fin(azimuth_deg: float, catch_azimuths: Array) -> bool:
+	for entry in catch_azimuths:
+		if absf(fposmod(azimuth_deg - float(entry) + 180.0, 360.0) - 180.0) < 1.0:
+			return true
+	return false
 
 
 ## Index of the stage whose base is the last one at or below `station_m` (-1 without stages).

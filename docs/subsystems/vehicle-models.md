@@ -28,7 +28,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   the rotation about +X by `rotation_sign_about_plus_x` x deflection are derived from `core/src/aero/flap.cpp` and tested
   against a re-implementation of it. Planform = the 1:100 model's (swept, wedge section, hinge lugs, `[flap.aft|fwd]`), the drawn hinge
   edge centred on the physics hinge; it does NOT keep the physics area (see "Physics deviations for the user").
-- `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The plate lies across the station axis and its cells open along X: at deflection 0 an axial flow passes through them (the core's "normal" in `grid_fin.cpp` is the lift normal, the tangent at d = 0; a right-handed rotation by +d about the radial axis turns it toward +X). Regular octagon hung on a corner, walls at +-45 deg, a spike under every wall crossing, toothed rim. Nodes `frame`, `lattice`, `plate` (far stand-in), `shaft`. See "Real-frames round".
+- `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The plate lies across the station axis and its cells open along X: at deflection 0 an axial flow passes through them (the core's "normal" in `grid_fin.cpp` is the lift normal, the tangent at d = 0; a right-handed rotation by +d about the radial axis turns it toward +X). Measured chamfered outline (unequal chamfers, root chamfer under the pylon), diamond walls at +-45 deg cut into cusped saddles (tips at the crossings on both faces), heavier cross rib, flat light rim band, scalloped aft rim. Nodes `frame`, `band`, `lattice`, `pylon` (bolted ring, root block, 3 struts), `bearing` (flat bar under the root, only on `catch_fin_azimuths_deg`), `plate` (far stand-in), `shaft`. 3,130 triangles (was 552). See "Fin outline round".
   toward +X: a right-handed rotation by +d about the radial axis, zero = rest. Drawn size = the model's octagon (4.03 m across flats,
   root flat on the hull), not the config area / span. Egg-crate lattice, cells open along the tangent, `hooks` = catch hardware.
 - `raptor.gltf`, `rvac.gltf`: origin = gimbal point, thrust +X, bell opens toward -X, exit plane at X = -`bell_length_m`
@@ -180,7 +180,7 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 17 (physics) | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
 | Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m | hinge 12 m, span 4, 48 m^2 | f14 file 5099 / 4699 / 5299 s: planform agrees (fisheye, not fitted); 2 V brackets + 1 central actuator instead of the model's 4 pegs | model planform, wedge, 3 lugs, hinge cover |
 | Forward flap | hinge edge 5.8 m (leans 19 deg along the ogive), span 3.04 m, swept quad with an aft foot beyond the hinge end (-1.49 m), area 13.8 m^2, 3 lugs | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); model kept | model planform centred on the physics hinge, hinge kept straight |
-| Grid fin | regular octagon 4.03 x 4.03 m, 10 cells across, depth 0.4 (catch 0.7) | 13.5 m^2 at span 3.0 | frames win, see "Real-frames round" | octagon on a corner, width 4.11 m, wall pitch 0.47 m |
+| Grid fin | regular octagon 4.03 x 4.03 m, 10 cells across, depth 0.4 (catch 0.7) | 13.5 m^2 at span 3.0 | factory photo + installed-fin photo win, see "Fin outline round" | chamfered 9-gon, width 4.11 m, span 3.84 m, wall pitch 0.49 m |
 | Booster top / hot stage | 20 V teeth, ~2.8 m high in the model view | | NSF photo 2026-03 measured, see "Real-frames round" | 20 spindle rods pairs, fork feet, ring 0.32 m |
 | Booster skirt | base ring r 4.65, four thin ring tubes at r 4.9 (stations 0.7 / 1.05 / 1.95 / 2.35), a comb of posts between them, one port 0.57 x 0.74 x 0.8 m at 2.9-3.7 m | flat skirt | no photo of the base | base ring, 4 ring flanges, 48 posts, 4 ports (count unknown) |
 | Booster raceway | pill 0.7 x 5 m + a thin rail along the tank part | none | none | rail + one pill per tank section (side and spacing estimated) |
@@ -196,7 +196,7 @@ The drawn shape sits on the physics' pivots; nothing in `config/` was changed. W
 |---|---|---|---|
 | Aft flap | 12 x 4 m, 48 m^2 | 12 x 3.69 m swept, 36.5 m^2 (-24 %) | the aero model has 31 % more aft flap area (control authority, flap heating area) than the drawn flap; matching the model would mean ~36 m^2 |
 | Forward flap | 8 x 3 m, 24 m^2 | 5.8 x 3.04 m swept, 13.8 m^2 (-43 %) | the forward flaps are the most overstated; hinge moment arm and pitch trim are affected |
-| Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | octagon on a corner, 4.11 m wide, gross 11.9 m^2, hull to tip 4.26 m: centre at r ~6.6 m | the physics has about 13 % more area and a 0.6 m shorter lever arm than the drawing; rest attitude agrees (cells axial at d = 0) |
+| Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | measured chamfered outline, 4.11 m wide, gross 11.80 m^2, hull to far vertex 8.49 - 4.5 = 3.99 m beyond the radius: centroid at r 6.64 m; walls block 16 % looking along the cells (0.04 m on a 0.49 m pitch) | the physics has 14 % more area (13.5 vs 11.80) and a 0.64 m shorter lever arm than the drawing; rest attitude agrees (cells axial at d = 0) |
 | Ship nose | `nose_length_m` 17 | ogive 13.4 m | drag / nose-radius numbers use the longer, sharper nose; the drawn one is blunter |
 | Forward flap hinge | straight, parallel to the axis, 38-46 m, azimuth belly +-110 | straight on the physics line; the frames agree with the azimuth: the tile edge sits at ~+-105 next to it | the real hinge leans along the ogive (model 19 deg; not measurable in frames) |
 | Fin azimuths | 0 / 90 / 180 (90 / 90 / 180) | as configured | aerial 2026-04, f12 1804 s: the spacing agrees, the middle fin points away from the tower |
@@ -347,3 +347,38 @@ Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax 
   radius (4.5 m).
 - Flaps at rest lie on the hull's tangent plane (stowed, flat): the tip stands up to 0.9 m off the curved hull.
 - Raceway position, tile coverage, hot-stage and bell dimensions are estimates; no Block 3 drawing exists.
+
+## Fin outline round (2026-10-31)
+Sources: the factory photo `screenshots/starship_v3_ref/eiv42cz7buif1.jpg` (a real fin on its fixture; outline, lattice), the
+user's installed-fin image (V3 fin against the sky: hearts, light band, ring + struts, serrated lower edge; user ruling
+2026-10-31: used as a DIRECT template for shape, no photo pixel in any asset, it carries a photographer's watermark), the
+person-on-fixture factory photo (wall depth, cusps, cross rib, root box), the arm photos (`padb_chopsticks_around_booster_top_2026-03.jpg`,
+the stacking image). Maps stay generated by our scripts.
+
+| Quantity | Value [E] | Method, uncertainty |
+|---|---|---|
+| Lattice | square, walls at +-45 deg to the outline's axes (measured 39.0 / 127.3 deg in the photo = the fin turned 6.5 deg in its plane) | LSD segments in the fin (`measure/fin_lines.py`), 69 / 12 segments; vanishing points -> f^2 = 1.7e7 px^2 (f ~ 4100 px), the picture is nearly face-on |
+| Pitch | 75.7 px = 0.49 m (+-0.05) | spectrum peak of the rectified picture (`fin_rectify.py`); 8.3 pitches over the width; f12 gave 0.46 +-0.07: agrees |
+| Overall | 4.11 m wide x 3.84 m span, gross 11.80 m^2 | vertices read by eye on the rectified picture, +-8 px = +-0.06 m (`fin_outline.py`) |
+| Sides / chamfers | AB 1.49, BC 0.88 (root chamfer under the pylon), CD 1.49, DE 0.67, EF 1.33, FG 0.59, GH 2.38, HI 2.00 (the long lower-left chamfer, 4.1 pitches), IA 2.00 m | same; all nine sides unequal, convex |
+| Cells per side | 3.0 / 1.8 / 3.0 / 1.4 / 2.7 / 1.2 / 4.9 / 4.1 / 4.1 pitches | side / pitch |
+| Wall depth | 0.50 m (cusp tip to cusp tip), valley 0.19 m below each tip (0.12 m of wall left in the middle) | person photo: valley ~0.4 of the depth; +-0.05 m |
+| Cusps | one tip per crossing on both faces: sharp horns (vertical tangent), concave arcs between; they are what the earlier "spikes" were (same feature, lit pale from below in f12 1804 s) | person photo, factory photo |
+| Wall thickness | 0.04 m, upper bound (not resolved) | |
+| Rim scallops | one per wall end, pitch 0.35 m (= pitch / sqrt 2), depth 0.22 m | factory photo; the stacking image reads ~0.44 +-0.1 m (low resolution, 9-10 teeth over the width): kept 0.35 |
+| Pylon | ring 0.32 m radius x 0.16 m, 12 bolts, tapered root block to the root chamfer, 3 triangular struts into the lattice, cross rib 1.05 m from the root | installed-fin photo, person photo, +-0.15 m |
+| Light band | 0.20 m flat rim face on the forward side | installed-fin photo |
+| Fin thickness | edge-on in the stacking image: 0.5 +-0.1 m cannot be separated from the plate seen 10-20 deg from above (up to 1.0 m apparent) | kept 0.5 m |
+
+Triangles: 3,130 per fin (frame ~720, lattice ~1,900, rest pylon / band / ring); the far plate tier keeps the outline (12
+triangles). Three fins add 9.4 k to a booster that had 10 k: state for the user, `vehicle_cost_check.gd` not rerun here.
+The photographed tie rods at the crossings are not drawn (600 triangles).
+
+### Catch bearing (flat bar under the root)
+Seen as a bright flat bar slanting under the fin root next to the toothed hinge ring, ~0.5 x 0.15 m (+-40 %, oblique, fin
+~170 px/m). Working assumption (user ruling 2026-10-31): the booster rests left and right on these bars, face down onto the arm
+(the stacking image and the NSF arm photo show the fins edge-on with serrated undersides just above the arm top chord). Drawn on
+`catch_fin_azimuths_deg` = 0 / 180 only; the 90 deg fin shows no bar (left / right pair in the user's two-fin image: the fins
+sit +-53 deg from the view axis, nearer to the 90 deg gap of fins 0 + 90 / 90 + 180 than to a 180 deg gap, which would sit at
++-90 deg; the second opposite fin has not been seen). Whether it is a bearing is not established; the cylinder and soot streak
+that first looked like part of it are shadows / reflections on the steel (user) and are not drawn.

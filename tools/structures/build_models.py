@@ -150,6 +150,7 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> 
             "weld_first_m": detail["hull"]["base_chamfer_m"] + 2.0 * detail["hull"]["weld_half_width_m"],
             "ship_barrel_end_m": spec["stages"]["ship"]["length_m"] - spec["stages"]["ship"]["nose_length_m"],
             "ship_belly_azimuth_deg": spec["stages"]["ship"]["belly_azimuth_deg"],
+            "catch_fin_azimuths_deg": detail["grid_fin"]["catch_fin_azimuths_deg"],
             "rib_counts": {("rvac" if e["file"].startswith("rvac") else "raptor"): e["rib_count"]
                            for e in spec["engines"].values()},
             "tiles": {k: detail["ship"]["tiles"][k] for k in ("hex_across_flats_m", "gap_m", "coverage_station_m",
