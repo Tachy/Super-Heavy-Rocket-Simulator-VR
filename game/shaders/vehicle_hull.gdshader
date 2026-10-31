@@ -1,16 +1,16 @@
 shader_type spatial;
 // Hull of the detailed Starship / Super Heavy models (game/vehicle/vehicle_models.gd): bare stainless steel (weld seams
 // and oil-canning dents from the baked, mipmapped steel map, per-ring panel tint, soot-free) and, on the ship's
-// windward side and the flaps' outer faces, the heat-shield tiles of heat_shield_tiles.gdshaderinc. Lit like LitAerial (Godot's PBR lighting
+// windward side and the flaps' outer faces, the heat-shield tiles from the baked maps of tools/structures/hull_tiles.py. Lit like LitAerial (Godot's PBR lighting
 // and the sky's reflections, seen through the atmosphere as FOG), opaque: it must stay in the opaque pass, which the
 // cloud layer draws behind (a transparent draw would hide from the clouds).
 //
 // Coordinates are the node's LOCAL ones = the config's body frame (X station, nose +X; flaps: X hinge axis, Y outer
-// face, Z span); the steel map is addressed by the hull's UV (arc metres, station metres), the tiles are analytic. Mode 0 steel only (booster,
+// face, Z span); the steel map is addressed by the hull's UV (arc metres, station metres), the tile maps by (arc, station) metres of the shield. Mode 0 steel only (booster,
 // chine, raceway, flap edges), 1 ship hull (tiles within the coverage table around the belly), 2 flap (tiles on +Y).
 
 #include "res://shaders/atmosphere.gdshaderinc"
-#include "res://shaders/heat_shield_tiles.gdshaderinc"
+#include "res://shaders/hull_noise.gdshaderinc"
 
 // [E] Large-scale variation of the sheets: +-3 % (+-10 % read as blotches once the ambient was right).
 const float STEEL_MOTTLE = 0.03;
@@ -34,16 +34,28 @@ uniform float weld_first_m = 0.35;        // no weld seams on the chamfer below 
 const float WELD_DARKEN = 0.25;           // [E] heat-affected band: albedo drop and roughness gain
 const float WELD_ROUGHER = 0.22;
 
-uniform float tile_across_flats_m = 0.30;
-uniform float tile_gap_m = 0.006;
 uniform float belly_azimuth_rad = -1.5707963;   // -Z in the body frame
 uniform int coverage_count = 5;
 uniform float coverage_station_m[8];
 uniform float coverage_half_angle_rad[8];
-uniform vec3 tile_albedo = vec3(0.030, 0.031, 0.034);   // linear, black ceramic with its coating
-uniform vec3 gap_albedo = vec3(0.055, 0.052, 0.050);      // gap filler
+
+// Baked tile maps (tools/structures/hull_tiles.py): the shader decides where tiles are (coverage table, flaps), the maps how
+// they look. Patch: one lattice period (two tiles), mipmapped + anisotropic: R, G bevel tilt, B tilt energy, A gap coverage.
+// Sel / ids: nearest, no mips (ids cannot be averaged): which tile a texel belongs to, and its shade / repaired flag.
+uniform bool tiles_textured = false;      // false (no maps): plain dark ceramic, no gaps
+uniform sampler2D tile_patch : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tile_sel : filter_nearest, repeat_enable;
+uniform sampler2D tile_ids : filter_nearest, repeat_enable;
+uniform vec2 tile_period_m = vec2(0.30, 0.5196);   // one patch repeat (arc, station), metres
+uniform vec2 tile_ids_size = vec2(128.0, 64.0);
+uniform float tile_tilt_energy_range = 0.16;
+uniform float tile_across_flats_m = 0.30;
+// [E] A dark near-black ceramic with its coating (linear), the gap filler a little lighter and rougher.
+uniform vec3 tile_albedo = vec3(0.030, 0.031, 0.034);
+uniform vec3 gap_albedo = vec3(0.055, 0.052, 0.050);
 uniform float tile_roughness : hint_range(0.0, 1.0) = 0.55;
-uniform float tile_bevel_m = 0.012;
+const float GAP_ROUGHNESS = 0.75;
+const vec3 REPAIRED_ALBEDO = vec3(0.075, 0.075, 0.078);   // [E] the few lighter, repaired tiles
 
 varying vec3 world_offset;  // fragment - the render origin (= the atmosphere's camera), world axes
 varying vec3 local_pos;
@@ -138,6 +150,11 @@ void fragment() {
 		tiles = smoothstep(0.6, 0.9, n.y);  // the outer face (the flaps' stowed-outward side) carries the shield
 	}
 
+	// Tile map coordinates and their derivatives, outside the branch (derivatives need uniform control flow).
+	vec2 uv_p = surface_m / tile_period_m;
+	vec2 duv_dx = dFdx(uv_p) * footprint_scale;
+	vec2 duv_dy = dFdy(uv_p) * footprint_scale;
+
 	vec3 albedo_out = steel;
 	float rough_out = steel_rough;
 	float metal_out = steel_metallic;
@@ -145,27 +162,34 @@ void fragment() {
 	vec3 n_out = n_steel;
 
 	if (tiles > 0.0) {
-		Tile t = tile_cell(surface_m, tile_across_flats_m);
-		float gap_half = 0.5 * tile_gap_m;
-		float gap = stripe_cover(t.edge_m, gap_half, px);
-		float h = tile_hash(t.id);
-		float detail_fade = 1.0 - smoothstep(tile_across_flats_m * 0.12, tile_across_flats_m * 0.35, px);
-		// Per-tile shade: a slightly different coating per tile, a few lighter (repaired) tiles; both fade to the mean.
-		float shade = 0.75 + 0.5 * h;
-		float repaired = step(0.994, tile_hash(t.id + 17.0));
-		vec3 tile_col = tile_albedo * mix(1.0, shade, detail_fade);
-		tile_col = mix(tile_col, vec3(0.075, 0.075, 0.078), repaired * detail_fade);
-		float gap_mean = clamp(2.0 * tile_gap_m / tile_across_flats_m, 0.0, 1.0);
-		gap = mix(gap, gap_mean, 1.0 - detail_fade);
-		vec3 tile_final = mix(tile_col, gap_albedo, gap);
-		// Bevel: the face rounds off towards the edge, tilting the normal outwards (fades with the footprint).
-		// The bevel is 12 mm wide: it fades out with the footprint (to nothing: its brightness is a highlight, no mean).
-		float bevel_fade = 1.0 - smoothstep(tile_bevel_m * 1.0, tile_bevel_m * 3.0, px);
-		float bevel = (1.0 - smoothstep(gap_half, gap_half + tile_bevel_m, t.edge_m)) * bevel_fade * (1.0 - gap);
-		vec3 outward = normalize(tangent_s * t.offset_m.x + axial * t.offset_m.y + 1e-6 * tangent_s);
-		vec3 n_tile = normalize(n_tile_base + 0.4 * bevel * outward);
-		albedo_out = mix(steel, tile_final, tiles);
-		rough_out = mix(steel_rough, mix(tile_roughness, 0.75, gap), tiles);
+		vec3 tile_col = tile_albedo;
+		float tile_rough = tile_roughness;
+		vec3 n_tile = n_tile_base;
+		if (tiles_textured) {
+			vec4 t = textureGrad(tile_patch, uv_p, duv_dx, duv_dy);
+			float gap = t.a;
+			// Per-tile shade: a slightly different coating per tile, a few lighter (repaired) tiles. Ids are nearest sampled
+			// (no mean to filter): the variation fades to its mean (shade 1, none repaired) by the pixel footprint.
+			vec4 sel = textureLod(tile_sel, uv_p, 0.0);
+			vec2 id_cell = floor(uv_p) + sel.rg;
+			vec4 ids = textureLod(tile_ids, (id_cell + 0.5) / tile_ids_size, 0.0);
+			bool second = sel.b > 0.5;
+			float shade = 0.75 + 0.5 * (second ? ids.g : ids.r);
+			float repaired = second ? ids.a : ids.b;
+			float detail_fade = 1.0 - smoothstep(tile_across_flats_m * 0.12, tile_across_flats_m * 0.35, px);
+			tile_col = tile_albedo * mix(1.0, shade, detail_fade);
+			tile_col = mix(tile_col, REPAIRED_ALBEDO, repaired * detail_fade);
+			tile_col = mix(tile_col, gap_albedo, gap);
+			// Bevel tilt of the normal along the arc / station axes; the tilt energy the mips lost widens the roughness.
+			vec2 tilt = t.rg - 0.5;
+			float tilt_var = max(t.b * tile_tilt_energy_range - dot(tilt, tilt), 0.0);
+			n_tile = normalize(n_tile_base + tilt.x * tangent_s + tilt.y * axial);
+			float alpha_tile = mix(tile_roughness, GAP_ROUGHNESS, gap);
+			alpha_tile *= alpha_tile;
+			tile_rough = sqrt(sqrt(alpha_tile * alpha_tile + tilt_var));
+		}
+		albedo_out = mix(steel, tile_col, tiles);
+		rough_out = mix(steel_rough, tile_rough, tiles);
 		metal_out = steel_metallic * (1.0 - tiles);
 		spec_out = mix(0.5, 0.4, tiles);
 		n_out = normalize(mix(n_steel, n_tile, tiles));

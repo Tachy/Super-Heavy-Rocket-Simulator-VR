@@ -67,7 +67,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   the averaging removed) and widens the GGX alpha (`alpha_eff^2 = alpha^2 + variance`, Godot's roughness = sqrt(alpha)), so
   the glints do not shimmer. Missing file / not the hull: `steel_textured` false, plain steel, one log line.
 
-## Hull shader (`game/shaders/vehicle_hull.gdshader` + `heat_shield_tiles.gdshaderinc`)
+## Hull shader (`game/shaders/vehicle_hull.gdshader` + `hull_noise.gdshaderinc`)
 - One opaque spatial shader (LitAerial's atmosphere fog, Godot PBR lighting: the clouds draw behind it, nothing goes to the
   transparent pass), four materials made by `VehicleModels` from the manifest's `look` block (ring pitch, first weld station, steel
   map, tile size / gap, coverage table, belly azimuth, barrel end): `steel` plain (chine, raceway, fins, hot stage, flap edges),
@@ -82,17 +82,30 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   its own dents (derivatives from the unshifted UV: no mip seam). No seams below `look.weld_first_m` (the chamfer). The seams
   continue over the ogive at the 1.8 m station pitch. The old footprint fades of the dents / bead slope and the profile-radius
   workaround are gone (the tile arc uses the local radius; the mesh is a plain lathe).
-- Tiles: axial hex cells (0.30 m across flats, 6 mm gap, config values) of (arc length, station) with the arc taken at the local
-  radius; coverage = half angle around the belly azimuth from the detail file's table (cut by the smooth boundary like the chine
-  strake); gap mask, bevel normal, per-tile shade hash, 0.6 % lighter "repaired" tiles. Under the shield the normal is the barrel's
-  radial or the ogive's profile slope. Anti-aliasing: the pixel footprint (derivatives
-  of the local position) box-filters the gap and edge, the per-tile detail fades to the mean colour between 0.12 and 0.35 tile widths
-  per pixel, the bevel (a highlight, no mean) fades out at 1-3 bevel widths. Flaps: planar (span, hinge) coordinates.
+- Tiles: baked maps (`tools/structures/hull_tiles.py` -> `tile_patch.png`, `tile_sel.png`, `tile_ids.png`, manifest `look.tile_maps`;
+  procedural, deterministic, hashed with the generator, git-ignored with the other models). The shader still decides WHERE tiles are
+  (coverage = half angle around the belly azimuth from the detail file's table, cut by the smooth boundary like the chine strake;
+  flaps: the outer +Y face; planar / arc-at-local-radius coordinates (arc, station) in metres; under the shield the normal is the
+  barrel's radial or the ogive's profile slope); the maps decide how they look:
+  - `tile_patch` 256 x 512 RGBA8, one lattice period (0.30 x 0.52 m, two hexagon tiles; 1.17 x 1.01 mm per texel: finer than a VR
+    pixel at 5 m, 1.7 mm, so the nearest view is minified, not blurred; the 6 mm gap is 5 texels): R, G bevel tilt of the normal
+    (0.4 at the edge, 12 mm wide), B tilt energy, A gap-filler coverage (4 x 4 supersampled bake). 0.5 MiB + mips = 0.67 MiB. The game
+    builds the mip chain (`Image.generate_mipmaps`, box averages, which the channels are designed for) and samples it with trilinear
+    + 8x anisotropic filtering (`textureGrad`, derivatives of the surface coordinate, outside the branch). Lost tilt energy
+    (B - |mean tilt|^2) widens the GGX alpha like the steel's: no gap / bevel fade, no hash, no analytic lattice left.
+  - Per-tile variation: `tile_sel` (128 x 256, nearest, no mips: which of the period's two tiles, the second lattice's tiles
+    belong to four period cells, so also the id cell offset) and `tile_ids` (128 x 64 period cells = 38 x 33 m before the shade
+    pattern repeats, nearest: shade 0.75 .. 1.25 per tile, 0.6 % lighter repaired tiles) = 98 kB + 32 kB. Ids are fetched at mip 0
+    only, so mips cannot bleed one tile's id into the next (the id of a texel is exact; a footprint wider than a tile just samples
+    some tile's id). Ids cannot be averaged, so this one fade remains: the shade / repaired variation fades to the mean (shade 1,
+    none repaired) between 0.12 and 0.35 tile widths per pixel, as before.
+  - Colour [E]: tile 0.030 / 0.031 / 0.034 (linear, near-black coated ceramic), gap filler 0.055 / 0.052 / 0.050, roughness 0.55 /
+    0.75, repaired 0.075. Missing maps: `tiles_textured` false, plain dark tile surface without gaps, one log line.
 - Known limit: s = angle x local radius shears the lattice a little on the ogive; real tiles are cut there anyway.
 
 ## Standing decisions
 - Detail in geometry only where the silhouette needs it (vents, lattice, strakes, hot-stage flange, nose); fine structure (welds,
-  dents) is texture, the tiles are analytic in the shader above (user 2026-10-31: everything gets mipmapped textures). Engines keep the
+  dents) is texture, the tiles are baked maps too (user 2026-10-31: everything gets mipmapped textures; the shader keeps only where they are). Engines keep the
   view's LitAerial steel. Staying data-driven: nothing is typed into a generator that the configs carry.
 - The deterministic check compares positions, UVs and indices byte-for-byte; Blender's smooth normals differ in the 7th digit
   between runs, so the `.bin` files as a whole are not byte-identical.
@@ -115,8 +128,8 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   2900 px (FOV 17.6 deg on the 900 px window), fixed exposure, 5 to 500 m, a 2 m patch (> the ring pitch, so beads count), 8 frames of
   0.3 px head motion, each at scale 1 (A) and at scale 2 (B: the supersampled reference, `footprint_scale` 2 so it evaluates the SAME
   filtered pattern, only sampled more densely). Gated: per-pixel temporal flicker (mean |dL| between motion frames / L) of A <=
-  1.5 x the reference's own + 0.004; per-pixel RMS of A - B over L <= 0.15 [E]; tiles: luminance ratio max / min <= 1.10. Tiles: ratio
-  1.081, temporal 0.0001-0.010 (ref 0.0000-0.0098), error <= 0.124 (40 m); steel (booster barrel, sunlit, now the mipmapped steel map):
+  1.5 x the reference's own + 0.004; per-pixel RMS of A - B over L <= 0.15 [E]; tiles: luminance ratio max / min <= 1.10. Tiles (baked maps, 2026-10-31): ratio
+  1.059, temporal 0.0000-0.0076 (ref 0.0000-0.0075), error <= 0.044 (160 m; the analytic tiles: 1.081, error <= 0.124); steel (booster barrel, sunlit, now the mipmapped steel map):
   temporal <= 0.0007 (ref <= 0.0007), error <= 0.043 (500 m; it was 0.128 with the analytic weld / dent fades), mean 0.29 -> 0.31
   with distance; ratio 1.074 (not gated). Logs of this state: `hs_shimmer_tiles.log`, `hs_shimmer_steel.log`. Before the fix round the
   check averaged a 1 m patch (blind to moire) and gated only the ratio; with the per-pixel metrics the first shader failed (steel
@@ -137,18 +150,22 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   measured, a linear scaling of the close-up's 0.014 ms/MP to the two eyes' 45 MP of the Pimax target): up to ~0.6 ms when the hull
   fills the whole view; at the stack's usual distances 10 % of that or less. Dents are skipped under tiles. The plan's 1.0 ms [E]
   therefore holds with margin at 2 x pixels, and is an estimate at VR size.
+- Cost of the tile maps (`vehicle_cost_check.gd`, same rig, 3 repeats; logs `tl_cost_before.txt` / `tl_cost_after.txt` in the plan's sdd folder):
+  the shader vs the old steel on the same meshes in the frame-filling belly close-up, analytic -> texture: scale 1 +0.024 -> +0.032 ms
+  (+0.017 -> +0.022 ms per MP), scale 2 (5.8 MP) +0.087 -> +0.118 ms (+0.015 -> +0.020 ms per MP): +30 % of the shader's own cost (three
+  more texture reads per tiled pixel, no hex maths); triangles unchanged. The absolute frame times of the two runs differ (scale 2 hull
+  2.45 vs 1.80 ms, the steel variant moved the same way), so only the within-run deltas are comparable. VR extrapolation of the
+  per-MP figure to 45 MP: ~0.9 ms when a tiled hull fills both eyes (was ~0.7 ms), NOT measured.
+- Repeats: the patch repeats every 0.30 x 0.52 m but its content is the same on every tile by nature (identical ceramic tiles); what
+  could read as a pattern is the shade / repaired variation, which repeats after 38 x 33 m of the surface (a ship is 50 m long and
+  its shield ~14 m wide at most). In the stereo close-up (`screenshots/vehicles/tl_after_st_eye0.png`) and the 5 m / 15 m / 60 m
+  views no repetition, seam or mip bleed at tile edges is visible; the id map is what breaks the patch.
 - Evidence tools: `vehicle_look_shots.gd` (real mission, orbit camera relative to a body, `--stereo=` for eye images, `--scan`
   for flap / fin deflections over time), `vehicle_cost_check.gd`, `vehicle_rig.gd` (the common mission / camera rig). Final fix round
   renders: `screenshots/vehicles/fin300_b0.png` (booster at T+300 s, fins -15.5 / 30.0 / -10.2 deg), `flap_real.png` (ship return,
   flaps 90 / 81 / 24.6 / 22.4 deg).
 
 ## Open points
-- Mipmapped tile set (estimate, not built): one periodic map over the hex lattice's rectangular repeat (0.30 x 0.52 m, two tiles),
-  256 x 512 RGBA8 (1.2 x 1.0 mm per texel, resolves the 6 mm gap), slope + bevel, slope energy, gap mask: 0.5 MiB + mips = 0.67 MiB;
-  the gap / bevel then filter by mip + anisotropy and the `stripe_cover` / bevel fades go. The per-tile shade and the repaired
-  tiles need the cell id (lattice integers, still analytic) or a 128 x 256 R8 id-shade map (32 kB, nearest per cell, mips to the
-  mean); a texture with the per-tile variation baked in would need ~2.4 x 4.2 m at 1.2 mm = 28 MiB, so no. The coverage boundary
-  (smooth cut by the half-angle table) and the ogive's arc shear stay analytic.
 - Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel). The flat flap / tile patches that
   read tan under a low Sun are the black tile (albedo 0.03) in direct, reddened Sun (~14 deg): diffuse, specular only
   ~10 %, AgX lifts it (probe in `sky-fix-report.md` Fix 2). Not a bug. Steel luminance ratio gated at 1.18.

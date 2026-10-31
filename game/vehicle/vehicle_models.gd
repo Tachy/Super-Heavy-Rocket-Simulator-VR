@@ -81,6 +81,7 @@ static func _load(vehicle_id: String) -> Dictionary:
 static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: String) -> Dictionary:
 	var materials := {}
 	var steel_map := _steel_map(look.get("steel_map", {}), model_dir, vehicle_id)
+	var tile_maps := _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
 	for key: String in ["steel", "booster", "ship", "flap"]:
 		var material := ShaderMaterial.new()
 		material.shader = HULL_SHADER
@@ -105,7 +106,15 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 			stations.resize(HULL_TABLE_SIZE)
 			half_angles.resize(HULL_TABLE_SIZE)
 			material.set_shader_parameter("tile_across_flats_m", float(tiles["hex_across_flats_m"]))
-			material.set_shader_parameter("tile_gap_m", float(tiles["gap_m"]))
+			if not tile_maps.is_empty():
+				var maps_info: Dictionary = look["tile_maps"]
+				material.set_shader_parameter("tiles_textured", true)
+				material.set_shader_parameter("tile_patch", tile_maps["patch"])
+				material.set_shader_parameter("tile_sel", tile_maps["sel"])
+				material.set_shader_parameter("tile_ids", tile_maps["ids"])
+				material.set_shader_parameter("tile_period_m", Vector2(maps_info["period_m"][0], maps_info["period_m"][1]))
+				material.set_shader_parameter("tile_ids_size", Vector2(maps_info["ids_size"][0], maps_info["ids_size"][1]))
+				material.set_shader_parameter("tile_tilt_energy_range", float(maps_info["tilt_energy_range"]))
 			material.set_shader_parameter("coverage_count", count)
 			material.set_shader_parameter("coverage_station_m", stations)
 			material.set_shader_parameter("coverage_half_angle_rad", half_angles)
@@ -131,6 +140,26 @@ static func _steel_map(info: Dictionary, model_dir: String, vehicle_id: String) 
 	return ImageTexture.create_from_image(image)
 
 
+## The baked tile maps (tools/structures/hull_tiles.py): the patch with a full mip chain made here (box averages, which its
+## channels are designed for), the selector and id maps as they are (nearest sampled, no mips: ids cannot be averaged).
+## {} when a file is missing (plain dark tiles without gaps, one log line).
+static func _tile_maps(info: Dictionary, model_dir: String, vehicle_id: String) -> Dictionary:
+	var maps := {}
+	for key: String in ["patch", "sel", "ids"]:
+		var path := model_dir.path_join(String(info.get("files", {}).get(key, "")))
+		var image := Image.load_from_file(path) if not info.is_empty() and FileAccess.file_exists(path) else null
+		if image == null:
+			if not _logged.has(vehicle_id + "/tile_maps"):
+				_logged[vehicle_id + "/tile_maps"] = true
+				print("VehicleModels: %s has no tile maps (%s): plain dark tiles" % [vehicle_id, path.get_file()])
+			return {}
+		image.convert(Image.FORMAT_RGBA8)
+		if key == "patch":
+			image.generate_mipmaps()
+		maps[key] = ImageTexture.create_from_image(image)
+	return maps
+
+
 static func _fallback(vehicle_id: String, reason: String) -> Dictionary:
 	if not _logged.has(vehicle_id):
 		_logged[vehicle_id] = true
@@ -154,6 +183,7 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	for script in SOURCE_SCRIPTS:
 		sources.append(Paths.repo_dir().path_join("tools/structures/blender").path_join(script))
 	sources.append(Paths.repo_dir().path_join("tools/structures/hull_textures.py"))
+	sources.append(Paths.repo_dir().path_join("tools/structures/hull_tiles.py"))
 	for path in sources:
 		if FileAccess.file_exists(path) and FileAccess.get_modified_time(path) > built:
 			return "models older than " + path.get_file()

@@ -13,3 +13,11 @@
 ## Steel values until 2026-10-31
 
 Steel: metallic 0.8, roughness 0.27 [E] (a diffuse share stands in for the sky's weak reflection); albedo sRGB 0.80 / 0.81 / 0.83, warm tint (1, 0.985, 0.96), mottle +-10 %. The diffuse share compensated the then black radiance cube.
+
+## Analytic heat shield tiles until 2026-10-31
+
+The tiles were computed per pixel in the shader (`heat_shield_tiles.gdshaderinc`): axial hex cells of (arc, station), the distance
+to the cell edge box-filtered by the pixel footprint for the gap, a bevel normal faded out at 1-3 bevel widths, a per-tile hash for
+the shade and the repaired tiles, all faded to the mean by the footprint. Shimmer: tiles ratio 1.081, error <= 0.124 (40 m), temporal
+0.0001-0.010; cost vs the old steel in the belly close-up +0.024 / +0.087 ms (scale 1 / 2). Replaced by the baked maps (see the
+hull shader section); the file is now `hull_noise.gdshaderinc` (hash and value noise of the steel only).
