@@ -149,6 +149,9 @@ var eye_adaptation_enabled := true
 ## scene_per_cd_m2, and the shaders read that product as atmosphere_exposure_gain for what is not lit through the tables
 ## (Moon, Sun disc).
 var exposure_gain := 1.0
+## Artificial light the eye sees (cd/m^2): the luminance of the lamp-lit surfaces of a site in view (World sets it each frame
+## from TowerView.lamp_adaptation_cd_m2, 0 = none); enters L_a as one more candidate of the maximum, view-weighted by the caller.
+var lamp_adaptation_cd_m2 := 0.0
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
 ## The luminance the eye is adapted to this frame (cd/m^2, EyeAdaptation.adaptation_cd_m2; 0 with the adaptation off):
@@ -327,7 +330,10 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	if eye_adaptation_enabled:
 		var moon_fixed := gcrf_to_fixed * (moon_gcrf_m - earth_center_gcrf_m) if moon_gcrf_m != Vector3.ZERO else Vector3.ZERO
 		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au, moon_fixed)
-		_eye.advance(luminance, last_target_scotopic_cd_m2, reference_luminance(d_au), adaptation_dt_s)
+		luminance = maxf(luminance, lamp_adaptation_cd_m2)  # lamp-lit surfaces in view (white)
+		var scotopic := maxf(last_target_scotopic_cd_m2,
+				lamp_adaptation_cd_m2 * Vector3.ONE.dot(EyeAdaptation.SCOTOPIC_WEIGHTS))  # white lamps light the rods too
+		_eye.advance(luminance, scotopic, reference_luminance(d_au), adaptation_dt_s)
 		exposure_gain = _eye.gain
 		adaptation_cd_m2 = _eye.adaptation_cd_m2
 		scotopic_cd_m2 = _eye.scotopic_cd_m2

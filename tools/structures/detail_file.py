@@ -116,6 +116,50 @@ def load(path) -> dict:
     return data
 
 
+LIGHTS_FILE_NAME = "starbase_olp2_lights.toml"
+LIGHTS_KEYS = ("dusk_deg", "fade_deg", "max_shadowed", "shadow_range_m", "point_angle_rad", "flash_per_min", "flash_on_s",
+               "red_cd", "white_day_cd")
+GROUP_KINDS = ("flood", "omni", "obstruction")
+GROUP_KEYS = ("name", "kind", "ref", "along_m", "across_m", "z_m", "range_m")
+
+
+def load_lights(path) -> dict:
+    """Lamps file (config/structures/starbase_olp2_lights.toml): `[lights]` settings and `[[lights.group]]` fixtures.
+
+    Flood groups need lumens, cct_k, half_angle_deg and aim; omni groups lumens and cct_k; at most `max_shadowed`
+    shadow-casting lights in all (shadow = per group and side, the first n of the group's `count`)."""
+    with open(Path(path), "rb") as f:
+        data = tomllib.load(f)
+    settings = data.get("lights")
+    if not isinstance(settings, dict):
+        raise DetailFileError("lights: must be a table")
+    _need(settings, LIGHTS_KEYS, "lights")
+    if settings["dusk_deg"] >= 0.0:
+        raise DetailFileError("lights.dusk_deg: the Sun's depression threshold must be negative")
+    groups = settings.get("group", [])
+    if not groups:
+        raise DetailFileError("lights.group: empty")
+    shadowed = 0
+    for i, g in enumerate(groups):
+        where = f"lights.group[{i}]"
+        _need(g, GROUP_KEYS, where)
+        if g["kind"] not in GROUP_KINDS:
+            raise DetailFileError(f"{where}.kind: '{g['kind']}' not in {GROUP_KINDS}")
+        if g["ref"] not in ("face", "axis"):
+            raise DetailFileError(f"{where}.ref: must be 'face' or 'axis'")
+        _positive(g, "range_m", where)
+        extra = {"flood": ("lumens", "cct_k", "half_angle_deg", "aim"), "omni": ("lumens", "cct_k"), "obstruction": ()}
+        _need(g, extra[g["kind"]], where)
+        for k in ("lumens", "cct_k", "half_angle_deg"):
+            if k in g:
+                _positive(g, k, where)
+        sides = 2 if g.get("mirror", False) else 1
+        shadowed += min(int(g.get("shadow", 0)), int(g.get("count", 1))) * sides
+    if shadowed > settings["max_shadowed"]:
+        raise DetailFileError(f"lights: {shadowed} shadow-casting lights, max_shadowed is {settings['max_shadowed']}")
+    return data
+
+
 _VALUE_LINE = re.compile(r"^\s*[A-Za-z_][\w.]*\s*=")
 _TAG = re.compile(r"#.*\[(E|S)\]")
 

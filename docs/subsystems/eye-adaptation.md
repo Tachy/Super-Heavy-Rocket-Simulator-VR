@@ -124,6 +124,11 @@ shaders:
     integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
     value per view, no Bezold-Bruecke hue shift (lunar day keeps B = S = 1).
 
+- **Lamps in view** [call 2026-10-31, `Atmosphere.lamp_adaptation_cd_m2`]: one more candidate of L_a's maximum (white, and its scotopic
+  equivalent), set by `World` from `TowerView.lamp_adaptation_cd_m2`: 3 % of the lit pad's luminance (Pad B deck 16.8 cd/m^2 at night) x the
+  camera's reach (300 m full, 0 at 1.5 km) x the view axis (25 deg full, 0 at 60 deg). 0 by day and at sites without lamps. Details
+  `launch-structures.md` "Lights".
+
 - **Ambient and the gain.** The sky's radiance cubemap holds scene values, so it is redrawn at a 2 % change of
   `luminance_scale`; during a fast light adaptation (tau 0.5 s) the ambient lags the gain by the 8 to 16 frames of the redraw
   (no scaling instead: `atmosphere-scattering.md`, "Why the gain needs a redraw").

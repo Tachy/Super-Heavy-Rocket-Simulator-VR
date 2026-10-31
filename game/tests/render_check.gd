@@ -32,6 +32,7 @@
 #          for before / after comparisons; the HUD's frame-rate line hidden). --repeat_identical[=2] once settled compares that many consecutive frames
 #          of the unchanged scene: any differing pixel fails (exit code 1; the HUD's frame-rate line hidden).
 #          --no_air_shadow: the clouds' shadows on the air off (the flag CloudLayer.air_shadow).
+# Tower lamps: on as in the game (between civil dusk and dawn); --no_tower_lights leaves them out (day comparison).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -212,6 +213,9 @@ func _process(_delta: float) -> bool:
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
 		world.refraction.enabled = not _args.has("no_refraction")
+		if _args.has("no_tower_lights"):
+			for tower in world.towers:
+				tower.remove_lights()
 		world.set_focus(_args.get("focus", World.FOCUS_EARTH))
 		if _args.has("lat"):
 			_view_from_ground(world)

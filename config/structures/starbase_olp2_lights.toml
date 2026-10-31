@@ -1,0 +1,188 @@
+# Pad B lamps (fine build task 4, spec G): where the fixtures stand, what they emit, when they burn.
+# Own file (not the detail file): the lamps do not feed the Blender models, so a change here never makes them stale.
+# Every value carries [E] (own estimate, method named) or [S] (published, source). Positions of the real lamps are read
+# from NSF / SpaceX photos (git-ignored screenshots/mechazilla/: padb_night_*, spacex-starship-mdr-100.webp,
+# HN635FUWYAAzbOB.webp) at the tower's metric scale (144 m roof, 12 m face), stated per group.
+# Site frame: z above the site origin (the tower's foot), `along_m` along the pad -> tower line from the reference
+# (ref "face": the tower's pad-side face, negative = out toward the pad; ref "axis": the mount axis), `across_m` across it.
+# `mirror` repeats the group at -across_m. `aim` = direction (along, across, up) of the beam, not normalised.
+
+[lights]
+dusk_deg = -6.0            # [S] civil dusk / dawn: the Sun's centre 6 deg below the horizon (switch-on / switch-off)
+fade_deg = 1.0             # [E] the lamps run up over this much further Sun depression (a photocell is not a switch)
+max_shadowed = 4           # [E] spec G: the shadow-casting spot lights of the whole site
+shadow_range_m = 500.0     # [E] a lamp's shadow map fades out beyond this camera distance (cost control)
+point_angle_rad = 0.0006   # [E] a lens never draws smaller than this angle (~2 px of a 5294 px / 100 deg eye): the far emissive point
+flash_per_min = 30.0       # [S] FAA AC 70/7460-1 / AC 150/5345-43 L-864 flashing red beacon: 20-40 flashes per minute, mid 30
+flash_on_s = 0.5           # [E] the burn time of one flash (the ACs give an effective-intensity profile, not a burn time)
+red_cd = 2000.0            # [S] AC 150/5345-43 L-864 (night): 2000 cd effective +-25 %
+white_day_cd = 20000.0     # [S] AC 150/5345-43 L-865 (day, medium-intensity white): 20000 cd +-25 %
+light_color_red_k = 1800.0 # [E] colour temperature of the red lens (only the hue: the lens is filtered)
+
+# Obstruction: top and mid level corners of the tower (4 + 4); flashing day and night, white by day, red at night. The lamp's
+# own light on the steel is only drawn at night (the day lens is the point).
+[[lights.group]]
+name = "obstruction_roof"
+kind = "obstruction"
+ref = "face"
+along_m = 0.3             # [E] corners of the roof deck (12 m face, rail line), mdr-100 shows a lamp on the roof's edge
+across_m = 5.9            # [E] lamp layout of this group (comment above)
+z_m = 146.0               # [E] on the railing posts, 2 m over the 144 m deck
+mirror = true
+lens_m = 0.25             # [E] L-864 lens ~ 0.25 m
+range_m = 12.0            # [E] 2000 cd: 0.2 lux at 100 m, the glow on the steel matters inside ~12 m
+
+[[lights.group]]
+name = "obstruction_roof_back"
+kind = "obstruction"
+ref = "face"
+along_m = 11.7            # [E] lamp layout of this group (comment above)
+across_m = 5.9            # [E] lamp layout of this group (comment above)
+z_m = 146.0               # [E] lamp layout of this group (comment above)
+mirror = true
+lens_m = 0.25             # [E] lamp layout of this group (comment above)
+range_m = 12.0            # [E] lamp layout of this group (comment above)
+
+[[lights.group]]
+name = "obstruction_mid"
+kind = "obstruction"
+ref = "face"
+along_m = -0.3            # [E] FAA: one more level halfway (72 m) for a structure of this height
+across_m = 6.3            # [E] lamp layout of this group (comment above)
+z_m = 72.0                # [E] lamp layout of this group (comment above)
+mirror = true
+lens_m = 0.25             # [E] lamp layout of this group (comment above)
+range_m = 12.0            # [E] lamp layout of this group (comment above)
+
+[[lights.group]]
+name = "obstruction_mid_back"
+kind = "obstruction"
+ref = "face"
+along_m = 12.3            # [E] lamp layout of this group (comment above)
+across_m = 6.3            # [E] lamp layout of this group (comment above)
+z_m = 72.0                # [E] lamp layout of this group (comment above)
+mirror = true
+lens_m = 0.25             # [E] lamp layout of this group (comment above)
+range_m = 12.0            # [E] lamp layout of this group (comment above)
+
+# Roof floods: the bright crown of padb_night_tower_lit; one in each corner, beam outward and down.
+[[lights.group]]
+name = "roof_flood_front"
+kind = "flood"
+ref = "face"
+along_m = 0.5             # [E] lamp layout of this group (comment above)
+across_m = 5.5            # [E] lamp layout of this group (comment above)
+z_m = 145.5               # [E] lamp layout of this group (comment above)
+mirror = true
+aim = [-0.7, 0.7, -0.6]   # [E] lamp layout of this group (comment above)
+lumens = 30000.0          # [E] class of a 200-300 W LED industrial flood (130 lm/W)
+cct_k = 6500.0            # [E] daylight-white LED (the photos read white; a blackbody 5000 K would show orange in linear sRGB)
+half_angle_deg = 40.0     # [E] wide flood optic
+range_m = 120.0           # [E] lamp layout of this group (comment above)
+shadow = 0                # [E] lamp layout of this group (comment above)
+lens_m = 0.4              # [E] lamp layout of this group (comment above)
+
+[[lights.group]]
+name = "roof_flood_back"
+kind = "flood"
+ref = "face"
+along_m = 11.5            # [E] lamp layout of this group (comment above)
+across_m = 5.5            # [E] lamp layout of this group (comment above)
+z_m = 145.5               # [E] lamp layout of this group (comment above)
+mirror = true
+aim = [0.7, 0.7, -0.6]    # [E] lamp layout of this group (comment above)
+lumens = 30000.0          # [E] as the front floods
+cct_k = 6500.0            # [E] lamp layout of this group (comment above)
+half_angle_deg = 40.0     # [E] lamp layout of this group (comment above)
+range_m = 120.0           # [E] lamp layout of this group (comment above)
+shadow = 0                # [E] lamp layout of this group (comment above)
+lens_m = 0.4              # [E] lamp layout of this group (comment above)
+
+# The two lamps on the pad-side face's edge, one above the other (spacex-starship-mdr-100: lamps at ~89 m and ~83 m on the
+# face's right edge, 4.9 px/m from the 144 m tower in that frame), light the ship's upper half.
+[[lights.group]]
+name = "face_lamps"
+kind = "flood"
+ref = "face"
+along_m = -0.8            # [E] lamp layout of this group (comment above)
+across_m = 6.4            # [E] lamp layout of this group (comment above)
+z_m = 89.0                # [E] lamp layout of this group (comment above)
+count = 2                 # [E] lamp layout of this group (comment above)
+step_z_m = -6.0           # [E] 89 and 83 m, mdr-100
+aim = [-1.0, -0.35, -0.15]# [E] lamp layout of this group (comment above)
+lumens = 20000.0          # [E] 150 W LED flood class
+cct_k = 5000.0            # [E] slightly warm white of the two lamps in mdr-100
+half_angle_deg = 35.0     # [E] lamp layout of this group (comment above)
+range_m = 90.0            # [E] lamp layout of this group (comment above)
+shadow = 0                # [E] lamp layout of this group (comment above)
+lens_m = 0.35             # [E] lamp layout of this group (comment above)
+
+# Interior lamps: the lattice glows from inside in padb_night_tower_lit (each level's deck lit, the diagonals bright).
+[[lights.group]]
+name = "lattice_lamps"
+kind = "omni"
+ref = "face"
+along_m = 2.0             # [E] just behind the cladding plane / inside the open lattice
+across_m = 0.0            # [E] lamp layout of this group (comment above)
+z_m = 14.0                # [E] lamp layout of this group (comment above)
+count = 14                # [E] lamp layout of this group (comment above)
+step_z_m = 9.0            # [E] every ~1.7 floors: 14 .. 131 m
+lumens = 30000.0          # [E] a cluster of LED floods per point: the night photo's lattice is bright to the roof
+cct_k = 4000.0            # [E] lamp layout of this group (comment above)
+range_m = 30.0            # [E] lamp layout of this group (comment above)
+shadow = 0                # [E] lamp layout of this group (comment above)
+lens_m = 0.3              # [E] lamp layout of this group (comment above)
+
+# Tower foot floods: the bright pair at the base of padb_night_floodlights_mount (left of the mount), aimed at the mount.
+[[lights.group]]
+name = "foot_floods"
+kind = "flood"
+ref = "face"
+along_m = -1.0            # [E] lamp layout of this group (comment above)
+across_m = 5.0            # [E] lamp layout of this group (comment above)
+z_m = 7.0                 # [E] lamp layout of this group (comment above)
+mirror = true
+aim = [-1.0, -0.4, -0.2]  # [E] lamp layout of this group (comment above)
+lumens = 30000.0          # [E] industrial flood class
+cct_k = 6500.0            # [E] lamp layout of this group (comment above)
+half_angle_deg = 45.0     # [E] lamp layout of this group (comment above)
+range_m = 80.0            # [E] lamp layout of this group (comment above)
+shadow = 0                # [E] lamp layout of this group (comment above)
+lens_m = 0.4              # [E] lamp layout of this group (comment above)
+
+# Mount floodlight banks: four lamps in a row on a mast beside the mount (padb_night_floodlights_mount: a row of four round
+# lamps ~1 m apart, ~15 m up; HN635FUWYAAzbOB: a bank across the pad on the right). Both banks aimed at the stack.
+[[lights.group]]
+name = "mount_banks"
+kind = "flood"
+ref = "axis"
+along_m = 8.0             # [E] masts on the tower side of the mount
+across_m = 21.0           # [E] between the mount's base (+-22.3 m) and the ramps' walls
+z_m = 27.0                # [E] masts ~25-30 m: the bank looks down on the 20 m deck (photo: the lamps stand level with the deck's upper edge)
+count = 4                 # [E] lamp layout of this group (comment above)
+step_across_m = 1.0       # [E] row of four, ~1 m apart in the photo (lamps ~ 0.7 m)
+mirror = true
+aim = [-0.35, -1.0, -0.33]# [E] lamp layout of this group (comment above)
+lumens = 40000.0          # [E] stadium-class LED panel 300 W
+cct_k = 6500.0            # [E] the cold white of the photo
+half_angle_deg = 30.0     # [E] lamp layout of this group (comment above)
+range_m = 150.0           # [E] lamp layout of this group (comment above)
+shadow = 2                # [E] two lamps per bank cast shadows: the site's four (max_shadowed)
+lens_m = 0.5              # [E] lamp layout of this group (comment above)
+
+# Deck lights: small omni lamps round the mount's deck and on the stair strips.
+[[lights.group]]
+name = "deck_lamps"
+kind = "omni"
+ref = "axis"
+along_m = 12.0            # [E] lamp layout of this group (comment above)
+across_m = 11.0           # [E] lamp layout of this group (comment above)
+z_m = 21.5                # [E] lamp layout of this group (comment above)
+count = 2                 # [E] lamp layout of this group (comment above)
+step_across_m = 6.0       # [E] lamp layout of this group (comment above)
+mirror = true
+lumens = 5000.0           # [E] a 50 W LED wall pack
+cct_k = 4000.0            # [E] lamp layout of this group (comment above)
+range_m = 25.0            # [E] lamp layout of this group (comment above)
+shadow = 0                # [E] lamp layout of this group (comment above)
+lens_m = 0.25             # [E] lamp layout of this group (comment above)

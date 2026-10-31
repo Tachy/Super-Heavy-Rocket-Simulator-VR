@@ -24,6 +24,7 @@ var _world: World
 var _frames := 120
 var _repeats := 3
 var _mask_range := 0.0
+var _utc := START_UTC
 
 
 func _initialize() -> void:
@@ -33,6 +34,7 @@ func _initialize() -> void:
 		args[parts[0]] = parts[1] if parts.size() > 1 else ""
 	_frames = int(args.get("frames", "120"))
 	_repeats = int(args.get("repeats", "3"))
+	_utc = String(args.get("utc", START_UTC))  # --utc=2026-10-13T03:30:00: the lamps burn (night)
 	var scales: Array[float] = []
 	for text: String in String(args.get("scale", "1,2")).split(","):
 		scales.append(float(text))
@@ -47,7 +49,7 @@ func _run(scales: Array[float]) -> void:
 	_world.clock.warp = 0.0
 	_world.weather.enabled = false
 	TimePanel.show_frame_rate = false
-	_world.clock.set_time(_world.core.utc_to_tdb_s(START_UTC))
+	_world.clock.set_time(_world.core.utc_to_tdb_s(_utc))
 	_world.atmosphere.eye_adaptation_enabled = false
 	_world.set_focus(World.FOCUS_EARTH)
 	var tower := _world.towers[0] if not _world.towers.is_empty() else null

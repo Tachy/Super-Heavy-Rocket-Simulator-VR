@@ -133,3 +133,34 @@ def test_ratio_scale():
     pts = {"scale": {"a": [0, 0], "b": [90, 0], "length_m": 9.0},
            "measure": {"w": {"a": [0, 0], "b": [0, 120]}}}
     assert ratio.measure(pts)["w"] == pytest.approx(12.0)
+
+
+LIGHTS = ROOT / "config" / "structures" / detail_file.LIGHTS_FILE_NAME
+
+
+def test_lights_file_loads_and_every_value_is_tagged():
+    d = detail_file.load_lights(LIGHTS)
+    s = d["lights"]
+    assert s["dusk_deg"] == -6.0  # [S] civil dusk
+    assert 20.0 <= s["flash_per_min"] <= 40.0  # [S] FAA L-864
+    assert s["red_cd"] == 2000.0 and s["white_day_cd"] == 20000.0
+    kinds = {g["kind"] for g in s["group"]}
+    assert kinds == {"flood", "omni", "obstruction"}
+    structural = ("name", "kind", "ref", "mirror")  # labels, not values
+    untagged = [(n, line) for n, line in detail_file.value_lines_without_tag(LIGHTS)
+                if line.split("=")[0].strip() not in structural]
+    assert untagged == []
+
+
+def test_lights_file_roof_obstruction_lamps_at_the_roof():
+    d = detail_file.load_lights(LIGHTS)
+    roof = [g for g in d["lights"]["group"] if g["name"].startswith("obstruction_roof")]
+    assert roof and all(g["z_m"] > ROOF_DECK_M for g in roof)
+
+
+def test_lights_file_rejects_too_many_shadowed(tmp_path):
+    text = LIGHTS.read_text(encoding="utf-8").replace("max_shadowed = 4", "max_shadowed = 3")
+    bad = tmp_path / "lights.toml"
+    bad.write_text(text, encoding="utf-8")
+    with pytest.raises(detail_file.DetailFileError, match="shadow"):
+        detail_file.load_lights(bad)

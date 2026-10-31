@@ -1,7 +1,7 @@
 # Launch structures (Pad B tower and chopstick model)
 
-State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.md`, tasks 1-3 done (lattice and tower body;
-carriage, both chopsticks, QD arm; square mount, trench, terrain mask); tasks 4-5 (lights, acceptance) open. The prototype plan
+State: fine build plan `docs/superpowers/plans/2026-10-31-mechazilla-fine-build.md`, tasks 1-4 done (lattice and tower body;
+carriage, both chopsticks, QD arm; square mount, trench, terrain mask; lights); task 5 (acceptance) open. The prototype plan
 (`2026-10-31-pad-b-prototype.md`) built the hybrid pipeline. Spec: `docs/superpowers/specs/2026-10-28-pad-b-model-design.md`.
 The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`; everything the physics touches stays on the physics numbers (table
 "Physics deviations" below).
@@ -214,6 +214,42 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   where the near range ends on the 60 deg / 900 px desktop view (2.5 px at a 1500 px VR focal length). The hand-over is a
   hard swap to a merged mesh with the same geometry, so the 1.30 px is not visible in the luminance, structure or shimmer
   measures; recorded as a deviation from the spec's number.
+
+## Lights (fine build task 4, spec G)
+- Fixtures: `config/structures/starbase_olp2_lights.toml` (own file: the lamps do not feed the Blender models, so a change never stales them;
+  validator `detail_file.load_lights`). Groups in the site frame (`ref` face / axis, along / across / z, count + steps, mirror): obstruction
+  lamps (4 at the roof corners 146 m, 4 at 72 m), roof floods (4), the two face-edge lamps at 89 and 83 m (`spacex-starship-mdr-100`: lamps
+  ~89 / ~83 m on the pad-side face's edge, 4.9 px/m from the 144 m tower), 14 lattice lamps every 9 m, tower-foot floods (2), two mount
+  banks of four lamps (z 27 m, 21 m across, aimed at the deck; `padb_night_floodlights_mount`, `HN635FUWYAAzbOB`), deck lamps (4). All
+  positions / lumens / CCT [E] with the photo named, FAA values [S]. 27 burning lamps + 8 obstruction lamps, 4 shadow-casting spots
+  (`max_shadowed`, the banks' first two lamps each), lights are Godot spot / omni with ranges 12-150 m (no light beyond its range).
+- Physics: lumens -> cd (`TowerLights.candela_cone` for the cone profile Godot's `spot_angle_attenuation` 4 makes: flux of the profile = the
+  lumens; `candela_omni`), energy = cd / pi x `atmosphere.scene_per_cd_m2` (the Sun's convention; includes the eye adaptation's gain, updated
+  each frame), distance attenuation 2 (inverse square, Godot's 1 - (d/r)^4 window), CCT by Kim et al. 2002 (6500 K ~ white; 5000 K orange in
+  linear sRGB). Lenses: `light_lens.gdshader`, a billboard disc at L = I / A in cd/m^2 x `atmosphere_scene_per_cd_m2`; far away it stops at
+  `point_angle_rad` 0.0006 and its luminance falls by the area ratio (flux kept: the far emissive point), halo cosmetic.
+- Schedule: `night_factor` 0 above Sun -6 deg (civil dusk, [S]) up to 1 at -7 deg (`fade_deg`), from the Sun's elevation at the site
+  (`TowerView.update_lights`, called from `World._update_sun_light`, no extra cost by day: lights hidden). Obstruction lenses flash always:
+  30 / min [S: FAA AC 70/7460-1 / 150/5345-43, 20-40], burn 0.5 s [E]; red 2000 cd [S] by night (with a red omni glow on the steel), white
+  20000 cd [S, L-865] by day (lens only).
+- Eye adaptation (open design point, [call]): L_a had no term for artificial light, so a lamp-lit pad at the dark-adapted gain (12 400) was blown
+  to white. `Atmosphere.lamp_adaptation_cd_m2` (set by `World` from `TowerView.lamp_adaptation_cd_m2`) is one more candidate of L_a's maximum
+  (and its scotopic equivalent): 3 % of the lit deck's luminance (albedo 0.3 / pi x the fixture model's 176 lux = 16.8 cd/m^2), weighted by what
+  the eye sees - camera within 300 m full, 0 beyond 1.5 km, site within 25 deg of the view axis full, 0 beyond 60 deg - so there is no global
+  term; at a mount view L_a 0.50 cd/m^2, gain 7390 (was 12 400). 3 % is the mean-to-peak ratio of a night view [call], to be tuned in the headset.
+  Other lamps (city) are still not in L_a.
+- Tests: `game/tests/tower_lights_test.gd` (schedule at -5.9 / -6.5 / -7.5 deg, flux of the cone profile, FAA rate 30 / min, day: no lamp burns /
+  all 8 obstruction lenses flash, night: 27 burn, 4 shadowed, rendered deck illuminance 218 lux = 1.24 x the fixture model 176 lux (limit
+  30 %), exposure scaling, no lamps at box sites); `pytest tools/structures/tests/test_detail_file.py` (lamps file). Day luminance with the lamps
+  against `render_check --no_tower_lights` (fixed exposure, 17:30 UTC, mount view): mean sRGB luminance changes by 0.004 % (limit 0.5 %).
+- Cost (`tower_cost_check --utc=`, 1600x900, tower incl. lamps vs hidden): day close-up +0.06 ms GPU (1x), night +0.36 ms (+0.35 ms at 2x
+  pixels), 300 m +0.05 ms, 1 km +0.05 ms, 6 km +0.07 ms; 22 draw calls more at night (lights, lenses, housings). Night image set
+  `screenshots/pad-b/fine/cmp_*.png` (ours left, reference right), twilight at Sun -6.7 deg, night at -47 deg.
+- Left out / differs: no Blender `gen_lights.py` (lens discs and plain dark boxes made in Godot, surface detail rule: the housings are not
+  modelled); no lamps on the arms, carriage, QD arm or the vehicle; no cranes / scaffold lights, no booster in the lamp tests; the far
+  hardstand receives lamp light only inside 150 m; the far tower tier (> ~1 km) is not lit by the lamps (its shader has its own colour), so
+  at 900 m by night the tower is nearly dark where the photo shows it bright; twilight at -6 .. -8 deg is dark: the references' lamps burn
+  at sunset (Sun ~ -1 deg), the spec's civil dusk threshold is kept.
 
 ## Fine build task 3 evidence (`screenshots/pad-b/fine/`, `.superpowers/sdd/2026-10-31-pad-b-prototype/fine3_*.txt`)
 - `tools/structures/tests/test_mount_layout.py`: base 44.6 x 40 m, deck 18.7 m, ring top = physics height, ring 9 / 10.4 m, 20 clamps, aprons 26 m wide / 33 m

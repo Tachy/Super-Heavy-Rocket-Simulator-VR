@@ -20,6 +20,15 @@ const MASK_INSET_M := 0.05  ## [E] the terrain mask ends this far inside the wal
 const MASK_VISIBLE_MARGIN_M := 150.0  ## the pit model is drawn this much beyond the mask's camera range
 const ARM_STRIP := Color(0.45, 0.36, 0.24)  ## [E] tan strip on the arm deck, images.jpeg
 
+## [call] Lamp adaptation weights: the lit work area dominates the view inside ~300 m and is a small patch beyond 1.5 km.
+const LAMP_VIEW_NEAR_M := 300.0
+const LAMP_VIEW_FAR_M := 1500.0
+## [call] The eye adapts to the view's mean, not to its brightest patch: the lit deck is ~30 x the mean of a night view
+## (dark ground and sky around the lamp-lit parts), so the lit surfaces stay below the display's white.
+const LAMP_MEAN_SHARE := 0.03
+const LAMP_VIEW_FULL_DEG := 25.0
+const LAMP_VIEW_NONE_DEG := 60.0
+
 var site_id := ""
 ## True when the Pad B models were built (the mount, the trench and the terrain mask), false for the boxes.
 var has_models := false
@@ -37,6 +46,8 @@ var _actuator: Dictionary = {}  ## detail file [carriage] actuator_* keys
 var _steel := LitAerial.material(Color(0.42, 0.43, 0.45), 0.5, 0.5)  # [E] albedo ~0.15 as TowerMaterial
 var _concrete := LitAerial.material(Color(0.62, 0.61, 0.58), 0.9, 0.0)
 var _lattice := ShaderMaterial.new()
+## The lamps of a model site (TowerLights); null for the boxes.
+var tower_lights: TowerLights = null
 
 
 ## Rebuilding (site change, re-entry) frees what an earlier build made.
@@ -46,6 +57,7 @@ func build(geometry: Dictionary) -> void:
 		child.queue_free()
 	_arms.clear()
 	_carriage = null
+	tower_lights = null
 	_cables.clear()
 	_cable_lateral_m.clear()
 	_actuators.clear()
@@ -89,6 +101,7 @@ func build(geometry: Dictionary) -> void:
 	if not models.is_empty():
 		_build_carriage(models)
 		_build_qd_arm(models, geometry)
+		_build_lights(geometry)
 	update_state({})
 
 
@@ -104,6 +117,55 @@ func _pad_b_lattice(models: Dictionary, geometry: Dictionary, axes: Basis) -> No
 	lattice.basis = Frames.basis_to_render(axes)
 	lattice.position = Frames.to_render(centre_site)
 	return lattice
+
+
+## The lamps (config/structures/starbase_olp2_lights.toml); none without the file.
+func _build_lights(geometry: Dictionary) -> void:
+	var lamps := TowerLights.load_config()
+	if lamps.is_empty():
+		return
+	tower_lights = TowerLights.new()
+	tower_lights.name = "Lights"
+	add_child(tower_lights)
+	tower_lights.build(lamps, geometry)
+
+
+## What the eye adapts to from the lamps (cd/m^2): the lit deck's luminance (TowerLights.deck_luminance_cd) while the lamps
+## burn, weighted by what the eye sees: the camera within the lamps' reach (full inside NEAR, none beyond FAR) and the
+## site in front of it (full within VIEW_FULL_DEG of the view axis, none beyond VIEW_NONE_DEG).
+func lamp_adaptation_cd_m2() -> float:
+	if tower_lights == null or not is_inside_tree():
+		return 0.0
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return 0.0
+	var offset := global_position - camera.global_position
+	var distance := offset.length()
+	if distance < 1.0:
+		return 0.0
+	var angle := rad_to_deg(acos(clampf((-camera.global_transform.basis.z).dot(offset / distance), -1.0, 1.0)))
+	var reach := 1.0 - smoothstep(LAMP_VIEW_NEAR_M, LAMP_VIEW_FAR_M, distance)
+	var in_view := 1.0 - smoothstep(LAMP_VIEW_FULL_DEG, LAMP_VIEW_NONE_DEG, angle)
+	return LAMP_MEAN_SHARE * tower_lights.deck_luminance_cd * tower_lights.night_factor_now() * reach * in_view
+
+
+## render_check --no_tower_lights: the day comparison without the lamps.
+func remove_lights() -> void:
+	if tower_lights != null:
+		remove_child(tower_lights)
+		tower_lights.queue_free()
+		tower_lights = null
+
+
+## Sun elevation at the site from the Earth-fixed Sun direction (the site's up is geometry["up"], Earth-fixed).
+func sun_elevation_rad(sun_direction_itrf: Vector3) -> float:
+	return asin(clampf(sun_direction_itrf.normalized().dot(_geometry["up"]), -1.0, 1.0))
+
+
+## Lamps for this frame: the Sun's Earth-fixed direction, the game's cd/m^2 -> scene factor, the clock (TDB s).
+func update_lights(sun_direction_itrf: Vector3, scene_per_cd_m2: float, time_s: float) -> void:
+	if tower_lights != null and not _geometry.is_empty():
+		tower_lights.update_state(sun_elevation_rad(sun_direction_itrf), scene_per_cd_m2, time_s)
 
 
 ## Pivot node at the hinge of arm `index` (0 = +across, 1 = -across).

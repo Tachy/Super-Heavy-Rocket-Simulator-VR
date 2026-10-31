@@ -258,6 +258,10 @@ func update_world() -> void:
 	_last_world_tdb_s = t
 	_camera_terrain_sun_fraction = _moon_terrain_sun_fraction(cam)
 	atmosphere.eye_terrain_sun_fraction = _camera_terrain_sun_fraction
+	var lamp_cd_m2 := 0.0
+	for view in towers:  # the eye sees the lamp-lit surfaces of a site in front of it
+		lamp_cd_m2 = maxf(lamp_cd_m2, view.lamp_adaptation_cd_m2())
+	atmosphere.lamp_adaptation_cd_m2 = lamp_cd_m2
 	var camera_sun_fraction := 1.0 - core.solar_eclipse_fraction_gcrf(cam, t)
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
@@ -606,6 +610,9 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 			visible)
 	sun_light.light_color = light[0]
 	sun_light.light_energy = light[1]
+	var sun_itrf := (gcrf_to_fixed * sun_apparent_from_earth_m).normalized()
+	for view in towers:  # the lamps: Sun elevation at their site, the game's exposure, the clock
+		view.update_lights(sun_itrf, atmosphere.scene_per_cd_m2, t)
 	# The sky's cube under the clouds at the lit body: the light there over the clear sky's (1 without weather).
 	_radiance_cloud_factors = atmosphere.cloud_radiance_factors(gcrf_to_fixed * lit_gcrf,
 			(gcrf_to_fixed * sun_apparent_from_earth_m).normalized())
