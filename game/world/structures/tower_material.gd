@@ -10,7 +10,7 @@ const TEXTURE_FILE := "materials/metal032/Metal032_1K-JPG_Color.jpg"
 ## 0.58) sRGB, this lifts it to the photo's bright steel.
 const STEEL_TINT := Color(1.25, 1.2, 1.15)
 const PLAIN_STEEL := Color(0.62, 0.64, 0.67)
-const DARK := Color(0.07, 0.075, 0.08)
+const DARK := Color(0.035, 0.038, 0.042)
 ## [E] chopstick arms and carriage are painted matte black (padb_chopsticks_around_booster_top_2026-03).
 const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 

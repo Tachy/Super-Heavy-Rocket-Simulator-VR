@@ -15,6 +15,7 @@ uniform float panel_m = 4.0;   // brace row pitch
 uniform float half_m = 4.9;    // centre line of legs and braces
 uniform float leg_m = 2.2;
 uniform float brace_m = 0.5;
+uniform float deck_half_m = 2.4;  // half width of the deck slabs
 uniform float deck_m = 0.8;    // visible thickness of a deck seen through the lattice
 uniform float core_m = 3.6;
 uniform float blur = 2.0;  // [E] filter width over the pixel footprint (tower_handover_check: shimmer)
@@ -80,7 +81,7 @@ void fragment() {
 		}
 		brace = mix(brace, mean_brace, to_mean) * step(au, half_m);
 		float core = 0.85 * clamp((0.5 * core_m + 0.5 * fw - au) / fw, 0.0, 1.0);
-		float dark = max(deck * step(au, half_m), core);
+		float dark = max(deck * step(au, deck_half_m), core);
 		float w_leg = leg;
 		float w_dark = dark * (1.0 - w_leg);
 		float w_brace = brace * (1.0 - w_leg) * (1.0 - w_dark);

@@ -10,8 +10,8 @@
 height_m = 144.5          # [E] count of sections x section height; matches 144.5 m of the spec (NAIP shadow + imagery)
 
 [tower.deck]              # floor / platform at every brace row: dark slabs seen through the lattice
-thickness_m = 0.5         # [E] dark bands ~5 px thick on padb_tower_full_with_chopsticks_2025-08 / 10.6 px/m, oblique view
-inset_m = 1.0             # [E] slab edge to the leg centre line: the decks reach the corner columns, ~1 m of leg width each
+thickness_m = 0.4         # [E] dark bands ~4-5 px thick on padb_tower_full_with_chopsticks_2025-08 / 10.6 px/m; look pass: thinner so light passes
+inset_m = 2.5             # [E] slab edge to the leg centre line; look pass (task 5): the photo shows the interior open with dark floors only inside, sky through the faces
 
 [tower.core]              # dark column bundle (pipes, stairs) in the middle of the lattice
 size_m = 3.6              # [E] ~35 px of the 120 px wide face on padb_tower_full_with_chopsticks_2025-08 = 0.3 x 12 m
@@ -129,7 +129,7 @@ wall_m = 0.05             # [E] estimate: plate column, no way to measure a wall
 
 [profiles.brace]          # bracing between the columns, clearly thinner than the legs
 kind = "h_beam"           # [E] reads as an I/H section with gusset plates in nsf_padb_chopsticks_2025-02
-size_m = 0.5              # [E] brace ~5 px wide at 10.6 px/m on padb_tower_full_with_chopsticks_2025-08
+size_m = 0.4              # [E] brace ~4-5 px wide at 10.6 px/m on padb_tower_full_with_chopsticks_2025-08; look pass: thinner chevrons
 wall_m = 0.04             # [E] estimate: flange thickness, not measurable
 
 [profiles.chopstick_rail]

@@ -16,11 +16,11 @@ const FACES := 4
 const LEGS := 4
 ## Braces per panel: two diagonals and the horizontal at the panel's lower edge (the topmost section adds one at its top).
 const BRACES_PER_PANEL := 3
-## [E] Hand-over ranges. A brace (0.5 m) is 1 px wide at ~390 m on a 60 deg / 900 px desktop view (779 px focal length)
-## and 1.7 px on a VR eye (~1300 px): individual members go at 380 m. The corner legs (2.2 m) stay >= 1.5 px to ~1100 m
+## [E] Hand-over ranges. A brace (0.4 m) is 1 px wide at ~310 m on a 60 deg / 900 px desktop view (779 px focal length)
+## and 1.7 px on a VR eye (~1300 px): individual members go at 300 m. The corner legs (2.2 m) stay >= 1.5 px to ~1100 m
 ## (desktop); the merged mesh ends at 1000 m, where the lattice shader (filtered) takes over: there the tiers' mean
 ## luminance agree within ~1 % (800 m: 0.0 %, 950 m: 0.9 %, 1050 m: 1.2 %).
-const NEAR_END_M := 380.0
+const NEAR_END_M := 300.0
 const MID_END_M := 1000.0
 ## Dither fade length each side of a range boundary (Godot: both neighbours fade over boundary +- this). 0 = hard swap:
 ## measured (tower_handover_check): with 60 m the two dithered neighbours were not complementary (the tower's rectangle
@@ -300,6 +300,7 @@ static func _far_material(detail: Dictionary, section: Dictionary, leg_size: flo
 	material.set_shader_parameter("half_m", half)
 	material.set_shader_parameter("leg_m", leg_size)
 	material.set_shader_parameter("brace_m", brace_size)
+	material.set_shader_parameter("deck_half_m", half - float(detail["tower.deck"]["inset_m"]))
 	material.set_shader_parameter("deck_m", float(detail["tower.deck"]["thickness_m"]) * FAR_DECK_VIEW_FACTOR)
 	material.set_shader_parameter("core_m", detail["tower.core"]["size_m"])
 	material.set_shader_parameter("crossed", section["pattern"] == "x_brace")

@@ -33,7 +33,7 @@ const MAX_JUMP := 0.02
 const TIER_NAMES := ["members", "merged", "shader"]
 ## [tier a, tier b, distances] compared alone.
 const TIER_PAIRS := [[0, 1, [250.0, 330.0, 380.0, 420.0, 450.0, 480.0]], [1, 2, [900.0, 1000.0, 1100.0, 1300.0]]]
-const SHIMMER_DISTANCES := [600.0, 1000.0, 1500.0, 2500.0, 4000.0]
+const SHIMMER_DISTANCES := [280.0, 330.0, 600.0, 1000.0, 1500.0, 2500.0, 4000.0]
 const SHIMMER_STEPS := 12
 const SHIMMER_STEP_PX := 0.25
 const MAX_SHIMMER_RATIO := 1.10
