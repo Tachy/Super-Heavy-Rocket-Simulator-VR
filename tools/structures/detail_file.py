@@ -37,10 +37,11 @@ MOUNT_KEYS = ("deck_height_m", "measured_height_m", "base_across_m", "base_towar
               "deck_drop_m", "deck_plate_m", "pit_depth_m", "ring_outer_diameter_m", "ring_opening_diameter_m",
               "ring_thickness_m", "chamber_radius_m", "clamp_count", "opening_width_ground_m", "opening_width_deck_m",
               "opening_top_m", "lintel_depth_m", "lintel_height_m", "duct_radius_m", "ridge_top_m", "rib_pitch_m",
-              "hood_inner_y_m", "hood_outer_y_m", "hood_height_m", "hood_drop_m", "door_width_m", "door_height_m",
+              "plan_yaw_deg", "hood_split_deg", "hood_long_width_m", "hood_short_width_m", "hood_short_front_m",
+              "hood_short_roof_m", "hood_height_m", "hood_drop_m", "door_width_m", "door_height_m",
               "qd_count", "qd_head_radius_m", "tile_m", "course_m", "panel_m", "seam_m", "map_size")
 TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "wall_thickness_m", "hardstand_lift_m",
-               "concrete_tile_m", "slab_m", "joint_m", "concrete_map_size", "foot_x_m", "foot_width_m", "foot_height_m",
+               "concrete_tile_m", "slab_m", "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_width_m", "foot_height_m",
                "mask_range_m")
 COUNT_KEYS = ("count", "columns", "louvre_count")
 

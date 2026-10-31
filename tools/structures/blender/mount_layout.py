@@ -320,27 +320,53 @@ def _deck_and_ring(S, sh):
                            at(r0, -hl, z1), at(r1, -hl, z1), at(r1, hl, z1), at(r0, hl, z1)])
 
 
+def _about_z(p, angle):
+    c, s = math.cos(angle), math.sin(angle)
+    return (c * p[0] - s * p[1], s * p[0] + c * p[1], p[2])
+
+
+def _radial_uv(p):
+    return (math.hypot(p[0], p[1]), p[2])
+
+
+def _hood(S, sh, profile, half_width, turn):
+    """One bent duct drawn along -X, turned about the ring's axis: side faces, the outer skin, the root block."""
+    m = sh.m
+    zd = sh.deck_z
+    x_root = m["hood_root_x_m"]
+
+    def at(x, y, z):
+        return _about_z((x, y, z), turn)
+
+    for sy in (-1.0, 1.0):
+        S.add(HOOD, [at(x, sy * half_width, z) for x, z in profile], at(0.0, sy, 0.0), _radial_uv)
+    for (xa, za), (xb, zb) in zip(profile, profile[1:]):
+        out = (-(zb - za), 0.0, xb - xa)  # the profile runs clockwise seen from +Y: this is its outside
+        if _dot(out, (xa + xb - 2.0 * x_root + 0.1, 0.0, za + zb - 2.0 * zd)) < 0.0:
+            out = (-out[0], 0.0, -out[2])
+        S.add(HOOD, [at(xa, -half_width, za), at(xb, -half_width, zb), at(xb, half_width, zb), at(xa, half_width, za)],
+              _about_z(out, turn), _radial_uv)
+    # Tan root block on the ring side of the duct (padb_chopsticks_above_mount_2026-05).
+    x1, z1 = x_root + m["hood_root_depth_m"], zd + m["hood_root_height_m"]
+    S.solid(PLINTH, [at(x_root, -half_width, zd), at(x1, -half_width, zd), at(x1, half_width, zd), at(x_root, half_width, zd),
+                     at(x_root, -half_width, z1), at(x1, -half_width, z1), at(x1, half_width, z1), at(x_root, half_width, z1)],
+            _radial_uv)
+
+
 def _hoods(S, sh):
-    """Two long bent ducts on the front side: root block at the ring, roof over the deck edge, box down the front face."""
+    """Two ducts `hood_split_deg` apart, symmetric about the line away from the tower (DSC05957): the long one runs over
+    the closed -X face with its box down the slope, the short one ends at the -Y deck edge above the portal."""
     m = sh.m
     zd = sh.deck_z
     x_root, x_roof, x_front = m["hood_root_x_m"], m["hood_roof_x_m"], m["hood_front_x_m"]
     top, shoulder, drop = zd + m["hood_height_m"], zd + m["hood_shoulder_m"], zd - m["hood_drop_m"]
+    yaw, half_split = math.radians(m["plan_yaw_deg"]), 0.5 * math.radians(m["hood_split_deg"])
     x_foot = -sh.hx(drop)  # where the box's bottom meets the sloped face
-    profile = [(x_root, zd), (x_root, top), (x_roof, top), (x_front, shoulder), (x_front, drop), (x_foot, drop)]
-    for sy in (-1.0, 1.0):
-        y0, y1 = sy * m["hood_inner_y_m"], sy * m["hood_outer_y_m"]
-        for yy, hint in ((y0, -sy), (y1, sy)):
-            S.add(HOOD, [(x, yy, z) for x, z in profile], (0.0, hint, 0.0), _uv_x)
-        for i in range(len(profile) - 1):
-            (xa, za), (xb, zb) = profile[i], profile[i + 1]
-            out = (-(zb - za), 0.0, xb - xa)  # the profile runs clockwise seen from +Y: this is its outside
-            if _dot(out, (xa + xb - 2.0 * x_root + 0.1, 0.0, za + zb - 2.0 * zd)) < 0.0:
-                out = (-out[0], 0.0, -out[2])
-            S.add(HOOD, [(xa, y0, za), (xb, y0, zb), (xb, y1, zb), (xa, y1, za)], out, _uv_y)
-        # Tan root block on the ring side of the duct (padb_chopsticks_above_mount_2026-05).
-        a, b = sorted((y0, y1))
-        S.box(PLINTH, (x_root, a, zd), (x_root + m["hood_root_depth_m"], b, zd + m["hood_root_height_m"]), _uv_x)
+    _hood(S, sh, [(x_root, zd), (x_root, top), (x_roof, top), (x_front, shoulder), (x_front, drop), (x_foot, drop)],
+          0.5 * m["hood_long_width_m"], yaw - half_split)
+    x_short = -m["hood_short_front_m"]
+    _hood(S, sh, [(x_root, zd), (x_root, top), (-m["hood_short_roof_m"], top), (x_short, shoulder), (x_short, zd)],
+          0.5 * m["hood_short_width_m"], yaw + half_split)
 
 
 def _front_details(S, sh):
@@ -363,15 +389,23 @@ def _front_details(S, sh):
                            (xt + 0.05, yv - hw, ztop), (xout, yv - hw, ztop), (xout, yv + hw, ztop),
                            (xt + 0.05, yv + hw, ztop)])
     r_head = m["qd_head_radius_m"]
-    for sy in (-1.0, 1.0):  # static cabinets with a boom and a head at 4.9 m from the axis, front side of the deck
+    yaw = math.radians(m["plan_yaw_deg"])
+
+    def turned_box(lo, hi):
+        x0, y0, z0 = lo
+        x1, y1, z1 = hi
+        S.solid(HARDWARE, [_about_z(p, yaw) for p in ((x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+                                                      (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1))])
+
+    for sy in (-1.0, 1.0):  # static cabinets with a boom and a head at 4.9 m from the axis, between the hoods
         cx, cy = m["qd_x_m"], sy * m["qd_y_m"]
         hx_, hy_ = 0.5 * m["qd_size_x_m"], 0.5 * m["qd_size_y_m"]
-        S.box(HARDWARE, (cx - hx_, cy - hy_, zd), (cx + hx_, cy + hy_, zd + m["qd_size_z_m"]))
+        turned_box((cx - hx_, cy - hy_, zd), (cx + hx_, cy + hy_, zd + m["qd_size_z_m"]))
         zb = zd + m["qd_boom_z_m"]
         half = 0.5 * m["qd_boom_size_m"]
         x_h = -math.sqrt(max(r_head ** 2 - (abs(cy) - 2.0 * half) ** 2, 0.0))  # the head's corner nearest the axis
-        S.box(HARDWARE, (cx + hx_, cy - half, zb - half), (x_h - 0.2, cy + half, zb + half))
-        S.box(HARDWARE, (x_h - 0.3, cy - 2.0 * half, zb - 2.0 * half), (x_h, cy + 2.0 * half, zb + 2.0 * half))
+        turned_box((cx + hx_, cy - half, zb - half), (x_h - 0.2, cy + half, zb + half))
+        turned_box((x_h - 0.3, cy - 2.0 * half, zb - 2.0 * half), (x_h, cy + 2.0 * half, zb + 2.0 * half))
 
 
 def mount(detail: dict) -> Surfaces:
@@ -444,12 +478,12 @@ def trench(detail: dict) -> Surfaces:
             S.add("wall", [(x, sy * y1, 0.0), (xo, sy * y1, 0.0), (xo, sy * y1, lip), (x, sy * y1, lip)], (0.0, sy, 0.0), _uv_x)
     _hardstand(S, sh)
     # The tower's foot: a low block with a chamfered roof up to the legs' plinth.
-    cx, half, top = t["foot_x_m"], 0.5 * t["foot_width_m"], t["foot_height_m"]
+    cx, cy, half, top = t["foot_x_m"], t["foot_y_m"], 0.5 * t["foot_width_m"], t["foot_height_m"]
     roof, roof_half = t["foot_roof_height_m"], t["foot_roof_half_m"]
-    S.box("foot", (cx - half, -half, 0.0), (cx + half, half, top), _uv_x)
-    S.solid("foot", [(cx - half, -half, top), (cx + half, -half, top), (cx + half, half, top), (cx - half, half, top),
-                     (cx - roof_half, -roof_half, roof), (cx + roof_half, -roof_half, roof),
-                     (cx + roof_half, roof_half, roof), (cx - roof_half, roof_half, roof)], _uv_x)
+    S.box("foot", (cx - half, cy - half, 0.0), (cx + half, cy + half, top), _uv_x)
+    S.solid("foot", [(cx - half, cy - half, top), (cx + half, cy - half, top), (cx + half, cy + half, top), (cx - half, cy + half, top),
+                     (cx - roof_half, cy - roof_half, roof), (cx + roof_half, cy - roof_half, roof),
+                     (cx + roof_half, cy + roof_half, roof), (cx - roof_half, cy + roof_half, roof)], _uv_x)
     return S
 
 

@@ -74,7 +74,7 @@ func build(geometry: Dictionary) -> void:
 	if models.is_empty():
 		add_child(_box(geometry["tower_size_m"], Basis(toward, across, up), geometry["tower_center_m"], _lattice))
 	else:
-		add_child(_pad_b_lattice(models, geometry, Basis(toward, across, up)))
+		add_child(_pad_b_lattice(models, geometry))
 	if models.is_empty():
 		_build_mount(geometry)
 		if had_models:
@@ -105,17 +105,25 @@ func build(geometry: Dictionary) -> void:
 	update_state({})
 
 
-## The detail file's lattice at the physics tower box: base on the box's base, the face toward the pad on the box's
-## pad-side face (the footprint centre moves by the difference of the face widths), faces rotated with the box.
-func _pad_b_lattice(models: Dictionary, geometry: Dictionary, axes: Basis) -> Node3D:
+## The axes of the measured squares (mount, trench, tower foot, lattice: parallel), site frame: the line to the physics
+## tower direction lies `plan_yaw_deg` off their X axis, toward +Y.
+func _plan_axes(detail: Dictionary, geometry: Dictionary) -> Basis:
+	var yaw := deg_to_rad(float(detail["mount"]["plan_yaw_deg"]))
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
+	return Basis(toward * cos(yaw) - across * sin(yaw), toward * sin(yaw) + across * cos(yaw), Vector3(0.0, 0.0, 1.0))
+
+
+## The detail file's lattice on the measured foot, base on the physics box's base, faces parallel to the mount.
+func _pad_b_lattice(models: Dictionary, geometry: Dictionary) -> Node3D:
 	var size: Vector3 = geometry["tower_size_m"]
-	var face_width: float = models["detail"]["tower.sections"][0]["face_width_m"]
-	var lattice := LatticeBuilder.build(models["detail"], models["profiles"], TowerMaterial.lattice_set())
-	var up := Vector3(0.0, 0.0, 1.0)
-	var toward: Vector3 = axes.x
-	var centre_site: Vector3 = geometry["tower_center_m"] - up * (0.5 * size.z) + toward * (0.5 * (face_width - size.x))
+	var detail: Dictionary = models["detail"]
+	var axes := _plan_axes(detail, geometry)
+	var lattice := LatticeBuilder.build(detail, models["profiles"], TowerMaterial.lattice_set())
+	var base_z: float = (geometry["tower_center_m"] as Vector3).z - 0.5 * size.z
 	lattice.basis = Frames.basis_to_render(axes)
-	lattice.position = Frames.to_render(centre_site)
+	lattice.position = Frames.to_render(axes.x * float(detail["trench"]["foot_x_m"]) + axes.y * float(detail["trench"]["foot_y_m"])
+			+ Vector3(0.0, 0.0, base_z))
 	return lattice
 
 
@@ -356,9 +364,7 @@ func _build_mount(geometry: Dictionary) -> void:
 func _build_mount_model(models: Dictionary, geometry: Dictionary) -> void:
 	has_models = true
 	var detail: Dictionary = models["detail"]
-	var toward: Vector3 = geometry["tower_direction"]
-	var across: Vector3 = geometry["across"]
-	var frame := Frames.basis_to_render(Basis(toward, across, Vector3(0.0, 0.0, 1.0)))
+	var frame := Frames.basis_to_render(_plan_axes(detail, geometry))
 	var shell := TowerMaterial.mount_shell(float(detail["mount"]["tile_m"]))
 	var materials := {
 		"shell": shell, "plinth": LitAerial.material(PLINTH_CONCRETE, 0.9, 0.0),
@@ -391,12 +397,11 @@ func _set_trench_mask(detail: Dictionary, geometry: Dictionary) -> void:
 	var m: Dictionary = detail["mount"]
 	var t: Dictionary = detail["trench"]
 	var split := TerrainQuadtree.split_float32(position)
-	var toward: Vector3 = geometry["tower_direction"]
-	var across: Vector3 = geometry["across"]
+	var axes := _plan_axes(detail, geometry)
 	ShaderGlobals.set_value(&"trench_site_hi", split[0])
 	ShaderGlobals.set_value(&"trench_site_lo", split[1])
-	ShaderGlobals.set_value(&"trench_axis_t", (basis * Frames.to_render(toward)).normalized())
-	ShaderGlobals.set_value(&"trench_axis_a", (basis * Frames.to_render(across)).normalized())
+	ShaderGlobals.set_value(&"trench_axis_t", (basis * Frames.to_render(axes.x)).normalized())
+	ShaderGlobals.set_value(&"trench_axis_a", (basis * Frames.to_render(axes.y)).normalized())
 	var half_a: float = 0.5 * float(m["base_across_m"])
 	ShaderGlobals.set_value(&"trench_shape", Vector4(0.5 * float(m["base_toward_m"]) - MASK_INSET_M,
 			half_a - MASK_INSET_M, 0.5 * float(t["width_m"]) - MASK_INSET_M,

@@ -171,9 +171,14 @@ def test_hardstand_surrounds_the_site_and_leaves_the_pit_open(detail, trench):
         assert not (abs(cx) < 0.5 * detail["trench"]["width_m"] and abs(cy) < ml.ramp_end_m(detail)), "hardstand over a ramp"
 
 
-def test_tower_foot_stands_on_the_physics_axis_and_off_the_mount(detail, trench):
+def test_tower_foot_is_at_the_measured_place_and_off_the_mount(detail, trench):
     t = detail["trench"]
-    assert t["foot_x_m"] == pytest.approx(_physics()["distance_m"], abs=0.01)
+    distance = math.hypot(t["foot_x_m"], t["foot_y_m"])
+    assert 32.0 < distance < 38.0  # measured 35 (3), 36 (4)
+    # the square yaw puts the foot on the line from the ring along the physics tower direction
+    yaw = math.radians(detail["mount"]["plan_yaw_deg"])
+    assert -t["foot_x_m"] * math.sin(yaw) + t["foot_y_m"] * math.cos(yaw) == pytest.approx(0.0, abs=0.1)
+    assert abs(detail["mount"]["plan_yaw_deg"] - 38.0) <= 6.0
     lo, hi = trench.extent("foot")
     assert lo[0] >= ml.Shape(detail).half_t  # off the mount's base
     assert hi[2] == pytest.approx(t["foot_roof_height_m"])
@@ -215,16 +220,20 @@ def test_hoods_and_qd_heads_stand_off_the_hull(detail, mount):
     assert min(qd_heads) >= hull + 0.3
 
 
-def test_hoods_are_bent_ducts_down_the_front_face(detail, mount):
+def test_hoods_are_split_about_the_line_away_from_the_tower(detail, mount):
     m = detail["mount"]
     above = [v for verts, _ in mount.nodes["hood"] for v in verts if v[2] > m["deck_height_m"]]
-    assert max(v[0] for v in above) < 0.0  # on the front side of the ring, none toward the tower
-    ys = {math.copysign(1.0, v[1]) for v in above if abs(v[1]) > 3.0}
-    assert ys == {-1.0, 1.0}
+    azimuths = [math.degrees(math.atan2(v[1], v[0])) % 360.0 for v in above]
+    axis = 180.0 + m["plan_yaw_deg"]
+    assert min(azimuths) > axis - 60.0 and max(azimuths) < axis + 60.0  # none toward the tower
+    assert m["hood_split_deg"] == pytest.approx(70.0, abs=10.0)
+    assert any(a < axis - 20.0 for a in azimuths) and any(a > axis + 20.0 for a in azimuths)
     deck = ml.Shape(detail).deck_z
-    box = [v for verts, _ in mount.nodes["hood"] for v in verts if v[0] == m["hood_front_x_m"]]
-    assert min(v[2] for v in box) == pytest.approx(deck - m["hood_drop_m"])  # the box runs down the sloped face
-    assert max(abs(v[1]) for v in box) < ml.Shape(detail).top_half_a
+    lowest = min(v[2] for verts, _ in mount.nodes["hood"] for v in verts
+                 if math.hypot(v[0], v[1]) > -m["hood_front_x_m"] - 0.5)
+    assert lowest <= deck - m["hood_drop_m"] + 1e-6  # the long hood's box runs down the sloped face
+    short_end = m["hood_short_front_m"]
+    assert short_end < -m["hood_front_x_m"]
 
 
 def test_every_polygon_is_planar_and_outward_hinted(mount, trench):

@@ -39,7 +39,8 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   pyramid. Base 44.6 x 40 m, deck 18.7 m wide, ring top 14.5 m as measured, slopes 45 deg (measured 48 (5)). Closed plated faces only on
   +-X. Each +-Y side is one portal: 26 m wide at the ground, sides following the piers up to the 7.2 m top, a vertical spandrel, a lintel
   and a ribbed duct above it; inside, a ribbed deflector curves from a ridge (6.9 m) under the ring to the pit floor 9 (2) m below the ground. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps; 7 m
-  chamber under it. Front (-X) face: two bent hood ducts (roof 4 m above the deck, box 6.5 m down the face), two rectangular grey doors, six
+  chamber under it. Two hoods 70 deg apart, symmetric about the line away from the tower (roof 4 m above the deck): the long one over the
+  closed -X face with a box 6.5 m down the slope, the short one ending at the -Y deck edge. -X face: two rectangular grey doors, six
   vents (padb_mount_pyramid_front_person_scale_2026-05); two booster QD cabinets between the ducts (static). 5.5k triangles. Plate map
   `mount_panels.png` (`mount_textures.py`: stacked plates 6 x 2 m, rust-tan seams, grey to tan, stains; `shaders/mount_shell.gdshader`).
 - Trench and ground (`trench.gltf`, `[trench]`): two flat aprons 26 m wide, floor rising from the pit to the ground, centre 33 m from the
@@ -185,6 +186,7 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 ## Physics deviations (what is drawn as measured differs from the physics; input to the physics plan)
 | Part | Drawn now | Physics stays | Why |
 |---|---|---|---|
+| Tower, carriage and arms | lattice, foot, mount and trench parallel at `plan_yaw_deg` 36.5, tower centre 36.1 m from the axis; the corner toward the mount lies about 3.7 m beyond the physics pivot plane | physics box and pivots at 30 m, face-on | **carriage and arms stand off the corner until the physics plan moves the pivots onto it** (user 2026-10-31: the hinge sits on the corner; rail bracing at top and bottom back to the two neighbouring corners, not modelled); tower lamps still placed from the physics face |
 | Mount deck | ring top 14.5 m as measured (user 2026-10-31: reality first), portal top 7.2 m, slope 45 deg | physics 20 m until the physics plan | **until then a stack on the pad hangs 5.5 m above the ring**; `check_envelope` lists the row |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
 | Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; kept from the earlier fit; the flat bearing piece clears the hull at any length |
