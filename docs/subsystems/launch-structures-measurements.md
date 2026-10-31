@@ -73,7 +73,53 @@ after the user's go. Tools: `tools/structures/measure/` (`ratio.py`, `camera_sol
 4. Two flame-trench exits (not one), opposite each other.
 5. Azimuth 345 deg against 315 deg (low confidence).
 
+## Flight webcast pass (2026-10-31, local streams flight 12 / 13 / 14, Pad B)
+Frames in git-ignored `screenshots/mechazilla/webcast/tower/` (contact sheets `sheet_f1x_60s.jpg`, `tail_*`, `ret_*`,
+liftoff sheets `lift_f1x_*`, grid crops `g_*`). Time codes are video seconds; liftoff (T-0) at f12 1924 s, f13 2105 s,
+f14 2149 s (clock in the frame).
+- **Not in the streams: no booster return, no catch.** Sampled f12 / f13 / f14 every 60 s from the start and every
+  30 s over the tails, and every 5 s over T+5:55 to T+10:50 of each flight: after liftoff the stream shows only ship
+  cameras (plus hot-staging, boosters' shot is not shown). So **carriage heights over time in a return, its rate, the arm
+  angles and timing at the catch, and the arm height at the catch are not obtainable here** (still open; they need the
+  booster-catch footage of another source, or the user's clips).
+- What the streams do show: three liftoff views with the stack on the mount and the tower beside it - f12 ground camera
+  (T-1:04, `f12_1860_full.png`), f13 drone (T-1:05, `f13_2040_full.png`), f14 ground telephoto (T-0:55,
+  `f14_2095_prelaunch_full.png`); 2 s sheets from T-54 s to T+26 s.
+- **Method limits.** The ground cameras look up (vertical scale falls from about 8.6 px/m at the foot to about 6 px/m at
+  the nose: booster 475 px for 72.3 m, ship 309 px for 52.1 m, f14), so a single 9 m ratio is wrong along the height. Heights
+  are read with a piecewise map through the known stack features (mount deck 14.5 m, hot-stage ring 86.8 m, nose tip 139 m)
+  and are good to about +-4 m; a full camera solve found no stable solution (3 unknowns, 2 axis points). Depth offset
+  tower to stack (about 24-32 m) adds a few percent. All values are [E], photo/video only.
+
+| Value | Reading [E] (+-) | Method, frame | Against current data |
+|---|---|---|---|
+| Arms during stacked liftoff | parked at the ship nose: top rail 134 (4) m above ground (f14 132, f13 137), carriage block about 120 to 134 m | piecewise map, f14 t=2095, f13 t=2040 | the 88 m of Ship 42 was a catch pose; **stacked parking is about 45 m higher** |
+| Arms open angle in that pose | span 277 px (outer ends) = 35.6 m at 7.8 px/m, so about 21 (5) deg from the line (lower bound: view may be oblique) | f14 t=2095 (outer ends x 813 / 1090, ship axis 940) | `arm_open_deg` 40 would span 48 m: the parked pose is about half open |
+| Arms and carriage during the countdown | **no motion** from T-55 s to T+3 s (2 s sheets, 3 flights) | `lift_f12_1912_2s`, `lift_f13_2093_2s`, `lift_f14_2095_2s` | carriage / arms stay parked until the stack clears the tower |
+| Roof deck / top block | box top 147-149 m, box underside about 142 m, louvred panel block about 7 m high; roof 146 (5) m | f13 t=2040 (nose 139 m at y 362, box y 318-350, 4.4 px/m) | agrees with 144 (5) m, upper half; keeps the "draft 150.1 m too tall" finding open at +-5 m |
+| Clad lower tower | closed plate face from the foot to about 40 % of the height on the camera side | f13 `g_f13_2040_tower_low.png` | confirms "clad face 12 to 79 m" |
+| Booster-side platform at the hot-stage ring | black lattice platform with railing at the booster top (86.8 m), reaching about 12 m out from the leg; stays attached to T-0 | f13 y 560-600; f14 `qd_f14_2135_1s.png` 15 frames 1 s | retracts only after T-0 (not visible: smoke) - **swing timing open** |
+| Face width at the leg centres | 12.9 (1.0) m after the +32 m depth correction (106 px, 8.9 px/m at the booster) | f14 t=2095, legs x 886 / 992 | within error of 11.9 / 12.0 |
+| Long dark wall right of the mount | about 5.5 m high, about 55 m long (crude, oblique) | f14 mount crop | trench / deluge wall, new part |
+
+### Look details for the model (from the three liftoff views)
+- Ship: black tile skin, nose and flaps black; booster: white / satin stainless, dirty (soot) in the lower third, black grid
+  fins and black hot-stage ring cut-outs.
+- Tower legs: bare steel, very bright silver in direct sun and near black in shade (no paint); X-braces and platforms
+  black / dark charcoal; open lattice above about 40 % of the height, closed light-grey plate cladding below on the
+  pad-side face; panels about 7-8 m between X-brace crossings in the open part (not resolved to the 5.3 m floor pitch).
+- Roof: a flat deck with a light-grey louvred block (about 7 m, a vented machine / hoist room) and a railing; no cabin
+  glazing visible from the stream.
+- Chopsticks (parked): black open trusses, top rail with a lighter tan catch strip, pivoting about a corner hinge on the
+  carriage, rounded outboard end, parked about half open; carriage a black frame with platforms.
+- Mount: tan / gold-beige steel panels in horizontal courses with vertical seams (square frustum), black base ring in
+  shade, two large grey rounded hoods flanking the booster on the deck, a tan diagonal stair or ramp strip across the
+  front face, steam venting at the foot; sand-coloured pad apron.
+- Neighbours: tank farm (two grey tall cylinders, two spheres, a dome) behind the mount at about 0.8 mount lengths.
+
 ## Open, needs more than these references
+- Booster return and catch (carriage heights, rate, arm angles and timing, arm height at the catch) are absent from the
+  flight 12-14 webcasts (see the webcast pass); another source is needed.
 - Section splices and section count; chopstick plan width; carriage vertical travel and rate; hinge height of the QD arm
   (a plan view or a dated survey is needed); trench depth (no side view of the ramps); azimuth and distance on a
   georeferenced image newer than 2025-05 (a NAIP flight after 2025-05 or the FAA EA site plan).
