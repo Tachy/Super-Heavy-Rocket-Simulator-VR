@@ -229,6 +229,9 @@ actuator_barrel_m = 0.5     # [E] ~20 px at 40.6 px/m: electromechanical (screw)
 actuator_rod_m = 0.3        # [E] same view
 actuator_barrel_length_m = 2.4  # [E] fixed length of the barrel, the rod takes the rest
 platform_width_m = 1.6    # [E] walkway on the upper collar, CRL05690 (not measurable)
+rail_height_m = 1.1       # [E] railing height over the walkway deck (a person at the 1.8 m scale), crop_rail_colleen
+rail_post_pitch_m = 2.0   # [E] railing posts / knee braces, crop_rail_colleen
+brace_drop_m = 1.5        # [E] the knee brace meets the collar chord's face this far below the deck
 drum_diameter_m = 3.8     # [E] +-0.4 m sheave block, carriage photo 2025-12 with a worker (1.8 m = 180 px)
 drum_width_m = 2.5        # [E] same photo, cheeks NSF 2026-03
 cable_count = 4           # [E] the photo shows 8+ thin cables; 4 at the size that reads

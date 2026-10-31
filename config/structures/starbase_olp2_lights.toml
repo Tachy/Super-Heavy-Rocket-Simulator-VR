@@ -7,7 +7,7 @@
 # lattice are parallel, `plan_yaw_deg` off the pad -> tower line): ref "face" = the tower box's pad-side face (`along_m` into the
 # tower from its plane, negative = out; `across_m` from the face's centre), ref "axis" = the ring axis (`along_m` toward the tower
 # side in the squares' axes, `across_m` across). Every group stands on a real part: tower faces and corners, the roof, the foot
-# block, the mount deck, or a mast on the ground (`mast_m` = mast width, tested). `mirror` repeats the group at -across_m.
+# block or the mount deck (`mast_m` = mast width, tested, only if a photo shows a mast). `mirror` repeats the group at -across_m.
 # `aim` = direction (along, across, up) of the beam in those axes, not normalised; `aim_at_axis_m` = aim at the ring axis at that height.
 
 [lights]
@@ -153,26 +153,25 @@ range_m = 80.0            # [E] lamp layout of this group (comment above)
 shadow = 0                # [E] lamp layout of this group (comment above)
 lens_m = 0.4              # [E] lamp layout of this group (comment above)
 
-# Mount floodlight banks: four lamps in a row on a mast beside the mount (padb_night_floodlights_mount: a row of four round
-# lamps ~1 m apart, ~15 m up; HN635FUWYAAzbOB: a bank across the pad on the right). Both banks aimed at the stack.
+# Mount floodlight banks: no photo (DSC06000, DSC06022, CRL05690) shows a mast beside the mount, so the two banks of four stand on
+# the tower's pad-side face (padb_night_floodlights_mount: a row of four round lamps ~1 m apart; HN635FUWYAAzbOB). Aimed at the stack.
 [[lights.group]]
 name = "mount_banks"
 kind = "flood"
-ref = "axis"
-along_m = 13.0            # [E] masts on the tower side of the mount, beside the block (X 10.3) and short of the tower foot (X 17.6), on the ground
-across_m = 24.0           # [E] outside the tunnel walls (X +-10.3), level with the ramps
-mast_m = 0.6              # [E] mast width, the row of four on a cross arm
-z_m = 27.0                # [E] masts ~25-30 m: the bank looks down on the 20 m deck (photo: the lamps stand level with the deck's upper edge)
-count = 4                 # [E] lamp layout of this group (comment above)
+ref = "face"
+along_m = -0.8            # [E] just outside the pad-side face, on the lattice (was two masts on the ground beside the mount: not in the photos)
+across_m = 2.0            # [E] row of four from 2.0 to 5.0 m off the face centre, both sides, clear of the face-edge lamps at 6.4 m
+z_m = 40.0                # [E] on the tower, 25.5 m above the deck: the bank looks down on the 14.5 m deck
+count = 4                 # [E] row of four
 step_across_m = 1.0       # [E] row of four, ~1 m apart in the photo (lamps ~ 0.7 m)
 mirror = true
-aim_at_axis_m = 18.0      # [E] the stack's lower part, the lamps look down on the deck
+aim_at_axis_m = 18.0      # [E] the stack's lower part
 lumens = 40000.0          # [E] stadium-class LED panel 300 W
 cct_k = 6500.0            # [E] the cold white of the photo
-half_angle_deg = 30.0     # [E] lamp layout of this group (comment above)
-range_m = 150.0           # [E] lamp layout of this group (comment above)
+half_angle_deg = 30.0     # [E] narrow beam
+range_m = 150.0           # [E] distance to the stack ~ 40 m
 shadow = 2                # [E] two lamps per bank cast shadows: the site's four (max_shadowed)
-lens_m = 0.5              # [E] lamp layout of this group (comment above)
+lens_m = 0.5              # [E] lamp layout of this group
 
 # Deck lights: small omni lamps round the mount's deck and on the stair strips.
 [[lights.group]]

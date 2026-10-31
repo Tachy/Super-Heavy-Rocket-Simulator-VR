@@ -153,9 +153,12 @@ def chopstick(detail: dict) -> list:
         ms.append(_member("fittings", "rect", 0.5, (x, _on_leg(plan, x), z_top), low(x + 0.9), 0.04))
     x_p = c["platform_frac"] * length
     y_p = _on_leg(plan, x_p) - 1.1
-    ms.append(_member("hardware", "rect", 1.3, (x_p - 1.3, y_p, -2.6), (x_p + 1.3, y_p, -2.6), 0.1))
+    ms.append(_member("fittings", "rect", 1.3, (x_p - 1.3, y_p, -2.6), (x_p + 1.3, y_p, -2.6), 0.1))
+    for dx in (-1.3, 1.3):  # the platform hangs from the leg on two braces (it is dark steel like the leg, never a loose plate)
+        tube("fittings", thin, (x_p + dx, _on_leg(plan, x_p + dx), z_top), (x_p + dx, y_p - 0.65, -2.6))
+    tube("fittings", d, (x_p - 1.3, y_p - 0.65, -1.5), (x_p + 1.3, y_p - 0.65, -1.5))
     x_m = c["mast_x_m"]
-    tube("hardware", c["mast_size_m"], (x_m, _on_leg(plan, x_m), 0.0), (x_m, _on_leg(plan, x_m), c["mast_height_m"]))
+    tube("fittings", c["mast_size_m"], (x_m, _on_leg(plan, x_m), 0.0), (x_m, _on_leg(plan, x_m), c["mast_height_m"]))
     return ms
 
 
@@ -264,16 +267,26 @@ def carriage(detail: dict) -> list:
                 g["c"][1] + along * axis[1] - k["rail_offset_m"] * other[1])
         for z in (z_up, z_lo):
             rect("frame", at((hx, hy), z), at(foot, z), k["beam_m"], cc)
-    # Walkway on the upper collar, outside, with a railing.
+    # Walkway on the upper collar, outside the face, as dark steel (crop_rail_colleen: grating deck, railing, knee braces down to the
+    # face), closed round the corner: each deck runs one walkway width past the corner rail so the two overlap there.
+    width = k["platform_width_m"]
+    z_deck = z_up + 0.5 * cc + 0.05
     for p0, p1, _, other in faces:
-        out = k["rail_offset_m"] + 0.5 * k["platform_width_m"]
-        q0 = (p0[0] - out * other[0], p0[1] - out * other[1])
-        q1 = (p1[0] - out * other[0], p1[1] - out * other[1])
-        z_deck = z_up + 0.5 * cc + 0.05
-        ms.append(_member("hardware", "rect", k["platform_width_m"], at(q0, z_deck), at(q1, z_deck), 0.1))
-        r0 = (p0[0] - 2.0 * out * other[0], p0[1] - 2.0 * out * other[1])
-        r1 = (p1[0] - 2.0 * out * other[0], p1[1] - 2.0 * out * other[1])
-        tube("hardware", 0.08, at(r0, z_up + 1.2), at(r1, z_up + 1.2))
+        run = math.dist(p0, p1)
+        u = ((p1[0] - p0[0]) / run, (p1[1] - p0[1]) / run)
+        start = (p0[0] - width * u[0], p0[1] - width * u[1])  # past the corner, round it
+        off = lambda q, d: (q[0] - d * other[0], q[1] - d * other[1])  # noqa: E731
+        d_mid, d_edge = 0.5 * width, width
+        rect("frame", at(off(start, d_mid), z_deck), at(off(p1, d_mid), z_deck), width, 0.1)
+        rect("frame", at(off(start, d_edge), z_up), at(off(p1, d_edge), z_up), 0.25, cc)  # outer edge beam
+        n_post = max(2, round((run + width) / k["rail_post_pitch_m"]))
+        for i in range(n_post + 1):
+            f = i / n_post
+            q = (start[0] + (p1[0] - start[0]) * f, start[1] + (p1[1] - start[1]) * f)
+            tube("frame", 0.08, at(off(q, d_edge), z_deck), at(off(q, d_edge), z_deck + k["rail_height_m"]))
+            tube("frame", 0.2, at(off(q, d_edge), z_up), at(q, z_up - k["brace_drop_m"]))  # knee brace to the face
+        for h in (k["rail_height_m"], 0.5 * k["rail_height_m"]):
+            tube("frame", 0.08, at(off(start, d_edge), z_deck + h), at(off(p1, d_edge), z_deck + h))
     # White actuator drum on each hinge (the arm's rod pulls from its anchor, `actuator_anchor_*`).
     for sign in (-1.0, 1.0):
         y = sign * (k["hinge_y_m"] - k["actuator_anchor_in_m"])

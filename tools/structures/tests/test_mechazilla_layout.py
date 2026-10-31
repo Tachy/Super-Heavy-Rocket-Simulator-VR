@@ -300,3 +300,44 @@ def test_envelope_passes_and_lists_only_table_rows():
     failures, exceptions = check_envelope.check(detail_file.load(check_envelope.DETAIL), check_envelope.tower(sites))
     assert failures == []
     assert set(exceptions) <= set(check_envelope.ALLOWED)
+
+
+def _seg_dist(a0, a1, b0, b1):
+    """Distance between two 3D segments (sampled finely: members are metres long, the tolerance 0.3 m)."""
+    def pts(p0, p1):
+        n = max(2, int(math.dist(p0, p1) / 0.05) + 1)
+        return [tuple(p0[i] + (p1[i] - p0[i]) * k / (n - 1) for i in range(3)) for k in range(n)]
+    pa, pb = pts(a0, a1), pts(b0, b1)
+    return min(math.dist(p, q) for p in pa for q in pb)
+
+
+def test_no_collar_member_floats(detail):
+    """Every member of the carriage (collars, walkways, railings, braces) lies within 0.3 m of another member, a rail or a tower face."""
+    g = layout.tower_corner(detail)
+    ms = layout.carriage(detail) + layout.rails(detail)
+    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
+
+    def box_gap(p):  # plan distance of a point to the tower box, 0 inside
+        rx, ry = p[0] - cx, p[1] - cy
+        u, v = rx * ex[0] + ry * ex[1], rx * ey[0] + ry * ey[1]
+        du, dv = max(-u, u - w, 0.0), max(-v, v - w, 0.0)
+        return math.hypot(du, dv)
+
+    worst = 0.0
+    for i, m in enumerate(ms):
+        half = 0.5 * m[2]
+        n = max(2, int(math.dist(m[3], m[4]) / 0.1) + 1)
+        samples = [tuple(m[3][j] + (m[4][j] - m[3][j]) * k / (n - 1) for j in range(3)) for k in range(n)]
+        near_face = min(box_gap(p) for p in samples) - half
+        near_member = min(_seg_dist(m[3], m[4], o[3], o[4]) - half - 0.5 * o[2] for j, o in enumerate(ms) if j != i)
+        gap = min(near_face, near_member)
+        worst = max(worst, gap)
+        assert gap <= 0.3, f"{m[0]} {m[3]} -> {m[4]} floats {gap:.2f} m"
+    assert worst <= 0.3
+
+
+def test_walkway_is_dark_steel_with_a_railing(detail):
+    ms = layout.carriage(detail)
+    assert not [m for m in ms if m[0] == "hardware" and m[1] == "rect"]  # no white plate: the deck is the frame's dark grating
+    posts = [m for m in ms if m[0] == "frame" and m[1] == "tube" and abs(m[2] - 0.08) < 1e-9]
+    assert len(posts) >= 6
