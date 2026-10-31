@@ -1,7 +1,7 @@
 # Vehicle detail models (Super Heavy Block 3 + Starship Block 3, prototype)
 
-State: plan `docs/superpowers/plans/2026-10-31-starship-booster-prototype.md`, task 1 done (models generated); the game side
-(task 2) and the tile shader (task 3) are open. Only `starship_block3`; depot, tanker, HLS and Falcon 9 keep today's view.
+State: plan `docs/superpowers/plans/2026-10-31-starship-booster-prototype.md`, tasks 1 (models generated) and 2 (game side) done; the
+tile shader (task 3) is open. Only `starship_block3`; depot, tanker, HLS and Falcon 9 keep today's view.
 
 ## Model
 - Physics numbers are the master: `config/vehicles/starship_block3.toml` and `config/engines/*.toml` (length, diameter, nose,
@@ -33,6 +33,24 @@ State: plan `docs/superpowers/plans/2026-10-31-starship-booster-prototype.md`, t
   (manifest `exit_plane_x_m`: the plume re-anchor of task 2), exit rim diameter = config value (tested), bare bell +
   housing above the gimbal.
 
+## Game side (`game/vehicle/vehicle_models.gd`, `vehicle_view.gd`)
+- `VehicleModels.load_for(vehicle_id)` -> `{}` (cylinders, one log line) unless the vehicle is `starship_block3`, the manifest and
+  all glTFs exist and are newer than the detail file, the vehicle config and the generator scripts. Result cached per run.
+  The prototype switch is a named constant (`PROTOTYPE_VEHICLE_ID`), like Pad B's.
+- The snapshot's stage dictionaries carry `vehicle_id` (bindings, `body_stages`): stage ids repeat in the tanker and HLS-launch
+  configs (stages taken over), so the id alone cannot tell them apart; a separated part reports `<vehicle>/<stage>` (the part
+  before `/` counts). No `vehicle_id` (older snapshot) = cylinders.
+- Per stage one node `stage_<id>` (origin at the stage's base station, the body -> render permutation as basis) with the hull
+  nodes (`hull`, `hot_stage`, ...), one MultiMesh per engine kind (`engines_raptor`, `engines_rvac`, one instance per snapshot
+  engine, posed from `position_m` / `direction` = the real gimbal), `flap_<i>`, `grid_fin_<i>` as children in stage-local body
+  coordinates. Stage separation rebuilds on the new stage list: a model never stays on the wrong stage. Material: the view's
+  stainless steel `LitAerial`.
+- Flap pose: hinge at (aft station, hull radius at the hinge azimuth), basis (X, e_r, stow) with stow = -rotation_sign * (X x e_r)
+  (mirrored when the manifest sign is +1), then rotation about +X by sign * deflection; manifest entry matched by stage id,
+  hinge azimuth and aft station. Fin pose: pivot at (station, hull radius, azimuth), rotation about +X by the azimuth, then about
+  the radial Y by +deflection. Both are tested against re-implementations of `flap_span_direction` and the grid-fin normal.
+- Plumes start at the model's exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the gimbal point); cylinders keep 3.0 m.
+
 ## Standing decisions
 - Detail in geometry only where it reads (beads, vents, lattice, strakes); tiles are the task 3 shader (UV and coverage table
   are ready). Staying data-driven: nothing is typed into a generator that the configs carry.
@@ -43,6 +61,10 @@ State: plan `docs/superpowers/plans/2026-10-31-starship-booster-prototype.md`, t
 - `python -m pytest tools/structures/tests/test_vehicle_models.py -q` (34 tests with the Pad B ones; Blender cases skip
   without Blender): hull bounds / diameter / nose / UV / outward winding, pins, fin fairings, chine azimuth, flap and fin
   hinge at the origin and sizes, engine exit diameter, manifest, determinism, up-to-date skip, spec validation, flap sign.
+- `godot --headless --path game --script res://tests/vehicle_view_test.gd` (synthetic snapshots from the vehicle config): node
+  sets of other vehicle / no models / no `vehicle_id`, 33 + 6 engines and their ring-formula poses, gimbal follow, flap poses at
+  0 / 35 / 90 deg and fin poses at 0 / -20 / 30 deg against the core's definitions, separation, plume exit planes, short lists.
+  (The headless renderer keeps no MultiMesh transforms: the view keeps the last engine poses for the test.)
 - Preview: `blender -b --factory-startup -P tools/structures/blender/preview_vehicle.py -- --spec <json> --out
   screenshots/vehicles` (stack, ship top / base, booster base / top, fin close-up; `--flap-deg`, `--fin-deg`).
 - Triangles: booster 21,252, ship 21,020, flap 84 each, grid fin 924, Raptor 2,048, RVac 2,560 (33 + 6 engines are instances).

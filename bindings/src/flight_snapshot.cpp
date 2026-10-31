@@ -21,8 +21,12 @@ godot::Vector3 to_godot(const math::Vec3& v) { return {v.x, v.y, v.z}; }
 
 godot::Array body_stages(const sim::FlightSession& session, size_t index) {
     godot::Array stages;
+    // The part's vehicle id ("starship_block3", after a separation "starship_block3/ship"): stage ids repeat across
+    // vehicles that take stages over (tanker, HLS launch), the detail models belong to one vehicle.
+    const godot::String vehicle_id = godot::String::utf8(session.body(index).vehicle().id().c_str());
     for (const auto& stage : session.body(index).vehicle().stages()) {
         godot::Dictionary d;
+        d["vehicle_id"] = vehicle_id;
         d["name"] = godot::String(stage.config.name.c_str());
         d["id"] = godot::String(stage.config.id.c_str());
         d["base_station_m"] = stage.base_station_m;
