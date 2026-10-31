@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import build_models  # noqa: E402
 import hull_textures  # noqa: E402
+import hull_tiles  # noqa: E402
 import vehicle_spec  # noqa: E402
 
 VEHICLE = "starship_block3"
@@ -293,7 +294,8 @@ def test_engine_exit_diameter_and_gimbal_origin(built, spec, eid):
 def test_manifest_and_triangle_counts(built, spec):
     manifest = json.loads((built / "manifest.json").read_text(encoding="utf-8"))
     assert set(manifest["files"]) == {"booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
-                                      "raptor.gltf", "rvac.gltf", "hull_steel.png"}
+                                      "raptor.gltf", "rvac.gltf", "hull_steel.png", "tile_patch.png", "tile_sel.png",
+                                      "tile_ids.png"}
     steel = manifest["look"]["steel_map"]
     assert steel["file"] == "hull_steel.png" and (built / steel["file"]).is_file()
     assert steel["period_v_m"] == spec["detail"]["hull"]["ring_pitch_m"]
@@ -360,3 +362,33 @@ def test_steel_map_needs_one_hull_radius(spec):
     bad["stages"]["booster"]["diameter_m"] = 8.0
     with pytest.raises(ValueError, match="one hull radius"):
         hull_textures.write(Path("."), bad)
+
+
+# ------------------------------------------------------------------------------ baked tile maps (no Blender)
+
+def test_tile_maps_are_deterministic_periodic_and_have_the_gap_share(spec):
+    tiles = spec["detail"]["ship"]["tiles"]
+    af, gap = tiles["hex_across_flats_m"], tiles["gap_m"]
+    a, b = hull_tiles.bake_patch(af, gap), hull_tiles.bake_patch(af, gap)
+    assert a.shape == (hull_tiles.TILE_SIZE_V, hull_tiles.TILE_SIZE_U, 4) and (a == b).all()
+    assert (hull_tiles.bake_ids() == hull_tiles.bake_ids()).all() and (hull_tiles.bake_sel() == hull_tiles.bake_sel()).all()
+    # gap coverage = perimeter x gap / 2 / area of the hexagon (two tiles per period): 2 sqrt3 x gap / (sqrt3/2 x af) / 2
+    expected = 2.0 * math.sqrt(3.0) * af * gap / 2.0 / (math.sqrt(3.0) / 2.0 * af * af)
+    assert a[..., 3].mean() / 255.0 == pytest.approx(expected, rel=0.03)
+    tilt = a[..., :2].astype(float) / 255.0 - 0.5
+    assert abs(tilt.mean(axis=(0, 1))).max() < 0.01          # a bevel tilts outwards on every side: no mean tilt
+    assert abs(tilt).max() <= hull_tiles.TILE_BEVEL_TILT + 0.01
+    # periodic: the pattern is mirror-symmetric about the edge across the arc seam (a flat there: equal gap coverage, opposite
+    # tilt) and continuous along the station seam (a tile's middle there)
+    ai = a.astype(int)
+    assert abs(ai[:, 0, 3] - ai[:, -1, 3]).max() <= 2 and abs(ai[:, 0, 0] + ai[:, -1, 0] - 256).max() <= 3
+    assert abs(ai[0] - ai[-1]).max() <= abs(ai[1:] - ai[:-1]).max()
+
+
+def test_tile_sel_ids_cover_both_lattices_and_the_repaired_share():
+    sel, ids = hull_tiles.bake_sel(), hull_tiles.bake_ids()
+    assert set(sel[..., 2].flatten()) == {0, 255} and abs((sel[..., 2] > 0).mean() - 0.5) < 0.02  # two tiles per period
+    assert set(sel[..., 0].flatten()) == {0, 255} and set(sel[..., 1].flatten()) == {0, 255}
+    repaired = (ids[..., 2].mean() + ids[..., 3].mean()) / 2.0 / 255.0  # 16k Bernoulli draws: sigma ~ 15 %
+    assert repaired == pytest.approx(hull_tiles.REPAIRED_FRACTION, rel=0.5)
+    assert abs(ids[..., 0].mean() / 255.0 - 0.5) < 0.03  # the shade 0.75 + 0.5 v has the mean 1

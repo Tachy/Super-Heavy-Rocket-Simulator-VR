@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hull_textures  # noqa: E402
+import hull_tiles  # noqa: E402
 import vehicle_spec  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +38,7 @@ OUTPUTS = ("profiles.gltf", "chopstick.gltf")
 MANIFEST = "manifest.json"
 VEHICLE_GENERATORS = ("gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py")
 VEHICLE_FIXED_OUTPUTS = ("booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
-                         hull_textures.FILE_NAME)
+                         hull_textures.FILE_NAME, *hull_tiles.FILES.values())
 VEHICLE_FRAME = ("Blender axes in glTF (export_yup off) = the config's body frame: X station axis (station 0 at X = 0, "
                  "nose +X), (Y, Z) = r (cos a, sin a), belly azimuth 270 = -Z; game maps body (x, y, z) to render "
                  "(y, z, x). Hull UV = (arc metres at the barrel radius, 1 - station) in Blender = (u, station) in glTF. "
@@ -123,7 +124,7 @@ def vehicle_hash(spec_text: str, version: str) -> str:
     h.update(version.encode())
     h.update(spec_text.encode())
     for p in [SCRIPT_DIR / "common.py", SCRIPT_DIR / "vehicle_common.py", Path(hull_textures.__file__),
-              *(SCRIPT_DIR / g for g in VEHICLE_GENERATORS)]:
+              Path(hull_tiles.__file__), *(SCRIPT_DIR / g for g in VEHICLE_GENERATORS)]:
         h.update(p.name.encode())
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()
@@ -180,6 +181,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     triangles: dict[str, int] = {}
     try:
         steel_map = hull_textures.write(staging, spec)
+        tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
         for gen in VEHICLE_GENERATORS:
             cmd = [str(exe), "-b", "--factory-startup", "-P", str(SCRIPT_DIR / gen), "--", "--spec", str(spec_file),
                    "--out", str(staging)]
@@ -196,6 +198,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
         spec_file.unlink(missing_ok=True)
     manifest = vehicle_manifest(spec, digest, version, triangles)
     manifest["look"]["steel_map"] = steel_map
+    manifest["look"]["tile_maps"] = tile_maps
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if out.exists():
         shutil.rmtree(out)
