@@ -18,6 +18,8 @@ var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the ro
 var _cable_lateral_m: Array[float] = []
 var _cable_top_m := 0.0  ## height of the cables' upper end above the site
 var _cable_base_m := 0.0  ## height of the sheave block's top above the deck plane
+var _actuators: Array[Array] = []  ## per arm: [barrel, rod] cylinders from the carriage to the arm's root column
+var _actuator: Dictionary = {}  ## detail file [carriage] actuator_* keys
 var _steel := LitAerial.material(Color(0.42, 0.43, 0.45), 0.5, 0.5)  # [E] albedo ~0.15 as TowerMaterial
 var _concrete := LitAerial.material(Color(0.62, 0.61, 0.58), 0.9, 0.0)
 var _lattice := ShaderMaterial.new()
@@ -32,6 +34,7 @@ func build(geometry: Dictionary) -> void:
 	_carriage = null
 	_cables.clear()
 	_cable_lateral_m.clear()
+	_actuators.clear()
 	_geometry = geometry
 	_lattice.shader = load("res://shaders/lattice.gdshader")
 	position = Frames.to_render(geometry["origin_itrf_m"])
@@ -106,6 +109,7 @@ func update_state(state: Dictionary) -> void:
 		_arms[i].position = Frames.to_render(hinge + up * offset)
 	if _carriage != null:
 		_place_carriage(offset)
+		_place_actuators()
 
 
 func _arm_materials() -> Dictionary:
@@ -127,8 +131,8 @@ func _build_carriage(models: Dictionary) -> void:
 	var count := int(k["cable_count"])
 	var size: float = k["cable_size_m"]
 	var pitch: float = k["cable_spacing_m"]
-	# The sheave block's top, as in mechazilla_layout.carriage_drum_top_z; cables run to the roof block's underside.
-	_cable_base_m = float(k["top_z_m"]) + 0.6 + float(k["drum_diameter_m"])
+	# The sheave block's top (the layout puts its centre at top + gap + diameter / 2); cables run to the roof block's underside.
+	_cable_base_m = float(k["top_z_m"]) + float(k["drum_gap_m"]) + float(k["drum_diameter_m"])
 	_cable_top_m = float(models["detail"]["tower.roof"]["block_base_m"])
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.5 * size
@@ -144,6 +148,64 @@ func _build_carriage(models: Dictionary) -> void:
 		add_child(cable)
 		_cables.append(cable)
 		_cable_lateral_m.append((c - 0.5 * (count - 1)) * pitch)
+	_build_actuators(k)
+
+
+## The electromechanical actuators (NSF 2026-05: not hydraulic): per arm a barrel fixed on the carriage and a rod to the lug
+## on the arm's inclined root column, both cylinders placed from the two end points each update, so the pair follows the
+## opening angle by geometry.
+func _build_actuators(k: Dictionary) -> void:
+	_actuator = k
+	for i in range(2):
+		var pair: Array = []
+		for part in range(2):
+			var mesh := CylinderMesh.new()
+			mesh.top_radius = 0.5 * float(k["actuator_barrel_m"] if part == 0 else k["actuator_rod_m"])
+			mesh.bottom_radius = mesh.top_radius
+			mesh.height = 1.0
+			mesh.radial_segments = 16
+			mesh.rings = 1
+			var node := MeshInstance3D.new()
+			node.name = "actuator_%d_%d" % [i, part]
+			node.mesh = mesh
+			node.material_override = TowerMaterial.clad() if part == 1 else TowerMaterial.dark()
+			add_child(node)
+			pair.append(node)
+		_actuators.append(pair)
+
+
+## Both end points in this node's (render) frame: the anchor on the carriage, the lug on the arm (model coordinates).
+func actuator_ends(arm: int) -> Array[Vector3]:
+	var side := 1.0 if arm == 0 else -1.0
+	var k := _actuator
+	var anchor_local := Vector3(k["actuator_anchor_x_m"], -side * (float(k["hinge_y_m"]) - float(k["actuator_anchor_in_m"])),
+			-float(k["actuator_anchor_depth_m"]))
+	# Model coordinates of the arm as drawn for +across (+Y toward the axis): the lug lies outboard, Y < 0 (the mirrored
+	# -across arm's node flips it).
+	var lug_local := Vector3(k["actuator_lug_x_m"], -float(k["actuator_lug_out_m"]), -float(k["actuator_lug_depth_m"]))
+	var carriage_model := _carriage.get_node("Carriage") as Node3D
+	var arm_model := _arms[arm].get_node("Chopstick") as Node3D
+	var a: Vector3 = _carriage.transform * (carriage_model.transform * anchor_local)
+	var b: Vector3 = _arms[arm].transform * (arm_model.transform * lug_local)
+	return [a, b]
+
+
+func _place_actuators() -> void:
+	for i in range(_actuators.size()):
+		var ends := actuator_ends(i)
+		var a: Vector3 = ends[0]
+		var b: Vector3 = ends[1]
+		var axis := b - a
+		var length := axis.length()
+		var barrel := minf(float(_actuator["actuator_barrel_length_m"]), length)
+		var dir := axis / length
+		var tilt := Basis(Quaternion(Vector3(0.0, 1.0, 0.0), dir))
+		for part in range(2):
+			var node := _actuators[i][part] as MeshInstance3D
+			var from_a := 0.0 if part == 0 else barrel
+			var len_part := barrel if part == 0 else length - barrel
+			node.position = a + dir * (from_a + 0.5 * len_part)
+			node.basis = tilt * Basis.from_scale(Vector3(1.0, maxf(len_part, 0.01), 1.0))
 
 
 ## Carriage node and cables at the carriage offset; the hinge line's height comes from the hinges.

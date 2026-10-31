@@ -17,7 +17,7 @@ import bmesh
 import bpy
 from mathutils import Vector
 
-TUBE_SIDES = 12  # [E] 12-gon reads round at the 0.5-0.65 m tubes from >= 5 m; a member is instanced thousands of times
+TUBE_SIDES = 16  # [E] 16-gon reads round at the 0.8-1.1 m arm tubes from close; tubes are only the few arm members
 TUBE_CHAMFER_FRAC = 0.2  # [E] end chamfer as a fraction of the tube radius (bevel, catches a highlight)
 
 

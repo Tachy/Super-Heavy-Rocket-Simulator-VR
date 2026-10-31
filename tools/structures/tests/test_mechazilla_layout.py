@@ -29,10 +29,38 @@ def _direction(a, b):
     return math.atan2(b[1] - a[1], b[0] - a[0])
 
 
-def test_main_beams_parallel_at_the_closed_pose(detail):
-    # Closed = opening 0: the arm's X is the pivot's forward axis for both (mirrored) arms; the main beam runs along X.
-    line = layout.plan_line(detail["chopstick"], -0.5)
-    assert abs(math.degrees(_direction(line[1], line[2]))) < 0.1
+def _physics():
+    with open(ROOT / "config" / "launch_sites.toml", "rb") as f:
+        return check_envelope.tower(tomllib.load(f))
+
+
+def _world_line(c, phys, side, y_main):
+    """Plan polyline of an arm's chord in the tower frame at the closed pose: (distance toward the pad, across).
+    The pose is built from the physics hinge, not from the layout: the arm points to the pad (-toward) from the hinge at
+    +-(gap / 2 + width / 2) across; the layout's +Y is toward the catch axis, the arm at `side` = -1 is its mirror."""
+    lateral = 0.5 * phys["arm_closed_gap_m"] + 0.5 * phys["arm_width_m"]
+    return [(phys["distance_m"] - 0.5 * phys["width_m"] - x, side * (lateral - y))
+            for x, y in layout.plan_line(c, y_main)]
+
+
+def _heading_deg(a, b):
+    return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+
+
+def test_main_beams_parallel_and_tips_bend_inward_at_the_closed_pose(detail):
+    c, phys = detail["chopstick"], _physics()
+    y_in, _ = layout.chord_y(c, detail["profiles"][c["chord_profile"]])
+    plus, minus = _world_line(c, phys, 1.0, y_in), _world_line(c, phys, -1.0, y_in)
+    # main beams: both run straight to the pad (heading 180 deg) and keep the same distance from each other
+    for line in (plus, minus):
+        assert abs(_heading_deg(line[2], line[1])) == pytest.approx(0.0, abs=0.1) or             abs(abs(_heading_deg(line[1], line[2])) - 180.0) < 0.1
+    gaps = [plus[i][1] - minus[i][1] for i in (1, 2)]
+    assert gaps[0] == pytest.approx(gaps[1], abs=1e-6)
+    assert gaps[0] == pytest.approx(phys["arm_closed_gap_m"] + 2.0 * (c["inner_face_y_m"] - y_in), abs=1e-6)
+    # the outer pieces are NOT parallel: they converge by the tip angle each, the root pieces fan out
+    assert plus[3][1] - minus[3][1] < gaps[0] < plus[0][1] - minus[0][1]
+    tip_turn = abs(abs(_heading_deg(plus[2], plus[3])) - 180.0)
+    assert tip_turn == pytest.approx(c["tip_kink_deg"], abs=0.1)
 
 
 def test_bends_point_inward_at_root_and_tip(detail):
@@ -65,19 +93,29 @@ def test_closed_arm_clears_the_hull(detail):
     assert min(_surface_distance_to_axis(m) for m in near) >= HULL_RADIUS_M + 0.03
 
 
-def test_pad_stands_at_the_hull(detail):
+def test_pad_stands_at_the_hull_at_the_arm_end(detail):
     c = detail["chopstick"]
     lateral_face = HINGE_LATERAL_M - (c["inner_face_y_m"] + c["pad_proud_m"])
     assert lateral_face - HULL_RADIUS_M == pytest.approx(0.1, abs=0.02)
-    assert c["pad_x_m"] == HINGE_TO_AXIS_M
+    end = c["pad_x_m"] + 0.5 * c["pad_length_m"]
+    assert abs(end - c["length_m"]) <= 0.1  # the pad ends at the arm's end
+    assert c["pad_x_m"] - 0.5 * c["pad_length_m"] < HINGE_TO_AXIS_M < end  # and spans the catch axis station
 
 
-def test_closed_arm_reaches_past_the_axis_and_lower_chord_rises(detail):
+def test_closed_arm_overshoots_the_axis_by_at_most_two_metres_and_lower_chord_rises(detail):
     c = detail["chopstick"]
-    assert c["length_m"] > HINGE_TO_AXIS_M
+    assert 0.0 < c["length_m"] - HINGE_TO_AXIS_M <= 2.0
     assert layout.lower_chord_z(c, c["knee_frac"] * c["length_m"]) == pytest.approx(-c["knee_depth_m"])
     assert layout.lower_chord_z(c, c["kink_frac"] * c["length_m"]) == pytest.approx(-c["depth_m"])
     assert c["knee_depth_m"] > c["depth_m"] > c["end_depth_m"]
+
+
+def test_open_frame_with_a_narrow_strip_on_the_inner_chord(detail):
+    ms = layout.chopstick(detail)
+    assert not [m for m in ms if m[0] == "deck"]  # no slab between the chords
+    strips = [m for m in ms if m[0] == "strip"]
+    assert strips and all(m[2] <= 0.8 for m in strips)  # a narrow strip, not the 4 m width
+    assert max(max(m[3][2], m[4][2]) + 0.5 * (m[5] or 0.0) for m in strips) == pytest.approx(0.0, abs=1e-9)
 
 
 def test_qd_arm_head_is_clear_of_the_hull_and_fits_between_the_closed_arms(detail):

@@ -45,7 +45,7 @@ def test_chopstick_bounds_and_hinge(built):
     assert lo[2] == pytest.approx(-detail["foot_depth_m"], abs=1.0)  # the root columns' foot
     assert hi[2] == pytest.approx(detail["mast_height_m"], abs=BOUND_TOL_M)  # the mast above the deck plane
     names = {n["name"] for n in g["nodes"]}
-    assert {"chopstick", "truss", "deck", "strip", "pad", "hardware"} <= names
+    assert {"chopstick", "truss", "strip", "pad", "hardware"} <= names
     root = next(n for n in g["nodes"] if n["name"] == "chopstick")
     assert "translation" not in root or root["translation"] == [0.0, 0.0, 0.0]
 

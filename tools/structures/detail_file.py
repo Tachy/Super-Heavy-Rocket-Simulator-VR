@@ -14,7 +14,10 @@ SECTION_KEYS = ("height_m", "face_width_m", "pitch_m", "pattern", "leg_profile",
 CHOPSTICK_KEYS = ("length_m", "width_m", "depth_m", "end_depth_m", "knee_depth_m", "foot_depth_m", "root_kink_x_m",
                   "root_kink_deg", "tip_kink_x_m", "tip_kink_deg", "inner_face_y_m", "rail_profile", "chord_profile",
                   "brace_profile", "thin_profile")
-CARRIAGE_KEYS = ("width_m", "bottom_depth_m", "hinge_y_m", "drum_diameter_m", "cable_count", "cable_size_m")
+CARRIAGE_KEYS = ("width_m", "bottom_depth_m", "hinge_y_m", "drum_diameter_m", "drum_gap_m", "cable_count", "cable_size_m",
+                 "actuator_anchor_x_m", "actuator_anchor_in_m", "actuator_anchor_depth_m", "actuator_lug_x_m",
+                 "actuator_lug_out_m", "actuator_lug_depth_m", "actuator_barrel_m", "actuator_rod_m",
+                 "actuator_barrel_length_m")
 QD_ARM_KEYS = ("deck_m", "reach_m", "root_length_m", "root_width_m", "tip_width_m", "foot_depth_m")
 TOWER_KEYS = ("height_m", "lattice_height_m", "sections", "floors", "deck", "core", "plinth", "cladding", "stairs",
               "roof")

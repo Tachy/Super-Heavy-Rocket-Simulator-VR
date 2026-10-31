@@ -19,14 +19,22 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   (courses of 5.35 m, two plates across, 0.1 m seams), roof deck 144 m with a louvred 8 x 8 x 7 m block (139.9-146.9 m) and
   a railing (silhouette top 146.9 m, the physics box is 146 m), zig-zag stair flights on one side face and two cable trays
   on the back face, dark deck slabs 0.4 m at every floor, column bundle 3.6 m.
-- Chopstick (task 2, Pad 2 arm; evidence "Arm research" in the measurements): `mechazilla_layout.chopstick`, frame of round
-  black tubes, 27 m, 4 m wide, V section: two top chords, one lower chord (knee 11 m at 0.21 L, 8.6 m at 0.35 L, 7 m at its end
-  0.87 L), root columns to a foot 17 m below the deck. In plan the top chords bend inward at 5.2 m (5 deg, from the geometry) and
-  at 24.8 m (28 +-15 deg); the main beam between runs along the arm's X, so both are parallel at the closed pose (`opening_rad` 0).
-  Grey contact pad at the axis station (under the catch fin at the closed pose), two telescopic pushers on the deck at the tip,
-  hanging stabilizer probe with its thin brace, ladders, platform, railing, mast, tan deck strip. Deck grating not drawn (plain plate).
-- Carriage (`mechazilla_layout.carriage`): black frame 13.5 x 9 m, hinge frames at the corners (6.75 m), grey actuator drums, walkway
-  past the corners, 3.8 m sheave block; four hoist cables to the roof block, stretched in `TowerView` with the carriage offset.
+- Chopstick (task 2 + fix round, Pad 2 arm; evidence "Arm research" in the measurements): `mechazilla_layout.chopstick`, an OPEN frame
+  of few big round black tubes (16-sided, 6.4k triangles; chords 1.1 m, diagonals 0.8 m, root columns 1.4 m), 25.9 m, 4 m wide,
+  V section: two top chords, one lower chord (knee 11 m at 0.21 L, 8.6 m at 0.35 L, 7 m at its end 0.87 L), root columns to a foot 17 m
+  below the deck. Per arm: 3 V posts, 2 W diagonals per side, the last strut, 3 ties on top (the real outer frame shows about 3 posts and
+  4 diagonals in NSF 2026-03 / 05; the old drawing had 27 of them). No deck slab: only a narrow tan strip (0.8 m) on the inner top
+  chord, top at Z = 0. Ladders are one flat panel each. In plan the top chords bend inward at 5.2 m (5 deg, from the geometry) and at 24.8 m
+  (28 +-15 deg); the MAIN BEAMS between run along the arm's X and are parallel at the closed pose (`opening_rad` 0); the OUTER PIECES (tips)
+  are not parallel: each bends 28 deg toward the other. The tip bend is only 1.1 m long: a longer one would reach into the 9 m hull
+  (the hinge sits 24 m from the axis). Grey contact pad at the arm's end, spanning the axis station (under the catch fin at the closed
+  pose), two telescopic pushers on the deck at the tip, hanging stabilizer probe with its thin brace, ladders, platform, railing, mast.
+  Deck grating not drawn (it does not read at any distance the game shows).
+- Carriage (`mechazilla_layout.carriage`): black frame 13.5 x 9 m, hinge frames on the physics pivot (5.8 m), walkway past the corners,
+  3.8 m sheave block; four hoist cables to the roof block, stretched in `TowerView` with the carriage offset. Per arm an
+  electromechanical actuator (NSF 2026-05: no longer hydraulic): barrel on the carriage, rod to a lug on the arm's inclined root column,
+  both cylinders placed from the two end points each update (`TowerView.actuator_ends`), so they follow the opening angle by geometry
+  (5.3 m closed, 6.5 m at 0.7 rad). Its numbers are the `actuator_*` keys of `[carriage]`.
 - QD arm (`mechazilla_layout.qd_arm`): THE ship QD arm, one arm; deep root truss with light cabinets, shallow tip platform, connector
   head; tip deck 86.8 m, static, head 1 m clear of the 4.5 m hull on the tower's centre plane, fits between the closed arms.
 - Open part of the lattice: `x_brace` on all eight lower sections, `chevron` on the top one. Which brace pitch the frames
@@ -115,9 +123,14 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
   than the geometry: hard swap of matched tiers and a coverage (alpha-to-coverage) instead; `alpha_scale` 0.85 and the
   colours of the far shader are fitted to the merged tier at 4.5-6.5 km (alpha 1.0 / 1.15 left the far tier up to 2.3 %
   brighter at VR focal length).
-- `tools/structures/tests/test_mechazilla_layout.py`: main beams parallel at the closed pose, bends inward, closed arm's surfaces >= 0.03 m
-  off the hull, pad 0.1 m from it, QD head 1 m off and between the arms. `python tools/structures/check_envelope.py`: inner face on the
-  physics half gap (0.05 m), tower width (0.10 m); only table rows are exceptions, listed by name.
+- `tools/structures/tests/test_mechazilla_layout.py`: both arms' chord lines built at the closed pose from the PHYSICS hinge (not from the
+  layout's own numbers): main beams parallel and the physics gap apart, tips bend toward each other by 28 deg, root pieces fan out; closed
+  arm's surfaces >= 0.03 m off the hull, pad 0.1 m from it and ending at the arm tip, open frame (no deck, strip <= 0.8 m, top at Z = 0).
+  `tower_view_test`: the pad meshes' centres through the pivots against hinge + pad station (0.05 m), the pad centres 9.8 m apart, the
+  actuators' ends on the carriage and the lug, length follows the opening. `python tools/structures/check_envelope.py`: inner face on the
+  physics half gap, arm length, hinge, tower width / height, arm top plane, leg outer width, QD head against the hull, drawn structure under the
+  deck against the pin-to-fin distance (vehicle config); a row is listed only when the compared numbers differ (exceptions = table rows).
+  Mount deck and azimuth / distance have no drawn number in the detail file (the view reads the physics geometry).
 - `python -m pytest tools/structures/tests -q`: required keys, sections sum to the 139.1 m lattice (139 +-0.2), 26 floors of
   5.3 +-0.1 m, leg 2.2 / brace 0.5 m, plinth 12.2 m, cladding 12.2-79 m, X-brace pitch 7-8 m, no pyramid keys, silhouette
   <= 148 m, every value line tagged, loader raises on missing keys / bad units / unknown pattern and checks the deck, core, roof and foot tables;
@@ -161,8 +174,8 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 |---|---|---|---|
 | Mount deck | 20 m (physics); plan, faces, courses as measured (task 3) | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
-| Arm length | 27 m, closed arm past the catch axis (physics hinge 24 m from it; real tips about at the axis) | 36 m | hinge-to-axis 24.5 +-2 m |
-| Hinge position | drawn hinge frames at 6.75 m, the arm turns about the physics pivot at 5.8 m: the root moves up to 0.95 m against the frame when open | 5.8 m | measured corners; the inner face stays on the physics half gap 4.8 m |
+| Arm length | 25.9 m, closed tip 1.9 m past the catch axis (physics hinge 24 m from it; the real tip is about at the axis; the pad ends at the tip and spans the axis) | 36 m | hinge-to-axis 24.5 +-2 m; 25.9 is the longest arm whose 28 deg bent tip still clears the hull by 3 cm |
+| Hinge position | resolved in the fix round: drawn hinge frames on the physics pivot 5.8 m (the corner hinges read 6.75 m: not drawn); `check_envelope` compares them, no exception | 5.8 m | the inner face stays on the physics half gap 4.8 m |
 | Fins against the arm | pins 66.5 m put the deck 2-2.5 m above the fin plates, the arm's top 2.5 m and truss run through the 0 / 180 fins at a catch: visible overlap, NOT hidden. Pad at the closed pose under where the fin bars come down | pins 66.5 m, azimuths 45 / 225, fins without contact | V3 user view: deck 0-0.9 m under the fins; proposal in the measurements |
 | Tower face, height | width 12 m, roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 12 / 146 m | within the error |
 | Leg spacing | outer width 12 m (leg centres 9.8 m) | box 12 m | measured leg centres 11.9 +-1 m (outer 13.3-14): the legs stay inside the physics box |
@@ -170,9 +183,9 @@ The lattice, carriage, both chopsticks and the QD arm render at `starbase_olp1`;
 | Azimuth, distance | physics 315 deg, 30 m | measured 345 +-25, 32 +-3 m | low confidence |
 
 ## Open points
-- Arm: the pad position along the arm (real block at the arm's end, drawn at the axis station); root bend and width from weak
-  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 7.9k triangles per arm, far tier unchanged (cost:
-  task 5); hinge visual offset 0.95 m (table); shock absorbers and the fin's station undecided.
+- Arm: root bend and width from weak
+  views (no top view of a Pad 2 arm found); deck grating and rack strip not drawn; 6.4k triangles per arm, far tier unchanged (cost:
+  task 5); shock absorbers and the fin's station undecided.
 - Render vs the frames (task 1): still different: no mount frustum (task 3; the old mount cylinder), no platforms with grating and no cross braces inside the face, the plinth is a plain box,
   the hoist cables and side members of the roof block are missing, grime is not tuned.
 - The far shader's `blur`, `alpha_scale` and colours are fitted to the merged tier at 900-1300 m for one sun / sky

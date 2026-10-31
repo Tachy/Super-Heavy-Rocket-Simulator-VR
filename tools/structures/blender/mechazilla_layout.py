@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 
 # Fractions of the arm that come from the plan / side views: see the [chopstick] table of the detail file.
-RING_POST_FRACTIONS = (0.35, 0.48, 0.61, 0.74, 0.87)  # [E] posts: 4 panels between knee and tip, side view 2025-08
+RING_POST_FRACTIONS = (0.35, 0.61, 0.87)  # [E] 3 posts, 2 panels: the real outer frame has few big members (NSF 2026-03 / 05)
 
 
 def _member(node, kind, size, p0, p1, size_y=None):
@@ -72,8 +72,10 @@ def chopstick(detail: dict) -> list:
     for line in lines:  # top chords with round end caps
         for (x0, y0), (x1, y1) in zip(line, line[1:]):
             tube("truss", chord, (x0, y0, z_top), (x1, y1, z_top))
-        xe, ye = line[-1]
-        tube("truss", chord * c["cap_scale"], (xe - 0.1, ye, z_top), (xe + 0.1, ye, z_top))
+        (xa, ya), (xe, ye) = line[-2], line[-1]
+        run = math.hypot(xe - xa, ye - ya)
+        dx, dy = 0.1 * (xe - xa) / run, 0.1 * (ye - ya) / run  # the cap sits on the bent chord's own axis
+        tube("truss", chord * c["cap_scale"], (xe - dx, ye - dy, z_top), (xe + dx, ye + dy, z_top))
     # Single lower chord on the centre line: the arm's section is a V (user view 2026-10-31: struts converge to a node).
     stations = [x_knee, c["kink_frac"] * length, x_end]
     for x0, x1 in zip(stations, stations[1:]):
@@ -104,16 +106,10 @@ def chopstick(detail: dict) -> list:
     tube("truss", chord, (x_knee, y_mid, -c["knee_depth_m"]), foot)
     tube("truss", chord, (x_knee, y_mid, -c["knee_depth_m"]), (x_col, y_mid, -c["knee_depth_m"] + 2.0))
 
-    # Deck in three plates (root, main, tip), the tan strip on its inner half, railing on the outer edge.
-    deck_y = c["deck_thickness_m"]
-    z_deck = -deck_y / 2.0
-    width = y_in - y_out + chord - 0.1
-    centre = plan_line(c, y_mid)
-    for i, (a, b) in enumerate(zip(centre, centre[1:])):
-        plate = c["tip_deck_frac"] * width if i == 2 else width  # the bent tip's plate narrows: its corner clears the hull
-        ms.append(_member("deck", "rect", plate, (a[0], a[1], z_deck), (b[0], b[1], z_deck), deck_y))
-    ms.append(_member("strip", "rect", c["strip_width_m"], (c["root_kink_x_m"], y_in - c["strip_width_m"], 0.01),
-                      (c["tip_kink_x_m"], y_in - c["strip_width_m"], 0.01), 0.02))
+    # Open frame: no deck plates. The tan strip lies on the inner top chord along its whole plan line (top at Z = 0).
+    strip_line = plan_line(c, y_in)
+    for a, b in zip(strip_line, strip_line[1:]):
+        ms.append(_member("strip", "rect", c["strip_width_m"], (a[0], a[1], -0.05), (b[0], b[1], -0.05), 0.1))
     y_rail = y_out - chord / 2.0 + 0.1
     h = c["railing_height_m"]
     rail_line = plan_line(c, y_rail)
@@ -151,21 +147,15 @@ def chopstick(detail: dict) -> list:
     ms.append(_member("hardware", "rect", 0.5, (x_probe, y_mid, probe_foot[2] - 0.6), (x_probe, y_mid, probe_foot[2]),
                       0.5))
 
-    # Two ladders between the chords and a small inspection platform (they read in every close view).
+    # Two ladders between the chords as one flat light panel each (the rungs do not read as members from afar).
     for frac in c["ladder_a_frac"], c["ladder_b_frac"]:
         x = frac * length
         top = (x, y_out - 0.3, z_top)
         bottom = (x + 0.9, y_mid - 0.9, lower_chord_z(c, x + 0.9))
-        for side in (-0.25, 0.25):
-            tube("hardware", 0.07, (top[0] + side, top[1], top[2]), (bottom[0] + side, bottom[1], bottom[2]))
-        for k in range(1, 8):
-            t = k / 8.0
-            p = [top[i] + (bottom[i] - top[i]) * t for i in range(3)]
-            tube("hardware", 0.05, (p[0] - 0.25, p[1], p[2]), (p[0] + 0.25, p[1], p[2]))
+        ms.append(_member("hardware", "rect", 0.5, top, bottom, 0.04))
     x_p = c["platform_frac"] * length
     ms.append(_member("hardware", "rect", 1.3, (x_p - 1.3, y_out - 1.1, -2.6), (x_p + 1.3, y_out - 1.1, -2.6), 0.1))
     tube("hardware", 0.08, (x_p - 1.3, y_out - 1.7, -1.5), (x_p + 1.3, y_out - 1.7, -1.5))
-    tube("hardware", 0.35, (x_p, y_out - 1.1, -2.6), (x_p, y_out - 1.1, -4.4))  # the grey actuator under it
     tube("hardware", 0.10, (c["mast_x_m"], y_rail, 0.0), (c["mast_x_m"], y_rail, c["mast_height_m"]))
     return ms
 
@@ -187,14 +177,11 @@ def carriage(detail: dict) -> list:
         beam("frame", (x_face, y, bottom), (x_face, y, top))
     beam("frame", (x_face, -half, bottom), (x_face, 0.0, top), box * 0.6)
     beam("frame", (x_face, half, bottom), (x_face, 0.0, top), box * 0.6)
-    # Hinge frame at each corner: a box out to the hinge line and the grey actuator drum beside the arm's root.
+    # Hinge frame at each corner: a box out to the hinge line (the arm-following actuator is drawn by the game).
     for sign in (-1.0, 1.0):
         y = sign * k["hinge_y_m"]
         beam("frame", (x_face, y, -box / 2.0), (0.0, y, -box / 2.0), box * 1.2)
         beam("frame", (x_face, y, bottom + box / 2.0), (0.0, y, -k["hinge_lower_m"]), box * 0.8)
-        ms.append(_member("hardware", "tube", k["drum_small_m"],
-                          (k["actuator_x_m"], y - sign * k["actuator_inset_m"], -k["actuator_z_m"] - 1.2),
-                          (k["actuator_x_m"], y - sign * k["actuator_inset_m"], -k["actuator_z_m"] + 1.2)))
     # Platforms: the walkway beam across the face reaching past the corner, with railing.
     p_end = half + k["platform_reach_m"]
     ms.append(_member("frame", "rect", k["platform_width_m"], (x_face, -p_end, top + 0.1), (x_face, p_end, top + 0.1),
@@ -204,15 +191,10 @@ def carriage(detail: dict) -> list:
         ms.append(_member("hardware", "tube", 0.08, (x_face + k["platform_width_m"] / 2.0, y0, top + 1.2),
                           (x_face + k["platform_width_m"] / 2.0, 0.0, top + 1.2)))
     # The drum / sheave block above the carriage with the hoist cables (carriage photo 2025-12: worker for scale).
-    d, w, z_d = k["drum_diameter_m"], k["drum_width_m"], top + k["drum_diameter_m"] / 2.0 + 0.6
+    d, w, z_d = k["drum_diameter_m"], k["drum_width_m"], top + k["drum_diameter_m"] / 2.0 + k["drum_gap_m"]
     ms.append(_member("frame", "tube", d, (x_face, -w / 2.0, z_d), (x_face, w / 2.0, z_d)))
     beam("frame", (x_face, 0.0, top), (x_face, 0.0, z_d), chord)
     return ms
-
-
-def carriage_drum_top_z(detail: dict) -> float:
-    k = detail["carriage"]
-    return k["top_z_m"] + 0.6 + k["drum_diameter_m"]
 
 
 def qd_arm(detail: dict) -> list:
@@ -246,7 +228,9 @@ def qd_arm(detail: dict) -> list:
             lo, hi = ((x0, z_b0), (x1, z_t1)) if i % 2 else ((x0, z_t0), (x1, z_b1))
             tube("truss", brace, (lo[0], y, lo[1]), (hi[0], y, hi[1]))
     # White cabinets inside the root truss (QD photo 2026-05).
-    box("hardware", (x_step * 0.2, 0.0, rise * 0.45 - 1.2), (x_step * 0.9, 0.0, rise * 0.1 - 1.2), half_root * 1.4, 2.4)
+    for side in (-1.0, 1.0):  # two small cabinets beside the centre line, not one slab across the root
+        box("hardware", (x_step * 0.25, side * half_root * 0.5, rise * 0.4 - 1.2),
+            (x_step * 0.5, side * half_root * 0.5, rise * 0.25 - 1.2), 1.8, 2.4)
     # Tip part: a shallow lattice platform, deck on top, stair up to it, connector head at the end.
     for side in (-1.0, 1.0):
         y = side * half_tip
@@ -255,8 +239,6 @@ def qd_arm(detail: dict) -> list:
         tube("truss", brace, (reach, y, 0.0), (reach, y, low_tip))
         tube("truss", brace, (x_step, y, low_tip), (reach, y, 0.0))
     box("truss", (x_step, 0.0, low_tip - 0.05), (reach, 0.0, low_tip - 0.05), 2.0 * half_tip, 0.1)
-    box("hardware", (x_step, 0.0, -0.05), (reach, 0.0, -0.05), 2.0 * half_tip, 0.1)
-    box("hardware", (0.0, 0.0, rise), (x_step, 0.0, 0.0), 2.0 * half_root, 0.1)
     head_x0 = reach - q["head_length_m"]
     box("hardware", (head_x0, 0.0, q["head_z_m"] - 0.6), (reach, 0.0, q["head_z_m"] - 0.6), q["head_width_m"], 1.2)
     tube("hardware", 0.5, (head_x0 - 1.0, 0.0, 0.25), (head_x0, 0.0, q["head_z_m"] - 0.6))

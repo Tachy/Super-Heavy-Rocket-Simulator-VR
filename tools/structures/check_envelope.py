@@ -4,6 +4,9 @@
 
 Tolerances 0.10 m (lengths) / 0.05 m (surfaces the vehicle touches). The only allowed exceptions are the rows of the
 "Physics deviations" table in docs/subsystems/launch-structures.md (ALLOWED); they are listed by name. Exit 1 on a failure.
+Every row is a comparison of real numbers: it is listed only when the drawn value differs from the physics / the reference.
+Mount deck height and azimuth / distance have no drawn number in the detail file (TowerView reads them from the physics
+geometry); tower_view_test checks them in the scene.
 """
 from __future__ import annotations
 
@@ -12,13 +15,19 @@ import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blender"))
 import detail_file  # noqa: E402
+import mechazilla_layout  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DETAIL = ROOT / "config" / "structures" / "starbase_olp2.toml"
 SITE_ID = "starbase_olp1"
 LENGTH_TOL_M = 0.10
 SURFACE_TOL_M = 0.05
+VEHICLE = ROOT / "config" / "vehicles" / "starship_block3.toml"
+HULL_RADIUS_M = 4.5  # [S] 9 m booster diameter
+MEASURED_LEG_CENTRES_M = 11.9  # [E] measured leg centre spacing, launch-structures-measurements.md (+-1 m)
+LEG_CENTRES_TOL_M = 1.0
 ALLOWED = ("Arm length", "Tower face, height", "Leg spacing", "Hinge position", "QD arm", "Fins against the arm")
 
 
@@ -53,8 +62,29 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
     within("Tower width", detail["tower"]["sections"][0]["face_width_m"], phys["width_m"], LENGTH_TOL_M)
     within("Tower height", detail["tower"]["roof"]["block_base_m"] + detail["tower"]["roof"]["block_height_m"],
            phys["height_m"], LENGTH_TOL_M, "Tower face, height")
-    # Arm deck against the fins and the static QD arm: no number in the physics, listed always.
-    exceptions.extend(["Fins against the arm", "QD arm", "Leg spacing"])
+    # Arm tops: the deck strip's top is the physics arm's top plane (Z = 0 at the hinge height) the pins land on.
+    strips = [m for m in mechazilla_layout.chopstick(detail) if m[0] == "strip"]
+    within("Arm top plane", max(max(m[3][2], m[4][2]) + 0.5 * (m[5] or 0.0) for m in strips), 0.0, SURFACE_TOL_M)
+    # Leg spacing: the outer width must stay inside the physics box; centres against the measurement.
+    leg = detail["profiles"][detail["tower"]["sections"][0]["leg_profile"]]["size_m"]
+    outer = detail["tower"]["sections"][0]["face_width_m"]
+    if outer > phys["width_m"] + LENGTH_TOL_M:
+        failures.append(f"Leg spacing: outer width {outer:.2f} m exceeds the physics box {phys['width_m']:.2f} m")
+    within("Leg spacing", outer - leg, MEASURED_LEG_CENTRES_M, LEG_CENTRES_TOL_M, "Leg spacing")
+    # QD arm: the head must not reach into the hull; a gap means it is static and not attached (no physics state).
+    hinge_to_axis = phys["distance_m"] - 0.5 * phys["width_m"]
+    gap = hinge_to_axis - detail["qd_arm"]["reach_m"] - HULL_RADIUS_M
+    if gap < 0.0:
+        failures.append(f"QD arm: head {-gap:.2f} m inside the hull")
+    within("QD arm", gap, 0.0, SURFACE_TOL_M, "QD arm")
+    # Fins against the arm: the arm's drawn structure below the deck at the axis station against the distance from the
+    # pins down to the fin hinge (vehicle config); deeper structure runs through the fin plane of a catch.
+    with open(VEHICLE, "rb") as f:
+        stage = tomllib.load(f)["stage"][0]
+    gap_fin_m = stage["catch_pins"]["station_m"] - stage["grid_fins"]["station_m"]
+    depth_m = -mechazilla_layout.lower_chord_z(c, hinge_to_axis)
+    if depth_m > gap_fin_m + SURFACE_TOL_M:
+        exceptions.append("Fins against the arm")
     return failures, exceptions
 
 

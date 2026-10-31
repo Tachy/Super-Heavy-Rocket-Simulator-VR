@@ -131,6 +131,8 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 			var expected := Frames.to_render(-toward * cos(opening) + across * (side * sin(opening)))
 			var angle := rad_to_deg(a.basis.z.normalized().angle_to(expected))
 			_check(angle < 0.1, "state %s arm %d: %.3f deg from arm_direction" % [state, arm_index, angle])
+		# The state dictionaries stand for FlightSim.tower_state(); the carriage's height is the static hinge height (physics
+		# geometry) plus the state's offset: a live catch flight is not started here.
 		var carriage := view.get_node("CarriageMount") as Node3D
 		var height_m := Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(carriage.position)
 		var want_m: float = float(geometry["hinge_plus_m"].z) + offset
@@ -146,21 +148,71 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	var hinge_to_axis: float = float(geometry["hinge_plus_m"].dot(toward))
 	_check(float(c["length_m"]) >= hinge_to_axis, "closed arm reaches the catch axis (%.1f m >= %.1f m)" % [c["length_m"], hinge_to_axis])
 	# Bounds of the model in the pivot's frame: hinge at 0, deck plane at Y = 0, the pad under it.
-	var deck := plus_arm.get_node("deck") as MeshInstance3D
+	var deck := plus_arm.get_node("strip") as MeshInstance3D
 	var deck_bounds: AABB = plus_arm.transform * deck.get_aabb()
-	_check(absf(deck_bounds.end.y) < 0.01, "deck top at the arm top plane (%.3f m)" % deck_bounds.end.y)
+	_check(absf(deck_bounds.end.y) < 0.01, "strip top at the arm top plane (%.3f m)" % deck_bounds.end.y)
 	_check(absf(deck_bounds.position.z) < 0.5 and absf(deck_bounds.end.z - float(c["length_m"])) < 1.0,
-			"deck from the hinge to the tip (%.1f .. %.1f m)" % [deck_bounds.position.z, deck_bounds.end.z])
+			"strip from the hinge to the tip (%.1f .. %.1f m)" % [deck_bounds.position.z, deck_bounds.end.z])
+	_check(plus_arm.get_node_or_null("deck") == null, "open frame: no deck slab")
 	var truss_bounds: AABB = plus_arm.transform * (plus_arm.get_node("truss") as MeshInstance3D).get_aabb()
 	_check(absf(truss_bounds.position.y + float(c["foot_depth_m"])) < 1.0, "root columns' foot %.1f m" % truss_bounds.position.y)
 	var pad_bounds: AABB = plus_arm.transform * (plus_arm.get_node("pad") as MeshInstance3D).get_aabb()
-	_check(pad_bounds.end.y < 0.0 and absf(pad_bounds.get_center().z - float(c["pad_x_m"])) < 0.01, "contact pad at the axis")
+	_check(pad_bounds.end.y < 0.0 and absf(pad_bounds.get_center().z - float(c["pad_x_m"])) < 0.01, "contact pad at the tip")
+	_check_closed_pose(view, models["detail"], geometry)
+	_check_actuators(view, geometry)
 	var paint := ((plus_arm.get_node("truss") as MeshInstance3D).material_override as ShaderMaterial).get_shader_parameter("albedo") as Color
 	_check(paint.v < 0.1, "chopstick: matte black paint (value %.3f)" % paint.v)
 	# The QD arm stands at its deck height, static.
 	var qd := view.get_node("QdArmMount") as Node3D
 	var qd_deck_m := Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(qd.position)
 	_check(absf(qd_deck_m - float(models["detail"]["qd_arm"]["deck_m"])) < 0.01, "QD arm deck at %.2f m" % qd_deck_m)
+
+
+## Real poses at the closed pose (opening 0): the pads' centres, taken from the drawn meshes through the pivots, lie where
+## the physics puts them: at the hinge, `pad_x` toward the pad, across by the gap. Both arms (mirror) on the same station,
+## so the main beams are parallel; the physics gap between the inner pad faces is arm_closed_gap_m - 2 x proud.
+## The outer pieces are not parallel: the tip bend is `tip_kink_deg` inward (checked on the layout in pytest).
+func _check_closed_pose(view: TowerView, detail: Dictionary, geometry: Dictionary) -> void:
+	view.update_state({"opening_rad": 0.0, "carriage_offset_m": 0.0})
+	var c: Dictionary = detail["chopstick"]
+	var toward: Vector3 = geometry["tower_direction"]
+	var across: Vector3 = geometry["across"]
+	var up := Vector3(0.0, 0.0, 1.0)
+	var centres: Array[Vector3] = []
+	for arm_index in range(2):
+		var side := 1.0 if arm_index == 0 else -1.0
+		var pivot := _pivot(view, arm_index)
+		var arm := pivot.get_node("Chopstick") as Node3D
+		var bounds: AABB = pivot.transform * (arm.transform * (arm.get_node("pad") as MeshInstance3D).get_aabb())
+		var y_pad: float = float(c["inner_face_y_m"]) + float(c["pad_proud_m"]) - 0.5 * float(c["pad_width_m"])
+		var z_pad: float = -float(c["pad_top_depth_m"]) - 0.5 * float(c["pad_height_m"])
+		var hinge: Vector3 = geometry["hinge_plus_m" if arm_index == 0 else "hinge_minus_m"]
+		var want := Frames.to_render(hinge - toward * float(c["pad_x_m"]) - across * (side * y_pad) + up * z_pad)
+		_check(bounds.get_center().distance_to(want) < 0.05, "closed pose arm %d: pad at %s, want %s" % [arm_index, bounds.get_center(), want])
+		centres.append(bounds.get_center())
+	var gap := (centres[0] - centres[1]).length()
+	# Pad centres: 2 x (gap / 2 + width / 2 - y_pad) apart, from the physics numbers
+	var y_c: float = float(c["inner_face_y_m"]) + float(c["pad_proud_m"]) - 0.5 * float(c["pad_width_m"])
+	var lateral: float = float(geometry["hinge_plus_m"].dot(across))  # = gap / 2 + width / 2 of the physics hinge
+	var want_gap := 2.0 * (lateral - y_c)
+	_check(absf(gap - want_gap) < 0.05, "closed pose: pad centres %.3f m apart (want %.3f)" % [gap, want_gap])
+
+
+## The actuators run from the carriage to the arm's root column and follow the opening angle.
+func _check_actuators(view: TowerView, geometry: Dictionary) -> void:
+	var lengths: Array[float] = []
+	for opening in [0.0, 0.7]:
+		view.update_state({"opening_rad": opening, "carriage_offset_m": 0.0})
+		for arm_index in range(2):
+			var ends := view.actuator_ends(arm_index)
+			var rod := view.get_node("actuator_%d_1" % arm_index) as MeshInstance3D
+			var far_end := rod.position + rod.basis.y.normalized() * 0.5 * rod.basis.y.length()
+			_check(far_end.distance_to(ends[1]) < 0.01, "actuator %d at %.1f rad: rod ends at the arm's lug" % [arm_index, opening])
+			var barrel := view.get_node("actuator_%d_0" % arm_index) as MeshInstance3D
+			var start := barrel.position - barrel.basis.y.normalized() * 0.5 * barrel.basis.y.length()
+			_check(start.distance_to(ends[0]) < 0.01, "actuator %d at %.1f rad: barrel starts on the carriage" % [arm_index, opening])
+		lengths.append(view.actuator_ends(0)[0].distance_to(view.actuator_ends(0)[1]))
+	_check(absf(lengths[1] - lengths[0]) > 0.5, "actuator length follows the opening: %.2f -> %.2f m" % [lengths[0], lengths[1]])
 
 
 ## Tiers of one section: near MultiMeshes up to NEAR_END_M, the merged mesh to MID_END_M, the lattice shader beyond;

@@ -23,9 +23,12 @@ Rule while the physics stays: **a surface the vehicle touches sits on the physic
 |---|---|---|---|
 | Mount deck | 20 m (physics); plan, faces, courses as measured | 20 m, measured 14.5 +-1.2 m | a stack stands on the deck: at 14.5 m it would hover 5.5 m |
 | Arm tops, carriage | at `tower_state()`, 95 m at the catch | measured 133 +-4 m at the catch, 134 +-4 m parked | pins land on them |
-| Arm length | 27 m, closed tips at the catch axis | 36 m | hinge-to-axis 24.5 +-2 m: the short arm reaches it |
+| Arm length | 25.9 m, closed tip 1.9 m past the catch axis | 36 m | hinge-to-axis 24.5 +-2 m: the short arm reaches it |
+| Hinge position | on the physics pivot 5.8 m (real corners 6.75 m not drawn); added in the fix round, no exception remains | 5.8 m | the inner face stays on the physics half gap |
+| Fins against the arm | pins 66.5 m, fin hinge 64 m: the drawn truss reaches deeper under the deck than 2.5 m, so it runs through the 0 / 180 fins at a catch | pins 66.5 m, azimuths 45 / 225 | visible overlap, not hidden; added after Task 2 (reviewed, no way to hide it before the physics plan) |
+| Leg spacing | outer width 12 m, leg centres 9.8 m | box 12 m | measured centres 11.9 +-1 m: the legs stay inside the physics box; added after Task 1 |
 | Tower face, height | width 12 m, roof deck at 144 +-5 m, lattice 139 m | box 12 / 146 m | within the error |
-| QD arm | static, swung clear | no state | needs the core's `qd_arm_angle_rad` |
+| QD arm | static, deck 86.8 m, head 1 m off the hull | no state | needs the core's `qd_arm_angle_rad` |
 | Azimuth, distance | physics 315 deg, 30 m | measured 345 +-25, 32 +-3 m | low confidence |
 
 These rows go into a "Physics deviations" table in `launch-structures.md`, input to the physics plan.
@@ -71,7 +74,7 @@ These rows go into a "Physics deviations" table in `launch-structures.md`, input
 
 - [ ] Step 1: Tests first: both arm boxes replaced, `-across` mirrored, arm pose equal to `TowerGeometry::arm_direction` within 0.1 deg at open / standby / closed, carriage node height = `tower_state()` height + offset within 0.01 m; closed arm reaches the catch axis; caught-booster render shows the pins on the arm tops.
 - [ ] Step 2: Chopstick: 27 m, depth 8.6 m with the inclined lower chord, rounded outer end, grated deck and rack strip (maps), tan catch strip, inner pads, railing; hydraulic actuators following the arm angle by geometry. Carriage: black frame across 13.5 m x 9 m, platforms, hinge frames at the corners.
-- [ ] Step 3: Tower-side parts: booster-side platform at 86.8 m (reach ~12 m), QD arm `gen_qd_arm.py` (deck 122 m, truss bottom 104 m, reach 20 m) static and swung clear.
+- [ ] Step 3: Tower-side parts: the ship QD arm `gen_qd_arm.py`: deck 86.8 m (the QD arm; 122 m / 104 m were the chopsticks, a swapped measurement row), reach 18.5 m, static (no separate booster-side platform exists).
 - [ ] Step 4: Tests pass; catch-pose PNGs against `f7_3060`, `f5_2405` (old hardware, shape of the arms only); `check_envelope.py` (Create: `tools/structures/check_envelope.py`, 0.10 / 0.05 m; the table's rows above are its only allowed exceptions, listed by name); commit, push.
 
 ### Task 3: Square mount, trench and tunnels
