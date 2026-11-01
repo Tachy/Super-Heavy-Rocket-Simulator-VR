@@ -7,7 +7,7 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
 - Only the current configuration (Block 3 / V3, Raptor 3) is modelled; data come from flights 12-14
   (`tests/validation/telemetry/flights.toml`).
 - **Block 3 masses** [D] from flights 12-14 (`tools/telemetry/mass_estimate.py`, `ship_dv.py`): ship dry 255 t (rocket
-  equation staging -> cutoff with the propellant gauge, 248-260 t), booster dry 210 t +-40 t (stack mass balance and
+  equation staging -> cutoff with the propellant gauge, 248-260 t), **probably too high** (the gauge excludes the landing propellant; one-engine phase of flight 12 allows <= 209-218 t at 280 tf; about 175 +-25 t by judgement; kept because no tested combination passes the replays, `docs/known-issues.md`), booster dry 210 t +-40 t (stack mass balance and
   descent ballistic coefficient), liftoff ~5,550 t; tank capacities 3,650 / 1,600 t [S]; Raptor 3 280 tf consistent
   (peaks ~270 tf sea-level equivalent; 250 tf is contradicted), minimum throttle 30 % [D] (V3 hovers on 3 engines).
 - **Booster ascent throttle** (vehicle data): `[stage] max_ascent_throttle` 0.88 [D] (flights 13/14 gauge flow before
