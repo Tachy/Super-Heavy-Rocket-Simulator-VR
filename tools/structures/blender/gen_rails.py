@@ -20,7 +20,7 @@ def main() -> None:
     common.clear_scene()
     root = bpy.data.objects.new("rails", None)
     bpy.context.scene.collection.objects.link(root)
-    print(f"TRIANGLES rails {common.add_layout(mechazilla_layout.rails(detail), root)}")
+    print(f"TRIANGLES rails {common.add_layout(mechazilla_layout.rails(detail) + mechazilla_layout.crown(detail), root)}")
     common.export_gltf(out / "rails.gltf")
 
 

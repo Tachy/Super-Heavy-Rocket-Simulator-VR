@@ -139,7 +139,7 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 		_check(absf(height_m - want_m) < 0.01, "state %s: carriage %.3f m = height + offset %.3f m" % [state, height_m, want_m])
 		var cable := view.get_node("cable_0") as MeshInstance3D
 		var cable_top_m: float = Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(cable.position) + 0.5 * cable.basis.y.length()
-		_check(absf(cable_top_m - float(models["detail"]["tower.roof"]["block_base_m"])) < 0.01, "cable reaches the roof block")
+		_check(absf(cable_top_m - float(models["detail"]["tower.roof"]["crown_beam_bottom_m"])) < 0.01, "cable reaches the crown beam's underside")
 	# The closed arm: with the pivot at the hinge the +across arm's inner face and its reach against the catch axis.
 	var c: Dictionary = models["detail"]["chopstick"]
 	var lateral: float = 0.5 * (float(geometry["arm_line_offset_plus_m"]) + float(geometry["arm_line_offset_minus_m"]))
@@ -318,6 +318,17 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 		var box: AABB = (rails.get_parent().get_parent() as Node3D).transform * ((rails.get_parent() as Node3D).transform * rails.get_aabb())
 		_check(box.size.y > float(detail["tower"]["lattice_height_m"]) - float(detail["tower.plinth"]["height_m"]) - 0.5,
 				"rails %.1f m long" % box.size.y)
+	# Crown beam (fixed, on the tower top): every cable's upper end meets it within 0.3 m.
+	var crown := view.get_node_or_null("RailsMount/Rails/crown") as MeshInstance3D
+	_check(crown != null, "crown beam built")
+	if crown != null:
+		var crown_box: AABB = (crown.get_parent().get_parent() as Node3D).transform * ((crown.get_parent() as Node3D).transform * crown.get_aabb())
+		_check(absf(up_r.dot(crown_box.position) - float(detail["tower.roof"]["crown_beam_bottom_m"])) < 0.01,
+				"crown beam underside at %.2f m" % up_r.dot(crown_box.position))
+		for c in range(cables):
+			var cable := view.get_node("cable_%d" % c) as MeshInstance3D
+			var top_point := cable.position + up_r * 0.5 * cable.basis.y.length()
+			_check(crown_box.grow(0.3).has_point(top_point), "hoist cable %d's upper end meets the crown beam" % c)
 	# QD arm: its head's face 1 m off the 4.5 m hull on the catch axis, the swing turns the head away, the bracket stays.
 	var qd := view.get_node("QdArmMount") as Node3D
 	var root_site := view.qd_arm_root_site(detail, geometry)
@@ -432,7 +443,7 @@ func _geometry() -> Dictionary:
 		"tower_center_m": centre, "tower_size_m": Vector3(13.3, 13.3, 146.0),
 		"mount_height_m": 20.0, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_pivot_m": toward * 20.3957 - across * 1.5082 + up * 95.0, "hinge_outside_corner_m": 2.0,
+		"hinge_pivot_m": toward * 20.3957 - across * 1.5082 + up * 133.0, "hinge_outside_corner_m": 2.0,
 		"arm_line_offset_plus_m": 5.8 + 1.5082, "arm_line_offset_minus_m": 5.8 - 1.5082,
 	}
 

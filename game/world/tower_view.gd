@@ -37,7 +37,7 @@ var _geometry: Dictionary = {}
 var _chopstick_detail: Dictionary = {}  ## the detail file's [chopstick]: the actuator's lug follows the arm's root
 var _arms: Array[Node3D] = []  ## pivots, both on the common hinge axis: [+across, -across]
 var _carriage: Node3D = null  ## models only: follows the carriage offset
-var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the roof block
+var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the crown beam
 var _cable_offsets_m: Array[Vector3] = []  ## from the axis to each hoist cable, plan (site frame)
 var _cable_anchor_site := Vector3.ZERO  ## the common hinge axis (site frame, horizontal): the cables come straight down onto it
 var _qd_arm: Node3D = null  ## the ship QD arm's model node (its swinging parts rotate about the swing axis)
@@ -239,14 +239,14 @@ func _build_carriage(models: Dictionary) -> void:
 	var size: float = k["cable_size_m"]
 	var pitch: float = k["cable_spacing_m"]
 	# Two groups come straight down onto the sheave block's top (2 m wide); they run to the roof block's
-	# underside (mechazilla_layout.hoist_cables).
+	# underside of the crown beam (mechazilla_layout.hoist_cables, crown).
 	_cable_base_m = float(k["top_z_m"]) + float(k["drum_gap_m"]) + float(k["drum_diameter_m"])  # = mechazilla_layout.sheave_block_top_z
 	var axes := _plan_axes(models["detail"], _geometry)
 	_cable_anchor_site = hinge_axis_site(_geometry)
 	var spread := (axes.y - axes.x).normalized()
 	var along := (axes.x + axes.y).normalized()
 	var per_group := count / 2
-	_cable_top_m = float(models["detail"]["tower.roof"]["block_base_m"])
+	_cable_top_m = float(models["detail"]["tower.roof"]["crown_beam_bottom_m"])  # the fixed crown beam's underside
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.5 * size
 	mesh.bottom_radius = 0.5 * size

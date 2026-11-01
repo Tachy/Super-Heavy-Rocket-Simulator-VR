@@ -368,7 +368,7 @@ def test_qd_arm_swung_out_clears_the_arms(detail):
 
 
 def test_every_member_is_inside_its_table(detail):
-    for build in (layout.chopstick, layout.carriage, layout.qd_arm, layout.rails):
+    for build in (layout.chopstick, layout.carriage, layout.qd_arm, layout.rails, layout.crown):
         members = build(detail)
         assert members
         assert all(m[1] in ("tube", "rect") and math.dist(m[3], m[4]) > 0.0 for m in members)
@@ -394,7 +394,7 @@ def _seg_dist(a0, a1, b0, b1):
 def test_no_collar_member_floats(detail):
     """Every member of the carriage (collars, walkways, railings, braces) lies within 0.3 m of another member, a rail or a tower face."""
     g = layout.tower_corner(detail)
-    ms = layout.carriage(detail) + layout.rails(detail)
+    ms = layout.carriage(detail) + layout.rails(detail) + layout.crown(detail)
     (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
 
     def box_gap(p):  # plan distance of a point to the tower box, 0 inside
@@ -421,3 +421,34 @@ def test_walkway_is_dark_steel_with_a_railing(detail):
     assert not [m for m in ms if m[0] == "hardware" and m[1] == "rect"]  # no white plate: the deck is the frame's dark grating
     posts = [m for m in ms if m[0] == "frame" and m[1] == "tube" and abs(m[2] - 0.08) < 1e-9]
     assert len(posts) >= 6
+
+
+def _plan_dist_to_segment(p, a, b):
+    return _dist_point_segment(p, a[:2], b[:2])
+
+
+def test_hoist_cables_end_on_the_crown_beam_bound_to_the_tower(detail):
+    phys = _physics()
+    crown = layout.crown(detail)
+    beams = [m for m in crown if m[1] == "rect"]
+    assert len(beams) == 2  # the beam from the corner and the cross beam over the axis
+    z_bottom = min(0.5 * (m[3][2] + m[4][2]) - 0.5 * m[5] for m in beams)
+    assert layout.hoist_cable_top_z(detail) == pytest.approx(z_bottom, abs=1e-9)
+    for c in layout.hoist_cables(detail):  # each cable's upper end meets a beam within 0.3 m (plan, and in height)
+        gap = min(_plan_dist_to_segment(c, m[3], m[4]) - 0.5 * m[2] for m in beams)
+        assert gap <= 0.3, f"cable at {c} misses the crown beam by {gap:.2f} m"
+    # Bound to the tower box: one end inside the box (the beam starts in the corner leg), nothing above the physics tower top.
+    corners = _box_corners_carriage(phys)
+    far = beams[0][3]  # the beam from the corner: its first end
+    ex, ey = layout._unit_axes(detail)
+    c0 = corners["c"]
+    u = (far[0] - c0[0]) * ex[0] + (far[1] - c0[1]) * ex[1]
+    v = (far[0] - c0[0]) * ey[0] + (far[1] - c0[1]) * ey[1]
+    assert 0.0 < u < phys["width_m"] and 0.0 < v < phys["width_m"]
+    top = max(0.5 * (m[3][2] + m[4][2]) + 0.5 * (m[5] if m[1] == "rect" else m[2]) for m in crown) + phys["catch_height_m"]
+    assert top <= phys["height_m"] + 1e-9
+
+
+def test_cable_pitch_leaves_a_gap_inside_the_sheave_width(detail):
+    k = detail["carriage"]
+    assert k["cable_spacing_m"] >= 1.15 * k["cable_size_m"]  # separate thin cables, not one bar (worker photo)

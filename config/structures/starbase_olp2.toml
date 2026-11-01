@@ -53,6 +53,13 @@ louvre_depth_m = 0.12     # [E] band proud of the wall, not measurable
 railing_height_m = 1.1    # [E] standard guard rail
 railing_member_m = 0.12   # [E] rail / post section, not measurable
 railing_post_pitch_m = 3.3  # [E] post spacing, not measurable
+crown_beam_bottom_m = 142.6 # [E] statics, no photo: the hoist cables leave the tower on a fixed beam out of the roof machine house; padb_tower_top_cabin_2026-04 shows the cabin overhanging with two cables hanging from its underside on the outer side, no beam resolved. Beam top 143.4 = under the roof plate (deck 144 - 0.6)
+crown_beam_height_m = 0.8   # [E] statics: a cantilever box beam for the carriage's load over a ~3 m reach, drawn 0.8 m deep (not measurable)
+crown_beam_width_m = 0.8    # [E] covers the four cables of a group (0.6 m) with a margin
+crown_inset_m = 1.0         # [E] beam starts this far inside the box corner (it is bolted to the corner leg, 2.2 m)
+crown_cross_overhang_m = 0.6  # [E] the cross beam passes the sheave block's centre by this much
+crown_sheave_diameter_m = 1.2 # [E] sheave block on the beam, a third of the carriage's 3.8 m block (the cables turn back into the tower over it)
+crown_sheave_width_m = 0.9    # [E] one block per cable group, a little wider than the 0.6 m the four cables span
 
 [[tower.sections]]        # eight identical X-braced sections of three floors ...
 height_m = 16.05          # [E] 3 floors x 5.35 m
@@ -227,8 +234,8 @@ drum_diameter_m = 3.8     # [E] +-0.4 m sheave block, carriage photo 2025-12 wit
 drum_width_m = 2.0        # [E] sheave block width, carriage photo 2025-12 (reads about 2 m); the cables (groups 1.5 m apart) run down onto its top
 cable_count = 8           # [E] two groups of 4; crop_rail_colleen shows 8+ thin cables
 cable_size_m = 0.16       # [E] ~6 px at 40.6 px/m
-cable_spacing_m = 0.16    # [E] pitch inside a group
-cable_group_spacing_m = 1.5  # [E] +-0.3 m two groups either side of the sheave block, crop_rail_colleen (about 70 px at ~46 px/m)
+cable_spacing_m = 0.19    # [E] pitch inside a group: the worker photo shows separate cables 2-3 widths apart across the whole 2 m block; 4 per group inside the block's width leave 1.2 widths at most (was 0.16 = touching, read as one bar)
+cable_group_spacing_m = 1.25  # [E] +-0.3 m two groups either side of the sheave block, crop_rail_colleen (about 70 px at ~46 px/m); 1.25 so that both groups stay inside the 2 m block
 
 [qd_arm]                  # THE ship QD arm (one arm: measurements "Arm research", no separate upper arm exists)
 deck_m = 81.3             # [E] +-3 m tip deck: Ship 42 y 445 at 6.4 px/m gave 86.8 with the 20 m deck; the ship stands 5.5 m lower on the 14.5 m ring, so does its QD station

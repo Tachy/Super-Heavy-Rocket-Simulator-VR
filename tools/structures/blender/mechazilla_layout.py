@@ -243,6 +243,43 @@ def sheave_block_top_z(detail: dict) -> float:
     return k["top_z_m"] + k["drum_gap_m"] + k["drum_diameter_m"]
 
 
+def crown_z(detail: dict) -> tuple:
+    """Bottom and top of the crown beam in the carriage frame (site height minus the catch height)."""
+    r, catch = detail["tower"]["roof"], detail["site_tower"]["catch_height_m"]
+    bottom = r["crown_beam_bottom_m"] - catch
+    return bottom, bottom + r["crown_beam_height_m"]
+
+
+def hoist_cable_top_z(detail: dict) -> float:
+    """Where the hoist cables end above: the underside of the crown beam (carriage frame)."""
+    return crown_z(detail)[0]
+
+
+def crown(detail: dict) -> list:
+    """The fixed crown beam on the tower top (carriage frame, offset 0): a beam from inside the corner leg out to the common axis,
+    a cross beam over the axis along the cable groups, and a sheave block on it above each group. The hoist cables end on its underside."""
+    r, k = detail["tower"]["roof"], detail["carriage"]
+    g = tower_corner(detail)
+    c0 = g["c"]
+    run = math.hypot(*c0)
+    out = (c0[0] / run, c0[1] / run)  # the outward diagonal, from the axis toward the box corner (the axis lies outside it)
+    z0, z1 = crown_z(detail)
+    zc = 0.5 * (z0 + z1)
+    h, w = r["crown_beam_height_m"], r["crown_beam_width_m"]
+    inner = (c0[0] + r["crown_inset_m"] * out[0], c0[1] + r["crown_inset_m"] * out[1])
+    t = cable_spread_axis(detail)
+    reach = 0.5 * k["cable_group_spacing_m"] + r["crown_cross_overhang_m"]
+    d, wd = r["crown_sheave_diameter_m"], r["crown_sheave_width_m"]
+    n = (-t[1], t[0])
+    ms = [_member("crown", "rect", w, (inner[0], inner[1], zc), (0.0, 0.0, zc), h),
+          _member("crown", "rect", w, (-reach * t[0], -reach * t[1], zc), (reach * t[0], reach * t[1], zc), h)]
+    for sign in (-1.0, 1.0):  # the sheave blocks stand on the beam, axis along the cable pitch
+        cx, cy = sign * 0.5 * k["cable_group_spacing_m"] * t[0], sign * 0.5 * k["cable_group_spacing_m"] * t[1]
+        ms.append(_member("crown", "tube", d, (cx - 0.5 * wd * n[0], cy - 0.5 * wd * n[1], z1 + 0.5 * d),
+                          (cx + 0.5 * wd * n[0], cy + 0.5 * wd * n[1], z1 + 0.5 * d)))
+    return ms
+
+
 def rails(detail: dict) -> list:
     """Static rails of the carriage: three vertical boxes from the plinth top to the lattice top (carriage frame, offset 0)."""
     k, t = detail["carriage"], detail["site_tower"]

@@ -32,7 +32,8 @@ CLADDING_KEYS = ("bottom_m", "top_m", "course_m", "columns", "seam_m", "thicknes
 STAIRS_KEYS = ("width_m", "thickness_m", "run_m", "tray_width_m", "tray_depth_m")
 ROOF_KEYS = ("deck_top_m", "plate_thickness_m", "overhang_m", "block_size_m", "block_base_m", "block_height_m",
              "louvre_count", "louvre_height_m", "louvre_depth_m", "railing_height_m", "railing_member_m",
-             "railing_post_pitch_m")
+             "railing_post_pitch_m", "crown_beam_bottom_m", "crown_beam_height_m", "crown_beam_width_m", "crown_inset_m",
+             "crown_cross_overhang_m", "crown_sheave_diameter_m", "crown_sheave_width_m")
 MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_back_m", "block_half_y_m", "annex_end_x_m",
               "annex_half_y_m", "annex_tip_half_y_m", "deck_drop_m", "deck_plate_m", "pit_depth_m", "ring_outer_diameter_m",
               "ring_opening_diameter_m", "ring_thickness_m", "chamber_radius_m", "clamp_count", "opening_top_m",
