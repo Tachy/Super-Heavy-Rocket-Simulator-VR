@@ -79,8 +79,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   over an abort with no converged abort plan 2 s after the abort, an abort leaning beyond 35 deg, an abort whose usable
   propellant falls below 1.3 x a vertical stop's need (`upright_stop_propellant_kg`), and a flip whose first three
   plans reach neither the catch nor the sea. `sim::ReturnResult` (caught / upright abort: contact tilt < 20 deg and
-  sink <= 5 m/s [E] / lost), `FlightSession::ship_return_result`. A pilot abort 1 s into the flip: water at 2.85 m/s,
-  14.9 deg, 1.7 t left.
+  sink <= 5 m/s [E] / lost), `FlightSession::ship_return_result`. A pilot abort during the flip (2026-11-01, nominal gate): upright abort on land 105 m from the pad, 4.2 t left, the water not kept. Aborts at CG height 350-450 m strike a standby arm (`docs/known-issues.md`).
 - Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):
   `FlightSession::plan_ship_return` (game key R) plans the deorbit burn (`gnc/deorbit_planner`: coast samples over
   48 h, passes = closest approaches of the ground track; per pass burn epoch bracketed on the entry predictor's

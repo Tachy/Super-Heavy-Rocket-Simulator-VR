@@ -2,13 +2,13 @@
 
 Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also live in `docs/subsystems/<slug>.md`.
 
-- Red by decision since the Pad B physics alignment (user 2026-10-31: no campaign tuning before the vehicle plan, plan
-  `docs/superpowers/archive/plans/2026-10-31-pad-b-physics-alignment.md`): the lunar direct campaign has no robust gate height, 21 seeds
-  (800 m: seed 3 lost, arm in the hull with 20.7 t; 815 m: all caught, one on 0.0 t; 825-850 m: seed 11 upright abort), cause not
-  found; `tanker_flight` and the refuelling inputs digest need the re-measure; ship case 20 ends upright on 0.3 t, still below the
-  1 t reserve (the 0.0 t was the braking feedforward not scaling with the sink; fixed in ca4d506). Not verified: that a ship abort with the water out of reach never strikes the tower, and that the
-  booster's 400 m abort point (loss, 28 m from the pad centre) clears the drawn tower, mount, foot and ramps; the wide run did
-  not finish (aerocapture at gate 800, the flown depot campaign).
+- Red list on the frozen aero state (vehicle physics Task 6e, 2026-11-01; measured on 5167ce4 + the re-measure, findings not fixed):
+  - Lunar direct campaign 18 of 21 (limit 21): seeds 12, 15 lost, seed 2 upright abort. 12, 15: the gate fires at 800 m only below 100 m/s of sink (`gate_reference_sink_mps`); just under it (98-99 m/s) the flip ends at 410-430 m with ~80 m/s, the first plan keeps a final vertical phase of 1-2.8 s instead of 5-9 s, and the hull arrives tilted 7 deg or more at arm height: the tail enters a standby arm with 20.6-21.0 t left. The same band (flip end <= 430 m) caught seeds 11, 14 (7.4, 6.0 t). Seed 2: gate 127 m east of the corridor (crossrange 0.14 km), first catch plan refused (defect 0.012), upright abort 5.1 t, 68 m off the axis. Why that gate arrives off corridor: not determined.
+  - `Docked tanker: the ship return flies to the catch`: lost. The tanker (35.7 t at the gate) departs in the terminal approach, axis error 100 deg, gate at 3,769 m with 217 m/s of sink; same phase as the low-Mach margin below, whether the same mechanism: not determined. `tanker_flight` from the pad is caught, on the header tanks (main 0.0 t).
+  - `Flown campaign, placed depot`: 4 rows, the test wants 3: tanker 1 refused ("Kein Rendezvous: Phasenwinkel nicht innerhalb ..."), the campaign re-plans and completes. The full flown campaign passes its comparison but loses tankers 5, 9 ("Kein Rendezvous: Bahn tritt vor dem Annäherungsbeginn in das Annäherungsellipsoid ein", was 0 failures); its first tanker return ends upright (allowed by the test). Whether the re-measured file moved the placed case: not determined.
+  - A ship abort with the water out of reach does strike the arms: nominal gate, abort at CG height 350-450 m: hull 0.3-2.4 m into a standby arm, lost, 16-17 t left; 475 m and above, 325 m and below are clear (arm 0.17 m at 325 m). Tower structure never struck, the closest 1.05 m at the 325 m abort. `tools/validation/abort_clearance.py` on the hidden `[.abort_clearance]` cases.
+  - Aborts on the drawn pad, which the physics does not collide with: booster 400 m: landed 29 m from the centre, foot 12.2, block 9.1, annulus 8.45, tower box 17.4, arm 5.2 m, but 0.84 m into the 0.5 m trench wall. Ship aborts at 170-275 m come down over the drawn ramp (hull axis at squares X 0.4-11.4, Y -19 to -29), 1.6-4.5 m into the trench walls, except the 225 m abort, which stands on the ramp itself, 2.1 m clear of them, over the drawn pit the flat physics ground does not know.
+  - Ship case 20: upright on 0.3 t, below the 1 t reserve (the 0.0 t was the braking feedforward; fixed in ca4d506).
 
 - Red since the ship's entry value set (vehicle physics Task 5b, 2026-11-01, user's OK on the set; no limit changed; re-measured Task 6d):
   - `[ship][entry][validation]` flight 14: speed rms 8.33 % (limit 5, the limit stays; flights 13, 12: 4.05, 1.51 %), flying fast. The mesh's hull centre of pressure takes the aft flaps from the stop (88-90 deg) to 30-37 deg, flap CdA from 55-65 to 13 m^2, total -10 % at Mach 8-25. Nose and `ship_ascent.csv` move this by at most 0.3 points. An experiment with 11 t instead of 35 t of header propellant reaches 3.15 % there, but low rms 112.9 % and subsonic ratio 3.31 (departs, alpha 168 deg at Mach 1.46): not adopted, the header load is not established by it. The webcast flights share a CdA shortfall of the mesh hull (`aero-derivation.md`).
@@ -90,8 +90,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   precomputed table sets) / city light on clouds; part 3 GOES patterns; part 4 wind / density and launch rules.
 - Pad B physics alignment (user 2026-10-31): the final arm geometry (one hinge axis, arm 24.0 m, standby 7.1 deg, closing
   0.71 s) was re-flown in the vehicle plan's Task 6: booster catch campaign 21 of 21, ship catch campaign 20 of 21
-  (`docs/subsystems/ship-entry-return.md`, `ascent-staging.md`). The lunar campaigns have not flown it: `[lunar][return][validation][slow]`
-  direct campaign run 2026-11-01 after the vehicle plan, the groups seeds 1-3 (2 of 3 flown), 10-12 and 13-15 red, the other groups green; cause not examined.
+  (`docs/subsystems/ship-entry-return.md`, `ascent-staging.md`). The lunar campaigns flew it in Task 6e: aerocapture 21 of 21, direct 18 of 21 (above).
 - `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
   2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
 
