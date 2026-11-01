@@ -55,6 +55,27 @@ def find_blender(explicit: str | None = None) -> Path | None:
     return None
 
 
+def blender_command(exe: Path, script: Path, *script_args: str) -> list:
+    """Headless run of a generator; a Python exception gives a non-zero exit (without the flag Blender exits 0 on one)."""
+    return [str(exe), "-b", "--factory-startup", "--python-exit-code", "1", "-P", str(script), "--", *script_args]
+
+
+def swap_in(staging: Path, out: Path) -> None:
+    """Replace `out` by the finished `staging`; the old directory stays until the new one has its name."""
+    old = out.parent / (out.name + ".old")
+    if old.exists():
+        shutil.rmtree(old)
+    if out.exists():
+        out.rename(old)
+    try:
+        staging.rename(out)
+    except OSError:
+        if old.exists() and not out.exists():
+            old.rename(out)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+
+
 def blender_version(blender: Path) -> str:
     out = subprocess.run([str(blender), "-b", "--factory-startup", "--version"], capture_output=True, text=True,
                          check=True).stdout
@@ -102,10 +123,14 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     triangles: dict[str, int] = {}
-    panel_map = mount_textures.write(staging, detail_file.load(config))
+    try:
+        panel_map = mount_textures.write(staging, detail_file.load(config))
+    except Exception as exc:
+        print(f"build_models: texture step failed ({exc}); {out} left as it was")
+        shutil.rmtree(staging, ignore_errors=True)
+        return 1
     for gen in GENERATORS:
-        cmd = [str(exe), "-b", "--factory-startup", "-P", str(SCRIPT_DIR / gen), "--", "--config", str(config),
-               "--out", str(staging)]
+        cmd = blender_command(exe, SCRIPT_DIR / gen, "--config", str(config), "--out", str(staging))
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             sys.stderr.write(res.stdout[-2000:] + res.stderr[-2000:])
@@ -114,13 +139,16 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
             return 1
         for m in re.finditer(r"^TRIANGLES (\S+) (\d+)$", res.stdout, re.M):
             triangles[m.group(1)] = int(m.group(2))
+    missing = [f for f in OUTPUTS if not (staging / f).is_file()]
+    if missing:
+        print(f"build_models: generators produced no {missing}; {out} left as it was")
+        shutil.rmtree(staging, ignore_errors=True)
+        return 1
     manifest = {"input_hash": digest, "blender": version, "config": config.name, "files": list(OUTPUTS),
                 "triangles": triangles, "mount_map": panel_map,
                 "frame": "Blender axes in glTF (export_yup off); per model: mechazilla_layout.py"}
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if out.exists():
-        shutil.rmtree(out)
-    staging.rename(out)
+    swap_in(staging, out)
     print(f"build_models: generated {', '.join(OUTPUTS)} in {out}; triangles {triangles}")
     return 0
 
@@ -196,8 +224,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
         steel_map = hull_textures.write(staging, spec)
         tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
         for gen in VEHICLE_GENERATORS:
-            cmd = [str(exe), "-b", "--factory-startup", "-P", str(SCRIPT_DIR / gen), "--", "--spec", str(spec_file),
-                   "--out", str(staging)]
+            cmd = blender_command(exe, SCRIPT_DIR / gen, "--spec", str(spec_file), "--out", str(staging))
             res = subprocess.run(cmd, capture_output=True, text=True)
             missing = [f for f in outputs if not (staging / f).is_file()] if gen == VEHICLE_GENERATORS[-1] else []
             if res.returncode != 0 or missing:
@@ -213,9 +240,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     manifest["look"]["steel_map"] = steel_map
     manifest["look"]["tile_maps"] = tile_maps
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if out.exists():
-        shutil.rmtree(out)
-    staging.rename(out)
+    swap_in(staging, out)
     print(f"build_models: generated {', '.join(outputs)} in {out}; triangles {triangles}")
     return 0
 

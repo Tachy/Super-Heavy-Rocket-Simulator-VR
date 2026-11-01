@@ -103,6 +103,13 @@ def test_failed_generator_leaves_the_old_models_and_manifest(built, tmp_path, mo
     assert "left as it was" in capsys.readouterr().out
 
 
+def test_blender_python_exception_gives_a_non_zero_exit(tmp_path):
+    script = tmp_path / "raises.py"
+    script.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+    res = subprocess.run(build_models.blender_command(build_models.find_blender(), script), capture_output=True, text=True)
+    assert res.returncode != 0
+
+
 def test_missing_blender_exits_zero(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(build_models, "find_blender", lambda explicit=None: None)
     assert build_models.build(build_models.DEFAULT_CONFIG, tmp_path / "none") == 0
