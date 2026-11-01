@@ -140,7 +140,9 @@ TEST_CASE("Ship catch single case", "[.][ship-single]") {
     // Diagnostics: STARSIM_SHIP_SEED=<seed of the campaign, 1-20> (0: nominal gate).
     const char* seed_text = std::getenv("STARSIM_SHIP_SEED");
     const unsigned seed = seed_text ? static_cast<unsigned>(std::atoi(seed_text)) : 0u;
-    const Gate g = seed ? dispersed_gate(seed) : nominal_gate();
+    Gate g = seed ? dispersed_gate(seed) : nominal_gate();
+    // STARSIM_SHIP_FAILED=<group>: that group fails in the flip (the campaign's last case: ship/sea_level_3, seed 0).
+    if (const char* failed = std::getenv("STARSIM_SHIP_FAILED")) g.failed_group = failed;
     std::printf("seed %u: propellant %.0f kg, gate v %.1f,%.1f,%.1f m/s, height %.0f m\n", seed, g.propellant_kg,
                 g.velocity_enu_mps.x, g.velocity_enu_mps.y, g.velocity_enu_mps.z, g.height_m);
     fly_from_gate(g);

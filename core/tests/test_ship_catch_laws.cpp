@@ -35,6 +35,24 @@ TEST_CASE("Upright descent: brakes a fast sink and stays upright", "[ship][landi
     CHECK(tilt(c.axis) <= p.tilt_max_rad + 1e-9);
 }
 
+// Vehicle physics Task 6b, ship catch case 20: below the profile the full braking feedforward lifted the ship off 0.2 m
+// above the ground until its last tonne was gone, and it fell from 1.3 m at 5 m/s.
+TEST_CASE("Upright descent: slower than the profile it sinks to the ground, it does not climb", "[ship][landing]") {
+    const gnc::UprightDescentParameters p;
+    constexpr double g = 9.81, a_min = 5.53, a_max = 21.45, dt = 0.01;
+    double h = 0.2, sink = 0.0, highest = h, burn_s = 0.0;
+    while (h > 0.0 && burn_s < 30.0) {
+        const auto c = gnc::upright_descent({300.0, 0.0, 0.0}, {0.0, 0.0, -sink}, up, h, a_min, a_max, g, p);
+        sink += (g - c.acceleration_mps2) * dt;
+        h -= sink * dt;
+        highest = std::max(highest, h);
+        burn_s += dt;
+    }
+    CHECK(highest < 0.2 + 1e-9);
+    CHECK(burn_s < 3.0);
+    CHECK(sink <= p.final_sink_mps + 0.5);
+}
+
 TEST_CASE("Upright descent: next to the tower it moves away; above its centre it still picks a way", "[ship][landing]") {
     const auto c = gnc::upright_descent({0.0, 20.0, 0.0}, {0.0, 0.0, -5.0}, up, 100.0, 8.0, 40.0, 9.81);
     CHECK(c.axis.y > 0.0);  // away from the tower

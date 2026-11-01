@@ -21,14 +21,15 @@ UprightDescentCommand upright_descent(const Vec3& from_tower_m, const Vec3& velo
     const Vec3 v_ref = distance < p.clear_radius_m ? away * p.away_speed_mps : Vec3{0.0, 0.0, 0.0};
     Vec3 a_h = (v_ref - v_h) * p.gain_per_s;
 
-    // sink profile v^2 = v_final^2 + 2 f (a_max - g) h: it reaches the ground at the final sink; along it the reference
-    // decelerates at f (a_max - g) (fed forward)
+    // sink profile v^2 = v_final^2 + 2 f (a_max - g) h: it reaches the ground at the final sink; the reference at the
+    // height flown changes at d(v)/dt = -f (a_max - g) sink / v (fed forward, the full braking at most): on the profile
+    // the braking, slower than it less, not sinking none (the full braking there held the ship at ~3 m until its tanks ran dry)
     const double sink = -dot(velocity_mps, up);
     const double excess = std::max(max_accel_mps2 - gravity_mps2, 0.0);
     const double h = std::max(height_m, 0.0);
     const double braking = p.deceleration_fraction * excess;
     const double wanted_sink = std::sqrt(p.final_sink_mps * p.final_sink_mps + 2.0 * braking * h);
-    const double feedforward = h > 0.0 ? braking : 0.0;
+    const double feedforward = h > 0.0 && wanted_sink > 0.0 ? braking * std::clamp(sink / wanted_sink, 0.0, 1.0) : 0.0;
     // the engines never run below their minimum throttle: the vertical part never drops below min_accel
     const double a_v = std::clamp(gravity_mps2 + feedforward + p.sink_gain_per_s * (sink - wanted_sink),
                                   std::min(min_accel_mps2, max_accel_mps2), max_accel_mps2);
