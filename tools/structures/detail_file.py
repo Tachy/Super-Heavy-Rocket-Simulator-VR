@@ -21,7 +21,7 @@ CARRIAGE_KEYS = ("collar_gap_m", "collar_chord_m", "truss_depth_m", "truss_panel
                  "actuator_barrel_length_m")
 QD_ARM_KEYS = ("deck_m", "head_gap_m", "root_beyond_m", "root_length_m", "root_width_m", "tip_width_m", "foot_depth_m")
 TOWER_KEYS = ("height_m", "lattice_height_m", "sections", "floors", "deck", "core", "plinth", "cladding", "stairs",
-              "roof")
+              "head")
 PATTERNS = ("x_brace", "k_brace", "chevron")
 ## Per table: the keys that are lengths in metres (> 0); counts are integers >= 1 (COUNT_KEYS).
 FLOORS_KEYS = ("pitch_m", "count")
@@ -30,10 +30,10 @@ CORE_KEYS = ("size_m",)
 PLINTH_KEYS = ("height_m", "width_m")
 CLADDING_KEYS = ("bottom_m", "top_m", "course_m", "columns", "seam_m", "thickness_m", "recess_m")
 STAIRS_KEYS = ("width_m", "thickness_m", "run_m", "tray_width_m", "tray_depth_m")
-ROOF_KEYS = ("deck_top_m", "plate_thickness_m", "overhang_m", "block_size_m", "block_base_m", "block_height_m",
-             "louvre_count", "louvre_height_m", "louvre_depth_m", "railing_height_m", "railing_member_m",
-             "railing_post_pitch_m", "crown_beam_bottom_m", "crown_beam_height_m", "crown_beam_width_m", "crown_inset_m",
-             "crown_cross_overhang_m", "crown_sheave_diameter_m", "crown_sheave_width_m")
+HEAD_KEYS = ("top_m", "underside_m", "overhang_past_axis_m", "roof_thickness_m", "roof_proud_m", "floor_thickness_m",
+             "beam_depth_m", "beam_width_m", "band_height_m", "band_proud_m", "wall_thickness_m", "wall_panels",
+             "panel_seam_m", "bracket_m", "bracket_pitch_m", "platform_length_m", "platform_width_m",
+             "platform_thickness_m", "platform_above_m")
 MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_back_m", "block_half_y_m", "annex_end_x_m",
               "annex_half_y_m", "annex_tip_half_y_m", "deck_drop_m", "deck_plate_m", "pit_depth_m", "ring_outer_diameter_m",
               "ring_opening_diameter_m", "ring_thickness_m", "chamber_radius_m", "clamp_count", "opening_top_m",
@@ -44,7 +44,7 @@ MOUNT_KEYS = ("deck_height_m", "measured_height_m", "block_x_tower_m", "block_x_
 TRENCH_KEYS = ("centre_m", "width_m", "length_m", "wall_height_m", "hardstand_lift_m", "concrete_tile_m", "slab_m",
                "joint_m", "concrete_map_size", "foot_x_m", "foot_y_m", "foot_near_x_m", "foot_far_x_m", "foot_width_m",
                "foot_height_m", "mask_range_m", "hardstand_mask_px_m", "hardstand_mask_half_m")
-COUNT_KEYS = ("count", "columns", "louvre_count")
+COUNT_KEYS = ("count", "columns", "louvre_count", "wall_panels")
 
 
 class DetailFileError(ValueError):
@@ -104,7 +104,7 @@ def load(path) -> dict:
         raise DetailFileError("tower.sections: empty")
     _positive(tower, "lattice_height_m", "tower")
     tables = (("floors", FLOORS_KEYS), ("deck", DECK_KEYS), ("core", CORE_KEYS), ("plinth", PLINTH_KEYS),
-              ("cladding", CLADDING_KEYS), ("stairs", STAIRS_KEYS), ("roof", ROOF_KEYS))
+              ("cladding", CLADDING_KEYS), ("stairs", STAIRS_KEYS), ("head", HEAD_KEYS))
     for table, keys in tables:
         if not isinstance(tower.get(table), dict):
             raise DetailFileError(f"tower.{table}: must be a table")

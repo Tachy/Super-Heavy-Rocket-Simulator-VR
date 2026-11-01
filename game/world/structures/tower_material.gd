@@ -21,8 +21,13 @@ const BRACE_GRIME := 0.3
 const PLAIN_LEG := Color(0.57, 0.58, 0.61)
 const PLAIN_BRACE := Color(0.22, 0.22, 0.235)
 const DARK := Color(0.035, 0.038, 0.042)
-## [E] Light-grey plinth, cladding plates and roof block: linear albedo ~0.30 (frames: light-grey plates, lit grey in sun).
+## [E] Light-grey plinth and cladding plates: linear albedo ~0.30 (frames: light-grey plates, lit grey in sun).
 const CLAD := Color(0.58, 0.58, 0.57)
+## [E] Tower head, padb_tower_top_cabin_2026-04: weathered dark-grey plate wall, two tones so the panels read; light roof and
+## bottom band; floor and beams dark steel (the black-paint default).
+const HEAD_WALL_A := Color(0.22, 0.21, 0.20)
+const HEAD_WALL_B := Color(0.17, 0.165, 0.16)
+const HEAD_BAND := Color(0.30, 0.30, 0.30)
 ## [E] chopstick arms and carriage are painted matte black (padb_chopsticks_around_booster_top_2026-03).
 const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 
@@ -79,6 +84,13 @@ static func _mapped(map: String, plain: Color, tile_m: float) -> Material:
 	m.set_shader_parameter("panels", ImageTexture.create_from_image(image))
 	m.set_shader_parameter("tile_m", tile_m)
 	return m
+
+
+## Node -> material of the head's parts in the rails model.
+static func head_set() -> Dictionary:
+	var band := LitAerial.material(HEAD_BAND, 0.7, 0.3)
+	return {"head_wall_a": LitAerial.material(HEAD_WALL_A, 0.85, 0.2), "head_wall_b": LitAerial.material(HEAD_WALL_B, 0.85, 0.2),
+			"head_band": band, "head_roof": band}
 
 
 static func clad() -> ShaderMaterial:

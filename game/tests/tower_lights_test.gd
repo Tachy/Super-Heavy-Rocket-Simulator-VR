@@ -171,7 +171,7 @@ func _check_attached(lights: TowerLights, _geometry_: Dictionary) -> void:
 	var ay := lights.plan_axes().y
 	var corner := lights.corner_site()
 	var width := 13.3
-	var height := 146.0
+	var height: float = detail["tower.head"]["top_m"]
 	var t: Dictionary = detail["trench"]
 	var m: Dictionary = detail["mount"]
 	var worst := 0.0

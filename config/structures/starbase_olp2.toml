@@ -6,7 +6,7 @@
 # Heights are above the tower foot (ground).
 
 [tower]
-height_m = 144.0          # [E] roof deck top: Ship 42 photo 146.3 m, full-stack photo 138.4-144 m, mean 144 +-5 m (measurements)
+height_m = 147.9          # [E] head roof top (tower.head.top_m): Ship 42 photo 146.3 m, f13 t=2040 147-149 m (measurements)
 lattice_height_m = 139.1  # [E] top of the last lattice panel: 139 +-5 m (measurements); = sum of the section heights
 
 [tower.floors]            # floor levels of the open lattice (decks)
@@ -40,26 +40,26 @@ run_m = 7.0               # [E] horizontal run of a flight across the face
 tray_width_m = 0.5        # [E] cable tray width, ~3 px at 6.4 px/m in the Ship 42 crop
 tray_depth_m = 0.35       # [E] cable tray depth, same crop
 
-[tower.roof]              # flat roof deck, louvred machine block and railing (no pyramid)
-deck_top_m = 144.0        # [E] roof deck top (see tower.height_m)
-plate_thickness_m = 0.6   # [E] padb_tower_full_with_chopsticks_2025-08, top 60 px: cap ~6 px thick
-overhang_m = 0.6          # [E] cap edge beyond the face, same image
-block_size_m = 8.0        # [E] louvred block ~8 x 8 m, Ship 42 top (140 px / 6.4 px/m = ~10 m wide as seen at ~45 deg)
-block_base_m = 139.9      # [E] box underside 142 (5) m, f13 t=2040; the lattice top frame sits below
-block_height_m = 7.0      # [E] louvred panel block about 7 m high (webcast pass f13)
-louvre_count = 6          # [E] horizontal louvre bands on every face of the block
-louvre_height_m = 0.45    # [E] band height, not measurable
-louvre_depth_m = 0.12     # [E] band proud of the wall, not measurable
-railing_height_m = 1.1    # [E] standard guard rail
-railing_member_m = 0.12   # [E] rail / post section, not measurable
-railing_post_pitch_m = 3.3  # [E] post spacing, not measurable
-crown_beam_bottom_m = 142.6 # [E] statics, no photo: the hoist cables leave the tower on a fixed beam out of the roof machine house; padb_tower_top_cabin_2026-04 shows the cabin overhanging with two cables hanging from its underside on the outer side, no beam resolved. Beam top 143.4 = under the roof plate (deck 144 - 0.6)
-crown_beam_height_m = 0.8   # [E] statics: a cantilever box beam for the carriage's load over a ~3 m reach, drawn 0.8 m deep (not measurable)
-crown_beam_width_m = 0.8    # [E] covers the four cables of a group (0.6 m) with a margin
-crown_inset_m = 1.0         # [E] beam starts this far inside the box corner (it is bolted to the corner leg, 2.2 m)
-crown_cross_overhang_m = 0.6  # [E] the cross beam passes the sheave block's centre by this much
-crown_sheave_diameter_m = 1.2 # [E] sheave block on the beam, a third of the carriage's 3.8 m block (the cables turn back into the tower over it)
-crown_sheave_width_m = 0.9    # [E] one block per cable group, a little wider than the 0.6 m the four cables span
+[tower.head]              # the tower head on padb_tower_top_cabin_2026-04: plan the tower's square with only the hinge corner pulled out along the diagonal (user 2026-11-01); scale there 28 px/m (legs' centres 324 px with both faces' foreshortening, floor pitch 150 px / 5.35 m)
+top_m = 147.9             # [E] roof plate top = underside + 7.4 m (about 207 px of the photo at the neighbouring corner's leg); f13 t=2040 147-149, Ship 42 146.3-148 (measurements)
+underside_m = 140.5       # [E] f13 t=2040 142 (5) m; the photo reads about level with the last lattice floor (139.1): 1.4 m above it so the sheave block (top 138.4 at rest) clears it up to +2.1 m carriage offset
+overhang_past_axis_m = 1.3  # [E] +-0.3 m point past the hinge axis on the diagonal: cables at x 835 / 885 (axis 860), corner leg 755, wall end ~925 = 65 px at 52 px/m along this diagonal (2 m = 105 px); about 0.6 m past the outer cable group as read on the photo; the groups (+-0.625 m) need >= 1.2 m to lie inside
+roof_thickness_m = 0.9    # [E] 25 px at 28 px/m
+roof_proud_m = 0.2        # [E] plate slightly proud of the walls, ~6 px
+floor_thickness_m = 0.4   # [E] floor plate above its beams, not measurable
+beam_depth_m = 0.4        # [E] visible steel under the floor, ~10 px
+beam_width_m = 0.5        # [E] same
+band_height_m = 0.6       # [E] bottom band of the wall, ~17 px
+band_proud_m = 0.1        # [E] band proud of the wall, not measurable
+wall_thickness_m = 0.2    # [E] plate wall, not measurable
+wall_panels = 7           # [E] vertical panels per closed wall, seams counted on the photo (+-1)
+panel_seam_m = 0.06       # [E] gap between panels, not measurable
+bracket_m = 0.3           # [E] small brackets along the wall's top, ~8 px
+bracket_pitch_m = 1.2     # [E] about 13 brackets on the 15 m wall
+platform_length_m = 1.2   # [E] small platform at the point (photo's right edge, about 50 px)
+platform_width_m = 1.4    # [E] same, not measurable
+platform_thickness_m = 0.2  # [E] same
+platform_above_m = 3.4    # [E] over the underside: 95 px at 28 px/m
 
 [[tower.sections]]        # eight identical X-braced sections of three floors ...
 height_m = 16.05          # [E] 3 floors x 5.35 m
@@ -125,10 +125,10 @@ pattern = "x_brace"       # [E] see above
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace
 
-[[tower.sections]]        # ... and a denser top section of two floors under the roof
+[[tower.sections]]        # ... and a denser top section of two floors under the head
 height_m = 10.7           # [E] 2 floors x 5.35 m
 face_width_m = 13.3       # [E] outer leg width 13.3-14 measured = the physics box (13.3)
-pitch_m = 5.35            # [E] one chevron per floor under the roof deck (Ship 42 top: denser members)
+pitch_m = 5.35            # [E] one chevron per floor under the head (Ship 42 top: denser members)
 pattern = "chevron"       # [E] Lambda per floor, Ship 42 top
 leg_profile = "leg"       # [E] see profiles.leg
 brace_profile = "brace"   # [E] see profiles.brace

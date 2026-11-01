@@ -67,7 +67,7 @@ def check(detail: dict, phys: dict) -> tuple[list, list]:
             within("Arm bearing face at the closed pose", side * across - (p[1] + 0.5 * plate[2]), half_gap, SURFACE_TOL_M)
     within("Arm length", c["length_m"], phys["arm_length_m"], LENGTH_TOL_M, "Arm length")
     within("Tower width", detail["tower"]["sections"][0]["face_width_m"], phys["width_m"], LENGTH_TOL_M, "Tower face, height")
-    within("Tower height", detail["tower"]["roof"]["block_base_m"] + detail["tower"]["roof"]["block_height_m"],
+    within("Tower height", detail["tower"]["head"]["top_m"],
            phys["height_m"], LENGTH_TOL_M, "Tower face, height")
     # Arm tops: the deck strip's top is the physics arm's top plane (Z = 0 at the hinge height) the pins land on.
     strips = [m for m in members if m[0] == "strip"]

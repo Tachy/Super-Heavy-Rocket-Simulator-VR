@@ -368,7 +368,7 @@ def test_qd_arm_swung_out_clears_the_arms(detail):
 
 
 def test_every_member_is_inside_its_table(detail):
-    for build in (layout.chopstick, layout.carriage, layout.qd_arm, layout.rails, layout.crown):
+    for build in (layout.chopstick, layout.carriage, layout.qd_arm, layout.rails, layout.head):
         members = build(detail)
         assert members
         assert all(m[1] in ("tube", "rect") and math.dist(m[3], m[4]) > 0.0 for m in members)
@@ -394,7 +394,7 @@ def _seg_dist(a0, a1, b0, b1):
 def test_no_collar_member_floats(detail):
     """Every member of the carriage (collars, walkways, railings, braces) lies within 0.3 m of another member, a rail or a tower face."""
     g = layout.tower_corner(detail)
-    ms = layout.carriage(detail) + layout.rails(detail) + layout.crown(detail)
+    ms = layout.carriage(detail) + layout.rails(detail)
     (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
 
     def box_gap(p):  # plan distance of a point to the tower box, 0 inside
@@ -423,30 +423,94 @@ def test_walkway_is_dark_steel_with_a_railing(detail):
     assert len(posts) >= 6
 
 
-def _plan_dist_to_segment(p, a, b):
-    return _dist_point_segment(p, a[:2], b[:2])
+def _inside(p, poly, margin=0.0):
+    """Plan point inside the counter-clockwise convex outline, at least `margin` from every edge."""
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        run = math.dist(a, b)
+        if ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / run < margin:
+            return False
+    return True
 
 
-def test_hoist_cables_end_on_the_crown_beam_bound_to_the_tower(detail):
-    phys = _physics()
-    crown = layout.crown(detail)
-    beams = [m for m in crown if m[1] == "rect"]
-    assert len(beams) == 2  # the beam from the corner and the cross beam over the axis
-    z_bottom = min(0.5 * (m[3][2] + m[4][2]) - 0.5 * m[5] for m in beams)
-    assert layout.hoist_cable_top_z(detail) == pytest.approx(z_bottom, abs=1e-9)
-    for c in layout.hoist_cables(detail):  # each cable's upper end meets a beam within 0.3 m (plan, and in height)
-        gap = min(_plan_dist_to_segment(c, m[3], m[4]) - 0.5 * m[2] for m in beams)
-        assert gap <= 0.3, f"cable at {c} misses the crown beam by {gap:.2f} m"
-    # Bound to the tower box: one end inside the box (the beam starts in the corner leg), nothing above the physics tower top.
-    corners = _box_corners_carriage(phys)
-    far = beams[0][3]  # the beam from the corner: its first end
-    ex, ey = layout._unit_axes(detail)
-    c0 = corners["c"]
-    u = (far[0] - c0[0]) * ex[0] + (far[1] - c0[1]) * ex[1]
-    v = (far[0] - c0[0]) * ey[0] + (far[1] - c0[1]) * ey[1]
-    assert 0.0 < u < phys["width_m"] and 0.0 < v < phys["width_m"]
-    top = max(0.5 * (m[3][2] + m[4][2]) + 0.5 * (m[5] if m[1] == "rect" else m[2]) for m in crown) + phys["catch_height_m"]
-    assert top <= phys["height_m"] + 1e-9
+def test_head_outline_contains_the_axis_and_the_cable_groups(detail):
+    outline = layout.head_outline(detail)
+    assert len(outline) == 4
+    assert _inside((0.0, 0.0), outline, 0.2)
+    for c in layout.hoist_cables(detail):
+        assert _inside(c, outline, 0.05), f"cable at {c} outside the head"
+
+
+def test_head_point_overhangs_past_the_axis_on_the_diagonal(detail):
+    g = layout.tower_corner(detail)
+    point = layout.head_outline(detail)[0]
+    run = math.hypot(*g["c"])
+    out = (-g["c"][0] / run, -g["c"][1] / run)  # from the corner through the axis
+    assert point[0] * out[0] + point[1] * out[1] == pytest.approx(detail["tower"]["head"]["overhang_past_axis_m"])
+    assert abs(point[0] * out[1] - point[1] * out[0]) < 1e-9  # on the diagonal through hinge and rear corner
+    assert 1.0 <= detail["tower"]["head"]["overhang_past_axis_m"] <= 1.6  # 1.3 +-0.3 m read on the photo
+
+
+def test_head_keeps_the_square_at_the_rear(detail):
+    g = layout.tower_corner(detail)
+    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
+    outline = layout.head_outline(detail)
+    assert outline[1] == pytest.approx((cx + w * ex[0], cy + w * ex[1]))
+    assert outline[3] == pytest.approx((cx + w * ey[0], cy + w * ey[1]))
+    assert outline[2] == pytest.approx((cx + w * (ex[0] + ey[0]), cy + w * (ex[1] + ey[1])))  # the rear corner itself
+
+
+def test_head_section_and_cables_end_on_its_underside(detail):
+    h, catch = detail["tower"]["head"], detail["site_tower"]["catch_height_m"]
+    assert 0.0 <= h["underside_m"] - detail["tower"]["lattice_height_m"] <= 1.5  # about level with the top of the last floor
+    assert layout.hoist_cable_top_z(detail) == pytest.approx(h["underside_m"] - catch)
+    assert layout.sheave_block_top_z(detail) + 2.0 < layout.hoist_cable_top_z(detail)  # the block stays under the head, also on a rebound
+    faces = layout.head_faces(detail)
+    zs = [p[2] for polys in faces.values() for v in polys for p in v]
+    assert max(zs) == pytest.approx(h["top_m"] - catch)
+    assert h["top_m"] <= 148.0
+
+
+def test_head_is_attached_and_nothing_floats(detail):
+    """Every piece lies inside the head's height range and within 1.5 m of the outline; a load beam runs over the axis and
+    the floor spans the whole outline, so the legs (they run up to the roof) carry it."""
+    h, catch = detail["tower"]["head"], detail["site_tower"]["catch_height_m"]
+    outline = layout.head_outline(detail)
+    z0, z1 = h["underside_m"] - catch, h["top_m"] - catch
+    for m in layout.head(detail):
+        half = 0.5 * (m[5] if m[1] == "rect" else m[2])
+        assert min(m[3][2], m[4][2]) - half >= z0 - 1e-9
+        assert max(m[3][2], m[4][2]) + half <= z1 + 1e-9
+        for q in m[3], m[4]:
+            assert _inside(q[:2], outline, -1.5), f"{m[0]} at {q} off the head"
+    faces = layout.head_faces(detail)
+    floor_top = [v for v in faces["head_floor"] if len({p[2] for p in v}) == 1]
+    assert {round(p[2], 6) for v in floor_top for p in v} == {round(z0 + h["beam_depth_m"], 6), round(z0 + h["beam_depth_m"] + h["floor_thickness_m"], 6)}
+    beams = [m for m in layout.head(detail) if m[0] == "head_steel" and m[1] == "rect" and abs(0.5 * (m[3][2] + m[4][2]) - 0.5 * m[5] - z0) < 1e-9]
+    assert any(_dist_point_segment((0.0, 0.0), m[3][:2], m[4][:2]) < 1e-9 for m in beams)  # the load beam over the axis
+
+
+def test_head_faces_wind_outward(detail):
+    """Prism faces: horizontal polygons up on the top, down on the bottom; side polygons away from the prism's middle."""
+    for node, polys in layout.head_faces(detail).items():
+        pts = [p for v in polys for p in v]
+        mid = tuple(sum(p[i] for p in pts) / len(pts) for i in range(3))
+        for v in polys:
+            a, b, c = v[0], v[1], v[2]
+            u, w = [b[i] - a[i] for i in range(3)], [c[i] - a[i] for i in range(3)]
+            n = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+            centre = [sum(p[i] for p in v) / len(v) - mid[i] for i in range(3)]
+            assert sum(n[i] * centre[i] for i in range(3)) > 0.0, f"{node} face wound inward"
+
+
+def test_head_closed_walls_only_toward_the_overhang(detail):
+    """Plate walls on the two edges at the point; the sides away from it stay open onto the lattice."""
+    outline = layout.head_outline(detail)
+    panels = [m for m in layout.head(detail) if m[0] in ("head_wall_a", "head_wall_b")]
+    assert len(panels) == 2 * detail["tower"]["head"]["wall_panels"]
+    for m in panels:
+        mid = (0.5 * (m[3][0] + m[4][0]), 0.5 * (m[3][1] + m[4][1]))
+        near = min(_dist_point_segment(mid, outline[0], outline[1]), _dist_point_segment(mid, outline[0], outline[3]))
+        assert near <= 0.2
 
 
 def test_cable_pitch_leaves_a_gap_inside_the_sheave_width(detail):

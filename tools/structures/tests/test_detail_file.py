@@ -13,9 +13,9 @@ import detail_file  # noqa: E402
 import ratio  # noqa: E402
 
 DRAFT = ROOT / "config" / "structures" / "starbase_olp2.toml"
-ROOF_DECK_M = 144.0  # [E] measurements: roof deck 144 +-5 m
+HEAD_TOP_M = 147.9  # [E] measurements: head roof plate top
 LATTICE_TOP_M = 139.0  # [E] measurements: lattice panels end at 139 +-5 m
-SILHOUETTE_MAX_M = 148.0  # plan task 1: silhouette top incl. railing
+SILHOUETTE_MAX_M = 148.0  # plan task 1: silhouette top
 
 
 def test_required_keys_present():
@@ -31,7 +31,7 @@ def test_section_heights_sum_to_lattice_height():
     total = sum(s["height_m"] for s in d["tower"]["sections"])
     assert total == pytest.approx(LATTICE_TOP_M, abs=0.2)
     assert d["tower"]["lattice_height_m"] == pytest.approx(total, abs=1.0e-6)
-    assert d["tower"]["height_m"] == pytest.approx(ROOF_DECK_M, abs=0.01)
+    assert d["tower"]["height_m"] == pytest.approx(HEAD_TOP_M, abs=0.01)
 
 
 def test_floors_are_26_of_5_3_m_and_fill_the_lattice():
@@ -62,15 +62,14 @@ def test_x_brace_crossings_7_to_8_m_in_the_open_part():
     assert all(7.0 <= s["pitch_m"] <= 8.1 for s in open_sections)
 
 
-def test_flat_roof_block_no_pyramid_and_silhouette_below_148_m():
+def test_head_replaces_the_roof_block_and_keeps_the_silhouette_below_148_m():
     d = detail_file.load(DRAFT)
-    roof = d["tower"]["roof"]
-    assert not any("pyramid" in k for k in roof)
-    block_top = roof["block_base_m"] + roof["block_height_m"]
-    rail_top = roof["deck_top_m"] + roof["railing_height_m"]
-    assert max(block_top, rail_top) <= SILHOUETTE_MAX_M
-    assert roof["deck_top_m"] == pytest.approx(d["tower"]["height_m"])
-    assert roof["block_base_m"] >= d["tower"]["lattice_height_m"] - 1.0e-6  # the block stands on the lattice top
+    assert "roof" not in d["tower"]
+    head = d["tower"]["head"]
+    assert not any(k.startswith(("crown", "block", "louvre", "railing")) for k in head)
+    assert head["top_m"] <= SILHOUETTE_MAX_M
+    assert head["top_m"] == pytest.approx(d["tower"]["height_m"])
+    assert 0.0 <= head["underside_m"] - d["tower"]["lattice_height_m"] <= 1.5  # the head stands about on the lattice top
 
 
 def test_every_value_line_is_tagged():
@@ -117,7 +116,7 @@ def test_load_raises_on_missing_key_and_bad_unit(tmp_path):
     ("top_m = 79.0", "top_m = -79.0", "positive"),
     ("columns = 2", "columns = 0", "columns"),
     ("size_m = 3.6 ", "size_m = -3.6 ", "positive"),
-    ("louvre_count = 6", "louvre_count = 0", "louvre_count"),
+    ("wall_panels = 7", "wall_panels = 0", "wall_panels"),
     ('pattern = "x_brace"', 'pattern = "zigzag"', "pattern"),
 ])
 def test_load_validates_tower_tables_and_pattern(tmp_path, old, new, match):
@@ -152,10 +151,10 @@ def test_lights_file_loads_and_every_value_is_tagged():
     assert untagged == []
 
 
-def test_lights_file_roof_obstruction_lamps_at_the_roof():
+def test_lights_file_roof_obstruction_lamps_on_the_head_roof():
     d = detail_file.load_lights(LIGHTS)
     roof = [g for g in d["lights"]["group"] if g["name"].startswith("obstruction_roof")]
-    assert roof and all(g["z_m"] > ROOF_DECK_M for g in roof)
+    assert roof and all(g["z_m"] > HEAD_TOP_M for g in roof)
 
 
 def test_lights_file_rejects_too_many_shadowed(tmp_path):

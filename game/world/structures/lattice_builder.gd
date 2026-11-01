@@ -1,8 +1,9 @@
 class_name LatticeBuilder
 ## Pad B tower body from the detail file (config/structures/starbase_olp2.toml): per section one MultiMesh of the four
-## corner legs, one per face of the braces, one of the dark solids (floor decks, inner column bundle, stairs, cable trays,
-## roof deck, louvres, railing) and one of the light-grey solids (plinth, cladding plates on the pad-side face, the roof
-## block), instanced from the generated profile meshes (unit length along +Z) and unit boxes.
+## corner legs, one per face of the braces, one of the dark solids (floor decks, inner column bundle, stairs, cable trays)
+## and one of the light-grey solids (plinth, cladding plates on the pad-side face), instanced from the generated profile
+## meshes (unit length along +Z) and unit boxes. The legs run up into the tower head; the head itself is a static model
+## (mechazilla_layout.head, rails.gltf) and the same at every distance.
 ## Local frame of the returned node = the frame of TowerView's tower box: origin at the centre of the footprint on the
 ## ground, +X across, +Y up, +Z away from the pad. Face 0 is the face at -Z (toward the pad); faces 1..3 follow by
 ## 90 degrees about Y.
@@ -34,9 +35,9 @@ const FADE_MARGIN_M := 0.0
 ## Visible share of a deck seen through the lattice at a grazing angle (far shader): thickness x this.
 const FAR_DECK_VIEW_FACTOR := 1.6
 const FAR_SHADER := preload("res://shaders/tower_far.gdshader")
-## Half extent (m) of the shared range box across the tower: the corner legs, the plinth and the roof cap sit inside it.
+## Half extent (m) of the shared range box across the tower: the corner legs and the plinth sit inside it.
 const RANGE_HALF_WIDTH_M := 12.0
-## Margin (m) of the shared range box above the tower's top and below its base (roof block, railing).
+## Margin (m) of the shared range box above the tower's top and below its base (the head).
 const RANGE_MARGIN_M := 10.0
 ## Width (m) the legs' inner faces leave for the cladding plates to overlap the legs by (plates sit between the legs).
 const CLAD_LEG_OVERLAP_M := 0.2
@@ -44,9 +45,8 @@ const CLAD_LEG_OVERLAP_M := 0.2
 const STAIR_INSET_M := 2.4
 const TRAY_OFFSET_M := 0.5
 const TRAY_X_M := 2.5
-## Gap (m) of the top frame's horizontal under the roof deck, and the cap's inset of the railing.
+## Gap (m) of the top frame's horizontal under the head's roof plate.
 const TOP_FRAME_GAP_M := 0.4
-const RAILING_INSET_M := 0.1
 
 
 ## Panels of a section: its height over the gusset pitch, at least one.
@@ -114,7 +114,7 @@ static func _build_section(detail: Dictionary, index: int, base_m: float, profil
 	for member: Array in members:
 		face_transforms.append(_member_transform(member[0], member[1], half))
 	var dark_boxes := dark_solids(detail, section, base_m, half, is_top)
-	var clad_boxes := clad_solids(detail, section, base_m, half, leg_size, index == 0, is_top)
+	var clad_boxes := clad_solids(detail, section, base_m, half, leg_size, index == 0)
 	var frame := top_frame_members(detail, section, base_m, half) if is_top else ([] as Array[Transform3D])
 	var unit_box := BoxMesh.new()
 
@@ -127,7 +127,7 @@ static func _build_section(detail: Dictionary, index: int, base_m: float, profil
 	if not clad_boxes.is_empty():
 		near.append(_instances("clad", unit_box, clad_boxes, materials["clad"]))
 	if not frame.is_empty():
-		near.append(_instances("roof", brace_mesh, frame, materials["brace"]))
+		near.append(_instances("head_frame", brace_mesh, frame, materials["brace"]))
 	for instance in near:
 		set_range(instance, 0.0, NEAR_END_M)
 		node.add_child(instance)
@@ -160,16 +160,16 @@ static func _build_section(detail: Dictionary, index: int, base_m: float, profil
 	set_range(far, MID_END_M, 0.0)
 	node.add_child(far)
 	if is_top:
-		node.add_child(_far_roof(detail, base_m, materials))
+		node.add_child(_far_head_legs(detail, section, base_m, half, leg_size, materials))
 	return node
 
 
-## Height of the section's legs: the top section's run up to the roof deck's underside.
+## Height of the section's legs: the top section's run through the head up to its roof plate.
 static func leg_height_m(detail: Dictionary, section: Dictionary, base_m: float, is_top: bool) -> float:
 	if not is_top:
 		return float(section["height_m"])
-	var roof: Dictionary = detail["tower.roof"]
-	return float(roof["deck_top_m"]) - float(roof["plate_thickness_m"]) - base_m
+	var head: Dictionary = detail["tower.head"]
+	return float(head["top_m"]) - float(head["roof_thickness_m"]) - base_m
 
 
 ## Legs: profile +Z (length) -> up, x stays, y -> -z; origin at the section's lower end.
@@ -211,8 +211,8 @@ static func face_members(section: Dictionary, half: float, is_top: bool) -> Arra
 
 
 ## Unit-box transforms (unit BoxMesh scaled per instance) of the dark solids of a section: a floor deck at every floor
-## level, the inner column bundle, stair flights and cable trays above the plinth; on the top section the roof deck, the
-## louvre bands of the roof block and the railing. `base_m`: the section's lower edge above the ground.
+## level, the inner column bundle, stair flights and cable trays above the plinth. `base_m`: the section's lower edge
+## above the ground.
 static func dark_solids(detail: Dictionary, section: Dictionary, base_m: float, half: float,
 		is_top: bool) -> Array[Transform3D]:
 	var transforms: Array[Transform3D] = []
@@ -229,14 +229,13 @@ static func dark_solids(detail: Dictionary, section: Dictionary, base_m: float, 
 	transforms.append_array(_stairs(detail, base_m, height, floors, half))
 	if is_top:
 		transforms.append(_box(Vector3(span, thickness, span), Vector3(0.0, height - 0.5 * thickness, 0.0)))
-		transforms.append_array(_roof_dark(detail, section, base_m))
 	return transforms
 
 
 ## Light-grey solids: the plinth on the first section, the cladding plates (courses with seams, columns across) on the
-## pad-side face where the section overlaps the cladding's height range, the louvred block on the top section.
+## pad-side face where the section overlaps the cladding's height range.
 static func clad_solids(detail: Dictionary, section: Dictionary, base_m: float, half: float, leg_size_m: float,
-		is_first: bool, is_top: bool) -> Array[Transform3D]:
+		is_first: bool) -> Array[Transform3D]:
 	var transforms: Array[Transform3D] = []
 	var plinth: Dictionary = detail["tower.plinth"]
 	if is_first:
@@ -263,47 +262,6 @@ static func clad_solids(detail: Dictionary, section: Dictionary, base_m: float, 
 				transforms.append(_box(Vector3(plate_w, plate_h, clad["thickness_m"]),
 						Vector3(x, 0.5 * (y0 + y1) - base_m, z)))
 		edge = next
-	if is_top:
-		var roof: Dictionary = detail["tower.roof"]
-		var b: float = roof["block_size_m"]
-		var bh: float = roof["block_height_m"]
-		transforms.append(_box(Vector3(b, bh, b), Vector3(0.0, float(roof["block_base_m"]) + 0.5 * bh - base_m, 0.0)))
-	return transforms
-
-
-## Roof deck plate, louvre bands on the four faces of the block, and the railing (two rails and posts), dark.
-static func _roof_dark(detail: Dictionary, section: Dictionary, base_m: float) -> Array[Transform3D]:
-	var roof: Dictionary = detail["tower.roof"]
-	var transforms: Array[Transform3D] = []
-	var plate: float = roof["plate_thickness_m"]
-	var cap := float(section["face_width_m"]) + 2.0 * float(roof["overhang_m"])
-	var deck_y := float(roof["deck_top_m"]) - base_m
-	transforms.append(_box(Vector3(cap, plate, cap), Vector3(0.0, deck_y - 0.5 * plate, 0.0)))
-	var b: float = roof["block_size_m"]
-	var bh: float = roof["block_height_m"]
-	var louvres: int = roof["louvre_count"]
-	var band_h: float = roof["louvre_height_m"]
-	var depth: float = roof["louvre_depth_m"]
-	var block_y := float(roof["block_base_m"]) - base_m
-	for k in range(louvres):
-		var y := block_y + (k + 0.5) * bh / louvres
-		for side in [-1.0, 1.0]:
-			var offset: float = side * (0.5 * b + 0.5 * depth)
-			transforms.append(_box(Vector3(b, band_h, depth), Vector3(0.0, y, offset)))
-			transforms.append(_box(Vector3(depth, band_h, b), Vector3(offset, y, 0.0)))
-	var m: float = roof["railing_member_m"]
-	var rail_h: float = roof["railing_height_m"]
-	var extent := 0.5 * cap - RAILING_INSET_M
-	for side in [-1.0, 1.0]:
-		for rail_y in [rail_h - 0.5 * m, 0.5 * rail_h]:
-			transforms.append(_box(Vector3(2.0 * extent, m, m), Vector3(0.0, deck_y + rail_y, side * extent)))
-			transforms.append(_box(Vector3(m, m, 2.0 * extent), Vector3(side * extent, deck_y + rail_y, 0.0)))
-		var posts := maxi(1, roundi(2.0 * extent / float(roof["railing_post_pitch_m"])))
-		for k in range(posts + 1):
-			var along := -extent + 2.0 * extent * k / posts
-			transforms.append(_box(Vector3(m, rail_h, m), Vector3(along, deck_y + 0.5 * rail_h, side * extent)))
-			if k > 0 and k < posts:  # the corner posts are already on the other pair of sides
-				transforms.append(_box(Vector3(m, rail_h, m), Vector3(side * extent, deck_y + 0.5 * rail_h, along)))
 	return transforms
 
 
@@ -333,11 +291,11 @@ static func _stairs(detail: Dictionary, base_m: float, height: float, floors: in
 	return transforms
 
 
-## The top section's frame under the roof deck: a horizontal member on each face (profile along the face).
+## The top section's frame under the head's roof plate: a horizontal member on each face (profile along the face).
 static func top_frame_members(detail: Dictionary, section: Dictionary, base_m: float,
 		half: float) -> Array[Transform3D]:
-	var roof: Dictionary = detail["tower.roof"]
-	var y := float(roof["deck_top_m"]) - float(roof["plate_thickness_m"]) - TOP_FRAME_GAP_M - base_m
+	var head: Dictionary = detail["tower.head"]
+	var y := float(head["top_m"]) - float(head["roof_thickness_m"]) - TOP_FRAME_GAP_M - base_m
 	var transforms: Array[Transform3D] = []
 	var corners: Array[Vector2] = [Vector2(-1.0, -1.0), Vector2(1.0, -1.0), Vector2(1.0, 1.0), Vector2(-1.0, 1.0)]
 	for k in range(corners.size()):
@@ -347,22 +305,18 @@ static func top_frame_members(detail: Dictionary, section: Dictionary, base_m: f
 	return transforms
 
 
-## Far tier of the roof: the block and the deck plate as two plain boxes (the far box ends at the lattice top).
-static func _far_roof(detail: Dictionary, base_m: float, materials: Dictionary) -> MeshInstance3D:
-	var roof: Dictionary = detail["tower.roof"]
-	var section: Dictionary = detail["tower.sections"][detail["tower.sections"].size() - 1]
-	var plate: float = roof["plate_thickness_m"]
-	var cap := float(section["face_width_m"]) + 2.0 * float(roof["overhang_m"])
-	var b: float = roof["block_size_m"]
-	var bh: float = roof["block_height_m"]
-	var unit_box := BoxMesh.new()
-	var block_y := float(roof["block_base_m"]) + 0.5 * bh - base_m
-	var block: Array[Transform3D] = [_box(Vector3(b, bh, b), Vector3(0.0, block_y, 0.0))]
-	var deck: Array[Transform3D] = [_box(Vector3(cap, plate, cap),
-			Vector3(0.0, float(roof["deck_top_m"]) - 0.5 * plate - base_m, 0.0))]
+## Far tier inside the head: the legs from the far box's top (the lattice top) up to the roof plate.
+static func _far_head_legs(detail: Dictionary, section: Dictionary, base_m: float, half: float, leg_size: float,
+		materials: Dictionary) -> MeshInstance3D:
+	var low := float(section["height_m"])
+	var high := leg_height_m(detail, section, base_m, true)
+	var legs: Array[Transform3D] = []
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			legs.append(_box(Vector3(leg_size, high - low, leg_size), Vector3(sx * half, 0.5 * (low + high), sz * half)))
 	var far := MeshInstance3D.new()
-	far.name = "far_roof"
-	far.mesh = _merged([[[unit_box, block]], [[unit_box, deck]]], [materials["clad"], materials["dark"]])
+	far.name = "far_head_legs"
+	far.mesh = _merged([[[BoxMesh.new(), legs]]], [materials["leg"]])
 	far.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	set_range(far, MID_END_M, 0.0)
 	return far

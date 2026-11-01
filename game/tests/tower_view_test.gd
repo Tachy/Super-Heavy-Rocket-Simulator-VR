@@ -43,7 +43,6 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	var plates_lo_m := INF
 	var plates_hi_m := 0.0
 	var plates := 0
-	var deck_top_m := 0.0
 	var plinth_top_m := 0.0
 	var leg_size: float = models["profiles"]["leg"].get_aabb().size.x
 	var brace_size: float = models["profiles"]["brace"].get_aabb().size.x
@@ -66,7 +65,7 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 			top_m = maxf(top_m, node.position.y + maxf(member[0].y, member[1].y))
 		var detail: Dictionary = models["detail"]
 		var darks := LatticeBuilder.dark_solids(detail, section, node.position.y, half, is_top)
-		var clads := LatticeBuilder.clad_solids(detail, section, node.position.y, half, leg_size, i == 0, is_top)
+		var clads := LatticeBuilder.clad_solids(detail, section, node.position.y, half, leg_size, i == 0)
 		for t in darks:
 			silhouette_m = maxf(silhouette_m, node.position.y + _bounds(t).end.y)
 		for t in clads:
@@ -79,14 +78,10 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 			elif i == 0 and b.size.y > 10.0 and absf(b.get_center().x) < 0.01:
 				plinth_top_m = node.position.y + b.end.y
 		if is_top:
-			for t in darks:  # the roof deck plate: the widest flat box
-				var b := _bounds(t)
-				if b.size.x > 12.5 and b.size.z > 12.5:
-					deck_top_m = node.position.y + b.end.y
 			for t in LatticeBuilder.top_frame_members(detail, section, node.position.y, half):
 				silhouette_m = maxf(silhouette_m, node.position.y + t.origin.y)
-			var roof_node := node.get_node("roof") as MultiMeshInstance3D
-			_check(roof_node.multimesh.instance_count == 4, "top: four frame members under the roof deck, no pyramid")
+			var frame_node := node.get_node("head_frame") as MultiMeshInstance3D
+			_check(frame_node.multimesh.instance_count == 4, "top: four frame members under the head's roof")
 		_check_hand_over(node, models["detail"], section, i, sections.size(), LatticeBuilder.total_height_m(models["detail"]))
 		_check(node.get_node_or_null("shadow_proxy") == null, "section %d: no shadow proxy (the Sun casts no shadows)" % i)
 		_check((node.get_node("face_0") as MultiMeshInstance3D).cast_shadow
@@ -95,7 +90,6 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 	_check(absf(top_m - 139.0) < 0.2 and absf(top_m - detail_lattice) < 0.01, "lattice panels end at %.2f m (139)" % top_m)
 	_check(floors == 26, "26 floors: %d" % floors)
 	_check(absf(top_m / floors - 5.3) < 0.1, "floor pitch %.3f m (5.3)" % (top_m / floors))
-	_check(absf(deck_top_m - 144.0) < 0.01, "roof deck top at %.2f m (144)" % deck_top_m)
 	_check(absf(plinth_top_m - 12.2) < 0.01, "plinth top at %.2f m (12.2)" % plinth_top_m)
 	_check(plates > 0 and absf(plates_lo_m - 12.2) < 0.15 and absf(plates_hi_m - 79.0) < 0.15,
 			"cladding %d plates on the pad-side face from %.2f to %.2f m (12.2 .. 79)" % [plates, plates_lo_m, plates_hi_m])
@@ -139,7 +133,7 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 		_check(absf(height_m - want_m) < 0.01, "state %s: carriage %.3f m = height + offset %.3f m" % [state, height_m, want_m])
 		var cable := view.get_node("cable_0") as MeshInstance3D
 		var cable_top_m: float = Frames.to_render(Vector3(0.0, 0.0, 1.0)).dot(cable.position) + 0.5 * cable.basis.y.length()
-		_check(absf(cable_top_m - float(models["detail"]["tower.roof"]["crown_beam_bottom_m"])) < 0.01, "cable reaches the crown beam's underside")
+		_check(absf(cable_top_m - float(models["detail"]["tower.head"]["underside_m"])) < 0.01, "cable reaches the head's underside")
 	# The closed arm: with the pivot at the hinge the +across arm's inner face and its reach against the catch axis.
 	var c: Dictionary = models["detail"]["chopstick"]
 	var lateral: float = 0.5 * (float(geometry["arm_line_offset_plus_m"]) + float(geometry["arm_line_offset_minus_m"]))
@@ -318,17 +312,24 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 		var box: AABB = (rails.get_parent().get_parent() as Node3D).transform * ((rails.get_parent() as Node3D).transform * rails.get_aabb())
 		_check(box.size.y > float(detail["tower"]["lattice_height_m"]) - float(detail["tower.plinth"]["height_m"]) - 0.5,
 				"rails %.1f m long" % box.size.y)
-	# Crown beam (fixed, on the tower top): every cable's upper end meets it within 0.3 m.
-	var crown := view.get_node_or_null("RailsMount/Rails/crown") as MeshInstance3D
-	_check(crown != null, "crown beam built")
-	if crown != null:
-		var crown_box: AABB = (crown.get_parent().get_parent() as Node3D).transform * ((crown.get_parent() as Node3D).transform * crown.get_aabb())
-		_check(absf(up_r.dot(crown_box.position) - float(detail["tower.roof"]["crown_beam_bottom_m"])) < 0.01,
-				"crown beam underside at %.2f m" % up_r.dot(crown_box.position))
+	# Tower head (fixed): every cable's upper end meets its underside within 0.3 m and lies inside the outline.
+	var head := detail["tower.head"] as Dictionary
+	var steel := view.get_node_or_null("RailsMount/Rails/head_steel") as MeshInstance3D
+	var roof := view.get_node_or_null("RailsMount/Rails/head_roof") as MeshInstance3D
+	_check(steel != null and roof != null, "tower head built")
+	if steel != null and roof != null:
+		var mount := steel.get_parent().get_parent() as Node3D
+		var steel_box: AABB = mount.transform * ((steel.get_parent() as Node3D).transform * steel.get_aabb())
+		var roof_box: AABB = mount.transform * ((roof.get_parent() as Node3D).transform * roof.get_aabb())
+		var underside_m: float = up_r.dot(steel_box.position)
+		_check(absf(underside_m - float(head["underside_m"])) < 0.01, "head underside at %.2f m" % underside_m)
+		_check(absf(up_r.dot(roof_box.end) - float(head["top_m"])) < 0.01 and up_r.dot(roof_box.end) <= 148.0, "head top at %.2f m <= 148" % up_r.dot(roof_box.end))
+		var outline := _head_outline(view, detail, geometry)
 		for c in range(cables):
 			var cable := view.get_node("cable_%d" % c) as MeshInstance3D
 			var top_point := cable.position + up_r * 0.5 * cable.basis.y.length()
-			_check(crown_box.grow(0.3).has_point(top_point), "hoist cable %d's upper end meets the crown beam" % c)
+			_check(absf(up_r.dot(top_point) - underside_m) <= 0.3, "hoist cable %d's upper end meets the head's underside" % c)
+			_check(Geometry2D.is_point_in_polygon(Vector2(top_point.z, top_point.x), outline), "hoist cable %d's upper end inside the head's outline" % c)
 	# QD arm: its head's face 1 m off the 4.5 m hull on the catch axis, the swing turns the head away, the bracket stays.
 	var qd := view.get_node("QdArmMount") as Node3D
 	var root_site := view.qd_arm_root_site(detail, geometry)
@@ -349,6 +350,24 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 	_check(away.distance_to(home) > 0.5 * head_x, "the swung head is %.1f m from the connected one" % away.distance_to(home))
 
 
+## The head's plan in site (x, y): the point past the hinge axis on the corner's diagonal, the neighbour corners, the rear corner.
+func _head_outline(view: TowerView, detail: Dictionary, geometry: Dictionary) -> PackedVector2Array:
+	var axes := view._plan_axes(detail, geometry)
+	var size: Vector3 = geometry["tower_size_m"]
+	var centre: Vector3 = geometry["tower_center_m"]
+	var w := size.x
+	var corner := centre - axes.x * (0.5 * w) - axes.y * (0.5 * w)
+	var head: Dictionary = detail["tower.head"]
+	var out := -(axes.x + axes.y).normalized()
+	var axis := view.hinge_axis_site(geometry)
+	var point := axis + out * float(head["overhang_past_axis_m"])
+	var plan: Array[Vector3] = [point, corner + axes.x * w, corner + (axes.x + axes.y) * w, corner + axes.y * w]
+	var outline := PackedVector2Array()
+	for p in plan:
+		outline.append(Vector2(p.x, p.y))
+	return outline
+
+
 ## The actuators run from the carriage to the arm's root column and follow the opening angle.
 func _check_actuators(view: TowerView, geometry: Dictionary) -> void:
 	var lengths: Array[float] = []
@@ -367,7 +386,7 @@ func _check_actuators(view: TowerView, geometry: Dictionary) -> void:
 
 
 ## Tiers of one section: near MultiMeshes up to NEAR_END_M, the merged mesh to MID_END_M, the lattice shader beyond;
-## decks / column bundle / roof cap / foot ring as dark solids.
+## decks / column bundle / foot ring as dark solids.
 func _check_hand_over(node: Node, detail: Dictionary, section: Dictionary, index: int, count: int,
 		total_m: float) -> void:
 	var panels := LatticeBuilder.panel_count(section)
@@ -377,11 +396,11 @@ func _check_hand_over(node: Node, detail: Dictionary, section: Dictionary, index
 	var is_top := index == count - 1
 	var base_m: float = (node as Node3D).position.y
 	var expected := LatticeBuilder.dark_solids(detail, section, base_m, half, is_top).size()
-	_check(decks.multimesh.instance_count == expected, "section %d: %d dark solids (decks, column, stairs, roof)" % [index, expected])
-	var clad_count := LatticeBuilder.clad_solids(detail, section, base_m, half, leg_size, index == 0, is_top).size()
+	_check(decks.multimesh.instance_count == expected, "section %d: %d dark solids (decks, column, stairs)" % [index, expected])
+	var clad_count := LatticeBuilder.clad_solids(detail, section, base_m, half, leg_size, index == 0).size()
 	_check((node.get_node_or_null("clad") != null) == (clad_count > 0), "section %d: clad node iff there are light solids" % index)
-	_check((node.get_node_or_null("roof") != null) == is_top, "section %d: roof frame only on top" % index)
-	_check((node.get_node_or_null("far_roof") != null) == is_top, "section %d: far roof boxes only on top" % index)
+	_check((node.get_node_or_null("head_frame") != null) == is_top, "section %d: head frame only on top" % index)
+	_check((node.get_node_or_null("far_head_legs") != null) == is_top, "section %d: far head legs only on top" % index)
 	var near := node.get_node("legs") as GeometryInstance3D
 	var mid := node.get_node("mid") as GeometryInstance3D
 	var far := node.get_node("far") as GeometryInstance3D

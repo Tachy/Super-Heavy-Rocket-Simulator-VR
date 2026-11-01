@@ -73,6 +73,5 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Slits between the cladding plates on the pad-side tower face: the sky shows through in places (`screenshots/pad-b-plan/fix6_leg.png`).
 - Tower braces have no gusset plates; the close-up photo shows them clearly (`nsf_padb_chopsticks_2025-02.jpg`).
 - Hoist cables: the worker photo reads 2-3 cable widths apart across the block; only 1.2 fit in the 2 m block at 4 per group, so the pitch is 0.19 m and the group spacing 1.25 m (photo reading 1.5 m). From the pad side the two groups still read as two bars.
-- Crown beam and its sheave blocks are reasoning from the statics [E]: `padb_tower_top_cabin_2026-04.jpg` shows only the roof cabin overhanging the lattice with cables from its underside.
 - Hinge axis direction (outward diagonal) is an assumption; the photos give only the 2 +-1 m. Rollers, third rail corner and second drum are the user's description, not resolved on photos.
 - Plan Task 6 step 2 (`[slow]` catch cases) did not run by user decision; it moves to the vehicle plan's campaign gate.

@@ -57,3 +57,14 @@ Ruling 2026-10-31 (real frames, `vehicle-models.md` "Black parts"): legs bare st
 on legs and braces. Rendered: warm brownish-grey (lit face (123, 112, 103) sRGB, std 30) and mottled by map and grime. The photo
 nsf_padb_chopsticks_2025-02 shows bright silver, clean legs; the warm tint, the full map contrast and the strong grime were the
 causes. Replaced by albedo ~0.30 cool, map contrast 0.25, grime 0.08 (legs); braces 0.04 neutral.
+
+## Tower top before the head (superseded 2026-11-01)
+
+The tower top was drawn as a flat deck at 144 m with a centred louvred 8 x 8 x 7 m block and a railing (silhouette 146.9 m, `[tower.roof]`), and the hoist cables ended on an invented crown beam with two sheave blocks at 142.6 m (Task 6 fix 2, reasoning from the statics, no photo). `padb_tower_top_cabin_2026-04` contradicts the block and the railing and the user named the real part (the tower head with the overhanging hinge corner): all replaced by `[tower.head]`. Earlier text of the measurements:
+
+- Roof: a flat deck with a light-grey louvred block (about 7 m, a vented machine / hoist room) and a railing; no cabin
+  glazing visible from the stream.
+
+Earlier text of the subsystem file: (courses of 5.35 m, two plates across, 0.1 m seams), roof deck 144 m with a louvred 8 x 8 x 7 m block (139.9-146.9 m) and a railing (silhouette top 146.9 m, the physics box is 146 m).
+
+Earlier cable text: Their upper ends meet the fixed crown beam on the tower top (`[tower.roof] crown_*`, `mechazilla_layout.crown`, node `crown` of rails.gltf): a beam from inside the corner leg (1 m) along the outward diagonal to the axis, a cross beam over the axis along the groups, a 1.2 m sheave block on it above each group, underside 142.6 m (under the roof plate, top <= 146.9 m, so `check_envelope.py` adds no exception). [E] from statics only: `padb_tower_top_cabin_2026-04` shows the roof cabin overhanging the lattice with two cables hanging from its underside on the outer side, no beam or sheave resolved.

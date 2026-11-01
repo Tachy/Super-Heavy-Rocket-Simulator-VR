@@ -2,11 +2,11 @@
 # Own file (not the detail file): the lamps do not feed the Blender models, so a change here never makes them stale.
 # Every value carries [E] (own estimate, method named) or [S] (published, source). Positions of the real lamps are read
 # from NSF / SpaceX photos (git-ignored screenshots/mechazilla/: padb_night_*, spacex-starship-mdr-100.webp,
-# HN635FUWYAAzbOB.webp) at the tower's metric scale (144 m roof, 12 m face), stated per group.
+# HN635FUWYAAzbOB.webp) at the tower's metric scale (147.9 m head roof, 13.3 m face), stated per group.
 # Site frame: z above the site origin (the tower's foot). The axes are the measured squares' (mount, trench, tower foot and
 # lattice are parallel, `plan_yaw_deg` off the pad -> tower line): ref "face" = the tower box's pad-side face (`along_m` into the
 # tower from its plane, negative = out; `across_m` from the face's centre), ref "axis" = the ring axis (`along_m` toward the tower
-# side in the squares' axes, `across_m` across). Every group stands on a real part: tower faces and corners, the roof, the foot
+# side in the squares' axes, `across_m` across). Every group stands on a real part: tower faces and corners, the head, the foot
 # block or the mount deck (`mast_m` = mast width, tested, only if a photo shows a mast). `mirror` repeats the group at -across_m.
 # `aim` = direction (along, across, up) of the beam in those axes, not normalised; `aim_at_axis_m` = aim at the ring axis at that height.
 
@@ -28,9 +28,9 @@ light_color_red_k = 1800.0 # [E] colour temperature of the red lens (only the hu
 name = "obstruction_roof"
 kind = "obstruction"
 ref = "face"
-along_m = 0.3             # [E] corners of the roof deck (12 m face, rail line), mdr-100 shows a lamp on the roof's edge
+along_m = 0.3             # [E] corners of the head's roof plate (over the tower corners), mdr-100 shows a lamp on the roof's edge
 across_m = 5.9            # [E] lamp layout of this group (comment above)
-z_m = 146.0               # [E] on the railing posts, 2 m over the 144 m deck
+z_m = 148.1               # [E] on the head's roof plate, top 147.9
 mirror = true
 lens_m = 0.25             # [E] L-864 lens ~ 0.25 m
 range_m = 12.0            # [E] 2000 cd: 0.2 lux at 100 m, the glow on the steel matters inside ~12 m
@@ -41,7 +41,7 @@ kind = "obstruction"
 ref = "face"
 along_m = 11.7            # [E] lamp layout of this group (comment above)
 across_m = 5.9            # [E] lamp layout of this group (comment above)
-z_m = 146.0               # [E] lamp layout of this group (comment above)
+z_m = 148.1               # [E] lamp layout of this group (comment above)
 mirror = true
 lens_m = 0.25             # [E] lamp layout of this group (comment above)
 range_m = 12.0            # [E] lamp layout of this group (comment above)
@@ -68,14 +68,14 @@ mirror = true
 lens_m = 0.25             # [E] lamp layout of this group (comment above)
 range_m = 12.0            # [E] lamp layout of this group (comment above)
 
-# Roof floods: the bright crown of padb_night_tower_lit; one in each corner, beam outward and down.
+# Head floods: the bright crown of padb_night_tower_lit; one on each corner leg just under the head's floor (the walls would block them higher up), beam outward and down.
 [[lights.group]]
 name = "roof_flood_front"
 kind = "flood"
 ref = "face"
 along_m = 0.5             # [E] lamp layout of this group (comment above)
 across_m = 5.5            # [E] lamp layout of this group (comment above)
-z_m = 145.5               # [E] lamp layout of this group (comment above)
+z_m = 140.2               # [E] under the head's underside (140.5)
 mirror = true
 aim = [-0.7, 0.7, -0.6]   # [E] lamp layout of this group (comment above)
 lumens = 30000.0          # [E] class of a 200-300 W LED industrial flood (130 lm/W)
@@ -91,7 +91,7 @@ kind = "flood"
 ref = "face"
 along_m = 11.5            # [E] lamp layout of this group (comment above)
 across_m = 5.5            # [E] lamp layout of this group (comment above)
-z_m = 145.5               # [E] lamp layout of this group (comment above)
+z_m = 140.2               # [E] under the head's underside (140.5)
 mirror = true
 aim = [0.7, 0.7, -0.6]    # [E] lamp layout of this group (comment above)
 lumens = 30000.0          # [E] as the front floods

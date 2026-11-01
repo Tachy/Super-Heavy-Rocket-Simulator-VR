@@ -104,7 +104,7 @@ f14 2149 s (clock in the frame).
 | Arms during stacked liftoff | parked at the ship nose: top rail 134 (4) m above ground (f14 132, f13 137), carriage block about 120 to 134 m | piecewise map, f14 t=2095, f13 t=2040 | the 88 m of Ship 42 was a catch pose; **stacked parking is about 45 m higher** |
 | Arms open angle in that pose | span 277 px (outer ends) = 35.6 m at 7.8 px/m, so about 21 (5) deg from the line (lower bound: view may be oblique) | f14 t=2095 (outer ends x 813 / 1090, ship axis 940) | `arm_open_deg` 40 would span 48 m: the parked pose is about half open |
 | Arms and carriage during the countdown | **no motion** from T-55 s to T+3 s (2 s sheets, 3 flights) | `lift_f12_1912_2s`, `lift_f13_2093_2s`, `lift_f14_2095_2s` | carriage / arms stay parked until the stack clears the tower |
-| Roof deck / top block | box top 147-149 m, box underside about 142 m, louvred panel block about 7 m high; roof 146 (5) m | f13 t=2040 (nose 139 m at y 362, box y 318-350, 4.4 px/m) | agrees with 144 (5) m, upper half; keeps the "draft 150.1 m too tall" finding open at +-5 m |
+| Tower head | box top 147-149 m, box underside about 142 m, about 7 m high; roof 146 (5) m | f13 t=2040 (nose 139 m at y 362, box y 318-350, 4.4 px/m) | agrees with 144 (5) m, upper half; keeps the "draft 150.1 m too tall" finding open at +-5 m |
 | Clad lower tower | closed plate face from the foot to about 40 % of the height on the camera side | f13 `g_f13_2040_tower_low.png` | confirms "clad face 12 to 79 m" |
 | Ship QD arm at the hot-stage ring (was read as a booster-side platform; "Arm research") | black lattice platform with railing at the booster top (86.8 m), reaching about 12 m out from the leg; stays attached to T-0 | f13 y 560-600; f14 `qd_f14_2135_1s.png` 15 frames 1 s | retracts only after T-0 (not visible: smoke) - **swing timing open** |
 | Face width at the leg centres | 12.9 (1.0) m after the +32 m depth correction (106 px, 8.9 px/m at the booster) | f14 t=2095, legs x 886 / 992 | within error of 11.9 / 12.0 |
@@ -116,8 +116,7 @@ f14 2149 s (clock in the frame).
 - Tower legs: bare steel, very bright silver in direct sun and near black in shade (no paint); X-braces and platforms
   black / dark charcoal; open lattice above about 40 % of the height, closed light-grey plate cladding below on the
   pad-side face; panels about 7-8 m between X-brace crossings in the open part (not resolved to the 5.3 m floor pitch).
-- Roof: a flat deck with a light-grey louvred block (about 7 m, a vented machine / hoist room) and a railing; no cabin
-  glazing visible from the stream.
+- Tower head (no flat deck, no louvred block, no railing; `padb_tower_top_cabin_2026-04`, 28 px/m from the legs' centres and the 150 px floor pitch): closed grey plate walls on the two edges at the overhanging hinge corner, rear sides open onto the lattice. Section underside to roof top 7.4 m (+-0.5), roof plate 0.9 m, bottom band 0.6 m, about 7 panels and 13 brackets per wall. Overhang 1.3 +-0.3 m past the hinge axis (cables at x 835 / 885, corner leg 755, wall end about 925; no pixel solve). The photo shows the roof ending on the rear corner's leg.
 - Chopsticks (parked): black open trusses, top rail with a lighter tan catch strip, pivoting about a corner hinge on the
   carriage, rounded outboard end, parked about half open; carriage a black frame with platforms.
 - Mount: tan / gold-beige steel panels in horizontal courses with vertical seams (square frustum), black base ring in

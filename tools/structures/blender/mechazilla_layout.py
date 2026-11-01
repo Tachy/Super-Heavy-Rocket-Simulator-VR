@@ -222,7 +222,7 @@ def cable_spread_axis(detail: dict) -> tuple:
 
 
 def hoist_cables(detail: dict) -> list:
-    """Plan points (X, Y) of the vertical hoist cables: two groups of the load centred on the axis, running down onto the sheave block's top.
+    """Plan points (X, Y) of the vertical hoist cables: two groups of the load centred on the axis, running from the head's underside onto the sheave block's top.
     Inside a group the cables stand along the outward diagonal."""
     k = detail["carriage"]
     t = cable_spread_axis(detail)
@@ -243,40 +243,148 @@ def sheave_block_top_z(detail: dict) -> float:
     return k["top_z_m"] + k["drum_gap_m"] + k["drum_diameter_m"]
 
 
-def crown_z(detail: dict) -> tuple:
-    """Bottom and top of the crown beam in the carriage frame (site height minus the catch height)."""
-    r, catch = detail["tower"]["roof"], detail["site_tower"]["catch_height_m"]
-    bottom = r["crown_beam_bottom_m"] - catch
-    return bottom, bottom + r["crown_beam_height_m"]
-
-
 def hoist_cable_top_z(detail: dict) -> float:
-    """Where the hoist cables end above: the underside of the crown beam (carriage frame)."""
-    return crown_z(detail)[0]
+    """Where the hoist cables end above: the head's underside (carriage frame), on its load beam over the axis."""
+    return detail["tower"]["head"]["underside_m"] - detail["site_tower"]["catch_height_m"]
 
 
-def crown(detail: dict) -> list:
-    """The fixed crown beam on the tower top (carriage frame, offset 0): a beam from inside the corner leg out to the common axis,
-    a cross beam over the axis along the cable groups, and a sheave block on it above each group. The hoist cables end on its underside."""
-    r, k = detail["tower"]["roof"], detail["carriage"]
-    g = tower_corner(detail)
-    c0 = g["c"]
-    run = math.hypot(*c0)
-    out = (c0[0] / run, c0[1] / run)  # the outward diagonal, from the axis toward the box corner (the axis lies outside it)
-    z0, z1 = crown_z(detail)
-    zc = 0.5 * (z0 + z1)
-    h, w = r["crown_beam_height_m"], r["crown_beam_width_m"]
-    inner = (c0[0] + r["crown_inset_m"] * out[0], c0[1] + r["crown_inset_m"] * out[1])
+def head_outline(detail: dict) -> list:
+    """Plan of the tower head (carriage frame), counter-clockwise: the point overhanging past the axis, the neighbour corner
+    along ex, the rear corner, the neighbour corner along ey: the tower's square with only the hinge corner pulled out along its diagonal."""
+    g, h = tower_corner(detail), detail["tower"]["head"]
+    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
+    point = h["overhang_past_axis_m"] / math.sqrt(2.0)
+    return [(-point * (ex[0] + ey[0]), -point * (ex[1] + ey[1])), (cx + w * ex[0], cy + w * ex[1]),
+            (cx + w * (ex[0] + ey[0]), cy + w * (ex[1] + ey[1])), (cx + w * ey[0], cy + w * ey[1])]
+
+
+def _edge_normal(a, b) -> tuple:
+    """Outward plan unit normal of the edge a -> b of a counter-clockwise outline."""
+    run = math.dist(a, b)
+    return ((b[1] - a[1]) / run, (a[0] - b[0]) / run)
+
+
+def _grown(outline: list, by: float) -> list:
+    """The convex counter-clockwise outline with every edge moved outward by `by`."""
+    out = []
+    for i, p in enumerate(outline):
+        n0 = _edge_normal(outline[i - 1], p)
+        n1 = _edge_normal(p, outline[(i + 1) % len(outline)])
+        k = by / (1.0 + n0[0] * n1[0] + n0[1] * n1[1])
+        out.append((p[0] + k * (n0[0] + n1[0]), p[1] + k * (n0[1] + n1[1])))
+    return out
+
+
+def _prism(outline: list, z0: float, z1: float) -> list:
+    """Closed prism over a counter-clockwise outline, polygons wound outward."""
+    faces = [[(x, y, z1) for x, y in outline], [(x, y, z0) for x, y in reversed(outline)]]
+    for a, b in zip(outline, outline[1:] + outline[:1]):
+        faces.append([(a[0], a[1], z0), (b[0], b[1], z0), (b[0], b[1], z1), (a[0], a[1], z1)])
+    return faces
+
+
+def head_faces(detail: dict) -> dict:
+    """Node -> polygons of the head's two plates: roof plate, slightly proud of the walls, and the floor over its beams."""
+    h = detail["tower"]["head"]
+    catch = detail["site_tower"]["catch_height_m"]
+    outline = head_outline(detail)
+    top = h["top_m"] - catch
+    floor = h["underside_m"] - catch + h["beam_depth_m"]
+    return {"head_roof": _prism(_grown(outline, h["roof_proud_m"]), top - h["roof_thickness_m"], top),
+            "head_floor": _prism(outline, floor, floor + h["floor_thickness_m"])}
+
+
+def _chord(outline: list, at: tuple, along: tuple) -> tuple:
+    """End points of the line through `at` along the unit vector `along` inside the convex outline."""
+    ts = []
+    for a, b in zip(outline, outline[1:] + outline[:1]):
+        ex, ey = b[0] - a[0], b[1] - a[1]
+        det = along[0] * ey - along[1] * ex
+        if abs(det) < 1e-12:
+            continue
+        t = ((a[0] - at[0]) * ey - (a[1] - at[1]) * ex) / det
+        f = ((a[0] - at[0]) * along[1] - (a[1] - at[1]) * along[0]) / det
+        if -1e-9 <= f <= 1.0 + 1e-9:
+            ts.append(t)
+    return ((at[0] + min(ts) * along[0], at[1] + min(ts) * along[1]), (at[0] + max(ts) * along[0], at[1] + max(ts) * along[1]))
+
+
+def head(detail: dict) -> list:
+    """Members of the head (carriage frame, offset 0): floor beams with the load beam over the axis (the cables end on it), two
+    closed walls of vertical panels on the edges at the point with a bottom band and a row of brackets along the top, braces on
+    the two sides away from the point (open onto the lattice), and the small platform at the point."""
+    h = detail["tower"]["head"]
+    catch = detail["site_tower"]["catch_height_m"]
+    outline = head_outline(detail)
+    z0 = h["underside_m"] - catch
+    z_floor = z0 + h["beam_depth_m"]
+    z_wall = z_floor + h["band_height_m"]
+    z_top = h["top_m"] - catch - h["roof_thickness_m"]
     t = cable_spread_axis(detail)
-    reach = 0.5 * k["cable_group_spacing_m"] + r["crown_cross_overhang_m"]
-    d, wd = r["crown_sheave_diameter_m"], r["crown_sheave_width_m"]
-    n = (-t[1], t[0])
-    ms = [_member("crown", "rect", w, (inner[0], inner[1], zc), (0.0, 0.0, zc), h),
-          _member("crown", "rect", w, (-reach * t[0], -reach * t[1], zc), (reach * t[0], reach * t[1], zc), h)]
-    for sign in (-1.0, 1.0):  # the sheave blocks stand on the beam, axis along the cable pitch
-        cx, cy = sign * 0.5 * k["cable_group_spacing_m"] * t[0], sign * 0.5 * k["cable_group_spacing_m"] * t[1]
-        ms.append(_member("crown", "tube", d, (cx - 0.5 * wd * n[0], cy - 0.5 * wd * n[1], z1 + 0.5 * d),
-                          (cx + 0.5 * wd * n[0], cy + 0.5 * wd * n[1], z1 + 0.5 * d)))
+    point, rear = outline[0], outline[2]
+    run = math.dist(point, rear)
+    out = ((point[0] - rear[0]) / run, (point[1] - rear[1]) / run)
+    ms = []
+    z_beam = z0 + 0.5 * h["beam_depth_m"]
+
+    def beam(a, b):
+        ms.append(_member("head_steel", "rect", h["beam_width_m"], (a[0], a[1], z_beam), (b[0], b[1], z_beam), h["beam_depth_m"]))
+
+    beam(point, rear)
+    stations = [(0.0, 0.0)] + [(-f * run * out[0] + point[0], -f * run * out[1] + point[1]) for f in (0.35, 0.6, 0.85)]
+    for at in stations:
+        beam(*_chord(outline, at, t))
+
+    for neighbour in outline[1], outline[3]:
+        a, b = point, neighbour
+        length = math.dist(a, b)
+        d = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+        n = _edge_normal(a, b)
+        if neighbour == outline[3]:  # this edge runs against the outline's direction
+            n = (-n[0], -n[1])
+
+        def at(s, off):
+            return (a[0] + s * d[0] + off * n[0], a[1] + s * d[1] + off * n[1])
+
+        z_mid = 0.5 * (z_wall + z_top)
+        panels = int(h["wall_panels"])
+        panel = (length - (panels - 1) * h["panel_seam_m"]) / panels
+        off = -0.5 * h["wall_thickness_m"]
+        for i in range(panels):
+            s0 = i * (panel + h["panel_seam_m"])
+            p0, p1 = at(s0, off), at(s0 + panel, off)
+            ms.append(_member("head_wall_a" if i % 2 == 0 else "head_wall_b", "rect", h["wall_thickness_m"],
+                              (p0[0], p0[1], z_mid), (p1[0], p1[1], z_mid), z_top - z_wall))
+        p0, p1 = at(0.0, -h["wall_thickness_m"] - 0.05), at(length, -h["wall_thickness_m"] - 0.05)  # dark backing behind the seams
+        ms.append(_member("head_steel", "rect", 0.1, (p0[0], p0[1], z_mid), (p1[0], p1[1], z_mid), z_top - z_wall))
+        band_t = h["wall_thickness_m"] + h["band_proud_m"]
+        p0, p1 = at(0.0, h["band_proud_m"] - 0.5 * band_t), at(length, h["band_proud_m"] - 0.5 * band_t)
+        z_band = z_floor + 0.5 * h["band_height_m"]
+        ms.append(_member("head_band", "rect", band_t, (p0[0], p0[1], z_band), (p1[0], p1[1], z_band), h["band_height_m"]))
+        count = round(length / h["bracket_pitch_m"])
+        z_bracket = z_top - 0.5 * h["bracket_m"]
+        for i in range(count):
+            s = (i + 0.5) * length / count
+            p0, p1 = at(s, -0.5 * h["bracket_m"]), at(s, 0.5 * h["bracket_m"])
+            ms.append(_member("head_band", "rect", h["bracket_m"], (p0[0], p0[1], z_bracket), (p1[0], p1[1], z_bracket), h["bracket_m"]))
+
+    z_foot = z_floor + h["floor_thickness_m"]
+    leg = detail["profiles"][detail["tower"]["sections"][0]["leg_profile"]]["size_m"]
+    centre = (0.5 * (outline[1][0] + outline[3][0]), 0.5 * (outline[1][1] + outline[3][1]))
+    keep = 1.0 - leg / tower_corner(detail)["w"]
+
+    def on_leg_line(p):
+        return (centre[0] + keep * (p[0] - centre[0]), centre[1] + keep * (p[1] - centre[1]))
+
+    for neighbour in outline[1], outline[3]:  # one chevron on each side away from the point, on the legs' centre lines
+        n_leg, r_leg = on_leg_line(neighbour), on_leg_line(rear)
+        apex = (0.5 * (n_leg[0] + r_leg[0]), 0.5 * (n_leg[1] + r_leg[1]), z_top - 0.2)
+        for corner in n_leg, r_leg:
+            ms.append(_member("head_steel", "tube", 0.4, (corner[0], corner[1], z_foot), apex))
+
+    z_p = z0 + h["platform_above_m"]
+    tip = (point[0] + h["platform_length_m"] * out[0], point[1] + h["platform_length_m"] * out[1], z_p)
+    ms.append(_member("head_steel", "rect", h["platform_width_m"], (point[0], point[1], z_p), tip, h["platform_thickness_m"]))
     return ms
 
 
