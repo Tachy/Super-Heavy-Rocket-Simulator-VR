@@ -150,7 +150,7 @@ hinge_radius_aft_m = 4.621         # [E] STL: radius of the hinge's aft end
 hinge_lean_deg = 19.03             # [E] STL: lean of the hinge towards the axis going forward, in the meridian plane
 outline_u_m = [0.0, 5.784, 5.72, 0.529, -1.449, -0.091]    # [E] STL: u along the hinge from its aft end (forward end, swept outer edge, outer corner, aft foot)
 outline_v_m = [0.0, 0.0, 0.188, 3.154, 2.472, 0.265]       # [E] STL: v perpendicular to the hinge in the meridian plane, outward and forward
-lug_u_m = [0.42, 2.09]             # [E] STL: centres of the two lug tabs on the flap's hinge edge
+lug_u_m = []                       # [E] none drawn, user 2026-11-01 (the STL's two tabs at u 0.42 and 2.09 read as grey covers)
 
 [catch_pin]
 radius_m = 0.25                    # [E] pin shaft radius

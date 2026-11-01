@@ -90,7 +90,7 @@ def validate_detail(detail: dict) -> None:
                 raise VehicleSpecError(f"[{name}]: missing key '{k}'")
             v = t[k]
             if isinstance(v, list):
-                if not v or not all(_number(x) and (x >= 0.0 or k in SIGNED_KEYS) for x in v):
+                if (not v and k != "lug_u_m") or not all(_number(x) and (x >= 0.0 or k in SIGNED_KEYS) for x in v):
                     raise VehicleSpecError(f"[{name}].{k}: must be a non-empty list of numbers >= 0")
             elif not _number(v) or (v <= 0.0 and k not in SIGNED_KEYS):
                 raise VehicleSpecError(f"[{name}].{k}: must be a positive number, got {v!r}")
