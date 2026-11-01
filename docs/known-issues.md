@@ -3,7 +3,7 @@
 Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also live in `docs/subsystems/<slug>.md`.
 
 - Red by decision since the Pad B physics alignment (user 2026-10-31: no campaign tuning before the vehicle plan, plan
-  `docs/superpowers/plans/2026-10-31-pad-b-physics-alignment.md`): the lunar direct campaign has no robust gate height, 21 seeds
+  `docs/superpowers/archive/plans/2026-10-31-pad-b-physics-alignment.md`): the lunar direct campaign has no robust gate height, 21 seeds
   (800 m: seed 3 lost, arm in the hull with 20.7 t; 815 m: all caught, one on 0.0 t; 825-850 m: seed 11 upright abort), cause not
   found; `tanker_flight` and the refuelling inputs digest need the re-measure; ship case 20 ends upright on 0.0 t below the
   1 t reserve, unexplained. Not verified: that a ship abort with the water out of reach never strikes the tower, and that the
@@ -68,3 +68,11 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   gate of the vehicle plan.
 - `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
   2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
+
+## Pad B drawing, open after the physics alignment plan (2026-11-01)
+- Slits between the cladding plates on the pad-side tower face: the sky shows through in places (`screenshots/pad-b-plan/fix6_leg.png`).
+- Tower braces have no gusset plates; the close-up photo shows them clearly (`nsf_padb_chopsticks_2025-02.jpg`).
+- Hoist cables: the worker photo reads 2-3 cable widths apart across the block; only 1.2 fit in the 2 m block at 4 per group, so the pitch is 0.19 m and the group spacing 1.25 m (photo reading 1.5 m). From the pad side the two groups still read as two bars.
+- Crown beam and its sheave blocks are reasoning from the statics [E]: `padb_tower_top_cabin_2026-04.jpg` shows only the roof cabin overhanging the lattice with cables from its underside.
+- Hinge axis direction (outward diagonal) is an assumption; the photos give only the 2 +-1 m. Rollers, third rail corner and second drum are the user's description, not resolved on photos.
+- Plan Task 6 step 2 (`[slow]` catch cases) did not run by user decision; it moves to the vehicle plan's campaign gate.
