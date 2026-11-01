@@ -55,8 +55,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
     const Vec3 pitch_axis = cross(Vec3{1.0, 0.0, 0.0}, belly);  // nose-up about this axis turns the nose to the lee
     std::vector<FlapSetting> flaps;
     for (const auto& f : stage.flaps) {
-        const double centroid = 0.5 * (f.geometry.station_fwd_m + f.geometry.station_aft_m);
-        flaps.push_back({&f, centroid > cg});
+        flaps.push_back({&f, aero::flap_centroid(f.geometry, 0.5 * f.max_deflection_rad).x > cg});
     }
 
     // Total force (body axes) at Mach number and angle of attack (belly towards the flow), flaps in pitch trim.

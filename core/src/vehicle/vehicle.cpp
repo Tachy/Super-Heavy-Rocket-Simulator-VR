@@ -138,7 +138,8 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
             for (const auto& f : stage_config.flaps) {
                 stage.flaps.push_back({{station + f.station_fwd_m, station + f.station_aft_m, f.hinge_azimuth_rad,
                                         0.5 * stage_config.diameter_m, f.span_m, f.area_m2,
-                                        stage_config.aero.belly_azimuth_rad},
+                                        stage_config.aero.belly_azimuth_rad, f.hinge_lean_rad, f.hinge_radius_aft_m,
+                                        f.centroid_u_m, f.centroid_v_m},
                                        f.max_deflection_rad, f.rate_rad_s,
                                        std::clamp(f.initial_deflection_rad, 0.0, f.max_deflection_rad)});
             }

@@ -512,6 +512,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             f.max_deflection_rad = doc.number(*ft, "max_deflection_deg") * constants::deg_to_rad;
             f.rate_rad_s = doc.number(*ft, "rate_deg_s") * constants::deg_to_rad;
             f.initial_deflection_rad = doc.number_or(*ft, "initial_deflection_deg", 0.0) * constants::deg_to_rad;
+            f.hinge_lean_rad = doc.number_or(*ft, "hinge_lean_deg", 0.0) * constants::deg_to_rad;
+            if (ft->contains("hinge_radius_aft_m")) f.hinge_radius_aft_m = doc.number(*ft, "hinge_radius_aft_m");
+            if (ft->contains("centroid_u_m")) f.centroid_u_m = doc.number(*ft, "centroid_u_m");
+            if (ft->contains("centroid_v_m")) f.centroid_v_m = doc.number(*ft, "centroid_v_m");
             s.flaps.push_back(f);
         }
         if (!s.flaps.empty() && s.aero.flap_table.empty()) doc.fail("stage.flap needs [stage.aero] flap_table");

@@ -121,6 +121,14 @@ func _check_gimbal(view: VehicleView, snapshot: Dictionary) -> void:
 
 
 func _check_flaps(stages: Array, snapshot: Dictionary, view: VehicleView, root: Node3D) -> void:
+	# Rest pose at liftoff: the config's initial state is d = 90, the panel in the meridian plane (no tilt off the axis).
+	view.sync(snapshot["stages"], snapshot["engines"], snapshot["flaps"], snapshot["grid_fins"], 0.0)
+	for i in snapshot["flaps"].size():
+		var rest: Dictionary = snapshot["flaps"][i]
+		_check(float(rest["deflection_deg"]) == 90.0, "flap %d rests at d = 90 at liftoff" % i)
+		var rest_node := root.find_child("flap_%d" % i, true, false) as Node3D
+		var panel_normal := rest_node.transform.basis * Vector3.UP  # model Y: the panel's thickness direction
+		_check(absf(panel_normal.normalized().x) < 1e-6, "flap %d at liftoff: panel normal perpendicular to the body axis" % i)
 	var belly_deg: float = _piece(stages, "ship")["stage"][0]["aero"]["belly_azimuth_deg"]
 	var belly := _radial(belly_deg)
 	var base: float = stages[1]["base_station_m"]
@@ -284,7 +292,8 @@ func _snapshot(stages: Array) -> Dictionary:
 						"spool": 0.0, "vacuum": group["engine"] == "raptor_vacuum3", "auxiliary": false})
 		for flap: Dictionary in pieces[i].get("stage.flap", []):
 			flaps.append({"hinge_azimuth_deg": flap["hinge_azimuth_deg"], "station_fwd_m": base + flap["station_fwd_m"],
-					"station_aft_m": base + flap["station_aft_m"], "span_m": flap["span_m"], "deflection_deg": 0.0})
+					"station_aft_m": base + flap["station_aft_m"], "span_m": flap["span_m"],
+					"deflection_deg": flap["initial_deflection_deg"]})
 		var grid: Dictionary = pieces[i]["stage"][0].get("grid_fins", {})
 		for azimuth: float in grid.get("azimuths_deg", []):
 			fins.append({"station_m": base + grid["station_m"], "azimuth_deg": azimuth, "radius_m": grid["radius_m"],

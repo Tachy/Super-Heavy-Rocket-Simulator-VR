@@ -134,18 +134,18 @@ lug_length_m = 0.6                 # [E] hinge lug along the hinge (model pegs 0
 lug_height_m = 0.7                 # [E] lug height normal to the hinge (model lugs 0.3-0.5 out of the panel)
 
 [flap.aft]
-hinge_drawn_length_m = 12.0        # [E] model: 1:100 model hinge edge 11.99 m (physics 12 m)
+hinge_drawn_length_m = 12.0        # [E] model: 1:100 model hinge edge 11.99 m
 outline_u_m = [0.0, 12.0, 12.0, 7.2, 0.0]     # [E] model: model x 0.1: hinge edge, forward tip, swept outer edge, outer corner
-outline_v_m = [0.0, 0.0, 0.44, 3.69, 3.69]    # [E] model: span 3.69 m (physics 4.0 m); area 36.5 m^2 (physics 48)
+outline_v_m = [0.0, 0.0, 0.44, 3.69, 3.69]    # [E] model: span 3.69 m; area 36.48 m^2 (vehicle config equal)
 lug_u_m = [0.8, 5.0, 10.7]         # [E] +-0.7 m: f14 file 5099 / 5299 s: two V brackets and one central actuator T (the model's 4 pegs are not on the flap)
 
 [flap.fwd]
 # Size, orientation and place from the 1:100 model's flat flap face (user 2026-11-01; supersedes the chord-of-the-hull hinge):
 # boundary loop of ss3-ship-nose-flap-l.stl, face normal exactly the meridian plane of azimuth 20.0 deg (printed pose d = 90),
 # station = model y + 34.89; lug tabs left out of the outline. Hinge 5.784 m long, aft end (42.282, r 4.621), leaned 19.03 deg
-# towards the axis going forward; panel area 12.37 m^2 (physics 24 m^2 centred at station 42; the older "13.8" was wrong).
+# towards the axis going forward; panel area 12.37 m^2 (the older "13.8" was wrong). The vehicle config's [[stage.flap]] follows.
 hinge_drawn_length_m = 5.784       # [E] STL: hinge edge of the flat face
-hinge_station_aft_m = 42.282       # [E] STL: station of the hinge's aft end (drawn; the physics flap stays 38-46)
+hinge_station_aft_m = 42.282       # [E] STL: station of the hinge's aft end (vehicle config equal)
 hinge_radius_aft_m = 4.621         # [E] STL: radius of the hinge's aft end
 hinge_lean_deg = 19.03             # [E] STL: lean of the hinge towards the axis going forward, in the meridian plane
 outline_u_m = [0.0, 5.784, 5.72, 0.529, -1.449, -0.091]    # [E] STL: u along the hinge from its aft end (forward end, swept outer edge, outer corner, aft foot)

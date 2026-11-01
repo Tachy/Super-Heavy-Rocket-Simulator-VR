@@ -201,6 +201,10 @@ struct FlapConfig {
     double max_deflection_rad = 0.0;
     double rate_rad_s = 0.0;
     double initial_deflection_rad = 0.0;
+    double hinge_lean_rad = 0.0;               // hinge towards the axis going forward, in the meridian plane
+    std::optional<double> hinge_radius_aft_m;  // aft end of the hinge; default the hull radius
+    std::optional<double> centroid_u_m;        // planform centroid in the hinge frame; default mid-hinge
+    std::optional<double> centroid_v_m;        // default mid-span
 };
 
 // Grid fins of a stage (aerodynamic control surfaces, e.g. for the booster's return).

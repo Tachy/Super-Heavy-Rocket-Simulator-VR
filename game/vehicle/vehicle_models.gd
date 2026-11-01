@@ -355,8 +355,8 @@ static func flap_entry(models: Dictionary, stage_id: String, flap: Dictionary, b
 	return {}
 
 
-## Flap model in stage-local body coordinates, placed by its manifest entry (the DRAWN hinge: aft end station and radius,
-## lean). The hinge (model X axis, origin at its aft end) sits at that point at the hinge azimuth and leans towards the
+## Flap model in stage-local body coordinates, placed by its manifest entry (the drawn hinge = the physics hinge of the
+## vehicle config: aft end station and radius, lean; pinned by a Python test). The hinge (model X axis, origin at its aft end) sits at that point at the hinge azimuth and leans towards the
 ## station axis going forward by the lean l, in the meridian plane: X' = cos l X - sin l e_r, Y' = sin l X + cos l e_r
 ## (l = 0: the station axis and the radial). The model Z (panel at rest) is the stow direction of core/src/aero/flap.cpp
 ## (hull tangent away from the belly: X x e_r, or its opposite = the mirrored basis when the manifest's rotation sign

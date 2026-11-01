@@ -277,10 +277,42 @@ def test_flaps_hinge_on_the_axis_and_drawn_shape_from_the_detail_file(built, spe
         edge = [p for p in parts["panel"][0] if abs(p[2]) < 1e-6]
         assert edge and max(abs(p[1]) for p in edge) <= spec["detail"]["flap"]["root_thickness_m"] / 2.0 + 1e-6
         assert _signed_volume(*[parts["panel"][0], parts["panel"][2]]) > 0.0
-        # drawn planform area (shoelace) vs the physics area: the deviation is documented, but stays within a factor 3
+        # drawn planform area (shoelace) vs the physics area (exact: test_config_flaps_are_the_drawn_flaps)
         pts = list(zip(d["outline_u_m"], d["outline_v_m"]))
         area = 0.5 * abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1])))
         assert 0.25 * f["area_m2"] < area < 1.1 * f["area_m2"]
+
+
+def _polygon_centroid(us, vs):
+    """Area and centroid of a closed outline (shoelace)."""
+    a = cu = cv = 0.0
+    for i in range(len(us)):
+        j = (i + 1) % len(us)
+        cross = us[i] * vs[j] - us[j] * vs[i]
+        a += cross
+        cu += (us[i] + us[j]) * cross
+        cv += (vs[i] + vs[j]) * cross
+    return abs(a) / 2.0, cu / (3.0 * a), cv / (3.0 * a)
+
+
+def test_config_flaps_are_the_drawn_flaps(spec):
+    """Physics [[stage.flap]] against the detail outlines and the manifest's drawn hinge: one geometry."""
+    with open(vehicle_spec.VEHICLES / f"{VEHICLE}.toml", "rb") as fh:
+        config = {f["id"]: f for s in tomllib.load(fh)["stage"] for f in s.get("flap", [])}
+    assert len(config) == 4
+    for f in spec["stages"]["ship"]["flaps"]:
+        c, d = config[f["id"]], spec["detail"]["flap"][f["kind"]]
+        area, u, v = _polygon_centroid(d["outline_u_m"], d["outline_v_m"])
+        assert c["area_m2"] == pytest.approx(area, abs=1e-3), f["id"]
+        assert c["span_m"] == pytest.approx(max(d["outline_v_m"]), abs=1e-3), f["id"]
+        assert c["centroid_u_m"] == pytest.approx(u, abs=1e-3), f["id"]
+        assert c["centroid_v_m"] == pytest.approx(v, abs=1e-3), f["id"]
+        assert f["drawn_hinge_station_aft_m"] == pytest.approx(c["station_aft_m"], abs=1e-9), f["id"]
+        assert f["drawn_hinge_station_fwd_m"] == pytest.approx(c["station_fwd_m"], abs=1e-3), f["id"]
+        assert f["drawn_hinge_lean_deg"] == pytest.approx(c.get("hinge_lean_deg", 0.0), abs=1e-9), f["id"]
+        radius = c.get("hinge_radius_aft_m", spec["stages"]["ship"]["diameter_m"] / 2.0)
+        assert f["drawn_hinge_radius_aft_m"] == pytest.approx(radius, abs=1e-9), f["id"]
+        assert c["initial_deflection_deg"] == 90.0 and c["max_deflection_deg"] == 90.0 and c["rate_deg_s"] == 20.0
 
 
 def _ship_profile(spec):
@@ -310,7 +342,7 @@ def test_forward_flap_numbers_are_the_stl_measurement(spec):
     assert (d["hinge_station_aft_m"], d["hinge_radius_aft_m"], d["hinge_lean_deg"]) == (42.282, 4.621, 19.03)
     assert _shoelace(list(zip(d["outline_u_m"], d["outline_v_m"]))) == pytest.approx(12.37, abs=0.02)
     for f in (f for f in spec["stages"]["ship"]["flaps"] if f["kind"] == "fwd"):
-        assert f["hinge_azimuth_deg"] in (20.0, 160.0)  # the physics' azimuth stays
+        assert f["hinge_azimuth_deg"] in (20.0, 160.0)
         assert f["drawn_hinge_station_aft_m"] == 42.282 and f["drawn_hinge_lean_deg"] == pytest.approx(19.03)
         assert f["drawn_hinge_radius_aft_m"] == 4.621
         assert f["drawn_hinge_station_fwd_m"] == pytest.approx(47.75, abs=0.005)
@@ -346,7 +378,7 @@ def test_hinge_covers_follow_the_drawn_hinge(spec):
         lo, hi = f["drawn_hinge_station_aft_m"] - overhang, f["drawn_hinge_station_fwd_m"] + overhang
         if f["kind"] == "fwd":
             assert (lo, hi) == pytest.approx((41.48, 48.55), abs=0.005)
-        else:  # the aft cover spans the physics stations as before
+        else:  # the aft cover spans the hinge stations
             assert (lo, hi) == pytest.approx((f["station_aft_m"] - overhang, f["station_fwd_m"] + overhang), abs=1e-9)
 
 

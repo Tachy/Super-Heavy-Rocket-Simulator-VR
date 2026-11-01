@@ -52,7 +52,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   engine, posed from `position_m` / `direction` = the real gimbal), `flap_<i>`, `grid_fin_<i>` as children in stage-local body
   coordinates. Stage separation rebuilds on the new stage list: a model never stays on the wrong stage (a hidden view still
   rebuilds, it only skips posing and plumes). Materials: the hull shader's three (below); engines keep the view's `LitAerial` steel.
-- Flap pose: hinge at the manifest's drawn (aft station, radius) at the hinge azimuth, basis (X' = cos l X - sin l e_r,
+- Flap pose: hinge at the manifest's drawn (aft station, radius), equal to the physics hinge, at the hinge azimuth, basis (X' = cos l X - sin l e_r,
   Y' = sin l X + cos l e_r, stow) with l the manifest lean and stow = -rotation_sign * (X x e_r) (mirrored when the manifest
   sign is +1), then rotation about X' by sign * deflection (d = 0 near the hull tangent, d = 90 in the meridian plane, span
   perpendicular to the hinge); manifest entry matched by stage id,
@@ -197,15 +197,15 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Hot-stage ring part | 9.0 m ring 0.6 m high, 3 pads | collar | n/a | collar kept |
 
 ### Physics deviations for the user
-The drawn shape sits on the physics' pivots; nothing in `config/` was changed. Where the real shape differs from the physics numbers:
+The drawn shape sits on the physics' pivots. The flaps' physics now equals the drawing (config = detail outline and manifest hinge, `test_config_flaps_are_the_drawn_flaps`; vehicle physics plan Task 3, 2026-11-01, previous numbers `docs/history/guidance-missions.md`). Where the real shape still differs from the physics numbers:
 
 | Item | Physics (config) | Drawn (model) | Meaning |
 |---|---|---|---|
-| Aft flap | 12 x 4 m, 48 m^2 | 12 x 3.69 m swept, 36.5 m^2 (-24 %) | the aero model has 31 % more aft flap area (control authority, flap heating area) than the drawn flap; matching the model would mean ~36 m^2 |
-| Forward flap | 8 x 3 m, 24 m^2, centre at station 42 | 5.784 x 3.15 m swept, 12.37 m^2 (-48 %), centre about station 45, lean 19.03 deg (physics 0) | the forward flaps are the most overstated; hinge moment arm and pitch trim are affected (the earlier "13.8 m^2" in these docs was wrong) |
+| Aft flap | 12 x 3.69 m, 36.48 m^2, centroid (u 5.059, v 1.682) | same | none. Thin plate: the wedge and lugs carry no aero |
+| Forward flap | hinge 42.282-47.75, lean 19.03 deg, 12.374 m^2, span 3.154, centroid (u 1.609, v 1.250), station 44.21 at d = 90 | same | none (the earlier "13.8 m^2" in these docs was wrong) |
 | Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | STL outline, gross 12.63 m^2 (cell map: 102.9 cells of 0.350 m), root at r 4.65 (hull + 0.15 m gap), tail at r 9.19, centroid at r 7.19 m; walls (0.04 m on a 0.35 m pitch, both families) block 22 % looking along the cells | the physics has 7 % more area (13.5 vs 12.63) and a 1.19 m shorter lever arm than the drawing (r 6.0 vs 7.19); rest attitude agrees (cells axial at d = 0) |
 | Ship nose | `nose_length_m` 17 | ogive 13.4 m | drag / nose-radius numbers use the longer, sharper nose; the drawn one is blunter |
-| Forward flap hinge | straight, parallel to the axis, 38-46 m, azimuth belly +-110 | drawn 42.28-47.75 m (aft end r 4.621), lean 19.03 deg along the ogive, azimuth the physics' 20 / 160 (the STL face is in the meridian plane of 20.0 deg) | physics hinge is straight (lean 0) at radius R over 38-46; drawn hinge centre 45.0 (physics 42.0), radius 4.62 -> 2.74 |
+| Forward RCS pod | station 46, azimuth 0 / 180, r 4.5 | not drawn; hull r 3.35 at station 46, the forward cover there reaches azimuth -2 deg | the physics pod floats 1.15 m off the hull, 1.54-1.75 m from the forward flap at every deflection; user decision (vehicle physics plan Task 3 report) |
 | Fin azimuths | 0 / 90 / 180 (90 / 90 / 180) | as configured | aerial 2026-04, f12 1804 s: the spacing agrees, the middle fin points away from the tower |
 | Fin station | 64 m | as configured | NSF 2026-03: 64.6 +-1 m: agrees |
 | Hull ring pitch | n/a | 2.0 +-0.15 m (photo 108 Block 2: 1.8) | drawing only |
@@ -352,7 +352,7 @@ Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax 
 - Config numbers that look odd next to the references: the 13.5 m^2 fin at a 3.0 m span (radius_m 6.0) gives a 4.5 m chord;
   the 20 outer engines on the 4.1 m ring overlap by 0.16 m at the exit planes and the outer bell edge (4.82 m) passes the hull
   radius (4.5 m).
-- Flaps at rest lie on the hull's tangent plane (stowed, flat): the tip stands up to 0.9 m off the curved hull.
+- Flaps at d = 0 (folded, not the rest pose, which is d = 90) lie on the hull's tangent plane: the tip stands up to 0.9 m off the curved hull.
 - Raceway position, tile coverage, hot-stage and bell dimensions are estimates; no Block 3 drawing exists.
 
 ## Fin outline round (2026-10-31)

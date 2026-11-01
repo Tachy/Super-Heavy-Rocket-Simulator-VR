@@ -32,20 +32,29 @@ FlapTable::FlapTable(const config::CsvTable& table) : mach_(table.column("mach")
 
 double FlapTable::cn_max(double mach) const { return empty() ? 0.0 : interpolate(mach_, cn_max_, mach); }
 
+Vec3 flap_hinge_direction(const FlapGeometry& flap) {
+    return Vec3{std::cos(flap.hinge_lean_rad), 0.0, 0.0} - radial(flap.hinge_azimuth_rad) * std::sin(flap.hinge_lean_rad);
+}
+
 Vec3 flap_span_direction(const FlapGeometry& flap, double deflection_rad) {
     const Vec3 e_r = radial(flap.hinge_azimuth_rad);
     Vec3 stow = cross(Vec3{1.0, 0.0, 0.0}, e_r);  // hull tangent at the hinge
     if (dot(stow, radial(flap.belly_azimuth_rad)) > 0.0) stow = stow * -1.0;
-    return stow * std::cos(deflection_rad) + e_r * std::sin(deflection_rad);
+    const Vec3 broadside = Vec3{std::sin(flap.hinge_lean_rad), 0.0, 0.0} + e_r * std::cos(flap.hinge_lean_rad);
+    return stow * std::cos(deflection_rad) + broadside * std::sin(deflection_rad);
 }
 
 Vec3 flap_normal(const FlapGeometry& flap, double deflection_rad) {
-    return cross(Vec3{1.0, 0.0, 0.0}, flap_span_direction(flap, deflection_rad));
+    return cross(flap_hinge_direction(flap), flap_span_direction(flap, deflection_rad));
 }
 
 Vec3 flap_centroid(const FlapGeometry& flap, double deflection_rad) {
-    return Vec3{0.5 * (flap.station_fwd_m + flap.station_aft_m), 0.0, 0.0} +
-           radial(flap.hinge_azimuth_rad) * flap.hull_radius_m + flap_span_direction(flap, deflection_rad) * (0.5 * flap.span_m);
+    const double hinge_length_m = (flap.station_fwd_m - flap.station_aft_m) / std::cos(flap.hinge_lean_rad);
+    const double u_m = flap.centroid_u_m.value_or(0.5 * hinge_length_m);
+    const double v_m = flap.centroid_v_m.value_or(0.5 * flap.span_m);
+    return Vec3{flap.station_aft_m, 0.0, 0.0} +
+           radial(flap.hinge_azimuth_rad) * flap.hinge_radius_aft_m.value_or(flap.hull_radius_m) +
+           flap_hinge_direction(flap) * u_m + flap_span_direction(flap, deflection_rad) * v_m;
 }
 
 FlapForce flap_force(const FlapGeometry& flap, double deflection_rad, const Vec3& velocity_body_mps,

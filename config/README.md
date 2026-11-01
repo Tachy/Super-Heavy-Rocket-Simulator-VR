@@ -55,7 +55,9 @@ flow separation (vacuum engines).
 - `[[stage.flap]]` (ship): flat plates hinged along the hull side - `id`, `hinge_azimuth_deg` (from body +y
   towards +z), `station_fwd_m`/`station_aft_m` (from the bottom of the stage), `span_m`, `area_m2`,
   `max_deflection_deg` (0 = folded leeward, 90 = broadside to a belly-first flow), `rate_deg_s`, optional
-  `initial_deflection_deg`; needs `[stage.aero] flap_table` (`aero/flap.csv`: mach, cn_max) and
+  `initial_deflection_deg` (the ships' rest pose: 90), `hinge_lean_deg` (towards the axis going forward, default 0),
+  `hinge_radius_aft_m` (default hull radius), `centroid_u_m` / `centroid_v_m` (planform centroid in the hinge frame, default
+  mid-hinge / mid-span); needs `[stage.aero] flap_table` (`aero/flap.csv`: mach, cn_max) and
   `belly_azimuth_deg` (body direction of the heat shield, default 270 = -z).
 - `[stage.heat_shield]` (ship, capsule): `nose_radius_m` (Sutton-Graves), `max_heat_rate_w_m2`, `max_heat_load_j_m2`,
   `max_load_g` (aerodynamic acceleration, breakup), optional `crew_load_limit_g` (warning, and the entry guidance's load

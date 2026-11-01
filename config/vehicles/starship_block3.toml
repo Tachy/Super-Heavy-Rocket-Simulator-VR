@@ -180,7 +180,7 @@ contents = "oxidizer"
 role = "header"
 propellant_management_device = true      # [E] user 2026-10-21: always covers its outlet (SpaceX details not public)
 mass_kg = 27391.3                        # [D] 35 t at O/F 3.6
-base_station_m = 44.0                    # [E] nose, forward of the forward flaps' hinge line
+base_station_m = 44.0                    # [E] nose (from before the drawn flap hinge, now 42.3-47.8 m)
 diameter_m = 3.6                         # [E] ~23 m^3
 
 [[stage.tank]]
@@ -242,17 +242,21 @@ belly_azimuth_deg = 270.0                # heat shield towards body -z
 nose_length_m = 17.0                     # ogive nose cone [E]
 flaps = 4
 
-# Flaps [E]: Block 3 aft flaps ~12 m x 4 m, forward flaps smaller and moved leeward (Block 2 on); hinges on the
-# hull sides (belly at body -z). 0 deg = folded leeward (edge-on to a belly-first flow), 90 deg = in the belly
-# plane (broadside). Rates [E]: electric actuators, ~20 deg/s.
+# Flaps [E]: size and place from the drawn model (`[flap.*]` in detail/starship_block3.toml, the 1:100 STL; user
+# 2026-11-01); hinges on the hull sides (belly at body -z). 0 deg = folded leeward (edge-on to a belly-first flow),
+# 90 deg = in the meridian plane (broadside). Rest pose 90 deg (user 2026-11-01, flight 14 frame at T+49 s: all flaps
+# fully out, smooth in the flight axis): on the pad, in ascent, coast and orbit. Rates [E]: electric actuators, ~20 deg/s.
 [[stage.flap]]
 id = "aft_right"
 hinge_azimuth_deg = 0.0
 station_fwd_m = 14.0
 station_aft_m = 2.0
-span_m = 4.0
-area_m2 = 48.0
+span_m = 3.69                            # [E] detail outline, tools/aero_derive secured areas (+-0.04)
+area_m2 = 36.48                          # [E] detail outline (+-0.73)
+centroid_u_m = 5.0592                    # [E] centroid of the detail outline, pinned by tools/structures/tests
+centroid_v_m = 1.6821
 max_deflection_deg = 90.0
+initial_deflection_deg = 90.0            # rest pose
 rate_deg_s = 20.0
 
 [[stage.flap]]
@@ -260,35 +264,48 @@ id = "aft_left"
 hinge_azimuth_deg = 180.0
 station_fwd_m = 14.0
 station_aft_m = 2.0
-span_m = 4.0
-area_m2 = 48.0
+span_m = 3.69                            # [E] detail outline, tools/aero_derive secured areas (+-0.04)
+area_m2 = 36.48                          # [E] detail outline (+-0.73)
+centroid_u_m = 5.0592                    # [E] centroid of the detail outline, pinned by tools/structures/tests
+centroid_v_m = 1.6821
 max_deflection_deg = 90.0
+initial_deflection_deg = 90.0            # rest pose
 rate_deg_s = 20.0
 
 [[stage.flap]]
 id = "forward_right"
 hinge_azimuth_deg = 20.0                 # moved leeward (Block 2 on)
-station_fwd_m = 46.0
-station_aft_m = 38.0
-span_m = 3.0
-area_m2 = 24.0
+station_fwd_m = 47.75                    # [E] STL flat face: 42.282 + 5.784 cos(19.03 deg)
+station_aft_m = 42.282
+hinge_lean_deg = 19.03                   # [E] STL, towards the axis going forward
+hinge_radius_aft_m = 4.621               # [E] STL
+span_m = 3.154                           # [E] detail outline (+-0.03)
+area_m2 = 12.374                         # [E] detail outline (+-0.25)
+centroid_u_m = 1.6091                    # [E] centroid of the detail outline, pinned by tools/structures/tests
+centroid_v_m = 1.2499
 max_deflection_deg = 90.0
+initial_deflection_deg = 90.0            # rest pose
 rate_deg_s = 20.0
 
 [[stage.flap]]
 id = "forward_left"
 hinge_azimuth_deg = 160.0
-station_fwd_m = 46.0
-station_aft_m = 38.0
-span_m = 3.0
-area_m2 = 24.0
+station_fwd_m = 47.75                    # [E] STL flat face: 42.282 + 5.784 cos(19.03 deg)
+station_aft_m = 42.282
+hinge_lean_deg = 19.03                   # [E] STL, towards the axis going forward
+hinge_radius_aft_m = 4.621               # [E] STL
+span_m = 3.154                           # [E] detail outline (+-0.03)
+area_m2 = 12.374                         # [E] detail outline (+-0.25)
+centroid_u_m = 1.6091                    # [E] centroid of the detail outline, pinned by tools/structures/tests
+centroid_v_m = 1.2499
 max_deflection_deg = 90.0
+initial_deflection_deg = 90.0            # rest pose
 rate_deg_s = 20.0
 
 [stage.catch_pins]
 azimuths_deg = [0.0, 180.0]              # [E] the sides, below the forward flaps: with the nose towards the tower before
                                          # the flip they lie across the arms after it (no roll needed; user 2026-10-13)
-station_m = 36.5                         # [E] just below the forward flaps (38-46 m)
+station_m = 36.5                         # [E] below the forward flaps (42.3-47.8 m, aft foot at d = 90 41.7 m)
 protrusion_m = 1.0                       # [E] beyond the hull (as the booster's)
 max_load_n = 5.0e6                       # [E] per pin (~1.9 g of a 265 t ship on two pins)
 
@@ -333,7 +350,7 @@ minimum_on_time_s = 0.02                 # [E] valve; on/off only, fixed thrust 
 
 [[stage.rcs.pod]]
 id = "forward"
-station_m = 46.0                         # [E] forward of the forward flaps; sides (belly at 270 deg)
+station_m = 46.0                         # [E] beside the forward flap hinge (20 deg off, Task 3 report); sides (belly at 270 deg)
 radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E] (the pre-d1 estimate)

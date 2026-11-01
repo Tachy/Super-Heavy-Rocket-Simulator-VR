@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "starsim/aero/flap.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/mat3.hpp"
 
@@ -160,7 +161,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             const auto& stage = body.vehicle().stages().front();
             const double cg = body.vehicle().mass_properties().cg_station_m;
             for (const auto& f : stage.flaps) {
-                const bool forward = 0.5 * (f.geometry.station_fwd_m + f.geometry.station_aft_m) > cg;
+                const bool forward = aero::flap_centroid(f.geometry, f.deflection_rad).x > cg;
                 cmd.flap_rad.push_back(forward ? f.max_deflection_rad : 0.0);
             }
         }

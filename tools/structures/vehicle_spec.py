@@ -147,9 +147,9 @@ def flap_rotation_sign(hinge_azimuth_deg: float, belly_azimuth_deg: float) -> in
 
 
 def drawn_hinge(flap: dict, kind_detail: dict, profile: hull_profile.Profile) -> dict:
-    """Where the model's hinge is DRAWN (the physics hinge in the vehicle config stays as it is). Forward flap: the 1:100
-    model's own place, typed into the detail file (aft end station and radius, lean). Aft flap: centred on the physics
-    hinge, on the barrel (hull radius, unleaned). Aft end station, radius, lean and forward end station."""
+    """Where the model's hinge is drawn; the physics hinge in the vehicle config equals it (pinned by a test). Forward
+    flap: the 1:100 model's own place, typed into the detail file (aft end station and radius, lean). Aft flap: on the
+    config's hinge, on the barrel (hull radius, unleaned). Aft end station, radius, lean and forward end station."""
     drawn = kind_detail["hinge_drawn_length_m"]
     if flap["kind"] == "fwd":
         x_a, r_a, lean = kind_detail["hinge_station_aft_m"], kind_detail["hinge_radius_aft_m"], math.radians(kind_detail["hinge_lean_deg"])

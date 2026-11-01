@@ -10,6 +10,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   booster's 400 m abort point (loss, 28 m from the pad centre) clears the drawn tower, mount, foot and ramps; the wide run did
   not finish (aerocapture at gate 800, the flown depot campaign).
 
+- Red by plan since the flaps follow the geometry (vehicle physics plan Task 3, 2026-11-01; goes to Task 5, nothing re-baselined):
+  `[header_tanks][aerocapture]` "An aerocapture pass with 64 t aboard damps a roll disturbance at peak q": axis error 159.9 deg
+  below 80 km (limit 10), apoapsis off by 7,348 km (limit 100). The fast `[entry]`, `[trim]`, `[catch]`, `[landing]`, `[ship]`,
+  `[return]`, `[ascent]` cases and `[ship][entry][validation]` stay green; the `[slow]` campaigns were not run (Task 6).
 - `optim` (SOCP solver, ECOS-style HSDE): dense Nesterov-Todd blocks per cone, so cones should stay small
   (dimension <= ~20); ordering is minimum degree on the explicit elimination graph (not full AMD). Solution
   vectors are accurate to roughly sqrt(tolerance) near cone boundaries; objective and feasibility to the tolerance.

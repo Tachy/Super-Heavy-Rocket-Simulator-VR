@@ -661,4 +661,4 @@ Verbatim record of this subsystem's notes as they stood in `docs/subsystems.md` 
   waits for a running input / chunk; an advance that throws stalls the runner until the next command (no re-throw
   every chunk), the snapshot is still built, and `FlightSim` reports input / advance / snapshot errors once via
   `push_error` (`SessionRunner::take_error`).
-
+- Flaps before the vehicle physics plan Task 3 (2026-11-01): aft 12 x 4 m, 48 m^2, stations 2-14; forward 8 x 3 m, 24 m^2, straight hinge 38-46 at the hull radius, azimuth 20 / 160; application point mid-hinge / mid-span; rest pose d = 0 (folded). Replaced by the drawn outlines and d = 90 (user 2026-11-01).
