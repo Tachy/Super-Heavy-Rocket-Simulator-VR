@@ -82,6 +82,10 @@ func build(geometry: Dictionary) -> void:
 	var models := StructureModels.load_for(site_id)  ## {} -> today's boxes
 	if models.is_empty():
 		add_child(_box(geometry["tower_size_m"], Basis(toward, across, up), geometry["tower_center_m"], _lattice))
+		var notice := ModelNotice.label(StructureModels.notice(site_id))  ## stale / missing models: say so on screen
+		if notice != null:
+			notice.position = Frames.to_render(geometry["tower_center_m"])
+			add_child(notice)
 	else:
 		add_child(_pad_b_lattice(models, geometry))
 	if models.is_empty():
@@ -234,9 +238,9 @@ func _build_carriage(models: Dictionary) -> void:
 	var count := int(k["cable_count"])
 	var size: float = k["cable_size_m"]
 	var pitch: float = k["cable_spacing_m"]
-	# Two groups come straight down either side of the sheave block onto the rotary hinge's crossbeam; they run to the roof block's
+	# Two groups come straight down onto the sheave block's top (2 m wide); they run to the roof block's
 	# underside (mechazilla_layout.hoist_cables).
-	_cable_base_m = float(k["top_z_m"])
+	_cable_base_m = float(k["top_z_m"]) + float(k["drum_gap_m"]) + float(k["drum_diameter_m"])  # = mechazilla_layout.sheave_block_top_z
 	var axes := _plan_axes(models["detail"], _geometry)
 	_cable_anchor_site = hinge_axis_site(_geometry)
 	var spread := (axes.y - axes.x).normalized()

@@ -292,10 +292,12 @@ def test_hoist_cables_in_two_groups_centred_on_the_axis(detail):
     assert abs(spacing - 1.5) <= 0.3
     mid = tuple(sum(c[i] for c in cables) / len(cables) for i in range(2))
     assert math.hypot(*mid) <= 0.3  # the load centred on the axis
-    # Either side of the sheave block, which stands on the axis.
-    assert 0.5 * k["drum_width_m"] <= min(abs(v) for v in lateral) - 0.5 * k["cable_size_m"]
+    # The sheave block (2 m wide, photo) stands on the axis; the cables run down onto its top, inside its width.
+    assert k["drum_width_m"] == pytest.approx(2.0)
+    assert max(abs(v) for v in lateral) + 0.5 * k["cable_size_m"] <= 0.5 * k["drum_width_m"]
     drum = [m for m in layout.carriage(detail) if m[1] == "tube" and m[2] == k["drum_diameter_m"]]
     assert len(drum) == 1
+    assert layout.sheave_block_top_z(detail) == pytest.approx(0.5 * (drum[0][3][2] + drum[0][4][2]) + 0.5 * k["drum_diameter_m"])
     mid = tuple(0.5 * (drum[0][3][i] + drum[0][4][i]) for i in range(2))
     assert math.hypot(*mid) == pytest.approx(0.0, abs=1e-9)
 

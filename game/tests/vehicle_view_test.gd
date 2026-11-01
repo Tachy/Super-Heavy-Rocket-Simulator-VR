@@ -21,6 +21,10 @@ func _initialize() -> void:
 	var old := _view(snapshot, VEHICLE + "x")  # not the prototype vehicle
 	_check(_count(old, "MultiMeshInstance3D") == 0 and old.get_child(0).find_children("stage_*", "Node3D", false,
 			false).is_empty() and _cylinders(old) == 3, "other vehicle: cylinders only (booster 1, ship barrel + nose)")
+	_check(VehicleModels.fallback_reason(VEHICLE + "x") == "none" and VehicleModels.notice(VEHICLE + "x") == "",
+			"a vehicle without models by design: reason none, no notice")
+	_check(ModelNotice.text_for("stale").contains("veraltet") and ModelNotice.text_for("missing").contains("fehlen")
+			and ModelNotice.text_for("none") == "" and ModelNotice.label("") == null, "notice texts: stale / missing / none")
 	var no_snapshot_id := _view(snapshot, "")
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
 	var models := VehicleModels.load_for(VEHICLE)
@@ -32,6 +36,12 @@ func _initialize() -> void:
 		var fallback := _view(snapshot, VEHICLE)
 		_check(_cylinders(fallback) == 3 and _count(fallback, "MultiMeshInstance3D") == 0,
 				"without models the vehicle keeps its cylinders")
+		VehicleModels._reasons[VEHICLE] = "stale"
+		var stale := _view(snapshot, VEHICLE)
+		_check(stale.find_children("ModelNotice", "Label3D", true, false).size() == 1
+				and stale.find_children("ModelNotice", "Label3D", true, false)[0].text.contains("veraltet"),
+				"stale models: the view carries the German notice")
+		_check(fallback.find_children("ModelNotice", "Label3D", true, false).is_empty(), "a fallback without a stale reason: no notice")
 		var lit: Array = snapshot["engines"].duplicate(true)
 		for engine: Dictionary in lit:
 			engine.merge({"firing": true, "spool": 1.0, "throttle": 1.0}, true)

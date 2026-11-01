@@ -120,6 +120,9 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> vo
 		if hull.is_empty():
 			_add_cylinders(stage, axis_rotation)
 	if _models.is_empty():
+		var notice := ModelNotice.label(VehicleModels.notice(_vehicle_id(stages)))  ## stale / missing models: say so on screen
+		if notice != null:
+			_stage_root.add_child(notice)
 		return
 	var stage_nodes: Array[Node3D] = []
 	for i in stages.size():

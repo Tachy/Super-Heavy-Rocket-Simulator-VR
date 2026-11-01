@@ -49,3 +49,11 @@ Physics: `hinge_distance_m` 22.3 and one hinge per arm at +-5.8 m across, each a
 - Stations on the arm: bearing start 13 m, leg end 19.5 m, connector 23 m, plate end 25.2 m, pad 23.23 m, tip box 22.6-26.2 m, mast 13.5 m, lower chord's end at 0.87 of the arm.
 - Rails on the corners themselves; sheave block 2.5 m wide with its tangent on the axis, outside the corner; 4 hoist cables in one bundle on the axis (0.16 m pitch).
 - User ruling 2026-11-01 on the photo differences: take the photo for axis, rails and cables; rollers and rear corner stay the user's description.
+
+
+## Leg colour (superseded 2026-11-01)
+Ruling 2026-10-31 (real frames, `vehicle-models.md` "Black parts"): legs bare steel of linear albedo ~0.15 +-0.08, tint
+(0.908, 0.834, 0.774) computed from the Metal032 map's linear mean (0.205, 0.248, 0.294) and the mean grime 0.91, grime strength 0.45
+on legs and braces. Rendered: warm brownish-grey (lit face (123, 112, 103) sRGB, std 30) and mottled by map and grime. The photo
+nsf_padb_chopsticks_2025-02 shows bright silver, clean legs; the warm tint, the full map contrast and the strong grime were the
+causes. Replaced by albedo ~0.30 cool, map contrast 0.25, grime 0.08 (legs); braces 0.04 neutral.

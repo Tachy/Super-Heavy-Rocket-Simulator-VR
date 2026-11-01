@@ -43,11 +43,11 @@ struct LandingSite {
     std::optional<PadTarget> pad;  // landing on legs (no catch target)
 };
 
-// Body +y direction (same frame as the inputs) that turns the first pin along +-across, upright body (x = up);
-// of the two solutions the one nearer `current_body_y` (the pins are symmetric).
 // Body +y for the catch of `target`: its away_from_tower azimuth if it has one, else the nearest pin roll (below).
 math::Vec3 catch_roll_reference(const CatchTarget& target, const math::Vec3& up, const math::Vec3& current_body_y);
 
+// Body +y direction (same frame as the inputs) that turns the first pin along +-across, upright body (x = up);
+// of the two solutions the one nearer `current_body_y` (the pins are symmetric).
 math::Vec3 catch_roll_reference(const math::Vec3& across, const math::Vec3& up, double pin_azimuth_rad,
                                 const math::Vec3& current_body_y);
 

@@ -6,15 +6,20 @@ extends RefCounted
 
 const SHADER := preload("res://shaders/tower_steel.gdshader")
 const TEXTURE_FILE := "materials/metal032/Metal032_1K-JPG_Color.jpg"
-## [E] Tower steel, user ruling 2026-10-31 on the real frames (vehicle-models.md "Black parts", real-frames item 11): the
-## legs are bare steel of linear albedo ~0.15 (+-0.08), bright in direct sun and near black in shade; the braces, decks
-## and platforms are dark, linear albedo ~0.04. The tints below give those means with the texture (linear mean
-## (0.205, 0.248, 0.294), `tools` check 2026-10-31: tint = albedo / 0.91 grime / texture mean) and are sRGB values for the
-## shader's source_color uniform. Without the texture the plain colours are the albedos themselves.
-const LEG_TINT := Color(0.908, 0.834, 0.774)
-const BRACE_TINT := Color(0.500, 0.458, 0.423)
-const PLAIN_LEG := Color(0.42, 0.42, 0.42)
-const PLAIN_BRACE := Color(0.22, 0.22, 0.22)
+## [E] Tower steel, photo nsf_padb_chopsticks_2025-02 (user 2026-11-01: the legs are bright silver and clean, the braces
+## clearly darker grey): the legs are galvanised steel of linear albedo ~0.30, slightly cool (the overcast photo reads the leg
+## faces (117, 120, 134) .. (139, 140, 157) sRGB, the sunlit corner edge 220), the braces linear ~0.04 (photo (50, 50, 62)).
+## The tint IS the albedo (sRGB values for the shader's source_color uniform); the Metal032 map only modulates it around its
+## mean (`texture_contrast`) and the grime stays weak on the legs. Before 2026-11-01 the legs were albedo ~0.15 warm
+## (0.908, 0.834, 0.774 x texture mean): brownish-grey and mottled, see docs/history/launch-structures.md.
+const LEG_TINT := Color(0.57, 0.58, 0.61)
+const BRACE_TINT := Color(0.22, 0.22, 0.235)
+const LEG_CONTRAST := 0.25
+const BRACE_CONTRAST := 0.5
+const LEG_GRIME := 0.08
+const BRACE_GRIME := 0.3
+const PLAIN_LEG := Color(0.57, 0.58, 0.61)
+const PLAIN_BRACE := Color(0.22, 0.22, 0.235)
 const DARK := Color(0.035, 0.038, 0.042)
 ## [E] Light-grey plinth, cladding plates and roof block: linear albedo ~0.30 (frames: light-grey plates, lit grey in sun).
 const CLAD := Color(0.58, 0.58, 0.57)
@@ -36,12 +41,12 @@ static var _texture_tried := false
 
 ## Bare steel of the legs.
 static func steel() -> ShaderMaterial:
-	return _steel_material(LEG_TINT, PLAIN_LEG)
+	return _steel_material(LEG_TINT, PLAIN_LEG, LEG_CONTRAST, LEG_GRIME)
 
 
 ## Dark steel of the braces.
 static func brace_steel() -> ShaderMaterial:
-	return _steel_material(BRACE_TINT, PLAIN_BRACE)
+	return _steel_material(BRACE_TINT, PLAIN_BRACE, BRACE_CONTRAST, BRACE_GRIME)
 
 
 ## Plates of the launch mount's faces: the generated map (data/models/starbase_olp2/mount_panels.png), tile in metres.
@@ -85,9 +90,11 @@ static func lattice_set() -> Dictionary:
 	return {"leg": steel(), "brace": brace_steel(), "dark": dark(), "clad": clad()}
 
 
-static func _steel_material(textured_tint: Color, plain: Color) -> ShaderMaterial:
+static func _steel_material(textured_tint: Color, plain: Color, contrast: float, grime: float) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = SHADER
+	m.set_shader_parameter("texture_contrast", contrast)
+	m.set_shader_parameter("grime_strength", grime)
 	var texture := _steel_texture()
 	m.set_shader_parameter("use_texture", texture != null)
 	if texture != null:

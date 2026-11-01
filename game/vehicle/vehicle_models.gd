@@ -48,6 +48,8 @@ const AZIMUTH_TOLERANCE_DEG := 0.5
 const STATION_TOLERANCE_M := 0.01
 
 static var _logged: Dictionary = {}
+## Vehicle -> why the cylinders are shown: "stale" | "missing" | "none" (no models for this vehicle, by design); absent: models loaded.
+static var _reasons: Dictionary = {}
 static var _cache: Dictionary = {}
 ## Reason of the last failed glTF load (set by _meshes_of), for the fallback log line.
 static var _load_error := ""
@@ -58,6 +60,10 @@ static var _load_error := ""
 ## engine meshes merged to one multi-surface mesh).
 static func load_for(vehicle_id: String) -> Dictionary:
 	if vehicle_id != PROTOTYPE_VEHICLE_ID:
+		_reasons[vehicle_id] = "none"
+		if vehicle_id != "" and not _logged.has(vehicle_id):
+			_logged[vehicle_id] = true
+			print("VehicleModels: %s has no models (cylinders by design)" % vehicle_id)
 		return {}
 	if not _cache.has(vehicle_id):
 		_cache[vehicle_id] = _load(vehicle_id)  # a failure is cached too: the view asks again whenever it rebuilds
@@ -68,6 +74,7 @@ static func load_for(vehicle_id: String) -> Dictionary:
 static func clear_cache() -> void:
 	_cache.clear()
 	_logged.clear()
+	_reasons.clear()
 
 
 static func _load(vehicle_id: String) -> Dictionary:
@@ -231,7 +238,18 @@ static func _tile_maps(info: Dictionary, model_dir: String, vehicle_id: String) 
 	return maps
 
 
+## "stale" | "missing" | "none" while the vehicle shows cylinders, else "".
+static func fallback_reason(vehicle_id: String) -> String:
+	return String(_reasons.get(vehicle_id, ""))
+
+
+## German notice for the view while the cylinders stand for stale or missing models, else "" (also for "none": by design).
+static func notice(vehicle_id: String) -> String:
+	return ModelNotice.text_for(fallback_reason(vehicle_id))
+
+
 static func _fallback(vehicle_id: String, reason: String) -> Dictionary:
+	_reasons[vehicle_id] = "stale" if reason.begins_with("models older") else "missing"
 	if not _logged.has(vehicle_id):
 		_logged[vehicle_id] = true
 		print("VehicleModels: %s keeps its cylinders (%s; run python tools/structures/build_models.py --vehicle %s)"

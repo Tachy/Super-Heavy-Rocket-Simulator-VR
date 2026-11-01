@@ -154,6 +154,7 @@ class MeshBuilder:
         self.add_faces(member_faces(kind, size, wall, length, size_y), lambda p: p0 + x * p.x + y * p.y + z * p.z)
 
     def to_object(self, name, parent=None):
+        self.bm.normal_update()  # the triangulation of a non-convex cap (H, angle) needs the face normals
         bmesh.ops.triangulate(self.bm, faces=self.bm.faces[:])
         mesh = bpy.data.meshes.new(name)
         self.bm.to_mesh(mesh)

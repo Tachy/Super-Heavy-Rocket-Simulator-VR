@@ -23,7 +23,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   on the back face, dark deck slabs 0.4 m at every floor, column bundle 3.6 m.
 - Common hinge axis (user rulings 2026-10-31 / 2026-11-01): both arms turn about ONE vertical axis `hinge_outside_corner_m` = 2 +-1 m [E] outside the physics box's corner toward the mount, `TowerGeometry::hinge_pivot` (20.396 m along the line, 1.508 m across, from `distance_m`, `width_m`, `plan_yaw_deg`, the offset; `layout.pivot_site` is the same formula). Offset: crop_rail_colleen and DSC06000 read the drum and block about 2 m off the corner edge, no pixel solve; the direction is NOT fixed by the photos (one oblique view each, height and depth mix): the corner's outward diagonal is a choice (-0.991 along, -0.132 across the line). The arm box is the closed arm turned rigidly about it: each side keeps a fixed offset to its line (`arm_line_offset_m`: 7.31 m +across, 4.29 m -across; they differ by 2 x 1.51 m), at opening 0 both faces are parallel to the line, 9.6 m apart, centred on the catch axis. Standby 7.1 deg: hull clear 2.83 / 2.81 m per side. The second tower site (`ksc_lc39a`, no photos, yaw 0) has the same offset: 22.59 m along, 7.41 m across, arm 34.59 m (tip where it was), standby 6.5 deg, hull clear by 2.5-3.2 m (test). No `hinge_distance_m`, no per-side hinge.
 - Chopstick (member map: measurements "Arm member map"): `mechazilla_layout.chopstick(detail, side)` in two models (`chopstick.gltf`, `chopstick_minus.gltf`: the roots differ, the -across model is mirrored in the view), large
-  round black tubes only (4.1k triangles, 23 truss members incl. 3 caps, table `ARM_MEMBERS`), 24.0 m = the physics arm (26 +-2 m measured: the lower edge). Plan: root out from the
+  round black tubes only (4.1k triangles, 23 truss members incl. 3 caps, table `ARM_MEMBERS`), 24.0 m = the physics arm: inside the closed-tip reach 24.5 (2) m and at or just below the hinge-to-tip 27 (2) m of the photos (straight lines hinge to tip 25.09 m on the +across arm, 24.38 m on the -across arm; 24.0 is the part along the arm). Plan: root out from the
   common axis to the bend (5.2 m along, 9.4 m off the catch axis: 64 / 57 deg off the arm), leg back in to its capped end (17.5 m), connector to the bearing tube
   (21 m), inner root tube from the axis to the bearing tube's start (11 m).
   The BEARING PIECE (1.3 m tube, flat 0.15 x 1.4 m plate on its inner side, tan strip on top, contact pad at the axis station) runs
@@ -32,7 +32,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 - Carriage (`mechazilla_layout.carriage`, `rails`, `rollers`; frame X toward the pad, Y = -across, origin on the common axis): the tower box of the physics
   (13.3 m, yaw 37.4) is the drawn lattice. One rotary hinge column (1.4 m) on the axis, no outriggers; horizontal struts at both collar levels from the axis back to the corner. Two collars along both side faces from the corner to the next corners; upper = walkway with railing, lower =
   truss 1.8 m deep, 15 m below the carriage top (+-3 m; `collar_gap_m`, at the root's foot). The whole carriage runs on 6 roller points (`rollers`, 3 per level) on three rails (`rails.gltf`, plinth top to lattice top), `rail_inboard_m` = 1 +-0.5 m inboard of the corner edge on the faces (crop_rail_colleen: both visible rails on the plated face; the third, at the other neighbour, on the other side face by symmetry). 6 rollers (3 per level), 3 corners with rails, none at the rear and the second drum behind the first: user's description, not resolved on photos.
-  White actuator drums beside the axis, one per arm (`actuator_*` keys), rod to a lug at the top of the outer root column, about level. A 3.8 m sheave block on the axis, 1.2 m wide; 8 hoist cables in two groups of 4 (`cable_group_spacing_m` 1.5 +-0.3 m, 0.16 m pitch inside a group, `mechazilla_layout.hoist_cables`), vertical, either side of the block onto a crossbeam on the hinge's top, load centred on the axis (`TowerView.hinge_axis_site`, `_cable_*`; statics, user 2026-10-31). The block's width is set to fit between the groups; the photo reads about 2 m with the cables running onto its top.
+  White actuator drums beside the axis, one per arm (`actuator_*` keys), rod to a lug at the top of the outer root column, about level. A 3.8 m sheave block on the axis, 2.0 m wide (photo); 8 hoist cables in two groups of 4 (`cable_group_spacing_m` 1.5 +-0.3 m, 0.16 m pitch inside a group, `mechazilla_layout.hoist_cables`), vertical, running down onto the block's top (inside its width), load centred on the axis (`TowerView.hinge_axis_site`, `_cable_*`; statics, user 2026-10-31).
 - QD arm (`mechazilla_layout.qd_geometry`, `qd_arm`): THE ship QD arm, FIXED in height (tip deck 81.3 m = 86.8 - 5.5, the stack stands 5.5 m lower) on the tower's rear
   side: swing axis `root_x_m` / `root_beyond_m` (-3.0 / 2.0 m in the box axes, 31.9 m from the ring axis), heading to the catch axis, reach 26.5 m so that the head's face is 1 m
   off the 4.5 m hull (connected pose, default). Walkway on a deep root truss, shallow tip platform, connector head; a swing drum under the root and a fixed bracket (`bracket` node)
@@ -92,12 +92,12 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   length) to 3.6 px (VR eye, 1500 px) wide; at 1 km, where it began before, it lost the truss at VR focal lengths.
   Nothing else of this plan draws in the transparent pass (steel / dark / chopstick materials have no alpha).
   Why these ranges and why no dither: `tower_handover_check.gd` below.
-- Colours (ruling 2026-10-31 on the real frames: `vehicle-models.md` "Black parts", real-frames item 11): legs bare steel,
-  linear albedo ~0.15 +-0.08 [E] (bright in direct sun, near black in shade), braces / decks / bundle dark, albedo ~0.04,
-  plinth / plates / roof block light grey ~0.30. No tint to fake the look: albedo and the physical lighting. The tints in
-  `tower_material.gd` are computed from the Metal032 map's linear mean (0.205, 0.248, 0.294) and the mean grime (0.91), as
-  the sRGB values of a `source_color` uniform (the earlier tint 0.65 gave only ~0.09). The far shader's `leg_colour`,
-  `steel_colour`, `dark_colour`, `clad_colour` are the same albedos (refit to the merged tier below).
+- Colours (user 2026-11-01 against the photo nsf_padb_chopsticks_2025-02): legs bright galvanised silver and clean, linear albedo ~0.30 [E]
+  (slightly cool: the overcast photo reads the leg faces (117, 120, 134) .. (139, 140, 157) sRGB, the sunlit edge 220), braces / decks / bundle
+  dark, albedo ~0.04 (photo (50, 50, 62)), plinth / plates / roof block light grey ~0.30. The tint IS the albedo (sRGB values of a
+  `source_color` uniform); the Metal032 map only modulates it (`texture_contrast` 0.25 legs, 0.5 braces) and the grime stays weak on the
+  legs (0.08, braces 0.3). The far shader's `leg_colour`, `steel_colour`, `dark_colour`, `clad_colour` are the same albedos. Earlier
+  ruling and why it looked brown: `docs/history/launch-structures.md` "Leg colour".
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
   frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`).
@@ -195,7 +195,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 | Part | Drawn now | Physics stays | Why |
 |---|---|---|---|
 | Hinge, root | one axis 2 +-1 m outside the box corner, as the physics; root 64 / 57 deg, 12.1 / 9.4 m to the bend | same axis | photos read the root 50 +-15 deg (within the error); the offset's direction is the outward diagonal by choice, the photos do not fix it |
-| Arm length | 24.0 m, as the physics | same | follows the axis so the tip stays 3.6 m past the catch axis; the lower edge of the 26 +-2 m photo reading |
+| Arm length | 24.0 m, as the physics | same | follows the axis so the tip stays 3.6 m past the catch axis; inside reach 24.5 (2) m, at or just below hinge-to-tip 27 (2) m (straight lines 25.09 / 24.38 m) |
 | Fins against the arm | drawn pins and deck at the fine build's place until Task 4 | pins at station 63.0 (fin hinge 64.0 - 1.0), azimuths 0 / 180 across the arms, the 90 deg fin away from the tower; fins without contact | the drawn arm's top reaches the 0 / 180 fin plates at a catch: visible, NOT hidden |
 | Tower height | roof deck 144 m, lattice 139.1 m, silhouette 146.9 m | box 146 m | within the error |
 | QD arm | static at the connected pose, deck 81.3 m, head 1 m off the hull (swing key in the view only) | no state | needs the core's `qd_arm_angle_rad` |

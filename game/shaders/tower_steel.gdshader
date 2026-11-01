@@ -14,6 +14,8 @@ uniform vec4 tint : source_color = vec4(1.0);
 uniform float texel_scale_m = 2.0;     // the texture repeats every 2 m
 uniform float grime_scale_m = 2.5;     // noise feature size
 uniform float grime_strength = 0.45;   // darkening at the dirtiest
+uniform float texture_contrast = 1.0;  // 0 = the tint alone, 1 = the texture's full light / dark variation around its mean
+uniform vec3 texture_mean = vec3(0.205, 0.248, 0.294);  // linear mean of the colour map (the variation is texel / mean)
 uniform float roughness_clean = 0.40;
 uniform float roughness_dirty = 0.80;
 uniform float metallic = 0.65;
@@ -60,7 +62,7 @@ void fragment() {
 		vec3 p = member_position / texel_scale_m;
 		vec3 texel = texture(steel_albedo, p.yz).rgb * w.x + texture(steel_albedo, p.xz).rgb * w.y
 				+ texture(steel_albedo, p.xy).rgb * w.z;
-		colour *= texel;
+		colour *= mix(vec3(1.0), texel / texture_mean, texture_contrast);
 	}
 	vec3 q = (member_position + instance_offset) / grime_scale_m;
 	float grime = smoothstep(0.35, 0.8, 0.65 * value_noise(q) + 0.35 * value_noise(q * 3.1));

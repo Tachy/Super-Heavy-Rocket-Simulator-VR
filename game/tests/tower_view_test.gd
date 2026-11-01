@@ -276,7 +276,7 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 	var outside: float = geometry["hinge_outside_corner_m"]
 	var axis_site := corner - (ax + ay).normalized() * outside
 	_check(axis_site.distance_to(view.hinge_axis_site(geometry)) < 1e-3, "the common hinge axis stands %.2f m outside that corner" % outside)
-	# Hoist cables: vertical, straight down onto the hinge's top, two groups either side of the sheave block, load centred on the axis.
+	# Hoist cables: vertical, straight down onto the sheave block's top, two groups inside its 2 m width, load centred on the axis.
 	var up_r := Frames.to_render(up)
 	var sum := Vector3.ZERO
 	var cables := 0
@@ -301,8 +301,8 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 			count_plus += 1
 		_check(cable.basis.y.normalized().distance_to(up_r) < 1e-6, "hoist cable %d vertical" % c)
 		var low_m: float = h - 0.5 * cable.basis.y.length()
-		var carriage_m: float = up_r.dot((view.get_node("CarriageMount") as Node3D).position) + float(detail["carriage"]["top_z_m"])
-		_check(absf(low_m - carriage_m) < 0.01, "hoist cable %d ends on the hinge's top (%.2f m)" % [c, low_m - carriage_m])
+		var carriage_m: float = up_r.dot((view.get_node("CarriageMount") as Node3D).position) + float(detail["carriage"]["top_z_m"]) 				+ float(detail["carriage"]["drum_gap_m"]) + float(detail["carriage"]["drum_diameter_m"])
+		_check(absf(low_m - carriage_m) < 0.01, "hoist cable %d ends on the sheave block's top (%.2f m)" % [c, low_m - carriage_m])
 		sum += at
 		cables += 1
 	_check(cables == int(detail["carriage"]["cable_count"]), "%d hoist cables" % cables)

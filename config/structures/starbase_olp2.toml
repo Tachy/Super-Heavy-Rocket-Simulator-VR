@@ -157,7 +157,7 @@ size_m = 0.35             # [E] ~14 px at 40.6 px/m
 wall_m = 0.02             # [E] estimate: tube wall, not measurable
 
 [chopstick]               # Pad 2 arm, not the Pad 1 / V2 arm; chords, bends, evidence: launch-structures-measurements.md "Arm research"
-length_m = 24.0           # [E] common axis to tip, 3.6 m past the catch axis = physics arm_length_m; lower edge of the 26 +-2 m photo reading
+length_m = 24.0           # [E] common axis to tip, 3.6 m past the catch axis = physics arm_length_m; inside reach 24.5 (2) m, at or just below hinge-to-tip 27 (2) m
 depth_m = 8.6             # [E] 8.6 +-1.2 m deck to the lower chord at the bearing piece's start (NSF 2026-03; crop_rail_colleen 0.6 of the foot depth at 41 % of the length)
 end_depth_m = 7.0         # [E] 6.9 +-0.7 m at the lower node near the tip: user view of the held V3 booster (45.6 px/m)
 foot_depth_m = 15.0       # [E] +-2 m the root columns' foot on the common axis, under the lower collar's level (crop_rail_colleen: foot and lower collar corner at one height; side view 2025-08 gave 17 +-2)
@@ -224,7 +224,7 @@ rail_height_m = 1.1       # [E] railing height over the walkway deck (a person a
 rail_post_pitch_m = 2.0   # [E] railing posts / knee braces, crop_rail_colleen
 brace_drop_m = 1.5        # [E] the knee brace meets the collar chord's face this far below the deck
 drum_diameter_m = 3.8     # [E] +-0.4 m sheave block, carriage photo 2025-12 with a worker (1.8 m = 180 px)
-drum_width_m = 1.2        # [E] between the two cable groups (their inner edges 0.67 m off the axis); the photo reads about 2 m, its cables run onto the block's top
+drum_width_m = 2.0        # [E] sheave block width, carriage photo 2025-12 (reads about 2 m); the cables (groups 1.5 m apart) run down onto its top
 cable_count = 8           # [E] two groups of 4; crop_rail_colleen shows 8+ thin cables
 cable_size_m = 0.16       # [E] ~6 px at 40.6 px/m
 cable_spacing_m = 0.16    # [E] pitch inside a group

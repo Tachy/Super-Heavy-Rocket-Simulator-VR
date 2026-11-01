@@ -116,3 +116,14 @@ def test_missing_blender_exits_zero(monkeypatch, tmp_path, capsys):
     assert "Blender not found" in capsys.readouterr().out
     assert not (tmp_path / "none").exists()
     shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_non_convex_member_caps_have_equal_areas_at_both_ends(tmp_path):
+    """The triangulation of an H / angle end cap needs the face normals: both caps of the built member must match."""
+    script = Path(__file__).with_name("blender_cap_areas.py")
+    res = subprocess.run(build_models.blender_command(build_models.find_blender(), script), capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    caps = json.loads(next(line for line in res.stdout.splitlines() if line.startswith("CAPS ")).removeprefix("CAPS "))
+    for kind, (start, end) in caps.items():
+        assert start > 0.0, kind
+        assert end == pytest.approx(start, rel=1e-6), kind

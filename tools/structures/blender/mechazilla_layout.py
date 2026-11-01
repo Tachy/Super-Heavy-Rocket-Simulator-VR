@@ -222,7 +222,7 @@ def cable_spread_axis(detail: dict) -> tuple:
 
 
 def hoist_cables(detail: dict) -> list:
-    """Plan points (X, Y) of the vertical hoist cables: two groups either side of the sheave block, the load centred on the axis.
+    """Plan points (X, Y) of the vertical hoist cables: two groups of the load centred on the axis, running down onto the sheave block's top.
     Inside a group the cables stand along the outward diagonal."""
     k = detail["carriage"]
     t = cable_spread_axis(detail)
@@ -235,6 +235,12 @@ def hoist_cables(detail: dict) -> list:
             along = (i - 0.5 * (per_group - 1)) * k["cable_spacing_m"]
             out.append((lateral * t[0] + along * n[0], lateral * t[1] + along * n[1]))
     return out
+
+
+def sheave_block_top_z(detail: dict) -> float:
+    """Height of the sheave block's top in the carriage frame: where the hoist cables end below."""
+    k = detail["carriage"]
+    return k["top_z_m"] + k["drum_gap_m"] + k["drum_diameter_m"]
 
 
 def rails(detail: dict) -> list:
@@ -322,15 +328,15 @@ def carriage(detail: dict) -> list:
         y = sign * k["actuator_anchor_y_m"]
         tube("hardware", k["actuator_barrel_m"] * 3.0, (k["actuator_anchor_x_m"] - 1.2, y, -k["actuator_anchor_depth_m"]),
              (k["actuator_anchor_x_m"] + 0.4, y, -k["actuator_anchor_depth_m"]))
-    # The sheave block above the hinge, on the common axis: the two hoist cable groups come straight down either side of it
-    # onto a crossbeam on the hinge's top (carriage photo 2025-12: worker for scale; crop_rail_colleen; statics: user 2026-10-31).
+    # The sheave block above the hinge, on the common axis: the two hoist cable groups come straight down onto its top
+    # (the block is 2 m wide, the groups stand inside that width); the crossbeam on the hinge's top carries the block (carriage photo 2025-12: worker for scale; crop_rail_colleen; statics: user 2026-10-31).
     d, wd = k["drum_diameter_m"], k["drum_width_m"]
     tx, ty = cable_spread_axis(detail)
-    z_d = top + k["drum_gap_m"] + d / 2.0
+    z_d = sheave_block_top_z(detail) - d / 2.0
     tube("frame", d, (-0.5 * wd * tx, -0.5 * wd * ty, z_d), (0.5 * wd * tx, 0.5 * wd * ty, z_d))
     tube("frame", 0.6 * chord, (0.0, 0.0, top), (0.0, 0.0, z_d))
     tube("frame", chord, at(c0, z_up), (0.0, 0.0, top))
-    beam = 0.5 * k["cable_group_spacing_m"] + 0.3
+    beam = 0.5 * max(wd, k["cable_group_spacing_m"]) + 0.3
     rect("frame", (-beam * tx, -beam * ty, top), (beam * tx, beam * ty, top), 0.6, 0.4)
     return ms
 

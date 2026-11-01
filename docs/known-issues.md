@@ -8,7 +8,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   found; `tanker_flight` and the refuelling inputs digest need the re-measure; ship case 20 ends upright on 0.0 t below the
   1 t reserve, unexplained. Not verified: that a ship abort with the water out of reach never strikes the tower, and that the
   booster's 400 m abort point (loss, 28 m from the pad centre) clears the drawn tower, mount, foot and ramps; the wide run did
-  not finish (aerocapture at gate 800, the flown depot campaign). `check_envelope` QD arm 0.70 m inside the hull: until Task 4.
+  not finish (aerocapture at gate 800, the flown depot campaign).
 
 - `optim` (SOCP solver, ECOS-style HSDE): dense Nesterov-Todd blocks per cone, so cones should stay small
   (dimension <= ~20); ordering is minimum degree on the explicit elimination graph (not full AMD). Solution
@@ -63,5 +63,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Planned (user 2026-10-27): milestone M11 (after M7 cockpit and M10 sound design) holds the rest of the weather - part
   2 rain / snow / fog / lightning / weather-dependent haze (small variant: climatology AOD plus humidity growth, a few
   precomputed table sets) / city light on clouds; part 3 GOES patterns; part 4 wind / density and launch rules.
-- Blender generators of `tools/structures` exit 0 when their script raises: `build_models` does not notice a generator
-  that leaves no file (found 2026-10-31; not fixed).
+- Pad B physics alignment (user 2026-10-31): the final arm geometry (one hinge axis, arm 24.0 m, standby 7.1 deg, closing
+  0.71 s) has flown no catch; the booster and ship catch campaigns and the `[slow]` catch cases have not run since. They are a
+  gate of the vehicle plan.
+- `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
+  2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).

@@ -12,11 +12,15 @@ const DETAIL_FILE := "structures/starbase_olp2.toml"
 const MODEL_DIR := "models/starbase_olp2"
 const MANIFEST := "manifest.json"
 const SOURCE_SCRIPTS: Array[String] = ["common.py", "mechazilla_layout.py", "gen_profiles.py", "gen_chopstick.py",
-		"gen_carriage.py", "gen_rails.py", "gen_qd_arm.py", "mount_layout.py", "gen_mount.py", "gen_trench.py"]
+		"gen_carriage.py", "gen_rails.py", "gen_qd_arm.py", "mount_layout.py", "gen_mount.py", "gen_trench.py", "member_geometry.py"]
+## Sources outside tools/structures/blender that the drawing depends on (build_models.input_hash covers the same files).
+const SOURCE_FILES: Array[String] = ["config/launch_sites.toml", "tools/structures/mount_textures.py"]
 ## Blender (X, Y, Z) -> render (Y, Z, X): arm along +X becomes +Z (the arm pivot's forward axis), Z up becomes +Y.
 const BLENDER_TO_RENDER := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
 
 static var _logged: Dictionary = {}
+## Site -> why the boxes are shown: "stale" | "missing" ("" or absent: models loaded, or no models by design).
+static var _reasons: Dictionary = {}
 ## Reason of the last failed glTF load (set by _meshes_of), for the fallback log line.
 static var _load_error := ""
 
@@ -27,6 +31,7 @@ static func load_for(site_id: String) -> Dictionary:
 		return {}
 	var detail_path := Paths.config_dir().path_join(DETAIL_FILE)
 	var model_dir := Paths.data_dir().path_join(MODEL_DIR)
+	_reasons.erase(site_id)
 	if not FileAccess.file_exists(detail_path):
 		return _fallback(site_id, "no detail file " + detail_path)
 	var missing := _missing_or_stale(model_dir)
@@ -69,7 +74,18 @@ static func model_node(node_name: String, meshes: Dictionary, materials: Diction
 	return root
 
 
+## "stale" | "missing" while the site shows boxes for want of fresh models, else "".
+static func fallback_reason(site_id: String) -> String:
+	return String(_reasons.get(site_id, ""))
+
+
+## German notice for the view while the site shows boxes for want of fresh models, else "".
+static func notice(site_id: String) -> String:
+	return ModelNotice.text_for(fallback_reason(site_id))
+
+
 static func _fallback(site_id: String, reason: String) -> Dictionary:
+	_reasons[site_id] = "stale" if reason.begins_with("models older") else "missing"
 	if not _logged.has(site_id):
 		_logged[site_id] = true
 		print("StructureModels: %s keeps its boxes (%s; run python tools/structures/build_models.py)" % [site_id, reason])
@@ -89,6 +105,8 @@ static func _missing_or_stale(model_dir: String) -> String:
 	var sources: Array[String] = [Paths.config_dir().path_join(DETAIL_FILE)]
 	for script in SOURCE_SCRIPTS:
 		sources.append(Paths.repo_dir().path_join("tools/structures/blender").path_join(script))
+	for file in SOURCE_FILES:
+		sources.append(Paths.repo_dir().path_join(file))
 	for path in sources:
 		if FileAccess.file_exists(path) and FileAccess.get_modified_time(path) > built:
 			return "models older than " + path.get_file()
