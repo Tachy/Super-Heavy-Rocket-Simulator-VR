@@ -52,7 +52,7 @@ flow separation (vacuum engines).
 - `[stage.grid_fins]`: one fin per entry of `azimuths_deg` (from body +y towards +z), `area_m2`
   (gross area inside the fin's outline), `station_m` (hinge), `radius_m` (fin centre of pressure, also the lever of its axial drag),
   `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.
-  `aero/grid_fin.csv`). Fin mass belongs in the stage's `dry_mass_kg`.
+  `aero/grid_fin.csv` for Falcon 9, `aero/super_heavy_grid_fin.csv` for the Super Heavy). Fin mass belongs in the stage's `dry_mass_kg`.
 - `[[stage.flap]]` (ship): flat plates hinged along the hull side - `id`, `hinge_azimuth_deg` (from body +y
   towards +z), `station_fwd_m`/`station_aft_m` (from the bottom of the stage), `span_m`, `area_m2`,
   `max_deflection_deg` (0 = folded leeward, 90 = broadside to a belly-first flow), `rate_deg_s`, optional

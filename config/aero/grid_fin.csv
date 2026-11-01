@@ -1,4 +1,4 @@
-# Grid (lattice) fin normal force, reference area = frontal lattice area of one fin.
+# Falcon 9 grid fins (the Super Heavy has aero/super_heavy_grid_fin.csv). Lattice fin normal force, reference area = frontal lattice area of one fin.
 # cn_alpha_per_rad: slope of the normal-force coefficient; limit_deg: effective incidence beyond which the
 # force no longer grows (cell flow separation).
 # [E] Generic grid-fin trend from wind-tunnel studies of lattice fins (e.g. Washington & Miller,

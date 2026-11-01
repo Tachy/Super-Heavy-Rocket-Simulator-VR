@@ -1,7 +1,7 @@
 # Aero derivation (ascent and booster descent drag from the built models)
 
-Drag derived from the drawn geometry (plan `docs/superpowers/plans/2026-11-01-vehicle-physics.md`, Tasks 1, 2, 2b, 4). The stack's ascent
-table is this tool's output; the descent tables and the ship's table are only compared. No number here was fitted; a disagreement is
+Drag derived from the drawn geometry (plan `docs/superpowers/plans/2026-11-01-vehicle-physics.md`, Tasks 1, 2, 2b, 4, 4b, 4c). The stack's ascent
+table and the Super Heavy's fin table are this tool's output; the descent tables and the ship's table are only compared. No number here was fitted; a disagreement is
 reported as it is.
 
 ## Code and commands
@@ -69,34 +69,34 @@ Kn 0.01 (Mach >= 8) friction is evaluated at the Kn 0.01 altitude and the row is
 
 | Mach | h km | col | friction | nose | base | clean (sum) | flaps | fins | other | other, no credit | gap | derived | +- | old table | derived/old | verdict | Newtonian | nose 17 m | flaps d=0 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 0.3 | 0.9 | on | 0.084 | 0.000 | 0.020 | 0.104 | 0.045 | 0.343 | 0.115 | 0.168 | 0.034 | 0.640 | 0.120 | 0.300 | 2.13 | outside | - | 0.640 | 0.634 |
-| 0.3 | 0.9 | off | 0.084 | 0.000 | 0.132 | 0.216 | 0.045 | 0.343 | 0.115 | 0.168 | 0.034 | 0.752 | 0.126 | 0.380 | 1.98 | outside | - | 0.752 | 0.746 |
-| 0.6 | 3.0 | on | 0.077 | 0.000 | 0.025 | 0.102 | 0.048 | 0.385 | 0.129 | 0.184 | 0.034 | 0.697 | 0.204 | 0.300 | 2.32 | outside | - | 0.697 | 0.691 |
-| 0.6 | 3.0 | off | 0.077 | 0.000 | 0.167 | 0.244 | 0.048 | 0.385 | 0.129 | 0.184 | 0.034 | 0.839 | 0.209 | 0.380 | 2.21 | outside | - | 0.839 | 0.833 |
-| 0.8 | 4.4 | on | 0.074 | 0.000 | 0.030 | 0.104 | 0.052 | 0.426 | 0.142 | 0.202 | 0.034 | 0.758 | 0.225 | 0.330 | 2.30 | outside | - | 0.758 | 0.750 |
-| 0.8 | 4.4 | off | 0.074 | 0.000 | 0.203 | 0.277 | 0.052 | 0.426 | 0.142 | 0.202 | 0.034 | 0.931 | 0.233 | 0.410 | 2.27 | outside | - | 0.931 | 0.924 |
-| 0.95 | 5.6 | on | 0.072 | 0.215 | 0.035 | 0.322 | 0.056 | 0.450 | 0.154 | 0.219 | 0.034 | 1.016 | 0.261 | 0.450 | 2.26 | outside | - | 0.948 | 1.008 |
-| 0.95 | 5.6 | off | 0.072 | 0.215 | 0.237 | 0.524 | 0.056 | 0.450 | 0.154 | 0.219 | 0.034 | 1.218 | 0.270 | 0.550 | 2.21 | outside | - | 1.150 | 1.210 |
-| 1.05 | 6.4 | on | 0.071 | 0.484 | 0.035 | 0.590 | 0.058 | 0.421 | 0.161 | 0.228 | 0.034 | 1.263 | 0.331 | 0.580 | 2.18 | outside | - | 1.110 | 1.255 |
-| 1.05 | 6.4 | off | 0.071 | 0.484 | 0.238 | 0.792 | 0.058 | 0.421 | 0.161 | 0.228 | 0.034 | 1.466 | 0.337 | 0.680 | 2.16 | outside | - | 1.313 | 1.458 |
-| 1.2 | 7.9 | on | 0.069 | 0.426 | 0.031 | 0.526 | 0.060 | 0.431 | 0.168 | 0.238 | 0.034 | 1.218 | 0.254 | 0.620 | 1.96 | outside | - | 1.083 | 1.209 |
-| 1.2 | 7.9 | off | 0.069 | 0.426 | 0.208 | 0.703 | 0.060 | 0.431 | 0.168 | 0.238 | 0.034 | 1.395 | 0.261 | 0.720 | 1.94 | outside | - | 1.261 | 1.387 |
-| 1.5 | 10.7 | on | 0.066 | 0.357 | 0.025 | 0.448 | 0.063 | 0.434 | 0.179 | 0.255 | 0.034 | 1.158 | 0.250 | 0.570 | 2.03 | outside | - | 1.046 | 1.149 |
-| 1.5 | 10.7 | off | 0.066 | 0.357 | 0.167 | 0.590 | 0.063 | 0.434 | 0.179 | 0.255 | 0.034 | 1.300 | 0.254 | 0.660 | 1.97 | outside | - | 1.187 | 1.291 |
-| 2 | 15.1 | on | 0.062 | 0.304 | 0.019 | 0.384 | 0.068 | 0.412 | 0.191 | 0.277 | 0.034 | 1.090 | 0.237 | 0.500 | 2.18 | outside | - | 0.994 | 1.080 |
-| 2 | 15.1 | off | 0.062 | 0.304 | 0.125 | 0.491 | 0.068 | 0.412 | 0.191 | 0.277 | 0.034 | 1.197 | 0.240 | 0.580 | 2.06 | outside | - | 1.100 | 1.186 |
-| 3 | 24.0 | on | 0.055 | 0.266 | 0.012 | 0.333 | 0.074 | 0.351 | 0.202 | 0.307 | 0.034 | 0.995 | 0.210 | 0.400 | 2.49 | outside | 0.937 | 0.911 | 0.984 |
-| 3 | 24.0 | off | 0.055 | 0.266 | 0.083 | 0.404 | 0.074 | 0.351 | 0.202 | 0.307 | 0.034 | 1.066 | 0.211 | 0.470 | 2.27 | outside | 1.008 | 0.982 | 1.055 |
-| 4 | 33.9 | on | 0.051 | 0.253 | 0.009 | 0.314 | 0.075 | 0.333 | 0.193 | 0.309 | 0.034 | 0.948 | 0.148 | 0.350 | 2.71 | outside | 0.908 | 0.868 | 0.937 |
-| 4 | 33.9 | off | 0.051 | 0.253 | 0.062 | 0.367 | 0.075 | 0.333 | 0.193 | 0.309 | 0.034 | 1.002 | 0.150 | 0.410 | 2.44 | outside | 0.961 | 0.922 | 0.990 |
-| 5 | 51.2 | on | 0.059 | 0.247 | 0.007 | 0.314 | 0.074 | 0.345 | 0.174 | 0.310 | 0.034 | 0.942 | 0.147 | 0.325 | 2.90 | outside | 0.909 | 0.864 | 0.930 |
-| 5 | 51.2 | off | 0.059 | 0.247 | 0.050 | 0.356 | 0.074 | 0.345 | 0.174 | 0.310 | 0.034 | 0.984 | 0.148 | 0.380 | 2.59 | outside | 0.952 | 0.906 | 0.973 |
-| 8 | 113.4* | on | 1.450 | 0.240 | 0.003 | 1.693 | 0.374 | 0.866 | 0.107 | 0.308 | 0.034 | 3.074 | 0.596 | 0.285 | 10.79 | outside (not flown in continuum) | 3.051 | 2.998 | 3.063 |
-| 8 | 113.4* | off | 1.450 | 0.240 | 0.022 | 1.712 | 0.374 | 0.866 | 0.107 | 0.308 | 0.034 | 3.093 | 0.596 | 0.330 | 9.37 | outside (not flown in continuum) | 3.070 | 3.018 | 3.082 |
-| 15 | 113.4* | on | 0.809 | 0.237 | 0.001 | 1.047 | 0.221 | 0.492 | 0.111 | 0.306 | 0.034 | 1.906 | 0.341 | 0.263 | 7.24 | outside (not flown in continuum) | 1.887 | 1.831 | 1.895 |
-| 15 | 113.4* | off | 0.809 | 0.237 | 0.006 | 1.053 | 0.221 | 0.492 | 0.111 | 0.306 | 0.034 | 1.911 | 0.341 | 0.303 | 6.30 | outside (not flown in continuum) | 1.892 | 1.836 | 1.900 |
-| 25 | 113.4* | on | 0.492 | 0.237 | 0.000 | 0.729 | 0.125 | 0.386 | 0.114 | 0.306 | 0.034 | 1.388 | 0.229 | 0.250 | 5.55 | outside (not flown in continuum) | 1.370 | 1.313 | 1.377 |
-| 25 | 113.4* | off | 0.492 | 0.237 | 0.002 | 0.731 | 0.125 | 0.386 | 0.114 | 0.306 | 0.034 | 1.390 | 0.229 | 0.290 | 4.79 | outside (not flown in continuum) | 1.372 | 1.315 | 1.379 |
+| 0.3 | 0.9 | on | 0.084 | 0.000 | 0.020 | 0.104 | 0.045 | 0.127 | 0.115 | 0.168 | 0.034 | 0.424 | 0.073 | 0.300 | 1.41 | outside | - | 0.424 | 0.418 |
+| 0.3 | 0.9 | off | 0.084 | 0.000 | 0.132 | 0.216 | 0.045 | 0.127 | 0.115 | 0.168 | 0.034 | 0.536 | 0.082 | 0.380 | 1.41 | outside | - | 0.536 | 0.530 |
+| 0.6 | 3.0 | on | 0.077 | 0.000 | 0.025 | 0.102 | 0.048 | 0.134 | 0.129 | 0.184 | 0.034 | 0.447 | 0.095 | 0.300 | 1.49 | outside | - | 0.447 | 0.440 |
+| 0.6 | 3.0 | off | 0.077 | 0.000 | 0.167 | 0.244 | 0.048 | 0.134 | 0.129 | 0.184 | 0.034 | 0.589 | 0.106 | 0.380 | 1.55 | outside | - | 0.589 | 0.582 |
+| 0.8 | 4.4 | on | 0.074 | 0.000 | 0.030 | 0.104 | 0.052 | 0.199 | 0.142 | 0.202 | 0.034 | 0.531 | 0.123 | 0.330 | 1.61 | outside | - | 0.531 | 0.524 |
+| 0.8 | 4.4 | off | 0.074 | 0.000 | 0.203 | 0.277 | 0.052 | 0.199 | 0.142 | 0.202 | 0.034 | 0.704 | 0.136 | 0.410 | 1.72 | outside | - | 0.704 | 0.697 |
+| 0.95 | 5.6 | on | 0.072 | 0.215 | 0.035 | 0.322 | 0.056 | 0.224 | 0.154 | 0.219 | 0.034 | 0.790 | 0.174 | 0.450 | 1.76 | outside | - | 0.722 | 0.782 |
+| 0.95 | 5.6 | off | 0.072 | 0.215 | 0.237 | 0.524 | 0.056 | 0.224 | 0.154 | 0.219 | 0.034 | 0.992 | 0.186 | 0.550 | 1.80 | outside | - | 0.924 | 0.984 |
+| 1.05 | 6.4 | on | 0.071 | 0.484 | 0.035 | 0.590 | 0.058 | 0.262 | 0.161 | 0.228 | 0.034 | 1.104 | 0.286 | 0.580 | 1.90 | outside | - | 0.951 | 1.096 |
+| 1.05 | 6.4 | off | 0.071 | 0.484 | 0.238 | 0.792 | 0.058 | 0.262 | 0.161 | 0.228 | 0.034 | 1.307 | 0.295 | 0.680 | 1.92 | outside | - | 1.154 | 1.299 |
+| 1.2 | 7.9 | on | 0.069 | 0.426 | 0.031 | 0.526 | 0.060 | 0.262 | 0.168 | 0.238 | 0.034 | 1.049 | 0.187 | 0.620 | 1.69 | outside | - | 0.914 | 1.040 |
+| 1.2 | 7.9 | off | 0.069 | 0.426 | 0.208 | 0.703 | 0.060 | 0.262 | 0.168 | 0.238 | 0.034 | 1.226 | 0.197 | 0.720 | 1.70 | outside | - | 1.092 | 1.217 |
+| 1.5 | 10.7 | on | 0.066 | 0.357 | 0.025 | 0.448 | 0.063 | 0.240 | 0.179 | 0.255 | 0.034 | 0.965 | 0.172 | 0.570 | 1.69 | outside | - | 0.852 | 0.956 |
+| 1.5 | 10.7 | off | 0.066 | 0.357 | 0.167 | 0.590 | 0.063 | 0.240 | 0.179 | 0.255 | 0.034 | 1.107 | 0.179 | 0.660 | 1.68 | outside | - | 0.994 | 1.098 |
+| 2 | 15.1 | on | 0.062 | 0.304 | 0.019 | 0.384 | 0.068 | 0.185 | 0.191 | 0.277 | 0.034 | 0.862 | 0.130 | 0.500 | 1.72 | outside | - | 0.766 | 0.852 |
+| 2 | 15.1 | off | 0.062 | 0.304 | 0.125 | 0.491 | 0.068 | 0.185 | 0.191 | 0.277 | 0.034 | 0.969 | 0.134 | 0.580 | 1.67 | outside | - | 0.873 | 0.959 |
+| 3 | 24.0 | on | 0.055 | 0.266 | 0.012 | 0.333 | 0.074 | 0.184 | 0.202 | 0.307 | 0.034 | 0.829 | 0.127 | 0.400 | 2.07 | outside | 0.771 | 0.745 | 0.817 |
+| 3 | 24.0 | off | 0.055 | 0.266 | 0.083 | 0.404 | 0.074 | 0.184 | 0.202 | 0.307 | 0.034 | 0.900 | 0.129 | 0.470 | 1.91 | outside | 0.842 | 0.816 | 0.888 |
+| 4 | 33.9 | on | 0.051 | 0.253 | 0.009 | 0.314 | 0.075 | 0.188 | 0.193 | 0.309 | 0.034 | 0.804 | 0.124 | 0.350 | 2.30 | outside | 0.763 | 0.724 | 0.792 |
+| 4 | 33.9 | off | 0.051 | 0.253 | 0.062 | 0.367 | 0.075 | 0.188 | 0.193 | 0.309 | 0.034 | 0.857 | 0.125 | 0.410 | 2.09 | outside | 0.816 | 0.777 | 0.845 |
+| 5 | 51.2 | on | 0.059 | 0.247 | 0.007 | 0.314 | 0.074 | 0.200 | 0.174 | 0.310 | 0.034 | 0.797 | 0.120 | 0.325 | 2.45 | outside | 0.764 | 0.719 | 0.785 |
+| 5 | 51.2 | off | 0.059 | 0.247 | 0.050 | 0.356 | 0.074 | 0.200 | 0.174 | 0.310 | 0.034 | 0.839 | 0.121 | 0.380 | 2.21 | outside | 0.807 | 0.761 | 0.828 |
+| 8 | 113.4* | on | 1.450 | 0.240 | 0.003 | 1.693 | 0.374 | 0.722 | 0.107 | 0.308 | 0.034 | 2.930 | 0.578 | 0.285 | 10.28 | outside (not flown in continuum) | 2.906 | 2.854 | 2.919 |
+| 8 | 113.4* | off | 1.450 | 0.240 | 0.022 | 1.712 | 0.374 | 0.722 | 0.107 | 0.308 | 0.034 | 2.949 | 0.578 | 0.330 | 8.94 | outside (not flown in continuum) | 2.926 | 2.873 | 2.938 |
+| 15 | 113.4* | on | 0.809 | 0.237 | 0.001 | 1.047 | 0.221 | 0.349 | 0.111 | 0.306 | 0.034 | 1.762 | 0.325 | 0.263 | 6.69 | outside (not flown in continuum) | 1.743 | 1.687 | 1.751 |
+| 15 | 113.4* | off | 0.809 | 0.237 | 0.006 | 1.053 | 0.221 | 0.349 | 0.111 | 0.306 | 0.034 | 1.768 | 0.325 | 0.303 | 5.83 | outside (not flown in continuum) | 1.748 | 1.693 | 1.756 |
+| 25 | 113.4* | on | 0.492 | 0.237 | 0.000 | 0.729 | 0.125 | 0.243 | 0.114 | 0.306 | 0.034 | 1.245 | 0.211 | 0.250 | 4.98 | outside (not flown in continuum) | 1.226 | 1.170 | 1.233 |
+| 25 | 113.4* | off | 0.492 | 0.237 | 0.002 | 0.731 | 0.125 | 0.243 | 0.114 | 0.306 | 0.034 | 1.247 | 0.211 | 0.290 | 4.30 | outside (not flown in continuum) | 1.228 | 1.172 | 1.235 |
 
 ### Ascent, ship alone
 
@@ -133,19 +133,19 @@ Kn 0.01 (Mach >= 8) friction is evaluated at the Kn 0.01 altitude and the row is
 
 | Mach | fin CA tail first (gross) | fin CA nose first (gross) | +- | fin CA table | total, 12.63 | total, 13.5 | +- | table total | verdict (12.63 / 13.5) | flights C_D at 261 t (sd, n) | verdict against flights (12.63 / 13.5) | beta 12.63 | beta 13.5 | beta tables | beta flights (sd) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 0.3 | 0.633 | 0.576 | 30 % | 0.821 | 1.339 | 1.365 | 0.143 | 1.448 | within / within | - | no flight data / no flight data | 3063 | 3005 | 2833 | - |
-| 0.6 | 0.692 | 0.645 | 50 % | 0.843 | 1.458 | 1.486 | 0.228 | 1.487 | within / within | - | no flight data / no flight data | 2814 | 2760 | 2760 | - |
-| 0.8 | 0.756 | 0.714 | 50 % | 0.900 | 1.588 | 1.619 | 0.293 | 1.573 | within / within | - | no flight data / no flight data | 2584 | 2534 | 2608 | - |
-| 0.95 | 0.794 | 0.754 | 50 % | 0.962 | 1.701 | 1.733 | 0.311 | 1.763 | within / within | - | no flight data / no flight data | 2412 | 2367 | 2327 | - |
-| 1.05 | 0.554 | 0.707 | 50 % | 0.987 | 1.608 | 1.631 | 0.269 | 1.979 | within / within | 2.06 (-, 1) | outside / outside | 2551 | 2515 | 2073 | 1995 (-) |
-| 1.2 | 0.557 | 0.723 | 50 % | 1.000 | 1.662 | 1.685 | 0.280 | 2.069 | outside / outside | 2.28 (0.14, 4) | outside / outside | 2469 | 2435 | 1983 | 1804 (108) |
-| 1.5 | 0.532 | 0.727 | 50 % | 0.983 | 2.288 | 2.310 | 0.390 | 2.006 | within / within | 1.71 (0.17, 3) | outside / outside | 1793 | 1776 | 2045 | 2410 (232) |
-| 2 | 0.456 | 0.691 | 50 % | 0.900 | 2.340 | 2.359 | 0.407 | 1.993 | within / within | 1.91 (0.18, 6) | within / outside | 1753 | 1739 | 2059 | 2162 (201) |
-| 3 | 0.313 | 0.597 | 50 % | 0.800 | 2.326 | 2.339 | 0.416 | 2.259 | within / within | 2.28 (0.18, 23) | within / within | 1764 | 1754 | 1816 | 1809 (141) |
-| 5 | 0.251 | 0.555 | 30 % | 0.750 | 2.305 | 2.316 | 0.316 | 2.357 | within / within | 2.34 (-, 1) | within / within | 1780 | 1772 | 1740 | 1751 (-) |
-| 8 | 0.245 | 0.552 | 30 % | 0.750 | 2.286 | 2.296 | 0.319 | 2.357 | within / within | - | no flight data / no flight data | 1795 | 1787 | 1740 | - |
-| 15 | 0.239 | 0.547 | 30 % | 0.750 | 2.269 | 2.278 | 0.320 | 2.357 | within / within | - | no flight data / no flight data | 1808 | 1801 | 1740 | - |
-| 25 | 0.237 | 0.546 | 30 % | 0.750 | 2.263 | 2.273 | 0.321 | 2.357 | within / within | - | no flight data / no flight data | 1813 | 1805 | 1740 | - |
+| 0.3 | 0.233 | 0.213 | 30 % | 0.821 | 1.101 | 1.111 | 0.097 | 1.448 | outside / outside | - | no flight data / no flight data | 3726 | 3694 | 2833 | - |
+| 0.6 | 0.244 | 0.224 | 50 % | 0.843 | 1.191 | 1.201 | 0.122 | 1.487 | within / within | - | no flight data / no flight data | 3446 | 3417 | 2760 | - |
+| 0.8 | 0.351 | 0.334 | 50 % | 0.900 | 1.347 | 1.361 | 0.215 | 1.573 | within / within | - | no flight data / no flight data | 3046 | 3014 | 2608 | - |
+| 0.95 | 0.392 | 0.375 | 50 % | 0.962 | 1.461 | 1.477 | 0.234 | 1.763 | within / within | - | no flight data / no flight data | 2808 | 2777 | 2327 | - |
+| 1.05 | 0.354 | 0.440 | 50 % | 0.988 | 1.489 | 1.504 | 0.237 | 1.979 | outside / outside | 2.06 (-, 1) | outside / outside | 2755 | 2728 | 2073 | 1995 (-) |
+| 1.2 | 0.346 | 0.439 | 50 % | 1.000 | 1.536 | 1.551 | 0.248 | 2.069 | outside / outside | 2.28 (0.14, 4) | outside / outside | 2670 | 2646 | 1983 | 1804 (108) |
+| 1.5 | 0.293 | 0.402 | 50 % | 0.983 | 2.145 | 2.157 | 0.367 | 2.006 | within / within | 1.71 (0.17, 3) | outside / outside | 1912 | 1902 | 2045 | 2410 (232) |
+| 2 | 0.177 | 0.308 | 30 % | 0.900 | 2.174 | 2.182 | 0.385 | 1.993 | within / within | 1.91 (0.18, 6) | within / within | 1887 | 1881 | 2059 | 2162 (201) |
+| 3 | 0.179 | 0.318 | 30 % | 0.800 | 2.246 | 2.253 | 0.407 | 2.259 | within / within | 2.28 (0.18, 23) | within / within | 1827 | 1821 | 1816 | 1809 (141) |
+| 5 | 0.169 | 0.312 | 30 % | 0.750 | 2.256 | 2.263 | 0.314 | 2.357 | within / within | 2.34 (-, 1) | within / within | 1819 | 1813 | 1740 | 1751 (-) |
+| 8 | 0.165 | 0.309 | 30 % | 0.750 | 2.238 | 2.245 | 0.317 | 2.357 | within / within | - | no flight data / no flight data | 1833 | 1828 | 1740 | - |
+| 15 | 0.161 | 0.306 | 30 % | 0.750 | 2.222 | 2.229 | 0.319 | 2.357 | within / within | - | no flight data / no flight data | 1846 | 1841 | 1740 | - |
+| 25 | 0.159 | 0.305 | 30 % | 0.750 | 2.217 | 2.224 | 0.319 | 2.357 | within / within | - | no flight data / no flight data | 1850 | 1845 | 1740 | - |
 
 ### Mesh factors k (per unit cp_max, on 63.6 m^2)
 
@@ -156,7 +156,7 @@ Kn 0.01 (Mach >= 8) friction is evaluated at the Kn 0.01 altitude and the row is
 - Stack nose first, flaps 0, exposed: booster/skirt 0.1393, ship/hull 0.1152, fin 0.0646, booster/top_truss 0.0431, flap 0.0346, ship/hinge_covers 0.0142, ship/catch_pins 0.0121, ship/ports 0.0065, booster/fin_fairings 0.0057, booster/hot_stage 0.0049, booster/strakes 0.0047, ship/chine 0.0011, ship/raceway 0.0009, booster/raceway 0.0002
 - Ship nose first, flaps 90, exposed: ship/hull 0.1186, flap 0.0420, ship/hinge_covers 0.0135, ship/catch_pins 0.0119, ship/ports 0.0064, ship/chine 0.0016, ship/raceway 0.0010
 - Solid load per fin, nose first, m^2: 0 deg 1.295, 90 deg 1.376, 180 deg 1.311
-- Fin, per gross area: tail first 0.128, nose first 0.296; aft wall edge mean cos^2 0.322; mean cell depth, flat forward face 0.500 m, scooped aft face 0.321 m
+- Fin, per gross area: tail first 0.086, nose first 0.165; aft wall edge mean cos^2 0.322; mean cell depth, flat forward face 0.500 m, scooped aft face 0.321 m
 - Hot-stage open band 2.56 m
 
 ### Parts term at Mach 1.2, per part: k with the layer credit, of k without
@@ -170,12 +170,8 @@ Kn 0.01 (Mach >= 8) friction is evaluated at the Kn 0.01 altitude and the row is
 - ship/chine: 0.0009 of 0.0016
 - ship/raceway: 0.0007 of 0.0009
 - booster/raceway: 0.0001 of 0.0002
-- Open fraction 0.694
-- Flight 14, stack to T+160 s: peak q 38.9 kPa at T+63 s (Mach 1.36, 9.2 km). Drag / thrust there: derived 3.2 %, table 1.6 %; their difference is 0.34 m/s^2 of acceleration. Velocity lost to drag: derived 37 m/s, table 17 m/s.
-
-Altitude telemetry ends near T+147 s, so the velocity loss skips the last 13 s to T+160 s; q is under 1 kPa there and falling, at most 0.3 m/s. Fin CA in the body + fins table is at the descent's altitudes; the stack's `fins` column uses the ascent's.
-
-Plots: `screenshots/vehicle-physics/*.png`.
+- Open fraction 0.825
+- Flight 14, stack to T+160 s: peak q 38.9 kPa at T+63 s (Mach 1.36, 9.2 km). Drag / thrust there: derived 2.7 %, table 1.6 %; their difference is 0.23 m/s^2 of acceleration. Velocity lost to drag: derived 30 m/s, table 17 m/s.
 
 ## The stack's table
 `config/aero/starship_stack_ascent.csv` is this tool's derived total since 2026-11-01 (user's OK "Anbauteile ergänzen"; orchestrator's
@@ -186,17 +182,17 @@ up, outside the continuum).
 
 | Mach | old, on | new, on | +- | new / old | old, off | new, off | +- | new / old |
 |---|---|---|---|---|---|---|---|---|
-| 0.3 | 0.300 | 0.640 | 0.120 | 2.13 | 0.380 | 0.752 | 0.126 | 1.98 |
-| 0.6 | 0.300 | 0.697 | 0.204 | 2.32 | 0.380 | 0.839 | 0.209 | 2.21 |
-| 0.8 | 0.330 | 0.758 | 0.225 | 2.30 | 0.410 | 0.931 | 0.233 | 2.27 |
-| 0.95 | 0.450 | 1.016 | 0.261 | 2.26 | 0.550 | 1.218 | 0.270 | 2.21 |
-| 1.05 | 0.580 | 1.263 | 0.331 | 2.18 | 0.680 | 1.466 | 0.337 | 2.16 |
-| 1.2 | 0.620 | 1.218 | 0.254 | 1.96 | 0.720 | 1.395 | 0.261 | 1.94 |
-| 1.5 | 0.570 | 1.158 | 0.250 | 2.03 | 0.660 | 1.300 | 0.254 | 1.97 |
-| 2 | 0.500 | 1.090 | 0.237 | 2.18 | 0.580 | 1.197 | 0.240 | 2.06 |
-| 3 | 0.400 | 0.995 | 0.210 | 2.49 | 0.470 | 1.066 | 0.211 | 2.27 |
-| 4 | 0.350 | 0.948 | 0.148 | 2.71 | 0.410 | 1.002 | 0.150 | 2.44 |
-| 5 | 0.325 | 0.942 | 0.147 | 2.90 | 0.380 | 0.984 | 0.148 | 2.59 |
+| 0.3 | 0.300 | 0.424 | 0.073 | 1.41 | 0.380 | 0.536 | 0.082 | 1.41 |
+| 0.6 | 0.300 | 0.447 | 0.095 | 1.49 | 0.380 | 0.589 | 0.106 | 1.55 |
+| 0.8 | 0.330 | 0.531 | 0.123 | 1.61 | 0.410 | 0.704 | 0.136 | 1.72 |
+| 0.95 | 0.450 | 0.790 | 0.174 | 1.76 | 0.550 | 0.992 | 0.186 | 1.80 |
+| 1.05 | 0.580 | 1.104 | 0.286 | 1.90 | 0.680 | 1.307 | 0.295 | 1.92 |
+| 1.2 | 0.620 | 1.049 | 0.187 | 1.69 | 0.720 | 1.226 | 0.197 | 1.70 |
+| 1.5 | 0.570 | 0.965 | 0.172 | 1.69 | 0.660 | 1.107 | 0.179 | 1.68 |
+| 2 | 0.500 | 0.862 | 0.130 | 1.72 | 0.580 | 0.969 | 0.134 | 1.67 |
+| 3 | 0.400 | 0.829 | 0.127 | 2.07 | 0.470 | 0.900 | 0.129 | 1.91 |
+| 4 | 0.350 | 0.804 | 0.124 | 2.30 | 0.410 | 0.857 | 0.125 | 2.09 |
+| 5 | 0.325 | 0.797 | 0.120 | 2.45 | 0.380 | 0.839 | 0.121 | 2.21 |
 
 Who flies what: the booster stage's `ascent_drag_table` is the stack's, and the lowest stage with a table sets the vehicle's
 (`Vehicle::rebuild_aero`), so `starship_block3`, `starship_tanker`, `starship_depot`, `starship_hls_launch` fly the new table in the stack.
@@ -209,23 +205,23 @@ flies `super_heavy_descent.csv`. Plan cache: `config_contents_hash` covers the c
 
 | Case | Mach | Verdict | Reason, as far as known |
 |---|---|---|---|
-| Ascent stack, both columns, against the old table | 0.3-5 | **outside**, 1.9-2.9: the reason for the new table | Fins 0.33-0.45 and other drawn parts 0.12-0.20 are the excess. The old table is a generic trend from Saturn V / Shuttle-class shapes (its header); those carry fins and protuberances, so what it holds of them is unknown and it was replaced, not added to |
+| Ascent stack, both columns, against the old table | 0.3-5 | **outside**, 1.4-2.5: the reason for the new table | Fins 0.13-0.26 (wall 0.012 m) and other drawn parts 0.12-0.20 are the excess. The old table is a generic trend from Saturn V / Shuttle-class shapes (its header); those carry fins and protuberances, so what it holds of them is unknown and it was replaced, not added to |
 | Ascent stack | 8-25 | outside, not a flown state | The stack stages at about Mach 6. Friction at Kn 0.01 is laminar and at the end of its range |
 | Ascent ship alone | 5 | 1.29 on, **just outside** (0.419 against 0.325 +- 0.089 combined); 1.14 off, within | Went from within to just outside when the wake range raised the flap load; left as it is, Task 5 re-determines the ship |
 | Ascent ship alone | 8-25 | outside, ratio 2.1-4.1, not flown in continuum | Friction near Kn 0.01; at the flown altitude the core's free-molecular blend dominates and the table's weight is small |
 | Descent body | 0.3-1.2 | within (0.90-1.10) | Hoerner blunt body; subsonic is unmeasured on both sides |
 | Descent body | 1.5, 2 | **outside** (1.39, 1.42) | Newtonian loads the flat face with full stagnation pressure, and the protrusions (k 0.21). Hoerner's face gives 1.42 / 1.54 against 1.42 / 1.46, so the method jump at Mach 1.5 is most of it |
 | Descent body | 3-25 | within (1.11-1.20) | Hull face alone: 1.77 at Mach 3-5 against 1.78-1.91 |
-| Descent total | all but 1.2 | within the table | Body high and fins low compensate from Mach 1.5 up: derived fin CA 0.24-0.53 against the table's 0.75-0.98. The agreement of the sum does not confirm the split |
-| Descent total | 1.2 | outside the table (1.66 against 2.07) | Fin form changes at Mach 1 and the blunt-face trend is the least certain band |
-| Descent total against flights | 1.05, 1.2 | **outside**: 1.61, 1.66 against 2.06 (one bin), 2.28 | Derived too low in the band flagged least certain |
-| Descent total against flights | 1.5 | **outside**: 2.29 against 1.71 | As descent body at 1.5 |
-| Descent total against flights | 2 | within at 12.63 m^2, outside at 13.5 m^2 | A thin margin, not a finding about the area |
-| Descent total against flights | 3, 5 | within: 2.33, 2.31 against 2.28, 2.34 (one bin) | Beta 1764 / 1780 against 1809 / 1751 kg/m^2; Mach 3 is the densest band (23 bins) |
+| Descent total | 0.6-0.95, 1.5-25 | within the table | Body high and fins low compensate from Mach 1.5 up: derived fin CA 0.16-0.29 against the table's 0.75-0.98. The agreement of the sum does not confirm the split |
+| Descent total | 0.3, 1.05, 1.2 | outside the table (1.10 against 1.45; 1.49 against 1.98; 1.54 against 2.07) | Fin form changes at Mach 1 and the blunt-face trend is the least certain band; Mach 0.3 is unmeasured on both sides |
+| Descent total against flights | 1.05, 1.2 | **outside**: 1.49, 1.54 against 2.06 (one bin), 2.28 | Derived too low in the band flagged least certain |
+| Descent total against flights | 1.5 | **outside**: 2.15 against 1.71 | As descent body at 1.5 |
+| Descent total against flights | 2 | within: 2.17 against 1.91 | |
+| Descent total against flights | 3, 5 | within: 2.25, 2.26 against 2.28, 2.34 (one bin) | Beta 1827 / 1819 against 1809 / 1751 kg/m^2; Mach 3 is the densest band (23 bins) |
 
 What the flights say about the ascent: **they cannot resolve its Cd.** At peak q (38.9 kPa, T+63 s) the derived and table drag differ by
-0.34 m/s^2, 1.6 % of thrust, less than the thrust change of one engine out (flight 14 flew 32 of 33). Velocity lost to drag up to T+160 s
-is 37 m/s with the new table and 17 m/s with the old, with the mass history assumed. `late_ascent_fit.py` works where drag is under 0.5 % of thrust and
+0.23 m/s^2, 1.1 % of thrust, less than the thrust change of one engine out (flight 14 flew 32 of 33). Velocity lost to drag up to T+160 s
+is 30 m/s with the new table and 17 m/s with the old, with the mass history assumed. `late_ascent_fit.py` works where drag is under 0.5 % of thrust and
 does not separate it.
 
 ## Sensitivities
@@ -235,9 +231,8 @@ does not separate it.
 - Nose 17 m (physics) instead of 13.4 m (drawn): -0.07 to -0.15 at Mach 0.95-5, nothing below.
 - Wake range 5 / 10 / 20 heights: parts k 0.186 / 0.185 / 0.178, skirt 0.139 / 0.139 / 0.133, fins 0.0626 / 0.0626 / 0.0618. Insensitive.
 - Layer credit: parts term 0.115-0.202 against 0.168-0.310 without it (power on, Mach 0.3-5).
-- Grid fin: wall 0.02 m instead of the upper bound 0.04 m: about half at Mach 0.3, 0.40 for 0.57 at Mach 5. Scooped forward face (not seen in a
-  photo, drawn flat): about 0.34 at Mach 5. Both move the same way, so the stack's 0.33-0.45 is close to an upper estimate, not a centre;
-  the stated +-30-50 % does not express this one-sidedness.
+- Grid fin wall (0.012 m, range 0.006-0.044): the drawn upper bound 0.04 gave the stack 0.33-0.45 for today's 0.13-0.26. The stack's total at Mach 0.3 / 2 / 5: 0.640 / 1.090 / 0.942
+  at 0.04, 0.424 / 0.862 / 0.797 at 0.012. Scooped forward face (not seen in a photo, drawn flat) would lower it further.
 - Drawn bells in the pure Newtonian descent: body 1.12-1.17 at Mach >= 1.5, a lower bound (see Method).
 - Hull face only against all drawn parts, descent Mach >= 1.5: 1.65-1.78 against 1.97-2.16.
 
@@ -251,12 +246,13 @@ does not separate it.
 - No interference between fins and hull, no real-gas cp_max above Mach ~8. The fin's started form jumps at Mach 1 (Idel'chik to Newtonian):
   tail first it falls 25 % across Mach 1 (0.79 to 0.55), nose first 6 % (0.75 to 0.71). So `grid_fin.csv` must not be reviewed against this step in Task 4.
 - Mach >= 1.5 descent body loads the skirt and strake ends, which stand in the base ring's bubble (k 0.209); most of the step 1.33 to 1.97.
-- Grid fin wall thickness 0.04 m is an upper bound (not resolved in any frame); it sets the open fraction 0.694 +-0.04.
+- Grid fin wall thickness 0.012 m (`geometry.DERIVATION_WALL_M`; 0.006-0.044, factory photo, may be a flange) sets the open fraction 0.825; the drawn `wall_m` stays 0.04 m. Mesh walls have no thickness.
 - Stack rows at Mach >= 8 and descent rows at Mach >= 5 are not measured states: descent friction there uses a nominal 30 km.
 
-## Grid fin authority: depth and cells (Task 4b, comparison only)
-`tools/aero_derive/grid_fin_lattice.py` writes `screenshots/vehicle-physics/grid_fin_lattice.{csv,md}` (all rows). Nothing feeds config or core;
-`grid_fin.csv` is unchanged, awaiting the user. Photo measurement: `tools/structures/measure/fin_rim_depth.py`.
+## Grid fin authority: depth and cells (Task 4b, flown since Task 4c)
+`tools/aero_derive/grid_fin_lattice.py` writes `screenshots/vehicle-physics/grid_fin_lattice.{csv,md}` (all rows); `--write-table` writes `config/aero/super_heavy_grid_fin.csv`,
+which the Super Heavy flies since the user's OK of 2026-11-01. "table" below is the generic `grid_fin.csv`, which Falcon 9 keeps unchanged. `ca_axial` of the new table is the generic's on the
+finer grid, not derived: the descent total the flights fixed stays. Photo measurement: `tools/structures/measure/fin_rim_depth.py`.
 
 **Secured geometry** (photo = `padb_chopsticks_around_booster_top_2026-03.jpg`, both a catch and the plain fin at one scale, 41 px/m, 17 deg elevation):
 
@@ -310,7 +306,7 @@ At small deflection peak q is 0.88 of the table (1.39 / 1.585, Mach 2.63); at 30
 
 **Axial force.** Depth hardly matters: tip 0.40 to 0.50 moves the CD term 3 x 12.63 / 63.617 x CA by at most -0.004 to +0.002 nose first, -0.008 to -0.001 tail first (friction up, the entry loss down, nearly cancelling), the excluded 0.70 at most +0.005 / -0.009. The wall dominates: at the nominal lattice against today's drawn (tip 0.5, wall 0.04) the **ascent fin term** falls by 0.14-0.23 (Mach 0.3: 0.337 to 0.124; Mach 2: 0.414 to 0.185; Mach 5: 0.329 to 0.184) and the derived **descent** term by 0.04-0.24 (Mach 0.8: 0.459 to 0.216; Mach 3: 0.186 to 0.112). The stack table's fin term (Task 2b) was built on wall 0.04, so it is high by that much if the wall reading holds. Descent table total does not move (fixed against flights); the derived fin CA tail first falls further below `ca_axial` (Mach 5: 0.18 against 0.75), which widens the open split. The couple in the core follows `ca_axial`, unchanged.
 
-**Open, for the user:** whether to replace `grid_fin.csv`'s slope and limit; what wall to adopt (a sharper photo of a wall edge would settle it). Not done: CFD, flight effect, fin-specific literature values.
+**Open:** the wall (a sharper photo of a wall edge would settle it). Below Mach 0.9 the derivation stays 0.5 of the generic table, outside its error, and the flights do not measure it. Flight effect on the catch: Task 6. Not done: CFD, flight effect, fin-specific literature values.
 
 ## Grid fins in the core (Task 4)
 Config: `area_m2` 12.63 (gross, drawn), `radius_m` 7.19 (outline centroid: hull 4.5 + root gap 0.15 + 2.544), `station_m` 64.0: the outline's

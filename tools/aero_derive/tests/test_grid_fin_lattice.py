@@ -1,4 +1,5 @@
 """Task 4b: lattice-wing derivation of the grid fin's normal force slope and limit."""
+import csv
 import math
 import sys
 from pathlib import Path
@@ -104,3 +105,31 @@ def test_config_table_is_read_unchanged():
     t = gl.config_table()
     assert t["mach"][0] == 0.0 and t["cn_alpha_per_rad"][0] == pytest.approx(2.9)
     assert gl.config_value(t, "cn_alpha_per_rad", 2.5) == pytest.approx(1.65)
+
+
+def _super_heavy_table():
+    with open(gl.ROOT / "config" / "aero" / "super_heavy_grid_fin.csv", encoding="utf-8") as handle:
+        return list(csv.DictReader(line for line in handle if not line.startswith("#")))
+
+
+def test_super_heavy_table_is_the_derivation():
+    rows = _super_heavy_table()
+    assert len(rows) == len(gl.MACH_GRID)
+    for row, derived in zip(rows, gl.table()):
+        assert float(row["mach"]) == derived["mach"]
+        assert float(row["cn_alpha_per_rad"]) == pytest.approx(derived["cn_alpha"], abs=0.006)
+        assert float(row["limit_deg"]) == pytest.approx(derived["limit_deg"], abs=0.06)
+
+
+def test_super_heavy_table_keeps_the_descent_axial_curve():
+    generic = gl.config_table()
+    for row in _super_heavy_table():
+        assert float(row["ca_axial"]) == pytest.approx(gl.config_value(generic, "ca_axial", float(row["mach"])), abs=1e-4)
+
+
+def test_falcon_9_keeps_the_generic_table():
+    text = (gl.ROOT / "config" / "vehicles" / "falcon9_block5.toml").read_text(encoding="utf-8")
+    assert 'table = "aero/grid_fin.csv"' in text
+    assert 'table = "aero/super_heavy_grid_fin.csv"' in (gl.ROOT / "config" / "vehicles" / "starship_block3.toml").read_text(encoding="utf-8")
+    generic = gl.config_table()
+    assert generic["cn_alpha_per_rad"][0] == 2.9 and generic["limit_deg"][-1] == 30.0

@@ -160,7 +160,7 @@ class TestBuiltModel:
         assert vehicle.flap_mesh_area_m2("fwd") == pytest.approx(vehicle.flap_area_m2("fwd"), rel=0.01)
 
     def test_open_fraction_near_the_cell_walls(self, vehicle):
-        assert 0.6 < vehicle.grid_fin_open_fraction() < (1.0 - 0.04 / 0.35) ** 2 + 0.01
+        assert 0.6 < vehicle.grid_fin_open_fraction() < (1.0 - geometry.DERIVATION_WALL_M / 0.35) ** 2 + 0.01
 
     def test_wetted_hull_is_a_lathe(self, vehicle):
         assert vehicle.hull_wetted_area_m2("booster") == pytest.approx(math.pi * 9.0 * 69.42, rel=0.01)

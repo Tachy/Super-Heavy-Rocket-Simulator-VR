@@ -166,9 +166,8 @@ def grid_fin_ca(mach: float, open_fraction: float, altitude_m: float, k_gross: f
     share as started.
     Friction: 2 wall families x 2 faces x depth / pitch of wetted area per gross area. Error [E]: +-30 % subsonic and
     started, +-50 % choked (no fin-specific data; Washington & Miller, AIAA 93-0035 is the only comparison named in
-    aero/grid_fin.csv, not re-read here). One-sided [E]: `wall_m` is an upper bound and the forward face is drawn flat, both
-    high: wall 0.02 m gives about half at Mach 0.3 and 0.40 for 0.57 at Mach 5; a scooped forward face about 0.34 at Mach 5.
-    The value is nearer an upper estimate than a centre."""
+    aero/grid_fin.csv, not re-read here). `wall_m` is itself weakly secured (geometry.DERIVATION_WALL_M); the forward face is
+    drawn flat, which is high: a scooped forward face lowers the value further at Mach 5."""
     capture = grid_fin_capture(mach, open_fraction)
     solidity = 1.0 - open_fraction
     state = air(altitude_m)

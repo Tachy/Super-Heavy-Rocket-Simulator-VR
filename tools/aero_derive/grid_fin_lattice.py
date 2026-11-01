@@ -42,7 +42,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import buildup  # noqa: E402
-from geometry import ROOT, _horn  # noqa: E402
+from geometry import DERIVATION_WALL_M, ROOT, _horn  # noqa: E402
 from newtonian import GAMMA_AIR  # noqa: E402
 
 # Secured geometry, docs/subsystems/aero-derivation.md "Grid fin authority".
@@ -93,7 +93,7 @@ class Lattice:
         return (1.0 - self.wall_m / self.pitch_m) ** 2
 
 
-NOMINAL = Lattice(tip_m=0.45, scoop_m=0.22, pitch_m=0.35, wall_m=0.012)
+NOMINAL = Lattice(tip_m=0.45, scoop_m=0.22, pitch_m=0.35, wall_m=DERIVATION_WALL_M)
 # Secured ranges; the catch and plain fin are one fin here.
 TIP_RANGE, SCOOP_RANGE, PITCH_RANGE, WALL_RANGE = (0.40, 0.50), (0.09, 0.30), (0.33, 0.37), (0.006, 0.044)
 
@@ -429,7 +429,29 @@ def report() -> tuple[list[dict], str]:
     return rows, "\n".join(md) + "\n"
 
 
+SUPER_HEAVY_TABLE_HEADER = """# Grid fin normal force of the Super Heavy, reference area = gross area of one fin (3 x 12.63 m^2).
+# cn_alpha_per_rad: secant slope at 10 deg; the core multiplies by sin(incidence). limit_deg: incidence beyond which the force no longer grows.
+# [E] Derived by tools/aero_derive/grid_fin_lattice.py --write-table (lattice theory, tip 0.45, scoop 0.22, pitch 0.35, wall 0.012 m; method and
+# errors: docs/subsystems/aero-derivation.md "Grid fin authority"). Not fitted. cn_alpha +-20-40 %, limit +-5-21 deg. No grid fin measurement behind it.
+# The step Mach 1.4-1.5 is the cells starting (model's Mach 1.42; real unstart has hysteresis).
+# ca_axial: axial force on the same area, [E] the values of aero/grid_fin.csv (interpolated on this grid), NOT derived: super_heavy_descent.csv was
+# reduced by exactly this share, so the total the flights fixed stays. The derived split: aero-derivation.md.
+"""
+
+
+def write_super_heavy_table(path: Path | None = None) -> None:
+    generic = config_table()
+    lines = [SUPER_HEAVY_TABLE_HEADER, "mach,cn_alpha_per_rad,limit_deg,ca_axial\n"]
+    for row in table():
+        ca = config_value(generic, "ca_axial", row["mach"])
+        lines.append(f"{row['mach']:g},{row['cn_alpha']:.2f},{row['limit_deg']:.1f},{ca:.4f}\n")
+    (path or ROOT / "config" / "aero" / "super_heavy_grid_fin.csv").write_text("".join(lines), encoding="utf-8")
+
+
 def main() -> None:
+    if "--write-table" in sys.argv:
+        write_super_heavy_table()
+        return
     rows, text = report()
     out = ROOT / "screenshots" / "vehicle-physics"
     out.mkdir(parents=True, exist_ok=True)

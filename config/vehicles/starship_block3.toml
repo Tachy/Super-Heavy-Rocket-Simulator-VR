@@ -111,7 +111,7 @@ station_m = 64.0                       # [E] hinge station from the bottom of th
 radius_m = 7.19                         # [E] centre of pressure = drawn outline centroid: 4.5 m hull + 0.15 m root gap + 2.544 m (detail [grid_fin] outline); was 6.0
 max_deflection_deg = 30.0               # [E]
 rate_deg_s = 30.0                       # [E] electric actuators
-table = "aero/grid_fin.csv"
+table = "aero/super_heavy_grid_fin.csv"  # [E] lattice derivation (depth, pitch, wall); ca_axial as identified
 
 [stage.catch_pins]
 azimuths_deg = [0.0, 180.0]             # [E] on the fin hinge line (user 2026-10-31): the pins lie across the arms, was 45 / 225

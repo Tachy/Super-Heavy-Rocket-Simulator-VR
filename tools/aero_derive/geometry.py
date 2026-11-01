@@ -25,6 +25,9 @@ import numpy as np
 import newtonian
 
 ROOT = Path(__file__).resolve().parents[2]
+# [E] Lattice wall of the fin for the physics: factory photo, bright edges 4 px (2-6) at about 400 px/m, range 0.006-0.044 m, weakly
+# secured, may be a flange (aero-derivation.md "Grid fin authority"; user's OK 2026-11-01). The drawn wall_m stays 0.04.
+DERIVATION_WALL_M = 0.012
 MODEL_ROOT = ROOT / "data" / "models"
 CONFIG_ROOT = ROOT / "config" / "vehicles"
 OUT_DIR = ROOT / "screenshots" / "vehicle-physics"
@@ -234,13 +237,12 @@ class Vehicle:
         """Share of the fin's area between its solid parts that the lattice walls block: 1 - (1 - w/p)^2.
 
         The lattice walls are zero-thickness double-sided sheets in the mesh (`_saddle_wall` in gen_grid_fin.py), so no
-        ray test can see `wall_m`; only the cross rib and the walls' cusp slopes are hit. The thickness comes from the
-        detail file (an upper bound, not resolved in any frame)."""
-        fin = self.detail["grid_fin"]
-        return 1.0 - (1.0 - fin["wall_m"] / fin["cell_pitch_m"]) ** 2
+        ray test can see a wall; only the cross rib and the walls' cusp slopes are hit. The thickness is
+        `DERIVATION_WALL_M`, not the detail file's drawn upper bound."""
+        return 1.0 - (1.0 - DERIVATION_WALL_M / self.detail["grid_fin"]["cell_pitch_m"]) ** 2
 
     def grid_fin_open_fraction(self, cell_m: float = 0.004) -> float:
-        """Open share of the gross outline along the cells at d = 0: solid parts from the mesh, walls from wall_m / pitch."""
+        """Open share of the gross outline along the cells at d = 0: solid parts from the mesh, walls from DERIVATION_WALL_M / pitch."""
         gross = self.grid_fin_gross_area_m2()
         solid = sum(self.grid_fin_blocked_area_m2(cell_m).values())
         return (gross - solid) * (1.0 - self.grid_fin_wall_share()) / gross
@@ -299,7 +301,7 @@ def secured_areas(vehicle: Vehicle) -> list:
     fin = vehicle.detail["grid_fin"]
     gross = vehicle.grid_fin_gross_area_m2()
     open_fraction = vehicle.grid_fin_open_fraction()
-    analytic_open = (1.0 - fin["wall_m"] / fin["cell_pitch_m"]) ** 2
+    analytic_open = (1.0 - DERIVATION_WALL_M / fin["cell_pitch_m"]) ** 2
     rows = []
 
     def add(name, value, err_abs, config_value, source):
@@ -316,7 +318,7 @@ def secured_areas(vehicle: Vehicle) -> list:
         "detail outline, STL 1:100 [E]; 102.9 cells x 0.35^2 = 12.60")
     blocked = vehicle.grid_fin_blocked_area_m2()
     add("grid fin open fraction [-]", open_fraction, 0.04, None,
-        f"solid parts by first hit along the cells at d = 0, then the walls (1 - w/p)^2 = {analytic_open:.3f} (mesh walls are zero-thick sheets; wall 0.04 m is an upper bound [E]); "
+        f"solid parts by first hit along the cells at d = 0, then the walls (1 - w/p)^2 = {analytic_open:.3f} (mesh walls are zero-thick sheets; wall {DERIVATION_WALL_M} m [E], factory photo); "
         + ", ".join(f"{k} {v:.2f}" for k, v in sorted(blocked.items())) + " m^2")
     add("grid fin open area [m^2]", open_fraction * gross, 0.04 * gross, None, "open fraction x gross")
     for stage_id in ("booster", "ship"):

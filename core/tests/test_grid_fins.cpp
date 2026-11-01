@@ -23,7 +23,7 @@ constexpr double deg = constants::deg_to_rad;
 const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
 const time::Epoch t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
 
-aero::GridFinTable table() { return aero::GridFinTable(config::load_csv_table(config_dir / "aero/grid_fin.csv")); }
+aero::GridFinTable table() { return aero::GridFinTable(config::load_csv_table(config_dir / "aero/super_heavy_grid_fin.csv")); }
 
 class ZeroGravity final : public environment::GravityModel {
 public:
@@ -188,6 +188,21 @@ TEST_CASE("Starship's fins carry the drawn area and the descent total stays as i
         CHECK(std::abs(v.aero().drag_curve(true).cd(mach, false) - total) < 1e-3);
         CHECK(std::abs(v.aero().drag_curve(true).cd(mach, true) - total) < 1e-3);
     }
+}
+
+TEST_CASE("Super Heavy flies the derived fin table, Falcon 9 the generic one, same axial curve", "[aero][grid_fins]") {
+    const auto booster = config::load_vehicle(config_dir, "starship_block3");
+    const auto falcon = config::load_vehicle(config_dir, "falcon9_block5");
+    CHECK(booster.stages.front().grid_fins.table == "aero/super_heavy_grid_fin.csv");
+    CHECK(falcon.stages.front().grid_fins.table == "aero/grid_fin.csv");
+    const aero::GridFinTable generic(config::load_csv_table(config_dir / "aero/grid_fin.csv"));
+    for (double mach = 0.0; mach <= 25.0; mach += 0.05) {
+        CAPTURE(mach);
+        CHECK(std::abs(table().axial_coefficient(mach) - generic.axial_coefficient(mach)) < 1e-4);
+    }
+    CHECK(generic.normal_force_slope_per_rad(0.0) == 2.9);
+    CHECK(table().normal_force_slope_per_rad(0.0) == Catch::Approx(1.46).margin(0.01));
+    CHECK(table().limit_rad(2.0) > 25.0 * deg);
 }
 
 TEST_CASE("The unbalanced fin's axial drag acts at its centre of pressure", "[aero][grid_fins]") {

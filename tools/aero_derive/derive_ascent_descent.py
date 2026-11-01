@@ -273,7 +273,7 @@ def ascent_rows(v, mesh, history) -> list:
             terms = [friction, nose_cd, *flap_fric, flap_edge, others]
             fin_cd = (0.0, 0.0)
             if case == "ascent_stack":
-                ca, err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"], fin["wall_m"],
+                ca, err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"], geometry.DERIVATION_WALL_M,
                                               v.grid_fin_mean_depth_m("fwd"))
                 fin_cd = (ca * fin_count * gross / A_REF_M2, err)
                 terms += [fin_cd, buildup.cavity_cd(gap_area, A_REF_M2)]
@@ -319,7 +319,7 @@ def descent_rows(v, mesh, bins) -> list:
     gross = v.grid_fin_gross_area_m2()
     config_fin_area = v.stage("booster")["grid_fins"]["area_m2"]  # the flown area, equal to the drawn since Task 4
     body_table = read_table(ROOT / "config" / "aero" / "super_heavy_descent.csv")
-    fin_table = read_table(ROOT / "config" / "aero" / "grid_fin.csv")
+    fin_table = read_table(ROOT / "config" / "aero" / "super_heavy_grid_fin.csv")
     k_parts = mesh.hit(("booster",), 1.0)
     k_no_fins = mesh.hit(("booster",), 1.0, fins=False)
     k_bells = mesh.hit(("booster",), 1.0, engines=True)
@@ -350,9 +350,9 @@ def descent_rows(v, mesh, bins) -> list:
         hull_only = cp * hull_k + friction[0] + base[0]
         hoerner_face = buildup.blunt_face_cd(mach)[0] + friction[0] + base[0]
         with_bells = cp * k_bell_body + friction[0] + base[0]
-        ca, ca_err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"], fin["wall_m"],
+        ca, ca_err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"], geometry.DERIVATION_WALL_M,
                                          v.grid_fin_mean_depth_m("aft"))
-        ca_nose = buildup.grid_fin_ca(mach, open_fraction, h, fin_k_nose, fin["thickness_m"], fin["cell_pitch_m"], fin["wall_m"],
+        ca_nose = buildup.grid_fin_ca(mach, open_fraction, h, fin_k_nose, fin["thickness_m"], fin["cell_pitch_m"], geometry.DERIVATION_WALL_M,
                                       v.grid_fin_mean_depth_m("fwd"))[0]
         table_ca = table_at(fin_table, "ca_axial", mach)
         fins_drawn = ca * fin_count * gross / A_REF_M2

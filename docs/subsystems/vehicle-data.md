@@ -70,7 +70,7 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
   pilot's abort (refused - false, arms untouched - without a sea, once down or with the pins on the arms; on the
   explicit laws the descent re-aims beyond the shoreline; before the landing burn it is remembered for it).
 - **Descent drag (tail first):** body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
-  (`aero/grid_fin.csv` column `ca_axial` [E], 3 x 12.63 m^2; the moment of fin 90's share: `aero-derivation.md`). Identified from our webcast telemetry of flights 13 and
+  (`aero/super_heavy_grid_fin.csv` column `ca_axial` [E], 3 x 12.63 m^2; `cn_alpha`, `limit_deg` in that table from the lattice derivation with wall 0.012 m, Falcon 9 keeps the generic `aero/grid_fin.csv`; the moment of fin 90's share: `aero-derivation.md`). Identified from our webcast telemetry of flights 13 and
   14 (`tests/validation/telemetry`, `tools/telemetry/webcast_telemetry.py` + `drag_estimate.py`; below ~9 km the speed
   dial gives way to the engine icon, speed then from the 0.1 km altitude of the nearly vertical fall). The webcast's
   speed and altitude graphics are offset by ~1.5-2 s. Subsonic drag is not measured.

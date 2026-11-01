@@ -4,15 +4,15 @@
 # hot-stage band. Method, errors and the old table: docs/subsystems/aero-derivation.md. Mach 0 holds the Mach 0.3 value;
 # held beyond the last row. The ship alone flies config/aero/ship_ascent.csv.
 mach,cd_axial_power_on,cd_axial_power_off
-0.0,0.640,0.752
-0.3,0.640,0.752
-0.6,0.697,0.839
-0.8,0.758,0.931
-0.95,1.016,1.218
-1.05,1.263,1.466
-1.2,1.218,1.395
-1.5,1.158,1.300
-2,1.090,1.197
-3,0.995,1.066
-4,0.948,1.002
-5,0.942,0.984
+0.0,0.424,0.536
+0.3,0.424,0.536
+0.6,0.447,0.589
+0.8,0.531,0.704
+0.95,0.790,0.992
+1.05,1.104,1.307
+1.2,1.049,1.226
+1.5,0.965,1.107
+2,0.862,0.969
+3,0.829,0.900
+4,0.804,0.857
+5,0.797,0.839
