@@ -65,14 +65,14 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
 TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelling][campaign][config]") {
     const auto r = config::load_refuelling_reference(config_dir);
     CHECK(r.depot.mission == "depot_launch");
-    CHECK(r.depot.initial_propellant_kg == Catch::Approx(70.7e3));  // planned-kick re-measure (ascent Task 5)
+    CHECK(r.depot.initial_propellant_kg == Catch::Approx(69.3e3));  // vehicle physics re-measure (was 70.7)
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(73.6e3));  // M8a re-measure (was 74.25)
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(73.4e3));  // vehicle physics re-measure (was 73.6)
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(1.1e3));  // flown campaign (ascent Task 5 re-calibration)
     CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(2.0e3));
     CHECK(r.hls.mission == "hls_refuel");
-    CHECK(r.hls.main_at_docking_kg == Catch::Approx(203.5e3));  // M8a re-measure (planned kick: 202.8 t)
+    CHECK(r.hls.main_at_docking_kg == Catch::Approx(202.9e3));  // vehicle physics re-measure (was 203.5)
     // the reference tanker is the configured one
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));
@@ -566,7 +566,7 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     // planned kick (tanker 18.1 deg instead of the webcast-tuned 14) leaves 105.6 t instead of 93.0 t after the ascent,
     // 74.25 t delivered per tanker, the campaign offsets re-calibrated)
     CHECK(r.result.tanker_flights == 12);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(50.63).margin(0.05));
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(50.99).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {

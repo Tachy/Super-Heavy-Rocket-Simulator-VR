@@ -406,22 +406,21 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   manual settle, the turn before the push, the allocator query, the gas bound and estimates);
   `[campaign_flown]` (`test_refuelling_campaign_flight.cpp`: supervisor, keep_station, place_vehicle, reboost, live
   start, free depot decay; placed and full campaign `[slow]`); `tools/test_vehicle_report.py`.
-- Reference flights (current, derived pad heights): tanker residue 105.6 t, rendezvous 17.93 t, delivered LOX / CH4
-  58.9 / 14.7 t, main at catch 1.38 t; depot fill 70.7 t (199.7 x 211.3 km); HLS main at docking 203.5 t; above-depot
-  pad flight 220 x 240 km, Waypoint 0 9.9 h after liftoff (window 10.0 h).
-- Calculator answer (default, depot placed at 200 km, 48 h): **12 tanker flights, 50.7 days** (planned kick 74.25 t per
+- Reference flights (re-measured 2026-11-01, vehicle physics Task 6e): tanker residue 104.2 t, rendezvous 16.74 t, delivered LOX / CH4
+  58.8 / 14.6 t, main at catch 0.0 t (header tanks); depot fill 69.3 t; HLS main at docking 202.9 t; above-depot
+  pad flight 220 x 240 km, Waypoint 0 9.9 h after liftoff (window 10.0 h). The "Numbers" above are the earlier measure.
+- Calculator answer (default, depot placed at 200 km, 48 h): **12 tanker flights, 51.0 days** (73.4 t per
   reference tanker). `--reference-phasing`: 14 / 224.7 d. Cadence: the 24 h pad turnaround against plane crossings
   ~23.4 h apart lets only every other crossing fly (`--interval-h 12`: 12 / 23.1 d); the gaps between runs are phases
   no candidate closes in 48 h; launches in runs of four per ~13.8 d phase cycle (r6 f1: 150 x 190 km when the depot is
   ahead, 220 x 240 / 250 x 270 km when behind). Levers (f1, 12 / 46.5 d baseline then): 300 km 13 / 31.9 d; tanker dry
   -10 t 11 / 45.9 d; insulation x 0.1 16 / 60.2 d; 28 h 11 / 75.2 d; 72 h 14 / 34.5 d (a looser limit opens earlier
   windows with longer phasing and more tanker boil-off: fewer days, more tankers).
-- Full flown run (`refuelling_report --fly`, ~22 min; ctest `Flown campaign: the depot launched*` `[slow]`): depot
-  launched 2026-10-20, 14 tankers, 0 failures, HLS at the depot 59.44 d with 1,090.8 t (needs 1,041.4 t); first plan 14
-  tankers / 53.2 d; arrivals within 0.07 d of their live plans; fills within 2 % (largest: tanker 13, 864.4 vs 850.9 t,
-  +1.6 %); deliveries 58.6-72.5 t; losses boil-off (remainder) 31.6 t, attitude gas 1.2 t, vent 27.3 t, station
-  keeping 0. Flown depot heights 207.5 -> 209.8 km over 53 days. Placed variant (`--fly-placed`, ~5 min): 2 tankers +
-  HLS, passes. Both passed against the calculator after the pad-height change.
+- Full flown run (`refuelling_report --fly`, ~24 min; ctest `Flown campaign: the depot launched*` `[slow]`; 2026-11-01): depot
+  launched 2026-10-20, 14 launches, 12 delivered, 2 failed "Kein Rendezvous" (tankers 5, 9) and re-planned, HLS at the depot 54.91 d with 1,064.1 t;
+  deliveries 66.4-76.9 t; losses boil-off (remainder) 29.0 t, attitude gas 1.1 t, vent 26.1 t, station
+  keeping 0. Flown depot heights 207.3 -> 208.0 km before the HLS. First tanker return: upright abort, main 0.50 t. Comparison passed. Placed variant (`--fly-placed`, ~7 min): red, a failed
+  tanker 1 gives 4 rows, the test wants 3 (`docs/known-issues.md`).
 
 ## Diagnostics
 
