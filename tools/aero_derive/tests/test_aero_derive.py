@@ -132,8 +132,8 @@ def test_buildup_values_are_positive_with_errors():
 
 def test_grid_fin_choking_exceeds_open_flow():
     # choked cells spill air: transonic CA above the started supersonic value; open fraction 1 has no blockage loss
-    trans = buildup.grid_fin_ca(1.2, 0.76, 10000.0, 0.2, 0.5, 0.35)[0]
-    started = buildup.grid_fin_ca(4.0, 0.76, 25000.0, 0.2, 0.5, 0.35)[0]
+    trans = buildup.grid_fin_ca(1.2, 0.76, 10000.0, 0.2, 0.5, 0.35, 0.04, 0.5)[0]
+    started = buildup.grid_fin_ca(4.0, 0.76, 25000.0, 0.2, 0.5, 0.35, 0.04, 0.5)[0]
     assert trans > started
 
 

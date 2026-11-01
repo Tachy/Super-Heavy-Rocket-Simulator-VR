@@ -4,13 +4,15 @@
 
 Writes to screenshots/vehicle-physics/: drag_compare.csv, telemetry_bins.csv, mesh_factors.csv, the plots
 drag_ascent.png / drag_descent.png / beta_descent.png, and tables.md (the tables of docs/subsystems/aero-derivation.md).
-A cross-check: nothing in config/ or core/ changes, and nothing here is fitted (user 2026-10-31 / 2026-11-01).
+Nothing here is fitted. The stack's table is this tool's output (Task 2b, user's OK 2026-11-01), written on request with
+--write-stack-table; the descent tables are only compared.
 
 Flaps stand at d = 90 in every ascent and stack case (user fact 2026-11-01, flight 14 frame at T+49 s: radial, their
 rest pose, edge-on to the axial flow). The booster alone in descent has no flaps.
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import math
 import statistics
@@ -24,6 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import buildup  # noqa: E402
+import exposure  # noqa: E402
 import geometry  # noqa: E402
 import newtonian  # noqa: E402
 
@@ -31,12 +34,14 @@ ROOT = geometry.ROOT
 OUT = geometry.OUT_DIR
 TELEMETRY = ROOT / "tests" / "validation" / "telemetry"
 MACHS = [0.3, 0.6, 0.8, 0.95, 1.05, 1.2, 1.5, 2.0, 3.0, 5.0, 8.0, 15.0, 25.0]
+ASCENT_MACHS = sorted(MACHS + [4.0])  # the stack table's grid needs this one
+TABLE_MAX_MACH = 5.0  # last row flown in continuum by the stack (see aero-derivation.md); the curve holds it beyond
+BAND_PARTS = ("booster/top_truss", "booster/hot_stage")  # stand in the hot-stage band: the cavity term is the band's one term
 A_REF_M2 = math.pi / 4.0 * 9.0 ** 2  # the tables' reference area
 DESCENT_MASS_KG = 261000.0  # 210 t dry + 51 t propellant from the gauge (aero/super_heavy_descent.csv)
 KNUDSEN_CONTINUUM = 0.01  # the core's rarefaction blend starts here (slender_body_aero.cpp)
 STACK_LENGTH_M = 124.4
 CELL_M = 0.02  # ray spacing of the whole-vehicle first hit: 2 samples across the 0.04 m features
-GAP_HEIGHT_M = 4.0  # hot-stage band, detail [booster.hot_stage] height_m
 ASCENT_TABLE_ERROR = 0.15  # [E] the ascent table's own band: generic trend, none published
 DESCENT_IDENTIFIED_ERROR = 0.125  # the table header: bins scatter +-10-15 %
 DESCENT_UNMEASURED_ERROR = 0.20  # [E] subsonic trend, and the held value above Mach 3.9
@@ -174,6 +179,14 @@ class Mesh:
         self.v = vehicle
         self.cache = {}
 
+    def exposed(self, stages, flap_deg=90.0):
+        """Nose first, with the wake range (`exposure`): the samples that load."""
+        key = ("exposed", stages, flap_deg)
+        if key not in self.cache:
+            tris, (names, ids) = self.v.triangles(stages, flap_deg, 0.0, False, True, True)
+            self.cache[key] = exposure.exposed_hits(tris, ids, names, self.v.outer_radius_m, CELL_M)
+        return self.cache[key]
+
     def hit(self, stages, flow_x, flap_deg=90.0, engines=False, fins=True, flaps=True):
         key = (stages, flow_x, flap_deg, engines, fins, flaps)
         if key not in self.cache:
@@ -206,15 +219,31 @@ def ascent_rows(v, mesh, history) -> list:
     gross = v.grid_fin_gross_area_m2()
     nose = v.detail["hull"]["nose_drawn_length_m"] / 9.0
     nose_config = v.stage("ship")["aero"]["nose_length_m"] / 9.0
-    table = read_table(ROOT / "config" / "aero" / "starship_stack_ascent.csv")
+    old_table = read_table(ROOT / "config" / "aero" / "ship_ascent.csv")  # the stack's table before Task 2b, same values
     exit_booster = 33 * math.pi / 4.0 * v.manifest["engines"]["raptor3"]["exit_diameter_m"] ** 2
     exit_ship = 3 * math.pi / 4.0 * (v.manifest["engines"]["raptor3"]["exit_diameter_m"] ** 2 + v.manifest["engines"]["raptor_vacuum3"]["exit_diameter_m"] ** 2)
-    k_stack = mesh.hit(("booster", "ship"), -1.0)
-    k_stack_flat = mesh.hit(("booster", "ship"), -1.0, flap_deg=0.0)
-    k_ship = mesh.hit(("ship",), -1.0)
+    stack_load = mesh.exposed(("booster", "ship"))
+    stack_flat_load = mesh.exposed(("booster", "ship"), flap_deg=0.0)
+    ship_load = mesh.exposed(("ship",))
+    k_stack = stack_load.k_by_part(A_REF_M2)
+    k_ship = ship_load.k_by_part(A_REF_M2)
+    fin_count = len(v.stage("booster")["grid_fins"]["azimuths_deg"])
     wetted_b, wetted_s = v.hull_wetted_area_m2("booster"), v.hull_wetted_area_m2("ship")
     fin_k = mesh.fin_k_per_gross(k_stack, "fwd")
-    gap_area = 2.0 * math.pi * 4.5 * GAP_HEIGHT_M
+    gap_area = 2.0 * math.pi * 4.5 * v.hot_stage_open_height_m()
+
+    def credited(load, mach, h):
+        """Per part: loaded area / A_ref with each sample at its share of q in the layer at its station."""
+        state = buildup.air(h)
+        unit_reynolds = state["rho"] * mach * state["a"] / state["mu"]
+
+        def share(x_m, height_m):
+            run = np.maximum(STACK_LENGTH_M - x_m, 0.1)
+            return buildup.boundary_layer_q_share(height_m, buildup.turbulent_layer_thickness_m(run, unit_reynolds * run))
+        return load.credited_k_by_part(A_REF_M2, share)
+
+    def is_other(name):
+        return not (name.endswith("/hull") or name.startswith(("fin/", "flap/")) or name in BAND_PARTS)
 
     def flap_terms(mach, h, k_parts):
         area = {"aft": v.flap_area_m2("aft"), "fwd": v.flap_area_m2("fwd")}
@@ -222,9 +251,9 @@ def ascent_rows(v, mesh, history) -> list:
         loaded = sum(x for k, x in k_parts.items() if k.startswith("flap/")) * A_REF_M2
         return friction, buildup.protuberance_cd(mach, loaded, A_REF_M2)
 
-    for case, machs, k_parts, length, wet, exit_area, hull_key in (
-            ("ascent_stack", MACHS, k_stack, STACK_LENGTH_M, wetted_b + wetted_s, exit_booster, "ship/hull"),
-            ("ascent_ship", [m for m in MACHS if m >= 5.0], k_ship, v.stage("ship")["length_m"], wetted_s, exit_ship, "ship/hull")):
+    for case, machs, k_parts, load, length, wet, exit_area, hull_key in (
+            ("ascent_stack", ASCENT_MACHS, k_stack, stack_load, STACK_LENGTH_M, wetted_b + wetted_s, exit_booster, "ship/hull"),
+            ("ascent_ship", [m for m in ASCENT_MACHS if m >= 5.0], k_ship, ship_load, v.stage("ship")["length_m"], wetted_s, exit_ship, "ship/hull")):
         for mach in machs:
             h_flown, t_s, reached = history[mach]
             h = min(h_flown, continuum_altitude_m(length))  # beyond it the flown altitude is not a continuum state
@@ -234,13 +263,18 @@ def ascent_rows(v, mesh, history) -> list:
             friction = buildup.skin_friction_cd(wet, length, mach, h, A_REF_M2)
             nose_cd = buildup.nose_pressure_cd(mach, nose)
             flap_fric, flap_edge = flap_terms(mach, h, k_parts)
-            other = sum(x for k, x in k_parts.items() if not (k.endswith("/hull") or k.startswith(("fin/", "flap/"))))
+            credit = credited(load, mach, h)
+            other_parts = {k: x for k, x in credit.items() if is_other(k)}
+            other_plain = sum(x for k, x in k_parts.items() if is_other(k))
+            other = sum(other_parts.values())
             others = buildup.protuberance_cd(mach, other * A_REF_M2, A_REF_M2)
+            credit_flat = credited(stack_flat_load, mach, h) if case == "ascent_stack" else {}
             terms = [friction, nose_cd, *flap_fric, flap_edge, others]
             fin_cd = (0.0, 0.0)
             if case == "ascent_stack":
-                ca, err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"])
-                fin_cd = (ca * 3.0 * gross / A_REF_M2, err)
+                ca, err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"], fin["wall_m"],
+                                              v.grid_fin_mean_depth_m("fwd"))
+                fin_cd = (ca * fin_count * gross / A_REF_M2, err)
                 terms += [fin_cd, buildup.cavity_cd(gap_area, A_REF_M2)]
             for powered, column in ((True, "cd_axial_power_on"), (False, "cd_axial_power_off")):
                 base = buildup.base_cd(mach, A_REF_M2, powered, A_REF_M2, exit_area)
@@ -250,15 +284,19 @@ def ascent_rows(v, mesh, history) -> list:
                     n_nose = newtonian.cp_max(mach) * k_parts.get(hull_key, 0.0)
                     n_rest = sum(t[0] for t in terms if t is not nose_cd) + base[0]
                     newton = n_nose + n_rest
-                known = table_at(table, column, mach)
+                known = table_at(old_table, column, mach)
                 rows.append(row(case, mach, "on" if powered else "off", total, err, known, ASCENT_TABLE_ERROR * known, h, t_s, reached, extrapolated,
                                 clean=friction[0] + nose_cd[0] + base[0],
                                 friction=friction[0], nose=nose_cd[0], base=base[0], flaps=sum(t[0] for t in flap_fric) + flap_edge[0],
-                                fins=fin_cd[0], other=others[0],
+                                fins=fin_cd[0], fin_ca_nose=fin_cd[0] * A_REF_M2 / (fin_count * gross), other=others[0],
+                                other_uncredited=buildup.protuberance_cd(mach, other_plain * A_REF_M2, A_REF_M2)[0],
+                                other_parts={k: round(x, 5) for k, x in other_parts.items()},
                                 gap=terms[-1][0] if case == "ascent_stack" else 0.0,
                                 newtonian=newton,
                                 nose_17m=total - nose_cd[0] + buildup.nose_pressure_cd(mach, nose_config)[0],
-                                flaps_d0=(total - flap_edge[0] - others[0] + buildup.protuberance_cd(mach, sum(x for k, x in k_stack_flat.items() if not k.endswith("/hull") and not k.startswith("fin/")) * A_REF_M2, A_REF_M2)[0]) if case == "ascent_stack" else None))
+                                flaps_d0=(total - flap_edge[0] - others[0] + buildup.protuberance_cd(mach, sum(
+                                    x if k.startswith("flap/") else credit_flat[k]
+                                    for k, x in stack_flat_load.k_by_part(A_REF_M2).items() if k.startswith("flap/") or is_other(k)) * A_REF_M2, A_REF_M2)[0]) if case == "ascent_stack" else None))
     return rows
 
 
@@ -287,6 +325,8 @@ def descent_rows(v, mesh, bins) -> list:
     hull_k = k_parts["booster/hull"]
     prot_k = sum(x for k, x in k_parts.items() if not (k.startswith("fin/") or k == "booster/hull"))
     fin_k = mesh.fin_k_per_gross(k_parts, "aft")
+    fin_k_nose = mesh.fin_k_per_gross(mesh.exposed(("booster", "ship")).k_by_part(A_REF_M2), "fwd")
+    fin_count = len(v.stage("booster")["grid_fins"]["azimuths_deg"])
     k_bell_body = sum(x for k, x in k_bells.items() if not k.startswith("fin/"))
     wet = v.hull_wetted_area_m2("booster")
     length = v.wetted_end_station_m("booster")
@@ -309,12 +349,15 @@ def descent_rows(v, mesh, bins) -> list:
         hull_only = cp * hull_k + friction[0] + base[0]
         hoerner_face = buildup.blunt_face_cd(mach)[0] + friction[0] + base[0]
         with_bells = cp * k_bell_body + friction[0] + base[0]
-        ca, ca_err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"])
+        ca, ca_err = buildup.grid_fin_ca(mach, open_fraction, h, fin_k, fin["thickness_m"], fin["cell_pitch_m"], fin["wall_m"],
+                                         v.grid_fin_mean_depth_m("aft"))
+        ca_nose = buildup.grid_fin_ca(mach, open_fraction, h, fin_k_nose, fin["thickness_m"], fin["cell_pitch_m"], fin["wall_m"],
+                                      v.grid_fin_mean_depth_m("fwd"))[0]
         table_ca = table_at(fin_table, "ca_axial", mach)
-        fins_drawn = ca * 3.0 * gross / A_REF_M2
-        fins_config = ca * 3.0 * config_fin_area / A_REF_M2
+        fins_drawn = ca * fin_count * gross / A_REF_M2
+        fins_config = ca * fin_count * config_fin_area / A_REF_M2
         known_body = table_at(body_table, "cd_axial_power_off", mach)
-        known_fins = table_ca * 3.0 * config_fin_area / A_REF_M2
+        known_fins = table_ca * fin_count * config_fin_area / A_REF_M2
         identified = DESCENT_IDENTIFIED_MACH[0] <= mach <= DESCENT_IDENTIFIED_MACH[1]
         known_rel = DESCENT_IDENTIFIED_ERROR if identified else DESCENT_UNMEASURED_ERROR
         common = dict(method=method, band=band, friction=friction[0], base=base[0], face=face_cd[0], hull_only_body=hull_only,
@@ -327,7 +370,7 @@ def descent_rows(v, mesh, bins) -> list:
             flight = bins.get(mach)
             flight_cd = flight["cd"] if flight else None
             r = row(f"descent_total_{area_name}", mach, "off", total, total_err, known_total, known_rel * known_total, h, None, True, False,
-                    fin_cd=fins_value, fin_ca_gross=ca, fin_ca_err=ca_err, table_ca=table_ca, table_fin_cd=known_fins,
+                    fin_cd=fins_value, fin_ca_gross=ca, fin_ca_nose=ca_nose, fin_ca_err=ca_err, table_ca=table_ca, table_fin_cd=known_fins,
                     beta_derived=DESCENT_MASS_KG / (total * A_REF_M2), beta_table=DESCENT_MASS_KG / (known_total * A_REF_M2),
                     beta_flight=flight["beta"] if flight else None, beta_flight_sd=flight["beta_sd"] if flight else None,
                     cd_flight=flight_cd, cd_flight_sd=flight["cd_sd"] if flight else None, n_flight=flight["n"] if flight else 0,
@@ -419,11 +462,11 @@ def markdown(rows, bins, factors, v, mesh) -> str:
     lines = []
     for case, head in (("ascent_stack", "Ascent, stack"), ("ascent_ship", "Ascent, ship alone")):
         lines += [f"### {head}", "",
-                  "| Mach | h km | col | friction | nose | base | clean (sum) | flaps | fins | other | gap | derived | +- | table | derived/table | verdict | Newtonian | nose 17 m | flaps d=0 |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                  "| Mach | h km | col | friction | nose | base | clean (sum) | flaps | fins | other | other, no credit | gap | derived | +- | old table | derived/old | verdict | Newtonian | nose 17 m | flaps d=0 |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             if r["case"] == case:
-                lines.append(f"| {r['mach']:g} | {r['altitude_km']:.1f}{'*' if r['continuum_extrapolated'] else ''} | {r['column']} | {fmt(r['friction'])} | {fmt(r['nose'])} | {fmt(r['base'])} | {fmt(r['clean'])} | {fmt(r['flaps'])} | {fmt(r['fins'])} | {fmt(r['other'])} | {fmt(r['gap'])} | {fmt(r['derived'])} | {fmt(r['derived_err'])} | {fmt(r['known'])} | {fmt(r['ratio'], 2)} | {r['verdict']} | {fmt(r['newtonian'])} | {fmt(r['nose_17m'])} | {fmt(r['flaps_d0'])} |")
+                lines.append(f"| {r['mach']:g} | {r['altitude_km']:.1f}{'*' if r['continuum_extrapolated'] else ''} | {r['column']} | {fmt(r['friction'])} | {fmt(r['nose'])} | {fmt(r['base'])} | {fmt(r['clean'])} | {fmt(r['flaps'])} | {fmt(r['fins'])} | {fmt(r['other'])} | {fmt(r['other_uncredited'])} | {fmt(r['gap'])} | {fmt(r['derived'])} | {fmt(r['derived_err'])} | {fmt(r['known'])} | {fmt(r['ratio'], 2)} | {r['verdict']} | {fmt(r['newtonian'])} | {fmt(r['nose_17m'])} | {fmt(r['flaps_d0'])} |")
         lines.append("")
     lines += ["### Booster descent, body without fins", "",
               "| Mach | band | face | friction | base | derived | +- | table | derived/table | verdict | hull face only | Hoerner face | with bells |",
@@ -432,14 +475,14 @@ def markdown(rows, bins, factors, v, mesh) -> str:
         if r["case"] == "descent_body":
             lines.append(f"| {r['mach']:g} | {r['band']} | {fmt(r['face'])} | {fmt(r['friction'])} | {fmt(r['base'])} | {fmt(r['derived'])} | {fmt(r['derived_err'])} | {fmt(r['known'])} | {fmt(r['ratio'], 2)} | {r['verdict']} | {fmt(r['hull_only_body'])} | {fmt(r['hoerner_face_body'])} | {fmt(r['with_bells_body'])} |")
     lines += ["", "### Booster descent, body + fins", "",
-              "| Mach | fin CA derived (gross) | +- | fin CA table | total, 12.63 | total, 13.5 | +- | table total | verdict (12.63 / 13.5) | flights C_D at 261 t (sd, n) | verdict against flights (12.63 / 13.5) | beta 12.63 | beta 13.5 | beta tables | beta flights (sd) |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+              "| Mach | fin CA tail first (gross) | fin CA nose first (gross) | +- | fin CA table | total, 12.63 | total, 13.5 | +- | table total | verdict (12.63 / 13.5) | flights C_D at 261 t (sd, n) | verdict against flights (12.63 / 13.5) | beta 12.63 | beta 13.5 | beta tables | beta flights (sd) |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     drawn = [r for r in rows if r["case"] == "descent_total_drawn_12.63"]
     config = [r for r in rows if r["case"] == "descent_total_config_13.5"]
     for a, b in zip(drawn, config):
         flights = f"{a['cd_flight']:.2f} ({fmt(a['cd_flight_sd'], 2)}, {a['n_flight']})" if a["cd_flight"] else "-"
         beta_f = f"{a['beta_flight']:.0f} ({fmt(a['beta_flight_sd'], 0)})" if a["beta_flight"] else "-"
-        lines.append(f"| {a['mach']:g} | {fmt(a['fin_ca_gross'])} | {a['fin_ca_err'] * 100:.0f} % | {fmt(a['table_ca'])} | {fmt(a['derived'])} | {fmt(b['derived'])} | {fmt(a['derived_err'])} | {fmt(a['known'])} | {a['verdict']} / {b['verdict']} | {flights} | {a['flight_verdict']} / {b['flight_verdict']} | {a['beta_derived']:.0f} | {b['beta_derived']:.0f} | {a['beta_table']:.0f} | {beta_f} |")
+        lines.append(f"| {a['mach']:g} | {fmt(a['fin_ca_gross'])} | {fmt(a['fin_ca_nose'])} | {a['fin_ca_err'] * 100:.0f} % | {fmt(a['table_ca'])} | {fmt(a['derived'])} | {fmt(b['derived'])} | {fmt(a['derived_err'])} | {fmt(a['known'])} | {a['verdict']} / {b['verdict']} | {flights} | {a['flight_verdict']} / {b['flight_verdict']} | {a['beta_derived']:.0f} | {b['beta_derived']:.0f} | {a['beta_table']:.0f} | {beta_f} |")
     lines += ["", "### Mesh factors k (per unit cp_max, on 63.6 m^2)", ""]
     def grouped(k):
         out = {}
@@ -450,10 +493,22 @@ def markdown(rows, bins, factors, v, mesh) -> str:
         return ", ".join(f"{a} {b:.4f}" for a, b in sorted(out.items(), key=lambda x: -x[1]))
     lines.append(f"- Tail first, no bells: {grouped(factors['k_parts'])}")
     lines.append(f"- Tail first, drawn bells: {grouped(factors['k_bells'])}")
-    lines.append(f"- Stack nose first, flaps 90: {grouped(mesh.hit(('booster', 'ship'), -1.0))}")
-    lines.append(f"- Stack nose first, flaps 0: {grouped(mesh.hit(('booster', 'ship'), -1.0, flap_deg=0.0))}")
-    lines.append(f"- Ship nose first, flaps 90: {grouped(mesh.hit(('ship',), -1.0))}")
-    lines.append(f"- Fin, per gross area: tail first {mesh.fin_k_per_gross(factors['k_parts'], 'aft'):.3f}, nose first {mesh.fin_k_per_gross(mesh.hit(('booster', 'ship'), -1.0), 'fwd'):.3f}; aft wall edge mean cos^2 {v.grid_fin_wall_edge_cos2('aft'):.3f}")
+    stack = mesh.exposed(("booster", "ship")).k_by_part(A_REF_M2)
+    lines.append(f"- Stack nose first, flaps 90, exposed (wake range): {grouped(stack)}")
+    lines.append(f"- Same, plain first hit (not used): {grouped(mesh.hit(('booster', 'ship'), -1.0))}")
+    lines.append(f"- Stack nose first, flaps 0, exposed: {grouped(mesh.exposed(('booster', 'ship'), flap_deg=0.0).k_by_part(A_REF_M2))}")
+    lines.append(f"- Ship nose first, flaps 90, exposed: {grouped(mesh.exposed(('ship',)).k_by_part(A_REF_M2))}")
+    per_fin = {}
+    for name, value in stack.items():
+        if name.startswith("fin/"):
+            per_fin[name.split("/")[1]] = per_fin.get(name.split("/")[1], 0.0) + value * A_REF_M2
+    lines.append("- Solid load per fin, nose first, m^2: " + ", ".join(f"{a} deg {b:.3f}" for a, b in per_fin.items()))
+    lines.append(f"- Fin, per gross area: tail first {mesh.fin_k_per_gross(factors['k_parts'], 'aft'):.3f}, nose first {mesh.fin_k_per_gross(stack, 'fwd'):.3f}; aft wall edge mean cos^2 {v.grid_fin_wall_edge_cos2('aft'):.3f}; mean cell depth, flat forward face {v.grid_fin_mean_depth_m('fwd'):.3f} m, scooped aft face {v.grid_fin_mean_depth_m('aft'):.3f} m")
+    lines.append(f"- Hot-stage open band {v.hot_stage_open_height_m():.2f} m")
+    lines += ["", "### Parts term at Mach 1.2, per part: k with the layer credit, of k without", ""]
+    peak = next(r for r in rows if r["case"] == "ascent_stack" and r["mach"] == 1.2)
+    for name, value in sorted(peak["other_parts"].items(), key=lambda x: -x[1]):
+        lines.append(f"- {name}: {value:.4f} of {stack.get(name, 0.0):.4f}")
     lines.append(f"- Open fraction {v.grid_fin_open_fraction():.3f}")
     return "\n".join(lines) + "\n"
 
@@ -470,22 +525,41 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
-def run() -> list:
+STACK_TABLE_HEADER = """# Axial drag coefficient of the full stack at zero angle of attack, reference area pi*(d/2)^2 (grid fins at 0, flaps at d = 90).
+# [E] Derived from the built models by tools/aero_derive/derive_ascent_descent.py --write-stack-table, not fitted to anything:
+# friction + nose + base + flaps + nose-first grid fins (3 x 12.63 m^2) + drawn parts (wake range, 1/7 profile layer credit) +
+# hot-stage band. Method, errors and the old table: docs/subsystems/aero-derivation.md. Mach 0 holds the Mach 0.3 value;
+# held beyond the last row. The ship alone flies config/aero/ship_ascent.csv.
+"""
+
+
+def write_stack_table(rows, path: Path) -> None:
+    on = {r["mach"]: r["derived"] for r in rows if r["case"] == "ascent_stack" and r["column"] == "on"}
+    off = {r["mach"]: r["derived"] for r in rows if r["case"] == "ascent_stack" and r["column"] == "off"}
+    grid = [m for m in ASCENT_MACHS if m <= TABLE_MAX_MACH]
+    lines = [STACK_TABLE_HEADER, "mach,cd_axial_power_on,cd_axial_power_off\n", f"0.0,{on[grid[0]]:.3f},{off[grid[0]]:.3f}\n"]
+    lines += [f"{m:g},{on[m]:.3f},{off[m]:.3f}\n" for m in grid]
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def run(write_table: bool = False) -> list:
     OUT.mkdir(parents=True, exist_ok=True)
     v = geometry.load_vehicle("starship_block3")
     geometry.write_secured_areas(v)
     mesh = Mesh(v)
     raw = telemetry_bins()
     bins = bins_at_machs(raw)
-    history = ascent_history(MACHS)
+    history = ascent_history(ASCENT_MACHS)
     rows = ascent_rows(v, mesh, history)
     down, factors = descent_rows(v, mesh, bins)
     rows += down
+    if write_table:
+        write_stack_table(rows, ROOT / "config" / "aero" / "starship_stack_ascent.csv")
     write_csv(OUT / "drag_compare.csv", rows)
     write_csv(OUT / "telemetry_bins.csv", raw)
     (OUT / "tables.md").write_text(markdown(rows, bins, factors, v, mesh) + ascent_drag_loss(rows) + chr(10), encoding="utf-8")
-    plot_case(rows, "ascent_stack", "on", OUT / "drag_ascent.png", "Ascent, stack, power on: derived against the table")
-    plot_case(rows, "ascent_stack", "off", OUT / "drag_ascent_off.png", "Ascent, stack, power off: derived against the table")
+    plot_case(rows, "ascent_stack", "on", OUT / "drag_ascent.png", "Ascent, stack, power on: derived against the old table")
+    plot_case(rows, "ascent_stack", "off", OUT / "drag_ascent_off.png", "Ascent, stack, power off: derived against the old table")
     plot_case(rows, "descent_body", "off", OUT / "drag_descent_body.png", "Booster descent, body without fins")
     plot_case(rows, "descent_total_drawn_12.63", "off", OUT / "drag_descent.png", "Booster descent, body + fins (12.63 m^2)")
     plot_beta(rows, OUT / "beta_descent.png")
@@ -493,4 +567,6 @@ def run() -> list:
 
 
 if __name__ == "__main__":
-    print(f"{len(run())} rows written to {OUT / 'drag_compare.csv'}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--write-stack-table", action="store_true", help="write config/aero/starship_stack_ascent.csv from the derived total")
+    print(f"{len(run(parser.parse_args().write_stack_table))} rows written to {OUT / 'drag_compare.csv'}")

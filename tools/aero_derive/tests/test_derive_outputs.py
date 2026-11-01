@@ -20,7 +20,8 @@ def rows():
 
 
 def test_every_mach_in_every_case(rows):
-    for case in ("ascent_stack", "descent_body", "descent_total_drawn_12.63", "descent_total_config_13.5"):
+    assert sorted({r["mach"] for r in rows if r["case"] == "ascent_stack"}) == dad.ASCENT_MACHS
+    for case in ("descent_body", "descent_total_drawn_12.63", "descent_total_config_13.5"):
         assert sorted({r["mach"] for r in rows if r["case"] == case}) == sorted(dad.MACHS)
     assert {r["column"] for r in rows if r["case"] == "ascent_stack"} == {"on", "off"}
 

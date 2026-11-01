@@ -126,6 +126,53 @@ def first_hit(tris: np.ndarray, flow_dir_body, cell_m: float | None = None, part
     return FirstHit(index, cell_m, cabs * cabs, perp, ids, names)
 
 
+@dataclass
+class AllHits:
+    """Every crossing of every grid ray with every triangle (not only the first)."""
+    ray: np.ndarray  # grid sample
+    tri: np.ndarray
+    depth: np.ndarray  # along the flow
+    radial_m: np.ndarray  # distance of the ray from the axis through the origin along the flow
+    cos2: np.ndarray  # cos^2(phi) per triangle
+
+
+def all_hits(tris: np.ndarray, flow_dir_body, cell_m: float) -> AllHits:
+    """Same grid as `first_hit`, keeping every crossing; for an exposure rule that needs what lies behind the first hit."""
+    tris = np.asarray(tris, float)
+    f, u, v = _basis(flow_dir_body)
+    pu, pv, depth = tris @ u, tris @ v, tris @ f
+    u0, u1, v0, v1 = pu.min(), pu.max(), pv.min(), pv.max()
+    nu, nv = int((u1 - u0) / cell_m) + 2, int((v1 - v0) / cell_m) + 2
+    iu0 = np.maximum(np.ceil((pu.min(axis=1) - u0) / cell_m - 0.5).astype(int), 0)
+    iu1 = np.minimum(np.floor((pu.max(axis=1) - u0) / cell_m - 0.5).astype(int), nu - 1)
+    iv0 = np.maximum(np.ceil((pv.min(axis=1) - v0) / cell_m - 0.5).astype(int), 0)
+    iv1 = np.minimum(np.floor((pv.max(axis=1) - v0) / cell_m - 0.5).astype(int), nv - 1)
+    denom = (pv[:, 1] - pv[:, 2]) * (pu[:, 0] - pu[:, 2]) + (pu[:, 2] - pu[:, 1]) * (pv[:, 0] - pv[:, 2])
+    rays, indices, depths = [], [], []
+    for t in np.nonzero((iu1 >= iu0) & (iv1 >= iv0) & (np.abs(denom) > 1e-14))[0]:
+        cols, rows = np.arange(iu0[t], iu1[t] + 1), np.arange(iv0[t], iv1[t] + 1)
+        du, dv = (u0 + (cols + 0.5) * cell_m)[:, None] - pu[t, 2], (v0 + (rows + 0.5) * cell_m)[None, :] - pv[t, 2]
+        w0 = ((pv[t, 1] - pv[t, 2]) * du + (pu[t, 2] - pu[t, 1]) * dv) / denom[t]
+        w1 = ((pv[t, 2] - pv[t, 0]) * du + (pu[t, 0] - pu[t, 2]) * dv) / denom[t]
+        w2 = 1.0 - w0 - w1
+        inside = (w0 >= 0.0) & (w1 >= 0.0) & (w2 >= 0.0)
+        a, b = np.nonzero(inside)
+        if len(a) == 0:
+            continue
+        z = w0[a, b] * depth[t, 0] + w1[a, b] * depth[t, 1] + w2[a, b] * depth[t, 2]
+        rays.append(cols[a] * nv + rows[b])
+        indices.append(np.full(len(a), t, dtype=np.int32))
+        depths.append(z)
+    ray = np.concatenate(rays)
+    # radial distance of the sample from the axis: u, v are perpendicular to the flow and pass through the origin
+    radial = np.hypot(u0 + (ray // nv + 0.5) * cell_m, v0 + (ray % nv + 0.5) * cell_m)
+    normal = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    length = np.linalg.norm(normal, axis=1)
+    length[length == 0.0] = 1.0
+    cos2 = ((normal / length[:, None]) @ f) ** 2
+    return AllHits(ray, np.concatenate(indices), np.concatenate(depths), radial, cos2)
+
+
 def axial_force_coefficient(tris: np.ndarray, flow_dir_body, cp_max_value: float, a_ref_m2: float,
                             cell_m: float | None = None) -> tuple[float, float]:
     """(ca, cn): force along the flow and magnitude across it, per q A_ref, with first-hit occlusion."""

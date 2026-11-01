@@ -14,6 +14,8 @@ import math
 import sys
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "telemetry"))
 from drag_estimate import GAMMA_AIR, R_AIR, atmosphere  # noqa: E402
 
@@ -105,10 +107,22 @@ def blunt_face_cd(mach: float) -> tuple[float, float]:
     return share * cp_max(mach), 0.10 if mach < 0.8 else 0.20
 
 
+def turbulent_layer_thickness_m(x_m: float, reynolds_x: float) -> float:
+    """Flat-plate turbulent layer: 0.37 x Re_x^-0.2 (Schlichting), incompressible form: at high Mach the real layer is
+    thicker, so the credit below is on the small side there."""
+    return 0.37 * x_m * np.maximum(reynolds_x, 1.0) ** -0.2
+
+
+def boundary_layer_q_share(height_m, delta_m):
+    """Local dynamic pressure over the free stream's at a height in a 1/7 power profile: q / q_e = (y / delta)^(2/7), 1 above
+    the layer. Density taken constant across the layer. Averaged over a band from the wall to h: (7/9) (h / delta)^(2/7)."""
+    return np.minimum(np.asarray(height_m, float) / delta_m, 1.0) ** (2.0 / 7.0)
+
+
 def protuberance_cd(mach: float, loaded_area_m2: float, a_ref_m2: float) -> tuple[float, float]:
-    """Drag of a blunt part standing in the flow: `loaded_area_m2` = sum(cos^2 phi dA) of its first-hit samples (from the
-    mesh, so ramps and edges count less than a face), times face plus own base (Hoerner ch. VIII). No credit for the
-    boundary layer it stands in. Error [E]: +-40 %."""
+    """Drag of a blunt part standing in the flow: `loaded_area_m2` = sum(cos^2 phi dA) of its exposed samples (from the
+    mesh, so ramps and edges count less than a face), times face plus own base (Hoerner ch. VIII). The caller credits the
+    boundary layer per sample before passing the area (`boundary_layer_q_share`). Error [E]: +-40 %."""
     face, _ = blunt_face_cd(mach)
     back, _ = base_cd(mach, 1.0, False, 1.0)
     return (face + back) * loaded_area_m2 / a_ref_m2, 0.4
@@ -133,16 +147,28 @@ def grid_fin_capture(mach: float, open_fraction: float) -> float:
     return min(1.0, open_fraction * area_ratio * pitot) if mach > 0.3 else 1.0
 
 
-def grid_fin_ca(mach: float, open_fraction: float, altitude_m: float, k_gross: float, depth_m: float, pitch_m: float) -> tuple[float, float]:
-    """Axial force of a grid fin at zero deflection, per its gross frontal area.
+def thick_grid_tau(depth_over_dh: float) -> float:
+    """Idel'chik's thick-grid coefficient: tau = (2.4 - l) 10^-phi, phi = 0.25 + 0.535 l^8 / (0.05 + l^7), l = depth over
+    hydraulic diameter (recalled [E]). The entry jet has not reattached in a short cell, so a shallow entry loses more."""
+    l = depth_over_dh
+    return (2.4 - l) * 10.0 ** (-(0.25 + 0.535 * l ** 8 / (0.05 + l ** 7)))
+
+
+def grid_fin_ca(mach: float, open_fraction: float, altitude_m: float, k_gross: float, depth_m: float, pitch_m: float,
+                wall_m: float, entry_depth_m: float) -> tuple[float, float]:
+    """Axial force of a grid fin at zero deflection, per its gross frontal area, for one flow direction.
 
     Started flow: wall faces and friction in the cells. Subsonic: Idel'chik's thick grid
-    (0.5 (1 - f) + (1 - f)^2) / f^2 on the approach q; supersonic: the first-hit Newtonian `k_gross` (per gross area, from
-    the mesh, per unit cp_max) times cp_max plus the walls' base. Choked (capture < 1): the spilled share of the stream
-    acts on a solid plate (blunt face plus base), the swallowed share as started.
+    (0.5 (1 - f) + tau (1 - f)^1.5 + (1 - f)^2) / f^2 on the approach q, tau from the mean cell depth of the face met
+    first (`entry_depth_m`; the scooped aft face is shallower than the flat forward face). Supersonic: the Newtonian
+    `k_gross` of that direction (per gross area, from the mesh, per unit cp_max) times cp_max plus the walls' base.
+    Choked (capture < 1): the spilled share of the stream acts on a solid plate (blunt face plus base), the swallowed
+    share as started.
     Friction: 2 wall families x 2 faces x depth / pitch of wetted area per gross area. Error [E]: +-30 % subsonic and
     started, +-50 % choked (no fin-specific data; Washington & Miller, AIAA 93-0035 is the only comparison named in
-    aero/grid_fin.csv, not re-read here)."""
+    aero/grid_fin.csv, not re-read here). One-sided [E]: `wall_m` is an upper bound and the forward face is drawn flat, both
+    high: wall 0.02 m gives about half at Mach 0.3 and 0.40 for 0.57 at Mach 5; a scooped forward face about 0.34 at Mach 5.
+    The value is nearer an upper estimate than a centre."""
     capture = grid_fin_capture(mach, open_fraction)
     solidity = 1.0 - open_fraction
     state = air(altitude_m)
@@ -151,7 +177,8 @@ def grid_fin_ca(mach: float, open_fraction: float, altitude_m: float, k_gross: f
     cf, _ = flat_plate_cf(state["rho"] * speed * depth_m / state["mu"], mach, state["t"])
     friction = cf * 4.0 * depth_m / pitch_m * velocity_gain
     if mach < 1.0:
-        started = (0.5 * solidity + solidity * solidity) / open_fraction ** 2 + friction
+        tau = thick_grid_tau(entry_depth_m / (pitch_m - wall_m))
+        started = (0.5 * solidity + tau * solidity ** 1.5 + solidity * solidity) / open_fraction ** 2 + friction
     else:
         started = cp_max(mach) * k_gross + base_cd(mach, solidity, False, 1.0)[0] + friction
     if capture >= 1.0:

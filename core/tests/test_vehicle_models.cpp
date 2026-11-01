@@ -117,8 +117,34 @@ TEST_CASE("Engine performance reproduces sea-level and vacuum data", "[propulsio
     CHECK(rvac.can_operate(100.0));
 }
 
+TEST_CASE("The stack and the ship alone fly their own axial tables", "[aero][vehicle]") {
+    const aero::AxialDragCurve stack_table(config::load_csv_table(config_dir / "aero/starship_stack_ascent.csv"));
+    const aero::AxialDragCurve ship_table(config::load_csv_table(config_dir / "aero/ship_ascent.csv"));
+    // Mach 1.05: the derived stack with grid fins and parts, more than twice the ship's
+    CHECK(stack_table.cd(1.05, true) > 2.0 * ship_table.cd(1.05, true));
+    CHECK(stack_table.cd(99.0, true) == Catch::Approx(stack_table.cd(5.0, true)));  // held beyond the last row
+
+    auto id = GENERATE("starship_block3", "starship_tanker", "starship_depot", "starship_hls_launch");
+    CAPTURE(id);
+    vehicle::Vehicle stack(config::load_vehicle(config_dir, id), config_dir);
+    for (const double mach : {0.3, 1.05, 3.0, 5.0}) {
+        CHECK(stack.aero().drag_curve(false).cd(mach, true) == Catch::Approx(stack_table.cd(mach, true)));
+    }
+    const auto upper = stack.separate(1);
+    for (const double mach : {0.3, 1.05, 3.0, 5.0}) {
+        CHECK(upper->aero().drag_curve(false).cd(mach, true) == Catch::Approx(ship_table.cd(mach, true)));
+        CHECK(stack.aero().drag_curve(false).cd(mach, true) == Catch::Approx(stack_table.cd(mach, true)));  // booster: nose first, not flown
+    }
+}
+
+TEST_CASE("Falcon 9 keeps its own ascent table", "[aero][vehicle]") {
+    const aero::AxialDragCurve falcon_table(config::load_csv_table(config_dir / "aero/falcon9_ascent.csv"));
+    const vehicle::Vehicle falcon(config::load_vehicle(config_dir, "falcon9_block5"), config_dir);
+    CHECK(falcon.aero().drag_curve(false).cd(1.2, true) == Catch::Approx(falcon_table.cd(1.2, true)));
+}
+
 TEST_CASE("Slender body aerodynamics", "[aero]") {
-    const auto table = config::load_csv_table(config_dir / "aero/starship_stack_ascent.csv");
+    const auto table = config::load_csv_table(config_dir / "aero/ship_ascent.csv");
     const aero::AxialDragCurve drag(table);
     CHECK(drag.cd(0.0, true) == Catch::Approx(0.30));
     CHECK(drag.cd(1.125, true) == Catch::Approx(0.60));  // midway between Mach 1.05 and 1.2
@@ -149,7 +175,7 @@ TEST_CASE("Mean free path and rarefied-flow drag", "[environment][aero]") {
     CHECK(aero::rarefaction_weight(100.0) == 1.0);
     CHECK(aero::rarefaction_weight(0.1) == Catch::Approx(0.5));  // midpoint of the bridge
 
-    const auto table = config::load_csv_table(config_dir / "aero/starship_stack_ascent.csv");
+    const auto table = config::load_csv_table(config_dir / "aero/ship_ascent.csv");
     const aero::SlenderBodyAero body({52.1, 9.0, 17.0}, aero::AxialDragCurve(table));
     const double area = constants::pi * 0.25 * 81.0;
     const auto orbit = atmosphere.at(400e3);

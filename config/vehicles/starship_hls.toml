@@ -92,7 +92,7 @@ landing_only = true                      # l4 flies them: last part of the landi
 [stage.aero]                             # the ship's hull (never flown in air: data for completeness)
 reference_diameter_m = 9.0
 crossflow_table = "aero/ship_crossflow.csv"
-ascent_drag_table = "aero/starship_stack_ascent.csv"
+ascent_drag_table = "aero/ship_ascent.csv"
 nose_length_m = 17.0
 
 # Legs: all [E]; fixed (always deployed). Sized by the lunar l2 drop tests (user 2026-10-15): a vertical touchdown on a

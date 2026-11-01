@@ -188,7 +188,7 @@ void Vehicle::rebuild_aero() {
         }
     }
     if (drag.empty() && aero_) {
-        // [E] Upper stage without its own table keeps the stack table after separation.
+        // [E] Upper stage without its own table keeps the table it flew with (the ships have ship_ascent.csv).
         drag = aero_->drag_curve();
     }
     // Tail-first flight: the base shape is that of the lowest stage.

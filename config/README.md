@@ -80,7 +80,7 @@ flow separation (vacuum engines).
   the set tears beyond it), `deploy_height_m` (mains below drogues), optional `max_deploy_dynamic_pressure_pa` (the
   deployment waits above it). Only the lowest stage's sets are sequenced (a capsule flying alone).
 - `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry guidance profile),
-  referenced by `[stage.aero] entry_alpha_table`. The ship's `ascent_drag_table` (the stack's [E]) gives its axial
+  referenced by `[stage.aero] entry_alpha_table`. The ship's `ascent_drag_table` (`aero/ship_ascent.csv` [E]) gives its axial
   drag when it flies alone.
 - `aero/radiative_heating_earth.csv` (lunar l5): equilibrium stagnation-point radiative heating for Earth air
   [S: Sutton & Hartung, NASA TM-102652, 1990; 624 rows, 30-84 km, 8-18 km/s, nose radius 0.05-10 m], interpolated by

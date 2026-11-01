@@ -245,6 +245,25 @@ class Vehicle:
         solid = sum(self.grid_fin_blocked_area_m2(cell_m).values())
         return (gross - solid) * (1.0 - self.grid_fin_wall_share()) / gross
 
+    def grid_fin_mean_depth_m(self, face: str) -> float:
+        """Mean depth of a cell wall when that face is met first: the thickness less the scoop's mean (drawn `horn`)."""
+        fin = self.detail["grid_fin"]
+        dip = fin["cusp_dip_aft_m"] if face == "aft" else fin["cusp_dip_fwd_m"]
+        mean = float(np.mean([_horn(u, fin["cusp_soft"]) for u in np.linspace(0.0, 1.0, 2001)]))
+        return fin["thickness_m"] - dip * mean
+
+    def hot_stage_open_height_m(self) -> float:
+        """Open band of the hot-stage: barrel end (station L - dome_start_m) to the closed ring under the ship."""
+        return self.detail["hull"]["dome_start_m"] - self.detail["booster"]["hot_stage_ring"]["height_m"]
+
+    def outer_radius_m(self, x_m) -> np.ndarray:
+        """Radius of the bare hull at a stack station: the booster's barrel (no dome: the band's outer line), the ship's lathe."""
+        booster, ship = self._profile("booster"), self._profile("ship")
+        base = self.booster_length_m
+        grid = np.arange(0.0, base + ship.L + 0.05, 0.05)
+        radius = [booster.base(min(x, booster.x_barrel_end)) if x < base else ship.base(min(x - base, ship.L)) for x in grid]
+        return np.interp(x_m, grid, radius)
+
     def grid_fin_wall_edge_cos2(self, face: str) -> float:
         """Mean cos^2(phi) of a wall's end face along its length. Forward face flat at the drawn dip 0 -> 1; aft face
         scooped by `cusp_dip_aft_m` with a saddle per pitch (the drawn `horn` profile, gen_grid_fin.py)."""
