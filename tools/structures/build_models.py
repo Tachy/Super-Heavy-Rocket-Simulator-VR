@@ -157,7 +157,7 @@ def vehicle_hash(spec_text: str, version: str) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
     h.update(spec_text.encode())
-    for p in [SCRIPT_DIR / "common.py", SCRIPT_DIR / "vehicle_common.py", Path(hull_textures.__file__),
+    for p in [SCRIPT_DIR / "common.py", SCRIPT_DIR / "vehicle_common.py", SCRIPT_DIR / "hull_profile.py", Path(hull_textures.__file__),
               Path(hull_tiles.__file__), *(SCRIPT_DIR / g for g in VEHICLE_GENERATORS)]:
         h.update(p.name.encode())
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))
@@ -171,7 +171,8 @@ def vehicle_outputs(spec: dict) -> tuple:
 def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> dict:
     """What the game needs besides the glTF: per-flap rotation signs, engine exit planes, the frame statement."""
     flaps = {st_id: [{k: f[k] for k in ("id", "kind", "hinge_azimuth_deg", "station_aft_m", "station_fwd_m", "span_m",
-                                          "rotation_sign_about_plus_x")} for f in st["flaps"]]
+                                          "rotation_sign_about_plus_x", "drawn_hinge_station_aft_m",
+                                          "drawn_hinge_lean_deg", "drawn_hinge_radius_aft_m")} for f in st["flaps"]]
              for st_id, st in spec["stages"].items() if st["flaps"]}
     detail = spec["detail"]
     recess = detail["ship"]["engine_recess"]

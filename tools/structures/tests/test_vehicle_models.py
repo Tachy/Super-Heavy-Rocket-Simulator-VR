@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
 import build_models  # noqa: E402
+import hull_profile  # noqa: E402
 import hull_textures  # noqa: E402
 import hull_tiles  # noqa: E402
 import vehicle_spec  # noqa: E402
@@ -262,7 +264,7 @@ def test_flaps_hinge_on_the_axis_and_drawn_shape_from_the_detail_file(built, spe
         f = next(f for st in spec["stages"].values() for f in st["flaps"] if f["kind"] == kind)
         d = spec["detail"]["flap"][kind]
         length = f["station_fwd_m"] - f["station_aft_m"]
-        u0 = (length - d["hinge_drawn_length_m"]) / 2.0  # the drawn hinge edge is centred on the physics hinge
+        u0 = 0.0  # the model origin is the drawn hinge's aft end; the placement comes from the manifest
         parts = _meshes(built / f"flap_{kind}.gltf")
         plo, phi = _bounds(parts["panel"][0])
         assert plo[0] == pytest.approx(u0 + min(d["outline_u_m"]), abs=BOUND_TOL_M)
@@ -279,6 +281,77 @@ def test_flaps_hinge_on_the_axis_and_drawn_shape_from_the_detail_file(built, spe
         pts = list(zip(d["outline_u_m"], d["outline_v_m"]))
         area = 0.5 * abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1])))
         assert 0.25 * f["area_m2"] < area < 1.1 * f["area_m2"]
+
+
+def _ship_profile(spec):
+    return hull_profile.Profile(spec["stages"]["ship"], spec["detail"]["hull"], spec["detail"]["ship"]["engine_bay"]["aft_chamfer_m"])
+
+
+def _fwd_hinge_ends(f, spec):
+    """(station, radius) of the drawn hinge's aft and forward end."""
+    lean, length = math.radians(f["drawn_hinge_lean_deg"]), spec["detail"]["flap"]["fwd"]["hinge_drawn_length_m"]
+    x, r = f["drawn_hinge_station_aft_m"], f["drawn_hinge_radius_aft_m"]
+    return (x, r), (x + length * math.cos(lean), r - length * math.sin(lean))
+
+
+def test_forward_flap_hinge_is_the_chord_of_the_drawn_hull_and_lies_in_the_cover(spec):
+    ship, profile = spec["stages"]["ship"], _ship_profile(spec)
+    cover_height = spec["detail"]["flap"]["hinge_cover"]["height_m"]
+    fwd = [f for f in ship["flaps"] if f["kind"] == "fwd"]
+    assert len(fwd) == 2
+    for f in fwd:
+        (xa, ra), (xf, rf) = _fwd_hinge_ends(f, spec)
+        # derived, not typed in: the chord of profile.base over the flap's stations (centred on the physics hinge)
+        assert xa == pytest.approx(39.1) and f["drawn_hinge_station_aft_m"] == xa  # planform and stations as before
+        chord = math.degrees(math.atan2(profile.base(xa) - profile.base(xf), xf - xa))
+        assert f["drawn_hinge_lean_deg"] == pytest.approx(chord, abs=0.01) and 5.0 < chord < 12.0
+        for i in range(51):  # along the whole hinge: on the shell or above it, below the top of the cover
+            t = i / 50.0
+            gap = ra + t * (rf - ra) - profile.base(xa + t * (xf - xa))
+            assert -1e-6 <= gap <= cover_height, (f["id"], t, gap)
+
+
+def test_aft_flap_hinge_stays_centred_unleaned_on_the_hull(spec):
+    ship = spec["stages"]["ship"]
+    for f in (f for f in ship["flaps"] if f["kind"] == "aft"):
+        length = f["station_fwd_m"] - f["station_aft_m"]
+        centred = f["station_aft_m"] + (length - spec["detail"]["flap"]["aft"]["hinge_drawn_length_m"]) / 2.0
+        assert f["drawn_hinge_station_aft_m"] == centred and f["drawn_hinge_lean_deg"] == 0.0
+        assert f["drawn_hinge_radius_aft_m"] == ship["diameter_m"] / 2.0
+
+
+def _rotate(v, axis, angle):
+    """Rodrigues: v turned by angle about the unit axis."""
+    c, s_ = math.cos(angle), math.sin(angle)
+    k = sum(a * b for a, b in zip(axis, v))
+    cr = (axis[1] * v[2] - axis[2] * v[1], axis[2] * v[0] - axis[0] * v[2], axis[0] * v[1] - axis[1] * v[0])
+    return tuple(v[i] * c + cr[i] * s_ + axis[i] * k * (1.0 - c) for i in range(3))
+
+
+def test_forward_flap_panel_never_enters_the_drawn_hull(spec):
+    """The panel's mid-plane outline at d = 0..90, placed as game/vehicle/vehicle_models.gd flap_transform does."""
+    ship, profile = spec["stages"]["ship"], _ship_profile(spec)
+    d = spec["detail"]["flap"]["fwd"]
+    for f in (f for f in ship["flaps"] if f["kind"] == "fwd"):
+        az, lean = math.radians(f["hinge_azimuth_deg"]), math.radians(f["drawn_hinge_lean_deg"])
+        e_r = (0.0, math.cos(az), math.sin(az))
+        x_ax = (math.cos(lean), -math.sin(lean) * e_r[1], -math.sin(lean) * e_r[2])
+        y_ax = (math.sin(lean), math.cos(lean) * e_r[1], math.cos(lean) * e_r[2])
+        stow = (0.0, -e_r[2], e_r[1])  # X x e_r
+        belly = math.radians(ship["belly_azimuth_deg"])
+        if stow[1] * math.cos(belly) + stow[2] * math.sin(belly) > 0.0:
+            stow = tuple(-c for c in stow)
+        hinge = (f["drawn_hinge_station_aft_m"], f["drawn_hinge_radius_aft_m"] * e_r[1], f["drawn_hinge_radius_aft_m"] * e_r[2])
+        for deg in range(0, 91, 5):
+            for u, v in zip(d["outline_u_m"], d["outline_v_m"]):
+                for t in (0.0, 0.5, 1.0):  # along the outline edges' start, the interior up to the hinge
+                    p_local = tuple(u * x_ax[i] + t * v * stow[i] for i in range(3))
+                    p = _rotate(p_local, x_ax, f["rotation_sign_about_plus_x"] * math.radians(deg))
+                    q = tuple(hinge[i] + p[i] for i in range(3))
+                    assert math.hypot(q[1], q[2]) >= profile.base(q[0]) - 1e-6, (f["id"], deg, u, v, t)
+        # the hinge axis does not move under the deflection
+        for deg in (0, 45, 90):
+            assert _rotate(x_ax, x_ax, math.radians(deg)) == pytest.approx(x_ax)
 
 
 @needs_blender

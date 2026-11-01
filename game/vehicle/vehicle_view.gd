@@ -26,7 +26,7 @@ var _models := {}
 var _stage_bases_m: Array[float] = []
 var _stage_ids: Array[String] = []
 var _engine_slots: Array[Dictionary] = []  # per engine: {"multimesh", "slot", "stage"}
-var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "stage", "sign"}; the node is null without a model
+var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
 var _engine_poses: Array[Transform3D] = []  # last pose per engine, stage-local body coordinates (headless tests)
 
@@ -219,7 +219,7 @@ func _build_flaps(stages: Array, flaps: Array, stage_nodes: Array[Node3D]) -> vo
 			instance.material_override = _hull_material("flap" if part == "panel" else "steel")
 			node.add_child(instance)
 		stage_nodes[stage].add_child(node)
-		_flap_nodes.append({"node": node, "stage": stage, "sign": int(entry["rotation_sign_about_plus_x"])})
+		_flap_nodes.append({"node": node, "entry": entry})
 
 
 func _build_fins(stages: Array, grid_fins: Array, stage_nodes: Array[Node3D]) -> void:
@@ -284,9 +284,7 @@ func _pose_models(stages: Array, engines: Array, flaps: Array, grid_fins: Array)
 	for i in mini(flaps.size(), _flap_nodes.size()):
 		var entry: Dictionary = _flap_nodes[i]
 		if entry["node"] != null:
-			var stage: int = entry["stage"]
-			(entry["node"] as Node3D).transform = VehicleModels.flap_transform(flaps[i], _stage_bases_m[stage],
-					stages[stage]["diameter_m"] * 0.5, entry["sign"])
+			(entry["node"] as Node3D).transform = VehicleModels.flap_transform(flaps[i], entry["entry"])
 	for i in mini(grid_fins.size(), _fin_nodes.size()):
 		var entry: Dictionary = _fin_nodes[i]
 		if entry["node"] != null:

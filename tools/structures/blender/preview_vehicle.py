@@ -60,9 +60,12 @@ def assemble(spec, parent, base_x, stage_id, parts, fin_deg, flap_deg):
         if stow.dot(Vector((0.0, math.cos(math.radians(st["belly_azimuth_deg"])),
                             math.sin(math.radians(st["belly_azimuth_deg"]))))) > 0.0:
             stow = -stow
-        pivot = Matrix.Translation(Vector((f["station_aft_m"], 0.0, 0.0)) + e_r * (st["diameter_m"] / 2.0))
-        rot = Matrix.Rotation(f["rotation_sign_about_plus_x"] * math.radians(flap_deg), 4, "X")
-        _place(parts["flap_" + f["kind"]], parent, shift @ pivot @ rot @ _basis(Vector((1, 0, 0)), e_r, stow))
+        lean = math.radians(f["drawn_hinge_lean_deg"])  # the drawn hinge leans towards the axis going forward
+        x_hinge = Vector((math.cos(lean), 0.0, 0.0)) - e_r * math.sin(lean)
+        y_hinge = Vector((math.sin(lean), 0.0, 0.0)) + e_r * math.cos(lean)
+        pivot = Matrix.Translation(Vector((f["drawn_hinge_station_aft_m"], 0.0, 0.0)) + e_r * f["drawn_hinge_radius_aft_m"])
+        rot = Matrix.Rotation(f["rotation_sign_about_plus_x"] * math.radians(flap_deg), 4, x_hinge)
+        _place(parts["flap_" + f["kind"]], parent, shift @ pivot @ rot @ _basis(x_hinge, y_hinge, stow))
     for g in st["engines"]:
         for az in g["angles_deg"]:
             a = math.radians(az)
@@ -94,7 +97,9 @@ def main():
              ("ship_base", (0, 0, bl + 8), 60.0, 200.0, 35.0, (1400, 1000)),
              ("booster_base", (0, 0, 6), 45.0, 30.0, -25.0, (1400, 1000)),
              ("booster_top", (0, 0, bl - 6), 55.0, 150.0, 20.0, (1400, 1000)),
-             ("fin_close", (0, 0, 64), 22.0, 20.0, 15.0, (1400, 1000))]
+             ("fin_close", (0, 0, 64), 22.0, 20.0, 15.0, (1400, 1000)),
+             ("fwdflap_side", (0, 0, bl + 42), 24.0, 20.0, 0.0, (1400, 1000)),
+             ("fwdflap_front", (0, 0, bl + 42), 24.0, 110.0, 0.0, (1400, 1000))]
     for name, centre, dist, az, el, size in shots:
         common_render(out / f"{name}.png", centre, dist, az, el, size)
         print("PREVIEW", name)

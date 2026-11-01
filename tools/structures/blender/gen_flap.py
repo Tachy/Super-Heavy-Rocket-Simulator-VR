@@ -1,14 +1,15 @@
 """Flaps of the ship, redrawn from the 1:100 reference model (planform, wedge section, hinge lugs; the detail file's
-[flap.aft] / [flap.fwd] outlines; the drawn hinge edge is centred on the physics hinge,
-the physics sizes stay in the config).
+[flap.aft] / [flap.fwd] outlines; the model origin is the drawn hinge's aft end, where that is on the vehicle comes
+from the manifest (drawn_hinge_*), the physics sizes stay in the config).
 
 Flaps of the ship: gen_flap.py -- --spec <json> --out <dir> writes flap_fwd.gltf and flap_aft.gltf.
 
 Frame (Blender axes kept): the HINGE LINE is the X axis from the hinge's aft end (X = 0, the origin) to its forward end
-(X = hinge length = station_fwd - station_aft); the panel lies along +Z in the stowed pose (span, Z = 0 .. span), its
+(X = the drawn hinge length, hinge_drawn_length_m); the panel lies along +Z in the stowed pose (span, Z = 0 .. span), its
 thickness is Y (+-t/2, a wedge: thick at the hinge, thin at the outer edge) and the outer (windward when deflected, tile-covered) face is +Y. Placement and rotation by the
-game: basis (X = station axis, Y = e_r radial outward at the hinge azimuth, Z = tangent X x e_r), mirrored in Z when the
-hinge's stow direction points to the belly side; the deflection d rotates the panel about +X by
+game: basis (X = the hinge, leaned from the station axis towards the axis going forward by drawn_hinge_lean_deg in the
+meridian plane of the hinge azimuth; Y = normal to it in that plane; Z = tangent X x e_r), mirrored in Z when the
+hinge's stow direction points to the belly side; the deflection d rotates the panel about the hinge X by
 `rotation_sign_about_plus_x` * d (manifest, from core/src/aero/flap.cpp), zero = rest pose. UV = (X metres, Z metres):
 glTF v is Z. Nodes: `flap` (root) with `panel` and `hinge` (the hinge fairing tube, centred on the X axis).
 """
@@ -29,23 +30,11 @@ COVER_R_M = 0.2  # [E] about 0.35-0.4 m across, against the ~0.95 m panels
 COVER_H_M = 0.05  # [E]
 
 
-def flap_dims(spec, kind):
-    for st in spec["stages"].values():
-        for f in st["flaps"]:
-            if f["kind"] == kind:
-                return f["station_fwd_m"] - f["station_aft_m"], f["span_m"]
-    raise SystemExit(f"no flap of kind {kind}")
-
-
 def flap_outline(spec, kind):
-    """(u, v) outline points of the drawn flap in the frame (X along the hinge, Z = span) and the hinge's X range.
-
-    The drawn hinge edge (1:100 model) is centred on the physics hinge: u0 = (physics length - drawn length) / 2."""
-    length, _ = flap_dims(spec, kind)
+    """(u, v) outline points of the drawn flap in the frame (X along the hinge, Z = span), the hinge's X range
+    and the lug positions. The origin is the drawn hinge's aft end (1:100 model)."""
     f = spec["detail"]["flap"][kind]
-    u0 = (length - f["hinge_drawn_length_m"]) / 2.0
-    pts = [(u0 + u, v) for u, v in zip(f["outline_u_m"], f["outline_v_m"])]
-    return pts, (u0, u0 + f["hinge_drawn_length_m"]), [u0 + u for u in f["lug_u_m"]]
+    return list(zip(f["outline_u_m"], f["outline_v_m"])), (0.0, f["hinge_drawn_length_m"]), list(f["lug_u_m"])
 
 
 def build_flap(spec, kind):

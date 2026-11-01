@@ -123,8 +123,8 @@ func _check_gimbal(view: VehicleView, snapshot: Dictionary) -> void:
 func _check_flaps(stages: Array, snapshot: Dictionary, view: VehicleView, root: Node3D) -> void:
 	var belly_deg: float = _piece(stages, "ship")["stage"][0]["aero"]["belly_azimuth_deg"]
 	var belly := _radial(belly_deg)
-	var hull_radius: float = stages[1]["diameter_m"] * 0.5
 	var base: float = stages[1]["base_station_m"]
+	var models := VehicleModels.load_for(VEHICLE)
 	for state in FLAP_STATES_DEG:
 		var flaps: Array = snapshot["flaps"].duplicate(true)
 		for flap: Dictionary in flaps:
@@ -137,21 +137,32 @@ func _check_flaps(stages: Array, snapshot: Dictionary, view: VehicleView, root: 
 			if node == null:
 				continue
 			var e_r := _radial(flap["hinge_azimuth_deg"])
-			# core/src/aero/flap.cpp flap_span_direction: stow = X x e_r away from the belly; d = 0 stow, 90 radial.
+			var entry := VehicleModels.flap_entry(models, "ship", flap, base)
+			var lean := deg_to_rad(float(entry["drawn_hinge_lean_deg"]))
+			var kind: String = entry["kind"]
+			# the lean is derived from the drawn hull (chord over the flap's stations; the python spec test checks the value)
+			_check(rad_to_deg(lean) > 5.0 and rad_to_deg(lean) < 12.0 if kind == "fwd" else lean == 0.0,
+					"flap %d (%s): hinge leans along the ogive (forward) / not (aft)" % [i, kind])
+			# The drawn hinge leans towards the axis going forward in the meridian plane; Y' is its normal there.
+			var hinge_axis := Vector3.RIGHT * cos(lean) - e_r * sin(lean)
+			var normal := Vector3.RIGHT * sin(lean) + e_r * cos(lean)
+			# core/src/aero/flap.cpp flap_span_direction: stow = X x e_r away from the belly; d = 0 stow, 90 broadside
+			# (in the meridian plane, perpendicular to the hinge).
 			var stow := Vector3.RIGHT.cross(e_r)
 			stow = -stow if stow.dot(belly) > 0.0 else stow
-			var span := stow * cos(deg_to_rad(state)) + e_r * sin(deg_to_rad(state))
+			var span := stow * cos(deg_to_rad(state)) + normal * sin(deg_to_rad(state))
 			var label := "flap %d at %.0f deg" % [i, state]
 			_check((node.transform.basis * Vector3.BACK).is_equal_approx(span),
-					label + ": panel along the core's span direction")
-			_check((node.transform.basis * Vector3.RIGHT).is_equal_approx(Vector3.RIGHT),
-					label + ": hinge along the station axis")
-			var hinge := Vector3(flap["station_aft_m"] - base, e_r.y * hull_radius, e_r.z * hull_radius)
-			_check(node.transform.origin.is_equal_approx(hinge), label + ": hinge on the hull at the aft station")
-			# The tile-covered +Y face looks at the flow side: radial at rest, towards the belly at 90 deg.
+					label + ": panel along the core's span direction, perpendicular to the leaned hinge")
+			_check((node.transform.basis * Vector3.RIGHT).is_equal_approx(hinge_axis),
+					label + ": hinge axis = the leaned basis X' (does not move under the deflection)")
+			_check(is_zero_approx(span.dot(hinge_axis)), label + ": span perpendicular to the hinge")
+			var hinge := Vector3(float(entry["drawn_hinge_station_aft_m"]), 0.0, 0.0) + e_r * float(entry["drawn_hinge_radius_aft_m"])
+			_check(node.transform.origin.is_equal_approx(hinge), label + ": hinge at the drawn aft end station and radius")
+			# The tile-covered +Y face looks at the flow side: along Y' at rest (hull tangent), towards the belly at 90 deg.
 			var outer := node.transform.basis * Vector3.UP
 			if state == 0.0:
-				_check(outer.is_equal_approx(e_r), label + ": rest pose, outer face radial")
+				_check(outer.is_equal_approx(normal), label + ": rest pose, outer face along the hinge normal")
 			elif state == 90.0:
 				_check(outer.dot(belly) > 0.9, label + ": broadside, outer face to the belly side")
 			# The panel may not be mirrored differently from the hinge side: lengths stay.

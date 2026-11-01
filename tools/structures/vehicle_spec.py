@@ -10,12 +10,20 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
 import tomllib
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blender"))
+import hull_profile  # noqa: E402  (pure Python, shared with the Blender generators)
 
 ROOT = Path(__file__).resolve().parents[2]
 VEHICLES = ROOT / "config" / "vehicles"
 ENGINES = ROOT / "config" / "engines"
+
+
+HINGE_ITERATIONS = 4  # fixed point of the hinge lean (its axial extent depends on it): converged far below 1e-6 deg
+HINGE_SAMPLES = 50  # stations along the chord where the shell's sagitta is looked up
 
 
 class VehicleSpecError(ValueError):
@@ -139,6 +147,25 @@ def flap_rotation_sign(hinge_azimuth_deg: float, belly_azimuth_deg: float) -> in
     return 1 if flipped else -1
 
 
+def drawn_hinge(flap: dict, kind_detail: dict, profile: hull_profile.Profile) -> dict:
+    """Where the model's hinge is DRAWN (the physics hinge in the vehicle config stays as it is): the drawn flap is
+    centred on the physics hinge, and its axis is the straight chord of the drawn hull over its stations, lifted by the
+    chord's sagitta so that the line touches the shell at worst (the ogive is convex). On the barrel that is the hull
+    radius, unleaned; on the ogive the hinge leans towards the axis going forward. Aft end station, radius, lean."""
+    length = flap["station_fwd_m"] - flap["station_aft_m"]
+    drawn = kind_detail["hinge_drawn_length_m"]
+    x_a = flap["station_aft_m"] + (length - drawn) / 2.0
+    lean = 0.0
+    for _ in range(HINGE_ITERATIONS):  # the drawn length is along the leaned axis: its axial extent is drawn cos(lean)
+        x_f = x_a + drawn * math.cos(lean)
+        r_a, r_f = profile.base(x_a), profile.base(x_f)
+        lean = math.atan2(r_a - r_f, x_f - x_a)
+    sag = max(profile.base(x_a + (x_f - x_a) * i / HINGE_SAMPLES) - (r_a + (r_f - r_a) * i / HINGE_SAMPLES)
+              for i in range(HINGE_SAMPLES + 1))
+    return {"drawn_hinge_station_aft_m": x_a, "drawn_hinge_lean_deg": math.degrees(lean),
+            "drawn_hinge_radius_aft_m": r_a + sag}
+
+
 def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
     with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
         vehicle = tomllib.load(f)
@@ -150,6 +177,9 @@ def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENG
     for s in vehicle["stage"]:
         aero = s.get("aero", {})
         belly = float(aero.get("belly_azimuth_deg", 270.0))
+        profile = hull_profile.Profile({"length_m": float(s["length_m"]), "diameter_m": float(s["diameter_m"]),
+                                       "nose_length_m": float(aero.get("nose_length_m", 0.0))}, detail["hull"],
+                                       detail["ship"]["engine_bay"]["aft_chamfer_m"] if s["id"] == "ship" else None)
         flaps = []
         for fl in s.get("flap", []):
             flaps.append({
@@ -159,6 +189,7 @@ def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENG
                 "kind": "fwd" if fl["id"].startswith("forward") else "aft",
                 "rotation_sign_about_plus_x": flap_rotation_sign(float(fl["hinge_azimuth_deg"]), belly),
             })
+            flaps[-1].update(drawn_hinge(flaps[-1], detail["flap"][flaps[-1]["kind"]], profile))
         engines = []
         for g in s.get("engine_group", []):
             engine_ids.add(g["engine"])

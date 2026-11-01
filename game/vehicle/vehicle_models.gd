@@ -10,7 +10,7 @@ class_name VehicleModels
 const PROTOTYPE_VEHICLE_ID := "starship_block3"
 const MANIFEST := "manifest.json"
 const MODEL_FILES: Array[String] = ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"]
-const SOURCE_SCRIPTS: Array[String] = ["vehicle_common.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py",
+const SOURCE_SCRIPTS: Array[String] = ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py",
 		"gen_engine.py"]
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
 const ENGINE_FILE := {false: "raptor", true: "rvac"}
@@ -355,18 +355,24 @@ static func flap_entry(models: Dictionary, stage_id: String, flap: Dictionary, b
 	return {}
 
 
-## Flap model in stage-local body coordinates. The hinge (model X axis, origin at its aft end) sits on the hull at the
-## hinge azimuth; the model Z (panel at rest) is the stow direction of core/src/aero/flap.cpp (hull tangent away from
-## the belly: X x e_r, or its opposite = the mirrored basis when the manifest's rotation sign about +X is +1); the
-## deflection d turns the panel about +X by rotation_sign * d, towards e_r (d = 90 deg: radial, broadside).
-static func flap_transform(flap: Dictionary, base_station_m: float, hull_radius_m: float,
-		rotation_sign: int) -> Transform3D:
+## Flap model in stage-local body coordinates, placed by its manifest entry (the DRAWN hinge: aft end station and radius,
+## lean). The hinge (model X axis, origin at its aft end) sits at that point at the hinge azimuth and leans towards the
+## station axis going forward by the lean l, in the meridian plane: X' = cos l X - sin l e_r, Y' = sin l X + cos l e_r
+## (l = 0: the station axis and the radial). The model Z (panel at rest) is the stow direction of core/src/aero/flap.cpp
+## (hull tangent away from the belly: X x e_r, or its opposite = the mirrored basis when the manifest's rotation sign
+## about +X is +1); the deflection d turns the panel about the hinge X' by rotation_sign * d, towards Y' (d = 90 deg:
+## in the meridian plane, broadside, span perpendicular to the hinge).
+static func flap_transform(flap: Dictionary, entry: Dictionary) -> Transform3D:
+	var rotation_sign := int(entry["rotation_sign_about_plus_x"])
 	var azimuth := deg_to_rad(float(flap["hinge_azimuth_deg"]))
+	var lean := deg_to_rad(float(entry["drawn_hinge_lean_deg"]))
 	var e_r := Vector3(0.0, cos(azimuth), sin(azimuth))
+	var hinge_axis := Vector3.RIGHT * cos(lean) - e_r * sin(lean)
+	var normal := Vector3.RIGHT * sin(lean) + e_r * cos(lean)
 	var stow := Vector3.RIGHT.cross(e_r) * (-float(rotation_sign))
-	var rest := Basis(Vector3.RIGHT, e_r, stow)  # model (X, Y, Z) -> (station axis, radial, stow); det -1 = mirrored
-	var hinge := Vector3(float(flap["station_aft_m"]) - base_station_m, e_r.y * hull_radius_m, e_r.z * hull_radius_m)
-	var turn := Basis(Vector3.RIGHT, float(rotation_sign) * deg_to_rad(float(flap["deflection_deg"])))
+	var rest := Basis(hinge_axis, normal, stow)  # model (X, Y, Z) -> (hinge, normal, stow); det -1 = mirrored
+	var hinge := Vector3(float(entry["drawn_hinge_station_aft_m"]), 0.0, 0.0) 			+ e_r * float(entry["drawn_hinge_radius_aft_m"])
+	var turn := Basis(hinge_axis, float(rotation_sign) * deg_to_rad(float(flap["deflection_deg"])))
 	return Transform3D(turn * rest, hinge)
 
 

@@ -124,7 +124,8 @@ shaft_inset_m = 0.6                # [E] the shaft continues this far into the h
 
 # Flaps redrawn from the 1:100 model (Printables "I am Darth", CC BY-NC-SA 4.0; geometry measured, nothing copied). Planform
 # in the hinge frame: u along the hinge from its aft end, v = span away from the hinge (u may be < 0 = the panel overhangs the
-# hinge's aft end). The drawn hinge edge is centred on the physics hinge.
+# hinge's aft end). The drawn hinge edge is centred on the physics hinge; its axis is the chord of the drawn hull over its
+# stations (unleaned on the barrel).
 [flap]
 root_thickness_m = 0.45            # [E] wedge section: thickness at the hinge (model: slab 0.45 at the hinge)
 tip_thickness_m = 0.20             # [E] thickness at the outer edge (model 0.2-0.25)
@@ -139,7 +140,7 @@ outline_v_m = [0.0, 0.0, 0.44, 3.69, 3.69]    # [E] model: span 3.69 m (physics 
 lug_u_m = [0.8, 5.0, 10.7]         # [E] +-0.7 m: f14 file 5099 / 5299 s: two V brackets and one central actuator T (the model's 4 pegs are not on the flap)
 
 [flap.fwd]
-hinge_drawn_length_m = 5.8         # [E] model: model hinge edge 5.8 m (physics 8 m); the real hinge also leans 19 deg along the ogive
+hinge_drawn_length_m = 5.8         # [E] model: model hinge edge 5.8 m (physics 8 m), drawn centred on the physics hinge; its axis is the chord of the drawn hull over these stations (lean derived, about 8.7 deg; the model's own reading 18.9 deg at stations 42.28-47.75 is not used, user ruling 2026-11-01)
 outline_u_m = [0.0, 5.8, 5.7, 0.48, -1.49]    # [E] model: model x 0.1 (swept quad with an aft foot beyond the hinge's aft end)
 outline_v_m = [0.0, 0.0, 0.2, 3.04, 2.31]     # [E] model: span 3.04 m (physics 3.0 m); area 13.8 m^2 (physics 24)
 lug_u_m = [0.46, 5.3]              # [E] two brackets assumed like the aft flap, f12 1804 s does not resolve them

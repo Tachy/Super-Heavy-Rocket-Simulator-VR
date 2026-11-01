@@ -53,3 +53,7 @@ The fins were drawn root-flat with cells along the tangent (a misreading of the 
 - Grid fin: regular octagon on a corner (across flats 3.8 m, width 4.11 m), walls through the octagon's centre at pitch 0.47 m, a
   four-sided pyramid spike (0.22 m) under every crossing, toothed rim 0.66 m pitch / 0.25 m deep, 552 triangles, no cross rib,
   no band, no ring or struts, gross 11.9 m^2, lever arm r ~6.6 m. Replaced by the measured chamfered outline and cusped saddle walls.
+
+## Superseded 2026-11-01 (forward flap hinge)
+- Forward flap hinge drawn straight, parallel to the station axis at the hull radius R (4.5 m), the lean "stays undrawn on purpose"; flap pose basis (X station, Y e_r, stow) with the rotation about the body +X. Replaced by the leaned hinge (chord of the drawn hull).
+- Measured on the 1:100 model (not used, user ruling 2026-11-01): hinge edge lean 18.9 deg, stations 42.28-47.75, azimuth 20.1 deg, aft-end radius 4.64 m.
