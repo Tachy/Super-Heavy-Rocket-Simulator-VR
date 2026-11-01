@@ -9,6 +9,7 @@
 #include <vector>
 #include <random>
 
+#include "abort_trace.hpp"
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/math/constants.hpp"
@@ -134,6 +135,35 @@ TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea
     } else {
         CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
     }
+}
+
+// Diagnostics (STARSIM_ABORT_TRACE_DIR): the hull axis of the commanded aborts, for tools/validation/abort_clearance.py.
+TEST_CASE("Booster abort clearance trace", "[.abort_clearance]") {
+    const double abort_height_m = GENERATE(1500.0, 800.0, 400.0);
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
+    const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
+                                                          {0.0, 0.0, -nominal_sink_mps}, catch_roll(session.launch_site())),
+                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+    test::AbortTrace trace("booster_" + std::to_string(static_cast<int>(abort_height_m)));
+    const auto& booster = session.body(0);
+    bool aborted = false;
+    for (double t = 0.0; t < 150.0 && !booster.impacted() && !booster.resting() && !booster.caught(); t += 0.05) {
+        session.advance_to(t0 + t, 100);
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        const Vec3 p = sim::site_enu_m(session.launch_site(), transpose(tr.rotation) * booster.state().position_gcrf_m);
+        if (!aborted && p.z < abort_height_m) {
+            session.abort_landing(0);
+            aborted = true;
+        }
+        trace.sample(session, earth(), 0, t);
+    }
+    std::printf("[clearance] booster abort at %.0f m: %s, struck %d, %.1f t left\n", abort_height_m,
+                sim::to_string(session.landing_outcome(0)), session.tower()->tower_struck() ? 1 : 0, booster.vehicle().propellant_kg() / 1e3);
 }
 
 TEST_CASE("An abort the guidance cannot fly leaves the tower's arms alone", "[gnc][catch][abort]") {
