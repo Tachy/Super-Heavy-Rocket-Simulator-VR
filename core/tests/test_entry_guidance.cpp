@@ -282,6 +282,49 @@ TEST_CASE("Belly flop attitude faces the flow and points the nose along the lift
     CHECK(gnc::slew_toward(from, to, 40.0 * deg).w == to.w);
 }
 
+// Vehicle physics Task 6b: the step to the nose turn's rate, fed forward at Mach 0.7, asked 20-40 x the RCS and departed.
+TEST_CASE("The nose turn's commanded rate starts as a ramp", "[ship][guidance]") {
+    const auto steepest_rate_change = [](double acceleration_radps2) {
+        test::EntryStart start;
+        start.height_m = 12000.0;
+        start.speed_relative_mps = 120.0;
+        start.flight_path_angle_rad = -85.0 * deg;  // steeper than the freeze angle: the turn starts at once
+        start.heading_rad = 0.0;
+        test::ShipEntryScenario scenario(start);
+        const frames::GeodeticPosition target_geodetic{start.latitude_rad + 2000.0 / constants::wgs84_semi_major_axis_m, 0.0, 0.0};
+        gnc::EntryTarget target{frames::geodetic_to_fixed(target_geodetic), 0.0};
+        const math::Vec3 up = math::normalized(target.position_itrf_m);
+        target.nose_direction_itrf = math::normalized(cross(up, cross(math::Vec3{0.0, 0.0, 1.0}, up)));  // north
+        auto parameters = test_parameters();
+        parameters.terminal_nose_slew_acceleration_radps2 = acceleration_radps2;
+        gnc::EntryGuidance guidance(scenario.body(), ship_alpha_schedule(), target, parameters);
+        guidance.skip_to(gnc::EntryPhase::Terminal);
+        const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Gate, 600.0);
+        double steepest = 0.0;
+        for (size_t i = 1; i < samples.size(); ++i) {
+            if (samples[i].command.phase != gnc::EntryPhase::Terminal || samples[i - 1].command.phase != gnc::EntryPhase::Terminal) continue;
+            const double change = std::abs(norm(samples[i].command.rate_gcrf_radps) - norm(samples[i - 1].command.rate_gcrf_radps));
+            steepest = std::max(steepest, change / (samples[i].t_s - samples[i - 1].t_s));
+        }
+        return steepest;
+    };
+    const double limit = gnc::EntryGuidanceParameters{}.terminal_nose_slew_acceleration_radps2;
+    CHECK(steepest_rate_change(limit) <= limit * 1.01);
+    CHECK(steepest_rate_change(0.0) > 5.0 * limit);  // without the ramp: the step
+}
+
+// Vehicle physics Task 6c: the miss of a 61.6 t entry swung +-100 m between cycles: the difference crossed the schedule's
+// fraction onto the flat part the trim floor leaves above it.
+TEST_CASE("The steering difference stays on its side of the schedule's fraction", "[ship][guidance]") {
+    using Model = gnc::EntryPredictorModel;
+    const math::Vec3 x{1.0, 0.0, 0.0}, y{0.0, 1.0, 0.0};
+    CHECK(Model::steering_difference({0.36, 0.29, 0.0}, x, 0.1) == -0.1);  // |p| 0.46: forward it would cross
+    CHECK(Model::steering_difference({0.36, 0.29, 0.0}, y, 0.1) == -0.1);
+    CHECK(Model::steering_difference({0.1, 0.1, 0.0}, x, 0.1) == 0.1);
+    CHECK(Model::steering_difference({0.6, 0.0, 0.0}, x, 0.1) == 0.1);  // above the schedule: only the disk bounds it
+    CHECK(Model::steering_difference({0.8, 0.6, 0.0}, x, 0.1) == -0.1);
+}
+
 TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
     test::EntryStart start;
     start.height_m = 12000.0;

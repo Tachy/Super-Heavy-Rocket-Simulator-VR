@@ -67,16 +67,30 @@ struct EntryPredictorModel {
     }
     double nose_min_fraction = 0.02;
     double nose_max_fraction = 0.5;
+    static constexpr double schedule_fraction = 0.5;  // the steering fraction that flies the alpha schedule
+    // Finite difference of the steering along a unit direction: into the unit disk (beyond it the fraction is clamped: no
+    // slope) and not across the schedule's fraction from below: above it the map has another slope, none where the trim
+    // floor meets the schedule; a secant over that flat part halves the slope and the step overshoots (period-2 growth of
+    // the miss from Mach ~2, vehicle physics Task 6c).
+    static double steering_difference(const math::Vec3& steering, const math::Vec3& direction, double step) {
+        const double limit = norm(steering) <= schedule_fraction ? schedule_fraction : 1.0;
+        return norm(steering + direction * step) <= limit ? step : -step;
+    }
+    // Most lift the steering may ask for: never below what the flaps can trim at this Mach.
+    double steering_most_lift_alpha(double nominal, double mach) const {
+        const double floor = std::max(terminal_min_alpha_rad, aero.lowest_trimmed_alpha_rad(mach));
+        return std::min(nominal, std::max(nominal - terminal_alpha_authority_rad, floor));
+    }
     double steering_alpha(double fraction, double mach) const {
         const double f = std::clamp(fraction, 0.0, 1.0);
         const double nominal = std::min(aero.alpha_rad(mach), 0.5 * constants::pi);
-        const double most_lift = std::max(nominal - terminal_alpha_authority_rad, terminal_min_alpha_rad);
+        const double most_lift = steering_most_lift_alpha(nominal, mach);
         return f <= 0.5 ? 0.5 * constants::pi + (nominal - 0.5 * constants::pi) * (f / 0.5)
                         : nominal + (most_lift - nominal) * ((f - 0.5) / 0.5);
     }
     double steering_fraction(double alpha_rad, double mach) const {
         const double nominal = std::min(aero.alpha_rad(mach), 0.5 * constants::pi);
-        const double most_lift = std::max(nominal - terminal_alpha_authority_rad, terminal_min_alpha_rad);
+        const double most_lift = steering_most_lift_alpha(nominal, mach);
         if (alpha_rad >= nominal) {
             const double span = 0.5 * constants::pi - nominal;
             return span > 1e-9 ? std::clamp(0.5 * (0.5 * constants::pi - alpha_rad) / span, 0.0, 0.5) : 0.5;

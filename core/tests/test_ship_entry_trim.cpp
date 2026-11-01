@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include "starsim/aero/flap.hpp"
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
+#include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -72,6 +74,47 @@ TEST_CASE("The pitch trim table agrees with the moments it was solved on", "[ent
         CAPTURE(mach);
         const auto l = loads(*v, mach, alpha, d[0], d[2]);
         CHECK(std::abs(l.hull_pitch_m3 + l.flap_pitch_m3) < 30.0);  // 3 % of the flaps' moment: the tables' interpolation
+    }
+}
+
+namespace {
+
+// Whether the pairs can balance the pitch moment at this Mach and alpha, from the moments at the two stop pairs alone.
+bool pitch_trimmable(const vehicle::Vehicle& v, double mach, double alpha) {
+    const double stop = v.stages().front().flaps.front().max_deflection_rad;
+    const auto sum = [](const Loads& l) { return l.hull_pitch_m3 + l.flap_pitch_m3; };
+    return (sum(loads(v, mach, alpha, stop, 0.0)) < 0.0) != (sum(loads(v, mach, alpha, 0.0, stop)) < 0.0);
+}
+
+}  // namespace
+
+TEST_CASE("The terminal steering never asks for less alpha than the flaps can trim", "[entry][flap][trim][guidance]") {
+    const gnc::AlphaSchedule schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
+    constexpr double search_step_rad = 1.0 * deg;  // the table's search step
+    constexpr double table_alpha_min_rad = 40.0 * deg;
+    for (const double propellant : {35000.0, 64000.0}) {  // both ends of the entry's mass and CG
+        const auto v = ship(propellant);
+        gnc::EntryPredictorModel model;
+        model.aero = gnc::EntryAeroTable(*v, schedule);
+        for (const double mach : {0.3, 0.7, 0.9, 1.2, 1.5, 2.0, 3.0, 4.0}) {
+            CAPTURE(propellant, mach);
+            const double nominal = std::min(schedule.at(mach), constants::pi / 2.0);
+            const double lowest = model.aero.lowest_trimmed_alpha_rad(mach);
+            CHECK(lowest <= nominal + 1e-9);
+            if (lowest < nominal) {  // otherwise the schedule itself is the edge (64 t: it does not trim there)
+                CHECK(pitch_trimmable(*v, mach, lowest));
+                // the search ends at the table's 40 deg (Mach 3 and 4 at 35 t trim below it): no edge there
+                if (lowest > table_alpha_min_rad + search_step_rad) {
+                    CHECK_FALSE(pitch_trimmable(*v, mach, lowest - search_step_rad));
+                }
+            }
+            // Most lift is the floor or the [E] authority below the schedule; the predictor flies the same function.
+            const double most_lift = model.steering_alpha(1.0, mach);
+            CHECK(most_lift >= lowest - 1e-9);
+            CHECK(most_lift <= nominal + 1e-9);
+            CHECK(model.steering_alpha(0.5, mach) == Catch::Approx(nominal));
+            if (nominal - most_lift > 1e-3) CHECK(model.steering_fraction(most_lift, mach) == Catch::Approx(1.0));
+        }
     }
 }
 

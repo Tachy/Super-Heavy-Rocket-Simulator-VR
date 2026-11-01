@@ -59,6 +59,9 @@ struct EntryGuidanceParameters {
     // [E] the commanded attitude follows the turn at this multiple of its rate: at 2x the pitch-up to the turn's alpha
     // together with the turn saturated the flaps and set off a roll limit cycle (departures, b4 campaign)
     double terminal_nose_slew_factor = 1.5;
+    // [E] ... and its rate starts as a ramp, as the lunar reversal's (bank_acceleration_radps2 of lunar_return()): the step
+    // to the turn's rate, fed forward at Mach 0.7, asked 20-40 x the RCS and departed (vehicle physics Task 6b).
+    double terminal_nose_slew_acceleration_radps2 = 0.5 * constants::deg_to_rad;
     double terminal_nose_turned_rad = 5.0 * constants::deg_to_rad;  // the turn is over within this
     double terminal_nose_max_turn_step_rad = 5.0 * constants::deg_to_rad;  // [E] steering angle change per cycle in the sector
     // Reversals: planned by the corrector (time of the next reversal for zero crossrange); without a bracket the
@@ -301,6 +304,8 @@ private:
     math::Vec3 terminal_lift_direction_;  // last lift direction (kept when the steering is ~0)
     bool terminal_basis_frozen_ = false;
     bool nose_turning_ = false;  // the lift direction still turns to the nose sector
+    bool nose_slew_started_ = false;
+    double nose_slew_rate_radps_ = 0.0;  // the commanded attitude's rate since the basis froze (bank_step_smooth)
     bool handed_over_ = false;  // the terminal phase follows the entry phase (not placed by skip_to)
     math::Vec3 terminal_e1_, terminal_e2_;  // steering basis (see EntryPredictorState::basis_frozen)
     math::Vec3 terminal_zem_itrf_;             // predicted horizontal miss at the gate

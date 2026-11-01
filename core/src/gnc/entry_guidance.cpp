@@ -497,9 +497,8 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
         const Vec3 z0 = terminal_miss(body, r_itrf, v_itrf, p, &gate_time_to_go_s);
         gate_epoch_ = last_update_ + gate_time_to_go_s;  // update() set last_update_ to this cycle's epoch
         const double d = parameters_.terminal_newton_step;
-        // finite differences pointing into the unit disk (beyond it the fraction is clamped: no slope)
-        const double d1s = norm(p + Vec3{d, 0.0, 0.0}) <= 1.0 ? d : -d;
-        const double d2s = norm(p + Vec3{0.0, d, 0.0}) <= 1.0 ? d : -d;
+        const double d1s = EntryPredictorModel::steering_difference(p, Vec3{1.0, 0.0, 0.0}, d);
+        const double d2s = EntryPredictorModel::steering_difference(p, Vec3{0.0, 1.0, 0.0}, d);
         const Vec3 z1 = terminal_miss(body, r_itrf, v_itrf, p + Vec3{d1s, 0.0, 0.0}, nullptr);
         const Vec3 z2 = terminal_miss(body, r_itrf, v_itrf, p + Vec3{0.0, d2s, 0.0}, nullptr);
         // 2x2 Jacobian of the miss (east, north) over the steering (e1, e2)
@@ -578,8 +577,20 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
     const auto wanted = entry_attitude_with_lift(itrf_to_gcrf * v_itrf, itrf_to_gcrf * lift_itrf, alpha, belly_azimuth_rad_);
     const math::Quat wanted_gcrf = attitude_from_axes(wanted.axis_gcrf, wanted.roll_reference_gcrf);
     const math::Quat previous = terminal_attitude_gcrf_;
-    terminal_attitude_gcrf_ =
-        slew_toward(terminal_attitude_gcrf_, wanted_gcrf, slew_rate * dt_s);
+    double slew_angle_rad = slew_rate * dt_s;
+    if (terminal_basis_frozen_ && norm(target_.nose_direction_itrf) > 0.0 && dt_s > 0.0) {
+        // The nose turn's rate starts as a ramp, the path of the lunar reversal (bank_step_smooth, on the angle to go).
+        if (!nose_slew_started_) {
+            nose_slew_started_ = true;
+            nose_slew_rate_radps_ = norm(command_.rate_gcrf_radps);
+        }
+        const math::Quat to_go = (wanted_gcrf * terminal_attitude_gcrf_.conjugate()).normalized();
+        const double to_go_rad = 2.0 * std::acos(std::clamp(std::abs(to_go.w), 0.0, 1.0));
+        int direction = 0;
+        slew_angle_rad = bank_step_smooth(0.0, to_go_rad, slew_rate, parameters_.terminal_nose_slew_acceleration_radps2, dt_s,
+                                          direction, nose_slew_rate_radps_);
+    }
+    terminal_attitude_gcrf_ = slew_toward(terminal_attitude_gcrf_, wanted_gcrf, slew_angle_rad);
     if (dt_s > 0.0) {
         math::Quat d = (terminal_attitude_gcrf_ * previous.conjugate()).normalized();
         if (d.w < 0.0) d = math::Quat{-d.w, -d.x, -d.y, -d.z};

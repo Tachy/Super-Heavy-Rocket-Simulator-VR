@@ -48,8 +48,12 @@ public:
     std::vector<double> trim_flap_rad(double mach) const;
     // The same at any angle of attack of the grid (bilinear).
     std::vector<double> trim_flap_rad(double mach, double alpha_rad) const;
+    // The lowest angle of attack the flaps can trim in pitch below the schedule at this Mach (most lift the ship can hold;
+    // 0: no flaps, no such bound).
+    double lowest_trimmed_alpha_rad(double mach) const;
 
 private:
+    std::vector<double> lowest_trimmed_alpha_rad_;  // per mach_
     AlphaSchedule schedule_;
     std::vector<double> mach_;
     std::vector<double> cd_area_m2_;

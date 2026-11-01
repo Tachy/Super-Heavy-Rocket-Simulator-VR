@@ -110,6 +110,21 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         cl_area_m2_.push_back(dot(force, l));
         trim_delta_rad_.push_back(trim_delta);
     }
+    // Walking down from the schedule until both pairs would pass their stops.
+    constexpr double trim_search_step_rad = 1.0 * constants::deg_to_rad;
+    if (stage.flap_table && !flaps.empty()) {
+        for (double mach : mach_grid) {
+            double alpha = std::min(schedule.at(mach), constants::pi / 2.0);
+            double lowest = alpha;
+            while (alpha > alpha_grid_min_deg * constants::deg_to_rad) {
+                alpha -= trim_search_step_rad;
+                trimmed_force(mach, alpha);
+                if (std::abs(trim_delta) >= 0.5 * flaps.front().flap->max_deflection_rad) break;
+                lowest = alpha;
+            }
+            lowest_trimmed_alpha_rad_.push_back(lowest);
+        }
+    }
     for (const auto& s : flaps) {
         flap_forward_.push_back(s.forward);
         flap_max_rad_.push_back(s.flap->max_deflection_rad);
@@ -171,6 +186,10 @@ double EntryAeroTable::cl_area_m2(double mach, double alpha_rad) const { return 
 
 double EntryAeroTable::cd_area_m2(double mach) const { return interpolate(mach_, cd_area_m2_, mach); }
 double EntryAeroTable::cl_area_m2(double mach) const { return interpolate(mach_, cl_area_m2_, mach); }
+
+double EntryAeroTable::lowest_trimmed_alpha_rad(double mach) const {
+    return lowest_trimmed_alpha_rad_.empty() ? 0.0 : interpolate(mach_, lowest_trimmed_alpha_rad_, mach);
+}
 
 std::vector<double> EntryAeroTable::trim_flap_rad(double mach) const {
     std::vector<double> deflections;
