@@ -1,6 +1,7 @@
 # Ship hull cross-flow coefficient eta * C_dc (Jorgensen viscous term, reference planform = length x diameter).
-# [D] calibrated on the entry of flight 13 (alpha profile aero/ship_entry_alpha.csv), checked on flights 12 and 14
-# (core/tests/test_ship_entry_telemetry.cpp). Effective value: includes what the hull model lacks (chines, flap roots).
+# [D] Empirical from the flights: calibrated on the entry of flight 13 (alpha profile aero/ship_entry_alpha.csv), checked on flights 12 and 14
+# (core/tests/test_ship_entry_telemetry.cpp). The drawn geometry derives only 1.07-1.10 at Mach 4-25: the gap is open
+# (docs/subsystems/aero-derivation.md "Ship entry", docs/known-issues.md), this table is not the hull's derived value.
 # Shape as a circular cylinder in cross-flow: transonic drag rise to ~1.9 near Mach 1.2, ~1.5 supersonic.
 mach,crossflow_cd
 0.0,1.0

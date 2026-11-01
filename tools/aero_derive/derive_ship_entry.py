@@ -42,7 +42,7 @@ FLIGHTS = (("flight12_2026-05-22.csv", 2820.5, 3400.0), ("flight13_2026-07-24.cs
 HULL_CP_ALPHAS = (5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 175)
 HULL_CP_HEADER = """# Ship hull alone: station of the normal force over the angle of attack, from the base.
 # [E] Written by tools/aero_derive/derive_ship_entry.py --write-hull-cp: modified Newtonian with first hit on the drawn mesh
-# (hull, chine, covers, no flaps; independent of Mach within its range, used at all Mach: below Mach 3 not determined).
+# (hull, chine, covers, no flaps; independent of Mach within its range). The core fades it in over Mach 1-4; below Mach 4 not derived.
 alpha_deg,station_m
 """
 

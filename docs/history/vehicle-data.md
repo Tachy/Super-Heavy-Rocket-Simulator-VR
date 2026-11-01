@@ -95,4 +95,9 @@ Verbatim record of this subsystem's notes as they stood in `docs/subsystems.md` 
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
 
-
+## Task 5b (2026-11-01): superseded ship values
+- `nose_length_m` 17.0 (block 3, HLS, depot), not the drawn ogive.
+- `ship_ascent.csv` Mach 6 / 10 / 25: 0.30 / 0.27 / 0.25 on, 0.35 / 0.31 / 0.29 off (generic trend).
+- Hull normal force at the formula's station (nose + half length) at all Mach; then, unflown, the mesh table faded in over Mach 2-3 (trim aft 63 -> 19 deg, which the frames do not show).
+- Trim then, 35 t: aft 73-90, forward 0-17 at Mach 4-25. Replay flights 13 / 12 / 14: 1.66 / 2.42 / 4.50 %. 64 t aerocapture: axis error 159.9 deg, apoapsis off by 7,348 km.
+- Rejected from the Task 5 patch: alpha 59.5, crossflow 1.07-1.10, nose radius 3.1 m, flight 14 limit 8 %, pod move.

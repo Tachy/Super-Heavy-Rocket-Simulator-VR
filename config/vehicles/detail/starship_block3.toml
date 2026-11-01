@@ -15,7 +15,7 @@ dome_start_m = 2.88                # [E] booster: barrel end below the top = hot
 dome_height_m = 2.56               # [E] booster: forward dome from the shoulder to the ring's foot (0.32 m ring): NSF photo 2026-03 shoulder 3.07 +-0.15 m below the top; apex not visible
 nose_tip_radius_m = 0.5            # [E] the ogive ends in a blunt rounded tip (photo 108: ~1 m across; model tip radius 0.55)
 nose_tip_cap_m = 0.25              # [E] model: the tip closes within 0.2 m axially (blunt, not a ball); photo 108 ~1 m across
-nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the physics nose_length_m of the config (17 m) is NOT drawn
+nose_drawn_length_m = 13.4         # [E] drawn tangent ogive (R = 4.5 m): 1:100 model x 0.1 and photo 108 (curved part ~11-13 m); the config's nose_length_m is the same
 base_chamfer_m = 0.25              # [E] aft edge chamfer of the skirt (radial and axial)
 
 [booster.hot_stage]

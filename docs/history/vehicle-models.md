@@ -84,3 +84,5 @@ Physics deviation rows, now none:
 | Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | STL outline, gross 12.63 m^2 (cell map: 102.9 cells of 0.350 m), root at r 4.65 (hull + 0.15 m gap), tail at r 9.19, centroid at r 7.19 m; walls (0.04 m on a 0.35 m pitch, both families) block 22 % looking along the cells | the physics has 7 % more area (13.5 vs 12.63) and a 1.19 m shorter lever arm than the drawing (r 6.0 vs 7.19); rest attitude agrees (cells axial at d = 0) |
 - Config oddity: the 13.5 m^2 fin at a 3.0 m span (radius_m 6.0) gave a 4.5 m chord.
 - `super_heavy_descent.csv` before the re-subtraction (fins 3 x 13.5 m^2), Mach: C_D: 0: 0.900, 0.6: 0.950, 0.8: 1.000, 0.95: 1.150, 1.1: 1.450, 1.5: 1.380, 2: 1.420, 3: 1.750, 5-25: 1.880.
+
+- Until Task 5b `nose_length_m` was 17 m against the drawn 13.4 m, a documented deviation.

@@ -228,7 +228,7 @@ does not separate it.
 - Fin area 13.5 (config until Task 4) against 12.63 m^2, derived fin CA: descent total +0.010 to +0.033 (at most 2.0 %), beta -8 to -59 kg/m^2.
 - Flaps at d = 0 instead of 90 in ascent (note only, d = 90 is the real pose): stack -0.006 to -0.011 (with the wake range folded flaps
   hide little). Flaps at d = 90 carry 0.045-0.075 in the stack at Mach 0.3-5.
-- Nose 17 m (physics) instead of 13.4 m (drawn): -0.07 to -0.15 at Mach 0.95-5, nothing below.
+- Nose 17 m (the physics until Task 5b) instead of 13.4 m (drawn): -0.07 to -0.15 at Mach 0.95-5, nothing below.
 - Wake range 5 / 10 / 20 heights: parts k 0.186 / 0.185 / 0.178, skirt 0.139 / 0.139 / 0.133, fins 0.0626 / 0.0626 / 0.0618. Insensitive.
 - Layer credit: parts term 0.115-0.202 against 0.168-0.310 without it (power on, Mach 0.3-5).
 - Grid fin wall (0.012 m, range 0.006-0.044): the drawn upper bound 0.04 gave the stack 0.33-0.45 for today's 0.13-0.26. The stack's total at Mach 0.3 / 2 / 5: 0.640 / 1.090 / 0.942
@@ -353,7 +353,7 @@ drawn mesh, partly the bearing on those fins.
 
 ## Ship entry (Task 5)
 `python tools/aero_derive/derive_ship_entry.py --trim <csv>` (pairs: hidden test `[trim_dump]`, `STARSIM_TRIM_CSV`); `--write-hull-cp` writes
-`config/aero/ship_hull_cp.csv`. Modified Newtonian first hit above Mach 3, Hoerner below. Results, not yet in the flown tables:
+`config/aero/ship_hull_cp.csv`. Modified Newtonian first hit above Mach 3, Hoerner below. Flown since Task 5b: nose 13.4 m, hull station table (fade Mach 1-4), `ship_ascent.csv` 0.419 / 0.433 from Mach 5. NOT flown: the crossflow row (gap below open) and the alpha. The webcast alpha supports the old table (`task-5a-report.md`):
 
 | Quantity | Tables today | Drawn geometry | Note |
 |---|---|---|---|
@@ -362,8 +362,7 @@ drawn mesh, partly the bearing on those fins.
 | Hull normal force station, alpha 50 / 60 / 90 | about 27 m (formula) | 25.61 / 24.97 / 23.61 m | Table above Mach 3; below it not determined |
 | Flap exposure, aft d = 30 / 40 / 60 / 90 | core 0.46 / 0.58 / 0.79 / 0.91 | mesh 0.41 / 0.65 / 0.82 / 0.85 | Forward, alpha 60: core rule against mesh within about 0.1 |
 
-The hull alone at the old alpha flies 17-20 % rms too fast on flights 13, 14 (drag short): alpha 59.5 instead of 50-55 closes it on 12, 13 with L/D 0.5; 65 runs
-out of lift. See the Task 5 report.
+The derived hull alone at the old alpha flies 17-20 % rms too fast on flights 13, 14 (drag short). The gap between 1.07-1.10 and the flights' 1.5-1.6 is open: `ship_crossflow.csv` stays [D].
 
 ## Open
 Ascent validation `[gnc][validation][ascent][slow]` with the new table runs in Task 6 (no campaign before it). Ship alone: Task 5. Fin CA: see

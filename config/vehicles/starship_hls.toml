@@ -93,7 +93,7 @@ landing_only = true                      # l4 flies them: last part of the landi
 reference_diameter_m = 9.0
 crossflow_table = "aero/ship_crossflow.csv"
 ascent_drag_table = "aero/ship_ascent.csv"
-nose_length_m = 17.0
+nose_length_m = 13.4                     # [E] the drawn tangent ogive (1:100 model, detail file nose_drawn_length_m)
 
 # Legs: all [E]; fixed (always deployed). Sized by the lunar l2 drop tests (user 2026-10-15): a vertical touchdown on a
 # slope lands on the uphill feet first and pivots freely through the slope angle (CG ~21 m up) - the energy gained must

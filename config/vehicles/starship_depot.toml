@@ -107,7 +107,7 @@ relight = true
 reference_diameter_m = 9.0
 crossflow_table = "aero/ship_crossflow.csv"
 ascent_drag_table = "aero/ship_ascent.csv"
-nose_length_m = 17.0
+nose_length_m = 13.4                     # [E] the drawn tangent ogive (1:100 model, detail file nose_drawn_length_m)
 
 [stage.rcs]
 type = "cold_gas_ullage"                 # autogenous ullage gas from the main tanks [E]

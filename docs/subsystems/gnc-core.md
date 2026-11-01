@@ -40,7 +40,7 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   aborts at once; `failures_before_abort` (2) re-plans with a virtual control above the stall threshold, or
   `unconverged_before_abort` (4) unconverged re-plans of any kind, give the target up and plan for the sea.
 - Grid fins (`aero/grid_fin`, `[stage.grid_fins]`): flat-plate normal force from the local flow at each fin (incl.
-  omega x r), slope/limit over Mach from a table; actuators with deflection and rate limits
+  omega x r), slope/limit over Mach from a table (Super Heavy `aero/super_heavy_grid_fin.csv`, lattice derivation: table 0.5 x the generic below Mach 0.9; Falcon 9 `aero/grid_fin.csv`); actuators with deflection and rate limits
   (`Vehicle::update_grid_fins`). The controller allocates torque to the fins first (minimum-norm least squares), the
   remainder to gimbals/RCS, using the last tick's air data (`FlightBody::air_data()`); only with
   `AttitudeController::Gains::grid_fins`. SCvx landing burns feather the grid fins into their local flow

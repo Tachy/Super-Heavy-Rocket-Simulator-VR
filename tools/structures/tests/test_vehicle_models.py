@@ -28,7 +28,7 @@ def test_detail_file_values_are_tagged_and_valid():
     assert vehicle_spec.value_lines_without_tag(DETAIL) == []
     spec = vehicle_spec.load(VEHICLE)
     assert set(spec["stages"]) >= {"booster", "ship"}
-    assert spec["stages"]["ship"]["nose_length_m"] == 17.0 and spec["stages"]["booster"]["nose_length_m"] == 0.0
+    assert spec["stages"]["ship"]["nose_length_m"] == 13.4 and spec["stages"]["booster"]["nose_length_m"] == 0.0
     assert sum(len(g["angles_deg"]) for g in spec["stages"]["booster"]["engines"]) == 33
     assert sum(len(g["angles_deg"]) for g in spec["stages"]["ship"]["engines"]) == 6
 

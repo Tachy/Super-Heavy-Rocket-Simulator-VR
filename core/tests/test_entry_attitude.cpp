@@ -4,6 +4,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
@@ -138,15 +139,19 @@ TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry
 }
 
 TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes to RCS", "[entry][flap]") {
+    // Demand per alpha, measured on the true moments (Mach 21, 65 km, 35 t): on the schedule (52-55 deg here) the flaps deliver 3e5 N m
+    // on all axes, RCS < 1e-4. At 60 deg, 7 deg above the schedule, the forward pair trims at 77 deg, 13 deg from its stop: roll ends at
+    // 1.4e5 N m and yaw between 2e5 and 3e5, so 1e5 N m there. The hull's mesh centre of pressure sets this, not the allocator.
+    const auto [alpha_deg, scale] = GENERATE(table<double, double>({{55.0, 3e5}, {60.0, 1e5}}));
+    CAPTURE(alpha_deg, scale);
     World world;
-    auto body = entry_ship(65000.0, 6500.0, 60.0 * deg, world);
+    auto body = entry_ship(65000.0, 6500.0, alpha_deg * deg, world);
     trim(*body);
     const auto trimmed = body->vehicle().stages().back().flaps;
     const auto out0 = gnc::AttitudeController::allocate(*body, 0.0, {}, false, true);
     // Authority scale: one aft flap's moment change over a few deg. The flaps cannot deliver 1e6 N m of yaw here
     // (iterated on the true moments, l5 Task 10: an aft flap ends folded, ~2 x the RCS left) - the earlier one-call
     // check only confirmed the linear model.
-    const double scale = 1e5;  // the forward flap's usable range now ends at the hull's shadow: 3e5 is out of reach
     auto& flaps = body->vehicle().stages().back().flaps;
     for (int axis = 0; axis < 3; ++axis) {
         Vec3 tau;

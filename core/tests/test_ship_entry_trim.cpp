@@ -93,7 +93,7 @@ TEST_CASE("Ship entry trim dump", "[.][trim_dump]") {
                  << l.hull_pitch_m3 << "," << l.flap_pitch_m3 << "," << l.hull_m2.x << "," << l.hull_m2.z << ","
                  << l.flaps_m2.x << "," << l.flaps_m2.z << "\n";
         };
-        for (const double mach : {0.3, 0.8, 1.2, 2.0, 4.0, 8.0, 15.0, 25.0}) {
+        for (const double mach : {0.3, 0.8, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 8.0, 15.0, 25.0}) {
             row(mach, schedule.at(mach), true);
             for (double a = 40.0; a <= 140.0 + 1e-9; a += 20.0) row(mach, a * deg, false);
         }

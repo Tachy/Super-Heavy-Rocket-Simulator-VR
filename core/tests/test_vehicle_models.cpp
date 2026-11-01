@@ -28,7 +28,7 @@ TEST_CASE("Vehicle configuration loads with all referenced engines", "[config]")
     CHECK(v.engines.size() == 2);
     CHECK(v.engine("raptor3").gimbal_max_rad == Catch::Approx(15.0 * constants::deg_to_rad));
     CHECK(v.propellant.mixture_ratio == 3.6);
-    CHECK(v.stages[1].aero.nose_length_m == 17.0);
+    CHECK(v.stages[1].aero.nose_length_m == 13.4);
 }
 
 TEST_CASE("All shipped vehicle configurations load", "[config]") {
@@ -137,6 +137,28 @@ TEST_CASE("The stack and the ship alone fly their own axial tables", "[aero][veh
     }
 }
 
+TEST_CASE("The ship's hull normal force fades to the drawn station over Mach 1-4", "[aero][vehicle]") {
+    auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    cfg.stages.erase(cfg.stages.begin());
+    const vehicle::Vehicle ship(cfg, config_dir);
+    constexpr double a_mps = 300.0;
+    const double alpha = 60.0 * constants::deg_to_rad;
+    const auto station = [&](double mach) {
+        const double speed = mach * a_mps;
+        const math::Vec3 air{speed * std::cos(alpha), 0.0, -speed * std::sin(alpha)};
+        return ship.aero().compute(air, 1e-3, a_mps, false, 0.0).normal_force_station_m;
+    };
+    CHECK(station(4.0) == Catch::Approx(24.97).margin(1e-6));  // config/aero/ship_hull_cp.csv
+    CHECK(station(8.0) == Catch::Approx(24.97).margin(1e-6));
+    CHECK(station(0.9) > 26.0);  // the formula: subsonic, not derived
+    double previous = station(1.0);
+    for (double mach = 1.1; mach <= 4.0; mach += 0.1) {  // no band where the station runs away
+        CAPTURE(mach);
+        CHECK(std::abs(station(mach) - previous) < 0.25);
+        previous = station(mach);
+    }
+}
+
 TEST_CASE("Falcon 9 keeps its own ascent table", "[aero][vehicle]") {
     const aero::AxialDragCurve falcon_table(config::load_csv_table(config_dir / "aero/falcon9_ascent.csv"));
     const vehicle::Vehicle falcon(config::load_vehicle(config_dir, "falcon9_block5"), config_dir);
@@ -148,7 +170,7 @@ TEST_CASE("Slender body aerodynamics", "[aero]") {
     const aero::AxialDragCurve drag(table);
     CHECK(drag.cd(0.0, true) == Catch::Approx(0.30));
     CHECK(drag.cd(1.125, true) == Catch::Approx(0.60));  // midway between Mach 1.05 and 1.2
-    CHECK(drag.cd(99.0, false) == Catch::Approx(0.29));
+    CHECK(drag.cd(99.0, false) == Catch::Approx(0.433));
 
     const aero::SlenderBodyAero body({124.4, 9.0, 17.0}, drag);
     // Nose-first at zero angle of attack: pure drag along -x.

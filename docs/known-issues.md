@@ -10,12 +10,17 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   booster's 400 m abort point (loss, 28 m from the pad centre) clears the drawn tower, mount, foot and ramps; the wide run did
   not finish (aerocapture at gate 800, the flown depot campaign).
 
-- Red by plan since the flaps follow the geometry (vehicle physics plan Task 3, 2026-11-01; goes to Task 5, nothing re-baselined):
-  (Task 5: aft flaps at the stop with 64 t: at the table's axial CG 23.84 m the pair misses 700-860 m^3 per q at Mach 1.2-25; with the hull's
-  derived centre of pressure that margin returns, axis error 2.3 deg, and the pass then fails on the heat limit instead: `task-5-report.md`.)
-  `[header_tanks][aerocapture]` "An aerocapture pass with 64 t aboard damps a roll disturbance at peak q": axis error 159.9 deg
-  below 80 km (limit 10), apoapsis off by 7,348 km (limit 100). The fast `[entry]`, `[trim]`, `[catch]`, `[landing]`, `[ship]`,
-  `[return]`, `[ascent]` cases and `[ship][entry][validation]` stay green; the `[slow]` campaigns were not run (Task 6).
+- Red since the ship's entry value set (vehicle physics Task 5b, 2026-11-01, user's OK on the set; no limit or guidance changed, `[slow]` not run, Task 6):
+  - `[ship][entry][validation]` flight 14: speed rms 8.34 % (limit 5; flights 13, 12: 4.05, 1.51 %), flying fast. The mesh's hull centre of pressure takes the aft
+    flaps from the stop (88-90 deg) to 30-37 deg, flap CdA from 55-65 to 13 m^2, total -10 % at Mach 8-25. Nose and `ship_ascent.csv` move this by at most 0.3 points.
+  - "The ship trims belly first with control margin" and "Flaps pinned at their stops": at 65 km, 35 t, alpha 60 the forward pair trims at 77.2 deg (limit 75); alpha 70 does not
+    trim at all (stops, remainder 2.8 x). The schedule flies 52-55 deg there, where the margin holds (forward 53-62 deg).
+  - "Guided 6-DOF entry flies to the gate": miss 831 m (limit 100); "Ship returns from orbit into the tower's arms": miss 1,601 m, not caught. Both pass with the old
+    `ship_ascent.csv` alone, the second also with nose 17 m alone: marginal, the miss builds in the last phase below 1.5 km. Not diagnosed further.
+  - "Guided lunar-return entry at 9.6 km/s": gate miss 2,105 km (limit 2 km), against 12 km without the hull table (red there as well). Cause not found.
+  - The 64 t aerocapture is green since this set: apoapsis 426 km, axis error 1.6 deg, peak 924 kW/m^2. At 64 t below Mach 2.5 the aft pair is at its stop (short 42-619 m^3 per q).
+- Ship crossflow gap: `ship_crossflow.csv` stays the flights' 1.5-1.6 [D], the drawn hull derives 1.07-1.10 at Mach 4-25 (`aero-derivation.md`). Open, not closed by the alpha the frames support.
+- Forward RCS pod (for Task 6): floats 1.15 m off the drawn hull (radius 4.5 against 3.348 at station 46). Moved alone it misses the catch gate at 148 m (limit 100), so it stays.
 - `optim` (SOCP solver, ECOS-style HSDE): dense Nesterov-Todd blocks per cone, so cones should stay small
   (dimension <= ~20); ordering is minimum degree on the explicit elimination graph (not full AMD). Solution
   vectors are accurate to roughly sqrt(tolerance) near cone boundaries; objective and feasibility to the tolerance.

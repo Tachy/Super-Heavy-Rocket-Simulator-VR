@@ -5,7 +5,7 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 
 ## Model
 Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
-- Entry (b1), belly first. Hull = `SlenderBodyAero` with `aero/ship_crossflow.csv` [D]. Four flaps (`aero/flap`,
+- Entry (b1), belly first. Hull = `SlenderBodyAero` with `aero/ship_crossflow.csv` [D, empirical from the flights] and `hull_cp_table` `aero/ship_hull_cp.csv` [E, drawn mesh; faded in over Mach 1-4, formula below]; nose 13.4 m as drawn. Four flaps (`aero/flap`,
   `[[stage.flap]]` [E] from the drawn outlines, Task 3 of the vehicle physics plan: aft 2 x 36.48 m^2, stations 2-14, span
   3.69, azimuth 0 / 180; forward 2 x 12.374 m^2, hinge 42.282-47.75 leaning 19.03 deg towards the axis from r 4.621, span
   3.154, azimuth 20 / 160; application point = the outline's centroid in the hinge frame (`centroid_u_m`, `centroid_v_m`);
@@ -107,7 +107,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 
 ## Validation
 - Ship entry replay of flights 12-14 (bank follows the recorded altitude): speed over time above Mach 3 within
-  1.6 / 2.3 / 4.9 % rms, below Mach 3 over altitude 6.0 / 5.2 %, belly-flop speed within 2-3 % (test "Ship entry
+  4.05 / 1.51 / **8.34** % rms (flights 13 / 12 / 14, limit 5: flight 14 red), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (test "Ship entry
   reproduces the webcast telemetry of flights 12-14").
 - Entry guidance campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase, truth aero +-10 %): 11
   within 0.11 m, case 4 marginal (test holds it to < 1.5 km), belly <= 30 deg off down at the gate; load limit held.
@@ -127,11 +127,10 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `STARSIM_RETURN_DISPERSED=<i>`, with `STARSIM_VERBOSE=1`).
 
 ## Open points and known limits
-- Hull and alpha from the geometry (Task 5) are derived but NOT applied: `.superpowers/sdd/2026-11-01-vehicle-physics/task-5-report.md`
-  and `task-5-values.patch` wait for a ruling; they break the deorbit, load limit and lunar cases (`docs/known-issues.md`).
-- Flaps from the geometry (2026-11-01) lowered the authority (My per q at d = 90, Mach 8, alpha 60, 35 t: aft 1159 -> 928
-  m^3, forward 454 -> 265 m^3) and moved the trim towards the stops (Mach 8: aft 63 -> 74 deg, forward 27 -> 16 deg). Not
-  tuned. The 64 t aerocapture pass departs (`docs/known-issues.md`); the re-determination is Task 5 of the plan.
+- Trim, 35 t (CG 25.50 m), Mach 25 / 15 / 8 / 4 / 3 / 2 / 0.8: aft 30 / 33 / 37 / 21 / 41 / 50 / 54 deg, forward 60 / 57 / 53 / 69 / 49 / 40 / 36. Frames (`task-5a-report.md`): aft 17-57 hypersonic;
+  +15-19 deg over Mach 4-2 (+-5, magnitude +-30 %), the model +29, at the upper edge. 64 t (23.84 m): aft 62 / 64 / 66 / 57 / 73, at the 90 stop from Mach 2.5 down, short 42-619 m^3 per q.
+  The CG question is not decided by the frames. Reds of this set: `docs/known-issues.md`.
+- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m.
 - Ship catch: case 4 of the entry campaign is marginal (roundoff moves it between ~0.1 and ~1.2 km); an
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); 5 of 21 dispersed gates arrive with <= 0.7 t.

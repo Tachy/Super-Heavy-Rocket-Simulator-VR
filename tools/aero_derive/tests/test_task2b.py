@@ -135,11 +135,11 @@ class TestBuilt:
             assert float(t["cd_axial_power_off"]) == pytest.approx(derived[(m, "off")], abs=6e-4)
 
 
-def test_ship_table_keeps_the_old_values():
+def test_ship_table_is_derived_from_mach_5():
     with open(AERO / "ship_ascent.csv", encoding="utf-8") as f:
         table = list(csv.DictReader(l for l in f if not l.startswith("#")))
     values = {float(t["mach"]): (float(t["cd_axial_power_on"]), float(t["cd_axial_power_off"])) for t in table}
     assert values[0.0] == (0.30, 0.38)
     assert values[1.2] == (0.62, 0.72)
-    assert values[6.0] == (0.30, 0.35)
-    assert values[25.0] == (0.25, 0.29)
+    assert values[5.0] == (0.419, 0.433)
+    assert values[25.0] == (0.419, 0.433)

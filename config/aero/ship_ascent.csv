@@ -1,7 +1,8 @@
 # Axial drag coefficient of the ship flying alone at zero angle of attack, reference area pi*(d/2)^2.
-# [E] Generic slender launch-vehicle trend (Saturn V / Shuttle-class wind-tunnel shapes), NOT Starship-specific data (none
-# public): the values the stack's table held until 2026-11-01. Derived from the drawn ship at Mach 5: ratio 1.29 power on, 1.14 off
-# (docs/subsystems/aero-derivation.md); Task 5 re-determines it. The stack flies config/aero/starship_stack_ascent.csv.
+# Mach >= 5: [E] derived from the drawn ship (docs/subsystems/aero-derivation.md, on 0.419 +-0.074, off 0.433 +-0.073), held
+# beyond: the Mach 8-25 rows of the derivation lie outside the continuum. Below Mach 5: [E] generic slender launch-vehicle
+# trend (Saturn V / Shuttle-class shapes), NOT derived: the ship alone does not fly nose first there. The stack flies
+# config/aero/starship_stack_ascent.csv.
 mach,cd_axial_power_on,cd_axial_power_off
 0.0,0.30,0.38
 0.6,0.30,0.38
@@ -13,6 +14,5 @@ mach,cd_axial_power_on,cd_axial_power_off
 2.0,0.50,0.58
 3.0,0.40,0.47
 4.0,0.35,0.41
-6.0,0.30,0.35
-10.0,0.27,0.31
-25.0,0.25,0.29
+5.0,0.419,0.433
+25.0,0.419,0.433

@@ -10,8 +10,8 @@ namespace starsim::aero {
 namespace {
 
 constexpr double free_molecular_drag_coefficient = 2.2;  // [E] diffuse reflection, per projected area
-constexpr double station_table_mach_low = 2.0;           // [E] the normal force station table fades in over this band
-constexpr double station_table_mach_high = 3.0;          // [E] modified Newtonian from about here
+constexpr double station_table_mach_low = 1.0;           // [E] the normal force station table fades in from the end of subsonic flow
+constexpr double station_table_mach_high = 4.0;          // [E] up to the derivation's first Newtonian row (derive_ship_entry.py)
 
 double interpolate(const std::vector<double>& x, const std::vector<double>& y, double at) {
     if (at <= x.front()) return y.front();
@@ -143,7 +143,8 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
         result.normal_force_station_m = (potential * nose_station + viscous * 0.5 * geometry_.length_m) / total;
     }
     if (!station_alpha_rad_.empty()) {
-        // The table holds in Newtonian flow; below that the formula stands (not derived).
+        // The table holds in Newtonian flow, from Mach 4; subsonic the formula stands (not derived, flown on the flights'
+        // low part). Over the whole band between: a fade over Mach 2-3 only made a trim sweep the entry frames do not show.
         const double f = (1.0 - w) * std::clamp((result.mach - station_table_mach_low) /
                                                     (station_table_mach_high - station_table_mach_low), 0.0, 1.0);
         result.normal_force_station_m =

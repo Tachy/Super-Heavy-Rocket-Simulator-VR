@@ -19,7 +19,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   permutation and no other offset.
 - `booster.gltf`, `ship.gltf`: nodes `hull` (a PLAIN lathe: rings only at the section ends - base, chamfer end, barrel end - and on the nose, 128
   segments around (sagitta 1.4 mm at R = 4.5 m); the weld seams and dents are the baked steel map, not mesh; radius = config
-  radius; ship: tangent ogive of the DRAWN length 13.4 m (not the physics 17 m) with a blunt tip; booster: flat top), `hot_stage`
+  radius; ship: tangent ogive of the drawn length 13.4 m (`nose_length_m` the same since Task 5b) with a blunt tip; booster: flat top), `hot_stage`
   (collar), `top_truss` (20-tooth V truss), `skirt` (rings, posts, ports), booster `raceway`, `fin_fairings`, `catch_pins` at the config stations / azimuths / protrusion, ship `chine` (swept strake
   along the tile boundary, azimuth = belly +- the coverage half angle of the tile table), `raceway` and `ports`. Hull UV = (arc metres
   at the barrel radius, station metres): glTF u = arc, v = station (Blender v = 1 - station).
@@ -184,7 +184,7 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Part | Model (full scale) | Config / earlier detail | Photo check | Used now |
 |---|---|---|---|---|
 | Hull diameter | 9.0 m (tank parts r 4.50) | 9.0 | agrees | plain lathe, unchanged |
-| Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 17 (physics) | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
+| Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 13.4 | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
 | Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m | hinge 12 m, span 4, 48 m^2 | f14 file 5099 / 4699 / 5299 s: planform agrees (fisheye, not fitted); 2 V brackets + 1 central actuator instead of the model's 4 pegs | model planform, wedge, 3 lugs, hinge cover |
 | Forward flap | hinge edge 5.784 m, leaned 19.03 deg at stations 42.28-47.75 (aft end r 4.621, azimuth 20 / 160), span 3.154 m, swept 6-point quad with an aft foot beyond the hinge end (-1.45 m), area 12.37 m^2 (flat face of `ss3-ship-nose-flap-l.stl`, boundary loop), no lugs drawn (user 2026-11-01) | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); STL size, orientation and place used | the model's own place and lean (user 2026-11-01) |
 | Grid fin | STL: irregular octagon 4.03 x 4.03 m over the cell axes (NOT regular: sides 0.35 / 2.37 / 2.01 / 1.10 / 1.98 m), pitch 0.350 m, lattice depth 0.4 on all variants (the catch STL's 0.7 is only the bar at the pylon; photo 0.45, `aero-derivation.md` Task 4b) | 12.63 m^2, r 7.19 (13.5 m^2 at span 3.0 until Task 4) | STL for the plan, photos for cusps / scallops, see "Fin plan round" | same irregular octagon, 3.53 m wide x 4.54 m span, pitch 0.350 m |
@@ -201,7 +201,6 @@ The drawn shape sits on the physics' pivots. The flaps' physics equals the drawi
 
 | Item | Physics (config) | Drawn (model) | Meaning |
 |---|---|---|---|
-| Ship nose | `nose_length_m` 17 | ogive 13.4 m | drag / nose-radius numbers use the longer, sharper nose; the drawn one is blunter |
 | Forward RCS pod | station 46, azimuth 0 / 180, r 4.5 | not drawn; hull r 3.35 at station 46, the forward cover there reaches azimuth -2 deg | the physics pod floats 1.15 m off the hull, 1.54-1.75 m from the forward flap at every deflection; user decision (vehicle physics plan Task 3 report) |
 | Fin azimuths | 0 / 90 / 180 (90 / 90 / 180) | as configured | aerial 2026-04, f12 1804 s: the spacing agrees, the middle fin points away from the tower |
 | Fin station | 64 m | as configured | NSF 2026-03: 64.6 +-1 m: agrees |

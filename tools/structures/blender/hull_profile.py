@@ -11,8 +11,7 @@ class Profile:
 
     def __init__(self, stage, hull, aft_chamfer_m=None):
         self.L, self.R = stage["length_m"], stage["diameter_m"] / 2.0
-        # the DRAWN ogive is the 1:100 model's (13.4 m), not the config's physics nose_length_m (17 m): a documented
-        # deviation
+        # the DRAWN ogive is the 1:100 model's (13.4 m)
         self.nose = hull["nose_drawn_length_m"] if stage["nose_length_m"] > 0.0 else 0.0
         self.chamfer = hull["base_chamfer_m"] if aft_chamfer_m is None else aft_chamfer_m
         self.tip_r = hull["nose_tip_radius_m"]
