@@ -79,6 +79,9 @@ User 2026-11-01 (flight 14 frame at T+49 s): the ship starts with all flaps full
 User 2026-11-01: only three fins, at azimuths 0 / 90 / 180. Every count, area and test uses three. The layout is asymmetric: the fin axial drag acts off-axis (net towards azimuth 90, lever about 7.19 m), but today it enters only through the axial curve, without a moment. Quantify this moment in ascent and tail-first descent against the control authority, and add it to the physics if it is not negligible.
 `config/vehicles/starship_block3.toml`: `area_m2` 12.63 [E], `radius_m` 7.19, `grid_fin.csv` reviewed against the open fraction; `[gnc][gridfin]`, `[aero][grid_fins]`, `[gnc][booster][validation]`. Descent table's fin share re-subtracted with the new area, so the total against telemetry stays (no re-fit of the total).
 
+### Task 4b: Grid fin authority follows depth and cell geometry
+User 2026-11-01: the fins' control authority depends on their height (depth). Today `F = q A cn_alpha(M) sin(alpha)` with a generic table: depth, pitch and wall thickness are no inputs, the fin's `depth_m` is drawing only. Secure depth (STL 0.4, catch fin 0.7; rim photo 0.43 to 0.5), pitch (STL 0.35, f12 frame 0.47) and wall. Derive `cn_alpha(M)` and `limit_deg(M)` from these in `tools/aero_derive` (lattice-wing theory, source and error named; chord / pitch ratio, stall of the cells, choking at Mach ~1), compare with `config/aero/grid_fin.csv`, report to the user before changing config.
+
 ### Task 5: Ship entry and atmospheric drag re-determined
 Mesh-based derivation for the ship alone over Mach, alpha 40-140, flap deflections: hull + flaps, against `ship_crossflow.csv` (which includes flap roots today), new `nose_length_m` 13.4, `nose_radius_m` from the drawn nose; crossflow and alpha tables re-determined. Replay `[ship][entry][validation]` on flights 12-14 (speed rms < 0.05, low rms < 0.10) as the check; `[flap]`, `[descent]`, `entry_aero_table`.
 
