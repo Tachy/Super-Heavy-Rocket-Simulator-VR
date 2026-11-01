@@ -254,6 +254,64 @@ does not separate it.
 - Grid fin wall thickness 0.04 m is an upper bound (not resolved in any frame); it sets the open fraction 0.694 +-0.04.
 - Stack rows at Mach >= 8 and descent rows at Mach >= 5 are not measured states: descent friction there uses a nominal 30 km.
 
+## Grid fin authority: depth and cells (Task 4b, comparison only)
+`tools/aero_derive/grid_fin_lattice.py` writes `screenshots/vehicle-physics/grid_fin_lattice.{csv,md}` (all rows). Nothing feeds config or core;
+`grid_fin.csv` is unchanged, awaiting the user. Photo measurement: `tools/structures/measure/fin_rim_depth.py`.
+
+**Secured geometry** (photo = `padb_chopsticks_around_booster_top_2026-03.jpg`, both a catch and the plain fin at one scale, 41 px/m, 17 deg elevation):
+
+| Quantity | Nominal | Range | Evidence, which reading wins |
+|---|---|---|---|
+| Pitch | 0.35 m | 0.33-0.37 | STL 0.350 wins over the f12 reading 0.47 and the earlier 0.49. Rim tooth spacing in the photo 19-20 px = 0.46-0.50 m in the image, about 0.50-0.53 m with the rim's foreshortening (view 21-27 deg off the fin, from its position) = p sqrt 2. A pitch of 0.47 needs 0.665 m, about 25 px. The rim tooth count and the 102.9 cells of the fitted image agree. The f12 frame is the lowest resolution of the three |
+| Depth at the cusp tips | 0.45 m | 0.40-0.50 | Photo: catch 0.48 (0.465 with the fin about 3 % nearer, assumed), plain 0.42, +-0.03 each. STL 0.40. The photo wins over the STL and over the drawn 0.50, within the errors of both |
+| Rim scallop | 0.15 m | 0.10-0.20 | Photo: crowns 0.28-0.30 m below the flat face. STL 0.09 (the STL does have scallops; the earlier "STL lacks them" is wrong). Drawn `edge_tooth_depth_m` 0.22 is high |
+| Interior scoop | 0.22 m | 0.09-0.30 | STL 0.09, hearts fit 0.30, factory photo about 0.28 (sag / oblique view by eye, weak) |
+| Mean wall chord | 0.32 m | 0.25-0.40 | This is what loads. STL wall area / length 0.323, drawn 0.321, rim 0.36-0.38 |
+| Wall | 0.012 m | 0.006-0.044 | Factory photo: bright edge lines median 4 px (2-6) at about 400 px/m = 0.010 m. STL 0.044 / wide variant 0.060 are print widths (guide: 0.2 / 0.4 mm nozzle variants, walls 0.44 / 0.60 mm), so not evidence. The edge may be a flange: the range keeps the old upper bound |
+
+**Catch fins are not deeper.** The `-catch` STLs have the same 0.40 m lattice (identical wall profile, y 0.30-0.70); the 0.7 m is only the bar at the pylon, y 0-0.30. In the photo the catch fin's tip 0.465-0.48 and the plain fin's 0.42 differ by 0.05 +-0.05 m, the crowns by -0.02 (opposite sign), mean rim 0.38 / 0.36. 0.7 m would be 28 px; measured 16-19. Identity: the right fin points away from the tower (the 90 deg fin, config), the front fin stands over the arm (0 / 180). The layout is unequal by azimuth only, no fin differs in depth or station.
+
+**Method**, sources and what is from memory: docstring of the tool. Weinig's cascade, Prandtl's box factor, Kantrowitz's limit, the thin-plate stall incidences and NACA 1135 are recalled from memory, with the first checked by its two limits and the last by chart values in the tests. The reflection law and the momentum closure are derived in the tool. Web check 2026-11-01: [Miller 1993 AIAA paper, abstract](https://www.scribd.com/document/514793588/washington1993) (distinct choking and shock Mach numbers, isentropic + 2-D airfoil theory) and [IISc thesis](https://etd.iisc.ac.in/handle/2005/563) (too deep a cell goes negative by reflected shocks) support the structure; no numbers were taken. **No grid fin measurement is in the repo; the table's "~0.05 /deg" could not be checked at its source, nor its reference area.** Errors are judgments.
+
+| Mach | regime | cn_alpha /rad, 10 deg secant | model | geometry band | table | ratio | limit deg | table |
+|---|---|---|---|---|---|---|---|---|
+| 0 | subsonic | 1.46 | 25 % | 1.27-1.53 | 2.90 | 0.50 | 32 +-10 | 25 |
+| 0.7 | subsonic | 1.58 | 25 % | 1.21-1.61 | 3.10 | 0.51 | 27 +-8 | 24 |
+| 0.9 | choked | 1.58 | 40 % | 1.24-1.64 | 2.20 | 0.72 | 22 +-7 | 20 |
+| 1.1 | choked | 1.69 | 40 % | 1.36-1.75 | 1.60 | 1.06 | 18 +-5 | 20 |
+| 1.4 | choked | 1.79 | 40 % | 1.44-3.56 | 2.10 | 0.85 | 18 +-5 | 24 |
+| 1.5 | started from 1.42 | 2.94 | 35 % | 1.48-3.45 | 2.07 | 1.42 | 18 +-5 | 24 |
+| 2 | started | 1.94 | 20 % | 1.28-2.88 | 1.90 | 1.02 | 31 +-13 | 26 |
+| 3 | started | 1.20 | 20 % | 0.79-1.78 | 1.40 | 0.86 | 44 +-21 | 28 |
+| 5 | started | 0.72 | 30 % | 0.47-1.07 | 0.90 | 0.80 | 45 +-14 | 30 |
+| 10 | started | 0.41 | 30 % | 0.27-0.61 | 0.60 | 0.69 | 45 +-14 | 30 |
+| 25 | started | 0.28 | 30 % | 0.18-0.41 | 0.50 | 0.56 | 45 +-14 | 30 |
+
+Verdict: Mach 1-5 within the errors, including peak q. **Below Mach 0.9 the table is about twice the derivation and outside its error.** The bound does not rest on the fitted parts: a guided lattice turns at most its own mass flow, 2 /rad per frontal area, and a solid plate of this planform has 2.24 /rad (Helmbold, AR 1.63). The table's 2.9-3.1 passes both, unless its source used another reference area (hypothesis). Finite-stack end effects could raise the derived value toward 2, not 3. Above Mach 7 the table is 1.4-1.8 x high, at a q where fins hardly matter.
+
+**Depth.** Above the ideal Mach (c = p sqrt(M^2 - 1), Mach 1.4 for the nominal chord) the slope is proportional to chord: tip 0.40 / 0.45 / 0.50 / 0.70 at Mach 2.63 gives 1.24 / 1.39 / 1.54 / 2.16. Subsonic it saturates at the momentum limit: 1.49 / 1.51 / 1.53 / 1.56 at Mach 0.5. Scoop counts as much as tip: chord 0.45 without scoop 1.96 at Mach 2.63. Limit: unaffected.
+**Pitch.** 0.33 / 0.37 / 0.47 at Mach 2.63: 1.47 / 1.31 / 1.03; Mach 0.5: 1.52 / 1.50 / 1.44.
+**Wall.** Slope above the start unchanged, but it sets where the cells start: wall 0.006 / 0.012 / 0.02 / 0.044 = Mach 1.26 / 1.42 / 1.62 / 2.46. At 0.044 the cell at peak q is just started and unstarts at 18 deg fin incidence: force 0.62 against 1.16 MN. So the old upper bound would halve the authority at peak q; the wall is the least secured and second most important input.
+
+**Authority**, 3 fins, 30 deg commanded, roll r 7.19 m, pair and single fin about lever 44.1 m (from Task 4's 94.3 MN m). Derived with the secant at the angle reached, since the supersonic load grows faster than sin(alpha). MN m:
+
+| Point | q kPa, Mach | | angle deg | fin force MN | roll | pitch (pair) | yaw (single) |
+|---|---|---|---|---|---|---|---|
+| f13 peak q | 106.7, 2.63 | table | 27.3 | 0.98 | 21.1 | 86.3 | 43.1 |
+| | | derived +-20 %, all geometry corners 0.46-1.72 MN (wall 0.044 at the low end) | 30 | 1.16 | 25.0 | 102 | 51.2 |
+| f14 peak q | 101.0, 2.44 | table | 26.9 | 0.97 | 20.9 | 85.5 | 42.7 |
+| | | derived +-20 % | 30 | 1.19 | 25.7 | 105 | 52.5 |
+| Landing burn ignition | 39.0, 0.77 | table | 22.6 | 0.53 | 11.4 | 46.5 | 23.2 |
+| | | derived +-40 % | 25.4 | 0.33 | 7.2 | 29.4 | 14.7 |
+| Ascent max q, not commanded | 38.9, 1.36 | table | 23.5 | 0.40 | 8.6 | 35.1 | 17.5 |
+| | | derived +-40 % | 18.1 | 0.27 | 5.8 | 23.9 | 11.9 |
+
+At small deflection peak q is 0.88 of the table (1.39 / 1.585, Mach 2.63); at 30 deg 1.19. Task 4's 94.3 MN m was the slope without limit. No flight data separates these: the telemetry replay covers the fall without commanded fins. Effect in flight not run (no core change, Task 6).
+
+**Axial force.** Depth hardly matters: tip 0.40 to 0.50 moves the CD term 3 x 12.63 / 63.617 x CA by at most -0.004 to +0.002 nose first, -0.008 to -0.001 tail first (friction up, the entry loss down, nearly cancelling), the excluded 0.70 at most +0.005 / -0.009. The wall dominates: at the nominal lattice against today's drawn (tip 0.5, wall 0.04) the **ascent fin term** falls by 0.14-0.23 (Mach 0.3: 0.337 to 0.124; Mach 2: 0.414 to 0.185; Mach 5: 0.329 to 0.184) and the derived **descent** term by 0.04-0.24 (Mach 0.8: 0.459 to 0.216; Mach 3: 0.186 to 0.112). The stack table's fin term (Task 2b) was built on wall 0.04, so it is high by that much if the wall reading holds. Descent table total does not move (fixed against flights); the derived fin CA tail first falls further below `ca_axial` (Mach 5: 0.18 against 0.75), which widens the open split. The couple in the core follows `ca_axial`, unchanged.
+
+**Open, for the user:** whether to replace `grid_fin.csv`'s slope and limit; what wall to adopt (a sharper photo of a wall edge would settle it). Not done: CFD, flight effect, fin-specific literature values.
+
 ## Grid fins in the core (Task 4)
 Config: `area_m2` 12.63 (gross, drawn), `radius_m` 7.19 (outline centroid: hull 4.5 + root gap 0.15 + 2.544), `station_m` 64.0: the outline's
 centroid lies on the hinge (z 0.000) and the plate is centred on it in depth (x +-0.25), so no disagreement. Falcon 9's fins untouched.
