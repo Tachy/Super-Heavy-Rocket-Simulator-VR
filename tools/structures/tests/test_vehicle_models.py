@@ -294,21 +294,60 @@ def _fwd_hinge_ends(f, spec):
     return (x, r), (x + length * math.cos(lean), r - length * math.sin(lean))
 
 
-def test_forward_flap_hinge_is_the_chord_of_the_drawn_hull_and_lies_in_the_cover(spec):
+# the STL loop in the drawn outline's order: aft hinge end, forward hinge end, then round the panel (measured: station, r)
+STL_OUTLINE_STATION_RADIUS_ORDERED = [(42.282, 4.621), (47.750, 2.735), (47.750, 2.934), (43.810, 7.430), (41.718, 7.430), (42.282, 4.901)]
+STL_OUTLINE_U = [0.0, 5.784, 5.72, 0.529, -1.449, -0.091]
+STL_OUTLINE_V = [0.0, 0.0, 0.188, 3.154, 2.472, 0.265]
+
+
+def _shoelace(pts):
+    return 0.5 * abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1])))
+
+
+def test_forward_flap_numbers_are_the_stl_measurement(spec):
+    d = spec["detail"]["flap"]["fwd"]
+    assert d["hinge_drawn_length_m"] == 5.784 and d["outline_u_m"] == STL_OUTLINE_U and d["outline_v_m"] == STL_OUTLINE_V
+    assert (d["hinge_station_aft_m"], d["hinge_radius_aft_m"], d["hinge_lean_deg"]) == (42.282, 4.621, 19.03)
+    assert _shoelace(list(zip(d["outline_u_m"], d["outline_v_m"]))) == pytest.approx(12.37, abs=0.02)
+    for f in (f for f in spec["stages"]["ship"]["flaps"] if f["kind"] == "fwd"):
+        assert f["hinge_azimuth_deg"] in (20.0, 160.0)  # the physics' azimuth stays
+        assert f["drawn_hinge_station_aft_m"] == 42.282 and f["drawn_hinge_lean_deg"] == pytest.approx(19.03)
+        assert f["drawn_hinge_radius_aft_m"] == 4.621
+        assert f["drawn_hinge_station_fwd_m"] == pytest.approx(47.75, abs=0.005)
+
+
+def test_forward_flap_outline_at_d90_maps_back_to_the_stl_station_and_radius(spec):
+    d = spec["detail"]["flap"]["fwd"]
+    lean = math.radians(d["hinge_lean_deg"])
+    for u, v, (station, radius) in zip(d["outline_u_m"], d["outline_v_m"], STL_OUTLINE_STATION_RADIUS_ORDERED):
+        # hinge frame -> (station, r) in the meridian plane: hinge direction (cos l, -sin l), outward-forward normal (sin l, cos l)
+        x = d["hinge_station_aft_m"] + u * math.cos(lean) + v * math.sin(lean)
+        r = d["hinge_radius_aft_m"] - u * math.sin(lean) + v * math.cos(lean)
+        assert (x, r) == pytest.approx((station, radius), abs=0.02)
+
+
+HINGE_TOUCH_TOL_M = 0.02  # = the STL mapping tolerance; the straight measured hinge grazes the convex ogive: 14 mm into the drawn shell at worst (t = 0.75), inside the 0.5 m cover
+
+
+def test_forward_flap_hinge_stays_outside_the_drawn_hull_and_inside_the_cover(spec):
     ship, profile = spec["stages"]["ship"], _ship_profile(spec)
     cover_height = spec["detail"]["flap"]["hinge_cover"]["height_m"]
-    fwd = [f for f in ship["flaps"] if f["kind"] == "fwd"]
-    assert len(fwd) == 2
-    for f in fwd:
+    for f in (f for f in ship["flaps"] if f["kind"] == "fwd"):
         (xa, ra), (xf, rf) = _fwd_hinge_ends(f, spec)
-        # derived, not typed in: the chord of profile.base over the flap's stations (centred on the physics hinge)
-        assert xa == pytest.approx(39.1) and f["drawn_hinge_station_aft_m"] == xa  # planform and stations as before
-        chord = math.degrees(math.atan2(profile.base(xa) - profile.base(xf), xf - xa))
-        assert f["drawn_hinge_lean_deg"] == pytest.approx(chord, abs=0.01) and 5.0 < chord < 12.0
-        for i in range(51):  # along the whole hinge: on the shell or above it, below the top of the cover
+        for i in range(51):  # along the whole hinge: above the shell, below the top of the cover
             t = i / 50.0
             gap = ra + t * (rf - ra) - profile.base(xa + t * (xf - xa))
-            assert -1e-6 <= gap <= cover_height, (f["id"], t, gap)
+            assert -HINGE_TOUCH_TOL_M <= gap <= cover_height, (f["id"], t, gap)
+
+
+def test_hinge_covers_follow_the_drawn_hinge(spec):
+    overhang = spec["detail"]["flap"]["hinge_cover"]["overhang_m"]
+    for f in spec["stages"]["ship"]["flaps"]:
+        lo, hi = f["drawn_hinge_station_aft_m"] - overhang, f["drawn_hinge_station_fwd_m"] + overhang
+        if f["kind"] == "fwd":
+            assert (lo, hi) == pytest.approx((41.48, 48.55), abs=0.005)
+        else:  # the aft cover spans the physics stations as before
+            assert (lo, hi) == pytest.approx((f["station_aft_m"] - overhang, f["station_fwd_m"] + overhang), abs=1e-9)
 
 
 def test_aft_flap_hinge_stays_centred_unleaned_on_the_hull(spec):

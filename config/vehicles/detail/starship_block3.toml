@@ -124,8 +124,8 @@ shaft_inset_m = 0.6                # [E] the shaft continues this far into the h
 
 # Flaps redrawn from the 1:100 model (Printables "I am Darth", CC BY-NC-SA 4.0; geometry measured, nothing copied). Planform
 # in the hinge frame: u along the hinge from its aft end, v = span away from the hinge (u may be < 0 = the panel overhangs the
-# hinge's aft end). The drawn hinge edge is centred on the physics hinge; its axis is the chord of the drawn hull over its
-# stations (unleaned on the barrel).
+# hinge's aft end). The aft flap's drawn hinge edge is centred on the physics hinge, unleaned on the barrel; the forward flap's
+# place is its own (below).
 [flap]
 root_thickness_m = 0.45            # [E] wedge section: thickness at the hinge (model: slab 0.45 at the hinge)
 tip_thickness_m = 0.20             # [E] thickness at the outer edge (model 0.2-0.25)
@@ -140,10 +140,17 @@ outline_v_m = [0.0, 0.0, 0.44, 3.69, 3.69]    # [E] model: span 3.69 m (physics 
 lug_u_m = [0.8, 5.0, 10.7]         # [E] +-0.7 m: f14 file 5099 / 5299 s: two V brackets and one central actuator T (the model's 4 pegs are not on the flap)
 
 [flap.fwd]
-hinge_drawn_length_m = 5.8         # [E] model: model hinge edge 5.8 m (physics 8 m), drawn centred on the physics hinge; its axis is the chord of the drawn hull over these stations (lean derived, about 8.7 deg; the model's own reading 18.9 deg at stations 42.28-47.75 is not used, user ruling 2026-11-01)
-outline_u_m = [0.0, 5.8, 5.7, 0.48, -1.49]    # [E] model: model x 0.1 (swept quad with an aft foot beyond the hinge's aft end)
-outline_v_m = [0.0, 0.0, 0.2, 3.04, 2.31]     # [E] model: span 3.04 m (physics 3.0 m); area 13.8 m^2 (physics 24)
-lug_u_m = [0.46, 5.3]              # [E] two brackets assumed like the aft flap, f12 1804 s does not resolve them
+# Size, orientation and place from the 1:100 model's flat flap face (user 2026-11-01; supersedes the chord-of-the-hull hinge):
+# boundary loop of ss3-ship-nose-flap-l.stl, face normal exactly the meridian plane of azimuth 20.0 deg (printed pose d = 90),
+# station = model y + 34.89; lug tabs left out of the outline. Hinge 5.784 m long, aft end (42.282, r 4.621), leaned 19.03 deg
+# towards the axis going forward; panel area 12.37 m^2 (physics 24 m^2 centred at station 42; the older "13.8" was wrong).
+hinge_drawn_length_m = 5.784       # [E] STL: hinge edge of the flat face
+hinge_station_aft_m = 42.282       # [E] STL: station of the hinge's aft end (drawn; the physics flap stays 38-46)
+hinge_radius_aft_m = 4.621         # [E] STL: radius of the hinge's aft end
+hinge_lean_deg = 19.03             # [E] STL: lean of the hinge towards the axis going forward, in the meridian plane
+outline_u_m = [0.0, 5.784, 5.72, 0.529, -1.449, -0.091]    # [E] STL: u along the hinge from its aft end (forward end, swept outer edge, outer corner, aft foot)
+outline_v_m = [0.0, 0.0, 0.188, 3.154, 2.472, 0.265]       # [E] STL: v perpendicular to the hinge in the meridian plane, outward and forward
+lug_u_m = [0.42, 2.09]             # [E] STL: centres of the two lug tabs on the flap's hinge edge
 
 [catch_pin]
 radius_m = 0.25                    # [E] pin shaft radius

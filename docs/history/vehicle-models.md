@@ -57,3 +57,19 @@ The fins were drawn root-flat with cells along the tangent (a misreading of the 
 ## Superseded 2026-11-01 (forward flap hinge)
 - Forward flap hinge drawn straight, parallel to the station axis at the hull radius R (4.5 m), the lean "stays undrawn on purpose"; flap pose basis (X station, Y e_r, stow) with the rotation about the body +X. Replaced by the leaned hinge (chord of the drawn hull).
 - Measured on the 1:100 model (not used, user ruling 2026-11-01): hinge edge lean 18.9 deg, stations 42.28-47.75, azimuth 20.1 deg, aft-end radius 4.64 m.
+
+## Superseded 2026-11-01 (forward flap from the STL)
+- Forward flap placed on the chord of the drawn hull (commit 0cd9838): hinge 5.8 m centred on the physics hinge (39.1-44.9), lean 7.99 deg, aft-end radius 4.676 m, outline 5 points, 3 lugs, area "13.8 m^2" (real area of that outline 12.0; the number was wrong). Replaced by the STL face: 5.784 m at 42.282-47.75, lean 19.03 deg, 6-point outline, 12.37 m^2.
+- Old text of the docs rows:
+  >   against a re-implementation of it. Planform = the 1:100 model's (swept, wedge section, hinge lugs, `[flap.aft|fwd]`), the drawn hinge
+  >   edge centred on the physics hinge, its axis the straight chord of the drawn hull over its stations (`vehicle_spec.drawn_hinge`,
+  >   manifest `drawn_hinge_station_aft_m / _lean_deg / _radius_aft_m`: forward flap 39.1 m, lean 7.99 deg towards the axis going
+  >   forward, aft-end radius 4.676 m = hull 4.49 m + the chord's sagitta 0.19 m so the line touches the shell at worst, inside the
+  >   0.5 m hinge cover; aft flap: lean 0, hull radius, as before; one code path); it does NOT keep the physics area (see "Physics deviations for the user").
+  > | Forward flap | hinge edge 5.8 m (the model's own reading: leans 18.9 deg at stations 42.28-47.75; NOT used, user ruling 2026-11-01), span 3.04 m, swept quad with an aft foot beyond the hinge end (-1.49 m), area 13.8 m^2, 3 lugs | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); model kept | model planform centred on the physics hinge, hinge axis the chord of the drawn hull (7.99 deg lean) |
+  > | Forward flap | 8 x 3 m, 24 m^2 | 5.8 x 3.04 m swept, 13.8 m^2 (-43 %) | the forward flaps are the most overstated; hinge moment arm and pitch trim are affected |
+  > | Forward flap hinge | straight, parallel to the axis, 38-46 m, azimuth belly +-110 | on the physics stations 38-46 (drawn 39.1-44.9) and azimuth; leaned 7.99 deg along the drawn ogive, the chord of the hull; the frames agree with the azimuth: the tile edge sits at ~+-105 next to it | physics hinge is straight (lean 0) at radius R; drawn lean 7.99 deg, drawn hinge centre 42.0 (= physics centre), radius 4.68 -> 3.87; the model's 18.9 deg / 42.28-47.75 is not used (user ruling) |
+  > hooks; the real fins show a serrated outer edge we do not draw; the V-truss rods are cylinders, not tapered; the forward flap hinge leans
+  > 7.99 deg (chord of the drawn hull); the nose is fuller near the tip in the model; the number of skirt ports and posts is a guess; the skirt has no photo.
+  >   forward flap hinge leans 7.99 deg along the drawn ogive; the model's 18.9 deg is not used).
+  > - Catch (frame IE-Photo-41-2, Flight 5, https://cms.interestingengineering.com/wp-content/uploads/2024/10/IE-Photo-41-2.jpg; scale: tower

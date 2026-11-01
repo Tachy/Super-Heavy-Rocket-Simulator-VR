@@ -140,9 +140,9 @@ func _check_flaps(stages: Array, snapshot: Dictionary, view: VehicleView, root: 
 			var entry := VehicleModels.flap_entry(models, "ship", flap, base)
 			var lean := deg_to_rad(float(entry["drawn_hinge_lean_deg"]))
 			var kind: String = entry["kind"]
-			# the lean is derived from the drawn hull (chord over the flap's stations; the python spec test checks the value)
-			_check(rad_to_deg(lean) > 5.0 and rad_to_deg(lean) < 12.0 if kind == "fwd" else lean == 0.0,
-					"flap %d (%s): hinge leans along the ogive (forward) / not (aft)" % [i, kind])
+			# the forward hinge leans 19.03 deg (the 1:100 model's flap face, detail file), the aft hinge not at all
+			_check(absf(rad_to_deg(lean) - 19.03) < 1e-6 if kind == "fwd" else lean == 0.0,
+					"flap %d (%s): hinge leans 19.03 deg (forward) / not (aft)" % [i, kind])
 			# The drawn hinge leans towards the axis going forward in the meridian plane; Y' is its normal there.
 			var hinge_axis := Vector3.RIGHT * cos(lean) - e_r * sin(lean)
 			var normal := Vector3.RIGHT * sin(lean) + e_r * cos(lean)
@@ -159,6 +159,10 @@ func _check_flaps(stages: Array, snapshot: Dictionary, view: VehicleView, root: 
 			_check(is_zero_approx(span.dot(hinge_axis)), label + ": span perpendicular to the hinge")
 			var hinge := Vector3(float(entry["drawn_hinge_station_aft_m"]), 0.0, 0.0) + e_r * float(entry["drawn_hinge_radius_aft_m"])
 			_check(node.transform.origin.is_equal_approx(hinge), label + ": hinge at the drawn aft end station and radius")
+			if kind == "fwd" and state == 90.0:  # d = 90 is the STL pose: outer corner (u 0.529, v 3.154) at station 43.81, r 7.43
+				var corner := node.transform * Vector3(0.529, 0.0, 3.154)
+				_check(absf(corner.x - 43.810) < 0.02 and absf(corner.dot(e_r) - 7.430) < 0.02 and absf(corner.dot(stow)) < 1e-6,
+						label + ": outer corner in the meridian plane at the STL station and radius")
 			# The tile-covered +Y face looks at the flow side: along Y' at rest (hull tangent), towards the belly at 90 deg.
 			var outer := node.transform.basis * Vector3.UP
 			if state == 0.0:

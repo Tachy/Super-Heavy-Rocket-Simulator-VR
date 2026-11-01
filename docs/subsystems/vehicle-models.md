@@ -26,11 +26,14 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
 - `flap_fwd.gltf`, `flap_aft.gltf`: hinge line = X axis from the aft end (origin), panel along +Z at rest (stowed, leeward),
   outer face +Y. The game's basis (X the drawn hinge, Y its normal in the meridian plane, Z stow direction, mirrored when
   the stow points to the belly side) and the rotation about the hinge X by `rotation_sign_about_plus_x` x deflection are derived from `core/src/aero/flap.cpp` and tested
-  against a re-implementation of it. Planform = the 1:100 model's (swept, wedge section, hinge lugs, `[flap.aft|fwd]`), the drawn hinge
-  edge centred on the physics hinge, its axis the straight chord of the drawn hull over its stations (`vehicle_spec.drawn_hinge`,
-  manifest `drawn_hinge_station_aft_m / _lean_deg / _radius_aft_m`: forward flap 39.1 m, lean 7.99 deg towards the axis going
-  forward, aft-end radius 4.676 m = hull 4.49 m + the chord's sagitta 0.19 m so the line touches the shell at worst, inside the
-  0.5 m hinge cover; aft flap: lean 0, hull radius, as before; one code path); it does NOT keep the physics area (see "Physics deviations for the user").
+  Planform = the 1:100 model's (swept, wedge section, hinge lugs, `[flap.aft|fwd]`). Aft flap: drawn hinge edge centred on the physics
+  hinge, on the barrel (hull radius, no lean). Forward flap: size, orientation and place from the STL's flat flap face (user 2026-11-01), typed
+  into `[flap.fwd]` (`hinge_station_aft_m` 42.282, `hinge_radius_aft_m` 4.621, `hinge_lean_deg` 19.03 towards the axis going forward, hinge
+  5.784 m, 6-point outline, area 12.37 m^2; azimuth stays the physics' 20 / 160); `vehicle_spec.drawn_hinge` reads them (manifest
+  `drawn_hinge_station_aft_m / _station_fwd_m / _lean_deg / _radius_aft_m`). d = 90 reproduces the STL pose in the meridian plane (check:
+  `tools/structures/measure/gltf_flap_measure.py`). Hinge tube, lugs and the hinge cover are unchanged in construction; the forward cover spans
+  the drawn hinge +- `overhang_m` (41.48-48.55 m). The straight hinge is up to 14 mm inside the drawn convex ogive at mid length (t = 0.75) and
+  0.03-0.39 m above it elsewhere (cover height 0.5 m). It does NOT keep the physics area (see "Physics deviations for the user").
 - `grid_fin.gltf`: pivot on the hull at the hinge, hinge axis +Y (radial). The plate lies across the station axis and its cells open along X: at deflection 0 an axial flow passes through them (the core's "normal" in `grid_fin.cpp` is the lift normal, the tangent at d = 0; a right-handed rotation by +d about the radial axis turns it toward +X). Plan geometry from the 1:100 plain fin STL (irregular octagon, exactly mirror-symmetric about the hinge axis, square cells at 45 deg to it, a wall crossing on the axis, cross rib corner to corner 1.75 m from the root), walls cut into cusped saddles (scooped on the AFT face only, 0.30 of the 0.50 m depth, tips slightly rounded; forward face flat), a closed outer frame wall (0.07 m thick, black like the lattice, full depth) round all 8 outline edges with soft arcs on its aft edge (one per wall end, 0.22 m deep), thin light band only on the two root tapers and the root chamfer, a fan of two full-depth struts from the ring to the rib with 45 deg cells in the whole root triangle (no tray, no hole). Nodes `frame` (closed wall round the whole outline), `band`, `lattice`, `pylon` (bolted ring, housing), `bearing` (flat bar under the root, only on `catch_fin_azimuths_deg`), `plate` (far stand-in), `shaft`. 4,060 triangles. The booster carries no catch-pin geometry any more (config kept). See "Fin plan round".
   toward +X: a right-handed rotation by +d about the radial axis, zero = rest. Drawn size = the STL's outline (see "Fin plan round"), not the config area / span. Egg-crate lattice, cells open along the tangent.
 - `raptor.gltf`, `rvac.gltf`: origin = gimbal point, thrust +X, bell opens toward -X, exit plane at X = -`bell_length_m`
@@ -183,7 +186,7 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Hull diameter | 9.0 m (tank parts r 4.50) | 9.0 | agrees | plain lathe, unchanged |
 | Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 17 (physics) | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
 | Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m | hinge 12 m, span 4, 48 m^2 | f14 file 5099 / 4699 / 5299 s: planform agrees (fisheye, not fitted); 2 V brackets + 1 central actuator instead of the model's 4 pegs | model planform, wedge, 3 lugs, hinge cover |
-| Forward flap | hinge edge 5.8 m (the model's own reading: leans 18.9 deg at stations 42.28-47.75; NOT used, user ruling 2026-11-01), span 3.04 m, swept quad with an aft foot beyond the hinge end (-1.49 m), area 13.8 m^2, 3 lugs | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); model kept | model planform centred on the physics hinge, hinge axis the chord of the drawn hull (7.99 deg lean) |
+| Forward flap | hinge edge 5.784 m, leaned 19.03 deg at stations 42.28-47.75 (aft end r 4.621, azimuth 20 / 160), span 3.154 m, swept 6-point quad with an aft foot beyond the hinge end (-1.45 m), area 12.37 m^2 (flat face of `ss3-ship-nose-flap-l.stl`, boundary loop), 2 lugs | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); STL size, orientation and place used | the model's own place and lean (user 2026-11-01) |
 | Grid fin | STL: irregular octagon 4.03 x 4.03 m over the cell axes (NOT regular: sides 0.35 / 2.37 / 2.01 / 1.10 / 1.98 m), pitch 0.350 m, depth 0.4 (catch 0.7) | 13.5 m^2 at span 3.0 | STL for the plan, photos for cusps / scallops, see "Fin plan round" | same irregular octagon, 3.53 m wide x 4.54 m span, pitch 0.350 m |
 | Booster top / hot stage | 20 V teeth, ~2.8 m high in the model view | | NSF photo 2026-03 measured, see "Real-frames round" | 20 spindle rods pairs, fork feet, ring 0.32 m |
 | Booster skirt | base ring r 4.65, four thin ring tubes at r 4.9 (stations 0.7 / 1.05 / 1.95 / 2.35), a comb of posts between them, one port 0.57 x 0.74 x 0.8 m at 2.9-3.7 m | flat skirt | no photo of the base | base ring, 4 ring flanges, 48 posts, 4 ports (count unknown) |
@@ -199,10 +202,10 @@ The drawn shape sits on the physics' pivots; nothing in `config/` was changed. W
 | Item | Physics (config) | Drawn (model) | Meaning |
 |---|---|---|---|
 | Aft flap | 12 x 4 m, 48 m^2 | 12 x 3.69 m swept, 36.5 m^2 (-24 %) | the aero model has 31 % more aft flap area (control authority, flap heating area) than the drawn flap; matching the model would mean ~36 m^2 |
-| Forward flap | 8 x 3 m, 24 m^2 | 5.8 x 3.04 m swept, 13.8 m^2 (-43 %) | the forward flaps are the most overstated; hinge moment arm and pitch trim are affected |
+| Forward flap | 8 x 3 m, 24 m^2, centre at station 42 | 5.784 x 3.15 m swept, 12.37 m^2 (-48 %), centre about station 45, lean 19.03 deg (physics 0) | the forward flaps are the most overstated; hinge moment arm and pitch trim are affected (the earlier "13.8 m^2" in these docs was wrong) |
 | Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | STL outline, gross 12.63 m^2 (cell map: 102.9 cells of 0.350 m), root at r 4.65 (hull + 0.15 m gap), tail at r 9.19, centroid at r 7.19 m; walls (0.04 m on a 0.35 m pitch, both families) block 22 % looking along the cells | the physics has 7 % more area (13.5 vs 12.63) and a 1.19 m shorter lever arm than the drawing (r 6.0 vs 7.19); rest attitude agrees (cells axial at d = 0) |
 | Ship nose | `nose_length_m` 17 | ogive 13.4 m | drag / nose-radius numbers use the longer, sharper nose; the drawn one is blunter |
-| Forward flap hinge | straight, parallel to the axis, 38-46 m, azimuth belly +-110 | on the physics stations 38-46 (drawn 39.1-44.9) and azimuth; leaned 7.99 deg along the drawn ogive, the chord of the hull; the frames agree with the azimuth: the tile edge sits at ~+-105 next to it | physics hinge is straight (lean 0) at radius R; drawn lean 7.99 deg, drawn hinge centre 42.0 (= physics centre), radius 4.68 -> 3.87; the model's 18.9 deg / 42.28-47.75 is not used (user ruling) |
+| Forward flap hinge | straight, parallel to the axis, 38-46 m, azimuth belly +-110 | drawn 42.28-47.75 m (aft end r 4.621), lean 19.03 deg along the ogive, azimuth the physics' 20 / 160 (the STL face is in the meridian plane of 20.0 deg) | physics hinge is straight (lean 0) at radius R over 38-46; drawn hinge centre 45.0 (physics 42.0), radius 4.62 -> 2.74 |
 | Fin azimuths | 0 / 90 / 180 (90 / 90 / 180) | as configured | aerial 2026-04, f12 1804 s: the spacing agrees, the middle fin points away from the tower |
 | Fin station | 64 m | as configured | NSF 2026-03: 64.6 +-1 m: agrees |
 | Hull ring pitch | n/a | 2.0 +-0.15 m (photo 108 Block 2: 1.8) | drawing only |
@@ -216,8 +219,8 @@ The drawn shape sits on the physics' pivots; nothing in `config/` was changed. W
 ### Evidence
 Side by side (ours | model view | photo): `screenshots/vehicles/shapes_flaps.png`, `shapes_fins.png`, `shapes_booster_top.png`, `shapes_skirt.png`,
 `shapes_nose.png`. What still differs: the model's grid fin has its catch corner (curved cells + a shaft at the corner) which we draw as four
-hooks; the real fins show a serrated outer edge we do not draw; the V-truss rods are cylinders, not tapered; the forward flap hinge leans
-7.99 deg (chord of the drawn hull); the nose is fuller near the tip in the model; the number of skirt ports and posts is a guess; the skirt has no photo.
+hooks; the real fins show a serrated outer edge we do not draw; the V-truss rods are cylinders, not tapered; the forward flap is the STL's (hinge leans 19.03 deg);
+the nose is fuller near the tip in the model; the number of skirt ports and posts is a guess; the skirt has no photo.
 Engine look pass (2026-10-31, `vehicle_look_shots.gd` from real sessions, `screenshots/vehicles/lk_*`, `d_*`, `e_*`, `f_*`, `g_*`): the
 truss, hinges, lugs, skirt rings and posts, aft / forward flaps and the all-round nose shield read as in the references. Added from the
 model STLs (`tank-bottom` / `tank-center` sections) and the photo of the stack on the mount: four long line fairings `strakes` (0.82 m
@@ -244,7 +247,7 @@ Triangles: booster 10,224, ship 9,100, flap 128 aft / 116 fwd, grid fin 552 (was
   fittings (r 0.4 m: collar, neck, cap; one steel material, not black). Skirt port / post counts: no photo exists, unchanged.
 - Ribbed ring (photo 108) is the Block 2 interstage; the Block 3 booster has the open V truss (photos 116 and 2026-03), nothing drawn.
 - Ship parts: flaps, hinges, nose, shield edge, chine, raceway, ports covered earlier; nothing further undrawn that a photo shows (the
-  forward flap hinge leans 7.99 deg along the drawn ogive; the model's 18.9 deg is not used).
+  forward flap hinge leans 19.03 deg, the STL's).
 - Catch (frame IE-Photo-41-2, Flight 5, https://cms.interestingengineering.com/wp-content/uploads/2024/10/IE-Photo-41-2.jpg; scale: tower
   ~146 m = 715 px, ~4.9 px/m [E]; the webcasts of flights 13 / 14 show only ship cameras):
 

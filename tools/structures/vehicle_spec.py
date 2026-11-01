@@ -22,8 +22,6 @@ VEHICLES = ROOT / "config" / "vehicles"
 ENGINES = ROOT / "config" / "engines"
 
 
-HINGE_ITERATIONS = 4  # fixed point of the hinge lean (its axial extent depends on it): converged far below 1e-6 deg
-HINGE_SAMPLES = 50  # stations along the chord where the shell's sagitta is looked up
 
 
 class VehicleSpecError(ValueError):
@@ -52,7 +50,8 @@ DETAIL_TABLES = {
     "flap": ("root_thickness_m", "tip_thickness_m", "hinge_radius_m", "lug_length_m", "lug_height_m"),
     "flap.hinge_cover": ("width_m", "height_m", "fade_m", "overhang_m"),
     "flap.aft": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
-    "flap.fwd": ("hinge_drawn_length_m", "outline_u_m", "outline_v_m", "lug_u_m"),
+    "flap.fwd": ("hinge_drawn_length_m", "hinge_station_aft_m", "hinge_radius_aft_m", "hinge_lean_deg", "outline_u_m", "outline_v_m",
+                 "lug_u_m"),
     "catch_pin": ("radius_m", "head_radius_m", "head_length_m"),
     "ship.chine": ("width_m", "height_m", "fade_m", "first_station_m", "last_station_m"),
     "ship.raceway": ("azimuth_from_belly_deg", "radius_m", "first_station_m", "last_station_m", "foot_width_m",
@@ -148,22 +147,17 @@ def flap_rotation_sign(hinge_azimuth_deg: float, belly_azimuth_deg: float) -> in
 
 
 def drawn_hinge(flap: dict, kind_detail: dict, profile: hull_profile.Profile) -> dict:
-    """Where the model's hinge is DRAWN (the physics hinge in the vehicle config stays as it is): the drawn flap is
-    centred on the physics hinge, and its axis is the straight chord of the drawn hull over its stations, lifted by the
-    chord's sagitta so that the line touches the shell at worst (the ogive is convex). On the barrel that is the hull
-    radius, unleaned; on the ogive the hinge leans towards the axis going forward. Aft end station, radius, lean."""
-    length = flap["station_fwd_m"] - flap["station_aft_m"]
+    """Where the model's hinge is DRAWN (the physics hinge in the vehicle config stays as it is). Forward flap: the 1:100
+    model's own place, typed into the detail file (aft end station and radius, lean). Aft flap: centred on the physics
+    hinge, on the barrel (hull radius, unleaned). Aft end station, radius, lean and forward end station."""
     drawn = kind_detail["hinge_drawn_length_m"]
-    x_a = flap["station_aft_m"] + (length - drawn) / 2.0
-    lean = 0.0
-    for _ in range(HINGE_ITERATIONS):  # the drawn length is along the leaned axis: its axial extent is drawn cos(lean)
-        x_f = x_a + drawn * math.cos(lean)
-        r_a, r_f = profile.base(x_a), profile.base(x_f)
-        lean = math.atan2(r_a - r_f, x_f - x_a)
-    sag = max(profile.base(x_a + (x_f - x_a) * i / HINGE_SAMPLES) - (r_a + (r_f - r_a) * i / HINGE_SAMPLES)
-              for i in range(HINGE_SAMPLES + 1))
-    return {"drawn_hinge_station_aft_m": x_a, "drawn_hinge_lean_deg": math.degrees(lean),
-            "drawn_hinge_radius_aft_m": r_a + sag}
+    if flap["kind"] == "fwd":
+        x_a, r_a, lean = kind_detail["hinge_station_aft_m"], kind_detail["hinge_radius_aft_m"], math.radians(kind_detail["hinge_lean_deg"])
+    else:
+        x_a = flap["station_aft_m"] + (flap["station_fwd_m"] - flap["station_aft_m"] - drawn) / 2.0
+        r_a, lean = profile.base(x_a), 0.0
+    return {"drawn_hinge_station_aft_m": x_a, "drawn_hinge_lean_deg": math.degrees(lean), "drawn_hinge_radius_aft_m": r_a,
+            "drawn_hinge_station_fwd_m": x_a + drawn * math.cos(lean)}
 
 
 def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:

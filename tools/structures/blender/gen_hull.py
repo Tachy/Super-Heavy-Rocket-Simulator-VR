@@ -100,7 +100,8 @@ def _build_hinge_covers(stage, detail, profile):
     for f in stage["flaps"]:
         h = math.radians(f["hinge_azimuth_deg"])
         side = -1.0 if math.sin(belly - h) < 0.0 else 1.0  # toward the belly
-        x0, x1 = f["station_aft_m"] - c["overhang_m"], f["station_fwd_m"] + c["overhang_m"]
+        x0 = f["drawn_hinge_station_aft_m"] - c["overhang_m"]  # the cover follows the DRAWN hinge
+        x1 = f["drawn_hinge_station_fwd_m"] + c["overhang_m"]
         xs = [x0, x0 + c["fade_m"], x1 - c["fade_m"], x1]
         fades = [0.0, 1.0, 1.0, 0.0]
 
