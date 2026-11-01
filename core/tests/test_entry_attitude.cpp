@@ -81,16 +81,19 @@ struct World {
 
 // Ship alone with only its landing propellant, flying horizontally (+x) at `height_m` over GCRF +z, in the entry
 // attitude for `alpha` (bank 0).
-std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world) {
+std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world,
+                                                 double propellant_kg = 0.0) {
     auto cfg = config::load_vehicle(config_dir, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    config::fill_tanks(cfg.stages[0], cfg.stages[0].landing_propellant_kg);
+    config::fill_tanks(cfg.stages[0], propellant_kg > 0.0 ? propellant_kg : cfg.stages[0].landing_propellant_kg);
     for (auto& f : cfg.stages[0].flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
     const Vec3 v{speed_mps, 0.0, 0.0}, up{0.0, 0.0, 1.0};
     const vehicle::RigidBodyState state{{0.0, 0.0, 6356752.3 + height_m}, v,
                                         gnc::entry_attitude_quaternion(v, up, alpha_rad, 0.0, belly), {}};
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, config_dir), state);
-    body->step(world.env, t0, 1e-6, {});  // air data for the controller
+    // air data for the controller. Long enough at low speed: this start lies on the pole, where the geodetic height of a
+    // displacement of 1e-4 m is not a number.
+    body->step(world.env, t0, speed_mps < 1000.0 ? 1e-3 : 1e-6, {});
     return body;
 }
 
@@ -181,6 +184,72 @@ TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes 
         CHECK(saturated.flap_rad[k] <= trimmed[k].max_deflection_rad);
     }
     CHECK(std::abs(saturated.rcs_torque_fraction.y) > 0.0);
+}
+
+// One flap's true moment about the CG in the body's air (the allocator's own model is not reachable from here).
+Vec3 true_flap_moment_nm(const vehicle::FlightBody& body, const vehicle::Flap& flap, double deflection_rad) {
+    const auto& stage = body.vehicle().stages().back();
+    const auto& air = body.air_data();
+    const Vec3 arm = aero::flap_centroid(flap.geometry, deflection_rad) -
+                     Vec3{body.vehicle().mass_properties().cg_station_m, 0.0, 0.0};
+    return cross(arm, aero::flap_force(flap.geometry, deflection_rad, air.air_velocity_body_mps, air.air, *stage.flap_table).force_body_n);
+}
+
+// Vehicle physics Task 6d. The guidance campaign's case 8 (61.6 t) departed at Mach 0.67, alpha 80.5 deg: a yaw demand of
+// about 1e6 N m drove a forward flap down to its edge-on deflection, where it has neither force nor slope. With it gone
+// roll and yaw can no longer be told apart (aft pair alone +-1.3e5 N m of yaw at zero roll, all four +-8.4e5), roll ran to
+// -0.06 rad/s and the sideslip it made gave a hull moment beyond the flaps. Same air here, landing propellant: trim at
+// 54 / 54 / 44 / 44 deg, and the same demand took the flap from 44 to 16 deg, slope 125 of 1.5e6 N m/rad.
+TEST_CASE("A yaw demand does not drive a flap into the range where it has no authority", "[entry][flap]") {
+    World world;
+    auto body = entry_ship(13000.0, 200.0, 80.5 * deg, world);
+    trim(*body);
+    auto& flaps = body->vehicle().stages().back().flaps;
+    const auto trimmed = flaps;
+    const auto slope_of = [&](const vehicle::Flap& f, double d, double span) {
+        return norm(true_flap_moment_nm(*body, f, d + 0.5 * span) - true_flap_moment_nm(*body, f, d - 0.5 * span)) / span;
+    };
+    const auto peak_slope = [&](const vehicle::Flap& f) {
+        double peak = 0.0;
+        for (double d = 2.5 * deg; d < f.max_deflection_rad; d += 5.0 * deg) peak = std::max(peak, slope_of(f, d, 5.0 * deg));
+        return peak;
+    };
+    constexpr double follow = 0.5 * deg;  // per call, a rate-limited actuator; the allocation's box is 5 deg
+    for (const double yaw_nm : {1e6, -1e6, 3e5, -3e5}) {
+        flaps = trimmed;
+        CAPTURE(yaw_nm);
+        double last_move = 0.0;
+        std::vector<double> lowest(flaps.size(), 2.0), highest(flaps.size(), -1.0);
+        gnc::ControlOutput out;
+        for (int call = 0; call < 200; ++call) {
+            out = gnc::AttitudeController::allocate(*body, 0.0, Vec3{0.0, 0.0, yaw_nm}, false, true);
+            last_move = 0.0;
+            for (size_t k = 0; k < flaps.size(); ++k) {
+                const double move = std::clamp(out.flap_rad[k] - flaps[k].deflection_rad, -follow, follow);
+                flaps[k].deflection_rad += move;
+                last_move = std::max(last_move, std::abs(move));
+                if (call >= 180) {
+                    lowest[k] = std::min(lowest[k], flaps[k].deflection_rad);
+                    highest[k] = std::max(highest[k], flaps[k].deflection_rad);
+                }
+            }
+        }
+        for (size_t k = 0; k < flaps.size(); ++k) {
+            const double d = flaps[k].deflection_rad, slope = slope_of(flaps[k], d, 1.0 * deg), peak = peak_slope(flaps[k]);
+            if (std::getenv("STARSIM_VERBOSE")) {
+                std::cout << "yaw " << yaw_nm << " flap " << k << " trim " << trimmed[k].deflection_rad / deg << " -> " << d / deg
+                          << " deg, slope " << slope << " of peak " << peak << ", excursion " << (highest[k] - lowest[k]) / deg
+                          << ", rcs " << norm(out.rcs_torque_fraction) << "\n";
+            }
+            CAPTURE(k, d / deg, slope, peak);
+            CHECK(slope >= 0.2 * peak);  // the allocator's floor is a quarter, on a 5 deg grid
+            CHECK(highest[k] - lowest[k] <= 1.01 * follow);  // at most the follow's own step, no wider cycle
+        }
+        if (std::abs(yaw_nm) < 5e5) {  // within the flaps' reach: delivered and settled
+            CHECK(norm(out.rcs_torque_fraction) < 0.01);
+            CHECK(last_move < 0.01 * deg);
+        }
+    }
 }
 
 TEST_CASE("Flaps pinned at their stops come back into the range", "[entry][flap][trim]") {

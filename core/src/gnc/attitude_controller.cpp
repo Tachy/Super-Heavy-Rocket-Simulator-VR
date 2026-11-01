@@ -1,6 +1,7 @@
 #include "starsim/gnc/attitude_controller.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <cstdlib>
@@ -187,6 +188,42 @@ Vec3 flap_moment(const vehicle::Flap& flap, double deflection_rad, const aero::F
     return cross(arm, force.force_body_n);
 }
 
+// [E] A flap whose moment changes by less than this share of its own best slope has no authority worth its travel: the
+// same quarter that separates a vanishing column at a stop (flap_tiny_column_fraction). Vehicle physics Task 6d.
+constexpr double flap_effective_slope_fraction = 0.25;
+constexpr double flap_slope_grid_rad = 5.0 * constants::deg_to_rad;  // [E] finer than the force's sin^2 and the shadow's ramp
+
+// Lowest deflection the allocation may drive a flap to, from the true moments in this air: below it the force fades into
+// the hull's shadow or the edge-on deflection, the slope goes to nothing and a flap sent there is lost to the control.
+// With it roll and yaw can no longer be told apart (case 8 of the guidance campaign, Mach 0.67, alpha 80: yaw at zero
+// roll +-8.4e5 N m on all four flaps, +-1.3e5 on the aft pair). Going down from the best slope, the first crossing,
+// interpolated so the floor moves smoothly with the flow.
+double flap_lowest_effective_rad(const vehicle::Flap& flap, const aero::FlapTable& table, const vehicle::AirData& air,
+                                 const Vec3& rate_body, double cg_station_m, double usable_rad) {
+    const double max = flap.max_deflection_rad;
+    const int intervals = static_cast<int>(std::ceil((max - usable_rad) / flap_slope_grid_rad));
+    constexpr int max_intervals = 36;
+    if (intervals < 2 || intervals > max_intervals) return usable_rad;
+    const double step = (max - usable_rad) / intervals;
+    std::array<double, max_intervals> slope{};
+    Vec3 previous = flap_moment(flap, usable_rad, table, air, rate_body, cg_station_m);
+    int best = 0;
+    for (int i = 0; i < intervals; ++i) {
+        const Vec3 next = flap_moment(flap, usable_rad + (i + 1) * step, table, air, rate_body, cg_station_m);
+        slope[i] = norm(next - previous) / step;
+        if (slope[i] > slope[best]) best = i;
+        previous = next;
+    }
+    const double wanted = flap_effective_slope_fraction * slope[best];
+    for (int i = best; i > 0; --i) {
+        if (slope[i - 1] < wanted) {
+            const double f = (wanted - slope[i - 1]) / (slope[i] - slope[i - 1]);
+            return usable_rad + (i - 0.5 + f) * step;  // between the intervals' midpoints
+        }
+    }
+    return usable_rad;
+}
+
 FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_m) {
     FlapAuthority a;
     const auto& air = body.air_data();
@@ -201,7 +238,8 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
             // Below this the plate has no usable force: to the allocator that is the lower stop. A flap there shows no
             // authority, and the moment-neutral centring would move it freely on that false zero.
             // At most half the range: a flap shadowed nearly all the way keeps a span for its columns.
-            const double low = std::min(0.5 * max, aero::flap_lowest_usable_deflection_rad(flap.geometry, max, air.air_velocity_body_mps));
+            const double usable = aero::flap_lowest_usable_deflection_rad(flap.geometry, max, air.air_velocity_body_mps);
+            const double low = std::min(0.5 * max, flap_lowest_effective_rad(flap, *stage.flap_table, air, w, cg_station_m, usable));
             a.aero_moment_nm += flap_moment(flap, d, *stage.flap_table, air, w, cg_station_m);
             const auto column = [&](double lo, double hi) {
                 return (flap_moment(flap, hi, *stage.flap_table, air, w, cg_station_m) -
