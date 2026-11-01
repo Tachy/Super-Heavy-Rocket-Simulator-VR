@@ -39,6 +39,7 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 - SCvx landing aborts (all vehicles; the pilot's `abort_landing` too): a first plan that finds the target unreachable
   aborts at once; `failures_before_abort` (2) re-plans with a virtual control above the stall threshold, or
   `unconverged_before_abort` (4) unconverged re-plans of any kind, give the target up and plan for the sea.
+- Flap allocation (`AttitudeController`, details `ship-entry-return.md`): box-constrained active set; the lower bound comes from the true moments in the current air (`flap_lowest_effective_rad`, a quarter of the flap's best slope [E]), so a flap is not driven to where it has neither force nor slope. A flap already below it holds until the demand raises it.
 - Grid fins (`aero/grid_fin`, `[stage.grid_fins]`): flat-plate normal force from the local flow at each fin (incl.
   omega x r), slope/limit over Mach from a table (Super Heavy `aero/super_heavy_grid_fin.csv`, lattice derivation: table 0.5 x the generic below Mach 0.9; Falcon 9 `aero/grid_fin.csv`); actuators with deflection and rate limits
   (`Vehicle::update_grid_fins`). The controller allocates torque to the fins first (minimum-norm least squares), the

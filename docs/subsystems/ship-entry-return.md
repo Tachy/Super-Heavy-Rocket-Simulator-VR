@@ -17,8 +17,8 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   landing laws start from there. `AttitudeController::Gains::flaps`: flaps cancel the modelled aero
   moment (hull + flaps), steer by a Newton step on their linearised moments, the rest goes to RCS; flap allocation is a
   box-constrained active set (free flaps re-solved, box = stops and the 0.25 s [E] flap-rate reach, all-flap
-  moment-neutral centring, a secant only for a flap at a stop; the lower stop is `flap_lowest_usable_deflection_rad`, above
-  edge-on and out of the shadow, with the secant all along the ramp out of the shadow); below 200 Pa [E] the flaps rest in the coming entry's
+  moment-neutral centring, a secant only for a flap at a stop; the lower stop is `flap_lowest_effective_rad`: above
+  `flap_lowest_usable_deflection_rad` (edge-on, shadow), going down from the flap's best moment slope in this air, the first crossing of a quarter of it [E], 5 deg grid, interpolated; with the secant all along the ramp out of the shadow); below 200 Pa [E] the flaps rest in the coming entry's
   pitch trim (`EntryAeroTable::trim_flap_rad`). `gnc/entry_attitude` builds the setpoint from angle of attack and bank
   (belly at `[stage.aero] belly_azimuth_deg`). Nominal alpha over Mach `aero/ship_entry_alpha.csv` [D] (55 deg
   hypersonic, 50 near Mach 8, 60-80 towards the belly flop). Ship dry CG 23.516 m [D] (landing-mass CG dry + 35 t at
@@ -52,6 +52,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `predictor_j2 = false`. Predictor additions for lunar return: radiative heating, skips carried, exit orbit, truth
   air-density factor (`FlightSession::set_air_density_factor`), great-circle range unwrapped by the swept angle, a
   target behind the start's track counted as a turn less its distance ahead.
+- Terminal steering floor (Task 6b): the most-lift alpha is never below `EntryAeroTable::lowest_trimmed_alpha_rad` (flying mass and CG; 1 deg search), in `EntryPredictorModel::steering_most_lift_alpha`, so guidance and predictor count the same lift. Steering differences stay on their side of `schedule_fraction` (`steering_difference`). After the basis froze, with a nose direction, the attitude slews on the `bank_step_smooth` ramp (`terminal_nose_slew_acceleration_radps2`, 0.5 deg/s^2 [E]). `upright_descent`'s braking feedforward scales with sink / profile sink, so a ship below the profile sinks instead of climbing.
 - Flip and catch (b3, `gnc/ship_landing`): at the gate the three sea-level Raptors relight at 80 % [E], aft flaps
   fold, forward flaps go broadside until the tilt is < 30 deg; flip ~4 s and ~8 t, pushes the ship ~100 m along its
   nose. Once upright (< 15 deg, < 0.2 rad/s) SCvx plans (`ship_landing_parameters()`) fly 3 -> 2 engines: the belly
@@ -107,16 +108,16 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 
 ## Validation
 - Ship entry replay of flights 12-14 (bank follows the recorded altitude): speed over time above Mach 3 within
-  4.05 / 1.51 / **8.34** % rms (flights 13 / 12 / 14, limit 5: flight 14 red), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (test "Ship entry
+  4.05 / 1.51 / **8.33** % rms (flights 13 / 12 / 14, limit 5: flight 14 red), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (test "Ship entry
   reproduces the webcast telemetry of flights 12-14").
 - Entry guidance campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase, truth aero +-10 %): 11
-  within 0.11 m, case 4 marginal (test holds it to < 1.5 km), belly <= 30 deg off down at the gate; load limit held.
+  within 0.14 m, case 9 3.15 m (test: case 4 < 1.5 km, others < 100 m), belly <= 0.48 deg off down at the gate (limit 30), sink <= 102 m/s; load limit held. Guided 6-DOF 8.5 m.
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
-  engine-failure case aborts upright. Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t
+  engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t
   left. Direct 21 of 21, aerocapture 21 of 21.
 - Ship return from orbit `[ship][mission][validation]` (phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit
-  execution +-1 % / 0.5 deg via `FlightSession::apply_velocity_error`): 14 of 14 caught, gate ~1 m, 8.9-13.9 t left.
+  execution +-1 % / 0.5 deg via `FlightSession::apply_velocity_error`): 14 of 14 caught, gate 0-11 m, 5.4-8.3 t left.
 
 ## Diagnostics
 - Ship: `STARSIM_DEBUG_FLIP=1` (also `[upright]`), `STARSIM_DEBUG_GATE=1`, `STARSIM_DEBUG_BURN=1`,
@@ -130,7 +131,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Trim, 35 t (CG 25.50 m), Mach 25 / 15 / 8 / 4 / 3 / 2 / 0.8: aft 30 / 33 / 37 / 21 / 41 / 50 / 54 deg, forward 60 / 57 / 53 / 69 / 49 / 40 / 36. Frames (`task-5a-report.md`): aft 17-57 hypersonic;
   +15-19 deg over Mach 4-2 (+-5, magnitude +-30 %), the model +29, at the upper edge. 64 t (23.84 m): aft 62 / 64 / 66 / 57 / 73, at the 90 stop from Mach 2.5 down, short 42-619 m^3 per q.
   The CG question is not decided by the frames. Reds of this set: `docs/known-issues.md`.
-- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m.
+- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m. Mach 0.68, alpha 80.5: yaw at zero roll +-8.4e5 N m, the demand at the terminal basis freeze ~1e6 (`docs/known-issues.md`).
 - Ship catch: case 4 of the entry campaign is marginal (roundoff moves it between ~0.1 and ~1.2 km); an
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); 5 of 21 dispersed gates arrive with <= 0.7 t.
