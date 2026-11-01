@@ -111,7 +111,12 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
         const Vec3 w = a * std::cos(error.pointing_azimuth_rad) + b * std::sin(error.pointing_azimuth_rad);
         session.apply_velocity_error(0, (u * error.scale + w * std::tan(error.pointing_rad)) * plan->delta_v_mps);
     }
-    while (session.epoch() < interface - 400.0) session.advance_to(std::min(session.epoch() + 600.0, interface - 400.0), 400000);
+    // advance_to stops up to a tick short of its target when the last stretch is ticked, not coasted: no further progress
+    while (session.epoch() < interface - 400.0) {
+        const time::Epoch before = session.epoch();
+        session.advance_to(std::min(session.epoch() + 600.0, interface - 400.0), 400000);
+        if (session.epoch() == before) break;
+    }
     const bool verbose = std::getenv("STARSIM_VERBOSE") != nullptr;
     while (!session.body(0).impacted() && session.epoch() < interface + 3600.0) {
         const auto* entry = session.entry_guidance(0);
@@ -158,6 +163,7 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
                 "sink %.2f m/s, %.1f t left\n",
                 run.gate, run.entry_s, run.gate_miss_m, sim::to_string(run.landing.tower_phase), run.landing.offset_m,
                 run.landing.lateral_mps, run.landing.sink_mps, run.propellant_kg / 1000.0);
+    std::fflush(stdout);  // a campaign's output in a file shows its progress
     return run;
 }
 
@@ -290,6 +296,7 @@ void fly_campaign(const std::vector<Case>& cases, const char* name) {
                     "%.2f deg\n",
                     name, index, c.phase_deg, c.periapsis_km, c.apoapsis_km, m.propellant_kg / 1000.0, c.propellant_t,
                     c.error.scale * 100.0, c.error.pointing_rad / deg);
+        std::fflush(stdout);
         const auto run = fly_return(session, deorbit_parameters(m), c.error);
         const auto* plan = session.ship_return_plan();
         std::printf("%s case %d: waited %.1f h\n", name, index, plan ? (plan->node.epoch - t0) / 3600.0 : -1.0);
