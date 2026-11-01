@@ -1,6 +1,8 @@
 // Grid fins: aerodynamic model, vehicle dynamics (damping) and torque allocation.
 
 #include <cmath>
+#include <string>
+#include <tuple>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -94,6 +96,7 @@ TEST_CASE("Grid fin force: direction, magnitude, limit, rarefied flow", "[aero][
 
 TEST_CASE("Grid fins damp the rotation of a falling booster", "[vehicle][gridfin]") {
     World world;
+    world.env.grid_fin_drag_couple = false;  // the damping alone: the drag couple pitches whatever the rate
     const Vec3 rate{0.0, 0.05, -0.03};
     auto with = falling_booster(true, rate);
     auto without = falling_booster(false, rate);
@@ -154,6 +157,98 @@ TEST_CASE("Grid fins add their axial drag to the tail-first drag curve", "[aero]
         CHECK(v.aero().drag_curve(true).cd(mach, true) ==
               Catch::Approx(body.cd(mach, true) + fins_area_m2 * ca / reference_area_m2).epsilon(1e-9));
         CHECK(v.aero().drag_curve(false).cd(mach, false) == Catch::Approx(ascent.cd(mach, false)));  // ascent table as is
+    }
+}
+
+TEST_CASE("Starship's fins carry the drawn area and the descent total stays as identified", "[aero][grid_fins]") {
+    const auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    const vehicle::Vehicle v(cfg, config_dir);
+    const auto& fins = cfg.stages.front().grid_fins;
+    CHECK(fins.azimuths_rad.size() == 3);
+    CHECK(fins.area_m2 == 12.63);
+    CHECK(fins.radius_m == 7.19);
+    // The total the flights fixed: the identified body table of 2026-10-13 + the fins' share with 3 x 13.5 m^2.
+    const aero::AxialDragCurve identified_body(
+        config::CsvTable{{"mach", "cd_axial_power_on", "cd_axial_power_off"},
+                         {{0.0, 0.900, 0.900},
+                          {0.6, 0.950, 0.950},
+                          {0.8, 1.000, 1.000},
+                          {0.95, 1.150, 1.150},
+                          {1.1, 1.450, 1.450},
+                          {1.5, 1.380, 1.380},
+                          {2.0, 1.420, 1.420},
+                          {3.0, 1.750, 1.750},
+                          {5.0, 1.880, 1.880},
+                          {10.0, 1.880, 1.880},
+                          {25.0, 1.880, 1.880}}});
+    const double reference_area_m2 = constants::pi * 0.25 * v.diameter_m() * v.diameter_m();
+    for (double mach = 0.0; mach <= 25.0; mach += mach < 6.0 ? 0.05 : 1.0) {
+        CAPTURE(mach);
+        const double total = identified_body.cd(mach, false) + 3.0 * 13.5 * table().axial_coefficient(mach) / reference_area_m2;
+        CHECK(std::abs(v.aero().drag_curve(true).cd(mach, false) - total) < 1e-3);
+        CHECK(std::abs(v.aero().drag_curve(true).cd(mach, true) - total) < 1e-3);
+    }
+}
+
+TEST_CASE("The unbalanced fin's axial drag acts at its centre of pressure", "[aero][grid_fins]") {
+    const auto t = table();
+    const aero::GridFinGeometry fin{60.0, 90.0 * deg, 7.19, 12.63};
+    const aero::FinAirData air{0.35, 300.0, 0.0};
+    SECTION("the fin's share of the hull's axial force") {
+        const double q = 0.5 * air.density_kg_m3 * 776.0 * 776.0;
+        const double mach = 776.0 / air.speed_of_sound_mps;
+        const double expected = q * fin.area_m2 * t.axial_coefficient(mach);
+        CHECK(aero::grid_fin_axial_force_n(fin, {-776.0, 0.0, 0.0}, air, t) == Catch::Approx(expected));
+        CHECK(aero::grid_fin_axial_force_n(fin, {776.0, 0.0, 0.0}, air, t) == Catch::Approx(-expected));
+        // As the hull's axial term: cos^2 of the angle of attack, none in free-molecular flow.
+        CHECK(aero::grid_fin_axial_force_n(fin, {-776.0 * std::cos(0.3), 776.0 * std::sin(0.3), 0.0}, air, t) ==
+              Catch::Approx(expected * std::cos(0.3) * std::cos(0.3)));
+        CHECK(aero::grid_fin_axial_force_n(fin, {-776.0, 0.0, 0.0}, {air.density_kg_m3, air.speed_of_sound_mps, 1.0}, t) == 0.0);
+    }
+    SECTION("a falling Super Heavy pitches about +y; the flag switches it; the force stays") {
+        const auto rate_of = [](bool couple, const std::string& id) {
+            World world;
+            world.env.grid_fin_drag_couple = couple;
+            auto cfg = config::load_vehicle(config_dir, id);
+            cfg.stages.resize(1);
+            const vehicle::RigidBodyState state{{6378137.0 + 10000.0, 0.0, 0.0}, {-600.0, 0.0, 0.0}, {}, {}};
+            vehicle::FlightBody body(std::make_unique<vehicle::Vehicle>(cfg, config_dir), state);
+            const double dt = 0.005;
+            body.step(world.env, t0, dt, {});
+            return std::make_tuple(body.state().angular_velocity_body_radps, body.state().velocity_gcrf_mps,
+                                   body.vehicle().mass_properties().inertia_kg_m2);
+        };
+        const auto [w_on, v_on, inertia] = rate_of(true, "starship_block3");
+        const auto [w_off, v_off, inertia_off] = rate_of(false, "starship_block3");
+        (void)inertia_off;
+        // Fin azimuth 90 stands at body +z, the drag on it along +x: moment r x F about +y.
+        const environment::Us76Atmosphere atmosphere;
+        const auto a = atmosphere.at(10000.0);
+        const aero::GridFinGeometry booster_fin{64.0, 90.0 * deg, 7.19, 12.63};
+        const double force =
+            aero::grid_fin_axial_force_n(booster_fin, {-600.0, 0.0, 0.0}, {a.density_kg_m3, a.speed_of_sound_mps, 0.0}, t);
+        CHECK(force > 0.0);
+        CHECK((w_on.y - w_off.y) == Catch::Approx(7.19 * force / inertia.y * 0.005).epsilon(0.02));
+        CHECK(std::abs(w_on.z - w_off.z) < 1e-9);
+        CHECK(std::abs(w_on.x - w_off.x) < 1e-9);
+        // A couple: the translation of the first tick is the same (the drag stays in the axial curve).
+        CHECK(norm(v_on - v_off) < 1e-6);
+    }
+    SECTION("a symmetric layout has no couple, exactly: Falcon 9 is bit-identical with the flag on and off") {
+        World on, off;
+        off.env.grid_fin_drag_couple = false;
+        auto cfg = config::load_vehicle(config_dir, "falcon9_block5");
+        cfg.stages.resize(1);
+        const vehicle::RigidBodyState state{{6378137.0 + 10000.0, 0.0, 0.0}, {-600.0, 0.0, 0.0}, {}, {0.01, 0.02, -0.01}};
+        vehicle::FlightBody a(std::make_unique<vehicle::Vehicle>(cfg, config_dir), state);
+        vehicle::FlightBody b(std::make_unique<vehicle::Vehicle>(cfg, config_dir), state);
+        for (int i = 0; i < 200; ++i) {
+            a.step(on.env, t0 + 0.005 * i, 0.005, {});
+            b.step(off.env, t0 + 0.005 * i, 0.005, {});
+        }
+        CHECK(a.state().angular_velocity_body_radps.y == b.state().angular_velocity_body_radps.y);
+        CHECK(a.state().angular_velocity_body_radps.z == b.state().angular_velocity_body_radps.z);
+        CHECK(a.state().velocity_gcrf_mps.x == b.state().velocity_gcrf_mps.x);
     }
 }
 

@@ -49,7 +49,7 @@ flow separation (vacuum engines).
   e.g. a returning booster; defaults to the ascent table), `crossflow_table` (hull cross-flow coefficient over Mach for a stage flying alone, e.g. the ship's
   belly-first entry; without it a generic value), `nose_length_m`.
 - `[stage.grid_fins]`: one fin per entry of `azimuths_deg` (from body +y towards +z), `area_m2`
-  (frontal lattice area per fin), `station_m` (hinge), `radius_m` (fin centre of pressure),
+  (gross area inside the fin's outline), `station_m` (hinge), `radius_m` (fin centre of pressure, also the lever of its axial drag),
   `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.
   `aero/grid_fin.csv`). Fin mass belongs in the stage's `dry_mass_kg`.
 - `[[stage.flap]]` (ship): flat plates hinged along the hull side - `id`, `hinge_azimuth_deg` (from body +y

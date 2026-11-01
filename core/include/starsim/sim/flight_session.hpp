@@ -733,6 +733,7 @@ public:
     // Fidelity switch: solar radiation pressure on all bodies (default on; the OEM validation turns it off).
     void set_solar_radiation_pressure(bool on) { env_.solar_radiation_pressure = on; }
     void set_boil_off(bool on) { env_.boil_off = on; }  // fidelity flag (refuelling r2)
+    void set_grid_fin_drag_couple(bool on) { env_.grid_fin_drag_couple = on; }  // fidelity flag (vehicle physics Task 4)
     void set_ignition_settling(bool on) { env_.ignition_settling = on; }  // fidelity flag (refuelling f3)
     bool ignition_settling() const { return env_.ignition_settling; }
     // Settling before an in-orbit ignition (refuelling f3). The push for the controlled vehicle's burn stage (zero when

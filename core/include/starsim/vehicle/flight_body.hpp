@@ -57,6 +57,10 @@ struct FlightEnvironment {
     // Fidelity flag (refuelling r2): cryogenic propellant in the hull tanks of stages with [stage.thermal] boils off
     // by the hull heat balance (vehicle/boil_off.hpp) in free flight above FlightBody::boil_off_min_altitude_m.
     bool boil_off = true;
+    // Fidelity flag (vehicle physics Task 4): each grid fin's share of the hull's axial drag acts at the fin's centre of
+    // pressure, not on the axis; an asymmetric layout (Super Heavy: 0 / 90 / 180) gets the moment (docs/subsystems/
+    // aero-derivation.md). Off: on the axis, no moment. A symmetric layout has none either way, exactly.
+    bool grid_fin_drag_couple = true;
     // M8: the Earth's surface (reference_body_of sets it on the Earth). nullptr: the flat model - the ground at each
     // body's ground_height_m (the old model, kept for comparison runs and the guidance planners' predictions).
     const environment::Terrain* earth_terrain = nullptr;

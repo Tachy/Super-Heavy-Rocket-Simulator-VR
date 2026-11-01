@@ -194,3 +194,15 @@ class TestBuiltModel:
         assert k.get("booster/hull", 0.0) < 0.002  # hidden behind the ship
         assert k.get("ship/engine_bay", 0.0) == 0.0  # internal
         assert k["ship/hull"] > 0.05
+
+
+@pytest.mark.parametrize("azimuth_deg", [0.0, 90.0, 180.0])
+@pytest.mark.parametrize("deflection_deg", [0.0, 20.0])
+def test_fin_pose_agrees_with_the_core(azimuth_deg, deflection_deg):
+    """fin_transform's cell axis and normal against grid_fin_force: n = t cos d + x sin d, cells axial at d = 0."""
+    a, d = math.radians(azimuth_deg), math.radians(deflection_deg)
+    m = geometry.rotation((1.0, 0.0, 0.0), a) @ geometry.rotation((0.0, 1.0, 0.0), d)
+    tangential = np.array([0.0, -math.sin(a), math.cos(a)])
+    x = np.array([1.0, 0.0, 0.0])
+    assert m @ np.array([0.0, 0.0, 1.0]) == pytest.approx(tangential * math.cos(d) + x * math.sin(d), abs=1e-12)
+    assert m @ x == pytest.approx(x * math.cos(d) - tangential * math.sin(d), abs=1e-12)

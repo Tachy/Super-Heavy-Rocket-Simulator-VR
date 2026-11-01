@@ -66,6 +66,12 @@ GridFinForce grid_fin_force(const GridFinGeometry& fin, double deflection_rad, c
 double grid_fin_effectiveness(const GridFinGeometry& fin, const math::Vec3& fin_velocity_body_mps,
                               const FinAirData& air, const GridFinTable& table);
 
+// One fin's share of the hull's axial force along body x (table column ca_axial, same law as the hull's axial term:
+// (1 - rarefaction) q S CA cos^2(alpha), against the axial motion). It is part of the vehicle's axial drag curve, so
+// this is not an extra force: FlightBody takes it to move that share from the axis to the fin's centre of pressure.
+double grid_fin_axial_force_n(const GridFinGeometry& fin, const math::Vec3& air_velocity_body_mps, const FinAirData& air,
+                              const GridFinTable& table);
+
 math::Vec3 grid_fin_radial(const GridFinGeometry& fin);
 math::Vec3 grid_fin_tangential(const GridFinGeometry& fin);
 

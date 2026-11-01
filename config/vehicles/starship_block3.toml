@@ -106,9 +106,9 @@ descent_drag_table = "aero/super_heavy_descent.csv"  # tail first (booster retur
 
 [stage.grid_fins]
 azimuths_deg = [0.0, 90.0, 180.0]          # [E] layout 3 fins, ~1.5x Block 2 size, 90/90/180 deg spacing [S:wiki_sh]
-area_m2 = 13.5                        # [E] frontal lattice area per fin
+area_m2 = 12.63                       # [E] gross area inside the outline, STL 1:100 model (detail [grid_fin] outline; 102.9 cells x 0.35^2 = 12.60), docs/subsystems/aero-derivation.md; was 13.5
 station_m = 64.0                       # [E] hinge station from the bottom of the stage (below the hot-staging ring)
-radius_m = 6.0                          # [E] centre of pressure: 4.5 m tank radius + half the fin span
+radius_m = 7.19                         # [E] centre of pressure = drawn outline centroid: 4.5 m hull + 0.15 m root gap + 2.544 m (detail [grid_fin] outline); was 6.0
 max_deflection_deg = 30.0               # [E]
 rate_deg_s = 30.0                       # [E] electric actuators
 table = "aero/grid_fin.csv"

@@ -48,6 +48,7 @@ DESCENT_UNMEASURED_ERROR = 0.20  # [E] subsonic trend, and the held value above 
 DESCENT_IDENTIFIED_MACH = (1.1, 3.9)
 TELEMETRY_MIN_DECEL = 3.0  # m/s^2: below it the 1 km altitude rounding dominates D/m
 SUPERSONIC_MESH_FROM_MACH = 1.5  # plan Task 2: subsonic and transonic from Hoerner, above that mesh + base
+FORMER_FIN_AREA_M2 = 13.5  # config until vehicle physics Task 4; the sensitivity of the descent total to it
 FLIGHTS = {13: ("flight13_2026-07-24.csv", 340.0, 386.0), 14: ("flight14_2026-09-28.csv", 340.0, 396.0)}  # to engine relight
 FLAP_REF_CHORD_M = {"aft": 12.0, "fwd": 5.784}  # hinge lengths, detail file
 ASCENT_END_S = 520.0  # flight 14: ship burn still running, before any return data
@@ -316,7 +317,7 @@ def descent_rows(v, mesh, bins) -> list:
     fin = v.detail["grid_fin"]
     open_fraction = v.grid_fin_open_fraction()
     gross = v.grid_fin_gross_area_m2()
-    config_fin_area = v.stage("booster")["grid_fins"]["area_m2"]
+    config_fin_area = v.stage("booster")["grid_fins"]["area_m2"]  # the flown area, equal to the drawn since Task 4
     body_table = read_table(ROOT / "config" / "aero" / "super_heavy_descent.csv")
     fin_table = read_table(ROOT / "config" / "aero" / "grid_fin.csv")
     k_parts = mesh.hit(("booster",), 1.0)
@@ -355,7 +356,7 @@ def descent_rows(v, mesh, bins) -> list:
                                       v.grid_fin_mean_depth_m("fwd"))[0]
         table_ca = table_at(fin_table, "ca_axial", mach)
         fins_drawn = ca * fin_count * gross / A_REF_M2
-        fins_config = ca * fin_count * config_fin_area / A_REF_M2
+        fins_config = ca * fin_count * FORMER_FIN_AREA_M2 / A_REF_M2  # sensitivity column
         known_body = table_at(body_table, "cd_axial_power_off", mach)
         known_fins = table_ca * fin_count * config_fin_area / A_REF_M2
         identified = DESCENT_IDENTIFIED_MACH[0] <= mach <= DESCENT_IDENTIFIED_MACH[1]
@@ -431,7 +432,7 @@ def plot_beta(rows, path):
     x = [r["mach"] for r in sel]
     ax.plot(x, [r["beta_derived"] for r in sel], color="#2a78d6", lw=2, marker="o", ms=4, label="derived, fins 12.63 m^2")
     ax.plot(x, [r["beta_derived"] for r in series["descent_total_config_13.5"]], color="#1baf7a", lw=2, marker="^", ms=4, label="derived, fins 13.5 m^2")
-    ax.plot(x, [r["beta_table"] for r in sel], color="#eb6834", lw=2, marker="s", ms=4, label="tables (body + fins 13.5 m^2)")
+    ax.plot(x, [r["beta_table"] for r in sel], color="#eb6834", lw=2, marker="s", ms=4, label="tables (body + fins 12.63 m^2)")
     fl = [(r["mach"], r["beta_flight"], r["beta_flight_sd"]) for r in sel if r["beta_flight"]]
     fx, fy, fs = zip(*fl)
     ax.errorbar(fx, fy, yerr=[0.0 if math.isnan(s) else s for s in fs], color="#0b0b0b", ls="none", marker="D", ms=5, capsize=3, label="flights 13, 14 (mean, sd)")

@@ -80,6 +80,24 @@ Vec3 actuator_moment(const TickContext& ctx, const MassProperties& mass, const V
     return moment;
 }
 
+// The grid fins' axial drag is in the hull's axial curve (the planners read that curve too), which acts on the axis.
+// Moving each fin's share to its centre of pressure leaves the force as it is and adds this couple. Exactly zero for a
+// symmetric layout: its sum would otherwise be rounding noise, and those vehicles stay bit-identical.
+Vec3 grid_fin_drag_couple(const Vehicle& vehicle, const Vec3& air_velocity_body, const aero::FinAirData& air) {
+    constexpr double balanced_share = 1e-9;
+    Vec3 couple;
+    double scale = 0.0;
+    for (const auto& stage : vehicle.stages()) {
+        for (const auto& fin : stage.grid_fins) {
+            const double force = aero::grid_fin_axial_force_n(fin.geometry, air_velocity_body, air, *stage.grid_fin_table);
+            couple += cross(aero::grid_fin_radial(fin.geometry) * fin.geometry.radius_m, Vec3{force, 0.0, 0.0});
+            scale += std::abs(force) * fin.geometry.radius_m;
+        }
+    }
+    if (norm(couple) <= balanced_share * scale) return {};
+    return couple * vehicle.hull_aero_scale();
+}
+
 struct Forces {
     Vec3 acceleration_gcrf;        // total
     Vec3 nongravitational_body_n;  // thrust + aero, body axes
@@ -136,6 +154,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             f.moment_body_nm += actuator_moment(ctx, f.mass, arm, force.force_body_n);
         }
     }
+    if (ctx.env.grid_fin_drag_couple) f.moment_body_nm += grid_fin_drag_couple(ctx.vehicle, air_velocity_body, fin_air);
     // Flaps: local flow at each flap centroid including the rotation.
     for (const auto& stage : ctx.vehicle.stages()) {
         if (!stage.flap_table) continue;

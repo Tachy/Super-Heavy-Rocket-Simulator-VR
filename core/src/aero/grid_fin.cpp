@@ -91,4 +91,13 @@ double grid_fin_effectiveness(const GridFinGeometry& fin, const Vec3& fin_veloci
     return -flow.dynamic_pressure * fin.area_m2 * table.normal_force_slope_per_rad(flow.mach) * flow.direction.x;
 }
 
+double grid_fin_axial_force_n(const GridFinGeometry& fin, const Vec3& air_velocity_body_mps, const FinAirData& air,
+                              const GridFinTable& table) {
+    const LocalFlow flow = local_flow(air_velocity_body_mps, air);
+    if (flow.dynamic_pressure <= 0.0) return 0.0;
+    const double cos_alpha = flow.direction.x;
+    return -std::copysign(flow.dynamic_pressure * fin.area_m2 * table.axial_coefficient(flow.mach) * cos_alpha * cos_alpha,
+                          cos_alpha);
+}
+
 }  // namespace starsim::aero

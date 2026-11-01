@@ -187,7 +187,7 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Ship ogive | tangent ogive R 4.5, 13.4 m long from station 38.7, tip r 0.55, closes within 0.2 m | `nose_length_m` 17 (physics) | photo 108: curved part ~11-13 m: model | drawn 13.4 m (`nose_drawn_length_m`), tip cap 0.25 m; the model is fuller within 3 m of the tip (r 2.2 vs 1.75 at 2.7 m) |
 | Aft flap | hinge 12.0 m, span 3.69 m, swept outer edge: full chord to 7.2 m, then to 0.44 m at the forward end; area 36.5 m^2; wedge 0.45 -> 0.2 m | hinge 12 m, span 4, 48 m^2 | f14 file 5099 / 4699 / 5299 s: planform agrees (fisheye, not fitted); 2 V brackets + 1 central actuator instead of the model's 4 pegs | model planform, wedge, 3 lugs, hinge cover |
 | Forward flap | hinge edge 5.784 m, leaned 19.03 deg at stations 42.28-47.75 (aft end r 4.621, azimuth 20 / 160), span 3.154 m, swept 6-point quad with an aft foot beyond the hinge end (-1.45 m), area 12.37 m^2 (flat face of `ss3-ship-nose-flap-l.stl`, boundary loop), no lugs drawn (user 2026-11-01) | hinge 8 m, span 3, 24 m^2 | photo 108: a wide swept flap, not measurable (perspective); STL size, orientation and place used | the model's own place and lean (user 2026-11-01) |
-| Grid fin | STL: irregular octagon 4.03 x 4.03 m over the cell axes (NOT regular: sides 0.35 / 2.37 / 2.01 / 1.10 / 1.98 m), pitch 0.350 m, depth 0.4 (catch 0.7) | 13.5 m^2 at span 3.0 | STL for the plan, photos for cusps / scallops, see "Fin plan round" | same irregular octagon, 3.53 m wide x 4.54 m span, pitch 0.350 m |
+| Grid fin | STL: irregular octagon 4.03 x 4.03 m over the cell axes (NOT regular: sides 0.35 / 2.37 / 2.01 / 1.10 / 1.98 m), pitch 0.350 m, depth 0.4 (catch 0.7) | 12.63 m^2, r 7.19 (13.5 m^2 at span 3.0 until Task 4) | STL for the plan, photos for cusps / scallops, see "Fin plan round" | same irregular octagon, 3.53 m wide x 4.54 m span, pitch 0.350 m |
 | Booster top / hot stage | 20 V teeth, ~2.8 m high in the model view | | NSF photo 2026-03 measured, see "Real-frames round" | 20 spindle rods pairs, fork feet, ring 0.32 m |
 | Booster skirt | base ring r 4.65, four thin ring tubes at r 4.9 (stations 0.7 / 1.05 / 1.95 / 2.35), a comb of posts between them, one port 0.57 x 0.74 x 0.8 m at 2.9-3.7 m | flat skirt | no photo of the base | base ring, 4 ring flanges, 48 posts, 4 ports (count unknown) |
 | Booster raceway | pill 0.7 x 5 m + a thin rail along the tank part | none | none | rail + one pill per tank section (side and spacing estimated) |
@@ -197,13 +197,10 @@ engine plates): not copied. Photos in `screenshots/mechazilla/` win where they d
 | Hot-stage ring part | 9.0 m ring 0.6 m high, 3 pads | collar | n/a | collar kept |
 
 ### Physics deviations for the user
-The drawn shape sits on the physics' pivots. The flaps' physics now equals the drawing (config = detail outline and manifest hinge, `test_config_flaps_are_the_drawn_flaps`; vehicle physics plan Task 3, 2026-11-01, previous numbers `docs/history/guidance-missions.md`). Where the real shape still differs from the physics numbers:
+The drawn shape sits on the physics' pivots. The flaps' physics equals the drawing (config = detail outline and manifest hinge, `test_config_flaps_are_the_drawn_flaps`; vehicle physics plan Task 3, 2026-11-01, previous numbers `docs/history/guidance-missions.md`), and so do the grid fins (12.63 m^2 gross, centre of pressure at the drawn centroid r 7.19; Task 4, `aero-derivation.md`; earlier rows `docs/history/vehicle-models.md`). Where the real shape still differs from the physics numbers:
 
 | Item | Physics (config) | Drawn (model) | Meaning |
 |---|---|---|---|
-| Aft flap | 12 x 3.69 m, 36.48 m^2, centroid (u 5.059, v 1.682) | same | none. Thin plate: the wedge and lugs carry no aero |
-| Forward flap | hinge 42.282-47.75, lean 19.03 deg, 12.374 m^2, span 3.154, centroid (u 1.609, v 1.250), station 44.21 at d = 90 | same | none (the earlier "13.8 m^2" in these docs was wrong) |
-| Grid fin | 13.5 m^2, span 3.0, chord 4.5, centre of pressure at r 6.0 | STL outline, gross 12.63 m^2 (cell map: 102.9 cells of 0.350 m), root at r 4.65 (hull + 0.15 m gap), tail at r 9.19, centroid at r 7.19 m; walls (0.04 m on a 0.35 m pitch, both families) block 22 % looking along the cells | the physics has 7 % more area (13.5 vs 12.63) and a 1.19 m shorter lever arm than the drawing (r 6.0 vs 7.19); rest attitude agrees (cells axial at d = 0) |
 | Ship nose | `nose_length_m` 17 | ogive 13.4 m | drag / nose-radius numbers use the longer, sharper nose; the drawn one is blunter |
 | Forward RCS pod | station 46, azimuth 0 / 180, r 4.5 | not drawn; hull r 3.35 at station 46, the forward cover there reaches azimuth -2 deg | the physics pod floats 1.15 m off the hull, 1.54-1.75 m from the forward flap at every deflection; user decision (vehicle physics plan Task 3 report) |
 | Fin azimuths | 0 / 90 / 180 (90 / 90 / 180) | as configured | aerial 2026-04, f12 1804 s: the spacing agrees, the middle fin points away from the tower |
@@ -349,8 +346,7 @@ Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax 
 - Catch pins: see the deviations table: the pins stay as configured, frames give no sign of them.
   catch features at / integrated with the grid-fin mechanisms (unconfirmed, partly older designs). Modelled as in the config
   (physics and visual agree); a check against Block 3 photos and a decision on the physics numbers are open.
-- Config numbers that look odd next to the references: the 13.5 m^2 fin at a 3.0 m span (radius_m 6.0) gives a 4.5 m chord;
-  the 20 outer engines on the 4.1 m ring overlap by 0.16 m at the exit planes and the outer bell edge (4.82 m) passes the hull
+- Config numbers that look odd next to the references: the 20 outer engines on the 4.1 m ring overlap by 0.16 m at the exit planes and the outer bell edge (4.82 m) passes the hull
   radius (4.5 m).
 - Flaps at d = 0 (folded, not the rest pose, which is d = 90) lie on the hull's tangent plane: the tip stands up to 0.9 m off the curved hull.
 - Raceway position, tile coverage, hot-stage and bell dimensions are estimates; no Block 3 drawing exists.

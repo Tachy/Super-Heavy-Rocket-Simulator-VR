@@ -1,6 +1,6 @@
 # Aero derivation (ascent and booster descent drag from the built models)
 
-Drag derived from the drawn geometry (plan `docs/superpowers/plans/2026-11-01-vehicle-physics.md`, Tasks 1, 2, 2b). The stack's ascent
+Drag derived from the drawn geometry (plan `docs/superpowers/plans/2026-11-01-vehicle-physics.md`, Tasks 1, 2, 2b, 4). The stack's ascent
 table is this tool's output; the descent tables and the ship's table are only compared. No number here was fitted; a disagreement is
 reported as it is.
 
@@ -18,11 +18,11 @@ reported as it is.
 ## Secured areas
 | Quantity | Drawn | Error | Config | Drawn / config | Source |
 |---|---|---|---|---|---|
-| flap aft area [m^2] | 36.480 | +-0.730 | 48 | 0.760 | detail outline, STL 1:100 [E]; mesh projection 36.48 |
-| flap aft span [m] | 3.690 | +-0.037 | 4 | 0.922 | detail outline [E] |
-| flap fwd area [m^2] | 12.374 | +-0.247 | 24 | 0.516 | detail outline, STL 1:100 [E]; mesh projection 12.37 |
-| flap fwd span [m] | 3.154 | +-0.032 | 3 | 1.051 | detail outline [E] |
-| grid fin gross area [m^2] | 12.626 | +-0.253 | 13.5 | 0.935 | detail outline, STL 1:100 [E]; 102.9 cells x 0.35^2 = 12.60 |
+| flap aft area [m^2] | 36.480 | +-0.730 | 36.48 | 1.000 | detail outline, STL 1:100 [E]; mesh projection 36.48 |
+| flap aft span [m] | 3.690 | +-0.037 | 3.69 | 1.000 | detail outline [E] |
+| flap fwd area [m^2] | 12.374 | +-0.247 | 12.374 | 1.000 | detail outline, STL 1:100 [E]; mesh projection 12.37 |
+| flap fwd span [m] | 3.154 | +-0.032 | 3.154 | 1.000 | detail outline [E] |
+| grid fin gross area [m^2] | 12.626 | +-0.253 | 12.63 | 1.000 | detail outline, STL 1:100 [E]; 102.9 cells x 0.35^2 = 12.60 |
 | grid fin open fraction [-] | 0.694 | +-0.040 | - | - | solid parts by first hit along the cells at d = 0, then the walls (1 - w/p)^2 = 0.784 (mesh walls are zero-thick sheets; wall 0.04 m is an upper bound [E]); band 0.06, frame 0.89, lattice 0.20, pylon 0.31 m^2 |
 | grid fin open area [m^2] | 8.764 | +-0.505 | - | - | open fraction x gross |
 | wetted hull booster [m^2] | 1965.453 | +-19.852 | - | - | lathe integral to station 69.42; mesh 1965.3; plain cylinder pi D L 2044.2 |
@@ -115,19 +115,19 @@ Kn 0.01 (Mach >= 8) friction is evaluated at the Kn 0.01 altitude and the row is
 
 | Mach | band | face | friction | base | derived | +- | table | derived/table | verdict | hull face only | Hoerner face | with bells |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 0.3 | subsonic | 0.777 | 0.053 | 0.132 | 0.962 | 0.088 | 0.925 | 1.04 | within | 1.149 | 0.962 | 0.798 |
-| 0.6 | subsonic | 0.831 | 0.048 | 0.167 | 1.045 | 0.097 | 0.950 | 1.10 | within | 1.245 | 1.045 | 0.869 |
-| 0.8 | transonic | 0.890 | 0.045 | 0.203 | 1.138 | 0.188 | 1.000 | 1.14 | within | 1.352 | 1.138 | 0.949 |
-| 0.95 | transonic | 0.947 | 0.043 | 0.237 | 1.228 | 0.203 | 1.150 | 1.07 | within | 1.456 | 1.228 | 1.027 |
-| 1.05 | transonic | 0.997 | 0.043 | 0.238 | 1.278 | 0.212 | 1.350 | 0.95 | within | 1.513 | 1.278 | 1.063 |
-| 1.2 | transonic | 1.081 | 0.041 | 0.208 | 1.331 | 0.225 | 1.432 | 0.93 | within | 1.566 | 1.331 | 1.086 |
-| 1.5 | supersonic | 1.766 | 0.039 | 0.167 | 1.971 | 0.357 | 1.380 | 1.43 | outside | 1.650 | 1.424 | 1.123 |
-| 2 | supersonic | 1.910 | 0.034 | 0.125 | 2.069 | 0.384 | 1.420 | 1.46 | outside | 1.722 | 1.535 | 1.152 |
-| 3 | supersonic | 2.023 | 0.033 | 0.083 | 2.140 | 0.405 | 1.750 | 1.22 | within | 1.772 | 1.697 | 1.168 |
-| 5 | supersonic | 2.084 | 0.021 | 0.050 | 2.155 | 0.313 | 1.880 | 1.15 | within | 1.777 | 1.699 | 1.154 |
-| 8 | supersonic | 2.106 | 0.012 | 0.022 | 2.140 | 0.316 | 1.880 | 1.14 | within | 1.757 | 1.679 | 1.129 |
-| 15 | supersonic | 2.115 | 0.005 | 0.006 | 2.126 | 0.317 | 1.880 | 1.13 | within | 1.742 | 1.663 | 1.110 |
-| 25 | supersonic | 2.118 | 0.002 | 0.002 | 2.122 | 0.318 | 1.880 | 1.13 | within | 1.737 | 1.659 | 1.105 |
+| 0.3 | subsonic | 0.777 | 0.053 | 0.132 | 0.962 | 0.088 | 0.959 | 1.00 | within | 1.149 | 0.962 | 0.798 |
+| 0.6 | subsonic | 0.831 | 0.048 | 0.167 | 1.045 | 0.097 | 0.985 | 1.06 | within | 1.245 | 1.045 | 0.869 |
+| 0.8 | transonic | 0.890 | 0.045 | 0.203 | 1.138 | 0.188 | 1.037 | 1.10 | within | 1.352 | 1.138 | 0.949 |
+| 0.95 | transonic | 0.947 | 0.043 | 0.237 | 1.228 | 0.203 | 1.190 | 1.03 | within | 1.456 | 1.228 | 1.027 |
+| 1.05 | transonic | 0.997 | 0.043 | 0.238 | 1.278 | 0.212 | 1.391 | 0.92 | within | 1.513 | 1.278 | 1.063 |
+| 1.2 | transonic | 1.081 | 0.041 | 0.208 | 1.331 | 0.225 | 1.474 | 0.90 | within | 1.566 | 1.331 | 1.086 |
+| 1.5 | supersonic | 1.766 | 0.039 | 0.167 | 1.971 | 0.357 | 1.420 | 1.39 | outside | 1.650 | 1.424 | 1.123 |
+| 2 | supersonic | 1.910 | 0.034 | 0.125 | 2.069 | 0.384 | 1.457 | 1.42 | outside | 1.722 | 1.535 | 1.152 |
+| 3 | supersonic | 2.023 | 0.033 | 0.083 | 2.140 | 0.405 | 1.783 | 1.20 | within | 1.772 | 1.697 | 1.168 |
+| 5 | supersonic | 2.084 | 0.021 | 0.050 | 2.155 | 0.313 | 1.911 | 1.13 | within | 1.777 | 1.699 | 1.154 |
+| 8 | supersonic | 2.106 | 0.012 | 0.022 | 2.140 | 0.316 | 1.911 | 1.12 | within | 1.757 | 1.679 | 1.129 |
+| 15 | supersonic | 2.115 | 0.005 | 0.006 | 2.126 | 0.317 | 1.911 | 1.11 | within | 1.742 | 1.663 | 1.110 |
+| 25 | supersonic | 2.118 | 0.002 | 0.002 | 2.122 | 0.318 | 1.911 | 1.11 | within | 1.737 | 1.659 | 1.105 |
 
 ### Booster descent, body + fins
 
@@ -213,9 +213,9 @@ flies `super_heavy_descent.csv`. Plan cache: `config_contents_hash` covers the c
 | Ascent stack | 8-25 | outside, not a flown state | The stack stages at about Mach 6. Friction at Kn 0.01 is laminar and at the end of its range |
 | Ascent ship alone | 5 | 1.29 on, **just outside** (0.419 against 0.325 +- 0.089 combined); 1.14 off, within | Went from within to just outside when the wake range raised the flap load; left as it is, Task 5 re-determines the ship |
 | Ascent ship alone | 8-25 | outside, ratio 2.1-4.1, not flown in continuum | Friction near Kn 0.01; at the flown altitude the core's free-molecular blend dominates and the table's weight is small |
-| Descent body | 0.3-1.2 | within (0.93-1.14) | Hoerner blunt body; subsonic is unmeasured on both sides |
-| Descent body | 1.5, 2 | **outside** (1.43, 1.46) | Newtonian loads the flat face with full stagnation pressure, and the protrusions (k 0.21). Hoerner's face gives 1.42 / 1.54 against 1.38 / 1.42, so the method jump at Mach 1.5 is most of it |
-| Descent body | 3-25 | within (1.13-1.22) | Hull face alone: 1.77 at Mach 3-5 against 1.75-1.88 |
+| Descent body | 0.3-1.2 | within (0.90-1.10) | Hoerner blunt body; subsonic is unmeasured on both sides |
+| Descent body | 1.5, 2 | **outside** (1.39, 1.42) | Newtonian loads the flat face with full stagnation pressure, and the protrusions (k 0.21). Hoerner's face gives 1.42 / 1.54 against 1.42 / 1.46, so the method jump at Mach 1.5 is most of it |
+| Descent body | 3-25 | within (1.11-1.20) | Hull face alone: 1.77 at Mach 3-5 against 1.78-1.91 |
 | Descent total | all but 1.2 | within the table | Body high and fins low compensate from Mach 1.5 up: derived fin CA 0.24-0.53 against the table's 0.75-0.98. The agreement of the sum does not confirm the split |
 | Descent total | 1.2 | outside the table (1.66 against 2.07) | Fin form changes at Mach 1 and the blunt-face trend is the least certain band |
 | Descent total against flights | 1.05, 1.2 | **outside**: 1.61, 1.66 against 2.06 (one bin), 2.28 | Derived too low in the band flagged least certain |
@@ -229,7 +229,7 @@ is 37 m/s with the new table and 17 m/s with the old, with the mass history assu
 does not separate it.
 
 ## Sensitivities
-- Fin area 13.5 against 12.63 m^2: descent total +0.010 to +0.033 (at most 2.0 %), beta -8 to -59 kg/m^2.
+- Fin area 13.5 (config until Task 4) against 12.63 m^2, derived fin CA: descent total +0.010 to +0.033 (at most 2.0 %), beta -8 to -59 kg/m^2.
 - Flaps at d = 0 instead of 90 in ascent (note only, d = 90 is the real pose): stack -0.006 to -0.011 (with the wake range folded flaps
   hide little). Flaps at d = 90 carry 0.045-0.075 in the stack at Mach 0.3-5.
 - Nose 17 m (physics) instead of 13.4 m (drawn): -0.07 to -0.15 at Mach 0.95-5, nothing below.
@@ -238,8 +238,6 @@ does not separate it.
 - Grid fin: wall 0.02 m instead of the upper bound 0.04 m: about half at Mach 0.3, 0.40 for 0.57 at Mach 5. Scooped forward face (not seen in a
   photo, drawn flat): about 0.34 at Mach 5. Both move the same way, so the stack's 0.33-0.45 is close to an upper estimate, not a centre;
   the stated +-30-50 % does not express this one-sidedness.
-- Fin asymmetry: the 90 deg fin has no opposite. Peak q: about 344 kN x 6.8 m = 2.3 MN m, about 0.03 deg of gimbal (lever about 45 m assumed).
-  The table is axial only, it carries no moment; Task 4 quantifies it.
 - Drawn bells in the pure Newtonian descent: body 1.12-1.17 at Mach >= 1.5, a lower bound (see Method).
 - Hull face only against all drawn parts, descent Mach >= 1.5: 1.65-1.78 against 1.97-2.16.
 
@@ -256,6 +254,49 @@ does not separate it.
 - Grid fin wall thickness 0.04 m is an upper bound (not resolved in any frame); it sets the open fraction 0.694 +-0.04.
 - Stack rows at Mach >= 8 and descent rows at Mach >= 5 are not measured states: descent friction there uses a nominal 30 km.
 
+## Grid fins in the core (Task 4)
+Config: `area_m2` 12.63 (gross, drawn), `radius_m` 7.19 (outline centroid: hull 4.5 + root gap 0.15 + 2.544), `station_m` 64.0: the outline's
+centroid lies on the hinge (z 0.000) and the plate is centred on it in depth (x +-0.25), so no disagreement. Falcon 9's fins untouched.
+
+- **Lever and attitude:** `fin_transform` (rotation about the azimuth, then about the radial) gives cell axis x cos d - t sin d and normal
+  t cos d + x sin d, the core's `grid_fin_force` normal, to 5e-17, at all three azimuths; at d = 0 the cells are axial. The axes agree.
+- **Descent table:** `super_heavy_descent.csv` = old body + 3 x 0.87 m^2 x `ca_axial` / 63.617 m^2 on the union of both Mach grids, so the
+  total against the flights did not move (largest change 4.3e-5, rounding; `[aero][grid_fins]` checks < 1e-3 over Mach 0-25). `ca_axial`
+  is not re-fitted.
+- **Open:** derived fin CA tail first is 0.24-0.79 against the table's 0.75-1.0, and the sum body + fins agrees only because the body is
+  high where the fins are low. The split between them remains undetermined; moving it would change the moment below, not the total.
+
+### The unbalanced fin's moment
+Fins 0 and 180 cancel, fin 90 stands at body +z: its axial drag makes a moment about +y, the axis on which the fins 0 and 180 act. Peak q from
+`tools/telemetry/peak_dynamic_pressure.py`; authority from the core with the new area and lever, at the measured state (261 t, CG 21.86 m;
+stack 3951 t at T+63 s, CG 53.38 m).
+
+| Phase | q kPa | Mach | CA | Force kN | Moment MN m | Authority about y, MN m | Share |
+|---|---|---|---|---|---|---|---|
+| Tail first, flight 13 peak (T+372 s, 11.2 km) | 106.7 | 2.63 | 0.837 table | 1128 | 8.11 | fins 94.3 | **8.6 %** |
+| Same, derived CA | 106.7 | 2.63 | ~0.37 | 499 | 3.6 | fins 94.3 | 3.8 % |
+| Tail first, flight 14 peak (T+382 s, 10.6 km) | 101.0 | 2.44 | 0.856 table | 1092 | 7.85 | fins 94.5 | **8.3 %** |
+| Tail first, against RCS (no engine running) | 106.7 | 2.63 | 0.837 | 1128 | 8.11 | RCS 0.587 | 1380 %, the fins must hold it; passes the RCS at q about 8.6 kPa |
+| Landing burn ignition, simulated (0.62 km, 260 m/s) | 39 | 0.77 | 0.88 | 432 | 3.1 | gimbal 13 engines 214 | 1.5 % |
+| Ascent, max q flight 14 (T+63 s) | 38.9 | 1.36 | 1.00 table | 491 | 3.53 | gimbal 480 (vacuum thrust) | 0.74 % |
+| Same, derived nose-first CA | 38.9 | 1.36 | 0.725 | 356 | 2.56 | gimbal 480 | 0.53 % |
+
+Decision from the numbers: above 2 % in the tail-first descent, by either CA, so it is in the physics. Holding 8.1 MN m takes about 2.6 deg of
+fin. Ascent is below 2 % and the same code runs there; its table CA is tail-first data, 38 % above the derived nose-first value.
+
+`FlightBody` (`grid_fin_drag_couple`, fidelity flag `FlightEnvironment::grid_fin_drag_couple`, default on; `FlightSession::set_grid_fin_drag_couple`)
+adds the moment of each fin's share of the axial force (`aero::grid_fin_axial_force_n`) at its centre of pressure. The force itself stays in the axial
+curve, because the planners read that curve (`booster_return_prediction`, `descent_model`): force on the axis + this couple is the same
+wrench as the drag at the fins with it taken out of the curve, and the total cannot move. A symmetric layout gets exactly zero (Falcon 9
+bit-identical, printed state compared in hex). The guidance has no feed-forward for this moment; the attitude loop takes it as a disturbance.
+
+### Why fins 0 and 180 load below fin 90 (nose first)
+Solid load 1.295 / 1.376 / 1.311 m^2 (0 / 90 / 180). Occlusion, not a bug, and not the catch pins the review suspected: removing `ship/catch_pins`
+changes nothing. With hulls and fins alone the three are 1.451 / 1.439 / 1.463. Removing the flaps gives 1.388 / 1.376 / 1.400: fin 90 is unchanged and
+0 / 180 rise above it. So the deficit is the wake of the flaps (hinge azimuths 0, 180, 20, 160), upstream of those two fins and not of fin 90. The wake rule takes a part's
+span as its height, which overstates a thin flap's wake (see `exposure.py`), so the 5-6 % is an upper value. The remaining difference between 0 and 180 (1 %) is the
+drawn mesh, partly the bearing on those fins.
+
 ## Open
-Ascent validation `[gnc][validation][ascent][slow]` with the new table runs in Task 6 (no campaign before it). Ship alone: Task 5. Fin
-axial moment and `grid_fin.csv`: Task 4.
+Ascent validation `[gnc][validation][ascent][slow]` with the new table runs in Task 6 (no campaign before it). Ship alone: Task 5. Fin CA: see
+"Grid fins in the core". No guidance feed-forward for the fin moment; Task 6 shows whether it is needed.

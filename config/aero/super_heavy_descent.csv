@@ -1,6 +1,6 @@
 # Axial drag coefficient of the Super Heavy (Block 3) booster falling engines first (tail first), reference
 # area pi*(d/2)^2, WITHOUT the grid fins (the vehicle model adds their drag from aero/grid_fin.csv ca_axial and
-# the fin count and area: 3 x 13.5 m^2).
+# the fin count and area: 3 x 12.63 m^2, the drawn gross area).
 # [D] Mach 1.1-3.9: identified from the webcast telemetry of flights 13 and 14 (tests/validation/telemetry,
 # tools/telemetry/drag_estimate.py: D/m = -dv/dt - g sin(gamma) in the unpowered descent; below ~9 km, where the
 # speed dial gives way to the engine icon, speed and deceleration from the 0.1 km altitude readings of the nearly
@@ -8,15 +8,20 @@
 # the fins' share; smoothed (the bins scatter +-10-15 %). Above Mach 3.9 held constant.
 # [E] Subsonic: blunt-cylinder trend (not measured: the landing burn starts at ~Mach 1).
 # Power-on column: during the landing burn the plume shields the base; kept equal for now [E].
+# Re-subtracted 2026-11-01 for the drawn fin area (was 3 x 13.5 m^2): body + 3 x 0.87 m^2 x ca_axial / 63.617 m^2, on the union of this
+# table's and grid_fin.csv's Mach grids, so the total body + fins the flights fixed is unchanged at every Mach (no re-fit; test in test_grid_fins.cpp).
 mach,cd_axial_power_on,cd_axial_power_off
-0.0,0.900,0.900
-0.6,0.950,0.950
-0.8,1.000,1.000
-0.95,1.150,1.150
-1.1,1.450,1.450
-1.5,1.380,1.380
-2.0,1.420,1.420
-3.0,1.750,1.750
-5.0,1.880,1.880
-10.0,1.880,1.880
-25.0,1.880,1.880
+0,0.9328,0.9328
+0.6,0.9846,0.9846
+0.7,1.0099,1.0099
+0.8,1.0369,1.0369
+0.9,1.1390,1.1390
+0.95,1.1895,1.1895
+1.1,1.4910,1.4910
+1.4,1.4385,1.4385
+1.5,1.4203,1.4203
+2,1.4569,1.4569
+3,1.7828,1.7828
+5,1.9108,1.9108
+10,1.9108,1.9108
+25,1.9108,1.9108

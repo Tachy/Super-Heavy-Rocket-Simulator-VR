@@ -44,7 +44,9 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   (`Vehicle::update_grid_fins`). The controller allocates torque to the fins first (minimum-norm least squares), the
   remainder to gimbals/RCS, using the last tick's air data (`FlightBody::air_data()`); only with
   `AttitudeController::Gains::grid_fins`. SCvx landing burns feather the grid fins into their local flow
-  (`AttitudeController::feathered_grid_fins`).
+  (`AttitudeController::feathered_grid_fins`). Each fin's axial drag, kept in the hull's curve, adds its moment at the fin
+  (`FlightEnvironment::grid_fin_drag_couple`): Super Heavy's 0 / 90 / 180 layout pitches about +y, up to 8.6 % of the fin
+  authority (`aero-derivation.md`); the controller meets it as a disturbance.
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically (follow the
   Earth), impacted/resting bodies do not block coast segments. A freely falling body below 5 km above its ground is
   ticked.
