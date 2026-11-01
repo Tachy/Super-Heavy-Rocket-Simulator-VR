@@ -339,7 +339,7 @@ Decision from the numbers (2026-11-01, Task 6): **off by default.** The rows abo
 term at Mach 3 is 0.112 on 63.62 m^2 for three fins, so CA 0.19 per fin against the table's 0.837: about 1.8 MN m, 1.8 % of the 102 MN m of authority, under the 2 % threshold. The table's
 CA overstates it about 4 x (the descent total keeps that CA only because the sum was fixed by the flights). The ascent is below 2 % by any CA.
 
-`FlightBody` (`grid_fin_drag_couple`, fidelity flag `FlightEnvironment::grid_fin_drag_couple`, default off; `FlightSession::set_grid_fin_drag_couple`)
+`FlightBody` (`grid_fin_drag_couple`, fidelity flag `FlightEnvironment::grid_fin_drag_couple`, default off; set through the environment only)
 with the flag on adds the moment of each fin's share of the axial force (`aero::grid_fin_axial_force_n`) at its centre of pressure. The force itself stays in the axial
 curve, because the planners read that curve (`booster_return_prediction`, `descent_model`): force on the axis + this couple is the same
 wrench as the drag at the fins with it taken out of the curve, and the total cannot move. A symmetric layout gets exactly zero (Falcon 9
@@ -360,11 +360,11 @@ drawn mesh, partly the bearing on those fins.
 |---|---|---|---|
 | Hull eta C_dc, Mach 4 / 8 / 15 / 25 | 1.50 / 1.50 / 1.52 / 1.58 | 1.07 / 1.09 / 1.10 / 1.10 +-10 % | Mean over alpha 50-90, potential term out; alpha 90 gives CN 535 m^2 = 2/3 cp_max on the 428 m^2 planform |
 | Hull eta C_dc, Mach 0.3 / 0.8 / 1.2 / 2 | 1.11 / 1.30 / 1.90 / 1.70 | 0.84 / 1.20 / 1.80 / 1.50 (+-0.25-0.40) | Hoerner, recalled |
-| Hull normal force station, alpha 50 / 60 / 90 | about 27 m (formula) | 25.61 / 24.97 / 23.61 m | Table above Mach 3; below it not determined |
+| Hull normal force station, alpha 50 / 60 / 90 | about 27 m (formula) | 25.61 / 24.97 / 23.61 m | Table from Mach 4, faded in over Mach 1-4; below Mach 1 the formula |
 | Flap exposure, aft d = 30 / 40 / 60 / 90 | core 0.46 / 0.58 / 0.79 / 0.91 | mesh 0.41 / 0.65 / 0.82 / 0.85 | Forward, alpha 60: core rule against mesh within about 0.1 |
 
 The derived hull alone at the old alpha flies 17-20 % rms too fast on flights 13, 14 (drag short). The gap between 1.07-1.10 and the flights' 1.5-1.6 is open: `ship_crossflow.csv` stays [D].
 
 ## Open
-Ascent validation `[gnc][validation][ascent][slow]` with the new table runs in Task 6 (no campaign before it). Ship alone: Task 5. Fin CA: see
-"Grid fins in the core". No guidance feed-forward for the fin moment; Task 6 shows whether it is needed.
+Ascent validation `[gnc][validation][ascent][slow]` with the new table ran in Task 6: green. Fin CA: see
+"Grid fins in the core". No guidance feed-forward for the fin moment; Task 6 ran with the fin drag couple off and showed no need (under 2 % by the review's figure).

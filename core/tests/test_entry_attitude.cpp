@@ -81,11 +81,10 @@ struct World {
 
 // Ship alone with only its landing propellant, flying horizontally (+x) at `height_m` over GCRF +z, in the entry
 // attitude for `alpha` (bank 0).
-std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world,
-                                                 double propellant_kg = 0.0) {
+std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world) {
     auto cfg = config::load_vehicle(config_dir, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    config::fill_tanks(cfg.stages[0], propellant_kg > 0.0 ? propellant_kg : cfg.stages[0].landing_propellant_kg);
+    config::fill_tanks(cfg.stages[0], cfg.stages[0].landing_propellant_kg);
     for (auto& f : cfg.stages[0].flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
     const Vec3 v{speed_mps, 0.0, 0.0}, up{0.0, 0.0, 1.0};
     const vehicle::RigidBodyState state{{0.0, 0.0, 6356752.3 + height_m}, v,

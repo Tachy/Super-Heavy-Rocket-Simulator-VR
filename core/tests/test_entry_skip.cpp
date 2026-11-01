@@ -178,7 +178,11 @@ TEST_CASE("Guided lunar-return entry at 9.6 km/s inertial reaches the gate withi
     p.final_bank_rad = -1.0;  // the constant-bank entry (lunar_return() profiles the bank since Task 8)
     p.initial_bank_rad = nominal_bank;
     p.lateral_margin_m = 0.0;  // the target is the prediction's own end point, not a track aimed beside the site
+    // The searched bank is pinned (77.5 deg = lowest captured 76.5 + 1 deg, measured 2026-11-01): it moves with every
+    // aero change, and a silent drift of the capture edge must show here.
+    CHECK(nominal_bank / deg == Approx(77.5).margin(0.01));
     scenario.fly_guided(schedule, target, p, radiative);
+    std::printf("lunar 9.6 km/s: searched bank %.2f deg, flown miss %.1f m\n", nominal_bank / deg, scenario.gate_miss_m(target));
     CHECK(scenario.reached_gate());
     CHECK(scenario.gate_miss_m(target) < 2000.0);
     CHECK(scenario.body().peak_heat_rate_w_m2() < 1.2e6);

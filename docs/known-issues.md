@@ -5,8 +5,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Red by decision since the Pad B physics alignment (user 2026-10-31: no campaign tuning before the vehicle plan, plan
   `docs/superpowers/archive/plans/2026-10-31-pad-b-physics-alignment.md`): the lunar direct campaign has no robust gate height, 21 seeds
   (800 m: seed 3 lost, arm in the hull with 20.7 t; 815 m: all caught, one on 0.0 t; 825-850 m: seed 11 upright abort), cause not
-  found; `tanker_flight` and the refuelling inputs digest need the re-measure; ship case 20 ends upright on 0.0 t below the
-  1 t reserve, unexplained. Not verified: that a ship abort with the water out of reach never strikes the tower, and that the
+  found; `tanker_flight` and the refuelling inputs digest need the re-measure; ship case 20 ends upright on 0.3 t, still below the
+  1 t reserve (the 0.0 t was the braking feedforward not scaling with the sink; fixed in ca4d506). Not verified: that a ship abort with the water out of reach never strikes the tower, and that the
   booster's 400 m abort point (loss, 28 m from the pad centre) clears the drawn tower, mount, foot and ramps; the wide run did
   not finish (aerocapture at gate 800, the flown depot campaign).
 
@@ -89,8 +89,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   2 rain / snow / fog / lightning / weather-dependent haze (small variant: climatology AOD plus humidity growth, a few
   precomputed table sets) / city light on clouds; part 3 GOES patterns; part 4 wind / density and launch rules.
 - Pad B physics alignment (user 2026-10-31): the final arm geometry (one hinge axis, arm 24.0 m, standby 7.1 deg, closing
-  0.71 s) has flown no catch; the booster and ship catch campaigns and the `[slow]` catch cases have not run since. They are a
-  gate of the vehicle plan.
+  0.71 s) was re-flown in the vehicle plan's Task 6: booster catch campaign 21 of 21, ship catch campaign 20 of 21
+  (`docs/subsystems/ship-entry-return.md`, `ascent-staging.md`). The lunar campaigns have not flown it: `[lunar][return][validation][slow]`
+  direct campaign run 2026-11-01 after the vehicle plan, the groups seeds 1-3 (2 of 3 flown), 10-12 and 13-15 red, the other groups green; cause not examined.
 - `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
   2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
 

@@ -207,7 +207,7 @@ TEST_CASE("Leaned forward flap against the STL's numbers", "[aero][flap]") {
     CHECK(dot(aero::flap_centroid(tip, pi / 2), e_r) == Approx(2.735).margin(0.005));
 }
 
-TEST_CASE("Lean 0 with the default centroid is the old straight flap to 1e-12", "[aero][flap]") {
+TEST_CASE("Lean 0 with the default centroid is the straight flap geometry to 1e-12", "[aero][flap]") {
     const math::Vec3 v{-300.0, 200.0, -1500.0};
     for (const double azimuth : {0.0, pi, 20.0 * constants::deg_to_rad, 160.0 * constants::deg_to_rad}) {
         auto f = flap();
@@ -226,14 +226,18 @@ TEST_CASE("Lean 0 with the default centroid is the old straight flap to 1e-12", 
             CHECK(norm(aero::flap_centroid(f, d) - point) < 1e-12);
             const auto r = aero::flap_force(f, d, v, air, table());
             CHECK(norm(r.application_point_m - point) < 1e-12);
-            const double q = 0.5 * 1e-3 * dot(v, v);
-            const double speed = norm(v), vn = dot(v, normal);
-            const double cn = table().cn_max(speed / air.speed_of_sound_mps) * (vn / speed) * (vn / speed);
-            // The old formula, on the part of the plate out of the hull's shadow.
-            const double exposed = aero::flap_exposed_fraction(f, d, v);
-            const math::Vec3 old_force = normal * (-std::copysign(exposed * cn * q * f.area_m2, vn));
-            CHECK(norm(r.force_body_n - old_force) < 1e-12 * std::max(1.0, norm(old_force)));
         }
+    }
+    // The force, in literal numbers (no value taken from the implementation): the broadside flap (d = 90 deg) in a flow
+    // along the belly normal (-z), Mach 5 (cn_max 1.84), q = 0.5 * 1e-3 * 1500^2 = 1125 Pa, area 48 m^2, fully exposed:
+    // F_z = 1.84 * 48 * 1125 = 99360 N, for a hinge on either side.
+    for (const double azimuth : {0.0, pi}) {
+        auto f = flap();
+        f.hinge_azimuth_rad = azimuth;
+        const auto r = aero::flap_force(f, pi / 2, math::Vec3{0.0, 0.0, -1500.0}, air, table());
+        CHECK(r.force_body_n.z == Approx(99360.0).epsilon(1e-9));
+        CHECK(std::abs(r.force_body_n.x) < 1e-6);
+        CHECK(std::abs(r.force_body_n.y) < 1e-6);
     }
 }
 

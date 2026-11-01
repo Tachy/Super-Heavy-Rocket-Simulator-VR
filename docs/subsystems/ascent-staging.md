@@ -282,8 +282,8 @@ open discrepancy (measured + `test::allowance_margin` 2 % [E]; each T+30/60/90/1
 - **Hull normal force A/B** (clipped LQR ticks): ASDS MECO states 0 / 82456 and 0 / 73036, ASDS at ignition 237 / 151618
   (peak 1.97), RTLS 0 / 110620, Super Heavy catch 0 / 125972, ship catch campaign 39 / 85609, lunar-return seed-18 gate 20 /
   4060; no case clips in its last 10 s. Outcomes: ASDS 11/11, 10/10, 21/21 landed, RTLS 21/21 (sink <= 1.05 m/s), Super
-  Heavy catch 21/21, ship catch campaign 20 of 21 (known engine-failure case). Abort test: 1500 m Wasserung 552 m / 12.4 t;
-  800 m 549 m / 10.0 t; 400 m 532 m / 6.1 t. Results of the SCvx rules above: `asds-single` seeds 0, 101-120 21/21 with no
+  Heavy catch 21/21, ship catch campaign 20 of 21 (known engine-failure case). Abort test (re-measured in the vehicle plan's Task 6): 1500 m
+  Wasserung 810 m / 6.3 t; 800 m 792 m / 4.1 t; 400 m landed 28 m / 27.7 t (earlier 552 / 549 / 532 m). Results of the SCvx rules above: `asds-single` seeds 0, 101-120 21/21 with no
   failed re-plan (ASDS cases land with ~5.0 t, seed 107 7.8 t).
 - **Windows and reference flights** (re-baselined by the ascent changes; re-measure after changes to ascent, staging or
   engine data): tanker_flight `insertion_s` 432.2 s / `insertion_arc_deg` 12.25; hls_refuel 415.7 s / 11.78 deg;

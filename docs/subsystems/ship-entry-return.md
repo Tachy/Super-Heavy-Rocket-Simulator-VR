@@ -134,7 +134,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m. Mach 0.68, alpha 80.5: yaw at zero roll +-8.4e5 N m, the demand at the terminal basis freeze ~1e6 (`docs/known-issues.md`).
 - Ship catch: case 4 of the entry campaign is marginal (roundoff moves it between ~0.1 and ~1.2 km); an
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
-  left); 5 of 21 dispersed gates arrive with <= 0.7 t.
+  left); since the vehicle plan's Task 6 the caught dispersed gates arrive with >= 3.8 t (see Validation).
 - A low-propellant abort (21-23 t at the gate) is carried by the flip push next to the tower and strikes it - an
   abort-planning problem (keep-out with unconverged re-plans), open.
 - Aero state frozen as on main (crossflow 1.5 [D], old entry alpha table, entry CG 25.50 m, dry 255 t, dry CG 23.516 m) because no tested combination (measured masses, geometry crossflow 1.07-1.10, alpha 59.5, CG 24.85 m) passes all flight replays and case 8; table and facts in `docs/known-issues.md`. Standing facts: 255 t dry is probably too high (about 175 +-25 t by judgement; entry masses 221 / 252 / 203-227 t +-20); the CG window is 24.49-25.88 m and 25.50 / 23.516 m are tuned values (bottom-up dry CG about 22.9 m, 19.4-23.5); the allocator's authority floor (fraction 0.25) has a narrow window (failures 8 / 9 / 2 / 0 / 9 of 10 at 0 / 0.15 / 0.20 / 0.25 / 0.30). Next step: the low Mach part (geometry set: flight 13 low 14.96 %, flight 14 low 22.06 %, too slow at Mach 3-6).
