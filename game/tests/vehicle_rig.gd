@@ -125,6 +125,7 @@ func place(sim: FlightSim, index: int, station_m: float, offset_body: Vector3, f
 
 
 func hide_ui(main: Node) -> void:
-	for child in main.get_children():
-		if child is CanvasLayer:
-			child.visible = false
+	for layer in main.find_children("*", "CanvasLayer", true, false):
+		(layer as CanvasLayer).visible = false
+	for control in main.find_children("*", "Control", true, false):
+		(control as Control).visible = false

@@ -26,6 +26,9 @@ var _models := {}
 var _stage_bases_m: Array[float] = []
 var _stage_ids: Array[String] = []
 var _engine_slots: Array[Dictionary] = []  # per engine: {"multimesh", "slot", "stage"}
+## Drawn deflection of every flap for comparison shots (`vehicle_look_shots.gd --flaps`); NAN = the snapshot's. Drawing only.
+static var look_flap_deg := NAN
+
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
 var _engine_poses: Array[Transform3D] = []  # last pose per engine, stage-local body coordinates (headless tests)
@@ -284,7 +287,11 @@ func _pose_models(stages: Array, engines: Array, flaps: Array, grid_fins: Array)
 	for i in mini(flaps.size(), _flap_nodes.size()):
 		var entry: Dictionary = _flap_nodes[i]
 		if entry["node"] != null:
-			(entry["node"] as Node3D).transform = VehicleModels.flap_transform(flaps[i], entry["entry"])
+			var flap: Dictionary = flaps[i]
+			if not is_nan(look_flap_deg):
+				flap = flap.duplicate()
+				flap["deflection_deg"] = look_flap_deg
+			(entry["node"] as Node3D).transform = VehicleModels.flap_transform(flap, entry["entry"])
 	for i in mini(grid_fins.size(), _fin_nodes.size()):
 		var entry: Dictionary = _fin_nodes[i]
 		if entry["node"] != null:
