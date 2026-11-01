@@ -1,0 +1,23 @@
+# Ship hull alone: station of the normal force over the angle of attack, from the base.
+# [E] Written by tools/aero_derive/derive_ship_entry.py --write-hull-cp: modified Newtonian with first hit on the drawn mesh
+# (hull, chine, covers, no flaps; independent of Mach within its range, used at all Mach: below Mach 3 not determined).
+alpha_deg,station_m
+5,38.63
+10,34.66
+20,30.17
+30,27.86
+40,26.51
+50,25.61
+60,24.97
+70,24.45
+80,24.01
+90,23.61
+100,22.62
+110,21.69
+120,21.03
+130,20.58
+140,20.00
+150,19.18
+160,18.17
+170,16.83
+175,14.99

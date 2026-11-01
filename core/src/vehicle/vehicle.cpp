@@ -139,7 +139,7 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                 stage.flaps.push_back({{station + f.station_fwd_m, station + f.station_aft_m, f.hinge_azimuth_rad,
                                         0.5 * stage_config.diameter_m, f.span_m, f.area_m2,
                                         stage_config.aero.belly_azimuth_rad, f.hinge_lean_rad, f.hinge_radius_aft_m,
-                                        f.centroid_u_m, f.centroid_v_m},
+                                        f.centroid_u_m, f.centroid_v_m, f.centroid_hull_radius_m, f.centroid_hull_taper},
                                        f.max_deflection_rad, f.rate_rad_s,
                                        std::clamp(f.initial_deflection_rad, 0.0, f.max_deflection_rad)});
             }
@@ -216,6 +216,9 @@ void Vehicle::rebuild_aero() {
     aero_ = std::make_unique<aero::SlenderBodyAero>(
         aero::SlenderBodyGeometry{length_m(), diameter_m(), stages_.back().config.aero.nose_length_m}, drag,
         tail_first, crossflow);
+    if (stages_.size() == 1 && !stages_.front().config.aero.hull_cp_table.empty()) {
+        aero_->set_normal_force_station(config::load_csv_table(config_dir_ / stages_.front().config.aero.hull_cp_table));
+    }
     // A capsule flying alone (its heat shield at the bottom of the stack): blunt-body aerodynamics, apex at station 0.
     capsule_aero_.reset();
     if (const auto& low = stages_.front().config.aero; !low.capsule_table.empty()) {

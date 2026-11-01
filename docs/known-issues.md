@@ -11,6 +11,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   not finish (aerocapture at gate 800, the flown depot campaign).
 
 - Red by plan since the flaps follow the geometry (vehicle physics plan Task 3, 2026-11-01; goes to Task 5, nothing re-baselined):
+  (Task 5: aft flaps at the stop with 64 t: at the table's axial CG 23.84 m the pair misses 700-860 m^3 per q at Mach 1.2-25; with the hull's
+  derived centre of pressure that margin returns, axis error 2.3 deg, and the pass then fails on the heat limit instead: `task-5-report.md`.)
   `[header_tanks][aerocapture]` "An aerocapture pass with 64 t aboard damps a roll disturbance at peak q": axis error 159.9 deg
   below 80 km (limit 10), apoapsis off by 7,348 km (limit 100). The fast `[entry]`, `[trim]`, `[catch]`, `[landing]`, `[ship]`,
   `[return]`, `[ascent]` cases and `[ship][entry][validation]` stay green; the `[slow]` campaigns were not run (Task 6).

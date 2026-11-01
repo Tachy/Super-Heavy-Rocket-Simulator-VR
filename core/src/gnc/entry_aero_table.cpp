@@ -118,14 +118,16 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         alpha_grid_rad_.push_back(a * constants::deg_to_rad);
     }
     for (double mach : mach_grid) {
-        std::vector<double> cd, cl;
+        std::vector<double> cd, cl, trim;
         for (double alpha : alpha_grid_rad_) {
             const Vec3 force = trimmed_force(mach, alpha);
             const double fx = force.x, fb = dot(force, belly);
             // air velocity u = cos(a) x + sin(a) b; lift direction l = sin(a) x - cos(a) b
             cd.push_back(-(fx * std::cos(alpha) + fb * std::sin(alpha)));
             cl.push_back(fx * std::sin(alpha) - fb * std::cos(alpha));
+            trim.push_back(trim_delta);
         }
+        trim_delta_grid_rad_.push_back(trim);
         cd_grid_m2_.push_back(cd);
         cl_grid_m2_.push_back(cl);
     }
@@ -174,6 +176,17 @@ std::vector<double> EntryAeroTable::trim_flap_rad(double mach) const {
     std::vector<double> deflections;
     if (trim_delta_rad_.empty()) return deflections;
     const double delta = interpolate(mach_, trim_delta_rad_, mach);
+    for (size_t i = 0; i < flap_forward_.size(); ++i) {
+        const double max = flap_max_rad_[i];
+        deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? delta : -delta), 0.0, max));
+    }
+    return deflections;
+}
+
+std::vector<double> EntryAeroTable::trim_flap_rad(double mach, double alpha_rad) const {
+    std::vector<double> deflections;
+    if (trim_delta_grid_rad_.empty()) return deflections;
+    const double delta = bilinear(trim_delta_grid_rad_, mach, alpha_rad);
     for (size_t i = 0; i < flap_forward_.size(); ++i) {
         const double max = flap_max_rad_[i];
         deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? delta : -delta), 0.0, max));

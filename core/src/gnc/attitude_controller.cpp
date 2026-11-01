@@ -198,21 +198,28 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
         for (const auto& flap : stage.flaps) {
             const double d = flap.deflection_rad;
             const double max = flap.max_deflection_rad;
+            // Below this the plate has no usable force: to the allocator that is the lower stop. A flap there shows no
+            // authority, and the moment-neutral centring would move it freely on that false zero.
+            // At most half the range: a flap shadowed nearly all the way keeps a span for its columns.
+            const double low = std::min(0.5 * max, aero::flap_lowest_usable_deflection_rad(flap.geometry, max, air.air_velocity_body_mps));
             a.aero_moment_nm += flap_moment(flap, d, *stage.flap_table, air, w, cg_station_m);
             const auto column = [&](double lo, double hi) {
                 return (flap_moment(flap, hi, *stage.flap_table, air, w, cg_station_m) -
                         flap_moment(flap, lo, *stage.flap_table, air, w, cg_station_m)) /
                        (hi - lo);
             };
-            Vec3 per_rad = column(std::max(0.0, d - flap_difference_step_rad), std::min(max, d + flap_difference_step_rad));
+            Vec3 per_rad = column(std::max(low, d - flap_difference_step_rad), std::min(max, std::max(low, d) + flap_difference_step_rad));
             // The flap force goes with sin^2 of its incidence: its derivative vanishes at both stops (folded, broadside).
             // The local difference of a flap AT a stop sees almost no authority and the flap never comes back (l5 Task 10:
             // flaps held 90/0/0/90 from 105 km, their roll moment outgrew the RCS at 83 km and the ship rolled away) -
             // there the secant over a wide span into the range is used. Only at the stop: a flap trimmed near it (the
             // aerocapture pass holds the forward flaps at ~82 deg) keeps its local column, a secant there chattered 0/90.
-            const bool at_lower = d <= flap_at_stop_rad, at_upper = d >= max - flap_at_stop_rad;
+            // Coming out of the hull's shadow (low > 0) the force grows from nothing over the whole span, so the local
+            // difference is small all along that ramp: the centring would take such a flap for free and move it into force.
+            const bool at_lower = d <= low + (low > 0.0 ? flap_stop_secant_span_rad : flap_at_stop_rad),
+                       at_upper = d >= max - flap_at_stop_rad;
             if (at_lower || at_upper) {
-                const Vec3 secant = at_lower ? column(0.0, std::min(max, flap_stop_secant_span_rad))
+                const Vec3 secant = at_lower ? column(low, std::min(max, low + flap_stop_secant_span_rad))
                                              : column(std::max(0.0, max - flap_stop_secant_span_rad), max);
                 if (norm(per_rad) < flap_tiny_column_fraction * norm(secant)) per_rad = secant;
             }
@@ -220,7 +227,7 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
             a.deflection_rad.push_back(d);
             a.max_deflection_rad.push_back(flap.max_deflection_rad);
             const double reach = flap.rate_rad_s > 0.0 ? flap.rate_rad_s * flap_reach_horizon_s : max;
-            a.lower_rad.push_back(std::max(0.0, d - reach));
+            a.lower_rad.push_back(std::min(d, std::max(low, d - reach)));
             a.upper_rad.push_back(std::min(max, d + reach));
             a.max_torque_nm += Vec3{std::abs(per_rad.x), std::abs(per_rad.y), std::abs(per_rad.z)} *
                                (0.5 * flap.max_deflection_rad);

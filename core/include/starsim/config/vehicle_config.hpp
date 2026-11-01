@@ -106,6 +106,7 @@ struct AeroConfig {
     std::string ascent_drag_table;  // path relative to config/, empty if none
     std::string descent_drag_table; // tail-first flight (booster return); empty = mirror the ascent table
     std::string crossflow_table;    // hull cross-flow eta * C_dc over Mach; used when the stage flies alone
+    std::string hull_cp_table;      // station of the hull's normal force over alpha (from the base) for a stage flying alone
     double nose_length_m = 0.0;     // ogive nose (0 = flat top, e.g. a booster)
     std::string flap_table;         // flap normal-force table (mach, cn_max), path relative to config/
     double belly_azimuth_rad = 1.5 * 3.14159265358979323846;  // body direction of the heat shield (default -z)
@@ -205,6 +206,8 @@ struct FlapConfig {
     std::optional<double> hinge_radius_aft_m;  // aft end of the hinge; default the hull radius
     std::optional<double> centroid_u_m;        // planform centroid in the hinge frame; default mid-hinge
     std::optional<double> centroid_v_m;        // default mid-span
+    std::optional<double> centroid_hull_radius_m;  // hull radius at the centroid's station (nose: below the barrel's)
+    double centroid_hull_taper = 0.0;              // d(radius)/d(station) of the hull there
 };
 
 // Grid fins of a stage (aerodynamic control surfaces, e.g. for the booster's return).

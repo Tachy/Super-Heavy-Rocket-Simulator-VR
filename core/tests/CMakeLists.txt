@@ -135,6 +135,7 @@ add_executable(starsim_core_tests
     test_ship_return_mission.cpp
     test_falcon9_ascent.cpp
     test_starship_ascent.cpp
+    test_ship_entry_trim.cpp
     ascent_validation.cpp
     test_ascent_profile_planner.cpp
     test_ascent_plan_cache.cpp

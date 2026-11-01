@@ -42,12 +42,35 @@ struct FlapGeometry {
     std::optional<double> hinge_radius_aft_m;  // default hull_radius_m
     std::optional<double> centroid_u_m;        // planform centroid along h from the aft end; default mid-hinge
     std::optional<double> centroid_v_m;        // planform centroid along s; default mid-span
+    std::optional<double> centroid_hull_radius_m;  // hull radius at the centroid's station; default hull_radius_m
+    double centroid_hull_taper = 0.0;              // d(radius)/d(station) of the hull there (nose: negative)
 };
 
 math::Vec3 flap_hinge_direction(const FlapGeometry& flap);  // h, towards the forward end
 math::Vec3 flap_span_direction(const FlapGeometry& flap, double deflection_rad);
 math::Vec3 flap_normal(const FlapGeometry& flap, double deflection_rad);
 math::Vec3 flap_centroid(const FlapGeometry& flap, double deflection_rad);  // body frame (station, y, z)
+
+// Share of the plate out of the hull's shadow in the crossflow plane, 0..1. In the shadow (0): the centroid lies
+// downstream of the axis and within the hull's width, i.e. its distance from the upstream line through the axis is below
+// the hull's radius where the flow line through the centroid crosses the axis plane (with an axial flow component a
+// flap on the nose sits behind a narrower section). Beyond that the share grows with the centroid's distance past the hull's edge, or upstream of
+// the axis, over half a span: a plate's centroid at half its span from the edge has all of it clear. So the force has no
+// step at the shadow's edge, and a flap out at the hull's side loads whichever side the crossflow comes from. Method:
+// tools/aero_derive/derive_ship_entry.py compares it with the first-hit exposure of the drawn mesh. No crossflow: 1.
+double flap_exposed_fraction(const FlapGeometry& flap, double deflection_rad, const math::Vec3& velocity_body_mps);
+inline bool flap_in_hull_shadow(const FlapGeometry& flap, double deflection_rad, const math::Vec3& velocity_body_mps) {
+    return flap_exposed_fraction(flap, deflection_rad, velocity_body_mps) <= 0.0;
+}
+
+// Deflection at which the plate is edge-on to `velocity_body_mps`, in [0, pi / 2]; 0 if that lies outside.
+double flap_edge_on_deflection_rad(const FlapGeometry& flap, const math::Vec3& velocity_body_mps);
+
+// Lowest deflection with a usable force: above the edge-on deflection (below it the air would meet the plate's hull
+// side) and out of the hull's shadow. A forward flap (azimuth 20) in a belly flow has nothing below about 20 deg, so
+// its usable range ends there rather than at the folded stop. 0 if the flap is in the shadow at every deflection.
+double flap_lowest_usable_deflection_rad(const FlapGeometry& flap, double max_deflection_rad,
+                                         const math::Vec3& velocity_body_mps);
 
 struct FlapForce {
     math::Vec3 force_body_n;
@@ -57,8 +80,7 @@ struct FlapForce {
 // Force of one flap. `velocity_body_mps`: flap centroid relative to the air (vehicle air velocity + omega x r).
 // Newtonian flat plate: |C_N| = cn_max(M) sin^2(theta), theta = incidence of the flow on the plate, along the
 // normal against the normal motion; continuum and free-molecular (2.2 sin^2, diffuse [E]) bridged by the
-// rarefaction weight. Only the windward side carries pressure: a flap whose centroid does not move towards the
-// belly lies in the hull's lee and gets no force.
+// rarefaction weight, times the plate's share out of the hull's shadow (`flap_exposed_fraction`).
 FlapForce flap_force(const FlapGeometry& flap, double deflection_rad, const math::Vec3& velocity_body_mps,
                      const FinAirData& air, const FlapTable& table);
 

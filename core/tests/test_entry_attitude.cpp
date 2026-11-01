@@ -146,7 +146,7 @@ TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes 
     // Authority scale: one aft flap's moment change over a few deg. The flaps cannot deliver 1e6 N m of yaw here
     // (iterated on the true moments, l5 Task 10: an aft flap ends folded, ~2 x the RCS left) - the earlier one-call
     // check only confirmed the linear model.
-    const double scale = 3e5;
+    const double scale = 1e5;  // the forward flap's usable range now ends at the hull's shadow: 3e5 is out of reach
     auto& flaps = body->vehicle().stages().back().flaps;
     for (int axis = 0; axis < 3; ++axis) {
         Vec3 tau;

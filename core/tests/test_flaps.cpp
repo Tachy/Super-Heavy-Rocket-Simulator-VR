@@ -59,12 +59,11 @@ TEST_CASE("Extended flap in a belly-first flow carries Newtonian drag", "[aero][
     const auto stowed = aero::flap_force(flap(), 0.0, v, air, table());
     CHECK(norm(stowed.force_body_n) < 1e-6 * q);
     const auto half = aero::flap_force(flap(), pi / 4, v, air, table());
-    CHECK(norm(half.force_body_n) == Approx(1.84 * 48.0 * q * 0.5));
+    // d = 45: sin^2 = 0.5; centroid 1.414 m past the hull's edge of half a span 2 m: 0.7071 clear.
+    CHECK(norm(half.force_body_n) == Approx(1.84 * 48.0 * q * 0.5 * 0.70711));
 }
 
-TEST_CASE("Flaps in the hull's lee or in vacuum carry no force", "[aero][flap]") {
-    const math::Vec3 back_first{0.0, 0.0, 1500.0};  // moving leeward
-    CHECK(norm(aero::flap_force(flap(), pi / 2, back_first, air, table()).force_body_n) == 0.0);
+TEST_CASE("Flaps in vacuum carry no force", "[aero][flap]") {
     const aero::FinAirData vacuum{0.0, 0.0, 1.0};
     const auto r = aero::flap_force(flap(), pi / 2, math::Vec3{0.0, 0.0, -7000.0}, vacuum, table());
     CHECK(norm(r.force_body_n) == 0.0);
@@ -91,9 +90,122 @@ aero::FlapGeometry leaned_flap(double azimuth_rad) {
     f.hinge_radius_aft_m = 4.621;
     f.centroid_u_m = 1.6091;
     f.centroid_v_m = 1.2499;
+    f.centroid_hull_radius_m = 3.852;
+    f.centroid_hull_taper = -0.2816;
     return f;
 }
 }  // namespace
+
+TEST_CASE("A flap out at the hull's side loads from both crossflow sides", "[aero][flap]") {
+    // Aft flap, d = 90: centroid (y, z) = (6.5, 0). Plate normal along z; q = 1125 Pa; 1.84 x 48 x 1125 = 99360 N.
+    const auto belly_side = aero::flap_force(flap(), pi / 2, {0.0, 0.0, -1500.0}, air, table());
+    const auto back_side = aero::flap_force(flap(), pi / 2, {0.0, 0.0, 1500.0}, air, table());
+    CHECK(belly_side.force_body_n.z == Approx(99360.0));
+    CHECK(back_side.force_body_n.z == Approx(-99360.0));
+
+    // Forward flap at azimuth 20, d = 90: centroid radius 5.278 at (y, z) = (4.960, 1.805), hull radius 3.852: y is
+    // outside the hull's width. Normal X x e_r = (0, -0.3420, 0.9397); 1.84 x 12.374 x 1125 x 0.9397^2 = 22.62 kN.
+    const auto forward = leaned_flap(20.0 * constants::deg_to_rad);
+    CHECK_FALSE(aero::flap_in_hull_shadow(forward, pi / 2, {0.0, 0.0, -1500.0}));
+    CHECK_FALSE(aero::flap_in_hull_shadow(forward, pi / 2, {0.0, 0.0, 1500.0}));
+    const auto fwd_belly = aero::flap_force(forward, pi / 2, {0.0, 0.0, -1500.0}, air, table());
+    const auto fwd_back = aero::flap_force(forward, pi / 2, {0.0, 0.0, 1500.0}, air, table());
+    // Centroid 1.108 m past the hull's edge of half a span 1.577 m: 0.703 of the plate clear; upstream 1.805 m from the
+    // back: all of it.
+    CHECK(aero::flap_exposed_fraction(forward, pi / 2, {0.0, 0.0, -1500.0}) == Approx(0.703).margin(0.002));
+    CHECK(aero::flap_exposed_fraction(forward, pi / 2, {0.0, 0.0, 1500.0}) == Approx(1.0));
+    CHECK(norm(fwd_belly.force_body_n) == Approx(0.703 * 22620.0).epsilon(3e-3));
+    CHECK(norm(fwd_back.force_body_n) == Approx(22620.0).epsilon(1e-3));
+    CHECK(fwd_belly.force_body_n.z > 0.0);
+    CHECK(fwd_back.force_body_n.z < 0.0);
+}
+
+TEST_CASE("A flap straight behind the hull is in its shadow", "[aero][flap]") {
+    // Folded forward flap at azimuth 20: centroid (y, z) = (3.42, 2.57), upstream line along z, |y| below 3.852.
+    const auto forward = leaned_flap(20.0 * constants::deg_to_rad);
+    CHECK(aero::flap_in_hull_shadow(forward, 0.0, {0.0, 0.0, -1500.0}));
+    CHECK(norm(aero::flap_force(forward, 0.0, {0.0, 0.0, -1500.0}, air, table()).force_body_n) == 0.0);
+    // The same flap with the flow from the back: it stands on the upstream side.
+    CHECK_FALSE(aero::flap_in_hull_shadow(forward, 0.0, {0.0, 0.0, 1500.0}));
+    // Crossflow along the side: the +y flap at d = 90 upstream, the -y flap straight behind the hull.
+    CHECK(aero::flap_exposed_fraction(flap(), pi / 2, {0.0, 1500.0, 0.0}) == Approx(1.0));
+    auto left = flap();
+    left.hinge_azimuth_rad = pi;
+    CHECK_FALSE(aero::flap_in_hull_shadow(flap(), pi / 2, {0.0, 1500.0, 0.0}));
+    CHECK(aero::flap_in_hull_shadow(left, pi / 2, {0.0, 1500.0, 0.0}));
+    // Folded aft flaps (centroid (+-4.5, 2)), belly flow with a little sideslip towards +y: distance from the upstream
+    // line 4.68 windward (out of the hull's width, 0.09 of the plate), 4.28 leeward (shadow).
+    CHECK(aero::flap_exposed_fraction(flap(), 0.0, {0.0, 150.0, -1500.0}) == Approx(0.0887).margin(0.001));
+    const math::Vec3 sideslip{0.0, 150.0, -1500.0};
+    CHECK_FALSE(aero::flap_in_hull_shadow(flap(), 0.0, sideslip));
+    CHECK(aero::flap_in_hull_shadow(left, 0.0, sideslip));
+    // Purely axial flow has no crossflow plane.
+    CHECK_FALSE(aero::flap_in_hull_shadow(flap(), 0.0, {-2000.0, 0.0, 0.0}));
+    // No step: the fraction moves little over a small change at the shadow's edge.
+    const math::Vec3 belly{0.0, 0.0, -1500.0};
+    const double edge = aero::flap_lowest_usable_deflection_rad(forward, pi / 2, belly);
+    CHECK(aero::flap_exposed_fraction(forward, edge + 0.01, belly) < 0.03);
+}
+
+TEST_CASE("A flap's usable range starts where the plate turns edge-on", "[aero][flap]") {
+    // Forward flap at azimuth 20 in a belly flow: atan(0.3233 / 0.9396) = 18.99 deg, independent of the lean's size in
+    // this plane only through the normal's tilt; an aft flap on the hull side has the whole range.
+    const math::Vec3 belly{0.0, 0.0, -1500.0};
+    CHECK(aero::flap_edge_on_deflection_rad(leaned_flap(20.0 * constants::deg_to_rad), belly) ==
+          Approx(18.99 * constants::deg_to_rad).margin(0.01 * constants::deg_to_rad));
+    CHECK(aero::flap_edge_on_deflection_rad(leaned_flap(160.0 * constants::deg_to_rad), belly) ==
+          Approx(18.99 * constants::deg_to_rad).margin(0.01 * constants::deg_to_rad));
+    CHECK(aero::flap_edge_on_deflection_rad(flap(), belly) == Approx(0.0).margin(1e-12));
+    // Side slip towards the flap: its edge-on angle lies below 0 and the range stays whole.
+    CHECK(aero::flap_edge_on_deflection_rad(flap(), {0.0, 150.0, -1500.0}) == 0.0);
+    // Side slip away from it: 5.71 deg (atan 0.1).
+    CHECK(aero::flap_edge_on_deflection_rad(flap(), {0.0, -150.0, -1500.0}) ==
+          Approx(5.71 * constants::deg_to_rad).margin(0.01 * constants::deg_to_rad));
+    const auto f = leaned_flap(20.0 * constants::deg_to_rad);
+    CHECK(dot(aero::flap_normal(f, aero::flap_edge_on_deflection_rad(f, belly)), belly) == Approx(0.0).margin(1e-9));
+}
+
+TEST_CASE("The usable range also ends at the hull's shadow", "[aero][flap]") {
+    // Forward flap, pure belly flow: the centroid stays within the hull's 3.852 m up to y = 3.852, at 19 to 22 deg.
+    const auto f = leaned_flap(20.0 * constants::deg_to_rad);
+    const math::Vec3 v{0.0, 0.0, -1500.0};
+    const double low = aero::flap_lowest_usable_deflection_rad(f, pi / 2, v);
+    CHECK(low > 19.0 * constants::deg_to_rad);
+    CHECK(low < 22.0 * constants::deg_to_rad);
+    CHECK(aero::flap_in_hull_shadow(f, low - 1e-4, v));
+    CHECK_FALSE(aero::flap_in_hull_shadow(f, low + 1e-4, v));
+    // Alpha 60 at d = 43: the flow line reaches the axis plane at station 45.7 (hull 3.43 m instead of 3.85 m): 0.54 clear,
+    // the drawn mesh's first hit gives about 0.5 (tools/aero_derive/derive_ship_entry.py).
+    CHECK(aero::flap_exposed_fraction(f, 43.0 * constants::deg_to_rad, {750.0, 0.0, -1299.0}) == Approx(0.54).margin(0.03));
+    // An aft flap in a belly flow keeps its whole range.
+    CHECK(aero::flap_lowest_usable_deflection_rad(flap(), pi / 2, {0.0, 0.0, -1500.0}) == Approx(0.0).margin(1e-5));
+}
+
+TEST_CASE("Leaned forward flap against the STL's numbers", "[aero][flap]") {
+    constexpr double right = 20.0 * constants::deg_to_rad;
+    const math::Vec3 e_r{0.0, 0.93969, 0.34202};
+    const auto f = leaned_flap(right);
+    // Centroid of the outline at d = 90: station 44.21, radius 5.278.
+    const auto c = aero::flap_centroid(f, pi / 2);
+    CHECK(c.x == Approx(44.211).margin(0.002));
+    CHECK(dot(c, e_r) == Approx(5.278).margin(0.002));
+    // Span at d = 90 runs forward AND outward (the hinge leans towards the axis going forward).
+    const auto s = aero::flap_span_direction(f, pi / 2);
+    CHECK(s.x == Approx(0.3260).margin(1e-3));
+    CHECK(dot(s, e_r) == Approx(0.9453).margin(1e-3));
+    // Outline vertices: the outer corner (u 0.529, v 3.154) at station 43.81, radius 7.43; the hinge's tip (u 5.784,
+    // v 0) on the hull at station 47.75, radius 2.735 (STL flat face).
+    auto corner = f;
+    corner.centroid_u_m = 0.529;
+    corner.centroid_v_m = 3.154;
+    CHECK(aero::flap_centroid(corner, pi / 2).x == Approx(43.81).margin(0.005));
+    CHECK(dot(aero::flap_centroid(corner, pi / 2), e_r) == Approx(7.43).margin(0.005));
+    auto tip = f;
+    tip.centroid_u_m = 5.784;
+    tip.centroid_v_m = 0.0;
+    CHECK(aero::flap_centroid(tip, pi / 2).x == Approx(47.75).margin(0.005));
+    CHECK(dot(aero::flap_centroid(tip, pi / 2), e_r) == Approx(2.735).margin(0.005));
+}
 
 TEST_CASE("Lean 0 with the default centroid is the old straight flap to 1e-12", "[aero][flap]") {
     const math::Vec3 v{-300.0, 200.0, -1500.0};
@@ -117,7 +229,9 @@ TEST_CASE("Lean 0 with the default centroid is the old straight flap to 1e-12", 
             const double q = 0.5 * 1e-3 * dot(v, v);
             const double speed = norm(v), vn = dot(v, normal);
             const double cn = table().cn_max(speed / air.speed_of_sound_mps) * (vn / speed) * (vn / speed);
-            const math::Vec3 old_force = normal * (-std::copysign(cn * q * f.area_m2, vn));
+            // The old formula, on the part of the plate out of the hull's shadow.
+            const double exposed = aero::flap_exposed_fraction(f, d, v);
+            const math::Vec3 old_force = normal * (-std::copysign(exposed * cn * q * f.area_m2, vn));
             CHECK(norm(r.force_body_n - old_force) < 1e-12 * std::max(1.0, norm(old_force)));
         }
     }
@@ -158,9 +272,9 @@ TEST_CASE("Leaned forward flap: the application point is the real planform's cen
 TEST_CASE("Flaps at d = 90 carry no force in axial flow", "[aero][flap]") {
     for (const auto& f : {flap(), leaned_flap(20.0 * constants::deg_to_rad), leaned_flap(160.0 * constants::deg_to_rad)}) {
         for (const double speed : {-2000.0, 2000.0}) {
-            CHECK(norm(aero::flap_force(f, pi / 2, {speed, 0.0, 0.0}, air, table()).force_body_n) == 0.0);
+            CHECK(norm(aero::flap_force(f, pi / 2, {speed, 0.0, 0.0}, air, table()).force_body_n) < 1e-6);
         }
-        // The lee test does not hide it: a whiff towards the belly gives only the second-order sin^2 force.
+        // The shadow test does not hide it: a whiff towards the belly gives only the second-order sin^2 force.
         const double crossflow = 1.0, speed = 2000.0, q = 0.5 * 1e-3 * speed * speed;
         const auto r = aero::flap_force(f, pi / 2, {-speed, 0.0, -crossflow}, air, table());
         CHECK(norm(r.force_body_n) < 2.0 * f.area_m2 * q * (crossflow / speed) * (crossflow / speed));
@@ -287,7 +401,9 @@ TEST_CASE("Extended flaps add their Newtonian drag to a belly-first ship", "[fla
     double expected_force = 0.0;
     for (const auto& f : extended->vehicle().stages().back().flaps) {
         const double tilt = std::asin(std::abs(std::sin(f.geometry.hinge_azimuth_rad)));
-        expected_force += cn * f.geometry.area_m2 * std::pow(std::cos(tilt), 3);
+        // Share of the plate clear of the hull at d = 90: aft (6.18 - 4.5) / 1.845 = 0.911, forward 0.703.
+        const double exposed = f.geometry.hinge_lean_rad > 0.0 ? 0.703 : 0.911;
+        expected_force += exposed * cn * f.geometry.area_m2 * std::pow(std::cos(tilt), 3);
     }
     const double mass = extended->vehicle().mass_properties().mass_kg;
     CHECK(extra == Approx(expected_force * q / mass).epsilon(0.05));

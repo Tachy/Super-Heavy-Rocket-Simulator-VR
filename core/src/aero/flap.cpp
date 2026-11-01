@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "starsim/math/constants.hpp"
+
 namespace starsim::aero {
 
 using math::Vec3;
@@ -10,6 +12,7 @@ using math::Vec3;
 namespace {
 
 constexpr double free_molecular_normal_coefficient = 2.2;  // [E] diffuse reflection, as SlenderBodyAero
+constexpr int shadow_edge_iterations = 20;                 // bisection: 90 deg / 2^20
 
 Vec3 radial(double azimuth_rad) { return {0.0, std::cos(azimuth_rad), std::sin(azimuth_rad)}; }
 
@@ -57,13 +60,49 @@ Vec3 flap_centroid(const FlapGeometry& flap, double deflection_rad) {
            flap_hinge_direction(flap) * u_m + flap_span_direction(flap, deflection_rad) * v_m;
 }
 
+double flap_exposed_fraction(const FlapGeometry& flap, double deflection_rad, const Vec3& velocity_body_mps) {
+    const double cross_speed = std::hypot(velocity_body_mps.y, velocity_body_mps.z);
+    if (cross_speed <= 0.0) return 1.0;
+    const double upstream_y = velocity_body_mps.y / cross_speed, upstream_z = velocity_body_mps.z / cross_speed;
+    const Vec3 c = flap_centroid(flap, deflection_rad);
+    const double upstream_m = c.y * upstream_y + c.z * upstream_z;
+    const double upstream_station_shift_m = std::max(-upstream_m, 0.0) * velocity_body_mps.x / cross_speed;
+    const double hull_radius_m = std::max(flap.centroid_hull_radius_m.value_or(flap.hull_radius_m) +
+                                              flap.centroid_hull_taper * upstream_station_shift_m, 0.0);
+    const double beyond_edge_m = std::abs(c.y * upstream_z - c.z * upstream_y) - hull_radius_m;
+    return std::clamp(std::max(beyond_edge_m, upstream_m) / (0.5 * flap.span_m), 0.0, 1.0);
+}
+
+double flap_edge_on_deflection_rad(const FlapGeometry& flap, const Vec3& velocity_body_mps) {
+    // n(d) . v = a cos(d) + b sin(d) with a = n(0) . v, b = n(90 deg) . v.
+    const double a = dot(flap_normal(flap, 0.0), velocity_body_mps);
+    const double b = dot(flap_normal(flap, 0.5 * constants::pi), velocity_body_mps);
+    if (a == 0.0 && b == 0.0) return 0.0;
+    double d = std::atan2(-a, b);
+    if (d < 0.0) d += constants::pi;
+    return d <= 0.5 * constants::pi ? d : 0.0;
+}
+
+double flap_lowest_usable_deflection_rad(const FlapGeometry& flap, double max_deflection_rad, const Vec3& velocity_body_mps) {
+    double lo = std::min(flap_edge_on_deflection_rad(flap, velocity_body_mps), max_deflection_rad);
+    if (!flap_in_hull_shadow(flap, lo, velocity_body_mps)) return lo;
+    double hi = max_deflection_rad;
+    if (flap_in_hull_shadow(flap, hi, velocity_body_mps)) return 0.0;
+    for (int i = 0; i < shadow_edge_iterations; ++i) {
+        const double mid = 0.5 * (lo + hi);
+        if (flap_in_hull_shadow(flap, mid, velocity_body_mps)) lo = mid; else hi = mid;
+    }
+    return hi;
+}
+
 FlapForce flap_force(const FlapGeometry& flap, double deflection_rad, const Vec3& velocity_body_mps,
                      const FinAirData& air, const FlapTable& table) {
     FlapForce out;
     out.application_point_m = flap_centroid(flap, deflection_rad);
     const double speed = norm(velocity_body_mps);
     if (speed < 1e-6 || air.density_kg_m3 <= 0.0) return out;
-    if (dot(velocity_body_mps, radial(flap.belly_azimuth_rad)) <= 0.0) return out;  // in the hull's lee
+    const double exposed = flap_exposed_fraction(flap, deflection_rad, velocity_body_mps);
+    if (exposed <= 0.0) return out;
     const Vec3 n = flap_normal(flap, deflection_rad);
     const double normal_speed = dot(velocity_body_mps, n);
     const double sin_theta = std::abs(normal_speed) / speed;
@@ -72,7 +111,7 @@ FlapForce flap_force(const FlapGeometry& flap, double deflection_rad, const Vec3
     const double cn =
         ((1.0 - w) * table.cn_max(mach) + w * free_molecular_normal_coefficient) * sin_theta * sin_theta;
     const double q = 0.5 * air.density_kg_m3 * speed * speed;
-    out.force_body_n = n * (-std::copysign(cn * q * flap.area_m2, normal_speed));
+    out.force_body_n = n * (-std::copysign(exposed * cn * q * flap.area_m2, normal_speed));
     return out;
 }
 

@@ -47,7 +47,8 @@ flow separation (vacuum engines).
 ## Aerodynamics and control surfaces (per stage)
 - `[stage.aero]`: `ascent_drag_table` (nose first, whole stack), `descent_drag_table` (tail first,
   e.g. a returning booster; defaults to the ascent table), `crossflow_table` (hull cross-flow coefficient over Mach for a stage flying alone, e.g. the ship's
-  belly-first entry; without it a generic value), `nose_length_m`.
+  belly-first entry; without it a generic value), `hull_cp_table` (station of the hull's normal force over alpha for a stage flying alone,
+  above Mach 3; without it the formula), `nose_length_m`.
 - `[stage.grid_fins]`: one fin per entry of `azimuths_deg` (from body +y towards +z), `area_m2`
   (gross area inside the fin's outline), `station_m` (hinge), `radius_m` (fin centre of pressure, also the lever of its axial drag),
   `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.

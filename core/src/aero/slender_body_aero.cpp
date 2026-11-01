@@ -10,6 +10,8 @@ namespace starsim::aero {
 namespace {
 
 constexpr double free_molecular_drag_coefficient = 2.2;  // [E] diffuse reflection, per projected area
+constexpr double station_table_mach_low = 2.0;           // [E] the normal force station table fades in over this band
+constexpr double station_table_mach_high = 3.0;          // [E] modified Newtonian from about here
 
 double interpolate(const std::vector<double>& x, const std::vector<double>& y, double at) {
     if (at <= x.front()) return y.front();
@@ -71,6 +73,15 @@ double SlenderBodyAero::potential_station_m() const {
     return geometry_.length_m - ogive_cp_fraction * geometry_.nose_length_m;
 }
 
+void SlenderBodyAero::set_normal_force_station(const config::CsvTable& table) {
+    station_alpha_rad_.clear();
+    for (const double a : table.column("alpha_deg")) station_alpha_rad_.push_back(a * constants::deg_to_rad);
+    station_m_ = table.column("station_m");
+    if (station_alpha_rad_.size() < 2 || !std::is_sorted(station_alpha_rad_.begin(), station_alpha_rad_.end())) {
+        throw config::ConfigError("normal force station table: alpha_deg must be ascending with >= 2 rows");
+    }
+}
+
 double AxialDragCurve::cd(double mach, bool powered) const {
     if (empty()) return 0.0;
     return interpolate(mach_, powered ? cd_power_on_ : cd_power_off_, mach);
@@ -130,6 +141,13 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
     const double total = potential + viscous;
     if (total > 0.0) {
         result.normal_force_station_m = (potential * nose_station + viscous * 0.5 * geometry_.length_m) / total;
+    }
+    if (!station_alpha_rad_.empty()) {
+        // The table holds in Newtonian flow; below that the formula stands (not derived).
+        const double f = (1.0 - w) * std::clamp((result.mach - station_table_mach_low) /
+                                                    (station_table_mach_high - station_table_mach_low), 0.0, 1.0);
+        result.normal_force_station_m =
+            f * interpolate(station_alpha_rad_, station_m_, alpha) + (1.0 - f) * result.normal_force_station_m;
     }
     return result;
 }

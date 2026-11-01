@@ -71,7 +71,7 @@ double rarefaction_weight(double knudsen);
 //                                                                 table for tail-first flight if given)
 //   normal force C_N = sin(2a) cos(a/2) + eta * C_dc * (L D / A_ref) sin^2(a)   (Jorgensen, NASA TR R-474)
 // The potential term acts at 0.466 of the nose length from the tip (ogive, Barrowman), the cross-flow
-// term at mid-length. [E] eta = 0.68, C_dc = 1.2 - generic; a CrossflowCurve replaces eta * C_dc where identified.
+// term at mid-length, or a stage's table of the normal force's station over alpha where it is derived. [E] eta = 0.68, C_dc = 1.2 - generic; a CrossflowCurve replaces eta * C_dc where identified.
 // Rarefied flow (above ~90 km): bridged by Knudsen number to free-molecular coefficients
 // (C_A = 2.2 cos^2 a, cross-flow C_dc = 2.2 with eta = 1 [E], typical diffuse-reflection values).
 // No damping derivatives yet.
@@ -86,6 +86,8 @@ public:
 
     const SlenderBodyGeometry& geometry() const { return geometry_; }
     double reference_area_m2() const { return reference_area_m2_; }
+    // Replaces the formula for the normal force's station: columns alpha_deg, station_m from the base (continuum).
+    void set_normal_force_station(const config::CsvTable& table);
     // Continuum cross-flow coefficient eta * C_dc at a Mach number: the identified curve, else the generic value.
     double continuum_crossflow_cd(double mach) const;
     // Station (from the bottom of the body) where the potential (nose) term acts; the cross-flow term acts at
@@ -103,6 +105,7 @@ private:
     AxialDragCurve tail_first_drag_;
     CrossflowCurve crossflow_;
     double reference_area_m2_;
+    std::vector<double> station_alpha_rad_, station_m_;  // empty: the formula
 };
 
 }  // namespace starsim::aero

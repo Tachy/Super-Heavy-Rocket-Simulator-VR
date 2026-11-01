@@ -400,6 +400,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.aero.ascent_drag_table = doc.text_or(*aero, "ascent_drag_table");
         s.aero.descent_drag_table = doc.text_or(*aero, "descent_drag_table");
         s.aero.crossflow_table = doc.text_or(*aero, "crossflow_table");
+        s.aero.hull_cp_table = doc.text_or(*aero, "hull_cp_table");
         s.aero.nose_length_m = doc.number_or(*aero, "nose_length_m", 0.0);
         s.aero.flap_table = doc.text_or(*aero, "flap_table");
         s.aero.entry_alpha_table = doc.text_or(*aero, "entry_alpha_table");
@@ -516,6 +517,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             if (ft->contains("hinge_radius_aft_m")) f.hinge_radius_aft_m = doc.number(*ft, "hinge_radius_aft_m");
             if (ft->contains("centroid_u_m")) f.centroid_u_m = doc.number(*ft, "centroid_u_m");
             if (ft->contains("centroid_v_m")) f.centroid_v_m = doc.number(*ft, "centroid_v_m");
+            if (ft->contains("centroid_hull_radius_m")) f.centroid_hull_radius_m = doc.number(*ft, "centroid_hull_radius_m");
+            f.centroid_hull_taper = doc.number_or(*ft, "centroid_hull_taper", 0.0);
             s.flaps.push_back(f);
         }
         if (!s.flaps.empty() && s.aero.flap_table.empty()) doc.fail("stage.flap needs [stage.aero] flap_table");

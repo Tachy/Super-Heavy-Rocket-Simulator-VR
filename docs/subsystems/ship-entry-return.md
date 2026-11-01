@@ -9,13 +9,16 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `[[stage.flap]]` [E] from the drawn outlines, Task 3 of the vehicle physics plan: aft 2 x 36.48 m^2, stations 2-14, span
   3.69, azimuth 0 / 180; forward 2 x 12.374 m^2, hinge 42.282-47.75 leaning 19.03 deg towards the axis from r 4.621, span
   3.154, azimuth 20 / 160; application point = the outline's centroid in the hinge frame (`centroid_u_m`, `centroid_v_m`);
-  Newtonian flat plates, `aero/flap.csv`; 0 deg folded leeward, 90 deg broadside; 20 deg/s; the deflection is limited to
-  0-90 deg). Rest pose d = 90 (user 2026-11-01, `initial_deflection_deg`): on the pad, in ascent, coast and orbit no law
+  Newtonian flat plates, `aero/flap.csv`, times the plate's share out of the hull's shadow, `aero::flap_exposed_fraction`:
+  0 with the centroid downstream and within the hull's width at the section the flow line crosses, growing over half a span
+  beyond it, so no step and both crossflow signs load a flap out at the side; 0 deg folded leeward, 90 deg broadside; 20 deg/s;
+  the deflection is limited to 0-90 deg). Rest pose d = 90 (user 2026-11-01, `initial_deflection_deg`): on the pad, in ascent, coast and orbit no law
   commands the flaps, `Vehicle::update_flaps` holds them; at d = 90 the plate is edge-on to axial flow. Entry, flip and
   landing laws start from there. `AttitudeController::Gains::flaps`: flaps cancel the modelled aero
   moment (hull + flaps), steer by a Newton step on their linearised moments, the rest goes to RCS; flap allocation is a
   box-constrained active set (free flaps re-solved, box = stops and the 0.25 s [E] flap-rate reach, all-flap
-  moment-neutral centring, a secant only for a flap at a stop); below 200 Pa [E] the flaps rest in the coming entry's
+  moment-neutral centring, a secant only for a flap at a stop; the lower stop is `flap_lowest_usable_deflection_rad`, above
+  edge-on and out of the shadow, with the secant all along the ramp out of the shadow); below 200 Pa [E] the flaps rest in the coming entry's
   pitch trim (`EntryAeroTable::trim_flap_rad`). `gnc/entry_attitude` builds the setpoint from angle of attack and bank
   (belly at `[stage.aero] belly_azimuth_deg`). Nominal alpha over Mach `aero/ship_entry_alpha.csv` [D] (55 deg
   hypersonic, 50 near Mach 8, 60-80 towards the belly flop). Ship dry CG 23.516 m [D] (landing-mass CG dry + 35 t at
@@ -124,6 +127,8 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `STARSIM_RETURN_DISPERSED=<i>`, with `STARSIM_VERBOSE=1`).
 
 ## Open points and known limits
+- Hull and alpha from the geometry (Task 5) are derived but NOT applied: `.superpowers/sdd/2026-11-01-vehicle-physics/task-5-report.md`
+  and `task-5-values.patch` wait for a ruling; they break the deorbit, load limit and lunar cases (`docs/known-issues.md`).
 - Flaps from the geometry (2026-11-01) lowered the authority (My per q at d = 90, Mach 8, alpha 60, 35 t: aft 1159 -> 928
   m^3, forward 454 -> 265 m^3) and moved the trim towards the stops (Mach 8: aft 63 -> 74 deg, forward 27 -> 16 deg). Not
   tuned. The 64 t aerocapture pass departs (`docs/known-issues.md`); the re-determination is Task 5 of the plan.

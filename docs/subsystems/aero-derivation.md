@@ -297,6 +297,20 @@ changes nothing. With hulls and fins alone the three are 1.451 / 1.439 / 1.463. 
 span as its height, which overstates a thin flap's wake (see `exposure.py`), so the 5-6 % is an upper value. The remaining difference between 0 and 180 (1 %) is the
 drawn mesh, partly the bearing on those fins.
 
+## Ship entry (Task 5)
+`python tools/aero_derive/derive_ship_entry.py --trim <csv>` (pairs: hidden test `[trim_dump]`, `STARSIM_TRIM_CSV`); `--write-hull-cp` writes
+`config/aero/ship_hull_cp.csv`. Modified Newtonian first hit above Mach 3, Hoerner below. Results, not yet in the flown tables:
+
+| Quantity | Tables today | Drawn geometry | Note |
+|---|---|---|---|
+| Hull eta C_dc, Mach 4 / 8 / 15 / 25 | 1.50 / 1.50 / 1.52 / 1.58 | 1.07 / 1.09 / 1.10 / 1.10 +-10 % | Mean over alpha 50-90, potential term out; alpha 90 gives CN 535 m^2 = 2/3 cp_max on the 428 m^2 planform |
+| Hull eta C_dc, Mach 0.3 / 0.8 / 1.2 / 2 | 1.11 / 1.30 / 1.90 / 1.70 | 0.84 / 1.20 / 1.80 / 1.50 (+-0.25-0.40) | Hoerner, recalled |
+| Hull normal force station, alpha 50 / 60 / 90 | about 27 m (formula) | 25.61 / 24.97 / 23.61 m | Table above Mach 3; below it not determined |
+| Flap exposure, aft d = 30 / 40 / 60 / 90 | core 0.46 / 0.58 / 0.79 / 0.91 | mesh 0.41 / 0.65 / 0.82 / 0.85 | Forward, alpha 60: core rule against mesh within about 0.1 |
+
+The hull alone at the old alpha flies 17-20 % rms too fast on flights 13, 14 (drag short): alpha 59.5 instead of 50-55 closes it on 12, 13 with L/D 0.5; 65 runs
+out of lift. See the Task 5 report.
+
 ## Open
 Ascent validation `[gnc][validation][ascent][slow]` with the new table runs in Task 6 (no campaign before it). Ship alone: Task 5. Fin CA: see
 "Grid fins in the core". No guidance feed-forward for the fin moment; Task 6 shows whether it is needed.

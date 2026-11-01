@@ -46,6 +46,8 @@ public:
     // Flap deflections (the ship's first-stage flaps in order) of the pitch trim at the scheduled angle of attack;
     // empty for a capsule.
     std::vector<double> trim_flap_rad(double mach) const;
+    // The same at any angle of attack of the grid (bilinear).
+    std::vector<double> trim_flap_rad(double mach, double alpha_rad) const;
 
 private:
     AlphaSchedule schedule_;
@@ -55,6 +57,7 @@ private:
     std::vector<double> alpha_grid_rad_;
     std::vector<std::vector<double>> cd_grid_m2_;  // [mach][alpha]
     std::vector<std::vector<double>> cl_grid_m2_;
+    std::vector<std::vector<double>> trim_delta_grid_rad_;  // [mach][alpha]
     std::vector<double> trim_delta_rad_;  // per mach_: forward pair at mid + delta, aft pair at mid - delta
     std::vector<bool> flap_forward_;
     std::vector<double> flap_max_rad_;
