@@ -67,11 +67,16 @@
 ---
 Tasks 3-7 are the plan as of the checkpoint; refine them with the user's answer before dispatching.
 
+### Task 2b: Stack ascent table gets the grid fins and drawn parts
+User's OK 2026-11-01 on the comparison: "OK, Anbauteile ergänzen". This lifts the earlier "ascent table not re-fitted" for this addition only. Descent tables stay.
+`vehicle.cpp:183-193` lets the ship alone keep the stack's table, and the ship alone agrees at Mach 5: so first give the ship (`starship_block3`, `starship_hls`, `starship_depot`) its own table `config/aero/ship_ascent.csv` with today's values, then raise `config/aero/starship_stack_ascent.csv` = today's value + fin term (derived fin CA x 3 x 12.63 / 63.6) + the parts term, Mach 0-6 only, held beyond, tagged [E] with the method. The parts term gets the boundary layer credit first: parts at the stack's aft end standing inside the local turbulent layer (thickness from the tool at that station) count only their share above it; result stated with its error. Check that the booster alone nose first is unaffected in flight (it never flies so) and that Falcon 9 is untouched. Tests: `[aero]`, `[vehicle]`; the plan cache invalidates by hash. No campaign here; the ascent validation runs in Task 6.
+
 ### Task 3: Flaps follow the geometry
 User 2026-11-01 (flight 14 frame at T+49 s): the ship starts with all flaps fully out, d = 90, which is their rest pose, standing smooth in the flight axis. Drawing check 2026-11-01: incidence 0.0000 deg for all four at d = 90. Change: rest pose d = 90 at start, on the pad, in ascent and in coast, in physics and view; pin a test (panel normal perpendicular to the body axis at d = 90, forward and aft). Check the clearance to the arms and the QD arm on the mount and at the catch at d = 90.
 `config/vehicles/starship_block3.toml` (and `starship_hls.toml`, tanker by inheritance): aft 36.5 m^2 span 3.69, forward 12.37 m^2, hinge stations 42.28-47.75. Add optional `hinge_lean_deg` and `hinge_radius_aft_m` to `[[stage.flap]]`, read in `core/src/vehicle` and used in `core/src/aero/flap.cpp` for span direction, normal and application point (centroid of the real planform, not mid-span x mid-station); same function in `attitude_controller.cpp`. Unit tests in `core/tests/test_flaps.cpp` `[aero][flap]`. The game's manifest and physics now agree. Forward RCS pod station 46 stands beside the hinge: move it to its drawn-free position or report (user decision). Lean 0 reproduces existing results to 1e-12 for other vehicles.
 
 ### Task 4: Grid fins follow the geometry
+User 2026-11-01: only three fins, at azimuths 0 / 90 / 180. Every count, area and test uses three. The layout is asymmetric: the fin axial drag acts off-axis (net towards azimuth 90, lever about 7.19 m), but today it enters only through the axial curve, without a moment. Quantify this moment in ascent and tail-first descent against the control authority, and add it to the physics if it is not negligible.
 `config/vehicles/starship_block3.toml`: `area_m2` 12.63 [E], `radius_m` 7.19, `grid_fin.csv` reviewed against the open fraction; `[gnc][gridfin]`, `[aero][grid_fins]`, `[gnc][booster][validation]`. Descent table's fin share re-subtracted with the new area, so the total against telemetry stays (no re-fit of the total).
 
 ### Task 5: Ship entry and atmospheric drag re-determined
