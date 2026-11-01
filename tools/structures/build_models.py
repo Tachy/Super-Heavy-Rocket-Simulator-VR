@@ -87,7 +87,7 @@ def input_hash(config: Path, version: str) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
     h.update(f"site_tower={sorted(detail_file.site_tower().items())}".encode())  # drawn on the physics values, not in the detail file
-    for p in [config, SCRIPT_DIR / "common.py", SCRIPT_DIR / "mechazilla_layout.py", SCRIPT_DIR / "mount_layout.py",
+    for p in [config, SCRIPT_DIR / "common.py", SCRIPT_DIR / "member_geometry.py", SCRIPT_DIR / "mechazilla_layout.py", SCRIPT_DIR / "mount_layout.py",
               Path(mount_textures.__file__), *(SCRIPT_DIR / g for g in GENERATORS)]:
         h.update(p.name.encode())
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))

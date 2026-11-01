@@ -110,6 +110,9 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   12.2-79 m on the pad-side face only, silhouette <= 148 m (146.9 m), four frame members and no pyramid under the roof.
 
 ## Standing decisions (from the spec)
+- Member faces are wound outward by construction in `tools/structures/blender/member_geometry.py`: vertices are not
+  shared between faces, so `recalc_face_normals` gives an arbitrary result, and the steel shader culls back faces.
+- Tower braces stay H sections, legs closed boxes (user 2026-11-01; photo reads H, not unambiguous at its resolution).
 - Rebuild from dimensions; photos only as references in git-ignored `screenshots/mechazilla/pad-b/`, no photo pixels,
   no traced drawings, no logos.
 - Measurement is scripted: `tools/structures/measure/ratio.py` reads a points file (next to the image, git-ignored)
