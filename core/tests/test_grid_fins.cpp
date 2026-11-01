@@ -96,7 +96,6 @@ TEST_CASE("Grid fin force: direction, magnitude, limit, rarefied flow", "[aero][
 
 TEST_CASE("Grid fins damp the rotation of a falling booster", "[vehicle][gridfin]") {
     World world;
-    world.env.grid_fin_drag_couple = false;  // the damping alone: the drag couple pitches whatever the rate
     const Vec3 rate{0.0, 0.05, -0.03};
     auto with = falling_booster(true, rate);
     auto without = falling_booster(false, rate);
@@ -251,7 +250,7 @@ TEST_CASE("The unbalanced fin's axial drag acts at its centre of pressure", "[ae
     }
     SECTION("a symmetric layout has no couple, exactly: Falcon 9 is bit-identical with the flag on and off") {
         World on, off;
-        off.env.grid_fin_drag_couple = false;
+        on.env.grid_fin_drag_couple = true;
         auto cfg = config::load_vehicle(config_dir, "falcon9_block5");
         cfg.stages.resize(1);
         const vehicle::RigidBodyState state{{6378137.0 + 10000.0, 0.0, 0.0}, {-600.0, 0.0, 0.0}, {}, {0.01, 0.02, -0.01}};

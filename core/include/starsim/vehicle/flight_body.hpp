@@ -59,8 +59,9 @@ struct FlightEnvironment {
     bool boil_off = true;
     // Fidelity flag (vehicle physics Task 4): each grid fin's share of the hull's axial drag acts at the fin's centre of
     // pressure, not on the axis; an asymmetric layout (Super Heavy: 0 / 90 / 180) gets the moment (docs/subsystems/
-    // aero-derivation.md). Off: on the axis, no moment. A symmetric layout has none either way, exactly.
-    bool grid_fin_drag_couple = true;
+    // aero-derivation.md). Off (the default): on the axis, no moment. With the lattice-derived CA the couple is 1.8 % of the
+    // fin authority, below the 2 % threshold; the table's CA overstates it 4 x. A symmetric layout has none either way.
+    bool grid_fin_drag_couple = false;
     // M8: the Earth's surface (reference_body_of sets it on the Earth). nullptr: the flat model - the ground at each
     // body's ground_height_m (the old model, kept for comparison runs and the guidance planners' predictions).
     const environment::Terrain* earth_terrain = nullptr;

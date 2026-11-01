@@ -335,11 +335,12 @@ stack 3951 t at T+63 s, CG 53.38 m).
 | Ascent, max q flight 14 (T+63 s) | 38.9 | 1.36 | 1.00 table | 491 | 3.53 | gimbal 480 (vacuum thrust) | 0.74 % |
 | Same, derived nose-first CA | 38.9 | 1.36 | 0.725 | 356 | 2.56 | gimbal 480 | 0.53 % |
 
-Decision from the numbers: above 2 % in the tail-first descent, by either CA, so it is in the physics. Holding 8.1 MN m takes about 2.6 deg of
-fin. Ascent is below 2 % and the same code runs there; its table CA is tail-first data, 38 % above the derived nose-first value.
+Decision from the numbers (2026-11-01, Task 6): **off by default.** The rows above use the wall 0.04 m; with the flown derivation wall 0.012 m the tail-first
+term at Mach 3 is 0.112 on 63.62 m^2 for three fins, so CA 0.19 per fin against the table's 0.837: about 1.8 MN m, 1.8 % of the 102 MN m of authority, under the 2 % threshold. The table's
+CA overstates it about 4 x (the descent total keeps that CA only because the sum was fixed by the flights). The ascent is below 2 % by any CA.
 
-`FlightBody` (`grid_fin_drag_couple`, fidelity flag `FlightEnvironment::grid_fin_drag_couple`, default on; `FlightSession::set_grid_fin_drag_couple`)
-adds the moment of each fin's share of the axial force (`aero::grid_fin_axial_force_n`) at its centre of pressure. The force itself stays in the axial
+`FlightBody` (`grid_fin_drag_couple`, fidelity flag `FlightEnvironment::grid_fin_drag_couple`, default off; `FlightSession::set_grid_fin_drag_couple`)
+with the flag on adds the moment of each fin's share of the axial force (`aero::grid_fin_axial_force_n`) at its centre of pressure. The force itself stays in the axial
 curve, because the planners read that curve (`booster_return_prediction`, `descent_model`): force on the axis + this couple is the same
 wrench as the drag at the fins with it taken out of the curve, and the total cannot move. A symmetric layout gets exactly zero (Falcon 9
 bit-identical, printed state compared in hex). The guidance has no feed-forward for this moment; the attitude loop takes it as a disturbance.

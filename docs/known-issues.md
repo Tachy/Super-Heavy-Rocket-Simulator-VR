@@ -15,9 +15,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     flaps from the stop (88-90 deg) to 30-37 deg, flap CdA from 55-65 to 13 m^2, total -10 % at Mach 8-25. Nose and `ship_ascent.csv` move this by at most 0.3 points.
   - "The ship trims belly first with control margin" and "Flaps pinned at their stops": at 65 km, 35 t, alpha 60 the forward pair trims at 77.2 deg (limit 75); alpha 70 does not
     trim at all (stops, remainder 2.8 x). The schedule flies 52-55 deg there, where the margin holds (forward 53-62 deg).
-  - "Guided 6-DOF entry flies to the gate": miss 831 m (limit 100); "Ship returns from orbit into the tower's arms": miss 1,601 m, not caught. Both pass with the old
-    `ship_ascent.csv` alone, the second also with nose 17 m alone: marginal, the miss builds in the last phase below 1.5 km. Not diagnosed further.
-  - "Guided lunar-return entry at 9.6 km/s": gate miss 2,105 km (limit 2 km), against 12 km without the hull table (red there as well). Cause not found.
+  - "Guided 6-DOF entry flies to the gate": miss 831 m (limit 100). Cause (Task 6): the terminal steering asks for an alpha the flaps cannot trim. With the mesh centre of pressure, 35 t cannot trim
+    below alpha ~62 deg under Mach 1 and ~56 at Mach 1.2 (both pairs at their stops), the steering's floor is 60 / 50 deg, the predictor counts the lift there, so the ship flies 5-10 deg above
+    the command and short of lift. A floor at the lowest trimmed alpha in `steering_alpha` gives 1.67 m, not adopted: a guidance change, the user's ruling.
+  - "Ship returns from orbit into the tower's arms": miss 1,601 m, not caught. Departure in the nose turn at Mach 0.7, 13 km: at the turn's start the demand reaches 20-40 x the RCS, the flaps go to 17 / 57 / 68 / 16 deg, roll swings +-0.4 rad/s and alpha runs from 80 to 170 deg. The trim floor does not cure it (1,656 m). Fix not determined; open for the user's ruling.
   - The 64 t aerocapture is green since this set: apoapsis 426 km, axis error 1.6 deg, peak 924 kW/m^2. At 64 t below Mach 2.5 the aft pair is at its stop (short 42-619 m^3 per q).
 - Ship crossflow gap: `ship_crossflow.csv` stays the flights' 1.5-1.6 [D], the drawn hull derives 1.07-1.10 at Mach 4-25 (`aero-derivation.md`). Open, not closed by the alpha the frames support.
 - Forward RCS pod (for Task 6): floats 1.15 m off the drawn hull (radius 4.5 against 3.348 at station 46). Moved alone it misses the catch gate at 148 m (limit 100), so it stays.

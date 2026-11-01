@@ -153,19 +153,30 @@ TEST_CASE("Guided lunar-return entry at 9.6 km/s inertial reaches the gate withi
     test::ShipEntryScenario scenario(start);
     const auto radiative = std::make_shared<const aero::RadiativeHeatingTable>(
         aero::RadiativeHeatingTable::load(STARSIM_CONFIG_DIR));
-    // target: the end point of a 75 deg bank prediction (reachable by construction)
+    // target: the end point of a captured bank's prediction, reachable by construction. lunar_return() counts a carried
+    // skip as an overshoot (l5 Task 10), so a target behind a skip arc cannot be flown (a fixed 75 deg did: it holds one
+    // skip since the mesh's hull centre of pressure, and the guidance sat on the capture edge 2,105 km short). So: the
+    // lowest bank that stays in, plus a margin off that edge [E].
     auto model = predictor_model(scenario, schedule);
     model.radiative = radiative;
     model.carry_skips = true;
-    const auto nominal = gnc::predict_entry(model, predictor_start(scenario), 75.0 * deg, gnc::EntryTarget{}, 800.0,
-                                            0.0, 1.0, 6000.0);
+    double nominal_bank = 60.0 * deg;
+    auto nominal = gnc::predict_entry(model, predictor_start(scenario), nominal_bank, gnc::EntryTarget{}, 800.0, 0.0, 1.0, 6000.0);
+    while ((!nominal.reached_gate || nominal.skips > 0) && nominal_bank < 90.0 * deg) {
+        nominal_bank += 0.5 * deg;
+        nominal = gnc::predict_entry(model, predictor_start(scenario), nominal_bank, gnc::EntryTarget{}, 800.0, 0.0, 1.0, 6000.0);
+    }
     REQUIRE(nominal.reached_gate);
+    nominal_bank += 1.0 * deg;
+    nominal = gnc::predict_entry(model, predictor_start(scenario), nominal_bank, gnc::EntryTarget{}, 800.0, 0.0, 1.0, 6000.0);
+    REQUIRE(nominal.reached_gate);
+    REQUIRE(nominal.skips == 0);
     const math::Vec3 end = nominal.end_position_itrf_m;
     const gnc::EntryTarget target{end * ((norm(end) - 800.0) / norm(end)), 0.0};
     auto p = gnc::EntryGuidanceParameters::lunar_return();
     p.predictor_j2 = false;
-    p.final_bank_rad = -1.0;  // the constant-bank skip entry (lunar_return() profiles the bank since Task 8)
-    p.initial_bank_rad = 75.0 * deg;
+    p.final_bank_rad = -1.0;  // the constant-bank entry (lunar_return() profiles the bank since Task 8)
+    p.initial_bank_rad = nominal_bank;
     p.lateral_margin_m = 0.0;  // the target is the prediction's own end point, not a track aimed beside the site
     scenario.fly_guided(schedule, target, p, radiative);
     CHECK(scenario.reached_gate());
