@@ -31,7 +31,7 @@ TEST_CASE("Launch sites load with their catch tower", "[config]") {
     CHECK_THAT(site.sea->shoreline_distance_m, WithinAbs(765.0, 1e-12));  // 3DEP grid, from the measured ring
     CHECK_THAT(t.mount_height_m, WithinAbs(14.5, 1e-12));
     CHECK_THAT(t.catch_height_m, WithinAbs(133.0, 1e-12));
-    CHECK_THAT(t.arm_length_m, WithinAbs(25.98, 1e-12));
+    CHECK_THAT(t.arm_length_m, WithinAbs(24.0, 1e-12));
     CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "ksc_lc39a").tower.has_value());
     CHECK_THROWS_AS(config::load_launch_site(STARSIM_CONFIG_DIR, "nowhere"), config::ConfigError);
 }

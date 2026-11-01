@@ -20,6 +20,8 @@ TowerConfig load_tower(const Document& doc, const toml::table& t) {
     c.mount_height_m = doc.positive(t, "mount_height_m");
     c.mount_outer_radius_m = doc.positive(t, "mount_outer_radius_m");
     c.mount_inner_radius_m = doc.positive(t, "mount_inner_radius_m");
+    c.hinge_outside_corner_m = doc.number(t, "hinge_outside_corner_m");
+    if (c.hinge_outside_corner_m < 0.0) doc.fail("tower: hinge_outside_corner_m must not be negative");
     c.arm_length_m = doc.positive(t, "arm_length_m");
     c.arm_width_m = doc.positive(t, "arm_width_m");
     c.arm_thickness_m = doc.positive(t, "arm_thickness_m");

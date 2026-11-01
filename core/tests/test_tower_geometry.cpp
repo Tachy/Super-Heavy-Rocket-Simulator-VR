@@ -74,11 +74,20 @@ TEST_CASE("Both arms turn about the one corner axis", "[contact]") {
         }
     }
     const Vec3 pivot = tower.hinge_pivot();
-    CHECK_THAT(pivot.x, WithinAbs(corner.x, 1e-9));
-    CHECK_THAT(pivot.y, WithinAbs(corner.y, 1e-9));
+    // The axis stands the configured distance outside that corner, on the outward diagonal from the box's centre.
+    CHECK_THAT(c.hinge_outside_corner_m, WithinAbs(2.0, 1e-12));
+    Vec3 outward = corner - box.center;
+    outward.z = 0.0;
+    outward = outward * (1.0 / norm(outward));
+    CHECK_THAT(pivot.x, WithinAbs(corner.x + outward.x * c.hinge_outside_corner_m, 1e-9));
+    CHECK_THAT(pivot.y, WithinAbs(corner.y + outward.y * c.hinge_outside_corner_m, 1e-9));
     CHECK_THAT(pivot.z, WithinAbs(c.catch_height_m, 1e-9));
-    CHECK_THAT(dot(pivot, tower.tower_direction()), WithinAbs(22.378, 0.001));
-    CHECK_THAT(std::abs(dot(pivot, tower.across())), WithinAbs(1.244, 0.001));
+    // Hand-computed: corner 22.378 / -1.244, outward diagonal (-0.9913, -0.1322) x 2 m.
+    CHECK_THAT(dot(pivot, tower.tower_direction()), WithinAbs(20.395, 0.001));
+    CHECK_THAT(std::abs(dot(pivot, tower.across())), WithinAbs(1.508, 0.001));
+    Vec3 mid_height = pivot;
+    mid_height.z = 0.5 * c.height_m;
+    CHECK_FALSE(point_in_box(box, mid_height).inside);
     for (const int side : {1, -1}) {
         for (const double opening : {0.0, c.arm_standby_rad, c.arm_open_rad}) {
             // A rigid turn: the box centre keeps its distance from the axis through the pivot and turns by the opening.
@@ -125,6 +134,26 @@ TEST_CASE("Opening moves a bearing face away from the hull", "[contact]") {
             previous = now;
         }
         CHECK_THAT(clearance(side, c.arm_standby_rad), WithinAbs(2.83, 0.05));  // about 3 m per side at the axis
+    }
+}
+
+TEST_CASE("The second tower site's arms stay centred and clear of the hull", "[contact]") {
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "ksc_lc39a");
+    REQUIRE(site.tower.has_value());
+    const TowerGeometry tower(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
+    const auto& c = tower.config();
+    const auto box = tower.tower_box();
+    Vec3 pivot = tower.hinge_pivot();
+    pivot.z = 0.5 * c.height_m;
+    CHECK_FALSE(point_in_box(box, pivot).inside);
+    const double hull_radius_m = 4.5;
+    for (const int side : {1, -1}) {
+        const auto closed = tower.arm_box(side, 0.0, 0.0);
+        CHECK_THAT(side * dot(closed.center, tower.across()) - closed.half_extents.y, WithinAbs(0.5 * c.arm_closed_gap_m, 1e-9));
+        const auto standby = tower.arm_box(side, c.arm_standby_rad, 0.0);
+        const double clear = std::abs(dot(standby.center, math::column(standby.axes, 1))) - standby.half_extents.y - hull_radius_m;
+        CHECK(clear > 2.5);
+        CHECK(clear < 3.2);
     }
 }
 

@@ -39,7 +39,10 @@ Annulus TowerGeometry::mount() const {
 Vec3 TowerGeometry::hinge_pivot() const {
     const auto box = tower_box();
     const Vec3 corner = box.center - math::column(box.axes, 0) * box.half_extents.x - math::column(box.axes, 1) * box.half_extents.y;
-    return {corner.x, corner.y, config_.catch_height_m};
+    // Outward along the corner's diagonal (the two axes' mean), `hinge_outside_corner_m` from the corner.
+    const Vec3 outward = (math::column(box.axes, 0) + math::column(box.axes, 1)) * (-1.0 / std::sqrt(2.0));
+    const Vec3 axis = corner + outward * config_.hinge_outside_corner_m;
+    return {axis.x, axis.y, config_.catch_height_m};
 }
 
 double TowerGeometry::arm_line_offset_m(int side) const {

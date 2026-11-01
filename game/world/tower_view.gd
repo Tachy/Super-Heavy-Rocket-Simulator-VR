@@ -38,9 +38,8 @@ var _chopstick_detail: Dictionary = {}  ## the detail file's [chopstick]: the ac
 var _arms: Array[Node3D] = []  ## pivots, both on the common hinge axis: [+across, -across]
 var _carriage: Node3D = null  ## models only: follows the carriage offset
 var _cables: Array[MeshInstance3D] = []  ## hoist cables, sheave block to the roof block
-var _cable_lateral_m: Array[float] = []
+var _cable_offsets_m: Array[Vector3] = []  ## from the axis to each hoist cable, plan (site frame)
 var _cable_anchor_site := Vector3.ZERO  ## the common hinge axis (site frame, horizontal): the cables come straight down onto it
-var _cable_spread := Vector3.ZERO  ## unit vector along the sheave's axis (site frame): the bundle lies along it
 var _qd_arm: Node3D = null  ## the ship QD arm's model node (its swinging parts rotate about the swing axis)
 ## Swing of the ship QD arm about its vertical axis, radians: 0 = connected (head 1 m off the hull), positive turns the head
 ## away from the catch line. The core has no `qd_arm_angle_rad` state yet (docs/subsystems/launch-structures.md, Open points).
@@ -69,7 +68,7 @@ func build(geometry: Dictionary) -> void:
 	tower_lights = null
 	_cables.clear()
 	_qd_arm = null
-	_cable_lateral_m.clear()
+	_cable_offsets_m.clear()
 	_actuators.clear()
 	var had_models := has_models
 	has_models = false
@@ -235,11 +234,14 @@ func _build_carriage(models: Dictionary) -> void:
 	var count := int(k["cable_count"])
 	var size: float = k["cable_size_m"]
 	var pitch: float = k["cable_spacing_m"]
-	# The cables come straight down past the sheave block onto the rotary hinge's top; they run to the roof block's underside.
+	# Two groups come straight down either side of the sheave block onto the rotary hinge's crossbeam; they run to the roof block's
+	# underside (mechazilla_layout.hoist_cables).
 	_cable_base_m = float(k["top_z_m"])
 	var axes := _plan_axes(models["detail"], _geometry)
 	_cable_anchor_site = hinge_axis_site(_geometry)
-	_cable_spread = (axes.y - axes.x).normalized()
+	var spread := (axes.y - axes.x).normalized()
+	var along := (axes.x + axes.y).normalized()
+	var per_group := count / 2
 	_cable_top_m = float(models["detail"]["tower.roof"]["block_base_m"])
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.5 * size
@@ -254,7 +256,8 @@ func _build_carriage(models: Dictionary) -> void:
 		cable.material_override = TowerMaterial.dark()
 		add_child(cable)
 		_cables.append(cable)
-		_cable_lateral_m.append((c - 0.5 * (count - 1)) * pitch)
+		var group_sign := -1.0 if c < per_group else 1.0
+		_cable_offsets_m.append(spread * (group_sign * 0.5 * float(k["cable_group_spacing_m"])) + along * ((c % per_group - 0.5 * (per_group - 1)) * pitch))
 	_build_actuators(k)
 
 
@@ -326,7 +329,7 @@ func _place_carriage(offset: float) -> void:
 	var low_m: float = centre.z + _cable_base_m
 	var length := maxf(0.1, _cable_top_m - low_m)
 	for i in range(_cables.size()):
-		var at: Vector3 = _cable_anchor_site + _cable_spread * _cable_lateral_m[i]
+		var at: Vector3 = _cable_anchor_site + _cable_offsets_m[i]
 		at.z = low_m + 0.5 * length
 		_cables[i].position = Frames.to_render(at)
 		# The cylinder's axis (local Y) is the column that basis_to_render sends to render Y: the site's up.
@@ -340,7 +343,7 @@ func hinge_axis_site(geometry: Dictionary) -> Vector3:
 	return at
 
 
-## The corner rails: three static vertical rails let into the corner toward the mount and its neighbours, in the carriage's
+## The rails: three static vertical rails on the faces, near the corner toward the mount and its neighbours, in the carriage's
 ## frame at the hinge height (the carriage rides up and down on them).
 func _build_rails(models: Dictionary) -> void:
 	var rails := Node3D.new()

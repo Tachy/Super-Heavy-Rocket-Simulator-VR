@@ -43,3 +43,9 @@ Triangle from the south tip -36 E / -74.6 N (+-8 m) and two edges (SW bearing 16
 
 ## Two hinges on outriggers (until 2026-10-31)
 Physics: `hinge_distance_m` 22.3 and one hinge per arm at +-5.8 m across, each arm turning about its own hinge; arm 25.9 m. Drawn: hinge columns 3.7 / 4.3 m in front of the faces, tied to the collars by outriggers (`hinge_y_m`, `beam_m`); root 35 deg, lower chord with a knee (11 m at 21 %, 8.6 m at 35 %), knee strut, foot 17 m at the arm's line, collar distance 13 m, pushers on the tip, rails 0.2 m outside the faces, cables from the sheave block's side at 0.3 m pitch. Replaced by the user's ruling of one axis on the corner.
+
+## Hinge axis on the box corner (physics plan Task 4d, replaced 2026-11-01 by Task 4e)
+- Axis on the corner toward the mount: 22.378 m along the line, 1.244 m across; `arm_line_offset_m` 7.044 / 4.556 m; arm 25.98 m; standby 6.5 deg (hull clear 2.83 m per side); second site 24 m / 6 m, arm 36 m.
+- Stations on the arm: bearing start 13 m, leg end 19.5 m, connector 23 m, plate end 25.2 m, pad 23.23 m, tip box 22.6-26.2 m, mast 13.5 m, lower chord's end at 0.87 of the arm.
+- Rails on the corners themselves; sheave block 2.5 m wide with its tangent on the axis, outside the corner; 4 hoist cables in one bundle on the axis (0.16 m pitch).
+- User ruling 2026-11-01 on the photo differences: take the photo for axis, rails and cables; rollers and rear corner stay the user's description.

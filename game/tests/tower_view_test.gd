@@ -258,7 +258,7 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 	_check(not boxes_view.has_models, "a site without models keeps the old mount cylinder")
 
 
-## The tower box's corner toward the mount (from the physics numbers): the rails, the hoist cables and the QD arm stand on it.
+## The tower box's corner toward the mount (from the physics numbers): the hinge axis outside it, the rails, the hoist cables and the QD arm.
 func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) -> void:
 	var detail: Dictionary = models["detail"]
 	var toward: Vector3 = geometry["tower_direction"]
@@ -273,18 +273,32 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 	corner.z = 0.0
 	_check(absf(corner.dot(toward) - 22.4) < 0.1 and absf(absf(corner.dot(across)) - 1.24) < 0.05,
 			"box corner toward the mount at %.2f m along, %.2f m across" % [corner.dot(toward), corner.dot(across)])
-	_check(Vector3(corner.x, corner.y, 0.0).distance_to(view.hinge_axis_site(geometry)) < 1e-3, "the common hinge axis is that corner")
-	# Hoist cables: vertical, straight down onto the hinge's top on the axis, every cable within 0.3 m of it.
+	var outside: float = geometry["hinge_outside_corner_m"]
+	var axis_site := corner - (ax + ay).normalized() * outside
+	_check(axis_site.distance_to(view.hinge_axis_site(geometry)) < 1e-3, "the common hinge axis stands %.2f m outside that corner" % outside)
+	# Hoist cables: vertical, straight down onto the hinge's top, two groups either side of the sheave block, load centred on the axis.
 	var up_r := Frames.to_render(up)
 	var sum := Vector3.ZERO
 	var cables := 0
-	for c in range(8):
+	var spread_r := Frames.to_render((ay - ax).normalized())
+	var axis_r := Frames.to_render(axis_site)
+	var group_minus := 0.0
+	var group_plus := 0.0
+	var count_minus := 0
+	var count_plus := 0
+	for c in range(32):
 		var cable := view.get_node_or_null("cable_%d" % c) as MeshInstance3D
 		if cable == null:
 			break
 		var at := cable.position
 		var h := up_r.dot(at)
-		_check(Frames.to_render(corner + up * h).distance_to(at) < 0.3, "hoist cable %d on the axis (%.2f m)" % [c, Frames.to_render(corner + up * h).distance_to(at)])
+		var lateral: float = (at - axis_r).dot(spread_r)
+		if lateral < 0.0:
+			group_minus += lateral
+			count_minus += 1
+		else:
+			group_plus += lateral
+			count_plus += 1
 		_check(cable.basis.y.normalized().distance_to(up_r) < 1e-6, "hoist cable %d vertical" % c)
 		var low_m: float = h - 0.5 * cable.basis.y.length()
 		var carriage_m: float = up_r.dot((view.get_node("CarriageMount") as Node3D).position) + float(detail["carriage"]["top_z_m"])
@@ -293,7 +307,10 @@ func _check_corner(view: TowerView, models: Dictionary, geometry: Dictionary) ->
 		cables += 1
 	_check(cables == int(detail["carriage"]["cable_count"]), "%d hoist cables" % cables)
 	var centre := sum / float(cables)
-	_check(Frames.to_render(corner + up * up_r.dot(centre)).distance_to(centre) < 0.3, "cable bundle on the axis")
+	_check(cables >= 8 and count_minus == count_plus, "%d + %d hoist cables in two groups" % [count_minus, count_plus])
+	var spacing := group_plus / float(count_plus) - group_minus / float(count_minus)
+	_check(absf(spacing - 1.5) <= 0.3, "cable groups %.2f m apart" % spacing)
+	_check(Frames.to_render(axis_site + up * up_r.dot(centre)).distance_to(centre) < 0.3, "midpoint of the cable groups on the axis")
 	# Rails: three static nodes' boxes at the corner and its two neighbours, from the plinth top up to the lattice top.
 	var rails := view.get_node_or_null("RailsMount/Rails/rail") as MeshInstance3D
 	_check(rails != null, "corner rails built")
@@ -415,8 +432,8 @@ func _geometry() -> Dictionary:
 		"tower_center_m": centre, "tower_size_m": Vector3(13.3, 13.3, 146.0),
 		"mount_height_m": 20.0, "mount_inner_radius_m": 5.5, "mount_outer_radius_m": 13.0,
 		"arm_length_m": 36.0, "arm_width_m": 2.0, "arm_thickness_m": 2.5, "arm_open_rad": deg_to_rad(40.0),
-		"hinge_pivot_m": toward * 22.378 - across * 1.2436 + up * 95.0,
-		"arm_line_offset_plus_m": 5.8 + 1.2436, "arm_line_offset_minus_m": 5.8 - 1.2436,
+		"hinge_pivot_m": toward * 20.3957 - across * 1.5082 + up * 95.0, "hinge_outside_corner_m": 2.0,
+		"arm_line_offset_plus_m": 5.8 + 1.5082, "arm_line_offset_minus_m": 5.8 - 1.5082,
 	}
 
 

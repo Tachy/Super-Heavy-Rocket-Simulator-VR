@@ -16,8 +16,10 @@ import detail_file  # noqa: E402
 import mechazilla_layout as layout  # noqa: E402
 
 HULL_RADIUS_M = 4.5  # [S] 9 m booster diameter
-HINGE_TO_AXIS_M = 31.7 - 6.65 * (math.cos(math.radians(37.4)) + math.sin(math.radians(37.4)))  # the box corner toward the mount along the line, hand-computed
-HINGE_ACROSS_M = -6.65 * (math.cos(math.radians(37.4)) - math.sin(math.radians(37.4)))  # the same corner across the line, hand-computed
+HINGE_OUTSIDE_M = 2.0  # the axis outside the corner, on the outward diagonal
+_REACH_M = 6.65 + HINGE_OUTSIDE_M / math.sqrt(2.0)
+HINGE_TO_AXIS_M = 31.7 - _REACH_M * (math.cos(math.radians(37.4)) + math.sin(math.radians(37.4)))  # the axis along the line, hand-computed
+HINGE_ACROSS_M = -_REACH_M * (math.cos(math.radians(37.4)) - math.sin(math.radians(37.4)))  # the axis across the line, hand-computed
 
 
 @pytest.fixture(scope="module")
@@ -51,8 +53,10 @@ def _heading_deg(a, b):
     return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
 
 
-def test_pivot_is_the_physics_corner():
+def test_pivot_stands_outside_the_physics_corner():
+    assert _physics()["hinge_outside_corner_m"] == HINGE_OUTSIDE_M
     along, across = layout.pivot_site(_physics())
+    assert along == pytest.approx(20.396, abs=0.001) and across == pytest.approx(-1.508, abs=0.001)
     assert along == pytest.approx(HINGE_TO_AXIS_M, abs=0.001)
     assert across == pytest.approx(HINGE_ACROSS_M, abs=0.001)
 
@@ -188,7 +192,7 @@ def test_open_frame_with_a_narrow_strip_on_the_inner_chord(detail):
 
 
 def _box_corners_carriage(phys):
-    """Independent of the layout: the physics box's corners (toward, across) -> carriage frame (X = axis station - toward, Y = pivot across - across).
+    """Independent of the layout: the physics box's corners (toward, across) -> carriage frame (origin on the hinge axis: X = axis station - toward, Y = pivot across - across).
     Returns {"c": corner toward the mount, "a": neighbour along the x axis, "b": neighbour along the y axis}."""
     yaw = math.radians(phys["plan_yaw_deg"])
     ex, ey = (math.cos(yaw), -math.sin(yaw)), (math.sin(yaw), math.cos(yaw))
@@ -196,19 +200,23 @@ def _box_corners_carriage(phys):
     centre = (phys["distance_m"], 0.0)
     c = (centre[0] - half * (ex[0] + ey[0]), centre[1] - half * (ex[1] + ey[1]))
     out = {"c": c, "a": (c[0] + 2 * half * ex[0], c[1] + 2 * half * ex[1]), "b": (c[0] + 2 * half * ey[0], c[1] + 2 * half * ey[1])}
-    return {k: (c[0] - v[0], -(v[1] - c[1])) for k, v in out.items()}
+    return {k: (HINGE_TO_AXIS_M - v[0], HINGE_ACROSS_M - v[1]) for k, v in out.items()}
 
 
-def test_rails_are_let_into_three_corners(detail):
+def test_rails_stand_inboard_of_three_corners(detail):
     phys = _physics()
     corners = _box_corners_carriage(phys)
-    assert corners["c"] == pytest.approx((0.0, 0.0), abs=1e-9)  # the frame's origin is the corner
+    assert math.hypot(*corners["c"]) == pytest.approx(HINGE_OUTSIDE_M, abs=1e-9)  # the frame's origin is the axis outside the corner
     rails = layout.rails(detail)
     assert len(rails) == 3  # the rear corner has no carriage rail
     for member, key in zip(rails, ("c", "a", "b")):
         _, _, size, p0, p1, _ = member
         assert math.dist(p0[:2], p1[:2]) < 1e-9  # vertical
-        assert math.dist(p0[:2], corners[key]) <= 0.3  # on the corner
+        assert math.dist(p0[:2], corners[key]) == pytest.approx(detail["carriage"]["rail_inboard_m"], abs=1e-9)  # inboard of its corner edge ...
+        ex, ey = layout._unit_axes(detail)
+        rel = (p0[0] - corners["c"][0], p0[1] - corners["c"][1])
+        u, v = rel[0] * ex[0] + rel[1] * ex[1], rel[0] * ey[0] + rel[1] * ey[1]
+        assert min(abs(u), abs(v)) < 1e-9 and 0.0 < max(u, v) < phys["width_m"]  # ... on a face of the box
         assert p0[2] < -phys["catch_height_m"] + detail["tower"]["plinth"]["height_m"] + 0.01  # from the plinth top ...
         assert p1[2] > detail["tower"]["lattice_height_m"] - phys["catch_height_m"] - 0.01  # ... to the lattice top
 
@@ -236,7 +244,7 @@ def test_carriage_has_six_rollers_on_three_corners(detail):
     assert len([m for m in layout.carriage(detail) if m[1] == "tube" and m[2] == size]) == 6
 
 
-def test_collars_run_from_the_axis_to_both_neighbour_corners(detail):
+def test_collars_run_from_the_corner_to_both_neighbour_corners(detail):
     phys = _physics()
     corners = _box_corners_carriage(phys)
     collar = [m for m in layout.carriage(detail) if m[0] == "collar"]
@@ -248,7 +256,7 @@ def test_collars_run_from_the_axis_to_both_neighbour_corners(detail):
         reached = set()
         for m in ends:
             assert m[3][2] == m[4][2]  # horizontal
-            assert math.dist(m[3][:2], corners["c"]) <= 0.3  # one end on the axis
+            assert math.dist(m[3][:2], corners["c"]) <= 0.3  # one end on the corner, struts reach from there to the axis
             for key in ("a", "b"):
                 if math.dist(m[4][:2], corners[key]) <= 0.3:
                     reached.add(key)
@@ -264,15 +272,32 @@ def test_one_hinge_column_on_the_axis_no_outriggers(detail):
     assert "beam_m" not in k and "hinge_y_m" not in k
 
 
-def test_hoist_cable_comes_down_on_the_axis(detail):
+def test_struts_reach_from_the_axis_back_to_the_corner(detail):
+    corner = layout.tower_corner(detail)["c"]
+    z_up, z_lo = layout.collar_levels(detail)
+    for z in (z_up, z_lo):
+        struts = [m for m in layout.carriage(detail) if m[3][:2] == (0.0, 0.0) and m[3][2] == z and m[4][2] == z]
+        assert any(math.dist(m[4][:2], corner) < 1e-9 for m in struts)
+
+
+def test_hoist_cables_in_two_groups_centred_on_the_axis(detail):
     k = detail["carriage"]
-    assert layout.hoist_anchor(detail) == (0.0, 0.0)
-    assert 0.5 * (k["cable_count"] - 1) * k["cable_spacing_m"] <= 0.3  # the whole bundle within 0.3 m of the axis
-    # The sheave block stands outside the faces, its tangent on the axis.
+    cables = layout.hoist_cables(detail)
+    assert len(cables) >= 8
+    t = layout.cable_spread_axis(detail)
+    lateral = [c[0] * t[0] + c[1] * t[1] for c in cables]
+    minus, plus = [v for v in lateral if v < 0.0], [v for v in lateral if v > 0.0]
+    assert len(minus) == len(plus) == len(cables) / 2
+    spacing = sum(plus) / len(plus) - sum(minus) / len(minus)
+    assert abs(spacing - 1.5) <= 0.3
+    mid = tuple(sum(c[i] for c in cables) / len(cables) for i in range(2))
+    assert math.hypot(*mid) <= 0.3  # the load centred on the axis
+    # Either side of the sheave block, which stands on the axis.
+    assert 0.5 * k["drum_width_m"] <= min(abs(v) for v in lateral) - 0.5 * k["cable_size_m"]
     drum = [m for m in layout.carriage(detail) if m[1] == "tube" and m[2] == k["drum_diameter_m"]]
     assert len(drum) == 1
     mid = tuple(0.5 * (drum[0][3][i] + drum[0][4][i]) for i in range(2))
-    assert math.hypot(*mid) == pytest.approx(0.5 * k["drum_diameter_m"], abs=1e-9)
+    assert math.hypot(*mid) == pytest.approx(0.0, abs=1e-9)
 
 
 def _qd_site(detail, point, swing=0.0):

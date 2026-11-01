@@ -21,6 +21,7 @@ struct TowerConfig {
     double mount_height_m = 0.0;        // top of the launch mount: a stack on the pad stands here
     double mount_outer_radius_m = 0.0;
     double mount_inner_radius_m = 0.0;
+    double hinge_outside_corner_m = 0.0;  // common hinge axis outside the box corner toward the mount, along its outward diagonal
     double arm_length_m = 0.0;          // hinge axis -> tip, along the arm
     double arm_width_m = 0.0;
     double arm_thickness_m = 0.0;

@@ -225,7 +225,8 @@ flow separation (vacuum engines).
   (`mount_height_m`, `mount_inner_radius_m`, `mount_outer_radius_m`), arms (`arm_length_m`, `arm_width_m`,
   `arm_thickness_m`, `arm_open_deg`, `arm_closed_gap_m`, `arm_rate_deg_s`, `arm_force_limit_n`),
   `catch_height_m` (arm tops above the ground) and the carriage shock absorbers (`carriage_mass_kg`,
-  `carriage_stiffness_n_m`, `carriage_damping_n_s_m`, `carriage_stroke_m`). The hinges sit on the tower face,
+  `carriage_stiffness_n_m`, `carriage_damping_n_s_m`, `carriage_stroke_m`). Both arms turn about one vertical axis
+  `hinge_outside_corner_m` outside the box corner toward the mount, on its outward diagonal; closed, their centre lines lie
   `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis.
 
 ## Splashdown zones (`splashdown_zones.toml`)

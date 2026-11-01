@@ -293,6 +293,7 @@ godot::Dictionary FlightSim::site_tower(const godot::String& site_id) const {
         d["arm_thickness_m"] = c.arm_thickness_m;
         d["arm_open_rad"] = c.arm_open_rad;
         d["hinge_pivot_m"] = to_godot(g.hinge_pivot());
+        d["hinge_outside_corner_m"] = c.hinge_outside_corner_m;
         d["arm_line_offset_plus_m"] = g.arm_line_offset_m(1);
         d["arm_line_offset_minus_m"] = g.arm_line_offset_m(-1);
     } catch (const std::exception& e) {

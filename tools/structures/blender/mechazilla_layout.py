@@ -8,8 +8,8 @@ mesh nodes, one material each.
 Chopstick frame: the common hinge axis at the origin, the bearing piece along +X, +Y toward the catch axis (the game mirrors
 the -across arm), strip top Z = 0 (the plane the catch pins land on). The corner lies off the catch line, so the two arms'
 roots differ: `chopstick(detail, side)`, everything beyond the root is the same at `arm_line_offset`.
-Carriage frame (also the rails'): X toward the pad, Y = -across, Z up, origin on the common hinge axis (the tower box's corner
-toward the mount, physics `[site.tower]`) in the deck plane (carriage offset 0).
+Carriage frame (also the rails'): X toward the pad, Y = -across, Z up, origin on the common hinge axis (outside the tower box's
+corner toward the mount, physics `[site.tower]`) in the deck plane (carriage offset 0).
 QD arm frame: X along the arm toward the catch axis, Y left of it, Z up, origin on the swing axis at the tip deck's height.
 """
 from __future__ import annotations
@@ -29,11 +29,12 @@ def _member(node, kind, size, p0, p1, size_y=None):
 
 
 def pivot_site(t: dict) -> tuple:
-    """The common hinge axis in (along the pad -> tower line, across): the physics box's corner toward the mount, as core
-    TowerGeometry::hinge_pivot. `t` is a `[site.tower]` table."""
+    """The common hinge axis in (along the pad -> tower line, across): `hinge_outside_corner_m` outside the physics box's corner
+    toward the mount, on its outward diagonal, as core TowerGeometry::hinge_pivot. `t` is a `[site.tower]` table."""
     yaw = math.radians(t["plan_yaw_deg"])
-    c, s, half = math.cos(yaw), math.sin(yaw), 0.5 * t["width_m"]
-    return (t["distance_m"] - half * (c + s), -half * (c - s))
+    c, s = math.cos(yaw), math.sin(yaw)
+    reach = 0.5 * t["width_m"] + t["hinge_outside_corner_m"] / math.sqrt(2.0)
+    return (t["distance_m"] - reach * (c + s), -reach * (c - s))
 
 
 def arm_line_offset(t: dict, side: float) -> float:
@@ -186,16 +187,20 @@ def _unit_axes(detail: dict):
 
 
 def tower_corner(detail: dict) -> dict:
-    """The box corner toward the mount (the frame's origin), the face axes and the face width W (physics box)."""
+    """The box corner toward the mount (the frame's origin is the hinge axis outside it), the face axes and the face width W (physics box)."""
     ex, ey = _unit_axes(detail)
-    return {"c": (0.0, 0.0), "ex": ex, "ey": ey, "w": detail["site_tower"]["width_m"]}
+    back = detail["site_tower"]["hinge_outside_corner_m"] / math.sqrt(2.0)
+    return {"c": (back * (ex[0] + ey[0]), back * (ex[1] + ey[1])), "ex": ex, "ey": ey, "w": detail["site_tower"]["width_m"]}
 
 
 def rail_points(detail: dict) -> dict:
-    """Axes (X, Y) of the three rails let into the corners: the hinge corner and both neighbours. The rear corner has none."""
+    """Axes (X, Y) of the three rails on the faces, `rail_inboard_m` inboard of the corner edge: the hinge corner and neighbour `b`
+    on the pad-side face (ey, both rails of crop_rail_colleen), neighbour `a` on the other side face (ex). The rear corner has none."""
     g = tower_corner(detail)
-    ex, ey, w = g["ex"], g["ey"], g["w"]
-    return {"corner": g["c"], "a": (w * ex[0], w * ex[1]), "b": (w * ey[0], w * ey[1])}
+    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
+    d = detail["carriage"]["rail_inboard_m"]
+    return {"corner": (cx + d * ey[0], cy + d * ey[1]), "a": (cx + (w - d) * ex[0], cy + (w - d) * ex[1]),
+            "b": (cx + (w - d) * ey[0], cy + (w - d) * ey[1])}
 
 
 def rollers(detail: dict) -> list:
@@ -210,13 +215,30 @@ def collar_levels(detail: dict) -> tuple:
     return k["top_z_m"] - 0.5 * k["collar_chord_m"], k["top_z_m"] - k["collar_gap_m"]
 
 
-def hoist_anchor(detail: dict) -> tuple:
-    """Plan point (X, Y) the hoist cables hang on: the top of the rotary hinge, on the common axis."""
-    return (0.0, 0.0)
+def cable_spread_axis(detail: dict) -> tuple:
+    """Plan unit vector (X, Y) from one hoist cable group to the other: across the corner's outward diagonal."""
+    ex, ey = _unit_axes(detail)
+    return ((ey[0] - ex[0]) / math.sqrt(2.0), (ey[1] - ex[1]) / math.sqrt(2.0))
+
+
+def hoist_cables(detail: dict) -> list:
+    """Plan points (X, Y) of the vertical hoist cables: two groups either side of the sheave block, the load centred on the axis.
+    Inside a group the cables stand along the outward diagonal."""
+    k = detail["carriage"]
+    t = cable_spread_axis(detail)
+    n = (-t[1], t[0])
+    per_group = round(k["cable_count"] / 2)
+    out = []
+    for sign in (-1.0, 1.0):
+        for i in range(per_group):
+            lateral = sign * 0.5 * k["cable_group_spacing_m"]
+            along = (i - 0.5 * (per_group - 1)) * k["cable_spacing_m"]
+            out.append((lateral * t[0] + along * n[0], lateral * t[1] + along * n[1]))
+    return out
 
 
 def rails(detail: dict) -> list:
-    """Static corner rails of the carriage: three vertical boxes from the plinth top to the lattice top (carriage frame, offset 0)."""
+    """Static rails of the carriage: three vertical boxes from the plinth top to the lattice top (carriage frame, offset 0)."""
     k, t = detail["carriage"], detail["site_tower"]
     z0 = detail["tower"]["plinth"]["height_m"] - t["catch_height_m"]
     z1 = detail["tower"]["lattice_height_m"] - t["catch_height_m"]
@@ -225,9 +247,10 @@ def rails(detail: dict) -> list:
 
 
 def carriage_faces(detail: dict) -> list:
-    """(from rail, to rail, face direction, other axis) of the two side faces the collars wrap."""
-    g, rp = tower_corner(detail), rail_points(detail)
-    return [(rp["corner"], rp["a"], g["ex"], g["ey"]), (rp["corner"], rp["b"], g["ey"], g["ex"])]
+    """(from corner, to neighbour corner, face direction, other axis) of the two side faces the collars wrap."""
+    g = tower_corner(detail)
+    (cx, cy), ex, ey, w = g["c"], g["ex"], g["ey"], g["w"]
+    return [(g["c"], (cx + w * ex[0], cy + w * ex[1]), ex, ey), (g["c"], (cx + w * ey[0], cy + w * ey[1]), ey, ex)]
 
 
 def carriage(detail: dict) -> list:
@@ -263,6 +286,13 @@ def carriage(detail: dict) -> list:
             b = tuple(p0[j] + (p1[j] - p0[j]) * (i + 1) / n for j in range(2))
             lo, hi = (a, b) if i % 2 == 0 else (b, a)
             tube("frame", 0.3, at(lo, z_lo), at(hi, z_hi))
+    # Horizontal struts at both collar levels from the axis back to the corner and a little along both faces.
+    c0 = g["c"]
+    reach = k["rail_inboard_m"]
+    for z in (z_up, z_lo):
+        tube("frame", chord, (0.0, 0.0, z), at(c0, z))
+        for u in (ex, ey):
+            tube("frame", 0.6 * chord, (0.0, 0.0, z), at((c0[0] + reach * u[0], c0[1] + reach * u[1]), z))
     # The rotary hinge: one column on the common axis, from the arms' foot to the top; the 6 rollers on the rails.
     tube("frame", k["hinge_column_m"], (0.0, 0.0, -detail["chopstick"]["foot_depth_m"]), (0.0, 0.0, top))
     for x, y, z, _ in rollers(detail):
@@ -292,19 +322,16 @@ def carriage(detail: dict) -> list:
         y = sign * k["actuator_anchor_y_m"]
         tube("hardware", k["actuator_barrel_m"] * 3.0, (k["actuator_anchor_x_m"] - 1.2, y, -k["actuator_anchor_depth_m"]),
              (k["actuator_anchor_x_m"] + 0.4, y, -k["actuator_anchor_depth_m"]))
-    # The sheave block above the hinge, outside the faces (its tangent is the common axis): the hoist cables come straight
-    # down past it onto the hinge's top (carriage photo 2025-12: worker for scale; statics: user 2026-10-31).
+    # The sheave block above the hinge, on the common axis: the two hoist cable groups come straight down either side of it
+    # onto a crossbeam on the hinge's top (carriage photo 2025-12: worker for scale; crop_rail_colleen; statics: user 2026-10-31).
     d, wd = k["drum_diameter_m"], k["drum_width_m"]
-    nx, ny = -(ex[0] + ey[0]), -(ex[1] + ey[1])
-    nl = math.hypot(nx, ny)
-    nx, ny = nx / nl, ny / nl
+    tx, ty = cable_spread_axis(detail)
     z_d = top + k["drum_gap_m"] + d / 2.0
-    centre = (rp["corner"][0] + 0.5 * d * nx, rp["corner"][1] + 0.5 * d * ny)
-    tx, ty = -ny, nx
-    tube("frame", d, (centre[0] - 0.5 * wd * tx, centre[1] - 0.5 * wd * ty, z_d),
-         (centre[0] + 0.5 * wd * tx, centre[1] + 0.5 * wd * ty, z_d))
-    tube("frame", chord, at(centre, top), at(centre, z_d))
-    tube("frame", chord, at(rp["corner"], z_up), at(centre, top))
+    tube("frame", d, (-0.5 * wd * tx, -0.5 * wd * ty, z_d), (0.5 * wd * tx, 0.5 * wd * ty, z_d))
+    tube("frame", 0.6 * chord, (0.0, 0.0, top), (0.0, 0.0, z_d))
+    tube("frame", chord, at(c0, z_up), (0.0, 0.0, top))
+    beam = 0.5 * k["cable_group_spacing_m"] + 0.3
+    rect("frame", (-beam * tx, -beam * ty, top), (beam * tx, beam * ty, top), 0.6, 0.4)
     return ms
 
 
