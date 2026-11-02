@@ -27,6 +27,7 @@ func _initialize() -> void:
 			and ModelNotice.text_for("none") == "" and ModelNotice.label("") == null, "notice texts: stale / missing / none")
 	var no_snapshot_id := _view(snapshot, "")
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
+	_check_other_model_vehicles(snapshot)
 	var models := VehicleModels.load_for(VEHICLE)
 	if models.is_empty():
 		print("  (no models: model cases skipped; run python tools/structures/build_models.py --vehicle %s)" % VEHICLE)
@@ -52,6 +53,57 @@ func _initialize() -> void:
 		view.free()
 	print("VEHICLE VIEW TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
+
+
+## The model vehicles other than the Starship (Falcon 9, Crew Dragon, ISS): with no manifest, or a model set older than its
+## sources, load_for returns {} with exactly one log line and the view shows its cylinders. Runs on a scratch repo folder
+## (VehicleModels.root_override) so the real data/ is not touched.
+func _check_other_model_vehicles(snapshot: Dictionary) -> void:
+	for id in ["falcon9_block5", "crew_dragon", "iss"]:
+		_check(VehicleModels.MODEL_VEHICLE_IDS.has(id), "%s is a model vehicle" % id)
+	_check(VehicleModels.MODEL_VEHICLE_IDS.has(VEHICLE) and not VehicleModels.MODEL_VEHICLE_IDS.has("starship_tanker"),
+			"the Starship is a model vehicle, the tanker is not")
+	var scratch := OS.get_user_data_dir().path_join("vehicle_view_test_%d" % OS.get_process_id())
+	for id in ["falcon9_block5", "crew_dragon"]:
+		VehicleModels.clear_cache()
+		VehicleModels.root_override = scratch
+		DirAccess.make_dir_recursive_absolute(scratch.path_join("data/models"))
+		DirAccess.make_dir_recursive_absolute(scratch.path_join("config/vehicles/detail"))
+		var lines := VehicleModels.log_count
+		_check(VehicleModels.load_for(id).is_empty() and VehicleModels.load_for(id).is_empty(), "%s: no manifest: {}" % id)
+		var view := _view(snapshot, id)
+		_check(VehicleModels.log_count - lines == 1, "%s: no manifest: exactly one log line (%d)" % [id, VehicleModels.log_count - lines])
+		_check(_cylinders(view) == 3 and _count(view, "MultiMeshInstance3D") == 0, "%s: no manifest: cylinders" % id)
+		_check(VehicleModels.fallback_reason(id) == "missing", "%s: no manifest: reason missing" % id)
+		# A model set older than its detail file: the manifest first, the source one clock second later.
+		VehicleModels.clear_cache()
+		VehicleModels.root_override = scratch
+		DirAccess.make_dir_recursive_absolute(scratch.path_join("data/models").path_join(id))
+		var manifest := FileAccess.open(scratch.path_join("data/models").path_join(id).path_join("manifest.json"), FileAccess.WRITE)
+		manifest.store_string("{}")
+		manifest.close()
+		OS.delay_msec(1100)  # get_modified_time has a resolution of 1 s
+		var detail := FileAccess.open(scratch.path_join("config/vehicles/detail/%s.toml" % id), FileAccess.WRITE)
+		detail.store_string("# newer than the models\n")
+		detail.close()
+		lines = VehicleModels.log_count
+		_check(VehicleModels.load_for(id).is_empty() and VehicleModels.load_for(id).is_empty(), "%s: stale models: {}" % id)
+		var stale := _view(snapshot, id)
+		_check(VehicleModels.log_count - lines == 1, "%s: stale models: exactly one log line (%d)" % [id, VehicleModels.log_count - lines])
+		_check(_cylinders(stale) == 3 and _count(stale, "MultiMeshInstance3D") == 0, "%s: stale models: cylinders" % id)
+		_check(VehicleModels.fallback_reason(id) == "stale", "%s: stale models: reason stale" % id)
+		_check(stale.find_children("ModelNotice", "Label3D", true, false).size() == 1, "%s: stale models: German notice" % id)
+		# Fresh manifest but no model files defined for the vehicle yet (stub): cylinders, one line, no crash.
+		VehicleModels.clear_cache()
+		VehicleModels.root_override = scratch
+		manifest = FileAccess.open(scratch.path_join("data/models").path_join(id).path_join("manifest.json"), FileAccess.WRITE)
+		manifest.store_string("{}")
+		manifest.close()
+		lines = VehicleModels.log_count
+		_check(VehicleModels.load_for(id).is_empty() and VehicleModels.log_count - lines == 1,
+				"%s: fresh manifest, no generated files yet: {} with one log line" % id)
+	VehicleModels.clear_cache()  # also resets root_override
+	OS.move_to_trash(scratch)
 
 
 func _check_models(stages: Array, snapshot: Dictionary, models: Dictionary) -> void:

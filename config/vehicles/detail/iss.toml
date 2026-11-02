@@ -1,0 +1,4 @@
+# Visual detail of iss (International Space Station, docking rings): what the physics does not need.
+# STUB (plan 2026-11-02-falcon-dragon-iss-models, Task 2): no content yet, the generators and their tables come with
+# the ISS tasks. Placement and size come from config/vehicles/iss.toml; this file never repeats them.
+# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.

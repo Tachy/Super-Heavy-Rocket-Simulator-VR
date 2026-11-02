@@ -41,9 +41,18 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   housing above the gimbal.
 
 ## Game side (`game/vehicle/vehicle_models.gd`, `vehicle_view.gd`)
-- `VehicleModels.load_for(vehicle_id)` -> `{}` (cylinders, one log line) unless the vehicle is `starship_block3`, the manifest and
-  all glTFs exist and are newer than the detail file, the vehicle config and the generator scripts. Result cached per run.
-  The prototype switch is a named constant (`PROTOTYPE_VEHICLE_ID`), like Pad B's.
+- `VehicleModels.load_for(vehicle_id)` -> `{}` (cylinders, one log line) unless the vehicle is in `MODEL_VEHICLE_IDS`
+  (`starship_block3`, `falcon9_block5`, `crew_dragon`, `iss`), the manifest and all glTFs of its `MODEL_FILES` entry exist and
+  are newer than the detail file, the vehicle config and its `SOURCE_SCRIPTS` / `SOURCE_BAKERS`. Result cached per run. The
+  Falcon 9, Crew Dragon and ISS have empty file lists until their generators exist (plan 2026-11-02): a fresh manifest
+  without files, a missing or a stale one all give `{}` + one log line + cylinders (reason "missing" / "stale": the German
+  notice is shown). Tests count lines (`VehicleModels.log_count`) and run on a scratch repo folder (`root_override`).
+- Pipeline for several vehicles: `tools/structures/blender/generators.toml` lists per vehicle the `kind` (`starship`: the
+  full spec of `vehicle_spec.load_starship`; `generic`: vehicle config + detail file as they are), the hashed helper
+  `scripts`, texture `bakers` and the Blender `generators`. `build_models.py --vehicle <id>` takes everything from it; a
+  vehicle with no generators prints one line, writes nothing, exits 0. The Starship's manifest hash and output are
+  byte-identical to before the table (test `test_starship_hash_is_the_one_of_the_fixed_generator_list`, forced rebuild).
+  The `falcon9_block5`, `crew_dragon`, `iss` detail files are stubs (comments only) until Tasks 3 onward.
 - The snapshot's stage dictionaries carry `vehicle_id` (bindings, `body_stages`): stage ids repeat in the tanker and HLS-launch
   configs (stages taken over), so the id alone cannot tell them apart; a separated part reports `<vehicle>/<stage>` (the part
   before `/` counts). No `vehicle_id` (older snapshot) = cylinders.

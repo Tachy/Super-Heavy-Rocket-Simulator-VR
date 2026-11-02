@@ -24,6 +24,18 @@ ENGINES = ROOT / "config" / "engines"
 
 
 
+GENERATORS_TOML = Path(__file__).resolve().parent / "blender" / "generators.toml"
+
+
+def generator_table(vehicle_id: str, path: Path = GENERATORS_TOML) -> dict:
+    """The vehicle's row of blender/generators.toml: kind, scripts, bakers, generators."""
+    with open(path, "rb") as f:
+        table = tomllib.load(f)
+    if vehicle_id not in table:
+        raise VehicleSpecError(f"{vehicle_id}: no entry in {path.name} (known: {', '.join(sorted(table))})")
+    return table[vehicle_id]
+
+
 class VehicleSpecError(ValueError):
     """The detail file misses a key or has a value of the wrong type or unit."""
 
@@ -161,6 +173,24 @@ def drawn_hinge(flap: dict, kind_detail: dict, profile: hull_profile.Profile) ->
 
 
 def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
+    """The spec of `vehicle_id`: the Starship's full one, or for a "generic" vehicle (generators.toml) its stages' size and
+    the detail file as it is (its tables are validated by the generators that come with it)."""
+    if generator_table(vehicle_id)["kind"] == "generic":
+        return load_generic(vehicle_id, vehicles_dir)
+    return load_starship(vehicle_id, vehicles_dir, engines_dir)
+
+
+def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
+    with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
+        vehicle = tomllib.load(f)
+    with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:
+        detail = tomllib.load(f)
+    stages = {s["id"]: {"length_m": float(s["length_m"]), "diameter_m": float(s["diameter_m"])}
+              for s in vehicle.get("stage", []) if "length_m" in s and "diameter_m" in s}
+    return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail}
+
+
+def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
     with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
         vehicle = tomllib.load(f)
     with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:

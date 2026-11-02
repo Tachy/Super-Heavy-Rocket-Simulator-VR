@@ -6,12 +6,22 @@ class_name VehicleModels
 ## "frame"). The poses below are body coordinates relative to the stage's base; the stage node carries the one
 ## permutation to render axes (body_to_render, the cyclic permutation of Frames.to_render).
 
-## Prototype: only this vehicle has models. A named constant, not a config key, until the full build.
-const PROTOTYPE_VEHICLE_ID := "starship_block3"
+## The vehicles that have detail models (a named list, not a config key, like Pad B's). The others keep their cylinders.
+## A vehicle on the list whose models are missing or stale also keeps them (one log line); the Falcon 9, Crew Dragon and
+## ISS have no model files yet, their generators come with later tasks (tools/structures/blender/generators.toml).
+static var MODEL_VEHICLE_IDS := PackedStringArray(["starship_block3", "falcon9_block5", "crew_dragon", "iss"])
 const MANIFEST := "manifest.json"
-const MODEL_FILES: Array[String] = ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"]
-const SOURCE_SCRIPTS: Array[String] = ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py",
-		"gen_engine.py"]
+## Per vehicle: the glTF files the loader needs (no extension) and the sources whose change makes the set stale
+## (tools/structures/blender/ scripts and tools/structures/ bakers); keep in step with generators.toml.
+const MODEL_FILES := {
+	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
+	"falcon9_block5": [], "crew_dragon": [], "iss": [],
+}
+const SOURCE_SCRIPTS := {
+	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
+	"falcon9_block5": [], "crew_dragon": [], "iss": [],
+}
+const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": []}
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
 const ENGINE_FILE := {false: "raptor", true: "rvac"}
 const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
@@ -53,17 +63,21 @@ static var _reasons: Dictionary = {}
 static var _cache: Dictionary = {}
 ## Reason of the last failed glTF load (set by _meshes_of), for the fallback log line.
 static var _load_error := ""
+## Tests: a scratch repo folder (data/, config/ inside) instead of the real one; clear_cache resets it.
+static var root_override := ""
+## Number of log lines this class printed (tests assert "exactly one line" per fallback).
+static var log_count := 0
 
 
 ## {} or {"manifest": Dictionary, "hulls": {stage_id: {node: Mesh}}, "flap": {"fwd"|"aft": {node: Mesh}},
 ## "grid_fin": {node: Mesh}, "engine": {false|true: Mesh}, "materials": {"steel"|"booster"|"ship"|"flap": ShaderMaterial}} (the
 ## engine meshes merged to one multi-surface mesh).
 static func load_for(vehicle_id: String) -> Dictionary:
-	if vehicle_id != PROTOTYPE_VEHICLE_ID:
+	if not MODEL_VEHICLE_IDS.has(vehicle_id):
 		_reasons[vehicle_id] = "none"
 		if vehicle_id != "" and not _logged.has(vehicle_id):
 			_logged[vehicle_id] = true
-			print("VehicleModels: %s has no models (cylinders by design)" % vehicle_id)
+			_say("VehicleModels: %s has no models (cylinders by design)" % vehicle_id)
 		return {}
 	if not _cache.has(vehicle_id):
 		_cache[vehicle_id] = _load(vehicle_id)  # a failure is cached too: the view asks again whenever it rebuilds
@@ -75,18 +89,30 @@ static func clear_cache() -> void:
 	_cache.clear()
 	_logged.clear()
 	_reasons.clear()
+	root_override = ""
+
+
+static func _say(line: String) -> void:
+	log_count += 1
+	print(line)
+
+
+static func _repo_dir() -> String:
+	return root_override if root_override != "" else Paths.repo_dir()
 
 
 static func _load(vehicle_id: String) -> Dictionary:
-	var model_dir := Paths.data_dir().path_join("models").path_join(vehicle_id)
+	var model_dir := _repo_dir().path_join("data/models").path_join(vehicle_id)
 	var missing := _missing_or_stale(vehicle_id, model_dir)
 	if missing != "":
 		return _fallback(vehicle_id, missing)
+	if (MODEL_FILES[vehicle_id] as Array).is_empty():  # fresh manifest, but this vehicle's generators do not exist yet
+		return _fallback(vehicle_id, "no model files defined for this vehicle yet")
 	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(model_dir.path_join(MANIFEST)))
 	if not (manifest is Dictionary and manifest.has("flaps") and manifest.has("engines")):
 		return _fallback(vehicle_id, "manifest unreadable")
 	var parts := {}
-	for file: String in MODEL_FILES:
+	for file: String in MODEL_FILES[vehicle_id]:
 		parts[file] = _meshes_of(model_dir.path_join(file + ".gltf"))
 		if (parts[file] as Dictionary).is_empty():
 			return _fallback(vehicle_id, _load_error)
@@ -211,7 +237,7 @@ static func _steel_map(info: Dictionary, model_dir: String, vehicle_id: String) 
 	if image == null:
 		if not _logged.has(vehicle_id + "/steel_map"):
 			_logged[vehicle_id + "/steel_map"] = true
-			print("VehicleModels: %s has no steel map (%s): plain steel" % [vehicle_id, path.get_file()])
+			_say("VehicleModels: %s has no steel map (%s): plain steel" % [vehicle_id, path.get_file()])
 		return null
 	image.convert(Image.FORMAT_RGBA8)
 	image.generate_mipmaps()
@@ -229,7 +255,7 @@ static func _tile_maps(info: Dictionary, model_dir: String, vehicle_id: String) 
 		if image == null:
 			if not _logged.has(vehicle_id + "/tile_maps"):
 				_logged[vehicle_id + "/tile_maps"] = true
-				print("VehicleModels: %s has no tile maps (%s): plain dark tiles" % [vehicle_id, path.get_file()])
+				_say("VehicleModels: %s has no tile maps (%s): plain dark tiles" % [vehicle_id, path.get_file()])
 			return {}
 		image.convert(Image.FORMAT_RGBA8)
 		if key == "patch":
@@ -252,7 +278,7 @@ static func _fallback(vehicle_id: String, reason: String) -> Dictionary:
 	_reasons[vehicle_id] = "stale" if reason.begins_with("models older") else "missing"
 	if not _logged.has(vehicle_id):
 		_logged[vehicle_id] = true
-		print("VehicleModels: %s keeps its cylinders (%s; run python tools/structures/build_models.py --vehicle %s)"
+		_say("VehicleModels: %s keeps its cylinders (%s; run python tools/structures/build_models.py --vehicle %s)"
 				% [vehicle_id, reason, vehicle_id])
 	return {}
 
@@ -262,17 +288,17 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	var manifest := model_dir.path_join(MANIFEST)
 	if not FileAccess.file_exists(manifest):
 		return "no models in " + model_dir
-	for file: String in MODEL_FILES:
+	for file: String in MODEL_FILES[vehicle_id]:
 		for extension in [".gltf", ".bin"]:
 			if not FileAccess.file_exists(model_dir.path_join(file + extension)):
 				return "model file %s missing" % (file + extension)
 	var built := FileAccess.get_modified_time(manifest)
-	var sources: Array[String] = [Paths.config_dir().path_join("vehicles/detail/%s.toml" % vehicle_id),
-			Paths.config_dir().path_join("vehicles/%s.toml" % vehicle_id)]
-	for script in SOURCE_SCRIPTS:
-		sources.append(Paths.repo_dir().path_join("tools/structures/blender").path_join(script))
-	sources.append(Paths.repo_dir().path_join("tools/structures/hull_textures.py"))
-	sources.append(Paths.repo_dir().path_join("tools/structures/hull_tiles.py"))
+	var sources: Array[String] = [_repo_dir().path_join("config/vehicles/detail/%s.toml" % vehicle_id),
+			_repo_dir().path_join("config/vehicles/%s.toml" % vehicle_id)]
+	for script: String in SOURCE_SCRIPTS[vehicle_id]:
+		sources.append(_repo_dir().path_join("tools/structures/blender").path_join(script))
+	for baker: String in SOURCE_BAKERS[vehicle_id]:
+		sources.append(_repo_dir().path_join("tools/structures").path_join(baker))
 	for path in sources:
 		if FileAccess.file_exists(path) and FileAccess.get_modified_time(path) > built:
 			return "models older than " + path.get_file()

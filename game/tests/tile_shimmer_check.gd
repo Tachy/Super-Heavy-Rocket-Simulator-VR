@@ -132,7 +132,7 @@ func _run() -> void:
 ## is the sampling error alone (the shimmer).
 func _set_scale(scale: float) -> void:
 	root.scaling_3d_scale = scale
-	for material: ShaderMaterial in VehicleModels.load_for(VehicleModels.PROTOTYPE_VEHICLE_ID)["materials"].values():
+	for material: ShaderMaterial in VehicleModels.load_for("starship_block3")["materials"].values():
 		material.set_shader_parameter("footprint_scale", scale)
 		if _args.has("set"):  # diagnostics: --set=name:value sets a float shader parameter of the hull materials
 			var kv := String(_args["set"]).split(":")

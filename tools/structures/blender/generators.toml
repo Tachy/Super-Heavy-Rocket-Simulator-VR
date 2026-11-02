@@ -1,0 +1,33 @@
+# Per-vehicle generator table of tools/structures/build_models.py --vehicle <id> (read by the driver with tomllib; the
+# generators themselves run on Blender's Python and never see this file).
+#   kind        "starship": spec by vehicle_spec.load_starship (hull / flap / fin / engine detail tables);
+#               "generic": vehicle config + detail file, no table validation yet (later tasks add their own).
+#   scripts     helper modules in this folder that the generators import (hashed into the manifest, in this order).
+#   bakers      Python texture modules in tools/structures/ (hashed after the scripts, in this order).
+#   generators  Blender scripts, run in this order with --spec <json> --out <dir>.
+# A vehicle with no generators has no models yet: the driver says so and exits 0, the game keeps the cylinders.
+# The game side keeps the matching file lists in game/vehicle/vehicle_models.gd (MODEL_FILES, SOURCE_SCRIPTS).
+
+[starship_block3]
+kind = "starship"
+scripts = ["common.py", "vehicle_common.py", "hull_profile.py"]
+bakers = ["hull_textures", "hull_tiles"]
+generators = ["gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"]
+
+[falcon9_block5]
+kind = "generic"
+scripts = ["common.py", "vehicle_common.py"]
+bakers = []
+generators = []
+
+[crew_dragon]
+kind = "generic"
+scripts = ["common.py", "vehicle_common.py"]
+bakers = []
+generators = []
+
+[iss]
+kind = "generic"
+scripts = ["common.py", "vehicle_common.py"]
+bakers = []
+generators = []

@@ -39,7 +39,6 @@ GENERATORS = ("gen_profiles.py", "gen_chopstick.py", "gen_carriage.py", "gen_rai
 OUTPUTS = ("profiles.gltf", "chopstick.gltf", "chopstick_minus.gltf", "carriage.gltf", "rails.gltf", "qd_arm.gltf", "mount.gltf", "trench.gltf",
            mount_textures.FILE_NAME, mount_textures.CONCRETE_FILE_NAME, mount_textures.APRON_MASK_FILE_NAME)
 MANIFEST = "manifest.json"
-VEHICLE_GENERATORS = ("gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py")
 VEHICLE_FIXED_OUTPUTS = ("booster.gltf", "ship.gltf", "flap_fwd.gltf", "flap_aft.gltf", "grid_fin.gltf",
                          hull_textures.FILE_NAME, *hull_tiles.FILES.values())
 VEHICLE_FRAME = ("Blender axes in glTF (export_yup off) = the config's body frame: X station axis (station 0 at X = 0, "
@@ -153,12 +152,17 @@ def build(config: Path = DEFAULT_CONFIG, out: Path = DEFAULT_OUT, force: bool = 
     return 0
 
 
-def vehicle_hash(spec_text: str, version: str) -> str:
+def vehicle_sources(table: dict) -> list:
+    """Files hashed into a vehicle's manifest, in order: helper scripts, texture bakers, generators (generators.toml)."""
+    return [*(SCRIPT_DIR / s for s in table["scripts"]), *(SCRIPT_DIR.parent / f"{b}.py" for b in table["bakers"]),
+            *(SCRIPT_DIR / g for g in table["generators"])]
+
+
+def vehicle_hash(spec_text: str, version: str, table: dict) -> str:
     h = hashlib.sha256()
     h.update(version.encode())
     h.update(spec_text.encode())
-    for p in [SCRIPT_DIR / "common.py", SCRIPT_DIR / "vehicle_common.py", SCRIPT_DIR / "hull_profile.py", Path(hull_textures.__file__),
-              Path(hull_tiles.__file__), *(SCRIPT_DIR / g for g in VEHICLE_GENERATORS)]:
+    for p in vehicle_sources(table):
         h.update(p.name.encode())
         h.update(p.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()
@@ -202,10 +206,14 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     if exe is None:
         print("build_models: Blender not found (set STARSIM_BLENDER or install Blender 3.4); no models generated")
         return 0
+    table = vehicle_spec.generator_table(vehicle_id)
     spec = vehicle_spec.load(vehicle_id, vehicles_dir)
+    if not table["generators"]:
+        print(f"build_models: {vehicle_id} has no generators yet; no models generated (the game keeps its cylinders)")
+        return 0
     spec_text = vehicle_spec.dumps(spec)
     version = blender_version(exe)
-    digest = vehicle_hash(spec_text, version)
+    digest = vehicle_hash(spec_text, version, table)
     outputs = vehicle_outputs(spec)
     try:
         current = json.loads((out / MANIFEST).read_text(encoding="utf-8")).get("input_hash") == digest
@@ -225,10 +233,10 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     try:
         steel_map = hull_textures.write(staging, spec)
         tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
-        for gen in VEHICLE_GENERATORS:
+        for gen in table["generators"]:
             cmd = blender_command(exe, SCRIPT_DIR / gen, "--spec", str(spec_file), "--out", str(staging))
             res = subprocess.run(cmd, capture_output=True, text=True)
-            missing = [f for f in outputs if not (staging / f).is_file()] if gen == VEHICLE_GENERATORS[-1] else []
+            missing = [f for f in outputs if not (staging / f).is_file()] if gen == table["generators"][-1] else []
             if res.returncode != 0 or missing:
                 sys.stderr.write(res.stdout[-2000:] + res.stderr[-2000:])
                 print(f"build_models: {gen} failed (exit {res.returncode}, missing {missing}); {out} left as it was")

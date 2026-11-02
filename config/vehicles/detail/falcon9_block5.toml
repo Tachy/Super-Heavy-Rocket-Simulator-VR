@@ -1,0 +1,4 @@
+# Visual detail of falcon9_block5 (Falcon 9 Block 5 with interstage and landing legs): what the physics does not need.
+# STUB (plan 2026-11-02-falcon-dragon-iss-models, Task 2): no content yet, the generators and their tables come with
+# Task 3 onward. Placement and size come from config/vehicles/falcon9_block5.toml; this file never repeats them.
+# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.

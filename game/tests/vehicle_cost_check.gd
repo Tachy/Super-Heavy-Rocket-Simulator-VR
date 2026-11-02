@@ -128,7 +128,7 @@ func _show(view: VehicleView, variant: String) -> void:
 					_original_materials[node] = node.material_override
 					node.material_override = view._steel
 		"cyl":
-			VehicleModels._cache[VehicleModels.PROTOTYPE_VEHICLE_ID] = {}
+			VehicleModels._cache["starship_block3"] = {}
 			view._built_signature = ""  # the view's next update rebuilds without models
 		"hidden":
 			view._stage_root.visible = false
