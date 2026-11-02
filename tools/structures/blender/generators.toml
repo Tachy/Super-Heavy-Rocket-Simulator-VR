@@ -1,7 +1,9 @@
 # Per-vehicle generator table of tools/structures/build_models.py --vehicle <id> (read by the driver with tomllib; the
 # generators themselves run on Blender's Python and never see this file).
 #   kind        "starship": spec by vehicle_spec.load_starship (hull / flap / fin / engine detail tables);
+#               "falcon9": spec by vehicle_spec.load_falcon9 (first stage with interstage, legs);
 #               "generic": vehicle config + detail file, no table validation yet (later tasks add their own).
+#   outputs     files every generator together must write (not the Starship: vehicle_outputs knows its fixed set).
 #   scripts     helper modules in this folder that the generators import (hashed into the manifest, in this order).
 #   bakers      Python texture modules in tools/structures/ (hashed after the scripts, in this order).
 #   generators  Blender scripts, run in this order with --spec <json> --out <dir>.
@@ -15,10 +17,11 @@ bakers = ["hull_textures", "hull_tiles"]
 generators = ["gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"]
 
 [falcon9_block5]
-kind = "generic"
+kind = "falcon9"
 scripts = ["common.py", "vehicle_common.py"]
 bakers = []
-generators = []
+generators = ["gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "gen_engine.py"]
+outputs = ["falcon9_stage1.gltf", "falcon9_grid_fin.gltf", "falcon9_leg.gltf", "merlin.gltf"]
 
 [crew_dragon]
 kind = "generic"

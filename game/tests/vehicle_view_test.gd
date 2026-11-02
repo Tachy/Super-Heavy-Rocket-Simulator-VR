@@ -28,6 +28,7 @@ func _initialize() -> void:
 	var no_snapshot_id := _view(snapshot, "")
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
 	_check_other_model_vehicles(snapshot)
+	_check_falcon9()
 	var models := VehicleModels.load_for(VEHICLE)
 	if models.is_empty():
 		print("  (no models: model cases skipped; run python tools/structures/build_models.py --vehicle %s)" % VEHICLE)
@@ -53,6 +54,83 @@ func _initialize() -> void:
 		view.free()
 	print("VEHICLE VIEW TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
+
+
+## Falcon 9 first stage: the leg rig against the contact physics' points and the stowed envelope, no flip at mid stroke, the view's
+## nodes on a stack and alone. Rig and meshes from the generated models; without them the case fails: the models are a build step
+## of this vehicle (python tools/structures/build_models.py --vehicle falcon9_block5).
+func _check_falcon9() -> void:
+	VehicleModels.clear_cache()
+	var models := VehicleModels.load_for("falcon9_block5")
+	if models.is_empty():
+		_check(false, "falcon9_block5: models generated (%s)" % VehicleModels.fallback_reason("falcon9_block5"))
+		return
+	_check(VehicleModels.notice("falcon9_block5") == "", "falcon9_block5: no missing-model notice")
+	var path := ProjectSettings.globalize_path("res://").path_join("../config/vehicles/falcon9_block5.toml")
+	var first: Dictionary = TomlLite.parse("[[stage]]" + FileAccess.get_file_as_string(path).split("[[stage]]", false)[1])
+	var legs: Dictionary = first["stage"][0]["landing_legs"]
+	var hull_radius: float = first["stage"][0]["diameter_m"] * 0.5
+	var rig: Dictionary = models["manifest"]["leg"]
+	var foot_local := Vector3(float(rig["length_m"]), 0.0, 0.0)
+	var envelope := hull_radius + float(rig["stowed_thickness_m"])
+	var vertices: PackedVector3Array = (models["leg"]["leg_main"] as Mesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	for azimuth: float in legs["azimuths_deg"]:
+		# deployment 0: inside the hull envelope + the stowed thickness
+		var stowed: Transform3D = VehicleModels.leg_poses(rig, azimuth, 0.0)["main"]
+		var worst := 0.0
+		for vertex in vertices:
+			var p := stowed * vertex
+			worst = maxf(worst, Vector2(p.y, p.z).length())
+		_check(worst <= envelope + EPS, "leg az %.0f stowed: r %.3f <= %.3f" % [azimuth, worst, envelope])
+		# deployment 1: the foot on the contact physics' point
+		var e_r := _radial(azimuth)
+		var target := Vector3(legs["foot_station_m"], 0.0, 0.0) + e_r * float(legs["footprint_radius_m"])
+		var foot: Vector3 = VehicleModels.leg_poses(rig, azimuth, 1.0)["main"] * foot_local
+		_check(foot.distance_to(target) < 0.05, "leg az %.0f deployed: foot %.3f m from the physics' point" % [azimuth, foot.distance_to(target)])
+		# in between: no flip
+		var from: Vector3 = stowed * foot_local
+		var stroke := from.distance_to(foot)
+		var last := from
+		var largest := 0.0
+		for k in range(1, 21):
+			var now: Vector3 = VehicleModels.leg_poses(rig, azimuth, k * 0.05)["main"] * foot_local
+			largest = maxf(largest, now.distance_to(last))
+			last = now
+		_check(largest <= 0.25 * stroke, "leg az %.0f: largest step %.2f m of the %.2f m stroke" % [azimuth, largest, stroke])
+		# the pusher joins its anchor and its point on the leg at every deployment
+		for d: float in [0.0, 0.5, 1.0]:
+			var poses := VehicleModels.leg_poses(rig, azimuth, d)
+			var pusher: Transform3D = poses["pusher"]
+			var on_leg: Vector3 = poses["main"] * Vector3(float(rig["pusher_leg_u_m"]), 0.0, 0.0)
+			_check((pusher * Vector3.RIGHT).distance_to(on_leg) < EPS, "leg az %.0f at %.1f: pusher reaches the leg" % [azimuth, d])
+	# The view: stack (fins folded, legs posed from the snapshot, second stage still a cylinder) and the stage alone.
+	var stage_1 := {"id": "first_stage", "base_station_m": 0.0, "length_m": first["stage"][0]["length_m"], "diameter_m": 3.66,
+			"nose_length_m": 0.0, "vehicle_id": "falcon9_block5"}
+	var stage_2 := {"id": "second_stage", "base_station_m": stage_1["length_m"], "length_m": 13.8, "diameter_m": 3.66, "nose_length_m": 0.0,
+			"vehicle_id": "falcon9_block5"}
+	var merlin := {"stage": 0, "position_m": Vector3.ZERO, "direction": Vector3.RIGHT, "firing": true, "throttle": 1.0, "spool": 1.0, "vacuum": false, "auxiliary": false}
+	var mvac := {"stage": 1, "position_m": Vector3(stage_1["length_m"], 0.0, 0.0), "direction": Vector3.RIGHT, "firing": true, "throttle": 1.0, "spool": 1.0, "vacuum": true, "auxiliary": false}
+	var fin := {"station_m": first["stage"][0]["grid_fins"]["station_m"], "azimuth_deg": 45.0, "radius_m": 2.6, "area_m2": 1.8, "deflection_deg": 0.0}
+	var snapshot_legs := {"present": true, "deployment": 0.0, "azimuths_deg": legs["azimuths_deg"]}
+	var view := VehicleView.new()
+	_views.append(view)
+	root.add_child(view)
+	view.sync([stage_1, stage_2], [merlin, mvac], [], [fin], 0.0, snapshot_legs)
+	var node := view.get_child(0).get_node_or_null("stage_first_stage") as Node3D
+	_check(node != null and node.get_node_or_null("interstage") != null and node.get_node_or_null("octaweb") != null, "first stage: hull, interstage, octaweb nodes")
+	_check(_cylinders(view) == 1 and view.find_children("ModelNotice", "Label3D", true, false).is_empty(), "first stage modelled, no notice; the second stage keeps its cylinder")
+	var fin_node := view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
+	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(Vector3.LEFT), "on the stack the fin lies folded, tip toward the base")
+	_check(_plume_top(view, 0).is_equal_approx(Frames.to_render(Vector3.ZERO)), "Merlin plume starts at the exit plane, station 0")
+	_check(is_equal_approx(view.engine_pose(0).origin.x, float(models["manifest"]["engines"]["merlin1d"]["axial_offset_m_by_stage"]["first_stage"])), "Merlin drawn one bell length above the exit plane")
+	snapshot_legs["deployment"] = 1.0
+	view.sync([stage_1], [merlin], [], [fin], 0.0, snapshot_legs)
+	node = view.get_child(0).get_node_or_null("stage_first_stage") as Node3D
+	var leg := node.get_node_or_null("leg_main_0") as Node3D
+	_check(leg != null and leg.transform.is_equal_approx(VehicleModels.leg_poses(rig, float(legs["azimuths_deg"][0]), 1.0)["main"]), "alone, deployment 1: leg posed by the rig")
+	fin_node = view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
+	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(_radial(45.0)), "alone: the fin stands out, hinge radial")
+	VehicleModels.clear_cache()
 
 
 ## The model vehicles other than the Starship (Falcon 9, Crew Dragon, ISS): with no manifest, or a model set older than its

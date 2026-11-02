@@ -7,19 +7,21 @@ class_name VehicleModels
 ## permutation to render axes (body_to_render, the cyclic permutation of Frames.to_render).
 
 ## The vehicles that have detail models (a named list, not a config key, like Pad B's). The others keep their cylinders.
-## A vehicle on the list whose models are missing or stale also keeps them (one log line); the Falcon 9, Crew Dragon and
-## ISS have no model files yet, their generators come with later tasks (tools/structures/blender/generators.toml).
+## A vehicle on the list whose models are missing or stale also keeps them (one log line); the Crew Dragon and ISS have no
+## model files yet, their generators come with later tasks (tools/structures/blender/generators.toml).
 static var MODEL_VEHICLE_IDS := PackedStringArray(["starship_block3", "falcon9_block5", "crew_dragon", "iss"])
 const MANIFEST := "manifest.json"
 ## Per vehicle: the glTF files the loader needs (no extension) and the sources whose change makes the set stale
 ## (tools/structures/blender/ scripts and tools/structures/ bakers); keep in step with generators.toml.
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
-	"falcon9_block5": [], "crew_dragon": [], "iss": [],
+	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "merlin"],
+	"crew_dragon": [], "iss": [],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
-	"falcon9_block5": [], "crew_dragon": [], "iss": [],
+	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "gen_engine.py"],
+	"crew_dragon": [], "iss": [],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": []}
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
@@ -55,6 +57,8 @@ const STEEL_MAP_KINDS: Array[String] = ["booster", "ship"]
 ## Entries of the shader's coverage table arrays.
 const HULL_TABLE_SIZE := 8
 const AZIMUTH_TOLERANCE_DEG := 0.5
+## Painted parts have no rings: a pitch longer than any stage keeps the shader's per-ring tint to one panel.
+const PAINT_RING_PITCH_M := 1000.0
 const STATION_TOLERANCE_M := 0.01
 
 static var _logged: Dictionary = {}
@@ -116,6 +120,16 @@ static func _load(vehicle_id: String) -> Dictionary:
 		parts[file] = _meshes_of(model_dir.path_join(file + ".gltf"))
 		if (parts[file] as Dictionary).is_empty():
 			return _fallback(vehicle_id, _load_error)
+	if vehicle_id == "falcon9_block5":
+		return {
+			"manifest": manifest,
+			"hulls": {"first_stage": parts["falcon9_stage1"]},
+			"flap": {},
+			"grid_fin": parts["falcon9_grid_fin"],
+			"leg": parts["falcon9_leg"],
+			"engine": {false: _merged(parts["merlin"])},
+			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
+		}
 	for engine_file: String in ["raptor", "rvac"]:
 		parts[engine_file] = _merged(parts[engine_file])
 	return {
@@ -133,8 +147,9 @@ static func _load(vehicle_id: String) -> Dictionary:
 ## outer face). Opaque, like every vehicle surface.
 static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: String) -> Dictionary:
 	var materials := {}
-	var steel_map := _steel_map(look.get("steel_map", {}), model_dir, vehicle_id)
-	var tile_maps := _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
+	var no_maps: bool = look.get("no_maps", false)  # a vehicle drawn in plain paint: no baked maps, no log line about them
+	var steel_map: ImageTexture = null if no_maps else _steel_map(look.get("steel_map", {}), model_dir, vehicle_id)
+	var tile_maps: Dictionary = {} if no_maps else _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
 	for key: String in ["steel", "booster", "ship", "flap", "fin_frame", "fin_cells", "fin_band", "dark"]:
 		var material := ShaderMaterial.new()
 		material.shader = HULL_SHADER
@@ -192,6 +207,18 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 			material.set_shader_parameter("belly_azimuth_rad",
 					deg_to_rad(float(look.get("ship_belly_azimuth_deg", 270.0))))
 		materials[key] = material
+	for key: String in look.get("paint", {}):  # plain painted parts (manifest): the hull shader's bare mode, no ring tint
+		var paint: Dictionary = look["paint"][key]
+		var painted := ShaderMaterial.new()
+		painted.shader = HULL_SHADER
+		var albedo: Array = paint["albedo"]
+		painted.set_shader_parameter("mode", 0)
+		painted.set_shader_parameter("ring_pitch_m", PAINT_RING_PITCH_M)
+		painted.set_shader_parameter("steel_albedo", Color(albedo[0], albedo[1], albedo[2]))
+		painted.set_shader_parameter("steel_roughness", float(paint["roughness"]))
+		painted.set_shader_parameter("steel_metallic", float(paint["metallic"]))
+		painted.set_shader_parameter("steel_mottle", 0.0)
+		materials[key] = painted
 	return materials
 
 
@@ -209,7 +236,7 @@ static func engine_material(vacuum: bool, models: Dictionary) -> ShaderMaterial:
 	m.set_shader_parameter("rib_slope", look["rib_slope"])
 	var manifest_look: Dictionary = models["manifest"].get("look", {})
 	var counts: Dictionary = manifest_look.get("rib_counts", {})
-	var engine: Dictionary = models["manifest"]["engines"].get(ENGINE_ID[vacuum], {})
+	var engine: Dictionary = models["manifest"]["engines"].get(engine_id(models, vacuum), {})
 	var depth := -float(engine.get("exit_plane_x_m", -DEFAULT_EXIT_DEPTH_M))
 	m.set_shader_parameter("rib_count", float(counts.get(ENGINE_FILE[vacuum], 0.0)))
 	m.set_shader_parameter("exit_x_m", -depth)
@@ -288,10 +315,6 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	var manifest := model_dir.path_join(MANIFEST)
 	if not FileAccess.file_exists(manifest):
 		return "no models in " + model_dir
-	for file: String in MODEL_FILES[vehicle_id]:
-		for extension in [".gltf", ".bin"]:
-			if not FileAccess.file_exists(model_dir.path_join(file + extension)):
-				return "model file %s missing" % (file + extension)
 	var built := FileAccess.get_modified_time(manifest)
 	var sources: Array[String] = [_repo_dir().path_join("config/vehicles/detail/%s.toml" % vehicle_id),
 			_repo_dir().path_join("config/vehicles/%s.toml" % vehicle_id)]
@@ -302,6 +325,10 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	for path in sources:
 		if FileAccess.file_exists(path) and FileAccess.get_modified_time(path) > built:
 			return "models older than " + path.get_file()
+	for file: String in MODEL_FILES[vehicle_id]:
+		for extension in [".gltf", ".bin"]:
+			if not FileAccess.file_exists(model_dir.path_join(file + extension)):
+				return "model file %s missing" % (file + extension)
 	return ""
 
 
@@ -358,16 +385,31 @@ static func engine_transform(position_m: Vector3, direction: Vector3, base_stati
 ## (manifest, per engine kind; the physics keeps its gimbal at the ship's station 0: docs "Stage interface"). Applied in
 ## one place for the bell pose and the plume. 0 for the booster and without models.
 static func axial_offset_m(models: Dictionary, stage_id: String, vacuum: bool) -> float:
-	if models.is_empty() or stage_id != "ship":
+	if models.is_empty():
 		return 0.0
-	return float(models["manifest"]["engines"][ENGINE_ID[vacuum]]["ship_axial_offset_m"])
+	var entry: Dictionary = models["manifest"]["engines"].get(engine_id(models, vacuum), {})
+	if entry.has("axial_offset_m_by_stage"):
+		return float(entry["axial_offset_m_by_stage"].get(stage_id, 0.0))
+	if stage_id != "ship" or not entry.has("ship_axial_offset_m"):
+		return 0.0
+	return float(entry["ship_axial_offset_m"])
 
 
 ## Exhaust start below the gimbal point along the thrust axis: the model's exit plane, else the former 3 m.
 static func exit_depth_m(models: Dictionary, vacuum: bool) -> float:
 	if models.is_empty():
 		return DEFAULT_EXIT_DEPTH_M
-	return -float(models["manifest"]["engines"][ENGINE_ID[vacuum]]["exit_plane_x_m"])
+	var entry: Dictionary = models["manifest"]["engines"].get(engine_id(models, vacuum), {})
+	return -float(entry["exit_plane_x_m"]) if entry.has("exit_plane_x_m") else DEFAULT_EXIT_DEPTH_M
+
+
+## The manifest's engine id of a snapshot engine kind: its own table (manifest look.engine_ids), else the Starship's. A kind
+## with no drawn model (the Falcon 9's Merlin Vacuum for now) has no manifest entry: callers fall back to the former values.
+static func engine_id(models: Dictionary, vacuum: bool) -> String:
+	var ids: Dictionary = models["manifest"].get("look", {}).get("engine_ids", {})
+	if ids.is_empty():
+		return ENGINE_ID[vacuum]
+	return String(ids.get("vacuum" if vacuum else "sea_level", ""))
 
 
 ## The manifest entry of a snapshot flap (same stage id, hinge azimuth and aft station relative to the stage), or {}.
@@ -411,3 +453,31 @@ static func fin_transform(fin: Dictionary, base_station_m: float, hull_radius_m:
 	var pivot := Vector3(float(fin["station_m"]) - base_station_m, cos(azimuth) * hull_radius_m,
 			sin(azimuth) * hull_radius_m)
 	return Transform3D(around_x * Basis(Vector3.UP, deg_to_rad(float(fin["deflection_deg"]))), pivot)
+
+
+## The folded pose of a fin while another stage stands on its stage (F_ORBCOMM_2, F_Falcon_9_first_stage_in_hangar): panel flat
+## against the hull, hinge on top, tip toward the base. The physics has no fold; a view rule from the snapshot's stage list.
+static func fin_stowed_transform(fin: Dictionary, base_station_m: float, hull_radius_m: float, standoff_m: float) -> Transform3D:
+	var azimuth := deg_to_rad(float(fin["azimuth_deg"]))
+	var e_r := Vector3(0.0, cos(azimuth), sin(azimuth))
+	var tangent := Vector3(0.0, -sin(azimuth), cos(azimuth))
+	return Transform3D(Basis(e_r, Vector3.LEFT, tangent),
+			Vector3(float(fin["station_m"]) - base_station_m, 0.0, 0.0) + e_r * (hull_radius_m + standoff_m))
+
+
+## Rig of a landing leg, a function of the snapshot's deployment only (stage-local body coordinates): {"main": the rigid leg
+## turned about its hinge from the stowed to the deployed angle, "pusher": the tube from the hull anchor to its point on the
+## leg, its +X scaled to that distance}. `rig`: manifest "leg" (generated by vehicle_spec.falcon9_leg).
+static func leg_poses(rig: Dictionary, azimuth_deg: float, deployment: float) -> Dictionary:
+	var azimuth := deg_to_rad(azimuth_deg)
+	var around_x := Basis(Vector3.RIGHT, azimuth)
+	var e_r := Vector3(0.0, cos(azimuth), sin(azimuth))
+	var angle := deg_to_rad(lerpf(float(rig["stowed_angle_deg"]), float(rig["deployed_angle_deg"]), clampf(deployment, 0.0, 1.0)))
+	var hinge := Vector3(float(rig["hinge_station_m"]), 0.0, 0.0) + e_r * float(rig["hinge_radius_m"])
+	var main := Transform3D(around_x * Basis(Vector3.BACK, angle), hinge)
+	var anchor := Vector3(float(rig["pusher_anchor_station_m"]), 0.0, 0.0) + e_r * float(rig["pusher_anchor_radius_m"])
+	var on_leg := main * Vector3(float(rig["pusher_leg_u_m"]), 0.0, 0.0)
+	var along := on_leg - anchor
+	var x := along.normalized()
+	var z := around_x * Vector3.BACK  # the hinge axis: normal to the leg's plane
+	return {"main": main, "pusher": Transform3D(Basis(along, z.cross(x), z), anchor)}

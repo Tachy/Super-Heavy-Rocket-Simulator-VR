@@ -1,4 +1,71 @@
-# Visual detail of falcon9_block5 (Falcon 9 Block 5 with interstage and landing legs): what the physics does not need.
-# STUB (plan 2026-11-02-falcon-dragon-iss-models, Task 2): no content yet, the generators and their tables come with
-# Task 3 onward. Placement and size come from config/vehicles/falcon9_block5.toml; this file never repeats them.
+# Visual detail of falcon9_block5 (first stage with interstage and landing legs): what the physics does not need.
+# Placement and size come from config/vehicles/falcon9_block5.toml; this file never repeats them (tested).
 # Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+# "M4" = the measured reference "SpaceX Falcon 9 and Dragon 2" (Forest Katsch, CC BY 4.0, only measured, nothing shipped:
+# screenshots/falcon9_ref/INDEX.md 5.4); heights there count from the outer Merlins' exit plane = our station 0.
+
+[hull]
+segments = 64                # [E] sagitta 2 mm at R = 1.83 m
+base_station_m = 1.06        # [E] M4: tank / skirt bottom above the exit plane; F_Falcon_9_B1046: bells ~1.1 x exit diameter visible
+interstage_base_m = 41.2     # [S] https://en.wikipedia.org/wiki/Falcon_9 stage without the interstage; rivet joint in F_ORBCOMM_2
+raceway_azimuths_deg = [0.0, 180.0]  # [E] F_Landed_rockets: raceway straight between two fins; the far side from F_ORBCOMM_2
+raceway_width_m = 0.26       # [E] F_Landed_rockets: ~7 % of the hull width
+raceway_height_m = 0.07      # [E] same photo
+raceway_first_m = 2.4        # [E] just above the octaweb cover
+pod_length_m = 0.5           # [E] thruster bump, F_ORBCOMM_2 against the 3.66 m hull
+pod_width_m = 0.4            # [E] same photo
+pod_height_m = 0.14          # [E] same photo
+interstage_wall_m = 0.04     # [E] open top edge, not measured
+
+[octaweb]
+cover_top_m = 2.3            # [E] black aft cover, F_Falcon_9_B1046 (windows row ~1.2 m above the base)
+chamfer_m = 0.12             # [E] same photo
+fitting_length_m = 0.5       # [E] leg clevis block at the rim, same photo against the 0.93 m bell
+fitting_width_m = 0.35       # [E] same photo
+fitting_proud_m = 0.14       # [E] same photo
+
+[engines.merlin1d]
+file = "merlin.gltf"         # [E] model file name
+bell_length_m = 1.7          # [E] exit to gimbal point: throat + chamber, F_Merlin_nozzle against the exit rim
+throat_from_exit_m = 1.25    # [E] same photo
+throat_diameter_m = 0.233    # [E] exit 0.932 m at expansion ratio 16 (https://en.wikipedia.org/wiki/SpaceX_Merlin)
+contour_exponent = 0.65      # [E] bell shape by eye, F_Falcon_9_B1046
+wall_m = 0.012               # [E] not measured
+mount_height_m = 0.5         # [E] hidden inside the skirt
+mount_radius_frac = 0.4      # [E] hidden inside the skirt
+segments = 32                # [E] sagitta 1.1 mm at the rim
+
+[grid_fin]
+chord_m = 1.2                # [E] ~4 ft (INDEX.md section 2, memory); M4 lattice 1.19 m
+span_m = 1.5                 # [E] ~5 ft: with the chord the config's 1.8 m2
+root_chamfer_m = 0.3         # [E] F_Falcon_9_first_stage_in_hangar: root corners cut
+depth_m = 0.2                # [E] M4 0.19 m
+cell_pitch_m = 0.16          # [E] F_Falcon_9_first_stage_in_hangar: ~7 cells over the chord
+wall_m = 0.014               # [E] same photo, thin against the pitch
+rim_m = 0.045                # [E] same photo
+root_gap_m = 0.14            # [E] hinge to the panel, same photo
+pivot_radius_m = 0.16        # [E] hinge housing, same photo against the chord
+pivot_length_m = 0.3         # [E] same photo
+stow_standoff_m = 0.12       # [E] folded panel off the hull, F_ORBCOMM_2
+
+[leg]
+hinge_station_m = 2.2        # [E] M4 lower hinge; the leg's length follows from here to the config's foot
+hinge_radius_m = 1.46        # [E] M4
+stowed_tip_radius_m = 1.9    # [E] leg axis at the tip when stowed: M4 cover r 2.115 less half the tip depth
+stowed_outer_radius_m = 2.1  # [E] outer face when stowed, M4 cover r 2.115
+stowed_thickness_m = 0.55    # [E] proud of the hull at most: M1 r <= 2.38
+root_width_m = 1.6           # [E] F_Falcon_9_B1046: clevis spacing at the base of one leg
+tip_width_m = 0.45           # [E] Starlink 15-25 file 1124 s, leg against the hull width
+tip_depth_m = 0.14           # [E] same frame
+pad_radius_m = 0.5           # [E] same frame
+pad_thickness_m = 0.12       # [E] same frame
+pusher_anchor_station_m = 6.35  # [E] M4 upper strut ring; frame 1124 s: 5.2 m below the leg cover top against M4 4.9 m
+pusher_anchor_radius_m = 2.0 # [E] M4 2.09 m, on the stowed leg's height
+pusher_leg_u_m = 5.5         # [E] along the leg from the hinge: frame 1124 s, the strut meets it about at 60 %
+pusher_radius_m = 0.07       # [E] same frame
+
+[paint]
+hull_albedo = [0.82, 0.82, 0.80]       # [E] white stage, F_ORBCOMM_2, crew13 t2880
+interstage_albedo = [0.04, 0.04, 0.045]  # [E] Block 5 black interstage, crew13 t2880 (40 px of 5.2 px/m: ~7.7 m band)
+octaweb_albedo = [0.05, 0.05, 0.05]    # [E] black aft cover, F_Falcon_9_B1046
+leg_albedo = [0.06, 0.06, 0.065]       # [E] dark carbon legs, Starlink 15-25 file 1124 s

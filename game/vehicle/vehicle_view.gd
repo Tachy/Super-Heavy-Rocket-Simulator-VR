@@ -28,10 +28,13 @@ var _stage_ids: Array[String] = []
 var _engine_slots: Array[Dictionary] = []  # per engine: {"multimesh", "slot", "stage"}
 ## Drawn deflection of every flap for comparison shots (`vehicle_look_shots.gd --flaps`); NAN = the snapshot's. Drawing only.
 static var look_flap_deg := NAN
+## The same for the legs' deployment (`vehicle_look_shots.gd --legs`).
+static var look_leg_deployment := NAN
 
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
 var _engine_poses: Array[Transform3D] = []  # last pose per engine, stage-local body coordinates (headless tests)
+var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "pusher"}
 
 
 func _init() -> void:  # not _ready: sync() may run before the view enters the tree
@@ -47,6 +50,9 @@ func _hull_material(kind: String) -> Material:
 
 ## "ship" / "booster" for a stage's hull node (they carry the steel map), "steel" for every other part.
 func _hull_kind(part: String, stage: Dictionary) -> String:
+	var part_materials: Dictionary = _models["manifest"].get("look", {}).get("part_materials", {})
+	if part_materials.has(part):
+		return part_materials[part]
 	if part == "fin_fairings":
 		return "dark"
 	if part == "hinge_covers":
@@ -65,7 +71,8 @@ func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
 	if not visible and _signature(stages) == _built_signature:
 		return  # nothing to draw: no posing, no plumes (a new stage list is still built, so the next view is right)
 	sync(stages, sim.body_engines(body_index), sim.body_flaps(body_index) if modelled else [],
-			sim.body_grid_fins(body_index) if modelled else [], sim.telemetry(body_index).get("altitude_m", 0.0))
+			sim.body_grid_fins(body_index) if modelled else [], sim.telemetry(body_index).get("altitude_m", 0.0),
+			sim.body_legs(body_index) if modelled else {})
 	if not visible:
 		return
 	var attitude := Basis(sim.body_attitude_gcrf(body_index))
@@ -75,15 +82,16 @@ func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
 
 
 ## The snapshot -> nodes step of update_view (no sim, no placement): rebuilds on a new stage list, then poses the
-## engines, flaps and grid fins of the models and the plumes. `flaps`, `grid_fins`: read only when models are shown.
-func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitude_m: float) -> void:
+## engines, flaps, grid fins and legs of the models and the plumes. `flaps`, `grid_fins`, `legs`: read only when models are shown.
+func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitude_m: float, legs := {}) -> void:
 	var signature := _signature(stages)
 	if signature != _built_signature:
 		_models = VehicleModels.load_for(_vehicle_id(stages))
-		_build(stages, engines, flaps, grid_fins)
+		_build(stages, engines, flaps, grid_fins, legs)
 		_built_signature = signature
 	if not _models.is_empty():
 		_pose_models(stages, engines, flaps, grid_fins)
+		_pose_legs(legs)
 	_update_plumes(engines, altitude_m)
 
 
@@ -102,7 +110,7 @@ static func _vehicle_id(stages: Array) -> String:
 	return String(stages[0].get("vehicle_id", "")).get_slice("/", 0) if not stages.is_empty() else ""
 
 
-func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> void:
+func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs: Dictionary) -> void:
 	for child in _stage_root.get_children():
 		child.free()  # immediately (not queue_free): the rebuilt nodes reuse the names, and nothing here is in a callback
 	_plumes.clear()
@@ -113,6 +121,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> vo
 	_engine_poses.resize(engines.size())
 	_flap_nodes.clear()
 	_fin_nodes.clear()
+	_leg_nodes.clear()
 	var axis_rotation := Basis(Vector3.RIGHT, PI / 2.0)  # CylinderMesh +Y -> render +Z (= body +x)
 	var staged: Array[bool] = []
 	for stage: Dictionary in stages:
@@ -133,6 +142,35 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array) -> vo
 	_build_engines(stages, engines, stage_nodes)
 	_build_flaps(stages, flaps, stage_nodes)
 	_build_fins(stages, grid_fins, stage_nodes)
+	if not stage_nodes.is_empty():
+		_build_legs(legs, stage_nodes[0])
+
+
+## One node pair per snapshot leg azimuth on the lowest stage (the snapshot's legs are that stage's).
+func _build_legs(legs: Dictionary, stage_node: Node3D) -> void:
+	if stage_node == null or not legs.get("present", false) or not _models.has("leg"):
+		return
+	var paint: Material = _models["materials"]["paint_leg"]
+	for i in (legs["azimuths_deg"] as Array).size():
+		var parts := {}
+		for part: String in ["leg_main", "leg_pusher"]:
+			var instance := MeshInstance3D.new()
+			instance.name = "%s_%d" % [part, i]
+			instance.mesh = _models["leg"][part]
+			instance.material_override = paint
+			stage_node.add_child(instance)
+			parts[part] = instance
+		_leg_nodes.append({"azimuth_deg": float(legs["azimuths_deg"][i]), "main": parts["leg_main"], "pusher": parts["leg_pusher"]})
+
+
+func _pose_legs(legs: Dictionary) -> void:
+	if _leg_nodes.is_empty():
+		return
+	var deployment := float(legs.get("deployment", 0.0)) if is_nan(look_leg_deployment) else look_leg_deployment
+	for leg: Dictionary in _leg_nodes:
+		var poses := VehicleModels.leg_poses(_models["manifest"]["leg"], leg["azimuth_deg"], deployment)
+		(leg["main"] as Node3D).transform = poses["main"]
+		(leg["pusher"] as Node3D).transform = poses["pusher"]
 
 
 func _add_cylinders(stage: Dictionary, axis_rotation: Basis) -> void:
@@ -296,8 +334,12 @@ func _pose_models(stages: Array, engines: Array, flaps: Array, grid_fins: Array)
 		var entry: Dictionary = _fin_nodes[i]
 		if entry["node"] != null:
 			var stage: int = entry["stage"]
-			(entry["node"] as Node3D).transform = VehicleModels.fin_transform(grid_fins[i], _stage_bases_m[stage],
-					stages[stage]["diameter_m"] * 0.5)
+			var radius: float = stages[stage]["diameter_m"] * 0.5
+			var standoff: Variant = _models["manifest"].get("look", {}).get("fin_stow_standoff_m")
+			if standoff != null and stage < stages.size() - 1:  # a vehicle whose fins fold: folded while a stage stands on this one
+				(entry["node"] as Node3D).transform = VehicleModels.fin_stowed_transform(grid_fins[i], _stage_bases_m[stage], radius, float(standoff))
+			else:
+				(entry["node"] as Node3D).transform = VehicleModels.fin_transform(grid_fins[i], _stage_bases_m[stage], radius)
 
 
 ## The drawn engine's offset from the physics gimbal point (VehicleModels.axial_offset_m), from its stage's id.

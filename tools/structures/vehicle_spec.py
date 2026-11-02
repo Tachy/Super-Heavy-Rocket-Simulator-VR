@@ -175,9 +175,69 @@ def drawn_hinge(flap: dict, kind_detail: dict, profile: hull_profile.Profile) ->
 def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
     """The spec of `vehicle_id`: the Starship's full one, or for a "generic" vehicle (generators.toml) its stages' size and
     the detail file as it is (its tables are validated by the generators that come with it)."""
-    if generator_table(vehicle_id)["kind"] == "generic":
+    kind = generator_table(vehicle_id)["kind"]
+    if kind == "generic":
         return load_generic(vehicle_id, vehicles_dir)
+    if kind == "falcon9":
+        return load_falcon9(vehicle_id, vehicles_dir, engines_dir)
     return load_starship(vehicle_id, vehicles_dir, engines_dir)
+
+
+FALCON9_DETAIL_KEYS = {
+    "hull": ("segments", "base_station_m", "interstage_base_m", "raceway_azimuths_deg", "raceway_width_m", "raceway_height_m",
+             "raceway_first_m", "pod_length_m", "pod_width_m", "pod_height_m", "interstage_wall_m"),
+    "octaweb": ("cover_top_m", "chamfer_m", "fitting_length_m", "fitting_width_m", "fitting_proud_m"),
+    "grid_fin": ("chord_m", "span_m", "root_chamfer_m", "depth_m", "cell_pitch_m", "wall_m", "rim_m", "root_gap_m",
+                 "pivot_radius_m", "pivot_length_m", "stow_standoff_m"),
+    "leg": ("hinge_station_m", "hinge_radius_m", "stowed_tip_radius_m", "stowed_outer_radius_m", "stowed_thickness_m",
+            "root_width_m", "tip_width_m", "tip_depth_m", "pad_radius_m", "pad_thickness_m", "pusher_anchor_station_m",
+            "pusher_anchor_radius_m", "pusher_leg_u_m", "pusher_radius_m"),
+    "paint": ("hull_albedo", "interstage_albedo", "octaweb_albedo", "leg_albedo"),
+}
+
+
+def validate_falcon9_detail(detail: dict) -> None:
+    for table, keys in FALCON9_DETAIL_KEYS.items():
+        t = _table(detail, table)
+        for k in keys:
+            if k not in t:
+                raise VehicleSpecError(f"[{table}]: missing key '{k}'")
+    for eid, e in _table(detail, "engines").items():
+        for k in ENGINE_KEYS:
+            if k != "rib_count" and k not in e:
+                raise VehicleSpecError(f"[engines.{eid}]: missing key '{k}'")
+
+
+def falcon9_leg(legs: dict, leg: dict) -> dict:
+    """Rig of one leg from the detail hinge and the config's foot: a straight rigid leg turning about its hinge. Angles from
+    the +X station axis towards the radial; the leg's length is what joins the hinge to the deployed foot."""
+    dr = legs["footprint_radius_m"] - leg["hinge_radius_m"]
+    ds = legs["foot_station_m"] - leg["hinge_station_m"]
+    length = math.hypot(dr, ds)
+    return {**leg, "length_m": length, "deployed_angle_deg": math.degrees(math.atan2(dr, ds)),
+            "stowed_angle_deg": math.degrees(math.asin((leg["stowed_tip_radius_m"] - leg["hinge_radius_m"]) / length))}
+
+
+def load_falcon9(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
+    """First stage of the Falcon 9: the physics numbers its generators draw on + the detail file (the second stage comes
+    with its own generators)."""
+    with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
+        vehicle = tomllib.load(f)
+    with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:
+        detail = tomllib.load(f)
+    validate_falcon9_detail(detail)
+    s = next(st for st in vehicle["stage"] if st["id"] == "first_stage")
+    stage = {"length_m": float(s["length_m"]), "diameter_m": float(s["diameter_m"]),
+             "interstage_top_m": float(s["length_m"]), "grid_fins": s["grid_fins"], "landing_legs": s["landing_legs"],
+             "rcs_pods": s["rcs"]["pod"]}
+    engine_spec = {}
+    for eid in sorted({g["engine"] for g in s["engine_group"]}):
+        with open(engines_dir / f"{eid}.toml", "rb") as f:
+            eng = tomllib.load(f)
+        engine_spec[eid] = {"nozzle_exit_diameter_m": float(eng["performance"]["nozzle_exit_diameter_m"]),
+                            **detail["engines"][eid]}
+    return {"vehicle_id": vehicle_id, "stages": {"first_stage": stage}, "engines": engine_spec, "detail": detail,
+            "leg": falcon9_leg(s["landing_legs"], detail["leg"])}
 
 
 def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:

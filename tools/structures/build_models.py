@@ -168,8 +168,32 @@ def vehicle_hash(spec_text: str, version: str, table: dict) -> str:
     return h.hexdigest()
 
 
-def vehicle_outputs(spec: dict) -> tuple:
+def vehicle_outputs(spec: dict, table: dict | None = None) -> tuple:
+    if table is not None and "outputs" in table:
+        return tuple(table["outputs"])
     return VEHICLE_FIXED_OUTPUTS + tuple(e["file"] for _, e in sorted(spec["engines"].items()))
+
+
+def falcon9_manifest(spec: dict, digest: str, version: str, triangles: dict, table: dict) -> dict:
+    """What the game needs of the Falcon 9's first stage: the leg rig, its deployed foot, the Merlin's exit plane and drawn
+    offset (station 0 is the outer Merlins' exit plane: the drawn gimbal point stands one bell length above the physics
+    one), part -> material names and the paints."""
+    detail = spec["detail"]
+    legs, fin = spec["stages"]["first_stage"]["landing_legs"], detail["grid_fin"]
+    engines = {eid: {"file": e["file"], "exit_plane_x_m": -e["bell_length_m"], "exit_diameter_m": e["nozzle_exit_diameter_m"],
+                     "axial_offset_m_by_stage": {"first_stage": e["bell_length_m"]}}
+               for eid, e in sorted(spec["engines"].items())}
+    paint = detail["paint"]
+    look = {"no_maps": True, "engine_ids": {"sea_level": "merlin1d"},
+            "fin_stow_standoff_m": fin["stow_standoff_m"],
+            "part_materials": {"hull": "paint_hull", "interstage": "paint_interstage", "octaweb": "paint_octaweb"},
+            "paint": {"paint_hull": {"albedo": paint["hull_albedo"], "roughness": 0.45, "metallic": 0.0},
+                      "paint_interstage": {"albedo": paint["interstage_albedo"], "roughness": 0.6, "metallic": 0.0},
+                      "paint_octaweb": {"albedo": paint["octaweb_albedo"], "roughness": 0.7, "metallic": 0.1},
+                      "paint_leg": {"albedo": paint["leg_albedo"], "roughness": 0.6, "metallic": 0.1}}}
+    return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
+            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": {}, "engines": engines, "look": look, "leg": spec["leg"],
+            "leg_foot_deployed_m": {"station": legs["foot_station_m"], "radius": legs["footprint_radius_m"]}}
 
 
 def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> dict:
@@ -214,7 +238,8 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     spec_text = vehicle_spec.dumps(spec)
     version = blender_version(exe)
     digest = vehicle_hash(spec_text, version, table)
-    outputs = vehicle_outputs(spec)
+    outputs = vehicle_outputs(spec, table)
+    starship = table["kind"] == "starship"
     try:
         current = json.loads((out / MANIFEST).read_text(encoding="utf-8")).get("input_hash") == digest
     except (OSError, ValueError):
@@ -231,8 +256,9 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     spec_file.write_text(spec_text, encoding="utf-8")
     triangles: dict[str, int] = {}
     try:
-        steel_map = hull_textures.write(staging, spec)
-        tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
+        if starship:
+            steel_map = hull_textures.write(staging, spec)
+            tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
         for gen in table["generators"]:
             cmd = blender_command(exe, SCRIPT_DIR / gen, "--spec", str(spec_file), "--out", str(staging))
             res = subprocess.run(cmd, capture_output=True, text=True)
@@ -246,9 +272,12 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
                 triangles[m.group(1)] = int(m.group(2))
     finally:
         spec_file.unlink(missing_ok=True)
-    manifest = vehicle_manifest(spec, digest, version, triangles)
-    manifest["look"]["steel_map"] = steel_map
-    manifest["look"]["tile_maps"] = tile_maps
+    if starship:
+        manifest = vehicle_manifest(spec, digest, version, triangles)
+        manifest["look"]["steel_map"] = steel_map
+        manifest["look"]["tile_maps"] = tile_maps
+    else:
+        manifest = falcon9_manifest(spec, digest, version, triangles, table)
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     swap_in(staging, out)
     print(f"build_models: generated {', '.join(outputs)} in {out}; triangles {triangles}")

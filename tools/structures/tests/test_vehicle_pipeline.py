@@ -17,7 +17,7 @@ GD = build_models.ROOT / "game" / "vehicle" / "vehicle_models.gd"
 @pytest.mark.parametrize("vehicle_id", IDS)
 def test_every_model_vehicle_has_a_table_row_with_existing_scripts(vehicle_id):
     table = vehicle_spec.generator_table(vehicle_id)
-    assert table["kind"] in ("starship", "generic")
+    assert table["kind"] in ("starship", "falcon9", "generic")
     for p in build_models.vehicle_sources(table):
         assert p.is_file(), p
     assert f'"{vehicle_id}"' in GD.read_text(encoding="utf-8")  # the game's MODEL_VEHICLE_IDS lists it too
@@ -37,7 +37,7 @@ def test_unknown_vehicle_is_an_error():
         vehicle_spec.load("starship_tanker")
 
 
-@pytest.mark.parametrize("vehicle_id", IDS[1:])
+@pytest.mark.parametrize("vehicle_id", IDS[2:])
 def test_stub_detail_file_is_valid_and_loads(vehicle_id):
     detail = vehicle_spec.VEHICLES / "detail" / f"{vehicle_id}.toml"
     assert vehicle_spec.value_lines_without_tag(detail) == []
@@ -46,7 +46,7 @@ def test_stub_detail_file_is_valid_and_loads(vehicle_id):
     assert spec["stages"]  # the vehicle config's stages with length and diameter
 
 
-@pytest.mark.parametrize("vehicle_id", IDS[1:])
+@pytest.mark.parametrize("vehicle_id", IDS[2:])
 def test_vehicle_without_generators_writes_nothing_and_exits_zero(vehicle_id, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(build_models, "find_blender", lambda explicit=None: Path("blender.exe"))
     monkeypatch.setattr(build_models, "blender_version", lambda exe: "test")

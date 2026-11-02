@@ -52,7 +52,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   `scripts`, texture `bakers` and the Blender `generators`. `build_models.py --vehicle <id>` takes everything from it; a
   vehicle with no generators prints one line, writes nothing, exits 0. The Starship's manifest hash and output are
   byte-identical to before the table (test `test_starship_hash_is_the_one_of_the_fixed_generator_list`, forced rebuild).
-  The `falcon9_block5`, `crew_dragon`, `iss` detail files are stubs (comments only) until Tasks 3 onward.
+  The `crew_dragon`, `iss` detail files are stubs (comments only) until later tasks.
 - The snapshot's stage dictionaries carry `vehicle_id` (bindings, `body_stages`): stage ids repeat in the tanker and HLS-launch
   configs (stages taken over), so the id alone cannot tell them apart; a separated part reports `<vehicle>/<stage>` (the part
   before `/` counts). No `vehicle_id` (older snapshot) = cylinders.
@@ -68,6 +68,19 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   hinge azimuth and aft station. Fin pose: pivot at (station, hull radius, azimuth), rotation about +X by the azimuth, then about
   the radial Y by +deflection. Both are tested against re-implementations of `flap_span_direction` and the grid-fin normal.
 - Plumes start at the DRAWN exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the drawn gimbal point; ship engines drawn higher, see "Stage interface"); cylinders keep 3.0 m.
+
+## Falcon 9 first stage (plan 2026-11-02, Task 3)
+- `generators.toml` kind `falcon9` (`vehicle_spec.load_falcon9`, `validate_falcon9_detail`), key `outputs`: `falcon9_stage1.gltf` (nodes `hull`, `interstage`,
+  `octaweb`), `falcon9_grid_fin.gltf` (`frame`, `lattice`, `plate`, `pylon`; same frame as the Starship's fin), `falcon9_leg.gltf` (`leg_main`, `leg_pusher`),
+  `merlin.gltf` (`gen_engine.py`). Triangles 992 / 368 / 156 / 2,048. Plain paint so far (`look.paint`, `part_materials`, `no_maps`): no baked map of panel lines or soot yet.
+- Leg rig `VehicleModels.leg_poses(rig, azimuth, deployment)`: a function of the snapshot's deployment only. A rigid leg turns about the hinge (M4: station 2.2, r 1.46) from the stowed
+  angle to the angle that puts its tip on the config's foot; the leg's length (8.68 m) follows from hinge and foot. The pusher runs from the hull ring to 5.5 m along the leg and is scaled along
+  its axis (1.4 to 8 m): the real part telescopes, ours stretches. Manifest `leg`, `leg_foot_deployed_m`.
+- Fins fold by a view rule: `fin_stowed_transform` while another stage stands on the fin's stage. The physics has no fold; on separation the fin snaps out.
+- Engines: manifest `look.engine_ids`, `axial_offset_m_by_stage`; a kind without a model (Merlin Vacuum) keeps the former plume start. The second stage stays a cylinder until Task 4.
+- The manifest's age is judged against the physics config: after any edit of `falcon9_block5.toml`, even a comment, the set counts as
+  stale (cylinders and the notice) until `python tools/structures/build_models.py --vehicle falcon9_block5` has run.
+- Checks: `tools/structures/tests/test_falcon9_spec.py`, `vehicle_view_test.gd` `_check_falcon9` (needs the generated set). Shots: `vehicle_look_shots.gd --legs=<d>`.
 
 ## Steel map (`tools/structures/hull_textures.py` -> `data/models/starship_block3/hull_steel.png`)
 - Baked by the driver (numpy, no Blender), procedural from the detail file's `[hull]` numbers (ring pitch, weld height / half

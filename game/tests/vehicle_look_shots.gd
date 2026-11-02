@@ -13,6 +13,7 @@
 #     --stereo) and saves <label>_eye0.png / <label>_eye1.png per shot (the fov field is then the headset's)
 #   --utc=2024-04-08T18:42:00  --out_dir=<dir>
 #   --flaps=<deg>  draws every flap at that deflection (0 folded, 90 broadside); the physics is not touched
+#   --legs=<0..1>  draws the landing legs at that deployment; the physics is not touched
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 10
@@ -70,6 +71,8 @@ func _setup() -> bool:
 	TimePanel.show_frame_rate = false
 	if _args.has("flaps"):
 		VehicleView.look_flap_deg = float(_args["flaps"])
+	if _args.has("legs"):
+		VehicleView.look_leg_deployment = float(_args["legs"])
 	_rig = VehicleRig.new(_world, _args)
 	var sim := _rig.start()
 	if _args.has("scan"):
