@@ -21,7 +21,7 @@ struct Reboost {
 };
 
 // IDA-2 as configured (iss.toml, station frame): the fixtures that mean "station x = N" convert through it, so they
-// follow the port when its measured position changes. The IDA-2 port frame is the station axes (x, -y, -z).
+// follow the port when its measured position changes.
 inline math::Vec3 ida2_station_position_m() {
     const auto iss = config::load_vehicle(STARSIM_CONFIG_DIR, "iss");  // a named copy: the range-for must not bind a temporary
     for (const auto& p : iss.stages.front().docking_ports) {
@@ -60,12 +60,24 @@ struct DragonAtPort {
         d.session.set_attitude_mode({});
         return d;
     }
-    // The Dragon port anywhere in the IDA-2 port frame (= station axes (x, -y, -z), origin at the configured IDA-2 position), at rest
-    // in the station frame unless `velocity_port_mps`, docking attitude, not turning (so the session may coast).
-    static DragonAtPort place_at(const math::Vec3& position_port_m, const math::Vec3& velocity_port_mps = {}) {
+    // Station axes (x, -y, -z) -> the IDA-2 port frame of the config (x out, z = up, y = up x x). The fixtures below say where the Dragon stands relative to the station's
+    // structure; the port's clocking (`up`, no longer the zenith since Task 8) must not move it.
+    static math::Vec3 station_offset_to_port(const math::Vec3& v) {
+        const math::Vec3 station{v.x, -v.y, -v.z};
+        const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "iss");
+        for (const auto& port : cfg.stages.front().docking_ports)
+            if (port.id == "ida2") {
+                const math::Vec3 y = cross(port.up, port.axis);
+                return {dot(station, port.axis), dot(station, y), dot(station, port.up)};
+            }
+        throw std::logic_error("iss.toml has no port ida2");
+    }
+    // The Dragon port at `position_m` (station axes (x, -y, -z), origin at the configured IDA-2 position), at rest
+    // in the station frame unless `velocity_mps` (same axes), docking attitude, not turning (so the session may coast).
+    static DragonAtPort place_at(const math::Vec3& position_m, const math::Vec3& velocity_mps = {}) {
         test::spice_session();
         DragonAtPort e(std::make_unique<proximity_test::DragonNearIss>(
-            proximity_test::at_port("ida2", position_port_m, velocity_port_mps)));
+            proximity_test::at_port("ida2", station_offset_to_port(position_m), station_offset_to_port(velocity_mps))));
         e.session.set_rendezvous_target(1, "idss", "ida2");
         e.session.set_attitude_mode({});
         e.session.apply_angular_rate(0, {});
@@ -80,8 +92,13 @@ struct DragonAtPort {
     // Beside the US module stack (station x = 30 m, clear of Columbus / Kibo at 46.7 m and of the truss at 35.5 m, Dragon axis along -x like at IDA-2), its 4 m heat shield `gap_m`
     // off the 2.2 m module surface on the station +y side, drifting towards it at `speed_mps`.
     static DragonAtPort beside_modules(double gap_m, double speed_mps) {
-        // IDA-2 port frame = station (x, -y, -z), origin at the configured IDA-2 position
-        return place("ida2", 30.0 - ida2_station_position_m().x, -(2.2 + 2.0 + gap_m), 0.0, speed_mps);
+        test::spice_session();
+        DragonAtPort d(std::make_unique<proximity_test::DragonNearIss>(
+            proximity_test::at_port("ida2", station_offset_to_port({30.0 - ida2_station_position_m().x, -(2.2 + 2.0 + gap_m), 0.0}),
+                                    station_offset_to_port({0.0, speed_mps, 0.0}), {}), true, true, std::vector<sim::StationImpulse>{}));
+        d.session.set_rendezvous_target(1, "idss", "ida2");
+        d.session.set_attitude_mode({});
+        return d;
     }
 
     // advance_to in 1 s calls until the docking phase is `phase` or `limit_s` after the current epoch.

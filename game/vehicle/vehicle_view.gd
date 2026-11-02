@@ -242,6 +242,37 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	if not stage_nodes.is_empty():
 		_build_legs(legs, stage_nodes[0], _stage_models[0])
 	_build_nose(stages, stage_nodes)
+	_build_joints(stages, stage_nodes)
+
+
+## The ISS's jointed parts: fixed nodes alpha_joint_<i> / beta_joint_<i> / radiator_joint_<i> at the manifest's stated pose, their meshes relative to the joint's origin. The station has no
+## joint state in the simulation: the pose never changes; a later state would only set these transforms.
+func _build_joints(stages: Array, stage_nodes: Array[Node3D]) -> void:
+	for i in stages.size():
+		var ms: Dictionary = _stage_models[i]
+		if stage_nodes[i] == null or not ms.has("jointed"):
+			continue
+		var joints: Array = ms["manifest"]["joints"]
+		var nodes := {}
+		var origins := {}
+		for joint: Dictionary in joints:
+			var node := Node3D.new()
+			node.name = String(joint["name"])
+			var origin := Vector3(joint["origin_m"][0], joint["origin_m"][1], joint["origin_m"][2])
+			var parent_name := String(joint["parent"])
+			var parent: Node3D = stage_nodes[i] if parent_name == "" else nodes[parent_name]
+			var parent_origin: Vector3 = Vector3.ZERO if parent_name == "" else origins[parent_name]
+			var axis := Vector3(joint["axis"][0], joint["axis"][1], joint["axis"][2])
+			node.transform = Transform3D(Basis(axis, deg_to_rad(float(joint["pose_deg"]))), origin - parent_origin)
+			parent.add_child(node)
+			nodes[joint["name"]] = node
+			origins[joint["name"]] = origin
+			for part: String in joint["meshes"]:
+				var instance := MeshInstance3D.new()
+				instance.name = part
+				instance.mesh = ms["jointed"][part]
+				instance.material_override = _hull_material(_hull_kind(part, stages[i], ms), ms)
+				node.add_child(instance)
 
 
 ## The hull meshes of stage `index` from its own model set ({} = no model: cylinders).

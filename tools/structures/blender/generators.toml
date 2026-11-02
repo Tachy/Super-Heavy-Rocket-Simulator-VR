@@ -3,6 +3,7 @@
 #   kind        "starship": spec by vehicle_spec.load_starship (hull / flap / fin / engine detail tables);
 #               "falcon9": spec by vehicle_spec.load_falcon9 (first stage with interstage, legs; second stage with the Merlin Vacuum);
 #               "dragon": spec by vehicle_spec.load_dragon (capsule, hinged nose, trunk);
+#               "iss": spec by vehicle_spec.load_iss (the ports of the config, the drawing tables, the IDSS numbers of Dragon's detail file);
 #               "generic": vehicle config + detail file, no table validation yet (later tasks add their own).
 #   outputs     files every generator together must write (not the Starship: vehicle_outputs knows its fixed set).
 #   scripts     helper modules in this folder that the generators import (hashed into the manifest, in this order).
@@ -32,7 +33,8 @@ generators = ["gen_dragon.py", "idss_mechanism.py"]
 outputs = ["dragon_capsule.gltf", "dragon_nose.gltf", "dragon_trunk.gltf", "idss_mechanism.gltf"]
 
 [iss]
-kind = "generic"
-scripts = ["common.py", "vehicle_common.py"]
-bakers = []
-generators = []
+kind = "iss"
+scripts = ["common.py", "vehicle_common.py", "idss_mechanism.py"]
+bakers = ["iss_textures"]
+generators = ["iss_station.py", "iss_arrays.py", "idss_passive_ring.py"]
+outputs = ["iss_station.gltf", "iss_arrays.gltf", "iss_rings.gltf"]

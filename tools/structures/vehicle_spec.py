@@ -182,6 +182,8 @@ def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENG
         return load_falcon9(vehicle_id, vehicles_dir, engines_dir)
     if kind == "dragon":
         return load_dragon(vehicle_id, vehicles_dir)
+    if kind == "iss":
+        return load_iss(vehicle_id, vehicles_dir)
     return load_starship(vehicle_id, vehicles_dir, engines_dir)
 
 
@@ -328,6 +330,50 @@ def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
                           "superdraco_half_gap_deg": 0.5 * (group["angles_deg"][1] - group["angles_deg"][0]),
                           "port_position_m": cap["docking_port"][0]["position_m"], "port_axis": cap["docking_port"][0]["axis"], "port_up": cap["docking_port"][0]["up"]}}
     return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose, "idss": idss_block(detail, stages["capsule"])}
+
+
+ISS_DETAIL_TABLES = ("paint", "pose", "ida", "lathe", "box", "bay", "plate", "tube", "wing", "gamma", "array", "irosa_plane", "joint", "array_shape", "truss_lattice")
+
+
+def load_iss(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
+    """The ISS: the ports of the physics config (position, axis, up) + the drawing tables + the IDSS numbers of Dragon's detail file (one interface, one table: the system is
+    androgynous). Port `number` 2 / 3 names the nodes; `pma_offset_dir` (drawing frame of idss_passive_ring.py) points from the ring axis to the Harmony axis."""
+    with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
+        vehicle = tomllib.load(f)
+    with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:
+        detail = tomllib.load(f)
+    with open(vehicles_dir / "crew_dragon.toml", "rb") as f:
+        dragon = tomllib.load(f)
+    with open(vehicles_dir / "detail" / "crew_dragon.toml", "rb") as f:
+        dragon_detail = tomllib.load(f)
+    for table in ISS_DETAIL_TABLES:
+        if table not in detail:
+            raise VehicleSpecError(f"iss detail: missing table [{table}]")
+    wings = len(detail["wing"])
+    if len(detail["pose"]["beta_deg"]) != wings:
+        raise VehicleSpecError("iss detail: [pose] beta_deg needs one angle per [[wing]]")
+    joints = {row["id"]: row["origin_m"] for row in detail["joint"]}
+    for wing in detail["wing"]:
+        if wing["joint"] not in joints:
+            raise VehicleSpecError(f"iss detail: wing {wing['array']}: unknown joint {wing['joint']}")
+    station = next(st for st in vehicle["stage"] if st["id"] == "station")
+    cap = next(st for st in dragon["stage"] if st["id"] == "capsule")
+    # The Harmony axis against the ring axis: ring offset measured at each port (detail [[port]] ring_axis_offset_from_harmony_axis_m), direction from the configured position.
+    harmony_axis = {"ida2": (None, 0.0, 0.0), "ida3": (46.72, 0.0, None)}
+    ports = []
+    for number, port in zip((2, 3), station["docking_port"]):
+        axis, up, pos = port["axis"], port["up"], port["position_m"]
+        reference = harmony_axis[port["id"]]
+        to_harmony = [0.0 if reference[k] is None else reference[k] - pos[k] for k in range(3)]
+        to_harmony = [0.0 if abs(a) > 0.5 else v for a, v in zip(axis, to_harmony)]
+        # into the drawing frame: X = axis, Y = axis x up, Z = -up
+        cross = (axis[1] * up[2] - axis[2] * up[1], axis[2] * up[0] - axis[0] * up[2], axis[0] * up[1] - axis[1] * up[0])
+        dot = lambda a, b: sum(x * y for x, y in zip(a, b))
+        length = math.sqrt(dot(to_harmony, to_harmony)) or 1.0
+        offset_dir = [dot(to_harmony, axis) / length, dot(to_harmony, cross) / length, -dot(to_harmony, up) / length]
+        ports.append({"id": port["id"], "number": number, "position_m": pos, "axis": axis, "up": up, "pma_offset_dir": offset_dir})
+    return {"vehicle_id": vehicle_id, "stages": {"station": {"length_m": float(station["length_m"]), "diameter_m": float(station["diameter_m"])}}, "engines": {}, "detail": detail,
+            "ports": ports, "idss": idss_block(dragon_detail, {"port_position_m": cap["docking_port"][0]["position_m"], "port_axis": cap["docking_port"][0]["axis"], "port_up": cap["docking_port"][0]["up"]})}
 
 
 def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:

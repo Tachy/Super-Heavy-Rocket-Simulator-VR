@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hull_textures  # noqa: E402
 import detail_file  # noqa: E402
 import hull_tiles  # noqa: E402
+import iss_textures  # noqa: E402
 import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 
@@ -237,6 +238,47 @@ def dragon_manifest(spec: dict, digest: str, version: str, triangles: dict, tabl
             "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": {}, "engines": {}, "look": look, "nose": spec["nose"], "idss": spec["idss"]}
 
 
+def iss_manifest(spec: dict, digest: str, version: str, triangles: dict, table: dict, textured: dict) -> dict:
+    """What the game needs of the ISS: the joints with their stated pose (parts relative to the joint's origin), materials per part, the baked maps."""
+    d = spec["detail"]
+    pose, joints_by_id = d["pose"], {row["id"]: row["origin_m"] for row in d["joint"]}
+    joints = []
+    for k, joint_id in enumerate(("PORT_ALPHA_ROT", "STBD_ALPHA_ROT")):
+        joints.append({"name": f"alpha_joint_{k}", "parent": "", "origin_m": joints_by_id[joint_id], "axis": pose["alpha_axis"], "pose_deg": pose["alpha_deg"][k],
+                       "meshes": [f"truss_outboard_{k}", f"pv_radiator_{k}"]})
+    parts = {}
+    for i, wing in enumerate(d["wing"]):
+        meshes = [f"array_{i}", f"mast_{i}"]
+        parts[f"array_{i}"], parts[f"mast_{i}"] = "paint_array", "paint_mast"
+        if wing["irosa"]:
+            meshes += [f"irosa_{i}", f"irosa_boom_{i}"]
+            parts[f"irosa_{i}"], parts[f"irosa_boom_{i}"] = "paint_irosa", "paint_mast"
+        joints.append({"name": f"beta_joint_{i}", "parent": f"alpha_joint_{wing['alpha']}", "origin_m": joints_by_id[wing["joint"]], "axis": pose["beta_axis"],
+                       "pose_deg": pose["beta_deg"][i], "meshes": meshes})
+    for j, row in enumerate(d["gamma"]):
+        joints.append({"name": f"radiator_joint_{j}", "parent": "", "origin_m": joints_by_id[row["joint"]], "axis": pose["beta_axis"], "pose_deg": 0.0, "meshes": [f"radiator_{j}"]})
+        parts[f"radiator_{j}"] = "paint_radiator"
+    for k in (0, 1):
+        parts[f"truss_outboard_{k}"], parts[f"pv_radiator_{k}"] = "paint_truss", "paint_radiator"
+    parts.update({"pressurised": "paint_us", "pressurised_ru": "paint_ru", "beam": "paint_beam", "pma_1": "paint_pma", "truss": "paint_truss", "payloads": "paint_payload",
+                  "wings_ru": "paint_wing_ru", "arm": "paint_arm"})
+    for port in spec["ports"]:
+        n = port["number"]
+        parts.update({f"pma_{n}": "paint_pma", f"ida_{n}": "paint_ida", f"ida_{n}_band": "paint_pma", f"ida_{n}_face": "paint_ida_face", f"ida_{n}_floor": "paint_pocket", f"ida_{n}_hcs": "paint_hook",
+                      f"ida_{n}_pockets": "paint_pocket", f"ida_{n}_hooks": "paint_hook", f"ida_{n}_pins": "paint_hook", f"ida_{n}_ring": "paint_ring",
+                      f"ida_{n}_petals": "paint_ring", f"ida_{n}_fittings": "paint_fitting"})
+    paint = d["paint"]
+    finish = {"paint_us": ("us_albedo", 0.45, 0.45), "paint_ru": ("ru_albedo", 0.8, 0.0), "paint_beam": ("beam_albedo", 0.9, 0.0), "paint_truss": ("truss_albedo", 0.5, 0.5),
+              "paint_payload": ("payload_albedo", 0.6, 0.3), "paint_pma": ("pma_albedo", 0.7, 0.0), "paint_ida": ("ida_albedo", 0.85, 0.0), "paint_ida_face": ("ida_face_albedo", 0.45, 0.6),
+              "paint_ring": ("ida_ring_albedo", 0.45, 0.6), "paint_hook": ("ida_hook_albedo", 0.35, 0.8), "paint_pocket": ("pocket_albedo", 0.8, 0.0), "paint_fitting": ("fitting_albedo", 0.6, 0.3),
+              "paint_array": ("array_albedo", 0.35, 0.3), "paint_irosa": ("irosa_albedo", 0.3, 0.3), "paint_radiator": ("radiator_albedo", 0.5, 0.0), "paint_mast": ("mast_albedo", 0.5, 0.4),
+              "paint_wing_ru": ("array_albedo", 0.35, 0.3), "paint_arm": ("arm_albedo", 0.85, 0.0)}
+    painted = {key: {"albedo": paint[a], "roughness": r, "metallic": m} for key, (a, r, m) in finish.items()}
+    return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)), "triangles": triangles, "frame": VEHICLE_FRAME,
+            "flaps": {}, "engines": {}, "joints": joints, "ports": spec["ports"],
+            "look": {"no_maps": True, "part_materials": parts, "paint": painted, "textured": textured}}
+
+
 def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> dict:
     """What the game needs besides the glTF: per-flap rotation signs, engine exit planes, the frame statement."""
     flaps = {st_id: [{k: f[k] for k in ("id", "kind", "hinge_azimuth_deg", "station_aft_m", "station_fwd_m", "span_m",
@@ -300,6 +342,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
         if starship:
             steel_map = hull_textures.write(staging, spec)
             tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
+        textured = iss_textures.write(staging) if table["kind"] == "iss" else {}
         for gen in table["generators"]:
             cmd = blender_command(exe, SCRIPT_DIR / gen, "--spec", str(spec_file), "--out", str(staging))
             res = subprocess.run(cmd, capture_output=True, text=True)
@@ -319,6 +362,8 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
         manifest["look"]["tile_maps"] = tile_maps
     elif table["kind"] == "dragon":
         manifest = dragon_manifest(spec, digest, version, triangles, table)
+    elif table["kind"] == "iss":
+        manifest = iss_manifest(spec, digest, version, triangles, table, textured)
     else:
         manifest = falcon9_manifest(spec, digest, version, triangles, table)
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

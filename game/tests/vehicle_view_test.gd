@@ -47,6 +47,7 @@ func _initialize() -> void:
 	_check_other_model_vehicles(snapshot)
 	_check_falcon9()
 	_check_dragon()
+	_check_iss()
 	var models := VehicleModels.load_for(VEHICLE)
 	if models.is_empty():
 		print("  (no models: model cases skipped; run python tools/structures/build_models.py --vehicle %s)" % VEHICLE)
@@ -316,6 +317,196 @@ func _check_dragon() -> void:
 	_check(is_zero_approx(view_stack.nose_fraction()) and s_capsule != null and s_capsule.get_node("nose_cone").transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.0)),
 			"stack: the nose is closed on the launcher")
 	VehicleModels.clear_cache()
+
+
+## The ISS model: nodes, joints at the stated pose, and the docking rings against Dragon's at both configured ports (geometry read from the meshes, ports from the configs).
+func _check_iss() -> void:
+	VehicleModels.clear_cache()
+	var models := VehicleModels.load_for("iss")
+	if models.is_empty():
+		_check(false, "iss: models generated (%s)" % VehicleModels.fallback_reason("iss"))
+		return
+	var dragon := VehicleModels.load_for("crew_dragon")
+	if dragon.is_empty():
+		_check(false, "iss: the crew_dragon models are needed for the ring check")
+		return
+	var root_dir := ProjectSettings.globalize_path("res://").path_join("..")
+	var ports := _config_ports(root_dir.path_join("config/vehicles/iss.toml"))
+	_check(ports.size() == 2, "iss: two ports in the config")
+	var station := {"id": "station", "base_station_m": 0.0, "length_m": 51.87, "diameter_m": 4.2, "nose_length_m": 0.0, "vehicle_id": "iss"}
+	var view := VehicleView.new()
+	_views.append(view)
+	root.add_child(view)
+	view.sync([station], [], [], [], 0.0)
+	var stage := view.get_child(0).get_node_or_null("stage_station") as Node3D
+	_check(stage != null and _cylinders(view) == 0, "iss: the station draws its model, no cylinder")
+	if stage == null:
+		return
+	for part: String in ["pressurised", "truss", "pma_2", "ida_2", "pma_3", "ida_3"]:
+		_check(stage.get_node_or_null(part) != null, "iss: node %s" % part)
+	# Joints: separate nodes at the manifest's pose, the parts below them.
+	var joints: Array = models["manifest"]["joints"]
+	_check(joints.size() == 2 + 8 + 2, "iss: 2 alpha, 8 beta, 2 radiator joints (%d)" % joints.size())
+	for joint: Dictionary in joints:
+		var node := stage.find_child(String(joint["name"]), true, false) as Node3D
+		_check(node != null, "iss: joint node %s" % joint["name"])
+		if node == null:
+			continue
+		var axis := _vec3(joint["axis"])
+		var parent_origin := Vector3.ZERO if String(joint["parent"]) == "" else _vec3(_joint_named(joints, joint["parent"])["origin_m"])
+		var expected := Transform3D(Basis(axis, deg_to_rad(float(joint["pose_deg"]))), _vec3(joint["origin_m"]) - parent_origin)
+		_check(node.transform.is_equal_approx(expected), "iss: %s at the stated pose %.0f deg" % [joint["name"], joint["pose_deg"]])
+		for part: String in joint["meshes"]:
+			_check(node.get_node_or_null(part) != null, "iss: %s under %s" % [part, joint["name"]])
+	_check(stage.find_child("array_7", true, false) != null and stage.find_child("radiator_1", true, false) != null, "iss: array_<i>, radiator_<i>")
+	# The wingspan at the stated pose: P6 / S6 blankets broadside give the published 109 m [S] (+-1 m).
+	var reach := 0.0
+	for i in 8:
+		var array_node := stage.find_child("array_%d" % i, true, false) as MeshInstance3D
+		for s in (array_node.mesh as Mesh).get_surface_count():
+			for v: Vector3 in array_node.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+				reach = maxf(reach, absf((_chain(array_node, stage) * v).y))
+	_check(absf(2.0 * reach - 109.0) < 1.0, "iss: array span at the pose %.2f m (109 m published)" % (2.0 * reach))
+	for pair: Array in [[0, "ida_2", "2"], [1, "ida_3", "3"]]:
+		_check_ring_mate(ports[pair[0]], String(pair[1]), models, dragon)
+	VehicleModels.clear_cache()
+
+
+## The docking ports of a vehicle config, read from its text (TomlLite has no nested arrays of tables): position_m, axis, up of every [[stage.docking_port]].
+func _config_ports(path: String) -> Array:
+	var ports := []
+	for block in FileAccess.get_file_as_string(path).replace("\r\n", "\n").split("[[stage.docking_port]]").slice(1):
+		var port := {}
+		for line in block.split("\n"):
+			if line.begins_with("[["):
+				break
+			var eq := line.find("=")
+			var key := line.substr(0, eq).strip_edges() if eq > 0 else ""
+			if key in ["position_m", "axis", "up"]:
+				var list := line.substr(eq + 1, line.find("]") - eq).strip_edges().trim_prefix("[").trim_suffix("]").split(",")
+				port[key] = [float(list[0]), float(list[1]), float(list[2])]
+		ports.append(port)
+	return ports
+
+
+## The transform of `node` relative to its ancestor `stop` (the test's views are not in the tree yet: no global transforms).
+func _chain(node: Node3D, stop: Node3D) -> Transform3D:
+	var out := Transform3D.IDENTITY
+	var at := node
+	while at != stop:
+		out = at.transform * out
+		at = at.get_parent() as Node3D
+	return out
+
+
+func _joint_named(joints: Array, joint_name: String) -> Dictionary:
+	for joint: Dictionary in joints:
+		if joint["name"] == joint_name:
+			return joint
+	return {}
+
+
+## Dragon's port on this station port (config data): plane within 0.01 m, axis within 0.1 deg, clocking as the config's up: the passive petals measured from the mesh at the IDD's angles
+## about `up`, Dragon's petals between them (60 deg), Dragon's receptacles on the passive guide pins.
+func _check_ring_mate(port: Dictionary, ida: String, models: Dictionary, dragon: Dictionary) -> void:
+	var parts: Dictionary = models["hulls"]["station"]
+	var position := _vec3(port["position_m"])
+	var x_s := _vec3(port["axis"]).normalized()
+	var up_s := _vec3(port["up"]).normalized()
+	var y_s := up_s.cross(x_s)
+	_check(absf(x_s.dot(up_s)) < 1e-6, "%s: config up is normal to the axis" % ida)
+	var idss: Dictionary = dragon["manifest"]["idss"]
+	# Dragon's mechanism meshes: body axes with the origin on its port (X out, up -Z: asserted against the Dragon's config).
+	var capsule_port: Dictionary = _config_ports(ProjectSettings.globalize_path("res://").path_join("../config/vehicles/crew_dragon.toml"))[0]
+	_check(_vec3(capsule_port["axis"]).is_equal_approx(Vector3.RIGHT) and _vec3(capsule_port["up"]).is_equal_approx(Vector3(0.0, 0.0, -1.0)), "%s: Dragon's port frame as the mechanism is drawn" % ida)
+	# Mated: axes opposed, ups equal (vehicle/docking_port). Dragon frame -> station: X -> -x_s, Z -> -up_s, Y -> y_s.
+	var to_station := Transform3D(Basis(-x_s, y_s, -up_s), position)
+	# Plane of Dragon's flange top (mating plane) and the IDA's face.
+	var dragon_plane := _plane_points(parts_points(dragon["mechanism"]["flange"], to_station), -x_s, position)  # Dragon's face looks along -x_s
+	var ida_plane := _plane_points(parts_points(parts[ida + "_face"], Transform3D.IDENTITY), x_s, position)
+	_check(absf(-float(dragon_plane["axial"]) - float(ida_plane["axial"])) < 0.01, "%s: ring planes coincide (Dragon %.4f, IDA %.4f m from the port)" % [ida, -float(dragon_plane["axial"]), ida_plane["axial"]])
+	_check(absf(ida_plane["axial"]) < 0.01, "%s: the IDA face stands on the configured port (%.4f m)" % [ida, ida_plane["axial"]])
+	_check(dragon_plane["tilt_deg"] < 0.1 and ida_plane["tilt_deg"] < 0.1, "%s: axes within 0.1 deg (Dragon %.4f, IDA %.4f)" % [ida, dragon_plane["tilt_deg"], ida_plane["tilt_deg"]])
+	_check(dragon_plane["centre_off"] < 0.01 and ida_plane["centre_off"] < 0.01, "%s: centres on the axis (Dragon %.4f, IDA %.4f m)" % [ida, dragon_plane["centre_off"], ida_plane["centre_off"]])
+	# Passive petals: three clusters, each at the IDD's angle about the config's up (phi = 90 - theta, y_s = up x axis).
+	var petals := parts_points(parts[ida + "_petals"], Transform3D.IDENTITY)
+	var expected_phi: Array[float] = []
+	for theta: float in idss["petal_theta_deg"]:
+		expected_phi.append(fposmod(90.0 - theta, 360.0))
+	for phi: float in expected_phi:
+		var worst := INF
+		var sum := Vector2.ZERO
+		for p in petals:
+			var q := p - position
+			var a := rad_to_deg(atan2(q.dot(up_s), q.dot(y_s)))
+			if absf(angle_difference(deg_to_rad(a), deg_to_rad(phi))) < deg_to_rad(40.0):
+				sum += Vector2(q.dot(y_s), q.dot(up_s))
+		worst = rad_to_deg(absf(angle_difference(sum.angle(), deg_to_rad(phi))))
+		_check(worst < 0.1, "%s: passive petal at phi %.0f deg about the config's up (off by %.3f deg)" % [ida, phi, worst])
+	# Dragon's petals in the station: between the passive ones (they mesh).
+	for theta: float in idss["petal_theta_deg"]:
+		var a_rad := deg_to_rad(90.0 - theta)
+		var along := Vector3(0.0, cos(a_rad) * -1.0, sin(a_rad) * -1.0)  # Dragon frame: y_port = -Y, up = -Z
+		var world := to_station.basis * along
+		var phi := rad_to_deg(atan2(world.dot(up_s), world.dot(y_s)))
+		var nearest := INF
+		for other: float in expected_phi:
+			nearest = minf(nearest, rad_to_deg(absf(angle_difference(deg_to_rad(phi), deg_to_rad(other)))))
+		_check(absf(nearest - 60.0) < 0.1, "%s: Dragon's petal stands between the passive petals (%.3f deg from the nearest)" % [ida, nearest])
+	# The passive guide pins on Dragon's receptacles (mesh centroids of the pins against the IDD's receptacle theta on Dragon).
+	var pins := parts_points(parts[ida + "_pins"], Transform3D.IDENTITY)
+	var r_pin := 0.5 * float(idss["pin_circle_diameter_m"])
+	for theta: float in idss["receptacle_theta_deg"]:
+		var a_rad := deg_to_rad(90.0 - theta)
+		var receptacle := to_station * (Vector3(0.0, -cos(a_rad), -sin(a_rad)) * r_pin)
+		var sum := Vector3.ZERO
+		var count := 0
+		for p in pins:
+			if p.distance_to(receptacle) < 0.15:
+				sum += p
+				count += 1
+		var off: float = INF if count == 0 else ((sum / count) - x_s * (sum / count - position).dot(x_s)).distance_to(receptacle - x_s * (receptacle - position).dot(x_s))
+		_check(off < 0.002, "%s: passive guide pin on Dragon's receptacle (theta %.1f, %.4f m)" % [ida, theta, off])
+
+
+## All vertices of a mesh through a transform.
+func parts_points(mesh: Mesh, frame: Transform3D) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for s in mesh.get_surface_count():
+		for v: Vector3 in mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+			out.append(frame * v)
+	return out
+
+
+## The mesh's flat top along `axis` (the outermost vertices within 1 mm): its axial place from `origin`, tilt of its normal to the axis, and how far the ring's centre lies off the axis.
+func _plane_points(points: PackedVector3Array, axis: Vector3, origin: Vector3) -> Dictionary:
+	var top := -INF
+	for p in points:
+		var q := p - origin
+		if absf(q.length()) > 0.5:  # the annulus only
+			top = maxf(top, q.dot(axis))
+	var ring := PackedVector3Array()
+	var e1 := axis.cross(Vector3(0.123, 0.456, 0.789)).normalized()
+	var e2 := axis.cross(e1)
+	var box := Rect2()
+	for p in points:
+		var q := p - origin
+		if q.length() > 0.5 and q.dot(axis) > top - 0.001:
+			ring.append(q)
+			var flat := Vector2(q.dot(e1), q.dot(e2))
+			box = Rect2(flat, Vector2.ZERO) if ring.size() == 1 else box.expand(flat)
+	# Normal from the widest triple of the ring (the points are on a circle).
+	var a := ring[0]
+	var b := ring[ring.size() / 3]
+	var c := ring[2 * ring.size() / 3]
+	var n := (b - a).cross(c - a).normalized()
+	if n.dot(axis) < 0.0:
+		n = -n
+	return {"axial": top, "tilt_deg": rad_to_deg(acos(clampf(n.dot(axis), -1.0, 1.0))), "centre_off": box.get_center().length()}
+
+
+func _vec3(values: Array) -> Vector3:
+	return Vector3(float(values[0]), float(values[1]), float(values[2]))
 
 
 ## Largest and smallest station (x) of a mesh's vertices: Vector2(min, max).

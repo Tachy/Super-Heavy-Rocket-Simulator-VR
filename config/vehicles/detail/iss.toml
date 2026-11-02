@@ -384,3 +384,671 @@ ring_radius_m = 0.749  # [D]
 petal_tip_radius_m = 0.650  # [D]
 petal_length_m = 0.295  # [D]
 
+# ---- the drawing (Task 8) ----
+# ------------------------------------------------------------------------------------------------------------------------------
+# The drawing (Task 8): our own rebuild from these typed tables (generators iss_station.py, iss_arrays.py, idss_passive_ring.py). The numbers are read off model D
+# by area-weighted radial slices and plane fits (no vertices leave the measure), rounded to 1 cm; the photos I_*, D_Iss* win where they differ.
+# Lathes: profile_m [station along the axis, radius]; centre_m the two other coordinates in axis order.
+
+[paint]
+us_albedo = [0.70, 0.70, 0.68]   # [E] I_The_International..., D_Crew_Dragon_Endeavour: Whipple shields read silver-white in sun
+ru_albedo = [0.78, 0.72, 0.58]   # [E] I_The_International... beige MLI on Nauka, Zvezda, Poisk
+beam_albedo = [0.74, 0.72, 0.66] # [E] fabric
+truss_albedo = [0.60, 0.60, 0.58]  # [E] D_Crew_Dragon_Endeavour: bare grey structure
+payload_albedo = [0.55, 0.53, 0.50]  # [E] mixed boxes
+pma_albedo = [0.13, 0.13, 0.14]  # [E] D_Iss072e096331: PMA dark with white straps
+ida_albedo = [0.70, 0.66, 0.55]  # [E] D_Iss072e096331, D_Iss072e144451: beige blanket on the IDA barrel
+ida_face_albedo = [0.38, 0.38, 0.39]  # [E] machined face; no photo of the bare face, D_Iss065e002827 shows Dragon's dark
+ida_ring_albedo = [0.45, 0.45, 0.46]  # [E] ring and petals lit pale, D_Iss065e002827 (Dragon's)
+ida_hook_albedo = [0.60, 0.60, 0.61]  # [E] bare hooks, pins
+pocket_albedo = [0.06, 0.06, 0.065]  # [E] Fig 3.2.3-1 [p37]: the dark bars of the latches
+fitting_albedo = [0.62, 0.60, 0.55]  # [E] targets, handrails
+array_albedo = [0.42, 0.34, 0.33]  # [E] I_The_International...: legacy blankets copper-brown lit from behind; the map adds cells
+irosa_albedo = [0.25, 0.26, 0.34]  # [E] same photo family, iROSA darker and bluer; map adds cells
+radiator_albedo = [0.86, 0.86, 0.84]  # [E] D_Crew_Dragon_Endeavour, station photos: white panels; the map adds the seams
+mast_albedo = [0.55, 0.50, 0.42]  # [E] FASTMast / canister
+arm_albedo = [0.74, 0.70, 0.62]   # [E] D_Crew_Dragon_Endeavour, D_Iss065e002827: fabric-covered Canadarm2
+
+[pose]
+# Fixed view pose (the game's station has no joint state): the angles the joint nodes carry, about the joint axes. Zero = the file's pose: blankets stand in the x-z plane.
+alpha_deg = [0.0, 0.0]           # [E] port, starboard SARJ at the file's zero: masts along x
+beta_deg = [-90.0, -90.0, -90.0, -90.0, 90.0, 90.0, 90.0, 90.0]  # [E] P4 2A 4A, P6 2B 4B, S4 1A 3A, S6 1B 3B: blankets broadside (normal along z) as in I_STS_135 / I_The_International..., span 109 m; the sign puts the iROSA on the zenith side (the Sun's side at noon)
+# Joint axes, same order. Station frame: alpha about y, beta about x (the mast).
+alpha_axis = [0.0, 1.0, 0.0]     # [D] SARJ on the truss axis
+beta_axis = [1.0, 0.0, 0.0]      # [D] BGA on the mast
+
+[ida]
+# One part drawn twice. Port frame: x out of the port, z the port's up, y = z x x; angle phi from y towards z. Fittings also come from model D (old zenith / forward frames + the corrected up).
+face_outer_r_m = 0.78            # [D] model D IDA2 face: flat out to r 0.78
+barrel_r_m = 0.89                # [D] model D p97 of the barrel -0.62 .. -0.06 m
+barrel_depth_m = 0.64            # [D] model D IDA2 mesh -0.640 m from the mating plane
+floor_depth_m = 0.60             # [E] closed hatch plane in the tunnel: model D shows an open lattice, a dark floor keeps the triangles
+# PMA, relative to its base on Harmony (x 49.12 - 0.45 stack overlap for PMA-2): [s along the port axis, radius, offset towards the ring axis]. 3.20 m base to the mating plane at both ports.
+pma_profile_m = [[0.0, 1.15, 0.0], [0.55, 1.20, 0.03], [0.95, 1.30, 0.18], [1.30, 1.30, 0.34], [1.72, 1.00, 0.60], [2.30, 0.86, 0.72], [2.60, 0.84, 0.72]]  # [D] model D PMA2 slices, rounded; PMA1 (the same part) cross-checks the 1.28-1.45 flare
+pma_base_s_m = 3.20              # [D] model D: base 48.67, mating plane 51.87; base -1.83, plane -5.03
+band_depth_m = [0.42, 0.26]      # [E] D_Iss072e096331: a darker strap band around the barrel
+handrail_phi_deg = [130.0, 172.0, 215.0, 268.0, 345.0, 22.0]  # [D] model D IDA2_Details_Handrails by eye in the close view (+-6 deg)
+handrail_depth_m = 0.33          # [D] model D axial -0.57 .. -0.09
+handrail_length_m = 0.32         # [D] model D
+handrail_r_m = 0.945             # [D] model D 0.90 .. 0.97
+target_rods = [[150.0, 0.06, 1.14], [240.0, 0.07, 1.18], [290.0, 0.06, 1.14], [40.0, 0.06, 1.14]]  # [D] model D rods with a ball (phi, depth m, end radius m) +-6 deg
+target_plate = [100.0, 0.33, 1.16, 0.52]  # [D] model D the lobed plate (phi, depth, end radius, tangential width)
+fitting_box = [5.0, 0.04, 1.08, 0.26, 0.14]  # [D] model D (phi, depth, end radius, tangential, axial)
+petal_plate_m = 0.012            # [E] plate thickness of the frame, by eye in model D
+petal_bar_m = 0.03               # [D] model D petal lattice bars about 3 cm wide
+
+[truss_lattice]
+member_m = 0.14  # [E] square longeron
+brace_m = 0.07  # [E] brace
+
+[array_shape]
+blanket_width_m = 4.28  # [D] P4_Array_2A z -11.22 .. -6.94
+mast_radius_m = 0.25  # [E] the FASTMast seen as one bar, model z -6.46 .. -4.56 with fittings
+canister_m = [2.9, 2.4, 1.5]  # [D] base box of the array mesh: along the mast, across, thick
+tip_bar_m = 0.35  # [E] tension bar across the blanket tips
+irosa_boom_m = 0.08  # [E]
+
+[[lathe]]
+id = "Zvezda_SM"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "ru"  # [E]
+centre_m = [0, 0]  # [D]
+profile_m = [[0.0, 1.7], [0.45, 2.06], [0.75, 2.09], [5.25, 2.18], [6.45, 1.59], [7.05, 1.64], [7.35, 2.0], [8.85, 2.05], [9.15, 1.61], [10.05, 1.47], [10.65, 0.96], [12.15, 1.25], [12.75, 1.12], [13.17, 0.77]]  # [D]
+
+[[lathe]]
+id = "Zarya_FGB"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "ru"  # [E]
+centre_m = [0, 0]  # [D]
+profile_m = [[13.18, 0.98], [13.93, 1.26], [14.53, 1.93], [14.83, 2.06], [19.93, 2.03], [22.93, 1.9], [23.23, 1.49], [23.83, 1.27], [25.03, 1.17], [25.94, 0.66]]  # [D]
+
+[[lathe]]
+id = "Node1"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "us"  # [E]
+centre_m = [0, 0]  # [D]
+profile_m = [[27.8, 1.19], [28.18, 1.3], [28.43, 2.08], [28.93, 2.23], [32.93, 2.21], [33.18, 1.6], [33.43, 1.21], [33.68, 1.2]]  # [D]
+
+[[lathe]]
+id = "USLab"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "us"  # [E]
+centre_m = [0, 0]  # [D]
+profile_m = [[33.34, 0.99], [33.72, 1.93], [33.97, 2.21], [41.72, 2.21], [41.97, 1.61], [42.22, 1.2], [42.47, 1.2]]  # [D]
+
+[[lathe]]
+id = "Node2"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "us"  # [E]
+centre_m = [0, 0]  # [D]
+profile_m = [[41.96, 1.01], [42.33, 1.26], [42.58, 2.19], [42.83, 2.24], [48.33, 2.24], [48.58, 2.01], [48.83, 1.27], [49.12, 1.19]]  # [D]
+
+[[lathe]]
+id = "PMA1"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "pma"  # [E]
+centre_m = [0, -0.21]  # [D]
+profile_m = [[25.53, 0.92], [25.71, 1.13], [25.95, 1.25], [26.79, 1.28], [27.39, 1.12], [27.87, 1.33], [28.29, 1.15]]  # [D]
+
+[[lathe]]
+id = "Node3"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "us"  # [E]
+centre_m = [31.31, 0]  # [D]
+profile_m = [[-9.04, 1.19], [-8.67, 1.32], [-8.42, 2.18], [-8.17, 2.24], [-2.67, 2.24], [-2.42, 2.1], [-2.17, 1.01], [-1.99, 1.0]]  # [D]
+
+[[lathe]]
+id = "Cupola"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "us"  # [E]
+centre_m = [31.29, -6.65]  # [D]
+profile_m = [[1.89, 1.06], [2.34, 1.26], [2.74, 1.19], [2.84, 0.93], [3.43, 0.6]]  # [D]
+
+[[lathe]]
+id = "Columbus"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "us"  # [E]
+centre_m = [46.72, 0]  # [D]
+profile_m = [[1.97, 1.13], [2.34, 1.45], [2.59, 2.07], [2.84, 2.24], [8.09, 2.21], [8.69, 1.27]]  # [D]
+
+[[lathe]]
+id = "JEM_PM"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "us"  # [E]
+centre_m = [46.73, 0]  # [D]
+profile_m = [[-13.38, 2.03], [-12.76, 1.99], [-12.01, 2.24], [-2.51, 2.24], [-1.96, 1.08]]  # [D]
+
+[[lathe]]
+id = "JEM_PS"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "us"  # [E]
+centre_m = [46.73, -9.95]  # [D]
+profile_m = [[-6.0, 1.75], [-5.7, 2.23], [-2.7, 2.27], [-2.5, 2.21], [-2.3, 1.74], [-2.1, 1.08], [-1.87, 1.06]]  # [D]
+
+[[lathe]]
+id = "Airlock"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "us"  # [E]
+centre_m = [31.12, 0]  # [D]
+profile_m = [[1.97, 1.13], [2.19, 1.21], [2.34, 1.58], [2.49, 1.78], [4.44, 1.78], [4.59, 1.59], [4.74, 1.2], [5.19, 1.24], [5.34, 1.56], [5.64, 1.55], [6.24, 1.34], [6.84, 1.4], [6.99, 1.22], [7.58, 0.97]]  # [D]
+
+[[lathe]]
+id = "Bishop_Airlock"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "us"  # [E]
+centre_m = [31.29, 0]  # [D]
+profile_m = [[-10.53, 0.56], [-10.18, 1.0], [-9.98, 1.08], [-9.08, 1.08], [-8.78, 1.0], [-8.65, 0.87]]  # [D]
+
+[[lathe]]
+id = "BEAM"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "beam"  # [E]
+centre_m = [27.34, 0]  # [D]
+profile_m = [[-8.37, 0.78], [-8.07, 1.27], [-7.71, 1.73], [-5.67, 1.74], [-5.55, 1.71], [-5.19, 1.18], [-4.94, 0.57]]  # [D]
+
+[[lathe]]
+id = "MLM"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "ru"  # [E]
+centre_m = [12.05, 0]  # [D]
+profile_m = [[2.2, 1.2], [2.6, 2.05], [7.45, 1.9], [8.35, 2.09], [8.95, 1.83], [11.05, 1.92], [12.4, 1.9], [12.85, 1.1]]  # [D]
+
+[[lathe]]
+id = "MLM_zenith_port"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "ru"  # [E]
+centre_m = [12.05, 0]  # [D]
+profile_m = [[0.4, 0.72], [1.45, 0.92], [3.0, 0.92]]  # [D]
+
+[[lathe]]
+id = "MLM_nadir_port"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "ru"  # [E]
+centre_m = [12.05, 0]  # [D]
+profile_m = [[11.9, 0.95], [13.41, 0.95]]  # [D]
+
+[[lathe]]
+id = "MLM_side_port"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "x"  # [D]
+paint = "ru"  # [E]
+centre_m = [-0.4, 13.0]  # [D]
+profile_m = [[13.7, 0.45], [15.7, 0.45]]  # [D]
+
+[[lathe]]
+id = "MRM1"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "ru"  # [E]
+centre_m = [24.62, 0]  # [D]
+profile_m = [[0.39, 0.72], [0.89, 1.04], [1.29, 1.15], [5.69, 1.16], [5.89, 1.12], [6.29, 0.71], [6.4, 0.64]]  # [D]
+
+[[lathe]]
+id = "MRM2"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "ru"  # [E]
+centre_m = [12.06, 0]  # [D]
+profile_m = [[-5.89, 0.7], [-5.59, 0.79], [-5.11, 1.3], [-4.63, 1.3], [-4.39, 1.17], [-3.55, 1.26], [-3.07, 1.11], [-2.71, 1.2], [-2.47, 1.13], [-2.23, 0.87], [-1.84, 0.79]]  # [D]
+
+[[lathe]]
+id = "Prichal"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "ru"  # [E]
+centre_m = [12.05, 0]  # [D]
+profile_m = [[12.91, 0.3], [13.26, 0.4], [13.36, 0.77], [13.56, 0.84], [13.96, 1.32], [14.46, 1.65], [15.76, 1.61], [16.36, 1.3], [16.66, 0.85], [17.0, 0.71]]  # [D]
+
+[[lathe]]
+id = "Z1_dish_a"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "truss"  # [E]
+centre_m = [31.2, -4.2]  # [D]
+profile_m = [[-10.25, 0.92], [-10.15, 0.92], [-9.75, 0.12]]  # [D]
+
+[[lathe]]
+id = "Z1_dish_b"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "z"  # [D]
+paint = "truss"  # [E]
+centre_m = [31.2, 1.0]  # [D]
+profile_m = [[-10.25, 0.92], [-10.15, 0.92], [-9.75, 0.12]]  # [D]
+
+[[lathe]]
+id = "PMM"  # [D] model D radial slices (area-weighted p90), rounded
+axis = "y"  # [D]
+paint = "us"  # [E]
+centre_m = [36.49, 0]  # [D]
+profile_m = [[-8.89, 1.7], [-8.59, 2.09], [-6.59, 2.29], [-4.7, 2.08], [-4.4, 1.7]]  # [D]
+
+[[box]]
+id = "S0_core"  # [D] Truss_S0 p5..p100
+paint = "truss"  # [E]
+min_m = [34.18, -6.71, -7.09]  # [D]
+max_m = [37.5, 6.71, -2.6]  # [D]
+
+[[box]]
+id = "S0_keel"  # [D] Truss_S0 the forward leg onto Destiny
+paint = "truss"  # [E]
+min_m = [37.5, -2.5, -4.5]  # [D]
+max_m = [40.7, 2.5, -0.88]  # [D]
+
+[[box]]
+id = "ELC_1"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [32.42, -25.52, -2.77]  # [D]
+max_m = [37.39, -23.35, 2.32]  # [D]
+
+[[box]]
+id = "ELC_2"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [32.41, 23.63, -12.02]  # [D]
+max_m = [37.38, 25.8, -6.94]  # [D]
+
+[[box]]
+id = "ELC_3"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [32.41, -24.96, -12.03]  # [D]
+max_m = [37.38, -23.17, -6.94]  # [D]
+
+[[box]]
+id = "ELC_4"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [32.42, 20.08, -2.77]  # [D]
+max_m = [37.38, 22.24, 2.33]  # [D]
+
+[[box]]
+id = "ESP2"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [33.75, 2.76, 0.11]  # [D]
+max_m = [36.81, 7.67, 1.39]  # [D]
+
+[[box]]
+id = "ESP3"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [32.44, 23.64, -2.94]  # [D]
+max_m = [37.34, 24.92, 0.5]  # [D]
+
+[[box]]
+id = "AMS"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [32.44, 19.73, -10.56]  # [D]
+max_m = [37.36, 22.94, -6.61]  # [D]
+
+[[box]]
+id = "JEM_EF"  # [D] mesh box, the platform deck only; payloads below not drawn
+paint = "payload"  # [E]
+min_m = [45.25, -18.75, 1.2]  # [D]
+max_m = [50.22, -13.1, 1.6]  # [D]
+
+[[box]]
+id = "Bartolomeo"  # [D] mesh box, the platform deck only (dock2_iface: below z 1 the IDA is free)
+paint = "payload"  # [E]
+min_m = [49.02, 2.59, 1.0]  # [D]
+max_m = [51.38, 8.68, 1.6]  # [D]
+
+[[box]]
+id = "Columbus_platform"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [46.09, 7.8, -2.13]  # [D]
+max_m = [47.36, 9.66, 2.15]  # [D]
+
+[[box]]
+id = "JEM_ELP"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [47.64, -15.15, -5.67]  # [D]
+max_m = [48.21, -12.68, -1.89]  # [D]
+
+[[box]]
+id = "MT"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [37.37, -7.56, -5.89]  # [D]
+max_m = [38.21, -2.93, -3.56]  # [D]
+
+[[box]]
+id = "MBS"  # [D] mesh box
+paint = "payload"  # [E]
+min_m = [38.24, -7.54, -7.45]  # [D]
+max_m = [40.74, -2.99, -3.78]  # [D]
+
+[[bay]]
+id = "Z1"  # [D] Truss_Z1 y mesh, x z p5..p95
+y_m = [-2.3, 2.3]  # [D]
+x_m = [30.1, 32.38]  # [D]
+z_m = [-7.0, -2.2]  # [D]
+count = 2  # [E] bays, by the model view
+outboard = 0  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "P1"  # [D] Truss_P1 y mesh, x z p5..p95
+y_m = [-20.37, -6.55]  # [D]
+x_m = [35.67, 37.37]  # [D]
+z_m = [-7.02, -2.72]  # [D]
+count = 5  # [E] bays, by the model view
+outboard = 0  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "S1"  # [D] Truss_S1 y mesh, x z p5..p95
+y_m = [6.55, 20.37]  # [D]
+x_m = [35.67, 37.37]  # [D]
+z_m = [-7.02, -2.72]  # [D]
+count = 5  # [E] bays, by the model view
+outboard = 0  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "P3"  # [D] Truss_P3 y mesh, x z p5..p95
+y_m = [-26.09, -20.34]  # [D]
+x_m = [34.11, 37.38]  # [D]
+z_m = [-6.81, -2.86]  # [D]
+count = 2  # [E] bays, by the model view
+outboard = 0  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "S3"  # [D] Truss_S3 y mesh, x z p5..p95
+y_m = [20.33, 26.08]  # [D]
+x_m = [34.11, 37.38]  # [D]
+z_m = [-6.81, -2.86]  # [D]
+count = 2  # [E] bays, by the model view
+outboard = 0  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "P4"  # [D] Truss_P4 y mesh, x z p5..p95
+y_m = [-33.74, -25.98]  # [D]
+x_m = [34.3, 37.2]  # [D]
+z_m = [-6.38, -3.3]  # [D]
+count = 3  # [E] bays, by the model view
+outboard = 1  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "S4"  # [D] Truss_S4 y mesh, x z p5..p95
+y_m = [25.83, 33.75]  # [D]
+x_m = [34.98, 37.88]  # [D]
+z_m = [-6.38, -3.3]  # [D]
+count = 3  # [E] bays, by the model view
+outboard = 2  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "P5"  # [D] Truss_P5 y mesh, x z p5..p95
+y_m = [-35.81, -32.15]  # [D]
+x_m = [34.25, 36.44]  # [D]
+z_m = [-6.55, -3.25]  # [D]
+count = 2  # [E] bays, by the model view
+outboard = 1  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "S5"  # [D] Truss_S5 y mesh, x z p5..p95
+y_m = [32.16, 35.81]  # [D]
+x_m = [35.08, 37.27]  # [D]
+z_m = [-6.55, -3.25]  # [D]
+count = 2  # [E] bays, by the model view
+outboard = 2  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "P6"  # [D] Truss_P6 y mesh, x z p5..p95
+y_m = [-48.84, -35.42]  # [D]
+x_m = [34.29, 36.74]  # [D]
+z_m = [-6.35, -3.3]  # [D]
+count = 5  # [E] bays, by the model view
+outboard = 1  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[bay]]
+id = "S6"  # [D] Truss_S6 y mesh, x z p5..p95
+y_m = [35.43, 48.76]  # [D]
+x_m = [34.78, 37.23]  # [D]
+z_m = [-6.35, -3.3]  # [D]
+count = 5  # [E] bays, by the model view
+outboard = 2  # [E] 0 inboard, 1 port alpha joint, 2 starboard alpha joint
+
+[[plate]]
+id = "Zvezda_wing_port"  # [D] plane fit of the mesh part
+paint = "wing_ru"  # [E]
+corners_m = [[9.24, -15.71, 0.66], [9.89, -9.16, 1.44], [6.9, -8.44, -2.14], [6.26, -14.99, -2.92]]  # [D]
+
+[[plate]]
+id = "Zvezda_wing_stbd"  # [D] plane fit of the mesh part
+paint = "wing_ru"  # [E]
+corners_m = [[6.83, 2.4, -2.22], [9.34, 2.4, 0.77], [9.34, 15.39, 0.77], [6.83, 15.39, -2.22]]  # [D]
+
+[[plate]]
+id = "Zarya_wing_port"  # [D] plane fit of the mesh part
+paint = "wing_ru"  # [E]
+corners_m = [[18.24, -4.71, -1.69], [21.43, -3.61, -3.01], [22.85, -3.62, 0.42], [19.67, -4.72, 1.74]]  # [D]
+
+[[plate]]
+id = "Zarya_wing_stbd"  # [D] plane fit of the mesh part
+paint = "wing_ru"  # [E]
+corners_m = [[18.24, 4.72, -1.68], [21.42, 3.62, -3.0], [22.85, 3.62, 0.43], [19.66, 4.71, 1.75]]  # [D]
+
+[[plate]]
+id = "Nauka_wing_stbd"  # [D] plane fit of the mesh part
+paint = "wing_ru"  # [E]
+corners_m = [[13.93, 3.0, 8.32], [13.93, 12.01, 8.26], [10.22, 12.01, 8.26], [10.22, 3.0, 8.32]]  # [D]
+
+[[plate]]
+id = "Nauka_radiator_a"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[15.75, -3.1, 3.23], [17.2, -3.1, 3.23], [17.2, -3.1, 6.22], [15.75, -3.1, 6.22]]  # [D]
+
+[[plate]]
+id = "Nauka_radiator_b"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[17.4, -3.1, 3.23], [18.85, -3.1, 3.23], [18.85, -3.1, 6.22], [17.4, -3.1, 6.22]]  # [D]
+
+[[plate]]
+id = "Nauka_radiator_c"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[19.0, -3.1, 3.23], [20.43, -3.1, 3.23], [20.43, -3.1, 6.22], [19.0, -3.1, 6.22]]  # [D]
+
+[[plate]]
+id = "Nauka_wing_port"  # [D] plane fit of the mesh part
+paint = "wing_ru"  # [E]
+corners_m = [[13.93, -3.0, 8.32], [13.93, -12.01, 8.26], [10.22, -12.01, 8.26], [10.22, -3.0, 8.32]]  # [D]
+
+[[plate]]
+id = "PVR_P4"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[35.41, -31.2, 1.02], [35.41, -27.78, 1.02], [35.41, -27.78, 10.34], [35.41, -31.2, 10.34]]  # [D]
+
+[[plate]]
+id = "PVR_S4"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[36.11, 27.78, 1.02], [36.11, 31.2, 1.02], [36.11, 31.2, 10.34], [36.11, 27.78, 10.34]]  # [D]
+
+[[plate]]
+id = "PVR_P6"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[35.41, -46.28, 1.0], [35.41, -42.85, 1.0], [35.41, -42.85, 10.35], [35.41, -46.28, 10.35]]  # [D]
+
+[[plate]]
+id = "PVR_S6"  # [D] plane fit of the mesh part
+paint = "radiator"  # [E]
+corners_m = [[36.11, 42.85, 0.98], [36.11, 46.28, 0.98], [36.11, 46.28, 10.35], [36.11, 42.85, 10.35]]  # [D]
+
+[[tube]]
+id = "Nauka_ERA_boom"  # [E] from model D close views
+a_m = [10.5, -2.0, 4.9]  # [E]
+b_m = [10.5, -8.5, 5.7]  # [E]
+radius_m = 0.11  # [E]
+paint = "arm"  # [E]
+
+[[tube]]
+id = "Nauka_ERA_boom2"  # [E] from model D close views
+a_m = [10.5, -8.5, 5.7]  # [E]
+b_m = [17.0, -13.5, 5.6]  # [E]
+radius_m = 0.11  # [E]
+paint = "arm"  # [E]
+
+[[tube]]
+id = "Zvezda_wing_root_port"  # [E] from model D close views
+a_m = [8.0, -2.0, -0.7]  # [E]
+b_m = [8.0, -8.5, -0.7]  # [E]
+radius_m = 0.08  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "Zvezda_wing_root_stbd"  # [E] from model D close views
+a_m = [8.0, 2.0, -0.7]  # [E]
+b_m = [8.0, 8.5, -0.7]  # [E]
+radius_m = 0.08  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "Nauka_wing_root_port"  # [E] from model D close views
+a_m = [12.05, -1.9, 8.3]  # [E]
+b_m = [12.05, -3.0, 8.3]  # [E]
+radius_m = 0.08  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "Nauka_wing_root_stbd"  # [E] from model D close views
+a_m = [12.05, 1.9, 8.3]  # [E]
+b_m = [12.05, 3.0, 8.3]  # [E]
+radius_m = 0.08  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "PVR_root_P4"  # [E] from model D close views
+a_m = [35.41, -29.5, -3.3]  # [E]
+b_m = [35.41, -29.5, 1.02]  # [E]
+radius_m = 0.12  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "PVR_root_S4"  # [E] from model D close views
+a_m = [36.11, 29.5, -3.3]  # [E]
+b_m = [36.11, 29.5, 1.02]  # [E]
+radius_m = 0.12  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "PVR_root_P6"  # [E] from model D close views
+a_m = [35.41, -44.5, -3.3]  # [E]
+b_m = [35.41, -44.5, 1.0]  # [E]
+radius_m = 0.12  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "PVR_root_S6"  # [E] from model D close views
+a_m = [36.11, 44.5, -3.3]  # [E]
+b_m = [36.11, 44.5, 0.98]  # [E]
+radius_m = 0.12  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "Z1_mast_a"  # [E] from model D close views
+a_m = [31.2, -0.5, -6.5]  # [E]
+b_m = [31.2, -4.2, -8.2]  # [E]
+radius_m = 0.11  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "Z1_mast_a2"  # [E] from model D close views
+a_m = [31.2, -4.2, -8.2]  # [E]
+b_m = [31.2, -4.2, -9.8]  # [E]
+radius_m = 0.09  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "Z1_mast_b"  # [E] from model D close views
+a_m = [31.2, 1.0, -7.0]  # [E]
+b_m = [31.2, 1.0, -9.8]  # [E]
+radius_m = 0.09  # [E]
+paint = "truss"  # [E]
+
+[[tube]]
+id = "SSRMS_upper"  # [E] from model D close views
+a_m = [37.9, 1.5, 3.2]  # [E]
+b_m = [43.5, -0.6, 3.65]  # [E]
+radius_m = 0.18  # [E]
+paint = "arm"  # [E]
+
+[[tube]]
+id = "SSRMS_lower"  # [E] from model D close views
+a_m = [43.5, -0.6, 3.65]  # [E]
+b_m = [46.0, 4.9, 7.3]  # [E]
+radius_m = 0.18  # [E]
+paint = "arm"  # [E]
+
+[[irosa_plane]]
+id = "IROSA_Deployed_P44A"  # [D] plane fit
+corners_m = [[57.64, -28.96, -1.16], [38.65, -32.3, -1.2], [38.66, -32.3, -7.21], [57.66, -28.95, -7.17]]  # [D]
+
+[[irosa_plane]]
+id = "IROSA_Deployed_P62B"  # [D] plane fit
+corners_m = [[57.64, -43.99, -1.16], [38.65, -47.34, -1.2], [38.66, -47.33, -7.21], [57.66, -43.98, -7.17]]  # [D]
+
+[[irosa_plane]]
+id = "IROSA_Deployed_P64B"  # [D] plane fit
+corners_m = [[13.17, -43.99, -8.57], [32.16, -47.34, -8.52], [32.15, -47.33, -2.5], [13.16, -43.98, -2.54]]  # [D]
+
+[[irosa_plane]]
+id = "IROSA_Deployed_S41A"  # [D] plane fit
+corners_m = [[58.34, 28.89, -8.54], [39.35, 32.24, -8.5], [39.36, 32.23, -2.48], [58.35, 28.88, -2.52]]  # [D]
+
+[[irosa_plane]]
+id = "IROSA_Deployed_S43A"  # [D] plane fit
+corners_m = [[13.87, 28.9, -1.16], [32.87, 32.25, -1.2], [32.86, 32.24, -7.22], [13.86, 28.89, -7.18]]  # [D]
+
+[[irosa_plane]]
+id = "IROSA_Deployed_S61B"  # [D] plane fit
+corners_m = [[13.87, 43.99, -1.15], [32.87, 47.34, -1.19], [32.86, 47.33, -7.21], [13.86, 43.98, -7.17]]  # [D]
+
+[[wing]]
+array = "P4_Array_2A"  # [D]
+joint = "PORT_BETA_ROT_2A"  # [D]
+alpha = 0  # [D] 0 port, 1 starboard SARJ
+irosa = ""  # [D] no iROSA on this wing in model D
+
+[[wing]]
+array = "P4_Array_4A"  # [D]
+joint = "PORT_BETA_ROT_4A"  # [D]
+alpha = 0  # [D] 0 port, 1 starboard SARJ
+irosa = "IROSA_Deployed_P44A"  # [D] 
+
+[[wing]]
+array = "P6_2B_Array"  # [D]
+joint = "PORT_BETA_ROT_2B"  # [D]
+alpha = 0  # [D] 0 port, 1 starboard SARJ
+irosa = "IROSA_Deployed_P62B"  # [D] 
+
+[[wing]]
+array = "P6_4B_Array"  # [D]
+joint = "PORT_BETA_ROT_4B"  # [D]
+alpha = 0  # [D] 0 port, 1 starboard SARJ
+irosa = "IROSA_Deployed_P64B"  # [D] 
+
+[[wing]]
+array = "S4_Array_1A"  # [D]
+joint = "STBD_BETA_ROT_1A"  # [D]
+alpha = 1  # [D] 0 port, 1 starboard SARJ
+irosa = "IROSA_Deployed_S41A"  # [D] 
+
+[[wing]]
+array = "S4_Array_3A"  # [D]
+joint = "STBD_BETA_ROT_3A"  # [D]
+alpha = 1  # [D] 0 port, 1 starboard SARJ
+irosa = "IROSA_Deployed_S43A"  # [D] 
+
+[[wing]]
+array = "S6_1B_Array"  # [D]
+joint = "STBD_BETA_ROT_1B"  # [D]
+alpha = 1  # [D] 0 port, 1 starboard SARJ
+irosa = "IROSA_Deployed_S61B"  # [D] 
+
+[[wing]]
+array = "S6_3B_Array"  # [D]
+joint = "STBD_BETA_ROT_3B"  # [D]
+alpha = 1  # [D] 0 port, 1 starboard SARJ
+irosa = ""  # [D] no iROSA on this wing in model D
+
+[[gamma]]
+id = "P1_Radiator"  # [D]
+joint = "PORT_TRRJ_GAMMA_ROT"  # [D]
+x_m = [12.47, 35.66]  # [D]
+panels_y_m = [[-20.48, -17.58], [-17.10, -12.28], [-11.79, -9.38]]  # [D] mesh y clusters
+z_m = -4.85  # [D]
+zigzag_m = [8, 0.55]  # [D] panels per wing, half height of the accordion, read in the model view (the mesh z range -6.9 .. -2.84 includes the root)
+
+[[gamma]]
+id = "S1_Radiator"  # [D]
+joint = "STBD_TRRJ_GAMMA_ROT"  # [D]
+x_m = [12.47, 35.66]  # [D]
+panels_y_m = [[9.38, 11.79], [12.28, 17.10], [17.58, 20.48]]  # [D] mirrored
+z_m = -4.85  # [D]
+zigzag_m = [8, 0.55]  # [D]
+

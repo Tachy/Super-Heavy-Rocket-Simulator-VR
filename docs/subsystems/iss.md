@@ -33,7 +33,7 @@ COMPLETE 2026-10-20.
 - **ISS vehicle** (`config/vehicles/iss.toml`): one stage, no engines. 460,320 kg, drag area 1,177.76 m^2, C_D 1.5 [S:
   OEM header] (replaced by the header of the OEM in use); fixed drag C_D A along the oncoming flow
   (`aero/fixed_area_aero`); SRP `solar_area_m2` 2,500 m^2 [E] (the OEM uses 0); principal inertia [E]; ports IDA-2
-  (Harmony forward, +XVV: V-bar) and IDA-3 (Harmony zenith: R-bar) with position, outward axis, clocking `up` [E];
+  (Harmony forward, +XVV: V-bar) and IDA-3 (Harmony zenith: R-bar) with position, outward axis, clocking `up` [D] (Port clocking below);
   collision capsules (modules) and boxes (truss, arrays) [E]. Drag acts at every height US76 covers (to 1,000 km).
 - **Ideal attitude** (documented simplification): a body with `[stage.station]` snaps to LVLH (+XVV: body x along the
   velocity, z nadir) rotated by the TEA `body_in_lvlh_deg` [E: yaw -3, pitch -6, roll 0.5 deg] after each integrator
@@ -110,13 +110,32 @@ COMPLETE 2026-10-20.
   transfer legs end at different points); no limit is touched. Test fixtures that said "station x = N m" now convert
   through the configured IDA-2 position (`docking_test_support.hpp`), `beside_modules` stands at station x 30 m (45 m is
   inside Columbus now), the hull-contact check at x 30.
-- **Gaps of the config against the real station** (not changed here, next task): no Unity / Destiny / Node 3 / Cupola /
+- **Gaps of the collision shapes against the real station** (the drawing has them since Task 8, `vehicle-models.md`; the collision capsules and boxes are unchanged, the view does not touch the simulation): no Unity / Destiny / Node 3 / Cupola /
   Quest / Bishop / BEAM / PMM / Z1 shapes (the US stack is one capsule), no Nauka (MLM, nadir of Zvezda, x 10-20.4,
   13 m long, with the ERA arm), Prichal (nadir of Nauka, x 10.5-13.6), Rassvet (MRM1, nadir of Zarya, x 22-27), Poisk
   (MRM2, zenith of Zvezda, x 10.8-13.3), no iROSA (6 in the model on 8 array positions), no radiators; the truss box
   (half y 54.5) is 5.7 m wider than the truss (48.8, without array width); the array boxes stand at y +-38 against
   blankets at +-33.8 / +-48.8; truss centre x 38 against S0 at 35.76 (mesh centre 37.9). The name search of Task 1 found no
   Nauka / Prichal because the nodes are `MLM` and `Russian_RSNode_DockingModule`.
+
+### Port clocking (Task 8, plan 2026-11-02-falcon-dragon-iss-models)
+- **Change.** IDA-2 `up` [0, 0, -1] (zenith) -> [0, -0.866, -0.5]; IDA-3 `up` [1, 0, 0] (forward) -> [-0.5, -0.866, 0]. The rings could not meet model D with the old `up`: the IDD puts petals at theta 90 / 210 / 330 about `up`, and model D's IDA-2 petals stand 60 deg off that about the zenith.
+- **Evidence.** (1) Measured: model D's IDA-3 petals fit `up` = forward; IDA-3 is the same part as IDA-2 turned by 180 deg between the two old port frames (azimuth pattern correlation peak at exactly 180), so IDA-2's `up` is nadir or +-120 deg from it: three candidates per port; the model has no guide pins or hooks that could pick one. (2) Dragon's hinge carries a petal (`D_Iss065e002827`, low resolution, my read; as Task 6 drew it). (3) Photos: `D_Crew_Dragon_Endeavour_and_H_II...` (IDA-2): hinge about zenith; `D_Iss072e096331`, `D_Iss072e144451` (IDA-3): nose to the right with Kibo's logistics module to the left, read as starboard. The candidate that fits: hinge 30 deg from zenith towards starboard at IDA-2 (the camera's side), 60 deg from starboard towards aft at IDA-3. **The photos read to about +-30 deg, the IDD's `up` of a real IDA is in no document we hold: a measured clock class (hard, model D) with a photo-picked member (soft).** Dragon's `up` body -z unchanged.
+- **Tags** (`[iss] [docking] [proximity] [rendezvous] [iss_mission]`, 266 cases, 265 passed; the one red is the known `Docked tanker: the ship return flies to the catch`). Task 7 -> this change, limit as tested:
+
+  | quantity | old up | new up | limit |
+  |---|---|---|---|
+  | chain IDA-2: contact / docked after / propellant | 62.5 min / 10.0 min / 31.6 kg | 62.3 / 10.2 / 37.4 | docked 8-13 min |
+  | chain IDA-2: comp / shear / bending | 928 / 93 / 434 | 955 / 84 / 95 | 6500 N / 3200 N / 2800 N m |
+  | chain IDA-3: contact / docked after / propellant | 98.8 / 10.2 / 65.7 | 99.2 / 10.2 / 71.6 | docks within 4 h |
+  | chain IDA-3: comp / shear / bending | 970 / 88 / 270 | 925 / 79 / 209 | as above |
+  | IDSS grid 32 cases: docked; max comp / shear / bending / torsion | 32/32; 1254 / 631 / 2055 / 761 | 32/32; 1252 / 627 / 2061 / 759 | 6500 / 3200 / 2800 / 1500 |
+  | undock IDA-2: separation / departure complete / propellant | 0.0844 m/s / 40.3 min / 5.0 kg | 0.0844 / 32.3 / 4.7 | 60 min / 60 kg |
+  | departure CW IDA-2: sphere / ellipsoid exit; kg | 474 s / 2273 s; 6.5 | 625 s / 2300 s; 6.1 | 3600 s |
+  | departure CW IDA-3 | 477 s / 1619 s; 6.7 | 454 s / 1783 s; 6.2 | 3600 s |
+  | undock -> splashdown: departure kg / RCS left | 5.2 / 1878 | 4.9 / 1890 | splashdown reached |
+
+  Propellant +5.8 / +5.9 kg: the rolled attitude means the port's lateral axes no longer lie on Dragon's body axes, so translation mixes thrusters; probable, not isolated by a run. Departure: the discrete direction pick (Validation), its step again. No limit touched, no physics changed. Three fixtures assumed "IDA-2 port frame = station (x, -y, -z)" (`beside_modules`, two truss-tip cases) and failed first: they stood somewhere else after the change; `docking_test_support.hpp` now converts station axes through the configured `up`. The Proximity and Docking tables in Validation hold the older `up` where not listed here.
 
 ### Crew Dragon translation and relative navigation (i2)
 - **Draco layout** [E] kept (user 2026-10-19). Test threshold lateral >= 0.04 m/s^2 [E] (1 m/s in 25 s).
@@ -423,6 +442,8 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   pose, force and peak compression.
 
 ## Open points and known limits
+- Port clocking `up`: which of the three positions model D allows is read from photos (+-30 deg): see Port clocking. A direct source (IDA clocking drawing, a photo of the guide pins) would settle it.
+- Collision shapes still lag the drawing (truss box half y 54.5, array boxes): the drawn Nauka, Prichal, Rassvet, Poisk, Node 3 etc. have no collision. Physics decision.
 - A phase plan (with `earliest_arrival_s`) has no boost check: the coelliptic and approach burns absorb the phase
   orbit's drag error (~-34 km, ~+13 m/s at 1.5x air); a re-plan from the eccentric phase orbit cost more (635 kg: the
   boost leaves the perigee); a phase trim burn after drag tracking would be the fix.

@@ -17,7 +17,7 @@ GD = build_models.ROOT / "game" / "vehicle" / "vehicle_models.gd"
 @pytest.mark.parametrize("vehicle_id", IDS)
 def test_every_model_vehicle_has_a_table_row_with_existing_scripts(vehicle_id):
     table = vehicle_spec.generator_table(vehicle_id)
-    assert table["kind"] in ("starship", "falcon9", "dragon", "generic")
+    assert table["kind"] in ("starship", "falcon9", "dragon", "iss", "generic")
     for p in build_models.vehicle_sources(table):
         assert p.is_file(), p
     assert f'"{vehicle_id}"' in GD.read_text(encoding="utf-8")  # the game's MODEL_VEHICLE_IDS lists it too
@@ -48,6 +48,8 @@ def test_stub_detail_file_is_valid_and_loads(vehicle_id):
 
 @pytest.mark.parametrize("vehicle_id", IDS[3:])
 def test_vehicle_without_generators_writes_nothing_and_exits_zero(vehicle_id, tmp_path, monkeypatch, capsys):
+    real_table = vehicle_spec.generator_table  # every vehicle has generators by now: a table row without any is what this case tests
+    monkeypatch.setattr(vehicle_spec, "generator_table", lambda vid: {**real_table(vid), "generators": []})
     monkeypatch.setattr(build_models, "find_blender", lambda explicit=None: Path("blender.exe"))
     monkeypatch.setattr(build_models, "blender_version", lambda exe: "test")
     out = tmp_path / "models" / vehicle_id

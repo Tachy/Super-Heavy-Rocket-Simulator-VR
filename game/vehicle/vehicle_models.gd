@@ -18,20 +18,21 @@ const MANIFEST := "manifest.json"
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
-	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism"], "iss": [],
+	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism"], "iss": ["iss_station", "iss_arrays", "iss_rings"],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
-	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": [],
+	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
-const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": []}
+const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": ["iss_textures.py"]}
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
 const ENGINE_FILE := {false: "raptor", true: "rvac"}
 const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
 ## Nozzle exit below the gimbal point when no model says better (the former view's value).
 const DEFAULT_EXIT_DEPTH_M := 3.0
 const HULL_SHADER := preload("res://shaders/vehicle_hull.gdshader")
+const MAPPED_SHADER := preload("res://shaders/lit_aerial_mapped.gdshader")
 ## "booster" = the booster hull: mode 0 with the baked steel map (the ship's hull carries it in mode 1).
 const HULL_MODE := {"steel": 0, "booster": 0, "ship": 1, "flap": 2, "fin_frame": 0, "fin_cells": 0, "fin_band": 0, "dark": 0}
 ## [E] Sunlit frames (NSF photo 2026-03, aerial 2026-04, f12 file 1804 s): the fin rim reads dark grey, the cells black. Albedo
@@ -133,6 +134,16 @@ static func _load(vehicle_id: String) -> Dictionary:
 			"engine": {false: _merged(parts["merlin"]), true: _merged(parts["mvac"])},
 			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 		}
+	if vehicle_id == "iss":
+		var fixed: Dictionary = parts["iss_station"].duplicate()
+		fixed.merge(parts["iss_rings"])
+		return {
+			"manifest": manifest,
+			"hulls": {"station": fixed},
+			"jointed": parts["iss_arrays"],  # relative to their joints' origins (manifest "joints"): VehicleView._build_joints
+			"flap": {}, "grid_fin": {}, "engine": {},
+			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
+		}
 	if vehicle_id == "crew_dragon":
 		return {
 			"manifest": manifest,
@@ -231,6 +242,23 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 		painted.set_shader_parameter("steel_metallic", float(paint["metallic"]))
 		painted.set_shader_parameter("steel_mottle", 0.0)
 		materials[key] = painted
+	var textured: Dictionary = look.get("textured", {})
+	for key: String in textured:  # a painted part with a baked albedo map (the ISS's cells, panel lines): lit_aerial_mapped, the paint's numbers
+		var paint: Dictionary = look["paint"][key]
+		var image := Image.load_from_file(model_dir.path_join(String(textured[key]["file"])))
+		if image == null:
+			continue
+		image.convert(Image.FORMAT_RGBA8)
+		image.generate_mipmaps()
+		var mapped := ShaderMaterial.new()
+		mapped.shader = MAPPED_SHADER
+		var albedo: Array = paint["albedo"]
+		mapped.set_shader_parameter("albedo", Color(albedo[0], albedo[1], albedo[2]))
+		mapped.set_shader_parameter("roughness", float(paint["roughness"]))
+		mapped.set_shader_parameter("metallic", float(paint["metallic"]))
+		mapped.set_shader_parameter("albedo_map", ImageTexture.create_from_image(image))
+		mapped.set_shader_parameter("map_period_m", Vector2(textured[key]["period_m"][0], textured[key]["period_m"][1]))
+		materials[key] = mapped
 	return materials
 
 
