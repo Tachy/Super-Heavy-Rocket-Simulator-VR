@@ -1,6 +1,6 @@
 # Aero derivation (ascent and booster descent drag from the built models)
 
-Drag derived from the drawn geometry (plan `docs/superpowers/plans/2026-11-01-vehicle-physics.md`, Tasks 1, 2, 2b, 4, 4b, 4c). The stack's ascent
+Drag derived from the drawn geometry (plan `docs/superpowers/archive/2026-11-01-vehicle-physics.md`, Tasks 1, 2, 2b, 4, 4b, 4c). The stack's ascent
 table and the Super Heavy's fin table are this tool's output; the descent tables and the ship's table are only compared. No number here was fitted; a disagreement is
 reported as it is.
 
