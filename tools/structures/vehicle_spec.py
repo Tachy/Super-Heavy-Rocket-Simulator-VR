@@ -198,7 +198,7 @@ FALCON9_DETAIL_KEYS = {
             "pusher_anchor_radius_m", "pusher_leg_u_m", "pusher_radius_m"),
     "paint": ("hull_albedo", "interstage_albedo", "octaweb_albedo", "leg_albedo", "stage2_hull_albedo", "engine_plate_albedo",
               "exhaust_albedo", "mvac_albedo"),
-    "second_stage": ("segments", "plate_thickness_m", "top_ring_height_m", "exhaust_radius_m", "exhaust_azimuth_deg"),
+    "second_stage": ("segments", "plate_thickness_m", "skirt_radius_m", "exhaust_radius_m", "exhaust_azimuth_deg"),
     "mvac": ("file", "bell_length_m", "extension_from_exit_m", "top_radius_m", "contour_exponent", "chamber_radius_m",
              "flange_radius_m", "flange_height_m", "wall_m", "mount_height_m", "mount_radius_m", "duct_start_from_exit_m",
              "duct_end_from_exit_m", "segments"),
@@ -250,7 +250,7 @@ def load_falcon9(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Pa
         mvac_engine = tomllib.load(f)
     mvac = {"nozzle_exit_diameter_m": float(mvac_engine["performance"]["nozzle_exit_diameter_m"]), **detail["mvac"]}
     second = {"length_m": float(s2["length_m"]), "diameter_m": float(s2["diameter_m"]), "base_station_m": stage["length_m"],
-              "rcs_pods": s2["rcs"]["pod"]}
+              "engine_station_m": float(s2["engine_group"][0].get("station_m", 0.0)), "rcs_pods": s2["rcs"]["pod"]}
     return {"vehicle_id": vehicle_id, "stages": {"first_stage": stage, "second_stage": second}, "engines": engine_spec,
             "detail": detail, "leg": falcon9_leg(s["landing_legs"], detail["leg"]), "mvac": mvac}
 

@@ -232,10 +232,17 @@ directions = ["tangential_plus", "tangential_minus", "inward", "inward"]  # [S:e
 id = "second_stage"
 name = "Falcon 9 Block 5 second stage"
 display_name = "Medium Launcher Stufe 2"  # [D] display name of the part flying alone, no trademark
-length_m = 13.8                          # [S:wiki_f9]
+length_m = 9.8                           # [D] the hull above its base, the interstage top, up to the trunk's base: at the hull's 3.66 m
+                                         # scale D_SpaceX_Crew_9_Preflight 587 px / 220 px = 9.77 m, F_NHQ202210010026 758 / 281 px = 9.87 m
+                                         # (+-0.2 m, tools/structures/measure/stack_bands.py). Not the 9.2 m of 70 m - 13.1 m - 47.7 m
+                                         # [S:wiki_f9]: 70 m is rounded and the fairing stands on the ledge ~1.2 m below the trunk's base
+                                         # (8.6 + 47.7 + 13.1 = 69.4 m). The published 13.8 m [S:wiki_f9] is the stage with its nozzle: the
+                                         # 4.0 m to the nozzle exit hang below station 0, inside the interstage. Was 13.8 here, the stack 4.0 m
+                                         # too tall (docs/subsystems/falcon9.md "Stack")
 diameter_m = 3.66
 dry_mass_kg = 3820.0                     # [S:wiki_f9] 3.9 t incl. the 80 kg of RCS nitrogen below [E]
-dry_cg_station_m = 4.0                   # [E]
+dry_cg_station_m = 2.4                   # [E] same fraction of the height above the gimbal point as before (4.0 of 13.8 m -> 3.0 of
+                                         # 10.4 m), from the new base. Not measured; was 4.0 above the gimbal point
 payload_mass_kg = 0.0
 fairing_mass_kg = 1900.0                 # [S:wiki_f9]
 
@@ -246,20 +253,21 @@ mass_kg = 75000.0                        # [D] 106.7 t total split at O/F 2.36: 
                                          # and stage-1 gauge at T+112-132 s) puts ~125 t above the first stage
                                          # (12.5 t Dragon [E]); 92.67 t [S:wiki_f9] left the stack ~15 t light and
                                          # the liftoff mass 520 t instead of 549 t [S:wiki_f9]
-base_station_m = 3.0                     # [E]
+base_station_m = -0.15                   # [E] negative: the aft end reaches just below the interstage top, above the engine (gimbal at
+                                         # -0.6; 5.9 m of LOX + 3.6 m of RP-1 fill a 9.8 m hull). Was 3.0 above the gimbal
 
 [[stage.tank]]
 id = "rp1_main"
 contents = "fuel"
 mass_kg = 31700.0                        # [D]
-base_station_m = 9.4                     # [E] above the longer LOX tank
+base_station_m = 5.95                    # [E] above the longer LOX tank, its top 0.2 m under the top plane. Was 9.4
 
 [[stage.tank]]
 id = "rcs_n2"
 contents = "rcs"
 mass_kg = 80.0                           # [E] nitrogen, carved out of the 3.9 t dry mass
 density_kg_m3 = 250.0                    # [E] COPV gas at ~300 bar
-base_station_m = 1.0                     # [E]
+base_station_m = 1.0                     # [E] station 0 is now the interstage top: unchanged number, 0.6 m further from the gimbal
 
 [stage.rcs]
 type = "cold_gas"
@@ -279,6 +287,7 @@ directions = ["tangential_plus", "tangential_minus", "inward", "forward"]
 id = "mvac"
 engine = "merlin_vacuum"
 count = 1
+station_m = -0.6                         # [D] below the interstage top: 13.8 m [S:wiki_f9] - 9.8 m hull - 3.4 m gimbal to exit [E]
 ring_radius_m = 0.0
 gimbal = true
 relight = true

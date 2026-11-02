@@ -10,6 +10,10 @@ const VEHICLE := "starship_block3"
 const FLAP_STATES_DEG: Array[float] = [0.0, 35.0, 90.0]
 const FIN_STATES_DEG: Array[float] = [0.0, -20.0, 30.0]
 const EPS := 1e-4
+const SECOND_STAGE_TOTAL_M := 13.8  # [S] https://en.wikipedia.org/wiki/Falcon_9, nozzle exit to the stage's top
+const INTERSTAGE_WALL_M := 0.04  # [E] detail/falcon9_block5.toml interstage_wall_m
+const STACK_HEIGHT_M := 65.6  # [D] docs/subsystems/falcon9.md "Stack": 47.7 + 9.8 + 8.1
+const STACK_TOLERANCE_M := 0.5  # the measurement's spread
 
 var _failures := 0
 var _views: Array[VehicleView] = []
@@ -125,10 +129,14 @@ func _check_falcon9() -> bool:
 	# The view: stack (fins folded, legs posed from the snapshot, second stage still a cylinder) and the stage alone.
 	var stage_1 := {"id": "first_stage", "base_station_m": 0.0, "length_m": first["stage"][0]["length_m"], "diameter_m": 3.66,
 			"nose_length_m": 0.0, "vehicle_id": "falcon9_block5"}
-	var stage_2 := {"id": "second_stage", "base_station_m": stage_1["length_m"], "length_m": 13.8, "diameter_m": 3.66, "nose_length_m": 0.0,
+	var second_cfg: Dictionary = TomlLite.parse("[[stage]]" + FileAccess.get_file_as_string(path).split("[[stage]]", false)[2])["stage"][0]
+	var second_length := float(second_cfg["length_m"])
+	var gimbal_match := RegEx.create_from_string('id = "mvac"[^\\[]*?station_m = (-?[0-9.]+)').search(FileAccess.get_file_as_string(path))
+	var gimbal_station := float(gimbal_match.get_string(1)) if gimbal_match != null else 0.0
+	var stage_2 := {"id": "second_stage", "base_station_m": stage_1["length_m"], "length_m": second_length, "diameter_m": 3.66, "nose_length_m": 0.0,
 			"vehicle_id": "falcon9_block5"}
 	var merlin := {"stage": 0, "position_m": Vector3.ZERO, "direction": Vector3.RIGHT, "firing": true, "throttle": 1.0, "spool": 1.0, "vacuum": false, "auxiliary": false}
-	var mvac := {"stage": 1, "position_m": Vector3(stage_1["length_m"], 0.0, 0.0), "direction": Vector3.RIGHT, "firing": true, "throttle": 1.0, "spool": 1.0, "vacuum": true, "auxiliary": false}
+	var mvac := {"stage": 1, "position_m": Vector3(stage_1["length_m"] + gimbal_station, 0.0, 0.0), "direction": Vector3.RIGHT, "firing": true, "throttle": 1.0, "spool": 1.0, "vacuum": true, "auxiliary": false}
 	var fin := {"station_m": first["stage"][0]["grid_fins"]["station_m"], "azimuth_deg": 45.0, "radius_m": 2.6, "area_m2": 1.8, "deflection_deg": 0.0}
 	var snapshot_legs := {"present": true, "deployment": 0.0, "azimuths_deg": legs["azimuths_deg"]}
 	var view := VehicleView.new()
@@ -143,12 +151,22 @@ func _check_falcon9() -> bool:
 	_check(upper != null and upper.get_node_or_null("engines_rvac") != null, "second stage: the MVac instance batch")
 	_check(upper != null and upper.transform.origin.is_equal_approx(Frames.to_render(Vector3(47.7, 0.0, 0.0))), "second stage base 47.7 m above the first stage's station 0")
 	var mvac_entry: Dictionary = models["manifest"]["engines"]["merlin_vacuum"]
-	var exit_station := 47.7 + float(mvac_entry["axial_offset_m_by_stage"].get("second_stage", 0.0)) + float(mvac_entry["exit_plane_x_m"])
+	var exit_station := 47.7 + gimbal_station + float(mvac_entry["axial_offset_m_by_stage"].get("second_stage", 0.0)) + float(mvac_entry["exit_plane_x_m"])
 	var interstage_base := float(models["manifest"]["look"]["interstage_base_m"])
 	_check(exit_station > interstage_base and exit_station < 47.7, "MVac exit plane (station %.2f) inside the interstage (%.1f .. 47.7)" % [exit_station, interstage_base])
+	_check(absf(47.7 + second_length - exit_station - SECOND_STAGE_TOTAL_M) < 0.05, "second stage nozzle exit to top: %.2f m, its true length" % (47.7 + second_length - exit_station))
+	# Separation start: everything the second stage draws below the interstage top lies inside the interstage's open wall.
+	var inner_radius := 3.66 * 0.5 - INTERSTAGE_WALL_M
+	var widest := 0.0
+	for mesh: Mesh in [models["engine"][true], models["hulls"]["second_stage"]["engine_plate"]]:
+		for surface in range(mesh.get_surface_count()):
+			for v: Vector3 in (mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+				if v.x < 0.0:
+					widest = maxf(widest, Vector2(v.y, v.z).length())
+	_check(widest > 0.0 and widest < inner_radius, "at separation start the parts in the interstage stay clear of its wall (r %.2f < %.2f)" % [widest, inner_radius])
 	_check(_plume_top(view, 1).is_equal_approx(Frames.to_render(Vector3(exit_station, 0.0, 0.0))), "MVac plume starts at the drawn exit plane")
-	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["engine_plate"])
-	_check(absf(mvac_bounds.y - 13.8) < 0.01, "second stage rim (hull + adapter ring) top at its config length, 13.8 m")
+	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["hull"])
+	_check(absf(mvac_bounds.y - second_length) < 0.01, "second stage rim (hull + adapter ring) top at its config length, %.1f m" % second_length)
 	var fin_node := view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
 	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(Vector3.LEFT), "on the stack the fin lies folded, tip toward the base")
 	_check(_plume_top(view, 0).is_equal_approx(Frames.to_render(Vector3.ZERO)), "Merlin plume starts at the exit plane, station 0")
@@ -282,6 +300,12 @@ func _check_dragon() -> bool:
 	_check(view_alone.get_child(0).get_node_or_null("stage_trunk") == null and view_alone.find_children("trunk*", "MeshInstance3D", true, false).is_empty(),
 			"capsule alone: no trunk")
 	_check(view_alone.get_child(0).get_node_or_null("stage_capsule/nose_cone") != null and _cylinders(view_alone) == 0, "capsule alone: its model with the nose")
+	# The real view path builds the docking mechanism on the capsule, on the port and retracted; never on the other stages.
+	var mechanism := view_alone.get_child(0).get_node_or_null("stage_capsule/docking_mechanism") as DockingMechanismView
+	var port_x := float(models["manifest"]["idss"]["port_position_m"][0])
+	_check(mechanism != null and mechanism == view_alone.docking_mechanism and absf(mechanism.ring_plane_x_m()) <= 0.01,
+			"capsule alone: the docking mechanism exists, retracted (ring plane on its HCS origin)")
+	_check(mechanism != null and absf(mechanism.position.x - port_x) < 0.01, "capsule alone: the mechanism on the port")
 	var trunk_alone := trunk.duplicate()
 	trunk_alone["vehicle_id"] = "crew_dragon/trunk"
 	var view_trunk := VehicleView.new()
@@ -290,6 +314,7 @@ func _check_dragon() -> bool:
 	view_trunk.sync([trunk_alone], [], [], [], 0.0, {})
 	_check(view_trunk.get_child(0).get_node_or_null("stage_trunk/trunk") != null and view_trunk.get_child(0).get_node_or_null("stage_capsule") == null
 			and _cylinders(view_trunk) == 0, "trunk alone: its model, no capsule")
+	_check(view_trunk.find_children("docking_mechanism", "", true, false).is_empty(), "trunk alone: no docking mechanism")
 	# On the Falcon 9 second stage ("falcon9_block5+crew_dragon"): the Dragon stands at its config stations, nose closed (no capsule state).
 	var f9_chunks := FileAccess.get_file_as_string(root_dir.path_join("config/vehicles/falcon9_block5.toml")).split("[[stage]]", false)
 	var first_len := float(TomlLite.parse("[[stage]]" + f9_chunks[1])["stage"][0]["length_m"])
@@ -325,6 +350,8 @@ func _check_dragon() -> bool:
 		trunk_low = minf(trunk_low, (mesh_node as MeshInstance3D).get_aabb().position.x)
 	var gap := (trunk_base + trunk_low) - (first_len + rim)
 	_check(absf(gap) < 0.01, "stack: trunk base and second stage rim meet on one station (gap %.3f m)" % gap)
+	var stack_height := capsule_base + float(capsule["length_m"])
+	_check(absf(stack_height - STACK_HEIGHT_M) < STACK_TOLERANCE_M, "stack: %.2f m with Dragon, measured %.1f +- %.1f" % [stack_height, STACK_HEIGHT_M, STACK_TOLERANCE_M])
 	_check(s_capsule != null and s_capsule.transform.origin.is_equal_approx(Frames.to_render(Vector3(capsule_base, 0.0, 0.0))),
 			"stack: the capsule stands on the trunk, station %.1f m" % capsule_base)
 	_check(view_stack.get_child(0).get_node_or_null("stage_second_stage") != null and view_stack.get_child(0).get_node_or_null("stage_first_stage") != null

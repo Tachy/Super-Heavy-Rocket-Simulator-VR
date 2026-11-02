@@ -96,7 +96,9 @@ def test_manifest_of_the_generated_set():
     assert m["engines"]["merlin1d"]["axial_offset_m_by_stage"]["first_stage"] == pytest.approx(spec["engines"]["merlin1d"]["bell_length_m"])
 
 
-SECOND_STAGE_LENGTH_M = 13.8  # [S] https://en.wikipedia.org/wiki/Falcon_9
+SECOND_STAGE_TOTAL_M = 13.8  # [S] https://en.wikipedia.org/wiki/Falcon_9, nozzle exit to the stage's top
+SECOND_STAGE_LENGTH_M = 9.8  # [D] above the interstage top, config second_stage.length_m
+INTERSTAGE_DOME_M = 41.2  # [S] https://en.wikipedia.org/wiki/Falcon_9 stage without the interstage
 MVAC_EXIT_DIAMETER_M = 3.3  # [S] https://en.wikipedia.org/wiki/SpaceX_Merlin infobox "Vacuum: 3.3 m"; config/engines/merlin_vacuum.toml
 
 
@@ -107,8 +109,11 @@ def test_second_stage_spec_follows_the_config():
     assert spec["mvac"]["nozzle_exit_diameter_m"] == pytest.approx(MVAC_EXIT_DIAMETER_M)  # config = the second source
     # the nozzle hangs inside the interstage: below the mount by its length, not through the first stage's tank section
     detail = spec["detail"]
-    exit_station = STAGE_LENGTH_M - spec["mvac"]["bell_length_m"]
+    exit_station = STAGE_LENGTH_M + s2["engine_station_m"] - spec["mvac"]["bell_length_m"]
     assert detail["hull"]["interstage_base_m"] < exit_station < STAGE_LENGTH_M
+    assert exit_station > INTERSTAGE_DOME_M + 1.0  # [E] clear of the first stage's tank dome
+    # the stage alone keeps its true length: nozzle exit to the top plane
+    assert s2["length_m"] + STAGE_LENGTH_M - exit_station == pytest.approx(SECOND_STAGE_TOTAL_M, abs=0.05)
     assert spec["mvac"]["extension_from_exit_m"] < spec["mvac"]["bell_length_m"]
     assert spec["mvac"]["flange_radius_m"] > spec["mvac"]["top_radius_m"]
 
@@ -118,17 +123,20 @@ def test_second_stage_models():
         pytest.skip("no generated Falcon 9 models")
     spec = vehicle_spec.load(ID)
     lo, hi = _bounds(MODELS / "falcon9_stage2.gltf", {"hull", "engine_plate"})
-    assert lo[0] == pytest.approx(0.0, abs=1e-3) and hi[0] == pytest.approx(SECOND_STAGE_LENGTH_M, abs=0.01)
+    # from the engine mount, inside the interstage, to the top plane
+    s2 = spec["stages"]["second_stage"]
+    assert lo[0] == pytest.approx(s2["engine_station_m"] + spec["mvac"]["mount_height_m"], abs=1e-3)
+    assert hi[0] == pytest.approx(SECOND_STAGE_LENGTH_M, abs=0.01)
     assert hi[1] == pytest.approx(spec["stages"]["second_stage"]["diameter_m"] / 2.0, abs=0.2)  # pods stand a little proud
     lo, hi = _bounds(MODELS / "mvac.gltf", {"bell"})
     assert lo[0] == pytest.approx(-spec["mvac"]["bell_length_m"], abs=1e-3)
     assert hi[1] == pytest.approx(MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3) and lo[1] == pytest.approx(-MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3)
-    # the stage's rim (hull and the dark adapter ring below it) reaches the config's length: no cone rises above the top plane
+    # the stage's white rim reaches the config's length: no cone rises above the top plane
     length = spec["stages"]["second_stage"]["length_m"]
     for name in ("hull", "engine_plate"):
         _, top = _bounds(MODELS / "falcon9_stage2.gltf", {name})
         assert top[0] <= length + 0.01
-    _, rim = _bounds(MODELS / "falcon9_stage2.gltf", {"engine_plate"})
+    _, rim = _bounds(MODELS / "falcon9_stage2.gltf", {"hull"})
     assert rim[0] == pytest.approx(length, abs=0.01)
     m = json.loads((MODELS / build_models.MANIFEST).read_text(encoding="utf-8"))
     e = m["engines"]["merlin_vacuum"]

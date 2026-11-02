@@ -74,12 +74,12 @@ engine_plate_albedo = [0.03, 0.03, 0.03]  # [E] black thermal blanket at the eng
 mvac_albedo = [0.55, 0.55, 0.56]       # [E] pale grey nozzle extension in sunlight, Starlink 15-25 file 1156 s (sky-lit, not a clean sunlit view)
 exhaust_albedo = [0.45, 0.33, 0.25]    # [E] bare turbine exhaust duct, copper-grey, Starlink 15-25 files 772 / 1156 s
 
-# Second stage: a plain tank cylinder of the config's length, its base (station 0) at the engine mount; the gimbal point of the
-# Merlin Vacuum is station 0, so the drawn nozzle hangs inside the interstage below it.
+# Second stage: a plain tank cylinder of the config's length, its base (station 0) on the interstage top; below it a dark cone to
+# the engine mount and the Merlin Vacuum at the config's engine station, all inside the interstage.
 [second_stage]
 segments = 64                # [E] sagitta 2 mm at R = 1.83 m
-plate_thickness_m = 0.12     # [E] engine-section closure, not measured
-top_ring_height_m = 0.30     # [E] dark payload-adapter ring ending at the stage's top plane (length_m), Crew-13 t2880 (dark band under the payload, height not measured)
+plate_thickness_m = 0.12     # [E] height of the skirt above the interstage top, not measured
+skirt_radius_m = 1.75        # [E] aft cone's top, inside the interstage's open wall (r 1.79); Starlink 15-25 files 772 / 1156 s show a blanketed cone, its radius not measured
 exhaust_radius_m = 0.12      # [E] turbine exhaust duct, Starlink 15-25 file 772 s against the 1.2 m chamber (not measured)
 exhaust_azimuth_deg = 20.0   # [E] the duct sits on one side, file 772 s (side not decidable)
 
