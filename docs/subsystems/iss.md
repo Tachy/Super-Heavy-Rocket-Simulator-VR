@@ -101,8 +101,8 @@ COMPLETE 2026-10-20.
   | chain IDA-3: peak compression / shear / bending | 970 / 108 / 230 | 970 / 88 / 270 | as above |
   | IDSS grid, 2 x 16 cases: docked; max comp / shear / bending / torsion | 32/32; 1254 / 631 / 2054 / 761 | 32/32; 1254 / 631 / 2055 / 761 | 6500 N / 3200 N / 2800 N m / 1500 N m |
   | undock IDA-2: separation / departure complete / propellant | 0.0844 m/s / 41.0 min / 5.0 kg | 0.0844 / 40.3 / 5.0 | 60 min / 60 kg |
-  | departure CW guidance IDA-2: sphere / ellipsoid exit; 0.30 m/s, kg | 474 s / 2273 s; 6.5 | same | ellipsoid within 3600 s |
-  | departure CW guidance IDA-3 | 477 s / 1619 s; 6.7 | same | same |
+  | departure CW guidance IDA-2: sphere / ellipsoid exit; 0.30 m/s, kg | 474 s / 2273 s; 6.5 | 625 s / 2300 s; 6.1 (re-measured Task 9: levers and clocking of Tasks 7-8) | ellipsoid within 3600 s |
+  | departure CW guidance IDA-3 | 477 s / 1619 s; 6.7 | 454 s / 1783 s; 6.2 (Task 9) | same |
   | undock -> splashdown: departure kg / RCS left | 5.2 / 1890 kg | 5.2 / 1878 | splashdown reached |
 
   The shifts (contact +0.7 min, IDA-3 +2.2 kg, bending +184 N m at IDA-2) follow the shorter lever from the station CG
@@ -415,10 +415,10 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   | docked 24 h with a 0.3 m/s reboost | the pair moves together, port error < 1 mm |
   | undock -> departure -> capsule return | 0.0844 m/s, departure 3.6 kg, deorbit 58 h later (7-day pass search), splashed down, 1871 kg RCS left |
 
-  Departure CW guidance: IDA-2 sphere left after 473 s, ellipsoid after 2290 s, 0.30 m/s, 6.5 kg; IDA-3 475 s / 1610 s
-  (Demo-1 6.8 / 17 min with larger burns). Session IDA-2: departure complete 40.3 min after the springs, 5.0 kg
+  Departure CW guidance: IDA-2 sphere left after 625 s, ellipsoid after 2300 s, 0.30 m/s, 6.1 kg; IDA-3 454 s / 1783 s, 6.2 kg (re-measured 2026-11-02, Task 9, final tree; was 473 s / 2290 s / 6.5 kg and 475 s / 1610 s with the old levers)
+  (Demo-1 6.8 / 17 min with larger burns). Session IDA-2: departure complete 32.3 min after the springs, 4.7 kg (current)
   (limits 60 min, 60 kg; 33.3 min / 3.4 kg before the Dragon port moved from 4.0 to 4.22 m, 41.0 min / 5.0 kg
-  after it, 40.3 min with the model-D station ports of Task 7). The step is not a lever effect:
+  after it, 40.3 min with the model-D station ports of Task 7, 32.3 min / 4.7 kg with the Task 8 clocking, Task 9 re-run). The step is not a lever effect:
   `breakout_delta_v` takes the smallest magnitude (0.3 m/s) and then, among 27 directions, the one with the largest
   minimum range after the exit; the leading candidates tie within < 1 m of ~220 m, so any small change of the start state
   can flip the pick (review emulation: 0.22 m flips 14 of 75 cases). Propellant per m/s differs ~4x by axis (+x 4.25,
@@ -457,3 +457,4 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
 - Departure direction pick is a discrete selector (see Validation, departure): step changes of time and propellant.
 - Station attitude is ideal; J2 short-period terms are not restored on the synthetic orbit; no structural model for
   collisions; later departure burns are not modelled.
+- End state of the detail-model plan (2026-11-02): the port `up` is a photo-picked member [E, +-30 deg] of a measured class [D] (see "Port clocking"); IDA-3 aft vs forward rests on model D only; the Dragon port is 4.22 m [E]; the CG 38 m is unverified [E] (tally about 33 m); collision shapes lag the drawing; the Task 8 measuring scripts are not in the repo. Departure CW rows re-measured in Task 9: 625 s / 2300 s / 6.1 kg (IDA-2), 454 s / 1783 s / 6.2 kg (IDA-3), undock departure 32.3 min / 4.7 kg. Cost of the drawing (rings worst case): `vehicle-models.md` "Cost of the Falcon 9, Dragon and ISS models".

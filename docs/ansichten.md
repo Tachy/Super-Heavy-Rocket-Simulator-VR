@@ -1,6 +1,6 @@
 # Ansichten und Bedienung im fertigen Simulator
 
-Stand: 22.10.2026. Lebendes Dokument: Es wird bei jeder Änderung an Ansichten oder Bedienung mitgepflegt.
+Stand: 02.11.2026. Lebendes Dokument: Es wird bei jeder Änderung an Ansichten oder Bedienung mitgepflegt.
 Markierungen: **[Entschieden]** = mit dem Nutzer abgestimmt, **[Vorschlag]** = Entwurf, noch zu bestätigen.
 
 ## 1. Grundsätze
@@ -396,3 +396,6 @@ ganze Start bis zur Welt dauert am Desktop etwa 4 s (vorher rund 24 s).
   der Config, keine Markennamen). Die Sprachen legt der Nutzer später fest.
 - Fahrzeugmodell beim Wiedereintritt: Hitzeschild und Klappen sichtbar, ggf. Anstell-/Rollwinkel-Anzeigen [Entschieden, Folgeplan].
 - Sollen die zwei Crewmitglieder auch Aufgaben übernehmen (z. B. Checklisten), oder nur Ansagen?
+
+### Fahrzeugmodelle in der Außenansicht [umgesetzt 2026-11-02]
+- Falcon 9 (erste Stufe mit Landebeinen und Gitterflossen, zweite Stufe, Dragon darauf), Crew Dragon (Kapsel, Trunk, IDSS-Mechanismus, Nasenkegel) und die ISS (Module, Fachwerk, Solarflächen, IDSS-Passivringe an den Docking-Ports IDA-2 / IDA-3) werden wie Super Heavy und Starship als Detailmodelle gezeichnet; fehlt ein Modell, erscheint der Hinweis und Zylinder. Die Ansicht liest nur den Simulationszustand (Beine, Flossen, Nasenkegel) und ändert die Physik nicht. Angedockt zeigt die Dragon den Ring eingefahren, die Haken offen (Mechanismus im Flug noch nicht angesteuert).

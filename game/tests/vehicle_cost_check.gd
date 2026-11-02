@@ -9,6 +9,10 @@
 # Scales 1 and 2 per axis (2 is the engine maximum: 3200 x 1800), the terrain settled first (nothing loading for TERRAIN_IDLE_FRAMES frames).
 # Needs a GPU (no --headless). Reads, does not judge; the numbers go into docs/subsystems/vehicle-models.md.
 # godot --path game --script res://tests/vehicle_cost_check.gd -- [--scale=1,2] [--frames=120] [--repeats=3]
+# Other missions / vehicles (Falcon 9, Crew Dragon, ISS; plan 2026-11-02-falcon-dragon-iss-models, task 9): --mission, --utc,
+# --t_plus or --at_event as vehicle_look_shots.gd, plus --views="name,body,station_m,dx,dy,dz,fov;..." (camera offset in the body
+# frame as VehicleRig.place). Variants there: hull (the models as shipped), cyl (no models: every vehicle's cylinders), hidden
+# (all vehicle views hidden); the steel variant is Starship-only.
 extends SceneTree
 
 ## [name, station aimed at (m), camera distance from the axis (m)]
@@ -31,6 +35,7 @@ var _main: Node
 var _started := false
 var _loop_started := false
 var _terrain_idle := 0
+var _custom_views: Array = []  ## --views specs; empty = the Starship belly / stack views
 var _original_materials := {}  ## MeshInstance3D -> its hull material, while the "steel" variant is shown
 
 
@@ -40,6 +45,8 @@ func _initialize() -> void:
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
 	_frames = int(_args.get("frames", "120"))
 	_repeats = int(_args.get("repeats", "3"))
+	for spec in String(_args.get("views", "")).split(";", false):
+		_custom_views.append(spec.split(",", false))
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 
@@ -52,7 +59,7 @@ func _process(_delta: float) -> bool:
 		_started = true
 		TimePanel.show_frame_rate = false
 		_world.atmosphere.eye_adaptation_enabled = false
-		_rig = VehicleRig.new(_world, {"mission": "starship_leo", "t_plus": "-30", "utc": "2026-10-31T21:00:00"})
+		_rig = VehicleRig.new(_world, _args if _args.has("mission") else {"mission": "starship_leo", "t_plus": "-30", "utc": "2026-10-31T21:00:00"})
 		_sim = _rig.start()
 		_rig.fly_to_target(_sim)
 		_rig.hide_ui(_main)
@@ -74,19 +81,23 @@ func _run() -> void:
 		root.scaling_3d_scale = scale
 		var megapixels := root.size.x * scale * root.size.y * scale / 1.0e6
 		print("=== render scale %.1f per axis (%.1f MP), %s ===" % [scale, megapixels, root.size])
-		for spec: Array in VIEWS:
-			_rig.place(_sim, 0, spec[1], Vector3(0.0, 0.0, -spec[2]), FOV_DEG)
+		for spec: Array in (_custom_views if not _custom_views.is_empty() else VIEWS):
+			if _custom_views.is_empty():
+				_rig.place(_sim, 0, spec[1], Vector3(0.0, 0.0, -spec[2]), FOV_DEG)
+			else:
+				_rig.place(_sim, int(spec[1]), float(spec[2]), Vector3(float(spec[3]), float(spec[4]), float(spec[5])), float(spec[6]))
 			await _n(FRAMES_TO_SETTLE)
+			var variants: Array = VARIANTS if _custom_views.is_empty() else ["hull", "cyl", "hidden"]
 			var rows := {}
-			for variant: String in VARIANTS:
+			for variant: String in variants:
 				rows[variant] = []
 			for repeat in _repeats:
-				for variant: String in VARIANTS:
+				for variant: String in variants:
 					await _show(view, variant)
 					rows[variant].append(await _measure(view))
 					await _restore(view, variant)
 			print("view %s:" % spec[0])
-			for variant: String in VARIANTS:
+			for variant: String in variants:
 				var gpu: Array[float] = []
 				var cpu: Array[float] = []
 				for r: Dictionary in rows[variant]:
@@ -95,6 +106,12 @@ func _run() -> void:
 				print("  %-6s GPU %s ms (median %.3f), CPU render median %.3f ms, %d calls, %d primitives" % [variant,
 						" / ".join(gpu.map(func(g: float) -> String: return "%.3f" % g)), _median(gpu), _median(cpu),
 						rows[variant][0]["calls"], rows[variant][0]["primitives"]])
+			if not _custom_views.is_empty():
+				var gpu_of := func(v: String) -> float: return _median(rows[v].map(func(r: Dictionary) -> float: return r["gpu"]))
+				print("  deltas (ms): models vs cylinders %+.3f; models vs hidden %+.3f; models %d draw calls / %d primitives more than hidden"
+						% [gpu_of.call("hull") - gpu_of.call("cyl"), gpu_of.call("hull") - gpu_of.call("hidden"),
+						rows["hull"][0]["calls"] - rows["hidden"][0]["calls"], rows["hull"][0]["primitives"] - rows["hidden"][0]["primitives"]])
+				continue
 			var hull := _median(rows["hull"].map(func(r: Dictionary) -> float: return r["gpu"]))
 			var steel := _median(rows["steel"].map(func(r: Dictionary) -> float: return r["gpu"]))
 			var cyl := _median(rows["cyl"].map(func(r: Dictionary) -> float: return r["gpu"]))
@@ -128,10 +145,14 @@ func _show(view: VehicleView, variant: String) -> void:
 					_original_materials[node] = node.material_override
 					node.material_override = view._steel
 		"cyl":
-			VehicleModels._cache["starship_block3"] = {}
-			view._built_signature = ""  # the view's next update rebuilds without models
+			for id in VehicleModels.MODEL_VEHICLE_IDS:
+				VehicleModels._cache[id] = {}
+			for v in _world.flight.views:
+				v._built_signature = ""
+				v._sets_signature = ""  # the view's next update rebuilds without models
 		"hidden":
-			view._stage_root.visible = false
+			for v in _world.flight.views:
+				v._stage_root.visible = false
 	await _n(FRAMES_TO_SETTLE)
 
 
@@ -143,9 +164,12 @@ func _restore(view: VehicleView, variant: String) -> void:
 			_original_materials.clear()
 		"cyl":
 			VehicleModels.clear_cache()  # reloads the models (the cached materials are new objects: nothing else holds them)
-			view._built_signature = ""
+			for v in _world.flight.views:
+				v._built_signature = ""
+				v._sets_signature = ""
 		"hidden":
-			view._stage_root.visible = true
+			for v in _world.flight.views:
+				v._stage_root.visible = true
 	await _n(FRAMES_TO_SETTLE)
 
 
