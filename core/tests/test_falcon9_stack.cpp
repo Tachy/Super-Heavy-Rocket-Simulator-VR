@@ -47,6 +47,47 @@ TEST_CASE("The second stage's tanks fit between its gimbal point and its top", "
     }
 }
 
+TEST_CASE("Payload and fairing stand above the second stage, at their configured stations", "[falcon9][vehicle]") {
+    constexpr double payload_kg = 16500.0;
+    auto bare_config = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    auto& upper = bare_config.stages.back();
+    const double payload_station_m = upper.payload_station_m.value();
+    const double fairing_station_m = upper.fairing_station_m.value();
+    CHECK(payload_station_m > upper.length_m);  // above the stage's top plane, not inside its RP-1
+    CHECK(fairing_station_m > upper.length_m);
+
+    const double fairing_kg = upper.fairing_mass_kg;
+    upper.fairing_mass_kg = 0.0;
+    const auto bare = vehicle::Vehicle(bare_config, STARSIM_CONFIG_DIR).mass_properties();
+
+    auto loaded_config = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    loaded_config.stages.back().payload_mass_kg = payload_kg;
+    const vehicle::Vehicle loaded(loaded_config, STARSIM_CONFIG_DIR);
+    const auto with = loaded.mass_properties();
+    const double base_m = loaded.stages().back().base_station_m;
+    const double expected_cg_m = (bare.mass_kg * bare.cg_station_m + payload_kg * (base_m + payload_station_m) +
+                                  fairing_kg * (base_m + fairing_station_m)) /
+                                 (bare.mass_kg + payload_kg + fairing_kg);
+    CHECK(with.mass_kg == Approx(bare.mass_kg + payload_kg + fairing_kg));
+    CHECK(with.cg_station_m == Approx(expected_cg_m).margin(1e-9));
+}
+
+TEST_CASE("A stage without payload stations keeps its extra mass in the upper part of the stage", "[falcon9][vehicle]") {
+    constexpr double payload_kg = 5000.0;
+    constexpr double default_fraction = 0.75;  // [E] vehicle.cpp, every vehicle without the keys (Starship: unchanged)
+    auto bare_config = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    auto& upper = bare_config.stages.back();
+    upper.payload_station_m.reset();
+    upper.fairing_station_m.reset();
+    upper.fairing_mass_kg = 0.0;
+    const auto bare = vehicle::Vehicle(bare_config, STARSIM_CONFIG_DIR).mass_properties();
+    upper.payload_mass_kg = payload_kg;
+    const vehicle::Vehicle loaded(bare_config, STARSIM_CONFIG_DIR);
+    const double station_m = loaded.stages().back().base_station_m + default_fraction * upper.length_m;
+    CHECK(loaded.mass_properties().cg_station_m ==
+          Approx((bare.mass_kg * bare.cg_station_m + payload_kg * station_m) / (bare.mass_kg + payload_kg)).margin(1e-9));
+}
+
 TEST_CASE("The nozzle leaves the interstage before the second stage lights", "[falcon9][vehicle]") {
     const auto v = launcher();
     const auto& first = v.stages().at(0);

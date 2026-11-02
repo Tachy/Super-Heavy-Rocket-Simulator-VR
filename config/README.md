@@ -21,6 +21,7 @@ crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by mi
   - `[S:<ref>]` sourced value, `<ref>` points to the `[sources]` table at the top of the file
   - `[E]` engineering estimate (no public data); calibrate against flight telemetry
   - `[D]` derived from other values in the file (the comment shows how)
+- `[[stage]] payload_station_m`, `fairing_station_m` (optional): where those masses sit, from the stage's base; left out: 0.75 of the stage's length [E].
 - Display names (shown in the game, English for now - the UI language is decided later, no trademarks; the `name` fields keep the real names and are never shown
   in the webcast overlay): `[vehicle] display_name` for the whole vehicle; `[[stage]] display_name` (optional) for a
   stage that flies as a separate body (booster, ship, capsule, trunk). A part split off at staging is shown by its

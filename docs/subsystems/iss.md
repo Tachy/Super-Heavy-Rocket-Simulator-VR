@@ -97,7 +97,7 @@ COMPLETE 2026-10-20.
   |---|---|---|---|
   | chain IDA-2: contact / docked after / propellant | 61.8 min / 10.2 min / 31.8 kg | 62.5 / 10.0 / 31.6 | docked 8-13 min |
   | chain IDA-2: peak compression / shear / bending | 956 / 92 / 250 N m | 928 / 93 / 434 | 6500 N / 3200 N / 2800 N m |
-  | chain IDA-3: contact / docked after / propellant | 98.0 / 10.0 / 63.5 | 98.8 / 10.2 / 65.7 | docks within 4 h |
+  | chain IDA-3: contact / docked after / propellant | 98.0 / 10.0 / 63.5 | 98.8 / 10.2 / 65.7 (now 99.2 / 10.2 / 71.6, table below) | docks within 4 h |
   | chain IDA-3: peak compression / shear / bending | 970 / 108 / 230 | 970 / 88 / 270 | as above |
   | IDSS grid, 2 x 16 cases: docked; max comp / shear / bending / torsion | 32/32; 1254 / 631 / 2054 / 761 | 32/32; 1254 / 631 / 2055 / 761 | 6500 N / 3200 N / 2800 N m / 1500 N m |
   | undock IDA-2: separation / departure complete / propellant | 0.0844 m/s / 41.0 min / 5.0 kg | 0.0844 / 40.3 / 5.0 | 60 min / 60 kg |

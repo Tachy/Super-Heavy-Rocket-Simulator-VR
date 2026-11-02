@@ -317,6 +317,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     }
     s.payload_mass_kg = doc.number_or(t, "payload_mass_kg", 0.0);
     s.fairing_mass_kg = doc.number_or(t, "fairing_mass_kg", 0.0);
+    if (t.contains("payload_station_m")) s.payload_station_m = doc.number(t, "payload_station_m");
+    if (t.contains("fairing_station_m")) s.fairing_station_m = doc.number(t, "fairing_station_m");
     s.jettison_after_separation_kg = doc.number_or(t, "jettison_after_separation_kg", 0.0);
     if (const auto* points = t["max_dynamic_pressure_pa"].as_array()) {  // [[mach, pa], ...]
         for (const auto& node : *points) {

@@ -346,6 +346,9 @@ struct StageConfig {
     math::Vec3 dry_cg_offset_m;  // lateral dry CG offset (y, z) from the axis (capsule trim); x unused (0)
     double payload_mass_kg = 0.0;
     double fairing_mass_kg = 0.0;
+    // Where those masses sit, from the stage's base (optional): left out, 0.75 of the stage's length [E] (vehicle.cpp).
+    std::optional<double> payload_station_m;
+    std::optional<double> fairing_station_m;
     double jettison_after_separation_kg = 0.0;
     // A first stage's structural dynamic-pressure limit: the ascent guidance throttles the stack to hold q at or below
     // it (gnc::PitchProgram::max_dynamic_pressure_by_mach). {mach, pa} points, increasing Mach, linear between them and

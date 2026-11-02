@@ -17,7 +17,7 @@ using math::Vec3;
 
 namespace {
 
-// Payload and fairing sit in the upper part of their stage [E].
+// Payload and fairing sit in the upper part of their stage [E], unless the stage's config gives their stations.
 constexpr double extra_mass_station_fraction = 0.75;
 // The RCS allocation is rebuilt when the CG has moved this far (lever change negligible below).
 constexpr double rcs_cg_tolerance_m = 0.01;
@@ -267,7 +267,14 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
                              s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z});
         }
         if (s.extra_mass_kg > 0.0) {
-            parts.push_back({s.extra_mass_kg, s.base_station_m + extra_mass_station_fraction * l, 0.0, 0.0});
+            const double default_station_m = extra_mass_station_fraction * l;
+            const auto& c = s.config;
+            if (c.payload_mass_kg > 0.0) {
+                parts.push_back({c.payload_mass_kg, s.base_station_m + c.payload_station_m.value_or(default_station_m), 0.0, 0.0});
+            }
+            if (c.fairing_mass_kg > 0.0) {
+                parts.push_back({c.fairing_mass_kg, s.base_station_m + c.fairing_station_m.value_or(default_station_m), 0.0, 0.0});
+            }
         }
         // Settled liquid; the fluid does not spin with the tank (no roll inertia) [E]. Settled aft: a column on the
         // tank bottom; otherwise below a surface perpendicular to liquid_down_body_ (liquid_settling).

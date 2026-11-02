@@ -177,7 +177,7 @@ landing_fresh_trust_region_weight = 0.3      # [E] SCvx weight of fresh plans (r
 landing_fresh_attitude_violation_weight = 100.0  # [E] penalty on the soft tilt and rate limits of fresh plans (re-plans keep
                                              # 10). Replays of the refused first plans (fixtures falcon9_asds_seed105 / 109):
                                              # at 10 one swing to 26-28 deg against 20 is refused by the guard, at 100 excess
-                                             # 0 in 240 starts perturbed by 0.5 m, 0.05 m/s (Task 3d)
+                                             # 0 in the 120 starts perturbed by 0.5 m, 0.05 m/s at the flown 0.3 / 100 (Task 3d; 240 runs in all)
 
 # Return to a drone ship (milestone c4; keys left out come from the RTLS profile above). Evidence: our Starlink 15-25
 # webcast telemetry (drone ship, no boostback).
@@ -245,6 +245,11 @@ dry_cg_station_m = 2.4                   # [E] same fraction of the height above
                                          # 10.4 m), from the new base. Not measured; was 4.0 above the gimbal point
 payload_mass_kg = 0.0
 fairing_mass_kg = 1900.0                 # [S:wiki_f9]
+payload_station_m = 14.0                 # [E] the payload's CG, above the stage's top plane at 9.8 m. 4.2 m over that plane is Dragon's own CG in crew_dragon.toml
+                                         # (trunk 1.5 t, capsule 8.4 t, propellant 2.6 t; the 12.5 t mass flown as a plain mass by falcon9_rtls and crs35_ascent); taken
+                                         # for the 16.5 t Starlink stack of falcon9_asds too, not measured for it. Was 0.75 x 9.8 = 7.35 m, inside the RP-1 tank
+fairing_station_m = 14.2                 # [E] thin shell of 13.1 m [S:wiki_f9] on the ledge at 8.6 m (docs/subsystems/falcon9.md "Stack"): area centroid of a 5.2 m
+                                         # cylinder of about 6.7 m plus an ogive of about 6.4 m, about 5.6 m above its base. The split is not sourced; was 7.35 m
 
 [[stage.tank]]
 id = "lox_main"
