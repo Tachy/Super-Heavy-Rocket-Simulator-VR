@@ -79,8 +79,7 @@ exhaust_albedo = [0.45, 0.33, 0.25]    # [E] bare turbine exhaust duct, copper-g
 [second_stage]
 segments = 64                # [E] sagitta 2 mm at R = 1.83 m
 plate_thickness_m = 0.12     # [E] engine-section closure, not measured
-top_ring_height_m = 0.30     # [E] payload-adapter ring below the cap, Crew-13 t2880 (dark band, not measured)
-cap_rise_m = 0.25            # [E] shallow closing cap, nothing above it is part of the stage
+top_ring_height_m = 0.30     # [E] dark payload-adapter ring ending at the stage's top plane (length_m), Crew-13 t2880 (dark band under the payload, height not measured)
 exhaust_radius_m = 0.12      # [E] turbine exhaust duct, Starlink 15-25 file 772 s against the 1.2 m chamber (not measured)
 exhaust_azimuth_deg = 20.0   # [E] the duct sits on one side, file 772 s (side not decidable)
 

@@ -1,8 +1,8 @@
 """Falcon 9 second stage: falcon9_second_stage.py -- --spec <json> --out <dir> writes falcon9_stage2.gltf and mvac.gltf.
 
 Frame: the stage's body frame (X station axis, station 0 = the engine mount = the Merlin Vacuum's gimbal point, nose +X).
-falcon9_stage2.gltf: `hull` (plain lathe from the closure plate to the closing cap, the thruster bumps of the config's
-pods), `engine_plate` (dark closure at station 0 and the adapter ring below the cap), `exhaust` is part of the engine.
+falcon9_stage2.gltf: `hull` (plain lathe from the closure plate to the adapter ring, the thruster bumps of the config's
+pods), `engine_plate` (dark closure at station 0 and the adapter ring under the top plane; the rim ends flat on the config's length_m, where the payload's base stands), `exhaust` is part of the engine.
 mvac.gltf: root `mvac` with `bell` (regenerative bell, flange, radiatively cooled extension, inner wall, lip) and `housing`
 and `duct` (turbine exhaust duct along the extension). Origin = gimbal point, thrust +X, bell opens toward -X, exit plane
 X = -bell_length_m (the plume's start), rim diameter = config/engines/merlin_vacuum.toml. Everything is plain: detail
@@ -32,11 +32,9 @@ def build_stage(spec, out):
     n = int(s["segments"])
     vc.common.clear_scene()
     root = vc.empty("falcon9_stage2")
-    ring_start = top - s["cap_rise_m"] - s["top_ring_height_m"]
-    cap_edge = top - s["cap_rise_m"]
+    ring_start = top - s["top_ring_height_m"]
     hull = vc.VMesh()
-    vc.revolve(hull, [([(s["plate_thickness_m"], r), (ring_start, r)], "out"),
-                      ([(cap_edge, r), (top, 0.0)], (1.0, 0.0, 0.0))], n, r, "hull")
+    vc.revolve(hull, [([(s["plate_thickness_m"], r), (ring_start, r)], "out")], n, r, "hull")
     for pod in stage["rcs_pods"]:
         for az_deg in pod["azimuths_deg"]:
             az = math.radians(az_deg)
@@ -45,7 +43,8 @@ def build_stage(spec, out):
                    (h["pod_length_m"] / 2.0, h["pod_height_m"] / 2.0, h["pod_width_m"] / 2.0))
     plate = vc.VMesh()
     vc.revolve(plate, [([(0.0, r), (s["plate_thickness_m"], r)], "out"), ([(0.0, 0.0), (0.0, r)], (-1.0, 0.0, 0.0)),
-                       ([(ring_start, r), (cap_edge, r)], "out")], n, r, "plate")
+                       ([(ring_start, r), (top, r)], "out"),
+                       ([(top, r), (top, 0.0)], (1.0, 0.0, 0.0))], n, r, "plate")
     tris = hull.to_object("hull", root)[1] + plate.to_object("engine_plate", root)[1]
     vc.export_selected(Path(out) / "falcon9_stage2.gltf", [root])
     vc.report_triangles("falcon9_stage2", tris)

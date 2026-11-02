@@ -147,8 +147,8 @@ func _check_falcon9() -> bool:
 	var interstage_base := float(models["manifest"]["look"]["interstage_base_m"])
 	_check(exit_station > interstage_base and exit_station < 47.7, "MVac exit plane (station %.2f) inside the interstage (%.1f .. 47.7)" % [exit_station, interstage_base])
 	_check(_plume_top(view, 1).is_equal_approx(Frames.to_render(Vector3(exit_station, 0.0, 0.0))), "MVac plume starts at the drawn exit plane")
-	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["hull"])
-	_check(absf(mvac_bounds.y - 13.8) < 0.01, "second stage hull top at its config length, 13.8 m")
+	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["engine_plate"])
+	_check(absf(mvac_bounds.y - 13.8) < 0.01, "second stage rim (hull + adapter ring) top at its config length, 13.8 m")
 	var fin_node := view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
 	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(Vector3.LEFT), "on the stack the fin lies folded, tip toward the base")
 	_check(_plume_top(view, 0).is_equal_approx(Frames.to_render(Vector3.ZERO)), "Merlin plume starts at the exit plane, station 0")
@@ -310,6 +310,21 @@ func _check_dragon() -> bool:
 	var s_capsule := view_stack.get_child(0).get_node_or_null("stage_capsule") as Node3D
 	_check(s_trunk != null and s_trunk.transform.origin.is_equal_approx(Frames.to_render(Vector3(trunk_base, 0.0, 0.0))),
 			"stack: the trunk stands on the second stage's top, station %.1f m" % trunk_base)
+	# The stage's rim and the trunk's base meet on the same station (no cone above the rim, no gap). Mesh vertices are in the
+	# stage's body frame, x = station from the stage's base.
+	var s_stage := view_stack.get_child(0).get_node_or_null("stage_second_stage") as Node3D
+	var rim := -INF
+	for mesh_node in s_stage.find_children("*", "MeshInstance3D", true, false):
+		var mesh := (mesh_node as MeshInstance3D).mesh
+		for surface in range(mesh.get_surface_count()):
+			for v in (mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+				if Vector2(v.y, v.z).length() > 1.7:  # the full-radius rim, not the apex of a closing cone
+					rim = maxf(rim, v.x)
+	var trunk_low := INF
+	for mesh_node in s_trunk.find_children("trunk", "MeshInstance3D", true, false):
+		trunk_low = minf(trunk_low, (mesh_node as MeshInstance3D).get_aabb().position.x)
+	var gap := (trunk_base + trunk_low) - (first_len + rim)
+	_check(absf(gap) < 0.01, "stack: trunk base and second stage rim meet on one station (gap %.3f m)" % gap)
 	_check(s_capsule != null and s_capsule.transform.origin.is_equal_approx(Frames.to_render(Vector3(capsule_base, 0.0, 0.0))),
 			"stack: the capsule stands on the trunk, station %.1f m" % capsule_base)
 	_check(view_stack.get_child(0).get_node_or_null("stage_second_stage") != null and view_stack.get_child(0).get_node_or_null("stage_first_stage") != null

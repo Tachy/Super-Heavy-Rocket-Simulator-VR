@@ -123,6 +123,13 @@ def test_second_stage_models():
     lo, hi = _bounds(MODELS / "mvac.gltf", {"bell"})
     assert lo[0] == pytest.approx(-spec["mvac"]["bell_length_m"], abs=1e-3)
     assert hi[1] == pytest.approx(MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3) and lo[1] == pytest.approx(-MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3)
+    # the stage's rim (hull and the dark adapter ring below it) reaches the config's length: no cone rises above the top plane
+    length = spec["stages"]["second_stage"]["length_m"]
+    for name in ("hull", "engine_plate"):
+        _, top = _bounds(MODELS / "falcon9_stage2.gltf", {name})
+        assert top[0] <= length + 0.01
+    _, rim = _bounds(MODELS / "falcon9_stage2.gltf", {"engine_plate"})
+    assert rim[0] == pytest.approx(length, abs=0.01)
     m = json.loads((MODELS / build_models.MANIFEST).read_text(encoding="utf-8"))
     e = m["engines"]["merlin_vacuum"]
     assert e["exit_plane_x_m"] == pytest.approx(-spec["mvac"]["bell_length_m"]) and e["axial_offset_m_by_stage"]["second_stage"] == 0.0
