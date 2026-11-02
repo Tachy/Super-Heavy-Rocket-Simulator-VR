@@ -21,6 +21,16 @@ static func clamp_fixed(p_fixed_m: Vector3, heights: HeightSource) -> Vector3:
 	return heights.position_fixed(geo.x, geo.y, floor_m)
 
 
+## Distance (m) of the body-fixed position above `heights`' surface; without a source above the reference surface
+## (WGS84 ellipsoid, the Moon's mean sphere). Never negative.
+static func surface_distance_m(p_fixed_m: Vector3, heights: HeightSource) -> float:
+	var geo := _geodetic(p_fixed_m, heights == null or heights.body == "earth")
+	if heights == null:
+		return maxf(geo.z, 0.0)
+	var surface: Dictionary = heights.sample(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]))
+	return maxf(geo.z - (surface["height_m"] as PackedFloat64Array)[0], 0.0)
+
+
 ## Geodetic latitude / longitude (deg) and height (m) of a body-fixed point: Earth WGS84 (Bowring, two iterations:
 ## sub-millimetre near the surface), Moon the mean sphere.
 static func _geodetic(p: Vector3, earth: bool) -> Vector3:

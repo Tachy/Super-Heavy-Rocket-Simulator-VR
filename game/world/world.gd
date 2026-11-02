@@ -466,18 +466,15 @@ func _update_free_camera() -> void:
 	camera.free_basis = pose["basis"]
 
 
-## The free camera's distance to the nearest surface of Earth (WGS84 ellipsoid, no terrain) or the Moon (sphere): its
-## translation speed scales with it (FreeCameraControl.poll). The Sun is only a disc (no body to fly to): not counted.
+## The free camera's distance to the terrain of the nearer body, Earth or Moon: its translation speed scales with it
+## (FreeCameraControl.poll). Not to the reference surface: Florida's and Texas' ground lies below the ellipsoid, where a
+## camera near the ground measured 0 m and crawled at the speed floor. The Sun is only a disc: not counted.
 func _free_surface_distance_m() -> float:
 	var p := camera.position_gcrf_m
-	var r := p.length()
-	var sin_lat := p.z / maxf(r, 1.0)  # geocentric; GCRF z ~ Earth's axis (precession is far below this use)
-	var b := Atmosphere.WGS84_A_M / Atmosphere.POLAR_STRETCH
-	var a := Atmosphere.WGS84_A_M
-	var surface := a * b / sqrt(b * b * (1.0 - sin_lat * sin_lat) + a * a * sin_lat * sin_lat)
-	var earth := r - surface
-	var moon := (p - moon_gcrf_m).length() - MOON_RADIUS_M
-	return minf(earth, moon)
+	if (p - moon_gcrf_m).length() - MOON_RADIUS_M < p.length() - EARTH_SEMI_MAJOR_AXIS_M:
+		return SurfaceClearance.surface_distance_m(moon.fixed_to_gcrf.transposed() * (p - moon_gcrf_m), _moon_heights) \
+				if _moon_heights != null else (p - moon_gcrf_m).length() - MOON_RADIUS_M
+	return SurfaceClearance.surface_distance_m(earth.fixed_to_gcrf.transposed() * p, _earth_heights)
 
 
 func _update_camera(t: float) -> void:

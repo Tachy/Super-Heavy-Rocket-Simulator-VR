@@ -69,6 +69,7 @@ func _initialize() -> void:
 	_check(jump["position_gcrf_m"].x > 3.0e7, "moved on")
 
 	_test_calibration()
+	_test_surface_distance()
 
 	print("[free_camera_test] %s (%d failures)" % ["OK" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
@@ -78,6 +79,33 @@ func _check(ok: bool, what: String) -> void:
 	if not ok:
 		_failures += 1
 		print("[free_camera_test] FAIL: ", what)
+
+
+## A terrain at a fixed height above the reference surface (Florida's ground lies about 28 m below the ellipsoid).
+class FixedHeights extends HeightSource:
+	var surface_m := 0.0
+
+	func sample(lats_deg: PackedFloat64Array, _lons_deg: PackedFloat64Array) -> Dictionary:
+		var heights := PackedFloat64Array()
+		heights.resize(lats_deg.size())
+		heights.fill(surface_m)
+		return {"height_m": heights}
+
+
+## The speed's distance is measured from the terrain, whatever the reference surface does below it.
+func _test_surface_distance() -> void:
+	var heights := FixedHeights.new()
+	heights.surface_m = -28.0
+	var eye := HeightSource.geodetic_to_fixed(28.6, -80.6, -10.0)  # 18 m above that ground, below the ellipsoid
+	_check(absf(SurfaceClearance.surface_distance_m(eye, heights) - 18.0) < 0.01, "18 m above ground below the ellipsoid")
+	heights.surface_m = 1000.0
+	var over_a_hill := HeightSource.geodetic_to_fixed(28.6, -80.6, 1200.0)
+	_check(absf(SurfaceClearance.surface_distance_m(over_a_hill, heights) - 200.0) < 0.01, "200 m above a hill")
+	_check(absf(SurfaceClearance.surface_distance_m(over_a_hill, null) - 1200.0) < 0.01, "no terrain: the reference surface")
+	heights.body = "moon"
+	heights.surface_m = -2000.0
+	var crater := Vector3(World.MOON_RADIUS_M - 1950.0, 0.0, 0.0)
+	_check(absf(SurfaceClearance.surface_distance_m(crater, heights) - 50.0) < 0.01, "50 m above a crater floor on the Moon")
 
 
 ## Wizard logic with synthetic samples: axis "0:1" rests at +0.2 and goes to -0.9 (asked direction) and +0.7 (opposite);
