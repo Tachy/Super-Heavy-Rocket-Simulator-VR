@@ -24,8 +24,8 @@ struct DockingPose {
 struct DockingInterfaceParameters {
     int petal_count = 3;                    // [S: IDSS IDD E 3.2.2.1] three inward-pointing guide petals
     double petal_outline_radius_m = 0.600;  // [S: IDSS IDD E 3.2] conic outline 1200 mm at the SCS mating plane
-    double petal_height_m = 0.20;           // [E] above the ring face (figures only in the IDD)
-    double petal_lean_rad = 30.0 * constants::deg_to_rad;  // [E] inward lean of the petal outline from the axis
+    double petal_height_m = 0.20;           // [S: IDSS IDD E Fig 3.1.1.1-2, pdf p. 24] 200 REF
+    double petal_lean_rad = 45.0 * constants::deg_to_rad;  // [S: IDSS IDD E Fig 3.1.1.1-3, pdf p. 24] petal face off the axis
     double petal_clearance_m = 0.01;        // [E] lateral play of the meshed petals at full ring contact
     double ring_extension_m = 0.30;         // [E] active ring face above the chaser HCS plane (passive ring at 0)
     // The interface acts only within this region of the ring centres (beyond: the hull contact owns it) [E]:
@@ -46,7 +46,7 @@ struct DockingInterfaceParameters {
     // The petals guide the light active ring, which gives way laterally on its actuator platform (spec correction 2);
     // the vehicle feels the platform spring, the stiff petal contact only beyond the range [E].
     double ring_lateral_stiffness_n_per_m = 2000.0;
-    double ring_lateral_range_m = 0.20;  // below the petal capture radius (0.24 m): the conformed ring still centres
+    double ring_lateral_range_m = 0.20;  // [E] below the petal capture radius (0.41 m): the conformed ring still centres
     double ring_tilt_max_rad = 6.0 * constants::deg_to_rad;   // the active ring conforms up to this tilt
     double latch_roll_max_rad = 6.0 * constants::deg_to_rad;  // petal flanks / latch strikers in roll
 };

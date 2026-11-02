@@ -91,7 +91,7 @@ hook_count = 12                # [S] copy; 3.2.3.4 [p42]
 # Soft capture
 scs_recess_m = 0.006           # [S] Fig 3.1.1.1-2 [p24] SCS mating plane 6 REF below the HCS plane
 tunnel_diameter_m = 1.255      # [S] Fig 3.1.1.1-2 [p24]
-petal_tip_diameter_m = 0.8     # [S] Fig 3.1.1.1-2 [p24] transfer passageway; with the height this is the 45 deg face of Fig 3.1.1.1-3 (the physics' petal_lean_rad 30 deg [E] differs: reported, not touched)
+petal_tip_diameter_m = 0.8     # [S] Fig 3.1.1.1-2 [p24] transfer passageway; with the height this is the 45 deg face of Fig 3.1.1.1-3, as the physics' petal_lean_rad
 petal_theta_deg = [90.0, 210.0, 330.0]  # [S] Fig 3.1.1.1-1 [p23]: one on the line of symmetry, 120 deg pitch
 striker_theta_deg = [30.0, 150.0, 270.0]  # [S] same figure: 3 latch strikers between the petals
 petal_base_half_deg = 30.0     # [E] Fig 3.1.1.1-1 by eye: base corners +-30 deg (+-2)

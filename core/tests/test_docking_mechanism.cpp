@@ -119,10 +119,20 @@ TEST_CASE("Docking mechanism: too fast overloads, the latches release, the chase
 }
 
 TEST_CASE("Docking mechanism: an offset beyond the petals' capture radius bounces off the tips", "[iss][docking]") {
-    auto r = approach(0.075, 0.30);
+    auto r = approach(0.075, 0.45);
     r.fly(60.0);
     CHECK(r.m.phase() == contact::DockingPhase::Failed);
     CHECK(r.m.failure() == "Versatz zu groß");
+    CHECK(r.c.v.x > 0.0);
+}
+
+TEST_CASE("Docking mechanism: inside the capture radius a large offset is pushed back out by the petal cone", "[iss][docking]") {
+    // 0.30 m is inside the 0.41 m, but the cone's axial force does more work on the way in than 0.075 m/s can pay
+    // (platform spring: k p^2 / 2 = 84 J at p = 0.29 m against about 34 J for the Dragon).
+    auto r = approach(0.075, 0.30);
+    r.fly(60.0);
+    CHECK(r.m.phase() == contact::DockingPhase::Failed);
+    CHECK(r.m.failure() == "abgeprallt");
     CHECK(r.c.v.x > 0.0);
 }
 

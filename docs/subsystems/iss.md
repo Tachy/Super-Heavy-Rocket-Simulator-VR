@@ -138,6 +138,21 @@ COMPLETE 2026-10-20.
   **What the `up` change did, shown by runs (2026-11-02, current tree, `STARSIM_VERBOSE=1`, the five cases chain IDA-2 / IDA-3, undock IDA-2, departure guidance IDA-2 / IDA-3, one `up` changed at a time).** Old `up` on both ports gives exactly the old numbers (IDA-2 chain 62.5 min / 31.6 kg / bending 434 N m, IDA-3 chain 65.7 kg / bending 270 N m, undock departure complete 40.3 min / 5.0 kg); IDA-2 `up` alone moves the IDA-2 chain and the undock, IDA-3 `up` alone moves the IDA-3 chain, nothing crosses between ports. So the +5.8 / +5.9 kg, the bending drop 434 -> 95 N m and the departure step 40.3 -> 32.3 min come from `up`, not from the fixtures or another change in the tree. The departure CW rows (sphere / ellipsoid exit 625 s / 2300 s IDA-2, 454 / 1783 s IDA-3) are identical for old and new `up`: their change against the Task 7 column (474 s ...) is not from `up` (earlier tree change, not attributed here).
   **Not shown.** The earlier explanation "the port's lateral axes no longer lie on Dragon's body axes" was wrong: mated attitude holds Dragon's axes on the port's (`flight_session_proximity.cpp`), and `apply_translation` commands in port axes, so port-axis authority does not depend on `up`. What `up` turns is LVLH against the body (V-bar / R-bar corrections, the departure burn through `port_to_lvlh`, `departure_guidance.cpp`). That LVLH-against-body mapping is the working hypothesis (pure lateral use scales with |cos| + |sin| = 1.366 at the 30 / 60 deg clockings, about 16 kg of lateral use for the +5.8 kg); the runs do not separate it from any other path through `up`, and no per-axis propellant breakdown was made (`STARSIM_DEBUG_PROXIMITY=1` would give it). The departure step is the discrete direction pick (Validation) moving with `up`, as before: unproven. The IDA-2 chain bending (434 -> 95 N m) and the IDA-3 numbers are shown to depend on `up`, their mechanism is open. No limit touched, no tuning, no physics changed. Three fixtures assumed "IDA-2 port frame = station (x, -y, -z)" (`beside_modules`, two truss-tip cases) and failed first: they stood somewhere else after the change; `docking_test_support.hpp` now converts station axes through the configured `up`. The Proximity and Docking tables in Validation hold the older `up` where not listed here.
 
+### Petal lean 45 deg (Task 13, plan 2026-11-02-falcon-dragon-iss-models)
+Physics follows the IDD's drawing: 30 deg [E, no source] -> 45 deg, capture radius 0.241 -> 0.41 m. Same tree, verbose, limit as tested:
+
+| quantity | old | new | limit |
+|---|---|---|---|
+| chain IDA-2: contact / docked after / propellant | 62.3 min / 10.2 min / 37.4 kg | same | docked 8-13 min |
+| chain IDA-2: comp / shear / bending | 955 / 84 / 95 | 957 / 130 / 112 | 6500 N / 3200 N / 2800 N m |
+| chain IDA-3: contact / docked after / propellant | 99.2 / 10.2 / 71.6 | same | docks within 4 h |
+| chain IDA-3: comp / shear / bending | 925 / 79 / 209 | 927 / 147 / 204 | as above |
+| IDSS grid 32 cases: docked; max comp / shear / bending / torsion | 32/32; 1252 / 627 / 2061 / 759 | 32/32; 1252 / 525 / 2031 / 751 | 6500 / 3200 / 2800 / 1500 |
+| nominal: hard capture, comp, shear | 10.0 min, 881, 83 | 10.0 min, 882, 87 | |
+| session IDA-2: docked, comp, shear | 10.0 min, 900, 78 | 10.0 min, 903, 135 | |
+
+The chain and session shear rises by up to 86 %, far under its limit; which contact carries it was not isolated. Four tests stood on the old geometry and moved: the centring case to 0.30 m, the tip strike and the "Versatz zu groß" cases to 0.45 m, and 0.30 m now fails as "abgeprallt" (own test). Refuelling docks on the probe and drogue (`probe_drogue_interface`), which has no petal lean: its tests stay as they were. The Docking table above holds the older lean where not listed here.
+
 ### Crew Dragon translation and relative navigation (i2)
 - **Draco layout** [E] kept (user 2026-10-19). Test threshold lateral >= 0.04 m/s^2 [E] (1 m/s in 25 s).
 - **Pure translation capability:** `RcsAllocator::pure_force_capability_n` (largest force whose allocation leaves torque
@@ -285,8 +300,8 @@ Plan `docs/superpowers/archive/plans/2026-10-19-iss-i5-docking.md`.
   10:27 EDT. Crew-4 / Demo-1: undock burn 1 to 0.15 m/s, keep-out sphere left 6 min 48 s, approach ellipsoid 17 min.
 - **Interface** (`contact/docking_interface`, passive port frame, reduced order): active ring face 0.30 m [E] out of the
   Dragon port; ring-face penalty contact (2e5 N/m, 2.9e4 N s/m [E]: 0.10 m/s impact peaks ~4.0 kN, 0.25 m/s ~10 kN);
-  three petal pairs as one cone (outline radius 0.60 m [S], height 0.20 m, lean 30 deg, meshed clearance 0.01 m [E]):
-  capture radius 0.241 m (beyond it tips strike the opposing petals, axial contact, no centring). The light active ring
+  three petal pairs as one cone (outline radius 0.60 m, height 0.20 m, lean 45 deg [S: IDD Figs 3.1.1.1-2, -3, pdf p. 24, printed 3-5; base 1200, tip 800, height 200 REF], meshed clearance 0.01 m [E]):
+  capture radius 0.41 m (0.01 + 0.40 tan 45; beyond it tips strike the opposing petals, axial contact, no centring). Inside it a large offset can still bounce: the cone's axial force is the lateral force x tan(lean), and on the way in it does the platform spring's work k p^2 / 2 whatever the lean, so at 0.075 m/s (about 34 J) 0.30 m (84 J) is pushed back out: "abgeprallt" (energy estimate, not a separate measurement). The light active ring
   gives way on its platform (2000 N/m up to 0.20 m [E]); conforms in tilt up to 6 deg and roll up to 6 deg [E]. Latches:
   ring faces within 5 mm, deflection, tilt and roll within ranges. Acts only within 1.2 m laterally and 0.15 m ring
   penetration (beyond: hull contact).
@@ -411,7 +426,7 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   | IDA-2 from Waypoint 0 | contact 62.3 min, docked 10.2 min later, 37.4 kg, bending 95 N m (comp, shear: before Tasks 7 and 8, 928 N, 93 N, not re-measured) |
   | IDA-3 from Waypoint 0 | contact 98.8 min, docked 10.2 min later, 65.7 kg, comp 970 N, shear 88 N, bending 270 N m |
   | IDSS grid 2^(6-2) x 2 ports (axial, offset, angle, roll, lateral, rate) | 32/32 docked; max comp 1254 N, shear 631 N, bending 2055 N m, torsion 761 N m |
-  | 0.30 m offset / 10 deg / 0.28 m/s | "Versatz zu groß" / "Winkel zu groß" / "Überlast" -> retreat to Waypoint 2 -> resume -> docked |
+  | 0.45 m offset (0.30 m: "abgeprallt") / 10 deg / 0.28 m/s | "Versatz zu groß" / "Winkel zu groß" / "Überlast" -> retreat to Waypoint 2 -> resume -> docked |
   | docked 24 h with a 0.3 m/s reboost | the pair moves together, port error < 1 mm |
   | undock -> departure -> capsule return | 0.0844 m/s, departure 4.9 kg, deorbit 58 h later (7-day pass search), splashed down, 1890 kg RCS left |
 
@@ -450,10 +465,7 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   boost leaves the perigee); a phase trim burn after drag tracking would be the fix.
 - Manual proximity control is M7.
 - US76 density vs NASA's model dominates the OEM along-track error (above).
-- Petal lean: physics 30 deg [E, no source] against 45 deg in the drawn IDD (height 200 mm, radial 600 -> 400 mm). Physics
-  unchanged. At 45 deg the capture radius would be 0.41 m (now 0.01 + 0.4 tan 30 = 0.24 m) and the axial force per
-  lateral force 1.0 (now 0.58), so the axial load from off-axis petal contact is understated. Changing it needs a re-tune
-  of `ring_lateral_range_m` (its comment rests on 0.24) and a docking campaign; the decision is the user's.
+- `ring_lateral_range_m` 0.20 m [E] kept below the new capture radius, not re-tuned: by geometry the IDSS envelope (offset to 0.10 m, 4 deg: about 0.12 m at the ring) stays off its stop (not read from the runs); beyond the envelope nothing is compared to reality.
 - Departure direction pick is a discrete selector (see Validation, departure): step changes of time and propellant.
 - Station attitude is ideal; J2 short-period terms are not restored on the synthetic orbit; no structural model for
   collisions; later departure burns are not modelled.

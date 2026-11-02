@@ -141,7 +141,7 @@ TEST_CASE("Docking campaign: the IDSS envelope grid captures and docks at both p
 
 TEST_CASE("Docking campaign: failures outside the envelope - offset and angle", "[iss][docking]") {
     {
-        auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.40 + 0.05, 0.30, -0.075, 0.0);
+        auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.40 + 0.05, 0.45, -0.075, 0.0);
         REQUIRE(d.fly_until(DockingPhase::Failed, 60.0));
         CHECK(d.session.docking_status() == "Fangen fehlgeschlagen: Versatz zu groß");
     }

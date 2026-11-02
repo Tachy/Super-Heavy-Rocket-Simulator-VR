@@ -4,7 +4,6 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 
 - Crew Dragon entry: 1 cm of stage length moves a campaign case by up to 0.88 km (bound 2 km holds), source not determined (`.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/task-5-report.md`); held until the rendering is done, by the user's wish.
 - Falcon 9 / Crew Dragon / ISS detail models (plan 2026-11-02, end state; values in `.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/final-values.md`), open for the user:
-  - Dragon petal lean: physics 30 deg [E] against the IDD's 45 deg face that is drawn. A change moves the capture radius: needs a capture campaign (`docs/subsystems/crew-dragon.md`, `iss.md`).
   - Port clocking: the `up` of the IDA-2 / IDA-3 ports is a photo-picked member [E, +-30 deg] of a measured class [D] (model D); no document states the real clock; IDA-3 aft vs forward rests on model D only. One config value, one tag run (`iss.md` "Port clocking").
   - Dragon port at 4.22 m [E] +-0.1 (was 4.0); capsule 4.85 m and trunk 3.25 m by measurement, over the cited 4.5 m capsule (`crew-dragon.md`).
   - Falcon 9 foot at -2.1 m from weak evidence; fins fold by a view rule (no physics state), leg drawn as one beam (`falcon9.md`).

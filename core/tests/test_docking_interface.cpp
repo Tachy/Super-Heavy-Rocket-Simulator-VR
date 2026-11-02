@@ -53,10 +53,10 @@ TEST_CASE("Docking interface: the penalty contact never pulls", "[iss][docking]"
 TEST_CASE("Docking interface: the petal cone centres a lateral offset inside the capture radius", "[iss][docking]") {
     const contact::DockingInterfaceParameters p;
     const double e = p.ring_extension_m;
-    // halfway into the petal overlap with 0.20 m offset along +y (clearance there 0.01 + 0.20 tan 30 deg = 0.125 m,
-    // capture radius 0.241 m): the cone pushes towards -y and out (+x)
+    // halfway into the petal overlap with 0.30 m offset along +y (clearance there 0.01 + 0.20 tan 45 deg = 0.21 m,
+    // capture radius 0.41 m): the cone pushes towards -y and out (+x)
     const double gap = p.petal_height_m;  // ring faces apart by one petal height
-    const auto c = contact::docking_interface_contact(pose({e + gap, 0.20, 0}), e, p);
+    const auto c = contact::docking_interface_contact(pose({e + gap, 0.30, 0}), e, p);
     REQUIRE(c.petal_contact);
     CHECK(c.force_port_n.y < 0.0);
     CHECK(c.force_port_n.x > 0.0);
@@ -69,7 +69,7 @@ TEST_CASE("Docking interface: beyond the capture radius the petal tips strike th
     const contact::DockingInterfaceParameters p;
     const double e = p.ring_extension_m;
     const double tips = e + 2.0 * p.petal_height_m;
-    const auto c = contact::docking_interface_contact(pose({tips - 0.01, 0.40, 0}, {-0.075, 0, 0}), e, p);
+    const auto c = contact::docking_interface_contact(pose({tips - 0.01, 0.45, 0}, {-0.075, 0, 0}), e, p);
     REQUIRE(c.tip_strike);
     CHECK(c.force_port_n.x > 0.0);
     CHECK(std::abs(c.force_port_n.y) < 1e-9);  // no centring on the tips
@@ -105,6 +105,11 @@ TEST_CASE("Docking interface: the IDSS outline and the dynamic load limit are th
     const contact::DockingInterfaceParameters p;
     CHECK(p.petal_outline_radius_m == 0.600);           // 1200 mm diameter at the SCS mating plane
     CHECK(p.petal_count == 3);
+    // Fig 3.1.1.1-3 (pdf p. 24, printed 3-5): the petal's face stands 45 deg off the axis; height 200, base 1200, tip 800.
+    CHECK(p.petal_lean_rad == Catch::Approx(45.0 * deg));
+    CHECK(p.petal_outline_radius_m - p.petal_height_m * std::tan(p.petal_lean_rad) == Catch::Approx(0.400));
+    const auto meshing = contact::docking_interface_contact(pose({p.ring_extension_m + 0.1, 0, 0}), p.ring_extension_m, p);
+    CHECK(meshing.capture_radius_m == Catch::Approx(0.41));
     // a 0.10 m/s ring-face impact (Dragon on the ISS, reduced mass ~12 t) peaks below the dynamic compression limit
     // (planning estimate with these values: 3,981 N; 0.25 m/s: 9,954 N)
     const double mu = 12000.0, dt = 1e-4;
