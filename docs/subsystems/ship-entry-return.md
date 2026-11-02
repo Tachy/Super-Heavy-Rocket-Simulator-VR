@@ -69,7 +69,9 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   gate to +-10 deg at it [E]). The predictor flies the same turn. The commanded attitude slews at 1.5x the turn rate
   and its rate is fed forward (`EntryCommand::rate_gcrf_radps`); entry controller actuator delay 0.5 s [E].
 - Catch from lunar gates: catch plans keep a soft half-plane 18 m off the tower while the hull bottom is below the
-  tower top; the gate hands over higher when the sink exceeds 100 m/s [E] (gate x (sink / 100)^2), only below 40 km.
+  tower top; the gate hands over higher with the sink, only below 40 km (`gnc::gate_trigger_height_m`): 800 m up to
+  S = 95 m/s [E], then a parabola, from J = 100^2 / S = 105.263 m/s the stopping-distance law gate x (sink / 100)^2 [E];
+  no step in height or slope, S is the only value of the parabola (Task 6h).
 - Structure keep-out (Task 6g, `gnc/descent_keep_out`, fidelity flag `SnapshotSettings::structure_keep_out`, on for the ship only): plans keep the hull's real extent (the capsule the tower physics collides: axis from tail to nose, radius 4.5 m, the plan's tilt) off boxes taken from `TowerGeometry`. Catch plans: both arms at standby. Abort plans: both arms open (the tower commands them open at an abort, 40 deg within 3.3 s; the strike at the 400 m abort was at opening 0.698 rad, not standby) and the tower box; the CG-only tower disc and mount rows stay. One soft row per box and interval, at the tightest of 4 instants between the nodes (the last phase's nodes lie up to ~2.4 s, ~70 m of height, apart), with normal, lever and axis frozen from the reference; rows only within 20 m [E] beyond the margin; margin 1.0 m [E] (tracking 0.2 m + thrust axis 1.5 deg off the hull over 24 m). `DescentPlan::keep_out_overlap_m` measures the settled plan. A catch plan that overlaps counts as beyond its limits (the existing refusal: first plan -> abort; 2 such re-plans -> abort). An abort plan that overlaps gives the water up, then is refused and the upright descent takes over. The mount has no hull row and the upright descent, the flip and the arms' swing are not covered.
 - Reach at the abort (`gnc::estimate_sea_reach`, once, from the live state): lower bound of the flight to the water and
   the stop on it (bang-bang at the tilt limit); beyond the usable propellant / `sea_reach_margin` 1.5 [D] the abort plans
@@ -115,7 +117,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
   engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t
-  left. Lunar: direct 19 of 21 (limit 21, seeds 2, 15 lost, `docs/known-issues.md`), aerocapture 21 of 21.
+  left. Lunar (Task 6h): direct 20 of 21 (limit 21; seed 2 upright 4.9 t, no ship lost, no strike, caught 4.2-12.2 t, peak 1171 kW/m^2; `docs/known-issues.md`), aerocapture 21 of 21 (4.9-11.3 t, raised perigee >= 197.4 km, peak 1084 kW/m^2).
 - Ship return from orbit `[ship][mission][validation]` (phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit
   execution +-1 % / 0.5 deg via `FlightSession::apply_velocity_error`): 14 of 14 caught, gate 0-11 m, 5.4-8.3 t left.
 
@@ -136,6 +138,5 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Ship catch: case 4 of the entry campaign is marginal (roundoff moves it between ~0.1 and ~1.2 km); an
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); since the vehicle plan's Task 6 the caught dispersed gates arrive with >= 3.8 t (see Validation).
-- A low-propellant abort (21-23 t at the gate) is carried by the flip push next to the tower and strikes it - an
-  abort-planning problem (keep-out with unconverged re-plans), open; not re-measured with the structure keep-out.
+- A low-propellant abort (21-23 t at the nominal gate; Task 6h with the structure keep-out, one uncommitted test line for the load) is lost at all three loads, open: 21 t 0.0 t left, 23 t 1.3 t left, no strike; 22 t struck at 4.0 t left (arm 7.61 m, tower box 0.93 m clear, hull bottom 18.95 m: the mount). Same result for an abort requested at 900, 600 or 400 m.
 - Aero state frozen as on main (crossflow 1.5 [D], old entry alpha table, entry CG 25.50 m, dry 255 t, dry CG 23.516 m) because no tested combination (measured masses, geometry crossflow 1.07-1.10, alpha 59.5, CG 24.85 m) passes all flight replays and case 8; table and facts in `docs/known-issues.md`. Standing facts: 255 t dry is probably too high (about 175 +-25 t by judgement; entry masses 221 / 252 / 203-227 t +-20); the CG window is 24.49-25.88 m and 25.50 / 23.516 m are tuned values (bottom-up dry CG about 22.9 m, 19.4-23.5); the allocator's authority floor (fraction 0.25) has a narrow window (failures 8 / 9 / 2 / 0 / 9 of 10 at 0 / 0.15 / 0.20 / 0.25 / 0.30). Next step: the low Mach part (geometry set: flight 13 low 14.96 %, flight 14 low 22.06 %, too slow at Mach 3-6).
