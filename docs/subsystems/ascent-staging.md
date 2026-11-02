@@ -24,19 +24,8 @@ command (no steering change while joined); every event at its own tick.
   `separation_after_meco_s`, upper ignition at MECO + `upper_ignition_after_meco_s`.
 - **Booster flip:** `[stage.recovery] flip_engine_groups` (unset: the final landing set - Super Heavy's centre engines;
   `[]`: engines off, the RCS turns the stage). MECO planning takes the flip from `flip_duration_s` (default 10 s [E];
-  Falcon 9 13.6 s [D], flown 13.9 s on the 47.7 m stage) plus the sequence's MECO -> separation interval (hot: run-on engines burn at minimum throttle).
-- **Falcon 9 flip** (follow-ups Task 7, user 2026-10-23: research first, fix vehicle data, no new guidance mechanism).
-  Nitrogen cold gas thrusters, 2 packs of 4 on the interstage [S: everydayastronaut.com Starship guide, Falcon 9
-  section]; thrust 6.5 kN each [D], N2 600 kg [D] (carved out of the 25.6 t dry mass: dry_mass_kg 25.0 t, total
-  unchanged), Isp 70 s [E]. Neither thrust nor supply is published; the thrust is sized so the flown separation ->
-  boostback is the mean of three timelines, 13.7 s (CRS-35 13 s, Bandwagon-3 14 s, Crew-13 14 s; spacelaunchschedule.com
-  timelines, +-0.6 s on the mean); the CRS-35 webcast clock gives 13.0 s. `flip_duration_s` 13.6 s [D] (the planning value; the full RTLS flies 13.9 s since the 47.7 m stage, inside the +-0.6 s of the mean),
-  `boostback_loss_fraction` 0.13 [D] (identified on the full RTLS: 12.1 t at landing-burn ignition for 12.1 t planned).
-  The full RTLS uses 473 kg N2 (ascent 87, flip, trims and landing 386), 127 kg left (27 % margin, >= 20 % [E]); 441 / 159 / 36 % on the 41.2 m stage: `docs/history/ascent-staging.md`.
-  Pitch inertia and lever were worked out on the 41.2 m stage (1.01e7 kg m2, 13 kN at 28.5 m from the CG = 3.71e5 Nm = 0.037
-  rad/s2) and are NOT recomputed for the 47.7 m stage (pod station 41.9 m, CG 12.0 m: lever 29.9 m); RCS capability at the full stage's CG roll / pitch / yaw 24 / 265 / 265
-  kNm; aero moment (q ~200 Pa at the separation) carries a large share of the turn. Whether the boostback lights before
-  the turn completes is not settled (the model lights at 15 deg pointing error).
+  Falcon 9 14.8 s [D], flown 14.7 s) plus the sequence's MECO -> separation interval (hot: run-on engines burn at minimum throttle).
+- **Falcon 9 flip:** a hold, a free turn over the ground on the nitrogen thrusters, ignition still turning, the gimbal ends the turn: `docs/subsystems/falcon9.md` "The flip" (law, measurements, N2 budget). Nitrogen cold gas thrusters, 2 packs of 4 on the interstage [S: everydayastronaut.com Starship guide, Falcon 9 section]; thrust 6.5 kN each [D], N2 600 kg [D], Isp 70 s [E]. `flip_duration_s` 14.8 s [D], `boostback_loss_fraction` 0.157 [D] (identified on the full RTLS: 12.1 t at landing-burn ignition for 12.1 t planned; former 13.6 s / 0.13: `docs/history/ascent-staging.md`).
 
 ### Max-Q limit and operational ascent throttle
 `gnc::AscentGuidance::booster_throttle`: the booster flies its operational throttle `[stage] max_ascent_throttle` and is
@@ -312,8 +301,7 @@ open discrepancy (measured + `test::allowance_margin` 2 % [E]; each T+30/60/90/1
 
 ## Open points and known limits
 - Falcon 9 vs CRS-35 and Starship vs flight 14 gaps listed under Validation (allowances asserted).
-- Whether the real Falcon 9 boostback lights before the flip is complete is not settled; the 6.5 kN flip thrust rests only
-  on the measured flip time.
+- The real Falcon 9 boostback lights before the turn is over (falcon9.md "The flip"); the 6.5 kN thrust is bounded by one flight's frames, not by a source.
 - Falcon 9 drone ship station is not checked to lie at sea (no land mask); a launch whose feasible kick band is narrower
   than 2.5 deg and falls between samples can be refused.
 - Remaining LQR clipping after the hull normal force: the ship's flaps (the allocation cancels them from the flight model

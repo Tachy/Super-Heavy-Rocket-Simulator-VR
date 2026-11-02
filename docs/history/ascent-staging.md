@@ -767,3 +767,6 @@ Diagnosis first (gate: the candidate fix chooses between two contradicting sourc
 Full RTLS: flip 13.6 s flown (planned 13.6 s), N2 used 441 kg (ascent 70, flip 349, trims and landing 22), 159 kg left = 36 % margin.
 One pack's two inward thrusters: 13 kN at 28.5 m from the CG = 3.71e5 Nm on a pitch inertia 1.01e7 kg m2 (0.037 rad/s2). On the
 47.7 m stage: 13.9 s, 473 kg used (ascent 87), 127 kg left = 27 %.
+
+## Falcon 9 flip before Task 14 (2026-11-02)
+The attitude controller turned the stage at once from separation to within 15 deg of the boostback aim (accelerate and brake on the RCS, 6.5 kN [D] sized so the total was 13.7 s; 13.9 s flown; 358 kg N2), then all three engines at once. `flip_duration_s` 13.6, `boostback_loss_fraction` 0.13; N2 129.5 kg left. The agreement of the total hid two errors: no hold and braking on the RCS. The drawn interstage cut the MVac bell 0.5-1.75 s after separation.
