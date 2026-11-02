@@ -152,6 +152,7 @@ add_executable(starsim_core_tests
     test_deck_motion.cpp
     test_deck_landing.cpp
     test_falcon9_rtls.cpp
+    test_falcon9_flip_moments.cpp
     test_falcon9_boostback_dump.cpp
     test_staging_sequence.cpp
     test_ship_catch.cpp

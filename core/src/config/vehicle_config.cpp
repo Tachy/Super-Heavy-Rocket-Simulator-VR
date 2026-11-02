@@ -726,6 +726,22 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             }
             p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
             p.flip_duration_s = doc.number_or(table, "flip_duration_s", p.flip_duration_s);
+            p.flip_hold_s = doc.number_or(table, "flip_hold_s", p.flip_hold_s);
+            if (p.flip_hold_s < 0.0) doc.fail("flip_hold_s must not be negative (0: the stage turns at once)");
+            p.flip_ignition_off_velocity_rad =
+                doc.number_or(table, "flip_ignition_off_velocity_deg", p.flip_ignition_off_velocity_rad / constants::deg_to_rad) *
+                constants::deg_to_rad;
+            p.flip_max_rate_radps =
+                doc.number_or(table, "flip_max_rate_deg_s", p.flip_max_rate_radps / constants::deg_to_rad) * constants::deg_to_rad;
+            p.flip_ignition_timeout_s = doc.number_or(table, "flip_ignition_timeout_s", p.flip_ignition_timeout_s);
+            if (const auto* groups = table["boostback_ignition_engine_groups"].as_array()) {
+                p.boostback_ignition_engine_groups.clear();
+                for (const auto& g : *groups) p.boostback_ignition_engine_groups.push_back(g.value_or(std::string{}));
+            }
+            p.boostback_buildup_s = doc.number_or(table, "boostback_buildup_s", p.boostback_buildup_s);
+            p.boostback_full_thrust_pointing_rad =
+                doc.number_or(table, "boostback_full_thrust_pointing_deg", p.boostback_full_thrust_pointing_rad / constants::deg_to_rad) *
+                constants::deg_to_rad;
             p.boostback_loss_fraction = doc.number_or(table, "boostback_loss_fraction", p.boostback_loss_fraction);
             p.rcs_propellant_kg = doc.number_or(table, "rcs_propellant_kg", p.rcs_propellant_kg);
             p.entry_burn_altitude_m = doc.number_or(table, "entry_burn_altitude_m", p.entry_burn_altitude_m);

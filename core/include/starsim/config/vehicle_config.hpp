@@ -291,6 +291,13 @@ struct ReturnProfile {
     double landing_fresh_attitude_violation_weight = 0.0;  // SCvx soft tilt / rate limit penalty of fresh plans (0: same)
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
     double flip_duration_s = 0.0;        // MECO planning: separation -> boostback ignition (0: the guidance default)
+    double flip_hold_s = 0.0;            // separation -> start of the turn: the stage holds its attitude (0: turns at once)
+    double flip_ignition_off_velocity_rad = 0.0;  // free turn over the ground: boostback lights this far off the velocity (0: pointing gate)
+    double flip_max_rate_radps = 0.0;    // free turn: no more RCS torque above this rate
+    double flip_ignition_timeout_s = 0.0;  // free turn: separation -> ignition at the latest (stuck turn: the gimbal does it)
+    std::vector<std::string> boostback_ignition_engine_groups;  // lit first (empty: all of the boostback set at once)
+    double boostback_buildup_s = 0.0;    // ignition -> the rest of the boostback set
+    double boostback_full_thrust_pointing_rad = 0.0;  // ... and only within this pointing error
     double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
     double rcs_propellant_kg = -1.0;        // MECO planning: main-tank RCS gas spent before landing-burn ignition (< 0: default)
     double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)

@@ -23,6 +23,18 @@ struct BoosterReturnParameters {
     bool boostback = true;
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)
     double flip_duration_s = 10.0; // [E] separation to boostback ignition (MECO planning; our flip takes ~10 s)
+    // Separation -> start of the turn: the stage holds its attitude and no RCS force, until the second stage's nozzle has
+    // left the interstage (with or without a boostback). 0: it turns at once (Super Heavy, hot staging).
+    double flip_hold_s = 0.0;
+    // Free turn (> 0; Falcon 9, docs/subsystems/falcon9.md "The flip"): after the hold the RCS accelerates the top over the ground,
+    // with no braking, and the boostback lights this far off the velocity, still turning; the engines' gimbal ends the turn.
+    // 0: the attitude controller turns the stage and the boostback lights within flip_tolerance_rad.
+    double flip_ignition_off_velocity_rad = 0.0;
+    double flip_max_rate_radps = 0.0;      // free turn: no more RCS torque above this rate
+    double flip_ignition_timeout_s = 0.0;  // free turn: separation -> ignition at the latest (stuck turn: the gimbal does it)
+    std::vector<std::string> boostback_ignition_groups;  // lit first (empty: all of boostback_groups at once)
+    double boostback_buildup_s = 0.0;      // ignition -> all of boostback_groups
+    double boostback_full_thrust_pointing_rad = 0.0;  // ... and only within this pointing error
     // [D] MECO planning: boostback delta-v beyond the two-body Lambert arc - the drag-aware aim point lies ~60 m/s
     // further, finite burn and tail-off ~70 m/s more (identified on our full block 3 return: 1616 vs 1488 m/s).
     double boostback_loss_fraction = 0.086;
@@ -138,8 +150,11 @@ public:
     double drag_scale() const { return drag_scale_; }
     // Scenarios: start in a later phase (e.g. LandingBurn for a booster placed at ignition).
     void skip_to(ReturnPhase phase) {
+        // Placed at the separation: the hold and the turn run from the first update.
+        const bool at_separation = phase == ReturnPhase::Flip;
+        hold_void_ = !at_separation;
         phase_ = phase;
-        started_ = true;
+        started_ = !at_separation;
     }
     void set_realtime(bool realtime);
     const ScvxLandingGuidance* scvx() const { return scvx_.get(); }
@@ -214,7 +229,12 @@ private:
     bool ditch_ = false;  // explicit laws only at a catch site: the whole return aims beyond the shoreline
     BoosterReturnParameters parameters_;
     ReturnPhase phase_ = ReturnPhase::Flip;
+    ReturnCommand steer(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
+
     time::Epoch boostback_start_;
+    math::Vec3 hold_axis_gcrf_;  // the body axis at the first update (flip_hold_s)
+    bool hold_void_ = false;     // placed in a later phase (skip_to): no separation to hold after
+    time::Epoch boostback_lit_;  // the boostback's ignition command
     bool started_ = false;
     math::Vec3 aim_offset_itrf_;  // horizontal shift of the Lambert aim point (drag compensation)
     bool final_engines_ = false;  // landing burn continues on the centre engines

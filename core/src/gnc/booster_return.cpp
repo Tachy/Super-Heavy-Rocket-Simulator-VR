@@ -99,6 +99,17 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
     }
     if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
     if (profile.flip_duration_s > 0.0) p.flip_duration_s = profile.flip_duration_s;
+    if (profile.flip_hold_s > 0.0) p.flip_hold_s = profile.flip_hold_s;
+    if (profile.flip_ignition_off_velocity_rad > 0.0) {
+        p.flip_ignition_off_velocity_rad = profile.flip_ignition_off_velocity_rad;
+        p.flip_max_rate_radps = profile.flip_max_rate_radps;
+        p.flip_ignition_timeout_s = profile.flip_ignition_timeout_s;
+    }
+    if (!profile.boostback_ignition_engine_groups.empty()) {
+        p.boostback_ignition_groups = ids(profile.boostback_ignition_engine_groups);
+        p.boostback_buildup_s = profile.boostback_buildup_s;
+        p.boostback_full_thrust_pointing_rad = profile.boostback_full_thrust_pointing_rad;
+    }
     if (profile.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = profile.boostback_loss_fraction;
     if (profile.rcs_propellant_kg >= 0.0) p.rcs_propellant_kg = profile.rcs_propellant_kg;
     if (profile.entry_burn_altitude_m > 0.0) {
@@ -143,6 +154,18 @@ void BoosterReturnGuidance::retarget_to_sea() {
 
 ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                             time::Epoch epoch) {
+    if (!started_) hold_axis_gcrf_ = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+    ReturnCommand cmd = steer(body, env, epoch);
+    if (!hold_void_ && epoch - boostback_start_ < parameters_.flip_hold_s) {  // the aim keeps tracking; only the turn waits
+        cmd.axis_gcrf = hold_axis_gcrf_;
+        cmd.rcs_force_gcrf = {};
+        cmd.torque_body_nm.reset();
+    }
+    return cmd;
+}
+
+ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                           time::Epoch epoch) {
     const auto& s = body.state();
     const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
     const Mat3 to_fixed = transpose(transform.rotation);
@@ -202,9 +225,38 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             // Turn with the flip engines idling (gimbal authority; none: on the RCS), then go to full boostback thrust.
             cmd.run_groups = parameters_.flip_groups;
             cmd.throttle = 0.0;  // limited to the minimum throttle by the engines
-            if (pointing < parameters_.flip_tolerance_rad) phase_ = ReturnPhase::Boostback;
+            const double since_s = epoch - boostback_start_;
+            const bool holding = !hold_void_ && since_s < parameters_.flip_hold_s;
+            bool ignite = pointing < parameters_.flip_tolerance_rad;
+            if (parameters_.flip_ignition_off_velocity_rad > 0.0) {
+                const double off_velocity =
+                    std::acos(std::clamp(dot(body_axis, math::normalized(v_rel_gcrf)), -1.0, 1.0));
+                ignite = off_velocity >= parameters_.flip_ignition_off_velocity_rad ||
+                         since_s >= parameters_.flip_ignition_timeout_s;
+                if (!holding) {
+                    // Over the ground: the top towards the nadir; the fins feather (stowed in reality), no braking.
+                    const Vec3 turn_body = s.attitude.inverse_rotate(
+                        math::normalized_or_zero(cross(body_axis, math::normalized(s.position_gcrf_m) * -1.0)));
+                    const Vec3& w = s.angular_velocity_body_radps;
+                    const bool at_limit = dot(w, turn_body) >= parameters_.flip_max_rate_radps;
+                    cmd.torque_body_nm = at_limit ? Vec3{} : turn_body * body.vehicle().max_rcs_torque_nm().y;
+                }
+            }
+            if (!holding && ignite) {
+                phase_ = ReturnPhase::Boostback;
+                boostback_lit_ = epoch;
+            }
         } else {
             cmd.run_groups = parameters_.boostback_groups;
+            if (!parameters_.boostback_ignition_groups.empty() &&
+                (epoch - boostback_lit_ < parameters_.boostback_buildup_s ||
+                 pointing > parameters_.boostback_full_thrust_pointing_rad)) {
+                cmd.run_groups = parameters_.boostback_ignition_groups;
+            }
+            // Engines still starting: the turn coasts on (no RCS braking), the gimbal takes it from the first thrust.
+            if (parameters_.flip_ignition_off_velocity_rad > 0.0 && !body.vehicle().any_engine_producing_thrust()) {
+                cmd.torque_body_nm = Vec3{};
+            }
             cmd.throttle = 1.0;
             // Cutoff when the remaining delta-v equals the shutdown tail-off impulse.
             const auto engines = engine_set(body.vehicle(), parameters_.boostback_groups, pressure);

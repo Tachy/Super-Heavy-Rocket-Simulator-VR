@@ -5,6 +5,7 @@
 #  - the wall cuts the drawn parts while the same ring set has points on both sides of it at the wall's height.
 #  - clearance: smallest distance of any point to the wall (a segment in station and radius), signed only by the state above.
 # godot --headless --path game --script res://tests/separation_clearance.gd -- [--mission=falcon9_crew_dragon] [--seconds=12]
+# Exit 1 when the wall cuts the drawn parts or the smallest clearance over the run is not above 0 (the test of the flip hold).
 extends SceneTree
 
 const STEP_S := 0.25
@@ -66,11 +67,19 @@ func _run() -> void:
 	var last_cut := NAN
 	var min_clearance := INF
 	var min_t := NAN
+	var smallest := INF
+	var smallest_t := NAN
+	var clear_t := NAN
 	while t <= sep + seconds:
 		var row := _measure(sim)
 		if row.is_empty():
 			quit(1)
 			return
+		if row["clearance_m"] < smallest:
+			smallest = row["clearance_m"]
+			smallest_t = t - sep
+		if is_nan(clear_t) and row["exit_above_rim_m"] > 0.0:
+			clear_t = t - sep
 		if row["cut"]:
 			first_cut = t - sep if is_nan(first_cut) else first_cut
 			last_cut = t - sep
@@ -84,7 +93,10 @@ func _run() -> void:
 		rig.advance(sim, zero + t)
 	print("separation_clearance: RESULT cut from dt %s s to dt %s s; before the cut smallest clearance %.3f m at dt %s s" % [
 			first_cut, last_cut, min_clearance, min_t])
-	quit(0)
+	var passed: bool = is_nan(first_cut) and smallest > 0.0
+	print("separation_clearance: GATE %s smallest clearance %.3f m at dt %s s; nozzle exit above the rim from dt %s s" % [
+			"PASS" if passed else "FAIL", smallest, smallest_t, clear_t])
+	quit(0 if passed else 1)
 
 
 func _measure(sim: FlightSim) -> Dictionary:

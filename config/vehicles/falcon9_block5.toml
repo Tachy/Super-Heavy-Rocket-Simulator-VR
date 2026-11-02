@@ -146,11 +146,23 @@ nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 60 km
 boostback_engine_groups = ["center", "pair"]  # [E] the 3-engine set (thrust on the axis)
 flip_engine_groups = []                      # [S: SpaceX webcasts] the flip after separation on the nitrogen thrusters,
                                              # engines off until the boostback
-flip_duration_s = 13.6                       # [D] MECO planning: separation -> boostback ignition; flown on our full RTLS 13.9 s
-                                             # (13.6 s on the former 41.2 m stage), inside the mean +-0.6 s; measured 13 / 14 / 14 s
-                                             # [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s
-boostback_loss_fraction = 0.13               # [D] MECO planning: identified on our full RTLS (12.1 t at the landing-burn
-                                             # ignition for 12.1 t planned; 0.19 with the former 50 s flip)
+flip_duration_s = 14.8                       # [D] MECO planning: separation -> boostback ignition as flown on our full RTLS. Measured
+                                             # 13 / 14 / 14 s [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s; speed dials 14.5 +-1 s
+flip_hold_s = 4.0                            # [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13] separation -> start of the turn: 4 s on all
+                                             # three timelines; the drawn nozzle exit leaves the interstage 3.96 s after separation
+                                             # at the pushers' 1 m/s (game/tests/separation_clearance.gd). Crew-13 frames agree: the
+                                             # second stage's bell stays within ~10 deg of the axis to 4 s (docs/subsystems/falcon9.md)
+flip_ignition_off_velocity_deg = 114.0       # [D] ignition with the turn under way, over the ground: Crew-13 earth limb crosses the
+                                             # view up the interstage at 13 deg/s, 9-11.5 s after separation; extrapolated to the
+                                             # ignition (speed dial, CRS-35 / Crew-13), +-15 deg (falcon9.md "The flip")
+flip_max_rate_deg_s = 20.0                   # [D] measured 16 +-4 deg/s extrapolated to the ignition: its upper end
+flip_ignition_timeout_s = 17.0               # [E] a stuck turn lights anyway: the measured 13.7 s + 3.3 s; the gimbal does the turn
+boostback_ignition_engine_groups = ["center"]  # [D] speed dial, CRS-35 and Crew-13: about one engine's deceleration first
+boostback_buildup_s = 3.5                    # [D] ... three engines 3.5 +-0.5 s later (T+154 -> T+158 on CRS-35; T+2:44.5 -> T+2:48 on
+                                             # Crew-13; CRS-35's aft camera shows the plume at 2:38)
+boostback_full_thrust_pointing_deg = 90.0    # [E] a late or stuck turn stays on the centre engine until it points roughly right
+boostback_loss_fraction = 0.157              # [D] MECO planning: identified on our full RTLS with the free turn (see falcon9.md); the
+                                             # engines light still turning, so part of the first seconds' thrust is off the aim
 return_flight_time_s = 260.0                 # [D] Lambert arc; with drag and the entry burn the touchdown follows ~300 s after
                                              # the boostback start as on CRS-35 (T+~150 s -> T+442 s; 290 s landed 38 s late)
 entry_engine_groups = ["center"]             # [D] CRS-35: the engine icon shows the centre engine alone
@@ -183,6 +195,8 @@ landing_fresh_attitude_violation_weight = 100.0  # [E] penalty on the soft tilt 
 # webcast telemetry (drone ship, no boostback).
 [stage.recovery.drone_ship]
 boostback = false                            # [D] no boostback: the stage coasts on its ascent arc, turns on its RCS
+flip_hold_s = 15.0                           # [D] Starlink 15-25 frames: the second stage stays within ~10 deg of the axis until T+2:48,
+                                             # 15 s after the separation at T+2:33 (+-2 s); the real stage has no hurry here
 entry_engine_groups = ["center", "pair"]     # [D] three engine icons T+367.5-385 s (the centre engine lit 3.5 s earlier)
 entry_burn_altitude_m = 66000.0              # [D] centre engine lit at 67.4 km, three engines from 64.2 km
 entry_burn_delta_v_mps = 880.0               # [D] 7,926 -> 5,245 km/h over T+361-392 s (745 m/s) plus ~125 m/s of
@@ -198,9 +212,9 @@ landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine chang
 [[stage.tank]]
 id = "rcs_n2"
 contents = "rcs"
-mass_kg = 600.0                              # [D] nitrogen, carved out of the 25.6 t dry mass: the full RTLS uses 473 kg
-                                             # (ascent 87 kg, flip, coast trims and landing 386 kg), 127 kg left
-                                             # at the touchdown = 27 % margin (>= 20 % [E] required)
+mass_kg = 600.0                              # [D] nitrogen, carved out of the 25.6 t dry mass: the full RTLS uses 308 kg (ascent 83 kg, hold 4,
+                                             # turn 189 = 130 kNs, coast trims and landing 32), 292 kg left = 95 % margin (>= 20 % [E]).
+                                             # Unpublished; sized when the flip braked on the RCS, not reduced: no source says less.
 density_kg_m3 = 250.0                        # [E] COPV gas at ~300 bar
 base_station_m = 38.0                        # [E] COPVs at the top of the tank section, below the interstage
 
@@ -217,15 +231,12 @@ station_m = 41.9                             # [E] interstage, ~0.7 m above the 
                                              # F_Falcon_9_first_stage_in_hangar (+-0.5 m, perspective); was 40.0
 radius_m = 1.83
 azimuths_deg = [0.0, 180.0]                  # [S:ea_rcs] two packs at the top; [E] azimuths between the fins
-thrust_n = 6500.0                             # [D] rests ONLY on the measured flip time (large for cold gas: 9.5 kg/s
-                                              # N2 each): no source gives or bounds the thrust (SpaceX, Wikipedia, spec
-                                              # sheets: "nitrogen cold gas thrusters" only). Sized on the existing flip
-                                              # controller and the 15 deg boostback gate so that separation -> boostback
-                                              # is the measured 13.7 s mean (flown 13.6 s on the former 41.2 m stage, 13.9 s on 47.7 m; 450 N [E] before: 53 s).
-                                              # Pitch at the separation (worked out on the 41.2 m stage, not
-                                              # recomputed for 47.7 m, pod now at 41.9 m): one pack's two inward thrusters,
-                                              # 13 kN at 28.5 m = 3.71e5 Nm on 1.01e7 kg m2 (~17 s bang-bang alone; the aero
-                                              # moment carries a large share of the turn)
+thrust_n = 6500.0                             # [D] from the measured turn, no source gives or bounds it (SpaceX, Wikipedia, spec sheets:
+                                              # "nitrogen cold gas thrusters" only). Crew-13 frames: 1.6-1.9 deg/s2 over the turn, so
+                                              # 3.1-3.7e5 Nm on the stage's 1.12e7 kg m2 (full stage at the separation, 30.4 m lever,
+                                              # two thrusters): 5-6 kN; separation -> ignition in 13.7 s would ask ~7.6 kN. 6.5 kN lies
+                                              # in that band and flies 14.7 s. Large for cold gas (9.5 kg/s N2 each at Isp 70 s): an
+                                              # assumption the frames only bound, docs/subsystems/falcon9.md "The flip".
 directions = ["tangential_plus", "tangential_minus", "inward", "inward"]  # [S:ea_rcs] 4 per pack
 
 [[stage]]
