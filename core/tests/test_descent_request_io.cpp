@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -9,6 +10,8 @@
 #include <sstream>
 #include <string>
 
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/descent_discretization.hpp"
 #include "starsim/gnc/descent_request_io.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
@@ -202,6 +205,71 @@ PlanRequest seed117_replan(const char* name) {
 }
 
 }  // namespace
+
+TEST_CASE("The first deck plan of the 47.7 m Falcon 9 stage converges on its fresh trust-region weight",
+          "[gnc][descent][scvx][falcon9][asds]") {
+    // First plan of the drone-ship mission, recorded with STARSIM_DUMP_SCVX (h 2951 m, 830 m across, 37.3 t, floor 30.5 t).
+    // At the default weight 0.1 the hull normal force holds SCvx in a limit cycle: defect 0.03-0.16 over 300 iterations,
+    // the plan on the propellant floor. Replays with 0.3 and 1 end at 31.4 t (Task 3b report).
+    auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/falcon9_asds_first_plan_47m.txt");
+    REQUIRE(!r.warm_start);
+    const auto stage = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front();
+    r.settings.fresh_trust_region_weight =
+        booster_return_parameters(stage.id, stage.return_profile_for(true)).scvx.settings.fresh_trust_region_weight;
+    DescentPlanner planner;
+    const auto plan = default_plan_function()(planner, r);
+    REQUIRE(plan.converged);
+    CHECK(plan.iterations < r.settings.fresh_max_iterations);
+    CHECK(plan.nonlinear_defect < r.settings.defect_tolerance);
+    CHECK(plan.reference.x.back()[descent_index::mass] == Catch::Approx(31400.0).margin(1000.0));
+}
+
+TEST_CASE("The tilt penalty on fresh plans keeps the refused first deck plans inside the guard's limit",
+          "[gnc][descent][scvx][falcon9][asds]") {
+    // First plans of ASDS MECO seeds 105 and 109, recorded with STARSIM_DUMP_SCVX. At the default penalty the solver settles
+    // on one swing of 28.1 / 26.5 deg against the final set's 20 deg, 12.8 s into the burn, and the guard refuses it
+    // (Task 3d report). Fixed numbers: each seed at the trust-region weight that refused it.
+    const double limit = std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad);
+    const auto excess = [](const char* name, double trust_region, double penalty) {
+        auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/" + name);
+        REQUIRE(!r.warm_start);
+        r.settings.fresh_trust_region_weight = trust_region;
+        r.settings.fresh_attitude_violation_weight = penalty;
+        DescentPlanner planner;
+        const auto plan = default_plan_function()(planner, r);
+        REQUIRE(plan.converged);
+        return plan.planned_tilt_excess;
+    };
+    const char* seed105 = "falcon9_asds_seed105_first_plan.txt";
+    const char* seed109 = "falcon9_asds_seed109_first_plan.txt";
+    CHECK(excess(seed105, 1.0, 0.0) > limit);
+    CHECK(excess(seed105, 1.0, 100.0) <= limit);
+    CHECK(excess(seed109, 0.3, 0.0) > limit);
+    CHECK(excess(seed109, 0.3, 100.0) <= limit);
+    // Both at the vehicle's own values
+    const auto stage = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front();
+    const auto own = booster_return_parameters(stage.id, stage.return_profile_for(true)).scvx.settings;
+    CHECK(own.fresh_trust_region_weight == 0.3);
+    CHECK(own.fresh_attitude_violation_weight == 100.0);
+    CHECK(excess(seed105, own.fresh_trust_region_weight, own.fresh_attitude_violation_weight) <= limit);
+    CHECK(excess(seed109, own.fresh_trust_region_weight, own.fresh_attitude_violation_weight) <= limit);
+}
+
+TEST_CASE("The fresh trust-region weight leaves a re-plan untouched", "[gnc][descent][scvx][falcon9]") {
+    const auto base = seed117_replan("falcon9_asds_seed117_741m.txt");
+    REQUIRE(base.warm_start);
+    auto with_weight = base;
+    with_weight.settings.fresh_trust_region_weight = 1.0;
+    with_weight.settings.fresh_attitude_violation_weight = 100.0;
+    DescentPlanner first, second;
+    const auto a = default_plan_function()(first, base);
+    const auto b = default_plan_function()(second, with_weight);
+    CHECK(a.iterations == b.iterations);
+    REQUIRE(a.reference.x.size() == b.reference.x.size());
+    for (size_t k = 0; k < a.reference.x.size(); ++k) {
+        for (size_t i = 0; i < DescentState::size(); ++i) CHECK(a.reference.x[k][i] == b.reference.x[k][i]);
+    }
+}
 
 TEST_CASE("A re-plan short of propellant draws on the soft part of the reserve and lands", "[gnc][descent][scvx][falcon9]") {
     const auto r = seed117_replan("falcon9_asds_seed117_741m.txt");

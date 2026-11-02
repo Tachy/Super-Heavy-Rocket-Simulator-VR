@@ -91,6 +91,12 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.scvx.switch_speed_mps = 0.5 * (switches[1].min_sink_mps + switches[1].max_sink_mps);
     }
     if (profile.landing_gimbal_fraction > 0.0) p.scvx.settings.limits.gimbal_fraction = profile.landing_gimbal_fraction;
+    if (profile.landing_fresh_trust_region_weight > 0.0) {
+        p.scvx.settings.fresh_trust_region_weight = profile.landing_fresh_trust_region_weight;
+    }
+    if (profile.landing_fresh_attitude_violation_weight > 0.0) {
+        p.scvx.settings.fresh_attitude_violation_weight = profile.landing_fresh_attitude_violation_weight;
+    }
     if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
     if (profile.flip_duration_s > 0.0) p.flip_duration_s = profile.flip_duration_s;
     if (profile.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = profile.boostback_loss_fraction;

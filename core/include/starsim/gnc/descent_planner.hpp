@@ -34,6 +34,14 @@ struct ScvxSettings {
     // A subproblem the solver could not finish to full accuracy is still used if it is feasible to this residual.
     double usable_primal_residual = 1e-6;
     double trust_region_growth = 10.0;
+    // Trust-region weight of a fresh plan (no warm start); 0: weights.trust_region. A vehicle's own setting
+    // (ReturnProfile::landing_fresh_trust_region_weight): the hull normal force can hold a fresh plan in a limit cycle
+    // at the default weight. Re-plans keep weights.trust_region.
+    double fresh_trust_region_weight = 0.0;
+    // Penalty on the soft tilt and rate limits of a fresh plan; 0: weights.attitude_violation. A vehicle's own setting
+    // (ReturnProfile::landing_fresh_attitude_violation_weight): a long hull's normal force can make one large swing
+    // beyond the soft limit a plan the solver settles on although a clean one exists. Re-plans keep the default.
+    double fresh_attitude_violation_weight = 0.0;
     // Not converging: stop once the virtual control has not shrunk below stall_ratio of its value stall_iterations
     // iterations earlier while still above stall_virtual_control (scaled: metre-size defects, an unreachable target;
     // keeps failing re-plans short without cutting slow but healthy convergence).

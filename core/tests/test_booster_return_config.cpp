@@ -8,6 +8,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/booster_return.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 
 using namespace starsim;
 using Groups = std::vector<std::string>;
@@ -79,6 +80,30 @@ TEST_CASE("Super Heavy has no drone-ship profile", "[gnc][booster]") {
     CHECK_FALSE(cfg.stages.front().drone_ship_return);
     CHECK(&cfg.stages.front().return_profile_for(true) == &cfg.stages.front().return_profile);
     CHECK(gnc::booster_return_parameters(cfg.stages.front()).boostback);
+}
+
+TEST_CASE("Only Falcon 9's fresh landing plans take their own trust-region weight", "[gnc][falcon9][asds][rtls][booster][ship]") {
+    const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    const auto& stage = f9.stages.front();
+    const double weight = stage.return_profile.landing_fresh_trust_region_weight;
+    CHECK(weight > gnc::DescentWeights{}.trust_region);
+    // RTLS and drone ship alike; the weight of the re-plans stays the default
+    const auto rtls = gnc::booster_return_parameters(stage).scvx.settings;
+    const auto deck = gnc::booster_return_parameters(stage.id, stage.return_profile_for(true)).scvx.settings;
+    CHECK(rtls.fresh_trust_region_weight == weight);
+    CHECK(deck.fresh_trust_region_weight == weight);
+    CHECK(deck.weights.trust_region == gnc::DescentWeights{}.trust_region);
+    const auto sh = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    CHECK(gnc::booster_return_parameters(sh.stages.front()).scvx.settings.fresh_trust_region_weight == 0.0);
+    CHECK(gnc::ship_landing_parameters().scvx.settings.fresh_trust_region_weight == 0.0);
+    // Likewise the tilt penalty on fresh plans
+    const double penalty = stage.return_profile.landing_fresh_attitude_violation_weight;
+    CHECK(penalty > gnc::DescentWeights{}.attitude_violation);
+    CHECK(rtls.fresh_attitude_violation_weight == penalty);
+    CHECK(deck.fresh_attitude_violation_weight == penalty);
+    CHECK(deck.weights.attitude_violation == gnc::DescentWeights{}.attitude_violation);
+    CHECK(gnc::booster_return_parameters(sh.stages.front()).scvx.settings.fresh_attitude_violation_weight == 0.0);
+    CHECK(gnc::ship_landing_parameters().scvx.settings.fresh_attitude_violation_weight == 0.0);
 }
 
 TEST_CASE("Falcon 9 landing plans take their own gimbal allowance, Super Heavy keeps the default",

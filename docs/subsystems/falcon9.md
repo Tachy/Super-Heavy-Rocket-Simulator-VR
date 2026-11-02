@@ -52,6 +52,38 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   `body_grid_fins(i)`, `return_state(i)["legs"]`. The bindings build with C++ exceptions on
   (`GODOTCPP_DISABLE_EXCEPTIONS OFF`).
 
+### First stage geometry (detail model plan 2026-11-02, Task 3)
+- Stage length 47.7 m [S] with the interstage, from the outer Merlins' exit plane (station 0) to the interstage top; 41.2 m is the
+  stage without its interstage, where tanks and engine bay end. A model's 48.4 m is that model's scale error, not averaged in.
+- Physics thrust acts at station 0 (the exit plane); the Merlin's drawn gimbal point stands 1.7 m [E] above it.
+- Fin hinge 43.35 m [E], RCS packs 41.9 m [E]: on the interstage, measured in `F_ORBCOMM_2`, `F_Falcon_9_first_stage_in_hangar`.
+- Foot -2.1 m [E] (model M4, scale-true; the Starlink 15-25 frame at file 1124 s is weak support: strut 37 +-3 deg off the axis against
+  38 deg at -2.1 and 40 deg at -1.5).
+
+### Fin and leg azimuths
+Evidence (photos, `screenshots/falcon9_ref/`; the reference models disagree, so they do not decide):
+- `F_Landed_rockets_in_hangar_39A`, the stage seen from its top: the raceway runs on the centre line, the two near fins sit +-45 deg (+-5) off it,
+  the leg covers at the far end also about +-50 deg: the legs are on the FINS' azimuths and the raceway between them.
+- `F_ORBCOMM_2`: fins at about +-48 deg and leg covers at about +-40 deg from the same camera axis (+-10 deg); with a 45 deg offset one of the two
+  would stand on the centre line and the other on the silhouette.
+- Webcast frames (Starlink 15-25 file 796 s, 1104 s; Crew-13): the thruster pack stands between two neighbouring fins, as the config's pods.
+So the fins stay at 45 / 135 / 225 / 315, the legs moved there from 0 / 90 / 180 / 270 and the pods stay at 0 / 180.
+Ring engines: `F_Falcon_9_B1046`: the base's leg clevises lie midway between two ring engines, the ring engines at 22.5 + 45 k deg from them (model M4
+agrees), so the config's ring stands at 22.5 + 45 k. The 3-engine set's `pair` is 22.5 / 202.5 [E], the opposite pair nearest the former 0 / 180; no photo shows which two
+engines fly it. An opposite pair and the centre stay balanced: the thrust stays on the axis, as do all nine.
+
+### Fresh landing plans (detail model plan 2026-11-02, Task 3)
+The 47.7 m hull's normal force (area and lever: moment coefficient x 1.58) needs two settings on fresh SCvx plans, those with no
+warm start: first plans and abort plans without one, on RTLS and drone ship alike. Re-plans keep the defaults (0.1 and 10).
+- `landing_fresh_trust_region_weight` 0.3 [E] (`ScvxSettings::fresh_trust_region_weight`): at 0.1 the first deck plan stays in a
+  limit cycle (defect 0.03-0.16 over 300 iterations, on the propellant floor).
+- `landing_fresh_attitude_violation_weight` 100 [E] (`ScvxSettings::fresh_attitude_violation_weight`), penalty on the soft tilt and
+  rate limits: at 10 the solver can settle on one swing to 26-28 deg against the final set's 20 deg, which `beyond_limits` refuses
+  rightly, and the stage ditches. Which plan it finds flips with 0.5 m of start state; clean plans exist from the same state. At
+  100: 0 of 240 perturbed starts refused. The price: first plans up to ~0.5 t less final mass than the swing; reserve unchanged.
+- The guard is unchanged and there is no retry. Super Heavy and the ship hold 0 in both settings (plan requests of a whole flight
+  identical to the former binary's).
+
 ## Standing decisions
 - Physics first (user 2026-10-14): gauges the engines cannot explain are not followed (Falcon 9 MECO 25 t vs gauge 47).
 - Falcon 9 first-stage propellant 425 t (2026-10-14); RCS on/off with fixed thrust, no
@@ -61,15 +93,17 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 - Leg drop tests `[legs]`: 1/3/6 m/s land (6 m/s crushes 0.36 m), 10 m/s and 25 deg at 2 m/s are lost.
 - Falcon 9 RTLS: from ignition (3.3 km, 300 m/s, 12.1 t) lands 0.01 m off at 0.88 m/s; campaign
   `[falcon9][rtls][validation]` (+-10 m, +-3 m/s, +-5 % propellant, +-3 deg, hull aero +-10 % via
-  `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 0.99 m/s, >= 5.7 t left; full mission MECO T+140 s,
-  landing burn T+423 s at 2.97 km / 287 m/s / 12.1 t, touchdown T+452 s, 6.4 t left (CRS-35: 137 / 355 / 420 at ~3.2
+  `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 1.06 m/s, >= 5.7 t left, 0 of 497 plans failed; full mission
+  MECO T+140 s, landing burn T+423 s at 2.96 km / 287 m/s / 12.1 t, touchdown T+455 s, 6.0 t left, N2 127 kg left = 27 % of
+  the 473 kg used (CRS-35: 137 / 355 / 420 at ~3.2
   km, ~300 m/s / 442 s). Test "Falcon 9 descent drag reproduces ..." (unguided replay after the entry burn: 0.9 / 1.5 %
   rms). CRS-35 ascent: -9.5 % at T+30 s, +2-5 % after max-Q, MECO T+132.7 s / 58.2 km / 6596 km/h vs 134.6 / 57.4 /
   6490, SECO T+508 vs ~512 s (dials' time base 3.42 / 5.87 s, `crs35_ascent.toml`).
-- Drone ship: full mission (kick 13 deg) MECO T+152 s, 64.8 km, 8373 km/h, 24.7 deg vs Starlink 15-25 T+149 s, 60 km,
-  ~8000 km/h, ~25 deg; 16.5 t to 200 x 281 km; entry burn T+379-399 s, landing burn T+476 s at 3.0 km / 271 m/s /
-  12.0 t, landed T+515 s 0.01 m off; campaigns `[falcon9][asds][validation]` from ignition and from MECO states (+-200
-  m, +-5 m/s, +-5 %, aero +-10 %; two halves) 21 of 21 each.
+- Drone ship: full mission MECO T+150 s, 70.3 km, 8159 km/h, 24.8 t vs Starlink 15-25 T+149 s, 60 km,
+  ~8000 km/h; 16.5 t to 200 x 281 km; entry burn T+397-418 s, landing burn T+490 s at 2.95 km / 271 m/s /
+  11.8 t, landed T+529 s 0.01 m off, 5.0 t left; campaigns `[falcon9][asds][validation]` from ignition and from MECO states
+  (+-200 m, +-5 m/s, +-5 %, aero +-10 %; two halves) 21 of 21 each, >= 4984 kg left, 3 of 702 and 25 of 713 plans failed
+  (none of them a first plan). Fixtures of the refused first plans: `falcon9_asds_seed105_first_plan.txt`, `..seed109..`.
 
 ## Diagnostics
 - Falcon 9: `STARSIM_DEBUG_LEGS=1`, `STARSIM_DEBUG_ASCENT_G=1`; hidden test "Falcon 9 ASDS single MECO case"

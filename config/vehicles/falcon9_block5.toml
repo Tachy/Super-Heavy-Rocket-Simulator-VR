@@ -170,6 +170,14 @@ landing_gimbal_fraction = 0.45               # [E] planned share of the 5 deg gi
                                              # <= 0.50 of the whole gimbal in 62 of 63 Falcon 9 campaign cases (seed 117
                                              # 1.06: unmodelled cross-flow at 400 m). The derivation leaves a band
                                              # 0.40-0.45; 0.45 is chosen from it - docs/subsystems.md, Task 2b
+landing_fresh_trust_region_weight = 0.3      # [E] SCvx weight of fresh plans (re-plans keep 0.1). Replay of the first deck
+                                             # plan on the 47.7 m stage (fixture falcon9_asds_first_plan_47m.txt): 0.1 stays
+                                             # in a limit cycle, 0.3 converges in 15 iterations at 31.4 t. Alone it loses 1 of
+                                             # 21 ASDS MECO cases: see the next key (docs/subsystems/falcon9.md)
+landing_fresh_attitude_violation_weight = 100.0  # [E] penalty on the soft tilt and rate limits of fresh plans (re-plans keep
+                                             # 10). Replays of the refused first plans (fixtures falcon9_asds_seed105 / 109):
+                                             # at 10 one swing to 26-28 deg against 20 is refused by the guard, at 100 excess
+                                             # 0 in 240 starts perturbed by 0.5 m, 0.05 m/s (Task 3d)
 
 # Return to a drone ship (milestone c4; keys left out come from the RTLS profile above). Evidence: our Starlink 15-25
 # webcast telemetry (drone ship, no boostback).

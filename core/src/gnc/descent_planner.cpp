@@ -253,6 +253,11 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     if (warm_start) limits.min_phase_s = {};
     std::vector<double> virtual_controls;
     DescentWeights weights = settings.weights;
+    if (!warm_start && settings.fresh_trust_region_weight > 0.0) weights.trust_region = settings.fresh_trust_region_weight;
+    if (!warm_start && settings.fresh_attitude_violation_weight > 0.0) {
+        weights.attitude_violation = settings.fresh_attitude_violation_weight;
+    }
+    const double nominal_trust_region = weights.trust_region;  // what the adaptive trust region relaxes back to
     const auto scale = descent_state_scales();
     bool candidate = false;  // the last solution met the convergence tests that need no propagation
     // How far a start state on the final set already exceeds its tilt limit (same units as the subproblem's slack).
@@ -307,7 +312,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
             result = solve(start_phase, target.goal, sub.problem);
         }
         if (usable(result)) {
-            weights.trust_region = std::max(settings.weights.trust_region, weights.trust_region / settings.trust_region_growth);
+            weights.trust_region = std::max(nominal_trust_region, weights.trust_region / settings.trust_region_growth);
         }
         plan.status = result.status;
         plan.iterations = it + 1;

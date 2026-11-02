@@ -153,6 +153,8 @@ void visit_settings(F& f, ScvxSettings& s) {
     f("settings.trust_region_retries", s.trust_region_retries);
     f("settings.usable_primal_residual", s.usable_primal_residual);
     f("settings.trust_region_growth", s.trust_region_growth);
+    f("settings.fresh_trust_region_weight", s.fresh_trust_region_weight);
+    f("settings.fresh_attitude_violation_weight", s.fresh_attitude_violation_weight);
     f("settings.stall_iterations", s.stall_iterations);
     f("settings.fresh_stall_iterations", s.fresh_stall_iterations);
     f("settings.stall_ratio", s.stall_ratio);

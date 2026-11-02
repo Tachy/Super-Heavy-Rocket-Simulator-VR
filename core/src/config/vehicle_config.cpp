@@ -712,6 +712,16 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             if (p.landing_gimbal_fraction < 0.0 || p.landing_gimbal_fraction > 1.0) {
                 doc.fail("landing_gimbal_fraction must be in [0, 1] (0: the default allowance)");
             }
+            p.landing_fresh_trust_region_weight =
+                doc.number_or(table, "landing_fresh_trust_region_weight", p.landing_fresh_trust_region_weight);
+            if (p.landing_fresh_trust_region_weight < 0.0) {
+                doc.fail("landing_fresh_trust_region_weight must not be negative (0: the default weight)");
+            }
+            p.landing_fresh_attitude_violation_weight =
+                doc.number_or(table, "landing_fresh_attitude_violation_weight", p.landing_fresh_attitude_violation_weight);
+            if (p.landing_fresh_attitude_violation_weight < 0.0) {
+                doc.fail("landing_fresh_attitude_violation_weight must not be negative (0: the default weight)");
+            }
             p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
             p.flip_duration_s = doc.number_or(table, "flip_duration_s", p.flip_duration_s);
             p.boostback_loss_fraction = doc.number_or(table, "boostback_loss_fraction", p.boostback_loss_fraction);
