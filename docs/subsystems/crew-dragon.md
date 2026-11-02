@@ -65,7 +65,7 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   release T+533 s, 200.0 x 210.8 km, 51.74 deg, first stage landed. Inertial hold after a 1.3 deg/s tumble <= 0.71
   deg, 1.9 kg/h; LVLH trunk forward <= 0.71 deg, 2.4 kg/h; Draco burns 1 / 10 m/s within 0.002 / 0.014 m/s (5.0 / 43.4
   kg), -x 2 m/s within 0.007 m/s.
-- Dragon entry `[dragon][entry][validation]` (entry angle +-0.1 deg, mass +-3 %, aero +-10 %): 12 of 12 at the gate
+- Measured before the capsule's new length, port and corrector (not re-measured, the campaign `[dragon][mission][validation]` is current; the capsule's pitch inertia rose about 7 % with the length, tags green): Dragon entry `[dragon][entry][validation]` (entry angle +-0.1 deg, mass +-3 %, aero +-10 %): 12 of 12 at the gate
   within 1.2 km, 160-178 m/s, <= 3.6 g. From 420 km / 51.6 deg: 139 m/s / 598 kg after 37 h, gate 0.58 km off at 166
   m/s, 3.5 g. Return mission: burn after 37.1 h, water 0.41 km from the zone centre at 6.9 m/s, deorbit ignition ->
   splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]); drogues 5.50 km, mains 1.80 km / 53 m/s, peak 2.8 g. Campaign

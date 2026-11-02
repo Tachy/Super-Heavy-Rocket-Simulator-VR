@@ -105,9 +105,9 @@ COMPLETE 2026-10-20.
   | departure CW guidance IDA-3 | 477 s / 1619 s; 6.7 | 454 s / 1783 s; 6.2 (Task 9) | same |
   | undock -> splashdown: departure kg / RCS left | 5.2 / 1890 kg | 5.2 / 1878 | splashdown reached |
 
-  The shifts (contact +0.7 min, IDA-3 +2.2 kg, bending +184 N m at IDA-2) follow the shorter lever from the station CG
-  (the port moves 21 m closer to the CG, so the station's rotation drags the port 0.015 instead of 0.039 m/s and the
-  transfer legs end at different points); no limit is touched. Test fixtures that said "station x = N m" now convert
+  The shifts (contact +0.7 min, IDA-3 +2.2 kg, bending +184 N m at IDA-2) came with the shorter lever from the station CG (the
+  port moves 21 m closer to the CG, the station's rotation drags the port 0.015 instead of 0.039 m/s); the later step in propellant
+  comes from `up`, not from a lever (below), and the CG is unverified. No limit is touched. Test fixtures that said "station x = N m" now convert
   through the configured IDA-2 position (`docking_test_support.hpp`), `beside_modules` stands at station x 30 m (45 m is
   inside Columbus now), the hull-contact check at x 30.
 - **Gaps of the collision shapes against the real station** (the drawing has them since Task 8, `vehicle-models.md`; the collision capsules and boxes are unchanged, the view does not touch the simulation): no Unity / Destiny / Node 3 / Cupola /
@@ -299,7 +299,7 @@ Plan `docs/superpowers/archive/plans/2026-10-19-iss-i5-docking.md`.
   0.1 s: "Überlast" (latches release). Tension / shear / bending / torsion above the limits only warn. Below 0.05 m/s it
   still captures (documented). Undock: Haken öffnen (180 s) -> getrennt; separation speed sqrt(2 E / mu), E = 43.35 N m
   [E]: 0.0844 m/s for the Dragon on the ISS.
-- **Hull collision** (`contact/station_collision`): hull rings every 0.5 m (16 points) over the trunk (3.7 m) and the
+- **Hull collision** (`contact/station_collision`): hull rings every 0.5 m (16 points) over the trunk (3.25 m) and the
   capsule tapering 4.0 -> 1.8 m [E: `hull_top_diameter_m`], the top metre below the docking port left out; penalty 1e6
   N/m against ISS capsules and boxes within 120 m of the station CG. Any contact: "Kollision" with impulse (sum |F| dt),
   the proximity flight ends (no structural model).
@@ -394,8 +394,8 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
 
   | case | time | propellant | axial | lateral | offset | angle | rate |
   |---|---|---|---|---|---|---|---|
-  | IDA-2 from Waypoint 0 | 62.0 min | 31.2 kg | 0.079 m/s | 0.0010 m/s | 0.052 m | 0.61 deg | 0.022 deg/s |
-  | IDA-3 (3 fly-around legs) | 98.1 min | 64.0 kg | 0.078 m/s | 0.0018 m/s | 0.035 m | 0.48 deg | - |
+  | IDA-2 from Waypoint 0 (chain) | 62.3 min | 37.4 kg | 0.079 m/s | 0.0010 m/s | 0.052 m | 0.61 deg | 0.022 deg/s |
+  | IDA-3 (3 fly-around legs, chain) | 99.2 min | 71.6 kg | 0.078 m/s | 0.0018 m/s | 0.035 m | 0.48 deg | - |
   | 8 dispersed Waypoint 2 starts | - | 1.7-2.0 kg | 0.078-0.080 | <= 0.0024 | 0.030-0.050 | <= 0.59 | <= 0.039 |
 
   From the i3 Waypoint 0 state in the braking attitude (180 deg off, drifting 0.02 m/s): aligned < 2 deg after 170 s,
@@ -404,16 +404,16 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   Abort at x 9.6 m: breakout in 10 s, 0.291 m/s, passively safe, 24 h drift closest 285 m. Hold at x 11.4 m for 120 s:
   drift 0.20 m, 0.0019 m/s; resume -> contact inside. Breakout (45,0,0) -> 0.30 m/s +z, closest 222 m; full model 24 h
   closest after exit 236 m.
-- **Docking** (`[docking]`; chains, grid and splashdown `[slow]`):
+- **Docking** (`[docking]`; chains, grid and splashdown `[slow]`; time and kg of the session table above re-measured 2026-11-02 on the final tree, its axial to rate columns measured before Tasks 7 and 8, not re-measured):
 
   | case | result |
   |---|---|
-  | IDA-2 from Waypoint 0 | contact 62.5 min, docked 10.0 min later, 31.6 kg, comp 928 N, shear 93 N, bending 434 N m |
+  | IDA-2 from Waypoint 0 | contact 62.3 min, docked 10.2 min later, 37.4 kg, bending 95 N m (comp, shear: before Tasks 7 and 8, 928 N, 93 N, not re-measured) |
   | IDA-3 from Waypoint 0 | contact 98.8 min, docked 10.2 min later, 65.7 kg, comp 970 N, shear 88 N, bending 270 N m |
   | IDSS grid 2^(6-2) x 2 ports (axial, offset, angle, roll, lateral, rate) | 32/32 docked; max comp 1254 N, shear 631 N, bending 2055 N m, torsion 761 N m |
   | 0.30 m offset / 10 deg / 0.28 m/s | "Versatz zu groß" / "Winkel zu groß" / "Überlast" -> retreat to Waypoint 2 -> resume -> docked |
   | docked 24 h with a 0.3 m/s reboost | the pair moves together, port error < 1 mm |
-  | undock -> departure -> capsule return | 0.0844 m/s, departure 3.6 kg, deorbit 58 h later (7-day pass search), splashed down, 1871 kg RCS left |
+  | undock -> departure -> capsule return | 0.0844 m/s, departure 4.9 kg, deorbit 58 h later (7-day pass search), splashed down, 1890 kg RCS left |
 
   Departure CW guidance: IDA-2 sphere left after 625 s, ellipsoid after 2300 s, 0.30 m/s, 6.1 kg; IDA-3 454 s / 1783 s, 6.2 kg (re-measured 2026-11-02, Task 9, final tree; was 473 s / 2290 s / 6.5 kg and 475 s / 1610 s with the old levers)
   (Demo-1 6.8 / 17 min with larger burns). Session IDA-2: departure complete 32.3 min after the springs, 4.7 kg (current)

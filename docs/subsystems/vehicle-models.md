@@ -83,17 +83,25 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
 - Checks: `tools/structures/tests/test_falcon9_spec.py`, `vehicle_view_test.gd` `_check_falcon9` (needs the generated set). Shots: `vehicle_look_shots.gd --legs=<d>`.
 
 ### Second stage and stack (Task 4)
-- `falcon9_second_stage.py` writes `falcon9_stage2.gltf` (`hull`: plain lathe from the engine mount to the adapter ring, white;
-  `engine_plate`: black closure at station 0 and the dark adapter ring ending flat on the config length, 13.8 m, where the payload trunk base stands (no cone above it; tested); RCS bumps at the config's pods) and `mvac.gltf`
+- `falcon9_second_stage.py` writes `falcon9_stage2.gltf` (`hull`: plain white lathe from the skirt to the flat top plane at the config length, 9.8 m, where the payload's trunk base stands (tested); RCS bumps at the config's pods; `engine_plate`: the dark cone from station 0 to the engine mount) and `mvac.gltf`
   (root `mvac`: `bell`, `housing`, `duct`). Triangles 536 / 3,840. Stage `second_stage` has its own part material (`stage_part_materials`).
-- Station 0 of the second stage = the Merlin Vacuum's gimbal point (physics and drawing agree, offset 0). The nozzle hangs 3.4 m below it
-  (manifest `exit_plane_x_m` -3.4, the plume starts there with the rim's radius): exit station 44.3 m of the stack, inside the interstage
-  (41.2 .. 47.7 m), tested. The stack's second stage base is the first stage's length, 47.7 m.
+- Station 0 of the second stage = the interstage top. The Merlin Vacuum's gimbal point is the physics' engine station -0.6 m (drawn there, offset 0). The nozzle hangs 3.4 m below it
+  (manifest `exit_plane_x_m` -3.4, the plume starts there with the rim's radius): exit station 43.7 m of the stack, inside the interstage
+  (41.2 .. 47.7 m), tested; nozzle exit to top 13.8 m, the published length. Measurement and consumers: `falcon9.md` "Stack". The adapter under the trunk is white (`D_SpaceX_Crew_9_Preflight`), no dark ring: the dark band in Crew-13 t2880 was the trunk's cells.
 - Nozzle: exit diameter 3.3 m = config = Wikipedia infobox; gimbal-to-exit 3.4 m [E] (extension 2.7 m [S, the original nozzle; a shorter
   one flies now, no published length] + 0.7 m regenerative bell; photo `F_Merlin_nozzle`: cone height 1.08 x the exit diameter = 3.6 m +-0.4 m,
   perspective); top radius 0.69 m and contour exponent 0.84 from the same photo. Not drawn: thermal blankets, the turbine exhaust's real
   routing (one straight duct), the corrugated wall seams; the real stage's skirt shape at the engine section is not measured (plain).
 - Separation: `<vehicle>/<stage>` ids keep both parts' models (tested, stack, first stage alone, second stage alone).
+
+### Measuring references and provenance (plan 2026-11-02)
+None ships; numbers were read by script (`tools/structures/measure/`, `reference_models/`) or by eye and drawn by us. Files live in the git-ignored `screenshots/falcon9_ref/`; credits in `tools/data_pipeline/sources.toml` / `CREDITS.md`. Real photos win over models.
+- M1 "Falcon 9 - Crew Dragon", KUBAHA, CC BY 4.0: stack on one scale; stage split not usable (first stage ~6 m short), rejected for capsule shape, engine ring.
+- M2 "SpaceX - Dragon 2", KUBAHA, CC BY 4.0: scaled x10 to the 4.0 m capsule; capsule 4.85 m, total 8.08 m, trunk 3.234 m, fins full trunk height with tip r 2.64, nose hinge r 1.108 at x 3.69, seam plane, Draco port groups at 36 / 144, bays at 63 / 117.
+- M3 "SpaceX Dragon 2 exterior", M4 "SpaceX Falcon 9 and Dragon 2", Forest Katsch, CC BY 4.0, one Dragon, not independent. M4 scale 1.000: tank + bay 41.4 m, interstage 7.0 m (+-0.5), first stage 48.4 m (not averaged in: 47.7 m published), foot -2.1 m, foot radius 9.2 m, engine ring 1.24 m at 22.5 + 45 k deg.
+- NASA ISS model D (IGOAL), NASA 3D Resources: station tables, IDA ports, clocking class. IDSS IDD Rev. E (NTRS 20170001546): docking dimensions; flange OD not dimensioned.
+- Photos (NASA public domain; SpaceX CC0; `F_Merlin_nozzle` CC BY 2.0 Steve Jurvetson): `F_NHQ202210010026`, `D_SpaceX_Crew_9_Preflight`, `F_KSC_20200429`, `F_ORBCOMM_2`, `F_Falcon_9_first_stage_in_hangar`, `F_Landed_rockets_in_hangar_39A`, `F_Falcon_9_B1046`, `D_CCP_SpaceX_Demo_2_Dragon_(3)`, `D_Crew_2_..._Falcon_9_mate`, `D_Iss065e002827`, `D_Iss071e186365`, `D_Iss072e096331`. Webcast frames (`crew13_*`, `starlink15-25_*`, `crs35_*`) are for private reference only.
+- Models disagree on grid fin station and azimuth, leg azimuth and the capsule's diameter; the photos decided (`falcon9.md`, `crew-dragon.md`).
 
 ## Crew Dragon (plan 2026-11-02, Task 5)
 - `generators.toml` kind `dragon` (`vehicle_spec.load_dragon`), generator `gen_dragon.py`. Our own rebuild from typed tables in `config/vehicles/detail/crew_dragon.toml`, measured on the KUBAHA "Dragon 2" model scaled to 4.0 m (ray casts, scratch scripts), photos `D_*` win where they disagree; no third-party vertex data in the repo.
@@ -117,8 +125,11 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   the Dragon, the second stage the Falcon 9 set. A set that is stale / missing leaves its stages as cylinders and the notice shows.
 - Checks: `tools/structures/tests/test_dragon_spec.py`, `vehicle_view_test.gd` `_check_dragon`. Shots: `vehicle_look_shots.gd --mission=crew_dragon_return --t_plus=2400 --nose=<0|1>`
   (body 1 = capsule after the trunk jettison; `sun<deg>` turns the camera about the axis).
-- Not drawn / unsure: hatch and window detail (textures), the real trunk array / radiator bands (layout guess: radiators low, cells high), the fin height (3.0 m vs 1.3 m in the
-  two model families, chosen from the trunk-base flare in D_Crew_2_..._mate), SuperDraco layout evidence (two models, one photo; moderate).
+- Not drawn / unsure: hatch and window detail beyond flanges and panel (textures), the trunk's cell pattern (one dark paint on the hinge side, radiators on the hatch side), SuperDraco layout evidence (two models, one photo; moderate).
+- The trunk's dark half is right: normals outward (`trunk_array` 108 of 108 side vertices), albedo [0.04, 0.05, 0.09] [E], and `D_Iss072e096331` and `D_SpaceX_Crew_9_Preflight` show the sunlit cells near black with a blue sheen. Against the Crew-9 photo: the real cells do reach the base, as drawn.
+- Closed surfaces (`tools/structures/tests/test_dragon_closed.py`, edges welded to 0.1 mm across a file's parts): the trunk's shell, fins and base disc form one closed body; the fin roots and the umbilical's back and upper end were open and are now closed (the umbilical's stood free above the trunk's top; the fin roots lay on the hull and never showed). Edges that stay open on purpose: trunk panels (single sheets 12 mm proud of the closed hull); on the capsule the decals on its surface (hatch, windows, seams, Draco ports), the SuperDraco bells (open mouths in closed pods), and 120 / 115 edges where band and capsule meet at x 0.68 without shared vertices; the nose's seal strip; three edges of the nose cone at its hinge (x -0.03, r 0.1). Renders from behind, below, the fins' back sides and through the open port show no hole (`screenshots/final/trunk_rear.png`); a ray down the axis hits the recess floor at 3.74 m.
+- The Falcon 9 leg's crush is not drawn: after a hard landing the feet sink up to 0.5 m into the deck in the view.
+- The thin tan rod beside the docked Dragon is the station's Canadarm2 (`detail/iss.toml` `SSRMS_upper`, `SSRMS_lower`): its wrist ends free, as a real arm's would, without the end effector drawn. Not a fault of Dragon or the docking; ISS look stays as it is (user 2026-11-02).
 
 ## ISS (plan 2026-11-02, Task 8)
 - `generators.toml` kind `iss` (`vehicle_spec.load_iss`): the ports come from the physics config, the IDSS numbers from Dragon's `[idss]` (one androgynous interface, one table), the drawing from `config/vehicles/detail/iss.toml` below the marker `---- the drawing (Task 8) ----` (typed tables: `[[lathe]]` per module, `[[box]]`, `[[plate]]`, `[[tube]]`, `[[bay]]` truss, `[[wing]]`, `[[irosa_plane]]`, `[[gamma]]`, `[ida]`, `[pose]`). Numbers read off NASA model D (radial slices, area-weighted; plane fits; rounded), no vertices copied. Stage frame of `iss.toml` as glTF frame.

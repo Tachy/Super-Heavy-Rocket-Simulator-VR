@@ -40,6 +40,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   (`Vehicle::main_propellant_kg`). The liquid does not turn with a round tank: moments act in roll about
   `MassProperties::roll_offset_m` (hull parts only), in pitch / yaw about the full CG. Tanks have flat ends; the RCS
   allocator uses the full CG point. The ship alone carries its own axial drag table [E] (`ascent_drag_table` = `aero/ship_ascent.csv`, the stack's generic trend until 2026-11-01).
+- The shared near-target miss metric in `entry_predictor` changed with the capsule's corrector (`crew-dragon.md`); ship and lunar numbers compared unchanged.
 - Entry guidance (b2, `gnc/entry_guidance`, `entry_predictor`, `entry_aero_table`): 3-DOF point-mass predictor
   (Earth-fixed, J2, US76, trimmed C_D A / C_L A over Mach and alpha, online drag / lift scale from the accelerometer
   `FlightBody::aero_acceleration_body_mps2()`, not learnt in an attitude transient over 2 deg in the terminal phase)

@@ -141,6 +141,8 @@ flow separation (vacuum engines).
 - `[stage.recovery.drone_ship]`: the return to a drone ship; its keys override the profile above (left out: taken from
   it). `boostback = false`: no flip or boostback (the stage coasts on its ascent arc). `landing_phase_max_tilt_deg`
   (3 values, either table): planned thrust tilt limit per landing engine set (default: Super Heavy's 25 / 20 / 10).
+- `[stage.recovery]` `landing_fresh_trust_region_weight`, `landing_fresh_attitude_violation_weight`: SCvx settings of fresh plans (no warm start); 0 keeps the defaults (`docs/subsystems/falcon9.md` "Fresh landing plans").
+- `[stage.engine_group]` `station_m` may be negative: the Falcon 9's second stage stands on the interstage top with its engine below station 0 (`falcon9.md` "Stack"); so may a tank's `base_station_m`.
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
   (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
   per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
@@ -422,6 +424,7 @@ over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad)
   Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.
 
 ## Vehicle detail files (`vehicles/detail/`)
+- Starship keys below; `falcon9_block5.toml`, `crew_dragon.toml`, `iss.toml` hold their own tables, each key's meaning in its source tag (validated by `vehicle_spec.py`, generators `tools/structures/blender/`).
 - `vehicles/detail/<vehicle id>.toml`: visual detail of one vehicle for the Blender model generators (weld pitch, hot-stage
   vents, grid-fin lattice, flap slab, catch-pin heads, chine, raceway, tile layout, engine bell contour). Placement and
   size always come from `vehicles/<id>.toml` and `engines/*.toml` (length, diameter, nose, flaps, fins, pins, engine
