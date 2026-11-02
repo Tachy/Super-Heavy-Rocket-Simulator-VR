@@ -100,7 +100,7 @@ public:
 
     bool aborting() const { return aborting_; }
     // A converged abort plan is being flown.
-    bool has_abort_plan() const { return plan_ && plan_->goal == DescentGoal::Abort && plan_->converged; }
+    bool has_abort_plan() const { return plan_ && plan_->goal == DescentGoal::Abort && plan_->converged && !abort_cannot_clear_; }
     // Abort plans must still end in the water (false: the reach estimate or a failed plan gave it up).
     bool sea_required() const { return sea_required_; }
     int engine_set() const { return engine_set_; }  // phase whose engine set runs
@@ -139,6 +139,8 @@ private:
     // A plan for the target that reaches it only by tilting beyond its limits (DescentPlan::planned_tilt_excess): the
     // target is out of reach, as for a plan that does not converge.
     bool beyond_limits(const DescentPlan& plan) const;
+    // A converged abort plan whose hull still overlaps a keep-out box.
+    bool abort_strikes(const DescentPlan& plan) const;
 
     LandingSite site_;
     ScvxLandingParameters parameters_;
@@ -146,6 +148,7 @@ private:
     DescentReplanner replanner_;
     std::shared_ptr<const DescentPlan> plan_;
     time::Epoch plan_epoch_;
+    time::Epoch first_plan_epoch_;  // diagnostics
     DescentModel model_;  // of the latest snapshot (gravity after the plan's end)
     time::Epoch next_request_;
     int engine_set_ = 0;  // phase whose engine set runs (only ever increases)
@@ -154,6 +157,7 @@ private:
     int consecutive_unconverged_ = 0;
     bool sea_required_ = true;  // abort plans must end beyond the shoreline; false once that proved unreachable
     bool sea_reach_checked_ = false;
+    bool abort_cannot_clear_ = false;  // an abort plan without the water still strikes (sticky)
     Statistics stats_;
     TvcLateralGains lqr_gains_;  // cached for (lqr_a_, lqr_c_)
     double lqr_a_ = -1.0;

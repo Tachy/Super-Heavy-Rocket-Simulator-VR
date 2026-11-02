@@ -64,6 +64,11 @@ struct SnapshotSettings {
     // the catch axis (the arms wait half open with ~3 m clearance per side and close only at the end).
     double corridor_margin_m = 5.0;    // [E]
     double corridor_radius_m = 1.5;    // [E] half the standby clearance
+    // Fidelity flag: plans keep the hull's real extent off the arms (catch: standby; abort: open) and, on an abort, the
+    // tower box. Off: only the CG rows above. On for the ship (ship_landing_parameters), whose plans fly to the tower.
+    bool structure_keep_out = false;
+    // [E] tracking 0.2 m (400 m abort, Task 6f) + the plan's thrust axis 1.5 deg off the hull over the CG's ~24 m: 0.63 m.
+    double keep_out_margin_m = 1.0;
     double final_set_radius_m = 3.0;   // [E] the final set (slow to turn) flies above the catch point
     // Pad landing: every final-set node this close to the touchdown point (soft; 0: no limit). A final set that can
     // hardly steer sideways (the HLS's landing thrusters on the RCS) must take over above the point (lunar l4).

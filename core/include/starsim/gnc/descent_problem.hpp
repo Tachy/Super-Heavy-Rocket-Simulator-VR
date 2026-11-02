@@ -13,6 +13,25 @@ namespace starsim::gnc {
 // (position, velocity, upright, no pitch/yaw rate) without the tower's corridor.
 enum class DescentGoal { Catch, Abort, Pad };
 
+// A part of a launch structure a plan's hull keeps off: a box about a vertical axis, plan frame.
+struct KeepOutBox {
+    math::Vec3 center_m;
+    double long_y = 1.0, long_z = 0.0;  // horizontal unit of the long axis
+    double half_long_m = 0.0, half_wide_m = 0.0, half_height_m = 0.0;
+};
+
+// The hull as the tower physics sees it: the axis segment around the CG, swept by the radius.
+struct HullExtent {
+    double below_cg_m = 0.0;
+    double above_cg_m = 0.0;
+    double radius_m = 0.0;
+};
+
+constexpr int max_keep_out_boxes = 3;
+// The worst of these points of an interval gets the row: the last phase's nodes lie up to ~2.4 s (~70 m of height) apart,
+// and the hull passes the arms between them. [E]
+constexpr int keep_out_samples_per_interval = 4;
+
 // End of the landing burn, plan frame.
 struct DescentTarget {
     DescentGoal goal = DescentGoal::Catch;
@@ -41,6 +60,12 @@ struct DescentTarget {
     // mount_top_cg_height_m (radius 0: none).
     double mount_keep_out_radius_m = 0.0;
     double mount_top_cg_height_m = 0.0;
+    // Boxes the whole hull keeps off, not only its CG (soft, per interval; none: no rows). Catch: the standby arms.
+    // Abort: the open arms (the tower opens them at an abort) and the tower.
+    std::array<KeepOutBox, max_keep_out_boxes> keep_out_boxes{};
+    int keep_out_box_count = 0;
+    HullExtent hull;
+    double keep_out_margin_m = 0.0;
 };
 
 // Engine switch from phase p to p + 1, at their shared node.
@@ -122,6 +147,7 @@ struct DescentWeights {
     double attitude_violation = 10.0;  // [E] per unit above the tilt (quaternion y,z norm) or rate (rad/s) limit;
                                        // higher values degrade the SOCP conditioning
     double corridor_violation = 10.0;  // [E] per metre outside the catch corridor, per node (~100 t of propellant)
+                                       // ... and per metre inside a keep-out box's margin, per interval
     double final_lateral_time_s = 2.0;  // [E] lateral speed counts as the offset it builds up in this time
     // [E] per 1e4 kg of the soft reserve used (DescentLimits::soft_reserve_kg): 100x the propellant's own weight, so a
     // plan draws on the reserve mainly when its target is out of reach above the floor; 10x below the virtual

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "starsim/gnc/descent_keep_out.hpp"
+
 namespace starsim::gnc {
 
 using math::Vec3;
@@ -20,6 +22,9 @@ constexpr double thrust_scale_fraction = 0.1;  // of phase 0's maximum thrust
 constexpr double duration_scale_s = 1.0;
 constexpr double min_reference_thrust_n = 1.0;  // below: no direction for the lower-bound linearisation
 constexpr double corridor_inactive_radius_m = 1.0e3;  // nodes above the corridor: idle (a landing burn diverts < 1 km)
+// [E] a keep-out box gets a row while the hull is this close beyond its margin: rows only where they can bind, as for the
+// tower row below; two position scales, about what one SCvx step moves a node.
+constexpr double keep_out_activation_m = 20.0;
 
 }  // namespace
 
@@ -313,6 +318,41 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         for (int p = 0; p < descent_phases; ++p) cone.push_back(AffineExpr{}.add(sub.ds[p], 2.0));
         cone.push_back(AffineExpr{-1.0}.add(eta_s[0], 1.0));
         b.add_second_order_cone(cone);
+    }
+    // Keep-out boxes: the hull's axis point nearest the box, per box and interval the tightest of the sampled instants,
+    // n . (r + axis * lever - p) >= radius + margin; n, lever and the axis from the reference (exact once it has settled).
+    for (int k = fixed_nodes_end; k + 1 < K; ++k) {
+        const Vec3 axis_a = state_attitude(ref.x[at(k)]).rotate({1.0, 0.0, 0.0});
+        const Vec3 axis_b = state_attitude(ref.x[at(k + 1)]).rotate({1.0, 0.0, 0.0});
+        for (int i = 0; i < target.keep_out_box_count; ++i) {
+            HullBoxClearance tightest;
+            double tightest_f = 0.0;
+            Vec3 tightest_axis;
+            for (int j = 1; j <= keep_out_samples_per_interval; ++j) {
+                const double f = static_cast<double>(j) / keep_out_samples_per_interval;
+                const Vec3 axis = math::normalized(axis_a * (1.0 - f) + axis_b * f);
+                const auto c = hull_box_clearance(state_position(ref.x[at(k)]) * (1.0 - f) + state_position(ref.x[at(k + 1)]) * f, axis,
+                                                  target.keep_out_boxes[static_cast<size_t>(i)], target.hull, target.keep_out_margin_m);
+                if (c.in_height_band && (!tightest.in_height_band || c.clearance_m < tightest.clearance_m)) {
+                    tightest = c;
+                    tightest_f = f;
+                    tightest_axis = axis;
+                }
+            }
+            if (!tightest.in_height_band || tightest.clearance_m > target.keep_out_margin_m + keep_out_activation_m) continue;
+            AffineExpr keep{tightest.lever_m * (tightest.normal_y * tightest_axis.y + tightest.normal_z * tightest_axis.z) -
+                            tightest.plane_m - target.hull.radius_m - target.keep_out_margin_m};
+            const auto add_position = [&](int node, double weight) {
+                const AffineExpr ry = X(node, 2), rz = X(node, 3);
+                for (const auto& [index, c] : ry.terms) keep.add(index, weight * tightest.normal_y * c);
+                for (const auto& [index, c] : rz.terms) keep.add(index, weight * tightest.normal_z * c);
+                keep.add_constant(weight * (tightest.normal_y * ry.constant + tightest.normal_z * rz.constant));
+            };
+            add_position(k, 1.0 - tightest_f);
+            add_position(k + 1, tightest_f);
+            keep.add(penalised(weights.corridor_violation, "keep_out_slack"), 1.0);
+            b.add_nonnegative(keep);
+        }
     }
     // Phase durations.
     for (int p = 0; p < descent_phases; ++p) {

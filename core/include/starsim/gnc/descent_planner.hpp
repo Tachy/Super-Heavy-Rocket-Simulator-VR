@@ -68,6 +68,8 @@ struct DescentPlan {
     // re-plan from a violating state feasible, but a plan that reaches its target only by planning the final set
     // further over its limit does not reach it within the vehicle's authority.
     double planned_tilt_excess = 0.0;
+    // Deepest overlap of the planned hull with the target's keep-out boxes (> 0: this plan does not clear them).
+    double keep_out_overlap_m = 0.0;
     optim::SocpStatus status = optim::SocpStatus::NumericalError;
 
     double duration_s() const;

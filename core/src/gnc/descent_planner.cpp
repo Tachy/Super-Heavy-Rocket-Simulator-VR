@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "starsim/gnc/descent_discretization.hpp"
+#include "starsim/gnc/descent_keep_out.hpp"
 #include "starsim/optim/socp_solver.hpp"
 
 namespace starsim::gnc {
@@ -320,6 +321,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
             // caller falls back / aborts.
             plan.converged = it > 0 && plan.virtual_control < settings.virtual_control_tolerance &&
                              defect < settings.flyable_defect_tolerance;
+            plan.keep_out_overlap_m = keep_out_overlap_m(plan.reference, target, start_phase, n);
             return plan;
         }
         const double previous_final_mass = plan.reference.x.back()[descent_index::mass];
@@ -333,6 +335,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
             plan.virtual_control > settings.stall_ratio * virtual_controls[static_cast<size_t>(it - stall_iterations)]) {
             plan.last_step = sub.max_step(result.x);
             plan.reference = sub.unpack(result.x);
+            plan.keep_out_overlap_m = keep_out_overlap_m(plan.reference, target, start_phase, n);
             return plan;  // stalled: not converged
         }
         plan.last_step = sub.max_step(result.x);
@@ -344,6 +347,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
                                  settings.final_mass_tolerance_kg;
         candidate = dynamics_hold && settled;
     }
+    plan.keep_out_overlap_m = keep_out_overlap_m(plan.reference, target, start_phase, n);
     return plan;
 }
 

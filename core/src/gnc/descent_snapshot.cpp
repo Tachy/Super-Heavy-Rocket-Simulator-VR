@@ -159,6 +159,23 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         snap.abort_target.keep_out_radius_m = c.tower_keep_out_radius_m;
         snap.abort_target.mount_keep_out_radius_m = c.mount_keep_out_radius_m;
         snap.abort_target.mount_top_cg_height_m = c.mount_height_m + mass.cg_station_m + settings.mount_margin_m;
+        if (settings.structure_keep_out) {
+            const auto plan_box = [&](const StructureBox& box) {
+                const Vec3 axis = frame.direction_to_plan(box.long_axis_itrf);
+                return KeepOutBox{frame.to_plan(box.center_itrf_m), axis.y, axis.z, box.half_long_m, box.half_wide_m, box.half_height_m};
+            };
+            const HullExtent hull{mass.cg_station_m, vehicle.length_m() - mass.cg_station_m, 0.5 * vehicle.diameter_m()};
+            auto& to_catch = snap.catch_target;
+            to_catch.keep_out_boxes = {plan_box(c.arms_standby[0]), plan_box(c.arms_standby[1]), KeepOutBox{}};
+            to_catch.keep_out_box_count = 2;
+            to_catch.hull = hull;
+            to_catch.keep_out_margin_m = settings.keep_out_margin_m;
+            auto& to_abort = snap.abort_target;
+            to_abort.keep_out_boxes = {plan_box(c.arms_open[0]), plan_box(c.arms_open[1]), plan_box(c.tower)};
+            to_abort.keep_out_box_count = 3;
+            to_abort.hull = hull;
+            to_abort.keep_out_margin_m = settings.keep_out_margin_m;
+        }
     }
     if (site.pad) {
         // Touchdown: the CG where the feet meet the pad, sinking at the end speed.

@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -11,6 +12,7 @@
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/descent_discretization.hpp"
 #include "starsim/gnc/booster_return.hpp"
+#include "starsim/gnc/descent_keep_out.hpp"
 #include "starsim/gnc/descent_planner.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -183,6 +185,82 @@ TEST_CASE("SCvx plans an abort to the sea clear of the tower", "[gnc][descent][s
         const Vec3 r = state_position(x) - target.keep_out_center_m;
         CHECK(std::hypot(r.y, r.z) >= target.keep_out_radius_m - 0.5);
     }
+}
+
+// A box of the arm's size at the arm height of the Starbase tower, across the free plan's way to the sea.
+static DescentTarget abort_across_a_wall(const Booster& b) {
+    DescentTarget target;
+    target.goal = DescentGoal::Abort;
+    target.ground_cg_height_m = b.vehicle->mass_properties().cg_station_m;
+    target.sea_target_m = {0.0, 900.0, 0.0};
+    target.keep_out_center_m = {0.0, 0.0, 300.0};  // tower elsewhere
+    target.keep_out_radius_m = 20.0;
+    target.keep_out_boxes[0] = KeepOutBox{{131.75, 80.0, 0.0}, 0.0, 1.0, 12.0, 1.0, 1.25};  // on the free plan's way down
+    target.keep_out_box_count = 1;
+    target.hull = HullExtent{b.vehicle->mass_properties().cg_station_m, 25.0, 4.5};
+    target.keep_out_margin_m = 1.0;
+    return target;
+}
+
+static DescentState towards_a_wall(const Booster& b) {
+    return make_state(b.vehicle->mass_properties().mass_kg, {1200.0, -60.0, 0.0}, {-250.0, 12.0, 0.0}, Quat{1.0, 0.0, 0.0, 0.0}, {});
+}
+
+TEST_CASE("Hull against a keep-out box: tail, radius, tilt", "[gnc][descent]") {
+    const KeepOutBox box{{131.75, 0.0, 0.0}, 0.0, 1.0, 12.0, 1.0, 1.25};  // long along z, 2 m wide along y
+    const HullExtent hull{24.0, 28.0, 4.5};
+    // Upright, tail below the box, axis 7 m off the face at y = 1: 7 - 1 - 4.5 = 1.5 m.
+    auto c = hull_box_clearance({150.0, 7.0, 0.0}, {1.0, 0.0, 0.0}, box, hull, 0.0);
+    CHECK(c.in_height_band);
+    CHECK(c.clearance_m == Catch::Approx(1.5));
+    CHECK(c.overlap_m == Catch::Approx(-1.5));
+    CHECK(c.normal_y == Catch::Approx(1.0));
+    // Tilted with the tail towards the box, the tail in the box's height: 7 - 24 sin(10 deg) - 1 - 4.5 = 1.33 - 4.17 + ...
+    const double t = 10.0 * deg;
+    c = hull_box_clearance({133.0 + 24.0 * std::cos(t), 7.0, 0.0}, {std::cos(t), std::sin(t), 0.0}, box, hull, 0.0);
+    CHECK(c.clearance_m == Catch::Approx(7.0 - 24.0 * std::sin(t) - 1.0 - 4.5).margin(0.2));
+    CHECK(c.overlap_m > 0.0);
+    // The tail 3 m above the top: the capsule's end still reaches it; 8 m above: not, even with the 1 m margin.
+    c = hull_box_clearance({133.0 + 3.0 + 24.0, 7.0, 0.0}, {1.0, 0.0, 0.0}, box, hull, 0.0);
+    CHECK(c.in_height_band);
+    c = hull_box_clearance({133.0 + 8.0 + 24.0, 7.0, 0.0}, {1.0, 0.0, 0.0}, box, hull, 1.0);
+    CHECK_FALSE(c.in_height_band);
+    // Over the footprint: out through the nearer long face.
+    c = hull_box_clearance({150.0, 0.5, 0.0}, {1.0, 0.0, 0.0}, box, hull, 0.0);
+    CHECK(c.clearance_m == Catch::Approx(-0.5 - 4.5));
+    CHECK(c.normal_y == Catch::Approx(1.0));
+    CHECK(c.plane_m == Catch::Approx(1.0));
+}
+
+TEST_CASE("An abort plan whose straight path crosses a standby arm goes round it", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto x0 = towards_a_wall(*b);
+    auto target = abort_across_a_wall(*b);
+    auto s = settings(*b);
+    s.limits.glide_slope_rad = 0.0;
+    // Without the box the plan runs through it (what the abort at 400 m did at the arm).
+    auto open = target;
+    open.keep_out_box_count = 0;
+    const auto through = plan_descent(b->model, x0, 0, open, s, nullptr, 0.0);
+    REQUIRE(through.converged);
+    CHECK(keep_out_overlap_m(through.reference, target, 0, through.nodes_per_phase) > 0.0);
+
+    const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    INFO("overlap " << plan.keep_out_overlap_m << " iterations " << plan.iterations);
+    REQUIRE(plan.converged);
+    CHECK(plan.keep_out_overlap_m <= 0.0);
+}
+
+TEST_CASE("A plan that cannot clear a keep-out box reports the overlap", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto target = abort_across_a_wall(*b);
+    target.keep_out_boxes[0] = KeepOutBox{{131.75, 80.0, 0.0}, 0.0, 1.0, 2000.0, 300.0, 1.25};  // no way round; the free plan's way down, from above it
+    const auto x0 = towards_a_wall(*b);
+    auto s = settings(*b);
+    s.limits.glide_slope_rad = 0.0;
+    const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    INFO("converged " << plan.converged << " overlap " << plan.keep_out_overlap_m);
+    CHECK((!plan.converged || plan.keep_out_overlap_m > 0.0));
 }
 
 TEST_CASE("SCvx plans a catch whatever the initial roll", "[gnc][descent][scvx]") {

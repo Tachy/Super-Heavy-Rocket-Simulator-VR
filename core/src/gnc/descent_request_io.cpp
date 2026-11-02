@@ -122,6 +122,21 @@ void visit_target(F& f, DescentTarget& t) {
     f("target.keep_out_radius_m", t.keep_out_radius_m);
     f("target.mount_keep_out_radius_m", t.mount_keep_out_radius_m);
     f("target.mount_top_cg_height_m", t.mount_top_cg_height_m);
+    f("target.keep_out_box_count", t.keep_out_box_count);
+    for (int i = 0; i < t.keep_out_box_count; ++i) {
+        auto& box = t.keep_out_boxes[static_cast<size_t>(i)];
+        const std::string name = "target.keep_out_box" + std::to_string(i);
+        visit(f, name + ".center_m", box.center_m);
+        f(name + ".long_y", box.long_y);
+        f(name + ".long_z", box.long_z);
+        f(name + ".half_long_m", box.half_long_m);
+        f(name + ".half_wide_m", box.half_wide_m);
+        f(name + ".half_height_m", box.half_height_m);
+    }
+    f("target.hull.below_cg_m", t.hull.below_cg_m);
+    f("target.hull.above_cg_m", t.hull.above_cg_m);
+    f("target.hull.radius_m", t.hull.radius_m);
+    f("target.keep_out_margin_m", t.keep_out_margin_m);
 }
 
 template <class F>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <optional>
 
 #include "starsim/ephemeris/ephemeris.hpp"
@@ -11,6 +12,15 @@ namespace starsim::gnc {
 struct SeaSide {
     double direction_rad = 0.0;          // pad centre -> sea, clockwise from north
     double shoreline_distance_m = 0.0;
+};
+
+// A box about the vertical: a part of the tower, as its collision physics has it.
+struct StructureBox {
+    math::Vec3 center_itrf_m;
+    math::Vec3 long_axis_itrf;  // horizontal unit
+    double half_long_m = 0.0;
+    double half_wide_m = 0.0;
+    double half_height_m = 0.0;
 };
 
 // Catch on the tower arms instead of a touchdown on the pad.
@@ -25,6 +35,9 @@ struct CatchTarget {
     double mount_height_m = 0.0;          // launch mount top above the pad ground
     double tower_height_m = 0.0;          // tower top above the pad ground (catch keep-out; 0: none)
     std::optional<double> away_from_tower_azimuth_rad;  // body azimuth facing away from the tower; none: nearest roll
+    std::array<StructureBox, 2> arms_standby{};  // for the plans' keep-out (SnapshotSettings::structure_keep_out)
+    std::array<StructureBox, 2> arms_open{};
+    StructureBox tower{};
 };
 
 // Touchdown on landing legs on a pad (landing zone) at the site's centre.

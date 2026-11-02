@@ -50,6 +50,7 @@ add_library(starsim_core STATIC
     src/gnc/booster_return_burns.cpp
     src/gnc/descent_model.cpp
     src/gnc/descent_discretization.cpp
+    src/gnc/descent_keep_out.cpp
     src/gnc/descent_problem.cpp
     src/gnc/descent_planner.cpp
     src/gnc/landing_site.cpp

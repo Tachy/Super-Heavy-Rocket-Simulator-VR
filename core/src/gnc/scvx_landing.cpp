@@ -64,6 +64,20 @@ DescentState predict_on_plan(const DescentModel& model, const DescentPlan& plan,
     return x;
 }
 
+// Diagnostics (STARSIM_DEBUG_PLAN_PATH): one line per plan, then its nodes in the plan frame.
+void print_plan_path(const DescentPlan& plan, double since_first_s, double solve_ms) {
+    if (!std::getenv("STARSIM_DEBUG_PLAN_PATH")) return;
+    std::printf("[plan] t %.2f goal %d conv %d it %d vc %.3g solve_ms %.1f overlap %.2f dur %.2f/%.2f/%.2f\n", since_first_s,
+                static_cast<int>(plan.goal), plan.converged, plan.iterations, plan.virtual_control, solve_ms, plan.keep_out_overlap_m,
+                plan.reference.duration_s[0], plan.reference.duration_s[1], plan.reference.duration_s[2]);
+    for (const auto& x : plan.reference.x) {
+        const auto q = state_attitude(x);
+        const Vec3 axis = q.rotate({1.0, 0.0, 0.0});
+        std::printf("[node] %.3f %.3f %.3f %.3f %.4f %.4f %.1f\n", x[descent_index::position], x[descent_index::position + 1],
+                    x[descent_index::position + 2], axis.x, axis.y, axis.z, x[descent_index::mass]);
+    }
+}
+
 }  // namespace
 
 double landing_throttle(const vehicle::Vehicle& v, const std::vector<std::string>& run_groups, double thrust_n,
@@ -177,20 +191,27 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
                     2.0 * std::asin(std::min(1.0, std::hypot(x0[9], x0[10]))) * 57.29577951308232, std::hypot(x0[12], x0[13]),
                     x0[2], x0[3]);
     }
+    print_plan_path(*outcome.plan, outcome.snapshot_epoch + outcome.start_offset_s - first_plan_epoch_, outcome.solve_ms);
     ++stats_.plans;
     stats_.last_solve_ms = outcome.solve_ms;
     stats_.max_solve_ms = std::max(stats_.max_solve_ms, outcome.solve_ms);
     const bool stale = aborting_ && outcome.plan->goal != DescentGoal::Abort;  // requested before the abort
     const bool beyond = beyond_limits(*outcome.plan);
-    if (outcome.plan->converged && !stale && !beyond) {
+    const bool strikes = abort_strikes(*outcome.plan);
+    if (outcome.plan->converged && !stale && !beyond && !strikes) {
         plan_ = outcome.plan;
         plan_epoch_ = outcome.snapshot_epoch + outcome.start_offset_s;
         consecutive_failures_ = 0;
         consecutive_unconverged_ = 0;
         return;
     }
-    if (outcome.plan->converged && !beyond) return;
+    if (outcome.plan->converged && !beyond && !strikes) return;
     ++stats_.failures;
+    // Not even without the water: no abort plan clears the structures from here (the upright descent takes over).
+    if (strikes && !sea_required_) {
+        abort_cannot_clear_ = true;
+        return;
+    }
     if (outcome.plan->goal == DescentGoal::Abort && sea_required_) {
         // One failed re-plan does not make the water unreachable while a converged abort plan to it is being flown
         // (a far shore leaves little margin: the re-plan at the end of the tilt-up stalls for a cycle or two).
@@ -216,7 +237,11 @@ bool ScvxLandingGuidance::beyond_limits(const DescentPlan& plan) const {
     // Only converged plans (an unconverged plan's slacks mean nothing) and only where the sea offers an abort: without
     // one (the Moon) the plan is flown as it is.
     return site_.sea && plan.converged && plan.goal != DescentGoal::Abort &&
-           plan.planned_tilt_excess > std::sin(0.5 * parameters_.max_planned_tilt_excess_rad);
+           (plan.planned_tilt_excess > std::sin(0.5 * parameters_.max_planned_tilt_excess_rad) || plan.keep_out_overlap_m > 0.0);
+}
+
+bool ScvxLandingGuidance::abort_strikes(const DescentPlan& plan) const {
+    return plan.converged && plan.goal == DescentGoal::Abort && plan.keep_out_overlap_m > 0.0;
 }
 
 bool ScvxLandingGuidance::request_abort() {
@@ -249,7 +274,7 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
         check_sea_reach(snapshot, 0);
         outcome = replanner_.plan_now(request(snapshot, 0));
     }
-    if (!outcome.plan->converged && aborting_ && sea_required_) {
+    if ((!outcome.plan->converged || abort_strikes(*outcome.plan)) && aborting_ && sea_required_) {
         // Not even the water beyond the shoreline is in reach: an abort that only pulls towards the sea.
         ++stats_.plans;
         ++stats_.failures;
@@ -262,9 +287,11 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
                     p.converged, p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
                     p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], snapshot.phase0_spool);
     }
+    first_plan_epoch_ = epoch;
+    print_plan_path(*outcome.plan, 0.0, outcome.solve_ms);
     ++stats_.plans;
     stats_.last_solve_ms = stats_.max_solve_ms = outcome.solve_ms;
-    if (!outcome.plan->converged) {
+    if (!outcome.plan->converged || abort_strikes(*outcome.plan)) {
         ++stats_.failures;
         return false;
     }

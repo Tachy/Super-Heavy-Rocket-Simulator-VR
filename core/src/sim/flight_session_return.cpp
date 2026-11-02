@@ -358,6 +358,16 @@ gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) con
                                                 c.mount_height_m,
                                                 c.height_m,
                                                 stage.config.catch_pins.away_from_tower_azimuth_rad};
+        const auto structure_box = [&](const contact::OrientedBox& box) {
+            return gnc::StructureBox{g.to_itrf(box.center), g.site_to_itrf() * math::column(box.axes, 0), box.half_extents.x,
+                                     box.half_extents.y, box.half_extents.z};
+        };
+        for (int i = 0; i < 2; ++i) {
+            const int side = i == 0 ? 1 : -1;
+            landing.catch_target->arms_standby[static_cast<size_t>(i)] = structure_box(g.arm_box(side, c.arm_standby_rad, 0.0));
+            landing.catch_target->arms_open[static_cast<size_t>(i)] = structure_box(g.arm_box(side, c.arm_open_rad, 0.0));
+        }
+        landing.catch_target->tower = structure_box(g.tower_box());
     }
     if (launch_site_.sea) {
         landing.sea = gnc::SeaSide{launch_site_.sea->direction_rad, launch_site_.sea->shoreline_distance_m};

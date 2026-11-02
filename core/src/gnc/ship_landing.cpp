@@ -52,6 +52,7 @@ ShipLandingParameters ship_landing_parameters() {
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"},
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"}};
     s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
+    s.snapshot.structure_keep_out = true;
     // The header tanks carry the landing and the engines starve when they run dry, while the propellant mass also
     // counts the main tanks' residue: the reserve stays a hard floor, no plan draws on it.
     s.replan_reserve_fraction = 0.0;
