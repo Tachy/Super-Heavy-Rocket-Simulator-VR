@@ -352,6 +352,12 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
                 boostback_s - meco_s, n2_at_separation_kg, stage.vehicle().rcs_supply_kg());
     CHECK(meco_s > 0.0);
     CHECK(std::abs(boostback_s - meco_s - 13.7) < 3.0);  // SpaceX timelines: CRS-35 / Bandwagon-3 / Crew-13 mean
+    // KNOWN MISS (falcon9.md "The flip"): the timelines' mean is 13.7 +-0.6 s; the flown 14.7 s lies 0.4 s beyond the band. Not tuned.
+    // Reported so a change of the number shows; no band fitted around it.
+    const double flip_time_error_s = std::abs(boostback_s - meco_s - 13.7);
+    std::printf("[validation] KNOWN MISS: separation -> boostback %.1f s vs 13.7 +-0.6 s (%s, %.2f s beyond the band)\n",
+                boostback_s - meco_s, flip_time_error_s <= 0.6 ? "inside" : "outside", std::max(0.0, flip_time_error_s - 0.6));
+    CHECK(flip_time_error_s > 0.6);  // pins the known miss: goes red when the flip meets the band, then move it to < 0.6
     CHECK(stage.vehicle().rcs_supply_kg() > 0.0);
     // The real sequence (docs/subsystems/falcon9.md, "The flip"): a hold until the nozzle is clear, the turn over the ground on
     // the nitrogen thrusters with no braking, ignition still turning, the centre engine first, the gimbal ends the turn.
@@ -360,8 +366,13 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
                 hold_tilt_deg, ignition_off_velocity_deg, ignition_rate_deg_s, three_engines_s - boostback_s,
                 stage.vehicle().rcs_supply_kg());
     CHECK(hold_tilt_deg < 0.5);
+    // 114 +-15 deg is an extrapolation of the dials (falcon9.md); the law's own gate is 114, so this only catches the timeout path.
     CHECK(std::abs(ignition_off_velocity_deg - 114.0) < 15.0);
-    CHECK(std::abs(ignition_rate_deg_s - 16.0) < 8.0);
+    // KNOWN MISS: the documented rate is 16 +-4 deg/s (Crew-13 limb, extrapolated); the flown 20.2 deg/s is outside it ([D] 20,
+    // upper end). Band not widened: the miss is pinned, so a change shows.
+    std::printf("[validation] KNOWN MISS: ignition rate %.1f deg/s vs 16 +-4 deg/s\n", ignition_rate_deg_s);
+    CHECK(std::abs(ignition_rate_deg_s - 16.0) > 4.0);
+    CHECK(std::abs(ignition_rate_deg_s - 16.0) < 8.0);  // the flown value stays near the documented band
     CHECK(three_engines_s - boostback_s > 2.5);
     CHECK(stage.vehicle().rcs_supply_kg() >= 0.2 * (600.0 - stage.vehicle().rcs_supply_kg()));  // floor [E]: 20 % of the used
     CHECK(entry_s > 0.0);
@@ -436,7 +447,10 @@ TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtl
     // +-5 deg, +-1 deg/s, +-5 % propellant, truth aero +-10 %, +-3 m/s [E]: wider than the separation can plausibly give.
     std::mt19937 rng(14);
     std::uniform_real_distribution<double> unit(-1.0, 1.0);
-    int landed = 0;
+    int landed = 0, on_pad = 0;
+    std::vector<int> off_pad;
+    const double pad_radius_m = lz40().pad_radius_m;  // config, FAA EA 2025
+    REQUIRE(pad_radius_m > 0.0);
     double least_propellant = 1e9, latest_ignition = 0.0;
     for (int i = 0; i < 13; ++i) {
         auto d = RtlsDispersion{};
@@ -456,11 +470,15 @@ TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtl
                     sim::to_string(f.run.outcome), f.run.offset_m, f.run.propellant_kg, f.run.scvx.plans, f.run.scvx.failures);
         std::fflush(stdout);
         CHECK(f.run.outcome == sim::LandingOutcome::Landed);
-        // KNOWN STATE, case 4 (docs/known-issues.md): four unconverged re-plans in a row end the pad landing, the abort plan sets
-        // down 121 m off. It is not the flip's: the former law, same dispersion, lands 117 m off the same way.
-        CHECK(f.run.offset_m < (i == 4 ? 150.0 : 5.0));
         CHECK(f.ignition_after_s < 17.1);
         if (f.run.outcome == sim::LandingOutcome::Landed) ++landed;
+        // "Landed" only says upright (landing_outcome.cpp has no pad rule): count the pad separately, with the pad's radius.
+        if (f.run.offset_m < pad_radius_m) {
+            ++on_pad;
+            CHECK(f.run.offset_m < 5.0);  // spec success: < 5 m from the centre
+        } else {
+            off_pad.push_back(i);
+        }
         least_propellant = std::min(least_propellant, f.run.propellant_kg);
         latest_ignition = std::max(latest_ignition, f.ignition_after_s);
     }

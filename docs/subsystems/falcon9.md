@@ -103,17 +103,17 @@ Evidence, webcast frames (`screenshots/falcon9_flip/frames`, `tools/telemetry/fl
 | value | measured | flights | error |
 |---|---|---|---|
 | hold | second stage's bell within ~10 deg of the axis to 4 s after separation; timelines 4 s | Crew-13; three timelines | whole seconds |
-| drone ship hold | second stage within ~10 deg to T+2:48, separation T+2:33 | Starlink 15-25 | +-2 s; the plume washes out part of it |
+| drone ship hold | second stage within ~10 deg to T+2:48, separation T+2:33: **15 s is a lower bound** (the camera view ends at T+2:48 and the plume washes out T+2:42-43; the stage had not visibly turned; jets at T+2:51 would bound it to ~18 s) [D] | Starlink 15-25 | censored, not +-2 s |
 | turn direction | over the ground: earth limb enters the view at the top of the interstage hole at video T+2:41 and leaves at the bottom at T+2:43.5, clouds fill the hole | Crew-13 | one flight |
 | rate during the turn | limb crosses ~32 deg in 2.5 s: 13 deg/s | Crew-13 | +-4 deg/s: the hole's 32 deg comes from geometry [E] (rim 1.83 m, ~6.5 m away) |
 | acceleration | 1.6-1.9 deg/s2 from the start at the hold's end through those two limb positions | Crew-13 | two points, two unknowns: not checked independently |
 | ignition -> three engines | 3.5 s: speed dial steps | CRS-35, Crew-13 | +-0.5 s |
-| separation -> ignition | 14.5 s (dials), 13.7 s (timelines) | CRS-35, Crew-13; three timelines | +-1 s; +-0.6 s |
+| separation -> ignition | 13.0 s (CRS-35 dials: separation T+141.5, speed leaves its ballistic decline T+154.5; own record, `docs/history/ascent-staging.md`); 12.5 s with ignition at T+154; Crew-13 dial reading ~14.5 s [D]; 13.7 s (three timelines) | CRS-35, Crew-13; three timelines | +-1 s; +-0.6 s |
 | ignition -> axis at the final attitude | 6 s; then horizontal uprange (+-5 deg from the speed and altitude dials) | CRS-35, Crew-13 | +-0.5 s |
 | attitude and rate at ignition | 114 +-15 deg off the velocity, 16 +-4 deg/s: **extrapolated**, the onboard view is cut before the ignition | Crew-13 | only an extrapolation |
 The frames cannot show: the attitude under thrust directly (only the thrust direction through the dials), the gimbal angles, the RCS pulses during the turn (jets are visible only later, T+3:37-3:41 Crew-13, T+2:51-2:57 Starlink), the dial's lag against the video (dials lead the pictures by ~2.5 s by the separation, one reading; not used across the two). The route over the ground rests on one daylight flight, against the shorter way up; thrust directions cannot tell them apart. No public source gives the RCS thrust or the N2 load (searched: SpaceX, Wikipedia, spec sheets, AIAA guide).
 
-Flown (`falcon9_rtls`): hold tilt 0.01 deg; ignition 14.7 s after separation, 114 deg off the velocity at 20 deg/s (the limit, 16 +-4 measured: the upper end); three engines at +3.5 s; final attitude at +6 s. 14.7 s stands 1.0 s off the timelines' 13.7 +-0.6 s and inside the dials' 14.5 +-1 s; not tuned.
+Flown (`falcon9_rtls`): hold tilt 0.01 deg; ignition 14.7 s after separation, 114 deg off the velocity at 20.2 deg/s; three engines at +3.5 s; final attitude at +6 s. Misses: 14.7 s misses the timelines' 13.7 +-0.6 s by 0.4 s beyond the band (1.0 s off the mean) and CRS-35's own 13.0 s; no dial reading we can confirm contains it. 20 deg/s is not measured: the 16 +-4 deg/s extrapolation ends at 20, the flown 20.2 lies just outside it, and 16 does not follow from 13 deg/s at mid-turn plus 1.75 deg/s2 (that gives ~19.6). `flip_duration_s` 14.8 and `boostback_loss_fraction` 0.157 are identified on our own RTLS simulation (as before), not measured from flights [D]. Not tuned. A gate ~14 deg earlier would light ~0.7 s sooner (estimate, unflown): an option for the user, not done. The tests pin the misses (`KNOWN MISS` lines in `test_falcon9_rtls.cpp`), so a change of these numbers shows.
 
 N2 at the flown law, RTLS (kg): ascent 83, hold 4, turn 189 (= 130 kNs, I w / lever: 1.12e7 x 0.35 / 30.4 m), boostback 0, coast and landing 32, 292 left of 600. At 13 kN: ascent 92, hold 7, turn 189; ignition at 12.25 s. The turn's impulse does not depend on the thrust, as nothing brakes. The former law used 358 kg on the turn (acceleration and braking) and 129.5 kg stayed at the touchdown.
 
@@ -121,7 +121,7 @@ Cold-gas doubt: 6.5 kN at Isp 70 s is 9.5 kg/s per thruster (at 100 bar a throat
 
 Fins do not help: they stay stowed through flip and boostback on RTLS flights (Crew-13: appear T+3:45-3:47; CRS-35: T+3:47; boostback ends ~T+3:20), and out at T+2:51-3:03 on Starlink 15-25, 18-30 s after separation. In the model over the turn at q 197-16 Pa: all fins at full deflection 13 kNm falling to 0.2 kNm, hull moment up to 37 kNm, RCS 396 kNm. Physics has no fold state for fins (they always carry their table); the turn law feathers them, so they give no moment; the hold and the boostback run on `return_controller_` with fins allocated first, at the above negligible moment. The fin law of the coast (`aero_steering_min_q_pa` 2000 Pa) does not reach the flip. The hull's aerodynamic moment carries about 9 % at most.
 
-Outcomes: dispersed separation (+-5 deg, +-1 deg/s, +-5 % propellant, aero +-10 %, +-3 m/s, 13 cases, `[flip]`): all land, ignition <= 15.2 s, >= 5189 kg left; 12 within 0.04 m, case 4 is `docs/known-issues.md`. RCS at half thrust: lights at the time limit 17.05 s, lands 0.01 m off, 5222 kg left. Dead RCS: lights at 17.05 s, the gimbal turns the stage, lands 93 m off (outside the pad; why not looked at), 5061 kg left.
+Outcomes: dispersed separation (+-5 deg, +-1 deg/s, +-5 % propellant, aero +-10 %, +-3 m/s, 13 cases, `[flip]`): all land, ignition <= 15.2 s, >= 5189 kg left; 12 within 0.04 m, case 4 is `docs/known-issues.md`. RCS at half thrust: lights at the time limit 17.05 s, lands 0.01 m off, 5222 kg left. Dead RCS: lights at 17.05 s, the gimbal turns the stage, lands 93 m off (outside the pad; cause not examined), 5061 kg left.
 
 ## Standing decisions
 - Physics first (user 2026-10-14): gauges the engines cannot explain are not followed (Falcon 9 MECO 25 t vs gauge 47).
@@ -141,8 +141,7 @@ Outcomes: dispersed separation (+-5 deg, +-1 deg/s, +-5 % propellant, aero +-10 
 - Drone ship: full mission MECO T+150 s, 70.3 km, 8159 km/h, 24.8 t vs Starlink 15-25 T+149 s, 60 km,
   ~8000 km/h; 16.5 t to 200 x 281 km; entry burn T+397-418 s, landing burn T+490 s at 2.95 km / 271 m/s /
   11.8 t, landed T+529 s 0.01 m off, 5.0 t left; campaigns `[falcon9][asds][validation]` from ignition and from MECO states
-  (+-200 m, +-5 m/s, +-5 %, aero +-10 %; two halves) 21 of 21 each, >= 4984 kg left, 3 of 702 and 25 of 713 plans failed
-  (none of them a first plan). Fixtures of the refused first plans: `falcon9_asds_seed105_first_plan.txt`, `..seed109..`.
+  (+-200 m, +-5 m/s, +-5 %, aero +-10 %; two halves) 21 of 21 each; with the Task 14 flip (hold 15 s) >= 4983 kg left (ignition) / >= 4984 kg (MECO), 6 of 697 (ignition) and 22 of 718 (MECO) plans failed (before: 3 of 702, 25 of 713; none of them a first plan). Fixtures of the refused first plans: `falcon9_asds_seed105_first_plan.txt`, `..seed109..`.
 
 ## Diagnostics
 - Falcon 9: `STARSIM_DEBUG_LEGS=1`, `STARSIM_DEBUG_ASCENT_G=1`; hidden test "Falcon 9 ASDS single MECO case"

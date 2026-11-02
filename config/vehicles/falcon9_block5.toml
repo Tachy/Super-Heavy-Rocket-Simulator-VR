@@ -147,7 +147,7 @@ boostback_engine_groups = ["center", "pair"]  # [E] the 3-engine set (thrust on 
 flip_engine_groups = []                      # [S: SpaceX webcasts] the flip after separation on the nitrogen thrusters,
                                              # engines off until the boostback
 flip_duration_s = 14.8                       # [D] MECO planning: separation -> boostback ignition as flown on our full RTLS. Measured
-                                             # 13 / 14 / 14 s [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s; speed dials 14.5 +-1 s
+                                             # 13 / 14 / 14 s [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s +-0.6; CRS-35 speed dials 13.0 s
 flip_hold_s = 4.0                            # [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13] separation -> start of the turn: 4 s on all
                                              # three timelines; the drawn nozzle exit leaves the interstage 3.96 s after separation
                                              # at the pushers' 1 m/s (game/tests/separation_clearance.gd). Crew-13 frames agree: the

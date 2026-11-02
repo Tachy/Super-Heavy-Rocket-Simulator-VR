@@ -24,7 +24,7 @@ command (no steering change while joined); every event at its own tick.
   `separation_after_meco_s`, upper ignition at MECO + `upper_ignition_after_meco_s`.
 - **Booster flip:** `[stage.recovery] flip_engine_groups` (unset: the final landing set - Super Heavy's centre engines;
   `[]`: engines off, the RCS turns the stage). MECO planning takes the flip from `flip_duration_s` (default 10 s [E];
-  Falcon 9 14.8 s [D], flown 14.7 s) plus the sequence's MECO -> separation interval (hot: run-on engines burn at minimum throttle).
+  Falcon 9 14.8 s [D], flown 14.7 s: identified on our simulation, not measured; the timelines' mean is 13.7 +-0.6 s, the CRS-35 webcast clock gives 13.0 s) plus the sequence's MECO -> separation interval (hot: run-on engines burn at minimum throttle).
 - **Falcon 9 flip:** a hold, a free turn over the ground on the nitrogen thrusters, ignition still turning, the gimbal ends the turn: `docs/subsystems/falcon9.md` "The flip" (law, measurements, N2 budget). Nitrogen cold gas thrusters, 2 packs of 4 on the interstage [S: everydayastronaut.com Starship guide, Falcon 9 section]; thrust 6.5 kN each [D], N2 600 kg [D], Isp 70 s [E]. `flip_duration_s` 14.8 s [D], `boostback_loss_fraction` 0.157 [D] (identified on the full RTLS: 12.1 t at landing-burn ignition for 12.1 t planned; former 13.6 s / 0.13: `docs/history/ascent-staging.md`).
 
 ### Max-Q limit and operational ascent throttle
