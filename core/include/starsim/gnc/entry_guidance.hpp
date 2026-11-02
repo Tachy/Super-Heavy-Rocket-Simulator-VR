@@ -28,6 +28,7 @@ struct EntryGuidanceParameters {
     // 15 reached the gate at 98-99 m/s, stayed at 800 m and ended the flip lowest of all.
     double gate_raise_start_sink_mps = 95.0;
     double cycle_s = 2.0;            // re-prediction interval
+    double corrector_tolerance_m = 500.0;  // [E] the corrector's downrange miss that counts as solved
     double max_bank_rad = 150.0 * constants::deg_to_rad;
     // Bank rate limits [E]: 1 deg/s hypersonic (faster departs in alpha, b1; seen again with weak flaps), 3 deg/s
     // below Mach 5 (dense air, more flap authority: reversals late in the entry must be quick), linear in between.
@@ -135,6 +136,10 @@ struct EntryGuidanceParameters {
         p.reversal_crossrange_base_m = 500.0;
         p.min_reversal_speed_mps = 500.0;
         p.hold_bank_below_speed_mps = 500.0;  // [E]
+        // [E] the last bank is held to the gate, and late in the entry range moves only ~50 m per deg of bank (scan at 504
+        // m/s, task 5d): 500 m let the first 10 deg bracket step pass as solved, the held bank fell on a 10 deg grid about
+        // the warm start, ~0.9 km across per step. 50 m: ~1 deg.
+        p.corrector_tolerance_m = 50.0;
         return p;
     }
     // Lunar return (l5): the predictor carries skip arcs (Orion-like skip entry, Brunner & Lu 2008 principle) and

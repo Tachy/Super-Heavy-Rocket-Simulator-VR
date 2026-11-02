@@ -447,6 +447,104 @@ TEST_CASE("The capsule predictor matches the flown entry at constant bank", "[dr
     CHECK(std::abs(p.time_s - s.time_s()) < 20.0);
 }
 
+namespace {
+
+// Two consecutive corrector updates of return campaign case 5 (trunk 3.25 m, capsule 4.85 m), last above the 500 m/s
+// bank hold, read from STARSIM_DEBUG_ENTRY runs (task 5d).
+struct LastUpdates {
+    Vec3 target_itrf_m{-2508448.379, -4757695.700, 3416650.927};
+    double ground_height_m = -37.032;
+    gnc::EntryPredictorState v526{{-2528219.032, -4765611.496, 3431894.141}, {385.9381, -140.9574, -328.6647}, 0.706593, 0};
+    gnc::EntryPredictorState v504{{-2527458.241, -4765875.557, 3431248.793}, {373.1089, -122.5928, -315.1512}, 0.706593, 0};
+    double mass_kg = 9913.0;
+    double warm_start_rad = 40.5 * deg;
+};
+
+}  // namespace
+
+// Task 5d: with enough bank the prediction falls vertically at the gate, its horizontal velocity passes through zero and
+// a miss measured along the velocity at the gate flipped sign for one and the same end point (+5.8 km at 100 deg, -5.6 km
+// at 110 deg of bank).
+TEST_CASE("Near the target the predicted miss moves smoothly and range falls with the bank", "[dragon][entry]") {
+    const LastUpdates u;
+    CapsuleEntryScenario s(120000.0, 7400.0, -1.2 * deg);
+    gnc::EntryPredictorModel model;
+    model.aero = gnc::EntryAeroTable::capsule(s.body().vehicle());
+    model.mass_kg = u.mass_kg;
+    gnc::EntryTarget target;
+    target.position_itrf_m = u.target_itrf_m;
+    target.ground_height_m = u.ground_height_m;
+    for (const double reversal_time_s : {-1.0, 0.0}) {
+        INFO("reversal time " << reversal_time_s);
+        auto start = u.v504;
+        start.reversal_time_s = reversal_time_s;
+        const auto at = [&](double bank_deg) { return gnc::predict_entry(model, start, bank_deg * deg, target, 5500.0, 0.0, 1.0, 3000.0); };
+        auto previous = at(0.0);
+        for (double bank = 5.0; bank <= 165.0; bank += 5.0) {
+            INFO("bank " << bank);
+            const auto p = at(bank);
+            REQUIRE(p.reached_gate);
+            // the end point itself moves < 0.6 km per 5 deg (scan of this state); the whole Earth-fixed miss vector, so
+            // neither of its components may jump
+            CHECK(std::abs(p.crossrange_m - previous.crossrange_m) < 1000.0);
+            CHECK(std::abs(p.downrange_error_m - previous.downrange_error_m) < 1000.0);
+            // the corrector's premise, in the capsule's range authority (d3: ~0-45 deg; above ~95 deg the fall at the gate
+            // is vertical and more bank only moves the end sideways)
+            if (reversal_time_s < 0.0 && bank <= 95.0) CHECK(p.downrange_error_m < previous.downrange_error_m);
+            previous = p;
+        }
+    }
+}
+
+TEST_CASE("A small change of state keeps the reversal check on its side at the last bank update", "[dragon][entry]") {
+    const LastUpdates u;
+    CapsuleEntryScenario s(120000.0, 7400.0, -1.2 * deg);
+    gnc::EntryTarget target;
+    target.position_itrf_m = u.target_itrf_m;
+    target.ground_height_m = u.ground_height_m;
+    const gnc::EntryGuidance guidance(s.body(), target);
+    auto model = guidance.model();
+    model.mass_kg = u.mass_kg;
+    const auto reverse_now = [&](gnc::EntryPredictorState state, double warm_start_rad) {
+        state.reversal_time_s = 0.0;
+        return guidance.solve(model, state, 0.0, 1.0, warm_start_rad);
+    };
+    // the flown run: +6.1 km, then -5.4 km one update later from the same warm start. The online scale factors are part
+    // of the state: within 1 % of the model (the flown range: "scales 1.00/1.01") the check must keep its side.
+    const auto reference = reverse_now(u.v526, u.warm_start_rad);
+    for (const auto& state : {u.v526, u.v504}) {
+        for (double drag = 0.99; drag <= 1.0101; drag += 0.0025) {
+            for (double lift = 0.99; lift <= 1.0101; lift += 0.0025) {
+                model.drag_scale = drag;
+                model.lift_scale = lift;
+                const auto r = reverse_now(state, u.warm_start_rad);
+                INFO("scales " << drag << " / " << lift << ": reverse now " << r.prediction.crossrange_m << " m at "
+                               << r.bank_rad / deg << " deg, reference " << reference.prediction.crossrange_m << " m");
+                CHECK(std::abs(r.prediction.crossrange_m - reference.prediction.crossrange_m) < 1500.0);
+            }
+        }
+    }
+}
+
+// Task 5d: late in the entry 500 m of range is ~10 deg of bank and ~0.9 km across; the corrector's first bracket step (10
+// deg) already fell inside a 500 m tolerance, so the bank moved in 10 deg steps and the last one was held to the gate.
+TEST_CASE("The capsule's corrector gives one bank whatever its warm start", "[dragon][entry]") {
+    const LastUpdates u;
+    CapsuleEntryScenario s(120000.0, 7400.0, -1.2 * deg);
+    gnc::EntryTarget target;
+    target.position_itrf_m = u.target_itrf_m;
+    target.ground_height_m = u.ground_height_m;
+    const gnc::EntryGuidance guidance(s.body(), target);
+    auto model = guidance.model();
+    model.mass_kg = u.mass_kg;
+    const double reference_rad = guidance.solve(model, u.v504, 0.0, 1.0, u.warm_start_rad).bank_rad;
+    for (double warm_deg = 15.0; warm_deg <= 65.0; warm_deg += 1.0) {
+        const auto r = guidance.solve(model, u.v504, 0.0, 1.0, warm_deg * deg);
+        INFO("warm start " << warm_deg << " deg: bank " << r.bank_rad / deg << " deg, reference " << reference_rad / deg);
+        CHECK(std::abs(r.bank_rad - reference_rad) < 2.0 * deg);
+    }
+}
+
 TEST_CASE("Capsule entry guidance reaches the drogue gate", "[dragon][entry][session]") {
     test::spice_session();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 14, 18, 0, 0.0});

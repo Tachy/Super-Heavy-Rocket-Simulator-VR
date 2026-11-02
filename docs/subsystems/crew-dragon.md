@@ -24,7 +24,9 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   air velocity (bank rate <= 10 deg/s [E]) and damp pitch / yaw (deadband 1 deg/s); below 200 Pa the full trim attitude
   is held; ~31 kg MMH/NTO per entry. `EntryGuidance(capsule, target)` with `EntryGuidanceParameters::capsule()`
   (`EntryAeroTable::capsule`; no terminal phase; gate 5.5 km [S: NASA Crew-2]; reversals down to 500 m/s with a 0.5 km
-  deadband; bank held below 500 m/s; load limit = crew 4 g [E] (`[stage.heat_shield] crew_load_limit_g`,
+  deadband; bank held below 500 m/s; corrector solves to 50 m [E: ~1 deg of bank late in the entry, where the last
+  solution is held]; within 50 km of the target the predictor's miss is along / across the track at the cycle's start, a
+  direction independent of the bank; load limit = crew 4 g [E] (`[stage.heat_shield] crew_load_limit_g`,
   `FlightBody::crew_load_warning`) x 0.9). Nominal entry -2.0 deg at 120 km with 30 deg of bank [E]. Splashdown zone
   `config/splashdown_zones.toml` (`pacific_san_diego` 32.6 N 117.8 W [E], radius 2 km - user 2026-10-14). Deorbit:
   `gnc::plan_deorbit` with `DeorbitParameters::burn_thrust_n` and `entry_mass_kg`. `FlightSession::plan_capsule_return`
@@ -56,7 +58,6 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 - Capsule 4.85 m shield apex to nose tip [E: measured, KUBAHA M2 / M1 4.85, drawing D_Dragon_2_DM_2_03 4.83, Forest Katsch 4.92 at 4.0 m], trunk 3.25 m (8.1 m total [S] minus the capsule, M2 3.234): the capsule stage's base is station 3.25 m. SuperDraco `angles_deg` pairs 58/68, 112/122, 238/248, 292/302 [E: bays at 63 / 117 / 243 / 297, photo D_CCP_Demo_2 (3) hatch to bay ~66 deg]; abort-only data, no flight effect. The nose cone's open angle (120 deg) and opening time (8 s) are view data in `config/vehicles/detail/crew_dragon.toml`; the physics' state stays binary.
 
 ## Open points (Task 5c)
-- Dragon return campaign case 5 misses by 2.75 km at exactly these lengths (bound 2 km, test `Crew Dragon return campaign: cases 4-7` red); 0.76-0.81 km at lengths 1-5 cm away. Cause: entry guidance, not geometry: the predictor's bank solution jumps on the last update above 500 m/s (+40.5 -> +10.5 deg at v 504) and is held from there. Open: decision on the guidance.
 - The aero table and heat model keep their [E] shape: 15 deg sidewall (measured about 20 deg) and R_n 4.8 m (measured 5.2-5.7 m on the same model). Not changed.
 
 ## Validation
@@ -68,7 +69,7 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   within 1.2 km, 160-178 m/s, <= 3.6 g. From 420 km / 51.6 deg: 139 m/s / 598 kg after 37 h, gate 0.58 km off at 166
   m/s, 3.5 g. Return mission: burn after 37.1 h, water 0.41 km from the zone centre at 6.9 m/s, deorbit ignition ->
   splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]); drogues 5.50 km, mains 1.80 km / 53 m/s, peak 2.8 g. Campaign
-  `[dragon][mission][validation]` (8 cases): 8 of 8 gewassert within 1.09 km, 6.9-7.0 m/s, <= 2.97 g. Test "A capsule
+  `[dragon][mission][validation]` (8 cases): 8 of 8 gewassert within 1.61 km (trunk / capsule +-1 cm: worst 1.24-1.61 km; 1 cm still moves a case by up to 0.88 km), 6.9-7.0 m/s, <= 2.97 g. Test "A capsule
   return without mains ends lost, ...".
 
 ## Diagnostics

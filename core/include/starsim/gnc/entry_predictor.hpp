@@ -143,7 +143,7 @@ struct EntryPrediction {
     double time_s = 0.0;
     // Miss: > 0 overshoot / target to the right. Start farther than 50 km from the target: range start -> end minus
     // range start -> target, and the target's distance from the great circle start -> end; closer: the horizontal
-    // miss at the end along / across the track there.
+    // miss at the end along / across the track at the start (one direction for all banks).
     double downrange_error_m = 0.0;
     double crossrange_m = 0.0;
     double peak_heat_rate_w_m2 = 0.0;

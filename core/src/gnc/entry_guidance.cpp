@@ -16,7 +16,6 @@ using math::Vec3;
 
 namespace {
 
-constexpr double converged_downrange_m = 500.0;
 constexpr double converged_bank_rad = 0.1 * constants::deg_to_rad;
 constexpr double bracket_step_rad = 10.0 * constants::deg_to_rad;
 constexpr int max_illinois_iterations = 8;
@@ -180,7 +179,7 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
         s.prediction = std::abs(fa) < std::abs(fb) ? pa : pb;
         int side = 0;
         for (int i = 0; i < max_illinois_iterations; ++i) {
-            if (std::abs(miss(s.prediction)) < converged_downrange_m || std::abs(b - a) < converged_bank_rad) break;
+            if (std::abs(miss(s.prediction)) < parameters_.corrector_tolerance_m || std::abs(b - a) < converged_bank_rad) break;
             const double c = (a * fb - b * fa) / (fb - fa);
             const EntryPrediction pc = predict(c);
             const double fc = miss(pc);

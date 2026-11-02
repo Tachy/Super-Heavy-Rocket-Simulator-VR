@@ -359,8 +359,11 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     // Far from the target: difference of ranges from the start (monotone in the bank; the end's unwrapped past the
     // antipode, the target's within half a turn) and the target's distance
     // from the great circle start -> end. Close to it a range difference cannot tell a target behind the end from
-    // one ahead: there the miss in the end's horizontal plane, along / across the track at the end (its velocity's
-    // horizontal direction; the direction from the start when the fall is vertical).
+    // one ahead: there the miss in the end's horizontal plane, along / across the track at the start (one direction for
+    // all banks; the direction from the start to the end when the start's fall is vertical). Not the track at the end:
+    // with enough bank the fall at the gate is vertical, the horizontal velocity there passes through zero and the same
+    // end point changed from +5.8 to -5.6 km across (task 5d, the capsule's reversal check), and the turning track made
+    // the range non-monotone in the bank, which the corrector assumes.
     if (ground_range_m(start.position_itrf_m, target.position_itrf_m) > near_target_range_m) {
         const double end_range_m =
             unwrapped_range_rad(ground_range_m(start.position_itrf_m, r) / constants::wgs84_semi_major_axis_m, swept_rad) *
@@ -384,7 +387,7 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     }
     const Vec3 up = math::normalized(r);
     const auto horizontal = [&](const Vec3& x) { return x - up * dot(x, up); };
-    Vec3 track = horizontal(v);
+    Vec3 track = horizontal(start.velocity_itrf_mps);
     if (norm(track) < min_track_speed_mps) track = horizontal(r - start.position_itrf_m);
     if (norm(track) > 0.0) {
         track = math::normalized(track);
