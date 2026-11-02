@@ -407,6 +407,9 @@ def fin(mesh, az_rad, outline, offset, thickness):
     for a, b in zip(pts, pts[1:]):
         out = (e_r + (AXIS_X if b.x > a.x else -AXIS_X) * 0.5 * abs(b.dot(e_r) - a.dot(e_r)) / max(abs(b.x - a.x), 1e-6)).normalized()
         mesh.face([a - t * (thickness / 2.0), a + t * (thickness / 2.0), b + t * (thickness / 2.0), b - t * (thickness / 2.0)], [(0, 0), (1, 0), (1, 1), (0, 1)], out)
+    # the root against the hull: closes the plate
+    a, b = pts[-1], pts[0]
+    mesh.face([a - t * (thickness / 2.0), a + t * (thickness / 2.0), b + t * (thickness / 2.0), b - t * (thickness / 2.0)], [(0, 0), (1, 0), (1, 1), (0, 1)], -e_r)
 
 
 def build_trunk(spec, out):
@@ -448,6 +451,11 @@ def build_trunk(spec, out):
         umb.face([AXIS_X * x + e_r * rr + t * side * w for x, rr in outline] + [AXIS_X * outline[-1][0] + e_r * inner + t * side * w], [(x, rr) for x, rr in outline] + [(outline[-1][0], inner)], t * side)
     for (xa, ra), (xb, rb) in zip(outline, outline[1:]):
         umb.face([AXIS_X * xa + e_r * ra - t * w, AXIS_X * xa + e_r * ra + t * w, AXIS_X * xb + e_r * rb + t * w, AXIS_X * xb + e_r * rb - t * w], uv, e_r, ("top", 0))
+    # Its back and upper end: above the trunk's top it stands free, so the inside must not show.
+    xt, rt = outline[-1]
+    xb0 = outline[0][0]
+    umb.face([AXIS_X * xt + e_r * rt - t * w, AXIS_X * xt + e_r * rt + t * w, AXIS_X * xt + e_r * inner + t * w, AXIS_X * xt + e_r * inner - t * w], uv, AXIS_X)
+    umb.face([AXIS_X * xt + e_r * inner - t * w, AXIS_X * xt + e_r * inner + t * w, AXIS_X * xb0 + e_r * inner + t * w, AXIS_X * xb0 + e_r * inner - t * w], uv, -e_r)
     tris = body.to_object("trunk", root)[1] + array.to_object("trunk_array", root)[1] + radiator.to_object("trunk_radiator", root)[1] + umb.to_object("umbilical", root)[1]
     vc.export_selected(Path(out) / "dragon_trunk.gltf", [root])
     vc.report_triangles("dragon_trunk", tris)
