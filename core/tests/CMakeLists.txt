@@ -46,6 +46,7 @@ add_executable(starsim_core_tests
     test_iss_station.cpp
     test_dragon_translation.cpp
     test_docking_port.cpp
+    test_idss_view_values.cpp
     test_docking_interface.cpp
     test_docking_mechanism.cpp
     test_station_collision.cpp

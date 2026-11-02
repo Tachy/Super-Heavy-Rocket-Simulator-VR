@@ -257,10 +257,12 @@ DRAGON_DETAIL_KEYS = {
     "capsule": ("az_step_deg", "nose_columns", "shield_edge_x_m", "band_top_x_m", "profile_m", "hood_half_width_deg", "hood_outer_m", "bay_top_x_m", "bay_corner_drop_m", "bay_corner_power",
                 "bay_half_width_deg_m", "bay_floor_m", "nozzle_x_m", "nozzle_half_x_m", "nozzle_half_az_deg", "nozzle_outline_scale", "seam_axis_x_m", "seam_slope", "seam_gap_m", "lip_thickness_m",
                 "nose_hinge_x_m", "nose_hinge_r_m", "nose_hinge_azimuth_deg", "nose_open_angle_deg", "nose_open_time_s", "hinge_fairing_m", "hinge_arm_m",
-                "nose_inner_shoulder_m", "nose_inner_cone_m", "nose_seal_m", "deck_x_m", "neck_m", "port_cone_m", "deck_holes", "windows", "window_flange_scale", "hatch",
+                "nose_inner_shoulder_m", "nose_inner_cone_m", "nose_seal_m", "neck_m", "deck_holes", "deck_slot", "windows", "window_flange_scale", "hatch",
                 "hatch_seam_m", "draco_clusters_az_deg", "draco_slots", "lift_panel_m", "lift_detail_m"),
     "trunk": ("segments", "shield_well_m", "top_wall_m", "floor_depth_m", "base_inner_r_m", "fin_count", "fin_first_azimuth_deg", "fin_outline_m", "fin_thickness_m", "array_azimuths_deg",
               "radiator_azimuths_deg", "array_top_x_m", "panel_base_m", "panel_proud_m", "umbilical_azimuth_deg", "umbilical_width_m", "umbilical_outline_m", "trunk_slots_m", "trunk_slots_azimuths_deg"),
+    "idss": ("ring_extension_m", "ring_tilt_max_deg", "petal_height_m", "petal_base_diameter_m", "hook_count", "scs_recess_m", "tunnel_diameter_m", "petal_tip_diameter_m", "petal_theta_deg",
+             "hook_radius_m", "hook_active_mm", "hook_passive_mm", "pin_theta_deg", "receptacle_theta_deg", "seal_diameters_m"),
     "paint": ("capsule_albedo", "shield_albedo", "band_albedo", "cowl_albedo", "pod_albedo", "window_albedo", "deck_albedo", "trunk_albedo", "radiator_albedo", "array_albedo"),
 }
 
@@ -277,6 +279,28 @@ def dragon_lobes(angles_deg: list) -> list:
     if len(angles_deg) % 2:
         raise VehicleSpecError("superdraco angles_deg: pairs expected (even count)")
     return [0.5 * (angles_deg[i] + angles_deg[i + 1]) for i in range(0, len(angles_deg), 2)]
+
+
+def idss_block(detail: dict, capsule: dict) -> dict:
+    """What the game's DockingMechanismView needs: the [idss] numbers, the port, and the two numbers derived from the IDD's hook figures: the active hook's pivot (closed pose = the
+    outline as typed: leading edge at its closed station, tangent plane at its height) and the turn that brings the leading edge to its open station. The IDD gives no stroke as a number."""
+    idss = dict(detail["idss"])
+    outline = idss["hook_active_mm"]
+    edge_mm = max(u for u, _ in outline)
+    notch_v_mm = next(v for u, v in outline if u == edge_mm and v < 30.0)  # the hook's tangent plane in its own outline
+    pivot_u = idss["hook_active_edge_closed_m"] - edge_mm / 1000.0
+    pivot_x = idss["hook_tangent_above_hcs_m"] - notch_v_mm / 1000.0
+    target = (idss["hook_active_edge_open_m"] - pivot_u) * 1000.0  # the largest u of the turned outline must reach this
+    def largest_u(turn):
+        return max(u * math.cos(turn) - v * math.sin(turn) for u, v in outline)
+    lo, hi = 0.0, math.radians(90.0)
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if largest_u(mid) > target else (lo, mid)
+    idss.update({"hook_pivot_m": [pivot_u, pivot_x], "hook_turn_deg": math.degrees(0.5 * (lo + hi)), "port_position_m": capsule["port_position_m"], "port_axis": capsule["port_axis"], "port_up": capsule["port_up"],
+                 "strut_base_x_m": detail["capsule"]["neck_m"][2][0] - capsule["port_position_m"][0],
+                 "nose_seal_m": detail["capsule"]["nose_seal_m"], "nose_inner_cone_m": detail["capsule"]["nose_inner_cone_m"]})  # the closed nose's inside, for the view's test
+    return idss
 
 
 def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
@@ -302,8 +326,8 @@ def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
                           "hull_top_radius_m": top_radius, "shield_nose_radius_m": float(cap["heat_shield"]["nose_radius_m"]),
                           "rcs_pods": cap["rcs"]["pod"], "superdraco_lobes_deg": dragon_lobes(group["angles_deg"]),
                           "superdraco_half_gap_deg": 0.5 * (group["angles_deg"][1] - group["angles_deg"][0]),
-                          "port_position_m": cap["docking_port"][0]["position_m"]}}
-    return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose}
+                          "port_position_m": cap["docking_port"][0]["position_m"], "port_axis": cap["docking_port"][0]["axis"], "port_up": cap["docking_port"][0]["up"]}}
+    return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose, "idss": idss_block(detail, stages["capsule"])}
 
 
 def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:

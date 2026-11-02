@@ -105,7 +105,7 @@ def deviations(models: Path = MODELS, detail_path: Path = DETAIL) -> dict:
         vehicle = tomllib.load(f)
     trunk_length = next(s for s in vehicle["stage"] if s["id"] == "trunk")["length_m"]
     cap_file = models / "dragon_capsule.gltf"
-    closed = triangles(cap_file, skip={"window", "hatch", "seams", "draco_pod", "hinge_fairing", "deck", "port", "superdraco_nozzle"})
+    closed = triangles(cap_file, skip={"window", "hatch", "seams", "draco_pod", "hinge_fairing", "deck", "recess", "superdraco_nozzle"})
     hinge = np.array([c["nose_hinge_x_m"], c["nose_hinge_r_m"] * math.cos(math.radians(c["nose_hinge_azimuth_deg"])),
                       c["nose_hinge_r_m"] * math.sin(math.radians(c["nose_hinge_azimuth_deg"]))])
     nose = triangles(models / "dragon_nose.gltf", NOSE_NODES) + hinge

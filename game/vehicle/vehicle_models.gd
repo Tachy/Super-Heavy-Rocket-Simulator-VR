@@ -18,12 +18,12 @@ const MANIFEST := "manifest.json"
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
-	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk"], "iss": [],
+	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism"], "iss": [],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
-	"crew_dragon": ["vehicle_common.py", "gen_dragon.py"], "iss": [],
+	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": [],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": []}
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
@@ -138,6 +138,7 @@ static func _load(vehicle_id: String) -> Dictionary:
 			"manifest": manifest,
 			"hulls": {"trunk": parts["dragon_trunk"], "capsule": parts["dragon_capsule"]},
 			"nose": parts["dragon_nose"],  # origin = the hinge point, closed = identity (nose_transform)
+			"mechanism": parts["idss_mechanism"],  # DockingMechanismView: frames in idss_mechanism.py
 			"flap": {}, "grid_fin": {}, "engine": {},
 			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 		}

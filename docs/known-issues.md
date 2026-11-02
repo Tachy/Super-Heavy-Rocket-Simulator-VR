@@ -2,6 +2,7 @@
 
 Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also live in `docs/subsystems/<slug>.md`.
 
+- Crew Dragon entry: 1 cm of stage length moves a campaign case by up to 0.88 km (bound 2 km holds), source not determined (`.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/task-5-report.md`); held until the rendering is done, by the user's wish.
 - Red list on the frozen aero state (vehicle physics Task 6e, 2026-11-01; measured on 5167ce4 + the re-measure, findings not fixed):
   - Lunar direct campaign, with the arms as keep-out and the gradual gate law (Tasks 6g, 6h): 20 of 21 (limit 21). Seed 2 upright 4.9 t, gate 838.9 m at 101.9 m/s, 127 m east of the corridor, why: not determined; it was lost 19.7 t with the keep-out alone, and its safe end is not understood. Seed 15 caught 4.2 t (keep-out alone: lost 20.6 t), seed 12 caught 11.5 t, no ship lost, no strike, the others caught 7.2-12.2 t. Peak over all 21 seeds is 1171 kW/m^2 (seed 21, limit 1200), not the 1096 first reported.
   - `Docked tanker: the ship return flies to the catch`: lost. The tanker (35.7 t at the gate) departs in the terminal approach, axis error 100 deg, gate at 3,769 m with 217 m/s of sink; same phase as the low-Mach margin below, whether the same mechanism: not determined. `tanker_flight` from the pad is caught, on the header tanks (main 0.0 t).

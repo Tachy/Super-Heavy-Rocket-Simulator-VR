@@ -93,7 +93,7 @@ TEST_CASE("Crew Dragon has its docking port under the nose cone", "[iss][rendezv
     CHECK(port.id == "idss");
     CHECK(port.behind_nose_cone);
     CHECK(port.axis.x == Catch::Approx(1.0));
-    CHECK(port.position_m.x == Catch::Approx(4.0));
+    CHECK(port.position_m.x == Catch::Approx(4.22));
     for (const auto& p : config::load_vehicle(config_dir, "iss").stages.front().docking_ports) {
         CHECK_FALSE(p.behind_nose_cone);
     }

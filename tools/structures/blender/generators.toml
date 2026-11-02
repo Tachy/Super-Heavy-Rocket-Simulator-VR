@@ -28,8 +28,8 @@ outputs = ["falcon9_stage1.gltf", "falcon9_grid_fin.gltf", "falcon9_leg.gltf", "
 kind = "dragon"
 scripts = ["common.py", "vehicle_common.py"]
 bakers = []
-generators = ["gen_dragon.py"]
-outputs = ["dragon_capsule.gltf", "dragon_nose.gltf", "dragon_trunk.gltf"]
+generators = ["gen_dragon.py", "idss_mechanism.py"]
+outputs = ["dragon_capsule.gltf", "dragon_nose.gltf", "dragon_trunk.gltf", "idss_mechanism.gltf"]
 
 [iss]
 kind = "generic"

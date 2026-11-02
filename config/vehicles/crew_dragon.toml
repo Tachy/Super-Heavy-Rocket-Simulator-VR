@@ -136,7 +136,7 @@ deploy_height_m = 1800.0                 # [S:nasa_demo2] ~6,000 ft (Crew-1: ~6,
 [[stage.docking_port]]
 id = "idss"
 name = "Dragon-Andocksystem"
-position_m = [4.0, 0.0, 0.0]             # [E] port ring in the neck's recess, inside the cone (hinge at station 3.69, recess floor 3.98; M2 port cone top 4.44: Task 6)
+position_m = [4.22, 0.0, 0.0]            # [E] the HCS mating plane, the top of the drawn flange (detail neck_m, tested). M2 neck top 4.22, its port cone top 4.44 = 4.22 + the IDD petal 0.2; D_Iss072e096331 at 143 px/m (4.0 m wide): white lip ends 4.24 above the shield apex (+-0.15), against the IDA; drawing D_Dragon_2_DM_2_03 4.07-4.18. Was 4.0, the recess. task-6-report
 axis = [1.0, 0.0, 0.0]                   # forward, along the capsule axis
 up = [0.0, 0.0, -1.0]                    # [E] clocking reference
 behind_nose_cone = true                  # [S] the cone covers it during ascent and entry

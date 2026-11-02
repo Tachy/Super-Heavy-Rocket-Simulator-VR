@@ -60,7 +60,7 @@ COMPLETE 2026-10-20.
   Measured (cone open, 12.5 t): +x 1556.3 N = 0.1245 m/s^2, 4.25 kg per m/s; -x 1556.3 N, 4.55 kg/(m/s); +-y +-z
   566.7 N = 0.0453 m/s^2, 16.20 kg/(m/s) (3.8x ideal; bound 4.5x [E]); residual torque <= 0.01 N m. Closed nose cone:
   pure lateral and -x authority < 1 N (lateral force needs the nose Dracos under the cone).
-- **Dragon port** (`crew_dragon.toml`): `idss`, station 4.0 m [E], axis body +x, clocking `up` body -z [E],
+- **Dragon port** (`crew_dragon.toml`): `idss`, station 4.22 m [E: the drawn HCS mating plane, `vehicle-models.md`; 4.0 until 2026-11-02], axis body +x, clocking `up` body -z [E],
   `behind_nose_cone = true` [S] (covered while the cone is closed).
 - **Port frame** (`vehicle/docking_port`, `port_kinematics(body, id)`): x outward docking axis, z clocking `up`,
   y = z x x. Lever from the current CG; port velocity = CG velocity + omega x lever. Mated ports: axes opposed, ups equal.

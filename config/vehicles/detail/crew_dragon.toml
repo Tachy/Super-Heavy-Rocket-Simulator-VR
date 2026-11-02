@@ -1,7 +1,7 @@
 # Visual detail of crew_dragon (Crew Dragon capsule and trunk, hinged nose, docking mechanism): what the physics does not need.
 # Placement and size come from config/vehicles/crew_dragon.toml (lengths, diameters, SuperDraco layout); this file never repeats them (tested).
-# The docking mechanism comes with Task 6: its place is the recess in the neck under the nose, its port is `position_m` of the config.
-# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+# The docking mechanism: [idss], drawn by idss_mechanism.py; its HCS mating plane is `position_m` of the config's port = the first station of neck_m (tested).
+# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md; [idss]: docs/subsystems/vehicle-models.md.
 # "M2" = reference "SpaceX - Dragon 2" (KUBAHA, CC BY 4.0), scaled to the 4.0 m diameter; ray-cast / vertex measurements by script (2026-11-02), re-typed here
 # as a coarse table and re-drawn by gen_dragon.py, nothing of the mesh is copied or shipped (screenshots/falcon9_ref/INDEX.md 5.4, task-5-report "Task 5c").
 # Photos checked against it: D_CCP_SpaceX_Demo_2_Dragon__3_ (closed capsule, cowl), D_Crew_2_..._Falcon_9_mate (capsule and trunk, fin outline), D_Iss071e186365 and
@@ -38,16 +38,16 @@ nose_hinge_azimuth_deg = 180.0 # [E] M2 and M4: opposite the hatch; D_Iss071e186
 nose_open_angle_deg = 120.0    # [E] M2 animation quaternion: exactly 120 deg (author's, not published); D_Iss071e186365 / D_Iss072e096331: cone lies beside the capsule, consistent to about +-15 deg
 nose_open_time_s = 8.0         # [E] view easing only; the author's animation 1.7 s is a cartoon, the real motion takes seconds (no published value)
 hinge_fairing_m = [3.62, 3.72, 1.12, 0.2]  # [E] M2 dark hinge parts lie under the skin at x < 3.6, D_Iss071e186365 shows only a small fairing at the seam: [x from, x to, outer r, width]
-hinge_arm_m = [0.3, 0.05]      # [E] M2 strap inside the nose from the hinge to the seal ring: [width, thickness]
+hinge_arm_m = [0.3, 0.05]      # [E] M2 strap inside the nose from the hinge to the outer edge of the seal ring (clear of the flange): [width, thickness]
 # Inside the nose, closed pose.
 nose_inner_shoulder_m = [4.27, 0.72]   # [E] M2 meridian: shell's inside runs parallel to the skin up to here
 nose_inner_cone_m = [[4.3, 0.72], [4.72, 0.31], [4.72, 0.0]]  # [E] M2 meridian az 0 / 90 / 180: inner cone with the port recess, flat end
 nose_seal_m = [4.3, 0.6, 0.75]  # [E] M2 dark seal ring [x, r in, r out] that closes on the neck
-# Neck under the nose (open pose), [x, r], outside to inside: deck, neck wall, top ring, recess to the port.
-deck_x_m = 3.72                # [E] M2 meridian az 180: flat bulkhead at x 3.72 out to r 1.04
-neck_m = [[3.72, 0.78], [4.2, 0.78], [4.22, 0.76], [4.22, 0.6], [3.98, 0.59], [3.98, 0.4], [3.74, 0.4], [3.74, 0.0]]  # [E] M2 meridians az 0 / 45 / 90 / 135 / 180
-port_cone_m = [[3.98, 0.547], [4.23, 0.43], [4.44, 0.29]]  # [E] M2 'plastic' node: the place of the docking mechanism (Task 6), petals not drawn yet
-deck_holes = [[56.0, 0.69, 0.07], [124.0, 0.69, 0.07], [236.0, 0.69, 0.07], [304.0, 0.69, 0.07]]  # [E] M2 dark discs on the top ring: [az, r, radius]; D-rendered nose Dracos are the config's physics pods, not these
+# Under the nose (open pose): a white conical skirt from the seat on the seam plane to the flange (photo D_Iss071e186365: skin runs on past the seam line, Draco slot on it; M2's flat deck at 3.72 + cylinder not followed: the photo wins).
+# neck_m [x, r]: flange top (the mating plane), tunnel, recess floor, well to the hatch.
+neck_m = [[4.22, 0.70], [4.22, 0.6275], [3.98, 0.6275], [3.98, 0.4], [3.74, 0.4], [3.74, 0.0]]  # [E] station 4.22, floor 3.98 and well 3.74, r 0.4: M2 meridians; r 0.6275 [S: IDSS IDD E Fig 3.1.1.1-2 tunnel ID 1255]; r 0.70 flange OD [E, the IDD leaves it open: pin circle 687.5 + pin 12.5 mm; D_Iss065e002827: white starts about there]
+deck_holes = [[56.0, 0.76, 0.05], [124.0, 0.76, 0.05], [236.0, 0.76, 0.05], [304.0, 0.76, 0.05]]  # [E] round ports on the skirt: [az, r, radius]. Az M2 (D_Iss065e002827 head-on: 64 / 118 / 241 / 309, low resolution); r from the same photo, M2 0.69 would lie on the hook circle
+deck_slot = [224.0, 0.80, 0.09, 0.035]  # [E] the oval Draco slot on the skirt: D_Iss065e002827 az ~224, D_Iss071e186365 ~220: [az, r, half length along the circle, half width]
 # Surface details on the skin. Each [az deg, x, half x, half az deg]; mirrored to the side az < 0 where listed once.
 windows = [[33.3, 2.38, 0.255, 5.5], [90.0, 2.385, 0.245, 5.6]]  # [E] M2 'okno' extents, mirrored; D_CCP_Demo_2 (3): window beside the hatch and one at the side
 window_flange_scale = 1.25     # [E] D_CCP_Demo_2 (3): white flange around the glass
@@ -79,6 +79,70 @@ umbilical_outline_m = [[0.056, 1.88], [0.1, 2.08], [0.4, 2.13], [0.7, 2.18], [1.
 trunk_slots_m = [-0.28, -0.06, 0.09]  # [E] M2 dark ports near the trunk top: [x from, x to, width], az 45 / 135 / 225 / 315 read from the render
 trunk_slots_azimuths_deg = [45.0, 135.0, 225.0, 315.0]  # [E] same
 
+[idss]
+# IDSS Interface Definition Document Rev E (2016, NTRS 20170001546), [S] = dimension in the figure named; pdf page in brackets. Azimuth theta = the IDD's axial view, viewed from outside onto the port: 0 = line of androgyny = the port's `up`, clockwise.
+# Copies of the physics defaults (contact/docking_interface.hpp, docking_mechanism.hpp: no config path there), test_idss_view_values.cpp compares them:
+ring_extension_m = 0.30        # [E] copy of ring_extension_m: the ring's face above the HCS plane, full extension
+ring_tilt_max_deg = 6.0        # [E] copy of ring_tilt_max_rad
+petal_count = 3                # [S] copy; IDD 3.2.2.1 [p28]
+petal_height_m = 0.20          # [S] copy; Fig 3.1.1.1-2 [p24] 200 REF
+petal_base_diameter_m = 1.2    # [S] copy of 2 x petal_outline_radius_m; Fig 3.1.1.1-2 [p24]
+hook_count = 12                # [S] copy; 3.2.3.4 [p42]
+# Soft capture
+scs_recess_m = 0.006           # [S] Fig 3.1.1.1-2 [p24] SCS mating plane 6 REF below the HCS plane
+tunnel_diameter_m = 1.255      # [S] Fig 3.1.1.1-2 [p24]
+petal_tip_diameter_m = 0.8     # [S] Fig 3.1.1.1-2 [p24] transfer passageway; with the height this is the 45 deg face of Fig 3.1.1.1-3 (the physics' petal_lean_rad 30 deg [E] differs: reported, not touched)
+petal_theta_deg = [90.0, 210.0, 330.0]  # [S] Fig 3.1.1.1-1 [p23]: one on the line of symmetry, 120 deg pitch
+striker_theta_deg = [30.0, 150.0, 270.0]  # [S] same figure: 3 latch strikers between the petals
+petal_base_half_deg = 30.0     # [E] Fig 3.1.1.1-1 by eye: base corners +-30 deg (+-2)
+petal_tip_half_deg = 10.6      # [E] same: tip edge +-0.075 m at r 0.4
+petal_thickness_m = 0.006      # [E] plate
+petal_rib_foot_m = [0.46, 0.03]  # [E] Fig 3.1.1.1-3 by eye: rear rib from the tip to r, depth below the SCS plane
+ring_section_m = [[0.575, -0.09], [0.575, -0.02], [0.585, -0.012], [0.6, 0.0], [0.612, -0.008], [0.622, -0.03], [0.622, -0.09]]  # [E] capture ring [r, x from the SCS plane]: peak at the petal base [S], pentagon of Fig 3.1.1.1-3 by eye (the figure's section is not to scale), OD inside the tunnel
+latch_box_m = [0.52, 0.03]     # [E] Fig 3.1.1.1-1 by eye: the square on each petal, r, half side
+striker_box_m = [0.028, 0.018, 0.022]  # [E] half sizes tangential, radial, axial; the IDD names 3 strikers, no outline
+# Six actuators of the soft-capture platform ([E]: the IDD defines the interface, not the actuators; the physics speaks of an "actuator platform". Six = what a 6-DOF ring needs, the stroke is the physics'.)
+strut_pair_theta_deg = [90.0, 210.0, 330.0]  # [E] pairs under the petals
+strut_top_half_deg = 15.0      # [E] top points +- about the pair
+strut_base_half_deg = 45.0     # [E] base points +- about the pair
+strut_top_r_m = 0.55           # [E] under the ring
+strut_base_r_m = 0.52          # [E] on the recess floor, M2 floor r 0.4-0.59
+strut_tube_length_m = 0.2      # [E] three telescoping tubes: barrel, middle, rod. Shorter than the retracted length, their sum longer than the longest stroke (tested)
+strut_radii_m = [0.018, 0.014, 0.01]  # [E]
+# Hard capture
+hook_radius_m = 0.6635         # [S] Fig 3.2.3-1 [p37] 2X 663.5
+hook_first_theta_deg = 15.0    # [S] Fig 3.2.3-1 [p37] 12 equally spaced, 15 deg from the line of androgyny
+hook_width_m = 0.02            # [S] Fig 3.2.3.4-4, -5 [p45] 20
+# Hook outlines typed from the figures [mm, u along the circle towards the leading edge, v along the port axis], origin: active = its pivot, Fig 3.2.3.4-4 [p45]; passive = base centre, Fig 3.2.3.4-5 [p46]. The figures' main dimensions are [S], the points between them read by eye (+-1 mm).
+hook_active_mm = [[23.0, 28.6], [12.2, 28.6], [12.2, 14.6], [4.3, 11.4], [1.1, 11.3], [-1.4, 15.5], [-14.1, 17.2], [-10.3, 31.4], [-3.9, 41.3], [8.1, 43.0], [15.1, 40.9], [23.0, 34.2]]  # [S] see above
+hook_passive_mm = [[11.0, 0.0], [-5.5, 16.9], [-5.7, 26.8], [5.2, 25.8], [5.2, 32.5], [0.0, 38.7], [-9.8, 40.9], [-22.0, 34.0], [-30.0, 22.0], [-25.7, 11.0], [-14.0, 4.0], [-11.0, 0.0]]  # [S] see above
+hook_passive_edge_m = -0.0425  # [S] Fig 3.2.3.4-1, -7 [p42, p46]: passive leading edge from the local latch centre line
+hook_active_edge_closed_m = 0.0525  # [S] 95 REF - 42.5: active leading edge, ready to hook and mated, Fig 3.2.3.4-2, -3 [p43]
+hook_active_edge_open_m = 0.037  # [S] 79.5 - 42.5: ready to dock, Fig 3.2.3.4-1 [p42]
+hook_tangent_above_hcs_m = 0.0028  # [S] Fig 3.2.3.4-2 [p43] hook tangent plane 2.8. The IDD gives no stroke as a number: the turn follows from these edges (test: tip heights 17.8 REF, envelope 18)
+hook_passive_top_above_hcs_m = 0.0178  # [S] Fig 3.2.3.4-1 [p42] 17.8 REF
+hook_pocket_length_m = 0.12    # [E] Fig 3.2.3-1 [p37] by eye: the dark bars of the 12 latches
+# Guide pins, receptacles, seals. CORRECTS screenshots/falcon9_ref/INDEX.md 5.3: re-read of Fig 3.2.3-1 and Fig 3.1.1.1-1: the second pin lies 120 deg clockwise of the top pair, the second receptacle 120 deg counter-clockwise; the features near the line of symmetry are separator areas.
+pin_circle_diameter_m = 1.375  # [S] Fig 3.2.3-1 [p37]
+pin_theta_deg = [-2.0833, 120.0]  # [S] -25 mm of the androgyny line at r 687.5 (50 +-0.14 between pin and receptacle) and the 120 deg arc, Fig 3.2.3-1 [p37]
+receptacle_theta_deg = [2.0833, 240.0]  # [S] same figure
+pin_diameter_m = 0.0247        # [S] Fig 3.2.3.3-2 [p40] 25 -0.2/-0.4
+pin_height_m = 0.051           # [S] same 51
+pin_shaft_m = 0.04             # [S] same 40 REF, then the 90 deg tip
+receptacle_outer_m = 0.04      # [E] Fig 3.2.3-1 detail by eye, outer diameter
+seal_diameters_m = [1.273, 1.304]  # [S] Fig 3.2.3-1 [p37] dual pressure seals
+seal_height_m = 0.0021         # [S] same 2.1 max
+seal_width_m = 0.006           # [E]
+separator_theta_deg = [30.0, 62.0, 92.0, 150.0, 180.0, 210.0, 272.0, 302.0, 330.0]  # [E] the 9 designated sensor / separator areas, Fig 3.2.3-1 [p37]; the 2 and 28 deg dimensions read off, the others by eye +-3 deg
+separator_box_m = [0.015, 0.012, 0.003]  # [E] half sizes tangential, radial, height
+separator_r_m = 0.685          # [E] outer band, same figure
+tunnel_wall_m = 0.24           # [E] the tunnel from the flange to the recess floor (neck_m)
+segments = 96                  # [E] sagitta 0.4 mm at r 0.66
+ring_albedo = [0.30, 0.30, 0.31]  # [E] grey metal; D_Iss065e002827: petals lit pale on a dark mechanism
+flange_albedo = [0.10, 0.10, 0.105]  # [E] D_Iss065e002827: dark with a blanket's rough edge up to about r 0.65 (the IDD's flange is metal: the photo wins)
+hook_albedo = [0.55, 0.55, 0.56]  # [E] bare metal hooks, pins
+strut_albedo = [0.25, 0.25, 0.26]  # [E]
+
 [paint]
 capsule_albedo = [0.60, 0.60, 0.62]  # [E] white painted shell, D_CCP_Demo_2 (3), lit indoors
 shield_albedo = [0.07, 0.065, 0.06]  # [E] charred PICA-X (dark grey-brown)
@@ -86,7 +150,7 @@ band_albedo = [0.42, 0.42, 0.44]     # [E] bare aluminium band above the shield,
 cowl_albedo = [0.40, 0.40, 0.41]     # [E] grey metal bay interior, same photo
 pod_albedo = [0.05, 0.05, 0.055]     # [E] Draco ports, throats, seam lines: dark
 window_albedo = [0.03, 0.035, 0.04]  # [E] glass, same photo
-deck_albedo = [0.45, 0.45, 0.46]     # [E] neck and deck, D_Iss071e186365
+deck_albedo = [0.60, 0.60, 0.62]     # [E] white skirt, D_Iss071e186365, D_Iss065e002827: same paint as the capsule
 trunk_albedo = [0.62, 0.62, 0.64]    # [E] white trunk skin and fins, D_Crew_2_..._mate
 radiator_albedo = [0.50, 0.51, 0.53] # [E] light grey radiator panels
 array_albedo = [0.04, 0.05, 0.09]    # [E] blue-black solar cells, D_Iss072e096331

@@ -3,8 +3,8 @@
 Own rebuild from the typed tables of config/vehicles/detail/crew_dragon.toml (measured on the reference model, see there); no third-party mesh.
 Frames: each stage's body frame (X station axis, nose +X). dragon_capsule.gltf: station 0 = the heat shield's apex; nodes `heat_shield`, `band`,
 `capsule` (skin r(x, az): body of revolution + four cowl lobes, ending on the tilted seam), `superdraco_pod` (bay floors and walls), `superdraco_nozzle`,
-`draco_pod` (port slots), `window`, `hatch` (hatch panel, window flanges), `seams`, `hinge_fairing`, `deck` (rim, deck, neck with the recess), `port` (the place of
-the docking mechanism). dragon_nose.gltf: node `nose_cone` (shell + inside) and `nose_seal`, ORIGIN AT THE HINGE POINT (vertices relative to it), closed pose =
+`draco_pod` (port slots), `window`, `hatch` (hatch panel, window flanges), `seams`, `hinge_fairing`, `deck` (seat on the seam, conical skirt to the flange), `recess` (floor, well, hatch end; the mechanism itself: idss_mechanism.py).
+dragon_nose.gltf: node `nose_cone` (shell + inside) and `nose_seal`, ORIGIN AT THE HINGE POINT (vertices relative to it), closed pose =
 identity: the game rotates about the hinge axis (manifest `nose`). dragon_trunk.gltf: station 0 = the trunk's base; `trunk` (shell, fins, floor), `trunk_array`,
 `trunk_radiator`, `umbilical`. Plain surfaces. Stations of the tables count from the shield apex; the trunk file adds the stage length.
 """
@@ -238,20 +238,35 @@ def ellipse(mesh, body, x0, az0, hx, haz, lift, power=2.0, rings=4, n=28, hole=0
             mesh.face([a, b, cc, d], [ua, ub, uc, ud], out, None)
 
 
-def disc(mesh, x, az_deg, r, radius, n=16):
-    """Flat dark disc facing +X on a plane of constant x."""
-    e_r, t = vc.radial_dir(math.radians(az_deg)), tangent(math.radians(az_deg))
-    c = AXIS_X * x + e_r * r
-    pts = [c + (e_r * math.cos(2.0 * math.pi * k / n) + t * math.sin(2.0 * math.pi * k / n)) * radius for k in range(n)]
-    mesh.face(pts, [(math.cos(2.0 * math.pi * k / n), math.sin(2.0 * math.pi * k / n)) for k in range(n)], AXIS_X, None)
+def skirt_point(body, az_deg, r, lift):
+    """On the conical skirt between the flange's edge and the seat on the seam plane, at this azimuth and radius r."""
+    c = body.c
+    flange_x, flange_r = c["neck_m"][0]
+    seam_x, _ = body.seam(az_deg)
+    seat_r = body.surface(seam_x, az_deg) - c["lip_thickness_m"]  # with the cowl's lobe, as the seat is drawn
+    f = (r - flange_r) / (seat_r - flange_r)
+    return vc.pt(flange_x + (seam_x - flange_x) * f + lift, math.radians(az_deg), r)
+
+
+def skirt_patch(mesh, body, az_deg, r, half_t, half_r, lift, rings=3, n=24):
+    """A dark ellipse on the skirt: half_t along the circle, half_r across it."""
+    def p(s, k):
+        a = 2.0 * math.pi * k / n
+        along, across = half_t * s * math.cos(a), half_r * s * math.sin(a)
+        local_r = r + across
+        return skirt_point(body, az_deg + math.degrees(along / r), local_r, lift)
+    for ring in range(rings):
+        s0, s1 = ring / rings, (ring + 1) / rings
+        for k in range(n):
+            mesh.face([p(s0, k), p(s0, k + 1), p(s1, k + 1), p(s1, k)], [(0, 0), (1, 0), (1, 1), (0, 1)], AXIS_X, None)
 
 
 def build_deck(body, deck, rim, cols, nose_x_lift):
-    """Rim under the seam, flat deck, neck and the recess to the port."""
+    """The seat under the seam, then the conical skirt to the flange's edge (the flange: neck_m, DockingMechanismView's part on it)."""
     c = body.c
     ncols = len(cols)
-    lip, deck_x = c["lip_thickness_m"], c["deck_x_m"]
-    neck_r = c["neck_m"][0][1]
+    lip = c["lip_thickness_m"]
+    flange_x, neck_r = c["neck_m"][0]
     for j in range(ncols):
         (p0, a0, x0), (p1, a1, x1) = rim[j], rim[(j + 1) % ncols]
         r0, r1 = math.hypot(p0.y, p0.z), math.hypot(p1.y, p1.z)
@@ -261,12 +276,9 @@ def build_deck(body, deck, rim, cols, nose_x_lift):
         q0, q1 = vc.pt(x0 - c["seam_slope"] * lip * math.cos(az0) * 0.0, az0, r0 - lip), vc.pt(x1, az1, r1 - lip)
         uv = [(0, 0), (1, 0), (1, 1), (0, 1)]
         deck.face([p0, p1, q1, q0], uv, AXIS_X, ("seat", 0))
-        # the rim's inside down to the deck (zero height at the hinge, where the seam meets the deck)
-        d0, d1 = vc.pt(min(deck_x, x0), az0, r0 - lip), vc.pt(min(deck_x, x1), az1, r1 - lip)
-        deck.face([q0, q1, d1, d0], uv, -vc.radial_dir(mid), None)
-        # the deck, from the rim to the neck
-        n0, n1 = vc.pt(deck_x, az0, neck_r), vc.pt(deck_x, az1, neck_r)
-        deck.face([d0, d1, n1, n0], uv, AXIS_X, ("deck", 0))
+        # the skirt, from the seat to the flange's edge
+        n0, n1 = vc.pt(flange_x, az0, neck_r), vc.pt(flange_x, az1, neck_r)
+        deck.face([q0, q1, n1, n0], uv, AXIS_X + vc.radial_dir(mid) * 0.3, ("deck", 0))
 
 
 def build_capsule(spec, out):
@@ -283,10 +295,9 @@ def build_capsule(spec, out):
     rim, cols = build_skin(body, hull, floor)
     deck = vc.VMesh()
     build_deck(body, deck, rim, cols, 0.0)
-    vc.revolve(deck, [(c["neck_m"][:3], "out"), (c["neck_m"][2:4], (1.0, 0.0, 0.0)), (c["neck_m"][3:5], "in"), (c["neck_m"][4:6], (1.0, 0.0, 0.0)),
-                      (c["neck_m"][5:7], "in"), (c["neck_m"][6:8], (1.0, 0.0, 0.0))], n, 1.0, "neck")
-    port = vc.VMesh()
-    vc.revolve(port, [(c["port_cone_m"], "out"), ([tuple(c["port_cone_m"][-1]), (c["port_cone_m"][-1][0], 0.0)], (1.0, 0.0, 0.0))], n, 1.0, "port")
+    neck = c["neck_m"]
+    recess = vc.VMesh()  # below the flange and its tunnel (idss_mechanism.py): floor, well, hatch end
+    vc.revolve(recess, [(neck[2:4], (1.0, 0.0, 0.0)), (neck[3:5], "in"), (neck[4:6], (1.0, 0.0, 0.0))], n, 1.0, "recess")
     nozzles, draco, window, panel, seams = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
     for pod in cap["superdraco_lobes_deg"]:
         for side in (-1.0, 1.0):
@@ -306,14 +317,16 @@ def build_capsule(spec, out):
     seam_scale = 1.0 - c["hatch_seam_m"] / h_hx
     ellipse(seams, body, h_x, h_az, h_hx, h_haz, lift_detail, power=4.0, rings=1, n=48, hole=seam_scale)
     for az, r, radius in c["deck_holes"]:
-        disc(seams, c["neck_m"][2][0] + 0.002, az, r, radius)
+        skirt_patch(seams, body, az, r, radius, radius, lift_detail)
+    slot_az, slot_r, slot_t, slot_w = c["deck_slot"]
+    skirt_patch(seams, body, slot_az, slot_r, slot_t, slot_w, lift_detail)
     fair = vc.VMesh()
     x0, x1, r_out, width = c["hinge_fairing_m"]
     az = math.radians(c["nose_hinge_azimuth_deg"])
     r_in = body.base(0.5 * (x0 + x1)) - 0.02
     e_r = vc.radial_dir(az)
     vc.box(fair, AXIS_X * 0.5 * (x0 + x1) + e_r * 0.5 * (r_in + r_out), AXIS_X, e_r, tangent(az), (0.5 * (x1 - x0), 0.5 * (r_out - r_in), 0.5 * width))
-    parts = (("capsule", hull), ("heat_shield", shield), ("band", band), ("deck", deck), ("port", port), ("superdraco_pod", floor), ("superdraco_nozzle", nozzles),
+    parts = (("capsule", hull), ("heat_shield", shield), ("band", band), ("deck", deck), ("recess", recess), ("superdraco_pod", floor), ("superdraco_nozzle", nozzles),
              ("draco_pod", draco), ("window", window), ("hatch", panel), ("seams", seams), ("hinge_fairing", fair))
     tris = sum(m.to_object(name, root)[1] for name, m in parts)
     vc.export_selected(Path(out) / "dragon_capsule.gltf", [root])
@@ -361,7 +374,7 @@ def build_nose(spec, out):
     az = math.radians(nose["hinge_azimuth_deg"])
     e_r, t = vc.radial_dir(az), tangent(az)
     width, thick = c["hinge_arm_m"]
-    far = AXIS_X * sx2 + e_r * r0
+    far = AXIS_X * sx2 + e_r * r1  # the seal ring's outer edge: the strap clears the flange
     along = (far - hinge).normalized()
     normal = along.cross(t).normalized()
     pin = [hinge, hinge + t * (width / 2.0), hinge - t * (width / 2.0)]

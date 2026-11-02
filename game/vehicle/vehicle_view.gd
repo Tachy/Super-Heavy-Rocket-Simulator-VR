@@ -45,6 +45,7 @@ var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "push
 ## The Crew Dragon's nose cone: {"node", "nose"} (manifest nose block) or {}; the fraction (0 closed .. 1 open) eases towards the
 ## snapshot's binary nose_cone_open at 1 / open_time_s per second: a view easing, no state of the simulation.
 var _nose := {}
+var docking_mechanism: DockingMechanismView = null  # the capsule's, null on any other vehicle; rebuilt with the stage nodes
 var _nose_fraction := 0.0
 var _nose_target := 0.0
 var _nose_settled := false  # the first snapshot after a build shows the state as it is (no opening on appearing)
@@ -216,6 +217,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	_fin_nodes.clear()
 	_leg_nodes.clear()
 	_nose = {}
+	docking_mechanism = null
 	_nose_settled = false
 	var axis_rotation := Basis(Vector3.RIGHT, PI / 2.0)  # CylinderMesh +Y -> render +Z (= body +x)
 	var staged: Array[bool] = []
@@ -258,6 +260,14 @@ static func _notice_text(stages: Array) -> String:
 	return ""
 
 
+## The docking mechanism on the capsule, retracted with the hooks open until later docking visuals call its set_state.
+func _build_docking_mechanism(stage: Dictionary, stage_node: Node3D, ms: Dictionary) -> void:
+	docking_mechanism = DockingMechanismView.new()
+	docking_mechanism.name = "docking_mechanism"
+	stage_node.add_child(docking_mechanism)
+	docking_mechanism.build(ms, func(part: String) -> Material: return _hull_material(_hull_kind(part, stage, ms), ms))
+
+
 ## The Crew Dragon's nose cone on its capsule stage, hinged at the manifest's point; posed by _apply_nose.
 func _build_nose(stages: Array, stage_nodes: Array[Node3D]) -> void:
 	for i in stages.size():
@@ -275,6 +285,7 @@ func _build_nose(stages: Array, stage_nodes: Array[Node3D]) -> void:
 		stage_nodes[i].add_child(node)
 		_nose = {"node": node, "nose": ms["manifest"]["nose"]}
 		_apply_nose()
+		_build_docking_mechanism(stages[i], stage_nodes[i], ms)
 		return
 
 

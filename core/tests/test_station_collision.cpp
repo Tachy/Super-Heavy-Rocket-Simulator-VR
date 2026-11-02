@@ -42,7 +42,7 @@ TEST_CASE("Hull sample points of the Crew Dragon: trunk, tapered capsule, dockin
         if (q.x > max_x - p.ring_spacing_m) max_r_top = std::max(max_r_top, std::hypot(q.y, q.z));
     }
     REQUIRE(max_r_top > 0.0);                                // the top region holds samples (no vacuous check)
-    CHECK(max_x <= dragon.stages.front().length_m + 4.0 - p.port_clearance_m + 1e-9);  // below the docking port region (trunk length from the config, port at capsule 4.0 m)
+    CHECK(max_x <= dragon.stages.front().length_m + dragon.stages.back().docking_ports.front().position_m.x - p.port_clearance_m + 1e-9);  // below the docking port region (trunk length and port from the config)
     CHECK(max_r == Catch::Approx(2.0));                      // the 4 m heat shield
     CHECK(max_r_top < 1.5);                                  // the capsule narrows towards the top
 }

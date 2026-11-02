@@ -34,7 +34,7 @@ TEST_CASE("Port position, velocity and axes of a turning Dragon", "[iss][rendezv
     const Vec3 cg = v.mass_properties().cg_point_m();
     const double capsule_base = v.stages().back().base_station_m;  // 3.25 m: the trunk below (8.1 m - 4.85 m capsule)
     CHECK(capsule_base == Catch::Approx(3.25));
-    const Vec3 lever_body = Vec3{capsule_base + 4.0, 0.0, 0.0} - cg;
+    const Vec3 lever_body = Vec3{capsule_base + config::load_vehicle(config_dir, "crew_dragon").stages.back().docking_ports.front().position_m.x, 0.0, 0.0} - cg;
     const Vec3 lever_gcrf{-lever_body.y, lever_body.x, lever_body.z};
 
     const auto k = vehicle::port_kinematics(*dragon, "idss");

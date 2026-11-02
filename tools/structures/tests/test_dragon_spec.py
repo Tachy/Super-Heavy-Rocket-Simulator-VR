@@ -84,9 +84,9 @@ def test_nose_hinge_is_the_measured_point_and_the_axis_is_tangential():
 @pytest.mark.skipif(not (MODELS / "dragon_capsule.gltf").is_file(), reason="models not generated")
 def test_generated_sizes():
     spec = vehicle_spec.load(ID)
-    lo, hi = _bounds(MODELS / "dragon_capsule.gltf", {"capsule", "heat_shield", "band", "deck", "port", "superdraco_pod", "superdraco_nozzle", "draco_pod", "window", "hatch", "seams"})
+    lo, hi = _bounds(MODELS / "dragon_capsule.gltf", {"capsule", "heat_shield", "band", "deck", "recess", "superdraco_pod", "superdraco_nozzle", "draco_pod", "window", "hatch", "seams"})
     assert lo[0] == pytest.approx(0.0, abs=0.001)  # the shield apex is the stage's station 0
-    assert hi[0] == pytest.approx(spec["detail"]["capsule"]["port_cone_m"][-1][0], abs=0.001)  # the port cone stands highest under the nose
+    assert hi[0] == pytest.approx(spec["stages"]["capsule"]["port_position_m"][0], abs=0.015)  # the flange top, the config's port, stands highest under the nose (skirt details lie a little proud)
     assert hi[1] == pytest.approx(spec["stages"]["capsule"]["diameter_m"] / 2.0, abs=0.12)  # the pods stand proud of the 4.0 m shoulder only by a few cm
     nlo, nhi = _bounds(MODELS / "dragon_nose.gltf", {"nose_cone"})
     # relative to the hinge: the tip is `length` above it; only the hinge pin (arm thickness) reaches below the hinge point
