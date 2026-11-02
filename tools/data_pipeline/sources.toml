@@ -450,3 +450,59 @@ target = "tools/structures/measure/camera_solve.py"
 kind = "licence_only"
 license = "Apache-2.0 for OpenCV 4.5+ (BSD-3-Clause up to 4.4); the opencv-python wheel's own scripts are MIT"
 credit = "OpenCV, Copyright (C) the OpenCV Team"
+
+# Measuring references of the Falcon 9 / Crew Dragon / ISS detail models (plan 2026-11-02). None of them ships and none
+# is downloaded by fetch.py: numbers were read from their vertices or pages and drawn by us (docs/subsystems/vehicle-models.md).
+[[source]]
+id = "ref_kubaha_falcon9_crew_dragon"
+name = "Falcon 9 - Crew Dragon, by KUBAHA (measuring reference M1: stack total; does not ship)"
+url = "https://sketchfab.com/3d-models/falcon-9-crew-dragon-7cbafced513f4bec9d0a956c94a3bfd1"
+target = "config/vehicles/detail/falcon9_block5.toml"
+kind = "licence_only"
+license = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)"
+credit = "Measurements based on \"Falcon 9 - Crew Dragon\" by KUBAHA (https://sketchfab.com/KUBAHA), CC BY 4.0"
+
+[[source]]
+id = "ref_kubaha_dragon2"
+name = "SpaceX - Dragon 2, by KUBAHA (measuring reference M2: capsule, trunk, nose hinge; does not ship)"
+url = "https://sketchfab.com/3d-models/spacex-dragon-2-1b125e30a2cb442288580290536fbe5d"
+target = "config/vehicles/detail/crew_dragon.toml"
+kind = "licence_only"
+license = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)"
+credit = "Measurements based on \"SpaceX - Dragon 2\" by KUBAHA (https://sketchfab.com/KUBAHA), CC BY 4.0"
+
+[[source]]
+id = "ref_katsch_dragon2_exterior"
+name = "SpaceX Dragon 2 exterior, by Forest Katsch (measuring reference M3; does not ship)"
+url = "https://sketchfab.com/3d-models/spacex-dragon-2-exterior-2575398db20c406cab2cf72b89a9be8b"
+target = "config/vehicles/detail/crew_dragon.toml"
+kind = "licence_only"
+license = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)"
+credit = "Measurements based on \"SpaceX Dragon 2 exterior\" by Forest Katsch (https://sketchfab.com/ForestKatsch), CC BY 4.0"
+
+[[source]]
+id = "ref_katsch_falcon9_dragon2"
+name = "SpaceX Falcon 9 and Dragon 2, by Forest Katsch (measuring reference M4: first stage, legs, engine ring; does not ship)"
+url = "https://sketchfab.com/3d-models/spacex-falcon-9-and-dragon-2-f709fc945bb2413faf2878aa613cde3d"
+target = "config/vehicles/detail/falcon9_block5.toml"
+kind = "licence_only"
+license = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)"
+credit = "Measurements based on \"SpaceX Falcon 9 and Dragon 2\" by Forest Katsch (https://sketchfab.com/ForestKatsch), CC BY 4.0"
+
+[[source]]
+id = "ref_idss_idd_rev_e"
+name = "International Docking System Standard (IDSS) Interface Definition Document, Revision E, Oct 2016 (dimensions of the docking mechanism and rings; does not ship)"
+url = "https://ntrs.nasa.gov/api/citations/20170001546/downloads/20170001546.pdf"
+target = "config/vehicles/detail/crew_dragon.toml"
+kind = "licence_only"
+license = "NASA document, public (NTRS); only dimensions are used"
+credit = "IDSS Interface Definition Document Rev. E, NASA NTRS 20170001546"
+
+[[source]]
+id = "ref_nasa_iss_model_d"
+name = "International Space Station model D (IGOAL), NASA 3D Resources (measuring reference of the ISS tables; does not ship)"
+url = "https://github.com/nasa/NASA-3D-Resources"
+target = "config/vehicles/detail/iss.toml"
+kind = "licence_only"
+license = "NASA 3D Resources: free and without copyright (README); NASA media usage guidelines apply"
+credit = "International Space Station model, NASA 3D Resources"
