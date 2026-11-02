@@ -20,7 +20,10 @@ stages_bottom_to_top = ["first_stage", "second_stage"]
 id = "first_stage"
 name = "Falcon 9 Block 5 first stage"
 display_name = "Medium Launcher Stufe 1"  # [D] display name of the part flying alone, no trademark
-length_m = 41.2                          # [S:wiki_f9]
+length_m = 47.7                          # [S:wiki_f9] with the interstage (156.5 ft), from the outer Merlins' exit plane
+                                         # (station 0) to the interstage top; 41.2 m is the stage WITHOUT its ~6.5 m
+                                         # interstage (tanks and engine bay end there). A reference model's 48.4 m is its
+                                         # own scale error: not averaged in (plan 2026-11-02-falcon-dragon-iss-models, Task 3)
 diameter_m = 3.66                        # [S:wiki_f9]
 dry_mass_kg = 25000.0                    # [S:wiki_f9] 25.6 t incl. the 0.6 t of RCS nitrogen below [D] (25.0 + 0.6:
                                          # the stage's total mass unchanged by the N2 sizing)
@@ -85,7 +88,7 @@ id = "pair"                              # with the centre: the 3-engine set (bo
 engine = "merlin1d"
 count = 2
 ring_radius_m = 1.25                     # [E] octaweb ring from imagery (3.66 m core)
-angles_deg = [0.0, 180.0]
+angles_deg = [22.5, 202.5]               # [E] the opposite pair nearest the former 0 / 180; no photo shows which two fly the set
 gimbal = true
 relight = true
 
@@ -94,7 +97,8 @@ id = "ring"
 engine = "merlin1d"
 count = 6
 ring_radius_m = 1.25                     # [E]
-angles_deg = [45.0, 90.0, 135.0, 225.0, 270.0, 315.0]
+angles_deg = [67.5, 112.5, 157.5, 247.5, 292.5, 337.5]  # [E] ring at 22.5 + 45 k deg, midway between legs' clevises
+                                         # and 22.5 deg off them (F_Falcon_9_B1046, model M4; was 0 + 45 k)
 gimbal = true
 relight = false
 
@@ -104,18 +108,24 @@ ascent_drag_table = "aero/falcon9_ascent.csv"
 descent_drag_table = "aero/falcon9_descent.csv"   # tail first [D] from webcast telemetry
 
 [stage.grid_fins]
-azimuths_deg = [45.0, 135.0, 225.0, 315.0]   # [E] four fins between the legs' azimuths
+azimuths_deg = [45.0, 135.0, 225.0, 315.0]   # [E] four fins, on the LEGS' azimuths and +-45 deg off the raceway and the
+                                             # RCS packs (photos: docs/subsystems/falcon9.md "Fin and leg azimuths")
 area_m2 = 1.8                                # [E] titanium fin ~1.2 x 1.5 m frontal lattice
-station_m = 39.0                             # [E] hinge near the interstage top (stage 41.2 m)
+station_m = 43.35                            # [E] hinge on the interstage, 4.35 m below its top: reference model M4 (hinge to
+                                             # top), inside the hangar photos' bound 42.5-43.8 m (above the rivet joint at the
+                                             # tank top 41.2 m, F_ORBCOMM_2); was 39.0 on the 41.2 m stage
 radius_m = 2.6                               # [E] 1.83 m core radius + half the fin span
 max_deflection_deg = 20.0                    # [E]
 rate_deg_s = 30.0                            # [E] hydraulic (open loop) actuators
 table = "aero/grid_fin.csv"
 
 [stage.landing_legs]                         # all [E] from imagery and public figures; contact physics in c2
-azimuths_deg = [0.0, 90.0, 180.0, 270.0]
+azimuths_deg = [45.0, 135.0, 225.0, 315.0]   # [E] under the grid fins (photos: F_Landed_rockets.., F_ORBCOMM_2; was
+                                             # 0 / 90 / 180 / 270, between the fins, which no photo shows)
 footprint_radius_m = 9.0                     # span ~18 m
-foot_station_m = -1.5                        # feet below the engine bell exit when deployed
+foot_station_m = -2.1                        # [E] feet below the outer Merlins' exit plane (station 0): reference model
+                                             # M4 -2.0..-2.1 (scale-true); frame Starlink 15-25 file 1124 s: strut 37 +-3 deg
+                                             # off the axis against 38 (-2.1) / 40 deg (-1.5), weak but in favour; was -1.5
 deploy_time_s = 2.0
 stroke_m = 0.5                               # crush core
 crush_force_n = 4.0e5                        # per leg: 4 legs ~6 g on a 27 t stage
@@ -180,11 +190,11 @@ landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine chang
 [[stage.tank]]
 id = "rcs_n2"
 contents = "rcs"
-mass_kg = 600.0                              # [D] nitrogen, carved out of the 25.6 t dry mass: the full RTLS uses 441 kg
-                                             # (ascent 70 kg, flip 349 kg, coast trims and landing 22 kg), 159 kg left
-                                             # at the touchdown = 36 % margin (>= 20 % [E] required)
+mass_kg = 600.0                              # [D] nitrogen, carved out of the 25.6 t dry mass: the full RTLS uses 473 kg
+                                             # (ascent 87 kg, flip, coast trims and landing 386 kg), 127 kg left
+                                             # at the touchdown = 27 % margin (>= 20 % [E] required)
 density_kg_m3 = 250.0                        # [E] COPV gas at ~300 bar
-base_station_m = 38.0                        # [E] interstage
+base_station_m = 38.0                        # [E] COPVs at the top of the tank section, below the interstage
 
 [stage.rcs]
 type = "cold_gas"                            # nitrogen, two pods at the top
@@ -194,7 +204,9 @@ minimum_on_time_s = 0.02                     # [E] valve; on/off only, fixed thr
 
 [[stage.rcs.pod]]
 id = "pod"
-station_m = 40.0                             # [E] interstage, below the grid fins
+station_m = 41.9                             # [E] interstage, ~0.7 m above the rivet joint at the tank top, below the fin
+                                             # hinge: the thruster bump on the raceway side in F_ORBCOMM_2,
+                                             # F_Falcon_9_first_stage_in_hangar (+-0.5 m, perspective); was 40.0
 radius_m = 1.83
 azimuths_deg = [0.0, 180.0]                  # [S:ea_rcs] two packs at the top; [E] azimuths between the fins
 thrust_n = 6500.0                             # [D] rests ONLY on the measured flip time (large for cold gas: 9.5 kg/s
