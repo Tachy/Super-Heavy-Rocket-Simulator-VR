@@ -94,3 +94,36 @@ def test_manifest_of_the_generated_set():
     assert m["engines"]["merlin1d"]["exit_plane_x_m"] == pytest.approx(-spec["engines"]["merlin1d"]["bell_length_m"])
     # the outer Merlins' exit plane is station 0: the drawn gimbal point sits one bell length above it
     assert m["engines"]["merlin1d"]["axial_offset_m_by_stage"]["first_stage"] == pytest.approx(spec["engines"]["merlin1d"]["bell_length_m"])
+
+
+SECOND_STAGE_LENGTH_M = 13.8  # [S] https://en.wikipedia.org/wiki/Falcon_9
+MVAC_EXIT_DIAMETER_M = 3.3  # [S] https://en.wikipedia.org/wiki/SpaceX_Merlin infobox "Vacuum: 3.3 m"; config/engines/merlin_vacuum.toml
+
+
+def test_second_stage_spec_follows_the_config():
+    spec = vehicle_spec.load(ID)
+    s2 = spec["stages"]["second_stage"]
+    assert s2["length_m"] == pytest.approx(SECOND_STAGE_LENGTH_M) and s2["base_station_m"] == pytest.approx(STAGE_LENGTH_M)
+    assert spec["mvac"]["nozzle_exit_diameter_m"] == pytest.approx(MVAC_EXIT_DIAMETER_M)  # config = the second source
+    # the nozzle hangs inside the interstage: below the mount by its length, not through the first stage's tank section
+    detail = spec["detail"]
+    exit_station = STAGE_LENGTH_M - spec["mvac"]["bell_length_m"]
+    assert detail["hull"]["interstage_base_m"] < exit_station < STAGE_LENGTH_M
+    assert spec["mvac"]["extension_from_exit_m"] < spec["mvac"]["bell_length_m"]
+    assert spec["mvac"]["flange_radius_m"] > spec["mvac"]["top_radius_m"]
+
+
+def test_second_stage_models():
+    if not (MODELS / "falcon9_stage2.gltf").is_file():
+        pytest.skip("no generated Falcon 9 models")
+    spec = vehicle_spec.load(ID)
+    lo, hi = _bounds(MODELS / "falcon9_stage2.gltf", {"hull", "engine_plate"})
+    assert lo[0] == pytest.approx(0.0, abs=1e-3) and hi[0] == pytest.approx(SECOND_STAGE_LENGTH_M, abs=0.01)
+    assert hi[1] == pytest.approx(spec["stages"]["second_stage"]["diameter_m"] / 2.0, abs=0.2)  # pods stand a little proud
+    lo, hi = _bounds(MODELS / "mvac.gltf", {"bell"})
+    assert lo[0] == pytest.approx(-spec["mvac"]["bell_length_m"], abs=1e-3)
+    assert hi[1] == pytest.approx(MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3) and lo[1] == pytest.approx(-MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3)
+    m = json.loads((MODELS / build_models.MANIFEST).read_text(encoding="utf-8"))
+    e = m["engines"]["merlin_vacuum"]
+    assert e["exit_plane_x_m"] == pytest.approx(-spec["mvac"]["bell_length_m"]) and e["axial_offset_m_by_stage"]["second_stage"] == 0.0
+    assert e["exit_diameter_m"] == pytest.approx(MVAC_EXIT_DIAMETER_M)

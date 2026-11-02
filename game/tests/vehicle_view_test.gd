@@ -118,7 +118,18 @@ func _check_falcon9() -> void:
 	view.sync([stage_1, stage_2], [merlin, mvac], [], [fin], 0.0, snapshot_legs)
 	var node := view.get_child(0).get_node_or_null("stage_first_stage") as Node3D
 	_check(node != null and node.get_node_or_null("interstage") != null and node.get_node_or_null("octaweb") != null, "first stage: hull, interstage, octaweb nodes")
-	_check(_cylinders(view) == 1 and view.find_children("ModelNotice", "Label3D", true, false).is_empty(), "first stage modelled, no notice; the second stage keeps its cylinder")
+	_check(_cylinders(view) == 0 and view.find_children("ModelNotice", "Label3D", true, false).is_empty(), "both stages modelled, no cylinder, no notice")
+	var upper := view.get_child(0).get_node_or_null("stage_second_stage") as Node3D
+	_check(upper != null and upper.get_node_or_null("hull") != null, "second stage: hull node")
+	_check(upper != null and upper.get_node_or_null("engines_rvac") != null, "second stage: the MVac instance batch")
+	_check(upper != null and upper.transform.origin.is_equal_approx(Frames.to_render(Vector3(47.7, 0.0, 0.0))), "second stage base 47.7 m above the first stage's station 0")
+	var mvac_entry: Dictionary = models["manifest"]["engines"]["merlin_vacuum"]
+	var exit_station := 47.7 + float(mvac_entry["axial_offset_m_by_stage"].get("second_stage", 0.0)) + float(mvac_entry["exit_plane_x_m"])
+	var interstage_base := float(models["manifest"]["look"]["interstage_base_m"])
+	_check(exit_station > interstage_base and exit_station < 47.7, "MVac exit plane (station %.2f) inside the interstage (%.1f .. 47.7)" % [exit_station, interstage_base])
+	_check(_plume_top(view, 1).is_equal_approx(Frames.to_render(Vector3(exit_station, 0.0, 0.0))), "MVac plume starts at the drawn exit plane")
+	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["hull"])
+	_check(absf(mvac_bounds.y - 13.8) < 0.01, "second stage hull top at its config length, 13.8 m")
 	var fin_node := view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
 	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(Vector3.LEFT), "on the stack the fin lies folded, tip toward the base")
 	_check(_plume_top(view, 0).is_equal_approx(Frames.to_render(Vector3.ZERO)), "Merlin plume starts at the exit plane, station 0")
@@ -130,7 +141,40 @@ func _check_falcon9() -> void:
 	_check(leg != null and leg.transform.is_equal_approx(VehicleModels.leg_poses(rig, float(legs["azimuths_deg"][0]), 1.0)["main"]), "alone, deployment 1: leg posed by the rig")
 	fin_node = view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
 	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(_radial(45.0)), "alone: the fin stands out, hinge radial")
+	# Separated parts keep their own models: "<vehicle>/<stage>" ids, each stage's base is station 0 again.
+	var first_alone := stage_1.duplicate()
+	first_alone["vehicle_id"] = "falcon9_block5/first_stage"
+	var second_alone := stage_2.duplicate()
+	second_alone["vehicle_id"] = "falcon9_block5/second_stage"
+	second_alone["base_station_m"] = 0.0
+	var mvac_alone := mvac.duplicate()
+	mvac_alone["stage"] = 0
+	mvac_alone["position_m"] = Vector3.ZERO
+	var view_1 := VehicleView.new()
+	_views.append(view_1)
+	root.add_child(view_1)
+	view_1.sync([first_alone], [merlin], [], [fin], 0.0, snapshot_legs)
+	var node_1 := view_1.get_child(0).get_node_or_null("stage_first_stage") as Node3D
+	_check(node_1 != null and node_1.get_node_or_null("octaweb") != null and _cylinders(view_1) == 0, "first stage alone: its model")
+	var view_2 := VehicleView.new()
+	_views.append(view_2)
+	root.add_child(view_2)
+	view_2.sync([second_alone], [mvac_alone], [], [], 0.0, {})
+	var node_2 := view_2.get_child(0).get_node_or_null("stage_second_stage") as Node3D
+	_check(node_2 != null and node_2.get_node_or_null("hull") != null and node_2.get_node_or_null("engines_rvac") != null and _cylinders(view_2) == 0,
+			"second stage alone: hull and MVac, no cylinder, no notice (%d labels)" % view_2.find_children("ModelNotice", "Label3D", true, false).size())
 	VehicleModels.clear_cache()
+
+
+## Largest and smallest station (x) of a mesh's vertices: Vector2(min, max).
+func _bounds_x(mesh: Mesh) -> Vector2:
+	var lo := INF
+	var hi := -INF
+	for s in mesh.get_surface_count():
+		for v: Vector3 in mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+			lo = minf(lo, v.x)
+			hi = maxf(hi, v.x)
+	return Vector2(lo, hi)
 
 
 ## The model vehicles other than the Starship (Falcon 9, Crew Dragon, ISS): with no manifest, or a model set older than its

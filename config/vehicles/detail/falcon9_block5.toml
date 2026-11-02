@@ -69,3 +69,37 @@ hull_albedo = [0.82, 0.82, 0.80]       # [E] white stage, F_ORBCOMM_2, crew13 t2
 interstage_albedo = [0.04, 0.04, 0.045]  # [E] Block 5 black interstage, crew13 t2880 (40 px of 5.2 px/m: ~7.7 m band)
 octaweb_albedo = [0.05, 0.05, 0.05]    # [E] black aft cover, F_Falcon_9_B1046
 leg_albedo = [0.06, 0.06, 0.065]       # [E] dark carbon legs, Starlink 15-25 file 1124 s
+stage2_hull_albedo = [0.78, 0.78, 0.77]  # [E] white second stage, crew13 t2880 (a little greyer than the first stage: no sun-bleached paint seen)
+engine_plate_albedo = [0.03, 0.03, 0.03]  # [E] black thermal blanket at the engine section, Starlink 15-25 file 772 s
+mvac_albedo = [0.55, 0.55, 0.56]       # [E] pale grey nozzle extension in sunlight, Starlink 15-25 file 1156 s (sky-lit, not a clean sunlit view)
+exhaust_albedo = [0.45, 0.33, 0.25]    # [E] bare turbine exhaust duct, copper-grey, Starlink 15-25 files 772 / 1156 s
+
+# Second stage: a plain tank cylinder of the config's length, its base (station 0) at the engine mount; the gimbal point of the
+# Merlin Vacuum is station 0, so the drawn nozzle hangs inside the interstage below it.
+[second_stage]
+segments = 64                # [E] sagitta 2 mm at R = 1.83 m
+plate_thickness_m = 0.12     # [E] engine-section closure, not measured
+top_ring_height_m = 0.30     # [E] payload-adapter ring below the cap, Crew-13 t2880 (dark band, not measured)
+cap_rise_m = 0.25            # [E] shallow closing cap, nothing above it is part of the stage
+exhaust_radius_m = 0.12      # [E] turbine exhaust duct, Starlink 15-25 file 772 s against the 1.2 m chamber (not measured)
+exhaust_azimuth_deg = 20.0   # [E] the duct sits on one side, file 772 s (side not decidable)
+
+# Merlin Vacuum nozzle. Exit diameter: config/engines/merlin_vacuum.toml (3.3 m, agrees with https://en.wikipedia.org/wiki/SpaceX_Merlin
+# infobox "Vacuum: 3.3 m"; expansion ratio 165 gives a throat 0.257 m, consistent). Origin = gimbal point, thrust +X.
+[mvac]
+file = "mvac.gltf"           # [E] model file name
+bell_length_m = 3.4          # [E] gimbal point to exit rim: extension 2.7 m [S] (https://en.wikipedia.org/wiki/SpaceX_Merlin, the original
+                             # niobium extension; the later one is shorter, no length published) + 0.7 m of regenerative bell above it;
+                             # F_Merlin_nozzle: cone height 1.08 x the exit diameter = 3.6 m (+-0.4 m, perspective)
+extension_from_exit_m = 2.7  # [S] same page
+top_radius_m = 0.69          # [E] F_Merlin_nozzle: mounting flange 0.42 x the exit width = 1.39 m diameter
+contour_exponent = 0.84      # [E] F_Merlin_nozzle: width at half the height 0.56 of the way from top to exit width, a near-cone
+chamber_radius_m = 0.40      # [E] regenerative bell where it meets the gimbal, hidden in the stage's engine section
+flange_radius_m = 0.76       # [E] F_Merlin_nozzle
+flange_height_m = 0.07       # [E] F_Merlin_nozzle
+wall_m = 0.010               # [E] not measured
+mount_height_m = 0.5         # [E] housing above the gimbal point, inside the stage
+mount_radius_m = 0.42        # [E] same
+duct_start_from_exit_m = 2.4  # [E] turbine exhaust duct along the extension: from here
+duct_end_from_exit_m = 0.9   # [E] to here
+segments = 48                # [E] sagitta 2.8 mm at the 1.65 m rim

@@ -192,7 +192,12 @@ FALCON9_DETAIL_KEYS = {
     "leg": ("hinge_station_m", "hinge_radius_m", "stowed_tip_radius_m", "stowed_outer_radius_m", "stowed_thickness_m",
             "root_width_m", "tip_width_m", "tip_depth_m", "pad_radius_m", "pad_thickness_m", "pusher_anchor_station_m",
             "pusher_anchor_radius_m", "pusher_leg_u_m", "pusher_radius_m"),
-    "paint": ("hull_albedo", "interstage_albedo", "octaweb_albedo", "leg_albedo"),
+    "paint": ("hull_albedo", "interstage_albedo", "octaweb_albedo", "leg_albedo", "stage2_hull_albedo", "engine_plate_albedo",
+              "exhaust_albedo", "mvac_albedo"),
+    "second_stage": ("segments", "plate_thickness_m", "top_ring_height_m", "cap_rise_m", "exhaust_radius_m", "exhaust_azimuth_deg"),
+    "mvac": ("file", "bell_length_m", "extension_from_exit_m", "top_radius_m", "contour_exponent", "chamber_radius_m",
+             "flange_radius_m", "flange_height_m", "wall_m", "mount_height_m", "mount_radius_m", "duct_start_from_exit_m",
+             "duct_end_from_exit_m", "segments"),
 }
 
 
@@ -219,8 +224,8 @@ def falcon9_leg(legs: dict, leg: dict) -> dict:
 
 
 def load_falcon9(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
-    """First stage of the Falcon 9: the physics numbers its generators draw on + the detail file (the second stage comes
-    with its own generators)."""
+    """The Falcon 9's stages: the physics numbers its generators draw on + the detail file. `stages.second_stage` and
+    `mvac` (the Merlin Vacuum's exit diameter from its engine file, bell numbers from the detail file) serve the second stage."""
     with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
         vehicle = tomllib.load(f)
     with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:
@@ -236,8 +241,14 @@ def load_falcon9(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Pa
             eng = tomllib.load(f)
         engine_spec[eid] = {"nozzle_exit_diameter_m": float(eng["performance"]["nozzle_exit_diameter_m"]),
                             **detail["engines"][eid]}
-    return {"vehicle_id": vehicle_id, "stages": {"first_stage": stage}, "engines": engine_spec, "detail": detail,
-            "leg": falcon9_leg(s["landing_legs"], detail["leg"])}
+    s2 = next(st for st in vehicle["stage"] if st["id"] == "second_stage")
+    with open(engines_dir / "merlin_vacuum.toml", "rb") as f:
+        mvac_engine = tomllib.load(f)
+    mvac = {"nozzle_exit_diameter_m": float(mvac_engine["performance"]["nozzle_exit_diameter_m"]), **detail["mvac"]}
+    second = {"length_m": float(s2["length_m"]), "diameter_m": float(s2["diameter_m"]), "base_station_m": stage["length_m"],
+              "rcs_pods": s2["rcs"]["pod"]}
+    return {"vehicle_id": vehicle_id, "stages": {"first_stage": stage, "second_stage": second}, "engines": engine_spec,
+            "detail": detail, "leg": falcon9_leg(s["landing_legs"], detail["leg"]), "mvac": mvac}
 
 
 def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:

@@ -183,14 +183,25 @@ def falcon9_manifest(spec: dict, digest: str, version: str, triangles: dict, tab
     engines = {eid: {"file": e["file"], "exit_plane_x_m": -e["bell_length_m"], "exit_diameter_m": e["nozzle_exit_diameter_m"],
                      "axial_offset_m_by_stage": {"first_stage": e["bell_length_m"]}}
                for eid, e in sorted(spec["engines"].items())}
+    # The Merlin Vacuum's gimbal point IS the second stage's station 0 (no offset); its bell hangs inside the interstage.
+    mvac = spec["mvac"]
+    engines["merlin_vacuum"] = {"file": mvac["file"], "exit_plane_x_m": -mvac["bell_length_m"],
+                                "exit_diameter_m": mvac["nozzle_exit_diameter_m"], "axial_offset_m_by_stage": {"second_stage": 0.0}}
     paint = detail["paint"]
-    look = {"no_maps": True, "engine_ids": {"sea_level": "merlin1d"},
+    look = {"no_maps": True, "engine_ids": {"sea_level": "merlin1d", "vacuum": "merlin_vacuum"},
+            "interstage_base_m": detail["hull"]["interstage_base_m"], "plume_start_at_exit_diameter": True,
             "fin_stow_standoff_m": fin["stow_standoff_m"],
-            "part_materials": {"hull": "paint_hull", "interstage": "paint_interstage", "octaweb": "paint_octaweb"},
+            "part_materials": {"hull": "paint_hull", "interstage": "paint_interstage", "octaweb": "paint_octaweb",
+                               "engine_plate": "paint_engine_plate"},
+            "stage_part_materials": {"second_stage": {"hull": "paint_hull2"}},
             "paint": {"paint_hull": {"albedo": paint["hull_albedo"], "roughness": 0.45, "metallic": 0.0},
                       "paint_interstage": {"albedo": paint["interstage_albedo"], "roughness": 0.6, "metallic": 0.0},
                       "paint_octaweb": {"albedo": paint["octaweb_albedo"], "roughness": 0.7, "metallic": 0.1},
-                      "paint_leg": {"albedo": paint["leg_albedo"], "roughness": 0.6, "metallic": 0.1}}}
+                      "paint_leg": {"albedo": paint["leg_albedo"], "roughness": 0.6, "metallic": 0.1},
+                      "paint_hull2": {"albedo": paint["stage2_hull_albedo"], "roughness": 0.5, "metallic": 0.0},
+                      "paint_engine_plate": {"albedo": paint["engine_plate_albedo"], "roughness": 0.8, "metallic": 0.0}},
+            "engine_look": {"vacuum": {"albedo": paint["mvac_albedo"], "roughness": 0.55, "metallic": 0.35,
+                                       "rib_slope": 0.0, "rib_top_x_m": -0.1}}}
     return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
             "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": {}, "engines": engines, "look": look, "leg": spec["leg"],
             "leg_foot_deployed_m": {"station": legs["foot_station_m"], "radius": legs["footprint_radius_m"]}}

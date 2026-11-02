@@ -146,8 +146,8 @@ nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 60 km
 boostback_engine_groups = ["center", "pair"]  # [E] the 3-engine set (thrust on the axis)
 flip_engine_groups = []                      # [S: SpaceX webcasts] the flip after separation on the nitrogen thrusters,
                                              # engines off until the boostback
-flip_duration_s = 13.6                       # [D] MECO planning: separation -> boostback ignition as flown on our full
-                                             # RTLS (13.6 s) with the RCS sized below; measured 13 / 14 / 14 s
+flip_duration_s = 13.6                       # [D] MECO planning: separation -> boostback ignition; flown on our full RTLS 13.9 s
+                                             # (13.6 s on the former 41.2 m stage), inside the mean +-0.6 s; measured 13 / 14 / 14 s
                                              # [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s
 boostback_loss_fraction = 0.13               # [D] MECO planning: identified on our full RTLS (12.1 t at the landing-burn
                                              # ignition for 12.1 t planned; 0.19 with the former 50 s flip)
@@ -167,7 +167,7 @@ landing_gimbal_fraction = 0.45               # [E] planned share of the 5 deg gi
                                              # and drone ship; default 0.3 is Super Heavy's catch campaign). Reach: the
                                              # drone-ship MECO seed 117 needs >= 0.40 (0.30 ditches, 0.35 fails 3
                                              # re-plans). Authority: at 0.45 the lateral command in the last 10 s uses
-                                             # <= 0.50 of the whole gimbal in 62 of 63 Falcon 9 campaign cases (seed 117
+                                             # <= 0.50 of the whole gimbal in 62 of 63 Falcon 9 campaign cases (counted on the 41.2 m stage; 47.7 m: docs/subsystems/falcon9.md; seed 117
                                              # 1.06: unmodelled cross-flow at 400 m). The derivation leaves a band
                                              # 0.40-0.45; 0.45 is chosen from it - docs/subsystems.md, Task 2b
 landing_fresh_trust_region_weight = 0.3      # [E] SCvx weight of fresh plans (re-plans keep 0.1). Replay of the first deck
@@ -221,10 +221,11 @@ thrust_n = 6500.0                             # [D] rests ONLY on the measured f
                                               # N2 each): no source gives or bounds the thrust (SpaceX, Wikipedia, spec
                                               # sheets: "nitrogen cold gas thrusters" only). Sized on the existing flip
                                               # controller and the 15 deg boostback gate so that separation -> boostback
-                                              # is the measured 13.7 s mean (flown 13.6 s; 450 N [E] before: 53 s).
-                                              # Pitch at the separation: one pack's two inward thrusters, 13 kN at
-                                              # 28.5 m = 3.71e5 Nm on 1.01e7 kg m2 (~17 s bang-bang alone; the aero
-                                              # moment carries a large share of the 13.6 s turn)
+                                              # is the measured 13.7 s mean (flown 13.6 s on the former 41.2 m stage, 13.9 s on 47.7 m; 450 N [E] before: 53 s).
+                                              # Pitch at the separation (worked out on the 41.2 m stage, not
+                                              # recomputed for 47.7 m, pod now at 41.9 m): one pack's two inward thrusters,
+                                              # 13 kN at 28.5 m = 3.71e5 Nm on 1.01e7 kg m2 (~17 s bang-bang alone; the aero
+                                              # moment carries a large share of the turn)
 directions = ["tangential_plus", "tangential_minus", "inward", "inward"]  # [S:ea_rcs] 4 per pack
 
 [[stage]]

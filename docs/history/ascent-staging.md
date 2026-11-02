@@ -762,3 +762,8 @@ Diagnosis first (gate: the candidate fix chooses between two contradicting sourc
     [legs],[rcs],[dragon],[propulsion],[config]"` (slow included) 301/301 passed before the recalibration and the
     allowance change; after them with `[iss]` added 452/452.
 
+
+## Falcon 9 flip on the 41.2 m stage (superseded by the 47.7 m stage, plan 2026-11-02 Task 3)
+Full RTLS: flip 13.6 s flown (planned 13.6 s), N2 used 441 kg (ascent 70, flip 349, trims and landing 22), 159 kg left = 36 % margin.
+One pack's two inward thrusters: 13 kN at 28.5 m from the CG = 3.71e5 Nm on a pitch inertia 1.01e7 kg m2 (0.037 rad/s2). On the
+47.7 m stage: 13.9 s, 473 kg used (ascent 87), 127 kg left = 27 %.

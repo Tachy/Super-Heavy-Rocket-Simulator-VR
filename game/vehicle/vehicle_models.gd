@@ -15,12 +15,12 @@ const MANIFEST := "manifest.json"
 ## (tools/structures/blender/ scripts and tools/structures/ bakers); keep in step with generators.toml.
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
-	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "merlin"],
+	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
 	"crew_dragon": [], "iss": [],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
-	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "gen_engine.py"],
+	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
 	"crew_dragon": [], "iss": [],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": []}
@@ -123,11 +123,11 @@ static func _load(vehicle_id: String) -> Dictionary:
 	if vehicle_id == "falcon9_block5":
 		return {
 			"manifest": manifest,
-			"hulls": {"first_stage": parts["falcon9_stage1"]},
+			"hulls": {"first_stage": parts["falcon9_stage1"], "second_stage": parts["falcon9_stage2"]},
 			"flap": {},
 			"grid_fin": parts["falcon9_grid_fin"],
 			"leg": parts["falcon9_leg"],
-			"engine": {false: _merged(parts["merlin"])},
+			"engine": {false: _merged(parts["merlin"]), true: _merged(parts["mvac"])},
 			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 		}
 	for engine_file: String in ["raptor", "rvac"]:
@@ -228,6 +228,11 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 ## Bell material of one engine kind: ribs map (one rib, mipmapped, baked here: a plain 1D profile), dark per ENGINE_LOOK.
 static func engine_material(vacuum: bool, models: Dictionary) -> ShaderMaterial:
 	var look: Dictionary = ENGINE_LOOK[vacuum]
+	var override: Dictionary = models["manifest"].get("look", {}).get("engine_look", {}).get("vacuum" if vacuum else "sea_level", {})
+	if not override.is_empty():  # a vehicle with its own engine look (the Falcon 9's Merlin Vacuum): the manifest's numbers
+		var a: Array = override["albedo"]
+		look = {"albedo": Color(a[0], a[1], a[2]), "roughness": override["roughness"], "metallic": override["metallic"],
+				"rib_slope": override["rib_slope"], "rib_top_x_m": override["rib_top_x_m"]}
 	var m := ShaderMaterial.new()
 	m.shader = ENGINE_SHADER
 	m.set_shader_parameter("albedo", look["albedo"])

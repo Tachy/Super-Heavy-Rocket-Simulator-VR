@@ -51,6 +51,9 @@ func _hull_material(kind: String) -> Material:
 ## "ship" / "booster" for a stage's hull node (they carry the steel map), "steel" for every other part.
 func _hull_kind(part: String, stage: Dictionary) -> String:
 	var part_materials: Dictionary = _models["manifest"].get("look", {}).get("part_materials", {})
+	var own: Dictionary = _models["manifest"].get("look", {}).get("stage_part_materials", {}).get(stage["id"], {})
+	if own.has(part):  # a part drawn differently on this stage (the Falcon 9's white second stage hull)
+		return own[part]
 	if part_materials.has(part):
 		return part_materials[part]
 	if part == "fin_fairings":
@@ -375,6 +378,10 @@ func _update_plumes(engines: Array, altitude_m: float) -> void:
 		var cone := plume.mesh as CylinderMesh
 		cone.height = length
 		cone.top_radius = 0.6 if not engine["vacuum"] else 1.1
+		if engine["vacuum"] and not _models.is_empty() and _models["manifest"].get("look", {}).get("plume_start_at_exit_diameter", false):
+			var rim: Dictionary = _models["manifest"]["engines"].get(VehicleModels.engine_id(_models, true), {})
+			if rim.has("exit_diameter_m"):
+				cone.top_radius = 0.5 * float(rim["exit_diameter_m"])  # the plume leaves the rim of the bell
 		cone.bottom_radius = (1.0 + 6.0 * expansion) * (1.6 if engine["vacuum"] else 1.0)
 		# Exhaust leaves opposite to the thrust direction, starting at the DRAWN nozzle exit: the model's exit plane below
 		# the drawn gimbal point (manifest; Raptor 2.1 m, RVac 3.6 m), ~3 m for the cylinders.

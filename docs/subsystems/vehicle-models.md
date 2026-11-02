@@ -44,7 +44,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
 - `VehicleModels.load_for(vehicle_id)` -> `{}` (cylinders, one log line) unless the vehicle is in `MODEL_VEHICLE_IDS`
   (`starship_block3`, `falcon9_block5`, `crew_dragon`, `iss`), the manifest and all glTFs of its `MODEL_FILES` entry exist and
   are newer than the detail file, the vehicle config and its `SOURCE_SCRIPTS` / `SOURCE_BAKERS`. Result cached per run. The
-  Falcon 9, Crew Dragon and ISS have empty file lists until their generators exist (plan 2026-11-02): a fresh manifest
+  Crew Dragon and ISS have empty file lists until their generators exist (plan 2026-11-02): a fresh manifest
   without files, a missing or a stale one all give `{}` + one log line + cylinders (reason "missing" / "stale": the German
   notice is shown). Tests count lines (`VehicleModels.log_count`) and run on a scratch repo folder (`root_override`).
 - Pipeline for several vehicles: `tools/structures/blender/generators.toml` lists per vehicle the `kind` (`starship`: the
@@ -77,10 +77,23 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   angle to the angle that puts its tip on the config's foot; the leg's length (8.68 m) follows from hinge and foot. The pusher runs from the hull ring to 5.5 m along the leg and is scaled along
   its axis (1.4 to 8 m): the real part telescopes, ours stretches. Manifest `leg`, `leg_foot_deployed_m`.
 - Fins fold by a view rule: `fin_stowed_transform` while another stage stands on the fin's stage. The physics has no fold; on separation the fin snaps out.
-- Engines: manifest `look.engine_ids`, `axial_offset_m_by_stage`; a kind without a model (Merlin Vacuum) keeps the former plume start. The second stage stays a cylinder until Task 4.
+- Engines: manifest `look.engine_ids`, `axial_offset_m_by_stage`; the Merlin Vacuum has its own (`merlin_vacuum`, `vacuum` id).
 - The manifest's age is judged against the physics config: after any edit of `falcon9_block5.toml`, even a comment, the set counts as
   stale (cylinders and the notice) until `python tools/structures/build_models.py --vehicle falcon9_block5` has run.
 - Checks: `tools/structures/tests/test_falcon9_spec.py`, `vehicle_view_test.gd` `_check_falcon9` (needs the generated set). Shots: `vehicle_look_shots.gd --legs=<d>`.
+
+### Second stage and stack (Task 4)
+- `falcon9_second_stage.py` writes `falcon9_stage2.gltf` (`hull`: plain lathe from the engine mount to the closing cap at 13.8 m, white;
+  `engine_plate`: black closure at station 0 and the adapter ring below the cap; RCS bumps at the config's pods) and `mvac.gltf`
+  (root `mvac`: `bell`, `housing`, `duct`). Triangles 536 / 3,840. Stage `second_stage` has its own part material (`stage_part_materials`).
+- Station 0 of the second stage = the Merlin Vacuum's gimbal point (physics and drawing agree, offset 0). The nozzle hangs 3.4 m below it
+  (manifest `exit_plane_x_m` -3.4, the plume starts there with the rim's radius): exit station 44.3 m of the stack, inside the interstage
+  (41.2 .. 47.7 m), tested. The stack's second stage base is the first stage's length, 47.7 m.
+- Nozzle: exit diameter 3.3 m = config = Wikipedia infobox; gimbal-to-exit 3.4 m [E] (extension 2.7 m [S, the original nozzle; a shorter
+  one flies now, no published length] + 0.7 m regenerative bell; photo `F_Merlin_nozzle`: cone height 1.08 x the exit diameter = 3.6 m +-0.4 m,
+  perspective); top radius 0.69 m and contour exponent 0.84 from the same photo. Not drawn: thermal blankets, the turbine exhaust's real
+  routing (one straight duct), the corrugated wall seams; the real stage's skirt shape at the engine section is not measured (plain).
+- Separation: `<vehicle>/<stage>` ids keep both parts' models (tested, stack, first stage alone, second stage alone).
 
 ## Steel map (`tools/structures/hull_textures.py` -> `data/models/starship_block3/hull_steel.png`)
 - Baked by the driver (numpy, no Blender), procedural from the detail file's `[hull]` numbers (ring pitch, weld height / half
