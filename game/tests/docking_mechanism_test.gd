@@ -21,12 +21,12 @@ func _initialize() -> void:
 	root.add_child(_view)
 	_view.build(models, func(_part: String) -> Material: return null)
 	var idss: Dictionary = models["manifest"]["idss"]
-	_check_port(idss)
-	_check_retracted_inside_nose(idss)
-	_check_extension(idss)
-	_check_hooks(idss)
-	_check_pins(idss)
-	_check_struts(idss)
+	_check(_check_port(idss) == true, "check_port ran to its end (an aborted check is a failure)")
+	_check(_check_retracted_inside_nose(idss) == true, "check_retracted_inside_nose ran to its end (an aborted check is a failure)")
+	_check(_check_extension(idss) == true, "check_extension ran to its end (an aborted check is a failure)")
+	_check(_check_hooks(idss) == true, "check_hooks ran to its end (an aborted check is a failure)")
+	_check(_check_pins(idss) == true, "check_pins ran to its end (an aborted check is a failure)")
+	_check(_check_struts(idss) == true, "check_struts ran to its end (an aborted check is a failure)")
 	_view.free()
 	print("DOCKING MECHANISM TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
@@ -40,12 +40,13 @@ func _check(ok: bool, what: String) -> void:
 		print("ok: ", what)
 
 
-func _check_port(idss: Dictionary) -> void:
+func _check_port(idss: Dictionary) -> bool:
 	_check(is_equal_approx(_view.position.x, float(idss["port_position_m"][0])), "the view's origin lies on the config's port (%.3f); test_idss_view_values.cpp, test_dragon_spec.py: on the drawn flange" % _view.position.x)
+	return true
 
 
 ## Every vertex of every part, retracted with hooks open and closed: inside the closed nose's inner surface and the seal ring, above the recess floor, inside the tunnel below the flange.
-func _check_retracted_inside_nose(capsule: Dictionary) -> void:
+func _check_retracted_inside_nose(capsule: Dictionary) -> bool:
 	_view.set_state(0.0, Vector2.ZERO, 0.0)
 	var worst := INF
 	var worst_where := ""
@@ -64,6 +65,7 @@ func _check_retracted_inside_nose(capsule: Dictionary) -> void:
 	for i in _view.strut_count():
 		lowest = minf(lowest, _view.strut_base_m(i).x)
 	_check(is_equal_approx(lowest, float(capsule["strut_base_x_m"])), "struts stand on the recess floor (%.3f m below the port)" % -lowest)
+	return true
 
 
 func _to_view(node: Node3D) -> Transform3D:
@@ -89,7 +91,7 @@ func _nose_clearance(p: Vector3, capsule: Dictionary) -> float:
 	return minf(minf(float(seal[1]), cone_r) - r, float(cone[-1][0]) - p.x)
 
 
-func _check_extension(idss: Dictionary) -> void:
+func _check_extension(idss: Dictionary) -> bool:
 	var full := float(idss["ring_extension_m"])
 	_view.set_state(full, Vector2.ZERO, 0.0)
 	_check(absf(_view.ring_plane_x_m() - full) <= RING_TOLERANCE_M, "full extension: ring plane %.4f m above the port (physics %.3f)" % [_view.ring_plane_x_m(), full])
@@ -102,6 +104,7 @@ func _check_extension(idss: Dictionary) -> void:
 	var direction: Vector3 = _view.transform.basis * (petal.basis * Vector3(0.0, 1.0, 0.0))
 	var expected := _direction(idss, float(idss["petal_theta_deg"][0]))
 	_check(direction.distance_to(expected) < 1e-5, "petal 0 at the IDD's angle")
+	return true
 
 
 func _direction(idss: Dictionary, theta: float) -> Vector3:
@@ -112,7 +115,7 @@ func _direction(idss: Dictionary, theta: float) -> Vector3:
 
 
 ## 12 hooks at theta 15 + 30 k, radius 663.5; closing moves the leading edge from the IDD's open to its closed station; never above the 18 mm envelope.
-func _check_hooks(idss: Dictionary) -> void:
+func _check_hooks(idss: Dictionary) -> bool:
 	var count := 0
 	var worst_hook := 0.0
 	for k in 12:
@@ -144,18 +147,20 @@ func _check_hooks(idss: Dictionary) -> void:
 		_check(absf(edge - want) < 0.0015, "hook at %.0f: leading edge %.4f m from the latch centre (IDD %.4f)" % [f, edge, want])
 		_check(top <= 0.018 + 1e-4, "hook at %.0f: top %.4f m above the HCS plane, IDD envelope 0.018" % [f, top])
 		_check(top >= 0.0160, "hook at %.0f: top near the IDD's 17.5-17.8 mm" % f)
+	return true
 
 
-func _check_pins(idss: Dictionary) -> void:
+func _check_pins(idss: Dictionary) -> bool:
 	var r0 := 0.5 * float(idss["pin_circle_diameter_m"])
 	for i in 2:
 		var pin := _view.get_node("guide_pin_%d" % i) as Node3D
 		var e := _direction(idss, float(idss["pin_theta_deg"][i]))
 		_check(pin.position.distance_to(e * r0) < 1e-5, "guide pin %d on the 1375 mm circle at theta %.2f" % [i, float(idss["pin_theta_deg"][i])])
+	return true
 
 
 ## The struts reach the ring at every state: retracted, full, the 4 deg envelope and the ring's 6 deg range; the three tubes keep overlapping.
-func _check_struts(idss: Dictionary) -> void:
+func _check_struts(idss: Dictionary) -> bool:
 	var full := float(idss["ring_extension_m"])
 	var limit := deg_to_rad(float(idss["ring_tilt_max_deg"]))
 	var tube := float(idss["strut_tube_length_m"])
@@ -180,3 +185,5 @@ func _check_struts(idss: Dictionary) -> void:
 	var ring := _view.get_node("ring") as Node3D
 	var tilted := rad_to_deg((ring.basis * Vector3.RIGHT).angle_to(Vector3.RIGHT))
 	_check(absf(tilted - TILT_LIMIT_DEG) < 1e-3, "the tilt command is the ring's tilt (%.2f deg)" % tilted)
+	return true
+

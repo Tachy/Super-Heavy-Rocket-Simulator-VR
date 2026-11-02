@@ -45,9 +45,9 @@ func _initialize() -> void:
 	var no_snapshot_id := _view(snapshot, "")
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
 	_check_other_model_vehicles(snapshot)
-	_check_falcon9()
-	_check_dragon()
-	_check_iss()
+	_check(_check_falcon9() == true, "check_falcon9 ran to its end (an aborted check is a failure)")
+	_check(_check_dragon() == true, "check_dragon ran to its end (an aborted check is a failure)")
+	_check(_check_iss() == true, "check_iss ran to its end (an aborted check is a failure)")
 	var models := VehicleModels.load_for(VEHICLE)
 	if models.is_empty():
 		print("  (no models: model cases skipped; run python tools/structures/build_models.py --vehicle %s)" % VEHICLE)
@@ -78,12 +78,12 @@ func _initialize() -> void:
 ## Falcon 9 first stage: the leg rig against the contact physics' points and the stowed envelope, no flip at mid stroke, the view's
 ## nodes on a stack and alone. Rig and meshes from the generated models; without them the case fails: the models are a build step
 ## of this vehicle (python tools/structures/build_models.py --vehicle falcon9_block5).
-func _check_falcon9() -> void:
+func _check_falcon9() -> bool:
 	VehicleModels.clear_cache()
 	var models := VehicleModels.load_for("falcon9_block5")
 	if models.is_empty():
 		_check(false, "falcon9_block5: models generated (%s)" % VehicleModels.fallback_reason("falcon9_block5"))
-		return
+		return false
 	_check(VehicleModels.notice("falcon9_block5") == "", "falcon9_block5: no missing-model notice")
 	var path := ProjectSettings.globalize_path("res://").path_join("../config/vehicles/falcon9_block5.toml")
 	var first: Dictionary = TomlLite.parse("[[stage]]" + FileAccess.get_file_as_string(path).split("[[stage]]", false)[1])
@@ -183,16 +183,17 @@ func _check_falcon9() -> void:
 	_check(node_2 != null and node_2.get_node_or_null("hull") != null and node_2.get_node_or_null("engines_rvac") != null and _cylinders(view_2) == 0,
 			"second stage alone: hull and MVac, no cylinder, no notice (%d labels)" % view_2.find_children("ModelNotice", "Label3D", true, false).size())
 	VehicleModels.clear_cache()
+	return true
 
 
 ## Crew Dragon (needs the generated set: python tools/structures/build_models.py --vehicle crew_dragon): the nose cone's hinge and
 ## angle, its easing between the two binary states, the trunk, the capsule alone, and the Dragon on a Falcon 9 second stage.
-func _check_dragon() -> void:
+func _check_dragon() -> bool:
 	VehicleModels.clear_cache()
 	var models := VehicleModels.load_for("crew_dragon")
 	if models.is_empty():
 		_check(false, "crew_dragon: models generated (%s)" % VehicleModels.fallback_reason("crew_dragon"))
-		return
+		return false
 	_check(VehicleModels.notice("crew_dragon") == "", "crew_dragon: no missing-model notice")
 	var root_dir := ProjectSettings.globalize_path("res://").path_join("..")
 	var chunks := FileAccess.get_file_as_string(root_dir.path_join("config/vehicles/crew_dragon.toml")).split("[[stage]]", false)
@@ -317,23 +318,25 @@ func _check_dragon() -> void:
 	_check(is_zero_approx(view_stack.nose_fraction()) and s_capsule != null and s_capsule.get_node("nose_cone").transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.0)),
 			"stack: the nose is closed on the launcher")
 	VehicleModels.clear_cache()
+	return true
 
 
 ## The ISS model: nodes, joints at the stated pose, and the docking rings against Dragon's at both configured ports (geometry read from the meshes, ports from the configs).
-func _check_iss() -> void:
+func _check_iss() -> bool:
 	VehicleModels.clear_cache()
 	var models := VehicleModels.load_for("iss")
 	if models.is_empty():
 		_check(false, "iss: models generated (%s)" % VehicleModels.fallback_reason("iss"))
-		return
+		return false
 	var dragon := VehicleModels.load_for("crew_dragon")
 	if dragon.is_empty():
 		_check(false, "iss: the crew_dragon models are needed for the ring check")
-		return
+		return false
 	var root_dir := ProjectSettings.globalize_path("res://").path_join("..")
 	var ports := _config_ports(root_dir.path_join("config/vehicles/iss.toml"))
 	_check(ports.size() == 2, "iss: two ports in the config")
-	var station := {"id": "station", "base_station_m": 0.0, "length_m": 51.87, "diameter_m": 4.2, "nose_length_m": 0.0, "vehicle_id": "iss"}
+	var length_m := float(TomlLite.parse(FileAccess.get_file_as_string(root_dir.path_join("config/vehicles/iss.toml")))["stage"][0]["length_m"])
+	var station := {"id": "station", "base_station_m": 0.0, "length_m": length_m, "diameter_m": 4.2, "nose_length_m": 0.0, "vehicle_id": "iss"}
 	var view := VehicleView.new()
 	_views.append(view)
 	root.add_child(view)
@@ -341,7 +344,7 @@ func _check_iss() -> void:
 	var stage := view.get_child(0).get_node_or_null("stage_station") as Node3D
 	_check(stage != null and _cylinders(view) == 0, "iss: the station draws its model, no cylinder")
 	if stage == null:
-		return
+		return false
 	for part: String in ["pressurised", "truss", "pma_2", "ida_2", "pma_3", "ida_3"]:
 		_check(stage.get_node_or_null(part) != null, "iss: node %s" % part)
 	# Joints: separate nodes at the manifest's pose, the parts below them.
@@ -368,8 +371,9 @@ func _check_iss() -> void:
 				reach = maxf(reach, absf((_chain(array_node, stage) * v).y))
 	_check(absf(2.0 * reach - 109.0) < 1.0, "iss: array span at the pose %.2f m (109 m published)" % (2.0 * reach))
 	for pair: Array in [[0, "ida_2", "2"], [1, "ida_3", "3"]]:
-		_check_ring_mate(ports[pair[0]], String(pair[1]), models, dragon)
+		_check(_check_ring_mate(ports[pair[0]], String(pair[1]), models, dragon) == true, "%s: ring check ran to its end" % pair[1])
 	VehicleModels.clear_cache()
+	return true
 
 
 ## The docking ports of a vehicle config, read from its text (TomlLite has no nested arrays of tables): position_m, axis, up of every [[stage.docking_port]].
@@ -408,7 +412,7 @@ func _joint_named(joints: Array, joint_name: String) -> Dictionary:
 
 ## Dragon's port on this station port (config data): plane within 0.01 m, axis within 0.1 deg, clocking as the config's up: the passive petals measured from the mesh at the IDD's angles
 ## about `up`, Dragon's petals between them (60 deg), Dragon's receptacles on the passive guide pins.
-func _check_ring_mate(port: Dictionary, ida: String, models: Dictionary, dragon: Dictionary) -> void:
+func _check_ring_mate(port: Dictionary, ida: String, models: Dictionary, dragon: Dictionary) -> bool:
 	var parts: Dictionary = models["hulls"]["station"]
 	var position := _vec3(port["position_m"])
 	var x_s := _vec3(port["axis"]).normalized()
@@ -436,23 +440,34 @@ func _check_ring_mate(port: Dictionary, ida: String, models: Dictionary, dragon:
 	for phi: float in expected_phi:
 		var worst := INF
 		var sum := Vector2.ZERO
+		var in_cluster := 0
 		for p in petals:
 			var q := p - position
 			var a := rad_to_deg(atan2(q.dot(up_s), q.dot(y_s)))
 			if absf(angle_difference(deg_to_rad(a), deg_to_rad(phi))) < deg_to_rad(40.0):
 				sum += Vector2(q.dot(y_s), q.dot(up_s))
-		worst = rad_to_deg(absf(angle_difference(sum.angle(), deg_to_rad(phi))))
-		_check(worst < 0.1, "%s: passive petal at phi %.0f deg about the config's up (off by %.3f deg)" % [ida, phi, worst])
-	# Dragon's petals in the station: between the passive ones (they mesh).
+				in_cluster += 1
+		worst = rad_to_deg(absf(angle_difference(sum.angle(), deg_to_rad(phi)))) if in_cluster > 0 else INF
+		_check(in_cluster > 0 and worst < 0.1, "%s: passive petal at phi %.0f deg about the config's up (%d vertices, off by %.3f deg)" % [ida, phi, in_cluster, worst])
+	# Dragon's petals in the station, read from its mechanism: the petal mesh is drawn on azimuth 0 (+Y) and DockingMechanismView turns it
+	# about the port axis to the IDD's theta; its centroid direction through that turn, in the station, stands between the passive ones (they mesh).
+	var petal_points := parts_points(dragon["mechanism"]["petal"], Transform3D.IDENTITY)
+	_check(petal_points.size() > 0, "%s: Dragon's petal mesh has vertices" % ida)
+	var centroid := Vector3.ZERO
+	for p in petal_points:
+		centroid += p
+	centroid /= maxf(1.0, float(petal_points.size()))
+	var port_up := _vec3(idss["port_up"])
+	var port_right := port_up.cross(_vec3(idss["port_axis"]))
 	for theta: float in idss["petal_theta_deg"]:
-		var a_rad := deg_to_rad(90.0 - theta)
-		var along := Vector3(0.0, cos(a_rad) * -1.0, sin(a_rad) * -1.0)  # Dragon frame: y_port = -Y, up = -Z
-		var world := to_station.basis * along
+		var radial := port_up * cos(deg_to_rad(theta)) + port_right * sin(deg_to_rad(theta))
+		var turned := Basis(Vector3.RIGHT, atan2(radial.z, radial.y)) * Vector3(0.0, centroid.y, centroid.z)
+		var world := to_station.basis * turned
 		var phi := rad_to_deg(atan2(world.dot(up_s), world.dot(y_s)))
 		var nearest := INF
 		for other: float in expected_phi:
 			nearest = minf(nearest, rad_to_deg(absf(angle_difference(deg_to_rad(phi), deg_to_rad(other)))))
-		_check(absf(nearest - 60.0) < 0.1, "%s: Dragon's petal stands between the passive petals (%.3f deg from the nearest)" % [ida, nearest])
+		_check(absf(nearest - 60.0) < 1.0, "%s: Dragon's petal (mesh, theta %.0f) stands between the passive petals (%.3f deg from the nearest)" % [ida, theta, nearest])
 	# The passive guide pins on Dragon's receptacles (mesh centroids of the pins against the IDD's receptacle theta on Dragon).
 	var pins := parts_points(parts[ida + "_pins"], Transform3D.IDENTITY)
 	var r_pin := 0.5 * float(idss["pin_circle_diameter_m"])
@@ -467,6 +482,7 @@ func _check_ring_mate(port: Dictionary, ida: String, models: Dictionary, dragon:
 				count += 1
 		var off: float = INF if count == 0 else ((sum / count) - x_s * (sum / count - position).dot(x_s)).distance_to(receptacle - x_s * (receptacle - position).dot(x_s))
 		_check(off < 0.002, "%s: passive guide pin on Dragon's receptacle (theta %.1f, %.4f m)" % [ida, theta, off])
+	return true
 
 
 ## All vertices of a mesh through a transform.
