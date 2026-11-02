@@ -70,6 +70,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   and its rate is fed forward (`EntryCommand::rate_gcrf_radps`); entry controller actuator delay 0.5 s [E].
 - Catch from lunar gates: catch plans keep a soft half-plane 18 m off the tower while the hull bottom is below the
   tower top; the gate hands over higher when the sink exceeds 100 m/s [E] (gate x (sink / 100)^2), only below 40 km.
+- Structure keep-out (Task 6g, `gnc/descent_keep_out`, fidelity flag `SnapshotSettings::structure_keep_out`, on for the ship only): plans keep the hull's real extent (the capsule the tower physics collides: axis from tail to nose, radius 4.5 m, the plan's tilt) off boxes taken from `TowerGeometry`. Catch plans: both arms at standby. Abort plans: both arms open (the tower commands them open at an abort, 40 deg within 3.3 s; the strike at the 400 m abort was at opening 0.698 rad, not standby) and the tower box; the CG-only tower disc and mount rows stay. One soft row per box and interval, at the tightest of 4 instants between the nodes (the last phase's nodes lie up to ~2.4 s, ~70 m of height, apart), with normal, lever and axis frozen from the reference; rows only within 20 m [E] beyond the margin; margin 1.0 m [E] (tracking 0.2 m + thrust axis 1.5 deg off the hull over 24 m). `DescentPlan::keep_out_overlap_m` measures the settled plan. A catch plan that overlaps counts as beyond its limits (the existing refusal: first plan -> abort; 2 such re-plans -> abort). An abort plan that overlaps gives the water up, then is refused and the upright descent takes over. The mount has no hull row and the upright descent, the flip and the arms' swing are not covered.
 - Reach at the abort (`gnc::estimate_sea_reach`, once, from the live state): lower bound of the flight to the water and
   the stop on it (bang-bang at the tilt limit); beyond the usable propellant / `sea_reach_margin` 1.5 [D] the abort plans
   no longer have to end in the water. The ship keeps flying those plans (not the upright law at once): right after the
@@ -79,7 +80,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   over an abort with no converged abort plan 2 s after the abort, an abort leaning beyond 35 deg, an abort whose usable
   propellant falls below 1.3 x a vertical stop's need (`upright_stop_propellant_kg`), and a flip whose first three
   plans reach neither the catch nor the sea. `sim::ReturnResult` (caught / upright abort: contact tilt < 20 deg and
-  sink <= 5 m/s [E] / lost), `FlightSession::ship_return_result`. A pilot abort during the flip (2026-11-01, nominal gate): upright abort on land 105 m from the pad, 4.2 t left, the water not kept. Aborts at CG height 350-450 m strike a standby arm (`docs/known-issues.md`).
+  sink <= 5 m/s [E] / lost), `FlightSession::ship_return_result`. A pilot abort during the flip (nominal gate): upright abort on land ~105 m from the pad, 4.2 t left, the water not kept. Abort scan and its limits: `docs/known-issues.md`.
 - Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):
   `FlightSession::plan_ship_return` (game key R) plans the deorbit burn (`gnc/deorbit_planner`: coast samples over
   48 h, passes = closest approaches of the ground track; per pass burn epoch bracketed on the entry predictor's
@@ -114,7 +115,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
   engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t
-  left. Direct 21 of 21, aerocapture 21 of 21.
+  left. Lunar: direct 19 of 21 (limit 21, seeds 2, 15 lost, `docs/known-issues.md`), aerocapture 21 of 21.
 - Ship return from orbit `[ship][mission][validation]` (phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit
   execution +-1 % / 0.5 deg via `FlightSession::apply_velocity_error`): 14 of 14 caught, gate 0-11 m, 5.4-8.3 t left.
 
@@ -122,6 +123,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Ship: `STARSIM_DEBUG_FLIP=1` (also `[upright]`), `STARSIM_DEBUG_GATE=1`, `STARSIM_DEBUG_BURN=1`,
   `STARSIM_DEBUG_ENTRY=1` (one line per cycle; with constraint and reversal lines), `STARSIM_DEBUG_ENTRY_ATTITUDE`
   (1 Hz axis error, rates, RCS, flaps; flaps print in config order: aft right, aft left, forward right, forward left),
+  `STARSIM_DEBUG_PLAN_PATH=1` (every plan: solve time, overlap, nodes in the plan frame), hidden `[.abort_clearance]` with `STARSIM_ABORT_HEIGHT`, `STARSIM_SHIP_SEED`, `STARSIM_GATE_HEIGHT`,
   `STARSIM_DEBUG_DEORBIT=1`, `STARSIM_DEBUG_RETURN` (a `return profile` line per plan); hidden tests "Ship catch single
   case" (`STARSIM_SHIP_SEED=<1-20>`), "Ship return single case" (`STARSIM_RETURN_PHASE=<deg>` or
   `STARSIM_RETURN_DISPERSED=<i>`, with `STARSIM_VERBOSE=1`).
@@ -135,5 +137,5 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); since the vehicle plan's Task 6 the caught dispersed gates arrive with >= 3.8 t (see Validation).
 - A low-propellant abort (21-23 t at the gate) is carried by the flip push next to the tower and strikes it - an
-  abort-planning problem (keep-out with unconverged re-plans), open.
+  abort-planning problem (keep-out with unconverged re-plans), open; not re-measured with the structure keep-out.
 - Aero state frozen as on main (crossflow 1.5 [D], old entry alpha table, entry CG 25.50 m, dry 255 t, dry CG 23.516 m) because no tested combination (measured masses, geometry crossflow 1.07-1.10, alpha 59.5, CG 24.85 m) passes all flight replays and case 8; table and facts in `docs/known-issues.md`. Standing facts: 255 t dry is probably too high (about 175 +-25 t by judgement; entry masses 221 / 252 / 203-227 t +-20); the CG window is 24.49-25.88 m and 25.50 / 23.516 m are tuned values (bottom-up dry CG about 22.9 m, 19.4-23.5); the allocator's authority floor (fraction 0.25) has a narrow window (failures 8 / 9 / 2 / 0 / 9 of 10 at 0 / 0.15 / 0.20 / 0.25 / 0.30). Next step: the low Mach part (geometry set: flight 13 low 14.96 %, flight 14 low 22.06 %, too slow at Mach 3-6).
