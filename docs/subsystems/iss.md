@@ -65,9 +65,9 @@ COMPLETE 2026-10-20.
   arrays turned broadside (centre to centre 97.5 m plus one blanket width 11.4 m = 108.9 m; scale from that: 0.025420,
   = 1.0008 inch). Independent checks at that scale: S0 13.43 m (published 13.4), S1 / P1 13.83 (13.7), SAW 35.2 x 11.4
   (35 x 11.6), iROSA 18.96 x 5.99, Zarya 12.76 long x 4.14 (12.56 x 4.11), Zvezda 13.17 (13.1), Harmony 7.16 (7.2).
-  Published values quoted from memory (not re-fetched), error of the scale about +-0.5 %; a search for the SAW and the
-  truss length found sources only for the iROSA (18.2-19 m x 6 m) and for a truss of 108-110 m (that figure is the
-  span with the arrays, see above).
+  Published module values as recalled, error of the scale about +-0.5 %. NASA "Space Station Facts and Figures": truss
+  94 m, solar array wingspan 109 m, pressurised length 67 m, solar array length 73 m (the old `length_m` 73 was the array
+  length). The measured truss (97.9 m) is +4 % against NASA's 94 m, unexplained (probably where the P6 / S6 mesh ends).
 - **Layout in the config frame** (x from the aft end of the Russian segment, Zvezda hull at model x -35.76 m): Zvezda
   0-13.2, Zarya 13.2-25.9 (the config's Russian capsule 0-26 holds), PMA-1 25.5-28.3, Unity 27.8-33.7, Destiny
   33.3-42.4, Harmony 42.0-49.1 (7.16 m, barrel radius 2.2, CBM petals to 2.5), PMA-2 48.7-51.4, IDA-2 face 51.87; truss
@@ -85,7 +85,9 @@ COMPLETE 2026-10-20.
   0, -5.0] -> [47.45, 0, -5.0] (z -5.03 measured, kept). The old x came from an inflated forward half (US stack to 69,
   Harmony at 66): measured 21 m too far forward. The hull capsules that hang on the ports follow (US modules end 49.1,
   PMA-2 49.1-51.37, PMA-3 on the Harmony axis, Columbus / Kibo at x 46.72), CG 38 m and truss / array boxes unchanged
-  (CG over Destiny stays right: Destiny centre 37.9). Error of the new x: plane definition +-0.1 m, scale 0.25 m, aft
+  (CG 38 m stays an UNVERIFIED [E]: Destiny's centre at 37.9 says nothing about the mass; the review's rough tally gives
+  about 33 m, which would make the IDA-2 lever about 19 m; physics unchanged, left open until a mass budget exists).
+  `length_m` is now 51.87 m [D] (stack length; the game draws the station hull from it). Error of the new x: plane definition +-0.1 m, scale 0.25 m, aft
   end +-0.3 m: **+-0.5 m**. Lever of IDA-2 from the CG: 35 m -> 13.9 m.
 - **Tags after the port change** (`[iss] [docking] [proximity] [rendezvous] [iss_mission]`, 266 cases, 265 passed; the
   one red is the known `Docked tanker: the ship return flies to the catch`, unchanged). Verbose numbers, Task 6 build

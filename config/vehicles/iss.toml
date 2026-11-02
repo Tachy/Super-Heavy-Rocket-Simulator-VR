@@ -17,10 +17,10 @@ stages_bottom_to_top = ["station"]
 [[stage]]
 id = "station"
 name = "International Space Station"
-length_m = 73.0                          # [S:wiki_iss] pressurised length along body x
+length_m = 51.87                         # [D] aft end of Zvezda to the IDA-2 face (measured, iss.md); NASA's 73 m is the solar array length, 67 m the pressurised length incl. visiting vehicles
 diameter_m = 4.2                         # [E] module diameter (knudsen length only; drag and SRP use fixed areas)
 dry_mass_kg = 460320.0                   # [S:oem]
-dry_cg_station_m = 38.0                  # [E] near the S0 truss over Destiny
+dry_cg_station_m = 38.0                  # [E] near the S0 truss over Destiny; UNVERIFIED, no mass budget (a rough tally gives about 33 m)
 # [D] principal moments: the IDSS design article IDSS-350T (Ixx 1.15e8, Iyy 6.2e7, Izz 1.65e8 kg m^2 at 3.5e5 kg)
 # [S: IDSS IDD E Table 3.3.1.2-1] scaled by the mass ratio 460.3 / 350 (the i1 estimate was 1.6e8, 6.5e7, 2.1e8).
 # Not used while the attitude is ideal; reported in the compound mass when a vehicle docks (i5).

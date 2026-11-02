@@ -79,9 +79,11 @@ def test_scale_from_span_pure():
 def test_scale_from_truss():
     """The 109 m span of the station (truss ends plus the array blanket width turned broadside) after scaling."""
     st = im.Station(_MODEL)
-    st.set_scale_from_span()
+    # the inch fixed independently of the span: the span must then come out at the NASA 109 m (fails if the scale breaks)
+    st.metres_per_unit = 0.0254
     span = st.metres(st.array_span_units())
     assert abs(span - im.TRUSS_SPAN_M) <= im.TRUSS_SPAN_TOLERANCE_M
+    st.set_scale_from_span()
     # independent cross-checks that do not use the span: published segment / array sizes (tolerance 3 %)
     s0 = st.metres(st.extent(st.index("Truss_S0"), axis=1, include_children=False))
     assert abs(s0 - 13.4) <= 0.03 * 13.4  # S0 truss length 13.4 m [S: NASA ITS segment data, recalled, see report]

@@ -12,7 +12,8 @@ Frames. The root node of the file carries a uniform negative scale (a point refl
 local axes are: +x forward (towards Harmony / the PMA-2 end), +y nadir, +z port (checked on the modules: Kibo on the
 port side of Harmony, Columbus on the starboard side, PMA-3 above Harmony). The station frame of config/vehicles/iss.toml
 is x forward, y starboard, z nadir, right-handed; from the file's local (x, y, z) it is (x, -z, y) (a proper rotation).
-Model units are not metres; `metres_per_unit` scales from the known truss span.
+Model units are not metres (the file's unit is the inch, 0.0254 m; cross-checked on the module lengths);
+`metres_per_unit` is set from the NASA solar array wingspan of 109 m (not the truss: NASA lists the truss as 94 m).
 """
 import json
 import os
@@ -25,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import glb_measure as gm  # noqa: E402
 
 _DRACO = "KHR_draco_mesh_compression"
-# Overall length of the integrated truss structure (ITS), NASA ISS fact sheet / Wikipedia "Integrated Truss Structure":
-# 108.5 m (356 ft); the commonly cited span 109 m [S: iss.toml wiki_iss] is this number rounded.
+# Solar array wingspan, NASA "Space Station Facts and Figures": 109 m (356 ft). NOT the truss (94 m there; measured 97.9 m,
+# +4 %, unexplained) and not the pressurised length (67 m). Used as the array span with the P6 / S6 arrays turned broadside.
 TRUSS_SPAN_M = 109.0
 TRUSS_SPAN_TOLERANCE_M = 1.0
 

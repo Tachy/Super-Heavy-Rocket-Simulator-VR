@@ -80,7 +80,7 @@ TEST_CASE("Corridor violation holds and resumes by itself", "[iss][proximity]") 
     gnc::ProximityParameters p;
     p.start_waypoint = 2;  // fly from Waypoint 2
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 5.0, 0.0}, {}};  // 20 m out, 5 m lateral: 14 deg > 10 deg, < 20 deg
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 5.0, 0.0}, {}};  // 20 m out, 5 m lateral: 14 deg > 10 deg, < 20 deg
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     proximity_test::run(g, s, 3600.0);
     CHECK(saw(g, ProximityPhase::Hold));
@@ -92,7 +92,7 @@ TEST_CASE("A large corridor deviation retreats and waits for the go", "[iss][pro
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 15.0, 7.0, 0.0}, {}};  // 25 deg off the axis
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 15.0, 7.0, 0.0}, {}};  // 25 deg off the axis
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     proximity_test::run(g, s, 1800.0);
     CHECK(saw(g, ProximityPhase::Retreat));
@@ -108,7 +108,7 @@ TEST_CASE("Commanded hold, resume, abort and refusals", "[iss][proximity]") {
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 0.0, 0.0}, {}};
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     CHECK_FALSE(g.resume());  // nothing held
     proximity_test::run(g, s, 400.0);  // Waypoint 2 hold (300 s), then into the final approach
@@ -152,7 +152,7 @@ TEST_CASE("Propellant below the deorbit reserve aborts", "[iss][proximity]") {
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 0.0, 0.0}, {}};
     s.propellant_kg = p.deorbit_reserve_kg + 0.5;
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     proximity_test::run(g, s, 1200.0);
@@ -196,7 +196,7 @@ TEST_CASE("A large deviation at an on-axis waypoint retreats once, not every tic
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 25.0, 10.0, 0.0}, {}};  // 22 deg off the axis beyond Waypoint 2
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 25.0, 10.0, 0.0}, {}};  // 22 deg off the axis beyond Waypoint 2
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     proximity_test::run(g, s, 60.0);
     CHECK(saw(g, ProximityPhase::Retreat));
@@ -207,7 +207,7 @@ TEST_CASE("Resume after an abort is checked against the live state", "[iss][prox
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 0.0, 0.0}, {}};
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     g.update(s.input());
     REQUIRE(g.abort());
@@ -260,7 +260,7 @@ TEST_CASE("A failed capture retreats to Waypoint 2 and waits for resume", "[iss]
     p.start_waypoint = 2;
     p.contact_plane_m = 0.7;  // the petal mesh plane of the docking interface (i5)
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 0.0, 0.0}, {}};
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     proximity_test::run(g, s, 1800.0);
     REQUIRE(g.phase() == ProximityPhase::Contact);
@@ -284,7 +284,7 @@ TEST_CASE("A commanded retreat waits for resume, not as a failed capture", "[iss
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 0.0, 0.0}, {}};
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     proximity_test::run(g, s, 60.0);
     REQUIRE(g.retreat());
@@ -297,7 +297,7 @@ TEST_CASE("A collision ends the guidance passively", "[iss][proximity][docking]"
     gnc::ProximityParameters p;
     p.start_waypoint = 2;
     auto s = CwSim::ida2();
-    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    s.cg = {s.port_lever_lvlh + Vec3{4.0 + 20.0, 0.0, 0.0}, {}};
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
     g.update(s.input());
     g.collided(s.epoch);

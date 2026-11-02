@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,17 @@
 
 namespace starsim::proximity_test {
 
+// Lever from the station CG to a configured ISS port (station frame = LVLH for the ideal attitude); read from iss.toml
+// so the CW fixtures follow the measured port positions and the CG.
+inline math::Vec3 iss_port_lever_m(const std::string& port_id) {
+    const auto iss = config::load_vehicle(STARSIM_CONFIG_DIR, "iss");  // a named copy: no range-for over a temporary
+    const auto& stage = iss.stages.front();
+    for (const auto& p : stage.docking_ports) {
+        if (p.id == port_id) return p.position_m - math::Vec3{stage.dry_cg_station_m, 0.0, 0.0};
+    }
+    throw std::logic_error("iss.toml has no port " + port_id);
+}
+
 struct CwSim {
     double n = 1.128e-3;
     math::Mat3 port_to_lvlh;      // target port frame in LVLH
@@ -41,13 +53,13 @@ struct CwSim {
     static CwSim ida2() {
         CwSim s;
         s.port_to_lvlh = math::Mat3::from_columns({1, 0, 0}, {0, -1, 0}, {0, 0, -1});  // axis +x, up -z (zenith)
-        s.port_lever_lvlh = {35.0, 0.0, 0.0};
+        s.port_lever_lvlh = iss_port_lever_m("ida2");
         return s;
     }
     static CwSim ida3() {
         CwSim s;
         s.port_to_lvlh = math::Mat3::from_columns({0, 0, -1}, {0, 1, 0}, {1, 0, 0});  // axis -z, up +x; y = z x x
-        s.port_lever_lvlh = {28.0, 0.0, -5.0};
+        s.port_lever_lvlh = iss_port_lever_m("ida3");
         return s;
     }
     math::Vec3 chaser_port_lvlh() const {  // the chaser port leads its CG along -x_t (towards the target port)
