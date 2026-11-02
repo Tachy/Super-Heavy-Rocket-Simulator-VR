@@ -186,22 +186,31 @@ TEST_CASE("Ship catch: an abort requested in the flip comes down upright", "[shi
 // Diagnostics (STARSIM_ABORT_TRACE_DIR): ship aborts at falling CG heights above the pad, from the first in the flip down
 // to below the arms' reach, with whether the water stayed required; for tools/validation/abort_clearance.py.
 TEST_CASE("Ship abort clearance trace", "[.abort_clearance]") {
-    const double abort_height_m = GENERATE(900.0, 600.0, 550.0, 500.0, 475.0, 450.0, 425.0, 400.0, 375.0, 350.0, 325.0, 300.0, 275.0, 250.0, 225.0, 200.0, 170.0);
+    // STARSIM_ABORT_HEIGHT=<m> flies that height alone, STARSIM_SHIP_SEED=<seed> a dispersed gate of the campaign.
+    const char* height_text = std::getenv("STARSIM_ABORT_HEIGHT");
+    const char* seed_text = std::getenv("STARSIM_SHIP_SEED");
+    const unsigned seed = seed_text ? static_cast<unsigned>(std::atoi(seed_text)) : 0u;
+    const double abort_height_m = height_text ? std::atof(height_text) : GENERATE(900.0, 600.0, 550.0, 500.0, 475.0, 450.0, 425.0, 400.0, 375.0, 350.0, 325.0, 300.0, 275.0, 250.0, 225.0, 200.0, 170.0);
     test::spice_session();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
-    const Gate gate = nominal_gate();
+    Gate gate = seed ? dispersed_gate(seed) : nominal_gate();
+    // STARSIM_GATE_HEIGHT=<m>: the gate height the entry guidance hands over at (800 m) instead of the catch cases' 950 m
+    const char* gate_text = std::getenv("STARSIM_GATE_HEIGHT");
+    if (gate_text) gate.height_m += std::atof(gate_text) - nominal_gate().height_m;
     const auto cfg = ship_with(gate.propellant_kg);
     auto state = test::state_over_site(session.launch_site(), earth(), t0, gate.offset_enu_m + Vec3{0.0, 0.0, gate.height_m},
                                        gate.velocity_enu_mps);
     const auto t = earth().fixed_to_gcrf(t0);
-    const Vec3 v_rel = state.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), state.position_gcrf_m);
+    const auto attitude_state = test::state_over_site(session.launch_site(), earth(), t0, gate.offset_enu_m + Vec3{0.0, 0.0, gate.height_m},
+                                                      gate.attitude_velocity_enu_mps.value_or(gate.velocity_enu_mps));
+    const Vec3 v_rel = attitude_state.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), state.position_gcrf_m);
     state.attitude = gnc::entry_attitude_quaternion(v_rel, math::normalized(state.position_gcrf_m), gate.alpha_deg * deg,
                                                     gate.bank_deg * deg, cfg.stages[0].aero.belly_azimuth_rad);
     state.angular_velocity_body_radps = state.attitude.inverse_rotate(vehicle::earth_rotation_vector(t));
     session.place_landing_ship(cfg, state, t0, gate.parameters);
-    test::AbortTrace trace("ship_" + std::to_string(static_cast<int>(abort_height_m)));
+    test::AbortTrace trace("ship_g" + std::string(gate_text ? gate_text : "950") + "_s" + std::to_string(seed) + "_" + std::to_string(static_cast<int>(abort_height_m)));
     const auto& ship = session.body(0);
     bool aborted = false, abort_accepted = false, water_kept = false;
     for (double s = 0.0; s < 150.0 && !ship.impacted() && !ship.resting() && !ship.caught(); s += 0.05) {
@@ -215,7 +224,7 @@ TEST_CASE("Ship abort clearance trace", "[.abort_clearance]") {
         if (const auto* g = session.ship_landing(0); g && g->scvx()) water_kept = g->scvx()->sea_required();
         trace.sample(session, earth(), 0, s);
     }
-    std::printf("[clearance] ship abort at %.0f m: accepted %d, water kept %d, %s / %s, struck %d, %.1f t left\n", abort_height_m,
+    std::printf("[clearance] gate %s seed %u ship abort at %.0f m: accepted %d, water kept %d, %s / %s, struck %d, %.1f t left\n", gate_text ? gate_text : "950", seed, abort_height_m,
                 abort_accepted ? 1 : 0, water_kept ? 1 : 0, sim::to_string(session.landing_outcome(0)), sim::to_string(session.ship_return_result(0)),
                 session.tower()->tower_struck() ? 1 : 0, ship.vehicle().propellant_kg() / 1e3);
 }

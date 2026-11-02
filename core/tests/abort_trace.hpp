@@ -34,7 +34,7 @@ public:
     explicit AbortTrace(const std::string& name) {
         const char* dir = std::getenv("STARSIM_ABORT_TRACE_DIR");
         if (dir) file_ = std::fopen((std::string(dir) + "/" + name + ".csv").c_str(), "w");
-        if (file_) std::fprintf(file_, "t_s,bx,by,bz,tx,ty,tz,radius_m,tower_m,arm1_m,arm2_m,phase\n");
+        if (file_) std::fprintf(file_, "t_s,bx,by,bz,tx,ty,tz,radius_m,tower_m,arm1_m,arm2_m,phase,opening_rad\n");
     }
     ~AbortTrace() {
         if (file_) std::fclose(file_);
@@ -58,11 +58,11 @@ public:
         const math::Vec3 top = cg + body_to_site * math::Vec3{body.vehicle().length_m() - cg_station, 0.0, 0.0};
         const double radius = 0.5 * body.vehicle().diameter_m();
         const auto& arms = tower->arms();
-        std::fprintf(file_, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%s\n", t_s, bottom.x, bottom.y, bottom.z, top.x, top.y,
+        std::fprintf(file_, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%.4f\n", t_s, bottom.x, bottom.y, bottom.z, top.x, top.y,
                      top.z, radius, hull_to_box_m(bottom, top, radius, g.tower_box()),
                      hull_to_box_m(bottom, top, radius, g.arm_box(1, arms.opening_rad(), arms.carriage_offset_m())),
                      hull_to_box_m(bottom, top, radius, g.arm_box(-1, arms.opening_rad(), arms.carriage_offset_m())),
-                     sim::to_string(tower->phase()));
+                     sim::to_string(tower->phase()), arms.opening_rad());
     }
 
 private:
