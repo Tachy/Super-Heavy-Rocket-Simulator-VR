@@ -67,6 +67,7 @@ pusher_radius_m = 0.07       # [E] same frame
 [paint]
 hull_albedo = [0.82, 0.82, 0.80]       # [E] white stage, F_ORBCOMM_2, crew13 t2880
 interstage_albedo = [0.04, 0.04, 0.045]  # [E] Block 5 black interstage, crew13 t2880 (40 px of 5.2 px/m: ~7.7 m band)
+interstage_roughness = 0.85    # [E] matt black: no sheen in F_Falcon_9_B1046 right crop or D_SpaceX_Crew_9_Preflight. Was 0.6 in the generator: its sun highlight moved the mean with distance, shimmer ratio 1.56 -> 1.13 (limit 1.18)
 octaweb_albedo = [0.05, 0.05, 0.05]    # [E] black aft cover, F_Falcon_9_B1046
 leg_albedo = [0.06, 0.06, 0.065]       # [E] dark carbon legs, Starlink 15-25 file 1124 s
 stage2_hull_albedo = [0.78, 0.78, 0.77]  # [E] white second stage, crew13 t2880 (a little greyer than the first stage: no sun-bleached paint seen)
@@ -97,7 +98,7 @@ interstage_rows = 4          # [E] same crop: rows of plates over the interstage
 interstage_rivet_pitch_m = 0.12  # [E] same crop
 interstage_rivet_radius_m = 0.012  # [E] same crop
 octaweb_gain = 2.5           # [E] same as the interstage: F_Falcon_9_B1046 bolts lighter than the black
-stage2_rows = 4              # [E] ring welds on the second stage's 9.8 m: not measured, same style as the first stage; the adapter under the trunk stays white, no dark band (Task 4)
+stage2_rows = 4              # [E] ring welds on the second stage's 9.8 m: not measured, same style as the first stage; the adapter under the trunk stays white with the thin dark line of [second_stage] top_band_height_m
 leg_gain = 1.5               # [E] c_nhq_base crop: near black, faint lines
 
 # Second stage: a plain tank cylinder of the config's length, its base (station 0) on the interstage top; below it a dark cone to
@@ -105,6 +106,7 @@ leg_gain = 1.5               # [E] c_nhq_base crop: near black, faint lines
 [second_stage]
 segments = 64                # [E] sagitta 2 mm at R = 1.83 m
 plate_thickness_m = 0.12     # [E] height of the skirt above the interstage top, not measured
+top_band_height_m = 0.04     # [E] the thin dark line right under the trunk: D_SpaceX_Crew_9_Preflight about 2 px of 60 px/m, F_NHQ202210010026 about 3 px of 78 px/m (screenshots/stack_height/band_crops.png). Paint on the rim, no gap
 skirt_radius_m = 1.75        # [E] aft cone's top, inside the interstage's open wall (r 1.79); Starlink 15-25 files 772 / 1156 s show a blanketed cone, its radius not measured
 exhaust_radius_m = 0.12      # [E] turbine exhaust duct, Starlink 15-25 file 772 s against the 1.2 m chamber (not measured)
 exhaust_azimuth_deg = 20.0   # [E] the duct sits on one side, file 772 s (side not decidable)

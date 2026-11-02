@@ -82,6 +82,8 @@ func _initialize() -> void:
 	root.add_child(_main)
 	_surface = _args.get("surface", "tiles")
 	root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	if _args.has("msaa"):  # diagnostics: --msaa=2|4|8 (default: the project's 2x), to tell geometry edges from the maps
+		root.msaa_3d = {"2": Viewport.MSAA_2X, "4": Viewport.MSAA_4X, "8": Viewport.MSAA_8X}[_args["msaa"]]
 	for i in 256:
 		_srgb_to_linear.append(Color(i / 255.0, i / 255.0, i / 255.0).srgb_to_linear().r)
 
@@ -134,7 +136,12 @@ func _run() -> void:
 			frames_a.append(_patch(image_a, distance, _centre()))
 			_set_scale(REFERENCE_SCALE)
 			await _n(FRAMES_CAPTURE)
-			frames_b.append(_patch(root.get_viewport().get_texture().get_image(), distance, _centre()))
+			var image_b := root.get_viewport().get_texture().get_image()
+			frames_b.append(_patch(image_b, distance, _centre()))
+			if step == 0 and _args.has("dump"):  # diagnostics: --dump=<dir> the first frame's A and B of every distance
+				DirAccess.make_dir_recursive_absolute(String(_args["dump"]))
+				image_a.save_png(String(_args["dump"]).path_join("%s_%03d_a.png" % [_surface, int(distance)]))
+				image_b.save_png(String(_args["dump"]).path_join("%s_%03d_b.png" % [_surface, int(distance)]))
 			if step == 0 and distance == (FIN_DISTANCES_M if _surface == "fin" else DISTANCES_M)[0]:
 				image_a.save_png(ProjectSettings.globalize_path("res://").path_join(
 						"../screenshots/vehicles/shimmer_%s_5m.png" % _surface))
@@ -170,7 +177,8 @@ func _centre() -> Vector2:
 
 func _patch(image: Image, distance_m: float, centre := Vector2.ZERO) -> PackedFloat32Array:
 	image.convert(Image.FORMAT_RGBA8)
-	var half := int(clampf(0.5 * PATCH_M * FOCAL_PX / distance_m, 0.5 * PATCH_MIN_PX, 0.5 * PATCH_MAX_PX))
+	var patch_m := float(_args.get("patch_m", PATCH_M))  # diagnostics: --patch_m=<m> a different physical patch; gates unchanged
+	var half := int(clampf(0.5 * patch_m * FOCAL_PX / distance_m, 0.5 * PATCH_MIN_PX, 0.5 * PATCH_MAX_PX))
 	var width := image.get_width()
 	var cx := clampi(int(centre.x), half, width - half)
 	var cy := clampi(int(centre.y), half, image.get_height() - half)

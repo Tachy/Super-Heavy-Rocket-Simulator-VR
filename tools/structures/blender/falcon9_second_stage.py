@@ -35,7 +35,11 @@ def build_stage(spec, out):
     vc.common.clear_scene()
     root = vc.empty("falcon9_stage2")
     hull = vc.VMesh()
-    vc.revolve(hull, [([(s["plate_thickness_m"], r), (top, r)], "out"), ([(top, r), (top, 0.0)], (1.0, 0.0, 0.0))], n, r, "hull")
+    band_from = top - s["top_band_height_m"]
+    vc.revolve(hull, [([(s["plate_thickness_m"], r), (band_from, r)], "out")], n, r, "hull")
+    # The dark line under the trunk: paint on the rim, one surface with the hull, no gap, the rim on the config's length.
+    band = vc.VMesh()
+    vc.revolve(band, [([(band_from, r), (top, r)], "out"), ([(top, r), (top, 0.0)], (1.0, 0.0, 0.0))], n, r, "hull")
     for pod in stage["rcs_pods"]:
         for az_deg in pod["azimuths_deg"]:
             az = math.radians(az_deg)
@@ -49,7 +53,7 @@ def build_stage(spec, out):
     mount_r = spec["mvac"]["mount_radius_m"]
     vc.revolve(plate, [([(mount_x, 0.0), (mount_x, mount_r)], (-1.0, 0.0, 0.0)),
                        ([(mount_x, mount_r), (0.0, s["skirt_radius_m"]), (s["plate_thickness_m"], r)], "out")], n, r, "plate")
-    tris = hull.to_object("hull", root)[1] + plate.to_object("engine_plate", root)[1]
+    tris = hull.to_object("hull", root)[1] + band.to_object("hull_band", root)[1] + plate.to_object("engine_plate", root)[1]
     vc.export_selected(Path(out) / "falcon9_stage2.gltf", [root])
     vc.report_triangles("falcon9_stage2", tris)
 

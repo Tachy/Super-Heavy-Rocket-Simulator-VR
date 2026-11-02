@@ -122,7 +122,7 @@ def test_second_stage_models():
     if not (MODELS / "falcon9_stage2.gltf").is_file():
         pytest.skip("no generated Falcon 9 models")
     spec = vehicle_spec.load(ID)
-    lo, hi = _bounds(MODELS / "falcon9_stage2.gltf", {"hull", "engine_plate"})
+    lo, hi = _bounds(MODELS / "falcon9_stage2.gltf", {"hull", "hull_band", "engine_plate"})
     # from the engine mount, inside the interstage, to the top plane
     s2 = spec["stages"]["second_stage"]
     assert lo[0] == pytest.approx(s2["engine_station_m"] + spec["mvac"]["mount_height_m"], abs=1e-3)
@@ -133,10 +133,13 @@ def test_second_stage_models():
     assert hi[1] == pytest.approx(MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3) and lo[1] == pytest.approx(-MVAC_EXIT_DIAMETER_M / 2.0, abs=1e-3)
     # the stage's white rim reaches the config's length: no cone rises above the top plane
     length = spec["stages"]["second_stage"]["length_m"]
-    for name in ("hull", "engine_plate"):
+    for name in ("hull", "hull_band", "engine_plate"):
         _, top = _bounds(MODELS / "falcon9_stage2.gltf", {name})
         assert top[0] <= length + 0.01
-    _, rim = _bounds(MODELS / "falcon9_stage2.gltf", {"hull"})
+    band = spec["detail"]["second_stage"]["top_band_height_m"]
+    band_lo, rim = _bounds(MODELS / "falcon9_stage2.gltf", {"hull_band"})
+    _, hull_top = _bounds(MODELS / "falcon9_stage2.gltf", {"hull"})
+    assert band_lo[0] == pytest.approx(length - band, abs=1e-3) and hull_top[0] == pytest.approx(length - band, abs=1e-3)  # no gap under the band
     assert rim[0] == pytest.approx(length, abs=0.01)
     m = json.loads((MODELS / build_models.MANIFEST).read_text(encoding="utf-8"))
     e = m["engines"]["merlin_vacuum"]

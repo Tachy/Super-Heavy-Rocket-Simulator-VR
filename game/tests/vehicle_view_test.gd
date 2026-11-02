@@ -166,8 +166,9 @@ func _check_falcon9() -> bool:
 					widest = maxf(widest, Vector2(v.y, v.z).length())
 	_check(widest > 0.0 and widest < inner_radius, "at separation start the parts in the interstage stay clear of its wall (r %.2f < %.2f)" % [widest, inner_radius])
 	_check(_plume_top(view, 1).is_equal_approx(Frames.to_render(Vector3(exit_station, 0.0, 0.0))), "MVac plume starts at the drawn exit plane")
-	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["hull"])
-	_check(absf(mvac_bounds.y - second_length) < 0.01, "second stage rim (hull + adapter ring) top at its config length, %.1f m" % second_length)
+	var mvac_bounds := _bounds_x(models["hulls"]["second_stage"]["hull_band"])
+	_check(absf(_bounds_x(models["hulls"]["second_stage"]["hull"]).y - mvac_bounds.x) < 0.001, "second stage hull ends where the dark band starts, no gap")
+	_check(absf(mvac_bounds.y - second_length) < 0.01, "second stage rim (hull + dark band) top at its config length, %.1f m" % second_length)
 	var fin_node := view.get_child(0).find_child("grid_fin_0", true, false) as Node3D
 	_check(fin_node != null and (fin_node.transform.basis * Vector3.UP).is_equal_approx(Vector3.LEFT), "on the stack the fin lies folded, tip toward the base")
 	_check(_plume_top(view, 0).is_equal_approx(Frames.to_render(Vector3.ZERO)), "Merlin plume starts at the exit plane, station 0")
