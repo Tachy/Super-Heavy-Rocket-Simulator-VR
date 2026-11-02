@@ -424,7 +424,7 @@ over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad)
   Placement and the physics numbers stay in `launch_sites.toml`. State: `docs/subsystems/launch-structures.md`.
 
 ## Vehicle detail files (`vehicles/detail/`)
-- Starship keys below; `falcon9_block5.toml`, `crew_dragon.toml`, `iss.toml` hold their own tables, each key's meaning in its source tag (validated by `vehicle_spec.py`, generators `tools/structures/blender/`).
+- Starship keys below; `falcon9_block5.toml`, `crew_dragon.toml`, `iss.toml` hold their own tables, each key's meaning in its source tag (validated by `vehicle_spec.py`, generators `tools/structures/blender/`). `[surface]` of the Falcon 9 and the Dragon feeds the baked maps (`tools/structures/surface_textures.py`); `soot_level` (Falcon 9) and `flown_soot` (Dragon) set how used the vehicle looks.
 - `vehicles/detail/<vehicle id>.toml`: visual detail of one vehicle for the Blender model generators (weld pitch, hot-stage
   vents, grid-fin lattice, flap slab, catch-pin heads, chine, raceway, tile layout, engine bell contour). Placement and
   size always come from `vehicles/<id>.toml` and `engines/*.toml` (length, diameter, nose, flaps, fins, pins, engine

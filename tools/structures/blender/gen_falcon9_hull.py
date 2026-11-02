@@ -1,7 +1,7 @@
 """Falcon 9 first stage hull: gen_falcon9_hull.py -- --spec <json> --out <dir> writes falcon9_stage1.gltf.
 
 Frame: the vehicle body frame (X station axis, station 0 = the outer Merlins' exit plane, (Y, Z) = r (cos a, sin a)).
-Nodes: `hull` (plain lathe from the top of the aft cover to the tank top, raceways), `interstage` (open cylinder up to the
+Nodes: `hull` (plain lathe from the top of the aft cover to the joint ring), `hull_joint` (the ring under the interstage, its rivet map), `raceway`, `interstage` (open cylinder up to the
 stage's length, floor, RCS thruster bumps at the config's pods), `octaweb` (black aft cover, base plate, a clevis block per
 leg). Plain surfaces: detail belongs into textures. Everything placed from the config; sizes from the detail file.
 """
@@ -38,10 +38,14 @@ def main():
     root = vc.empty("falcon9_stage1")
 
     hull = vc.VMesh()
-    vc.revolve(hull, [([(o["cover_top_m"], r), (joint, r)], "out")], n, r, "hull")
+    joint_low = joint - d["surface"]["joint_height_m"]
+    vc.revolve(hull, [([(o["cover_top_m"], r), (joint_low, r)], "out")], n, r, "hull")
+    rivets = vc.VMesh()  # the ring under the interstage with its rivet row: its own node, its own map
+    vc.revolve(rivets, [([(joint_low, r), (joint, r)], "out")], n, r, "hull_joint")
+    raceway = vc.VMesh()
     for az_deg in h["raceway_azimuths_deg"]:
         length = joint - h["raceway_first_m"]
-        radial_box(hull, h["raceway_first_m"] + length / 2.0, math.radians(az_deg), r, length, h["raceway_width_m"],
+        radial_box(raceway, h["raceway_first_m"] + length / 2.0, math.radians(az_deg), r, length, h["raceway_width_m"],
                    h["raceway_height_m"])
 
     inter = vc.VMesh()
@@ -61,7 +65,8 @@ def main():
         radial_box(octaweb, base + c + o["fitting_length_m"] / 2.0, math.radians(az_deg), r, o["fitting_length_m"],
                    o["fitting_width_m"], o["fitting_proud_m"])
 
-    tris = hull.to_object("hull", root)[1] + inter.to_object("interstage", root)[1] + octaweb.to_object("octaweb", root)[1]
+    tris = (hull.to_object("hull", root)[1] + rivets.to_object("hull_joint", root)[1] + raceway.to_object("raceway", root)[1]
+            + inter.to_object("interstage", root)[1] + octaweb.to_object("octaweb", root)[1])
     vc.export_selected(Path(args["out"]) / "falcon9_stage1.gltf", [root])
     vc.report_triangles("falcon9_stage1", tris)
 

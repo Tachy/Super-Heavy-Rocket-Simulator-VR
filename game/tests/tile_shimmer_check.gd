@@ -27,7 +27,19 @@ const SURFACES := {
 	"fin": [{"mission": "starship_leo", "t_plus": "100", "utc": "2026-10-31T19:00:00"}, 0, 64.0,
 			Vector3(0.5, 0.85, 0.0), 0.0],
 }
-const FIN_DISTANCES_M := [20.0, 60.0, 100.0, 115.0, 125.0, 140.0, 200.0, 320.0]
+## The baked surfaces (surface_textures.py): first stage with soot, interstage, the trunk's array and radiator, the capsule's skin (stack, stations: first stage 47.7 m + second stage 9.8 m = trunk base 57.5 m).
+const BAKED_SURFACES := {
+## T+120 s, stack still whole (separation just after T+150 s): nearly above the air, so haze does not count as a change of the mean. Array, radiator, skin are seen between two fins (azimuth 135 / 45): a fin edge-on in the patch measures the geometry's edge, not the map.
+	"f9_hull": [{"mission": "falcon9_crew_dragon", "t_plus": "120", "utc": "2026-10-31T17:00:00"}, 0, 22.0, Vector3(0.0, 0.0, -1.0), 0.0],
+	"f9_interstage": [{"mission": "falcon9_crew_dragon", "t_plus": "120", "utc": "2026-10-31T17:00:00"}, 0, 44.0, Vector3(0.0, 0.0, -1.0), 0.0],
+	## On the pad in full sun (the views of screenshots/surfaces/array_close): haze raises the mean with distance here, the per-pixel gates are the point. The shaded views below sit near black, where 8-bit steps swamp a relative error.
+	"array_sun": [{"mission": "falcon9_crew_dragon", "t_plus": "2", "utc": "2024-04-08T15:00:00"}, 0, 58.6, Vector3(0.0, 0.0, 1.0), -40.0],
+	"skin_sun": [{"mission": "falcon9_crew_dragon", "t_plus": "2", "utc": "2024-04-08T15:00:00"}, 0, 64.15, Vector3(0.0, 0.0, 1.0), 40.0],
+	"array": [{"mission": "falcon9_crew_dragon", "t_plus": "120", "utc": "2026-10-31T17:00:00"}, 0, 59.0, Vector3(0.0, -0.7071, 0.7071), NAN],
+	"radiator": [{"mission": "falcon9_crew_dragon", "t_plus": "120", "utc": "2026-10-31T17:00:00"}, 0, 59.0, Vector3(0.0, 0.7071, 0.7071), NAN],
+	"skin": [{"mission": "falcon9_crew_dragon", "t_plus": "120", "utc": "2026-10-31T17:00:00"}, 0, 63.0, Vector3(0.0, 0.7071, 0.7071), NAN],
+}
+const FIN_DISTANCES_M :=[20.0, 60.0, 100.0, 115.0, 125.0, 140.0, 200.0, 320.0]
 ## Step limit between the two distances either side of the swap (luminance ratio).
 const SWAP_STEP_LIMIT := 1.10
 const WINDOW_HEIGHT_PX := 900.0
@@ -82,7 +94,7 @@ func _process(_delta: float) -> bool:
 		_started = true
 		TimePanel.show_frame_rate = false
 		_world.atmosphere.eye_adaptation_enabled = false
-		var rig_args: Dictionary = SURFACES[_surface][0].duplicate()
+		var rig_args: Dictionary = _spec()[0].duplicate()
 		rig_args.merge(_args, true)
 		_rig = VehicleRig.new(_world, rig_args)
 		_sim = _rig.start()
@@ -90,6 +102,10 @@ func _process(_delta: float) -> bool:
 		_rig.hide_ui(_main)
 		_run()
 	return false
+
+
+func _spec() -> Array:
+	return BAKED_SURFACES[_surface] if BAKED_SURFACES.has(_surface) else SURFACES[_surface]
 
 
 func _n(count: int) -> void:
@@ -100,7 +116,7 @@ func _n(count: int) -> void:
 func _run() -> void:
 	await _n(10)
 	var fov_deg := rad_to_deg(2.0 * atan(0.5 * WINDOW_HEIGHT_PX / FOCAL_PX))
-	var spec: Array = SURFACES[_surface]
+	var spec: Array = _spec()
 	var body: int = spec[1]
 	var station: float = spec[2]
 	for distance: float in (FIN_DISTANCES_M if _surface == "fin" else DISTANCES_M):
@@ -132,11 +148,13 @@ func _run() -> void:
 ## is the sampling error alone (the shimmer).
 func _set_scale(scale: float) -> void:
 	root.scaling_3d_scale = scale
-	for material: ShaderMaterial in VehicleModels.load_for("starship_block3")["materials"].values():
-		material.set_shader_parameter("footprint_scale", scale)
-		if _args.has("set"):  # diagnostics: --set=name:value sets a float shader parameter of the hull materials
-			var kv := String(_args["set"]).split(":")
-			material.set_shader_parameter(kv[0], float(kv[1]))
+	var vehicle_ids: Array = ["falcon9_block5", "crew_dragon"] if BAKED_SURFACES.has(_surface) else ["starship_block3"]
+	for vehicle_id: String in vehicle_ids:
+		for material: ShaderMaterial in VehicleModels.load_for(vehicle_id)["materials"].values():
+			material.set_shader_parameter("footprint_scale", scale)
+			if _args.has("set"):  # diagnostics: --set=name:value sets a float shader parameter of the hull materials
+				var kv := String(_args["set"]).split(":")
+				material.set_shader_parameter(kv[0], float(kv[1]))
 
 
 ## Linear luminance of the central physical patch (row-major).

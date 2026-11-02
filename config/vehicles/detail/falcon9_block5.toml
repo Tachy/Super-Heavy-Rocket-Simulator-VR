@@ -74,6 +74,32 @@ engine_plate_albedo = [0.03, 0.03, 0.03]  # [E] black thermal blanket at the eng
 mvac_albedo = [0.55, 0.55, 0.56]       # [E] pale grey nozzle extension in sunlight, Starlink 15-25 file 1156 s (sky-lit, not a clean sunlit view)
 exhaust_albedo = [0.45, 0.33, 0.25]    # [E] bare turbine exhaust duct, copper-grey, Starlink 15-25 files 772 / 1156 s
 
+# Baked surfaces (tools/structures/surface_textures.py): our own painted maps, no photo pixels, no lettering.
+[surface]
+soot_level = 0.9             # [E] THE parameter: 0 a clean new stage (F_NHQ202210010026), 1 the darkest re-flown side. Default: F_Falcon_9_B1046 and landing frame cr_3475 (re-flown Block 5: dark areas and lengthwise streaks; white still reads through)
+soot_profile_m = [[0.0, 0.6], [2.3, 0.5], [6.0, 0.8], [14.0, 0.9], [18.0, 0.5], [22.0, 0.9], [30.0, 0.8], [34.0, 0.25], [41.2, 0.1], [41.21, 0.2], [47.7, 0.2]]  # [E] share of the level along the stage [station, share]: cr_3475: a light band about 7 m under the interstage, dark below it, a lighter gap, the lower third dark; F_Falcon_9_B1046: nearly white beside the interstage; interstage grey-brown over black
+soot_windward_azimuth_deg = 90.0  # [E] the side that takes the most: F_Falcon_9_B1046, cr_3475 show one side far darker than the other; which azimuth is not decidable from photos
+soot_windward_share = 0.7    # [E] the far side's soot is this much less, same photos
+soot_albedo = [0.045, 0.04, 0.035]  # [E] brown-black film, same photo
+soot_roughness = 0.85        # [E] a matt film, same photo
+raceway_albedo = [0.03, 0.03, 0.03]  # [E] black raceway on the white hull: F_NHQ202210010026, close crop of the leg section
+hull_tiles_around = 4        # [E] long weld lines per circumference: F_Falcon_9_first_stage_in_hangar: faint; count not measured
+hull_ring_pitch_m = 3.66     # [E] ring welds about one diameter apart, same photo, faint, +-1 m
+hull_line_half_m = 0.006     # [E] a thin line at this photo's resolution, upper bound
+hull_line_depth = 0.12       # [E] low contrast, same photo: seams read only near the camera
+joint_height_m = 0.5         # [E] height of the ring just under the interstage that carries the rivets
+joint_rivet_pitch_m = 0.1    # [E] F_ORBCOMM_2: a single dark row, ~115 rivets around the hull at a by-eye count of the visible 1/3
+joint_rivet_radius_m = 0.016 # [E] same photo
+joint_rivet_depth = 0.75     # [E] same photo: dark dots on white
+interstage_gain = 2.5        # [E] detail map's range over the black paint (fasteners lighter than the paint)
+interstage_tiles_around = 6  # [E] plates per circumference: F_Falcon_9_B1046 right crop, about 2 m wide
+interstage_rows = 4          # [E] same crop: rows of plates over the interstage
+interstage_rivet_pitch_m = 0.12  # [E] same crop
+interstage_rivet_radius_m = 0.012  # [E] same crop
+octaweb_gain = 2.5           # [E] same as the interstage: F_Falcon_9_B1046 bolts lighter than the black
+stage2_rows = 4              # [E] ring welds on the second stage's 9.8 m: not measured, same style as the first stage; the adapter under the trunk stays white, no dark band (Task 4)
+leg_gain = 1.5               # [E] c_nhq_base crop: near black, faint lines
+
 # Second stage: a plain tank cylinder of the config's length, its base (station 0) on the interstage top; below it a dark cone to
 # the engine mount and the Merlin Vacuum at the config's engine station, all inside the interstage.
 [second_stage]

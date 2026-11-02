@@ -28,6 +28,7 @@ import hull_textures  # noqa: E402
 import detail_file  # noqa: E402
 import hull_tiles  # noqa: E402
 import iss_textures  # noqa: E402
+import surface_textures  # noqa: E402
 import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 
@@ -192,10 +193,12 @@ def falcon9_manifest(spec: dict, digest: str, version: str, triangles: dict, tab
     look = {"no_maps": True, "engine_ids": {"sea_level": "merlin1d", "vacuum": "merlin_vacuum"},
             "interstage_base_m": detail["hull"]["interstage_base_m"], "plume_start_at_exit_diameter": True,
             "fin_stow_standoff_m": fin["stow_standoff_m"],
-            "part_materials": {"hull": "paint_hull", "interstage": "paint_interstage", "octaweb": "paint_octaweb",
+            "part_materials": {"hull": "paint_hull", "hull_joint": "paint_joint", "raceway": "paint_raceway", "interstage": "paint_interstage", "octaweb": "paint_octaweb",
                                "engine_plate": "paint_engine_plate"},
             "stage_part_materials": {"second_stage": {"hull": "paint_hull2"}},
             "paint": {"paint_hull": {"albedo": paint["hull_albedo"], "roughness": 0.45, "metallic": 0.0},
+                      "paint_joint": {"albedo": paint["hull_albedo"], "roughness": 0.45, "metallic": 0.0},
+                      "paint_raceway": {"albedo": detail["surface"]["raceway_albedo"], "roughness": 0.6, "metallic": 0.0},
                       "paint_interstage": {"albedo": paint["interstage_albedo"], "roughness": 0.6, "metallic": 0.0},
                       "paint_octaweb": {"albedo": paint["octaweb_albedo"], "roughness": 0.7, "metallic": 0.1},
                       "paint_leg": {"albedo": paint["leg_albedo"], "roughness": 0.6, "metallic": 0.1},
@@ -219,9 +222,9 @@ def dragon_manifest(spec: dict, digest: str, version: str, triangles: dict, tabl
                                "seams": "paint_pod", "nose_seal": "paint_pod", "window": "paint_window", "umbilical": "paint_trunk",
                                "flange": "paint_flange", "hcs_metal": "paint_hook", "hook_pockets": "paint_pod", "ring": "paint_ring", "petal": "paint_ring", "guide_pin": "paint_hook", "hook": "paint_hook",
                                "strut_barrel": "paint_strut", "strut_middle": "paint_hook", "strut_rod": "paint_hook",
-                               "trunk": "paint_trunk", "trunk_array": "paint_array", "trunk_radiator": "paint_radiator"},
+                               "trunk": "paint_trunk", "trunk_array": "paint_array", "trunk_radiator": "paint_radiator", "trunk_slots": "paint_pod"},
             "paint": {"paint_capsule": {"albedo": paint["capsule_albedo"], "roughness": 0.45, "metallic": 0.0},
-                      "paint_shield": {"albedo": paint["shield_albedo"], "roughness": 0.85, "metallic": 0.0},
+                      "paint_shield": {"albedo": surface_textures.shield_albedo(spec["detail"]), "roughness": 0.85, "metallic": 0.0},
                       "paint_band": {"albedo": paint["band_albedo"], "roughness": 0.4, "metallic": 0.7},
                       "paint_cowl": {"albedo": paint["cowl_albedo"], "roughness": 0.45, "metallic": 0.5},
                       "paint_window": {"albedo": paint["window_albedo"], "roughness": 0.1, "metallic": 0.0},
@@ -229,7 +232,7 @@ def dragon_manifest(spec: dict, digest: str, version: str, triangles: dict, tabl
                       "paint_pod": {"albedo": paint["pod_albedo"], "roughness": 0.6, "metallic": 0.1},
                       "paint_trunk": {"albedo": paint["trunk_albedo"], "roughness": 0.5, "metallic": 0.0},
                       "paint_radiator": {"albedo": paint["radiator_albedo"], "roughness": 0.4, "metallic": 0.3},
-                      "paint_array": {"albedo": paint["array_albedo"], "roughness": 0.3, "metallic": 0.4},
+                      "paint_array": {"albedo": paint["array_albedo"], "roughness": 0.28, "metallic": 0.0},
                       "paint_flange": {"albedo": idss["flange_albedo"], "roughness": 0.8, "metallic": 0.0},
                       "paint_ring": {"albedo": idss["ring_albedo"], "roughness": 0.45, "metallic": 0.6},
                       "paint_hook": {"albedo": idss["hook_albedo"], "roughness": 0.35, "metallic": 0.8},
@@ -343,6 +346,11 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
             steel_map = hull_textures.write(staging, spec)
             tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
         textured = iss_textures.write(staging) if table["kind"] == "iss" else {}
+        surface = {}
+        if table["kind"] == "falcon9":
+            surface = surface_textures.write_falcon9(staging, spec)
+        elif table["kind"] == "dragon":
+            surface = surface_textures.write_dragon(staging, spec)
         for gen in table["generators"]:
             cmd = blender_command(exe, SCRIPT_DIR / gen, "--spec", str(spec_file), "--out", str(staging))
             res = subprocess.run(cmd, capture_output=True, text=True)
@@ -362,10 +370,12 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
         manifest["look"]["tile_maps"] = tile_maps
     elif table["kind"] == "dragon":
         manifest = dragon_manifest(spec, digest, version, triangles, table)
+        manifest["look"]["surface"] = surface
     elif table["kind"] == "iss":
         manifest = iss_manifest(spec, digest, version, triangles, table, textured)
     else:
         manifest = falcon9_manifest(spec, digest, version, triangles, table)
+        manifest["look"]["surface"] = surface
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     swap_in(staging, out)
     print(f"build_models: generated {', '.join(outputs)} in {out}; triangles {triangles}")

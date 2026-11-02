@@ -187,7 +187,11 @@ def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENG
     return load_starship(vehicle_id, vehicles_dir, engines_dir)
 
 
+FALCON9_SURFACE_KEYS = ("soot_level", "soot_profile_m", "soot_windward_azimuth_deg", "soot_windward_share", "soot_albedo", "soot_roughness", "raceway_albedo", "hull_tiles_around", "hull_ring_pitch_m",
+                        "hull_line_half_m", "hull_line_depth", "joint_height_m", "joint_rivet_pitch_m", "joint_rivet_radius_m", "joint_rivet_depth", "interstage_gain", "interstage_tiles_around",
+                        "interstage_rows", "interstage_rivet_pitch_m", "interstage_rivet_radius_m", "octaweb_gain", "stage2_rows", "leg_gain")
 FALCON9_DETAIL_KEYS = {
+    "surface": FALCON9_SURFACE_KEYS,
     "hull": ("segments", "base_station_m", "interstage_base_m", "raceway_azimuths_deg", "raceway_width_m", "raceway_height_m",
              "raceway_first_m", "pod_length_m", "pod_width_m", "pod_height_m", "interstage_wall_m"),
     "octaweb": ("cover_top_m", "chamfer_m", "fitting_length_m", "fitting_width_m", "fitting_proud_m"),
@@ -267,6 +271,12 @@ DRAGON_DETAIL_KEYS = {
              "hook_radius_m", "hook_active_mm", "hook_passive_mm", "pin_theta_deg", "receptacle_theta_deg", "seal_diameters_m"),
     "paint": ("capsule_albedo", "shield_albedo", "band_albedo", "cowl_albedo", "pod_albedo", "window_albedo", "deck_albedo", "trunk_albedo", "radiator_albedo", "array_albedo"),
 }
+
+DRAGON_SURFACE_KEYS = ("flown_soot", "shield_new_albedo", "skin_rim_row_x_m", "skin_rivet_pitch_m", "skin_rivet_radius_m", "skin_line_half_m", "skin_seam_rivet_below_m", "skin_seam_paint_half_m", "skin_seam_paint",
+                       "skin_panels", "shield_rings_r_m", "shield_segments", "array_period_m", "array_cells", "array_gain", "array_glass_factor", "radiator_panel_m", "radiator_line_half_m",
+                       "radiator_rivet_pitch_m", "radiator_rivet_radius_m")
+DRAGON_DETAIL_KEYS["surface"] = DRAGON_SURFACE_KEYS
+
 
 def validate_dragon_detail(detail: dict) -> None:
     for table, keys in DRAGON_DETAIL_KEYS.items():

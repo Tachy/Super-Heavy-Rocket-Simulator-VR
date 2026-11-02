@@ -143,6 +143,30 @@ flange_albedo = [0.10, 0.10, 0.105]  # [E] D_Iss065e002827: dark with a blanket'
 hook_albedo = [0.55, 0.55, 0.56]  # [E] bare metal hooks, pins
 strut_albedo = [0.25, 0.25, 0.26]  # [E]
 
+# Baked surfaces (tools/structures/surface_textures.py): our own painted maps, no photo pixels, no lettering. Azimuth 0 = hatch.
+[surface]
+flown_soot = 0.0               # [E] 0 new white (user 2026-11-02, D_Crew_2_..._mate), 1 flown: streaks below the SuperDraco bays, charred shield
+shield_new_albedo = [0.42, 0.42, 0.40]  # [E] unflown underside, D_CCP_Demo_2 (3): pale grey; paint.shield_albedo is the charred one
+skin_rim_row_x_m = 0.82        # [E] D_CCP_Demo_2 (3): a dark row of fasteners just above the bare band
+skin_rivet_pitch_m = 0.07      # [E] same photo: dots along the panel edges
+skin_rivet_radius_m = 0.009    # [E] same photo
+skin_line_half_m = 0.006       # [E] D_Crew_2_..._mate: fine lines
+skin_seam_rivet_below_m = 0.35 # [E] D_CCP_Demo_2 (3): the dotted line round the shoulder under the nose
+skin_seam_paint_half_m = 0.012 # [E] D_Crew_2_..._mate: the seam's red-brown line
+skin_seam_paint = [0.22, 0.09, 0.07]  # [E] multiplier of the white, same photo
+# [az deg, x, half x, half az deg, superellipse power, mirrored, fasteners]
+skin_panels = [[0.0, 1.25, 0.42, 16.0, 4.0, false, true], [21.0, 1.72, 0.14, 3.2, 6.0, false, true], [0.0, 3.3, 0.14, 4.0, 4.0, false, false], [50.0, 2.95, 0.12, 5.0, 6.0, true, false], [68.0, 2.9, 0.09, 4.0, 6.0, true, false], [118.0, 3.0, 0.1, 5.0, 6.0, true, false], [36.0, 1.2, 0.34, 10.0, 3.0, true, false], [144.0, 1.2, 0.34, 10.0, 3.0, true, false]]  # [E] D_CCP_Demo_2 (3), D_Crew_2_..._mate, read by eye
+shield_rings_r_m = [0.7, 1.35] # [E] D_CCP_Demo_2 (3): faint lines on the underside, not measured
+shield_segments = 8            # [E] same photo, not measured
+array_period_m = 0.9           # [E] D_Iss072e096331: grid lines about 0.45 m on the 3.7 m trunk; two modules per tile
+array_cells = 6                # [E] per tile: 0.15 m, the common size of space silicon cells; not resolved in the photos
+array_gain = 6.0               # [E] the map's range over the near-black cell paint
+array_glass_factor = 0.45      # [E] cover glass against the bare grid: the paint's roughness x this; D_Iss072e096331: mirror-like reflections of the station
+radiator_panel_m = 0.4         # [E] D__iss063e026772: about 7 strips over a half panel of 2.8 m; D_SpaceX_Crew_9: fine lengthwise lines
+radiator_line_half_m = 0.005   # [E] D__iss063e026772
+radiator_rivet_pitch_m = 0.1   # [E] same photo, the row near the capsule
+radiator_rivet_radius_m = 0.008  # [E] same photo
+
 [paint]
 capsule_albedo = [0.60, 0.60, 0.62]  # [E] white painted shell, D_CCP_Demo_2 (3), lit indoors
 shield_albedo = [0.07, 0.065, 0.06]  # [E] charred PICA-X (dark grey-brown)
@@ -152,5 +176,5 @@ pod_albedo = [0.05, 0.05, 0.055]     # [E] Draco ports, throats, seam lines: dar
 window_albedo = [0.03, 0.035, 0.04]  # [E] glass, same photo
 deck_albedo = [0.60, 0.60, 0.62]     # [E] white skirt, D_Iss071e186365, D_Iss065e002827: same paint as the capsule
 trunk_albedo = [0.62, 0.62, 0.64]    # [E] white trunk skin and fins, D_Crew_2_..._mate
-radiator_albedo = [0.50, 0.51, 0.53] # [E] light grey radiator panels
+radiator_albedo = [0.58, 0.58, 0.60] # [E] nearly the trunk's white: D_SpaceX_Crew_9, D__iss063e026772
 array_albedo = [0.04, 0.05, 0.09]    # [E] blue-black solar cells, D_Iss072e096331

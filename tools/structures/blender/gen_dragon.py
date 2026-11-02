@@ -225,7 +225,7 @@ def ellipse(mesh, body, x0, az0, hx, haz, lift, power=2.0, rings=4, n=28, hole=0
             dx, da_m = dx * cos_l - da * sin_l, dx * sin_l + da * cos_l
             da = math.degrees(da_m / body.base(x0))
         x, a = x0 + dx, az0 + da
-        return vc.pt(x, math.radians(a), body.surface(x, a) + lift), (da * 0.03, 1.0 - dx)
+        return vc.pt(x, math.radians(a), body.surface(x, a) + lift), (math.radians(a) * 2.0, 1.0 - x)  # the skin's UV: the panels sample the same map
 
     out = vc.radial_dir(math.radians(az0))
     for r in range(rings):
@@ -281,6 +281,17 @@ def build_deck(body, deck, rim, cols, nose_x_lift):
         deck.face([q0, q1, n1, n0], uv, AXIS_X + vc.radial_dir(mid) * 0.3, ("deck", 0))
 
 
+def revolve_planar(mesh, profile, segments, group):
+    """The heat shield, faces towards -X, UV = (Y, Z) metres + half of the map's span (surface_textures.SHIELD_SPAN_M 4.2): the dome's steep apex would stretch an (arc, station) map."""
+    def uv(p):
+        return (p.y + 2.1, 1.0 - (p.z + 2.1))
+    for (x0, r0), (x1, r1) in zip(profile, profile[1:]):
+        for i in range(segments):
+            a0, a1 = 2.0 * math.pi * i / segments, 2.0 * math.pi * (i + 1) / segments
+            pts = [vc.pt(x0, a0, r0), vc.pt(x0, a1, r0), vc.pt(x1, a1, r1), vc.pt(x1, a0, r1)]
+            mesh.face(pts, [uv(p) for p in pts], (-1.0, 0.0, 0.0), group)
+
+
 def build_capsule(spec, out):
     c, cap = spec["detail"]["capsule"], spec["stages"]["capsule"]
     body = Body(spec)
@@ -290,7 +301,7 @@ def build_capsule(spec, out):
     shield, band, hull, floor = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
     prof = body.profile
     edge, band_top = c["shield_edge_x_m"], c["band_top_x_m"]
-    vc.revolve(shield, [([p for p in prof if p[0] <= edge], (-1.0, 0.0, 0.0))], n, 2.0, "heat_shield")
+    revolve_planar(shield, [p for p in prof if p[0] <= edge], n, "heat_shield")
     vc.revolve(band, [([p for p in prof if edge <= p[0] <= band_top], "out")], n, 2.0, "band")
     rim, cols = build_skin(body, hull, floor)
     deck = vc.VMesh()
@@ -360,8 +371,10 @@ def build_nose(spec, out):
     for j in range(n):
         a, b = ring[j], ring[(j + 1) % n]
         mid = math.radians(360.0 * (j + 0.5) / n)
+        u0, u1 = math.radians(360.0 * j / n) * 2.0, math.radians(360.0 * (j + 1) / n) * 2.0  # the capsule skin's UV: the same map
         for k in range(NOSE_ROWS):
-            mesh.face([a[k], b[k], b[k + 1], a[k + 1]], uv, vc.radial_dir(mid) + AXIS_X * (k / NOSE_ROWS), "skin")
+            skin_uv = [(u0, 1.0 - a[k].x), (u1, 1.0 - b[k].x), (u1, 1.0 - b[k + 1].x), (u0, 1.0 - a[k + 1].x)]
+            mesh.face([a[k], b[k], b[k + 1], a[k + 1]], skin_uv, vc.radial_dir(mid) + AXIS_X * (k / NOSE_ROWS), "skin")
         ia, ib = inner[j], inner[(j + 1) % n]
         mesh.face([a[0], b[0], ib[0], ia[0]], uv, -AXIS_X, None)  # the lip
         for k in range(2):
@@ -437,9 +450,10 @@ def build_trunk(spec, out):
     for k, (a0, a1) in enumerate(c["array_azimuths_deg"]):
         patch(array, c["panel_base_m"], x_top, r + c["panel_proud_m"], math.radians(a0), math.radians(a1), ("array", k))
     x0, x1, width = c["trunk_slots_m"]
+    slots = vc.VMesh()  # dark ports: not the cells' map
     for az in c["trunk_slots_azimuths_deg"]:
         half = 0.5 * width / r
-        patch(array, length + x0, length + x1, r + 2.0 * c["panel_proud_m"], math.radians(az) - half, math.radians(az) + half, ("slot", az))
+        patch(slots, length + x0, length + x1, r + 2.0 * c["panel_proud_m"], math.radians(az) - half, math.radians(az) + half, ("slot", az))
     umb = vc.VMesh()
     a = math.radians(c["umbilical_azimuth_deg"])
     e_r, t = vc.radial_dir(a), tangent(a)
@@ -456,7 +470,7 @@ def build_trunk(spec, out):
     xb0 = outline[0][0]
     umb.face([AXIS_X * xt + e_r * rt - t * w, AXIS_X * xt + e_r * rt + t * w, AXIS_X * xt + e_r * inner + t * w, AXIS_X * xt + e_r * inner - t * w], uv, AXIS_X)
     umb.face([AXIS_X * xt + e_r * inner - t * w, AXIS_X * xt + e_r * inner + t * w, AXIS_X * xb0 + e_r * inner + t * w, AXIS_X * xb0 + e_r * inner - t * w], uv, -e_r)
-    tris = body.to_object("trunk", root)[1] + array.to_object("trunk_array", root)[1] + radiator.to_object("trunk_radiator", root)[1] + umb.to_object("umbilical", root)[1]
+    tris = body.to_object("trunk", root)[1] + array.to_object("trunk_array", root)[1] + radiator.to_object("trunk_radiator", root)[1] + slots.to_object("trunk_slots", root)[1] + umb.to_object("umbilical", root)[1]
     vc.export_selected(Path(out) / "dragon_trunk.gltf", [root])
     vc.report_triangles("dragon_trunk", tris)
 

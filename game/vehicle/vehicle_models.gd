@@ -25,7 +25,7 @@ const SOURCE_SCRIPTS := {
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
 	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
-const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": ["iss_textures.py"]}
+const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py"], "iss": ["iss_textures.py"]}
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
 const ENGINE_FILE := {false: "raptor", true: "rvac"}
 const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
@@ -33,6 +33,7 @@ const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
 const DEFAULT_EXIT_DEPTH_M := 3.0
 const HULL_SHADER := preload("res://shaders/vehicle_hull.gdshader")
 const MAPPED_SHADER := preload("res://shaders/lit_aerial_mapped.gdshader")
+const PAINTED_SHADER := preload("res://shaders/vehicle_painted.gdshader")
 ## "booster" = the booster hull: mode 0 with the baked steel map (the ship's hull carries it in mode 1).
 const HULL_MODE := {"steel": 0, "booster": 0, "ship": 1, "flap": 2, "fin_frame": 0, "fin_cells": 0, "fin_band": 0, "dark": 0}
 ## [E] Sunlit frames (NSF photo 2026-03, aerial 2026-04, f12 file 1804 s): the fin rim reads dark grey, the cells black. Albedo
@@ -259,7 +260,51 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 		mapped.set_shader_parameter("albedo_map", ImageTexture.create_from_image(image))
 		mapped.set_shader_parameter("map_period_m", Vector2(textured[key]["period_m"][0], textured[key]["period_m"][1]))
 		materials[key] = mapped
+	var surface: Dictionary = look.get("surface", {})
+	var loaded := {}  # file -> texture: parts sharing a map share its memory
+	for key: String in surface:  # a painted part with its baked surface (Falcon 9, Crew Dragon); a missing file keeps the plain paint, one log line
+		var entry: Dictionary = surface[key]
+		var detail: ImageTexture = _surface_map(String(entry["file"]), model_dir, Image.FORMAT_RGBA8, loaded)
+		if detail == null:
+			_say("VehicleModels: %s: surface map %s missing, plain paint" % [vehicle_id, entry["file"]])
+			continue
+		var paint: Dictionary = look["paint"][key]
+		var albedo: Array = paint["albedo"]
+		var finished := ShaderMaterial.new()
+		finished.shader = PAINTED_SHADER
+		finished.set_shader_parameter("albedo", Color(albedo[0], albedo[1], albedo[2]))
+		finished.set_shader_parameter("roughness", float(paint["roughness"]))
+		finished.set_shader_parameter("metallic", float(paint["metallic"]))
+		finished.set_shader_parameter("detail_map", detail)
+		finished.set_shader_parameter("detail_period_m", Vector2(entry["period_m"][0], entry["period_m"][1]))
+		finished.set_shader_parameter("detail_gain", float(entry["gain"]))
+		if entry.has("wear_file"):
+			var wear: ImageTexture = _surface_map(String(entry["wear_file"]), model_dir, Image.FORMAT_R8, loaded)
+			if wear != null:
+				var soot: Array = entry["wear_albedo"]
+				finished.set_shader_parameter("wear_map", wear)
+				finished.set_shader_parameter("wear_period_m", Vector2(entry["wear_period_m"][0], entry["wear_period_m"][1]))
+				finished.set_shader_parameter("wear_albedo", Vector3(soot[0], soot[1], soot[2]))
+				finished.set_shader_parameter("wear_roughness", float(entry["wear_roughness"]))
+		materials[key] = finished
 	return materials
+
+
+## One baked surface map with its mip chain (box averages of linear data); null without the file.
+static func _surface_map(file: String, model_dir: String, format: Image.Format, loaded: Dictionary) -> ImageTexture:
+	if loaded.has(file):
+		return loaded[file]
+	var path := model_dir.path_join(file)
+	if not FileAccess.file_exists(path):
+		return null
+	var image := Image.load_from_file(path)
+	if image == null or image.is_empty():
+		return null
+	image.convert(format)
+	image.generate_mipmaps()
+	var texture := ImageTexture.create_from_image(image)
+	loaded[file] = texture
+	return texture
 
 
 ## The baked steel map (tools/structures/hull_textures.py) with a full mip chain made here: a plain box average of

@@ -145,6 +145,7 @@ func _check_falcon9() -> bool:
 	view.sync([stage_1, stage_2], [merlin, mvac], [], [fin], 0.0, snapshot_legs)
 	var node := view.get_child(0).get_node_or_null("stage_first_stage") as Node3D
 	_check(node != null and node.get_node_or_null("interstage") != null and node.get_node_or_null("octaweb") != null, "first stage: hull, interstage, octaweb nodes")
+	_check_baked(node, ["hull", "hull_joint", "interstage", "octaweb"], "first stage")
 	_check(_cylinders(view) == 0 and view.find_children("ModelNotice", "Label3D", true, false).is_empty(), "both stages modelled, no cylinder, no notice")
 	var upper := view.get_child(0).get_node_or_null("stage_second_stage") as Node3D
 	_check(upper != null and upper.get_node_or_null("hull") != null, "second stage: hull node")
@@ -258,6 +259,11 @@ func _check_dragon() -> bool:
 	_check(present, "capsule: capsule, heat_shield, deck, superdraco_pod, draco_pod, nose_cone nodes")
 	_check(trunk_node != null and ["trunk", "trunk_array", "trunk_radiator"].all(func(n: String) -> bool: return trunk_node.get_node_or_null(n) != null),
 			"trunk: trunk, trunk_array, trunk_radiator nodes")
+	_check_baked(trunk_node, ["trunk_array", "trunk_radiator"], "trunk")
+	_check_baked(capsule_node, ["capsule", "heat_shield", "band", "superdraco_pod"], "capsule")
+	if capsule_node != null:
+		var nose_parts := capsule_node.find_children("nose_cone", "MeshInstance3D", true, false)
+		_check(nose_parts.size() == 1 and (nose_parts[0] as MeshInstance3D).material_override == (capsule_node.get_node("capsule") as MeshInstance3D).material_override, "capsule: the nose shares the skin's material")
 	_check(_cylinders(view) == 0 and view.find_children("ModelNotice", "Label3D", true, false).is_empty(), "both stages modelled, no cylinder, no notice")
 	var nose_node := capsule_node.get_node("nose_cone") as Node3D
 	_check(nose_node.transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.0)) and is_zero_approx(view.nose_fraction()), "nose closed with nose_cone_open false")
@@ -925,6 +931,16 @@ func _plume_top(view: VehicleView, index: int) -> Vector3:
 	var plume: MeshInstance3D = view._plumes[index]
 	var cone := plume.mesh as CylinderMesh
 	return plume.transform * Vector3(0.0, cone.height * 0.5, 0.0)
+
+
+## Parts with a baked surface carry the painted shader and a mipped detail map (surface_textures.py).
+func _check_baked(stage_node: Node3D, parts: Array, label: String) -> void:
+	for part: String in parts:
+		var instance := stage_node.get_node_or_null(part) as MeshInstance3D if stage_node != null else null
+		var material := instance.material_override as ShaderMaterial if instance != null else null
+		var ok := material != null and material.shader == VehicleModels.PAINTED_SHADER
+		var map: Texture2D = material.get_shader_parameter("detail_map") if ok else null
+		_check(map != null and map.get_image().has_mipmaps(), "%s: %s has its baked, mipped surface" % [label, part])
 
 
 func _cylinders(view: VehicleView) -> int:
