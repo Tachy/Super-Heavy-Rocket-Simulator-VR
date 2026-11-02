@@ -1,4 +1,386 @@
-# Visual detail of iss (International Space Station, docking rings): what the physics does not need.
-# STUB (plan 2026-11-02-falcon-dragon-iss-models, Task 2): no content yet, the generators and their tables come with
-# the ISS tasks. Placement and size come from config/vehicles/iss.toml; this file never repeats them.
-# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+# Measured layout of the ISS (NASA 3D Resources model D, IGOAL; vertices read by tools/structures/measure/iss_measure.py, nothing copied).
+# Station frame of config/vehicles/iss.toml: x forward from the aft end of the Russian segment (Zvezda aft end), y starboard and z nadir from the module axis.
+# Accuracy: scale +-0.5 % (cross-checks in docs/subsystems/iss.md), plane and axis fits +-0.1 m; extents include fittings of the node's own mesh.
+# Gaps against config/vehicles/iss.toml: see docs/subsystems/iss.md (Model D measurement).
+
+[scale]
+metres_per_unit = 0.025420                      # [D] NASA ISS model D, vertex extents by script (iss_measure.py): 109 m span with the P6/S6 arrays turned broadside; the file's unit is 1 inch
+truss_end_to_end_m = 97.92                   # [D] NASA ISS model D, vertex extents by script (iss_measure.py): truss without arrays
+array_span_m = 109.00                        # [D] NASA ISS model D, vertex extents by script (iss_measure.py): 109 m [S: NASA / Wikipedia 'width']
+aft_end_model_x_m = -35.76                      # [D] NASA ISS model D, vertex extents by script (iss_measure.py): model x of the Russian segment aft end (config x = model x - this)
+module_axis_below_truss_m = 4.85               # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+
+[[module]]
+id = "Zarya_FGB"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 12.76  # [D]
+barrel_radius_m = 2.07  # [D]
+min_m = [13.18, -5.46, -2.95]  # [D]
+max_m = [25.94, 5.46, 1.57]  # [D]
+
+[[module]]
+id = "Zvezda_SM"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 13.17  # [D]
+barrel_radius_m = 2.20  # [D]
+min_m = [0.00, -15.39, -2.81]  # [D]
+max_m = [13.17, 15.39, 1.64]  # [D]
+
+[[module]]
+id = "Node1"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 5.86  # [D]
+barrel_radius_m = 2.23  # [D]
+min_m = [27.80, -2.22, -2.22]  # [D]
+max_m = [33.66, 2.23, 2.23]  # [D]
+
+[[module]]
+id = "USLab"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 9.08  # [D]
+barrel_radius_m = 2.23  # [D]
+min_m = [33.34, -2.22, -2.22]  # [D]
+max_m = [42.42, 2.23, 2.22]  # [D]
+
+[[module]]
+id = "Node2"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 7.16  # [D]
+barrel_radius_m = 2.47  # [D]
+min_m = [41.96, -2.24, -2.23]  # [D]
+max_m = [49.12, 2.52, 2.62]  # [D]
+
+[[module]]
+id = "PMA1"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 2.76  # [D]
+barrel_radius_m = 1.37  # [D]
+min_m = [25.53, -1.29, -1.57]  # [D]
+max_m = [28.29, 1.30, 1.27]  # [D]
+
+[[module]]
+id = "PMA2"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "x"  # [D]
+length_m = 2.76  # [D]
+barrel_radius_m = 1.46  # [D]
+min_m = [48.67, -1.31, -1.29]  # [D]
+max_m = [51.43, 1.50, 1.78]  # [D]
+
+[[module]]
+id = "PMA3"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "z"  # [D]
+length_m = 2.76  # [D]
+barrel_radius_m = 1.42  # [D]
+min_m = [45.44, -1.31, -4.59]  # [D]
+max_m = [48.52, 1.49, -1.83]  # [D]
+
+[[module]]
+id = "Node3"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 7.05  # [D]
+barrel_radius_m = 2.41  # [D]
+min_m = [29.08, -9.04, -2.43]  # [D]
+max_m = [33.84, -1.99, 2.25]  # [D]
+
+[[module]]
+id = "Cupola"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "z"  # [D]
+length_m = 1.54  # [D]
+barrel_radius_m = 1.13  # [D]
+min_m = [29.92, -7.94, 1.89]  # [D]
+max_m = [32.51, -5.45, 3.43]  # [D]
+
+[[module]]
+id = "Columbus"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 6.72  # [D]
+barrel_radius_m = 2.42  # [D]
+min_m = [44.24, 1.97, -2.25]  # [D]
+max_m = [49.01, 8.69, 2.25]  # [D]
+
+[[module]]
+id = "JEM_PM"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 11.43  # [D]
+barrel_radius_m = 2.38  # [D]
+min_m = [44.11, -13.38, -2.24]  # [D]
+max_m = [49.34, -1.96, 2.49]  # [D]
+
+[[module]]
+id = "JEM_PS"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 5.26  # [D]
+barrel_radius_m = 2.52  # [D]
+min_m = [44.49, -12.58, -6.00]  # [D]
+max_m = [49.24, -7.33, -1.87]  # [D]
+
+[[module]]
+id = "Airlock"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 5.64  # [D]
+barrel_radius_m = 1.72  # [D]
+min_m = [28.42, 1.95, -3.05]  # [D]
+max_m = [33.76, 7.58, 3.43]  # [D]
+
+[[module]]
+id = "Bishop_Airlock"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 1.88  # [D]
+barrel_radius_m = 1.07  # [D]
+min_m = [30.04, -10.53, -1.24]  # [D]
+max_m = [32.53, -8.64, 1.25]  # [D]
+
+[[module]]
+id = "BEAM"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 3.43  # [D]
+barrel_radius_m = 2.20  # [D]
+min_m = [25.23, -8.37, -1.71]  # [D]
+max_m = [29.43, -4.94, 1.71]  # [D]
+
+[[module]]
+id = "MLM"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "z"  # [D]
+length_m = 13.00  # [D]
+barrel_radius_m = 4.50  # [D]
+min_m = [9.99, -12.05, 0.40]  # [D]
+max_m = [20.43, 12.01, 13.41]  # [D]
+
+[[module]]
+id = "MRM1"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "z"  # [D]
+length_m = 6.01  # [D]
+barrel_radius_m = 1.95  # [D]
+min_m = [22.13, -1.27, 0.39]  # [D]
+max_m = [27.09, 1.90, 6.40]  # [D]
+
+[[module]]
+id = "MRM2"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "z"  # [D]
+length_m = 4.05  # [D]
+barrel_radius_m = 1.27  # [D]
+min_m = [10.78, -1.29, -5.89]  # [D]
+max_m = [13.32, 1.26, -1.84]  # [D]
+
+[[module]]
+id = "Russian_RSNode_DockingModule"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "z"  # [D]
+length_m = 4.09  # [D]
+barrel_radius_m = 1.52  # [D]
+min_m = [10.48, -1.60, 12.91]  # [D]
+max_m = [13.63, 1.56, 17.00]  # [D]
+
+[[module]]
+id = "PMM"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = "y"  # [D]
+length_m = 4.49  # [D]
+barrel_radius_m = 3.37  # [D]
+min_m = [33.32, -8.89, -2.24]  # [D]
+max_m = [39.77, -4.40, 2.25]  # [D]
+
+[[truss]]
+id = "Truss_S0"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [33.01, -6.71, -7.09]  # [D]
+max_m = [42.84, 6.71, -0.88]  # [D]
+
+[[truss]]
+id = "Truss_P1"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [35.59, -20.37, -7.33]  # [D]
+max_m = [37.49, -6.55, -2.38]  # [D]
+
+[[truss]]
+id = "Truss_S1"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [35.59, 6.56, -7.47]  # [D]
+max_m = [37.49, 20.38, -2.38]  # [D]
+
+[[truss]]
+id = "Truss_P3"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [34.00, -26.09, -7.09]  # [D]
+max_m = [37.49, -20.34, -2.58]  # [D]
+
+[[truss]]
+id = "Truss_S3"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [33.85, 20.33, -7.33]  # [D]
+max_m = [37.50, 26.08, -2.38]  # [D]
+
+[[truss]]
+id = "Truss_P4"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [34.07, -33.74, -7.08]  # [D]
+max_m = [37.45, -25.98, 10.34]  # [D]
+
+[[truss]]
+id = "Truss_S4"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [34.07, 25.83, -7.33]  # [D]
+max_m = [38.19, 33.75, 10.34]  # [D]
+
+[[truss]]
+id = "Truss_P5"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [32.54, -35.81, -7.33]  # [D]
+max_m = [36.60, -32.15, -2.37]  # [D]
+
+[[truss]]
+id = "Truss_S5"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [34.92, 32.16, -7.33]  # [D]
+max_m = [38.98, 35.81, -2.37]  # [D]
+
+[[truss]]
+id = "Truss_P6"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [33.12, -48.84, -7.08]  # [D]
+max_m = [37.20, -35.42, 10.35]  # [D]
+
+[[truss]]
+id = "Truss_S6"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [34.48, 35.43, -7.07]  # [D]
+max_m = [37.52, 48.76, 10.35]  # [D]
+
+[[truss]]
+id = "Z1"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [29.22, -5.09, -10.29]  # [D]
+max_m = [32.80, 2.65, -1.92]  # [D]
+
+[[array]]
+id = "P4_Array_2A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [-0.92, -34.62, -11.22]  # [D]
+max_m = [34.29, -32.92, 0.19]  # [D]
+
+[[irosa]]
+id = "IROSA_Deployed_P44A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [38.67, -32.50, -7.17]  # [D]
+max_m = [57.63, -28.74, -1.19]  # [D]
+
+[[array]]
+id = "P4_Array_4A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [36.52, -34.62, -9.90]  # [D]
+max_m = [71.73, -32.92, 1.51]  # [D]
+
+[[irosa]]
+id = "IROSA_Deployed_P62B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [38.67, -47.54, -7.17]  # [D]
+max_m = [57.63, -43.77, -1.19]  # [D]
+
+[[array]]
+id = "P6_2B_Array"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [36.52, -49.65, -9.90]  # [D]
+max_m = [71.73, -47.95, 1.51]  # [D]
+
+[[irosa]]
+id = "IROSA_Deployed_P64B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [13.19, -47.54, -8.53]  # [D]
+max_m = [32.15, -43.77, -2.54]  # [D]
+
+[[array]]
+id = "P6_4B_Array"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [-0.92, -49.65, -11.22]  # [D]
+max_m = [34.29, -47.95, 0.18]  # [D]
+
+[[irosa]]
+id = "IROSA_Deployed_S41A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [39.36, 28.67, -8.51]  # [D]
+max_m = [58.32, 32.44, -2.52]  # [D]
+
+[[array]]
+id = "S4_Array_1A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [37.23, 32.86, -11.22]  # [D]
+max_m = [72.44, 34.56, 0.19]  # [D]
+
+[[irosa]]
+id = "IROSA_Deployed_S43A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [13.89, 28.69, -7.18]  # [D]
+max_m = [32.85, 32.45, -1.19]  # [D]
+
+[[array]]
+id = "S4_Array_3A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [-0.21, 32.86, -9.90]  # [D]
+max_m = [35.10, 34.60, 1.51]  # [D]
+
+[[irosa]]
+id = "IROSA_Deployed_S61B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [13.89, 43.78, -7.17]  # [D]
+max_m = [32.85, 47.54, -1.18]  # [D]
+
+[[array]]
+id = "S6_1B_Array"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [-0.21, 47.95, -9.89]  # [D]
+max_m = [35.00, 49.65, 1.51]  # [D]
+
+[[array]]
+id = "S6_3B_Array"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [37.23, 47.95, -11.21]  # [D]
+max_m = [72.44, 49.65, 0.19]  # [D]
+
+[[radiator]]
+id = "P1_Radiator"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [12.47, -20.48, -6.94]  # [D]
+max_m = [35.66, -8.90, -2.74]  # [D]
+
+[[radiator]]
+id = "S1_Radiator"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+min_m = [12.47, 8.90, -7.01]  # [D]
+max_m = [35.66, 20.48, -2.77]  # [D]
+
+[[joint]]
+id = "PORT_BETA_ROT_2A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [33.02, -33.46, -5.51]  # [D]
+
+[[joint]]
+id = "PORT_BETA_ROT_4A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [37.79, -33.46, -4.19]  # [D]
+
+[[joint]]
+id = "PORT_BETA_ROT_2B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [37.79, -48.48, -4.20]  # [D]
+
+[[joint]]
+id = "PORT_BETA_ROT_4B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [33.02, -48.48, -5.52]  # [D]
+
+[[joint]]
+id = "PORT_ALPHA_ROT"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [35.76, -17.79, -4.85]  # [D]
+
+[[joint]]
+id = "STBD_BETA_ROT_1A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [38.51, 33.40, -5.51]  # [D]
+
+[[joint]]
+id = "STBD_BETA_ROT_3A"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [33.72, 33.40, -4.19]  # [D]
+
+[[joint]]
+id = "STBD_BETA_ROT_1B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [33.72, 48.48, -4.19]  # [D]
+
+[[joint]]
+id = "STBD_BETA_ROT_3B"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [38.51, 48.48, -5.51]  # [D]
+
+[[joint]]
+id = "STBD_ALPHA_ROT"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [35.76, 17.79, -4.85]  # [D]
+
+[[joint]]
+id = "PORT_TRRJ_GAMMA_ROT"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [28.98, -14.69, -4.85]  # [D]
+
+[[joint]]
+id = "STBD_TRRJ_GAMMA_ROT"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py): node origin = rotation axis point
+origin_m = [28.98, 14.69, -4.85]  # [D]
+
+[[port]]
+id = "ida2"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = [1.00, 0.00, 0.00]  # [D]
+mating_face_m = [51.87, 0.02, 0.72]  # [D]
+ring_axis_offset_from_harmony_axis_m = 0.72  # [D]
+ring_radius_m = 0.749  # [D]
+petal_tip_radius_m = 0.650  # [D]
+petal_length_m = 0.295  # [D]
+
+[[port]]
+id = "ida3"                              # [D] NASA ISS model D, vertex extents by script (iss_measure.py)
+axis = [0.00, 0.00, -1.00]  # [D]
+mating_face_m = [47.45, 0.02, -5.03]  # [D]
+ring_axis_offset_from_harmony_axis_m = 0.72  # [D]
+ring_radius_m = 0.749  # [D]
+petal_tip_radius_m = 0.650  # [D]
+petal_length_m = 0.295  # [D]
+

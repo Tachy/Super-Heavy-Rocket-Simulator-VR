@@ -52,6 +52,70 @@ COMPLETE 2026-10-20.
   one revolution of the window edges it cannot be read: assumed posigrade (reboosts are), the `note` names it. Event
   names may contain "(": only lines starting with "(", "|" or "=" are skipped.
 
+### Layout measured from NASA model D (Task 7, plan 2026-11-02-falcon-dragon-iss-models)
+- **Source and method.** NASA 3D Resources ISS (D) IGOAL (`screenshots/falcon9_ref/models/iss/d_igoal/`, git-ignored,
+  public domain). `tools/structures/measure/iss_measure.py` reads the glTF JSON and decodes the Draco vertex buffers
+  (DracoPy, `-I`, nothing executed, no mesh data in the repo): per-node vertex extents, barrel radii, joint origins,
+  IDA ring fits. Result table with [D] tags: `config/vehicles/detail/iss.toml` (config station frame). Frames: the root
+  node has a negative uniform scale; undone, the file's local axes are x forward, y nadir, z port (checked: Columbus
+  starboard / Kibo port of Harmony, PMA-3 above it); station frame (x fwd, y starboard, z nadir) = (x, -z, y).
+- **Scale: 0.02542 m per vertex unit (the file's unit is the inch), not "truss = 109 m".** Taking the end-to-end truss
+  (97.9 m measured) as 109 m gives 0.02830 and makes every module 11-19 % too big (Zarya 4.65 m diameter against 4.11,
+  Zvezda 4.96 against 4.35, iROSA 21.1 x 6.7 m against about 18.9 x 6.1). The 109 m is the span across the P6 / S6
+  arrays turned broadside (centre to centre 97.5 m plus one blanket width 11.4 m = 108.9 m; scale from that: 0.025420,
+  = 1.0008 inch). Independent checks at that scale: S0 13.43 m (published 13.4), S1 / P1 13.83 (13.7), SAW 35.2 x 11.4
+  (35 x 11.6), iROSA 18.96 x 5.99, Zarya 12.76 long x 4.14 (12.56 x 4.11), Zvezda 13.17 (13.1), Harmony 7.16 (7.2).
+  Published values quoted from memory (not re-fetched), error of the scale about +-0.5 %; a search for the SAW and the
+  truss length found sources only for the iROSA (18.2-19 m x 6 m) and for a truss of 108-110 m (that figure is the
+  span with the arrays, see above).
+- **Layout in the config frame** (x from the aft end of the Russian segment, Zvezda hull at model x -35.76 m): Zvezda
+  0-13.2, Zarya 13.2-25.9 (the config's Russian capsule 0-26 holds), PMA-1 25.5-28.3, Unity 27.8-33.7, Destiny
+  33.3-42.4, Harmony 42.0-49.1 (7.16 m, barrel radius 2.2, CBM petals to 2.5), PMA-2 48.7-51.4, IDA-2 face 51.87; truss
+  S0 centre at x 35.76 (mesh 33.0-42.8), truss axis 4.85 m zenith of the module axis, truss y +-48.8 m (arrays: P6 /
+  S6 centres y +-48.8, P4 / S4 +-33.8, blankets 35.2 x 11.4 m, iROSA 18.96 x 5.99 m, alpha joints y +-17.8, beta
+  joints y +-33.5 / +-48.5, radiator joints (TRRJ) y +-14.7); radiators P1 / S1 23.2 x 11.6 m (y +-14.7, trailing).
+- **Ports.** Both IDAs sit **0.72 m off the Harmony axis**: IDA-2 ring axis at z +0.73 (nadir of the module axis), IDA-3
+  ring axis 0.73 m forward of the Harmony centre (x 47.45 against 46.72). Ring (mesh) outer face = mating plane: IDA-2
+  x 51.87, IDA-3 z -5.03; petals 0.295 m long beyond the base, tip radius 0.65 m, ring base radius 0.75 m. Petal
+  clocking (port frame x outward, z up, y = z x x; angle from y towards up, +-3 deg): IDA-2 petal bodies at 58 / 178 / 302
+  deg, feet at 359 / 117 / 241; IDA-3 (up = forward) bodies at 358 / 122 / 238, feet at 61 / 179 / 297 (identical
+  parts, the 60 deg step follows from the two port frames). Looked at in close views
+  (`screenshots/iss_measure/ida2_*.png`, `ida3_*.png`).
+- **Config change** (outside the error, old -> new; tag table below): IDA-2 `position_m` [73.0, 0, 0] -> [51.87, 0, 0.72], IDA-3 [66.0,
+  0, -5.0] -> [47.45, 0, -5.0] (z -5.03 measured, kept). The old x came from an inflated forward half (US stack to 69,
+  Harmony at 66): measured 21 m too far forward. The hull capsules that hang on the ports follow (US modules end 49.1,
+  PMA-2 49.1-51.37, PMA-3 on the Harmony axis, Columbus / Kibo at x 46.72), CG 38 m and truss / array boxes unchanged
+  (CG over Destiny stays right: Destiny centre 37.9). Error of the new x: plane definition +-0.1 m, scale 0.25 m, aft
+  end +-0.3 m: **+-0.5 m**. Lever of IDA-2 from the CG: 35 m -> 13.9 m.
+- **Tags after the port change** (`[iss] [docking] [proximity] [rendezvous] [iss_mission]`, 266 cases, 265 passed; the
+  one red is the known `Docked tanker: the ship return flies to the catch`, unchanged). Verbose numbers, Task 6 build
+  (old) against Task 7 (new), limit as tested:
+
+  | quantity | old | new | limit |
+  |---|---|---|---|
+  | chain IDA-2: contact / docked after / propellant | 61.8 min / 10.2 min / 31.8 kg | 62.5 / 10.0 / 31.6 | docked 8-13 min |
+  | chain IDA-2: peak compression / shear / bending | 956 / 92 / 250 N m | 928 / 93 / 434 | 6500 N / 3200 N / 2800 N m |
+  | chain IDA-3: contact / docked after / propellant | 98.0 / 10.0 / 63.5 | 98.8 / 10.2 / 65.7 | docks within 4 h |
+  | chain IDA-3: peak compression / shear / bending | 970 / 108 / 230 | 970 / 88 / 270 | as above |
+  | IDSS grid, 2 x 16 cases: docked; max comp / shear / bending / torsion | 32/32; 1254 / 631 / 2054 / 761 | 32/32; 1254 / 631 / 2055 / 761 | 6500 N / 3200 N / 2800 N m / 1500 N m |
+  | undock IDA-2: separation / departure complete / propellant | 0.0844 m/s / 41.0 min / 5.0 kg | 0.0844 / 40.3 / 5.0 | 60 min / 60 kg |
+  | departure CW guidance IDA-2: sphere / ellipsoid exit; 0.30 m/s, kg | 474 s / 2273 s; 6.5 | same | ellipsoid within 3600 s |
+  | departure CW guidance IDA-3 | 477 s / 1619 s; 6.7 | same | same |
+  | undock -> splashdown: departure kg / RCS left | 5.2 / 1890 kg | 5.2 / 1878 | splashdown reached |
+
+  The shifts (contact +0.7 min, IDA-3 +2.2 kg, bending +184 N m at IDA-2) follow the shorter lever from the station CG
+  (the port moves 21 m closer to the CG, so the station's rotation drags the port 0.015 instead of 0.039 m/s and the
+  transfer legs end at different points); no limit is touched. Test fixtures that said "station x = N m" now convert
+  through the configured IDA-2 position (`docking_test_support.hpp`), `beside_modules` stands at station x 30 m (45 m is
+  inside Columbus now), the hull-contact check at x 30.
+- **Gaps of the config against the real station** (not changed here, next task): no Unity / Destiny / Node 3 / Cupola /
+  Quest / Bishop / BEAM / PMM / Z1 shapes (the US stack is one capsule), no Nauka (MLM, nadir of Zvezda, x 10-20.4,
+  13 m long, with the ERA arm), Prichal (nadir of Nauka, x 10.5-13.6), Rassvet (MRM1, nadir of Zarya, x 22-27), Poisk
+  (MRM2, zenith of Zvezda, x 10.8-13.3), no iROSA (6 in the model on 8 array positions), no radiators; the truss box
+  (half y 54.5) is 5.7 m wider than the truss (48.8, without array width); the array boxes stand at y +-38 against
+  blankets at +-33.8 / +-48.8; truss centre x 38 against S0 at 35.76 (mesh centre 37.9). The name search of Task 1 found no
+  Nauka / Prichal because the nodes are `MLM` and `Russian_RSNode_DockingModule`.
+
 ### Crew Dragon translation and relative navigation (i2)
 - **Draco layout** [E] kept (user 2026-10-19). Test threshold lateral >= 0.04 m/s^2 [E] (1 m/s in 25 s).
 - **Pure translation capability:** `RcsAllocator::pure_force_capability_n` (largest force whose allocation leaves torque
@@ -322,15 +386,23 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
 
   | case | result |
   |---|---|
-  | IDA-2 from Waypoint 0 | contact 61.8 min, docked 10.2 min later, 31.2 kg, comp 922 N, shear 93 N, bending 557 N m |
-  | IDA-3 from Waypoint 0 | contact 98.0 min, docked 10.2 min later, 64.0 kg, comp 943 N, shear 118 N, bending 262 N m |
-  | IDSS grid 2^(6-2) x 2 ports (axial, offset, angle, roll, lateral, rate) | 32/32 docked; max comp 1254 N, shear 600 N, bending 2035 N m, torsion 761 N m |
+  | IDA-2 from Waypoint 0 | contact 62.5 min, docked 10.0 min later, 31.6 kg, comp 928 N, shear 93 N, bending 434 N m |
+  | IDA-3 from Waypoint 0 | contact 98.8 min, docked 10.2 min later, 65.7 kg, comp 970 N, shear 88 N, bending 270 N m |
+  | IDSS grid 2^(6-2) x 2 ports (axial, offset, angle, roll, lateral, rate) | 32/32 docked; max comp 1254 N, shear 631 N, bending 2055 N m, torsion 761 N m |
   | 0.30 m offset / 10 deg / 0.28 m/s | "Versatz zu groß" / "Winkel zu groß" / "Überlast" -> retreat to Waypoint 2 -> resume -> docked |
   | docked 24 h with a 0.3 m/s reboost | the pair moves together, port error < 1 mm |
   | undock -> departure -> capsule return | 0.0844 m/s, departure 3.6 kg, deorbit 58 h later (7-day pass search), splashed down, 1871 kg RCS left |
 
   Departure CW guidance: IDA-2 sphere left after 473 s, ellipsoid after 2290 s, 0.30 m/s, 6.5 kg; IDA-3 475 s / 1610 s
-  (Demo-1 6.8 / 17 min with larger burns). Session IDA-2: departure complete 33 min after the springs, 3.4 kg.
+  (Demo-1 6.8 / 17 min with larger burns). Session IDA-2: departure complete 40.3 min after the springs, 5.0 kg
+  (limits 60 min, 60 kg; 33.3 min / 3.4 kg before the Dragon port moved from 4.0 to 4.22 m, 41.0 min / 5.0 kg
+  after it, 40.3 min with the model-D station ports of Task 7). The step is not a lever effect:
+  `breakout_delta_v` takes the smallest magnitude (0.3 m/s) and then, among 27 directions, the one with the largest
+  minimum range after the exit; the leading candidates tie within < 1 m of ~220 m, so any small change of the start state
+  can flip the pick (review emulation: 0.22 m flips 14 of 75 cases). Propellant per m/s differs ~4x by axis (+x 4.25,
+  lateral 16.2 kg/(m/s)), the exit time follows the arc. This cause is the review's probable one, **not proven**: the
+  direction chosen by the old run was not recorded. Departure time and propellant therefore move in steps with small
+  changes of Dragon or the state; both limits hold.
 - **Missions** (OEM fixture): `crew_dragon_iss` start (window + plan) < 0.1 s, hard capture at IDA-2 7.0 h after the
   window's liftoff, 583 kg RCS; IDA-3 at 40 deg on the synthetic orbit docked 9.2 h after the start; pad -> hard capture
   **7.5 h** after liftoff, 4 rendezvous burns, 0 re-plans, 612 kg. The flown ascent lands 0.0055 deg off the planned plane
@@ -354,5 +426,10 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   boost leaves the perigee); a phase trim burn after drag tracking would be the fix.
 - Manual proximity control is M7.
 - US76 density vs NASA's model dominates the OEM along-track error (above).
+- Petal lean: physics 30 deg [E, no source] against 45 deg in the drawn IDD (height 200 mm, radial 600 -> 400 mm). Physics
+  unchanged. At 45 deg the capture radius would be 0.41 m (now 0.01 + 0.4 tan 30 = 0.24 m) and the axial force per
+  lateral force 1.0 (now 0.58), so the axial load from off-axis petal contact is understated. Changing it needs a re-tune
+  of `ring_lateral_range_m` (its comment rests on 0.24) and a docking campaign; the decision is the user's.
+- Departure direction pick is a discrete selector (see Validation, departure): step changes of time and propellant.
 - Station attitude is ideal; J2 short-period terms are not restored on the synthetic orbit; no structural model for
   collisions; later departure burns are not modelled.

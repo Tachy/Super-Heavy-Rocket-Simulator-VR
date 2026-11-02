@@ -134,7 +134,7 @@ def validate_detail(detail: dict) -> None:
 
 
 _VALUE_LINE = re.compile(r"^\s*[A-Za-z_][\w.]*\s*=")
-_TAG = re.compile(r"#.*\[(E|S)\]")
+_TAG = re.compile(r"#.*\[(E|S|D)\]")  # D: measured / derived (config/README.md)
 
 
 def value_lines_without_tag(path) -> list[tuple[int, str]]:

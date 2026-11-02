@@ -57,7 +57,8 @@ TEST_CASE("A port behind a closed nose cone is covered", "[iss][rendezvous][port
     CHECK_FALSE(vehicle::port_kinematics(*iss, "ida2").covered);
     // IDA-3 sits on the station stage (base 0) at its configured position relative to the CG
     const auto k = vehicle::port_kinematics(*iss, "ida3");
-    const Vec3 expected = Vec3{66.0, 0.0, -5.0} - iss->vehicle().mass_properties().cg_point_m();
+    const Vec3 ida3_config_m = config::load_vehicle(config_dir, "iss").stages.front().docking_ports.at(1).position_m;
+    const Vec3 expected = ida3_config_m - iss->vehicle().mass_properties().cg_point_m();
     CHECK(norm(k.position_gcrf_m - Vec3{6.8e6, 0.0, 0.0} - expected) < 1e-9);
 }
 

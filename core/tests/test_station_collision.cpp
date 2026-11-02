@@ -67,14 +67,14 @@ TEST_CASE("Hull contact: a Dragon point inside the Harmony capsule is pushed out
     const auto iss = config::load_vehicle(config_dir, "iss");
     const auto shape = contact::station_shape(iss);
     const contact::StationCollisionParameters p;
-    // a point 0.1 m inside us_modules (axis x 26..69, radius 2.2) from +y, moving inward at 0.05 m/s
-    const auto c = contact::hull_contact(shape, {{50.0, 2.1, 0.0}}, {{0.0, -0.05, 0.0}}, {50.0, 4.0, 0.0}, p);
+    // a point 0.1 m inside us_modules (axis x 26..49.1, radius 2.2) from +y at x 30 (clear of Columbus / Kibo at x 46.7), moving inward at 0.05 m/s
+    const auto c = contact::hull_contact(shape, {{30.0, 2.1, 0.0}}, {{0.0, -0.05, 0.0}}, {30.0, 4.0, 0.0}, p);
     REQUIRE(c.any);
     CHECK(c.force_station_n.y > 0.0);
     CHECK(c.force_station_n.y == Catch::Approx(p.stiffness_n_per_m * 0.1 + p.damping_ns_per_m * 0.05));
     CHECK(c.max_depth_m == Catch::Approx(0.1));
     CHECK(c.torque_station_nm.z == Catch::Approx(0.0).margin(1e-6));  // the force runs through the CG line here
-    CHECK_FALSE(contact::hull_contact(shape, {{50.0, 2.5, 0.0}}, {{}}, {50.0, 4.0, 0.0}, p).any);
+    CHECK_FALSE(contact::hull_contact(shape, {{30.0, 2.5, 0.0}}, {{}}, {30.0, 4.0, 0.0}, p).any);
 }
 
 TEST_CASE("Hull contact: the truss box pushes along its nearest face normal", "[iss][docking]") {

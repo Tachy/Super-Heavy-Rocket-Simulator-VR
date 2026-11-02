@@ -48,7 +48,7 @@ reference_utc = "2026-10-14T12:00:00"    # the fixture's first row
 [[stage.docking_port]]
 id = "ida2"
 name = "IDA-2 (Harmony vorn)"
-position_m = [73.0, 0.0, 0.0]            # [E] forward end of PMA-2/IDA-2 on Harmony
+position_m = [51.87, 0.0, 0.72]          # [D] model D (iss.md, Model D measurement): IDA-2 mating face on Harmony forward; the ring axis is 0.72 m nadir of the Harmony axis; was [E] [73.0, 0.0, 0.0]
 axis = [1.0, 0.0, 0.0]                   # +XVV: V-bar approach
 up = [0.0, 0.0, -1.0]                    # zenith
 soft_capture = "passive"                 # [S: IDSS IDD E 3.2.2.2] the IDA ring stays retracted
@@ -56,7 +56,7 @@ soft_capture = "passive"                 # [S: IDSS IDD E 3.2.2.2] the IDA ring 
 [[stage.docking_port]]
 id = "ida3"
 name = "IDA-3 (Harmony oben)"
-position_m = [66.0, 0.0, -5.0]           # [E] Harmony zenith, PMA-3 + IDA-3
+position_m = [47.45, 0.0, -5.0]          # [D] model D: IDA-3 mating face on Harmony zenith (z -5.03 measured), ring axis 0.72 m forward of the Harmony axis; was [E] [66.0, 0.0, -5.0]
 axis = [0.0, 0.0, -1.0]                  # zenith: R-bar approach
 up = [1.0, 0.0, 0.0]                     # forward
 soft_capture = "passive"                 # [S: IDSS IDD E 3.2.2.2]
@@ -73,35 +73,35 @@ radius_m = 2.1
 id = "us_modules"                        # Unity + Destiny + Harmony
 kind = "capsule"
 a_m = [26.0, 0.0, 0.0]
-b_m = [69.0, 0.0, 0.0]
+b_m = [49.1, 0.0, 0.0]                   # [D] Harmony forward end (model D 49.12 m)
 radius_m = 2.2
 
 [[stage.collision]]
 id = "pma2_ida2"                         # pressurised mating adapter + docking adapter forward of Harmony (i5 review)
 kind = "capsule"
-a_m = [69.0, 0.0, 0.0]
-b_m = [72.5, 0.0, 0.0]                   # [E] ends 0.5 m short of the IDA-2 HCS plane (73 m): a docked Dragon is clear
+a_m = [49.1, 0.0, 0.0]
+b_m = [51.37, 0.0, 0.0]                  # [E] ends 0.5 m short of the IDA-2 HCS plane (51.87 m): a docked Dragon is clear
 radius_m = 1.4                           # [E] PMA / IDA outer radius
 
 [[stage.collision]]
 id = "pma3_ida3"                         # PMA-3 + IDA-3 on the Harmony zenith side
 kind = "capsule"
-a_m = [66.0, 0.0, -2.2]
-b_m = [66.0, 0.0, -4.5]                  # [E] ends 0.5 m short of the IDA-3 HCS plane (z -5 m)
+a_m = [46.72, 0.0, -2.2]                 # [D] on the Harmony axis (model D x 46.72)
+b_m = [47.45, 0.0, -4.5]                  # [E] ends 0.5 m short of the IDA-3 HCS plane (z -5 m), on the ring axis 0.72 m forward
 radius_m = 1.4                           # [E]
 
 [[stage.collision]]
 id = "columbus"
 kind = "capsule"
-a_m = [66.0, 2.2, 0.0]
-b_m = [66.0, 9.0, 0.0]
+a_m = [46.72, 2.2, 0.0]                 # [D] Harmony axis x
+b_m = [46.72, 9.0, 0.0]
 radius_m = 2.25
 
 [[stage.collision]]
 id = "kibo"
 kind = "capsule"
-a_m = [66.0, -2.2, 0.0]
-b_m = [66.0, -13.5, 0.0]
+a_m = [46.72, -2.2, 0.0]
+b_m = [46.72, -13.5, 0.0]
 radius_m = 2.2
 
 [[stage.collision]]

@@ -205,11 +205,11 @@ def load_lights(path) -> dict:
 
 
 _VALUE_LINE = re.compile(r"^\s*[A-Za-z_][\w.]*\s*=")
-_TAG = re.compile(r"#.*\[(E|S)\]")
+_TAG = re.compile(r"#.*\[(E|S|D)\]")  # D: measured / derived (config/README.md), e.g. the ISS layout read from model D
 
 
 def value_lines_without_tag(path) -> list[tuple[int, str]]:
-    """(line number, text) of every `key = value` line that has no `# [E]` / `# [S]` comment."""
+    """(line number, text) of every `key = value` line that has no `# [E]` / `# [S]` / `# [D]` comment."""
     bad = []
     for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
         if _VALUE_LINE.match(line) and not _TAG.search(line):

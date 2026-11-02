@@ -4,10 +4,12 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "proximity_test_support.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "test_support.hpp"
 
 namespace starsim::docking_test {
@@ -17,6 +19,16 @@ struct Reboost {
     double after_s = 0.0;
     double delta_v_mps = 0.0;
 };
+
+// IDA-2 as configured (iss.toml, station frame): the fixtures that mean "station x = N" convert through it, so they
+// follow the port when its measured position changes. The IDA-2 port frame is the station axes (x, -y, -z).
+inline math::Vec3 ida2_station_position_m() {
+    const auto iss = config::load_vehicle(STARSIM_CONFIG_DIR, "iss");  // a named copy: the range-for must not bind a temporary
+    for (const auto& p : iss.stages.front().docking_ports) {
+        if (p.id == "ida2") return p.position_m;
+    }
+    throw std::logic_error("iss.toml has no port ida2");
+}
 
 struct DragonAtPort {
     std::unique_ptr<proximity_test::DragonNearIss> near;
@@ -48,7 +60,7 @@ struct DragonAtPort {
         d.session.set_attitude_mode({});
         return d;
     }
-    // The Dragon port anywhere in the IDA-2 port frame (= station axes (x, -y, -z), origin at station x 73 m), at rest
+    // The Dragon port anywhere in the IDA-2 port frame (= station axes (x, -y, -z), origin at the configured IDA-2 position), at rest
     // in the station frame unless `velocity_port_mps`, docking attitude, not turning (so the session may coast).
     static DragonAtPort place_at(const math::Vec3& position_port_m, const math::Vec3& velocity_port_mps = {}) {
         test::spice_session();
@@ -65,11 +77,11 @@ struct DragonAtPort {
         d.fly_until(contact::DockingPhase::Docked, 1200.0);
         return d;
     }
-    // Beside the US module stack (station x = 45 m, Dragon axis along -x like at IDA-2), its 4 m heat shield `gap_m`
+    // Beside the US module stack (station x = 30 m, clear of Columbus / Kibo at 46.7 m and of the truss at 35.5 m, Dragon axis along -x like at IDA-2), its 4 m heat shield `gap_m`
     // off the 2.2 m module surface on the station +y side, drifting towards it at `speed_mps`.
     static DragonAtPort beside_modules(double gap_m, double speed_mps) {
-        // IDA-2 port frame = station (x, -y, -z), port at station x = 73 m
-        return place("ida2", 45.0 - 73.0, -(2.2 + 2.0 + gap_m), 0.0, speed_mps);
+        // IDA-2 port frame = station (x, -y, -z), origin at the configured IDA-2 position
+        return place("ida2", 30.0 - ida2_station_position_m().x, -(2.2 + 2.0 + gap_m), 0.0, speed_mps);
     }
 
     // advance_to in 1 s calls until the docking phase is `phase` or `limit_s` after the current epoch.
