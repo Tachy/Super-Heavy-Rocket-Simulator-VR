@@ -1,4 +1,53 @@
 # Visual detail of crew_dragon (Crew Dragon capsule and trunk, hinged nose, docking mechanism): what the physics does not need.
-# STUB (plan 2026-11-02-falcon-dragon-iss-models, Task 2): no content yet, the generators and their tables come with
-# the Dragon tasks. Placement and size come from config/vehicles/crew_dragon.toml; this file never repeats them.
+# Placement and size come from config/vehicles/crew_dragon.toml (lengths, diameters, hull top, heat shield nose radius, Draco and
+# SuperDraco layout, docking port); this file never repeats them (tested). The docking mechanism comes with Task 6: its place is
+# the deck under the nose (collar, nothing else), its port is `position_m` of the config.
 # Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+# "M2" = measured reference "SpaceX - Dragon 2" (KUBAHA, CC BY 4.0), "M3/M4" = Forest Katsch's Dragons (CC BY 4.0, capsule 3.70 m:
+# not to scale, used only for proportions); measured by script, nothing shipped (screenshots/falcon9_ref/INDEX.md 5.4).
+# Photos: D_CCP_SpaceX_Demo_2_Dragon__3_ (closed capsule), D_Crew_2_..._Falcon_9_mate (capsule and trunk), D_Iss071e186365 and
+# D_Iss072e096331 (nose open, trunk top). Heights count from the heat shield apex (capsule station 0) unless stated.
+
+[capsule]
+segments = 96                  # [E] sagitta 0.7 mm at R = 2 m
+shield_edge_radius_m = 1.88    # [E] M2 / M3 / M4: heat shield edge diameter 3.7-3.76 m
+shoulder_rise_m = 0.1          # [E] shield edge to the full 4.0 m diameter, D_CCP_Demo_2 (3): the aluminium band above the shield
+band_top_m = 0.75              # [E] top of the cylindrical band, same photo (band ~1/6 of the height)
+sidewall_mid_station_m = 2.2   # [E] one bulge point: sidewall slightly convex, D_CCP_Demo_2 (3)
+sidewall_mid_radius_m = 1.5    # [E] chord radius there 1.45 m + 5 cm bulge; M2 / M3 half angle 17-18 deg, 20 deg here with the hull top 1.8 m
+deck_collar_radius_m = 0.5     # [E] raised collar on the deck under the nose: the place of the docking mechanism (Task 6)
+deck_collar_height_m = 0.2     # [E] to 3.9 m; below the port plane at 4.0 m
+nose_hinge_station_m = 3.7     # [E] M2 (author's scale 4.0 m: 3.7 m above the shield bottom); M4 3.42 m; D_CCP_Demo_2 (3): seam ~0.6-0.8 m under the tip
+nose_hinge_azimuth_deg = 180.0 # [E] opposite the hatch (hatch az 0, between the SuperDraco pods 324 / 36); M2 / M4 the hinge lies opposite the hatch
+nose_open_angle_deg = 120.0    # [E] M2 animation 0 -> 120 deg (author's, not published); D_Iss071e186365 / D_Iss072e096331: cone lies beside the capsule, consistent to about +-15 deg
+nose_open_time_s = 8.0         # [E] view easing only; the author's animation 1.7 s is a cartoon, the real motion takes seconds (no published value)
+lobe_centre_station_m = 1.0    # [E] M3 / M4: SuperDraco pod lobes at 0.65-1.36 m above the shield bottom
+lobe_length_m = 0.7            # [E] same
+lobe_width_m = 0.5             # [E] same: 14.5 deg at R = 1.9 m
+lobe_proud_m = 0.05            # [E] D_CCP_Demo_2 (3): the pod bay scoop stands out a few cm from the sidewall
+draco_length_m = 0.2           # [E] D_Iss071e186365: Draco window pairs ~ 0.2 x 0.12 m
+draco_width_m = 0.12           # [E] same photo
+draco_proud_m = 0.03           # [E] same photo
+nose_draco_radius_m = 0.05     # [E] a Draco nozzle under the nose, ~0.1 m across (400 N)
+
+[trunk]
+segments = 64                  # [E] sagitta 1 mm at R = 1.85 m
+shield_well_m = 0.375          # [S] the heat shield's sagitta, config R_n = 4.8 m over 1.88 m: the trunk top ring stands at the shield edge, the apex sits in the trunk
+fin_count = 4                  # [E] M2 / KUBAHA and M4 both show four
+fin_first_azimuth_deg = 0.0    # [E] on the hatch azimuth (M4), every 90 deg; KUBAHA 0 / 90 / 180 / 270
+fin_height_m = 3.0             # [E] M4 tall panels (3.0 m); KUBAHA 1.3 m. D_Crew_2_..._mate: the trunk base flares out over most of the height, so the tall one
+fin_tip_radius_m = 2.7         # [E] both families 2.64-2.7 at the trunk base
+fin_thickness_m = 0.08         # [E] thin panel
+base_ring_height_m = 0.15      # [E] dark adapter ring at the trunk base (D_Crew_2_..._mate)
+radiator_to_m = 1.3            # [E] radiators on the lower trunk (Wikipedia: "on the trunk"; no dimension), the band is a layout guess
+array_from_m = 1.5             # [E] body-mounted solar cells on the upper trunk (Wikipedia: fixed panels on the skin); band not separable in M1-M4
+panel_gap_deg = 10.0           # [E] angular gap between a fin and the band beside it
+panel_proud_m = 0.03           # [E] cell layer thickness
+
+[paint]
+capsule_albedo = [0.60, 0.60, 0.62]  # [E] white painted shell, D_CCP_Demo_2 (3), lit indoors
+shield_albedo = [0.07, 0.065, 0.06]  # [E] charred PICA-X (dark grey-brown)
+pod_albedo = [0.05, 0.05, 0.055]     # [E] pod bay and Draco windows: dark
+trunk_albedo = [0.62, 0.62, 0.64]    # [E] white trunk skin and fins, D_Crew_2_..._mate
+radiator_albedo = [0.50, 0.51, 0.53] # [E] light grey radiator panels
+array_albedo = [0.04, 0.05, 0.09]    # [E] blue-black solar cells, D_Iss072e096331

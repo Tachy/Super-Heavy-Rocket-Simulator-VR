@@ -29,6 +29,7 @@ func _initialize() -> void:
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
 	_check_other_model_vehicles(snapshot)
 	_check_falcon9()
+	_check_dragon()
 	var models := VehicleModels.load_for(VEHICLE)
 	if models.is_empty():
 		print("  (no models: model cases skipped; run python tools/structures/build_models.py --vehicle %s)" % VEHICLE)
@@ -163,6 +164,127 @@ func _check_falcon9() -> void:
 	var node_2 := view_2.get_child(0).get_node_or_null("stage_second_stage") as Node3D
 	_check(node_2 != null and node_2.get_node_or_null("hull") != null and node_2.get_node_or_null("engines_rvac") != null and _cylinders(view_2) == 0,
 			"second stage alone: hull and MVac, no cylinder, no notice (%d labels)" % view_2.find_children("ModelNotice", "Label3D", true, false).size())
+	VehicleModels.clear_cache()
+
+
+## Crew Dragon (needs the generated set: python tools/structures/build_models.py --vehicle crew_dragon): the nose cone's hinge and
+## angle, its easing between the two binary states, the trunk, the capsule alone, and the Dragon on a Falcon 9 second stage.
+func _check_dragon() -> void:
+	VehicleModels.clear_cache()
+	var models := VehicleModels.load_for("crew_dragon")
+	if models.is_empty():
+		_check(false, "crew_dragon: models generated (%s)" % VehicleModels.fallback_reason("crew_dragon"))
+		return
+	_check(VehicleModels.notice("crew_dragon") == "", "crew_dragon: no missing-model notice")
+	var root_dir := ProjectSettings.globalize_path("res://").path_join("..")
+	var chunks := FileAccess.get_file_as_string(root_dir.path_join("config/vehicles/crew_dragon.toml")).split("[[stage]]", false)
+	var trunk_cfg: Dictionary = TomlLite.parse("[[stage]]" + chunks[1])["stage"][0]
+	var capsule_cfg: Dictionary = TomlLite.parse("[[stage]]" + chunks[2])["stage"][0]
+	var detail: Dictionary = TomlLite.parse(FileAccess.get_file_as_string(root_dir.path_join("config/vehicles/detail/crew_dragon.toml")))
+	var nose: Dictionary = models["manifest"]["nose"]
+	var angle_deg := float(detail["capsule"]["nose_open_angle_deg"])
+	_check(is_equal_approx(float(nose["open_angle_deg"]), angle_deg) and is_equal_approx(float(nose["open_time_s"]), float(detail["capsule"]["nose_open_time_s"])),
+			"nose: manifest angle %.0f deg and time come from the detail file" % angle_deg)
+	# The nose never leaves its hinge: the model's origin is the hinge point, and the model has a vertex on it (the base rim's hinge edge).
+	var vertices: PackedVector3Array = (models["nose"]["nose_cone"] as Mesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var nearest := INF
+	for v in vertices:
+		nearest = minf(nearest, v.length())
+	_check(nearest < 0.01, "nose: a vertex of the cone sits on the hinge point (%.4f m)" % nearest)
+	var azimuth := deg_to_rad(float(nose["hinge_azimuth_deg"]))
+	var hinge := Vector3(float(nose["hinge_station_m"]), 0.0, 0.0) + Vector3(0.0, cos(azimuth), sin(azimuth)) * float(nose["hinge_radius_m"])
+	_check(is_equal_approx(hinge.y * hinge.y + hinge.z * hinge.z, pow(float(capsule_cfg["hull_top_diameter_m"]) * 0.5, 2.0)),
+			"nose: the hinge lies on the hull top's edge (config hull_top_diameter_m)")
+	var worst := 0.0
+	var model_vertex := vertices[0]
+	for v in vertices:
+		if v.length() < model_vertex.length():
+			model_vertex = v
+	for k in range(0, 11):
+		worst = maxf(worst, (VehicleModels.nose_transform(nose, k * 0.1) * model_vertex).distance_to(hinge))
+	_check(worst < 0.01, "nose: the hinge vertex stays at the hinge point at every opening (largest move %.4f m)" % worst)
+	_check(VehicleModels.nose_transform(nose, 0.0).basis.is_equal_approx(Basis.IDENTITY), "nose: closed is the identity pose")
+	var open_basis := VehicleModels.nose_transform(nose, 1.0).basis
+	_check(absf(rad_to_deg(open_basis.get_rotation_quaternion().get_angle()) - angle_deg) < 0.01, "nose: open turns by the detail file's angle")
+	_check((open_basis * Vector3.RIGHT).dot(Vector3(0.0, cos(azimuth), sin(azimuth))) > 0.0, "nose: opening swings the tip outward at the hinge side")
+	# The view: trunk + capsule with the snapshot's binary nose state eased by the view.
+	var trunk := {"id": "trunk", "base_station_m": 0.0, "length_m": trunk_cfg["length_m"], "diameter_m": trunk_cfg["diameter_m"], "nose_length_m": 0.0, "vehicle_id": "crew_dragon"}
+	var capsule := {"id": "capsule", "base_station_m": trunk_cfg["length_m"], "length_m": capsule_cfg["length_m"], "diameter_m": 4.0, "nose_length_m": 4.0, "vehicle_id": "crew_dragon"}
+	var view := VehicleView.new()
+	_views.append(view)
+	root.add_child(view)
+	view.sync([trunk, capsule], [], [], [], 0.0, {}, {"present": true, "nose_cone": true, "nose_cone_open": false})
+	var capsule_node := view.get_child(0).get_node_or_null("stage_capsule") as Node3D
+	var trunk_node := view.get_child(0).get_node_or_null("stage_trunk") as Node3D
+	var capsule_parts := ["capsule", "heat_shield", "deck", "superdraco_pod", "draco_pod", "nose_cone"]
+	var present := capsule_node != null and capsule_parts.all(func(n: String) -> bool: return capsule_node.get_node_or_null(n) != null)
+	_check(present, "capsule: capsule, heat_shield, deck, superdraco_pod, draco_pod, nose_cone nodes")
+	_check(trunk_node != null and ["trunk", "trunk_array", "trunk_radiator"].all(func(n: String) -> bool: return trunk_node.get_node_or_null(n) != null),
+			"trunk: trunk, trunk_array, trunk_radiator nodes")
+	_check(_cylinders(view) == 0 and view.find_children("ModelNotice", "Label3D", true, false).is_empty(), "both stages modelled, no cylinder, no notice")
+	var nose_node := capsule_node.get_node("nose_cone") as Node3D
+	_check(nose_node.transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.0)) and is_zero_approx(view.nose_fraction()), "nose closed with nose_cone_open false")
+	view.sync([trunk, capsule], [], [], [], 0.0, {}, {"present": true, "nose_cone": true, "nose_cone_open": true})
+	_check(is_zero_approx(view.nose_fraction()), "nose: the state flips, the view has not moved yet")
+	var open_time := float(nose["open_time_s"])
+	view.advance_nose(open_time * 0.5)
+	_check(is_equal_approx(view.nose_fraction(), 0.5) and nose_node.transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.5)), "nose: half the opening time, half open")
+	view.advance_nose(open_time)
+	_check(is_equal_approx(view.nose_fraction(), 1.0) and nose_node.transform.is_equal_approx(VehicleModels.nose_transform(nose, 1.0)), "nose: open after the opening time, no overshoot")
+	view.sync([trunk, capsule], [], [], [], 0.0, {}, {"present": true, "nose_cone": true, "nose_cone_open": false})
+	view.advance_nose(open_time * 2.0)
+	_check(is_zero_approx(view.nose_fraction()) and nose_node.transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.0)), "nose: closes again")
+	var born_open := VehicleView.new()
+	_views.append(born_open)
+	root.add_child(born_open)
+	born_open.sync([trunk, capsule], [], [], [], 0.0, {}, {"present": true, "nose_cone": true, "nose_cone_open": true})
+	_check(is_equal_approx(born_open.nose_fraction(), 1.0), "nose: a Dragon first seen with the nose open shows it open")
+	# After trunk separation: the capsule alone shows no trunk, its base is station 0, the nose still hinges.
+	var alone := capsule.duplicate()
+	alone["vehicle_id"] = "crew_dragon/capsule"
+	alone["base_station_m"] = 0.0
+	var view_alone := VehicleView.new()
+	_views.append(view_alone)
+	root.add_child(view_alone)
+	view_alone.sync([alone], [], [], [], 0.0, {}, {"present": true, "nose_cone": true, "nose_cone_open": false})
+	_check(view_alone.get_child(0).get_node_or_null("stage_trunk") == null and view_alone.find_children("trunk*", "MeshInstance3D", true, false).is_empty(),
+			"capsule alone: no trunk")
+	_check(view_alone.get_child(0).get_node_or_null("stage_capsule/nose_cone") != null and _cylinders(view_alone) == 0, "capsule alone: its model with the nose")
+	var trunk_alone := trunk.duplicate()
+	trunk_alone["vehicle_id"] = "crew_dragon/trunk"
+	var view_trunk := VehicleView.new()
+	_views.append(view_trunk)
+	root.add_child(view_trunk)
+	view_trunk.sync([trunk_alone], [], [], [], 0.0, {})
+	_check(view_trunk.get_child(0).get_node_or_null("stage_trunk/trunk") != null and view_trunk.get_child(0).get_node_or_null("stage_capsule") == null
+			and _cylinders(view_trunk) == 0, "trunk alone: its model, no capsule")
+	# On the Falcon 9 second stage ("falcon9_block5+crew_dragon"): the Dragon stands at its config stations, nose closed (no capsule state).
+	var f9_chunks := FileAccess.get_file_as_string(root_dir.path_join("config/vehicles/falcon9_block5.toml")).split("[[stage]]", false)
+	var first_len := float(TomlLite.parse("[[stage]]" + f9_chunks[1])["stage"][0]["length_m"])
+	var second_len := float(TomlLite.parse("[[stage]]" + f9_chunks[2])["stage"][0]["length_m"])
+	var stack_id := "falcon9_block5+crew_dragon"
+	var trunk_base := first_len + second_len
+	var capsule_base := trunk_base + float(trunk["length_m"])
+	var stack: Array = [
+		{"id": "first_stage", "base_station_m": 0.0, "length_m": first_len, "diameter_m": 3.66, "nose_length_m": 0.0, "vehicle_id": stack_id},
+		{"id": "second_stage", "base_station_m": first_len, "length_m": second_len, "diameter_m": 3.66, "nose_length_m": 0.0, "vehicle_id": stack_id},
+		{"id": "trunk", "base_station_m": trunk_base, "length_m": trunk["length_m"], "diameter_m": trunk["diameter_m"], "nose_length_m": 0.0, "vehicle_id": stack_id},
+		{"id": "capsule", "base_station_m": capsule_base, "length_m": capsule["length_m"], "diameter_m": 4.0, "nose_length_m": 4.0, "vehicle_id": stack_id}]
+	var view_stack := VehicleView.new()
+	_views.append(view_stack)
+	root.add_child(view_stack)
+	view_stack.sync(stack, [], [], [], 0.0, {}, {"present": false})
+	var s_trunk := view_stack.get_child(0).get_node_or_null("stage_trunk") as Node3D
+	var s_capsule := view_stack.get_child(0).get_node_or_null("stage_capsule") as Node3D
+	_check(s_trunk != null and s_trunk.transform.origin.is_equal_approx(Frames.to_render(Vector3(trunk_base, 0.0, 0.0))),
+			"stack: the trunk stands on the second stage's top, station %.1f m" % trunk_base)
+	_check(s_capsule != null and s_capsule.transform.origin.is_equal_approx(Frames.to_render(Vector3(capsule_base, 0.0, 0.0))),
+			"stack: the capsule stands on the trunk, station %.1f m" % capsule_base)
+	_check(view_stack.get_child(0).get_node_or_null("stage_second_stage") != null and view_stack.get_child(0).get_node_or_null("stage_first_stage") != null
+			and _cylinders(view_stack) == 0 and view_stack.find_children("ModelNotice", "Label3D", true, false).is_empty(),
+			"stack: all four stages modelled, no cylinder, no notice")
+	_check(is_zero_approx(view_stack.nose_fraction()) and s_capsule != null and s_capsule.get_node("nose_cone").transform.is_equal_approx(VehicleModels.nose_transform(nose, 0.0)),
+			"stack: the nose is closed on the launcher")
 	VehicleModels.clear_cache()
 
 

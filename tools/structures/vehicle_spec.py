@@ -180,6 +180,8 @@ def load(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENG
         return load_generic(vehicle_id, vehicles_dir)
     if kind == "falcon9":
         return load_falcon9(vehicle_id, vehicles_dir, engines_dir)
+    if kind == "dragon":
+        return load_dragon(vehicle_id, vehicles_dir)
     return load_starship(vehicle_id, vehicles_dir, engines_dir)
 
 
@@ -249,6 +251,58 @@ def load_falcon9(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Pa
               "rcs_pods": s2["rcs"]["pod"]}
     return {"vehicle_id": vehicle_id, "stages": {"first_stage": stage, "second_stage": second}, "engines": engine_spec,
             "detail": detail, "leg": falcon9_leg(s["landing_legs"], detail["leg"]), "mvac": mvac}
+
+
+DRAGON_DETAIL_KEYS = {
+    "capsule": ("segments", "shield_edge_radius_m", "shoulder_rise_m", "band_top_m", "sidewall_mid_station_m",
+                "sidewall_mid_radius_m", "deck_collar_radius_m", "deck_collar_height_m", "nose_hinge_station_m",
+                "nose_hinge_azimuth_deg", "nose_open_angle_deg", "nose_open_time_s", "lobe_centre_station_m", "lobe_length_m",
+                "lobe_width_m", "lobe_proud_m", "draco_length_m", "draco_width_m", "draco_proud_m", "nose_draco_radius_m"),
+    "trunk": ("segments", "shield_well_m", "fin_count", "fin_first_azimuth_deg", "fin_height_m", "fin_tip_radius_m",
+              "fin_thickness_m", "base_ring_height_m", "radiator_to_m", "array_from_m", "panel_gap_deg", "panel_proud_m"),
+    "paint": ("capsule_albedo", "shield_albedo", "pod_albedo", "trunk_albedo", "radiator_albedo", "array_albedo"),
+}
+
+
+def validate_dragon_detail(detail: dict) -> None:
+    for table, keys in DRAGON_DETAIL_KEYS.items():
+        t = _table(detail, table)
+        for k in keys:
+            if k not in t:
+                raise VehicleSpecError(f"[{table}]: missing key '{k}'")
+
+
+def dragon_lobes(angles_deg: list) -> list:
+    """Centres of the SuperDraco pods: the middle of each consecutive pair of the config's engine angles."""
+    if len(angles_deg) % 2:
+        raise VehicleSpecError("superdraco angles_deg: pairs expected (even count)")
+    return [0.5 * (angles_deg[i] + angles_deg[i + 1]) for i in range(0, len(angles_deg), 2)]
+
+
+def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
+    """Crew Dragon: the capsule's and trunk's physics numbers (sizes, hull top, shield radius, Draco pods, SuperDraco pairs,
+    docking port) + the detail file. The nose cone's frame: hinge point, axis and open angle, derived in `nose`."""
+    with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
+        vehicle = tomllib.load(f)
+    with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:
+        detail = tomllib.load(f)
+    validate_dragon_detail(detail)
+    trunk = next(st for st in vehicle["stage"] if st["id"] == "trunk")
+    cap = next(st for st in vehicle["stage"] if st["id"] == "capsule")
+    c = detail["capsule"]
+    group = next(g for g in cap["engine_group"] if g["id"] == "superdraco")
+    hinge_az = math.radians(c["nose_hinge_azimuth_deg"])
+    top_radius = float(cap["hull_top_diameter_m"]) / 2.0
+    nose = {"stage_id": "capsule", "hinge_station_m": c["nose_hinge_station_m"], "hinge_azimuth_deg": c["nose_hinge_azimuth_deg"],
+            "hinge_radius_m": top_radius, "open_angle_deg": c["nose_open_angle_deg"], "open_time_s": c["nose_open_time_s"],
+            "length_m": float(cap["length_m"]) - c["nose_hinge_station_m"],
+            "axis": [0.0, -math.sin(hinge_az), math.cos(hinge_az)]}
+    stages = {"trunk": {"length_m": float(trunk["length_m"]), "diameter_m": float(trunk["diameter_m"])},
+              "capsule": {"length_m": float(cap["length_m"]), "diameter_m": float(cap["diameter_m"]),
+                          "hull_top_radius_m": top_radius, "shield_nose_radius_m": float(cap["heat_shield"]["nose_radius_m"]),
+                          "rcs_pods": cap["rcs"]["pod"], "superdraco_lobes_deg": dragon_lobes(group["angles_deg"]),
+                          "port_position_m": cap["docking_port"][0]["position_m"]}}
+    return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose}
 
 
 def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:

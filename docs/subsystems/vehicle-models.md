@@ -52,7 +52,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   `scripts`, texture `bakers` and the Blender `generators`. `build_models.py --vehicle <id>` takes everything from it; a
   vehicle with no generators prints one line, writes nothing, exits 0. The Starship's manifest hash and output are
   byte-identical to before the table (test `test_starship_hash_is_the_one_of_the_fixed_generator_list`, forced rebuild).
-  The `crew_dragon`, `iss` detail files are stubs (comments only) until later tasks.
+  The `iss` detail file is a stub (comments only) until its task.
 - The snapshot's stage dictionaries carry `vehicle_id` (bindings, `body_stages`): stage ids repeat in the tanker and HLS-launch
   configs (stages taken over), so the id alone cannot tell them apart; a separated part reports `<vehicle>/<stage>` (the part
   before `/` counts). No `vehicle_id` (older snapshot) = cylinders.
@@ -94,6 +94,26 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   perspective); top radius 0.69 m and contour exponent 0.84 from the same photo. Not drawn: thermal blankets, the turbine exhaust's real
   routing (one straight duct), the corrugated wall seams; the real stage's skirt shape at the engine section is not measured (plain).
 - Separation: `<vehicle>/<stage>` ids keep both parts' models (tested, stack, first stage alone, second stage alone).
+
+## Crew Dragon (plan 2026-11-02, Task 5)
+- `generators.toml` kind `dragon` (`vehicle_spec.load_dragon`), generator `gen_dragon.py`, outputs `dragon_capsule.gltf` (station 0 = heat shield apex; nodes `capsule`,
+  `heat_shield` (sphere of the config's R_n 4.8 m up to the 1.88 m edge), `deck` (dark deck and collar under the nose: the place of the docking mechanism, Task 6),
+  `superdraco_pod`, `draco_pod`), `dragon_nose.gltf` (`nose_cone`, ORIGIN = the hinge point, closed = identity) and `dragon_trunk.gltf` (station 0 = trunk base; `trunk`
+  with four fins, `trunk_array`, `trunk_radiator`). Triangles 3,744 / 1,920 / 664. Plain paint (`look.paint`, `part_materials`).
+- Derived from the physics config, not typed twice: the SuperDraco pods sit at the middle of each consecutive pair of `angles_deg` (36 / 144 / 216 / 324, hatch at azimuth 0 in the
+  72 deg gap between the pods 324 / 36), the Draco windows at the config's side pods, the four nose Dracos at the nose pods, hull top radius, shield nose radius.
+  The trunk's top ring stands at the shield edge, 0.375 m above the stage length (the shield apex is recessed in the trunk).
+- Nose: hinge at capsule station 3.7 m on the hull top edge, azimuth 180 (opposite the hatch), tangential axis; open angle 120 deg [E: reference model's animation, photos
+  D_Iss071e186365 / D_Iss072e096331 agree to about +-15 deg], opening time 8 s [E, view only]. `VehicleModels.nose_transform(nose, fraction)`.
+  `VehicleView.sync(..., capsule)` takes `FlightSim.capsule_state` (`nose_cone_open`; `present` false on a launcher = closed): the view eases its fraction towards the binary
+  state at 1 / open_time_s per second (`_process` / `advance_nose`), a Dragon first seen shows the state as it is. `VehicleView.look_nose_fraction` / `vehicle_look_shots.gd --nose` for shots.
+- Stack and payload ids: the vehicle id of a stack is `launcher+payload` ("falcon9_block5+crew_dragon"), a separated part `launcher+payload/<stage>`. The view loads the model set
+  of every `+` part and each stage draws from the set that holds its hull id (`_stage_models`): the Dragon on the Falcon 9 second stage is drawn, and a separated payload shows
+  the Dragon, the second stage the Falcon 9 set. A set that is stale / missing leaves its stages as cylinders and the notice shows.
+- Checks: `tools/structures/tests/test_dragon_spec.py`, `vehicle_view_test.gd` `_check_dragon`. Shots: `vehicle_look_shots.gd --mission=crew_dragon_return --t_plus=2400 --nose=<0|1>`
+  (body 1 = capsule after the trunk jettison; `sun<deg>` turns the camera about the axis).
+- Not drawn / unsure: hatch and window detail (textures), the real trunk array / radiator bands (layout guess: radiators low, cells high), the fin height (3.0 m vs 1.3 m in the
+  two model families, chosen from the trunk-base flare in D_Crew_2_..._mate), SuperDraco layout evidence (two models, one photo; moderate).
 
 ## Steel map (`tools/structures/hull_textures.py` -> `data/models/starship_block3/hull_steel.png`)
 - Baked by the driver (numpy, no Blender), procedural from the detail file's `[hull]` numbers (ring pitch, weld height / half

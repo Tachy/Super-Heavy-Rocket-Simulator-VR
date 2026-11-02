@@ -207,6 +207,24 @@ def falcon9_manifest(spec: dict, digest: str, version: str, triangles: dict, tab
             "leg_foot_deployed_m": {"station": legs["foot_station_m"], "radius": legs["footprint_radius_m"]}}
 
 
+def dragon_manifest(spec: dict, digest: str, version: str, triangles: dict, table: dict) -> dict:
+    """What the game needs of the Crew Dragon: the nose cone's hinge (point, axis, open angle, opening time) and the paints.
+    The nose file's origin is the hinge point; the closed pose is the identity."""
+    paint = spec["detail"]["paint"]
+    look = {"no_maps": True,
+            "part_materials": {"capsule": "paint_capsule", "nose_cone": "paint_capsule", "heat_shield": "paint_shield",
+                               "deck": "paint_pod", "superdraco_pod": "paint_pod", "draco_pod": "paint_pod",
+                               "trunk": "paint_trunk", "trunk_array": "paint_array", "trunk_radiator": "paint_radiator"},
+            "paint": {"paint_capsule": {"albedo": paint["capsule_albedo"], "roughness": 0.45, "metallic": 0.0},
+                      "paint_shield": {"albedo": paint["shield_albedo"], "roughness": 0.85, "metallic": 0.0},
+                      "paint_pod": {"albedo": paint["pod_albedo"], "roughness": 0.6, "metallic": 0.1},
+                      "paint_trunk": {"albedo": paint["trunk_albedo"], "roughness": 0.5, "metallic": 0.0},
+                      "paint_radiator": {"albedo": paint["radiator_albedo"], "roughness": 0.4, "metallic": 0.3},
+                      "paint_array": {"albedo": paint["array_albedo"], "roughness": 0.3, "metallic": 0.4}}}
+    return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
+            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": {}, "engines": {}, "look": look, "nose": spec["nose"]}
+
+
 def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> dict:
     """What the game needs besides the glTF: per-flap rotation signs, engine exit planes, the frame statement."""
     flaps = {st_id: [{k: f[k] for k in ("id", "kind", "hinge_azimuth_deg", "station_aft_m", "station_fwd_m", "span_m",
@@ -287,6 +305,8 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
         manifest = vehicle_manifest(spec, digest, version, triangles)
         manifest["look"]["steel_map"] = steel_map
         manifest["look"]["tile_maps"] = tile_maps
+    elif table["kind"] == "dragon":
+        manifest = dragon_manifest(spec, digest, version, triangles, table)
     else:
         manifest = falcon9_manifest(spec, digest, version, triangles, table)
     (staging / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

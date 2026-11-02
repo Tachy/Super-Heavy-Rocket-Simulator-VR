@@ -52,6 +52,11 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   `body_parachutes(i)`, `capsule_state(i)`, `splashdown_zone()`, `set_splashdown_zone(id)`, `plan_capsule_return()`,
   `autopilot_status()["capsule_step"]`. Covered by the smoke test, whose check functions must run to their end.
 
+### Detail model (plan 2026-11-02, Task 5; `docs/subsystems/vehicle-models.md` "Crew Dragon")
+- Capsule 4.5 m with the nose [S: Wikipedia; was 4.4], trunk 3.6 m (8.1 m total minus the capsule; was 3.7): the capsule stage's base is now station 3.6 m. SuperDraco
+  `angles_deg` pairs now 31/41, 139/149, 211/221, 319/329 [E: pods at 36 / 144 / 216 / 324, hatch in the 72 deg gap 324..36] instead of the uniform 40/50/130...; abort-only data,
+  no flight effect. The nose cone's open angle (120 deg) and opening time (8 s) are view data in `config/vehicles/detail/crew_dragon.toml`; the physics' state stays binary.
+
 ## Validation
 - Falcon 9 Crew Dragon mission `falcon9_crew_dragon` (SLC-40, 51.6 deg, 200 x 210 km, RTLS to LZ-40): SECO T+503 s,
   release T+533 s, 200.0 x 210.8 km, 51.74 deg, first stage landed. Inertial hold after a 1.3 deg/s tumble <= 0.71

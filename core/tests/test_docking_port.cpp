@@ -32,8 +32,8 @@ TEST_CASE("Port position, velocity and axes of a turning Dragon", "[iss][rendezv
                                           omega_body});
     const auto& v = dragon->vehicle();
     const Vec3 cg = v.mass_properties().cg_point_m();
-    const double capsule_base = v.stages().back().base_station_m;  // 3.7 m: the trunk below
-    CHECK(capsule_base == Catch::Approx(3.7));
+    const double capsule_base = v.stages().back().base_station_m;  // 3.6 m: the trunk below (8.1 m - 4.5 m capsule)
+    CHECK(capsule_base == Catch::Approx(3.6));
     const Vec3 lever_body = Vec3{capsule_base + 4.0, 0.0, 0.0} - cg;
     const Vec3 lever_gcrf{-lever_body.y, lever_body.x, lever_body.z};
 

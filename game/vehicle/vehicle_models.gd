@@ -16,12 +16,12 @@ const MANIFEST := "manifest.json"
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
-	"crew_dragon": [], "iss": [],
+	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk"], "iss": [],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
-	"crew_dragon": [], "iss": [],
+	"crew_dragon": ["vehicle_common.py", "gen_dragon.py"], "iss": [],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": [], "crew_dragon": [], "iss": []}
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
@@ -128,6 +128,14 @@ static func _load(vehicle_id: String) -> Dictionary:
 			"grid_fin": parts["falcon9_grid_fin"],
 			"leg": parts["falcon9_leg"],
 			"engine": {false: _merged(parts["merlin"]), true: _merged(parts["mvac"])},
+			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
+		}
+	if vehicle_id == "crew_dragon":
+		return {
+			"manifest": manifest,
+			"hulls": {"trunk": parts["dragon_trunk"], "capsule": parts["dragon_capsule"]},
+			"nose": parts["dragon_nose"],  # origin = the hinge point, closed = identity (nose_transform)
+			"flap": {}, "grid_fin": {}, "engine": {},
 			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 		}
 	for engine_file: String in ["raptor", "rvac"]:
@@ -447,6 +455,16 @@ static func flap_transform(flap: Dictionary, entry: Dictionary) -> Transform3D:
 	var hinge := Vector3(float(entry["drawn_hinge_station_aft_m"]), 0.0, 0.0) 			+ e_r * float(entry["drawn_hinge_radius_aft_m"])
 	var turn := Basis(hinge_axis, float(rotation_sign) * deg_to_rad(float(flap["deflection_deg"])))
 	return Transform3D(turn * rest, hinge)
+
+
+## The Crew Dragon's nose cone in capsule-local body coordinates: its model's origin is the hinge point (manifest `nose`:
+## station, azimuth, radius of the hinge, the tangential axis, the open angle), so the hinge stays where it is at every
+## opening `fraction` (0 closed .. 1 open) and the cone turns about the tangent, +X towards the outward radial.
+static func nose_transform(nose: Dictionary, fraction: float) -> Transform3D:
+	var azimuth := deg_to_rad(float(nose["hinge_azimuth_deg"]))
+	var hinge := Vector3(float(nose["hinge_station_m"]), 0.0, 0.0) + Vector3(0.0, cos(azimuth), sin(azimuth)) * float(nose["hinge_radius_m"])
+	var axis := Vector3(nose["axis"][0], nose["axis"][1], nose["axis"][2])
+	return Transform3D(Basis(axis, deg_to_rad(float(nose["open_angle_deg"])) * clampf(fraction, 0.0, 1.0)), hinge)
 
 
 ## Grid fin model in stage-local body coordinates: pivot on the hull at the fin's station and azimuth, model Y radial;
