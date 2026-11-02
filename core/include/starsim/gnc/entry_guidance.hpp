@@ -24,6 +24,9 @@ struct EntryGuidanceParameters {
     // thin air (x0.88) reached the gate at 106 m/s, the flip ended ~130 m lower than nominal and the catch plan ran
     // into an arm with 22 t left; the same gate 100 m higher was caught (0: off).
     double gate_reference_sink_mps = 100.0;
+    // [E] the raise starts gradually here instead of at the reference (gate_trigger_height_m); lunar direct seeds 12 and
+    // 15 reached the gate at 98-99 m/s, stayed at 800 m and ended the flip lowest of all.
+    double gate_raise_start_sink_mps = 95.0;
     double cycle_s = 2.0;            // re-prediction interval
     double max_bank_rad = 150.0 * constants::deg_to_rad;
     // Bank rate limits [E]: 1 deg/s hypersonic (faster departs in alpha, b1; seen again with weak flaps), 3 deg/s
@@ -177,6 +180,12 @@ struct EntryGuidanceParameters {
 // there is a few % of the RCS's and the allocation only wandered them.
 inline constexpr double entry_flap_rest_dynamic_pressure_pa = 200.0;
 
+// Hand-over height above the target ground at a sink rate. gate_height_m up to the raise start S; above the join
+// J = R^2 / S (R: the reference sink) the stopping-distance law gate_height_m (sink / R)^2; between them the parabola
+// gate_height_m + a (sink - S)^2 with no step in height or slope at either end (the tangency fixes both J and a, S is
+// the only new value).
+double gate_trigger_height_m(const EntryGuidanceParameters& parameters, double sink_mps);
+
 struct EntryCommand {
     EntryPhase phase = EntryPhase::Entry;
     double alpha_rad = 0.0;              // setpoint (entry phase)
@@ -257,7 +266,6 @@ public:
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
     void aerocapture_cycle(const vehicle::FlightBody& body, const EntryPredictorState& state);
-    double gate_trigger_height_m(double sink_mps) const;  // hand-over height above the target ground
     void terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
                   const math::Vec3& v_itrf, double mach, double dt_s);
     // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).

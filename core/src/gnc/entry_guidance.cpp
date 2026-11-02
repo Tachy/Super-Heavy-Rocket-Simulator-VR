@@ -443,10 +443,15 @@ Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r
     return end - end_up * dot(end, end_up);
 }
 
-double EntryGuidance::gate_trigger_height_m(double sink_mps) const {
-    const double reference = parameters_.gate_reference_sink_mps;
-    if (reference <= 0.0 || sink_mps <= reference) return parameters_.gate_height_m;
-    return parameters_.gate_height_m * (sink_mps / reference) * (sink_mps / reference);
+double gate_trigger_height_m(const EntryGuidanceParameters& parameters, double sink_mps) {
+    const double reference = parameters.gate_reference_sink_mps;
+    const double start = parameters.gate_raise_start_sink_mps;
+    if (reference <= 0.0 || sink_mps <= start) return parameters.gate_height_m;
+    const double join = reference * reference / start;
+    if (sink_mps >= join) return parameters.gate_height_m * (sink_mps / reference) * (sink_mps / reference);
+    // the parabola from the flat gate, tangent to the stopping-distance law at the join
+    const double curvature = parameters.gate_height_m * join / (reference * reference) / (join - start);
+    return parameters.gate_height_m + curvature * (sink_mps - start) * (sink_mps - start);
 }
 
 void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const Vec3& r_itrf,
@@ -687,7 +692,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         if (phase_ == EntryPhase::Entry && dipped_ && height > parameters_.exit_height_m) phase_ = EntryPhase::Exit;
     } else if (!given_up_ && height - target_.ground_height_m <=
                // the sink scaling only in dense air: a fast dive from space (an unflown braking burn) is no flip
-               gate_trigger_height_m(height < terminal_max_height_m ? -dot(v_rel_gcrf, up_gcrf) : 0.0)) {
+               gate_trigger_height_m(parameters_, height < terminal_max_height_m ? -dot(v_rel_gcrf, up_gcrf) : 0.0)) {
         phase_ = EntryPhase::Gate;
     }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from

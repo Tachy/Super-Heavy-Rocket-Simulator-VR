@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "ship_entry_scenario.hpp"
 #include "starsim/gnc/attitude_slew.hpp"
@@ -15,6 +16,7 @@
 #include "starsim/gnc/entry_predictor.hpp"
 
 using namespace starsim;
+using Catch::Matchers::WithinAbs;
 
 namespace {
 
@@ -34,6 +36,37 @@ test::EntryLaw scheduled(const gnc::AlphaSchedule& schedule, double bank_deg) {
 }
 
 }  // namespace
+
+TEST_CASE("The gate rises gradually with the sink, without a step", "[ship][guidance]") {
+    gnc::EntryGuidanceParameters p;
+    const auto height = [&](double sink_mps) { return gnc::gate_trigger_height_m(p, sink_mps); };
+    CHECK_THAT(height(90.0), WithinAbs(800.0, 1e-9));
+    CHECK_THAT(height(95.0), WithinAbs(800.0, 1e-9));
+    // the parabola, by hand: J = 100^2 / 95 = 105.263, a = 800 J / 100^2 / (J - 95) = 0.82051
+    CHECK_THAT(height(98.0), WithinAbs(807.385, 1e-2));
+    CHECK_THAT(height(99.0), WithinAbs(813.128, 1e-2));
+    CHECK_THAT(height(100.0), WithinAbs(820.513, 1e-2));
+    CHECK_THAT(height(103.0), WithinAbs(852.513, 1e-2));
+    // the stopping-distance law above the join, unchanged
+    CHECK_THAT(height(107.0), WithinAbs(915.92, 1e-2));
+    CHECK_THAT(height(120.0), WithinAbs(1152.0, 1e-2));
+    // no kink across the raise start, the old reference and the join
+    for (double s : {95.0, 100.0, 100.0 * 100.0 / 95.0}) {
+        const double below = (height(s) - height(s - 1e-4)) / 1e-4, above = (height(s + 1e-4) - height(s)) / 1e-4;
+        CHECK(std::abs(above - below) < 0.01);
+    }
+    // no step in height or slope anywhere over the band
+    const double ds = 1e-3;
+    for (double s = 90.0; s < 110.0; s += 0.0137) {
+        const double slope = (height(s + ds) - height(s)) / ds;
+        const double next = (height(s + 2.0 * ds) - height(s + ds)) / ds;
+        CHECK(std::abs(height(s + ds) - height(s)) < 0.03);
+        CHECK(std::abs(next - slope) < 0.01);
+        CHECK(slope >= 0.0);
+    }
+    p.gate_reference_sink_mps = 0.0;  // off (the capsule's drogues)
+    CHECK_THAT(height(150.0), WithinAbs(800.0, 1e-9));
+}
 
 TEST_CASE("Entry aero table reproduces the 6-DOF ship's aerodynamic acceleration", "[ship][guidance]") {
     const auto schedule = ship_alpha_schedule();
