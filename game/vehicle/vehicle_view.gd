@@ -21,6 +21,7 @@ var _plume_material := ShaderMaterial.new()
 ## The ship's engine bay: black plate and sooted wall (frames f12 138.9 s, f13 2262 s) [E].
 var _engine_bay_material := LitAerial.material(Color(0.035, 0.035, 0.04), 0.55, 0.3)
 var _built_signature := ""
+var _sets_signature := ""  # the stage list `_model_sets` was loaded for (update_view runs every frame, also in VR)
 ## Detail models of this vehicle ({} = cylinders) and the nodes posed from the snapshot, in snapshot order. `_models` is the
 ## set of the lowest stage's vehicle (or the first loaded one); a stack with a payload ("falcon9_block5+crew_dragon") also loads
 ## the payload's set, and every stage draws from the set that holds its hull (`_stage_models`, {} = cylinders).
@@ -78,21 +79,22 @@ func _hull_kind(part: String, stage: Dictionary, models: Dictionary = _models) -
 
 
 ## Rebuilds geometry when the stage list changed (e.g. after separation), then places the body.
-func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
+## `sim` is a FlightSim (typed Object so that a test can pass a stub with the same body_* getters).
+func update_view(sim: Object, camera_gcrf_m: Vector3) -> void:
 	var stages: Array = sim.body_stages(body_index)
-	var modelled := not _load_sets(stages).is_empty()
-	var offset := Frames.to_render(sim.body_position_gcrf_m(body_index) - camera_gcrf_m)
+	var modelled := not _ensure_sets(stages).is_empty()
+	var offset := Frames.to_render((sim.body_position_gcrf_m(body_index) as Vector3) - camera_gcrf_m)
 	visible = offset.length() < HIDE_BEYOND_M
 	if not visible and _signature(stages) == _built_signature:
 		return  # nothing to draw: no posing, no plumes (a new stage list is still built, so the next view is right)
 	sync(stages, sim.body_engines(body_index), sim.body_flaps(body_index) if modelled else [],
 			sim.body_grid_fins(body_index) if modelled else [], sim.telemetry(body_index).get("altitude_m", 0.0),
-			sim.body_legs(body_index) if modelled else {}, sim.capsule_state(body_index) if modelled and not _nose.is_empty() else {})
+			sim.body_legs(body_index) if modelled else {}, sim.capsule_state(body_index) if modelled else {})
 	if not visible:
 		return
-	var attitude := Basis(sim.body_attitude_gcrf(body_index))
+	var attitude := Basis(sim.body_attitude_gcrf(body_index) as Quaternion)
 	transform = Transform3D(Frames.basis_to_render(attitude), offset)
-	var cg := sim.body_cg_station_m(body_index)
+	var cg: float = sim.body_cg_station_m(body_index)
 	_stage_root.position = Frames.to_render(Vector3(-cg, 0.0, 0.0))
 
 
@@ -101,7 +103,7 @@ func update_view(sim: FlightSim, camera_gcrf_m: Vector3) -> void:
 func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitude_m: float, legs := {}, capsule := {}) -> void:
 	var signature := _signature(stages)
 	if signature != _built_signature:
-		_load_sets(stages)
+		_ensure_sets(stages)
 		_build(stages, engines, flaps, grid_fins, legs)
 		_built_signature = signature
 	if not _models.is_empty():
@@ -114,6 +116,14 @@ func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitud
 ## Loads the model sets of every vehicle named in the stage list's id ("a+b/c": a launcher and its payload) and sets
 ## `_model_sets`, `_models` (the set holding the lowest stage's hull, else the first loaded one) and `_stage_models`.
 ## Returns the loaded sets.
+func _ensure_sets(stages: Array) -> Array[Dictionary]:
+	var signature := _signature(stages)
+	if signature != _sets_signature:
+		_load_sets(stages)
+		_sets_signature = signature
+	return _model_sets
+
+
 func _load_sets(stages: Array) -> Array[Dictionary]:
 	_model_sets.clear()
 	_models = {}

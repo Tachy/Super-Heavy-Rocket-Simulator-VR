@@ -38,7 +38,7 @@ TEST_CASE("Hull sample points of the Crew Dragon: trunk, tapered capsule, dockin
         max_r = std::max(max_r, std::hypot(q.y, q.z));
         if (q.x > 6.5) max_r_top = std::max(max_r_top, std::hypot(q.y, q.z));
     }
-    CHECK(max_x <= 3.7 + 4.0 - p.port_clearance_m + 1e-9);  // below the docking port region (port at capsule 4.0 m)
+    CHECK(max_x <= dragon.stages.front().length_m + 4.0 - p.port_clearance_m + 1e-9);  // below the docking port region (trunk length from the config, port at capsule 4.0 m)
     CHECK(max_r == Catch::Approx(2.0));                      // the 4 m heat shield
     CHECK(max_r_top < 1.5);                                  // the capsule narrows towards the top
 }
@@ -56,7 +56,7 @@ TEST_CASE("Hull sample points stop below a nose port listed after a dorsal port"
     const contact::StationCollisionParameters p;
     double max_x = 0.0;
     for (const auto& q : contact::hull_sample_points(dragon, p)) max_x = std::max(max_x, q.x);
-    CHECK(max_x <= 3.7 + nose.position_m.x - p.port_clearance_m + 1e-9);
+    CHECK(max_x <= dragon.stages.front().length_m + nose.position_m.x - p.port_clearance_m + 1e-9);
 }
 
 TEST_CASE("Hull contact: a Dragon point inside the Harmony capsule is pushed out; outside nothing", "[iss][docking]") {
@@ -90,7 +90,7 @@ TEST_CASE("Hull contact: a Dragon docked at either IDA touches nothing", "[iss][
     const auto shape = contact::station_shape(iss);
     const contact::StationCollisionParameters p;
     const auto pts = contact::hull_sample_points(dragon, p);
-    const double port_station = 3.7 + 4.0;  // Dragon port in its vehicle frame
+    const double port_station = dragon.stages.front().length_m + dragon.stages.back().docking_ports.front().position_m.x;  // Dragon port in its vehicle frame
     for (const auto& port : iss.stages.front().docking_ports) {
         std::vector<Vec3> in_station;
         for (const auto& q : pts) {

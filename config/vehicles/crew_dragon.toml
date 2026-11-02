@@ -136,7 +136,7 @@ deploy_height_m = 1800.0                 # [S:nasa_demo2] ~6,000 ft (Crew-1: ~6,
 [[stage.docking_port]]
 id = "idss"
 name = "Dragon-Andocksystem"
-position_m = [4.0, 0.0, 0.0]             # [E] top of the pressure vessel, below the cone hinge (length 4.5 m with the cone)
+position_m = [4.0, 0.0, 0.0]             # [E] port ring just above the deck, inside the cone (hinge at station 3.7, collar top 3.9; length 4.5 m with the cone)
 axis = [1.0, 0.0, 0.0]                   # forward, along the capsule axis
 up = [0.0, 0.0, -1.0]                    # [E] clocking reference
 behind_nose_cone = true                  # [S] the cone covers it during ascent and entry

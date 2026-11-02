@@ -15,6 +15,23 @@ var _failures := 0
 var _views: Array[VehicleView] = []
 
 
+## The FlightSim getters update_view reads, for one body.
+class _StubSim:
+	var stages: Array = []
+	var capsule := {}
+
+	func body_stages(_i: int) -> Array: return stages
+	func body_position_gcrf_m(_i: int) -> Vector3: return Vector3.ZERO
+	func body_engines(_i: int) -> Array: return []
+	func body_flaps(_i: int) -> Array: return []
+	func body_grid_fins(_i: int) -> Array: return []
+	func body_legs(_i: int) -> Dictionary: return {}
+	func telemetry(_i: int) -> Dictionary: return {}
+	func capsule_state(_i: int) -> Dictionary: return capsule
+	func body_attitude_gcrf(_i: int) -> Quaternion: return Quaternion.IDENTITY
+	func body_cg_station_m(_i: int) -> float: return 0.0
+
+
 func _initialize() -> void:
 	var stages := _config_stages()
 	var snapshot := _snapshot(stages)
@@ -239,6 +256,19 @@ func _check_dragon() -> void:
 	root.add_child(born_open)
 	born_open.sync([trunk, capsule], [], [], [], 0.0, {}, {"present": true, "nose_cone": true, "nose_cone_open": true})
 	_check(is_equal_approx(born_open.nose_fraction(), 1.0), "nose: a Dragon first seen with the nose open shows it open")
+	# The same through update_view (first build and the sets loaded once per stage list).
+	var stub := _StubSim.new()
+	stub.stages = [trunk, capsule]
+	stub.capsule = {"present": true, "nose_cone": true, "nose_cone_open": true}
+	var via_update := VehicleView.new()
+	_views.append(via_update)
+	root.add_child(via_update)
+	via_update.update_view(stub, Vector3.ZERO)
+	_check(is_equal_approx(via_update.nose_fraction(), 1.0), "update_view: a Dragon first built with the nose open shows it open at once")
+	var sets_loaded := VehicleModels.load_calls
+	via_update.update_view(stub, Vector3.ZERO)
+	via_update.update_view(stub, Vector3.ZERO)
+	_check(VehicleModels.load_calls == sets_loaded, "update_view: the model sets are not reloaded while the stage list is unchanged")
 	# After trunk separation: the capsule alone shows no trunk, its base is station 0, the nose still hinges.
 	var alone := capsule.duplicate()
 	alone["vehicle_id"] = "crew_dragon/capsule"

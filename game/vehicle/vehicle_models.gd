@@ -7,9 +7,11 @@ class_name VehicleModels
 ## permutation to render axes (body_to_render, the cyclic permutation of Frames.to_render).
 
 ## The vehicles that have detail models (a named list, not a config key, like Pad B's). The others keep their cylinders.
-## A vehicle on the list whose models are missing or stale also keeps them (one log line); the Crew Dragon and ISS have no
-## model files yet, their generators come with later tasks (tools/structures/blender/generators.toml).
+## A vehicle on the list whose models are missing or stale also keeps them (one log line); the generators are listed in
+## tools/structures/blender/generators.toml.
 static var MODEL_VEHICLE_IDS := PackedStringArray(["starship_block3", "falcon9_block5", "crew_dragon", "iss"])
+## Calls of load_for (tests: a view must not ask again every frame).
+static var load_calls := 0
 const MANIFEST := "manifest.json"
 ## Per vehicle: the glTF files the loader needs (no extension) and the sources whose change makes the set stale
 ## (tools/structures/blender/ scripts and tools/structures/ bakers); keep in step with generators.toml.
@@ -77,6 +79,7 @@ static var log_count := 0
 ## "grid_fin": {node: Mesh}, "engine": {false|true: Mesh}, "materials": {"steel"|"booster"|"ship"|"flap": ShaderMaterial}} (the
 ## engine meshes merged to one multi-surface mesh).
 static func load_for(vehicle_id: String) -> Dictionary:
+	load_calls += 1
 	if not MODEL_VEHICLE_IDS.has(vehicle_id):
 		_reasons[vehicle_id] = "none"
 		if vehicle_id != "" and not _logged.has(vehicle_id):
