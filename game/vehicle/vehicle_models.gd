@@ -363,6 +363,8 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	var built := FileAccess.get_modified_time(manifest)
 	var sources: Array[String] = [_repo_dir().path_join("config/vehicles/detail/%s.toml" % vehicle_id),
 			_repo_dir().path_join("config/vehicles/%s.toml" % vehicle_id)]
+	if vehicle_id == "iss":  # the station's rings are drawn from Dragon's [idss]
+		sources.append(_repo_dir().path_join("config/vehicles/detail/crew_dragon.toml"))
 	for script: String in SOURCE_SCRIPTS[vehicle_id]:
 		sources.append(_repo_dir().path_join("tools/structures/blender").path_join(script))
 	for baker: String in SOURCE_BAKERS[vehicle_id]:
@@ -449,7 +451,7 @@ static func exit_depth_m(models: Dictionary, vacuum: bool) -> float:
 
 
 ## The manifest's engine id of a snapshot engine kind: its own table (manifest look.engine_ids), else the Starship's. A kind
-## with no drawn model (the Falcon 9's Merlin Vacuum for now) has no manifest entry: callers fall back to the former values.
+## with no drawn model has no manifest entry: callers fall back to the former values.
 static func engine_id(models: Dictionary, vacuum: bool) -> String:
 	var ids: Dictionary = models["manifest"].get("look", {}).get("engine_ids", {})
 	if ids.is_empty():

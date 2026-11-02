@@ -1,6 +1,6 @@
 # Demo of the Crew Dragon's docking mechanism: extend, contact, retract, close the hooks, driven only through DockingMechanismView.set_state, with the passive port
 # of a second mechanism opposite (the IDSS is androgynous; that port's ring stays retracted). Needs a GPU (no --headless) and the generated models.
-# godot --path game --script res://tests/docking_mechanism_demo.gd -- --out_dir=<abs dir> [--sun=<deg>]
+# godot --path game --script res://tests/docking_mechanism_demo.gd -- --out_dir=<abs dir>
 # Writes <phase>_<view>.png per phase and view. Numbers: the manifest's idss block; contact tilt and stroke of this scene are illustrative, not a flown case.
 extends SceneTree
 
