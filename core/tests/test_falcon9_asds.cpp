@@ -2,6 +2,7 @@
 // three-engine entry burn, one-engine landing burn) and the Starlink-class mission from SLC-40.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -342,6 +343,45 @@ TEST_CASE("A Falcon 9 stage that cannot reach the drone ship ditches beside it",
     REQUIRE(guidance->scvx() != nullptr);
     CHECK(guidance->scvx()->aborting());
     CHECK(run.outcome == sim::LandingOutcome::Splashdown);
+}
+
+TEST_CASE("A Falcon 9 landing aborted in mid-flight re-plans at the fresh-plan settings and ends in the water",
+          "[gnc][falcon9][asds]") {
+    // The abort is a fresh plan (goal differs from the flown one, scvx_landing.cpp), so it flies the 0.3 / 100 settings from a
+    // state that is already moving. Nominal landing burn from the ignition state, abort ordered at the given height
+    // (review of Task 3, "confirm a mid-flight abort at the new penalty"). Prints what it flew; the outcome is asserted.
+    const double abort_height_m = GENERATE(2000.0, 1200.0);
+    CAPTURE(abort_height_m);
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(ship());
+    session.set_landing_zone(ship());
+    const auto parameters = asds_parameters();
+    const auto cfg = test::booster_config("falcon9_block5", asds_ignition_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, asds_ignition_sink_mps, parameters);
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {15.0, -10.0, h},
+                                                          {2.0, -1.0, -asds_ignition_sink_mps}),
+                                    t0, parameters, gnc::ReturnPhase::LandingBurn);
+    const auto& stage = session.body(0);
+    bool aborted = false;
+    double t = 0.0;
+    for (; t < 90.0 && !stage.impacted() && session.leg_touchdown(0) == sim::LegTouchdown::None; t += 0.05) {
+        session.advance_to(t0 + t, 100);
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        const Vec3 p = sim::site_enu_m(session.launch_site(), transpose(tr.rotation) * stage.state().position_gcrf_m);
+        if (!aborted && p.z < abort_height_m) aborted = session.abort_landing(0);
+    }
+    const auto* guidance = session.return_guidance(0);
+    std::printf("[falcon9] mid-flight abort at %.0f m: %s / %s after %.1f s, %.1f t left, plans %d, failed %d\n", abort_height_m,
+                sim::to_string(session.leg_touchdown(0)), sim::to_string(session.landing_outcome(0)), t,
+                stage.vehicle().propellant_kg() / 1e3,
+                guidance && guidance->scvx() ? guidance->scvx()->statistics().plans : -1,
+                guidance && guidance->scvx() ? guidance->scvx()->statistics().failures : -1);
+    REQUIRE(aborted);
+    REQUIRE(guidance->scvx() != nullptr);
+    CHECK(guidance->scvx()->aborting());
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);
 }
 
 TEST_CASE("The Falcon 9 drone-ship mission loads", "[config][falcon9][asds]") {

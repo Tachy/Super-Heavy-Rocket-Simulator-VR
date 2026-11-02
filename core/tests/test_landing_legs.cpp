@@ -126,15 +126,15 @@ TEST_CASE("A foot beyond the deck edge drops to the sea", "[contact][legs]") {
     const auto g = contact::make_leg_geometry(legs, 0.0, 1.83);
     contact::LandingSurface ship;
     ship.deck = contact::LandingSurface::Deck{45.0, 26.0, 0.0, 3.0};
-    // Stage 20 m east of the centre line: both eastern feet (azimuths 45 / 135 deg, 6.36 m east of the axis) are over the
-    // water at x = 26.36 > 26.
+    // Stage 20 m east of the centre line: the two eastern feet (azimuths 45 / 315 deg: cos a > 0, 6.36 m east of the axis)
+    // are over the water at x = 26.36 > 26, the western two (135 / 225 deg) stay on the deck at x = 13.64.
     auto pose = upright(g, 12.0, 0.003);
     pose.cg_m.x = 20.0;
     std::vector<double> crushed(4, 0.0);
     const auto c = contact::leg_contact(g, crushed, pose, ship);
     CHECK(c.feet_in_contact == 2);
     CHECK_FALSE(c.water);
-    pose.cg_m.z -= 3.5;  // sunk below the sea level: that foot is in the water
+    pose.cg_m.z -= 3.5;  // sunk below the sea level: the feet over the water are in the water
     std::vector<double> crushed2(4, 0.0);
     CHECK(contact::leg_contact(g, crushed2, pose, ship).water);
 }
