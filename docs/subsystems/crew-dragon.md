@@ -53,9 +53,11 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   `autopilot_status()["capsule_step"]`. Covered by the smoke test, whose check functions must run to their end.
 
 ### Detail model (plan 2026-11-02, Task 5; `docs/subsystems/vehicle-models.md` "Crew Dragon")
-- Capsule 4.5 m with the nose [S: Wikipedia; was 4.4], trunk 3.6 m (8.1 m total minus the capsule; was 3.7): the capsule stage's base is now station 3.6 m. SuperDraco
-  `angles_deg` pairs now 31/41, 139/149, 211/221, 319/329 [E: pods at 36 / 144 / 216 / 324, hatch in the 72 deg gap 324..36] instead of the uniform 40/50/130...; abort-only data,
-  no flight effect. The nose cone's open angle (120 deg) and opening time (8 s) are view data in `config/vehicles/detail/crew_dragon.toml`; the physics' state stays binary.
+- Capsule 4.85 m shield apex to nose tip [E: measured, KUBAHA M2 / M1 4.85, drawing D_Dragon_2_DM_2_03 4.83, Forest Katsch 4.92 at 4.0 m], trunk 3.25 m (8.1 m total [S] minus the capsule, M2 3.234): the capsule stage's base is station 3.25 m. SuperDraco `angles_deg` pairs 58/68, 112/122, 238/248, 292/302 [E: bays at 63 / 117 / 243 / 297, photo D_CCP_Demo_2 (3) hatch to bay ~66 deg]; abort-only data, no flight effect. The nose cone's open angle (120 deg) and opening time (8 s) are view data in `config/vehicles/detail/crew_dragon.toml`; the physics' state stays binary.
+
+## Open points (Task 5c)
+- Dragon return campaign case 5 misses by 2.75 km at exactly these lengths (bound 2 km, test `Crew Dragon return campaign: cases 4-7` red); 0.76-0.81 km at lengths 1-5 cm away. Cause: entry guidance, not geometry: the predictor's bank solution jumps on the last update above 500 m/s (+40.5 -> +10.5 deg at v 504) and is held from there. Open: decision on the guidance.
+- The aero table and heat model keep their [E] shape: 15 deg sidewall (measured about 20 deg) and R_n 4.8 m (measured 5.2-5.7 m on the same model). Not changed.
 
 ## Validation
 - Falcon 9 Crew Dragon mission `falcon9_crew_dragon` (SLC-40, 51.6 deg, 200 x 210 km, RTLS to LZ-40): SECO T+503 s,

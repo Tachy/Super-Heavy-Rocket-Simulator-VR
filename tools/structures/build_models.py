@@ -212,11 +212,16 @@ def dragon_manifest(spec: dict, digest: str, version: str, triangles: dict, tabl
     The nose file's origin is the hinge point; the closed pose is the identity."""
     paint = spec["detail"]["paint"]
     look = {"no_maps": True,
-            "part_materials": {"capsule": "paint_capsule", "nose_cone": "paint_capsule", "heat_shield": "paint_shield",
-                               "deck": "paint_pod", "superdraco_pod": "paint_pod", "draco_pod": "paint_pod",
+            "part_materials": {"capsule": "paint_capsule", "nose_cone": "paint_capsule", "hatch": "paint_capsule", "hinge_fairing": "paint_pod", "heat_shield": "paint_shield",
+                               "band": "paint_band", "deck": "paint_deck", "port": "paint_deck", "superdraco_pod": "paint_cowl", "superdraco_nozzle": "paint_pod", "draco_pod": "paint_pod",
+                               "seams": "paint_pod", "nose_seal": "paint_pod", "window": "paint_window", "umbilical": "paint_trunk",
                                "trunk": "paint_trunk", "trunk_array": "paint_array", "trunk_radiator": "paint_radiator"},
             "paint": {"paint_capsule": {"albedo": paint["capsule_albedo"], "roughness": 0.45, "metallic": 0.0},
                       "paint_shield": {"albedo": paint["shield_albedo"], "roughness": 0.85, "metallic": 0.0},
+                      "paint_band": {"albedo": paint["band_albedo"], "roughness": 0.4, "metallic": 0.7},
+                      "paint_cowl": {"albedo": paint["cowl_albedo"], "roughness": 0.45, "metallic": 0.5},
+                      "paint_window": {"albedo": paint["window_albedo"], "roughness": 0.1, "metallic": 0.0},
+                      "paint_deck": {"albedo": paint["deck_albedo"], "roughness": 0.6, "metallic": 0.1},
                       "paint_pod": {"albedo": paint["pod_albedo"], "roughness": 0.6, "metallic": 0.1},
                       "paint_trunk": {"albedo": paint["trunk_albedo"], "roughness": 0.5, "metallic": 0.0},
                       "paint_radiator": {"albedo": paint["radiator_albedo"], "roughness": 0.4, "metallic": 0.3},

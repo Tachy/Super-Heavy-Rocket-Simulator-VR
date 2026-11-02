@@ -86,3 +86,6 @@ Physics deviation rows, now none:
 - `super_heavy_descent.csv` before the re-subtraction (fins 3 x 13.5 m^2), Mach: C_D: 0: 0.900, 0.6: 0.950, 0.8: 1.000, 0.95: 1.150, 1.1: 1.450, 1.5: 1.380, 2: 1.420, 3: 1.750, 5-25: 1.880.
 
 - Until Task 5b `nose_length_m` was 17 m against the drawn 13.4 m, a documented deviation.
+
+## Crew Dragon, first drawing (Task 5, superseded by Task 5c, 2026-11-02)
+Plain revolved wall with one bulge, an ellipse as nose on a flat seam at station 3.7 (hinge r 0.9), boxes as pods, triangular fins, capsule 4.5 m + trunk 3.6 m, SuperDraco pods at 36 / 144 / 216 / 324. User: the nose "looks like a knob". Corrected misreadings of the first model measurement: "M2 capsule 4.44" was the port's top without the nose (real 4.85, total 8.08); "fins 1.3 m" was wrong (full trunk height); the az 36 / 144 groups are the Draco ports, the SuperDraco bays lie at 63 / 117.

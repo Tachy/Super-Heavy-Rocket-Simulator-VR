@@ -254,15 +254,15 @@ def load_falcon9(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Pa
 
 
 DRAGON_DETAIL_KEYS = {
-    "capsule": ("segments", "shield_edge_radius_m", "shoulder_rise_m", "band_top_m", "sidewall_mid_station_m",
-                "sidewall_mid_radius_m", "deck_collar_radius_m", "deck_collar_height_m", "nose_hinge_station_m",
-                "nose_hinge_azimuth_deg", "nose_open_angle_deg", "nose_open_time_s", "lobe_centre_station_m", "lobe_length_m",
-                "lobe_width_m", "lobe_proud_m", "draco_length_m", "draco_width_m", "draco_proud_m", "nose_draco_radius_m"),
-    "trunk": ("segments", "shield_well_m", "fin_count", "fin_first_azimuth_deg", "fin_height_m", "fin_tip_radius_m",
-              "fin_thickness_m", "base_ring_height_m", "radiator_to_m", "array_from_m", "panel_gap_deg", "panel_proud_m"),
-    "paint": ("capsule_albedo", "shield_albedo", "pod_albedo", "trunk_albedo", "radiator_albedo", "array_albedo"),
+    "capsule": ("az_step_deg", "nose_columns", "shield_edge_x_m", "band_top_x_m", "profile_m", "hood_half_width_deg", "hood_outer_m", "bay_top_x_m", "bay_corner_drop_m", "bay_corner_power",
+                "bay_half_width_deg_m", "bay_floor_m", "nozzle_x_m", "nozzle_half_x_m", "nozzle_half_az_deg", "nozzle_outline_scale", "seam_axis_x_m", "seam_slope", "seam_gap_m", "lip_thickness_m",
+                "nose_hinge_x_m", "nose_hinge_r_m", "nose_hinge_azimuth_deg", "nose_open_angle_deg", "nose_open_time_s", "hinge_fairing_m", "hinge_arm_m",
+                "nose_inner_shoulder_m", "nose_inner_cone_m", "nose_seal_m", "deck_x_m", "neck_m", "port_cone_m", "deck_holes", "windows", "window_flange_scale", "hatch",
+                "hatch_seam_m", "draco_clusters_az_deg", "draco_slots", "lift_panel_m", "lift_detail_m"),
+    "trunk": ("segments", "shield_well_m", "top_wall_m", "floor_depth_m", "base_inner_r_m", "fin_count", "fin_first_azimuth_deg", "fin_outline_m", "fin_thickness_m", "array_azimuths_deg",
+              "radiator_azimuths_deg", "array_top_x_m", "panel_base_m", "panel_proud_m", "umbilical_azimuth_deg", "umbilical_width_m", "umbilical_outline_m", "trunk_slots_m", "trunk_slots_azimuths_deg"),
+    "paint": ("capsule_albedo", "shield_albedo", "band_albedo", "cowl_albedo", "pod_albedo", "window_albedo", "deck_albedo", "trunk_albedo", "radiator_albedo", "array_albedo"),
 }
-
 
 def validate_dragon_detail(detail: dict) -> None:
     for table, keys in DRAGON_DETAIL_KEYS.items():
@@ -293,14 +293,15 @@ def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
     group = next(g for g in cap["engine_group"] if g["id"] == "superdraco")
     hinge_az = math.radians(c["nose_hinge_azimuth_deg"])
     top_radius = float(cap["hull_top_diameter_m"]) / 2.0
-    nose = {"stage_id": "capsule", "hinge_station_m": c["nose_hinge_station_m"], "hinge_azimuth_deg": c["nose_hinge_azimuth_deg"],
-            "hinge_radius_m": top_radius, "open_angle_deg": c["nose_open_angle_deg"], "open_time_s": c["nose_open_time_s"],
-            "length_m": float(cap["length_m"]) - c["nose_hinge_station_m"],
+    nose = {"stage_id": "capsule", "hinge_station_m": c["nose_hinge_x_m"], "hinge_azimuth_deg": c["nose_hinge_azimuth_deg"],
+            "hinge_radius_m": c["nose_hinge_r_m"], "open_angle_deg": c["nose_open_angle_deg"], "open_time_s": c["nose_open_time_s"],
+            "length_m": float(cap["length_m"]) - c["nose_hinge_x_m"],
             "axis": [0.0, -math.sin(hinge_az), math.cos(hinge_az)]}
     stages = {"trunk": {"length_m": float(trunk["length_m"]), "diameter_m": float(trunk["diameter_m"])},
               "capsule": {"length_m": float(cap["length_m"]), "diameter_m": float(cap["diameter_m"]),
                           "hull_top_radius_m": top_radius, "shield_nose_radius_m": float(cap["heat_shield"]["nose_radius_m"]),
                           "rcs_pods": cap["rcs"]["pod"], "superdraco_lobes_deg": dragon_lobes(group["angles_deg"]),
+                          "superdraco_half_gap_deg": 0.5 * (group["angles_deg"][1] - group["angles_deg"][0]),
                           "port_position_m": cap["docking_port"][0]["position_m"]}}
     return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose}
 

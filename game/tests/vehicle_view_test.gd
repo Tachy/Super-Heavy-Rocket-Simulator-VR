@@ -210,8 +210,8 @@ func _check_dragon() -> void:
 	_check(nearest < 0.01, "nose: a vertex of the cone sits on the hinge point (%.4f m)" % nearest)
 	var azimuth := deg_to_rad(float(nose["hinge_azimuth_deg"]))
 	var hinge := Vector3(float(nose["hinge_station_m"]), 0.0, 0.0) + Vector3(0.0, cos(azimuth), sin(azimuth)) * float(nose["hinge_radius_m"])
-	_check(is_equal_approx(hinge.y * hinge.y + hinge.z * hinge.z, pow(float(capsule_cfg["hull_top_diameter_m"]) * 0.5, 2.0)),
-			"nose: the hinge lies on the hull top's edge (config hull_top_diameter_m)")
+	_check(is_equal_approx(hinge.y * hinge.y + hinge.z * hinge.z, pow(float(detail["capsule"]["nose_hinge_r_m"]), 2.0)),
+			"nose: the hinge lies at the measured radius (detail file nose_hinge_r_m)")
 	var worst := 0.0
 	var model_vertex := vertices[0]
 	for v in vertices:
