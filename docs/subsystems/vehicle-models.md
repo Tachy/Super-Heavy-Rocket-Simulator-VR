@@ -83,8 +83,8 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
 - Checks: `tools/structures/tests/test_falcon9_spec.py`, `vehicle_view_test.gd` `_check_falcon9` (needs the generated set). Shots: `vehicle_look_shots.gd --legs=<d>`.
 
 ### Second stage and stack (Task 4)
-- `falcon9_second_stage.py` writes `falcon9_stage2.gltf` (`hull`: plain lathe from the engine mount to the closing cap at 13.8 m, white;
-  `engine_plate`: black closure at station 0 and the adapter ring below the cap; RCS bumps at the config's pods) and `mvac.gltf`
+- `falcon9_second_stage.py` writes `falcon9_stage2.gltf` (`hull`: plain lathe from the engine mount to the adapter ring, white;
+  `engine_plate`: black closure at station 0 and the dark adapter ring ending flat on the config length, 13.8 m, where the payload trunk base stands (no cone above it; tested); RCS bumps at the config's pods) and `mvac.gltf`
   (root `mvac`: `bell`, `housing`, `duct`). Triangles 536 / 3,840. Stage `second_stage` has its own part material (`stage_part_materials`).
 - Station 0 of the second stage = the Merlin Vacuum's gimbal point (physics and drawing agree, offset 0). The nozzle hangs 3.4 m below it
   (manifest `exit_plane_x_m` -3.4, the plume starts there with the rim's radius): exit station 44.3 m of the stack, inside the interstage
