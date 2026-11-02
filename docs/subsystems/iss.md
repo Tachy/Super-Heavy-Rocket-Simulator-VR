@@ -151,7 +151,19 @@ Physics follows the IDD's drawing: 30 deg [E, no source] -> 45 deg, capture radi
 | nominal: hard capture, comp, shear | 10.0 min, 881, 83 | 10.0 min, 882, 87 | |
 | session IDA-2: docked, comp, shear | 10.0 min, 900, 78 | 10.0 min, 903, 135 | |
 
-The chain and session shear rises by up to 86 %, far under its limit; which contact carries it was not isolated. Four tests stood on the old geometry and moved: the centring case to 0.30 m, the tip strike and the "Versatz zu groß" cases to 0.45 m, and 0.30 m now fails as "abgeprallt" (own test). Refuelling docks on the probe and drogue (`probe_drogue_interface`), which has no petal lean: its tests stay as they were. The Docking table above holds the older lean where not listed here.
+The chain and session shear rises by up to 86 %, far under its limit. Cause measured in the mechanism (the chain itself not instrumented): shear is counted from the latch, where the joint applies -k y - c vy at once; at 0.075 m/s and 0.10 m offset the chaser latches at y 0.089 m, vy -0.0148 m/s (30 deg, peak shear 152 N) against y 0.097 m, vy -0.0085 m/s (45 deg, 189 N): the cone engages later, the chaser arrives less centred and with less inward speed, so the spring and damper terms cancel less. Consistent with the chain rise, not proven in the chain.
+
+**Capture limit by speed, narrowed at the slow end** (C++ offset scan, 0.005 m grid, no lateral speed, largest offset that still captures): 
+
+| axial speed | 30 deg | 45 deg |
+|---|---|---|
+| 0.05 m/s | 0.200 m | 0.135 m |
+| 0.075 m/s | 0.240 m | 0.200 m |
+| 0.10 m/s | 0.240 m | 0.260 m |
+
+At 0.05 m/s the margin over the IDSS 0.10 m offset envelope falls from 0.10 m to 0.035 m (a Python replica had said 0.201 -> 0.139 m; the C++ confirms it within the grid). The 0.41 m capture radius is the single-cone formula (0.01 + 0.40 tan 45), a model bound, not an IDD figure: the near tip would stand at r 0.81 m, outside the 0.60 m outline.
+
+**Known state: outward lateral speed at the envelope corner.** 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral away from the axis (inside the IDSS envelope, which limits lateral speed by magnitude) ends "abgeprallt" at both 30 and 45 deg (inward -0.04 m/s captures at both). Pre-existing, not a regression of the lean. The 32-case grid and the corner test use inward lateral speed only, so "32/32" does not cover this corner. Pinned by the test "KNOWN STATE - envelope corner with outward lateral speed", not tuned; lever would be the undamped platform [E] (`docs/known-issues.md`). Four tests stood on the old geometry and moved: the centring case to 0.30 m, the tip strike and the "Versatz zu groß" cases to 0.45 m, and 0.30 m now fails as "abgeprallt" (own test). Refuelling docks on the probe and drogue (`probe_drogue_interface`), which has no petal lean: its tests stay as they were. The Docking table above holds the older lean where not listed here.
 
 ### Crew Dragon translation and relative navigation (i2)
 - **Draco layout** [E] kept (user 2026-10-19). Test threshold lateral >= 0.04 m/s^2 [E] (1 m/s in 25 s).
@@ -301,7 +313,7 @@ Plan `docs/superpowers/archive/plans/2026-10-19-iss-i5-docking.md`.
 - **Interface** (`contact/docking_interface`, passive port frame, reduced order): active ring face 0.30 m [E] out of the
   Dragon port; ring-face penalty contact (2e5 N/m, 2.9e4 N s/m [E]: 0.10 m/s impact peaks ~4.0 kN, 0.25 m/s ~10 kN);
   three petal pairs as one cone (outline radius 0.60 m, height 0.20 m, lean 45 deg [S: IDD Figs 3.1.1.1-2, -3, pdf p. 24, printed 3-5; base 1200, tip 800, height 200 REF], meshed clearance 0.01 m [E]):
-  capture radius 0.41 m (0.01 + 0.40 tan 45; beyond it tips strike the opposing petals, axial contact, no centring). Inside it a large offset can still bounce: the cone's axial force is the lateral force x tan(lean), and on the way in it does the platform spring's work k p^2 / 2 whatever the lean, so at 0.075 m/s (about 34 J) 0.30 m (84 J) is pushed back out: "abgeprallt" (energy estimate, not a separate measurement). The light active ring
+  capture radius 0.41 m (0.01 + 0.40 tan 45; beyond it tips strike the opposing petals, axial contact, no centring). Inside it a large offset can still bounce, by reflection and not by an energy barrier (measured in C++, `[.scan]` case in `test_docking_mechanism.cpp`): at 0.075 m/s and 0.30 m the platform deflection peaks at only 0.126 m (15.8 J of the chaser's 33.8 J, far from the 0.20 m stop); the 45 deg cone face turns axial speed into lateral speed, the chaser crosses the axis at gap 0.11 m, strikes the opposite side of the cone and leaves at +0.065 m/s: "abgeprallt" (a V that reflects the chaser). At 30 deg 0.30 m is beyond the 0.24 m capture radius ("Versatz zu groß"). The light active ring
   gives way on its platform (2000 N/m up to 0.20 m [E]); conforms in tilt up to 6 deg and roll up to 6 deg [E]. Latches:
   ring faces within 5 mm, deflection, tilt and roll within ranges. Acts only within 1.2 m laterally and 0.15 m ring
   penetration (beyond: hull contact).

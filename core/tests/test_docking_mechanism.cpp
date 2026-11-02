@@ -50,9 +50,10 @@ struct Run {
 // The IDSS initial contact conditions hold at the first physical touch (IDSS IDD E 3.3.1.1): the chaser starts 5 mm
 // before it - on the petal cone for an offset beyond the meshed clearance, on the ring face otherwise; offsets beyond
 // the capture radius start 5 cm before the petal tips.
-Run approach(double axial_mps, double offset_m, double angle_rad = 0.0, double lateral_mps = 0.0) {
-    Run r;
-    const contact::DockingMechanismParameters p;
+Run approach(double axial_mps, double offset_m, double angle_rad = 0.0, double lateral_mps = 0.0, double lean_rad = -1.0) {
+    contact::DockingMechanismParameters p;
+    if (lean_rad > 0.0) p.interface.petal_lean_rad = lean_rad;
+    Run r{contact::DockingMechanism(p), {}, 0.0};
     const auto& ip = p.interface;
     const double tips = 2.0 * ip.petal_height_m;
     const double capture = ip.petal_clearance_m + tips * std::tan(ip.petal_lean_rad);
@@ -127,13 +128,31 @@ TEST_CASE("Docking mechanism: an offset beyond the petals' capture radius bounce
 }
 
 TEST_CASE("Docking mechanism: inside the capture radius a large offset is pushed back out by the petal cone", "[iss][docking]") {
-    // 0.30 m is inside the 0.41 m, but the cone's axial force does more work on the way in than 0.075 m/s can pay
-    // (platform spring: k p^2 / 2 = 84 J at p = 0.29 m against about 34 J for the Dragon).
+    // 0.30 m is inside the 0.41 m, but the chaser is not stopped by the platform spring: measured (scan below) it
+    // reaches a peak deflection of only about 0.13 m (about 17 J of the 34 J), the 45 deg cone turns its axial speed
+    // into lateral speed, it crosses the axis, strikes the opposite side of the cone and is reflected out (a V, not
+    // an energy barrier).
     auto r = approach(0.075, 0.30);
     r.fly(60.0);
     CHECK(r.m.phase() == contact::DockingPhase::Failed);
     CHECK(r.m.failure() == "abgeprallt");
     CHECK(r.c.v.x > 0.0);
+}
+
+TEST_CASE("Docking mechanism: KNOWN STATE - envelope corner with outward lateral speed bounces at 30 and 45 deg",
+          "[iss][docking]") {
+    // 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral AWAY from the axis: inside the IDSS initial-condition envelope
+    // (lateral speed is limited by magnitude), yet the model does not capture it, at either lean (measured: both
+    // "abgeprallt"). Pre-existing at 30 deg, not caused by the 45 deg lean. Not tuned and not weakened: this pins the
+    // state until the undamped platform [E] is revisited (docs/known-issues.md). When it captures, flip the check.
+    for (double lean_deg : {30.0, 45.0}) {
+        auto r = approach(0.05, 0.10, 0.0, 0.04, lean_deg * deg);
+        r.fly(60.0);
+        INFO("lean " << lean_deg << " -> " << r.m.failure());
+        CHECK(r.m.phase() == contact::DockingPhase::Failed);
+        CHECK(r.m.failure() == "abgeprallt");
+        CHECK(r.c.v.x > 0.0);
+    }
 }
 
 TEST_CASE("Docking mechanism: rearm after a failure, then a good approach captures", "[iss][docking]") {
@@ -189,4 +208,77 @@ TEST_CASE("Docking mechanism: start_docked enters Docked from Ready only", "[doc
     CHECK_FALSE(m.refusal().empty());
     CHECK(m.undock(10.0));  // the docked state undocks as after a capture
     CHECK(m.phase() == contact::DockingPhase::HooksOpening);
+}
+
+// Measurements for docs/subsystems/iss.md (STARSIM_VERBOSE prints them): hidden, run with "[.scan]".
+namespace {
+bool captures(double axial, double offset, double lean, double lateral = 0.0) {
+    auto r = approach(axial, offset, 0.0, lateral, lean);
+    r.fly(60.0);
+    return r.m.phase() == contact::DockingPhase::SoftCapture;
+}
+}  // namespace
+
+TEST_CASE("Docking mechanism scan: largest captured offset by speed and lean, bounce mechanism, latch state",
+          "[.scan]") {
+    for (double lean_deg : {30.0, 45.0}) {
+        for (double axial : {0.05, 0.075, 0.10}) {
+            double best = 0.0;
+            for (double o = 0.02; o < 0.44; o += 0.005) {
+                if (captures(axial, o, lean_deg * deg)) best = o;
+            }
+            std::printf("[scan] lean %.0f axial %.3f largest captured offset (0.005 grid) %.3f m\n", lean_deg, axial, best);
+        }
+    }
+    for (double lean_deg : {30.0, 45.0}) {
+        auto r = approach(0.075, 0.30, 0.0, 0.0, lean_deg * deg);
+        double min_x = 1e9, max_abs_y = 0.0, y_at_cross = 0.0, vx_exit = 0.0, x0 = r.c.p.x;
+        bool crossed = false;
+        double peak_defl = 0.0, peak_defl_energy_j = 0.0;
+        for (int i = 0; i < 12000; ++i) {
+            const double y_before = r.c.p.y;
+            r.fly(0.005);
+            min_x = std::min(min_x, r.c.p.x);
+            {   // platform deflection = offset - clearance(gap) while the ring is in the cone
+                const contact::DockingInterfaceParameters ip;
+                const double gap = r.c.p.x - ip.ring_extension_m;
+                const double defl = std::hypot(r.c.p.y, r.c.p.z) - (ip.petal_clearance_m + std::max(gap, 0.0) * std::tan(lean_deg * deg));
+                if (defl > peak_defl) { peak_defl = defl; peak_defl_energy_j = 0.5 * ip.ring_lateral_stiffness_n_per_m * defl * defl; }
+            }
+            max_abs_y = std::max(max_abs_y, std::fabs(r.c.p.y));
+            if (!crossed && y_before * r.c.p.y < 0.0) { crossed = true; y_at_cross = r.c.p.x; }
+        }
+        vx_exit = r.c.v.x;
+        std::printf("[scan] 0.30 m @0.075 lean %.0f: %s, min x %.3f (start %.3f, travel %.3f), max |y| %.3f, crossed axis %d at x %.3f, "
+                    "exit vx %+.3f, peak deflection %.3f m (spring work %.1f J), chaser KE at start %.1f J\n", lean_deg,
+                    r.m.failure().c_str(), min_x, x0, x0 - min_x, max_abs_y, crossed, y_at_cross, vx_exit, peak_defl,
+                    peak_defl_energy_j, 0.5 * 12000.0 * 0.075 * 0.075);
+    }
+    for (double lean_deg : {30.0, 45.0}) {
+        for (double lat : {-0.04, 0.04}) {
+            auto r = approach(0.05, 0.10, 0.0, lat, lean_deg * deg);
+            Vec3 pl, vl;
+            bool latched = false;
+            for (int i = 0; i < 12000; ++i) {
+                r.fly(0.005);
+                if (!latched && r.m.phase() == contact::DockingPhase::SoftCapture) { latched = true; pl = r.c.p; vl = r.c.v; }
+            }
+            std::printf("[scan] corner 0.05 m/s 0.10 m lateral %+.2f lean %.0f: %s, latch y %.3f vy %+.4f, shear %.0f N\n", lat,
+                        lean_deg, latched ? "captured" : r.m.failure().c_str(), pl.y, vl.y, r.m.peaks().shear_n);
+        }
+    }
+    for (double lean_deg : {30.0, 45.0}) {
+        for (double off : {0.10}) {
+            auto r = approach(0.075, off, 0.0, 0.0, lean_deg * deg);
+            Vec3 pl, vl;
+            bool latched = false;
+            for (int i = 0; i < 12000; ++i) {
+                r.fly(0.005);
+                if (!latched && r.m.phase() == contact::DockingPhase::SoftCapture) { latched = true; pl = r.c.p; vl = r.c.v; }
+            }
+            std::printf("[scan] latch 0.075 m/s offset %.2f lean %.0f: y %.3f vy %+.4f, shear %.0f N\n", off, lean_deg, pl.y, vl.y,
+                        r.m.peaks().shear_n);
+        }
+    }
+    SUCCEED();
 }

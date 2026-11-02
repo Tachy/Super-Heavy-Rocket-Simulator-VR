@@ -9,6 +9,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   - Falcon 9 foot at -2.1 m from weak evidence; fins fold by a view rule (no physics state), leg drawn as one beam (`falcon9.md`).
   - Raptor 3 nozzle (drawn 1.30 m official, physics Isp / thrust unchanged): its own later topic, nothing changed in this plan.
   - ISS collision shapes are the old capsules and boxes and lag the drawing; CG 38 m is an unverified [E] (a rough tally gives about 33 m) (`iss.md`).
+  - IDSS soft capture misses one envelope corner: 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral away from the axis ends "abgeprallt" at 30 and 45 deg petal lean (inward lateral captures); the undamped ring platform [E] reflects the chaser. Pinned by a test, not tuned. Capture at 0.05 m/s also narrowed with the 45 deg lean (largest offset 0.200 -> 0.135 m, margin over the 0.10 m envelope 0.035 m) (`iss.md`).
   - Docked Dragon shows ring retracted / hooks open (`DockingMechanismView` is not driven in flight).
   - The Dragon sensitivity above stays parked.
   - Dragon's flange OD: drawn 1.40 m [E], about 1.64 m in the photo (`vehicle-models.md`); axial fittings against model D unchecked; Dragon's campaign margin 1.61 km against the 2 km bound.
