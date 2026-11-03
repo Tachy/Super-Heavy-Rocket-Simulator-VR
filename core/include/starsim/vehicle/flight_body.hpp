@@ -279,7 +279,9 @@ private:
     void snap_ideal_attitude();
     std::optional<math::Quat> ideal_lvlh_;
     void follow_pad(const environment::BodyFrame& frame);
-    void resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
+    // cg_station_m: the CG station the state was integrated with (the hull's bottom lies that far below the position)
+    void resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame,
+                                double cg_station_m);
     void update_air_data(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
     void judge_parachute_loads();
 

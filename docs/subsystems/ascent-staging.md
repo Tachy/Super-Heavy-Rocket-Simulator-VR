@@ -6,6 +6,13 @@ Plan `docs/superpowers/archive/plans/2026-10-22-ascent-trajectory-staging.md`, s
 
 ## Model
 
+### Liftoff
+- After the clamps open the stack rests on the ground (`FlightBody::resolve_ground_contact`) until it rises; the hull's
+  bottom is judged from the CG station the tick integrated with, not the one after the tick's burn (planner plan Task
+  4b: the stretched tanker's CG climbs 0.09 mm per tick on the pad, its first tick rises 0.045 mm at T/W 1.37 - judged
+  after the burn the contact held it for the whole booster burn). Test "A stack whose CG climbs faster than its first
+  tick's rise lifts off the pad" (`[vehicle][contact][ascent]`).
+
 ### Staging sequence
 `stage()` starts a sequence (`[stage.staging]` of the lower stage, `config::StagingConfig`; `sim::StagingSequence`,
 `flight_session_staging.cpp`); `AutopilotState::Staging` lies between Booster and UpperStage and holds the guidance's last

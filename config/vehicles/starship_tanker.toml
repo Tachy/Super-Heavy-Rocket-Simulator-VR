@@ -1,6 +1,7 @@
-# Starship tanker (refuelling r1): a Block 3 ship that carries propellant to the depot. Same hull, tanks and engines as
-# starship_block3.toml - its stages are taken over unchanged ([[stage]] from = "<vehicle>:<stage>"); the ship adds four
-# docking probes on the dorsal side and the transfer connectors (spec 2026-10-20-orbital-refuelling-design.md).
+# Starship tanker (refuelling r1): a Block 3 ship that carries propellant to the depot. Same hull and engines as
+# starship_block3.toml - its stages are taken over ([[stage]] from = "<vehicle>:<stage>"); the ship's main tanks are
+# stretched into the cargo bay (planner plan Task 4b), it adds four docking probes on the dorsal side and the transfer
+# connectors (spec 2026-10-20-orbital-refuelling-design.md).
 
 [sources]
 spacex_v3 = "SpaceX Starship V3 update, May 2026, via https://www.teslarati.com/spacex-unveils-sweeping-starship-v3-upgrades-ahead-may-19-launch/ (four docking drogues and dedicated propellant transfer connections)"
@@ -19,10 +20,33 @@ from = "starship_block3:booster"
 from = "starship_block3:ship"
 display_name = "Tanker Mk3"  # [D] display name of the part flying alone, no trademark
 # [E] placeholder until the real tanker is known (user 2026-10-20): a tanker ship without cargo doors, dispenser and
-# interior (heat shield, flaps and header tanks stay). Block 3's 177 t [D] (flights 12-14, planner plan Task 3b) less
-# the payload bay door and dispenser (6 t [E], tools/structures/ship_mass_budget.py). Before Task 3b: 209 t, chosen
-# as 46 t under the 255 t then for 100 t main propellant after the ascent. CG as Block 3's.
-dry_mass_kg = 171000.0
+# interior (heat shield, flaps and header tanks stay), its main tanks stretched into the cargo bay (user 2026-11-03:
+# SpaceX intends larger tanks there; no published dimensions). Bottom-up from Block 3's 177 t [D] (flights 12-14):
+#   python tools/structures/ship_mass_budget.py --dry-t 177 --tanker
+# less the payload bay door and dispenser (6 t at 37 m), the common and forward domes and the CH4 header moved with the
+# tanks, the CH4 line +0.15 t; the hull is the tank wall either way (4 mm, same shell). Block 3's unexplained 49.7 t
+# placed like the tanker's shell (other placements: CG 19.70-22.08 m). 171 t / 22.03 m before Task 4b.
+dry_mass_kg = 171150.0
+dry_cg_station_m = 21.88
+
+# Main tanks stretched into the cargo bay [E] (planner plan Task 4b): the forward dome moves from 32.2 m to the end of
+# the cylindrical barrel, 38.7 m (52.1 m - the 13.4 m drawn ogive; the ogive keeps the dome cap, the LOX header and its
+# downcomer), the column top with it (32.15 -> 38.65 m). LOX at the bottom, CH4 above as in Block 3; the common dome
+# moves up (19.5 -> 23.2 m) so that the main tanks keep the Raptor's O/F 3.6 at the config densities (1200 / 440
+# kg/m^3, hull diameter 9 m): LOX 3.50-23.24 m (1,256 m^3), CH4 23.70-38.65 m (951 m^3), main 1,925.7 t (Block 3 1,565.0
+# t), 1,960.7 t with the 35 t headers. Same script (tanker_tanks).
+[[stage.tank]]
+id = "lox_main"
+mass_kg = 1507072.1
+
+[[stage.tank]]
+id = "ch4_main"
+mass_kg = 418631.1
+base_station_m = 23.697
+
+[[stage.tank]]
+id = "ch4_header"                        # on the CH4 main tank's lower dome, as in Block 3
+base_station_m = 23.697
 
 # Docking probes and transfer connectors [E] (positions not published; spec r1, plan decision 3): the interface plane
 # z = +5.0 m lies 0.5 m off the dorsal hull (radius 4.5 m; belly at -z). Mated with the depot's drogues the ships lie parallel,
@@ -39,7 +63,7 @@ elements_m = [[12.0, -1.5, 5.0], [12.0, 1.5, 5.0], [28.0, -1.5, 5.0], [28.0, 1.5
 
 [[stage.transfer_connector]]
 id = "lox_transfer"
-tank = "lox_main"                        # LOX main tank 3.5-20.4 m
+tank = "lox_main"                        # LOX main tank 3.5-23.24 m
 position_m = [8.0, 0.0, 5.0]             # [E]
 line_diameter_m = 0.15                   # [E] one line per propellant (SpaceX publishes no size)
 discharge_coefficient = 0.6              # [E] lumped line, valve and coupling losses
@@ -48,8 +72,8 @@ chilldown_kg = 150.0                     # [E] ~300 kg of line and coupling stee
 
 [[stage.transfer_connector]]
 id = "ch4_transfer"
-tank = "ch4_main"                        # CH4 main tank 20-32.6 m
-position_m = [24.0, 0.0, 5.0]            # [E]
+tank = "ch4_main"                        # CH4 main tank 23.70-38.65 m
+position_m = [24.0, 0.0, 5.0]            # [E] on the depot's CH4 connector when mated (still on the CH4 tank)
 line_diameter_m = 0.15                   # [E]
 discharge_coefficient = 0.6              # [E]
 chilldown_kg = 60.0                      # [E] the same steel over 510 kJ/kg ~37 kg, +50 %

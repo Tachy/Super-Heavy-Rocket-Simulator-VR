@@ -478,6 +478,10 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     }
     const bool was_resting = resting_;  // on the ground nothing boils off (as in coast())
     resting_ = false;                   // re-established by the ground contact below
+    // The CG station the tick integrates with: the propellant burned below moves the CG inside the hull, not the hull
+    // (planner plan Task 4b: on the pad the stretched tanker's CG climbed 0.09 mm per tick, faster than its first
+    // tick's rise of 0.045 mm, and the contact held it down for the whole booster burn).
+    const double integrated_cg_station_m = vehicle_->mass_properties().cg_station_m;
 
     const TickContext ctx{env,
                           *vehicle_,
@@ -543,17 +547,18 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         boil_off(env, epoch + dt_s, dt_s);
     }
 
-    resolve_ground_contact(body, body.frame(epoch + dt_s));
+    resolve_ground_contact(body, body.frame(epoch + dt_s), integrated_cg_station_m);
 }
 
 // Ground = the reference body's terrain (Earth: M8, Moon: lunar l2; the bare shape without one); the Earth without
 // terrain: flat at ground_height_m_ (the pad elevation).
 // Gentle contact: the ground carries the vehicle (it rests, co-rotating with the Earth, and lifts off as
 // soon as thrust exceeds weight). Hard contact (sink rate or tilt too large): impact.
-void FlightBody::resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame) {
+void FlightBody::resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame,
+                                        double cg_station_m) {
     // Legs moving or out on a leg landing site: that simulation owns the contact.
     if (vehicle_->leg_deployment() > 0.0 && legs_on_site_) return;
-    const double cg = vehicle_->mass_properties().cg_station_m;
+    const double cg = cg_station_m;
     const Vec3 bottom_fixed = frame.to_fixed(state_.position_gcrf_m + state_.attitude.rotate(Vec3{-cg, 0.0, 0.0}));
     const Vec3 top_fixed =
         frame.to_fixed(state_.position_gcrf_m + state_.attitude.rotate(Vec3{vehicle_->length_m() - cg, 0.0, 0.0}));
@@ -702,7 +707,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
         liquid.specific_force_body_mps2 = boil_off_specific_force_body_mps2_;
         vehicle_->update_settling(liquid, duration_s);
     }
-    resolve_ground_contact(end_body, end_frame);
+    resolve_ground_contact(end_body, end_frame, vehicle_->mass_properties().cg_station_m);  // a coast burns nothing
     update_air_data(end_body, end_frame);
     boil_off(env, epoch + duration_s, duration_s);
 }

@@ -206,7 +206,10 @@ flow separation (vacuum engines).
 - `[[stage]] from = "<vehicle>:<stage>"`: the stage exactly as `config/vehicles/<vehicle>.toml` configures it
   (the Starship tanker and the depot's Super Heavy are Block 3's). Only `[[stage.docking_port]]`,
   `[[stage.transfer_connector]]`, `[[stage.rcs_pod]]` (r3: same keys as `[[stage.rcs.pod]]`; the source stage needs
-  `[stage.rcs]`) and `[stage.propellant_transfer]` (r4) may be added, `dry_mass_kg` and `display_name` overridden; any other key is an error (it would silently diverge from the source).
+  `[stage.rcs]`) and `[stage.propellant_transfer]` (r4) may be added, `dry_mass_kg`, `dry_cg_station_m` and
+  `display_name` overridden, and `[[stage.tank]]` entries resize a source tank by `id` (only `mass_kg`, the full load,
+  and `base_station_m`; planner plan Task 4b: the tanker's stretched main tanks); any other key, or a tank the source
+  does not have, is an error (it would silently diverge from the source).
   The propellant must be the vehicle's. `tools/vehicle_report.py` follows `from`.
 - `[stage] hull_top_diameter_m` (optional): the hull tapers linearly from `diameter_m` at the stage bottom to this at
   its top - the hull sample points of a visiting vehicle against the station primitives (ISS i5; Crew Dragon capsule).

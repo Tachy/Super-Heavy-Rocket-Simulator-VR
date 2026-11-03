@@ -548,3 +548,22 @@ TEST_CASE("A stage without forward thrusters refuses an RCS burn", "[rcs][burn]"
     CHECK_FALSE(session.execute_burn({t0 + 600.0, math::normalized(at_node.velocity_mps) * 0.5}));
     CHECK(std::isfinite(session.body(0).state().position_gcrf_m.x));
 }
+
+// Planner plan Task 4b: the stretched tanker stack's CG climbs 0.09 mm per tick on the pad (the booster's tanks drain),
+// more than its first tick's rise at T/W 1.37 (0.045 mm). The ground contact judged the hull's bottom from the CG
+// after the burn and held the stack down for the whole booster burn; the bottom lies below the CG the tick integrated.
+TEST_CASE("A stack whose CG climbs faster than its first tick's rise lifts off the pad", "[vehicle][contact][ascent]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    session.launch_from_pad("starship_tanker", {25.99686 * deg, -97.15394 * deg, 10.0}, 90.0 * deg, t0);
+    session.engage_ascent_autopilot({120.0e3, 190.0e3, 26.5 * deg, true}, gnc::PitchProgram{});
+    session.advance_to(t0 + 15.0, 100000);
+    const auto t = session.telemetry(0);
+    std::printf("tanker stack T+%.1f s: %.0f m, %.1f m/s\n", session.mission_time_s(), t.altitude_m, t.speed_relative_mps);
+    CHECK_FALSE(session.body(0).resting());
+    CHECK(t.altitude_m > 200.0);
+}

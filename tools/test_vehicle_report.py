@@ -58,10 +58,22 @@ class FromResolution(unittest.TestCase):
         self.assertEqual([p["id"] for p in stages["ship"]["docking_port"]], ["nose", "dorsal"])
         self.assertEqual(stages["ship"]["dry_mass_kg"], 50.0)
 
+    def test_tanks_are_resized_not_added(self):
+        source = SOURCE + '[[stage.tank]]\nid = "lox"\nmass_kg = 10.0\nbase_station_m = 1.0\n'
+        stages = resolve({"source": source, "test": reused('from = "source:ship"\ndry_cg_station_m = 2.0\n'
+                                                           '[[stage.tank]]\nid = "lox"\nmass_kg = 20.0\n')}, "test")
+        self.assertEqual(stages["ship"]["tank"], [{"id": "lox", "mass_kg": 20.0, "base_station_m": 1.0}])
+        self.assertEqual(stages["ship"]["dry_cg_station_m"], 2.0)
+        with self.assertRaisesRegex(SystemExit, "is not on the source stage"):
+            resolve({"source": source, "test": reused('from = "source:ship"\n[[stage.tank]]\nid = "x"\n')}, "test")
+        with self.assertRaisesRegex(SystemExit, "can only change"):
+            resolve({"source": source, "test": reused('from = "source:ship"\n[[stage.tank]]\nid = "lox"\n'
+                                                      'diameter_m = 1.0\n')}, "test")
+
     def test_tanker_from_the_real_config(self):
         vehicle = vehicle_report.load_toml(vehicle_report.CONFIG_DIR / "vehicles" / "starship_tanker.toml")
         ship = vehicle_report.resolve_stages(vehicle)["ship"]
-        self.assertEqual(ship["dry_mass_kg"], 171000.0)
+        self.assertEqual(ship["dry_mass_kg"], 171150.0)
         self.assertEqual([p["id"] for p in ship["docking_port"]], ["transfer_dock"])
 
 

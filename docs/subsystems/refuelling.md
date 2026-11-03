@@ -9,18 +9,27 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
 ## Model
 
 ### Vehicles and docking geometry (r1)
-- `starship_tanker` = Block 3 unchanged (`[[stage]] from = "starship_block3:<stage>"`) + four dorsal probes (port
+- `starship_tanker` = Block 3 (`[[stage]] from = "starship_block3:<stage>"`) with main tanks stretched into the cargo
+  bay + four dorsal probes (port
   `transfer_dock`, `mechanism = "probe_drogue"`, `soft_capture = "active"`) and the transfer connectors `lox_transfer`
   / `ch4_transfer`. `starship_depot` = Block 3 booster + a ship without heat shield, flaps, catch pins and recovery:
   158.5 t dry, CG 21.89 m [E] (177 - 10.5 heat shield - 10 flaps - 1 pins + 3 insulation; planner plan Task 3b, was 236.5 t
   on the 255 t ship), four dorsal drogues (passive). The HLS
-  carries the tanker's probes and connectors. Flown tanker: dry mass **171 t** (Block 3 177 t less 6 t door and dispenser;
-  209 t before Task 3b; `dry_mass_kg` override on its `from`
-  stage: no cargo doors, dispenser, interior; heat shield, flaps, headers stay) [E, user 2026-10-20].
-- A `from` stage is the source vehicle's stage exactly; only `docking_port` and `transfer_connector` entries may be
-  added (any other key, a missing stage / vehicle, a propellant mismatch or a cycle is a `ConfigError`).
-  `tools/vehicle_report.py` follows `from` by the C++ rules (cycle bound, `<vehicle>:<stage>`, allowed keys, lists
-  appended; `tools/test_vehicle_report.py`). Duplicate stage, docking-port and transfer-connector ids are config errors.
+  carries the tanker's probes and connectors. Flown tanker (planner plan Task 4b, user 2026-11-03: the tanker needs no
+  cargo bay, SpaceX intends larger tanks there; no published dimensions): main tanks stretched into the bay [E] - the
+  forward dome from 32.2 m to the barrel end 38.7 m (the ogive above keeps the LOX header), the common dome from 19.5 to
+  23.2 m so that the main tanks keep O/F 3.6: LOX 1,507.1 t at 3.5-23.24 m (1,256 m^3), CH4 418.6 t at 23.70-38.65 m
+  (951 m^3), main 1,925.7 t (Block 3 1,565.0 t), 1,960.7 t with the unchanged 35 t headers; the CH4 header moves with
+  the CH4 tank's lower dome to 23.70 m; connectors stay at 8 / 24 m (24 m on the CH4 tank). Dry mass **171.15 t**, CG
+  **21.88 m** [E] (`tools/structures/ship_mass_budget.py --dry-t 177 --tanker`: no 6 t door and dispenser, domes and
+  CH4 header moved, CH4 line +0.15 t, the Block 3 rest of 49.7 t placed like the tanker's shell; 171 t / 22.03 m before
+  Task 4b, 209 t before Task 3b). Heat shield, flaps, headers, probes and connectors stay.
+- A `from` stage is the source vehicle's stage exactly; only `docking_port`, `transfer_connector`, `rcs_pod` and
+  `propellant_transfer` entries may be added, dry mass / dry CG / display name overridden and source tanks resized by
+  id (`[[stage.tank]]`: `mass_kg`, `base_station_m`); any other key, an unknown tank, a missing stage / vehicle, a
+  propellant mismatch or a cycle is a `ConfigError`.
+  `tools/vehicle_report.py` follows `from` by the C++ rules (cycle bound, `<vehicle>:<stage>`, allowed keys, tank
+  resizes, lists appended; `tools/test_vehicle_report.py`). Duplicate stage, docking-port and transfer-connector ids are config errors.
 - Layout [E]: interface plane 0.5 m off the dorsal hull (`[20, 0, 5]`, axis +z, up +x), probes / drogues at stations
   12 / 28 m, y +-1.5 m; connectors at 8 m (LOX) / 24 m (CH4), y 0. Mated (`vehicle::mated_stage_transform`):
   parallel, rolled 180 deg, centrelines 10 m apart, 1 m between the hulls, every probe on a drogue and every connector
@@ -239,7 +248,10 @@ Fidelity flag `FlightEnvironment::ignition_settling` (default on, one source `ve
   on the derived heights), initial fill 55.5 t main, boil-off 17.6 kg in 90 min, booster caught. `tanker_flight` (pad):
   window 79.8 h after earliest (48 h uncrewed phasing; the crew's 28 h: 177 h), SECO 444.3 s, arc 12.17 deg [D];
   residue 105.6 t, settling gas 0.98 t, main at undock 12.6 t, rendezvous 17.93 t, delivered LOX / CH4 58.9 / 14.7 t,
-  main at catch 1.38 t. `hls_refuel` (pad): SECO 428.3 s, arc 11.68 deg [D], residue 216.4 t, after the raise 208.3 t,
+  main at catch 1.38 t (the tanker numbers of a 209 t tanker; flown 2026-11-03 with the stretched 171.15 t tanker,
+  planner plan Task 4b: residue 152.7 t, rendezvous 18.19 t, delivered LOX / CH4 95.8 / 25.3 t in 750 s, settling gas
+  1.21 t, main at undock 11.71 t, at catch 1.74 t, booster and ship caught; with Block 3's tanks at 171 t: 133.0 /
+  18.52 / 80.4 / 20.8 / 11.72 / 1.68 t - the file is re-measured in Task 12). `hls_refuel` (pad): SECO 428.3 s, arc 11.68 deg [D], residue 216.4 t, after the raise 208.3 t,
   HLS main at docking 203.5 t, filled to 1,585 t (depot 1,500 -> 83 t), waited 5.3 days (2.7 t boil-off), lunar
   mission planned from 1,580 t; `hls_refuel_orbit`: docked 195 t, TLI 3,152 m/s. Full HLS departure 1.96 t of push gas.
 - Numbers from tests (tanker 200 t main propellant, depot 600 t, 200 km / 26.5 deg): phasing from 170 x 190 km, 8 deg

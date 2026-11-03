@@ -27,7 +27,9 @@ def load_toml(path: Path) -> dict:
 
 
 # The rules of core/src/config/vehicle_config.cpp (load_stage_from): only these keys on a reused stage, lists appended.
-FROM_ADDED_KEYS = {"docking_port", "transfer_connector", "rcs_pod", "propellant_transfer", "dry_mass_kg", "display_name"}
+FROM_ADDED_KEYS = {"docking_port", "transfer_connector", "rcs_pod", "propellant_transfer", "dry_mass_kg",
+                   "dry_cg_station_m", "display_name"}
+FROM_TANK_KEYS = {"id", "mass_kg", "base_station_m"}  # [[stage.tank]] on a reused stage resizes a source tank
 MAX_FROM_DEPTH = 4  # a longer chain is a cycle
 
 
@@ -41,15 +43,25 @@ def resolve_stages(vehicle: dict, config_dir: Path = CONFIG_DIR, depth: int = 0)
             source_id, _, stage_id = stage["from"].partition(":")
             if not source_id or not stage_id or ":" in stage_id:
                 raise SystemExit(f'stage.from must be "<vehicle>:<stage>", got "{stage["from"]}"')
-            for key in stage.keys() - FROM_ADDED_KEYS - {"from"}:
+            for key in stage.keys() - FROM_ADDED_KEYS - {"from", "tank"}:
                 raise SystemExit(f'stage.from = "{stage["from"]}": {key!r} cannot be set on a reused stage')
             source = load_toml(config_dir / "vehicles" / f"{source_id}.toml")
             source_stages = resolve_stages(source, config_dir, depth + 1)
             if stage_id not in source_stages:
                 raise SystemExit(f'stage.from = "{stage["from"]}": no such stage')
             merged = dict(source_stages[stage_id])
+            tanks = {t["id"]: dict(t) for t in merged.get("tank", [])}
+            for change in stage.get("tank", []):
+                if change.get("id") not in tanks:
+                    raise SystemExit(f'stage.from = "{stage["from"]}": tank {change.get("id")!r} is not on the source stage')
+                for key in change.keys() - FROM_TANK_KEYS:
+                    raise SystemExit(f'stage.from = "{stage["from"]}": tank {change["id"]!r} can only change mass_kg '
+                                     "and base_station_m")
+                tanks[change["id"]].update(change)
+            if "tank" in stage:
+                merged["tank"] = list(tanks.values())
             for key, value in stage.items():
-                if key == "from":
+                if key in ("from", "tank"):
                     continue
                 merged[key] = merged.get(key, []) + value if isinstance(value, list) else value
             stage = merged

@@ -142,7 +142,14 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
         const auto state = session.autopilot().state;
         const auto index = session.controlled_index();
         const auto& body = session.body(index);
-        if (body.impacted()) return {nan, "Die Rakete ist abgestürzt."};
+        if (body.impacted()) {
+            if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
+                std::printf("  [ascent planner] impact T+%.1f s, state %s, %zu bodies, speed %.1f m/s: %s\n",
+                            session.mission_time_s(), to_string(state), session.body_count(),
+                            math::norm(body.state().velocity_gcrf_mps), body.breakup_reason().c_str());
+            }
+            return {nan, "Die Rakete ist abgestürzt."};
+        }
         if (!separation && session.body_count() > 1) separation = session.epoch();
         if (drone_ship && separation && !impact &&
             !(session.epoch() - *separation < drone_ship_prediction_after_separation_s)) {

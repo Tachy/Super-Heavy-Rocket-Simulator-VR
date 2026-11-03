@@ -18,8 +18,9 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
   flight 12's one-engine landing phase bounds the splashdown mass at <= 209-218 t at 280 tf; the vehicle physics mass
   audit's judgement 175 +-25 t; a community bottom-up 166 t. **Ship dry CG 22.03 m +-1.3 m** [D]
   (`tools/structures/ship_mass_budget.py --dry-t 177`: 127.3 t of named items at 20.94 m, the rest like the shell;
-  other placements of the rest 20.07-22.37 m); with full headers 24.99 m. Tanker 171 t [E] (177 - 6 t door and
-  dispenser), depot 158.5 t / 21.89 m [E] (177 t less shield, flaps, pins, plus insulation); HLS keeps its 120 t [E].
+  other placements of the rest 20.07-22.37 m); with full headers 24.99 m. Tanker 171.15 t / 21.88 m [E] with main
+  tanks stretched into the cargo bay to 1,925.7 t (`--tanker`: no door and dispenser, forward dome at the barrel end
+  38.7 m; `docs/subsystems/refuelling.md`), depot 158.5 t / 21.89 m [E] (177 t less shield, flaps, pins, plus insulation); HLS keeps its 120 t [E].
   Booster dry 210 t +-40 t (stack mass balance and descent ballistic coefficient), liftoff ~5,550 t (telemetry); tank capacities
   3,650 / 1,600 t [S]; Raptor 3 280 tf consistent (peaks ~270 tf sea-level equivalent; 250 tf is contradicted),
   minimum throttle 30 % [D] (V3 hovers on 3 engines). Superseded 255 t / 23.516 m: `docs/history/vehicle-data.md`.

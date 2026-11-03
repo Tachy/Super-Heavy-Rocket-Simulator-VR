@@ -554,3 +554,9 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   reboost, live start, the free depot's decay, the placed and the full campaign `[slow]`), the track and the orbit
   events in `test_refuelling_campaign.cpp`.
 
+
+### Tanker with stretched main tanks (planner plan Task 4b, 2026-11-03)
+- Superseded: the tanker ship took the Block 3 main tanks unchanged (LOX 1,224.8 t at 3.5-19.54 m, CH4 340.2 t at
+  20.0-32.15 m, CH4 header at 20.0 m) with dry 171 t [E] at the Block 3 CG 22.03 m (Task 3b: 177 t less the 6 t door and
+  dispenser). User 2026-11-03: the tanker needs no cargo bay, SpaceX intends larger tanks there - the main tanks now
+  reach the barrel end (current state: `docs/subsystems/refuelling.md`).

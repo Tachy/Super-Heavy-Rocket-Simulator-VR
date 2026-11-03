@@ -832,8 +832,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
 }
 
 // [[stage]] from = "<vehicle>:<stage>": that vehicle's stage exactly as configured there (refuelling r1: the tanker
-// and the depot's booster are Block 3's). Only docking ports, transfer connectors and RCS pods (r3) may be added; any
-// other key would silently diverge from the source and is an error.
+// and the depot's booster are Block 3's). Only docking ports, transfer connectors and RCS pods (r3) may be added, and
+// the dry mass, dry CG, display name and the source's tanks' loads / stations changed; any other key would silently
+// diverge from the source and is an error.
 StageConfig load_stage_from(const std::filesystem::path& config_dir, const Document& doc, const toml::table& t,
                             const std::string& propellant_id) {
     constexpr int max_from_depth = 4;  // a longer chain is a cycle
@@ -851,7 +852,8 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     }
     for (const auto& [key, value] : t) {
         if (key != "from" && key != "docking_port" && key != "transfer_connector" && key != "rcs_pod" &&
-            key != "propellant_transfer" && key != "dry_mass_kg" && key != "display_name") {
+            key != "propellant_transfer" && key != "dry_mass_kg" && key != "dry_cg_station_m" && key != "tank" &&
+            key != "display_name") {
             doc.fail("stage.from = \"" + from + "\": '" + std::string(key.str()) + "' cannot be set on a reused stage");
         }
     }
@@ -865,8 +867,28 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
                                  [&](const StageConfig& s) { return s.id == stage_id; });
     if (it == source.stages.end()) doc.fail("stage.from = \"" + from + "\": no such stage");
     StageConfig s = *it;
-    // a variant's own dry mass (user 2026-10-20, refuelling r5: the tanker without cargo hardware); CG as the source
+    // a variant's own dry mass and CG (user 2026-10-20, refuelling r5: the tanker without cargo hardware; planner plan
+    // Task 4b: its CG from the mass budget)
     if (t.contains("dry_mass_kg")) s.dry_mass_kg = doc.positive(t, "dry_mass_kg");
+    if (t.contains("dry_cg_station_m")) s.dry_cg_station_m = doc.number(t, "dry_cg_station_m");
+    // a variant's resized tanks (planner plan Task 4b: the tanker's main tanks stretched into the cargo bay): each entry
+    // names a tank of the source and sets its full load and / or base station; it cannot add or remove a tank
+    if (auto tanks = t["tank"].as_array()) {
+        for (const auto& node : *tanks) {
+            const auto* tank = node.as_table();
+            if (!tank) doc.fail("stage.from = \"" + from + "\": stage.tank entries must be tables");
+            const std::string id = doc.text(*tank, "id");
+            const auto k = std::find_if(s.tanks.begin(), s.tanks.end(), [&](const TankConfig& c) { return c.id == id; });
+            if (k == s.tanks.end()) doc.fail("stage.from = \"" + from + "\": tank '" + id + "' is not on the source stage");
+            for (const auto& [key, value] : *tank) {
+                if (key != "id" && key != "mass_kg" && key != "base_station_m") {
+                    doc.fail("stage.from = \"" + from + "\": tank '" + id + "' can only change mass_kg and base_station_m");
+                }
+            }
+            if (tank->contains("mass_kg")) k->mass_kg = k->capacity_kg = doc.positive(*tank, "mass_kg");
+            if (tank->contains("base_station_m")) k->base_station_m = doc.number(*tank, "base_station_m");
+        }
+    }
     s.display_name = doc.text_or(t, "display_name", s.display_name);  // a variant's own name (the tanker's ship)
     append_docking_ports(doc, t, s);
     append_transfer_connectors(doc, t, s);

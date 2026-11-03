@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 
@@ -113,14 +114,17 @@ TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refu
         const auto& b = tanker.stages[i];
         CAPTURE(a.id);
         CHECK(b.id == a.id);
-        // the tanker ship carries its own dry mass (user 2026-10-20, Task 3b: 171 t [E] without cargo hardware)
-        CHECK(b.dry_mass_kg == (a.id == "ship" ? 171000.0 : a.dry_mass_kg));
-        CHECK(b.dry_cg_station_m == a.dry_cg_station_m);
+        // the tanker ship carries its own dry mass and CG (user 2026-10-20; planner plan Task 4b: without cargo
+        // hardware, main tanks stretched into the bay - tools/structures/ship_mass_budget.py --dry-t 177 --tanker)
+        CHECK(b.dry_mass_kg == (a.id == "ship" ? 171150.0 : a.dry_mass_kg));
+        CHECK(b.dry_cg_station_m == (a.id == "ship" ? 21.88 : a.dry_cg_station_m));
         REQUIRE(b.tanks.size() == a.tanks.size());
         for (size_t k = 0; k < a.tanks.size(); ++k) {
             CHECK(b.tanks[k].id == a.tanks[k].id);
-            CHECK(b.tanks[k].mass_kg == a.tanks[k].mass_kg);
-            CHECK(b.tanks[k].capacity_kg == a.tanks[k].capacity_kg);
+            CHECK(b.tanks[k].capacity_kg == b.tanks[k].mass_kg);  // configured loads are full tanks
+            const bool stretched = a.id == "ship" && a.tanks[k].role == config::TankRole::Main;
+            if (!stretched) CHECK(b.tanks[k].mass_kg == a.tanks[k].mass_kg);
+            if (!stretched && a.tanks[k].id != "ch4_header") CHECK(b.tanks[k].base_station_m == a.tanks[k].base_station_m);
         }
         CHECK(b.engine_groups.size() == a.engine_groups.size());
         // the ship adds its -x docking pair (refuelling r3)
@@ -128,6 +132,60 @@ TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refu
         CHECK(b.flaps.size() == a.flaps.size());
     }
     CHECK(tanker.engines.size() == block3.engines.size());
+}
+
+// Planner plan Task 4b (user 2026-11-03): the tanker's main tanks fill the cargo bay - LOX at the bottom, CH4 above, at
+// the Raptor mixture ratio, up to the end of the cylindrical barrel (below the drawn ogive); the CH4 header stays on the
+// CH4 tank's lower dome.
+TEST_CASE("The tanker's main tanks are stretched into the cargo bay at the Raptor mixture ratio", "[refuelling][config]") {
+    const auto tanker = config::load_vehicle(config_dir, "starship_tanker");
+    const auto block3 = config::load_vehicle(config_dir, "starship_block3");
+    const auto& ship = tanker.stages.back();
+    const double area_m2 = std::numbers::pi * 0.25 * ship.diameter_m * ship.diameter_m;
+    auto tank = [&](const config::StageConfig& s, const std::string& id) {
+        return *std::find_if(s.tanks.begin(), s.tanks.end(), [&](const auto& t) { return t.id == id; });
+    };
+    const auto lox = tank(ship, "lox_main"), ch4 = tank(ship, "ch4_main");
+    const double lox_top_m = lox.base_station_m + lox.capacity_kg / (tanker.propellant.oxidizer_density_kg_m3 * area_m2);
+    const double ch4_top_m = ch4.base_station_m + ch4.capacity_kg / (tanker.propellant.fuel_density_kg_m3 * area_m2);
+    std::printf("tanker main tanks: LOX %.1f t %.2f-%.2f m, CH4 %.1f t %.2f-%.2f m\n", lox.capacity_kg / 1e3,
+                lox.base_station_m, lox_top_m, ch4.capacity_kg / 1e3, ch4.base_station_m, ch4_top_m);
+    CHECK(lox.capacity_kg / ch4.capacity_kg == Catch::Approx(3.6).epsilon(1e-4));
+    CHECK(lox.base_station_m == tank(block3.stages.back(), "lox_main").base_station_m);
+    CHECK(lox_top_m < ch4.base_station_m);
+    const double barrel_end_m = ship.length_m - ship.aero.nose_length_m;
+    CHECK(ch4_top_m <= barrel_end_m);
+    CHECK(ch4_top_m > barrel_end_m - 0.1);
+    CHECK(lox.capacity_kg + ch4.capacity_kg > 1.9e6);
+    CHECK(tank(ship, "ch4_header").base_station_m == ch4.base_station_m);
+}
+
+TEST_CASE("A reused stage resizes its source's tanks, nothing else of them", "[refuelling][config]") {
+    const auto dir = config_with("from_tank_ok", vehicle_with_stage("from = \"starship_block3:ship\"\ndry_cg_station_m = 21.0\n"
+                                                                    "[[stage.tank]]\nid = \"ch4_main\"\nmass_kg = 400000.0\n"
+                                                                    "base_station_m = 21.0\n"));
+    const auto v = config::load_vehicle(dir, "test_vehicle");
+    const auto& s = v.stages.back();
+    CHECK(s.dry_cg_station_m == 21.0);
+    const auto ch4 = std::find_if(s.tanks.begin(), s.tanks.end(), [](const auto& t) { return t.id == "ch4_main"; });
+    REQUIRE(ch4 != s.tanks.end());
+    CHECK(ch4->mass_kg == 400000.0);
+    CHECK(ch4->capacity_kg == 400000.0);
+    CHECK(ch4->base_station_m == 21.0);
+    const struct {
+        const char* name;
+        const char* body;
+        const char* message;
+    } bad[] = {
+        {"from_tank_unknown", "[[stage.tank]]\nid = \"cargo\"\nmass_kg = 1.0\n", "is not on the source stage"},
+        {"from_tank_key", "[[stage.tank]]\nid = \"ch4_main\"\ndiameter_m = 3.0\n", "can only change mass_kg"},
+        {"from_tank_mass", "[[stage.tank]]\nid = \"ch4_main\"\nmass_kg = 0.0\n", "must be positive"},
+    };
+    for (const auto& c : bad) {
+        CAPTURE(c.name);
+        const auto bad_dir = config_with(c.name, vehicle_with_stage(std::string("from = \"starship_block3:ship\"\n") + c.body));
+        CHECK_THROWS_WITH(config::load_vehicle(bad_dir, "test_vehicle"), Catch::Matchers::ContainsSubstring(c.message));
+    }
 }
 
 // User 2026-10-20 (r5): a variant may carry its own dry mass on a reused stage (the tanker); the rest stays the source's.
