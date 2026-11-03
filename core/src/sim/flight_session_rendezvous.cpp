@@ -28,6 +28,8 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/refuelling_costs.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "flight_session_lunar_detail.hpp"
 
 namespace starsim::sim {
@@ -102,12 +104,45 @@ double FlightSession::rendezvous_budget_kg() const {
     return vehicle.rcs_supply_kg();  // the main tanks (engines and cold gas); the headers are the landing reserve
 }
 
-const config::RendezvousReserveConfig* FlightSession::rendezvous_reserve() const {
-    if (bodies_.empty()) return nullptr;
-    for (const auto& s : bodies_[controlled_].body->vehicle().stages()) {
-        if (s.config.rendezvous_reserve) return &*s.config.rendezvous_reserve;
+std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(std::string* reason) const {
+    const auto refuse = [&](const std::string& why) -> std::optional<config::RendezvousReserveConfig> {
+        if (reason) *reason = why;
+        return std::nullopt;
+    };
+    if (bodies_.empty()) return refuse("kein Fahrzeug");
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const config::RendezvousReserveConfig* configured = nullptr;
+    for (const auto& s : vehicle.stages()) {
+        if (s.config.rendezvous_reserve) {
+            configured = &*s.config.rendezvous_reserve;
+            break;
+        }
     }
-    return nullptr;
+    if (!configured) return refuse("Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
+    auto floors = *configured;
+    // Fix round 1 of planner Task 8 (I1): a ship that returns to the tower keeps its own return beyond the configured
+    // allowances - the deorbit burn from the station's orbit to the return's entry interface (two-body, at its apoapsis)
+    // by the rocket equation with the commit margin, the return gas and the unusable main propellant, as the tanker
+    // reserve books them (without the boil-off of a wait: its pass is not known before the docking).
+    const auto& stage = vehicle.stages().front().config;
+    if (stage.recovery_method == "tower_catch" && !stage.return_mission.empty() && station_index_) {
+        std::string why;
+        const auto settings = ship_return_settings(&why);
+        if (!settings) return refuse(why);
+        const auto st = station_state();
+        const auto e = orbit::elements_from_state(st, constants::earth_gm_m3ps2);
+        const double dv = mission::entry_deorbit_delta_v_mps(
+            e.semi_major_axis_m * (1.0 + e.eccentricity),
+            constants::wgs84_semi_major_axis_m + settings->entry_interface_height_m, settings->entry_flight_path_rad,
+            constants::earth_gm_m3ps2);
+        const auto p = return_reserve_parameters(dv, &why);
+        if (!p) return refuse(why);
+        const double need_kg =
+            mission::tanker_reserve(vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg(), *p).total_kg;
+        floors.proximity_kg += need_kg;
+        floors.phasing_kg += need_kg;
+    }
+    return floors;
 }
 
 bool FlightSession::execute_rendezvous_burn(const gnc::BurnNode& node) {
@@ -155,9 +190,10 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
     }
     p = with_station_limits(p, station_limits());
     // the vehicle's own reserve (planner plan Task 8)
-    const auto* reserve = rendezvous_reserve();
-    if (!reserve) return refuse("Kein Rendezvous: Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
-    p.reserve_kg = reserve->phasing_kg;
+    std::string why;
+    const auto floors = rendezvous_floors(&why);
+    if (!floors) return refuse("Kein Rendezvous: " + why);
+    p.reserve_kg = floors->phasing_kg;
     // Crew Dragon flies the phasing with its nose cone open (it opens after the separation): only then its Dracos turn
     // it without a push - closed, a turn to a burn pushed it up to 0.28 m/s (i3: Waypoint 0 missed by 130-390 m).
     auto& vehicle = bodies_[controlled_].body->vehicle();

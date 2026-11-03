@@ -502,6 +502,9 @@ public:
     // commit margin there stranded ships with 9 % to spare; a committed plan may cut into its reserve, as for drag).
     // The tanker reserve keeps the commit margin (its return is held to it).
     static constexpr double commit_burn_margin = 1.10;
+    // The orbit attitude hold's deadband [E] (orbit_controller_, d2); the depot's attitude gas is booked for it
+    // (vehicle::lvlh_hold_gas_kgps).
+    static constexpr double orbit_hold_deadband_rad = 0.5 * constants::deg_to_rad;
     static constexpr double call_off_burn_margin = 1.02;
     // Why the last burn was aborted (German; empty: none). A burn whose engines run dry - e.g. main tanks boiled off
     // while waiting (refuelling r2) - cannot finish: it is cut off, the autopilot goes off.
@@ -930,6 +933,11 @@ public:
     std::optional<TransferRequest> tanker_transfer_request(std::string* reason = nullptr) const;
     // The controlled vehicle's gnc proximity parameters while a proximity flight runs (nullptr: none).
     const gnc::ProximityParameters* proximity_parameters() const { return proximity_ ? &proximity_->parameters() : nullptr; }
+    // The propellant floors of the controlled vehicle's rendezvous (plan_rendezvous keeps `phasing_kg`, start_proximity
+    // aborts below `proximity_kg`): its [stage.recovery] rendezvous_reserve_kg (its first stage with the key), for a
+    // ship that returns to the tower plus its own return need from the station's orbit (fix round 1 of planner Task 8);
+    // nullopt with a German *reason without the key or the return's settings.
+    std::optional<config::RendezvousReserveConfig> rendezvous_floors(std::string* reason = nullptr) const;
     // A scenario that starts docked (ISS i6): the armed pair (set_rendezvous_target with the chaser's active port on a
     // passive station port) mated at once - the chaser moved to the mated pose moving with the station, the mechanism
     // Docked, the compound merged (momentum kept). Throws std::logic_error without an armed mechanism or outside Ready.
@@ -1140,7 +1148,7 @@ private:
     // roll of the capsule spent 3.5 kg on a 180 deg turn), with a hold deadband [E] 0.5 deg / 0.05 deg/s so the hold
     // settles into a slow limit cycle instead of chattering (d2).
     gnc::AttitudeController orbit_controller_{gnc::AttitudeController::Gains{
-        0.3, 0.9, false, false, 0.0, 1.0 * constants::deg_to_rad, 0.5 * constants::deg_to_rad,
+        0.3, 0.9, false, false, 0.0, 1.0 * constants::deg_to_rad, orbit_hold_deadband_rad,
         0.05 * constants::deg_to_rad, 1.0 * constants::deg_to_rad}};
     // Lunar coast (attitude modes in the state Lunar): slower slews (0.5 deg/s [E]) and a tight rate deadband
     // (0.002 deg/s [E]) - the vehicle then coasts freely for hours, and the orbit hold's 0.05 deg/s residual turned
@@ -1262,8 +1270,10 @@ private:
     MainPropellant main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const;
     // The first deorbit plan's orbital drag C_D A / m: the controlled ship flown ahead on a copy of itself over one
     // tracking arc (deorbit_track_interval_s; free drift as in the wait, nominal US76 air), measured with the re-plans'
-    // own estimator (gnc::estimate_drag_area_per_mass). 0 when the arc does not tell.
+    // own estimator (gnc::estimate_drag_area_per_mass). 0 when the arc does not tell. The overload flies `body` (the
+    // tanker reserve: the ship as it will wait for its burn, holding only the reserve).
     double drag_area_per_mass_ahead() const;
+    double drag_area_per_mass_ahead(const vehicle::FlightBody& body) const;
     // The deorbit burn of `plan` checked against the controlled ship's main tanks at the node (sets plan.boil_off_kg):
     // a German refusal when they will not hold the burn.
     std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const;
@@ -1442,11 +1452,18 @@ private:
     // a 24 m/s braking burn after a re-plan took ~40 min and missed Waypoint 0 by 5 km.
     double rendezvous_transient_share(double delta_v_mps) const;
     double rendezvous_budget_kg() const;
-    // The controlled vehicle's [stage.recovery] rendezvous_reserve_kg (its stage with the key; nullptr: none).
-    const config::RendezvousReserveConfig* rendezvous_reserve() const;
+    // The inputs of mission::tanker_reserve for the controlled ship's return with a deorbit burn of `delta_v_mps` (no
+    // boil-off): the deorbit set's exhaust velocity and mixture ratio, commit_burn_margin, return_gas_kg and the unusable
+    // main propellant; nullopt with a German *reason without them.
+    std::optional<mission::TankerReserveParameters> return_reserve_parameters(double delta_v_mps,
+                                                                              std::string* reason) const;
+    // A copy of the controlled ship alone in its state, its main tanks holding `reserve` (in proportion to capacity).
+    std::unique_ptr<vehicle::FlightBody> holding(const mission::TankerReserve& reserve) const;
     // The deorbit settings of the controlled ship's return: the running mission's ship return, else the vehicle's
     // [stage.recovery] return_mission; nullopt with a German *reason without either.
     std::optional<gnc::DeorbitParameters> ship_return_settings(std::string* reason) const;
+    // The vehicle's [stage.recovery] return_mission alone (plan_ship_return without parameters): the one mapping.
+    std::optional<gnc::DeorbitParameters> vehicle_return_settings(std::string* reason) const;
     bool execute_rendezvous_burn(const gnc::BurnNode& node);
     math::StateVector station_state() const;
     const config::StationProximityConfig& station_limits() const;  // the station stage's [stage.station.proximity]
@@ -1549,6 +1566,10 @@ private:
     // plan_ship_return's planner; without a drag in `parameters` it coasts with drag_area_per_mass_ahead() (the value
     // used goes to `drag_used_m2pkg`)
     gnc::DeorbitPlan ship_deorbit_plan(const gnc::DeorbitParameters& parameters, double* drag_used_m2pkg = nullptr) const;
+    // The same planner for `body` instead of the controlled ship (the tanker reserve: the ship as it will fly its
+    // return, holding only the reserve - its drag, entry mass and propellant, not the full docked ship's).
+    gnc::DeorbitPlan ship_deorbit_plan(const vehicle::FlightBody& body, const gnc::DeorbitParameters& parameters,
+                                       double* drag_used_m2pkg = nullptr) const;
     // A plan the session flies (not a preview / reserve search) that is not dispersion-robust: its German note to the
     // mission log (stdout; the UI reads it from autopilot_status().return).
     static void log_dispersion_note(const gnc::DeorbitPlan& plan);

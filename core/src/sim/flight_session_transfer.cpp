@@ -1,6 +1,8 @@
 // Refuelling r4: a docked pair's boil-off and the propellant transfer between its ships.
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -277,16 +279,51 @@ std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string*
     auto search = ship_return_settings(&why);
     if (!search) return refuse("Keine Reserve: " + why);
     search->search_window_s = tanker_reserve_search_s;
-    const auto plan = ship_return_preview(*search);
-    if (!plan.feasible) return refuse("Keine Reserve: " + plan.reason);
+    const auto first = ship_return_preview(*search);  // the full docked ship: only a first delta-v
+    if (!first.feasible) return refuse("Keine Reserve: " + first.reason);
     const auto& body = *bodies_[controlled_].body;
+    auto p = return_reserve_parameters(first.delta_v_mps, &why);
+    if (!p) return refuse("Keine Reserve: " + why);
     const auto& vehicle = body.vehicle();
+    const double dry_with_headers_kg = vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg();
+    // Fix round 1 (I2): the pass is chosen for the ship as it will wait and fly its return - holding only the reserve.
+    // Planned on the full docked ship (406 t, C_D A / m 1.1e-3 m2/kg against 2.8e-3 at 222 t), the docked-pair
+    // fixture's search took a pass 151 h ahead, while the flown return took one 8.6 h after the transfer start: the
+    // reserve booked 6.6 t of boil-off where the flown pass's wait boils ~1.2 t.
+    auto reserve = mission::tanker_reserve(dry_with_headers_kg, *p);
+    const auto plan = ship_deorbit_plan(*holding(reserve), *search);
+    if (!plan.feasible) return refuse("Keine Reserve: " + plan.reason);
+    p->deorbit_delta_v_mps = plan.delta_v_mps;
+    reserve = mission::tanker_reserve(dry_with_headers_kg, *p);
+    // The boil-off of the wait for that burn by the thermal model: the copy holding the reserve flown ahead to the burn
+    // (as boil_off_shortfall checks the return). Its fill sets the wetted wall; the boil-off itself (a few % of the
+    // reserve) changes it too little for a second pass.
+    const auto at_burn = main_propellant_at(*holding(reserve), plan.node.epoch);
+    p->boil_off_oxidizer_kg = std::max(0.0, reserve.oxidizer_kg - at_burn.oxidizer_kg);
+    p->boil_off_fuel_kg = std::max(0.0, reserve.fuel_kg - at_burn.fuel_kg);
+    if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
+        std::printf("[deorbit] tanker reserve: node at %.0f s TDB (+%.1f h), %.2f m/s, boil-off LOX %.2f t CH4 %.2f t\n",
+                    plan.node.epoch.tdb_seconds_past_j2000(), (plan.node.epoch - epoch_) / 3600.0, plan.delta_v_mps,
+                    p->boil_off_oxidizer_kg / 1000.0, p->boil_off_fuel_kg / 1000.0);
+    }
+    auto result = mission::tanker_reserve(dry_with_headers_kg, *p);
+    result.wait_s = plan.node.epoch - epoch_;
+    return result;
+}
+
+std::optional<mission::TankerReserveParameters> FlightSession::return_reserve_parameters(double delta_v_mps,
+                                                                                         std::string* reason) const {
+    const auto refuse = [&](const std::string& why) -> std::optional<mission::TankerReserveParameters> {
+        if (reason) *reason = why;
+        return std::nullopt;
+    };
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
     const auto& stage = vehicle.stages().front().config;
-    if (!(stage.return_gas_kg > 0.0)) return refuse("Keine Reserve: Schlüssel 'return_gas_kg' fehlt in [stage.recovery]");
+    if (!(stage.return_gas_kg > 0.0)) return refuse("Schlüssel 'return_gas_kg' fehlt in [stage.recovery]");
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
-    if (configurations.empty()) return refuse("Keine Reserve: Deorbit-Triebwerk nicht verfügbar");
+    if (configurations.empty()) return refuse("Deorbit-Triebwerk nicht verfügbar");
     mission::TankerReserveParameters p;
-    p.deorbit_delta_v_mps = plan.delta_v_mps;
+    p.deorbit_delta_v_mps = delta_v_mps;
     p.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
     for (const auto& s : vehicle.stages()) {
         for (const auto& e : s.engines) {
@@ -298,12 +335,12 @@ std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string*
     p.burn_margin = commit_burn_margin;  // plan_ship_return holds the burn to it
     p.gas_kg = stage.return_gas_kg;
     p.unusable_kg = stage.unusable_propellant.main_kg;
-    const double dry_with_headers_kg = vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg();
-    auto reserve = mission::tanker_reserve(dry_with_headers_kg, p);
-    // The boil-off of the wait for the burn by the thermal model: a copy holding that reserve in its main tanks flown
-    // ahead to the burn (as boil_off_shortfall checks the return). Its fill sets the wetted wall; the boil-off itself
-    // (a few % of the reserve) changes it too little for a second pass.
-    auto copy = vehicle.copy_upper(0);  // the ship alone in orbit: its one stage holds the main tanks
+    return p;
+}
+
+std::unique_ptr<vehicle::FlightBody> FlightSession::holding(const mission::TankerReserve& reserve) const {
+    const auto& body = *bodies_[controlled_].body;
+    auto copy = body.vehicle().copy_upper(0);  // the ship alone in orbit: its one stage holds the main tanks
     for (const auto contents : {config::TankContents::Oxidizer, config::TankContents::Fuel}) {
         double capacity_kg = 0.0;
         for (const auto& t : copy->stages().front().tanks) {
@@ -316,12 +353,9 @@ std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string*
             }
         }
     }
-    vehicle::FlightBody held(std::move(copy), body.state());
-    held.set_ground_height(body.ground_height_m());
-    const auto at_burn = main_propellant_at(held, plan.node.epoch);
-    p.boil_off_oxidizer_kg = std::max(0.0, reserve.oxidizer_kg - at_burn.oxidizer_kg);
-    p.boil_off_fuel_kg = std::max(0.0, reserve.fuel_kg - at_burn.fuel_kg);
-    return mission::tanker_reserve(dry_with_headers_kg, p);
+    auto held = std::make_unique<vehicle::FlightBody>(std::move(copy), body.state());
+    held->set_ground_height(body.ground_height_m());
+    return held;
 }
 
 std::optional<TransferRequest> FlightSession::tanker_transfer_request(std::string* reason) const {

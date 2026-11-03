@@ -49,11 +49,13 @@ RefuellingReference load_refuelling_reference(const std::filesystem::path& confi
 RefuellingCampaignSettings load_refuelling_campaign_settings(const std::filesystem::path& config_dir) {
     const detail::Document doc(config_dir / "refuelling" / "campaign.toml");
     const auto* transfer = doc.root["transfer"].as_table();
-    if (!transfer) doc.fail("missing [transfer]");
+    if (!transfer) doc.fail("Tabelle [transfer] fehlt");
     RefuellingCampaignSettings s;
-    s.transfer_vent_fraction = doc.number(*transfer, "vent_fraction");
+    const auto vent = (*transfer)["vent_fraction"].value<double>();
+    if (!vent) doc.fail("Schlüssel 'vent_fraction' fehlt in [transfer]");
+    s.transfer_vent_fraction = *vent;
     if (!(s.transfer_vent_fraction >= 0.0 && s.transfer_vent_fraction < 1.0)) {
-        doc.fail("'vent_fraction' must lie in [0, 1)");
+        doc.fail("[transfer] vent_fraction muss in [0, 1) liegen");
     }
     return s;
 }

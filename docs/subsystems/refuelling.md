@@ -103,6 +103,16 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
   thrust `v_along + 2 n x_radial` is conserved, CW). Translation at 10 t main propellant: equal +-x (3,000 N each).
   The Block 3 ship keeps none. `Vehicle::rcs_supply_kg()`: main-tank cold gas counts the main oxidizer + fuel tanks
   (not the headers: the landing reserve), else the RCS tanks; proximity and phasing budget it.
+- Rendezvous floors (`FlightSession::rendezvous_floors`, planner Task 8 fix round 1): the vehicle's `[stage.recovery]
+  rendezvous_reserve_kg` (`proximity`: the proximity flight aborts below it; `phasing`: the phasing plan keeps it), for
+  a ship returning to the tower plus its own return need - the deorbit from the station's apoapsis to the return's
+  entry interface and flight path angle (`mission::entry_deorbit_delta_v_mps`, two-body) by the rocket equation x the
+  commit margin + return gas + unusable propellant (`mission::tanker_reserve` without boil-off: the pass is unknown
+  before docking; TankerAtPort, 200 t: 9.49 t). Tanker (Block 3 ship) beyond it: proximity 0 (the abort's retreat is
+  the departure in the return gas), phasing 5.0 t [D: Waypoint 0 -> docked took 5.04 t in tanker_flight]. HLS (no
+  return; unfilled, its lunar propellant is not aboard; an HLS that cannot dock stays in orbit): proximity 0.6 t [E: an
+  abort's retreat, tanker departure 0.24 t, filled HLS 1.96 t], phasing 5.6 t (+ the tanker's proximity flight [D]).
+  Crew Dragon: 600 / 900 kg [E] (its deorbit need d3 598 kg + proximity operations; ISS subsystem).
 - Target block (`[stage.station.proximity]`, `sim::with_station_limits`): keep-out radius, approach ellipsoid, Waypoint
   0 / 1 / 2 and fly-around radius override the code's ISS defaults (and a caller's own values: safety limits of the
   target must not be loosened) only where the target sets them; the ISS sets none. The depot takes the ISS values [E]
@@ -169,13 +179,17 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
   (`TransferState::settling_impulse_ns`).
 - Tanker reserve (`mission::tanker_reserve`, `FlightSession::tanker_reserve` / `tanker_transfer_request`; every input
   from config and physics, planner plan Task 8): deorbit burn by the rocket equation from the mass after it, with the
-  delta-v of `ship_return_preview` flown with the return's own deorbit settings (the mission's ship return, else the
-  vehicle's `return_mission`; 8-day pass search [E]), x `FlightSession::commit_burn_margin` (the margin the return is
-  held to), + gas `[stage.recovery] return_gas_kg` (3.5 t [D] r5: departure 0.3 t + entry ~3 t) + unusable
-  `[stage.tanks] unusable_propellant_kg.main` (1 t [E]) split at the deorbit set's mixture ratio, + the boil-off of the
-  wait for the burn per propellant [D]: a copy holding the reserve flown ahead to the burn (as `boil_off_shortfall`;
-  none with boil-off off). `TankerReserve::inputs` records them. Docked-pair fixture: wait 6.8 days, LOX 5.26 t + CH4
-  2.18 t boiled, reserve 17.45 t.
+  delta-v of the deorbit plan with the return's own deorbit settings (the mission's ship return, else the vehicle's
+  `return_mission`; 8-day pass search [E]) for the ship as it will wait and fly its return - a copy holding only the
+  reserve (its drag, entry mass and propellant; `ship_deorbit_plan(body, ...)`, a first delta-v from the full ship
+  sizes it) - x `FlightSession::commit_burn_margin` (the margin the return is held to), + gas `[stage.recovery]
+  return_gas_kg` (3.5 t [D] r5: departure 0.3 t + entry ~3 t) + unusable `[stage.tanks] unusable_propellant_kg.main`
+  (1 t [E]) split at the deorbit set's mixture ratio, + the boil-off of the wait for that burn per propellant [D]: the
+  copy flown ahead to the burn (as `boil_off_shortfall`; none with boil-off off). `TankerReserve::inputs` records them,
+  `wait_s` the planned wait. Docked-pair fixture: wait 9.0 h, LOX 0.35 t + CH4 0.83 t boiled, reserve 9.87 t. The CH4
+  share of the boil-off (70 % here, 56 % in r5, 29 % over the 6.8-day wait before fix round 1) is no constant: the
+  thermal model books each tank's heat on its own wetted wall at its fill, and over a long wait the small CH4 residue
+  boils away first (tanker_flight before the fix: CH4 2.18 -> 0 t in 134 h), after which only LOX boils.
 
 ### Settling before an in-orbit ignition (f3)
 Fidelity flag `FlightEnvironment::ignition_settling` (default on, one source `vehicle::ignition_settling_default`;
@@ -266,7 +280,8 @@ Fidelity flag `FlightEnvironment::ignition_settling` (default on, one source `ve
   chill-down + ~630 s LOX flow), delivered LOX 144.6 t / CH4 40.3 t, settling gas 1.83 t at 1,333 N, chill-down 0.42
   t, boil-off of both ships 12.6 kg; tanker left LOX 10.0 t / CH4 2.75 t (floors 10.0 / 2.8 t [test]). Depot -> HLS
   (50 t aboard) 20 / 5.5 t: 400 s, 595 kg of the HLS's gas. Docked 2 h without transfer: tanker (200 t) 532 kg, depot
-  (600 t) 32 kg. Tanker reserve at the depot: deorbit 59.4 m/s -> burn 5.6 t, reserve 10.1 t.
+  (600 t) 32 kg. Tanker reserve at the depot (r4, before planner Task 8): deorbit 59.4 m/s -> burn 5.6 t, reserve
+  10.1 t; current figures under "Tanker reserve" above.
 - Boil-off numbers (200 km, 26.5 deg, LVLH identity = nose +V, dorsal nadir; `STARSIM_VERBOSE=1`): depot (full) 444
   kg/day = 0.028 %/day at beta 0, 461 kg/day = 0.029 %/day at beta 60 deg; bare tanker 15.9 t/day (beta 0), 22.9 t/day
   (beta 60). Conventionally insulated cryogenic tanks in orbit ~0.1 %/day (plausibility only).
@@ -289,7 +304,8 @@ Plan files `docs/superpowers/archive/plans/2026-10-20-refuelling-r6-campaign.md`
   by the flown logic (`plan_launch_window` against the depot, phasing orbits shifted with the depot, search 60 days
   [E]; of the launches reaching the same Waypoint 0 (within 3 h [E]) the latest is flown); depot boil-off by
   `orbit_average_boil_off` with the day's fill and Sun; drag end-on (Cd 2.2, pi (d/2)^2, US76) made up by one Raptor
-  `sea_level_3`; attitude gas 20 kg/day [E]. HLS demand: `hls_lunar_llo_depot` placed in a scratch session, outbound
+  `sea_level_3`; attitude gas `vehicle::lvlh_hold_gas_kgps` with the day's fill (`CampaignModels::attitude_gas_kgps`).
+  HLS demand: `hls_lunar_llo_depot` placed in a scratch session, outbound
   planned, budget legs (`lunar_mission_legs`) -> the smallest closing mass (`lunar_budget_required_mass`); demand =
   (required propellant + HLS boil-off while waiting - propellant at docking) x 1.015 + chill 0.42 t; the HLS wait boils
   off with the Sun of its arrival (`CampaignModels::hls_wait_kg`) and must fit its free tank volume; TLI starts from
@@ -356,8 +372,14 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   readiness [E]); the first plan is the comparison's baseline. Flights are sequential; each launches with
   `keep_station` beside the kept depot (`launch_campaign_flight`); after it the chaser is dropped (`keep_only_station`).
   Only the first tanker flies its return, in a blocking side session (`place_vehicle`): caught, 2.95 t main left. A
-  failed flight re-plans from the next window. Booked on the depot: attitude gas 20 kg/day [E] (1 kg batches), the
-  transfer vent (`campaign.toml`, 1.5 % [E]).
+  failed flight re-plans from the next window. Booked on the depot: attitude gas (the calculator's model on the live
+  depot's fill and orbit, 1 kg batches), the transfer vent (`campaign.toml`, 1.5 % [E]).
+- Depot attitude gas (`vehicle/attitude_hold_gas`, fix round 1 of planner Task 8; the flights fly an ideal LVLH depot):
+  the gravity gradient on the held LVLH attitude (nose along +V-bar: the unstable pitch equilibrium) within the orbit
+  hold's deadband (`FlightSession::orbit_hold_deadband_rad`, 0.5 deg [E]), the pitch error spread evenly over it [E]:
+  mean torque 1.5 n^2 (I_yaw - I_roll) (1 - cos 2 db) / (2 db), over the RCS couple's torque per flow (the longest
+  pitch arms fore and aft at Isp g0: 1.37e4 N m s/kg). Depot at 250 km: 5.3 kg/day empty, 14.4 kg/day at 1,000 t
+  (was 20 kg/day [E]). Not modelled: aero torque (none nose-on), the free limit cycle (grams per day).
 - Station keeping: `[station_keeping]` below 195 km mean height (J2 energy), nothing in flight and the next arrival
   more than 24 h away -> a Hohmann pair to 200 km [E] from the energy-mean a (first burn 30 min ahead, the second half
   a transfer later, tail-off awaited). At 636 t the belly Raptor's transients exceed 60 % of a ~2 m/s burn, so the

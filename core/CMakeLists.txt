@@ -29,6 +29,7 @@ add_library(starsim_core STATIC
     src/aero/parachute.cpp
     src/aero/fixed_area_aero.cpp
     src/vehicle/liquid_settling.cpp
+    src/vehicle/attitude_hold_gas.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
     src/vehicle/docking_port.cpp

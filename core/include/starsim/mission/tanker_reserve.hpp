@@ -22,6 +22,7 @@ struct TankerReserve {
     double fuel_kg = 0.0;
     double total_kg = 0.0;
     TankerReserveParameters inputs;  // what it was computed from
+    double wait_s = 0.0;             // until the planned deorbit burn (FlightSession::tanker_reserve; 0: not planned)
 };
 
 // The main-tank residue a tanker keeps for its return (spec r4 "End"): the deorbit burn by the rocket equation from

@@ -26,7 +26,7 @@ void advance(Depot& d, double to_s, const CampaignInputs& in, const CampaignMode
         const double dt = std::min(in.step_s, to_s - d.t_s);
         const double boil = m.boil_off_kgps(d.t_s, d.propellant_kg) * dt;
         const double drag = m.drag_makeup_kgps(d.t_s) * dt;
-        const double gas = in.attitude_gas_kgps * dt;
+        const double gas = m.attitude_gas_kgps ? m.attitude_gas_kgps(d.propellant_kg) * dt : 0.0;
         // an emptied depot loses only what it holds: book the losses in proportion
         const double total = boil + drag + gas;
         const double share = total > d.propellant_kg && total > 0.0 ? d.propellant_kg / total : 1.0;

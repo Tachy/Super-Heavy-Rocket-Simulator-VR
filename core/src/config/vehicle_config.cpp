@@ -854,16 +854,25 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.return_mission = doc.text_or(*recovery, "return_mission");
         // The propellant a chaser keeps through its rendezvous (required with an active docking port: load_vehicle).
         if (const auto* reserve = (*recovery)["rendezvous_reserve_kg"].as_table()) {
+            // German load errors (fix round 1 of planner Task 8, M1)
+            const auto amount = [&](const char* key) {
+                const auto v = (*reserve)[key].value<double>();
+                if (!v) doc.fail(std::string("Schlüssel '") + key + "' fehlt in [stage.recovery] rendezvous_reserve_kg");
+                if (!std::isfinite(*v) || *v < 0.0) {
+                    doc.fail(std::string("[stage.recovery] rendezvous_reserve_kg.") + key + " muss >= 0 sein");
+                }
+                return *v;
+            };
             RendezvousReserveConfig r;
-            r.proximity_kg = doc.positive(*reserve, "proximity");
-            r.phasing_kg = doc.positive(*reserve, "phasing");
+            r.proximity_kg = amount("proximity");
+            r.phasing_kg = amount("phasing");
             if (r.phasing_kg < r.proximity_kg) {
-                doc.fail("stage.recovery.rendezvous_reserve_kg: phasing must not lie below proximity (the phasing "
-                         "plan keeps the proximity flight's reserve)");
+                doc.fail("[stage.recovery] rendezvous_reserve_kg: 'phasing' darf nicht unter 'proximity' liegen (der "
+                         "Phasing-Plan hält die Reserve des Anflugs)");
             }
             s.rendezvous_reserve = r;
         } else if (recovery->contains("rendezvous_reserve_kg")) {
-            doc.fail("stage.recovery.rendezvous_reserve_kg must be a table { proximity = ..., phasing = ... }");
+            doc.fail("[stage.recovery] rendezvous_reserve_kg muss eine Tabelle { proximity = ..., phasing = ... } sein");
         }
         const bool returns_from_orbit = (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) ||
                                         s.aero.entry_profile == "capsule";

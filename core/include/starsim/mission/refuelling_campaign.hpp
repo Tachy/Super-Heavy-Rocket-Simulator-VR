@@ -28,6 +28,9 @@ struct CampaignFlight {
 struct CampaignModels {
     std::function<double(double t_s, double depot_propellant_kg)> boil_off_kgps;
     std::function<double(double t_s)> drag_makeup_kgps;
+    // The depot's attitude hold gas at its fill (vehicle::lvlh_hold_gas_kgps: the gravity gradient's torque on the
+    // filled depot within the hold deadband; fix round 1 of planner Task 8, M2); empty: none.
+    std::function<double(double depot_propellant_kg)> attitude_gas_kgps;
     // The first window at or after `earliest_launch_s`; std::nullopt: none within the search.
     std::function<std::optional<CampaignFlight>(double earliest_launch_s)> next_tanker;
     std::function<std::optional<CampaignFlight>(double earliest_launch_s)> next_hls;
@@ -44,7 +47,6 @@ struct CampaignInputs {
     double depot_capacity_kg = 0.0;  // main tanks
     double depot_initial_kg = 0.0;
     double demand_kg = 0.0;                     // what the depot must hold when the HLS arrives
-    double attitude_gas_kgps = 20.0 / 86400.0;  // [E] attitude hold (the flights fly an ideal LVLH depot)
     double transfer_vent_fraction = 0.015;      // [E] pressurant + vented displaced gas (r5: 1-2 %, not modelled)
     double launch_interval_s = 86400.0;         // [E] pad turnaround between launches
     double port_spacing_s = 6.0 * 3600.0;       // [E] one depot port: docking, transfer, departure (~3 h flown)

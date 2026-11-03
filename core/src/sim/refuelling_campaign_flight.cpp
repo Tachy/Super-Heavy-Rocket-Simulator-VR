@@ -12,12 +12,13 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/orbit/kepler.hpp"
+#include "starsim/vehicle/attitude_hold_gas.hpp"
 
 namespace starsim::sim {
 
 namespace {
 
-const mission::CampaignInputs booked{};  // the calculator's [E] attitude gas: one source (the vent: campaign.toml)
 constexpr double gas_batch_kg = 1.0;     // [E] the attitude gas is drawn in batches of this
 
 double main_kg(const FlightSession& s, size_t body) { return s.body(body).vehicle().main_propellant_kg(); }
@@ -126,8 +127,15 @@ std::optional<time::Epoch> RefuellingCampaignFlight::wake_epoch() const {
 }
 
 void RefuellingCampaignFlight::book_attitude_gas(FlightSession& s, double dt_s) {
-    pending_gas_kg_ += booked.attitude_gas_kgps * std::max(0.0, dt_s);
-    if (pending_gas_kg_ < gas_batch_kg || !s.station_index() || transfer_running(s)) return;
+    if (!s.station_index()) return;
+    // the calculator's model on the live depot (its fill and orbit now; M2, fix round 1 of planner Task 8)
+    const auto& depot = s.body(*s.station_index());
+    const auto e = orbit::elements_from_state({depot.state().position_gcrf_m, depot.state().velocity_gcrf_mps},
+                                              constants::earth_gm_m3ps2);
+    const double rate_radps = std::sqrt(constants::earth_gm_m3ps2 / std::pow(e.semi_major_axis_m, 3));
+    pending_gas_kg_ += vehicle::lvlh_hold_gas_kgps(depot.vehicle(), rate_radps, FlightSession::orbit_hold_deadband_rad) *
+                       std::max(0.0, dt_s);
+    if (pending_gas_kg_ < gas_batch_kg || transfer_running(s)) return;
     draw_main(s, *s.station_index(), pending_gas_kg_);
     state_.losses.attitude_gas_kg += pending_gas_kg_;
     pending_gas_kg_ = 0.0;

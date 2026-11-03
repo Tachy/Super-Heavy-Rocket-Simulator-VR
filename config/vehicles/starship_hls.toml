@@ -158,10 +158,13 @@ emissivity = 0.80                        # [E]
 wall_resistance_m2k_w = 63.7             # [D] as starship_depot (Centaur-derived MLI, r2)
 ullage_resistance_m2k_w = 100.0          # [E] dry wall: ullage gas conduction, no convection near free fall
 
-# No recovery (the HLS stays at the Moon); the table holds the rendezvous reserve at the depot [E] as the Block 3 ship's
-# (planner plan Task 8): its lunar propellant is kept by the lunar budget, not here.
+# No recovery (the HLS stays at the Moon); the table holds the rendezvous reserve at the depot (planner plan Task 8,
+# fix round 1). The HLS has no return to keep: before it is filled its lunar propellant is not on board yet, and an HLS
+# that cannot dock stays in orbit. proximity: the abort's retreat out of the approach ellipsoid [E: the tanker's
+# departure took 0.24 t, the filled HLS's 1.96 t (r3)]; phasing: plus the proximity flight from Waypoint 0 to docked
+# [D: the tanker's 5.04 t in tanker_flight, the same thrusters and a similar mass].
 [stage.recovery]
-rendezvous_reserve_kg = { proximity = 600.0, phasing = 900.0 }  # [E]
+rendezvous_reserve_kg = { proximity = 600.0, phasing = 5600.0 }
 
 # Docking probes and transfer connectors [E] as the tanker's (refuelling r1): the HLS fills up at the depot. The tank
 # stations are Block 3's (3.5 / 20 m), so the connectors sit on the main tanks. Leg clearance at the depot: r3.

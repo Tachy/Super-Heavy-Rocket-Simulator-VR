@@ -413,6 +413,15 @@ void FlightSession::run_autopilot() {
                        epoch_ - *settling_hold_start_ < settling_hold_factor * settling_lead_s_;
             }
             if (autopilot_.burn.ignite && !running && !hold) {
+                if (ship_return_ && std::getenv("STARSIM_DEBUG_DEORBIT")) {
+                    double lox_kg = 0.0, ch4_kg = 0.0;
+                    for (const auto& st : vehicle.stages()) {
+                        lox_kg += st.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Main);
+                        ch4_kg += st.propellant_kg(config::TankContents::Fuel, config::TankRole::Main);
+                    }
+                    std::printf("[deorbit] ignition at %.0f s TDB: main LOX %.2f t, CH4 %.2f t\n",
+                                epoch_.tdb_seconds_past_j2000(), lox_kg / 1000.0, ch4_kg / 1000.0);
+                }
                 for (const auto& g : c.groups) flying.running_groups[g] = true;
             }
             // Engines that ran dry (main tanks boiled off while waiting, refuelling r2) cannot finish the burn: cut off

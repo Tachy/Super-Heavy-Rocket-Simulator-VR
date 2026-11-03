@@ -18,7 +18,9 @@
 #include "refuelling_test_support.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/mission/tanker_reserve.hpp"
+#include "starsim/vehicle/attitude_hold_gas.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/vehicle/docking_port.hpp"
@@ -577,14 +579,14 @@ TEST_CASE("Tanker reserve from the vehicle config", "[refuelling][prop_transfer]
     INFO(reason);
     REQUIRE(reserve);
     const auto& in = reserve->inputs;
-    // Review Focus 4: the search flies the return mission's deorbit settings, not DeorbitParameters{} defaults
+    // Review Focus 4: the search flies the return mission's deorbit settings, not DeorbitParameters{} defaults - for
+    // the ship holding only the reserve (fix round 1, I2), so its pass and delta-v are the light ship's; that it is the
+    // pass the flown return takes is checked in "Docked tanker: transfer down to the reserve, undock, depart, ...".
     REQUIRE_FALSE(stage.return_mission.empty());
-    auto settings = sim::ship_deorbit_parameters(
-        config::load_ship_return_mission(STARSIM_CONFIG_DIR, stage.return_mission).deorbit);
-    settings.search_window_s = sim::FlightSession::tanker_reserve_search_s;
-    const auto plan = f.session.ship_return_preview(settings);
-    REQUIRE(plan.feasible);
-    CHECK(in.deorbit_delta_v_mps == plan.delta_v_mps);
+    CHECK(in.deorbit_delta_v_mps > 50.0);   // two-body from the depot's orbit to -1 deg at 120 km: ~68 m/s
+    CHECK(in.deorbit_delta_v_mps < 120.0);
+    REQUIRE(reserve->wait_s > 0.0);
+    CHECK(reserve->wait_s <= sim::FlightSession::tanker_reserve_search_s);
     // the vehicle's keys and the session's commit margin
     CHECK(in.gas_kg == stage.return_gas_kg);
     CHECK(in.gas_kg == 3500.0);
@@ -593,15 +595,17 @@ TEST_CASE("Tanker reserve from the vehicle config", "[refuelling][prop_transfer]
     CHECK(in.burn_margin == sim::FlightSession::commit_burn_margin);
     CHECK(in.mixture_ratio == Catch::Approx(3.6));
     // The boil-off of the wait from the thermal model: both propellants boil, CH4 more than its share at O/F 3.6
-    // (r5: 0.9 of 1.6 t CH4); a band of the r2/r5 measurements (1.4-1.6 t in ~20 h) per day of wait
-    const double wait_d = (plan.node.epoch - f.session.epoch()) / 86400.0;
+    // (r5: 0.9 of 1.6 t CH4); a band around the r2/r5 measurements (1.4-1.6 t in ~20 h at ~10 t; fix round 1: 1.44 t in
+    // 15.5 h at 16.8 t in tanker_flight): 0.3-2.5 t per day of wait, the first day whole (the reserve's warm wall)
+    const double wait_d = reserve->wait_s / 86400.0;
     const double boiled = in.boil_off_oxidizer_kg + in.boil_off_fuel_kg;
     INFO("wait " << wait_d << " d, boil-off LOX " << in.boil_off_oxidizer_kg << " kg, CH4 " << in.boil_off_fuel_kg
                  << " kg, reserve " << reserve->total_kg << " kg");
     CHECK(in.boil_off_oxidizer_kg > 0.0);
     CHECK(in.boil_off_fuel_kg > 0.0);
     CHECK(in.boil_off_fuel_kg / boiled > 1.0 / 4.6);
-    CHECK(boiled < 5000.0 * std::max(1.0, wait_d));
+    CHECK(boiled > 300.0 * wait_d);
+    CHECK(boiled < 2500.0 * std::max(1.0, wait_d));
     CHECK(reserve->total_kg == Catch::Approx(reserve->burn_kg + in.gas_kg + in.unusable_kg + boiled));
     // without boil-off in the session: none booked
     f.session.set_boil_off(false);
@@ -609,6 +613,80 @@ TEST_CASE("Tanker reserve from the vehicle config", "[refuelling][prop_transfer]
     REQUIRE(cold);
     CHECK(cold->inputs.boil_off_oxidizer_kg == 0.0);
     CHECK(cold->inputs.boil_off_fuel_kg == 0.0);
+}
+
+TEST_CASE("Entry deorbit delta-v: the conic reaches the entry interface at the flight path angle",
+          "[refuelling][mission][deorbit]") {
+    const double gm = constants::earth_gm_m3ps2;
+    const double r = constants::wgs84_semi_major_axis_m + 250.0e3;
+    const double rei = constants::wgs84_semi_major_axis_m + 120.0e3;
+    const double gamma = -1.0 * constants::deg_to_rad;
+    const double dv = mission::entry_deorbit_delta_v_mps(r, rei, gamma, gm);
+    // hand check: after the burn, energy and angular momentum give the flight path angle at the entry interface
+    const double va = std::sqrt(gm / r) - dv;
+    const double vei = std::sqrt(va * va + 2.0 * gm * (1.0 / rei - 1.0 / r));
+    CHECK(std::acos(r * va / (rei * vei)) == Catch::Approx(-gamma).epsilon(1e-9));
+    CHECK(dv > 60.0);  // ~70 m/s (the flown plans from the depot: 67-80 m/s)
+    CHECK(dv < 80.0);
+    // steeper costs more
+    CHECK(mission::entry_deorbit_delta_v_mps(r, rei, 2.0 * gamma, gm) > dv);
+}
+
+TEST_CASE("Depot attitude gas from its inertia, its RCS and the hold deadband", "[refuelling][campaign][rcs]") {
+    // hand case: dI 1e8 kg m^2, n 1.15e-3 rad/s, deadband 0.5 deg, 1e4 N m per kg/s
+    const double db = 0.5 * constants::deg_to_rad;
+    const double expected = 1.5 * 1.15e-3 * 1.15e-3 * 1.0e8 * (1.0 - std::cos(2.0 * db)) / (2.0 * db) / 1.0e4;
+    CHECK(vehicle::gravity_gradient_hold_gas_kgps(1.0e8, 1.15e-3, db, 1.0e4) == Catch::Approx(expected));
+    CHECK(vehicle::gravity_gradient_hold_gas_kgps(1.0e8, 1.15e-3, db, 0.0) == 0.0);  // no pitch thrusters
+    // the depot: pods at stations 46 and 6 m (Isp 70 s): a couple with arms ~20 m each, ~1.4e4 N m per kg/s
+    const double n = std::sqrt(constants::earth_gm_m3ps2 / std::pow(constants::wgs84_semi_major_axis_m + 250.0e3, 3));
+    const double day = 86400.0;
+    vehicle::Vehicle empty(refuelling_test::depot_config(0.0), refuelling_test::config_dir);
+    vehicle::Vehicle full(refuelling_test::depot_config(1000.0e3), refuelling_test::config_dir);
+    const double ratio = vehicle::pitch_torque_per_mass_flow(empty);
+    INFO("torque per flow " << ratio << " N m s/kg");
+    CHECK(ratio > 70.0 * constants::standard_gravity_mps2 * 10.0);
+    CHECK(ratio < 70.0 * constants::standard_gravity_mps2 * 30.0);
+    const double gas_empty = vehicle::lvlh_hold_gas_kgps(empty, n, db) * day;
+    const double gas_full = vehicle::lvlh_hold_gas_kgps(full, n, db) * day;
+    INFO("hold gas " << gas_empty << " kg/day empty, " << gas_full << " kg/day full");
+    CHECK(gas_empty > 0.0);
+    CHECK(gas_full > gas_empty);  // the inertia grows with the fill
+    CHECK(gas_full < 200.0);      // [E] the former booking: 20 kg/day
+}
+
+TEST_CASE("Rendezvous floors: a returning ship keeps its own return, the HLS its configured floor",
+          "[refuelling][rendezvous][proximity][config]") {
+    test::spice_session();
+    {
+        refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
+        const auto& stage = f.session.body(f.session.controlled_index()).vehicle().stages().front().config;
+        REQUIRE(stage.rendezvous_reserve);
+        std::string why;
+        const auto floors = f.session.rendezvous_floors(&why);
+        INFO(why);
+        REQUIRE(floors);
+        const double need = floors->proximity_kg - stage.rendezvous_reserve->proximity_kg;
+        INFO("return need " << need << " kg");
+        CHECK(floors->phasing_kg - stage.rendezvous_reserve->phasing_kg == Catch::Approx(need));
+        // burn (~200 t after it, ~70 m/s, Raptor ~3.2 km/s, x 1.10) ~4.6 t + gas 3.5 t + unusable 1 t
+        CHECK(need > stage.return_gas_kg + stage.unusable_propellant.main_kg + 3.0e3);
+        CHECK(need < stage.return_gas_kg + stage.unusable_propellant.main_kg + 7.0e3);
+        // the proximity flight takes that floor
+        gnc::ProximityParameters p;
+        p.start_waypoint = 2;
+        REQUIRE(f.session.start_proximity("transfer_dock", p));
+        CHECK(f.session.proximity_parameters()->deorbit_reserve_kg == Catch::Approx(floors->proximity_kg));
+    }
+    {  // the HLS has no return: its floors are the configured ones
+        refuelling_test::TankerAtPort f({20.0, 0.0, 0.0}, {}, refuelling_test::ship_with("starship_hls", 200.0e3));
+        const auto& stage = f.session.body(f.session.controlled_index()).vehicle().stages().front().config;
+        const auto floors = f.session.rendezvous_floors();
+        REQUIRE(floors);
+        REQUIRE(stage.rendezvous_reserve);
+        CHECK(floors->proximity_kg == stage.rendezvous_reserve->proximity_kg);
+        CHECK(floors->phasing_kg == stage.rendezvous_reserve->phasing_kg);
+    }
 }
 
 TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer request",

@@ -22,6 +22,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/vehicle/attitude_hold_gas.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -349,6 +350,12 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     // it at the floor, booked at the next orbit event at the Raptor's exhaust velocity (the flown light depot reboosts
     // on cold gas when the Raptor's transients exceed 60 % of the burn) [E: reboosts after the last transfer unbooked]
     models.drag_makeup_kgps = [](double) { return 0.0; };
+    // M2 (fix round 1 of planner Task 8): the attitude hold's gas from the depot's inertia at its fill and its RCS
+    models.attitude_gas_kgps = [&](double fill_kg) {
+        set_main(depot, fill_kg);
+        return vehicle::lvlh_hold_gas_kgps(depot, std::sqrt(gm / (r_new * r_new * r_new)),
+                                           FlightSession::orbit_hold_deadband_rad);
+    };
     const double drag_area_m2 = FlightSession::dragon_free_molecular_cd * constants::pi * 0.25 * diameter_m * diameter_m;
     const double ve_depot = phasing_exhaust_velocity_mps(depot);
     vehicle::Vehicle depot_mass(depot_vehicle_cfg, dir);

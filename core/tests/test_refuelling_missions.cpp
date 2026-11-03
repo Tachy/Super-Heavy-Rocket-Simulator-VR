@@ -341,6 +341,14 @@ struct DockedAtDepot : refuelling_test::TankerAtPort {
 TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit planned", "[refuelling][iss_mission]") {
     test::spice_session();
     DockedAtDepot f;
+    // Fix round 1 of planner Task 8 (I2): the reserve is planned for the burn the flown return takes - the ship holding
+    // only the reserve, not the full docked ship (whose pass lay 151 h ahead: 6.6 t of boil-off booked against ~1.2 t
+    // for the flown pass)
+    std::string why;
+    const auto reserve = f.session.tanker_reserve(&why);
+    INFO(why);
+    REQUIRE(reserve);
+    const time::Epoch reserve_burn = f.session.epoch() + reserve->wait_s;
     f.session.set_iss_mission(f.tanker_sequence());
     REQUIRE(f.leg() == IssMissionLeg::Docked);  // a docked start with a transfer begins at the Docked gate (f4)
     f.session.advance_to(f.session.epoch() + 1.0);
@@ -355,6 +363,11 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     REQUIRE(f.leg() == IssMissionLeg::Return);
     REQUIRE(f.session.ship_return_plan());
     CHECK(f.session.ship_return_plan()->feasible);
+    const auto& flown = *f.session.ship_return_plan();
+    INFO("reserve burn " << (reserve_burn - flown.node.epoch) / 3600.0 << " h from the flown one, "
+                         << reserve->inputs.deorbit_delta_v_mps << " against " << flown.delta_v_mps << " m/s");
+    CHECK(std::abs(reserve_burn - flown.node.epoch) < 5400.0);  // the same pass (within an orbit)
+    CHECK(reserve->inputs.deorbit_delta_v_mps == Catch::Approx(flown.delta_v_mps).margin(3.0));
     const auto& marks = f.session.iss_mission_marks();
     REQUIRE(marks.size() >= 3u);
     CHECK(marks[0].leg == IssMissionLeg::Docked);  // f4: a docked start passes the Docked gate

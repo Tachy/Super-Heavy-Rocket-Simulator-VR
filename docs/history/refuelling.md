@@ -567,3 +567,9 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   interface 120 km: the same numbers as `ship_return_starbase`). Now: margin = `FlightSession::commit_burn_margin`, gas
   and unusable from the ship config, the boil-off from the thermal model over the wait, the search with the return
   mission's settings. `CampaignInputs::transfer_vent_fraction` 0.015 default -> `config/refuelling/campaign.toml`.
+- Fix round 1 (2026-11-03): the reserve's pass was searched for the full docked ship (406 t, C_D A / m 1.1e-3 m2/kg
+  against 2.8e-3 at 222 t): its pass lay 151 h ahead (docked pair; tanker_flight 134 h), the flown return took one
+  8.6 h (16.2 h) after the transfer start - 6.6 t (7.0 t) of boil-off booked, ~1.4 t boiled; reserve 17.45 t, the
+  caught tanker kept 6.16 t main (docked pair 7.81 t). Now planned for the copy holding only the reserve.
+  Superseded too: the ships' rendezvous floors 600 / 900 kg (Crew Dragon's figures) on the Block 3 ship / tanker and
+  the HLS, and `CampaignInputs::attitude_gas_kgps` 20 kg/day [E] (now `vehicle::lvlh_hold_gas_kgps`).

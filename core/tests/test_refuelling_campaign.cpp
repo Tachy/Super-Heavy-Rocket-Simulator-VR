@@ -244,7 +244,6 @@ mission::CampaignInputs simple_inputs() {
     in.depot_capacity_kg = 1000e3;
     in.depot_initial_kg = 50e3;
     in.demand_kg = 300e3;
-    in.attitude_gas_kgps = 0.0;
     in.transfer_vent_fraction = 0.0;
     in.port_spacing_s = 0.0;
     return in;
@@ -311,8 +310,9 @@ TEST_CASE("Campaign: the HLS's extra demand must be in the depot at its arrival"
 TEST_CASE("Campaign: vent and attitude gas are booked as losses", "[refuelling][campaign]") {
     auto in = simple_inputs();
     in.transfer_vent_fraction = 0.1;
-    in.attitude_gas_kgps = 1e3 / day;
-    const auto r = mission::refuelling_campaign(in, constant_models(0.0, 100.0, 2.0));
+    auto models = constant_models(0.0, 100.0, 2.0);
+    models.attitude_gas_kgps = [](double) { return 1e3 / day; };
+    const auto r = mission::refuelling_campaign(in, models);
     REQUIRE(r.closes);
     // T1 day 2: 50 - 2 + 90 = 138; T2 day 3: 227; T3 day 4: 316 >= 300; HLS day 4.
     CHECK(r.tanker_flights == 3);

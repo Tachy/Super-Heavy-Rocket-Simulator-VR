@@ -105,14 +105,19 @@ TEST_CASE("Rendezvous plan refusals in the session", "[rendezvous][phasing][sess
 TEST_CASE("Phasing and proximity reserves from config", "[rendezvous][phasing][proximity][session][config]") {
     namespace fs = std::filesystem;
     const fs::path source(STARSIM_CONFIG_DIR);
-    // every chaser (active docking port) carries its reserve; the tanker inherits the Block 3 ship's
-    for (const char* id : {"crew_dragon", "starship_tanker", "starship_hls", "starship_hls_launch"}) {
+    // every chaser (active docking port) carries its reserve; the tanker inherits the Block 3 ship's (beyond its own
+    // return, which the session adds: "Rendezvous floors: a returning ship keeps ..."; fix round 1)
+    const std::pair<const char*, std::pair<double, double>> expected[] = {{"crew_dragon", {600.0, 900.0}},
+                                                                          {"starship_tanker", {0.0, 5000.0}},
+                                                                          {"starship_hls", {600.0, 5600.0}},
+                                                                          {"starship_hls_launch", {600.0, 5600.0}}};
+    for (const auto& [id, kg] : expected) {
         const auto cfg = config::load_vehicle(source, id);
         const auto& top = cfg.stages.back();
         INFO(id);
         REQUIRE(top.rendezvous_reserve);
-        CHECK(top.rendezvous_reserve->proximity_kg == 600.0);
-        CHECK(top.rendezvous_reserve->phasing_kg == 900.0);
+        CHECK(top.rendezvous_reserve->proximity_kg == kg.first);
+        CHECK(top.rendezvous_reserve->phasing_kg == kg.second);
     }
     // a target (passive ports) needs none
     for (const char* id : {"iss", "starship_depot"}) {

@@ -126,12 +126,13 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
             return refuse(std::string("Kein Anflug: keine Schubrichtung entlang ") + axis_names[k] + " des Ports");
         }
     }
-    const auto* reserve = rendezvous_reserve();  // the vehicle's own abort floor (planner plan Task 8)
-    if (!reserve) {
+    std::string why;
+    const auto floors = rendezvous_floors(&why);  // the vehicle's own abort floor (planner plan Task 8)
+    if (!floors) {
         clear_rendezvous_target();
-        return refuse("Kein Anflug: Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
+        return refuse("Kein Anflug: " + why);
     }
-    p.deorbit_reserve_kg = reserve->proximity_kg;
+    p.deorbit_reserve_kg = floors->proximity_kg;
     if (!(vehicle.rcs_supply_kg() > p.deorbit_reserve_kg)) {
         clear_rendezvous_target();
         return refuse("Kein Anflug: kein Treibstoff");

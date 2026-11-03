@@ -111,8 +111,9 @@ FlightSession::MainPropellant FlightSession::main_propellant_at(const vehicle::F
     const auto later = main_tanks(ahead.vehicle());
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
         const auto now = main_tanks(body.vehicle());
-        std::printf("[deorbit] flown ahead %.1f h: main LOX %.1f -> %.1f t, CH4 %.1f -> %.1f t\n", (at - epoch_) / 3600.0,
-                    now.oxidizer_kg / 1000.0, later.oxidizer_kg / 1000.0, now.fuel_kg / 1000.0, later.fuel_kg / 1000.0);
+        std::printf("[deorbit] flown ahead %.1f h to %.0f s TDB: main LOX %.2f -> %.2f t, CH4 %.2f -> %.2f t\n",
+                    (at - epoch_) / 3600.0, at.tdb_seconds_past_j2000(), now.oxidizer_kg / 1000.0,
+                    later.oxidizer_kg / 1000.0, now.fuel_kg / 1000.0, later.fuel_kg / 1000.0);
     }
     return later;
 }
@@ -122,7 +123,10 @@ double FlightSession::drag_area_per_mass_ahead() const {
     // planned crossrange; with the ship's real drag (tracked 2.4-2.6e-3 m2/kg at 217 t) that pass lay 125 km across, out
     // of reach - the re-plans found none in their windows, the old burn was flown and the entry hit the ground 950 km
     // short. The planner measures the drag the tracker will measure: on the ship itself, flown ahead.
-    const auto& body = *bodies_[controlled_].body;
+    return drag_area_per_mass_ahead(*bodies_[controlled_].body);
+}
+
+double FlightSession::drag_area_per_mass_ahead(const vehicle::FlightBody& body) const {
     vehicle::FlightEnvironment nominal = env_;
     nominal.air_density_factor = 1.0;  // the planner's air (US76), not the truth's
     vehicle::FlightBody ahead(body.vehicle().copy_upper(0), body.state());
@@ -182,10 +186,19 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
         return refused;
     }
     const auto& flying = bodies_[controlled_];
-    const auto& vehicle = flying.body->vehicle();
+    if (flying.entry_guidance || flying.ship_landing) {
+        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+        return refused;
+    }
+    return ship_deorbit_plan(*flying.body, given, drag_used_m2pkg);
+}
+
+gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const vehicle::FlightBody& body, const gnc::DeorbitParameters& given,
+                                                  double* drag_used_m2pkg) const {
+    gnc::DeorbitPlan refused;
+    const auto& vehicle = body.vehicle();
     const auto& stage = vehicle.stages().front().config;
-    if (stage.aero.entry_alpha_table.empty() || stage.deorbit_engine_groups.empty() || flying.entry_guidance ||
-        flying.ship_landing) {
+    if (stage.aero.entry_alpha_table.empty() || stage.deorbit_engine_groups.empty()) {
         refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
         return refused;
     }
@@ -197,15 +210,15 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
     const double exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
-    const gnc::EntryGuidance onboard(*flying.body, schedule, target,
+    const gnc::EntryGuidance onboard(body, schedule, target,
                                      gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
     // no drag given (the first plan): the ship's own, flown ahead
     gnc::DeorbitParameters parameters = given;
     parameters.reach_check = gnc::entry_reach_check(onboard);  // the onboard guidance's rules and limits
     parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);  // its cutoff residual and pointing error
-    if (!(parameters.drag_area_per_mass_m2pkg > 0.0)) parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_ahead();
+    if (!(parameters.drag_area_per_mass_m2pkg > 0.0)) parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_ahead(body);
     if (drag_used_m2pkg) *drag_used_m2pkg = parameters.drag_area_per_mass_m2pkg;
-    const auto& s = flying.body->state();
+    const auto& s = body.state();
     return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
                              vehicle.mass_properties().mass_kg, exhaust_velocity_mps, vehicle.propellant_kg(),
                              stage.landing_propellant_kg, parameters);
@@ -221,6 +234,10 @@ gnc::DeorbitPlan FlightSession::ship_return_preview(const gnc::DeorbitParameters
 
 std::optional<gnc::DeorbitParameters> FlightSession::ship_return_settings(std::string* reason) const {
     if (iss_mission_ && iss_mission_->ship_return) return *iss_mission_->ship_return;  // the mission's own return
+    return vehicle_return_settings(reason);
+}
+
+std::optional<gnc::DeorbitParameters> FlightSession::vehicle_return_settings(std::string* reason) const {
     const std::string mission_id = bodies_.empty() ? std::string() : bodies_[controlled_].body->vehicle().stages().front().config.return_mission;
     if (mission_id.empty()) {
         if (reason) *reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
@@ -233,17 +250,15 @@ std::optional<gnc::DeorbitParameters> FlightSession::ship_return_settings(std::s
 }
 
 bool FlightSession::plan_ship_return() {
-    const std::string mission_id = bodies_.empty() ? std::string() : bodies_[controlled_].body->vehicle().stages().front().config.return_mission;
-    if (mission_id.empty()) {
+    std::string why;
+    const auto parameters = vehicle_return_settings(&why);
+    if (!parameters) {
         ship_return_ = false;
         deorbit_plan_ = gnc::DeorbitPlan{};
-        deorbit_plan_->reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
+        deorbit_plan_->reason = why;
         return false;
     }
-    const auto m = config::load_ship_return_mission(config_dir_, mission_id);
-    auto parameters = ship_deorbit_parameters(m.deorbit);  // the one mapping (refuelling r5)
-    parameters.search_window_s = m.deorbit.search_window_s;
-    return plan_ship_return(parameters);
+    return plan_ship_return(*parameters);
 }
 
 bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
