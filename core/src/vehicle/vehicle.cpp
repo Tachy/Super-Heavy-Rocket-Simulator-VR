@@ -70,7 +70,8 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
       // the vehicle's name only while all its named stages are there (not for a ship placed without its booster)
       display_name_(config.named_stage_count == 0 || config.stages.size() == config.named_stage_count ? config.display_name
                                                                                                      : std::string()),
-      config_dir_(config_dir) {
+      config_dir_(config_dir),
+      source_config_(std::make_shared<const config::VehicleConfig>(config)) {
     std::map<std::string, std::shared_ptr<const propulsion::EnginePerformance>> performances;
     for (const auto& [engine_id, engine_config] : config.engines) {
         performances[engine_id] = std::make_shared<propulsion::EnginePerformance>(engine_config);
@@ -909,6 +910,7 @@ std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
     copy->id_ = id_;
     copy->display_name_ = display_name_;
     copy->config_dir_ = config_dir_;
+    copy->source_config_ = source_config_;
     copy->stages_ = stages_;
     copy->nose_cone_open_ = nose_cone_open_;
     copy->hull_aero_scale_ = hull_aero_scale_;
@@ -927,6 +929,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     auto upper = std::unique_ptr<Vehicle>(new Vehicle());
     upper->id_ = id_ + "/" + stages_[index].config.id;
     upper->config_dir_ = config_dir_;
+    upper->source_config_ = source_config_;
     const double shift = stages_[index].base_station_m;
     for (size_t i = index; i < stages_.size(); ++i) {
         Stage stage = std::move(stages_[i]);

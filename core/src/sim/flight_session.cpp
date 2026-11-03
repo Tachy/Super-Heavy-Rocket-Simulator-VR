@@ -991,7 +991,8 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                                     v.stages().front().propellant_kg(config::TankContents::Fuel),
                                     v.stages().front().propellant_kg(config::TankContents::Oxidizer));
                     }
-                    flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()));
+                    flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(
+                        return_site(flying.body->vehicle()), gnc::ship_landing_parameters(flying.body->vehicle()));
                     flying.ship_landing->set_realtime(realtime_planning_);
                 }
             }

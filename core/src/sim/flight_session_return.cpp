@@ -66,7 +66,7 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
     }
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     // gate ahead of the tower's catch axis (b3), else over the pad centre
-    const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters());
+    const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters(flying.body->vehicle()));
     flying.entry_guidance =
         std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters, radiative_heating_);
 }
@@ -156,7 +156,7 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
     }
     const double exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
-    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters());
+    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
     const gnc::EntryGuidance onboard(*flying.body, schedule, target);
     const auto& s = flying.body->state();
     return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
@@ -220,7 +220,7 @@ void FlightSession::replan_ship_deorbit() {
                                          deorbit_parameters_.drag_area_per_mass_m2pkg);
     deorbit_parameters_.drag_area_per_mass_m2pkg = parameters.drag_area_per_mass_m2pkg;  // the next re-plan's guess
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
-    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters());
+    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
     const gnc::EntryGuidance onboard(*flying.body, schedule, target);
     const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
                                         onboard.model(), target, vehicle.mass_properties().mass_kg,
@@ -284,10 +284,12 @@ time::Epoch FlightSession::entry_start_epoch(double horizon_s) const {
 }
 
 void FlightSession::place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
-                                       time::Epoch epoch, gnc::ShipLandingParameters parameters) {
+                                       time::Epoch epoch, std::optional<gnc::ShipLandingParameters> parameters) {
     place_body(config, state, epoch);
     auto& flying = bodies_.front();
-    flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()), std::move(parameters));
+    const auto& vehicle = flying.body->vehicle();
+    flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(
+        return_site(vehicle), parameters ? std::move(*parameters) : gnc::ship_landing_parameters(vehicle));
     flying.ship_landing->set_realtime(realtime_planning_);
 }
 

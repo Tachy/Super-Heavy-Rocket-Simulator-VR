@@ -207,7 +207,8 @@ TEST_CASE("Abort plans may draw on the whole reserve, the ship's header reserve 
     REQUIRE(abort_soft_reserve_kg.size() == 1);
     CHECK(abort_soft_reserve_kg[0] == parameters.abort_reserve_fraction * parameters.snapshot.reserve_kg);
     CHECK(parameters.abort_reserve_fraction == 1.0);
-    const auto ship = gnc::ship_landing_parameters().scvx;
+    const auto block3 = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    const auto ship = gnc::ship_landing_parameters(block3, block3.stages.at(1)).scvx;
     CHECK(ship.replan_reserve_fraction == 0.0);
     CHECK(ship.abort_reserve_fraction == 0.0);
 }

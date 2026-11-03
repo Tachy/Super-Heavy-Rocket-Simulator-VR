@@ -74,7 +74,7 @@ std::unique_ptr<Ship> ship_after_flip(double propellant_kg = 27000.0) {
     s->vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
     gnc::DescentModelInputs in;
     in.vehicle = s->vehicle.get();
-    in.phase_groups = gnc::ship_landing_parameters().scvx.snapshot.phase_groups;
+    in.phase_groups = gnc::ship_landing_parameters(cfg, cfg.stages[0]).scvx.snapshot.phase_groups;
     in.atmosphere = &s->atmosphere;
     in.site_height_m = 10.0;
     const double lat = 26.0 * deg;
@@ -96,7 +96,8 @@ TEST_CASE("SCvx plans a ship catch from after the flip", "[ship][landing]") {
     const double cg = ship->vehicle->mass_properties().cg_station_m;
     target.position_m = {96.0 - (pin_station - cg), 0.0, 0.0};  // pins 1 m above the 95 m arm tops
     target.velocity_mps = {-1.0, 0.0, 0.0};
-    auto settings = gnc::ship_landing_parameters().scvx.settings;
+    const auto& ship_cfg = ship->vehicle->source_config();
+    auto settings = gnc::ship_landing_parameters(ship_cfg, ship_cfg.stages[0]).scvx.settings;
     settings.limits.min_mass_kg = ship->vehicle->mass_properties().mass_kg - ship->vehicle->propellant_kg() + 1000.0;
     const auto x0 = gnc::make_state(ship->vehicle->mass_properties().mass_kg, {650.0, 20.0, -10.0}, {-85.0, 3.0, 0.0},
                                     math::Quat::from_axis_angle({0.0, 0.0, 1.0}, 5.0 * deg), {});

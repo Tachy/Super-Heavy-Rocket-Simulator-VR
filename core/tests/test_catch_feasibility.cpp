@@ -21,7 +21,7 @@ vehicle::Vehicle ship_with(double propellant_kg) {
 }
 
 const std::vector<std::string>& flip_groups() {
-    static const auto groups = gnc::ship_landing_parameters().flip_groups;
+    static const auto groups = gnc::ship_flip_groups(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages.at(1));
     return groups;
 }
 

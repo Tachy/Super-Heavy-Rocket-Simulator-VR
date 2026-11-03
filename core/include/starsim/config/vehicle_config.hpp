@@ -308,6 +308,25 @@ struct ReturnProfile {
     std::optional<std::vector<std::string>> flip_engine_groups;
 };
 
+// [stage.recovery] keys of a ship that flips and lands on its sea-level engines at a catch tower
+// (gnc::ship_landing_parameters; required for a "tower_catch" stage with an entry_alpha_table). The engine sets come from
+// the ReturnProfile (flip_engine_groups, landing_engine_phases, landing_phase_max_tilt_rad).
+struct ShipLandingProfile {
+    double flip_throttle = 0.0;              // the flip engines' throttle
+    double flip_tolerance_rad = 0.0;         // axis from the vertical: the burn plans start ...
+    double flip_settled_rate_radps = 0.0;    // ... once the pitch/yaw rate is this low (the plans' rate cone)
+    double flaps_until_tilt_rad = 0.0;       // the flip's aerodynamic start: flaps until the axis is this near the vertical
+    double descent_propellant_margin = 0.0;  // an abort turns to the upright descent below this times a vertical stop's need
+    double lateral_effort_fraction = 0.0;    // the landing burn's lateral LQR effort (ScvxLandingParameters)
+};
+
+// [stage.tanks] unusable_propellant_kg: propellant the engines cannot draw from a tank set (lines, sumps, below the
+// outlets), per set; a plan's floor.
+struct UnusablePropellantConfig {
+    double main_kg = 0.0;
+    double header_kg = 0.0;
+};
+
 // [stage.staging] of a lower stage: how the stage above it separates (ascent trajectory and staging, Task 1).
 //  Cold (Falcon 9): MECO - every group off, the tail-off acts on the joined stack - then separation_delay_s later the
 //    separation with a push of separation_dv_mps (relative speed of the parts), upper_ignition_delay_s after it the
@@ -381,6 +400,8 @@ struct StageConfig {
     // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;
+    std::optional<ShipLandingProfile> ship_landing;  // a ship landing at a catch tower (else none)
+    UnusablePropellantConfig unusable_propellant;    // [stage.tanks]
     LandingLegConfig landing_legs;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
     RcsConfig rcs;                                 // reaction control (no thrusters: none)

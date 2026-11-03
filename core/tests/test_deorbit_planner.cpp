@@ -77,7 +77,7 @@ Setup setup(double phase_rad, double propellant_kg = 45000.0) {
     }
     s.propellant_kg = propellant_kg;
     s.reserve_kg = stage.config.landing_propellant_kg;
-    s.target = gnc::ship_entry_target(s.session->return_site(s.ship->vehicle()), gnc::ship_landing_parameters());
+    s.target = gnc::ship_entry_target(s.session->return_site(s.ship->vehicle()), gnc::ship_landing_parameters(s.ship->vehicle()));
     const auto schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, stage.config.aero.entry_alpha_table);
     s.model = gnc::EntryGuidance(*s.ship, schedule, s.target).model();
     return s;

@@ -36,6 +36,19 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     the burnable header propellant (`gnc::feed_propellant_kg`, it counted the 3.85 t residue before); the case still
     ends on the floor with the flight's +1.9 % thrust / +10.5 % density dispersion. Open: whether this gate has a
     catch within the headers at all (propellant margin of the catch from the flip end).
+    Task 3 (2026-11-03, derived ship landing values): 6.96 m/s, still red. Measured: every plan ends exactly on the
+    floor; with the floor lowered the first plan needs 27.6 t against 26.9 t usable (+0.7 t short), and after the plan
+    end (pins 1 m above the arms at 1 m/s) the descent onto the arms needs ~0.75 t more - the ship starves there. The
+    shortfall comes from the catch approach constraint (`DescentLimits::approach_time_constant_s` 3 s [E], a booster
+    default): without it the first plan needs 22.9 t (4 t margin) but ends in a hard final braking the throttle rate
+    (0.5 /s) cannot follow (10.5 m/s at the arms); 1.5 s caught at 3.5 m/s. A floor term for the post-plan descent
+    alone made it worse (plans squeezed, 7.8 m/s; not kept). Re-assess after the dry-mass change (Task 3b).
+  - "Ship catch campaign: gate dispersions and an engine failure" ([slow], single case seed 13 = case 12): lost since
+    Task 3 (sink 6.4 m/s, 2.0 t left; case 19 caught at 4.1 m/s). Cause: the derived 3 -> 2 window maximum (~100 m/s
+    from the gate height) is never binding, but the SCvx initial guess ends phase 0 at the window midpoint (53 m/s
+    instead of 30 m/s): the first plan brakes to a hover at ~380 m and descends for 15.5 s on the pair. With the max at
+    40 m/s the case is caught with 5.1 t. Fix in the planner (guess from the height, not the window midpoint) after the
+    dry-mass change (Task 3b); the [slow] set was not run in Task 3 (controller ruling).
   - `tanker_flight` reference: main at catch re-measured 0.37 -> 0.68 t (inner rings / settled-column commits; the
     other tanker numbers within 1 % / 0.3 t, kept).
   - "Lunar return campaign (direct): seed 15": green since Task 1c (same SCvx fix): caught with 3.6 t (cause: first catch

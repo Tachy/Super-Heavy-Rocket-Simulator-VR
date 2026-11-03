@@ -100,6 +100,13 @@ flow separation (vacuum engines).
   (the session selects them); the main tanks feed everything before. The configured loads are full tanks (capacities);
   scenarios load propellant with `config::fill_tanks` (headers first). The gauge (`main_propellant_kg`) shows the main
   tanks only. Tank liquid settles perpendicular to the apparent gravity (`vehicle/liquid_settling`).
+- `[stage.tanks] unusable_propellant_kg = { main = ..., header = ... }`: propellant the engines cannot draw per tank set
+  [E]; the header value is the ship landing plans' hard floor (required for a ship landing), main the tanker reserve's.
+- Ship landing (`gnc::ship_landing_parameters`; required for a `"tower_catch"` stage with an `entry_alpha_table`, a German
+  error names the missing key): `[stage.recovery]` `flip_engine_groups`, `landing_engine_phases`,
+  `landing_phase_max_tilt_deg`, `flip_throttle`, `flip_tolerance_deg`, `flip_settled_rate_rad_s`, `flaps_until_deg`,
+  `descent_propellant_margin`, `landing_lateral_effort`. Tilt-rate limits, the 3 -> 2 sink window and the gate lead are
+  derived in code from the engine sets and the landing masses.
 - `[stage.recovery] landing_propellant_kg`: booster - at landing-burn ignition (MECO is planned for it); ship - derived
   from the header tanks' contents (35 t [E]; giving a different value is an error). `rcs_propellant_kg`: main-tank RCS
   gas a returning booster spends from MECO to landing-burn ignition (the MECO plan adds it; 0 with an own RCS supply).

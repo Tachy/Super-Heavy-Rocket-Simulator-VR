@@ -95,7 +95,7 @@ TEST_CASE("Only Falcon 9's fresh landing plans take their own trust-region weigh
     CHECK(deck.weights.trust_region == gnc::DescentWeights{}.trust_region);
     const auto sh = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     CHECK(gnc::booster_return_parameters(sh.stages.front()).scvx.settings.fresh_trust_region_weight == 0.0);
-    CHECK(gnc::ship_landing_parameters().scvx.settings.fresh_trust_region_weight == 0.0);
+    CHECK(gnc::ship_landing_parameters(sh, sh.stages.at(1)).scvx.settings.fresh_trust_region_weight == 0.0);
     // Likewise the tilt penalty on fresh plans
     const double penalty = stage.return_profile.landing_fresh_attitude_violation_weight;
     CHECK(penalty > gnc::DescentWeights{}.attitude_violation);
@@ -103,7 +103,7 @@ TEST_CASE("Only Falcon 9's fresh landing plans take their own trust-region weigh
     CHECK(deck.fresh_attitude_violation_weight == penalty);
     CHECK(deck.weights.attitude_violation == gnc::DescentWeights{}.attitude_violation);
     CHECK(gnc::booster_return_parameters(sh.stages.front()).scvx.settings.fresh_attitude_violation_weight == 0.0);
-    CHECK(gnc::ship_landing_parameters().scvx.settings.fresh_attitude_violation_weight == 0.0);
+    CHECK(gnc::ship_landing_parameters(sh, sh.stages.at(1)).scvx.settings.fresh_attitude_violation_weight == 0.0);
 }
 
 TEST_CASE("Falcon 9 landing plans take their own gimbal allowance, Super Heavy keeps the default",

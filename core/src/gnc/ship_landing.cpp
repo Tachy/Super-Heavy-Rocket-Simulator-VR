@@ -14,8 +14,6 @@ using math::Vec3;
 
 namespace {
 
-constexpr double deg = constants::deg_to_rad;
-constexpr double no_sink_limit_mps = 1.0e3;  // an engine-set switch without a sink window
 constexpr double catch_missed_height_m = 5.0;  // CG this far below the catch point: the catch is over (as the booster)
 
 // Thrust of the running engines of `groups` at minimum and full throttle, and their exhaust velocity.
@@ -44,38 +42,6 @@ Vec3 up_at(double latitude_rad, double longitude_rad) {
 }
 
 }  // namespace
-
-ShipLandingParameters ship_landing_parameters() {
-    ShipLandingParameters p;
-    auto& s = p.scvx;
-    s.snapshot.phase_groups = {std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2", "ship/sea_level_3"},
-                               std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"},
-                               std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"}};
-    s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
-    s.snapshot.structure_keep_out = true;
-    // The header tanks carry the landing and the engines starve when they run dry, while the propellant mass also
-    // counts the main tanks' residue: the reserve stays a hard floor, no plan draws on it.
-    s.replan_reserve_fraction = 0.0;
-    s.abort_reserve_fraction = 0.0;
-    // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew);
-    // 0.1 until the ship catch robustness plan (2026-10-21): the LQR's model has no actuator delay (0.75 s on the
-    // ship), and with ~30 m/s across after the flip (lunar-return direct seed 18) the hull out-tilted the plan, braked
-    // ~4 m/s too much across, the re-plans jumped to a long slow final phase and stopped converging - catch aborted.
-    // Seed-18 replay: 0.1 / 0.07 miss, 0.05 / 0.04 / 0.03 / 0.02 catch (17 plans, none failed, 0.04-0.05 m): the
-    // middle of that band.
-    s.lateral_effort_fraction = 0.03;
-    auto& l = s.settings.limits;
-    // [E] the more engines, the more gimbal authority. The lateral phase took 15 deg until f3: it saturated on the
-    // divert after the flip (lunar return seed 1, ~27 m/s across: overshoot, hover, headers dry).
-    l.tilt_max_rad = {20.0 * deg, 20.0 * deg, 15.0 * deg};
-    l.rate_max_radps = {0.3, 0.2, 0.2};                     // [E] the ship is shorter and lighter than the booster
-    // 3 -> 2 at 20-40 m/s sink [D]: flight 14 video shows two engines from ~200 m (user 2026-10-13), where flights
-    // 13/14 sank at 31 / 35 m/s (webcast telemetry). The planner's third phase flies the same pair (no switch).
-    l.switches = {{{0.0, 0.0, 20.0, 40.0}, {0.0, 0.0, 0.0, no_sink_limit_mps}}};
-    l.throttle_margin = 0.05;          // [E]
-    l.terminal_thrust_margin = 1.0;    // no "gentle end" cap: two engines at minimum are below the weight
-    return p;
-}
 
 EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParameters& parameters) {
     const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
@@ -130,6 +96,19 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
         started_ = true;
         next_attempt_ = epoch;
         flip_start_ = epoch;
+        if (parameters_.switch_window_from_gate) {
+            // The 3 -> 2 window's maximum from the height left at the gate: the CG above the catch (or the ground).
+            const auto& vehicle = body.vehicle();
+            const Vec3 pad = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
+            const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
+            double height = dot(r_fixed - pad, site_up);
+            if (site_.catch_target) {
+                const double cg = vehicle.mass_properties().cg_station_m;
+                height -= dot(site_.catch_target->pin_point_itrf_m - pad, site_up) - (site_.catch_target->pin_station_m - cg);
+            }
+            parameters_.scvx.settings.limits.switches[0].max_sink_mps = ship_switch_max_sink_mps(
+                vehicle.source_config(), vehicle.stages().front().config, parameters_, height);
+        }
         if (std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("gate", body, transform, epoch);  // diagnostics
     }
     if (phase_ == ReturnPhase::Flip) {

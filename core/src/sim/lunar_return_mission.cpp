@@ -197,7 +197,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     const vehicle::FlightBody entry_body(std::make_unique<vehicle::Vehicle>(entry_cfg, config_dir),
                                          vehicle::RigidBodyState{});
     const auto& entry_vehicle = entry_body.vehicle();
-    const auto gate = gnc::ship_entry_target(session.return_site(entry_vehicle), gnc::ship_landing_parameters());
+    const auto gate = gnc::ship_entry_target(session.return_site(entry_vehicle), gnc::ship_landing_parameters(entry_vehicle));
     const gnc::EntryGuidance onboard(
         entry_body, gnc::load_alpha_schedule(config_dir, stage.aero.entry_alpha_table), gate, setup.entry,
         std::make_shared<const aero::RadiativeHeatingTable>(aero::RadiativeHeatingTable::load(config_dir)));

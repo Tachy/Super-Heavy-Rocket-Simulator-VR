@@ -9,22 +9,26 @@
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
 #include "starsim/gnc/upright_descent.hpp"
+#include "starsim/gnc/vehicle_capability.hpp"
 #include "starsim/math/constants.hpp"
 
 namespace starsim::gnc {
 
 // Flip and landing of the ship at the tower (b3 of docs/superpowers/archive/specs/2026-10-13-ship-return-design.md).
+// Production values come from the vehicle config: ship_landing_parameters(vehicle, stage). The member defaults are
+// only test fixtures.
 struct ShipLandingParameters {
     std::vector<std::string> flip_groups{"ship/sea_level_1", "ship/sea_level_2", "ship/sea_level_3"};
-    double flip_throttle = 0.8;                                  // [E]
-    double flip_tolerance_rad = 15.0 * constants::deg_to_rad;    // [E] axis from the vertical: the burn plans start
-    double flip_settled_rate_radps = 0.2;                        // [E] ... once the flip's pitch/yaw rate is this low
+    double flip_throttle = 0.8;                                  // [K] flip_throttle
+    double flip_tolerance_rad = 15.0 * constants::deg_to_rad;    // [K] axis from the vertical: the burn plans start
+    double flip_settled_rate_radps = 0.2;                        // [K] ... once the flip's pitch/yaw rate is this low
     // The flip starts aerodynamically: aft flaps folded, forward flaps out - the tail loses its drag and falls (engines
-    // down) while the engines spool up; below this tilt the attitude controller takes the flaps back [E].
+    // down) while the engines spool up; below this tilt the attitude controller takes the flaps back [K flaps_until_deg].
     double flip_flaps_until_tilt_rad = 30.0 * constants::deg_to_rad;
     double first_plan_retry_s = 1.0;                             // a failed first plan is tried again this often
-    // [E] the flip pushes the ship ~100-200 m along its nose (thrust across the path while it turns): the entry's gate
-    // lies this far back from the catch axis on the line tower -> pad, the nose pointing to the tower
+    // [D] the flip pushes the ship along its nose (thrust across the path while it turns) and the landing burn brakes
+    // the speed it gained: the entry's gate lies this far back from the catch axis on the line tower -> pad, the nose
+    // pointing to the tower (ship_gate_lead_m).
     double gate_lead_m = 220.0;
     // Ship catch robustness (2026-10-21): the last-resort abort (gnc::upright_descent) after this many failed first
     // plans (neither the catch nor the sea in reach), or when an abort has no converged abort plan after the grace
@@ -34,15 +38,70 @@ struct ShipLandingParameters {
     double abort_plan_grace_s = 2.0;                                  // [E] two re-plan cycles
     // [E] abort plans fly up to ~24 deg (20 deg limit + thrust axis + tracking); seed 18 tumbled from 45 deg on
     double upright_guard_tilt_rad = 35.0 * constants::deg_to_rad;
-    double descent_two_engine_sink_mps = 20.0;                        // [D] the 3 -> 2 switch window starts at 20 m/s
-    // [E] an abort switches to the descent once the usable propellant is below this times a vertical stop's need
+    // [D] the upright descent runs the flip set while sinking faster than this, else the landing pair: the 3 -> 2
+    // window's minimum (ship_switch_sink_window)
+    double descent_two_engine_sink_mps = 20.0;
+    // [K] an abort switches to the descent once the usable propellant is below this times a vertical stop's need
     double descent_propellant_margin = 1.3;
+    // The 3 -> 2 window's maximum is set at the gate from its height (ship_switch_sink_window); false: as given.
+    bool switch_window_from_gate = false;
     ScvxLandingParameters scvx;                                  // ship preset: ship_landing_parameters()
 };
 
-// The ship's preset: engine phases 3 -> 2 (user 2026-10-13, flight 13/14 videos: the belly engine shuts down, the
-// leeward pair lands; its thrust centroid lies in the symmetry plane) and planning limits for the ship.
-ShipLandingParameters ship_landing_parameters();
+// The ship's flip and landing burn from its config ([stage.recovery] ship keys, [stage.tanks] unusable propellant,
+// the engines): engine sets 3 -> 2 (user 2026-10-13, flight 13/14 videos), tilt limits and the K values as configured;
+// the tilt-rate limits, the 3 -> 2 sink window and the gate lead derived (see the functions below). Throws
+// std::invalid_argument for a stage without the ship landing keys (config::StageConfig::ship_landing).
+ShipLandingParameters ship_landing_parameters(const config::VehicleConfig& vehicle, const config::StageConfig& ship);
+// The same for a flying ship: its source config and its front stage.
+ShipLandingParameters ship_landing_parameters(const vehicle::Vehicle& ship);
+// The flip's engine groups (stage-prefixed ids) of a ship stage; throws std::invalid_argument without the ship keys.
+std::vector<std::string> ship_flip_groups(const config::StageConfig& ship);
+
+// The masses the derivations use: heavy = the ship with full header tanks and empty main tanks (the landing propellant
+// at the gate), light = dry with the header's unusable propellant only (the end of the burn).
+struct ShipLandingMasses {
+    double heavy_kg = 0.0;
+    double light_kg = 0.0;
+    double heavy_cg_station_m = 0.0;
+    double heavy_pitch_inertia_kg_m2 = 0.0;
+};
+ShipLandingMasses ship_landing_masses(const config::VehicleConfig& vehicle, const config::StageConfig& ship);
+
+// Tilt-rate limit of a phase [D]: the peak rate of a rest-to-rest turn through the phase's tilt allowance at the set's
+// gimbal acceleration at minimum throttle, sqrt(alpha tilt_max), capped by the gimbal slew rate (the smaller).
+double ship_phase_rate_limit_radps(const EngineSetThrust& set, double tilt_max_rad, double inertia_kg_m2);
+
+// The 3 -> 2 switch's sink window [D]. Minimum: the outgoing set at minimum throttle exceeds the light ship's weight -
+// it must switch while still sinking faster than what the set removes while it shuts down,
+// (F_out,min / m_light - g) t_shutdown; a set that cannot exceed the weight needs no minimum (0). Maximum: the incoming
+// set at its planned maximum (1 - throttle_margin) still stops the heavy ship within the remaining height,
+// sqrt(2 (F_in,max (1 - margin) / m_heavy - g) height); 0 when it cannot hold the weight.
+struct SinkWindow {
+    double min_sink_mps = 0.0;
+    double max_sink_mps = 0.0;
+};
+SinkWindow ship_switch_sink_window(const EngineSetThrust& outgoing, const EngineSetThrust& incoming, double light_mass_kg,
+                                   double heavy_mass_kg, double height_m, double throttle_margin, double shutdown_s,
+                                   double gravity_mps2);
+// The window's maximum for the ship's own sets (ship_landing_masses) from `height_m`: the CG's height above the catch
+// (or the ground) at the gate.
+double ship_switch_max_sink_mps(const config::VehicleConfig& vehicle, const config::StageConfig& ship,
+                                const ShipLandingParameters& parameters, double height_m);
+
+// The flip's push along the nose [D]: the flip set at the flip throttle turns the heavy ship rest-to-rest through
+// 90 deg (belly-first -> engines down) in flip_duration_s(pi / 2, alpha, no cap); its thrust, along the axis at the
+// angle theta(t) from the horizontal, gives the speed dv = int a cos(theta) dt and the travel
+// x = int (t_f - t) a cos(theta) dt; the first landing set then brakes dv at its planned maximum tilted to the phase's
+// tilt limit: lead = x + dv^2 / (2 a_brake sin(tilt)).
+struct FlipPush {
+    double duration_s = 0.0;
+    double speed_mps = 0.0;
+    double travel_m = 0.0;
+    double brake_m = 0.0;
+    double lead_m() const { return travel_m + brake_m; }
+};
+FlipPush ship_flip_push(double flip_accel_mps2, double flip_alpha_radps2, double brake_accel_mps2, double brake_tilt_rad);
 
 // Where the ship's entry guidance aims: with a catch tower `gate_lead_m` back from the catch axis on the line
 // tower -> pad, the nose to the tower: the flip pushes the ship towards the arms, the final approach comes from the open
@@ -61,7 +120,7 @@ EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParamete
 // Commands as the booster's return guidance (ReturnCommand), so the session flies both the same way.
 class ShipLandingGuidance {
 public:
-    explicit ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters = ship_landing_parameters());
+    ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters);
 
     ReturnCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 

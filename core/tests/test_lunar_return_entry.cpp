@@ -532,7 +532,7 @@ test::CatchRun replay_gate(const double (&g)[16], double aero, double density, d
         std::printf("[gate replay] gate ENU %.1f %.1f %.1f m, velocity %.1f %.1f %.1f m/s, nose %.3f %.3f %.3f\n", re.x,
                     re.y, re.z, ve.x, ve.y, ve.z, ne.x, ne.y, ne.z);
     }
-    t.session.place_landing_ship(ship, state, epoch, gnc::ship_landing_parameters());
+    t.session.place_landing_ship(ship, state, epoch);
     t.session.set_aero_dispersion(0, aero);
     t.session.set_thrust_dispersion(0, thrust);
     t.session.set_air_density_factor(density);

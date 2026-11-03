@@ -63,7 +63,7 @@ struct Gate {
     std::string failed_group;          // this engine fails 1 s into the flip ("": none)
     bool abort_in_flip = false;        // the pilot gives the catch up 1 s into the flip
     double propellant_kg = 35000.0;    // the ship's landing_propellant_kg [E]
-    gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters();
+    std::optional<gnc::ShipLandingParameters> parameters;  // none: from the ship's config
 };
 
 test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {

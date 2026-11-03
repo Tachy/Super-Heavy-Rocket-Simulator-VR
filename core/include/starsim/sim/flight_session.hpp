@@ -475,9 +475,10 @@ public:
                                 time::Epoch epoch,
                                 gnc::EntryGuidanceParameters parameters = gnc::EntryGuidanceParameters::capsule());
     // Scenarios: a ship placed at the gate (belly down) flips and lands on its landing guidance (catch at this site's
-    // tower). An entering ship gets the same guidance when its entry guidance reaches the gate.
+    // tower). An entering ship gets the same guidance when its entry guidance reaches the gate. Parameters left out:
+    // from the ship's config (gnc::ship_landing_parameters).
     void place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
-                            gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters());
+                            std::optional<gnc::ShipLandingParameters> parameters = std::nullopt);
     const gnc::ShipLandingGuidance* ship_landing(size_t index) const { return bodies_.at(index).ship_landing.get(); }
     // Return of the controlled ship from orbit to this site's tower (b4): the onboard computer plans the deorbit burn
     // (gnc::plan_deorbit) and flies it on the vehicle's deorbit engine set; the ship then coasts, gets its entry guidance

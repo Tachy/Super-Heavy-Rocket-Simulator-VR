@@ -198,6 +198,10 @@ public:
     // The configured display name of the whole vehicle; empty for a part split off by separate() (both parts are named
     // by their stages then).
     const std::string& display_name() const { return display_name_; }
+    // The configuration this vehicle was built from (all its configured stages, also after separate()): the engine
+    // and propellant data the planners derive capabilities from (gnc::vehicle_capability); stage data per part is
+    // stages()[i].config.
+    const config::VehicleConfig& source_config() const { return *source_config_; }
     // The name shown for this body (webcast overlay): the vehicle's display name; for a part, the display name of its
     // lowest stage with main (non-auxiliary) engines, else of its topmost stage that has one (capsule + trunk: the
     // capsule); empty when no stage is named.
@@ -364,6 +368,7 @@ private:
     std::string id_;
     std::string display_name_;
     std::filesystem::path config_dir_;
+    std::shared_ptr<const config::VehicleConfig> source_config_;
     std::vector<Stage> stages_;
     std::unique_ptr<aero::SlenderBodyAero> aero_;
     std::unique_ptr<aero::CapsuleAero> capsule_aero_;

@@ -372,6 +372,20 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     read_propellant_transfer(doc, t, s);
     double header_kg = 0.0;  // the header tanks' contents: the stage's landing propellant
     for (const auto& k : s.tanks) header_kg += k.role == TankRole::Header ? k.capacity_kg : 0.0;
+    if (const auto* tanks = t["tanks"].as_table()) {
+        if (const auto* unusable = (*tanks)["unusable_propellant_kg"].as_table()) {
+            s.unusable_propellant.main_kg = doc.number_or(*unusable, "main", 0.0);
+            s.unusable_propellant.header_kg = doc.number_or(*unusable, "header", 0.0);
+            if (s.unusable_propellant.main_kg < 0.0 || s.unusable_propellant.header_kg < 0.0) {
+                doc.fail("stage.tanks.unusable_propellant_kg: main / header must not be negative");
+            }
+            if (s.unusable_propellant.header_kg > header_kg) {
+                doc.fail("stage.tanks.unusable_propellant_kg.header exceeds the header tanks' contents");
+            }
+        } else if (tanks->contains("unusable_propellant_kg")) {
+            doc.fail("stage.tanks.unusable_propellant_kg must be a table { main = ..., header = ... }");
+        }
+    }
     if (auto groups = t["engine_group"].as_array()) {
         for (const auto& node : *groups) {
             const auto& g = *node.as_table();
@@ -758,6 +772,35 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.return_profile = read_profile(*recovery, {});
         if (const auto* drone_ship = (*recovery)["drone_ship"].as_table()) {
             s.drone_ship_return = read_profile(*drone_ship, s.return_profile);
+        }
+        // A ship caught by the tower (gnc::ship_landing_parameters): every key of its flip and landing burn is required.
+        if (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) {
+            const auto missing = [&](const std::string& key, const std::string& where) {
+                doc.fail("Schiffslandung der Stufe '" + s.id + "': Schlüssel '" + key + "' fehlt in [" + where + "]");
+            };
+            const auto required = [&](std::string_view key) {
+                if (!recovery->contains(key)) missing(std::string(key), "stage.recovery");
+                return doc.number(*recovery, key);
+            };
+            const auto& r = s.return_profile;
+            if (!r.flip_engine_groups || r.flip_engine_groups->empty()) missing("flip_engine_groups", "stage.recovery");
+            if (r.landing_engine_phases.empty()) missing("landing_engine_phases", "stage.recovery");
+            if (r.landing_phase_max_tilt_rad.empty()) missing("landing_phase_max_tilt_deg", "stage.recovery");
+            if (!(s.unusable_propellant.header_kg > 0.0)) missing("unusable_propellant_kg.header", "stage.tanks");
+            ShipLandingProfile p;
+            p.flip_throttle = required("flip_throttle");
+            p.flip_tolerance_rad = required("flip_tolerance_deg") * constants::deg_to_rad;
+            p.flip_settled_rate_radps = required("flip_settled_rate_rad_s");
+            p.flaps_until_tilt_rad = required("flaps_until_deg") * constants::deg_to_rad;
+            p.descent_propellant_margin = required("descent_propellant_margin");
+            p.lateral_effort_fraction = required("landing_lateral_effort");
+            if (!(p.flip_throttle > 0.0) || p.flip_throttle > 1.0) doc.fail("stage.recovery.flip_throttle must be in (0, 1]");
+            if (!(p.flip_tolerance_rad > 0.0) || !(p.flip_settled_rate_radps > 0.0) || !(p.flaps_until_tilt_rad > 0.0)) {
+                doc.fail("stage.recovery: flip_tolerance_deg, flip_settled_rate_rad_s and flaps_until_deg must be positive");
+            }
+            if (!(p.descent_propellant_margin >= 1.0)) doc.fail("stage.recovery.descent_propellant_margin must be >= 1");
+            if (!(p.lateral_effort_fraction > 0.0)) doc.fail("stage.recovery.landing_lateral_effort must be positive");
+            s.ship_landing = p;
         }
     }
     return s;

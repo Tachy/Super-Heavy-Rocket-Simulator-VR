@@ -56,16 +56,28 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Terminal steering floor (Task 6b): the most-lift alpha is never below `EntryAeroTable::lowest_trimmed_alpha_rad` (flying mass and CG; 1 deg search), in `EntryPredictorModel::steering_most_lift_alpha`, so guidance and predictor count the same lift. Steering differences stay on their side of `schedule_fraction` (`steering_difference`). After the basis froze, with a nose direction, the attitude slews on the `bank_step_smooth` ramp (`terminal_nose_slew_acceleration_radps2`, 0.5 deg/s^2 [E]). `upright_descent`'s braking feedforward scales with sink / profile sink, so a ship below the profile sinks instead of climbing.
 - Flip and catch (b3, `gnc/ship_landing`): at the gate the three sea-level Raptors relight at 80 % [E], aft flaps
   fold, forward flaps go broadside until the tilt is < 30 deg; flip ~4 s and ~8 t, pushes the ship ~100 m along its
-  nose. Once upright (< 15 deg, < 0.2 rad/s) SCvx plans (`ship_landing_parameters()`) fly 3 -> 2 engines: the belly
-  engine shuts down at 20-40 m/s sink [D], the leeward pair lands (layout [D] from flight 13 splashdown video). Thrust
+  nose. Once upright (< 15 deg, < 0.2 rad/s) SCvx plans fly 3 -> 2 engines: the belly engine shuts down, the leeward
+  pair lands (layout [D] from flight 13 splashdown video). Parameters from the config (Task 3, 2026-11-03,
+  `gnc::ship_landing_parameters(vehicle, stage)`, `core/src/gnc/ship_landing_parameters.cpp`; a "tower_catch" stage with
+  an entry_alpha_table must have every key, German refusal at load): K `[stage.recovery]` flip_engine_groups,
+  landing_engine_phases, landing_phase_max_tilt_deg (20/20/15), flip_throttle 0.8, flip_tolerance_deg 15,
+  flip_settled_rate_rad_s 0.2, flaps_until_deg 30, descent_propellant_margin 1.3, landing_lateral_effort 0.03;
+  `[stage.tanks] unusable_propellant_kg` header 1 t = the plans' hard floor (main 1 t for the tanker reserve). D (at the
+  landing masses: dry + full headers 290 t / dry + 1 t 256 t): tilt-rate limits min(gimbal slew, sqrt(alpha_min tilt))
+  = 0.265 / 0.216 / 0.187 rad/s; 3 -> 2 sink window min = (3 at minimum - weight) x shutdown = 0 (three Raptors at
+  30 % are below the weight), max = sqrt(2 (2 at 95 % / m - g) h) set at the gate from the CG height above the catch
+  (~107 m/s from 700 m; the webcast 20-40 m/s is no longer used); the upright descent's 3 -> 2 sink = the window minimum.
+  Thrust
   of an asymmetric set goes through the CG along an axis tilted against the hull (~1.5 deg for the pair): plan states
   carry the thrust-axis attitude (`gnc::thrust_axis_body`). The plans' propellant floor counts only what the selected
   feed can burn (`gnc::feed_propellant_kg`: from the flip the header tanks, limited by the scarcer of LOX and CH4 at
-  O/F 3.6; the main-tank residue never reaches the engines) minus the 1 t reserve; the upright abort's propellant check
-  reads the same (Task 1c, 2026-11-03; before, the whole load counted and plans could fly the headers dry). Ship LQR effort 0.03 of the gimbal authority [E], attitude
+  O/F 3.6; the main-tank residue never reaches the engines) minus the 1 t unusable header propellant; the upright abort's propellant check
+  reads the same (Task 1c, 2026-11-03; before, the whole load counted and plans could fly the headers dry). Ship LQR effort 0.03 of the gimbal authority [D seed 18], attitude
   controller `Gains::actuator_delay_s` 0.75 s; flaps folded in the burn. Lateral phase tilt limit 20 deg [E].
   `FlightSession::place_landing_ship`; the entry hands over at the gate.
-- Gate lead: `gnc::ship_entry_target` puts the entry target 220 m [E] back from the catch axis on the line tower ->
+- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (197 m, `gnc::ship_flip_push`: the flip set at
+  the flip throttle turns 90 deg rest-to-rest in 3.25 s, pushes 95 m and 43 m/s along the nose, the three at 95 % tilted
+  20 deg brake it in 102 m; engine spool-up and the settle are not modelled) back from the catch axis on the line tower ->
   pad with `EntryTarget::nose_direction_itrf` to the tower; only that approach is robust (the arms stand across the
   line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering to the nearest edge
   of the nose sector at fraction 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 3 deg/s [E],

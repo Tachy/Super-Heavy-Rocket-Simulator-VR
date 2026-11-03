@@ -170,7 +170,7 @@ void FlightSession::run_crew_escape() {
         // an aerocapture pass is no catch attempt (final review I2): the final entry after the capture is judged
         const bool aerocapture = ship.entry_guidance && ship.entry_guidance->parameters().aerocapture_apoapsis_m > 0.0;
         if (ship.entry_guidance && !ship.ship_landing && !aerocapture) {
-            const auto f = gnc::catch_feasibility(ship.body->vehicle(), gnc::ship_landing_parameters().flip_groups,
+            const auto f = gnc::catch_feasibility(ship.body->vehicle(), gnc::ship_flip_groups(ship.body->vehicle().stages().front().config),
                                                   c.config.min_catch_propellant_kg);
             if (!f.feasible) {
                 crew_arm(f.reason, crew_height_m(*ship.body) > c.config.min_firing_height_m);
