@@ -106,9 +106,10 @@ void ShipLandingGuidance::print_gate_state(const char* label, const vehicle::Fli
     const Vec3 axis = site_.catch_target ? site_.catch_target->pin_point_itrf_m : pad;
     const Vec3 to_axis = axis - r;
     std::printf("[%s] to-axis E %.1f N %.1f m, height %.1f m, v E %.2f N %.2f U %.2f m/s, axis from pad E %.2f N %.2f m, "
-                "propellant %.0f kg\n",
+                "propellant %.0f kg (the feed can burn %.0f kg)\n",
                 label, dot(to_axis, east), dot(to_axis, north), dot(r - pad, up), dot(v, east), dot(v, north), dot(v, up),
-                dot(axis - pad, east), dot(axis - pad, north), body.vehicle().propellant_kg());
+                dot(axis - pad, east), dot(axis - pad, north), body.vehicle().propellant_kg(),
+                feed_propellant_kg(body.vehicle()));
 }
 
 ShipLandingGuidance::ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters)
@@ -221,7 +222,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                                   cross(vehicle::earth_rotation_vector(transform), body.state().position_gcrf_m));
             const double sink = -dot(v_fixed, site_up);
             const auto thrust = group_thrust(body.vehicle(), descent_groups(sink), env.atmosphere.at(site_.height_m).pressure_pa);
-            const double usable = body.vehicle().propellant_kg() - parameters_.scvx.snapshot.reserve_kg;
+            const double usable = feed_propellant_kg(body.vehicle()) - parameters_.scvx.snapshot.reserve_kg;
             const double need = upright_stop_propellant_kg(mass.mass_kg, sink, thrust.max_n / mass.mass_kg,
                                                            constants::standard_gravity_mps2, thrust.exhaust_velocity_mps,
                                                            parameters_.upright_descent);

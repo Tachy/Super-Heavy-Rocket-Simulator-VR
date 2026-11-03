@@ -8,6 +8,7 @@
 
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -147,6 +148,23 @@ TEST_CASE("RCS ullage gas comes from the main tanks, from the headers once they 
         CHECK((flow_kgps(ship, TankRole::Main) > 0.0) == main_left);
         CHECK((flow_kgps(ship, TankRole::Header) > 0.0) == !main_left);
     }
+}
+
+TEST_CASE("The landing plans count only the propellant the selected feed can burn", "[header][descent][ship]") {
+    // Task 1c (2026-11-03): the gate of lunar-return seed 18 carries 38.85 t, 35 t in the headers and 3.85 t of main
+    // residue. The plans' floor counted all of it, flew the headers dry ~3 s before the catch and the ship fell onto
+    // the arms at 5.75 m/s with 3.8 t of unreachable main propellant left.
+    Vehicle v(ship_config(38850.0), config_dir);
+    const auto& s = v.stages()[0];
+    const double header_ox = s.propellant_kg(TankContents::Oxidizer, TankRole::Header);
+    const double header_fuel = s.propellant_kg(TankContents::Fuel, TankRole::Header);
+    REQUIRE(header_ox + header_fuel == Approx(35000.0).margin(1.0));
+    CHECK(gnc::feed_propellant_kg(v) == v.propellant_kg());  // main feed (ascent, coast, entry): all of it
+    v.select_feed(0, FeedSource::Header);
+    CHECK(gnc::feed_propellant_kg(v) == Approx(35000.0).margin(1.0));  // the headers at O/F 3.6, the residue not
+    // the scarcer component limits: 1 t of CH4 less burns with 3.6 t of LOX less
+    v.set_tank_mass(0, "ch4_header", header_fuel - 1000.0);
+    CHECK(gnc::feed_propellant_kg(v) == Approx(35000.0 - 4600.0).margin(1.0));
 }
 
 TEST_CASE("Selecting the headers on a stage without them changes nothing", "[header]") {

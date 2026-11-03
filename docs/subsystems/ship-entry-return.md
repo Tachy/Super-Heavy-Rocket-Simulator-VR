@@ -59,7 +59,10 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   nose. Once upright (< 15 deg, < 0.2 rad/s) SCvx plans (`ship_landing_parameters()`) fly 3 -> 2 engines: the belly
   engine shuts down at 20-40 m/s sink [D], the leeward pair lands (layout [D] from flight 13 splashdown video). Thrust
   of an asymmetric set goes through the CG along an axis tilted against the hull (~1.5 deg for the pair): plan states
-  carry the thrust-axis attitude (`gnc::thrust_axis_body`). Ship LQR effort 0.03 of the gimbal authority [E], attitude
+  carry the thrust-axis attitude (`gnc::thrust_axis_body`). The plans' propellant floor counts only what the selected
+  feed can burn (`gnc::feed_propellant_kg`: from the flip the header tanks, limited by the scarcer of LOX and CH4 at
+  O/F 3.6; the main-tank residue never reaches the engines) minus the 1 t reserve; the upright abort's propellant check
+  reads the same (Task 1c, 2026-11-03; before, the whole load counted and plans could fly the headers dry). Ship LQR effort 0.03 of the gimbal authority [E], attitude
   controller `Gains::actuator_delay_s` 0.75 s; flaps folded in the burn. Lateral phase tilt limit 20 deg [E].
   `FlightSession::place_landing_ship`; the entry hands over at the gate.
 - Gate lead: `gnc::ship_entry_target` puts the entry target 220 m [E] back from the catch axis on the line tower ->

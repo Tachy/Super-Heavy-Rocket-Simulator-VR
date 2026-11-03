@@ -109,6 +109,19 @@ DescentState plan_state(const vehicle::FlightBody& body, const environment::Body
                       hull_to_thrust.inverse_rotate(s.angular_velocity_body_radps - s.attitude.inverse_rotate(omega)));
 }
 
+double feed_propellant_kg(const vehicle::Vehicle& vehicle) {
+    const auto& stage = vehicle.stages().front();
+    if (stage.feed != vehicle::FeedSource::Header || !stage.has_header_tanks() || stage.engines.empty()) {
+        return vehicle.propellant_kg();
+    }
+    const double oxidizer = stage.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Header);
+    const double fuel = stage.propellant_kg(config::TankContents::Fuel, config::TankRole::Header);
+    const double ratio = stage.engines.front().performance->config().mixture_ratio;  // oxidizer / fuel
+    if (!(ratio > 0.0)) return oxidizer + fuel;
+    const double burnable_fuel = std::min(fuel, oxidizer / ratio);
+    return burnable_fuel * (1.0 + ratio);
+}
+
 DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                       time::Epoch epoch, const LandingSite& site, const PlanFrame& frame,
                                       const SnapshotSettings& settings) {
@@ -137,7 +150,7 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
     snap.model.crossflow_enabled = settings.hull_normal_force && std::getenv("STARSIM_DEBUG_NO_CROSSFLOW") == nullptr;
     snap.initial = plan_state(body, body_frame, frame);
     snap.epoch = epoch;
-    snap.min_mass_kg = mass.mass_kg - vehicle.propellant_kg() + settings.reserve_kg;
+    snap.min_mass_kg = mass.mass_kg - feed_propellant_kg(vehicle) + settings.reserve_kg;
 
     if (site.catch_target) {
         const auto& c = *site.catch_target;

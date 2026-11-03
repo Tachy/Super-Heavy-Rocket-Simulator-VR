@@ -95,6 +95,12 @@ struct DescentSnapshot {
     time::Epoch epoch;
 };
 
+// Propellant the landing engines can still burn. A first stage feeding from its header tanks (the ship from the flip
+// on): the headers only - the main tanks' residue never reaches the engines, they starve when the headers run dry -
+// limited by the scarcer of oxidizer and fuel at the engines' mixture ratio. Otherwise Vehicle::propellant_kg().
+// The snapshot's propellant floor (min_mass_kg) leaves the reserve of this.
+double feed_propellant_kg(const vehicle::Vehicle& vehicle);
+
 DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                       time::Epoch epoch, const LandingSite& site, const PlanFrame& frame,
                                       const SnapshotSettings& settings);
