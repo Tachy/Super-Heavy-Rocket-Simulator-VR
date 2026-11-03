@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++20 / Catch2 v3.8.1 / CTest (`catch_discover_tests ... ADD_TAGS_AS_LABELS`), PowerShell 5.1 (`tools/build.ps1`), Godot 4 headless scripts.
 
-**Spec:** `docs/superpowers/specs/2026-11-03-test-audit.md` (the audit list; data files in `.superpowers/sdd/test-audit/`: `classified.csv`, `flags.txt`, `tagsets.md`, `full_run.log`, `w_checks.txt`, `godot_scripts.txt`).
+**Spec:** `docs/superpowers/archive/specs/2026-11-03-test-audit.md` (the audit list; data files in `.superpowers/sdd/test-audit/`: `classified.csv`, `flags.txt`, `tagsets.md`, `full_run.log`, `w_checks.txt`, `godot_scripts.txt`).
 
 ## Global Constraints
 
