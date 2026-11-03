@@ -119,6 +119,7 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
     ship_return_ = false;
     capsule_return_step_ = CapsuleReturnStep::None;
     deorbit_plan_.reset();
+    ++deorbit_generation_;  // a background ship return plan is dropped when it arrives
     if (bodies_.empty()) return false;
     deorbit_plan_ = capsule_deorbit_plan(parameters);
     deorbit_parameters_ = parameters;

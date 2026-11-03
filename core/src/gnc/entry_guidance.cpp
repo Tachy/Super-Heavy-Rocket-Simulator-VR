@@ -557,7 +557,8 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
         if (terminal_aim_ && !given_up_ && terminal_gate_velocity_itrf_) {  // re-aim from the live state
             const Vec3& gate_v = *terminal_gate_velocity_itrf_;
             const double gate_height = gate_trigger_height_m(parameters_, -dot(gate_v, up));
-            target_ = terminal_aim_({body, env, epoch, gate_v, gate_height});
+            const auto to_gate = gate_epoch_ ? std::optional<double>(*gate_epoch_ - epoch) : std::nullopt;
+            target_ = terminal_aim_({body, env, epoch, gate_v, gate_height, to_gate});
         }
         double gate_time_to_go_s = 0.0;
         Vec3 gate_velocity_itrf_mps;

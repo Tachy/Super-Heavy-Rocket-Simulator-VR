@@ -1,6 +1,7 @@
 #include "starsim/sim/flight_session.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <cmath>
 #include <cstdio>
@@ -65,7 +66,14 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
       radiative_heating_(std::make_shared<const aero::RadiativeHeatingTable>(aero::RadiativeHeatingTable::load(config_dir_))),
       env_{gravity_, atmosphere_, earth_, &ephemeris_, true, moon_ ? &*moon_ : nullptr, radiative_heating_.get()},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
-    legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
+    sources_.ephemeris = &ephemeris;
+    sources_.earth = &earth;
+    sources_.moon = moon_orientation;
+    sources_.gravity = gravity_.config();
+    sources_.ephemeris_node_spacing_s = interpolated_ephemeris ? ephemeris::InterpolatedEphemeris::default_node_spacing_s : 0.0;
+    sources_.orientation_node_spacing_s =
+        interpolated_ephemeris ? frames::InterpolatedOrientation::default_node_spacing_s : 0.0;
+    legs_ =std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     moon_orientation_ = moon_cache_ ? &*moon_cache_ : nullptr;
     lunar_debug_ = std::getenv("STARSIM_DEBUG_LUNAR_SESSION") != nullptr;
     rendezvous_debug_ = std::getenv("STARSIM_DEBUG_RENDEZVOUS") != nullptr;
@@ -351,6 +359,10 @@ void FlightSession::run_autopilot() {
             }
             break;
         case AutopilotState::Burn: {
+            if (deorbit_replan_task_.busy()) {  // real-time play: a re-plan from the worker
+                poll_deorbit_replan(false);
+                if (autopilot_.state != AutopilotState::Burn) break;  // called off (boil-off, r2)
+            }
             if (!autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > 0.0 &&
                 deorbit_replan_in_s() <= 1.0) {  // the coast stops <= 1 s short
                 replan_ship_deorbit();  // the far plan: planned again from the tracked state (daily, ~2 orbits before)
@@ -520,7 +532,17 @@ void FlightSession::set_realtime_planning(bool realtime) {
     for (auto& flying : bodies_) {
         if (flying.return_guidance) flying.return_guidance->set_realtime(realtime);
         if (flying.ship_landing) flying.ship_landing->set_realtime(realtime);
+        if (flying.gate_aim) flying.gate_aim->set_realtime(realtime);
     }
+}
+
+std::shared_ptr<vehicle::WorkerEnvironment> FlightSession::worker_environment() const {
+    auto sources = sources_;
+    sources.radiative_heating = radiative_heating_;
+    sources.earth_terrain = earth_terrain_;
+    auto worker = std::make_shared<vehicle::WorkerEnvironment>(std::move(sources));
+    worker->copy_flags(env_);
+    return worker;
 }
 
 void FlightSession::set_launch_site(const LaunchSite& site) {
@@ -781,6 +803,7 @@ void FlightSession::reset_mission_state() {
     burn_.reset();
     ship_return_ = false;
     deorbit_plan_.reset();
+    ++deorbit_generation_;  // a background plan of the old mission is dropped when it arrives
     attitude_mode_ = {};
     payload_separation_.reset();
     nose_cone_epoch_.reset();
@@ -940,8 +963,36 @@ double FlightSession::coast_allowance_s() const {
     return allowance > 1.0 ? allowance : 0.0;
 }
 
+namespace {
+
+// Records the wall time of one advance_to step (diagnostics: FlightSession::step_timing).
+class StepTimer {
+public:
+    StepTimer(FlightSession::StepTiming& timing, time::Epoch epoch)
+        : timing_(timing), epoch_(epoch), start_(std::chrono::steady_clock::now()) {}
+    ~StepTimer() {
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_).count();
+        ++timing_.steps;
+        if (ms > timing_.budget_ms) ++timing_.over_budget;
+        if (ms > timing_.max_ms) {
+            timing_.max_ms = ms;
+            timing_.max_at = epoch_;
+        }
+    }
+    StepTimer(const StepTimer&) = delete;
+    StepTimer& operator=(const StepTimer&) = delete;
+
+private:
+    FlightSession::StepTiming& timing_;
+    time::Epoch epoch_;
+    std::chrono::steady_clock::time_point start_;
+};
+
+}  // namespace
+
 time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
     for (int tick = 0; tick < max_ticks && target - epoch_ >= tick_s; ++tick) {
+        const StepTimer timer(step_timing_, epoch_);
         if (nose_cone_epoch_ && epoch_ >= *nose_cone_epoch_) {
             if (nose_cone_body_ < bodies_.size()) set_nose_cone(nose_cone_body_, true);
             nose_cone_epoch_.reset();
@@ -973,7 +1024,8 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             docked_update(coast, true);
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
-                if (deorbit_replan_in_s() <= 1.0) {
+                if (deorbit_replan_task_.busy()) poll_deorbit_replan(false);  // real-time play: from the worker
+                if (autopilot_.state == AutopilotState::Burn && deorbit_replan_in_s() <= 1.0) {
                     replan_ship_deorbit();  // the far plan: planned again from the tracked state (daily, ~2 orbits before)
                 }
             }

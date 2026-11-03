@@ -122,6 +122,35 @@ std::uint64_t FlightSim::post_active(const char* name, SessionCommand command) {
     });
 }
 
+std::uint64_t FlightSim::post_deferred_active(const char* name, std::function<SessionPoll(sim::FlightSession&)> command) {
+    if (!runner_) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.") + name + ": call setup() first");
+        return 0;
+    }
+    auto outcome = std::make_shared<Outcome>();
+    const auto id = runner_->post_deferred(
+        [command = std::move(command), outcome](sim::FlightSession& session) -> sim::SessionRunner::Poll {
+            if (!session.active()) {
+                *outcome = Outcome{false, godot::String::utf8("Kein aktiver Flug")};
+                return {};
+            }
+            auto poll = command(session);
+            if (auto now = poll(session)) {  // decided at once
+                *outcome = std::move(*now);
+                return {};
+            }
+            return [poll = std::move(poll), outcome](sim::FlightSession& s) {
+                auto later = poll(s);
+                if (!later) return false;
+                *outcome = std::move(*later);
+                return true;
+            };
+        });
+    commands_[id] = {godot::String(name), outcome};
+    while (commands_.size() > max_kept_commands) commands_.erase(commands_.begin());
+    return id;
+}
+
 godot::Dictionary FlightSim::result(int64_t id) const {
     godot::Dictionary d;
     d["done"] = false;
@@ -490,8 +519,15 @@ int64_t FlightSim::plan_circularization() {
 }
 
 int64_t FlightSim::plan_ship_return() {
-    return static_cast<int64_t>(post_active("plan_ship_return", [](sim::FlightSession& session) {
-        return Outcome{session.plan_ship_return(), {}};
+    // Task 11b: in real-time play the drag flight, the planner and the boil-off flight (seconds) run on a worker while
+    // the ship coasts on; the outcome follows (command_finished). Time warp: at once, as before.
+    return static_cast<int64_t>(post_deferred_active("plan_ship_return", [](sim::FlightSession& session) -> SessionPoll {
+        const auto first = session.begin_ship_return(session.realtime_planning());
+        return [first](sim::FlightSession& s) -> std::optional<Outcome> {
+            const auto done = first ? first : s.poll_ship_return(false);
+            if (!done) return std::nullopt;
+            return Outcome{*done, {}};
+        };
     }));
 }
 

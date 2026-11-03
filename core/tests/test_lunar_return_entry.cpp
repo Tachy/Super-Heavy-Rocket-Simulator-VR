@@ -654,3 +654,41 @@ TEST_CASE("The flip flown forward matches the session's flip at the seed-18 gate
     CHECK(built.travel_m == Approx(travel).epsilon(0.10));
     CHECK(built.speed_mps - built.gate_speed_mps == Approx(push).epsilon(0.10));
 }
+
+// Task 11b: in real-time play the gate aim flies the prediction on a worker - a copy of the ship, the session's
+// WorkerEnvironment (own interpolation caches on the same sources and grids). Same inputs: the same prediction, bit for bit.
+TEST_CASE("The flip prediction on a worker equals the one on the sim thread", "[ship][landing][lunar][realtime]") {
+    test::LunarReturnSession t;
+    const auto epoch = place_gate(t, seed18, true);
+    auto& session = t.session;
+    const auto& body = session.body(0);
+    const auto site = session.return_site(body.vehicle());
+    const auto p = gnc::ship_landing_parameters(body.vehicle());
+    const math::Vec3 along = gnc::ship_entry_target(site, p).nose_direction_itrf;
+    const auto tr = t.earth.fixed_to_gcrf(epoch);
+    const math::Vec3 r = transpose(tr.rotation) * body.state().position_gcrf_m;
+    const math::Vec3 v = transpose(tr.rotation) * (body.state().velocity_gcrf_mps -
+                                                   cross(vehicle::earth_rotation_vector(tr), body.state().position_gcrf_m));
+    const auto gate = gnc::ship_gate_state(body, tr, r, v, along);
+    const double tick = sim::FlightSession::tick_s;
+    const auto here = gnc::predict_ship_flip(body.vehicle(), gate, session.environment(), epoch, site, p,
+                                             session.ship_landing_controller(), tick, along);
+    std::shared_ptr<const vehicle::Vehicle> ship = body.vehicle().copy_upper(0);
+    const auto worker = session.worker_environment();
+    gnc::BackgroundTask<gnc::ShipFlipPrediction> task;
+    task.submit([&, ship, worker] {
+        return gnc::predict_ship_flip(*ship, gate, worker->env(), epoch, site, p, session.ship_landing_controller(), tick,
+                                      along);
+    });
+    const auto there = task.collect(true);
+    REQUIRE(there.has_value());
+    REQUIRE(here.reached);
+    CHECK(there->reached == here.reached);
+    CHECK(there->flip_end_s == here.flip_end_s);
+    CHECK(there->flip_end_travel_m == here.flip_end_travel_m);
+    CHECK(there->flip_end_speed_mps == here.flip_end_speed_mps);
+    CHECK(there->duration_s == here.duration_s);
+    CHECK(there->gate_speed_mps == here.gate_speed_mps);
+    CHECK(there->travel_m == here.travel_m);
+    CHECK(there->speed_mps == here.speed_mps);
+}

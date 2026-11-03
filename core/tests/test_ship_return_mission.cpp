@@ -4,8 +4,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <thread>
 #include <cstdlib>
 #include <random>
 #include <vector>
@@ -271,6 +273,82 @@ TEST_CASE("A deorbit re-plan keeps the boil-off until its burn", "[ship][session
     while (session.epoch() < replanned) session.advance_to(session.epoch() + 1800.0, 400000);
     REQUIRE(session.ship_return_plan() != nullptr);
     CHECK(session.ship_return_plan()->boil_off_kg > 0.0);
+}
+
+// Task 11b: in real-time play the far deorbit re-plan runs off the sim thread; the old plan stays armed until the new
+// one arrives (its burn is >= deorbit_replan_lead_s away). Measurement: the sim steps' wall times through the re-plan.
+TEST_CASE("Real-time play: a far deorbit re-plan off the sim thread", "[.][ship][session][deorbit][realtime]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    session.set_realtime_planning(true);
+    // the first plan (key R) in parts, as the game's runner polls it between its chunks
+    const auto wall = std::chrono::steady_clock::now();
+    auto planned = session.begin_ship_return(deorbit_parameters(m), true);
+    const double begin_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
+    session.reset_step_timing();
+    while (!planned) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        session.advance_to(session.epoch() + 1.0, 400000);
+        planned = session.poll_ship_return(false);
+    }
+    const double plan_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
+    const auto first = session.step_timing();
+    std::printf("real-time key R: begin %.1f ms on the sim thread, plan ready after %.0f ms; meanwhile %ld steps, %ld over "
+                "%.0f ms, max %.1f ms\n",
+                begin_ms, plan_ms, first.steps, first.over_budget, first.budget_ms, first.max_ms);
+    REQUIRE(*planned);
+    const auto burn = session.ship_return_plan()->node.epoch;
+    REQUIRE(burn - session.epoch() > sim::FlightSession::deorbit_replan_age_s);
+    const auto replanned = burn - sim::FlightSession::deorbit_replan_lead_s + 600.0;
+    session.reset_step_timing();
+    while (session.epoch() < replanned) {
+        session.advance_to(session.epoch() + 60.0, 400000);
+        // real time: hours pass before the burn; the test waits for the worker instead
+        while (session.deorbit_replan_pending()) std::this_thread::sleep_for(std::chrono::milliseconds(5)), session.advance_to(session.epoch() + 1.0, 400000);
+    }
+    const auto timing = session.step_timing();
+    std::printf("real-time deorbit: %ld steps through the re-plans, %ld over %.0f ms, max %.1f ms, %d re-plans applied\n",
+                timing.steps, timing.over_budget, timing.budget_ms, timing.max_ms, session.deorbit_replans());
+    REQUIRE(session.ship_return_plan() != nullptr);
+    CHECK(session.deorbit_replans() >= 1);
+    CHECK(session.ship_return_plan()->boil_off_kg > 0.0);
+}
+
+// Task 11b: the re-plan on the worker (real-time play) from the same snapshot is the one made on the sim thread, bit
+// for bit - the planner, the reach check and the boil-off flight run on a WorkerEnvironment of the same sources.
+TEST_CASE("A far deorbit re-plan on the worker equals the one on the sim thread", "[ship][session][deorbit][realtime]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession waiting(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    sim::FlightSession realtime(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    realtime.set_realtime_planning(true);
+    for (auto* s : {&waiting, &realtime}) {
+        place_mission(*s, m);
+        REQUIRE(s->plan_ship_return(deorbit_parameters(m)));
+    }
+    const auto burn = waiting.ship_return_plan()->node.epoch;
+    REQUIRE(burn - waiting.epoch() > sim::FlightSession::deorbit_replan_age_s);
+    // the first re-plan: one tracking arc after the plan (the same coast segments in both sessions)
+    for (auto* s : {&waiting, &realtime}) {
+        while (s->deorbit_replans() == 0 && s->autopilot().state == sim::AutopilotState::Burn) {
+            s->advance_to(s->epoch() + 60.0, 400000);
+            while (s->deorbit_replan_pending()) std::this_thread::sleep_for(std::chrono::milliseconds(5)), s->advance_to(s->epoch() + 1.0, 400000);
+        }
+    }
+    REQUIRE(waiting.deorbit_replans() == 1);
+    REQUIRE(realtime.deorbit_replans() == 1);
+    const auto& a = *waiting.ship_return_plan();
+    const auto& b = *realtime.ship_return_plan();
+    std::printf("deorbit re-plan: waiting burn %.3f s, %.6f m/s, boil-off %.3f kg; worker burn %.3f s, %.6f m/s, boil-off %.3f kg\n",
+                a.node.epoch - waiting.epoch(), a.delta_v_mps, a.boil_off_kg, b.node.epoch - waiting.epoch(), b.delta_v_mps,
+                b.boil_off_kg);
+    CHECK(a.feasible == b.feasible);
+    CHECK(a.node.epoch == b.node.epoch);
+    CHECK(a.node.delta_v_gcrf_mps.x == b.node.delta_v_gcrf_mps.x);
+    CHECK(a.node.delta_v_gcrf_mps.y == b.node.delta_v_gcrf_mps.y);
+    CHECK(a.node.delta_v_gcrf_mps.z == b.node.delta_v_gcrf_mps.z);
+    CHECK(a.crossrange_m == b.crossrange_m);
+    CHECK(a.boil_off_kg == b.boil_off_kg);
 }
 
 // Refuelling r2: the onboard computer counts the bare hull's boil-off until the burn - 7 t above the landing

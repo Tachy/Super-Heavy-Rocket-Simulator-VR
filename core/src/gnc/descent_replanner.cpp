@@ -46,14 +46,15 @@ PlanOutcome DescentReplanner::plan_now(const PlanRequest& request) {
     return run(planner_, plan_, request);
 }
 
-void DescentReplanner::submit(PlanRequest request) {
+void DescentReplanner::submit(PlanRequest request, std::optional<double> latency_s) {
     if (busy()) throw std::logic_error("DescentReplanner::submit while a request is pending");
     pending_snapshot_ = request.snapshot_epoch;
+    pending_latency_s_ = latency_s.value_or(latency_s_);
     pending_ = std::async(std::launch::async, [this, r = std::move(request)] { return run(planner_, plan_, r); });
 }
 
 std::optional<PlanOutcome> DescentReplanner::collect(time::Epoch now, bool wait) {
-    if (!pending_.valid() || now - pending_snapshot_ < latency_s_ - epoch_tolerance_s) return std::nullopt;
+    if (!pending_.valid() || now - pending_snapshot_ < pending_latency_s_ - epoch_tolerance_s) return std::nullopt;
     if (!wait && pending_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return std::nullopt;
     return pending_.get();
 }

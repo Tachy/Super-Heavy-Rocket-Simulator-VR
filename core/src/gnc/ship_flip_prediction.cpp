@@ -125,31 +125,69 @@ ShipFlipPrediction predict_ship_flip(const vehicle::Vehicle& ship, const vehicle
 ShipGateAim::ShipGateAim(LandingSite site, ShipLandingParameters parameters, AttitudeController controller, double tick_s)
     : site_(std::move(site)), parameters_(std::move(parameters)), controller_(controller), tick_s_(tick_s) {}
 
+namespace {
+
+void print_flip(const ShipFlipPrediction& f, double sink_mps, double height_m, const char* where) {
+    if (!std::getenv("STARSIM_DEBUG_GATE")) return;  // diagnostics
+    std::printf("[gate-flip] gate along %.2f m/s, sink %.1f m/s, height %.0f m: flip end %.2f s %.1f m %.2f m/s, "
+                "plan start %.2f s %.1f m %.2f m/s%s (%.0f ms%s)\n",
+                f.gate_speed_mps, sink_mps, height_m, f.flip_end_s, f.flip_end_travel_m, f.flip_end_speed_mps, f.duration_s,
+                f.travel_m, f.speed_mps, f.reached ? "" : " NOT SETTLED", f.wall_ms, where);
+}
+
+}  // namespace
+
 EntryTarget ShipGateAim::operator()(const EntryGuidance::TerminalGate& gate) {
     const auto aim = ship_entry_target(site_, parameters_.gate_lead_m);
     if (!site_.catch_target) return aim;
     const Vec3& along = aim.nose_direction_itrf;  // horizontal
     const double along_mps = dot(gate.velocity_itrf_mps, along);
     const double mass_kg = gate.body.vehicle().mass_properties().mass_kg;
-    if (!flip_epoch_ || gate.epoch - *flip_epoch_ >= flip_refresh_s) {
+    const Vec3 up = site_up(site_);
+    if (auto done = task_.collect(false)) {  // real-time play: a prediction from the worker
+        flip_ = std::move(*done);
+        print_flip(*flip_, -dot(gate.velocity_itrf_mps, up), gate.height_m, ", worker");
+    }
+    const bool periodic = !flip_epoch_ || gate.epoch - *flip_epoch_ >= flip_refresh_s;
+    // N3: one last refresh once the gate is closer than flip_refresh_s, unless the latest one already was
+    const bool last = gate.time_to_gate_s && *gate.time_to_gate_s < flip_refresh_s &&
+                      !(flip_time_to_gate_s_ && *flip_time_to_gate_s_ < flip_refresh_s);
+    if ((periodic || last) && !task_.busy()) {
         flip_epoch_ = gate.epoch;
+        flip_time_to_gate_s_ = gate.time_to_gate_s;
+        ++refreshes_;
         const auto tr = gate.env.earth_orientation.fixed_to_gcrf(gate.epoch);
-        const Vec3 up = site_up(site_);
         // the gate on the static aim's point at the hand-over height (the lead hardly moves the air it flies in)
         const Vec3 position = aim.position_itrf_m + up * gate.height_m;
         const auto state = ship_gate_state(gate.body, tr, position, gate.velocity_itrf_mps, along);
-        flip_ = predict_ship_flip(gate.body.vehicle(), state, gate.env, gate.epoch, site_, parameters_, controller_,
-                                  tick_s_, along);
-        if (std::getenv("STARSIM_DEBUG_GATE")) {  // diagnostics
-            std::printf("[gate-flip] gate along %.2f m/s, sink %.1f m/s, height %.0f m: flip end %.2f s %.1f m %.2f m/s, "
-                        "plan start %.2f s %.1f m %.2f m/s%s (%.0f ms)\n",
-                        flip_->gate_speed_mps, -dot(gate.velocity_itrf_mps, up), gate.height_m, flip_->flip_end_s,
-                        flip_->flip_end_travel_m, flip_->flip_end_speed_mps, flip_->duration_s, flip_->travel_m,
-                        flip_->speed_mps, flip_->reached ? "" : " NOT SETTLED", flip_->wall_ms);
+        if (realtime_ && worker_environment_) {
+            // Copies of every input; the worker environment samples the same sources as the session's (bit for bit).
+            std::shared_ptr<const vehicle::Vehicle> ship = gate.body.vehicle().copy_upper(0);
+            auto environment = worker_environment_();
+            task_.submit([ship, state, environment, epoch = gate.epoch, site = site_, parameters = parameters_,
+                          controller = controller_, tick_s = tick_s_, along] {
+                return predict_ship_flip(*ship, state, environment->env(), epoch, site, parameters, controller, tick_s,
+                                         along);
+            });
+        } else {
+            flip_ = predict_ship_flip(gate.body.vehicle(), state, gate.env, gate.epoch, site_, parameters_, controller_,
+                                      tick_s_, along);
+            print_flip(*flip_, -dot(gate.velocity_itrf_mps, up), gate.height_m, "");
         }
     }
-    const double lead_m = flip_ && flip_->reached ? ship_gate_lead_m(parameters_, *flip_, along_mps, mass_kg)
-                                                  : ship_gate_lead_m(parameters_, along_mps, mass_kg);
+    const bool flown = flip_ && flip_->reached;
+    if (!flown) {
+        // N4: the analytic FlipModel leaves the air out (round 2: ~90 m more lead than flown) - say so
+        ++analytic_aims_;
+        bool& logged = flip_ ? logged_unsettled_ : logged_waiting_;
+        if (!logged) {
+            logged = true;
+            std::printf("[gate-aim] analytic flip model for the gate lead: %s\n",
+                        flip_ ? "the flip flown forward did not settle" : "no flip flown forward yet");
+        }
+    }
+    const double lead_m = flown ? ship_gate_lead_m(parameters_, *flip_, along_mps, mass_kg)
+                                : ship_gate_lead_m(parameters_, along_mps, mass_kg);
     if (std::getenv("STARSIM_DEBUG_GATE")) {  // diagnostics
         std::printf("[gate-aim] along %.2f m/s, mass %.1f t: lead %.1f m (static %.1f m, analytic %.1f m)\n", along_mps,
                     mass_kg / 1000.0, lead_m, parameters_.gate_lead_m, ship_gate_lead_m(parameters_, along_mps, mass_kg));

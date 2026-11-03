@@ -1,10 +1,12 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "starsim/gnc/background_task.hpp"
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
@@ -12,6 +14,7 @@
 #include "starsim/gnc/upright_descent.hpp"
 #include "starsim/gnc/vehicle_capability.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/vehicle/worker_environment.hpp"
 
 namespace starsim::gnc {
 
@@ -188,16 +191,25 @@ double ship_gate_lead_m(const ShipLandingParameters& parameters, const ShipFlipP
 
 // The terminal entry guidance's re-aim (EntryGuidance::set_terminal_aim): the gate with the lead for the predicted gate
 // velocity (Earth-fixed) along the line to the tower and the live mass; the pad centre without a tower. The lead comes
-// from the flip flown forward (predict_ship_flip) from the predicted gate state, refreshed every
-// flip_refresh_s of flight (between refreshes the gate speed enters to first order); the analytic FlipModel only if
-// the flown flip does not settle.
+// from the flip flown forward (predict_ship_flip) from the predicted gate state, refreshed every flip_refresh_s of
+// flight and once more when the gate comes closer than flip_refresh_s (between refreshes the gate speed enters to first
+// order); the analytic FlipModel while no flown flip has settled (logged once per cause).
+// Real-time play (set_realtime with a worker environment, Task 11b): the prediction flies on a worker from copies of its
+// inputs; the aim keeps the previous prediction until the new one arrives. Otherwise it flies at once, at the cycle it
+// is due - the same prediction on the same inputs.
 class ShipGateAim {
 public:
     ShipGateAim(LandingSite site, ShipLandingParameters parameters, AttitudeController controller, double tick_s);
     EntryTarget operator()(const EntryGuidance::TerminalGate& gate);
+    using WorkerEnvironmentSource = std::function<std::shared_ptr<vehicle::WorkerEnvironment>()>;
+    void set_worker_environment(WorkerEnvironmentSource source) { worker_environment_ = std::move(source); }
+    void set_realtime(bool realtime) { realtime_ = realtime; }
     // [E] computing budget: a flip flown forward costs ~1000 ticks; the predicted gate speed moves slowly
     static constexpr double flip_refresh_s = 5.0;
     const std::optional<ShipFlipPrediction>& flip() const { return flip_; }
+    int refreshes() const { return refreshes_; }         // predictions started
+    int analytic_aims() const { return analytic_aims_; }  // aims made with the analytic FlipModel
+    bool predicting() const { return task_.busy(); }     // a prediction on the worker
 
 private:
     LandingSite site_;
@@ -206,6 +218,14 @@ private:
     double tick_s_ = 0.0;
     std::optional<ShipFlipPrediction> flip_;
     std::optional<time::Epoch> flip_epoch_;
+    std::optional<double> flip_time_to_gate_s_;  // at the latest refresh
+    WorkerEnvironmentSource worker_environment_;
+    bool realtime_ = false;
+    int refreshes_ = 0;
+    int analytic_aims_ = 0;
+    bool logged_unsettled_ = false;  // the analytic fallback's causes, each logged once
+    bool logged_waiting_ = false;
+    BackgroundTask<ShipFlipPrediction> task_;  // last: destroyed first (waits for a running prediction)
 };
 
 // From the gate (belly down, ~100 m/s sink):
@@ -273,6 +293,8 @@ private:
     ShipLandingParameters parameters_;
     ReturnPhase phase_ = ReturnPhase::Flip;
     std::unique_ptr<ScvxLandingGuidance> scvx_;
+    std::unique_ptr<ScvxLandingGuidance> pending_;  // its first plan under way (real-time play: on the worker)
+    time::Epoch attempt_epoch_;                     // of the pending first plan
     bool started_ = false;
     bool diagnostics_ = true;
     time::Epoch next_attempt_;

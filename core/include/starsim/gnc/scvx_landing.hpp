@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -92,8 +93,15 @@ class ScvxLandingGuidance {
 public:
     ScvxLandingGuidance(LandingSite site, ScvxLandingParameters parameters, PlanFunction plan = default_plan_function());
 
-    // First plan; false if it failed (the caller falls back to other guidance).
+    // First plan; false if it failed (the caller falls back to other guidance). Synchronous: begin + poll.
     bool start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
+    // The first plan in parts (Task 11b): begin takes the snapshot at `epoch` and plans - on the replanner's worker with
+    // `background` (real-time play: the vehicle flies on meanwhile), else at once; poll gives the outcome once it is
+    // decided (the refused catch's abort plan and the abort without the water are planned in turn, from the same
+    // snapshot): true - the plan takes effect at `epoch` (as start's), false - it failed. Same requests either way, so
+    // the same plans; update() only after poll returned true.
+    void begin(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch, bool background);
+    std::optional<bool> poll(time::Epoch now);
     ScvxLandingCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     bool aborting() const { return aborting_; }
@@ -139,6 +147,9 @@ private:
     bool beyond_limits(const DescentPlan& plan) const;
     // A converged abort plan whose hull still overlaps a keep-out box.
     bool abort_strikes(const DescentPlan& plan) const;
+    void submit_first();  // the first plan's next request from its snapshot
+    // One first-plan outcome: the next request submitted (none) or the first plan decided.
+    std::optional<bool> first_step(const PlanOutcome& outcome);
 
     LandingSite site_;
     ScvxLandingParameters parameters_;
@@ -147,6 +158,14 @@ private:
     std::shared_ptr<const DescentPlan> plan_;
     time::Epoch plan_epoch_;
     time::Epoch first_plan_epoch_;  // diagnostics
+    // The first plan under way (begin .. poll): its snapshot, epoch, which refusal step is next, the outcome of a plan
+    // made at once, and its wall-clock start (diagnostics).
+    std::optional<DescentSnapshot> first_snapshot_;
+    time::Epoch first_epoch_;
+    int first_stage_ = 0;
+    bool first_background_ = false;
+    std::optional<PlanOutcome> first_outcome_;
+    std::chrono::steady_clock::time_point first_wall_start_;
     DescentModel model_;  // of the latest snapshot (gravity after the plan's end)
     time::Epoch next_request_;
     int engine_set_ = 0;  // phase whose engine set runs (only ever increases)

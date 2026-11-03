@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <stdexcept>
 #include <utility>
 
 #include "starsim/frames/geodetic.hpp"
@@ -258,44 +259,88 @@ bool ScvxLandingGuidance::request_abort() {
 }
 
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
-    const auto wall_start = std::chrono::steady_clock::now();  // diagnostics: the synchronous first plan's wall time
-    const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
-    model_ = snapshot.model;
-    check_sea_reach(snapshot, 0);  // an abort requested before the first plan
-    auto outcome = replanner_.plan_now(request(snapshot, 0));
-    if ((!outcome.plan->converged || beyond_limits(*outcome.plan)) && site_.sea && !aborting_) {
-        if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: the refused catch plan
-            const auto& p = *outcome.plan;
-            const auto& x0 = snapshot.initial;
-            std::printf("[scvx] first catch plan refused: it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f | "
-                        "h %.1f lat %.1f,%.1f v %.1f,%.1f,%.1f m %.0f min %.0f\n",
-                        p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
-                        p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], x0[1], x0[2], x0[3],
-                        x0[4], x0[5], x0[6], x0[0], snapshot.min_mass_kg);
-        }
-        // The catch is out of reach from the start: plan the abort to the sea right away.
-        ++stats_.plans;
-        ++stats_.failures;
-        aborting_ = true;
-        check_sea_reach(snapshot, 0);
-        outcome = replanner_.plan_now(request(snapshot, 0));
+    begin(body, env, epoch, false);
+    return *poll(epoch);  // planned at once: decided
+}
+
+void ScvxLandingGuidance::begin(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                                bool background) {
+    if (first_snapshot_ || replanner_.busy()) throw std::logic_error("ScvxLandingGuidance::begin while a first plan is under way");
+    first_wall_start_ = std::chrono::steady_clock::now();  // diagnostics: the first plan's wall time
+    first_snapshot_ = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
+    model_ = first_snapshot_->model;
+    first_epoch_ = epoch;
+    first_stage_ = 0;
+    first_background_ = background;
+    check_sea_reach(*first_snapshot_, 0);  // an abort requested before the first plan
+    submit_first();
+}
+
+void ScvxLandingGuidance::submit_first() {
+    auto r = request(*first_snapshot_, 0);
+    if (first_background_) {
+        replanner_.submit(std::move(r), 0.0);  // in effect at the snapshot, as the one made at once
+    } else {
+        first_outcome_ = replanner_.plan_now(r);
     }
-    if ((!outcome.plan->converged || abort_strikes(*outcome.plan)) && aborting_ && sea_required_) {
-        // Not even the water beyond the shoreline is in reach: an abort that only pulls towards the sea.
-        ++stats_.plans;
-        ++stats_.failures;
-        sea_required_ = false;
-        outcome = replanner_.plan_now(request(snapshot, 0));
+}
+
+std::optional<bool> ScvxLandingGuidance::poll(time::Epoch now) {
+    while (first_snapshot_) {
+        std::optional<PlanOutcome> outcome = std::exchange(first_outcome_, std::nullopt);
+        if (!outcome) outcome = replanner_.collect(now, false);
+        if (!outcome) return std::nullopt;  // still planning
+        if (const auto decided = first_step(*outcome)) return decided;
+    }
+    return std::nullopt;
+}
+
+std::optional<bool> ScvxLandingGuidance::first_step(const PlanOutcome& outcome) {
+    const auto& snapshot = *first_snapshot_;
+    if (first_stage_ < 1) {
+        first_stage_ = 1;
+        if ((!outcome.plan->converged || beyond_limits(*outcome.plan)) && site_.sea && !aborting_) {
+            if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: the refused catch plan
+                const auto& p = *outcome.plan;
+                const auto& x0 = snapshot.initial;
+                std::printf("[scvx] first catch plan refused: it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f | "
+                            "h %.1f lat %.1f,%.1f v %.1f,%.1f,%.1f m %.0f min %.0f\n",
+                            p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
+                            p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], x0[1], x0[2],
+                            x0[3], x0[4], x0[5], x0[6], x0[0], snapshot.min_mass_kg);
+            }
+            // The catch is out of reach from the start: plan the abort to the sea right away.
+            ++stats_.plans;
+            ++stats_.failures;
+            aborting_ = true;
+            check_sea_reach(snapshot, 0);
+            submit_first();
+            return std::nullopt;
+        }
+    }
+    if (first_stage_ < 2) {
+        first_stage_ = 2;
+        if ((!outcome.plan->converged || abort_strikes(*outcome.plan)) && aborting_ && sea_required_) {
+            // Not even the water beyond the shoreline is in reach: an abort that only pulls towards the sea.
+            ++stats_.plans;
+            ++stats_.failures;
+            sea_required_ = false;
+            submit_first();
+            return std::nullopt;
+        }
     }
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking
         const auto& p = *outcome.plan;
         std::printf("[scvx] first: conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f spool %.2f "
-                    "solve %.0f ms, start %.0f ms\n",
+                    "solve %.0f ms, start %.0f ms%s\n",
                     p.converged, p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
                     p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], snapshot.phase0_spool,
                     outcome.solve_ms,
-                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall_start).count());
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - first_wall_start_).count(),
+                    first_background_ ? " (background)" : "");
     }
+    const time::Epoch epoch = first_epoch_;
+    first_snapshot_.reset();
     first_plan_epoch_ = epoch;
     print_plan_path(*outcome.plan, 0.0, outcome.solve_ms);
     ++stats_.plans;

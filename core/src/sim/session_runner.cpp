@@ -44,6 +44,13 @@ SessionRunner::~SessionRunner() {
 }
 
 std::uint64_t SessionRunner::post(Command command) {
+    return post_deferred([command = std::move(command)](FlightSession& session) {
+        command(session);
+        return Poll{};
+    });
+}
+
+std::uint64_t SessionRunner::post_deferred(DeferredCommand command) {
     std::uint64_t id = 0;
     {
         std::lock_guard lock(mutex_);
@@ -54,6 +61,10 @@ std::uint64_t SessionRunner::post(Command command) {
     }
     wake_.notify_all();
     return id;
+}
+
+bool SessionRunner::chunk_due_locked() const {
+    return latest_ || (active_ && !stalled_ && !target_reached_locked());
 }
 
 void SessionRunner::set_latest(Command command) {
@@ -73,16 +84,20 @@ void SessionRunner::set_target(time::Epoch target) {
 }
 
 void SessionRunner::run() {
+    // [E] a deferred command's poll interval while there is nothing else to do
+    constexpr auto deferred_poll = std::chrono::milliseconds(2);
     std::unique_lock lock(mutex_);
     while (true) {
-        wake_.wait(lock, [this] {
-            return stop_ || !queue_.empty() || latest_ || (active_ && !stalled_ && !target_reached_locked());
-        });
+        wake_.wait(lock, [this] { return stop_ || deferred_ || !queue_.empty() || chunk_due_locked(); });
         if (stop_) return;
-        if (!queue_.empty()) {
+        if (deferred_) poll_deferred(lock);
+        if (stop_) return;
+        if (!deferred_ && !queue_.empty()) {
             run_command(lock);
-        } else {
-            run_chunk(lock);
+        } else if (chunk_due_locked()) {
+            run_chunk(lock);  // also while a deferred command plans: the session flies on
+        } else if (deferred_) {
+            wake_.wait_for(lock, deferred_poll, [this] { return stop_ || chunk_due_locked(); });
         }
         idle_cv_.notify_all();
     }
@@ -96,19 +111,57 @@ void SessionRunner::run_command(std::unique_lock<std::mutex>& lock) {
     running_since_ = std::chrono::steady_clock::now();
     lock.unlock();
     Result r{true, false, {}};
-    if (auto error = guarded([&] { command(*session_); })) {
+    Poll poll;
+    if (auto error = guarded([&] { poll = command(*session_); })) {
         r.threw = true;
         r.error = *error;
+        poll = nullptr;
     }
     // reached_ has a single writer (this thread): reading it unlocked is safe.
     const bool active = session_->active();
     const auto now = active ? session_->epoch() : reached_;
     const auto observer_error = guarded([&] { observer_(*session_, now); });
     lock.lock();
-    running_id_ = 0;
     active_ = active;
     reached_ = now;
     if (observer_error) set_error_locked(*observer_error);
+    if (poll) {
+        deferred_.emplace(id, std::move(poll));  // running_id_ stays: the command goes on
+        return;
+    }
+    finish_locked(id, r);
+}
+
+void SessionRunner::poll_deferred(std::unique_lock<std::mutex>& lock) {
+    const auto id = deferred_->first;
+    const Poll poll = deferred_->second;
+    lock.unlock();
+    Result r{true, false, {}};
+    bool done = false;
+    if (auto error = guarded([&] { done = poll(*session_); })) {
+        r.threw = true;
+        r.error = *error;
+        done = true;
+    }
+    std::optional<std::string> observer_error;
+    bool active = false;
+    time::Epoch now = reached_;
+    if (done) {  // the outcome may have changed the session: the snapshot follows
+        active = session_->active();
+        now = active ? session_->epoch() : reached_;
+        observer_error = guarded([&] { observer_(*session_, now); });
+    }
+    lock.lock();
+    if (!done) return;
+    deferred_.reset();
+    active_ = active;
+    reached_ = now;
+    if (observer_error) set_error_locked(*observer_error);
+    finish_locked(id, r);
+}
+
+void SessionRunner::finish_locked(std::uint64_t id, const Result& r) {
+    running_id_ = 0;
     if (const auto it = results_.find(id); it != results_.end()) it->second = r;
     finished_.emplace_back(id, r);
     while (finished_.size() > max_kept_results) finished_.pop_front();

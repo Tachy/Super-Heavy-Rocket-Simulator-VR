@@ -1,6 +1,7 @@
 #include "starsim/gnc/descent_planner.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -226,11 +227,13 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     };
     std::optional<DescentPlan> plan;
     for (const auto start : starts) {
+        const auto wall = std::chrono::steady_clock::now();  // diagnostics: each start's cost (Task 11b)
         auto candidate = plan_once(model, initial, start_phase, target, settings, nullptr, 0.0, start);
         if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: the two starts
-            std::printf("  [scvx start] %s: conv %d it %d vc %.3g final mass %.0f\n",
+            std::printf("  [scvx start] %s: conv %d it %d vc %.3g final mass %.0f (%.0f ms)\n",
                         start == SwitchGuess::State ? "state" : "window middle", candidate.converged, candidate.iterations,
-                        candidate.virtual_control, candidate.reference.x.back()[descent_index::mass]);
+                        candidate.virtual_control, candidate.reference.x.back()[descent_index::mass],
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count());
         }
         if (!plan || better(candidate, *plan)) plan = std::move(candidate);
     }

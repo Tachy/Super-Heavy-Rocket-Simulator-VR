@@ -45,7 +45,8 @@ public:
     DescentReplanner& operator=(const DescentReplanner&) = delete;
 
     PlanOutcome plan_now(const PlanRequest& request);  // synchronous; precondition: !busy()
-    void submit(PlanRequest request);                  // precondition: !busy()
+    // Precondition: !busy(). `latency_s`: this request's own (a first plan in real-time play takes effect when ready: 0).
+    void submit(PlanRequest request, std::optional<double> latency_s = std::nullopt);
     bool busy() const { return pending_.valid(); }     // submitted and not yet collected
     std::optional<PlanOutcome> collect(time::Epoch now, bool wait);
 
@@ -55,6 +56,7 @@ private:
     DescentPlanner planner_;
     std::future<PlanOutcome> pending_;
     time::Epoch pending_snapshot_;
+    double pending_latency_s_ = 0.0;
 };
 
 }  // namespace starsim::gnc

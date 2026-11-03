@@ -3,7 +3,9 @@
 // Helpers for return/landing scenarios: a booster with a chosen propellant load, placed over the launch site.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -92,12 +94,29 @@ struct CatchRun {
     }
 };
 
-// Advances body 0 tick by tick until it is caught, rests, impacts or `max_s` pass.
-inline CatchRun fly_landing(sim::FlightSession& session, const frames::BodyOrientation& earth, time::Epoch t0, double max_s) {
+// Real-time play in a test (Task 11b): holds each step back until the wall clock reaches it, as the game's runner does
+// (its target is the clock: a step that took too long is followed by the next at once, no waiting).
+class WallPacer {
+public:
+    explicit WallPacer(time::Epoch start) : start_(start), wall_start_(std::chrono::steady_clock::now()) {}
+    void wait_until(time::Epoch epoch) const {
+        std::this_thread::sleep_until(wall_start_ + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                        std::chrono::duration<double>(epoch - start_)));
+    }
+
+private:
+    time::Epoch start_;
+    std::chrono::steady_clock::time_point wall_start_;
+};
+
+// Advances body 0 tick by tick until it is caught, rests, impacts or `max_s` pass (at the wall clock's pace with a pacer).
+inline CatchRun fly_landing(sim::FlightSession& session, const frames::BodyOrientation& earth, time::Epoch t0, double max_s,
+                            const WallPacer* pacer = nullptr) {
     CatchRun run;
     const auto& booster = session.body(0);
     const auto* tower = session.tower();
     for (double t = sim::FlightSession::tick_s; t <= max_s; t += sim::FlightSession::tick_s) {
+        if (pacer) pacer->wait_until(t0 + t);
         session.advance_to(t0 + t, 10);
         if (std::getenv("STARSIM_DEBUG_CATCH") && tower && static_cast<int>(std::lround(t / sim::FlightSession::tick_s)) % 20 == 0) {  // diagnostics
             const auto tr = earth.fixed_to_gcrf(session.epoch());

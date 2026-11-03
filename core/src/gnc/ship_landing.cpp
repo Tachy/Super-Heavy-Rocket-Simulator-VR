@@ -96,6 +96,7 @@ ShipLandingGuidance::ShipLandingGuidance(LandingSite site, ShipLandingParameters
 void ShipLandingGuidance::set_realtime(bool realtime) {
     parameters_.scvx.realtime = realtime;
     if (scvx_) scvx_->set_realtime(realtime);
+    if (pending_) pending_->set_realtime(realtime);
 }
 
 ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
@@ -164,17 +165,25 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             if (diagnostics_ && std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("flip-end", body, transform, epoch);
         }
         if (ship_flip_ready(parameters_, body, up_gcrf) && epoch >= next_attempt_ && site_.catch_target &&
-            !upright_descent_) {
+            !upright_descent_ && !pending_) {
             ++first_plan_attempts_;
-            auto guidance = std::make_unique<ScvxLandingGuidance>(site_, parameters_.scvx);
-            if (abort_requested_) guidance->request_abort();
-            if (guidance->start(body, env, epoch)) {
-                scvx_ = std::move(guidance);
-                phase_ = ReturnPhase::LandingBurn;
-            } else {
-                next_attempt_ = epoch + parameters_.first_plan_retry_s;
-                // neither the catch nor the sea in reach: holding the flip thrust would hover the headers dry
-                if (first_plan_attempts_ >= parameters_.first_plans_before_descent) upright_descent_ = true;
+            pending_ = std::make_unique<ScvxLandingGuidance>(site_, parameters_.scvx);
+            if (abort_requested_) pending_->request_abort();
+            attempt_epoch_ = epoch;
+            // real-time play: planned on the worker while the flip command above holds (Task 11b); else at once
+            pending_->begin(body, env, epoch, parameters_.scvx.realtime);
+        }
+        if (pending_) {
+            if (const auto started = pending_->poll(epoch)) {
+                if (*started) {
+                    scvx_ = std::move(pending_);
+                    phase_ = ReturnPhase::LandingBurn;
+                } else {
+                    pending_.reset();
+                    next_attempt_ = attempt_epoch_ + parameters_.first_plan_retry_s;
+                    // neither the catch nor the sea in reach: holding the flip thrust would hover the headers dry
+                    if (first_plan_attempts_ >= parameters_.first_plans_before_descent) upright_descent_ = true;
+                }
             }
         }
     }
@@ -301,6 +310,7 @@ bool ShipLandingGuidance::request_abort() {
     if (!site_.sea || phase_ == ReturnPhase::Landed || catch_contact_) return false;
     if (scvx_) return abort_requested_ = scvx_->request_abort();
     abort_requested_ = true;  // still flipping: the first plan goes to the sea
+    if (pending_) pending_->request_abort();  // a first plan under way: the abort follows it (its re-plans)
     return true;
 }
 

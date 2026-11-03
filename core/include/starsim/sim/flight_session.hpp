@@ -38,6 +38,7 @@
 #include "starsim/frames/interpolated_orientation.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
+#include "starsim/gnc/background_task.hpp"
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
@@ -51,6 +52,7 @@
 #include "starsim/gnc/relative_navigation.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/gnc/sun_hold.hpp"
+#include "starsim/vehicle/worker_environment.hpp"
 #include "starsim/mission/earth_return.hpp"
 #include "starsim/mission/lunar_descent.hpp"
 #include "starsim/mission/lunar_orbit_transfer.hpp"
@@ -491,7 +493,18 @@ public:
     // Without parameters: those of the ship's own return mission ([stage.recovery] return_mission, its [deorbit]) -
     // the game's key R from any orbit.
     bool plan_ship_return();
+    // The same in parts (Task 11b, the game's key R in real-time play): with `background` the drag flight, the planner
+    // and the boil-off flight run on a worker (seconds) while the ship coasts on - none returned; poll_ship_return gives
+    // the outcome once it is there (wait: blocks until it is) and commits it as plan_ship_return would, from the same
+    // snapshot (same plan). Without `background`, or refused at once: the outcome now. A new begin drops a pending one.
+    std::optional<bool> begin_ship_return(bool background);
+    std::optional<bool> begin_ship_return(const gnc::DeorbitParameters& parameters, bool background);
+    std::optional<bool> poll_ship_return(bool wait);
+    bool ship_return_pending() const { return ship_return_task_.busy(); }
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
+    // Far deorbit re-plans (replan_ship_deorbit): applied so far, and one working on a background thread (real-time play).
+    int deorbit_replans() const { return deorbit_replans_; }
+    bool deorbit_replan_pending() const { return deorbit_replan_task_.busy(); }
     // The deorbit plan the controlled ship's return would take now (plan_ship_return's planner and refusals without
     // the boil-off check; also while docked: the held state), not stored and not flown (refuelling r4).
     gnc::DeorbitPlan ship_return_preview(const gnc::DeorbitParameters& parameters = {}) const;
@@ -603,8 +616,26 @@ public:
     static constexpr double llo_trim_interval_s = 600.0;             // [E] after a trim burn, the next check
     // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
     const gnc::EntryCommand* entry_status(size_t index) const;
-    // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
+    // Interactive real-time play: planner work never holds up the simulation (default: off = deterministic). On, the
+    // planners run on background threads and the vehicle flies its last plan / guidance until a result arrives (Task 11b):
+    // landing re-plans, the ship's first catch plan, the gate lead's flip prediction and the far deorbit re-plans. Off
+    // (tests, campaigns, time warp) each of them runs to its end on the sim thread at the tick it is due - the results
+    // are the same on the same inputs either way (the same functions; the worker's environment samples the same nodes).
     void set_realtime_planning(bool realtime);
+    bool realtime_planning() const { return realtime_planning_; }
+    // Wall-clock cost of advance_to's steps (a tick or a coast segment) on the calling thread (diagnostics: the sim thread's
+    // budget at 200 Hz is tick_s).
+    struct StepTiming {
+        long steps = 0;
+        long over_budget = 0;  // steps longer than budget_ms
+        double max_ms = 0.0;
+        time::Epoch max_at;  // the longest step's start
+        double budget_ms = 1000.0 * 0.005;
+    };
+    const StepTiming& step_timing() const { return step_timing_; }
+    void reset_step_timing() { step_timing_ = {}; }
+    // A FlightEnvironment of its own for a planner thread (the session's flags; the same sources and grids).
+    std::shared_ptr<vehicle::WorkerEnvironment> worker_environment() const;
     const gnc::BoosterReturnGuidance* return_guidance(size_t index) const { return bodies_.at(index).return_guidance.get(); }
     // Return guidance of a body (nullptr if it has none) and its latest command.
     const gnc::ReturnCommand* return_status(size_t index) const;
@@ -1029,6 +1060,7 @@ private:
         std::unique_ptr<gnc::BoosterReturnGuidance> return_guidance;  // autonomous return (separated booster)
         gnc::ReturnCommand return_command;
         std::unique_ptr<gnc::EntryGuidance> entry_guidance;  // entering ship (scenario)
+        std::shared_ptr<gnc::ShipGateAim> gate_aim;           // its terminal re-aim (shared with entry_guidance's hook)
         gnc::EntryCommand entry_command;
         // entry controller: the estimated true / modelled hull pitch moment (update_hull_moment_scale) ...
         double entry_hull_moment_scale = 1.0;
@@ -1125,6 +1157,8 @@ private:
     // lunar l5: Earth air radiation (config/aero); shared with the entry guidance's predictor
     std::shared_ptr<const aero::RadiativeHeatingTable> radiative_heating_;
     vehicle::FlightEnvironment env_;
+    vehicle::EnvironmentSources sources_;  // what env_ samples (worker_environment)
+    StepTiming step_timing_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
     gnc::AttitudeController return_controller_{gnc::booster_return_attitude_gains};
@@ -1284,6 +1318,56 @@ private:
     time::Epoch deorbit_next_track_;                // the next tracking re-plan (deorbit_track_interval_s)
     double deorbit_replan_in_s() const;             // to the next re-plan of a far deorbit (seconds; inf: none)
     gnc::DeorbitParameters deorbit_parameters_;
+    int deorbit_replans_ = 0;
+    // A far deorbit re-plan in three parts (Task 11b): the inputs taken on the sim thread (prepare_deorbit_replan), the
+    // planner and the boil-off flight ahead (compute_deorbit_replan: pure on its inputs, a worker in real-time play) and
+    // the result applied on the sim thread (apply_deorbit_replan).
+    struct DeorbitReplanInputs {
+        bool measure_drag = false;            // a first plan: no drag given - the ship's own, flown ahead
+        time::Epoch epoch;                    // the snapshot
+        math::StateVector state;
+        gnc::BurnNode old_node;
+        gnc::DeorbitPlan old_plan;
+        gnc::DeorbitParameters parameters;
+        std::shared_ptr<const gnc::EntryGuidance> onboard;
+        gnc::EntryTarget target;
+        double mass_kg = 0.0;
+        double exhaust_velocity_mps = 0.0;
+        double propellant_kg = 0.0;
+        double landing_propellant_kg = 0.0;
+        std::shared_ptr<const vehicle::FlightBody> copy;  // the ship as it is (the boil-off flight ahead)
+        std::uint64_t generation = 0;
+    };
+    struct DeorbitReplanResult {
+        DeorbitReplanInputs inputs;
+        gnc::DeorbitPlan plan;
+        MainPropellant now;      // the main tanks at the snapshot ...
+        MainPropellant at_burn;  // ... and at the flown plan's burn (the new one, else the old one)
+    };
+    std::optional<DeorbitReplanInputs> prepare_deorbit_replan();
+    // The planner's inputs for `body` (sim thread: the onboard guidance, a copy of the ship); none, with the German
+    // reason in `refused`, for a vehicle without the entry and deorbit setup.
+    std::optional<DeorbitReplanInputs> deorbit_plan_inputs(const vehicle::FlightBody& body,
+                                                           const gnc::DeorbitParameters& given,
+                                                           gnc::DeorbitPlan& refused) const;
+    // The planner on them (with measure_drag and no drag: the drag flown ahead first, written to the inputs).
+    static gnc::DeorbitPlan plan_from_inputs(DeorbitReplanInputs& inputs, const environment::GravityModel& gravity,
+                                             const frames::BodyOrientation& earth, const vehicle::FlightEnvironment& env);
+    // ... and the boil-off flight to the flown plan's burn: everything that runs on a worker in real-time play.
+    static DeorbitReplanResult compute_deorbit_plan(DeorbitReplanInputs inputs, const environment::GravityModel& gravity,
+                                                    const frames::BodyOrientation& earth,
+                                                    const vehicle::FlightEnvironment& env);
+    void apply_deorbit_replan(const DeorbitReplanResult& result);
+    bool apply_ship_return(const DeorbitReplanResult& result);  // plan_ship_return's commitment
+    static double drag_area_per_mass_flown(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                           const environment::GravityModel& gravity, time::Epoch from);
+    void poll_deorbit_replan(bool wait);  // a finished background re-plan is applied (wait: until it is)
+    // The main tanks of `body` at `at`, flown ahead from `from` (main_propellant_at's flight, any environment).
+    static MainPropellant main_propellant_flown(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                                time::Epoch from, time::Epoch at);
+    std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
+                                                  const MainPropellant& at_burn) const;
+    std::uint64_t deorbit_generation_ = 0;  // a new ship return plan: background re-plans of the old one are dropped
     time::Epoch entry_start_;                       // state Return: entry guidance from here
     CapsuleReturnStep capsule_return_step_ = CapsuleReturnStep::None;
     time::Epoch capsule_step_epoch_;                // the next timed step (trunk jettison, nose cone)
@@ -1593,6 +1677,9 @@ private:
     // the tail-off) - a 10.7 m/s plane trim at ~570 t missed the quarter rule by 0.01 m/s and took 9.4 t of cold gas; the
     // 18 m/s circularisation at 151 t (transients 0.56) flew on the RCS, ~15 min off-centre: 93.7 x 101.9 km (l4 C4).
     static constexpr double small_burn_transient_share = 0.6;
+    // Last members: destroyed first (each waits for its running plan; they hold their own copies and worker environments).
+    gnc::BackgroundTask<DeorbitReplanResult> deorbit_replan_task_;
+    gnc::BackgroundTask<DeorbitReplanResult> ship_return_task_;  // begin_ship_return in the background
 };
 
 }  // namespace starsim::sim

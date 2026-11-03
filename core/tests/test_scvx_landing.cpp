@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <optional>
+#include <thread>
 #include <vector>
 
 #include "return_scenario.hpp"
@@ -69,6 +72,34 @@ TEST_CASE("SCvx landing guidance starts with a plan and commands the ignition en
     CHECK(cmd.time_to_go_s > 5.0);
     CHECK(guidance.statistics().plans == 1);
     std::printf("first plan: %.0f ms\n", guidance.statistics().last_solve_ms);
+}
+
+// Task 11b: real-time play plans the first plan on the replanner's worker; the vehicle flies on meanwhile. Same snapshot,
+// same request: the plan is the one start() makes at once, bit for bit (the commands from it are equal).
+TEST_CASE("A first plan on the worker equals the one made at once", "[gnc][scvx_landing][realtime]") {
+    Fixture f;
+    const auto& env = f.session->environment();
+    gnc::ScvxLandingGuidance at_once(f.session->return_site(f.body->vehicle()), f.parameters());
+    REQUIRE(at_once.start(*f.body, env, f.t0));
+    gnc::ScvxLandingGuidance background(f.session->return_site(f.body->vehicle()), f.parameters());
+    background.begin(*f.body, env, f.t0, true);
+    std::optional<bool> started;
+    for (int k = 0; k < 20000 && !started; ++k) {  // the sim thread polls each tick until it is there (<= 100 s)
+        started = background.poll(f.t0 + 0.005 * k);
+        if (!started) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(started.has_value());
+    REQUIRE(*started);
+    CHECK(background.plan_end_epoch() == at_once.plan_end_epoch());
+    CHECK(background.statistics().plans == at_once.statistics().plans);
+    const auto a = at_once.update(*f.body, env, f.t0 + 0.2);
+    const auto b = background.update(*f.body, env, f.t0 + 0.2);
+    CHECK(a.run_groups == b.run_groups);
+    CHECK(a.throttle == b.throttle);
+    CHECK(a.axis_gcrf.x == b.axis_gcrf.x);
+    CHECK(a.axis_gcrf.y == b.axis_gcrf.y);
+    CHECK(a.axis_gcrf.z == b.axis_gcrf.z);
+    CHECK(a.time_to_go_s == b.time_to_go_s);
 }
 
 TEST_CASE("A re-plan from a snapshot takes effect half a second later", "[gnc][scvx_landing]") {

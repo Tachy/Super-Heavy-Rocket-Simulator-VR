@@ -49,6 +49,42 @@ TEST_CASE("runner advances a session to the target", "[session_runner]") {
     CHECK(f.observed >= 2);
 }
 
+// Task 11b: a deferred command (a plan on a background thread) lets the session fly on; its result is done when its poll
+// says so, and the commands after it wait for that.
+TEST_CASE("runner flies on while a deferred command plans, later commands wait", "[session_runner][realtime]") {
+    RunnerFixture f;
+    f.runner.post([](sim::FlightSession& s) { s.launch_from_pad("starship_block3", starbase, 0.0, t0); });
+    REQUIRE(f.runner.wait_idle(30.0));
+    std::atomic<bool> planned = false;
+    std::atomic<int> polls = 0;
+    std::vector<int> order;
+    const auto plan = f.runner.post_deferred([&](sim::FlightSession&) -> sim::SessionRunner::Poll {
+        order.push_back(1);
+        return [&](sim::FlightSession&) {
+            ++polls;
+            if (!planned) return false;
+            order.push_back(2);
+            return true;
+        };
+    });
+    const auto after = f.runner.post([&](sim::FlightSession&) { order.push_back(3); });
+    const double before = f.last_epoch_s;
+    f.runner.set_target(t0 + 2.0);
+    std::this_thread::sleep_for(300ms);
+    CHECK_FALSE(f.runner.result(plan).done);
+    CHECK_FALSE(f.runner.result(after).done);
+    CHECK(f.runner.busy_s() > 0.2);
+    CHECK(f.last_epoch_s > before);  // the session flew on
+    CHECK(polls > 1);
+    CHECK_FALSE(f.runner.idle());
+    planned = true;
+    REQUIRE(f.runner.wait_idle(30.0));
+    CHECK(f.runner.result(plan).done);
+    CHECK_FALSE(f.runner.result(plan).threw);
+    CHECK(f.runner.result(after).done);
+    CHECK(order == std::vector<int>{1, 2, 3});
+}
+
 TEST_CASE("runner commands keep their order and report exceptions", "[session_runner]") {
     RunnerFixture f;
     std::vector<int> order;

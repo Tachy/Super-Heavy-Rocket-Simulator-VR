@@ -32,6 +32,7 @@ add_library(starsim_core STATIC
     src/vehicle/attitude_hold_gas.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
+    src/vehicle/worker_environment.cpp
     src/vehicle/docking_port.cpp
     src/vehicle/port_mating.cpp
     src/vehicle/propellant_transfer.cpp

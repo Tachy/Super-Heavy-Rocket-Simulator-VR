@@ -153,3 +153,39 @@ TEST_CASE("Session flies an entering ship from Mach 2.6 into the tower's arms", 
     CHECK_FALSE(run.tower_struck);
     CHECK(run.caught_within_tolerance());
 }
+
+// Task 11b: the same return in real-time play (set_realtime_planning, the game at warp 1), each tick held back to the
+// wall clock as the game's runner does. The planners (gate lead's flip prediction, first catch plan, re-plans) run off
+// the sim thread; the sim steps' wall times say what the sim thread spent (budget: one tick, 5 ms). Measurement: hidden,
+// ~100 s of wall time; wall-clock numbers depend on the machine's load.
+TEST_CASE("Real-time play: entering ship from Mach 2.6 into the arms at the wall clock", "[.][ship][catch][session][realtime]") {
+    test::spice_session();
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_supersonic_ship(session, t0);
+    session.set_realtime_planning(true);
+    session.reset_step_timing();
+    const test::WallPacer pacer(t0);
+    double time_s = 0.0;
+    while (session.entry_guidance(0)->phase() != gnc::EntryPhase::Gate && !session.body(0).impacted() && time_s < 600.0) {
+        time_s += sim::FlightSession::tick_s;
+        pacer.wait_until(t0 + time_s);
+        session.advance_to(t0 + time_s, 10);
+    }
+    REQUIRE(session.entry_guidance(0)->phase() == gnc::EntryPhase::Gate);
+    const auto entry = session.step_timing();
+    session.reset_step_timing();
+    const auto run = test::fly_landing(session, earth(), t0 + time_s, 120.0, &pacer);
+    const auto landing = session.step_timing();
+    const auto* g = session.ship_landing(0);
+    REQUIRE(g != nullptr);
+    std::printf("real-time Mach 2.6: entry %ld steps, %ld over %.0f ms, max %.1f ms (%.2f s before the gate); flip + burn %ld "
+                "steps, %ld over, max %.1f ms (%.2f s after the gate); first plan attempts %d, %d plans (max solve %.0f ms); "
+                "%s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s\n",
+                entry.steps, entry.over_budget, entry.budget_ms, entry.max_ms, (t0 + time_s) - entry.max_at, landing.steps,
+                landing.over_budget, landing.max_ms, landing.max_at - (t0 + time_s), g->first_plan_attempts(),
+                run.scvx.plans, run.scvx.max_solve_ms, sim::to_string(run.tower_phase), run.offset_m, run.lateral_mps,
+                run.sink_mps);
+    CHECK_FALSE(run.tower_struck);
+    CHECK(run.caught_within_tolerance());
+}

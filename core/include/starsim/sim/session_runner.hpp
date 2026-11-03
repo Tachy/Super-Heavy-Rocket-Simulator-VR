@@ -39,6 +39,13 @@ public:
 
     // Queues a command; returns its id (> 0, increasing). An exception it throws is caught: result(id) carries it.
     std::uint64_t post(Command command);
+    // A command whose work goes on after it returns (Task 11b: a planner on a background thread, the session flying
+    // on): it returns a poll that the worker calls between advance chunks until it reports done (true); only then is
+    // the command's result done. Later commands wait for it (posting order), the session advances meanwhile and busy_s()
+    // counts on. An empty poll: done at once (a plain command). A poll's exception ends it like the command's.
+    using Poll = std::function<bool(FlightSession&)>;
+    using DeferredCommand = std::function<Poll(FlightSession&)>;
+    std::uint64_t post_deferred(DeferredCommand command);
     // Overwrites the single "latest" slot (pilot input): run once before the next chunk; older values are dropped.
     void set_latest(Command command);
     // The session advances towards `target` whenever no command waits. A new target replaces the old one, also an
@@ -65,16 +72,20 @@ public:
 private:
     void run();
     void run_command(std::unique_lock<std::mutex>& lock);  // front of the queue; lock held on entry and exit
+    void poll_deferred(std::unique_lock<std::mutex>& lock);  // the running deferred command's poll; lock as above
+    void finish_locked(std::uint64_t id, const Result& r);   // the command's result done; mutex_ held
     void run_chunk(std::unique_lock<std::mutex>& lock);    // latest input + one advance chunk; lock as above
     bool idle_locked() const;                              // mutex_ held
     bool target_reached_locked() const;                    // no target, or less than one tick left; mutex_ held
+    bool chunk_due_locked() const;                         // input waiting or the target ahead; mutex_ held
     void set_error_locked(const std::string& error);       // mutex_ held
 
     std::unique_ptr<FlightSession> session_;
     Observer observer_;
     mutable std::mutex mutex_;
     mutable std::condition_variable wake_, idle_cv_;
-    std::deque<std::pair<std::uint64_t, Command>> queue_;
+    std::deque<std::pair<std::uint64_t, DeferredCommand>> queue_;
+    std::optional<std::pair<std::uint64_t, Poll>> deferred_;  // the running deferred command (running_id_ is its id)
     std::optional<Command> latest_;
     std::optional<time::Epoch> target_;
     time::Epoch reached_;

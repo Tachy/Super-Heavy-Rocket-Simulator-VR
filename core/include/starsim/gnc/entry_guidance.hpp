@@ -343,6 +343,7 @@ public:
         time::Epoch epoch;
         math::Vec3 velocity_itrf_mps;  // predicted at the gate (Earth-fixed)
         double height_m = 0.0;         // the gate's hand-over height above the target ground at that sink
+        std::optional<double> time_to_gate_s;  // from the latest prediction (none before one)
     };
     using TerminalAim = std::function<EntryTarget(const TerminalGate& gate)>;
     void set_terminal_aim(TerminalAim aim) { terminal_aim_ = std::move(aim); }

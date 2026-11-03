@@ -77,10 +77,15 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
         std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters, radiative_heating_);
     // the terminal phase moves the gate with the lead the predicted gate state needs: the flip flown forward with this
     // session's ship-landing controller and tick (gnc::ShipGateAim)
+    flying.gate_aim.reset();
     if (site.catch_target) {
         auto aim = std::make_shared<gnc::ShipGateAim>(site, std::move(landing), ship_landing_controller_, tick_s);
+        // real-time play: the prediction flies on a worker with an environment of its own (built here, on the sim thread)
+        aim->set_worker_environment([this] { return worker_environment(); });
+        aim->set_realtime(realtime_planning_);
         flying.entry_guidance->set_terminal_aim(
             [aim](const gnc::EntryGuidance::TerminalGate& gate) { return (*aim)(gate); });
+        flying.gate_aim = std::move(aim);
     }
 }
 
@@ -98,21 +103,27 @@ FlightSession::MainPropellant main_tanks(const vehicle::Vehicle& vehicle) {
 }  // namespace
 
 FlightSession::MainPropellant FlightSession::main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const {
-    if (!env_.boil_off || env_.ephemeris == nullptr) return main_tanks(body.vehicle());
+    return main_propellant_flown(body, env_, epoch_, at);
+}
+
+FlightSession::MainPropellant FlightSession::main_propellant_flown(const vehicle::FlightBody& body,
+                                                                   const vehicle::FlightEnvironment& env,
+                                                                   time::Epoch from, time::Epoch at) {
+    if (!env.boil_off || env.ephemeris == nullptr) return main_tanks(body.vehicle());
     // Waiting for its burn the ship drifts free (burn_drifting) and turns under the air's torque - which side the Sun
     // heats changes the boil-off by up to ~2x (r2 campaigns), so no fixed-attitude average will do: a copy is coasted.
     vehicle::FlightBody ahead(body.vehicle().copy_upper(0), body.state());
     ahead.set_ground_height(body.ground_height_m());
-    for (time::Epoch t = epoch_; t < at;) {
+    for (time::Epoch t = from; t < at;) {
         const double dt = std::min(max_coast_s, at - t);
-        ahead.coast(env_, t, dt);
+        ahead.coast(env, t, dt);
         t = t + dt;
     }
     const auto later = main_tanks(ahead.vehicle());
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
         const auto now = main_tanks(body.vehicle());
         std::printf("[deorbit] flown ahead %.1f h to %.0f s TDB: main LOX %.2f -> %.2f t, CH4 %.2f -> %.2f t\n",
-                    (at - epoch_) / 3600.0, at.tdb_seconds_past_j2000(), now.oxidizer_kg / 1000.0,
+                    (at - from) / 3600.0, at.tdb_seconds_past_j2000(), now.oxidizer_kg / 1000.0,
                     later.oxidizer_kg / 1000.0, now.fuel_kg / 1000.0, later.fuel_kg / 1000.0);
     }
     return later;
@@ -127,19 +138,24 @@ double FlightSession::drag_area_per_mass_ahead() const {
 }
 
 double FlightSession::drag_area_per_mass_ahead(const vehicle::FlightBody& body) const {
-    vehicle::FlightEnvironment nominal = env_;
+    return drag_area_per_mass_flown(body, env_, gravity_, epoch_);
+}
+
+double FlightSession::drag_area_per_mass_flown(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                               const environment::GravityModel& gravity, time::Epoch from) {
+    vehicle::FlightEnvironment nominal = env;
     nominal.air_density_factor = 1.0;  // the planner's air (US76), not the truth's
     vehicle::FlightBody ahead(body.vehicle().copy_upper(0), body.state());
     ahead.set_ground_height(body.ground_height_m());
-    const time::Epoch end = epoch_ + deorbit_track_interval_s;
-    for (time::Epoch t = epoch_; t < end;) {
+    const time::Epoch end = from + deorbit_track_interval_s;
+    for (time::Epoch t = from; t < end;) {
         const double dt = std::min(max_coast_s, end - t);
         ahead.coast(nominal, t, dt);
         t = t + dt;
     }
     const auto& s0 = body.state();
     const auto& s1 = ahead.state();
-    const double beta = gnc::estimate_drag_area_per_mass(gravity_, {s0.position_gcrf_m, s0.velocity_gcrf_mps}, epoch_,
+    const double beta = gnc::estimate_drag_area_per_mass(gravity, {s0.position_gcrf_m, s0.velocity_gcrf_mps}, from,
                                                          {s1.position_gcrf_m, s1.velocity_gcrf_mps}, end, 0.0);
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
         std::printf("[deorbit] drag flown ahead %.1f h: C_D A / m %.3e m2/kg (%.1f t)\n", deorbit_track_interval_s / 3600.0,
@@ -150,8 +166,12 @@ double FlightSession::drag_area_per_mass_ahead(const vehicle::FlightBody& body) 
 
 std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const {
     const auto& body = *bodies_[controlled_].body;
-    const auto now = main_tanks(body.vehicle());
-    const auto at_burn = main_propellant_at(body, plan.node.epoch);
+    return boil_off_shortfall(plan, margin, main_tanks(body.vehicle()), main_propellant_at(body, plan.node.epoch));
+}
+
+std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
+                                                             const MainPropellant& at_burn) const {
+    const auto& body = *bodies_[controlled_].body;
     plan.boil_off_kg = now.total() - at_burn.total();
     // LOX and CH4 boil off in another ratio than the engine burns them (~3.2 against 3.6): the one that runs dry first
     // limits the burn. The deorbit engine set's mixture ratio (r2 minor: not just the last engine's).
@@ -196,32 +216,60 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
 gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const vehicle::FlightBody& body, const gnc::DeorbitParameters& given,
                                                   double* drag_used_m2pkg) const {
     gnc::DeorbitPlan refused;
+    auto inputs = deorbit_plan_inputs(body, given, refused);
+    if (!inputs) return refused;
+    // no drag given (the first plan): the ship's own, flown ahead
+    inputs->measure_drag = true;
+    auto plan = plan_from_inputs(*inputs, gravity_, earth_, env_);
+    if (drag_used_m2pkg) *drag_used_m2pkg = inputs->parameters.drag_area_per_mass_m2pkg;
+    return plan;
+}
+
+std::optional<FlightSession::DeorbitReplanInputs> FlightSession::deorbit_plan_inputs(const vehicle::FlightBody& body,
+                                                                                     const gnc::DeorbitParameters& given,
+                                                                                     gnc::DeorbitPlan& refused) const {
     const auto& vehicle = body.vehicle();
     const auto& stage = vehicle.stages().front().config;
     if (stage.aero.entry_alpha_table.empty() || stage.deorbit_engine_groups.empty()) {
         refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
-        return refused;
+        return std::nullopt;
     }
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
     if (configurations.empty()) {
         refused.reason = "Deorbit-Triebwerk nicht verfügbar";
-        return refused;
+        return std::nullopt;
     }
-    const double exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
-    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
-    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
-    const gnc::EntryGuidance onboard(body, schedule, target,
-                                     gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
-    // no drag given (the first plan): the ship's own, flown ahead
-    gnc::DeorbitParameters parameters = given;
-    parameters.reach_check = gnc::entry_reach_check(onboard);  // the onboard guidance's rules and limits
-    parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);  // its cutoff residual and pointing error
-    if (!(parameters.drag_area_per_mass_m2pkg > 0.0)) parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_ahead(body);
-    if (drag_used_m2pkg) *drag_used_m2pkg = parameters.drag_area_per_mass_m2pkg;
+    DeorbitReplanInputs in;
     const auto& s = body.state();
-    return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
-                             vehicle.mass_properties().mass_kg, exhaust_velocity_mps, vehicle.propellant_kg(),
-                             stage.landing_propellant_kg, parameters);
+    in.epoch = epoch_;
+    in.state = {s.position_gcrf_m, s.velocity_gcrf_mps};
+    in.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
+    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    in.target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
+    in.onboard = std::make_shared<const gnc::EntryGuidance>(
+        body, schedule, in.target, gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
+    in.parameters = given;
+    in.parameters.reach_check = gnc::entry_reach_check(*in.onboard);  // the onboard guidance's rules and limits
+    in.parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);  // its cutoff residual and pointing error
+    in.mass_kg = vehicle.mass_properties().mass_kg;
+    in.propellant_kg = vehicle.propellant_kg();
+    in.landing_propellant_kg = stage.landing_propellant_kg;
+    // the flights ahead (drag, boil-off) start from a copy of the ship as it is (its ground height)
+    auto copy = std::make_shared<vehicle::FlightBody>(vehicle.copy_upper(0), s);
+    copy->set_ground_height(body.ground_height_m());
+    in.copy = std::move(copy);
+    in.generation = deorbit_generation_;
+    return in;
+}
+
+gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const environment::GravityModel& gravity,
+                                                 const frames::BodyOrientation& earth,
+                                                 const vehicle::FlightEnvironment& env) {
+    if (in.measure_drag && !(in.parameters.drag_area_per_mass_m2pkg > 0.0)) {
+        in.parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_flown(*in.copy, env, gravity, in.epoch);
+    }
+    return gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard->model(), in.target, in.mass_kg,
+                             in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, in.parameters);
 }
 
 void FlightSession::log_dispersion_note(const gnc::DeorbitPlan& plan) {
@@ -249,30 +297,72 @@ std::optional<gnc::DeorbitParameters> FlightSession::vehicle_return_settings(std
     return parameters;
 }
 
-bool FlightSession::plan_ship_return() {
+bool FlightSession::plan_ship_return() { return *begin_ship_return(false); }
+
+bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
+    return *begin_ship_return(parameters, false);
+}
+
+std::optional<bool> FlightSession::begin_ship_return(bool background) {
     std::string why;
     const auto parameters = vehicle_return_settings(&why);
     if (!parameters) {
         ship_return_ = false;
+        ++deorbit_generation_;
         deorbit_plan_ = gnc::DeorbitPlan{};
         deorbit_plan_->reason = why;
         return false;
     }
-    return plan_ship_return(*parameters);
+    return begin_ship_return(*parameters, background);
 }
 
-bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
+std::optional<bool> FlightSession::begin_ship_return(const gnc::DeorbitParameters& parameters, bool background) {
     ship_return_ = false;
     deorbit_plan_.reset();
+    ++deorbit_generation_;  // a background plan or re-plan of an earlier return is dropped when it arrives
+    ship_return_task_.discard();
     deorbit_parameters_ = parameters;
     if (bodies_.empty()) return false;
+    gnc::DeorbitPlan refused;
+    std::optional<DeorbitReplanInputs> inputs;
+    const auto& flying = bodies_[controlled_];
+    if (flying.entry_guidance || flying.ship_landing) {
+        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+    } else {
+        inputs = deorbit_plan_inputs(*flying.body, parameters, refused);
+    }
+    if (!inputs) {
+        deorbit_plan_ = refused;
+        return false;
+    }
+    inputs->measure_drag = true;  // no drag given: the ship's own, flown ahead
+    if (background) {
+        // Real-time play (Task 11b): the drag flight, the planner and the boil-off flight on a worker; the ship coasts on.
+        auto worker = worker_environment();
+        ship_return_task_.submit([in = std::move(*inputs), worker] {
+            return compute_deorbit_plan(in, worker->gravity(), worker->earth(), worker->env());
+        });
+        return std::nullopt;
+    }
+    return apply_ship_return(compute_deorbit_plan(std::move(*inputs), gravity_, earth_, env_));
+}
+
+std::optional<bool> FlightSession::poll_ship_return(bool wait) {
+    auto result = ship_return_task_.collect(wait);
+    if (!result) return std::nullopt;
+    return apply_ship_return(*result);
+}
+
+bool FlightSession::apply_ship_return(const DeorbitReplanResult& result) {
+    const auto& in = result.inputs;
+    if (in.generation != deorbit_generation_ || bodies_.empty()) return false;  // planned anew since: dropped
     const auto& stage = bodies_[controlled_].body->vehicle().stages().front().config;
-    const auto& s = bodies_[controlled_].body->state();
     // the drag the plan coasted with: the tracking re-plans' first guess
-    deorbit_plan_ = ship_deorbit_plan(parameters, &deorbit_parameters_.drag_area_per_mass_m2pkg);
+    deorbit_parameters_.drag_area_per_mass_m2pkg = in.parameters.drag_area_per_mass_m2pkg;
+    deorbit_plan_ = result.plan;
     if (!deorbit_plan_->feasible) return false;
     // The earliest pass is the best one with boil-off too (a later one only has less left): it alone is checked.
-    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin)) {
+    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin, result.now, result.at_burn)) {
         deorbit_plan_->feasible = false;
         deorbit_plan_->short_of_reserve = true;
         deorbit_plan_->reason = *shortfall;
@@ -285,10 +375,10 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
     }
     ship_return_ = true;
     log_dispersion_note(*deorbit_plan_);
-    deorbit_replan_due_ = deorbit_plan_->node.epoch - epoch_ > deorbit_replan_age_s;
-    deorbit_track_epoch_ = epoch_;
-    deorbit_track_state_ = {s.position_gcrf_m, s.velocity_gcrf_mps};
-    deorbit_next_track_ = epoch_ + deorbit_track_interval_s;
+    deorbit_replan_due_ = deorbit_plan_->node.epoch - in.epoch > deorbit_replan_age_s;
+    deorbit_track_epoch_ = in.epoch;
+    deorbit_track_state_ = in.state;
+    deorbit_next_track_ = in.epoch + deorbit_track_interval_s;
     return true;
 }
 
@@ -300,38 +390,87 @@ double FlightSession::deorbit_replan_in_s() const {
 
 void FlightSession::replan_ship_deorbit() {
     deorbit_replan_due_ = false;
-    auto& flying = bodies_[controlled_];
-    const auto& vehicle = flying.body->vehicle();
-    const auto& stage = vehicle.stages().front().config;
-    const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
-    if (configurations.empty() || !deorbit_plan_) return;
-    const auto old_node = deorbit_plan_->node;
+    auto inputs = prepare_deorbit_replan();
+    if (!inputs) return;
+    if (realtime_planning_) {
+        // Real-time play (Task 11b): the planner and the boil-off flight run on a worker with an environment of their
+        // own; the old plan stays armed until the result is applied (its burn is >= deorbit_replan_lead_s away).
+        deorbit_replan_task_.discard();  // one of an earlier return (it is not due before its own was applied)
+        auto worker = worker_environment();
+        deorbit_replan_task_.submit([in = std::move(*inputs), worker] {
+            return compute_deorbit_plan(in, worker->gravity(), worker->earth(), worker->env());
+        });
+        return;
+    }
+    apply_deorbit_replan(compute_deorbit_plan(std::move(*inputs), gravity_, earth_, env_));
+}
+
+void FlightSession::poll_deorbit_replan(bool wait) {
+    if (auto result = deorbit_replan_task_.collect(wait)) apply_deorbit_replan(*result);
+}
+
+std::optional<FlightSession::DeorbitReplanInputs> FlightSession::prepare_deorbit_replan() {
+    const auto& flying = bodies_[controlled_];
+    const auto& stage = flying.body->vehicle().stages().front().config;
+    if (stage.deorbit_engine_groups.empty() || burn_configurations(&stage.deorbit_engine_groups).empty() || !deorbit_plan_) {
+        return std::nullopt;
+    }
     const auto& s = flying.body->state();
     gnc::DeorbitParameters parameters = deorbit_parameters_;
-    parameters.search_window_s = old_node.epoch - epoch_ + deorbit_replan_window_s;
+    parameters.search_window_s = deorbit_plan_->node.epoch - epoch_ + deorbit_replan_window_s;
     parameters.drag_area_per_mass_m2pkg =
         gnc::estimate_drag_area_per_mass(gravity_, deorbit_track_state_, deorbit_track_epoch_,
                                          {s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_,
                                          deorbit_parameters_.drag_area_per_mass_m2pkg);
     deorbit_parameters_.drag_area_per_mass_m2pkg = parameters.drag_area_per_mass_m2pkg;  // the next re-plan's guess
-    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
-    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
-    const gnc::EntryGuidance onboard(*flying.body, schedule, target,
-                                     gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
-    parameters.reach_check = gnc::entry_reach_check(onboard);
-    parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);
-    const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
-                                        onboard.model(), target, vehicle.mass_properties().mass_kg,
-                                        configurations.front().thrust_n / configurations.front().mass_flow_kgps,
-                                        vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
+    gnc::DeorbitPlan refused;
+    auto in = deorbit_plan_inputs(*flying.body, parameters, refused);
+    if (!in) return std::nullopt;
+    in->old_node = deorbit_plan_->node;
+    in->old_plan = *deorbit_plan_;
+    return in;
+}
+
+FlightSession::DeorbitReplanResult FlightSession::compute_deorbit_plan(DeorbitReplanInputs inputs,
+                                                                       const environment::GravityModel& gravity,
+                                                                       const frames::BodyOrientation& earth,
+                                                                       const vehicle::FlightEnvironment& env) {
+    DeorbitReplanResult r;
+    r.plan = plan_from_inputs(inputs, gravity, earth, env);
+    const auto& in = inputs;
+    // The plan flown and its main tanks at its burn: a first plan (measure_drag) only when feasible (apply_ship_return);
+    // a re-plan's new one, else the old one (apply_deorbit_replan).
+    const bool first = in.measure_drag;
+    if (!first || r.plan.feasible) {
+        const auto& flown_node = first || r.plan.feasible || r.plan.short_of_reserve ? r.plan.node : in.old_plan.node;
+        r.now = main_tanks(in.copy->vehicle());
+        r.at_burn = main_propellant_flown(*in.copy, env, in.epoch, flown_node.epoch);
+    }
+    r.inputs = std::move(inputs);
+    return r;
+}
+
+void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
+    const auto& in = result.inputs;
+    // a re-plan of a return that has ended or been planned anew since its snapshot: dropped
+    if (in.generation != deorbit_generation_ || !ship_return_ || !deorbit_plan_ || autopilot_.state != AutopilotState::Burn ||
+        bodies_.empty()) {
+        return;
+    }
+    ++deorbit_replans_;
+    const auto& plan = result.plan;
+    const auto& old_node = in.old_node;
+    const auto& stage = bodies_[controlled_].body->vehicle().stages().front().config;
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
         std::printf("[deorbit] re-plan %.0f s before the old node (tracked %.1f h, CdA/m %.3e m2/kg): %s, burn %+.1f s "
-                    "from it, %.2f m/s (old %.2f m/s), cross %.1f km\n",
-                    old_node.epoch - epoch_, (epoch_ - deorbit_track_epoch_) / 3600.0, parameters.drag_area_per_mass_m2pkg,
-                    plan.feasible ? "feasible" : plan.reason.c_str(), plan.feasible ? plan.node.epoch - old_node.epoch : 0.0,
-                    norm(plan.node.delta_v_gcrf_mps), norm(old_node.delta_v_gcrf_mps), plan.crossrange_m / 1000.0);
+                    "from it, %.2f m/s (old %.2f m/s), cross %.1f km%s\n",
+                    old_node.epoch - in.epoch, (in.epoch - deorbit_track_epoch_) / 3600.0,
+                    in.parameters.drag_area_per_mass_m2pkg, plan.feasible ? "feasible" : plan.reason.c_str(),
+                    plan.feasible ? plan.node.epoch - old_node.epoch : 0.0, norm(plan.node.delta_v_gcrf_mps),
+                    norm(old_node.delta_v_gcrf_mps), plan.crossrange_m / 1000.0,
+                    epoch_ == in.epoch ? "" : " (worker)");
     }
-    deorbit_next_track_ = epoch_ + deorbit_track_interval_s;
+    deorbit_next_track_ = in.epoch + deorbit_track_interval_s;
     // A later pass is taken when drag moved this one out of reach (it is planned again before its burn); none in the
     // window: the old plan is flown (and planned again at the next tracking time or before its burn).
     // The landing reserve was checked when the deorbit was committed; a re-plan that only cuts into it is still flown -
@@ -341,7 +480,7 @@ void FlightSession::replan_ship_deorbit() {
     // ship stays in orbit instead of running dry in the burn.
     gnc::DeorbitPlan flown = plan.feasible || plan.short_of_reserve ? plan : *deorbit_plan_;
     {
-        if (const auto shortfall = boil_off_shortfall(flown, call_off_burn_margin)) {
+        if (const auto shortfall = boil_off_shortfall(flown, call_off_burn_margin, result.now, result.at_burn)) {
             deorbit_plan_ = flown;
             deorbit_plan_->feasible = false;
             deorbit_plan_->short_of_reserve = true;
@@ -365,7 +504,7 @@ void FlightSession::replan_ship_deorbit() {
     } else {
         deorbit_plan_->boil_off_kg = flown.boil_off_kg;  // the old plan, flown on: its boil-off from now
     }
-    deorbit_replan_due_ = node.epoch - epoch_ > deorbit_replan_age_s;
+    deorbit_replan_due_ = node.epoch - in.epoch > deorbit_replan_age_s;
 }
 
 time::Epoch FlightSession::entry_start_epoch(double horizon_s) const {
