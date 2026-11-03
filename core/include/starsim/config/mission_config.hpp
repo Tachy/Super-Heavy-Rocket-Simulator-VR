@@ -146,6 +146,10 @@ struct LunarReturnMission {
     double nominal_bank_rad = 110.0 * constants::deg_to_rad;
     double aerocapture_apoapsis_m = 400e3;
     double perigee_raise_height_m = 200e3;
+    // aerocapture: the start budget's perigee raise + circularisation and b4 deorbit burn ([return] capture_raise_mps,
+    // capture_deorbit_mps; required for the variant)
+    double aerocapture_raise_mps = 0.0;
+    double aerocapture_deorbit_mps = 0.0;
     ShipReturnDeorbit deorbit;  // [deorbit] (aerocapture): b4 after the capture
     double mcc_allowance_mps = 30.0;
     double coast_attitude_kg_per_day = 1000.0;

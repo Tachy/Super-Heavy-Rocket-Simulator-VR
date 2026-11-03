@@ -335,6 +335,18 @@ struct ShipLandingProfile {
     double lateral_effort_fraction = 0.0;    // the landing burn's lateral LQR effort (ScvxLandingParameters)
 };
 
+// [stage.lunar_landing] and [stage.lunar_ascent] of a lunar lander (a stage with fixed legs; every key required there):
+// the approach's lateral LQR effort (gnc::LunarLandingGuidance's SCvx approach) and the ascent's liftoff sequence and
+// abort check (gnc::LunarAscentGuidance), applied by gnc::lunar_landing_parameters / gnc::lunar_ascent_parameters.
+struct LunarLandingProfile {
+    double lateral_effort_fraction = 0.0;  // the approach's lateral LQR effort (ScvxLandingParameters)
+};
+struct LunarAscentProfile {
+    double raptor_start_height_m = 0.0;   // the ascent set starts this high above the liftoff point
+    double vertical_rise_height_m = 0.0;  // PEG from here
+    double abort_delta_v_margin = 0.0;    // losses on the abort's propellant check (fraction of the ideal delta-v)
+};
+
 // [stage.entry] of a ship flying the belly-first entry guidance (gnc::entry_guidance_parameters; every key required for
 // a stage with an entry_alpha_table): limits and caps [E]; the rates the guidance flies are derived from the stage's RCS
 // at the entry mass up to these caps.
@@ -432,6 +444,8 @@ struct StageConfig {
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;
     std::optional<ShipLandingProfile> ship_landing;  // a ship landing at a catch tower (else none)
+    std::optional<LunarLandingProfile> lunar_landing;  // a lunar lander (fixed legs; else none)
+    std::optional<LunarAscentProfile> lunar_ascent;    // a lunar lander (fixed legs; else none)
     UnusablePropellantConfig unusable_propellant;    // [stage.tanks]
     LandingLegConfig landing_legs;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure

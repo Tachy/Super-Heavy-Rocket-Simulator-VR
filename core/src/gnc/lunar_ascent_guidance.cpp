@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 #include "starsim/gnc/lunar_landing_guidance.hpp"
 
@@ -97,6 +98,16 @@ double groups_vacuum_isp_s(const vehicle::Vehicle& vehicle, const std::vector<st
         }
     }
     return mass_flow_kgps > 0.0 ? thrust_n / mass_flow_kgps / constants::standard_gravity_mps2 : 0.0;
+}
+
+LunarAscentParameters lunar_ascent_parameters(const config::StageConfig& stage, LunarAscentParameters base) {
+    if (!stage.lunar_ascent) {
+        throw std::runtime_error("die Stufe '" + stage.id + "' hat keine Mondaufstiegs-Werte ([stage.lunar_ascent])");
+    }
+    base.raptor_start_height_m = stage.lunar_ascent->raptor_start_height_m;
+    base.vertical_rise_height_m = stage.lunar_ascent->vertical_rise_height_m;
+    base.abort_delta_v_margin = stage.lunar_ascent->abort_delta_v_margin;
+    return base;
 }
 
 const char* to_string(LunarAscentPhase phase) {

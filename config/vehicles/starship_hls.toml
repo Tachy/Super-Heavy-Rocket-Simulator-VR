@@ -114,6 +114,18 @@ damping_n_s_m = 3.0e6                    # l4 Task 10: x3 - at 1e6 the hull rock
                                          # walked 1.2 m; 3e6 (~0.9) settles it. 1 m/s x 3e6 < the crush force
 friction = 0.6                           # foot pad on regolith
 
+# Lunar landing and ascent guidance (gnc::LunarLandingGuidance, gnc::LunarAscentGuidance; required for a stage with fixed
+# legs). The approach's phase times are not configured: SCvx starts from the planner's ballistic guess (the landing
+# set's thrust-to-weight and the state at the hand-over; planner plan Task 6).
+[stage.lunar_landing]
+lateral_effort_fraction = 0.05           # [E] l4: the booster's 0.2 rocked the 700 t HLS on its single Raptor (rates up
+                                         # to 0.7 rad/s); 0.05 tracks within 0.07
+
+[stage.lunar_ascent]
+raptor_start_height_m = 30.0             # [E] spec: the Raptors start "after a few tens of metres" on the landing thrusters
+vertical_rise_height_m = 150.0           # [E] PEG from here (Apollo LM: ~10 s vertical rise)
+abort_delta_v_margin = 0.15              # [E] gravity and steering losses on an abort's propellant check (l4)
+
 # Ship RCS layout (cold gas from the main tanks).
 
 [stage.rcs]

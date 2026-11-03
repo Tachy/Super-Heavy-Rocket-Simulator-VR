@@ -56,10 +56,15 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   thrusters (the set drops at max(0.9 x next max, running minimum)); `mission::braking_range_m` (thrust fraction 0.55,
   factor 1.0, floor 150 km: 164 km at 566 t). Approach: SCvx on the landing thrusters from the high gate (700 m / 800 m
   / 25 m/s), "equivalent gimbal" simplification (differential throttling ~20x the RCS torque, equivalent gimbal 9.4
-  deg; user 2026-10-15). Terminal descent (Apollo P66 style, `LunarDescentPhase::Terminal`, "Endanflug"): 1 m/s sink,
+  deg; user 2026-10-15). Fresh approach plans start from the planner's ballistic guess (the landing set's T/W and the
+  hand-over state, both switch starts; planner plan Task 6 - the former fixed 50/10/30 s phase times left 3.4 t less at
+  566 and 500 t PDI); the lateral LQR effort is the vehicle's `[stage.lunar_landing] lateral_effort_fraction` (0.05
+  [E]); `gnc::lunar_landing_parameters(stage)` applies it in `begin_powered_descent`. Terminal descent (Apollo P66 style, `LunarDescentPhase::Terminal`, "Endanflug"): 1 m/s sink,
   throttle >= 0.1 above the minimum and <= 0.95 of the weight floor. Engines off on leg contact. Surface stay: resting
-  on the legs for `stay_hours`; no boil-off. Ascent (`gnc/lunar_ascent_guidance`, `gnc/peg_steering`): vertical rise to
-  150 m, PEG to 15 km x 100 km on the 3 RVacs (user 2026-10-15), landing thrusters steer by differential throttling
+  on the legs for `stay_hours`; no boil-off. Ascent (`gnc/lunar_ascent_guidance`, `gnc/peg_steering`): the Raptors start
+  at 30 m, vertical rise to 150 m, abort check margin 0.15 (vehicle keys `[stage.lunar_ascent]` [E], applied by
+  `gnc::lunar_ascent_parameters(stage)` at liftoff and abort; a fixed-leg stage without `[stage.lunar_landing]` /
+  `[stage.lunar_ascent]` is refused at load, "Mondlandung ... fehlt"), PEG to 15 km x 100 km on the 3 RVacs (user 2026-10-15), landing thrusters steer by differential throttling
   until the RVac axis is within 2 deg of PEG, acceleration limit 1.5 g [D], circularised at the aposelene. RVac
   engine-out: the other two cut, the 3 sea-level Raptors take over. Aborts (`abort_landing`, automatic when the
   approach cannot be planned): Arrest (climb) then PEG once a fresh solve steers below 0.85 radial or the ballistic
@@ -81,7 +86,11 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   (`mission/earth_return`): LLO TEI ~880 m/s (aligned plane, 3.4 d), braking burn on the vacuum Raptors centred at
   ~2,000 km, 1.03-1.15 km/s, entry ~9.7 km/s relative; aerocapture braking ~0.93 km/s. The gate is aimed by moving the
   arrival epoch with a gate window scan +-12 h by continuation (2 h steps halved to 15 min); the plan aims ONE bank
-  sign's predicted track. The direct entry reaches Starbase only at epochs where the arrival brings the site within
+  sign's predicted track, moving the aimed plane by its predicted crossrange; a shift the timed Newton cannot follow
+  (the 177 t ship's ~717 km track lost the interface at the first departures and the session's plan cost ~150 m/s more
+  than the start's budget: "0,3 t fehlen", planner plan Task 6) is taken in halves down to 1/8, each warm-started.
+  The aircatch's start budget adds the mission's `[return] capture_raise_mps` (120) and `capture_deorbit_mps` (100) on
+  the deorbit engines [E]. The direct entry reaches Starbase only at epochs where the arrival brings the site within
   reach (Nov 12 2026 works, Nov 2 not); rule (user 2026-10-18): plan as mission planners do - find the departure window,
   no epoch hopping. NRHO: single perilune TEI costs 3.4 km/s -> NRHO departure + 100 km return powered flyby, up to 8
   patched-conic departure options tried cheapest first: Nov 13 2026 575.7 m/s.

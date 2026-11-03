@@ -2,6 +2,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
+#include <string>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -9,6 +14,8 @@
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/lunar_ascent_guidance.hpp"
+#include "starsim/gnc/lunar_landing_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -128,5 +135,71 @@ TEST_CASE("The truth thrust factor scales the force, not the performance the gui
     const auto& nominal_engines = nominal.vehicle().stages().front().engines;
     for (size_t i = 0; i < engines.size(); ++i) {
         CHECK(engines[i].performance->thrust_n(1.0, 0.0) == nominal_engines[i].performance->thrust_n(1.0, 0.0));
+    }
+}
+
+// Planner plan 2026-11-03 Task 6: the approach's lateral effort and the ascent's liftoff heights and abort margin are
+// vehicle keys ([stage.lunar_landing], [stage.lunar_ascent], [E] in starship_hls.toml); the approach's phase times are
+// no longer a fixed guess (the planner's ballistic guess from the landing set's T/W and the hand-over state).
+TEST_CASE("HLS landing and ascent parameters follow config", "[vehicle][hls][config]") {
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
+    auto& s = cfg.stages.front();
+    REQUIRE(s.lunar_landing);
+    REQUIRE(s.lunar_ascent);
+    CHECK(s.lunar_landing->lateral_effort_fraction == 0.05);
+    CHECK(s.lunar_ascent->raptor_start_height_m == 30.0);
+    CHECK(s.lunar_ascent->vertical_rise_height_m == 150.0);
+    CHECK(s.lunar_ascent->abort_delta_v_margin == 0.15);
+    // a changed key reaches the guidance parameters; the mission's values on the base stay
+    s.lunar_landing->lateral_effort_fraction = 0.07;
+    s.lunar_ascent->raptor_start_height_m = 40.0;
+    s.lunar_ascent->vertical_rise_height_m = 200.0;
+    s.lunar_ascent->abort_delta_v_margin = 0.2;
+    CHECK(gnc::lunar_landing_parameters(s).approach.lateral_effort_fraction == 0.07);
+    gnc::LunarAscentParameters mission;
+    mission.insertion_altitude_above_site_m = 12.0e3;
+    const auto ascent = gnc::lunar_ascent_parameters(s, mission);
+    CHECK(ascent.raptor_start_height_m == 40.0);
+    CHECK(ascent.vertical_rise_height_m == 200.0);
+    CHECK(ascent.abort_delta_v_margin == 0.2);
+    CHECK(ascent.insertion_altitude_above_site_m == 12.0e3);
+    // the refuelled launch variant reuses the HLS stage with its keys
+    const auto launch = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls_launch");
+    CHECK(launch.stages.back().lunar_landing.has_value());
+    CHECK(launch.stages.back().lunar_ascent.has_value());
+    // a stage that is no lunar lander has none: the guidance refuses it instead of using a default
+    const auto block3 = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    for (const auto& stage : block3.stages) {
+        CHECK_FALSE(stage.lunar_landing.has_value());
+        CHECK_THROWS_AS(gnc::lunar_landing_parameters(stage), std::runtime_error);
+        CHECK_THROWS_AS(gnc::lunar_ascent_parameters(stage), std::runtime_error);
+    }
+}
+
+TEST_CASE("A lunar lander without its landing or ascent keys is refused", "[vehicle][hls][config]") {
+    namespace fs = std::filesystem;
+    const fs::path source(STARSIM_CONFIG_DIR);
+    for (const std::string key : {"lateral_effort_fraction", "raptor_start_height_m", "abort_delta_v_margin"}) {
+        const auto dir = fs::temp_directory_path() / ("starsim_lunar_lander_keys_" + key);
+        fs::remove_all(dir);
+        fs::create_directories(dir / "vehicles");
+        fs::copy(source / "engines", dir / "engines", fs::copy_options::recursive);
+        fs::copy_file(source / "propellants.toml", dir / "propellants.toml");
+        std::ifstream in(source / "vehicles" / "starship_hls.toml");
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const auto at = text.find("\n" + key + " =");
+        REQUIRE(at != std::string::npos);
+        text.insert(at + 1, "# ");
+        std::ofstream(dir / "vehicles" / "starship_hls.toml") << text;
+        try {
+            config::load_vehicle(dir, "starship_hls");
+            FAIL("loaded without " << key);
+        } catch (const config::ConfigError& e) {
+            const std::string what = e.what();
+            CHECK(what.find("Mondlandung") != std::string::npos);  // German, naming the key and the file
+            CHECK(what.find(key) != std::string::npos);
+            CHECK(what.find("starship_hls.toml") != std::string::npos);
+        }
+        fs::remove_all(dir);
     }
 }

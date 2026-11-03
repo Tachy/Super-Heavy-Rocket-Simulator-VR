@@ -333,6 +333,8 @@ LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config
     if (m.aerocapture) {
         m.aerocapture_apoapsis_m = doc.positive(ret, "aerocapture_apoapsis_km") * 1000.0;
         m.perigee_raise_height_m = doc.positive(ret, "perigee_raise_km") * 1000.0;
+        m.aerocapture_raise_mps = doc.positive(ret, "capture_raise_mps");
+        m.aerocapture_deorbit_mps = doc.positive(ret, "capture_deorbit_mps");
         m.deorbit = ship_return_deorbit(doc, doc.table(doc.root, "deorbit"));
     }
     m.mcc_allowance_mps = doc.number(budget, "mcc_allowance_mps");

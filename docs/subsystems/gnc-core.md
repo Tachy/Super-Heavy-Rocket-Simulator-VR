@@ -48,8 +48,8 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   later sets can finish in their minimum phase times, not below what the set cannot remove within the height left,
   within the window) and in the windows' middle; it keeps the converged one with the most mass left (neither wins
   everywhere: the state start ~1 t heavier on booster sea aborts across a box, the middle 0.2-0.9 t on Falcon 9's
-  recorded deck plans; the ship fixture `ship_return_dispersed1` needs both starts in the escalation). Fixed kinematic
-  guesses (HLS) start once. A fresh plan that does not
+  recorded deck plans; the ship fixture `ship_return_dispersed1` needs both starts in the escalation). The HLS approach
+  uses the same guess (its fixed kinematic phase times were removed in planner plan Task 6). A fresh plan that does not
   converge while its virtual control stays below `stall_virtual_control` (in reach, SCvx cycling) is solved again with
   the soft tilt / rate limits' penalty raised 10x, 100x, 1000x (`attitude_penalty_growth` 10, `attitude_penalty_raises`
   3 [E]; both starts at each weight); the converged one with the most mass left is the plan (exact penalty: too low a weight lets the subproblem

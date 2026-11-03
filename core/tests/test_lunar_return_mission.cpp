@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -18,6 +20,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
+#include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
 using Catch::Matchers::ContainsSubstring;
@@ -60,6 +63,44 @@ TEST_CASE("Lunar return missions load", "[lunar][return][config]") {
     CHECK_FALSE(a.boil_off);
     CHECK_FALSE(n.boil_off);
     CHECK_THROWS_AS(config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo"), config::ConfigError);
+}
+
+// Planner plan 2026-11-03 Task 6: the aircatch's perigee raise + circularisation and b4 deorbit are mission choices
+// ([return] capture_raise_mps / capture_deorbit_mps), not code constants; the start's propellant follows them by the
+// rocket equation on the deorbit engines.
+TEST_CASE("Lunar return burns come from the mission", "[lunar][return][config][session]") {
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    CHECK(m.aerocapture_raise_mps == 120.0);
+    CHECK(m.aerocapture_deorbit_mps == 100.0);
+    test::LunarReturnSession t;
+    const time::Epoch epoch = t.time.from_utc(m.epoch_utc);
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
+    t.session.set_launch_site(sim::launch_site_from_config(site));
+    const auto site_itrf = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
+    const auto budget = [&](const config::LunarReturnMission& mission) {
+        auto setup = sim::lunar_return_setup(mission, site_itrf, t.session.gravity(), t.ephemeris, epoch);
+        return sim::lunar_return_budget(t.session, STARSIM_CONFIG_DIR, mission, ship, epoch, setup);
+    };
+    const auto nominal = budget(m);
+    auto more = m;
+    more.aerocapture_raise_mps += 100.0;
+    const auto raised = budget(more);
+    REQUIRE(nominal.closes);
+    REQUIRE(raised.closes);
+    // 100 m/s more on the deorbit engines multiply everything the burns before carry (dry + landing propellant and the
+    // propellant of TEI, MCC and braking) by exp(100 / ve); MCC, coast and reserve terms differ by < 1 % of the step
+    const vehicle::Vehicle full(ship, STARSIM_CONFIG_DIR);
+    const double dry_kg = full.mass_properties().mass_kg - full.propellant_kg();
+    std::vector<std::string> deorbit;
+    for (const auto& g : ship.stages.front().deorbit_engine_groups) deorbit.push_back("ship/" + g);
+    const double ve_mps = gnc::groups_vacuum_isp_s(full, deorbit) * constants::standard_gravity_mps2;
+    REQUIRE(ve_mps > 0.0);
+    const double coast_kg = m.coast_attitude_kg_per_day * m.flight_time_s / 86400.0;
+    const double carried_kg = nominal.propellant_kg + dry_kg - m.reserve_kg - coast_kg;
+    const double expected_kg = carried_kg * std::expm1(100.0 / ve_mps);
+    INFO("step " << (raised.propellant_kg - nominal.propellant_kg) / 1e3 << " t, expected " << expected_kg / 1e3 << " t");
+    CHECK(raised.propellant_kg - nominal.propellant_kg == Catch::Approx(expected_kg).epsilon(0.02));
 }
 
 TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lunar][return][session][slow]") {

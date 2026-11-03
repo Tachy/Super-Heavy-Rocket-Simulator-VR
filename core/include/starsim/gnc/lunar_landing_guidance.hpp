@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/apollo_braking.hpp"
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/descent_snapshot.hpp"
@@ -66,8 +67,13 @@ struct LunarLandingParameters {
     // descent flies its set to the touchdown.
     TerminalDescentParameters terminal;
 };
-// The HLS's values (the [E] limits found in Task 3's lunar SCvx test, re-tuned for the real mass in the C2 sweep).
+// The HLS's values (the [E] limits found in Task 3's lunar SCvx test, re-tuned for the real mass in the C2 sweep). The
+// vehicle's own keys come with lunar_landing_parameters.
 LunarLandingParameters hls_landing_parameters();
+// `base` with the stage's [stage.lunar_landing] values (the approach's lateral LQR effort). Throws std::runtime_error
+// (German) for a stage without them (not a lunar lander).
+LunarLandingParameters lunar_landing_parameters(const config::StageConfig& stage,
+                                                LunarLandingParameters base = hls_landing_parameters());
 
 // Axial vacuum thrust of the set's usable engines (first stage) at full throttle.
 double set_max_thrust_n(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups);

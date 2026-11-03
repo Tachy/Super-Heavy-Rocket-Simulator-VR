@@ -30,10 +30,6 @@ constexpr double asymptote_lead_s = 3600.0;              // [E] the LLO plane ho
 constexpr double min_entry_speed_mps = 8000.0;           // [E] floor of the entry-speed search (below: LEO entries)
 constexpr double max_entry_speed_mps = 11500.0;          // [E] above the natural lunar return (~11.0 km/s inertial)
 constexpr double entry_heading_rad = 0.5 * constants::pi;  // [E] eastward arrival (l5 Task 6: westward +0.8 km/s)
-// [E] aerocapture: perigee raise out of the pass and the circularisation at 200 km (l5 Task 9 flight: 43.8 + ~60 m/s)
-// and the b4 deorbit burn (~100 m/s with margin) on the deorbit engines
-constexpr double aerocapture_raise_mps = 120.0;
-constexpr double aerocapture_deorbit_mps = 100.0;
 // [E] aerocapture: banks beyond the one that exits at the apoapsis that stay within the heat-rate limit - the guidance's
 // room for thinner air / less drag (l5 Task 9: the 400 km bank at the classical corridor's 10.1 km/s saw 1.3-2.5 MW/m2)
 constexpr double aerocapture_min_bank_window_rad = 10.0 * constants::deg_to_rad;
@@ -268,7 +264,8 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     if (m.aerocapture) {
         const double isp_deorbit_s =
             gnc::groups_vacuum_isp_s(entry_vehicle, qualified(stage.id, stage.deorbit_engine_groups));
-        end_kg *= std::exp((aerocapture_raise_mps + aerocapture_deorbit_mps) /
+        // the perigee raise + circularisation and the b4 deorbit on the deorbit engines (mission [return])
+        end_kg *= std::exp((m.aerocapture_raise_mps + m.aerocapture_deorbit_mps) /
                            (isp_deorbit_s * constants::standard_gravity_mps2));
     }
     auto planning = setup.ret;

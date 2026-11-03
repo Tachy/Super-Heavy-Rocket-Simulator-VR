@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 
 #include "starsim/math/constants.hpp"
 
@@ -138,11 +139,19 @@ LunarLandingParameters hls_landing_parameters() {
     // them back
     l.gimbal_fraction = 1.0;
     l.final_gimbal_fraction = 1.0;
-    a.settings.kinematic_guess_s = {50.0, 10.0, 30.0};    // [E] ~1 min on the Raptor, short second phase, ~30 s
+    // Fresh plans start from the planner's ballistic guess (the landing set's thrust-to-weight and the hand-over state,
+    // switches from the state and the windows' middle; planner plan Task 6: 3.4 t more left than the former fixed
+    // {50, 10, 30} s phase times at both PDI masses).
     a.lqr_lateral = true;
-    // [E] the booster's 0.2 rocked the 700 t HLS on its single Raptor (rates up to 0.7 rad/s); 0.05 tracks within 0.07
-    a.lateral_effort_fraction = 0.05;
     return p;
+}
+
+LunarLandingParameters lunar_landing_parameters(const config::StageConfig& stage, LunarLandingParameters base) {
+    if (!stage.lunar_landing) {
+        throw std::runtime_error("die Stufe '" + stage.id + "' hat keine Mondlande-Werte ([stage.lunar_landing])");
+    }
+    base.approach.lateral_effort_fraction = stage.lunar_landing->lateral_effort_fraction;
+    return base;
 }
 
 LunarLandingGuidance::LunarLandingGuidance(LandingSite touchdown, double approach_azimuth_rad,

@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_budget.hpp"
@@ -47,6 +48,10 @@ bool FlightSession::plan_lunar_ascent(const gnc::LunarAscentParameters& paramete
         return false;
     }
     const auto& vehicle = flying.body->vehicle();
+    if (!vehicle.stages().front().config.lunar_ascent) {  // the liftoff applies its keys (gnc::lunar_ascent_parameters)
+        lunar_status_ = "Kein Aufstieg: die Stufe hat keine Mondaufstiegs-Werte ([stage.lunar_ascent])";
+        return false;
+    }
     const double isp_s = gnc::groups_vacuum_isp_s(vehicle, parameters.ascent_groups);
     if (isp_s <= 0.0) {
         lunar_status_ = "Kein Aufstieg: keine Aufstiegstriebwerke";
@@ -92,7 +97,16 @@ void FlightSession::lunar_liftoff(Flying& flying) {
         vehicle.mass_properties().cg_station_m - vehicle.stages().front().config.landing_legs.foot_station_m;
     const math::Vec3 feet = s.position_gcrf_m - s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}) * below_cg_m;
     const double site_height_m = norm(feet - frame.centre_gcrf_m) - constants::moon_mean_radius_m;
-    const auto parameters = lunar_ascent_parameters_ ? *lunar_ascent_parameters_ : gnc::LunarAscentParameters{};
+    gnc::LunarAscentParameters parameters;
+    try {  // the vehicle's own liftoff keys ([stage.lunar_ascent]) on the planned (or default) mission values
+        parameters = gnc::lunar_ascent_parameters(
+            vehicle.stages().front().config,
+            lunar_ascent_parameters_ ? *lunar_ascent_parameters_ : gnc::LunarAscentParameters{});
+    } catch (const std::runtime_error& e) {
+        lunar_ascent_parameters_.reset();
+        lunar_abort(std::string("Kein Aufstieg: ") + e.what());
+        return;
+    }
     lunar_ascent_parameters_.reset();
     body.release_landed();
     legs_->release(body);
@@ -110,8 +124,16 @@ bool FlightSession::lunar_abort_to_orbit() {
     auto& body = *bodies_[controlled_].body;
     const auto& vehicle = body.vehicle();
     const auto frame = moon_->frame(epoch_);
-    const auto parameters = lunar_landing_setup_ && lunar_landing_setup_->ascent ? *lunar_landing_setup_->ascent
-                                                                                 : gnc::LunarAscentParameters{};
+    gnc::LunarAscentParameters parameters;
+    try {  // the vehicle's own keys ([stage.lunar_ascent]: the abort margin) on the mission's ascent
+        parameters = gnc::lunar_ascent_parameters(vehicle.stages().front().config,
+                                                  lunar_landing_setup_ && lunar_landing_setup_->ascent
+                                                      ? *lunar_landing_setup_->ascent
+                                                      : gnc::LunarAscentParameters{});
+    } catch (const std::runtime_error& e) {
+        lunar_status_ = std::string("Abbruch nicht möglich: ") + e.what();
+        return false;
+    }
     const double reserve_kg = lunar_landing_setup_ ? lunar_landing_setup_->reserve_kg : default_ascent_reserve_kg;
     auto guidance = std::make_unique<gnc::LunarAscentGuidance>(
         parameters, env_.ephemeris->gm_m3ps2(ephemeris::Body::Moon), lunar_touchdown_point_.height_m);

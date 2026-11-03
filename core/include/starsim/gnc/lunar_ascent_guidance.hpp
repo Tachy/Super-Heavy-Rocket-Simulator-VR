@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/gnc/peg_steering.hpp"
 #include "starsim/math/constants.hpp"
@@ -32,8 +33,9 @@ struct LunarAscentParameters {
     // 60-90 deg off PEG; at a 3 g limit it sat at full throttle and crashed), as
     // TerminalDescentParameters::steering_throttle_margin
     double steering_throttle_margin = 0.1;
-    double raptor_start_height_m = 30.0;     // [E] the Raptors start this high (spec: "after a few tens of metres")
-    double vertical_rise_height_m = 150.0;   // [E] PEG from here (Apollo: ~10 s vertical rise)
+    // The vehicle's values ([stage.lunar_ascent], applied by lunar_ascent_parameters; these defaults are test fixtures):
+    double raptor_start_height_m = 30.0;     // the Raptors start this high
+    double vertical_rise_height_m = 150.0;   // PEG from here
     double insertion_altitude_above_site_m = 15.0e3;  // [E] Apollo inserted ~18 km up; >= 10.8 km clears all terrain
     double aposelene_altitude_m = 100.0e3;   // the LLO (spec)
     bool northerly = true;                   // polar plane through the site, launched towards the north
@@ -42,7 +44,7 @@ struct LunarAscentParameters {
     // speed still to gain - from a fast, low state (an abort at the high gate: 1.4 km/s, 14 km below the insertion) it
     // ran to ~25 s, steered at its radial limit (0.9) and cut off sub-orbital.
     double abort_peg_max_radial = 0.85;
-    double abort_delta_v_margin = 0.15;      // [E] gravity and steering losses on the abort's propellant check
+    double abort_delta_v_margin = 0.15;      // gravity and steering losses on the abort's propellant check ([stage.lunar_ascent])
     double abort_max_tilt_rad = 30.0 * constants::deg_to_rad;  // [E] abort: thrust tilt towards downrange while sinking
     // [D] the ascent set throttles down to this thrust acceleration, never below its minimum throttle (which sets a floor
     // of ~1.4-1.8 g near cutoff at 200-150 t). l4 C4 sweep (user 2026-10-15: "find the optimum"; 340 / 260 t landed):
@@ -51,6 +53,10 @@ struct LunarAscentParameters {
     // variant's optimum, farthest from that edge.
     double max_acceleration_mps2 = 1.5 * constants::standard_gravity_mps2;
 };
+
+// `base` with the stage's [stage.lunar_ascent] values (Raptor start and vertical rise heights, abort margin). Throws
+// std::runtime_error (German) for a stage without them (not a lunar lander).
+LunarAscentParameters lunar_ascent_parameters(const config::StageConfig& stage, LunarAscentParameters base = {});
 
 enum class LunarAscentPhase { Liftoff, Vertical, Arrest, Peg, Cutoff };
 // German: "Abheben", "Senkrechtaufstieg", "Sinken stoppen", "PEG", "Brennschluss"

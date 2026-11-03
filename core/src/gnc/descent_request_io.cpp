@@ -161,7 +161,6 @@ void visit_settings(F& f, ScvxSettings& s) {
     f("settings.fresh_stall_iterations", s.fresh_stall_iterations);
     f("settings.stall_ratio", s.stall_ratio);
     f("settings.stall_virtual_control", s.stall_virtual_control);
-    visit(f, "settings.kinematic_guess_s", s.kinematic_guess_s);
     auto& l = s.limits;
     visit(f, "limits.tilt_max_rad", l.tilt_max_rad);
     f("limits.terminal_tilt_rad", l.terminal_tilt_rad);

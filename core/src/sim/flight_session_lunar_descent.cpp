@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <stdexcept>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_budget.hpp"
@@ -199,6 +200,12 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
     const auto& legs = vehicle.stages().front().config.landing_legs;
     if (legs.azimuths_rad.empty()) {
         lunar_status_ = "Landeanflug nicht möglich: keine Landebeine";
+        return false;
+    }
+    try {  // the vehicle's own approach keys ([stage.lunar_landing])
+        parameters = gnc::lunar_landing_parameters(vehicle.stages().front().config, std::move(parameters));
+    } catch (const std::runtime_error& e) {
+        lunar_status_ = std::string("Landeanflug nicht möglich: ") + e.what();
         return false;
     }
     if (!legs.fixed && vehicle.leg_deployment() == 0.0) vehicle.deploy_legs();

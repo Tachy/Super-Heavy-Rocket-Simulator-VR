@@ -63,10 +63,6 @@ struct ScvxSettings {
     double stall_virtual_control = 1.0;
     DescentLimits limits;
     DescentWeights weights;
-    // Fresh plans: phase durations of a kinematic first guess (all 0: the straight-line guess). For approaches that
-    // mostly fly horizontally (the lunar high gate: 3 km at 90 m/s), where the straight-line guess is far from
-    // consistent and SCvx ends in a poor local optimum. [E] per vehicle.
-    PhaseDurations kinematic_guess_s{};
     // [E] A plan may tilt the final set at most this far beyond its soft limit (more than the start state already does;
     // DescentPlan::planned_tilt_excess); beyond, the target counts as out of reach (ScvxLandingGuidance: abort where there
     // is a sea). The soft limits keep re-plans from violating states feasible; Falcon 9 lit 900 m beyond its zone once got
@@ -120,13 +116,6 @@ enum class SwitchGuess { State, WindowMiddle };
 DescentReference initial_guess(const DescentModel& model, const DescentState& initial, int start_phase,
                                const DescentTarget& target, const DescentLimits& limits, int nodes_per_phase,
                                SwitchGuess guess = SwitchGuess::State);
-
-// Kinematic guess over the given phase durations: a cubic (Hermite) path that matches position and velocity at both
-// ends, its acceleration flown by the thrust (minus gravity and the frame terms; magnitude within each set's bounds,
-// tilt within the phase limit), the attitude along the thrust (roll of the initial state), the mass from the flow.
-DescentReference kinematic_guess(const DescentModel& model, const DescentState& initial, int start_phase,
-                                 const DescentTarget& target, const DescentLimits& limits, int nodes_per_phase,
-                                 const PhaseDurations& duration_s);
 
 // Previous plan shifted by `elapsed_s` onto the node grid of a re-plan; nodes at time 0 are the measured `initial`
 // state (the old plan's prediction there differs by the tracking error).

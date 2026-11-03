@@ -891,6 +891,29 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             s.ship_landing = p;
         }
     }
+    // A lunar lander (fixed legs: gnc::LunarLandingGuidance and gnc::LunarAscentGuidance): every key of its approach and
+    // ascent is required (planner plan Task 6).
+    if (s.landing_legs.fixed) {
+        const auto read = [&](const char* table, std::string_view key) {
+            const auto* section = t[table].as_table();
+            if (!section || !section->contains(key)) {
+                doc.fail("Mondlandung der Stufe '" + s.id + "': Schlüssel '" + std::string(key) + "' fehlt in [stage." +
+                         table + "]");
+            }
+            return doc.positive(*section, key);
+        };
+        LunarLandingProfile landing;
+        landing.lateral_effort_fraction = read("lunar_landing", "lateral_effort_fraction");
+        LunarAscentProfile ascent;
+        ascent.raptor_start_height_m = read("lunar_ascent", "raptor_start_height_m");
+        ascent.vertical_rise_height_m = read("lunar_ascent", "vertical_rise_height_m");
+        ascent.abort_delta_v_margin = read("lunar_ascent", "abort_delta_v_margin");
+        if (ascent.vertical_rise_height_m < ascent.raptor_start_height_m) {
+            doc.fail("stage.lunar_ascent.vertical_rise_height_m must not lie below raptor_start_height_m");
+        }
+        s.lunar_landing = landing;
+        s.lunar_ascent = ascent;
+    }
     return s;
 }
 
