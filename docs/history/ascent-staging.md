@@ -779,4 +779,6 @@ A rest-to-rest bang-bang turn at the flip set's full gimbal deflection, applied 
 
 ## Drone-ship provisional station before planner plan Task 7 (2026-11-03)
 The kick search placed the drone ship at a provisional station 600 km [E] downrange ("Starlink-class"); since Task 7
-it is the ballistic range of the stage's nominal MECO state (584.4 km for Falcon 9).
+it is the ballistic range of the stage's nominal MECO state: first from the last frame with nine engines lit (T+148.25 s:
+81.7 km, 58.2 km, 2181 m/s, 25.3 deg -> 584.4 km; review M1: before the tail-off, ~4 % short), since fix round 1 from
+the end of the tail-off (612.9 km).

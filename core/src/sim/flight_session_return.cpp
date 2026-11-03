@@ -201,6 +201,7 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
                                      gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
     // no drag given (the first plan): the ship's own, flown ahead
     gnc::DeorbitParameters parameters = given;
+    parameters.reach_check = gnc::entry_reach_check(onboard);  // the onboard guidance's rules and limits
     if (!(parameters.drag_area_per_mass_m2pkg > 0.0)) parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_ahead();
     if (drag_used_m2pkg) *drag_used_m2pkg = parameters.drag_area_per_mass_m2pkg;
     const auto& s = flying.body->state();
@@ -283,6 +284,7 @@ void FlightSession::replan_ship_deorbit() {
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
     const gnc::EntryGuidance onboard(*flying.body, schedule, target,
                                      gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
+    parameters.reach_check = gnc::entry_reach_check(onboard);
     const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
                                         onboard.model(), target, vehicle.mass_properties().mass_kg,
                                         configurations.front().thrust_n / configurations.front().mass_flow_kgps,

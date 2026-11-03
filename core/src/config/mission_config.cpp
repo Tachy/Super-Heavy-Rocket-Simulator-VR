@@ -86,10 +86,11 @@ int positive_integer(const detail::Document& doc, const toml::table& t, std::str
     return static_cast<int>(*v);
 }
 
-// The reversals' crossrange reach follows the entry vehicle's L/D (gnc::entry_crossrange_reach_m, planner plan Task 7).
+// The crossrange reach is what the entry guidance can fly with the vehicle (gnc::assess_entry_reach, planner plan Task 7).
 void reject_crossrange_key(const detail::Document& doc, const toml::table& deorbit) {
     if (deorbit.contains("max_crossrange_km")) {
-        doc.fail("deorbit: max_crossrange_km is derived from the vehicle's L/D (gnc::entry_crossrange_reach_m): remove the key");
+        doc.fail("deorbit: max_crossrange_km wird aus dem Fahrzeug abgeleitet (Reichweite der Eintrittsführung): "
+                 "Schlüssel entfernen");
     }
 }
 

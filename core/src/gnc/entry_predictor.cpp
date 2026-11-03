@@ -84,7 +84,8 @@ public:
             if (norm(nose_) > 0.0) {  // as the guidance
                 lift_angle_ = std::atan2(steering_.y, steering_.x);  // the turn starts from the lift flown
                 steering_ = nose_turn_steering(steering_, nose_, e1_, e2_,
-                                               m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_),
+                                               m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_) *
+                                                   (1.0 - m_.nose_turn_inset),
                                                m_.nose_fraction);
             }
         }
@@ -338,6 +339,10 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
         bank = next_bank;
         now = next;
         t += step_s;
+        if (p.mark_time_s < 0.0 && ((model.mark_mach > 0.0 && now.mach > 0.0 && now.mach < model.mark_mach) ||
+                                    (model.mark_speed_mps > 0.0 && norm(v) < model.mark_speed_mps))) {
+            p.mark_time_s = t;
+        }
         if (now.height_m < entry_height_m) entered = true;
         if (entered && now.height_m > skip_out_height_m) {
             const Exit e = exit_orbit(model, r, v);

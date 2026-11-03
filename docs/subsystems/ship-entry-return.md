@@ -133,8 +133,9 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   ~164 m at v0 5.8 m/s (the analytic model: 252 m). Not in the lead: the plans' non-maximal braking; the first plan
   is synchronous, so no latency term. The lead lies on the line tower ->
   pad with `EntryTarget::nose_direction_itrf` to the tower; only that approach is robust (the arms stand across the
-  line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering to the nearest edge
-  of the nose sector at fraction 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 3 deg/s [E],
+  line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering into the nose
+  sector at fraction 0.2 (alpha ~86 deg), half a sector inside its nearest edge (`nose_turn_inset` 0.5 [E]: room both
+  ways for the turn's own error; on the edge, phase 90 sat pinned there and ended 152 m across), the lift direction turns about the air velocity at 3 deg/s [E],
   then Levenberg-Marquardt in sector coordinates (fraction 0.02-0.5; the sector narrows from +-30 deg 4 km above the
   gate to +-10 deg at it [E]). The predictor flies the same turn. The commanded attitude slews at 1.5x the turn rate
   and its rate is fed forward (`EntryCommand::rate_gcrf_radps`); entry controller actuator delay 0.5 s [E].
@@ -157,14 +158,24 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `FlightSession::plan_ship_return` (game key R) plans the deorbit burn (`gnc/deorbit_planner`: coast samples over
   48 h, passes = closest approaches of the ground track; per pass burn epoch bracketed on the entry predictor's
   downrange error and burn epoch + retrograde delta-v shot (Newton) to the 120 km entry interface at -1 deg at a nominal
-  50 deg bank; the first pass whose predicted crossrange lies within the ship's reach is taken; refused without the
-  landing reserve or a pass). The reach [D] (`gnc::entry_crossrange_reach_m`, planner plan Task 7): the crossrange a
-  flight holding one bank sign gains over the reversals' mean path, the equilibrium-glide approximation (closed form
-  (pi^2/48) (L/D)^2 sin(2 sigma) R for a constant L/D) integrated with the entry table's L/D over the glide (alpha
-  schedule, Mach at the US76 glide height) from the pass's entry speed at the mission's nominal bank: 212 t ship, L/D
-  0.67-0.80 hypersonic, 50 deg: 660 km from circular speed, ~507-554 km from a LEO entry (the planner's own one-sign
-  predictions of the aircatch b4 pass: -776 / +487 km, half the span 631 km). `DeorbitParameters::max_crossrange_m`
-  > 0 replaces it in unit-test fixtures only; a mission's `max_crossrange_km` is refused. Without parameters
+  50 deg bank; the first pass whose entry the guidance can fly is taken; refused without the landing reserve or a
+  pass). The reach [D] (`gnc::assess_entry_reach`, planner plan Task 7 fix round 1) is checked with the guidance's own
+  predictor at the converged shot's entry interface state, as the guidance flies it: first sign the one ending closer
+  across, one reversal flown at the bank-rate limit (its loss included) whose start must come before the hand-over
+  (Mach `terminal_mach` 5; a capsule: `min_reversal_speed_mps`) - holding the first sign to the hand-over and reversing
+  there must end beyond the target, so the terminal phase never inherits a one-sided lateral need; the margin less the
+  guidance's deadband (`reversal_crossrange_base_m`); and the same for each entry-interface dispersion alone, each with
+  its bank re-solved for the range ([E] `EntryReachCheck`: the entry guidance campaign's -0.2 deg, -40 m/s, aero
+  +-10 % with lift and drag together; Crew Dragon: its campaign's -0.1 deg, mass and aero +-3 / 10 %). The reach =
+  |crossrange| + the smallest margin; the planned entry (the zeroing reversal) must stay within the corridor (peak heat
+  rate and load within `constraint_fraction` 0.9 of the heat shield's limits, q within 25 kPa;
+  `DeorbitPlan::entry_peak_*`). Measured (ship, 50 deg, LEO entries 7.38-7.39 km/s): nominal window ~620-660 km, the
+  dispersions take 21-26 km (slower limits), reach 600-615 km; the passes flown: phase 90 -522 km (86 % of 603 km,
+  reversal at 3.5 km/s, gate 5 m), b4 aircatch -381 km of 615 km, phases 0 / 180 / 270 -178 / -366 / -228 km; peaks
+  219-231 kW/m2, 2.3-2.6 g, 8.6-10.5 kPa. Crew Dragon: nominal ~55 km, dispersions ~40 km (steeper limits), reach
+  ~15-16 km. `gnc::entry_crossrange_reach_m` (one-sign equilibrium-glide integral, closed form (pi^2/48) (L/D)^2
+  sin(2 sigma) R; 660 km from circular speed) plus the Earth's rotation under the glide is only the pass prefilter's
+  upper bound (ship 1,280 km: 664 km + 1,326 s of rotation; Crew Dragon 270 km). A mission's `max_crossrange_km` is refused (German load error). Without parameters
   (`plan_ship_return()`, bindings / key R) the ship flies its own `[stage.recovery] return_mission` (M,
   `ship_return_starbase`). The
   burn flies on `[stage.recovery] deorbit_engine_groups` - the ship: the belly sea-level Raptor alone (user

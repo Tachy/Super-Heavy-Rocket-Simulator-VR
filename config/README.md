@@ -301,8 +301,8 @@ flow separation (vacuum engines).
   refuses a file of another kind.
 - `leo_ascent.toml`: target orbit of the game's ascent autopilot (key P).
 - `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`). `[deorbit]`
-  `entry_interface_km`, `entry_flight_path_deg`, `nominal_bank_deg`, `search_window_h`; the crossrange reach follows from
-  the bank and the vehicle's L/D (`gnc::entry_crossrange_reach_m`): `max_crossrange_km` is refused.
+  `entry_interface_km`, `entry_flight_path_deg`, `nominal_bank_deg`, `search_window_h`; the crossrange reach is what the
+  entry guidance can fly with the vehicle at that bank (`gnc::assess_entry_reach`): `max_crossrange_km` is refused.
 - `crew_dragon_return.toml`: capsule return from orbit (`config::load_capsule_return_mission`,
   `sim::place_capsule_return_mission`): `[mission]` `vehicle`, `zone` (`splashdown_zones.toml`); `[orbit]` epoch, heights,
   inclination, RAAN, argument of latitude, `rcs_propellant_kg`; `[deorbit]` as the ship's.

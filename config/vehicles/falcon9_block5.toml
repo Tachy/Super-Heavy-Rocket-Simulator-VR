@@ -144,8 +144,9 @@ reserve_propellant_kg = 46750.0              # [D] MECO of a drone-ship return (
                                              # an RTLS keeps more (CRS-35: ~15.5 % = 66 t at T+137 s)
 landing_propellant_kg = 12100.0              # [D] at landing-burn ignition: 2.8-2.9 % on both flights (touchdown: 1.7 %
                                              # = 7.2 t on both: the real landing burn uses ~4.9 t)
-nominal_meco_s = 137.0                       # [D] CRS-35 (RTLS); Starlink 15-25 (drone ship): 149 s
-nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 60 km
+nominal_meco_s = 137.0                       # [D] CRS-35 (RTLS); Starlink 15-25 (drone ship): T+148.25 s last frame
+                                             # with nine engines, tail-off over at T+151.25 s ([stage.recovery.drone_ship])
+nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 58.2 km / 61.0 km at those times
 # Return (gnc::booster_return_parameters). Evidence: our CRS-35 webcast telemetry (RTLS to LZ-40).
 boostback_engine_groups = ["center", "pair"]  # [E] the 3-engine set (thrust on the axis)
 flip_engine_groups = []                      # [S: SpaceX webcasts] the flip after separation on the nitrogen thrusters,
@@ -216,12 +217,13 @@ landing_phase_max_tilt_deg = [20.0, 20.0, 20.0]  # [E] the same engine throughou
 landing_phase_throttles = [0.7, 0.7, 0.65]   # [E] design throttles that time the ignition (~3.0 km at ~270 m/s)
 landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine change: wide windows that only split the plan
 # Nominal MECO state (Earth-relative; the ascent planner's provisional drone-ship station is its ballistic range), [D]
-# Starlink 15-25 telemetry at the last frame with nine engines lit (T+148.25 s): speed 7,853 km/h, altitude 58.2 km, the
-# altitude rate over +-2 s 933 m/s; ground distance = the horizontal speed integrated from liftoff
-nominal_meco_downrange_m = 81700.0           # [D]
-nominal_meco_altitude_m = 58200.0            # [D]
-nominal_meco_speed_mps = 2181.0              # [D]
-nominal_meco_flight_path_deg = 25.3          # [D] asin(933 / 2181)
+# Starlink 15-25 telemetry at the end of the thrust tail-off (the speed maximum, T+151.25 s; nine engines lit until
+# T+148.25 s): speed 8,009 km/h, altitude 61.0 km, the altitude rate over +-2 s 950 m/s; ground distance = the
+# horizontal speed integrated from liftoff (81.7 km at T+148.25 s + 6.0 km through the tail-off)
+nominal_meco_downrange_m = 87700.0           # [D]
+nominal_meco_altitude_m = 61000.0            # [D]
+nominal_meco_speed_mps = 2225.0              # [D]
+nominal_meco_flight_path_deg = 25.3          # [D] asin(950 / 2225)
 
 [[stage.tank]]
 id = "rcs_n2"

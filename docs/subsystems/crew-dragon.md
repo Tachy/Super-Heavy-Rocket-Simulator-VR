@@ -30,8 +30,11 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   `FlightBody::crew_load_warning`) x 0.9). Nominal entry -2.0 deg at 120 km with 30 deg of bank [E]. Splashdown zone
   `config/splashdown_zones.toml` (`pacific_san_diego` 32.6 N 117.8 W [E], radius 2 km - user 2026-10-14). Deorbit:
   `gnc::plan_deorbit` with `DeorbitParameters::burn_thrust_n` and `entry_mass_kg`; the pass's crossrange within the
-  capsule's reach [D] (`gnc::entry_crossrange_reach_m`: L/D 0.19 at trim, 30 deg bank: 41.2 km from circular speed,
-  34.2 km from 7.6 km/s; planner plan Task 7, was 40 km [E]). Entry angle and bank come from the return mission's
+  capsule's reach [D] (`gnc::assess_entry_reach`, planner plan Task 7 fix round 1: the capsule guidance's reversal
+  window down to its `min_reversal_speed_mps` 500 m/s, its 500 m deadband and its campaign's dispersions -0.1 deg,
+  mass +-3 %, aero +-10 % with the bank re-solved; L/D 0.19 at trim, 30 deg: nominal window ~55 km, the steeper entry
+  takes ~40 km, reach ~15-16 km; the flown return keeps its 15 km pass at 37.1 h, planned peaks 513-527 kW/m2,
+  3.48 g, 18-19 kPa within the corridor). Entry angle and bank come from the return mission's
   `[deorbit]` (M); `plan_capsule_return()` without parameters (bindings, game) flies the capsule's
   `[stage.recovery] return_mission` (`crew_dragon_return`). `FlightSession::plan_capsule_return`
   (steps `CapsuleReturnStep`): Draco burn along +x (4 side Dracos, 1.6 kN), trunk jettison 120 s after it, nose cone

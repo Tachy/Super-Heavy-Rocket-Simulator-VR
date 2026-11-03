@@ -16,6 +16,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
@@ -611,6 +612,7 @@ struct DragonDeorbit {
         p.nominal_bank_rad = 30.0 * deg;
         p.gate_height_m = 5500.0;
         p.burn_thrust_n = thrust_n;
+        p.reach_check = gnc::entry_reach_check(gnc::EntryGuidanceParameters::capsule(), true);  // the capsule's rules
         return p;
     }
     gnc::DeorbitPlan plan(const gnc::DeorbitParameters& p, double entry_mass_kg) {

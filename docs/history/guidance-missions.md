@@ -678,3 +678,16 @@ at L/D 0.2"; `FlightSession::capsule_deorbit_parameters`, bank 30 deg / -2.0 deg
 no-argument `plan_ship_return()` / `plan_capsule_return()` flew struct defaults. With the drag-modelled coast (Task 6)
 the aircatch b4 found no pass within 60 km in 168 h (closest 66.7 km). Since Task 7 the reach is the vehicle's
 (`gnc::entry_crossrange_reach_m`) and the no-argument returns fly the stage's `return_mission`.
+
+Task 7 first took the reach as the one-sign equilibrium-glide integral from the pass's entry speed (ship 507-516 km
+at LEO entries, Crew Dragon 33.9-34.1 km; `DeorbitParameters::max_crossrange_m` > 0 overrode it in fixtures). Review
+I1: an upper bound used as the limit (no reversal, hand-over or dispersions; it counted the terminal phase's glide),
+its margin to the predictor's one-sign half span (~650 km) an accident of the entry speed. Fix round 1 replaced it by
+`gnc::assess_entry_reach` (the guidance's predictor, reversal window to the hand-over, dispersions, corridor); the
+integral stays as the pass prefilter's bound (the prefilter was 5 x the reach, ~3,300 km, and filtered almost nothing).
+
+Ship terminal nose turn before fix round 1: at the basis freeze the steering turned to the nose sector's nearest edge.
+Phase 90 of the ship return (a late reversal at Mach 16.6, the lift 57 deg to the side before the freeze, a 90 deg
+turn) ended the turn with the miss growing to ~80 m and the correction outside the sector: the steering sat on the
+edge (bank -146.3 deg) from 10.4 to 4.7 km and reached the gate 152 m across the tower line (gate miss 155 m). The turn
+now ends half a sector inside the edge (`EntryPredictorModel::nose_turn_inset` 0.5 [E]).

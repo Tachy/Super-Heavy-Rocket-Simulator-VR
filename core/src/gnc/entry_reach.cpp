@@ -30,7 +30,9 @@ double height_of_density(const environment::Us76Atmosphere& air, double density_
 
 }  // namespace
 
-double entry_crossrange_reach_m(const EntryPredictorModel& model, double bank_rad, double entry_speed_mps) {
+double entry_crossrange_reach_m(const EntryPredictorModel& model, double bank_rad, double entry_speed_mps,
+                                double* glide_time_s) {
+    if (glide_time_s) *glide_time_s = 0.0;
     const double cos_bank = std::cos(bank_rad), sin_bank = std::abs(std::sin(bank_rad));
     if (!(cos_bank > 0.0) || model.aero.empty() || !(model.mass_kg > 0.0) || !(entry_speed_mps > 0.0)) return 0.0;
     const double r = model.earth_radius_m;
@@ -59,6 +61,7 @@ double entry_crossrange_reach_m(const EntryPredictorModel& model, double bank_ra
         const double ds = lift_to_drag * cos_bank * v * v * dx / (g * (1.0 - u));
         crossrange += (psi + 0.5 * dpsi) * ds;
         psi += dpsi;
+        if (glide_time_s) *glide_time_s += ds / v;
     }
     return crossrange;
 }

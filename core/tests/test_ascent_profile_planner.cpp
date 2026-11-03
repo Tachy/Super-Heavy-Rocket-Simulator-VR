@@ -269,9 +269,9 @@ TEST_CASE("Provisional downrange from the MECO state", "[sim][ascent_planner][co
     const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
     REQUIRE(f9.stages.front().drone_ship_meco);
     const auto& meco = *f9.stages.front().drone_ship_meco;
-    CHECK(meco.downrange_m == 81700.0);
-    CHECK(meco.altitude_m == 58200.0);
-    CHECK(meco.speed_mps == 2181.0);
+    CHECK(meco.downrange_m == 87700.0);
+    CHECK(meco.altitude_m == 61000.0);
+    CHECK(meco.speed_mps == 2225.0);
     CHECK(meco.flight_path_rad == Catch::Approx(25.3 * deg));
     // Hand value: flat vacuum range from height h, v cos(gamma) / g (v sin(gamma) + sqrt(v^2 sin^2(gamma) + 2 g h));
     // the sphere (curving away, weaker gravity) adds a few per cent.

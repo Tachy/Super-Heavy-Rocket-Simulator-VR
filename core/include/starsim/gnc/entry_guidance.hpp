@@ -262,6 +262,7 @@ public:
     const EntryCommand& command() const { return command_; }  // of the last update
     const EntryTarget& target() const { return target_; }
     const EntryGuidanceParameters& parameters() const { return parameters_; }
+    const config::HeatShieldConfig& limits() const { return limits_; }  // heat rate and load (the crew's when lower)
     void skip_to(EntryPhase phase) { phase_ = phase; }
     // Crew escape: the onboard computer gives the ship up. From now on it aims at `sea` (gnc::sea_give_up_target) and
     // never hands over at a gate: the entry / terminal steering fly the belly flop down to the impact.

@@ -470,7 +470,8 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
             terminal_basis_frozen_ = true;
             if (norm(target_.nose_direction_itrf) > 0.0 && terminal_started_) {  // as the prediction (nose_fraction)
                 terminal_steering_ = nose_turn_steering(terminal_steering_, target_.nose_direction_itrf, terminal_e1_,
-                                                        terminal_e2_, sector_rad, model_.nose_fraction);
+                                                        terminal_e2_, sector_rad * (1.0 - model_.nose_turn_inset),
+                                                        model_.nose_fraction);
             }
         }
     }

@@ -88,6 +88,7 @@ gnc::DeorbitPlan FlightSession::capsule_deorbit_plan(gnc::DeorbitParameters& par
     // The capsule after the trunk jettison: its entry model (aero at trim, heat shield, crew load limit).
     vehicle::FlightBody capsule(vehicle.copy_upper(stages.size() - 1), flying.body->state());
     const gnc::EntryGuidance onboard(capsule, capsule_entry_target());
+    parameters.reach_check = gnc::entry_reach_check(onboard);  // its rules (no terminal phase) and the crew load limit
     const double capsule_mass_kg = capsule.vehicle().mass_properties().mass_kg;
     const auto& s = flying.body->state();
     const auto plan = [&](double entry_mass_kg) {

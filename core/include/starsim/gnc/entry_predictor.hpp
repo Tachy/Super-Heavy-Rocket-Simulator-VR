@@ -61,6 +61,11 @@ struct EntryPredictorModel {
     // lift swept during the up to ~25 s turn - gate overshoots of 0.4-0.8 km, b4 campaign).
     double nose_turn_rate_radps = 3.0 * constants::deg_to_rad;
     double nose_turned_rad = 5.0 * constants::deg_to_rad;
+    // [E] The turn ends this fraction of the sector inside its nearest edge (nose_turn_steering): on the edge the steering
+    // had room to one side only, and the turn's own error (the flown attitude lags the predicted turn) pointed out of the
+    // sector after a 90 deg turn - pinned on the edge from 10.4 to 4.7 km, 152 m across at the gate (planner plan Task 7,
+    // ship return phase 90).
+    double nose_turn_inset = 0.5;
     double nose_sector_at(double height_above_gate_m) const {
         const double f = std::clamp(height_above_gate_m / nose_sector_wide_height_m, 0.0, 1.0);
         return nose_sector_rad + f * (nose_sector_wide_rad - nose_sector_rad);
@@ -114,6 +119,10 @@ struct EntryPredictorModel {
     // then a glide. A constant lift-down bank dives once below circular speed (14-37 g at 9.67 km/s, -5.1 deg).
     // < 0: constant bank (LEO entries).
     double final_bank_rad = -1.0;
+    // > 0: the prediction notes when the Mach number (mark_mach) or the Earth-relative speed (mark_speed_mps) first falls
+    // below this (EntryPrediction::mark_time_s; the deorbit planner's hand-over check). 0: not noted.
+    double mark_mach = 0.0;
+    double mark_speed_mps = 0.0;
 };
 
 struct EntryPredictorState {
@@ -158,6 +167,7 @@ struct EntryPrediction {
     double exit_periapsis_height_m = 0.0;
     double exit_inclination_rad = 0.0;    // to the equator (ITRF z)
     int skips = 0;                        // arcs carried above the atmosphere
+    double mark_time_s = -1.0;            // EntryPredictorModel::mark_mach / mark_speed_mps first passed (< 0: not)
 };
 
 // Integrates the entry of a point mass from `start` to the gate height above the target ground (classical RK4,

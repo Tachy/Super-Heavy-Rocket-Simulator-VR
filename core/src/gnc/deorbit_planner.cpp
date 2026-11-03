@@ -75,7 +75,7 @@ struct Shot {
     double speed_mps = 0.0;
     double downrange_m = 0.0;
     double crossrange_m = 0.0;
-    double crossrange_one_sign_m[2] = {0.0, 0.0};  // at +bank and -bank held to the gate
+    math::Vec3 position_itrf_m, velocity_itrf_mps;  // at the entry interface
 };
 
 class Shooter {
@@ -147,16 +147,18 @@ public:
         shot.speed_mps = norm(v);
         shot.flight_path_rad = std::asin(std::clamp(dot(v, up) / shot.speed_mps, -1.0, 1.0));
         shot.valid = true;
+        shot.position_itrf_m = r;
+        shot.velocity_itrf_mps = v;
         for (const double sign : {1.0, -1.0}) {  // bank reversals: the guidance flies both signs
             EntryPredictorState start;
             start.position_itrf_m = r;
             start.velocity_itrf_mps = v;
             start.bank_rad = sign * parameters_.nominal_bank_rad;
-            const auto p = predict_entry(model_, start, start.bank_rad, target_, parameters_.gate_height_m, 0.0, 2.0);
+            const auto p = predict_entry(model_, start, start.bank_rad, target_, parameters_.gate_height_m, 0.0,
+                                         parameters_.reach_check.step_s);
             shot.valid = shot.valid && p.reached_gate;
             shot.downrange_m += 0.5 * p.downrange_error_m;
             shot.crossrange_m += 0.5 * p.crossrange_m;
-            shot.crossrange_one_sign_m[sign > 0.0 ? 0 : 1] = p.crossrange_m;
         }
         return shot;
     }
@@ -218,7 +220,9 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     };
     // A drag-decayed orbit that sinks into the atmosphere within the window has no pass after that: the samples end
     // there (heights as coast_dynamics: the GCRF z axis as the Earth's axis); coasting on into dense air underflowed
-    // the step size (an 8-day tanker-reserve window from 200 km at 2.6e-3 m2/kg).
+    // the step size (an 8-day tanker-reserve window from 200 km at 2.6e-3 m2/kg). It applies to drag-free coasts too: an
+    // orbit whose perigee already lies below the interface ends its samples at the first perigee (the callers raise
+    // the perigee before they plan).
     const integrators::Event<6> decayed{
         "decayed into the atmosphere",
         [&](double, const integrators::State<6>& y) {
@@ -252,20 +256,23 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     const auto entry_mass = [&](double dv) {
         return parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg - burn_propellant(dv);
     };
-    // The reach of the reversals: the vehicle's (entry_crossrange_reach_m at the nominal bank, from the pass's entry
-    // speed); an explicit max_crossrange_m (unit-test fixtures) replaces it. The prefilter takes it from circular speed
-    // (its upper bound).
-    const auto reach_at = [&](const EntryPredictorModel& m, double entry_speed_mps) {
-        return parameters.max_crossrange_m > 0.0 ? parameters.max_crossrange_m
-                                                 : entry_crossrange_reach_m(m, parameters.nominal_bank_rad, entry_speed_mps);
-    };
-    EntryPredictorModel bound_model = model;  // at the entry mass (the passed model's may be unset)
+    // Prefilter: the orbit's cross-track distance at the closest approach against an upper bound of what an entry can
+    // reach - the one-sign glide reach from circular speed (entry_crossrange_reach_m at the nominal bank and the entry
+    // mass; the passed model's mass may be unset) plus the Earth's rotation under the whole glide (the entry arrives
+    // after the orbit's pass; at most the glide's duration). What the guidance can fly is checked per converged pass.
+    EntryPredictorModel bound_model = model;
     bound_model.mass_kg = parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg;
-    const double reach_bound_m = reach_at(bound_model, std::sqrt(gm / radius_m));
-    if (debug) std::printf("[deorbit] crossrange reach (circular entry) %.1f km\n", reach_bound_m / 1000.0);
+    double glide_time_s = 0.0;
+    const double glide_reach_m = entry_crossrange_reach_m(bound_model, parameters.nominal_bank_rad, std::sqrt(gm / radius_m),
+                                                          &glide_time_s);
+    const double reach_bound_m = glide_reach_m + constants::earth_rotation_rate_radps * radius_m * glide_time_s;
+    if (debug) {
+        std::printf("[deorbit] pass prefilter %.1f km (glide reach %.1f km, %.0f s)\n", reach_bound_m / 1000.0,
+                    glide_reach_m / 1000.0, glide_time_s);
+    }
     for (size_t i = 1; i + 1 < samples.size(); ++i) {
         if (!(angle[i] < angle[i - 1] && angle[i] <= angle[i + 1])) continue;
-        if (std::abs(cross_track[i]) > 5.0 * reach_bound_m) {
+        if (std::abs(cross_track[i]) > reach_bound_m) {
             if (debug) std::printf("[deorbit] pass %+.0f s cross track %.0f km: far\n", samples[i].epoch - epoch, cross_track[i] / 1000.0);
             continue;
         }
@@ -359,14 +366,27 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             shooter.set_mass(entry_mass(dv));
         }
         if (!converged) continue;
-        const double reach_m = reach_at(shooter.model(), shot.speed_mps);
+        EntryPredictorState entry;
+        entry.position_itrf_m = shot.position_itrf_m;
+        entry.velocity_itrf_mps = shot.velocity_itrf_mps;
+        const auto reach = assess_entry_reach(shooter.model(), entry, parameters.nominal_bank_rad, target,
+                                              parameters.gate_height_m, parameters.reach_check);
         if (debug) {
-            std::printf("[deorbit]   crossrange %.1f km (one sign %+.1f / %+.1f km), reach %.1f km\n",
-                        shot.crossrange_m / 1000.0, shot.crossrange_one_sign_m[0] / 1000.0,
-                        shot.crossrange_one_sign_m[1] / 1000.0, reach_m / 1000.0);
+            std::printf("[deorbit]   crossrange %.1f km, reach %.1f km (nominal margin %.1f km, dispersions %.1f km: %s), "
+                        "reversal at %.0f m/s, hand-over %.0f s; peaks %.0f kW/m2 %.2f g %.1f kPa%s\n",
+                        shot.crossrange_m / 1000.0, reach.reach_m / 1000.0, reach.nominal_margin_m / 1000.0,
+                        reach.dispersion_reserve_m / 1000.0, reach.limiting_case, reach.reversal_speed_mps,
+                        reach.handover_time_s,
+                        reach.peak_heat_rate_w_m2 / 1000.0, reach.peak_load_g, reach.peak_dynamic_pressure_pa / 1000.0,
+                        reach.within_corridor ? "" : " - outside the corridor");
         }
-        if (std::abs(shot.crossrange_m) > reach_m) continue;
-        plan.crossrange_reach_m = reach_m;
+        if (!reach.bracketed || !reach.within_corridor) continue;
+        plan.crossrange_reach_m = reach.reach_m;
+        plan.crossrange_reserve_m = reach.dispersion_reserve_m;
+        plan.reversal_speed_mps = reach.reversal_speed_mps;
+        plan.entry_peak_heat_rate_w_m2 = reach.peak_heat_rate_w_m2;
+        plan.entry_peak_load_g = reach.peak_load_g;
+        plan.entry_peak_dynamic_pressure_pa = reach.peak_dynamic_pressure_pa;
 
         plan.node = {t, -math::normalized(shooter.state_at(t).velocity_mps) * dv};
         plan.delta_v_mps = dv;
