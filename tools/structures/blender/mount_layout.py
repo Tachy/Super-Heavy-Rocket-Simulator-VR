@@ -385,7 +385,7 @@ def _hoods(S, sh):
 
 
 def _qd_heads(S, sh):
-    """Booster QD heads on the launch ring, one under each hood, `qd_head_radius_m` from the axis (0.35 m off the hull);
+    """Booster QD heads on the launch ring, one under each hood, `qd_head_radius_m` from the axis (0.35 m off the hull, above the bell envelope);
     static (whether the covers move at liftoff is unknown)."""
     m = sh.m
     front, depth = m["qd_head_radius_m"], m["qd_head_depth_m"]

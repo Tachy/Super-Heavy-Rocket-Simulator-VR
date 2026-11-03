@@ -227,7 +227,8 @@ func _check_mount(view: TowerView, models: Dictionary, geometry: Dictionary) -> 
 			elif absf(v.z - ring_top) < 1.0e-4:
 				min_r_ring = minf(min_r_ring, r)
 	_check(min_r_above >= 4.5 + 0.04 - 1.0e-4, "nothing of the mount inside the hull above the ring (%.3f m)" % min_r_above)
-	_check(absf(min_r_ring - 0.5 * float(m["ring_opening_diameter_m"])) < 0.01, "ring opening %.3f m radius" % min_r_ring)
+	# Only the QD heads (face at qd_head_radius_m) reach inside the ring's opening radius.
+	_check(min_r_ring >= float(m["qd_head_radius_m"]) - 0.01 and min_r_ring <= 0.5 * float(m["ring_opening_diameter_m"]) + 0.01, "ring opening / QD head inner radius %.3f m" % min_r_ring)
 	# Exits: the trench's ramps run across the mount-tower line, 25.5 m from the axis; the hardstand stays out of the pit.
 	var hardstand: AABB = (view.get_node("TrenchModel/Trench/hardstand") as MeshInstance3D).mesh.get_aabb()
 	_check(hardstand.position.z > 0.0 and hardstand.size.z < 0.001, "hardstand a flat plate above the ground (%s)" % hardstand)

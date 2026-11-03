@@ -211,7 +211,9 @@ def test_two_exit_ramps_opposite_and_perpendicular_to_the_tower_line(detail, tre
 def test_ring_outer_and_opening(detail, mount):
     h = detail["mount"]["deck_height_m"]
     radii = [math.hypot(v[0], v[1]) for verts, _ in mount.nodes["hardware"] for v in verts if abs(v[2] - h) < 1e-9]
-    assert min(radii) == pytest.approx(0.5 * detail["mount"]["ring_opening_diameter_m"], abs=0.01)  # 5.0 m
+    opening_r = 0.5 * detail["mount"]["ring_opening_diameter_m"]  # 5.0 m
+    assert any(abs(r - opening_r) < 0.01 for r in radii)  # the ring's inner edge
+    assert min(radii) > detail["mount"]["qd_head_radius_m"] - 0.01  # only the QD heads reach inside it (head face 4.85 m)
     assert any(r == pytest.approx(0.5 * detail["mount"]["ring_outer_diameter_m"], abs=0.01) for r in radii)  # 5.8 m
     clamp_tops = {round(v[2], 6) for verts, _ in mount.nodes["hardware"] for v in verts
                   if abs(v[2] - (h + detail["mount"]["clamp_height_m"])) < 1e-9}
