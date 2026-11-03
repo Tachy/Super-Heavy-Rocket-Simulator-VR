@@ -92,7 +92,7 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
 - Ascent throttle / max-Q limit are vehicle data (user 2026-10-23).
 
 ## Validation
-- Test "Starship ascent to flight 14's insertion orbit against its webcast telemetry" (see Model).
+- Test "Starship ascent to flight 14's insertion orbit" and its nightly report "Starship ascent: agreement with flight 14's webcast telemetry (report)" (see Model).
 - Nightly report "Booster descent drag: agreement with the webcast telemetry of flights 13 and 14" (report, not gate (user 2026-11-03: "report, not gate; physical gate kept"), 2026-11-03; no physical gate remains in that case): the unguided booster (210 t dry +
   51 t) follows both descents from ~27 km within 0.6 / 2.6 % rms and loses altitude to the landing burn within
   415 / 158 m.

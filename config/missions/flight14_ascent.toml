@@ -1,6 +1,6 @@
 # Validation case (ascent trajectory and staging, Task 6): Starship flight 14 (2026-09-28, B21 / S41) flown to its own
 # recorded insertion orbit, with its payload and propellant load, through the onboard computer's plan (sim::plan_launch: kick,
-# catch, MECO from the booster's return) - test "Starship ascent to flight 14's orbit against its webcast telemetry".
+# catch, MECO from the booster's return) - test "Starship ascent to flight 14's insertion orbit" and its nightly report case.
 # The recorded flight (tests/validation/telemetry/flight14_2026-09-28.csv, flights.toml) is the comparison, never an
 # input to the profile. Not modelled (stated, not corrected): the booster engine out from T+76 s (32 of 33 lit) and the
 # ship's RVac out from T+438 s; flight 14's booster splashed down in the gulf (ours returns to the tower).

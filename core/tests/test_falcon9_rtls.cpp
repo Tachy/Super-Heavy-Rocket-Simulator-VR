@@ -280,7 +280,7 @@ struct RtlsFlight {
 
 // Liftoff of the falcon9_rtls mission to the stage's touchdown on LZ-40 (the gate case and the webcast report fly the same flight).
 RtlsFlight fly_rtls_mission() {
-    const auto m =config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
@@ -395,6 +395,8 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
     CHECK(f.hold_tilt_deg < 0.5);
     CHECK(f.three_engines_s - f.boostback_s > 2.5);
     CHECK(f.n2_left_kg >= 0.2 * (600.0 - f.n2_left_kg));  // floor [E]: 20 % of the used
+    // The flip law ends at its own 114 deg gate; far off means the timeout path (flip law logic, not webcast agreement; report row below).
+    CHECK(std::abs(f.ignition_off_velocity_deg - 114.0) < 15.0);
     CHECK(f.entry_s > 0.0);
     CHECK(f.landing_s > 0.0);
     CHECK(f.outcome == sim::LandingOutcome::Landed);
