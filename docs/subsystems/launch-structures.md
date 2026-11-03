@@ -260,7 +260,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
 - `tools/structures/tests/test_mount_layout.py`: base 44.6 x 40 m, deck 18.7 m, ring top = physics height, ring 9 / 10.4 m, 20 clamps, aprons 26 m wide / 33 m
   out as wide as the portal foot, floor -9 m, portal open over its whole width on both sides, rectangular doors, hoods down the front face, hardstand round the site and off the pit, foot on the physics axis, every polygon planar. Stack clearance (Review Focus 1): sampled points of
   every mount polygon (6 per triangle) against the hull (4.5 m radius above the ring top, +0.04 m) and the 33 booster engines' bells below it
-  (rings 1.0 / 2.6 / 4.1 m, exact bell contour, margin 0.04 m): none inside; a 8 m opening is caught (negative control). `tower_view_test`
+  (rings 1.0 / 2.6 / 4.40 m, bells 1.30 m inner / 1.32 m lip, exact bell contour, margin 0.04 m): `test_booster_stack_clears_deck_ring_and_qd` is RED: the outer bells reach beyond the 9.0 m mount opening (2052 points inside the envelope at the ring's underside); the pad opening awaits the user's decision (`docs/known-issues.md`); a 8 m opening is caught (negative control). `tower_view_test`
   (309 cases): model dimensions, deck at 19 m, ring opening 4.5 m, mask equals the drawn footprint (+-0.06 m), no script error in the log.
 - `game/tests/trench_mask_check.gd` (Review Focus 4; GPU): per distance 30 m .. 400 km three frames (terrain alone / mask on, no models / as drawn);
   the pixels the mask changes (isolated noise filtered, 150 frames wait for the node morph) lie on the projected footprint (+3 px) at every

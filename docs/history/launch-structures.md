@@ -68,3 +68,5 @@ The tower top was drawn as a flat deck at 144 m with a centred louvred 8 x 8 x 7
 Earlier text of the subsystem file: (courses of 5.35 m, two plates across, 0.1 m seams), roof deck 144 m with a louvred 8 x 8 x 7 m block (139.9-146.9 m) and a railing (silhouette top 146.9 m, the physics box is 146 m).
 
 Earlier cable text: Their upper ends meet the fixed crown beam on the tower top (`[tower.roof] crown_*`, `mechazilla_layout.crown`, node `crown` of rails.gltf): a beam from inside the corner leg (1 m) along the outward diagonal to the axis, a cross beam over the axis along the groups, a 1.2 m sheave block on it above each group, underside 142.6 m (under the roof plate, top <= 146.9 m, so `check_envelope.py` adds no exception). [E] from statics only: `padb_tower_top_cabin_2026-04` shows the roof cabin overhanging the lattice with two cables hanging from its underside on the outer side, no beam or sheave resolved.
+
+Earlier stack clearance text (until the Raptor 3 nozzle change 2026-11-03): bells in rings 1.0 / 2.6 / 4.1 m, margin 0.04 m: none inside the mount polygons; a 8 m opening is caught (negative control).
