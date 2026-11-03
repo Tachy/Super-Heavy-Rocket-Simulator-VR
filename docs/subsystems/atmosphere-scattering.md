@@ -127,7 +127,7 @@ vehicles still fly through `Us76Atmosphere`).
 
 ## Validation
 
-- Core `[atmosphere]` (21 ctest cases, incl. aerial perspective to a point before the entry): Rayleigh coefficient and
+- Core `[atmosphere]` (20 ctest cases, incl. aerial perspective to a point before the entry): Rayleigh coefficient and
   vertical optical depth vs Bucholtz 1995 (1 % / 2 %); transmittance vs a direct optical-depth integral (3.24e-3) and
   single scattering vs a brute-force raymarch (1.07e-3); off-texel lookups 7.1e-3, horizon seam 9.2e-3; multiple
   scattering 5 vs 7 orders 1.96e-3; direct sun at air mass 1.5 vs ASTM G-173 (400-700 nm) -2.1 %, runtime direct beam

@@ -111,6 +111,7 @@ TEST_CASE("Docking campaign: IDA-2 from Waypoint 0 to hard capture", "[iss][dock
     CHECK(r.contact->envelope.inside);
     CHECK(-r.contact->port.velocity_mps.x < 0.1);  // M9 criterion
     CHECK(r.proximity_kg < 150.0);                 // [E] bound, i3 reserve 900 kg incl. proximity
+    CHECK(r.flight_min < 180.0);                   // the proximity flight's own bound (formerly fly(d, 3 h))
     CHECK_FALSE(r.flyaround);                      // the V-bar approach has none
     CHECK_FALSE(r.abort_event);
     CHECK(r.autopilot_off_at_contact);
@@ -132,6 +133,7 @@ TEST_CASE("Docking campaign: IDA-3 from Waypoint 0 to hard capture", "[iss][dock
     CHECK(r.contact->envelope.inside);
     CHECK(-r.contact->port.velocity_mps.x < 0.1);  // M9 criterion
     CHECK(r.proximity_kg < 150.0);                 // [E] bound, i3 reserve 900 kg incl. proximity
+    CHECK(r.flight_min < 180.0);                   // the proximity flight's own bound (formerly fly(d, 3 h))
     CHECK(r.flyaround);                            // the R-bar approach flies around the station first
     CHECK_FALSE(r.abort_event);
     CHECK(r.autopilot_off_at_contact);

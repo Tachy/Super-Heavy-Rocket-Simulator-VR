@@ -417,7 +417,7 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   coelliptic 68.66, approach initiation 5.93, braking 0.13 @+21.35 h; Waypoint 0 (-7.9, 0.6, 399.9) m, 0.021 m/s, 603 kg.
   Real Demo-2 in-plane total ~118 m/s.
 - **Proximity**, guidance alone (CW point mass, dt 0.05 s): IDA-2 62.8 min / 49.8 kg, IDA-3 98.8 min / 112.7 kg.
-  Session campaigns (`[proximity]`, full model, 200 Hz, OEM ISS, 10-24 s each, not `[slow]`):
+  Session campaigns (full model, 200 Hz, OEM ISS; the Waypoint 0 rows are flown by the `[slow]` docking campaign chains (`test_docking_campaign.cpp`, the proximity flight up to the contact), the dispersed Waypoint 2 starts by the `[proximity]` cases, 10-24 s each):
 
   | case | time | propellant | axial | lateral | offset | angle | rate |
   |---|---|---|---|---|---|---|---|

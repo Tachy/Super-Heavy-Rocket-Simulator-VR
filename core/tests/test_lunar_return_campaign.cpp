@@ -156,7 +156,20 @@ Run fly(const Dispersion& d, bool aircatch) {
     // entry angle: the inertial velocity turned in the trajectory plane at the interface, after the entry
     // trim (> 0: steeper). Turned right after the braking burn (~1,800 km up, 8 min out) 0.07 deg was ~10 m/s and
     // ~0.5 deg at the interface - the trim then flew 8-23 m/s for an artefact of the test (l5 Task 10).
+    bool handover_printed = false;
     run_until(s, s.epoch() + 4.0 * 3600.0, 1.0, 4000000, [&] {
+        if (!handover_printed && std::getenv("STARSIM_VERBOSE") && s.autopilot().state == sim::AutopilotState::Return) {
+            // the hand-over state of the entry scenario fixture (test_mission_timeline.cpp, test_lunar_return_entry.cpp):
+            // the first step with the autopilot in Return, after the entry trim. Regenerate with STARSIM_RETURN_NOMINAL=1
+            // and the single case "[.lunar_return_case]" (seed ignored)
+            handover_printed = true;
+            const auto& st = body.state();
+            std::printf("[lunar return] hand-over: epoch_tdb %.17g propellant %.17g r %.17g %.17g %.17g v %.17g %.17g %.17g "
+                        "q %.17g %.17g %.17g %.17g\n",
+                        s.epoch().tdb_seconds_past_j2000(), body.vehicle().propellant_kg(), st.position_gcrf_m.x,
+                        st.position_gcrf_m.y, st.position_gcrf_m.z, st.velocity_gcrf_mps.x, st.velocity_gcrf_mps.y,
+                        st.velocity_gcrf_mps.z, st.attitude.w, st.attitude.x, st.attitude.y, st.attitude.z);
+        }
         if (step() == sim::LunarStep::EntryTrim || s.autopilot().state == sim::AutopilotState::Burn) return false;
         const auto tel = s.telemetry(ship);
         const double sink_mps = -tel.speed_relative_mps * std::sin(tel.flight_path_angle_rad);
@@ -170,21 +183,10 @@ Run fly(const Dispersion& d, bool aircatch) {
     }
 
     // entry (and for the aerocapture: capture coast, perigee raise, circularisation, b4) to the catch
-    bool entered = false, handover_printed = false;
+    bool entered = false;
     while (!body.caught() && !body.impacted() && s.epoch() - t0 < 13.0 * 86400.0) {
         s.advance_to(s.epoch() + 86400.0, 200);
         const auto tel = s.telemetry(ship);
-        if (!handover_printed && std::getenv("STARSIM_VERBOSE") && s.autopilot().state == sim::AutopilotState::Return) {
-            // the hand-over state of the entry scenario fixture (test_mission_timeline.cpp, test_lunar_return_entry.cpp):
-            // regenerate with STARSIM_RETURN_NOMINAL=1 and the single case "[.lunar_return_case]" (seed ignored)
-            handover_printed = true;
-            const auto& st = body.state();
-            std::printf("[lunar return] hand-over: epoch_tdb %.17g propellant %.17g r %.17g %.17g %.17g v %.17g %.17g %.17g "
-                        "q %.17g %.17g %.17g %.17g\n",
-                        s.epoch().tdb_seconds_past_j2000(), body.vehicle().propellant_kg(), st.position_gcrf_m.x,
-                        st.position_gcrf_m.y, st.position_gcrf_m.z, st.velocity_gcrf_mps.x, st.velocity_gcrf_mps.y,
-                        st.velocity_gcrf_mps.z, st.attitude.w, st.attitude.x, st.attitude.y, st.attitude.z);
-        }
         if (!entered && tel.altitude_m < interface_height_m) {
             entered = true;
             r.entry_speed_mps = tel.speed_relative_mps;

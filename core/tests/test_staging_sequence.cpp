@@ -243,7 +243,7 @@ TEST_CASE("A manual stage command during the sequence separates once", "[staging
 // manual command of the case above) - no ascent plan, no flight to the real MECO (formerly both missions were flown
 // from the pad to their MECO: 124 s). engage_ascent_autopilot resets the autopilot and takes the state from the
 // sequence under way, so the state before the engagement does not matter.
-TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging][ascent_planner]") {
+TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const double tick = sim::FlightSession::tick_s;

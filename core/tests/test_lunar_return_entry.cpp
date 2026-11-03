@@ -1,5 +1,5 @@
 // The lunar return's entry to the catch from the hand-over state of the full flight (l5 Task 8): a fast fixture for the
-// profiled entry guidance - the full flight ("Lunar return direct: the ship is caught at Starbase") takes 2-20 min.
+// profiled entry guidance - the full flight (the lunar return campaign's direct seeds) takes 2-20 min.
 
 #include <algorithm>
 #include <cmath>
