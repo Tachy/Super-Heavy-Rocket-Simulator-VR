@@ -291,8 +291,11 @@ TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][s
 // need from this gate (a raised gate, 1200 m at 100 m/s: gnc::ship_catch_propellant_need above the floor), so no guidance
 // can complete the catch. The guidance plans from the load and gives the catch up. The former "Fang verfehlt" (the CG
 // passing the catch point without the abort flag) is not reached by a load: scans 2026-11-03 at gates 950 m / 90-115
-// m/s and 1200 m, 15-18 t, and entering from 12 km gave "Fang abgebrochen", or ran dry hovering at the arms.
-TEST_CASE("A catch that fails after the gate ejects the crew", "[crew_escape][session]") {
+// m/s and 1200 m, 15-18 t, and entering from 12 km gave "Fang abgebrochen", or ran dry hovering at the arms. The case
+// starts at the gate (place_landing_ship), so the entry's floor check does not run: it tests the guidance's abort of a
+// load above the floor (catch_feasibility holds).
+TEST_CASE("A load above the catch floor but short of the gate's need aborts the catch and ejects the crew",
+          "[crew_escape][session]") {
     const double height_m = 1200.0, sink_mps = 100.0;
     const Vec3 offset{to_tower * -220.0 + Vec3{0, 0, height_m}}, velocity{to_tower * 3.0 + Vec3{0, 0, -sink_mps}};
     const auto empty = ship_with(0.0);
@@ -318,7 +321,7 @@ TEST_CASE("A catch that fails after the gate ejects the crew", "[crew_escape][se
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
     CHECK_FALSE(s.early);
-    CHECK(s.give_up_reason.find("Treibstoff zu knapp") == std::string::npos);
+    CHECK(s.give_up_reason == "Fang abgebrochen");
     CHECK(s.fired);
     CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {
