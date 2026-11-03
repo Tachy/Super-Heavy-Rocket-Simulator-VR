@@ -110,10 +110,13 @@ DescentState plan_state(const vehicle::FlightBody& body, const environment::Body
 }
 
 double feed_propellant_kg(const vehicle::Vehicle& vehicle) {
+    if (vehicle.stages().front().feed != vehicle::FeedSource::Header) return vehicle.propellant_kg();
+    return landing_feed_propellant_kg(vehicle);
+}
+
+double landing_feed_propellant_kg(const vehicle::Vehicle& vehicle) {
     const auto& stage = vehicle.stages().front();
-    if (stage.feed != vehicle::FeedSource::Header || !stage.has_header_tanks() || stage.engines.empty()) {
-        return vehicle.propellant_kg();
-    }
+    if (!stage.has_header_tanks() || stage.engines.empty()) return vehicle.propellant_kg();
     const double oxidizer = stage.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Header);
     const double fuel = stage.propellant_kg(config::TankContents::Fuel, config::TankRole::Header);
     const double ratio = stage.engines.front().performance->config().mixture_ratio;  // oxidizer / fuel

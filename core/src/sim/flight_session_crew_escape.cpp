@@ -170,8 +170,17 @@ void FlightSession::run_crew_escape() {
         // an aerocapture pass is no catch attempt (final review I2): the final entry after the capture is judged
         const bool aerocapture = ship.entry_guidance && ship.entry_guidance->parameters().aerocapture_apoapsis_m > 0.0;
         if (ship.entry_guidance && !ship.ship_landing && !aerocapture) {
-            const auto f = gnc::catch_feasibility(ship.body->vehicle(), gnc::ship_flip_groups(ship.body->vehicle().stages().front().config),
-                                                  c.config.min_catch_propellant_kg);
+            const auto& vehicle = ship.body->vehicle();
+            const auto& stage = vehicle.stages().front().config;
+            if (!c.catch_floor_kg) {  // the ship's own need from the nominal gate (its entry guidance's) to the arms
+                const auto& p = ship.entry_guidance->parameters();
+                const double arm_top_m =
+                    tower_ && !stage.catch_pins.azimuths_rad.empty() ? tower_->geometry().arm_top_height_m(0.0) : 0.0;
+                c.catch_floor_kg = gnc::ship_catch_propellant_floor_kg(vehicle.source_config(), stage, p.gate_height_m,
+                                                                       p.gate_reference_sink_mps, arm_top_m,
+                                                                       c.config.catch_propellant_margin);
+            }
+            const auto f = gnc::catch_feasibility(vehicle, gnc::ship_flip_groups(stage), *c.catch_floor_kg);
             if (!f.feasible) {
                 crew_arm(f.reason, crew_height_m(*ship.body) > c.config.min_firing_height_m);
                 const auto site = return_site(ship.body->vehicle());

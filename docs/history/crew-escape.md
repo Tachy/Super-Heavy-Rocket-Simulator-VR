@@ -26,6 +26,10 @@ water"; data + game interface first, the pilot's view rendered later; **the ship
   review I1: at 27 t the ship ran dry hovering at the arms at ~93 m and dropped onto them - 3 seats out, the fourth
   0.4 s stagger slot too late: "Schiff aufgeschlagen vor dem Ausstieg"). An aerocapture pass is not judged; the final
   entry after the capture is (final review I2).
+- Superseded 2026-11-03 (planner plan Task 4 fix round 2): the fixed 30 t floor (compared with all propellant, main
+  residue included) was the 290 t ship's; the 177 t ship catches from 18 t, so it gave up catchable crewed ships. Now the
+  derived floor on the usable header propellant (`docs/subsystems/crew-escape.md`). The give-up-at-1.2 km / tumbling /
+  one-long-advance cases flew 20 t (below 30 t); they now fly half the derived floor.
 - **Give-up in the entry** (`EntryGuidance::give_up`, `gnc::sea_give_up_target`): the target moves to the pad + sea
   direction x (shoreline + 2 km) [E], the gate height to 0, no gate hand-over, no flip: the entry / terminal steering fly
   the belly flop down to the impact. Unit case: 12 km / 120 m/s, 2 km west of the pad -> impact 2,500 m east (the

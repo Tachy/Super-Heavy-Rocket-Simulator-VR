@@ -82,7 +82,7 @@ CrewEscapeConfig load_crew_escape(const std::filesystem::path& config_dir, std::
     }
     c.min_firing_height_m = doc.positive(t, "min_firing_height_m");
     c.sea_target_margin_m = non_negative(doc, t, "sea_target_margin_m");
-    c.min_catch_propellant_kg = non_negative(doc, t, "min_catch_propellant_kg");
+    c.catch_propellant_margin = non_negative(doc, t, "catch_propellant_margin");
     c.max_load_g = doc.positive(t, "max_load_g");
     c.max_load_duration_s = non_negative(doc, t, "max_load_duration_s");
     c.min_clearance_m = non_negative(doc, t, "min_clearance_m");

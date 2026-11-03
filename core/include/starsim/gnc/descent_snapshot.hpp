@@ -100,6 +100,9 @@ struct DescentSnapshot {
 // limited by the scarcer of oxidizer and fuel at the engines' mixture ratio. Otherwise Vehicle::propellant_kg().
 // The snapshot's propellant floor (min_mass_kg) leaves the reserve of this.
 double feed_propellant_kg(const vehicle::Vehicle& vehicle);
+// The same for the landing still to come, whatever the stage feeds from now (the ship in the entry still feeds from its
+// main tanks): a first stage with header tanks the headers only, otherwise Vehicle::propellant_kg().
+double landing_feed_propellant_kg(const vehicle::Vehicle& vehicle);
 
 DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                       time::Epoch epoch, const LandingSite& site, const PlanFrame& frame,

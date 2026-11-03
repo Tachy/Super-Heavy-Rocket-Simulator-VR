@@ -20,7 +20,9 @@
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/catch_feasibility.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/crew_escape.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -219,7 +221,13 @@ TEST_CASE("crew escape touchdown over water from terrain", "[session][earth_terr
     session.set_launch_site(starbase);
     const double tower_azimuth = starbase.tower->azimuth_rad;
     const Vec3 to_tower{std::sin(tower_azimuth), std::cos(tower_azimuth), 0.0};
-    const auto cfg = ship_with(20000.0);  // below min_catch_propellant_kg: the give-up fires at once
+    // half the crewed ship's catch floor (its entry guidance's nominal gate to the arms): the give-up fires at once
+    const auto probe = ship_with(0.0);
+    const auto gate = gnc::entry_guidance_parameters(probe, probe.stages[0], gnc::EntryKind::Orbital);
+    const double floor_kg = gnc::ship_catch_propellant_floor_kg(probe, probe.stages[0], gate.gate_height_m,
+                                                                gate.gate_reference_sink_mps,
+                                                                starbase.tower->catch_height_m, crew().catch_propellant_margin);
+    const auto cfg = ship_with(0.5 * floor_kg);
     session.place_entering_ship(cfg, belly_state(session, cfg, to_tower * -300.0 + Vec3{0, 0, 1200}, {0.0, 0.0, -95.0}),
                                 t0());
     session.set_crew_escape(crew());

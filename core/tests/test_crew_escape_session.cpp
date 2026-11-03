@@ -16,7 +16,10 @@
 #include "starsim/config/crew_escape_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/propellant_loading.hpp"
+#include "starsim/gnc/catch_feasibility.hpp"
+#include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/crew_escape.hpp"
@@ -56,6 +59,31 @@ config::VehicleConfig ship_with(double propellant_kg) {
     for (auto& f : ship.flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
     return cfg;
 }
+
+double arm_top_height_m() {
+    return config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").tower->catch_height_m;
+}
+
+// The crewed ship's catch floor (usable propellant) as the session derives it: the nominal gate of the ship's entry
+// guidance to the Starbase arms, the crew config's margin.
+double catch_floor_kg() {
+    const auto cfg = ship_with(0.0);
+    const auto p = gnc::entry_guidance_parameters(cfg, cfg.stages[0], gnc::EntryKind::Orbital);
+    return gnc::ship_catch_propellant_floor_kg(cfg, cfg.stages[0], p.gate_height_m, p.gate_reference_sink_mps,
+                                               arm_top_height_m(), crew().catch_propellant_margin);
+}
+
+// The fill (headers first, gnc::fill_tanks) whose usable landing propellant - the headers at the mixture ratio less the
+// unusable header propellant (catch_feasibility) - is `usable_kg` (linear while the headers take the whole fill).
+double fill_for_usable_kg(double usable_kg) {
+    const double probe_kg = 30000.0;
+    const vehicle::Vehicle v(ship_with(probe_kg), STARSIM_CONFIG_DIR);
+    return (usable_kg + v.stages().front().config.unusable_propellant.header_kg) * probe_kg /
+           gnc::landing_feed_propellant_kg(v);
+}
+
+// A load the catch floor gives up at the first entry tick.
+double short_load_kg() { return fill_for_usable_kg(0.5 * catch_floor_kg()); }
 
 time::Epoch t0() {
     test::spice_session();
@@ -202,7 +230,7 @@ TEST_CASE("Crewed ship with a failed engine before the gate gives up and the cre
 TEST_CASE("A give-up below the minimum firing height fires at once", "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
-    const auto cfg = ship_with(20000.0);  // below min_catch_propellant_kg
+    const auto cfg = ship_with(short_load_kg());  // below the catch floor
     session.place_entering_ship(cfg, belly_state(session, cfg, to_tower * -300.0 + Vec3{0, 0, 1200}, {0.0, 0.0, -95.0}),
                                 t0());
     session.set_crew_escape(crew());
@@ -258,15 +286,51 @@ TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][s
     for (const auto& m : s.members) CHECK(m.outcome == sim::CrewOutcome::Rescued);
 }
 
-// Final review I1: a catch that misses must arm the seats too.
-// Planner plan Task 4 fix round 1: the load comes from the ship config (the former fixed 27 t was the 290 t ship's first
-// missed load; the 177 t ship catches down to 18 t, hidden "Ship catch: lowest catchable gate load"). It is the rocket
-// equation's propellant for the ideal stop at the arms - the fall from 950 m at 100 m/s, sqrt(v^2 + 2 g h), no gravity
-// loss, no flip - for the light landing mass at the landing engines' sea-level Isp: no guidance catches with it. The
-// guidance plans from the load and gives the catch up ("Fang abgebrochen"): a scan of 9-17 t gave that reason at every
-// load, the guidance no longer flies a short load into the arms (the former "Fang verfehlt", the CG passing the catch
-// point without the abort flag, is not reached by a load any more).
-TEST_CASE("A missed catch ejects the crew", "[crew_escape][session]") {
+// Final review I1: a catch that fails after the gate must arm the seats too. Planner plan Task 4 fix round 2: the load
+// passes the crewed ship's catch floor (the entry flies it to the gate, catch_feasibility) but lies below the ideal
+// need from this gate (a raised gate, 1200 m at 100 m/s: gnc::ship_catch_propellant_need above the floor), so no guidance
+// can complete the catch. The guidance plans from the load and gives the catch up. The former "Fang verfehlt" (the CG
+// passing the catch point without the abort flag) is not reached by a load: scans 2026-11-03 at gates 950 m / 90-115
+// m/s and 1200 m, 15-18 t, and entering from 12 km gave "Fang abgebrochen", or ran dry hovering at the arms.
+TEST_CASE("A catch that fails after the gate ejects the crew", "[crew_escape][session]") {
+    const double height_m = 1200.0, sink_mps = 100.0;
+    const Vec3 offset{to_tower * -220.0 + Vec3{0, 0, height_m}}, velocity{to_tower * 3.0 + Vec3{0, 0, -sink_mps}};
+    const auto empty = ship_with(0.0);
+    const auto& stage = empty.stages[0];
+    const auto masses = gnc::ship_landing_masses(empty, stage);
+    const double drop_m = height_m - (arm_top_height_m() - (stage.catch_pins.station_m - masses.heavy_cg_station_m));
+    const double need_kg =
+        gnc::ship_catch_propellant_need(empty, stage, drop_m, sink_mps,
+                                        gnc::ship_landing_parameters(empty, stage).scvx.snapshot.catch_sink_mps)
+            .propellant_kg;
+    const double floor_kg = catch_floor_kg();
+    std::printf("failed catch: floor %.1f t, ideal need from the gate %.1f t\n", floor_kg / 1000.0, need_kg / 1000.0);
+    REQUIRE(need_kg > floor_kg);
+    const auto cfg = ship_with(fill_for_usable_kg(0.5 * (floor_kg + need_kg)));
+    REQUIRE(gnc::catch_feasibility(vehicle::Vehicle(cfg, STARSIM_CONFIG_DIR), gnc::ship_flip_groups(stage), floor_kg)
+                .feasible);
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    set_starbase(session);
+    session.place_landing_ship(cfg, belly_state(session, cfg, offset, velocity), t0());
+    session.set_crew_escape(crew());
+    fly_out(session, 600.0);
+    print(session, "failed catch");
+    const auto& s = *session.crew_escape_state();
+    CHECK(s.armed);
+    CHECK_FALSE(s.early);
+    CHECK(s.give_up_reason.find("Treibstoff zu knapp") == std::string::npos);
+    CHECK(s.fired);
+    CHECK_FALSE(session.body(0).caught());
+    for (const auto& m : s.members) {
+        CHECK(m.outcome != sim::CrewOutcome::Flying);
+        CHECK(m.reason.find("außerhalb") == std::string::npos);
+    }
+}
+
+// Planner plan Task 4 fix round 1: the guidance's own catch abort. The load is the rocket equation's propellant for the
+// ideal stop at the arms alone - the fall from 950 m at 100 m/s, sqrt(v^2 + 2 g h), no gravity loss, no flip - for the
+// light landing mass at the landing engines' sea-level Isp: the guidance plans from it and gives the catch up.
+TEST_CASE("A catch the guidance gives up for want of propellant ejects the crew", "[crew_escape][session]") {
     const Vec3 offset{to_tower * -220.0 + Vec3{0, 0, 950}}, velocity{to_tower * 3.0 + Vec3{0, 0, -100}};
     const auto full = ship_with(0.0);
     const double light_kg = gnc::ship_landing_masses(full, full.stages[0]).light_kg;
@@ -279,11 +343,10 @@ TEST_CASE("A missed catch ejects the crew", "[crew_escape][session]") {
         }
     }
     REQUIRE(isp_s > 0.0);
-    const double catch_height_m = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").tower->catch_height_m;
     const double g = constants::standard_gravity_mps2;
-    const double stop_dv_mps = std::sqrt(dot(velocity, velocity) + 2.0 * g * (offset.z - catch_height_m));
+    const double stop_dv_mps = std::sqrt(dot(velocity, velocity) + 2.0 * g * (offset.z - arm_top_height_m()));
     const double load_kg = light_kg * std::expm1(stop_dv_mps / (g * isp_s));
-    std::printf("missed catch: load %.1f t (light %.1f t, Isp %.0f s, ideal stop %.0f m/s)\n", load_kg / 1000.0,
+    std::printf("catch abort: load %.1f t (light %.1f t, Isp %.0f s, ideal stop %.0f m/s)\n", load_kg / 1000.0,
                 light_kg / 1000.0, isp_s, stop_dv_mps);
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
@@ -291,9 +354,10 @@ TEST_CASE("A missed catch ejects the crew", "[crew_escape][session]") {
     session.place_landing_ship(cfg, belly_state(session, cfg, offset, velocity), t0());
     session.set_crew_escape(crew());
     fly_out(session, 600.0);
-    print(session, "missed catch");
+    print(session, "catch abort");
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
+    CHECK(s.give_up_reason == "Fang abgebrochen");
     CHECK(s.fired);
     CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {
@@ -321,7 +385,7 @@ TEST_CASE("An aerocapture pass does not give the ship up", "[crew_escape][sessio
 TEST_CASE("Tumbling ship: seats fire along the hull", "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
-    const auto cfg = ship_with(20000.0);
+    const auto cfg = ship_with(short_load_kg());
     auto state = belly_state(session, cfg, to_tower * -300.0 + Vec3{0, 0, 1200}, {0.0, 0.0, -95.0}, 30.0);
     state.angular_velocity_body_radps += Vec3{0.0, 0.5, 0.0};
     session.place_entering_ship(cfg, state, t0());
@@ -342,7 +406,7 @@ TEST_CASE("One long advance gives the same touchdown", "[crew_escape][session]")
     for (int run = 0; run < 2; ++run) {
         sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
         set_starbase(session);
-        const auto cfg = ship_with(20000.0);
+        const auto cfg = ship_with(short_load_kg());
         session.place_entering_ship(cfg, belly_state(session, cfg, to_tower * -300.0 + Vec3{0, 0, 1200}, {0.0, 0.0, -95.0}),
                                     t0());
         session.set_crew_escape(crew());

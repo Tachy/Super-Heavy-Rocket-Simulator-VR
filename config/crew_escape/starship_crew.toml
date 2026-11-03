@@ -32,8 +32,11 @@ mode2_separation_delay_s = 1.16          # [D] drogue 0.16 s + recovery mortar 1
 # Give-up rules (spec: early give-up fires over water, at the latest at this height above ground)
 min_firing_height_m = 1500.0             # [E] mode 1 main fully open after ~3 s / ~300 m of fall
 sea_target_margin_m = 2000.0             # [E] given-up ship aims this far beyond the shoreline
-min_catch_propellant_kg = 30000.0        # [D] nominal gate (test "Ship catch: lowest catchable gate load", 2026-10-22):
-                                         # 28 t caught, 27 t missed -> 28 t + 2 t margin [E]
+catch_propellant_margin = 0.1            # [E] on the ship's ideal catch need (gnc::ship_catch_propellant_floor_kg: the
+                                         # nominal gate's ideal stop + the flip's push, rocket equation): a give-up in the
+                                         # entry (over water, high) is safer than an abort at the arms. Below the real
+                                         # losses over the ideal: 177 t ship 2026-11-03, nominal gate 18 t caught (17 t
+                                         # usable), 1.3 x the ideal 12.7 t -> floor 13.9 t usable
 
 # Judging [E unless sourced]
 max_load_g = 20.0                        # [E] sustained longer than max_load_duration_s

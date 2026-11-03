@@ -1043,6 +1043,7 @@ private:
         std::vector<bool> out_of_hull;         // the seat left the hatch (hull clearance counted from then on)
         std::optional<time::Epoch> fire_epoch;  // first seat
         double ship_speed_mps = 0.0;           // Earth-fixed, last tick before the impact
+        std::optional<double> catch_floor_kg;  // gnc::ship_catch_propellant_floor_kg, set at the first entry tick
     };
     void run_crew_escape();
     void crew_arm(const std::string& reason, bool early);

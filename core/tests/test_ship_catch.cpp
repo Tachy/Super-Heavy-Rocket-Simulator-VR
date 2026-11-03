@@ -153,7 +153,8 @@ TEST_CASE("Ship catch single case", "[.][ship-single]") {
 }
 
 // Crew escape calibration (plan Task 3): the lowest propellant load at the nominal gate that is still caught, in 1 t
-// steps from the landing load down (config/crew_escape min_catch_propellant_kg = this + margin).
+// steps from the landing load down (the crewed ship's derived catch floor, gnc::ship_catch_propellant_floor_kg,
+// must stay below it).
 TEST_CASE("Ship catch: lowest catchable gate load", "[.][ship-single]") {
     double lowest_caught_kg = -1.0;
     for (double propellant_kg = 35000.0; propellant_kg >= 10000.0; propellant_kg -= 1000.0) {

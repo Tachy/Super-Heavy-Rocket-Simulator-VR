@@ -13,10 +13,17 @@ Spec `docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md`, plan `do
   Bodies `vehicles/ejection_seat.toml` (170 kg, fixed drag 0.9 m^2, drogue 0.73 m^2) and `vehicles/parachutist.toml`
   (100 kg, main 35 m^2 [D: 6.7 m/s at sea level, S: GQ 5000 / AP3456], splashdown recovery 8 m/s). The ship keeps its
   mass and CG when the seats leave (documented simplification, ~0.8 t of ~260 t).
-- **Catch feasibility** (`gnc::catch_feasibility`, crewed ships only): a failed flip-group engine or propellant below
-  `min_catch_propellant_kg` = 30 t [D: nominal gate 28 t caught, 27 t missed (hidden test "Ship catch: lowest
-  catchable gate load") + 2 t; set on the 290 t ship - the 177 t ship catches down to 18 t: open, `docs/known-issues.md`]. Checked every tick of the entry up to the gate (the same tick before the gate
-  hand-over); after the flip every abort (SCvx abort to the sea, upright descent, `abort_landing`) arms the seats, and
+- **Catch feasibility** (`gnc::catch_feasibility`, crewed ships only): a failed flip-group engine, or usable landing
+  propellant (the header tanks at the engines' mixture ratio, `gnc::landing_feed_propellant_kg`, less the unusable
+  header propellant) below the ship's catch floor `gnc::ship_catch_propellant_floor_kg` [D, planner plan Task 4 fix
+  round 2]: the ideal need from the nominal gate (the entry guidance's `gate_height_m` at `gate_reference_sink_mps`)
+  to the catch (pins at the arm tops, the heavy landing mass's CG below them) - the ideal vertical stop at the first
+  landing set's planned maximum, dv = (v_i - v_f) a / (a - g) with v_i^2 = ((v^2 + 2 g h)(a - g) + g v_f^2) / a, plus
+  the flip's push across the path (`ship_flip_push`), rocket equation to the light landing mass at the landing
+  engines' sea-level Isp, the gate mass as a fixed point - times (1 + `catch_propellant_margin` 0.1 [E]). Block 3
+  (177 t): need 12.7 t over 679 m (stop 175 m/s, flip 49 m/s), floor 13.9 t usable; the nominal gate catches from 18 t
+  (17 t usable). Computed once at the first entry tick (`CrewRuntime::catch_floor_kg`). Checked every tick of the entry
+  up to the gate (the same tick before the gate hand-over); after the flip every abort (SCvx abort to the sea, upright descent, `abort_landing`) arms the seats, and
   so do a missed catch (phase Landed without pins on the arms) and every commanded engine starved or failed. An
   aerocapture pass is not judged; the final entry after the capture is.
 - **Give-up in the entry** (`EntryGuidance::give_up`, `gnc::sea_give_up_target`): the target moves to the pad + sea
@@ -61,7 +68,13 @@ Spec `docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md`, plan `do
   impact 7 m beside the pad (reported as it falls).
 - Entry engine failure 12 km, 2 km west -> fired at 61.7 s over water, 4 rescued 600-670 m east (water) at 6.7 m/s,
   peak 15.8 g, ship 2,500 m east in the sea at 96 m/s.
-- Give-up at 1.2 km (20 t): fires at once, mode 1, crew on land ~340 m from the pad, ship on land 469 m from the tower.
+- Catch floor hand case (`test_catch_feasibility.cpp`): the stop's dv against a fall-then-brake flown in 0.1 ms steps
+  (ignition by bisection, within 0.2 %); the floor below the nominal gate's lowest caught load.
+- Give-up at 1.2 km (half the floor, 7.0 t usable): fires at once, mode 1, crew on land ~350 m from the pad, ship on land
+  313 m from the tower.
+- A catch that fails after the gate (1200 m at 100 m/s; usable midway between the floor 13.9 t and that gate's ideal
+  need 14.3 t: passes the floor, cannot be caught): "Fang abgebrochen" at 5.7 s, 4 rescued (13.5 g), ship 86 m from the
+  tower. The guidance's own abort at 9.1 t (950 m gate, ideal stop alone): "Fang abgebrochen" at 5.6 s, 4 rescued.
 - Catch abort in the flip: crew on land ~160 m from the pad (14-15 g), ship upright in the water 20 m beyond the shore.
 - Crewed orbit return and lunar direct return with an entry engine failure: the ship is over the Gulf when it enters
   the envelope - seats fire at ~15 km in mode 3, 4 rescued on water at 6.7 m/s, peak 16.4 g.
@@ -75,3 +88,9 @@ Spec `docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md`, plan `do
 - No Mach limit in the envelope (height + EAS only); no wind (M8); no zero-zero apex reference (no published ACES II
   number found); the seat's attitude is free (no STAPAC); no seat-seat collision check.
 - A crew landing on land beside the pad after a late give-up is reported, not avoided.
+- The "Fang verfehlt" arm (phase Landed, CG past the catch point, no abort flag) has no session case: no load reaches
+  it (scans 2026-11-03, 177 t ship: gates 950 m at 90 / 100 / 115 m/s and 1200 m, 15-18 t, and entering from 12 km gave
+  "Fang abgebrochen" or ran dry hovering at the arms - 17-18 t at 115 m/s: "Triebwerke ohne Treibstoff", then dropped
+  onto the arms and caught with the crew already out). It needs a truth-vs-plan shortfall scenario.
+- The floor's ideal need leaves out the real profile's losses (nominal gate: lowest caught 18 t = 1.3 x the ideal); the
+  margin only moves the give-up early, it never gives up a catchable ship.

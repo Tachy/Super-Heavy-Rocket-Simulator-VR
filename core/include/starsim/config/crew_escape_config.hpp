@@ -43,7 +43,7 @@ struct CrewEscapeConfig {
     double mode2_separation_delay_s = 0.0;  // the main follows on the separation
     double min_firing_height_m = 0.0;    // an early give-up fires over water, at the latest here
     double sea_target_margin_m = 0.0;    // a given-up ship aims this far beyond the shoreline
-    double min_catch_propellant_kg = 0.0;
+    double catch_propellant_margin = 0.0;  // on gnc::ship_catch_propellant_floor_kg's ideal need (fraction)
     double max_load_g = 0.0;             // sustained longer than max_load_duration_s: lost
     double max_load_duration_s = 0.0;
     double min_clearance_m = 0.0;        // to the ship hull, its plume and the tower

@@ -196,7 +196,8 @@ flow separation (vacuum engines).
   (occupant under the main canopy), both in `vehicles/`; `rail_direction` (ship body axes, normalised),
   `rail_length_m`, `stagger_s`; envelope `envelope_max_height_m`, `envelope_max_eas_mps`; modes `mode1_max_eas_mps`,
   `mode_low_height_m`, `mode1_main_delay_s`, `mode2_drogue_delay_s`, `mode2_separation_delay_s`; give-up
-  `min_firing_height_m`, `sea_target_margin_m`, `min_catch_propellant_kg`; judging `max_load_g`, `max_load_duration_s`,
+  `min_firing_height_m`, `sea_target_margin_m`, `catch_propellant_margin` (fraction on the ship's derived catch need,
+  `gnc::ship_catch_propellant_floor_kg`); judging `max_load_g`, `max_load_duration_s`,
   `min_clearance_m`, `plume_half_angle_deg`, `plume_length_m`, `max_touchdown_sink_mps`; thrust tables `catapult`,
   `rocket` (`[[time_s, thrust_n]]`, ascending times, along the rail, from the seat's firing).
 - `[[seat]] position_m`: one per crew member in the firing order, in the ship's stage frame (x from the stage bottom).
