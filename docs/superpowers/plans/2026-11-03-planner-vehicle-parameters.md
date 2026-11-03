@@ -71,7 +71,7 @@ The reds from the 1.1 % lower vacuum Isp (`task-1-report.md`, `docs/known-issues
 - Modify: `core/CMakeLists.txt` / tests list as the repo does it
 
 **Interfaces (produces, used by Tasks 3-8):**
-- `double gnc::stage_pitch_inertia_kg_m2(const config::StageConfig&, double propellant_kg)` — `inertia_kg_m2` if set, else the cylinder model the vehicle code already uses (reuse it, do not copy).
+- `double gnc::stage_pitch_inertia_kg_m2(const config::VehicleConfig&, const config::StageConfig&, double propellant_kg)` — about the stage's CG, propellant settled aft in its tanks: the flight dynamics' own parts (`vehicle::settled_stage_mass_properties`, which also gives the stage-local CG station for the levers). As built after the Task 2 fix round (was `(StageConfig, propellant_kg)` with a hull-long propellant cylinder).
 - `struct EngineSetThrust { double min_n; double max_n; double gimbal_rad; double gimbal_rate_radps; double lever_m; };` `EngineSetThrust gnc::engine_set_thrust(const config::StageConfig&, const std::vector<std::string>& groups, double ambient_pa, double cg_station_m)`.
 - `double gnc::max_pitch_acceleration_radps2(const EngineSetThrust&, double throttle, double inertia_kg_m2)` and `double gnc::rcs_pitch_acceleration_radps2(const config::StageConfig&, double inertia_kg_m2, double cg_station_m)`.
 - `double gnc::flip_duration_s(double angle_rad, double accel_radps2, double max_rate_radps)` — bang-bang with a rate cap (accelerate, coast at the cap, decelerate).

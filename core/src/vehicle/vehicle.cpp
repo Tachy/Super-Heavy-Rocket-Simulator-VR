@@ -18,8 +18,6 @@ using math::Vec3;
 
 namespace {
 
-// Payload and fairing sit in the upper part of their stage [E], unless the stage's config gives their stations.
-constexpr double extra_mass_station_fraction = 0.75;
 // The RCS allocation is rebuilt when the CG has moved this far (lever change negligible below).
 constexpr double rcs_cg_tolerance_m = 0.01;
 // Propellant settling [E]: below this specific force the liquid holds its position (orbital drag ~1e-5 m/s^2, RCS
@@ -86,9 +84,7 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
         for (const auto& tank_config : stage_config.tanks) {
             const double diameter = tank_config.diameter_m > 0.0 ? tank_config.diameter_m : stage_config.diameter_m;
             const double area = constants::pi * 0.25 * diameter * diameter;
-            const double density = tank_config.contents == config::TankContents::Oxidizer ? config.propellant.oxidizer_density_kg_m3
-                                   : tank_config.contents == config::TankContents::Fuel   ? config.propellant.fuel_density_kg_m3
-                                                                                          : tank_config.density_kg_m3;
+            const double density = tank_density_kg_m3(tank_config, config.propellant);
             const bool settles = tank_config.contents != config::TankContents::Rcs && tank_config.capacity_kg > 0.0;
             stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg, 0.5 * diameter,
                                    settles ? tank_config.capacity_kg / (density * area) : 0.0});
@@ -279,8 +275,8 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
             if (mass <= 0.0) continue;
             const double base = s.base_station_m + t.config.base_station_m;
             if (settled_aft || t.length_m <= 0.0) {
-                const double h = mass / (t.density_kg_m3 * t.area_m2);
-                parts.push_back({mass, base + 0.5 * h, 0.0, mass * (0.25 * t.radius_m * t.radius_m + h * h / 12.0)});
+                const auto column = settled_column(mass, t.density_kg_m3, t.radius_m, base);
+                parts.push_back({mass, column.station_m, 0.0, column.pitch_inertia_kg_m2});
                 continue;
             }
             if (!t.settling) t.settling = settling_table(t.length_m / t.radius_m);

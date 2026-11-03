@@ -48,12 +48,18 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   (`AttitudeController::feathered_grid_fins`). Each fin's axial drag stays in the hull's curve, on the axis. Its moment at the
   fin is a fidelity flag, default off (`FlightEnvironment::grid_fin_drag_couple`): Super Heavy's 0 / 90 / 180 layout would
   pitch about +y with 1.8 % of the fin authority by the derived CA (`aero-derivation.md`).
-- Vehicle capabilities for planners (`gnc/vehicle_capability`, `[gnc][capability]`): stage pitch inertia (config
-  `inertia_kg_m2` or the vehicle's thin-walled cylinder, `vehicle/stage_inertia`, plus the propellant as the same
-  cylinder [E]); an engine set's thrust at its common min / max throttle from the engine config (`EnginePerformance`),
-  its smallest gimbal angle / rate, lever and gimballed share; gimbal pitch acceleration `F sin(gimbal) lever / I`;
-  RCS pitch acceleration from the allocator's `max_torque_nm` (weaker transverse axis); rest-to-rest bang-bang turn
-  time with a rate cap. Planners derive their limits from these instead of carrying own numbers.
+- Vehicle capabilities for planners (`gnc/vehicle_capability`, `[gnc][capability]`): stage pitch inertia about the
+  stage's CG with the propellant settled aft - the flight dynamics' own parts (`vehicle::settled_stage_mass_properties`
+  in `vehicle/stage_inertia`, shared with `Vehicle::mass_properties`: dry stage about its own CG, config
+  `inertia_kg_m2` or the thin-walled cylinder; payload / fairing; each tank's liquid as a column on its bottom; parallel
+  axis to the common CG; the main load split over the main tanks by capacity, headers / RCS at their configured mass).
+  Equal to `Vehicle::mass_properties` to 1e-12 (Falcon 9 first stage alone); Falcon 9 at our RTLS separation (52.1 t)
+  1.123e7 kg m^2, CG 11.46 m, matching the config comment's 1.12e7 / 30.4 m lever; at the drone-ship MECO load (46.75 t)
+  1.065e7. An engine set's thrust at its common min / max throttle from the engine config (`EnginePerformance`), its
+  smallest gimbal angle / rate, lever (stage-local CG station) and the gimballed engines' thrust at both ends (mixed
+  engine types: Raptor SL + RVac); gimbal pitch acceleration `F_gimballed sin(gimbal) lever / I`; RCS pitch
+  acceleration from the allocator's `max_torque_nm` (weaker transverse axis); rest-to-rest bang-bang turn time with a
+  rate cap (throws for no authority). Planners derive their limits from these instead of carrying own numbers.
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically (follow the
   Earth), impacted/resting bodies do not block coast segments. A freely falling body below 5 km above its ground is
   ticked.
