@@ -7,9 +7,22 @@ namespace starsim::gnc {
 
 using math::Vec3;
 
+double upright_descent_sink_mps(double height_m, double max_accel_mps2, double gravity_mps2,
+                                const UprightDescentParameters& p) {
+    const double braking = p.deceleration_fraction * std::max(max_accel_mps2 - gravity_mps2, 0.0);
+    return std::sqrt(p.final_sink_mps * p.final_sink_mps + 2.0 * braking * std::max(height_m, 0.0));
+}
+
 UprightDescentCommand upright_descent(const Vec3& from_tower_m, const Vec3& velocity_mps, const Vec3& up, double height_m,
                                       double min_accel_mps2, double max_accel_mps2, double gravity_mps2,
                                       const UprightDescentParameters& p) {
+    return upright_descent(from_tower_m, velocity_mps, up, height_m, min_accel_mps2, max_accel_mps2, max_accel_mps2,
+                           gravity_mps2, p);
+}
+
+UprightDescentCommand upright_descent(const Vec3& from_tower_m, const Vec3& velocity_mps, const Vec3& up, double height_m,
+                                      double min_accel_mps2, double max_accel_mps2, double profile_max_accel_mps2,
+                                      double gravity_mps2, const UprightDescentParameters& p) {
     Vec3 away = from_tower_m - up * dot(from_tower_m, up);
     const double distance = norm(away);
     if (distance < 1e-3) {  // straight above the tower centre: any horizontal direction
@@ -25,10 +38,9 @@ UprightDescentCommand upright_descent(const Vec3& from_tower_m, const Vec3& velo
     // height flown changes at d(v)/dt = -f (a_max - g) sink / v (fed forward, the full braking at most): on the profile
     // the braking, slower than it less, not sinking none (the full braking there held the ship at ~3 m until its tanks ran dry)
     const double sink = -dot(velocity_mps, up);
-    const double excess = std::max(max_accel_mps2 - gravity_mps2, 0.0);
     const double h = std::max(height_m, 0.0);
-    const double braking = p.deceleration_fraction * excess;
-    const double wanted_sink = std::sqrt(p.final_sink_mps * p.final_sink_mps + 2.0 * braking * h);
+    const double braking = p.deceleration_fraction * std::max(profile_max_accel_mps2 - gravity_mps2, 0.0);
+    const double wanted_sink = upright_descent_sink_mps(h, profile_max_accel_mps2, gravity_mps2, p);
     const double feedforward = h > 0.0 && wanted_sink > 0.0 ? braking * std::clamp(sink / wanted_sink, 0.0, 1.0) : 0.0;
     // the engines never run below their minimum throttle: the vertical part never drops below min_accel
     const double a_v = std::clamp(gravity_mps2 + feedforward + p.sink_gain_per_s * (sink - wanted_sink),

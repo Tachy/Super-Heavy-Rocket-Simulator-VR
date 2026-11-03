@@ -177,6 +177,7 @@ void visit_settings(F& f, ScvxSettings& s) {
         f(n + ".max_sink_mps", sw.max_sink_mps);
         f(n + ".min_cg_height_m", sw.min_cg_height_m);
     }
+    f("limits.late_switch_guess", l.late_switch_guess);
     f("limits.final_min_thrust_fraction", l.final_min_thrust_fraction);
     f("limits.final_ease_nodes", l.final_ease_nodes);
     f("limits.throttle_margin", l.throttle_margin);

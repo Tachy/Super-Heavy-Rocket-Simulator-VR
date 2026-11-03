@@ -29,26 +29,14 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     commits (found by the Task 1c re-measure, red without the Task 1c changes too): the same terminal entry departure
     (alpha 80 commanded, aoa 153-172 deg from h ~8 km), gate at 270 m/s sink, 1028 m off, abort, 0.0 t left. Same
     open fix as above (Task 4).
-  - "Lunar return seed-18 gate is caught" ([ship][catch][lunar], gate replay): red since the inner rings / settled-
-    column commits (red without the Task 1c changes too): plans converge (22, none failed), the ship reaches the arms
-    at 6.2 m/s sink ("verfehlt") with 3.8 t left - the main-tank residue the engines cannot reach: the headers (35.0 t
-    at the gate, 29.0 t burnable at the flip end) run dry in the last ~3 s. Task 1c made the plans' floor count only
-    the burnable header propellant (`gnc::feed_propellant_kg`, it counted the 3.85 t residue before); the case still
-    ends on the floor with the flight's +1.9 % thrust / +10.5 % density dispersion. Open: whether this gate has a
-    catch within the headers at all (propellant margin of the catch from the flip end).
-    Task 3 (2026-11-03, derived ship landing values): 6.96 m/s, still red. Measured: every plan ends exactly on the
-    floor; with the floor lowered the first plan needs 27.6 t against 26.9 t usable (+0.7 t short), and after the plan
-    end (pins 1 m above the arms at 1 m/s) the descent onto the arms needs ~0.75 t more - the ship starves there. The
-    shortfall comes from the catch approach constraint (`DescentLimits::approach_time_constant_s` 3 s [E], a booster
-    default): without it the first plan needs 22.9 t (4 t margin) but ends in a hard final braking the throttle rate
-    (0.5 /s) cannot follow (10.5 m/s at the arms); 1.5 s caught at 3.5 m/s. A floor term for the post-plan descent
-    alone made it worse (plans squeezed, 7.8 m/s; not kept). Re-assess after the dry-mass change (Task 3b).
-  - "Ship catch campaign: gate dispersions and an engine failure" ([slow], single case seed 13 = case 12): lost since
-    Task 3 (sink 6.4 m/s, 2.0 t left; case 19 caught at 4.1 m/s). Cause: the derived 3 -> 2 window maximum (~100 m/s
-    from the gate height) is never binding, but the SCvx initial guess ends phase 0 at the window midpoint (53 m/s
-    instead of 30 m/s): the first plan brakes to a hover at ~380 m and descends for 15.5 s on the pair. With the max at
-    40 m/s the case is caught with 5.1 t. Fix in the planner (guess from the height, not the window midpoint) after the
-    dry-mass change (Task 3b); the [slow] set was not run in Task 3 (controller ruling).
+  - "Lunar return seed-18 gate is caught" ([ship][catch][lunar], gate replay): green again since the Task 3 fix round
+    (2026-11-03): caught at 0.95 m/s with 6.3 t left. It was red since the inner rings / settled-column commits (6.2,
+    after Task 3 6.96 m/s, headers dry): the ship's plans flew the booster's catch approach constant (3 s [E]); the
+    ship now derives its own (`gnc::ship_approach_time_constant_s`, 1.4 s, `ship-entry-return.md`).
+  - "Ship catch campaign: gate dispersions and an engine failure" ([slow]): case 12 (seed 13) was lost after Task 3
+    (6.4 m/s, 2.0 t): the SCvx guess ended phase 0 in the middle of the wide derived 3 -> 2 window. Since the fix
+    round the ship's guess switches from the state (`DescentLimits::late_switch_guess`): seed 13 caught with 8.7 t
+    (single case). The campaign itself is re-measured in Task 12.
   - `tanker_flight` reference: main at catch re-measured 0.37 -> 0.68 t (inner rings / settled-column commits; the
     other tanker numbers within 1 % / 0.3 t, kept).
   - "Lunar return campaign (direct): seed 15": green since Task 1c (same SCvx fix): caught with 3.6 t (cause: first catch

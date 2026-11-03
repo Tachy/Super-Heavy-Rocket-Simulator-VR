@@ -28,6 +28,15 @@ struct UprightDescentCommand {
 UprightDescentCommand upright_descent(const math::Vec3& from_tower_m, const math::Vec3& velocity_mps, const math::Vec3& up,
                                       double height_m, double min_accel_mps2, double max_accel_mps2, double gravity_mps2,
                                       const UprightDescentParameters& p = {});
+// The same with the sink profile planned for other engines (profile_max_accel_mps2 at full throttle) than the running
+// ones: the running set brakes the ship onto the profile the next set can then follow (the ship's three engines onto
+// the landing pair's profile).
+UprightDescentCommand upright_descent(const math::Vec3& from_tower_m, const math::Vec3& velocity_mps, const math::Vec3& up,
+                                      double height_m, double min_accel_mps2, double max_accel_mps2,
+                                      double profile_max_accel_mps2, double gravity_mps2, const UprightDescentParameters& p);
+// The sink profile: sqrt(final_sink^2 + 2 f (max_accel - g) h).
+double upright_descent_sink_mps(double height_m, double max_accel_mps2, double gravity_mps2,
+                                const UprightDescentParameters& p = {});
 
 // Propellant the upright descent needs to stop a sink: dv = sink + g t with t = sink / (f (a_max - g)) along the sink
 // profile, rocket equation at exhaust velocity ve. A thrust that cannot hold the weight: the whole mass.

@@ -66,7 +66,16 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   landing masses: dry + full headers 290 t / dry + 1 t 256 t): tilt-rate limits min(gimbal slew, sqrt(alpha_min tilt))
   = 0.265 / 0.216 / 0.187 rad/s; 3 -> 2 sink window min = (3 at minimum - weight) x shutdown = 0 (three Raptors at
   30 % are below the weight), max = sqrt(2 (2 at 95 % / m - g) h) set at the gate from the CG height above the catch
-  (~107 m/s from 700 m; the webcast 20-40 m/s is no longer used); the upright descent's 3 -> 2 sink = the window minimum.
+  (~107 m/s from 700 m; never binding - the window has effectively no maximum; the webcast 20-40 m/s is no longer
+  used). The first plan's guess switches from the state (`DescentLimits::late_switch_guess`, only the ship: as late as
+  the pair can still finish in its minimum phase times, ~13 m/s, but not below what three engines cannot remove within
+  the height; the window's middle is no operating point). Catch approach time constant (`DescentLimits::
+  approach_time_constant_s`) [D] = the pair's throttle range / throttle rate, (1 - 0.3) / 0.5 = 1.4 s
+  (`gnc::ship_approach_time_constant_s`; the booster keeps 3 s [E]). The upright descent (last resort) brakes on the
+  three engines towards the landing pair's own sink profile sqrt(v_f^2 + 2 f (a_pair - g) h) until the pair at its planned
+  maximum (the plans' 5 % throttle margin below full) can stop the sink within the height (the same with f = 1, live
+  mass; the margin closes in on the profile), then the pair takes over (sticky) and
+  lands (`upright_descent` with a profile acceleration).
   Thrust
   of an asymmetric set goes through the CG along an axis tilted against the hull (~1.5 deg for the pair): plan states
   carry the thrust-axis attitude (`gnc::thrust_axis_body`). The plans' propellant floor counts only what the selected
@@ -75,9 +84,13 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   reads the same (Task 1c, 2026-11-03; before, the whole load counted and plans could fly the headers dry). Ship LQR effort 0.03 of the gimbal authority [D seed 18], attitude
   controller `Gains::actuator_delay_s` 0.75 s; flaps folded in the burn. Lateral phase tilt limit 20 deg [E].
   `FlightSession::place_landing_ship`; the entry hands over at the gate.
-- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (197 m, `gnc::ship_flip_push`: the flip set at
-  the flip throttle turns 90 deg rest-to-rest in 3.25 s, pushes 95 m and 43 m/s along the nose, the three at 95 % tilted
-  20 deg brake it in 102 m; engine spool-up and the settle are not modelled) back from the catch axis on the line tower ->
+- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (195 m, `gnc::ship_flip_push`: the flip set at
+  the flip throttle relights - thrust and authority ramp over the Raptor's 3 s startup - and turns 90 deg rest-to-rest
+  (time-optimal at the ramped authority) in 4.51 s, pushing 87 m and 37.8 m/s along the nose; the three at 95 % tilt in
+  to 20 deg at the phase's rate limit in 1.69 s (60 m, braking meanwhile) and brake the remaining 29.9 m/s in 49 m.
+  Sim check, seed-18 gate: flip 4.4-4.9 s, ~105 m, +36 m/s. Not in the lead: the gate's own horizontal speed (an entry
+  result, 3-7 m/s, ~20-40 m over flip and tilt-in) and the plans' non-maximal braking; the ideal turn ends settled
+  and the first plan is synchronous, so no settle or latency term) back from the catch axis on the line tower ->
   pad with `EntryTarget::nose_direction_itrf` to the tower; only that approach is robust (the arms stand across the
   line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering to the nearest edge
   of the nose sector at fraction 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 3 deg/s [E],

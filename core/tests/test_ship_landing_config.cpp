@@ -14,6 +14,7 @@
 #include <string>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/descent_planner.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/gnc/vehicle_capability.hpp"
 #include "starsim/math/constants.hpp"
@@ -68,16 +69,60 @@ TEST_CASE("Ship landing derivations follow their hand formulas", "[ship][landing
     w = gnc::ship_switch_sink_window(out, in, 250.0e3, 300.0e3, 500.0, 0.05, 0.5, g0);
     CHECK(w.min_sink_mps == 0.0);
 
-    // Flip push: rest-to-rest 90 deg at alpha, theta = alpha t^2 / 2 to the middle (x = sqrt(1/2) in Fresnel terms for
-    // any alpha): dv = a sqrt(pi / alpha) (C + S), travel = a (T sqrt(pi / alpha) C + (1 - sqrt 2) / alpha).
+    // Flip push without spool-up: rest-to-rest 90 deg at alpha, theta = alpha t^2 / 2 to the middle (x = sqrt(1/2) in
+    // Fresnel terms for any alpha): dv = a sqrt(pi / alpha) (C + S), travel = a (T sqrt(pi / alpha) C + (1 - sqrt 2) / alpha).
     const double a = 20.0, alpha = 0.5, brake = 10.0, tilt = 20.0 * deg;
-    const auto f = gnc::ship_flip_push(a, alpha, brake, tilt);
+    gnc::FlipModel model{a, alpha, 0.0, brake, 0.0, 0.0, tilt};  // no tilt-in authority: braking at the full tilt
+    const auto f = gnc::ship_flip_push(model);
     const double t_f = std::sqrt(2.0 * constants::pi / alpha);
     const double x = std::sqrt(0.5), c = fresnel_c(x), s = fresnel_s(x);
     CHECK(f.duration_s == Approx(t_f).epsilon(1e-12));
     CHECK(f.speed_mps == Approx(a * std::sqrt(constants::pi / alpha) * (c + s)).epsilon(1e-6));
     CHECK(f.travel_m == Approx(a * (t_f * std::sqrt(constants::pi / alpha) * c + (1.0 - std::sqrt(2.0)) / alpha)).epsilon(1e-6));
+    CHECK(f.tilt_in_m == 0.0);
     CHECK(f.brake_m == Approx(f.speed_mps * f.speed_mps / (2.0 * brake * std::sin(tilt))).epsilon(1e-12));
+    CHECK(f.lead_m() == Approx(f.travel_m + f.brake_m).epsilon(1e-12));
+
+    // Tilt-in, rest-to-rest through phi at alpha_b without a rate cap (T = 2 sqrt(phi / alpha_b)): the horizontal
+    // braking a sin(theta) removes dv_b = a sqrt(pi / alpha_b) (S(y) + sin(phi) C(y) - cos(phi) S(y)), y = sqrt(phi / pi);
+    // a binding rate cap makes the turn last phi / rate + rate / alpha_b.
+    const double alpha_b = 0.6;
+    model.brake_alpha_radps2 = alpha_b;
+    const auto t = gnc::ship_flip_push(model);
+    const double y = std::sqrt(tilt / constants::pi);
+    const double dv_b = brake * std::sqrt(constants::pi / alpha_b) *
+                        (fresnel_s(y) + std::sin(tilt) * fresnel_c(y) - std::cos(tilt) * fresnel_s(y));
+    CHECK(t.tilt_in_s == Approx(2.0 * std::sqrt(tilt / alpha_b)).epsilon(1e-12));
+    CHECK(t.brake_speed_mps == Approx(t.speed_mps - dv_b).epsilon(1e-6));
+    CHECK(t.tilt_in_m < t.speed_mps * t.tilt_in_s);
+    CHECK(t.tilt_in_m > t.brake_speed_mps * t.tilt_in_s);
+    CHECK(t.brake_m == Approx(t.brake_speed_mps * t.brake_speed_mps / (2.0 * brake * std::sin(tilt))).epsilon(1e-12));
+    CHECK(t.lead_m() == Approx(t.travel_m + t.tilt_in_m + t.brake_m).epsilon(1e-12));
+    model.brake_rate_max_radps = 0.2;
+    CHECK(gnc::ship_flip_push(model).tilt_in_s == Approx(tilt / 0.2 + 0.2 / alpha_b).epsilon(1e-12));
+
+    // Spool-up over T_s: the authority ramps, the flip lasts longer (by less than T_s); a vanishing spool is the
+    // closed form above.
+    model.brake_rate_max_radps = 0.0;
+    model.brake_alpha_radps2 = 0.0;
+    model.spool_s = 3.0;
+    const auto spooled = gnc::ship_flip_push(model);
+    CHECK(spooled.duration_s > t_f);
+    CHECK(spooled.duration_s < t_f + model.spool_s);
+    model.spool_s = 1e-9;
+    CHECK(gnc::ship_flip_push(model).duration_s == Approx(t_f).epsilon(1e-6));
+    CHECK(gnc::ship_flip_push(model).speed_mps == Approx(f.speed_mps).epsilon(1e-6));
+    // ... and the spooled turn's switch: with the authority ramping t / T_s over the whole flip (T_s beyond the end),
+    // theta = alpha t^3 / (6 T_s) up to the switch t_s, the rate zero at t_e = sqrt(2) t_s and there
+    // theta(t_e) = alpha / T_s (t_s^3 / 3 + t_s^2 (t_e - t_s) - t_e^3 / 6) = pi / 2.
+    model.spool_s = 100.0;
+    const auto slow = gnc::ship_flip_push(model);
+    const double t_s = slow.duration_s / std::sqrt(2.0);
+    const double end_angle = alpha / model.spool_s *
+                             (t_s * t_s * t_s / 3.0 + t_s * t_s * (slow.duration_s - t_s) -
+                              slow.duration_s * slow.duration_s * slow.duration_s / 6.0);
+    CHECK(slow.duration_s < model.spool_s);
+    CHECK(end_angle == Approx(0.5 * constants::pi).epsilon(1e-9));
 
     // Rate limit: sqrt(alpha tilt) below the gimbal slew rate, else the slew rate.
     gnc::EngineSetThrust set{3.0e6, 9.0e6, 15.0 * deg, 20.0 * deg, 20.0, 0.3, 1.0};
@@ -86,6 +131,46 @@ TEST_CASE("Ship landing derivations follow their hand formulas", "[ship][landing
     CHECK(gnc::ship_phase_rate_limit_radps(set, 20.0 * deg, inertia) == Approx(std::sqrt(alpha_min * 20.0 * deg)));
     set.gimbal_rate_radps = 0.1;
     CHECK(gnc::ship_phase_rate_limit_radps(set, 20.0 * deg, inertia) == 0.1);
+}
+
+// Task 3 fix (I1): the first plan's guess ends a phase from the state, not in the middle of a wide derived window.
+TEST_CASE("Descent guess switches as late as the later sets can finish", "[ship][landing][scvx]") {
+    gnc::DescentModel model;
+    model.engine_sets[0].thrust_max_n = 9.0e6;
+    model.engine_sets[1].thrust_max_n = 6.0e6;
+    model.engine_sets[2].thrust_max_n = 6.0e6;
+    model.gravity_mps2 = {-g0, 0.0, 0.0};
+    gnc::DescentTarget target;
+    target.position_m = {0.0, 0.0, 0.0};
+    target.velocity_mps = {-1.0, 0.0, 0.0};
+    gnc::DescentLimits limits;
+    limits.switches = {{{0.0, 0.0, 0.0, 1000.0}, {0.0, 0.0, 0.0, 1000.0}}};
+    limits.min_phase_s = {1.0, 1.0, 1.0};
+    limits.late_switch_guess = true;
+    const auto state = [](double height_m) {
+        return gnc::make_state(300.0e3, {height_m, 0.0, 0.0}, {-80.0, 0.0, 0.0}, math::Quat{1.0, 0.0, 0.0, 0.0}, {});
+    };
+    // guess decelerations at 0.8 of full thrust: 24 - g0 (three), 16 - g0 (pair)
+    const double d0 = 24.0 - g0, d1 = 16.0 - g0;
+    // 500 m up: the pair's two minimum phases remove 2 d1 above the final 1 m/s; the three reach that within the height
+    auto ref = gnc::initial_guess(model, state(500.0), 0, target, limits, 5);
+    const double late = 1.0 + 2.0 * d1;
+    CHECK(ref.duration_s[0] == Approx((80.0 - late) / d0).epsilon(1e-12));
+    CHECK(ref.duration_s[1] == Approx(1.0).epsilon(1e-12));
+    CHECK(ref.duration_s[2] == Approx(1.0).epsilon(1e-12));
+    // 150 m up: the three cannot brake below sqrt(80^2 - 2 d0 150) within the height
+    ref = gnc::initial_guess(model, state(150.0), 0, target, limits, 5);
+    const double reach = std::sqrt(80.0 * 80.0 - 2.0 * d0 * 150.0);
+    CHECK(ref.duration_s[0] == Approx((80.0 - reach) / d0).epsilon(1e-12));
+    // within the window
+    limits.switches[0].max_sink_mps = 10.0;
+    ref = gnc::initial_guess(model, state(500.0), 0, target, limits, 5);
+    CHECK(ref.duration_s[0] == Approx((80.0 - 10.0) / d0).epsilon(1e-12));
+    // without the flag: the window's middle (here above the speed: phase 0 only its minimum)
+    limits.late_switch_guess = false;
+    limits.switches[0].max_sink_mps = 1000.0;
+    ref = gnc::initial_guess(model, state(500.0), 0, target, limits, 5);
+    CHECK(ref.duration_s[0] == 1.0);
 }
 
 TEST_CASE("Ship landing parameters follow the vehicle config", "[ship][landing][config]") {
@@ -136,22 +221,35 @@ TEST_CASE("Ship landing parameters follow the vehicle config", "[ship][landing][
     // 3 -> 2 window minimum: three at minimum against the light ship's weight (0 when they cannot exceed it)
     const double out_decel = 3.0 * f_min / m.light_kg - g0;
     CHECK(l.switches[0].min_sink_mps == Approx(out_decel > 0.0 ? out_decel * raptor.config().shutdown_s : 0.0).margin(1e-12));
-    CHECK(p.descent_two_engine_sink_mps == l.switches[0].min_sink_mps);
     CHECK(p.switch_window_from_gate);
+    CHECK(l.late_switch_guess);
+    // catch approach: the pair runs its throttle range, (max - min) / rate
+    const auto& rc = raptor.config();
+    CHECK(l.approach_time_constant_s == Approx((rc.throttle_max - rc.throttle_min) / rc.throttle_rate_per_s).epsilon(1e-12));
     // ... maximum from a gate height: two at 95 % stop the heavy ship within it
     const double h = 700.0;
     CHECK(gnc::ship_switch_max_sink_mps(cfg, ship, p, h) ==
           Approx(std::sqrt(2.0 * (2.0 * f_max * 0.95 / m.heavy_kg - g0) * h)).epsilon(1e-12));
-    // gate lead: the flip set at 0.8 pushes, the three at 95 % tilted 20 deg brake
-    const auto push = gnc::ship_flip_push(3.0 * f_flip / m.heavy_kg, 3.0 * f_flip * std::sin(gimbal) * lever / inertia,
-                                          3.0 * f_max * 0.95 / m.heavy_kg, 20.0 * deg);
+    // gate lead: the flip set at 0.8 pushes while spooling up over the Raptor's startup, the three at 95 % tilt in to
+    // 20 deg at the phase's rate limit and brake
+    const double brake_throttle = rc.throttle_min + (0.95 * f_max - f_min) / (f_max - f_min) * (1.0 - rc.throttle_min);
+    const double f_brake = raptor.thrust_n(brake_throttle, p0);
+    const gnc::FlipModel model{3.0 * f_flip / m.heavy_kg,
+                               3.0 * f_flip * std::sin(gimbal) * lever / inertia,
+                               rc.startup_s,
+                               3.0 * f_max * 0.95 / m.heavy_kg,
+                               3.0 * f_brake * std::sin(gimbal) * lever / inertia,
+                               l.rate_max_radps[0],
+                               20.0 * deg};
+    const auto push = gnc::ship_flip_push(model);
     if (std::getenv("STARSIM_VERBOSE")) {
         std::printf("ship landing: heavy %.1f t light %.1f t, I %.4g kg m2, lever %.2f m, rates %.3f %.3f %.3f rad/s, "
-                    "3->2 min sink %.2f m/s, max at %.0f m %.1f m/s, flip %.2f s, dv %.1f m/s, travel %.1f m, brake %.1f m, "
-                    "lead %.1f m\n",
+                    "3->2 min sink %.2f m/s, max at %.0f m %.1f m/s, approach tau %.2f s, flip %.2f s, dv %.1f m/s, "
+                    "travel %.1f m, tilt-in %.2f s %.1f m, brake from %.1f m/s %.1f m, lead %.1f m\n",
                     m.heavy_kg / 1e3, m.light_kg / 1e3, inertia, lever, l.rate_max_radps[0], l.rate_max_radps[1],
                     l.rate_max_radps[2], l.switches[0].min_sink_mps, h, gnc::ship_switch_max_sink_mps(cfg, ship, p, h),
-                    push.duration_s, push.speed_mps, push.travel_m, push.brake_m, push.lead_m());
+                    l.approach_time_constant_s, push.duration_s, push.speed_mps, push.travel_m, push.tilt_in_s,
+                    push.tilt_in_m, push.brake_speed_mps, push.brake_m, push.lead_m());
     }
     CHECK(p.gate_lead_m == Approx(push.lead_m()).epsilon(1e-9));
     CHECK(p.gate_lead_m > 100.0);  // the flip pushes ~100-200 m along the nose (b3 design)

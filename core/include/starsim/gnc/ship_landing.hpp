@@ -38,9 +38,9 @@ struct ShipLandingParameters {
     double abort_plan_grace_s = 2.0;                                  // [E] two re-plan cycles
     // [E] abort plans fly up to ~24 deg (20 deg limit + thrust axis + tracking); seed 18 tumbled from 45 deg on
     double upright_guard_tilt_rad = 35.0 * constants::deg_to_rad;
-    // [D] the upright descent runs the flip set while sinking faster than this, else the landing pair: the 3 -> 2
-    // window's minimum (ship_switch_sink_window)
-    double descent_two_engine_sink_mps = 20.0;
+    // [D] The upright descent runs the flip set (braking towards the landing pair's descent profile) until the pair at
+    // its planned maximum (scvx throttle_margin below full) can still stop the sink within the height,
+    // sqrt(v_f^2 + 2 (a_pair - g) h) at the live mass; then the pair (sticky) follows its profile to the ground.
     // [K] an abort switches to the descent once the usable propellant is below this times a vertical stop's need
     double descent_propellant_margin = 1.3;
     // The 3 -> 2 window's maximum is set at the gate from its height (ship_switch_sink_window); false: as given.
@@ -89,19 +89,44 @@ SinkWindow ship_switch_sink_window(const EngineSetThrust& outgoing, const Engine
 double ship_switch_max_sink_mps(const config::VehicleConfig& vehicle, const config::StageConfig& ship,
                                 const ShipLandingParameters& parameters, double height_m);
 
-// The flip's push along the nose [D]: the flip set at the flip throttle turns the heavy ship rest-to-rest through
-// 90 deg (belly-first -> engines down) in flip_duration_s(pi / 2, alpha, no cap); its thrust, along the axis at the
-// angle theta(t) from the horizontal, gives the speed dv = int a cos(theta) dt and the travel
-// x = int (t_f - t) a cos(theta) dt; the first landing set then brakes dv at its planned maximum tilted to the phase's
-// tilt limit: lead = x + dv^2 / (2 a_brake sin(tilt)).
-struct FlipPush {
-    double duration_s = 0.0;
-    double speed_mps = 0.0;
-    double travel_m = 0.0;
-    double brake_m = 0.0;
-    double lead_m() const { return travel_m + brake_m; }
+// The flip's push along the nose and the braking after it [D]:
+//  Flip    - the flip set relights (thrust and gimbal authority ramp up linearly over its engines' startup time) and
+//            turns the heavy ship rest-to-rest (time-optimal bang-bang at the ramped authority) through 90 deg,
+//            belly-first -> engines down; its thrust along the axis at theta(t) from the horizontal gives
+//            dv = int a s(t) cos(theta) dt and the travel x = int (t_f - t) a s(t) cos(theta) dt.
+//  Tilt-in - the first landing set (planned maximum) tilts rest-to-rest to the phase's tilt limit at its gimbal
+//            acceleration, capped by the phase's tilt-rate limit (flip_duration_s); the horizontal part a sin(theta)
+//            brakes meanwhile.
+//  Brake   - the rest at the full tilt: v^2 / (2 a sin(tilt)).
+// lead = flip travel + tilt-in travel + braking distance. The ideal turn ends settled: no settle time (the guidance's
+// settled-rate test passes at the turn's end), and the synchronous first plan adds no flight time.
+struct FlipModel {
+    double flip_accel_mps2 = 0.0;       // the flip set at the flip throttle on the heavy ship, fully spooled
+    double flip_alpha_radps2 = 0.0;     // its gimbal pitch acceleration, fully spooled
+    double spool_s = 0.0;               // the flip engines' startup time (0: full thrust at once)
+    double brake_accel_mps2 = 0.0;      // the first landing set at its planned maximum on the heavy ship
+    double brake_alpha_radps2 = 0.0;    // its gimbal pitch acceleration there
+    double brake_rate_max_radps = 0.0;  // the phase's tilt-rate limit (<= 0: none)
+    double brake_tilt_rad = 0.0;        // the phase's tilt limit
 };
-FlipPush ship_flip_push(double flip_accel_mps2, double flip_alpha_radps2, double brake_accel_mps2, double brake_tilt_rad);
+struct FlipPush {
+    double duration_s = 0.0;   // the flip
+    double speed_mps = 0.0;    // gained in the flip
+    double travel_m = 0.0;     // in the flip
+    double tilt_in_s = 0.0;
+    double tilt_in_m = 0.0;    // travel while tilting in
+    double brake_speed_mps = 0.0;  // left when the full tilt is reached
+    double brake_m = 0.0;
+    double lead_m() const { return travel_m + tilt_in_m + brake_m; }
+};
+FlipPush ship_flip_push(const FlipModel& model);
+
+// The ship's catch approach time constant [D] (DescentLimits::approach_time_constant_s): the time the final set's
+// engines take to run their throttle range, (throttle_max - throttle_min) / throttle_rate (the slowest engine). Within
+// it the thrust can go from the hover-ish minimum to full braking, so the plan's sink near the arms stays below
+// height / tau: what is left can still be braked at the rate the engines can follow.
+double ship_approach_time_constant_s(const config::VehicleConfig& vehicle, const config::StageConfig& ship,
+                                     const std::vector<std::string>& groups);
 
 // Where the ship's entry guidance aims: with a catch tower `gate_lead_m` back from the catch axis on the line
 // tower -> pad, the nose to the tower: the flip pushes the ship towards the arms, the final approach comes from the open
@@ -143,6 +168,8 @@ public:
     double flip_end_height_m() const { return flip_end_height_m_; }
     // The last-resort abort flies (sticky): upright descent instead of plans.
     bool upright_descent_active() const { return upright_descent_; }
+    // ... and has switched to the landing pair.
+    bool descent_on_pair() const { return descent_on_pair_; }
     // First tick resting or impacted: axis tilt from the local vertical and sink speed (Earth-fixed).
     bool has_contact() const { return contact_; }
     double contact_tilt_rad() const { return contact_tilt_rad_; }
@@ -151,13 +178,14 @@ public:
 private:
     void print_gate_state(const char* label, const vehicle::FlightBody& body, const frames::FixedToInertial& transform,
                           time::Epoch epoch) const;
-    // The upright descent's engines: three while sinking faster than the 3 -> 2 window, then the landing pair.
-    const std::vector<std::string>& descent_groups(double sink_mps) const {
-        return sink_mps > parameters_.descent_two_engine_sink_mps ? parameters_.flip_groups
-                                                                  : parameters_.scvx.snapshot.phase_groups[1];
+    // The upright descent's engines: the flip set while the pair at its planned maximum could not stop the sink within
+    // the height, then the pair (sticky once it runs).
+    bool descent_pair_reached(const vehicle::Vehicle& vehicle, double sink_mps, double height_m, double pressure_pa) const;
+    const std::vector<std::string>& descent_groups(bool pair) const {
+        return pair ? parameters_.scvx.snapshot.phase_groups[1] : parameters_.flip_groups;
     }
     void fly_upright_descent(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
-                             const frames::FixedToInertial& transform, const math::Vec3& site_up, ReturnCommand& cmd) const;
+                             const frames::FixedToInertial& transform, const math::Vec3& site_up, ReturnCommand& cmd);
 
     LandingSite site_;
     ShipLandingParameters parameters_;
@@ -172,6 +200,7 @@ private:
     bool catch_contact_ = false;
     bool abort_requested_ = false;
     bool upright_descent_ = false;
+    bool descent_on_pair_ = false;
     std::optional<time::Epoch> abort_since_;
     bool contact_ = false;
     double contact_tilt_rad_ = 0.0;

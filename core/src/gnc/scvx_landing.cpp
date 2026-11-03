@@ -1,6 +1,7 @@
 #include "starsim/gnc/scvx_landing.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -253,6 +254,7 @@ bool ScvxLandingGuidance::request_abort() {
 }
 
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
+    const auto wall_start = std::chrono::steady_clock::now();  // diagnostics: the synchronous first plan's wall time
     const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
     model_ = snapshot.model;
     check_sea_reach(snapshot, 0);  // an abort requested before the first plan
@@ -283,9 +285,12 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
     }
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking
         const auto& p = *outcome.plan;
-        std::printf("[scvx] first: conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f spool %.2f\n",
+        std::printf("[scvx] first: conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f spool %.2f "
+                    "solve %.0f ms, start %.0f ms\n",
                     p.converged, p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
-                    p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], snapshot.phase0_spool);
+                    p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], snapshot.phase0_spool,
+                    outcome.solve_ms,
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall_start).count());
     }
     first_plan_epoch_ = epoch;
     print_plan_path(*outcome.plan, 0.0, outcome.solve_ms);

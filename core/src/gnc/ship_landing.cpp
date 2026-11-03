@@ -200,7 +200,11 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                                  (body.state().velocity_gcrf_mps -
                                   cross(vehicle::earth_rotation_vector(transform), body.state().position_gcrf_m));
             const double sink = -dot(v_fixed, site_up);
-            const auto thrust = group_thrust(body.vehicle(), descent_groups(sink), env.atmosphere.at(site_.height_m).pressure_pa);
+            const double pressure = env.atmosphere.at(site_.height_m).pressure_pa;
+            const Vec3 pad = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
+            const double engine_height = dot(r_fixed - pad, site_up) - mass.cg_station_m;
+            const auto thrust = group_thrust(
+                body.vehicle(), descent_groups(descent_pair_reached(body.vehicle(), sink, engine_height, pressure)), pressure);
             const double usable = feed_propellant_kg(body.vehicle()) - parameters_.scvx.snapshot.reserve_kg;
             const double need = upright_stop_propellant_kg(mass.mass_kg, sink, thrust.max_n / mass.mass_kg,
                                                            constants::standard_gravity_mps2, thrust.exhaust_velocity_mps,
@@ -229,11 +233,24 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
     return cmd;
 }
 
-// The last-resort abort (gnc::upright_descent): three engines while sinking faster than the 3 -> 2 window, then the
-// landing pair; thrust limits of the running engines at the local pressure; arms open, flaps folded, free roll.
+bool ShipLandingGuidance::descent_pair_reached(const vehicle::Vehicle& vehicle, double sink_mps, double height_m,
+                                               double pressure_pa) const {
+    const auto pair = group_thrust(vehicle, parameters_.scvx.snapshot.phase_groups[1], pressure_pa);
+    const double mass_kg = vehicle.mass_properties().mass_kg;
+    // the pair at its planned maximum (the plans' tracking margin below full) still stops the sink within the height:
+    // the descent profile with that whole excess; the margin is left to close in on its own profile
+    auto full = parameters_.upright_descent;
+    full.deceleration_fraction = 1.0;
+    const double planned = pair.max_n * (1.0 - parameters_.scvx.settings.limits.throttle_margin) / mass_kg;
+    return sink_mps <= upright_descent_sink_mps(height_m, planned, constants::standard_gravity_mps2, full);
+}
+
+// The last-resort abort (gnc::upright_descent): the flip set brakes towards the landing pair's sink profile until the
+// pair can stop the sink, then the pair follows the profile (sticky); thrust limits of the running engines at the local pressure; arms open, flaps folded,
+// free roll.
 void ShipLandingGuidance::fly_upright_descent(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                               const frames::FixedToInertial& transform, const Vec3& site_up,
-                                              ReturnCommand& cmd) const {
+                                              ReturnCommand& cmd) {
     const auto& vehicle = body.vehicle();
     const auto mass = vehicle.mass_properties();
     const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
@@ -244,11 +261,14 @@ void ShipLandingGuidance::fly_upright_descent(const vehicle::FlightBody& body, c
     const double cg_height = dot(r_fixed - pad, site_up);
     const double pressure = env.atmosphere.at(site_.height_m + cg_height).pressure_pa;
     const double sink = -dot(v_fixed, site_up);
-    const auto& groups = descent_groups(sink);
+    const double engine_height = cg_height - mass.cg_station_m;
+    if (!descent_on_pair_) descent_on_pair_ = descent_pair_reached(vehicle, sink, engine_height, pressure);
+    const auto& groups = descent_groups(descent_on_pair_);
     const auto thrust = group_thrust(vehicle, groups, pressure);
+    const auto pair = group_thrust(vehicle, parameters_.scvx.snapshot.phase_groups[1], pressure);
     const Vec3 tower = site_.catch_target ? site_.catch_target->tower_center_itrf_m : pad;
-    const auto c = upright_descent(r_fixed - tower, v_fixed, site_up, cg_height - mass.cg_station_m,
-                                   thrust.min_n / mass.mass_kg, thrust.max_n / mass.mass_kg,
+    const auto c = upright_descent(r_fixed - tower, v_fixed, site_up, engine_height, thrust.min_n / mass.mass_kg,
+                                   thrust.max_n / mass.mass_kg, pair.max_n / mass.mass_kg,
                                    constants::standard_gravity_mps2, parameters_.upright_descent);
     cmd.run_groups = groups;
     cmd.throttle = landing_throttle(vehicle, groups, mass.mass_kg * c.acceleration_mps2, pressure);

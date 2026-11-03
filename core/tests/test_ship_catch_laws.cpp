@@ -53,6 +53,35 @@ TEST_CASE("Upright descent: slower than the profile it sinks to the ground, it d
     CHECK(sink <= p.final_sink_mps + 0.5);
 }
 
+// Task 3 fix (I3): the three engines brake the ship onto the landing pair's profile, the pair then follows it down.
+TEST_CASE("Upright descent: the flip set brakes onto the landing pair's profile", "[ship][landing]") {
+    const gnc::UprightDescentParameters p;
+    constexpr double g = 9.81, a3_min = 7.6, a3_max = 28.4, a2_min = 5.1, a2_max = 19.0, dt = 0.01;
+    // the pair's profile: sqrt(final^2 + 2 f (a2 - g) h)
+    CHECK(gnc::upright_descent_sink_mps(400.0, a2_max, g, p) ==
+          Catch::Approx(std::sqrt(p.final_sink_mps * p.final_sink_mps + 2.0 * p.deceleration_fraction * (a2_max - g) * 400.0)));
+    CHECK(gnc::upright_descent_sink_mps(400.0, 9.0, g, p) == p.final_sink_mps);  // a set below the weight: the final sink
+    // 400 m up at 90 m/s: three engines (towards the pair's profile) until the pair at its planned maximum (5 % margin)
+    // can stop the sink within the height (the profile with that whole excess), then the pair to the ground
+    auto full = p;
+    full.deceleration_fraction = 1.0;
+    const double a2_planned = 0.95 * a2_max;
+    CHECK(gnc::upright_descent_sink_mps(400.0, a2_planned, g, full) < 90.0);
+    double h = 400.0, sink = 90.0, switch_height = -1.0;
+    bool pair = false;
+    while (h > 0.0) {
+        if (!pair) pair = sink <= gnc::upright_descent_sink_mps(h, a2_planned, g, full);
+        if (pair && switch_height < 0.0) switch_height = h;
+        const auto c = pair ? gnc::upright_descent({300.0, 0.0, 0.0}, {0.0, 0.0, -sink}, up, h, a2_min, a2_max, g, p)
+                            : gnc::upright_descent({300.0, 0.0, 0.0}, {0.0, 0.0, -sink}, up, h, a3_min, a3_max, a2_max, g, p);
+        sink += (g - c.acceleration_mps2) * dt;
+        h -= sink * dt;
+    }
+    CHECK(pair);
+    CHECK(switch_height > 100.0);  // well above the ground, not at contact
+    CHECK(sink <= p.final_sink_mps + 0.5);
+}
+
 TEST_CASE("Upright descent: next to the tower it moves away; above its centre it still picks a way", "[ship][landing]") {
     const auto c = gnc::upright_descent({0.0, 20.0, 0.0}, {0.0, 0.0, -5.0}, up, 100.0, 8.0, 40.0, 9.81);
     CHECK(c.axis.y > 0.0);  // away from the tower

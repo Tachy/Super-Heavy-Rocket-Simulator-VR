@@ -120,17 +120,29 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
     auto decel = [&](int p, double m) {
         return std::max(guess_throttle * model.engine_sets[static_cast<size_t>(p)].thrust_max_n / m - g, min_deceleration_mps2);
     };
-    DescentReference ref;
-    double speed = speed0;  // at the start of phase p
-    for (int p = start_phase; p < descent_phases; ++p) {
-        const auto& sw = limits.switches[static_cast<size_t>(std::min(p, descent_phases - 2))];
-        const double end_speed = p + 1 < descent_phases ? std::min(speed, 0.5 * (sw.min_sink_mps + sw.max_sink_mps)) : final_speed;
-        ref.duration_s[static_cast<size_t>(p)] = std::max((speed - end_speed) / decel(p, m0), limits.min_phase_s[static_cast<size_t>(p)]);
-        speed = end_speed;
-    }
     const Vec3 r_end = target.goal != DescentGoal::Abort
                            ? target.position_m
                            : Vec3{target.ground_cg_height_m, target.sea_target_m.y, target.sea_target_m.z};
+    DescentReference ref;
+    double speed = speed0;  // at the start of phase p
+    double height = std::max(initial[descent_index::position] - r_end.x, 0.0);  // left at the start of phase p
+    for (int p = start_phase; p < descent_phases; ++p) {
+        const auto& sw = limits.switches[static_cast<size_t>(std::min(p, descent_phases - 2))];
+        double end_speed = final_speed;
+        if (p + 1 < descent_phases && limits.late_switch_guess) {
+            // the latest switch the later sets can still finish in their minimum phase times ...
+            double late = final_speed;
+            for (int q = p + 1; q < descent_phases; ++q) late += decel(q, m0) * limits.min_phase_s[static_cast<size_t>(q)];
+            // ... but not below what this set cannot remove within the height left
+            const double reach = std::sqrt(std::max(speed * speed - 2.0 * decel(p, m0) * height, 0.0));
+            end_speed = std::min(speed, std::clamp(std::max(late, reach), sw.min_sink_mps, sw.max_sink_mps));
+        } else if (p + 1 < descent_phases) {
+            end_speed = std::min(speed, 0.5 * (sw.min_sink_mps + sw.max_sink_mps));
+        }
+        ref.duration_s[static_cast<size_t>(p)] = std::max((speed - end_speed) / decel(p, m0), limits.min_phase_s[static_cast<size_t>(p)]);
+        height = std::max(height - (speed * speed - end_speed * end_speed) / (2.0 * decel(p, m0)), 0.0);
+        speed = end_speed;
+    }
     const Vec3 v_end = target.goal != DescentGoal::Abort ? target.velocity_mps : Vec3{};
     const Quat q_end = upright_with_roll(state_attitude(initial));
     double total = 0.0;

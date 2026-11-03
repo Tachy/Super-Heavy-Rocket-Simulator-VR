@@ -66,7 +66,7 @@ struct Gate {
     std::optional<gnc::ShipLandingParameters> parameters;  // none: from the ship's config
 };
 
-test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
+test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr, bool* descent_on_pair = nullptr) {
     test::spice_session();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
@@ -107,6 +107,7 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
                 g && g->scvx() ? g->scvx()->statistics().plans : 0, g && g->scvx() ? g->scvx()->statistics().failures : 0,
                 session.body(0).vehicle().propellant_kg() / 1000.0);
     (void)flip_s;
+    if (descent_on_pair) *descent_on_pair = g && g->upright_descent_active() && g->descent_on_pair();
     return run;
 }
 
@@ -179,6 +180,23 @@ TEST_CASE("Ship catch: an abort requested in the flip comes down upright", "[shi
     Gate g = nominal_gate();
     g.abort_in_flip = true;
     const auto run = fly_from_gate(g);
+    CHECK(run.result == sim::ReturnResult::UprightAbort);
+    CHECK_FALSE(run.tower_struck);
+}
+
+// The last-resort upright descent from a gate (forced: every abort leans beyond a zero guard tilt) brakes on three
+// engines onto the landing pair's profile and lands on the pair (Task 3 fix I3: the pair lands, as designed). The gate
+// lies 600 m out on the line tower -> pad: the descent comes down clear of the arms.
+TEST_CASE("Ship catch: an upright descent from the gate ends on the landing pair", "[ship][landing][catch]") {
+    Gate g = nominal_gate();
+    g.offset_enu_m = g.offset_enu_m * (600.0 / 220.0);
+    g.abort_in_flip = true;
+    const auto cfg = ship_with(g.propellant_kg);
+    g.parameters = gnc::ship_landing_parameters(cfg, cfg.stages[0]);
+    g.parameters->upright_guard_tilt_rad = 0.0;
+    bool on_pair = false;
+    const auto run = fly_from_gate(g, nullptr, &on_pair);
+    CHECK(on_pair);
     CHECK(run.result == sim::ReturnResult::UprightAbort);
     CHECK_FALSE(run.tower_struck);
 }
