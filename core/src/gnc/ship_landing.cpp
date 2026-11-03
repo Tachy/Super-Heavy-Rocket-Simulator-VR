@@ -44,6 +44,23 @@ Vec3 up_at(double latitude_rad, double longitude_rad) {
 }  // namespace
 
 EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParameters& parameters) {
+    return ship_entry_target(site, parameters.gate_lead_m);
+}
+
+EntryTarget ship_gate_aim(const LandingSite& site, const ShipLandingParameters& parameters,
+                          const Vec3& gate_velocity_itrf_mps, double mass_kg) {
+    const auto aim = ship_entry_target(site, parameters.gate_lead_m);
+    if (!site.catch_target) return aim;
+    const double along_mps = dot(gate_velocity_itrf_mps, aim.nose_direction_itrf);  // the nose direction is horizontal
+    const double lead_m = ship_gate_lead_m(parameters, along_mps, mass_kg);
+    if (std::getenv("STARSIM_DEBUG_GATE")) {  // diagnostics
+        std::printf("[gate-aim] along %.2f m/s, mass %.1f t: lead %.1f m (static %.1f m)\n", along_mps, mass_kg / 1000.0,
+                    lead_m, parameters.gate_lead_m);
+    }
+    return ship_entry_target(site, lead_m);
+}
+
+EntryTarget ship_entry_target(const LandingSite& site, double gate_lead_m) {
     const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
     EntryTarget target{pad, site.height_m, {}};
     if (!site.catch_target) return target;
@@ -52,7 +69,7 @@ EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParamete
     Vec3 to_tower = c.tower_center_itrf_m - c.pin_point_itrf_m;
     to_tower = math::normalized(to_tower - up * dot(to_tower, up));
     const Vec3 axis = c.pin_point_itrf_m - up * dot(c.pin_point_itrf_m - pad, up);  // catch axis at the pad height
-    target.position_itrf_m = axis - to_tower * parameters.gate_lead_m;
+    target.position_itrf_m = axis - to_tower * gate_lead_m;
     target.nose_direction_itrf = to_tower;
     return target;
 }

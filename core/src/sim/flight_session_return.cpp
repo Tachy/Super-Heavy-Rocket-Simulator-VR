@@ -66,9 +66,18 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
     }
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     // gate ahead of the tower's catch axis (b3), else over the pad centre
-    const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters(flying.body->vehicle()));
+    const auto site = return_site(flying.body->vehicle());
+    auto landing = gnc::ship_landing_parameters(flying.body->vehicle());
+    const auto target = gnc::ship_entry_target(site, landing);
     flying.entry_guidance =
         std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters, radiative_heating_);
+    // the terminal phase moves the gate with the lead the predicted gate state needs (ship_gate_aim)
+    if (site.catch_target) {
+        flying.entry_guidance->set_terminal_aim(
+            [site, landing = std::move(landing)](const math::Vec3& gate_velocity_itrf_mps, double mass_kg) {
+                return gnc::ship_gate_aim(site, landing, gate_velocity_itrf_mps, mass_kg);
+            });
+    }
 }
 
 namespace {

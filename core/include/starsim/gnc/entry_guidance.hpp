@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include "starsim/config/vehicle_config.hpp"
@@ -247,6 +248,11 @@ public:
     // never hands over at a gate: the entry / terminal steering fly the belly flop down to the impact.
     void give_up(const EntryTarget& sea);
     bool given_up() const { return given_up_; }
+    // Terminal re-aim (a ship catch: gnc::ship_gate_aim): each terminal cycle the target becomes aim(the previous
+    // cycle's predicted gate velocity (Earth-fixed), the live mass) before the steering's predictions; the first
+    // terminal cycle keeps the target given. Not after give_up.
+    using TerminalAim = std::function<EntryTarget(const math::Vec3& gate_velocity_itrf_mps, double mass_kg)>;
+    void set_terminal_aim(TerminalAim aim) { terminal_aim_ = std::move(aim); }
     // The gate as the latest prediction reaches it (onboard prediction for the mission timeline): the cycle's epoch plus
     // the predicted time to the gate height - the entry corrector's solution or the terminal steering's prediction.
     // None before the first, when the prediction misses the gate, for an aerocapture or a given-up ship, and once there.
@@ -275,7 +281,8 @@ private:
                   const math::Vec3& v_itrf, double mach, double dt_s);
     // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).
     math::Vec3 terminal_miss(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf,
-                               const math::Vec3& steering, double* time_to_go_s) const;
+                               const math::Vec3& steering, double* time_to_go_s,
+                               math::Vec3* gate_velocity_itrf_mps = nullptr) const;
     bool violates(const EntryPrediction& p) const;
     // Corrector miss (> 0: too much energy left - more bank).
     double miss(const EntryPrediction& p) const;
@@ -322,6 +329,8 @@ private:
     bool handed_over_ = false;  // the terminal phase follows the entry phase (not placed by skip_to)
     math::Vec3 terminal_e1_, terminal_e2_;  // steering basis (see EntryPredictorState::basis_frozen)
     math::Vec3 terminal_zem_itrf_;             // predicted horizontal miss at the gate
+    TerminalAim terminal_aim_;
+    std::optional<math::Vec3> terminal_gate_velocity_itrf_;  // the last terminal prediction's, for the re-aim
     double terminal_prediction_age_s_ = 0.0;
     std::optional<time::Epoch> gate_epoch_;  // latest predicted arrival at the gate height
 };

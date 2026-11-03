@@ -73,7 +73,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   approach_time_constant_s`) [D] = the pair's throttle range / throttle rate, (1 - 0.3) / 0.5 = 1.4 s
   (`gnc::ship_approach_time_constant_s`; the booster keeps 3 s [E]). The upright descent (last resort) brakes on the
   three engines towards the landing pair's own sink profile sqrt(v_f^2 + 2 f (a_pair - g) h) until the pair at its planned
-  maximum (the plans' 5 % throttle margin below full) can stop the sink within the height (the same with f = 1, live
+  maximum (the plans' 5 % throttle margin below full - the scvx K value `throttle_margin` reused, not derived) can stop the sink within the height (the same with f = 1, live
   mass; the margin closes in on the profile), then the pair takes over (sticky) and
   lands (`upright_descent` with a profile acceleration).
   Thrust
@@ -84,13 +84,18 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   reads the same (Task 1c, 2026-11-03; before, the whole load counted and plans could fly the headers dry). Ship LQR effort 0.03 of the gimbal authority [D seed 18], attitude
   controller `Gains::actuator_delay_s` 0.75 s; flaps folded in the burn. Lateral phase tilt limit 20 deg [E].
   `FlightSession::place_landing_ship`; the entry hands over at the gate.
-- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (195 m, `gnc::ship_flip_push`: the flip set at
+- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (static: 195 m, `gnc::ship_flip_push`: the flip set at
   the flip throttle relights - thrust and authority ramp over the Raptor's 3 s startup - and turns 90 deg rest-to-rest
   (time-optimal at the ramped authority) in 4.51 s, pushing 87 m and 37.8 m/s along the nose; the three at 95 % tilt in
   to 20 deg at the phase's rate limit in 1.69 s (60 m, braking meanwhile) and brake the remaining 29.9 m/s in 49 m.
-  Sim check, seed-18 gate: flip 4.4-4.9 s, ~105 m, +36 m/s. Not in the lead: the gate's own horizontal speed (an entry
-  result, 3-7 m/s, ~20-40 m over flip and tilt-in) and the plans' non-maximal braking; the ideal turn ends settled
-  and the first plan is synchronous, so no settle or latency term) back from the catch axis on the line tower ->
+  Sim check, seed-18 gate: flip 4.4-4.9 s, ~105 m, +36 m/s; Mach 2.6 session flight: flip 3.8 s, +24 m/s, ~75 m (the
+  aerodynamic flip start - flaps folded, the tail falls while the engines spool - is not in the model). The gate's own
+  horizontal speed v0 along the line adds v0 (t_flip + t_tilt-in) and brakes from v0 + 29.9 m/s
+  (`FlipModel::initial_speed_mps`): the static 195 m (v0 = 0, heavy ship) is the deorbit planners' aim
+  (`ship_deorbit_plan`, `replan_ship_deorbit`, the lunar return's gate); in flight `EntryGuidance::set_terminal_aim`
+  re-aims every terminal cycle with `gnc::ship_gate_aim` (`ship_gate_lead_m` for the previous cycle's predicted gate
+  velocity along the line and the live mass; e.g. 6.6 m/s, 289 t -> 260 m). Not in the lead: the plans' non-maximal
+  braking; the ideal turn ends settled and the first plan is synchronous, so no settle or latency term) back from the catch axis on the line tower ->
   pad with `EntryTarget::nose_direction_itrf` to the tower; only that approach is robust (the arms stand across the
   line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering to the nearest edge
   of the nose sector at fraction 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 3 deg/s [E],

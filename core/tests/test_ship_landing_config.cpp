@@ -133,6 +133,59 @@ TEST_CASE("Ship landing derivations follow their hand formulas", "[ship][landing
     CHECK(gnc::ship_phase_rate_limit_radps(set, 20.0 * deg, inertia) == 0.1);
 }
 
+// Task 3 fix round 2 (I2): the gate's horizontal speed v0 along the line enters the lead; the in-flight re-aim uses it.
+TEST_CASE("Gate lead follows the gate's horizontal speed", "[ship][landing][config]") {
+    const double a = 20.0, alpha = 0.5, brake = 10.0, tilt = 20.0 * deg, v0 = 5.0;
+    const double t_f = std::sqrt(2.0 * constants::pi / alpha);
+    // Hand case, no tilt-in authority: v0 travels through the flip, the braking starts at dv + v0:
+    // lead = travel(0) + v0 T + (dv + v0)^2 / (2 a sin(tilt)).
+    gnc::FlipModel model{a, alpha, 0.0, brake, 0.0, 0.0, tilt};
+    const auto f0 = gnc::ship_flip_push(model);
+    model.initial_speed_mps = v0;
+    const auto f5 = gnc::ship_flip_push(model);
+    CHECK(f5.duration_s == f0.duration_s);
+    CHECK(f5.speed_mps == f0.speed_mps);
+    CHECK(f5.lead_m() ==
+          Approx(f0.travel_m + v0 * t_f + (f0.speed_mps + v0) * (f0.speed_mps + v0) / (2.0 * brake * std::sin(tilt)))
+              .epsilon(1e-12));
+    // With the tilt-in: its speed loss does not depend on the speed, so
+    // lead(v0) - lead(0) = v0 (T + t_tilt) + ((v_b + v0)^2 - v_b^2) / (2 a sin(tilt)), v_b the brake speed at v0 = 0.
+    model.brake_alpha_radps2 = 0.6;
+    model.initial_speed_mps = 0.0;
+    const auto t0 = gnc::ship_flip_push(model);
+    model.initial_speed_mps = v0;
+    const auto t5 = gnc::ship_flip_push(model);
+    const double vb = t0.brake_speed_mps;
+    CHECK(t5.brake_speed_mps == Approx(vb + v0).epsilon(1e-12));
+    CHECK(t5.lead_m() - t0.lead_m() ==
+          Approx(v0 * (t0.duration_s + t0.tilt_in_s) + ((vb + v0) * (vb + v0) - vb * vb) / (2.0 * brake * std::sin(tilt)))
+              .epsilon(1e-9));
+    // Moving away from the tower: the tilt-in travel ends at rest (no reverse travel). From 0.5 m/s at the flip's end,
+    // early in the tilt-in (theta = alpha_b t^2 / 2, sin theta ~ theta): v = 0.5 - a alpha_b t^3 / 6 reaches zero at
+    // t* = (3 / (a alpha_b))^(1/3) after (3/4) 0.5 t*.
+    model.initial_speed_mps = 0.5 - f0.speed_mps;
+    const auto stop = gnc::ship_flip_push(model);
+    const double t_stop = std::cbrt(3.0 / (brake * 0.6));
+    CHECK(stop.brake_speed_mps == 0.0);
+    CHECK(stop.brake_m == 0.0);
+    CHECK(stop.tilt_in_m == Approx(0.75 * 0.5 * t_stop).epsilon(0.02));
+    model.initial_speed_mps = -1.0 - f0.speed_mps;  // already backwards at the flip's end: nothing after the flip
+    const auto back = gnc::ship_flip_push(model);
+    CHECK(back.tilt_in_m == 0.0);
+    CHECK(back.lead_m() == back.travel_m);
+
+    // ship_gate_lead_m: the parameters' model with v0; half the mass doubles the linear accelerations (same thrust).
+    gnc::ShipLandingParameters p;
+    p.gate_flip = gnc::FlipModel{a, alpha, 0.0, brake, 0.6, 0.0, tilt};
+    p.gate_flip_mass_kg = 200.0e3;
+    gnc::FlipModel light = p.gate_flip;
+    light.flip_accel_mps2 *= 2.0;
+    light.brake_accel_mps2 *= 2.0;
+    light.initial_speed_mps = v0;
+    CHECK(gnc::ship_gate_lead_m(p, v0, 100.0e3) == Approx(gnc::ship_flip_push(light).lead_m()).epsilon(1e-12));
+    CHECK(gnc::ship_gate_lead_m(p, v0, 200.0e3) == Approx(t5.lead_m()).epsilon(1e-12));
+}
+
 // Task 3 fix (I1): the first plan's guess ends a phase from the state, not in the middle of a wide derived window.
 TEST_CASE("Descent guess switches as late as the later sets can finish", "[ship][landing][scvx]") {
     gnc::DescentModel model;

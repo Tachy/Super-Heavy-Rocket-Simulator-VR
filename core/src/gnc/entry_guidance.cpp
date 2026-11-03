@@ -424,7 +424,7 @@ void EntryGuidance::aerocapture_cycle(const vehicle::FlightBody& body, const Ent
 }
 
 Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r_itrf, const Vec3& v_itrf,
-                                  const Vec3& steering, double* time_to_go_s) const {
+                                  const Vec3& steering, double* time_to_go_s, Vec3* gate_velocity_itrf_mps) const {
     EntryPredictorModel m = model_;
     m.mass_kg = body.vehicle().mass_properties().mass_kg;
     EntryPredictorState state{r_itrf, v_itrf, 0.0};
@@ -437,6 +437,7 @@ Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r
     const EntryPrediction p = predict_entry(m, state, 0.0, target_, parameters_.gate_height_m, 0.0,
                                             parameters_.terminal_prediction_step_s, max_terminal_prediction_s);
     if (time_to_go_s) *time_to_go_s = p.time_s;
+    if (gate_velocity_itrf_mps) *gate_velocity_itrf_mps = p.end_velocity_itrf_mps;
     const Vec3 end = p.end_position_itrf_m - target_.position_itrf_m;
     const Vec3 end_up = math::normalized(p.end_position_itrf_m);
     return end - end_up * dot(end, end_up);
@@ -497,8 +498,13 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
         terminal_prediction_age_s_ = 0.0;
         terminal_predicted_ = true;
         Vec3 p = terminal_steering_;
+        if (terminal_aim_ && !given_up_ && terminal_gate_velocity_itrf_) {  // re-aim from the live state
+            target_ = terminal_aim_(*terminal_gate_velocity_itrf_, body.vehicle().mass_properties().mass_kg);
+        }
         double gate_time_to_go_s = 0.0;
-        const Vec3 z0 = terminal_miss(body, r_itrf, v_itrf, p, &gate_time_to_go_s);
+        Vec3 gate_velocity_itrf_mps;
+        const Vec3 z0 = terminal_miss(body, r_itrf, v_itrf, p, &gate_time_to_go_s, &gate_velocity_itrf_mps);
+        terminal_gate_velocity_itrf_ = gate_velocity_itrf_mps;
         gate_epoch_ = last_update_ + gate_time_to_go_s;  // update() set last_update_ to this cycle's epoch
         const double d = parameters_.terminal_newton_step;
         const double d1s = EntryPredictorModel::steering_difference(p, Vec3{1.0, 0.0, 0.0}, d);

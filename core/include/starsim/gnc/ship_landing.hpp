@@ -14,6 +14,30 @@
 
 namespace starsim::gnc {
 
+// The flip's push along the nose and the braking after it [D]:
+//  Flip    - the flip set relights (thrust and gimbal authority ramp up linearly over its engines' startup time) and
+//            turns the heavy ship rest-to-rest (time-optimal bang-bang at the ramped authority) through 90 deg,
+//            belly-first -> engines down; its thrust along the axis at theta(t) from the horizontal gives
+//            dv = int a s(t) cos(theta) dt and the travel x = int (t_f - t) a s(t) cos(theta) dt.
+//  Tilt-in - the first landing set (planned maximum) tilts rest-to-rest to the phase's tilt limit at its gimbal
+//            acceleration, capped by the phase's tilt-rate limit (flip_duration_s); the horizontal part a sin(theta)
+//            brakes meanwhile.
+//  Brake   - the rest at the full tilt: v^2 / (2 a sin(tilt)).
+// lead = flip travel + tilt-in travel + braking distance. The ideal turn ends settled: no settle time (the guidance's
+// settled-rate test passes at the turn's end), and the synchronous first plan adds no flight time. A horizontal speed
+// v0 along the line at the gate (towards the tower > 0) adds v0 (t_flip + t_tilt-in) of travel and enters the braking
+// (the speed after the tilt-in is v0 + dv - dv_tilt-in); the tilt-in travel stops where the speed reaches zero.
+struct FlipModel {
+    double flip_accel_mps2 = 0.0;       // the flip set at the flip throttle on the heavy ship, fully spooled
+    double flip_alpha_radps2 = 0.0;     // its gimbal pitch acceleration, fully spooled
+    double spool_s = 0.0;               // the flip engines' startup time (0: full thrust at once)
+    double brake_accel_mps2 = 0.0;      // the first landing set at its planned maximum on the heavy ship
+    double brake_alpha_radps2 = 0.0;    // its gimbal pitch acceleration there
+    double brake_rate_max_radps = 0.0;  // the phase's tilt-rate limit (<= 0: none)
+    double brake_tilt_rad = 0.0;        // the phase's tilt limit
+    double initial_speed_mps = 0.0;     // v0: horizontal speed along the line at the gate (towards the tower > 0)
+};
+
 // Flip and landing of the ship at the tower (b3 of docs/superpowers/archive/specs/2026-10-13-ship-return-design.md).
 // Production values come from the vehicle config: ship_landing_parameters(vehicle, stage). The member defaults are
 // only test fixtures.
@@ -28,8 +52,11 @@ struct ShipLandingParameters {
     double first_plan_retry_s = 1.0;                             // a failed first plan is tried again this often
     // [D] the flip pushes the ship along its nose (thrust across the path while it turns) and the landing burn brakes
     // the speed it gained: the entry's gate lies this far back from the catch axis on the line tower -> pad, the nose
-    // pointing to the tower (ship_gate_lead_m).
+    // pointing to the tower. This static value (no horizontal speed at the gate, the heavy ship) is the deorbit
+    // planners' aim; in flight the terminal entry guidance re-aims from the live state (ship_gate_lead_m).
     double gate_lead_m = 220.0;
+    FlipModel gate_flip;              // the model behind gate_lead_m (initial_speed_mps 0)
+    double gate_flip_mass_kg = 0.0;   // the mass its accelerations are for (the heavy landing mass)
     // Ship catch robustness (2026-10-21): the last-resort abort (gnc::upright_descent) after this many failed first
     // plans (neither the catch nor the sea in reach), or when an abort has no converged abort plan after the grace
     // time or leans the hull beyond the guard tilt.
@@ -89,26 +116,6 @@ SinkWindow ship_switch_sink_window(const EngineSetThrust& outgoing, const Engine
 double ship_switch_max_sink_mps(const config::VehicleConfig& vehicle, const config::StageConfig& ship,
                                 const ShipLandingParameters& parameters, double height_m);
 
-// The flip's push along the nose and the braking after it [D]:
-//  Flip    - the flip set relights (thrust and gimbal authority ramp up linearly over its engines' startup time) and
-//            turns the heavy ship rest-to-rest (time-optimal bang-bang at the ramped authority) through 90 deg,
-//            belly-first -> engines down; its thrust along the axis at theta(t) from the horizontal gives
-//            dv = int a s(t) cos(theta) dt and the travel x = int (t_f - t) a s(t) cos(theta) dt.
-//  Tilt-in - the first landing set (planned maximum) tilts rest-to-rest to the phase's tilt limit at its gimbal
-//            acceleration, capped by the phase's tilt-rate limit (flip_duration_s); the horizontal part a sin(theta)
-//            brakes meanwhile.
-//  Brake   - the rest at the full tilt: v^2 / (2 a sin(tilt)).
-// lead = flip travel + tilt-in travel + braking distance. The ideal turn ends settled: no settle time (the guidance's
-// settled-rate test passes at the turn's end), and the synchronous first plan adds no flight time.
-struct FlipModel {
-    double flip_accel_mps2 = 0.0;       // the flip set at the flip throttle on the heavy ship, fully spooled
-    double flip_alpha_radps2 = 0.0;     // its gimbal pitch acceleration, fully spooled
-    double spool_s = 0.0;               // the flip engines' startup time (0: full thrust at once)
-    double brake_accel_mps2 = 0.0;      // the first landing set at its planned maximum on the heavy ship
-    double brake_alpha_radps2 = 0.0;    // its gimbal pitch acceleration there
-    double brake_rate_max_radps = 0.0;  // the phase's tilt-rate limit (<= 0: none)
-    double brake_tilt_rad = 0.0;        // the phase's tilt limit
-};
 struct FlipPush {
     double duration_s = 0.0;   // the flip
     double speed_mps = 0.0;    // gained in the flip
@@ -132,6 +139,15 @@ double ship_approach_time_constant_s(const config::VehicleConfig& vehicle, const
 // tower -> pad, the nose to the tower: the flip pushes the ship towards the arms, the final approach comes from the open
 // side between them and the side pins lie across them; else the pad centre.
 EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParameters& parameters);
+EntryTarget ship_entry_target(const LandingSite& site, double gate_lead_m);
+// The gate lead from the live state [D]: the parameters' flip model (gate_flip) with the horizontal speed along the
+// line `along_speed_mps` (towards the tower > 0) and the linear accelerations at `mass_kg` (same thrust; the angular
+// accelerations stay the heavy ship's).
+double ship_gate_lead_m(const ShipLandingParameters& parameters, double along_speed_mps, double mass_kg);
+// The terminal entry guidance's re-aim (EntryGuidance::set_terminal_aim): the gate with ship_gate_lead_m for the
+// predicted gate velocity (Earth-fixed) along the line to the tower and the live mass; the pad centre without a tower.
+EntryTarget ship_gate_aim(const LandingSite& site, const ShipLandingParameters& parameters,
+                          const math::Vec3& gate_velocity_itrf_mps, double mass_kg);
 
 // From the gate (belly down, ~100 m/s sink):
 //  Flip        - the sea-level engines relight at the flip throttle and the attitude controller turns the axis to the

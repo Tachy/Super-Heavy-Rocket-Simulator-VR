@@ -162,15 +162,22 @@ FlipPush ship_flip_push(const FlipModel& m) {
         f.speed_mps += a * dt;
         f.travel_m += (f.duration_s - t) * a * dt;
     }
-    // Tilt-in: the horizontal part of the braking set's thrust grows with the tilt.
-    double v = f.speed_mps;
+    // The gate's own horizontal speed along the line carries on through the flip.
+    f.travel_m += m.initial_speed_mps * f.duration_s;
+    // Tilt-in: the horizontal part of the braking set's thrust grows with the tilt; the braking ends at rest.
+    double v = m.initial_speed_mps + f.speed_mps;
     if (m.brake_tilt_rad > 0.0 && m.brake_alpha_radps2 > 0.0) {
         f.tilt_in_s = flip_duration_s(m.brake_tilt_rad, m.brake_alpha_radps2, m.brake_rate_max_radps);
         const double h = f.tilt_in_s / flip_push_steps;
-        for (int i = 0; i < flip_push_steps; ++i) {
+        for (int i = 0; i < flip_push_steps && v > 0.0; ++i) {
             const double t = (i + 0.5) * h;
             const double a = m.brake_accel_mps2 *
                              std::sin(capped_turn_angle(t, m.brake_tilt_rad, m.brake_alpha_radps2, m.brake_rate_max_radps));
+            if (a * h >= v) {  // stops within this step: v^2 / (2 a)
+                f.tilt_in_m += a > 0.0 ? v * v / (2.0 * a) : 0.0;
+                v = 0.0;
+                break;
+            }
             f.tilt_in_m += (v - 0.5 * a * h) * h;
             v -= a * h;
         }
@@ -257,8 +264,21 @@ ShipLandingParameters ship_landing_parameters(const config::VehicleConfig& vehic
         sets[0], throttle_for(sets[0], sets[0].max_n * (1.0 - l.throttle_margin)), masses.heavy_pitch_inertia_kg_m2);
     model.brake_rate_max_radps = l.rate_max_radps[0];
     model.brake_tilt_rad = l.tilt_max_rad[0];
+    p.gate_flip = model;
+    p.gate_flip_mass_kg = masses.heavy_kg;
     p.gate_lead_m = ship_flip_push(model).lead_m();
     return p;
+}
+
+double ship_gate_lead_m(const ShipLandingParameters& p, double along_speed_mps, double mass_kg) {
+    FlipModel m = p.gate_flip;
+    if (p.gate_flip_mass_kg > 0.0 && mass_kg > 0.0) {  // same thrust on the live mass
+        const double scale = p.gate_flip_mass_kg / mass_kg;
+        m.flip_accel_mps2 *= scale;
+        m.brake_accel_mps2 *= scale;
+    }
+    m.initial_speed_mps = along_speed_mps;
+    return ship_flip_push(m).lead_m();
 }
 
 std::vector<std::string> ship_flip_groups(const config::StageConfig& ship) {
