@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -234,6 +235,33 @@ optim::SocpResult DescentPlanner::solve(int start_phase, DescentGoal goal, const
 DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& initial, int start_phase,
                                  const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
                                  double elapsed) {
+    auto plan = plan_once(model, initial, start_phase, target, settings, warm_start, elapsed);
+    if (warm_start || plan.converged || !(plan.virtual_control < settings.stall_virtual_control)) return plan;
+    // A fresh plan cycling in reach: the soft attitude limits' penalty raised (ScvxSettings::attitude_penalty_growth).
+    ScvxSettings raised = settings;
+    double weight = settings.fresh_attitude_violation_weight > 0.0 ? settings.fresh_attitude_violation_weight
+                                                                     : settings.weights.attitude_violation;
+    std::optional<DescentPlan> best;
+    for (int k = 0; k < settings.attitude_penalty_raises; ++k) {
+        weight *= settings.attitude_penalty_growth;
+        raised.fresh_attitude_violation_weight = weight;
+        auto candidate = plan_once(model, initial, start_phase, target, raised, nullptr, 0.0);
+        if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: the penalty escalation
+            std::printf("  [scvx penalty] weight %.3g: conv %d it %d vc %.3g defect %.3g final mass %.0f\n", weight,
+                        candidate.converged, candidate.iterations, candidate.virtual_control, candidate.nonlinear_defect,
+                        candidate.reference.x.back()[descent_index::mass]);
+        }
+        if (!candidate.converged) continue;
+        if (!best || candidate.reference.x.back()[descent_index::mass] > best->reference.x.back()[descent_index::mass]) {
+            best = std::move(candidate);
+        }
+    }
+    return best ? *best : plan;
+}
+
+DescentPlan DescentPlanner::plan_once(const DescentModel& model, const DescentState& initial, int start_phase,
+                                      const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
+                                      double elapsed) {
     const int n = settings.nodes_per_phase;
     const int max_iterations = warm_start ? settings.max_iterations : settings.fresh_max_iterations;
     const int stall_iterations = warm_start ? settings.stall_iterations : settings.fresh_stall_iterations;

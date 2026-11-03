@@ -29,7 +29,12 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   sensitivities), `descent_problem` (convex subproblem in scaled deviations: thrust/gimbal/tilt/rate/glide cones, catch
   or sea-abort goal with tower keep-out; shared phase node has the next set's bounds, engine switches have sink
   windows, the last one is calm), `descent_planner` (`plan_descent`: penalised trust region, warm start, converged when
-  virtual control is small, step or final mass settled, nonlinear interval defects < 5 cm). Uses `optim::SocpSolver`.
+  virtual control is small, step or final mass settled, nonlinear interval defects < 5 cm). A fresh plan that does not
+  converge while its virtual control stays below `stall_virtual_control` (in reach, SCvx cycling) is solved again with
+  the soft tilt / rate limits' penalty raised 10x, 100x, 1000x (`attitude_penalty_growth` 10, `attitude_penalty_raises`
+  3 [E]); the converged one with the most mass left is the plan (exact penalty: too low a weight lets the subproblem
+  lean beyond the limits into a cycle; ship first catch plans of lunar seed 15 / ship return case 1, fixtures
+  `ship_*_first_catch_plan.txt`, Task 1c 2026-11-03). Converging fresh plans and re-plans are unchanged. Uses `optim::SocpSolver`.
   Nominal Block 3 case 6 iterations ~0.5 s fresh; re-plans 1-4 iterations < 0.5 s. In flight: `gnc/descent_snapshot`
   (the worker never calls SPICE), `gnc/descent_replanner` (worker thread, fixed sim-time latency),
   `gnc/descent_tracking`, `gnc/tvc_lateral` (LQR gains), `gnc/scvx_landing` (first plan, re-plans, abort to the sea,

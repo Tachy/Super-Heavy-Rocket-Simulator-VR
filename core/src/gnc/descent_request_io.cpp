@@ -155,6 +155,8 @@ void visit_settings(F& f, ScvxSettings& s) {
     f("settings.trust_region_growth", s.trust_region_growth);
     f("settings.fresh_trust_region_weight", s.fresh_trust_region_weight);
     f("settings.fresh_attitude_violation_weight", s.fresh_attitude_violation_weight);
+    f("settings.attitude_penalty_growth", s.attitude_penalty_growth);
+    f("settings.attitude_penalty_raises", s.attitude_penalty_raises);
     f("settings.stall_iterations", s.stall_iterations);
     f("settings.fresh_stall_iterations", s.fresh_stall_iterations);
     f("settings.stall_ratio", s.stall_ratio);

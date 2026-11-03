@@ -319,6 +319,29 @@ TEST_CASE("A plan that reaches its target only beyond the final set's tilt limit
     CHECK(replan.planned_tilt_excess < std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad));
 }
 
+TEST_CASE("A fresh catch plan held in a limit cycle by its soft attitude limits converges on a raised penalty",
+          "[gnc][descent][scvx][catch][ship]") {
+    // First catch plans of the ship after the flip, recorded with STARSIM_DUMP_SCVX (Task 1c, 2026-11-03): lunar return
+    // direct seed 15 (h 361 m, 70.5 m/s down, 287.0 t, floor 256 t) and ship return dispersed case 1 (h 329 m, 58.9 m/s
+    // down, 281.5 t). At the ship's penalty on the soft tilt / rate limits (weights.attitude_violation 10) SCvx cycles
+    // for its 60 fresh iterations: seed 15 with the dynamics holding (virtual control 1.3e-12, defect 0.087), case 1
+    // at virtual control 0.156; the catch was given up for the sea. The plans the penalised optimum leans into lie
+    // beyond the soft limits. Replays of the dumps at 10x / 100x / 1000x the penalty (weights 100 / 1000 / 10000):
+    // seed 15 converges at all three, ending at 256.0 / 260.8 / 260.4 t; case 1 at the last two, 256.2 / 256.1 t. The
+    // escalation flies the converged plan with the most mass left (both: weight 1000).
+    for (const char* name : {"ship_lunar_seed15_first_catch_plan.txt", "ship_return_dispersed1_first_catch_plan.txt"}) {
+        INFO(name);
+        const auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/" + name);
+        REQUIRE(!r.warm_start);
+        REQUIRE(r.target.goal == DescentGoal::Catch);
+        DescentPlanner planner;
+        const auto plan = default_plan_function()(planner, r);
+        REQUIRE(plan.converged);
+        CHECK(plan.nonlinear_defect < r.settings.defect_tolerance);
+        CHECK(plan.reference.x.back()[descent_index::mass] >= r.settings.limits.min_mass_kg - 1.0);  // above the floor
+    }
+}
+
 TEST_CASE("A fresh sea-abort plan passes a transient of its virtual control and reaches the water", "[gnc][descent][scvx][catch]") {
     // Super Heavy, the catch given up at ~350 m CG height (83 m/s down; test "A commanded abort late in the landing
     // burn ...", recorded with STARSIM_DUMP_SCVX once the model had the hull normal force). From the straight-line guess

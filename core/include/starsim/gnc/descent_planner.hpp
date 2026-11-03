@@ -42,6 +42,14 @@ struct ScvxSettings {
     // (ReturnProfile::landing_fresh_attitude_violation_weight): a long hull's normal force can make one large swing
     // beyond the soft limit a plan the solver settles on although a clean one exists. Re-plans keep the default.
     double fresh_attitude_violation_weight = 0.0;
+    // Exact-penalty escalation of a fresh plan (Task 1c, 2026-11-03): one that did not converge while its dynamics
+    // nearly hold (virtual control below stall_virtual_control: in reach, SCvx cycling) is solved again with the soft
+    // tilt / rate limits' penalty raised by this factor, up to this many times; the converged one with the most mass
+    // left is the plan. A penalty too low for the limits lets the subproblem lean beyond them into a cycle (the ship's
+    // first catch plans after the flip: lunar seed 15 and ship return case 1 converge at 100x / 1000x). [E] a decade
+    // per step, three steps (the trust region's own ladder: trust_region_growth, trust_region_retries).
+    double attitude_penalty_growth = 10.0;
+    int attitude_penalty_raises = 3;
     // Not converging: stop once the virtual control has not shrunk below stall_ratio of its value stall_iterations
     // iterations earlier while still above stall_virtual_control (scaled: metre-size defects, an unreachable target;
     // keeps failing re-plans short without cutting slow but healthy convergence).
@@ -122,6 +130,9 @@ public:
     size_t solver_count() const { return solvers_.size(); }
 
 private:
+    // One SCvx run (plan() adds the penalty escalation of a fresh plan).
+    DescentPlan plan_once(const DescentModel& model, const DescentState& initial, int start_phase, const DescentTarget& target,
+                          const ScvxSettings& settings, const DescentPlan* warm_start, double warm_start_elapsed_s);
     optim::SocpResult solve(int start_phase, DescentGoal goal, const optim::SocpProblem& problem);
     std::map<std::pair<int, DescentGoal>, std::unique_ptr<optim::SocpSolver>> solvers_;
 };
