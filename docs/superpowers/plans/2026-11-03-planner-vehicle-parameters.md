@@ -19,7 +19,7 @@
 - Physics first; no webcast gates; tests follow physics (memory `feedback-tests-follow-physics`). No magic numbers: new constants with source in `core/include/starsim/math/constants.hpp`.
 - SI units, frame/unit in names, angles in radians internally (`*_deg` keys converted at load, as the loader does today).
 - After every vehicle config change: `python tools/vehicle_report.py <vehicle-id>` (starship_block3, falcon9_block5, starship_hls, starship_tanker as touched).
-- Tests: per change `-Fast -TestFilter` of the touched tags; before push the same tags with `[slow]`; `-Nightly` only in Task 12 in the background. Known reds stay red unless a task fixes them: the two settling cases, "Docked tanker: the ship return flies to the catch", "Lunar return campaign (direct): seed 2", the two flap-trim cases, `plan_speed`, #1147 (nightly).
+- Tests (user 2026-11-03: long tests collected at the end while the plan still changes values): per task `-Fast -TestFilter` of the touched tags plus single cases by name; push after those; every `[slow]` set and campaign once in Task 12, `-Nightly` there in the background. Task steps that name `[slow]` runs are moved to Task 12. Known reds stay red unless a task fixes them: the two settling cases, "Docked tanker: the ship return flies to the catch", "Lunar return campaign (direct): seed 2", the two flap-trim cases, `plan_speed`, #1147 (nightly).
 - Each subsystem file `docs/subsystems/<slug>.md` touched is updated with the change (current state only; superseded values to `docs/history/<slug>.md`).
 - Commit on `main` by path, push after green; never add `*.uid` or `cmake/build/`. Conventional Commits, English.
 
