@@ -139,7 +139,7 @@ LunarLandingParameters hls_landing_parameters() {
     // them back
     l.gimbal_fraction = 1.0;
     l.final_gimbal_fraction = 1.0;
-    // Fresh plans start from the planner's ballistic guess (the landing set's thrust-to-weight and the hand-over state,
+    // Fresh plans start from the planner's constant-deceleration guess (from the landing set's thrust-to-weight and the hand-over state,
     // switches from the state and the windows' middle; planner plan Task 6: 3.4 t more left than the former fixed
     // {50, 10, 30} s phase times at both PDI masses).
     a.lqr_lateral = true;

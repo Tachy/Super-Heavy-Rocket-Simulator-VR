@@ -115,7 +115,7 @@ damping_n_s_m = 3.0e6                    # l4 Task 10: x3 - at 1e6 the hull rock
 friction = 0.6                           # foot pad on regolith
 
 # Lunar landing and ascent guidance (gnc::LunarLandingGuidance, gnc::LunarAscentGuidance; required for a stage with fixed
-# legs). The approach's phase times are not configured: SCvx starts from the planner's ballistic guess (the landing
+# legs). The approach's phase times are not configured: SCvx starts from the planner's constant-deceleration guess (the landing
 # set's thrust-to-weight and the state at the hand-over; planner plan Task 6).
 [stage.lunar_landing]
 lateral_effort_fraction = 0.05           # [E] l4: the booster's 0.2 rocked the 700 t HLS on its single Raptor (rates up

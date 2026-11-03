@@ -1245,6 +1245,10 @@ private:
     // Refuelling r2: the main-tank propellant `body` will still have at `at`, flown ahead on a copy of itself (free
     // drift, air torque, boil-off: the onboard computer's model); the present amounts with the flag off.
     MainPropellant main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const;
+    // The first deorbit plan's orbital drag C_D A / m: the controlled ship flown ahead on a copy of itself over one
+    // tracking arc (deorbit_track_interval_s; free drift as in the wait, nominal US76 air), measured with the re-plans'
+    // own estimator (gnc::estimate_drag_area_per_mass). 0 when the arc does not tell.
+    double drag_area_per_mass_ahead() const;
     // The deorbit burn of `plan` checked against the controlled ship's main tanks at the node (sets plan.boil_off_kg):
     // a German refusal when they will not hold the burn.
     std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const;
@@ -1528,7 +1532,9 @@ private:
     TransferTanks transfer_tanks() const;
     void run_transfer_step(double dt_s);
     bool refuse_transfer(const char* reason);
-    gnc::DeorbitPlan ship_deorbit_plan(const gnc::DeorbitParameters& parameters) const;  // plan_ship_return's planner
+    // plan_ship_return's planner; without a drag in `parameters` it coasts with drag_area_per_mass_ahead() (the value
+    // used goes to `drag_used_m2pkg`)
+    gnc::DeorbitPlan ship_deorbit_plan(const gnc::DeorbitParameters& parameters, double* drag_used_m2pkg = nullptr) const;
     void end_transfer();  // a collision, undocking or a cleared target stops a running transfer
     void run_departure(Flying& flying);
     void measure_proximity_authority();  // pure translation authority along the station port axes, docking attitude

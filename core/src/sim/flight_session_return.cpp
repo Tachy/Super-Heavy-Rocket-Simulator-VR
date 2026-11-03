@@ -115,6 +115,33 @@ FlightSession::MainPropellant FlightSession::main_propellant_at(const vehicle::F
     return later;
 }
 
+double FlightSession::drag_area_per_mass_ahead() const {
+    // Fix round (planner Task 6): a drag-free first plan of b4 from the aircatch orbit took a pass 111 h ahead at 56.8 km
+    // planned crossrange; with the ship's real drag (tracked 2.4-2.6e-3 m2/kg at 217 t) that pass lay 125 km across, out
+    // of reach - the re-plans found none in their windows, the old burn was flown and the entry hit the ground 950 km
+    // short. The planner measures the drag the tracker will measure: on the ship itself, flown ahead.
+    const auto& body = *bodies_[controlled_].body;
+    vehicle::FlightEnvironment nominal = env_;
+    nominal.air_density_factor = 1.0;  // the planner's air (US76), not the truth's
+    vehicle::FlightBody ahead(body.vehicle().copy_upper(0), body.state());
+    ahead.set_ground_height(body.ground_height_m());
+    const time::Epoch end = epoch_ + deorbit_track_interval_s;
+    for (time::Epoch t = epoch_; t < end;) {
+        const double dt = std::min(max_coast_s, end - t);
+        ahead.coast(nominal, t, dt);
+        t = t + dt;
+    }
+    const auto& s0 = body.state();
+    const auto& s1 = ahead.state();
+    const double beta = gnc::estimate_drag_area_per_mass(gravity_, {s0.position_gcrf_m, s0.velocity_gcrf_mps}, epoch_,
+                                                         {s1.position_gcrf_m, s1.velocity_gcrf_mps}, end, 0.0);
+    if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
+        std::printf("[deorbit] drag flown ahead %.1f h: C_D A / m %.3e m2/kg (%.1f t)\n", deorbit_track_interval_s / 3600.0,
+                    beta, body.vehicle().mass_properties().mass_kg / 1000.0);
+    }
+    return beta;
+}
+
 std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const {
     const auto& body = *bodies_[controlled_].body;
     const auto now = main_tanks(body.vehicle());
@@ -146,7 +173,7 @@ std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& p
     return std::string(text);
 }
 
-gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& parameters) const {
+gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& given, double* drag_used_m2pkg) const {
     gnc::DeorbitPlan refused;
     if (bodies_.empty()) {
         refused.reason = "Keine Rückkehr möglich: kein Fahrzeug";
@@ -170,6 +197,10 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
     const gnc::EntryGuidance onboard(*flying.body, schedule, target,
                                      gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
+    // no drag given (the first plan): the ship's own, flown ahead
+    gnc::DeorbitParameters parameters = given;
+    if (!(parameters.drag_area_per_mass_m2pkg > 0.0)) parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_ahead();
+    if (drag_used_m2pkg) *drag_used_m2pkg = parameters.drag_area_per_mass_m2pkg;
     const auto& s = flying.body->state();
     return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
                              vehicle.mass_properties().mass_kg, exhaust_velocity_mps, vehicle.propellant_kg(),
@@ -187,7 +218,8 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
     if (bodies_.empty()) return false;
     const auto& stage = bodies_[controlled_].body->vehicle().stages().front().config;
     const auto& s = bodies_[controlled_].body->state();
-    deorbit_plan_ = ship_deorbit_plan(parameters);
+    // the drag the plan coasted with: the tracking re-plans' first guess
+    deorbit_plan_ = ship_deorbit_plan(parameters, &deorbit_parameters_.drag_area_per_mass_m2pkg);
     if (!deorbit_plan_->feasible) return false;
     // The earliest pass is the best one with boil-off too (a later one only has less left): it alone is checked.
     if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin)) {

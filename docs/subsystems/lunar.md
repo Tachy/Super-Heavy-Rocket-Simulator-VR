@@ -56,7 +56,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   thrusters (the set drops at max(0.9 x next max, running minimum)); `mission::braking_range_m` (thrust fraction 0.55,
   factor 1.0, floor 150 km: 164 km at 566 t). Approach: SCvx on the landing thrusters from the high gate (700 m / 800 m
   / 25 m/s), "equivalent gimbal" simplification (differential throttling ~20x the RCS torque, equivalent gimbal 9.4
-  deg; user 2026-10-15). Fresh approach plans start from the planner's ballistic guess (the landing set's T/W and the
+  deg; user 2026-10-15). Fresh approach plans start from the planner's constant-deceleration guess (from the landing set's T/W, the
   hand-over state, both switch starts; planner plan Task 6 - the former fixed 50/10/30 s phase times left 3.4 t less at
   566 and 500 t PDI); the lateral LQR effort is the vehicle's `[stage.lunar_landing] lateral_effort_fraction` (0.05
   [E]); `gnc::lunar_landing_parameters(stage)` applies it in `begin_powered_descent`. Terminal descent (Apollo P66 style, `LunarDescentPhase::Terminal`, "Endanflug"): 1 m/s sink,

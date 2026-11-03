@@ -41,8 +41,15 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   - "Lunar return campaign (direct): seed 15": green since Task 1c (same SCvx fix): caught with 3.6 t (cause: first catch
     plan cycled at the default soft-limit penalty, virtual control 1.3e-12, defect 0.087, abort -> upright 3.8 t).
     Seed 2 stays red (known).
-  - "Lunar return aerocapture: captured - perigee raised - caught by b4": green again after the inner rings / inertia
-    commits (re-checked 2026-11-03, Task 1c): caught, 11.9 t left.
+  - "Lunar return aerocapture: captured - perigee raised - caught by b4": red since the ship changes after Task 1c
+    (planner plan Task 6 fix round 1, 2026-11-03). Was: b4's first deorbit plan coasted drag-free, took a pass 111 h
+    ahead at 56.8 km planned crossrange that lay 125 km across with the real drag; the re-plans found none in reach, the
+    old burn was flown, the entry began 176 km across / 287 km long, the bank was held at the q limit and the ship came
+    down 950 km short (impact, 3.5 t). Now the first plan coasts with the ship's own drag (2.45e-3 m2/kg) and refuses:
+    from the 203.7 x 208.6 km orbit no pass comes within the mission's 60 km reach [E] - planned crossranges 199, 305,
+    270, 239, 183, 137, 102, 78, 67, 70 km on the bracketed passes to +8.6 d (minimum 66.7 km at +7.6 d). Measured: with a 90 km
+    reach the 78 km pass (+6.6 d, 70.7 m/s) is caught with 15.9 t; the reversals' lateral spread at the nominal bank is
+    ~-780 / +490 km. Open (decision): the 60 km reach is an [E] b2 campaign value, not derived from the ship.
   - "A commanded abort late in the landing burn ditches the booster at sea": green again after the inner rings / inertia
     commits (re-checked): 800 m ditches with 3.3 t (1500 m 6.7 t, 400 m lands on land 28.0 t as before).
   - Turned green: "Docked tanker: the ship return flies to the catch".

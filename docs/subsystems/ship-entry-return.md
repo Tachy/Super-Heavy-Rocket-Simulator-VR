@@ -163,10 +163,14 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   (`FlightSession::execute_burn(node, groups)`; named groups only, no RCS fallback). Any burn more than 30 min [E]
   (`FlightSession::burn_drift_lead_s`) + 120 s preparation away waits in free drift (no RCS, coasted at any rate); the
   ship then turns to the burn attitude on the slow coast controller (0.5 deg/s) and holds it until the preparation.
+  The first plan already coasts with the ship's own orbital drag [D] (`FlightSession::drag_area_per_mass_ahead`: a
+  copy of the ship flown ahead in free drift over one 24 h tracking arc, nominal US76 air, measured with the tracker's
+  estimator; 177 t-dry ship at ~217-225 t: 2.45-2.49e-3 m2/kg against 2.43-2.46e-3 tracked on the first day).
   Onboard tracking of a far deorbit: planned more than 4 h ahead, it is planned again every 24 h [E] and 3 h before
   its burn with the orbital drag `DeorbitParameters::drag_area_per_mass_m2pkg` that `gnc::estimate_drag_area_per_mass`
-  solves from the arc since the first plan (C_D A / m 1.9-2.5e-3 m2/kg; later re-plans move the burn by 0-16 s); a
-  re-plan may take a pass up to 72 h [E] beyond the old one; a re-plan short only of the landing reserve is flown.
+  solves from the arc since the first plan (C_D A / m 2.4-2.6e-3 m2/kg; the 3 h re-plan of the LEO return moves the
+  burn by 0.7 s); a re-plan may take a pass up to 72 h [E] beyond the old one; a re-plan short only of the landing
+  reserve is flown.
   `AutopilotState::Return` ("Rückkehr") coasts to 300 s before the entry interface, then entry guidance and flip/catch
   take over. From 200 km / 26.5 deg: burn after ~21-22 h, 65-78 m/s, 5.6-6.8 t.
 

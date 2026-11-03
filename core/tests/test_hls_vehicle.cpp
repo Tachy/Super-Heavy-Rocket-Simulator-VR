@@ -140,7 +140,7 @@ TEST_CASE("The truth thrust factor scales the force, not the performance the gui
 
 // Planner plan 2026-11-03 Task 6: the approach's lateral effort and the ascent's liftoff heights and abort margin are
 // vehicle keys ([stage.lunar_landing], [stage.lunar_ascent], [E] in starship_hls.toml); the approach's phase times are
-// no longer a fixed guess (the planner's ballistic guess from the landing set's T/W and the hand-over state).
+// no longer a fixed guess (the planner's constant-deceleration guess from the landing set's T/W and the hand-over state).
 TEST_CASE("HLS landing and ascent parameters follow config", "[vehicle][hls][config]") {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
     auto& s = cfg.stages.front();
