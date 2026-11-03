@@ -121,6 +121,44 @@ def test_outer_ring_bells_do_not_touch():
     assert _smallest_lip_gap_m(spec, [outer]) >= 0.0
 
 
+def _booster_rings(spec):
+    """{ring radius: [angles]} of the booster (centre 3, middle 10 = divert + middle, outer 20)."""
+    rings = {}
+    for g in spec["stages"]["booster"]["engines"]:
+        rings.setdefault(round(g["ring_radius_m"], 3), []).extend(g["angles_deg"])
+    return rings
+
+
+def test_booster_rings_follow_the_stl_with_equal_spacing_and_radial_gaps():
+    # 1:100 STL engine plate: centre 0.878, middle 2.550, outer 4.400 m (+-0.02); the rings are concentric and the lips of
+    # neighbouring rings keep a radial gap (gimbal: all engines tilt alike under one command, plan-view gaps unchanged)
+    spec = vehicle_spec.load(VEHICLE)
+    rings = _booster_rings(spec)
+    assert sorted(rings) == pytest.approx([0.88, 2.55, 4.40], abs=0.02)
+    assert sorted(len(a) for a in rings.values()) == [3, 10, 20]
+    for radius, angles in rings.items():
+        a = sorted(x % 360.0 for x in angles)
+        steps = [(a[(i + 1) % len(a)] - a[i]) % 360.0 for i in range(len(a))]
+        assert steps == pytest.approx([360.0 / len(a)] * len(a), abs=1e-6), radius
+    lip = _lip_diameter_m(spec, "raptor3")
+    radii = sorted(rings)
+    for inner, outer in zip(radii, radii[1:]):
+        assert outer - inner >= lip, (inner, outer)  # radial gap between the lips of two rings
+
+
+def test_ship_rings_follow_the_stl_and_keep_radial_gaps():
+    spec = vehicle_spec.load(VEHICLE)
+    groups = spec["stages"]["ship"]["engines"]
+    sea = [g for g in groups if g["engine"] == "raptor3"]
+    vac = [g for g in groups if g["engine"] == "raptor_vacuum3"]
+    assert [g["ring_radius_m"] for g in sea] == pytest.approx([0.95] * len(sea), abs=0.02)  # STL 0.95 m
+    n_sea = sum(len(g["angles_deg"]) for g in sea)
+    chord = 2.0 * 0.95 * math.sin(math.pi / n_sea)
+    assert chord >= _lip_diameter_m(spec, "raptor3")
+    r_sea, r_vac = sea[0]["ring_radius_m"], vac[0]["ring_radius_m"]
+    assert r_vac - r_sea >= 0.5 * _lip_diameter_m(spec, "raptor3") + 0.5 * _lip_diameter_m(spec, "raptor_vacuum3")
+
+
 def test_booster_bells_do_not_touch():
     # every Raptor / RVac pair of the booster, the ship and the HLS (same bells as the ship; its own rings)
     spec = vehicle_spec.load(VEHICLE)

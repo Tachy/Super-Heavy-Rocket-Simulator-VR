@@ -35,7 +35,7 @@ TEST_CASE("Ship has three single sea-level engine groups and catch pins", "[ship
         sea_level.insert(g.id);
         CHECK(g.count == 1);
         CHECK(g.gimbal);
-        CHECK(g.ring_radius_m == 1.3);
+        CHECK(g.ring_radius_m == 0.95);  // 1:100 STL sea-level ring
     }
     CHECK(sea_level == std::set<std::string>{"sea_level_1", "sea_level_2", "sea_level_3"});
 

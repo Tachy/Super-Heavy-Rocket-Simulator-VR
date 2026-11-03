@@ -309,7 +309,7 @@ The drawn shape sits on the physics' pivots. The flaps' physics equals the drawi
 | Ship gimbal station | station 0 of the ship (stack 72.3 m) | Raptor 2.1 m, RVac 3.6 m above it (exit planes at station 0) | thrust acts 2.1 / 3.6 m further aft than drawn: lever arm to the dry CG (23.5 m) 23.5 m in the physics, 21.4 m for the gimbaled Raptors as drawn, so TVC authority +10 % against the drawing; RVacs fixed. Stack length 124.4 m holds, the ship's and booster's lengths are unchanged |
 | Ship tank bases | LOX main at station 3.5 m | engine plate at 3.7 m, housings up to 3.1 (Raptor) / 4.6 m (RVac) | the tank base lies 0.2 m below the plate, the RVac housing 1.1 m into it; nothing of it visible (CG / masses unchanged) |
 | Booster dome top | tank volumes in the config, no dome | apex 71.7 m under the 0.6 m ring | CH4 tank top not compared: drawing only |
-| Sea-level ring | 1.3 m | drawn from the config, real 0.89 +-0.04 m (fit) | the Raptor gimbal's roll / yaw lever is ~46 % longer than the real one; a config decision for the user |
+| Sea-level ring | 0.95 m (1:100 STL, Task 1d) | drawn from the config, real 0.89 +-0.04 m (fit) | the gimbal lever is ~7 % longer than the real one (was 1.3 m, +46 %); STL value kept: 3 lips 0.33 m apart |
 
 ### Evidence
 Side by side (ours | model view | photo): `screenshots/vehicles/shapes_flaps.png`, `shapes_fins.png`, `shapes_booster_top.png`, `shapes_skirt.png`,
@@ -433,7 +433,7 @@ Tower material lowered accordingly (`tower_material.gd`, `tower_view.gd`, also `
 Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax pixel at ~100 m), beyond that the opaque `plate`. A hard swap, measured 2026-10-31 (`tile_shimmer_check.gd --surface=fin`, booster fin 0 from above, 20-320 m, patch on the projected fin): luminance step 115 -> 125 m 1.014 (gate 1.10), temporal <= 0.0012 (ref 0.0012), error <= 0.037 (gate 0.15). Not seen in the headset. Cell pitch: frame f12 1804 s counts ~9 +-1.5 columns over the 4.1 m width = 0.46 +-0.07 m, so the config's 0.47 stays.
 
 ## Open points
-- Interface look: the arrangement agrees. Still different: the sea-level cluster is too wide (config ring 1.3 m, real 0.89 m); no powerhead detail above the throat (plain cylinder against the pump and pipe bundle of f14 2515 s); plate: dark, the real one is crumpled foil with bolt rings (f14 2515 s), not drawn; the bay wall's real corrugation and four frames are only partly drawn; ship plumes pass through the booster at hot staging.
+- Interface look: the arrangement agrees. Still different: the sea-level ring is 0.95 m (STL; real 0.89 m); no powerhead detail above the throat (plain cylinder against the pump and pipe bundle of f14 2515 s); plate: dark, the real one is crumpled foil with bolt rings (f14 2515 s), not drawn; the bay wall's real corrugation and four frames are only partly drawn; ship plumes pass through the booster at hot staging.
 - Steel shimmer after the look pass (2026-10-31): temporal <= 0.0008, error <= 0.044, luminance ratio 1.134 (not gated for steel); after the thinner welds / dots 1.180, exactly at the gate (the 20 m patch dips; no headroom left). The flat flap / tile patches that
   read tan under a low Sun are the black tile (albedo 0.03) in direct, reddened Sun (~14 deg): diffuse, specular only
   ~10 %, AgX lifts it (probe in `sky-fix-report.md` Fix 2). Not a bug. Steel luminance ratio gated at 1.18.
@@ -449,8 +449,7 @@ Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax 
   on the 4.40 m ring [E] (1:100 STL engine plate 4.40 m; user photo `screenshots/raptor_nozzle/user_booster_engines_detail.jpg`
   4.3 +-0.15 m; no-touch bound 1.32 / (2 sin 9 deg) = 4.22 m): neighbouring lips 0.057 m apart, the bell edge (5.06 m)
   passes the hull radius (4.5 m) as in the photo. Measurement: `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/task-1-rings.md`.
-  Tests: `test_outer_ring_bells_do_not_touch`, `test_booster_bells_do_not_touch` (booster, ship, HLS). The STL's centre
-  (0.88 m) and middle (2.55 m) rings differ from the config's 1.0 / 2.6 m (no overlap either way; open for the user).
+  Tests: `test_outer_ring_bells_do_not_touch`, `test_booster_bells_do_not_touch` (booster, ship, HLS). Inner rings follow the 1:100 STL (Task 1d): centre 0.88 m (lip gap +0.20 m), middle 2.55 m (+0.26 m), radial gaps 1.67 / 1.85 m; ship sea level 0.95 m (+0.33 m), RVac 3.0 m; HLS and depot ship the same. Tests: `test_booster_rings_follow_the_stl_with_equal_spacing_and_radial_gaps`, `test_ship_rings_follow_the_stl_and_keep_radial_gaps`. Gimbal: all engines tilt alike under one command, so plan-view gaps stay.
 - Flaps at d = 0 (folded, not the rest pose, which is d = 90) lie on the hull's tangent plane: the tip stands up to 0.9 m off the curved hull.
 - Raceway position, tile coverage, hot-stage and bell dimensions are estimates; no Block 3 drawing exists.
 

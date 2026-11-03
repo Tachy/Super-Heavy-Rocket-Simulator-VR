@@ -6,7 +6,8 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "c96d2f0385643390"  # Raptor 3 nozzle 1.30 m + outer ring 4.40 m 2026-11-03 (planner plan Task 1), the pad
+inputs_digest = "8f4d8eaf7da1ff79"  # inner rings 0.88 / 2.55 / 0.95 m 2026-11-03 (Task 1d): the pad flights still pass their 1 % / 0.3 t checks, numbers kept;
+                                    # Raptor 3 nozzle 1.30 m + outer ring 4.40 m 2026-11-03 (planner plan Task 1), the pad
                                     # flights re-measured (campaign offsets below not re-calibrated);
                                     # vehicle physics Task 6e 2026-11-01: Pad B geometry + vehicle aero, re-measured;
                                     # M8a Task 6: site heights derived from the terrain data (Starbase 10.00 ->

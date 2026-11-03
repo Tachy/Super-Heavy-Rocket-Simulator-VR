@@ -93,3 +93,6 @@ Plain revolved wall with one bulge, an ellipse as nose on a flat seam at station
 ## Raptor bells and outer ring before 2026-11-03
 The bell's OUTER rim had the config's exit diameter (1.446 m), the 2 cm wall [E] inside it; outer ring 4.1 m [E]: the 20
 outer lips overlapped by 0.16 m (test_engine_ring_overlap_is_reported allowed down to -0.25 m), bell edge 4.82 m.
+
+## Inner engine rings (2026-11-03, Task 1d)
+Before: booster centre 1.0 m, middle / divert 2.6 m, ship and HLS sea-level ring 1.3 m (the roll / yaw lever 46 % above the real one). Now the 1:100 STL values 0.88 / 2.55 / 0.95 m.
