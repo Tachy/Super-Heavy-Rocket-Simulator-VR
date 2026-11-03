@@ -146,6 +146,7 @@ add_executable(starsim_core_tests
     test_leg_landing.cpp
     test_falcon9_descent_telemetry.cpp
     test_booster_return_config.cpp
+    test_vehicle_capability.cpp
     test_falcon9_asds.cpp
     test_falcon9_stack.cpp
     test_sea_state_refusal.cpp

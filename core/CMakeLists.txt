@@ -36,6 +36,7 @@ add_library(starsim_core STATIC
     src/vehicle/propellant_transfer.cpp
     src/vehicle/compound_mass.cpp
     src/vehicle/boil_off.cpp
+    src/vehicle/stage_inertia.cpp
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
     src/gnc/peg_steering.cpp
@@ -82,6 +83,7 @@ add_library(starsim_core STATIC
     src/gnc/entry_guidance.cpp
     src/gnc/entry_predictor.cpp
     src/gnc/entry_corridor.cpp
+    src/gnc/vehicle_capability.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
     src/sim/leg_landing_sim.cpp

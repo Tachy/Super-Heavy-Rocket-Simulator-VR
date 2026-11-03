@@ -48,6 +48,12 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   (`AttitudeController::feathered_grid_fins`). Each fin's axial drag stays in the hull's curve, on the axis. Its moment at the
   fin is a fidelity flag, default off (`FlightEnvironment::grid_fin_drag_couple`): Super Heavy's 0 / 90 / 180 layout would
   pitch about +y with 1.8 % of the fin authority by the derived CA (`aero-derivation.md`).
+- Vehicle capabilities for planners (`gnc/vehicle_capability`, `[gnc][capability]`): stage pitch inertia (config
+  `inertia_kg_m2` or the vehicle's thin-walled cylinder, `vehicle/stage_inertia`, plus the propellant as the same
+  cylinder [E]); an engine set's thrust at its common min / max throttle from the engine config (`EnginePerformance`),
+  its smallest gimbal angle / rate, lever and gimballed share; gimbal pitch acceleration `F sin(gimbal) lever / I`;
+  RCS pitch acceleration from the allocator's `max_torque_nm` (weaker transverse axis); rest-to-rest bang-bang turn
+  time with a rate cap. Planners derive their limits from these instead of carrying own numbers.
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically (follow the
   Earth), impacted/resting bodies do not block coast segments. A freely falling body below 5 km above its ground is
   ticked.

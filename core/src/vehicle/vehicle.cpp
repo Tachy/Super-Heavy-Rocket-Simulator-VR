@@ -10,6 +10,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/propellant_transfer.hpp"
+#include "starsim/vehicle/stage_inertia.hpp"
 
 namespace starsim::vehicle {
 
@@ -255,17 +256,11 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
     const double lateral_z = lateral > 0.0 ? down.z / lateral : 0.0;
     for (size_t si = 0; si < stages_.size(); ++si) {
         const auto& s = stages_[si];
-        const double r = 0.5 * s.config.diameter_m;
         const double l = s.config.length_m;
         // Dry structure: the configured principal moments (a station), else a thin-walled cylinder about its own CG [E].
-        if (const auto& i = s.config.inertia_kg_m2) {
-            parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m, i->x, i->y,
-                             s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z, false, i->z});
-        } else {
-            parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m,
-                             s.config.dry_mass_kg * r * r, s.config.dry_mass_kg * (0.5 * r * r + l * l / 12.0),
-                             s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z});
-        }
+        const Vec3 dry_inertia = dry_stage_inertia_kg_m2(s.config);
+        parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m, dry_inertia.x,
+                         dry_inertia.y, s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z, false, dry_inertia.z});
         if (s.extra_mass_kg > 0.0) {
             const double default_station_m = extra_mass_station_fraction * l;
             const auto& c = s.config;
