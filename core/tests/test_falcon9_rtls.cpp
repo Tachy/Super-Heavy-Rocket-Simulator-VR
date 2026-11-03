@@ -441,9 +441,9 @@ FlipRun fly_from_separation(const RtlsDispersion& d, const Vec3& rate_body_radps
     return out;
 }
 
-}  // namespace
-
-TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtls][flip][validation][slow][ascent_planner]") {
+// Flip campaign over separations [first, last) of 13: the dispersions come from one seeded stream, so every case draws
+// the whole sequence and flies only its own range (the three cases together are the former single campaign).
+void fly_flip_campaign(int first, int last) {
     // +-5 deg, +-1 deg/s, +-5 % propellant, truth aero +-10 %, +-3 m/s [E]: wider than the separation can plausibly give.
     std::mt19937 rng(14);
     std::uniform_real_distribution<double> unit(-1.0, 1.0);
@@ -452,7 +452,7 @@ TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtl
     const double pad_radius_m = lz40().pad_radius_m;  // config, FAA EA 2025
     REQUIRE(pad_radius_m > 0.0);
     double least_propellant = 1e9, latest_ignition = 0.0;
-    for (int i = 0; i < 13; ++i) {
+    for (int i = 0; i < last; ++i) {
         auto d = RtlsDispersion{};
         Vec3 rate{};
         if (i > 0) {
@@ -463,6 +463,7 @@ TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtl
             d.aero_factor = 1.0 + 0.1 * unit(rng);
             rate = Vec3{0.0, unit(rng), unit(rng)} * constants::deg_to_rad;
         }
+        if (i < first) continue;
         if (const char* only = std::getenv("STARSIM_FLIP_CASE"); only && std::atoi(only) != i) continue;  // diagnostics
         const auto f = fly_from_separation(d, rate, 1.0);
         CAPTURE(i);
@@ -482,8 +483,22 @@ TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtl
         least_propellant = std::min(least_propellant, f.run.propellant_kg);
         latest_ignition = std::max(latest_ignition, f.ignition_after_s);
     }
-    std::printf("[validation] Falcon 9 flip campaign: landed %d of 13, ignition <= %.2f s, >= %.0f kg left\n", landed, latest_ignition,
-                least_propellant);
+    std::printf("[validation] Falcon 9 flip campaign, separations %d-%d of 13: landed %d, ignition <= %.2f s, >= %.0f kg left\n", first,
+                last - 1, landed, latest_ignition, least_propellant);
+}
+
+}  // namespace
+
+TEST_CASE("Falcon 9 flip: dispersed separation states land, separations 0-4", "[gnc][falcon9][rtls][flip][validation][slow][ascent_planner]") {
+    fly_flip_campaign(0, 5);
+}
+
+TEST_CASE("Falcon 9 flip: dispersed separation states land, separations 5-8", "[gnc][falcon9][rtls][flip][validation][slow][ascent_planner]") {
+    fly_flip_campaign(5, 9);
+}
+
+TEST_CASE("Falcon 9 flip: dispersed separation states land, separations 9-12", "[gnc][falcon9][rtls][flip][validation][slow][ascent_planner]") {
+    fly_flip_campaign(9, 13);
 }
 
 TEST_CASE("Falcon 9 flip: a stuck or weak turn lights at the time limit and has a defined end", "[gnc][falcon9][rtls][flip][slow][ascent_planner]") {

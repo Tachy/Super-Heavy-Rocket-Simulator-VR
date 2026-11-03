@@ -411,7 +411,7 @@ TEST_CASE("Flown campaign needs a session with the Moon orientation", "[campaign
     CHECK(f.session.supervisor() == nullptr);
 }
 
-TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_flown][refuelling][slow][ascent_planner]") {
+TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_flown][refuelling][nightly][ascent_planner]") {
     CampaignSession c;
     sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
     c.fly([&] { return c.ended(); }, 40.0 * 86400.0);
@@ -517,7 +517,7 @@ TEST_CASE("The measured phasing boil-off of the tanker and the HLS matches a fre
 }
 
 TEST_CASE("Flown campaign: the depot launched, every tanker, the HLS - compared with the calculator",
-          "[campaign_flown][refuelling][slow][ascent_planner]") {
+          "[campaign_flown][refuelling][nightly][ascent_planner]") {
     CampaignSession c;
     const auto s =
         sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown", {}, c.clock);

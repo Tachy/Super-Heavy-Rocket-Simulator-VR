@@ -583,7 +583,7 @@ TEST_CASE("Probe: planning boil-off of the tanker and the HLS", "[.f1_probe]") {
     }
 }
 
-TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelling][mission][slow][ascent_planner]") {
+TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelling][mission][nightly][ascent_planner]") {
     test::spice_session();
     const double re = constants::wgs84_semi_major_axis_m;
     refuelling_test::DepotSession f;
@@ -692,7 +692,7 @@ void fly_mission(refuelling_test::DepotSession& f, double limit_s) {
 }  // namespace
 
 TEST_CASE("tanker_flight_orbit: phasing orbit -> docked -> transfer -> caught at Starbase",
-          "[refuelling][mission][docking][ship][slow]") {
+          "[refuelling][mission][docking][ship][nightly]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight_orbit", f.t0, f.clock)
@@ -1075,7 +1075,7 @@ TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continu
     CHECK(departure->chaser_main_propellant_kg > transfer->chaser_main_propellant_kg);
 }
 
-TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refuelling][mission][lunar][ascent][slow][ascent_planner]") {
+TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refuelling][mission][lunar][ascent][nightly][ascent_planner]") {
     test::spice_session();
     LunarDepotSession f;
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel", f.t0, f.clock);

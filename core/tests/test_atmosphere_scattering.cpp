@@ -105,7 +105,7 @@ Vec3 atmosphere_space_to_ellipsoid(const Vec3& p) {
 
 }  // namespace
 
-TEST_CASE("Multiple scattering converges", "[atmosphere][slow]") {
+TEST_CASE("Multiple scattering converges", "[atmosphere][nightly]") {
     // The configuration's orders vs two more, at ten sample directions and the sky illuminance: < 1 %. Both carry the
     // geometric tail of the higher orders (atmosphere_precompute.cpp). Measured (Task 3 report): truncated at 4 vs 6
     // orders 6.8 % (blue, 2 deg up); with the tail 4 vs 6 still 1.7 % (the ratio of orders 4 / 3 overestimates the
@@ -179,7 +179,7 @@ TEST_CASE("Direct sunlight matches ASTM G173 at air mass 1.5", "[atmosphere]") {
 
 // The checks on the full-resolution tables share one precomputation (one test process): each SECTION runs
 // in the same process with the function-local static tables.
-TEST_CASE("The sky model at full resolution", "[atmosphere][slow]") {
+TEST_CASE("The sky model at full resolution", "[atmosphere][nightly]") {
     SECTION("Clear-sky luminances are physical") {
         const auto& atm = atmosphere();
         const Site ground = site(0.0, 0.0, 0.0);

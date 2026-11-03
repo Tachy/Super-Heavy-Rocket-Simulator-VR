@@ -149,7 +149,7 @@ double impact_miss_of_ship_m(const sim::AscentProfileRequest& request, const sim
 
 }  // namespace
 
-TEST_CASE("The planner's kick is the optimum of a kick sweep", "[sim][ascent_planner][slow]") {
+TEST_CASE("The planner's kick is the optimum of a kick sweep", "[sim][ascent_planner][nightly]") {
     sim::disable_plan_cache();  // asserts trial flights
     const auto request = starship_request(100.0);  // own memo key
     struct Point {

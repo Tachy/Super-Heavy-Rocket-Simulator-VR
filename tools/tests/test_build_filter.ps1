@@ -42,9 +42,15 @@ $inter = Count-With @("gnc", "validation", "ascent")
 Assert ($inter -gt 0) "reference intersection [gnc][validation][ascent] is non-empty ($inter)"
 Assert ((List-Count @("-TestFilter", "[gnc][validation][ascent]")) -eq $inter) "[gnc][validation][ascent] is the intersection ($inter)"
 
-$legs = Ctest-Count '-L "^legs$"'
-$asds = Ctest-Count '-L "^asds$"'
-$union = Ctest-Count '-L "^(legs|asds)$"'
+Assert ($inter -eq 5) "absolute: [gnc][validation][ascent] matches 5 cases ($inter)"
+
+# The union reference comes from the JSON too: without the nightly cases (ctest -L would count them).
+function Count-Any([string[]]$tags) {
+    @($tests | Where-Object { $l = Labels $_; ($l -notcontains "nightly") -and @($tags | Where-Object { $l -contains $_ }).Count -gt 0 }).Count
+}
+$legs = Count-With @("legs")
+$asds = Count-With @("asds")
+$union = Count-Any @("legs", "asds")
 Assert ($union -le $legs + $asds) "reference union sane ($union of $legs + $asds)"
 Assert ((List-Count @("-TestFilter", "[legs],[asds]")) -eq $union) "[legs],[asds] is the union ($union)"
 
@@ -57,6 +63,10 @@ Assert $threw "[nosuchtag] fails with no match"
 
 $f9 = Ctest-Count '-L "^falcon9$"'
 $f9noNight = Count-With @("falcon9")
+$lunar = Ctest-Count '-L "^lunar$"'
+$lunarNoNight = Count-With @("lunar")
+Assert ($lunarNoNight -lt $lunar) "[lunar] holds nightly cases, excluded by default ($lunarNoNight of $lunar)"
+Assert ((List-Count @("-TestFilter", "[lunar]")) -eq $lunarNoNight) "[lunar] without -Nightly excludes nightly cases ($lunarNoNight)"
 Assert ((List-Count @("-TestFilter", "[falcon9]")) -eq $f9noNight) "[falcon9] without -Nightly excludes nightly cases ($f9noNight of $f9)"
 $f9Night = @($tests | Where-Object { $l = Labels $_; $l -contains "falcon9" }).Count
 Assert ((List-Count @("-TestFilter", "[falcon9]", "-Nightly")) -eq $f9Night) "[falcon9] -Nightly adds the nightly cases ($f9Night)"
