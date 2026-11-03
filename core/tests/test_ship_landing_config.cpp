@@ -266,8 +266,8 @@ TEST_CASE("Ship landing parameters follow the vehicle config", "[ship][landing][
 
     // D: masses - heavy = dry + full headers (35 t), light = dry + the 1 t unusable header propellant
     const auto m = gnc::ship_landing_masses(cfg, ship);
-    CHECK(m.heavy_kg == Approx(255000.0 + 35000.0).margin(1.0));
-    CHECK(m.light_kg == Approx(255000.0 + 1000.0).margin(1.0));
+    CHECK(m.heavy_kg == Approx(177000.0 + 35000.0).margin(1.0));
+    CHECK(m.light_kg == Approx(177000.0 + 1000.0).margin(1.0));
     // one sea-level Raptor at sea level, thrust from the engine model; levers from the heavy CG
     const propulsion::EnginePerformance raptor(cfg.engine("raptor3"));
     const double f_min = raptor.thrust_n(raptor.config().throttle_min, p0);

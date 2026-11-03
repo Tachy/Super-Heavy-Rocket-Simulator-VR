@@ -12,8 +12,10 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
 - `starship_tanker` = Block 3 unchanged (`[[stage]] from = "starship_block3:<stage>"`) + four dorsal probes (port
   `transfer_dock`, `mechanism = "probe_drogue"`, `soft_capture = "active"`) and the transfer connectors `lox_transfer`
   / `ch4_transfer`. `starship_depot` = Block 3 booster + a ship without heat shield, flaps, catch pins and recovery:
-  236.5 t dry [E] (255 - 10.5 heat shield - 10 flaps - 1 pins + 3 insulation), four dorsal drogues (passive). The HLS
-  carries the tanker's probes and connectors. Flown tanker: dry mass **209 t** (`dry_mass_kg` override on its `from`
+  158.5 t dry, CG 21.89 m [E] (177 - 10.5 heat shield - 10 flaps - 1 pins + 3 insulation; planner plan Task 3b, was 236.5 t
+  on the 255 t ship), four dorsal drogues (passive). The HLS
+  carries the tanker's probes and connectors. Flown tanker: dry mass **171 t** (Block 3 177 t less 6 t door and dispenser;
+  209 t before Task 3b; `dry_mass_kg` override on its `from`
   stage: no cargo doors, dispenser, interior; heat shield, flaps, headers stay) [E, user 2026-10-20].
 - A `from` stage is the source vehicle's stage exactly; only `docking_port` and `transfer_connector` entries may be
   added (any other key, a missing stage / vehicle, a propellant mismatch or a cycle is a `ConfigError`).
@@ -368,7 +370,9 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
 - Block 3 tanker/depot/HLS share the ship stage via `from`; layout positions are [E] (SpaceX publishes none).
 - -x docking thrusters on tanker and HLS, none on the Block 3 ship (user 2026-10-20).
 - Wetted-wall boil-off (user 2026-10-20); Block 3 lunar returns keep `boil_off = false`.
-- Tanker ascent figures (209 t dry, 120 x 190 km insertion) are [E] placeholders (user 2026-10-20).
+- Tanker ascent figures (171 t dry, 120 x 190 km insertion) are [E] placeholders (user 2026-10-20; dry mass from the
+  177 t ship since planner plan Task 3b). The measured numbers (`reference_flights.toml`) still belong to 209 t until
+  Task 12 re-measures them.
 - Depot orbit followed in the calculator (user 2026-10-22); delivery calibration offsets (user 2026-10-21).
 - Pad turnaround 24 h [E] and the HLS-first-window rule; the calculator takes the first window (fewest days).
 - Raise tail-off wait without a timeout (no public path keeps an engine running with the autopilot idle in Raise).

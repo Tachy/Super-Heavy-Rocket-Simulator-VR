@@ -57,14 +57,16 @@ void print_corridor(const char* what, double speed_mps, const gnc::EntryCorridor
 
 }  // namespace
 
-TEST_CASE("The ship has no lunar-return corridor at 10.9 km/s within its heat limit", "[ship][guidance][corridor]") {
+// Planner plan Task 3b (dry 255 -> 177 t): at 255 t no corridor existed at 10.9 km/s; the lighter ship has one of
+// 0.13 deg (-5.25 .. -5.12 deg), far below the 1 deg the planners ask for: still no direct lunar return at that speed.
+TEST_CASE("The ship has no usable lunar-return corridor at 10.9 km/s within its heat limit", "[ship][guidance][corridor]") {
     auto [model, limits] = ship_model();
     gnc::CorridorQuery q;
     q.speed_mps = 10900.0;
     q.limits = limits;
     const auto c = gnc::entry_corridor(model, q);
     print_corridor("ship direct", q.speed_mps, c);
-    CHECK_FALSE(c.exists);
+    CHECK((!c.exists || c.width_rad < 1.0 * deg));
     CHECK(c.limiting == "Hitzestrom");
 }
 
@@ -136,6 +138,11 @@ TEST_CASE("The aerocapture speed leaves a bank window to 400 km within the limit
     }
     REQUIRE(w.exists);
     CHECK(w.width_rad >= 10.0 * deg);
-    CHECK(q.speed_mps < 9900.0);  // probe: the 400 km bank at 9.9 km/s is over 1.08 MW/m2 at every angle
+    // the window costs speed against the corridor alone (Task 3b, 177 t: 9992 against 10273 m/s; at 255 t the window
+    // speed was below 9.9 km/s)
+    gnc::CorridorQuery corridor_only = q;
+    corridor_only.min_bank_window_rad = 0.0;
+    const double v_corridor = gnc::max_entry_speed(model, corridor_only, 0.5 * deg, 8000.0, 11000.0);
+    CHECK(q.speed_mps < v_corridor);
     CHECK(q.speed_mps > 9000.0);
 }

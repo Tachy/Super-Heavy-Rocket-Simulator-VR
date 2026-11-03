@@ -21,8 +21,8 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `flap_lowest_usable_deflection_rad` (edge-on, shadow), going down from the flap's best moment slope in this air, the first crossing of a quarter of it [E], 5 deg grid, interpolated; with the secant all along the ramp out of the shadow); below 200 Pa [E] the flaps rest in the coming entry's
   pitch trim (`EntryAeroTable::trim_flap_rad`). `gnc/entry_attitude` builds the setpoint from angle of attack and bank
   (belly at `[stage.aero] belly_azimuth_deg`). Nominal alpha over Mach `aero/ship_entry_alpha.csv` [D] (55 deg
-  hypersonic, 50 near Mach 8, 60-80 towards the belly flop). Ship dry CG 23.516 m [D] (landing-mass CG dry + 35 t at
-  25.50 m from the base). Entry control: 0.5 rad/s, bank changes <= 1 deg/s. `FlightSession::update_hull_moment_scale`
+  hypersonic, 50 near Mach 8, 60-80 towards the belly flop). Ship dry 177 t, dry CG 22.03 m [D] (planner plan Task 3b, bottom-up budget;
+  `vehicle-data.md`); with full headers (35 t) 212 t at 24.99 m from the base. Entry control: 0.5 rad/s, bank changes <= 1 deg/s. `FlightSession::update_hull_moment_scale`
   estimates k = true / modelled hull pitch moment (Mach > 10, q > 200 Pa, 0.3 deg deadband, 2 % apply deadband; a
   scale, not a torque integral, user 2026-10-17).
 - Corridor (`[stage.heat_shield]`, judged while the ship flies alone): Sutton-Graves stagnation heat rate
@@ -63,10 +63,10 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   landing_engine_phases, landing_phase_max_tilt_deg (20/20/15), flip_throttle 0.8, flip_tolerance_deg 15,
   flip_settled_rate_rad_s 0.2, flaps_until_deg 30, descent_propellant_margin 1.3, landing_lateral_effort 0.03;
   `[stage.tanks] unusable_propellant_kg` header 1 t = the plans' hard floor (main 1 t for the tanker reserve). D (at the
-  landing masses: dry + full headers 290 t / dry + 1 t 256 t): tilt-rate limits min(gimbal slew, sqrt(alpha_min tilt))
-  = 0.265 / 0.216 / 0.187 rad/s; 3 -> 2 sink window min = (3 at minimum - weight) x shutdown = 0 (three Raptors at
-  30 % are below the weight), max = sqrt(2 (2 at 95 % / m - g) h) set at the gate from the CG height above the catch
-  (~107 m/s from 700 m; never binding - the window has effectively no maximum; the webcast 20-40 m/s is no longer
+  landing masses: dry + full headers 212 t / dry + 1 t 178 t; I 5.46e7 kg m^2, lever 24.98 m): tilt-rate limits
+  min(gimbal slew, sqrt(alpha_min tilt)) = 0.301 / 0.246 / 0.213 rad/s; 3 -> 2 sink window min = (3 at minimum -
+  weight) x shutdown = 1.25 m/s (three Raptors at 30 % lift the light ship), max = sqrt(2 (2 at 95 % / m - g) h) set at
+  the gate from the CG height above the catch (144 m/s from 700 m; never binding - the window has effectively no maximum; the webcast 20-40 m/s is no longer
   used). The first plan's guess switches from the state (`DescentLimits::late_switch_guess`, only the ship: as late as
   the pair can still finish in its minimum phase times, ~13 m/s, but not below what three engines cannot remove within
   the height; the window's middle is no operating point). Catch approach time constant (`DescentLimits::
@@ -179,4 +179,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); since the vehicle plan's Task 6 the caught dispersed gates arrive with >= 3.8 t (see Validation).
 - A low-propellant abort (21-23 t at the nominal gate; Task 6h with the structure keep-out, one uncommitted test line for the load) is lost at all three loads, open: 21 t 0.0 t left, 23 t 1.3 t left, no strike; 22 t struck at 4.0 t left (arm 7.61 m, tower box 0.93 m clear, hull bottom 18.95 m: the mount). Same result for an abort requested at 900, 600 or 400 m.
-- Aero state frozen as on main (crossflow 1.5 [D], old entry alpha table, entry CG 25.50 m, dry 255 t, dry CG 23.516 m) because no tested combination (measured masses, geometry crossflow 1.07-1.10, alpha 59.5, CG 24.85 m) passes all flight replays and case 8; table and facts in `docs/known-issues.md`. Standing facts: 255 t dry is probably too high (about 175 +-25 t by judgement; entry masses 221 / 252 / 203-227 t +-20); the CG window is 24.49-25.88 m and 25.50 / 23.516 m are tuned values (bottom-up dry CG about 22.9 m, 19.4-23.5); the allocator's authority floor (fraction 0.25) has a narrow window (failures 8 / 9 / 2 / 0 / 9 of 10 at 0 / 0.15 / 0.20 / 0.25 / 0.30). Next step: the low Mach part (geometry set: flight 13 low 14.96 %, flight 14 low 22.06 %, too slow at Mach 3-6).
+- Since planner plan Task 3b the dry mass and CG are derived (177 t, 22.03 m; entry CG 24.99 m with 35 t): the trim
+  margin at alpha 60 holds (forward 54.3 deg), alpha 70 at 79.7 deg; new reds for Task 4: the Mach 0.6 yaw-demand
+  allocation and the nose turn at the basis freeze (gate miss 190 m), `docs/known-issues.md`. The rest of this item is the
+  state before. Aero state frozen as on main (crossflow 1.5 [D], old entry alpha table, entry CG 25.50 m, dry 255 t, dry CG 23.516 m) because no tested combination (measured masses, geometry crossflow 1.07-1.10, alpha 59.5, CG 24.85 m) passes all flight replays and case 8; table and facts in `docs/known-issues.md`. Standing facts: 255 t dry is probably too high (about 175 +-25 t by judgement; entry masses 221 / 252 / 203-227 t +-20); the CG window is 24.49-25.88 m and 25.50 / 23.516 m are tuned values (bottom-up dry CG about 22.9 m, 19.4-23.5); the allocator's authority floor (fraction 0.25) has a narrow window (failures 8 / 9 / 2 / 0 / 9 of 10 at 0 / 0.15 / 0.20 / 0.25 / 0.30). Next step: the low Mach part (geometry set: flight 13 low 14.96 %, flight 14 low 22.06 %, too slow at Mach 3-6).

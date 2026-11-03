@@ -113,8 +113,8 @@ TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refu
         const auto& b = tanker.stages[i];
         CAPTURE(a.id);
         CHECK(b.id == a.id);
-        // the tanker ship carries its own dry mass (user 2026-10-20, r5: 209 t [E] without cargo hardware)
-        CHECK(b.dry_mass_kg == (a.id == "ship" ? 209000.0 : a.dry_mass_kg));
+        // the tanker ship carries its own dry mass (user 2026-10-20, Task 3b: 171 t [E] without cargo hardware)
+        CHECK(b.dry_mass_kg == (a.id == "ship" ? 171000.0 : a.dry_mass_kg));
         CHECK(b.dry_cg_station_m == a.dry_cg_station_m);
         REQUIRE(b.tanks.size() == a.tanks.size());
         for (size_t k = 0; k < a.tanks.size(); ++k) {
@@ -337,13 +337,13 @@ TEST_CASE("Tanker and HLS mate back to back with the depot", "[refuelling][docki
     check_mates_with_depot("starship_hls");
 }
 
-TEST_CASE("The depot is a Block 3 ship without entry hardware, 236.5 t dry", "[refuelling][vehicle]") {
+TEST_CASE("The depot is a Block 3 ship without entry hardware, 158.5 t dry", "[refuelling][vehicle]") {
     const auto depot = config::load_vehicle(config_dir, "starship_depot");
     const auto block3 = config::load_vehicle(config_dir, "starship_block3");
     REQUIRE(depot.stages.size() == 2);
     CHECK(depot.stages.front().dry_mass_kg == block3.stages.front().dry_mass_kg);  // the same Super Heavy
     const auto& s = depot.stages.back();
-    CHECK(s.dry_mass_kg == 236500.0);
+    CHECK(s.dry_mass_kg == 158500.0);
     double propellant_kg = 0.0;
     for (const auto& t : s.tanks) propellant_kg += t.mass_kg;
     CHECK(propellant_kg == Catch::Approx(1.6e6));

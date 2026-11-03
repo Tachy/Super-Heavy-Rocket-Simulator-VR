@@ -150,12 +150,19 @@ name = "Starship Block 3"
 display_name = "Raumschiff Mk3"  # [D] display name of the part flying alone, no trademark
 length_m = 52.1                          # [D] stack 124.4 m [S:wiki_starship] - booster 72.3 m
 diameter_m = 9.0
-dry_mass_kg = 255000.0                   # [D] flights 12-14 webcast telemetry (propellant gauge, rocket equation staging ->
-                                         # cutoff, 20-26 Starlink V3 ~2 t each): 248 / 260 / 254 t
-dry_cg_station_m = 23.516                # [D] keeps the validated landing-mass CG (dry + 35 t: 25.50 m from the base,
-                                         # header-tank plan Task 3): 28 m [D] was the belly-first trim with the landing
-                                         # propellant in the main tanks (flaps near mid-range at alpha 55-75 deg, b1
-                                         # plan Task 6); the LOX header in the nose moves it forward
+dry_mass_kg = 177000.0                   # [D] +-20 t: flights 12-14 webcast telemetry, rocket equation ignition -> cutoff
+                                         # with gravity and steering losses; the gauge shows the main tanks only, so
+                                         # the 35 t of header propellant and the payload are taken out (planner plan
+                                         # Task 3b; 255 t before held the headers):
+#   python tools/telemetry/ship_dv.py tests/validation/telemetry/flight12_2026-05-22.csv --ignition-s 145 --p1 2.38
+#       --payload-t 37.5 --rvac-out-s 183   -> 165.8 t
+#   (flight13_2026-07-24.csv --ignition-s 143 --p1 2.89 --payload-t 38.5 -> 182.4 t; flight14_2026-09-28.csv
+#    --ignition-s 146 --p1 2.5 --payload-t 50 --rvac-out-s 438 -> 181.7 t); flight 12's one-engine landing phase
+#   bounds the splashdown mass at <= 209-218 t at 280 tf (177 t + residue fits, 255 t needed 117 % of the rating)
+dry_cg_station_m = 22.03                 # [D] +-1.3 m: bottom-up budget at 177 t (127 t of named items at 20.94 m, the
+                                         # rest like the shell):  python tools/structures/ship_mass_budget.py --dry-t 177
+                                         # (rest like the named items 20.94, uniform over the tanks 20.07, along the
+                                         # hull 22.37 m); with full headers 24.99 m, inside the entry trim window
 payload_mass_kg = 0.0
 
 [[stage.tank]]

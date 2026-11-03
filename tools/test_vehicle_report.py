@@ -61,7 +61,7 @@ class FromResolution(unittest.TestCase):
     def test_tanker_from_the_real_config(self):
         vehicle = vehicle_report.load_toml(vehicle_report.CONFIG_DIR / "vehicles" / "starship_tanker.toml")
         ship = vehicle_report.resolve_stages(vehicle)["ship"]
-        self.assertEqual(ship["dry_mass_kg"], 209000.0)
+        self.assertEqual(ship["dry_mass_kg"], 171000.0)
         self.assertEqual([p["id"] for p in ship["docking_port"]], ["transfer_dock"])
 
 

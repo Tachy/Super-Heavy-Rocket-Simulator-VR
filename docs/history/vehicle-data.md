@@ -81,7 +81,8 @@ Verbatim record of this subsystem's notes as they stood in `docs/subsystems.md` 
   the landing burn within 415 / 158 m (test "Booster descent drag reproduces the webcast telemetry of flights 13
   and 14"). The webcast's speed and altitude graphics are offset by ~1.5-2 s. Subsonic drag is not measured.
 - Block 3 masses [D] from flights 12-14 (`tools/telemetry/mass_estimate.py`, `ship_dv.py`): ship dry 255 t
-  (rocket equation staging -> cutoff with the propellant gauge, 248-260 t), booster dry 210 t +-40 t (stack mass
+  (rocket equation staging -> cutoff with the propellant gauge, 248-260 t; superseded by 177 t in planner plan
+  Task 3b, below), booster dry 210 t +-40 t (stack mass
   balance and descent ballistic coefficient), liftoff ~5,550 t; tank capacities 3,650 / 1,600 t [S]; Raptor 3
   280 tf consistent (peaks ~270 tf sea-level equivalent; 250 tf is contradicted), minimum throttle 30 % [D] (V3
   hovers on 3 engines). MECO of a returning booster is planned by the ascent autopilot from the state
@@ -94,6 +95,19 @@ Verbatim record of this subsystem's notes as they stood in `docs/subsystems.md` 
   staging (see the Starship throttle note).
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
+
+## Planner plan Task 3b (2026-11-03): superseded ship dry mass and CG
+- Ship dry 255 t [D] (2026-10-13, a207277): `ship_dv.py` with C = 1,600 t and nothing unmetered, the gravity loss only
+  where the ship's altitude dial was shown (T+146-430 s missing), no steering, p1 the table's last value (4.1-5.1 %
+  against 2.4-2.9 % in the frames), Isp 365 s, payloads 45 / 41 / 53 t: 248 / 260 / 254 t. The gauge shows the main
+  tanks only (headers added 2026-10-18 on top), so it held the 35 t of landing propellant; the errors partly cancelled
+  (vehicle physics mass audit 2026-11-01). Flight 14's ascent stayed ~60 m/s / 5.6 t of main propellant short of its
+  orbit with it (Raptor 1.30 m nozzle).
+- Ship dry CG 23.516 m [D]: not from mass and geometry - 28 m (2026-10-13) was scanned to make the old hull model trim,
+  23.516 m that value inverted through the header tanks (2026-10-18) to keep the entry CG at 25.50 m with 35 t.
+- Tanker 209 t [E] (255 - 46 t, chosen for 100 t of main propellant after the ascent); depot 236.5 t / 23.516 m [E].
+- `test_entry_corridor.cpp` pins at 255 t: no corridor at 10.9 km/s (now 0.13 deg wide, still unusable); the
+  aerocapture window speed below 9.9 km/s (now 9,992 m/s, the corridor alone 10,273 m/s).
 
 ## Task 5b (2026-11-01): superseded ship values
 - `nose_length_m` 17.0 (block 3, HLS, depot), not the drawn ogive.

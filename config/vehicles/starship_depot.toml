@@ -25,9 +25,10 @@ name = "Starship Depot"
 display_name = "Depot Mk3"  # [D] display name of the part flying alone, no trademark
 length_m = 52.1                          # [D] as the Block 3 ship
 diameter_m = 9.0
-dry_mass_kg = 236500.0                   # [E] Block 3 ship 255 t - heat shield 10.5 t - four flaps 10 t [E] - catch pins
+dry_mass_kg = 158500.0                   # [E] Block 3 ship 177 t [D] - heat shield 10.5 t - four flaps 10 t [E] - catch pins
                                          # 1 t [E] + insulation 3 t [E] (~2 kg/m^2 MLI on ~1,300 m^2 of tank hull)
-dry_cg_station_m = 23.516                # [E] as Block 3: the removed masses sit fore, aft and along the belly
+dry_cg_station_m = 21.89                 # [E] Block 3's 22.03 m less the shield (26.86 m), flaps (16.47 m, area-weighted
+                                         # centroids), pins (36.5 m), plus the insulation over the tanks (17.85 m)
 payload_mass_kg = 0.0
 
 [[stage.tank]]

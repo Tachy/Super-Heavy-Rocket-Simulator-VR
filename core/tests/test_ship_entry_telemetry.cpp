@@ -250,7 +250,7 @@ TEST_CASE("Ship entry flies the recorded paths of flights 12-14 without impact a
 }
 
 TEST_CASE("Ship entry: agreement with the webcast telemetry of flights 12-14 (report)", "[nightly][webcast][ship][entry]") {
-    const std::string params = "entry mass (255 t vs ~175 t), CG, crossflow Cd, flap CdA";
+    const std::string params = "entry mass (177 t dry + 35 t headers), CG, crossflow Cd, flap CdA";
     std::vector<test::WebcastRow> rows;
     for (const auto& f : flights) {
         const ReplayResult r = replay(f.file, f.t_start, f.name);

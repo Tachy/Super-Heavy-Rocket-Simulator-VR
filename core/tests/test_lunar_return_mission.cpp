@@ -72,7 +72,7 @@ TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lun
     REQUIRE(budget.closes);
     CHECK(s.return_planned);
     // [D] TEI ~0.9 + braking ~1.1 km/s (l5 Task 6; the plan estimated 1.5) + MCC + coast + 35 t landing + 10 t reserve
-    // on 255 t dry: ~250 t
+    // on 255 t dry: ~250 t (before planner plan Task 3b; 177 t dry since)
     const auto& v = t.session.body(t.session.controlled_index()).vehicle();
     CHECK(v.propellant_kg() > 200e3);
     CHECK(v.propellant_kg() < 400e3);
@@ -98,12 +98,13 @@ TEST_CASE("Lunar return start refuses without an entry corridor", "[lunar][retur
 }
 
 TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][return][session]") {
-    // tanks of 200 t (an eighth): the return needs ~250 t (a heavier dry mass fails earlier - no entry corridor)
+    // tanks of 100 t (a sixteenth): the return needs ~190 t on 177 t dry (Task 3b; at 255 t dry an eighth, 200 t, was
+    // short of ~250 t) - a heavier dry mass fails earlier: no entry corridor
     test::LunarReturnSession t;
     const auto vehicle = test::block3_with_ship([](config::StageConfig& s) {
         for (auto& tank : s.tanks) {
-            tank.mass_kg *= 0.125;
-            tank.capacity_kg *= 0.125;  // smaller tanks, not a partial load
+            tank.mass_kg *= 0.0625;
+            tank.capacity_kg *= 0.0625;  // smaller tanks, not a partial load
         }
     });
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
@@ -193,7 +194,8 @@ TEST_CASE("start_mission dispatches a lunar return", "[lunar][return][session]")
     if (std::getenv("STARSIM_VERBOSE")) {
         std::printf("[lunar return] LLO aircatch: propellant %.1f t\n", v.propellant_kg() / 1000.0);
     }
-    CHECK(v.propellant_kg() > 200e3);
+    // 186.5 t on 177 t dry (planner plan Task 3b; above 200 t on 255 t dry)
+    CHECK(v.propellant_kg() > 150e3);
     CHECK(v.propellant_kg() < 400e3);
 }
 

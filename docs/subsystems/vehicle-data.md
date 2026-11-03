@@ -6,10 +6,20 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
 ## Model
 - Only the current configuration (Block 3 / V3, Raptor 3) is modelled; data come from flights 12-14
   (`tests/validation/telemetry/flights.toml`).
-- **Block 3 masses** [D] from flights 12-14 (`tools/telemetry/mass_estimate.py`, `ship_dv.py`): ship dry 255 t (rocket
-  equation staging -> cutoff with the propellant gauge, 248-260 t), **probably too high** (the gauge excludes the landing propellant; one-engine phase of flight 12 allows <= 209-218 t at 280 tf; about 175 +-25 t by judgement; kept because no tested combination passes the replays, `docs/known-issues.md`), booster dry 210 t +-40 t (stack mass balance and
-  descent ballistic coefficient), liftoff ~5,550 t; tank capacities 3,650 / 1,600 t [S]; Raptor 3 280 tf consistent
-  (peaks ~270 tf sea-level equivalent; 250 tf is contradicted), minimum throttle 30 % [D] (V3 hovers on 3 engines).
+- **Block 3 masses** [D] from flights 12-14 (`tools/telemetry/mass_estimate.py`, `ship_dv.py`): **ship dry 177 t
+  +-20 t** (planner plan Task 3b, user 2026-11-03 "Leermasse realistischer"): rocket equation from ship ignition to
+  cutoff with gravity loss over the whole burn (altitude polynomial anchored by the stack's), steering (normal
+  acceleration), the config's engine mix (Isp 362.6 s, 359.2 s with one RVac out on flights 12 / 14), gauge p0
+  extrapolated to ignition, p1 read from frames; the gauge shows the main tanks only, so metered capacity 1,565 t and
+  dry = M - payload - 35 t of header propellant: 165.8 / 182.4 / 181.7 t (payloads 37.5 / 38.5 / 50 t). Cross-checks:
+  flight 12's one-engine landing phase bounds the splashdown mass at <= 209-218 t at 280 tf; the vehicle physics mass
+  audit's judgement 175 +-25 t; a community bottom-up 166 t. **Ship dry CG 22.03 m +-1.3 m** [D]
+  (`tools/structures/ship_mass_budget.py --dry-t 177`: 127.3 t of named items at 20.94 m, the rest like the shell;
+  other placements of the rest 20.07-22.37 m); with full headers 24.99 m. Tanker 171 t [E] (177 - 6 t door and
+  dispenser), depot 158.5 t / 21.89 m [E] (177 t less shield, flaps, pins, plus insulation); HLS keeps its 120 t [E].
+  Booster dry 210 t +-40 t (stack mass balance and descent ballistic coefficient), liftoff ~5,550 t (telemetry); tank capacities
+  3,650 / 1,600 t [S]; Raptor 3 280 tf consistent (peaks ~270 tf sea-level equivalent; 250 tf is contradicted),
+  minimum throttle 30 % [D] (V3 hovers on 3 engines). Superseded 255 t / 23.516 m: `docs/history/vehicle-data.md`.
 - **Raptor 3 nozzle**: exit (inner, flow) diameter 1.30 m [S: user 2026-11-03], A_e 1.3273 m^2; sea-level 280 tf / 330 s
   stay, vacuum follows (`engine_performance.cpp`): 2.880 MN, 346.2 s (test "Raptor 3 vacuum performance follows the
   1.30 m exit"). Every Raptor burn above sea level reads it (ascent, boostback, landing, ship burns, lunar).
