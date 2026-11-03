@@ -56,10 +56,11 @@ Assert ((List-Count @("-TestFilter", "[legs],[asds]")) -eq $union) "[legs],[asds
 
 $threw = $false
 $ErrorActionPreference = "Continue"
-& powershell -NoProfile -ExecutionPolicy Bypass -File $build -ListOnly -TestFilter "[nosuchtag]" *> $null
+$nomatchOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $build -ListOnly -TestFilter "[nosuchtag]" 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { $threw = $true }
 $ErrorActionPreference = "Stop"
 Assert $threw "[nosuchtag] fails with no match"
+Assert ($nomatchOut -match 'TestFilter matched no test') "[nosuchtag] reports 'TestFilter matched no test'"
 
 $f9 = Ctest-Count '-L "^falcon9$"'
 $f9noNight = Count-With @("falcon9")

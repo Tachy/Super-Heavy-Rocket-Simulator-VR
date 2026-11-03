@@ -31,6 +31,12 @@ if ($Only.Count -gt 0) {
     $scripts = $scripts | Where-Object { $names -contains $_.BaseName }
 }
 
+$runnable = @($scripts | Where-Object { $Gpu -or ($needsGpuOrModels -notcontains $_.BaseName) })
+if ($Only.Count -gt 0 -and $runnable.Count -eq 0) {
+    Write-Host "FAILED: -Only matched no runnable script ($($Only -join ', '))"
+    exit 1
+}
+
 New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
 "Godot tests $(Get-Date -Format s)" | Set-Content $log -Encoding utf8
 

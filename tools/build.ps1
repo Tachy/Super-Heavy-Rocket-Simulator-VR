@@ -99,7 +99,7 @@ if ($NoTests) { return }
 if ($TestFilter -and -not $isTagSpec) {
     $tests = Join-Path $buildDir "core\tests\starsim_core_tests.exe"
     $code = Invoke-Vc @("`"$tests`" `"$TestFilter`"")
-    if ($code -ne 0) { throw "build failed ($code)" }
+    if ($code -ne 0) { throw "tests failed ($code)" }
     return
 }
 
