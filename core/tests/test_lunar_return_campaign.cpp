@@ -279,13 +279,6 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
     return good;
 }
 
-// The same campaign over an explicit seed list (the reduced default-tier cases).
-int fly_seed_list(std::initializer_list<unsigned> seeds, bool aircatch) {
-    int good = 0;
-    for (const unsigned seed : seeds) good += fly_seeds(seed, seed, aircatch);
-    return good;
-}
-
 }  // namespace
 
 // The full campaigns (21 seeds each) run in the nightly tier, three seeds per case so ctest runs them in parallel
@@ -302,9 +295,10 @@ TEST_CASE("Lunar return campaign (direct): seeds 19-21", "[lunar][return][valida
 
 // Reduced direct campaign (seeds named by the test tiers plan): seed 2 is the known red (upright abort,
 // docs/known-issues.md) and keeps this case red until it is fixed; 18 is the former refuelling-f3 miss (lateral LQR).
-TEST_CASE("Lunar return campaign (direct): seeds 2, 12, 15, 18", "[lunar][return][validation][slow]") {
-    CHECK(fly_seed_list({2u, 12u, 15u, 18u}, false) == 4);
-}
+TEST_CASE("Lunar return campaign (direct): seed 2", "[lunar][return][validation][slow]") { CHECK(fly_seeds(2, 2, false) == 1); }
+TEST_CASE("Lunar return campaign (direct): seed 12", "[lunar][return][validation][slow]") { CHECK(fly_seeds(12, 12, false) == 1); }
+TEST_CASE("Lunar return campaign (direct): seed 15", "[lunar][return][validation][slow]") { CHECK(fly_seeds(15, 15, false) == 1); }
+TEST_CASE("Lunar return campaign (direct): seed 18", "[lunar][return][validation][slow]") { CHECK(fly_seeds(18, 18, false) == 1); }
 
 // Seeds 4 and 7 failed after l6 Task 1 (entry attitude departure at peak q with 61-64 t aboard, the liquid always a
 // column on the aft domes); propellant settling (header-tank plan) moves the residue forward at entry and fixed them.
@@ -316,9 +310,9 @@ TEST_CASE("Lunar return campaign (aerocapture): seeds 15-21", "[lunar][return][v
 // case's output nowhere), so the three seeds are those with the largest dispersion that drives the gate miss, the
 // sum |entry angle| / 0.1 deg + |aero - 1| / 0.10 + |density - 1| / 0.15 (seed 19: 2.7, 11: 2.25, 3: 2.2; the next
 // is seed 7 at 1.96).
-TEST_CASE("Lunar return campaign (aerocapture): seeds 3, 11, 19", "[lunar][return][validation][slow]") {
-    CHECK(fly_seed_list({3u, 11u, 19u}, true) == 3);
-}
+TEST_CASE("Lunar return campaign (aerocapture): seed 3", "[lunar][return][validation][slow]") { CHECK(fly_seeds(3, 3, true) == 1); }
+TEST_CASE("Lunar return campaign (aerocapture): seed 11", "[lunar][return][validation][slow]") { CHECK(fly_seeds(11, 11, true) == 1); }
+TEST_CASE("Lunar return campaign (aerocapture): seed 19", "[lunar][return][validation][slow]") { CHECK(fly_seeds(19, 19, true) == 1); }
 
 TEST_CASE("Lunar return campaign: a single case", "[.lunar_return_case]") {
     const char* seed = std::getenv("STARSIM_RETURN_SEED");

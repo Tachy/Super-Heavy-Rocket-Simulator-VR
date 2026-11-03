@@ -22,6 +22,9 @@ $needsGpuOrModels = @(
     'vehicle_view_test'        # Starship / Super Heavy detail models
 )
 
+# Scripts that legitimately run longer than the default limit (seconds; the larger of this and -TimeoutSec applies).
+$slowScripts = @{ 'terrain_quadtree_test' = 900 }  # measured 502 s with the Earth and Moon terrain data (2026-11-03)
+
 $scripts = Get-ChildItem (Join-Path $root 'game/tests') -Filter '*_test.gd' | Sort-Object Name
 if ($Only.Count -gt 0) {
     $names = $Only | ForEach-Object { $_ -split "," } | ForEach-Object { $_ -replace '\.gd$', '' }
@@ -43,7 +46,7 @@ foreach ($s in $scripts) {
     $p = Start-Process $godot -ArgumentList @('--headless', '--path', (Join-Path $root 'game'), '--script', "res://tests/$($s.Name)") `
         -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError "$out.err"
     $null = $p.Handle  # keeps the process handle so ExitCode is readable after WaitForExit(ms)
-    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+    if (-not $p.WaitForExit(([Math]::Max($TimeoutSec, $slowScripts[$name]) * 1000))) {
         $p.Kill()
         $code = 'TIMEOUT'
     } else {

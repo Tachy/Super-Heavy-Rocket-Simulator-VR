@@ -44,24 +44,38 @@ func _initialize() -> void:
 	_terrain = bool(loaded.get("earth", false))
 	_moon_terrain = bool(loaded.get("moon", false))
 	_check_morph_ranges()
+	print("  time  %s done at %d ms" % ["_check_morph_ranges()", Time.get_ticks_msec()])
 	_check_flat_rule()
+	print("  time  %s done at %d ms" % ["_check_flat_rule()", Time.get_ticks_msec()])
 	_check_hysteresis()
+	print("  time  %s done at %d ms" % ["_check_hysteresis()", Time.get_ticks_msec()])
 	_check_morph_continuity()
+	print("  time  %s done at %d ms" % ["_check_morph_continuity()", Time.get_ticks_msec()])
 	_check_morph_fade_in()
+	print("  time  %s done at %d ms" % ["_check_morph_fade_in()", Time.get_ticks_msec()])
 	_check_camera_precision()
+	print("  time  %s done at %d ms" % ["_check_camera_precision()", Time.get_ticks_msec()])
 	_check_jump()
+	print("  time  %s done at %d ms" % ["_check_jump()", Time.get_ticks_msec()])
 	_check_fresh_checkout()
+	print("  time  %s done at %d ms" % ["_check_fresh_checkout()", Time.get_ticks_msec()])
 	_check_moon_without_water()
+	print("  time  %s done at %d ms" % ["_check_moon_without_water()", Time.get_ticks_msec()])
 	_check_no_horizon_without_terrain()
+	print("  time  %s done at %d ms" % ["_check_no_horizon_without_terrain()", Time.get_ticks_msec()])
 	if _terrain:
 		_check_data()
+		print("  time  %s done at %d ms" % ["_check_data()", Time.get_ticks_msec()])
 	else:
 		print("  note  data/ Earth terrain absent: 'refines towards the camera' (data) and 'finest mesh matches the "
 				+ "core' skipped")
 	if _moon_terrain:
 		_check_moon_data()
+		print("  time  %s done at %d ms" % ["_check_moon_data()", Time.get_ticks_msec()])
 		_check_moon_horizon()
+		print("  time  %s done at %d ms" % ["_check_moon_horizon()", Time.get_ticks_msec()])
 		_check_horizon_pole_and_margin()
+		print("  time  %s done at %d ms" % ["_check_horizon_pole_and_margin()", Time.get_ticks_msec()])
 	else:
 		print("  note  data/ Moon terrain absent: 'moon refines to the 20 m tile' and 'moon finest mesh matches the "
 				+ "core' skipped")

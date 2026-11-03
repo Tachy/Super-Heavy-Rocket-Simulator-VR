@@ -69,22 +69,26 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 
   | Set | Cases (default) | CPU s | Wall est. s | Wall before s |
   |---|---|---|---|---|
-  | full default tier | 1513 | 10582 | 460 (run: 619) | 1941 (CPU 20382) |
+  | full default tier | 1518 | 10582 | 384 (run before the split: 619) | 1941 (CPU 20382) |
   | `-Fast` (no `[slow]`) | 1396 | 1938 | 81 | - |
   | nightly only | 30 | not measured | not measured | - |
   | `[falcon9]` / `[asds]` | 52 / 36 | 1178 / 838 | 230 | 201 / 125 |
   | `[ascent_planner]` | 63 | 2815 | 384 | 365 |
-  | `[lunar]` / `[return]` | 96 / 29 | 2484 / 1502 | 460 | 1044 |
+  | `[lunar]` / `[return]` | 96 / 29 | 2484 / 1502 | <= 384 (see below) | 1044 |
   | `[refuelling]` | 163 | 1631 | 384 | 1941 |
   | `[sim]` / `[mission]` | 112 / 72 | 1757 / 2391 | 104 / 384 | 369 |
   | `[docking]` / `[ship]` | 96 / 66 | 1438 / 2152 | 384 | 335 |
   | `[atmosphere]` / `[weather]` | 18 / 113 | 94 / 231 | 45 / 75 | 341 / 113 |
   | `[timeline]` / `[catch]` | 29 / 33 | 168 / 726 | 30 / 177 | 96 / 145 |
   | `[dragon]` / `[iss_mission]` | 62 / 40 | 356 / 639 | 74 / 119 | 70 / 182 |
-  | `[gnc]\|[validation]\|[ascent]` | 256 | 5663 | 460 | 1044 |
+  | `[gnc]\|[validation]\|[ascent]` | 256 | 5663 | <= 384 (see below) | 1044 |
 
-  The default run took 619 s real (target ~500 s missed): its longest cases (aerocapture seeds 3, 11, 19 at 460 s,
-  `tanker_flight` 384 s) bound the wall from below; ctest packing and 24 parallel processes stretch it. Some sets
+  The default run took 619 s real (target ~500 s missed): its longest cases (aerocapture seeds 3, 11, 19 in one case at
+  460 s, `tanker_flight` 384 s) bounded the wall from below. Task 8b split the reduced lunar return cases into one per
+  seed (7 cases, 1518 in the default tier); measured case times (ctest, 7 cases in parallel, 2026-11-03): direct seeds
+  2 / 12 / 15 / 18 at 45 / 50 / 55 / 44 s, aerocapture seeds 3 / 11 / 19 at 86 / 86 / 84 s. The longest case of the
+  default tier is now `tanker_flight` at 384 s; the 384 s wall is derived from the measured case times, not from a new
+  full run (the 619 s run was the last one). Rows marked "<= 384" were 460 s before the split; ctest packing and 24 parallel processes stretch it. Some sets
   are slower than the audit figures although cases moved out (`[falcon9]`, `[ascent_planner]`, `[docking]`): this run
   is cold-cache and 24 processes compete for memory bandwidth (cache state of the audit run not recorded).
 - Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
@@ -97,7 +101,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Headless Godot tests (run after changes in `game/`): `powershell -ExecutionPolicy Bypass -File tools/run_godot_tests.ps1`
   runs every `game/tests/*_test.gd` with `--headless`, time and exit code per script in `build/godot_tests.log`, exit 1 if any
   fails. Scripts needing the generated models (`docking_mechanism_test`, `tower_view_test`, `vehicle_view_test`) are skipped
-  unless `-Gpu`; `-Only a,b` selects scripts. Needs the built GDExtension. Scripts not named `*_test` are GPU checks or tools.
+  unless `-Gpu`; `-Only a,b` selects scripts. Needs the built GDExtension. Scripts not named `*_test` are GPU checks or tools. `terrain_quadtree_test` is slow with the terrain data (502 s measured, data checks alone take 132 s Earth, 193 s Moon), so the runner gives it a 900 s limit (`$slowScripts`); it prints elapsed ms per check.
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
   `--lat= --lon= --look_at_moon --fov=`; clouds with `--weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid>,<fraction>`
