@@ -14,7 +14,8 @@
 
 - One rule per value, decided per item in its task: (D) **derived** in code from config physics when the physics determines it; (K) **config key** with a provenance tag `[S]`/`[E]`/`[D]` in the TOML comment (see `config/README.md`) when it is a vehicle or mission property the config cannot derive (fitted/identified values keep `[D]` and say on what they were identified); (M) **mission config** when it is a mission choice, not a vehicle property.
 - Production paths (FlightSession, planners, bindings, missions) never fall back to a struct default for a moved value. Struct defaults may stay only as unit-test fixtures. A vehicle that uses a guidance law but lacks one of its keys fails at load with a German message naming the key and file (Review Focus 1).
-- Behaviour-neutral moves (K, M with the current value) must leave the affected tags bit-identical in outcome; derived values (D) may change results: re-measure, record the new numbers, do not tune anything back (user 2026-11-03). A campaign that turns red after a (D) change is recorded in `docs/known-issues.md` with numbers, not fixed by fitting.
+- Behaviour-neutral moves (K, M with the current value) must leave the affected tags bit-identical in outcome; derived values (D) may change results: re-measure, record before/after.
+- User 2026-11-03: "Der Planer muss jetzt mit den neuen Werten automatisch so planen und im Flug nachplanen, dass die Flüge hinhauen ... für das ist der Planer ja da." A flight or campaign that turns red after a vehicle value changed is a planner defect: the planner / guidance must plan from the vehicle values and re-plan in flight so the flight works. Fix it in the planner logic (derive, search, re-plan from the live state), never by a fitted constant, a loosened limit or by changing the vehicle value back. Only a mission that is physically impossible with the vehicle (shown with numbers, e.g. no propellant margin at any feasible plan) goes to the user instead.
 - Physics first; no webcast gates; tests follow physics (memory `feedback-tests-follow-physics`). No magic numbers: new constants with source in `core/include/starsim/math/constants.hpp`.
 - SI units, frame/unit in names, angles in radians internally (`*_deg` keys converted at load, as the loader does today).
 - After every vehicle config change: `python tools/vehicle_report.py <vehicle-id>` (starship_block3, falcon9_block5, starship_hls, starship_tanker as touched).
@@ -50,6 +51,14 @@ User 2026-11-03: "1,30 m sind gesetzt ... Die Düsen dürfen sich nicht mehr üb
 - [ ] Step 4: tests green: `-Fast -TestFilter "[propulsion],[engines],[ascent],[booster_return],[peg]"` + pytest `tools/structures/tests` + Godot `vehicle_view_test.gd`.
 - [ ] Step 5: render check (GPU, no headless) of the booster and ship engine bays from below and the side, PNGs to `screenshots/raptor_nozzle/`, sent to the user.
 - [ ] Step 6: re-measure (vacuum thrust changed every Raptor burn): `[slow]` of `[ascent_planner]`, `[booster]`, `[catch]`, `[ship]`, `[lunar]` reduced cases; numbers before/after into the report; reds to known-issues with numbers. Commit `feat(propulsion): Raptor 3 nozzle exit 1.30 m, rings without bell overlap`.
+
+### Task 1b: Mount opening fits the engine bay (Sonnet)
+
+User 2026-11-03: "Beim Mount muss natürlich alles durchpassen." The pad's mount opening (9.0 m) is smaller than the outer bells (ring 4.40 m + lip 0.66 m = 5.06 m radius). Widen the opening (and whatever ring/clamp geometry sits around it) so the booster's whole engine bay incl. gimbal sweep passes with the existing 0.04 m margin; take the real opening from the photo / STL / pad references (`feedback-reality-over-physics-geometry`) when it is larger. `test_booster_stack_clears_deck_ring_and_qd` green (negative control kept), `docs/subsystems/launch-structures.md` current; render check of the mount from below and the side to `screenshots/raptor_nozzle/`. Physics pad collision shapes follow the drawing if they model the opening.
+
+### Task 1c: Planners fly the Task 1 reds again (Opus, systematic-debugging)
+
+The reds from the 1.1 % lower vacuum Isp (`task-1-report.md`, `docs/known-issues.md`): flight 14 ascent plan infeasible, two ship-return dispersion cases miss the gate by 356 m and 638 m, lunar direct seed 15, aerocapture b4, booster abort at 800 m with 0.5 t left. Per the user's rule (Global Constraints) each is a planner defect: find why the planner did not absorb the change (plan from vehicle values, in-flight re-plan) and fix the planner logic, red test first where possible. A case that is physically impossible goes to the user with numbers. Known-issues updated; tags of each case with `[slow]`.
 
 ### Task 2: Shared vehicle capability derivations (Opus)
 
