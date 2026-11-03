@@ -144,6 +144,9 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 		"plan_ship_return":
 			if ok:
 				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm"
+				var plan: Dictionary = sim.autopilot_status().get("return", {})
+				if not plan.get("dispersion_robust", true):
+					last_event += " - Achtung: %s" % plan.get("dispersion_note", "nicht gegen alle Streuungen robust")
 			else:
 				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
 

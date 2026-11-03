@@ -136,7 +136,7 @@ TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "
     const double half_span_m = 0.5 * norm(plus.end_position_itrf_m - minus.end_position_itrf_m);
     const math::Vec3 side = math::normalized(plus.end_position_itrf_m - minus.end_position_itrf_m);
 
-    gnc::EntryReachCheck check;  // the ship guidance's rules, the entry campaign's dispersions
+    gnc::EntryReachCheck check;  // the ship guidance's rules, the air's dispersions
     check.limits.max_heat_rate_w_m2 = 1.2e6;
     check.limits.max_load_g = 6.0;
     check.guidance.max_dynamic_pressure_pa = 25000.0;
@@ -149,10 +149,10 @@ TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "
     CHECK(centred.bracketed);  // every dispersed case flies too
     CHECK(centred.within_corridor);
     CHECK(std::abs(centred.crossrange_m) < 20e3);
-    // the dispersions (the entry guidance campaign's: +-0.2 deg, +-40 m/s, +-10 % aero, +-300 km range, +-60 km across)
-    // take most of the one-sign half span: the faster / shallower entries' late reversals hit the load limit
-    CHECK(centred.reach_m < 0.5 * half_span_m);
-    CHECK(centred.reach_m > 50e3);
+    // the air's dispersions (+-10 % lift and drag) cost little of the nominal reach (planner plan Task 7 fix round 3:
+    // 452 km against 455-466 km nominal only, half the one-sign span 657 km)
+    CHECK(centred.reach_m > 0.6 * half_span_m);
+    CHECK(centred.reach_m < half_span_m);
     // the reversal that ends on the target comes before the hand-over (Mach 5: ~1.5 km/s)
     CHECK(centred.reversal_speed_mps > 1500.0);
     CHECK(centred.peak_load_g > 1.0);
@@ -175,9 +175,9 @@ TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "
         CAPTURE(sign);
         std::printf("side %+.0f: reach %.1f km; %.1f km -> %d, %.1f km -> %d (%s)\n", sign, measured.reach_m / 1000.0,
                     inside.crossrange_m / 1000.0, inside.bracketed, beyond.crossrange_m / 1000.0, beyond.bracketed,
-                    beyond.limiting_case);
+                    beyond.limiting_case.c_str());
         CHECK(measured.reach_m < half_span_m);
-        CHECK(measured.reach_m > centred.reach_m);  // the dispersions take their share
+        CHECK(measured.reach_m >= centred.reach_m);  // the dispersions take their share
         CHECK(inside.bracketed);
         CHECK_FALSE(beyond.bracketed);
     }

@@ -698,3 +698,14 @@ the Mach 5 hand-over, less the 2 km deadband and single-axis dispersions (-0.2 d
 600-615 km, planned peaks 2.3-2.6 g / 8.6-10.5 kPa. Flown, the guidance raised the bank after the late reversal
 (phase 90 at -522 km: 50 -> 88 deg, predictions 4.6-6.3 g), so the plan was not the flight. The terminal nose turn
 ended half a sector inside the edge (`nose_turn_inset` 0.5 [E]); now the derived lag w^2 / (2 a).
+
+Planner plan Task 7 fix round 2 (superseded by fix round 3): the reach check flew the entry guidance campaign's 11
+dispersed interfaces (`gnc::ship_entry_campaign_dispersions`: +-0.2 deg, +-40 m/s, +-300 km start range, +-60 km
+across, crossflow +-10 %) - a guidance stress set, not the deorbit's dispersions (its burn errors of ~1 % / 0.5 deg move
+the interface by ~0.01 deg and ~1 m/s). Reach 76-241 km at the LEO passes, waits 20-23 h, the docked tanker without a
+robust pass in 8 days; the fallback pass was silent. A capsule was checked nominal only: the campaign's case-1 offsets
+applied to the planner's own interface missed by 11-38 km, read as a fly-ahead fault - flown ahead from the campaign's
+own interface the fly-ahead agrees with the 6-DoF flight (fix round 3). The nose turn ended inside the edge by the
+largest lag w^2 / (2 a) (35.7 deg > the 30 deg sector: on the nose direction); on the ship return phase-90 pass at
+-291 km (a 118 deg turn) that left the correction outside the sector, gate 105 m. The fly-ahead's terminal steering
+took one guidance step (0.3) per 10 s cycle.

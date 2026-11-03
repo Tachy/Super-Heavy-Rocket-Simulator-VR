@@ -83,10 +83,8 @@ public:
             frozen_ = true;
             if (norm(nose_) > 0.0) {  // as the guidance
                 lift_angle_ = std::atan2(steering_.y, steering_.x);  // the turn starts from the lift flown
-                steering_ = nose_turn_steering(steering_, nose_, e1_, e2_,
-                                               std::max(0.0, m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_) -
-                                                                 m_.nose_turn_inset_rad),
-                                               m_.nose_fraction);
+                steering_ = nose_turn_end_steering(
+                    m_, steering_, nose_, e1_, e2_, m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_));
             }
         }
     }
@@ -179,8 +177,29 @@ void steering_basis(const Vec3& up, const Vec3& u, Vec3& e1, Vec3& e2) {
     e2 = cross(u, e1);
 }
 
-double nose_turn_lag_rad(double turn_rate_radps, double slew_acceleration_radps2) {
-    return slew_acceleration_radps2 > 0.0 ? turn_rate_radps * turn_rate_radps / (2.0 * slew_acceleration_radps2) : 0.0;
+double nose_turn_lag_rad(double turn_rate_radps, double slew_acceleration_radps2, double slew_rate_radps, double turn_rad) {
+    const double w = turn_rate_radps, a = slew_acceleration_radps2, s = slew_rate_radps;
+    if (!(a > 0.0) || !(w > 0.0) || !(s > 0.0)) return 0.0;
+    const double t = turn_rad / w;
+    const double attitude = a * t < s ? 0.5 * a * t * t : 0.5 * s * s / a + s * (t - s / a);
+    return std::clamp(w * t - attitude, 0.0, 0.5 * w * w / a);
+}
+
+Vec3 nose_turn_end_steering(const EntryPredictorModel& m, const Vec3& p, const Vec3& nose, const Vec3& e1, const Vec3& e2,
+                            double sector_rad) {
+    // the turn to the nearest edge, then on by the inset x: x = lag(turn to the edge + x), within [0, sector]
+    double to_edge = 0.0;
+    if (norm(p) > 1e-9) {
+        const double heading = std::atan2(dot(nose, e2), dot(nose, e1));
+        const double offset = std::remainder(std::atan2(p.y, p.x) - heading, 2.0 * constants::pi);
+        to_edge = std::max(0.0, std::abs(offset) - sector_rad);
+    }
+    double inset = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        inset = std::min(sector_rad, nose_turn_lag_rad(m.nose_turn_rate_radps, m.nose_slew_acceleration_radps2,
+                                                       m.nose_slew_rate_radps, to_edge + inset));
+    }
+    return nose_turn_steering(p, nose, e1, e2, sector_rad - inset, m.nose_fraction);
 }
 
 Vec3 nose_steering(const Vec3& nose, const Vec3& e1, const Vec3& e2, double fraction) {

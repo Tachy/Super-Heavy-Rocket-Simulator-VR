@@ -68,6 +68,16 @@ void to_fixed(const frames::BodyOrientation& earth, time::Epoch epoch, const mat
     v = transpose(t.rotation) * (s.velocity_mps - cross(vehicle::earth_rotation_vector(t), s.position_m));
 }
 
+// A burn executed with an error: magnitude (fraction), pointing (rad: in the pitch plane - > 0 towards up -, across it -
+// > 0 towards the orbit normal) and ignition (s late).
+struct BurnError {
+    const char* name = "";
+    double magnitude = 0.0;
+    double pitch_rad = 0.0;
+    double yaw_rad = 0.0;
+    double time_s = 0.0;
+};
+
 // One shot: coast to the burn, retrograde impulse, coast to the entry interface, entry prediction at +-bank.
 struct Shot {
     bool valid = false;
@@ -98,10 +108,18 @@ public:
         return propagate(gravity_, parameters_.drag_area_per_mass_m2pkg, samples_[i].state, samples_[i].epoch, epoch, {}, options_).state;
     }
 
-    // State at the end of the burn centred on `burn` (impulsive: at `burn`) and that epoch.
-    math::StateVector after_burn(time::Epoch burn, double delta_v_mps, time::Epoch& end) const {
+    // State at the end of the burn centred on `burn` (impulsive: at `burn`) and that epoch; `error`: as executed.
+    math::StateVector after_burn(time::Epoch burn, double delta_v_mps, time::Epoch& end, const BurnError& error = {}) const {
+        burn = burn + error.time_s;
+        delta_v_mps *= 1.0 + error.magnitude;
         auto s = state_at(burn);
-        const Vec3 direction = -math::normalized(s.velocity_mps);
+        Vec3 direction = -math::normalized(s.velocity_mps);
+        if (error.pitch_rad != 0.0 || error.yaw_rad != 0.0) {
+            const Vec3 normal = math::normalized(cross(s.position_m, s.velocity_mps));
+            const Vec3 up = math::normalized(cross(normal, direction));  // in the plane, perpendicular to the burn
+            direction = math::normalized(direction * (std::cos(error.pitch_rad) * std::cos(error.yaw_rad)) +
+                                         up * std::sin(error.pitch_rad) + normal * std::sin(error.yaw_rad));
+        }
         if (parameters_.burn_thrust_n <= 0.0) {
             s.velocity_mps += direction * delta_v_mps;
             end = burn;
@@ -126,10 +144,11 @@ public:
         return math::unpack(r.y);
     }
 
-    Shot shoot(time::Epoch burn, double delta_v_mps) const {
+    // Coast to the entry interface (Earth-fixed state, valid: reached within the coast).
+    Shot interface_of(time::Epoch burn, double delta_v_mps, const BurnError& error = {}) const {
         Shot shot;
         time::Epoch end;
-        const auto s = after_burn(burn, delta_v_mps, end);
+        const auto s = after_burn(burn, delta_v_mps, end, error);
         const integrators::Event<6> interface{
             "entry interface",
             [&](double t_s, const integrators::State<6>& y) {
@@ -150,6 +169,13 @@ public:
         shot.valid = true;
         shot.position_itrf_m = r;
         shot.velocity_itrf_mps = v;
+        return shot;
+    }
+
+    Shot shoot(time::Epoch burn, double delta_v_mps) const {
+        Shot shot = interface_of(burn, delta_v_mps);
+        if (!shot.valid) return shot;
+        const Vec3 r = shot.position_itrf_m, v = shot.velocity_itrf_mps;
         for (const double sign : {1.0, -1.0}) {  // bank reversals: the guidance flies both signs
             EntryPredictorState start;
             start.position_itrf_m = r;
@@ -271,6 +297,45 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         std::printf("[deorbit] pass prefilter %.1f km (glide reach %.1f km, %.0f s)\n", reach_bound_m / 1000.0,
                     glide_reach_m / 1000.0, glide_time_s);
     }
+    // The reach check with the burn's execution errors propagated to the entry interface (each alone, both signs) added
+    // to its dispersions (the air).
+    const DeorbitBurnDispersion& e = parameters.burn_dispersion;
+    const BurnError burn_errors[] = {
+        {"Deorbit-Impuls +1 %", e.magnitude_fraction, 0.0, 0.0, 0.0},
+        {"Deorbit-Impuls -1 %", -e.magnitude_fraction, 0.0, 0.0, 0.0},
+        {"Deorbit-Richtung hoch", 0.0, e.pointing_rad, 0.0, 0.0},
+        {"Deorbit-Richtung tief", 0.0, -e.pointing_rad, 0.0, 0.0},
+        {"Deorbit-Richtung links", 0.0, 0.0, e.pointing_rad, 0.0},
+        {"Deorbit-Richtung rechts", 0.0, 0.0, -e.pointing_rad, 0.0},
+        {"Zündung früh", 0.0, 0.0, 0.0, -e.timing_s},
+        {"Zündung spät", 0.0, 0.0, 0.0, e.timing_s},
+    };
+    const auto with_burn_dispersions = [&](time::Epoch t, double dv, const Shot& nominal) {
+        EntryReachCheck check = parameters.reach_check;
+        for (const BurnError& error : burn_errors) {
+            if (error.magnitude == 0.0 && error.pitch_rad == 0.0 && error.yaw_rad == 0.0 && error.time_s == 0.0) continue;
+            const Shot dispersed = shooter.interface_of(t, dv, error);
+            EntryDispersion d;
+            d.name = error.name;
+            d.has_state = true;
+            if (dispersed.valid) {
+                d.position_itrf_m = dispersed.position_itrf_m;
+                d.velocity_itrf_mps = dispersed.velocity_itrf_mps;
+                d.flight_path_rad = dispersed.flight_path_rad - nominal.flight_path_rad;
+                d.speed_mps = dispersed.speed_mps - nominal.speed_mps;
+            } else {  // never reaches the interface (skips over it): the nominal interface, judged by the nominal
+                d.position_itrf_m = nominal.position_itrf_m;
+                d.velocity_itrf_mps = nominal.velocity_itrf_mps;
+            }
+            if (debug) {
+                std::printf("[deorbit]   %s: entry %+.0f s, gamma %+.4f deg, speed %+.2f m/s\n", error.name,
+                            dispersed.entry_epoch - nominal.entry_epoch, d.flight_path_rad / constants::deg_to_rad,
+                            d.speed_mps);
+            }
+            check.dispersions.push_back(d);
+        }
+        return check;
+    };
     struct Candidate {
         time::Epoch t;
         double dv = 0.0;
@@ -285,6 +350,16 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         const EntryReachAssessment& reach = c.reach;
         plan.dispersion_robust = robust;
         plan.reach_limiting_case = robust ? "" : reach.limiting_case;
+        plan.dispersed_cases = reach.cases - 1;
+        plan.dispersed_cases_flying = reach.cases_flying - (reach.nominal_flies ? 1 : 0);
+        if (!robust) {
+            char note[200];
+            std::snprintf(note, sizeof note,
+                          "Kein Überflug fliegt alle Streuungen: Überflug mit %d von %d Streufällen gewählt (nicht: %s)",
+                          plan.dispersed_cases_flying, plan.dispersed_cases, plan.reach_limiting_case.c_str());
+            plan.dispersion_note = note;
+            std::printf("[deorbit] %s\n", note);  // not silent: the mission log
+        }
         plan.crossrange_reach_m = reach.reach_m;
         plan.reversal_speed_mps = reach.reversal_speed_mps;
         plan.entry_peak_heat_rate_w_m2 = reach.peak_heat_rate_w_m2;
@@ -425,6 +500,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         double aim_rad = parameters.entry_flight_path_rad;
         EntryReachAssessment reach;
         bool converged = false;
+        std::optional<Candidate> best;  // of the aims: the most cases flying with the nominal (the first of those)
         for (int step = 0; step <= 2; ++step) {
             converged = converge(aim_rad);
             if (!converged) break;
@@ -432,29 +508,31 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             entry.position_itrf_m = shot.position_itrf_m;
             entry.velocity_itrf_mps = shot.velocity_itrf_mps;
             reach = assess_entry_reach(shooter.model(), entry, parameters.nominal_bank_rad, target, parameters.gate_height_m,
-                                       parameters.reach_check);
+                                       with_burn_dispersions(t, dv, shot));
             if (debug) {
                 std::printf("[deorbit]   crossrange %.1f km, reach %.1f km%s%s, %d reversals (last at %.0f m/s), hand-over "
                             "%.0f s, terminal miss %.0f m; peaks %.0f kW/m2 %.2f g %.1f kPa (cases up to %.0f kW/m2 %.2f g "
                             "%.1f kPa)%s\n",
                             shot.crossrange_m / 1000.0, reach.reach_m / 1000.0, reach.bracketed ? "" : " - not flyable: ",
-                            reach.bracketed ? "" : reach.limiting_case, reach.reversals, reach.reversal_speed_mps,
+                            reach.bracketed ? "" : reach.limiting_case.c_str(), reach.reversals, reach.reversal_speed_mps,
                             reach.handover_time_s, reach.terminal_miss_m, reach.peak_heat_rate_w_m2 / 1000.0,
                             reach.peak_load_g, reach.peak_dynamic_pressure_pa / 1000.0,
                             reach.worst_peak_heat_rate_w_m2 / 1000.0, reach.worst_peak_load_g,
                             reach.worst_peak_dynamic_pressure_pa / 1000.0,
                             reach.within_corridor ? "" : " - outside the corridor");
             }
+            if (reach.nominal_flies && (!best || reach.cases_flying > best->reach.cases_flying)) {
+                best = Candidate{t, dv, shot, reach};
+            }
             if ((reach.bracketed && reach.within_corridor) || reach.aim_direction == 0 || !(aim_step_rad > 0.0)) break;
             aim_rad += reach.aim_direction * aim_step_rad;  // < 0: steeper
             if (debug) std::printf("[deorbit]   aim %.3f deg\n", aim_rad / constants::deg_to_rad);
         }
-        if (!converged) continue;
-        if (!reach.bracketed || !reach.within_corridor) {
-            // a pass the nominal guided entry flies within the corridor, but not every dispersed interface: kept as
-            // the fallback when no pass in the window is robust to all of the campaign's dispersions
-            if (reach.nominal_flies && (!fallback || reach.cases_flying > fallback->reach.cases_flying)) {
-                fallback = Candidate{t, dv, shot, reach};  // the most robust (the earliest of those)
+        if (!converged || !reach.bracketed || !reach.within_corridor) {
+            // a pass the nominal guided entry flies within the corridor, but not every dispersed entry: its best aim
+            // kept as the fallback when no pass in the window is robust to all dispersions
+            if (best && (!fallback || best->reach.cases_flying > fallback->reach.cases_flying)) {
+                fallback = best;  // the most robust (the earliest of those)
             }
             continue;
         }

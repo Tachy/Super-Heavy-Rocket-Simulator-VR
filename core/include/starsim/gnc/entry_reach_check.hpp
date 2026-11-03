@@ -4,31 +4,37 @@
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/math/constants.hpp"
 
+#include <string>
 #include <vector>
 
 namespace starsim::gnc {
 
-// One dispersed entry interface: offsets from the planned entry and the aerodynamics / mass against the model.
+// One dispersed entry: the interface (a state - a deorbit burn error propagated to it -, or offsets from the planned
+// entry) and the aerodynamics / mass against the model.
 struct EntryDispersion {
+    std::string name;  // German (UI: DeorbitPlan::reach_limiting_case)
+    bool has_state = false;  // the interface below (Earth-fixed); the offsets then only describe it (the planner's aim)
+    math::Vec3 position_itrf_m, velocity_itrf_mps;
     double flight_path_rad = 0.0;  // > 0: shallower
     double speed_mps = 0.0;
     double range_m = 0.0;          // > 0: the interface further from the target (more range to fly)
     double cross_m = 0.0;          // > 0: the interface displaced to the right of the path
-    double aero_factor = 1.0;      // lift and drag
-    double mass_factor = 1.0;
+    double aero_factor = 1.0;      // lift and drag (the vehicle's aerodynamics, or the air's density: both act alike)
+    double mass_factor = 1.0;      // known onboard (the vehicle's mass)
 };
 
-// [E] The dispersed cases the campaigns fly, drawn as they draw them (same generator, seeds and order):
-//  - the ship's entry guidance campaign (core/tests/test_entry_guidance_campaign.cpp, 11 cases): flight-path angle
-//    +-0.2 deg, speed +-40 m/s, start range +-300 km, +-60 km across, crossflow and flap tables +-10 % (the crossflow
-//    factor scales lift and drag together, as that table scales the normal force; the entry mass is known onboard);
-//  (a capsule: none yet, see entry_reach_check). Not single-axis extremes, which no campaign flies: those refused every
-//  ship pass beyond ~200 km and every Crew Dragon pass (planner plan Task 7 fix round 2).
-std::vector<EntryDispersion> ship_entry_campaign_dispersions();
+// [E] The air and aerodynamics the entry guidance must absorb at the planned interface: lift and drag together
+// +-`aero_fraction` (the ship's entry guidance campaign flies its crossflow table +-10 %, the capsule campaign its truth
+// aerodynamics +-10 %; a density error scales both alike), each side alone; and a capsule's mass +-`mass_fraction`
+// (capsule campaign: +-3 %, the RCS tank; known onboard). The deorbit burn's own errors are propagated to the interface
+// by the planner (DeorbitParameters::burn_dispersion).
+std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double mass_fraction = 0.0);
+inline constexpr double entry_aero_dispersion_fraction = 0.10;
+inline constexpr double capsule_mass_dispersion_fraction = 0.03;
 
 // What the deorbit planner checks a pass's entry against: the onboard entry guidance itself (its corrector, reversal
-// rules, hand-over and corridor), flown ahead from the entry interface, and the entry-interface dispersions it is
-// flown against in the campaigns.
+// rules, hand-over and corridor), flown ahead from the entry interface, and the dispersed entries it must fly too (the
+// air; the deorbit planner adds its burn's errors propagated to the interface).
 struct EntryReachCheck {
     EntryGuidanceParameters guidance;   // the onboard guidance's parameters (entry_reach_check)
     config::HeatShieldConfig limits;    // heat rate and load limits (the crew's when lower); 0: not judged
@@ -36,14 +42,18 @@ struct EntryReachCheck {
     // A capsule (no terminal phase): the gate's horizontal miss allowed - the splashdown zone's radius (the session sets
     // it); 0: the guidance's reversal deadband.
     double gate_tolerance_m = 0.0;
-    // The dispersed entry interfaces the guidance must fly as well (default: the ship's entry guidance campaign; a
-    // capsule: none, entry_reach_check), and the flight-path dispersion's size (the planner's aim step).
-    std::vector<EntryDispersion> dispersions = ship_entry_campaign_dispersions();
+    // The dispersed entries the guidance must fly as well: the air (entry_air_dispersions); the deorbit planner adds its
+    // burn errors propagated to the interface. The flight-path step of the planner's aim search (its half).
+    std::vector<EntryDispersion> dispersions = entry_air_dispersions(entry_aero_dispersion_fraction);
     double flight_path_dispersion_rad = 0.2 * constants::deg_to_rad;
     // [E] The fly-ahead's corrector cycle (the guidance's: cycle_s, 2 s): a reversal is still timed within its cycle;
     // the bank magnitude is re-solved every 10 s instead of 2 s (planner plan Task 7 fix round 2: phases 0/90/180/270,
     // planned against flown peaks in the report).
     double cycle_s = 10.0;
+    // [E] The terminal steering's cycle flown ahead (the guidance's: terminal_cycle_s, 0.5 s; its step limit scaled to
+    // the same steering rate). At 10 s near-identical entries (a 0.0004 deg burn-pointing case) handed over 1-8 km
+    // across and the gate verdict flipped between them (planner plan Task 7 fix round 3).
+    double terminal_cycle_s = 2.0;
     double step_s = 2.0;  // predictor step (as the planner's shots)
     bool measure_reach = true;  // EntryReachAssessment::reach_m by flying moved targets (two waves of 8 flights)
 };
@@ -56,9 +66,10 @@ EntryReachCheck entry_reach_check(const EntryGuidanceParameters& parameters, boo
 struct EntryReachAssessment {
     bool bracketed = false;        // every case (nominal and dispersed) flies to the target (assess_entry_reach)
     bool within_corridor = false;  // every case's flown peaks stay within the vehicle's limits
-    const char* limiting_case = "nominal";  // the first case that does not fly
+    std::string limiting_case = "nominal";  // the first case that does not fly
     bool nominal_flies = false;             // the nominal guided entry flies (gate, terminal, its corridor)
-    int cases_flying = 0;                   // of the nominal and the dispersed cases
+    int cases = 0;                          // the nominal and the dispersed cases
+    int cases_flying = 0;                   // of them
     // The nominal flies but only dispersed cases of one energy side fail (shallower + faster against the dispersions'
     // sizes): -1 the energy-high side (aim steeper), +1 the energy-low side (aim shallower); 0 otherwise.
     int aim_direction = 0;
@@ -88,14 +99,14 @@ struct EntryReachAssessment {
 // Checks the entry from the entry-interface state `entry` (Earth-fixed, bank ignored) by flying the onboard entry
 // guidance ahead in its own predictor: entry_corrector_cycle every EntryReachCheck::cycle_s (the bank magnitude re-solved
 // for the range - raised after a late reversal as in flight -, the reversal timed by its rule), the bank rate-limited
-// between, the hand-over at the terminal Mach number once no reversal rolls (terminal_mach_latest at the latest), then
-// the terminal steering's reach to the gate from there (its Levenberg-Marquardt step on the miss, without the nose
-// sector). A case flies when it reaches the gate, the terminal steering nulls the miss from the hand-over
+// between, the hand-over at the terminal Mach number once no reversal rolls (terminal_mach_latest at the latest:
+// entry_terminal_handover), then the terminal steering flown ahead to the gate from there (its Levenberg-Marquardt step,
+// entry_terminal_steering_step, every terminal_cycle_s, without the nose sector). A case flies when it reaches the gate, the terminal steering nulls the miss from the hand-over
 // (corrector_tolerance_m; a capsule: the gate missed by at most the reversal deadband) - range the corridor cut-back or a
 // saturated bank gave up shows there - and its flown peaks stay within the vehicle's limits (heat rate and load of the
 // heat shield / crew, the guidance's dynamic-pressure limit; the guidance itself cuts back at constraint_fraction). Every
-// dispersed case (EntryReachCheck::dispersions) flies on its own (its model is the guidance's: the scale factors
-// converged), all at once on worker threads. `bank_rad`: the planner's shot bank (the warm start and the mean crossrange).
+// dispersed case (EntryReachCheck::dispersions) flies on its own (the onboard model starts nominal and learns the
+// truth's aero scale at the guidance's filter gain), on a pool of hardware-concurrency worker threads. `bank_rad`: the planner's shot bank (the warm start and the mean crossrange).
 EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const EntryPredictorState& entry, double bank_rad,
                                         const EntryTarget& target, double gate_height_m, const EntryReachCheck& check);
 

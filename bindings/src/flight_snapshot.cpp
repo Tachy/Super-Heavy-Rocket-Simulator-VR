@@ -406,6 +406,10 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
         r["burn_in_s"] = plan->node.epoch - session.epoch();
         r["entry_in_s"] = plan->entry_interface_epoch - session.epoch();
         r["crossrange_km"] = plan->crossrange_m / 1000.0;
+        r["crossrange_reach_km"] = plan->crossrange_reach_m / 1000.0;
+        // false: no pass flew every dispersed entry; the pass with the most dispersed cases flying was taken
+        r["dispersion_robust"] = plan->dispersion_robust;
+        r["dispersion_note"] = godot::String::utf8(plan->dispersion_note.c_str());
         d["return"] = r;
     }
     if (session.capsule_return_step() != sim::CapsuleReturnStep::None) {

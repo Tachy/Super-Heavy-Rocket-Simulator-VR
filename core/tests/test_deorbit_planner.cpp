@@ -102,8 +102,12 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
     REQUIRE(p.feasible);
     CHECK(std::abs(p.entry_flight_path_rad + 1.0 * deg) < 0.02 * deg);
     CHECK(std::abs(p.downrange_error_m) < 2000.0);
-    // within the ship's reach (planner plan Task 7 fix round 2: the guidance flown ahead with the entry campaign's
-    // dispersed interfaces, ~180-240 km at the Starbase passes; the one-sign half span ~650 km bounds it)
+    // within the ship's reach (planner plan Task 7 fix round 3: the guidance flown ahead from the nominal interface,
+    // the deorbit burn's errors propagated to it - 8 cases - and the air +-10 % - 2; the one-sign half span ~650 km
+    // bounds it)
+    CHECK(p.dispersed_cases == 10);
+    CHECK(p.dispersion_robust);
+    CHECK(p.dispersion_note.empty());
     CHECK(p.crossrange_reach_m > 150e3);
     CHECK(p.crossrange_reach_m < 650e3);
     CHECK(std::abs(p.crossrange_m) <= p.crossrange_reach_m);

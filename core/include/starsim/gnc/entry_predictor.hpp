@@ -61,13 +61,14 @@ struct EntryPredictorModel {
     // lift swept during the up to ~25 s turn - gate overshoots of 0.4-0.8 km, b4 campaign).
     double nose_turn_rate_radps = 3.0 * constants::deg_to_rad;
     double nose_turned_rad = 5.0 * constants::deg_to_rad;
-    // The turn ends this angle inside the sector's nearest edge (nose_turn_steering; at most at the nose direction): the
-    // lift direction the guidance flies lags the turn by its attitude ramp - the commanded attitude starts the turn at
-    // rest and gains rate at the slew acceleration a, so it trails a lift direction turning at w by w^2 / (2 a)
-    // (nose_turn_lag_rad) - and the miss that lag leaves wants a correction about as far beyond the turn's end. On
-    // the edge that correction pointed out of the sector: pinned there from 10.4 to 4.7 km, 152 m across at the gate
-    // (planner plan Task 7, ship return phase 90). Set by EntryGuidance from its parameters; 0: on the edge.
-    double nose_turn_inset_rad = 0.0;
+    // The turn ends inside the sector's nearest edge by the lag of the flown lift direction at the turn's end
+    // (nose_turn_end_steering; at most at the nose direction): the commanded attitude starts the turn at rest and gains
+    // rate at the slew acceleration a up to the slew rate, so it trails a lift direction turning at w
+    // (nose_turn_lag_rad), and the miss that lag leaves wants a correction about as far beyond the turn's end. On the
+    // edge that correction pointed out of the sector: pinned there from 10.4 to 4.7 km, 152 m across at the gate
+    // (planner plan Task 7, ship return phase 90). Set by EntryGuidance from its parameters; 0: no ramp (on the edge).
+    double nose_slew_acceleration_radps2 = 0.0;
+    double nose_slew_rate_radps = 0.0;
     double nose_sector_at(double height_above_gate_m) const {
         const double f = std::clamp(height_above_gate_m / nose_sector_wide_height_m, 0.0, 1.0);
         return nose_sector_rad + f * (nose_sector_wide_rad - nose_sector_rad);
@@ -208,13 +209,21 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
 // e1 cos(sigma) - e2 sin(sigma).
 void steering_basis(const math::Vec3& up, const math::Vec3& u, math::Vec3& e1, math::Vec3& e2);
 
-// How far the lift direction the guidance flies trails a nose turn at `turn_rate_radps` when the commanded attitude
-// starts it from rest at `slew_acceleration_radps2` (EntryGuidanceParameters::terminal_nose_*): w^2 / (2 a), the lag
-// when the attitude's rate has caught up with the turn's; 0 without a ramp.
-double nose_turn_lag_rad(double turn_rate_radps, double slew_acceleration_radps2);
+// How far the lift direction the guidance flies trails a nose turn through `turn_rad` at `turn_rate_radps` (w) when the
+// commanded attitude starts it from rest at `slew_acceleration_radps2` (a) up to `slew_rate_radps` (s;
+// EntryGuidanceParameters::terminal_nose_*), at the turn's end T = turn / w: w T less the attitude's angle a T^2 / 2
+// (s^2 / (2 a) + s (T - s / a) once at s), at least 0; at most w^2 / (2 a), when the attitude's rate catches up with the
+// turn's. 0 without a ramp.
+double nose_turn_lag_rad(double turn_rate_radps, double slew_acceleration_radps2, double slew_rate_radps, double turn_rad);
 
 // The steering vector (components along e1, e2) of the horizontal direction `nose`, `fraction` long.
 math::Vec3 nose_steering(const math::Vec3& nose, const math::Vec3& e1, const math::Vec3& e2, double fraction);
+
+// Where the nose turn ends when the basis freezes, by the model's turn (EntryPredictorModel::nose_*): the direction of p
+// turned into the sector of +-`sector_rad`, inside its nearest edge by the lag at the turn's end (nose_turn_lag_rad of
+// the turn to there - solved by fixed-point iteration), at most to the nose direction; at the nose fraction.
+math::Vec3 nose_turn_end_steering(const EntryPredictorModel& m, const math::Vec3& p, const math::Vec3& nose,
+                                  const math::Vec3& e1, const math::Vec3& e2, double sector_rad);
 
 // Where the nose turn ends when the basis freezes: the direction of p turned into the sector (its nearest edge), at
 // `fraction` (the nose direction itself when p is zero).

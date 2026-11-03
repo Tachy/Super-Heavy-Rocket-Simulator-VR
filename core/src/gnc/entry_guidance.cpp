@@ -25,7 +25,6 @@ constexpr int constraint_bisections = 6;
 // short) - the boundary is the nominal model's.
 constexpr double capture_margin_rad = 8.0 * constants::deg_to_rad;
 
-constexpr double max_terminal_prediction_s = 900.0;
 // [E] the flaps' rest trim is taken at the Mach number of this height (where the entry's air starts to load them)
 constexpr double flap_rest_reference_height_m = 80000.0;
 constexpr double levenberg_marquardt_damping = 1.0e-3;            // relative to the trace of J^T J
@@ -49,6 +48,37 @@ double measured_bank_rad(const Vec3& axis, const Vec3& air_velocity, const Vec3&
 
 }  // namespace
 
+double EntryLateralState::fly_pending_reversal(int& roll_direction) {
+    pending_reversal_in_s = -1.0;
+    roll_direction = 0;  // a new roll (a magnitude change while waiting set a direction)
+    sign = -sign;
+    time_since_reversal_s = 0.0;
+    reversal_rolling = true;
+    bank_magnitude_rad = pending_reversal_bank_rad;
+    return sign * bank_magnitude_rad;
+}
+
+bool entry_terminal_handover(const EntryGuidanceParameters& parameters, double height_m, double mach,
+                             double bank_command_rad, double bank_rad) {
+    if (!parameters.terminal_phase || height_m >= entry_terminal_max_height_m) return false;
+    const bool settled = std::abs(std::remainder(bank_command_rad - bank_rad, 2.0 * constants::pi)) < entry_settled_bank_rad;
+    return (mach < parameters.terminal_mach && settled) || mach < parameters.terminal_mach_latest;
+}
+
+Vec3 entry_terminal_steering_step(const Vec3& steering, double j11, double j12, double j21, double j22, const Vec3& z0,
+                                  double max_step) {
+    const double a11 = j11 * j11 + j21 * j21, a12 = j11 * j12 + j21 * j22, a22 = j12 * j12 + j22 * j22;
+    const double lambda = levenberg_marquardt_damping * (a11 + a22);
+    const double b1 = -(j11 * z0.x + j21 * z0.y), b2 = -(j12 * z0.x + j22 * z0.y);
+    const double det = (a11 + lambda) * (a22 + lambda) - a12 * a12;
+    if (!(det > 0.0)) return steering;
+    Vec3 step{((a22 + lambda) * b1 - a12 * b2) / det, ((a11 + lambda) * b2 - a12 * b1) / det, 0.0};
+    if (norm(step) > max_step) step = step * (max_step / norm(step));
+    Vec3 p = steering + step;
+    if (norm(p) > 1.0) p = p / norm(p);
+    return p;
+}
+
 const char* to_string(EntryPhase phase) {
     switch (phase) {
         case EntryPhase::Entry: return "Eintritt";
@@ -66,7 +96,7 @@ EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedul
     model_.aero = EntryAeroTable(ship.vehicle(), schedule);
     model_.radiative = std::move(radiative);
     configure_model(ship);
-    bank_magnitude_rad_ = parameters_.initial_bank_rad;
+    lateral_.bank_magnitude_rad = parameters_.initial_bank_rad;
 }
 
 EntryGuidance::EntryGuidance(const vehicle::FlightBody& capsule, EntryTarget target, EntryGuidanceParameters parameters)
@@ -98,8 +128,9 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
     model_.nose_turned_rad = parameters_.terminal_nose_turned_rad;
     model_.nose_min_fraction = parameters_.terminal_nose_min_fraction;
     model_.nose_max_fraction = parameters_.terminal_nose_max_fraction;
-    model_.nose_turn_inset_rad =
-        nose_turn_lag_rad(parameters_.terminal_nose_turn_rate_radps, parameters_.terminal_nose_slew_acceleration_radps2);
+    model_.nose_slew_acceleration_radps2 = parameters_.terminal_nose_slew_acceleration_radps2;
+    model_.nose_slew_rate_radps = std::max(parameters_.terminal_slew_rate_radps,
+                                           parameters_.terminal_nose_slew_factor * parameters_.terminal_nose_turn_rate_radps);
     if (!parameters_.predictor_j2) model_.j2 = 0.0;
     model_.carry_skips = parameters_.carry_skips;
     model_.final_bank_rad = parameters_.final_bank_rad;
@@ -375,7 +406,7 @@ EntrySolution entry_corrector_cycle(const EntryCorrector& corrector, const Entry
 
 void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_itrf, const Vec3& v_itrf) {
     model_.mass_kg = body.vehicle().mass_properties().mass_kg;
-    time_since_reversal_s_ += parameters_.cycle_s;
+    lateral_.time_since_reversal_s += parameters_.cycle_s;
     EntryPredictorState state{r_itrf, v_itrf, bank_rad_, roll_direction_};
     state.bank_rate_radps = bank_rate_radps_;
     if (aerocapture()) {
@@ -388,17 +419,9 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     const Vec3 t = math::normalized(target_.position_itrf_m);
     const Vec3 d = t - up * dot(t, up);
     const double heading_error = -std::atan2(dot(cross(v_h, d), up), dot(v_h, d));  // > 0: target to the right
-    EntryLateralState lateral{sign_, bank_magnitude_rad_, time_since_reversal_s_, reversal_rolling_, pending_reversal_in_s_,
-                              pending_reversal_bank_rad_};
     const Solution s = entry_corrector_cycle(corrector(), model_, state, body.heat_load_j_m2(), bank_target_rad_,
-                                             parameters_.cycle_s, lateral, roll_direction_);
-    sign_ = lateral.sign;
-    bank_magnitude_rad_ = lateral.bank_magnitude_rad;
-    time_since_reversal_s_ = lateral.time_since_reversal_s;
-    reversal_rolling_ = lateral.reversal_rolling;
-    pending_reversal_in_s_ = lateral.pending_reversal_in_s;
-    pending_reversal_bank_rad_ = lateral.pending_reversal_bank_rad;
-    bank_target_rad_ = sign_ * s.bank_rad;
+                                             parameters_.cycle_s, lateral_, roll_direction_);
+    bank_target_rad_ = lateral_.sign * s.bank_rad;
     if (std::getenv("STARSIM_DEBUG_ENTRY")) {
         std::printf("[entry] v %.0f bank %+.1f%s (flown %+.1f, h %.1f km, scales %.2f/%.2f) downrange %.1f km cross %.1f km "
                     "peak %.2f g q %.1f kPa (%d predictions)\n",
@@ -420,26 +443,26 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
 // predicted exit inclination is off by more than the deadband and the reversed sign's solution ends closer to it.
 void EntryGuidance::aerocapture_cycle(const vehicle::FlightBody& body, const EntryPredictorState& state) {
     const bool steer_plane = parameters_.target_inclination_rad >= 0.0;
-    if (sign_ == 0.0) {
-        sign_ = 1.0;
+    if (lateral_.sign == 0.0) {
+        lateral_.sign = 1.0;
         if (steer_plane) {
-            const Solution left = solve(model_, state, body.heat_load_j_m2(), 1.0, bank_magnitude_rad_);
-            const Solution right = solve(model_, state, body.heat_load_j_m2(), -1.0, bank_magnitude_rad_);
-            sign_ = inclination_error(left.prediction) <= inclination_error(right.prediction) ? 1.0 : -1.0;
+            const Solution left = solve(model_, state, body.heat_load_j_m2(), 1.0, lateral_.bank_magnitude_rad);
+            const Solution right = solve(model_, state, body.heat_load_j_m2(), -1.0, lateral_.bank_magnitude_rad);
+            lateral_.sign = inclination_error(left.prediction) <= inclination_error(right.prediction) ? 1.0 : -1.0;
         }
     }
-    Solution s = solve(model_, state, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-    if (steer_plane && time_since_reversal_s_ >= parameters_.min_reversal_interval_s &&
+    Solution s = solve(model_, state, body.heat_load_j_m2(), lateral_.sign, lateral_.bank_magnitude_rad);
+    if (steer_plane && lateral_.time_since_reversal_s >= parameters_.min_reversal_interval_s &&
         inclination_error(s.prediction) > parameters_.inclination_deadband_rad) {
-        const Solution reversed = solve(model_, state, body.heat_load_j_m2(), -sign_, s.bank_rad);
+        const Solution reversed = solve(model_, state, body.heat_load_j_m2(), -lateral_.sign, s.bank_rad);
         if (inclination_error(reversed.prediction) < inclination_error(s.prediction)) {
-            sign_ = -sign_;
-            time_since_reversal_s_ = 0.0;
+            lateral_.sign = -lateral_.sign;
+            lateral_.time_since_reversal_s = 0.0;
             s = reversed;
         }
     }
-    bank_magnitude_rad_ = s.bank_rad;
-    bank_target_rad_ = sign_ * s.bank_rad;
+    lateral_.bank_magnitude_rad = s.bank_rad;
+    bank_target_rad_ = lateral_.sign * s.bank_rad;
     if (std::getenv("STARSIM_DEBUG_ENTRY")) {
         std::printf("[aerocapture] v %.0f bank %+.1f%s (flown %+.1f, h %.1f km) exit apoapsis %.1f km periapsis %.1f km "
                     "incl %.2f deg peak %.0f kW/m2 %.2f g %.1f kPa (%d predictions)\n",
@@ -467,7 +490,7 @@ Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r
     state.basis_e2 = terminal_e2_;
     state.lift_direction = terminal_lift_direction_;
     const EntryPrediction p = predict_entry(m, state, 0.0, target_, parameters_.gate_height_m, 0.0,
-                                            parameters_.terminal_prediction_step_s, max_terminal_prediction_s);
+                                            parameters_.terminal_prediction_step_s, entry_terminal_max_prediction_s);
     if (time_to_go_s) *time_to_go_s = p.time_s;
     if (gate_velocity_itrf_mps) *gate_velocity_itrf_mps = p.end_velocity_itrf_mps;
     const Vec3 end = p.end_position_itrf_m - target_.position_itrf_m;
@@ -502,9 +525,8 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
         if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < model_.steering_freeze_gamma_rad) {
             terminal_basis_frozen_ = true;
             if (norm(target_.nose_direction_itrf) > 0.0 && terminal_started_) {  // as the prediction (nose_fraction)
-                terminal_steering_ = nose_turn_steering(terminal_steering_, target_.nose_direction_itrf, terminal_e1_,
-                                                        terminal_e2_, std::max(0.0, sector_rad - model_.nose_turn_inset_rad),
-                                                        model_.nose_fraction);
+                terminal_steering_ = nose_turn_end_steering(model_, terminal_steering_, target_.nose_direction_itrf,
+                                                            terminal_e1_, terminal_e2_, sector_rad);
             }
         }
     }
@@ -550,13 +572,7 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
         // 2x2 Jacobian of the miss (east, north) over the steering (e1, e2)
         const double j11 = dot(z1 - z0, east) / d1s, j12 = dot(z2 - z0, east) / d2s;
         const double j21 = dot(z1 - z0, north) / d1s, j22 = dot(z2 - z0, north) / d2s;
-        // Levenberg-Marquardt step on the miss (least squares when the gate is out of reach at the steering limit),
-        // limited in size: (J^T J + lambda I) dp = -J^T z.
         const double me = dot(z0, east), mn = dot(z0, north);
-        const double a11 = j11 * j11 + j21 * j21, a12 = j11 * j12 + j21 * j22, a22 = j12 * j12 + j22 * j22;
-        const double lambda = levenberg_marquardt_damping * (a11 + a22);
-        const double b1 = -(j11 * me + j21 * mn), b2 = -(j12 * me + j22 * mn);
-        const double det = (a11 + lambda) * (a22 + lambda) - a12 * a12;
         const bool nose_sector = terminal_basis_frozen_ && norm(target_.nose_direction_itrf) > 0.0;
         if (nose_sector && !nose_turning_) {
             // In the nose sector the step is taken in its own coordinates (fraction r, angle t off the nose heading h),
@@ -583,11 +599,8 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
                                -sector_rad, sector_rad);
                 p = Vec3{r * std::cos(h + t), r * std::sin(h + t), 0.0};
             }
-        } else if (det > 0.0 && !nose_turning_) {
-            Vec3 step{((a22 + lambda) * b1 - a12 * b2) / det, ((a11 + lambda) * b2 - a12 * b1) / det, 0.0};
-            if (norm(step) > parameters_.terminal_max_step) step = step * (parameters_.terminal_max_step / norm(step));
-            p = p + step;
-            if (norm(p) > 1.0) p = p / norm(p);
+        } else if (!nose_turning_) {
+            p = entry_terminal_steering_step(p, j11, j12, j21, j22, Vec3{me, mn, 0.0}, parameters_.terminal_max_step);
         }
         terminal_steering_ = p;
         if (std::getenv("STARSIM_DEBUG_ENTRY")) {  // diagnostics
@@ -738,9 +751,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
     }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from
     // the bank flown), at the latest at the late hand-over Mach number.
-    const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < entry_settled_bank_rad;
-    if (phase_ == EntryPhase::Entry && parameters_.terminal_phase && height < entry_terminal_max_height_m &&
-        ((mach < parameters_.terminal_mach && bank_settled) || mach < parameters_.terminal_mach_latest)) {
+    if (phase_ == EntryPhase::Entry && entry_terminal_handover(parameters_, height, mach, bank_target_rad_, bank_rad_)) {
         phase_ = EntryPhase::Terminal;
         handed_over_ = true;
     }
@@ -753,17 +764,9 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             if (!capsule_) flown_bank_rad_ = measured_bank_rad(axis_gcrf, v_rel_gcrf, up_gcrf);
             entry_cycle(body, r_itrf, v_itrf);
         }
-        if (pending_reversal_in_s_ >= 0.0 && phase_ == EntryPhase::Entry) {  // a reversal timed within the cycle
-            pending_reversal_in_s_ -= dt;
-            if (pending_reversal_in_s_ <= 0.0) {
-                pending_reversal_in_s_ = -1.0;
-                roll_direction_ = 0;  // a new roll (a magnitude change while waiting set a direction)
-                sign_ = -sign_;
-                time_since_reversal_s_ = 0.0;
-                reversal_rolling_ = true;
-                bank_magnitude_rad_ = pending_reversal_bank_rad_;
-                bank_target_rad_ = sign_ * bank_magnitude_rad_;
-            }
+        if (lateral_.pending_reversal_in_s >= 0.0 && phase_ == EntryPhase::Entry) {  // a reversal timed within the cycle
+            lateral_.pending_reversal_in_s -= dt;
+            if (lateral_.pending_reversal_in_s <= 0.0) bank_target_rad_ = lateral_.fly_pending_reversal(roll_direction_);
         }
         const double max_change = model_.bank_rate_at(mach) * dt;
         const double previous_bank_rad = bank_rad_;

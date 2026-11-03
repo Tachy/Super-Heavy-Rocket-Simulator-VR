@@ -30,12 +30,16 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   `FlightBody::crew_load_warning`) x 0.9). Nominal entry -2.0 deg at 120 km with 30 deg of bank [E]. Splashdown zone
   `config/splashdown_zones.toml` (`pacific_san_diego` 32.6 N 117.8 W [E], radius 2 km - user 2026-10-14). Deorbit:
   `gnc::plan_deorbit` with `DeorbitParameters::burn_thrust_n` and `entry_mass_kg`; the pass's crossrange within the
-  capsule's reach [D] (`gnc::assess_entry_reach`, planner plan Task 7 fix round 2: the capsule guidance flown ahead
+  capsule's reach [D] (`gnc::assess_entry_reach`, planner plan Task 7 fix round 3: the capsule guidance flown ahead
   from the entry interface - its corrector, reversals down to 500 m/s, the 0.9 x 4 g / 25 kPa cut-back, the bank held
-  below 500 m/s - must bring the gate within the zone's radius; nominal entry only, see `ship-entry-return.md`: the
-  fly-ahead of the capsule campaign's case 1 misses by 11-38 km where the 6-DoF campaign reaches 0.71 km - open).
-  L/D 0.19 at trim, 30 deg: reach 58-64 km; the flown return keeps its 14.8 km pass at 37.1 h (gate 1.11 km, planned
-  3.49 g = flown 3.49 g), ISS undock return -14.0 km, timeline case 14.7 km. Entry angle and bank come from the return mission's
+  below 500 m/s - must bring the gate within the zone's radius, nominal and dispersed: the Draco burn's errors +-1 % /
+  0.5 deg / +-1 s propagated to the interface, aero +-10 %, mass +-3 %; see `ship-entry-return.md`). From the capsule
+  campaign's case-1 interface the fly-ahead agrees with the 6-DoF flight (gate 0.50 against 0.55 km, 3.60 g both;
+  test "Capsule entry campaign case flown ahead by the deorbit planner's check"). L/D 0.19 at trim, 30 deg: only the
+  ~15 km pass is in reach (73-247 km passes fail nominally), and it does not fly the burn -1 % case (the interface
+  ~10 s on, the capsule at its load cut-back: gate 8-21 km off): the planner takes it as the fallback (11 of 12 cases,
+  `dispersion_robust` false, logged). The flown return keeps its 14.8 km pass at 37.1 h (gate 1.11 km, 3.49 g), ISS
+  undock return flies (fallback, 11 of 12). Entry angle and bank come from the return mission's
   `[deorbit]` (M); `plan_capsule_return()` without parameters (bindings, game) flies the capsule's
   `[stage.recovery] return_mission` (`crew_dragon_return`). `FlightSession::plan_capsule_return`
   (steps `CapsuleReturnStep`): Draco burn along +x (4 side Dracos, 1.6 kN), trunk jettison 120 s after it, nose cone

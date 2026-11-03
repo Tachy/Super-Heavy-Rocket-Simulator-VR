@@ -4,11 +4,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <future>
+#include <atomic>
 #include <iterator>
 #include <limits>
-#include <random>
-#include <string_view>
+#include <string>
+#include <thread>
 #include <vector>
 
 #include "starsim/environment/atmosphere.hpp"
@@ -20,7 +20,6 @@ using math::Vec3;
 
 namespace {
 
-constexpr double max_terminal_prediction_s = 900.0;  // as EntryGuidance::terminal_miss
 constexpr int reach_grid = 8;                        // reach search: two waves of this many targets (span / 64)
 
 // Rodrigues: `x` turned by `angle` about the unit axis `k`.
@@ -29,7 +28,7 @@ Vec3 rotated(const Vec3& x, const Vec3& k, double angle) {
 }
 
 struct Case {
-    const char* name;
+    std::string name;
     EntryPredictorModel model;   // the truth (the dispersed aerodynamics and mass)
     double aero_factor = 1.0;    // truth over the onboard model's aerodynamics (EntryGuidance learns it: scale factors)
     EntryPredictorState entry;
@@ -59,7 +58,7 @@ void take_peaks(Guided& g, const EntryPrediction& p) {
 }
 
 // The terminal steering flown ahead from the hand-over state (EntryGuidance::terminal without the nose sector): each
-// cycle one Levenberg-Marquardt step on the predicted horizontal miss at the gate (its step limit), then the steering
+// cycle one Levenberg-Marquardt step (entry_terminal_steering_step) on the predicted horizontal miss at the gate (its step limit), then the steering
 // held for the cycle; from the entry's bank at the schedule's fraction. The horizontal miss where the flight reaches the
 // gate.
 double terminal_miss_m(const EntryGuidanceParameters& p, const EntryPredictorModel& model, const EntryPredictorState& from,
@@ -79,12 +78,14 @@ double terminal_miss_m(const EntryGuidanceParameters& p, const EntryPredictorMod
         EntryPredictorState q = s;
         q.steering = steering;
         const auto pr = predict_entry(model, q, 0.0, free, p.gate_height_m, 0.0, p.terminal_prediction_step_s,
-                                      max_terminal_prediction_s);
+                                      entry_terminal_max_prediction_s);
         reached = pr.reached_gate;
         return horizontal(pr);
     };
+    // the guidance steps every terminal_cycle_s by at most terminal_max_step: the same steering rate over this cycle
+    const double max_step = p.terminal_max_step * std::max(1.0, cycle_s / p.terminal_cycle_s);
     Vec3 steering = Vec3{std::cos(bank_rad), -std::sin(bank_rad), 0.0} * EntryPredictorModel::schedule_fraction;
-    for (double t = 0.0; t < max_terminal_prediction_s; t += cycle_s) {
+    for (double t = 0.0; t < entry_terminal_max_prediction_s; t += cycle_s) {
         bool reached = false;
         const Vec3 z0 = miss(steering, reached);
         if (!reached) return std::numeric_limits<double>::infinity();
@@ -93,19 +94,9 @@ double terminal_miss_m(const EntryGuidanceParameters& p, const EntryPredictorMod
         bool r1 = false, r2 = false;
         const Vec3 z1 = miss(steering + Vec3{d1, 0.0, 0.0}, r1);
         const Vec3 z2 = miss(steering + Vec3{0.0, d2, 0.0}, r2);
-        if (r1 && r2) {
-            const double j11 = (z1.x - z0.x) / d1, j12 = (z2.x - z0.x) / d2;
-            const double j21 = (z1.y - z0.y) / d1, j22 = (z2.y - z0.y) / d2;
-            const double a11 = j11 * j11 + j21 * j21, a12 = j11 * j12 + j21 * j22, a22 = j12 * j12 + j22 * j22;
-            const double lambda = 1.0e-3 * (a11 + a22);  // as EntryGuidance::terminal
-            const double b1 = -(j11 * z0.x + j21 * z0.y), b2 = -(j12 * z0.x + j22 * z0.y);
-            const double det = (a11 + lambda) * (a22 + lambda) - a12 * a12;
-            if (det > 0.0) {
-                Vec3 step{((a22 + lambda) * b1 - a12 * b2) / det, ((a11 + lambda) * b2 - a12 * b1) / det, 0.0};
-                if (norm(step) > p.terminal_max_step) step = step * (p.terminal_max_step / norm(step));
-                steering = steering + step;
-                if (norm(steering) > 1.0) steering = steering / norm(steering);
-            }
+        if (r1 && r2) {  // EntryGuidance::terminal's step, its limit over the guidance's cycles within this one
+            steering = entry_terminal_steering_step(steering, (z1.x - z0.x) / d1, (z2.x - z0.x) / d2, (z1.y - z0.y) / d1,
+                                                    (z2.y - z0.y) / d2, z0, max_step);
         }
         EntryPredictorState q = s;
         q.steering = steering;
@@ -181,15 +172,7 @@ Guided fly_guided(const EntryReachCheck& check, const EntryGuidanceParameters& p
         s.bank_rad = segment.end_bank_rad;
         s.bank_rate_radps = segment.end_bank_rate_radps;
         t += segment.time_s;
-        if (pending) {  // the reversal timed within the cycle has flown (EntryGuidance::update)
-            lateral.pending_reversal_in_s = -1.0;
-            lateral.sign = -lateral.sign;
-            lateral.time_since_reversal_s = 0.0;
-            lateral.reversal_rolling = true;
-            lateral.bank_magnitude_rad = lateral.pending_reversal_bank_rad;
-            bank_target = lateral.sign * lateral.bank_magnitude_rad;
-            roll_direction = 0;
-        }
+        if (pending) bank_target = lateral.fly_pending_reversal(roll_direction);  // flown within the cycle
         if (segment.reached_gate || segment.exited || segment.time_s <= 0.0) {  // a capsule: the gate in the entry
             g.reached_gate = segment.reached_gate;
             g.handover_crossrange_m = segment.crossrange_m;
@@ -203,12 +186,7 @@ Guided fly_guided(const EntryReachCheck& check, const EntryGuidanceParameters& p
             const double height = frames::fixed_to_geodetic(s.position_itrf_m).height_m;
             const double sound = atmosphere.at(height).speed_of_sound_mps;
             const double mach = sound > 0.0 ? norm(s.velocity_itrf_mps) / sound : 0.0;
-            const bool settled =
-                std::abs(std::remainder(bank_target - s.bank_rad, 2.0 * constants::pi)) < entry_settled_bank_rad;
-            if (height < entry_terminal_max_height_m &&
-                ((mach < p.terminal_mach && settled) || mach < p.terminal_mach_latest)) {
-                break;
-            }
+            if (entry_terminal_handover(p, height, mach, bank_target, s.bank_rad)) break;
         }
     }
     if (!ended) {
@@ -221,7 +199,7 @@ Guided fly_guided(const EntryReachCheck& check, const EntryGuidanceParameters& p
         g.reached_gate = to_gate.reached_gate;
         g.handover_crossrange_m = to_gate.crossrange_m;
         if (p.terminal_phase && g.reached_gate) {
-            g.terminal_miss_m = terminal_miss_m(p, onboard, s, bank_target, target, check.cycle_s);
+            g.terminal_miss_m = terminal_miss_m(p, onboard, s, bank_target, target, check.terminal_cycle_s);
             g.terminal_ok = g.terminal_miss_m < p.corrector_tolerance_m;
         }
     }
@@ -233,44 +211,46 @@ Guided fly_guided(const EntryReachCheck& check, const EntryGuidanceParameters& p
     return g;
 }
 
-// Flies case i to target i, all at once (one thread each; the predictor is pure); `trace_case`: the case whose cycles
-// are printed.
+// Flies case i to target i on a fixed pool of worker threads (hardware concurrency, at most one per flight; the
+// predictor is pure); `trace_case`: the case whose cycles are printed.
 std::vector<Guided> fly_all(const EntryReachCheck& check, const EntryGuidanceParameters& p, const std::vector<Case>& cases,
                             double warm_bank_rad, const std::vector<EntryTarget>& targets, const char* trace_case) {
-    std::vector<std::future<Guided>> flights;
-    flights.reserve(targets.size());
-    for (size_t i = 0; i < targets.size(); ++i) {
-        const Case& c = cases[i];
-        const EntryTarget& target = targets[i];
-        const bool debug = trace_case != nullptr && std::string_view(trace_case) == c.name;
-        flights.push_back(std::async(std::launch::async, [&check, &p, &c, warm_bank_rad, &target, debug] {
-            return fly_guided(check, p, c, warm_bank_rad, target, debug);
-        }));
-    }
-    std::vector<Guided> flown;
-    flown.reserve(flights.size());
-    for (auto& f : flights) flown.push_back(f.get());
+    std::vector<Guided> flown(targets.size());
+    std::atomic<size_t> next{0};
+    const auto work = [&] {
+        for (size_t i = next++; i < targets.size(); i = next++) {
+            const bool debug = trace_case != nullptr && cases[i].name == trace_case;
+            flown[i] = fly_guided(check, p, cases[i], warm_bank_rad, targets[i], debug);
+        }
+    };
+    const size_t hardware = std::max(1u, std::thread::hardware_concurrency());
+    std::vector<std::thread> workers;
+    for (size_t k = 1; k < std::min(hardware, targets.size()); ++k) workers.emplace_back(work);
+    work();  // the calling thread is one of them
+    for (auto& w : workers) w.join();
     return flown;
 }
 
 }  // namespace
 
-std::vector<EntryDispersion> ship_entry_campaign_dispersions() {
-    // as "Entry guidance brings the ship to the Starbase flip gate from dispersed entries": one generator, seven draws a
-    // case (the propellant and the flap factor drawn but not used here: the mass is known onboard, the flaps trim)
-    std::mt19937 rng(20261013);
-    std::uniform_real_distribution<double> u(-1.0, 1.0);
+std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double mass_fraction) {
     std::vector<EntryDispersion> cases;
-    for (int i = 0; i < 11; ++i) {
+    char name[64];
+    for (const double sign : {-1.0, 1.0}) {
         EntryDispersion d;
-        d.flight_path_rad = 0.2 * u(rng) * constants::deg_to_rad;  // the campaign's -1 + 0.2 u deg (u > 0: shallower)
-        d.speed_mps = 40.0 * u(rng);
-        d.range_m = 300000.0 * u(rng);
-        d.cross_m = 60000.0 * u(rng);
-        (void)u(rng);  // propellant
-        d.aero_factor = 1.0 + 0.1 * u(rng);  // crossflow
-        (void)u(rng);  // flap
+        std::snprintf(name, sizeof name, "Luft/Aerodynamik %+.0f %%", sign * 100.0 * aero_fraction);
+        d.name = name;
+        d.aero_factor = 1.0 + sign * aero_fraction;
         cases.push_back(d);
+    }
+    if (mass_fraction > 0.0) {
+        for (const double sign : {-1.0, 1.0}) {
+            EntryDispersion d;
+            std::snprintf(name, sizeof name, "Masse %+.0f %%", sign * 100.0 * mass_fraction);
+            d.name = name;
+            d.mass_factor = 1.0 + sign * mass_fraction;
+            cases.push_back(d);
+        }
     }
     return cases;
 }
@@ -279,14 +259,9 @@ EntryReachCheck entry_reach_check(const EntryGuidanceParameters& p, bool capsule
     EntryReachCheck check;
     check.guidance = p;
     check.capsule = capsule;
-    if (capsule) {
-        // The capsule's campaign (core/tests/test_capsule_entry.cpp: entry angle +-0.1 deg, mass +-3 %, truth aero
-        // +-10 %) is not flown ahead: the fly-ahead of its corridor cut-back disagrees with the 6-DoF campaign - case 1
-        // (0.099 deg shallower, mass +2.6 %, aero -7.4 %) misses the 2 km zone by 11-38 km flown ahead (cut back at 0.9 x
-        // 4 g or 25 kPa from the interface on), but reaches the gate 0.71 km off in the campaign (peak 3.60 g). Open
-        // (planner plan Task 7 fix round 2); the nominal entry is checked.
-        check.dispersions.clear();
-        check.flight_path_dispersion_rad = 0.1 * constants::deg_to_rad;
+    if (capsule) {  // the capsule campaign's (core/tests/test_capsule_entry.cpp): truth aero +-10 %, mass +-3 %
+        check.dispersions = entry_air_dispersions(entry_aero_dispersion_fraction, capsule_mass_dispersion_fraction);
+        check.flight_path_dispersion_rad = 0.1 * constants::deg_to_rad;  // its entry angle +-0.1 deg
     }
     return check;
 }
@@ -319,9 +294,6 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
     const double half_span_m = 0.5 * std::abs(ends[0] - ends[1]);
 
     // the cases: nominal, then each dispersed entry interface of the campaign
-    static const char* const names[] = {"case 1", "case 2", "case 3",  "case 4",  "case 5",  "case 6",
-                                        "case 7", "case 8", "case 9",  "case 10", "case 11", "case 12",
-                                        "case 13", "case 14", "case 15", "case 16"};
     std::vector<Case> cases{{"nominal", model, 1.0, entry}};
     const Vec3 up = math::normalized(entry.position_itrf_m);
     const double speed = norm(entry.velocity_itrf_mps);
@@ -331,17 +303,21 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
     const Vec3 track = math::normalized(cross(up, cross(u, up)));  // horizontal, along the motion
     const Vec3 normal = math::normalized(cross(entry.position_itrf_m, entry.velocity_itrf_mps));
     const double radius = norm(entry.position_itrf_m);
-    for (size_t i = 0; i < check.dispersions.size() && i < std::size(names); ++i) {
-        const EntryDispersion& d = check.dispersions[i];
-        Case c{names[i], model, 1.0, entry};
-        const double down = -d.flight_path_rad;  // > 0: steeper
-        c.entry.velocity_itrf_mps = (u * std::cos(down) + down_normal * std::sin(down)) * (speed + d.speed_mps);
-        const double back = -d.range_m / radius;  // the interface further back along the path
-        c.entry.position_itrf_m = rotated(c.entry.position_itrf_m, normal, back);
-        c.entry.velocity_itrf_mps = rotated(c.entry.velocity_itrf_mps, normal, back);
-        const double side = d.cross_m / radius;  // to the right of the path
-        c.entry.position_itrf_m = rotated(c.entry.position_itrf_m, track, side);
-        c.entry.velocity_itrf_mps = rotated(c.entry.velocity_itrf_mps, track, side);
+    for (const EntryDispersion& d : check.dispersions) {
+        Case c{d.name, model, 1.0, entry};
+        if (d.has_state) {
+            c.entry.position_itrf_m = d.position_itrf_m;
+            c.entry.velocity_itrf_mps = d.velocity_itrf_mps;
+        } else {
+            const double down = -d.flight_path_rad;  // > 0: steeper
+            c.entry.velocity_itrf_mps = (u * std::cos(down) + down_normal * std::sin(down)) * (speed + d.speed_mps);
+            const double back = -d.range_m / radius;  // the interface further back along the path
+            c.entry.position_itrf_m = rotated(c.entry.position_itrf_m, normal, back);
+            c.entry.velocity_itrf_mps = rotated(c.entry.velocity_itrf_mps, normal, back);
+            const double side = d.cross_m / radius;  // to the right of the path
+            c.entry.position_itrf_m = rotated(c.entry.position_itrf_m, track, side);
+            c.entry.velocity_itrf_mps = rotated(c.entry.velocity_itrf_mps, track, side);
+        }
         c.model.lift_scale *= d.aero_factor;
         c.model.drag_scale *= d.aero_factor;
         c.model.mass_kg *= d.mass_factor;  // known onboard (the vehicle's mass)
@@ -366,10 +342,10 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
     for (size_t i = 0; i < flown.size(); ++i) {
         const Guided& g = flown[i];
         if (debug) {
-            std::printf("[reach] %-12s flies %d (gate %d miss %.0f m, terminal %.0f m, corridor %d, %d constrained): "
+            std::printf("[reach] %-24s flies %d (gate %d miss %.0f m, terminal %.0f m, corridor %d, %d constrained): "
                         "hand-over cross %.1f km after %.0f s, %d reversals (last %.0f s at %.0f m/s), peaks %.0f kW/m2 "
                         "%.2f g %.1f kPa\n",
-                        cases[i].name, g.flies, g.reached_gate, g.gate_miss_m, g.terminal_miss_m, g.within_corridor,
+                        cases[i].name.c_str(), g.flies, g.reached_gate, g.gate_miss_m, g.terminal_miss_m, g.within_corridor,
                         g.constrained_cycles,
                         g.handover_crossrange_m / 1000.0, g.handover_time_s, g.reversals, g.reversal_time_s,
                         g.reversal_speed_mps, g.peak_heat_rate_w_m2 / 1000.0, g.peak_load_g,
@@ -382,22 +358,27 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
         if (!g.flies && all_fly) result.limiting_case = cases[i].name;
         all_fly = all_fly && g.flies;
         result.cases_flying += g.flies ? 1 : 0;
+        ++result.cases;
     }
     result.within_corridor = all_inside;
     result.bracketed = all_fly;
-    if (!all_fly && nominal.flies) {  // which energy side fails: shallower and faster against the dispersions' sizes
+    if (!all_fly && nominal.flies) {
+        // which energy side fails: shallower, faster, less drag and heavier (more range) against the dispersions' sizes
         bool high_fails = false, low_fails = false;
-        double gamma_size = 0.0, speed_size = 0.0;
+        double gamma_size = 0.0, speed_size = 0.0, aero_size = 0.0, mass_size = 0.0;
         for (const auto& d : check.dispersions) {
             gamma_size = std::max(gamma_size, std::abs(d.flight_path_rad));
             speed_size = std::max(speed_size, std::abs(d.speed_mps));
+            aero_size = std::max(aero_size, std::abs(d.aero_factor - 1.0));
+            mass_size = std::max(mass_size, std::abs(d.mass_factor - 1.0));
         }
+        const auto part = [](double x, double size) { return size > 0.0 ? x / size : 0.0; };
         for (size_t i = 1; i < flown.size(); ++i) {
             if (flown[i].flies) continue;
             const EntryDispersion& d = check.dispersions[i - 1];
-            const double energy = (gamma_size > 0.0 ? d.flight_path_rad / gamma_size : 0.0) +
-                                  (speed_size > 0.0 ? d.speed_mps / speed_size : 0.0);
-            (energy > 0.0 ? high_fails : low_fails) = true;
+            const double energy = part(d.flight_path_rad, gamma_size) + part(d.speed_mps, speed_size) +
+                                  part(1.0 - d.aero_factor, aero_size) + part(d.mass_factor - 1.0, mass_size);
+            if (energy != 0.0) (energy > 0.0 ? high_fails : low_fails) = true;
         }
         result.aim_direction = high_fails && !low_fails ? -1 : low_fails && !high_fails ? 1 : 0;
     }

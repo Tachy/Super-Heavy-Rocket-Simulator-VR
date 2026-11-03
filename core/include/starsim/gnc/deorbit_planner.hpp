@@ -13,16 +13,29 @@
 
 namespace starsim::gnc {
 
+// The deorbit burn's execution errors the planner propagates to the entry interface (each alone, both signs; the
+// entry guidance must fly every resulting interface, assess_entry_reach):
+//  - magnitude +-1 % and pointing 0.5 deg [E]: the ship return campaign's execution error
+//    (core/tests/test_ship_return_mission.cpp, dispersed_cases) - in the pitch plane and across it;
+//  - ignition timing +-1 s [E]: the engine's start-up transient shifts the impulse's centre (the executor ignites on
+//    the scheduled tick; the cutoff is closed-loop on the velocity, its residual is in the magnitude).
+struct DeorbitBurnDispersion {
+    double magnitude_fraction = 0.01;
+    double pointing_rad = 0.5 * constants::deg_to_rad;
+    double timing_s = 1.0;
+};
+
 struct DeorbitParameters {
     double entry_interface_height_m = 120000.0;                         // b2's entry interface
     double entry_flight_path_rad = -1.0 * constants::deg_to_rad;        // [E] b2's nominal (campaign +-0.2 deg)
     // [E] the plan flies this bank (both signs averaged: reversals), so that the entry guidance has range to spare
     // either way (b2 campaign: nominal ~45-50 deg at 7,500 km).
     double nominal_bank_rad = 50.0 * constants::deg_to_rad;
-    // A pass is taken when its entry passes assess_entry_reach (the guidance's reversal window to the hand-over, the
-    // dispersion reserve, the corridor; planner plan Task 7). The session fills it from its onboard guidance
-    // (entry_reach_check); the defaults are the ship guidance's rules without corridor limits.
+    // A pass is taken when its entry passes assess_entry_reach (the onboard guidance flown ahead, nominal and dispersed,
+    // the corridor; planner plan Task 7). The session fills it from its onboard guidance (entry_reach_check); the
+    // defaults are the ship guidance's rules without corridor limits. Its dispersions (the air) get the burn's added.
     EntryReachCheck reach_check;
+    DeorbitBurnDispersion burn_dispersion;
     double search_window_s = 2.0 * 86400.0;
     double lead_s = 600.0;                 // earliest burn after planning (turn to the burn attitude)
     double gate_height_m = 800.0;          // as EntryGuidanceParameters
@@ -61,12 +74,15 @@ struct DeorbitPlan {
     double propellant_kg = 0.0;           // for the burn (rocket equation)
     double boil_off_kg = 0.0;             // boiled off until the burn (boil_off_kgps; the session: flown ahead)
     bool short_of_reserve = false;        // not feasible only because the landing reserve would be cut (plan complete)
-    // The pass flies for the nominal entry and every dispersed interface of the campaign (assess_entry_reach); false:
-    // no pass in the window did; of those whose nominal guided entry flies within the corridor the one with the most
-    // dispersed cases flying (the earliest of them) was taken, and
-    // reach_limiting_case names the first dispersed case it does not fly.
+    // The pass flies for the nominal entry and every dispersed one (the burn's errors at the interface, the air:
+    // assess_entry_reach); false: no pass in the window did; of those whose nominal guided entry flies within the
+    // corridor the one with the most dispersed cases flying (the earliest of them) was taken, reach_limiting_case
+    // (German) names the first dispersed case it does not fly, and dispersion_note says so (German, for the UI).
     bool dispersion_robust = true;
     std::string reach_limiting_case;
+    int dispersed_cases = 0;          // checked (nominal not counted)
+    int dispersed_cases_flying = 0;
+    std::string dispersion_note;      // empty when robust
     int passes_checked = 0;
 };
 

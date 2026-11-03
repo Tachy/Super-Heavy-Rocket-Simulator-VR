@@ -267,7 +267,26 @@ struct EntryLateralState {
     bool reversal_rolling = false;          // the last range-control reversal still rolls (no new one is checked)
     double pending_reversal_in_s = -1.0;    // a reversal timed within the cycle (< 0: none)
     double pending_reversal_bank_rad = 0.0;
+    // The pending reversal flies now: the sign flips to the pending bank, a new roll (`roll_direction` cleared: a
+    // magnitude change while waiting set one). Returns the new bank command (with sign).
+    double fly_pending_reversal(int& roll_direction);
 };
+
+// The hand-over from the entry to the terminal phase (EntryGuidance and its fly-ahead, assess_entry_reach): below
+// entry_terminal_max_height_m, under the terminal Mach number once no bank reversal is in progress (the bank within
+// entry_settled_bank_rad of its command), at the latest under the late hand-over Mach number.
+bool entry_terminal_handover(const EntryGuidanceParameters& parameters, double height_m, double mach,
+                             double bank_command_rad, double bank_rad);
+
+// [E] The terminal steering's prediction horizon (to the gate).
+inline constexpr double entry_terminal_max_prediction_s = 900.0;
+
+// One Levenberg-Marquardt step of the terminal steering (no nose sector): with the 2x2 Jacobian J (j11 j12; j21 j22) of
+// the horizontal miss (east, north) over the steering (e1, e2) and the miss `z0` (x: east, y: north) at `steering`,
+// solves (J^T J + lambda I) dp = -J^T z0 (least squares when the gate is out of reach), the step limited to `max_step`,
+// the steering to |p| <= 1. The steering unchanged when the system is singular.
+math::Vec3 entry_terminal_steering_step(const math::Vec3& steering, double j11, double j12, double j21, double j22,
+                                        const math::Vec3& z0, double max_step);
 
 // One entry-phase cycle of the corrector from `state` (bank flown now, its roll): the bank sign (chosen once: the one
 // ending closer across), the bank magnitude for the range, the reversal check (EntryGuidance's rules, in the header
@@ -380,12 +399,7 @@ private:
     int roll_direction_ = 0;         // profiled entry: the direction of a roll under way (bank_step_held)
     double flown_bank_rad_ = 0.0;    // diagnostics: the bank the vehicle flies (STARSIM_DEBUG_ENTRY)
     double bank_target_rad_ = 0.0;   // corrector output with sign
-    double bank_magnitude_rad_ = 0.0;
-    double sign_ = 0.0;              // 0: not chosen yet
-    double time_since_reversal_s_ = 1.0e9;
-    bool reversal_rolling_ = false;  // the last range-control reversal still rolls (no new one is checked)
-    double pending_reversal_in_s_ = -1.0;  // a reversal timed within the cycle (< 0: none)
-    double pending_reversal_bank_rad_ = 0.0;
+    EntryLateralState lateral_;      // bank sign, magnitude and reversals (entry_corrector_cycle)
     double bank_rate_radps_ = 0.0;   // the setpoint's bank rate (bank_step_smooth)
     EntryCommand command_;
     bool terminal_started_ = false;

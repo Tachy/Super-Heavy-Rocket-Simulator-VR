@@ -964,6 +964,54 @@ TEST_CASE("Capsule entry single case", "[.][dragon]") {
     CHECK(g.miss_m < 2000.0);
 }
 
+// The deorbit planner's fly-ahead (gnc::assess_entry_reach) of a campaign case from the same entry interface as the
+// 6-DoF flight: planner and flight must agree (planner plan Task 7 fix round 3, review I5).
+TEST_CASE("Capsule entry campaign case flown ahead by the deorbit planner's check", "[dragon][entry][deorbit]") {
+    test::spice_session();
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 14, 18, 0, 0.0});
+    const auto zone = config::load_splashdown_zone(STARSIM_CONFIG_DIR, "pacific_san_diego");
+    const char* seed_env = std::getenv("STARSIM_CAPSULE_SEED");
+    const int seed = seed_env ? std::atoi(seed_env) : 1;
+    const auto c = campaign_case(seed);
+    const double nominal_mass = capsule_config().stages.front().dry_mass_kg + 2100.0;
+    const auto cfg = capsule_config(2100.0 + (c.mass_factor - 1.0) * nominal_mass);
+    const vehicle::Vehicle nominal(capsule_config(), STARSIM_CONFIG_DIR);
+    const vehicle::Vehicle capsule(cfg, STARSIM_CONFIG_DIR);
+    const double azimuth = 120.0 * deg;
+    const double speed = 7500.0;
+    double offset = 0.0;
+    const double range = nominal_entry_range_m(zone, offset, azimuth, speed, -2.0 * deg, 30.0 * deg, t0, nominal);
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    session.set_splashdown_zone(zone);
+    const auto s0 = entry_interface_state(zone, range, azimuth, speed, c.gamma_rad, 30.0 * deg, t0, capsule, offset);
+    session.place_entering_capsule(cfg, s0, t0);
+    const gnc::EntryGuidance& guidance = *session.entry_guidance(0);
+    const auto t = spice_earth().fixed_to_gcrf(t0);
+    gnc::EntryPredictorState entry;
+    entry.position_itrf_m = transpose(t.rotation) * s0.position_gcrf_m;
+    entry.velocity_itrf_mps =
+        transpose(t.rotation) * (s0.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s0.position_gcrf_m));
+    gnc::EntryPredictorModel model = guidance.model();  // the capsule's mass (known onboard), nominal aerodynamics
+    auto check = gnc::entry_reach_check(guidance);
+    check.gate_tolerance_m = zone.radius_m;
+    check.measure_reach = false;
+    gnc::EntryDispersion truth;  // the flight's truth: its hull aerodynamics scaled
+    truth.name = "truth";
+    truth.aero_factor = c.aero_factor;
+    check.dispersions = {truth};
+    const auto a = gnc::assess_entry_reach(model, entry, 30.0 * deg, guidance.target(), guidance.parameters().gate_height_m,
+                                           check);
+    std::printf("[validation] capsule campaign %d flown ahead: %s (%d of 2 fly), peaks %.2f g %.1f kPa (worst %.2f g)\n",
+                seed, a.bracketed ? "flies" : "does not fly", a.cases_flying, a.peak_load_g,
+                a.peak_dynamic_pressure_pa / 1000.0, a.worst_peak_load_g);
+    CHECK(a.bracketed);  // its gate within the zone: the 6-DoF case 1 reaches it 0.55-0.71 km off (fly-ahead: 0.50 km)
+    if (seed == 1) {
+        // the 6-DoF flight of case 1 peaks at 3.60 g (the 0.9 x 4 g cut-back) and reverses at ~5.36 km/s
+        CHECK(a.worst_peak_load_g > 3.5);
+        CHECK(a.worst_peak_load_g < 3.7);
+    }
+}
+
 TEST_CASE("A finite deorbit burn ignites after the planning lead", "[dragon][deorbit]") {
     // Review (d3) I1: the lead limited the burn's centre; a ~17 min Draco burn ignites half its length earlier.
     REQUIRE(dragon_raan_rad() >= 0.0);
