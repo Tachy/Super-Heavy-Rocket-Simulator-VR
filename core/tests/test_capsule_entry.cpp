@@ -613,6 +613,7 @@ struct DragonDeorbit {
         p.gate_height_m = 5500.0;
         p.burn_thrust_n = thrust_n;
         p.reach_check = gnc::entry_reach_check(gnc::EntryGuidanceParameters::capsule(), true);  // the capsule's rules
+        p.reach_check.gate_tolerance_m = zone.radius_m;
         return p;
     }
     gnc::DeorbitPlan plan(const gnc::DeorbitParameters& p, double entry_mass_kg) {

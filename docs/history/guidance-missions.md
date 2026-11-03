@@ -691,3 +691,10 @@ Phase 90 of the ship return (a late reversal at Mach 16.6, the lift 57 deg to th
 turn) ended the turn with the miss growing to ~80 m and the correction outside the sector: the steering sat on the
 edge (bank -146.3 deg) from 10.4 to 4.7 km and reached the gate 152 m across the tower line (gate miss 155 m). The turn
 now ends half a sector inside the edge (`EntryPredictorModel::nose_turn_inset` 0.5 [E]).
+
+Planner plan Task 7 fix round 1 (superseded by fix round 2): the deorbit reach check flew one reversal at the fixed
+nominal bank (50 deg) from the entry interface with the predictor - window from reversing at once to reversing at
+the Mach 5 hand-over, less the 2 km deadband and single-axis dispersions (-0.2 deg, -40 m/s, aero +-10 %): reach
+600-615 km, planned peaks 2.3-2.6 g / 8.6-10.5 kPa. Flown, the guidance raised the bank after the late reversal
+(phase 90 at -522 km: 50 -> 88 deg, predictions 4.6-6.3 g), so the plan was not the flight. The terminal nose turn
+ended half a sector inside the edge (`nose_turn_inset` 0.5 [E]); now the derived lag w^2 / (2 a).

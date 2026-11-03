@@ -61,11 +61,13 @@ struct EntryPredictorModel {
     // lift swept during the up to ~25 s turn - gate overshoots of 0.4-0.8 km, b4 campaign).
     double nose_turn_rate_radps = 3.0 * constants::deg_to_rad;
     double nose_turned_rad = 5.0 * constants::deg_to_rad;
-    // [E] The turn ends this fraction of the sector inside its nearest edge (nose_turn_steering): on the edge the steering
-    // had room to one side only, and the turn's own error (the flown attitude lags the predicted turn) pointed out of the
-    // sector after a 90 deg turn - pinned on the edge from 10.4 to 4.7 km, 152 m across at the gate (planner plan Task 7,
-    // ship return phase 90).
-    double nose_turn_inset = 0.5;
+    // The turn ends this angle inside the sector's nearest edge (nose_turn_steering; at most at the nose direction): the
+    // lift direction the guidance flies lags the turn by its attitude ramp - the commanded attitude starts the turn at
+    // rest and gains rate at the slew acceleration a, so it trails a lift direction turning at w by w^2 / (2 a)
+    // (nose_turn_lag_rad) - and the miss that lag leaves wants a correction about as far beyond the turn's end. On
+    // the edge that correction pointed out of the sector: pinned there from 10.4 to 4.7 km, 152 m across at the gate
+    // (planner plan Task 7, ship return phase 90). Set by EntryGuidance from its parameters; 0: on the edge.
+    double nose_turn_inset_rad = 0.0;
     double nose_sector_at(double height_above_gate_m) const {
         const double f = std::clamp(height_above_gate_m / nose_sector_wide_height_m, 0.0, 1.0);
         return nose_sector_rad + f * (nose_sector_wide_rad - nose_sector_rad);
@@ -168,6 +170,10 @@ struct EntryPrediction {
     double exit_inclination_rad = 0.0;    // to the equator (ITRF z)
     int skips = 0;                        // arcs carried above the atmosphere
     double mark_time_s = -1.0;            // EntryPredictorModel::mark_mach / mark_speed_mps first passed (< 0: not)
+    // the bank at the end (a prediction stopped by max_time_s continues from here: the deorbit planner's fly-ahead)
+    double end_bank_rad = 0.0;
+    double end_bank_rate_radps = 0.0;
+    int end_roll_direction = 0;
 };
 
 // Integrates the entry of a point mass from `start` to the gate height above the target ground (classical RK4,
@@ -201,6 +207,11 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
 // (north's when the fall is nearly vertical), e2 = u x e1. A bank sigma (entry_attitude) is the lift
 // e1 cos(sigma) - e2 sin(sigma).
 void steering_basis(const math::Vec3& up, const math::Vec3& u, math::Vec3& e1, math::Vec3& e2);
+
+// How far the lift direction the guidance flies trails a nose turn at `turn_rate_radps` when the commanded attitude
+// starts it from rest at `slew_acceleration_radps2` (EntryGuidanceParameters::terminal_nose_*): w^2 / (2 a), the lag
+// when the attitude's rate has caught up with the turn's; 0 without a ramp.
+double nose_turn_lag_rad(double turn_rate_radps, double slew_acceleration_radps2);
 
 // The steering vector (components along e1, e2) of the horizontal direction `nose`, `fraction` long.
 math::Vec3 nose_steering(const math::Vec3& nose, const math::Vec3& e1, const math::Vec3& e2, double fraction);

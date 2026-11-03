@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "return_scenario.hpp"
+#include "starsim/aero/entry_heating.hpp"
 #include "starsim/config/propellant_loading.hpp"
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/math/constants.hpp"
@@ -81,6 +83,9 @@ struct ReturnRun {
     double entry_s = 0.0;  // entry interface to gate
     test::CatchRun landing;
     double propellant_kg = 0.0;
+    double peak_load_g = 0.0;  // flown, entry interface to the gate
+    double peak_dynamic_pressure_pa = 0.0;
+    double peak_heat_rate_w_m2 = 0.0;
 };
 
 // Execution error of the deorbit burn, applied when it ends: magnitude (fraction of the burn) and pointing.
@@ -118,11 +123,21 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
         if (session.epoch() == before) break;
     }
     const bool verbose = std::getenv("STARSIM_VERBOSE") != nullptr;
+    const environment::Us76Atmosphere atmosphere;
+    const double nose_radius_m = session.body(0).vehicle().stages().front().config.heat_shield.nose_radius_m;
     while (!session.body(0).impacted() && session.epoch() < interface + 3600.0) {
         const auto* entry = session.entry_guidance(0);
         if (entry && entry->phase() == gnc::EntryPhase::Gate) break;
         const double height = session.telemetry(0).altitude_m - session.launch_site().height_m;
         session.advance_to(session.epoch() + (height < 3000.0 ? 0.05 : 1.0), 400000);
+        {  // flown peaks to the gate (against the plan's: assess_entry_reach)
+            const auto tel = session.telemetry(0);
+            run.peak_load_g = std::max(run.peak_load_g, tel.sensed_acceleration_g);
+            run.peak_dynamic_pressure_pa = std::max(run.peak_dynamic_pressure_pa, tel.dynamic_pressure_pa);
+            run.peak_heat_rate_w_m2 =
+                std::max(run.peak_heat_rate_w_m2, aero::entry_heat_rate_w_m2(atmosphere.at(tel.altitude_m).density_kg_m3,
+                                                                             tel.speed_relative_mps, nose_radius_m, nullptr));
+        }
         const long elapsed = static_cast<long>(session.epoch() - interface);
         if (verbose && entry && height >= 3000.0 && (elapsed % 20 == 0 || (height < 14000.0 && elapsed % 2 == 0))) {
             const auto* s = session.entry_status(0);
@@ -159,6 +174,13 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
         run.landing = test::fly_landing(session, earth(), session.epoch(), 120.0);
     }
     run.propellant_kg = session.body(0).vehicle().propellant_kg();
+    const auto* flown_plan = session.ship_return_plan();  // the last re-plan's
+    if (flown_plan) {
+        std::printf("entry peaks: planned %.0f kW/m2 %.2f g %.1f kPa, flown %.0f kW/m2 %.2f g %.1f kPa\n",
+                flown_plan->entry_peak_heat_rate_w_m2 / 1000.0, flown_plan->entry_peak_load_g,
+                flown_plan->entry_peak_dynamic_pressure_pa / 1000.0, run.peak_heat_rate_w_m2 / 1000.0, run.peak_load_g,
+                run.peak_dynamic_pressure_pa / 1000.0);
+    }
     std::printf("return: gate %d after %.0f s from the entry interface, miss %.0f m; %s, offset %.2f m, lateral %.2f m/s, "
                 "sink %.2f m/s, %.1f t left\n",
                 run.gate, run.entry_s, run.gate_miss_m, sim::to_string(run.landing.tower_phase), run.landing.offset_m,

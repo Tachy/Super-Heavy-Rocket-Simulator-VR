@@ -84,8 +84,8 @@ public:
             if (norm(nose_) > 0.0) {  // as the guidance
                 lift_angle_ = std::atan2(steering_.y, steering_.x);  // the turn starts from the lift flown
                 steering_ = nose_turn_steering(steering_, nose_, e1_, e2_,
-                                               m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_) *
-                                                   (1.0 - m_.nose_turn_inset),
+                                               std::max(0.0, m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_) -
+                                                                 m_.nose_turn_inset_rad),
                                                m_.nose_fraction);
             }
         }
@@ -177,6 +177,10 @@ void steering_basis(const Vec3& up, const Vec3& u, Vec3& e1, Vec3& e2) {
     }
     e1 = math::normalized(e1);
     e2 = cross(u, e1);
+}
+
+double nose_turn_lag_rad(double turn_rate_radps, double slew_acceleration_radps2) {
+    return slew_acceleration_radps2 > 0.0 ? turn_rate_radps * turn_rate_radps / (2.0 * slew_acceleration_radps2) : 0.0;
 }
 
 Vec3 nose_steering(const Vec3& nose, const Vec3& e1, const Vec3& e2, double fraction) {
@@ -361,6 +365,9 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     p.end_position_itrf_m = r;
     p.end_velocity_itrf_mps = v;
     p.time_s = t;
+    p.end_bank_rad = bank;
+    p.end_bank_rate_radps = bank_rate;
+    p.end_roll_direction = roll_direction;
     // Far from the target: difference of ranges from the start (monotone in the bank; the end's unwrapped past the
     // antipode, the target's within half a turn) and the target's distance
     // from the great circle start -> end. Close to it a range difference cannot tell a target behind the end from

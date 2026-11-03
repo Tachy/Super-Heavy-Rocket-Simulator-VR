@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <vector>
 
 #include "starsim/environment/atmosphere.hpp"
@@ -270,6 +271,57 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         std::printf("[deorbit] pass prefilter %.1f km (glide reach %.1f km, %.0f s)\n", reach_bound_m / 1000.0,
                     glide_reach_m / 1000.0, glide_time_s);
     }
+    struct Candidate {
+        time::Epoch t;
+        double dv = 0.0;
+        Shot shot;
+        EntryReachAssessment reach;
+    };
+    std::optional<Candidate> fallback;
+    const auto finish = [&](const Candidate& c, bool robust) {
+        const time::Epoch t = c.t;
+        const double dv = c.dv;
+        const Shot& shot = c.shot;
+        const EntryReachAssessment& reach = c.reach;
+        plan.dispersion_robust = robust;
+        plan.reach_limiting_case = robust ? "" : reach.limiting_case;
+        plan.crossrange_reach_m = reach.reach_m;
+        plan.reversal_speed_mps = reach.reversal_speed_mps;
+        plan.entry_peak_heat_rate_w_m2 = reach.peak_heat_rate_w_m2;
+        plan.entry_peak_load_g = reach.peak_load_g;
+        plan.entry_peak_dynamic_pressure_pa = reach.peak_dynamic_pressure_pa;
+
+        plan.node = {t, -math::normalized(shooter.state_at(t).velocity_mps) * dv};
+        plan.delta_v_mps = dv;
+        plan.entry_interface_epoch = shot.entry_epoch;
+        plan.entry_flight_path_rad = shot.flight_path_rad;
+        plan.entry_speed_mps = shot.speed_mps;
+        plan.downrange_error_m = shot.downrange_m;
+        plan.crossrange_m = shot.crossrange_m;
+        plan.propellant_kg = burn_propellant(dv);
+        // The earliest pass is the best one with boil-off too: a later pass only has less left.
+        const double boiled_kg = parameters.boil_off_kgps * std::max(0.0, t - epoch);
+        plan.boil_off_kg = boiled_kg;
+        if (available_propellant_kg - boiled_kg - plan.propellant_kg < reserve_propellant_kg) {
+            char text[200];
+            if (boiled_kg > 0.0) {
+                std::snprintf(text, sizeof text,
+                              "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t, bis zum Brennvorgang "
+                              "in %.1f h verdampft %.1f t",
+                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
+                              available_propellant_kg / 1000.0, (t - epoch) / 3600.0, boiled_kg / 1000.0);
+            } else {
+                std::snprintf(text, sizeof text, "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t",
+                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
+                              available_propellant_kg / 1000.0);
+            }
+            plan.reason = text;
+            plan.short_of_reserve = true;
+            return plan;
+        }
+        plan.feasible = true;
+        return plan;
+    };
     for (size_t i = 1; i + 1 < samples.size(); ++i) {
         if (!(angle[i] < angle[i - 1] && angle[i] <= angle[i + 1])) continue;
         if (std::abs(cross_track[i]) > reach_bound_m) {
@@ -332,93 +384,83 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         // Newton on (flight-path angle at the entry interface, downrange error) in (burn epoch, delta-v).
         time::Epoch t = t_lo;
         Shot shot = s_lo;
+        const auto converge = [&](double flight_path_rad) {
+            for (int iteration = 0; iteration < 25; ++iteration) {
+                shot = shooter.shoot(t, dv);
+                if (!shot.valid) return false;
+                const double f1 = (shot.flight_path_rad - flight_path_rad) / (0.01 * constants::deg_to_rad);
+                const double f2 = shot.downrange_m / 1000.0;
+                if (debug) {
+                    std::printf("[deorbit]   it %d burn %+.1f s dv %.2f m/s: gamma %.4f deg downrange %.2f km cross %.1f km\n",
+                                iteration, t - epoch, dv, shot.flight_path_rad / constants::deg_to_rad, f2,
+                                shot.crossrange_m / 1000.0);
+                }
+                if (std::abs(f1) < 0.3 && std::abs(f2) < 0.3) return true;
+                const double dt = 2.0, ddv = 0.2;
+                const Shot st = shooter.shoot(t + dt, dv);
+                const Shot sv = shooter.shoot(t, dv + ddv);
+                if (!st.valid || !sv.valid) return false;
+                const double a11 = (st.flight_path_rad - shot.flight_path_rad) / (0.01 * constants::deg_to_rad) / dt;
+                const double a21 = (st.downrange_m - shot.downrange_m) / 1000.0 / dt;
+                const double a12 = (sv.flight_path_rad - shot.flight_path_rad) / (0.01 * constants::deg_to_rad) / ddv;
+                const double a22 = (sv.downrange_m - shot.downrange_m) / 1000.0 / ddv;
+                const double det = a11 * a22 - a12 * a21;
+                if (std::abs(det) < 1e-12) return false;
+                double step_t = -(a22 * f1 - a12 * f2) / det;
+                double step_v = -(-a21 * f1 + a11 * f2) / det;
+                step_t = std::clamp(step_t, -120.0, 120.0);
+                step_v = std::clamp(step_v, -20.0, 20.0);
+                t = std::max(t + step_t, earliest_for(dv + step_v));
+                dv = std::max(dv + step_v, 1.0);
+                shooter.set_mass(entry_mass(dv));
+            }
+            return false;
+        };
+        // The entry angle aimed: the mission's; when the guidance flies the nominal entry but not the interface
+        // dispersions of one side only (too much energy: shallower / faster; too little: steeper / slower), the aim moves
+        // away from that side in steps of half the flight-path dispersion, at most by the dispersion itself - the
+        // corridor the entry guidance can fly is not centred on the mission's angle (planner plan Task 7 fix round 2:
+        // Crew Dragon's -2.0 deg sits at the 0.9 x 4 g edge for a 0.1 deg shallower entry).
+        const double aim_step_rad = 0.5 * parameters.reach_check.flight_path_dispersion_rad;
+        double aim_rad = parameters.entry_flight_path_rad;
+        EntryReachAssessment reach;
         bool converged = false;
-        for (int iteration = 0; iteration < 25; ++iteration) {
-            shot = shooter.shoot(t, dv);
-            if (!shot.valid) break;
-            const double f1 = (shot.flight_path_rad - parameters.entry_flight_path_rad) / (0.01 * constants::deg_to_rad);
-            const double f2 = shot.downrange_m / 1000.0;
+        for (int step = 0; step <= 2; ++step) {
+            converged = converge(aim_rad);
+            if (!converged) break;
+            EntryPredictorState entry;
+            entry.position_itrf_m = shot.position_itrf_m;
+            entry.velocity_itrf_mps = shot.velocity_itrf_mps;
+            reach = assess_entry_reach(shooter.model(), entry, parameters.nominal_bank_rad, target, parameters.gate_height_m,
+                                       parameters.reach_check);
             if (debug) {
-                std::printf("[deorbit]   it %d burn %+.1f s dv %.2f m/s: gamma %.4f deg downrange %.2f km cross %.1f km\n",
-                            iteration, t - epoch, dv, shot.flight_path_rad / constants::deg_to_rad, f2,
-                            shot.crossrange_m / 1000.0);
+                std::printf("[deorbit]   crossrange %.1f km, reach %.1f km%s%s, %d reversals (last at %.0f m/s), hand-over "
+                            "%.0f s, terminal miss %.0f m; peaks %.0f kW/m2 %.2f g %.1f kPa (cases up to %.0f kW/m2 %.2f g "
+                            "%.1f kPa)%s\n",
+                            shot.crossrange_m / 1000.0, reach.reach_m / 1000.0, reach.bracketed ? "" : " - not flyable: ",
+                            reach.bracketed ? "" : reach.limiting_case, reach.reversals, reach.reversal_speed_mps,
+                            reach.handover_time_s, reach.terminal_miss_m, reach.peak_heat_rate_w_m2 / 1000.0,
+                            reach.peak_load_g, reach.peak_dynamic_pressure_pa / 1000.0,
+                            reach.worst_peak_heat_rate_w_m2 / 1000.0, reach.worst_peak_load_g,
+                            reach.worst_peak_dynamic_pressure_pa / 1000.0,
+                            reach.within_corridor ? "" : " - outside the corridor");
             }
-            if (std::abs(f1) < 0.3 && std::abs(f2) < 0.3) {
-                converged = true;
-                break;
-            }
-            const double dt = 2.0, ddv = 0.2;
-            const Shot st = shooter.shoot(t + dt, dv);
-            const Shot sv = shooter.shoot(t, dv + ddv);
-            if (!st.valid || !sv.valid) break;
-            const double a11 = (st.flight_path_rad - shot.flight_path_rad) / (0.01 * constants::deg_to_rad) / dt;
-            const double a21 = (st.downrange_m - shot.downrange_m) / 1000.0 / dt;
-            const double a12 = (sv.flight_path_rad - shot.flight_path_rad) / (0.01 * constants::deg_to_rad) / ddv;
-            const double a22 = (sv.downrange_m - shot.downrange_m) / 1000.0 / ddv;
-            const double det = a11 * a22 - a12 * a21;
-            if (std::abs(det) < 1e-12) break;
-            double step_t = -(a22 * f1 - a12 * f2) / det;
-            double step_v = -(-a21 * f1 + a11 * f2) / det;
-            step_t = std::clamp(step_t, -120.0, 120.0);
-            step_v = std::clamp(step_v, -20.0, 20.0);
-            t = std::max(t + step_t, earliest_for(dv + step_v));
-            dv = std::max(dv + step_v, 1.0);
-            shooter.set_mass(entry_mass(dv));
+            if ((reach.bracketed && reach.within_corridor) || reach.aim_direction == 0 || !(aim_step_rad > 0.0)) break;
+            aim_rad += reach.aim_direction * aim_step_rad;  // < 0: steeper
+            if (debug) std::printf("[deorbit]   aim %.3f deg\n", aim_rad / constants::deg_to_rad);
         }
         if (!converged) continue;
-        EntryPredictorState entry;
-        entry.position_itrf_m = shot.position_itrf_m;
-        entry.velocity_itrf_mps = shot.velocity_itrf_mps;
-        const auto reach = assess_entry_reach(shooter.model(), entry, parameters.nominal_bank_rad, target,
-                                              parameters.gate_height_m, parameters.reach_check);
-        if (debug) {
-            std::printf("[deorbit]   crossrange %.1f km, reach %.1f km (nominal margin %.1f km, dispersions %.1f km: %s), "
-                        "reversal at %.0f m/s, hand-over %.0f s; peaks %.0f kW/m2 %.2f g %.1f kPa%s\n",
-                        shot.crossrange_m / 1000.0, reach.reach_m / 1000.0, reach.nominal_margin_m / 1000.0,
-                        reach.dispersion_reserve_m / 1000.0, reach.limiting_case, reach.reversal_speed_mps,
-                        reach.handover_time_s,
-                        reach.peak_heat_rate_w_m2 / 1000.0, reach.peak_load_g, reach.peak_dynamic_pressure_pa / 1000.0,
-                        reach.within_corridor ? "" : " - outside the corridor");
-        }
-        if (!reach.bracketed || !reach.within_corridor) continue;
-        plan.crossrange_reach_m = reach.reach_m;
-        plan.crossrange_reserve_m = reach.dispersion_reserve_m;
-        plan.reversal_speed_mps = reach.reversal_speed_mps;
-        plan.entry_peak_heat_rate_w_m2 = reach.peak_heat_rate_w_m2;
-        plan.entry_peak_load_g = reach.peak_load_g;
-        plan.entry_peak_dynamic_pressure_pa = reach.peak_dynamic_pressure_pa;
-
-        plan.node = {t, -math::normalized(shooter.state_at(t).velocity_mps) * dv};
-        plan.delta_v_mps = dv;
-        plan.entry_interface_epoch = shot.entry_epoch;
-        plan.entry_flight_path_rad = shot.flight_path_rad;
-        plan.entry_speed_mps = shot.speed_mps;
-        plan.downrange_error_m = shot.downrange_m;
-        plan.crossrange_m = shot.crossrange_m;
-        plan.propellant_kg = burn_propellant(dv);
-        // The earliest pass is the best one with boil-off too: a later pass only has less left.
-        const double boiled_kg = parameters.boil_off_kgps * std::max(0.0, t - epoch);
-        plan.boil_off_kg = boiled_kg;
-        if (available_propellant_kg - boiled_kg - plan.propellant_kg < reserve_propellant_kg) {
-            char text[200];
-            if (boiled_kg > 0.0) {
-                std::snprintf(text, sizeof text,
-                              "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t, bis zum Brennvorgang "
-                              "in %.1f h verdampft %.1f t",
-                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
-                              available_propellant_kg / 1000.0, (t - epoch) / 3600.0, boiled_kg / 1000.0);
-            } else {
-                std::snprintf(text, sizeof text, "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t",
-                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
-                              available_propellant_kg / 1000.0);
+        if (!reach.bracketed || !reach.within_corridor) {
+            // a pass the nominal guided entry flies within the corridor, but not every dispersed interface: kept as
+            // the fallback when no pass in the window is robust to all of the campaign's dispersions
+            if (reach.nominal_flies && (!fallback || reach.cases_flying > fallback->reach.cases_flying)) {
+                fallback = Candidate{t, dv, shot, reach};  // the most robust (the earliest of those)
             }
-            plan.reason = text;
-            plan.short_of_reserve = true;
-            return plan;
+            continue;
         }
-        plan.feasible = true;
-        return plan;
+        return finish(Candidate{t, dv, shot, reach}, true);
     }
+    if (fallback) return finish(*fallback, false);
     char text[160];
     std::snprintf(text, sizeof text, "Kein Überflug des Ziels in Reichweite (%.0f h gesucht)",
                   parameters.search_window_s / 3600.0);

@@ -102,8 +102,10 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
     REQUIRE(p.feasible);
     CHECK(std::abs(p.entry_flight_path_rad + 1.0 * deg) < 0.02 * deg);
     CHECK(std::abs(p.downrange_error_m) < 2000.0);
-    // within the ship's reach (planner plan Task 7: gnc::entry_crossrange_reach_m at the 50 deg bank, ~500 km)
-    CHECK(p.crossrange_reach_m > 400e3);
+    // within the ship's reach (planner plan Task 7 fix round 2: the guidance flown ahead with the entry campaign's
+    // dispersed interfaces, ~180-240 km at the Starbase passes; the one-sign half span ~650 km bounds it)
+    CHECK(p.crossrange_reach_m > 150e3);
+    CHECK(p.crossrange_reach_m < 650e3);
     CHECK(std::abs(p.crossrange_m) <= p.crossrange_reach_m);
     CHECK(p.delta_v_mps > 40.0);
     CHECK(p.delta_v_mps < 150.0);

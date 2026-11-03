@@ -54,14 +54,19 @@ struct DeorbitPlan {
     double downrange_error_m = 0.0;       // nominal bank (> 0: overshoot)
     double crossrange_m = 0.0;            // nominal bank, both signs averaged
     double crossrange_reach_m = 0.0;      // the reach it was checked against (assess_entry_reach)
-    double crossrange_reserve_m = 0.0;    // of it, used up by the entry-interface dispersions
-    double reversal_speed_mps = 0.0;      // the planned reversal's speed (0: none planned)
+    double reversal_speed_mps = 0.0;      // the planned entry's last reversal's speed (0: none)
     double entry_peak_heat_rate_w_m2 = 0.0;    // planned entry (assess_entry_reach), against the heat shield's limit
     double entry_peak_load_g = 0.0;
     double entry_peak_dynamic_pressure_pa = 0.0;
     double propellant_kg = 0.0;           // for the burn (rocket equation)
     double boil_off_kg = 0.0;             // boiled off until the burn (boil_off_kgps; the session: flown ahead)
     bool short_of_reserve = false;        // not feasible only because the landing reserve would be cut (plan complete)
+    // The pass flies for the nominal entry and every dispersed interface of the campaign (assess_entry_reach); false:
+    // no pass in the window did; of those whose nominal guided entry flies within the corridor the one with the most
+    // dispersed cases flying (the earliest of them) was taken, and
+    // reach_limiting_case names the first dispersed case it does not fly.
+    bool dispersion_robust = true;
+    std::string reach_limiting_case;
     int passes_checked = 0;
 };
 

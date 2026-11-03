@@ -108,9 +108,9 @@ math::Vec3 ground(const math::Vec3& p) {
 
 }  // namespace
 
-// Fix round 1 of planner plan Task 7 (review I1): the planner's reach is what the guidance can fly - one reversal
-// (flown at the bank rate) that must start before the hand-over, the guidance's deadband, the entry-interface
-// dispersions - checked with the guidance's own predictor, plus the corridor of the planned entry.
+// Planner plan Task 7 fix rounds 1-2 (review I1, I3): the planner's reach is what the guidance flies - the onboard
+// corrector flown ahead from the entry interface (its bank re-solved for the range, its reversal rule, the corridor, the
+// hand-over and the terminal steering), for the nominal entry and each entry-interface dispersion.
 TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "[deorbit][entry][ship][guidance]") {
     auto model = ship_model();
     model.nose_radius_m = 1.0;  // heating predicted (the corridor check)
@@ -137,44 +137,52 @@ TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "
     const math::Vec3 side = math::normalized(plus.end_position_itrf_m - minus.end_position_itrf_m);
 
     gnc::EntryReachCheck check;  // the ship guidance's rules, the entry campaign's dispersions
-    check.max_heat_rate_w_m2 = 1.2e6;
-    check.max_load_g = 6.0;
-    check.max_dynamic_pressure_pa = 25000.0;
+    check.limits.max_heat_rate_w_m2 = 1.2e6;
+    check.limits.max_load_g = 6.0;
+    check.guidance.max_dynamic_pressure_pa = 25000.0;
     const auto centred = gnc::assess_entry_reach(model, entry, bank, {centre, 0.0}, gate_m, check);
-    std::printf("held signs end %.1f km apart; centred: reach %.1f km (nominal margin %.1f km, dispersions %.1f km: %s), "
-                "reversal at %.0f m/s, hand-over after %.0f s; peaks %.0f kW/m2 %.2f g %.1f kPa\n",
-                2.0 * half_span_m / 1000.0, centred.reach_m / 1000.0, centred.nominal_margin_m / 1000.0,
-                centred.dispersion_reserve_m / 1000.0, centred.limiting_case, centred.reversal_speed_mps,
+    std::printf("held signs end %.1f km apart; centred: reach %.1f km, %d reversals (last at %.0f m/s), hand-over after "
+                "%.0f s; peaks %.0f kW/m2 %.2f g %.1f kPa (cases up to %.2f g)\n",
+                2.0 * half_span_m / 1000.0, centred.reach_m / 1000.0, centred.reversals, centred.reversal_speed_mps,
                 centred.handover_time_s, centred.peak_heat_rate_w_m2 / 1000.0, centred.peak_load_g,
-                centred.peak_dynamic_pressure_pa / 1000.0);
-    CHECK(centred.bracketed);
+                centred.peak_dynamic_pressure_pa / 1000.0, centred.worst_peak_load_g);
+    CHECK(centred.bracketed);  // every dispersed case flies too
     CHECK(centred.within_corridor);
     CHECK(std::abs(centred.crossrange_m) < 20e3);
-    // the reversal window ends at the hand-over and the dispersions take their share: less than holding one sign to
-    // the gate, but most of it
-    CHECK(centred.reach_m < half_span_m);
-    CHECK(centred.reach_m > 0.6 * half_span_m);
-    CHECK(centred.dispersion_reserve_m > 0.0);
+    // the dispersions (the entry guidance campaign's: +-0.2 deg, +-40 m/s, +-10 % aero, +-300 km range, +-60 km across)
+    // take most of the one-sign half span: the faster / shallower entries' late reversals hit the load limit
+    CHECK(centred.reach_m < 0.5 * half_span_m);
+    CHECK(centred.reach_m > 50e3);
     // the reversal that ends on the target comes before the hand-over (Mach 5: ~1.5 km/s)
     CHECK(centred.reversal_speed_mps > 1500.0);
     CHECK(centred.peak_load_g > 1.0);
     CHECK(centred.peak_heat_rate_w_m2 > 0.0);
 
-    // targets moved across: inside the reach still flyable, beyond it not
+    // targets moved across (the nominal entry alone): the reach measured from one target is where the guidance stops
+    // flying - inside it flies, beyond it gives range up or misses
+    gnc::EntryReachCheck nominal_only = check;
+    nominal_only.dispersions.clear();
     for (const double sign : {1.0, -1.0}) {
-        const auto inside = gnc::assess_entry_reach(model, entry, bank, {ground(centre + side * (sign * (centred.reach_m - 30e3))), 0.0},
-                                                    gate_m, check);
-        const auto beyond = gnc::assess_entry_reach(model, entry, bank, {ground(centre + side * (sign * (centred.reach_m + 30e3))), 0.0},
-                                                    gate_m, check);
+        const auto measured =
+            gnc::assess_entry_reach(model, entry, bank, {ground(centre + side * (sign * 100e3)), 0.0}, gate_m, nominal_only);
+        REQUIRE(measured.bracketed);
+        nominal_only.measure_reach = false;
+        const auto inside = gnc::assess_entry_reach(
+            model, entry, bank, {ground(centre + side * (sign * (measured.reach_m - 20e3))), 0.0}, gate_m, nominal_only);
+        const auto beyond = gnc::assess_entry_reach(
+            model, entry, bank, {ground(centre + side * (sign * (measured.reach_m + 100e3))), 0.0}, gate_m, nominal_only);
+        nominal_only.measure_reach = true;
         CAPTURE(sign);
-        std::printf("side %+.0f: %.1f km of %.1f km -> %d, %.1f km of %.1f km -> %d\n", sign, inside.crossrange_m / 1000.0,
-                    inside.reach_m / 1000.0, inside.bracketed, beyond.crossrange_m / 1000.0, beyond.reach_m / 1000.0,
-                    beyond.bracketed);
+        std::printf("side %+.0f: reach %.1f km; %.1f km -> %d, %.1f km -> %d (%s)\n", sign, measured.reach_m / 1000.0,
+                    inside.crossrange_m / 1000.0, inside.bracketed, beyond.crossrange_m / 1000.0, beyond.bracketed,
+                    beyond.limiting_case);
+        CHECK(measured.reach_m < half_span_m);
+        CHECK(measured.reach_m > centred.reach_m);  // the dispersions take their share
         CHECK(inside.bracketed);
         CHECK_FALSE(beyond.bracketed);
     }
 
     // the corridor: a heat-rate limit below the planned peak refuses the entry
-    check.max_heat_rate_w_m2 = 0.5 * centred.peak_heat_rate_w_m2;
+    check.limits.max_heat_rate_w_m2 = 0.5 * centred.peak_heat_rate_w_m2;
     CHECK_FALSE(gnc::assess_entry_reach(model, entry, bank, {centre, 0.0}, gate_m, check).within_corridor);
 }

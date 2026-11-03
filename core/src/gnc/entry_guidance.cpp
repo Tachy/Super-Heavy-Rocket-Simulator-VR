@@ -24,7 +24,7 @@ constexpr int constraint_bisections = 6;
 // 2 deg (the bisection itself resolves ~2 deg) skipped out in air x1.12 / lift x1.04 (campaign seeds 4 / 11, 3,600 km
 // short) - the boundary is the nominal model's.
 constexpr double capture_margin_rad = 8.0 * constants::deg_to_rad;
-constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number is only trusted in dense air
+
 constexpr double max_terminal_prediction_s = 900.0;
 // [E] the flaps' rest trim is taken at the Mach number of this height (where the entry's air starts to load them)
 constexpr double flap_rest_reference_height_m = 80000.0;
@@ -98,6 +98,8 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
     model_.nose_turned_rad = parameters_.terminal_nose_turned_rad;
     model_.nose_min_fraction = parameters_.terminal_nose_min_fraction;
     model_.nose_max_fraction = parameters_.terminal_nose_max_fraction;
+    model_.nose_turn_inset_rad =
+        nose_turn_lag_rad(parameters_.terminal_nose_turn_rate_radps, parameters_.terminal_nose_slew_acceleration_radps2);
     if (!parameters_.predictor_j2) model_.j2 = 0.0;
     model_.carry_skips = parameters_.carry_skips;
     model_.final_bank_rad = parameters_.final_bank_rad;
@@ -105,46 +107,50 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
     belly_azimuth_rad_ = stage.config.aero.belly_azimuth_rad;
 }
 
-bool EntryGuidance::violates(const EntryPrediction& p) const {
-    const double f = parameters_.constraint_fraction;
-    if (limits_.max_heat_rate_w_m2 > 0.0 && p.peak_heat_rate_w_m2 > f * limits_.max_heat_rate_w_m2) return true;
+bool EntryCorrector::violates(const EntryPrediction& p) const {
+    const double f = parameters.constraint_fraction;
+    if (limits.max_heat_rate_w_m2 > 0.0 && p.peak_heat_rate_w_m2 > f * limits.max_heat_rate_w_m2) return true;
     // Aerocapture: a prediction that stays in is judged on the pass's heat rate only - its dive to the gate is never
     // flown (the next cycles take bank back). Task 9: the solver ended on such a bank next to the apoapsis cliff, its
     // dive "violated" the load and the cut-back exited at 3,600 km instead of 400 (as gnc::entry_bank_window).
-    if (aerocapture() && !p.exited) return false;
-    if (limits_.max_load_g > 0.0 && p.peak_load_g > f * limits_.max_load_g) return true;
-    return p.peak_dynamic_pressure_pa > parameters_.max_dynamic_pressure_pa;
+    if (parameters.aerocapture_apoapsis_m > 0.0 && !p.exited) return false;
+    if (limits.max_load_g > 0.0 && p.peak_load_g > f * limits.max_load_g) return true;
+    return p.peak_dynamic_pressure_pa > parameters.max_dynamic_pressure_pa;
 }
 
 // Entry: downrange error at the gate; a prediction that exits (not carried) or is still flying at the time limit (a long
 // carried skip) overshoots by the whole Earth's range - its end point short of the target is no undershoot.
 // Aerocapture: exit apoapsis minus the target; a prediction that stays in (reaches the gate or times out) undershoots.
-double EntryGuidance::miss(const EntryPrediction& p) const {
+double EntryCorrector::miss(const EntryPrediction& p) const {
     constexpr double overshoot_m = 2.0e7;  // [E] beyond any range: forces more bank
-    if (aerocapture()) {
+    if (parameters.aerocapture_apoapsis_m > 0.0) {
         if (p.exited) {
             return p.exit_apoapsis_height_m < 0.0 ? overshoot_m
-                                                   : p.exit_apoapsis_height_m - parameters_.aerocapture_apoapsis_m;
+                                                   : p.exit_apoapsis_height_m - parameters.aerocapture_apoapsis_m;
         }
         return -overshoot_m;
     }
     if (p.exited || !p.reached_gate) return overshoot_m;
-    if (parameters_.skip_is_overshoot && p.skips > 0) return overshoot_m;
+    if (parameters.skip_is_overshoot && p.skips > 0) return overshoot_m;
     return p.downrange_error_m;
 }
+
+bool EntryGuidance::violates(const EntryPrediction& p) const { return corrector().violates(p); }
+
+double EntryGuidance::miss(const EntryPrediction& p) const { return corrector().miss(p); }
 
 double EntryGuidance::inclination_error(const EntryPrediction& p) const {
     return p.exited ? std::abs(p.exit_inclination_rad - parameters_.target_inclination_rad) : constants::pi;
 }
 
-EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, const EntryPredictorState& state,
-                                             double heat_load_j_m2, double sign, double warm_start_rad) const {
-    Solution s;
-    const double max_bank = parameters_.max_bank_rad;
+EntrySolution EntryCorrector::solve(const EntryPredictorModel& model, const EntryPredictorState& state,
+                                    double heat_load_j_m2, double sign, double warm_start_rad) const {
+    EntrySolution s;
+    const double max_bank = parameters.max_bank_rad;
     const auto predict = [&](double magnitude) {
         ++s.predictions;
-        return predict_entry(model, state, sign * magnitude, target_, parameters_.gate_height_m,
-                             heat_load_j_m2, 1.0, parameters_.max_time_s);
+        return predict_entry(model, state, sign * magnitude, target, parameters.gate_height_m, heat_load_j_m2, step_s,
+                             parameters.max_time_s);
     };
     // f(m) = miss (downrange error or exit apoapsis error), falling with the bank magnitude m (more bank = less lift up
     // = less range / less apoapsis). Bracket from the warm start.
@@ -178,7 +184,7 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
         s.prediction = std::abs(fa) < std::abs(fb) ? pa : pb;
         int side = 0;
         for (int i = 0; i < max_illinois_iterations; ++i) {
-            if (std::abs(miss(s.prediction)) < parameters_.corrector_tolerance_m || std::abs(b - a) < converged_bank_rad) break;
+            if (std::abs(miss(s.prediction)) < parameters.corrector_tolerance_m || std::abs(b - a) < converged_bank_rad) break;
             const double c = (a * fb - b * fa) / (fb - fa);
             const EntryPrediction pc = predict(c);
             const double fc = miss(pc);
@@ -201,8 +207,8 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
     // largest bank inside the limits.
     if (violates(s.prediction)) {
         s.constrained = true;
-        const Solution solved = s;
-        if (std::getenv("STARSIM_DEBUG_ENTRY")) {  // diagnostics: which limit cuts the solved bank back
+        const EntrySolution solved = s;
+        if (debug) {  // diagnostics: which limit cuts the solved bank back
             const auto& p = s.prediction;
             std::printf("[entry]   constraint: solved %+.1f deg (miss %.1f km, gate %d, skips %d, exited %d) peak heat %.0f "
                         "kW/m2 load %.2f g q %.1f kPa\n",
@@ -231,7 +237,7 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
         // 6,200 km short); the predicted violation is the late dive of a bank held to the gate, which later cycles
         // re-solve. Fly the lowest capturing bank plus a margin instead.
         const auto captured = [](const EntryPrediction& x) { return x.reached_gate && x.skips == 0; };
-        if (parameters_.final_bank_rad >= 0.0 && captured(solved.prediction) && !captured(p_lo)) {
+        if (parameters.final_bank_rad >= 0.0 && captured(solved.prediction) && !captured(p_lo)) {
             double out = lo, in = solved.bank_rad;
             EntryPrediction p_in = solved.prediction;
             for (int i = 0; i < constraint_bisections; ++i) {
@@ -252,6 +258,121 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
     return s;
 }
 
+EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, const EntryPredictorState& state,
+                                             double heat_load_j_m2, double sign, double warm_start_rad) const {
+    return corrector().solve(model, state, heat_load_j_m2, sign, warm_start_rad);
+}
+
+EntryCorrector EntryGuidance::corrector() const {
+    return EntryCorrector{parameters_, limits_, target_, 1.0, std::getenv("STARSIM_DEBUG_ENTRY") != nullptr};
+}
+
+EntrySolution entry_corrector_cycle(const EntryCorrector& corrector, const EntryPredictorModel& model,
+                                    const EntryPredictorState& state, double heat_load_j_m2, double bank_target_rad,
+                                    double cycle_s, EntryLateralState& lateral, int& roll_direction) {
+    const EntryGuidanceParameters& parameters = corrector.parameters;
+    const bool debug = corrector.debug;
+    // Lateral: the corrector times the bank reversals. Holding the sign to the gate ends with the crossrange
+    // c_hold, reversing now with c_now; when they lie on opposite sides of the target a reversal at some time ends on
+    // it, and it is flown in the cycle that time falls into. Otherwise the sign whose prediction ends closer across
+    // is taken. The terminal phase removes what is left.
+    if (lateral.sign == 0.0) {
+        const EntrySolution left = corrector.solve(model, state, heat_load_j_m2, 1.0, lateral.bank_magnitude_rad);
+        const EntrySolution right = corrector.solve(model, state, heat_load_j_m2, -1.0, lateral.bank_magnitude_rad);
+        lateral.sign = std::abs(left.prediction.crossrange_m) <= std::abs(right.prediction.crossrange_m) ? 1.0 : -1.0;
+        if (debug) {
+            std::printf("[entry] sign: +%.1f deg%s cross %.1f km downrange %.1f km | -%.1f deg%s cross %.1f km "
+                        "downrange %.1f km\n",
+                        left.bank_rad / constants::deg_to_rad, left.constrained ? " constrained" : "",
+                        left.prediction.crossrange_m / 1000.0, left.prediction.downrange_error_m / 1000.0,
+                        right.bank_rad / constants::deg_to_rad, right.constrained ? " constrained" : "",
+                        right.prediction.crossrange_m / 1000.0, right.prediction.downrange_error_m / 1000.0);
+        }
+    }
+    EntrySolution s = corrector.solve(model, state, heat_load_j_m2, lateral.sign, lateral.bank_magnitude_rad);
+    const double speed_mps = norm(state.velocity_itrf_mps);
+    // no new reversal while the last one still rolls: below ~2 km/s a 180 deg roll takes ~60 s at the bank rate, and
+    // reversals checked every 20 s reversed again mid-roll (l5 Task 10, seed 2: 2.0, 1.5 and 1.3 km/s, the flown bank
+    // never caught up and the entry ended 38 km across). Only a reversal's roll blocks: a setpoint lagging a new bank
+    // magnitude (or the first roll from 0) is no reversal, and blocking it shifted the capsule campaign's reversals.
+    if (std::abs(std::remainder(bank_target_rad - state.bank_rad, 2.0 * constants::pi)) <= entry_settled_bank_rad) {
+        lateral.reversal_rolling = false;
+    }
+    if (speed_mps > parameters.min_reversal_speed_mps && speed_mps < parameters.max_reversal_speed_mps &&
+        lateral.time_since_reversal_s >= parameters.min_reversal_interval_s && !lateral.reversal_rolling &&
+        // the crossrange of a prediction that misses the range is no basis: a constant-bank skip entry 2,600 km short
+        // (no root until the skip arc appears) reversed on it into a skip-out (test "Guided lunar-return entry ...")
+        std::abs(s.prediction.downrange_error_m) < parameters.reversal_max_downrange_error_m) {
+        const double sign = lateral.sign;
+        EntryPredictorState now = state;
+        now.reversal_time_s = 0.0;
+        const EntrySolution reverse_now = corrector.solve(model, now, heat_load_j_m2, sign, lateral.bank_magnitude_rad);
+        // measured from each sign's aim point (sign x margin beyond the target; the sign pushes the track its way)
+        const double end_mps = parameters.lateral_margin_end_speed_mps;
+        const double margin_m =
+            parameters.lateral_margin_m *
+            std::pow(std::max(0.0, speed_mps - end_mps) / (parameters.lateral_margin_speed_mps - end_mps), 3.0);
+        const double c_hold = s.prediction.crossrange_m - sign * margin_m;
+        const double c_now = reverse_now.prediction.crossrange_m + sign * margin_m;
+        bool reverse = false;
+        if ((c_hold > 0.0) != (c_now > 0.0)) {
+            // The reversal time that ends on the target lies between now and never: it has come when a reversal
+            // one cycle from now would already end on the side of holding the sign.
+            EntryPredictorState next = state;
+            next.reversal_time_s = cycle_s;
+            const EntrySolution reverse_next = corrector.solve(model, next, heat_load_j_m2, sign, lateral.bank_magnitude_rad);
+            const double c_next = reverse_next.prediction.crossrange_m + sign * margin_m;
+            // ... and only if reversing now ends closer across than holding: late in a capsule's entry the crossrange
+            // moves fast with the reversal time, and a reversal one cycle early overshot (d4 campaign: -2.1 km held,
+            // +5.9 km reversed at 536 m/s, then held from 500 m/s: 5.8 km off the zone).
+            reverse = (c_next > 0.0) == (c_hold > 0.0) && std::abs(c_now) < std::abs(c_hold);
+            if (reverse) {
+                // ... at the time within the cycle where it ends on the target (the crossrange is nearly linear in
+                // the reversal time): at ~5 km/s it moves > 5 km per second of reversal time, and reversing on the
+                // cycle's edge ended up to 11 km across (l5 Task 10, direct seed 20 with the rate feedforward)
+                const double f = std::clamp(c_now / (c_now - c_next), 0.0, 1.0);
+                lateral.pending_reversal_in_s = f * cycle_s;
+                lateral.pending_reversal_bank_rad = reverse_now.bank_rad + f * (reverse_next.bank_rad - reverse_now.bank_rad);
+                // the predictions fly their solved magnitude before the reversal too: held until it comes (holding
+                // the sign's own solution, 51 instead of 83 deg, ended the seed 20 reversal 10 km across again)
+                s.bank_rad = lateral.pending_reversal_bank_rad;
+                s.constrained = reverse_now.constrained || reverse_next.constrained;
+                if (debug) {
+                    std::printf("[entry]   reversal in %.2f s: next cycle %.1f km (bank %.1f%s)\n",
+                                lateral.pending_reversal_in_s, c_next / 1000.0, reverse_next.bank_rad / constants::deg_to_rad,
+                                reverse_next.constrained ? " constrained" : "");
+                }
+            }
+            if (!reverse && (c_next > 0.0) != (c_hold > 0.0)) {
+                // the bank magnitude for the reversal still to come: its time interpolated between the next cycle
+                // and the end of the prediction (the crossrange over the reversal time is nearly linear)
+                EntryPredictorState planned = state;
+                planned.reversal_time_s = cycle_s + (s.prediction.time_s - cycle_s) * c_next / (c_next - c_hold);
+                const EntrySolution at = corrector.solve(model, planned, heat_load_j_m2, sign, lateral.bank_magnitude_rad);
+                s.bank_rad = at.bank_rad;
+                s.prediction.downrange_error_m = at.prediction.downrange_error_m;
+                s.constrained = at.constrained;
+            }
+        } else if (std::abs(c_now) + parameters.reversal_crossrange_base_m < std::abs(c_hold)) {
+            reverse = true;
+        }
+        if (debug) {
+            std::printf("[entry]   reversal check: hold %.1f km, reverse now %.1f km (bank %.1f%s) -> %s\n",
+                        c_hold / 1000.0, c_now / 1000.0, reverse_now.bank_rad / constants::deg_to_rad,
+                        reverse_now.constrained ? " constrained" : "", reverse ? "reverse" : "hold");
+        }
+        if (reverse && lateral.pending_reversal_in_s < 0.0) {
+            roll_direction = 0;  // a new roll: its way round by bank_step_held's rule, not a magnitude change's
+            lateral.sign = -lateral.sign;
+            lateral.time_since_reversal_s = 0.0;
+            lateral.reversal_rolling = true;
+            s = reverse_now;
+        }
+    }
+    lateral.bank_magnitude_rad = s.bank_rad;
+    return s;
+}
+
 void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_itrf, const Vec3& v_itrf) {
     model_.mass_kg = body.vehicle().mass_properties().mass_kg;
     time_since_reversal_s_ += parameters_.cycle_s;
@@ -267,104 +388,16 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     const Vec3 t = math::normalized(target_.position_itrf_m);
     const Vec3 d = t - up * dot(t, up);
     const double heading_error = -std::atan2(dot(cross(v_h, d), up), dot(v_h, d));  // > 0: target to the right
-    // Lateral: the corrector times the bank reversals. Holding the sign to the gate ends with the crossrange
-    // c_hold, reversing now with c_now; when they lie on opposite sides of the target a reversal at some time ends on
-    // it, and it is flown in the cycle that time falls into. Otherwise the sign whose prediction ends closer across
-    // is taken. The terminal phase removes what is left.
-    if (sign_ == 0.0) {
-        const Solution left = solve(model_, state, body.heat_load_j_m2(), 1.0, bank_magnitude_rad_);
-        const Solution right = solve(model_, state, body.heat_load_j_m2(), -1.0, bank_magnitude_rad_);
-        sign_ = std::abs(left.prediction.crossrange_m) <= std::abs(right.prediction.crossrange_m) ? 1.0 : -1.0;
-        if (std::getenv("STARSIM_DEBUG_ENTRY")) {
-            std::printf("[entry] sign: +%.1f deg%s cross %.1f km downrange %.1f km | -%.1f deg%s cross %.1f km "
-                        "downrange %.1f km\n",
-                        left.bank_rad / constants::deg_to_rad, left.constrained ? " constrained" : "",
-                        left.prediction.crossrange_m / 1000.0, left.prediction.downrange_error_m / 1000.0,
-                        right.bank_rad / constants::deg_to_rad, right.constrained ? " constrained" : "",
-                        right.prediction.crossrange_m / 1000.0, right.prediction.downrange_error_m / 1000.0);
-        }
-    }
-    Solution s = solve(model_, state, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-    const double speed_mps = norm(v_itrf);
-    // no new reversal while the last one still rolls: below ~2 km/s a 180 deg roll takes ~60 s at the bank rate, and
-    // reversals checked every 20 s reversed again mid-roll (l5 Task 10, seed 2: 2.0, 1.5 and 1.3 km/s, the flown bank
-    // never caught up and the entry ended 38 km across). Only a reversal's roll blocks: a setpoint lagging a new bank
-    // magnitude (or the first roll from 0) is no reversal, and blocking it shifted the capsule campaign's reversals.
-    if (std::abs(std::remainder(bank_target_rad_ - bank_rad_, 2.0 * constants::pi)) <= entry_settled_bank_rad) {
-        reversal_rolling_ = false;
-    }
-    if (speed_mps > parameters_.min_reversal_speed_mps && speed_mps < parameters_.max_reversal_speed_mps &&
-        time_since_reversal_s_ >= parameters_.min_reversal_interval_s && !reversal_rolling_ &&
-        // the crossrange of a prediction that misses the range is no basis: a constant-bank skip entry 2,600 km short
-        // (no root until the skip arc appears) reversed on it into a skip-out (test "Guided lunar-return entry ...")
-        std::abs(s.prediction.downrange_error_m) < parameters_.reversal_max_downrange_error_m) {
-        EntryPredictorState now = state;
-        now.reversal_time_s = 0.0;
-        const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-        // measured from each sign's aim point (sign x margin beyond the target; the sign pushes the track its way)
-        const double end_mps = parameters_.lateral_margin_end_speed_mps;
-        const double margin_m =
-            parameters_.lateral_margin_m *
-            std::pow(std::max(0.0, speed_mps - end_mps) / (parameters_.lateral_margin_speed_mps - end_mps), 3.0);
-        const double c_hold = s.prediction.crossrange_m - sign_ * margin_m;
-        const double c_now = reverse_now.prediction.crossrange_m + sign_ * margin_m;
-        bool reverse = false;
-        if ((c_hold > 0.0) != (c_now > 0.0)) {
-            // The reversal time that ends on the target lies between now and never: it has come when a reversal
-            // one cycle from now would already end on the side of holding the sign.
-            EntryPredictorState next = state;
-            next.reversal_time_s = parameters_.cycle_s;
-            const Solution reverse_next = solve(model_, next, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-            const double c_next = reverse_next.prediction.crossrange_m + sign_ * margin_m;
-            // ... and only if reversing now ends closer across than holding: late in a capsule's entry the crossrange
-            // moves fast with the reversal time, and a reversal one cycle early overshot (d4 campaign: -2.1 km held,
-            // +5.9 km reversed at 536 m/s, then held from 500 m/s: 5.8 km off the zone).
-            reverse = (c_next > 0.0) == (c_hold > 0.0) && std::abs(c_now) < std::abs(c_hold);
-            if (reverse) {
-                // ... at the time within the cycle where it ends on the target (the crossrange is nearly linear in
-                // the reversal time): at ~5 km/s it moves > 5 km per second of reversal time, and reversing on the
-                // cycle's edge ended up to 11 km across (l5 Task 10, direct seed 20 with the rate feedforward)
-                const double f = std::clamp(c_now / (c_now - c_next), 0.0, 1.0);
-                pending_reversal_in_s_ = f * parameters_.cycle_s;
-                pending_reversal_bank_rad_ = reverse_now.bank_rad + f * (reverse_next.bank_rad - reverse_now.bank_rad);
-                // the predictions fly their solved magnitude before the reversal too: held until it comes (holding
-                // the sign's own solution, 51 instead of 83 deg, ended the seed 20 reversal 10 km across again)
-                s.bank_rad = pending_reversal_bank_rad_;
-                s.constrained = reverse_now.constrained || reverse_next.constrained;
-                if (std::getenv("STARSIM_DEBUG_ENTRY")) {
-                    std::printf("[entry]   reversal in %.2f s: next cycle %.1f km (bank %.1f%s)\n", pending_reversal_in_s_,
-                                c_next / 1000.0, reverse_next.bank_rad / constants::deg_to_rad,
-                                reverse_next.constrained ? " constrained" : "");
-                }
-            }
-            if (!reverse && (c_next > 0.0) != (c_hold > 0.0)) {
-                // the bank magnitude for the reversal still to come: its time interpolated between the next cycle
-                // and the end of the prediction (the crossrange over the reversal time is nearly linear)
-                EntryPredictorState planned = state;
-                planned.reversal_time_s = parameters_.cycle_s + (s.prediction.time_s - parameters_.cycle_s) *
-                                                                     c_next / (c_next - c_hold);
-                const Solution at = solve(model_, planned, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-                s.bank_rad = at.bank_rad;
-                s.prediction.downrange_error_m = at.prediction.downrange_error_m;
-                s.constrained = at.constrained;
-            }
-        } else if (std::abs(c_now) + parameters_.reversal_crossrange_base_m < std::abs(c_hold)) {
-            reverse = true;
-        }
-        if (std::getenv("STARSIM_DEBUG_ENTRY")) {
-            std::printf("[entry]   reversal check: hold %.1f km, reverse now %.1f km (bank %.1f%s) -> %s\n",
-                        c_hold / 1000.0, c_now / 1000.0, reverse_now.bank_rad / constants::deg_to_rad,
-                        reverse_now.constrained ? " constrained" : "", reverse ? "reverse" : "hold");
-        }
-        if (reverse && pending_reversal_in_s_ < 0.0) {
-            roll_direction_ = 0;  // a new roll: its way round by bank_step_held's rule, not a magnitude change's
-            sign_ = -sign_;
-            time_since_reversal_s_ = 0.0;
-            reversal_rolling_ = true;
-            s = reverse_now;
-        }
-    }
-    bank_magnitude_rad_ = s.bank_rad;
+    EntryLateralState lateral{sign_, bank_magnitude_rad_, time_since_reversal_s_, reversal_rolling_, pending_reversal_in_s_,
+                              pending_reversal_bank_rad_};
+    const Solution s = entry_corrector_cycle(corrector(), model_, state, body.heat_load_j_m2(), bank_target_rad_,
+                                             parameters_.cycle_s, lateral, roll_direction_);
+    sign_ = lateral.sign;
+    bank_magnitude_rad_ = lateral.bank_magnitude_rad;
+    time_since_reversal_s_ = lateral.time_since_reversal_s;
+    reversal_rolling_ = lateral.reversal_rolling;
+    pending_reversal_in_s_ = lateral.pending_reversal_in_s;
+    pending_reversal_bank_rad_ = lateral.pending_reversal_bank_rad;
     bank_target_rad_ = sign_ * s.bank_rad;
     if (std::getenv("STARSIM_DEBUG_ENTRY")) {
         std::printf("[entry] v %.0f bank %+.1f%s (flown %+.1f, h %.1f km, scales %.2f/%.2f) downrange %.1f km cross %.1f km "
@@ -470,7 +503,7 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
             terminal_basis_frozen_ = true;
             if (norm(target_.nose_direction_itrf) > 0.0 && terminal_started_) {  // as the prediction (nose_fraction)
                 terminal_steering_ = nose_turn_steering(terminal_steering_, target_.nose_direction_itrf, terminal_e1_,
-                                                        terminal_e2_, sector_rad * (1.0 - model_.nose_turn_inset),
+                                                        terminal_e2_, std::max(0.0, sector_rad - model_.nose_turn_inset_rad),
                                                         model_.nose_fraction);
             }
         }
@@ -700,13 +733,13 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         if (phase_ == EntryPhase::Entry && dipped_ && height > parameters_.exit_height_m) phase_ = EntryPhase::Exit;
     } else if (!given_up_ && height - target_.ground_height_m <=
                // the sink scaling only in dense air: a fast dive from space (an unflown braking burn) is no flip
-               gate_trigger_height_m(parameters_, height < terminal_max_height_m ? -dot(v_rel_gcrf, up_gcrf) : 0.0)) {
+               gate_trigger_height_m(parameters_, height < entry_terminal_max_height_m ? -dot(v_rel_gcrf, up_gcrf) : 0.0)) {
         phase_ = EntryPhase::Gate;
     }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from
     // the bank flown), at the latest at the late hand-over Mach number.
     const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < entry_settled_bank_rad;
-    if (phase_ == EntryPhase::Entry && parameters_.terminal_phase && height < terminal_max_height_m &&
+    if (phase_ == EntryPhase::Entry && parameters_.terminal_phase && height < entry_terminal_max_height_m &&
         ((mach < parameters_.terminal_mach && bank_settled) || mach < parameters_.terminal_mach_latest)) {
         phase_ = EntryPhase::Terminal;
         handed_over_ = true;

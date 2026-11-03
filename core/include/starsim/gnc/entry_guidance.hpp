@@ -231,6 +231,53 @@ struct EntryCommand {
     double exit_apoapsis_height_m = 0.0;  // aerocapture: latest prediction (< 0: hyperbolic)
 };
 
+// [E] The terminal phase's hand-over Mach number is only trusted below this height (dense air).
+inline constexpr double entry_terminal_max_height_m = 40000.0;
+
+struct EntrySolution {
+    double bank_rad = 0.0;  // magnitude
+    EntryPrediction prediction;
+    bool constrained = false;
+    int predictions = 0;
+};
+
+// The entry phase's numeric predictor-corrector without the vehicle: EntryGuidance flies it each cycle, the deorbit
+// planner flies it ahead from a pass's entry interface (assess_entry_reach) - the same rules in both.
+struct EntryCorrector {
+    const EntryGuidanceParameters& parameters;
+    const config::HeatShieldConfig& limits;  // heat rate and load (the crew's when lower)
+    const EntryTarget& target;
+    double step_s = 1.0;  // predictor step
+    bool debug = false;   // STARSIM_DEBUG_ENTRY diagnostics
+    // A prediction beyond the corridor: heat rate and load above constraint_fraction of the limits, q above its limit.
+    bool violates(const EntryPrediction& p) const;
+    // Corrector miss (> 0: too much energy left - more bank).
+    double miss(const EntryPrediction& p) const;
+    // Bank magnitude in [0, max_bank] for zero downrange error with the bank sign `sign` (+-1), the search starting at
+    // `warm_start_rad`; then the corridor constraints. A reversal planned in `state` (reversal_time_s) is flown.
+    EntrySolution solve(const EntryPredictorModel& model, const EntryPredictorState& state, double heat_load_j_m2,
+                        double sign, double warm_start_rad) const;
+};
+
+// The entry corrector's lateral state between its cycles.
+struct EntryLateralState {
+    double sign = 0.0;  // 0: not chosen yet
+    double bank_magnitude_rad = 0.0;
+    double time_since_reversal_s = 1.0e9;
+    bool reversal_rolling = false;          // the last range-control reversal still rolls (no new one is checked)
+    double pending_reversal_in_s = -1.0;    // a reversal timed within the cycle (< 0: none)
+    double pending_reversal_bank_rad = 0.0;
+};
+
+// One entry-phase cycle of the corrector from `state` (bank flown now, its roll): the bank sign (chosen once: the one
+// ending closer across), the bank magnitude for the range, the reversal check (EntryGuidance's rules, in the header
+// comment) with the next cycle `cycle_s` ahead. Updates `lateral` and, on a reversal, `roll_direction`; returns the
+// solution flown (bank magnitude; its sign is lateral.sign, a pending reversal flips it within the cycle).
+// `bank_target_rad`: the last cycle's command (a reversal still rolls until the bank is within entry_settled_bank_rad).
+EntrySolution entry_corrector_cycle(const EntryCorrector& corrector, const EntryPredictorModel& model,
+                                    const EntryPredictorState& state, double heat_load_j_m2, double bank_target_rad,
+                                    double cycle_s, EntryLateralState& lateral, int& roll_direction);
+
 // Entry guidance of the ship (onboard computer), from the measured state each cycle:
 //  Entry     - numeric predictor-corrector: the bank magnitude whose prediction ends at the target (warm-started
 //              bracket + Illinois); peaks of heat rate, load and dynamic pressure beyond their limits cut the bank
@@ -288,13 +335,8 @@ public:
         return gate_epoch_;
     }
 
-    struct Solution {
-        double bank_rad = 0.0;  // magnitude
-        EntryPrediction prediction;
-        bool constrained = false;
-        int predictions = 0;
-    };
-    // Corrector: bank magnitude in [0, max_bank] for zero downrange error with the bank sign `sign` (+-1), the
+    using Solution = EntrySolution;
+    // Corrector (EntryCorrector::solve at a 1 s step): bank magnitude in [0, max_bank] for zero downrange error with the bank sign `sign` (+-1), the
     // search starting at `warm_start_rad`; then the corridor constraints. A reversal planned in `state`
     // (reversal_time_s) is flown by the prediction.
     Solution solve(const EntryPredictorModel& model, const EntryPredictorState& state, double heat_load_j_m2,
@@ -311,6 +353,7 @@ private:
     math::Vec3 terminal_miss(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf,
                                const math::Vec3& steering, double* time_to_go_s,
                                math::Vec3* gate_velocity_itrf_mps = nullptr) const;
+    EntryCorrector corrector() const;
     bool violates(const EntryPrediction& p) const;
     // Corrector miss (> 0: too much energy left - more bank).
     double miss(const EntryPrediction& p) const;
