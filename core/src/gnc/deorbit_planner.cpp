@@ -8,6 +8,7 @@
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/entry_reach.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -74,6 +75,7 @@ struct Shot {
     double speed_mps = 0.0;
     double downrange_m = 0.0;
     double crossrange_m = 0.0;
+    double crossrange_one_sign_m[2] = {0.0, 0.0};  // at +bank and -bank held to the gate
 };
 
 class Shooter {
@@ -154,9 +156,12 @@ public:
             shot.valid = shot.valid && p.reached_gate;
             shot.downrange_m += 0.5 * p.downrange_error_m;
             shot.crossrange_m += 0.5 * p.crossrange_m;
+            shot.crossrange_one_sign_m[sign > 0.0 ? 0 : 1] = p.crossrange_m;
         }
         return shot;
     }
+
+    const EntryPredictorModel& model() const { return model_; }
 
 private:
     const std::vector<Sample>& samples_;
@@ -211,8 +216,17 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             next += parameters.sample_s;
         }
     };
+    // A drag-decayed orbit that sinks into the atmosphere within the window has no pass after that: the samples end
+    // there (heights as coast_dynamics: the GCRF z axis as the Earth's axis); coasting on into dense air underflowed
+    // the step size (an 8-day tanker-reserve window from 200 km at 2.6e-3 m2/kg).
+    const integrators::Event<6> decayed{
+        "decayed into the atmosphere",
+        [&](double, const integrators::State<6>& y) {
+            return frames::fixed_to_geodetic(Vec3{y[0], y[1], y[2]}).height_m - parameters.entry_interface_height_m;
+        },
+        integrators::Crossing::Falling};
     integrators::integrate<6>(coast_dynamics(gravity, epoch, parameters.drag_area_per_mass_m2pkg), 0.0, math::pack(state_gcrf),
-                              parameters.search_window_s, options, {}, observer);
+                              parameters.search_window_s, options, std::span(&decayed, 1), observer);
     if (samples.size() < 3) {
         plan.reason = "Bahn nicht berechenbar";
         return plan;
@@ -238,9 +252,20 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     const auto entry_mass = [&](double dv) {
         return parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg - burn_propellant(dv);
     };
+    // The reach of the reversals: the vehicle's (entry_crossrange_reach_m at the nominal bank, from the pass's entry
+    // speed); an explicit max_crossrange_m (unit-test fixtures) replaces it. The prefilter takes it from circular speed
+    // (its upper bound).
+    const auto reach_at = [&](const EntryPredictorModel& m, double entry_speed_mps) {
+        return parameters.max_crossrange_m > 0.0 ? parameters.max_crossrange_m
+                                                 : entry_crossrange_reach_m(m, parameters.nominal_bank_rad, entry_speed_mps);
+    };
+    EntryPredictorModel bound_model = model;  // at the entry mass (the passed model's may be unset)
+    bound_model.mass_kg = parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg;
+    const double reach_bound_m = reach_at(bound_model, std::sqrt(gm / radius_m));
+    if (debug) std::printf("[deorbit] crossrange reach (circular entry) %.1f km\n", reach_bound_m / 1000.0);
     for (size_t i = 1; i + 1 < samples.size(); ++i) {
         if (!(angle[i] < angle[i - 1] && angle[i] <= angle[i + 1])) continue;
-        if (std::abs(cross_track[i]) > 5.0 * parameters.max_crossrange_m) {
+        if (std::abs(cross_track[i]) > 5.0 * reach_bound_m) {
             if (debug) std::printf("[deorbit] pass %+.0f s cross track %.0f km: far\n", samples[i].epoch - epoch, cross_track[i] / 1000.0);
             continue;
         }
@@ -333,7 +358,15 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             dv = std::max(dv + step_v, 1.0);
             shooter.set_mass(entry_mass(dv));
         }
-        if (!converged || std::abs(shot.crossrange_m) > parameters.max_crossrange_m) continue;
+        if (!converged) continue;
+        const double reach_m = reach_at(shooter.model(), shot.speed_mps);
+        if (debug) {
+            std::printf("[deorbit]   crossrange %.1f km (one sign %+.1f / %+.1f km), reach %.1f km\n",
+                        shot.crossrange_m / 1000.0, shot.crossrange_one_sign_m[0] / 1000.0,
+                        shot.crossrange_one_sign_m[1] / 1000.0, reach_m / 1000.0);
+        }
+        if (std::abs(shot.crossrange_m) > reach_m) continue;
+        plan.crossrange_reach_m = reach_m;
 
         plan.node = {t, -math::normalized(shooter.state_at(t).velocity_mps) * dv};
         plan.delta_v_mps = dv;

@@ -136,6 +136,7 @@ add_executable(starsim_core_tests
     test_ship_catch_laws.cpp
     test_ship_deorbit.cpp
     test_deorbit_planner.cpp
+    test_entry_reach.cpp
     test_ship_return_mission.cpp
     test_falcon9_ascent.cpp
     test_starship_ascent.cpp

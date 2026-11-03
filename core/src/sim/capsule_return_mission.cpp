@@ -30,12 +30,12 @@ void place_capsule_return_mission(FlightSession& session, const config::CapsuleR
 }
 
 gnc::DeorbitParameters capsule_return_parameters(const config::CapsuleReturnMission& m) {
-    auto p = FlightSession::capsule_deorbit_parameters();
+    gnc::DeorbitParameters p;
     p.entry_interface_height_m = m.entry_interface_height_m;
     p.entry_flight_path_rad = m.entry_flight_path_rad;
-    p.nominal_bank_rad = m.nominal_bank_rad;
-    p.max_crossrange_m = m.max_crossrange_m;
+    p.nominal_bank_rad = m.nominal_bank_rad;  // the reach follows from it and the capsule's L/D (plan_deorbit)
     p.search_window_s = m.search_window_s;
+    p.gate_height_m = gnc::EntryGuidanceParameters::capsule().gate_height_m;
     return p;
 }
 

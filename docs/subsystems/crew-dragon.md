@@ -29,7 +29,11 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   direction independent of the bank; load limit = crew 4 g [E] (`[stage.heat_shield] crew_load_limit_g`,
   `FlightBody::crew_load_warning`) x 0.9). Nominal entry -2.0 deg at 120 km with 30 deg of bank [E]. Splashdown zone
   `config/splashdown_zones.toml` (`pacific_san_diego` 32.6 N 117.8 W [E], radius 2 km - user 2026-10-14). Deorbit:
-  `gnc::plan_deorbit` with `DeorbitParameters::burn_thrust_n` and `entry_mass_kg`. `FlightSession::plan_capsule_return`
+  `gnc::plan_deorbit` with `DeorbitParameters::burn_thrust_n` and `entry_mass_kg`; the pass's crossrange within the
+  capsule's reach [D] (`gnc::entry_crossrange_reach_m`: L/D 0.19 at trim, 30 deg bank: 41.2 km from circular speed,
+  34.2 km from 7.6 km/s; planner plan Task 7, was 40 km [E]). Entry angle and bank come from the return mission's
+  `[deorbit]` (M); `plan_capsule_return()` without parameters (bindings, game) flies the capsule's
+  `[stage.recovery] return_mission` (`crew_dragon_return`). `FlightSession::plan_capsule_return`
   (steps `CapsuleReturnStep`): Draco burn along +x (4 side Dracos, 1.6 kN), trunk jettison 120 s after it, nose cone
   closed 120 s later [E], turn to trim, entry guidance `entry_lead_s` before the interface, gate;
   `place_entering_capsule`. A capsule that impacts or breaks up ends as "verloren" (`CapsuleReturnStep::Lost`).

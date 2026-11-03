@@ -776,3 +776,7 @@ MECO planning took the flip from `flip_duration_s` plus the MECO -> separation i
 
 ## Super Heavy flip model of Task 5 before its fix round 1 (2026-11-03)
 A rest-to-rest bang-bang turn at the flip set's full gimbal deflection, applied at once, lit within 15 deg: 9.7 s for the flown 153 deg at 293 t (MECO plan 9.4-9.9 s), flown 10.43 s. It left out the gimbal slew (20 deg/s) and the attitude loop's braking law (braking planned at half the authority, per body axis); the closeness to the flown flip was a cancellation (no slew and full braking against the aerodynamic help).
+
+## Drone-ship provisional station before planner plan Task 7 (2026-11-03)
+The kick search placed the drone ship at a provisional station 600 km [E] downrange ("Starlink-class"); since Task 7
+it is the ballistic range of the stage's nominal MECO state (584.4 km for Falcon 9).

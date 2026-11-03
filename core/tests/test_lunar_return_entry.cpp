@@ -250,7 +250,6 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
     p.entry_interface_height_m = m.deorbit.entry_interface_height_m;
     p.entry_flight_path_rad = m.deorbit.entry_flight_path_rad;
     p.nominal_bank_rad = m.deorbit.nominal_bank_rad;
-    p.max_crossrange_m = m.deorbit.max_crossrange_m;
     p.search_window_s = m.deorbit.search_window_s;
     const bool planned = t.session.plan_ship_return(p);
     const auto* plan = t.session.ship_return_plan();

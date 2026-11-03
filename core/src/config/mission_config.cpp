@@ -86,6 +86,13 @@ int positive_integer(const detail::Document& doc, const toml::table& t, std::str
     return static_cast<int>(*v);
 }
 
+// The reversals' crossrange reach follows the entry vehicle's L/D (gnc::entry_crossrange_reach_m, planner plan Task 7).
+void reject_crossrange_key(const detail::Document& doc, const toml::table& deorbit) {
+    if (deorbit.contains("max_crossrange_km")) {
+        doc.fail("deorbit: max_crossrange_km is derived from the vehicle's L/D (gnc::entry_crossrange_reach_m): remove the key");
+    }
+}
+
 // [deorbit] of a ship return (b4)
 ShipReturnDeorbit ship_return_deorbit(const detail::Document& doc, const toml::table& deorbit) {
     const double deg = constants::deg_to_rad;
@@ -94,7 +101,7 @@ ShipReturnDeorbit ship_return_deorbit(const detail::Document& doc, const toml::t
     d.entry_flight_path_rad = doc.number(deorbit, "entry_flight_path_deg") * deg;
     if (!(d.entry_flight_path_rad < 0.0)) doc.fail("deorbit: entry_flight_path_deg must be negative");
     d.nominal_bank_rad = doc.positive(deorbit, "nominal_bank_deg") * deg;
-    d.max_crossrange_m = doc.positive(deorbit, "max_crossrange_km") * 1000.0;
+    reject_crossrange_key(doc, deorbit);
     d.search_window_s = doc.positive(deorbit, "search_window_h") * 3600.0;
     return d;
 }
@@ -215,7 +222,7 @@ CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& co
     m.entry_flight_path_rad = doc.number(*deorbit, "entry_flight_path_deg") * deg;
     if (!(m.entry_flight_path_rad < 0.0)) doc.fail("deorbit: entry_flight_path_deg must be negative");
     m.nominal_bank_rad = doc.positive(*deorbit, "nominal_bank_deg") * deg;
-    m.max_crossrange_m = doc.positive(*deorbit, "max_crossrange_km") * 1000.0;
+    reject_crossrange_key(doc, *deorbit);
     m.search_window_s = doc.positive(*deorbit, "search_window_h") * 3600.0;
     return m;
 }

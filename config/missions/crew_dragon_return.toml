@@ -28,5 +28,4 @@ rcs_propellant_kg = 2000.0      # [E] after the ISS mission; the return spends ~
 entry_interface_km = 120.0
 entry_flight_path_deg = -2.0    # [E] d3: inside the crew's 4 g at L/D 0.2
 nominal_bank_deg = 30.0         # [E] d3
-max_crossrange_km = 40.0        # [E] d3
 search_window_h = 48.0

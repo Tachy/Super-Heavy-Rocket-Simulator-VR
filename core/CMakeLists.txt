@@ -85,6 +85,7 @@ add_library(starsim_core STATIC
     src/gnc/entry_guidance.cpp
     src/gnc/entry_guidance_parameters.cpp
     src/gnc/entry_predictor.cpp
+    src/gnc/entry_reach.cpp
     src/gnc/entry_corridor.cpp
     src/gnc/vehicle_capability.cpp
     src/sim/telemetry_recorder.cpp

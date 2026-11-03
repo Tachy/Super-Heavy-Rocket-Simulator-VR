@@ -43,9 +43,8 @@ capture_deorbit_mps = 100.0
 entry_interface_km = 120.0
 entry_flight_path_deg = -1.0        # [E] b2's nominal entry
 nominal_bank_deg = 50.0             # [E] the plan flies this bank: range to spare both ways
-max_crossrange_km = 60.0            # [E] reach of the entry guidance's reversals (b2 campaign)
 search_window_h = 168.0             # [E] l5 Task 9: from the captured orbit (32 deg) 48 h held no pass within the
-                                    # 60 km reach - a ground track needs days to come over the site
+                                    # reversals' reach (then 60 km) - a ground track needs days to come over the site
 
 [budget]
 mcc_allowance_mps = 90.0            # [D] l5 Task 10 campaign: corrections <= 58 m/s + entry trim <= 29 m/s (TEI and braking +-1 % / 0.5 deg; kept as margin for the +-0.2 % / 0.1 deg campaign)

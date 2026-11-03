@@ -18,7 +18,9 @@ struct DeorbitParameters {
     // [E] the plan flies this bank (both signs averaged: reversals), so that the entry guidance has range to spare
     // either way (b2 campaign: nominal ~45-50 deg at 7,500 km).
     double nominal_bank_rad = 50.0 * constants::deg_to_rad;
-    double max_crossrange_m = 60000.0;     // [E] b2 campaign's dispersion: tested reach of the reversals
+    // 0: the reversals' reach is the entry vehicle's (entry_crossrange_reach_m of the planner's entry model at
+    // nominal_bank_rad, planner plan Task 7); > 0: this reach instead (unit-test fixtures only).
+    double max_crossrange_m = 0.0;
     double search_window_s = 2.0 * 86400.0;
     double lead_s = 600.0;                 // earliest burn after planning (turn to the burn attitude)
     double gate_height_m = 800.0;          // as EntryGuidanceParameters
@@ -49,6 +51,7 @@ struct DeorbitPlan {
     double entry_speed_mps = 0.0;         // relative to the Earth
     double downrange_error_m = 0.0;       // nominal bank (> 0: overshoot)
     double crossrange_m = 0.0;            // nominal bank, both signs averaged
+    double crossrange_reach_m = 0.0;      // the reach it was checked against (entry_crossrange_reach_m)
     double propellant_kg = 0.0;           // for the burn (rocket equation)
     double boil_off_kg = 0.0;             // boiled off until the burn (boil_off_kgps; the session: flown ahead)
     bool short_of_reserve = false;        // not feasible only because the landing reserve would be cut (plan complete)

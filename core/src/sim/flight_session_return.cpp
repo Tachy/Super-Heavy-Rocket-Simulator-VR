@@ -8,8 +8,10 @@
 #include <cstdlib>
 #include <limits>
 
+#include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 
 namespace starsim::sim {
 
@@ -209,6 +211,20 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
 
 gnc::DeorbitPlan FlightSession::ship_return_preview(const gnc::DeorbitParameters& parameters) const {
     return ship_deorbit_plan(parameters);
+}
+
+bool FlightSession::plan_ship_return() {
+    const std::string mission_id = bodies_.empty() ? std::string() : bodies_[controlled_].body->vehicle().stages().front().config.return_mission;
+    if (mission_id.empty()) {
+        ship_return_ = false;
+        deorbit_plan_ = gnc::DeorbitPlan{};
+        deorbit_plan_->reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
+        return false;
+    }
+    const auto m = config::load_ship_return_mission(config_dir_, mission_id);
+    auto parameters = ship_deorbit_parameters(m.deorbit);  // the one mapping (refuelling r5)
+    parameters.search_window_s = m.deorbit.search_window_s;
+    return plan_ship_return(parameters);
 }
 
 bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {

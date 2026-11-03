@@ -288,7 +288,6 @@ TEST_CASE("Crew Dragon return mission loads", "[dragon][mission][config]") {
     CHECK(m.inclination_rad == Catch::Approx(51.6 * deg));
     CHECK(m.entry_flight_path_rad == Catch::Approx(-2.0 * deg));
     CHECK(m.nominal_bank_rad == Catch::Approx(30.0 * deg));
-    CHECK(m.max_crossrange_m == 40000.0);
     CHECK(m.rcs_propellant_kg == 2000.0);
     const auto p = sim::capsule_return_parameters(m);
     CHECK(p.entry_flight_path_rad == m.entry_flight_path_rad);

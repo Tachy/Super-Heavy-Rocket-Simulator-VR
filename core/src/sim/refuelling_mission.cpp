@@ -166,8 +166,7 @@ gnc::DeorbitParameters ship_deorbit_parameters(const config::ShipReturnDeorbit& 
     gnc::DeorbitParameters p;
     p.entry_interface_height_m = d.entry_interface_height_m;
     p.entry_flight_path_rad = d.entry_flight_path_rad;
-    p.nominal_bank_rad = d.nominal_bank_rad;
-    p.max_crossrange_m = d.max_crossrange_m;
+    p.nominal_bank_rad = d.nominal_bank_rad;  // the reach follows from it and the ship's L/D (plan_deorbit)
     p.search_window_s = FlightSession::tanker_reserve_search_s;
     return p;
 }

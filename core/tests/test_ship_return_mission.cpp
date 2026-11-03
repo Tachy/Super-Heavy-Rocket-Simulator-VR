@@ -178,6 +178,28 @@ TEST_CASE("Ship return mission loads", "[ship][mission]") {
     CHECK(m.deorbit.search_window_s == 48.0 * 3600.0);
 }
 
+// Review Focus 4 (planner plan Task 7): the game's key R (no parameters, bindings plan_ship_return) flies the ship's own
+// return mission ([stage.recovery] return_mission), not struct defaults; the reach is the ship's (L/D, mission bank).
+TEST_CASE("No-argument ship return uses the mission config", "[ship][deorbit][config]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession own(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(own, m);
+    CHECK(own.body(0).vehicle().stages().front().config.return_mission == "ship_return_starbase");
+    REQUIRE(own.plan_ship_return());
+    sim::FlightSession mission(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(mission, m);
+    REQUIRE(mission.plan_ship_return(deorbit_parameters(m)));
+    const auto& a = *own.ship_return_plan();
+    const auto& b = *mission.ship_return_plan();
+    std::printf("no-argument ship return: burn in %.2f h, %.2f m/s, crossrange %.1f km of %.1f km reach\n",
+                (a.node.epoch - own.epoch()) / 3600.0, a.delta_v_mps, a.crossrange_m / 1000.0, a.crossrange_reach_m / 1000.0);
+    CHECK(a.node.epoch == b.node.epoch);
+    CHECK(a.delta_v_mps == b.delta_v_mps);
+    CHECK(a.crossrange_reach_m == b.crossrange_reach_m);
+    CHECK(a.crossrange_reach_m > 0.0);
+    CHECK(std::abs(a.crossrange_m) <= a.crossrange_reach_m);
+}
+
 // Refuelling r2 (found by boil-off): a burn whose engines run dry cannot finish - it ends with a reason instead of
 // waiting for ever.
 TEST_CASE("A burn on dry main tanks is aborted with a reason", "[ship][session][deorbit][boil_off]") {

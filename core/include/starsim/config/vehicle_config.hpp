@@ -323,6 +323,15 @@ struct ReturnProfile {
     std::optional<std::vector<std::string>> flip_engine_groups;
 };
 
+// Nominal MECO state of a first stage's flight (Earth-relative), for planning before any trial is flown: the ground
+// distance from the pad, the height, the speed and the flight-path angle at MECO.
+struct NominalMeco {
+    double downrange_m = 0.0;
+    double altitude_m = 0.0;
+    double speed_mps = 0.0;
+    double flight_path_rad = 0.0;
+};
+
 // [stage.recovery] keys of a ship that flips and lands on its sea-level engines at a catch tower
 // (gnc::ship_landing_parameters; required for a "tower_catch" stage with an entry_alpha_table). The engine sets come from
 // the ReturnProfile (flip_engine_groups, landing_engine_phases, landing_phase_max_tilt_rad).
@@ -440,6 +449,11 @@ struct StageConfig {
     const ReturnProfile& return_profile_for(bool drone_ship) const {
         return drone_ship && drone_ship_return ? *drone_ship_return : return_profile;
     }
+    // [stage.recovery.drone_ship] nominal_meco_*: the MECO state of a drone-ship flight (required with that table).
+    std::optional<NominalMeco> drone_ship_meco;
+    // [stage.recovery] return_mission: the return mission (config/missions/<id>.toml) the stage flies from orbit
+    // without a mission of its own (M; required for a ship caught by the tower and for a capsule).
+    std::string return_mission;
     // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;

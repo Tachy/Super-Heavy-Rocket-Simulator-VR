@@ -19,6 +19,8 @@
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
+#include "starsim/config/mission_config.hpp"
+#include "starsim/sim/capsule_return_mission.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -607,7 +609,6 @@ struct DragonDeorbit {
         gnc::DeorbitParameters p;
         p.entry_flight_path_rad = -2.0 * deg;
         p.nominal_bank_rad = 30.0 * deg;
-        p.max_crossrange_m = 40000.0;
         p.gate_height_m = 5500.0;
         p.burn_thrust_n = thrust_n;
         return p;
@@ -827,6 +828,25 @@ TEST_CASE("Crew Dragon returns from orbit to the drogue gate", "[dragon][mission
     const auto before = s.epoch();
     const auto reached = s.advance_to(before + 3600.0, 2000);
     CHECK(reached - before > 3000.0);
+}
+
+// Review Focus 4 (planner plan Task 7): the game's return (no parameters) flies the capsule's own return mission
+// ([stage.recovery] return_mission), not struct defaults; its reach is the capsule's (L/D at trim, mission bank).
+TEST_CASE("No-argument capsule return uses the mission config", "[dragon][deorbit][config]") {
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    DragonDeorbit own(dragon_raan_rad()), mission(dragon_raan_rad());
+    CHECK(own.session.body(0).vehicle().stages().back().config.return_mission == "crew_dragon_return");
+    REQUIRE(own.session.plan_capsule_return());
+    const auto m = config::load_capsule_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return");
+    REQUIRE(mission.session.plan_capsule_return(sim::capsule_return_parameters(m)));
+    const auto& a = *own.session.ship_return_plan();
+    const auto& b = *mission.session.ship_return_plan();
+    CHECK(a.node.epoch == b.node.epoch);
+    CHECK(a.delta_v_mps == b.delta_v_mps);
+    CHECK(a.entry_flight_path_rad == Catch::Approx(m.entry_flight_path_rad).margin(0.01 * deg));
+    CHECK(a.crossrange_reach_m == b.crossrange_reach_m);
+    CHECK(a.crossrange_reach_m > 0.0);
+    CHECK(std::abs(a.crossrange_m) <= a.crossrange_reach_m);
 }
 
 TEST_CASE("No pass within reach refuses the capsule return", "[dragon][mission]") {

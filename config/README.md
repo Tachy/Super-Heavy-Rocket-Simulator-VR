@@ -164,6 +164,11 @@ flow separation (vacuum engines).
 - `[stage.recovery.drone_ship]`: the return to a drone ship; its keys override the profile above (left out: taken from
   it). `boostback = false`: no flip or boostback (the stage coasts on its ascent arc). `landing_phase_max_tilt_deg`
   (3 values, either table): planned thrust tilt limit per landing engine set (required on a returning first stage).
+  `nominal_meco_downrange_m`, `nominal_meco_altitude_m`, `nominal_meco_speed_mps`, `nominal_meco_flight_path_deg`
+  (required in this table): the Earth-relative MECO state of a drone-ship flight; the ascent planner's provisional ship
+  station is its ballistic range (`sim::nominal_meco_impact_downrange_m`).
+- `[stage.recovery]` `return_mission`: the return mission (`missions/<id>.toml`) a ship caught by the tower or a capsule
+  flies from orbit without a mission of its own (`plan_ship_return()` / `plan_capsule_return()`, key R); required there.
 - `[stage.recovery]` `landing_fresh_trust_region_weight`, `landing_fresh_attitude_violation_weight`: SCvx settings of fresh plans (no warm start); 0 keeps the defaults (`docs/subsystems/falcon9.md` "Fresh landing plans").
 - `[stage.engine_group]` `station_m` may be negative: the Falcon 9's second stage stands on the interstage top with its engine below station 0 (`falcon9.md` "Stack"); so may a tank's `base_station_m`.
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
@@ -295,7 +300,9 @@ flow separation (vacuum engines).
   at its `[orbit]` epoch with the deorbit planned, a ship return is refused: it is flown from orbit, key R). Each loader
   refuses a file of another kind.
 - `leo_ascent.toml`: target orbit of the game's ascent autopilot (key P).
-- `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`).
+- `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`). `[deorbit]`
+  `entry_interface_km`, `entry_flight_path_deg`, `nominal_bank_deg`, `search_window_h`; the crossrange reach follows from
+  the bank and the vehicle's L/D (`gnc::entry_crossrange_reach_m`): `max_crossrange_km` is refused.
 - `crew_dragon_return.toml`: capsule return from orbit (`config::load_capsule_return_mission`,
   `sim::place_capsule_return_mission`): `[mission]` `vehicle`, `zone` (`splashdown_zones.toml`); `[orbit]` epoch, heights,
   inclination, RAAN, argument of latitude, `rcs_propellant_kg`; `[deorbit]` as the ship's.

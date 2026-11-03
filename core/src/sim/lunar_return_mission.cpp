@@ -118,7 +118,6 @@ LunarReturnSetup lunar_return_setup(const config::LunarReturnMission& m, const m
         setup.deorbit.entry_interface_height_m = m.deorbit.entry_interface_height_m;
         setup.deorbit.entry_flight_path_rad = m.deorbit.entry_flight_path_rad;
         setup.deorbit.nominal_bank_rad = m.deorbit.nominal_bank_rad;
-        setup.deorbit.max_crossrange_m = m.deorbit.max_crossrange_m;
         setup.deorbit.search_window_s = m.deorbit.search_window_s;
     } else {
         setup.entry = gnc::EntryGuidanceParameters::lunar_return();

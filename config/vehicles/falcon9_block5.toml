@@ -215,6 +215,13 @@ landing_phase_max_tilt_deg = [20.0, 20.0, 20.0]  # [E] the same engine throughou
                                                  # drone-ship approach needs its divert in the last phase too)
 landing_phase_throttles = [0.7, 0.7, 0.65]   # [E] design throttles that time the ignition (~3.0 km at ~270 m/s)
 landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine change: wide windows that only split the plan
+# Nominal MECO state (Earth-relative; the ascent planner's provisional drone-ship station is its ballistic range), [D]
+# Starlink 15-25 telemetry at the last frame with nine engines lit (T+148.25 s): speed 7,853 km/h, altitude 58.2 km, the
+# altitude rate over +-2 s 933 m/s; ground distance = the horizontal speed integrated from liftoff
+nominal_meco_downrange_m = 81700.0           # [D]
+nominal_meco_altitude_m = 58200.0            # [D]
+nominal_meco_speed_mps = 2181.0              # [D]
+nominal_meco_flight_path_deg = 25.3          # [D] asin(933 / 2181)
 
 [[stage.tank]]
 id = "rcs_n2"

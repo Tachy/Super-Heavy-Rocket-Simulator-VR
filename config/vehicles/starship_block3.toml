@@ -357,6 +357,7 @@ reserve_propellant_kg = 30000.0          # [E]
 # landing_propellant_kg: the header tanks' contents (35 t [E]; the webcast gauge shows the main tanks only): flip
 # (~8 t) and landing burn; a tower catch ends slower than the splashdowns of flights 13/14. b3 catch campaign: 30 t
 # ran dry in a third of the dispersed cases, 35 t holds
+return_mission = "ship_return_starbase"  # the return from orbit without a mission of its own (its [deorbit] settings)
 deorbit_engine_groups = ["sea_level_3"]  # user 2026-10-13: the belly Raptor alone (in the symmetry plane), thrust
                                          # gimballed through the CG
 # Flip and landing burn at the tower (gnc::ship_landing_parameters; b3 ship-return design). The landing burn steps down

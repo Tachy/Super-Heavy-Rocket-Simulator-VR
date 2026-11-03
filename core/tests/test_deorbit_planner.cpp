@@ -102,7 +102,9 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
     REQUIRE(p.feasible);
     CHECK(std::abs(p.entry_flight_path_rad + 1.0 * deg) < 0.02 * deg);
     CHECK(std::abs(p.downrange_error_m) < 2000.0);
-    CHECK(std::abs(p.crossrange_m) < 60000.0);
+    // within the ship's reach (planner plan Task 7: gnc::entry_crossrange_reach_m at the 50 deg bank, ~500 km)
+    CHECK(p.crossrange_reach_m > 400e3);
+    CHECK(std::abs(p.crossrange_m) <= p.crossrange_reach_m);
     CHECK(p.delta_v_mps > 40.0);
     CHECK(p.delta_v_mps < 150.0);
     CHECK(p.node.epoch - s.t0 >= 600.0);

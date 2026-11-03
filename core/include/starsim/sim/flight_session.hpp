@@ -487,7 +487,10 @@ public:
     // (gnc::plan_deorbit) and flies it on the vehicle's deorbit engine set; the ship then coasts, gets its entry guidance
     // `entry_lead_s` before the entry interface and is caught by the flip and landing guidance. False if the plan is
     // refused (reason in ship_return_plan()) or the burn cannot be flown.
-    bool plan_ship_return(const gnc::DeorbitParameters& parameters = {});
+    bool plan_ship_return(const gnc::DeorbitParameters& parameters);
+    // Without parameters: those of the ship's own return mission ([stage.recovery] return_mission, its [deorbit]) -
+    // the game's key R from any orbit.
+    bool plan_ship_return();
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
     // The deorbit plan the controlled ship's return would take now (plan_ship_return's planner and refusals without
     // the boil-off check; also while docked: the held state), not stored and not flown (refuelling r4).
@@ -508,8 +511,9 @@ public:
     // trim attitude and gets its entry guidance entry_lead_s before the interface, which takes it to the drogue gate.
     // False if refused (reason in ship_return_plan()). Order of events [S]: SpaceX since the return to West Coast
     // recovery - deorbit burn, then trunk jettison (the trunk falls uprange of the capsule).
-    bool plan_capsule_return(gnc::DeorbitParameters parameters = capsule_deorbit_parameters());
-    static gnc::DeorbitParameters capsule_deorbit_parameters();
+    bool plan_capsule_return(gnc::DeorbitParameters parameters);
+    // Without parameters: those of the capsule's own return mission ([stage.recovery] return_mission, its [deorbit]).
+    bool plan_capsule_return();
     CapsuleReturnStep capsule_return_step() const { return capsule_return_step_; }
     static constexpr double trunk_jettison_delay_s = 120.0;   // [E] after the deorbit burn
     static constexpr double nose_cone_close_delay_s = 120.0;  // [E] after the trunk jettison

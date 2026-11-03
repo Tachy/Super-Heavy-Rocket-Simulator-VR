@@ -828,6 +828,34 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.return_profile = read_profile(*recovery, {});
         if (const auto* drone_ship = (*recovery)["drone_ship"].as_table()) {
             s.drone_ship_return = read_profile(*drone_ship, s.return_profile);
+            // The drone-ship planner's provisional station: the ballistic range of the nominal MECO state (planner plan
+            // Task 7); every key required.
+            const auto meco_key = [&](std::string_view key) {
+                if (!drone_ship->contains(key)) {
+                    doc.fail("Drohnenschiff-Rückkehr der Stufe '" + s.id + "': Schlüssel '" + std::string(key) +
+                             "' fehlt in [stage.recovery.drone_ship]");
+                }
+                return doc.number(*drone_ship, key);
+            };
+            NominalMeco meco;
+            meco.downrange_m = meco_key("nominal_meco_downrange_m");
+            meco.altitude_m = meco_key("nominal_meco_altitude_m");
+            meco.speed_mps = meco_key("nominal_meco_speed_mps");
+            meco.flight_path_rad = meco_key("nominal_meco_flight_path_deg") * constants::deg_to_rad;
+            if (meco.downrange_m < 0.0 || !(meco.altitude_m > 0.0) || !(meco.speed_mps > 0.0) ||
+                !(meco.flight_path_rad > -constants::pi / 2.0 && meco.flight_path_rad < constants::pi / 2.0)) {
+                doc.fail("stage.recovery.drone_ship: nominal_meco_downrange_m >= 0, altitude and speed positive, flight "
+                         "path in (-90, 90) deg");
+            }
+            s.drone_ship_meco = meco;
+        }
+        // The return mission the vehicle flies without a mission of its own (FlightSession::plan_ship_return /
+        // plan_capsule_return without parameters): required for a ship caught by the tower and for a capsule.
+        s.return_mission = doc.text_or(*recovery, "return_mission");
+        const bool returns_from_orbit = (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) ||
+                                        s.aero.entry_profile == "capsule";
+        if (returns_from_orbit && s.return_mission.empty()) {
+            doc.fail("Rückkehr der Stufe '" + s.id + "' aus dem Orbit: Schlüssel 'return_mission' fehlt in [stage.recovery]");
         }
         // A returning first stage (gnc::booster_return_parameters): every key its return guidance flies on is required.
         const bool returning_booster = (s.recovery_method == "tower_catch" && s.aero.entry_alpha_table.empty()) ||

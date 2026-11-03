@@ -36,6 +36,12 @@ inline constexpr double sea_check_heading_step_rad = 5.0 * constants::deg_to_rad
 // A grid heading replaces the ground track only when its significant tilt is smaller by more than this.
 inline constexpr double sea_check_tilt_tie_rad = 1e-9;
 
+// Ground distance from the pad to where a first stage at its nominal MECO state comes down without a boostback: the
+// MECO's own ground distance plus the vacuum Kepler arc of the Earth-relative MECO state on a sphere of radius
+// `radius_m` (no drag, no Earth rotation: the drone-ship planner's provisional station, which only has to lie in the
+// stage's sea area away from the pad; the ship is placed at the flown trial's predicted impact).
+double nominal_meco_impact_downrange_m(const config::NominalMeco& meco, double gm_m3ps2, double radius_m);
+
 // The landing zone or drone ship of `recovery` as the session's landing site (none for a tower catch), read from
 // `session`'s config directory. A drone ship floats on `session`'s sea at its station (FlightSession::sea_height_m:
 // the terrain's fine EGM2008 geoid when set, else the coarse one).

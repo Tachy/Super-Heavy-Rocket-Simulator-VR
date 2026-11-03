@@ -102,7 +102,10 @@ removed).
     (SpaceX practice); else a drone ship from `config/drone_ships.toml` at the stage's impact predicted 10 s after the
     separation (`BoosterReturnGuidance::predict_impact`, drag and entry burn, no steering), deck along the ground track
     (in a moving sea: the heading of least deck tilt); its sea the EGM2008 geoid at the station
-    (`FlightSession::sea_height_m`). The kick is searched with the ship at a provisional station 600 km [E] downrange.
+    (`FlightSession::sea_height_m`). The kick is searched with the ship at a provisional station downrange [D]
+    (`sim::nominal_meco_impact_downrange_m`, planner plan Task 7): the MECO's ground distance plus the vacuum Kepler arc
+    of the stage's nominal MECO state (`[stage.recovery.drone_ship] nominal_meco_*` [D], Starlink 15-25 telemetry:
+    81.7 km, 58.2 km, 2181 m/s, 25.3 deg) = 81.7 + 502.7 = 584.4 km (was 600 km [E]).
     Neither feasible: refused.
   - Drone ships: `asds_atlantic`, `asds_atlantic_2` (Port Canaveral [S]), `asds_pacific` (Long Beach [S]), each with a
     service area [E] (lat/lon box). `config::drone_ship_for` picks the ship whose area holds the point (several: nearest

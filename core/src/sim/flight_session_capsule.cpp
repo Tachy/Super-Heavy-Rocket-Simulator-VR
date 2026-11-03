@@ -2,8 +2,10 @@
 
 #include "starsim/sim/flight_session.hpp"
 
+#include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/sim/capsule_return_mission.hpp"
 
 namespace starsim::sim {
 
@@ -41,15 +43,19 @@ const char* to_string(CapsuleReturnStep step) {
     return "?";
 }
 
-gnc::DeorbitParameters FlightSession::capsule_deorbit_parameters() {
-    gnc::DeorbitParameters p;
-    // [E] d3 ledger: an L/D 0.2 capsule under the crew's 4 g has range authority only between ~0 and ~45 deg of bank; at
-    // -2.0 deg the range moves ~1000 km per degree of entry angle (-1.2 deg: ~2400 km)
-    p.entry_flight_path_rad = -2.0 * constants::deg_to_rad;
-    p.nominal_bank_rad = 30.0 * constants::deg_to_rad;
-    p.max_crossrange_m = 40000.0;  // [E] the capsule's lateral reach at L/D 0.2 (reversals)
-    p.gate_height_m = gnc::EntryGuidanceParameters::capsule().gate_height_m;
-    return p;
+bool FlightSession::plan_capsule_return() {
+    std::string mission_id;
+    if (!bodies_.empty()) {
+        for (const auto& stage : bodies_[controlled_].body->vehicle().stages()) {
+            if (!stage.config.return_mission.empty()) mission_id = stage.config.return_mission;
+        }
+    }
+    if (mission_id.empty()) {
+        deorbit_plan_ = gnc::DeorbitPlan{};
+        deorbit_plan_->reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
+        return false;
+    }
+    return plan_capsule_return(capsule_return_parameters(config::load_capsule_return_mission(config_dir_, mission_id)));
 }
 
 gnc::DeorbitPlan FlightSession::capsule_deorbit_plan(gnc::DeorbitParameters& parameters) const {

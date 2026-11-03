@@ -38,7 +38,6 @@ struct ShipReturnDeorbit {
     double entry_interface_height_m = 0.0;
     double entry_flight_path_rad = 0.0;
     double nominal_bank_rad = 0.0;
-    double max_crossrange_m = 0.0;
     double search_window_s = 0.0;
 };
 
@@ -79,7 +78,6 @@ struct CapsuleReturnMission {
     double entry_interface_height_m = 0.0;
     double entry_flight_path_rad = 0.0;
     double nominal_bank_rad = 0.0;
-    double max_crossrange_m = 0.0;
     double search_window_s = 0.0;
 };
 

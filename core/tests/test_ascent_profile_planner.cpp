@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/launch_site_config.hpp"
@@ -254,6 +255,37 @@ TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]
 // Task 4: the onboard computer chooses the booster recovery, refuses unreachable launches and flies due east when the
 // target inclination is below the site's latitude.
 
+// Planner plan Task 7: the drone ship's provisional station is the ballistic range of the stage's nominal MECO state.
+TEST_CASE("Provisional downrange from the MECO state", "[sim][ascent_planner][config]") {
+    const double r = constants::wgs84_semi_major_axis_m, mu = constants::earth_gm_m3ps2;
+    // A short hop from the ground: the flat vacuum range v^2 sin(2 gamma) / g (curvature ~1e-6 at 1 km)
+    config::NominalMeco hop{0.0, 0.0, 100.0, 45.0 * deg};
+    CHECK(sim::nominal_meco_impact_downrange_m(hop, mu, r) == Catch::Approx(100.0 * 100.0 / (mu / (r * r))).epsilon(1e-4));
+    // The MECO's own ground distance adds on
+    hop.downrange_m = 5000.0;
+    CHECK(sim::nominal_meco_impact_downrange_m(hop, mu, r) ==
+          Catch::Approx(5000.0 + 100.0 * 100.0 / (mu / (r * r))).epsilon(1e-4));
+
+    const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    REQUIRE(f9.stages.front().drone_ship_meco);
+    const auto& meco = *f9.stages.front().drone_ship_meco;
+    CHECK(meco.downrange_m == 81700.0);
+    CHECK(meco.altitude_m == 58200.0);
+    CHECK(meco.speed_mps == 2181.0);
+    CHECK(meco.flight_path_rad == Catch::Approx(25.3 * deg));
+    // Hand value: flat vacuum range from height h, v cos(gamma) / g (v sin(gamma) + sqrt(v^2 sin^2(gamma) + 2 g h));
+    // the sphere (curving away, weaker gravity) adds a few per cent.
+    const double g = mu / (r * r), v = meco.speed_mps, s = std::sin(meco.flight_path_rad);
+    const double flat = v * std::cos(meco.flight_path_rad) / g * (v * s + std::sqrt(v * v * s * s + 2.0 * g * meco.altitude_m));
+    const double downrange = sim::nominal_meco_impact_downrange_m(meco, mu, r);
+    std::printf("[ascent_planner] provisional drone-ship downrange %.1f km (MECO %.1f km + arc %.1f km; flat %.1f km)\n",
+                downrange / 1000.0, meco.downrange_m / 1000.0, (downrange - meco.downrange_m) / 1000.0, flat / 1000.0);
+    CHECK(downrange - meco.downrange_m > flat);
+    CHECK(downrange - meco.downrange_m < 1.1 * flat);
+    // Super Heavy is caught at the tower: no drone-ship MECO state
+    CHECK_FALSE(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages.front().drone_ship_meco);
+}
+
 TEST_CASE("Falcon 9 from SLC-40 to the ISS plane returns to LZ-40", "[sim][ascent_planner]") {
     const auto request = falcon9_request("falcon9_rtls");  // CRS-35 class: 12.5 t, no fairing, 200 km / 51.6 deg
     const auto plan = timed_plan(request, true);
@@ -299,8 +331,9 @@ const spice::SpiceEphemeris& test_ephemeris();
 }
 
 TEST_CASE("Falcon 9 impact outside every service area is refused", "[sim][ascent_planner][asds]") {
-    // a copy of the config with the pad moved to 35 S / 18 E (no landing zone): the provisional station 600 km
-    // downrange lies in no drone ship's service area, so the plan stops before any trial flight
+    // a copy of the config with the pad moved to 35 S / 18 E (no landing zone): the provisional station (the ballistic
+    // range of the nominal MECO state, ~570 km downrange) lies in no drone ship's service area, so the plan stops before
+    // any trial flight
     const auto dir = std::filesystem::temp_directory_path() / "starsim_ascent_planner_no_ship_area";
     std::filesystem::remove_all(dir);
     std::filesystem::copy(STARSIM_CONFIG_DIR, dir, std::filesystem::copy_options::recursive);

@@ -47,11 +47,6 @@ constexpr double golden = 0.381966011250105;  // (3 - sqrt 5) / 2
 constexpr double expansion = 1.618033988749895;  // bracketing: each step this much longer than the last
 constexpr int max_trials = 16;                   // [E] safeguard; Starship and Falcon 9 converge in 4
 
-// [E] Provisional station of the drone ship while the kick is searched, this far downrange along the launch azimuth: away
-// from the pad (its deck replaces the ground near it), the MECO plan without a boostback does not depend on it; the ship
-// is then placed at the predicted impact (Starlink-class: ~600 km downrange).
-constexpr double provisional_ship_downrange_m = 600e3;
-
 struct Trial {
     double propellant_kg = nan;
     std::string reason;  // German, when infeasible
@@ -435,6 +430,21 @@ private:
 
 }  // namespace
 
+double nominal_meco_impact_downrange_m(const config::NominalMeco& meco, double gm_m3ps2, double radius_m) {
+    // Kepler conic of the MECO state: true anomaly at MECO (ascending: in (0, pi)) and at the descending crossing of
+    // `radius_m`; the range angle between them.
+    const double r0 = radius_m + meco.altitude_m;
+    const double v = meco.speed_mps;
+    const double h = r0 * v * std::cos(meco.flight_path_rad);
+    const double p = h * h / gm_m3ps2;
+    const double energy = 0.5 * v * v - gm_m3ps2 / r0;
+    const double e = std::sqrt(std::max(0.0, 1.0 + 2.0 * energy * h * h / (gm_m3ps2 * gm_m3ps2)));
+    if (!(e > 0.0)) return meco.downrange_m;  // circular at MECO: never comes down (not a first stage)
+    const double theta0 = std::copysign(std::acos(std::clamp((p / r0 - 1.0) / e, -1.0, 1.0)), meco.flight_path_rad);
+    const double theta1 = 2.0 * constants::pi - std::acos(std::clamp((p / radius_m - 1.0) / e, -1.0, 1.0));
+    return meco.downrange_m + radius_m * (theta1 - theta0);
+}
+
 double least_deck_motion_heading_rad(const FlightSession& like, const config::DroneShipConfig& ship,
                                      double ground_track_heading_rad) {
     const auto& sea = like.sea_state();
@@ -548,7 +558,8 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     };
     const char* unreachable = "Ziel mit Booster-Rückkehr nicht erreichbar";
 
-    const std::string method = request_stack(dir, request).stages.front().recovery_method;
+    const auto first_stage = request_stack(dir, request).stages.front();
+    const std::string& method = first_stage.recovery_method;
     if (method == "tower_catch") {
         AscentProfile none;
         none.target = request.target;
@@ -568,8 +579,16 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
         auto profile = planned({RecoveryKind::LandingZone, zone.id, zone.latitude_rad, zone.longitude_rad, 0.0});
         if (profile.feasible) return profile;
     }
-    // The drone ship: the kick searched with the ship at a provisional station downrange (the return without a
-    // boostback plans its MECO independent of it), then the ship placed at the stage's predicted impact.
+    // The drone ship: the kick searched with the ship at a provisional station downrange - away from the pad (its deck
+    // replaces the ground near it); the return without a boostback plans its MECO independent of it - at the ballistic
+    // range of the stage's nominal MECO state, then the ship placed at the stage's predicted impact.
+    if (!first_stage.drone_ship_meco) {
+        AscentProfile none;
+        none.target = request.target;
+        return refused(none, "Die erste Stufe hat keine Drohnenschiff-Rückkehr");
+    }
+    const double provisional_ship_downrange_m = nominal_meco_impact_downrange_m(
+        *first_stage.drone_ship_meco, constants::earth_gm_m3ps2, constants::wgs84_semi_major_axis_m);
     const double speed_mps = std::sqrt(constants::earth_gm_m3ps2 /
                                        (constants::wgs84_semi_major_axis_m + request.target.periapsis_altitude_m));
     const double azimuth = gnc::launch_azimuth_rad(site.latitude_rad, request.target.inclination_rad, speed_mps,

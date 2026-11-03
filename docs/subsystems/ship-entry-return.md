@@ -157,7 +157,16 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `FlightSession::plan_ship_return` (game key R) plans the deorbit burn (`gnc/deorbit_planner`: coast samples over
   48 h, passes = closest approaches of the ground track; per pass burn epoch bracketed on the entry predictor's
   downrange error and burn epoch + retrograde delta-v shot (Newton) to the 120 km entry interface at -1 deg at a nominal
-  50 deg bank; the first pass within 60 km crossrange [E] is taken; refused without the landing reserve or a pass). The
+  50 deg bank; the first pass whose predicted crossrange lies within the ship's reach is taken; refused without the
+  landing reserve or a pass). The reach [D] (`gnc::entry_crossrange_reach_m`, planner plan Task 7): the crossrange a
+  flight holding one bank sign gains over the reversals' mean path, the equilibrium-glide approximation (closed form
+  (pi^2/48) (L/D)^2 sin(2 sigma) R for a constant L/D) integrated with the entry table's L/D over the glide (alpha
+  schedule, Mach at the US76 glide height) from the pass's entry speed at the mission's nominal bank: 212 t ship, L/D
+  0.67-0.80 hypersonic, 50 deg: 660 km from circular speed, ~507-554 km from a LEO entry (the planner's own one-sign
+  predictions of the aircatch b4 pass: -776 / +487 km, half the span 631 km). `DeorbitParameters::max_crossrange_m`
+  > 0 replaces it in unit-test fixtures only; a mission's `max_crossrange_km` is refused. Without parameters
+  (`plan_ship_return()`, bindings / key R) the ship flies its own `[stage.recovery] return_mission` (M,
+  `ship_return_starbase`). The
   burn flies on `[stage.recovery] deorbit_engine_groups` - the ship: the belly sea-level Raptor alone (user
   2026-10-13), hull turned so that the thrust axis through the CG points along the burn
   (`FlightSession::execute_burn(node, groups)`; named groups only, no RCS fallback). Any burn more than 30 min [E]
