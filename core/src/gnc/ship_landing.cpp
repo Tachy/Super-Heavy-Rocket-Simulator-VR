@@ -47,19 +47,6 @@ EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParamete
     return ship_entry_target(site, parameters.gate_lead_m);
 }
 
-EntryTarget ship_gate_aim(const LandingSite& site, const ShipLandingParameters& parameters,
-                          const Vec3& gate_velocity_itrf_mps, double mass_kg) {
-    const auto aim = ship_entry_target(site, parameters.gate_lead_m);
-    if (!site.catch_target) return aim;
-    const double along_mps = dot(gate_velocity_itrf_mps, aim.nose_direction_itrf);  // the nose direction is horizontal
-    const double lead_m = ship_gate_lead_m(parameters, along_mps, mass_kg);
-    if (std::getenv("STARSIM_DEBUG_GATE")) {  // diagnostics
-        std::printf("[gate-aim] along %.2f m/s, mass %.1f t: lead %.1f m (static %.1f m)\n", along_mps, mass_kg / 1000.0,
-                    lead_m, parameters.gate_lead_m);
-    }
-    return ship_entry_target(site, lead_m);
-}
-
 EntryTarget ship_entry_target(const LandingSite& site, double gate_lead_m) {
     const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
     EntryTarget target{pad, site.height_m, {}};
@@ -95,6 +82,14 @@ void ShipLandingGuidance::print_gate_state(const char* label, const vehicle::Fli
                 feed_propellant_kg(body.vehicle()));
 }
 
+bool ship_flip_ready(const ShipLandingParameters& parameters, const vehicle::FlightBody& body, const Vec3& up_gcrf) {
+    const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+    const double tilt = std::acos(std::clamp(dot(axis, up_gcrf), -1.0, 1.0));
+    const Vec3 w = body.state().angular_velocity_body_radps;
+    // the plans' rate cone
+    return tilt < parameters.flip_tolerance_rad && std::hypot(w.y, w.z) < parameters.flip_settled_rate_radps;
+}
+
 ShipLandingGuidance::ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters)
     : site_(std::move(site)), parameters_(std::move(parameters)) {}
 
@@ -126,7 +121,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             parameters_.scvx.settings.limits.switches[0].max_sink_mps = ship_switch_max_sink_mps(
                 vehicle.source_config(), vehicle.stages().front().config, parameters_, height);
         }
-        if (std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("gate", body, transform, epoch);  // diagnostics
+        if (diagnostics_ && std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("gate", body, transform, epoch);
     }
     if (phase_ == ReturnPhase::Flip) {
         cmd.run_groups = parameters_.flip_groups;
@@ -141,8 +136,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
         const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
         const double tilt = std::acos(std::clamp(dot(axis, up_gcrf), -1.0, 1.0));
         const Vec3 w = body.state().angular_velocity_body_radps;
-        const bool settled = std::hypot(w.y, w.z) < parameters_.flip_settled_rate_radps;  // the plans' rate cone
-        if (std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics
+        if (diagnostics_ && std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics
             double spool = 0.0, thrust = 0.0;
             for (const auto& e : body.vehicle().stages().front().engines) {
                 if (e.producing_thrust()) thrust += e.spool * e.performance->thrust_n(e.throttle, 0.0);
@@ -167,9 +161,9 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             flip_duration_s_ = epoch - flip_start_;
             const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
             flip_end_height_m_ = frames::fixed_to_geodetic(r_fixed).height_m - site_.height_m;
-            if (std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("flip-end", body, transform, epoch);  // diagnostics
+            if (diagnostics_ && std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("flip-end", body, transform, epoch);
         }
-        if (tilt < parameters_.flip_tolerance_rad && settled && epoch >= next_attempt_ && site_.catch_target &&
+        if (ship_flip_ready(parameters_, body, up_gcrf) && epoch >= next_attempt_ && site_.catch_target &&
             !upright_descent_) {
             ++first_plan_attempts_;
             auto guidance = std::make_unique<ScvxLandingGuidance>(site_, parameters_.scvx);
@@ -289,7 +283,7 @@ void ShipLandingGuidance::fly_upright_descent(const vehicle::FlightBody& body, c
                                    constants::standard_gravity_mps2, parameters_.upright_descent);
     cmd.run_groups = groups;
     cmd.throttle = landing_throttle(vehicle, groups, mass.mass_kg * c.acceleration_mps2, pressure);
-    if (std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics
+    if (diagnostics_ && std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics
         std::printf("[upright] h %.1f sink %.1f groups %zu accel %.2f (%.2f-%.2f) throttle %.2f propellant %.0f kg\n",
                     cg_height - mass.cg_station_m, sink, groups.size(), c.acceleration_mps2, thrust.min_n / mass.mass_kg,
                     thrust.max_n / mass.mass_kg, cmd.throttle, vehicle.propellant_kg());

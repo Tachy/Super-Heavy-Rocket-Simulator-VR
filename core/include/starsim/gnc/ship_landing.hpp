@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "starsim/gnc/booster_return.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
 #include "starsim/gnc/upright_descent.hpp"
@@ -127,6 +128,41 @@ struct FlipPush {
     double lead_m() const { return travel_m + tilt_in_m + brake_m; }
 };
 FlipPush ship_flip_push(const FlipModel& model);
+// Tilt-in and brake alone (tilt_in_*, brake_*) from `speed_mps` along the line at the flip's end.
+FlipPush ship_brake_after_flip(const FlipModel& model, double speed_mps);
+
+// The flip flown forward [D] (Task 3 fix round 3): a copy of the ship at a gate state flies the flip as the session
+// flies it - ShipLandingGuidance's flip command (flip set at the flip throttle, axis to the vertical, flap schedule),
+// the session's ship-landing attitude controller, FlightBody::step at the session tick (engine spool-up, gimbals, hull and
+// flap aerodynamics, gravity) - until the first plan would start (ship_flip_ready). The planner's model, not the truth:
+// the copy flies the nominal hull aerodynamics, thrust and air density. The analytic FlipModel leaves the air out; at
+// ~100 m/s sink the hull's normal force turns with the hull and pushes back against the flip (Mach 2.6 flight: thrust
+// alone +40 m/s, flown +25 m/s).
+struct ShipFlipPrediction {
+    bool reached = false;         // the plan-start condition within the time limit
+    double flip_end_s = 0.0;      // axis within the flip tolerance (ShipLandingGuidance::flip_duration_s)
+    double flip_end_travel_m = 0.0;
+    double flip_end_speed_mps = 0.0;
+    double duration_s = 0.0;      // until the first plan starts
+    double gate_speed_mps = 0.0;  // along the line at the gate
+    double travel_m = 0.0;        // along the line, gate -> plan start
+    double speed_mps = 0.0;       // along the line at the plan start
+    double wall_ms = 0.0;         // computing time (diagnostics)
+};
+// The flip's end as the guidance takes it: the axis within the flip tolerance of `up_gcrf` and the pitch/yaw rate below
+// the settled rate - the first plan starts.
+bool ship_flip_ready(const ShipLandingParameters& parameters, const vehicle::FlightBody& body, const math::Vec3& up_gcrf);
+// `along_itrf`: the horizontal unit vector of the line (towards the tower); `tick_s`: the session's tick.
+ShipFlipPrediction predict_ship_flip(const vehicle::Vehicle& ship, const vehicle::RigidBodyState& gate_state,
+                                     const vehicle::FlightEnvironment& env, time::Epoch epoch, const LandingSite& site,
+                                     const ShipLandingParameters& parameters, const AttitudeController& controller,
+                                     double tick_s, const math::Vec3& along_itrf, double max_s = 30.0);
+// The predicted gate state for predict_ship_flip: at `position_itrf_m` with `velocity_itrf_mps` (Earth-fixed), the
+// belly flop the terminal steering flies into the gate - the axis level along `nose_itrf` (horizontal), the belly
+// (the live hull's flow side) into the flow, no rotation relative to the Earth.
+vehicle::RigidBodyState ship_gate_state(const vehicle::FlightBody& live, const frames::FixedToInertial& transform,
+                                        const math::Vec3& position_itrf_m, const math::Vec3& velocity_itrf_mps,
+                                        const math::Vec3& nose_itrf);
 
 // The ship's catch approach time constant [D] (DescentLimits::approach_time_constant_s): the time the final set's
 // engines take to run their throttle range, (throttle_max - throttle_min) / throttle_rate (the slowest engine). Within
@@ -144,10 +180,33 @@ EntryTarget ship_entry_target(const LandingSite& site, double gate_lead_m);
 // line `along_speed_mps` (towards the tower > 0) and the linear accelerations at `mass_kg` (same thrust; the angular
 // accelerations stay the heavy ship's).
 double ship_gate_lead_m(const ShipLandingParameters& parameters, double along_speed_mps, double mass_kg);
-// The terminal entry guidance's re-aim (EntryGuidance::set_terminal_aim): the gate with ship_gate_lead_m for the
-// predicted gate velocity (Earth-fixed) along the line to the tower and the live mass; the pad centre without a tower.
-EntryTarget ship_gate_aim(const LandingSite& site, const ShipLandingParameters& parameters,
-                          const math::Vec3& gate_velocity_itrf_mps, double mass_kg);
+// The gate lead from a flown flip (predict_ship_flip) [D]: its travel to the plan start, a gate speed along the line
+// other than the flip's carried on through it (v0 - v0_flip) t, then tilt-in and brake (ship_brake_after_flip at
+// `mass_kg`) from the plan start's speed.
+double ship_gate_lead_m(const ShipLandingParameters& parameters, const ShipFlipPrediction& flip,
+                        double along_speed_mps, double mass_kg);
+
+// The terminal entry guidance's re-aim (EntryGuidance::set_terminal_aim): the gate with the lead for the predicted gate
+// velocity (Earth-fixed) along the line to the tower and the live mass; the pad centre without a tower. The lead comes
+// from the flip flown forward (predict_ship_flip) from the predicted gate state, refreshed every
+// flip_refresh_s of flight (between refreshes the gate speed enters to first order); the analytic FlipModel only if
+// the flown flip does not settle.
+class ShipGateAim {
+public:
+    ShipGateAim(LandingSite site, ShipLandingParameters parameters, AttitudeController controller, double tick_s);
+    EntryTarget operator()(const EntryGuidance::TerminalGate& gate);
+    // [E] computing budget: a flip flown forward costs ~1000 ticks; the predicted gate speed moves slowly
+    static constexpr double flip_refresh_s = 5.0;
+    const std::optional<ShipFlipPrediction>& flip() const { return flip_; }
+
+private:
+    LandingSite site_;
+    ShipLandingParameters parameters_;
+    AttitudeController controller_;
+    double tick_s_ = 0.0;
+    std::optional<ShipFlipPrediction> flip_;
+    std::optional<time::Epoch> flip_epoch_;
+};
 
 // From the gate (belly down, ~100 m/s sink):
 //  Flip        - the sea-level engines relight at the flip throttle and the attitude controller turns the axis to the
@@ -164,6 +223,8 @@ public:
     ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters);
 
     ReturnCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
+    // Diagnostics prints (STARSIM_DEBUG_*) on (default) or off (the flip prediction's copy).
+    void set_diagnostics(bool on) { diagnostics_ = on; }
 
     ReturnPhase phase() const { return phase_; }
     void set_catch_contact(bool contact) { catch_contact_ = contact; }
@@ -208,6 +269,7 @@ private:
     ReturnPhase phase_ = ReturnPhase::Flip;
     std::unique_ptr<ScvxLandingGuidance> scvx_;
     bool started_ = false;
+    bool diagnostics_ = true;
     time::Epoch next_attempt_;
     time::Epoch flip_start_;
     double flip_duration_s_ = 0.0;

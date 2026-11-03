@@ -454,8 +454,9 @@ double gate_trigger_height_m(const EntryGuidanceParameters& parameters, double s
     return parameters.gate_height_m + curvature * (sink_mps - start) * (sink_mps - start);
 }
 
-void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const Vec3& r_itrf,
-                             const Vec3& v_itrf, double mach, double dt_s) {
+void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                             const math::Mat3& itrf_to_gcrf, const Vec3& r_itrf, const Vec3& v_itrf, double mach,
+                             double dt_s) {
     const Vec3 up = math::normalized(r_itrf);
     const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
     const Vec3 north = cross(up, east);
@@ -499,7 +500,9 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
         terminal_predicted_ = true;
         Vec3 p = terminal_steering_;
         if (terminal_aim_ && !given_up_ && terminal_gate_velocity_itrf_) {  // re-aim from the live state
-            target_ = terminal_aim_(*terminal_gate_velocity_itrf_, body.vehicle().mass_properties().mass_kg);
+            const Vec3& gate_v = *terminal_gate_velocity_itrf_;
+            const double gate_height = gate_trigger_height_m(parameters_, -dot(gate_v, up));
+            target_ = terminal_aim_({body, env, epoch, gate_v, gate_height});
         }
         double gate_time_to_go_s = 0.0;
         Vec3 gate_velocity_itrf_mps;
@@ -762,7 +765,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             }
         }
     }
-    if ((phase_ == EntryPhase::Terminal || phase_ == EntryPhase::Gate) && !capsule_) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
+    if ((phase_ == EntryPhase::Terminal || phase_ == EntryPhase::Gate) && !capsule_) terminal(body, env, epoch, transform.rotation, r_itrf, v_itrf, mach, dt);
     if (!capsule_) {
         // the coming entry's Mach number: the speed against the sound speed at the entry interface (none above US76)
         const double sound_mps = atmosphere.at(std::min(height, flap_rest_reference_height_m)).speed_of_sound_mps;

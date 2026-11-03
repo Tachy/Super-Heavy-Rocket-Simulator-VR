@@ -62,6 +62,7 @@ add_library(starsim_core STATIC
     src/gnc/scvx_landing.cpp
     src/gnc/ship_landing.cpp
     src/gnc/ship_landing_parameters.cpp
+    src/gnc/ship_flip_prediction.cpp
     src/gnc/upright_descent.cpp
     src/gnc/tvc_lateral.cpp
     src/gnc/attitude_slew.cpp

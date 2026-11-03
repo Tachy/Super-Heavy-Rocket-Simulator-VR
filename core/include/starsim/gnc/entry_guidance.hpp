@@ -248,10 +248,17 @@ public:
     // never hands over at a gate: the entry / terminal steering fly the belly flop down to the impact.
     void give_up(const EntryTarget& sea);
     bool given_up() const { return given_up_; }
-    // Terminal re-aim (a ship catch: gnc::ship_gate_aim): each terminal cycle the target becomes aim(the previous
-    // cycle's predicted gate velocity (Earth-fixed), the live mass) before the steering's predictions; the first
-    // terminal cycle keeps the target given. Not after give_up.
-    using TerminalAim = std::function<EntryTarget(const math::Vec3& gate_velocity_itrf_mps, double mass_kg)>;
+    // Terminal re-aim (a ship catch: gnc::ShipGateAim): each terminal cycle the target becomes aim(the live state and
+    // the previous cycle's predicted gate) before the steering's predictions; the first terminal cycle keeps the target
+    // given. Not after give_up.
+    struct TerminalGate {
+        const vehicle::FlightBody& body;
+        const vehicle::FlightEnvironment& env;
+        time::Epoch epoch;
+        math::Vec3 velocity_itrf_mps;  // predicted at the gate (Earth-fixed)
+        double height_m = 0.0;         // the gate's hand-over height above the target ground at that sink
+    };
+    using TerminalAim = std::function<EntryTarget(const TerminalGate& gate)>;
     void set_terminal_aim(TerminalAim aim) { terminal_aim_ = std::move(aim); }
     // The gate as the latest prediction reaches it (onboard prediction for the mission timeline): the cycle's epoch plus
     // the predicted time to the gate height - the entry corrector's solution or the terminal steering's prediction.
@@ -277,8 +284,9 @@ public:
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
     void aerocapture_cycle(const vehicle::FlightBody& body, const EntryPredictorState& state);
-    void terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
-                  const math::Vec3& v_itrf, double mach, double dt_s);
+    void terminal(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                  const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf, const math::Vec3& v_itrf, double mach,
+                  double dt_s);
     // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).
     math::Vec3 terminal_miss(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf,
                                const math::Vec3& steering, double* time_to_go_s,

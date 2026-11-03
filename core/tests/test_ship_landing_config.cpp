@@ -184,6 +184,20 @@ TEST_CASE("Gate lead follows the gate's horizontal speed", "[ship][landing][conf
     light.initial_speed_mps = v0;
     CHECK(gnc::ship_gate_lead_m(p, v0, 100.0e3) == Approx(gnc::ship_flip_push(light).lead_m()).epsilon(1e-12));
     CHECK(gnc::ship_gate_lead_m(p, v0, 200.0e3) == Approx(t5.lead_m()).epsilon(1e-12));
+
+    // From a flown flip (fix round 3): a flip with the analytic model's numbers gives the analytic lead; another gate
+    // speed carries on through it, (v0 - v0_flip) T, and enters the brake.
+    gnc::ShipFlipPrediction flown;
+    flown.reached = true;
+    flown.duration_s = t0.duration_s;
+    flown.gate_speed_mps = 0.0;
+    flown.travel_m = t0.travel_m;
+    flown.speed_mps = t0.speed_mps;
+    CHECK(gnc::ship_gate_lead_m(p, flown, 0.0, 200.0e3) == Approx(t0.lead_m()).epsilon(1e-12));
+    CHECK(gnc::ship_gate_lead_m(p, flown, v0, 200.0e3) == Approx(t5.lead_m()).epsilon(1e-12));
+    const auto brake_only = gnc::ship_brake_after_flip(p.gate_flip, t5.speed_mps + v0);
+    CHECK(brake_only.tilt_in_m == Approx(t5.tilt_in_m).epsilon(1e-12));
+    CHECK(brake_only.brake_m == Approx(t5.brake_m).epsilon(1e-12));
 }
 
 // Task 3 fix (I1): the first plan's guess ends a phase from the state, not in the middle of a wide derived window.

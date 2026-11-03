@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <string>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "lunar_return_test_support.hpp"
@@ -22,6 +23,7 @@
 #include "starsim/sim/lunar_return_mission.hpp"
 
 using namespace starsim;
+using Catch::Approx;
 
 namespace {
 
@@ -477,8 +479,8 @@ namespace {
 // flight's truth factors.
 // `moved_from_olp1`: a gate printed before the pad moved (2026-10-31): carried rigidly with the pad, from the old
 // position and tower azimuth to the site's, so that it keeps its place relative to pad and tower.
-test::CatchRun replay_gate(const double (&g)[16], double aero, double density, double thrust, bool moved_from_olp1 = false) {
-    test::LunarReturnSession t;
+// Places the gate's ship in `t` (place_landing_ship); returns the gate epoch.
+time::Epoch place_gate(test::LunarReturnSession& t, const double (&g)[16], bool moved_from_olp1) {
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
@@ -533,6 +535,12 @@ test::CatchRun replay_gate(const double (&g)[16], double aero, double density, d
                     re.y, re.z, ve.x, ve.y, ve.z, ne.x, ne.y, ne.z);
     }
     t.session.place_landing_ship(ship, state, epoch);
+    return epoch;
+}
+
+test::CatchRun replay_gate(const double (&g)[16], double aero, double density, double thrust, bool moved_from_olp1 = false) {
+    test::LunarReturnSession t;
+    const auto epoch = place_gate(t, g, moved_from_olp1);
     t.session.set_aero_dispersion(0, aero);
     t.session.set_thrust_dispersion(0, thrust);
     t.session.set_air_density_factor(density);
@@ -574,12 +582,76 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
 // Ship catch robustness (2026-10-21): the gate of lunar-return direct seed 18, the one of 21 that missed since
 // refuelling f3 - the landing burn's attitude lagged its re-planned reference, the re-plans stopped converging near
 // the 3 -> 2 engine switch and the catch aborted.
+namespace {
+const double seed18[16] = {848010481.76666546,   -2303163.2930843853, 5251548.8077884363,  2784887.0713356393,
+                           -344.80324421150925,  -241.62089640034384, -35.169364115429531, 0.75127393148601607,
+                           -0.59132762504812575, -0.23785828951925145, -0.17129668365576775, -0.075085288294500299,
+                           0.018449976961259034, -0.025684817876441189, 8443.9801185259676, 30406.388246525152};
+}  // namespace
+
 TEST_CASE("Lunar return seed-18 gate is caught", "[ship][catch][lunar]") {
-    const double seed18[16] = {848010481.76666546,   -2303163.2930843853, 5251548.8077884363,  2784887.0713356393,
-                               -344.80324421150925,  -241.62089640034384, -35.169364115429531, 0.75127393148601607,
-                               -0.59132762504812575, -0.23785828951925145, -0.17129668365576775, -0.075085288294500299,
-                               0.018449976961259034, -0.025684817876441189, 8443.9801185259676, 30406.388246525152};
     const auto run = replay_gate(seed18, 1.014, 1.105, 1.019, true);  // the flight's aero, density and thrust factors
     CHECK(run.result == sim::ReturnResult::Caught);
     CHECK(run.caught_within_tolerance());
+}
+
+// Task 3 fix round 3: the gate lead's flip (gnc::predict_ship_flip) against the flip the session flies from the same
+// gate - once from the exact gate state, once from the state the terminal re-aim builds (the gate velocity, the level
+// belly flop). Nominal truth (the prediction is the planner's model).
+TEST_CASE("The flip flown forward matches the session's flip at the seed-18 gate", "[ship][landing][lunar]") {
+    test::LunarReturnSession t;
+    const auto epoch = place_gate(t, seed18, true);
+    auto& session = t.session;
+    const auto& body = session.body(0);
+    const auto site = session.return_site(body.vehicle());
+    const auto p = gnc::ship_landing_parameters(body.vehicle());
+    const math::Vec3 along = gnc::ship_entry_target(site, p).nose_direction_itrf;
+    const auto tr = t.earth.fixed_to_gcrf(epoch);
+    const auto fixed = [&](const vehicle::RigidBodyState& s, time::Epoch at, math::Vec3& r, math::Vec3& v) {
+        const auto now = t.earth.fixed_to_gcrf(at);
+        r = transpose(now.rotation) * s.position_gcrf_m;
+        v = transpose(now.rotation) * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(now), s.position_gcrf_m));
+    };
+    math::Vec3 r0, v0;
+    fixed(body.state(), epoch, r0, v0);
+    const double tick = sim::FlightSession::tick_s;
+    const auto predict = [&](const vehicle::RigidBodyState& gate) {
+        return gnc::predict_ship_flip(body.vehicle(), gate, session.environment(), epoch, site, p,
+                                      session.ship_landing_controller(), tick, along);
+    };
+    const auto exact = predict(body.state());
+    const auto built = predict(gnc::ship_gate_state(body, tr, r0, v0, along));
+
+    // the session's flip up to the first plan (the plan starts in the tick's update, before its step)
+    vehicle::RigidBodyState before = body.state();
+    double flown_s = 0.0;
+    while (session.ship_landing(0)->phase() == gnc::ReturnPhase::Flip && flown_s < 30.0) {
+        before = body.state();
+        flown_s += tick;
+        session.advance_to(epoch + flown_s);
+    }
+    REQUIRE(session.ship_landing(0)->phase() == gnc::ReturnPhase::LandingBurn);
+    const double duration = flown_s - tick;
+    math::Vec3 r1, v1;
+    fixed(before, epoch + duration, r1, v1);
+    const double travel = dot(r1 - r0, along), push = dot(v1 - v0, along);
+    const auto line = [](const char* name, double d, double tr_m, double dv) {
+        std::printf("[flip prediction] %-7s plan start %.2f s, travel %.1f m, push %+.2f m/s\n", name, d, tr_m, dv);
+    };
+    line("flown", duration, travel, push);
+    line("exact", exact.duration_s, exact.travel_m, exact.speed_mps - exact.gate_speed_mps);
+    line("built", built.duration_s, built.travel_m, built.speed_mps - built.gate_speed_mps);
+    std::printf("[flip prediction] flip end (tolerance) flown %.2f s, exact %.2f s, built %.2f s; %.0f / %.0f ms\n",
+                session.ship_landing(0)->flip_duration_s(), exact.flip_end_s, built.flip_end_s, exact.wall_ms,
+                built.wall_ms);
+    REQUIRE(exact.reached);
+    REQUIRE(built.reached);
+    // the same dynamics from the same state
+    CHECK(exact.duration_s == Approx(duration).margin(2.0 * tick));
+    CHECK(exact.travel_m == Approx(travel).epsilon(0.01));
+    CHECK(exact.speed_mps - exact.gate_speed_mps == Approx(push).epsilon(0.01));
+    // from the re-aim's gate state: within 10 %
+    CHECK(built.duration_s == Approx(duration).epsilon(0.10));
+    CHECK(built.travel_m == Approx(travel).epsilon(0.10));
+    CHECK(built.speed_mps - built.gate_speed_mps == Approx(push).epsilon(0.10));
 }

@@ -383,6 +383,8 @@ public:
     // mission's landing target (drone ship or not).
     gnc::BoosterReturnParameters return_parameters(const config::StageConfig& stage) const;
     const vehicle::FlightEnvironment& environment() const { return env_; }
+    // The attitude controller of ship landings (flip, landing burn); the flip prediction flies it too.
+    const gnc::AttitudeController& ship_landing_controller() const { return ship_landing_controller_; }
     // Reference body of body `index` now (lunar l1).
     ephemeris::Body reference_body(size_t index) const;
     const CatchTowerSim* tower() const { return tower_.get(); }

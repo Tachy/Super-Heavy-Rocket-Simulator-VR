@@ -164,8 +164,18 @@ FlipPush ship_flip_push(const FlipModel& m) {
     }
     // The gate's own horizontal speed along the line carries on through the flip.
     f.travel_m += m.initial_speed_mps * f.duration_s;
+    const auto brake = ship_brake_after_flip(m, m.initial_speed_mps + f.speed_mps);
+    f.tilt_in_s = brake.tilt_in_s;
+    f.tilt_in_m = brake.tilt_in_m;
+    f.brake_speed_mps = brake.brake_speed_mps;
+    f.brake_m = brake.brake_m;
+    return f;
+}
+
+FlipPush ship_brake_after_flip(const FlipModel& m, double speed_mps) {
+    FlipPush f;
     // Tilt-in: the horizontal part of the braking set's thrust grows with the tilt; the braking ends at rest.
-    double v = m.initial_speed_mps + f.speed_mps;
+    double v = speed_mps;
     if (m.brake_tilt_rad > 0.0 && m.brake_alpha_radps2 > 0.0) {
         f.tilt_in_s = flip_duration_s(m.brake_tilt_rad, m.brake_alpha_radps2, m.brake_rate_max_radps);
         const double h = f.tilt_in_s / flip_push_steps;
@@ -270,15 +280,32 @@ ShipLandingParameters ship_landing_parameters(const config::VehicleConfig& vehic
     return p;
 }
 
-double ship_gate_lead_m(const ShipLandingParameters& p, double along_speed_mps, double mass_kg) {
+namespace {
+
+FlipModel model_at_mass(const ShipLandingParameters& p, double mass_kg) {
     FlipModel m = p.gate_flip;
     if (p.gate_flip_mass_kg > 0.0 && mass_kg > 0.0) {  // same thrust on the live mass
         const double scale = p.gate_flip_mass_kg / mass_kg;
         m.flip_accel_mps2 *= scale;
         m.brake_accel_mps2 *= scale;
     }
+    return m;
+}
+
+}  // namespace
+
+double ship_gate_lead_m(const ShipLandingParameters& p, double along_speed_mps, double mass_kg) {
+    FlipModel m = model_at_mass(p, mass_kg);
     m.initial_speed_mps = along_speed_mps;
     return ship_flip_push(m).lead_m();
+}
+
+double ship_gate_lead_m(const ShipLandingParameters& p, const ShipFlipPrediction& flip, double along_speed_mps,
+                        double mass_kg) {
+    // the flown flip at its own gate speed; a different gate speed carries on through it (first order)
+    const double dv0 = along_speed_mps - flip.gate_speed_mps;
+    const auto brake = ship_brake_after_flip(model_at_mass(p, mass_kg), flip.speed_mps + dv0);
+    return flip.travel_m + dv0 * flip.duration_s + brake.tilt_in_m + brake.brake_m;
 }
 
 std::vector<std::string> ship_flip_groups(const config::StageConfig& ship) {

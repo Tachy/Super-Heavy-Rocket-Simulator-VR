@@ -1,6 +1,7 @@
 // The flight session flies an entering ship on its entry guidance (full environment: SPICE Earth, gravity with J2,
 // Moon and Sun) from the supersonic end of the entry west of Starbase to the gate ahead of the tower, and on to the catch.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -11,6 +12,7 @@
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
@@ -127,13 +129,27 @@ TEST_CASE("Session flies an entering ship from Mach 2.6 into the tower's arms", 
     std::printf("gate: height %.0f m, speed %.1f m/s, sink %.1f m/s, flight path %.1f deg, alpha %.1f deg, %.1f t\n",
                 gate.altitude_m - session.launch_site().height_m, gate.speed_relative_mps, -gate.vertical_speed_mps,
                 gate.flight_path_angle_rad / deg, gate.angle_of_attack_rad / deg, gate.propellant_kg / 1000.0);
+    // the gate lead's flip (Task 3 fix round 3): flown forward from the gate state the re-aim builds (gate velocity,
+    // level belly flop)
+    const auto& body = session.body(0);
+    const auto site = session.return_site(body.vehicle());
+    const auto landing = gnc::ship_landing_parameters(body.vehicle());
+    const Vec3 along = gnc::ship_entry_target(site, landing).nose_direction_itrf;
+    const auto tr = earth().fixed_to_gcrf(session.epoch());
+    const Vec3 r = transpose(tr.rotation) * body.state().position_gcrf_m;
+    const Vec3 v = transpose(tr.rotation) *
+                   (body.state().velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), body.state().position_gcrf_m));
+    const auto flip = gnc::predict_ship_flip(body.vehicle(), gnc::ship_gate_state(body, tr, r, v, along),
+                                             session.environment(), session.epoch(), site, landing,
+                                             session.ship_landing_controller(), sim::FlightSession::tick_s, along);
     const auto run = test::fly_landing(session, earth(), t0 + time_s, 120.0);
     const auto* g = session.ship_landing(0);
     REQUIRE(g != nullptr);
-    std::printf("entry to catch: gate after %.0f s, flip %.1f s ending at %.0f m; %s, offset %.2f m, lateral %.2f m/s, "
-                "sink %.2f m/s, %.1f t propellant left\n",
-                time_s, g->flip_duration_s(), g->flip_end_height_m(), sim::to_string(run.tower_phase), run.offset_m,
-                run.lateral_mps, run.sink_mps, session.body(0).vehicle().propellant_kg() / 1000.0);
+    std::printf("entry to catch: gate after %.0f s, flip %.2f s (predicted %.2f s) ending at %.0f m; %s, offset %.2f m, "
+                "lateral %.2f m/s, sink %.2f m/s, %.1f t propellant left\n",
+                time_s, g->flip_duration_s(), flip.flip_end_s, g->flip_end_height_m(), sim::to_string(run.tower_phase),
+                run.offset_m, run.lateral_mps, run.sink_mps, session.body(0).vehicle().propellant_kg() / 1000.0);
+    CHECK(flip.flip_end_s == Catch::Approx(g->flip_duration_s()).epsilon(0.10));
     CHECK_FALSE(run.tower_struck);
     CHECK(run.caught_within_tolerance());
 }

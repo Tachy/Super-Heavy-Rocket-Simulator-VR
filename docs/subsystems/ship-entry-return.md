@@ -84,18 +84,25 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   reads the same (Task 1c, 2026-11-03; before, the whole load counted and plans could fly the headers dry). Ship LQR effort 0.03 of the gimbal authority [D seed 18], attitude
   controller `Gains::actuator_delay_s` 0.75 s; flaps folded in the burn. Lateral phase tilt limit 20 deg [E].
   `FlightSession::place_landing_ship`; the entry hands over at the gate.
-- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (static: 195 m, `gnc::ship_flip_push`: the flip set at
-  the flip throttle relights - thrust and authority ramp over the Raptor's 3 s startup - and turns 90 deg rest-to-rest
-  (time-optimal at the ramped authority) in 4.51 s, pushing 87 m and 37.8 m/s along the nose; the three at 95 % tilt in
-  to 20 deg at the phase's rate limit in 1.69 s (60 m, braking meanwhile) and brake the remaining 29.9 m/s in 49 m.
-  Sim check, seed-18 gate: flip 4.4-4.9 s, ~105 m, +36 m/s; Mach 2.6 session flight: flip 3.8 s, +24 m/s, ~75 m (the
-  aerodynamic flip start - flaps folded, the tail falls while the engines spool - is not in the model). The gate's own
-  horizontal speed v0 along the line adds v0 (t_flip + t_tilt-in) and brakes from v0 + 29.9 m/s
-  (`FlipModel::initial_speed_mps`): the static 195 m (v0 = 0, heavy ship) is the deorbit planners' aim
-  (`ship_deorbit_plan`, `replan_ship_deorbit`, the lunar return's gate); in flight `EntryGuidance::set_terminal_aim`
-  re-aims every terminal cycle with `gnc::ship_gate_aim` (`ship_gate_lead_m` for the previous cycle's predicted gate
-  velocity along the line and the live mass; e.g. 6.6 m/s, 289 t -> 260 m). Not in the lead: the plans' non-maximal
-  braking; the ideal turn ends settled and the first plan is synchronous, so no settle or latency term) back from the catch axis on the line tower ->
+- Gate lead: `gnc::ship_entry_target` puts the entry target the derived lead (flip travel + tilt-in + brake) back
+  from the catch axis. Static (the deorbit planners' aim: `ship_deorbit_plan`, `replan_ship_deorbit`, the lunar return's gate): 195 m
+  from the analytic `gnc::ship_flip_push` (no air) - the flip set relights (thrust and authority ramp over the Raptor's
+  3 s startup) and turns 90 deg rest-to-rest in 4.51 s, pushing 87 m and 37.8 m/s; the three at 95 % tilt in to 20 deg
+  at the phase's rate limit in 1.69 s (60 m) and brake the remaining 29.9 m/s in 49 m; v0 at the gate adds
+  v0 (t_flip + t_tilt-in) and brakes from v0 + 29.9 m/s (`FlipModel::initial_speed_mps`). This model overstates the
+  push: at ~100 m/s sink the hull's normal force turns with the hull and pushes back (Mach 2.6 flight: thrust alone
+  +40 m/s, flown +25 m/s). In flight (fix round 3) `EntryGuidance::set_terminal_aim` re-aims with `gnc::ShipGateAim`:
+  the flip flown forward (`gnc::predict_ship_flip`: a copy of the ship at the predicted gate state - the terminal
+  prediction's gate velocity at the hand-over height, level belly flop with the live flow side, `ship_gate_state` -
+  flies `ShipLandingGuidance`'s flip with the session's ship-landing controller and `FlightBody::step` at the session
+  tick, nominal aero / thrust / air, to the first plan's start `ship_flip_ready`), then tilt-in and brake
+  (`ship_brake_after_flip`) from the flown end speed (`ship_gate_lead_m(p, ShipFlipPrediction, v0, mass)`). Refreshed
+  every 5 s of the terminal phase [E computing budget, ~50 ms per flip]; between refreshes the gate speed enters to
+  first order ((v0 - v0_flip) t_flip and the brake). Checks: seed-18 gate from the exact state identical to the
+  session's flip (4.93 s, 130.7 m, +34.6 m/s), from the re-aim's built state 4.80 s, 119.6 m, +32.2 m/s (-3/-8/-7 %);
+  Mach 2.6 flight: predicted flip end 3.92 s vs flown 3.93 s, 72.1 m / +25.8 m/s vs ~71.5 m / +25.4 m/s; lead
+  ~164 m at v0 5.8 m/s (the analytic model: 252 m). Not in the lead: the plans' non-maximal braking; the first plan
+  is synchronous, so no latency term. The lead lies on the line tower ->
   pad with `EntryTarget::nose_direction_itrf` to the tower; only that approach is robust (the arms stand across the
   line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering to the nearest edge
   of the nose sector at fraction 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 3 deg/s [E],

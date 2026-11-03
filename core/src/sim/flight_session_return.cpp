@@ -71,12 +71,12 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
     const auto target = gnc::ship_entry_target(site, landing);
     flying.entry_guidance =
         std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters, radiative_heating_);
-    // the terminal phase moves the gate with the lead the predicted gate state needs (ship_gate_aim)
+    // the terminal phase moves the gate with the lead the predicted gate state needs: the flip flown forward with this
+    // session's ship-landing controller and tick (gnc::ShipGateAim)
     if (site.catch_target) {
+        auto aim = std::make_shared<gnc::ShipGateAim>(site, std::move(landing), ship_landing_controller_, tick_s);
         flying.entry_guidance->set_terminal_aim(
-            [site, landing = std::move(landing)](const math::Vec3& gate_velocity_itrf_mps, double mass_kg) {
-                return gnc::ship_gate_aim(site, landing, gate_velocity_itrf_mps, mass_kg);
-            });
+            [aim](const gnc::EntryGuidance::TerminalGate& gate) { return (*aim)(gate); });
     }
 }
 
