@@ -5,6 +5,7 @@
 #include <memory>
 #include <utility>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "ship_entry_scenario.hpp"
@@ -145,4 +146,8 @@ TEST_CASE("The aerocapture speed leaves a bank window to 400 km within the limit
     const double v_corridor = gnc::max_entry_speed(model, corridor_only, 0.5 * deg, 8000.0, 11000.0);
     CHECK(q.speed_mps < v_corridor);
     CHECK(q.speed_mps > 9000.0);
+    // regression pins of the 177 t ship (measured 2026-11-03): 50 m/s is 0.5 % of the speed, ~1.5 % of the heat rate
+    // at the limit (q ~ v^3) - a model change of that size shows here
+    CHECK(q.speed_mps == Catch::Approx(9992.0).margin(50.0));
+    CHECK(v_corridor == Catch::Approx(10273.0).margin(50.0));
 }

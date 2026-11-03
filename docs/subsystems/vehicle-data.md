@@ -11,7 +11,10 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
   cutoff with gravity loss over the whole burn (altitude polynomial anchored by the stack's), steering (normal
   acceleration), the config's engine mix (Isp 362.6 s, 359.2 s with one RVac out on flights 12 / 14), gauge p0
   extrapolated to ignition, p1 read from frames; the gauge shows the main tanks only, so metered capacity 1,565 t and
-  dry = M - payload - 35 t of header propellant: 165.8 / 182.4 / 181.7 t (payloads 37.5 / 38.5 / 50 t). Cross-checks:
+  dry = M - payload - 35 t of header propellant: 165.8 / 182.4 / 181.7 t (payloads 37.5 / 38.5 / 50 t). Flight 14's
+  payload is [E] 26 Starlink V3 at ~2 t; the preferred figure is the mission file's 52 t (26 x 2.0 t,
+  `config/missions/flight14_ascent.toml`), which gives 179.7 t and a mean of 176.0 t (176.6 t with 50 t): 177 t stays,
+  the payload's 2 t move it by 0.7 t, far inside the +-20 t. Cross-checks:
   flight 12's one-engine landing phase bounds the splashdown mass at <= 209-218 t at 280 tf; the vehicle physics mass
   audit's judgement 175 +-25 t; a community bottom-up 166 t. **Ship dry CG 22.03 m +-1.3 m** [D]
   (`tools/structures/ship_mass_budget.py --dry-t 177`: 127.3 t of named items at 20.94 m, the rest like the shell;

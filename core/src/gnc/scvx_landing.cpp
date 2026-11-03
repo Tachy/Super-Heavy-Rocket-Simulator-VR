@@ -135,9 +135,14 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
         r.warm_start = plan_;
         r.warm_start_elapsed_s = snapshot.epoch + r.start_offset_s - plan_epoch_;
     }
-    if (plan_) {  // a re-plan: the engines are running, their thrust changes at the throttle rate
+    // A re-plan, or a first plan whose start set already burns at thrust (the ship's flip engines at the flip
+    // throttle): the engines are running, their thrust changes at the throttle rate from what they give now. Without
+    // it the ship's first plan after the flip asked 8.7 m/s^2 at once while the three engines came down from 0.8 at
+    // 0.5 / s (~19 m/s^2 flown on 212 t): ~9 m/s of sink braked off unplanned, the catch ~3 s later than planned.
+    const bool running = !plan_ && snapshot.thrust_n > 0.0 && snapshot.phase0_spool >= 1.0;
+    if (plan_ || running) {
         r.settings.limits.initial_thrust_n = snapshot.thrust_n;
-        r.settings.limits.initial_thrust_window_s = parameters_.plan_latency_s;
+        r.settings.limits.initial_thrust_window_s = plan_ ? parameters_.plan_latency_s : 0.0;
     }
     if (aborting_) r.settings.limits.min_phase_s = {};  // mid-flight: no forced phase durations
     const double reserve_fraction = aborting_ ? parameters_.abort_reserve_fraction

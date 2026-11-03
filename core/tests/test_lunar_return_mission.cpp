@@ -14,6 +14,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
@@ -71,10 +72,22 @@ TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lun
     INFO(s.refusal);
     REQUIRE(budget.closes);
     CHECK(s.return_planned);
-    // [D] TEI ~0.9 + braking ~1.1 km/s (l5 Task 6; the plan estimated 1.5) + MCC + coast + 35 t landing + 10 t reserve
-    // on 255 t dry: ~250 t (before planner plan Task 3b; 177 t dry since)
+    // [D] TEI ~0.9 + braking ~1.1 km/s (l5 Task 6; the plan estimated 1.5) + MCC + coast + landing + 10 t reserve:
+    // ~190 t on 177 t dry (planner plan Task 3b; ~250 t on 255 t dry before). The load must at least carry the
+    // planned burns by the rocket equation on the vacuum Raptors from the entry mass (dry + header landing propellant),
+    // plus that landing propellant - a floor that follows the dry mass (MCC, coast and reserve come on top):
+    // 212 t x (exp(2.0 km/s / (380 s g0)) - 1) + 35 t = ~186 t at 177 t dry.
     const auto& v = t.session.body(t.session.controlled_index()).vehicle();
-    CHECK(v.propellant_kg() > 200e3);
+    const double dry_kg = v.mass_properties().mass_kg - v.propellant_kg();
+    double landing_kg = 0.0;
+    test::block3_with_ship([&](config::StageConfig& s) { landing_kg = s.landing_propellant_kg; });
+    const double ve_mps = gnc::groups_vacuum_isp_s(v, {"ship/vacuum"}) * constants::standard_gravity_mps2;
+    REQUIRE(ve_mps > 0.0);
+    const double burns_floor_kg =
+        (dry_kg + landing_kg) * std::expm1((budget.tei_delta_v_mps + budget.braking_delta_v_mps) / ve_mps) + landing_kg;
+    INFO("floor " << burns_floor_kg / 1e3 << " t");
+    CHECK(budget.tei_delta_v_mps + budget.braking_delta_v_mps > 0.0);
+    CHECK(v.propellant_kg() > burns_floor_kg);
     CHECK(v.propellant_kg() < 400e3);
     CHECK(v.propellant_kg() == Catch::Approx(budget.propellant_kg).margin(1.0));
     CHECK(budget.entry_speed_mps > 9000.0);

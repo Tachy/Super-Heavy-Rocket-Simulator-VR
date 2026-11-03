@@ -2,7 +2,7 @@
 
 Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also live in `docs/subsystems/<slug>.md`.
 
-- #1147 (`Ship entry reproduces the webcast telemetry of flights 12-14`, flight 14 speed rms 8.33 % against 5 %): the webcast comparison is a report since 2026-11-03 (user: "report, not gate; physical gate kept"), `[nightly][webcast]` "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" writes `webcast_report/ship_entry_telemetry.md` (parameters: entry mass 255 vs ~175 t, CG, crossflow Cd, flap CdA). The gate part (no impact, lift fraction saturated < 10 %, > 200 speed points) is green (measured 2026-11-03, 16 s) and red or green by physics only; the report row flight 14 speed rms was 0.083 (outside 0.05) at 255 t dry; since the 177 t of Task 3b it is 0.046 (inside), flights 12 / 13 0.061 / 0.091 (outside) and the Mach 3-1 rows of flights 13 / 14 0.28 / 0.25 (outside 0.1, slow); open vehicle-plan item, nothing tuned. The same applies to the other webcast bands (ascent flight 14 / CRS-35, descent rms, booster return timeline, ASDS and RTLS timelines, staging flip time, Crew Dragon chutes): reports, the physical gates stay in the normal tier. Dropped pins: the 77.5 deg bank of `test_entry_skip.cpp` (gate, miss and heat stay), the docking `KNOWN STATE` (report row).
+- #1147 (`Ship entry reproduces the webcast telemetry of flights 12-14`, flight 14 speed rms 8.33 % against 5 %): the webcast comparison is a report since 2026-11-03 (user: "report, not gate; physical gate kept"), `[nightly][webcast]` "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" writes `webcast_report/ship_entry_telemetry.md` (parameters: entry mass (177 t dry + 35 t headers), CG, crossflow Cd, flap CdA). The gate part (no impact, lift fraction saturated < 10 %, > 200 speed points) is green (measured 2026-11-03, 16 s) and red or green by physics only; the report row flight 14 speed rms was 0.083 (outside 0.05) at 255 t dry; since the 177 t of Task 3b it is 0.046 (inside), flights 12 / 13 0.061 / 0.091 (outside) and the Mach 3-1 rows of flights 13 / 14 0.28 / 0.25 (outside 0.1, slow); open vehicle-plan item, nothing tuned. The same applies to the other webcast bands (ascent flight 14 / CRS-35, descent rms, booster return timeline, ASDS and RTLS timelines, staging flip time, Crew Dragon chutes): reports, the physical gates stay in the normal tier. Dropped pins: the 77.5 deg bank of `test_entry_skip.cpp` (gate, miss and heat stay), the docking `KNOWN STATE` (report row).
 - Default-tier run after the test tiers (2026-11-03, `.superpowers/sdd/2026-11-03-test-tiers/full_after.log`): 7 of 1513 red at that run (the "Docked tanker" case is green since 2026-11-03); ctest numbers shift with every added case, so the reds are named by test: the two settling cases below ("the coast stops before the lead in 10 s and in 600 s steps", "the turn to the burn ends before the push"), the reduced direct lunar case "Lunar return campaign (direct): seed 2", the two flap-trim cases (one since Task 3b, below), `plan_speed`. The timeline sampling case (formerly #711) was fixed by 9fbb94a and is green; #1147 is nightly.
 - Reds since 47904b6 (ship hull CP table, station fade Mach 1-4, nose 17 -> 13.4 m), found by the full run 2026-11-03 (`.superpowers/sdd/test-audit/reds-report.md`), not re-pinned: the two settling cases of `test_ignition_settling.cpp` (the drifting tanker in a ~100 km perigee orbit turns side-on, apoapsis 183 -> 117 km in one pass, hits the ground ~2100 s before the burn; open: test orbit or attitude hold while drifting, check mission tankers); (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (interface speed -68..-82 m/s, braking +78..+96 m/s, TEI -1.9/+3.4/-0.2 m/s LLO/NRHO/aircatch against the stored reference plans).
 - Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, -1.1 % vacuum Isp on
@@ -59,9 +59,19 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     at the basis freeze (Mach ~0.4) departs (axis error 7.6 deg, roll error -19 deg, RCS 13-22 x saturated, flaps on
     the 90 deg stops) and the ship drifts 180 m east, which the near-vertical fall cannot take back. The same start
     flown to the arms ("from Mach 2.6") is caught (0.96 m/s, 9.5 t, was 10.6 t).
-  - New red, predictions (for plan Task 4): "A ship's flip and catch records one landing burn": the entry guidance's
-    gate time is -1.95 / -2.15 s off in its first ~10 s at 208 s out (limit 1.0; within 120 s 0.90 s); the first catch
-    plan ends 4.41 s early (limit 4.0). Caught, one landing burn.
+  - Red, predictions: "A ship's flip and catch records one landing burn". Found after Task 3b (fix round 1): (1) the
+    case placed the ship at 65 deg with the flaps at mid travel, the 290 t ship's state; the 212 t ship's steering
+    commands 56.3 deg there (its first prediction at 65 deg fell 4.3 km short) and trims with the forward flaps ~20 deg
+    further out: a ~10 s pitch transient the predictions do not fly. The case now starts at the commanded alpha with
+    the trimmed flaps (derived per run). (2) The predicted catch was the plan's end, the pins 1 m above the arm tops at
+    1 m/s: the touch comes clearance / sink = 1.0 s later (`ShipLandingGuidance::catch_epoch`). (3) The first landing
+    plan after the flip ignored that the flip engines run (3 x 0.8 throttle, 0.5 / s down): it asked 8.7 m/s^2, the
+    ship flew ~19 and braked ~9 m/s of sink off unplanned; the first plan now starts from the running thrust like a
+    re-plan (`ScvxLandingGuidance::request`). Catch error 4.41 -> 3.11 s (limit 4.0, green). Still red: the gate
+    -1.34 s at 207 s out (limit 1.0; was -2.15), -0.78 s after ~15 s: the online drag scale learns a 0.7 % drag
+    deficit of the entry aero table below Mach 2.2 over that time (the predicted gate moves +0.57 s with it); the
+    rest (~-0.8 s) is the pre-existing bias (-0.83 s at 290 t over a 179 s horizon, now 208 s). Entry aero table
+    fidelity, for plan Task 4.
   - Fixed on the way: the booster's landing-ignition forecast just past the apex (-54.7 s, a sink near zero; now the mean
     sink of the fall ahead is its floor: +8.6 s); `frames::fixed_to_geodetic` NaN within ~0.1 m of the axis (the
     yaw-demand fixture starts over the pole). Mass-relative fixtures restated: no usable corridor at 10.9 km/s (0.13
@@ -103,7 +113,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   - The 64 t aerocapture is green: apoapsis 426 km, axis error 1.6 deg, peak 924 kW/m^2. At 64 t below Mach 2.5 the aft pair is at its stop (short 42-619 m^3 per q).
 - Low-Mach control margin of the belly flop (Task 6d): the attitude step when the terminal basis freezes (gamma -70, Mach ~0.68) demands ~1e6 N m of yaw, above what the flaps deliver at zero roll (+-8.4e5 N m at alpha 80.5, forward flaps fixed about -1.3e5 / +0.7e5). Roll reaches 0.05-0.07 rad/s and makes sideslip; at 13 deg of it the hull's yaw moment nearly exhausts the flaps, at 20 deg it is beyond them. The authority floor of the allocation (`flap_lowest_effective_rad`, a quarter of the best slope) cleared every departure seen, and case 8 under flap table scalings up to +-0.2 %: 0 of 10 depart (without floor 8 of 10). The window is narrow: fraction 0.20 2 of 10, 0.15 and 0.30 9 of 10. 0.25 was set before the first run, from `flap_tiny_column_fraction`, and not moved. The step itself is untouched (no guidance change).
 
-- Ship aero state frozen (2026-11-01, mass / CG / geometry audits and replays): crossflow `ship_crossflow.csv` 1.5-1.6 [D], the old entry alpha table, entry CG 25.50 m, dry mass 255 t, dry CG 23.516 m [D] stay as on main, because no tested combination passes all replays (flights 12-14 speed rms < 5 %, low-altitude rms < 10 %, saturated < 10 %, subsonic ratio 0.9-1.1; the guidance case 8). Replays, entry mass per flight 221 / 252 / 215 t:
+- Ship aero state frozen (2026-11-01, mass / CG / geometry audits and replays): crossflow `ship_crossflow.csv` 1.5-1.6 [D] and the old entry alpha table stay as on main (the dry mass and CG are the derived 177 t / 22.03 m since planner plan Task 3b, entry CG with full headers 24.99 m), because no tested combination of the 2026-11-01 audits passed all replays (flights 12-14 speed rms < 5 %, low-altitude rms < 10 %, saturated < 10 %, subsonic ratio 0.9-1.1; the guidance case 8). Replays, entry mass per flight 221 / 252 / 215 t:
 
   | Variant | f12 speed / sat % | f13 speed / low / sat % | f14 speed / low / sat % | Case 8 |
   |---|---|---|---|---|
@@ -113,7 +123,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   | geometry + alpha 59.5 + masses + CG 24.85 m | 4.54 / **10.20** | 3.54 / **14.96** / **15.21** | 4.45 / **22.06** / 8.53 | departs, 10 of 10 fail (miss 5.2 km) |
   | main since Task 3b (177 t dry, 212 t entry, CG 24.99 m, crossflow 1.5) | **6.07** / - | **9.08** / **27.9** / - | 4.55 / **24.7** / - | not run (Task 12) |
 
-  Since Task 3b the dry mass and CG are the derived 177 t / 22.03 m (no longer frozen); the row is the nightly report
+  The last row is the nightly report
   "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" (speed rms above Mach 3 / rms Mach 3-1;
   subsonic ratio 0.83 / 0.82 on flights 13 / 14, outside 0.9-1.1): the lighter ship flies slow below Mach 3, as the
   "measured masses" row did. Crossflow and alpha table stay as frozen; the low-Mach part stays the next step.

@@ -241,6 +241,7 @@ public:
     EntryCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     EntryPhase phase() const { return phase_; }
+    const EntryCommand& command() const { return command_; }  // of the last update
     const EntryTarget& target() const { return target_; }
     const EntryGuidanceParameters& parameters() const { return parameters_; }
     void skip_to(EntryPhase phase) { phase_ = phase; }

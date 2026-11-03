@@ -19,6 +19,9 @@ are corrected by the table's bias (--gauge-bias).
 
 The default engines are the config's: Raptor 3 in vacuum (1.30 m nozzle: 2.880 MN, 346.2 s) and RVac 3 (2.98 MN,
 380 s); --rvac-out-s drops one RVac from that time on (flight 12 T+183 s, flight 14 T+438 s).
+Assumptions (both second order): the mixed Isp sum F / sum (F / Isp) takes every engine at the same throttle; the
+steering term carries the Coriolis lift of an eastward Earth-relative speed (2 Omega v cos lat) but not the Earth
+rotation's centrifugal acceleration (~0.03 m/s^2) and takes the azimuth as due east (together < ~10 m/s).
 """
 import argparse
 import csv

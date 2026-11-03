@@ -587,15 +587,45 @@ TEST_CASE("A lunar-return entry's loft records no Max Q", "[timeline][slow]") {
 TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     test::spice_session();
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
-    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
-    set_starbase(session);
-    const auto cfg = ship_alone(-1.0);  // its landing propellant
+    auto cfg = ship_alone(-1.0);  // its landing propellant
     // 28 km west of the pad, 26 km up, Mach ~2.6, 8 deg down (test_flight_session_entry: caught in the arms)
     const double speed = 780.0, gamma = -8.0 * deg;
-    session.place_entering_ship(
-        cfg, belly_state(session, cfg, t0, {-28000.0, 0.0, 26000.0}, {speed * std::cos(gamma), 0.0, speed * std::sin(gamma)},
-                         65.0),
-        t0);
+    double start_alpha_deg = 65.0;
+    const auto place = [&](sim::FlightSession& s) {
+        set_starbase(s);
+        s.place_entering_ship(
+            cfg, belly_state(s, cfg, t0, {-28000.0, 0.0, 26000.0}, {speed * std::cos(gamma), 0.0, speed * std::sin(gamma)},
+                             start_alpha_deg),
+            t0);
+    };
+    // Placed mid-flight, the ship starts in trim at the alpha its terminal steering commands for this state (as after
+    // a hand-over from the entry), not in an attitude transient the onboard predictions do not fly. The fixed 65 deg
+    // with the flaps at mid travel belonged to the 290 t ship (255 t dry, CG 23.5 m); the 212 t ship (planner plan
+    // Task 3b, CG 22.0 m) slows faster - its first prediction at 65 deg fell 4.3 km short, the steering commanded
+    // 56.3 deg - and trims with the forward flaps ~20 deg further out than mid; the ~10 s pitch transient made the first
+    // gate predictions 2.15 s early (0.93 s once flown out). Two guidance cycles per pass, until the alpha holds.
+    for (int pass = 0; pass < 4; ++pass) {
+        sim::FlightSession probe(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+        place(probe);
+        const double mach = probe.telemetry(0).mach;
+        probe.advance_to(t0 + 1.0, 1000);
+        const auto* entry = probe.entry_guidance(0);
+        REQUIRE(entry);
+        const double commanded_deg = entry->command().alpha_rad / deg;
+        const auto trim = entry->model().aero.trim_flap_rad(mach, commanded_deg * deg);
+        REQUIRE(trim.size() == cfg.stages[0].flaps.size());
+        for (size_t k = 0; k < trim.size(); ++k) cfg.stages[0].flaps[k].initial_deflection_rad = trim[k];
+        const bool held = std::abs(commanded_deg - start_alpha_deg) < 0.5;
+        start_alpha_deg = commanded_deg;
+        if (held) break;
+    }
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("  [start] alpha %.1f deg, flaps", start_alpha_deg);
+        for (const auto& f : cfg.stages[0].flaps) std::printf(" %.1f", f.initial_deflection_rad / deg);
+        std::printf(" deg\n");
+    }
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    place(session);
     const auto& t = session.timeline();
     PredictionTrack landing_burn_prediction, catch_prediction;  // onboard predictions (Task 4b)
     int after_contact = 0, without_catch = 0;
@@ -605,8 +635,7 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
         landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn), session.epoch());
         catch_prediction.sample(predicted_of(t, MissionEventKind::Caught), session.epoch());
         if (const auto* entry = session.entry_guidance(0)) {
-            max_drag_scale = std::max(max_drag_scale, entry->model().drag_scale);
-        }
+            max_drag_scale = std::max(max_drag_scale, entry->model().drag_scale);        }
         if (session.catch_contact_epoch(0)) {  // from the pins' first touch a catch dot is shown
             ++after_contact;
             if (!caught_shown(t, session.body_serial(0))) ++without_catch;
@@ -631,6 +660,10 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     CHECK(*landing_burn_prediction.first_seen - t0 <= 1.0);  // from the entry guidance's first cycle
     // Measured 2026-10-22: the gate -0.83 s 179 s before, 0.07 s within the last 30 s; the catch (the plan's end vs the
     // pins' first touch on the arms): -2.9 s 18 s before, -1.3 s at the end.
+    // Planner plan Task 3b (212 t ship, trimmed start): the gate -1.34 s 207 s before, -0.78 s after ~15 s (the online
+    // drag scale learns the table's 0.7 % drag deficit below Mach 2.2 over that time, the predicted gate moving
+    // +0.57 s with it), 0.09 s within the last 30 s; the catch (the touch now clearance / sink after the plan's end; the
+    // first plan from the running flip engines' thrust) -3.11 s at most, 0.75 s within the last 10 s.
     // M8a Task 7: on the derived Starbase height (-21.11 m) the subsonic pitch-up to the belly-flop alpha (78 -> 86 deg
     // commanded, 83-89 deg flown) taught the online drag scale 1.09 from the transient and the gate ran 2.92 s late;
     // in the terminal phase the scales now hold while the largest full attitude error over the scale cycle exceeds

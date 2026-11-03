@@ -234,11 +234,16 @@ public:
     // once down or with the pins on the arms.
     bool request_abort();
     int first_plan_attempts() const { return first_plan_attempts_; }
-    // The catch the landing burn's plan flies to (its end); none before the first plan, once landed, while aborting
-    // and in the upright descent (onboard prediction for the mission timeline).
+    // The catch the landing burn's plan flies to: the pins' touch on the arms - the plan ends with them the catch
+    // clearance above the arm tops, sinking at the catch sink, which the tracking holds past the end (sample_plan), so
+    // they touch clearance / sink later. None before the first plan, once landed, while aborting and in the upright
+    // descent (onboard prediction for the mission timeline).
     std::optional<time::Epoch> catch_epoch() const {
         if (phase_ != ReturnPhase::LandingBurn || !scvx_ || upright_descent_ || scvx_->aborting()) return std::nullopt;
-        return scvx_->plan_end_epoch();
+        const auto end = scvx_->plan_end_epoch();
+        if (!end) return std::nullopt;
+        const auto& snapshot = parameters_.scvx.snapshot;
+        return *end + snapshot.catch_clearance_m / snapshot.catch_sink_mps;
     }
     // The flip: from the gate until the axis is within the flip tolerance; height of the CG above the site then.
     double flip_duration_s() const { return flip_duration_s_; }

@@ -69,7 +69,11 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   the gate from the CG height above the catch (144 m/s from 700 m; never binding - the window has effectively no maximum; the webcast 20-40 m/s is no longer
   used). The first plan's guess switches from the state (`DescentLimits::late_switch_guess`, only the ship: as late as
   the pair can still finish in its minimum phase times, ~13 m/s, but not below what three engines cannot remove within
-  the height; the window's middle is no operating point). Catch approach time constant (`DescentLimits::
+  the height; the window's middle is no operating point). The first plan starts from the flip engines' running thrust
+  (3 x 0.8, changing at the throttle rate from the plan's start; `ScvxLandingGuidance::request`, as every re-plan; a set
+  still starting up - the booster - keeps its start-up model): without it the 212 t ship's first plan asked 8.7 m/s^2
+  at once, the engines gave ~19 while coming down, ~9 m/s of sink went unplanned and the catch came ~3 s later than
+  planned. Catch approach time constant (`DescentLimits::
   approach_time_constant_s`) [D] = the pair's throttle range / throttle rate, (1 - 0.3) / 0.5 = 1.4 s
   (`gnc::ship_approach_time_constant_s`; the booster keeps 3 s [E]). The upright descent (last resort) brakes on the
   three engines towards the landing pair's own sink profile sqrt(v_f^2 + 2 f (a_pair - g) h) until the pair at its planned

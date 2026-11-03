@@ -58,7 +58,9 @@ serial and the acting part's name.
   - Ship / capsule entry (`EntryGuidance::gate_epoch`: the corrector's or the terminal steering's predicted time to
     the gate): the ship's landing burn (flip at the gate; ship_return_starbase: +28 s 26 min ahead, 0.3 s within
     2 min) or the capsule's drogues (Parachutes; Crew Dragon: within 3.5 s, 1.8 s at the end). Then
-    `ShipLandingGuidance::catch_epoch` (the landing burn plan's end; -2.9 s 18 s ahead, -1.3 s at the end).
+    `ShipLandingGuidance::catch_epoch` (the pins' touch: the landing burn plan's end - pins catch_clearance_m above
+    the arm tops at catch_sink_mps, held past it - plus clearance / sink = 1.0 s; 212 t ship from a trimmed start:
+    -3.11 s at most, 0.75 s within the last 10 s; planner plan Task 3b fix round 1).
   - The entry interface of a capsule return whose trunk is still on carries the capsule's serial: the trunk keeps the
     stack's at the jettison, the capsule becomes the next body (`FlightSession::next_body_serial`).
   - Not predicted (no guidance holds a time): the boostback ignition (the flip ends on attitude), Falcon 9's entry
