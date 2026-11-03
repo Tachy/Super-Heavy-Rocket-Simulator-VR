@@ -30,6 +30,14 @@ constexpr double alpha_grid_step_deg = 5.0;
 const std::vector<double> mach_grid{0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0, 3.0,
                                     4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 25.0, 30.0};
 
+// The settled trim's Newton solve: pitch slopes over the allocation's 1 deg difference (AttitudeController's
+// flap_difference_step_rad), its Jacobian over 0.5 deg, steps of at most 10 deg, done below 1e-6 rad.
+constexpr double trim_slope_step_rad = 1.0 * constants::deg_to_rad;
+constexpr double trim_jacobian_step_rad = 0.5 * constants::deg_to_rad;
+constexpr double trim_newton_max_step_rad = 10.0 * constants::deg_to_rad;
+constexpr double trim_tolerance_rad = 1.0e-6;
+constexpr int trim_newton_iterations = 30;
+
 struct FlapSetting {
     const vehicle::Flap* flap;
     bool forward;  // forward pair (centroid ahead of the CG)
@@ -59,7 +67,8 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
     }
 
     // Total force (body axes) at Mach number and angle of attack (belly towards the flow), flaps in pitch trim.
-    double trim_delta = 0.0;  // the last trimmed_force's pitch trim (forward pair mid + delta, aft pair mid - delta)
+    double trim_delta = 0.0;  // the last trimmed_force's antisymmetric pitch trim (forward mid + delta, aft mid - delta)
+    double trim_aft = 0.0, trim_forward = 0.0;  // ... and its settled trim (offsets of the pairs from mid-range)
     const auto trimmed_force = [&](double mach, double alpha) {
         const double speed = mach * reference_speed_of_sound_mps;
         const Vec3 u = Vec3{std::cos(alpha), 0.0, 0.0} + belly * std::sin(alpha);  // air velocity direction
@@ -67,14 +76,14 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         const auto hull = ship.aero().compute(v_body, reference_density_kg_m3, reference_speed_of_sound_mps, false, 0.0);
         const aero::FinAirData air{reference_density_kg_m3, reference_speed_of_sound_mps, 0.0};
 
-        // Force and pitch moment with the forward pair at mid + delta, the aft pair at mid - delta.
-        const auto evaluate = [&](double delta, Vec3& force) {
+        // Force and pitch moment with the aft pair at mid + aft, the forward pair at mid + forward.
+        const auto evaluate_pairs = [&](double aft, double forward, Vec3& force) {
             force = hull.force_body_n;
             Vec3 moment = cross(Vec3{hull.normal_force_station_m - cg, 0.0, 0.0}, hull.force_body_n);
             if (stage.flap_table) {
                 for (const auto& s : flaps) {
                     const double max = s.flap->max_deflection_rad;
-                    const double d = std::clamp(0.5 * max + (s.forward ? delta : -delta), 0.0, max);
+                    const double d = std::clamp(0.5 * max + (s.forward ? forward : aft), 0.0, max);
                     const auto f = aero::flap_force(s.flap->geometry, d, v_body, air, *stage.flap_table);
                     force += f.force_body_n;
                     moment += cross(f.application_point_m - Vec3{cg, 0.0, 0.0}, f.force_body_n);
@@ -82,20 +91,68 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
             }
             return dot(moment, pitch_axis);
         };
+        // The antisymmetric trim: forward pair at mid + delta, aft pair at mid - delta (the widest pitch reach; the
+        // lowest-alpha search below and the settled trim's start).
+        const auto evaluate = [&](double delta, Vec3& force) { return evaluate_pairs(-delta, delta, force); };
         const double half_range = constants::pi / 2.0;
         Vec3 force;
         double lo = -half_range, hi = half_range;
         const double m_lo = evaluate(lo, force), m_hi = evaluate(hi, force);
         double delta = std::abs(m_lo) < std::abs(m_hi) ? lo : hi;
-        if ((m_lo < 0.0) != (m_hi < 0.0)) {
+        const bool bracketed = (m_lo < 0.0) != (m_hi < 0.0);
+        if (bracketed) {
             for (int i = 0; i < 50; ++i) {
                 const double mid = 0.5 * (lo + hi);
                 if ((evaluate(mid, force) < 0.0) == (m_lo < 0.0)) lo = mid; else hi = mid;
             }
             delta = 0.5 * (lo + hi);
         }
-        evaluate(delta, force);
         trim_delta = delta;
+        trim_aft = -delta;
+        trim_forward = delta;
+        // The settled trim (the allocation's end point): pitch M(a, f) = 0 with the offsets from mid in the ratio of the
+        // pairs' pitch slopes, a dM/df - f dM/da = 0 (the moment-neutral drift stops where the offset vector lies in
+        // the pitch column's direction). Newton from the antisymmetric trim, numerical derivatives over the
+        // allocation's own 1 deg difference; kept antisymmetric if it does not converge.
+        if (bracketed) {
+            const auto conditions = [&](double a, double f, double& pitch, double& balance) {
+                Vec3 unused;
+                pitch = evaluate_pairs(a, f, unused);
+                const double h = trim_slope_step_rad;
+                const double ga = (evaluate_pairs(a + h, f, unused) - evaluate_pairs(a - h, f, unused)) / (2.0 * h);
+                const double gf = (evaluate_pairs(a, f + h, unused) - evaluate_pairs(a, f - h, unused)) / (2.0 * h);
+                balance = a * gf - f * ga;
+                return std::abs(ga) + std::abs(gf);
+            };
+            double a = -delta, f = delta;
+            bool converged = false;
+            for (int i = 0; i < trim_newton_iterations && !converged; ++i) {
+                double m0 = 0.0, b0 = 0.0, ma = 0.0, ba = 0.0, mf = 0.0, bf = 0.0;
+                const double slope = conditions(a, f, m0, b0);
+                const double e = trim_jacobian_step_rad;
+                conditions(a + e, f, ma, ba);
+                conditions(a, f + e, mf, bf);
+                const double j11 = (ma - m0) / e, j12 = (mf - m0) / e, j21 = (ba - b0) / e, j22 = (bf - b0) / e;
+                const double det = j11 * j22 - j12 * j21;
+                if (!(std::abs(det) > 0.0) || !(slope > 0.0)) break;
+                double da = -(j22 * m0 - j12 * b0) / det, df = -(j11 * b0 - j21 * m0) / det;
+                const double largest = std::max(std::abs(da), std::abs(df));
+                if (largest > trim_newton_max_step_rad) {
+                    da *= trim_newton_max_step_rad / largest;
+                    df *= trim_newton_max_step_rad / largest;
+                }
+                a = std::clamp(a + da, -half_range, half_range);
+                f = std::clamp(f + df, -half_range, half_range);
+                converged = largest < trim_tolerance_rad;
+            }
+            double pitch = 0.0, balance = 0.0;
+            const double slope = conditions(a, f, pitch, balance);
+            if (converged && std::abs(pitch) <= trim_tolerance_rad * slope) {
+                trim_aft = a;
+                trim_forward = f;
+            }
+        }
+        evaluate_pairs(trim_aft, trim_forward, force);
         return force / (0.5 * reference_density_kg_m3 * speed * speed);
     };
 
@@ -108,7 +165,8 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         mach_.push_back(mach);
         cd_area_m2_.push_back(-dot(force, u));
         cl_area_m2_.push_back(dot(force, l));
-        trim_delta_rad_.push_back(trim_delta);
+        trim_aft_rad_.push_back(trim_aft);
+        trim_forward_rad_.push_back(trim_forward);
     }
     // Walking down from the schedule until both pairs would pass their stops.
     constexpr double trim_search_step_rad = 1.0 * constants::deg_to_rad;
@@ -133,16 +191,18 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         alpha_grid_rad_.push_back(a * constants::deg_to_rad);
     }
     for (double mach : mach_grid) {
-        std::vector<double> cd, cl, trim;
+        std::vector<double> cd, cl, aft, forward;
         for (double alpha : alpha_grid_rad_) {
             const Vec3 force = trimmed_force(mach, alpha);
             const double fx = force.x, fb = dot(force, belly);
             // air velocity u = cos(a) x + sin(a) b; lift direction l = sin(a) x - cos(a) b
             cd.push_back(-(fx * std::cos(alpha) + fb * std::sin(alpha)));
             cl.push_back(fx * std::sin(alpha) - fb * std::cos(alpha));
-            trim.push_back(trim_delta);
+            aft.push_back(trim_aft);
+            forward.push_back(trim_forward);
         }
-        trim_delta_grid_rad_.push_back(trim);
+        trim_aft_grid_rad_.push_back(aft);
+        trim_forward_grid_rad_.push_back(forward);
         cd_grid_m2_.push_back(cd);
         cl_grid_m2_.push_back(cl);
     }
@@ -193,22 +253,23 @@ double EntryAeroTable::lowest_trimmed_alpha_rad(double mach) const {
 
 std::vector<double> EntryAeroTable::trim_flap_rad(double mach) const {
     std::vector<double> deflections;
-    if (trim_delta_rad_.empty()) return deflections;
-    const double delta = interpolate(mach_, trim_delta_rad_, mach);
+    if (trim_aft_rad_.empty()) return deflections;
+    const double aft = interpolate(mach_, trim_aft_rad_, mach), forward = interpolate(mach_, trim_forward_rad_, mach);
     for (size_t i = 0; i < flap_forward_.size(); ++i) {
         const double max = flap_max_rad_[i];
-        deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? delta : -delta), 0.0, max));
+        deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? forward : aft), 0.0, max));
     }
     return deflections;
 }
 
 std::vector<double> EntryAeroTable::trim_flap_rad(double mach, double alpha_rad) const {
     std::vector<double> deflections;
-    if (trim_delta_grid_rad_.empty()) return deflections;
-    const double delta = bilinear(trim_delta_grid_rad_, mach, alpha_rad);
+    if (trim_aft_grid_rad_.empty()) return deflections;
+    const double aft = bilinear(trim_aft_grid_rad_, mach, alpha_rad);
+    const double forward = bilinear(trim_forward_grid_rad_, mach, alpha_rad);
     for (size_t i = 0; i < flap_forward_.size(); ++i) {
         const double max = flap_max_rad_[i];
-        deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? delta : -delta), 0.0, max));
+        deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? forward : aft), 0.0, max));
     }
     return deflections;
 }

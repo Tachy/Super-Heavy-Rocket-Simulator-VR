@@ -358,6 +358,24 @@ max_heat_load_j_m2 = 6.0e8               # [E]
 max_load_g = 6.0                         # [E] structure
 heat_shield_mass_kg = 10500.0            # [E] Block 1 figure
 
+# Entry guidance (gnc::entry_guidance_parameters, planner plan Task 4): limits and caps. The hypersonic bank rate and
+# the terminal nose turn's angular acceleration fly what the RCS alone gives at the entry mass (dry + full headers,
+# the weaker transverse axis), up to these caps; the other values are used as they stand.
+[stage.entry]
+max_dynamic_pressure_pa = 25000.0        # [E] structural (b2 estimate, no source)
+lunar_max_dynamic_pressure_pa = 32000.0  # [E] user 2026-10-17: 25 kPa cut the dispersed lunar returns' bank back
+                                         # (campaign 3/11 -> 7/11 at 32 kPa); 0.9 x 6 g still bounds the load
+terminal_mach = 5.0                      # [E] hand-over to the terminal steering ...
+terminal_mach_latest = 3.0               # [E] ... at the latest, when a bank reversal still ran
+terminal_min_alpha_deg = 50.0            # [E, identified on b1-b4] most lift of the terminal steering (the flown floor
+                                         # is the table's lowest trimmed alpha at the flying mass, EntryAeroTable)
+terminal_alpha_authority_deg = 20.0      # [E, identified on b1-b4] steering range about the alpha schedule
+bank_rate_max_deg_s = 1.0                # [E] hypersonic (b1: faster departed in alpha with weak flaps)
+fast_bank_rate_deg_s = 3.0               # [E] below Mach 5: the flaps' authority in dense air (needs the air: not
+                                         # derived from the config); late reversals must be quick
+alpha_slew_rate_deg_s = 3.0              # [E] the terminal phase's attitude slew (as the fast bank rate)
+nose_slew_acceleration_max_deg_s2 = 0.5  # [E] vehicle physics Task 6b: the step to the turn's rate asked 20-40 x the RCS
+
 # Boil-off heat balance (refuelling r2). Bare stainless hull - the hull is the tank wall (integral tanks, no vacuum
 # jacket): alpha / eps [E] from handbook values for polished stainless steel (~0.4 / 0.1-0.15); effective wall
 # resistance [E] of a wetted 4 mm steel wall with its liquid-side film. Tiles on the windward half [E]: black coating

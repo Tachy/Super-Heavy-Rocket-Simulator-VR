@@ -320,6 +320,22 @@ struct ShipLandingProfile {
     double lateral_effort_fraction = 0.0;    // the landing burn's lateral LQR effort (ScvxLandingParameters)
 };
 
+// [stage.entry] of a ship flying the belly-first entry guidance (gnc::entry_guidance_parameters; every key required for
+// a stage with an entry_alpha_table): limits and caps [E]; the rates the guidance flies are derived from the stage's RCS
+// at the entry mass up to these caps.
+struct EntryProfile {
+    double max_dynamic_pressure_pa = 0.0;        // structural: an entry from orbit
+    double lunar_max_dynamic_pressure_pa = 0.0;  // ... a lunar return (user 2026-10-17)
+    double terminal_mach = 0.0;                  // hand-over to the terminal steering ...
+    double terminal_mach_latest = 0.0;           // ... at the latest, when a bank reversal still ran
+    double terminal_min_alpha_rad = 0.0;         // the terminal steering's most-lift angle of attack
+    double terminal_alpha_authority_rad = 0.0;   // its range about the alpha schedule
+    double bank_rate_max_radps = 0.0;            // hypersonic bank rate: cap of the RCS-derived rate
+    double fast_bank_rate_radps = 0.0;           // bank rate below Mach 5 (dense air, the flaps' authority)
+    double alpha_slew_rate_radps = 0.0;          // the terminal phase's attitude slew rate
+    double nose_slew_acceleration_max_radps2 = 0.0;  // the nose turn's angular acceleration: cap of the RCS-derived one
+};
+
 // [stage.tanks] unusable_propellant_kg: propellant the engines cannot draw from a tank set (lines, sumps, below the
 // outlets), per set; a plan's floor.
 struct UnusablePropellantConfig {
@@ -416,6 +432,7 @@ struct StageConfig {
     CatchPinConfig catch_pins;  // empty azimuths: none
     std::vector<FlapConfig> flaps;
     HeatShieldConfig heat_shield;
+    std::optional<EntryProfile> entry;  // [stage.entry]: a ship with an entry_alpha_table (else none)
     std::optional<ThermalConfig> thermal;  // [stage.thermal] (refuelling r2): none -> its tanks do not boil off
     std::vector<ParachuteConfig> parachutes;  // [[stage.parachute]] (d4: Crew Dragon drogues and mains)
     // [stage.recovery] max_splashdown_speed_mps (method "splashdown", required there): sink rate at the water up to

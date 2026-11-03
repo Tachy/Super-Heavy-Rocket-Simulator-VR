@@ -546,6 +546,31 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.heat_shield.max_load_g = doc.number_or(*shield, "max_load_g", 0.0);
         s.heat_shield.crew_load_limit_g = doc.number_or(*shield, "crew_load_limit_g", 0.0);
     }
+    // A belly-first ship (entry alpha table, not a capsule): its entry guidance limits and caps, every key required.
+    if (!s.aero.entry_alpha_table.empty() && s.aero.entry_profile != "capsule") {
+        const auto* entry = t["entry"].as_table();
+        const auto required = [&](std::string_view key) {
+            if (!entry || !entry->contains(key)) {
+                doc.fail("Eintrittsführung der Stufe '" + s.id + "': Schlüssel '" + std::string(key) + "' fehlt in [stage.entry]");
+            }
+            const double v = doc.number(*entry, key);
+            if (!(v > 0.0)) doc.fail("stage.entry." + std::string(key) + " must be positive");
+            return v;
+        };
+        EntryProfile e;
+        e.max_dynamic_pressure_pa = required("max_dynamic_pressure_pa");
+        e.lunar_max_dynamic_pressure_pa = required("lunar_max_dynamic_pressure_pa");
+        e.terminal_mach = required("terminal_mach");
+        e.terminal_mach_latest = required("terminal_mach_latest");
+        e.terminal_min_alpha_rad = required("terminal_min_alpha_deg") * constants::deg_to_rad;
+        e.terminal_alpha_authority_rad = required("terminal_alpha_authority_deg") * constants::deg_to_rad;
+        e.bank_rate_max_radps = required("bank_rate_max_deg_s") * constants::deg_to_rad;
+        e.fast_bank_rate_radps = required("fast_bank_rate_deg_s") * constants::deg_to_rad;
+        e.alpha_slew_rate_radps = required("alpha_slew_rate_deg_s") * constants::deg_to_rad;
+        e.nose_slew_acceleration_max_radps2 = required("nose_slew_acceleration_max_deg_s2") * constants::deg_to_rad;
+        if (e.terminal_mach_latest > e.terminal_mach) doc.fail("stage.entry: terminal_mach_latest must not exceed terminal_mach");
+        s.entry = e;
+    }
     if (auto thermal = t["thermal"].as_table()) {
         auto surface = [&](const toml::table& zone, const std::string& where) {
             const ThermalSurfaceConfig c{doc.number(zone, "absorptivity"), doc.number(zone, "emissivity"),

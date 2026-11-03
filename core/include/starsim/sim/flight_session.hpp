@@ -461,9 +461,10 @@ public:
                                  time::Epoch epoch, gnc::BoosterReturnParameters parameters, gnc::ReturnPhase start_phase);
     // Scenarios: a ship (single stage with flaps and a heat shield) placed with a free state flies its entry guidance
     // to the gate above the launch site's pad (b3 adds the flip and the catch). It becomes the controlled body; pilot
-    // input is ignored while it has entry guidance.
+    // input is ignored while it has entry guidance. No parameters: the orbital entry's from the config
+    // (gnc::entry_guidance_parameters).
     void place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
-                             gnc::EntryGuidanceParameters parameters = {});
+                             std::optional<gnc::EntryGuidanceParameters> parameters = std::nullopt);
     const gnc::EntryGuidance* entry_guidance(size_t index) const { return bodies_.at(index).entry_guidance.get(); }
     // Parachute sequence of body `index` (its lowest stage has [[stage.parachute]] sets: a capsule alone), nullptr if
     // none. The Dracos stay off once a set is out (user 2026-10-14: no steering under the parachutes).

@@ -199,6 +199,12 @@ Vec3 true_flap_moment_nm(const vehicle::FlightBody& body, const vehicle::Flap& f
 // roll and yaw can no longer be told apart (aft pair alone +-1.3e5 N m of yaw at zero roll, all four +-8.4e5), roll ran to
 // -0.06 rad/s and the sideslip it made gave a hull moment beyond the flaps. Same air here, landing propellant: trim at
 // 54 / 54 / 44 / 44 deg, and the same demand took the flap from 44 to 16 deg, slope 125 of 1.5e6 N m/rad.
+// Planner plan Task 4: the 212 t ship (177 t dry, CG 24.98 m) trims here at 63.6 / 63.6 / 43.5 / 43.5 deg; its flaps'
+// yaw reach at unchanged roll and pitch is far smaller than the 290 t ship's 8.4e5 N m: the true moments on a 1 deg grid
+// with the forward flaps above their authority floor (36.4 deg) give +-1.8e5 N m (roll / pitch within 5e3 N m; +-2.4e5
+// within 2e4), and the allocation delivers 2.0e5 settled (RCS fraction 1e-4) but not 2.5e5. The former within-reach demand
+// 3e5 lies beyond it (it left an RCS fraction 1.6): the within-reach demands are 1.5e5 now, 3e5 joins the beyond-reach
+// ones (floor and no limit cycle checked).
 TEST_CASE("A yaw demand does not drive a flap into the range where it has no authority", "[entry][flap]") {
     World world;
     auto body = entry_ship(13000.0, 200.0, 80.5 * deg, world);
@@ -214,7 +220,8 @@ TEST_CASE("A yaw demand does not drive a flap into the range where it has no aut
         return peak;
     };
     constexpr double follow = 0.5 * deg;  // per call, a rate-limited actuator; the allocation's box is 5 deg
-    for (const double yaw_nm : {1e6, -1e6, 3e5, -3e5}) {
+    constexpr double within_reach_nm = 1.5e5;
+    for (const double yaw_nm : {1e6, -1e6, 3e5, -3e5, within_reach_nm, -within_reach_nm}) {
         flaps = trimmed;
         CAPTURE(yaw_nm);
         double last_move = 0.0;
@@ -244,7 +251,7 @@ TEST_CASE("A yaw demand does not drive a flap into the range where it has no aut
             CHECK(slope >= 0.2 * peak);  // the allocator's floor is a quarter, on a 5 deg grid
             CHECK(highest[k] - lowest[k] <= 1.01 * follow);  // at most the follow's own step, no wider cycle
         }
-        if (std::abs(yaw_nm) < 5e5) {  // within the flaps' reach: delivered and settled
+        if (std::abs(yaw_nm) <= within_reach_nm) {  // within the flaps' reach: delivered and settled
             CHECK(norm(out.rcs_torque_fraction) < 0.01);
             CHECK(last_move < 0.01 * deg);
         }

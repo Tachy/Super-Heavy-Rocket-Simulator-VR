@@ -326,6 +326,9 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     try {
         ship = lunar_return_ship(m, config_dir, vehicle);
         setup = lunar_return_setup(m, site_itrf, session.gravity(), session.ephemeris(), epoch);
+        // the ship's own limits and RCS-derived rates on the preset (aerocapture: the orbital q limit, as before)
+        setup.entry = gnc::entry_guidance_parameters(
+            ship, ship.stages.front(), m.aerocapture ? gnc::EntryKind::Orbital : gnc::EntryKind::LunarReturn, setup.entry);
     } catch (const std::runtime_error& e) {  // stage missing, NRHO reference not converged (German)
         return refuse(e.what());
     }

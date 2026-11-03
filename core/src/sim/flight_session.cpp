@@ -436,9 +436,14 @@ void FlightSession::run_autopilot() {
                 break;
             }
             if (!flying.entry_guidance && !flying.ship_landing && epoch_ >= entry_start_) {
-                const bool capsule = flying.body->vehicle().stages().front().config.aero.entry_profile == "capsule";
-                start_entry_guidance(flying, capsule ? gnc::EntryGuidanceParameters::capsule()
-                                                     : return_entry_parameters_.value_or(gnc::EntryGuidanceParameters{}));
+                const auto& vehicle = flying.body->vehicle();
+                const auto& stage = vehicle.stages().front().config;
+                const bool capsule = stage.aero.entry_profile == "capsule";
+                start_entry_guidance(flying, capsule                   ? gnc::EntryGuidanceParameters::capsule()
+                                             : return_entry_parameters_ ? *return_entry_parameters_
+                                                                        : gnc::entry_guidance_parameters(
+                                                                              vehicle.source_config(), stage,
+                                                                              gnc::EntryKind::Orbital));
             }
             break;
         case AutopilotState::Lunar:

@@ -23,6 +23,10 @@ AlphaSchedule load_alpha_schedule(const std::filesystem::path& config_dir, const
 // (force / dynamic pressure) over Mach at the scheduled angle of attack, hull plus flaps in pitch trim about the
 // current CG. Continuum flow (the rarefied upper entry carries little force; the guidance's online scale factors
 // absorb the difference). Built on the simulation thread; afterwards immutable and safe to copy to a worker.
+// The trim is the one the flap allocation settles in (AttitudeController: pitch cancelled, then the moment-neutral
+// drift towards mid-range): of all pitch trims of the two pairs the one closest to mid-range, where each pair's offset
+// from mid goes with its own pitch slope. (Before planner plan Task 4 the pairs moved by equal and opposite offsets: the
+// forward pair 14-33 deg where the flown flaps sat at 41-44, 0.4-0.5 % too little drag below Mach 3.)
 class EntryAeroTable {
 public:
     EntryAeroTable() = default;
@@ -61,8 +65,9 @@ private:
     std::vector<double> alpha_grid_rad_;
     std::vector<std::vector<double>> cd_grid_m2_;  // [mach][alpha]
     std::vector<std::vector<double>> cl_grid_m2_;
-    std::vector<std::vector<double>> trim_delta_grid_rad_;  // [mach][alpha]
-    std::vector<double> trim_delta_rad_;  // per mach_: forward pair at mid + delta, aft pair at mid - delta
+    // Trim offsets from mid-range of the aft and the forward pair: [mach][alpha] and per mach_ (schedule)
+    std::vector<std::vector<double>> trim_aft_grid_rad_, trim_forward_grid_rad_;
+    std::vector<double> trim_aft_rad_, trim_forward_rad_;
     std::vector<bool> flap_forward_;
     std::vector<double> flap_max_rad_;
     double bilinear(const std::vector<std::vector<double>>& grid, double mach, double alpha_rad) const;

@@ -46,14 +46,27 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   `FlightBody::aero_acceleration_body_mps2()`, not learnt in an attitude transient over 2 deg in the terminal phase)
   every 2 s; bank magnitude for zero range error (Illinois); heat-rate, load and dynamic-pressure peaks over 90 % of a
   limit cut the bank back. Reversals timed by the predictor; a reversal due within the next cycle is flown only if
-  reversing now ends closer across than holding. Bank rate 1 deg/s above Mach 10, 3 deg/s below Mach 5 [E]. From
+  reversing now ends closer across than holding. Parameters from the config (planner plan Task 4,
+  `gnc::entry_guidance_parameters(vehicle, stage, EntryKind)`, `core/src/gnc/entry_guidance_parameters.cpp`; every key of
+  `[stage.entry]` required for a belly-first stage, German refusal at load; the tanker inherits it): K q limit 25 kPa
+  (lunar return 32 kPa), terminal Mach 5 / latest 3, terminal min alpha 50 deg and alpha authority 20 deg [E, identified
+  on b1-b4; the flown floor is the table's lowest trimmed alpha], bank rate 3 deg/s below Mach 5 and attitude slew 3 deg/s
+  (the flaps' authority needs the air: not derived). D at the entry mass (dry + full headers, 212 t, I 5.46e7 kg m^2)
+  from the RCS's acceleration about the weaker transverse axis (yaw 1.2e5 N m: a = 2.2e-3 rad/s^2): the hypersonic bank
+  rate sqrt(2 a 5 deg) = 1.12 deg/s, capped at 1 deg/s [E] (the cap binds); the terminal nose turn's angular acceleration
+  a = 0.126 deg/s^2, capped at 0.5 [E] (the RCS binds). Linear between Mach 5 and 10 as before. From
   Mach 5 (latest Mach 3, once a reversal has settled) the terminal phase ("Endanflug") steers the lift in the velocity
   frame relative to the alpha schedule (Levenberg-Marquardt on the predicted gate miss); the gate ("Tor") is 800 m [E]
   above the pad (flight 13 relit at ~0.95 km [D]). `FlightSession::place_entering_ship`, `entry_status`. Tests use
   `predictor_j2 = false`. Predictor additions for lunar return: radiative heating, skips carried, exit orbit, truth
   air-density factor (`FlightSession::set_air_density_factor`), great-circle range unwrapped by the swept angle, a
   target behind the start's track counted as a turn less its distance ahead.
-- Terminal steering floor (Task 6b): the most-lift alpha is never below `EntryAeroTable::lowest_trimmed_alpha_rad` (flying mass and CG; 1 deg search), in `EntryPredictorModel::steering_most_lift_alpha`, so guidance and predictor count the same lift. Steering differences stay on their side of `schedule_fraction` (`steering_difference`). After the basis froze, with a nose direction, the attitude slews on the `bank_step_smooth` ramp (`terminal_nose_slew_acceleration_radps2`, 0.5 deg/s^2 [E]). `upright_descent`'s braking feedforward scales with sink / profile sink, so a ship below the profile sinks instead of climbing.
+- Entry aero table trim (planner plan Task 4): the table's flaps sit where the allocation settles - of all pitch trims of
+  the two pairs the one nearest mid-range, each pair's offset in the ratio of its pitch slope (Newton from the
+  antisymmetric trim, which still bounds the lowest trimmed alpha). Against the flown trim at 212 t, Mach 2.6-0.47: drag
+  area -0.03 to -0.24 % (the 5 deg alpha grid), was -0.43 to -0.68 % with the antisymmetric trim (forward pair 14-33 deg
+  where the flown flaps sit at 41-44).
+- Terminal steering floor (Task 6b): the most-lift alpha is never below `EntryAeroTable::lowest_trimmed_alpha_rad` (flying mass and CG; 1 deg search), in `EntryPredictorModel::steering_most_lift_alpha`, so guidance and predictor count the same lift. Steering differences stay on their side of `schedule_fraction` (`steering_difference`). After the basis froze, with a nose direction, the attitude slews on the `bank_step_smooth` ramp (`terminal_nose_slew_acceleration_radps2`, the RCS-derived 0.126 deg/s^2 of the 212 t ship; at the K 0.5 deg/s^2 the turn asked ~4.8e5 N m of yaw against ~1.2e5 RCS plus ~1-2e5 of flap reach and departed). `upright_descent`'s braking feedforward scales with sink / profile sink, so a ship below the profile sinks instead of climbing.
 - Flip and catch (b3, `gnc/ship_landing`): at the gate the three sea-level Raptors relight at 80 % [E], aft flaps
   fold, forward flaps go broadside until the tilt is < 30 deg; flip ~4 s and ~8 t, pushes the ship ~100 m along its
   nose. Once upright (< 15 deg, < 0.2 rad/s) SCvx plans fly 3 -> 2 engines: the belly engine shuts down, the leeward
@@ -178,12 +191,12 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Trim, 35 t (CG 25.50 m), Mach 25 / 15 / 8 / 4 / 3 / 2 / 0.8: aft 30 / 33 / 37 / 21 / 41 / 50 / 54 deg, forward 60 / 57 / 53 / 69 / 49 / 40 / 36. Frames (`task-5a-report.md`): aft 17-57 hypersonic;
   +15-19 deg over Mach 4-2 (+-5, magnitude +-30 %), the model +29, at the upper edge. 64 t (23.84 m): aft 62 / 64 / 66 / 57 / 73, at the 90 stop from Mach 2.5 down, short 42-619 m^3 per q.
   The CG question is not decided by the frames. Reds of this set: `docs/known-issues.md`.
-- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m. Mach 0.68, alpha 80.5: yaw at zero roll +-8.4e5 N m, the demand at the terminal basis freeze ~1e6 (`docs/known-issues.md`).
+- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m. Mach ~0.6, alpha 80.5, 212 t (trim 63.6 / 43.5 deg): yaw at unchanged roll / pitch +-1.8e5 N m above the authority floor (+-2.6e5 without it; the 290 t ship: +-8.4e5). Beyond that reach the allocation leaves a roll remainder (RCS roll fraction 1.5 at a 3e5 yaw demand) instead of a yaw one: open, not changed (the terminal nose turn now stays inside the RCS's reach).
 - Ship catch: case 4 of the entry campaign is marginal (roundoff moves it between ~0.1 and ~1.2 km); an
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); since the vehicle plan's Task 6 the caught dispersed gates arrive with >= 3.8 t (see Validation).
 - A low-propellant abort (21-23 t at the nominal gate; Task 6h with the structure keep-out, one uncommitted test line for the load) is lost at all three loads, open: 21 t 0.0 t left, 23 t 1.3 t left, no strike; 22 t struck at 4.0 t left (arm 7.61 m, tower box 0.93 m clear, hull bottom 18.95 m: the mount). Same result for an abort requested at 900, 600 or 400 m.
 - Since planner plan Task 3b the dry mass and CG are derived (177 t, 22.03 m; entry CG 24.99 m with 35 t): the trim
-  margin at alpha 60 holds (forward 54.3 deg), alpha 70 at 79.7 deg; new reds for Task 4: the Mach 0.6 yaw-demand
-  allocation and the nose turn at the basis freeze (gate miss 190 m), `docs/known-issues.md`. The rest of this item is the
+  margin at alpha 60 holds (forward 54.3 deg), alpha 70 at 79.7 deg; the Mach 0.6 yaw-demand fixture and the nose turn
+  at the basis freeze (gate miss 190 m) are green since Task 4, `docs/known-issues.md`. The rest of this item is the
   state before. Aero state frozen as on main (crossflow 1.5 [D], old entry alpha table, entry CG 25.50 m, dry 255 t, dry CG 23.516 m) because no tested combination (measured masses, geometry crossflow 1.07-1.10, alpha 59.5, CG 24.85 m) passes all flight replays and case 8; table and facts in `docs/known-issues.md`. Standing facts: 255 t dry is probably too high (about 175 +-25 t by judgement; entry masses 221 / 252 / 203-227 t +-20); the CG window is 24.49-25.88 m and 25.50 / 23.516 m are tuned values (bottom-up dry CG about 22.9 m, 19.4-23.5); the allocator's authority floor (fraction 0.25) has a narrow window (failures 8 / 9 / 2 / 0 / 9 of 10 at 0 / 0.15 / 0.20 / 0.25 / 0.30). Next step: the low Mach part (geometry set: flight 13 low 14.96 %, flight 14 low 22.06 %, too slow at Mach 3-6).

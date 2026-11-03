@@ -13,7 +13,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   - "Ship return campaign: dispersions 1-3" case 1: green since Task 1c (fresh SCvx catch plans escalate the soft
     attitude penalty, `gnc-core.md`): gate miss 72 m, caught with 0.2 t (before the fix: catch plan cycled, abort, 5.1 t).
     The gate miss of 72 m comes from the roll oscillation below.
-  - "Ship return campaign: dispersions 4-6" case 2 (dispersed index 5): still red. Entry departure in the subsonic
+  - "Ship return campaign: dispersions 4-6" case 2 and "orbit phase 0-135 deg" case 1 (phase 45): green as single cases
+    since the ship dry mass 177 t (Task 3b; re-run at the start of planner plan Task 4: caught, 10.9 / 10.1 t left, gate
+    miss 3 / 5 m) and after Task 4 (12.3 / 10.9 t, 4 / 5 m; dispersed 0: 11.9 t). The campaigns themselves are
+    re-measured in Task 12. The state before (255 t dry), kept for the record: entry departure in the subsonic
     terminal phase: from the basis freeze (h 13 km, Mach 0.69, nose turn to the tower, alpha 86 deg commanded) a roll
     oscillation (+-0.3 rad/s) grows, both forward flaps sit on their 90 deg stop and the RCS saturates in yaw; the
     attitude error grows ~2.7 deg/s to 80 deg, the ship arrives tail first at 2.66 km / 183 m/s sink, 479 m off, abort
@@ -52,7 +55,17 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   - Turned green: flight 14 ascent (above); "Flaps pinned at their stops come back into the range". The trim-margin case
     stays red but narrower: alpha 60 trims at forward 54.3 deg (was 77.2), alpha 70 trims (was none) at forward 79.7
     deg against the 75 deg limit.
-  - New red, entry authority (for plan Task 4): "A yaw demand does not drive a flap into the range where it has no
+  - Green since planner plan Task 4 (2026-11-03, `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/task-4-report.md`):
+    the yaw-demand fixture (its 3e5 N m lay beyond the 212 t ship's flap yaw reach of ~1.8-2.6e5; restated to 1.5e5
+    within reach, 3e5 kept as beyond); the gate over Starbase (miss 189.8 -> 38.6 m: the nose turn's angular acceleration
+    is the RCS's, 0.126 deg/s^2, not 0.5); the flip-and-catch gate prediction (1.34 -> 0.62 s: the entry aero table's
+    flaps now trim where the allocation settles, drag area deficit 0.4-0.7 % -> 0.03-0.24 %). Before:
+  - Red found by Task 4's -Fast run (not caused by it: the case flies `place_landing_ship`, no entry guidance or entry
+    table): "A missed catch ejects the crew" ([crew_escape][session]): its 27 t gate load ("the calibration's first
+    missed gate load") was calibrated on the 290 t ship; the run ends with the seats never armed (armed 0, fired 0),
+    most likely the 212 t ship no longer misses with it (outcome not traced). Probably red since Task 3b ([crew_escape]
+    was not in its tag sets). A mass-relative fixture for Task 12 (or the controller).
+  - Red then, entry authority (for plan Task 4): "A yaw demand does not drive a flap into the range where it has no
     authority" (Mach ~0.6, alpha 80.5, 35 t: trim aft 63.6 / forward 43.5 deg, was 54 / 44; a 3e5 N m yaw leaves an RCS
     fraction 1.6 and the aft pair moving 0.5 deg per call; the forward flap stops at the authority floor at 36 deg).
     "Session flies an entering ship to the gate over Starbase": gate miss 0.6 -> 189.8 m (limit 150): the nose turn

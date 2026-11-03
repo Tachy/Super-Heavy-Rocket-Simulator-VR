@@ -51,9 +51,11 @@ const gnc::EntryCommand* FlightSession::entry_status(size_t index) const {
 }
 
 void FlightSession::place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
-                                        time::Epoch epoch, gnc::EntryGuidanceParameters parameters) {
+                                        time::Epoch epoch, std::optional<gnc::EntryGuidanceParameters> parameters) {
     place_body(config, state, epoch);
-    start_entry_guidance(bodies_.front(), parameters);
+    start_entry_guidance(bodies_.front(), parameters ? *parameters
+                                                     : gnc::entry_guidance_parameters(config, config.stages.front(),
+                                                                                      gnc::EntryKind::Orbital));
 }
 
 void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters) {
@@ -166,7 +168,8 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
     const double exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
-    const gnc::EntryGuidance onboard(*flying.body, schedule, target);
+    const gnc::EntryGuidance onboard(*flying.body, schedule, target,
+                                     gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
     const auto& s = flying.body->state();
     return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
                              vehicle.mass_properties().mass_kg, exhaust_velocity_mps, vehicle.propellant_kg(),
@@ -230,7 +233,8 @@ void FlightSession::replan_ship_deorbit() {
     deorbit_parameters_.drag_area_per_mass_m2pkg = parameters.drag_area_per_mass_m2pkg;  // the next re-plan's guess
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
-    const gnc::EntryGuidance onboard(*flying.body, schedule, target);
+    const gnc::EntryGuidance onboard(*flying.body, schedule, target,
+                                     gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
     const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
                                         onboard.model(), target, vehicle.mass_properties().mass_kg,
                                         configurations.front().thrust_n / configurations.front().mass_flow_kgps,
