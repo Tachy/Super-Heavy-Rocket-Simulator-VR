@@ -374,7 +374,7 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
                 forecast_.landing_ignition.reset();
                 forecast_.touchdown.reset();
             } else {
-                forecast_landing(burn, height - target_bottom_height_m_, -dot(v_fixed, site_up));
+                forecast_landing(burn, height - target_bottom_height_m_, -dot(v_fixed, site_up), epoch);
             }
         }
         cmd.phase = phase_;
@@ -451,7 +451,8 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
     return cmd;
 }
 
-void BoosterReturnGuidance::forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps) {
+void BoosterReturnGuidance::forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps,
+                                             time::Epoch epoch) {
     // The ignition from the guidance's two predictions: the ballistic impact less the fall, at the sink speed now, over
     // the height the landing burn takes (its start height above its stop height). At the ignition that height is the
     // height left. (The stop height alone run forward linearly was 26 s early in the fall's middle: the
@@ -461,6 +462,12 @@ void BoosterReturnGuidance::forecast_landing(const BurnPrediction& burn, double 
         forecast_.touchdown.reset();
         return;
     }
+    // Just past the apex the sink now is near zero and far below the sink at the ignition: the mean sink of the fall
+    // still ahead (height over the time to the impact) bounds it from below there (planner plan Task 3b: the lighter
+    // ship's ascent put a sample 0.3 s past the apex, 55 s early).
+    const double to_impact_s = *impact_epoch_ - epoch;
+    const double mean_sink_mps = to_impact_s > 0.0 ? height_m / to_impact_s : 0.0;
+    sink_mps = std::max(sink_mps, mean_sink_mps);
     forecast_.landing_ignition = *impact_epoch_ - std::max(height_m - burn.stop_height_m, 0.0) / sink_mps;
     forecast_.touchdown = *forecast_.landing_ignition + burn.duration_s;
 }

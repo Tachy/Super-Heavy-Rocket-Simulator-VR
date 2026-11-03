@@ -263,7 +263,7 @@ private:
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
     Forecast forecast_;
     std::optional<time::Epoch> impact_epoch_;  // Coast: the latest ballistic impact prediction
-    void forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps);
+    void forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps, time::Epoch epoch);
 
     void entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                     ReturnCommand& cmd);

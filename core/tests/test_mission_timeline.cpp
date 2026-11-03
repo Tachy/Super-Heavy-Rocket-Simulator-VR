@@ -412,7 +412,9 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     // -16 s at the apex (ignition plus the one-dimensional burn duration), then the SCvx plan's end, 4.3 s within the
     // last 30 s, 0.9 s within the last 10 s. With the hot-staging sequence: landing burn -13.3 s, catch -23.5 s at the
     // apex (its first sample, where the fall rate is near 0: the height over the sink is ill-conditioned there and moves
-    // with the apex state), unchanged from 120 s on (4.9 / 4.6 s).
+    // with the apex state), unchanged from 120 s on (4.9 / 4.6 s). Planner plan Task 3b (ship dry 177 t): a sample
+    // 0.3 s past the apex was -54.7 / -64.4 s off; with the mean sink of the fall ahead as the floor +8.6 / -1.2 s, the
+    // later samples unchanged (5.3 / 3.7 s within 120 s).
     CHECK(*cutoff_prediction.first_seen - boostback->epoch <= 1.0);  // from the boostback's first second
     CHECK(cutoff_prediction.max_error_within_s(cutoff->epoch, 1e9) <= 2.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 15.0);
