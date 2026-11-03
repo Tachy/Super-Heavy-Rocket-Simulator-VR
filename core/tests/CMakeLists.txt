@@ -214,7 +214,9 @@ add_executable(starsim_core_tests
     test_cloud_transfer_table.cpp
     test_cloud_render_texels.cpp
     test_cloud_volume_bake.cpp
+    support/webcast_report.cpp
 )
+target_include_directories(starsim_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support)
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain tomlplusplus::tomlplusplus)
 target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_KERNEL_DIR="${STARSIM_DATA_DIR}/spice"

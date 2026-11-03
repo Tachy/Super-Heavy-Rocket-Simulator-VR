@@ -20,6 +20,7 @@
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -267,8 +268,19 @@ TEST_CASE("The Falcon 9 RTLS mission loads", "[config][falcon9]") {
     CHECK_FALSE(m.fairing);
 }
 
-TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation][ascent_planner]") {
-    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
+namespace {
+
+struct RtlsFlight {
+    double meco_s = -1.0, meco_propellant_kg = 0.0, entry_s = -1.0, entry_h = 0.0, landing_s = -1.0, landing_h = 0.0,
+           landing_v = 0.0, landing_propellant_kg = 0.0, boostback_s = -1.0, n2_at_separation_kg = 0.0, n2_left_kg = 0.0;
+    double hold_tilt_deg = 0.0, ignition_off_velocity_deg = 0.0, ignition_rate_deg_s = 0.0, three_engines_s = -1.0;
+    double end_s = 0.0, offset_m = 0.0;
+    sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+};
+
+// Liftoff of the falcon9_rtls mission to the stage's touchdown on LZ-40 (the gate case and the webcast report fly the same flight).
+RtlsFlight fly_rtls_mission() {
+    const auto m =config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
@@ -341,52 +353,73 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
     }
     const auto& stage = session.body(0);
     const Vec3 p = sim::site_enu_m(zone, transpose(earth().fixed_to_gcrf(session.epoch()).rotation) * stage.state().position_gcrf_m);
-    std::printf("[validation] Falcon 9 RTLS: MECO T+%.0f s with %.1f t (CRS-35: T+137 s, ~66 t); entry burn T+%.0f s at "
-                "%.1f km (T+355 s, 56.6 km); landing burn T+%.0f s at %.2f km, %.0f m/s, %.1f t (T+420 s, ~3.2 km, ~300 "
-                "m/s, 12.1 t); %s at T+%.0f s (T+442 s), %.2f m from the centre, %.1f t left\n",
-                meco_s, meco_propellant_kg / 1e3, entry_s, entry_h / 1e3, landing_s, landing_h / 1e3, landing_v,
-                landing_propellant_kg / 1e3, sim::to_string(session.landing_outcome(0)), session.mission_time_s(),
-                std::hypot(p.x, p.y), stage.vehicle().propellant_kg() / 1e3);
-    std::printf("[validation] Falcon 9 RTLS: separation -> boostback %.1f s (13.7 s); N2 %.0f kg at the separation, %.0f kg "
-                "left at the touchdown\n",
-                boostback_s - meco_s, n2_at_separation_kg, stage.vehicle().rcs_supply_kg());
-    CHECK(meco_s > 0.0);
-    CHECK(std::abs(boostback_s - meco_s - 13.7) < 3.0);  // SpaceX timelines: CRS-35 / Bandwagon-3 / Crew-13 mean
-    // KNOWN MISS (falcon9.md "The flip"): the timelines' mean is 13.7 +-0.6 s; the flown 14.7 s lies 0.4 s beyond the band. Not tuned.
-    // Reported so a change of the number shows; no band fitted around it.
-    const double flip_time_error_s = std::abs(boostback_s - meco_s - 13.7);
-    std::printf("[validation] KNOWN MISS: separation -> boostback %.1f s vs 13.7 +-0.6 s (%s, %.2f s beyond the band)\n",
-                boostback_s - meco_s, flip_time_error_s <= 0.6 ? "inside" : "outside", std::max(0.0, flip_time_error_s - 0.6));
-    CHECK(flip_time_error_s > 0.6);  // pins the known miss: goes red when the flip meets the band, then move it to < 0.6
-    CHECK(stage.vehicle().rcs_supply_kg() > 0.0);
-    // The real sequence (docs/subsystems/falcon9.md, "The flip"): a hold until the nozzle is clear, the turn over the ground on
-    // the nitrogen thrusters with no braking, ignition still turning, the centre engine first, the gimbal ends the turn.
-    std::printf("[validation] Falcon 9 flip: hold tilt %.2f deg; ignition %.1f deg off the velocity at %.1f deg/s; three engines "
-                "%.1f s after ignition; N2 %.0f kg left\n",
-                hold_tilt_deg, ignition_off_velocity_deg, ignition_rate_deg_s, three_engines_s - boostback_s,
-                stage.vehicle().rcs_supply_kg());
-    CHECK(hold_tilt_deg < 0.5);
-    // 114 +-15 deg is an extrapolation of the dials (falcon9.md); the law's own gate is 114, so this only catches the timeout path.
-    CHECK(std::abs(ignition_off_velocity_deg - 114.0) < 15.0);
-    // KNOWN MISS: the documented rate is 16 +-4 deg/s (Crew-13 limb, extrapolated); the flown 20.2 deg/s is outside it ([D] 20,
-    // upper end). Band not widened: the miss is pinned, so a change shows.
-    std::printf("[validation] KNOWN MISS: ignition rate %.1f deg/s vs 16 +-4 deg/s\n", ignition_rate_deg_s);
-    CHECK(std::abs(ignition_rate_deg_s - 16.0) > 4.0);
-    CHECK(std::abs(ignition_rate_deg_s - 16.0) < 8.0);  // the flown value stays near the documented band
-    CHECK(three_engines_s - boostback_s > 2.5);
-    CHECK(stage.vehicle().rcs_supply_kg() >= 0.2 * (600.0 - stage.vehicle().rcs_supply_kg()));  // floor [E]: 20 % of the used
-    CHECK(entry_s > 0.0);
-    CHECK(landing_s > 0.0);
-    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
-    CHECK(std::hypot(p.x, p.y) < 5.0);
-    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.2 km, ~300 m/s, 12.1 t.
-    CHECK(std::abs(landing_propellant_kg - 12100.0) < 1000.0);
-    CHECK(landing_h > 2500.0);
-    CHECK(landing_h < 4000.0);
-    CHECK(std::abs(landing_v - 300.0) < 30.0);
-    // Timeline [D]: entry burn T+355 s, landing burn T+420 s on CRS-35.
-    CHECK(std::abs(entry_s - 355.0) < 20.0);
-    CHECK(std::abs(landing_s - 420.0) < 20.0);
+    RtlsFlight f;
+    f.meco_s = meco_s;
+    f.meco_propellant_kg = meco_propellant_kg;
+    f.entry_s = entry_s;
+    f.entry_h = entry_h;
+    f.landing_s = landing_s;
+    f.landing_h = landing_h;
+    f.landing_v = landing_v;
+    f.landing_propellant_kg = landing_propellant_kg;
+    f.boostback_s = boostback_s;
+    f.n2_at_separation_kg = n2_at_separation_kg;
+    f.n2_left_kg = stage.vehicle().rcs_supply_kg();
+    f.hold_tilt_deg = hold_tilt_deg;
+    f.ignition_off_velocity_deg = ignition_off_velocity_deg;
+    f.ignition_rate_deg_s = ignition_rate_deg_s;
+    f.three_engines_s = three_engines_s;
+    f.end_s = session.mission_time_s();
+    f.offset_m = std::hypot(p.x, p.y);
+    f.outcome = session.landing_outcome(0);
+    return f;
+}
+
+}  // namespace
+
+TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation][ascent_planner]") {
+    // Physical gates only; the agreement with the webcast timelines is the nightly report below (user 2026-11-03).
+    const auto f = fly_rtls_mission();
+    std::printf("[validation] Falcon 9 RTLS: MECO T+%.0f s with %.1f t; entry burn T+%.0f s at %.1f km; landing burn T+%.0f s at "
+                "%.2f km, %.0f m/s, %.1f t; %s at T+%.0f s, %.2f m from the centre; separation -> boostback %.1f s; hold tilt "
+                "%.2f deg; ignition %.1f deg off the velocity at %.1f deg/s; three engines %.1f s after ignition; N2 %.0f kg at "
+                "the separation, %.0f kg left\n",
+                f.meco_s, f.meco_propellant_kg / 1e3, f.entry_s, f.entry_h / 1e3, f.landing_s, f.landing_h / 1e3, f.landing_v,
+                f.landing_propellant_kg / 1e3, sim::to_string(f.outcome), f.end_s, f.offset_m, f.boostback_s - f.meco_s,
+                f.hold_tilt_deg, f.ignition_off_velocity_deg, f.ignition_rate_deg_s, f.three_engines_s - f.boostback_s,
+                f.n2_at_separation_kg, f.n2_left_kg);
+    CHECK(f.meco_s > 0.0);
+    CHECK(f.boostback_s > f.meco_s);
+    CHECK(f.n2_left_kg > 0.0);
+    // The real sequence (docs/subsystems/falcon9.md, "The flip"): a hold until the nozzle is clear, the centre engine first.
+    CHECK(f.hold_tilt_deg < 0.5);
+    CHECK(f.three_engines_s - f.boostback_s > 2.5);
+    CHECK(f.n2_left_kg >= 0.2 * (600.0 - f.n2_left_kg));  // floor [E]: 20 % of the used
+    CHECK(f.entry_s > 0.0);
+    CHECK(f.landing_s > 0.0);
+    CHECK(f.outcome == sim::LandingOutcome::Landed);
+    CHECK(f.offset_m < 5.0);  // spec success: < 5 m from the centre
+}
+
+TEST_CASE("Falcon 9 RTLS mission: agreement with the webcast timelines (report)", "[nightly][webcast][falcon9][rtls][ascent_planner]") {
+    const auto f = fly_rtls_mission();
+    const std::string flip_params = "flip_duration_s, boostback_loss_fraction, RCS thrust and N2 supply, stage inertia";
+    const std::string ignition_params = "landing-burn plan, entry-burn plan, descent drag (Cd table), propellant at MECO";
+    test::webcast_report(
+        "falcon9_rtls_timeline",
+        {
+            // KNOWN MISS (falcon9.md "The flip"): timelines' mean 13.7 +-0.6 s, flown 14.7 s. Not tuned.
+            {"separation -> boostback [s]", f.boostback_s - f.meco_s, 13.7, 0.6, "SpaceX timelines CRS-35 / Bandwagon-3 / Crew-13 mean", flip_params},
+            {"ignition angle off the velocity [deg]", f.ignition_off_velocity_deg, 114.0, 15.0, "extrapolation of the dials (falcon9.md)", flip_params},
+            // KNOWN MISS: flown 20.2 deg/s lies just outside the Crew-13 limb extrapolation 16 +-4 deg/s.
+            {"ignition rate [deg/s]", f.ignition_rate_deg_s, 16.0, 4.0, "Crew-13 limb, extrapolated [D]", flip_params},
+            {"landing-burn propellant [t]", f.landing_propellant_kg / 1e3, 12.1, 1.0, "CRS-35 telemetry", ignition_params},
+            {"landing-burn ignition height [km]", f.landing_h / 1e3, 3.25, 0.75, "CRS-35 telemetry, ~3.2 km (2.5-4 km band)", ignition_params},
+            {"landing-burn ignition speed [m/s]", f.landing_v, 300.0, 30.0, "CRS-35 telemetry", ignition_params},
+            {"entry burn time [s]", f.entry_s, 355.0, 20.0, "CRS-35 timeline [D]", ignition_params},
+            {"landing burn time [s]", f.landing_s, 420.0, 20.0, "CRS-35 timeline [D]", ignition_params},
+            {"touchdown time [s]", f.end_s, 442.0, 20.0, "CRS-35 timeline [D]", ignition_params},
+        });
 }
 
 namespace {
