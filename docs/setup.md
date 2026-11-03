@@ -54,8 +54,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   included), also before a push and before a plan's final review; no blanket `-Fast` or full-suite runs. A change to
   shared code (e.g. `FlightSession::advance_to`, `Vehicle::mass_properties`) whose new branch is inactive for other
   subsystems does not pull their campaigns in. Tag a new test case `[slow]` when it takes more than ~40 s.
-- `-TestFilter "[a],[b]"` runs the union of the tags as parallel ctest processes (`[slow]` included unless `-Fast`;
-  output in `build/ctest_filter.log`); a spec that is not a tag list runs the exe serially.
+- `-TestFilter` has Catch semantics: `,` = union of groups, `[a][b]` inside a group = intersection (`"[gnc][validation],[legs]"`).
+  Matching cases run as parallel ctest processes (`[slow]` included unless `-Fast`; output in `build/ctest_filter.log`);
+  a spec that is not a tag list runs the exe serially. `-ListOnly` prints the ctest command and the matched count
+  without building or running (0 matches throws "TestFilter matched no test"). Three tiers: the default and every
+  filter exclude the label `nightly`; `-Nightly` alone runs only the nightly cases, with a filter it adds the nightly
+  cases of those tags. (Final tier sizes: Task 8 of the test tiers plan.) Check of the filter: `tools/tests/test_build_filter.ps1`.
 - Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
   in a file; check its state every 10 minutes (failures so far, a case hanging or far beyond its usual time). When
   tests are going wrong, stop the run early and fix the cause instead of waiting for the end.

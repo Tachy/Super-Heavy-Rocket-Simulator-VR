@@ -82,7 +82,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 
 ## Build & test (Windows, MSVC 2022 Build Tools, CMake, Ninja, SCons) - details in `docs/setup.md`
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter "[tag1],[tag2]"  # core + affected tags
+powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter "[tag1],[a][b]"  # core + affected tags (, = union, [a][b] = intersection; -Nightly adds the nightly tier, -ListOnly counts)
 powershell -ExecutionPolicy Bypass -File tools/build.ps1 -TestFilter "[tag]"                       # + GDExtension
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
 ```
