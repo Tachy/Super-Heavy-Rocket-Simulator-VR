@@ -485,6 +485,10 @@ void fly_flip_campaign(int first, int last) {
     }
     std::printf("[validation] Falcon 9 flip campaign, separations %d-%d of 13: landed %d, ignition <= %.2f s, >= %.0f kg left\n", first,
                 last - 1, landed, latest_ignition, least_propellant);
+    // KNOWN STATE (docs/known-issues.md): separation 4 stands upright 121 m off the pad after four unconverged re-plans.
+    // Any other off-pad separation is a new failure; a fixed case 4 also shows here and needs the known-issues entry closed.
+    const std::vector<int> expected_off_pad = (first <= 4 && 4 < last) ? std::vector<int>{4} : std::vector<int>{};
+    if (!std::getenv("STARSIM_FLIP_CASE")) CHECK(off_pad == expected_off_pad);
 }
 
 }  // namespace
