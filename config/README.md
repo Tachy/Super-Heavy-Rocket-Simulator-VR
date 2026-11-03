@@ -41,7 +41,9 @@ mdot        = thrust_ref_n / (isp_ref_s * g0)                 (constant at full 
 F(p_amb)    = thrust_ref_n - (p_amb - reference_pressure_pa) * A_exit
 Isp(p_amb)  = F(p_amb) / (mdot * g0)
 ```
-`A_exit` comes from `nozzle_exit_diameter_m`. Sea-level and vacuum Isp therefore stay
+`A_exit` comes from `nozzle_exit_diameter_m`, the INNER (flow) exit diameter; the drawn bell's wall (`wall_m` of the
+detail file) lies outside it (Raptor 3: 1.30 m exit, user 2026-11-03, 1 cm wall, drawn lip 1.32 m; vacuum thrust then
+2.7459e6 + 101325 x 1.3273 = 2.880 MN, Isp 346.2 s). Sea-level and vacuum Isp therefore stay
 mutually consistent. `max_ambient_pressure_pa` limits where the nozzle may run without
 flow separation (vacuum engines).
 

@@ -217,7 +217,7 @@ throat_from_exit_m = 1.35          # [E] +-0.3 m: f14 file 2515 s: bell height /
 rib_count = 200                    # [E] fine regen ribs, f14 file 2563 s (not countable); read only up close
 throat_diameter_m = 0.30           # [E]
 contour_exponent = 0.5             # [E] bell radius r = r_t + (r_e - r_t) * (z / L)^exponent (parabola-like, quick opening)
-wall_m = 0.02                      # [E] bell wall
+wall_m = 0.01                      # [S] user 2026-11-03: 1 cm bell wall, outside the config's 1.30 m (inner) exit: lip 1.32 m
 mount_height_m = 1.0               # [E] chamber / pump housing above the gimbal point (inside the stage's skirt)
 mount_radius_frac = 0.45           # [E] housing radius as a fraction of the exit radius
 segments = 32                      # [E]
@@ -229,7 +229,7 @@ throat_from_exit_m = 3.0           # [E] +-0.4 m: f14 file 2515 s: height / rim 
 rib_count = 80                     # [E] flutes, f14 file 2515 s: ~40 on the visible half
 throat_diameter_m = 0.30           # [E]
 contour_exponent = 0.5             # [E]
-wall_m = 0.02                      # [E]
+wall_m = 0.01                      # [S] user 2026-11-03: 1 cm bell wall, outside the config's (inner) exit
 mount_height_m = 1.0               # [E]
 mount_radius_frac = 0.30           # [E]
 segments = 40                      # [E]

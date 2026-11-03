@@ -108,13 +108,28 @@ TEST_CASE("Engine performance reproduces sea-level and vacuum data", "[propulsio
     const propulsion::EnginePerformance raptor(v.engine("raptor3"));
     CHECK(raptor.thrust_n(1.0, constants::standard_pressure_pa) == Catch::Approx(2.7459e6));  // 280 tf [S:block3_summary]
     CHECK(raptor.specific_impulse_s(1.0, constants::standard_pressure_pa) == Catch::Approx(330.0));
-    CHECK(raptor.specific_impulse_s(1.0, 0.0) == Catch::Approx(350.0).epsilon(1e-3));
+    // vacuum Isp follows from the 1.30 m exit (user 2026-11-03): (2.7459e6 + 101325 * 1.3273) / (848.5 kg/s * g0) = 346.2 s
+    CHECK(raptor.specific_impulse_s(1.0, 0.0) == Catch::Approx(346.16).margin(0.01));
     CHECK(raptor.thrust_n(0.4, 0.0) == Catch::Approx(0.4 * raptor.thrust_n(1.0, 0.0)));
 
     const propulsion::EnginePerformance rvac(v.engine("raptor_vacuum3"));
     CHECK(rvac.specific_impulse_s(1.0, 0.0) == Catch::Approx(380.0));
     CHECK_FALSE(rvac.can_operate(constants::standard_pressure_pa));
     CHECK(rvac.can_operate(100.0));
+}
+
+TEST_CASE("Raptor 3 vacuum performance follows the 1.30 m exit", "[propulsion][config]") {
+    // User 2026-11-03: inner (flow) exit diameter 1.30 m; sea-level thrust 280 tf and Isp 330 s stay, vacuum follows.
+    const auto v = config::load_vehicle(config_dir, "starship_block3");
+    const auto& cfg = v.engine("raptor3");
+    const double area_m2 = constants::pi / 4.0 * 1.30 * 1.30;
+    CHECK(cfg.nozzle_exit_area_m2 == Catch::Approx(area_m2).margin(1e-9));
+    const propulsion::EnginePerformance raptor(cfg);
+    const double f_vac_n = 2.7459e6 + constants::standard_pressure_pa * area_m2;  // ~2.880 MN
+    CHECK(raptor.thrust_n(1.0, 0.0) == Catch::Approx(f_vac_n).margin(1.0));
+    const double mdot_kgps = 2.7459e6 / (330.0 * constants::standard_gravity_mps2);
+    CHECK(raptor.specific_impulse_s(1.0, 0.0) ==
+          Catch::Approx(f_vac_n / (mdot_kgps * constants::standard_gravity_mps2)).margin(0.01));
 }
 
 TEST_CASE("The stack and the ship alone fly their own axial tables", "[aero][vehicle]") {

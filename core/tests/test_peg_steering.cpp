@@ -7,8 +7,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/peg_steering.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/propulsion/engine_performance.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -24,9 +26,12 @@ TEST_CASE("PEG steers a lunar ascent into a 15 x 100 km insertion", "[gnc][peg]"
     target.terminal_semi_major_axis_m = 0.5 * (rp + ra);
     gnc::PegSteering peg(gm);
 
-    // 600 t on three sea-level Raptors in vacuum (2.912 MN, 350 s each), 300 m above the sphere, rising 20 m/s.
+    // 600 t on three sea-level Raptors in vacuum (config/engines/raptor3.toml: ~2.880 MN, ~346 s each from the 1.30 m
+    // exit), 300 m above the sphere, rising 20 m/s.
     double m = 600e3;
-    const double thrust = 3.0 * 2.912e6, flow = thrust / (350.0 * constants::standard_gravity_mps2);
+    const propulsion::EnginePerformance raptor(
+        config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").engine("raptor3"));
+    const double thrust = 3.0 * raptor.thrust_n(1.0, 0.0), flow = 3.0 * raptor.mass_flow_kgps(1.0);
     Vec3 r{R + 300.0, 0.0, 0.0}, v{20.0, 0.0, 0.0};
     time::Epoch t = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
     bool cut = false;

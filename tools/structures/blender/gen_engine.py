@@ -2,8 +2,9 @@
 
 Frame (Blender axes kept): the engine's GIMBAL POINT is the origin, the axis is X with the thrust direction +X, so the
 bell opens toward -X and the exit plane is X = -bell_length_m (the plume's start); the chamber / pump housing sits above
-the gimbal (X = 0 .. mount_height_m, inside the stage's skirt). The outer rim of the lip has the diameter of
-`nozzle_exit_diameter_m` in config/engines/<id>.toml. Nodes: `<file stem>` root with `bell` (outer wall, inner wall,
+the gimbal (X = 0 .. mount_height_m, inside the stage's skirt). The INNER (flow) wall at the exit has the diameter of
+`nozzle_exit_diameter_m` in config/engines/<id>.toml (the physics' exit area); the wall `wall_m` lies outside it, so the
+closed lip's outer rim is that diameter + 2 wall (Raptor 3: 1.30 + 0.02 = 1.32 m, user 2026-11-03). Nodes: `<file stem>` root with `bell` (outer wall, inner wall,
 lip) and `housing`. The game places one instance per engine at the config ring position (no cant, gimbal in the game).
 """
 import sys
@@ -25,14 +26,14 @@ def build_engine(spec, eid):
     zs = [throat * i / BELL_RINGS for i in range(BELL_RINGS + 1)]  # distance from the throat along the bell
     x_throat = throat - length  # X of the throat (exit plane at -length)
 
-    def r_out(z):
+    def r_in(z):  # the flow contour: the config's exit diameter is the inner one
         return r_t + (r_e - r_t) * (z / throat) ** exp
 
-    outer = [(x_throat - z, r_out(z)) for z in reversed(zs)]  # exit -> throat, X increasing
-    inner = [(x_throat - z, r_out(z) - wall) for z in zs]  # throat -> exit
+    outer = [(x_throat - z, r_in(z) + wall) for z in reversed(zs)]  # exit -> throat, X increasing
+    inner = [(x_throat - z, r_in(z)) for z in zs]  # throat -> exit
     bell = vc.VMesh()
     vc.revolve(bell, [([(x_throat, 0.0), (x_throat, inner[0][1])], (-1.0, 0.0, 0.0)), (inner, "in"),
-                      ([(-length, r_e - wall), (-length, r_e)], (-1.0, 0.0, 0.0)), (outer, "out")], n, r_e, "bell")
+                      ([(-length, r_e), (-length, r_e + wall)], (-1.0, 0.0, 0.0)), (outer, "out")], n, r_e + wall, "bell")
     housing = vc.VMesh()
     rh = max(e["mount_radius_frac"] * r_e, r_t * 1.1)
     h = e["mount_height_m"]

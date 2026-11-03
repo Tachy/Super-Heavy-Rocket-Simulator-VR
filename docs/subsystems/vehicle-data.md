@@ -10,6 +10,10 @@ Ascent trajectory and staging: `docs/subsystems/ascent-staging.md`.
   equation staging -> cutoff with the propellant gauge, 248-260 t), **probably too high** (the gauge excludes the landing propellant; one-engine phase of flight 12 allows <= 209-218 t at 280 tf; about 175 +-25 t by judgement; kept because no tested combination passes the replays, `docs/known-issues.md`), booster dry 210 t +-40 t (stack mass balance and
   descent ballistic coefficient), liftoff ~5,550 t; tank capacities 3,650 / 1,600 t [S]; Raptor 3 280 tf consistent
   (peaks ~270 tf sea-level equivalent; 250 tf is contradicted), minimum throttle 30 % [D] (V3 hovers on 3 engines).
+- **Raptor 3 nozzle**: exit (inner, flow) diameter 1.30 m [S: user 2026-11-03], A_e 1.3273 m^2; sea-level 280 tf / 330 s
+  stay, vacuum follows (`engine_performance.cpp`): 2.880 MN, 346.2 s (test "Raptor 3 vacuum performance follows the
+  1.30 m exit"). Every Raptor burn above sea level reads it (ascent, boostback, landing, ship burns, lunar).
+  Superseded 1.446 m / 350 s: `docs/history/vehicle-data.md`.
 - **Booster ascent throttle** (vehicle data): `[stage] max_ascent_throttle` 0.88 [D] (flights 13/14 gauge flow before
   max-Q against the rated flow) and `max_dynamic_pressure_pa` 38909 Pa [D] (flight 14's peak q). Every launch plans its
   kick. On the dials' own time base (speed 3.50 s, altitude 5.45 s late) and with flight 14's booster load (96.8 %)

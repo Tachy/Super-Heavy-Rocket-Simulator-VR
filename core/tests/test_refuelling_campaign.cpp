@@ -65,14 +65,14 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
 TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelling][campaign][config]") {
     const auto r = config::load_refuelling_reference(config_dir);
     CHECK(r.depot.mission == "depot_launch");
-    CHECK(r.depot.initial_propellant_kg == Catch::Approx(69.3e3));  // vehicle physics re-measure (was 70.7)
+    CHECK(r.depot.initial_propellant_kg == Catch::Approx(63.1e3));  // Raptor nozzle 1.30 m re-measure 2026-11-03 (was 69.3)
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(73.4e3));  // vehicle physics re-measure (was 73.6)
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(68.4e3));  // Raptor nozzle 1.30 m re-measure 2026-11-03 (was 73.4)
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(1.1e3));  // flown campaign (ascent Task 5 re-calibration)
     CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(2.0e3));
     CHECK(r.hls.mission == "hls_refuel");
-    CHECK(r.hls.main_at_docking_kg == Catch::Approx(202.9e3));  // vehicle physics re-measure (was 203.5)
+    CHECK(r.hls.main_at_docking_kg == Catch::Approx(198.2e3));  // Raptor nozzle 1.30 m re-measure 2026-11-03 (was 202.9)
     // the reference tanker is the configured one
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));
@@ -564,9 +564,11 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     // 52.5 d with the flown decay factor 1.076; 14 / 52.3 d after the ascent Task 2 re-measure: 63.6 t per tanker
     // instead of 67.7 t, the depot's own 69.6 t instead of 55.5 t; 12 / 50.6 d after the ascent Task 5 re-measure: the
     // planned kick (tanker 18.1 deg instead of the webcast-tuned 14) leaves 105.6 t instead of 93.0 t after the ascent,
-    // 74.25 t delivered per tanker, the campaign offsets re-calibrated)
-    CHECK(r.result.tanker_flights == 12);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(50.99).margin(0.05));
+    // 74.25 t delivered per tanker, the campaign offsets re-calibrated; 12 / 50.99 d after the vehicle physics
+    // re-measure; 13 / 52.37 d after the Raptor nozzle 1.30 m re-measure 2026-11-03: 68.4 t delivered per tanker instead
+    // of 73.4 t, depot fill 63.1 t instead of 69.3 t, campaign offsets not re-calibrated)
+    CHECK(r.result.tanker_flights == 13);
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(52.37).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {

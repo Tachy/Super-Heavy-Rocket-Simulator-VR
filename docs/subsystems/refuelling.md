@@ -406,10 +406,12 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   manual settle, the turn before the push, the allocator query, the gas bound and estimates);
   `[campaign_flown]` (`test_refuelling_campaign_flight.cpp`: supervisor, keep_station, place_vehicle, reboost, live
   start, free depot decay; placed and full campaign `[slow]`); `tools/test_vehicle_report.py`.
-- Reference flights (re-measured 2026-11-01, vehicle physics Task 6e): tanker residue 104.2 t, rendezvous 16.74 t, delivered LOX / CH4
-  58.8 / 14.6 t, main at catch 0.0 t (header tanks); depot fill 69.3 t; HLS main at docking 202.9 t; above-depot
+- Reference flights (re-measured 2026-11-03 after the Raptor 3 nozzle 1.30 m, vacuum Isp 350 -> 346.2 s): tanker residue
+  98.1 t, rendezvous 15.66 t, delivered LOX / CH4 54.6 / 13.8 t, main at catch 0.37 t; depot fill 63.1 t; HLS main at
+  docking 198.2 t (2026-11-01: 104.2 / 16.74 / 58.8 / 14.6 / 0.0 / 69.3 / 202.9 t). The campaign offsets and the
+  calculator answer below were not re-calibrated with them (the full flown campaign was not re-flown); above-depot
   pad flight 220 x 240 km, Waypoint 0 9.9 h after liftoff (window 10.0 h). The "Numbers" above are the earlier measure.
-- Calculator answer (default, depot placed at 200 km, 48 h): **12 tanker flights, 51.0 days** (73.4 t per
+- Calculator answer (default, depot placed at 200 km, 48 h): **13 tanker flights, 52.4 days** (2026-11-03, Raptor nozzle 1.30 m; was 12 / 51.0 d) (68.4 t per
   reference tanker). `--reference-phasing`: 14 / 224.7 d. Cadence: the 24 h pad turnaround against plane crossings
   ~23.4 h apart lets only every other crossing fly (`--interval-h 12`: 12 / 23.1 d); the gaps between runs are phases
   no candidate closes in 48 h; launches in runs of four per ~13.8 d phase cycle (r6 f1: 150 x 190 km when the depot is

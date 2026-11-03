@@ -5,12 +5,34 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - #1147 (`Ship entry reproduces the webcast telemetry of flights 12-14`, flight 14 speed rms 8.33 % against 5 %): the webcast comparison is a report since 2026-11-03 (user: "report, not gate; physical gate kept"), `[nightly][webcast]` "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" writes `webcast_report/ship_entry_telemetry.md` (parameters: entry mass 255 vs ~175 t, CG, crossflow Cd, flap CdA). The gate part (no impact, lift fraction saturated < 10 %, > 200 speed points) is green (measured 2026-11-03, 16 s) and red or green by physics only; the report row flight 14 speed rms is 0.083 (outside 0.05), the others inside; the number stays an open vehicle-plan item, nothing tuned. The same applies to the other webcast bands (ascent flight 14 / CRS-35, descent rms, booster return timeline, ASDS and RTLS timelines, staging flip time, Crew Dragon chutes): reports, the physical gates stay in the normal tier. Dropped pins: the 77.5 deg bank of `test_entry_skip.cpp` (gate, miss and heat stay), the docking `KNOWN STATE` (report row).
 - Default-tier run after the test tiers (2026-11-03, `.superpowers/sdd/2026-11-03-test-tiers/full_after.log`): 7 of 1513 red, all listed here; ctest numbers shift with every added case, so the reds are named by test: the two settling cases below ("the coast stops before the lead in 10 s and in 600 s steps", "the turn to the burn ends before the push"), "Docked tanker: the ship return flies to the catch", the reduced direct lunar case "Lunar return campaign (direct): seed 2", the two flap-trim cases, `plan_speed`. The timeline sampling case (formerly #711) was fixed by 9fbb94a and is green; #1147 is nightly.
 - Reds since 47904b6 (ship hull CP table, station fade Mach 1-4, nose 17 -> 13.4 m), found by the full run 2026-11-03 (`.superpowers/sdd/test-audit/reds-report.md`), not re-pinned: the two settling cases of `test_ignition_settling.cpp` (the drifting tanker in a ~100 km perigee orbit turns side-on, apoapsis 183 -> 117 km in one pass, hits the ground ~2100 s before the burn; open: test orbit or attitude hold while drifting, check mission tankers); (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (interface speed -68..-82 m/s, braking +78..+96 m/s, TEI -1.9/+3.4/-0.2 m/s LLO/NRHO/aircatch against the stored reference plans).
+- Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, -1.1 % vacuum Isp on
+  every Raptor burn; nothing tuned back; measured `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/t1-{before,after}-full.log`):
+  - "Starship ascent to flight 14's insertion orbit": the plan is infeasible ("Die Oberstufe erreicht den Zielorbit nicht");
+    before kick 16.09 deg, 165.0 x 277.3 km, 35.6 t left in the ship. With the 255 t ship dry mass [D, probably too high,
+    `vehicle-data.md`] the ship no longer reaches flight 14's orbit with booster return: a vehicle-parameter item.
+  - "Ship return campaign: dispersions 1-3" case 1 and "4-6" case 2: gate miss 356 m / 638 m (limit 100 m), aborted, 3.7 /
+    0.1 t left (before 2 m / 4 m, caught with 7.9 / 7.0 t); the other four cases unchanged (miss 0-9 m).
+  - "Lunar return campaign (direct): seed 15": upright abort, 3.7 t left (before caught, 4.2 t); same TEI / braking.
+    Seed 2 stays red (known).
+  - "Lunar return aerocapture: captured - perigee raised - caught by b4": impacted, 5.5 t left (before caught, 12.5 t).
+  - "A commanded abort late in the landing burn ditches the booster at sea": abort at 800 m ditches with 0.5 t left
+    (limit > 1 t; before 4.1 t); 1500 m and 400 m pass.
+  - Turned green: "Docked tanker: the ship return flies to the catch".
+  - Refuelling reference flights re-measured (`config/refuelling/reference_flights.toml`, `refuelling.md`); the
+    calculator answers 13 tankers / 52.4 d (was 12 / 51.0 d); the campaign offsets are not re-calibrated (full flown
+    campaign not re-flown).
+- `test_mount_layout.py::test_booster_stack_clears_deck_ring_and_qd` red since the Raptor nozzle change (2026-11-03,
+  outer ring 4.1 -> 4.40 m, lip 1.32 m): 2052 mount points lie inside the bells' envelope at the ring's underside
+  (r 4.41-4.54 m, z 13.7 m; the envelope there is 4.40 + 0.256 + 0.04 margin = 4.70 m against the 9.0 m [E] ring
+  opening). ANY ring that keeps the 20 lips apart (>= 4.22 m) needs an opening >= 9.04 m; with 4.40 m about 9.4 m and the
+  deck parts at z 13.5 m (r ~4.80 m) moved too (tried 9.5 m: 4 points left there, `test_ring_outer_and_opening` pins 4.5 m).
+  Pad geometry follows the measurements (opening "about 9 m", pickup scale -5 %; DSC06000 reads 11.6 m across the deck):
+  not changed, for the user. Drawing only; the physics has no mount opening.
 - Crew Dragon entry: 1 cm of stage length moves a campaign case by up to 0.88 km (bound 2 km holds), source not determined (`.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/task-5-report.md`); held until the rendering is done, by the user's wish.
 - Falcon 9 / Crew Dragon / ISS detail models (plan 2026-11-02, end state; values in `.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/final-values.md`), open for the user:
   - Port clocking: the `up` of the IDA-2 / IDA-3 ports is a photo-picked member [E, +-30 deg] of a measured class [D] (model D); no document states the real clock; IDA-3 aft vs forward rests on model D only. One config value, one tag run (`iss.md` "Port clocking").
   - Dragon port at 4.22 m [E] +-0.1 (was 4.0); capsule 4.85 m and trunk 3.25 m by measurement, over the cited 4.5 m capsule (`crew-dragon.md`).
   - Falcon 9 foot at -2.1 m from weak evidence; fins fold by a view rule (no physics state), leg drawn as one beam (`falcon9.md`).
-  - Raptor 3 nozzle (drawn 1.30 m official, physics Isp / thrust unchanged): its own later topic, nothing changed in this plan.
   - ISS collision shapes are the old capsules and boxes and lag the drawing; CG 38 m is an unverified [E] (a rough tally gives about 33 m) (`iss.md`).
   - IDSS soft capture misses one envelope corner: 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral away from the axis ends "abgeprallt" at 30 and 45 deg petal lean (inward lateral captures); the undamped ring platform [E] reflects the chaser. Not tuned; the nightly report row "IDSS envelope corner" (captured 0 vs 1, outside) shows it, no test pins it. Capture at 0.05 m/s also narrowed with the 45 deg lean (largest offset 0.200 -> 0.135 m, margin over the 0.10 m envelope 0.035 m) (`iss.md`).
   - Docked Dragon shows ring retracted / hooks open (`DockingMechanismView` is not driven in flight).

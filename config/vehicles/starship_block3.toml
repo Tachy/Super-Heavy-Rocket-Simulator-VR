@@ -95,7 +95,7 @@ relight = true
 id = "outer"
 engine = "raptor3"
 count = 20
-ring_radius_m = 4.1                      # [E]
+ring_radius_m = 4.40                     # [E] 1:100 STL engine plate 4.40 m; user photo 2026-11-03 4.3 +-0.15 m; no-touch bound for 20 lips of 1.32 m: 4.22 m
 gimbal = false                           # [E]
 relight = true                           # Raptor 3 outer engines can relight [S:wiki_sh]
 

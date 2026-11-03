@@ -88,23 +88,55 @@ def test_flap_rotation_sign_reproduces_the_physics_span_direction():
         assert stow[0] * math.cos(math.radians(b)) + stow[1] * math.sin(math.radians(b)) <= 1e-9
 
 
-def test_engine_ring_overlap_is_reported():
+def _lip_diameter_m(spec, eid):
+    """Drawn outer lip: the config's exit diameter is the inner (flow) one, the bell wall lies outside it."""
+    e = spec["engines"][eid]
+    return e["nozzle_exit_diameter_m"] + 2.0 * e["wall_m"]
+
+
+def _smallest_lip_gap_m(spec, groups):
+    """Smallest gap between two drawn lips over every engine pair of the groups (plan view, no clearance asked)."""
+    pos = [(g["engine"], g["ring_radius_m"] * math.cos(math.radians(a)), g["ring_radius_m"] * math.sin(math.radians(a)))
+           for g in groups for a in g["angles_deg"]]
+    worst = math.inf
+    for i, (ei, xi, yi) in enumerate(pos):
+        for ej, xj, yj in pos[i + 1:]:
+            gap = math.hypot(xi - xj, yi - yj) - 0.5 * (_lip_diameter_m(spec, ei) + _lip_diameter_m(spec, ej))
+            worst = min(worst, gap)
+    return worst
+
+
+def test_raptor_lip_is_the_config_exit_plus_the_wall():
     spec = vehicle_spec.load(VEHICLE)
-    lines = []
+    assert spec["engines"]["raptor3"]["nozzle_exit_diameter_m"] == pytest.approx(1.30)  # user 2026-11-03, inner exit
+    assert _lip_diameter_m(spec, "raptor3") == pytest.approx(1.32)  # 1 cm wall (user 2026-11-03)
+
+
+def test_outer_ring_bells_do_not_touch():
+    # 20 bells on one ring: the chord 2 R sin(9 deg) must hold the 1.32 m lip, R >= 4.22 m
+    spec = vehicle_spec.load(VEHICLE)
+    outer = next(g for g in spec["stages"]["booster"]["engines"] if g["group"] == "outer")
+    assert len(outer["angles_deg"]) == 20
+    assert outer["ring_radius_m"] >= _lip_diameter_m(spec, "raptor3") / (2.0 * math.sin(math.radians(9.0)))
+    assert _smallest_lip_gap_m(spec, [outer]) >= 0.0
+
+
+def test_booster_bells_do_not_touch():
+    # every Raptor / RVac pair of the booster, the ship and the HLS (same bells as the ship; its own rings)
+    spec = vehicle_spec.load(VEHICLE)
     for stage_id, st in spec["stages"].items():
-        pos = [(g["engine"], g["ring_radius_m"] * math.cos(math.radians(a)), g["ring_radius_m"] * math.sin(math.radians(a)))
-               for g in st["engines"] for a in g["angles_deg"]]
-        worst = 1e9
-        for i, (ei, xi, yi) in enumerate(pos):
-            for ej, xj, yj in pos[i + 1:]:
-                gap = math.hypot(xi - xj, yi - yj) - 0.5 * (spec["engines"][ei]["nozzle_exit_diameter_m"] +
-                                                              spec["engines"][ej]["nozzle_exit_diameter_m"])
-                worst = min(worst, gap)
-        lines.append(f"{stage_id}: smallest gap between two exit planes {worst:+.3f} m")
-        assert worst > -0.25  # config rings leave the 20 outer Raptors slightly overlapping; larger would be a typo
-        outer = max(g["ring_radius_m"] for g in st["engines"])
-        lines.append(f"{stage_id}: outermost bell edge {outer + 0.723:.2f} m vs hull radius {st['diameter_m'] / 2:.2f} m")
-    print("\n".join(lines))
+        gap = _smallest_lip_gap_m(spec, st["engines"])
+        print(f"{stage_id}: smallest gap between two drawn lips {gap:+.3f} m")
+        assert gap >= 0.0, stage_id
+    with open(vehicle_spec.VEHICLES / "starship_hls.toml", "rb") as f:
+        hls = tomllib.load(f)
+    for s in hls["stage"]:
+        groups = [{"engine": g["engine"], "ring_radius_m": float(g["ring_radius_m"]),
+                   "angles_deg": g.get("angles_deg") or [360.0 * i / g["count"] for i in range(g["count"])]}
+                  for g in s.get("engine_group", []) if g["engine"] in spec["engines"]]
+        gap = _smallest_lip_gap_m(spec, groups)
+        print(f"starship_hls {s['id']}: smallest gap between two drawn lips {gap:+.3f} m")
+        assert gap >= 0.0, s["id"]
 
 
 # ------------------------------------------------------------------------------------------ Blender
@@ -470,8 +502,10 @@ def test_engine_exit_diameter_and_gimbal_origin(built, spec, eid):
     pos = parts["bell"][0]
     lo, hi = _bounds(pos)
     assert lo[0] == pytest.approx(-e["bell_length_m"], abs=1e-4)  # exit plane
-    rim = max(math.hypot(p[1], p[2]) for p in pos if abs(p[0] - lo[0]) < 1e-4)
-    assert 2.0 * rim == pytest.approx(e["nozzle_exit_diameter_m"], abs=0.01)  # = config/engines value
+    exit_r = [math.hypot(p[1], p[2]) for p in pos if abs(p[0] - lo[0]) < 1e-4]
+    # closed lip: inner rim = config/engines exit (the flow's), outer rim = + the wall (Raptor 3: 1.30 / 1.32 m)
+    assert 2.0 * min(exit_r) == pytest.approx(e["nozzle_exit_diameter_m"], abs=2e-3)
+    assert 2.0 * max(exit_r) == pytest.approx(e["nozzle_exit_diameter_m"] + 2.0 * e["wall_m"], abs=2e-3)
     x_throat = e["throat_from_exit_m"] - e["bell_length_m"]
     assert hi[0] == pytest.approx(x_throat, abs=1e-4)  # the bell ends at the throat, the chamber goes on to the gimbal
     assert _bounds(parts["housing"][0])[0][0] == pytest.approx(x_throat, abs=1e-4)

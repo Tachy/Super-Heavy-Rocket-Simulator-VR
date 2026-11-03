@@ -554,7 +554,8 @@ def ramp_end_m(detail: dict) -> float:
 # ---------------------------------------------------------------- clearance of the stack
 
 def bell_radius_m(engine: dict, depth_m: float) -> float:
-    """Radius of a Raptor bell at `depth_m` below its gimbal point (gen_engine.py's contour; the chamber housing above)."""
+    """Outer radius of a Raptor bell at `depth_m` below its gimbal point (gen_engine.py's contour: the config's exit
+    diameter is the inner, flow one; the wall `wall_m` lies outside it; the chamber housing above)."""
     r_e, r_t = 0.5 * engine["nozzle_exit_diameter_m"], 0.5 * engine["throat_diameter_m"]
     length, throat = engine["bell_length_m"], engine["throat_from_exit_m"]
     x_throat = length - throat  # depth of the throat below the gimbal point
@@ -564,7 +565,7 @@ def bell_radius_m(engine: dict, depth_m: float) -> float:
     if depth_m < x_throat:
         return r_h + (r_t - r_h) * depth_m / x_throat  # the housing's cone from the gimbal point to the throat
     z = min(depth_m - x_throat, throat)
-    return r_t + (r_e - r_t) * (z / throat) ** engine["contour_exponent"]
+    return r_t + (r_e - r_t) * (z / throat) ** engine["contour_exponent"] + engine["wall_m"]
 
 
 def stack_violations(surfaces: Surfaces, height: float, hull_radius: float, ring_radii: list, engine: dict,

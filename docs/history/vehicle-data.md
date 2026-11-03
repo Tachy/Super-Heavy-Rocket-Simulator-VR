@@ -101,3 +101,9 @@ Verbatim record of this subsystem's notes as they stood in `docs/subsystems.md` 
 - Hull normal force at the formula's station (nose + half length) at all Mach; then, unflown, the mesh table faded in over Mach 2-3 (trim aft 63 -> 19 deg, which the frames do not show).
 - Trim then, 35 t: aft 73-90, forward 0-17 at Mach 4-25. Replay flights 13 / 12 / 14: 1.66 / 2.42 / 4.50 %. 64 t aerocapture: axis error 159.9 deg, apoapsis off by 7,348 km.
 - Rejected from the Task 5 patch: alpha 59.5, crossflow 1.07-1.10, nose radius 3.1 m, flight 14 limit 8 %, pod move.
+
+## Raptor 3 nozzle exit 1.446 m (superseded 2026-11-03)
+`config/engines/raptor3.toml` held `nozzle_exit_diameter_m = 1.446` [D], derived so that the vacuum Isp equals the 350 s of
+Wikipedia's Super Heavy page: A_e = F_sl (350 / 330 - 1) / p0 = 1.6424 m^2, F_vac = 2.912 MN. The drawn bells then
+overlapped on the 4.1 m outer ring (0.16 m at the exit planes). User ruling 2026-11-03: 1.30 m (inner exit), 280 tf and
+330 s at sea level stay; vacuum follows: 2.880 MN, 346.2 s. `test_peg_steering.cpp` used 3 x 2.912e6 N / 350 s locally.

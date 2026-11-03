@@ -89,3 +89,7 @@ Physics deviation rows, now none:
 
 ## Crew Dragon, first drawing (Task 5, superseded by Task 5c, 2026-11-02)
 Plain revolved wall with one bulge, an ellipse as nose on a flat seam at station 3.7 (hinge r 0.9), boxes as pods, triangular fins, capsule 4.5 m + trunk 3.6 m, SuperDraco pods at 36 / 144 / 216 / 324. User: the nose "looks like a knob". Corrected misreadings of the first model measurement: "M2 capsule 4.44" was the port's top without the nose (real 4.85, total 8.08); "fins 1.3 m" was wrong (full trunk height); the az 36 / 144 groups are the Draco ports, the SuperDraco bays lie at 63 / 117.
+
+## Raptor bells and outer ring before 2026-11-03
+The bell's OUTER rim had the config's exit diameter (1.446 m), the 2 cm wall [E] inside it; outer ring 4.1 m [E]: the 20
+outer lips overlapped by 0.16 m (test_engine_ring_overlap_is_reported allowed down to -0.25 m), bell edge 4.82 m.

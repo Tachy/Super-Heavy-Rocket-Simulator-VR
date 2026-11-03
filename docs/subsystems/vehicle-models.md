@@ -444,8 +444,13 @@ Lattice and spikes draw up to 120 m (`FIN_LATTICE_RANGE_M`: wall 4 cm = 1 Pimax 
 - Catch pins: see the deviations table: the pins stay as configured, frames give no sign of them.
   catch features at / integrated with the grid-fin mechanisms (unconfirmed, partly older designs). Modelled as in the config
   (physics and visual agree); a check against Block 3 photos and a decision on the physics numbers are open.
-- Config numbers that look odd next to the references: the 20 outer engines on the 4.1 m ring overlap by 0.16 m at the exit planes and the outer bell edge (4.82 m) passes the hull
-  radius (4.5 m).
+- Raptor bells (user 2026-11-03): the config's `nozzle_exit_diameter_m` 1.30 m is the inner (flow) exit; `gen_engine.py`
+  draws the 1 cm wall (`wall_m` 0.01, RVac too) outside it and closes the lip: outer lip 1.32 m. The 20 outer engines sit
+  on the 4.40 m ring [E] (1:100 STL engine plate 4.40 m; user photo `screenshots/raptor_nozzle/user_booster_engines_detail.jpg`
+  4.3 +-0.15 m; no-touch bound 1.32 / (2 sin 9 deg) = 4.22 m): neighbouring lips 0.057 m apart, the bell edge (5.06 m)
+  passes the hull radius (4.5 m) as in the photo. Measurement: `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/task-1-rings.md`.
+  Tests: `test_outer_ring_bells_do_not_touch`, `test_booster_bells_do_not_touch` (booster, ship, HLS). The STL's centre
+  (0.88 m) and middle (2.55 m) rings differ from the config's 1.0 / 2.6 m (no overlap either way; open for the user).
 - Flaps at d = 0 (folded, not the rest pose, which is d = 90) lie on the hull's tangent plane: the tip stands up to 0.9 m off the curved hull.
 - Raceway position, tile coverage, hot-stage and bell dimensions are estimates; no Block 3 drawing exists.
 

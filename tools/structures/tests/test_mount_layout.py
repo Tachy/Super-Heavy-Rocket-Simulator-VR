@@ -40,6 +40,13 @@ def _engine():
     return {"nozzle_exit_diameter_m": e["performance"]["nozzle_exit_diameter_m"], **d}
 
 
+def test_bell_radius_is_the_drawn_outer_lip_at_the_exit():
+    e = _engine()
+    # the config's 1.30 m exit is the inner one; the 1 cm wall lies outside (user 2026-11-03): lip radius 0.66 m
+    assert ml.bell_radius_m(e, e["bell_length_m"]) == pytest.approx(0.5 * e["nozzle_exit_diameter_m"] + e["wall_m"])
+    assert ml.bell_radius_m(e, e["bell_length_m"]) == pytest.approx(0.66)
+
+
 def _ring_radii():
     with open(ROOT / "config" / "vehicles" / "starship_block3.toml", "rb") as f:
         stage = tomllib.load(f)["stage"][0]
