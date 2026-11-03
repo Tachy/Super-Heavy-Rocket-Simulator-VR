@@ -237,7 +237,7 @@ TEST_CASE("Falcon 9's flip time follows its RCS and the free turn", "[gnc][falco
     const double flip_s = p.flip_hold_s + w / alpha + (theta - w * w / (2.0 * alpha)) / w;
     CHECK(gnc::booster_flip_s(p, authority, 0.0, 0.0) == Approx(flip_s).epsilon(1e-12));
     std::printf("[flip] Falcon 9: I %.4g kg m2, CG %.2f m, alpha %.4f rad/s2 (%.2f deg/s2), flip %.2f s (timelines "
-                "13.7 +-0.6 s, flown 14.79 s, the former fitted 14.8 s)\n",
+                "13.7 +-0.6 s, flown 14.1 s; 14.79 s at the former 114 deg, the former fitted 14.8 s)\n",
                 mass.pitch_inertia_kg_m2, mass.cg_station_m, alpha, alpha / deg, flip_s);
     // physical band: the measured turn 1.6-1.9 deg/s2 (Crew-13 frames, falcon9.md); the timelines 13.7 +-0.6 s, below
     // the 17 s timeout

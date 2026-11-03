@@ -40,8 +40,8 @@ command (no steering change while joined); every event at its own tick.
   11.04 s at 293 t for the flown 153 deg about -113 deg from body +y (MECO plan 11.25 s), flown 10.46 s: the model is
   a vacuum turn, the stage top first at 470 -> 130 Pa gets help from its hull and fins (+5.5 %, the slower bound;
   formerly a fixed 10 s [E], then a bang-bang 9.7 s: `docs/history/ascent-staging.md`); Falcon 9 the hold plus the free
-  turn to 114 deg capped at 20 deg/s - 14.65 s (flown 14.8 s; formerly a fitted 14.8 s; the timelines' mean
-  13.7 +-0.6 s, the CRS-35 webcast clock 13.0 s).
+  turn to 100 deg capped at 20 deg/s - 13.95 s (flown 14.1 s; at the former 114 deg 14.65 s, flown 14.8 s, before that a
+  fitted 14.8 s; the timelines' mean 13.7 +-0.6 s, the CRS-35 webcast clock 13.0 s; `falcon9.md` "The flip").
 - **Falcon 9 flip:** a hold, a free turn over the ground on the nitrogen thrusters, ignition still turning, the gimbal ends the turn: `docs/subsystems/falcon9.md` "The flip" (law, measurements, N2 budget). Nitrogen cold gas thrusters, 2 packs of 4 on the interstage [S: everydayastronaut.com Starship guide, Falcon 9 section]; thrust 6.5 kN each [D], N2 600 kg [D], Isp 70 s [E]. Flip time derived (above; the former `flip_duration_s` key is refused), `boostback_loss_fraction` 0.157 [D] (identified on the full RTLS: 12.1 t at landing-burn ignition for 12.1 t planned; former 13.6 s / 0.13: `docs/history/ascent-staging.md`).
 
 ### Max-Q limit and operational ascent throttle

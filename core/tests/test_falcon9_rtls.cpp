@@ -396,8 +396,10 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
     CHECK(f.hold_tilt_deg < 0.5);
     CHECK(f.three_engines_s - f.boostback_s > 2.5);
     CHECK(f.n2_left_kg >= 0.2 * (600.0 - f.n2_left_kg));  // floor [E]: 20 % of the used
-    // The flip law ends at its own 114 deg gate; far off means the timeout path (flip law logic, not webcast agreement; report row below).
-    CHECK(std::abs(f.ignition_off_velocity_deg - 114.0) < 15.0);
+    // The flip law ends at its own configured gate; far off means the timeout path (flip law logic, not webcast agreement;
+    // report row below).
+    const double gate_deg = falcon9_parameters().flip_ignition_off_velocity_rad / constants::deg_to_rad;
+    CHECK(std::abs(f.ignition_off_velocity_deg - gate_deg) < 15.0);
     CHECK(f.entry_s > 0.0);
     CHECK(f.landing_s > 0.0);
     CHECK(f.outcome == sim::LandingOutcome::Landed);
@@ -520,10 +522,9 @@ void fly_flip_campaign(int first, int last) {
     }
     std::printf("[validation] Falcon 9 flip campaign, separations %d-%d of 13: landed %d, ignition <= %.2f s, >= %.0f kg left\n", first,
                 last - 1, landed, latest_ignition, least_propellant);
-    // KNOWN STATE (docs/known-issues.md): separation 4 stands upright 121 m off the pad after four unconverged re-plans.
-    // Any other off-pad separation is a new failure; a fixed case 4 also shows here and needs the known-issues entry closed.
-    const std::vector<int> expected_off_pad = (first <= 4 && 4 < last) ? std::vector<int>{4} : std::vector<int>{};
-    if (!std::getenv("STARSIM_FLIP_CASE")) CHECK(off_pad == expected_off_pad);
+    // Every separation lands on the pad (the off-pad list is the measured set: empty since planner Task 10; separation 4
+    // stood 121 m off before planner Task 5, docs/history/guidance-missions.md). Any off-pad separation is a new failure.
+    if (!std::getenv("STARSIM_FLIP_CASE")) CHECK(off_pad == std::vector<int>{});
 }
 
 }  // namespace

@@ -158,9 +158,11 @@ flip_hold_s = 4.0                           # [S:tl_crs35] [S:tl_bandwagon3] [S:
                                              # three timelines; the drawn nozzle exit leaves the interstage 3.96 s after separation
                                              # at the pushers' 1 m/s (game/tests/separation_clearance.gd). Crew-13 frames agree: the
                                              # second stage's bell stays within ~10 deg of the axis to 4 s (docs/subsystems/falcon9.md)
-flip_ignition_off_velocity_deg = 114.0       # [D] ignition with the turn under way, over the ground: Crew-13 earth limb crosses the
+flip_ignition_off_velocity_deg = 100.0      # [D] ignition with the turn under way, over the ground: Crew-13 earth limb crosses the
                                              # view up the interstage at 13 deg/s, 9-11.5 s after separation; extrapolated to the
-                                             # ignition (speed dial, CRS-35 / Crew-13), +-15 deg (falcon9.md "The flip")
+                                             # ignition (speed dial, CRS-35 / Crew-13) 114 +-15 deg (falcon9.md "The flip"). 100 within
+                                             # that band [E]: separation -> ignition 14.1 s inside the timelines' 13.7 +-0.6 s (114 deg
+                                             # gave 14.8 s); RTLS and ASDS campaigns green on both (planner Task 10, 2026-11-03)
 flip_max_rate_deg_s = 20.0                   # [D] measured 16 +-4 deg/s extrapolated to the ignition: its upper end
 flip_ignition_timeout_s = 17.0               # [E] a stuck turn lights anyway: the measured 13.7 s + 3.3 s; the gimbal does the turn
 boostback_ignition_engine_groups = ["center"]  # [D] speed dial, CRS-35 and Crew-13: about one engine's deceleration first
