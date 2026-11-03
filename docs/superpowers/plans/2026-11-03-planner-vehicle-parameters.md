@@ -173,6 +173,10 @@ The stored reference plans differ (interface -68..-82 m/s, braking +78..+96 m/s,
 
 - [ ] Steps: find the generator; regenerate; `plan_speed` green; commit `test: re-measure plan_speed reference plans`.
 
+### Task 11b: Planner work off the sim thread (Opus)
+
+Measured in Task 3: the first catch plan runs blocking on the 200 Hz sim thread (0.25-0.95 s, ~6.5 s per cycling plan with Task 1c's escalation) and the forward-propagated flip prediction costs ~50 ms (154 ms cold) every 5 s in the terminal phase: 10-30 tick overruns, a visible hold in VR. Move both into the existing background planner (the one re-plans use), with the flying vehicle continuing on the last valid plan / guidance until the result arrives; results identical to the synchronous ones on the same inputs (test). Also N3: one last prediction refresh tied to time-to-go before the gate; N4: the fallback to the analytic flip model is logged. Measure tick overruns before/after on the Mach 2.6 session case.
+
 ### Task 12: Re-measure, docs, final review
 
 - [ ] `[slow]` of every touched tag, then `-Nightly` in the background (output to `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/nightly.log`, check every 10 min); webcast reports read, not gated.
