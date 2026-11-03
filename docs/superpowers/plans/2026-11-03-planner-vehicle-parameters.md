@@ -120,6 +120,10 @@ Per value: max q 25 kPa / lunar 32 kPa (K, structural [E]); terminal Mach 5/3 (K
 - [ ] Step 1: tests "Entry guidance parameters follow the vehicle config", "Lunar return entry uses the lunar q limit from config", tanker inheritance. Red.
 - [ ] Step 2: implement and wire; green `-Fast -TestFilter "[entry],[guidance],[config]"`; `[slow]` `[ship][guidance]`, `[entry]` reduced lunar cases, #1147 report via nightly only in Task 12. Commit `feat(gnc): ship entry guidance from vehicle config`.
 
+### Task 4b: Tanker with stretched main tanks (Opus)
+
+User 2026-11-03: the tanker does not need the cargo bay; SpaceX intends larger tanks there ("haben wir das?" — no: `starship_tanker.toml` takes the Block 3 ship's tanks unchanged). No published dimensions: [E] from geometry. Extend the tanker's main tank(s) into the cargo-bay volume (hull radius, bay length from the ship's stations; keep the header tanks, heat shield, flaps, docking ports and transfer connectors; check the LOX/CH4 split from the Raptor mixture ratio 3.6 and the tank order), tank wall mass instead of bay structure in the dry mass (`tools/structures/ship_mass_budget.py`, the 171 t [E] confirmed by the user follows the budget), CG from the mass budget. The tanker must still fly its mission: ascent with the larger load (Super Heavy capacity, MECO, the planners plan from the values), docking, return and catch. `vehicle_report.py starship_tanker`; drawn model follows the tanks only if the hull changes (it does not: tanks are internal). Single cases: tanker_flight, one docking/transfer case, tanker return catch; refuelling numbers (tankers per campaign) re-measured in Task 12.
+
 ### Task 5: Booster returns from config (Opus)
 
 Items: `booster_return.hpp:24-25` (flight time 230, flip 10), Super Heavy `[stage.recovery]` incomplete, `falcon9_block5.toml:149,164` (`flip_duration_s` 14.8, `boostback_loss_fraction` 0.157 [D fitted]), `scvx_landing.hpp:46-50` (defaults used by every vehicle without a profile), `booster_return_detail.hpp:27,39-42` (alpha 8 deg, leg margin 5 s, touchdown tilt 4 deg).
