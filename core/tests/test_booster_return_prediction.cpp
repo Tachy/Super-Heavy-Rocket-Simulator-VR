@@ -189,14 +189,86 @@ TEST_CASE("MECO propellant: RCS gas and the entry burn are added by the rocket e
           Catch::Approx(expected_kg).epsilon(1e-9));
 }
 
+// Run-down term: engines that still produce thrust at MECO burn half their shutdown time at the current flow (a ramp
+// down). Hand value: 0.5 * shutdown_s * count * mass flow * throttle, lit by hand (center group, throttle 0.7). Relative
+// tolerance 1e-9 (closed form, double precision).
+TEST_CASE("MECO propellant: engines still running add half their shutdown time of flow", "[booster_return][gnc]") {
+    const FixedEarth earth;
+    const time::Epoch epoch = time::Epoch::from_tdb_seconds_past_j2000(0.0);
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    vehicle::Vehicle stack(cfg, STARSIM_CONFIG_DIR);
+    const double dry_kg = stack.stages().front().config.dry_mass_kg + stack.stages().front().extra_mass_kg;
+    const double landing_kg = 90.0e3;
+    const double throttle = 0.7;
+    const auto center = figures(cfg, "center");
+    const double shutdown_s = cfg.engines.at(cfg.stages.front().engine_groups.front().engine_id).shutdown_s;
+    int lit = 0;
+    for (auto& e : stack.stages().front().engines) {
+        if (e.group_id != "booster/center") continue;
+        e.mode = vehicle::EngineMode::Running;
+        e.spool = 1.0;
+        e.throttle = throttle;
+        ++lit;
+    }
+    REQUIRE(lit == center.count);
+    REQUIRE(shutdown_s > 0.0);
+    const double run_down_kg = 0.5 * shutdown_s * lit * center.mass_flow_kgps * throttle;
+    REQUIRE(run_down_kg > 100.0);  // far above the tolerance
+
+    auto c = boostback_case({60.0, 0.0, 0.0}, 10.0);
+    gnc::BoosterReturnParameters p;
+    p.boostback = false;
+    CHECK(gnc::BoosterReturnGuidance::meco_propellant_kg(stack, c.meco, earth, epoch, c.site, p, landing_kg) ==
+          Catch::Approx(landing_kg + run_down_kg).epsilon(1e-9));
+
+    // with a boostback the run-down is added to the plan (not scaled by the rocket equation): forward check
+    c.parameters.rcs_propellant_kg = 0.0;
+    c.parameters.entry_altitude_m = 0.0;
+    c.parameters.flip_groups.clear();
+    c.parameters.boostback_groups = {"booster/center", "booster/divert", "booster/middle"};
+    const double e = std::exp(-1.1 * 60.0 / (center.vacuum_thrust_n / center.mass_flow_kgps));
+    const double plan_kg =
+        gnc::BoosterReturnGuidance::meco_propellant_kg(stack, c.meco, earth, epoch, c.site, c.parameters, landing_kg);
+    const double left_kg = (dry_kg + plan_kg - run_down_kg) * e - dry_kg;
+    CHECK(left_kg == Catch::Approx(landing_kg).epsilon(1e-5));  // as in the boostback case: 0.9 kg of 90 t
+}
+
+// Boostback and entry burn together: the entry burn's propellant is the landing propellant of the boostback. Both are
+// the rocket equation on the booster's total mass, so (L + d) exp(dv_entry / c) / e - d is the plan, forward check as above.
+TEST_CASE("MECO propellant: boostback and entry burn in one plan", "[booster_return][gnc]") {
+    const FixedEarth earth;
+    const time::Epoch epoch = time::Epoch::from_tdb_seconds_past_j2000(0.0);
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    const vehicle::Vehicle stack(cfg, STARSIM_CONFIG_DIR);
+    const double dry_kg = stack.stages().front().config.dry_mass_kg + stack.stages().front().extra_mass_kg;
+    const double landing_kg = 90.0e3;
+    auto c = boostback_case({60.0, 0.0, 0.0}, 10.0);
+    c.parameters.rcs_propellant_kg = 0.0;
+    c.parameters.flip_groups.clear();
+    c.parameters.entry_altitude_m = 60.0e3;
+    c.parameters.entry_delta_v_mps = 125.0;
+    c.parameters.entry_groups = {"booster/center"};
+    c.parameters.boostback_groups = {"booster/center", "booster/divert", "booster/middle"};
+    const auto center = figures(cfg, "center");
+    const double exhaust_mps = center.vacuum_thrust_n / center.mass_flow_kgps;
+    const double e = std::exp(-1.1 * 60.0 / exhaust_mps);
+    const double after_kg = (landing_kg + dry_kg) * std::exp(125.0 / exhaust_mps) - dry_kg;  // left after the boostback
+    const double plan_kg =
+        gnc::BoosterReturnGuidance::meco_propellant_kg(stack, c.meco, earth, epoch, c.site, c.parameters, landing_kg);
+    CHECK(after_kg > landing_kg + 1000.0);  // the entry burn costs real propellant
+    CHECK((dry_kg + plan_kg) * e - dry_kg == Catch::Approx(after_kg).epsilon(1e-5));  // 1e-5: 8 mm/s on dv, as above
+}
+
 // Landing burn straight down in vacuum with uniform gravity and constant thrust (13 Raptors at the design throttle, no
-// start-up, no drag). Closed form with the mass flow: v(t) = v0 - c ln(m0 / m(t)) + g t, m = m0 - mdot t, and
+// start-up, no drag), from 600 m/s so that the burn is long: about a fifth of the mass is burnt during it. Closed form
+// with the mass flow: v(t) = v0 - c ln(m0 / m(t)) + g t, m = m0 - mdot t, and
 // the way x(t) = v0 t - c I(t) + g t^2 / 2 with I(t) = [(1 - k t) ln(1 - k t) + k t] / k, the integral of ln(m0 / m) (k = mdot / m0).
 // The prediction is explicit Euler with dt = 0.05 s (speed first, then the height with the new speed): its distance is
 // short by about a dt T / 2 (T the burn time, a the deceleration), its end time quantised to dt. Tolerances: duration
-// 2 dt; height a_max dt T (twice the Euler bias).
+// 2 dt; height a_max dt T (twice the Euler bias). The case first asserts that the same burn at constant mass would
+// differ by several times those tolerances, so a prediction without the mass flow cannot pass.
 TEST_CASE("Landing-burn prediction matches the constant-thrust hand solution", "[booster_return][gnc]") {
-    const double h0_m = GENERATE(1000.0, 100.0);  // 100 m: the burn cannot stop above the ground (negative stop height)
+    const double h0_m = GENERATE(20000.0, 100.0);  // 100 m: the burn cannot stop above the ground (negative stop height)
     CAPTURE(h0_m);
     auto cfg = test::booster_config("starship_block3", 120.0e3);
     for (auto& [id, engine] : cfg.engines) engine.startup_s = 0.0;
@@ -222,7 +294,7 @@ TEST_CASE("Landing-burn prediction matches the constant-thrust hand solution", "
     auto vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
     const double m0 = vehicle->mass_properties().mass_kg;
     const double cg_m = vehicle->mass_properties().cg_station_m;
-    const double v0 = 150.0;
+    const double v0 = 600.0;
     const vehicle::RigidBodyState state{{constants::wgs84_semi_major_axis_m + cg_m + h0_m, 0.0, 0.0}, {-v0, 0.0, 0.0}, {}, {}};
     const vehicle::FlightBody body(std::move(vehicle), state);
     const FixedEarth earth;
@@ -245,8 +317,15 @@ TEST_CASE("Landing-burn prediction matches the constant-thrust hand solution", "
     const double stop_height_m = h0_m - way(t_stop);
     const double a_max = thrust_n / (m0 - mdot * t_stop) - g;
 
+    // the same burn at constant mass (no mass flow): v0 / (F/m0 - g) long, v0 t / 2 of way
+    const double t_const = v0 / (thrust_n / m0 - g);
+    const double stop_height_const_m = h0_m - 0.5 * v0 * t_const;
+    const double tolerance_m = a_max * 0.05 * t_stop;
+    REQUIRE(std::abs(t_const - t_stop) > 4.0 * 0.1);
+    REQUIRE(std::abs(stop_height_const_m - stop_height_m) > 4.0 * tolerance_m);
+
     const auto burn = guidance.predict_landing_burn(body, env, time::Epoch::from_tdb_seconds_past_j2000(0.0));
     CHECK(burn.duration_s == Catch::Approx(t_stop).margin(0.1));
-    CHECK(burn.stop_height_m == Catch::Approx(stop_height_m).margin(a_max * 0.05 * t_stop));
+    CHECK(burn.stop_height_m == Catch::Approx(stop_height_m).margin(tolerance_m));
     CHECK((burn.stop_height_m > 0.0) == (stop_height_m > 0.0));
 }
