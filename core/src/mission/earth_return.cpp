@@ -64,6 +64,8 @@ constexpr double gate_min_probe_s = 600.0;
 // (the guidance nulls the rest with small reversals below their speed limit)
 constexpr double lateral_tolerance_m = 2000.0;
 constexpr int lateral_iterations = 6;
+// [E] continuation: the smallest part of a lateral shift tried before the aim is given up (1/8 of a ~700 km track)
+constexpr double lateral_min_shift_fraction = 0.125;
 constexpr double braking_angle_tolerance_rad = 0.005 * constants::deg_to_rad;
 // patched-conic departure search
 constexpr double llo_sample_s = 60.0;
@@ -522,9 +524,17 @@ auto EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, time::Epoch bur
         if (std::abs(a.predicted_crossrange_m) < lateral_tolerance_m) return GateAim{*dv, shifted.lateral_offset_m};
         if (k == lateral_iterations) break;
         // the site lies that far beside the track's end: move the aimed plane by it (the arrival time is kept; the
-        // predicted crossrange moves one to one with the offset)
-        shifted.lateral_offset_m -= a.predicted_crossrange_m;
-        dv = aim_at_gate_once(at_burn, burn_epoch, shifted, *dv, false);
+        // predicted crossrange moves one to one with the offset). Continuation: a shift the timed Newton cannot follow
+        // from the last solution (it loses the interface: Task 6 of the vehicle-parameters plan, the 177 t ship's
+        // ~717 km track) is taken in halves, each warm-started from the last solved aim.
+        const Vec3 last = *dv;
+        dv.reset();
+        for (double fraction = 1.0; !dv && fraction >= lateral_min_shift_fraction; fraction *= 0.5) {
+            EarthReturnTarget trial = shifted;
+            trial.lateral_offset_m -= fraction * a.predicted_crossrange_m;
+            dv = aim_at_gate_once(at_burn, burn_epoch, trial, last, false);
+            if (dv) shifted = trial;
+        }
     }
     return std::nullopt;
 }
