@@ -142,8 +142,10 @@ def test_booster_rings_follow_the_stl_with_equal_spacing_and_radial_gaps():
         assert steps == pytest.approx([360.0 / len(a)] * len(a), abs=1e-6), radius
     lip = _lip_diameter_m(spec, "raptor3")
     radii = sorted(rings)
+    # radial gaps between the lips of two rings: centre-middle 1.67 m, middle-outer 1.85 m (STL), at least 1.6 m
+    assert [b - a for a, b in zip(radii, radii[1:])] == pytest.approx([1.67, 1.85], abs=0.03)
     for inner, outer in zip(radii, radii[1:]):
-        assert outer - inner >= lip, (inner, outer)  # radial gap between the lips of two rings
+        assert outer - inner >= 1.6 and outer - inner - lip > 0.3, (inner, outer)
 
 
 def test_ship_rings_follow_the_stl_and_keep_radial_gaps():
@@ -151,12 +153,19 @@ def test_ship_rings_follow_the_stl_and_keep_radial_gaps():
     groups = spec["stages"]["ship"]["engines"]
     sea = [g for g in groups if g["engine"] == "raptor3"]
     vac = [g for g in groups if g["engine"] == "raptor_vacuum3"]
-    assert [g["ring_radius_m"] for g in sea] == pytest.approx([0.95] * len(sea), abs=0.02)  # STL 0.95 m
-    n_sea = sum(len(g["angles_deg"]) for g in sea)
-    chord = 2.0 * 0.95 * math.sin(math.pi / n_sea)
-    assert chord >= _lip_diameter_m(spec, "raptor3")
     r_sea, r_vac = sea[0]["ring_radius_m"], vac[0]["ring_radius_m"]
-    assert r_vac - r_sea >= 0.5 * _lip_diameter_m(spec, "raptor3") + 0.5 * _lip_diameter_m(spec, "raptor_vacuum3")
+    assert r_sea == pytest.approx(0.95, abs=0.02)  # STL 0.95 m
+    assert [g["ring_radius_m"] for g in sea] == [r_sea] * len(sea)  # one ring
+    # equal angular spacing: 3 sea-level engines 120 deg apart, 3 RVac 120 deg apart
+    for angles in ([a for g in sea for a in g["angles_deg"]], [a for g in vac for a in g["angles_deg"]]):
+        a = sorted(x % 360.0 for x in angles)
+        assert len(a) == 3
+        assert [(a[(i + 1) % 3] - a[i]) % 360.0 for i in range(3)] == pytest.approx([120.0] * 3, abs=1e-6)
+    lip = _lip_diameter_m(spec, "raptor3")
+    assert 2.0 * r_sea * math.sin(math.pi / 3.0) - lip >= 0.3  # sea-level lips: chord gap +0.33 m
+    rvac_lip = _lip_diameter_m(spec, "raptor_vacuum3")
+    assert 2.0 * r_vac * math.sin(math.pi / 3.0) - rvac_lip >= 0.3  # RVac lips on their ring
+    assert r_vac - r_sea - 0.5 * (lip + rvac_lip) == pytest.approx(0.18, abs=0.02)  # rings 2.05 m apart, radial lip gap 0.18 m (worst pair at its azimuth: +0.32 m)
 
 
 def test_booster_bells_do_not_touch():
