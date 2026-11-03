@@ -394,7 +394,7 @@ TEST_CASE("The Falcon 9 drone-ship mission loads", "[config][falcon9][asds]") {
     CHECK(std::abs(m.inclination_rad / deg - 53.0) < 1e-9);
 }
 
-TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone", "[sim][falcon9][asds]") {
+TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone", "[sim][falcon9][asds][ascent_planner]") {
     // The onboard computer chooses the drone ship (the RTLS return leaves the upper stage short of this orbit) and puts
     // it at the stage's predicted impact (sim::plan_launch).
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
@@ -423,7 +423,7 @@ TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone
     CHECK(session.body(0).vehicle().stages().back().config.payload_mass_kg == m.payload_kg);
 }
 
-TEST_CASE("A plain launch after a mission does not inherit its autopilot", "[sim][falcon9][asds]") {
+TEST_CASE("A plain launch after a mission does not inherit its autopilot", "[sim][falcon9][asds][ascent_planner]") {
     // Review finding: start_mission engages the autopilot; a later free launch on the same session must start idle.
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");  // a quicker plan than the ASDS
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
@@ -440,7 +440,7 @@ TEST_CASE("A plain launch after a mission does not inherit its autopilot", "[sim
     CHECK(session.telemetry(0).engines_running == 0);
 }
 
-TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage", "[.][falcon9][asds]") {
+TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage", "[.][falcon9][asds][ascent_planner]") {
     // Diagnostic: where the stage would come down from MECO (drag, the entry burn as an impulse, no steering) - the
     // drone ship's position in config/missions/falcon9_asds.toml [D].
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
@@ -477,7 +477,7 @@ TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage"
                 geo.latitude_rad / deg, geo.longitude_rad / deg);
 }
 
-TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage landed on the deck", "[gnc][falcon9][asds][validation]") {
+TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage landed on the deck", "[gnc][falcon9][asds][validation][ascent_planner]") {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
@@ -624,7 +624,7 @@ DeckRelative deck_relative(const sim::FlightSession& session, const vehicle::Fli
 
 }  // namespace
 
-TEST_CASE("The drone-ship mission lands on a moving deck", "[slow][falcon9][asds][sea_state]") {
+TEST_CASE("The drone-ship mission lands on a moving deck", "[slow][falcon9][asds][sea_state][ascent_planner]") {
     // falcon9_asds_sea: the drone-ship mission in Hs 2.5 m / Tp 8 s, started as sim::start_mission does (the sea first,
     // then the launch plans the recovery and turns the deck to its least-tilt heading).
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds_sea");
@@ -828,7 +828,7 @@ void report_campaign(const char* name, const std::vector<AsdsDispersion>& cases,
 
 }  // namespace
 
-TEST_CASE("Falcon 9 ASDS landing campaign: dispersions at ignition", "[gnc][falcon9][asds][validation][slow]") {
+TEST_CASE("Falcon 9 ASDS landing campaign: dispersions at ignition", "[gnc][falcon9][asds][validation][slow][ascent_planner]") {
     // As for RTLS (spec c4): +-10 m, +-3 m/s per axis, +-5 % propellant, +-3 deg, truth aero +-10 %, around the
     // nominal mission's slanted ignition state (~0.8 km short of the deck, ~90 m/s across).
     const auto& n = nominal_return();
@@ -860,15 +860,15 @@ void meco_campaign(const char* name, unsigned first_seed, unsigned last_seed, bo
 
 }  // namespace
 
-TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (1 of 2)", "[gnc][falcon9][asds][validation][slow]") {
+TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (1 of 2)", "[gnc][falcon9][asds][validation][slow][ascent_planner]") {
     meco_campaign("MECO 1", 101, 110, true);
 }
 
-TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (2 of 2)", "[gnc][falcon9][asds][validation][slow]") {
+TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (2 of 2)", "[gnc][falcon9][asds][validation][slow][ascent_planner]") {
     meco_campaign("MECO 2", 111, 120, false);
 }
 
-TEST_CASE("Falcon 9 ASDS single MECO case", "[.][asds-single]") {
+TEST_CASE("Falcon 9 ASDS single MECO case", "[.][asds-single][ascent_planner]") {
     // Diagnostics: STARSIM_ASDS_SEED=<seed of the MECO campaign> (0: nominal); prints the return's phases.
     const auto& n = nominal_return();
     const char* seed_text = std::getenv("STARSIM_ASDS_SEED");

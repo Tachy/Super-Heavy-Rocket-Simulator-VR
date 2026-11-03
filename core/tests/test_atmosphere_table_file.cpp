@@ -84,7 +84,7 @@ bool same_tables(const environment::AtmosphereTables& a, const environment::Atmo
 
 }  // namespace
 
-TEST_CASE("Table files round-trip and damaged files are recomputed", "[atmosphere]") {
+TEST_CASE("Table files round-trip and damaged files are recomputed", "[atmosphere][slow]") {
     const auto optics = config::load_atmosphere_optics(config_dir / "atmosphere" / "earth_optics.toml");
     const auto sizes = small_sizes();
     const auto tables = environment::precompute_atmosphere(optics, sizes);

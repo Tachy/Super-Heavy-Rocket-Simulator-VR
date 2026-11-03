@@ -238,7 +238,7 @@ TEST_CASE("Reboost: a refused burn leaves the depot a station", "[campaign_flown
 }
 
 TEST_CASE("A campaign tanker launches beside the kept depot and flies its chain to the raise",
-          "[campaign_flown][refuelling][ascent]") {
+          "[campaign_flown][refuelling][ascent][slow][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto& dir = refuelling_test::config_dir;
@@ -348,7 +348,7 @@ TEST_CASE("Flown campaign start: the placed depot is the station and the first f
     CHECK(c.session.body_count() == 1u);
 }
 
-TEST_CASE("Flown campaign: one time-warp call launches at the planned liftoff", "[campaign_flown][refuelling]") {
+TEST_CASE("Flown campaign: one time-warp call launches at the planned liftoff", "[campaign_flown][refuelling][slow][ascent_planner]") {
     CampaignSession c;
     sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
     c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch); }, 600.0, 60.0);
@@ -361,7 +361,7 @@ TEST_CASE("Flown campaign: one time-warp call launches at the planned liftoff", 
 }
 
 TEST_CASE("Flown campaign: a failed tanker flight is recorded and the campaign re-plans",
-          "[campaign_flown][refuelling]") {
+          "[campaign_flown][refuelling][slow][ascent_planner]") {
     CampaignSession c;
     sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
     c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::Flying); }, 10.0 * 86400.0);
@@ -411,7 +411,7 @@ TEST_CASE("Flown campaign needs a session with the Moon orientation", "[campaign
     CHECK(f.session.supervisor() == nullptr);
 }
 
-TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_flown][refuelling][slow]") {
+TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_flown][refuelling][slow][ascent_planner]") {
     CampaignSession c;
     sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
     c.fly([&] { return c.ended(); }, 40.0 * 86400.0);
@@ -517,7 +517,7 @@ TEST_CASE("The measured phasing boil-off of the tanker and the HLS matches a fre
 }
 
 TEST_CASE("Flown campaign: the depot launched, every tanker, the HLS - compared with the calculator",
-          "[campaign_flown][refuelling][slow]") {
+          "[campaign_flown][refuelling][slow][ascent_planner]") {
     CampaignSession c;
     const auto s =
         sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown", {}, c.clock);

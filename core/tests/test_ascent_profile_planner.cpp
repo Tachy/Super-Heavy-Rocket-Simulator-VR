@@ -185,7 +185,7 @@ TEST_CASE("The planner's kick is the optimum of a kick sweep", "[sim][ascent_pla
     }
 }
 
-TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner]") {
+TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner][slow]") {
     const auto request = starship_request();
     const auto plan = timed_plan(request);
     REQUIRE(plan.feasible);
@@ -224,7 +224,7 @@ TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner]") {
     CHECK(worst_below_rad <= 15.0 * deg);  // [E] no kink (before: 50-70 deg below the velocity at a 64 deg MECO)
 }
 
-TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]") {
+TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner][slow]") {
     sim::disable_plan_cache();  // asserts trial flights
     auto request = starship_request(200.0);  // own memo key
     const auto first = timed_plan(request);
@@ -264,7 +264,7 @@ TEST_CASE("Falcon 9 from SLC-40 to the ISS plane returns to LZ-40", "[sim][ascen
 }
 
 TEST_CASE("Falcon 9 with a Starlink-class payload to 53 deg lands on the drone ship at its predicted impact point",
-          "[sim][ascent_planner][slow]") {
+          "[sim][ascent_planner]") {
     const auto request = falcon9_request("falcon9_asds");  // 16.5 t to 200 x 280 km / 53 deg from SLC-40
     const auto plan = timed_plan(request, true);
     REQUIRE(plan.feasible);
@@ -279,7 +279,7 @@ TEST_CASE("Falcon 9 with a Starlink-class payload to 53 deg lands on the drone s
     CHECK(impact_miss_of_ship_m(request, plan) < 2000.0);  // [E] brief: within 2 km of the no-boostback impact
 }
 
-TEST_CASE("Falcon 9 from a site without a landing zone uses the drone ship", "[sim][ascent_planner]") {
+TEST_CASE("Falcon 9 from a site without a landing zone uses the drone ship", "[sim][ascent_planner][slow]") {
     auto request = falcon9_request("falcon9_rtls");
     request.site_id = "ksc_lc39a";  // a pad without a landing zone (its tower catches no Falcon 9)
     const auto plan = timed_plan(request, true);
@@ -327,7 +327,7 @@ TEST_CASE("Starship at a site without a tower is refused", "[sim][ascent_planner
     CHECK(plan.trial_flights == 0);
 }
 
-TEST_CASE("An unreachable target is refused", "[sim][ascent_planner]") {
+TEST_CASE("An unreachable target is refused", "[sim][ascent_planner][slow]") {
     sim::disable_plan_cache();  // asserts trial flights
     auto request = starship_request(300.0);  // own memo key
     request.target.periapsis_altitude_m = 2000e3;
@@ -338,7 +338,7 @@ TEST_CASE("An unreachable target is refused", "[sim][ascent_planner]") {
     CHECK(plan.trial_flights > 0);
 }
 
-TEST_CASE("An inclination below the site latitude flies due east", "[sim][ascent_planner]") {
+TEST_CASE("An inclination below the site latitude flies due east", "[sim][ascent_planner][slow]") {
     auto request = starship_request();
     request.site_id = "ksc_lc39a";
     request.target.inclination_rad = 26.5 * deg;  // starship_leo's Starbase plane: below LC-39A's 28.6 deg
@@ -447,7 +447,7 @@ TEST_CASE("An ascent mission's [propellant] loads the named stages", "[sim][asce
     CHECK_THROWS_AS(sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, liftoff()), std::invalid_argument);
 }
 
-TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_planner]") {
+TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_planner][slow]") {
     sim::FlightSession session(test_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     const auto t0 = liftoff();
     const auto request = starship_request();

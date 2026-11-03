@@ -215,7 +215,7 @@ TEST_CASE("Autopilot flies Falcon 9 from SLC-40 into a 200 km orbit", "[gnc][val
     CHECK(a.propellant_t < 30.0);  // review focus: an untested drag table would show as an implausibly easy ascent
 }
 
-TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[gnc][validation][ascent][falcon9]") {
+TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[gnc][validation][ascent][falcon9][ascent_planner]") {
     const auto& a = crs35();
     REQUIRE(a.plan.feasible);
     REQUIRE(a.seco_s > 0.0);

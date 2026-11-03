@@ -168,7 +168,7 @@ TEST_CASE("Uncrewed ship ignores the crew escape", "[crew_escape][session]") {
 }
 
 TEST_CASE("Crewed ship with a failed engine before the gate gives up and the crew is rescued",
-          "[crew_escape][session][slow]") {
+          "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
     const auto cfg = ship_with(35000.0);
@@ -215,7 +215,7 @@ TEST_CASE("A give-up below the minimum firing height fires at once", "[crew_esca
     for (const auto& m : s.members) CHECK(m.outcome != sim::CrewOutcome::Flying);
 }
 
-TEST_CASE("A catch abort after the flip ejects the crew", "[crew_escape][session][slow]") {
+TEST_CASE("A catch abort after the flip ejects the crew", "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
     const auto cfg = ship_with(35000.0);
@@ -240,7 +240,7 @@ TEST_CASE("A catch abort after the flip ejects the crew", "[crew_escape][session
     CHECK(session.ship_return_result(0) == sim::ReturnResult::Lost);
 }
 
-TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][session][slow]") {
+TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
     const auto cfg = ship_with(35000.0);
@@ -257,7 +257,7 @@ TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][s
 }
 
 // Final review I1: a catch that misses (no abort flag: the CG passes the catch point) must arm the seats too.
-TEST_CASE("A missed catch ejects the crew", "[crew_escape][session][slow]") {
+TEST_CASE("A missed catch ejects the crew", "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
     const auto cfg = ship_with(27000.0);  // the calibration's first missed gate load

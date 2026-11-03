@@ -42,7 +42,7 @@ TEST_CASE("Flight session: pad, ignition, liftoff, staging", "[sim]") {
     CHECK(session.telemetry(1).engines_running == 3);  // ship: sea-level Raptors only (RVacs blocked at low altitude)
 }
 
-TEST_CASE("Coast segments agree with fixed ticks", "[sim]") {
+TEST_CASE("Coast segments agree with fixed ticks", "[sim][slow]") {
     test::spice_session();
     const spice::SpiceEphemeris ephemeris;
     const auto earth = spice::SpiceOrientation::earth();

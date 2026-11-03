@@ -233,7 +233,7 @@ test::LegRun fly_rtls_dispersed(const RtlsDispersion& d) {
 
 }  // namespace
 
-TEST_CASE("Falcon 9 RTLS landing campaign: dispersions at ignition", "[gnc][falcon9][rtls][validation]") {
+TEST_CASE("Falcon 9 RTLS landing campaign: dispersions at ignition", "[gnc][falcon9][rtls][validation][slow]") {
     std::vector<RtlsDispersion> cases{RtlsDispersion{}};
     for (unsigned seed = 1; seed <= 20; ++seed) cases.push_back(rtls_dispersion(seed));
     int landed = 0;
@@ -267,7 +267,7 @@ TEST_CASE("The Falcon 9 RTLS mission loads", "[config][falcon9]") {
     CHECK_FALSE(m.fairing);
 }
 
-TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation]") {
+TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation][ascent_planner]") {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
@@ -443,7 +443,7 @@ FlipRun fly_from_separation(const RtlsDispersion& d, const Vec3& rate_body_radps
 
 }  // namespace
 
-TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtls][flip][validation][slow]") {
+TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtls][flip][validation][slow][ascent_planner]") {
     // +-5 deg, +-1 deg/s, +-5 % propellant, truth aero +-10 %, +-3 m/s [E]: wider than the separation can plausibly give.
     std::mt19937 rng(14);
     std::uniform_real_distribution<double> unit(-1.0, 1.0);
@@ -486,7 +486,7 @@ TEST_CASE("Falcon 9 flip: dispersed separation states land", "[gnc][falcon9][rtl
                 least_propellant);
 }
 
-TEST_CASE("Falcon 9 flip: a stuck or weak turn lights at the time limit and has a defined end", "[gnc][falcon9][rtls][flip][slow]") {
+TEST_CASE("Falcon 9 flip: a stuck or weak turn lights at the time limit and has a defined end", "[gnc][falcon9][rtls][flip][slow][ascent_planner]") {
     for (const double factor : {0.0, 0.5}) {
         const auto f = fly_from_separation(RtlsDispersion{}, Vec3{}, factor);
         std::printf("[validation] Falcon 9 flip, RCS x%.1f: ignition %.2f s, %s, %.2f m off, %.0f kg left\n", factor, f.ignition_after_s,

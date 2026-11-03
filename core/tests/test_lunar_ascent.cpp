@@ -194,7 +194,7 @@ TEST_CASE("After a 3-day stay under time warp the HLS ascends into the 100 km LL
 }
 
 TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish the ascent into the LLO",
-          "[sim][lunar_ascent][engine_out][terrain][data][slow]") {
+          "[sim][lunar_ascent][engine_out][terrain][data]") {
     Fixture fx;
     fx.land(hls(test::hls_landed_propellant_kg));
     const double m0 = fx.mass_kg();
@@ -225,7 +225,7 @@ TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish t
     CHECK(high < 101e3);
 }
 
-TEST_CASE("An abort 1 km above the touchdown point reaches orbit", "[sim][lunar_ascent][abort][terrain][data][slow]") {
+TEST_CASE("An abort 1 km above the touchdown point reaches orbit", "[sim][lunar_ascent][abort][terrain][data]") {
     Fixture fx;
     const auto point = touchdown_point(fx);
     const double range = test::pdi_braking_range_m(fx.ephemeris, point, 120e3 + test::hls_pdi_propellant_kg);
@@ -245,7 +245,7 @@ TEST_CASE("An abort 1 km above the touchdown point reaches orbit", "[sim][lunar_
 }
 
 TEST_CASE("An abort without the propellant for orbit is refused and the landing continues",
-          "[sim][lunar_ascent][abort][terrain][data][slow]") {
+          "[sim][lunar_ascent][abort][terrain][data]") {
     Fixture fx;
     const auto point = touchdown_point(fx);
     // Review focus 3: a heavy dry mass (420 t) leaves ~31 t of propellant at 1 km - enough to land, far too little for
@@ -263,7 +263,7 @@ TEST_CASE("An abort without the propellant for orbit is refused and the landing 
 }
 
 TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
-          "[sim][lunar_ascent][abort][terrain][data][slow]") {
+          "[sim][lunar_ascent][abort][terrain][data]") {
     Fixture fx;
     const auto point = touchdown_point(fx);
     // PDI only 60 km before the point at orbital speed (the braking phase needs >= 150 km): the approach cannot be
@@ -282,7 +282,7 @@ TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
     CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);
 }
 
-TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent", "[sim][lunar_ascent][abort][terrain][data][slow]") {
+TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent", "[sim][lunar_ascent][abort][terrain][data]") {
     // Final review l4 I2: the approach cannot be planned and the propellant cannot reach orbit - the HLS must not cut
     // its engines (it fell from the gate); it flies the terminal law instead.
     Fixture fx;

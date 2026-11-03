@@ -247,7 +247,7 @@ TEST_CASE("Ship return plan counts the boil-off until the pass", "[ship][session
     CHECK(without.plan_ship_return(deorbit_parameters(m)));
 }
 
-TEST_CASE("Ship returns from orbit into the tower's arms", "[ship][catch][session][mission]") {
+TEST_CASE("Ship returns from orbit into the tower's arms", "[ship][catch][session][mission][slow]") {
     const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     place_mission(session, m);

@@ -24,7 +24,7 @@
 using namespace starsim;
 using math::Vec3;
 
-TEST_CASE("Falcon 9 CRS-35 first stage profile dump", "[.][f9-boostback-dump]") {
+TEST_CASE("Falcon 9 CRS-35 first stage profile dump", "[.][f9-boostback-dump][ascent_planner]") {
     const char* out_path = std::getenv("STARSIM_BOOSTBACK_DUMP");
     if (!out_path) SKIP("set STARSIM_BOOSTBACK_DUMP=<file.csv>");
     test::spice_session();

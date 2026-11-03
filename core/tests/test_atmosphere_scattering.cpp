@@ -438,7 +438,7 @@ TEST_CASE("Aerial perspective to a point before the atmosphere's entry is empty"
     CHECK(t_ground.y < 1.0);
 }
 
-TEST_CASE("Single-scattering lookups between table rows and across the horizon match the raymarch", "[atmosphere]") {
+TEST_CASE("Single-scattering lookups between table rows and across the horizon match the raymarch", "[atmosphere][slow]") {
     // Off-texel CPU lookups near the ground (the real observers sit between the scattering table's r rows): observers
     // at 0 m and 50 m looking 1-2 deg up, Sun 30 deg high, single scattering (orders = 1) vs the brute-force raymarch,
     // 1 %.

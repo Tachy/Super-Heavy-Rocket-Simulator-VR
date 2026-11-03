@@ -158,7 +158,7 @@ TEST_CASE("sea_state_refusal: within the limits, above them, flag off", "[sim][a
     CHECK_FALSE(sim::sea_state_refusal(session, ship, 0.0));
 }
 
-TEST_CASE("A rough-sea drone-ship launch is refused before its drone-ship trials", "[sim][asds][sea_state]") {
+TEST_CASE("A rough-sea drone-ship launch is refused before its drone-ship trials", "[sim][asds][sea_state][ascent_planner]") {
     // The Starlink-class request (falcon9_asds.toml): the RTLS return leaves the upper stage short of this orbit, so the
     // drone ship would be chosen. Its RTLS plan is answered first (memo, from the disk cache when another process has
     // planned it); then the disk cache is switched off so that any drone-ship trial would have to be flown.
@@ -179,7 +179,7 @@ TEST_CASE("A rough-sea drone-ship launch is refused before its drone-ship trials
     CHECK_FALSE(plan.booster_impact);
 }
 
-TEST_CASE("An RTLS launch ignores the sea state", "[sim][asds][sea_state]") {
+TEST_CASE("An RTLS launch ignores the sea state", "[sim][asds][sea_state][ascent_planner]") {
     const auto request = falcon9_request("falcon9_rtls");  // CRS-35 class: back to LZ-40
     sim::FlightSession like(de440(), earth(), STARSIM_CONFIG_DIR);
     like.set_sea_state(sea(6.0, 10.0, 60.0 * deg));
@@ -189,7 +189,7 @@ TEST_CASE("An RTLS launch ignores the sea state", "[sim][asds][sea_state]") {
     CHECK(plan.recovery.zone_or_ship_id == "ccsfs_lz40");
 }
 
-TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_state][slow]") {
+TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_state][ascent_planner]") {
     // The Starlink-class request (drone ship): one kick search, the later plans answered from the memo.
     const auto request = falcon9_request("falcon9_asds");
     const auto ship = config::load_drone_ship(STARSIM_CONFIG_DIR, "asds_atlantic");
@@ -241,7 +241,7 @@ TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_st
     CHECK(flag_off.recovery.heading_rad == track_rad);
 }
 
-TEST_CASE("A mission start sets its sea state; the next start without one resets it", "[sim][asds][sea_state][slow]") {
+TEST_CASE("A mission start sets its sea state; the next start without one resets it", "[sim][asds][sea_state][ascent_planner]") {
     // The mission file lives in a copy of the config (unique directory); the session keeps the repository config, so
     // its plans come from the planner's memo / disk cache (keyed by the session's config directory).
     const auto dir = std::filesystem::temp_directory_path() / "starsim_sea_state_mission_start";

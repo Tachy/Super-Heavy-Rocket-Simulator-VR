@@ -76,7 +76,7 @@ TEST_CASE("Transmittance table matches a direct optical-depth integral", "[atmos
     std::printf("transmittance: max relative error %.3e\n", max_error);
 }
 
-TEST_CASE("Single scattering matches a brute-force raymarch", "[atmosphere]") {
+TEST_CASE("Single scattering matches a brute-force raymarch", "[atmosphere][slow]") {
     const auto c = optics();
     const environment::AtmosphereTableSizes sizes;
     const auto tables = precompute_timed(c, sizes);
@@ -226,7 +226,7 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
     CHECK(hashes.size() == 1 + config_changes.size() + size_changes.size());
 }
 
-TEST_CASE("The multiple-scattering tail is on in the shipped config and changes the tables", "[atmosphere]") {
+TEST_CASE("The multiple-scattering tail is on in the shipped config and changes the tables", "[atmosphere][slow]") {
     const auto shipped = optics();
     CHECK(shipped.multiple_scattering_tail);  // fidelity flag (earth_optics.toml), on by default
     REQUIRE(shipped.scattering_orders >= 3);  // the tail needs two computed multiple-scattering orders

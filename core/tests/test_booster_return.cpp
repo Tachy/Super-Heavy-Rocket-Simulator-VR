@@ -184,7 +184,7 @@ TEST_CASE("Catch roll reference turns the pins towards the arms", "[gnc][booster
     }
 }
 
-TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][catch][validation]") {
+TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][catch][validation][slow][ascent_planner]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
@@ -237,7 +237,7 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
 // boostback's start, falls faster than the engines can burn (13 engines: ~15 t/s against ~10.5 t/s at full thrust) and
 // 77 t in the last 12 s on 3 engines (~30 t burnt); our return needs ~300 t there.
 TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned propellant, within the FAA residual",
-          "[gnc][booster][validation]") {
+          "[gnc][booster][validation][slow][ascent_planner]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();

@@ -246,7 +246,7 @@ void print_events(const sim::MissionTimeline& t) {
 }
 }  // namespace
 
-TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO", "[timeline]") {
+TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -349,7 +349,7 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     CHECK(predicted_of(t, K::Seco) == nullptr);
 }
 
-TEST_CASE("Booster return records boostback, landing burn and the catch", "[timeline]") {
+TEST_CASE("Booster return records boostback, landing burn and the catch", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -448,7 +448,7 @@ TEST_CASE("An undocking mission starts its clock at the undocking", "[timeline]"
     CHECK(*t.t0() == undocking->epoch);
 }
 
-TEST_CASE("start_mission resets the timeline; campaign launches do not", "[timeline]") {
+TEST_CASE("start_mission resets the timeline; campaign launches do not", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -479,7 +479,7 @@ TEST_CASE("start_mission resets the timeline; campaign launches do not", "[timel
                         [](const MissionEvent& e) { return e.kind == MissionEventKind::Liftoff; }) == 2);
 }
 
-TEST_CASE("A refused start_mission keeps the running flight's log", "[timeline]") {
+TEST_CASE("A refused start_mission keeps the running flight's log", "[timeline][slow][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     // a config copy whose ISS launch finds no window: a 1 h search, a mission limit just past the insertion
@@ -561,7 +561,7 @@ const math::Quat handover_attitude{-0.55696594189169446, -0.50181461927849202, 0
                                    0.6178935111697279};
 constexpr double handover_initial_bank_rad = 113.25 * deg;
 
-TEST_CASE("A lunar-return entry's loft records no Max Q", "[timeline]") {
+TEST_CASE("A lunar-return entry's loft records no Max Q", "[timeline][slow]") {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_boil_off(m.boil_off);
@@ -650,7 +650,7 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     CHECK(t.predicted().empty());
 }
 
-TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cutoff", "[timeline]") {
+TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cutoff", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
@@ -757,7 +757,7 @@ const MissionEvent* find_predicted(const sim::MissionTimeline& t, MissionEventKi
 }
 }  // namespace
 
-TEST_CASE("A scheduled liftoff waits on the pad and lifts off at T-0", "[timeline]") {
+TEST_CASE("A scheduled liftoff waits on the pad and lifts off at T-0", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -797,7 +797,7 @@ TEST_CASE("A scheduled liftoff waits on the pad and lifts off at T-0", "[timelin
     CHECK(session.telemetry(session.controlled_index()).altitude_m - pad_altitude_m > 10.0);
 }
 
-TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "[timeline]") {
+TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -813,7 +813,7 @@ TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "
     CHECK(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").countdown_s == std::nullopt);
 }
 
-TEST_CASE("A countdown shorter than the engine start moves T-0, the clock never runs back", "[timeline]") {
+TEST_CASE("A countdown shorter than the engine start moves T-0, the clock never runs back", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -838,7 +838,7 @@ TEST_CASE("A countdown shorter than the engine start moves T-0, the clock never 
     CHECK(std::abs(liftoff->epoch - *t.t0()) <= sim::FlightSession::tick_s);
 }
 
-TEST_CASE("A window liftoff closer than the engine start places the vehicle earlier", "[timeline]") {
+TEST_CASE("A window liftoff closer than the engine start places the vehicle earlier", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -857,7 +857,7 @@ TEST_CASE("A window liftoff closer than the engine start places the vehicle earl
     CHECK(st.epoch == session.epoch());
 }
 
-TEST_CASE("An ISS launch waits only where the station source of its liftoff covers", "[timeline]") {
+TEST_CASE("An ISS launch waits only where the station source of its liftoff covers", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -877,7 +877,7 @@ TEST_CASE("An ISS launch waits only where the station source of its liftoff cove
     CHECK(session.epoch() - st.launch_window->liftoff < 0.0);
 }
 
-TEST_CASE("Disengaging on the pad drops the scheduled liftoff", "[timeline]") {
+TEST_CASE("Disengaging on the pad drops the scheduled liftoff", "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -895,7 +895,7 @@ TEST_CASE("Disengaging on the pad drops the scheduled liftoff", "[timeline]") {
     CHECK(session.body(0).clamped());
 }
 
-TEST_CASE("An ISS launch can wait on the pad for its window", "[timeline]") {
+TEST_CASE("An ISS launch can wait on the pad for its window", "[timeline][slow][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -1113,7 +1113,7 @@ TEST_CASE("The predicted undocking is the separation the mission records", "[tim
     CHECK(find_predicted(t, MissionEventKind::Undocking) == nullptr);
 }
 
-TEST_CASE("Mission event probe", "[.][probe][timeline_probe]") {  // STARSIM_PROBE_MISSION, STARSIM_PROBE_S: prints the log
+TEST_CASE("Mission event probe", "[.][probe][timeline_probe][ascent_planner]") {  // STARSIM_PROBE_MISSION, STARSIM_PROBE_S: prints the log
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -1145,7 +1145,7 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe]") {  // STARSIM_PRO
 // Cost of the predicted events per FlightSession::advance_to (final review, item 10): every advance_to call rebuilds the
 // predicted list once; this times one extra predicted_mission_events call per step against the advance_to calls.
 // STARSIM_PROBE_MISSION (starship_leo), STARSIM_PROBE_S (400), STARSIM_PROBE_STEP_S (1/60: a game frame).
-TEST_CASE("Predicted events cost probe", "[.][probe][timeline_probe]") {
+TEST_CASE("Predicted events cost probe", "[.][probe][timeline_probe][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);

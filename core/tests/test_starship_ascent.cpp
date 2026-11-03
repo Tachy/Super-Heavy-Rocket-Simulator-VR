@@ -80,7 +80,7 @@ const test::FlownAscent& flight14() {
 }  // namespace
 
 TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast telemetry",
-          "[gnc][validation][ascent][slow]") {
+          "[gnc][validation][ascent][slow][ascent_planner]") {
     const auto& a = flight14();
     REQUIRE(a.plan.feasible);
     REQUIRE(a.seco_s > 0.0);

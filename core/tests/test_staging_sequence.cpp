@@ -70,7 +70,7 @@ bool fly_to_separation(sim::FlightSession& session) {
 
 }  // namespace
 
-TEST_CASE("Cold staging: MECO, separation after the delay, upper ignition after its delay", "[staging]") {
+TEST_CASE("Cold staging: MECO, separation after the delay, upper ignition after its delay", "[staging][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const auto t0 = time.from_utc({2026, 10, 13, 10, 40, 0.0});
@@ -101,7 +101,7 @@ TEST_CASE("Cold staging: MECO, separation after the delay, upper ignition after 
     CHECK(session.autopilot().state == sim::AutopilotState::UpperStage);
 }
 
-TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; the booster falls back", "[staging]") {
+TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; the booster falls back", "[staging][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
@@ -148,7 +148,7 @@ TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; th
     CHECK(session.telemetry(0).engines_running == 3);
 }
 
-TEST_CASE("The Falcon 9 booster flips on RCS with its engines off", "[staging]") {
+TEST_CASE("The Falcon 9 booster flips on RCS with its engines off", "[staging][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const auto t0 = time.from_utc({2026, 10, 13, 10, 40, 0.0});
@@ -202,7 +202,7 @@ TEST_CASE("A manual stage command during the sequence separates once", "[staging
     CHECK(count(session.timeline(), MissionEventKind::StageSeparation) == 1);
 }
 
-TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging]") {
+TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging][slow][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const double tick = sim::FlightSession::tick_s;

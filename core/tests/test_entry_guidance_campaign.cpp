@@ -2,6 +2,7 @@
 // reaches the flip gate 1.5 km above the pad; the truth's aerodynamics differ from the onboard computer's model.
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <random>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/interfaces/catch_interfaces_capture.hpp>
 
 #include "ship_entry_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
@@ -47,7 +49,13 @@ double bearing(const LatLon& a, const LatLon& b) {
 // Copy of a config CSV with one column scaled (truth model errors), written to the temp directory.
 std::string scaled_table(const std::string& table, const std::string& column, double factor, const std::string& name) {
     const auto csv = config::load_csv_table(std::filesystem::path(STARSIM_CONFIG_DIR) / table);
-    const auto dir = std::filesystem::temp_directory_path() / "starsim_entry_campaign";
+    // One directory per test case: ctest runs the cases as parallel processes, which must not share temp files.
+    std::string test_name = Catch::getResultCapture().getCurrentTestName();
+    for (auto& ch : test_name) {
+        if (!std::isalnum(static_cast<unsigned char>(ch))) ch = '_';
+    }
+    test_name.resize(std::min<size_t>(test_name.size(), 48));
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_entry_campaign" / test_name;
     std::filesystem::create_directories(dir);
     const auto path = dir / name;
     std::ofstream out(path);

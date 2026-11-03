@@ -433,7 +433,7 @@ TEST_CASE("A mission without a payload vehicle ends in orbit as before", "[drago
 }
 
 TEST_CASE("Falcon 9 lifts Crew Dragon into its insertion orbit and the capsule separates",
-          "[dragon][mission][validation]") {
+          "[dragon][mission][validation][slow][ascent_planner]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
@@ -521,7 +521,7 @@ TEST_CASE("A retrograde Draco burn waits for its half turn", "[dragon][burn]") {
 }
 
 TEST_CASE("Re-engaging the ascent autopilot after staging keeps a stacked payload on the upper stage",
-          "[dragon][sim]") {
+          "[dragon][sim][ascent_planner]") {
     // Review (d2): [second stage, trunk, capsule] has three stages but one launcher stage with engines: the autopilot must
     // resume as the upper stage (cutoff, payload release), not as a booster burning the stage dry.
     test::spice_session();

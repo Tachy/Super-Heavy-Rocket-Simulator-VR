@@ -53,7 +53,7 @@ frames::GeodeticPosition geodetic(const sim::FlightSession& session, const Vec3&
 
 }  // namespace
 
-TEST_CASE("starbase catch on the real terrain", "[data][slow][earth_terrain]") {
+TEST_CASE("starbase catch on the real terrain", "[data][slow][earth_terrain][ascent_planner]") {
     test::spice_session();
     const auto terrain = real_terrain();
     sim::FlightSession session(env().ephemeris, env().earth, STARSIM_CONFIG_DIR);
@@ -97,7 +97,7 @@ TEST_CASE("starbase catch on the real terrain", "[data][slow][earth_terrain]") {
     CHECK(std::abs(session.telemetry(0).altitude_terrain_m - (g.height_m - site.height_m)) <= 0.01);
 }
 
-TEST_CASE("Falcon 9 RTLS to LZ-40 on the real terrain", "[data][slow][earth_terrain]") {
+TEST_CASE("Falcon 9 RTLS to LZ-40 on the real terrain", "[data][slow][earth_terrain][ascent_planner]") {
     test::spice_session();
     const auto terrain = real_terrain();
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");

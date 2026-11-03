@@ -303,7 +303,7 @@ TEST_CASE("An overcast deck dims the ground physically", "[weather]") {
     }
 }
 
-TEST_CASE("Noise coverage is preserved", "[weather]") {
+TEST_CASE("Noise coverage is preserved", "[weather][slow]") {
     const auto start = std::chrono::steady_clock::now();
     const CloudNoise noise = generate_cloud_noise();
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -776,7 +776,7 @@ LayerConnectivity layer_connectivity(const CloudNoise& noise, double state, doub
 
 }  // namespace
 
-TEST_CASE("A cumulus is one connected body", "[weather]") {
+TEST_CASE("A cumulus is one connected body", "[weather][slow]") {
     // User 2026-10-26: a cumulus hangs together as one cloud, not a scatter of puffs: the shape's low octaves decide
     // where a cloud is, the detail mostly erodes its rim (cloud_noise.hpp). The cloud (v > t(cf)) of a cumulus layer
     // 8.2 km x 8.2 km x 1.5 km at 16 m voxels with level 0 alone (the state a few km away) and with all detail levels:
@@ -883,7 +883,7 @@ TEST_CASE("Cloud type weights are continuous and keep the water", "[weather]") {
     CHECK(cloud_stratiform_weight_between(1.0, 0.0, 0.0, 0.8) == Approx(1.0));
 }
 
-TEST_CASE("Coverage and water are kept for every cloud type", "[weather]") {
+TEST_CASE("Coverage and water are kept for every cloud type", "[weather][slow]") {
     // Per type, the shape read at the type's coordinates (stratiform stretched, cirrus the ice tile) keeps the covered
     // fraction cf and the grid-mean water at the table states (5e5 uniform random positions over the stratiform tile,
     // in which every type's tile repeats; the tolerances of "Noise coverage is preserved" and "Cloud edges of varying
@@ -1051,7 +1051,7 @@ TEST_CASE("The curl texture is divergence-free and tileable", "[weather]") {
     CHECK(cloud_curl_field() == field);  // deterministic
 }
 
-TEST_CASE("The sub-cell threshold field keeps the cell's cover", "[weather]") {
+TEST_CASE("The sub-cell threshold field keeps the cell's cover", "[weather][slow]") {
     // cloud_noise.hpp "Sub-cell field" (world-volume Task 7, ruling R1): the mean of sigma_c Phi((v - t) / s_e) over
     // the cell is sigma_c c for a Gaussian v of any sigma_v - graded at sigma_v = 0, binary at sigma_v >> s_e.
     REQUIRE(cloud_normal_quantile(0.975) == Approx(1.959963984540054).epsilon(1e-12));

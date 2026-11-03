@@ -43,7 +43,7 @@ TEST_CASE("A loader refuses a mission of another kind", "[mission][config]") {
     CHECK_THROWS_AS(config::load_ship_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return"), config::ConfigError);
 }
 
-TEST_CASE("An ascent mission starts at the requested epoch with its site", "[mission][sim]") {
+TEST_CASE("An ascent mission starts at the requested epoch with its site", "[mission][sim][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
@@ -66,7 +66,7 @@ TEST_CASE("liftoff_utc is loaded", "[mission][config]") {
     CHECK_FALSE(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").liftoff_utc.has_value());
 }
 
-TEST_CASE("An ascent mission with liftoff_utc lifts off at it, whatever the requested epoch", "[mission][sim]") {
+TEST_CASE("An ascent mission with liftoff_utc lifts off at it, whatever the requested epoch", "[mission][sim][slow][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "flight14_ascent");
@@ -96,7 +96,7 @@ TEST_CASE("An ascent mission with liftoff_utc lifts off at it, whatever the requ
 }
 
 // r2 review: a lunar return mission turns boil-off off; the next mission in the same session must have it again.
-TEST_CASE("Every mission start sets the boil-off flag of its mission", "[mission][sim][boil_off]") {
+TEST_CASE("Every mission start sets the boil-off flag of its mission", "[mission][sim][boil_off][slow][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);

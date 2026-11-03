@@ -525,7 +525,7 @@ void print(const char* tag, const sim::CampaignReport& r) {
 }
 }  // namespace
 
-TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[refuelling][campaign][slow]") {
+TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[refuelling][campaign]") {
     const Sources s;
     const auto r = sim::plan_refuelling_campaign(s.get(), {});
     print("reference", r);
@@ -601,7 +601,7 @@ TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", 
     CHECK_FALSE(sim::plan_refuelling_campaign(s.get(), height, &live).result.closes);  // refused with a live start
 }
 
-TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campaign][slow]") {
+TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campaign]") {
     const Sources s;
     const auto base = sim::plan_refuelling_campaign(s.get(), {});
     sim::CampaignLevers higher;
@@ -623,7 +623,7 @@ TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campa
     CHECK(p.result.losses.boil_off_kg > base.result.losses.boil_off_kg);
 }
 
-TEST_CASE("Reference phasing reproduces the single-orbit campaign", "[refuelling][campaign][slow]") {
+TEST_CASE("Reference phasing reproduces the single-orbit campaign", "[refuelling][campaign]") {
     const Sources s;
     sim::CampaignLevers ref;
     ref.reference_phasing = true;
@@ -637,7 +637,7 @@ TEST_CASE("Reference phasing reproduces the single-orbit campaign", "[refuelling
     }
 }
 
-TEST_CASE("Per-window phasing: more arrivals, fewer days", "[refuelling][campaign][slow]") {
+TEST_CASE("Per-window phasing: more arrivals, fewer days", "[refuelling][campaign]") {
     const Sources s;
     sim::CampaignLevers ref;
     ref.reference_phasing = true;
@@ -777,7 +777,7 @@ TEST_CASE("Campaign levers are validated", "[refuelling][campaign]") {
     CHECK(refused([](sim::CampaignLevers& l) { l.phasing_limit_s = 0.0; }));
 }
 
-TEST_CASE("A looser phasing limit never costs days", "[refuelling][campaign][slow]") {
+TEST_CASE("A looser phasing limit never costs days", "[refuelling][campaign]") {
     // review I1: the window chooser flies the latest launch that reaches the same arrival (the shortest phasing).
     // f1: the calculator takes the first window, so it minimises the days: a looser limit opens earlier windows with
     // longer phasing (more tanker boil-off) - it may cost tankers (72 h: 12 in 27.1 d vs 28 h: 10 in 64.0 d)

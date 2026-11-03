@@ -93,7 +93,7 @@ TEST_CASE("release_tower refuses without a caught body", "[refuelling][catch]") 
 }
 
 TEST_CASE("release_tower keeps the indices: booster caught, then lifted off; the ship flies on",
-          "[refuelling][catch][slow]") {
+          "[refuelling][catch][slow][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto m = config::load_ascent_mission(refuelling_test::config_dir, "starship_leo");
@@ -124,7 +124,7 @@ TEST_CASE("release_tower keeps the indices: booster caught, then lifted off; the
 }
 
 // Review r5 I2: a tower whose booster catch was aborted (or missed) is re-armed for the ship as well.
-TEST_CASE("release_tower re-arms a tower after an aborted booster catch", "[refuelling][catch][slow]") {
+TEST_CASE("release_tower re-arms a tower after an aborted booster catch", "[refuelling][catch][slow][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto m = config::load_ascent_mission(refuelling_test::config_dir, "starship_leo");
@@ -227,7 +227,7 @@ TEST_CASE("Raise: two burns to an orbit above the depot, then the phasing plan",
     CHECK(used_kg < 12e3);  // ~44 + 21 m/s on ~310 t: ~6 t, plus the bare tanker's boil-off over ~3 h (~3.5 t)
 }
 
-TEST_CASE("Raise: every below-depot candidate can be planned after its flown raise", "[refuelling][iss_mission]") {
+TEST_CASE("Raise: every below-depot candidate can be planned after its flown raise", "[refuelling][iss_mission][slow]") {
     // review I1: the osculating apoapsis after a raise near the coelliptic height (197.1 km) must stay below it
     test::spice_session();
     const double re = constants::wgs84_semi_major_axis_m;
@@ -484,7 +484,7 @@ TEST_CASE("Continuation refusal ends the mission", "[refuelling][iss_mission]") 
     CHECK(f.session.iss_mission_status() == "Mission beendet: Mondmission: zu spät");
 }
 
-TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuelling][mission]") {
+TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuelling][mission][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock);
@@ -498,7 +498,7 @@ TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuel
 }
 
 TEST_CASE("depot_launch: pad -> orbit, the depot becomes the station, the booster is caught",
-          "[refuelling][mission][ascent][slow]") {
+          "[refuelling][mission][ascent][slow][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock).refusal.empty());
@@ -553,7 +553,7 @@ TEST_CASE("tanker_flight_orbit starts behind the depot and plans the phasing", "
 }
 
 TEST_CASE("tanker_flight finds a launch window into the depot plane within the uncrewed limit",
-          "[refuelling][mission][launch_window]") {
+          "[refuelling][mission][launch_window][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
@@ -583,7 +583,7 @@ TEST_CASE("Probe: planning boil-off of the tanker and the HLS", "[.f1_probe]") {
     }
 }
 
-TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelling][mission][slow]") {
+TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelling][mission][slow][ascent_planner]") {
     test::spice_session();
     const double re = constants::wgs84_semi_major_axis_m;
     refuelling_test::DepotSession f;
@@ -613,7 +613,7 @@ TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelli
 }
 
 TEST_CASE("Refuelling flights: the window's separation estimate matches the flown ascent",
-          "[refuelling][mission][ascent][slow]") {
+          "[refuelling][mission][ascent][slow][ascent_planner]") {
     test::spice_session();
     const std::string id = GENERATE(std::string("tanker_flight"), std::string("hls_refuel"));
     CAPTURE(id);
@@ -708,7 +708,7 @@ TEST_CASE("tanker_flight_orbit: phasing orbit -> docked -> transfer -> caught at
 }
 
 TEST_CASE("tanker_flight: pad -> booster caught -> docked -> transfer -> ship caught",
-          "[refuelling][mission][docking][ship][ascent][slow]") {
+          "[refuelling][mission][docking][ship][ascent][slow][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
@@ -781,7 +781,7 @@ TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then pl
 // Probe (user 2026-10-20: levers in the flight for the tanker's residue): the tanker ascent with one change at a
 // time; prints the main-tank residue at insertion, the equivalent residue in the 170 x 190 km phasing orbit (a lower
 // insertion perigee pays the raise at apoapsis on the belly Raptor, c ~3.4 km/s [E]) and whether the booster is caught.
-TEST_CASE("Tanker ascent levers", "[.r5_probe]") {
+TEST_CASE("Tanker ascent levers", "[.r5_probe][ascent_planner]") {
     test::spice_session();
     struct Variant {
         const char* name;
@@ -950,7 +950,7 @@ TEST_CASE("hls_refuel starts with the depot in the lunar mission's parking plane
 // flight waits for a go at Waypoint 2. An autonomous mission resumes up to max_capture_retries times, then ends; a
 // retreat the pilot commanded waits for the pilot (review r5 I4), as with 0 retries (the ISS default).
 TEST_CASE("A commanded retreat in an autonomous mission waits for the pilot",
-          "[refuelling][iss_mission][proximity][docking]") {
+          "[refuelling][iss_mission][proximity][docking][slow]") {
     test::spice_session();
     const auto with_sequence = [](refuelling_test::TankerAtPort& f, int retries) {
         sim::IssMissionSequence q;
@@ -1075,7 +1075,7 @@ TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continu
     CHECK(departure->chaser_main_propellant_kg > transfer->chaser_main_propellant_kg);
 }
 
-TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refuelling][mission][lunar][ascent][slow]") {
+TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refuelling][mission][lunar][ascent][slow][ascent_planner]") {
     test::spice_session();
     LunarDepotSession f;
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel", f.t0, f.clock);

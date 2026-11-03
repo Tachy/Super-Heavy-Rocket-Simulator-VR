@@ -382,7 +382,7 @@ TEST_CASE("Settling: the coast stops before the lead in 10 s and in 600 s steps"
     }
 }
 
-TEST_CASE("Settling: the turn to the burn ends before the push, the ignition is not held", "[ignition_settling][sim]") {
+TEST_CASE("Settling: the turn to the burn ends before the push, the ignition is not held", "[ignition_settling][sim][slow]") {
     test::spice_session();
     TankerInOrbit f(100e3);
     run_to(f.session, f.t0 + 2.0 * 3600.0, 600.0);

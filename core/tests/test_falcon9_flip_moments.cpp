@@ -22,7 +22,7 @@
 using namespace starsim;
 using math::Vec3;
 
-TEST_CASE("Falcon 9 flip: moments over the turn", "[.][f9-flip-moments]") {
+TEST_CASE("Falcon 9 flip: moments over the turn", "[.][f9-flip-moments][ascent_planner]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();

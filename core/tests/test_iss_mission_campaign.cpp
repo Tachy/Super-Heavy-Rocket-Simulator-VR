@@ -123,7 +123,7 @@ TEST_CASE("ISS mission: start_mission dispatches crew_dragon_iss", "[iss][iss_mi
     CHECK_FALSE(st.warnings.empty());  // at least the ISS source note
 }
 
-TEST_CASE("ISS mission: the window's separation estimate matches the flown ascent", "[iss][iss_mission][ascent][slow]") {
+TEST_CASE("ISS mission: the window's separation estimate matches the flown ascent", "[iss][iss_mission][ascent][slow][ascent_planner]") {
     test::spice_session();
     Session f;
     const auto m = config::load_iss_launch_mission(rendezvous_test::config_dir, "falcon9_crew_dragon_iss");
@@ -175,7 +175,7 @@ TEST_CASE("ISS mission: the window's separation estimate matches the flown ascen
     CHECK(phase_deg < 0.5);   // [E] 0.5 deg ~ 2 min of catch-up: well inside the schedule's slack
 }
 
-TEST_CASE("ISS mission: falcon9_crew_dragon_iss from the pad to hard capture", "[iss][iss_mission][docking][slow]") {
+TEST_CASE("ISS mission: falcon9_crew_dragon_iss from the pad to hard capture", "[iss][iss_mission][docking][slow][ascent_planner]") {
     test::spice_session();
     Session f;
     const auto m = config::load_iss_launch_mission(rendezvous_test::config_dir, "falcon9_crew_dragon_iss");

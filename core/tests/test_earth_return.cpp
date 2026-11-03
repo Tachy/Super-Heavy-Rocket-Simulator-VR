@@ -145,7 +145,7 @@ TEST_CASE("TEI with the braking burn arrives at the target speed", "[lunar][retu
     CHECK(plan.braking_delta_v_mps < 1300.0);
 }
 
-TEST_CASE("TEI from the NRHO costs less than from the LLO", "[lunar][return][slow]") {
+TEST_CASE("TEI from the NRHO costs less than from the LLO", "[lunar][return]") {
     // [S] spec: ~0.4-0.5 km/s from the NRHO - as Artemis: departure burn + return powered flyby at 100 km (a single burn
     // at the perilune meets the return asymptote head-on: ~3.4 km/s). Reference built as lunar_outbound_parameters does
     // (hls_lunar_nrho seed).
