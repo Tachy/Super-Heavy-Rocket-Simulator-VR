@@ -604,7 +604,8 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     // Task 3b, CG 22.0 m) slows faster - its first prediction at 65 deg fell 4.3 km short, the steering commanded
     // 56.3 deg - and trims with the forward flaps ~20 deg further out than mid; the ~10 s pitch transient made the first
     // gate predictions 2.15 s early (0.93 s once flown out). Two guidance cycles per pass, until the alpha holds.
-    for (int pass = 0; pass < 4; ++pass) {
+    bool trim_held = false;
+    for (int pass = 0; pass < 4 && !trim_held; ++pass) {
         sim::FlightSession probe(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
         place(probe);
         const double mach = probe.telemetry(0).mach;
@@ -615,10 +616,10 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
         const auto trim = entry->model().aero.trim_flap_rad(mach, commanded_deg * deg);
         REQUIRE(trim.size() == cfg.stages[0].flaps.size());
         for (size_t k = 0; k < trim.size(); ++k) cfg.stages[0].flaps[k].initial_deflection_rad = trim[k];
-        const bool held = std::abs(commanded_deg - start_alpha_deg) < 0.5;
+        trim_held = std::abs(commanded_deg - start_alpha_deg) < 0.5;
         start_alpha_deg = commanded_deg;
-        if (held) break;
     }
+    REQUIRE(trim_held);  // the derived start converged: commanded alpha within 0.5 deg of the placed alpha
     if (std::getenv("STARSIM_VERBOSE")) {
         std::printf("  [start] alpha %.1f deg, flaps", start_alpha_deg);
         for (const auto& f : cfg.stages[0].flaps) std::printf(" %.1f", f.initial_deflection_rad / deg);
@@ -635,7 +636,8 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
         landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn), session.epoch());
         catch_prediction.sample(predicted_of(t, MissionEventKind::Caught), session.epoch());
         if (const auto* entry = session.entry_guidance(0)) {
-            max_drag_scale = std::max(max_drag_scale, entry->model().drag_scale);        }
+            max_drag_scale = std::max(max_drag_scale, entry->model().drag_scale);
+        }
         if (session.catch_contact_epoch(0)) {  // from the pins' first touch a catch dot is shown
             ++after_contact;
             if (!caught_shown(t, session.body_serial(0))) ++without_catch;
