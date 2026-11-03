@@ -1,5 +1,6 @@
 #include "starsim/frames/geodetic.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace starsim::frames {
@@ -45,9 +46,11 @@ GeodeticPosition fixed_to_geodetic(const math::Vec3& fixed_m, const Ellipsoid& e
     const double k = s + 1.0 + 1.0 / s;
     const double big_p = f / (3.0 * k * k * g * g);
     const double q = std::sqrt(1.0 + 2.0 * e2 * e2 * big_p);
+    // Within ~0.1 m of the axis the root's argument (~p^2) cancels to a rounding-sized negative number: clamped
+    // (an r0 error below ~0.1 m moves the height by < 1 mm).
     const double r0 = -(big_p * e2 * p) / (1.0 + q) +
-                      std::sqrt(0.5 * a * a * (1.0 + 1.0 / q) - big_p * (1.0 - e2) * z2 / (q * (1.0 + q)) -
-                                0.5 * big_p * p * p);
+                      std::sqrt(std::max(0.0, 0.5 * a * a * (1.0 + 1.0 / q) - big_p * (1.0 - e2) * z2 / (q * (1.0 + q)) -
+                                              0.5 * big_p * p * p));
     const double t = p - e2 * r0;
     const double u = std::sqrt(t * t + z2);
     const double v = std::sqrt(t * t + (1.0 - e2) * z2);

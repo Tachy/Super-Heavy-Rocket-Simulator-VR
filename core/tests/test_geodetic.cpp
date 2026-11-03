@@ -39,3 +39,18 @@ TEST_CASE("Geodetic conversion on the rotation axis", "[frames]") {
     CHECK(north.latitude_rad == Catch::Approx(constants::pi / 2.0));
     CHECK(north.height_m == Catch::Approx(7.0e6 - frames::wgs84.semi_minor_axis_m()).margin(1e-6));
 }
+
+// Planner plan Task 3b: within ~0.1 m of the axis Heikkinen's root argument cancels to a rounding-sized negative
+// number (-0.0078 m^2 at 13 km over the pole) and the height was NaN; whether it does depends on the rounding of z,
+// hence the scan over p and heights 0.1 m apart.
+TEST_CASE("Geodetic conversion a few centimetres off the rotation axis", "[frames]") {
+    const double b = frames::wgs84.semi_minor_axis_m();
+    for (double p = 1e-6; p < 1.0; p *= 1.07) {
+        for (const double h : {0.0, 12999.9, 13000.0, 13000.1, 4.0e5}) {
+            CAPTURE(p, h);
+            const auto g = frames::fixed_to_geodetic({p, 0.0, b + h});
+            CHECK(g.height_m == Catch::Approx(h).margin(1e-3));
+            CHECK(g.latitude_rad == Catch::Approx(constants::pi / 2.0).margin(1e-7));
+        }
+    }
+}
