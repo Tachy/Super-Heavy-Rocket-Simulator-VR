@@ -1,0 +1,7 @@
+# Refuelling campaign: estimated items no reference flight measures (planner plan Task 8; the measured numbers are in
+# reference_flights.toml). Read by the campaign calculator (refuelling_campaign_setup.cpp) and the flown campaign.
+
+[transfer]
+# Share of a transfer's delivered propellant lost to the pressurant and the vented displaced gas (not modelled in the
+# flown transfer, which books it after the transfer). [E] r5: 1-2 %.
+vent_fraction = 0.015

@@ -78,6 +78,7 @@ public:
     bool waiting_after_capture_failure() const { return waiting_for_go() && capture_retreat_; }
     size_t waypoint() const { return target_; }  // index into path() of the waypoint flown to / held at
     const std::vector<ProximityWaypoint>& path() const { return path_; }
+    const ProximityParameters& parameters() const { return p_; }
     const std::string& status() const { return status_; }
     const std::string& refusal() const { return refusal_; }  // German reason of the last refused command
     // Refreshes the live state the command checks use (resume's range / propellant) without flying: the session

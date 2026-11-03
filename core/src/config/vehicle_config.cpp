@@ -852,6 +852,19 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         // The return mission the vehicle flies without a mission of its own (FlightSession::plan_ship_return /
         // plan_capsule_return without parameters): required for a ship caught by the tower and for a capsule.
         s.return_mission = doc.text_or(*recovery, "return_mission");
+        // The propellant a chaser keeps through its rendezvous (required with an active docking port: load_vehicle).
+        if (const auto* reserve = (*recovery)["rendezvous_reserve_kg"].as_table()) {
+            RendezvousReserveConfig r;
+            r.proximity_kg = doc.positive(*reserve, "proximity");
+            r.phasing_kg = doc.positive(*reserve, "phasing");
+            if (r.phasing_kg < r.proximity_kg) {
+                doc.fail("stage.recovery.rendezvous_reserve_kg: phasing must not lie below proximity (the phasing "
+                         "plan keeps the proximity flight's reserve)");
+            }
+            s.rendezvous_reserve = r;
+        } else if (recovery->contains("rendezvous_reserve_kg")) {
+            doc.fail("stage.recovery.rendezvous_reserve_kg must be a table { proximity = ..., phasing = ... }");
+        }
         const bool returns_from_orbit = (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) ||
                                         s.aero.entry_profile == "capsule";
         if (returns_from_orbit && s.return_mission.empty()) {
@@ -924,6 +937,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             p.flaps_until_tilt_rad = required("flaps_until_deg") * constants::deg_to_rad;
             p.descent_propellant_margin = required("descent_propellant_margin");
             p.lateral_effort_fraction = required("landing_lateral_effort");
+            s.return_gas_kg = required("return_gas_kg");
+            if (!(s.return_gas_kg > 0.0)) doc.fail("stage.recovery.return_gas_kg must be positive");
             if (!(p.flip_throttle > 0.0) || p.flip_throttle > 1.0) doc.fail("stage.recovery.flip_throttle must be in (0, 1]");
             if (!(p.flip_tolerance_rad > 0.0) || !(p.flip_settled_rate_radps > 0.0) || !(p.flaps_until_tilt_rad > 0.0)) {
                 doc.fail("stage.recovery: flip_tolerance_deg, flip_settled_rate_rad_s and flaps_until_deg must be positive");
@@ -1080,6 +1095,11 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
     for (const auto& stage : v.stages) {
         for (const auto& p : stage.docking_ports) {
             if (!port_ids.insert(p.id).second) doc.fail("docking port id '" + p.id + "' on two stages");
+            // a chaser (active port) flies the phasing and the proximity flight on its own reserve (planner plan Task 8)
+            if (p.soft_capture == SoftCaptureMode::Active && !stage.rendezvous_reserve) {
+                doc.fail("Rendezvous der Stufe '" + stage.id +
+                         "': Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
+            }
         }
         for (const auto& c : stage.transfer_connectors) {
             if (!connector_ids.insert(c.id).second) doc.fail("transfer connector id '" + c.id + "' on two stages");

@@ -560,3 +560,10 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   20.0-32.15 m, CH4 header at 20.0 m) with dry 171 t [E] at the Block 3 CG 22.03 m (Task 3b: 177 t less the 6 t door and
   dispenser). User 2026-11-03: the tanker needs no cargo bay, SpaceX intends larger tanks there - the main tanks now
   reach the barrel end (current state: `docs/subsystems/refuelling.md`).
+
+### Reserves and campaign vent from config (planner plan Task 8, 2026-11-03)
+- Superseded: `TankerReserveParameters` defaults in production - burn margin 1.10, gas 3500 kg, boil-off 2000 kg [E]
+  split 56 % CH4 [D r5], unusable 1000 kg - and the reserve search with `DeorbitParameters{}` (bank 50 deg, path -1 deg,
+  interface 120 km: the same numbers as `ship_return_starbase`). Now: margin = `FlightSession::commit_burn_margin`, gas
+  and unusable from the ship config, the boil-off from the thermal model over the wait, the search with the return
+  mission's settings. `CampaignInputs::transfer_vent_fraction` 0.015 default -> `config/refuelling/campaign.toml`.

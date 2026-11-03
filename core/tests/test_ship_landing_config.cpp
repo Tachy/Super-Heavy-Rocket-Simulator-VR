@@ -327,7 +327,7 @@ TEST_CASE("Ship landing parameters follow the vehicle config", "[ship][landing][
 TEST_CASE("Ship without landing keys is refused", "[ship][landing][config]") {
     namespace fs = std::filesystem;
     const fs::path source(STARSIM_CONFIG_DIR);
-    for (const std::string key : {"landing_lateral_effort", "flip_throttle", "landing_engine_phases"}) {
+    for (const std::string key : {"landing_lateral_effort", "flip_throttle", "landing_engine_phases", "return_gas_kg"}) {
         const auto dir = fs::temp_directory_path() / ("starsim_ship_landing_keys_" + key);
         fs::remove_all(dir);
         fs::create_directories(dir / "vehicles");

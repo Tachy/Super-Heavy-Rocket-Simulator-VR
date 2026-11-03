@@ -265,38 +265,67 @@ void FlightSession::run_transfer_step(double dt_s) {
     transfer_thrust_n_ = out.thrust ? thrust : 0.0;
 }
 
-std::optional<mission::TankerReserve> FlightSession::tanker_reserve(mission::TankerReserveParameters base,
-                                                                    std::string* reason) const {
+std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string* reason) const {
     const auto refuse = [&](const std::string& why) -> std::optional<mission::TankerReserve> {
         if (reason) *reason = why;
         return std::nullopt;
     };
     if (!docked()) return refuse("Keine Reserve: nicht angedockt");
-    // The delta-v hardly depends on the pass; the depot plane meets the site only every few days within reach (r3).
-    gnc::DeorbitParameters search;
-    search.search_window_s = tanker_reserve_search_s;
-    const auto plan = ship_return_preview(search);
+    // The return's own deorbit settings (planner plan Task 8, Review Focus 4: no struct defaults). The delta-v hardly
+    // depends on the pass; the depot plane meets the site only every few days within reach (r3).
+    std::string why;
+    auto search = ship_return_settings(&why);
+    if (!search) return refuse("Keine Reserve: " + why);
+    search->search_window_s = tanker_reserve_search_s;
+    const auto plan = ship_return_preview(*search);
     if (!plan.feasible) return refuse("Keine Reserve: " + plan.reason);
-    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const auto& body = *bodies_[controlled_].body;
+    const auto& vehicle = body.vehicle();
     const auto& stage = vehicle.stages().front().config;
+    if (!(stage.return_gas_kg > 0.0)) return refuse("Keine Reserve: Schlüssel 'return_gas_kg' fehlt in [stage.recovery]");
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
     if (configurations.empty()) return refuse("Keine Reserve: Deorbit-Triebwerk nicht verfügbar");
-    base.deorbit_delta_v_mps = plan.delta_v_mps;
-    base.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
+    mission::TankerReserveParameters p;
+    p.deorbit_delta_v_mps = plan.delta_v_mps;
+    p.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
     for (const auto& s : vehicle.stages()) {
         for (const auto& e : s.engines) {
             if (e.group_id == configurations.front().groups.front()) {
-                base.mixture_ratio = e.performance->config().mixture_ratio;
+                p.mixture_ratio = e.performance->config().mixture_ratio;
             }
         }
     }
+    p.burn_margin = commit_burn_margin;  // plan_ship_return holds the burn to it
+    p.gas_kg = stage.return_gas_kg;
+    p.unusable_kg = stage.unusable_propellant.main_kg;
     const double dry_with_headers_kg = vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg();
-    return mission::tanker_reserve(dry_with_headers_kg, base);
+    auto reserve = mission::tanker_reserve(dry_with_headers_kg, p);
+    // The boil-off of the wait for the burn by the thermal model: a copy holding that reserve in its main tanks flown
+    // ahead to the burn (as boil_off_shortfall checks the return). Its fill sets the wetted wall; the boil-off itself
+    // (a few % of the reserve) changes it too little for a second pass.
+    auto copy = vehicle.copy_upper(0);  // the ship alone in orbit: its one stage holds the main tanks
+    for (const auto contents : {config::TankContents::Oxidizer, config::TankContents::Fuel}) {
+        double capacity_kg = 0.0;
+        for (const auto& t : copy->stages().front().tanks) {
+            if (t.config.role == config::TankRole::Main && t.config.contents == contents) capacity_kg += t.config.capacity_kg;
+        }
+        const double kg = contents == config::TankContents::Oxidizer ? reserve.oxidizer_kg : reserve.fuel_kg;
+        for (const auto& t : copy->stages().front().tanks) {
+            if (t.config.role == config::TankRole::Main && t.config.contents == contents && capacity_kg > 0.0) {
+                copy->set_tank_mass(0, t.config.id, kg * t.config.capacity_kg / capacity_kg);
+            }
+        }
+    }
+    vehicle::FlightBody held(std::move(copy), body.state());
+    held.set_ground_height(body.ground_height_m());
+    const auto at_burn = main_propellant_at(held, plan.node.epoch);
+    p.boil_off_oxidizer_kg = std::max(0.0, reserve.oxidizer_kg - at_burn.oxidizer_kg);
+    p.boil_off_fuel_kg = std::max(0.0, reserve.fuel_kg - at_burn.fuel_kg);
+    return mission::tanker_reserve(dry_with_headers_kg, p);
 }
 
-std::optional<TransferRequest> FlightSession::tanker_transfer_request(mission::TankerReserveParameters base,
-                                                                     std::string* reason) const {
-    const auto reserve = tanker_reserve(base, reason);
+std::optional<TransferRequest> FlightSession::tanker_transfer_request(std::string* reason) const {
+    const auto reserve = tanker_reserve(reason);
     if (!reserve) return std::nullopt;
     TransferRequest r;
     r.direction = TransferDirection::ChaserToStation;

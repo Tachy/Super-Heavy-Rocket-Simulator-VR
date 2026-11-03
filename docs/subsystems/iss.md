@@ -224,7 +224,8 @@ Plan `docs/superpowers/archive/plans/2026-10-19-iss-i3-phasing.md`.
   position targeter (CW first guess); the mid-course correction is planned in flight only (skipped below 0.02 m/s [D];
   non-converged: "Kurskorrektur nicht berechenbar", the braking still follows; a skipped one carries ~24 m); braking
   leaves the chaser at rest in the target's LVLH frame. Budget by the rocket equation against the Dracos' propellant with
-  `reserve_kg` 900 kg [E] (deorbit ~600 kg + proximity and abort); `min_ellipsoid_metric_before_ai` (arc sampled every
+  the vehicle's `[stage.recovery] rendezvous_reserve_kg.phasing` (Dragon 900 kg [E]: deorbit ~600 kg + proximity and
+  abort; the session sets `reserve_kg` from it, a chaser with an active port must carry the key); `min_ellipsoid_metric_before_ai` (arc sampled every
   minute) must stay > 1. `boost_phase_error_m` predicts the along-track miss from live states.
 - **Drag.** Dragon C_D 2.2 [E] on its cross-section; ISS from its OEM header. In flight the session tracks both
   (`gnc::estimate_drag_area_per_mass`, Dragon since its last burn, station since plan or last impulse) once an arc is
@@ -278,7 +279,7 @@ Plan `docs/superpowers/archive/plans/2026-10-19-iss-i4-proximity.md`.
   (CW transfer), "Umflug", "Anflug" (axial approach to an on-axis waypoint), "Endanflug" (Waypoint 2 -> contact), "Halt",
   "Rückzug", "Abbruch", "Kontakt". Monitors: leaving the corridor -> "Halt: Korridor verlassen" (beyond 2x: retreat);
   closing faster than 1.5 x schedule + 0.02 m/s -> "Halt: zu schnell"; inside the sphere off the corridor -> "Abbruch:
-  Sicherheitszone verletzt"; RCS propellant below the deorbit reserve (600 kg [E]) -> "Abbruch: Treibstoffreserve".
+  Sicherheitszone verletzt"; RCS propellant below the vehicle's `rendezvous_reserve_kg.proximity` (Dragon 600 kg [E], the deorbit need) -> "Abbruch: Treibstoffreserve".
   Commands `hold`, `retreat` (from a waypoint or an interrupting hold: to the previous waypoint; from a monitor: to the
   last reached), `abort`, `resume` latch a request resolved in the next update; a second command before then is refused;
   each refusal sets a German `refusal()` (shown as `proximity_status()`), e.g. retreat at Waypoint 0, resume without a

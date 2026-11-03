@@ -46,4 +46,16 @@ RefuellingReference load_refuelling_reference(const std::filesystem::path& confi
     return r;
 }
 
+RefuellingCampaignSettings load_refuelling_campaign_settings(const std::filesystem::path& config_dir) {
+    const detail::Document doc(config_dir / "refuelling" / "campaign.toml");
+    const auto* transfer = doc.root["transfer"].as_table();
+    if (!transfer) doc.fail("missing [transfer]");
+    RefuellingCampaignSettings s;
+    s.transfer_vent_fraction = doc.number(*transfer, "vent_fraction");
+    if (!(s.transfer_vent_fraction >= 0.0 && s.transfer_vent_fraction < 1.0)) {
+        doc.fail("'vent_fraction' must lie in [0, 1)");
+    }
+    return s;
+}
+
 }  // namespace starsim::config

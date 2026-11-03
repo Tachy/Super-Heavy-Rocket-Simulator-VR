@@ -496,6 +496,13 @@ public:
     // the boil-off check; also while docked: the held state), not stored and not flown (refuelling r4).
     gnc::DeorbitPlan ship_return_preview(const gnc::DeorbitParameters& parameters = {}) const;
     static constexpr double tanker_reserve_search_s = 8.0 * 86400.0;  // [E] tanker_reserve: the pass search
+    // Usable main-tank propellant over the burn's impulsive propellant [E]. Committing: the execution dispersion
+    // (~1 %), start / shutdown transients and finite-burn losses (1.05 let a burn run dry on its last tonne in the r2
+    // campaigns). Calling a committed burn off at a re-plan: only when it cannot be flown at all (r2 review: the
+    // commit margin there stranded ships with 9 % to spare; a committed plan may cut into its reserve, as for drag).
+    // The tanker reserve keeps the commit margin (its return is held to it).
+    static constexpr double commit_burn_margin = 1.10;
+    static constexpr double call_off_burn_margin = 1.02;
     // Why the last burn was aborted (German; empty: none). A burn whose engines run dry - e.g. main tanks boiled off
     // while waiting (refuelling r2) - cannot finish: it is cut off, the autopilot goes off.
     const std::string& burn_abort_reason() const { return burn_abort_reason_; }
@@ -912,13 +919,17 @@ public:
     bool start_transfer(const TransferRequest& request);
     void stop_transfer();
     const TransferState& transfer_state() const;  // the running or last transfer, or the refusal
-    // The docked tanker's reserve for its return (mission::tanker_reserve with ship_return_preview's delta-v and the
-    // deorbit set's exhaust velocity and mixture ratio); nullopt with a German *reason when not docked or without a
-    // feasible return. tanker_transfer_request: a ChaserToStation request with that reserve as the floors.
-    std::optional<mission::TankerReserve> tanker_reserve(mission::TankerReserveParameters base = {},
-                                                         std::string* reason = nullptr) const;
-    std::optional<TransferRequest> tanker_transfer_request(mission::TankerReserveParameters base = {},
-                                                           std::string* reason = nullptr) const;
+    // The docked tanker's reserve for its return (mission::tanker_reserve), every input from its config and physics
+    // (planner plan Task 8): the delta-v of ship_return_preview with the return's own deorbit settings (the mission's
+    // ship return, else the vehicle's [stage.recovery] return_mission), the deorbit set's exhaust velocity and mixture
+    // ratio, commit_burn_margin, [stage.recovery] return_gas_kg, [stage.tanks] unusable_propellant_kg.main and the
+    // boil-off of the wait for the burn (a copy holding the reserve flown ahead to the burn, as boil_off_shortfall).
+    // nullopt with a German *reason when not docked or without a feasible return. tanker_transfer_request: a
+    // ChaserToStation request with that reserve as the floors.
+    std::optional<mission::TankerReserve> tanker_reserve(std::string* reason = nullptr) const;
+    std::optional<TransferRequest> tanker_transfer_request(std::string* reason = nullptr) const;
+    // The controlled vehicle's gnc proximity parameters while a proximity flight runs (nullptr: none).
+    const gnc::ProximityParameters* proximity_parameters() const { return proximity_ ? &proximity_->parameters() : nullptr; }
     // A scenario that starts docked (ISS i6): the armed pair (set_rendezvous_target with the chaser's active port on a
     // passive station port) mated at once - the chaser moved to the mated pose moving with the station, the mechanism
     // Docked, the compound merged (momentum kept). Throws std::logic_error without an armed mechanism or outside Ready.
@@ -1256,12 +1267,6 @@ private:
     // The deorbit burn of `plan` checked against the controlled ship's main tanks at the node (sets plan.boil_off_kg):
     // a German refusal when they will not hold the burn.
     std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const;
-    // Usable main-tank propellant over the burn's impulsive propellant [E]. Committing: the execution dispersion
-    // (~1 %), start / shutdown transients and finite-burn losses (1.05 let a burn run dry on its last tonne in the r2
-    // campaigns). Calling a committed burn off at a re-plan: only when it cannot be flown at all (r2 review: the
-    // commit margin there stranded ships with 9 % to spare; a committed plan may cut into its reserve, as for drag).
-    static constexpr double commit_burn_margin = 1.10;
-    static constexpr double call_off_burn_margin = 1.02;
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
     bool deorbit_replan_due_ = false;               // a far deorbit: planned again when its free drift ends
     time::Epoch deorbit_track_epoch_;               // onboard tracking: the arc from the first plan (drag estimate)
@@ -1437,6 +1442,11 @@ private:
     // a 24 m/s braking burn after a re-plan took ~40 min and missed Waypoint 0 by 5 km.
     double rendezvous_transient_share(double delta_v_mps) const;
     double rendezvous_budget_kg() const;
+    // The controlled vehicle's [stage.recovery] rendezvous_reserve_kg (its stage with the key; nullptr: none).
+    const config::RendezvousReserveConfig* rendezvous_reserve() const;
+    // The deorbit settings of the controlled ship's return: the running mission's ship return, else the vehicle's
+    // [stage.recovery] return_mission; nullopt with a German *reason without either.
+    std::optional<gnc::DeorbitParameters> ship_return_settings(std::string* reason) const;
     bool execute_rendezvous_burn(const gnc::BurnNode& node);
     math::StateVector station_state() const;
     const config::StationProximityConfig& station_limits() const;  // the station stage's [stage.station.proximity]

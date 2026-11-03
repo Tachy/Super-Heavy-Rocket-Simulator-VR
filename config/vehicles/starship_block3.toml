@@ -365,6 +365,14 @@ deorbit_engine_groups = ["sea_level_3"]  # user 2026-10-13: the belly Raptor alo
 # 48.7 ft/s; as the lunar return campaign's TEI and braking burns]
 deorbit_cutoff_residual = 0.002          # [E] of the burn's delta-v
 deorbit_pointing_error_deg = 0.1         # [E]
+# The cold gas the return from orbit takes from the main tanks after a docking (mission::tanker_reserve): departure
+# ~0.3 t, the turn to the burn and the entry ~3 t [D: r5 tanker_flight_orbit; 1.5 t before left the caught tanker 0 t]
+return_gas_kg = 3500.0
+# The propellant a rendezvous keeps (the tanker and the HLS inherit / share it; planner plan Task 8): the proximity
+# flight's abort floor and the phasing plan's reserve, Crew Dragon's figures. On a ship the main tanks hold tonnes
+# beyond them: the return's own propellant is kept by the tanker reserve (mission::tanker_reserve) and the HLS's by
+# its lunar budget, not here.
+rendezvous_reserve_kg = { proximity = 600.0, phasing = 900.0 }  # [E]
 # Flip and landing burn at the tower (gnc::ship_landing_parameters; b3 ship-return design). The landing burn steps down
 # 3 -> 2 (user 2026-10-13, flight 13/14 videos: the belly engine shuts down, the leeward pair lands; the planner's third
 # phase flies the same pair). Tilt-rate limits, the 3 -> 2 sink window and the gate lead are derived from these sets.

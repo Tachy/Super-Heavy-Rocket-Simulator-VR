@@ -219,6 +219,19 @@ gnc::DeorbitPlan FlightSession::ship_return_preview(const gnc::DeorbitParameters
     return ship_deorbit_plan(parameters);
 }
 
+std::optional<gnc::DeorbitParameters> FlightSession::ship_return_settings(std::string* reason) const {
+    if (iss_mission_ && iss_mission_->ship_return) return *iss_mission_->ship_return;  // the mission's own return
+    const std::string mission_id = bodies_.empty() ? std::string() : bodies_[controlled_].body->vehicle().stages().front().config.return_mission;
+    if (mission_id.empty()) {
+        if (reason) *reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
+        return std::nullopt;
+    }
+    const auto m = config::load_ship_return_mission(config_dir_, mission_id);
+    auto parameters = ship_deorbit_parameters(m.deorbit);  // the one mapping (refuelling r5)
+    parameters.search_window_s = m.deorbit.search_window_s;
+    return parameters;
+}
+
 bool FlightSession::plan_ship_return() {
     const std::string mission_id = bodies_.empty() ? std::string() : bodies_[controlled_].body->vehicle().stages().front().config.return_mission;
     if (mission_id.empty()) {

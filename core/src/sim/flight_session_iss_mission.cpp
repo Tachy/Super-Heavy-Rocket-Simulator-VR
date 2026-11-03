@@ -100,7 +100,7 @@ void FlightSession::iss_start_transfer() {
     std::optional<TransferRequest> request;
     std::string reason;
     if (*q.transfer == MissionTransfer::TankerReserve) {
-        request = tanker_transfer_request({}, &reason);
+        request = tanker_transfer_request(&reason);
     } else {  // the chaser's main tanks up to full; the station down to empty
         TransferRequest r;
         r.direction = TransferDirection::StationToChaser;

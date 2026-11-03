@@ -95,6 +95,10 @@ return_mission = "crew_dragon_return"    # the return from orbit without a missi
 # as the ship's (the IMU's attitude, star-tracker aligned)
 deorbit_cutoff_residual = 0.001          # [E] of the burn's delta-v
 deorbit_pointing_error_deg = 0.1         # [E]
+# The Draco propellant the rendezvous keeps (planner plan Task 8): the proximity flight aborts below `proximity` - the
+# deorbit plan's need (d3: 598 kg for 139 m/s from 420 km); the phasing plan keeps `phasing` - that plus the proximity
+# operations and an abort (i3)
+rendezvous_reserve_kg = { proximity = 600.0, phasing = 900.0 }  # [E]
 
 [stage.aero]
 reference_diameter_m = 4.0

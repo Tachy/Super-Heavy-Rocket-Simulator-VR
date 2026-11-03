@@ -20,6 +20,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/tanker_reserve.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/vehicle/docking_port.hpp"
 #include "starsim/vehicle/propellant_transfer.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -546,18 +547,68 @@ TEST_CASE("Zero settling push: the liquid stays forward, the transfer pauses", "
 
 TEST_CASE("Tanker reserve: the deorbit burn by the rocket equation plus gas, boil-off and residue",
           "[refuelling][prop_transfer][mission]") {
-    mission::TankerReserveParameters p;
+    mission::TankerReserveParameters p;  // fixture: the r5 measured items
     p.deorbit_delta_v_mps = 80.0;
     p.exhaust_velocity_mps = 3300.0;
+    p.mixture_ratio = 3.6;
+    p.burn_margin = 1.10;
+    p.gas_kg = 3500.0;
+    p.boil_off_oxidizer_kg = 880.0;  // 2 t, 56 % CH4
+    p.boil_off_fuel_kg = 1120.0;
+    p.unusable_kg = 1000.0;
     const auto r = mission::tanker_reserve(290.0e3, p);
-    // r5 measured items: gas 3.5 t, boil-off 2 t of which 56 % CH4. After the burn 290 + 3.5 + 1 t;
-    // burn = 294.5 t (e^(80/3300) - 1) x 1.10 = 7.9495 t
+    // After the burn 290 + 3.5 + 1 t; burn = 294.5 t (e^(80/3300) - 1) x 1.10 = 7.9495 t
     CHECK(r.burn_kg == Catch::Approx(7949.5).epsilon(1e-4));
     CHECK(r.total_kg == Catch::Approx(r.burn_kg + 3500.0 + 2000.0 + 1000.0));
     const double at_ratio = r.burn_kg + 3500.0 + 1000.0;
-    CHECK(r.oxidizer_kg == Catch::Approx(at_ratio * 3.6 / 4.6 + 0.44 * 2000.0));
-    CHECK(r.fuel_kg == Catch::Approx(at_ratio / 4.6 + 0.56 * 2000.0));
+    CHECK(r.oxidizer_kg == Catch::Approx(at_ratio * 3.6 / 4.6 + 880.0));
+    CHECK(r.fuel_kg == Catch::Approx(at_ratio / 4.6 + 1120.0));
     CHECK(r.oxidizer_kg + r.fuel_kg == Catch::Approx(r.total_kg));
+    CHECK(r.inputs.gas_kg == 3500.0);
+}
+
+TEST_CASE("Tanker reserve from the vehicle config", "[refuelling][prop_transfer][docking][config][deorbit]") {
+    test::spice_session();
+    DockedPair f;
+    f.session.set_boil_off(true);
+    const auto& stage = f.session.body(f.session.controlled_index()).vehicle().stages().front().config;
+    std::string reason;
+    const auto reserve = f.session.tanker_reserve(&reason);
+    INFO(reason);
+    REQUIRE(reserve);
+    const auto& in = reserve->inputs;
+    // Review Focus 4: the search flies the return mission's deorbit settings, not DeorbitParameters{} defaults
+    REQUIRE_FALSE(stage.return_mission.empty());
+    auto settings = sim::ship_deorbit_parameters(
+        config::load_ship_return_mission(STARSIM_CONFIG_DIR, stage.return_mission).deorbit);
+    settings.search_window_s = sim::FlightSession::tanker_reserve_search_s;
+    const auto plan = f.session.ship_return_preview(settings);
+    REQUIRE(plan.feasible);
+    CHECK(in.deorbit_delta_v_mps == plan.delta_v_mps);
+    // the vehicle's keys and the session's commit margin
+    CHECK(in.gas_kg == stage.return_gas_kg);
+    CHECK(in.gas_kg == 3500.0);
+    CHECK(in.unusable_kg == stage.unusable_propellant.main_kg);
+    CHECK(in.unusable_kg == 1000.0);
+    CHECK(in.burn_margin == sim::FlightSession::commit_burn_margin);
+    CHECK(in.mixture_ratio == Catch::Approx(3.6));
+    // The boil-off of the wait from the thermal model: both propellants boil, CH4 more than its share at O/F 3.6
+    // (r5: 0.9 of 1.6 t CH4); a band of the r2/r5 measurements (1.4-1.6 t in ~20 h) per day of wait
+    const double wait_d = (plan.node.epoch - f.session.epoch()) / 86400.0;
+    const double boiled = in.boil_off_oxidizer_kg + in.boil_off_fuel_kg;
+    INFO("wait " << wait_d << " d, boil-off LOX " << in.boil_off_oxidizer_kg << " kg, CH4 " << in.boil_off_fuel_kg
+                 << " kg, reserve " << reserve->total_kg << " kg");
+    CHECK(in.boil_off_oxidizer_kg > 0.0);
+    CHECK(in.boil_off_fuel_kg > 0.0);
+    CHECK(in.boil_off_fuel_kg / boiled > 1.0 / 4.6);
+    CHECK(boiled < 5000.0 * std::max(1.0, wait_d));
+    CHECK(reserve->total_kg == Catch::Approx(reserve->burn_kg + in.gas_kg + in.unusable_kg + boiled));
+    // without boil-off in the session: none booked
+    f.session.set_boil_off(false);
+    const auto cold = f.session.tanker_reserve(&reason);
+    REQUIRE(cold);
+    CHECK(cold->inputs.boil_off_oxidizer_kg == 0.0);
+    CHECK(cold->inputs.boil_off_fuel_kg == 0.0);
 }
 
 TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer request",
@@ -570,7 +621,7 @@ TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer r
     const auto plan = f.session.ship_return_preview(search);
     INFO(plan.reason);
     REQUIRE(plan.feasible);
-    const auto reserve = f.session.tanker_reserve({}, &reason);
+    const auto reserve = f.session.tanker_reserve(&reason);
     INFO(reason);
     REQUIRE(reserve);
     INFO("deorbit " << plan.delta_v_mps << " m/s, reserve " << reserve->total_kg << " kg (burn " << reserve->burn_kg
@@ -579,14 +630,14 @@ TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer r
     CHECK(plan.delta_v_mps < 200.0);
     CHECK(reserve->total_kg > 8.0e3);
     CHECK(reserve->total_kg < 30.0e3);
-    const auto request = f.session.tanker_transfer_request({}, &reason);
+    const auto request = f.session.tanker_transfer_request(&reason);
     REQUIRE(request);
     CHECK(request->direction == sim::TransferDirection::ChaserToStation);
     CHECK(request->delivering_floor_kg[0] == Catch::Approx(reserve->oxidizer_kg));
     CHECK(request->delivering_floor_kg[1] == Catch::Approx(reserve->fuel_kg));
     // not docked: no reserve
     refuelling_test::TankerAtPort free({20.0, 0.0, 0.0});
-    CHECK_FALSE(free.session.tanker_reserve({}, &reason));
+    CHECK_FALSE(free.session.tanker_reserve(&reason));
     CHECK(reason == "Keine Reserve: nicht angedockt");
 }
 

@@ -43,4 +43,12 @@ struct RefuellingReference {
 // ConfigError (via detail::Document) for a missing file, block or number, or a negative mass.
 RefuellingReference load_refuelling_reference(const std::filesystem::path& config_dir);
 
+// config/refuelling/campaign.toml (planner plan Task 8): the campaign's estimated items that no flight measures.
+struct RefuellingCampaignSettings {
+    double transfer_vent_fraction = 0.0;  // of a transfer's delivered propellant: pressurant and vented displaced gas
+};
+
+// ConfigError for a missing file or key, or a fraction outside [0, 1).
+RefuellingCampaignSettings load_refuelling_campaign_settings(const std::filesystem::path& config_dir);
+
 }  // namespace starsim::config

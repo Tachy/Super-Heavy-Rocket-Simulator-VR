@@ -411,3 +411,8 @@ ledger `.superpowers/sdd/2026-10-20-iss-i6-missions/progress.md`.
 - **Tests:** `[launch_window]`, `[iss_mission]` (`test_iss_launch_window.cpp`, `test_iss_mission_config.cpp`,
   `test_iss_mission_sequence.cpp`, `test_iss_mission_campaign.cpp` with the `[slow]` end-to-end cases).
 
+### Rendezvous reserves from config (planner plan Task 8, 2026-11-03)
+- Superseded: the code defaults `gnc::ProximityParameters::deorbit_reserve_kg` 600 kg and
+  `mission::PhasingParameters::reserve_kg` 900 kg for every chaser. Now `[stage.recovery] rendezvous_reserve_kg =
+  { proximity, phasing }` per vehicle (same numbers for Dragon, the Block 3 ship / tanker and the HLS); the defaults stay
+  unit-test fixtures.

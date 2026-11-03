@@ -6,8 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 
+#include "proximity_test_support.hpp"
 #include "rendezvous_test_support.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/mission/rendezvous_geometry.hpp"
 #include "starsim/orbit/clohessy_wiltshire.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -94,6 +100,64 @@ TEST_CASE("Rendezvous plan refusals in the session", "[rendezvous][phasing][sess
     ship.add_station(f.start.iss.vehicle, f.start.iss.state_gcrf, f.start.iss.epoch, f.start.iss.impulses);
     CHECK_FALSE(ship.plan_rendezvous({}));
     CHECK(ship.rendezvous_status().find("nicht innerhalb") != std::string::npos);
+}
+
+TEST_CASE("Phasing and proximity reserves from config", "[rendezvous][phasing][proximity][session][config]") {
+    namespace fs = std::filesystem;
+    const fs::path source(STARSIM_CONFIG_DIR);
+    // every chaser (active docking port) carries its reserve; the tanker inherits the Block 3 ship's
+    for (const char* id : {"crew_dragon", "starship_tanker", "starship_hls", "starship_hls_launch"}) {
+        const auto cfg = config::load_vehicle(source, id);
+        const auto& top = cfg.stages.back();
+        INFO(id);
+        REQUIRE(top.rendezvous_reserve);
+        CHECK(top.rendezvous_reserve->proximity_kg == 600.0);
+        CHECK(top.rendezvous_reserve->phasing_kg == 900.0);
+    }
+    // a target (passive ports) needs none
+    for (const char* id : {"iss", "starship_depot"}) {
+        for (const auto& s : config::load_vehicle(source, id).stages) CHECK_FALSE(s.rendezvous_reserve);
+    }
+    {  // a chaser without the key is refused at load, in German, naming the key and the file
+        const auto dir = fs::temp_directory_path() / "starsim_rendezvous_reserve_key";
+        fs::remove_all(dir);
+        fs::create_directories(dir / "vehicles");
+        fs::copy(source / "engines", dir / "engines", fs::copy_options::recursive);
+        fs::copy_file(source / "propellants.toml", dir / "propellants.toml");
+        std::ifstream in(source / "vehicles" / "starship_hls.toml");
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const auto at = text.find("\nrendezvous_reserve_kg =");
+        REQUIRE(at != std::string::npos);
+        text.insert(at + 1, "# ");
+        std::ofstream(dir / "vehicles" / "starship_hls.toml") << text;
+        try {
+            config::load_vehicle(dir, "starship_hls");
+            FAIL("loaded without rendezvous_reserve_kg");
+        } catch (const config::ConfigError& e) {
+            const std::string what = e.what();
+            CHECK(what.find("Rendezvous") != std::string::npos);
+            CHECK(what.find("rendezvous_reserve_kg") != std::string::npos);
+            CHECK(what.find("starship_hls.toml") != std::string::npos);
+        }
+        fs::remove_all(dir);
+    }
+    const auto dragon = config::load_vehicle(source, "crew_dragon").stages.back().rendezvous_reserve;
+    test::spice_session();
+    {  // the phasing plan keeps the vehicle's reserve, whatever the caller passed
+        Flight f(30.0, 3.0 * 3600.0);
+        mission::PhasingParameters p;
+        p.reserve_kg = 1.0;
+        REQUIRE(f.session.plan_rendezvous(p));
+        CHECK(f.session.rendezvous_plan()->parameters.reserve_kg == dragon->phasing_kg);
+    }
+    {  // the proximity flight aborts below the vehicle's reserve
+        proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-5, 0, 397}));
+        gnc::ProximityParameters p;
+        p.deorbit_reserve_kg = 1.0;
+        REQUIRE(d.session.start_proximity("ida2", p));
+        REQUIRE(d.session.proximity_parameters());
+        CHECK(d.session.proximity_parameters()->deorbit_reserve_kg == dragon->proximity_kg);
+    }
 }
 
 TEST_CASE("Rendezvous flight from 30 deg to Waypoint 0", "[rendezvous][phasing][session][validation]") {

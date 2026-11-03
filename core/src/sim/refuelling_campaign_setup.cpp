@@ -224,7 +224,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     // depot); the altitude cost keeps the deorbit difference
     const double dv_back = mission::deorbit_delta_v_mps(r_new, rp, gm) - mission::deorbit_delta_v_mps(r_ref, rp, gm);
     report.altitude_cost_kg = return_mass_kg * (std::exp(dv_back / ve_tanker) - 1.0) *
-                                  mission::TankerReserveParameters{}.burn_margin;
+                                  FlightSession::commit_burn_margin;  // as the tanker reserve
     report.tanker_base_delivered_kg = ref.tanker.delivered_oxidizer_kg + ref.tanker.delivered_fuel_kg +
                                       (ref.tanker.dry_mass_kg - dry_kg) * ref.tanker.dry_mass_sensitivity +
                                       (ref.tanker.main_at_undock_kg - reserve_kg) - report.altitude_cost_kg;
@@ -414,6 +414,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         };
     }
     mission::CampaignInputs inputs;
+    inputs.transfer_vent_fraction = config::load_refuelling_campaign_settings(dir).transfer_vent_fraction;
     inputs.hls_tank_room_kg = demand.capacity_kg - required_propellant_kg;
     report.demand_kg = mission::gross_for_net_kg(std::max(0.0, required_propellant_kg - report.hls_propellant_at_docking_kg),
                                                  inputs.transfer_vent_fraction) +

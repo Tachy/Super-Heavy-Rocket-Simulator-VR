@@ -379,6 +379,15 @@ struct UnusablePropellantConfig {
     double header_kg = 0.0;
 };
 
+// [stage.recovery] rendezvous_reserve_kg = { proximity = ..., phasing = ... } (planner plan Task 8): the propellant a
+// chaser keeps through its rendezvous - the proximity flight aborts below `proximity` (gnc::ProximityParameters::
+// deorbit_reserve_kg), the phasing plan keeps `phasing` (mission::PhasingParameters::reserve_kg). Required for a stage
+// with an active docking port.
+struct RendezvousReserveConfig {
+    double proximity_kg = 0.0;
+    double phasing_kg = 0.0;
+};
+
 // [stage.staging] of a lower stage: how the stage above it separates (ascent trajectory and staging, Task 1).
 //  Cold (Falcon 9): MECO - every group off, the tail-off acts on the joined stack - then separation_delay_s later the
 //    separation with a push of separation_dv_mps (relative speed of the parts), upper_ignition_delay_s after it the
@@ -462,6 +471,11 @@ struct StageConfig {
     // fly (gnc::DeorbitBurnDispersion). Required, as return_mission, for a stage that returns from orbit.
     double deorbit_cutoff_residual = 0.0;
     double deorbit_pointing_error_rad = 0.0;
+    // [stage.recovery] return_gas_kg: the cold gas a ship's return from orbit takes from the main tanks after a
+    // docking (departure, turn to the burn, entry) - mission::TankerReserveParameters::gas_kg. Required for a ship
+    // caught by the tower.
+    double return_gas_kg = 0.0;
+    std::optional<RendezvousReserveConfig> rendezvous_reserve;  // [stage.recovery] rendezvous_reserve_kg
     std::optional<ShipLandingProfile> ship_landing;  // a ship landing at a catch tower (else none)
     std::optional<LunarLandingProfile> lunar_landing;  // a lunar lander (fixed legs; else none)
     std::optional<LunarAscentProfile> lunar_ascent;    // a lunar lander (fixed legs; else none)

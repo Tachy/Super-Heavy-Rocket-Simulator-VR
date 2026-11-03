@@ -17,7 +17,7 @@ namespace starsim::sim {
 
 namespace {
 
-const mission::CampaignInputs booked{};  // the calculator's [E] items (attitude gas, vent): one source
+const mission::CampaignInputs booked{};  // the calculator's [E] attitude gas: one source (the vent: campaign.toml)
 constexpr double gas_batch_kg = 1.0;     // [E] the attitude gas is drawn in batches of this
 
 double main_kg(const FlightSession& s, size_t body) { return s.body(body).vehicle().main_propellant_kg(); }
@@ -80,7 +80,8 @@ RefuellingCampaignFlight::RefuellingCampaignFlight(CampaignSources sources,
       mission_(std::move(mission)),
       reference_(config::load_refuelling_reference(sources_.config_dir)),
       tanker_(config::load_refuelling_flight_mission(sources_.config_dir, reference_.tanker.mission)),
-      hls_(config::load_refuelling_flight_mission(sources_.config_dir, reference_.hls.mission)) {
+      hls_(config::load_refuelling_flight_mission(sources_.config_dir, reference_.hls.mission)),
+      settings_(config::load_refuelling_campaign_settings(sources_.config_dir)) {
     state_.status = "Depotstart";
 }
 
@@ -159,7 +160,7 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
         if (!demand_) return end(report.result.reason);
         placed_fill_set_ = true;
         const double fill = report.demand_kg - mission_.placed_shortfall_tankers * report.tanker_base_delivered_kg *
-                                                   (1.0 - booked.transfer_vent_fraction);
+                                                   (1.0 - settings_.transfer_vent_fraction);
         draw_main(s, depot, live.depot_propellant_kg - std::max(0.0, fill));
         return plan_next(s);
     }
@@ -263,7 +264,7 @@ void RefuellingCampaignFlight::watch_flight(FlightSession& s) {
     const auto* after = mark(s, IssMissionLeg::Departure);
     if (after) row.main_at_undock_kg = after->chaser_main_propellant_kg;
     if (before && after) {
-        const double vent = booked.transfer_vent_fraction;
+        const double vent = settings_.transfer_vent_fraction;
         if (row.hls) {
             row.delivered_kg = after->chaser_main_propellant_kg - before->chaser_main_propellant_kg;
             draw_main(s, s.controlled_index(), vent * row.delivered_kg);

@@ -121,6 +121,7 @@ private:
     config::RefuellingCampaignFlownMission mission_;
     config::RefuellingReference reference_;  // reference_flights.toml (the missions)
     config::RefuellingFlightMission tanker_, hls_;
+    config::RefuellingCampaignSettings settings_;  // campaign.toml (the transfer vent)
     CampaignFlightState state_;
     std::optional<CampaignHlsDemand> demand_;
     std::optional<mission::CampaignFlight> next_;

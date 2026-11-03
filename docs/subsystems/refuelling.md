@@ -167,10 +167,15 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
   and undocking ("Abkoppeln nicht möglich: Treibstofftransfer läuft") are refused while one runs; a cleared target, a
   detach or a new scenario stops it. The settling push gives only the impulse of the gas it drew
   (`TransferState::settling_impulse_ns`).
-- Tanker reserve (`mission::tanker_reserve`, `FlightSession::tanker_reserve` / `tanker_transfer_request`): deorbit
-  burn by the rocket equation from the mass after it, with the delta-v of `ship_return_preview` (8-day pass search
-  [E]), x 1.10, + gas + boil-off until the burn 2 t [E] + unusable 1 t [E]; split at the deorbit set's mixture ratio.
-  Reserve from the flown return [D]: gas 3.5 t (departure 0.3 t + entry ~3 t), boil-off 2 t split 56 % CH4.
+- Tanker reserve (`mission::tanker_reserve`, `FlightSession::tanker_reserve` / `tanker_transfer_request`; every input
+  from config and physics, planner plan Task 8): deorbit burn by the rocket equation from the mass after it, with the
+  delta-v of `ship_return_preview` flown with the return's own deorbit settings (the mission's ship return, else the
+  vehicle's `return_mission`; 8-day pass search [E]), x `FlightSession::commit_burn_margin` (the margin the return is
+  held to), + gas `[stage.recovery] return_gas_kg` (3.5 t [D] r5: departure 0.3 t + entry ~3 t) + unusable
+  `[stage.tanks] unusable_propellant_kg.main` (1 t [E]) split at the deorbit set's mixture ratio, + the boil-off of the
+  wait for the burn per propellant [D]: a copy holding the reserve flown ahead to the burn (as `boil_off_shortfall`;
+  none with boil-off off). `TankerReserve::inputs` records them. Docked-pair fixture: wait 6.8 days, LOX 5.26 t + CH4
+  2.18 t boiled, reserve 17.45 t.
 
 ### Settling before an in-orbit ignition (f3)
 Fidelity flag `FlightEnvironment::ignition_settling` (default on, one source `vehicle::ignition_settling_default`;
@@ -271,7 +276,8 @@ Plan files `docs/superpowers/archive/plans/2026-10-20-refuelling-r6-campaign.md`
 `docs/superpowers/archive/plans/2026-10-21-refuelling-f1-phasing-per-window.md`.
 - Calculator `mission::refuelling_campaign` (pure): the depot loses boil-off, drag makeup and attitude gas in daily
   steps; tankers arrive at their windows (pad turnaround `launch_interval_s` 1 day [E], one depot port: arrivals 6 h
-  apart [E]) and add their delivery less 1.5 % vent [E] (pressurant + displaced gas; the vent grosses up as net /
+  apart [E]) and add their delivery less the transfer vent (`config/refuelling/campaign.toml` `[transfer] vent_fraction` 1.5 %
+  [E]: pressurant + displaced gas; the vent grosses up as net /
   (1 - f), `mission::gross_for_net_kg`), clamped to the tank volume; once the fill reaches the demand the HLS window is
   checked - the campaign closes when the depot still holds the demand at the HLS arrival. German reasons: depot volume
   (also: full tanks that cannot bridge the losses until the HLS arrives), no window, a tanker delivering nothing (also
@@ -351,7 +357,7 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   `keep_station` beside the kept depot (`launch_campaign_flight`); after it the chaser is dropped (`keep_only_station`).
   Only the first tanker flies its return, in a blocking side session (`place_vehicle`): caught, 2.95 t main left. A
   failed flight re-plans from the next window. Booked on the depot: attitude gas 20 kg/day [E] (1 kg batches), the
-  transfer vent 1.5 % [E].
+  transfer vent (`campaign.toml`, 1.5 % [E]).
 - Station keeping: `[station_keeping]` below 195 km mean height (J2 energy), nothing in flight and the next arrival
   more than 24 h away -> a Hohmann pair to 200 km [E] from the energy-mean a (first burn 30 min ahead, the second half
   a transfer later, tail-off awaited). At 636 t the belly Raptor's transients exceed 60 % of a ~2 m/s burn, so the

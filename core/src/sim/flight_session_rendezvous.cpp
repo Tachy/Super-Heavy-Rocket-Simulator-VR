@@ -102,6 +102,14 @@ double FlightSession::rendezvous_budget_kg() const {
     return vehicle.rcs_supply_kg();  // the main tanks (engines and cold gas); the headers are the landing reserve
 }
 
+const config::RendezvousReserveConfig* FlightSession::rendezvous_reserve() const {
+    if (bodies_.empty()) return nullptr;
+    for (const auto& s : bodies_[controlled_].body->vehicle().stages()) {
+        if (s.config.rendezvous_reserve) return &*s.config.rendezvous_reserve;
+    }
+    return nullptr;
+}
+
 bool FlightSession::execute_rendezvous_burn(const gnc::BurnNode& node) {
     if (!rendezvous_main_engines()) return execute_burn(node);
     const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
@@ -146,6 +154,10 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
         return refuse("Kein Rendezvous: ein Flug läuft bereits");
     }
     p = with_station_limits(p, station_limits());
+    // the vehicle's own reserve (planner plan Task 8)
+    const auto* reserve = rendezvous_reserve();
+    if (!reserve) return refuse("Kein Rendezvous: Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
+    p.reserve_kg = reserve->phasing_kg;
     // Crew Dragon flies the phasing with its nose cone open (it opens after the separation): only then its Dracos turn
     // it without a push - closed, a turn to a burn pushed it up to 0.28 m/s (i3: Waypoint 0 missed by 130-390 m).
     auto& vehicle = bodies_[controlled_].body->vehicle();
