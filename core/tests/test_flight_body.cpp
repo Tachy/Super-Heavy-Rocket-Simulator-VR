@@ -289,7 +289,13 @@ TEST_CASE("A caught body co-rotates with the Earth", "[vehicle]") {
 TEST_CASE("The Block 3 booster has a divert pair on the middle ring", "[vehicle]") {
     // Landing sequence 13 -> 5 -> 3 (V3 baseline): the five divert engines are the three centre engines and a pair
     // of the middle ring. Engine groups may place their engines at explicit ring angles.
-    const Vehicle v(config::load_vehicle(config_dir, "starship_block3"), config_dir);
+    const auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    const Vehicle v(cfg, config_dir);
+    double middle_ring_m = 0.0;
+    for (const auto& g : cfg.stages.front().engine_groups) {
+        if (g.id == "middle") middle_ring_m = g.ring_radius_m;
+    }
+    REQUIRE(middle_ring_m > 0.0);
     const auto& engines = v.stages().front().engines;
     REQUIRE(engines.size() == 33);
     int center = 0, divert = 0, middle = 0, outer = 0;
@@ -310,7 +316,7 @@ TEST_CASE("The Block 3 booster has a divert pair on the middle ring", "[vehicle]
     }
     for (const auto& e : engines) {
         if (e.group_id != "booster/divert") continue;
-        CHECK(std::hypot(e.gimbal_point_m.y, e.gimbal_point_m.z) == Catch::Approx(2.6));
+        CHECK(std::hypot(e.gimbal_point_m.y, e.gimbal_point_m.z) == Catch::Approx(middle_ring_m));  // on the middle ring
         CHECK(std::abs(std::sin(e.ring_angle_rad)) < 1e-12);  // at 0 and 180 deg: a symmetric pair
     }
 }

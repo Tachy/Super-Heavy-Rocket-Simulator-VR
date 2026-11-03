@@ -34,7 +34,8 @@ double tank_density_kg_m3(const config::TankConfig& tank, const config::Propella
 }
 
 SettledColumn settled_column(double mass_kg, double density_kg_m3, double radius_m, double base_station_m) {
-    const double h = mass_kg / (density_kg_m3 * constants::pi * radius_m * radius_m);
+    // Grouped as density * area with area = pi r^2, bit-equal to the flight dynamics' pi * 0.25 * d^2.
+    const double h = mass_kg / (density_kg_m3 * (constants::pi * radius_m * radius_m));
     return {base_station_m + 0.5 * h, mass_kg * (0.25 * radius_m * radius_m + h * h / 12.0)};
 }
 
