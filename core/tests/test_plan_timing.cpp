@@ -29,7 +29,12 @@ double timed_start(const char* mission_id) {
 }  // namespace
 
 namespace {
-// The plans of the scan before l6 Task 1 (the probe above, Ledger Task 1).
+// The plans of the fast planning, re-measured 2026-11-03 (planner plan Task 11) with the "plan time of the lunar mission
+// starts" probe above after the ship's dry mass 177 t (entry mass 290 -> 212 t: higher entry speed, less braking), the
+// entry limits from the vehicle config and the halved gate-aim shift. The previous values (l6 Task 1 scan): LLO 883.185 /
+// 1032.647 / 848009633.349 / 9695.247 / -0.084746628, NRHO 575.758 / 1007.453 / 848277848.768 / 9695.014 / -0.084750394,
+// aircatch 864.312 / 927.338 / 848016057.211 / 9790.176 / -0.085253983. Explained in
+// docs/subsystems/lunar.md (Plan time).
 struct ReferencePlan {
     const char* mission_id;
     double tei_mps, braking_mps, interface_tdb_s, interface_speed_mps, interface_angle_rad;
@@ -37,11 +42,11 @@ struct ReferencePlan {
 };
 constexpr double kPlanTimeLimitS = 10.0;      // user 2026-10-18
 constexpr double kNrhoPlanTimeLimitS = 20.0;  // [E] two burns, 8 departure options per perilune
-constexpr ReferencePlan kLlo{"ship_lunar_return_llo", 883.185, 1032.647, 848009633.349, 9695.247, -0.084746628,
+constexpr ReferencePlan kLlo{"ship_lunar_return_llo", 886.740, 845.060, 848008563.238, 9859.380, -0.085372018,
                              kPlanTimeLimitS};
-constexpr ReferencePlan kNrho{"ship_lunar_return_nrho", 575.758, 1007.453, 848277848.768, 9695.014, -0.084750394,
+constexpr ReferencePlan kNrho{"ship_lunar_return_nrho", 568.023, 816.574, 848276864.318, 9859.123, -0.085370411,
                               kNrhoPlanTimeLimitS};
-constexpr ReferencePlan kAircatch{"ship_lunar_aircatch_llo", 864.312, 927.338, 848016057.211, 9790.176, -0.085253983,
+constexpr ReferencePlan kAircatch{"ship_lunar_aircatch_llo", 864.842, 688.077, 848015773.331, 9995.333, -0.085379467,
                                   kPlanTimeLimitS};
 
 // The fast planning (interpolated ephemeris, coarse Lambert bracket) finds the same plans (l6 Task 1, user 2026-10-18:

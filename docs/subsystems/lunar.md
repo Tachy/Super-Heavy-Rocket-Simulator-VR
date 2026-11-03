@@ -123,6 +123,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   (`SessionRunner::take_error`). `[plan_speed]` checks wall time and runs as one `RUN_SERIAL` CTest test. Plan time:
   whole mission start LLO ~7 s, NRHO ~8 s, aircatch ~4.5 s (`InterpolatedEphemeris` / `InterpolatedOrientation`;
   `solve_lambert` bracket scan 100 samples first, 4,000 only as fallback).
+  `[plan_speed]` reference plans re-measured 2026-11-03 (`test_plan_timing.cpp` lists old and new): entry speed 9695 -> 9859 m/s,
+  braking 1033 -> 845 m/s (LLO) because the ship's dry mass 177 t (was 255 t) lowers the entry mass 290 -> 212 t and with it the
+  ballistic coefficient, so the corridor search allows a higher entry speed and the braking burn shrinks (LLO 883 -> 887, NRHO
+  576 -> 568, aircatch 864 -> 865 m/s TEI).
 
 ## Standing decisions
 - Plan like mission planners: find the departure window, no epoch hopping (user 2026-10-18); re-plan from flight data.
