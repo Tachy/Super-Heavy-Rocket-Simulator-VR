@@ -213,8 +213,8 @@ TEST_CASE("The first deck plan of the 47.7 m Falcon 9 stage converges on its fre
     // the plan on the propellant floor. Replays with 0.3 and 1 end at 31.4 t (Task 3b report).
     auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/falcon9_asds_first_plan_47m.txt");
     REQUIRE(!r.warm_start);
-    const auto stage = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front();
-    const auto own = booster_return_parameters(stage.id, stage.return_profile_for(true)).scvx.settings;
+    const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    const auto own = booster_return_parameters(f9, f9.stages.front(), true).scvx.settings;
     CHECK(own.fresh_trust_region_weight == 0.3);  // the flown pair, both applied below (review of Task 3, minor 3)
     CHECK(own.fresh_attitude_violation_weight == 100.0);
     r.settings.fresh_trust_region_weight = own.fresh_trust_region_weight;
@@ -252,8 +252,8 @@ TEST_CASE("The tilt penalty on fresh plans keeps the refused first deck plans in
     CHECK(excess(seed109, 0.3, 0.0) > limit);
     CHECK(excess(seed109, 0.3, 100.0) <= limit);
     // Both at the vehicle's own values
-    const auto stage = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front();
-    const auto own = booster_return_parameters(stage.id, stage.return_profile_for(true)).scvx.settings;
+    const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    const auto own = booster_return_parameters(f9, f9.stages.front(), true).scvx.settings;
     CHECK(own.fresh_trust_region_weight == 0.3);
     CHECK(own.fresh_attitude_violation_weight == 100.0);
     CHECK(excess(seed105, own.fresh_trust_region_weight, own.fresh_attitude_violation_weight) <= limit);

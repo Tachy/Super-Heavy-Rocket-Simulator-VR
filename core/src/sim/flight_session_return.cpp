@@ -402,9 +402,9 @@ void FlightSession::place_returning_booster(const config::VehicleConfig& config,
     flying.return_guidance->set_realtime(realtime_planning_);
 }
 
-gnc::BoosterReturnParameters FlightSession::return_parameters(const config::StageConfig& stage) const {
+gnc::BoosterReturnParameters FlightSession::return_parameters(const vehicle::Vehicle& vehicle) const {
     const bool drone_ship = landing_zone_ && landing_zone_->deck;
-    return gnc::booster_return_parameters(stage.id, stage.return_profile_for(drone_ship),
+    return gnc::booster_return_parameters(vehicle.source_config(), vehicle.stages().front().config, drone_ship,
                                           booster_return_.value_or(gnc::BoosterReturnParameters{}));
 }
 

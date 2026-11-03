@@ -18,8 +18,16 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 - Booster return (`gnc/booster_return`, `FlightSession::set_booster_return(true)`): flip, Lambert boostback with
   drag-aware aim-point shooting, coast (RCS impact trim above ~2 kPa, below it grid-fin steering with the angle of
   attack found by bisection on the aero model), landing burn (explicit fallback 13 -> 3 engines; SCvx 13 -> 5 -> 3):
-  1-D burn simulation for ignition, ZEM/ZEV vertical to the gate, approach profile sink = 1 m/s + height / 3 s,
-  braking-profile divert. Own faster attitude controller with grid fins; rate command limited to what the available
+  1-D burn simulation for ignition, ZEM/ZEV vertical to the gate, approach profile sink = 1 m/s + height / tau,
+  braking-profile divert. Parameters from the stage's config (`gnc::booster_return_parameters(vehicle, stage,
+  drone_ship)`, planner plan Task 5; struct defaults are test fixtures): return profile keys (required on a returning
+  first stage, `config/README.md`), grid fins' `max_return_alpha_deg` (coast steering, 8 deg [E]), legs'
+  `deploy_margin_s` / `max_touchdown_tilt_deg` or catch pins' `max_catch_tilt_deg` (4 deg [E], also the SCvx plans'
+  terminal tilt), and [D] the catch approach tau = the final set's throttle range time (`gnc::throttle_range_time_s`,
+  Raptor (1 - 0.3) / 0.5 = 1.4 s, was 3 s [E]; explicit law and SCvx plans; a pad landing flies none). MECO planning
+  derives the flip (`gnc::booster_meco_to_boostback_s`, `ascent-staging.md`). A catch-site abort cuts the engines 0.5 s
+  after the abort plan's end at the water, as the pad landing does (the final set at minimum throttle lifts the light
+  stage: it hovered there until dry). Own faster attitude controller with grid fins; rate command limited to what the available
   angular acceleration (gimbal or RCS, plus fins) can stop. Files: `booster_return.cpp`, `_prediction.cpp` (impact /
   landing-burn / MECO predictions, drag estimate), `_burns.cpp`, private `booster_return_detail.hpp`.
 - SCvx landing planner (`gnc/descent_*`): `descent_phases` = 3 engine phases (13 -> 5 -> 3; 10 nodes per phase,
@@ -29,10 +37,16 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   sensitivities), `descent_problem` (convex subproblem in scaled deviations: thrust/gimbal/tilt/rate/glide cones, catch
   or sea-abort goal with tower keep-out; shared phase node has the next set's bounds, engine switches have sink
   windows, the last one is calm), `descent_planner` (`plan_descent`: penalised trust region, warm start, converged when
-  virtual control is small, step or final mass settled, nonlinear interval defects < 5 cm). A fresh plan that does not
+  virtual control is small, step or final mass settled, nonlinear interval defects < 5 cm). A fresh plan from the
+  initial guess starts twice (`gnc::SwitchGuess`, planner plan Task 5): the phase ends from the state (as late as the
+  later sets can finish in their minimum phase times, not below what the set cannot remove within the height left,
+  within the window) and in the windows' middle; it keeps the converged one with the most mass left (neither wins
+  everywhere: the state start ~1 t heavier on booster sea aborts across a box, the middle 0.2-0.9 t on Falcon 9's
+  recorded deck plans; the ship fixture `ship_return_dispersed1` needs both starts in the escalation). Fixed kinematic
+  guesses (HLS) start once. A fresh plan that does not
   converge while its virtual control stays below `stall_virtual_control` (in reach, SCvx cycling) is solved again with
   the soft tilt / rate limits' penalty raised 10x, 100x, 1000x (`attitude_penalty_growth` 10, `attitude_penalty_raises`
-  3 [E]); the converged one with the most mass left is the plan (exact penalty: too low a weight lets the subproblem
+  3 [E]; both starts at each weight); the converged one with the most mass left is the plan (exact penalty: too low a weight lets the subproblem
   lean beyond the limits into a cycle; ship first catch plans of lunar seed 15 / ship return case 1, fixtures
   `ship_*_first_catch_plan.txt`, Task 1c 2026-11-03). Converging fresh plans and re-plans are unchanged. Uses `optim::SocpSolver`.
   Nominal Block 3 case 6 iterations ~0.5 s fresh; re-plans 1-4 iterations < 0.5 s. In flight: `gnc/descent_snapshot`

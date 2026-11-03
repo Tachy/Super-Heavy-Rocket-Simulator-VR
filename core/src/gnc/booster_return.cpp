@@ -2,10 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/vehicle_capability.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/lambert.hpp"
+#include "starsim/vehicle/stage_inertia.hpp"
 
 #include "booster_return_detail.hpp"
 
@@ -56,8 +60,10 @@ const char* to_string(ReturnPhase phase) {
     return "";
 }
 
-BoosterReturnParameters booster_return_parameters(const std::string& stage_id, const config::ReturnProfile& profile,
-                                                  BoosterReturnParameters p) {
+BoosterReturnParameters booster_return_parameters(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                                                  bool drone_ship, BoosterReturnParameters p) {
+    const auto& profile = stage.return_profile_for(drone_ship);
+    const std::string& stage_id = stage.id;
     p.boostback = profile.boostback;
     const auto ids = [&](const std::vector<std::string>& local) {
         std::vector<std::string> out;
@@ -84,7 +90,9 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         auto& switches = p.scvx.settings.limits.switches;
         for (size_t i = 0; i < 2; ++i) {
             const auto [low, high] = profile.landing_switch_sink_mps[i];
-            switches[i] = {0.0, 0.0, low, high};
+            const double tilt = profile.landing_switch_max_tilt_rad.size() == 2 ? profile.landing_switch_max_tilt_rad[i] : 0.0;
+            const double rate = profile.landing_switch_max_rate_radps.size() == 2 ? profile.landing_switch_max_rate_radps[i] : 0.0;
+            switches[i] = {tilt, rate, low, high};
         }
         // The burn prediction switches in the middle of each window.
         p.scvx.divert_speed_mps = 0.5 * (switches[0].min_sink_mps + switches[0].max_sink_mps);
@@ -98,7 +106,6 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.scvx.settings.fresh_attitude_violation_weight = profile.landing_fresh_attitude_violation_weight;
     }
     if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
-    if (profile.flip_duration_s > 0.0) p.flip_duration_s = profile.flip_duration_s;
     if (profile.flip_hold_s > 0.0) p.flip_hold_s = profile.flip_hold_s;
     if (profile.flip_ignition_off_velocity_rad > 0.0) {
         p.flip_ignition_off_velocity_rad = profile.flip_ignition_off_velocity_rad;
@@ -117,11 +124,41 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.entry_delta_v_mps = profile.entry_burn_delta_v_mps;
         if (profile.entry_burn_throttle > 0.0) p.entry_throttle = profile.entry_burn_throttle;
     }
+    if (stage.grid_fins.max_return_alpha_rad > 0.0) p.aero_steering_max_alpha_rad = stage.grid_fins.max_return_alpha_rad;
+    if (!stage.landing_legs.azimuths_rad.empty() && stage.landing_legs.max_touchdown_tilt_rad > 0.0) {
+        p.touchdown_tilt_rad = stage.landing_legs.max_touchdown_tilt_rad;
+        p.leg_deploy_margin_s = stage.landing_legs.deploy_margin_s;
+    } else if (!stage.catch_pins.azimuths_rad.empty() && stage.catch_pins.max_catch_tilt_rad > 0.0) {
+        p.touchdown_tilt_rad = stage.catch_pins.max_catch_tilt_rad;
+    }
+    p.scvx.settings.limits.terminal_tilt_rad = p.touchdown_tilt_rad;
+    // Catch approach [D]: the time the final set runs its throttle range (within it the thrust follows the approach's
+    // braking at the rate the engines can change it). A pad landing flies none (BoosterReturnGuidance::start_landing).
+    if (const double tau = throttle_range_time_s(vehicle, stage, p.landing_groups); tau > 0.0) {
+        p.approach_time_constant_s = tau;
+        p.scvx.settings.limits.approach_time_constant_s = tau;
+    }
     return p;
 }
 
-BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters base) {
-    return booster_return_parameters(stage.id, stage.return_profile, std::move(base));
+double booster_flip_acceleration_radps2(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                                        const BoosterReturnParameters& parameters, double propellant_kg) {
+    const auto mass = vehicle::settled_stage_mass_properties(vehicle, stage, propellant_kg);
+    if (parameters.flip_groups.empty()) {
+        return rcs_pitch_acceleration_radps2(stage, mass.pitch_inertia_kg_m2, mass.cg_station_m);
+    }
+    // At MECO height the air pressure is negligible: vacuum thrust.
+    const auto set = engine_set_thrust(vehicle, stage, parameters.flip_groups, 0.0, mass.cg_station_m);
+    return max_pitch_acceleration_radps2(set, set.throttle_min, mass.pitch_inertia_kg_m2);
+}
+
+double booster_flip_s(const BoosterReturnParameters& parameters, double accel_radps2, double angle_rad) {
+    if (parameters.flip_ignition_off_velocity_rad > 0.0) {
+        return parameters.flip_hold_s +
+               free_turn_time_s(parameters.flip_ignition_off_velocity_rad, accel_radps2, parameters.flip_max_rate_radps);
+    }
+    return parameters.flip_hold_s +
+           turn_time_within_s(angle_rad, parameters.flip_tolerance_rad, accel_radps2, parameters.flip_max_rate_radps);
 }
 
 BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnParameters parameters)
@@ -222,6 +259,10 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
 
         const double pointing = std::acos(std::clamp(dot(body_axis, cmd.axis_gcrf), -1.0, 1.0));
         if (phase_ == ReturnPhase::Flip) {
+            if (tick_counter_ == 1 && std::getenv("STARSIM_DEBUG_BOOSTER_FLIP")) {
+                std::fprintf(stderr, "[booster-flip] separation: axis %.1f deg off the boostback direction\n",
+                             pointing / constants::deg_to_rad);
+            }
             // Turn with the flip engines idling (gimbal authority; none: on the RCS), then go to full boostback thrust.
             cmd.run_groups = parameters_.flip_groups;
             cmd.throttle = 0.0;  // limited to the minimum throttle by the engines
@@ -245,6 +286,12 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
             if (!holding && ignite) {
                 phase_ = ReturnPhase::Boostback;
                 boostback_lit_ = epoch;
+                if (std::getenv("STARSIM_DEBUG_BOOSTER_FLIP")) {  // diagnostics: the flown flip against the MECO plan's
+                    std::fprintf(stderr, "[booster-flip] separation -> boostback ignition %.2f s (planned %.2f s), "
+                                         "pointing %.1f deg, %.0f t\n",
+                                 since_s, parameters_.flip_duration_s, pointing / constants::deg_to_rad,
+                                 mass.mass_kg / 1e3);
+                }
             }
         } else {
             cmd.run_groups = parameters_.boostback_groups;
@@ -303,9 +350,9 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
                     auto lateral = [&](double alpha) {
                         return lateral_acceleration(body, speed, air_now, alpha, fin_station);
                     };
-                    const double at_max = lateral(aero_steering_max_alpha_rad);
+                    const double at_max = lateral(parameters_.aero_steering_max_alpha_rad);
                     if (at_max != 0.0 && impact_miss_m_ > trim_deadband_m) {
-                        double low = 0.0, high = aero_steering_max_alpha_rad;
+                        double low = 0.0, high = parameters_.aero_steering_max_alpha_rad;
                         if (std::abs(at_max) > norm(required)) {
                             for (int i = 0; i < 20; ++i) {
                                 const double mid = 0.5 * (low + high);
@@ -426,11 +473,18 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
                                      site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
                 const double height = dot(r_fixed - r_catch, site_up);
                 over = !c.abort && (catch_contact_ || height < -catch_missed_height_m);
+                if (c.abort) {
+                    // Ditching (as on the pad below): the engines stop shortly after the abort plan's end at the water.
+                    // The final set at minimum throttle lifts the light stage (Super Heavy: 3 x 30 % of 280 tf against
+                    // ~215 t), so it cannot come down the last metres a plan ends high on - it would hover until dry.
+                    if (c.time_to_go_s > 0.0 || !plan_end_) plan_end_ = epoch + c.time_to_go_s;
+                    over = epoch - *plan_end_ > pad_cutoff_after_plan_s;
+                }
             } else {
                 // Pad: the legs go out before the touchdown; the engines stop on leg contact, or shortly after the plan's
                 // end (a plan ending a little high: the stage drops onto its legs).
                 const double deploy_s = body.vehicle().stages().front().config.landing_legs.deploy_time_s;
-                if (c.time_to_go_s <= deploy_s + leg_deploy_margin_s) legs_deployed_ = true;
+                if (c.time_to_go_s <= deploy_s + parameters_.leg_deploy_margin_s) legs_deployed_ = true;
                 if (c.time_to_go_s > 0.0 || !plan_end_) plan_end_ = epoch + c.time_to_go_s;
                 over = leg_contact_ || epoch - *plan_end_ > pad_cutoff_after_plan_s;
             }

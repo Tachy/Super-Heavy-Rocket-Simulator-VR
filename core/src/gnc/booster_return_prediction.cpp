@@ -279,6 +279,39 @@ std::optional<double> BoosterReturnGuidance::boostback_delta_v_mps(const math::S
     return (1.0 + parameters.boostback_loss_fraction) * norm(arc->departure_velocity_mps - after_flip.velocity_mps);
 }
 
+double booster_meco_to_boostback_s(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
+                                   const frames::BodyOrientation& earth, time::Epoch epoch, const LandingSite& site,
+                                   const BoosterReturnParameters& parameters, double separation_after_meco_s) {
+    const auto& booster = stack.stages().front();
+    const double propellant_kg =
+        booster.propellant_kg(config::TankContents::Oxidizer) + booster.propellant_kg(config::TankContents::Fuel);
+    const double accel = booster_flip_acceleration_radps2(stack.source_config(), booster.config, parameters, propellant_kg);
+    if (parameters.flip_ignition_off_velocity_rad > 0.0) {  // the free turn's gate is off the velocity: a fixed angle
+        return separation_after_meco_s + booster_flip_s(parameters, accel, 0.0);
+    }
+    // The stack's axis at the separation: along the air-relative velocity (gravity turn).
+    const auto at_separation = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, separation_after_meco_s);
+    const Vec3 omega = vehicle::earth_rotation_vector(earth.fixed_to_gcrf(epoch + separation_after_meco_s));
+    const Vec3 axis = math::normalized(at_separation.velocity_mps - cross(omega, at_separation.position_m));
+    const Vec3 site_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    // The boostback direction after the flip depends on the flip's own coast: a few fixed-point steps from a half turn.
+    double flip_s = booster_flip_s(parameters, accel, constants::pi);
+    for (int i = 0; i < 4; ++i) {
+        const double meco_to_ignition_s = separation_after_meco_s + flip_s;
+        const auto after_flip = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, meco_to_ignition_s);
+        const double time_left = std::max(parameters.flight_time_s - meco_to_ignition_s, 30.0);
+        const Vec3 aim_gcrf = earth.fixed_to_gcrf(epoch + meco_to_ignition_s + time_left).position(site_fixed);
+        const Vec3 normal = math::normalized(cross(after_flip.position_m, aim_gcrf));
+        const auto arc =
+            orbit::solve_lambert(after_flip.position_m, aim_gcrf, time_left, constants::earth_gm_m3ps2, normal);
+        if (!arc) break;
+        const Vec3 v_go = arc->departure_velocity_mps - after_flip.velocity_mps;
+        const double angle = std::acos(std::clamp(dot(axis, math::normalized(v_go)), -1.0, 1.0));
+        flip_s = booster_flip_s(parameters, accel, angle);
+    }
+    return separation_after_meco_s + flip_s;
+}
+
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict(const vehicle::FlightBody& body,
                                                              const vehicle::FlightEnvironment& env, time::Epoch epoch,
                                                              const Vec3* velocity_gcrf_mps) const {

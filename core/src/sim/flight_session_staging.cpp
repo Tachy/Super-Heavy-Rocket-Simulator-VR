@@ -163,7 +163,7 @@ size_t FlightSession::separate_lowest_stage(size_t index, double dv_mps) {
         lower.body->set_ground_height(landing.height_m);
         lower.body->set_accelerometer(true);  // the return guidance estimates the drag online
         lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
-            landing, return_parameters(lower.body->vehicle().stages().front().config));
+            landing, return_parameters(lower.body->vehicle()));
         lower.return_guidance->set_realtime(realtime_planning_);
     }
     const bool was_controlled = index == controlled_;

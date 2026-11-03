@@ -219,6 +219,9 @@ struct GridFinConfig {
     double max_deflection_rad = 0.0;
     double rate_rad_s = 0.0;
     std::string table;                 // normal- and axial-force table, path relative to config/
+    // A returning booster's coast steering: the largest angle of attack the fins hold to move the impact point
+    // (max_return_alpha_deg; fin trim authority, heating). Required for a stage with fins and a return profile.
+    double max_return_alpha_rad = 0.0;
 };
 
 // Catch pins of a stage: hardpoints the tower arms catch (the returning booster).
@@ -230,6 +233,9 @@ struct CatchPinConfig {
     // Body azimuth (from +y towards +z) that faces away from the tower when caught; none: either of the two rolls
     // that lay the pins across the arms, whichever is nearer.
     std::optional<double> away_from_tower_azimuth_rad;
+    // A returning booster's landing burn: the thrust tilt from the vertical at the catch (max_catch_tilt_deg; the hull
+    // passing the arms). Required for a returning booster with pins.
+    double max_catch_tilt_rad = 0.0;
 };
 
 // Landing legs of a stage that lands on the ground or a deck (Falcon 9). Deployed geometry and the crush-core contact
@@ -245,6 +251,11 @@ struct LandingLegConfig {
     double damping_n_s_m = 0.0;
     double friction = 0.0;             // Coulomb, foot on the surface
     bool fixed = false;                // always deployed (HLS): no deployment, deploy_time_s unused
+    // A returning booster's landing burn (required for recovery method "leg_landing"): the legs are commanded out
+    // deploy_time_s + deploy_margin_s before the planned touchdown, and the thrust tilt from the vertical at the
+    // touchdown is at most max_touchdown_tilt_rad (structural limit of the landing).
+    double deploy_margin_s = 0.0;
+    double max_touchdown_tilt_rad = 0.0;
 };
 
 // Heat shield and structure of a vehicle that enters the atmosphere (the ship). Judged while the stage flies alone.
@@ -276,8 +287,10 @@ struct ParachuteConfig {
     double max_deploy_dynamic_pressure_pa = 0.0;  // the deployment waits above it; 0 = no check
 };
 
-// Return of a first stage (gnc::booster_return_parameters; empty / 0: the guidance's defaults, which are Super Heavy's).
-// Engine groups are ids of the stage.
+// Return of a first stage (gnc::booster_return_parameters). Engine groups are ids of the stage. A returning booster
+// ("tower_catch" without an entry table, "leg_landing") must set landing_engine_phases, landing_phase_throttles,
+// landing_switch_sink_mps and, with a boostback, return_flight_time_s and boostback_loss_fraction (load fails
+// otherwise); the other keys are optional (0 / empty: not used).
 struct ReturnProfile {
     bool boostback = true;  // false: no flip and no boostback, the stage coasts on its ascent arc (drone ship)
     std::vector<std::string> boostback_engine_groups;
@@ -286,11 +299,13 @@ struct ReturnProfile {
     std::vector<double> landing_phase_throttles;                  // design throttle per set (ignition timing)
     std::vector<double> landing_phase_max_tilt_rad;               // planned thrust tilt limit per set (gimbal authority)
     std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
+    // Per engine switch (optional, 2 values; 0: no limit): the tilt and the pitch/yaw rate at the switch.
+    std::vector<double> landing_switch_max_tilt_rad;
+    std::vector<double> landing_switch_max_rate_radps;
     double landing_gimbal_fraction = 0.0;  // planned share of the gimbal deflection (0: DescentLimits default)
     double landing_fresh_trust_region_weight = 0.0;  // SCvx trust-region weight of fresh plans (0: DescentWeights default)
     double landing_fresh_attitude_violation_weight = 0.0;  // SCvx soft tilt / rate limit penalty of fresh plans (0: same)
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
-    double flip_duration_s = 0.0;        // MECO planning: separation -> boostback ignition (0: the guidance default)
     double flip_hold_s = 0.0;            // separation -> start of the turn: the stage holds its attitude (0: turns at once)
     double flip_ignition_off_velocity_rad = 0.0;  // free turn over the ground: boostback lights this far off the velocity (0: pointing gate)
     double flip_max_rate_radps = 0.0;    // free turn: no more RCS torque above this rate
@@ -298,7 +313,7 @@ struct ReturnProfile {
     std::vector<std::string> boostback_ignition_engine_groups;  // lit first (empty: all of the boostback set at once)
     double boostback_buildup_s = 0.0;    // ignition -> the rest of the boostback set
     double boostback_full_thrust_pointing_rad = 0.0;  // ... and only within this pointing error
-    double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
+    double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: unset)
     double rcs_propellant_kg = -1.0;        // MECO planning: main-tank RCS gas spent before landing-burn ignition (< 0: default)
     double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
     double entry_burn_delta_v_mps = 0.0;

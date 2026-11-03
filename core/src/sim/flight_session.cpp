@@ -301,11 +301,20 @@ void FlightSession::run_autopilot() {
                 const auto& s = body.state();
                 // the flip starts at the separation: the staging sequence's MECO -> separation interval goes with it
                 // (hot staging: the run-on engines burn at minimum throttle through it, as the flip engines do)
-                auto parameters = return_parameters(booster.config);
-                parameters.flip_duration_s += separation_after_meco_s(body.vehicle());
+                auto parameters = return_parameters(body.vehicle());
+                const auto site = return_site(body.vehicle());
+                if (parameters.boostback) {
+                    parameters.flip_duration_s = gnc::booster_meco_to_boostback_s(
+                        body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_, site, parameters,
+                        separation_after_meco_s(body.vehicle()));
+                }
                 reserve_kg = gnc::BoosterReturnGuidance::meco_propellant_kg(
-                    body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_,
-                    return_site(body.vehicle()), parameters, booster.config.landing_propellant_kg);
+                    body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_, site, parameters,
+                    booster.config.landing_propellant_kg);
+                if (propellant <= reserve_kg && std::getenv("STARSIM_DEBUG_BOOSTER_FLIP")) {
+                    std::fprintf(stderr, "[booster-flip] MECO plan: MECO -> boostback ignition %.2f s (separation %.2f s)\n",
+                                 parameters.flip_duration_s, separation_after_meco_s(body.vehicle()));
+                }
             }
             booster_cutoff_propellant_kg_ = reserve_kg;
             if (propellant <= reserve_kg) {

@@ -200,15 +200,7 @@ FlipPush ship_brake_after_flip(const FlipModel& m, double speed_mps) {
 
 double ship_approach_time_constant_s(const config::VehicleConfig& vehicle, const config::StageConfig& ship,
                                      const std::vector<std::string>& groups) {
-    double tau = 0.0;
-    for (const auto& id : groups) {
-        for (const auto& g : ship.engine_groups) {
-            if (g.id != id) continue;
-            const auto& e = vehicle.engine(g.engine_id);
-            if (e.throttle_rate_per_s > 0.0) tau = std::max(tau, (e.throttle_max - e.throttle_min) / e.throttle_rate_per_s);
-        }
-    }
-    return tau;
+    return throttle_range_time_s(vehicle, ship, groups);
 }
 
 ShipLandingParameters ship_landing_parameters(const config::VehicleConfig& vehicle, const config::StageConfig& ship) {
@@ -257,8 +249,6 @@ ShipLandingParameters ship_landing_parameters(const config::VehicleConfig& vehic
         shutdown_s(vehicle, ship, r.landing_engine_phases[0], r.landing_engine_phases[1]), constants::standard_gravity_mps2);
     l.switches = {{{0.0, 0.0, window.min_sink_mps, no_sink_limit_mps}, {0.0, 0.0, 0.0, no_sink_limit_mps}}};
     p.switch_window_from_gate = true;
-    // The window is wide (no fitted operating point in its middle): the first plan's guess switches from the state.
-    l.late_switch_guess = true;
     // Catch approach: the time the landing pair runs its throttle range.
     l.approach_time_constant_s = ship_approach_time_constant_s(vehicle, ship, r.landing_engine_phases.back());
 

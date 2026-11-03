@@ -17,12 +17,16 @@ enum class ReturnPhase { Flip, Boostback, Coast, EntryBurn, LandingBurn, Landed 
 
 const char* to_string(ReturnPhase phase);
 
+// Production builds these from the vehicle config (booster_return_parameters); the member defaults are unit-test
+// fixtures only.
 struct BoosterReturnParameters {
     // false (drone ship): no flip and no boostback - the stage coasts on its ascent arc from separation, turning engines
     // first on its RCS, and the entry burn steers the impact point.
     bool boostback = true;
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)
-    double flip_duration_s = 10.0; // [E] separation to boostback ignition (MECO planning; our flip takes ~10 s)
+    // MECO planning: MECO -> boostback ignition, set by the MECO planner from the stage's state and turn authority
+    // (booster_meco_to_boostback_s); not used by the guidance in flight.
+    double flip_duration_s = 10.0;
     // Separation -> start of the turn: the stage holds its attitude and no RCS force, until the second stage's nozzle has
     // left the interstage (with or without a boostback). 0: it turns at once (Super Heavy, hot staging).
     double flip_hold_s = 0.0;
@@ -35,8 +39,8 @@ struct BoosterReturnParameters {
     std::vector<std::string> boostback_ignition_groups;  // lit first (empty: all of boostback_groups at once)
     double boostback_buildup_s = 0.0;      // ignition -> all of boostback_groups
     double boostback_full_thrust_pointing_rad = 0.0;  // ... and only within this pointing error
-    // [D] MECO planning: boostback delta-v beyond the two-body Lambert arc - the drag-aware aim point lies ~60 m/s
-    // further, finite burn and tail-off ~70 m/s more (identified on our full block 3 return: 1616 vs 1488 m/s).
+    // MECO planning: boostback delta-v beyond the two-body Lambert arc (drag shift of the aim point, finite burn and
+    // tail-off; the stage's boostback_loss_fraction).
     double boostback_loss_fraction = 0.086;
     // MECO planning: main-tank propellant the RCS (ullage gas thrusters) spends from MECO to landing-burn ignition (0 for
     // a stage with its own RCS supply).
@@ -73,18 +77,47 @@ struct BoosterReturnParameters {
     double max_tilt_rad = 10.0 * 3.14159265358979 / 180.0;         // thrust from the vertical, centre engines
     double max_tilt_ignition_rad = 25.0 * 3.14159265358979 / 180.0; // with the inner engines (more gimbal authority)
     double flip_tolerance_rad = 15.0 * 3.14159265358979 / 180.0;
+    // Coast: the largest angle of attack the grid fins hold to move the impact point ([stage.grid_fins]
+    // max_return_alpha_deg).
+    double aero_steering_max_alpha_rad = 8.0 * 3.14159265358979 / 180.0;
+    // Explicit laws: the thrust tilt limit at the touchdown / catch, tapering from max_tilt_rad over the last metres
+    // ([stage.landing_legs] max_touchdown_tilt_deg, [stage.catch_pins] max_catch_tilt_deg); the SCvx plans' terminal
+    // tilt is the same value.
+    double touchdown_tilt_rad = 4.0 * 3.14159265358979 / 180.0;
+    // Legs commanded out this long before the planned touchdown beyond their deploy time ([stage.landing_legs]).
+    double leg_deploy_margin_s = 5.0;
+    // Catch approach on the final set (explicit law and SCvx plans): sink -> touchdown speed + height / this, the time
+    // the final set's engines run their throttle range [D] (gnc::throttle_range_time_s).
+    double approach_time_constant_s = 3.0;
     // Landing burn on SCvx plans (catch sites only); the explicit laws above remain the fallback when the first
     // plan fails, and the guidance of sites without a tower.
     bool scvx_landing = true;
     ScvxLandingParameters scvx;
 };
 
-// Return parameters of a first stage: `base` with every key of a return profile that is set (engine sets, return flight
-// time, entry burn, landing-burn profile; engine group ids get the stage prefix `stage_id`).
-BoosterReturnParameters booster_return_parameters(const std::string& stage_id, const config::ReturnProfile& profile,
-                                                  BoosterReturnParameters base = {});
-// The same with the stage's [stage.recovery] profile (launch / landing site, catch tower).
-BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters base = {});
+// Return parameters of a first stage from its config: `base` with the stage's return profile ([stage.recovery], or
+// [stage.recovery.drone_ship] for `drone_ship`; engine group ids get the stage prefix), the grid fins' steering limit,
+// the legs' or catch pins' touchdown limits and the derived catch approach time. `vehicle`: the engines' data.
+BoosterReturnParameters booster_return_parameters(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                                                  bool drone_ship = false, BoosterReturnParameters base = {});
+
+// The flip's turn authority [D]: the pitch acceleration of the flip engines' full gimbal at their minimum throttle in
+// vacuum, or, without flip engines, of the stage's RCS; the stage alone with `propellant_kg` of main propellant, settled
+// aft (gnc::stage_pitch_inertia_kg_m2).
+double booster_flip_acceleration_radps2(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                                        const BoosterReturnParameters& parameters, double propellant_kg);
+// Separation -> boostback ignition [D] at `accel_radps2`: flip_hold_s, then the free turn to
+// flip_ignition_off_velocity_rad off the velocity (accelerating up to flip_max_rate_radps, no braking; angle_rad unused),
+// or the rest-to-rest turn through `angle_rad` (the axis off the boostback direction at the separation) until the axis
+// is within flip_tolerance_rad (the guidance's ignition gate).
+double booster_flip_s(const BoosterReturnParameters& parameters, double accel_radps2, double angle_rad);
+// MECO planning: MECO -> boostback ignition for the stack at `state_gcrf` (its first stage the booster): the staging's
+// `separation_after_meco_s`, then booster_flip_s at the booster's propellant now. The turn angle: the air-relative
+// velocity at the separation (the stack's axis) against the boostback direction of the Lambert arc after the flip
+// (BoosterReturnGuidance::boostback_delta_v_mps's arc), iterated with the flip's own coast.
+double booster_meco_to_boostback_s(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
+                                   const frames::BodyOrientation& earth, time::Epoch epoch, const LandingSite& site,
+                                   const BoosterReturnParameters& parameters, double separation_after_meco_s);
 
 struct ReturnCommand {
     ReturnPhase phase = ReturnPhase::Flip;

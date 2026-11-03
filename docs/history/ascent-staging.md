@@ -770,3 +770,6 @@ One pack's two inward thrusters: 13 kN at 28.5 m from the CG = 3.71e5 Nm on a pi
 
 ## Falcon 9 flip before Task 14 (2026-11-02)
 The attitude controller turned the stage at once from separation to within 15 deg of the boostback aim (accelerate and brake on the RCS, 6.5 kN [D] sized so the total was 13.7 s; 13.9 s flown; 358 kg N2), then all three engines at once. `flip_duration_s` 13.6, `boostback_loss_fraction` 0.13; N2 129.5 kg left. The agreement of the total hid two errors: no hold and braking on the RCS. The drawn interstage cut the MVac bell 0.5-1.75 s after separation.
+
+## Booster flip time before the planner plan Task 5 (2026-11-03)
+MECO planning took the flip from `flip_duration_s` plus the MECO -> separation interval: Super Heavy the guidance default 10 s [E] (flown 10.43 s, 153 deg turn at 503 t), Falcon 9 the RTLS-fitted 14.8 s [D] (flown 14.79 s). Since Task 5 both are derived from the stage's turn authority (`gnc::booster_meco_to_boostback_s`).

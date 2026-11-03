@@ -56,6 +56,8 @@ flow separation (vacuum engines).
   (gross area inside the fin's outline), `station_m` (hinge), `radius_m` (fin centre of pressure, also the lever of its axial drag),
   `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.
   `aero/grid_fin.csv` for Falcon 9, `aero/super_heavy_grid_fin.csv` for the Super Heavy). Fin mass belongs in the stage's `dry_mass_kg`.
+  `max_return_alpha_deg` (required on a returning first stage): the largest angle of attack the fins hold in the return
+  coast to move the impact point.
 - `[[stage.flap]]` (ship): flat plates hinged along the hull side - `id`, `hinge_azimuth_deg` (from body +y
   towards +z), `station_fwd_m`/`station_aft_m` (from the bottom of the stage), `span_m`, `area_m2`,
   `max_deflection_deg` (0 = folded leeward, 90 = broadside to a belly-first flow), `rate_deg_s`, optional
@@ -126,16 +128,25 @@ flow separation (vacuum engines).
   `cant_deg`: thrust tilted towards the axis, the exhaust away from the hull (a canted group cannot gimbal).
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
-  hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
+  hull), `max_load_n` (structural limit per pin; above it the catch is an impact), `max_catch_tilt_deg` (required on a
+  returning booster: the landing burn's thrust tilt from the vertical at the catch).
 - `[stage.recovery] method`: `"tower_catch"` (Super Heavy: always caught), `"leg_landing"` (Falcon 9: on its legs on a
   landing zone or a drone ship, chosen by the mission); empty: expendable.
-- `[stage.recovery]` return keys (`gnc::booster_return_parameters`; left out: the guidance's defaults, Super Heavy's):
-  `boostback_engine_groups`, `entry_engine_groups` (group ids of this stage), `return_flight_time_s` (boostback start
-  to touchdown), `entry_burn_altitude_m` / `entry_burn_delta_v_mps` / `entry_burn_throttle` (entry burn lit while
-  descending below that altitude, retrograde, for that delta-v), `landing_engine_phases` (3 group lists: ignition,
-  divert, final set), `landing_phase_throttles` (3 design throttles that time the ignition),
-  `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches) and `flip_engine_groups` (the flip
-  after separation at minimum throttle; left out: the final landing set; `[]`: engines off, the RCS turns the stage).
+- `[stage.recovery]` return keys (`gnc::booster_return_parameters`). Required on a returning first stage (`"tower_catch"`
+  without an entry table, `"leg_landing"`; the load fails with a German message naming the key):
+  `landing_engine_phases` (3 group lists: ignition, divert, final set), `landing_phase_throttles` (3 design throttles
+  that time the ignition), `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches) and, with a
+  boostback, `return_flight_time_s` (boostback start to touchdown, the Lambert arc's shape) and
+  `boostback_loss_fraction` (MECO planning: boostback delta-v beyond the two-body arc). Optional:
+  `boostback_engine_groups`, `entry_engine_groups` (group ids of this stage), `entry_burn_altitude_m` /
+  `entry_burn_delta_v_mps` / `entry_burn_throttle` (entry burn lit while descending below that altitude, retrograde,
+  for that delta-v), `landing_switch_max_tilt_deg` / `landing_switch_max_rate_rad_s` (2 values: tilt and rate at each
+  engine switch, 0 = no limit), `flip_engine_groups` (the flip after separation at minimum throttle; left out: the
+  final landing set; `[]`: engines off, the RCS turns the stage), `flip_hold_s`, and the free turn
+  (`flip_ignition_off_velocity_deg`, `flip_max_rate_deg_s`, `flip_ignition_timeout_s`). The flip's duration is derived
+  (`gnc::booster_meco_to_boostback_s`: the flip set's gimbal at minimum throttle or the RCS, the stage's inertia at its
+  propellant, the turn angle from the MECO state); `flip_duration_s` is refused. The catch approach time comes from
+  the final set's throttle range.
 - `[[stage]] max_dynamic_pressure_pa` (a first stage; left out: no limit): the ascent guidance throttles the stack to
   hold the dynamic pressure at or below it (max-Q limit). One number, or `[[mach, pa], ...]` (increasing Mach, linear
   between, held beyond the ends) for a limit over Mach (Falcon 9: the transonic hold). [D] from the flights' q and
@@ -150,14 +161,16 @@ flow separation (vacuum engines).
   Stages taken with `from` keep the source's sequence.
 - `[stage.recovery.drone_ship]`: the return to a drone ship; its keys override the profile above (left out: taken from
   it). `boostback = false`: no flip or boostback (the stage coasts on its ascent arc). `landing_phase_max_tilt_deg`
-  (3 values, either table): planned thrust tilt limit per landing engine set (default: Super Heavy's 25 / 20 / 10).
+  (3 values, either table): planned thrust tilt limit per landing engine set (left out: `DescentLimits`' 25 / 20 / 10).
 - `[stage.recovery]` `landing_fresh_trust_region_weight`, `landing_fresh_attitude_violation_weight`: SCvx settings of fresh plans (no warm start); 0 keeps the defaults (`docs/subsystems/falcon9.md` "Fresh landing plans").
 - `[stage.engine_group]` `station_m` may be negative: the Falcon 9's second stage stands on the interstage top with its engine below station 0 (`falcon9.md` "Stack"); so may a tank's `base_station_m`.
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
   (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
   per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
   plastically over at most `stroke_m`; more is an impact) and the foot's Coulomb `friction`. `fixed = true`: always
-  deployed (HLS; `deploy_time_s` not needed).
+  deployed (HLS; `deploy_time_s` not needed). A `"leg_landing"` first stage also needs `deploy_margin_s` (legs
+  commanded out `deploy_time_s` + this before the planned touchdown) and `max_touchdown_tilt_deg` (thrust tilt from the
+  vertical at the touchdown).
 - Falcon 9 octaweb: `center` (1, the landing engine), `pair` (2 opposite ring engines: with the centre the 3-engine set
   of boostback and entry burn, thrust on the axis), `ring` (the other 6).
 

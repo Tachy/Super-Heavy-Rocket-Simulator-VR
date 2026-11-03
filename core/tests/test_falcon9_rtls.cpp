@@ -49,7 +49,8 @@ sim::LaunchSite lz40() {
 }
 
 gnc::BoosterReturnParameters falcon9_parameters() {
-    return gnc::booster_return_parameters(config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front());
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    return gnc::booster_return_parameters(cfg, cfg.stages.front());
 }
 
 }  // namespace

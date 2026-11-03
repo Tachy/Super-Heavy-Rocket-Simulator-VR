@@ -24,11 +24,10 @@ inline constexpr double entry_delta_v_probe_mps = 20.0;
 inline constexpr double entry_altitude_probe_m = 1000.0;
 inline constexpr double aero_steering_min_q_pa = 2000.0;  // below: RCS translation trim
 inline constexpr double aero_steering_time_fraction = 0.5;
-inline constexpr double aero_steering_max_alpha_rad = 8.0 * constants::deg_to_rad;  // [E] fin trim authority, heating
 inline constexpr double minimum_time_to_go_s = 0.3;
-// Centre-engine approach: sink rate follows touchdown speed + height / tau (an exponential approach, the V3 profile
-// ending in a near hover; the same shape as the SCvx plans' approach limit), with a proportional sink-rate loop.
-inline constexpr double approach_time_constant_s = 3.0;  // [E]
+// Centre-engine approach: sink rate follows touchdown speed + height / tau (BoosterReturnParameters::
+// approach_time_constant_s; an exponential approach, the V3 profile ending in a near hover; the same shape as the SCvx
+// plans' approach limit), with a proportional sink-rate loop.
 inline constexpr double approach_gain_per_s = 1.0;       // [E]
 inline constexpr double touchdown_cutoff_height_m = 0.05; // engine cutoff when the legs / catch arms take the load
 inline constexpr double divert_time_constant_s = 2.0;      // cross-track damping during the divert
@@ -36,9 +35,7 @@ inline constexpr double hold_time_constant_s = 4.0;        // position hold on t
 inline constexpr double divert_hold_radius_m = 3.0;        // inside: position hold instead of braking profile
 inline constexpr double catch_missed_height_m = 5.0;  // CG this far below the catch height: the arms were missed
 inline constexpr double tilt_taper_height_m = 60.0;                           // below: tilt limit tapers off
-inline constexpr double leg_deploy_margin_s = 5.0;      // [E] legs locked this long before the planned touchdown
 inline constexpr double pad_cutoff_after_plan_s = 0.5;  // pad landing: engines off this long after the plan's end (spec)
-inline constexpr double touchdown_tilt_rad = 4.0 * constants::deg_to_rad;     // tilt limit at touchdown
 inline constexpr double entry_no_thrust_s = 5.0;  // [E] entry burn without thrust this long (engines out): it is over
 // Online drag estimate (as the ship's entry guidance): filter gain per 0.2 s update, only with a clear signal.
 inline constexpr double drag_scale_filter_gain = 0.1;          // [E]

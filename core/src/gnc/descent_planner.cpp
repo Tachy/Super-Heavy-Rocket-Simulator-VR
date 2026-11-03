@@ -112,7 +112,7 @@ Vec3 DescentPlan::thrust_at(double t) const {
 }
 
 DescentReference initial_guess(const DescentModel& model, const DescentState& initial, int start_phase,
-                               const DescentTarget& target, const DescentLimits& limits, int n) {
+                               const DescentTarget& target, const DescentLimits& limits, int n, SwitchGuess guess) {
     const double m0 = initial[descent_index::mass];
     const double g = norm(model.gravity_mps2);
     const double speed0 = norm(state_velocity(initial));
@@ -129,15 +129,15 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
     for (int p = start_phase; p < descent_phases; ++p) {
         const auto& sw = limits.switches[static_cast<size_t>(std::min(p, descent_phases - 2))];
         double end_speed = final_speed;
-        if (p + 1 < descent_phases && limits.late_switch_guess) {
+        if (p + 1 < descent_phases && guess == SwitchGuess::WindowMiddle) {
+            end_speed = std::min(speed, 0.5 * (sw.min_sink_mps + sw.max_sink_mps));
+        } else if (p + 1 < descent_phases) {
             // the latest switch the later sets can still finish in their minimum phase times ...
             double late = final_speed;
             for (int q = p + 1; q < descent_phases; ++q) late += decel(q, m0) * limits.min_phase_s[static_cast<size_t>(q)];
             // ... but not below what this set cannot remove within the height left
             const double reach = std::sqrt(std::max(speed * speed - 2.0 * decel(p, m0) * height, 0.0));
             end_speed = std::min(speed, std::clamp(std::max(late, reach), sw.min_sink_mps, sw.max_sink_mps));
-        } else if (p + 1 < descent_phases) {
-            end_speed = std::min(speed, 0.5 * (sw.min_sink_mps + sw.max_sink_mps));
         }
         ref.duration_s[static_cast<size_t>(p)] = std::max((speed - end_speed) / decel(p, m0), limits.min_phase_s[static_cast<size_t>(p)]);
         height = std::max(height - (speed * speed - end_speed * end_speed) / (2.0 * decel(p, m0)), 0.0);
@@ -247,8 +247,31 @@ optim::SocpResult DescentPlanner::solve(int start_phase, DescentGoal goal, const
 DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& initial, int start_phase,
                                  const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
                                  double elapsed) {
-    auto plan = plan_once(model, initial, start_phase, target, settings, warm_start, elapsed);
-    if (warm_start || plan.converged || !(plan.virtual_control < settings.stall_virtual_control)) return plan;
+    if (warm_start) return plan_once(model, initial, start_phase, target, settings, warm_start, elapsed, SwitchGuess::State);
+    // A fresh plan from the initial guess (not a fixed kinematic guess) starts twice - the switches from the state and in
+    // the middle of the switch windows - and keeps the better: converged, then the heavier end. Neither start wins
+    // everywhere (planner plan Task 5: the state start is ~1 t heavier on the booster's sea aborts across a box, the
+    // window middle 0.2-0.9 t on Falcon 9's recorded deck plans and keeps a limit-cycling ship catch in reach).
+    const bool kinematic = std::any_of(settings.kinematic_guess_s.begin(), settings.kinematic_guess_s.end(),
+                                       [](double d) { return d > 0.0; });
+    const std::vector<SwitchGuess> starts = kinematic ? std::vector<SwitchGuess>{SwitchGuess::State}
+                                                      : std::vector<SwitchGuess>{SwitchGuess::State, SwitchGuess::WindowMiddle};
+    const auto better = [](const DescentPlan& a, const DescentPlan& b) {  // a better than b
+        if (a.converged != b.converged) return a.converged;
+        if (a.converged) return a.reference.x.back()[descent_index::mass] > b.reference.x.back()[descent_index::mass];
+        return a.virtual_control < b.virtual_control;
+    };
+    std::optional<DescentPlan> plan;
+    for (const auto start : starts) {
+        auto candidate = plan_once(model, initial, start_phase, target, settings, nullptr, 0.0, start);
+        if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: the two starts
+            std::printf("  [scvx start] %s: conv %d it %d vc %.3g final mass %.0f\n",
+                        start == SwitchGuess::State ? "state" : "window middle", candidate.converged, candidate.iterations,
+                        candidate.virtual_control, candidate.reference.x.back()[descent_index::mass]);
+        }
+        if (!plan || better(candidate, *plan)) plan = std::move(candidate);
+    }
+    if (plan->converged || !(plan->virtual_control < settings.stall_virtual_control)) return *plan;
     // A fresh plan cycling in reach: the soft attitude limits' penalty raised (ScvxSettings::attitude_penalty_growth).
     ScvxSettings raised = settings;
     double weight = settings.fresh_attitude_violation_weight > 0.0 ? settings.fresh_attitude_violation_weight
@@ -257,23 +280,22 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     for (int k = 0; k < settings.attitude_penalty_raises; ++k) {
         weight *= settings.attitude_penalty_growth;
         raised.fresh_attitude_violation_weight = weight;
-        auto candidate = plan_once(model, initial, start_phase, target, raised, nullptr, 0.0);
-        if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: the penalty escalation
-            std::printf("  [scvx penalty] weight %.3g: conv %d it %d vc %.3g defect %.3g final mass %.0f\n", weight,
-                        candidate.converged, candidate.iterations, candidate.virtual_control, candidate.nonlinear_defect,
-                        candidate.reference.x.back()[descent_index::mass]);
-        }
-        if (!candidate.converged) continue;
-        if (!best || candidate.reference.x.back()[descent_index::mass] > best->reference.x.back()[descent_index::mass]) {
-            best = std::move(candidate);
+        for (const auto start : starts) {
+            auto candidate = plan_once(model, initial, start_phase, target, raised, nullptr, 0.0, start);
+            if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: the penalty escalation
+                std::printf("  [scvx penalty] weight %.3g: conv %d it %d vc %.3g defect %.3g final mass %.0f\n", weight,
+                            candidate.converged, candidate.iterations, candidate.virtual_control, candidate.nonlinear_defect,
+                            candidate.reference.x.back()[descent_index::mass]);
+            }
+            if (candidate.converged && (!best || better(candidate, *best))) best = std::move(candidate);
         }
     }
-    return best ? *best : plan;
+    return best ? *best : *plan;
 }
 
 DescentPlan DescentPlanner::plan_once(const DescentModel& model, const DescentState& initial, int start_phase,
                                       const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
-                                      double elapsed) {
+                                      double elapsed, SwitchGuess guess) {
     const int n = settings.nodes_per_phase;
     const int max_iterations = warm_start ? settings.max_iterations : settings.fresh_max_iterations;
     const int stall_iterations = warm_start ? settings.stall_iterations : settings.fresh_stall_iterations;
@@ -286,7 +308,7 @@ DescentPlan DescentPlanner::plan_once(const DescentModel& model, const DescentSt
     plan.reference = warm_start ? warm_start_reference(*warm_start, elapsed, start_phase, n, initial)
                      : kinematic ? kinematic_guess(model, initial, start_phase, target, settings.limits, n,
                                                    settings.kinematic_guess_s)
-                                 : initial_guess(model, initial, start_phase, target, settings.limits, n);
+                                 : initial_guess(model, initial, start_phase, target, settings.limits, n, guess);
     // Minimum phase durations only shape a fresh plan: on a re-plan they would stretch a nearly finished phase
     // again and again (every replan cycle).
     DescentLimits limits = settings.limits;

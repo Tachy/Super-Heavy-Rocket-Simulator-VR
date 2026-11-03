@@ -134,10 +134,10 @@ TEST_CASE("release_tower re-arms a tower after an aborted booster catch", "[refu
         sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", 70.0e3);
     const double sink_mps = 355.0;
-    const double h = test::ignition_height_m(f.session, cfg, f.earth, f.t0, sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(f.session, cfg, f.earth, f.t0, sink_mps, test::config_return_parameters(cfg));
     f.session.place_returning_booster(
         cfg, test::state_over_site(f.session.launch_site(), f.earth, f.t0, {20.0, -10.0, h}, {0.0, 0.0, -sink_mps}),
-        f.t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+        f.t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     f.session.advance_to(f.t0 + 1.0, 1000);
     REQUIRE(f.session.abort_landing(0));  // the booster gives up its return
     REQUIRE(f.session.tower()->phase() == sim::CatchPhase::Aborted);

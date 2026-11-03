@@ -514,6 +514,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.grid_fins.max_deflection_rad = doc.number(*fins, "max_deflection_deg") * constants::deg_to_rad;
         s.grid_fins.rate_rad_s = doc.number(*fins, "rate_deg_s") * constants::deg_to_rad;
         s.grid_fins.table = doc.text(*fins, "table");
+        s.grid_fins.max_return_alpha_rad = doc.number_or(*fins, "max_return_alpha_deg", 0.0) * constants::deg_to_rad;
+        if (s.grid_fins.max_return_alpha_rad < 0.0 || s.grid_fins.max_return_alpha_rad >= constants::pi / 2.0) {
+            doc.fail("grid_fins.max_return_alpha_deg must be in (0, 90)");
+        }
     }
     if (auto flaps = t["flap"].as_array()) {
         for (auto& node : *flaps) {
@@ -649,6 +653,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             s.catch_pins.away_from_tower_azimuth_rad =
                 doc.number(*pins, "away_from_tower_azimuth_deg") * constants::deg_to_rad;
         }
+        s.catch_pins.max_catch_tilt_rad = doc.number_or(*pins, "max_catch_tilt_deg", 0.0) * constants::deg_to_rad;
+        if (s.catch_pins.max_catch_tilt_rad < 0.0 || s.catch_pins.max_catch_tilt_rad >= constants::pi / 2.0) {
+            doc.fail("catch_pins.max_catch_tilt_deg must be in (0, 90)");
+        }
     }
     if (auto legs = t["landing_legs"].as_table()) {
         const auto* azimuths = (*legs)["azimuths_deg"].as_array();
@@ -668,6 +676,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.landing_legs.stiffness_n_m = doc.positive(*legs, "stiffness_n_m");
         s.landing_legs.damping_n_s_m = doc.positive(*legs, "damping_n_s_m");
         s.landing_legs.friction = doc.positive(*legs, "friction");
+        s.landing_legs.deploy_margin_s = doc.number_or(*legs, "deploy_margin_s", 0.0);
+        s.landing_legs.max_touchdown_tilt_rad = doc.number_or(*legs, "max_touchdown_tilt_deg", 0.0) * constants::deg_to_rad;
+        if (s.landing_legs.deploy_margin_s < 0.0 || s.landing_legs.max_touchdown_tilt_rad < 0.0 ||
+            s.landing_legs.max_touchdown_tilt_rad >= constants::pi / 2.0) {
+            doc.fail("landing_legs: deploy_margin_s >= 0 and max_touchdown_tilt_deg in (0, 90)");
+        }
     }
     if (auto rcs = t["rcs"].as_table()) s.rcs = load_rcs(doc, *rcs, s.tanks);
     for (const auto& thruster : s.rcs.thrusters) {
@@ -749,6 +763,20 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 }
                 if (p.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
             }
+            // per switch, >= 0 (0: no limit); `scale` converts the unit
+            const auto switch_limits = [&](std::string_view key, double scale, std::vector<double>& out) {
+                const auto* list = table[key].as_array();
+                if (!list) return;
+                out.clear();
+                for (const auto& node : *list) {
+                    const auto value = node.value<double>();
+                    if (!value || *value < 0.0) doc.fail(std::string(key) + " must be numbers >= 0");
+                    out.push_back(*value * scale);
+                }
+                if (out.size() != 2) doc.fail(std::string(key) + " must list 2 values (one per engine switch)");
+            };
+            switch_limits("landing_switch_max_tilt_deg", constants::deg_to_rad, p.landing_switch_max_tilt_rad);
+            switch_limits("landing_switch_max_rate_rad_s", 1.0, p.landing_switch_max_rate_radps);
             p.landing_gimbal_fraction = doc.number_or(table, "landing_gimbal_fraction", p.landing_gimbal_fraction);
             if (p.landing_gimbal_fraction < 0.0 || p.landing_gimbal_fraction > 1.0) {
                 doc.fail("landing_gimbal_fraction must be in [0, 1] (0: the default allowance)");
@@ -764,7 +792,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 doc.fail("landing_fresh_attitude_violation_weight must not be negative (0: the default weight)");
             }
             p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
-            p.flip_duration_s = doc.number_or(table, "flip_duration_s", p.flip_duration_s);
+            if (table.contains("flip_duration_s")) {
+                doc.fail("stage.recovery.flip_duration_s is derived from the stage's turn authority (gnc::booster_meco_to_boostback_s): "
+                         "remove the key");
+            }
             p.flip_hold_s = doc.number_or(table, "flip_hold_s", p.flip_hold_s);
             if (p.flip_hold_s < 0.0) doc.fail("flip_hold_s must not be negative (0: the stage turns at once)");
             p.flip_ignition_off_velocity_rad =
@@ -797,6 +828,36 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.return_profile = read_profile(*recovery, {});
         if (const auto* drone_ship = (*recovery)["drone_ship"].as_table()) {
             s.drone_ship_return = read_profile(*drone_ship, s.return_profile);
+        }
+        // A returning first stage (gnc::booster_return_parameters): every key its return guidance flies on is required.
+        const bool returning_booster = (s.recovery_method == "tower_catch" && s.aero.entry_alpha_table.empty()) ||
+                                       s.recovery_method == "leg_landing";
+        if (returning_booster) {
+            const auto missing = [&](const std::string& key, const std::string& where) {
+                doc.fail("Rückkehr der Stufe '" + s.id + "': Schlüssel '" + key + "' fehlt in [" + where + "]");
+            };
+            for (const auto* profile : {&s.return_profile, s.drone_ship_return ? &*s.drone_ship_return : nullptr}) {
+                if (!profile) continue;
+                const std::string where = profile == &s.return_profile ? "stage.recovery" : "stage.recovery.drone_ship";
+                if (profile->landing_engine_phases.empty()) missing("landing_engine_phases", where);
+                if (profile->landing_phase_throttles.empty()) missing("landing_phase_throttles", where);
+                if (profile->landing_switch_sink_mps.empty()) missing("landing_switch_sink_mps", where);
+                if (profile->boostback) {
+                    if (!(profile->return_flight_time_s > 0.0)) missing("return_flight_time_s", where);
+                    if (profile->boostback_loss_fraction < 0.0) missing("boostback_loss_fraction", where);
+                }
+            }
+            if (!s.grid_fins.azimuths_rad.empty() && !(s.grid_fins.max_return_alpha_rad > 0.0)) {
+                missing("max_return_alpha_deg", "stage.grid_fins");
+            }
+            if (s.recovery_method == "tower_catch") {
+                if (s.catch_pins.azimuths_rad.empty()) missing("azimuths_deg", "stage.catch_pins");
+                if (!(s.catch_pins.max_catch_tilt_rad > 0.0)) missing("max_catch_tilt_deg", "stage.catch_pins");
+            } else {
+                if (s.landing_legs.azimuths_rad.empty()) missing("azimuths_deg", "stage.landing_legs");
+                if (!(s.landing_legs.deploy_margin_s > 0.0)) missing("deploy_margin_s", "stage.landing_legs");
+                if (!(s.landing_legs.max_touchdown_tilt_rad > 0.0)) missing("max_touchdown_tilt_deg", "stage.landing_legs");
+            }
         }
         // A ship caught by the tower (gnc::ship_landing_parameters): every key of its flip and landing burn is required.
         if (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) {

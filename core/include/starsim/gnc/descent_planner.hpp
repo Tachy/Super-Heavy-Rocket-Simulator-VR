@@ -98,8 +98,14 @@ struct DescentPlan {
 // target or -target, whichever is nearer `reference` (a quaternion and its negative are the same attitude).
 math::Quat nearest_sign(const math::Quat& target, const math::Quat& reference);
 
+// Where a fresh plan's guess ends each phase but the last: State - from the state (DescentLimits::switches: as late as
+// the later sets can still finish in their minimum phase times, not below what this set cannot remove within the height
+// left, within the window); WindowMiddle - the middle of the switch window. DescentPlanner::plan starts from both.
+enum class SwitchGuess { State, WindowMiddle };
+
 DescentReference initial_guess(const DescentModel& model, const DescentState& initial, int start_phase,
-                               const DescentTarget& target, const DescentLimits& limits, int nodes_per_phase);
+                               const DescentTarget& target, const DescentLimits& limits, int nodes_per_phase,
+                               SwitchGuess guess = SwitchGuess::State);
 
 // Kinematic guess over the given phase durations: a cubic (Hermite) path that matches position and velocity at both
 // ends, its acceleration flown by the thrust (minus gravity and the frame terms; magnitude within each set's bounds,
@@ -130,9 +136,10 @@ public:
     size_t solver_count() const { return solvers_.size(); }
 
 private:
-    // One SCvx run (plan() adds the penalty escalation of a fresh plan).
+    // One SCvx run (plan() adds the two starts and the penalty escalation of a fresh plan).
     DescentPlan plan_once(const DescentModel& model, const DescentState& initial, int start_phase, const DescentTarget& target,
-                          const ScvxSettings& settings, const DescentPlan* warm_start, double warm_start_elapsed_s);
+                          const ScvxSettings& settings, const DescentPlan* warm_start, double warm_start_elapsed_s,
+                          SwitchGuess guess);
     optim::SocpResult solve(int start_phase, DescentGoal goal, const optim::SocpProblem& problem);
     std::map<std::pair<int, DescentGoal>, std::unique_ptr<optim::SocpSolver>> solvers_;
 };

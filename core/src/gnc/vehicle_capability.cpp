@@ -113,4 +113,37 @@ double flip_duration_s(double angle_rad, double accel_radps2, double max_rate_ra
     return angle / max_rate_radps + max_rate_radps / accel_radps2;
 }
 
+double turn_time_within_s(double total_rad, double tolerance_rad, double accel_radps2, double max_rate_radps) {
+    const double total = std::abs(total_rad);
+    const double reach = total - std::abs(tolerance_rad);
+    if (reach <= 0.0) return 0.0;
+    const double duration = flip_duration_s(total, accel_radps2, max_rate_radps);
+    const bool capped = max_rate_radps > 0.0 && max_rate_radps * max_rate_radps < total * accel_radps2;
+    // angle covered by the acceleration ramp (and, symmetric, by the braking ramp)
+    const double ramp = capped ? 0.5 * max_rate_radps * max_rate_radps / accel_radps2 : 0.5 * total;
+    if (reach <= ramp) return std::sqrt(2.0 * reach / accel_radps2);
+    if (reach <= total - ramp) return max_rate_radps / accel_radps2 + (reach - ramp) / max_rate_radps;
+    return duration - std::sqrt(2.0 * (total - reach) / accel_radps2);
+}
+
+double free_turn_time_s(double angle_rad, double accel_radps2, double max_rate_radps) {
+    if (!(accel_radps2 > 0.0)) {
+        throw std::invalid_argument("free_turn_time_s: angular acceleration must be > 0 (no turn authority)");
+    }
+    const double angle = std::abs(angle_rad);
+    const double ramp = max_rate_radps > 0.0 ? 0.5 * max_rate_radps * max_rate_radps / accel_radps2 : angle;
+    if (angle <= ramp) return std::sqrt(2.0 * angle / accel_radps2);
+    return max_rate_radps / accel_radps2 + (angle - ramp) / max_rate_radps;
+}
+
+double throttle_range_time_s(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                             const std::vector<std::string>& groups) {
+    double time_s = 0.0;
+    for (const auto& key : groups) {
+        const auto& e = vehicle.engine(find_group(stage, key).engine_id);
+        if (e.throttle_rate_per_s > 0.0) time_s = std::max(time_s, (e.throttle_max - e.throttle_min) / e.throttle_rate_per_s);
+    }
+    return time_s;
+}
+
 }  // namespace starsim::gnc

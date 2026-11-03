@@ -96,12 +96,8 @@ struct DescentLimits {
         {0.0, 0.0, 180.0, 220.0},  // [D] flights 13/14: ~200 m/s
         {3.0 * constants::deg_to_rad, 0.03, 15.0, 30.0},
     }};
-    // A fresh plan's guess ends each phase (initial_guess): false - in the middle of its switch window (the fitted
-    // windows of the booster and the lunar lander); true - from the state [D]: as late as the incoming set can still
-    // finish (the final speed plus what it removes in its minimum phase time at the guess throttle), but no lower than
-    // what the outgoing set cannot remove within the height left; within the window (the ship's derived window, whose
-    // middle is no operating point).
-    bool late_switch_guess = false;
+    // A fresh plan starts from the switches from the state and from the windows' middle (gnc::SwitchGuess, initial_guess)
+    // and keeps the better.
     double final_min_thrust_fraction = 0.0;  // [E] final-set thrust floor (fraction of its maximum) but at the end
     int final_ease_nodes = 3;                // last nodes free to ease down to the gentle end
     double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)

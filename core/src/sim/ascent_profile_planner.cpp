@@ -61,7 +61,7 @@ struct Trial {
 // Where `stage` (a first stage coasting without a boostback) comes down: BoosterReturnGuidance::predict_impact with
 // drag and its entry burn ahead, on the session's landing site (the drone ship's deck).
 std::optional<BoosterImpact> predict_booster_impact(const FlightSession& session, const vehicle::FlightBody& stage) {
-    const auto p = session.return_parameters(stage.vehicle().stages().front().config);
+    const auto p = session.return_parameters(stage.vehicle());
     const auto burn = gnc::BoosterReturnGuidance::entry_burn_ahead(stage.vehicle(), p);
     const auto impact = gnc::BoosterReturnGuidance::predict_impact(stage, session.environment(), session.epoch(),
                                                                    session.landing_zone()->height_m, nullptr, &burn);
@@ -77,13 +77,15 @@ std::optional<BoosterImpact> predict_booster_impact(const FlightSession& session
 // The boostback of the stack's return planned from the state now has a Lambert arc (the session's MECO plan:
 // FlightSession's Booster state, flip from the MECO to the separation included); true without a boostback.
 bool boostback_arc_found(const FlightSession& session, const vehicle::FlightBody& stack) {
-    auto parameters = session.return_parameters(stack.vehicle().stages().front().config);
+    auto parameters = session.return_parameters(stack.vehicle());
     if (!parameters.boostback) return true;
-    parameters.flip_duration_s += separation_after_meco_s(stack.vehicle());
     const auto& s = stack.state();
+    const auto site = session.return_site(stack.vehicle());
+    parameters.flip_duration_s = gnc::booster_meco_to_boostback_s(
+        stack.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, session.earth_orientation(), session.epoch(), site,
+        parameters, separation_after_meco_s(stack.vehicle()));
     const auto delta_v = gnc::BoosterReturnGuidance::boostback_delta_v_mps(
-        {s.position_gcrf_m, s.velocity_gcrf_mps}, session.earth_orientation(), session.epoch(),
-        session.return_site(stack.vehicle()), parameters);
+        {s.position_gcrf_m, s.velocity_gcrf_mps}, session.earth_orientation(), session.epoch(), site, parameters);
     return delta_v && std::isfinite(*delta_v);
 }
 

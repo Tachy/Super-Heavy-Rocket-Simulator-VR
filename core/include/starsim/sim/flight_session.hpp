@@ -379,9 +379,9 @@ public:
     // The lowest stage of `vehicle` gets return guidance after separation (booster return on, and either caught by a
     // tower at this site or landing on its legs on the landing zone).
     bool returns_after_staging(const vehicle::Vehicle& vehicle) const;
-    // Return parameters of a first stage: the guidance's (set_booster_return) with the stage's return profile for this
-    // mission's landing target (drone ship or not).
-    gnc::BoosterReturnParameters return_parameters(const config::StageConfig& stage) const;
+    // Return parameters of a vehicle's first stage: the guidance's (set_booster_return) with the stage's config
+    // (gnc::booster_return_parameters) for this mission's landing target (drone ship or not).
+    gnc::BoosterReturnParameters return_parameters(const vehicle::Vehicle& vehicle) const;
     const vehicle::FlightEnvironment& environment() const { return env_; }
     // The attitude controller of ship landings (flip, landing burn); the flip prediction flies it too.
     const gnc::AttitudeController& ship_landing_controller() const { return ship_landing_controller_; }

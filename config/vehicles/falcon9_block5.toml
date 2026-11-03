@@ -118,6 +118,8 @@ radius_m = 2.6                               # [E] 1.83 m core radius + half the
 max_deflection_deg = 20.0                    # [E]
 rate_deg_s = 30.0                            # [E] hydraulic (open loop) actuators
 table = "aero/grid_fin.csv"
+max_return_alpha_deg = 8.0                   # [E] return coast: the largest angle of attack the fins hold to move the
+                                             # impact point (fin trim authority, heating)
 
 [stage.landing_legs]                         # all [E] from imagery and public figures; contact physics in c2
 azimuths_deg = [45.0, 135.0, 225.0, 315.0]   # [E] under the grid fins (photos: F_Landed_rockets.., F_ORBCOMM_2; was
@@ -132,6 +134,8 @@ crush_force_n = 4.0e5                        # per leg: 4 legs ~6 g on a 27 t st
 stiffness_n_m = 2.0e7
 damping_n_s_m = 2.0e5
 friction = 0.6
+deploy_margin_s = 5.0                        # [E] legs commanded out deploy_time_s + this before the planned touchdown
+max_touchdown_tilt_deg = 4.0                 # [E] landing burn: thrust tilt from the vertical at the touchdown (structural)
 
 [stage.recovery]
 method = "leg_landing"                       # pad (RTLS) or drone ship, chosen by the mission (user 2026-10-13)
@@ -146,9 +150,10 @@ nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 60 km
 boostback_engine_groups = ["center", "pair"]  # [E] the 3-engine set (thrust on the axis)
 flip_engine_groups = []                      # [S: SpaceX webcasts] the flip after separation on the nitrogen thrusters,
                                              # engines off until the boostback
-flip_duration_s = 14.8                       # [D] MECO planning: separation -> boostback ignition as flown on our full RTLS. Measured
-                                             # 13 / 14 / 14 s [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s +-0.6; CRS-35 speed dials 13.0 s
-flip_hold_s = 4.0                            # [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13] separation -> start of the turn: 4 s on all
+# Separation -> boostback ignition (MECO planning) is derived: the hold, then the RCS turn to the ignition angle at the
+# stage's RCS torque, capped at flip_max_rate (gnc::booster_meco_to_boostback_s). Measured 13 / 14 / 14 s [S:tl_crs35]
+# [S:tl_bandwagon3] [S:tl_crew13], mean 13.7 s +-0.6; CRS-35 speed dials 13.0 s.
+flip_hold_s = 4.0                           # [S:tl_crs35] [S:tl_bandwagon3] [S:tl_crew13] separation -> start of the turn: 4 s on all
                                              # three timelines; the drawn nozzle exit leaves the interstage 3.96 s after separation
                                              # at the pushers' 1 m/s (game/tests/separation_clearance.gd). Crew-13 frames agree: the
                                              # second stage's bell stays within ~10 deg of the axis to 4 s (docs/subsystems/falcon9.md)

@@ -213,7 +213,6 @@ TEST_CASE("Descent guess switches as late as the later sets can finish", "[ship]
     gnc::DescentLimits limits;
     limits.switches = {{{0.0, 0.0, 0.0, 1000.0}, {0.0, 0.0, 0.0, 1000.0}}};
     limits.min_phase_s = {1.0, 1.0, 1.0};
-    limits.late_switch_guess = true;
     const auto state = [](double height_m) {
         return gnc::make_state(300.0e3, {height_m, 0.0, 0.0}, {-80.0, 0.0, 0.0}, math::Quat{1.0, 0.0, 0.0, 0.0}, {});
     };
@@ -233,11 +232,14 @@ TEST_CASE("Descent guess switches as late as the later sets can finish", "[ship]
     limits.switches[0].max_sink_mps = 10.0;
     ref = gnc::initial_guess(model, state(500.0), 0, target, limits, 5);
     CHECK(ref.duration_s[0] == Approx((80.0 - 10.0) / d0).epsilon(1e-12));
-    // without the flag: the window's middle (here above the speed: phase 0 only its minimum)
-    limits.late_switch_guess = false;
-    limits.switches[0].max_sink_mps = 1000.0;
+    // a window above the speed: no switch to make, phase 0 only its minimum
+    limits.switches[0] = {0.0, 0.0, 100.0, 1000.0};
     ref = gnc::initial_guess(model, state(500.0), 0, target, limits, 5);
     CHECK(ref.duration_s[0] == 1.0);
+    // the planner's second start: the window's middle
+    limits.switches[0] = {0.0, 0.0, 20.0, 40.0};
+    ref = gnc::initial_guess(model, state(500.0), 0, target, limits, 5, gnc::SwitchGuess::WindowMiddle);
+    CHECK(ref.duration_s[0] == Approx((80.0 - 30.0) / d0).epsilon(1e-12));
 }
 
 TEST_CASE("Ship landing parameters follow the vehicle config", "[ship][landing][config]") {
@@ -289,7 +291,6 @@ TEST_CASE("Ship landing parameters follow the vehicle config", "[ship][landing][
     const double out_decel = 3.0 * f_min / m.light_kg - g0;
     CHECK(l.switches[0].min_sink_mps == Approx(out_decel > 0.0 ? out_decel * raptor.config().shutdown_s : 0.0).margin(1e-12));
     CHECK(p.switch_window_from_gate);
-    CHECK(l.late_switch_guess);
     // catch approach: the pair runs its throttle range, (max - min) / rate
     const auto& rc = raptor.config();
     CHECK(l.approach_time_constant_s == Approx((rc.throttle_max - rc.throttle_min) / rc.throttle_rate_per_s).epsilon(1e-12));
@@ -335,7 +336,7 @@ TEST_CASE("Ship without landing keys is refused", "[ship][landing][config]") {
         std::ifstream in(source / "vehicles" / "starship_block3.toml");
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         // comment the key's line out (the phases list spans two lines: both)
-        auto at = text.find("\n" + key + " =");
+        auto at = text.find("\n" + key + " =", text.find("id = \"ship\""));  // the ship's (the booster has its own phases)
         REQUIRE(at != std::string::npos);
         text.insert(at + 1, "# ");
         if (key == "landing_engine_phases") text.insert(text.find('\n', at + 2) + 1, "# ");

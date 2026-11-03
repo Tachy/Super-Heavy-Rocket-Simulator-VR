@@ -61,12 +61,12 @@ test::CatchRun fly(const Vec3& offset_enu_m, const Vec3& velocity_offset_mps) {
     sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
-    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, test::config_return_parameters(cfg));
     session.place_returning_booster(cfg,
                                     test::state_over_site(session.launch_site(), earth(), t0, offset_enu_m + Vec3{0.0, 0.0, h},
                                                           velocity_offset_mps + Vec3{0.0, 0.0, -nominal_sink_mps},
                                                           catch_roll(session.launch_site())),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     const auto run = test::fly_landing(session, earth(), t0, 90.0);
     if (const auto* g = session.return_guidance(0); g && g->scvx()) {
         const auto& s = g->scvx()->statistics();
@@ -92,17 +92,17 @@ TEST_CASE("SCvx flies a nominal landing burn onto the arms", "[gnc][catch]") {
 TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea", "[gnc][catch][abort][slow]") {
     // The pilot (or the tower) gives the catch up at a given CG height above the pad: the booster must reach the sea
     // beyond the shoreline, not hover over land until its propellant runs out.
-    const double abort_height_m = GENERATE(1500.0, 800.0, 400.0);
+    const double abort_height_m = GENERATE(1500.0, 800.0, 250.0);
     CAPTURE(abort_height_m);
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
-    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, test::config_return_parameters(cfg));
     session.place_returning_booster(cfg,
                                     test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
                                                           {0.0, 0.0, -nominal_sink_mps}, catch_roll(session.launch_site())),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     const auto& booster = session.body(0);
     const auto& site = session.launch_site();
     bool aborted = false;
@@ -124,10 +124,11 @@ TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea
                 sim::to_string(session.landing_outcome(0)), t, p.x, p.y, booster.vehicle().propellant_kg() / 1e3);
     CHECK(aborted);
     CHECK_FALSE(session.tower()->tower_struck());
-    // The reach estimate decides at the abort. From 1500 and 800 m the water is in reach, with propellant left. From 400 m
-    // the flight there would end on the last propellant, or short of it (flown: 55 m short, 2.9 t): the water is given up
-    // and the booster comes down soft on land instead.
-    const bool water_expected = abort_height_m > 400.0;
+    // The reach estimate decides at the abort. From 1500 and 800 m the water is in reach, with propellant left (planner
+    // plan Task 5: 6.2 / 4.4 t). From 250 m (205 m CG height, 61 m/s sink: 1.5 x 27.7 t > 40.5 t usable) the water is
+    // given up and the booster comes down soft on land instead. 400 m sits on the decision's edge (Task 5: in reach by
+    // 43 kg, flown to the water with 4.4 t; with the 3 s approach it was given up): not a case here.
+    const bool water_expected = abort_height_m > 300.0;
     CHECK(water_kept == water_expected);
     if (water_expected) {
         CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);
@@ -144,11 +145,11 @@ TEST_CASE("Booster abort clearance trace", "[.abort_clearance]") {
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
-    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, test::config_return_parameters(cfg));
     session.place_returning_booster(cfg,
                                     test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
                                                           {0.0, 0.0, -nominal_sink_mps}, catch_roll(session.launch_site())),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     test::AbortTrace trace("booster_" + std::to_string(static_cast<int>(abort_height_m)));
     const auto& booster = session.body(0);
     bool aborted = false;
@@ -175,15 +176,15 @@ TEST_CASE("An abort the guidance cannot fly leaves the tower's arms alone", "[gn
     site.sea.reset();  // a tower site without a coastline
     session.set_launch_site(site);
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
-    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, test::config_return_parameters(cfg));
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
                                                                {0.0, 0.0, -nominal_sink_mps}, catch_roll(session.launch_site())),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     session.advance_to(t0 + 1.0, 100);
     CHECK_FALSE(session.abort_landing(0));
     CHECK(session.tower()->phase() != sim::CatchPhase::Aborted);
 
-    gnc::BoosterReturnGuidance landed(session.return_site(session.body(0).vehicle()), gnc::BoosterReturnParameters{});
+    gnc::BoosterReturnGuidance landed(session.return_site(session.body(0).vehicle()), test::config_return_parameters(cfg));
     landed.skip_to(gnc::ReturnPhase::Landed);
     CHECK_FALSE(landed.request_abort());
 }
@@ -224,8 +225,8 @@ test::CatchRun fly_dispersed(const Dispersion& d) {
     const auto t0 = start();
     sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
-    const auto parameters = gnc::BoosterReturnParameters{};
     const auto nominal = test::booster_config("starship_block3", nominal_propellant_kg);
+    const auto parameters = test::config_return_parameters(nominal);
     const double h = test::ignition_height_m(session, nominal, earth(), t0, nominal_sink_mps, parameters);
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg * d.mass_factor);
     session.place_returning_booster(cfg,
@@ -289,7 +290,7 @@ double roll_error_at_ignition_deg(double start_roll_deg = 60.0) {
     session.place_returning_booster(cfg,
                                     test::state_over_site(session.launch_site(), earth(), t0, {0.0, 0.0, 12000.0},
                                                           {0.0, 0.0, -450.0}, rolled),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::Coast);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::Coast);
     for (double t = 0.0; t < 120.0;) {
         t += sim::FlightSession::tick_s;
         session.advance_to(t0 + t, 10);
@@ -318,11 +319,11 @@ TEST_CASE("SCvx catches with the residual roll error of a flown return", "[gnc][
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
-    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, test::config_return_parameters(cfg));
     const auto residual = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, sign * test::flown_ignition_roll_error_bound_deg * constants::deg_to_rad);
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
                                                                {0.0, 0.0, -nominal_sink_mps}, residual * exact_catch_roll(session.launch_site())),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     const auto run = test::fly_landing(session, earth(), t0, 90.0);
     CHECK(run.caught_within_tolerance());
     CHECK_FALSE(run.tower_struck);
@@ -345,10 +346,10 @@ TEST_CASE("The landing burn ends with the 90 deg fin away from the tower", "[gnc
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2")));
     const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
-    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, test::config_return_parameters(cfg));
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
                                                                {0.0, 0.0, -nominal_sink_mps}, catch_roll(session.launch_site())),
-                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+                                    t0, test::config_return_parameters(cfg), gnc::ReturnPhase::LandingBurn);
     const auto run = test::fly_landing(session, earth(), t0, 90.0);
     CHECK(run.caught_within_tolerance());
     const auto tr = earth().fixed_to_gcrf(session.epoch());

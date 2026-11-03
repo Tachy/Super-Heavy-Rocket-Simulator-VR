@@ -148,8 +148,8 @@ TEST_CASE("A stage set down on the deck lands, one beside it splashes down", "[l
 namespace {
 
 gnc::BoosterReturnParameters asds_parameters() {
-    const auto stage = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front();
-    return gnc::booster_return_parameters(stage.id, stage.return_profile_for(true));
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    return gnc::booster_return_parameters(cfg, cfg.stages.front(), true);
 }
 
 constexpr double asds_ignition_sink_mps = 270.0;       // [D] Starlink 15-25: ~270 m/s at ~3.0 km (T+476 s)
@@ -428,7 +428,7 @@ TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone
     CHECK(distance_m < 750e3);
     CHECK(session.autopilot().state != sim::AutopilotState::Off);
     CHECK(session.returns_after_staging(session.body(0).vehicle()));
-    CHECK(session.return_parameters(session.body(0).vehicle().stages().front().config).boostback == false);
+    CHECK(session.return_parameters(session.body(0).vehicle()).boostback == false);
     CHECK(session.body(0).vehicle().stages().back().config.payload_mass_kg == m.payload_kg);
 }
 
@@ -472,7 +472,7 @@ TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage"
     // impact point only ~0.1 km in these seconds.
     session.advance_to(session.epoch() + 10.0, 4000);
     const auto& stage = session.body(0);
-    const auto p = session.return_parameters(stage.vehicle().stages().front().config);
+    const auto p = session.return_parameters(stage.vehicle());
     const auto burn = gnc::BoosterReturnGuidance::entry_burn_ahead(stage.vehicle(), p);
     const double ground = session.landing_zone()->height_m;
     const auto impact = gnc::BoosterReturnGuidance::predict_impact(stage, session.environment(), session.epoch(), ground,

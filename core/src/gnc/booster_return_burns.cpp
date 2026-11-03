@@ -139,8 +139,8 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     double a_vertical = 6.0 * zem_up / (t * t) - 2.0 * zev_up / t;
     if (final_engines_) {
         // Along v_ref(h) the reference deceleration is (dv_ref/dh) sink = sink / tau.
-        const double v_ref = touchdown_speed_mps + std::max(height, 0.0) / approach_time_constant_s;
-        a_vertical = -g_up + std::max(sink, 0.0) / approach_time_constant_s + approach_gain_per_s * (sink - v_ref);
+        const double v_ref = touchdown_speed_mps + std::max(height, 0.0) / parameters_.approach_time_constant_s;
+        a_vertical = -g_up + std::max(sink, 0.0) / parameters_.approach_time_constant_s + approach_gain_per_s * (sink - v_ref);
     }
     // Horizontal channel.
     const Vec3 offset_side = (r_fixed - r_pad) - site_up * height;
@@ -169,8 +169,8 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     const double a_up = std::max(a_vertical, 0.1 * g);
     const double tilt_max = final_engines_ ? parameters_.max_tilt_rad : parameters_.max_tilt_ignition_rad;
     const double tilt_limit =
-        std::clamp(height / tilt_taper_height_m, 0.0, 1.0) * std::max(tilt_max - touchdown_tilt_rad, 0.0) +
-        touchdown_tilt_rad;
+        std::clamp(height / tilt_taper_height_m, 0.0, 1.0) * std::max(tilt_max - parameters_.touchdown_tilt_rad, 0.0) +
+        parameters_.touchdown_tilt_rad;
     const double side_limit = a_up * std::tan(tilt_limit);
     if (norm(a_side) > side_limit) a_side = a_side * (side_limit / norm(a_side));
     const Vec3 a_cmd = site_up * a_up + a_side;
@@ -186,7 +186,7 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     cmd.run_groups = groups;
     cmd.time_to_go_s = t;
     cmd.impact_miss_m = norm(offset_side);
-    if (site_.pad && t <= body.vehicle().stages().front().config.landing_legs.deploy_time_s + leg_deploy_margin_s) {
+    if (site_.pad && t <= body.vehicle().stages().front().config.landing_legs.deploy_time_s + parameters_.leg_deploy_margin_s) {
         legs_deployed_ = true;
     }
     // Touchdown sensed (or ground contact): engines off.

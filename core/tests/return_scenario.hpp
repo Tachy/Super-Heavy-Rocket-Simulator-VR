@@ -33,6 +33,11 @@ inline config::VehicleConfig booster_config(const std::string& vehicle_id, doubl
     return cfg;
 }
 
+// The return parameters production builds from the booster's config (RTLS / catch profile).
+inline gnc::BoosterReturnParameters config_return_parameters(const config::VehicleConfig& cfg) {
+    return gnc::booster_return_parameters(cfg, cfg.stages.front());
+}
+
 // Booster state over `site`: CG at `cg_enu_m` (east, north, up from the pad centre on the ground), velocity relative
 // to the ground, body x up and body +y east, then rotated by `tilt_enu` (site frame); co-rotating with the Earth.
 inline vehicle::RigidBodyState state_over_site(const sim::LaunchSite& site, const frames::BodyOrientation& earth,

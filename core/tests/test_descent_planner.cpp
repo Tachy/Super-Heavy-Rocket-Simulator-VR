@@ -202,6 +202,23 @@ static DescentTarget abort_across_a_wall(const Booster& b) {
     return target;
 }
 
+// The box moved across the free plan's way down: its centre where the free plan's CG passes the box's height (the free
+// plan's path depends on the planner's starts, the test on the box lying across it).
+static void box_across_the_path(DescentTarget& target, const DescentPlan& free_plan) {
+    auto& box = target.keep_out_boxes[0];
+    const auto& xs = free_plan.reference.x;
+    for (size_t k = 0; k + 1 < xs.size(); ++k) {
+        const double h0 = xs[k][descent_index::position] - box.center_m.x;
+        const double h1 = xs[k + 1][descent_index::position] - box.center_m.x;
+        if (h0 * h1 > 0.0 || h0 == h1) continue;
+        const double f = h0 / (h0 - h1);
+        box.center_m.y = xs[k][descent_index::position + 1] * (1.0 - f) + xs[k + 1][descent_index::position + 1] * f;
+        box.center_m.z = xs[k][descent_index::position + 2] * (1.0 - f) + xs[k + 1][descent_index::position + 2] * f;
+        return;
+    }
+    FAIL("the free plan never passes the box's height");
+}
+
 static DescentState towards_a_wall(const Booster& b) {
     return make_state(b.vehicle->mass_properties().mass_kg, {1200.0, -60.0, 0.0}, {-250.0, 12.0, 0.0}, Quat{1.0, 0.0, 0.0, 0.0}, {});
 }
@@ -243,6 +260,7 @@ TEST_CASE("An abort plan whose straight path crosses a standby arm goes round it
     open.keep_out_box_count = 0;
     const auto through = plan_descent(b->model, x0, 0, open, s, nullptr, 0.0);
     REQUIRE(through.converged);
+    box_across_the_path(target, through);
     CHECK(keep_out_overlap_m(through.reference, target, 0, through.nodes_per_phase) > 0.0);
 
     const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
@@ -258,6 +276,9 @@ TEST_CASE("A plan that cannot clear a keep-out box reports the overlap", "[gnc][
     const auto x0 = towards_a_wall(*b);
     auto s = settings(*b);
     s.limits.glide_slope_rad = 0.0;
+    auto open = target;
+    open.keep_out_box_count = 0;
+    box_across_the_path(target, plan_descent(b->model, x0, 0, open, s, nullptr, 0.0));
     const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
     INFO("converged " << plan.converged << " overlap " << plan.keep_out_overlap_m);
     CHECK((!plan.converged || plan.keep_out_overlap_m > 0.0));
@@ -669,7 +690,7 @@ std::unique_ptr<Booster> falcon9() {
 
 TEST_CASE("SCvx plans a Falcon 9 touchdown on the landing pad", "[gnc][descent][scvx][falcon9]") {
     const auto b = falcon9();
-    const auto cfg = gnc::booster_return_parameters(b->vehicle->stages()[0].config);
+    const auto cfg = gnc::booster_return_parameters(b->vehicle->source_config(), b->vehicle->stages()[0].config);
     auto s = cfg.scvx.settings;
     s.limits.min_mass_kg = b->vehicle->mass_properties().mass_kg - b->vehicle->propellant_kg() + 3000.0;
     s.limits.approach_time_constant_s = 0.0;  // the single engine cannot hover (see the pad goal)

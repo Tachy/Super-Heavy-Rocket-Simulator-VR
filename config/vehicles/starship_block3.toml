@@ -112,6 +112,8 @@ radius_m = 7.19                         # [E] centre of pressure = drawn outline
 max_deflection_deg = 30.0               # [E]
 rate_deg_s = 30.0                       # [E] electric actuators
 table = "aero/super_heavy_grid_fin.csv"  # [E] lattice derivation (depth, pitch, wall); ca_axial as identified
+max_return_alpha_deg = 8.0              # [E] return coast: the largest angle of attack the fins hold to move the impact
+                                        # point (fin trim authority, heating)
 
 [stage.catch_pins]
 azimuths_deg = [0.0, 180.0]             # [E] on the fin hinge line (user 2026-10-31): the pins lie across the arms, was 45 / 225
@@ -119,6 +121,7 @@ station_m = 63.0                       # [E] hinge station of the grid fins (64.
 protrusion_m = 1.0                     # [E] beyond the hull
 max_load_n = 5.0e6                     # [E] structural limit per pin (~1.9 g of a 275 t booster on two pins)
 away_from_tower_azimuth_deg = 90.0     # [E] the single 90 deg fin looks away from the tower, the fin gap at it (user 2026-10-31)
+max_catch_tilt_deg = 4.0               # [E] thrust tilt from the vertical at the catch (the hull passing the arms; structural)
 
 [stage.recovery]
 method = "tower_catch"
@@ -128,6 +131,23 @@ rcs_propellant_kg = 1700.0               # [D] main-tank RCS gas MECO -> landing
                                          # 49.2 t instead of 50.9 t once the RCS drew it (d1)
 nominal_meco_s = 160.0                   # [E]
 nominal_meco_altitude_m = 65000.0        # [E]
+# Return (gnc::booster_return_parameters). The flip (centre engines at minimum throttle, gimbal) and its duration are
+# derived from the stage at MECO planning (gnc::booster_meco_to_boostback_s); the catch approach time from the final
+# set's throttle range.
+return_flight_time_s = 230.0             # [E] boostback start -> touchdown, the Lambert arc's shape (not searched by
+                                         # the planner)
+boostback_loss_fraction = 0.086          # [D] MECO planning: boostback delta-v beyond the two-body Lambert arc - the
+                                         # drag-aware aim point lies ~60 m/s further, finite burn and tail-off ~70 m/s
+                                         # more (identified on our full block 3 return: 1616 vs 1488 m/s)
+# Landing burn, V3 baseline 13 -> 5 -> 3 [S:satnews_2025_10]: ignition set, divert set, the centre engines to the arms.
+landing_engine_phases = [["center", "divert", "middle"], ["center", "divert"], ["center"]]
+landing_phase_throttles = [0.35, 0.4, 0.4]  # [E] design throttles that time the ignition: flights 13/14 light at
+                                            # ~2.8-2.9 km falling ~0.35-0.4 km/s [D], 13 engines near minimum reproduce
+                                            # that (scenario: 2.88 km at 355 m/s); the centre engines near hover
+landing_switch_sink_mps = [[180.0, 220.0], [15.0, 30.0]]  # 13 -> 5 [D] flights 13/14: five engines at ~200 m/s, ~1.4 km;
+                                                          # 5 -> 3 [E] calm, at a low sink rate
+landing_switch_max_tilt_deg = [0.0, 3.0]          # [E] 5 -> 3 nearly upright: the three centre engines turn the
+landing_switch_max_rate_rad_s = [0.0, 0.03]       # booster slowly (0: no limit)
 
 [stage.rcs]
 type = "cold_gas"                        # gas thrusters fed with autogenous ullage gas from the main tanks [E]

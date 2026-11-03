@@ -132,7 +132,7 @@ double impact_miss_of_ship_m(const sim::AscentProfileRequest& request, const sim
     REQUIRE(session.body_count() == 2);
     session.advance_to(session.epoch() + sim::drone_ship_prediction_after_separation_s, 4000);
     const auto& stage = session.body(0);
-    const auto p = session.return_parameters(stage.vehicle().stages().front().config);
+    const auto p = session.return_parameters(stage.vehicle());
     const auto burn = gnc::BoosterReturnGuidance::entry_burn_ahead(stage.vehicle(), p);
     const auto impact = gnc::BoosterReturnGuidance::predict_impact(stage, session.environment(), session.epoch(),
                                                                    ship->height_m, nullptr, &burn);

@@ -34,6 +34,8 @@ struct ScvxLandingParameters {
     // propellant; beyond, the abort gives the water up from the live state instead of finding out late.
     // [D] flown propellant over the estimate from the abort on (Block 3 booster, shore 765 m): 1.45 from 1500 m, 1.39 from
     // 800 m; from 400 m (needs 1.34+) it ran out 55 m short of the water. 1.5: those two go, 400 m gives the water up.
+    // Re-measured with the derived 1.4 s catch approach and the engines cut at the abort plan's end (planner plan
+    // Task 5): 1.41 from 1500 m, 1.41 from 800 m; 400 m now lies on the edge (in reach by 43 kg, flown 4.4 t left).
     double sea_reach_margin = 1.5;
     // [E] A plan for the target may tilt the final set at most this far beyond its soft limit (more than the start
     // state already does); beyond, the target counts as out of reach (abort where there is a sea). The soft limits keep

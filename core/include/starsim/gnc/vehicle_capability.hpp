@@ -58,4 +58,17 @@ double rcs_pitch_acceleration_radps2(const config::StageConfig& stage, double in
 // (2 sqrt(angle / accel)). Throws std::invalid_argument for accel_radps2 <= 0 (no authority: the turn never ends).
 double flip_duration_s(double angle_rad, double accel_radps2, double max_rate_radps);
 
+// The same rest-to-rest turn through total_rad: the time until the axis is within tolerance_rad of its end (a burn that
+// lights inside a pointing tolerance). tolerance_rad >= total_rad: 0.
+double turn_time_within_s(double total_rad, double tolerance_rad, double accel_radps2, double max_rate_radps);
+
+// A free turn from rest (no braking): accelerate up to max_rate_radps (<= 0: no cap), then coast; the time to turn
+// through angle_rad. Throws std::invalid_argument for accel_radps2 <= 0.
+double free_turn_time_s(double angle_rad, double accel_radps2, double max_rate_radps);
+
+// The time the slowest engine of a set runs its whole throttle range, (throttle_max - throttle_min) / throttle_rate
+// (0: no engine with a throttle rate). groups: as engine_set_thrust.
+double throttle_range_time_s(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                             const std::vector<std::string>& groups);
+
 }  // namespace starsim::gnc
