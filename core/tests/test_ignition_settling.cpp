@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -13,6 +14,8 @@
 
 #include "refuelling_test_support.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/config/mission_config.hpp"
+#include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/boil_off.hpp"
@@ -73,6 +76,16 @@ struct TankerInOrbit : refuelling_test::DepotSession {
         return false;
     }
 };
+
+// The tanker's phasing orbit (perigee and apogee heights, m) from the mission configs: tanker_flight's [phasing]
+// periapsis after the raise, the ascent's apoapsis. Cases that drift free for hours fly here: the 120 km insertion
+// perigee is raised at the first apoapsis; drifting on there for 4 h (about 101 km per pass with J2 against the
+// two-body placement) the tumbling hull's drag brings the apoapsis down 188 -> 130 km and it falls before 4 h.
+std::pair<double, double> tanker_phasing_orbit() {
+    const auto flight = config::load_refuelling_flight_mission(config_dir, "tanker_flight");
+    const auto ascent = config::load_ascent_mission(config_dir, flight.ascent_id);
+    return {flight.phasing_periapsis_height_m.value_or(ascent.periapsis_height_m), ascent.apoapsis_height_m};
+}
 
 }  // namespace
 
@@ -366,7 +379,8 @@ TEST_CASE("The autopilot settles before a raise burn and the burn flies", "[igni
 // The final states are not compared: the 10 s and 600 s runs end ~8 m/s apart with the flag off too (pre-existing).
 TEST_CASE("Settling: the coast stops before the lead in 10 s and in 600 s steps", "[ignition_settling][sim]") {
     test::spice_session();
-    TankerInOrbit fine(100e3), coarse(100e3);
+    const auto [periapsis_m, apoapsis_m] = tanker_phasing_orbit();
+    TankerInOrbit fine(100e3, periapsis_m, apoapsis_m), coarse(100e3, periapsis_m, apoapsis_m);
     for (auto* f : {&fine, &coarse}) {
         run_to(f->session, f->t0 + 2.0 * 3600.0, 600.0);  // both at the same epoch
         REQUIRE_FALSE(f->vehicle().stage_settled(0));
@@ -384,7 +398,8 @@ TEST_CASE("Settling: the coast stops before the lead in 10 s and in 600 s steps"
 
 TEST_CASE("Settling: the turn to the burn ends before the push, the ignition is not held", "[ignition_settling][sim][slow]") {
     test::spice_session();
-    TankerInOrbit f(100e3);
+    const auto [periapsis_m, apoapsis_m] = tanker_phasing_orbit();
+    TankerInOrbit f(100e3, periapsis_m, apoapsis_m);
     run_to(f.session, f.t0 + 2.0 * 3600.0, 600.0);
     REQUIRE_FALSE(f.vehicle().stage_settled(0));
     auto node = prograde(f.session, 7200.0, 100.0);

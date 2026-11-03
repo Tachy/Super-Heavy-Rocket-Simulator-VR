@@ -447,7 +447,10 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   events, free depot decay, HLS extra demand; reference, per-window and lever campaigns `[slow]`);
   `[ignition_settling]` (`test_ignition_settling.cpp`: progress and travel, PMD and header feed, ingestion in / out of
   orbit and with the flag off, the push before a raise burn, coast stop in 10 s and 600 s steps, the held ignition,
-  manual settle, the turn before the push, the allocator query, the gas bound and estimates);
+  manual settle, the turn before the push, the allocator query, the gas bound and estimates; the two cases that drift
+  free for 4 h (coast stop, turn before the push) fly in the tanker's phasing orbit from the mission configs,
+  tanker_flight `[phasing]` 170 km x tanker_ascent 190 km: at the 120 km insertion perigee, which the mission raises at
+  the first apoapsis, the free-drifting hull tumbles in the perigee air and falls at ~14,000 s);
   `[campaign_flown]` (`test_refuelling_campaign_flight.cpp`: supervisor, keep_station, place_vehicle, reboost, live
   start, free depot decay; placed and full campaign `[slow]`); `tools/test_vehicle_report.py`.
 - Reference flights (re-measured 2026-11-03 after the Raptor 3 nozzle 1.30 m, vacuum Isp 350 -> 346.2 s): tanker residue
