@@ -7,16 +7,44 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Reds since 47904b6 (ship hull CP table, station fade Mach 1-4, nose 17 -> 13.4 m), found by the full run 2026-11-03 (`.superpowers/sdd/test-audit/reds-report.md`), not re-pinned: the two settling cases of `test_ignition_settling.cpp` (the drifting tanker in a ~100 km perigee orbit turns side-on, apoapsis 183 -> 117 km in one pass, hits the ground ~2100 s before the burn; open: test orbit or attitude hold while drifting, check mission tankers); (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (interface speed -68..-82 m/s, braking +78..+96 m/s, TEI -1.9/+3.4/-0.2 m/s LLO/NRHO/aircatch against the stored reference plans).
 - Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, -1.1 % vacuum Isp on
   every Raptor burn; nothing tuned back; measured `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/t1-{before,after}-full.log`):
-  - "Starship ascent to flight 14's insertion orbit": the plan is infeasible ("Die Oberstufe erreicht den Zielorbit nicht");
-    before kick 16.09 deg, 165.0 x 277.3 km, 35.6 t left in the ship. With the 255 t ship dry mass [D, probably too high,
-    `vehicle-data.md`] the ship no longer reaches flight 14's orbit with booster return: a vehicle-parameter item.
-  - "Ship return campaign: dispersions 1-3" case 1 and "4-6" case 2: gate miss 356 m / 638 m (limit 100 m), aborted, 3.7 /
-    0.1 t left (before 2 m / 4 m, caught with 7.9 / 7.0 t); the other four cases unchanged (miss 0-9 m).
-  - "Lunar return campaign (direct): seed 15": upright abort, 3.7 t left (before caught, 4.2 t); same TEI / braking.
+  - "Starship ascent to flight 14's insertion orbit": physically out of reach, for the user (Task 1c, re-checked
+    2026-11-03): every kick of the search (5.6-22.6 deg, 10 trials) runs the ship's main tanks dry before cutoff (the
+    six engines starve with the 35.1 t of header propellant left, mass 342.1 t); the best trial (kick 15.5 deg) is in
+    74 x 165 km at 7777.7 m/s against 7838.1 m/s for 165 x 276 km at 165 km: ~60 m/s, ~5.6 t of main propellant short
+    (before the nozzle 0.6 t of main propellant to spare). Kick, MECO (from the catch) and the mission's target and
+    payload (52 t [E]) leave no other freedom; the item is the 255 t ship dry mass [D, probably too high,
+    `vehicle-data.md`] / the payload. Not tuned.
+  - "Ship return campaign: dispersions 1-3" case 1: green since Task 1c (fresh SCvx catch plans escalate the soft
+    attitude penalty, `gnc-core.md`): gate miss 72 m, caught with 0.2 t (before the fix: catch plan cycled, abort, 5.1 t).
+    The gate miss of 72 m comes from the roll oscillation below.
+  - "Ship return campaign: dispersions 4-6" case 2 (dispersed index 5): still red. Entry departure in the subsonic
+    terminal phase: from the basis freeze (h 13 km, Mach 0.69, nose turn to the tower, alpha 86 deg commanded) a roll
+    oscillation (+-0.3 rad/s) grows, both forward flaps sit on their 90 deg stop and the RCS saturates in yaw; the
+    attitude error grows ~2.7 deg/s to 80 deg, the ship arrives tail first at 2.66 km / 183 m/s sink, 479 m off, abort
+    (11.7 t left after Task 1c, 5.2 t before). Case 1 shows the same oscillation milder (it reaches the gate); caught cases fly the turn at
+    < 0.02 rad/s. The known yaw-authority shortfall at the nose turn (demand ~1e6 vs +-8.4e5 N m, `ship-entry-return.md`);
+    a ~0.1 % mass change at entry flips the case. Fix belongs to the entry guidance's nose turn within the flap / RCS
+    authority (plan Task 4), not done in Task 1c.
+  - "Ship return campaign: orbit phase 0-135 deg" case 1 (phase 45 deg): red since the inner rings / settled-column
+    commits (found by the Task 1c re-measure, red without the Task 1c changes too): the same terminal entry departure
+    (alpha 80 commanded, aoa 153-172 deg from h ~8 km), gate at 270 m/s sink, 1028 m off, abort, 0.0 t left. Same
+    open fix as above (Task 4).
+  - "Lunar return seed-18 gate is caught" ([ship][catch][lunar], gate replay): red since the inner rings / settled-
+    column commits (red without the Task 1c changes too): plans converge (22, none failed), the ship reaches the arms
+    at 6.2 m/s sink ("verfehlt") with 3.8 t left - the main-tank residue the engines cannot reach: the headers (35.0 t
+    at the gate, 29.0 t burnable at the flip end) run dry in the last ~3 s. Task 1c made the plans' floor count only
+    the burnable header propellant (`gnc::feed_propellant_kg`, it counted the 3.85 t residue before); the case still
+    ends on the floor with the flight's +1.9 % thrust / +10.5 % density dispersion. Open: whether this gate has a
+    catch within the headers at all (propellant margin of the catch from the flip end).
+  - `tanker_flight` reference: main at catch re-measured 0.37 -> 0.68 t (inner rings / settled-column commits; the
+    other tanker numbers within 1 % / 0.3 t, kept).
+  - "Lunar return campaign (direct): seed 15": green since Task 1c (same SCvx fix): caught with 3.6 t (cause: first catch
+    plan cycled at the default soft-limit penalty, virtual control 1.3e-12, defect 0.087, abort -> upright 3.8 t).
     Seed 2 stays red (known).
-  - "Lunar return aerocapture: captured - perigee raised - caught by b4": impacted, 5.5 t left (before caught, 12.5 t).
-  - "A commanded abort late in the landing burn ditches the booster at sea": abort at 800 m ditches with 0.5 t left
-    (limit > 1 t; before 4.1 t); 1500 m and 400 m pass.
+  - "Lunar return aerocapture: captured - perigee raised - caught by b4": green again after the inner rings / inertia
+    commits (re-checked 2026-11-03, Task 1c): caught, 11.9 t left.
+  - "A commanded abort late in the landing burn ditches the booster at sea": green again after the inner rings / inertia
+    commits (re-checked): 800 m ditches with 3.3 t (1500 m 6.7 t, 400 m lands on land 28.0 t as before).
   - Turned green: "Docked tanker: the ship return flies to the catch".
   - Refuelling reference flights re-measured (`config/refuelling/reference_flights.toml`, `refuelling.md`); the
     calculator answers 13 tankers / 52.4 d (was 12 / 51.0 d); the campaign offsets are not re-calibrated (full flown

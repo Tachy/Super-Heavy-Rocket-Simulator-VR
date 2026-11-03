@@ -43,7 +43,7 @@ chilldown_t = 0.42                 # [D] vented
 settling_gas_t = 0.98              # [D] planned kick 2026-10-23 (max-Q: 0.90, staging: 0.94, f2: 0.92): the transfer's
                                    # settling push (r4)
 main_at_undock_t = 12.59           # [D] the reserve kept for the return
-main_at_catch_t = 0.37             # [D] Raptor nozzle 1.30 m 2026-11-03; vehicle physics 2026-11-01: 0.0, caught on the header tanks (1.38); M8a site heights (planned kick: 1.21, max-Q: 1.08, staging: 1.19, f2: 1.88):
+main_at_catch_t = 0.68             # [D] planner plan Task 1c re-check 2026-11-03 (inner rings, settled-column bit fix; the other tanker numbers within their 1 % / 0.3 t, kept): Raptor nozzle 1.30 m 2026-11-03: 0.37; vehicle physics 2026-11-01: 0.0, caught on the header tanks (1.38); M8a site heights (planned kick: 1.21, max-Q: 1.08, staging: 1.19, f2: 1.88):
                                    # what the reserve left over
 dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> residue +9.9 / +19.8 t
 # [D] f2 2026-10-21: the tanker with 99.7 t main in a 24 h free coast (the phasing flight between its burns), the flown

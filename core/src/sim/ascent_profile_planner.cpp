@@ -176,7 +176,28 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
                 if (i != index) session.end_booster_return(i);
             }
             const bool running = session.telemetry(index).engines_running > 0;
-            if (upper_lit && !running) return {nan, "Die Oberstufe ist vor Brennschluss leer."};
+            if (upper_lit && !running) {
+                if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
+                    const auto& upper = body.vehicle().stages().front();
+                    int starved = 0, failed = 0;
+                    for (const auto& e : upper.engines) {
+                        starved += e.starved;
+                        failed += e.failed;
+                    }
+                    const auto& s = body.state();
+                    const auto e = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps},
+                                                              session.gm_earth_m3ps2());
+                    const double rp = e.semi_major_axis_m * (1.0 - e.eccentricity);
+                    const double ra = e.semi_major_axis_m * (1.0 + e.eccentricity);
+                    std::printf("  [ascent planner] upper stage out T+%.1f s: %.1f kg main, %.1f kg total, %d starved, "
+                                "%d failed, %zu engines, osculating %.1f x %.1f km, speed %.1f m/s, mass %.0f kg\n",
+                                session.mission_time_s(), stage_propellant_kg(upper), body.vehicle().propellant_kg(),
+                                starved, failed, upper.engines.size(), (rp - constants::wgs84_semi_major_axis_m) / 1e3,
+                                (ra - constants::wgs84_semi_major_axis_m) / 1e3, math::norm(s.velocity_gcrf_mps),
+                                body.vehicle().mass_properties().mass_kg);
+                }
+                return {nan, "Die Oberstufe ist vor Brennschluss leer."};
+            }
             upper_lit = upper_lit || running;
             continue;
         }
