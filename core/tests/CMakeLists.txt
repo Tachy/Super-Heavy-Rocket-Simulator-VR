@@ -117,6 +117,7 @@ add_executable(starsim_core_tests
     test_lunar_powered_descent.cpp
     test_differential_throttle.cpp
     test_booster_return.cpp
+    test_booster_return_prediction.cpp
     test_descent_telemetry.cpp
     test_grid_fins.cpp
     test_flaps.cpp

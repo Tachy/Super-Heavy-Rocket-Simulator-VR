@@ -1000,8 +1000,11 @@ TEST_CASE("Predicted events follow the plan", "[timeline]") {
     check_plan(second);
 
     // while the deorbit burn is lit the entry interface stays predicted (the burn is the plan's node)
+    // (steps of <= 1 s from 20 s before the predicted ignition: a coarse step may end after the 7 s burn)
     while (!session.autopilot().burn.ignite && session.autopilot().state == sim::AutopilotState::Burn) {
-        session.advance_to(session.epoch() + 10.0, 400000);
+        const auto* next = find_predicted(t, MissionEventKind::Ignition);
+        const bool near_ignition = next == nullptr || next->epoch - session.epoch() < 20.0;
+        session.advance_to(session.epoch() + (near_ignition ? 1.0 : 10.0), 400000);
     }
     session.advance_to(session.epoch() + 2.0, 1000);
     REQUIRE(session.autopilot().state == sim::AutopilotState::Burn);
