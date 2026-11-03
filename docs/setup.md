@@ -67,6 +67,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (exception: the write-once plan cache `build/plan_cache`, Task 5 of the 2026-10-23 follow-ups: content-addressed,
   files renamed into place, wiped on every test relink, active only through `STARSIM_PLAN_CACHE_DIR` set by the test
   CMake; a test that asserts trial flights calls `sim::disable_plan_cache()`).
+- Headless Godot tests (run after changes in `game/`): `powershell -ExecutionPolicy Bypass -File tools/run_godot_tests.ps1`
+  runs every `game/tests/*_test.gd` with `--headless`, time and exit code per script in `build/godot_tests.log`, exit 1 if any
+  fails. Scripts needing the generated models (`docking_mechanism_test`, `tower_view_test`, `vehicle_view_test`) are skipped
+  unless `-Gpu`; `-Only a,b` selects scripts. Needs the built GDExtension. Scripts not named `*_test` are GPU checks or tools.
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
   `--lat= --lon= --look_at_moon --fov=`; clouds with `--weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid>,<fraction>`

@@ -1,3 +1,4 @@
+# Desktop run (GPU, windowed), a TOOL not a test: it has no *_test name and the headless runner (tools/run_godot_tests.ps1) never runs it.
 # Desktop run of the free camera: enters it from the Earth view, flies it by a synthetic command, checks the pose and the
 # panel; no HOTAS needed. Run (GPU, windowed): godot --path game --script res://tests/free_camera_run.gd
 extends SceneTree
