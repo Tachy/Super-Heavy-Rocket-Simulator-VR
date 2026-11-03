@@ -99,6 +99,14 @@ Per value:
 - [ ] Step 2: implement, wire every production call site; K values = today's numbers (neutral).
 - [ ] Step 3: `-Fast -TestFilter "[ship][landing],[config]"` green; then `[slow]` of `[catch]`, `[ship]` reduced lunar cases; before/after into the report. Commit `feat(gnc): ship landing parameters from vehicle config`.
 
+### Task 3b: Realistic ship dry mass (Opus)
+
+User 2026-11-03: "Leermasse realistischer." (asked after flight 14's ascent stayed ~60 m/s / 5.6 t short at every kick with 255 t dry and 52 t payload.) Evidence in `docs/known-issues.md` (ship aero frozen entry, ~:83-93): the 255 t [D] came from the rocket equation over webcast gauges that exclude the landing propellant, so it contains it; flight 12's one-engine phase allows m <= 209-218 t at 280 tf; judgement about 175 +-25 t. `docs/history/vehicle-data.md:83`, `tools/telemetry/mass_estimate.py`, `ship_dv.py`.
+
+- Re-derive the dry mass from the flight data with the landing propellant separated (tool change, documented), cross-check with the one-engine bound and the 175 +-25 t judgement; set `starship_block3.toml` ship dry mass and dry CG (the CG must follow the mass distribution, not stay at 23.516 m by default) [D with source]; tanker, HLS, depot via `from =` checked (HLS keeps its own 120 t [E] if it overrides).
+- `python tools/vehicle_report.py` for every ship-based vehicle.
+- Re-fly with single cases by name: flight 14 ascent (must reach its orbit now), one ship catch, one entry replay per flight 12-14 (the `[nightly][webcast]` ship entry report case once, read not gated), tanker_flight. Reds follow the planner rule (fix in planners, or Task 4 for entry authority). Update known-issues (frozen-aero entry: what the new mass does to the replay table), subsystem docs, history (255 t).
+
 ### Task 4: Ship entry guidance from config (Opus)
 
 Items: `entry_guidance.hpp:33-55`; `flight_session.cpp:440-441` uses raw defaults; lunar preset (q 32 kPa) in `lunar_return()`.
