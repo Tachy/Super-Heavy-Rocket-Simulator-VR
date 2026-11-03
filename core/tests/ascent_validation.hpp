@@ -10,6 +10,7 @@
 
 #include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/time/epoch.hpp"
+#include "webcast_report.hpp"
 
 namespace starsim::test {
 
@@ -62,6 +63,8 @@ struct Comparison {
     bool within() const { return std::abs(simulated - recorded) <= bound(); }
 };
 void print(const std::string& flight, const Comparison& c);
+// The same comparison as a webcast report row (reference = the recorded value, tolerance = bound()).
+WebcastRow webcast_row(const std::string& flight, const Comparison& c, const std::string& parameters);
 
 // [E] Margin of an allowance over its measured gap: a regression beyond the documented discrepancy fails.
 inline constexpr double allowance_margin = 0.02;

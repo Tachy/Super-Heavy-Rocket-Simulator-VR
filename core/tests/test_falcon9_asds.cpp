@@ -25,6 +25,7 @@
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -279,9 +280,17 @@ TEST_CASE("A falling Falcon 9 stage flies its drone-ship entry burn on three eng
     CHECK(run.ignition_altitude_m > 64.0e3);
     CHECK(run.delta_v_mps >= 880.0);
     CHECK(run.delta_v_mps < 900.0);
-    // [D] gauge 6.1 -> 2.85 % of 425 t = 13.8 t; the rocket equation on 880 m/s gives 12.6 t from 24.7 t.
-    CHECK(std::abs(run.used_kg - 13200.0) < 1000.0);
     CHECK(horizontal_m(error) < 300.0);
+}
+
+TEST_CASE("A falling Falcon 9 stage's drone-ship entry burn: propellant against the webcast gauge (report)",
+          "[nightly][webcast][gnc][falcon9][asds]") {
+    const auto run = fly_entry_burn({0.0, -40e3, 75e3}, 0.0);
+    REQUIRE(run.burned);
+    // [D] gauge 6.1 -> 2.85 % of 425 t = 13.8 t; the rocket equation on 880 m/s gives 12.6 t from 24.7 t.
+    test::webcast_report("falcon9_asds_entry_burn",
+                         {{"entry burn propellant [t]", run.used_kg / 1e3, 13.2, 1.0, "Starlink 15-25 gauge [D]",
+                           "stage mass, Merlin Isp, entry burn delta-v"}});
 }
 
 TEST_CASE("The drone-ship entry burn steers the impact onto the deck", "[gnc][falcon9][asds]") {
@@ -477,7 +486,18 @@ TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage"
                 geo.latitude_rad / deg, geo.longitude_rad / deg);
 }
 
-TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage landed on the deck", "[gnc][falcon9][asds][validation][ascent_planner]") {
+namespace {
+
+struct AsdsFlight {
+    double meco_s = -1.0, entry_s = -1.0, entry_pointing_deg = 0.0, landing_s = -1.0, landing_h = 0.0, landing_v = 0.0,
+           landing_kg = 0.0, offset_m = 0.0, periapsis_km = 0.0, apoapsis_km = 0.0;
+    bool orbit_reached = false;
+    sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+};
+
+// Liftoff of the falcon9_asds mission to the stage's touchdown on the deck and the second stage's orbit (the gate case and
+// the webcast report fly the same flight).
+AsdsFlight fly_asds_mission() {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
@@ -562,9 +582,6 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
     std::printf("[validation] Falcon 9 ASDS: %.1f t to %.0f x %.0f km, i = %.2f deg (%s at T+%.0f s, %.1f t left in stage 2)\n", m.payload_kg / 1e3,
                 periapsis_km, apoapsis_km, orbit.inclination_rad / deg, sim::to_string(session.autopilot().state),
                 session.mission_time_s(), upper.vehicle().propellant_kg() / 1e3);
-    CHECK(session.autopilot().state == sim::AutopilotState::Orbit);
-    CHECK(std::abs(periapsis_km - 200.0) < 5.0);
-    CHECK(std::abs(apoapsis_km - 280.0) < 5.0);
     std::printf("[validation] Falcon 9 ASDS: MECO T+%.0f s at %.1f km, %.0f km/h, %.1f t (Starlink 15-25: T+149 s, 60 km, "
                 "~8000 km/h, gauge ~47 t); entry burn T+%.0f s at %.1f km, %.0f km/h, %.1f t, %.1f deg off the burn axis "
                 "(T+364 s, 67.4 km, ~7900 km/h, 25.9 t) to T+%.0f s, %.0f km/h (T+386 s, ~5250 km/h); landing burn T+%.0f "
@@ -573,23 +590,52 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
                 meco_s, meco_h / 1e3, meco_v * 3.6, meco_kg / 1e3, entry_s, entry_h / 1e3, entry_v * 3.6, entry_kg / 1e3,
                 entry_pointing_deg, entry_end_s, entry_end_v * 3.6, landing_s, landing_h / 1e3, landing_v,
                 landing_kg / 1e3, sim::to_string(outcome), touchdown_s, std::hypot(p.x, p.y), left_kg / 1e3);
-    CHECK(meco_s > 0.0);
-    CHECK(entry_s > 0.0);
-    CHECK(entry_pointing_deg < 15.0);  // turned engines first on the RCS before the burn
-    CHECK(landing_s > 0.0);
-    CHECK(outcome == sim::LandingOutcome::Landed);
-    CHECK(std::hypot(p.x, p.y) < 5.0);
-    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.0 km, ~270 m/s, 11.9 t.
-    CHECK(std::abs(landing_kg - 12100.0) < 1000.0);
-    CHECK(landing_h > 2500.0);
-    CHECK(landing_h < 4000.0);
-    CHECK(std::abs(landing_v - 270.0) < 40.0);
-    // Timeline [D] of Starlink 15-25: entry burn T+364 s, landing burn T+476 s. Ascent Task 2 (the max-Q limit instead
-    // of the CRS-35 schedule's ~95 % after the bucket, then still the mission's fixed 13 deg kick): separation at 75 km
-    // on a 30.6 deg path (Starlink 15-25: 60 km, ~25 deg) - the higher arc put entry burn and landing burn at T+429 /
-    // T+514 s (bounds 25 -> 75 / 50 s). Since Task 5 the kick is planned before the launch (13.93 deg).
-    CHECK(std::abs(entry_s - 364.0) < 75.0);
-    CHECK(std::abs(landing_s - 476.0) < 50.0);
+    AsdsFlight f;
+    f.meco_s = meco_s;
+    f.entry_s = entry_s;
+    f.entry_pointing_deg = entry_pointing_deg;
+    f.landing_s = landing_s;
+    f.landing_h = landing_h;
+    f.landing_v = landing_v;
+    f.landing_kg = landing_kg;
+    f.offset_m = std::hypot(p.x, p.y);
+    f.periapsis_km = periapsis_km;
+    f.apoapsis_km = apoapsis_km;
+    f.orbit_reached = session.autopilot().state == sim::AutopilotState::Orbit;
+    f.outcome = outcome;
+    return f;
+}
+
+}  // namespace
+
+TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage landed on the deck", "[gnc][falcon9][asds][validation][ascent_planner]") {
+    // Physical gates only (user 2026-11-03): the agreement with the Starlink 15-25 timeline is the nightly report below.
+    const auto f = fly_asds_mission();
+    CHECK(f.orbit_reached);
+    CHECK(std::abs(f.periapsis_km - 200.0) < 5.0);
+    CHECK(std::abs(f.apoapsis_km - 280.0) < 5.0);
+    CHECK(f.meco_s > 0.0);
+    CHECK(f.entry_s > 0.0);
+    CHECK(f.entry_pointing_deg < 15.0);  // turned engines first on the RCS before the burn
+    CHECK(f.landing_s > 0.0);
+    CHECK(f.outcome == sim::LandingOutcome::Landed);
+    CHECK(f.offset_m < 5.0);
+}
+
+TEST_CASE("Falcon 9 drone-ship mission: agreement with the Starlink 15-25 timeline (report)", "[nightly][webcast][falcon9][asds][ascent_planner]") {
+    const auto f = fly_asds_mission();
+    const std::string params = "landing-burn plan, entry-burn plan, descent drag (Cd table), propellant at MECO, kick";
+    const std::string src = "Starlink 15-25 telemetry";
+    // Ascent Task 2 (the max-Q limit instead of the CRS-35 schedule's ~95 % after the bucket): separation at 75 km on a
+    // 30.6 deg path (Starlink 15-25: 60 km, ~25 deg); the former bounds were 75 s / 50 s.
+    test::webcast_report("falcon9_asds_timeline",
+                         {
+                             {"landing-burn propellant [t]", f.landing_kg / 1e3, 12.1, 1.0, src, params},
+                             {"landing-burn ignition height [km]", f.landing_h / 1e3, 3.25, 0.75, src + " (~3.0 km; 2.5-4 km band)", params},
+                             {"landing-burn ignition speed [m/s]", f.landing_v, 270.0, 40.0, src, params},
+                             {"entry burn time [s]", f.entry_s, 364.0, 75.0, src + " timeline [D]", params},
+                             {"landing burn time [s]", f.landing_s, 476.0, 50.0, src + " timeline [D]", params},
+                         });
 }
 
 namespace {

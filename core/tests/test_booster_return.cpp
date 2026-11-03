@@ -22,6 +22,7 @@
 #include "starsim/spice/spice_adapters.hpp"
 #include "return_scenario.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 
@@ -229,15 +230,15 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
     CHECK(ignition_roll_error_deg < test::flown_ignition_roll_error_bound_deg);
 }
 
-// The ascent autopilot plans MECO from what the return needs (flip, boostback, the propellant kept for the landing
-// burn), not from a fixed reserve: the booster lights its landing burn with the planned propellant. On the flight-like
-// ascent the return keeps flight 14's timeline (our webcast table and video readings, tests/validation/telemetry):
-// boostback ~T+152-187 s (31 -> 11 -> 3 engines), apogee 98.9 km at T+240 s, landing-burn ignition ~T+398 s. The
-// booster's gauge is not followed after staging (user 2026-10-14: physics first): it shows 11.8 % (431 t) at the
-// boostback's start, falls faster than the engines can burn (13 engines: ~15 t/s against ~10.5 t/s at full thrust) and
-// 77 t in the last 12 s on 3 engines (~30 t burnt); our return needs ~300 t there.
-TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned propellant, within the FAA residual",
-          "[gnc][booster][validation][slow][ascent_planner]") {
+namespace {
+
+struct PlannedReturn {
+    double ignition_propellant_kg = -1.0, ignition_s = -1.0, boostback_start_kg = -1.0;
+    double boostback_start_s = -1.0, boostback_end_s = -1.0, apogee_km = 0.0, apogee_s = -1.0;
+};
+
+// Liftoff like flight 14 to the landing-burn ignition of the planned return (the gate case and the webcast report fly the same flight).
+PlannedReturn fly_planned_return() {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
@@ -245,8 +246,14 @@ TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned pr
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
     start_flight_like_ascent(session, t0);
-    double ignition_propellant_kg = -1.0, ignition_s = -1.0, boostback_start_kg = -1.0;
-    double boostback_start_s = -1.0, boostback_end_s = -1.0, apogee_km = 0.0, apogee_s = -1.0;
+    PlannedReturn f;
+    double& ignition_propellant_kg = f.ignition_propellant_kg;
+    double& ignition_s = f.ignition_s;
+    double& boostback_start_kg = f.boostback_start_kg;
+    double& boostback_start_s = f.boostback_start_s;
+    double& boostback_end_s = f.boostback_end_s;
+    double& apogee_km = f.apogee_km;
+    double& apogee_s = f.apogee_s;
     for (double t = 0.25; t < 1200.0 && ignition_propellant_kg < 0.0; t += 0.25) {
         session.advance_to(t0 + t, 1000);
         if (session.body_count() < 2) continue;
@@ -272,23 +279,47 @@ TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned pr
             ignition_s = t_mission;
         }
     }
+    return f;
+}
+
+}  // namespace
+
+// The ascent autopilot plans MECO from what the return needs (flip, boostback, the propellant kept for the landing
+// burn), not from a fixed reserve: the booster lights its landing burn with the planned propellant. On the flight-like
+// ascent the return keeps flight 14's timeline (our webcast table and video readings, tests/validation/telemetry):
+// boostback ~T+152-187 s (31 -> 11 -> 3 engines), apogee 98.9 km at T+240 s, landing-burn ignition ~T+398 s. The
+// booster's gauge is not followed after staging (user 2026-10-14: physics first): it shows 11.8 % (431 t) at the
+// boostback's start, falls faster than the engines can burn (13 engines: ~15 t/s against ~10.5 t/s at full thrust) and
+// 77 t in the last 12 s on 3 engines (~30 t burnt); our return needs ~300 t there.
+TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned propellant, within the FAA residual",
+          "[gnc][booster][validation][slow][ascent_planner]") {
+    // Physical gates only (user 2026-11-03): the agreement with flight 14's timeline is the nightly report below.
+    const auto f = fly_planned_return();
     const double planned_kg =
         config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages.front().landing_propellant_kg;
-    std::printf("[validation] starship_block3 return: boostback T+%.0f-%.0f s from %.0f t (flight 14: ~T+152-187 s, gauge "
-                "431 t), apogee %.1f km at T+%.0f s (98.9 km at T+240 s), landing-burn ignition T+%.0f s (~T+398 s) with "
-                "%.1f t, planned %.1f t (FAA EA: <= 74 t)\n",
-                boostback_start_s, boostback_end_s, boostback_start_kg / 1e3, apogee_km, apogee_s, ignition_s,
-                ignition_propellant_kg / 1e3, planned_kg / 1e3);
-    CHECK(std::abs(boostback_start_s - 152.0) < 5.0);
-    // ascent Task 2 (operational throttle 0.88 + q limit instead of the speed-fitted schedule; the stack is faster than
-    // flight 14, MECO earlier): apogee T+221 s, ignition T+383 s (bounds 15 -> 25 s)
-    CHECK(std::abs(apogee_s - 240.0) < 25.0);
-    CHECK(std::abs(apogee_km - 98.9) < 10.0);
-    CHECK(std::abs(ignition_s - 398.0) < 25.0);
-    REQUIRE(ignition_propellant_kg >= 0.0);
-    CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
+    std::printf("[validation] starship_block3 return: boostback T+%.0f-%.0f s from %.0f t, apogee %.1f km at T+%.0f s, "
+                "landing-burn ignition T+%.0f s with %.1f t, planned %.1f t (FAA EA: <= 74 t)\n",
+                f.boostback_start_s, f.boostback_end_s, f.boostback_start_kg / 1e3, f.apogee_km, f.apogee_s, f.ignition_s,
+                f.ignition_propellant_kg / 1e3, planned_kg / 1e3);
+    REQUIRE(f.ignition_propellant_kg >= 0.0);
+    CHECK(f.ignition_propellant_kg <= faa_landing_propellant_kg);
     REQUIRE(planned_kg > 0.0);
-    CHECK(std::abs(ignition_propellant_kg - planned_kg) < 3.0e3);  // model: two-body flip coast, no drag/gravity loss
+    CHECK(std::abs(f.ignition_propellant_kg - planned_kg) < 3.0e3);  // model: two-body flip coast, no drag/gravity loss
     // The MECO plan budgets the RCS gas from the main tanks (d1 review: without it 1.7 t short).
-    CHECK(ignition_propellant_kg > planned_kg - 1.0e3);
+    CHECK(f.ignition_propellant_kg > planned_kg - 1.0e3);
+}
+
+TEST_CASE("Block 3 booster return: agreement with flight 14's timeline (report)", "[nightly][webcast][gnc][booster][ascent_planner]") {
+    const auto f = fly_planned_return();
+    const std::string params = "liftoff mass, Raptor thrust, throttle (operational 0.88 + q limit), boostback plan, drag";
+    const std::string src = "flight 14 webcast";
+    test::webcast_report(
+        "booster_return_flight14",
+        {
+            {"boostback start [s]", f.boostback_start_s, 152.0, 5.0, src, params},
+            // ascent Task 2: the stack is faster than flight 14, MECO earlier; apogee T+221 s, ignition T+383 s (bounds 15 -> 25 s)
+            {"apogee time [s]", f.apogee_s, 240.0, 25.0, src, params},
+            {"apogee altitude [km]", f.apogee_km, 98.9, 10.0, src, params},
+            {"landing-burn ignition time [s]", f.ignition_s, 398.0, 25.0, src, params},
+        });
 }

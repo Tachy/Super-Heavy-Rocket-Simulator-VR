@@ -13,6 +13,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 
@@ -79,8 +80,9 @@ const test::FlownAscent& flight14() {
 
 }  // namespace
 
-TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast telemetry",
+TEST_CASE("Starship ascent to flight 14's insertion orbit",
           "[gnc][validation][ascent][slow][ascent_planner]") {
+    // Physical gates only (user 2026-11-03): the agreement with the webcast telemetry is the nightly report below.
     const auto& a = flight14();
     REQUIRE(a.plan.feasible);
     REQUIRE(a.seco_s > 0.0);
@@ -92,6 +94,14 @@ TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast te
     CHECK(std::abs(a.periapsis_km - 165.0) < 5.0);
     CHECK(std::abs(a.apoapsis_km - 276.0) < 5.0);
     CHECK(std::abs(a.inclination_deg - 30.5) < 0.1);
+}
+
+TEST_CASE("Starship ascent: agreement with flight 14's webcast telemetry (report)", "[nightly][webcast][ascent][ascent_planner]") {
+    const auto& a = flight14();
+    REQUIRE(a.plan.feasible);
+    REQUIRE(a.seco_s > 0.0);
+    const std::string params = "liftoff mass, Raptor thrust, throttle, drag";
+    std::vector<test::WebcastRow> rows;
 
     // every recorded sample of the booster phase (engine-outs not modelled: flight 14's 33rd engine is out from T+76 s)
     for (const auto& gap : sample_gaps) {
@@ -100,8 +110,8 @@ TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast te
             test::compare_altitude(table, a, gap.t_s, altitude_time_base_s, test::allowance(gap.altitude));
         test::print("flight 14", speed);
         test::print("flight 14", altitude);
-        CHECK(speed.within());
-        CHECK(altitude.within());
+        rows.push_back(test::webcast_row("flight 14", speed, params));
+        rows.push_back(test::webcast_row("flight 14", altitude, params));
     }
 
     // MECO: the recorded state at the recorded MECO against the simulated state at the simulated MECO. The last
@@ -133,6 +143,7 @@ TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast te
     };
     for (const auto& c : meco) {
         test::print("flight 14", c);
-        CHECK(c.within());
+        rows.push_back(test::webcast_row("flight 14", c, params));
     }
+    test::webcast_report("starship_ascent_flight14", rows);
 }

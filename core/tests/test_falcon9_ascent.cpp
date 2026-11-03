@@ -19,6 +19,7 @@
 #include "starsim/spice/spice_adapters.hpp"
 #include "ascent_validation.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 
@@ -215,7 +216,8 @@ TEST_CASE("Autopilot flies Falcon 9 from SLC-40 into a 200 km orbit", "[gnc][val
     CHECK(a.propellant_t < 30.0);  // review focus: an untested drag table would show as an implausibly easy ascent
 }
 
-TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[gnc][validation][ascent][falcon9][ascent_planner]") {
+TEST_CASE("Falcon 9 ascent to CRS-35's orbit: feasible, first stage back to LZ-40", "[gnc][validation][ascent][falcon9][ascent_planner]") {
+    // Physical gates only (user 2026-11-03): the agreement with the webcast telemetry is the nightly report below.
     const auto& a = crs35();
     REQUIRE(a.plan.feasible);
     REQUIRE(a.seco_s > 0.0);
@@ -224,6 +226,14 @@ TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[g
                 "%.1f x %.1f km, i %.2f deg, %.1f t left in the second stage\n",
                 a.plan.kick_angle_rad / deg, a.meco.t_s, a.booster_meco_propellant_t, a.seco_s, a.periapsis_km,
                 a.apoapsis_km, a.inclination_deg, a.upper_propellant_at_seco_t);
+}
+
+TEST_CASE("Falcon 9 ascent: agreement with CRS-35's webcast telemetry (report)", "[nightly][webcast][ascent][falcon9][ascent_planner]") {
+    const auto& a = crs35();
+    REQUIRE(a.plan.feasible);
+    REQUIRE(a.seco_s > 0.0);
+    const std::string params = "liftoff mass, Merlin thrust and throttle, drag, Dragon / trunk mass";
+    std::vector<test::WebcastRow> rows;
 
     // every recorded sample of the first-stage burn (nine engines lit throughout)
     for (const auto& gap : crs35_sample_gaps) {
@@ -232,8 +242,8 @@ TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[g
                                                      test::allowance(gap.altitude));
         test::print("CRS-35", speed);
         test::print("CRS-35", altitude);
-        CHECK(speed.within());
-        CHECK(altitude.within());
+        rows.push_back(test::webcast_row("CRS-35", speed, params));
+        rows.push_back(test::webcast_row("CRS-35", altitude, params));
     }
 
     // MECO: the recorded state at the recorded MECO against the simulated state at its MECO; the altitude dial shows the
@@ -260,6 +270,7 @@ TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[g
     };
     for (const auto& c : checks) {
         test::print("CRS-35", c);
-        CHECK(c.within());
+        rows.push_back(test::webcast_row("CRS-35", c, params));
     }
+    test::webcast_report("falcon9_ascent_crs35", rows);
 }

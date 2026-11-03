@@ -17,6 +17,7 @@
 
 #include "ship_entry_scenario.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 
@@ -110,6 +111,7 @@ struct ReplayResult {
     int low_points = 0;
     double saturated_fraction = 0.0;  // of the control steps with the vertical lift fraction at a limit
     double subsonic_ratio = 0.0;      // mean model / telemetry speed between 10 and 3 km (0: no readings)
+    bool impacted = false;
 };
 
 constexpr double nominal_lift_fraction = 0.5;  // vertical share of the lift on the recorded path [E]
@@ -216,32 +218,49 @@ ReplayResult replay(const char* file, double t_start, const char* name) {
                            << " s, below Mach 3 over altitude " << r.low_rms * 100 << " % over " << r.low_points
                            << " s, lift saturated " << r.saturated_fraction * 100 << " %, subsonic ratio "
                            << r.subsonic_ratio << ", breakup '" << scenario.body().breakup_reason() << "'\n";
-    CHECK_FALSE(scenario.body().impacted());
+    r.impacted = scenario.body().impacted();
     return r;
 }
 
 }  // namespace
 
-TEST_CASE("Ship entry reproduces the webcast telemetry of flights 12-14", "[ship][entry][validation]") {
-    struct Flight {
-        const char* file;
-        double t_start;  // first readings below ~88 km
-        const char* name;
-        bool subsonic;   // telemetry covers 10-3 km
-    };
-    const Flight flights[] = {{"flight13_2026-07-24.csv", 2800.5, "flight 13", true},
-                              {"flight12_2026-05-22.csv", 2820.5, "flight 12", false},
-                              {"flight14_2026-09-28.csv", 9990.5, "flight 14", true}};
+namespace {
+
+struct Flight {
+    const char* file;
+    double t_start;  // first readings below ~88 km
+    const char* name;
+    bool subsonic;   // telemetry covers 10-3 km
+};
+const Flight flights[] = {{"flight13_2026-07-24.csv", 2800.5, "flight 13", true},
+                          {"flight12_2026-05-22.csv", 2820.5, "flight 12", false},
+                          {"flight14_2026-09-28.csv", 9990.5, "flight 14", true}};
+
+}  // namespace
+
+TEST_CASE("Ship entry flies the recorded paths of flights 12-14 without impact and with the trim in reach", "[ship][entry][validation]") {
+    // Physical gates only (user 2026-11-03): the agreement with the webcast speeds is the nightly report below.
     for (const auto& f : flights) {
         CAPTURE(f.name);
         const ReplayResult r = replay(f.file, f.t_start, f.name);
-        CHECK(r.speed_points > 200);
-        CHECK(r.speed_rms < 0.05);
-        if (r.low_points > 0) CHECK(r.low_rms < 0.10);
-        CHECK(r.saturated_fraction < 0.1);
-        if (f.subsonic) {
-            CHECK(r.subsonic_ratio > 0.9);
-            CHECK(r.subsonic_ratio < 1.1);
-        }
+        CHECK_FALSE(r.impacted);
+        CHECK(r.speed_points > 200);  // the replay ran through the entry
+        CHECK(r.saturated_fraction < 0.1);  // the lift suffices to fly the recorded path
     }
+}
+
+TEST_CASE("Ship entry: agreement with the webcast telemetry of flights 12-14 (report)", "[nightly][webcast][ship][entry]") {
+    const std::string params = "entry mass (255 t vs ~175 t), CG, crossflow Cd, flap CdA";
+    std::vector<test::WebcastRow> rows;
+    for (const auto& f : flights) {
+        const ReplayResult r = replay(f.file, f.t_start, f.name);
+        const std::string n = f.name;
+        // Former gate limits as tolerances around a perfect match (rms 0 / ratio 1).
+        rows.push_back({n + ": speed rms over time, above Mach 3 [relative]", r.speed_rms, 0.0, 0.05, "webcast telemetry " + n, params});
+        if (r.low_points > 0)
+            rows.push_back({n + ": speed rms over altitude, Mach 3 to 1 [relative]", r.low_rms, 0.0, 0.10, "webcast telemetry " + n, params});
+        if (f.subsonic)
+            rows.push_back({n + ": subsonic speed, model / telemetry, 10-3 km", r.subsonic_ratio, 1.0, 0.1, "webcast telemetry " + n, params});
+    }
+    test::webcast_report("ship_entry_telemetry", rows);
 }

@@ -111,8 +111,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 
 ## Validation
 - Ship entry replay of flights 12-14 (bank follows the recorded altitude): speed over time above Mach 3 within
-  4.05 / 1.51 / **8.33** % rms (flights 13 / 12 / 14, limit 5: flight 14 red), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (test "Ship entry
-  reproduces the webcast telemetry of flights 12-14").
+  4.05 / 1.51 / **8.33** % rms (flights 13 / 12 / 14, limit 5: flight 14 red), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (the nightly report "Ship entry: agreement with the webcast telemetry of flights 12-14", `webcast_report/ship_entry_telemetry.md`, parameters entry mass, CG, crossflow Cd, flap CdA). Since 2026-11-03 this is report, not gate (user 2026-11-03: "report, not gate; physical gate kept"): the normal-tier case "Ship entry flies the recorded paths of flights 12-14 without impact and with the trim in reach" gates no impact, lift fraction saturated < 10 %, > 200 speed points. The former red #1147 (flight 14 speed rms 8.33 % over the limit 5 %) is now a report row; the gate part is green or red by physics only.
 - Entry guidance campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase, truth aero +-10 %): 11
   within 0.14 m, case 9 3.15 m (test: case 4 < 1.5 km, others < 100 m), belly <= 0.48 deg off down at the gate (limit 30), sink <= 102 m/s; load limit held. Guided 6-DOF 8.5 m.
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10

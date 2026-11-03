@@ -20,6 +20,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 
@@ -75,7 +76,8 @@ std::pair<double, double> altitude_fit(const std::vector<Sample>& d, double t, d
 
 }  // namespace
 
-TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 13 and 14", "[gnc][booster][validation]") {
+TEST_CASE("Booster descent drag: agreement with the webcast telemetry of flights 13 and 14 (report)", "[nightly][webcast][gnc][booster]") {
+    // No physical gate remains (user 2026-11-03: report, not gate); the descent itself is gated by the booster return cases.
     // Table and the vehicle configuration that flew (tests/validation/telemetry/flights.toml).
     // Propellant in the descent: from the gauge after the boostback (flight 14: 1.4 % of 3,650 t = 51 t).
     const auto [file, vehicle_id, propellant_kg] = GENERATE(table<std::string, std::string, double>({
@@ -169,14 +171,20 @@ TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 13 a
         std::printf("%s: altitude lost to the landing burn (T+%.1f s): %d samples, max error %.0f m\n", file.c_str(), t_burn,
                     n_altitude, max_altitude_error_m);
     }
-    if (n_altitude > 0) CHECK(max_altitude_error_m < 500.0);  // 0.1 km readings, ~10-25 s of fall from ~9 km
+    REQUIRE(n > 30);  // round dials: the speed dial gives way to the engine icon before the landing burn
     const double rms = std::sqrt(sum_sq / n);
     if (std::getenv("STARSIM_VERBOSE")) {
         std::printf("%s: start T+%.1f s at %.1f km, %.0f m/s (vertical %.0f); %d samples to T+%.1f s: rms %.1f %%, "
                     "max %.1f %%\n", file.c_str(), peak->t_s, h0 / 1e3, peak->speed_mps, vz0, n, t_ignition - 2.0,
                     100.0 * rms, 100.0 * max_error);
     }
-    CHECK(n > 30);  // round dials: the speed dial gives way to the engine icon before the landing burn
-    CHECK(rms < 0.03);
-    CHECK(max_error < 0.06);
+    const std::string params = "booster dry mass, descent drag (Cd table, tail-first), propellant at the peak speed";
+    const std::string source = "webcast telemetry " + file;
+    std::vector<test::WebcastRow> rows = {
+        {"speed rms, peak descent to landing burn [relative]", rms, 0.0, 0.03, source, params},
+        {"speed max error [relative]", max_error, 0.0, 0.06, source, params},
+    };
+    if (n_altitude > 0)
+        rows.push_back({"altitude lost to the landing burn, max error [m]", max_altitude_error_m, 0.0, 500.0, source + " (0.1 km readings)", params});
+    test::webcast_report("booster_descent_" + file.substr(0, file.find('.')), rows);
 }

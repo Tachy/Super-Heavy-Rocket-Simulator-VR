@@ -146,6 +146,7 @@ Outcomes: dispersed separation (+-5 deg, +-1 deg/s, +-5 % propellant, aero +-10 
 ## Diagnostics
 - Falcon 9: `STARSIM_DEBUG_LEGS=1`, `STARSIM_DEBUG_ASCENT_G=1`; hidden test "Falcon 9 ASDS single MECO case"
   (`STARSIM_ASDS_SEED=<101-120>`).
+- Webcast agreement of the drone-ship flight (landing-burn state, entry / landing burn times against Starlink 15-25, entry burn propellant 13.2 t) is report, not gate (user 2026-11-03: "report, not gate; physical gate kept"): the normal-tier cases gate orbit, the entry burn engine set, delta-v band, impact < 300 m, landed upright within 5 m of the deck centre; the `[nightly][webcast]` cases write `webcast_report/falcon9_asds_timeline.md`, `falcon9_asds_entry_burn.md` (also `falcon9_ascent_crs35.md`, `falcon9_descent_*.md`). RTLS: the normal-tier case never asserted an orbit (the audit spec lists "orbit"); no orbit assertion was added, the gate is landed upright within 5 m of the LZ-40 centre. The report keeps only rows with a sourced reference and tolerance (the touchdown time row was dropped: no source).
 
 ## Open points and known limits
 - Falcon 9 drone-ship landing burns end at the SCvx reserve (5 t [E]) after ~36 s; the gauge shows 7.2 t at touchdown

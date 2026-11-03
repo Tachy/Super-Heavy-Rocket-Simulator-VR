@@ -182,6 +182,11 @@ void print(const std::string& flight, const Comparison& c) {
                 c.within() ? "" : "  MISS");
 }
 
+WebcastRow webcast_row(const std::string& flight, const Comparison& c, const std::string& parameters) {
+    return {flight + " " + c.what, c.simulated, c.recorded, c.bound(), "webcast telemetry " + flight + " (dials, reading tolerance + documented allowance)",
+            parameters};
+}
+
 Comparison compare_speed(const std::string& table, const FlownAscent& flown, double t_s, double time_base_s,
                          double allowance) {
     const auto r = recorded_stack(table, t_s);

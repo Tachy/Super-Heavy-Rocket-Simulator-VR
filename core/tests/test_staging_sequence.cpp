@@ -17,6 +17,7 @@
 #include "starsim/sim/mission_timeline.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 using sim::MissionEventKind;
@@ -148,7 +149,15 @@ TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; th
     CHECK(session.telemetry(0).engines_running == 3);
 }
 
-TEST_CASE("The Falcon 9 booster flips on RCS with its engines off", "[staging][ascent_planner]") {
+namespace {
+
+struct BoosterFlip {
+    bool lit_in_flip = false;
+    double boostback_s = -1.0;  // after the separation
+    double n2_used_kg = 0.0;
+};
+
+BoosterFlip fly_booster_flip() {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const auto t0 = time.from_utc({2026, 10, 13, 10, 40, 0.0});
@@ -173,12 +182,33 @@ TEST_CASE("The Falcon 9 booster flips on RCS with its engines off", "[staging][a
         session.advance_to(session.epoch() + 1.5 * sim::FlightSession::tick_s, 10);
     }
     REQUIRE(boostback_s);
-    std::printf("[staging] Falcon 9 booster: boostback %.1f s after the separation, %.1f kg N2 in the flip\n", *boostback_s,
-                rcs_at_separation_kg - session.body(0).vehicle().rcs_supply_kg());
-    CHECK_FALSE(lit_in_flip);
+    BoosterFlip flip;
+    flip.lit_in_flip = lit_in_flip;
+    flip.boostback_s = *boostback_s;
+    flip.n2_used_kg = rcs_at_separation_kg - session.body(0).vehicle().rcs_supply_kg();
+    std::printf("[staging] Falcon 9 booster: boostback %.1f s after the separation, %.1f kg N2 in the flip\n", flip.boostback_s,
+                flip.n2_used_kg);
+    return flip;
+}
+
+}  // namespace
+
+TEST_CASE("The Falcon 9 booster flips on RCS with its engines off", "[staging][ascent_planner]") {
+    // Physical gate only (user 2026-11-03): the timing against the SpaceX timelines is the nightly report below.
+    const auto flip = fly_booster_flip();
+    CHECK_FALSE(flip.lit_in_flip);
+    CHECK(flip.boostback_s > 0.0);  // the flip ends in the boostback
+}
+
+TEST_CASE("The Falcon 9 booster flip: boostback time against the SpaceX timelines (report)", "[nightly][webcast][staging][ascent_planner]") {
+    const auto flip = fly_booster_flip();
     // separation -> boostback ignition: 13 / 14 / 14 s on CRS-35, Bandwagon-3 and Crew-13 (SpaceX mission timelines,
-    // config/vehicles/falcon9_block5.toml [sources]); mean 13.7 s
-    CHECK(std::abs(*boostback_s - 13.7) < 3.0);
+    // config/vehicles/falcon9_block5.toml [sources]); mean 13.7 s. The band is the former gate's +-3 s; the tighter
+    // +-0.6 s of the timelines' spread is in the falcon9_rtls report.
+    test::webcast_report("staging_falcon9_flip",
+                         {{"separation -> boostback [s]", flip.boostback_s, 13.7, 3.0,
+                           "SpaceX timelines CRS-35 / Bandwagon-3 / Crew-13 mean",
+                           "flip_duration_s, boostback_loss_fraction, RCS thrust and N2 supply, stage inertia"}});
 }
 
 TEST_CASE("A manual stage command during the sequence separates once", "[staging]") {

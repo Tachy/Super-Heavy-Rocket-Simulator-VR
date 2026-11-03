@@ -25,6 +25,7 @@
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -390,7 +391,7 @@ MissionRun fly_mission(const MissionDispersion& dispersion = {}) {
 
 }  // namespace
 
-TEST_CASE("Crew Dragon return mission splashes down in the zone on the published timeline", "[dragon][mission][splashdown]") {
+TEST_CASE("Crew Dragon return mission splashes down in the zone", "[dragon][mission][splashdown]") {
     const auto r = fly_mission();
     REQUIRE(r.planned);
     const auto& d = r.descent;
@@ -402,16 +403,29 @@ TEST_CASE("Crew Dragon return mission splashes down in the zone on the published
                 d.drogue_height_m / 1000.0, d.drogue_speed_mps, d.main_height_m / 1000.0, d.main_speed_mps,
                 d.main_s - d.drogue_s, d.splashdown_s - d.main_s, d.sink_mps, d.miss_m / 1000.0,
                 r.splashdown_after_ignition_s / 60.0, d.peak_g, r.rcs_left_kg);
+    // Physical gates only (user 2026-11-03): chute heights and speeds and the 54 min of Crew-10 are the nightly report below.
     CHECK(d.outcome == sim::LandingOutcome::SplashedDown);
-    CHECK(d.miss_m < 2000.0);                                          // user 2026-10-14: zone radius 2 km
-    CHECK(d.drogue_height_m == Catch::Approx(5500.0).epsilon(0.15));    // [S] ~18,000 ft
-    CHECK(d.drogue_speed_mps == Catch::Approx(156.0).epsilon(0.15));    // [S] ~350 mph
-    CHECK(d.main_height_m == Catch::Approx(1830.0).epsilon(0.15));      // [S] ~6,000 ft
-    CHECK(d.main_speed_mps == Catch::Approx(53.0).epsilon(0.15));       // [S] ~119 mph
-    CHECK(d.sink_mps == Catch::Approx(7.0).epsilon(0.30));              // [S] 15-16 mph
-    CHECK(r.splashdown_after_ignition_s / 60.0 == Catch::Approx(54.0).epsilon(0.15));  // [S] Crew-10 10:39 -> 11:33 EDT
+    CHECK(d.miss_m < 2000.0);  // user 2026-10-14: zone radius 2 km
     CHECK(d.peak_g < 3.6);
     CHECK(r.final_step == sim::CapsuleReturnStep::SplashedDown);
+}
+
+TEST_CASE("Crew Dragon return mission: agreement with the published timeline (report)", "[nightly][webcast][dragon][mission][splashdown]") {
+    const auto r = fly_mission();
+    REQUIRE(r.planned);
+    const auto& d = r.descent;
+    const std::string params = "parachute sequence (drogue / main deployment), capsule mass and Cd, deorbit burn";
+    // Tolerances are the former relative bands (15 %, sink 30 %) of the [S] references.
+    test::webcast_report(
+        "crew_dragon_return",
+        {
+            {"drogue deployment height [m]", d.drogue_height_m, 5500.0, 0.15 * 5500.0, "[S] ~18,000 ft", params},
+            {"drogue deployment speed [m/s]", d.drogue_speed_mps, 156.0, 0.15 * 156.0, "[S] ~350 mph", params},
+            {"main deployment height [m]", d.main_height_m, 1830.0, 0.15 * 1830.0, "[S] ~6,000 ft", params},
+            {"main deployment speed [m/s]", d.main_speed_mps, 53.0, 0.15 * 53.0, "[S] ~119 mph", params},
+            {"splashdown sink rate [m/s]", d.sink_mps, 7.0, 0.30 * 7.0, "[S] 15-16 mph", params},
+            {"ignition -> splashdown [min]", r.splashdown_after_ignition_s / 60.0, 54.0, 0.15 * 54.0, "[S] Crew-10 10:39 -> 11:33 EDT", params},
+        });
 }
 
 namespace {

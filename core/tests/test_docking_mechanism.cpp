@@ -5,9 +5,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <vector>
 
 #include "starsim/contact/docking_mechanism.hpp"
 #include "starsim/math/constants.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 using math::Mat3;
@@ -139,20 +142,24 @@ TEST_CASE("Docking mechanism: inside the capture radius a large offset is pushed
     CHECK(r.c.v.x > 0.0);
 }
 
-TEST_CASE("Docking mechanism: KNOWN STATE - envelope corner with outward lateral speed bounces at 30 and 45 deg",
-          "[iss][docking]") {
-    // 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral AWAY from the axis: inside the IDSS initial-condition envelope
-    // (lateral speed is limited by magnitude), yet the model does not capture it, at either lean (measured: both
-    // "abgeprallt"). Pre-existing at 30 deg, not caused by the 45 deg lean. Not tuned and not weakened: this pins the
-    // state until the undamped platform [E] is revisited (docs/known-issues.md). When it captures, flip the check.
+TEST_CASE("Docking mechanism: IDSS envelope corner with outward lateral speed (report)",
+          "[nightly][webcast][iss][docking]") {
+    // KNOWN STATE (docs/known-issues.md): 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral AWAY from the axis is inside the
+    // IDSS initial-condition envelope (lateral speed is limited by magnitude), yet the model does not capture it, at
+    // either lean (measured: both "abgeprallt"). Pre-existing at 30 deg, not caused by the 45 deg lean. Not tuned: a
+    // report row until the undamped platform [E] is revisited (user 2026-11-03: the pin became a report; it no longer
+    // fails when the state changes).
+    std::vector<test::WebcastRow> rows;
     for (double lean_deg : {30.0, 45.0}) {
         auto r = approach(0.05, 0.10, 0.0, 0.04, lean_deg * deg);
         r.fly(60.0);
         INFO("lean " << lean_deg << " -> " << r.m.failure());
-        CHECK(r.m.phase() == contact::DockingPhase::Failed);
-        CHECK(r.m.failure() == "abgeprallt");
-        CHECK(r.c.v.x > 0.0);
+        const bool captured = r.m.phase() != contact::DockingPhase::Failed;
+        rows.push_back({"captured at 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral, petal lean " + std::to_string(static_cast<int>(lean_deg)) +
+                            " deg (1 = captured; failure: '" + std::string(r.m.failure()) + "')",
+                        captured ? 1.0 : 0.0, 1.0, 0.0, "IDSS initial-condition envelope", "ring platform damping [E], petal lean, petal geometry"});
     }
+    test::webcast_report("docking_idss_envelope_corner", rows);
 }
 
 TEST_CASE("Docking mechanism: rearm after a failure, then a good approach captures", "[iss][docking]") {

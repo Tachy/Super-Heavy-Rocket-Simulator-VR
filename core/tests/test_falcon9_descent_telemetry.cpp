@@ -20,6 +20,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
+#include "webcast_report.hpp"
 
 using namespace starsim;
 
@@ -75,8 +76,9 @@ std::pair<double, double> altitude_fit(const std::vector<Sample>& d, double t, d
 
 }  // namespace
 
-TEST_CASE("Falcon 9 descent drag reproduces the webcast telemetry of CRS-35 and Starlink 15-25",
-          "[gnc][falcon9][validation]") {
+TEST_CASE("Falcon 9 descent drag: agreement with the webcast telemetry of CRS-35 and Starlink 15-25 (report)",
+          "[nightly][webcast][gnc][falcon9]") {
+    // No physical gate remains (user 2026-11-03: report, not gate).
     // Propellant in the descent from the stage's gauge after the entry burn (% of 425 t); horizontal direction of
     // flight (east, north): CRS-35 flies back west to LZ-40, Starlink 15-25 south along the Californian coast.
     const auto [file, propellant_kg, heading_east, heading_north] = GENERATE(table<std::string, double, double, double>({
@@ -158,8 +160,11 @@ TEST_CASE("Falcon 9 descent drag reproduces the webcast telemetry of CRS-35 and 
                 "rms %.1f %%, max %.1f %%; altitude lost to the landing burn (T+%.1f s): max error %.0f m (%d samples)\n",
                 file.c_str(), start->t_s, h0 / 1e3, start->speed_mps, vz0, n, last->t_s, 100.0 * rms, 100.0 * max_error,
                 landing_start, max_altitude_error_m, n_altitude);
-    CHECK(n > 30);
-    CHECK(rms < 0.03);
-    CHECK(max_error < 0.06);
-    CHECK(max_altitude_error_m < 300.0);
+    REQUIRE(n > 30);
+    const std::string params = "stage dry mass, descent drag (Cd table), propellant after the entry burn";
+    const std::string source = "webcast telemetry " + file;
+    test::webcast_report("falcon9_descent_" + file.substr(0, file.find('.')),
+                         {{"speed rms, entry burn to landing burn [relative]", rms, 0.0, 0.03, source, params},
+                          {"speed max error [relative]", max_error, 0.0, 0.06, source, params},
+                          {"altitude lost to the landing burn, max error [m]", max_altitude_error_m, 0.0, 300.0, source + " (0.1 km readings)", params}});
 }

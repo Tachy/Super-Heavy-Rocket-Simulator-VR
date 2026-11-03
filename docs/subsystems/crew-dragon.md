@@ -68,7 +68,7 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 - Measured before the capsule's new length, port and corrector (not re-measured, the campaign `[dragon][mission][validation]` is current; the capsule's pitch inertia rose about 7 % with the length, tags green): Dragon entry `[dragon][entry][validation]` (entry angle +-0.1 deg, mass +-3 %, aero +-10 %): 12 of 12 at the gate
   within 1.2 km, 160-178 m/s, <= 3.6 g. From 420 km / 51.6 deg: 139 m/s / 598 kg after 37 h, gate 0.58 km off at 166
   m/s, 3.5 g. Return mission: burn after 37.1 h, water 0.41 km from the zone centre at 6.9 m/s, deorbit ignition ->
-  splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]); drogues 5.50 km, mains 1.80 km / 53 m/s, peak 2.8 g. Campaign
+  splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]); drogues 5.50 km, mains 1.80 km / 53 m/s, peak 2.8 g. The chute heights and speeds, the sink rate and the 54 min are report, not gate (user 2026-11-03: "report, not gate; physical gate kept"): the normal-tier case gates splashed down, < 2 km from the centre, peak < 3.6 g, the step machine; the comparison is the `[nightly][webcast]` case writing `webcast_report/crew_dragon_return.md`. Campaign
   `[dragon][mission][validation]` (8 cases): 8 of 8 gewassert within 1.61 km (trunk / capsule +-1 cm: worst 1.24-1.61 km; 1 cm still moves a case by up to 0.88 km), 6.9-7.0 m/s, <= 2.97 g. Test "A capsule
   return without mains ends lost, ...".
 

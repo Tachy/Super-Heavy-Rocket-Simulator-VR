@@ -418,7 +418,6 @@ TEST_CASE("Falcon 9 RTLS mission: agreement with the webcast timelines (report)"
             {"landing-burn ignition speed [m/s]", f.landing_v, 300.0, 30.0, "CRS-35 telemetry", ignition_params},
             {"entry burn time [s]", f.entry_s, 355.0, 20.0, "CRS-35 timeline [D]", ignition_params},
             {"landing burn time [s]", f.landing_s, 420.0, 20.0, "CRS-35 timeline [D]", ignition_params},
-            {"touchdown time [s]", f.end_s, 442.0, 20.0, "CRS-35 timeline [D]", ignition_params},
         });
 }
 

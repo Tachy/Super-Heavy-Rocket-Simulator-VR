@@ -218,14 +218,14 @@ CRS-35 cargo 2,860 kg [S: space.com 2026-10-13]; Dragon 2 dry 7,700 kg + propell
 - The forecast of MECO is not shown before the kick's end (the return's MECO plan from the near-vertical state swings).
 
 ## Validation
-Tolerance scheme (`test_starship_ascent.cpp`, `test_falcon9_ascent.cpp`): bound = reading tolerance (speed 1 km/h,
+Tolerance scheme (`test_starship_ascent.cpp`, `test_falcon9_ascent.cpp`; since 2026-11-03 the agreement with the webcast tables is report, not gate (user 2026-11-03: "report, not gate; physical gate kept"): the normal-tier cases gate only feasibility, the insertion orbit (flight 14: 165 x 276 km, 30.5 deg) and the LZ-40 recovery, the sample / MECO / SECO comparisons are the `[nightly][webcast]` cases writing `webcast_report/starship_ascent_flight14.md` and `falcon9_ascent_crs35.md`): bound = reading tolerance (speed 1 km/h,
 altitude 0.05 km, +-0.25 s per reading and +-0.25 s time base, times the local rate) + a named allowance per documented
 open discrepancy (measured + `test::allowance_margin` 2 % [E]; each T+30/60/90/120 s sample has its own
 `test::SampleGap`); MECO reading tolerance = local rate x 2 x the MECO's uncertainty (flight 14) / x 1 (CRS-35).
 `STARSIM_ASCENT_DUMP=<dir>` writes the flown samples. Samples' altitude is above the pad (`docs/subsystems/earth-terrain.md`).
 - **Staging** (`[staging]`): Falcon 9 booster -1.00 m/s along track right after separation; Starship booster -0.03 m/s at
   separation then -4.6 / -8.9 / -12.4 / -15.1 / -17.8 m/s over the next 5 s; Falcon 9 flip 13.5 s, 344.7 kg N2, pitch
-  inertia 9.98e6 kg m2; separation -> boostback within 3 s of 13.7 s (`test_falcon9_rtls`, `test_staging_sequence`).
+  inertia 9.98e6 kg m2; separation -> boostback against 13.7 s is a report row, report, not gate (user 2026-11-03: "report, not gate; physical gate kept") (`test_falcon9_rtls`, `test_staging_sequence`; the staging gate keeps: flips on RCS, engines off, boostback follows).
 - **Max-Q hold** (`[ascent]` "The ascent holds dynamic pressure at the vehicle limit"): Falcon 9 max q 31997 Pa (at most
   1.000 of the limit at its Mach), lowest throttle 0.814, full thrust below 90 %, MECO T+137.7 s (fixed-kick 10 t, 12 deg);
   free Starship (kick 10 deg, 0.88) peaks at 33.8 kPa (0.87 of the limit, never limited).
