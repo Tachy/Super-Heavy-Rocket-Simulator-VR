@@ -117,6 +117,8 @@ Items: `entry_guidance.hpp:33-55`; `flight_session.cpp:440-441` uses raw default
 
 Per value: max q 25 kPa / lunar 32 kPa (K, structural [E]); terminal Mach 5/3 (K); min alpha 50 deg, alpha authority 20 deg (D from the flap travel in `[[stage.flap]]` and the trim table if the aero model offers the trim range; otherwise K [D identified on b1-b4] — the implementer states which in the report); bank rates 1/3 deg/s and alpha slew 3 deg/s (D: roll/pitch acceleration from `rcs_pitch_acceleration_radps2` and flap rate; cap = the smaller of derived and K `bank_rate_max_dps` [E]).
 
+Also in this task (reds from Tasks 1c/3b, planner rule): the subsonic yaw-authority losses (ship return dispersions 4-6 case 2, orbit phase 45 deg: forward flaps on their stop, RCS saturated in yaw while the nose turns to the tower), the -Fast reds "yaw-demand allocation" and the gate miss 189.8 m (nose turn departs), and the flip-and-catch gate prediction red (1.34 s vs 1.0 s: the online drag scale learns a ~0.7 % table shortfall from the first cycle, +0.57 s; ~0.8 s unexplained and pre-existing): find causes with numbers (guidance demand vs the ship's real flap/RCS authority from config, entry aero table fidelity) and fix in guidance/prediction; physically impossible cases go to the user with numbers.
+
 - [ ] Step 1: tests "Entry guidance parameters follow the vehicle config", "Lunar return entry uses the lunar q limit from config", tanker inheritance. Red.
 - [ ] Step 2: implement and wire; green `-Fast -TestFilter "[entry],[guidance],[config]"`; `[slow]` `[ship][guidance]`, `[entry]` reduced lunar cases, #1147 report via nightly only in Task 12. Commit `feat(gnc): ship entry guidance from vehicle config`.
 
