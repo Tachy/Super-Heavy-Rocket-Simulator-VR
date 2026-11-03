@@ -8,7 +8,7 @@
 
 **Tech Stack:** Blender Python, Python tools, GDScript, Godot shaders; C++ core only for config-driven values.
 
-**Spec:** `docs/superpowers/specs/2026-11-02-falcon-dragon-iss-models-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-02-falcon-dragon-iss-models-design.md`
 
 ## Global Constraints
 - Own rebuild of everything; no third-party mesh in the repo or the game. A reference's terms are checked before download; references stay in git-ignored `screenshots/falcon9_ref/`.
