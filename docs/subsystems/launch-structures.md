@@ -43,7 +43,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   and a pyramid ANNEX only on the side away from the tower (plated slopes, trapezoid footprint Y +-22.3 at X -10.9 narrowing to +-9.2 at X -20; two doors at
   its foot, white vent plates, dark louvre boxes along the slanted edges). Nothing of the mount lies beyond X +10.3. The block is crossed along Y by ONE
   tunnel of one width (15.2 m) from end to end: rectangular portals (top 7.2 m above the ground), vertical walls, ceiling with the 7 m chamber under the
-  ring, no deflector, no ridge, no flare. Ring: outer 10.4 m, opening 9 m, stands 1 m proud of the deck, 20 clamps (the originals show no proud ring or
+  ring, no deflector, no ridge, no flare. Ring: outer 11.6 m, opening 10.0 m (user 2026-11-03 "at the mount everything must fit": the outer Raptor lips, ring 4.40 m + 0.66 m, pass from 9.63 m with the 0.04 m margin; 10.0 m lies in DSC06000's 11.6 m reading +-15 %; clamps, hood roots and QD heads moved out with it, the QD head face now 0.55 m off the hull), stands 1 m proud of the deck, 20 clamps (the originals show no proud ring or
   clamps: kept until the seat is decided). Two hoods 70 deg apart, symmetric about the line away from the tower (roof 4 m above the deck): the long one
   down the middle of the annex, the short one ending at the -Y deck edge; a booster QD head stands on the ring under each (0.35 m off the hull, static;
   no cabinets or booms on the deck). 1.1k triangles. Plate map `mount_panels.png` (`mount_textures.py`; `shaders/mount_shell.gdshader`).
@@ -257,10 +257,10 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   at sunset (Sun ~ -1 deg), the spec's civil dusk threshold is kept.
 
 ## Fine build task 3 evidence (`screenshots/pad-b/fine/`, `.superpowers/sdd/2026-10-31-pad-b-prototype/fine3_*.txt`)
-- `tools/structures/tests/test_mount_layout.py`: base 44.6 x 40 m, deck 18.7 m, ring top = physics height, ring 9 / 10.4 m, 20 clamps, aprons 26 m wide / 33 m
+- `tools/structures/tests/test_mount_layout.py`: base 44.6 x 40 m, deck 18.7 m, ring top = physics height, ring 10 / 11.6 m, 20 clamps, aprons 26 m wide / 33 m
   out as wide as the portal foot, floor -9 m, portal open over its whole width on both sides, rectangular doors, hoods down the front face, hardstand round the site and off the pit, foot on the physics axis, every polygon planar. Stack clearance (Review Focus 1): sampled points of
   every mount polygon (6 per triangle) against the hull (4.5 m radius above the ring top, +0.04 m) and the 33 booster engines' bells below it
-  (rings 1.0 / 2.6 / 4.40 m, bells 1.30 m inner / 1.32 m lip, exact bell contour, margin 0.04 m): `test_booster_stack_clears_deck_ring_and_qd` is RED: the outer bells reach beyond the 9.0 m mount opening (2052 points inside the envelope at the ring's underside); the pad opening awaits the user's decision (`docs/known-issues.md`); a 8 m opening is caught (negative control). `tower_view_test`
+  (rings 1.0 / 2.6 / 4.40 m, bells 1.30 m inner / 1.32 m lip, exact bell contour, margin 0.04 m): `test_booster_stack_clears_deck_ring_and_qd` green with the 10.0 m opening (smallest passing 9.63 m); the 8 m and the earlier 9 m openings are caught (negative controls). The physics has no mount opening (no collision shape to follow). `tower_view_test`
   (309 cases): model dimensions, deck at 19 m, ring opening 4.5 m, mask equals the drawn footprint (+-0.06 m), no script error in the log.
 - `game/tests/trench_mask_check.gd` (Review Focus 4; GPU): per distance 30 m .. 400 km three frames (terrain alone / mask on, no models / as drawn);
   the pixels the mask changes (isolated noise filtered, 150 frames wait for the node morph) lie on the projected footprint (+3 px) at every

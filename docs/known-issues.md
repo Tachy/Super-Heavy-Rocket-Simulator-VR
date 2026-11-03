@@ -21,13 +21,6 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   - Refuelling reference flights re-measured (`config/refuelling/reference_flights.toml`, `refuelling.md`); the
     calculator answers 13 tankers / 52.4 d (was 12 / 51.0 d); the campaign offsets are not re-calibrated (full flown
     campaign not re-flown).
-- `test_mount_layout.py::test_booster_stack_clears_deck_ring_and_qd` red since the Raptor nozzle change (2026-11-03,
-  outer ring 4.1 -> 4.40 m, lip 1.32 m): 2052 mount points lie inside the bells' envelope at the ring's underside
-  (r 4.41-4.54 m, z 13.7 m; the envelope there is 4.40 + 0.256 + 0.04 margin = 4.70 m against the 9.0 m [E] ring
-  opening). ANY ring that keeps the 20 lips apart (>= 4.22 m) needs an opening >= 9.04 m; with 4.40 m about 9.4 m and the
-  deck parts at z 13.5 m (r ~4.80 m) moved too (tried 9.5 m: 4 points left there, `test_ring_outer_and_opening` pins 4.5 m).
-  Pad geometry follows the measurements (opening "about 9 m", pickup scale -5 %; DSC06000 reads 11.6 m across the deck):
-  not changed, for the user. Drawing only; the physics has no mount opening.
 - Crew Dragon entry: 1 cm of stage length moves a campaign case by up to 0.88 km (bound 2 km holds), source not determined (`.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/task-5-report.md`); held until the rendering is done, by the user's wish.
 - Falcon 9 / Crew Dragon / ISS detail models (plan 2026-11-02, end state; values in `.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/final-values.md`), open for the user:
   - Port clocking: the `up` of the IDA-2 / IDA-3 ports is a photo-picked member [E, +-30 deg] of a measured class [D] (model D); no document states the real clock; IDA-3 aft vs forward rests on model D only. One config value, one tag run (`iss.md` "Port clocking").

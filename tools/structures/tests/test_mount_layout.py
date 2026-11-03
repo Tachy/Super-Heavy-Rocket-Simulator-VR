@@ -211,8 +211,8 @@ def test_two_exit_ramps_opposite_and_perpendicular_to_the_tower_line(detail, tre
 def test_ring_outer_and_opening(detail, mount):
     h = detail["mount"]["deck_height_m"]
     radii = [math.hypot(v[0], v[1]) for verts, _ in mount.nodes["hardware"] for v in verts if abs(v[2] - h) < 1e-9]
-    assert min(radii) == pytest.approx(4.5, abs=0.01)
-    assert max(r for r in radii if r < 5.3) == pytest.approx(5.2, abs=0.01)
+    assert min(radii) == pytest.approx(0.5 * detail["mount"]["ring_opening_diameter_m"], abs=0.01)  # 5.0 m
+    assert any(r == pytest.approx(0.5 * detail["mount"]["ring_outer_diameter_m"], abs=0.01) for r in radii)  # 5.8 m
     clamp_tops = {round(v[2], 6) for verts, _ in mount.nodes["hardware"] for v in verts
                   if abs(v[2] - (h + detail["mount"]["clamp_height_m"])) < 1e-9}
     assert clamp_tops, "clamps on the ring"
@@ -298,6 +298,10 @@ def test_clearance_test_catches_a_wrong_ring(detail):
     narrow["mount"] = dict(detail["mount"], ring_opening_diameter_m=8.0)
     bad = ml.stack_violations(ml.mount(narrow), detail["mount"]["deck_height_m"], 4.5, _ring_radii(), _engine())
     assert bad, "a 8 m opening must hit the hull and the outer engines"
+    old = dict(detail)
+    old["mount"] = dict(detail["mount"], ring_opening_diameter_m=9.0)  # the pad's earlier opening: the 4.40 m ring's lips hit
+    bad = ml.stack_violations(ml.mount(old), detail["mount"]["deck_height_m"], 4.5, _ring_radii(), _engine())
+    assert bad, "the earlier 9 m opening must hit the outer bells"
 
 
 def test_hoods_and_qd_heads_stand_off_the_hull(detail, mount):
