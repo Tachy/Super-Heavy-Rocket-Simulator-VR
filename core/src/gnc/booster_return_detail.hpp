@@ -25,6 +25,9 @@ inline constexpr double entry_altitude_probe_m = 1000.0;
 inline constexpr double aero_steering_min_q_pa = 2000.0;  // below: RCS translation trim
 inline constexpr double aero_steering_time_fraction = 0.5;
 inline constexpr double minimum_time_to_go_s = 0.3;
+// Landing-ignition forecast on the predicted fall (ignition_on_fall): every this many guidance updates (1 s at the
+// 200 Hz tick; a multiple of the impact prediction's 40 / 200).
+inline constexpr int fall_forecast_ticks = 200;
 // Centre-engine approach: sink rate follows touchdown speed + height / tau (BoosterReturnParameters::
 // approach_time_constant_s; an exponential approach, the V3 profile ending in a near hover; the same shape as the SCvx
 // plans' approach limit), with a proportional sink-rate loop.

@@ -516,7 +516,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.grid_fins.table = doc.text(*fins, "table");
         s.grid_fins.max_return_alpha_rad = doc.number_or(*fins, "max_return_alpha_deg", 0.0) * constants::deg_to_rad;
         if (s.grid_fins.max_return_alpha_rad < 0.0 || s.grid_fins.max_return_alpha_rad >= constants::pi / 2.0) {
-            doc.fail("grid_fins.max_return_alpha_deg must be in (0, 90)");
+            doc.fail("grid_fins.max_return_alpha_deg must be in [0, 90) (0: not set)");
         }
     }
     if (auto flaps = t["flap"].as_array()) {
@@ -655,7 +655,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         }
         s.catch_pins.max_catch_tilt_rad = doc.number_or(*pins, "max_catch_tilt_deg", 0.0) * constants::deg_to_rad;
         if (s.catch_pins.max_catch_tilt_rad < 0.0 || s.catch_pins.max_catch_tilt_rad >= constants::pi / 2.0) {
-            doc.fail("catch_pins.max_catch_tilt_deg must be in (0, 90)");
+            doc.fail("catch_pins.max_catch_tilt_deg must be in [0, 90) (0: not set)");
         }
     }
     if (auto legs = t["landing_legs"].as_table()) {
@@ -680,7 +680,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.landing_legs.max_touchdown_tilt_rad = doc.number_or(*legs, "max_touchdown_tilt_deg", 0.0) * constants::deg_to_rad;
         if (s.landing_legs.deploy_margin_s < 0.0 || s.landing_legs.max_touchdown_tilt_rad < 0.0 ||
             s.landing_legs.max_touchdown_tilt_rad >= constants::pi / 2.0) {
-            doc.fail("landing_legs: deploy_margin_s >= 0 and max_touchdown_tilt_deg in (0, 90)");
+            doc.fail("landing_legs: deploy_margin_s >= 0 and max_touchdown_tilt_deg in [0, 90) (0: not set)");
         }
     }
     if (auto rcs = t["rcs"].as_table()) s.rcs = load_rcs(doc, *rcs, s.tanks);
@@ -842,6 +842,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 if (profile->landing_engine_phases.empty()) missing("landing_engine_phases", where);
                 if (profile->landing_phase_throttles.empty()) missing("landing_phase_throttles", where);
                 if (profile->landing_switch_sink_mps.empty()) missing("landing_switch_sink_mps", where);
+                if (profile->landing_phase_max_tilt_rad.empty()) missing("landing_phase_max_tilt_deg", where);
+                if (!(profile->landing_gimbal_fraction > 0.0)) missing("landing_gimbal_fraction", where);
                 if (profile->boostback) {
                     if (!(profile->return_flight_time_s > 0.0)) missing("return_flight_time_s", where);
                     if (profile->boostback_loss_fraction < 0.0) missing("boostback_loss_fraction", where);

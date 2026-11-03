@@ -136,6 +136,11 @@ double free_turn_time_s(double angle_rad, double accel_radps2, double max_rate_r
     return max_rate_radps / accel_radps2 + (angle - ramp) / max_rate_radps;
 }
 
+double landing_phase_rate_limit_radps(const EngineSetThrust& set, double tilt_max_rad, double inertia_kg_m2) {
+    const double alpha = max_pitch_acceleration_radps2(set, set.throttle_min, inertia_kg_m2);
+    return std::min(set.gimbal_rate_radps, std::sqrt(alpha * tilt_max_rad));
+}
+
 double throttle_range_time_s(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
                              const std::vector<std::string>& groups) {
     double time_s = 0.0;

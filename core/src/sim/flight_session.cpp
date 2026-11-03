@@ -22,6 +22,8 @@ namespace {
 // A freely falling body this close to its ground is ticked: a coast segment ends with one ground-contact check, so
 // a long one would fall through the ground and judge the touchdown at the speed it has reached far below it.
 constexpr double ground_tick_height_m = 5000.0;
+// The MECO plan's flip time is derived anew this often in the booster phase (FlightSession::meco_to_boostback_s_).
+constexpr double meco_to_boostback_renewal_s = 1.0;
 // [E] an Earth leg site on terrain tracks bodies within this horizontal distance: a landing missing its zone by more than
 // 5 km is no leg landing; the local 1 m tile reaches 5-6 km; beyond it the body's own ground contact (FlightBody on the
 // terrain) judges.
@@ -304,9 +306,14 @@ void FlightSession::run_autopilot() {
                 auto parameters = return_parameters(body.vehicle());
                 const auto site = return_site(body.vehicle());
                 if (parameters.boostback) {
-                    parameters.flip_duration_s = gnc::booster_meco_to_boostback_s(
-                        body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_, site, parameters,
-                        separation_after_meco_s(body.vehicle()));
+                    if (!meco_to_boostback_epoch_ || epoch_ < *meco_to_boostback_epoch_ ||
+                        epoch_ - *meco_to_boostback_epoch_ >= meco_to_boostback_renewal_s) {
+                        meco_to_boostback_s_ = gnc::booster_meco_to_boostback_s(
+                            body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, s.attitude, earth_, epoch_, site,
+                            parameters, separation_after_meco_s(body.vehicle()));
+                        meco_to_boostback_epoch_ = epoch_;
+                    }
+                    parameters.flip_duration_s = meco_to_boostback_s_;
                 }
                 reserve_kg = gnc::BoosterReturnGuidance::meco_propellant_kg(
                     body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_, site, parameters,

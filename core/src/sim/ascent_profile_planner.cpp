@@ -82,7 +82,7 @@ bool boostback_arc_found(const FlightSession& session, const vehicle::FlightBody
     const auto& s = stack.state();
     const auto site = session.return_site(stack.vehicle());
     parameters.flip_duration_s = gnc::booster_meco_to_boostback_s(
-        stack.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, session.earth_orientation(), session.epoch(), site,
+        stack.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, s.attitude, session.earth_orientation(), session.epoch(), site,
         parameters, separation_after_meco_s(stack.vehicle()));
     const auto delta_v = gnc::BoosterReturnGuidance::boostback_delta_v_mps(
         {s.position_gcrf_m, s.velocity_gcrf_mps}, session.earth_orientation(), session.epoch(), site, parameters);

@@ -101,23 +101,37 @@ struct BoosterReturnParameters {
 BoosterReturnParameters booster_return_parameters(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
                                                   bool drone_ship = false, BoosterReturnParameters base = {});
 
+// The attitude loop the session flies a returning booster on (flip, boostback, landing burn; faster than the ascent's
+// for the landing-burn divert, gimbal limits unchanged). The flip prediction models the same law.
+inline const AttitudeController::Gains booster_return_attitude_gains{1.5, 0.9, true};
+
 // The flip's turn authority [D]: the pitch acceleration of the flip engines' full gimbal at their minimum throttle in
-// vacuum, or, without flip engines, of the stage's RCS; the stage alone with `propellant_kg` of main propellant, settled
-// aft (gnc::stage_pitch_inertia_kg_m2).
-double booster_flip_acceleration_radps2(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
-                                        const BoosterReturnParameters& parameters, double propellant_kg);
-// Separation -> boostback ignition [D] at `accel_radps2`: flip_hold_s, then the free turn to
-// flip_ignition_off_velocity_rad off the velocity (accelerating up to flip_max_rate_radps, no braking; angle_rad unused),
-// or the rest-to-rest turn through `angle_rad` (the axis off the boostback direction at the separation) until the axis
-// is within flip_tolerance_rad (the guidance's ignition gate).
-double booster_flip_s(const BoosterReturnParameters& parameters, double accel_radps2, double angle_rad);
-// MECO planning: MECO -> boostback ignition for the stack at `state_gcrf` (its first stage the booster): the staging's
-// `separation_after_meco_s`, then booster_flip_s at the booster's propellant now. The turn angle: the air-relative
-// velocity at the separation (the stack's axis) against the boostback direction of the Lambert arc after the flip
-// (BoosterReturnGuidance::boostback_delta_v_mps's arc), iterated with the flip's own coast.
+// vacuum and their gimbal limit and slew rate, or, without flip engines, the stage's RCS (gimbal_max_rad 0); the stage
+// alone with `propellant_kg` of main propellant, settled aft (gnc::stage_pitch_inertia_kg_m2).
+struct BoosterFlipAuthority {
+    double accel_radps2 = 0.0;
+    double gimbal_max_rad = 0.0;
+    double gimbal_rate_radps = 0.0;
+};
+BoosterFlipAuthority booster_flip_authority(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                                            const BoosterReturnParameters& parameters, double propellant_kg);
+// Separation -> boostback ignition [D]: flip_hold_s, then the free turn to flip_ignition_off_velocity_rad off the
+// velocity (accelerating up to flip_max_rate_radps, no braking; the angles unused), or the turn through `angle_rad` (the
+// axis off the boostback direction at the separation) until the axis is within flip_tolerance_rad (the guidance's
+// ignition gate): on the gimbal as the session's attitude loop flies it (AttitudeController::gimbal_turn_time_s with
+// booster_return_attitude_gains: its braking law, the gimbal limit and slew rate; the turn axis `axis_angle_rad` from body
+// +y towards +z), on the RCS rest-to-rest bang-bang.
+double booster_flip_s(const BoosterReturnParameters& parameters, const BoosterFlipAuthority& authority, double angle_rad,
+                      double axis_angle_rad);
+// MECO planning: MECO -> boostback ignition for the stack at `state_gcrf` with `attitude_gcrf` (its first stage the
+// booster): the staging's `separation_after_meco_s`, then booster_flip_s at the booster's propellant now. The turn
+// angle: the air-relative velocity at the separation (the stack's axis) against the boostback direction of the Lambert
+// arc after the flip (BoosterReturnGuidance::boostback_delta_v_mps's arc), iterated with the flip's own coast; the turn
+// axis in the body from the attitude (the roll is held through the staging).
 double booster_meco_to_boostback_s(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
-                                   const frames::BodyOrientation& earth, time::Epoch epoch, const LandingSite& site,
-                                   const BoosterReturnParameters& parameters, double separation_after_meco_s);
+                                   const math::Quat& attitude_gcrf, const frames::BodyOrientation& earth,
+                                   time::Epoch epoch, const LandingSite& site, const BoosterReturnParameters& parameters,
+                                   double separation_after_meco_s);
 
 struct ReturnCommand {
     ReturnPhase phase = ReturnPhase::Flip;
@@ -159,11 +173,12 @@ public:
     // Each holds only while its phase computes it:
     //  boostback_cutoff - Boostback: the velocity still to be gained (less the tail-off) on the boostback engines
     //                     (rocket equation at the current mass and full thrust);
-    //  landing_ignition - Coast, descending: the ballistic impact prediction less the fall, at the sink speed now, over
-    //                     the height the landing-burn prediction takes (start height - stop height); none before both
-    //                     predictions exist and while an entry burn is ahead or running (the burn prediction does
-    //                     not know it);
-    //  touchdown        - Coast: that ignition plus the predicted burn duration; LandingBurn: the burn's time to go
+    //  landing_ignition - Coast, descending: where the predicted fall (the impact prediction's samples) meets the
+    //                     guidance's own ignition criterion - the landing-burn prediction from that point stops at the
+    //                     ground (renewed once a second; before the first: the ballistic impact less the burn's height
+    //                     at the sink speed now); none while an entry burn is ahead or running (the burn prediction
+    //                     does not know it);
+    //  touchdown        - Coast: that ignition plus that burn's predicted duration; LandingBurn: the burn's time to go
     //                     (SCvx plan or explicit law); none once landed. `catch_target`: the touchdown is a catch.
     struct Forecast {
         std::optional<time::Epoch> boostback_cutoff;
@@ -217,10 +232,22 @@ public:
         double time_s = 0.0;
         bool valid = false;
     };
-    // `drag_scale` multiplies the tabulated drag (the online estimate, drag_scale()).
+    // A point of the predicted fall: time from now, CG height above the ground height less the CG station (the frame of
+    // predict_impact's ground), air-relative speed, sine of the descent angle (> 0 falling), mass, gravity.
+    struct TrajectorySample {
+        double t_s = 0.0;
+        double height_m = 0.0;
+        double speed_mps = 0.0;
+        double sin_descent = 0.0;
+        double mass_kg = 0.0;
+        double gravity_mps2 = 0.0;
+    };
+    // `drag_scale` multiplies the tabulated drag (the online estimate, drag_scale()). `samples` (optional): the fall at
+    // each integration step (1 s) above the ground.
     static Impact predict_impact(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                  time::Epoch epoch, double ground_height_m, const math::Vec3* velocity_gcrf_mps = nullptr,
-                                 const PendingBurn* burn = nullptr, double drag_scale = 1.0);
+                                 const PendingBurn* burn = nullptr, double drag_scale = 1.0,
+                                 std::vector<TrajectorySample>* samples = nullptr);
 
     // One-dimensional landing-burn simulation along the current flight path: height above the ground
     // where the speed reaches zero (negative: below ground) and the burn duration.
@@ -230,6 +257,9 @@ public:
     };
     BurnPrediction predict_landing_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                         time::Epoch epoch) const;
+    // The same from a point of a predicted fall (height above the site's ground, as TrajectorySample).
+    BurnPrediction predict_landing_burn(const vehicle::Vehicle& vehicle, const vehicle::FlightEnvironment& env,
+                                        const TrajectorySample& state) const;
 
     // Landing on legs: how far short of the ballistic impact a retrograde landing burn stops (Earth-fixed, horizontal,
     // along the impact's horizontal velocity). The burn against the velocity bends the fall towards the vertical (a
@@ -296,6 +326,12 @@ private:
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
     Forecast forecast_;
     std::optional<time::Epoch> impact_epoch_;  // Coast: the latest ballistic impact prediction
+    // Coast: where the latest predicted fall reaches the guidance's own ignition criterion (the burn prediction's stop
+    // height at the ground) and that burn's duration (ignition_on_fall).
+    std::optional<time::Epoch> fall_ignition_epoch_;
+    double fall_burn_s_ = 0.0;
+    std::vector<TrajectorySample> fall_;
+    void ignition_on_fall(const vehicle::Vehicle& vehicle, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     void forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps, time::Epoch epoch);
 
     void entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
@@ -303,7 +339,7 @@ private:
     // The rest of the entry burn while it is still ahead or running (nullopt without one / once flown).
     std::optional<PendingBurn> pending_entry_burn(const vehicle::Vehicle& vehicle) const;
     Impact predict(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
-                   const math::Vec3* velocity_gcrf_mps = nullptr) const;
+                   const math::Vec3* velocity_gcrf_mps = nullptr, std::vector<TrajectorySample>* samples = nullptr) const;
 
     void start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     void explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,

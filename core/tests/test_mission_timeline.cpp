@@ -414,7 +414,10 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     // apex (its first sample, where the fall rate is near 0: the height over the sink is ill-conditioned there and moves
     // with the apex state), unchanged from 120 s on (4.9 / 4.6 s). Planner plan Task 3b (ship dry 177 t): a sample
     // 0.3 s past the apex was -54.7 / -64.4 s off; with the mean sink of the fall ahead as the floor +8.6 / -1.2 s, the
-    // later samples unchanged (5.3 / 3.7 s within 120 s).
+    // later samples unchanged (5.3 / 3.7 s within 120 s). Planner plan Task 5 fix round 1 (the ignition where the
+    // predicted fall meets the guidance's own criterion): landing burn +0.2 s at the apex, 0.9 / 0.5 s within 120 / 30 s;
+    // catch +2.6 s at the apex, 3.2 / 2.8 / 0.8 s within 120 / 30 / 10 s (the 1-D burn at the design throttles ~2.7 s
+    // longer than the flown SCvx burn).
     CHECK(*cutoff_prediction.first_seen - boostback->epoch <= 1.0);  // from the boostback's first second
     CHECK(cutoff_prediction.max_error_within_s(cutoff->epoch, 1e9) <= 2.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 15.0);

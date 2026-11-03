@@ -27,8 +27,14 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   Raptor (1 - 0.3) / 0.5 = 1.4 s, was 3 s [E]; explicit law and SCvx plans; a pad landing flies none). MECO planning
   derives the flip (`gnc::booster_meco_to_boostback_s`, `ascent-staging.md`). A catch-site abort cuts the engines 0.5 s
   after the abort plan's end at the water, as the pad landing does (the final set at minimum throttle lifts the light
-  stage: it hovered there until dry). Own faster attitude controller with grid fins; rate command limited to what the available
-  angular acceleration (gimbal or RCS, plus fins) can stop. Files: `booster_return.cpp`, `_prediction.cpp` (impact /
+  stage: it hovered there until dry). SCvx limits per landing phase (fix round 1): tilt `landing_phase_max_tilt_deg`
+  and `landing_gimbal_fraction` [E] keys, the pitch/yaw rate [D] `gnc::landing_phase_rate_limit_radps` (as the ship's:
+  min(gimbal slew, sqrt(alpha tilt)) at the landing-burn load; Super Heavy 0.349 / 0.254 / 0.139 rad/s, Falcon 9 RTLS
+  0.141 / 0.218 / 0.089, were [E] 0.2 / 0.15 / 0.1). Landing-ignition forecast: the guidance's own criterion (burn
+  prediction stops at the ground) found on the predicted fall (`ignition_on_fall`, bisection over the 1 s samples of
+  the impact prediction), the touchdown that ignition plus that burn's duration. Own faster attitude controller with
+  grid fins (`gnc::booster_return_attitude_gains`); rate command limited to what the available angular acceleration
+  (gimbal or RCS, plus fins) can stop. Files: `booster_return.cpp`, `_prediction.cpp` (impact /
   landing-burn / MECO predictions, drag estimate), `_burns.cpp`, private `booster_return_detail.hpp`.
 - SCvx landing planner (`gnc/descent_*`): `descent_phases` = 3 engine phases (13 -> 5 -> 3; 10 nodes per phase,
   neighbours share a node) in the plan frame (origin pad centre on the ground, x up, y east, z north; upright =

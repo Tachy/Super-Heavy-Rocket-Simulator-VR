@@ -104,6 +104,23 @@ public:
     ControlOutput steer(const vehicle::FlightBody& body, double ambient_pressure_pa, const math::Vec3& axis_gcrf,
                         const math::Vec3& roll_reference_gcrf = {}, const Feedforward* feedforward = nullptr) const;
 
+    // The planners' model of a large pitch/yaw turn on the gimbals as steer() with `gains` flies it, nothing else acting
+    // (one rigid body, constant authority): per body axis the rate command of the error (linear, limited to the rate
+    // braking at braking_margin of the full-deflection acceleration can stop), the torque I kd (command - rate) as the
+    // deflection the allocation gives for it, the deflection vector within gimbal_max_rad, each axis slewing at
+    // gimbal_rate_radps (<= 0: at once). The turn axis lies axis_angle_rad from body +y towards +z: the error splits over
+    // the two axes, which changes the braking rate and the slew. Returns the time until the error is within tolerance_rad.
+    // Throws std::invalid_argument without gimbal authority.
+    struct GimbalTurn {
+        double angle_rad = 0.0;
+        double tolerance_rad = 0.0;
+        double accel_radps2 = 0.0;  // full deflection
+        double gimbal_max_rad = 0.0;
+        double gimbal_rate_radps = 0.0;
+        double axis_angle_rad = 0.0;
+    };
+    static double gimbal_turn_time_s(const Gains& gains, const GimbalTurn& turn);
+
     // Rate command (stability augmentation for manual flight): tracks body angular rates.
     ControlOutput steer_rates(const vehicle::FlightBody& body, double ambient_pressure_pa,
                               const math::Vec3& rates_body_radps) const;

@@ -244,22 +244,41 @@ optim::SocpResult DescentPlanner::solve(int start_phase, DescentGoal goal, const
     }
 }
 
+bool DescentPlan::feasible(const ScvxSettings& settings) const {
+    // As the guidance refuses plans (ScvxLandingGuidance::beyond_limits, abort_strikes): every goal must clear the boxes;
+    // the tilt allowance holds for the target, an abort to the sea flies its tilt (the stage is given up). The excess
+    // is the sine of the half angle (DescentPlan).
+    return converged && !(keep_out_overlap_m > 0.0) &&
+           (goal == DescentGoal::Abort || !(planned_tilt_excess > std::sin(0.5 * settings.max_planned_tilt_excess_rad)));
+}
+
+bool better_descent_plan(const DescentPlan& a, const DescentPlan& b, const ScvxSettings& settings) {
+    if (a.converged != b.converged) return a.converged;
+    if (!a.converged) return a.virtual_control < b.virtual_control;
+    const bool a_feasible = a.feasible(settings), b_feasible = b.feasible(settings);
+    if (a_feasible != b_feasible) return a_feasible;
+    if (!a_feasible) {
+        if (a.keep_out_overlap_m != b.keep_out_overlap_m) return a.keep_out_overlap_m < b.keep_out_overlap_m;
+        if (a.planned_tilt_excess != b.planned_tilt_excess) return a.planned_tilt_excess < b.planned_tilt_excess;
+    }
+    return a.reference.x.back()[descent_index::mass] > b.reference.x.back()[descent_index::mass];
+}
+
 DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& initial, int start_phase,
                                  const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
                                  double elapsed) {
     if (warm_start) return plan_once(model, initial, start_phase, target, settings, warm_start, elapsed, SwitchGuess::State);
     // A fresh plan from the initial guess (not a fixed kinematic guess) starts twice - the switches from the state and in
-    // the middle of the switch windows - and keeps the better: converged, then the heavier end. Neither start wins
+    // the middle of the switch windows - and keeps the better (better_descent_plan: converged, feasible, then the heavier
+    // end). Neither start wins
     // everywhere (planner plan Task 5: the state start is ~1 t heavier on the booster's sea aborts across a box, the
     // window middle 0.2-0.9 t on Falcon 9's recorded deck plans and keeps a limit-cycling ship catch in reach).
     const bool kinematic = std::any_of(settings.kinematic_guess_s.begin(), settings.kinematic_guess_s.end(),
                                        [](double d) { return d > 0.0; });
     const std::vector<SwitchGuess> starts = kinematic ? std::vector<SwitchGuess>{SwitchGuess::State}
                                                       : std::vector<SwitchGuess>{SwitchGuess::State, SwitchGuess::WindowMiddle};
-    const auto better = [](const DescentPlan& a, const DescentPlan& b) {  // a better than b
-        if (a.converged != b.converged) return a.converged;
-        if (a.converged) return a.reference.x.back()[descent_index::mass] > b.reference.x.back()[descent_index::mass];
-        return a.virtual_control < b.virtual_control;
+    const auto better = [&settings](const DescentPlan& a, const DescentPlan& b) {
+        return better_descent_plan(a, b, settings);
     };
     std::optional<DescentPlan> plan;
     for (const auto start : starts) {

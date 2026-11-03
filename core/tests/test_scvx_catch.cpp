@@ -92,7 +92,7 @@ TEST_CASE("SCvx flies a nominal landing burn onto the arms", "[gnc][catch]") {
 TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea", "[gnc][catch][abort][slow]") {
     // The pilot (or the tower) gives the catch up at a given CG height above the pad: the booster must reach the sea
     // beyond the shoreline, not hover over land until its propellant runs out.
-    const double abort_height_m = GENERATE(1500.0, 800.0, 250.0);
+    const double abort_height_m = GENERATE(1500.0, 800.0, 400.0, 250.0, 150.0);
     CAPTURE(abort_height_m);
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
@@ -125,10 +125,20 @@ TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea
     CHECK(aborted);
     CHECK_FALSE(session.tower()->tower_struck());
     // The reach estimate decides at the abort. From 1500 and 800 m the water is in reach, with propellant left (planner
-    // plan Task 5: 6.2 / 4.4 t). From 250 m (205 m CG height, 61 m/s sink: 1.5 x 27.7 t > 40.5 t usable) the water is
-    // given up and the booster comes down soft on land instead. 400 m sits on the decision's edge (Task 5: in reach by
-    // 43 kg, flown to the water with 4.4 t; with the 3 s approach it was given up): not a case here.
-    const bool water_expected = abort_height_m > 300.0;
+    // plan Task 5 fix round 1: 6.5 / 4.4 t). From 150 m the water is given up and the booster comes down soft on land
+    // instead (24.7 t left). 400 and 250 m sit near the decision's edge (Task 5: 400 m in reach by 43 kg; 250 m given up
+    // with the [E] landing rates, in reach with the derived ones - both flew to the water with 4.4 t in fix round 1):
+    // either way is safe - the water with propellant left, or soft on land, never a crash.
+    if (abort_height_m > 200.0 && abort_height_m < 500.0) {
+        if (water_kept) {
+            CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);
+            CHECK(booster.vehicle().propellant_kg() > 1000.0);
+        } else {
+            CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
+        }
+        return;
+    }
+    const bool water_expected = abort_height_m > 500.0;
     CHECK(water_kept == water_expected);
     if (water_expected) {
         CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);

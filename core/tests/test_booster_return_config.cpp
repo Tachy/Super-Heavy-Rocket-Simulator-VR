@@ -5,11 +5,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -29,6 +31,11 @@ using Groups = std::vector<std::string>;
 namespace {
 
 constexpr double deg = constants::deg_to_rad;
+
+// The flown Super Heavy flip of "Booster return to the catch tower ends on the arms" (STARSIM_DEBUG_BOOSTER_FLIP):
+// separation -> boostback ignition and the turn axis in the body at the separation.
+constexpr double flown_flip_s = 10.46;
+constexpr double flown_flip_axis_deg = -113.3;
 
 // Throttle range time of one engine type: (max - min) / rate.
 double range_time_s(const config::EngineConfig& e) { return (e.throttle_max - e.throttle_min) / e.throttle_rate_per_s; }
@@ -64,6 +71,18 @@ TEST_CASE("Falcon 9 return parameters come from its recovery config", "[gnc][fal
     // D: the approach time is the Merlin's throttle range, (1 - 0.4) / 0.5 = 1.2 s (a pad landing flies none)
     CHECK(p.approach_time_constant_s == Approx(range_time_s(cfg.engine("merlin1d"))).epsilon(1e-12));
     CHECK(p.approach_time_constant_s == Approx(1.2).epsilon(1e-12));
+    // K tilt per phase, D rate per phase (gnc::landing_phase_rate_limit_radps at the landing-burn load)
+    const auto& limits = p.scvx.settings.limits;
+    CHECK(limits.tilt_max_rad[2] == Approx(10.0 * deg).epsilon(1e-12));
+    CHECK(limits.gimbal_fraction == 0.45);
+    std::printf("[rates] Falcon 9: %.3f / %.3f / %.3f rad/s (were [E] 0.2 / 0.15 / 0.1)\n", limits.rate_max_radps[0],
+                limits.rate_max_radps[1], limits.rate_max_radps[2]);
+    const auto& stage = cfg.stages.front();
+    const auto landing = vehicle::settled_stage_mass_properties(cfg, stage, stage.landing_propellant_kg);
+    const auto set = gnc::engine_set_thrust(cfg, stage, p.landing_groups, constants::standard_pressure_pa,
+                                            landing.cg_station_m);
+    CHECK(limits.rate_max_radps[2] ==
+          Approx(gnc::landing_phase_rate_limit_radps(set, 10.0 * deg, landing.pitch_inertia_kg_m2)).epsilon(1e-12));
 }
 
 TEST_CASE("Super Heavy return parameters come from its config", "[gnc][booster][config]") {
@@ -96,6 +115,34 @@ TEST_CASE("Super Heavy return parameters come from its config", "[gnc][booster][
     CHECK(p.aero_steering_max_alpha_rad == Approx(8.0 * deg).epsilon(1e-12));
     CHECK(p.touchdown_tilt_rad == Approx(4.0 * deg).epsilon(1e-12));  // the catch pins' key
     CHECK(p.scvx.settings.limits.terminal_tilt_rad == p.touchdown_tilt_rad);
+    // K: tilt per phase and the planned gimbal share; D: the rate per phase as the ship's (Task 3) - by hand for the
+    // final set: three centre Raptors at minimum throttle at sea level about the CG at the landing-burn load,
+    // min(gimbal slew 20 deg/s, sqrt(alpha x 10 deg))
+    const auto& limits = p.scvx.settings.limits;
+    CHECK(limits.tilt_max_rad[0] == Approx(25.0 * deg).epsilon(1e-12));
+    CHECK(limits.tilt_max_rad[1] == Approx(20.0 * deg).epsilon(1e-12));
+    CHECK(limits.tilt_max_rad[2] == Approx(10.0 * deg).epsilon(1e-12));
+    CHECK(limits.gimbal_fraction == 0.3);
+    {
+        const auto& raptor = cfg.engine("raptor3");
+        const propulsion::EnginePerformance engine(raptor);
+        const auto landing = vehicle::settled_stage_mass_properties(cfg, stage, stage.landing_propellant_kg);
+        double centre_station_m = 0.0;
+        for (const auto& g : stage.engine_groups) {
+            if (g.id == "center") centre_station_m = g.station_m;
+        }
+        const double final_alpha = 3.0 * engine.thrust_n(raptor.throttle_min, constants::standard_pressure_pa) *
+                                   std::sin(raptor.gimbal_max_rad) * (landing.cg_station_m - centre_station_m) /
+                                   landing.pitch_inertia_kg_m2;
+        const double final_rate = std::min(raptor.gimbal_rate_rad_s, std::sqrt(final_alpha * 10.0 * deg));
+        CHECK(limits.rate_max_radps[2] == Approx(final_rate).epsilon(1e-9));
+        std::printf("[rates] Super Heavy: %.3f / %.3f / %.3f rad/s (were [E] 0.2 / 0.15 / 0.1), final alpha %.3f rad/s2\n",
+                    limits.rate_max_radps[0], limits.rate_max_radps[1], limits.rate_max_radps[2], final_alpha);
+        for (int i = 0; i < 3; ++i) {
+            CHECK(limits.rate_max_radps[i] > 0.0);
+            CHECK(limits.rate_max_radps[i] <= raptor.gimbal_rate_rad_s);
+        }
+    }
 
     // D: catch approach, the Raptor's throttle range (1 - 0.3) / 0.5 = 1.4 s, in the explicit law and the SCvx plans
     const auto& raptor = cfg.engine("raptor3");
@@ -116,18 +163,51 @@ TEST_CASE("Super Heavy return parameters come from its config", "[gnc][booster][
     const double lever_m = mass.cg_station_m - centre->station_m;
     const double alpha = 3.0 * engine.thrust_n(raptor.throttle_min, 0.0) * std::sin(raptor.gimbal_max_rad) * lever_m /
                          mass.pitch_inertia_kg_m2;
-    CHECK(gnc::booster_flip_acceleration_radps2(cfg, stage, p, propellant_kg) == Approx(alpha).epsilon(1e-12));
-    // Rest-to-rest bang-bang through 153 deg (the flown turn at the separation), lit within the 15 deg tolerance:
-    // T = 2 sqrt(theta / alpha), the last 15 deg take sqrt(2 tol / alpha).
-    const double theta = 153.0 * deg, tol = p.flip_tolerance_rad;
-    const double flip_s = 2.0 * std::sqrt(theta / alpha) - std::sqrt(2.0 * tol / alpha);
-    CHECK(gnc::booster_flip_s(p, alpha, theta) == Approx(flip_s).epsilon(1e-12));
-    std::printf("[flip] Super Heavy: I %.4g kg m2, CG %.2f m, lever %.2f m, alpha %.4f rad/s2, 153 deg -> %.2f s "
-                "(flown 10.43 s, the former fixed 10 s)\n",
-                mass.pitch_inertia_kg_m2, mass.cg_station_m, lever_m, alpha, flip_s);
-    // physical band: the flown flip (10.4 s, attitude controller) - the bang-bang turn at full authority is not slower
-    CHECK(flip_s > 5.0);
-    CHECK(flip_s < 11.0);
+    const auto authority = gnc::booster_flip_authority(cfg, stage, p, propellant_kg);
+    CHECK(authority.accel_radps2 == Approx(alpha).epsilon(1e-12));
+    CHECK(authority.gimbal_max_rad == raptor.gimbal_max_rad);    // 15 deg
+    CHECK(authority.gimbal_rate_radps == raptor.gimbal_rate_rad_s);  // 20 deg/s
+    // The turn through 153 deg (the flown turn at the separation), lit within the 15 deg tolerance, as the session's
+    // attitude loop flies it: its braking law and the gimbal slew, the turn axis where the flown one lay in the body.
+    const double theta = 153.0 * deg, tol = p.flip_tolerance_rad, axis = flown_flip_axis_deg * deg;
+    const double flip_s = gnc::AttitudeController::gimbal_turn_time_s(
+        gnc::booster_return_attitude_gains, {theta, tol, alpha, raptor.gimbal_max_rad, raptor.gimbal_rate_rad_s, axis});
+    CHECK(gnc::booster_flip_s(p, authority, theta, axis) == Approx(flip_s).epsilon(1e-12));
+    const double bang_bang_s = 2.0 * std::sqrt(theta / alpha) - std::sqrt(2.0 * tol / alpha);  // the former model
+    std::printf("[flip] Super Heavy: I %.4g kg m2, CG %.2f m, lever %.2f m, alpha %.4f rad/s2, 153 deg about %.0f deg -> "
+                "%.2f s (flown %.2f s; bang-bang at full deflection %.2f s, the former fixed 10 s)\n",
+                mass.pitch_inertia_kg_m2, mass.cg_station_m, lever_m, alpha, flown_flip_axis_deg, flip_s, flown_flip_s,
+                bang_bang_s);
+    // The flown flip (catch case, 504 t at the separation) against the model of the same law: the model is a turn in
+    // vacuum. The stage flies top first at the separation with its CG low (18 m of 71 m): at 470 -> 130 Pa its hull and
+    // fins push the turn along (reviewer estimate 1-2 MN m against the gimbals' 12 MN m), so the flown flip is faster;
+    // measured +5.5 % (11.04 vs 10.46 s; the loop's own fin authority adds ~1 %). The model stays the slower bound, by
+    // at most 8 %.
+    CHECK(flip_s > flown_flip_s);
+    CHECK(flip_s < 1.08 * flown_flip_s);
+}
+
+TEST_CASE("The attitude loop's turn model: braking law, gimbal slew and the turn axis", "[gnc][config]") {
+    const auto gains = gnc::booster_return_attitude_gains;
+    const double pi = constants::pi, a = 0.1, tol = 0.2, gimbal = 15.0 * deg;
+    // No slew, one body axis: full authority until the rate meets the braking curve sqrt(2 x 0.5 a e) (a third of the
+    // turn), then along that curve to the tolerance: sqrt(2 theta / 3a) + 2 (sqrt(2 theta / 3) - sqrt(tol)) / sqrt(a).
+    // The PD loop rides above the curve by the deceleration over kd (a / 2 / 2.7 = 0.019 rad/s): ~4 % faster.
+    const double closed_s = std::sqrt(2.0 * pi / (3.0 * a)) + 2.0 * (std::sqrt(2.0 * pi / 3.0) - std::sqrt(tol)) / std::sqrt(a);
+    const double instant_s = gnc::AttitudeController::gimbal_turn_time_s(gains, {pi, tol, a, gimbal, 0.0, 0.0});
+    CHECK(instant_s < closed_s);
+    CHECK(instant_s == Approx(closed_s).epsilon(0.05));
+    // The slew (20 deg/s over 15 deg: 0.75 s to full deflection, then the reversal into the braking at half authority)
+    // adds time; a turn axis between the body axes splits the error, each axis brakes on its own curve: faster.
+    const double slewed_s = gnc::AttitudeController::gimbal_turn_time_s(gains, {pi, tol, a, gimbal, 20.0 * deg, 0.0});
+    const double diagonal_s = gnc::AttitudeController::gimbal_turn_time_s(gains, {pi, tol, a, gimbal, 20.0 * deg, 0.25 * pi});
+    std::printf("[turn model] instant %.2f s (closed form %.2f s), slewed %.2f s, diagonal axis %.2f s\n", instant_s,
+                closed_s, slewed_s, diagonal_s);
+    CHECK(slewed_s > instant_s + 0.1);
+    CHECK(slewed_s < instant_s + 1.0);
+    CHECK(diagonal_s < slewed_s);
+    CHECK_THROWS_AS(gnc::AttitudeController::gimbal_turn_time_s(gains, {pi, tol, 0.0, gimbal, 0.0, 0.0}),
+                    std::invalid_argument);
 }
 
 TEST_CASE("Falcon 9's flip time follows its RCS and the free turn", "[gnc][falcon9][config]") {
@@ -144,7 +224,9 @@ TEST_CASE("Falcon 9's flip time follows its RCS and the free turn", "[gnc][falco
     }
     // the allocator's pure torque about a transverse axis: one tangential thruster per pod, opposite pods (a couple)
     // plus the inward ones on the lever - taken from the allocator itself, checked against the 2-thruster lever bound
-    const double alpha = gnc::booster_flip_acceleration_radps2(cfg, stage, p, propellant_kg);
+    const auto authority = gnc::booster_flip_authority(cfg, stage, p, propellant_kg);
+    const double alpha = authority.accel_radps2;
+    CHECK(authority.gimbal_max_rad == 0.0);  // the RCS turns it
     const double lever_bound = 2.0 * pod_thrust_n * (pod_station_m - mass.cg_station_m) / mass.pitch_inertia_kg_m2;
     CHECK(alpha == Approx(gnc::rcs_pitch_acceleration_radps2(stage, mass.pitch_inertia_kg_m2, mass.cg_station_m)).epsilon(1e-12));
     CHECK(alpha > 0.5 * lever_bound);
@@ -153,7 +235,7 @@ TEST_CASE("Falcon 9's flip time follows its RCS and the free turn", "[gnc][falco
     const double w = p.flip_max_rate_radps, theta = p.flip_ignition_off_velocity_rad;
     REQUIRE(w * w / (2.0 * alpha) < theta);
     const double flip_s = p.flip_hold_s + w / alpha + (theta - w * w / (2.0 * alpha)) / w;
-    CHECK(gnc::booster_flip_s(p, alpha, 0.0) == Approx(flip_s).epsilon(1e-12));
+    CHECK(gnc::booster_flip_s(p, authority, 0.0, 0.0) == Approx(flip_s).epsilon(1e-12));
     std::printf("[flip] Falcon 9: I %.4g kg m2, CG %.2f m, alpha %.4f rad/s2 (%.2f deg/s2), flip %.2f s (timelines "
                 "13.7 +-0.6 s, flown 14.79 s, the former fitted 14.8 s)\n",
                 mass.pitch_inertia_kg_m2, mass.cg_station_m, alpha, alpha / deg, flip_s);
@@ -251,7 +333,8 @@ TEST_CASE("A returning booster without its return keys is refused", "[gnc][boost
     for (const auto& c : {Case{"starship_block3", "return_flight_time_s"}, Case{"starship_block3", "landing_phase_throttles"},
                           Case{"starship_block3", "max_return_alpha_deg"}, Case{"starship_block3", "max_catch_tilt_deg"},
                           Case{"falcon9_block5", "boostback_loss_fraction"}, Case{"falcon9_block5", "deploy_margin_s"},
-                          Case{"falcon9_block5", "max_touchdown_tilt_deg"}}) {
+                          Case{"falcon9_block5", "max_touchdown_tilt_deg"}, Case{"starship_block3", "landing_phase_max_tilt_deg"},
+                          Case{"starship_block3", "landing_gimbal_fraction"}, Case{"falcon9_block5", "landing_phase_max_tilt_deg"}}) {
         const std::string key = c.key;
         CAPTURE(c.vehicle, key);
         const auto dir = fs::temp_directory_path() / ("starsim_booster_return_keys_" + std::string(c.vehicle) + "_" + key);

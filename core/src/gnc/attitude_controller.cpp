@@ -6,6 +6,7 @@
 #include <map>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
@@ -393,7 +394,46 @@ double rate_command(double error_rad, double linear_gain, double max_angular_acc
     return std::copysign(std::min(std::abs(linear), braking), error_rad);
 }
 
+// Integration step and time bound of the turn model (gimbal_turn_time_s). The session's loop runs at 200 Hz; the MECO
+// planner calls the model every tick of the ascent (several times per plan), so it steps at 50 Hz (kd dt ~0.05; the
+// Super Heavy flip 11.04 s at both rates).
+constexpr double turn_model_step_s = 0.02;
+constexpr double turn_model_max_s = 600.0;
+
 }  // namespace
+
+double AttitudeController::gimbal_turn_time_s(const Gains& gains, const GimbalTurn& turn) {
+    if (!(turn.accel_radps2 > 0.0) || !(turn.gimbal_max_rad > 0.0)) {
+        throw std::invalid_argument("gimbal_turn_time_s: needs gimbal authority (accel_radps2 and gimbal_max_rad > 0)");
+    }
+    const double kd = 2.0 * gains.damping_ratio * gains.natural_frequency_rad_s;
+    const double gain = gains.natural_frequency_rad_s * gains.natural_frequency_rad_s / kd;
+    const double sin_max = std::sin(turn.gimbal_max_rad);
+    const double slew = turn.gimbal_rate_radps > 0.0 ? turn.gimbal_rate_radps * turn_model_step_s
+                                                     : std::numeric_limits<double>::infinity();
+    const double angle = std::abs(turn.angle_rad);
+    double error[2] = {angle * std::cos(turn.axis_angle_rad), angle * std::sin(turn.axis_angle_rad)};
+    double rate[2] = {0.0, 0.0};
+    double gimbal[2] = {0.0, 0.0};
+    for (double t = 0.0; t < turn_model_max_s; t += turn_model_step_s) {
+        if (std::hypot(error[0], error[1]) <= std::abs(turn.tolerance_rad)) return t;
+        // steer(): per axis the rate command and the torque I kd (command - rate); the allocation's deflection for it,
+        // the deflection vector within the gimbal limit (Vehicle: the magnitude), each axis slewing at the gimbal rate.
+        double target[2];
+        for (int i = 0; i < 2; ++i) {
+            const double wanted = kd * (rate_command(error[i], gain, turn.accel_radps2, gains.actuator_delay_s) - rate[i]);
+            target[i] = wanted / turn.accel_radps2 * sin_max;  // allocate(): torque / lever moment (small angle)
+        }
+        const double magnitude = std::hypot(target[0], target[1]);
+        for (int i = 0; i < 2; ++i) {
+            if (magnitude > turn.gimbal_max_rad) target[i] *= turn.gimbal_max_rad / magnitude;
+            gimbal[i] += std::clamp(target[i] - gimbal[i], -slew, slew);
+            rate[i] += turn.accel_radps2 * std::sin(gimbal[i]) / sin_max * turn_model_step_s;
+            error[i] -= rate[i] * turn_model_step_s;
+        }
+    }
+    return turn_model_max_s;
+}
 
 std::vector<double> AttitudeController::feathered_grid_fins(const vehicle::FlightBody& body) {
     std::vector<double> deflections;

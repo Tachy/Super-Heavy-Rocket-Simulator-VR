@@ -232,7 +232,7 @@ TEST_CASE("The tilt penalty on fresh plans keeps the refused first deck plans in
     // First plans of ASDS MECO seeds 105 and 109, recorded with STARSIM_DUMP_SCVX. At the default penalty the solver settles
     // on one swing of 28.1 / 26.5 deg against the final set's 20 deg, 12.8 s into the burn, and the guard refuses it
     // (Task 3d report). Fixed numbers: each seed at the trust-region weight that refused it.
-    const double limit = std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad);
+    const double limit = std::sin(0.5 * ScvxLandingParameters{}.settings.max_planned_tilt_excess_rad);
     const auto excess = [](const char* name, double trust_region, double penalty) {
         auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/" + name);
         REQUIRE(!r.warm_start);
@@ -312,11 +312,11 @@ TEST_CASE("A plan that reaches its target only beyond the final set's tilt limit
     DescentPlanner planner;
     const auto plan = default_plan_function()(planner, r);
     REQUIRE(plan.converged);
-    CHECK(plan.planned_tilt_excess > std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad));
+    CHECK(plan.planned_tilt_excess > std::sin(0.5 * ScvxLandingParameters{}.settings.max_planned_tilt_excess_rad));
     // The drone-ship re-plan at 741 m flies its final phase within the limit.
     const auto replan = default_plan_function()(planner, seed117_replan("falcon9_asds_seed117_741m.txt"));
     REQUIRE(replan.converged);
-    CHECK(replan.planned_tilt_excess < std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad));
+    CHECK(replan.planned_tilt_excess < std::sin(0.5 * ScvxLandingParameters{}.settings.max_planned_tilt_excess_rad));
 }
 
 TEST_CASE("A fresh catch plan held in a limit cycle by its soft attitude limits converges on a raised penalty",

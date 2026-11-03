@@ -284,6 +284,47 @@ TEST_CASE("A plan that cannot clear a keep-out box reports the overlap", "[gnc][
     CHECK((!plan.converged || plan.keep_out_overlap_m > 0.0));
 }
 
+TEST_CASE("Of two starts the feasible plan wins over one with more propellant left", "[gnc][descent][scvx]") {
+    // Hand-made plans (DescentPlanner::plan's two fresh starts): feasibility first, then the propellant.
+    const ScvxSettings settings;
+    const auto plan = [](double final_mass_kg, double overlap_m, double tilt_excess) {
+        DescentPlan p;
+        p.converged = true;
+        p.reference.x = {make_state(300e3, {}, {}, Quat{}, {}), make_state(final_mass_kg, {}, {}, Quat{}, {})};
+        p.keep_out_overlap_m = overlap_m;
+        p.planned_tilt_excess = tilt_excess;
+        return p;
+    };
+    const double limit = std::sin(0.5 * settings.max_planned_tilt_excess_rad);
+    const auto clear = plan(260e3, -2.0, 0.0);
+    const auto through_box = plan(262e3, 0.5, 0.0);           // 2 t more left, but through a keep-out box
+    const auto over_tilt = plan(263e3, -2.0, 1.5 * limit);    // 3 t more left, but beyond the tilt limit
+    const auto within_tilt = plan(261e3, -2.0, 0.5 * limit);  // over the soft limit, within the allowance
+    CHECK(clear.feasible(settings));
+    CHECK_FALSE(through_box.feasible(settings));
+    CHECK_FALSE(over_tilt.feasible(settings));
+    CHECK(within_tilt.feasible(settings));
+    CHECK(better_descent_plan(clear, through_box, settings));
+    CHECK_FALSE(better_descent_plan(through_box, clear, settings));
+    CHECK(better_descent_plan(clear, over_tilt, settings));
+    CHECK_FALSE(better_descent_plan(over_tilt, clear, settings));
+    // both feasible: the propellant; both infeasible: the smaller overlap, then the smaller excess
+    CHECK(better_descent_plan(within_tilt, clear, settings));
+    CHECK(better_descent_plan(over_tilt, through_box, settings));
+    CHECK(better_descent_plan(plan(250e3, 0.2, 0.0), through_box, settings));
+    // an abort to the sea flies its tilt (as the guidance): only the boxes count there
+    auto abort_tilted = over_tilt;
+    abort_tilted.goal = DescentGoal::Abort;
+    CHECK(abort_tilted.feasible(settings));
+    auto abort_through_box = through_box;
+    abort_through_box.goal = DescentGoal::Abort;
+    CHECK_FALSE(abort_through_box.feasible(settings));
+    // converged before all of it
+    auto unconverged = plan(270e3, -2.0, 0.0);
+    unconverged.converged = false;
+    CHECK(better_descent_plan(through_box, unconverged, settings));
+}
+
 TEST_CASE("SCvx plans a catch whatever the initial roll", "[gnc][descent][scvx]") {
     const auto b = block3();
     const auto s = settings(*b);

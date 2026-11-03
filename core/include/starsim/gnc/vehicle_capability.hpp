@@ -66,6 +66,10 @@ double turn_time_within_s(double total_rad, double tolerance_rad, double accel_r
 // through angle_rad. Throws std::invalid_argument for accel_radps2 <= 0.
 double free_turn_time_s(double angle_rad, double accel_radps2, double max_rate_radps);
 
+// Pitch/yaw rate limit of a landing phase on `set` [D]: the gimbal slew rate, or the rate the set at its minimum
+// throttle still stops within the phase's tilt limit, sqrt(alpha tilt_max) - whichever is lower.
+double landing_phase_rate_limit_radps(const EngineSetThrust& set, double tilt_max_rad, double inertia_kg_m2);
+
 // The time the slowest engine of a set runs its whole throttle range, (throttle_max - throttle_min) / throttle_rate
 // (0: no engine with a throttle rate). groups: as engine_set_thrust.
 double throttle_range_time_s(const config::VehicleConfig& vehicle, const config::StageConfig& stage,

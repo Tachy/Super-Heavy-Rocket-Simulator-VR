@@ -67,6 +67,12 @@ struct ScvxSettings {
     // mostly fly horizontally (the lunar high gate: 3 km at 90 m/s), where the straight-line guess is far from
     // consistent and SCvx ends in a poor local optimum. [E] per vehicle.
     PhaseDurations kinematic_guess_s{};
+    // [E] A plan may tilt the final set at most this far beyond its soft limit (more than the start state already does;
+    // DescentPlan::planned_tilt_excess); beyond, the target counts as out of reach (ScvxLandingGuidance: abort where there
+    // is a sea). The soft limits keep re-plans from violating states feasible; Falcon 9 lit 900 m beyond its zone once got
+    // a converged pad plan that tilted 15 deg beyond the final set's 10 deg, flew it, and gave the zone up too low to
+    // reach the water.
+    double max_planned_tilt_excess_rad = 3.0 * constants::deg_to_rad;
 };
 
 struct DescentPlan {
@@ -93,7 +99,15 @@ struct DescentPlan {
     int phase_at(double t_s) const;
     DescentState state_at(double t_s) const;   // linear between nodes, quaternion normalised
     math::Vec3 thrust_at(double t_s) const;    // first-order hold
+    // Converged, clear of the keep-out boxes and - for the target, not an abort - with the final set's tilt within
+    // max_planned_tilt_excess_rad beyond its soft limit: a plan the guidance flies as it is.
+    bool feasible(const ScvxSettings& settings) const;
 };
+
+// Of two plans from the same state for the same target, whether `a` is better than `b` (DescentPlanner::plan's starts):
+// converged first, then feasible (DescentPlan::feasible), then - both feasible - the heavier end; both converged but
+// infeasible: the smaller keep-out overlap, then the smaller tilt excess; neither converged: the smaller virtual control.
+bool better_descent_plan(const DescentPlan& a, const DescentPlan& b, const ScvxSettings& settings);
 
 // target or -target, whichever is nearer `reference` (a quaternion and its negative are the same attitude).
 math::Quat nearest_sign(const math::Quat& target, const math::Quat& reference);

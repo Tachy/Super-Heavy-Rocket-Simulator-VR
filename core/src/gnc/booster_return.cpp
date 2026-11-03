@@ -86,6 +86,17 @@ BoosterReturnParameters booster_return_parameters(const config::VehicleConfig& v
     if (profile.landing_phase_max_tilt_rad.size() == 3) {
         for (size_t i = 0; i < 3; ++i) p.scvx.settings.limits.tilt_max_rad[i] = profile.landing_phase_max_tilt_rad[i];
     }
+    if (profile.landing_engine_phases.size() == 3) {
+        // [D] pitch/yaw rate per phase as the ship's (Task 3): the set's gimbal slew, or the rate it stops within the
+        // phase's tilt limit at minimum throttle - the stage at its landing-burn load (the heavier end, the slower turn).
+        const auto landing = vehicle::settled_stage_mass_properties(vehicle, stage, stage.landing_propellant_kg);
+        const std::vector<std::string>* sets[3] = {&p.landing_ignition_groups, &p.landing_divert_groups, &p.landing_groups};
+        for (size_t i = 0; i < 3; ++i) {
+            const auto set = engine_set_thrust(vehicle, stage, *sets[i], constants::standard_pressure_pa, landing.cg_station_m);
+            p.scvx.settings.limits.rate_max_radps[i] = landing_phase_rate_limit_radps(
+                set, p.scvx.settings.limits.tilt_max_rad[i], landing.pitch_inertia_kg_m2);
+        }
+    }
     if (profile.landing_switch_sink_mps.size() == 2) {
         auto& switches = p.scvx.settings.limits.switches;
         for (size_t i = 0; i < 2; ++i) {
@@ -141,24 +152,32 @@ BoosterReturnParameters booster_return_parameters(const config::VehicleConfig& v
     return p;
 }
 
-double booster_flip_acceleration_radps2(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
-                                        const BoosterReturnParameters& parameters, double propellant_kg) {
+BoosterFlipAuthority booster_flip_authority(const config::VehicleConfig& vehicle, const config::StageConfig& stage,
+                                            const BoosterReturnParameters& parameters, double propellant_kg) {
     const auto mass = vehicle::settled_stage_mass_properties(vehicle, stage, propellant_kg);
     if (parameters.flip_groups.empty()) {
-        return rcs_pitch_acceleration_radps2(stage, mass.pitch_inertia_kg_m2, mass.cg_station_m);
+        return {rcs_pitch_acceleration_radps2(stage, mass.pitch_inertia_kg_m2, mass.cg_station_m), 0.0, 0.0};
     }
     // At MECO height the air pressure is negligible: vacuum thrust.
     const auto set = engine_set_thrust(vehicle, stage, parameters.flip_groups, 0.0, mass.cg_station_m);
-    return max_pitch_acceleration_radps2(set, set.throttle_min, mass.pitch_inertia_kg_m2);
+    return {max_pitch_acceleration_radps2(set, set.throttle_min, mass.pitch_inertia_kg_m2), set.gimbal_rad,
+            set.gimbal_rate_radps};
 }
 
-double booster_flip_s(const BoosterReturnParameters& parameters, double accel_radps2, double angle_rad) {
+double booster_flip_s(const BoosterReturnParameters& parameters, const BoosterFlipAuthority& authority, double angle_rad,
+                      double axis_angle_rad) {
     if (parameters.flip_ignition_off_velocity_rad > 0.0) {
-        return parameters.flip_hold_s +
-               free_turn_time_s(parameters.flip_ignition_off_velocity_rad, accel_radps2, parameters.flip_max_rate_radps);
+        return parameters.flip_hold_s + free_turn_time_s(parameters.flip_ignition_off_velocity_rad, authority.accel_radps2,
+                                                         parameters.flip_max_rate_radps);
     }
-    return parameters.flip_hold_s +
-           turn_time_within_s(angle_rad, parameters.flip_tolerance_rad, accel_radps2, parameters.flip_max_rate_radps);
+    if (authority.gimbal_max_rad > 0.0) {
+        return parameters.flip_hold_s +
+               AttitudeController::gimbal_turn_time_s(
+                   booster_return_attitude_gains, {angle_rad, parameters.flip_tolerance_rad, authority.accel_radps2,
+                                                   authority.gimbal_max_rad, authority.gimbal_rate_radps, axis_angle_rad});
+    }
+    return parameters.flip_hold_s + turn_time_within_s(angle_rad, parameters.flip_tolerance_rad, authority.accel_radps2,
+                                                       parameters.flip_max_rate_radps);
 }
 
 BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnParameters parameters)
@@ -260,8 +279,12 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
         const double pointing = std::acos(std::clamp(dot(body_axis, cmd.axis_gcrf), -1.0, 1.0));
         if (phase_ == ReturnPhase::Flip) {
             if (tick_counter_ == 1 && std::getenv("STARSIM_DEBUG_BOOSTER_FLIP")) {
-                std::fprintf(stderr, "[booster-flip] separation: axis %.1f deg off the boostback direction\n",
-                             pointing / constants::deg_to_rad);
+                const Vec3 turn_body =
+                    s.attitude.inverse_rotate(math::normalized_or_zero(cross(body_axis, cmd.axis_gcrf)));
+                std::fprintf(stderr, "[booster-flip] separation: axis %.1f deg off the boostback direction, turn axis "
+                                     "%.1f deg from body +y\n",
+                             pointing / constants::deg_to_rad,
+                             std::atan2(turn_body.z, turn_body.y) / constants::deg_to_rad);
             }
             // Turn with the flip engines idling (gimbal authority; none: on the RCS), then go to full boostback thrust.
             cmd.run_groups = parameters_.flip_groups;
@@ -331,10 +354,14 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
         const double fin_station = grid_fin_station(body.vehicle());
         const bool aero_steering = fin_station > 0.0 && dynamic_pressure > aero_steering_min_q_pa;
         if (tick_counter_ % (aero_steering ? 40 : 200) == 0) {
-            const auto impact = predict(body, env, epoch);
+            // The ignition on the predicted fall once a second (a forecast; the guidance's own ignition check runs on).
+            const bool fall_forecast = tick_counter_ % fall_forecast_ticks == 0 && !pending_entry_burn(body.vehicle());
+            const auto impact = predict(body, env, epoch, nullptr, fall_forecast ? &fall_ : nullptr);
             impact_epoch_.reset();
+            if (fall_forecast) fall_ignition_epoch_.reset();
             if (impact.valid) {
                 impact_epoch_ = epoch + impact.time_s;
+                if (fall_forecast) ignition_on_fall(body.vehicle(), env, epoch);
                 const Vec3 miss = horizontal_miss(impact);
                 impact_miss_m_ = norm(miss);
                 trim_itrf_ = {};
@@ -507,6 +534,15 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
 
 void BoosterReturnGuidance::forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps,
                                              time::Epoch epoch) {
+    // The guidance's own criterion on the predicted fall (ignition_on_fall): the burn prediction at the predicted
+    // ignition state, not at the state now (the stage slows in the denser air below). Super Heavy timeline: ignition
+    // within 0.9 s from 120 s out (was 5.3 s late), the catch within 3.2 s (was 6.1 s) - planner plan Task 5 fix
+    // round 1. The fallback below (no ignition on the fall yet): the impact less the burn's height at the sink now.
+    if (fall_ignition_epoch_ && *fall_ignition_epoch_ >= epoch) {
+        forecast_.landing_ignition = *fall_ignition_epoch_;
+        forecast_.touchdown = *fall_ignition_epoch_ + fall_burn_s_;
+        return;
+    }
     // The ignition from the guidance's two predictions: the ballistic impact less the fall, at the sink speed now, over
     // the height the landing burn takes (its start height above its stop height). At the ignition that height is the
     // height left. (The stop height alone run forward linearly was 26 s early in the fall's middle: the

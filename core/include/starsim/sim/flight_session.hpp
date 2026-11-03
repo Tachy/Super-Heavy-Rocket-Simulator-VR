@@ -1104,7 +1104,7 @@ private:
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
-    gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9, true}};
+    gnc::AttitudeController return_controller_{gnc::booster_return_attitude_gains};
     // Its coast phase (turning engines first on the RCS, d1): slews limited to 2 deg/s [E] - the RCS supply is finite
     // (Falcon 9 nitrogen); a full-authority turn spent it (and the momentum the air adds at 70 km) before the entry burn.
     gnc::AttitudeController return_coast_controller_{
@@ -1216,6 +1216,11 @@ private:
     double gm_earth_;
     AutopilotStatus autopilot_;
     std::optional<double> booster_cutoff_propellant_kg_;  // see booster_cutoff_propellant_kg()
+    // AutopilotState::Booster: the MECO plan's MECO -> boostback ignition (gnc::booster_meco_to_boostback_s, its turn
+    // model integrates the attitude loop) and when it was derived: renewed once a second, not every tick (it changes by
+    // milliseconds per second; every tick it cost ~40 % of an ascent's wall time).
+    double meco_to_boostback_s_ = 0.0;
+    std::optional<time::Epoch> meco_to_boostback_epoch_;
     std::optional<StagingSequence> staging_;               // see staging()
     std::unique_ptr<gnc::AscentGuidance> guidance_;
     std::optional<gnc::BurnExecutor> burn_;

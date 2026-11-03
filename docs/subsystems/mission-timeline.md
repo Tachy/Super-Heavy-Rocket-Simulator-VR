@@ -49,12 +49,14 @@ serial and the acting part's name.
   - SECO: `AscentGuidance::cutoff_epoch` (closed-loop update + PEG time to go) from the upper stage's first
     closed-loop tick: -1.9 s then, within 0.3 s over the last 120 s.
   - Booster return (`BoosterReturnGuidance::forecast`): the boostback's cutoff (velocity to be gained less the
-    tail-off, rocket equation at full thrust; -1.6 s at its start, 0.2 s within 10 s); the landing burn (LandingBurn,
-    from the apex: the ballistic impact prediction less the fall, at the sink speed now, over the height the
-    landing-burn prediction takes - within 5.4 s, 1.4 s in the last 30 s; with an entry burn (Falcon 9) only after
-    it); the touchdown (Caught / Landed: that ignition plus the burn prediction's duration, then the landing burn's
-    time to go - the SCvx plan's end; Super Heavy: -16 s at the apex, 4.3 s within 30 s, 0.9 s within 10 s of the
-    pins' first touch).
+    tail-off, rocket equation at full thrust; -1.5 s at its start, 0.2 s within 10 s); the landing burn (LandingBurn,
+    from the apex: where the predicted fall meets the guidance's own ignition criterion - the burn prediction from
+    that point stops at the ground; planner plan Task 5 fix round 1, was the impact less the burn's height at the sink
+    now, up to 5.3 s late - +0.2 s at the apex, within 0.9 s from 120 s, 0.5 s in the last 30 s; with an entry burn
+    (Falcon 9) only after it); the touchdown (Caught / Landed: that ignition plus that burn's predicted duration, then
+    the landing burn's time to go - the SCvx plan's end; Super Heavy: +2.6 s at the apex, within 3.2 s from 120 s,
+    0.8 s within 10 s of the pins' first touch; the rest is the 1-D burn at the design throttles, ~2.7 s longer than
+    the flown SCvx burn).
   - Ship / capsule entry (`EntryGuidance::gate_epoch`: the corrector's or the terminal steering's predicted time to
     the gate): the ship's landing burn (flip at the gate; ship_return_starbase: +28 s 26 min ahead, 0.3 s within
     2 min) or the capsule's drogues (Parachutes; Crew Dragon: within 3.5 s, 1.8 s at the end). Then

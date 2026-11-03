@@ -33,15 +33,11 @@ struct ScvxLandingParameters {
     // The water counts as in reach while this x the estimated cost (estimate_sea_reach, a lower bound) fits the usable
     // propellant; beyond, the abort gives the water up from the live state instead of finding out late.
     // [D] flown propellant over the estimate from the abort on (Block 3 booster, shore 765 m): 1.45 from 1500 m, 1.39 from
-    // 800 m; from 400 m (needs 1.34+) it ran out 55 m short of the water. 1.5: those two go, 400 m gives the water up.
-    // Re-measured with the derived 1.4 s catch approach and the engines cut at the abort plan's end (planner plan
-    // Task 5): 1.41 from 1500 m, 1.41 from 800 m; 400 m now lies on the edge (in reach by 43 kg, flown 4.4 t left).
+    // 800 m; from 400 m (needs 1.34+) it ran out 55 m short of the water. Re-measured with the derived 1.4 s catch
+    // approach and the engines cut at the abort plan's end (planner plan Task 5): 1.41 from 1500 m and from 800 m. 1.5
+    // stays: it covers the measured ratios (1.39-1.45) with a little margin; 400 and 250 m lie near the edge (in reach,
+    // flown to the water with 4.4 t with the derived landing rates, fix round 1), 150 m gives the water up.
     double sea_reach_margin = 1.5;
-    // [E] A plan for the target may tilt the final set at most this far beyond its soft limit (more than the start
-    // state already does); beyond, the target counts as out of reach (abort where there is a sea). The soft limits keep
-    // re-plans from violating states feasible; Falcon 9 lit 900 m beyond its zone once got a converged pad plan that
-    // tilted 15 deg beyond the final set's 10 deg, flew it, and gave the zone up too low to reach the water.
-    double max_planned_tilt_excess_rad = 3.0 * constants::deg_to_rad;
     // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), V3 baseline: 13 engines,
     // 5 from ~200 m/s, 3 for the last slow metres. Flights 13/14 light the burn at ~2.8-2.9 km falling ~0.35-0.4 km/s
     // [D]: 13 engines near minimum throttle reproduce that (scenario: 2.88 km at 355 m/s).

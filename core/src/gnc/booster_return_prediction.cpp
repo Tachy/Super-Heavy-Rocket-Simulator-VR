@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
@@ -19,7 +21,9 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
                                                                     const vehicle::FlightEnvironment& env,
                                                                     time::Epoch epoch, double ground_height_m,
                                                                     const Vec3* velocity_gcrf_mps, const PendingBurn* burn,
-                                                                    double drag_scale) {
+                                                                    double drag_scale,
+                                                                    std::vector<TrajectorySample>* samples) {
+    if (samples) samples->clear();
     const auto t0 = env.earth_orientation.fixed_to_gcrf(epoch);
     const Vec3 omega = vehicle::earth_rotation_vector(t0);
     const double w = norm(omega);
@@ -83,7 +87,17 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
         v_prev = v;
         r = r_next;
         v = v_next;
-        const double height = frames::fixed_to_geodetic(fixed_at(t + dt, r)).height_m - mass.cg_station_m;
+        const auto geo = frames::fixed_to_geodetic(fixed_at(t + dt, r));
+        const double height = geo.height_m - mass.cg_station_m;
+        if (samples && height > ground_height_m) {
+            const Vec3 v_air_fixed = fixed_at(t + dt, v - cross(omega, r));
+            const double speed = norm(v_air_fixed);
+            const double sin_gamma =
+                speed > 0.0 ? std::clamp(-dot(v_air_fixed, up_at(geo.latitude_rad, geo.longitude_rad)) / speed, -1.0, 1.0)
+                            : 0.0;
+            samples->push_back({t + dt, height - ground_height_m, speed, sin_gamma, m,
+                                norm(env.gravity.acceleration_mps2(r, epoch + t + dt))});
+        }
         if (burn_pending && height < previous_height && height + mass.cg_station_m - ground_height_m < burn->altitude_m) {
             burn_pending = false;
             if (burn->thrust_n > 0.0) {
@@ -115,8 +129,18 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     const auto geo = frames::fixed_to_geodetic(transpose(transform.rotation) * st.position_gcrf_m);
     const Vec3 up = transform.rotation * up_at(geo.latitude_rad, geo.longitude_rad);
     const auto mass = body.vehicle().mass_properties();
-    const double area = constants::pi * 0.25 * body.vehicle().diameter_m() * body.vehicle().diameter_m();
-    const auto& drag = body.vehicle().aero().drag_curve(true);
+    const double speed = norm(v_rel);
+    const double sin_gamma = speed > 0.0 ? -dot(v_rel, up) / speed : 1.0;
+    return predict_landing_burn(body.vehicle(), env,
+                                {0.0, geo.height_m - mass.cg_station_m - site_.height_m, speed, sin_gamma, mass.mass_kg,
+                                 norm(env.gravity.acceleration_mps2(st.position_gcrf_m, epoch))});
+}
+
+BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_burn(
+    const vehicle::Vehicle& vehicle, const vehicle::FlightEnvironment& env, const TrajectorySample& state) const {
+    const auto mass = vehicle.mass_properties();
+    const double area = constants::pi * 0.25 * vehicle.diameter_m() * vehicle.diameter_m();
+    const auto& drag = vehicle.aero().drag_curve(true);
     const bool scvx = parameters_.scvx_landing && (site_.catch_target || site_.pad);
     // Segments: ignition set, (SCvx only) divert set, final set; each until its switch speed.
     struct Segment {
@@ -133,19 +157,19 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
         segments = {{&parameters_.landing_ignition_groups, parameters_.landing_throttle, parameters_.gate_speed_mps},
                     {&parameters_.landing_groups, parameters_.final_throttle, 0.0}};
     }
-    const double g = norm(env.gravity.acceleration_mps2(st.position_gcrf_m, epoch));
+    const double g = state.gravity_mps2;
 
-    double speed = norm(v_rel);
-    const double sin_gamma = speed > 0.0 ? std::clamp(-dot(v_rel, up) / speed, 0.0, 1.0) : 1.0;  // descent angle
-    double h = geo.height_m - mass.cg_station_m - site_.height_m - target_bottom_height_m_;
-    double m = mass.mass_kg;
+    double speed = state.speed_mps;
+    const double sin_gamma = std::clamp(state.sin_descent, 0.0, 1.0);  // descent angle
+    double h = state.height_m - target_bottom_height_m_;
+    double m = state.mass_kg;
     const double dt = 0.05;
     double t = 0.0;
     size_t segment = 0;
     for (; t < 200.0 && speed > 0.0; t += dt) {
         const auto air = env.atmosphere.at(site_.height_m + mass.cg_station_m + h);
         while (segment + 1 < segments.size() && speed <= segments[segment].end_speed_mps) ++segment;  // as the guidance
-        const auto engines = engine_set(body.vehicle(), *segments[segment].groups, air.pressure_pa);
+        const auto engines = engine_set(vehicle, *segments[segment].groups, air.pressure_pa);
         const double throttle = segments[segment].throttle;
         // Only the ignition engines start up (the later sets are already running).
         const double spool = segment == 0 && engines.startup_s > 0.0 ? std::clamp(t / engines.startup_s, 0.0, 1.0) : 1.0;
@@ -280,14 +304,15 @@ std::optional<double> BoosterReturnGuidance::boostback_delta_v_mps(const math::S
 }
 
 double booster_meco_to_boostback_s(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
-                                   const frames::BodyOrientation& earth, time::Epoch epoch, const LandingSite& site,
-                                   const BoosterReturnParameters& parameters, double separation_after_meco_s) {
+                                   const math::Quat& attitude_gcrf, const frames::BodyOrientation& earth,
+                                   time::Epoch epoch, const LandingSite& site, const BoosterReturnParameters& parameters,
+                                   double separation_after_meco_s) {
     const auto& booster = stack.stages().front();
     const double propellant_kg =
         booster.propellant_kg(config::TankContents::Oxidizer) + booster.propellant_kg(config::TankContents::Fuel);
-    const double accel = booster_flip_acceleration_radps2(stack.source_config(), booster.config, parameters, propellant_kg);
+    const auto authority = booster_flip_authority(stack.source_config(), booster.config, parameters, propellant_kg);
     if (parameters.flip_ignition_off_velocity_rad > 0.0) {  // the free turn's gate is off the velocity: a fixed angle
-        return separation_after_meco_s + booster_flip_s(parameters, accel, 0.0);
+        return separation_after_meco_s + booster_flip_s(parameters, authority, 0.0, 0.0);
     }
     // The stack's axis at the separation: along the air-relative velocity (gravity turn).
     const auto at_separation = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, separation_after_meco_s);
@@ -295,7 +320,9 @@ double booster_meco_to_boostback_s(const vehicle::Vehicle& stack, const math::St
     const Vec3 axis = math::normalized(at_separation.velocity_mps - cross(omega, at_separation.position_m));
     const Vec3 site_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
     // The boostback direction after the flip depends on the flip's own coast: a few fixed-point steps from a half turn.
-    double flip_s = booster_flip_s(parameters, accel, constants::pi);
+    // The turn axis in the body: from the axis towards the boostback direction (first guess: the stack's pitch axis).
+    double axis_angle_rad = 0.0;
+    double flip_s = booster_flip_s(parameters, authority, constants::pi, axis_angle_rad);
     for (int i = 0; i < 4; ++i) {
         const double meco_to_ignition_s = separation_after_meco_s + flip_s;
         const auto after_flip = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, meco_to_ignition_s);
@@ -307,16 +334,59 @@ double booster_meco_to_boostback_s(const vehicle::Vehicle& stack, const math::St
         if (!arc) break;
         const Vec3 v_go = arc->departure_velocity_mps - after_flip.velocity_mps;
         const double angle = std::acos(std::clamp(dot(axis, math::normalized(v_go)), -1.0, 1.0));
-        flip_s = booster_flip_s(parameters, accel, angle);
+        const Vec3 turn_body = attitude_gcrf.inverse_rotate(math::normalized_or_zero(cross(axis, v_go)));
+        if (norm(turn_body) > 0.0) axis_angle_rad = std::atan2(turn_body.z, turn_body.y);
+        flip_s = booster_flip_s(parameters, authority, angle, axis_angle_rad);
+        if (i == 3 && std::getenv("STARSIM_DEBUG_BOOSTER_FLIP")) {  // diagnostics: the planned turn
+            std::fprintf(stderr, "[booster-flip] MECO plan: turn %.1f deg about %.1f deg from body +y, %.2f s\n",
+                         angle / constants::deg_to_rad, axis_angle_rad / constants::deg_to_rad, flip_s);
+        }
     }
     return separation_after_meco_s + flip_s;
 }
 
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict(const vehicle::FlightBody& body,
                                                              const vehicle::FlightEnvironment& env, time::Epoch epoch,
-                                                             const Vec3* velocity_gcrf_mps) const {
+                                                             const Vec3* velocity_gcrf_mps,
+                                                             std::vector<TrajectorySample>* samples) const {
     const auto burn = pending_entry_burn(body.vehicle());
-    return predict_impact(body, env, epoch, site_.height_m, velocity_gcrf_mps, burn ? &*burn : nullptr, drag_scale_);
+    return predict_impact(body, env, epoch, site_.height_m, velocity_gcrf_mps, burn ? &*burn : nullptr, drag_scale_,
+                          samples);
+}
+
+void BoosterReturnGuidance::ignition_on_fall(const vehicle::Vehicle& vehicle, const vehicle::FlightEnvironment& env,
+                                             time::Epoch epoch) {
+    // The guidance lights the landing burn where the burn prediction stops it at the ground (stop height <= 0): find that
+    // point on the predicted fall (falling part; the stop height shrinks as the stage nears the ground) by bisection
+    // over the samples, linear in between.
+    fall_ignition_epoch_.reset();
+    size_t first = 0;
+    while (first < fall_.size() && !(fall_[first].sin_descent > 0.0)) ++first;
+    if (first >= fall_.size()) return;
+    const auto stop_at = [&](size_t i) { return predict_landing_burn(vehicle, env, fall_[i]); };
+    auto low = stop_at(first);
+    if (low.stop_height_m <= 0.0) {
+        fall_ignition_epoch_ = epoch + fall_[first].t_s;
+        fall_burn_s_ = low.duration_s;
+        return;
+    }
+    size_t lo = first, hi = fall_.size() - 1;
+    auto high = stop_at(hi);
+    if (high.stop_height_m > 0.0) return;  // the fall ends above the stop height's zero: no forecast
+    while (hi - lo > 1) {
+        const size_t mid = lo + (hi - lo) / 2;
+        const auto at = stop_at(mid);
+        if (at.stop_height_m > 0.0) {
+            lo = mid;
+            low = at;
+        } else {
+            hi = mid;
+            high = at;
+        }
+    }
+    const double f = low.stop_height_m / (low.stop_height_m - high.stop_height_m);
+    fall_ignition_epoch_ = epoch + fall_[lo].t_s + f * (fall_[hi].t_s - fall_[lo].t_s);
+    fall_burn_s_ = low.duration_s + f * (high.duration_s - low.duration_s);
 }
 
 void BoosterReturnGuidance::estimate_drag_scale(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,

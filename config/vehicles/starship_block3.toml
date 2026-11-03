@@ -143,7 +143,12 @@ boostback_loss_fraction = 0.086          # [D] MECO planning: boostback delta-v 
 landing_engine_phases = [["center", "divert", "middle"], ["center", "divert"], ["center"]]
 landing_phase_throttles = [0.35, 0.4, 0.4]  # [E] design throttles that time the ignition: flights 13/14 light at
                                             # ~2.8-2.9 km falling ~0.35-0.4 km/s [D], 13 engines near minimum reproduce
-                                            # that (scenario: 2.88 km at 355 m/s); the centre engines near hover
+                                            # that (scenario: 2.88 km at 355 m/s); the three centre engines at minimum
+                                            # still lift the empty stage (no hover throttle), 0.4 times their phase
+landing_phase_max_tilt_deg = [25.0, 20.0, 10.0]  # [E] gimbal authority: the more engines, the more (13, 5, 3); the
+                                                 # phases' rate limits follow from it (gnc::landing_phase_rate_limit_radps)
+landing_gimbal_fraction = 0.3                # [E] planned share of the gimbal limit, the rest the lateral controller's
+                                             # margin (catch campaign: 0.4 lost one of 21 cases to saturation, 0.3 none)
 landing_switch_sink_mps = [[180.0, 220.0], [15.0, 30.0]]  # 13 -> 5 [D] flights 13/14: five engines at ~200 m/s, ~1.4 km;
                                                           # 5 -> 3 [E] calm, at a low sink rate
 landing_switch_max_tilt_deg = [0.0, 3.0]          # [E] 5 -> 3 nearly upright: the three centre engines turn the

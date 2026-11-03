@@ -135,7 +135,9 @@ flow separation (vacuum engines).
 - `[stage.recovery]` return keys (`gnc::booster_return_parameters`). Required on a returning first stage (`"tower_catch"`
   without an entry table, `"leg_landing"`; the load fails with a German message naming the key):
   `landing_engine_phases` (3 group lists: ignition, divert, final set), `landing_phase_throttles` (3 design throttles
-  that time the ignition), `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches) and, with a
+  that time the ignition), `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches),
+  `landing_phase_max_tilt_deg` (3 tilt limits; each phase's pitch/yaw rate limit is derived from it and the set:
+  `gnc::landing_phase_rate_limit_radps`), `landing_gimbal_fraction` (planned share of the gimbal limit) and, with a
   boostback, `return_flight_time_s` (boostback start to touchdown, the Lambert arc's shape) and
   `boostback_loss_fraction` (MECO planning: boostback delta-v beyond the two-body arc). Optional:
   `boostback_engine_groups`, `entry_engine_groups` (group ids of this stage), `entry_burn_altitude_m` /
@@ -161,7 +163,7 @@ flow separation (vacuum engines).
   Stages taken with `from` keep the source's sequence.
 - `[stage.recovery.drone_ship]`: the return to a drone ship; its keys override the profile above (left out: taken from
   it). `boostback = false`: no flip or boostback (the stage coasts on its ascent arc). `landing_phase_max_tilt_deg`
-  (3 values, either table): planned thrust tilt limit per landing engine set (left out: `DescentLimits`' 25 / 20 / 10).
+  (3 values, either table): planned thrust tilt limit per landing engine set (required on a returning first stage).
 - `[stage.recovery]` `landing_fresh_trust_region_weight`, `landing_fresh_attitude_violation_weight`: SCvx settings of fresh plans (no warm start); 0 keeps the defaults (`docs/subsystems/falcon9.md` "Fresh landing plans").
 - `[stage.engine_group]` `station_m` may be negative: the Falcon 9's second stage stands on the interstage top with its engine below station 0 (`falcon9.md` "Stack"); so may a tank's `base_station_m`.
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry

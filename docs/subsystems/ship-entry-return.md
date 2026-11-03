@@ -92,7 +92,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   min(gimbal slew, sqrt(alpha_min tilt)) = 0.301 / 0.246 / 0.213 rad/s; 3 -> 2 sink window min = (3 at minimum -
   weight) x shutdown = 1.25 m/s (three Raptors at 30 % lift the light ship), max = sqrt(2 (2 at 95 % / m - g) h) set at
   the gate from the CG height above the catch (144 m/s from 700 m; never binding - the window has effectively no maximum; the webcast 20-40 m/s is no longer
-  used). The first plan starts from two guesses and keeps the better (`gnc::SwitchGuess`, every vehicle since planner Task 5): the window's middle, and the switch from the state (as late as
+  used). The first plan starts from two guesses and keeps the better (`gnc::SwitchGuess`, every vehicle since planner Task 5; `gnc::better_descent_plan`: converged, then feasible - clear of the keep-out boxes, final-set tilt within `max_planned_tilt_excess_rad` - then the heavier end): the window's middle, and the switch from the state (as late as
   the pair can still finish in its minimum phase times, ~13 m/s, but not below what three engines cannot remove within
   the height; the window's middle is no operating point). The first plan starts from the flip engines' running thrust
   (3 x 0.8, changing at the throttle rate from the plan's start; `ScvxLandingGuidance::request`, as every re-plan; a set

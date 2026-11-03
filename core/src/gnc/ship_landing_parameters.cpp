@@ -78,8 +78,7 @@ ShipLandingMasses ship_landing_masses(const config::VehicleConfig& vehicle, cons
 }
 
 double ship_phase_rate_limit_radps(const EngineSetThrust& set, double tilt_max_rad, double inertia_kg_m2) {
-    const double alpha = max_pitch_acceleration_radps2(set, set.throttle_min, inertia_kg_m2);
-    return std::min(set.gimbal_rate_radps, std::sqrt(alpha * tilt_max_rad));
+    return landing_phase_rate_limit_radps(set, tilt_max_rad, inertia_kg_m2);
 }
 
 SinkWindow ship_switch_sink_window(const EngineSetThrust& outgoing, const EngineSetThrust& incoming, double light_mass_kg,

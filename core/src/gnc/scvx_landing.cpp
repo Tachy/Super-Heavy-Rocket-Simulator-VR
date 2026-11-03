@@ -242,8 +242,7 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
 bool ScvxLandingGuidance::beyond_limits(const DescentPlan& plan) const {
     // Only converged plans (an unconverged plan's slacks mean nothing) and only where the sea offers an abort: without
     // one (the Moon) the plan is flown as it is.
-    return site_.sea && plan.converged && plan.goal != DescentGoal::Abort &&
-           (plan.planned_tilt_excess > std::sin(0.5 * parameters_.max_planned_tilt_excess_rad) || plan.keep_out_overlap_m > 0.0);
+    return site_.sea && plan.converged && plan.goal != DescentGoal::Abort && !plan.feasible(parameters_.settings);
 }
 
 bool ScvxLandingGuidance::abort_strikes(const DescentPlan& plan) const {

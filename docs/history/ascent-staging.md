@@ -773,3 +773,6 @@ The attitude controller turned the stage at once from separation to within 15 de
 
 ## Booster flip time before the planner plan Task 5 (2026-11-03)
 MECO planning took the flip from `flip_duration_s` plus the MECO -> separation interval: Super Heavy the guidance default 10 s [E] (flown 10.43 s, 153 deg turn at 503 t), Falcon 9 the RTLS-fitted 14.8 s [D] (flown 14.79 s). Since Task 5 both are derived from the stage's turn authority (`gnc::booster_meco_to_boostback_s`).
+
+## Super Heavy flip model of Task 5 before its fix round 1 (2026-11-03)
+A rest-to-rest bang-bang turn at the flip set's full gimbal deflection, applied at once, lit within 15 deg: 9.7 s for the flown 153 deg at 293 t (MECO plan 9.4-9.9 s), flown 10.43 s. It left out the gimbal slew (20 deg/s) and the attitude loop's braking law (braking planned at half the authority, per body axis); the closeness to the flown flip was a cancellation (no slew and full braking against the aerodynamic help).
