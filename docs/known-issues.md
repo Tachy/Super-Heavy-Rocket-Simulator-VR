@@ -60,11 +60,13 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     within reach, 3e5 kept as beyond); the gate over Starbase (miss 189.8 -> 38.6 m: the nose turn's angular acceleration
     is the RCS's, 0.126 deg/s^2, not 0.5); the flip-and-catch gate prediction (1.34 -> 0.62 s: the entry aero table's
     flaps now trim where the allocation settles, drag area deficit 0.4-0.7 % -> 0.03-0.24 %). Before:
-  - Red found by Task 4's -Fast run (not caused by it: the case flies `place_landing_ship`, no entry guidance or entry
-    table): "A missed catch ejects the crew" ([crew_escape][session]): its 27 t gate load ("the calibration's first
-    missed gate load") was calibrated on the 290 t ship; the run ends with the seats never armed (armed 0, fired 0),
-    most likely the 212 t ship no longer misses with it (outcome not traced). Probably red since Task 3b ([crew_escape]
-    was not in its tag sets). A mass-relative fixture for Task 12 (or the controller).
+  - Green since Task 4 fix round 1: "A missed catch ejects the crew" - its fixed 27 t was the 290 t ship's first
+    missed load; the 177 t ship catches down to 18 t (hidden "Ship catch: lowest catchable gate load": 17 t missed).
+    The load now comes from the config (ideal-stop rocket-equation bound, 9.1 t). Open: the guidance gives every short
+    load up ("Fang abgebrochen", scan 9-17 t), so the seats' "Fang verfehlt" path (CG past the catch point without the
+    abort flag) is no longer reached by a load; and `min_catch_propellant_kg` = 30 t [D] in
+    `config/crew_escape/starship_crew.toml` was set on the 290 t ship (28 t caught + 2 t): with 18 t caught now it gives
+    up catchable crewed ships (18-30 t) - for Task 12 / the user.
   - Red then, entry authority (for plan Task 4): "A yaw demand does not drive a flap into the range where it has no
     authority" (Mach ~0.6, alpha 80.5, 35 t: trim aft 63.6 / forward 43.5 deg, was 54 / 44; a 3e5 N m yaw leaves an RCS
     fraction 1.6 and the aft pair moving 0.5 deg per call; the forward flap stops at the authority floor at 36 deg).

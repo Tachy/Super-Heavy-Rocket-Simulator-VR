@@ -365,6 +365,12 @@ std::vector<double> allocate_flaps(const FlapAuthority& fa, const Vec3& needed) 
     return delta;
 }
 
+// Halvings of the yaw share's bisection when flaps and RCS cannot meet the demand (allocate): 2^-16 of the demand.
+constexpr int flap_yaw_share_bisections = 16;
+// [E] Roll / pitch the flaps' yaw share may add to the RCS's part, as a fraction of its capability: the linear model's
+// noise (the in-reach allocation leaves ~1e-4), far below a spill (the 1.5 it replaces).
+constexpr double flap_yaw_share_spill = 0.01;
+
 // Thrust centroid this far off the axis: the engine set is asymmetric (roll by RCS, see allocate).
 constexpr double asymmetric_thrust_offset_m = 0.05;
 
@@ -432,15 +438,57 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
         if (fa.active) {
             // Newton step: the flaps add what the modelled aero moment lacks of the wanted net torque.
             const Vec3 needed = torque - fa.aero_moment_nm;
-            const std::vector<double> delta = allocate_flaps(fa, needed);
-            const size_t n = delta.size();
-            out.flap_rad.resize(n);
-            Vec3 achieved;
-            for (size_t i = 0; i < n; ++i) {
-                out.flap_rad[i] = std::clamp(fa.deflection_rad[i] + delta[i], 0.0, fa.max_deflection_rad[i]);
-                achieved += fa.torque_per_rad[i] * (out.flap_rad[i] - fa.deflection_rad[i]);
+            const auto flaps_for = [&](double yaw_share) {  // the flaps asked for this share of the yaw
+                const std::vector<double> delta = allocate_flaps(fa, {needed.x, needed.y, yaw_share * needed.z});
+                out.flap_rad.resize(delta.size());
+                Vec3 achieved;
+                for (size_t i = 0; i < delta.size(); ++i) {
+                    out.flap_rad[i] = std::clamp(fa.deflection_rad[i] + delta[i], 0.0, fa.max_deflection_rad[i]);
+                    achieved += fa.torque_per_rad[i] * (out.flap_rad[i] - fa.deflection_rad[i]);
+                }
+                return needed - achieved;  // remainder for gimbals / RCS
+            };
+            Vec3 remainder = flaps_for(1.0);
+            if (!(a.lever_moment > 0.0) && !(a.roll_moment > 0.0)) {
+                // Flaps and RCS alone (planner plan Task 4, controller ruling): beyond their joint reach the flaps
+                // first, then the RCS yaw torque, then the clip - a yaw demand is never traded into roll. The flaps'
+                // least-squares compromise spilled it there (RCS roll fraction 1.5 at 3e5 N m of yaw: the failure
+                // signature of the terminal-phase departures, roll error -24 deg; a yaw-light row weight did not help,
+                // the active set had already pinned the flaps where the yaw step sent them). Then the flaps are asked
+                // for the largest share of the yaw that leaves roll and pitch within the RCS; the rest of the yaw goes
+                // to the RCS, beyond it is cut on the yaw axis.
+                const Vec3 cap = rcs_max + throttle_authority(body, mass.cg_station_m).max_torque_nm;
+                const auto beyond = [&](double r, double c) { return std::abs(r) > c * (1.0 + 1e-9) + 1e-6; };
+                if (beyond(remainder.z, cap.z) && (beyond(remainder.x, cap.x) || beyond(remainder.y, cap.y))) {
+                    // A yaw beyond the reach that spills (only then: a roll / pitch demand beyond it is no yaw's).
+                    // Held: no more roll / pitch left to the RCS than with the flaps' yaw unchanged (share 0) - the RCS
+                    // roll is the bank's, not the yaw's - and within the RCS. When even share 0 does not hold them
+                    // (roll / pitch beyond the reach themselves, e.g. the hull's moment in a departure), the flaps keep
+                    // the whole demand as before: cutting their yaw there only lost what they still gave (a give-up
+                    // entry turning to the sea, crew escape case: impact on land at 250 m/s).
+                    const Vec3 r0 = flaps_for(0.0);
+                    const auto roll_pitch_held = [&](const Vec3& r) {
+                        return !beyond(r.x, cap.x) && !beyond(r.y, cap.y) &&
+                               std::abs(r.x) <= std::abs(r0.x) + flap_yaw_share_spill * cap.x &&
+                               std::abs(r.y) <= std::abs(r0.y) + flap_yaw_share_spill * cap.y;
+                    };
+                    double share = 1.0;
+                    if (roll_pitch_held(r0)) {
+                        double lo = 0.0, hi = 1.0;
+                        for (int i = 0; i < flap_yaw_share_bisections; ++i) {
+                            const double mid = 0.5 * (lo + hi);
+                            (roll_pitch_held(flaps_for(mid)) ? lo : hi) = mid;
+                        }
+                        share = lo;
+                    }
+                    remainder = flaps_for(share);
+                }
+                const Vec3 clipped{std::clamp(remainder.x, -cap.x, cap.x), std::clamp(remainder.y, -cap.y, cap.y),
+                                   std::clamp(remainder.z, -cap.z, cap.z)};
+                out.unmet_torque_nm = remainder - clipped;  // anti-windup: what no actuator gives
+                remainder = clipped;
             }
-            torque = needed - achieved;  // remainder for gimbals / RCS
+            torque = remainder;
         }
     }
     // Off-axis thrust (an asymmetric engine set, e.g. two of the ship's three centre Raptors): the moment of the

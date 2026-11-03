@@ -186,7 +186,8 @@ struct EntryGuidanceParameters {
 // (Orbital: the defaults; LunarReturn: lunar_return()) with the stage's limits and caps; the dynamic-pressure limit of
 // the kind. Derived [D] at the entry mass (dry + full header tanks, gnc::ship_landing_masses), from the RCS's angular
 // acceleration a about the weaker transverse axis (gnc::rcs_pitch_acceleration_radps2; the flaps hold the trim):
-//  - hypersonic bank rate: the rate the RCS stops within the angle a turn counts as done (terminal_nose_turned_rad),
+//  - hypersonic bank rate: the rate the RCS stops within the angle a bank reversal counts as done (entry_settled_bank_rad;
+//    RCS alone - a lower bound, the hypersonic flaps add roll authority),
 //    sqrt(2 a angle), capped by bank_rate_max_deg_s;
 //  - the terminal nose turn's angular acceleration: a, capped by nose_slew_acceleration_max_deg_s2.
 // `base`: another preset to apply the config to (the aerocapture pass). A stage without [stage.entry] keeps the preset.
@@ -199,6 +200,9 @@ EntryGuidanceParameters entry_guidance_parameters(const config::VehicleConfig& v
 // [E] below this dynamic pressure the entry's flaps rest in EntryCommand::flap_rest_rad (user 2026-10-18): their moment
 // there is a few % of the RCS's and the allocation only wandered them.
 inline constexpr double entry_flap_rest_dynamic_pressure_pa = 200.0;
+
+// [E] A bank reversal is over (no reversal in progress) once the bank is within this of its target.
+inline constexpr double entry_settled_bank_rad = 5.0 * constants::deg_to_rad;
 
 // Hand-over height above the target ground at a sink rate. gate_height_m up to the raise start S; above the join
 // J = R^2 / S (R: the reference sink) the stopping-distance law gate_height_m (sink / R)^2; between them the parabola

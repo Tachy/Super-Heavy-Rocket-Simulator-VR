@@ -20,6 +20,9 @@ struct ControlOutput {
     std::vector<double> grid_fin_rad;  // empty: fins neutral
     std::vector<double> flap_rad;      // empty: flaps hold their deflection
     std::vector<double> throttle_trim;  // differential throttling per engine (stage order); empty: none
+    // Desired torque the flaps and RCS cannot give (body axes, N m), cut on the axis that asked for it (see allocate);
+    // zero within their reach. Anti-windup: an integrator must not accumulate an error the actuators cannot remove.
+    math::Vec3 unmet_torque_nm;
 
     void apply_to(vehicle::VehicleCommand& command) const {
         command.engine_throttle_trim = throttle_trim;
@@ -108,7 +111,8 @@ public:
     // Allocates a desired body torque to grid fins (optional) and gimbals / RCS. With `flaps` the torque is the net
     // torque wanted: the flaps cancel the modelled aerodynamic moment (hull + flaps, the trim) and add the rest by a
     // Newton step on their numerically linearised moments (minimum-norm, each flap clamped to its range, the null
-    // space drawn towards mid-range); what they cannot give goes to gimbals / RCS.
+    // space drawn towards mid-range); what they cannot give goes to gimbals / RCS. Without gimbals, a demand beyond
+    // flaps + RCS is cut per axis (never traded into another axis; ControlOutput::unmet_torque_nm).
     static ControlOutput allocate(const vehicle::FlightBody& body, double ambient_pressure_pa,
                                   const math::Vec3& torque_body_nm, bool grid_fins = false, bool flaps = false);
 

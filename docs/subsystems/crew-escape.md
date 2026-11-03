@@ -15,7 +15,7 @@ Spec `docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md`, plan `do
   mass and CG when the seats leave (documented simplification, ~0.8 t of ~260 t).
 - **Catch feasibility** (`gnc::catch_feasibility`, crewed ships only): a failed flip-group engine or propellant below
   `min_catch_propellant_kg` = 30 t [D: nominal gate 28 t caught, 27 t missed (hidden test "Ship catch: lowest
-  catchable gate load") + 2 t]. Checked every tick of the entry up to the gate (the same tick before the gate
+  catchable gate load") + 2 t; set on the 290 t ship - the 177 t ship catches down to 18 t: open, `docs/known-issues.md`]. Checked every tick of the entry up to the gate (the same tick before the gate
   hand-over); after the flip every abort (SCvx abort to the sea, upright descent, `abort_landing`) arms the seats, and
   so do a missed catch (phase Landed without pins on the arms) and every commanded engine starved or failed. An
   aerocapture pass is not judged; the final entry after the capture is.

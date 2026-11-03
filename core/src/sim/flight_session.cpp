@@ -1421,7 +1421,9 @@ void FlightSession::update_hull_moment_scale(Flying& flying) {
             }
         }
         const double error = gnc::AttitudeController::pointing_error(body, e.axis_gcrf, e.roll_reference_gcrf).y;
-        if (!at_stop && std::abs(error) > integral_error_deadband_rad) {
+        // ... nor is one the flaps and RCS together cannot give (the allocation cut the pitch demand)
+        const bool saturated = flying.entry_unmet_torque_nm.y != 0.0;
+        if (!at_stop && !saturated && std::abs(error) > integral_error_deadband_rad) {
             const double beyond = error - std::copysign(integral_error_deadband_rad, error);
             const math::Vec3 step = entry_controller_.integrate_error({}, {0.0, beyond, 0.0}, tick_s);
             const double torque_nm = entry_controller_.integral_torque(body, step).y;  // wanted more torque ...

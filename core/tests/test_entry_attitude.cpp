@@ -203,7 +203,7 @@ Vec3 true_flap_moment_nm(const vehicle::FlightBody& body, const vehicle::Flap& f
 // yaw reach at unchanged roll and pitch is far smaller than the 290 t ship's 8.4e5 N m: the true moments on a 1 deg grid
 // with the forward flaps above their authority floor (36.4 deg) give +-1.8e5 N m (roll / pitch within 5e3 N m; +-2.4e5
 // within 2e4), and the allocation delivers 2.0e5 settled (RCS fraction 1e-4) but not 2.5e5. The former within-reach demand
-// 3e5 lies beyond it (it left an RCS fraction 1.6): the within-reach demands are 1.5e5 now, 3e5 joins the beyond-reach
+// 3e5 lies beyond it (it left an RCS fraction 1.6): the within-reach demand is 0.7 of the reach (measured below), 3e5 joins the beyond-reach
 // ones (floor and no limit cycle checked).
 TEST_CASE("A yaw demand does not drive a flap into the range where it has no authority", "[entry][flap]") {
     World world;
@@ -220,7 +220,25 @@ TEST_CASE("A yaw demand does not drive a flap into the range where it has no aut
         return peak;
     };
     constexpr double follow = 0.5 * deg;  // per call, a rate-limited actuator; the allocation's box is 5 deg
-    constexpr double within_reach_nm = 1.5e5;
+    // Fix round 1: the flaps' own yaw reach at unchanged roll / pitch from this ship's config, not an offline number: a
+    // demand far beyond flaps + RCS settles with the RCS yaw at its maximum and roll / pitch held (the allocation cuts
+    // the yaw, see the next case); the true flap + hull yaw moment there is the flaps' reach (2.15e5 N m for the 212 t
+    // ship). Within reach: 0.7 of it ([E] margin for the linearised steps; 1.5e5 N m).
+    const double flap_reach_nm = [&] {
+        flaps = trimmed;
+        for (int call = 0; call < 200; ++call) {
+            const auto o = gnc::AttitudeController::allocate(*body, 0.0, Vec3{0.0, 0.0, 1e6}, false, true);
+            for (size_t k = 0; k < flaps.size(); ++k) {
+                flaps[k].deflection_rad += std::clamp(o.flap_rad[k] - flaps[k].deflection_rad, -follow, follow);
+            }
+        }
+        Vec3 aero = gnc::AttitudeController::modelled_hull_moment_nm(*body);
+        for (const auto& f : flaps) aero += true_flap_moment_nm(*body, f, f.deflection_rad);
+        return aero.z;
+    }();
+    const double within_reach_nm = 0.7 * flap_reach_nm;
+    CAPTURE(flap_reach_nm);
+    REQUIRE(flap_reach_nm > 0.0);
     for (const double yaw_nm : {1e6, -1e6, 3e5, -3e5, within_reach_nm, -within_reach_nm}) {
         flaps = trimmed;
         CAPTURE(yaw_nm);
@@ -255,6 +273,53 @@ TEST_CASE("A yaw demand does not drive a flap into the range where it has no aut
             CHECK(norm(out.rcs_torque_fraction) < 0.01);
             CHECK(last_move < 0.01 * deg);
         }
+    }
+}
+
+// Fix round 1 of planner plan Task 4 (controller ruling): beyond the flaps' yaw reach the least-squares remainder spilled
+// into roll (RCS roll fraction 1.5 at 3e5 N m of yaw). Flaps first, then the RCS, then the cut - on the yaw axis only:
+// the net roll stays the demand (zero), the RCS fractions stay within +-1, the cut is reported (anti-windup) and the
+// yaw delivered is at least the RCS's own yaw torque from the config.
+TEST_CASE("A yaw demand beyond flaps and RCS is cut in yaw, not traded into roll", "[entry][flap]") {
+    World world;
+    auto body = entry_ship(13000.0, 200.0, 80.5 * deg, world);
+    trim(*body);
+    auto& flaps = body->vehicle().stages().back().flaps;
+    const auto trimmed = flaps;
+    const Vec3 rcs_max = body->vehicle().max_rcs_torque_nm();
+    for (const double yaw_nm : {1e6, -1e6, 6e5, -6e5}) {
+        flaps = trimmed;
+        CAPTURE(yaw_nm);
+        gnc::ControlOutput out;
+        for (int call = 0; call < 200; ++call) {
+            out = gnc::AttitudeController::allocate(*body, 0.0, Vec3{0.0, 0.0, yaw_nm}, false, true);
+            for (size_t k = 0; k < flaps.size(); ++k) {
+                flaps[k].deflection_rad += std::clamp(out.flap_rad[k] - flaps[k].deflection_rad, -0.5 * deg, 0.5 * deg);
+            }
+        }
+        // diagnostics: the net moment at the settled flaps (true flap + hull moments) plus the RCS
+        Vec3 aero = gnc::AttitudeController::modelled_hull_moment_nm(*body);
+        for (const auto& f : flaps) aero += true_flap_moment_nm(*body, f, f.deflection_rad);
+        const Vec3 net{aero.x + out.rcs_torque_fraction.x * rcs_max.x, aero.y + out.rcs_torque_fraction.y * rcs_max.y,
+                       aero.z + out.rcs_torque_fraction.z * rcs_max.z};
+        if (std::getenv("STARSIM_VERBOSE")) {
+            std::cout << "yaw " << yaw_nm << ": rcs " << out.rcs_torque_fraction.x << " " << out.rcs_torque_fraction.y << " "
+                      << out.rcs_torque_fraction.z << ", unmet " << out.unmet_torque_nm.x << " " << out.unmet_torque_nm.y
+                      << " " << out.unmet_torque_nm.z << ", net " << net.x << " " << net.y << " " << net.z << "\n";
+        }
+        CAPTURE(out.rcs_torque_fraction.x, out.rcs_torque_fraction.y, out.rcs_torque_fraction.z, out.unmet_torque_nm.z);
+        for (const double f : {out.rcs_torque_fraction.x, out.rcs_torque_fraction.y, out.rcs_torque_fraction.z}) {
+            CHECK(std::abs(f) <= 1.0);
+        }
+        // roll and pitch: their demand (zero) - nothing cut there, the RCS not spent on a share of the yaw
+        CHECK(out.unmet_torque_nm.x == 0.0);
+        CHECK(out.unmet_torque_nm.y == 0.0);
+        CHECK(std::abs(out.rcs_torque_fraction.x) < 0.02);
+        CHECK(std::abs(out.rcs_torque_fraction.y) < 0.02);
+        // yaw: the RCS at its reach from config, the rest cut on the yaw axis (same sign as the demand)
+        CHECK(out.rcs_torque_fraction.z == Approx(yaw_nm > 0.0 ? 1.0 : -1.0));
+        CHECK(out.unmet_torque_nm.z * yaw_nm > 0.0);
+        CHECK(std::abs(out.unmet_torque_nm.z) < std::abs(yaw_nm) - rcs_max.z);
     }
 }
 

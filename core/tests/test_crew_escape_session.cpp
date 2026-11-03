@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <optional>
@@ -16,6 +17,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/crew_escape.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -256,19 +258,44 @@ TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][s
     for (const auto& m : s.members) CHECK(m.outcome == sim::CrewOutcome::Rescued);
 }
 
-// Final review I1: a catch that misses (no abort flag: the CG passes the catch point) must arm the seats too.
+// Final review I1: a catch that misses must arm the seats too.
+// Planner plan Task 4 fix round 1: the load comes from the ship config (the former fixed 27 t was the 290 t ship's first
+// missed load; the 177 t ship catches down to 18 t, hidden "Ship catch: lowest catchable gate load"). It is the rocket
+// equation's propellant for the ideal stop at the arms - the fall from 950 m at 100 m/s, sqrt(v^2 + 2 g h), no gravity
+// loss, no flip - for the light landing mass at the landing engines' sea-level Isp: no guidance catches with it. The
+// guidance plans from the load and gives the catch up ("Fang abgebrochen"): a scan of 9-17 t gave that reason at every
+// load, the guidance no longer flies a short load into the arms (the former "Fang verfehlt", the CG passing the catch
+// point without the abort flag, is not reached by a load any more).
 TEST_CASE("A missed catch ejects the crew", "[crew_escape][session]") {
+    const Vec3 offset{to_tower * -220.0 + Vec3{0, 0, 950}}, velocity{to_tower * 3.0 + Vec3{0, 0, -100}};
+    const auto full = ship_with(0.0);
+    const double light_kg = gnc::ship_landing_masses(full, full.stages[0]).light_kg;
+    const vehicle::Vehicle ship(full, STARSIM_CONFIG_DIR);
+    const auto flip_groups = gnc::ship_flip_groups(full.stages[0]);
+    double isp_s = 0.0;
+    for (const auto& e : ship.stages().front().engines) {
+        if (std::find(flip_groups.begin(), flip_groups.end(), e.group_id) != flip_groups.end()) {
+            isp_s = e.performance->specific_impulse_s(1.0, constants::standard_pressure_pa);
+        }
+    }
+    REQUIRE(isp_s > 0.0);
+    const double catch_height_m = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2").tower->catch_height_m;
+    const double g = constants::standard_gravity_mps2;
+    const double stop_dv_mps = std::sqrt(dot(velocity, velocity) + 2.0 * g * (offset.z - catch_height_m));
+    const double load_kg = light_kg * std::expm1(stop_dv_mps / (g * isp_s));
+    std::printf("missed catch: load %.1f t (light %.1f t, Isp %.0f s, ideal stop %.0f m/s)\n", load_kg / 1000.0,
+                light_kg / 1000.0, isp_s, stop_dv_mps);
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);
-    const auto cfg = ship_with(27000.0);  // the calibration's first missed gate load
-    session.place_landing_ship(cfg, belly_state(session, cfg, to_tower * -220.0 + Vec3{0, 0, 950}, to_tower * 3.0 + Vec3{0, 0, -100}),
-                               t0());
+    const auto cfg = ship_with(load_kg);
+    session.place_landing_ship(cfg, belly_state(session, cfg, offset, velocity), t0());
     session.set_crew_escape(crew());
-    fly_out(session, 600.0);  // runs dry hovering at the arms (~93 m) and drops onto them
+    fly_out(session, 600.0);
     print(session, "missed catch");
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
     CHECK(s.fired);
+    CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {
         CHECK(m.outcome != sim::CrewOutcome::Flying);
         CHECK(m.reason.find("außerhalb") == std::string::npos);

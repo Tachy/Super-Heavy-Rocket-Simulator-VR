@@ -18,7 +18,16 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   moment (hull + flaps), steer by a Newton step on their linearised moments, the rest goes to RCS; flap allocation is a
   box-constrained active set (free flaps re-solved, box = stops and the 0.25 s [E] flap-rate reach, all-flap
   moment-neutral centring, a secant only for a flap at a stop; the lower stop is `flap_lowest_effective_rad`: above
-  `flap_lowest_usable_deflection_rad` (edge-on, shadow), going down from the flap's best moment slope in this air, the first crossing of a quarter of it [E], 5 deg grid, interpolated; with the secant all along the ramp out of the shadow); below 200 Pa [E] the flaps rest in the coming entry's
+  `flap_lowest_usable_deflection_rad` (edge-on, shadow), going down from the flap's best moment slope in this air, the first crossing of a quarter of it [E], 5 deg grid, interpolated; with the secant all along the ramp out of the shadow).
+  Beyond flaps + RCS (no gimbals; planner plan Task 4 fix round 1, controller ruling): flaps first, then the RCS yaw,
+  then the cut - never a yaw demand traded into roll. When the flap step leaves more yaw than the RCS can give and spills
+  roll / pitch beyond it, the flaps are asked for the largest share of the yaw (bisection, 16 halvings) that leaves no
+  more roll / pitch to the RCS than with their yaw unchanged (+1 % [E] of the RCS capability; when even that does not
+  hold - roll / pitch beyond the reach themselves - the flaps keep the whole demand: cutting their yaw there flew the
+  crew-escape give-up entry onto land at 250 m/s); the rest of the yaw goes to the RCS, beyond it is clipped and
+  reported as `ControlOutput::unmet_torque_nm` (anti-windup: the hull-moment integral does not run on a cut pitch). Mach
+  ~0.6, alpha 80.5, 212 t, 1e6 N m of yaw: settled RCS 0.010 / 0.0004 / 1.0 (roll / pitch / yaw), 6.5e5 cut, the flaps'
+  true yaw 2.15e5 + RCS 1.2e5 (before: RCS roll 1.5, roll unmet; 3e5 is now delivered, RCS yaw 0.6). Below 200 Pa [E] the flaps rest in the coming entry's
   pitch trim (`EntryAeroTable::trim_flap_rad`). `gnc/entry_attitude` builds the setpoint from angle of attack and bank
   (belly at `[stage.aero] belly_azimuth_deg`). Nominal alpha over Mach `aero/ship_entry_alpha.csv` [D] (55 deg
   hypersonic, 50 near Mach 8, 60-80 towards the belly flop). Ship dry 177 t, dry CG 22.03 m [D] (planner plan Task 3b, bottom-up budget;
@@ -49,11 +58,13 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   reversing now ends closer across than holding. Parameters from the config (planner plan Task 4,
   `gnc::entry_guidance_parameters(vehicle, stage, EntryKind)`, `core/src/gnc/entry_guidance_parameters.cpp`; every key of
   `[stage.entry]` required for a belly-first stage, German refusal at load; the tanker inherits it): K q limit 25 kPa
-  (lunar return 32 kPa), terminal Mach 5 / latest 3, terminal min alpha 50 deg and alpha authority 20 deg [E, identified
-  on b1-b4; the flown floor is the table's lowest trimmed alpha], bank rate 3 deg/s below Mach 5 and attitude slew 3 deg/s
+  (lunar return 32 kPa), terminal Mach 5 / latest 3, terminal min alpha 50 deg and alpha authority 20 deg [D identified
+  on the b1 terminal-phase campaign 2026-10-13, 12 dispersed entries, 12/12 at the gate; the flown floor is the table's
+  lowest trimmed alpha], bank rate 3 deg/s below Mach 5 and attitude slew 3 deg/s
   (the flaps' authority needs the air: not derived). D at the entry mass (dry + full headers, 212 t, I 5.46e7 kg m^2)
   from the RCS's acceleration about the weaker transverse axis (yaw 1.2e5 N m: a = 2.2e-3 rad/s^2): the hypersonic bank
-  rate sqrt(2 a 5 deg) = 1.12 deg/s, capped at 1 deg/s [E] (the cap binds); the terminal nose turn's angular acceleration
+  rate sqrt(2 a 5 deg) = 1.12 deg/s (5 deg: the reversal's own settled band, `entry_settled_bank_rad`; RCS alone, a lower
+  bound), capped at 1 deg/s [E] (the cap binds); the terminal nose turn's angular acceleration
   a = 0.126 deg/s^2, capped at 0.5 [E] (the RCS binds). Linear between Mach 5 and 10 as before. From
   Mach 5 (latest Mach 3, once a reversal has settled) the terminal phase ("Endanflug") steers the lift in the velocity
   frame relative to the alpha schedule (Levenberg-Marquardt on the predicted gate miss); the gate ("Tor") is 800 m [E]
@@ -65,7 +76,8 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   the two pairs the one nearest mid-range, each pair's offset in the ratio of its pitch slope (Newton from the
   antisymmetric trim, which still bounds the lowest trimmed alpha). Against the flown trim at 212 t, Mach 2.6-0.47: drag
   area -0.03 to -0.24 % (the 5 deg alpha grid), was -0.43 to -0.68 % with the antisymmetric trim (forward pair 14-33 deg
-  where the flown flaps sit at 41-44).
+  where the flown flaps sit at 41-44). Cost: the Newton adds ~20 us per table point, 8 ms per build (396 points; 11.5 ->
+  19.6 ms); the lowest-alpha walk (240 points) uses the antisymmetric trim alone.
 - Terminal steering floor (Task 6b): the most-lift alpha is never below `EntryAeroTable::lowest_trimmed_alpha_rad` (flying mass and CG; 1 deg search), in `EntryPredictorModel::steering_most_lift_alpha`, so guidance and predictor count the same lift. Steering differences stay on their side of `schedule_fraction` (`steering_difference`). After the basis froze, with a nose direction, the attitude slews on the `bank_step_smooth` ramp (`terminal_nose_slew_acceleration_radps2`, the RCS-derived 0.126 deg/s^2 of the 212 t ship; at the K 0.5 deg/s^2 the turn asked ~4.8e5 N m of yaw against ~1.2e5 RCS plus ~1-2e5 of flap reach and departed). `upright_descent`'s braking feedforward scales with sink / profile sink, so a ship below the profile sinks instead of climbing.
 - Flip and catch (b3, `gnc/ship_landing`): at the gate the three sea-level Raptors relight at 80 % [E], aft flaps
   fold, forward flaps go broadside until the tilt is < 30 deg; flip ~4 s and ~8 t, pushes the ship ~100 m along its
@@ -191,7 +203,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Trim, 35 t (CG 25.50 m), Mach 25 / 15 / 8 / 4 / 3 / 2 / 0.8: aft 30 / 33 / 37 / 21 / 41 / 50 / 54 deg, forward 60 / 57 / 53 / 69 / 49 / 40 / 36. Frames (`task-5a-report.md`): aft 17-57 hypersonic;
   +15-19 deg over Mach 4-2 (+-5, magnitude +-30 %), the model +29, at the upper edge. 64 t (23.84 m): aft 62 / 64 / 66 / 57 / 73, at the 90 stop from Mach 2.5 down, short 42-619 m^3 per q.
   The CG question is not decided by the frames. Reds of this set: `docs/known-issues.md`.
-- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m. Mach ~0.6, alpha 80.5, 212 t (trim 63.6 / 43.5 deg): yaw at unchanged roll / pitch +-1.8e5 N m above the authority floor (+-2.6e5 without it; the 290 t ship: +-8.4e5). Beyond that reach the allocation leaves a roll remainder (RCS roll fraction 1.5 at a 3e5 yaw demand) instead of a yaw one: open, not changed (the terminal nose turn now stays inside the RCS's reach).
+- Flap authority at 65 km, Mach 21, 35 t, flaps alone: 3e5 N m on all axes at alpha 52-55; at alpha 60 roll ends at 1.4e5, yaw between 2e5 and 3e5 N m. Mach ~0.6, alpha 80.5, 212 t (trim 63.6 / 43.5 deg): yaw at unchanged roll / pitch +-1.8e5 N m above the authority floor (+-2.6e5 without it; the 290 t ship: +-8.4e5). Beyond flaps + RCS the yaw is cut on its own axis (fix round 1 above; the test measures the flaps' reach from the config, 2.15e5 settled, and demands 0.7 of it within reach).
 - Ship catch: case 4 of the entry campaign is marginal (roundoff moves it between ~0.1 and ~1.2 km); an
   energy-short terminal phase (36 km from Mach 2.6) hits the gate but turns the nose too late and ditches safely (1.4 t
   left); since the vehicle plan's Task 6 the caught dispersed gates arrive with >= 3.8 t (see Validation).

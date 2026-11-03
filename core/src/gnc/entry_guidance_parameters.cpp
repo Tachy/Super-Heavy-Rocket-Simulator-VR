@@ -35,7 +35,8 @@ EntryGuidanceParameters entry_guidance_parameters(const config::VehicleConfig& v
     p.bank_rate_radps = e.bank_rate_max_radps;
     p.terminal_nose_slew_acceleration_radps2 = e.nose_slew_acceleration_max_radps2;
     if (a > 0.0) {
-        p.bank_rate_radps = std::min(e.bank_rate_max_radps, std::sqrt(2.0 * a * p.terminal_nose_turned_rad));
+        // the hypersonic reversal's own angle: the RCS stops the roll within what counts as a settled bank
+        p.bank_rate_radps = std::min(e.bank_rate_max_radps, std::sqrt(2.0 * a * entry_settled_bank_rad));
         p.terminal_nose_slew_acceleration_radps2 = std::min(e.nose_slew_acceleration_max_radps2, a);
     }
     return p;

@@ -53,6 +53,7 @@ vehicle::VehicleCommand FlightSession::steering_command_for(size_t index, double
             const auto out =
                 entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf, &feedforward);
             out.apply_to(command);
+            flying.entry_unmet_torque_nm = out.unmet_torque_nm;
             static const bool debug = std::getenv("STARSIM_DEBUG_ENTRY_ATTITUDE") != nullptr;
             if (debug && std::fmod(epoch_.tdb_seconds_past_j2000(), 1.0) < tick_s) {  // diagnostics: once per second
                 const auto& s = flying.body->state();

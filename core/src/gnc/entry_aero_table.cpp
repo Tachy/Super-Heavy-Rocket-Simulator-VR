@@ -69,7 +69,10 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
     // Total force (body axes) at Mach number and angle of attack (belly towards the flow), flaps in pitch trim.
     double trim_delta = 0.0;  // the last trimmed_force's antisymmetric pitch trim (forward mid + delta, aft mid - delta)
     double trim_aft = 0.0, trim_forward = 0.0;  // ... and its settled trim (offsets of the pairs from mid-range)
-    const auto trimmed_force = [&](double mach, double alpha) {
+    // `settle`: also find the settled trim (Newton); the lowest-alpha search needs only the antisymmetric one. Measured
+    // (planner plan Task 4 fix round 1): the Newton adds ~20 us per call, 8 ms to a 396-call table (11.5 -> 19.6 ms per
+    // build); the walk's 240 calls skip it (it cost ~5 ms more there).
+    const auto trimmed_force = [&](double mach, double alpha, bool settle = true) {
         const double speed = mach * reference_speed_of_sound_mps;
         const Vec3 u = Vec3{std::cos(alpha), 0.0, 0.0} + belly * std::sin(alpha);  // air velocity direction
         const Vec3 v_body = u * speed;
@@ -114,7 +117,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         // pairs' pitch slopes, a dM/df - f dM/da = 0 (the moment-neutral drift stops where the offset vector lies in
         // the pitch column's direction). Newton from the antisymmetric trim, numerical derivatives over the
         // allocation's own 1 deg difference; kept antisymmetric if it does not converge.
-        if (bracketed) {
+        if (bracketed && settle) {
             const auto conditions = [&](double a, double f, double& pitch, double& balance) {
                 Vec3 unused;
                 pitch = evaluate_pairs(a, f, unused);
@@ -176,7 +179,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
             double lowest = alpha;
             while (alpha > alpha_grid_min_deg * constants::deg_to_rad) {
                 alpha -= trim_search_step_rad;
-                trimmed_force(mach, alpha);
+                trimmed_force(mach, alpha, false);
                 if (std::abs(trim_delta) >= 0.5 * flaps.front().flap->max_deflection_rad) break;
                 lowest = alpha;
             }

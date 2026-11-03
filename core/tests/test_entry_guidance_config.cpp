@@ -61,7 +61,7 @@ TEST_CASE("Entry guidance parameters follow the vehicle config", "[ship][entry][
     CHECK(a * m.heavy_pitch_inertia_kg_m2 == Approx(1.2e5).epsilon(0.02));
     CHECK(p.terminal_nose_slew_acceleration_radps2 == Approx(std::min(e.nose_slew_acceleration_max_radps2, a)).epsilon(1e-12));
     CHECK(p.terminal_nose_slew_acceleration_radps2 < e.nose_slew_acceleration_max_radps2);  // the RCS binds: ~0.13 deg/s^2
-    const double stop_rate = std::sqrt(2.0 * a * p.terminal_nose_turned_rad);
+    const double stop_rate = std::sqrt(2.0 * a * gnc::entry_settled_bank_rad);
     CHECK(p.bank_rate_radps == Approx(std::min(e.bank_rate_max_radps, stop_rate)).epsilon(1e-12));
     CHECK(stop_rate > e.bank_rate_max_radps);  // ~1.1 deg/s: the 1 deg/s cap binds
     // the rest of the preset stays: an orbital entry carries no skips

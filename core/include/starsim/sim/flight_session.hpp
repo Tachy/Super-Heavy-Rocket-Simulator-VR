@@ -1010,6 +1010,9 @@ private:
         // entry controller: the estimated true / modelled hull pitch moment (update_hull_moment_scale) ...
         double entry_hull_moment_scale = 1.0;
         math::Vec3 entry_attitude_bias_nm;  // ... and the torque the allocation's model lacks for it now
+        // The entry allocation's last cut torque (gnc::ControlOutput::unmet_torque_nm): written by the per-tick command
+        // (const), read by update_hull_moment_scale's anti-windup.
+        mutable math::Vec3 entry_unmet_torque_nm;
         std::unique_ptr<gnc::ShipLandingGuidance> ship_landing;  // ship from the gate: flip and catch (its command:
                                                                  // return_command)
         std::unique_ptr<gnc::ParachuteSequencer> parachutes;     // lowest stage with parachute sets (capsule)

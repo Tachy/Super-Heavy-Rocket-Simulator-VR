@@ -367,9 +367,11 @@ lunar_max_dynamic_pressure_pa = 32000.0  # [E] user 2026-10-17: 25 kPa cut the d
                                          # (campaign 3/11 -> 7/11 at 32 kPa); 0.9 x 6 g still bounds the load
 terminal_mach = 5.0                      # [E] hand-over to the terminal steering ...
 terminal_mach_latest = 3.0               # [E] ... at the latest, when a bank reversal still ran
-terminal_min_alpha_deg = 50.0            # [E, identified on b1-b4] most lift of the terminal steering (the flown floor
-                                         # is the table's lowest trimmed alpha at the flying mass, EntryAeroTable)
-terminal_alpha_authority_deg = 20.0      # [E, identified on b1-b4] steering range about the alpha schedule
+terminal_min_alpha_deg = 50.0            # [D identified on the b1 terminal-phase campaign, 2026-10-13: 12 dispersed
+                                         # entries, 12/12 at the gate, 11 within 0.11 m; 55 deg before] most lift of the
+                                         # terminal steering (the flown floor is the table's lowest trimmed alpha at the
+                                         # flying mass, EntryAeroTable)
+terminal_alpha_authority_deg = 20.0      # [D identified on the same campaign] steering range about the alpha schedule
 bank_rate_max_deg_s = 1.0                # [E] hypersonic (b1: faster departed in alpha with weak flaps)
 fast_bank_rate_deg_s = 3.0               # [E] below Mach 5: the flaps' authority in dense air (needs the air: not
                                          # derived from the config); late reversals must be quick

@@ -26,7 +26,6 @@ constexpr int constraint_bisections = 6;
 constexpr double capture_margin_rad = 8.0 * constants::deg_to_rad;
 constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number is only trusted in dense air
 constexpr double max_terminal_prediction_s = 900.0;
-constexpr double settled_bank_rad = 5.0 * constants::deg_to_rad;  // no reversal in progress
 // [E] the flaps' rest trim is taken at the Mach number of this height (where the entry's air starts to load them)
 constexpr double flap_rest_reference_height_m = 80000.0;
 constexpr double levenberg_marquardt_damping = 1.0e-3;            // relative to the trace of J^T J
@@ -291,7 +290,7 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     // reversals checked every 20 s reversed again mid-roll (l5 Task 10, seed 2: 2.0, 1.5 and 1.3 km/s, the flown bank
     // never caught up and the entry ended 38 km across). Only a reversal's roll blocks: a setpoint lagging a new bank
     // magnitude (or the first roll from 0) is no reversal, and blocking it shifted the capsule campaign's reversals.
-    if (std::abs(std::remainder(bank_target_rad_ - bank_rad_, 2.0 * constants::pi)) <= settled_bank_rad) {
+    if (std::abs(std::remainder(bank_target_rad_ - bank_rad_, 2.0 * constants::pi)) <= entry_settled_bank_rad) {
         reversal_rolling_ = false;
     }
     if (speed_mps > parameters_.min_reversal_speed_mps && speed_mps < parameters_.max_reversal_speed_mps &&
@@ -705,7 +704,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
     }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from
     // the bank flown), at the latest at the late hand-over Mach number.
-    const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < settled_bank_rad;
+    const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < entry_settled_bank_rad;
     if (phase_ == EntryPhase::Entry && parameters_.terminal_phase && height < terminal_max_height_m &&
         ((mach < parameters_.terminal_mach && bank_settled) || mach < parameters_.terminal_mach_latest)) {
         phase_ = EntryPhase::Terminal;
