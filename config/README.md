@@ -169,6 +169,11 @@ flow separation (vacuum engines).
   station is its ballistic range (`sim::nominal_meco_impact_downrange_m`).
 - `[stage.recovery]` `return_mission`: the return mission (`missions/<id>.toml`) a ship caught by the tower or a capsule
   flies from orbit without a mission of its own (`plan_ship_return()` / `plan_capsule_return()`, key R); required there.
+- `[stage.recovery]` `deorbit_cutoff_residual` (fraction of the burn's delta-v, < 0.1), `deorbit_pointing_error_deg`
+  (< 10): the deorbit burn's guided-cutoff residual and pointing error, which every pass the deorbit planner takes must
+  fly (`gnc::deorbit_burn_dispersion`; ignition +-1 s is fixed); required, as `return_mission`, for a stage returning
+  from orbit. Ship 0.2 % / 0.1 deg [E, user 2026-10-17], Crew Dragon 0.1 % / 0.1 deg [E, Draco trim on GPS-aided
+  navigation].
 - `[stage.recovery]` `landing_fresh_trust_region_weight`, `landing_fresh_attitude_violation_weight`: SCvx settings of fresh plans (no warm start); 0 keeps the defaults (`docs/subsystems/falcon9.md` "Fresh landing plans").
 - `[stage.engine_group]` `station_m` may be negative: the Falcon 9's second stage stands on the interstage top with its engine below station 0 (`falcon9.md` "Stack"); so may a tank's `base_station_m`.
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry

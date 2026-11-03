@@ -20,16 +20,22 @@ struct EntryDispersion {
     double range_m = 0.0;          // > 0: the interface further from the target (more range to fly)
     double cross_m = 0.0;          // > 0: the interface displaced to the right of the path
     double aero_factor = 1.0;      // lift and drag (the vehicle's aerodynamics, or the air's density: both act alike)
+    double lift_factor = 1.0;      // lift alone (L/D: the trim angle, a capsule's CG offset)
     double mass_factor = 1.0;      // known onboard (the vehicle's mass)
+    // false: the dispersed burn never reaches the entry interface (skips over it) - a case that does not fly
+    bool reaches_interface = true;
 };
 
-// [E] The air and aerodynamics the entry guidance must absorb at the planned interface: lift and drag together
-// +-`aero_fraction` (the ship's entry guidance campaign flies its crossflow table +-10 %, the capsule campaign its truth
-// aerodynamics +-10 %; a density error scales both alike), each side alone; and a capsule's mass +-`mass_fraction`
-// (capsule campaign: +-3 %, the RCS tank; known onboard). The deorbit burn's own errors are propagated to the interface
-// by the planner (DeorbitParameters::burn_dispersion).
-std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double mass_fraction = 0.0);
+// [E] The air and aerodynamics the entry guidance must absorb at the planned interface, each side alone: lift and drag
+// together +-`aero_fraction` (the ship's entry guidance campaign flies its crossflow table +-10 %, the capsule campaign
+// its truth aerodynamics +-10 %; a density error scales both alike); lift alone +-`lift_fraction` (L/D, the guidance's
+// main sensitivity); and a capsule's mass +-`mass_fraction` (capsule campaign: +-3 %, the RCS tank; known onboard). The
+// deorbit burn's own errors are propagated to the interface by the planner (DeorbitParameters::burn_dispersion).
+std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double lift_fraction, double mass_fraction = 0.0);
 inline constexpr double entry_aero_dispersion_fraction = 0.10;
+// [E] an L/D error of a trim angle ~1 deg off: the ship's Newtonian L/D = cot(alpha) at its ~55 deg changes 3.7 % per
+// degree; a capsule's L/D (0.2 from a 0.1 m CG offset) roughly with its CG offset, 5 mm of ~0.1 m.
+inline constexpr double entry_lift_dispersion_fraction = 0.05;
 inline constexpr double capsule_mass_dispersion_fraction = 0.03;
 
 // What the deorbit planner checks a pass's entry against: the onboard entry guidance itself (its corrector, reversal
@@ -44,7 +50,8 @@ struct EntryReachCheck {
     double gate_tolerance_m = 0.0;
     // The dispersed entries the guidance must fly as well: the air (entry_air_dispersions); the deorbit planner adds its
     // burn errors propagated to the interface. The flight-path step of the planner's aim search (its half).
-    std::vector<EntryDispersion> dispersions = entry_air_dispersions(entry_aero_dispersion_fraction);
+    std::vector<EntryDispersion> dispersions =
+        entry_air_dispersions(entry_aero_dispersion_fraction, entry_lift_dispersion_fraction);
     double flight_path_dispersion_rad = 0.2 * constants::deg_to_rad;
     // [E] The fly-ahead's corrector cycle (the guidance's: cycle_s, 2 s): a reversal is still timed within its cycle;
     // the bank magnitude is re-solved every 10 s instead of 2 s (planner plan Task 7 fix round 2: phases 0/90/180/270,

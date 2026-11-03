@@ -176,33 +176,36 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   guidance's steering rate - 0.3 per 0.5 s -, no nose sector; at 10 s near-identical entries handed over 1-8 km across
   and the gate verdict flipped; the gate within `corrector_tolerance_m`; a capsule: within the splashdown zone's
   radius). A case flies when it reaches the gate so and its flown peaks stay within the heat shield / crew limits and
-  the 25 kPa q limit. Cases (planner plan Task 7 fix round 3): the nominal; the deorbit burn's execution errors
+  the 25 kPa q limit. Cases (planner plan Task 7 fix rounds 3-4): the nominal; the deorbit burn's execution errors
   propagated to the entry interface by the planner's own coast (`DeorbitParameters::burn_dispersion`, each alone, both
-  signs: magnitude +-1 % and pointing 0.5 deg in and across the pitch plane [E] - the ship return campaign's execution
-  error -, ignition +-1 s [E] - the engine's start-up transient; at LEO they move the interface by 0.008-0.023 deg,
-  0.6-1.1 m/s and 4-10 s); the air (`gnc::entry_air_dispersions`: lift and drag together +-10 % [E], the entry
-  campaigns' aero dispersion - a density error acts alike); a capsule also its mass +-3 % (capsule campaign, known
-  onboard). Every case must fly; when no pass in the window does, the planner takes, of the passes whose nominal flies
-  within the corridor, the one with the most dispersed cases flying (`DeorbitPlan::dispersion_robust` false,
-  `reach_limiting_case` / `dispersion_note` German, printed as `[deorbit] Kein Überflug fliegt alle Streuungen...`,
-  in the bindings' `return` dictionary and the game's event line "Achtung: ..."). When the nominal flies but only
-  dispersed cases of one energy side fail (shallower, faster, less drag, heavier), the planner aims the entry angle away
-  from that side in steps of half the flight-path step (ship 0.1 deg, capsule 0.05 deg), at most two. The reach
-  (`DeorbitPlan::crossrange_reach_m`): the largest |crossrange| every case still flies to, targets moved outward in two
-  waves of 8 (span / 64); the fly-aheads run on a pool of hardware-concurrency threads. The planned peaks
-  (`DeorbitPlan::entry_peak_*`) are the nominal fly-ahead's whole-entry peaks. Measured (single cases, 50 deg, LEO
-  7.38-7.39 km/s, round 3): phases 0 / 90 / 180 / 270 fly -177.6 / -291.4 / -366.4 / -228.2 km after 20.3 / 20.0 / 0.7 /
-  0.3 h (round 2: 20.3 / 21.5 / 22.7 / 0.3 h), reach 412-427 / 419-435 / 405 / 405 km, gates 35 / 61 / 7 / 90 m, all
-  caught (11.8 / 7.9 / 13.2 / 13.7 t left). The earlier passes stay refused by physics: phase 0's -705 / -810 km and
-  phase 90's -1,007 km fail nominally, phase 90's -522 km in the air -10 % case (terminal miss 3.8 km). Docked tanker:
-  -623 km pass, reach 641 km, caught (1.96 t main, 10.5 t headers); its 8-day reserve search still falls back (7 of 10).
-  b4 aircatch: -381.0 km pass, robust (reach 381 km), caught, 11.8 t. Centred synthetic entry: reach 452 km against
-  455-466 km nominal only. Planned against flown peaks: heat within 2 %, q within 7 %, load within 15 % (the load peak
-  of the terminal phase's pitch-up is not in the fly-ahead). Crew Dragon: the one pass in reach (~15 km; 73-247 km
-  passes fail nominally) flies every case but the burn -1 % (a 1.4 m/s short burn moves the interface ~10 s on, the
-  capsule at its 0.9 x 4 g cut-back cannot absorb it): fallback pass, 11 of 12 (return, ISS undock); the fly-ahead
-  itself agrees with the 6-DoF capsule campaign case 1 from the same interface (0.50 against 0.55 km, 3.60 g both,
-  reversal 5.38 / 5.36 km/s - round 2 had applied the campaign's offsets to the planner's own interface). `gnc::entry_crossrange_reach_m` (one-sign equilibrium-glide integral, closed form (pi^2/48) (L/D)^2
+  signs): magnitude and pointing in and across the pitch plane = the vehicle's guided-cutoff residual
+  (`[stage.recovery] deorbit_cutoff_residual` / `deorbit_pointing_error_deg`, required for a stage returning from orbit,
+  `gnc::deorbit_burn_dispersion`, set by the session: ship 0.2 % / 0.1 deg [E, user 2026-10-17, as the lunar return
+  campaign], Crew Dragon 0.1 % / 0.1 deg [E, Draco trim on GPS-aided navigation]), ignition +-1 s [E] - the engine's
+  start-up transient; a burn that never reaches the interface is a failing case; the air (`gnc::entry_air_dispersions`:
+  lift and drag together +-10 % [E], the entry campaigns' aero dispersion - a density error acts alike - and lift alone
+  +-5 % [E], an L/D error of a ~1 deg trim error); a capsule also its mass +-3 % (capsule campaign, known onboard). Ship
+  12 dispersed cases, capsule 14. Every case must fly; when no pass in the window does, the planner takes, of the passes
+  whose nominal flies within the corridor, the one with the most dispersed cases flying (`DeorbitPlan::dispersion_robust`
+  false, `reach_limiting_case` / `dispersion_note` German; printed as `[deorbit] Kein Überflug fliegt alle
+  Streuungen...` only when the session flies the plan - not for previews or reserve searches -, in the bindings'
+  `return` dictionary, the HUD's return block "Achtung" and the event line of `plan_ship_return` / `plan_capsule_return`).
+  When the nominal flies but only dispersed cases of one energy side fail (shallower, faster, less drag, more lift,
+  heavier, or the interface skipped; a case of energy below a quarter of one dispersion's size - an ignition-timing
+  case - has no side), the planner aims the entry angle away from that side in steps of half the flight-path step (ship
+  0.1 deg, capsule 0.05 deg), at most two. The reach (`DeorbitPlan::crossrange_reach_m`): the largest |crossrange| every
+  case still flies to, targets moved outward in two waves of 8 (span / 64); the fly-aheads run on a pool of
+  hardware-concurrency threads. The planned peaks (`DeorbitPlan::entry_peak_*`) are the nominal fly-ahead's whole-entry
+  peaks. Measured (single cases, 50 deg, LEO 7.38-7.39 km/s, round 4): phases 0 / 90 / 180 / 270 fly -177.6 / -291.4 /
+  -366.4 / -228.2 km after 20.3 / 20.0 / 0.7 / 0.3 h, reach 390-420 / 330-430 / 401 / 411 km, gates 35 / 61 / 7 / 90 m,
+  all caught (11.8 / 7.9 / 13.2 / 13.7 t left), all robust. The earlier passes stay refused by physics: phase 0's -705 /
+  -810 km and phase 90's -1,007 km fail nominally, phase 90's -522 km in the air -10 % case. Docked tanker: -81 km pass,
+  robust, reach 409 km, caught (3.69 t main, 11.76 t headers). b4 aircatch: -382.5 km pass, robust, wait 102.5 h,
+  caught, 13.5 t. Planned against flown peaks: heat within 2 %, q within 7 %, load within 15 % (the load peak of the
+  terminal phase's pitch-up is not in the fly-ahead). Crew Dragon: the ~15 km pass is robust now (all 14 cases, gate
+  misses 0.03-0.67 km in the fly-ahead; return 14.8 km at 37.1 h, gate 1.11 km, 3.49 g; ISS undock -14.0 km, reach
+  43 km), no fallback; the fly-ahead itself agrees with the 6-DoF capsule campaign case 1 from the same interface (0.50
+  against 0.55 km, 3.60 g both, reversal 5.38 / 5.36 km/s). `gnc::entry_crossrange_reach_m` (one-sign equilibrium-glide integral, closed form (pi^2/48) (L/D)^2
   sin(2 sigma) R; 660 km from circular speed) plus the Earth's rotation under the glide is only the pass prefilter's
   upper bound (ship 1,280 km: 664 km + 1,326 s of rotation; Crew Dragon 270 km). A mission's `max_crossrange_km` is refused (German load error). Without parameters
   (`plan_ship_return()`, bindings / key R) the ship flies its own `[stage.recovery] return_mission` (M,

@@ -857,6 +857,20 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         if (returns_from_orbit && s.return_mission.empty()) {
             doc.fail("Rückkehr der Stufe '" + s.id + "' aus dem Orbit: Schlüssel 'return_mission' fehlt in [stage.recovery]");
         }
+        // The deorbit burn's execution errors the planner's pass must fly: required with the return from orbit.
+        if (returns_from_orbit) {
+            for (const char* key : {"deorbit_cutoff_residual", "deorbit_pointing_error_deg"}) {
+                if (!(*recovery)[key].is_number()) {
+                    doc.fail("Rückkehr der Stufe '" + s.id + "' aus dem Orbit: Schlüssel '" + key +
+                             "' fehlt in [stage.recovery]");
+                }
+            }
+            s.deorbit_cutoff_residual = doc.positive(*recovery, "deorbit_cutoff_residual");
+            s.deorbit_pointing_error_rad = doc.positive(*recovery, "deorbit_pointing_error_deg") * constants::deg_to_rad;
+            if (s.deorbit_cutoff_residual >= 0.1 || s.deorbit_pointing_error_rad >= 10.0 * constants::deg_to_rad) {
+                doc.fail("stage.recovery: deorbit_cutoff_residual < 0.1 (a fraction) and deorbit_pointing_error_deg < 10");
+            }
+        }
         // A returning first stage (gnc::booster_return_parameters): every key its return guidance flies on is required.
         const bool returning_booster = (s.recovery_method == "tower_catch" && s.aero.entry_alpha_table.empty()) ||
                                        s.recovery_method == "leg_landing";

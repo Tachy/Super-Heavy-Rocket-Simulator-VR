@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/gnc/burn_node.hpp"
@@ -15,15 +16,20 @@ namespace starsim::gnc {
 
 // The deorbit burn's execution errors the planner propagates to the entry interface (each alone, both signs; the
 // entry guidance must fly every resulting interface, assess_entry_reach):
-//  - magnitude +-1 % and pointing 0.5 deg [E]: the ship return campaign's execution error
-//    (core/tests/test_ship_return_mission.cpp, dispersed_cases) - in the pitch plane and across it;
+//  - magnitude and pointing: the guided (closed-loop) cutoff's residual, per vehicle ([stage.recovery]
+//    deorbit_cutoff_residual / deorbit_pointing_error_deg; the session sets them) - in the pitch plane and across it.
+//    Default: the ship's, 0.2 % / 0.1 deg [E, user 2026-10-17: Apollo 15 MCC-2 48.9 for 48.7 ft/s];
 //  - ignition timing +-1 s [E]: the engine's start-up transient shifts the impulse's centre (the executor ignites on
 //    the scheduled tick; the cutoff is closed-loop on the velocity, its residual is in the magnitude).
 struct DeorbitBurnDispersion {
-    double magnitude_fraction = 0.01;
-    double pointing_rad = 0.5 * constants::deg_to_rad;
+    double magnitude_fraction = 0.002;
+    double pointing_rad = 0.1 * constants::deg_to_rad;
     double timing_s = 1.0;
 };
+
+// The stage's own ([stage.recovery] deorbit_cutoff_residual, deorbit_pointing_error_deg); the defaults where it has none
+// (a stage that does not return from orbit: the keys are required where it does).
+DeorbitBurnDispersion deorbit_burn_dispersion(const config::StageConfig& stage);
 
 struct DeorbitParameters {
     double entry_interface_height_m = 120000.0;                         // b2's entry interface

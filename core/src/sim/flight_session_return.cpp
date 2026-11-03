@@ -202,12 +202,17 @@ gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& 
     // no drag given (the first plan): the ship's own, flown ahead
     gnc::DeorbitParameters parameters = given;
     parameters.reach_check = gnc::entry_reach_check(onboard);  // the onboard guidance's rules and limits
+    parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);  // its cutoff residual and pointing error
     if (!(parameters.drag_area_per_mass_m2pkg > 0.0)) parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_ahead();
     if (drag_used_m2pkg) *drag_used_m2pkg = parameters.drag_area_per_mass_m2pkg;
     const auto& s = flying.body->state();
     return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
                              vehicle.mass_properties().mass_kg, exhaust_velocity_mps, vehicle.propellant_kg(),
                              stage.landing_propellant_kg, parameters);
+}
+
+void FlightSession::log_dispersion_note(const gnc::DeorbitPlan& plan) {
+    if (plan.feasible && !plan.dispersion_robust) std::printf("[deorbit] %s\n", plan.dispersion_note.c_str());
 }
 
 gnc::DeorbitPlan FlightSession::ship_return_preview(const gnc::DeorbitParameters& parameters) const {
@@ -251,6 +256,7 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
         return false;
     }
     ship_return_ = true;
+    log_dispersion_note(*deorbit_plan_);
     deorbit_replan_due_ = deorbit_plan_->node.epoch - epoch_ > deorbit_replan_age_s;
     deorbit_track_epoch_ = epoch_;
     deorbit_track_state_ = {s.position_gcrf_m, s.velocity_gcrf_mps};
@@ -285,6 +291,7 @@ void FlightSession::replan_ship_deorbit() {
     const gnc::EntryGuidance onboard(*flying.body, schedule, target,
                                      gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
     parameters.reach_check = gnc::entry_reach_check(onboard);
+    parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);
     const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
                                         onboard.model(), target, vehicle.mass_properties().mass_kg,
                                         configurations.front().thrust_n / configurations.front().mass_flow_kgps,
@@ -322,6 +329,7 @@ void FlightSession::replan_ship_deorbit() {
         deorbit_plan_ = flown;  // the plan with the boil-off until its burn (r2 minor: the planner's has none)
         if (execute_burn(plan.node, stage.deorbit_engine_groups)) {
             node = plan.node;
+            log_dispersion_note(*deorbit_plan_);
         } else {
             deorbit_plan_->node = old_node;
             execute_burn(old_node, stage.deorbit_engine_groups);

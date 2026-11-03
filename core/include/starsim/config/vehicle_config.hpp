@@ -457,6 +457,11 @@ struct StageConfig {
     // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;
+    // [stage.recovery] deorbit_cutoff_residual / deorbit_pointing_error_deg: the deorbit burn's guided cutoff residual
+    // (fraction of its delta-v, either sign) and its pointing error - the burn errors the deorbit planner's pass must
+    // fly (gnc::DeorbitBurnDispersion). Required, as return_mission, for a stage that returns from orbit.
+    double deorbit_cutoff_residual = 0.0;
+    double deorbit_pointing_error_rad = 0.0;
     std::optional<ShipLandingProfile> ship_landing;  // a ship landing at a catch tower (else none)
     std::optional<LunarLandingProfile> lunar_landing;  // a lunar lander (fixed legs; else none)
     std::optional<LunarAscentProfile> lunar_ascent;    // a lunar lander (fixed legs; else none)

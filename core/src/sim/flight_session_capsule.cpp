@@ -90,6 +90,7 @@ gnc::DeorbitPlan FlightSession::capsule_deorbit_plan(gnc::DeorbitParameters& par
     const gnc::EntryGuidance onboard(capsule, capsule_entry_target());
     parameters.reach_check = gnc::entry_reach_check(onboard);  // its rules (no terminal phase) and the crew load limit
     parameters.reach_check.gate_tolerance_m = splashdown_zone_->radius_m;  // the gate over the zone
+    parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stages.back().config);  // its cutoff residual, pointing
     const double capsule_mass_kg = capsule.vehicle().mass_properties().mass_kg;
     const auto& s = flying.body->state();
     const auto plan = [&](double entry_mass_kg) {
@@ -129,6 +130,7 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
         return false;
     }
     capsule_return_step_ = CapsuleReturnStep::DeorbitBurn;
+    log_dispersion_note(*deorbit_plan_);
     return true;
 }
 

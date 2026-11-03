@@ -116,6 +116,8 @@ func _process_unprofiled(_delta: float) -> void:
 		if r["entry_in_s"] > 0.0:
 			lines.append("Rückkehr        Δv %.1f m/s (%.1f t), Quer %.0f km" % [r["delta_v_mps"], r["propellant_t"], r["crossrange_km"]])
 			lines.append("  Eintritt in   %s" % _clock(r["entry_in_s"]))
+		if not r.get("dispersion_robust", true):  # also a return the mission planned (ISS undocking, capsule mission)
+			lines.append("  Achtung       %s" % r.get("dispersion_note", "nicht gegen alle Streuungen robust"))
 	if world.flight.last_event != "":
 		lines.append("Ereignis: %s" % world.flight.last_event)
 	lines.append("")

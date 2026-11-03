@@ -1,16 +1,22 @@
 // Deorbit burn of the ship (b4): the belly sea-level Raptor alone (`[stage.recovery] deorbit_engine_groups`), its thrust
 // gimballed through the CG; the hull is steered so that this tilted thrust axis points along the burn.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -40,6 +46,51 @@ TEST_CASE("Ship config names the belly Raptor as its deorbit engine", "[ship][bu
     const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     CHECK(cfg.stages[1].deorbit_engine_groups == std::vector<std::string>{"sea_level_3"});
     CHECK(cfg.stages[0].deorbit_engine_groups.empty());
+}
+
+namespace {
+
+// A copy of the config dir with `from` removed from config/vehicles/<file> (one directory per call: ctest runs cases as
+// parallel processes).
+std::filesystem::path without(const std::string& file, const std::string& from) {
+    namespace fs = std::filesystem;
+    const fs::path src = STARSIM_CONFIG_DIR;
+    const fs::path dir = fs::temp_directory_path() / ("starsim_deorbit_dispersion_" + file);
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    fs::copy(src, dir, fs::copy_options::recursive);
+    std::ifstream in(src / "vehicles" / file);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    text.erase(at, from.size());
+    std::ofstream(dir / "vehicles" / file) << text;
+    return dir;
+}
+
+}  // namespace
+
+// The deorbit burn's dispersion the planner checks is the vehicle's guided cutoff residual (fix round 4, I6): required
+// for every stage returning from orbit.
+TEST_CASE("The deorbit burn dispersion is the vehicle's cutoff residual", "[deorbit][config]") {
+    const auto ship = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages[1];
+    CHECK(ship.deorbit_cutoff_residual == 0.002);  // user 2026-10-17
+    CHECK(ship.deorbit_pointing_error_rad == Catch::Approx(0.1 * deg));
+    const auto d = gnc::deorbit_burn_dispersion(ship);
+    CHECK(d.magnitude_fraction == 0.002);
+    CHECK(d.pointing_rad == Catch::Approx(0.1 * deg));
+    CHECK(d.timing_s == 1.0);
+    const auto capsule = config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon").stages.back();
+    CHECK(capsule.deorbit_cutoff_residual == 0.001);
+    CHECK(capsule.deorbit_pointing_error_rad == Catch::Approx(0.1 * deg));
+    CHECK(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages[0].deorbit_cutoff_residual == 0.0);
+
+    using Catch::Matchers::ContainsSubstring;
+    CHECK_THROWS_WITH(config::load_vehicle(without("starship_block3.toml", "deorbit_cutoff_residual = 0.002"),
+                                           "starship_block3"),
+                      ContainsSubstring("Schlüssel 'deorbit_cutoff_residual' fehlt in [stage.recovery]"));
+    CHECK_THROWS_WITH(config::load_vehicle(without("crew_dragon.toml", "deorbit_pointing_error_deg = 0.1"), "crew_dragon"),
+                      ContainsSubstring("Schlüssel 'deorbit_pointing_error_deg' fehlt in [stage.recovery]"));
 }
 
 TEST_CASE("Deorbit burn on the belly Raptor alone", "[ship][burn][validation]") {

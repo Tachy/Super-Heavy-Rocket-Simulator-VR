@@ -71,7 +71,7 @@ void to_fixed(const frames::BodyOrientation& earth, time::Epoch epoch, const mat
 // A burn executed with an error: magnitude (fraction), pointing (rad: in the pitch plane - > 0 towards up -, across it -
 // > 0 towards the orbit normal) and ignition (s late).
 struct BurnError {
-    const char* name = "";
+    std::string name;
     double magnitude = 0.0;
     double pitch_rad = 0.0;
     double yaw_rad = 0.0;
@@ -300,9 +300,14 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     // The reach check with the burn's execution errors propagated to the entry interface (each alone, both signs) added
     // to its dispersions (the air).
     const DeorbitBurnDispersion& e = parameters.burn_dispersion;
+    char magnitude_name[2][64];
+    for (int i = 0; i < 2; ++i) {
+        std::snprintf(magnitude_name[i], sizeof magnitude_name[i], "Deorbit-Impuls %c%.2g %%", i == 0 ? '+' : '-',
+                      100.0 * e.magnitude_fraction);
+    }
     const BurnError burn_errors[] = {
-        {"Deorbit-Impuls +1 %", e.magnitude_fraction, 0.0, 0.0, 0.0},
-        {"Deorbit-Impuls -1 %", -e.magnitude_fraction, 0.0, 0.0, 0.0},
+        {magnitude_name[0], e.magnitude_fraction, 0.0, 0.0, 0.0},
+        {magnitude_name[1], -e.magnitude_fraction, 0.0, 0.0, 0.0},
         {"Deorbit-Richtung hoch", 0.0, e.pointing_rad, 0.0, 0.0},
         {"Deorbit-Richtung tief", 0.0, -e.pointing_rad, 0.0, 0.0},
         {"Deorbit-Richtung links", 0.0, 0.0, e.pointing_rad, 0.0},
@@ -323,14 +328,15 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
                 d.velocity_itrf_mps = dispersed.velocity_itrf_mps;
                 d.flight_path_rad = dispersed.flight_path_rad - nominal.flight_path_rad;
                 d.speed_mps = dispersed.speed_mps - nominal.speed_mps;
-            } else {  // never reaches the interface (skips over it): the nominal interface, judged by the nominal
+            } else {  // never reaches the interface (skips over it): a case that does not fly
                 d.position_itrf_m = nominal.position_itrf_m;
                 d.velocity_itrf_mps = nominal.velocity_itrf_mps;
+                d.reaches_interface = false;
             }
             if (debug) {
-                std::printf("[deorbit]   %s: entry %+.0f s, gamma %+.4f deg, speed %+.2f m/s\n", error.name,
-                            dispersed.entry_epoch - nominal.entry_epoch, d.flight_path_rad / constants::deg_to_rad,
-                            d.speed_mps);
+                std::printf("[deorbit]   %s: %s entry %+.0f s, gamma %+.4f deg, speed %+.2f m/s\n", error.name.c_str(),
+                            dispersed.valid ? "" : "NO INTERFACE", dispersed.entry_epoch - nominal.entry_epoch,
+                            d.flight_path_rad / constants::deg_to_rad, d.speed_mps);
             }
             check.dispersions.push_back(d);
         }
@@ -355,10 +361,10 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         if (!robust) {
             char note[200];
             std::snprintf(note, sizeof note,
-                          "Kein Überflug fliegt alle Streuungen: Überflug mit %d von %d Streufällen gewählt (nicht: %s)",
+                          "Kein Überflug fliegt alle Streuungen: Überflug gewählt, der %d von %d Streufällen standhält "
+                          "(nicht: %s)",
                           plan.dispersed_cases_flying, plan.dispersed_cases, plan.reach_limiting_case.c_str());
-            plan.dispersion_note = note;
-            std::printf("[deorbit] %s\n", note);  // not silent: the mission log
+            plan.dispersion_note = note;  // the session logs it when it flies the plan (not for a hypothetical one)
         }
         plan.crossrange_reach_m = reach.reach_m;
         plan.reversal_speed_mps = reach.reversal_speed_mps;
@@ -544,6 +550,13 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
                   parameters.search_window_s / 3600.0);
     plan.reason = text;
     return plan;
+}
+
+DeorbitBurnDispersion deorbit_burn_dispersion(const config::StageConfig& stage) {
+    DeorbitBurnDispersion d;
+    if (stage.deorbit_cutoff_residual > 0.0) d.magnitude_fraction = stage.deorbit_cutoff_residual;
+    if (stage.deorbit_pointing_error_rad > 0.0) d.pointing_rad = stage.deorbit_pointing_error_rad;
+    return d;
 }
 
 math::StateVector coast_with_drag(const environment::GravityModel& gravity, const math::StateVector& state_gcrf,

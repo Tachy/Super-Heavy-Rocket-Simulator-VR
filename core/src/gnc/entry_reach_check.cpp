@@ -21,6 +21,9 @@ using math::Vec3;
 namespace {
 
 constexpr int reach_grid = 8;                        // reach search: two waves of this many targets (span / 64)
+// [E] The aim classification's energy (each offset over its largest size among the dispersions) below which a failing
+// case has no energy side: a quarter of one dispersion's size.
+constexpr double aim_energy_threshold = 0.25;
 
 // Rodrigues: `x` turned by `angle` about the unit axis `k`.
 Vec3 rotated(const Vec3& x, const Vec3& k, double angle) {
@@ -32,6 +35,8 @@ struct Case {
     EntryPredictorModel model;   // the truth (the dispersed aerodynamics and mass)
     double aero_factor = 1.0;    // truth over the onboard model's aerodynamics (EntryGuidance learns it: scale factors)
     EntryPredictorState entry;
+    double lift_factor = 1.0;    // truth over the onboard model's lift alone
+    bool reaches_interface = true;  // false: the case does not fly (EntryDispersion::reaches_interface)
 };
 
 struct Guided {
@@ -113,10 +118,14 @@ double terminal_miss_m(const EntryGuidanceParameters& p, const EntryPredictorMod
 Guided fly_guided(const EntryReachCheck& check, const EntryGuidanceParameters& p, const Case& c, double warm_bank_rad,
                   const EntryTarget& target, bool debug) {
     Guided g;
+    if (!c.reaches_interface) {  // no entry to fly: it does not fly
+        g.within_corridor = true;
+        return g;
+    }
     const EntryCorrector corrector{p, check.limits, target, check.step_s, false};
     const EntryPredictorModel& truth = c.model;
     EntryPredictorModel onboard = c.model;  // the guidance's model: nominal aerodynamics, the scales learnt in flight
-    onboard.lift_scale /= c.aero_factor;
+    onboard.lift_scale /= c.aero_factor * c.lift_factor;
     onboard.drag_scale /= c.aero_factor;
     // EntryGuidance::update's scale filter over one fly-ahead cycle (its gain per guidance cycle)
     const double scale_gain = 1.0 - std::pow(1.0 - p.scale_filter_gain, check.cycle_s / p.cycle_s);
@@ -233,7 +242,7 @@ std::vector<Guided> fly_all(const EntryReachCheck& check, const EntryGuidancePar
 
 }  // namespace
 
-std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double mass_fraction) {
+std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double lift_fraction, double mass_fraction) {
     std::vector<EntryDispersion> cases;
     char name[64];
     for (const double sign : {-1.0, 1.0}) {
@@ -242,6 +251,15 @@ std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double 
         d.name = name;
         d.aero_factor = 1.0 + sign * aero_fraction;
         cases.push_back(d);
+    }
+    if (lift_fraction > 0.0) {
+        for (const double sign : {-1.0, 1.0}) {
+            EntryDispersion d;
+            std::snprintf(name, sizeof name, "Auftrieb (L/D) %+.0f %%", sign * 100.0 * lift_fraction);
+            d.name = name;
+            d.lift_factor = 1.0 + sign * lift_fraction;
+            cases.push_back(d);
+        }
     }
     if (mass_fraction > 0.0) {
         for (const double sign : {-1.0, 1.0}) {
@@ -260,7 +278,8 @@ EntryReachCheck entry_reach_check(const EntryGuidanceParameters& p, bool capsule
     check.guidance = p;
     check.capsule = capsule;
     if (capsule) {  // the capsule campaign's (core/tests/test_capsule_entry.cpp): truth aero +-10 %, mass +-3 %
-        check.dispersions = entry_air_dispersions(entry_aero_dispersion_fraction, capsule_mass_dispersion_fraction);
+        check.dispersions = entry_air_dispersions(entry_aero_dispersion_fraction, entry_lift_dispersion_fraction,
+                                                  capsule_mass_dispersion_fraction);
         check.flight_path_dispersion_rad = 0.1 * constants::deg_to_rad;  // its entry angle +-0.1 deg
     }
     return check;
@@ -318,10 +337,12 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
             c.entry.position_itrf_m = rotated(c.entry.position_itrf_m, track, side);
             c.entry.velocity_itrf_mps = rotated(c.entry.velocity_itrf_mps, track, side);
         }
-        c.model.lift_scale *= d.aero_factor;
+        c.model.lift_scale *= d.aero_factor * d.lift_factor;
         c.model.drag_scale *= d.aero_factor;
         c.model.mass_kg *= d.mass_factor;  // known onboard (the vehicle's mass)
         c.aero_factor = d.aero_factor;
+        c.lift_factor = d.lift_factor;
+        c.reaches_interface = d.reaches_interface;
         cases.push_back(c);
     }
     const std::vector<Guided> flown = fly_all(check, p, cases, bank_rad, std::vector<EntryTarget>(cases.size(), target),
@@ -363,22 +384,31 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
     result.within_corridor = all_inside;
     result.bracketed = all_fly;
     if (!all_fly && nominal.flies) {
-        // which energy side fails: shallower, faster, less drag and heavier (more range) against the dispersions' sizes
+        // which energy side fails: shallower, faster, less drag, more lift and heavier (more range) against the
+        // dispersions' sizes; an interface never reached (skipped over: too shallow) is the high side
         bool high_fails = false, low_fails = false;
-        double gamma_size = 0.0, speed_size = 0.0, aero_size = 0.0, mass_size = 0.0;
+        double gamma_size = 0.0, speed_size = 0.0, aero_size = 0.0, lift_size = 0.0, mass_size = 0.0;
         for (const auto& d : check.dispersions) {
             gamma_size = std::max(gamma_size, std::abs(d.flight_path_rad));
             speed_size = std::max(speed_size, std::abs(d.speed_mps));
             aero_size = std::max(aero_size, std::abs(d.aero_factor - 1.0));
+            lift_size = std::max(lift_size, std::abs(d.lift_factor - 1.0));
             mass_size = std::max(mass_size, std::abs(d.mass_factor - 1.0));
         }
         const auto part = [](double x, double size) { return size > 0.0 ? x / size : 0.0; };
         for (size_t i = 1; i < flown.size(); ++i) {
             if (flown[i].flies) continue;
             const EntryDispersion& d = check.dispersions[i - 1];
+            if (!d.reaches_interface) {
+                high_fails = true;
+                continue;
+            }
             const double energy = part(d.flight_path_rad, gamma_size) + part(d.speed_mps, speed_size) +
-                                  part(1.0 - d.aero_factor, aero_size) + part(d.mass_factor - 1.0, mass_size);
-            if (energy != 0.0) (energy > 0.0 ? high_fails : low_fails) = true;
+                                  part(1.0 - d.aero_factor, aero_size) + part(d.lift_factor - 1.0, lift_size) +
+                                  part(d.mass_factor - 1.0, mass_size);
+            // a case of no energy side (an ignition-timing case: its interface the nominal's, shifted; the rest of
+            // its offsets is the coast's noise) points the aim nowhere
+            if (std::abs(energy) >= aim_energy_threshold) (energy > 0.0 ? high_fails : low_fails) = true;
         }
         result.aim_direction = high_fails && !low_fails ? -1 : low_fails && !high_fails ? 1 : 0;
     }

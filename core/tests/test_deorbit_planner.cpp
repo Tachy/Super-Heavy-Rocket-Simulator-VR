@@ -103,9 +103,9 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
     CHECK(std::abs(p.entry_flight_path_rad + 1.0 * deg) < 0.02 * deg);
     CHECK(std::abs(p.downrange_error_m) < 2000.0);
     // within the ship's reach (planner plan Task 7 fix round 3: the guidance flown ahead from the nominal interface,
-    // the deorbit burn's errors propagated to it - 8 cases - and the air +-10 % - 2; the one-sign half span ~650 km
-    // bounds it)
-    CHECK(p.dispersed_cases == 10);
+    // the deorbit burn's errors propagated to it - 8 cases - and the air +-10 % and lift alone +-5 % - 4 (fix round 4);
+    // the one-sign half span ~650 km bounds it)
+    CHECK(p.dispersed_cases == 12);
     CHECK(p.dispersion_robust);
     CHECK(p.dispersion_note.empty());
     CHECK(p.crossrange_reach_m > 150e3);

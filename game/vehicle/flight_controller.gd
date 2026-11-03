@@ -143,12 +143,22 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
 		"plan_ship_return":
 			if ok:
-				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm"
-				var plan: Dictionary = sim.autopilot_status().get("return", {})
-				if not plan.get("dispersion_robust", true):
-					last_event += " - Achtung: %s" % plan.get("dispersion_note", "nicht gegen alle Streuungen robust")
+				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm" + _dispersion_warning()
 			else:
 				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
+		"plan_capsule_return":
+			if ok:
+				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Wasserung" + _dispersion_warning()
+			else:
+				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "keine Kapsel im Orbit")
+
+
+## The planned return's note when its pass does not fly every dispersed case (the planner's fallback), else "".
+func _dispersion_warning() -> String:
+	var plan: Dictionary = sim.autopilot_status().get("return", {})
+	if plan.get("dispersion_robust", true):
+		return ""
+	return " - Achtung: %s" % plan.get("dispersion_note", "nicht gegen alle Streuungen robust")
 
 
 ## A mission start posted and not yet finished (the world clock holds meanwhile).

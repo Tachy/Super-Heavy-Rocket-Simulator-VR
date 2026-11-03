@@ -186,3 +186,74 @@ TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "
     check.limits.max_heat_rate_w_m2 = 0.5 * centred.peak_heat_rate_w_m2;
     CHECK_FALSE(gnc::assess_entry_reach(model, entry, bank, {centre, 0.0}, gate_m, check).within_corridor);
 }
+
+// Planner plan Task 7 fix round 4 (re-review 3, M11-M13): the air's set holds lift-only (L/D) cases; a dispersed burn
+// that never reaches the entry interface is a failing case (the high-energy side: it skipped over); a failing case with
+// no energy side (an ignition-timing case: its offsets the coast's noise) points the aim nowhere.
+TEST_CASE("Reach check cases: lift alone, interface missed, no energy side", "[deorbit][entry][ship][guidance]") {
+    const auto air = gnc::entry_air_dispersions(gnc::entry_aero_dispersion_fraction, gnc::entry_lift_dispersion_fraction);
+    REQUIRE(air.size() == 4u);
+    for (int k = 2; k < 4; ++k) {
+        CHECK(air[k].aero_factor == 1.0);
+        CHECK(std::abs(air[k].lift_factor - 1.0) == Catch::Approx(gnc::entry_lift_dispersion_fraction));
+    }
+    CHECK(air[2].lift_factor < 1.0);
+    CHECK(air[3].lift_factor > 1.0);
+
+    const auto model = ship_model();
+    const double bank = 50.0 * deg;
+    const frames::GeodeticPosition start{20.0 * deg, -150.0 * deg, 120e3};
+    gnc::EntryPredictorState entry;
+    entry.position_itrf_m = frames::geodetic_to_fixed(start);
+    const math::Vec3 up = math::normalized(entry.position_itrf_m);
+    const math::Vec3 east = math::normalized(cross(math::Vec3{0.0, 0.0, 1.0}, up));
+    const math::Vec3 north = cross(up, east);
+    entry.velocity_itrf_mps = (east * std::cos(-1.0 * deg) + up * std::sin(-1.0 * deg)) * 7400.0;
+    const double gate_m = 800.0;
+    gnc::EntryPredictorState s = entry;
+    s.bank_rad = bank;
+    const auto plus = gnc::predict_entry(model, s, bank, {ground(entry.position_itrf_m + east * 7.0e6), 0.0}, gate_m, 0.0, 2.0);
+    s.bank_rad = -bank;
+    const auto minus = gnc::predict_entry(model, s, -bank, {ground(entry.position_itrf_m + east * 7.0e6), 0.0}, gate_m, 0.0, 2.0);
+    REQUIRE(plus.reached_gate);
+    REQUIRE(minus.reached_gate);
+    const gnc::EntryTarget target{ground(0.5 * (plus.end_position_itrf_m + minus.end_position_itrf_m)), 0.0};
+
+    gnc::EntryReachCheck check;
+    check.measure_reach = false;
+    gnc::EntryDispersion mild;  // flies: sets the flight-path and speed sizes (as a cutoff residual case)
+    mild.name = "mild";
+    mild.flight_path_rad = 0.01 * deg;
+    mild.speed_mps = 1.0;
+    gnc::EntryDispersion skipped;  // the dispersed burn never reached the interface
+    skipped.name = "skipped";
+    skipped.has_state = true;
+    skipped.position_itrf_m = entry.position_itrf_m;
+    skipped.velocity_itrf_mps = entry.velocity_itrf_mps;
+    skipped.reaches_interface = false;
+    check.dispersions = {mild, skipped};
+    const auto missed = gnc::assess_entry_reach(model, entry, bank, target, gate_m, check);
+    CHECK(missed.nominal_flies);
+    CHECK_FALSE(missed.bracketed);
+    CHECK(missed.limiting_case == "skipped");
+    CHECK(missed.cases_flying == 2);
+    CHECK(missed.aim_direction == -1);  // aim steeper
+
+    // a timing-like case: its interface turned 30 deg off the track (it fails), its offsets noise
+    gnc::EntryDispersion timing;
+    timing.name = "timing";
+    timing.has_state = true;
+    timing.position_itrf_m = entry.position_itrf_m;
+    const double turn = 30.0 * deg;
+    const math::Vec3 v = entry.velocity_itrf_mps;
+    const math::Vec3 horizontal = east * dot(v, east) + north * dot(v, north);
+    timing.velocity_itrf_mps = v - horizontal + (east * std::cos(turn) + north * std::sin(turn)) * norm(horizontal);
+    timing.flight_path_rad = 1e-7;
+    timing.speed_mps = 1e-4;
+    check.dispersions = {mild, timing};
+    const auto noisy = gnc::assess_entry_reach(model, entry, bank, target, gate_m, check);
+    CHECK(noisy.nominal_flies);
+    CHECK_FALSE(noisy.bracketed);
+    CHECK(noisy.limiting_case == "timing");
+    CHECK(noisy.aim_direction == 0);
+}

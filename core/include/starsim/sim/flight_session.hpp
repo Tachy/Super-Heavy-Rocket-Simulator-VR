@@ -1539,6 +1539,9 @@ private:
     // plan_ship_return's planner; without a drag in `parameters` it coasts with drag_area_per_mass_ahead() (the value
     // used goes to `drag_used_m2pkg`)
     gnc::DeorbitPlan ship_deorbit_plan(const gnc::DeorbitParameters& parameters, double* drag_used_m2pkg = nullptr) const;
+    // A plan the session flies (not a preview / reserve search) that is not dispersion-robust: its German note to the
+    // mission log (stdout; the UI reads it from autopilot_status().return).
+    static void log_dispersion_note(const gnc::DeorbitPlan& plan);
     void end_transfer();  // a collision, undocking or a cleared target stops a running transfer
     void run_departure(Flying& flying);
     void measure_proximity_authority();  // pure translation authority along the station port axes, docking attitude
