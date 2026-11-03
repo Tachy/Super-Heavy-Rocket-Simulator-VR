@@ -176,7 +176,7 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
     CHECK(hashes.size() == 1 + config_changes.size() + size_changes.size());
 }
 
-TEST_CASE("The multiple-scattering tail is on in the shipped config and changes the tables", "[atmosphere][slow]") {
+TEST_CASE("The multiple-scattering tail is on in the shipped config and changes the tables", "[atmosphere]") {
     const auto shipped = optics();
     CHECK(shipped.multiple_scattering_tail);  // fidelity flag (earth_optics.toml), on by default
     REQUIRE(shipped.scattering_orders >= 3);  // the tail needs two computed multiple-scattering orders

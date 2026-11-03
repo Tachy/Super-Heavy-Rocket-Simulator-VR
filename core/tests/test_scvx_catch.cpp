@@ -89,7 +89,7 @@ TEST_CASE("SCvx flies a nominal landing burn onto the arms", "[gnc][catch]") {
     CHECK(run.outcome == sim::LandingOutcome::Caught);
 }
 
-TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea", "[gnc][catch][abort]") {
+TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea", "[gnc][catch][abort][slow]") {
     // The pilot (or the tower) gives the catch up at a given CG height above the pad: the booster must reach the sea
     // beyond the shoreline, not hover over land until its propellant runs out.
     const double abort_height_m = GENERATE(1500.0, 800.0, 400.0);

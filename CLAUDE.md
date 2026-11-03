@@ -89,9 +89,11 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Weather data (opt-in, needs the built core): `python tools/data_pipeline/fetch.py weather_analog` writes the shipped
   typical-weather files `data/weather/analog`; live ERA5 / GFS snapshots are downloaded at run time into
   `data/weather/cache` (`docs/subsystems/weather-service.md`). Weather and cloud limits: `docs/subsystems/weather-clouds.md`.
-- Test workflow (user 2026-10-19): run only what the change affects - the tags of the touched modules and of the
-  subsystems whose code paths changed (`[slow]` cases of those tags included), also before a push and before a plan's
-  final review; no blanket `-Fast` or full-suite runs. Tag a new case `[slow]` when it takes more than ~40 s.
+- Test workflow (user 2026-10-19, tiers 2026-11-03): run only what the change affects - the tags of the touched
+  modules and of the subsystems whose code paths changed. Per change `-Fast -TestFilter` of those tags; before a push
+  and before a plan's final review the same tags with `[slow]`; `-Nightly` only at a plan's end or when asked, in the
+  background; webcast reports (`[nightly]`) are read, not gated; no blanket full-suite runs. Tag a new case `[slow]`
+  when it takes more than ~40 s cold. Measured waits: `docs/setup.md`.
 - Long runs (user 2026-10-20): > 10 min to the background with output in a file, check every 10 min; stop early and
   fix the cause when tests go wrong.
 - ctest runs cases as parallel processes: tests must not share temp files or directories (unique names).

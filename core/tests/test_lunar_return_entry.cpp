@@ -446,7 +446,7 @@ AircatchPass fly_aircatch_pass(double density_factor, double aero_factor, double
 // 74 km grew into a departure (64 t: axis error 166 deg, apoapsis 12,058 km). Seed 7's truth factors.
 // Fixed by propellant settling (header-tank plan): at entry attitude the liquid lies along the forward domes and the belly,
 // so the CG moves forward and the aft flaps trim off the stop (axis error ~1 deg).
-TEST_CASE("An aerocapture pass with 64 t aboard damps a roll disturbance at peak q", "[header_tanks][aerocapture]") {
+TEST_CASE("An aerocapture pass with 64 t aboard damps a roll disturbance at peak q", "[header_tanks][aerocapture][slow]") {
     const auto f = fly_aircatch_pass(0.855, 0.984, 64000.0, 74e3, {0.02, 0.0, 0.0});
     REQUIRE(f.exited);
     CHECK(f.max_axis_error_below_80km_deg < 10.0);

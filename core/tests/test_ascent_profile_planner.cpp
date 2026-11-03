@@ -224,7 +224,7 @@ TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner][slo
     CHECK(worst_below_rad <= 15.0 * deg);  // [E] no kink (before: 50-70 deg below the velocity at a 64 deg MECO)
 }
 
-TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]") {
+TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner][slow]") {
     sim::disable_plan_cache();  // asserts trial flights
     // A Falcon 9 request (CRS-35 class): the memo is keyed on the request and the gravity model, not on the vehicle; the
     // Starship request this case flew before needed ~177 s of trial flights per plan.

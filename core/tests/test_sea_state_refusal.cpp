@@ -189,7 +189,7 @@ TEST_CASE("An RTLS launch ignores the sea state", "[sim][asds][sea_state][ascent
     CHECK(plan.recovery.zone_or_ship_id == "ccsfs_lz40");
 }
 
-TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_state][ascent_planner]") {
+TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_state][ascent_planner][slow]") {
     // The Starlink-class request (drone ship): one kick search, the later plans answered from the memo.
     const auto request = falcon9_request("falcon9_asds");
     const auto ship = config::load_drone_ship(STARSIM_CONFIG_DIR, "asds_atlantic");

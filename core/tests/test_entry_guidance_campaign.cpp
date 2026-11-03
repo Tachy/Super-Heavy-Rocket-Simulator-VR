@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -51,10 +52,13 @@ std::string scaled_table(const std::string& table, const std::string& column, do
     const auto csv = config::load_csv_table(std::filesystem::path(STARSIM_CONFIG_DIR) / table);
     // One directory per test case: ctest runs the cases as parallel processes, which must not share temp files.
     std::string test_name = Catch::getResultCapture().getCurrentTestName();
+    uint64_t hash = 1469598103934665603ull;  // FNV-1a of the full name: cases sharing the first 48 characters stay apart
+    for (const char ch : test_name) hash = (hash ^ static_cast<unsigned char>(ch)) * 1099511628211ull;
     for (auto& ch : test_name) {
         if (!std::isalnum(static_cast<unsigned char>(ch))) ch = '_';
     }
     test_name.resize(std::min<size_t>(test_name.size(), 48));
+    test_name += "_" + std::to_string(hash);
     const auto dir = std::filesystem::temp_directory_path() / "starsim_entry_campaign" / test_name;
     std::filesystem::create_directories(dir);
     const auto path = dir / name;

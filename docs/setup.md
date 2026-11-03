@@ -34,9 +34,10 @@ cd external/godot-cpp; ../godot/bin/godot.windows.editor.double.x86_64.console.e
 ```
 Every build:
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build.ps1          # core + GDExtension + full ctest (parallel, ~3 min)
+powershell -ExecutionPolicy Bypass -File tools/build.ps1          # core + GDExtension + default-tier ctest (parallel, ~10 min cold)
 powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings
-powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -Fast                  # without [slow] campaigns (~1 min)
+powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -Fast                  # without [slow] campaigns (~80 s)
+powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -Nightly               # only the nightly tier (long campaigns, webcast reports)
 powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter "[cr3bp]"  # only matching tags
 # Godot smoke test (extension loads, float64 end to end)
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
@@ -49,17 +50,43 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   parts terrain / imagery, each < 2 GB) and the Inno Setup installer (`tools/installer.iss`, all data inside: the repo
   is private). `/build` publishes the release-please version, `/build-local` a local test installer. Version:
   `game/util/game_version.gd` (release-please `extra-files`; the action has `skip-github-release`).
-- Test workflow (user 2026-10-19, replaces 2026-10-15): always run only what the change affects - the tags of the
-  touched modules and of the subsystems whose code paths changed (`-TestFilter`, `[slow]` cases of those tags
-  included), also before a push and before a plan's final review; no blanket `-Fast` or full-suite runs. A change to
-  shared code (e.g. `FlightSession::advance_to`, `Vehicle::mass_properties`) whose new branch is inactive for other
-  subsystems does not pull their campaigns in. Tag a new test case `[slow]` when it takes more than ~40 s.
+- Test workflow (user 2026-10-19, tiers 2026-11-03): run only what the change affects - the tags of the touched
+  modules and of the subsystems whose code paths changed. Per change `-Fast -TestFilter "<tags>"`; before a push and
+  before a plan's final review the same tags with `[slow]` (no `-Fast`); `-Nightly` only at a plan's end or when asked,
+  in the background; no blanket full-suite runs. A change to shared code (e.g. `FlightSession::advance_to`,
+  `Vehicle::mass_properties`) whose new branch is inactive for other subsystems does not pull their campaigns in. Tag
+  a new test case `[slow]` when it takes more than ~40 s cold (the plan cache is wiped after every relink). Webcast
+  agreement cases are `[nightly]` reports: read them, they do not gate (the physical gates stay in the default tier).
 - `-TestFilter` has Catch semantics: `,` = union of groups, `[a][b]` inside a group = intersection (`"[gnc][validation],[legs]"`).
   Matching cases run as parallel ctest processes (`[slow]` included unless `-Fast`; output in `build/ctest_filter.log`);
   a spec that is not a tag list runs the exe serially. `-ListOnly` prints the ctest command and the matched count
   without building or running (0 matches throws "TestFilter matched no test"). Three tiers: the default and every
   filter exclude the label `nightly`; `-Nightly` alone runs only the nightly cases, with a filter it adds the nightly
-  cases of those tags. (Final tier sizes: Task 8 of the test tiers plan.) Check of the filter: `tools/tests/test_build_filter.ps1`.
+  cases of those tags. Check of the filter: `tools/tests/test_build_filter.ps1`.
+- Tier sizes and waits (2026-11-03, 24 logical processors, cold plan cache; "wall est." = longest-first packing of the
+  measured case times on 24 slots, CPU = sum of case times; before = audit run `test-audit/full_run.log`, one
+  uniform pre-tier suite of 1529 cases):
+
+  | Set | Cases (default) | CPU s | Wall est. s | Wall before s |
+  |---|---|---|---|---|
+  | full default tier | 1513 | 10582 | 460 (run: 619) | 1941 (CPU 20382) |
+  | `-Fast` (no `[slow]`) | 1396 | 1938 | 81 | - |
+  | nightly only | 30 | not measured | not measured | - |
+  | `[falcon9]` / `[asds]` | 52 / 36 | 1178 / 838 | 230 | 201 / 125 |
+  | `[ascent_planner]` | 63 | 2815 | 384 | 365 |
+  | `[lunar]` / `[return]` | 96 / 29 | 2484 / 1502 | 460 | 1044 |
+  | `[refuelling]` | 163 | 1631 | 384 | 1941 |
+  | `[sim]` / `[mission]` | 112 / 72 | 1757 / 2391 | 104 / 384 | 369 |
+  | `[docking]` / `[ship]` | 96 / 66 | 1438 / 2152 | 384 | 335 |
+  | `[atmosphere]` / `[weather]` | 18 / 113 | 94 / 231 | 45 / 75 | 341 / 113 |
+  | `[timeline]` / `[catch]` | 29 / 33 | 168 / 726 | 30 / 177 | 96 / 145 |
+  | `[dragon]` / `[iss_mission]` | 62 / 40 | 356 / 639 | 74 / 119 | 70 / 182 |
+  | `[gnc]\|[validation]\|[ascent]` | 256 | 5663 | 460 | 1044 |
+
+  The default run took 619 s real (target ~500 s missed): its longest cases (aerocapture seeds 3, 11, 19 at 460 s,
+  `tanker_flight` 384 s) bound the wall from below; ctest packing and 24 parallel processes stretch it. Some sets
+  are slower than the audit figures although cases moved out (`[falcon9]`, `[ascent_planner]`, `[docking]`): this run
+  is cold-cache and 24 processes compete for memory bandwidth (cache state of the audit run not recorded).
 - Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
   in a file; check its state every 10 minutes (failures so far, a case hanging or far beyond its usual time). When
   tests are going wrong, stop the run early and fix the cause instead of waiting for the end.
