@@ -80,26 +80,6 @@ void print_contact(const char* label, const gnc::ProximityContact& c, double kg)
                 c.envelope.inside ? "inside" : c.envelope.reason.c_str());
 }
 
-// The full approach from i3's measured Waypoint 0 arrival (LVLH (-5.0, 0.0, 396.9) m, 0.017 m/s).
-void full_approach(const char* port, bool flyaround) {
-    proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-5.0, 0.0, 396.9}, {0.012, 0.0, -0.012}));
-    REQUIRE(d.session.start_proximity(port));
-    const double kg0 = d.session.body(0).vehicle().rcs_propellant_kg();
-    const double t = fly(d, 3.0 * 3600.0);
-    std::printf("[validation] proximity to %s from Waypoint 0: %.1f min\n", port, t / 60.0);
-    print_events(d);
-    const auto c = d.session.proximity_contact();
-    REQUIRE(c);
-    const double kg = kg0 - d.session.body(0).vehicle().rcs_propellant_kg();
-    print_contact(port, *c, kg);
-    CHECK(c->envelope.inside);
-    CHECK(-c->port.velocity_mps.x < 0.1);  // M9 criterion
-    CHECK(kg < 150.0);                     // [E] bound, i3 reserve 900 kg incl. proximity
-    CHECK(has_event(d, gnc::ProximityPhase::Flyaround) == flyaround);
-    CHECK_FALSE(has_event(d, gnc::ProximityPhase::Abort));
-    CHECK(d.session.autopilot().state == sim::AutopilotState::Off);  // contact ends the autopilot
-}
-
 gnc::ProximityParameters at_waypoint2(const std::string& port, double hold_s) {
     gnc::ProximityParameters p;
     p.waypoint2_hold_s = hold_s;
@@ -181,15 +161,9 @@ TEST_CASE("Disengaging the autopilot ends the proximity flight", "[iss][proximit
     CHECK(norm(d.session.translation_command()) == 0.0);
 }
 
-TEST_CASE("Proximity to IDA-2 from Waypoint 0", "[iss][proximity][session][validation]") {
-    test::spice_session();
-    full_approach("ida2", false);
-}
-
-TEST_CASE("Proximity to IDA-3 with the fly-around", "[iss][proximity][session][validation]") {
-    test::spice_session();
-    full_approach("ida3", true);
-}
+// The full approaches from i3's measured Waypoint 0 arrival (LVLH (-5.0, 0.0, 396.9) m, 0.017 m/s) to IDA-2 and IDA-3 (with
+// the fly-around) are flown to hard capture by the cases "Docking campaign: IDA-2 / IDA-3 from Waypoint 0" in
+// test_docking_campaign.cpp, which check the contact, the propellant, the events and the corridor of this proximity flight.
 
 TEST_CASE("Final approach campaign with dispersed Waypoint 2 states", "[iss][proximity][session][validation]") {
     test::spice_session();

@@ -66,34 +66,8 @@ TEST_CASE("liftoff_utc is loaded", "[mission][config]") {
     CHECK_FALSE(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").liftoff_utc.has_value());
 }
 
-TEST_CASE("An ascent mission with liftoff_utc lifts off at it, whatever the requested epoch", "[mission][sim][slow][ascent_planner]") {
-    test::spice_session();
-    const spice::SpiceTimeConverter time;
-    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "flight14_ascent");
-    REQUIRE(m.liftoff_utc);
-    const auto liftoff = time.from_utc(*m.liftoff_utc);
-    const auto requested = liftoff + 3.0 * 86400.0;
-    sim::StartOptions waiting;
-    waiting.wait_on_pad = true;
-    waiting.countdown_s = 600.0;  // longer than the ignition lead
-    const double countdown_s = m.countdown_s.value_or(waiting.countdown_s);
-    {
-        sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
-        const auto s = sim::start_mission(session, STARSIM_CONFIG_DIR, "flight14_ascent", requested, time, waiting);
-        REQUIRE(s.refusal.empty());
-        REQUIRE(session.timeline().t0());
-        CHECK(std::abs(*session.timeline().t0() - liftoff) < 1e-6);
-        CHECK(std::abs((liftoff - s.epoch) - countdown_s) < 1e-6);
-        CHECK(session.epoch() == s.epoch);
-    }
-    {
-        sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
-        const auto s = sim::start_mission(session, STARSIM_CONFIG_DIR, "flight14_ascent", requested, time);
-        REQUIRE(s.refusal.empty());
-        CHECK(std::abs(s.epoch - liftoff) < 1e-6);
-        CHECK(std::abs(session.epoch() - liftoff) < 1e-6);
-    }
-}
+// The liftoff_utc start (a mission lifts off at its date, whatever the requested epoch) is checked in
+// test_mission_timeline.cpp ("An ascent waiting on the pad counts down ...").
 
 // r2 review: a lunar return mission turns boil-off off; the next mission in the same session must have it again.
 TEST_CASE("Every mission start sets the boil-off flag of its mission", "[mission][sim][boil_off][slow][ascent_planner]") {

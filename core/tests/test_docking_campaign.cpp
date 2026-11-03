@@ -5,6 +5,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -28,6 +29,9 @@ bool verbose() { return std::getenv("STARSIM_VERBOSE") != nullptr; }
 struct ChainResult {
     bool docked = false;
     double flight_min = 0.0, dock_min = 0.0, kg = 0.0;
+    // the proximity flight at the contact (formerly the cases "Proximity to IDA-2 / IDA-3" of test_proximity_session.cpp)
+    double proximity_kg = 0.0;
+    bool flyaround = false, abort_event = false, autopilot_off_at_contact = false;
     std::optional<gnc::ProximityContact> contact;
     contact::LoadPeaks loads;
 };
@@ -39,11 +43,31 @@ ChainResult full_chain(const std::string& port) {
     const double kg0 = s.body(0).vehicle().rcs_propellant_kg();
     ChainResult r;
     double t = 0.0, contact_t = -1.0;
+    const gnc::ProximityParameters proximity;
     for (; t < 4.0 * 3600.0 && !s.docked(); t += 10.0) {
         s.advance_to(d.t0 + t + 10.0, 1000000);
         if (contact_t < 0.0 && s.proximity_contact()) {
             contact_t = t + 10.0;
             r.contact = s.proximity_contact();
+            r.proximity_kg = kg0 - s.body(0).vehicle().rcs_propellant_kg();
+            r.autopilot_off_at_contact = s.autopilot().state == sim::AutopilotState::Off;  // contact ends the autopilot
+            const auto& events = *s.proximity_events();
+            const auto has = [&](gnc::ProximityPhase phase) {
+                return std::any_of(events.begin(), events.end(), [&](const auto& e) { return e.phase == phase; });
+            };
+            r.flyaround = has(gnc::ProximityPhase::Flyaround);
+            r.abort_event = has(gnc::ProximityPhase::Abort);
+        }
+        // the corridor on every call: inside the keep-out sphere the chaser port must not be in the retreat zone
+        if (contact_t < 0.0) {
+            const auto phase = s.proximity_phase();
+            if (phase && *phase != gnc::ProximityPhase::Abort) {
+                const auto rel = *s.relative_port_state();
+                const double cg_range = norm(s.body(0).state().position_gcrf_m - s.body(1).state().position_gcrf_m);
+                if (cg_range < proximity.keep_out_radius_m) {
+                    CHECK(gnc::corridor_status(rel.position_m, cg_range, proximity) != gnc::CorridorStatus::Retreat);
+                }
+            }
         }
         if (s.collision_impulse_ns()) break;
     }
@@ -85,6 +109,11 @@ TEST_CASE("Docking campaign: IDA-2 from Waypoint 0 to hard capture", "[iss][dock
     const auto r = full_chain("ida2");
     REQUIRE(r.contact);
     CHECK(r.contact->envelope.inside);
+    CHECK(-r.contact->port.velocity_mps.x < 0.1);  // M9 criterion
+    CHECK(r.proximity_kg < 150.0);                 // [E] bound, i3 reserve 900 kg incl. proximity
+    CHECK_FALSE(r.flyaround);                      // the V-bar approach has none
+    CHECK_FALSE(r.abort_event);
+    CHECK(r.autopilot_off_at_contact);
     CHECK(r.docked);
     CHECK(r.dock_min > 8.0);
     CHECK(r.dock_min < 13.0);
@@ -101,6 +130,11 @@ TEST_CASE("Docking campaign: IDA-3 from Waypoint 0 to hard capture", "[iss][dock
     const auto r = full_chain("ida3");
     REQUIRE(r.contact);
     CHECK(r.contact->envelope.inside);
+    CHECK(-r.contact->port.velocity_mps.x < 0.1);  // M9 criterion
+    CHECK(r.proximity_kg < 150.0);                 // [E] bound, i3 reserve 900 kg incl. proximity
+    CHECK(r.flyaround);                            // the R-bar approach flies around the station first
+    CHECK_FALSE(r.abort_event);
+    CHECK(r.autopilot_off_at_contact);
     CHECK(r.docked);
     CHECK(r.loads.compression_n < 6500.0);
     CHECK(r.loads.shear_n < 3200.0);

@@ -438,7 +438,8 @@ TEST_CASE("Aerial perspective to a point before the atmosphere's entry is empty"
     CHECK(t_ground.y < 1.0);
 }
 
-TEST_CASE("Single-scattering lookups between table rows and across the horizon match the raymarch", "[atmosphere][slow]") {
+TEST_CASE("Single-scattering table texels, lookups between table rows and across the horizon match the raymarch",
+          "[atmosphere][slow]") {
     // Off-texel CPU lookups near the ground (the real observers sit between the scattering table's r rows): observers
     // at 0 m and 50 m looking 1-2 deg up, Sun 30 deg high, single scattering (orders = 1) vs the brute-force raymarch,
     // 1 %.
@@ -446,6 +447,58 @@ TEST_CASE("Single-scattering lookups between table rows and across the horizon m
     c.scattering_orders = 1;
     const auto tables = precompute_timed(c);
     const ref::Model model{c};
+
+    {  // Table texels vs the raymarch (formerly the case "Single scattering matches a brute-force raymarch" of
+       // test_atmosphere_tables.cpp: the same orders = 1 tables at the default grid, now computed once for both).
+        const environment::AtmosphereTableSizes sizes;
+        const int w = sizes.scattering_width(), h = sizes.scattering_height();
+        // Texels (x = nu * mu_s_size + mu_s, mu, r). mu index 64 is the zenith and 127 the horizon (rays to the top),
+        // 63 the nadir and 0 the horizon (rays to the ground). Cells: from the ground 15 deg up and 1.1 deg up (the
+        // near-horizon sky), from 270 m 0.8 deg up, from -45 m just above the model horizon (a grazing ray), ground-hitting
+        // rays from 795 m and 6.6 km, an upward ray at 42 km and a limb ray from the top. Measured max 1.2e-3 (Bruneton's
+        // 50 uniform samples and 256 x 64 transmittance: 0.75).
+        struct Texel {
+            int nu, mu_s, mu, r;
+        };
+        const std::vector<Texel> texels{{5, 28, 80, 0},  {7, 24, 120, 0}, {6, 26, 118, 2}, {6, 26, 126, 1},
+                                        {2, 30, 20, 3},  {4, 26, 40, 8},  {3, 22, 70, 20}, {6, 28, 110, 31}};
+        double max_texel_error = 0.0;
+        int lookups_checked = 0;
+        for (const auto& tx : texels) {
+            const int x = tx.nu * sizes.scattering_mu_s + tx.mu_s;
+            const auto cell = environment::scattering_cell_at_texel(tables->parameters, sizes, x, tx.mu, tx.r);
+            const auto expected = ref::single_scattering(model, cell.r_m, cell.mu, cell.mu_s, cell.nu);
+            INFO("texel r " << tx.r << " mu " << tx.mu << " mu_s " << tx.mu_s << " nu " << tx.nu << ": alt "
+                            << cell.r_m - constants::wgs84_semi_major_axis_m << " mu " << cell.mu << " mu_s " << cell.mu_s
+                            << " nu " << cell.nu << " ground " << cell.ray_r_mu_intersects_ground);
+            REQUIRE(expected.sun_near_horizon_samples == 0);  // the reference has no penumbra: test clean cells only
+            const std::size_t i = (static_cast<std::size_t>(tx.r) * h + tx.mu) * w + x;
+            for (int ch = 0; ch < 3; ++ch) {
+                const double er = rel_error(tables->scattering[4 * i + ch], expected.rayleigh[ch]);
+                const double em = rel_error(tables->single_mie[4 * i + ch], expected.mie[ch]);
+                // The single Rayleigh table (static clouds Task 9b: the cloud shadows on the air) holds the same single
+                // Rayleigh scattering as the scattering table of a single-order precompute.
+                const double es = rel_error(tables->single_rayleigh[4 * i + ch], expected.rayleigh[ch]);
+                CHECK(tables->single_rayleigh[4 * i + ch] == Approx(tables->scattering[4 * i + ch]).epsilon(1e-6));
+                CHECK(es < 0.01);
+                max_texel_error = std::max({max_texel_error, er, em, es});
+                INFO("ch " << ch << " rayleigh " << tables->scattering[4 * i + ch] << " ref " << expected.rayleigh[ch]
+                           << " mie " << tables->single_mie[4 * i + ch] << " ref " << expected.mie[ch]);
+                CHECK(er < 0.01);
+                CHECK(em < 0.01);
+            }
+            CHECK(tables->scattering[4 * i + 3] == Approx(tables->single_mie[4 * i]).epsilon(1e-6));  // A = Mie red
+            // The filtered lookup at a texel centre returns the texel (when nu was not clamped to its range).
+            if (std::abs(cell.nu - (2.0 * tx.nu / (sizes.scattering_nu - 1) - 1.0)) < 1e-12) {
+                ++lookups_checked;
+                const auto looked_up = environment::lookup_scattering(*tables, tables->scattering, cell);
+                for (int ch = 0; ch < 4; ++ch) CHECK(looked_up[ch] == Approx(tables->scattering[4 * i + ch]).epsilon(1e-5));
+            }
+        }
+        CHECK(lookups_checked > 0);
+        std::printf("single scattering at the texels: max relative error %.3e\n", max_texel_error);
+    }
+
     double max_error = 0.0;
     for (const double height_m : {0.0, 50.0}) {
         for (const double view_deg : {1.0, 1.5, 2.0}) {

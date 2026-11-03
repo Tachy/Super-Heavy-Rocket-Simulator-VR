@@ -76,59 +76,9 @@ TEST_CASE("Transmittance table matches a direct optical-depth integral", "[atmos
     std::printf("transmittance: max relative error %.3e\n", max_error);
 }
 
-TEST_CASE("Single scattering matches a brute-force raymarch", "[atmosphere][slow]") {
-    const auto c = optics();
-    const environment::AtmosphereTableSizes sizes;
-    const auto tables = precompute_timed(c, sizes);
-    const ref::Model model{c};
-    const int w = sizes.scattering_width(), h = sizes.scattering_height();
-
-    // Texels (x = nu * mu_s_size + mu_s, mu, r). mu index 64 is the zenith and 127 the horizon (rays to the top),
-    // 63 the nadir and 0 the horizon (rays to the ground). Cells: from the ground 15 deg up and 1.1 deg up (the
-    // near-horizon sky), from 270 m 0.8 deg up, from -45 m just above the model horizon (a grazing ray), ground-hitting
-    // rays from 795 m and 6.6 km, an upward ray at 42 km and a limb ray from the top. Measured max 1.2e-3 (Bruneton's
-    // 50 uniform samples and 256 x 64 transmittance: 0.75).
-    struct Texel {
-        int nu, mu_s, mu, r;
-    };
-    const std::vector<Texel> texels{{5, 28, 80, 0},  {7, 24, 120, 0}, {6, 26, 118, 2}, {6, 26, 126, 1},
-                                    {2, 30, 20, 3},  {4, 26, 40, 8},  {3, 22, 70, 20}, {6, 28, 110, 31}};
-    double max_error = 0.0;
-    int lookups_checked = 0;
-    for (const auto& t : texels) {
-        const int x = t.nu * sizes.scattering_mu_s + t.mu_s;
-        const auto cell = environment::scattering_cell_at_texel(tables.parameters, sizes, x, t.mu, t.r);
-        const auto expected = ref::single_scattering(model, cell.r_m, cell.mu, cell.mu_s, cell.nu);
-        INFO("texel r " << t.r << " mu " << t.mu << " mu_s " << t.mu_s << " nu " << t.nu << ": alt "
-                        << cell.r_m - constants::wgs84_semi_major_axis_m << " mu " << cell.mu << " mu_s " << cell.mu_s
-                        << " nu " << cell.nu << " ground " << cell.ray_r_mu_intersects_ground);
-        REQUIRE(expected.sun_near_horizon_samples == 0);  // the reference has no penumbra: test clean cells only
-        const std::size_t i = (static_cast<std::size_t>(t.r) * h + t.mu) * w + x;
-        for (int ch = 0; ch < 3; ++ch) {
-            const double er = rel_error(tables.scattering[4 * i + ch], expected.rayleigh[ch]);
-            const double em = rel_error(tables.single_mie[4 * i + ch], expected.mie[ch]);
-            // The single Rayleigh table (static clouds Task 9b: the cloud shadows on the air) holds the same single
-            // Rayleigh scattering as the scattering table of a single-order precompute.
-            const double es = rel_error(tables.single_rayleigh[4 * i + ch], expected.rayleigh[ch]);
-            CHECK(tables.single_rayleigh[4 * i + ch] == Approx(tables.scattering[4 * i + ch]).epsilon(1e-6));
-            CHECK(es < 0.01);
-            max_error = std::max({max_error, er, em, es});
-            INFO("ch " << ch << " rayleigh " << tables.scattering[4 * i + ch] << " ref " << expected.rayleigh[ch]
-                       << " mie " << tables.single_mie[4 * i + ch] << " ref " << expected.mie[ch]);
-            CHECK(er < 0.01);
-            CHECK(em < 0.01);
-        }
-        CHECK(tables.scattering[4 * i + 3] == Approx(tables.single_mie[4 * i]).epsilon(1e-6));  // A = Mie red
-        // The filtered lookup at a texel centre returns the texel (when nu was not clamped to its range).
-        if (std::abs(cell.nu - (2.0 * t.nu / (sizes.scattering_nu - 1) - 1.0)) < 1e-12) {
-            ++lookups_checked;
-            const auto looked_up = environment::lookup_scattering(tables, tables.scattering, cell);
-            for (int ch = 0; ch < 4; ++ch) CHECK(looked_up[ch] == Approx(tables.scattering[4 * i + ch]).epsilon(1e-5));
-        }
-    }
-    CHECK(lookups_checked > 0);
-    std::printf("single scattering: max relative error %.3e\n", max_error);
-}
+// "Single scattering matches a brute-force raymarch" (the table texels against the reference) runs on the tables of the case
+// "Single-scattering lookups between table rows and across the horizon match the raymarch" in test_atmosphere_scattering.cpp:
+// the same orders = 1 precompute at the same default grid, computed once.
 
 TEST_CASE("The ground radius lies below every relevant surface", "[atmosphere]") {
     const auto c = optics();

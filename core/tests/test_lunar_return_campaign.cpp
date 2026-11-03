@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "lunar_return_test_support.hpp"
+#include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -96,6 +97,7 @@ struct Run {
     double gate_down_km = 0.0, gate_cross_km = 0.0;  // entry guidance at the gate (direct)
     double braked_t = 0.0, interface_t = 0.0;  // propellant after the braking burn and at the interface
     double peak_heat_w_m2 = 0.0, peak_load_g = 0.0, propellant_t = 0.0;
+    double braking_height_m = 0.0;  // geodetic height of the braking burn's centre
     std::pair<double, double> exit_apsides{0.0, 0.0}, raised_apsides{0.0, 0.0};
     std::string status, breakup, braking_status;
 };
@@ -142,6 +144,10 @@ Run fly(const Dispersion& d, bool aircatch) {
     INFO(s.lunar_status());
     REQUIRE(braking != nullptr);
     r.braking_mps = norm(braking->node.delta_v_gcrf_mps);
+    {
+        const math::Vec3 centre_itrf = transpose(t.earth.fixed_to_gcrf(braking->node.epoch).rotation) * braking->centre_gcrf_m;
+        r.braking_height_m = frames::fixed_to_geodetic(centre_itrf).height_m;
+    }
     r.braked_t = body.vehicle().propellant_kg() / 1000.0;
     if (!std::getenv("STARSIM_RETURN_NO_BRAKING_ERROR")) {  // diagnostics: the other errors alone
         s.apply_velocity_error(ship, burn_error_mps(braking->node.delta_v_gcrf_mps, d.braking));
@@ -164,10 +170,21 @@ Run fly(const Dispersion& d, bool aircatch) {
     }
 
     // entry (and for the aerocapture: capture coast, perigee raise, circularisation, b4) to the catch
-    bool entered = false;
+    bool entered = false, handover_printed = false;
     while (!body.caught() && !body.impacted() && s.epoch() - t0 < 13.0 * 86400.0) {
         s.advance_to(s.epoch() + 86400.0, 200);
         const auto tel = s.telemetry(ship);
+        if (!handover_printed && std::getenv("STARSIM_VERBOSE") && s.autopilot().state == sim::AutopilotState::Return) {
+            // the hand-over state of the entry scenario fixture (test_mission_timeline.cpp, test_lunar_return_entry.cpp):
+            // regenerate with STARSIM_RETURN_NOMINAL=1 and the single case "[.lunar_return_case]" (seed ignored)
+            handover_printed = true;
+            const auto& st = body.state();
+            std::printf("[lunar return] hand-over: epoch_tdb %.17g propellant %.17g r %.17g %.17g %.17g v %.17g %.17g %.17g "
+                        "q %.17g %.17g %.17g %.17g\n",
+                        s.epoch().tdb_seconds_past_j2000(), body.vehicle().propellant_kg(), st.position_gcrf_m.x,
+                        st.position_gcrf_m.y, st.position_gcrf_m.z, st.velocity_gcrf_mps.x, st.velocity_gcrf_mps.y,
+                        st.velocity_gcrf_mps.z, st.attitude.w, st.attitude.x, st.attitude.y, st.attitude.z);
+        }
         if (!entered && tel.altitude_m < interface_height_m) {
             entered = true;
             r.entry_speed_mps = tel.speed_relative_mps;
@@ -244,7 +261,15 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
         std::printf(" | %s | %s, %.1f t left, %s%s%s\n", r.braking_status.c_str(), r.caught ? "caught" : sim::to_string(r.result), r.propellant_t,
                     r.status.c_str(), r.breakup.empty() ? "" : " / ", r.breakup.c_str());
         std::fflush(stdout);
+        // The checks of the former nominal case "Lunar return direct: the ship is caught at Starbase" (test_lunar_return_session
+        // .cpp): the braking burn at the mission's [return] braking_height_km 2000 km +-50 km, the shield intact
+        // (no "Hitzeschild" breakup), propellant left; caught and the heat bound are the campaign's own.
+        std::printf("%s case %2u: braking burn at %.0f km\n", tag, seed, r.braking_height_m / 1000.0);
         bool ok = r.caught && r.peak_heat_w_m2 < 1.2e6;
+        if (!aircatch) {
+            ok = ok && std::abs(r.braking_height_m - 2000e3) < 50e3 && r.breakup.find("Hitzeschild") == std::string::npos &&
+                 r.propellant_t >= 0.0;
+        }
         if (aircatch) ok = ok && r.raised && r.raised_apsides.first > 150e3;
         if (ok) ++good;
     }

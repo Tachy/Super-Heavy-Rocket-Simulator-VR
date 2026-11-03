@@ -115,17 +115,6 @@ void fly_direct_to_catch(test::LunarReturnSession& t) {
     while (!body.caught() && !body.impacted() && t.session.epoch() - start_epoch < 8.0 * 86400.0) {
         t.session.advance_to(t.session.epoch() + 86400.0, 200);
         if (t.session.autopilot().state == sim::AutopilotState::Return) {
-            static bool snapshot = false;  // the hand-over state for the fast entry test (entry scenario fixture)
-            if (!snapshot && std::getenv("STARSIM_VERBOSE")) {
-                snapshot = true;
-                const auto& s = body.state();
-                std::printf("[lunar return] hand-over: epoch_tdb %.17g propellant %.17g r %.17g %.17g %.17g v %.17g %.17g %.17g "
-                            "q %.17g %.17g %.17g %.17g\n",
-                            t.session.epoch().tdb_seconds_past_j2000(), body.vehicle().propellant_kg(),
-                            s.position_gcrf_m.x, s.position_gcrf_m.y, s.position_gcrf_m.z, s.velocity_gcrf_mps.x,
-                            s.velocity_gcrf_mps.y, s.velocity_gcrf_mps.z, s.attitude.w, s.attitude.x, s.attitude.y,
-                            s.attitude.z);
-            }
             const auto tel = t.session.telemetry(t.session.controlled_index());
             if (!entered && tel.altitude_m < 120e3) {
                 entered = true;
@@ -166,13 +155,9 @@ void fly_direct_to_catch(test::LunarReturnSession& t) {
 
 }  // namespace
 
-// Task 8b (2026-10-16): the plan aims at one bank sign's track (~960 km beside the arrival plane) - caught, 1,055 kW/m2,
-// 4.2 g, 7.9 t left.
-TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return][session][slow]") {
-    test::LunarReturnSession t;
-    start(t);
-    fly_direct_to_catch(t);
-}
+// The nominal direct return ("the ship is caught at Starbase": the plan aims at one bank sign's track ~960 km beside the
+// arrival plane - caught, 1,055 kW/m2, 4.2 g, 7.9 t left, Task 8b 2026-10-16) is covered by the direct campaign seeds in
+// test_lunar_return_campaign.cpp, which check the same (caught, braking height, shield, heat, propellant).
 
 // l5 Task 10 (user 2026-10-18: a failed correction must be re-planned from the current flight data): a TEI realised
 // far off (a velocity error along the burn after the cutoff) moves the arrival by hours - the correction back onto

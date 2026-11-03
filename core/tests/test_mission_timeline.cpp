@@ -448,7 +448,8 @@ TEST_CASE("An undocking mission starts its clock at the undocking", "[timeline]"
     CHECK(*t.t0() == undocking->epoch);
 }
 
-TEST_CASE("start_mission resets the timeline; campaign launches do not", "[timeline][ascent_planner]") {
+TEST_CASE("start_mission resets the timeline; campaign launches do not; a refused start keeps the log",
+          "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -477,12 +478,9 @@ TEST_CASE("start_mission resets the timeline; campaign launches do not", "[timel
     session.advance_to(session.epoch() + 1.0, 100000);
     CHECK(std::count_if(t.recorded().begin(), t.recorded().end(),
                         [](const MissionEvent& e) { return e.kind == MissionEventKind::Liftoff; }) == 2);
-}
 
-TEST_CASE("A refused start_mission keeps the running flight's log", "[timeline][slow][ascent_planner]") {
-    test::spice_session();
-    const spice::SpiceTimeConverter time;
-    // a config copy whose ISS launch finds no window: a 1 h search, a mission limit just past the insertion
+    // A refused start_mission keeps the running flight's log (formerly an own case that flew its own starship_leo start).
+    // A config copy whose ISS launch finds no window: a 1 h search, a mission limit just past the insertion.
     const auto dir = std::filesystem::temp_directory_path() / "starsim_timeline_refused_start";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
@@ -499,19 +497,11 @@ TEST_CASE("A refused start_mission keeps the running flight's log", "[timeline][
     replace("search_days = 3.0", "search_days = 0.04");
     replace("mission_limit_h = 28.0", "mission_limit_h = 0.5");
     std::ofstream(mission_file) << toml;
-
-    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
-    const auto t0 = time.from_utc({2026, 10, 16, 0, 0, 0.0});
-    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", t0, time);
-    session.advance_to(t0 + 15.0, 100000);
-    const auto& t = session.timeline();
-    REQUIRE(find_event(t, MissionEventKind::Liftoff));
-    const size_t events = t.recorded().size();
-
+    const size_t events_before_refusal = t.recorded().size();
     const auto refused = sim::start_mission(session, dir / "config", "falcon9_crew_dragon_iss", session.epoch(), time);
     INFO(refused.refusal);
     CHECK_FALSE(refused.refusal.empty());
-    CHECK(t.recorded().size() == events);
+    CHECK(t.recorded().size() == events_before_refusal);
     CHECK(find_event(t, MissionEventKind::Liftoff));
     std::filesystem::remove_all(dir);
 }
@@ -797,7 +787,8 @@ TEST_CASE("A scheduled liftoff waits on the pad and lifts off at T-0", "[timelin
     CHECK(session.telemetry(session.controlled_index()).altitude_m - pad_altitude_m > 10.0);
 }
 
-TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "[timeline][ascent_planner]") {
+TEST_CASE("An ascent waiting on the pad counts down from the requested epoch; a liftoff_utc mission lifts off at its date",
+          "[timeline][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -811,6 +802,34 @@ TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "
     CHECK(*session.timeline().t0() == requested + 600.0);
     CHECK(*session.timeline().mission_clock_s(session.epoch()) == -600.0);
     CHECK(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").countdown_s == std::nullopt);
+
+    // A mission with a liftoff_utc lifts off at it, whatever the requested epoch (formerly test_mission_start.cpp, flown
+    // there on flight14_ascent in 369 s; the start logic is the mission file's, not the vehicle's: CRS-35's file, a
+    // Falcon 9 plan, stands in).
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "crs35_ascent");
+    REQUIRE(m.liftoff_utc);
+    const auto liftoff = time.from_utc(*m.liftoff_utc);
+    const auto later = liftoff + 3.0 * 86400.0;
+    sim::StartOptions waiting;
+    waiting.wait_on_pad = true;
+    waiting.countdown_s = 600.0;  // longer than the ignition lead
+    const double countdown_s = m.countdown_s.value_or(waiting.countdown_s);
+    {
+        sim::FlightSession waiting_session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+        const auto s = sim::start_mission(waiting_session, STARSIM_CONFIG_DIR, "crs35_ascent", later, time, waiting);
+        REQUIRE(s.refusal.empty());
+        REQUIRE(waiting_session.timeline().t0());
+        CHECK(std::abs(*waiting_session.timeline().t0() - liftoff) < 1e-6);
+        CHECK(std::abs((liftoff - s.epoch) - countdown_s) < 1e-6);
+        CHECK(waiting_session.epoch() == s.epoch);
+    }
+    {
+        sim::FlightSession direct_session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+        const auto s = sim::start_mission(direct_session, STARSIM_CONFIG_DIR, "crs35_ascent", later, time);
+        REQUIRE(s.refusal.empty());
+        CHECK(std::abs(s.epoch - liftoff) < 1e-6);
+        CHECK(std::abs(direct_session.epoch() - liftoff) < 1e-6);
+    }
 }
 
 TEST_CASE("A countdown shorter than the engine start moves T-0, the clock never runs back", "[timeline][ascent_planner]") {

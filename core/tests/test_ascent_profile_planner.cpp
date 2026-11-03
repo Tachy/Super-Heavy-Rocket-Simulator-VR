@@ -224,9 +224,13 @@ TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner][slo
     CHECK(worst_below_rad <= 15.0 * deg);  // [E] no kink (before: 50-70 deg below the velocity at a 64 deg MECO)
 }
 
-TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner][slow]") {
+TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]") {
     sim::disable_plan_cache();  // asserts trial flights
-    auto request = starship_request(200.0);  // own memo key
+    // A Falcon 9 request (CRS-35 class): the memo is keyed on the request and the gravity model, not on the vehicle; the
+    // Starship request this case flew before needed ~177 s of trial flights per plan.
+    auto request = falcon9_request("falcon9_rtls", 200.0);  // own memo key
+    const auto lz = config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_lz40");  // the recovery plan_launch chooses (below)
+    request.recovery = {sim::RecoveryKind::LandingZone, "ccsfs_lz40", lz.latitude_rad, lz.longitude_rad, 0.0};
     const auto first = timed_plan(request);
     REQUIRE(first.feasible);
     REQUIRE(first.trial_flights > 0);

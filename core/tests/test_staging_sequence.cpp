@@ -10,6 +10,7 @@
 #include <optional>
 #include <vector>
 
+#include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -59,12 +60,14 @@ double along_track_mps(const sim::FlightSession& s, size_t a, size_t b) {
 
 // Flies the mission until the booster phase has ended (MECO commanded), then tick by tick until the separation (two
 // bodies). Returns false if the flight never separated.
-bool fly_to_separation(sim::FlightSession& session) {
+// `saw_staging` (optional): the autopilot was in the state Staging on the way (the MECO of the Booster state).
+bool fly_to_separation(sim::FlightSession& session, bool* saw_staging = nullptr) {
     const double tick = sim::FlightSession::tick_s;
     const auto t0 = session.epoch();
     while (session.epoch() - t0 < 400.0 && session.body_count() < 2) {
         const bool booster = session.autopilot().state == sim::AutopilotState::Booster;
         session.advance_to(session.epoch() + (booster ? 0.1 : 1.5 * tick), 1000);
+        if (saw_staging && session.autopilot().state == sim::AutopilotState::Staging) *saw_staging = true;
     }
     return session.body_count() >= 2;
 }
@@ -79,7 +82,9 @@ TEST_CASE("Cold staging: MECO, separation after the delay, upper ignition after 
     REQUIRE(staging.kind == config::StagingConfig::Kind::Cold);
     sim::FlightSession session(staging_ephemeris(), staging_earth(), STARSIM_CONFIG_DIR);
     sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_rtls", t0, time);
-    REQUIRE(fly_to_separation(session));
+    bool saw_staging = false;
+    REQUIRE(fly_to_separation(session, &saw_staging));
+    CHECK(saw_staging);  // the autopilot's MECO puts it in Staging (the placed stack of the re-engage case starts there)
     // right after the separation: the push sends the booster back, no tail-off acts on it alone
     const double relative_mps = along_track_mps(session, 0, session.controlled_index());
     session.advance_to(session.epoch() + staging.upper_ignition_delay_s + 2.0, 100000);
@@ -108,7 +113,9 @@ TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; th
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
     sim::FlightSession session(staging_ephemeris(), staging_earth(), STARSIM_CONFIG_DIR);
     sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", t0, time);
-    REQUIRE(fly_to_separation(session));
+    bool saw_staging = false;
+    REQUIRE(fly_to_separation(session, &saw_staging));
+    CHECK(saw_staging);  // the autopilot's MECO puts it in Staging (the placed stack of the re-engage case starts there)
     const size_t ship = session.controlled_index();
     REQUIRE(ship == 1);
     // the separation tick: every ship engine at thrust
@@ -232,30 +239,46 @@ TEST_CASE("A manual stage command during the sequence separates once", "[staging
     CHECK(count(session.timeline(), MissionEventKind::StageSeparation) == 1);
 }
 
-TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging][slow][ascent_planner]") {
+// The sequence is started on a placed stack: launched from the pad, 10 s under thrust, then the stage command (the
+// manual command of the case above) - no ascent plan, no flight to the real MECO (formerly both missions were flown
+// from the pad to their MECO: 124 s). engage_ascent_autopilot resets the autopilot and takes the state from the
+// sequence under way, so the state before the engagement does not matter.
+TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging][ascent_planner]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
     const double tick = sim::FlightSession::tick_s;
-    gnc::AscentTarget target{200e3, 200e3, 26.5 * constants::deg_to_rad, true};
+    const double deg = constants::deg_to_rad;
+    gnc::AscentTarget target{200e3, 200e3, 26.5 * deg, true};
     gnc::PitchProgram program;
-    program.kick_angle_rad = 14.0 * constants::deg_to_rad;
-    for (const char* mission : {"starship_leo", "falcon9_rtls"}) {  // hot: joined; cold: the separated upper stage
+    program.kick_angle_rad = 14.0 * deg;
+    struct Stack {
+        const char* vehicle_id;
+        const char* site_id;
+        double heading_deg;
+    };
+    // hot: joined; cold: the separated upper stage
+    for (const Stack stack : {Stack{"starship_block3", "starbase_pad2", 90.0}, Stack{"falcon9_block5", "ccsfs_slc40", 45.0}}) {
         sim::FlightSession session(staging_ephemeris(), staging_earth(), STARSIM_CONFIG_DIR);
-        sim::start_mission(session, STARSIM_CONFIG_DIR, mission, time.from_utc({2026, 10, 13, 10, 40, 0.0}), time);
-        const auto t0 = session.epoch();
-        while (session.epoch() - t0 < 400.0 && (session.autopilot().state == sim::AutopilotState::PreLaunch ||
-                                                session.autopilot().state == sim::AutopilotState::Booster)) {
-            session.advance_to(session.epoch() + 0.1, 1000);
-        }
+        const auto t0 = time.from_utc({2026, 10, 13, 10, 40, 0.0});
+        session.launch_from_pad(stack.vehicle_id,
+                                sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, stack.site_id)),
+                                stack.heading_deg * deg, t0);
+        session.set_booster_return(false);  // the booster's fate is not the subject
+        session.ignite();
+        session.release_clamps();
+        session.advance_to(t0 + 10.0);
+        session.stage();
         REQUIRE(session.staging());
         const bool hot = session.staging()->config.kind == config::StagingConfig::Kind::Hot;
         if (!hot) {  // cold: on to the separation, the upper stage not yet lit
-            while (!session.staging()->separation_epoch) session.advance_to(session.epoch() + 1.5 * tick, 10);
+            for (int i = 0; i < 2000 && !session.staging()->separation_epoch; ++i) {
+                session.advance_to(session.epoch() + 1.5 * tick, 10);
+            }
             REQUIRE(session.staging());
+            REQUIRE(session.staging()->separation_epoch);
             REQUIRE_FALSE(session.staging()->upper_ignition_epoch);
         }
-        INFO(mission);
-        REQUIRE(session.autopilot().state == sim::AutopilotState::Staging);
+        INFO(stack.vehicle_id);
         session.engage_ascent_autopilot(target, program);
         CHECK(session.autopilot().state == sim::AutopilotState::Staging);  // not Booster on the joined stack
         // the sequence still ends in the upper stage's flight

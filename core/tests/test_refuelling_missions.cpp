@@ -16,6 +16,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "refuelling_measurements.hpp"
+#include "return_scenario.hpp"
 #include "refuelling_test_support.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
@@ -123,13 +124,21 @@ TEST_CASE("release_tower keeps the indices: booster caught, then lifted off; the
     f.session.advance_to(f.session.epoch() + 60.0);  // runs on without the booster
 }
 
-// Review r5 I2: a tower whose booster catch was aborted (or missed) is re-armed for the ship as well.
-TEST_CASE("release_tower re-arms a tower after an aborted booster catch", "[refuelling][catch][slow][ascent_planner]") {
+// Review r5 I2: a tower whose booster catch was aborted (or missed) is re-armed for the ship as well. The booster is placed
+// at its landing-burn ignition over the Starbase pad (70 t, 355 m/s sink: the documented flown state as in
+// test_scvx_catch.cpp) instead of flying the ascent to the separation (45 s), and gives up the catch at once.
+TEST_CASE("release_tower re-arms a tower after an aborted booster catch", "[refuelling][catch]") {
     test::spice_session();
     refuelling_test::DepotSession f;
-    const auto m = config::load_ascent_mission(refuelling_test::config_dir, "starship_leo");
-    sim::start_ascent_mission(f.session, m, refuelling_test::config_dir, f.t0);
-    while (f.session.epoch() - f.t0 < 300.0 || f.session.body_count() < 2) f.session.advance_to(f.session.epoch() + 1.0);
+    f.session.set_launch_site(
+        sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_pad2")));
+    const auto cfg = test::booster_config("starship_block3", 70.0e3);
+    const double sink_mps = 355.0;
+    const double h = test::ignition_height_m(f.session, cfg, f.earth, f.t0, sink_mps, gnc::BoosterReturnParameters{});
+    f.session.place_returning_booster(
+        cfg, test::state_over_site(f.session.launch_site(), f.earth, f.t0, {20.0, -10.0, h}, {0.0, 0.0, -sink_mps}),
+        f.t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+    f.session.advance_to(f.t0 + 1.0, 1000);
     REQUIRE(f.session.abort_landing(0));  // the booster gives up its return
     REQUIRE(f.session.tower()->phase() == sim::CatchPhase::Aborted);
     const size_t bodies = f.session.body_count();
