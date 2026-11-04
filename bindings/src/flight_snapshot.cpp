@@ -410,6 +410,10 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
         // false: no pass flew every dispersed entry; the pass with the most dispersed cases flying was taken
         r["dispersion_robust"] = plan->dispersion_robust;
         r["dispersion_note"] = godot::String::utf8(plan->dispersion_note.c_str());
+        // Task 12b: main-tank residue vented before the interface (planned; still to vent / vented after the burn)
+        r["entry_vent_planned_t"] = plan->entry_vent_kg / 1000.0;
+        r["entry_vent_remaining_t"] = session.entry_vent_remaining_kg() / 1000.0;
+        r["entry_vented_t"] = session.entry_vented_kg() / 1000.0;
         d["return"] = r;
     }
     if (session.capsule_return_step() != sim::CapsuleReturnStep::None) {

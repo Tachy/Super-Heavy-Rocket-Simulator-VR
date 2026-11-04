@@ -280,15 +280,18 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     const double entry_radius_m = radius_m + parameters.entry_interface_height_m;
 
     Shooter shooter(samples, gravity, earth, model, target, parameters, mass_kg, exhaust_velocity_mps);
+    // Task 12b: a ship vents main-tank residue its flaps cannot trim before the interface - the entry flies at most
+    // max_entry_mass_kg.
+    const auto vented = [&](double m) { return parameters.max_entry_mass_kg > 0.0 ? std::min(m, parameters.max_entry_mass_kg) : m; };
     const auto entry_mass = [&](double dv) {
-        return parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg - burn_propellant(dv);
+        return vented(parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg - burn_propellant(dv));
     };
     // Prefilter: the orbit's cross-track distance at the closest approach against an upper bound of what an entry can
     // reach - the one-sign glide reach from circular speed (entry_crossrange_reach_m at the nominal bank and the entry
     // mass; the passed model's mass may be unset) plus the Earth's rotation under the whole glide (the entry arrives
     // after the orbit's pass; at most the glide's duration). What the guidance can fly is checked per converged pass.
     EntryPredictorModel bound_model = model;
-    bound_model.mass_kg = parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg;
+    bound_model.mass_kg = vented(parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg);
     double glide_time_s = 0.0;
     const double glide_reach_m = entry_crossrange_reach_m(bound_model, parameters.nominal_bank_rad, std::sqrt(gm / radius_m),
                                                           &glide_time_s);
@@ -380,6 +383,10 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         plan.downrange_error_m = shot.downrange_m;
         plan.crossrange_m = shot.crossrange_m;
         plan.propellant_kg = burn_propellant(dv);
+        {
+            const double after_burn_kg = parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg - plan.propellant_kg;
+            plan.entry_vent_kg = after_burn_kg - vented(after_burn_kg);
+        }
         // The earliest pass is the best one with boil-off too: a later pass only has less left.
         const double boiled_kg = parameters.boil_off_kgps * std::max(0.0, t - epoch);
         plan.boil_off_kg = boiled_kg;

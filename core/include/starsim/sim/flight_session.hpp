@@ -525,6 +525,11 @@ public:
     // Tests: the session's own polls of a background return plan skip (a result that arrives late, after a warp).
     void hold_ship_return_polls_for_test(bool hold) { hold_ship_return_polls_ = hold; }
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
+    // Entry residue vent (planner plan Task 12b): after a ship return's deorbit burn the main-tank residue its flaps
+    // cannot trim in the entry (gnc::entry_residue_limit) leaves through the vents at [stage.recovery]
+    // entry_vent_rate_kg_s until the entry guidance starts; header tanks untouched. Still to vent, and vented so far.
+    double entry_vent_remaining_kg() const { return entry_vent_remaining_kg_; }
+    double entry_vented_kg() const { return entry_vented_kg_; }
     // Far deorbit re-plans (replan_ship_deorbit): applied so far, and one working on a background thread (real-time play).
     int deorbit_replans() const { return deorbit_replans_; }
     bool deorbit_replan_pending() const { return deorbit_replan_task_.busy(); }
@@ -1370,6 +1375,11 @@ private:
         gnc::DeorbitPlan old_plan;
         gnc::DeorbitParameters parameters;
         std::shared_ptr<const gnc::EntryGuidance> onboard;
+        // Task 12b: the most main-tank propellant the flaps trim in the entry (infinity: no limit) and the onboard
+        // guidance of the ship vented to it; plan_from_inputs plans again with them when its burn leaves more
+        double max_main_propellant_kg = std::numeric_limits<double>::infinity();
+        double main_propellant_kg = 0.0;
+        std::shared_ptr<const gnc::EntryGuidance> onboard_vented;
         gnc::EntryTarget target;
         double mass_kg = 0.0;
         double exhaust_velocity_mps = 0.0;
@@ -1714,6 +1724,10 @@ private:
     std::array<std::vector<vehicle::TankBoilOff>, 2> docked_boil_off_last_;  // chaser, station
     vehicle::LiquidEnvironment docked_liquid(size_t body_index, const math::Vec3& push_station_mps2) const;
     double vent_docked_boil_off(double dt_s, const math::Vec3& push_station_mps2);  // returns the vented kg
+    void arm_entry_vent();               // after a ship return's deorbit burn: the excess to vent before the interface
+    void vent_entry_residue(double dt_s);  // the vent over the last `dt_s` (ticks and coasts)
+    double entry_vent_remaining_kg_ = 0.0;
+    double entry_vented_kg_ = 0.0;
     void docked_update(double dt_s, bool after_coast);
     void reset_docked_update();
     std::optional<PropellantTransfer> transfer_;

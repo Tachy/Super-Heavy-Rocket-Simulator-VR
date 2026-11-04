@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -55,8 +56,15 @@ public:
     // The lowest angle of attack the flaps can trim in pitch below the schedule at this Mach (most lift the ship can hold;
     // 0: no flaps, no such bound).
     double lowest_trimmed_alpha_rad(double mach) const;
+    // How far the flaps' pitch trim along the schedule stays inside their stops (planner plan Task 12b): over the Mach
+    // grid, the smallest distance of any flap of the trim the table holds (the settled one, else the antisymmetric) from
+    // its stops - the upper `max_deflection_rad` and the lower the lowest usable deflection in that flow (edge-on /
+    // the hull's shadow, aero::flap_lowest_usable_deflection_rad). <= 0: somewhere the flaps alone cannot hold the
+    // schedule in pitch. +infinity without flaps (a capsule).
+    double schedule_trim_margin_rad() const { return schedule_trim_margin_rad_; }
 
 private:
+    double schedule_trim_margin_rad_ = std::numeric_limits<double>::infinity();
     std::vector<double> lowest_trimmed_alpha_rad_;  // per mach_
     AlphaSchedule schedule_;
     std::vector<double> mach_;

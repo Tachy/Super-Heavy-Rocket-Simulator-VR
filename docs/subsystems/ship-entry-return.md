@@ -39,7 +39,32 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   ship breaks up ("Hitzeschild versagt" / "Strukturüberlast", outcome "zerbrochen"), warning from 80 %; skip-out
   ("Abprall": below 80 km, then above 100 km). Heating integrated in `step()` only. Entry mass in tests: dry + full
   header tanks (`landing_propellant_kg`, 35 t [E]) + main-tank residue; `config::fill_tanks` fills headers first; a
-  returning ship never carries less than 35 t. Campaigns: entry 35 t + 0-28 t residue, catch gate 35 t + 0-3.5 t.
+  returning ship never carries less than 35 t. Campaigns: entry 35 t + 0-28 t residue after the deorbit burn (vented to
+  the trim limit below before the interface), catch gate 35 t + 0-3.5 t.
+- Entry residue limit and vent (planner plan Task 12b, `gnc/entry_residue_limit`, ruling 2026-11-04: a planner item).
+  Main-tank residue lies aft and moves the CG aft; from some load the flaps alone no longer hold the alpha schedule in
+  pitch. The RCS is no trim source (the entry guidance's bank rate is derived from the RCS alone). The limit is derived
+  from the ship's aero, flap stops and the allocation's lower stop, not fitted:
+  `EntryAeroTable::schedule_trim_margin_rad` = over the table's Mach grid, the smallest distance of any flap of the
+  schedule's pitch trim from its stops (upper `max_deflection_rad`, lower `gnc::flap_lower_stop_rad` - the allocation's
+  lowest effective deflection in that flow, the same floor `AttitudeController` uses); `gnc::entry_residue_limit`
+  bisects the main tanks' fill (both drawn in proportion, headers untouched; 100 kg) for the largest residue with margin
+  > 0. 177 t ship: 5.85 t main on top of the full headers (40.85 t on board, CG 24.50 m); the flown allocation agrees
+  (RCS share of the trim <= 2e-5 at 11 points of a belly-first descent at the limit, 1.0 with 27 t). The return planner
+  (`FlightSession::plan_from_inputs`) plans as before; when that plan's burn leaves more main-tank propellant than the
+  limit, it plans again with the entry predictor's mass capped at the vented mass (`DeorbitParameters::
+  max_entry_mass_kg`) and the onboard model's trim from the vented ship (`set_inputs_body` builds both models; a return
+  within the limit is planned exactly as before - a first version that always used the vented model moved the
+  phase-45 return's gate to 305 m); the plan carries
+  its estimate `DeorbitPlan::entry_vent_kg` (rocket-equation burn; the flown burn, settling gas and boil-off take ~3 t
+  more, so the flown vent is smaller). After the deorbit burn `FlightSession::arm_entry_vent` takes the excess of the
+  live ship and `vent_entry_residue` vents it at `[stage.recovery] entry_vent_rate_kg_s` (50 kg/s [E], required for a
+  ship caught by the tower) in ticks and coasts until the entry guidance starts - mass leaves the main tanks, the CG
+  moves forward (35 t main: 21.3 t vented in 7 min, CG 23.02 -> 24.53 m). Vented, not burnt in the deorbit: the excess
+  (up to ~21 t) on the belly Raptor would add hundreds of m/s and move the planned interface; venting keeps the burn and
+  the entry the planner flew ahead. HUD return block "Restablassen" (planned / vented / still open; bindings `return`
+  `entry_vent_planned_t`, `entry_vent_remaining_t`, `entry_vented_t`), log line `[entry vent]`. Not applied to the lunar
+  return (no deorbit burn; its ships enter with <= ~6 t main, 12a: seed 11 40.6 t on board).
 - Propellant settling (`vehicle/liquid_settling`, flag `FlightEnvironment::propellant_settling`, on): oxidizer and fuel
   lie below a surface perpendicular to the apparent gravity, lagged by tau = sqrt(2 D / a) in [0.5, 60] s and held in
   coasts (< 0.01 m/s^2); per tank a tilted-cylinder table. At entry attitude the residue lies forward on the belly (64
@@ -293,11 +318,13 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Ship entry replay of flights 12-14 (bank follows the recorded altitude): speed over time above Mach 3 within
   4.05 / 1.51 / **8.33** % rms (flights 13 / 12 / 14, limit 5: flight 14 outside, now a report row), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (the nightly report "Ship entry: agreement with the webcast telemetry of flights 12-14", `webcast_report/ship_entry_telemetry.md`, parameters entry mass, CG, crossflow Cd, flap CdA). Since 2026-11-03 this is report, not gate (user 2026-11-03: "report, not gate; physical gate kept"): the normal-tier case "Ship entry flies the recorded paths of flights 12-14 without impact and with the trim in reach" gates no impact, lift fraction saturated < 10 %, > 200 speed points. The former red #1147 (flight 14 speed rms 8.33 % over the limit 5 %) is now a report row; the gate part is green or red by physics only.
 - Entry guidance campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase, truth aero +-10 %; planner
-  plan Task 12, 177 t dry): the 9 cases with up to 45.8 t on board at the gate within 0.07 m, belly <= 0.13 deg off
-  down, sink <= 84 m/s; red: cases 8 / 9 / 11 with 61.6 / 54.4 / 56.3 t (main-tank residue 19-27 t) - the schedule's
-  alpha is not trimmable with that aft CG from Mach ~2 down (case 8 departs to tail first, 5.4 km; cases 9 / 11 at the
-  gate 2.0 / 1.3 km off; `docs/known-issues.md` "Entry trim with main-tank residue"). Before (255 t dry): 11 within
-  0.14 m, case 9 3.15 m. Load limit held. Guided 6-DOF 8.5 m.
+  plan Task 12b, 177 t dry; the residue drawn after the deorbit burn, vented to the trim limit before the interface by
+  `gnc::entry_residue_limit` as the session does): 12 of 12 at the gate within 0.08 m, belly <= 0.13 deg off down, sink
+  <= 85 m/s; cases 4 / 7 / 8 / 9 / 11 vent 5.0 / 3.2 / 20.7 / 13.6 / 15.5 t (unvented, Task 12: cases 8 / 9 / 11
+  departed or missed by 1.3-5.4 km, `docs/history/guidance-missions.md`). `STARSIM_ENTRY_CASE=<i>` flies one case.
+  Load limit held. Guided 6-DOF 8.5 m. Residue limit: "The entry residue limit: the flaps alone trim the schedule up
+  to it" (`[entry][flap][trim]`); vent in flight: "A ship return vents the residue its flaps cannot trim before the
+  entry" (`[slow]`, 87 s: 35 t main, 21.28 t vented in 7 min, headers untouched, CG 23.02 -> 24.53 m).
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
   engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t

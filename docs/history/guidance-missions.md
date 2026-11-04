@@ -768,3 +768,14 @@ The `docs/known-issues.md` entry as it stood before the re-measure (all green si
   - Refuelling reference flights re-measured (`config/refuelling/reference_flights.toml`, `refuelling.md`); the
     calculator answers 13 tankers / 52.4 d (was 12 / 51.0 d); the campaign offsets are not re-calibrated (full flown
     campaign not re-flown).
+
+### Entry trim with main-tank residue, before the entry residue vent (planner plan Task 12 -> 12b, 2026-11-04)
+- Measured with the hidden "Diagnostic: flap trim along the schedule over the propellant" (`test_entry_attitude.cpp`;
+  headers full, the rest in the main tanks): the 177 t ship trimmed the alpha schedule with flaps alone up to ~40 t on
+  board (CG 24.57 m: forward pair 73-83 deg at alpha 66-75); from 45 t (CG 24.18 m) the schedule from Mach ~2 down
+  (alpha 66-80) left one pair on its 90 deg stop and the RCS saturated (fraction 0.8-1); 55 t already at Mach 3 / alpha
+  60, 62 t trimmed only at Mach 21 / alpha 55 (pair at 83.5 deg).
+- The entry guidance campaign entered with the main residue 0-28 t on top of the 35 t headers unvented: cases 8 / 9 /
+  11 (61.6 / 54.4 / 56.3 t) departed in the transonic terminal phase (case 8: aoa from 72 deg at Mach 1.9 to tail
+  first, 5.4 km miss, 412 m/s sink; cases 9 / 11 at the gate 2.0 / 1.3 km off); every case up to 45.8 t was at the gate
+  within 0.07 m. First reported as a user item; ruled a planner item (the return planner vents the excess, Task 12b).

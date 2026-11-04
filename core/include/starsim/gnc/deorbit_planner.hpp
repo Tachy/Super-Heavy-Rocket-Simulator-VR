@@ -51,6 +51,10 @@ struct DeorbitParameters {
     double burn_thrust_n = 0.0;
     // > 0: the entry predictor's mass (a capsule drops its trunk after the burn); 0: the mass after the burn.
     double entry_mass_kg = 0.0;
+    // > 0: the most the ship enters with (planner plan Task 12b): main-tank residue its flaps cannot trim in the entry
+    // (gnc::entry_residue_limit) is vented between the burn and the interface, so the entry predictor flies at most this
+    // mass. The session sets it from the ship (dry + headers + the trimmable main residue); 0: no limit.
+    double max_entry_mass_kg = 0.0;
     // Orbital drag of the coast, C_D A / m (US76 density, air co-rotating with the Earth); 0: drag-free. A tracked
     // value (estimate_drag_area_per_mass): drag-free, a 4.7-day coast at ~200 km put the pass ~80 km off its plan, out
     // of the reversals' 60 km reach (l5 Task 10, b4 from the aircatch orbit).
@@ -79,6 +83,7 @@ struct DeorbitPlan {
     double entry_peak_dynamic_pressure_pa = 0.0;
     double propellant_kg = 0.0;           // for the burn (rocket equation)
     double boil_off_kg = 0.0;             // boiled off until the burn (boil_off_kgps; the session: flown ahead)
+    double entry_vent_kg = 0.0;           // main-tank residue vented before the interface (max_entry_mass_kg)
     bool short_of_reserve = false;        // not feasible only because the landing reserve would be cut (plan complete)
     // The pass flies for the nominal entry and every dispersed one (the burn's errors at the interface, the air:
     // assess_entry_reach); false: no pass in the window did; of those whose nominal guided entry flies within the

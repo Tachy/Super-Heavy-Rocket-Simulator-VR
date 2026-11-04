@@ -18,6 +18,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
+#include "starsim/gnc/entry_residue_limit.hpp"
 
 using namespace starsim;
 
@@ -114,6 +115,17 @@ Outcome fly(const Case& c, int index) {
     start.flight_path_angle_rad = c.gamma_deg * deg;
     start.speed_relative_mps = c.speed_mps;
     start.mass_propellant_kg = c.propellant_kg;
+    double vented_kg = 0.0;
+    {
+        // Planner plan Task 12b: the return planner vents the main-tank residue the flaps cannot trim before the
+        // interface (gnc::entry_residue_limit on the onboard computer's nominal model; FlightSession::arm_entry_vent)
+        test::ShipEntryScenario probe(start);
+        const auto& ship = probe.body().vehicle();
+        const auto limit = gnc::entry_residue_limit(
+            ship, gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, ship.stages()[0].config.aero.entry_alpha_table));
+        vented_kg = limit.excess_kg();
+        start.mass_propellant_kg -= vented_kg;
+    }
 
     const auto tweak = [&](config::VehicleConfig& cfg) {
         auto& aero = cfg.stages[0].aero;
@@ -159,7 +171,7 @@ Outcome fly(const Case& c, int index) {
     if (verbose()) {
         std::cout << "case " << index << ": gamma " << c.gamma_deg << " v " << c.speed_mps << " range "
                   << c.range_offset_m / 1e3 << " km cross " << c.cross_offset_m / 1e3 << " km prop "
-                  << c.propellant_kg / 1e3 << " t crossflow x" << c.crossflow_factor << " flap x" << c.flap_factor
+                  << c.propellant_kg / 1e3 << " t (vented " << vented_kg / 1e3 << " t) crossflow x" << c.crossflow_factor << " flap x" << c.flap_factor
                   << " -> gate " << o.gate << " broken " << o.broken << " '" << body.breakup_reason() << "' after "
                   << o.time_s << " s, miss " << o.miss_m << " m, belly " << o.belly_off_down_rad / deg << " deg, sink "
                   << o.sink_mps << " m/s, peak heat " << o.peak_heat_w_m2 / 1e3 << " kW/m2, load " << o.peak_load_g
@@ -194,14 +206,21 @@ TEST_CASE("Entry guidance brings the ship to the Starbase flip gate from dispers
         c.range_offset_m = 300000.0 * u(rng);
         c.cross_offset_m = 60000.0 * u(rng);
         // header-tank plan (user 2026-10-19): the headers are full until the flip, so the +-5 % entry-mass spread
-        // (28 t) is main-tank residue on top of them (0-28 t)
+        // (28 t) is main-tank residue on top of them (0-28 t) after the deorbit burn; the planner vents what the flaps
+        // cannot trim before the interface (Task 12b, in fly)
         c.propellant_kg = 35000.0 + 14000.0 * (1.0 + u(rng));
         c.crossflow_factor = 1.0 + 0.1 * u(rng);
         c.flap_factor = 1.0 + 0.1 * u(rng);
         cases.push_back(c);
     }
     int index = 0;
+    // STARSIM_ENTRY_CASE=<i>: that case alone (debugging)
+    const char* only = std::getenv("STARSIM_ENTRY_CASE");
     for (const auto& c : cases) {
+        if (only && std::atoi(only) != index) {
+            ++index;
+            continue;
+        }
         const Outcome o = fly(c, index);
         INFO("case " << index);
         CHECK(o.gate);

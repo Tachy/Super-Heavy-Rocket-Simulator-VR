@@ -368,6 +368,10 @@ deorbit_pointing_error_deg = 0.1         # [E]
 # The cold gas the return from orbit takes from the main tanks after a docking (mission::tanker_reserve): departure
 # ~0.3 t, the turn to the burn and the entry ~3 t [D: r5 tanker_flight_orbit; 1.5 t before left the caught tanker 0 t]
 return_gas_kg = 3500.0
+# Main-tank residue the flaps cannot trim in the entry (gnc::entry_residue_limit: the 177 t ship ~5.9 t on top of full
+# headers) is vented between the deorbit burn and the entry interface (planner plan Task 12b): 50 kg/s [E] - the
+# campaign's heaviest excess (21 t) in 7 min, inside the ~0.5 h coast from the burn to the interface
+entry_vent_rate_kg_s = 50.0
 # The propellant a rendezvous keeps beyond the ship's own return (the tanker inherits it; planner plan Task 8, fix round
 # 1). The session adds the return need itself (FlightSession::rendezvous_floors: the deorbit burn from the station's
 # orbit by the rocket equation with the commit margin, return_gas_kg and the unusable main propellant, as the tanker

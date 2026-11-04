@@ -54,6 +54,7 @@ TEST_CASE("Entry attitude: alpha 60, bank 30 deg tilts the lift vector", "[entry
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
+#include "starsim/gnc/entry_residue_limit.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace {
@@ -158,6 +159,68 @@ TEST_CASE("Diagnostic: flap trim along the schedule over the propellant", "[.dia
             std::cout << "  rcs " << norm(t.remainder_fraction) << "\n";
         }
     }
+}
+
+// Planner plan Task 12b: the main-tank residue the ship may carry into the entry. The limit comes from the entry aero
+// table's trim along the schedule; the flown control allocation must agree: at the limit the flaps alone trim every
+// point of the schedule (the RCS stays free for the bank), with the campaign's heaviest residue they do not.
+TEST_CASE("The entry residue limit: the flaps alone trim the schedule up to it", "[entry][flap][trim]") {
+    World world;
+    const auto ship_with = [&](double propellant_kg) {
+        auto body = entry_ship(65000.0, 6500.0, 55.0 * deg, world, propellant_kg);
+        return body;
+    };
+    const auto schedule_of = [&](const vehicle::Vehicle& v) {
+        return gnc::load_alpha_schedule(config_dir, v.stages().front().config.aero.entry_alpha_table);
+    };
+    {
+        auto headers_only = ship_with(-1.0);  // full headers, empty main tanks: nothing to vent
+        const auto limit = gnc::entry_residue_limit(headers_only->vehicle(), schedule_of(headers_only->vehicle()));
+        CHECK(limit.main_propellant_kg == Approx(0.0).margin(1.0));
+        CHECK(limit.excess_kg() == 0.0);
+    }
+    auto heavy = ship_with(62000.0);  // the campaign's heaviest: 35 t headers + 27 t main
+    const auto schedule = schedule_of(heavy->vehicle());
+    const double headers_kg = heavy->vehicle().propellant_kg() - heavy->vehicle().main_propellant_kg();
+    const auto limit = gnc::entry_residue_limit(heavy->vehicle(), schedule);
+    std::cout << "entry residue limit: main " << limit.main_propellant_kg / 1000.0 << " t, trimmable "
+              << limit.max_main_propellant_kg / 1000.0 << " t, excess " << limit.excess_kg() / 1000.0 << " t\n";
+    REQUIRE(limit.main_propellant_kg == Approx(62000.0 - headers_kg).margin(1.0));
+    CHECK(limit.excess_kg() > 0.0);
+    CHECK(limit.max_main_propellant_kg > 0.0);
+
+    // the table's verdict on both sides of the limit
+    auto at_limit = heavy->vehicle().copy_upper(0);
+    gnc::draw_main_tanks(*at_limit, limit.excess_kg());
+    CHECK(at_limit->main_propellant_kg() == Approx(limit.max_main_propellant_kg).margin(1.0));
+    CHECK(at_limit->propellant_kg() - at_limit->main_propellant_kg() == Approx(headers_kg).margin(1e-6));  // headers kept
+    CHECK(gnc::EntryAeroTable(*at_limit, schedule).schedule_trim_margin_rad() > 0.0);
+    auto beyond = heavy->vehicle().copy_upper(0);
+    gnc::draw_main_tanks(*beyond, limit.excess_kg() - 1000.0);
+    CHECK(gnc::EntryAeroTable(*beyond, schedule).schedule_trim_margin_rad() <= 0.0);
+
+    // the flown allocation along the schedule (heights and speeds of a belly-first descent, the schedule's alpha)
+    struct Point { double height_m, speed_mps; };
+    const Point points[] = {{65000.0, 6500.0}, {45000.0, 2500.0}, {35000.0, 900.0}, {30000.0, 700.0},
+                            {27000.0, 560.0},  {25000.0, 445.0},  {22000.0, 380.0}, {20000.0, 330.0},
+                            {18000.0, 300.0},  {15000.0, 240.0},  {12000.0, 200.0}};
+    double worst_at_limit = 0.0, worst_heavy = 0.0;
+    for (const auto& p : points) {
+        const double alpha = schedule.at(p.speed_mps / world.atmosphere.at(p.height_m).speed_of_sound_mps);
+        auto light = entry_ship(p.height_m, p.speed_mps, alpha, world, headers_kg + limit.max_main_propellant_kg);
+        const Trim t = trim(*light);
+        worst_at_limit = std::max(worst_at_limit, norm(t.remainder_fraction));
+        auto full = entry_ship(p.height_m, p.speed_mps, alpha, world, 62000.0);
+        worst_heavy = std::max(worst_heavy, norm(trim(*full).remainder_fraction));
+        if (std::getenv("STARSIM_VERBOSE")) {
+            std::cout << "  h " << p.height_m / 1000.0 << " km alpha " << alpha / deg << ": flaps";
+            for (double d : t.deflection_rad) std::cout << " " << d / deg;
+            std::cout << "  rcs " << norm(t.remainder_fraction) << "\n";
+        }
+    }
+    std::cout << "  RCS share of the trim: at the limit " << worst_at_limit << ", 62 t " << worst_heavy << "\n";
+    CHECK(worst_at_limit < 0.01);  // the flaps alone (as the trim margin case above)
+    CHECK(worst_heavy > 0.01);
 }
 
 TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes to RCS", "[entry][flap]") {

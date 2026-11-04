@@ -475,6 +475,10 @@ struct StageConfig {
     // docking (departure, turn to the burn, entry) - mission::TankerReserveParameters::gas_kg. Required for a ship
     // caught by the tower.
     double return_gas_kg = 0.0;
+    // [stage.recovery] entry_vent_rate_kg_s: how fast a ship returning from orbit vents main-tank residue the flaps
+    // could not trim in the entry (gnc::entry_residue_limit) between the deorbit burn and the entry interface. Required
+    // for a ship caught by the tower.
+    double entry_vent_rate_kgps = 0.0;
     std::optional<RendezvousReserveConfig> rendezvous_reserve;  // [stage.recovery] rendezvous_reserve_kg
     std::optional<ShipLandingProfile> ship_landing;  // a ship landing at a catch tower (else none)
     std::optional<LunarLandingProfile> lunar_landing;  // a lunar lander (fixed legs; else none)

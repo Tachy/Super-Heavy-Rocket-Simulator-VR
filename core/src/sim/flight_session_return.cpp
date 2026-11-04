@@ -11,6 +11,7 @@
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/entry_residue_limit.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
 
@@ -258,8 +259,23 @@ std::optional<FlightSession::DeorbitReplanInputs> FlightSession::deorbit_plan_in
 void FlightSession::set_inputs_body(DeorbitReplanInputs& in, const vehicle::FlightBody& body) {
     const auto& vehicle = body.vehicle();
     const auto& stage = vehicle.stages().front().config;
-    in.onboard = std::make_shared<const gnc::EntryGuidance>(
-        body, *in.schedule, in.target, gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
+    const auto guidance = gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital);
+    in.onboard = std::make_shared<const gnc::EntryGuidance>(body, *in.schedule, in.target, guidance);
+    in.max_main_propellant_kg = std::numeric_limits<double>::infinity();
+    in.onboard_vented.reset();
+    in.main_propellant_kg = vehicle.main_propellant_kg();
+    if (stage.entry_vent_rate_kgps > 0.0) {
+        // Task 12b: main-tank residue the flaps cannot trim is vented before the interface (arm_entry_vent); the
+        // onboard model of the vented ship (its CG) for a plan whose burn leaves more (plan_from_inputs)
+        const auto limit = gnc::entry_residue_limit(vehicle, *in.schedule);
+        if (limit.excess_kg() > 0.0) {
+            in.max_main_propellant_kg = limit.max_main_propellant_kg;
+            auto vented = vehicle.copy_upper(0);
+            gnc::draw_main_tanks(*vented, limit.excess_kg());
+            const vehicle::FlightBody vented_body(std::move(vented), body.state());
+            in.onboard_vented = std::make_shared<const gnc::EntryGuidance>(vented_body, *in.schedule, in.target, guidance);
+        }
+    }
     in.parameters.reach_check = gnc::entry_reach_check(*in.onboard);  // the onboard guidance's rules and limits
     in.mass_kg = vehicle.mass_properties().mass_kg;
     in.propellant_kg = vehicle.propellant_kg();
@@ -275,8 +291,19 @@ gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const 
     if (in.measure_drag && !(in.parameters.drag_area_per_mass_m2pkg > 0.0)) {
         in.parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_flown(*in.copy, env, gravity, in.epoch);
     }
-    return gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard->model(), in.target, in.mass_kg,
-                             in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, in.parameters);
+    const auto plan = gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard->model(), in.target, in.mass_kg,
+                                        in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, in.parameters);
+    // Task 12b: the burn leaves more main-tank residue than the flaps trim - the ship vents the excess before the
+    // interface, so the entry is planned again with the vented mass and the vented ship's trim. A return that stays
+    // within the limit is planned as before (no second plan).
+    if (!in.onboard_vented || !(plan.feasible || plan.short_of_reserve) ||
+        in.main_propellant_kg - plan.propellant_kg <= in.max_main_propellant_kg) {
+        return plan;
+    }
+    auto vented = in.parameters;
+    vented.max_entry_mass_kg = in.mass_kg - (in.main_propellant_kg - in.max_main_propellant_kg);
+    return gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard_vented->model(), in.target, in.mass_kg,
+                             in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, vented);
 }
 
 void FlightSession::log_dispersion_note(const gnc::DeorbitPlan& plan) {
@@ -785,6 +812,43 @@ void FlightSession::apply_return_command(const Flying& flying, const gnc::Attitu
     }
     command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
     if (!r.flap_rad.empty()) command.flap_rad = r.flap_rad;
+}
+
+void FlightSession::arm_entry_vent() {
+    entry_vent_remaining_kg_ = 0.0;
+    entry_vented_kg_ = 0.0;
+    if (bodies_.empty()) return;
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const auto& stage = vehicle.stages().front().config;
+    if (!(stage.entry_vent_rate_kgps > 0.0) || stage.aero.entry_alpha_table.empty()) return;
+    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    const auto limit = gnc::entry_residue_limit(vehicle, schedule);
+    entry_vent_remaining_kg_ = limit.excess_kg();
+    if (entry_vent_remaining_kg_ > 0.0) {
+        std::printf("[entry vent] main tanks %.2f t, the flaps trim the entry with %.2f t: venting %.2f t at %.0f kg/s, "
+                    "%.0f s before the entry guidance\n",
+                    limit.main_propellant_kg / 1000.0, limit.max_main_propellant_kg / 1000.0,
+                    entry_vent_remaining_kg_ / 1000.0, stage.entry_vent_rate_kgps, entry_start_ - epoch_);
+    }
+}
+
+void FlightSession::vent_entry_residue(double dt_s) {
+    if (!(entry_vent_remaining_kg_ > 0.0) || bodies_.empty()) return;
+    auto& flying = bodies_[controlled_];
+    if (flying.entry_guidance || flying.ship_landing || flying.body->impacted() || autopilot_.state != AutopilotState::Return) {
+        // the interface reached (or the return ended) before the vent: what is left stays on board
+        std::printf("[entry vent] stopped with %.2f t still to vent (%.2f t vented)\n", entry_vent_remaining_kg_ / 1000.0,
+                    entry_vented_kg_ / 1000.0);
+        entry_vent_remaining_kg_ = 0.0;
+        return;
+    }
+    auto& vehicle = flying.body->vehicle();
+    const double kg = std::min({entry_vent_remaining_kg_, vehicle.stages().front().config.entry_vent_rate_kgps * dt_s,
+                                vehicle.main_propellant_kg()});
+    gnc::draw_main_tanks(vehicle, kg);
+    entry_vent_remaining_kg_ = kg < entry_vent_remaining_kg_ && vehicle.main_propellant_kg() > 0.0
+                                   ? entry_vent_remaining_kg_ - kg : 0.0;
+    entry_vented_kg_ += kg;
 }
 
 }  // namespace starsim::sim

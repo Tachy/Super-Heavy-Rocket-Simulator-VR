@@ -402,6 +402,13 @@ constexpr double turn_model_max_s = 600.0;
 
 }  // namespace
 
+double flap_lower_stop_rad(const vehicle::Flap& flap, const aero::FlapTable& table, const vehicle::AirData& air,
+                           double cg_station_m) {
+    const double max = flap.max_deflection_rad;
+    const double usable = aero::flap_lowest_usable_deflection_rad(flap.geometry, max, air.air_velocity_body_mps);
+    return std::min(0.5 * max, flap_lowest_effective_rad(flap, table, air, {}, cg_station_m, usable));
+}
+
 double AttitudeController::gimbal_turn_time_s(const Gains& gains, const GimbalTurn& turn) {
     if (!(turn.accel_radps2 > 0.0) || !(turn.gimbal_max_rad > 0.0)) {
         throw std::invalid_argument("gimbal_turn_time_s: needs gimbal authority (accel_radps2 and gimbal_max_rad > 0)");

@@ -1,6 +1,7 @@
 // Ship return from orbit (b4): config/missions/ship_return_starbase.toml in one session - the onboard computer plans
 // the deorbit burn, the belly Raptor flies it, the ship coasts, enters on its entry guidance and is caught at the tower.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
@@ -19,6 +20,7 @@
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/gnc/entry_residue_limit.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
@@ -278,6 +280,58 @@ TEST_CASE("A deorbit re-plan keeps the boil-off until its burn", "[ship][session
     while (session.epoch() < replanned) session.advance_to(session.epoch() + 1800.0, 400000);
     REQUIRE(session.ship_return_plan() != nullptr);
     CHECK(session.ship_return_plan()->boil_off_kg > 0.0);
+}
+
+// Planner plan Task 12b: main-tank residue the flaps cannot trim in the entry (gnc::entry_residue_limit) is vented
+// between the deorbit burn and the entry guidance - mass leaves the main tanks, the headers stay full, the CG moves
+// forward; the plan's entry prediction flies the vented mass.
+TEST_CASE("A ship return vents the residue its flaps cannot trim before the entry",
+          "[ship][session][deorbit][entry][slow]") {
+    auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    m.propellant_kg = 70000.0;  // 35 t headers + 35 t main: after the ~6 t burn far more than the flaps trim
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    REQUIRE(session.plan_ship_return(deorbit_parameters(m)));
+    const double planned_vent_kg = session.ship_return_plan()->entry_vent_kg;
+    const double planned_burn_kg = session.ship_return_plan()->propellant_kg;
+    const double main_before_kg = session.body(0).vehicle().main_propellant_kg();
+    CHECK(planned_vent_kg > 10000.0);
+    while (session.autopilot().state == sim::AutopilotState::Burn) session.advance_to(session.epoch() + 60.0, 400000);
+    INFO(session.burn_abort_reason());
+    REQUIRE(session.autopilot().state == sim::AutopilotState::Return);
+    const auto& vehicle = session.body(0).vehicle();
+    const auto headers = [&] { return vehicle.propellant_kg() - vehicle.main_propellant_kg(); };
+    // read up to a minute after the burn: what was vented by then is added back
+    const double vented_at_read = session.entry_vented_kg();
+    const double headers_after_burn = headers(), main_after_burn = vehicle.main_propellant_kg() + vented_at_read;
+    const double mass_after_burn = vehicle.mass_properties().mass_kg + vented_at_read;
+    const double cg_at_read = vehicle.mass_properties().cg_station_m;
+    const double boil_off_kg = session.ship_return_plan()->boil_off_kg;
+    const double to_vent = session.entry_vent_remaining_kg() + session.entry_vented_kg();
+    const auto schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, vehicle.stages().front().config.aero.entry_alpha_table);
+    const auto limit = gnc::entry_residue_limit(vehicle, schedule);  // drawn from the burn's end as the session did
+    while (!session.entry_guidance(0) && session.epoch() - session.ship_return_plan()->entry_interface_epoch < 0.0) {
+        session.advance_to(session.epoch() + 30.0, 400000);
+    }
+    REQUIRE(session.entry_guidance(0) != nullptr);
+    std::printf("entry vent: planned %.2f t (boil-off to the burn %.2f t), after the burn main %.2f t, vented %.2f t "
+                "(limit %.2f t main), CG %.2f m (%.2f t vented) -> %.2f m\n",
+                planned_vent_kg / 1000.0, boil_off_kg / 1000.0, main_after_burn / 1000.0, session.entry_vented_kg() / 1000.0,
+                limit.max_main_propellant_kg / 1000.0, cg_at_read, vented_at_read / 1000.0,
+                vehicle.mass_properties().cg_station_m);
+    CHECK(session.entry_vent_remaining_kg() == 0.0);
+    CHECK(session.entry_vented_kg() == Catch::Approx(to_vent).margin(1.0));
+    // the plan vents what its own estimate leaves: the rocket equation's burn; the flown burn (finite, steered through
+    // the CG), the settling gas and the boil-off took more from the main tanks
+    CHECK(session.entry_vented_kg() <= planned_vent_kg + 1.0);
+    const double used_beyond_plan_kg = main_before_kg - main_after_burn - planned_burn_kg;
+    std::printf("  main tanks: %.2f t taken beyond the planned burn of %.2f t\n", used_beyond_plan_kg / 1000.0,
+                planned_burn_kg / 1000.0);
+    CHECK(planned_vent_kg - session.entry_vented_kg() == Catch::Approx(used_beyond_plan_kg).margin(200.0));
+    CHECK(vehicle.main_propellant_kg() <= limit.max_main_propellant_kg + 1.0);
+    CHECK(headers() == Catch::Approx(headers_after_burn).margin(1.0));  // landing propellant untouched
+    CHECK(mass_after_burn - vehicle.mass_properties().mass_kg >= session.entry_vented_kg() - 1.0);  // mass left
+    CHECK(vehicle.mass_properties().cg_station_m > cg_at_read + 0.1);  // the aft residue left: CG forward
 }
 
 // Task 11b: in real-time play the far deorbit re-plan runs off the sim thread; the old plan stays armed until the new

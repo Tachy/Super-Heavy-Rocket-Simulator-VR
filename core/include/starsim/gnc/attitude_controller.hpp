@@ -141,4 +141,10 @@ private:
     Gains gains_;
 };
 
+// The flap allocation's lower stop for `flap` in this air (no body rate): the lowest effective deflection - going down
+// from the flap's best moment slope, the first crossing of a quarter of it, above the lowest usable deflection (edge-on,
+// the hull's shadow) - at most half the range. The same floor AttitudeController's allocation uses.
+double flap_lower_stop_rad(const vehicle::Flap& flap, const aero::FlapTable& table, const vehicle::AirData& air,
+                           double cg_station_m);
+
 }  // namespace starsim::gnc

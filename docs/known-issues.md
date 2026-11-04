@@ -5,24 +5,24 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - #1147 (`Ship entry reproduces the webcast telemetry of flights 12-14`, flight 14 speed rms 8.33 % against 5 %): the webcast comparison is a report since 2026-11-03 (user: "report, not gate; physical gate kept"), `[nightly][webcast]` "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" writes `webcast_report/ship_entry_telemetry.md` (parameters: entry mass (177 t dry + 35 t headers), CG, crossflow Cd, flap CdA). The gate part (no impact, lift fraction saturated < 10 %, > 200 speed points) is green (measured 2026-11-03, 16 s) and red or green by physics only; the report row flight 14 speed rms was 0.083 (outside 0.05) at 255 t dry; since the 177 t of Task 3b it is 0.046 (inside), flights 12 / 13 0.061 / 0.091 (outside) and the Mach 3-1 rows of flights 13 / 14 0.28 / 0.25 (outside 0.1, slow); open vehicle-plan item, nothing tuned. The same applies to the other webcast bands (ascent flight 14 / CRS-35, descent rms, booster return timeline, ASDS and RTLS timelines, staging flip time, Crew Dragon chutes): reports, the physical gates stay in the normal tier. Dropped pins: the 77.5 deg bank of `test_entry_skip.cpp` (gate, miss and heat stay), the docking `KNOWN STATE` (report row).
 - Planner plan Task 12 re-measure (2026-11-04, `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/task-12-report.md`):
   the plan's touched tags with `[slow]` (1143 cases, 1502 s) left 10 red; after the re-measures and test-premise fixes
-  two stay red, both entry trim with the 177 t ship (below): "The ship trims belly first with control margin on its
-  flaps" and "Entry guidance brings the ship to the Starbase flip gate from dispersed entries" (cases 8, 9, 11). Green
+  two stayed red, both entry trim with the 177 t ship (below): "The ship trims belly first with control margin on its
+  flaps" (still red) and "Entry guidance brings the ship to the Starbase flip gate from dispersed entries" (cases 8, 9,
+  11; green since Task 12b, the entry residue vent). Green
   in that run: the settling cases, "Lunar return campaign (direct): seed 2", "Docked tanker: the ship return flies to
   the catch", `plan_speed`, "Flaps pinned at their stops", every ship return / catch / lunar / Falcon 9 / Dragon campaign.
   Nightly (30 cases, 1931 s): 29 green incl. the full flown refuelling campaign against the calculator; red "Lunar
   return campaign (direct): seeds 10-12" (seed 11, below). The other 149 default-tier cases of the plan's tags green.
-- Entry trim with main-tank residue (planner plan Task 12, measured with the hidden "Diagnostic: flap trim along the
-  schedule over the propellant", `test_entry_attitude.cpp`; headers full, the rest in the main tanks): the 177 t ship
-  trims the alpha schedule with flaps alone up to ~40 t on board (CG 24.57 m: forward pair 73-83 deg at alpha 66-75);
-  from 45 t (CG 24.18 m) the schedule from Mach ~2 down (alpha 66-80) leaves one pair on its 90 deg stop and the RCS
-  saturated (fraction 0.8-1); 55 t already at Mach 3 / alpha 60, 62 t trims only at Mach 21 / alpha 55 (pair at 83.5
-  deg). The entry guidance campaign draws the main residue 0-28 t on top of the 35 t headers (the +-5 % entry-mass spread
-  of the 290 t ship): its cases 8 / 9 / 11 (61.6 / 54.4 / 56.3 t) depart in the transonic terminal phase (case 8: aoa
-  runs from 72 deg at Mach 1.9 to tail first, 5.4 km miss, 412 m/s sink; cases 9 / 11 reach the gate 2.0 / 1.3 km off);
-  every case up to 45.8 t is at the gate within 0.07 m. Physical limit of the vehicle, not a guidance defect: a 177 t
-  ship cannot fly the belly flop with more than ~5-10 t of main-tank residue; the ship returns enter with ~40 t and
-  pass. Open for the user: the mission rule for main-tank residue at entry (vent / burn it before the entry, or a
-  residue limit in the return planner) and the campaign's residue spread. Nothing tuned, no limit changed.
+- Entry trim with main-tank residue: closed by planner plan Task 12b (controller ruling 2026-11-04, a planner item):
+  the return planner vents the main-tank residue the flaps cannot trim before the entry interface
+  (`gnc::entry_residue_limit`, 5.85 t main on top of the full headers for the 177 t ship; `ship-entry-return.md`).
+  Entry guidance campaign 12 of 12 (cases 4 / 7 / 8 / 9 / 11 vent 5.0 / 3.2 / 20.7 / 13.6 / 15.5 t; gate <= 0.08 m,
+  belly <= 0.13 deg, sink <= 85 m/s). The measurement before: `docs/history/guidance-missions.md`.
+- Hull drift with the burning CG (`flight_body.cpp`, Task 4b review minor, measured Task 12b with the hidden
+  "Diagnostic: Super Heavy CG station over its propellant"): the state position stays where it is when consumption moves
+  the CG along the hull, so the hull shifts against the trajectory (review estimate ~2.8 m over the ascent burn; bounded
+  by the CG station's change, not measured in flight). Super Heavy CG station 30.15 m full, 18.30 m at the
+  separation's 293 t, 21.78 m at the landing burn's 53.5 t, 23.03 / 23.49 m at 20 / 10 t: over the landing burn at
+  most 1.3-1.7 m along the (then vertical) axis - the catch pins' height, not the lateral catch geometry; the catch ends 0.0 m off the axis, max pin load 1.30 MN, every catch / pad campaign green. Open (no red).
 - Trim margin, "The ship trims belly first with control margin on its flaps": alpha 70 deg at Mach 21 / 65 km (15 deg
   above the schedule's 55) trims with the forward pair at 79.7 deg against the 75 deg margin limit (alpha 55 / 60:
   46.7 / 54.3 deg). An attitude the schedule does not fly there; the limit is not changed (open, vehicle data).
@@ -133,7 +133,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   | measured masses, crossflow 1.5 | **5.14** / 1.0 | 2.66 / **12.5** / 0 | 3.75 / **22.2** / 0 | 0 of 50 green at 175 t dry |
   | measured masses, geometry crossflow 1.07-1.10 | 1.54 / 5.7 | **9.76** / **10.9** / 0 | **7.31** / 8.5 / 0 | passes at CG 25.50 m |
   | geometry + alpha 59.5 + masses + CG 24.85 m | 4.54 / **10.20** | 3.54 / **14.96** / **15.21** | 4.45 / **22.06** / 8.53 | departs, 10 of 10 fail (miss 5.2 km) |
-  | main since Task 3b (177 t dry, 212 t entry, CG 24.99 m, crossflow 1.5) | **6.07** / - | **9.08** / **27.9** / - | 4.55 / **24.7** / - | departs, 5.4 km (Task 12; cases 9 / 11 2.0 / 1.3 km: "Entry trim with main-tank residue") |
+  | main since Task 3b (177 t dry, 212 t entry, CG 24.99 m, crossflow 1.5) | **6.07** / - | **9.08** / **27.9** / - | 4.55 / **24.7** / - | departs with 61.6 t (Task 12; cases 9 / 11 2.0 / 1.3 km); since Task 12b vented to 40.9 t: 0.01 m |
 
   The last row is the nightly report
   "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" (speed rms above Mach 3 / rms Mach 3-1;

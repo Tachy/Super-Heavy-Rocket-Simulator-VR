@@ -463,7 +463,10 @@ void FlightSession::run_autopilot() {
                                    : rendezvous_step_ != RendezvousStep::None ? AutopilotState::Rendezvous
                                    : ship_return_                             ? AutopilotState::Return
                                                                               : AutopilotState::Off;
-                if (ship_return_) entry_start_ = entry_start_epoch();  // from the state the burn actually left
+                if (ship_return_) {
+                    entry_start_ = entry_start_epoch();  // from the state the burn actually left
+                    arm_entry_vent();  // Task 12b: the residue the flaps cannot trim leaves before the interface
+                }
             }
             break;
         }
@@ -1038,6 +1041,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (legs_->deck_motion()) legs_->follow_deck(body_pointers(), env_, epoch_);  // landed stages ride the deck
             sync_docked();
             docked_update(coast, true);
+            vent_entry_residue(coast);
             if (ship_return_task_.busy() && !hold_ship_return_polls_) poll_ship_return(false);  // real-time play: a return plan from the worker
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
@@ -1157,6 +1161,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         epoch_ += tick_s;
         if (docking_) docking_after_tick();
         docked_update(tick_s, false);
+        vent_entry_residue(tick_s);
         observer_.observe(*this, timeline_);  // at most every MissionEventObserver::observe_interval_s
     }
     if (bodies_.empty()) {

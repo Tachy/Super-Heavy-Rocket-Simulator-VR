@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "starsim/aero/flap.hpp"
+#include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/math/constants.hpp"
 
 namespace starsim::gnc {
@@ -29,7 +30,6 @@ constexpr double alpha_grid_max_deg = 140.0;
 constexpr double alpha_grid_step_deg = 5.0;
 const std::vector<double> mach_grid{0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0, 3.0,
                                     4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 25.0, 30.0};
-
 // The settled trim's Newton solve: pitch slopes over the allocation's 1 deg difference (AttitudeController's
 // flap_difference_step_rad), its Jacobian over 0.5 deg, steps of at most 10 deg, done below 1e-6 rad.
 constexpr double trim_slope_step_rad = 1.0 * constants::deg_to_rad;
@@ -170,6 +170,17 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         cl_area_m2_.push_back(dot(force, l));
         trim_aft_rad_.push_back(trim_aft);
         trim_forward_rad_.push_back(trim_forward);
+        // the trim's distance from the flaps' stops (the allocation's lower stop in this flow)
+        if (stage.flap_table) {
+            const vehicle::AirData air{u * (mach * reference_speed_of_sound_mps),
+                                       {reference_density_kg_m3, reference_speed_of_sound_mps, 0.0}};
+            for (const auto& s : flaps) {
+                const double max = s.flap->max_deflection_rad;
+                const double d = 0.5 * max + (s.forward ? trim_forward : trim_aft);
+                const double low = flap_lower_stop_rad(*s.flap, *stage.flap_table, air, cg);
+                schedule_trim_margin_rad_ = std::min(schedule_trim_margin_rad_, std::min(d - low, max - d));
+            }
+        }
     }
     // Walking down from the schedule until both pairs would pass their stops.
     constexpr double trim_search_step_rad = 1.0 * constants::deg_to_rad;

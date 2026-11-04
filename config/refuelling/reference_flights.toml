@@ -6,7 +6,9 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "70da9d78bc754af3"  # planner plan Task 12 2026-11-04: depot + tanker pad flights re-measured (ship 177 t, tanker 171 t
+inputs_digest = "f2132ca1e3638499"  # planner plan Task 12b 2026-11-04: ship entry_vent_rate_kg_s added; tanker_flight re-flown, no vent (main
+                                    # at catch 1.46 t, within its 0.3 t; the other numbers identical), numbers kept;
+                                    # planner plan Task 12 2026-11-04: depot + tanker pad flights re-measured (ship 177 t, tanker 171 t
                                     # with stretched tanks, tanker_flight insertion 497.7 s); ship landing keys from config 2026-11-03 (planner plan Task 3): NOT re-measured - the
                                     # ship dry mass changes in Task 3b, the pad flights are re-measured after it;
                                     # inner rings 0.88 / 2.55 / 0.95 m 2026-11-03 (Task 1d): the pad flights still pass their 1 % / 0.3 t checks, numbers kept;

@@ -948,6 +948,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             p.lateral_effort_fraction = required("landing_lateral_effort");
             s.return_gas_kg = required("return_gas_kg");
             if (!(s.return_gas_kg > 0.0)) doc.fail("stage.recovery.return_gas_kg must be positive");
+            s.entry_vent_rate_kgps = required("entry_vent_rate_kg_s");
+            if (!(s.entry_vent_rate_kgps > 0.0)) doc.fail("stage.recovery.entry_vent_rate_kg_s must be positive");
             if (!(p.flip_throttle > 0.0) || p.flip_throttle > 1.0) doc.fail("stage.recovery.flip_throttle must be in (0, 1]");
             if (!(p.flip_tolerance_rad > 0.0) || !(p.flip_settled_rate_radps > 0.0) || !(p.flaps_until_tilt_rad > 0.0)) {
                 doc.fail("stage.recovery: flip_tolerance_deg, flip_settled_rate_rad_s and flaps_until_deg must be positive");
