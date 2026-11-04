@@ -1,12 +1,86 @@
 # Visual detail of starship_hls: the Human Landing System (Block 3 hull, lunar lander, never returns to Earth).
-# Only the variant switches live here; every other table (hull, ship, flap, booster, engines, ...) comes from
+# Only the variant switches and the HLS's own drawing tables live here; every other table (hull, ship, flap, booster, engines, ...) comes from
 # starship_block3.toml (tools/structures/vehicle_spec.py, VARIANT_BASE). Placement and physics: config/vehicles/starship_hls.toml.
 # Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+# Basis of the look (plan 2026-11-04, Task 5): the 2021 NASA concept render (screenshots/depot_tanker_hls_ref/nasa_hls_banner_render_2022_pd, INDEX.md
+# section 5c): a white hull with a dark band under the nose that carries the thruster ports and a row of small window slots; no photo of the V3-era HLS.
 
 [variant]
 tiles = false         # [E] heat-shield tiles on the belly: none, no heat shield (config header)
 flaps = false         # [E] drawn flaps and hinge covers: none (config header)
 chine = false         # [E] tiled chine strips: tied to the tiles
 catch_pins = false    # [E] catch pins on the ship: none, it is not caught (config header)
-payload_door = false  # [E] cargo door in the hull: the HLS hull task (Task 5) sets it
-skin = "white"        # [E] white skin, baked by the HLS hull task (Task 5); steel until then
+payload_door = false  # [E] cargo door in the hull: none drawn (the render shows a side hatch and an elevator, no photo of the V3 layout)
+skin = "white"        # [E] white painted skin: hull_textures.bake_white, numbers in [white_paint] below
+
+# Dorsal transfer hardware: the same probes and connectors as the tanker (config [[stage.docking_port]] / [[stage.transfer_connector]]); the
+# drawing numbers are shared (config/vehicles/detail/dock_hardware.toml).
+[dorsal]
+shared = true  # [E] use dock_hardware.toml
+
+# White skin (baked into hull_white.png by tools/structures/hull_textures.py bake_white, no geometry): painted stainless, faint panel lines, no quilting.
+[white_paint]
+albedo = [0.86, 0.86, 0.85]  # [E] sRGB of a linear albedo ~0.70 = 1 - the config's solar absorptivity 0.30 ([stage.thermal], as the depot): white paint, a touch aged
+roughness = 0.55             # [E] semi-gloss paint: the render shows a soft sheen on the sunlit side
+metallic = 0.0               # [E] a dielectric coat
+panel_width_m = 1.57         # [E] sheet width around the barrel (three sheets per map period of 4.71 m)
+panel_height_m = 1.80        # [E] the hull's ring pitch (detail/starship_block3.toml [hull]): the welds under the paint
+groove_half_width_m = 0.006  # [E] a paint-filled weld groove, 1.2 cm wide: "faint panel lines" of the render
+groove_depth_m = 0.0008      # [E] 0.8 mm: slope 0.13, a line that shows under raking light only
+groove_darkening = 0.10      # [E] share of albedo lost in the groove (A channel; shader WELD_DARKEN 0.25 -> 2.5 %)
+wave_share = 0.30            # [E] paint hides but does not remove the sheets' oil-canning: this share of the steel map's dent slope rms
+
+# Solar band (plan 2026-11-04, Task 5): the dark conformal array under the nose, drawn by texture (hull_textures.bake_overlay -> hull_overlay.png).
+# Render: lower edge at ~63 % of the hull height (y 470 of the 12..1250 px column = station ~33 m), the upper edge at the ogive's start; the
+# drawn ogive is longer (13.4 m, 1:100 model) so the band reaches 4.3 m onto it, which also takes the config's landing thrusters at station 40 m.
+[solar_band]
+station_from_m = 33.0        # [E] lower edge: render, y 470 of the 12..1250 px column (26 px/m across 235 px = 9 m) -> (1250 - 470) / 1238 x 52.1 m = 32.8 m
+station_to_m = 43.0          # [E] upper edge: 10 m band as the render (~10.7 m between its edges, y 207..470); the drawn nose is longer
+albedo = [0.10, 0.11, 0.17]  # [E] sRGB of dark blue-black cells (render: near black with a blue tint)
+line_albedo = [0.27, 0.29, 0.33]  # [E] sRGB of the cell grid (render: lighter grey-blue lines)
+columns = 32                 # [E] cell columns around the hull (render: ~11 visible across the front half = 0.9 m): 28.3 m / 32 = 0.88 m
+row_pitch_m = 1.0            # [E] cell rows (render: ~10 rows over the band)
+line_half_width_m = 0.012    # [E] grid line half width
+trim_height_m = 0.10         # [E] light rolled trim at both edges of the band (render: a thin lighter rim under the band)
+trim_albedo = [0.55, 0.56, 0.58]  # [E] sRGB of the trim: bare steel under paint
+roughness = 0.30             # [E] cover glass (band and windows share one value in the shader)
+metallic = 0.0               # [E] glass and cells are dielectrics
+
+# Crew windows (render: a row of four small slots at the top of the band, one side).
+[windows]
+station_m = 41.6             # [E] render: slots 1/3 of the band height below its upper edge (y 292 of 207..470) -> 43.0 - 3.3 = 39.7 m; moved 1.6 m up to clear the thrusters at station 40
+azimuth_deg = 0.0            # [E] on the +y side: the render shows the row on one side only, no photo of the cabin layout
+count = 4                    # [E] render: four slots
+pitch_m = 0.62               # [E] render: 15 px between slot centres at 26 px/m
+width_m = 0.40               # [E] render: ~12 px wide
+height_m = 0.64              # [E] render: ~17 px tall
+corner_m = 0.10              # [E] rounded slot corners
+frame_m = 0.04               # [E] light frame around each slot
+frame_albedo = [0.45, 0.46, 0.48]  # [E] sRGB of the frame
+glass_albedo = [0.02, 0.025, 0.04]  # [E] sRGB of dark glass
+
+# Landing thrusters (plan 2026-11-04, Task 5). Count, ring, station, cant and exit diameter come from config/vehicles/starship_hls.toml group `landing`
+# and config/engines/hls_landing_thruster.toml (user ruling 2026-11-04: the config stays); only the drawing is here. The thrust axis is mostly along the
+# station axis (cant 15 deg toward the hull axis, core/src/vehicle/vehicle.cpp), the exit plane stands across it on the config position: a pod
+# on the ogive that opens aft.
+[landing_thruster]
+throat_diameter_m = 0.184    # [E] A_t = F / (Cf x Pc) = 90 kN / (1.7 x 20 bar) = 0.0265 m2 (config engine: thrust_ref_n 90e3, chamber_pressure_pa 20e5, Cf 1.7 for the vacuum area ratio 6)
+bell_length_m = 0.40         # [E] 80 % bell of a 15 deg half-angle cone: (0.45 - 0.184) / 2 / tan 15 deg = 0.50 m x 0.8
+wall_m = 0.01                # [E] thin bell wall, closed lip as the Raptor model
+contour_exponent = 0.7       # [E] bell contour r(z) = r_t + (r_e - r_t) (z / L)^e, as the Raptor model's bell
+pod_wall_m = 0.095           # [E] pod radius = exit radius + this: a pod just clear of the bell lip
+pod_length_m = 0.60          # [E] straight pod body behind the exit plane
+pod_taper_m = 1.60           # [E] the pod then narrows to a point over this length so its end disappears into the ogive (axis dips 15 deg towards the hull axis)
+bay_radius_m = 0.60          # [E] dark port bay painted round the pod on the hull (hull_textures.bake_overlay)
+bay_albedo = [0.02, 0.02, 0.025]  # [E] sRGB of the bay: near black like the band
+segments = 24                # [E] sides of the pod and bell
+
+# Nose docking port: NOT in the config (the HLS config has only the dorsal transfer dock): drawn visual only, no physics (open point in docs/known-issues.md).
+# NASA's docking page and the concept render show an IDSS-class port on the nose (INDEX.md 5c).
+[nose_port]
+radius_m = 0.50              # [E] the drawn blunt tip is 0.50 m in radius (detail/starship_block3.toml nose_tip_radius_m): the collar sits on it
+height_m = 0.10              # [E] the collar stands this far above the physics length (the tip cap); visual only
+embed_m = 0.30               # [E] collar foot below the cap, inside the hull
+recess_m = 0.06              # [E] depth of the recessed docking face below the collar's rim
+face_radius_m = 0.36         # [E] inner radius of the collar's rim: the capture-ring opening of an IDSS-class port (outer ring 0.8 m dia scaled to the tip)
+hub_radius_m = 0.14          # [E] central hub of the docking face

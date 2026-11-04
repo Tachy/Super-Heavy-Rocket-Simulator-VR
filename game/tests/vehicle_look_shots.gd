@@ -17,6 +17,7 @@
 #   --legs=<0..1>  draws the landing legs at that deployment; the physics is not touched
 #   --probes=<0..1>  draws the tanker's docking probes at that extension (0 stowed, 1 out); the physics is not touched
 #   --nose=<0..1>  draws the Crew Dragon's nose cone at that opening (1 = open); the physics is not touched
+#   --force_sun=<energy>  sets the Sun light's energy every frame of the shots (diagnostic: a lunar scene whose Sun reads 0 shows the model, not the lighting)
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 10
@@ -80,6 +81,8 @@ func _setup() -> bool:
 		VehicleView.look_probe_extension = float(_args["probes"])
 	if _args.has("nose"):
 		VehicleView.look_nose_fraction = float(_args["nose"])
+	if _args.has("force_sun"):  # after the world's own update of the frame, just before it is drawn
+		RenderingServer.frame_pre_draw.connect(func() -> void: _world.sun_light.light_energy = float(_args["force_sun"]))
 	_rig = VehicleRig.new(_world, _args)
 	var sim := _rig.start()
 	if _args.has("scan"):

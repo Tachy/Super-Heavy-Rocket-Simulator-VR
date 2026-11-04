@@ -56,8 +56,8 @@ def test_depot_variant_has_no_tile_flap_chine_pin_nodes():
 def test_hls_has_only_a_ship_stage():
     spec = vehicle_spec.load_starship("starship_hls")
     assert set(spec["stages"]) == {"ship"} and spec["stages"]["ship"]["stage_id"] == "hls"
-    assert spec["variant"]["skin"] == "white" and spec["engines"]  # raptor / vacuum Raptor models, no thruster model yet
-    assert vehicle_spec.generator_table("starship_hls")["outputs"] == ["ship.gltf", "raptor.gltf", "rvac.gltf"]
+    assert spec["variant"]["skin"] == "white" and spec["engines"]  # raptor / vacuum Raptor models; the landing thrusters are hls_parts.gltf
+    assert vehicle_spec.generator_table("starship_hls")["outputs"] == ["ship.gltf", "raptor.gltf", "rvac.gltf", "dorsal_hardware.gltf", "hls_parts.gltf"]
 
 
 def test_tanker_ship_resolves_block3_physics_with_tanker_tanks():

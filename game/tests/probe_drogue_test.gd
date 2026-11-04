@@ -210,7 +210,11 @@ func _check_hls_pair() -> bool:
 	if hls.is_empty() or (hls.get("dorsal", {}) as Dictionary).is_empty():
 		print("pending (Task 6): HLS docked pair - starship_hls has no dorsal hardware yet")
 		return true
-	_check(false, "HLS has dorsal hardware: extend _check_docked_pair to the HLS pair (Task 6)")
+	# Task 5 gave the HLS its dorsal hardware (four probes, two connectors, as the tanker's); the docked HLS pair is Task 6's check.
+	var view := _dorsal_view(hls)
+	_check(view.probe_count() == 4 and view.connector_names().size() == 2, "HLS: four probes and two connectors drawn")
+	view.free()
+	print("pending (Task 6): HLS docked pair - the pair arithmetic of _check_docked_pair is not run for the HLS yet")
 	return true
 
 

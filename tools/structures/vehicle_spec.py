@@ -511,6 +511,72 @@ def rcs_pods_block(vehicle_id: str, ship: dict, drawing: dict) -> dict:
     return {"pods": pods, "drawing": {k: drawing[k] for k in RCS_POD_KEYS}}
 
 
+HLS_TABLES = {
+    "landing_thruster": ("throat_diameter_m", "bell_length_m", "wall_m", "contour_exponent", "pod_wall_m", "pod_length_m", "pod_taper_m", "bay_radius_m", "bay_albedo", "segments"),
+    "nose_port": ("radius_m", "height_m", "embed_m", "recess_m", "face_radius_m", "hub_radius_m"),
+    "solar_band": ("station_from_m", "station_to_m", "albedo", "line_albedo", "columns", "row_pitch_m", "line_half_width_m", "trim_height_m", "trim_albedo", "roughness", "metallic"),
+    "windows": ("station_m", "azimuth_deg", "count", "pitch_m", "width_m", "height_m", "corner_m", "frame_m", "frame_albedo", "glass_albedo"),
+}
+WHITE_KEYS = ("albedo", "roughness", "metallic", "panel_width_m", "panel_height_m", "groove_half_width_m", "groove_depth_m", "groove_darkening", "wave_share")
+
+
+def _colour(vehicle_id: str, where: str, v) -> None:
+    if not (isinstance(v, list) and len(v) == 3 and all(_number(c) and 0.0 <= c <= 1.0 for c in v)):
+        raise VehicleSpecError(f"{where}: three numbers in [0, 1], got {v!r}")
+
+
+def white_paint_block(vehicle_id: str, table: dict) -> dict:
+    """`[white_paint]` of a detail file with `skin = "white"`: the paint's panel lines (bake) and shading (shader)."""
+    missing = [k for k in WHITE_KEYS if k not in table]
+    if missing or sorted(set(table) - set(WHITE_KEYS)):
+        raise VehicleSpecError(f"{vehicle_id}: [white_paint] needs exactly {WHITE_KEYS}; missing {missing}, unknown {sorted(set(table) - set(WHITE_KEYS))}")
+    _colour(vehicle_id, "[white_paint].albedo", table["albedo"])
+    for k in WHITE_KEYS[1:]:
+        if not _number(table[k]) or table[k] < 0.0:
+            raise VehicleSpecError(f"[white_paint].{k}: must be a non-negative number, got {table[k]!r}")
+    for k in ("roughness", "metallic", "groove_darkening", "wave_share"):
+        if table[k] > 1.0:
+            raise VehicleSpecError(f"[white_paint].{k}: at most 1, got {table[k]!r}")
+    return {k: table[k] for k in WHITE_KEYS}
+
+
+def hls_parts_block(vehicle_id: str, stage_id: str, ship: dict, detail: dict, engines_dir: Path = ENGINES) -> dict:
+    """The HLS's own hull parts: the landing thrusters exactly as the core resolves the config's `landing_only` engine groups (position
+    (station, r cos a, r sin a), thrust axis (cos c, -sin c cos a, -sin c sin a): core/src/vehicle/vehicle.cpp), with the drawing numbers of the
+    detail file's [landing_thruster] / [nose_port] / [solar_band] / [windows]."""
+    drawing = {}
+    for name, keys in HLS_TABLES.items():
+        t = detail.get(name)
+        if not isinstance(t, dict):
+            raise VehicleSpecError(f"{vehicle_id}: detail file has no [{name}]")
+        missing = [k for k in keys if k not in t]
+        if missing or sorted(set(t) - set(keys)):
+            raise VehicleSpecError(f"{vehicle_id}: [{name}] needs exactly {keys}; missing {missing}, unknown {sorted(set(t) - set(keys))}")
+        for k in keys:
+            if k.endswith("albedo"):
+                _colour(vehicle_id, f"[{name}].{k}", t[k])
+            elif not _number(t[k]) or (t[k] <= 0.0 and k not in ("azimuth_deg", "metallic")):
+                raise VehicleSpecError(f"[{name}].{k}: must be a positive number, got {t[k]!r}")
+        drawing[name] = {k: t[k] for k in keys}
+    thrusters = []
+    for g in ship.get("engine_group", []):
+        if not g.get("landing_only", False):
+            continue
+        with open(engines_dir / f"{g['engine']}.toml", "rb") as f:
+            exit_d = float(tomllib.load(f)["performance"]["nozzle_exit_diameter_m"])
+        count = int(g.get("count", 1))
+        angles = [math.radians(a) for a in (g.get("angles_deg") or [360.0 * i / count for i in range(count)])]
+        if len(angles) != count:
+            raise VehicleSpecError(f"{vehicle_id}.{g['id']}: angles_deg has {len(angles)} entries, count {count}")
+        cant, ring, station = math.radians(float(g.get("cant_deg", 0.0))), float(g["ring_radius_m"]), float(g.get("station_m", 0.0))
+        for a in angles:
+            thrusters.append({"group": g["id"], "position_m": [station, ring * math.cos(a), ring * math.sin(a)],
+                              "axis": [math.cos(cant), -math.sin(cant) * math.cos(a), -math.sin(cant) * math.sin(a)], "exit_diameter_m": exit_d})
+    if not thrusters:
+        raise VehicleSpecError(f"{vehicle_id}: no landing_only engine group on the ship stage")
+    return {"stage_id": stage_id, "length_m": float(ship["length_m"]), "thrusters": thrusters, "drawing": drawing}
+
+
 def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
     """Spec of a Block 3 vehicle or ship variant. Stages are keyed by ROLE ("booster", "ship"): the one stage that is not
     the booster is the "ship" role whatever its id (depot, hls); a variant spec also names it as `stage_id`."""
@@ -595,6 +661,9 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
         spec["dorsal"] = dorsal_block(vehicle_id, stages["ship"]["stage_id"], raw_ship, detail["dorsal"])
     if is_variant and variant["skin"] == "insulated":  # the depot's MLI blanket look: baked map + shader numbers (Task 4)
         spec["insulation"] = insulation_block(vehicle_id, detail.get("insulation", {}))
+    if is_variant and variant["skin"] == "white":  # the HLS: white paint, solar band, windows, thrusters, nose port (Task 5)
+        spec["white_paint"] = white_paint_block(vehicle_id, detail.get("white_paint", {}))
+        spec["hls_parts"] = hls_parts_block(vehicle_id, stages["ship"]["stage_id"], raw_ship, detail)
     if "rcs_pods" in detail:  # drawn RCS pods at the config's pod stations (Task 4)
         spec["rcs_pods"] = rcs_pods_block(vehicle_id, raw_ship, detail["rcs_pods"])
     return spec

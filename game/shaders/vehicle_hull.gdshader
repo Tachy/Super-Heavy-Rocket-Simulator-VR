@@ -35,6 +35,15 @@ uniform float weld_first_m = 0.35;        // no weld seams on the chamfer below 
 const float WELD_DARKEN = 0.25;           // [E] heat-affected band: albedo drop and roughness gain
 const float WELD_ROUGHER = 0.08;  // [E] weld pits and dots read dark in the frames, not glinting (was 0.22 / 0.25)
 
+// Baked overlay of flat hull detail (tools/structures/hull_textures.py bake_overlay; the HLS's solar band, windows and thruster bays): sRGB colour + coverage,
+// u = arc metres over one circumference, v = station over overlay_range_m. One roughness / metallic for all of it.
+uniform bool overlay_textured = false;
+uniform sampler2D overlay_map : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform vec2 overlay_range_m = vec2(33.0, 43.0);
+uniform float overlay_period_u_m = 28.274;
+uniform float overlay_roughness : hint_range(0.0, 1.0) = 0.3;
+uniform float overlay_metallic : hint_range(0.0, 1.0) = 0.0;
+
 uniform float belly_azimuth_rad = -1.5707963;   // -Z in the body frame
 uniform int coverage_count = 5;
 uniform float coverage_station_m[8];
@@ -156,6 +165,11 @@ void fragment() {
 	vec2 duv_dx = dFdx(uv_p) * footprint_scale;
 	vec2 duv_dy = dFdy(uv_p) * footprint_scale;
 
+	// Overlay coordinates and derivatives outside any branch (derivatives need uniform control flow).
+	vec2 uv_o = vec2(UV.x / overlay_period_u_m, (UV.y - overlay_range_m.x) / (overlay_range_m.y - overlay_range_m.x));
+	vec2 duv_o_dx = dFdx(uv_o) * footprint_scale;
+	vec2 duv_o_dy = dFdy(uv_o) * footprint_scale;
+
 	vec3 albedo_out = steel;
 	float rough_out = steel_rough;
 	float metal_out = steel_metallic;
@@ -194,6 +208,14 @@ void fragment() {
 		metal_out = steel_metallic * (1.0 - tiles);
 		spec_out = mix(0.5, 0.4, tiles);
 		n_out = normalize(mix(n_steel, n_tile, tiles));
+	}
+
+	if (overlay_textured && mode == 1) {
+		vec4 o = textureGrad(overlay_map, uv_o, duv_o_dx, duv_o_dy);
+		float cover = o.a * step(0.0, uv_o.y) * step(uv_o.y, 1.0);
+		albedo_out = mix(albedo_out, o.rgb, cover);
+		rough_out = mix(rough_out, overlay_roughness, cover);
+		metal_out = mix(metal_out, overlay_metallic, cover);
 	}
 
 	ALBEDO = albedo_out * colour_factor;

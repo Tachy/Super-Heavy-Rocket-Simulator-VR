@@ -51,6 +51,7 @@ func _initialize() -> void:
 	_check_other_model_vehicles(snapshot)
 	_check_ship_variants(snapshot)
 	_check(_check_tanker_dorsal() == true, "check_tanker_dorsal ran to its end (an aborted check is a failure)")
+	_check(_check_hls_parts() == true, "check_hls_parts ran to its end (an aborted check is a failure)")
 	_check(_check_falcon9() == true, "check_falcon9 ran to its end (an aborted check is a failure)")
 	_check(_check_dragon() == true, "check_dragon ran to its end (an aborted check is a failure)")
 	_check(_check_iss() == true, "check_iss ran to its end (an aborted check is a failure)")
@@ -1014,6 +1015,54 @@ func _check_tanker_dorsal() -> bool:
 	root.add_child(other)
 	other.sync([block3], [], [], [], 0.0)
 	_check(other.probe_drogue == null, "Block 3 ship: no dorsal hardware")
+	return true
+
+
+## The HLS's landing thrusters: twelve fixed pods and the nose port on the hls stage (also on top of the booster), no RVac instance for them, a firing
+## thruster's plume starting at the manifest's thruster_exit_m (the config position) along the exhaust. Skipped without generated models.
+func _check_hls_parts() -> bool:
+	var models := VehicleModels.load_for("starship_hls")
+	if models.is_empty() or (models.get("hls_parts", {}) as Dictionary).is_empty():
+		print("  (no HLS models: HLS cases skipped; run python tools/structures/build_models.py --vehicle starship_hls)")
+		return true
+	var config := TomlLite.parse("[[stage]]" + FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://").path_join(
+			"../config/vehicles/starship_hls.toml")).split("[[stage]]", false)[1])
+	var group: Dictionary = {}
+	for g: Dictionary in config.get("stage.engine_group", []):
+		if g["id"] == "landing":
+			group = g
+	_check(not group.is_empty() and int(group["count"]) == 12, "config: twelve landing thrusters")
+	var exits: Array = models["manifest"]["thruster_exit_m"]
+	_check(exits.size() == int(group["count"]), "manifest: one exit plane per config thruster")
+	for base: float in [0.0, 72.3]:  # alone, and on top of the booster (starship_hls_launch)
+		var engines: Array = []
+		var cant := deg_to_rad(float(group["cant_deg"]))
+		for k in int(group["count"]):
+			var angle := TAU * k / int(group["count"])
+			var ring: float = group["ring_radius_m"]
+			engines.append({"stage": 0, "position_m": Vector3(base + float(group["station_m"]), ring * cos(angle), ring * sin(angle)),
+					"direction": Vector3(cos(cant), -sin(cant) * cos(angle), -sin(cant) * sin(angle)), "firing": true, "throttle": 1.0,
+					"spool": 1.0, "vacuum": true, "auxiliary": true})
+		var hls := {"id": "hls", "base_station_m": base, "length_m": 52.1, "diameter_m": 9.0, "nose_length_m": 13.4, "vehicle_id": "starship_hls"}
+		var view := VehicleView.new()
+		_views.append(view)
+		root.add_child(view)
+		view.sync([hls], engines, [], [], 0.0)
+		var node := view.find_child("stage_hls", true, false) as Node3D
+		_check(node != null and node.find_child("thruster_0", false, false) != null and node.find_child("thruster_11", false, false) != null
+				and node.find_child("nose_port", false, false) != null, "hls (base %.1f): thruster pods and nose port on the stage" % base)
+		_check(_count(view, "MultiMeshInstance3D") == 0, "hls (base %.1f): no RVac instance for a landing thruster" % base)
+		var ok := true
+		for k in engines.size():
+			var exit: Array = exits[k]["exit_m"]
+			var at := Frames.to_render(Vector3(exit[0] + base, exit[1], exit[2]))
+			if not _plume_top(view, k).is_equal_approx(at):
+				ok = false
+			var plume: MeshInstance3D = view._plumes[k]
+			var exhaust := Frames.to_render(-(engines[k]["direction"] as Vector3)).normalized()
+			if not (plume.transform.basis * Vector3.DOWN).normalized().is_equal_approx(exhaust) 					or not is_equal_approx((plume.mesh as CylinderMesh).top_radius, 0.5 * float(exits[k]["exit_diameter_m"])):
+				ok = false
+		_check(ok, "hls (base %.1f): every firing landing thruster's plume starts at thruster_exit_m, along the exhaust, exit radius" % base)
 	return true
 
 

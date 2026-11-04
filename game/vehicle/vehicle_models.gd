@@ -20,7 +20,7 @@ const MODEL_FILES := {
 	# ship variants (plan 2026-11-04): the depot draws no flaps, the HLS has no booster (generators.toml "outputs")
 	"starship_tanker": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac", "dorsal_hardware"],
 	"starship_depot": ["booster", "ship", "grid_fin", "raptor", "rvac", "dorsal_hardware"],
-	"starship_hls": ["ship", "raptor", "rvac"],
+	"starship_hls": ["ship", "raptor", "rvac", "dorsal_hardware", "hls_parts"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
 	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism"], "iss": ["iss_station", "iss_arrays", "iss_rings"],
 }
@@ -28,7 +28,7 @@ const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
 	"starship_tanker": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
 	"starship_depot": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
-	"starship_hls": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_engine.py"],
+	"starship_hls": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "hls_layout.py", "gen_hull.py", "gen_engine.py", "gen_dorsal_hardware.py", "gen_hls_parts.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
 	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
@@ -194,6 +194,7 @@ static func _load(vehicle_id: String) -> Dictionary:
 		"flap": {"fwd": parts["flap_fwd"], "aft": parts["flap_aft"]} if parts.has("flap_fwd") else {},
 		"grid_fin": parts.get("grid_fin", {}),
 		"engine": {false: parts["raptor"], true: parts["rvac"]},
+		"hls_parts": parts.get("hls_parts", {}),  # the HLS's thruster pods and nose port (gen_hls_parts.py); {} elsewhere
 		"dorsal": parts.get("dorsal_hardware", {}),  # ProbeDrogueView: frames in gen_dorsal_hardware.py; {} on a ship with none
 		"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 	}
@@ -223,8 +224,9 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 			material.set_shader_parameter("steel_slope_range", float(info["slope_range"]))
 			material.set_shader_parameter("steel_energy_range", float(info["slope_energy_range"]))
 			material.set_shader_parameter("steel_shift_steps", float(info.get("shift_steps", 0)))
-		if key == "ship" and not no_maps and look.get("skin_drawn", "steel") == "insulated":  # the depot's MLI blanket: its own baked map and shading
-			var blanket: Dictionary = (look.get("steel_map", {}) as Dictionary).get("insulated", {})
+		var skin: String = look.get("skin_drawn", "steel")
+		if key == "ship" and not no_maps and (skin == "insulated" or skin == "white"):  # the depot's MLI blanket, the HLS's white paint: its own baked map and shading
+			var blanket: Dictionary = (look.get("steel_map", {}) as Dictionary).get(skin, {})
 			var blanket_map := _steel_map({"file": blanket.get("file", "")}, model_dir, vehicle_id)
 			if blanket_map != null:
 				var albedo: Array = blanket["albedo"]
@@ -233,6 +235,16 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 				material.set_shader_parameter("steel_albedo", Color(albedo[0], albedo[1], albedo[2]))
 				material.set_shader_parameter("steel_roughness", float(blanket["roughness"]))
 				material.set_shader_parameter("steel_metallic", float(blanket["metallic"]))
+		if key == "ship" and not no_maps and skin == "white":  # the HLS's band, windows and thruster bays (hull_overlay.png)
+			var overlay: Dictionary = (look.get("steel_map", {}) as Dictionary).get("overlay", {})
+			var overlay_map := _steel_map({"file": overlay.get("file", "")}, model_dir, vehicle_id)
+			if overlay_map != null:
+				material.set_shader_parameter("overlay_textured", true)
+				material.set_shader_parameter("overlay_map", overlay_map)
+				material.set_shader_parameter("overlay_range_m", Vector2(float(overlay["station_from_m"]), float(overlay["station_to_m"])))
+				material.set_shader_parameter("overlay_period_u_m", float(overlay["period_u_m"]))
+				material.set_shader_parameter("overlay_roughness", float(overlay["roughness"]))
+				material.set_shader_parameter("overlay_metallic", float(overlay["metallic"]))
 		if key == "flap" and steel_map != null:  # the panel lines of the lee face (same channels, no ring shift, no weld gate)
 			var info: Dictionary = look["steel_map"]
 			var flap_map := _steel_map({"file": info.get("flap_file", "")}, model_dir, vehicle_id)

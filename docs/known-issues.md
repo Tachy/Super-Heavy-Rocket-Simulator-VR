@@ -226,10 +226,18 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 
 - Dorsal raceway vs transfer connectors (plan 2026-11-04, Tasks 3 / 4; USER DECISION OPEN): the Block 3 raceway tube lies on the
   dorsal centreline and the configs put both connectors on y = 0 (stations 8 and 24 m), so the tube would run into the connector
-  pedestals. Until the user decides, the DRAWING routes the tube sideways around the pedestals on the tanker and the depot only
+  pedestals. Until the user decides, the DRAWING routes the tube sideways around the pedestals on the tanker, the depot and the HLS only
   (`[dorsal] raceway_detour_m` / `raceway_detour_ramp_m`, `dorsal_layout.raceway_offset_m`, `gen_hull.py`); physics and Block 3 are
   untouched. Option 2 awaiting the user: move the connectors off the centreline in the configs (`starship_tanker.toml`,
   `starship_depot.toml`, `starship_hls.toml`; the mated pair needs both ships' connectors mirrored), then drop the detour keys.
+- HLS nose docking port (plan 2026-11-04, Task 5): NASA's docking page and the concept render show an IDSS-class port on the HLS nose, but
+  `config/vehicles/starship_hls.toml` has only the dorsal `transfer_dock`. The nose port is drawn VISUAL ONLY (`[nose_port]` of
+  `detail/starship_hls.toml`, node `nose_port`, manifest `hls_nose_port.visual_only`): no docking physics, no port frame, nothing in the core. Open: whether the
+  HLS gets a configured nose port (Orion / Gateway-style docking in the lunar missions); until then nothing can dock there. The drawn collar stands 0.10 m above the
+  config length (52.1 m).
+- HLS landing thrusters (plan 2026-11-04, Task 5): drawn exactly as the config's `landing` group resolves them (12, ring 4.6 m, station 40.0 m, cant 15 deg
+  toward the axis). The thrust axis then lies 15 deg off the hull's station axis, so the exit plane stands across the hull (aft-facing pods), which the 2021 render's
+  "port cutouts" do not show either way; the config is unchanged (user ruling 2026-11-04: no proposal approved).
 
 ## Pad B drawing, open after the physics alignment plan (2026-11-01)
 - Slits between the cladding plates on the pad-side tower face: the sky shows through in places (`screenshots/pad-b-plan/fix6_leg.png`).

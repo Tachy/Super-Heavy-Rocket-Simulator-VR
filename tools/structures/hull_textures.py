@@ -41,6 +41,12 @@ DOT_DROPOUT = 0.2        # [E] share of dots missing along a line (same frames: 
 DOT_COVERAGE = 0.8        # [E] darkening share of a dot in the A channel
 INSULATED_FILE_NAME = "hull_insulated.png"
 INSULATED_SEED = SEED + 31
+WHITE_FILE_NAME = "hull_white.png"
+WHITE_SEED = SEED + 53
+OVERLAY_FILE_NAME = "hull_overlay.png"
+OVERLAY_SIZE = (4096, 1024)  # [E] texels around the hull (6.9 mm at R = 4.5 m, a window slot 58 texels) x along the 10 m band (9.8 mm)
+BAY_RIM_M = 0.025            # [E] light rim round a thruster's port bay
+BAY_RIM_ALBEDO = (0.30, 0.30, 0.32)  # [E] sRGB of the rim: bare metal edge of the cutout
 FLAP_FILE_NAME = "flap_lee.png"
 FLAP_SIZE = (1024, 342)   # texels along the hinge, span: the aft flap's 12 x 4 m
 FLAP_PERIOD_M = (12.0, 4.0)
@@ -172,6 +178,108 @@ def bake_insulated(radius_m: float, hull: dict, ins: dict) -> np.ndarray:
     return np.rint(out * 255.0).astype(np.uint8)
 
 
+def bake_white(radius_m: float, hull: dict, paint: dict) -> np.ndarray:
+    """(SIZE_V, SIZE_U, 4) uint8, same channels and periods as `bake`, for the HLS's white paint (spec["white_paint"]): painted stainless.
+
+    Faint panel lines: a V-shaped paint-filled groove (`groove_depth_m` deep, `groove_half_width_m` half wide) at every sheet edge, `panel_width_m` x
+    `panel_height_m` (rounded to whole cells per period), darkening the A channel by `groove_darkening`; the steel map's dent octaves scaled to
+    `wave_share` of the hull's `dent_slope_rms` for the sheets' oil-canning under the paint. No quilting, no weld beads."""
+    pu, pv = periods_m(radius_m, hull["ring_pitch_m"])
+    du, dv = pu / SIZE_U, pv / SIZE_V
+    nu, nv = max(1, round(pu / paint["panel_width_m"])), max(1, round(pv / paint["panel_height_m"]))
+    u = (np.arange(SIZE_U) + 0.5) * du
+    v = (np.arange(SIZE_V) + 0.5) * dv
+    cu, cv = pu / nu, pv / nv
+    edge_u = ((u + 0.5 * cu) % cu) - 0.5 * cu  # signed distance to the nearest sheet edge, metres
+    edge_v = ((v + 0.5 * cv) % cv) - 0.5 * cv
+    half, depth = paint["groove_half_width_m"], paint["groove_depth_m"]
+    sx = np.sign(edge_u) * (np.abs(edge_u) < half) * (depth / half)  # a V dip: falling towards the edge, rising after it
+    sy = np.sign(edge_v) * (np.abs(edge_v) < half) * (depth / half)
+    rng = np.random.default_rng(WHITE_SEED)
+    w = np.zeros((SIZE_V, SIZE_U))
+    for cells_u, cells_v, weight in DENT_OCTAVES:
+        w += weight * (_periodic_noise(rng, cells_u, cells_v, SIZE_U, SIZE_V) - 0.5) * (pu / cells_u + pv / cells_v) * 0.5
+    wx = (np.roll(w, -1, axis=1) - np.roll(w, 1, axis=1)) / (2.0 * du)
+    wy = (np.roll(w, -1, axis=0) - np.roll(w, 1, axis=0)) / (2.0 * dv)
+    gain = paint["wave_share"] * hull["dent_slope_rms"] / math.sqrt(float(np.mean(wx * wx + wy * wy)))
+    sx, sy = sx[None, :] + gain * wx, sy[:, None] + gain * wy
+    cover_u = np.clip((half - np.abs(edge_u)) / du + 0.5, 0.0, 1.0)  # box-filtered at the texel
+    cover_v = np.clip((half - np.abs(edge_v)) / dv + 0.5, 0.0, 1.0)
+    groove = np.maximum(cover_v[:, None], cover_u[None, :])
+    lim = SLOPE_RANGE / 2.0
+    sx, sy = np.clip(sx, -lim, lim), np.clip(sy, -lim, lim)
+    out = np.empty((SIZE_V, SIZE_U, 4))
+    out[..., 0] = 0.5 + sx / SLOPE_RANGE
+    out[..., 1] = 0.5 + sy / SLOPE_RANGE
+    out[..., 2] = np.clip((sx * sx + sy * sy) / SLOPE_ENERGY_RANGE, 0.0, 1.0)
+    out[..., 3] = paint["groove_darkening"] * groove
+    return np.rint(out * 255.0).astype(np.uint8)
+
+
+def _over(rgb: np.ndarray, alpha: np.ndarray, colour, cover: np.ndarray) -> None:
+    """Paints `colour` (sRGB triple) with coverage `cover` (H x W, 0..1) over the (rgb, alpha) layer in place."""
+    c = np.asarray(colour, dtype=float)
+    a_new = cover + alpha * (1.0 - cover)
+    safe = np.where(a_new > 1e-9, a_new, 1.0)
+    rgb[:] = (c[None, None, :] * cover[..., None] + rgb * (alpha * (1.0 - cover))[..., None]) / safe[..., None]
+    alpha[:] = a_new
+
+
+def _box(distance_m: np.ndarray, texel_m: float) -> np.ndarray:
+    """Coverage of a shape from its signed inside distance (> 0 inside), box-filtered over one texel."""
+    return np.clip(distance_m / texel_m + 0.5, 0.0, 1.0)
+
+
+def bake_overlay(radius_m: float, hls: dict) -> np.ndarray:
+    """(H, W, 4) uint8 sRGB + straight alpha of the HLS's flat hull detail, one map over the band (spec["hls_parts"]):
+    u = arc metres at the barrel radius (the map spans the circumference, repeats), v = station metres from `solar_band.station_from_m` to `station_to_m`.
+
+    Layers, bottom to top: the solar cells with their grid and the two trim lines; the dark bay round every landing thruster (the config's
+    stations and azimuths) with a thin metal rim; the crew windows (light frame, dark glass)."""
+    d = hls["drawing"]
+    band, win, thr = d["solar_band"], d["windows"], d["landing_thruster"]
+    w_px, h_px = OVERLAY_SIZE
+    circ = 2.0 * math.pi * radius_m
+    v0, v1 = band["station_from_m"], band["station_to_m"]
+    du, dv = circ / w_px, (v1 - v0) / h_px
+    u = (np.arange(w_px) + 0.5) * du
+    v = v0 + (np.arange(h_px) + 0.5) * dv
+    uu, vv = np.meshgrid(u, v)  # (h, w)
+    rgb = np.empty((h_px, w_px, 3))
+    rgb[:] = np.asarray(band["albedo"])
+    alpha = np.zeros((h_px, w_px))
+    _over(rgb, alpha, band["albedo"], np.ones((h_px, w_px)))
+    half = band["line_half_width_m"]
+    col_pitch = circ / band["columns"]
+    cu = ((uu + 0.5 * col_pitch) % col_pitch) - 0.5 * col_pitch
+    rv = ((vv - v0 + 0.5 * band["row_pitch_m"]) % band["row_pitch_m"]) - 0.5 * band["row_pitch_m"]
+    _over(rgb, alpha, band["line_albedo"], np.maximum(_box(half - np.abs(cu), du), _box(half - np.abs(rv), dv)))
+    trim = band["trim_height_m"]
+    _over(rgb, alpha, band["trim_albedo"], np.maximum(_box(v0 + trim - vv, dv), _box(vv - (v1 - trim), dv)))
+
+    def arc(a_rad):  # arc position of an azimuth (the hull's u)
+        return (a_rad * radius_m) % circ
+
+    for t in hls["thrusters"]:  # the dark bay (and its rim) round the pod, on the hull at the thruster's station and azimuth
+        a = math.atan2(t["position_m"][2], t["position_m"][1])
+        du_t = ((uu - arc(a)) + 0.5 * circ) % circ - 0.5 * circ
+        dist = np.hypot(du_t, vv - t["position_m"][0])
+        _over(rgb, alpha, BAY_RIM_ALBEDO, _box(thr["bay_radius_m"] + BAY_RIM_M - dist, du))
+        _over(rgb, alpha, thr["bay_albedo"], _box(thr["bay_radius_m"] - dist, du))
+    centre_u = arc(math.radians(win["azimuth_deg"]))
+    for k in range(int(win["count"])):  # a row of slots centred on the azimuth: rounded rectangles (signed-distance box)
+        x0 = centre_u + (k - 0.5 * (win["count"] - 1)) * win["pitch_m"]
+        qx = np.abs(((uu - x0) + 0.5 * circ) % circ - 0.5 * circ) - (0.5 * win["width_m"] + win["frame_m"] - win["corner_m"])
+        qy = np.abs(vv - win["station_m"]) - (0.5 * win["height_m"] + win["frame_m"] - win["corner_m"])
+        outer = win["corner_m"] - (np.hypot(np.maximum(qx, 0.0), np.maximum(qy, 0.0)) + np.minimum(np.maximum(qx, qy), 0.0))
+        _over(rgb, alpha, win["frame_albedo"], _box(outer, du))
+        _over(rgb, alpha, win["glass_albedo"], _box(outer - win["frame_m"], du))
+    out = np.empty((h_px, w_px, 4))
+    out[..., :3] = rgb
+    out[..., 3] = alpha
+    return np.rint(np.clip(out, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
 def bake_flap() -> np.ndarray:
     """Panel lines of the flaps' bare lee face, same channels as the hull map, not tiling: columns, rows, two stiffeners."""
     w, h = FLAP_SIZE
@@ -229,6 +337,15 @@ def write(out_dir, spec: dict) -> dict:
         ins = spec["insulation"]
         (out_dir / INSULATED_FILE_NAME).write_bytes(png_bytes(bake_insulated(radius, hull, ins)))
         entry["insulated"] = {"file": INSULATED_FILE_NAME, "albedo": ins["albedo"], "roughness": ins["roughness"], "metallic": ins["metallic"]}
+    if spec.get("white_paint"):  # the HLS: white paint map and the band / windows / bays overlay
+        paint = spec["white_paint"]
+        (out_dir / WHITE_FILE_NAME).write_bytes(png_bytes(bake_white(radius, hull, paint)))
+        entry["white"] = {"file": WHITE_FILE_NAME, "albedo": paint["albedo"], "roughness": paint["roughness"], "metallic": paint["metallic"]}
+        hls = spec["hls_parts"]
+        (out_dir / OVERLAY_FILE_NAME).write_bytes(png_bytes(bake_overlay(radius, hls)))
+        band = hls["drawing"]["solar_band"]
+        entry["overlay"] = {"file": OVERLAY_FILE_NAME, "station_from_m": band["station_from_m"], "station_to_m": band["station_to_m"],
+                            "period_u_m": 2.0 * math.pi * radius, "roughness": band["roughness"], "metallic": band["metallic"]}
     return {**entry, "file": FILE_NAME, "flap_file": FLAP_FILE_NAME, "flap_period_m": list(FLAP_PERIOD_M),
             "shift_steps": STRINGERS_PER_TILE, "period_u_m": pu, "period_v_m": pv, "size": [SIZE_U, SIZE_V], "slope_range": SLOPE_RANGE,
             "slope_energy_range": SLOPE_ENERGY_RANGE, "texel_m": [pu / SIZE_U, pv / SIZE_V]}

@@ -8,6 +8,12 @@ extends Node3D
 
 const PLUME_SEA_LEVEL_LENGTH_M := 35.0
 const PLUME_VACUUM_LENGTH_M := 160.0
+## [E] The HLS landing thrusters (config/engines/hls_landing_thruster.toml, exit 0.45 m) against the RVac's 160 m plume at 3.6 m exit: the length scales with the exit diameter.
+const PLUME_THRUSTER_LENGTH_M := 20.0
+## Plume width at its far end in exit radii at the ground, widening as the ambient pressure drops (as the Raptor plume's 1 + 6 x expansion).
+const PLUME_THRUSTER_SPREAD := 2.0
+## A snapshot engine matches a manifest thruster entry within this distance (m).
+const STATION_MATCH_M := 0.01
 const HIDE_BEYOND_M := 2.0e6  # vehicles are sub-pixel beyond this distance
 
 var body_index := 0
@@ -281,6 +287,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 		_build_legs(legs, stage_nodes[0], _stage_models[0])
 	_build_nose(stages, stage_nodes)
 	_build_dorsal(stages, stage_nodes)
+	_build_hls_parts(stages, stage_nodes)
 	_build_joints(stages, stage_nodes)
 
 
@@ -358,6 +365,39 @@ func _build_dorsal(stages: Array, stage_nodes: Array[Node3D]) -> void:
 		var stage: Dictionary = stages[i]
 		probe_drogue.build(ms, func(part: String) -> Material: return _hull_material(_hull_kind(part, stage, ms), ms))
 		return
+
+
+## The HLS's landing thruster pods and its nose port (hls_parts.gltf, vertices in the stage's body frame) on the stage the manifest names. Fixed geometry: the
+## thrusters have no gimbal; their plumes come from _update_plumes.
+func _build_hls_parts(stages: Array, stage_nodes: Array[Node3D]) -> void:
+	for i in stages.size():
+		var ms: Dictionary = _stage_models[i]
+		if stage_nodes[i] == null or (ms.get("hls_parts", {}) as Dictionary).is_empty() or String(ms["manifest"].get("hls_stage_id", "")) != String(stages[i]["id"]):
+			continue
+		var parts: Dictionary = ms["hls_parts"]
+		for part: String in parts:
+			var instance := MeshInstance3D.new()
+			instance.name = part
+			instance.mesh = parts[part]
+			instance.material_override = _hull_material(_hull_kind(part, stages[i], ms), ms)
+			stage_nodes[i].add_child(instance)
+
+
+## The manifest's thruster entry (exit plane centre, stage-local body frame) of a snapshot engine that is one of the HLS's landing thrusters: an auxiliary
+## engine on a stage whose model set draws thruster pods; {} for every other engine. Matched by the config position (0.01 m).
+func _thruster_entry(engine: Dictionary) -> Dictionary:
+	var stage: int = engine["stage"]
+	if not engine.get("auxiliary", false) or stage < 0 or stage >= _stage_models.size():
+		return {}
+	var ms: Dictionary = _stage_models[stage]
+	if (ms.get("hls_parts", {}) as Dictionary).is_empty():
+		return {}
+	var local: Vector3 = engine["position_m"] - Vector3(_stage_bases_m[stage], 0.0, 0.0)
+	for entry: Dictionary in ms["manifest"].get("thruster_exit_m", []):
+		var exit: Array = entry["exit_m"]
+		if local.distance_to(Vector3(exit[0], exit[1], exit[2])) < STATION_MATCH_M:
+			return entry
+	return {}
 
 
 ## The Crew Dragon's nose cone on its capsule stage, hinged at the manifest's point; posed by _apply_nose.
@@ -456,7 +496,8 @@ func _build_engines(stages: Array, engines: Array, stage_nodes: Array[Node3D]) -
 		var stage: int = engine["stage"]
 		var vacuum: bool = engine["vacuum"]
 		if stage < 0 or stage >= stage_nodes.size() or stage_nodes[stage] == null \
-				or not (_stage_models[stage].get("engine", {}) as Dictionary).has(vacuum):
+				or not (_stage_models[stage].get("engine", {}) as Dictionary).has(vacuum) \
+				or not _thruster_entry(engine).is_empty():  # a landing thruster is a fixed pod (hls_parts), not an RVac instance
 			_engine_slots.append({})
 			continue
 		var key := "%d:%s" % [stage, vacuum]
@@ -607,6 +648,10 @@ func _update_plumes(engines: Array, altitude_m: float) -> void:
 		if not plume.visible:
 			continue
 		var strength: float = engine["spool"] * (0.4 + 0.6 * engine["throttle"])
+		var thruster := _thruster_entry(engine)
+		if not thruster.is_empty():
+			_place_thruster_plume(plume, engine, thruster, strength, expansion)
+			continue
 		var base_length := PLUME_VACUUM_LENGTH_M if engine["vacuum"] else PLUME_SEA_LEVEL_LENGTH_M
 		var length := base_length * (0.6 + 1.4 * expansion) * strength
 		var cone := plume.mesh as CylinderMesh
@@ -626,6 +671,21 @@ func _update_plumes(engines: Array, altitude_m: float) -> void:
 				- direction * depth
 		var center := Frames.to_render(nozzle_exit) + exhaust * length * 0.5
 		plume.transform = Transform3D(_basis_from_y(-exhaust), center)
+
+
+## A landing thruster's plume: starts at the model's exit plane centre (manifest thruster_exit_m, the config position), radius = the exit radius, along the exhaust.
+func _place_thruster_plume(plume: MeshInstance3D, engine: Dictionary, entry: Dictionary, strength: float, expansion: float) -> void:
+	var cone := plume.mesh as CylinderMesh
+	var exit_radius := 0.5 * float(entry["exit_diameter_m"])
+	var length := PLUME_THRUSTER_LENGTH_M * (0.6 + 1.4 * expansion) * strength
+	cone.height = length
+	cone.top_radius = exit_radius
+	cone.bottom_radius = exit_radius * (PLUME_THRUSTER_SPREAD + 6.0 * expansion)
+	var exit: Array = entry["exit_m"]
+	var base: float = _stage_bases_m[engine["stage"]]
+	var exit_body := Vector3(exit[0] + base, exit[1], exit[2])
+	var exhaust := Frames.to_render(-(engine["direction"] as Vector3)).normalized()
+	plume.transform = Transform3D(_basis_from_y(-exhaust), Frames.to_render(exit_body) + exhaust * length * 0.5)
 
 
 ## Basis whose +Y axis points along `y` (CylinderMesh: top at +Y = nozzle side).

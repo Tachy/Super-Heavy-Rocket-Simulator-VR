@@ -32,6 +32,7 @@ import surface_textures  # noqa: E402
 import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 import dorsal_layout  # noqa: E402  (blender/, put on the path by vehicle_spec)
+import hls_layout  # noqa: E402  (blender/)
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = ROOT / "tools" / "structures" / "blender"
@@ -309,16 +310,22 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict, tab
     if "variant" in spec:  # a ship variant (tanker, depot, HLS): the switches, the ship stage's id; no tiles = zero coverage
         look["variant"] = spec["variant"]
         look["stage_ids"] = {role: st["stage_id"] for role, st in spec["stages"].items()}
-        # Skins: "insulated" is baked by hull_textures.bake_insulated (Task 4); TODO(Task 5): "white" until then draws as steel.
-        look["skin_drawn"] = "insulated" if spec["variant"]["skin"] == "insulated" and "insulation" in spec else "steel"
+        # Skins: "insulated" is baked by hull_textures.bake_insulated (Task 4), "white" by bake_white (Task 5)
+        skin = spec["variant"]["skin"]
+        look["skin_drawn"] = skin if (skin == "insulated" and "insulation" in spec) or (skin == "white" and "white_paint" in spec) else "steel"
         if "rcs_pods" in spec:  # drawn RCS pods: dark covers (DARK_PARTS "dark")
             look["part_materials"] = {"rcs_pods": "dark"}
+        if "hls_parts" in spec:  # the HLS's thruster pods and the nose port (hls_parts.gltf): dark metal, like the other small hardware
+            look["part_materials"] = {**look.get("part_materials", {}), "nose_port": "dark"}
+            look["part_materials"].update({f"thruster_{i}": "dark" for i in range(len(spec["hls_parts"]["thrusters"]))})
         if not spec["variant"]["tiles"]:
             look["tiles"]["coverage_half_angle_deg"] = [0.0] * len(look["tiles"]["coverage_half_angle_deg"])
     manifest = {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
                 "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": flaps, "engines": engines, "look": look}
     if "dorsal" in spec:  # probes / drogues, connectors, fairing (dorsal_hardware.gltf): where they sit and the probe stroke
         manifest.update(dorsal_layout.block(spec["dorsal"], 0.5 * spec["stages"]["ship"]["diameter_m"]))
+    if "hls_parts" in spec:  # thruster exit planes, nose port, band and windows places (hls_parts.gltf + hull_overlay.png)
+        manifest.update(hls_layout.block(spec["hls_parts"]))
     return manifest
 
 
