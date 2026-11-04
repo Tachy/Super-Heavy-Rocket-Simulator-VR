@@ -799,6 +799,7 @@ void FlightSession::apply_station_impulses() {
 
 void FlightSession::reset_mission_state() {
     autopilot_ = {};
+    release_background_tasks();
     staging_.reset();
     guidance_.reset();
     burn_.reset();
@@ -963,8 +964,8 @@ double FlightSession::coast_allowance_s() const {
     if (transfer_ && transfer_->active()) allowance = std::min(allowance, transfer_next_ - epoch_);  // r4 steps
     // background plans (real-time play): no coast past the epoch they are waited for (fix round 1)
     if (ship_return_task_.busy()) allowance = std::min(allowance, ship_return_deadline_ - epoch_);
-    if (deorbit_replan_task_.busy()) allowance = std::min(allowance, deorbit_replan_deadline_ - epoch_);
-    if (tanker_reserve_task_.busy()) allowance = std::min(allowance, tanker_reserve_deadline_ - epoch_);
+    if (deorbit_replan_task_.busy() && !deorbit_replan_orphan_) allowance = std::min(allowance, deorbit_replan_deadline_ - epoch_);
+    if (tanker_reserve_task_.busy() && !tanker_reserve_orphan_) allowance = std::min(allowance, tanker_reserve_deadline_ - epoch_);
     return allowance > 1.0 ? allowance : 0.0;
 }
 
@@ -995,6 +996,19 @@ private:
 
 }  // namespace
 
+void FlightSession::release_background_tasks() {
+    if (deorbit_replan_task_.busy() && autopilot_.state != AutopilotState::Burn) deorbit_replan_orphan_ = true;
+    if (tanker_reserve_task_.busy() && !(iss_mission_ && iss_leg_ == IssMissionLeg::Docked)) tanker_reserve_orphan_ = true;
+    if (deorbit_replan_orphan_) {
+        deorbit_replan_task_.collect(false);  // the result of an ended owner is dropped
+        if (!deorbit_replan_task_.busy()) deorbit_replan_orphan_ = false;
+    }
+    if (tanker_reserve_orphan_) {
+        tanker_reserve_task_.collect(false);
+        if (!tanker_reserve_task_.busy()) tanker_reserve_orphan_ = false;
+    }
+}
+
 time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
     for (int tick = 0; tick < max_ticks && target - epoch_ >= tick_s; ++tick) {
         const StepTimer timer(step_timing_, epoch_);
@@ -1017,6 +1031,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                     flying.body->vehicle().stages().front().config.parachutes);
             }
         }
+        release_background_tasks();
         double coast = std::min(coast_allowance_s(), target - epoch_);
         if (supervisor_) {  // f2: the coast ends at the driver's next event (a launch)
             if (const auto wake = supervisor_->wake_epoch(); wake && *wake > epoch_) coast = std::min(coast, *wake - epoch_);

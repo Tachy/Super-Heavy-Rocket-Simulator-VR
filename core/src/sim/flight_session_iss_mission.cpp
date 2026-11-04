@@ -85,6 +85,7 @@ void FlightSession::mark_rendezvous_at_waypoint0_for_test() {
 
 void FlightSession::iss_enter(IssMissionLeg leg, std::string status) {
     iss_leg_ = leg;
+    release_background_tasks();  // leaving Docked orphans a running reserve
     iss_status_ = std::move(status);
     if (leg == IssMissionLeg::Departure) iss_return_requested_ = false;
     if (bodies_.empty() || controlled_ >= bodies_.size()) return;

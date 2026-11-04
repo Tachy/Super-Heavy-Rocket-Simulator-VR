@@ -528,6 +528,7 @@ public:
     // Far deorbit re-plans (replan_ship_deorbit): applied so far, and one working on a background thread (real-time play).
     int deorbit_replans() const { return deorbit_replans_; }
     bool deorbit_replan_pending() const { return deorbit_replan_task_.busy(); }
+    bool tanker_reserve_pending() const { return tanker_reserve_task_.busy(); }  // fix round 2 (N-a): also an orphan
     // The deorbit plan the controlled ship's return would take now (plan_ship_return's planner and refusals without
     // the boil-off check; also while docked: the held state), not stored and not flown (refuelling r4).
     gnc::DeorbitPlan ship_return_preview(const gnc::DeorbitParameters& parameters = {}) const;
@@ -724,7 +725,7 @@ public:
     // abort (not returning, no sea at the site, already down or on the arms): then nothing changes.
     // Lunar l4: the controlled body in step PoweredDescent aborts to orbit (step AbortAscent) when the propellant
     // suffices (LunarAscentGuidance::abort_delta_v_mps against the rocket equation, reserve as the landing setup's),
-    // else false with "Abbruch nicht mÃ¶glich: ..." and the landing continues.
+    // else false with "Abbruch nicht möglich: ..." and the landing continues.
     bool abort_landing(size_t body_index);
     // Attitude mode of the controlled body while no autopilot phase steers it (state Off / Orbit; d2). Any mode but Free
     // keeps the session ticking (pulsed RCS hold); Free lets it coast. Pilot input is ignored while a mode is held.
@@ -971,7 +972,7 @@ public:
     // thrust, an impulse every request.step_s, gas from its main tanks). Masses and CGs follow (set_tank_mass), both
     // ships keep boiling off. False with a German transfer_state().status when refused: not docked, the autopilot
     // active, no coupled connectors or no transfer pressures on either ship, nothing to move; a second start while one
-    // runs is refused in docking_status() ("Transfer lÃ¤uft bereits") and keeps the running state. Undocking is refused
+    // runs is refused in docking_status() ("Transfer läuft bereits") and keeps the running state. Undocking is refused
     // while a transfer runs.
     bool start_transfer(const TransferRequest& request);
     void stop_transfer();
@@ -1749,6 +1750,12 @@ private:
     gnc::BackgroundTask<DeorbitReplanResult> deorbit_replan_task_;
     gnc::BackgroundTask<DeorbitReplanResult> ship_return_task_;  // begin_ship_return in the background
     gnc::BackgroundTask<TankerReserveResult> tanker_reserve_task_;  // poll_tanker_reserve
+    // Fix round 2 (N-a): a background task lives with its owner (the re-plan with the Burn state, the reserve with the
+    // Docked leg). When the owner ends (reset, disengage, undock, iss_end) a running task is orphaned: it clamps no
+    // coast, nobody collects its result, it is reaped (dropped) when it is done, and its owner's next task waits for it.
+    bool deorbit_replan_orphan_ = false;
+    bool tanker_reserve_orphan_ = false;
+    void release_background_tasks();
 };
 
 }  // namespace starsim::sim

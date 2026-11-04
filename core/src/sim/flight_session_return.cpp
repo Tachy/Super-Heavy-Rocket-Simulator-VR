@@ -391,7 +391,9 @@ std::optional<bool> FlightSession::poll_ship_return(bool wait) {
         const auto& plan = result->plan;
         const auto& groups = bodies_.empty() ? std::vector<std::string>{}
                                              : bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
+        // only a snapshot older than now can be stale: a plan made from the state now is decided as the sync path would
         if (result->inputs.generation == deorbit_generation_ && plan.feasible && !bodies_.empty() &&
+            result->inputs.epoch < epoch_ &&
             !burn_still_ahead(plan.node, groups)) {
             // Fix round 1 (I1): its burn came too close while it was planned (time warp meanwhile) - never armed;
             // planned again from the state now.
@@ -479,6 +481,7 @@ void FlightSession::replan_ship_deorbit() {
         // Real-time play (Task 11b): the planner and the boil-off flight run on a worker with an environment of their
         // own; the old plan stays armed until the result is applied (its burn is >= deorbit_replan_lead_s away).
         deorbit_replan_task_.discard();  // one of an earlier return (it is not due before its own was applied)
+        deorbit_replan_orphan_ = false;
         deorbit_replan_deadline_ = epoch_ + ship_return_budget_s_;  // waited for from here (time warp meanwhile)
         auto worker = worker_environment();
         deorbit_replan_task_.submit([in = std::move(*inputs), worker] {
@@ -490,6 +493,7 @@ void FlightSession::replan_ship_deorbit() {
 }
 
 void FlightSession::poll_deorbit_replan(bool wait) {
+    if (deorbit_replan_orphan_) return;  // its owner ended: reaped, never applied
     const bool due = wait || !realtime_planning_ || epoch_ - deorbit_replan_deadline_ >= 0.0;
     if (auto result = deorbit_replan_task_.collect(due)) apply_deorbit_replan(*result);
 }
@@ -546,7 +550,7 @@ void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
     if (epoch_ != in.epoch) {
         // Fix round 1 (I1), a re-plan from the worker: the armed burn's preparation or the burn itself has begun (time
         // warp while it was planned) - the old plan flies on, never re-armed mid-burn; a new pass that came too close is
-        // not taken (the old plan flies; its own re-plan follows at its next tracking time if it is still far).
+        // not taken (the old plan flies on; no further far re-plan is armed - deorbit_replan_due_ was cleared when this one began).
         const bool started = autopilot_.burn.ignite || autopilot_.burn.time_to_ignition_s <= burn_lead_s();
         if (started || (result.plan.feasible && !burn_still_ahead(result.plan.node, stage.deorbit_engine_groups))) {
             ++deorbit_replans_dropped_;

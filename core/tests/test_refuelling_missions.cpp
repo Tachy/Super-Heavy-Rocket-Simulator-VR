@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -351,8 +352,10 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     const time::Epoch reserve_burn = f.session.epoch() + reserve->wait_s;
     f.session.set_iss_mission(f.tanker_sequence());
     REQUIRE(f.leg() == IssMissionLeg::Docked);  // a docked start with a transfer begins at the Docked gate (f4)
-    f.session.advance_to(f.session.epoch() + 1.0);
-    REQUIRE(f.leg() == IssMissionLeg::Transfer);  // ... and starts it on a following tick
+    // ... and starts it on a following tick; in forced real-time play the reserve is planned on a worker first (waited
+    // for at the latest at its 60 s deadline, the pair stays docked meanwhile)
+    for (int i = 0; i < 120 && f.leg() == IssMissionLeg::Docked; ++i) f.session.advance_to(f.session.epoch() + 1.0);
+    REQUIRE(f.leg() == IssMissionLeg::Transfer);
     f.fly([&] { return f.leg() == IssMissionLeg::Departure || f.leg() == IssMissionLeg::Ended; }, 3600.0, 10.0);
     INFO(f.session.iss_mission_status());
     REQUIRE(f.leg() == IssMissionLeg::Departure);
@@ -379,6 +382,35 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
                         m.station_main_propellant_kg / 1e3);
         }
     }
+}
+
+// Fix round 2 (N-a): the reserve's worker job lives with the Docked leg. The mission ends while it runs: the job is
+// orphaned (no coast clamp, no result used), and the next docking plans a fresh one.
+TEST_CASE("Docked tanker: a reserve job whose leg ended is dropped, the next docking plans anew", "[refuelling][iss_mission][realtime]") {
+    test::spice_session();
+    DockedAtDepot f;
+    f.session.set_realtime_planning(true);
+    f.session.set_iss_mission(f.tanker_sequence());
+    for (int i = 0; i < 20 && !f.session.tanker_reserve_pending(); ++i) f.session.advance_to(f.session.epoch() + 0.1);
+    REQUIRE(f.session.tanker_reserve_pending());
+    f.session.set_iss_mission(std::nullopt);  // the leg ends while the job runs
+    f.session.advance_to(f.session.epoch() + 120.0);  // past the job's 60 s deadline
+    for (int i = 0; i < 3000 && f.session.tanker_reserve_pending(); ++i) {  // wall-clock bound (a loaded machine)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    REQUIRE_FALSE(f.session.tanker_reserve_pending());  // reaped
+    CHECK(f.leg() != IssMissionLeg::Transfer);
+    f.session.reset_step_timing();
+    f.session.advance_to(f.session.epoch() + 600.0);
+    INFO("steps for ten minutes: " << f.session.step_timing().steps);
+    CHECK(f.session.step_timing().steps < 2000);  // the pair coasts again
+    // the next docking (the pair is still docked): a fresh reserve is planned, not the old result reused
+    f.session.set_iss_mission(f.tanker_sequence());
+    for (int i = 0; i < 20 && !f.session.tanker_reserve_pending(); ++i) f.session.advance_to(f.session.epoch() + 0.1);
+    CHECK(f.session.tanker_reserve_pending());
+    for (int i = 0; i < 120 && f.leg() == IssMissionLeg::Docked; ++i) f.session.advance_to(f.session.epoch() + 1.0);
+    CHECK(f.leg() == IssMissionLeg::Transfer);
 }
 
 TEST_CASE("Docked tanker: the ship return flies to the catch", "[refuelling][iss_mission][ship][slow]") {

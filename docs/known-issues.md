@@ -12,6 +12,12 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   running job (up to ~38 s for the tanker reserve); the hand-over holds cost propellant (b4 aircatch 9.1 t left
   against 11.6 t synchronous); the gate aim's very first refresh in real-time play uses the analytic flip model for
   one cycle (M2).
+  Fix round 2: a background job lives with its owner (the far re-plan with the Burn state, the tanker reserve with the
+  Docked leg); when the owner ends (reset, disengage, undock, mission end) it is orphaned: no coast clamp, its result is
+  dropped when it is done, and the owner's next job waits for it. A booster already at its stop height when it is first
+  seen starts its landing plan synchronously (~0.7 s sim-thread step) instead of one hold late. The refuelling first
+  return's side flight on the worker interpolates the worker's interpolated ephemeris again (sub-mm): not bit-identical
+  to the synchronous side flight (identical with real-time planning off).
 - Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, -1.1 % vacuum Isp on
   every Raptor burn; nothing tuned back; measured `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/t1-{before,after}-full.log`):
   - "Starship ascent to flight 14's insertion orbit": green since the ship dry mass 177 t (planner plan Task 3b,

@@ -412,6 +412,35 @@ TEST_CASE("Real-time play: key R's planning ends when another return replaces it
     CHECK(note == "Rückkehrplanung abgebrochen: eine andere Rückkehr wurde geplant");
 }
 
+// Fix round 2 (N-a): a background re-plan lives with the Burn state - the pilot disengages while it runs: the job is
+// orphaned, reaped when done, and the session coasts again after the 60 s deadline (no 200 Hz ticking for good).
+TEST_CASE("Real-time play: disengaging during a far re-plan leaves the coast free", "[ship][session][deorbit][realtime]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    session.set_realtime_planning(true);
+    REQUIRE(session.plan_ship_return(deorbit_parameters(m)));
+    const auto burn = session.ship_return_plan()->node.epoch;
+    REQUIRE(burn - session.epoch() > sim::FlightSession::deorbit_replan_age_s);
+    while (!session.deorbit_replan_pending() && session.autopilot().state == sim::AutopilotState::Burn &&
+           session.epoch() < burn - sim::FlightSession::deorbit_replan_lead_s) {
+        session.advance_to(session.epoch() + 30.0, 400000);
+    }
+    REQUIRE(session.deorbit_replan_pending());
+    session.disengage_autopilot();
+    session.advance_to(session.epoch() + 120.0, 400000);  // past the 60 s deadline of the (now ownerless) job
+    for (int i = 0; i < 400 && session.deorbit_replan_pending(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        session.advance_to(session.epoch() + 1.0, 400000);
+    }
+    CHECK_FALSE(session.deorbit_replan_pending());  // reaped, never applied
+    CHECK(session.deorbit_replans() == 0);
+    session.reset_step_timing();
+    session.advance_to(session.epoch() + 3600.0, 400000);
+    INFO("steps for one hour: " << session.step_timing().steps);
+    CHECK(session.step_timing().steps < 2000);  // coasting (200 Hz ticking would be 720000)
+}
+
 // Refuelling r2: the onboard computer counts the bare hull's boil-off until the burn - 7 t above the landing
 // propellant leave too little methane for the burn after the ~22 h to the Starbase pass.
 TEST_CASE("Ship return plan counts the boil-off until the pass", "[ship][session][deorbit][boil_off]") {

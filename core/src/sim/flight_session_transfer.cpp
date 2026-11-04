@@ -370,6 +370,7 @@ std::optional<mission::TankerReserve> FlightSession::poll_tanker_reserve(std::st
     const auto ms_since = [](std::chrono::steady_clock::time_point t) {
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
     };
+    if (tanker_reserve_orphan_) return std::nullopt;  // an ended docking's job still runs: reaped first, then a fresh one
     if (!tanker_reserve_task_.busy()) {
         tanker_reserve_wall_start_ = std::chrono::steady_clock::now();
         auto inputs = tanker_reserve_inputs(reason);

@@ -441,15 +441,13 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
         }
         if (phase_ == ReturnPhase::Coast && descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
             const auto burn = predict_landing_burn(body, env, epoch);
-            if (realtime_first_plan() && !pending_) {
+            if (realtime_first_plan() && !pending_ && burn.stop_height_m > 0.0) {  // else the synchronous start below
                 // Real-time play (Task 11b fix round 1): the first plan starts on the worker the hold before the
                 // ignition the stop height's trend predicts, from the state the unpowered fall leads to; the engines
                 // light at the hand-over with the plan.
                 const double hold_s = first_plan_hold_s(FirstPlanKind::Booster);
                 std::optional<double> to_ignition_s;
-                if (burn.stop_height_m <= 0.0) {
-                    to_ignition_s = hold_s;  // no forecast ahead of it: lit one hold late
-                } else if (fall_ignition_epoch_ && *fall_ignition_epoch_ >= epoch) {
+                if (fall_ignition_epoch_ && *fall_ignition_epoch_ >= epoch) {
                     // the guidance's own ignition on the predicted fall (within ~1 s, forecast_landing)
                     if (*fall_ignition_epoch_ - epoch <= hold_s) to_ignition_s = *fall_ignition_epoch_ - epoch;
                 } else if (last_stop_height_ && epoch - last_stop_height_->first >= stop_height_trend_s) {
