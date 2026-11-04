@@ -301,7 +301,7 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
   engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t
-  left. Lunar (Task 6h): direct 20 of 21 (limit 21; seed 2 upright 4.9 t, no ship lost, no strike, caught 4.2-12.2 t, peak 1171 kW/m^2; `docs/known-issues.md`), aerocapture 21 of 21 (4.9-11.3 t, raised perigee >= 197.4 km, peak 1084 kW/m^2).
+  left. Lunar (planner plan Task 12): direct 20 of 21 (limit 21; seed 11 upright 8.2 t, seed 2 caught; Task 6h: seed 2 upright 4.9 t, no ship lost, no strike, caught 4.2-12.2 t, peak 1171 kW/m^2; `docs/known-issues.md`), aerocapture 21 of 21 (4.9-11.3 t, raised perigee >= 197.4 km, peak 1084 kW/m^2).
 - Ship return from orbit `[ship][mission][validation]` (phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit
   execution +-1 % / 0.5 deg via `FlightSession::apply_velocity_error`): 14 of 14 caught, gate 0-11 m, 5.4-8.3 t left.
 
