@@ -8,7 +8,11 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <map>
+#include <stdexcept>
+#include <string>
 #include <memory>
 #include <set>
 #include <thread>
@@ -17,6 +21,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/moon_surface_config.hpp"
+#include "starsim/config/rock_abundance_file.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/cube_face_cell.hpp"
 #include "starsim/environment/lunar_rocks.hpp"
 #include "starsim/environment/lunar_surface_detail.hpp"
@@ -79,13 +85,47 @@ std::shared_ptr<const environment::LunarTerrain> make_terrain() {
     return std::make_shared<const environment::LunarTerrain>(std::move(g), std::vector{site_tile()}, R);
 }
 
-config::MoonSurfaceConfig load_config() {
-    return config::load_moon_surface_config(std::filesystem::path(STARSIM_CONFIG_DIR) / "moon_surface.toml");
+config::MoonSurfaceConfig load_config(const char* abundance_source) {
+    auto cfg = config::load_moon_surface_config(std::filesystem::path(STARSIM_CONFIG_DIR) / "moon_surface.toml");
+    cfg.rocks.abundance_source = abundance_source;
+    return cfg;
 }
 
+// The shipped configuration with the uniform law (the Diviner product is not installed in the test environment; the
+// site at -84.8 deg lies outside the map anyway).
 std::shared_ptr<const LunarSurfaceDetail> shared_detail() {
-    static const auto d = std::make_shared<const LunarSurfaceDetail>(load_config(), make_terrain());
+    static const auto d = std::make_shared<const LunarSurfaceDetail>(load_config("uniform"), make_terrain());
     return d;
+}
+
+// The shipped configuration as it is ("diviner"): needs a map.
+std::shared_ptr<const LunarSurfaceDetail> diviner_detail() {
+    static const auto d = std::make_shared<const LunarSurfaceDetail>(load_config("diviner"), make_terrain());
+    return d;
+}
+
+// Plan-view area of the part of the rock above its base height, measured with rock_top on a sunflower pattern of
+// `points` columns over the rock's bounding ellipse (pi a b).
+double measured_footprint_m2(const LunarRocks& lr, const Rock& r, int points) {
+    const Vec3 e_a = math::column(r.local_to_fixed, 0), e_b = math::column(r.local_to_fixed, 1);
+    const double golden = constants::pi * (3.0 - std::sqrt(5.0));
+    int hits = 0;
+    for (int k = 0; k < points; ++k) {
+        const double rho = std::sqrt((k + 0.5) / points), phi = golden * k;
+        const double x = r.axes_m.x * rho * std::cos(phi), y = r.axes_m.y * rho * std::sin(phi);
+        if (lr.rock_top(r, math::normalized(r.base_unit + (e_a * x + e_b * y) / R))) ++hits;
+    }
+    return constants::pi * r.axes_m.x * r.axes_m.y * hits / points;
+}
+
+// Lowest and highest vertex of a template's finest mesh (independent of the sampled extents in RockTemplates).
+std::pair<double, double> mesh_z_extent(int template_id) {
+    double lo = 1.0, hi = -1.0;
+    for (const Vec3& v : RockTemplates::instance().mesh(template_id, 0).vertices) {
+        lo = std::min(lo, v.z);
+        hi = std::max(hi, v.z);
+    }
+    return {lo, hi};
 }
 
 const LunarRocks& rocks() {
@@ -93,7 +133,7 @@ const LunarRocks& rocks() {
     return r;
 }
 
-// Synthetic Diviner-like map: constant area fraction over +-60 deg (the real product is not installed).
+// Synthetic Diviner-like map: constant area fraction over +-60 deg (the loader is tested on a file in the real format).
 std::shared_ptr<const environment::RockAbundanceMap> constant_map(double fraction) {
     auto m = std::make_shared<environment::RockAbundanceMap>();
     m->lines = 120;
@@ -232,10 +272,13 @@ TEST_CASE("A rock top lies above the ground and below its full height", "[moon_s
     const Vec3 centre = direction(site_lat, site_lon);
     const auto found = rocks().rocks_near(centre, 200.0, 0.5);
     REQUIRE(found.size() > 100);
+    const RockTemplates& templates = RockTemplates::instance();
     int hits = 0, misses = 0;
+    double worst_surface = 0.0;
     for (const Rock& r : found) {
         const Tangent t = tangent(r.base_unit);
-        const double a = r.axes_m.x;
+        const double a = r.axes_m.x, b = r.axes_m.y, c = r.axes_m.z;
+        const Vec3 e_a = math::column(r.local_to_fixed, 0), e_b = math::column(r.local_to_fixed, 1);
         for (int k = 0; k < 40; ++k) {
             const double x = (2.0 * unit_hash(r.id % 9973, k, 1) - 1.0) * 1.2 * a;
             const double y = (2.0 * unit_hash(r.id % 9973, k, 2) - 1.0) * 1.2 * a;
@@ -246,9 +289,16 @@ TEST_CASE("A rock top lies above the ground and below its full height", "[moon_s
                 continue;
             }
             ++hits;
-            const double d2 = R * R * dot(p - r.base_unit, p - r.base_unit);
+            const Vec3 offset = (p - r.base_unit) * R;
+            const double lx = dot(offset, e_a), ly = dot(offset, e_b);
+            const double curvature = (lx * lx + ly * ly) / (2.0 * R);
             CHECK(top->first > r.base_height_m);
-            CHECK(top->first <= r.base_height_m - r.burial_m + r.axes_m.z + d2 / (2.0 * R) + 1e-9);
+            // Below the template's real top (its highest point c top_z above the centre), not only the bounding c.
+            CHECK(top->first <= r.base_height_m - r.burial_m + c * templates.top_z(r.template_id) + curvature + 1e-9);
+            // On the rock's surface: in unit coordinates |u| = r(u / |u|).
+            const double lz = top->first - curvature - r.base_height_m + r.burial_m;
+            const Vec3 u{lx / a, ly / b, lz / c};
+            worst_surface = std::max(worst_surface, std::abs(norm(u) - templates.radius(r.template_id, u)));
             CHECK(std::abs(norm(top->second) - 1.0) < 1e-9);
             CHECK(dot(top->second, r.base_unit) > -1e-6);  // the top surface faces up
         }
@@ -256,8 +306,35 @@ TEST_CASE("A rock top lies above the ground and below its full height", "[moon_s
         const auto apex = rocks().rock_top(r, r.base_unit);
         if (apex) CHECK(apex->first > r.base_height_m);
     }
+    std::printf("rock tops: %d hits, %d misses, worst |u| - r(u) %.2e\n", hits, misses, worst_surface);
+    CHECK(worst_surface < 1e-6);
     CHECK(hits > 1000);
     CHECK(misses > 1000);
+}
+
+TEST_CASE("The buried share of the rock height is the configured one", "[moon_surface][environment]") {
+    const auto& cfg = shared_detail()->config().rocks;
+    const auto found = rocks().rocks_near(direction(site_lat, site_lon), 60.0, 0.1);
+    REQUIRE(found.size() > 2000);
+    // Share by height (the config's definition: share of the rock height below the regolith surface), measured on the
+    // template's finest mesh: ground at -burial_m from the centre, rock from c z_lo to c z_hi.
+    double sum = 0.0, lowest = 1.0, highest = 0.0;
+    for (const Rock& r : found) {
+        const auto [z_lo, z_hi] = mesh_z_extent(r.template_id);
+        const double share = (r.burial_m / r.axes_m.z - z_lo) / (z_hi - z_lo);
+        sum += share;
+        lowest = std::min(lowest, share);
+        highest = std::max(highest, share);
+    }
+    const double mean = sum / static_cast<double>(found.size());
+    const double sigma_mean = cfg.burial_fraction_sd / std::sqrt(static_cast<double>(found.size()));
+    std::printf("buried share: mean %.4f (configured %.2f, 3 sigma %.4f), range %.4f-%.4f over %zu rocks\n", mean,
+                cfg.burial_fraction_mean, 3.0 * sigma_mean, lowest, highest, found.size());
+    // Mesh vertices sit on the surface but can miss its extreme points by ~1e-3 of the unit size.
+    constexpr double mesh_tolerance = 0.005;
+    CHECK(std::abs(mean - cfg.burial_fraction_mean) <= 3.0 * sigma_mean + mesh_tolerance);
+    CHECK(lowest >= -mesh_tolerance);
+    CHECK(highest <= 0.6 + mesh_tolerance);
 }
 
 TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]") {
@@ -273,7 +350,20 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
         }
         CHECK(r_min > 0.2);  // positive, and no needle
         CHECK(r_max <= 1.0);
-        CHECK(r_max > 0.97);  // normalised: the rock fills its bounding axes
+        CHECK(r_max > 0.97);  // normalised: the rock reaches its bounding axes
+        // Exposed plan-view area: the whole projection below the rock, nothing above it, shrinking in between.
+        const double full = t.exposed_area(id, t.bottom_z(id) - 1e-3);
+        CHECK(full > 0.2 * constants::pi);
+        CHECK(full < constants::pi);
+        CHECK(t.exposed_area(id, t.top_z(id) + 1e-3) == 0.0);
+        CHECK(t.bottom_z(id) < 0.0);
+        CHECK(t.top_z(id) > 0.0);
+        double previous = full;
+        for (int k = 0; k <= 20; ++k) {
+            const double area = t.exposed_area(id, t.bottom_z(id) + (t.top_z(id) - t.bottom_z(id)) * k / 20.0);
+            CHECK(area <= previous);
+            previous = area;
+        }
         for (int lod = 0; lod < RockTemplates::lods; ++lod) {
             const auto& m = t.mesh(id, lod);
             const size_t nv = m.vertices.size(), nf = m.indices.size() / 3;
@@ -334,6 +424,7 @@ TEST_CASE("Rocks are deterministic and pole-regular", "[moon_surface][environmen
             CHECK(r.axes_m.x >= r.axes_m.y);
             CHECK(r.axes_m.y >= r.axes_m.z);
             CHECK(r.axes_m.z > 0.0);
+            CHECK(r.axes_m.x <= rocks().max_semi_axis_per_diameter() * r.diameter_m);
             const Vec3 e_a = math::column(r.local_to_fixed, 0), e_b = math::column(r.local_to_fixed, 1),
                        up = math::column(r.local_to_fixed, 2);
             CHECK(std::abs(norm(e_a) - 1.0) < 1e-12);
@@ -359,22 +450,35 @@ TEST_CASE("Cover fraction equals the area of the generated rocks", "[moon_surfac
     CHECK(rocks().cover_fraction(1.0, 0.5) == 0.0);
     CHECK(rocks().cover_fraction(20.0, 30.0) == 0.0);  // outside the law's range
 
-    const double lo = 0.02, hi = 0.5, patch_radius = 30.0;
+    // The generated rocks' real plan-view area (part above the ground, measured with rock_top on the template
+    // geometry) in a patch of ~8000 rocks of 0.05-0.2 m (population scatter of the area ~1.5 %, 1 sigma).
+    const double lo = 0.05, hi = 0.2, patch_radius = 43.0;
     const Vec3 centre = direction(site_lat, site_lon);
-    double area = 0.0;
+    double footprint = 0.0, discs = 0.0;
+    size_t count = 0;
     for (const Rock& r : rocks().rocks_near(centre, patch_radius, lo)) {
-        if (r.diameter_m < hi) area += 0.25 * constants::pi * r.diameter_m * r.diameter_m;
+        if (r.diameter_m >= hi) continue;
+        footprint += measured_footprint_m2(rocks(), r, 64);
+        discs += 0.25 * constants::pi * r.diameter_m * r.diameter_m;
+        ++count;
     }
-    const double measured = area / (constants::pi * patch_radius * patch_radius);
+    const double patch = constants::pi * patch_radius * patch_radius;
+    const double measured = footprint / patch;
     const double expected = rocks().cover_fraction(lo, hi);
-    std::printf("cover fraction %.3f-%.2f m: patch %.5f, formula %.5f\n", lo, hi, measured, expected);
+    std::printf("cover fraction %.2f-%.2f m: %zu rocks, measured footprint %.5f, formula %.5f (%+.2f %%); "
+                "footprint / D^2 discs %.4f\n",
+                lo, hi, count, measured, expected, 100.0 * (measured / expected - 1.0), footprint / discs);
+    std::printf("largest semi-axis a per diameter D: %.3f\n", rocks().max_semi_axis_per_diameter());
+    CHECK(count > 7000);
     CHECK(std::abs(measured - expected) <= 0.05 * expected);
+    // Geometry alone (no population scatter): each rock covers pi D^2 / 4, D being its area-equivalent diameter.
+    CHECK(std::abs(footprint / discs - 1.0) < 0.02);
 }
 
 TEST_CASE("The abundance map scales the population and blends into the uniform law", "[moon_surface][environment]") {
     const auto& cfg = shared_detail()->config().rocks;
     const double ref = cfg.abundance_reference_area_fraction;
-    const LunarRocks mapped(shared_detail(), constant_map(3.0 * ref));
+    const LunarRocks mapped(diviner_detail(), constant_map(3.0 * ref));
     CHECK(rocks().abundance_factor(direction(0.0, 0.3)) == cfg.abundance_scale);  // no map: the uniform law
     CHECK(std::abs(mapped.abundance_factor(direction(0.0, 0.3)) - 3.0 * cfg.abundance_scale) < 1e-6);  // the map stores floats
     CHECK(std::abs(mapped.abundance_factor(direction(-54.0 * deg, 2.0)) - 3.0 * cfg.abundance_scale) < 1e-6);
@@ -402,6 +506,73 @@ TEST_CASE("The abundance map scales the population and blends into the uniform l
         for (const Rock& r : mapped.rocks_near(direction(lat, 1.0), radius, lo)) n += r.diameter_m < hi ? 1.0 : 0.0;
         CHECK(std::abs(n - expected) <= 3.0 * std::sqrt(expected));
     }
+}
+
+TEST_CASE("abundance_source selects the abundance law", "[moon_surface][environment]") {
+    const auto& cfg = shared_detail()->config().rocks;
+    // "uniform": a passed map is ignored.
+    const LunarRocks uniform(shared_detail(), constant_map(3.0 * cfg.abundance_reference_area_fraction));
+    CHECK(uniform.abundance_factor(direction(0.0, 0.3)) == cfg.abundance_scale);
+    // "diviner" without a map: German error naming the fetch target.
+    try {
+        const LunarRocks missing(diviner_detail());
+        FAIL("no exception");
+    } catch (const std::invalid_argument& e) {
+        CHECK(std::string(e.what()).find("fetch.py diviner_rock_abundance") != std::string::npos);
+    }
+    // A no-data pixel falls back to the uniform law.
+    auto holes = std::make_shared<environment::RockAbundanceMap>(*constant_map(3.0 * cfg.abundance_reference_area_fraction));
+    std::fill(holes->area_fraction.begin(), holes->area_fraction.begin() + holes->samples * 60,
+              std::numeric_limits<float>::quiet_NaN());  // northern half
+    const LunarRocks holey(diviner_detail(), holes);
+    CHECK(holey.abundance_factor(direction(30.0 * deg, 1.0)) == cfg.abundance_scale);
+    CHECK(std::abs(holey.abundance_factor(direction(-30.0 * deg, 1.0)) - 3.0 * cfg.abundance_scale) < 1e-6);
+}
+
+TEST_CASE("The Diviner rock abundance file loads into the map", "[moon_surface][environment]") {
+    // A small file in the real format (tools/data_pipeline/rock_abundance.py): 0.1 px/deg, 12 x 36, +-60 deg.
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_rock_abundance_load_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    constexpr int lines = 12, samples = 36, missing_dn = -32768;
+    std::vector<std::int16_t> dn(lines * samples);
+    for (int l = 0; l < lines; ++l) {
+        for (int s = 0; s < samples; ++s) dn[l * samples + s] = static_cast<std::int16_t>(10 * l + s % 3);
+    }
+    dn[5 * samples + 7] = missing_dn;
+    {
+        std::ofstream values(dir / "diviner_rock_abundance.i16", std::ios::binary);
+        values.write(reinterpret_cast<const char*>(dn.data()), static_cast<std::streamsize>(2 * dn.size()));
+        std::ofstream header(dir / config::rock_abundance_file_name);
+        header << "[grid]\nproduct = \"TEST\"\nprojection = \"simple_cylindrical\"\nlines = 12\nsamples = 36\n"
+                  "pixels_per_degree = 0.1\nzero_line = 5.5\nzero_sample = -0.5\nmax_latitude_deg = 60.0\n"
+                  "dn_scale = 0.001\nmissing_dn = -32768\nvalues = \"diviner_rock_abundance.i16\"\n";
+    }
+    auto diviner_cfg = load_config("diviner").rocks;
+    const auto map = environment::load_rock_abundance_map(diviner_cfg, dir);
+    REQUIRE(map);
+    CHECK(map->lines == lines);
+    CHECK(map->samples == samples);
+    CHECK(std::abs(map->lat_limit_rad - 60.0 * deg) < 1e-12);
+    // Pixel centre (line 2, sample 4): latitude (5.5 - 2) / 0.1 = 35 deg, longitude (4 + 0.5) / 0.1 = 45 deg.
+    CHECK(std::abs(map->at(35.0 * deg, 45.0 * deg) - 0.001 * (10 * 2 + 4 % 3)) < 1e-6);
+    // Longitude wraps: between sample 35 (355 deg) and sample 0 (5 deg).
+    CHECK(std::abs(map->at(-5.0 * deg, 0.0) - 0.001 * 0.5 * ((10 * 6 + 35 % 3) + (10 * 6 + 0))) < 1e-6);
+    // The missing pixel (line 5, sample 7) is NaN and bilinear interpolation skips it.
+    CHECK(std::isnan(map->area_fraction[5 * samples + 7]));
+    CHECK(std::isnan(map->at(5.0 * deg, 75.0 * deg)));  // its centre (latitude 5 deg, longitude 75 deg)
+    CHECK(std::abs(map->at(5.0 * deg, 80.0 * deg) - 0.001 * (10 * 5 + 8 % 3)) < 1e-6);  // half way to sample 8
+    // "uniform" reads nothing; "diviner" with no file names fetch.py.
+    diviner_cfg.abundance_source = "uniform";
+    CHECK(environment::load_rock_abundance_map(diviner_cfg, dir / "absent") == nullptr);
+    diviner_cfg.abundance_source = "diviner";
+    try {
+        (void)environment::load_rock_abundance_map(diviner_cfg, dir / "absent");
+        FAIL("no exception");
+    } catch (const config::ConfigError& e) {
+        CHECK(std::string(e.what()).find("fetch.py diviner_rock_abundance") != std::string::npos);
+    }
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("Craters, roughness and rock tops sum to the measured total roughness", "[moon_surface][environment][slow]") {

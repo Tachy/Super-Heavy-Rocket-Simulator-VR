@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <vector>
 
 #include "starsim/math/vec3.hpp"
@@ -15,7 +16,8 @@ struct TemplateMesh {
 
 // Star-shaped rock shapes: 16 seeded radial functions r(dir) > 0 on the unit sphere, built from a few random plane
 // waves (r = exp(sum a_k cos(f_k dir.d_k + p_k)), a_k ~ 1/f_k), scaled so that max r = 1 (a rock's semi-axes a, b, c
-// then bound it exactly). Meshes: icosphere subdivision 4, 3, 2, 1 (2562, 642, 162, 42 vertices) with vertex = dir r(dir).
+// then bound it; the shape fills them only partly: about 0.66 along an axis on average, so a rock's size follows from
+// its measured plan-view area, see exposed_area and LunarRocks). Meshes: icosphere subdivision 4, 3, 2, 1 (2562, 642, 162, 42 vertices) with vertex = dir r(dir).
 // Everything derives from the integer hash: identical on every machine.
 class RockTemplates {
 public:
@@ -29,6 +31,22 @@ public:
     math::Vec3 normal(int id, const math::Vec3& dir_local) const;
     const TemplateMesh& mesh(int id, int lod) const;
 
+    // Top of the unit-size surface on the vertical line (x, y) (unit coordinates, |(x, y)| < 1): highest z inside the
+    // rock, found by a scan from z = 1 down in top_scan_steps steps and bisection; nullopt when the line misses the rock.
+    std::optional<double> column_top(int id, double x, double y) const;
+    // Lowest and highest point of the unit-size surface (sampled; the vertical extent of the template).
+    double bottom_z(int id) const { return shapes_[static_cast<size_t>(id)].bottom_z; }
+    double top_z(int id) const { return shapes_[static_cast<size_t>(id)].top_z; }
+    // Plan-view area of the part of the unit-size rock above the plane z = cut_z (projection onto x-y; unit disc = pi):
+    // the area seen from above when the rock is buried to cut_z. From column_top on a footprint_columns^2 grid of
+    // column centres over [-1, 1]^2, so it is the same criterion LunarRocks::rock_top uses.
+    double exposed_area(int id, double cut_z) const;
+
+    // Scan steps over the height when searching a column's top ([E]: the templates are smooth, no thin spikes).
+    static constexpr int top_scan_steps = 48;
+    // Columns per side of the footprint grid ([E]: ~7200 columns inside the unit disc; area error well below 1 %).
+    static constexpr int footprint_columns = 96;
+
 private:
     RockTemplates();
 
@@ -40,6 +58,8 @@ private:
     struct Shape {
         std::array<Wave, waves> wave;
         double scale = 1.0;  // 1 / sampled maximum
+        double bottom_z = -1.0, top_z = 1.0;
+        std::vector<double> column_tops;  // sorted tops of the footprint columns that hit the rock
     };
     double raw_radius(const Shape& shape, const math::Vec3& dir_unit) const;
 

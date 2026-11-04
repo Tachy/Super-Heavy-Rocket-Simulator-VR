@@ -66,6 +66,11 @@ def main() -> int:
         if source.get("kind") == "lunar_tiles":  # LOLA: range-cropped site tiles + the global grid (lunar_tile.py)
             lunar_tile.fetch_all(load_sources(), REPO_ROOT, args.force)
             continue
+        if source.get("kind") == "rock_abundance":  # Diviner rock abundance -> int16 DN + TOML header (rock_abundance.py)
+            import rock_abundance
+
+            rock_abundance.fetch(source, REPO_ROOT, download, args.force)
+            continue
         if source.get("kind") == "iss_oem":  # ISS OEM: always fetched, every version archived (iss_oem.py)
             iss_oem.fetch(source, REPO_ROOT, download)
             continue

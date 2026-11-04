@@ -511,10 +511,10 @@ credit = "International Space Station model, NASA 3D Resources"
 # only numbers (facts); docs/subsystems/moon-surface.md, section Sources, gives tables / figures and the choices.
 [[source]]
 id = "diviner_rock_abundance"
-name = "LRO Diviner GDR Level 3 rock abundance map (average, simple cylindrical, 60 S - 60 N; Bandfield et al. 2011) - local scale of the rock population"
-url = "https://pds-geosciences.wustl.edu/missions/lro/diviner.htm"
-target = "config/moon_surface.toml"
-kind = "licence_only"
+name = "LRO Diviner GDR Level 3 rock abundance map DGDR_RA_AVG_CYL_032 (average, simple cylindrical, 32 px/deg, 60 S - 60 N; Bandfield et al. 2011) - local scale of the rock population"
+url = "https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_diviner_derived1/data_derived_gdr_l3/cylindrical/img/dgdr_ra_avg_cyl_032_img.img"
+target = "data/terrain/diviner_rock_abundance.toml"
+kind = "rock_abundance"
 license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
 credit = "LRO Diviner Lunar Radiometer Experiment team (UCLA / JPL, D. A. Paige et al.); J. L. Bandfield et al. 2011, JGR 116, doi:10.1029/2011JE003866; NASA Planetary Data System Geosciences Node"
 

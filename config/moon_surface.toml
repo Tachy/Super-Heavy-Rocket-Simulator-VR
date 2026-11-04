@@ -44,7 +44,7 @@ axis_ratio_sd = 0.15               # [E] spread of the NAC b/a range 0.3-0.9 aro
 burial_fraction_mean = 0.3         # [E] share of the rock height below the regolith surface; no lunar measurement found
 burial_fraction_sd = 0.15          # [E]
 albedo_to_regolith = 1.35          # [E] single-scattering albedo ratio 0.65 / 0.48 used by Marshal, Ruesch, Woehler et al. (EGU22-12217) for NAC boulder fields
-abundance_source = "diviner"       # [S] Diviner GDR L3 rock abundance (Bandfield et al. 2011), NASA PDS public domain; covers 60 S - 60 N only, outside "uniform"
+abundance_source = "diviner"       # [S] Diviner GDR L3 rock abundance (Bandfield et al. 2011), NASA PDS public domain; covers 60 S - 60 N only, outside "uniform"; data: python tools/data_pipeline/fetch.py diviner_rock_abundance
 abundance_scale = 1.0              # [D] the SFD below is the mean regolith population; a local map value scales it by RA / abundance_reference_area_fraction
 abundance_reference_min_diameter_m = 0.5    # [E] lower size limit of what Diviner RA counts: Bandfield et al. 2011 (JGR 116, E00H02) rocks stay warm at night down to the ~0.1-1 m scale; 0.5 m taken as the middle (a 1 m limit would give 0.0047, 1.45x)
 abundance_reference_area_fraction = 0.0068  # [D] disc area of the law below over 0.5-10 m: (pi/4) k b (D1^(2-b) - D0^(2-b)) / (2-b) = 0.00678

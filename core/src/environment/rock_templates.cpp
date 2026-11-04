@@ -21,6 +21,9 @@ constexpr int sample_points = 20000;                          // Fibonacci direc
 // The sampled maximum can miss a peak between samples (worst case ~ 0.5 f'' delta^2 ~ 5e-4); a margin keeps r <= 1.
 constexpr double scale_margin = 1.005;
 constexpr double normal_step = 1e-4;                          // rad, central differences for the normal
+// Bisection refinement of a column top (bracket 2/48 wide): 40 halvings are far below 1e-12 of the unit size.
+constexpr int top_bisections = 40;
+constexpr double min_inside_norm = 1e-12;
 constexpr std::array<int, RockTemplates::lods> subdivisions = {4, 3, 2, 1};  // icosphere levels per LOD [E]
 
 double unit(std::uint64_t seed, std::uint64_t a, std::uint64_t b) {
@@ -96,6 +99,26 @@ RockTemplates::RockTemplates() {
             max_r = std::max(max_r, raw_radius(shape, {rho * std::cos(golden * n), rho * std::sin(golden * n), z}));
         }
         shape.scale = 1.0 / (max_r * scale_margin);
+        // Vertical extent: lowest / highest z of the scaled surface over the same directions.
+        shape.bottom_z = 1.0;
+        shape.top_z = -1.0;
+        for (int n = 0; n < sample_points; ++n) {
+            const double z = 1.0 - 2.0 * (n + 0.5) / sample_points, rho = std::sqrt(1.0 - z * z);
+            const Vec3 d{rho * std::cos(golden * n), rho * std::sin(golden * n), z};
+            const double height = shape.scale * raw_radius(shape, d) * z;
+            shape.bottom_z = std::min(shape.bottom_z, height);
+            shape.top_z = std::max(shape.top_z, height);
+        }
+        // Footprint grid: the top of every column, for the exposed plan-view area at any cut height.
+        for (int i = 0; i < footprint_columns; ++i) {
+            for (int j = 0; j < footprint_columns; ++j) {
+                const double x = -1.0 + (2.0 * i + 1.0) / footprint_columns;
+                const double y = -1.0 + (2.0 * j + 1.0) / footprint_columns;
+                if (x * x + y * y >= 1.0) continue;
+                if (const auto top = column_top(id, x, y)) shape.column_tops.push_back(*top);
+            }
+        }
+        std::sort(shape.column_tops.begin(), shape.column_tops.end());
 
         for (int lod = 0; lod < lods; ++lod) {
             const Icosphere ico = make_icosphere(subdivisions[static_cast<size_t>(lod)]);
@@ -127,6 +150,39 @@ Vec3 RockTemplates::normal(int id, const Vec3& dir_local) const {
         return (radius(id, d + t * normal_step) - radius(id, d - t * normal_step)) / (2.0 * normal_step);
     };
     return math::normalized(d - (t1 * slope(t1) + t2 * slope(t2)) / radius(id, d));
+}
+
+std::optional<double> RockTemplates::column_top(int id, double x, double y) const {
+    // g < 0 inside the star-shaped rock: |u| - r(u / |u|).
+    const auto g = [&](double z) {
+        const Vec3 u{x, y, z};
+        const double n = norm(u);
+        return n < min_inside_norm ? -1.0 : n - radius(id, u / n);
+    };
+    double z_out = 1.0, z_in = 0.0, previous = 1.0;
+    bool found = false;
+    for (int i = 0; i <= top_scan_steps && !found; ++i) {
+        const double z = 1.0 - 2.0 * i / top_scan_steps;
+        if (g(z) <= 0.0) {
+            z_in = z;
+            z_out = i == 0 ? z : previous;
+            found = true;
+        }
+        previous = z;
+    }
+    if (!found) return std::nullopt;
+    for (int k = 0; k < top_bisections && z_out != z_in; ++k) {
+        const double mid = 0.5 * (z_out + z_in);
+        (g(mid) <= 0.0 ? z_in : z_out) = mid;
+    }
+    return z_in;
+}
+
+double RockTemplates::exposed_area(int id, double cut_z) const {
+    const auto& tops = shapes_[static_cast<size_t>(id)].column_tops;
+    const auto above = tops.end() - std::upper_bound(tops.begin(), tops.end(), cut_z);
+    const double cell = 2.0 / footprint_columns;
+    return static_cast<double>(above) * cell * cell;
 }
 
 const TemplateMesh& RockTemplates::mesh(int id, int lod) const {

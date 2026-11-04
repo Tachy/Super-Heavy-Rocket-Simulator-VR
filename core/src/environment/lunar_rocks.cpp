@@ -15,14 +15,12 @@ using math::Vec3;
 namespace {
 
 // Share of the rock height below the ground is limited to [0, 0.6] and the axis ratios to the NAC range ([E]): keeps
-// every rock a rock (visible above the ground, c <= b <= a, b/a >= 0.3 as measured on NAC boulders).
+// every rock a rock (visible above the ground, c <= b <= a, b/a >= 0.3 as measured on NAC boulders). The burial clamp
+// is symmetric about the configured mean 0.3, so the mean share stays the configured one.
 constexpr double max_burial_fraction = 0.6;
 constexpr double min_axis_ratio = 0.3, max_axis_ratio = 1.0, min_c_to_a = 0.2;
 // Normal-ish draws: sum of six uniforms (variance 1/2) scaled to unit variance, truncated at +-4.2 sigma [E].
 constexpr int normal_draws = 6;
-// Bisection refinement of the rock top (bracket c/24 wide): 40 halvings are far below a micrometre.
-constexpr int top_bisections = 40;
-constexpr double min_inside_norm = 1e-12;
 
 double unit_of(std::uint64_t id, std::uint64_t field) { return hash_unit(surface_hash(id, field, 0x5EED, 0)); }
 
@@ -43,35 +41,32 @@ double smooth01(double x) {
     return x * x * (3.0 - 2.0 * x);
 }
 
-}  // namespace
-
-double RockAbundanceMap::at(double latitude_rad, double longitude_rad) const {
-    const double line = std::clamp((lat_limit_rad - latitude_rad) / (2.0 * lat_limit_rad) * lines - 0.5, 0.0,
-                                   static_cast<double>(lines - 1));
-    double lon = std::fmod(longitude_rad, constants::two_pi);
-    if (lon < 0.0) lon += constants::two_pi;
-    const double sample = lon / constants::two_pi * samples - 0.5;
-    const int l0 = std::min(static_cast<int>(std::floor(line)), lines - 1);
-    const int l1 = std::min(l0 + 1, lines - 1);
-    const double fl = line - l0;
-    const int s0 = static_cast<int>(std::floor(sample));
-    const double fs = sample - s0;
-    const auto px = [&](int l, int s) {
-        const int w = ((s % samples) + samples) % samples;
-        return static_cast<double>(area_fraction[static_cast<size_t>(l) * static_cast<size_t>(samples) +
-                                                 static_cast<size_t>(w)]);
-    };
-    return (1.0 - fl) * ((1.0 - fs) * px(l0, s0) + fs * px(l0, s0 + 1)) +
-           fl * ((1.0 - fs) * px(l1, s0) + fs * px(l1, s0 + 1));
+// Height of the ground in the template's unit coordinates for burial share f of the template's height.
+double burial_cut(const RockTemplates& templates, int id, double f) {
+    return templates.bottom_z(id) + f * (templates.top_z(id) - templates.bottom_z(id));
 }
+
+}  // namespace
 
 LunarRocks::LunarRocks(std::shared_ptr<const LunarSurfaceDetail> detail,
                        std::shared_ptr<const RockAbundanceMap> abundance)
     : detail_(std::move(detail)), abundance_(std::move(abundance)) {
     if (!detail_) throw std::invalid_argument("LunarRocks: keine Oberflaechendetails uebergeben");
-    const auto& sfd = detail_->config().rocks.sfd;
+    const auto& rocks = detail_->config().rocks;
+    const auto& sfd = rocks.sfd;
     if (sfd.form != "power" && sfd.form != "exponential") {
         throw std::invalid_argument("LunarRocks: unbekannte Groessenverteilung '" + sfd.form + "'");
+    }
+    if (rocks.abundance_source == "uniform") {
+        abundance_ = nullptr;
+    } else if (rocks.abundance_source == "diviner") {
+        if (!abundance_) {
+            throw std::invalid_argument(
+                "LunarRocks: abundance_source = \"diviner\" braucht die Diviner-Felsenhäufigkeitskarte - bitte python "
+                "tools/data_pipeline/fetch.py diviner_rock_abundance ausführen");
+        }
+    } else {
+        throw std::invalid_argument("LunarRocks: unbekannte abundance_source '" + rocks.abundance_source + "'");
     }
     if (abundance_ && (abundance_->lines < 2 || abundance_->samples < 2 || abundance_->lat_limit_rad <= 0.0 ||
                        abundance_->area_fraction.size() !=
@@ -88,6 +83,12 @@ LunarRocks::LunarRocks(std::shared_ptr<const LunarSurfaceDetail> detail,
         octaves_.push_back(o);
         d_lo = d_hi;
     }
+    const RockTemplates& templates = RockTemplates::instance();
+    double least_area = constants::pi;
+    for (int t = 0; t < RockTemplates::count; ++t) {
+        least_area = std::min(least_area, templates.exposed_area(t, burial_cut(templates, t, max_burial_fraction)));
+    }
+    max_semi_axis_per_diameter_ = 0.5 * std::sqrt(constants::pi / (min_axis_ratio * least_area));
 }
 
 double LunarRocks::abundance_factor(const Vec3& unit) const {
@@ -96,16 +97,30 @@ double LunarRocks::abundance_factor(const Vec3& unit) const {
     const double lat = std::asin(std::clamp(unit.z, -1.0, 1.0));
     const double w = smooth01((abundance_->lat_limit_rad - std::abs(lat)) / abundance_blend_band_rad);
     if (w <= 0.0) return rocks.abundance_scale;
-    const double local = abundance_->at(lat, std::atan2(unit.y, unit.x)) / rocks.abundance_reference_area_fraction;
+    const double value = abundance_->at(lat, std::atan2(unit.y, unit.x));
+    if (std::isnan(value)) return rocks.abundance_scale;  // no data: the uniform law
+    const double local = value / rocks.abundance_reference_area_fraction;
     return rocks.abundance_scale * ((1.0 - w) + w * local);
 }
 
 double LunarRocks::cell_factor(const FaceCell& cell) const { return abundance_factor(face_cell_point(cell, 0.5, 0.5)); }
 
+double LunarRocks::burial_fraction(std::uint64_t id) const {
+    const auto& cfg = detail_->config().rocks;
+    return std::clamp(cfg.burial_fraction_mean + cfg.burial_fraction_sd * normal_draw(id, 5), 0.0,
+                      max_burial_fraction);
+}
+
+double LunarRocks::b_to_a(std::uint64_t id) const {
+    const auto& cfg = detail_->config().rocks;
+    return std::clamp(cfg.axis_b_to_a_mean + cfg.axis_ratio_sd * normal_draw(id, 3), min_axis_ratio, max_axis_ratio);
+}
+
 void LunarRocks::collect(int octave, const FaceCell& cell, double min_diameter_m, const Filter* filter,
                          std::vector<Rock>& out) const {
     const Octave& o = octaves_[static_cast<size_t>(octave)];
     const auto& cfg = detail_->config().rocks;
+    const RockTemplates& templates = RockTemplates::instance();
     const double radius = detail_->sphere_radius_m();
     const std::uint64_t h = rock_cell_hash(cell);
     const auto ou = static_cast<std::uint64_t>(octave);
@@ -118,24 +133,25 @@ void LunarRocks::collect(int octave, const FaceCell& cell, double min_diameter_m
         const double d = sampling::inverse_cumulative(cfg.sfd, n_lo - unit_of(id, 2) * (n_lo - n_hi));
         if (d < min_diameter_m) continue;
         const Vec3 base = face_cell_point(cell, unit_of(id, 0), unit_of(id, 1));
+        // Shape: template, b / a and burial share first; a then makes the plan-view area above the ground pi D^2 / 4.
+        const int template_id =
+            std::min(static_cast<int>(unit_of(id, 6) * RockTemplates::count), RockTemplates::count - 1);
+        const double q = b_to_a(id);
+        const double cut = burial_cut(templates, template_id, burial_fraction(id));
+        const double a = 0.5 * d * std::sqrt(constants::pi / (q * templates.exposed_area(template_id, cut)));
         if (filter) {
-            const double limit = filter->radius_m + (filter->add_extent ? 0.5 * d : 0.0);
+            const double limit = filter->radius_m + (filter->add_extent ? a : 0.0);
             if (radius * norm(base - filter->unit) > limit) continue;
         }
         Rock r;
         r.id = id;
         r.base_unit = base;
         r.diameter_m = d;
-        const double a = 0.5 * d;
-        const double b_to_a =
-            std::clamp(cfg.axis_b_to_a_mean + cfg.axis_ratio_sd * normal_draw(id, 3), min_axis_ratio, max_axis_ratio);
         const double c_to_a =
-            std::clamp(cfg.axis_c_to_a_mean + cfg.axis_ratio_sd * normal_draw(id, 4), min_c_to_a, b_to_a);
-        r.axes_m = {a, a * b_to_a, a * c_to_a};
-        const double burial_fraction = std::clamp(
-            cfg.burial_fraction_mean + cfg.burial_fraction_sd * normal_draw(id, 5), 0.0, max_burial_fraction);
-        r.burial_m = (2.0 * burial_fraction - 1.0) * r.axes_m.z;
-        r.template_id = std::min(static_cast<int>(unit_of(id, 6) * RockTemplates::count), RockTemplates::count - 1);
+            std::clamp(cfg.axis_c_to_a_mean + cfg.axis_ratio_sd * normal_draw(id, 4), min_c_to_a, q);
+        r.axes_m = {a, a * q, a * c_to_a};
+        r.burial_m = cut * r.axes_m.z;
+        r.template_id = template_id;
         r.albedo_factor = cfg.albedo_to_regolith;
         // Frame: yaw about the vertical (the rock rests on its flattest side).
         const Vec3 t1 = math::normalized(cross(std::abs(base.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, base));
@@ -175,7 +191,7 @@ std::vector<Rock> LunarRocks::rocks_touching(const Vec3& unit, double radius_m, 
     const Filter filter{unit, radius_m, true};
     for (size_t k = 0; k < octaves_.size(); ++k) {
         if (octaves_[k].max_diameter_m <= min_diameter_m) continue;
-        const double reach = radius_m + 0.5 * octaves_[k].max_diameter_m;
+        const double reach = radius_m + max_semi_axis_per_diameter_ * octaves_[k].max_diameter_m;
         for (const FaceCell& cell : face_cells_within(unit, octaves_[k].level, reach, detail_->sphere_radius_m())) {
             collect(static_cast<int>(k), cell, min_diameter_m, &filter, out);
         }
@@ -193,34 +209,12 @@ std::optional<std::pair<double, Vec3>> LunarRocks::rock_top(const Rock& rock, co
     if (ux * ux + uy * uy >= 1.0) return std::nullopt;
 
     const RockTemplates& templates = RockTemplates::instance();
-    // f < 0 inside the star-shaped rock: |u| - r(u / |u|) in the unit-size coordinates u = (x / a, y / b, z / c).
-    const auto f = [&](double z) {
-        const Vec3 u{ux, uy, z / c};
-        const double n = norm(u);
-        return n < min_inside_norm ? -1.0 : n - templates.radius(rock.template_id, u / n);
-    };
-    double z_out = 0.0, z_in = 0.0;
-    bool found = false;
-    double previous = c;
-    for (int i = 0; i <= top_scan_steps && !found; ++i) {
-        const double z = c * (1.0 - 2.0 * i / top_scan_steps);
-        if (f(z) <= 0.0) {
-            z_in = z;
-            z_out = i == 0 ? z : previous;
-            found = true;
-        }
-        previous = z;
-    }
-    if (!found) return std::nullopt;
-    for (int k = 0; k < top_bisections && z_out != z_in; ++k) {
-        const double mid = 0.5 * (z_out + z_in);
-        (f(mid) <= 0.0 ? z_in : z_out) = mid;
-    }
-    const double above_base = z_in - rock.burial_m;
+    const auto top = templates.column_top(rock.template_id, ux, uy);
+    if (!top) return std::nullopt;
+    const double above_base = c * *top - rock.burial_m;
     if (above_base <= 0.0) return std::nullopt;
 
-    const Vec3 u{ux, uy, z_in / c};
-    const Vec3 n_unit = templates.normal(rock.template_id, u);
+    const Vec3 n_unit = templates.normal(rock.template_id, Vec3{ux, uy, *top});
     const Vec3 n_local = math::normalized({n_unit.x / a, n_unit.y / b, n_unit.z / c});
     const double height = rock.base_height_m + above_base + (x * x + y * y) / (2.0 * sphere_radius);
     return std::pair{height, rock.local_to_fixed * n_local};

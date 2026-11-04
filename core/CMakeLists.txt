@@ -165,6 +165,7 @@ add_library(starsim_core STATIC
     src/environment/lunar_surface_detail.cpp
     src/environment/rock_templates.cpp
     src/environment/lunar_rocks.cpp
+    src/environment/rock_abundance_map.cpp
     src/environment/terrain_horizon.cpp
     src/environment/geographic_grid.cpp
     src/environment/geoid.cpp
@@ -192,6 +193,7 @@ add_library(starsim_core STATIC
     src/config/atmosphere_optics_config.cpp
     src/config/earth_terrain_config.cpp
     src/config/moon_surface_config.cpp
+    src/config/rock_abundance_file.cpp
     src/sim/lunar_site.cpp
     src/sim/earth_terrain_loader.cpp
     src/sim/terrain_cache.cpp

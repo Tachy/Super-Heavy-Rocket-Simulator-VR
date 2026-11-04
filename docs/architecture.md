@@ -15,7 +15,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; the Moon's procedural
   near-ground relief below LOLA, `environment::LunarSurfaceDetail` (hashed craters and regolith roughness on cube-face
   cells, band-limited queries) and its deterministic rocks, `environment::LunarRocks` (size-frequency population per
-  cell, 16 star-shaped templates with mesh LODs, rock tops; `docs/subsystems/moon-surface.md`); on the Earth terrain a site's
+  cell, 16 star-shaped templates with mesh LODs, rock tops, Diviner abundance map via `load_rock_abundance_map`;
+  `docs/subsystems/moon-surface.md`); on the Earth terrain a site's
   leg landing tracks bodies within 5 km of the site; the sea state at a drone ship's station: long-crested JONSWAP sea,
   deterministic by seed; the Earth's atmosphere optics and precomputed scattering: a float64 port of Bruneton 2017 -
   transmittance / scattering / irradiance tables in luminance with 5 orders + geometric tail, the WGS84 stretch, CPU

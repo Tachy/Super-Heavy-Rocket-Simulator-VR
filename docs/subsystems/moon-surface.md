@@ -17,7 +17,8 @@ on top of that relief.
   summed surface (craters + rocks + roughness). Derivation in Sources, Regolith roughness.
 - Rocks: N(>D) = 1.54e-3 D^-2.286 per m^2, 0.01 - 10 m (N(>1 cm) = 57 per m^2, N(>10 cm) = 0.30 per m^2,
   N(>1 m) = 1.5 per 1000 m^2, N(>10 m) = 8 per km^2; area covered 3.1 % for 0.01-10 m, 0.68 % for 0.5-10 m). Axis
-  ratios b/a 0.71, c/a 0.50 (sd 0.15), burial 0.3 +- 0.15 of the height, single-scattering albedo 1.35 x regolith.
+  ratios b/a 0.71, c/a 0.50 (sd 0.15), burial 0.3 +- 0.15 of the height, single-scattering albedo 1.35 x regolith;
+  D = plan-view-area-equivalent diameter (the generated rocks cover exactly the law's disc area).
   Local abundance: Diviner rock abundance (60 S - 60 N) divided by `rocks.abundance_reference_area_fraction` (0.0068,
   the disc area the law gives for 0.5-10 m, lower limit `rocks.abundance_reference_min_diameter_m`); uniform elsewhere.
 - Hapke (643 nm, highland proxy): w 0.429, b 0.220, c 0.514, B_S0 1.61, h_S 0.054, B_C0 0, h_C 1, theta_bar
@@ -69,26 +70,40 @@ on top of that relief.
 ### Rocks (Task 3)
 - Templates (`RockTemplates`): 16 star-shaped radial functions r(dir) = exp(sum of 8 random plane waves, a_k = 0.30 / f_k,
   f_k 1.5-5 rad) scaled to max r = 1 (sampled on 20000 directions, margin 0.5 %), so a rock's semi-axes a, b, c bound
-  it exactly; meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with vertex dir r(dir), true surface normals.
-  All values [E] (appearance only); everything from the integer hash.
+  it; the shape fills them only partly (mean r ~0.66). meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with
+  vertex dir r(dir), true surface normals. Per template: vertical extent `bottom_z` / `top_z` (same 20000 directions),
+  `column_top(x, y)` (scan from z = 1 down in 48 steps + 40 bisections; the one criterion `rock_top` also uses) and
+  `exposed_area(cut_z)` = plan-view area of the part above the plane z = cut_z, from the column tops of a 96 x 96 grid
+  over [-1, 1]^2. All values [E] (appearance only); everything from the integer hash.
 - Population (`LunarRocks`): one diameter octave (0.01 m, doubling, to 10 m: 10 octaves) per face-cell level, cells >= 4 x
   D_max nominal; count Poisson (exact cell area x abundance factor at the cell centre x octave density), position uniform
   in the cell (each rock belongs to exactly one cell: found from both sides of a face edge, no duplicates), D by the
-  inverse cumulative SFD, b/a 0.71 +- 0.15 (clamped 0.3-1), c/a 0.50 +- 0.15 (0.2 - b/a), burial share of the height
-  0.3 +- 0.15 (clamped 0-0.6; `burial_m` = (2 f - 1) c, negative = centre above the ground), template and yaw random, the
-  c axis vertical (rests on its flattest side, [E]), albedo = `albedo_to_regolith`. D = 2 a (bounding long axis).
-  Normal-like draws are the sum of 6 uniforms (no library distributions).
-- Ground: the rock stands on LOLA + `relief_m(base, 0)` at its base point, on the plane tangent there (small rocks on
-  slopes are not tilted; a 10 m rock on a steep slope would be).
-- Rock top: `rock_top(rock, unit)` scans the vertical line through `unit` downward from +c in 48 steps, bisects the
-  first inside point (f = |u| - r(u/|u|)) and returns height above the sphere = base + z_top - burial + d^2 / 2R with the
-  outward normal (template normal through the inverse axis scaling); nullopt where the rock is not above its base height.
-- Abundance: `abundance_scale` x (uniform 1 outside the map). A `RockAbundanceMap` (cylindrical float grid, area
-  fraction, |lat| <= 60 deg) is optional; inside it the factor is map / `abundance_reference_area_fraction` (0.0068),
-  blended smoothstep to 1 over the last 5 deg below the map edge (`abundance_blend_band_rad`, 150 km: no step). The
-  real Diviner product is NOT installed (see Open points); without a map every place gets the uniform law.
-- `cover_fraction(min, max)`: area share of discs (pi/4) D^2, analytic for the power law (0.0311 for 0.01-10 m,
-  0.00678 for 0.5-10 m). `rocks_touching(unit, r, min)` returns rocks with base within r + a (hazard / contact queries).
+  inverse cumulative SFD, b/a 0.71 +- 0.15 (clamped 0.3-1), c/a 0.50 +- 0.15 (0.2 - b/a), burial share f of the height
+  0.3 +- 0.15 (clamped 0-0.6, symmetric about the mean, so the mean share stays 0.3), template and yaw random, the c
+  axis vertical (rests on its flattest side, [E]), albedo = `albedo_to_regolith`. Normal-like draws are the sum of 6
+  uniforms (no library distributions).
+- Size convention: D is the plan-view-area-equivalent diameter: the rock's area seen from above (the part above the
+  ground) is pi D^2 / 4. Per rock a = (D / 2) sqrt(pi / ((b/a) exposed_area(cut))), so a is ~0.84 D for a typical rock and at
+  most 1.77 D (`max_semi_axis_per_diameter`: b/a 0.3, burial 0.6, least filled template); the visible long dimension is
+  ~1.1-1.3 D. This is the area definition of Diviner rock abundance (the normalisation 0.0068 stays a disc integral and
+  is exact); the Surveyor counts' own convention is an open point.
+- Burial by height (the config's definition): ground at cut = bottom_z + f (top_z - bottom_z) of the template,
+  `burial_m` = c x cut (depth of the centre below the ground; negative = centre above it).
+- Ground: the rock stands on LOLA + `relief_m(base, 0)` at its base point, on the plane tangent there; no rock is tilted.
+  On a slope the ground falls away on the downhill side, so part of the underside is exposed and the uphill side is
+  buried deeper (Open points).
+- Rock top: `rock_top(rock, unit)` takes the template's `column_top` at (x/a, y/b) and returns height above the sphere =
+  base + c z_top - burial + d^2 / 2R with the outward normal (template normal through the inverse axis scaling); nullopt
+  where the rock is not above its base height. "Above" is against `base_height_m` only, not the local ground at `unit`.
+- Abundance: `abundance_source` selects it. "uniform": `abundance_scale` everywhere (a passed map is ignored).
+  "diviner": `load_rock_abundance_map(rocks, data/terrain)` reads the Diviner map (`RockAbundanceMap`, cylindrical
+  float grid, area fraction, |lat| <= 60 deg, no data = NaN); `LunarRocks` without a map then throws a German error
+  naming `fetch.py diviner_rock_abundance`, like the LOLA loader (decision: error, not a silent fallback). Inside the
+  map the factor is map / `abundance_reference_area_fraction` (0.0068), blended smoothstep to 1 over the last 5 deg
+  below the map edge (`abundance_blend_band_rad`, 150 km: no step); a no-data pixel gives the uniform law.
+- `cover_fraction(min, max)`: area share (pi/4) D^2 integrated over the law = the generated rocks' real plan-view area
+  (0.0311 for 0.01-10 m, 0.00678 for 0.5-10 m). `rocks_touching(unit, r, min)` returns rocks with base within r + a
+  (hazard / contact queries; cells searched within r + 1.77 D_max).
 
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
@@ -102,10 +117,21 @@ on top of that relief.
   `band_start_m`, `finest_wavelength_m` (0.01 m), `craters_in_cell`, `craters_within`, `crater_profile_m`,
   `crater_octaves`, `roughness_octaves`, `roughness_scale_m`. It knows nothing about rocks.
 - `core/include/starsim/environment/rock_templates.hpp`, `core/src/environment/rock_templates.cpp`: `RockTemplates`
-  (`radius`, `normal`, `mesh(id, lod)`, 16 templates x 4 LODs), `TemplateMesh`.
+  (`radius`, `normal`, `mesh(id, lod)`, `column_top`, `bottom_z`, `top_z`, `exposed_area`, 16 templates x 4 LODs),
+  `TemplateMesh`.
 - `core/include/starsim/environment/lunar_rocks.hpp`, `core/src/environment/lunar_rocks.cpp`: `LunarRocks(detail, map)`:
-  `rocks_in_cell`, `rocks_near`, `rocks_touching`, `rock_top`, `cover_fraction`, `abundance_factor`, `octaves`; `Rock`,
-  `RockAbundanceMap`. `core/src/environment/surface_sampling.hpp`: Poisson / inverse SFD shared with the craters.
+  `rocks_in_cell`, `rocks_near`, `rocks_touching`, `rock_top`, `cover_fraction`, `abundance_factor`, `octaves`,
+  `max_semi_axis_per_diameter`; `Rock`. `core/src/environment/surface_sampling.hpp`: Poisson / inverse SFD shared with
+  the craters.
+- `core/include/starsim/environment/rock_abundance_map.hpp`, `core/src/environment/rock_abundance_map.cpp`:
+  `RockAbundanceMap` (`at`: bilinear over valid neighbours), `make_rock_abundance_map(file)` (checks the grid layout),
+  `load_rock_abundance_map(rocks config, terrain_dir)`. `core/include/starsim/config/rock_abundance_file.hpp`,
+  `core/src/config/rock_abundance_file.cpp`: `load_rock_abundance_file` (TOML header + int16 DN; German ConfigError
+  naming fetch.py when missing).
+- `tools/data_pipeline/rock_abundance.py` (fetch target `diviner_rock_abundance`, kind `rock_abundance`): downloads
+  DGDR_RA_AVG_CYL_032 (Diviner GDR L3 rock abundance average, 32 px/deg, 3840 x 11520 int16 LSB, 88 MB; layout from
+  its PDS3 label: line 0 = 60 N, zero_line 1919.5, zero_sample -0.5, RA = DN x 0.001, missing -32768) into
+  `data/terrain/diviner_rock_abundance.{i16,toml}`. The 128 px/deg version (1.9 GB) is not used.
 - `LunarTerrain::tile_blend` / `tile_weight` / `global_resolution_m` / `finest_resolution_m` (`lunar.md`).
 - `core/include/starsim/config/moon_surface_config.hpp`, `core/src/config/moon_surface_config.cpp`:
   `config::load_moon_surface_config(file)` -> `MoonSurfaceConfig` (craters, roughness, rocks, hapke);
@@ -162,17 +188,28 @@ on top of that relief.
     1 x outside; the factor is monotone and steps < 0.4 % of the jump per 0.01 deg across the blend band;
   - ownership: 82 3 x 3 blocks (2 cube corners, 80 cells along a face edge): no duplicate id, every rock's cell is the
     cell that lists it, and the rocks found by position equal the union of the block's cells;
-  - tops: every top of the > 100 rocks of a 200 m disc (40 sample points each) lies above base height and below base - burial + c + d^2/2R,
-    unit normals facing up; templates: r > 0.2 and <= 1 (max > 0.97) on 10^4 directions, every mesh at every LOD closed
+  - tops: every top of the > 100 rocks of a 200 m disc (40 sample points each; 7307 hits) lies above base height and
+    below base - burial + c top_z + d^2/2R, and on the rock's surface (|u| - r(u) worst 4.8e-14), unit normals facing up;
+  - burial: buried share of the height measured on the LOD 0 mesh extents, 3350 rocks >= 0.1 m within 60 m of the
+    site: mean 0.3001 (configured 0.30, 3 sigma 0.0078), range -0.0009 - 0.6005;
+  - templates: r > 0.2 and <= 1 (max > 0.97) on 10^4 directions; exposed area full below the rock (0.2 pi - pi), 0 above,
+    monotone; every mesh at every LOD closed
     and oriented (each directed edge once with its reverse, V - E + F = 2, every triangle faces outward), LOD 0 vertices
     within 1 % of r, unit outward normals; determinism on 4 threads (own and shared instance), also at -90 deg;
-  - cover fraction: formula 0.0311 / 0.00678; a 30 m patch of 0.02-0.5 m rocks 0.01814 vs formula 0.01781 (+1.8 %, 5 %);
+  - cover fraction: formula 0.0311 / 0.00678; real plan-view area of the 8083 rocks of 0.05-0.2 m in a 43 m disc at the
+    site, measured with `rock_top` on 64 sunflower columns per rock: 0.00748 vs formula 0.00745 (+0.37 %, tolerance
+    5 %); measured footprint / sum of pi D^2 / 4 = 0.9933 (tolerance 2 %); every rock's a <= 1.769 D;
+  - abundance source: "uniform" ignores a map, "diviner" without a map throws (names the fetch target), no-data pixels
+    give the uniform law; a 12 x 36 file in the real format (TOML header + int16, one missing DN) loads: pixel centres,
+    longitude wrap, NaN skipped in the bilinear; a missing file names fetch.py;
   - `[slow]` summed roughness (median plane-detrended 125 mm window std, 600 windows over 2 km, rock tops entered as
-    max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 3.927 mm vs the measured total 4.000 mm
-    (-1.8 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.130 mm (+3.3 %). The corner excess of the skewed
+    max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 4.049 mm vs the measured total 4.000 mm
+    (+1.2 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.232 mm (+5.8 %). The corner excess of the skewed
     lattice is unchanged after the face blend (4.090 vs 3.845 at the site = +6.4 %) and stays inside 10 % of the total, so
-    the amplitude is not touched. The rock tops add only 0.08 mm to the median (rare rocks dominate the mean square,
+    the amplitude is not touched. The rock tops add 0.20 mm (site) to the median (rare rocks dominate the mean square,
     not the median).
+- Diviner product check (python, label + three rows by range request, not the 88 MB file): the label layout above;
+  median RA 0.004 at the equator (17 % no data in that row), 0.003 at 57 N, 0.002 at 60 S; p95 0.006-0.008.
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -262,9 +299,20 @@ geometry (g near 0) is not observed there. The published global-average table of
 
 ## Open points
 - Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies (done). The
-  map itself is not downloaded and no loader exists: `LunarRocks` takes a `RockAbundanceMap` built by the caller; the
-  PDS GDR product's exact file layout was not examined, `tools/data_pipeline/fetch.py` has no Diviner entry. Until then
-  every place has the uniform law (the map path is tested with synthetic maps only).
+  loader is tested on a synthetic file in the real format; the full 88 MB product has not been loaded by a test (the
+  label and three rows were checked). Nothing constructs `LunarRocks` outside the tests yet: the caller (Task 7) must
+  call `load_rock_abundance_map`, and with the shipped "diviner" the map then has to be fetched.
+- The real map's median (0.002-0.004) is about half the reference 0.0068: with "diviner" the mid latitudes get ~0.5 x
+  the Surveyor VI population. Points at the reference's 0.5 m lower limit or at the law (open, not changed).
+- No-data pixels (17 % of the equator row) fall back to the uniform law: a population step of up to ~2 x at the edge
+  of a gap (948 m pixels). A gap fill (nearest valid / smoothing) would remove it.
+- Size convention of the Surveyor fragment counts (long dimension vs mean / area-equivalent) not determined from the
+  original paper; D is taken as the plan-view-area-equivalent diameter (exact for Diviner's area fraction). If the
+  counts used the long dimension, rocks of a given count are ~10-30 % smaller than generated.
+- Rocks stand on the tangent plane at the base point, not tilted: on a slope s the ground falls away downhill, so the
+  underside is exposed there and the uphill side buried deeper (ellipsoid c/a 0.5, f 0.3 at 20 deg: the downhill
+  ground crossing moves from ~0.92 a to ~0.6 a). Crater walls near the site reach such slopes. Fix: burial against the
+  lowest ground under the footprint, or tilt large rocks.
 - Burial, rock albedo ratio and degraded d/D are estimates; no direct lunar measurements found.
 - One Hurst exponent for cm to tens of m although the measured breakover is 1-2 m (H 0.78 below, ~0.9 above).
 - Units of Shoemaker & Morris' 10^10.9 not confirmed from the original paper (used only as a comparison).
