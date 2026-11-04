@@ -3,7 +3,28 @@
 Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also live in `docs/subsystems/<slug>.md`.
 
 - #1147 (`Ship entry reproduces the webcast telemetry of flights 12-14`, flight 14 speed rms 8.33 % against 5 %): the webcast comparison is a report since 2026-11-03 (user: "report, not gate; physical gate kept"), `[nightly][webcast]` "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" writes `webcast_report/ship_entry_telemetry.md` (parameters: entry mass (177 t dry + 35 t headers), CG, crossflow Cd, flap CdA). The gate part (no impact, lift fraction saturated < 10 %, > 200 speed points) is green (measured 2026-11-03, 16 s) and red or green by physics only; the report row flight 14 speed rms was 0.083 (outside 0.05) at 255 t dry; since the 177 t of Task 3b it is 0.046 (inside), flights 12 / 13 0.061 / 0.091 (outside) and the Mach 3-1 rows of flights 13 / 14 0.28 / 0.25 (outside 0.1, slow); open vehicle-plan item, nothing tuned. The same applies to the other webcast bands (ascent flight 14 / CRS-35, descent rms, booster return timeline, ASDS and RTLS timelines, staging flip time, Crew Dragon chutes): reports, the physical gates stay in the normal tier. Dropped pins: the 77.5 deg bank of `test_entry_skip.cpp` (gate, miss and heat stay), the docking `KNOWN STATE` (report row).
-- Default-tier run after the test tiers (2026-11-03, `.superpowers/sdd/2026-11-03-test-tiers/full_after.log`): 7 of 1513 red at that run (the "Docked tanker" case is green since 2026-11-03); ctest numbers shift with every added case, so the reds are named by test: the two settling cases (green since planner plan Task 9, below), the reduced direct lunar case "Lunar return campaign (direct): seed 2", the two flap-trim cases (one since Task 3b, below); `plan_speed` is green since the re-measure of 2026-11-03. The timeline sampling case (formerly #711) was fixed by 9fbb94a and is green; #1147 is nightly.
+- Planner plan Task 12 re-measure (2026-11-04, `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/task-12-report.md`):
+  the plan's touched tags with `[slow]` (1143 cases, 1502 s) left 10 red; after the re-measures and test-premise fixes
+  two stay red, both entry trim with the 177 t ship (below): "The ship trims belly first with control margin on its
+  flaps" and "Entry guidance brings the ship to the Starbase flip gate from dispersed entries" (cases 8, 9, 11). Green
+  in that run: the settling cases, "Lunar return campaign (direct): seed 2", "Docked tanker: the ship return flies to
+  the catch", `plan_speed`, "Flaps pinned at their stops", every ship return / catch / lunar / Falcon 9 / Dragon campaign.
+- Entry trim with main-tank residue (planner plan Task 12, measured with the hidden "Diagnostic: flap trim along the
+  schedule over the propellant", `test_entry_attitude.cpp`; headers full, the rest in the main tanks): the 177 t ship
+  trims the alpha schedule with flaps alone up to ~40 t on board (CG 24.57 m: forward pair 73-83 deg at alpha 66-75);
+  from 45 t (CG 24.18 m) the schedule from Mach ~2 down (alpha 66-80) leaves one pair on its 90 deg stop and the RCS
+  saturated (fraction 0.8-1); 55 t already at Mach 3 / alpha 60, 62 t trims only at Mach 21 / alpha 55 (pair at 83.5
+  deg). The entry guidance campaign draws the main residue 0-28 t on top of the 35 t headers (the +-5 % entry-mass spread
+  of the 290 t ship): its cases 8 / 9 / 11 (61.6 / 54.4 / 56.3 t) depart in the transonic terminal phase (case 8: aoa
+  runs from 72 deg at Mach 1.9 to tail first, 5.4 km miss, 412 m/s sink; cases 9 / 11 reach the gate 2.0 / 1.3 km off);
+  every case up to 45.8 t is at the gate within 0.07 m. Physical limit of the vehicle, not a guidance defect: a 177 t
+  ship cannot fly the belly flop with more than ~5-10 t of main-tank residue; the ship returns enter with ~40 t and
+  pass. Open for the user: the mission rule for main-tank residue at entry (vent / burn it before the entry, or a
+  residue limit in the return planner) and the campaign's residue spread. Nothing tuned, no limit changed.
+- Trim margin, "The ship trims belly first with control margin on its flaps": alpha 70 deg at Mach 21 / 65 km (15 deg
+  above the schedule's 55) trims with the forward pair at 79.7 deg against the 75 deg margin limit (alpha 55 / 60:
+  46.7 / 54.3 deg). An attitude the schedule does not fly there; the limit is not changed (open, vehicle data).
+- Default-tier run after the test tiers (2026-11-03, `.superpowers/sdd/2026-11-03-test-tiers/full_after.log`): 7 of 1513 red at that run (the "Docked tanker" case is green since 2026-11-03); ctest numbers shift with every added case, so the reds are named by test: the two settling cases (green since planner plan Task 9, below), the reduced direct lunar case "Lunar return campaign (direct): seed 2" (green in the Task 12 run), the two flap-trim cases (one since Task 3b, above); `plan_speed` is green since the re-measure of 2026-11-03. The timeline sampling case (formerly #711) was fixed by 9fbb94a and is green; #1147 is nightly.
 - Reds since 47904b6 (ship hull CP table, station fade Mach 1-4, nose 17 -> 13.4 m), found by the full run 2026-11-03 (`.superpowers/sdd/test-audit/reds-report.md`), not re-pinned: the two settling cases of `test_ignition_settling.cpp` were green again by planner plan Task 9 (2026-11-03): the fixture drifted free for 4 h at the 120 km insertion perigee (~101 km per pass with J2 against the two-body placement), where the tumbling hull fell at ~14,000 s; mission tankers raise that perigee at the first apoapsis and drift free (burn_drifting, no RCS) only in the 170 x 190 km phasing orbit, so the two cases fly there (from the mission configs), no attitude hold added, no limit changed; (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (green since 2026-11-03: reference plans re-measured, see `docs/subsystems/lunar.md`).
 - Real-time play (planner plan Task 11b, fix round 1): every planner that held the sim thread for >= 0.4 s runs on a
   worker (ship-entry-return.md "Planner work off the sim thread"). Left: the entry guidance's first cycle after a
@@ -19,57 +40,13 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   seen starts its landing plan synchronously (~0.7 s sim-thread step) instead of one hold late. The refuelling first
   return's side flight on the worker interpolates the worker's interpolated ephemeris again (sub-mm): not bit-identical
   to the synchronous side flight (identical with real-time planning off).
-- Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, -1.1 % vacuum Isp on
-  every Raptor burn; nothing tuned back; measured `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/t1-{before,after}-full.log`):
-  - "Starship ascent to flight 14's insertion orbit": green since the ship dry mass 177 t (planner plan Task 3b,
-    2026-11-03): kick 16.87 deg, MECO T+129.25 s with 306.6 t, SECO T+433.7 s, 165.0 x 276.9 km, i 30.50 deg, 102.3 t
-    left in the ship. With 255 t every kick ran the main tanks dry ~60 m/s / ~5.6 t short (best 74 x 165 km).
-  - "Ship return campaign: dispersions 1-3" case 1: green since Task 1c (fresh SCvx catch plans escalate the soft
-    attitude penalty, `gnc-core.md`): gate miss 72 m, caught with 0.2 t (before the fix: catch plan cycled, abort, 5.1 t).
-    The gate miss of 72 m comes from the roll oscillation below.
-  - "Ship return campaign: dispersions 4-6" case 2 and "orbit phase 0-135 deg" case 1 (phase 45): green as single cases
-    since the ship dry mass 177 t (Task 3b; re-run at the start of planner plan Task 4: caught, 10.9 / 10.1 t left, gate
-    miss 3 / 5 m) and after Task 4 (12.3 / 10.9 t, 4 / 5 m; dispersed 0: 11.9 t). The campaigns themselves are
-    re-measured in Task 12. The state before (255 t dry), kept for the record: entry departure in the subsonic
-    terminal phase: from the basis freeze (h 13 km, Mach 0.69, nose turn to the tower, alpha 86 deg commanded) a roll
-    oscillation (+-0.3 rad/s) grows, both forward flaps sit on their 90 deg stop and the RCS saturates in yaw; the
-    attitude error grows ~2.7 deg/s to 80 deg, the ship arrives tail first at 2.66 km / 183 m/s sink, 479 m off, abort
-    (11.7 t left after Task 1c, 5.2 t before). Case 1 shows the same oscillation milder (it reaches the gate); caught cases fly the turn at
-    < 0.02 rad/s. The known yaw-authority shortfall at the nose turn (demand ~1e6 vs +-8.4e5 N m, `ship-entry-return.md`);
-    a ~0.1 % mass change at entry flips the case. Fix belongs to the entry guidance's nose turn within the flap / RCS
-    authority (plan Task 4), not done in Task 1c.
-  - "Ship return campaign: orbit phase 0-135 deg" case 1 (phase 45 deg): red since the inner rings / settled-column
-    commits (found by the Task 1c re-measure, red without the Task 1c changes too): the same terminal entry departure
-    (alpha 80 commanded, aoa 153-172 deg from h ~8 km), gate at 270 m/s sink, 1028 m off, abort, 0.0 t left. Same
-    open fix as above (Task 4).
-  - "Lunar return seed-18 gate is caught" ([ship][catch][lunar], gate replay): green again since the Task 3 fix round
-    (2026-11-03): caught at 0.95 m/s with 6.3 t left. It was red since the inner rings / settled-column commits (6.2,
-    after Task 3 6.96 m/s, headers dry): the ship's plans flew the booster's catch approach constant (3 s [E]); the
-    ship now derives its own (`gnc::ship_approach_time_constant_s`, 1.4 s, `ship-entry-return.md`).
-  - "Ship catch campaign: gate dispersions and an engine failure" ([slow]): case 12 (seed 13) was lost after Task 3
-    (6.4 m/s, 2.0 t): the SCvx guess ended phase 0 in the middle of the wide derived 3 -> 2 window. Since the fix
-    round the guess switches from the state (since planner Task 5 every fresh plan also starts from the window middle and keeps the better, `gnc::SwitchGuess`): seed 13 caught with 8.7 t
-    (single case). The campaign itself is re-measured in Task 12.
-  - `tanker_flight` reference: main at catch re-measured 0.37 -> 0.68 t (inner rings / settled-column commits; the
-    other tanker numbers within 1 % / 0.3 t, kept).
-  - "Lunar return campaign (direct): seed 15": green since Task 1c (same SCvx fix): caught with 3.6 t (cause: first catch
-    plan cycled at the default soft-limit penalty, virtual control 1.3e-12, defect 0.087, abort -> upright 3.8 t).
-    Seed 2 stays red (known).
-  - "Lunar return aerocapture: captured - perigee raised - caught by b4": red since the ship changes after Task 1c
-    (planner plan Task 6 fix round 1, 2026-11-03). Was: b4's first deorbit plan coasted drag-free, took a pass 111 h
-    ahead at 56.8 km planned crossrange that lay 125 km across with the real drag; the re-plans found none in reach, the
-    old burn was flown, the entry began 176 km across / 287 km long, the bank was held at the q limit and the ship came
-    down 950 km short (impact, 3.5 t). Now the first plan coasts with the ship's own drag (2.45e-3 m2/kg) and refuses:
-    from the 203.7 x 208.6 km orbit no pass comes within the mission's 60 km reach [E] - planned crossranges 199, 305,
-    270, 239, 183, 137, 102, 78, 67, 70 km on the bracketed passes to +8.6 d (minimum 66.7 km at +7.6 d). Measured: with a 90 km
-    reach the 78 km pass (+6.6 d, 70.7 m/s) is caught with 15.9 t; the reversals' lateral spread at the nominal bank is
-    ~-780 / +490 km. Open (decision): the 60 km reach is an [E] b2 campaign value, not derived from the ship.
-  - "A commanded abort late in the landing burn ditches the booster at sea": green again after the inner rings / inertia
-    commits (re-checked): 800 m ditches with 3.3 t (1500 m 6.7 t, 400 m lands on land 28.0 t as before).
-  - Turned green: "Docked tanker: the ship return flies to the catch".
-  - Refuelling reference flights re-measured (`config/refuelling/reference_flights.toml`, `refuelling.md`); the
-    calculator answers 13 tankers / 52.4 d (was 12 / 51.0 d); the campaign offsets are not re-calibrated (full flown
-    campaign not re-flown).
+- Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, nothing tuned
+  back): all green in the planner plan Task 12 run (2026-11-04): flight 14 ascent, the ship return campaigns (phase
+  0-135 / 180-315, dispersions 1-3 / 4-6; dispersed case 3 re-planned to the next pass, the campaign now follows the flown
+  plan), the lunar seed-18 gate, the ship catch campaign, the direct lunar seeds 2 / 12 / 15 / 18, "Lunar return
+  aerocapture: captured - perigee raised - caught by b4", the booster abort, the docked tanker return; refuelling
+  reference flights re-measured (7 tankers / 25.25 d, `refuelling.md`). The entries as they stood:
+  `docs/history/guidance-missions.md` "Known issues closed by the Task 12 re-measure".
 - Ship dry mass 255 -> 177 t, dry CG 23.516 -> 22.03 m (planner plan Task 3b, 2026-11-03; with full headers 212 t at
   24.99 m instead of 290 t at 25.50 m; `vehicle-data.md`). Single cases and `-Fast` of the touched tags, before ->
   after (`.superpowers/sdd/2026-11-03-planner-vehicle-parameters/task-3b-report.md`):
@@ -95,7 +72,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     at the basis freeze (Mach ~0.4) departs (axis error 7.6 deg, roll error -19 deg, RCS 13-22 x saturated, flaps on
     the 90 deg stops) and the ship drifts 180 m east, which the near-vertical fall cannot take back. The same start
     flown to the arms ("from Mach 2.6") is caught (0.96 m/s, 9.5 t, was 10.6 t).
-  - Red, predictions: "A ship's flip and catch records one landing burn". Found after Task 3b (fix round 1): (1) the
+  - Green in the Task 12 run (2026-11-04, `[timeline]` 29 of 29), before red, predictions: "A ship's flip and catch records one landing burn". Found after Task 3b (fix round 1): (1) the
     case placed the ship at 65 deg with the flaps at mid travel, the 290 t ship's state; the 212 t ship's steering
     commands 56.3 deg there (its first prediction at 65 deg fell 4.3 km short) and trims with the forward flaps ~20 deg
     further out: a ~10 s pitch transient the predictions do not fly. The case now starts at the commanded alpha with
@@ -113,11 +90,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     yaw-demand fixture starts over the pole). Mass-relative fixtures restated: no usable corridor at 10.9 km/s (0.13
     deg wide now), aerocapture window speed 9,992 m/s (below the corridor's 10,273), lunar return tanks 1/16, aircatch
     propellant 186.5 t.
-  - Refuelling measured numbers (Task 12 re-measures): "The measured-numbers file loads and matches its vehicles"
-    (tanker 171 t [E] vs the file's 209 t) and "The measured numbers belong to the current configs" (digest) red;
-    `tanker_flight` from the pad completes and is caught, its numbers moved: residue after ascent 98.1 -> 133.0 t,
-    rendezvous 15.66 -> 18.52 t, delivered LOX / CH4 54.6 / 13.8 -> 80.4 / 20.8 t, main at undock 12.59 -> 11.72 t, at
-    catch 0.68 -> 1.65 t.
+  - Refuelling measured numbers: green since the Task 12 re-measure (2026-11-04; tanker 171.15 t with stretched tanks,
+    depot 158.5 t, `tanker_flight` insertion 497.7 s; numbers in `refuelling.md`).
 - Crew Dragon entry: 1 cm of stage length moves a campaign case by up to 0.88 km (bound 2 km holds), source not determined (`.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/task-5-report.md`); held until the rendering is done, by the user's wish.
 - Falcon 9 / Crew Dragon / ISS detail models (plan 2026-11-02, end state; values in `.superpowers/sdd/2026-11-02-falcon-dragon-iss-models/final-values.md`), open for the user:
   - Port clocking: the `up` of the IDA-2 / IDA-3 ports is a photo-picked member [E, +-30 deg] of a measured class [D] (model D); no document states the real clock; IDA-3 aft vs forward rests on model D only. One config value, one tag run (`iss.md` "Port clocking").
@@ -157,7 +131,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   | measured masses, crossflow 1.5 | **5.14** / 1.0 | 2.66 / **12.5** / 0 | 3.75 / **22.2** / 0 | 0 of 50 green at 175 t dry |
   | measured masses, geometry crossflow 1.07-1.10 | 1.54 / 5.7 | **9.76** / **10.9** / 0 | **7.31** / 8.5 / 0 | passes at CG 25.50 m |
   | geometry + alpha 59.5 + masses + CG 24.85 m | 4.54 / **10.20** | 3.54 / **14.96** / **15.21** | 4.45 / **22.06** / 8.53 | departs, 10 of 10 fail (miss 5.2 km) |
-  | main since Task 3b (177 t dry, 212 t entry, CG 24.99 m, crossflow 1.5) | **6.07** / - | **9.08** / **27.9** / - | 4.55 / **24.7** / - | not run (Task 12) |
+  | main since Task 3b (177 t dry, 212 t entry, CG 24.99 m, crossflow 1.5) | **6.07** / - | **9.08** / **27.9** / - | 4.55 / **24.7** / - | departs, 5.4 km (Task 12; cases 9 / 11 2.0 / 1.3 km: "Entry trim with main-tank residue") |
 
   The last row is the nightly report
   "Ship entry: agreement with the webcast telemetry of flights 12-14 (report)" (speed rms above Mach 3 / rms Mach 3-1;

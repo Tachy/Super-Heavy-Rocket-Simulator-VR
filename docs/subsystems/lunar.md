@@ -55,7 +55,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   targets) on the 3 RVacs + RCS attitude (user 2026-10-15: Isp 380 vs 350), then sea_level_1, then the landing
   thrusters (the set drops at max(0.9 x next max, running minimum)); `mission::braking_range_m` (thrust fraction 0.55,
   factor 1.0, floor 150 km: 164 km at 566 t). Approach: SCvx on the landing thrusters from the high gate (700 m / 800 m
-  / 25 m/s), "equivalent gimbal" simplification (differential throttling ~20x the RCS torque, equivalent gimbal 9.4
+  / 25 m/s; the HLS is handed over from the braking burn with its engines at thrust, so its first SCvx plan starts from
+  the measured running thrust like every re-plan - `ScvxLandingGuidance::request`, planner plan Task 3b, the same rule
+  as the ship's flip; `[lunar_scvx]` / `[lunar_descent_flight]` / `[lunar_descent_session]` / `[hls]` green in the Task 12
+  run), "equivalent gimbal" simplification (differential throttling ~20x the RCS torque, equivalent gimbal 9.4
   deg; user 2026-10-15). Fresh approach plans start from the planner's constant-deceleration guess (from the landing set's T/W, the
   hand-over state, both switch starts; planner plan Task 6 - the former fixed 50/10/30 s phase times left 3.4 t less at
   566 and 500 t PDI); the lateral LQR effort is the vehicle's `[stage.lunar_landing] lateral_effort_fraction` (0.05

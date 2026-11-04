@@ -573,3 +573,9 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   caught tanker kept 6.16 t main (docked pair 7.81 t). Now planned for the copy holding only the reserve.
   Superseded too: the ships' rendezvous floors 600 / 900 kg (Crew Dragon's figures) on the Block 3 ship / tanker and
   the HLS, and `CampaignInputs::attitude_gas_kgps` 20 kg/day [E] (now `vehicle::lvlh_hold_gas_kgps`).
+
+### Reference flights before the planner plan Task 12 re-measure (2026-11-04)
+- Superseded (2026-11-03, Raptor nozzle 1.30 m; 209 t tanker, 255 t-era depot): tanker residue 98.1 t, rendezvous
+  15.66 t, delivered LOX / CH4 54.6 / 13.8 t, settling gas 0.98 t, main at undock 12.59 t, at catch 0.68 t; depot fill
+  63.1 t; calculator 13 tankers / 52.37 d (levers: dry 199 t). `tanker_flight` insertion 432.2 s / 12.25 deg (the
+  stretched tanker reaches orbit 65 s later, the window estimate was 1.2 deg off). Now: `docs/subsystems/refuelling.md`.

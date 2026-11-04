@@ -270,7 +270,7 @@ Fidelity flag `FlightEnvironment::ignition_settling` (default on, one source `ve
   main at catch 1.38 t (the tanker numbers of a 209 t tanker; flown 2026-11-03 with the stretched 171.15 t tanker,
   planner plan Task 4b: residue 152.7 t, rendezvous 18.19 t, delivered LOX / CH4 95.8 / 25.3 t in 750 s, settling gas
   1.21 t, main at undock 11.71 t, at catch 1.74 t, booster and ship caught; with Block 3's tanks at 171 t: 133.0 /
-  18.52 / 80.4 / 20.8 / 11.72 / 1.68 t - the file is re-measured in Task 12). `hls_refuel` (pad): SECO 428.3 s, arc 11.68 deg [D], residue 216.4 t, after the raise 208.3 t,
+  18.52 / 80.4 / 20.8 / 11.72 / 1.68 t; the file re-measured in planner plan Task 12, below). `hls_refuel` (pad): SECO 428.3 s, arc 11.68 deg [D], residue 216.4 t, after the raise 208.3 t,
   HLS main at docking 203.5 t, filled to 1,585 t (depot 1,500 -> 83 t), waited 5.3 days (2.7 t boil-off), lunar
   mission planned from 1,580 t; `hls_refuel_orbit`: docked 195 t, TLI 3,152 m/s. Full HLS departure 1.96 t of push gas.
 - Numbers from tests (tanker 200 t main propellant, depot 600 t, 200 km / 26.5 deg): phasing from 170 x 190 km, 8 deg
@@ -411,8 +411,8 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
 - -x docking thrusters on tanker and HLS, none on the Block 3 ship (user 2026-10-20).
 - Wetted-wall boil-off (user 2026-10-20); Block 3 lunar returns keep `boil_off = false`.
 - Tanker ascent figures (171 t dry, 120 x 190 km insertion) are [E] placeholders (user 2026-10-20; dry mass from the
-  177 t ship since planner plan Task 3b). The measured numbers (`reference_flights.toml`) still belong to 209 t until
-  Task 12 re-measures them.
+  177 t ship since planner plan Task 3b). The measured numbers (`reference_flights.toml`) belong to the 171.15 t
+  stretched tanker since planner plan Task 12.
 - Depot orbit followed in the calculator (user 2026-10-22); delivery calibration offsets (user 2026-10-21).
 - Pad turnaround 24 h [E] and the HLS-first-window rule; the calculator takes the first window (fewest days).
 - Raise tail-off wait without a timeout (no public path keeps an engine running with the autopilot idle in Raise).

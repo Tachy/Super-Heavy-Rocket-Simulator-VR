@@ -292,8 +292,12 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
 ## Validation
 - Ship entry replay of flights 12-14 (bank follows the recorded altitude): speed over time above Mach 3 within
   4.05 / 1.51 / **8.33** % rms (flights 13 / 12 / 14, limit 5: flight 14 outside, now a report row), below Mach 3 over altitude 4.7 / 9.0 %, belly-flop speed within 2-3 % (the nightly report "Ship entry: agreement with the webcast telemetry of flights 12-14", `webcast_report/ship_entry_telemetry.md`, parameters entry mass, CG, crossflow Cd, flap CdA). Since 2026-11-03 this is report, not gate (user 2026-11-03: "report, not gate; physical gate kept"): the normal-tier case "Ship entry flies the recorded paths of flights 12-14 without impact and with the trim in reach" gates no impact, lift fraction saturated < 10 %, > 200 speed points. The former red #1147 (flight 14 speed rms 8.33 % over the limit 5 %) is now a report row; the gate part is green or red by physics only.
-- Entry guidance campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase, truth aero +-10 %): 11
-  within 0.14 m, case 9 3.15 m (test: case 4 < 1.5 km, others < 100 m), belly <= 0.48 deg off down at the gate (limit 30), sink <= 102 m/s; load limit held. Guided 6-DOF 8.5 m.
+- Entry guidance campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase, truth aero +-10 %; planner
+  plan Task 12, 177 t dry): the 9 cases with up to 45.8 t on board at the gate within 0.07 m, belly <= 0.13 deg off
+  down, sink <= 84 m/s; red: cases 8 / 9 / 11 with 61.6 / 54.4 / 56.3 t (main-tank residue 19-27 t) - the schedule's
+  alpha is not trimmable with that aft CG from Mach ~2 down (case 8 departs to tail first, 5.4 km; cases 9 / 11 at the
+  gate 2.0 / 1.3 km off; `docs/known-issues.md` "Entry trim with main-tank residue"). Before (255 t dry): 11 within
+  0.14 m, case 9 3.15 m. Load limit held. Guided 6-DOF 8.5 m.
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
   engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t

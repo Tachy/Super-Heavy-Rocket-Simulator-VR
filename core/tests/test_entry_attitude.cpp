@@ -81,10 +81,11 @@ struct World {
 
 // Ship alone with only its landing propellant, flying horizontally (+x) at `height_m` over GCRF +z, in the entry
 // attitude for `alpha` (bank 0).
-std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world) {
+std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world,
+                                                double propellant_kg = -1.0) {
     auto cfg = config::load_vehicle(config_dir, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    config::fill_tanks(cfg.stages[0], cfg.stages[0].landing_propellant_kg);
+    config::fill_tanks(cfg.stages[0], propellant_kg >= 0.0 ? propellant_kg : cfg.stages[0].landing_propellant_kg);
     for (auto& f : cfg.stages[0].flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
     const Vec3 v{speed_mps, 0.0, 0.0}, up{0.0, 0.0, 1.0};
     const vehicle::RigidBodyState state{{0.0, 0.0, 6356752.3 + height_m}, v,
@@ -136,6 +137,25 @@ TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry
         for (double d : t.deflection_rad) {
             CHECK(d >= 15.0 * deg);
             CHECK(d <= 75.0 * deg);
+        }
+    }
+}
+
+// Diagnostic (planner plan Task 12): the flap trim along the alpha schedule over the propellant on board (headers full,
+// the rest main-tank residue): deflections and the RCS remainder per point.
+TEST_CASE("Diagnostic: flap trim along the schedule over the propellant", "[.diag_trim]") {
+    World world;
+    struct Point { double height_m, speed_mps, alpha_deg; };
+    const Point points[] = {{65000.0, 6500.0, 55.0}, {35000.0, 900.0, 60.0}, {27000.0, 560.0, 66.0},
+                            {25000.0, 445.0, 70.0},  {20000.0, 330.0, 75.0}, {15000.0, 240.0, 80.0}};
+    for (double propellant_t : {35.0, 40.0, 45.0, 50.0, 55.0, 62.0}) {
+        for (const auto& p : points) {
+            auto body = entry_ship(p.height_m, p.speed_mps, p.alpha_deg * deg, world, propellant_t * 1000.0);
+            const Trim t = trim(*body);
+            std::cout << "prop " << propellant_t << " t, cg " << body->vehicle().mass_properties().cg_station_m << " m, h "
+                      << p.height_m / 1000.0 << " km v " << p.speed_mps << " alpha " << p.alpha_deg << ": flaps";
+            for (double d : t.deflection_rad) std::cout << " " << d / deg;
+            std::cout << "  rcs " << norm(t.remainder_fraction) << "\n";
         }
     }
 }

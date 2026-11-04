@@ -713,3 +713,58 @@ took one guidance step (0.3) per 10 s cycle.
 Planner plan Task 7 fix round 3 (superseded by fix round 4): the deorbit burn's dispersion was the ship return campaign's open-loop execution error, magnitude +-1 % and pointing 0.5 deg for every vehicle; the air set had no lift-only case; a dispersed burn that skipped the interface was judged on the nominal interface (it counted as flying); the aim classification took any non-zero energy, so ignition-timing cases (energy ~0 by construction) pushed the aim by their noise; the planner printed its fallback note for every plan, also the tanker's hypothetical reserve and departure searches. Crew Dragon then had no robust pass: the -1 % case (1.4 m/s short) moved the interface ~10 s on and failed (fallback, 11 of 12); the docked tanker took a -623 km pass (reach 641 km). Fix round 4 made the dispersion the vehicle's closed-loop cutoff residual (config) - 5-10x smaller -, with which Dragon's ~15 km pass flies all 14 cases.
 
 Falcon 9 flip before planner plan Task 10 (2026-11-03): boostback ignition gate 114 deg off the velocity (the extrapolation's centre); separation -> ignition flown 14.7-14.8 s (MECO plan 14.65 s), 0.4 s beyond the timelines' 13.7 +-0.6 s band; flip campaign ignition 14.55-15.15 s. Up to planner Task 5 (measured on e5cb24e) campaign separation 4 stood upright 121.19 m off the LZ-40 centre (6608 kg left, 26 plans, 5 failed): its first SCvx plan (converged, 21 it) held the ignition set only 1.18 s; the next four warm-started re-plans (snapshots 1-4 s after ignition, 2.5-1.85 km) each ran out of their 10 iterations with the linearised dynamics holding (virtual control <= 1.4e-14) but still stepping (step 0.23-0.51) and nonlinear defects 0.023-0.23 above the flyable 0.005, so unconverged_before_abort (4) gave the pad up at 1.75 km for the sea abort, which came down on land. Task 5's profile commit (6761830: config landing profile, derived approach and limits) fixes it on its own: first plan 2.37 s on the ignition set, every re-plan converges (2-10 it), 0.00 m off, 23 plans, 0 failed. A/B at 9ce0054: neither the two-start switch guess nor the former [E] rate limits 0.2 / 0.15 / 0.1 rad/s bring it back (both 0.00 m, 0 failed).
+
+### Known issues closed by the Task 12 re-measure (planner plan, 2026-11-04)
+The `docs/known-issues.md` entry as it stood before the re-measure (all green since):
+
+- Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, -1.1 % vacuum Isp on
+  every Raptor burn; nothing tuned back; measured `.superpowers/sdd/2026-11-03-planner-vehicle-parameters/t1-{before,after}-full.log`):
+  - "Starship ascent to flight 14's insertion orbit": green since the ship dry mass 177 t (planner plan Task 3b,
+    2026-11-03): kick 16.87 deg, MECO T+129.25 s with 306.6 t, SECO T+433.7 s, 165.0 x 276.9 km, i 30.50 deg, 102.3 t
+    left in the ship. With 255 t every kick ran the main tanks dry ~60 m/s / ~5.6 t short (best 74 x 165 km).
+  - "Ship return campaign: dispersions 1-3" case 1: green since Task 1c (fresh SCvx catch plans escalate the soft
+    attitude penalty, `gnc-core.md`): gate miss 72 m, caught with 0.2 t (before the fix: catch plan cycled, abort, 5.1 t).
+    The gate miss of 72 m comes from the roll oscillation below.
+  - "Ship return campaign: dispersions 4-6" case 2 and "orbit phase 0-135 deg" case 1 (phase 45): green as single cases
+    since the ship dry mass 177 t (Task 3b; re-run at the start of planner plan Task 4: caught, 10.9 / 10.1 t left, gate
+    miss 3 / 5 m) and after Task 4 (12.3 / 10.9 t, 4 / 5 m; dispersed 0: 11.9 t). The campaigns themselves are
+    re-measured in Task 12. The state before (255 t dry), kept for the record: entry departure in the subsonic
+    terminal phase: from the basis freeze (h 13 km, Mach 0.69, nose turn to the tower, alpha 86 deg commanded) a roll
+    oscillation (+-0.3 rad/s) grows, both forward flaps sit on their 90 deg stop and the RCS saturates in yaw; the
+    attitude error grows ~2.7 deg/s to 80 deg, the ship arrives tail first at 2.66 km / 183 m/s sink, 479 m off, abort
+    (11.7 t left after Task 1c, 5.2 t before). Case 1 shows the same oscillation milder (it reaches the gate); caught cases fly the turn at
+    < 0.02 rad/s. The known yaw-authority shortfall at the nose turn (demand ~1e6 vs +-8.4e5 N m, `ship-entry-return.md`);
+    a ~0.1 % mass change at entry flips the case. Fix belongs to the entry guidance's nose turn within the flap / RCS
+    authority (plan Task 4), not done in Task 1c.
+  - "Ship return campaign: orbit phase 0-135 deg" case 1 (phase 45 deg): red since the inner rings / settled-column
+    commits (found by the Task 1c re-measure, red without the Task 1c changes too): the same terminal entry departure
+    (alpha 80 commanded, aoa 153-172 deg from h ~8 km), gate at 270 m/s sink, 1028 m off, abort, 0.0 t left. Same
+    open fix as above (Task 4).
+  - "Lunar return seed-18 gate is caught" ([ship][catch][lunar], gate replay): green again since the Task 3 fix round
+    (2026-11-03): caught at 0.95 m/s with 6.3 t left. It was red since the inner rings / settled-column commits (6.2,
+    after Task 3 6.96 m/s, headers dry): the ship's plans flew the booster's catch approach constant (3 s [E]); the
+    ship now derives its own (`gnc::ship_approach_time_constant_s`, 1.4 s, `ship-entry-return.md`).
+  - "Ship catch campaign: gate dispersions and an engine failure" ([slow]): case 12 (seed 13) was lost after Task 3
+    (6.4 m/s, 2.0 t): the SCvx guess ended phase 0 in the middle of the wide derived 3 -> 2 window. Since the fix
+    round the guess switches from the state (since planner Task 5 every fresh plan also starts from the window middle and keeps the better, `gnc::SwitchGuess`): seed 13 caught with 8.7 t
+    (single case). The campaign itself is re-measured in Task 12.
+  - `tanker_flight` reference: main at catch re-measured 0.37 -> 0.68 t (inner rings / settled-column commits; the
+    other tanker numbers within 1 % / 0.3 t, kept).
+  - "Lunar return campaign (direct): seed 15": green since Task 1c (same SCvx fix): caught with 3.6 t (cause: first catch
+    plan cycled at the default soft-limit penalty, virtual control 1.3e-12, defect 0.087, abort -> upright 3.8 t).
+    Seed 2 stays red (known).
+  - "Lunar return aerocapture: captured - perigee raised - caught by b4": red since the ship changes after Task 1c
+    (planner plan Task 6 fix round 1, 2026-11-03). Was: b4's first deorbit plan coasted drag-free, took a pass 111 h
+    ahead at 56.8 km planned crossrange that lay 125 km across with the real drag; the re-plans found none in reach, the
+    old burn was flown, the entry began 176 km across / 287 km long, the bank was held at the q limit and the ship came
+    down 950 km short (impact, 3.5 t). Now the first plan coasts with the ship's own drag (2.45e-3 m2/kg) and refuses:
+    from the 203.7 x 208.6 km orbit no pass comes within the mission's 60 km reach [E] - planned crossranges 199, 305,
+    270, 239, 183, 137, 102, 78, 67, 70 km on the bracketed passes to +8.6 d (minimum 66.7 km at +7.6 d). Measured: with a 90 km
+    reach the 78 km pass (+6.6 d, 70.7 m/s) is caught with 15.9 t; the reversals' lateral spread at the nominal bank is
+    ~-780 / +490 km. Open (decision): the 60 km reach is an [E] b2 campaign value, not derived from the ship.
+  - "A commanded abort late in the landing burn ditches the booster at sea": green again after the inner rings / inertia
+    commits (re-checked): 800 m ditches with 3.3 t (1500 m 6.7 t, 400 m lands on land 28.0 t as before).
+  - Turned green: "Docked tanker: the ship return flies to the catch".
+  - Refuelling reference flights re-measured (`config/refuelling/reference_flights.toml`, `refuelling.md`); the
+    calculator answers 13 tankers / 52.4 d (was 12 / 51.0 d); the campaign offsets are not re-calibrated (full flown
+    campaign not re-flown).
