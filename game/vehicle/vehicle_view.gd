@@ -76,7 +76,7 @@ func _hull_kind(part: String, stage: Dictionary, models: Dictionary = _models) -
 		return "ship"  # tiled: they lie inside the coverage
 	if part != "hull":
 		return "steel"
-	return "ship" if stage["id"] == "ship" else "booster"
+	return "ship" if stage["id"] == VehicleModels.ship_stage_id(models) else "booster"
 
 
 ## Rebuilds geometry when the stage list changed (e.g. after separation), then places the body.
@@ -128,22 +128,37 @@ func _ensure_sets(stages: Array) -> Array[Dictionary]:
 func _load_sets(stages: Array) -> Array[Dictionary]:
 	_model_sets.clear()
 	_models = {}
-	for id in _vehicle_ids(stages):
-		var ms := VehicleModels.load_for(id)
-		if not ms.is_empty():
-			_model_sets.append(ms)
-	for ms in _model_sets:
-		if not stages.is_empty() and (ms["hulls"] as Dictionary).has(stages[0]["id"]):
-			_models = ms
-	if _models.is_empty() and not _model_sets.is_empty():
-		_models = _model_sets[0]
-	_stage_models.clear()
+	var ids := _vehicle_ids(stages)
+	var by_id := {}  # model set id -> its set ({} = none)
+	for id in ids:
+		by_id[id] = VehicleModels.load_for(id)
+	# one vehicle: every stage is drawn by the set VehicleModels.model_set_for_stage names (a taken-over stage by its
+	# source vehicle); a stack ("a+b"): by the set that holds the stage's hull
+	var set_ids: Array[String] = []
 	for stage: Dictionary in stages:
+		var set_id := VehicleModels.model_set_for_stage(ids[0], stage["id"]) if ids.size() == 1 else ""
+		set_ids.append(set_id)
+		if set_id != "" and not by_id.has(set_id):
+			by_id[set_id] = VehicleModels.load_for(set_id)
+	for id: String in by_id:
+		if not (by_id[id] as Dictionary).is_empty():
+			_model_sets.append(by_id[id])
+	_stage_models.clear()
+	for i in stages.size():
 		var own := {}
-		for ms in _model_sets:
-			if (ms["hulls"] as Dictionary).has(stage["id"]):
-				own = ms
+		if set_ids[i] != "":
+			var candidate: Dictionary = by_id[set_ids[i]]
+			if not candidate.is_empty() and (candidate["hulls"] as Dictionary).has(stages[i]["id"]):
+				own = candidate
+		else:
+			for ms in _model_sets:
+				if (ms["hulls"] as Dictionary).has(stages[i]["id"]):
+					own = ms
 		_stage_models.append(own)
+	if not stages.is_empty() and not (_stage_models[0] as Dictionary).is_empty():
+		_models = _stage_models[0]
+	elif not _model_sets.is_empty():
+		_models = _model_sets[0]
 	return _model_sets
 
 
@@ -228,10 +243,11 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 		staged.append(not hull.is_empty())
 		if hull.is_empty():
 			_add_cylinders(stage, axis_rotation)
+	# stale / missing models: say so on screen, also when another vehicle's set draws some stages (tanker booster)
+	var notice := ModelNotice.label(_notice_text(stages))
+	if notice != null:
+		_stage_root.add_child(notice)
 	if _models.is_empty():
-		var notice := ModelNotice.label(_notice_text(stages))  ## stale / missing models: say so on screen
-		if notice != null:
-			_stage_root.add_child(notice)
 		return
 	var stage_nodes: Array[Node3D] = []
 	for i in stages.size():

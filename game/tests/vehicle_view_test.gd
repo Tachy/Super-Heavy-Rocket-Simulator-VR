@@ -49,6 +49,7 @@ func _initialize() -> void:
 	var no_snapshot_id := _view(snapshot, "")
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
 	_check_other_model_vehicles(snapshot)
+	_check_ship_variants(snapshot)
 	_check(_check_falcon9() == true, "check_falcon9 ran to its end (an aborted check is a failure)")
 	_check(_check_dragon() == true, "check_dragon ran to its end (an aborted check is a failure)")
 	_check(_check_iss() == true, "check_iss ran to its end (an aborted check is a failure)")
@@ -591,8 +592,9 @@ func _bounds_x(mesh: Mesh) -> Vector2:
 func _check_other_model_vehicles(snapshot: Dictionary) -> void:
 	for id in ["falcon9_block5", "crew_dragon", "iss"]:
 		_check(VehicleModels.MODEL_VEHICLE_IDS.has(id), "%s is a model vehicle" % id)
-	_check(VehicleModels.MODEL_VEHICLE_IDS.has(VEHICLE) and not VehicleModels.MODEL_VEHICLE_IDS.has("starship_tanker"),
-			"the Starship is a model vehicle, the tanker is not")
+	for id in ["starship_block3", "starship_tanker", "starship_depot", "starship_hls"]:
+		_check(VehicleModels.MODEL_VEHICLE_IDS.has(id), "%s is a model vehicle" % id)
+	_check(not VehicleModels.MODEL_VEHICLE_IDS.has("starship_hls_launch"), "the HLS launch vehicle reuses model sets, it has none")
 	var scratch := OS.get_user_data_dir().path_join("vehicle_view_test_%d" % OS.get_process_id())
 	for id in ["falcon9_block5", "crew_dragon"]:
 		VehicleModels.clear_cache()
@@ -634,6 +636,76 @@ func _check_other_model_vehicles(snapshot: Dictionary) -> void:
 				"%s: fresh manifest, no generated files yet: {} with one log line" % id)
 	VehicleModels.clear_cache()  # also resets root_override
 	OS.move_to_trash(scratch)
+
+
+## Ship variants (tanker, depot, HLS; plan 2026-11-04, Task 2): which model set draws which stage (the snapshot reports the
+## composite vehicle, "a/<stage>" after a separation), and the fallbacks of the new ids on a scratch repo folder: no manifest
+## or a stale one gives {}, exactly one log line, cylinders, and a loaded starship_block3 set stays as it is.
+func _check_ship_variants(snapshot: Dictionary) -> void:
+	var expected := {
+		["starship_block3", "booster"]: "starship_block3", ["starship_block3", "ship"]: "starship_block3",
+		["starship_tanker", "booster"]: "starship_block3", ["starship_tanker", "ship"]: "starship_tanker",
+		["starship_hls_launch", "booster"]: "starship_block3", ["starship_hls_launch", "hls"]: "starship_hls",
+		["starship_depot", "booster"]: "starship_depot", ["starship_depot", "depot"]: "starship_depot",
+		["starship_hls", "hls"]: "starship_hls", ["falcon9_block5", "first_stage"]: "falcon9_block5",
+	}
+	for key: Array in expected:
+		for form: String in ["%s", "%s/%s"]:  # before and after a separation
+			var vehicle: String = form % [key[0], key[1]] if form.contains("/") else key[0]
+			_check(VehicleModels.model_set_for_stage(vehicle, key[1]) == expected[key],
+					"model set of %s / %s is %s" % [vehicle, key[1], expected[key]])
+	var block3 := VehicleModels.load_for(VEHICLE)  # the real set (or {}): must survive the scratch cases
+	var scratch := OS.get_user_data_dir().path_join("vehicle_view_variants_%d" % OS.get_process_id())
+	var ids := ["starship_tanker", "starship_depot", "starship_hls"]
+	VehicleModels.root_override = scratch
+	DirAccess.make_dir_recursive_absolute(scratch.path_join("config/vehicles/detail"))
+	for id in ids:
+		DirAccess.make_dir_recursive_absolute(scratch.path_join("data/models").path_join(id))
+		var lines := VehicleModels.log_count
+		_check(VehicleModels.load_for(id).is_empty() and VehicleModels.load_for(id).is_empty(), "%s: no manifest: {}" % id)
+		var view := _view(snapshot, id)
+		_check(VehicleModels.log_count - lines == 1, "%s: no manifest: exactly one log line (%d)" % [id, VehicleModels.log_count - lines])
+		_check(_count(view, "MultiMeshInstance3D") == 0 or not block3.is_empty(), "%s: no manifest: no engine models" % id)
+		_check(VehicleModels.fallback_reason(id) == "missing", "%s: no manifest: reason missing" % id)
+	for id in ids:  # a manifest older than the detail file written below
+		var manifest := FileAccess.open(scratch.path_join("data/models").path_join(id).path_join("manifest.json"), FileAccess.WRITE)
+		manifest.store_string("{}")
+		manifest.close()
+	OS.delay_msec(1100)  # get_modified_time has a resolution of 1 s
+	for id in ids:
+		var detail := FileAccess.open(scratch.path_join("config/vehicles/detail/%s.toml" % id), FileAccess.WRITE)
+		detail.store_string("# newer than the models\n")
+		detail.close()
+		VehicleModels._cache.erase(id)  # as a new run: the failure of the first call is cached
+		VehicleModels._logged.erase(id)
+		var lines := VehicleModels.log_count
+		_check(VehicleModels.load_for(id).is_empty() and VehicleModels.load_for(id).is_empty(), "%s: stale models: {}" % id)
+		var view := _view(snapshot, id)
+		_check(VehicleModels.log_count - lines == 1, "%s: stale models: exactly one log line (%d)" % [id, VehicleModels.log_count - lines])
+		_check(VehicleModels.fallback_reason(id) == "stale", "%s: stale models: reason stale" % id)
+		_check(view.find_children("ModelNotice", "Label3D", true, false).size() == 1, "%s: stale models: German notice" % id)
+	_check(is_same(VehicleModels.load_for(VEHICLE), block3), "a loaded starship_block3 set is untouched by the variants' fallbacks")
+	if not block3.is_empty():
+		# the tanker's booster is drawn by the Block 3 set, its ship (no tanker models) by cylinders
+		var tanker := _view(snapshot, "starship_tanker")
+		_check(is_same(tanker._stage_models[0], block3) and (tanker._stage_models[1] as Dictionary).is_empty(),
+				"tanker with Block 3 models only: booster modelled by starship_block3, ship cylinders")
+		_check(tanker.find_children("stage_booster", "Node3D", true, false).size() == 1, "tanker: booster node from the Block 3 set")
+	VehicleModels.clear_cache()  # also resets root_override
+	OS.move_to_trash(scratch)
+	VehicleModels.load_for(VEHICLE)  # the real set again for the cases after this one
+	# generated sets (python tools/structures/build_models.py --vehicle <id>): hulls keyed by the config's stage ids
+	var generated := {"starship_tanker": ["booster", "ship"], "starship_depot": ["booster", "depot"], "starship_hls": ["hls"]}
+	for id: String in generated:
+		var set := VehicleModels.load_for(id)
+		if set.is_empty():
+			print("  (no %s models: set cases skipped)" % id)
+			continue
+		var keys: Array = (set["hulls"] as Dictionary).keys()
+		keys.sort()
+		_check(keys == generated[id], "%s: hulls of %s (got %s)" % [id, generated[id], keys])
+		_check((set["flap"] as Dictionary).is_empty() == (id != "starship_tanker"), "%s: flap models only on the tanker" % id)
+		_check(VehicleModels.ship_stage_id(set) == generated[id][-1], "%s: ship stage id" % id)
 
 
 func _check_models(stages: Array, snapshot: Dictionary, models: Dictionary) -> void:

@@ -1,0 +1,12 @@
+# Visual detail of starship_depot: the orbital propellant depot (a Block 3 ship hull that never returns).
+# Only the variant switches live here; every other table (hull, ship, flap, booster, engines, ...) comes from
+# starship_block3.toml (tools/structures/vehicle_spec.py, VARIANT_BASE). Placement and physics: config/vehicles/starship_depot.toml.
+# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+
+[variant]
+tiles = false         # [E] heat-shield tiles on the belly: none, no heat shield (config header)
+flaps = false         # [E] drawn flaps and hinge covers: none (config header)
+chine = false         # [E] tiled chine strips: tied to the tiles
+catch_pins = false    # [E] catch pins on the ship: none, it is not caught (config header)
+payload_door = false  # [E] cargo door in the hull: none
+skin = "insulated"    # [E] light MLI skin, baked by the depot hull task (Task 4); steel until then

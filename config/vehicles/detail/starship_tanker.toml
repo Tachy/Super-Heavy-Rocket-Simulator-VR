@@ -1,0 +1,12 @@
+# Visual detail of starship_tanker: the Block 3 tanker (ship hull as Block 3; the larger tanks need no outer change).
+# Only the variant switches live here; every other table (hull, ship, flap, booster, engines, ...) comes from
+# starship_block3.toml (tools/structures/vehicle_spec.py, VARIANT_BASE). Placement and physics: config/vehicles/starship_tanker.toml.
+# Every value line carries [E] (own estimate, method named) or [S] (published, URL). Keys: config/README.md.
+
+[variant]
+tiles = true          # [E] heat-shield tiles on the belly: the tanker re-enters like Block 3
+flaps = true          # [E] drawn flaps and hinge covers: as Block 3
+chine = true          # [E] tiled chine strips beside the tile field: as Block 3
+catch_pins = true     # [E] catch pins on the ship: as Block 3
+payload_door = false  # [E] cargo door in the hull: none drawn until the cargo-bay work
+skin = "steel"        # [E] Block 3 steel skin

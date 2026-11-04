@@ -32,9 +32,9 @@ def test_game_source_lists_name_the_starship_scripts():
 
 def test_unknown_vehicle_is_an_error():
     with pytest.raises(vehicle_spec.VehicleSpecError):
-        vehicle_spec.generator_table("starship_tanker")
+        vehicle_spec.generator_table("starship_hls_launch")
     with pytest.raises(vehicle_spec.VehicleSpecError):
-        vehicle_spec.load("starship_tanker")
+        vehicle_spec.load("starship_hls_launch")
 
 
 @pytest.mark.parametrize("vehicle_id", IDS[2:])

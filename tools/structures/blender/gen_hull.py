@@ -349,6 +349,7 @@ def _build_raceway(stage, detail, profile):
 def build_stage(spec, stage_id):
     """Builds the stage's objects in the current scene; returns (root object, {node name: triangles})."""
     stage, detail = spec["stages"][stage_id], spec["detail"]
+    variant = spec.get("variant", {})  # tiles / flaps / chine / catch_pins switches of a ship variant; none = Block 3
     aft = detail["ship"]["engine_bay"]["aft_chamfer_m"] if stage_id == "ship" else None
     profile = Profile(stage, detail["hull"], aft)
     root = vc.empty(stage_id)
@@ -363,8 +364,10 @@ def build_stage(spec, stage_id):
             parts["fin_fairings"] = _build_fin_fairings(stage, detail, profile)
     else:
         parts["engine_bay"] = _build_engine_bay(stage, detail, profile)
-        parts["chine"] = _build_chine(stage, detail, profile)
-        parts["hinge_covers"] = _build_hinge_covers(stage, detail, profile)
+        if variant.get("chine", True):
+            parts["chine"] = _build_chine(stage, detail, profile)
+        if variant.get("flaps", True):
+            parts["hinge_covers"] = _build_hinge_covers(stage, detail, profile)
         parts["raceway"] = _build_raceway(stage, detail, profile)
         parts["ports"] = _build_ports(stage, detail, profile)
     if stage.get("catch_pins") and stage_id != "booster":  # the booster's bearing is the fins' flat bar, no frame shows a pin
@@ -380,6 +383,8 @@ def main():
     spec = vc.load_spec(args["spec"])
     out = Path(args["out"])
     for stage_id in ("booster", "ship"):
+        if stage_id not in spec["stages"]:  # the HLS has no booster
+            continue
         vc.common.clear_scene()
         root, tris = build_stage(spec, stage_id)
         vc.export_selected(out / f"{stage_id}.gltf", [root])

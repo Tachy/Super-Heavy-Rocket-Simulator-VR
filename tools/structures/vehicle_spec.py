@@ -396,22 +396,81 @@ def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
     return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail}
 
 
-def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
+VARIANT_BOOLS = ("tiles", "flaps", "chine", "catch_pins", "payload_door")
+VARIANT_SKINS = ("steel", "insulated", "white")
+VARIANT_BASE = "starship_block3"  # a variant's detail file holds only [variant] and its own tables; the rest is Block 3's
+
+
+def variant_of(detail: dict) -> dict:
+    """The ship variant switches of a detail file: [variant] over the defaults (all true, skin steel = Block 3)."""
+    given = detail.get("variant", {})
+    unknown = sorted(set(given) - set(VARIANT_BOOLS) - {"skin"})
+    if unknown:
+        raise VehicleSpecError(f"[variant]: unknown key {unknown}")
+    variant = {k: True for k in VARIANT_BOOLS}
+    variant["skin"] = "steel"
+    for k, v in given.items():
+        if k == "skin":
+            if v not in VARIANT_SKINS:
+                raise VehicleSpecError(f"[variant].skin: one of {VARIANT_SKINS}, got {v!r}")
+        elif not isinstance(v, bool):
+            raise VehicleSpecError(f"[variant].{k}: must be true or false, got {v!r}")
+        variant[k] = v
+    return variant
+
+
+def resolve_stages(vehicle_id: str, vehicles_dir: Path = VEHICLES, _depth: int = 0) -> list:
+    """The stage tables of a vehicle config, bottom to top. A taken-over stage (`from = "<vehicle>:<stage>"`) is the
+    source stage's table (its physics, flaps, engines) with the entry's tank changes merged into `tank` by id."""
+    if _depth > 4:
+        raise VehicleSpecError(f"{vehicle_id}: stage.from chain too long (a cycle?)")
     with open(vehicles_dir / f"{vehicle_id}.toml", "rb") as f:
         vehicle = tomllib.load(f)
+    stages = []
+    for entry in vehicle["stage"]:
+        if "from" not in entry:
+            stages.append(entry)
+            continue
+        source_id, _, stage_id = entry["from"].partition(":")
+        source = next((s for s in resolve_stages(source_id, vehicles_dir, _depth + 1) if s["id"] == stage_id), None)
+        if source is None:
+            raise VehicleSpecError(f"{vehicle_id}: stage.from = {entry['from']!r}: no such stage")
+        # the entry's tank list only resizes tanks of the source (core/src/config/vehicle_config.cpp, load_stage_from)
+        tanks = [dict(t) for t in source.get("tank", [])]
+        for change in entry.get("tank", []):
+            target = next((t for t in tanks if t["id"] == change["id"]), None)
+            if target is None:
+                raise VehicleSpecError(f"{vehicle_id}: tank {change['id']!r} is not on {entry['from']!r}")
+            target.update(change)
+        stages.append({**source, "tank": tanks})
+    return stages
+
+
+def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
+    """Spec of a Block 3 vehicle or ship variant. Stages are keyed by ROLE ("booster", "ship"): the one stage that is not
+    the booster is the "ship" role whatever its id (depot, hls); a variant spec also names it as `stage_id`."""
     with open(vehicles_dir / "detail" / f"{vehicle_id}.toml", "rb") as f:
         detail = tomllib.load(f)
+    is_variant = "variant" in detail
+    if is_variant and vehicle_id != VARIANT_BASE:
+        with open(vehicles_dir / "detail" / f"{VARIANT_BASE}.toml", "rb") as f:
+            base = tomllib.load(f)
+        detail = {**base, **detail}  # table level: a variant may replace a whole table
+    variant = variant_of(detail)
     validate_detail(detail)
     stages = {}
     engine_ids = set()
-    for s in vehicle["stage"]:
+    for s in resolve_stages(vehicle_id, vehicles_dir):
+        role = "booster" if s["id"] == "booster" else "ship"
+        if role in stages:
+            raise VehicleSpecError(f"{vehicle_id}: two stages of the role '{role}'")
         aero = s.get("aero", {})
         belly = float(aero.get("belly_azimuth_deg", 270.0))
         profile = hull_profile.Profile({"length_m": float(s["length_m"]), "diameter_m": float(s["diameter_m"]),
                                        "nose_length_m": float(aero.get("nose_length_m", 0.0))}, detail["hull"],
-                                       detail["ship"]["engine_bay"]["aft_chamfer_m"] if s["id"] == "ship" else None)
+                                       detail["ship"]["engine_bay"]["aft_chamfer_m"] if role == "ship" else None)
         flaps = []
-        for fl in s.get("flap", []):
+        for fl in (s.get("flap", []) if variant["flaps"] else []):
             flaps.append({
                 "id": fl["id"], "hinge_azimuth_deg": float(fl["hinge_azimuth_deg"]),
                 "station_fwd_m": float(fl["station_fwd_m"]), "station_aft_m": float(fl["station_aft_m"]),
@@ -422,6 +481,8 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
             flaps[-1].update(drawn_hinge(flaps[-1], detail["flap"][flaps[-1]["kind"]], profile))
         engines = []
         for g in s.get("engine_group", []):
+            if is_variant and g["engine"] not in detail["engines"]:
+                continue  # an engine the variant has no model for (the HLS landing thrusters: its own task) keeps no mesh
             engine_ids.add(g["engine"])
             count = int(g.get("count", 1))
             angles = g.get("angles_deg") or [360.0 * i / count for i in range(count)]
@@ -429,14 +490,20 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
                 raise VehicleSpecError(f"{s['id']}.{g['id']}: angles_deg has {len(angles)} entries, count {count}")
             engines.append({"group": g["id"], "engine": g["engine"], "ring_radius_m": float(g["ring_radius_m"]),
                             "station_m": float(g.get("station_m", 0.0)), "angles_deg": [float(a) for a in angles]})
-        stages[s["id"]] = {
+        stages[role] = {
             "length_m": float(s["length_m"]), "diameter_m": float(s["diameter_m"]),
             "nose_length_m": float(aero.get("nose_length_m", 0.0)), "belly_azimuth_deg": belly,
-            "grid_fins": s.get("grid_fins"), "catch_pins": s.get("catch_pins"), "flaps": flaps, "engines": engines,
+            "grid_fins": s.get("grid_fins"), "catch_pins": s.get("catch_pins") if variant["catch_pins"] else None,
+            "flaps": flaps, "engines": engines,
         }
-    for k in ("booster", "ship"):
-        if k not in stages:
-            raise VehicleSpecError(f"{vehicle_id}: no stage '{k}'")
+        if is_variant:
+            stages[role]["stage_id"] = s["id"]
+            stages[role]["tanks"] = {t["id"]: {k: float(t[k]) for k in ("mass_kg", "base_station_m") if k in t}
+                                     for t in s.get("tank", [])}
+    if "ship" not in stages:
+        raise VehicleSpecError(f"{vehicle_id}: no ship stage")
+    if "booster" not in stages and not is_variant:
+        raise VehicleSpecError(f"{vehicle_id}: no stage 'booster'")
     engine_spec = {}
     for eid in sorted(engine_ids):
         with open(engines_dir / f"{eid}.toml", "rb") as f:
@@ -450,7 +517,10 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
                  for st in stages.values() for f in st["flaps"] if f["kind"] == k}
         if len(sizes) > 1:
             raise VehicleSpecError(f"flaps of kind '{k}' differ in size: {sorted(sizes)}")
-    return {"vehicle_id": vehicle_id, "stages": stages, "engines": engine_spec, "detail": detail}
+    spec = {"vehicle_id": vehicle_id, "stages": stages, "engines": engine_spec, "detail": detail}
+    if is_variant:
+        spec["variant"] = variant
+    return spec
 
 
 def dumps(spec: dict) -> str:

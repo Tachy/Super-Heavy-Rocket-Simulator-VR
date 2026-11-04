@@ -42,7 +42,7 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
 
 ## Game side (`game/vehicle/vehicle_models.gd`, `vehicle_view.gd`)
 - `VehicleModels.load_for(vehicle_id)` -> `{}` (cylinders, one log line) unless the vehicle is in `MODEL_VEHICLE_IDS`
-  (`starship_block3`, `falcon9_block5`, `crew_dragon`, `iss`), the manifest and all glTFs of its `MODEL_FILES` entry exist and
+  (`starship_block3`, `starship_tanker`, `starship_depot`, `starship_hls`, `falcon9_block5`, `crew_dragon`, `iss`), the manifest and all glTFs of its `MODEL_FILES` entry exist and
   are newer than the detail file, the vehicle config and its `SOURCE_SCRIPTS` / `SOURCE_BAKERS`. Result cached per run. The
   Crew Dragon and ISS have empty file lists until their generators exist (plan 2026-11-02): a fresh manifest
   without files, a missing or a stale one all give `{}` + one log line + cylinders (reason "missing" / "stale": the German
@@ -68,6 +68,14 @@ look pass, evidence) done; the prototype awaits the user's verdict and a headset
   hinge azimuth and aft station. Fin pose: pivot at (station, hull radius, azimuth), rotation about +X by the azimuth, then about
   the radial Y by +deflection. Both are tested against re-implementations of `flap_span_direction` and the grid-fin normal.
 - Plumes start at the DRAWN exit plane (manifest: Raptor 2.1 m, RVac 3.6 m below the drawn gimbal point; ship engines drawn higher, see "Stage interface"); cylinders keep 3.0 m.
+
+## Ship variants and taken-over stages (plan 2026-11-04, Task 2)
+- Detail files `starship_tanker|depot|hls.toml` hold only `[variant]` (booleans `tiles`, `flaps`, `chine`, `catch_pins`, `payload_door`, string `skin`; defaults all true / `steel` = Block 3, no table = nothing in the spec text, so the Block 3 spec and hash input are unchanged). Missing tables come from `starship_block3.toml` (`vehicle_spec.VARIANT_BASE`).
+- `vehicle_spec.load_starship` resolves `[[stage]] from = "<v>:<s>"` through `resolve_stages` (source stage; the entry's `[[stage.tank]]` changes merged by id) and keys the spec stages by ROLE (`booster`, `ship`: the one stage that is not the booster, whatever its id); a variant spec adds `stage_id`, `tanks` per stage and a top-level `variant`. Switches act in the spec (`flaps` false: no flaps, `catch_pins` false: no pins), in `gen_hull.py` (`chine`, `flaps` false: no `chine` / `hinge_covers` nodes) and in the build (`tiles` false: no tile bake, manifest `look.tiles.coverage_half_angle_deg` all 0, `look.variant.tiles` false: the game loads no tile maps). Engines without a detail table (the HLS landing thruster) get no mesh until Task 6.
+- `generators.toml`: `starship_tanker` = the Block 3 list; `starship_depot` (`gen_hull`, `gen_grid_fin`, `gen_engine`; no flap files) and `starship_hls` (`gen_hull`, `gen_engine`; `ship.gltf` only, no booster) via `outputs`. Tasks 3-6 append their generators here. `skin` other than `steel` is validated and written to the manifest (`look.variant.skin`, `look.skin_drawn = "steel"`); TODO Task 4 / Task 5 bake insulated / white.
+- Manifest of a variant: `look.stage_ids` ({role: config stage id}); `VehicleModels` keys `hulls` by it (`ship_stage_id(models)` also for the ship's axial engine offset and the hull material), flap / grid-fin parts are `{}` when the set has none.
+- The snapshot's `vehicle_id` is the composite config id (`starship_tanker`, `starship_hls_launch`; `<id>/<stage>` after a separation), not the source of a taken-over stage. `VehicleModels.model_set_for_stage(vehicle, stage)`: tanker / booster and hls_launch / booster -> `starship_block3`, hls_launch / hls -> `starship_hls`, otherwise the vehicle. `VehicleView._load_sets` draws every stage of a one-vehicle list from that set (a stack `a+b` still by hull id); a stage whose set is missing keeps its cylinders, the stale / missing notice also shows when other stages are modelled. `starship_tanker|depot|hls` are in `MODEL_VEHICLE_IDS`, stale also against Block 3's detail file and config. Tests: `tools/structures/tests/test_ship_variants.py`, `vehicle_view_test.gd` `_check_ship_variants`.
+- Note: Blender's `.bin` output is not bit-stable between two runs of the same code (glTF, PNGs, triangle counts are); "byte-identical" for Block 3 therefore means glTF + PNG + triangle counts.
 
 ## Falcon 9 first stage (plan 2026-11-02, Task 3)
 - `generators.toml` kind `falcon9` (`vehicle_spec.load_falcon9`, `validate_falcon9_detail`), key `outputs`: `falcon9_stage1.gltf` (nodes `hull`, `interstage`,

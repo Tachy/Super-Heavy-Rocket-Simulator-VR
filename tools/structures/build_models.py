@@ -282,7 +282,7 @@ def iss_manifest(spec: dict, digest: str, version: str, triangles: dict, table: 
             "look": {"no_maps": True, "part_materials": parts, "paint": painted, "textured": textured}}
 
 
-def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> dict:
+def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict, table: dict | None = None) -> dict:
     """What the game needs besides the glTF: per-flap rotation signs, engine exit planes, the frame statement."""
     flaps = {st_id: [{k: f[k] for k in ("id", "kind", "hinge_azimuth_deg", "station_aft_m", "station_fwd_m", "span_m",
                                           "rotation_sign_about_plus_x", "drawn_hinge_station_aft_m",
@@ -305,7 +305,14 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict) -> 
                            for e in spec["engines"].values()},
             "tiles": {k: detail["ship"]["tiles"][k] for k in ("hex_across_flats_m", "gap_m", "coverage_station_m",
                                                                "coverage_half_angle_deg")}}
-    return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec)),
+    if "variant" in spec:  # a ship variant (tanker, depot, HLS): the switches, the ship stage's id; no tiles = zero coverage
+        look["variant"] = spec["variant"]
+        look["stage_ids"] = {role: st["stage_id"] for role, st in spec["stages"].items()}
+        # TODO(Task 4 / Task 5): the "insulated" and "white" skins are baked there; until then every skin draws as steel.
+        look["skin_drawn"] = "steel"
+        if not spec["variant"]["tiles"]:
+            look["tiles"]["coverage_half_angle_deg"] = [0.0] * len(look["tiles"]["coverage_half_angle_deg"])
+    return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
             "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": flaps, "engines": engines, "look": look}
 
 
@@ -344,7 +351,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     try:
         if starship:
             steel_map = hull_textures.write(staging, spec)
-            tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes)
+            tile_maps = hull_tiles.write(staging, spec, hull_textures.png_bytes) if spec.get("variant", {}).get("tiles", True) else {}
         textured = iss_textures.write(staging) if table["kind"] == "iss" else {}
         surface = {}
         if table["kind"] == "falcon9":
@@ -365,7 +372,7 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     finally:
         spec_file.unlink(missing_ok=True)
     if starship:
-        manifest = vehicle_manifest(spec, digest, version, triangles)
+        manifest = vehicle_manifest(spec, digest, version, triangles, table)
         manifest["look"]["steel_map"] = steel_map
         manifest["look"]["tile_maps"] = tile_maps
     elif table["kind"] == "dragon":

@@ -9,7 +9,7 @@ class_name VehicleModels
 ## The vehicles that have detail models (a named list, not a config key, like Pad B's). The others keep their cylinders.
 ## A vehicle on the list whose models are missing or stale also keeps them (one log line); the generators are listed in
 ## tools/structures/blender/generators.toml.
-static var MODEL_VEHICLE_IDS := PackedStringArray(["starship_block3", "falcon9_block5", "crew_dragon", "iss"])
+static var MODEL_VEHICLE_IDS := PackedStringArray(["starship_block3", "starship_tanker", "starship_depot", "starship_hls", "falcon9_block5", "crew_dragon", "iss"])
 ## Calls of load_for (tests: a view must not ask again every frame).
 static var load_calls := 0
 const MANIFEST := "manifest.json"
@@ -17,15 +17,42 @@ const MANIFEST := "manifest.json"
 ## (tools/structures/blender/ scripts and tools/structures/ bakers); keep in step with generators.toml.
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
+	# ship variants (plan 2026-11-04): the depot draws no flaps, the HLS has no booster (generators.toml "outputs")
+	"starship_tanker": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
+	"starship_depot": ["booster", "ship", "grid_fin", "raptor", "rvac"],
+	"starship_hls": ["ship", "raptor", "rvac"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
 	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism"], "iss": ["iss_station", "iss_arrays", "iss_rings"],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
+	"starship_tanker": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
+	"starship_depot": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py"],
+	"starship_hls": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_engine.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
 	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
-const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py"], "iss": ["iss_textures.py"]}
+const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "starship_tanker": ["hull_textures.py", "hull_tiles.py"],
+		"starship_depot": ["hull_textures.py", "hull_tiles.py"], "starship_hls": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py"], "iss": ["iss_textures.py"]}
+## Ship variants take the detail tables they do not list, and the stages they take over, from Block 3: its files also make
+## their model set stale (tools/structures/vehicle_spec.py, VARIANT_BASE).
+const VARIANT_VEHICLES: Array[String] = ["starship_tanker", "starship_depot", "starship_hls"]
+const VARIANT_BASE := "starship_block3"
+## Which vehicle's model set draws a stage: a stage a vehicle takes over unchanged is drawn by the vehicle it comes from
+## (config `[[stage]] from = "<vehicle>:<stage>"`), the others by the vehicle itself.
+const MODEL_SET_OF_STAGE := {
+	"starship_tanker": {"booster": "starship_block3"},
+	"starship_hls_launch": {"booster": "starship_block3", "hls": "starship_hls"},
+}
+
+
+## The vehicle whose model set draws `stage_id` of `vehicle_id` (the snapshot's: "a", or "a/<stage>" after a separation,
+## the part before "/" counts). The snapshot reports the composite vehicle ("starship_tanker"), not the source of a stage.
+static func model_set_for_stage(vehicle_id: String, stage_id: String) -> String:
+	var vehicle := vehicle_id.get_slice("/", 0)
+	return String((MODEL_SET_OF_STAGE.get(vehicle, {}) as Dictionary).get(stage_id, vehicle))
+
+
 ## Engine kinds: the snapshot's "vacuum" flag selects the model and the manifest's engine id.
 const ENGINE_FILE := {false: "raptor", true: "rvac"}
 const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
@@ -156,11 +183,16 @@ static func _load(vehicle_id: String) -> Dictionary:
 		}
 	for engine_file: String in ["raptor", "rvac"]:
 		parts[engine_file] = _merged(parts[engine_file])
+	var hulls := {}
+	var stage_ids: Dictionary = manifest.get("look", {}).get("stage_ids", {"booster": "booster", "ship": "ship"})
+	for role: String in ["booster", "ship"]:
+		if parts.has(role):  # a variant names its ship stage (depot, hls) and may have no booster
+			hulls[String(stage_ids.get(role, role))] = parts[role]
 	return {
 		"manifest": manifest,
-		"hulls": {"booster": parts["booster"], "ship": parts["ship"]},
-		"flap": {"fwd": parts["flap_fwd"], "aft": parts["flap_aft"]},
-		"grid_fin": parts["grid_fin"],
+		"hulls": hulls,
+		"flap": {"fwd": parts["flap_fwd"], "aft": parts["flap_aft"]} if parts.has("flap_fwd") else {},
+		"grid_fin": parts.get("grid_fin", {}),
 		"engine": {false: parts["raptor"], true: parts["rvac"]},
 		"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 	}
@@ -173,7 +205,8 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 	var materials := {}
 	var no_maps: bool = look.get("no_maps", false)  # a vehicle drawn in plain paint: no baked maps, no log line about them
 	var steel_map: ImageTexture = null if no_maps else _steel_map(look.get("steel_map", {}), model_dir, vehicle_id)
-	var tile_maps: Dictionary = {} if no_maps else _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
+	var no_tiles: bool = not (look.get("variant", {}) as Dictionary).get("tiles", true)  # a variant without a heat shield
+	var tile_maps: Dictionary = {} if no_maps or no_tiles else _tile_maps(look.get("tile_maps", {}), model_dir, vehicle_id)
 	for key: String in ["steel", "booster", "ship", "flap", "fin_frame", "fin_cells", "fin_band", "dark"]:
 		var material := ShaderMaterial.new()
 		material.shader = HULL_SHADER
@@ -410,6 +443,9 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 			_repo_dir().path_join("config/vehicles/%s.toml" % vehicle_id)]
 	if vehicle_id == "iss":  # the station's rings are drawn from Dragon's [idss]
 		sources.append(_repo_dir().path_join("config/vehicles/detail/crew_dragon.toml"))
+	if VARIANT_VEHICLES.has(vehicle_id):  # the rest of the detail tables and the taken-over stages
+		sources.append(_repo_dir().path_join("config/vehicles/detail/%s.toml" % VARIANT_BASE))
+		sources.append(_repo_dir().path_join("config/vehicles/%s.toml" % VARIANT_BASE))
 	for script: String in SOURCE_SCRIPTS[vehicle_id]:
 		sources.append(_repo_dir().path_join("tools/structures/blender").path_join(script))
 	for baker: String in SOURCE_BAKERS[vehicle_id]:
@@ -482,9 +518,16 @@ static func axial_offset_m(models: Dictionary, stage_id: String, vacuum: bool) -
 	var entry: Dictionary = models["manifest"]["engines"].get(engine_id(models, vacuum), {})
 	if entry.has("axial_offset_m_by_stage"):
 		return float(entry["axial_offset_m_by_stage"].get(stage_id, 0.0))
-	if stage_id != "ship" or not entry.has("ship_axial_offset_m"):
+	if stage_id != ship_stage_id(models) or not entry.has("ship_axial_offset_m"):
 		return 0.0
 	return float(entry["ship_axial_offset_m"])
+
+
+## The id of the stage drawn as the Starship's ship hull: "ship", for a variant the manifest's (depot, hls).
+static func ship_stage_id(models: Dictionary) -> String:
+	if models.is_empty():
+		return "ship"
+	return String(models["manifest"].get("look", {}).get("stage_ids", {}).get("ship", "ship"))
 
 
 ## Exhaust start below the gimbal point along the thrust axis: the model's exit plane, else the former 3 m.

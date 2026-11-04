@@ -38,3 +38,25 @@ scripts = ["common.py", "vehicle_common.py", "idss_mechanism.py"]
 bakers = ["iss_textures"]
 generators = ["iss_station.py", "iss_arrays.py", "idss_passive_ring.py"]
 outputs = ["iss_station.gltf", "iss_arrays.gltf", "iss_rings.gltf"]
+
+# Ship variants (plan 2026-11-04 depot / tanker / HLS): the Block 3 generators with the detail file's [variant] switches.
+# Tasks 3-6 add their own generators to these entries. The depot and HLS draw no flaps (no gen_flap); the HLS has no booster.
+[starship_tanker]
+kind = "starship"
+scripts = ["common.py", "vehicle_common.py", "hull_profile.py"]
+bakers = ["hull_textures", "hull_tiles"]
+generators = ["gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"]
+
+[starship_depot]
+kind = "starship"
+outputs = ["booster.gltf", "ship.gltf", "grid_fin.gltf", "raptor.gltf", "rvac.gltf"]
+scripts = ["common.py", "vehicle_common.py", "hull_profile.py"]
+bakers = ["hull_textures", "hull_tiles"]
+generators = ["gen_hull.py", "gen_grid_fin.py", "gen_engine.py"]
+
+[starship_hls]
+kind = "starship"
+outputs = ["ship.gltf", "raptor.gltf", "rvac.gltf"]
+scripts = ["common.py", "vehicle_common.py", "hull_profile.py"]
+bakers = ["hull_textures", "hull_tiles"]
+generators = ["gen_hull.py", "gen_engine.py"]
