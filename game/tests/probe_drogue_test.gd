@@ -232,14 +232,28 @@ func _check_hls_pair() -> bool:
 	var hull := _vertices(hls["hulls"][VehicleModels.ship_stage_id(hls)]["hull"])
 	_check(_min_axis_distance(hull, pose) > radius_depot, "HLS hull outside the depot's hull radius (%.3f m)" % _min_axis_distance(hull, pose))
 	var parts: Dictionary = hls["hls_parts"]
-	var legs_seen := 0
-	for part_name: String in parts:
-		if not (part_name.begins_with("leg_") or part_name.begins_with("foot_") or part_name.begins_with("airlock") or part_name.begins_with("elevator")):
-			continue
-		legs_seen += 1
-		var near := _min_axis_distance(_vertices(parts[part_name]), pose)
-		_check(near > radius_depot, "HLS %s outside the depot's hull radius: nearest vertex %.3f m from the depot's axis (hull radius %.3f m)" % [part_name, near, radius_depot])
-	_check(legs_seen == 15, "HLS pair: six legs, six feet, airlock hatch, elevator track and basket checked (%d)" % legs_seen)
+	# Task 6b: docked in space the legs are stowed (deployment 0, the physical state); deployed (1) checked as well. Leg, foot and pusher take the rig's
+	# pose (VehicleModels.hls_leg_pose), the mounts, the airlock and the elevator are fixed.
+	var legs_block: Dictionary = hls["manifest"]["hls_legs"]
+	var moving := {}
+	for entry: Dictionary in legs_block["legs"]:
+		for key: String in ["leg_node", "foot_node", "pusher_node"]:
+			moving[String(entry[key])] = [float(entry["azimuth_deg"]), key == "pusher_node"]
+	for deployment: float in [0.0, 1.0]:
+		var seen := 0
+		for part_name: String in parts:
+			if not (part_name.begins_with("leg_") or part_name.begins_with("foot_") or part_name.begins_with("pusher_") or part_name.begins_with("airlock")
+					or part_name.begins_with("elevator")):
+				continue
+			seen += 1
+			var local := Transform3D.IDENTITY
+			if moving.has(part_name):
+				var rig_pose := VehicleModels.hls_leg_pose(legs_block["rig"], moving[part_name][0], deployment)
+				local = rig_pose["pusher"] if moving[part_name][1] else rig_pose["leg"]
+			var near := _min_axis_distance(_vertices(parts[part_name]), pose * local)
+			_check(near > radius_depot, "HLS %s (deployment %.0f) outside the depot's hull radius: nearest vertex %.3f m from the depot's axis (hull radius %.3f m)"
+					% [part_name, deployment, near, radius_depot])
+		_check(seen == 27, "HLS pair: six legs, feet, pushers and mounts, airlock hatch, elevator track and basket checked (%d)" % seen)
 	hls_view.free()
 	depot_view.free()
 	return true

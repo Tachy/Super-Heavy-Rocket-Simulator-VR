@@ -12,7 +12,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   different model (frame accelerates; 0.33 / 4.4 m in a day vs the Earth-centred integration).
 - l2 HLS and terrain: `config/vehicles/starship_hls.toml` (120 t dry [E], Block 3 tanks and Raptors, no heat shield /
   flaps / pins, ship RCS; landing thrusters re-sized in l4 to 12 x 90 kN (throttle 35-100 %), canted 15 deg at 40 m,
-  `landing_only`: never in burns or `ignite()`). Engine groups take `station_m` / `cant_deg`. Legs [E] fixed, six,
+  `landing_only`: never in burns or `ignite()`). Engine groups take `station_m` / `cant_deg`. Legs [E] deployable (user 2026-11-04, Task 6b of the models plan; like Falcon 9's), six,
   footprint radius 12 m (user 2026-10-15): slope limit ~9 deg at 12 m stance (NASA's Artemis limit ~8-10 deg); absorber
   1e7 N/m, damping 3e6 N s/m [E], crush 4.5 MN [E]. Terrain: `config/lunar_sites.toml` (default `mons_mouton_im2`,
   IM-2's landing point [S], 5,322 m above the sphere); `fetch.py` crops LOLA `LDEM_80S_20M` to 20 x 20 km per site by
@@ -23,6 +23,16 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`). The Earth takes the `environment::Terrain` interface
   (earth-terrain.md). Leg tracks start only near the body's own ground.
+- Legs (Task 6b, user 2026-11-04): `deploy_time_s` 10 s, `deploy_margin_s` 5 s [E]. Stowed on the pad, in the ascent, in space and in the LLO
+  (deployment 0); `begin_powered_descent` no longer deploys them: `LunarLandingGuidance` sets `ReturnCommand::deploy_legs` (sticky) once the
+  braking time-to-go is at most `approach_time_to_go_s` (15 s) + `leg_deploy_lead_s` (= deploy_time_s + deploy_margin_s from
+  `lunar_landing_parameters`, 0 for fixed legs) = 30 s, and in every later phase at once (aborted approach, terminal without plan); the session
+  applies it in `PoweredDescent`. So they lock 5 s before the hand-over to the approach - the last point of the timeline known ahead (the
+  approach's length is planned at the hand-over; its last phase starts the terminal descent). Measured (566 t PDI): 0.00 at PDI, out at t_go
+  30.0 s, 1.00 at the hand-over and at the first foot contact; the liftoff keeps them out (no retraction). A pilot who takes over in the braking
+  phase deploys them himself (`FlightSession::deploy_legs`). The station collision points (`contact::station_collision`) keep the deployed
+  struts in every state (conservative: they clear the mated depot). Test: `[lunar_descent_flight][hls][legs]` "The HLS deploys its legs before
+  the approach and keeps them out for the liftoff".
 - l3 outbound: `mission/position_targeter` (fixed-time position in the full model; needs a patched-conic first guess on
   long arcs; finite burns via `set_finite_burn` / `mission::apply_finite_burn`), `orbit/cr3bp`, `mission/nrho_reference`
   (9:2 southern L2 NRHO [S: Zimovan 2017 seed], multiple shooting in the full model: periods 6.25-6.71 d, perilune
@@ -66,8 +76,8 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   throttle >= 0.1 above the minimum and <= 0.95 of the weight floor. Engines off on leg contact. Surface stay: resting
   on the legs for `stay_hours`; no boil-off. Ascent (`gnc/lunar_ascent_guidance`, `gnc/peg_steering`): the Raptors start
   at 30 m, vertical rise to 150 m, abort check margin 0.15 (vehicle keys `[stage.lunar_ascent]` [E], applied by
-  `gnc::lunar_ascent_parameters(stage)` at liftoff and abort; a fixed-leg stage without `[stage.lunar_landing]` /
-  `[stage.lunar_ascent]` is refused at load, "Mondlandung ... fehlt"), PEG to 15 km x 100 km on the 3 RVacs (user 2026-10-15), landing thrusters steer by differential throttling
+  `gnc::lunar_ascent_parameters(stage)` at liftoff and abort; a stage with fixed legs, or with legs and either table, without every key of `[stage.lunar_landing]` /
+  `[stage.lunar_ascent]` is refused at load (tables without legs too), "Mondlandung ... fehlt"), PEG to 15 km x 100 km on the 3 RVacs (user 2026-10-15), landing thrusters steer by differential throttling
   until the RVac axis is within 2 deg of PEG, acceleration limit 1.5 g [D], circularised at the aposelene. RVac
   engine-out: the other two cut, the 3 sea-level Raptors take over. Aborts (`abort_landing`, automatic when the
   approach cannot be planned): Arrest (climb) then PEG once a fresh solve steers below 0.85 radial or the ballistic

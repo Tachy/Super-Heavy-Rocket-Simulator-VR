@@ -250,5 +250,4 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 
 ## Lunar landing mission lands in the dark (found 2026-11-04, HLS models Task 6)
 - `config/missions/hls_lunar_llo.toml` (and the NRHO / depot variants) have `epoch_utc = 2026-11-02`: the HLS touches down at the IM-2 site (84.79 S) ~9.7 days later, Sun elevation -1.4 deg (the terrain horizon there is +2.8 deg), and lifts off after the 24 h stay still in shadow: the Sun light energy is 0 and the lander is black. Not a lighting bug (checked with `vehicle_look_shots.gd --sun_report`): the site is lit only about days 13.4-28.9 after 2026-11-02 (Sun 2.5-6.8 deg high). Landing windows would have to be chosen (a later `epoch_utc`; the core tests pin 2026-11-02); the user decides. The look scripts' `--utc` does not move a lunar mission.
-- The HLS on its booster (`hls_ascent` at the pad) shows the six fixed legs with feet 12 m out beside the booster's top: the config has no stowed leg state; drawn as the config says.
 

@@ -263,7 +263,7 @@ TEST_CASE("Ground clearance is measured over the reference body", "[vehicle][lun
     CHECK(c.sink_mps == Catch::Approx(12.0).margin(0.01));
 }
 
-TEST_CASE("A body with fixed legs and no leg site keeps its own ground contact on the Moon", "[vehicle][lunar][legs]") {
+TEST_CASE("A body with deployed legs and no leg site keeps its own ground contact on the Moon", "[vehicle][lunar][legs]") {
     LunarFixture fx;
     auto hls = [&](const RigidBodyState& s) {
         return std::make_unique<FlightBody>(
@@ -271,7 +271,7 @@ TEST_CASE("A body with fixed legs and no leg site keeps its own ground contact o
     };
     const double cg = hls(lunar_orbit(fx.moon, fx.t0))->vehicle().mass_properties().cg_station_m;
     auto body = hls(above_moon(fx.moon, fx.t0, -85.0 * deg, 30.0 * deg, cg + 0.5, 1.0));
-    REQUIRE(body->vehicle().leg_deployment() == 1.0);
+    body->vehicle().set_leg_deployment(1.0);  // Task 6b: deployable legs, out for the landing
     time::Epoch t = fx.t0;
     for (int i = 0; i < 2000 && !body->resting() && !body->impacted(); ++i, t = t + 0.005) {
         body->step(fx.env, t, 0.005, {});

@@ -967,9 +967,14 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             s.ship_landing = p;
         }
     }
-    // A lunar lander (fixed legs: gnc::LunarLandingGuidance and gnc::LunarAscentGuidance): every key of its approach and
-    // ascent is required (planner plan Task 6).
-    if (s.landing_legs.fixed) {
+    // A lunar lander (gnc::LunarLandingGuidance and gnc::LunarAscentGuidance): a stage with fixed legs, or one with
+    // deployable legs and a [stage.lunar_landing] / [stage.lunar_ascent] table (Task 6b: the HLS's legs deploy before the
+    // landing). Every key of its approach and ascent is required (planner plan Task 6).
+    const bool lunar_tables = t.contains("lunar_landing") || t.contains("lunar_ascent");
+    if (lunar_tables && s.landing_legs.azimuths_rad.empty()) {
+        doc.fail("Mondlandung der Stufe '" + s.id + "': [stage.lunar_landing] / [stage.lunar_ascent] brauchen Landebeine");
+    }
+    if (s.landing_legs.fixed || lunar_tables) {
         const auto read = [&](const char* table, std::string_view key) {
             const auto* section = t[table].as_table();
             if (!section || !section->contains(key)) {

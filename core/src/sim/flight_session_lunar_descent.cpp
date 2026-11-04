@@ -208,7 +208,7 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
         lunar_status_ = std::string("Landeanflug nicht möglich: ") + e.what();
         return false;
     }
-    if (!legs.fixed && vehicle.leg_deployment() == 0.0) vehicle.deploy_legs();
+    // Deployable legs stay stowed here: the guidance commands them out in the braking phase (leg_deploy_lead_s).
     gnc::LandingSite site{ephemeris::Body::Moon, point.latitude_rad, point.longitude_rad, point.height_m, {}, {},
                           gnc::PadTarget{-legs.foot_station_m, 0.0}};  // feet -foot_station_m below the stage bottom
     lunar_landing_ = std::make_unique<gnc::LunarLandingGuidance>(site, approach_azimuth_rad, std::move(parameters));
@@ -349,6 +349,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                     flying.return_command = lunar_landing_->update(body, env_, epoch_, contact);
                 }
             }
+            if (flying.return_command.deploy_legs && !body.vehicle().legs_deploying()) body.vehicle().deploy_legs();
             for (const auto& stage : body.vehicle().stages()) {
                 for (const auto& e : stage.engines) {
                     const auto& groups = flying.return_command.run_groups;

@@ -95,15 +95,21 @@ crossflow_table = "aero/ship_crossflow.csv"
 ascent_drag_table = "aero/ship_ascent.csv"
 nose_length_m = 13.4                     # [E] the drawn tangent ogive (1:100 model, detail file nose_drawn_length_m)
 
-# Legs: all [E]; fixed (always deployed). Sized by the lunar l2 drop tests (user 2026-10-15): a vertical touchdown on a
+# Legs: all [E]; deployable (user 2026-11-04, Task 6b): stowed against the hull at launch, in ascent and in space, deployed
+# before the lunar landing like Falcon 9's (user 2026-11-04: stowed flat against the hull, foot end up towards the nose; each
+# swings down and out about a hinge at its lower end near the aft skirt, a telescoping strut holds it at the deployed angle).
+# The deployed geometry below is unchanged; hinge, leg length and strut are drawing values [E] in the detail file. Sized by the lunar l2 drop tests (user 2026-10-15): a vertical touchdown on a
 # slope lands on the uphill feet first and pivots freely through the slope angle (CG ~21 m up) - the energy gained must
 # stay below the tip barrier over the downhill feet. Slope limit (1 m/s + 0.5 m drop) vs footprint radius: 8 m ~5 deg,
 # 10 m 7 deg, 12 m >= 9 deg (NASA's Artemis landing-slope limit is ~8-10 deg). Six legs: four would tip between two.
 [stage.landing_legs]
-fixed = true
 azimuths_deg = [0.0, 60.0, 120.0, 180.0, 240.0, 300.0]
 footprint_radius_m = 12.0                # static tip-over across an edge ~26 deg
 foot_station_m = -1.5                    # feet below the skirt
+deploy_time_s = 10.0                     # [E] no published figure: an unhurried electromechanical swing of ~90 deg of a
+                                         # 7.5 m leg with no air load (Falcon 9: 2 s, pneumatic, against the airflow)
+deploy_margin_s = 5.0                    # [E] locked this long before the descent's hand-over to the approach (as
+                                         # Falcon 9's margin): a failed lock is seen while an abort to orbit is still open
 stroke_m = 0.6
 crush_force_n = 4.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4 x3
                                          # for a 662 t landing (l2's 1.5 MN crushed through on 8 deg); kept for the
@@ -114,9 +120,11 @@ damping_n_s_m = 3.0e6                    # l4 Task 10: x3 - at 1e6 the hull rock
                                          # walked 1.2 m; 3e6 (~0.9) settles it. 1 m/s x 3e6 < the crush force
 friction = 0.6                           # foot pad on regolith
 
-# Lunar landing and ascent guidance (gnc::LunarLandingGuidance, gnc::LunarAscentGuidance; required for a stage with fixed
-# legs). The approach's phase times are not configured: SCvx starts from the planner's constant-deceleration guess (the landing
-# set's thrust-to-weight and the state at the hand-over; planner plan Task 6).
+# Lunar landing and ascent guidance (gnc::LunarLandingGuidance, gnc::LunarAscentGuidance; a stage with legs and these tables
+# is a lunar lander, every key required). The guidance commands the legs out at a braking time-to-go of the approach
+# hand-over (15 s) + deploy_time_s + deploy_margin_s = 30 s; they stay out for the stay and the liftoff. The approach's
+# phase times are not configured: SCvx starts from the planner's constant-deceleration guess (the landing set's
+# thrust-to-weight and the state at the hand-over; planner plan Task 6).
 [stage.lunar_landing]
 lateral_effort_fraction = 0.05           # [E] l4: the booster's 0.2 rocked the 700 t HLS on its single Raptor (rates up
                                          # to 0.7 rad/s); 0.05 tracks within 0.07

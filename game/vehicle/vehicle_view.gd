@@ -49,7 +49,7 @@ static var look_probe_extension := NAN
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
 var _engine_poses: Array[Transform3D] = []  # last pose per engine, stage-local body coordinates (headless tests)
-var _hls_feet: Array[Node3D] = []  # foot_<i> of the HLS (index = leg), posed by the leg's compression
+var _hls_legs: Array[Dictionary] = []  # per HLS leg: {"index", "azimuth_deg", "rig", "leg", "foot", "pusher", "lowest"}, posed by deployment and compression
 var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "pusher"}
 ## The Crew Dragon's nose cone: {"node", "nose"} (manifest nose block) or {}; the fraction (0 closed .. 1 open) eases towards the
 ## snapshot's binary nose_cone_open at 1 / open_time_s per second: a view easing, no state of the simulation.
@@ -120,7 +120,7 @@ func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitud
 	if not _models.is_empty():
 		_pose_models(stages, engines, flaps, grid_fins)
 		_pose_legs(legs)
-		_pose_hls_feet(legs)
+		_pose_hls_legs(legs)
 		_set_nose_target(capsule)
 		_pose_probes(docking)
 	_update_plumes(engines, altitude_m)
@@ -260,7 +260,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	_flap_nodes.clear()
 	_fin_nodes.clear()
 	_leg_nodes.clear()
-	_hls_feet.clear()
+	_hls_legs.clear()
 	_nose = {}
 	docking_mechanism = null
 	probe_drogue = null
@@ -384,27 +384,45 @@ func _build_hls_parts(stages: Array, stage_nodes: Array[Node3D]) -> void:
 			instance.mesh = parts[part]
 			instance.material_override = _hull_material(_hull_kind(part, stages[i], ms), ms)
 			stage_nodes[i].add_child(instance)
-			# Only the lowest stage's feet follow the snapshot's `legs` (core: stages().front()): a stacked HLS sits on the booster, which has no legs, so its feet stay nominal.
-			if part.begins_with("foot_") and i == 0:
-				var index := int(part.trim_prefix("foot_"))
-				if _hls_feet.size() <= index:
-					_hls_feet.resize(index + 1)
-				_hls_feet[index] = instance
+		_collect_hls_legs(ms, stage_nodes[i], i == 0)
 
 
-## The fixed legs' feet: each pad slides up along the station axis (+X of the stage's body frame) by its leg's compression (snapshot `legs.compression_m`, the
-## core contact model; at most the stroke), so the pad stands on the surface. No compression in the snapshot (airborne, older snapshot) = the nominal pose.
-func _pose_hls_feet(legs: Dictionary) -> void:
-	if _hls_feet.is_empty():
+## The leg, foot and pusher nodes of an HLS stage's legs (manifest hls_legs). Only the lowest stage's legs follow the snapshot's `legs` (core:
+## stages().front()); a stacked HLS sits on the booster, which has no legs: its legs are stowed (the core's upper part starts with them stowed).
+func _collect_hls_legs(ms: Dictionary, stage_node: Node3D, lowest: bool) -> void:
+	var block: Dictionary = ms["manifest"].get("hls_legs", {})
+	if block.is_empty() or not block.has("rig"):
 		return
-	var compression: Array = legs.get("compression_m", []) if legs.get("present", false) else []
+	for i in (block["legs"] as Array).size():
+		var entry: Dictionary = block["legs"][i]
+		_hls_legs.append({"index": i, "azimuth_deg": float(entry["azimuth_deg"]), "rig": block["rig"], "lowest": lowest,
+				"leg": stage_node.find_child(String(entry["leg_node"]), false, false), "foot": stage_node.find_child(String(entry["foot_node"]), false, false),
+				"pusher": stage_node.find_child(String(entry["pusher_node"]), false, false)})
+
+
+## The HLS's deployable legs (Task 6b): leg and foot turn about the hinge by the deployment (snapshot `legs.deployment` on the lowest stage, else stowed;
+## `look_leg_deployment` overrides it for shots), the pusher spans anchor to leg; each pad slides up along the station axis (+X of the deployed drawing)
+## by its leg's compression (snapshot `legs.compression_m`, the core contact model; at most the stroke). No compression in the snapshot = the nominal pose.
+func _pose_hls_legs(legs: Dictionary) -> void:
+	if _hls_legs.is_empty():
+		return
+	var present: bool = legs.get("present", false)
+	var compression: Array = legs.get("compression_m", []) if present else []
 	var stroke := float(legs.get("stroke_m", INF))
-	for i in _hls_feet.size():
-		var foot := _hls_feet[i]
-		if foot == null:
-			continue
-		var c := minf(float(compression[i]), stroke) if i < compression.size() else 0.0
-		foot.transform = Transform3D(Basis.IDENTITY, Vector3(maxf(c, 0.0), 0.0, 0.0))
+	var snapshot := float(legs.get("deployment", 0.0)) if present else 0.0
+	for entry: Dictionary in _hls_legs:
+		var deployment := snapshot if entry["lowest"] else 0.0
+		if not is_nan(look_leg_deployment):
+			deployment = look_leg_deployment
+		var pose := VehicleModels.hls_leg_pose(entry["rig"], entry["azimuth_deg"], deployment)
+		var i: int = entry["index"]
+		var c := minf(float(compression[i]), stroke) if entry["lowest"] and i < compression.size() else 0.0
+		if entry["leg"] != null:
+			(entry["leg"] as Node3D).transform = pose["leg"]
+		if entry["foot"] != null:
+			(entry["foot"] as Node3D).transform = pose["leg"] * Transform3D(Basis.IDENTITY, Vector3(maxf(c, 0.0), 0.0, 0.0))
+		if entry["pusher"] != null:
+			(entry["pusher"] as Node3D).transform = pose["pusher"]
 
 
 ## The manifest's thruster entry (exit plane centre, stage-local body frame) of a snapshot engine that is one of the HLS's landing thrusters: an auxiliary

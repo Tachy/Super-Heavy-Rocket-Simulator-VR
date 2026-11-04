@@ -151,6 +151,8 @@ LunarLandingParameters lunar_landing_parameters(const config::StageConfig& stage
         throw std::runtime_error("die Stufe '" + stage.id + "' hat keine Mondlande-Werte ([stage.lunar_landing])");
     }
     base.approach.lateral_effort_fraction = stage.lunar_landing->lateral_effort_fraction;
+    const auto& legs = stage.landing_legs;
+    base.leg_deploy_lead_s = legs.fixed ? 0.0 : legs.deploy_time_s + legs.deploy_margin_s;
     return base;
 }
 
@@ -457,6 +459,10 @@ ReturnCommand LunarLandingGuidance::update(const vehicle::FlightBody& body, cons
         cmd.axis_gcrf = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});  // hold
         cmd.abort = phase_ == LunarDescentPhase::Aborted;
     }
+    // Deployable legs: out before the approach (see leg_deploy_lead_s); sticky once commanded.
+    legs_commanded_ = legs_commanded_ || phase_ != LunarDescentPhase::Braking ||
+                      braking_t_go_ <= parameters_.approach_time_to_go_s + parameters_.leg_deploy_lead_s;
+    cmd.deploy_legs = legs_commanded_;
     started_ = true;
     last_update_ = epoch;
     return cmd;

@@ -515,9 +515,9 @@ HLS_TABLES = {
     "landing_thruster": ("throat_diameter_m", "bell_length_m", "wall_m", "contour_exponent", "pod_wall_m", "pod_length_m", "pod_taper_m", "bay_radius_m", "bay_albedo", "segments"),
     "nose_port": ("radius_m", "height_m", "embed_m", "recess_m", "face_radius_m", "hub_radius_m"),
     "solar_band": ("station_from_m", "station_to_m", "albedo", "line_albedo", "columns", "row_pitch_m", "line_half_width_m", "trim_height_m", "trim_albedo", "roughness", "metallic"),
-    "landing_leg": ("pad_radius_m", "pad_height_m", "stem_radius_m", "stem_inside_m", "sleeve_gap_m", "sleeve_radius_m", "sleeve_length_m", "strut_radius_m",
-                    "brace_radius_m", "strut_attach_station_m", "brace_attach_station_m", "attach_embed_m", "saddle_height_m", "saddle_thickness_m",
-                    "saddle_width_m", "sides"),
+    "landing_leg": ("pad_radius_m", "pad_height_m", "stem_radius_m", "stem_inside_m", "sleeve_gap_m", "sleeve_radius_m", "sleeve_length_m", "leg_root_radius_m",
+                    "leg_tip_radius_m", "hinge_station_m", "hinge_radius_m", "clevis_height_m", "clevis_width_m", "stowed_angle_deg", "pusher_anchor_station_m",
+                    "pusher_anchor_radius_m", "pusher_leg_u_m", "pusher_radius_m", "anchor_size_m", "stowed_thickness_m", "attach_embed_m", "sides"),
     "airlock": ("azimuth_deg", "sill_station_m", "height_m", "width_m", "frame_depth_m", "frame_width_m"),
     "elevator": ("azimuth_deg", "track_from_station_m", "track_to_station_m", "rail_gauge_m", "rail_width_m", "rail_depth_m", "rail_stand_off_m", "bracket_count",
                  "cable_radius_m", "basket_width_m", "basket_depth_m", "basket_height_m", "wall_height_m", "basket_bottom_station_m", "basket_clearance_m",
@@ -562,7 +562,7 @@ def hls_parts_block(vehicle_id: str, stage_id: str, ship: dict, detail: dict, en
         for k in keys:
             if k.endswith("albedo"):
                 _colour(vehicle_id, f"[{name}].{k}", t[k])
-            elif not _number(t[k]) or (t[k] <= 0.0 and k not in ("azimuth_deg", "metallic", "track_to_station_m")):
+            elif not _number(t[k]) or (t[k] <= 0.0 and k not in ("azimuth_deg", "metallic", "track_to_station_m", "stowed_angle_deg")):
                 raise VehicleSpecError(f"[{name}].{k}: must be a positive number, got {t[k]!r}")
         drawing[name] = {k: t[k] for k in keys}
     thrusters = []
@@ -582,10 +582,11 @@ def hls_parts_block(vehicle_id: str, stage_id: str, ship: dict, detail: dict, en
     if not thrusters:
         raise VehicleSpecError(f"{vehicle_id}: no landing_only engine group on the ship stage")
     legs = ship.get("landing_legs")
-    if not isinstance(legs, dict) or not legs.get("fixed", False):
-        raise VehicleSpecError(f"{vehicle_id}: the HLS needs fixed [stage.landing_legs]")
+    if not isinstance(legs, dict) or legs.get("fixed", False) or not _number(legs.get("deploy_time_s")):
+        raise VehicleSpecError(f"{vehicle_id}: the HLS needs deployable [stage.landing_legs] (deploy_time_s; Task 6b)")
     leg_block = {"azimuths_deg": [float(a) for a in legs["azimuths_deg"]], "footprint_radius_m": float(legs["footprint_radius_m"]),
-                 "foot_station_m": float(legs["foot_station_m"]), "stroke_m": float(legs["stroke_m"]), "hull_radius_m": 0.5 * float(ship["diameter_m"])}
+                 "foot_station_m": float(legs["foot_station_m"]), "stroke_m": float(legs["stroke_m"]), "deploy_time_s": float(legs["deploy_time_s"]),
+                 "hull_radius_m": 0.5 * float(ship["diameter_m"])}
     return {"stage_id": stage_id, "length_m": float(ship["length_m"]), "thrusters": thrusters, "legs": leg_block, "drawing": drawing}
 
 

@@ -66,6 +66,12 @@ struct LunarLandingParameters {
     // Once the approach enters its last phase (planned within pad_final_set_radius_m of the point), the terminal
     // descent flies its set to the touchdown.
     TerminalDescentParameters terminal;
+    // Deployable legs (Task 6b): commanded out (ReturnCommand::deploy_legs, sticky) once the braking time-to-go reaches
+    // approach_time_to_go_s + this, so they are locked before the hand-over to the approach - the last point of the
+    // descent timeline known ahead (the approach's length is planned only at the hand-over, and its last phase starts the
+    // terminal descent). lunar_landing_parameters sets it to the stage's deploy_time_s + deploy_margin_s; 0: fixed legs
+    // (always out). Every phase after the braking commands them at once.
+    double leg_deploy_lead_s = 0.0;
 };
 // The HLS's values (the [E] limits found in Task 3's lunar SCvx test, re-tuned for the real mass in the C2 sweep). The
 // vehicle's own keys come with lunar_landing_parameters.
@@ -131,6 +137,7 @@ private:
     time::Epoch last_update_;
     std::deque<std::pair<time::Epoch, double>> demand_history_;  // (epoch, thrust demand N) over demand_trend_s
     double braking_t_go_ = 0.0;
+    bool legs_commanded_ = false;  // deployable legs commanded out (sticky; leg_deploy_lead_s)
     std::string status_;
     bool debug_ = false;  // STARSIM_DEBUG_LUNAR_DESCENT
     time::Epoch next_debug_;

@@ -146,7 +146,6 @@ TEST_CASE("A foot beyond the deck edge drops to the sea", "[contact][legs]") {
 // The contact point of a foot is computed independently of the core's formula: the line foot + s * axis against the plane z = tan(7 deg) * y.
 TEST_CASE("Foot compression along the stroke axis puts each HLS foot on a 7 degree slope", "[contact][legs]") {
     const auto legs = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls").stages.front().landing_legs;
-    REQUIRE(legs.fixed);
     const auto g = contact::make_leg_geometry(legs, 0.0, 4.5);
     REQUIRE(g.feet.size() == 6);
     const double slope_rad = 7.0 * deg;

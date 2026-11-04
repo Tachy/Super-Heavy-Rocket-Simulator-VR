@@ -1,4 +1,4 @@
-// The HLS (lunar l2): masses, landing thrusters sized to the lunar weight, fixed legs.
+// The HLS (lunar l2): masses, landing thrusters sized to the lunar weight, deployable legs (Task 6b).
 
 #include <cmath>
 #include <cstdio>
@@ -41,7 +41,7 @@ TEST_CASE("The HLS has the Block 3 tanks, 120 t dry and no entry hardware", "[ve
     CHECK(s.flaps.empty());
     CHECK(s.heat_shield.nose_radius_m == 0.0);
     CHECK(s.catch_pins.azimuths_rad.empty());
-    CHECK(s.landing_legs.fixed);
+    CHECK_FALSE(s.landing_legs.fixed);  // deployable (user 2026-11-04)
     CHECK(s.landing_legs.azimuths_rad.size() == 6);
 }
 
@@ -78,24 +78,26 @@ TEST_CASE("HLS landing thrusters take over from one Raptor and hover the real la
     CHECK(max_axial / lunar_g_mps2 > 1.5 * 340e3);   // lifts the heaviest with 1.5 lunar weights
 }
 
-TEST_CASE("Fixed legs are deployed from the start and stay deployed", "[vehicle][hls][legs]") {
+TEST_CASE("The HLS's legs are stowed until commanded and lock in their deploy time", "[vehicle][hls][legs]") {
     vehicle::Vehicle v(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls"), STARSIM_CONFIG_DIR);
     CHECK(v.has_landing_legs());
-    CHECK(v.leg_deployment() == 1.0);
-    v.update_landing_legs(1.0);
+    CHECK(v.leg_deployment() == 0.0);
+    v.update_landing_legs(100.0);
+    CHECK(v.leg_deployment() == 0.0);  // nothing deploys them uncommanded
+    v.deploy_legs();
+    const double t = v.stages().front().config.landing_legs.deploy_time_s;
+    v.update_landing_legs(0.5 * t);
+    CHECK(v.leg_deployment() == Catch::Approx(0.5));
+    v.update_landing_legs(t);
     CHECK(v.leg_deployment() == 1.0);
 }
 
-TEST_CASE("An upper stage with fixed legs keeps them out after separation", "[vehicle][hls][legs]") {
-    auto stack = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
-    const auto hls = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
-    stack.stages[1] = hls.stages[0];  // Super Heavy + HLS
-    stack.engines.insert(hls.engines.begin(), hls.engines.end());
-    vehicle::Vehicle v(stack, STARSIM_CONFIG_DIR);
+TEST_CASE("The HLS stacked on its booster keeps its legs stowed through the separation", "[vehicle][hls][legs]") {
+    vehicle::Vehicle v(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls_launch"), STARSIM_CONFIG_DIR);
     CHECK(v.leg_deployment() == 0.0);  // the booster's front stage has no legs
     const auto upper = v.separate(1);
     REQUIRE(upper->has_landing_legs());
-    CHECK(upper->leg_deployment() == 1.0);
+    CHECK(upper->leg_deployment() == 0.0);  // ascent and space: stowed
 }
 
 TEST_CASE("The truth thrust factor scales the force, not the performance the guidance reads", "[vehicle][hls][dispersion]") {
@@ -156,6 +158,14 @@ TEST_CASE("HLS landing and ascent parameters follow config", "[vehicle][hls][con
     s.lunar_ascent->vertical_rise_height_m = 200.0;
     s.lunar_ascent->abort_delta_v_margin = 0.2;
     CHECK(gnc::lunar_landing_parameters(s).approach.lateral_effort_fraction == 0.07);
+    // deployable legs: commanded out deploy_time_s + deploy_margin_s ahead of the approach hand-over; fixed legs never
+    REQUIRE_FALSE(s.landing_legs.fixed);
+    CHECK(gnc::lunar_landing_parameters(s).leg_deploy_lead_s ==
+          s.landing_legs.deploy_time_s + s.landing_legs.deploy_margin_s);
+    CHECK(gnc::lunar_landing_parameters(s).leg_deploy_lead_s > 0.0);
+    auto fixed = s;
+    fixed.landing_legs.fixed = true;
+    CHECK(gnc::lunar_landing_parameters(fixed).leg_deploy_lead_s == 0.0);
     gnc::LunarAscentParameters mission;
     mission.insertion_altitude_above_site_m = 12.0e3;
     const auto ascent = gnc::lunar_ascent_parameters(s, mission);

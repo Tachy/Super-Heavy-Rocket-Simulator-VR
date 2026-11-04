@@ -68,6 +68,10 @@ struct DescentResult {
     double offset_m = 0.0, sink_mps = 0.0, lateral_mps = 0.0;
     double m0 = 0.0, m_drop = 0.0, m1 = 0.0;  // at PDI, at the first set drop (off the vacuum Raptors), landed
     double braking_s = 0.0, seconds = 0.0;
+    // Legs (Task 6b): deployment at PDI and when the descent leaves the braking phase / first touches the ground; the
+    // braking time-to-go when they started out (-1: never).
+    double deployment_at_pdi = -1.0, deployment_at_handover = -1.0, deployment_at_contact = -1.0;
+    double t_go_at_deploy_s = -1.0;
 };
 
 // Flies the descent placed in `fx` (optionally failing a running vacuum Raptor `fail_after_s` after PDI).
@@ -75,6 +79,7 @@ DescentResult fly_from_pdi(Fixture& fx, double fail_after_s = -1.0) {
     DescentResult r;
     r.m0 = fx.session.body(0).vehicle().mass_properties().mass_kg;
     REQUIRE(fx.session.begin_powered_descent(fx.point, fx.azimuth));
+    r.deployment_at_pdi = fx.session.body(0).vehicle().leg_deployment();
     r.braking_s = -1.0;
     bool failed = fail_after_s < 0.0;
     // 0.1 s steps: epoch() + tick_s alone rounds below one tick and advance_to then does nothing
@@ -85,9 +90,13 @@ DescentResult fly_from_pdi(Fixture& fx, double fail_after_s = -1.0) {
         if (r.m_drop == 0.0 && g && g->braking_groups() != gnc::hls_landing_parameters().braking_sets.front()) {
             r.m_drop = mass;
         }
+        const auto& legs = fx.session.body(0).vehicle();
+        if (r.t_go_at_deploy_s < 0.0 && legs.legs_deploying() && g) r.t_go_at_deploy_s = g->braking_time_to_go_s();
         if (r.braking_s < 0.0 && g && g->phase() != gnc::LunarDescentPhase::Braking) {
             r.braking_s = fx.session.epoch() - fx.t0;
+            r.deployment_at_handover = legs.leg_deployment();
         }
+        if (r.deployment_at_contact < 0.0 && fx.session.lunar_touchdown()) r.deployment_at_contact = legs.leg_deployment();
         if (!failed && fx.session.epoch() - fx.t0 >= fail_after_s) {
             const auto& engines = fx.session.body(0).vehicle().stages().front().engines;
             size_t rvac = engines.size();
@@ -144,6 +153,36 @@ TEST_CASE("The HLS brakes from PDI at the real mass and lands within 1 m",
         CHECK(r.sink_mps <= 1.0 + 0.1);
         CHECK(descent_delta_v_mps(r) < 2400.0);  // spec ~2.0 km/s incl. the approach; the crash runs burnt ~3.5 km/s
     }
+}
+
+// Task 6b (user 2026-11-04): the HLS's legs are stowed in the LLO and at PDI, the guidance commands them out at the braking
+// time-to-go of the approach hand-over + deploy_time_s + deploy_margin_s, they are locked by the hand-over (so before the
+// terminal descent) and at the first foot contact, and they stay out through the liftoff.
+TEST_CASE("The HLS deploys its legs before the approach and keeps them out for the liftoff",
+          "[sim][lunar_descent_flight][hls][legs][terrain][data][slow]") {
+    Fixture fx;
+    fx.place_at_pdi(test::hls_pdi_propellant_kg);
+    REQUIRE(fx.session.body(0).vehicle().leg_deployment() == 0.0);  // in the orbit: stowed
+    const auto r = fly_from_pdi(fx);
+    report("legs", fx, r);
+    const auto& stage = fx.session.body(0).vehicle().stages().front().config;
+    const auto p = gnc::lunar_landing_parameters(stage);
+    std::printf("[lunar_descent] legs: %.2f at PDI, out at t_go %.1f s (rule %.1f s), %.2f at the hand-over, %.2f at contact\n",
+                r.deployment_at_pdi, r.t_go_at_deploy_s, p.approach_time_to_go_s + p.leg_deploy_lead_s,
+                r.deployment_at_handover, r.deployment_at_contact);
+    CHECK(r.deployment_at_pdi == 0.0);
+    CHECK(r.t_go_at_deploy_s <= p.approach_time_to_go_s + p.leg_deploy_lead_s);
+    CHECK(r.t_go_at_deploy_s > p.approach_time_to_go_s + stage.landing_legs.deploy_time_s);  // locked with margin
+    CHECK(r.deployment_at_handover == 1.0);
+    CHECK(r.deployment_at_contact == 1.0);
+    REQUIRE(r.outcome == sim::LegTouchdown::Landed);
+    CHECK(r.offset_m < 1.0);
+    // Liftoff: the legs stay out (they cannot be stowed again).
+    REQUIRE(fx.session.plan_lunar_ascent({}, 0.0));
+    fx.session.advance_to(fx.session.epoch() + 60.0, 20000);
+    CHECK(fx.session.lunar_step() == sim::LunarStep::Ascent);
+    CHECK_FALSE(fx.session.body(0).resting());
+    CHECK(fx.session.body(0).vehicle().leg_deployment() == 1.0);
 }
 
 TEST_CASE("A vacuum-Raptor failure early in the braking phase at the real mass: the sea-level Raptors land the HLS",

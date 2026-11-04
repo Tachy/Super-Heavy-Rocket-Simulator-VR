@@ -153,7 +153,7 @@ func _scan(sim: FlightSim) -> void:
 			line += "  [%d] alt %.1f km flap %.0f fin %.0f" % [i, sim.telemetry(i).get("altitude_m", 0.0) / 1000.0, flap, fin]
 			var legs: Dictionary = sim.body_legs(i)
 			if legs.get("present", false):
-				line += " legs %s compression %s" % [legs.get("touchdown", ""), (legs.get("compression_m", []) as Array).map(func(c): return snappedf(c, 0.001))]
+				line += " legs %s deployment %.2f compression %s" % [legs.get("touchdown", ""), float(legs.get("deployment", 0.0)), (legs.get("compression_m", []) as Array).map(func(c): return snappedf(c, 0.001))]
 		print(line)
 		t += float(spec[2])
 

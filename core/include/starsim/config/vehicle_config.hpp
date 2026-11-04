@@ -253,7 +253,8 @@ struct LandingLegConfig {
     bool fixed = false;                // always deployed (HLS): no deployment, deploy_time_s unused
     // A returning booster's landing burn (required for recovery method "leg_landing"): the legs are commanded out
     // deploy_time_s + deploy_margin_s before the planned touchdown, and the thrust tilt from the vertical at the
-    // touchdown is at most max_touchdown_tilt_rad (structural limit of the landing).
+    // touchdown is at most max_touchdown_tilt_rad (structural limit of the landing). A lunar lander with deployable legs:
+    // locked deploy_margin_s before the powered descent's hand-over to the approach (gnc::LunarLandingGuidance).
     double deploy_margin_s = 0.0;
     double max_touchdown_tilt_rad = 0.0;
 };
@@ -344,7 +345,8 @@ struct ShipLandingProfile {
     double lateral_effort_fraction = 0.0;    // the landing burn's lateral LQR effort (ScvxLandingParameters)
 };
 
-// [stage.lunar_landing] and [stage.lunar_ascent] of a lunar lander (a stage with fixed legs; every key required there):
+// [stage.lunar_landing] and [stage.lunar_ascent] of a lunar lander (a stage with landing legs, fixed or deployable, and
+// either table; a stage with fixed legs is a lunar lander always; every key required there):
 // the approach's lateral LQR effort (gnc::LunarLandingGuidance's SCvx approach) and the ascent's liftoff sequence and
 // abort check (gnc::LunarAscentGuidance), applied by gnc::lunar_landing_parameters / gnc::lunar_ascent_parameters.
 struct LunarLandingProfile {
@@ -481,8 +483,8 @@ struct StageConfig {
     double entry_vent_rate_kgps = 0.0;
     std::optional<RendezvousReserveConfig> rendezvous_reserve;  // [stage.recovery] rendezvous_reserve_kg
     std::optional<ShipLandingProfile> ship_landing;  // a ship landing at a catch tower (else none)
-    std::optional<LunarLandingProfile> lunar_landing;  // a lunar lander (fixed legs; else none)
-    std::optional<LunarAscentProfile> lunar_ascent;    // a lunar lander (fixed legs; else none)
+    std::optional<LunarLandingProfile> lunar_landing;  // a lunar lander (see LunarLandingProfile; else none)
+    std::optional<LunarAscentProfile> lunar_ascent;    // a lunar lander (see LunarLandingProfile; else none)
     UnusablePropellantConfig unusable_propellant;    // [stage.tanks]
     LandingLegConfig landing_legs;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure

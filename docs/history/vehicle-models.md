@@ -96,3 +96,8 @@ outer lips overlapped by 0.16 m (test_engine_ring_overlap_is_reported allowed do
 
 ## Inner engine rings (2026-11-03, Task 1d)
 Before: booster centre 1.0 m, middle / divert 2.6 m, ship and HLS sea-level ring 1.3 m (the roll / yaw lever 46 % above the real one). Now the 1:100 STL values 0.88 / 2.55 / 0.95 m.
+
+## HLS fixed legs (Task 6, superseded by Task 6b deployable legs, 2026-11-04)
+The Task 6 drawing, when the config's legs were `fixed = true`:
+- Legs exactly from `[stage.landing_legs]` (config unchanged, user ruling 2026-11-04): six, azimuths 0..300, footprint 12.0 m, foot station -1.5 m, stroke 0.6 m. `hls_legs_layout.py` (pure Python) -> nodes in `hls_parts.gltf`: `leg_<i>` (vertical sleeve at the foot, main strut to the hull at station 7.0 m, lower brace at 1.0 m, two hull saddles) and `foot_<i>` (pad frustum whose BOTTOM FACE CENTRE is the core's foot point, plus the piston stem that reaches 0.5 m into the sleeve). All drawing numbers `[E]` in `[landing_leg]` (render: pad ~2 m, splayed struts). The sleeve bottom stands 0.8 m above the pad (stroke 0.6 m + 0.2 m), so the pad never touches it. Manifest `hls_legs` (stroke, stroke axis +X, per leg nodes and foot point).
+- The HLS on its booster then showed the feet 12 m out beside the booster's top (no stowed state). Task 6b (user 2026-11-04) made the legs deployable; the drawing became one rigid leg on a skirt hinge with a pusher (sleeve 1.3 m, gap 0.8 m, strut to station 7.0 m and brace to 1.0 m with saddles were dropped).

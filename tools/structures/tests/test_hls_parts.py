@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
 import build_models  # noqa: E402
 import hls_layout as hl  # noqa: E402
+import hls_legs_layout as ll  # noqa: E402
 import hull_textures  # noqa: E402
 import test_dorsal_hardware as td  # noqa: E402
 import vehicle_spec  # noqa: E402
@@ -209,7 +210,9 @@ def test_feet_stand_on_the_config_foot_points():
         assert np.linalg.norm(_bottom_centre(foot) - want) < TOL_M
         leg = np.array(td._mesh_points(doc, buffers, f"leg_{i}"), dtype=float)
         radial = np.hypot(leg[:, 1], leg[:, 2])
-        assert radial.max() > cfg["footprint_radius_m"] - 0.3 and radial.min() < 4.5  # from the sleeve at the foot into the hull
+        assert radial.max() > cfg["footprint_radius_m"] - 0.3 and radial.min() < 5.0  # from the knuckle at the foot to the hinge by the hull
+        mount = np.array(td._mesh_points(doc, buffers, f"leg_mount_{i}"), dtype=float)
+        assert np.hypot(mount[:, 1], mount[:, 2]).min() < 4.5  # the hinge clevis sits in the skin
         # the sleeve stays clear of the pad at full stroke: the lowest leg point is above the pad's top by the stroke
         assert leg[:, 0].min() > cfg["foot_station_m"] + 0.15 + cfg["stroke_m"]
 
@@ -225,4 +228,48 @@ def test_manifest_has_legs_airlock_and_elevator():
     assert manifest["hls_airlock"]["azimuth_deg"] == manifest["hls_elevator"]["azimuth_deg"] == 150.0
     # the elevator stands between two legs (120 and 180), clear of both feet
     assert min(abs(150.0 - az) for az in cfg["azimuths_deg"]) == 30.0
+    assert {f"pusher_{i}" for i in range(6)} <= names and {f"leg_mount_{i}" for i in range(6)} <= names
+    spec = vehicle_spec.load_starship("starship_hls")["hls_parts"]
+    assert legs["rig"] == pytest.approx(ll.leg_rig(spec["drawing"]["landing_leg"], spec["legs"]))
+
+
+def _drawn(prims):
+    """Points of the layout primitives (tube end rings, box corners), body frame."""
+    pts = []
+    for p in prims:
+        if p[0] == "tube":
+            _, a, b, r0, r1 = p
+            a, b = np.array(a), np.array(b)
+            z = (b - a) / np.linalg.norm(b - a)
+            x = np.cross(z, [1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.cross(z, [0.0, 1.0, 0.0])
+            x /= np.linalg.norm(x)
+            y = np.cross(z, x)
+            for c, r in ((a, r0), (b, r1)):
+                pts += [c + r * (math.cos(t) * x + math.sin(t) * y) for t in np.linspace(0.0, 2.0 * math.pi, 32, endpoint=False)]
+        else:
+            _, c, ex, ey, ez, h = p
+            pts += [np.array(c) + sx * h[0] * np.array(ex) + sy * h[1] * np.array(ey) + sz * h[2] * np.array(ez)
+                    for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+    return pts
+
+
+def test_leg_rig_deploys_from_along_the_hull_to_the_config_foot():
+    """Task 6b: stowed (0) every leg and foot point lies within the skin + stowed_thickness_m (and outside the skin), above the hull base and
+    below the landing thrusters; deployed (1) the pose is the identity (the foot on the config's point); the pusher spans anchor to leg."""
+    spec = vehicle_spec.load_starship("starship_hls")["hls_parts"]
+    d, legs = spec["drawing"]["landing_leg"], spec["legs"]
+    rig = ll.leg_rig(d, legs)
+    hull = legs["hull_radius_m"]
+    for az in legs["azimuths_deg"]:
+        a = math.radians(az)
+        drawn = _drawn(ll.leg_prims(d, legs, a) + ll.foot_prims(d, legs, a))
+        stowed = np.array([ll.pose_point(rig, a, 0.0, p) for p in drawn])
+        r = np.hypot(stowed[:, 1], stowed[:, 2])
+        assert r.max() <= hull + d["stowed_thickness_m"] and r.min() > hull
+        assert stowed[:, 0].min() > 0.0 and stowed[:, 0].max() < 12.0
+        foot = ll.foot_point(legs, a)
+        assert np.linalg.norm(np.array(ll.pose_point(rig, a, 1.0, foot)) - np.array(foot)) < 1e-9
+        anchor, on_leg = ll.pusher_ends(rig, a, 0.0)
+        assert 0.0 < math.dist(anchor, on_leg) < math.dist(*ll.pusher_ends(rig, a, 1.0))
+    assert rig["deployed_angle_deg"] == pytest.approx(97.52, abs=0.01) and rig["stowed_angle_deg"] == 0.0
 

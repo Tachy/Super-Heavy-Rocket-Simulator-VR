@@ -69,6 +69,7 @@ struct Fixture {
         const auto attitude =
             math::Quat::from_matrix(site_to_gcrf * contact::from_columns({0, 0, 1}, {0, 1, 0}, {-1, 0, 0}));
         session.place_body(cfg, {r, v, attitude, {}}, t0);
+        session.set_leg_deployment(0, 1.0);  // Task 6b: a landing HLS has its legs out
     }
     // Sets the HLS down at the site centre 0.3 m above the ground and lets the legs judge it "gelandet".
     void land(const config::VehicleConfig& cfg) {

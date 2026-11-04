@@ -85,26 +85,36 @@ recess_m = 0.06              # [E] depth of the recessed docking face below the 
 face_radius_m = 0.36         # [E] inner radius of the collar's rim: the capture-ring opening of an IDSS-class port (outer ring 0.8 m dia scaled to the tip)
 hub_radius_m = 0.14          # [E] central hub of the docking face
 
-# Landing legs (plan 2026-11-04, Task 6). Count, azimuths, footprint radius (12.0 m), foot station (-1.5 m) and stroke (0.6 m) are the config's
-# [stage.landing_legs] (user ruling 2026-11-04: unchanged); only the drawing is here. Basis: the 2021 NASA render (INDEX.md 5c): splayed truss legs,
-# large round pads. Each leg: a vertical sleeve at the foot, a main strut up to the hull and a lower brace; the pad and its piston stem (node foot_<i>)
-# slide into the sleeve along the station axis by the leg's compression (core contact model).
+# Landing legs (plan 2026-11-04, Tasks 6 / 6b). Count, azimuths, footprint radius (12.0 m), foot station (-1.5 m) and stroke (0.6 m) are the config's
+# [stage.landing_legs] (user ruling 2026-11-04: unchanged); only the drawing is here. Deployable (user 2026-11-04, Task 6b; like Falcon 9's): each leg is a
+# rigid tube hinged on the skirt that swings out and down from along the hull to the foot; a knuckle sleeve at its tip carries the pad's piston stem
+# (node foot_<i>, slides up along the station axis by the leg's compression, core contact model); a pusher from a hull anchor to the leg drives it.
+# Basis for the sizes: the 2021 NASA render (INDEX.md 5c, large round pads); the mechanism is [E] (no published HLS leg design). Pose: hls_legs_layout.py.
 [landing_leg]
 pad_radius_m = 1.0            # [E] render: pad ~2 m across next to the 9 m hull (pixel ratio on the left foot, 55 px at 24 px/m)
 pad_height_m = 0.15           # [E] thin dished plate
 stem_radius_m = 0.14          # [E] piston stem
-stem_inside_m = 0.50          # [E] the stem reaches this far into the sleeve at rest, so it never leaves it at full stroke
-sleeve_gap_m = 0.80           # [E] sleeve bottom above the pad top: the config stroke 0.6 m plus a 0.2 m margin (the pad never touches the sleeve)
-sleeve_radius_m = 0.24        # [E] sleeve around the 0.14 m stem
-sleeve_length_m = 1.30        # [E] sleeve length (joint of strut and brace on it)
-strut_radius_m = 0.30         # [E] main strut at the hull end (render: slender truss member ~0.5 m)
-brace_radius_m = 0.20         # [E] lower brace
-strut_attach_station_m = 7.0  # [E] render: the strut meets the hull about one pad radius per metre of height; ~7 m above the skirt, where the skirt ends and the tank wall stiffens
-brace_attach_station_m = 1.0  # [E] brace meets the hull at the skirt ring
-attach_embed_m = 0.05         # [E] struts and saddles enter the hull surface by this much (no gap on the curved wall)
-saddle_height_m = 1.20        # [E] hull saddle of the main strut (station extent)
-saddle_thickness_m = 0.12     # [E] saddle standing off the hull
-saddle_width_m = 0.80         # [E] saddle across the hull
+stem_inside_m = 0.20          # [E] the stem reaches this far into the knuckle sleeve at rest (at full stroke it rises 0.6 m more, into the leg's tip)
+sleeve_gap_m = 0.65           # [E] sleeve bottom above the pad top: the config stroke 0.6 m plus 0.05 m (the pad never touches the sleeve); short, as it
+                              # stands out from the hull when stowed
+sleeve_radius_m = 0.30        # [E] knuckle sleeve around the 0.14 m stem
+sleeve_length_m = 0.50        # [E] stowed it points at the hull: half its length (0.25 m) is less than the leg axis' 0.30 m off the skin
+leg_root_radius_m = 0.28      # [E] leg tube at the hinge (render: slender members ~0.5 m); its inner face clears the skin by 0.02 m when stowed
+leg_tip_radius_m = 0.20       # [E] leg tube at the knuckle
+hinge_station_m = 0.5         # [E] on the skirt ring 0.5 m above the hull base: the clevis stays clear of the hot-stage ring below station 0 on the booster
+hinge_radius_m = 4.8          # [E] hinge axis 0.3 m off the 4.5 m skin: the stowed leg (axis on the hinge radius) lies along the hull
+clevis_height_m = 0.8         # [E] hinge clevis on the hull (station extent)
+clevis_width_m = 0.7          # [E] hinge clevis across the hull
+stowed_angle_deg = 0.0        # [E] stowed leg along the hull (parallel to the station axis, tip up); deployed angle = hinge -> knuckle over the config's foot
+pusher_anchor_station_m = 3.0 # [E] pusher anchor on the hull above the hinge; stowed the pusher nests along the leg tube, deployed it braces the leg as the
+                              # render's second member does
+pusher_anchor_radius_m = 4.8  # [E] on the hinge radius: stowed the pusher lies inside the leg tube's line
+pusher_leg_u_m = 5.5          # [E] pusher point along the leg from the hinge (~3/4 of the 7.3 m leg)
+pusher_radius_m = 0.15        # [E] inside the leg tube's radius (nests when stowed)
+anchor_size_m = 0.5           # [E] anchor bracket (station extent and width)
+stowed_thickness_m = 1.5      # [E] bound on the stowed leg's height off the skin: the knuckle sleeve, the free stem and the pad stand out from the leg axis
+                              # (the pad lies flat over the leg's tip), 1.48 m drawn; Falcon 9's stowed legs stand 0.55 m off a 1.83 m radius (30 %), these 33 %
+attach_embed_m = 0.05         # [E] mounts enter the hull surface by this much (no gap on the curved wall)
 sides = 16                    # [E] sides of the round members
 
 # Airlock hatch (NASA 2024-04-30 airlock and suit test, INDEX.md section 2): the crew leaves by a side hatch above the elevator. A fixed drawing (no state)

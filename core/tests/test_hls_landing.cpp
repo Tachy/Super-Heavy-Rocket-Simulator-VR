@@ -74,6 +74,7 @@ void place_over_site(Fixture& fx, const config::VehicleConfig& cfg, double clear
     const math::Mat3 site_to_gcrf = frame.transform.rotation * legs.site_to_fixed();
     const auto attitude = math::Quat::from_matrix(site_to_gcrf * contact::from_columns({0, 0, 1}, {0, 1, 0}, {-1, 0, 0}));
     fx.session.place_body(cfg, {r, v, attitude, {}}, fx.t0);
+    fx.session.set_leg_deployment(0, 1.0);  // Task 6b: a landing HLS has its legs out
 }
 
 sim::LegSite lunar_site_on_sphere() { return {ephemeris::Body::Moon, site_lat, site_lon, 0.0, 10000.0}; }

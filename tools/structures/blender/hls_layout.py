@@ -57,12 +57,14 @@ def nose_port_runs(d, length_m):
 
 
 def legs_block(hls):
-    """Manifest entry `hls_legs`: per leg the nodes and the foot point (the core's: station, radius, azimuth; bottom centre of the pad), the stroke axis."""
+    """Manifest entry `hls_legs`: per leg the nodes and the foot point (the core's: station, radius, azimuth; bottom centre of the pad), the stroke
+    axis, and the deployment rig (hls_legs_layout.leg_rig: hinge, angles, pusher; the view poses the nodes from it, Task 6b)."""
     legs = hls["legs"]
     return {"stroke_m": legs["stroke_m"], "stroke_axis": [1.0, 0.0, 0.0], "foot_station_m": legs["foot_station_m"],
-            "footprint_radius_m": legs["footprint_radius_m"],
-            "legs": [{"leg_node": n["leg_node"], "foot_node": n["foot_node"], "azimuth_deg": n["azimuth_deg"],
-                      "foot_m": list(ll.foot_point(legs, n["azimuth_rad"]))} for n in ll.foot_nodes(legs)]}
+            "footprint_radius_m": legs["footprint_radius_m"], "hull_radius_m": legs["hull_radius_m"],
+            "rig": ll.leg_rig(hls["drawing"]["landing_leg"], legs),
+            "legs": [{"leg_node": n["leg_node"], "foot_node": n["foot_node"], "pusher_node": n["pusher_node"], "mount_node": n["mount_node"],
+                      "azimuth_deg": n["azimuth_deg"], "foot_m": list(ll.foot_point(legs, n["azimuth_rad"]))} for n in ll.foot_nodes(legs)]}
 
 
 def block(hls):

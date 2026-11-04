@@ -650,3 +650,24 @@ static func leg_poses(rig: Dictionary, azimuth_deg: float, deployment: float) ->
 	var x := along.normalized()
 	var z := around_x * Vector3.BACK  # the hinge axis: normal to the leg's plane
 	return {"main": main, "pusher": Transform3D(Basis(along, z.cross(x), z), anchor)}
+
+
+## Rig of an HLS leg (Task 6b), a function of the deployment only (stage-local body frame): {"leg": the transform of the leg and foot nodes, which are
+## drawn deployed - a turn about the hinge's tangent axis by (1 - d) x (stowed - deployed angle), the identity at d = 1; "pusher": the pusher node (drawn
+## along +X with unit length) from its hull anchor to its point on the leg, +X stretched to that distance}. `rig`: manifest hls_legs.rig
+## (hls_legs_layout.leg_rig). Mirrors hls_legs_layout.pose_point / pusher_ends.
+static func hls_leg_pose(rig: Dictionary, azimuth_deg: float, deployment: float) -> Dictionary:
+	var a := deg_to_rad(azimuth_deg)
+	var e_r := Vector3(0.0, cos(a), sin(a))
+	var tangent := Vector3(0.0, -sin(a), cos(a))  # X x e_r: a positive turn about it takes +X towards the radial
+	var deployed := deg_to_rad(float(rig["deployed_angle_deg"]))
+	var delta := (1.0 - clampf(deployment, 0.0, 1.0)) * (deg_to_rad(float(rig["stowed_angle_deg"])) - deployed)
+	var hinge := Vector3(float(rig["hinge_station_m"]), 0.0, 0.0) + e_r * float(rig["hinge_radius_m"])
+	var turn := Basis(tangent, delta)
+	var leg := Transform3D(turn, hinge - turn * hinge)
+	var u := float(rig["pusher_leg_u_m"])
+	var on_leg := leg * (hinge + (Vector3.RIGHT * cos(deployed) + e_r * sin(deployed)) * u)
+	var anchor := Vector3(float(rig["pusher_anchor_station_m"]), 0.0, 0.0) + e_r * float(rig["pusher_anchor_radius_m"])
+	var along := on_leg - anchor
+	var x := along.normalized()
+	return {"leg": leg, "pusher": Transform3D(Basis(along, tangent.cross(x), tangent), anchor)}

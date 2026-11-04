@@ -1078,7 +1078,8 @@ func _check_hls_legs() -> bool:
 			"../config/vehicles/starship_hls.toml")).split("[[stage]]", false)[1])
 	var cfg: Dictionary = config["stage"][0]["landing_legs"]
 	var azimuths: Array = cfg["azimuths_deg"]
-	var legs := {"present": true, "fixed": true, "stroke_m": float(cfg["stroke_m"]), "azimuths_deg": azimuths}
+	_check(not cfg.get("fixed", false) and float(cfg.get("deploy_time_s", 0.0)) > 0.0, "hls: deployable legs in the config (Task 6b)")
+	var legs := {"present": true, "fixed": false, "deployment": 1.0, "stroke_m": float(cfg["stroke_m"]), "azimuths_deg": azimuths}
 	var hls := {"id": "hls", "base_station_m": 0.0, "length_m": 52.1, "diameter_m": 9.0, "nose_length_m": 13.4, "vehicle_id": "starship_hls"}
 	var view := VehicleView.new()
 	_views.append(view)
@@ -1114,7 +1115,111 @@ func _check_hls_legs() -> bool:
 	legs["compression_m"] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 	view.sync([hls], [], [], [], 0.0, legs)
 	_check((node.find_child("foot_1", false, false) as Node3D).transform.origin.is_zero_approx(), "hls: compression 0 returns the nominal pose")
+	# Task 6b: stowed (deployment 0) every leg part lies within the skin + stowed_thickness_m, outside the skin, on the hull's station span
+	var block: Dictionary = models["manifest"]["hls_legs"]
+	var rig: Dictionary = block["rig"]
+	var hull_r := float(block["hull_radius_m"])
+	legs["deployment"] = 0.0
+	view.sync([hls], [], [], [], 0.0, legs)
+	var r_lo := INF
+	var r_hi := -INF
+	var s_lo := INF
+	var s_hi := -INF
+	for i in azimuths.size():
+		for part: String in ["leg_%d" % i, "foot_%d" % i, "pusher_%d" % i]:
+			var mi := node.find_child(part, false, false) as MeshInstance3D
+			for v in _mesh_vertices(mi.mesh as ArrayMesh):
+				var p := mi.transform * v
+				r_lo = minf(r_lo, Vector2(p.y, p.z).length())
+				r_hi = maxf(r_hi, Vector2(p.y, p.z).length())
+				s_lo = minf(s_lo, p.x)
+				s_hi = maxf(s_hi, p.x)
+	print("    hls stowed legs: radius %.3f..%.3f m (skin %.2f + %.2f), station %.3f..%.3f m" % [r_lo, r_hi, hull_r, float(rig["stowed_thickness_m"]), s_lo, s_hi])
+	_check(r_hi <= hull_r + float(rig["stowed_thickness_m"]) and r_lo > hull_r and s_lo > 0.0 and s_hi < 52.1,
+			"hls: stowed legs, feet and pushers inside the skin + stowed thickness, outside the skin, above the hull base")
+	# deployment 0..1 in 0.05 steps: the foot moves at most 25 % of its path per sample, and lands on the config's point at 1
+	var smooth_ok := true
+	for i in azimuths.size():
+		var a := deg_to_rad(float(azimuths[i]))
+		var foot_m := Vector3(float(cfg["foot_station_m"]), float(cfg["footprint_radius_m"]) * cos(a), float(cfg["footprint_radius_m"]) * sin(a))
+		var path: Array[Vector3] = []
+		for k in 21:
+			path.append((VehicleModels.hls_leg_pose(rig, float(azimuths[i]), 0.05 * k)["leg"] as Transform3D) * foot_m)
+		var total := 0.0
+		var longest := 0.0
+		for k in 20:
+			total += path[k].distance_to(path[k + 1])
+			longest = maxf(longest, path[k].distance_to(path[k + 1]))
+		if longest > 0.25 * total or path[20].distance_to(foot_m) > 0.01:
+			smooth_ok = false
+			print("    leg %d: step %.3f of a %.3f m path, end %s" % [i, longest, total, path[20]])
+	_check(smooth_ok, "hls: deploying 0..1 in 0.05 steps the foot moves <= 25 %% of its path per step and ends on the config's foot")
+	# a pusher spans its anchor and its point on the leg in every pose (stretched +X)
+	var span_ok := true
+	for d: float in [0.0, 0.5, 1.0]:
+		var pose := VehicleModels.hls_leg_pose(rig, 0.0, d)
+		var anchor := Vector3(float(rig["pusher_anchor_station_m"]), float(rig["pusher_anchor_radius_m"]), 0.0)
+		var deployed := deg_to_rad(float(rig["deployed_angle_deg"]))
+		var hinge := Vector3(float(rig["hinge_station_m"]), float(rig["hinge_radius_m"]), 0.0)
+		var on_leg := (pose["leg"] as Transform3D) * (hinge + Vector3(cos(deployed), sin(deployed), 0.0) * float(rig["pusher_leg_u_m"]))
+		var t := pose["pusher"] as Transform3D
+		span_ok = span_ok and t.origin.distance_to(anchor) < 0.001 and (t * Vector3.RIGHT).distance_to(on_leg) < 0.001
+	_check(span_ok, "hls: the pusher runs from its hull anchor to its point on the leg at 0, 0.5 and 1")
+	return _check_hls_stack_legs()
+
+
+## On starship_hls_launch the HLS is stacked on the booster: its legs are stowed whatever the snapshot says (the booster has no legs) and clear the booster's
+## grid fins and hot-stage ring (every stowed leg vertex above the booster's highest vertex).
+func _check_hls_stack_legs() -> bool:
+	var stack: Array = [{"id": "booster", "base_station_m": 0.0, "length_m": 72.3, "diameter_m": 9.0, "nose_length_m": 0.0, "vehicle_id": "starship_hls_launch"},
+			{"id": "hls", "base_station_m": 72.3, "length_m": 52.1, "diameter_m": 9.0, "nose_length_m": 13.4, "vehicle_id": "starship_hls_launch"}]
+	var view := VehicleView.new()
+	_views.append(view)
+	root.add_child(view)
+	view.sync(stack, [], [], [], 0.0, {"present": false})
+	var hls_node := view.find_child("stage_hls", true, false) as Node3D
+	var booster_node := view.find_child("stage_booster", true, false) as Node3D
+	if hls_node == null or booster_node == null or hls_node.find_child("leg_0", false, false) == null:
+		_check(false, "hls stack: booster and HLS model stages with legs drawn")
+		return false
+	var to_view := _relative(hls_node, view).affine_inverse()  # the HLS stage frame: station along +X, 0 at its base (not in the tree yet)
+	var booster_top := -INF
+	var fins := 0
+	for mi: Node in booster_node.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if String(m.name).contains("fin") or String(m.name).contains("ring") or String(m.name).contains("hot"):
+			fins += 1
+		var xf := to_view * _relative(m, view)
+		for v in _mesh_vertices(m.mesh as ArrayMesh):
+			booster_top = maxf(booster_top, (xf * v).x)
+	var legs_low := INF
+	for i in 6:
+		for part: String in ["leg_%d" % i, "foot_%d" % i, "pusher_%d" % i]:
+			var m := hls_node.find_child(part, false, false) as MeshInstance3D
+			var xf := to_view * _relative(m, view)
+			for v in _mesh_vertices(m.mesh as ArrayMesh):
+				legs_low = minf(legs_low, (xf * v).x)
+	print("    hls stack: booster parts %d (grid fins / ring), highest booster vertex %.3f m, lowest stowed leg vertex %.3f m (HLS stage frame)" % [fins, booster_top, legs_low])
+	_check(fins > 0 and legs_low > booster_top, "hls stack: the stowed legs clear the booster (grid fins, hot-stage ring) - above its highest vertex")
 	return true
+
+
+## Transform of `node` in `ancestor`'s frame through the parent chain (works before the nodes enter the tree).
+func _relative(node: Node3D, ancestor: Node) -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var n: Node = node
+	while n != null and n != ancestor:
+		if n is Node3D:
+			t = (n as Node3D).transform * t
+		n = n.get_parent()
+	return t
+
+
+func _mesh_vertices(mesh: ArrayMesh) -> PackedVector3Array:
+	var points := PackedVector3Array()
+	for surface in mesh.get_surface_count():
+		points.append_array(mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX])
+	return points
 
 
 ## Centre (bounding box, the pad is a regular polygon) of the lowest-station vertices (the pad's bottom face) of a mesh in the stage's body frame.
