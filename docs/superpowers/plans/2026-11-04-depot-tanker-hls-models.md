@@ -113,6 +113,31 @@
 - [ ] **Step 2:** Implement; green.
 - [ ] **Step 3:** Renders `hls_moon_*` from a lunar landing session (touchdown, standing, liftoff) and `hls_launch_*` on the booster at the pad; send. Commit, push.
 
+### Task 6b: Deployable HLS legs (user decision 2026-11-04)
+
+The user chose deployable legs over fixed ones: stowed flat against the hull at launch, in ascent and in space, deployed before the lunar landing (like Falcon 9's). Physics change.
+
+**Files:**
+- Modify: `config/vehicles/starship_hls.toml` (`[stage.landing_legs]`: `fixed = false` and the deployment keys the Falcon 9 legs use; stowed geometry [E]), the core's lunar landing sequence (deploy command before the terminal descent; read how `falcon9_block5` commands `deployment`), `gen_hls_parts.py` / leg generator (a rig that is a function of `deployment` only), `vehicle_view.gd`, `docs/subsystems/` of lunar landing and legs
+- Test: core `[legs]`, `[hls]`, `[lunar]` cases; `game/tests/vehicle_view_test.gd`
+
+- [ ] **Step 1:** Failing core test: an HLS lunar landing deploys the legs before touchdown (deployment 1 before the first foot contact) and the legs are stowed (deployment 0) on the pad, in ascent and in LLO; a lunar liftoff keeps them deployed. Then implement; `vehicle_report.py starship_hls`.
+- [ ] **Step 2:** Re-run Task 1's `[hls]`, `[lunar]`, `[legs]` with `[slow]`: table old, new, limit; planner fixes if red (user 2026-11-03).
+- [ ] **Step 3:** Failing view tests: at deployment 0 every leg part lies inside the hull envelope + its stowed thickness and clear of the booster (grid fins, hot-stage ring) on `starship_hls_launch`; at 1 the feet on (station -1.5, radius 12.0, azimuth) within 0.01 m; sampling 0..1 at 0.05 the foot moves at most 25 % of its path per sample. Implement; green.
+- [ ] **Step 4:** Renders `hls_launch_*` stowed, `hls_moon_*` deploying and deployed; send. Commit, push.
+
+### Task 6c: Lunar mission lands in daylight (user decision 2026-11-04)
+
+The shipped `hls_lunar_llo` lands at 84.79 S in lunar night (Sun -1.45 deg against a terrain horizon of +2.85 deg; Task 6).
+
+**Files:**
+- Modify: the lunar mission file(s) under `config/missions/` (`epoch_utc` so the landing and liftoff fall in lunar daylight with the Sun at least ~5 deg above the terrain horizon at the site for the whole surface stay), core tests that pin the old epoch (their reference values re-derived, not loosened), `docs/known-issues.md` (remove the lunar-night entry)
+- Create: a reproducible Sun-elevation scan script under `tools/` (site, epoch range, terrain horizon) with its output in the report
+
+- [ ] **Step 1:** Scan with the script; choose the epoch; state Sun elevation at landing and liftoff.
+- [ ] **Step 2:** Change the epoch; re-run `[lunar]`, `[hls]`, `[campaign]` with `[slow]`: table old, new, limit; a pinned value that changes is re-derived from the new epoch and stated; planner fixes if red.
+- [ ] **Step 3:** Moon renders from the shipped mission (no scratch copy, no `--force_sun`); send. Commit, push.
+
 ### Task 7: Cost, docs, final
 
 **Files:**
