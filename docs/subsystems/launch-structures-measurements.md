@@ -260,7 +260,7 @@ ratio in the oblique views (no pixel solve): its error is about 15 %, so the DSC
 | Block X, tower side wall (vertical) | +10.3 m | 1.5 | DSC05957; DSC06000 reads it flush and vertical |
 | Block X, deck edge away from the tower | -10.9 m | 1.5 | DSC05957 |
 | Block Y (end faces, portals) | +-9.4 m | 1.5 | DSC05957; the ring unit (clamps and hoods) measures 11.6 m across on DSC06000 against the 9 m hull (ratio block / ring 1.6): the ring OUTER, not the opening (re-read on the photo 2026-11-03: the dark hole inside is clearly narrower than the unit) |
-| Ring opening / outer (2026-11-03) | opening 10.0 m, outer 11.6 m | 1.7 | opening >= 9.63 m for the outer Raptor lips (4.40 + 0.66 + 0.04 margin, test); DSC06000 reading 11.6 m +-15 % is the ring unit's outer extent (see the row above); the opening itself is not readable on the photo (oblique, hole partly hidden by hoods), so it follows the bell fit; was 9.0 / 10.4 (pickup scale) |
+| Ring opening / outer (2026-11-03) | opening 10.0 m, outer 11.6 m | 1.7 | opening >= 9.63 m for the outer Raptor bells (test: the exact bell contour at the ring height + 0.04 m margin; the lip, 4.40 + 0.66 + 0.04 = 5.10 m radius, does not reach the ring height); DSC06000 reading 11.6 m +-15 % is the ring unit's outer extent (see the row above); the opening itself is not readable on the photo (oblique, hole partly hidden by hoods), so it follows the bell fit; was 9.0 / 10.4 (pickup scale) |
 | Annex footprint | Y +-22.3 at X -10.9, +-9.2 at X -20 | 2 | DSC05957; DSC06000 and CRL05690 show the trapezoid narrowing away |
 | Deck above the ground | 13.5 m (ring top 14.5 m) | 1.2 | kept (Ship 42, person scale) |
 | Tunnel inner width, same everywhere | 15.2 m | 1 | DSC05957 portal; user ruling: no flare, no narrower portal |

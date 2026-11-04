@@ -27,7 +27,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   above the schedule's 55) trims with the forward pair at 79.7 deg against the 75 deg margin limit (alpha 55 / 60:
   46.7 / 54.3 deg). An attitude the schedule does not fly there; the limit is not changed (open, vehicle data).
 - Default-tier run after the test tiers (2026-11-03, `.superpowers/sdd/2026-11-03-test-tiers/full_after.log`): 7 of 1513 red at that run (the "Docked tanker" case is green since 2026-11-03); ctest numbers shift with every added case, so the reds are named by test: the two settling cases (green since planner plan Task 9, below), the reduced direct lunar case "Lunar return campaign (direct): seed 2" (green in the Task 12 run), the two flap-trim cases (one since Task 3b, above); `plan_speed` is green since the re-measure of 2026-11-03. The timeline sampling case (formerly #711) was fixed by 9fbb94a and is green; #1147 is nightly.
-- Reds since 47904b6 (ship hull CP table, station fade Mach 1-4, nose 17 -> 13.4 m), found by the full run 2026-11-03 (`.superpowers/sdd/test-audit/reds-report.md`), not re-pinned: the two settling cases of `test_ignition_settling.cpp` were green again by planner plan Task 9 (2026-11-03): the fixture drifted free for 4 h at the 120 km insertion perigee (~101 km per pass with J2 against the two-body placement), where the tumbling hull fell at ~14,000 s; mission tankers raise that perigee at the first apoapsis and drift free (burn_drifting, no RCS) only in the 170 x 190 km phasing orbit, so the two cases fly there (from the mission configs), no attitude hold added, no limit changed; (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (green since 2026-11-03: reference plans re-measured, see `docs/subsystems/lunar.md`).
+- Settling cases (red since 47904b6, ship hull CP table; green since planner plan Task 9, 2026-11-03): the fixture drifted free for 4 h at the 120 km insertion perigee (~101 km per pass with J2 against the two-body placement), where the tumbling hull fell at ~14,000 s; mission tankers raise that perigee at the first apoapsis and drift free (burn_drifting, no RCS) only in the 170 x 190 km phasing orbit, so the two cases fly there (from the mission configs), no attitude hold added, no limit changed; (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (green since 2026-11-03: reference plans re-measured, see `docs/subsystems/lunar.md`).
 - Real-time play (planner plan Task 11b, fix round 1): every planner that held the sim thread for >= 0.4 s runs on a
   worker (ship-entry-return.md "Planner work off the sim thread"). Left: the entry guidance's first cycle after a
   placement (~55 ms), the refuelling campaign's live re-plans (`plan_refuelling_campaign`, unmeasured); no
@@ -42,6 +42,12 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   seen starts its landing plan synchronously (~0.7 s sim-thread step) instead of one hold late. The refuelling first
   return's side flight on the worker interpolates the worker's interpolated ephemeris again (sub-mm): not bit-identical
   to the synchronous side flight (identical with real-time planning off).
+  Late landing re-plans (fix round 3): a re-plan one interval past its epoch of effect is waited for on the sim thread
+  (gnc-core.md); the hold is the solve's wall time less latency + interval - idle <= ~0.2 s, 6-12 s per late re-plan
+  under the full parallel test load (in VR the sim stalls while rendering interpolates); `STARSIM_DEBUG_REALTIME`
+  prints each ("late landing re-plan: waited ... ms") and a dropped orphan job's failure ("dropped background job
+  failed"). Accepted limit: a late flip prediction has no age bound (its lead is recomputed from the live state each
+  call; staleness = refresh period + worker time).
 - Reds since the Raptor 3 nozzle 1.30 m (2026-11-03, vacuum 2.912 MN / 350 s -> 2.880 MN / 346.2 s, nothing tuned
   back): all green in the planner plan Task 12 run (2026-11-04): flight 14 ascent, the ship return campaigns (phase
   0-135 / 180-315, dispersions 1-3 / 4-6; dispersed case 3 re-planned to the next pass, the campaign now follows the flown

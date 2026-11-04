@@ -125,7 +125,9 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   flip_settled_rate_rad_s 0.2, flaps_until_deg 30, descent_propellant_margin 1.3, landing_lateral_effort 0.03;
   `[stage.tanks] unusable_propellant_kg` header 1 t = the plans' hard floor (main 1 t for the tanker reserve). D (at the
   landing masses: dry + full headers 212 t / dry + 1 t 178 t; I 5.46e7 kg m^2, lever 24.98 m): tilt-rate limits
-  min(gimbal slew, sqrt(alpha_min tilt)) = 0.301 / 0.246 / 0.213 rad/s; 3 -> 2 sink window min = (3 at minimum -
+  min(gimbal slew, sqrt(alpha_min tilt)) = 0.301 / 0.246 / 0.213 rad/s (alpha at minimum throttle: the conservative
+  end, the least angular acceleration; the gimbal term is the deflection slew rate set against a body rate - different
+  quantities, kept as a cap that does not bind here); 3 -> 2 sink window min = (3 at minimum -
   weight) x shutdown = 1.25 m/s (three Raptors at 30 % lift the light ship), max = sqrt(2 (2 at 95 % / m - g) h) set at
   the gate from the CG height above the catch (144 m/s from 700 m; never binding - the window has effectively no maximum; the webcast 20-40 m/s is no longer
   used). The first plan starts from two guesses and keeps the better (`gnc::SwitchGuess`, every vehicle since planner Task 5; `gnc::better_descent_plan`: converged, then feasible - clear of the keep-out boxes, final-set tilt within `max_planned_tilt_excess_rad` - then the heavier end): the window's middle, and the switch from the state (as late as

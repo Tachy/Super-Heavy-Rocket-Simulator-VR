@@ -71,10 +71,11 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   height's trend over >= 1 s: tick to tick it jitters by ~16 m, a 5 ms trend began it at 7.6 km) lies within the hold,
   lit at the hand-over (its start-up counts from there); the HLS its braking thrust, begun the hold before the
   approach t_go. Off (tests, warp): synchronous, unchanged. Re-plans in real-time play are used when they arrive, but
-  one a re-plan interval (1 s) past its epoch of effect (snapshot + latency) is waited for - plans never come further
-  apart than interval + latency + interval, however slow the machine (fix round 3: a paced Mach 2.6 run under the full
-  parallel test load, 7-13 s solves: never waiting 2 plans in the burn, tower struck; a 3 s bound 8 plans, struck at
-  3.7 m/s sink; the 1 s bound 17 plans, caught 0.13 m).
+  one a re-plan interval (1 s) past its epoch of effect (snapshot + latency) is waited for. Rule [E]: the worst gap
+  between plans is one missed synchronous cycle, 2 x `replan_interval_s` + `plan_latency_s`, however slow the machine.
+  Its sim-thread hold is the solve's wall time less latency + interval (idle <= ~0.2 s; 6-12 s under the full
+  parallel test load), logged per wait by `STARSIM_DEBUG_REALTIME` ("late landing re-plan"). The trials behind it:
+  `docs/history/guidance-missions.md`.
 - SCvx landing aborts (all vehicles; the pilot's `abort_landing` too): a first plan that finds the target unreachable
   aborts at once; `failures_before_abort` (2) re-plans with a virtual control above the stall threshold, or
   `unconverged_before_abort` (4) unconverged re-plans of any kind, give the target up and plan for the sea.

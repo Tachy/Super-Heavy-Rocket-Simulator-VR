@@ -779,3 +779,7 @@ The `docs/known-issues.md` entry as it stood before the re-measure (all green si
   11 (61.6 / 54.4 / 56.3 t) departed in the transonic terminal phase (case 8: aoa from 72 deg at Mach 1.9 to tail
   first, 5.4 km miss, 412 m/s sink; cases 9 / 11 at the gate 2.0 / 1.3 km off); every case up to 45.8 t was at the gate
   within 0.07 m. First reported as a user item; ruled a planner item (the return planner vents the excess, Task 12b).
+- Late landing re-plan bound in real-time play (planner plan Task 11b fix round 3; moved here by the final fix
+  2026-11-04): a paced Mach 2.6 run under the full parallel test load (7-13 s solves) that never waited flew 2 plans in
+  the whole burn and struck the tower; a 3 s bound flew 8 plans, still struck (sink 3.7 m/s); the bound of one re-plan
+  interval (1 s) flew 17 plans, caught 0.13 m. Current rule: `docs/subsystems/gnc-core.md`.
