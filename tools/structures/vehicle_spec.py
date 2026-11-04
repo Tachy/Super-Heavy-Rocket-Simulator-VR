@@ -453,7 +453,8 @@ def resolve_stages(vehicle_id: str, vehicles_dir: Path = VEHICLES, _depth: int =
 DORSAL_KEYS = ("probe_stroke_m", "fairing_height_m", "fairing_radius_m", "fairing_chamfer_m", "fairing_bore_clearance_m", "fairing_embed_m",
                "probe_head_radius_m", "probe_head_length_m", "probe_head_collar_m", "probe_shaft_radius_m", "probe_shaft_length_m",
                "probe_tip_flat_radius_m", "drogue_mouth_radius_m", "drogue_depth_m", "drogue_throat_radius_m", "drogue_wall_m", "drogue_foot_m",
-               "connector_pedestal_radius_m", "connector_nozzle_wall_m", "connector_nozzle_length_m", "connector_embed_m", "segments")
+               "connector_pedestal_radius_m", "connector_nozzle_wall_m", "connector_nozzle_length_m", "connector_embed_m", "raceway_detour_m", "raceway_detour_ramp_m",
+               "segments")
 
 
 def dorsal_block(vehicle_id: str, stage_id: str, ship: dict, drawing: dict) -> dict:
@@ -475,6 +476,38 @@ def dorsal_block(vehicle_id: str, stage_id: str, ship: dict, drawing: dict) -> d
         raise VehicleSpecError(f"{vehicle_id}: the dorsal ports must share one axis")
     connectors = [{k: c[k] for k in ("id", "position_m", "line_diameter_m")} for c in ship.get("transfer_connector", [])]
     return {"stage_id": stage_id, "ports": ports, "connectors": connectors, "drawing": {k: drawing[k] for k in DORSAL_KEYS}}
+
+
+INSULATION_KEYS = ("albedo", "roughness", "metallic", "pillow_width_m", "pillow_height_m", "pillow_bulge_m", "wrinkle_share", "seam_darkening", "seam_half_width_m")
+RCS_POD_KEYS = ("length_m", "width_m", "height_m")
+
+
+def insulation_block(vehicle_id: str, table: dict) -> dict:
+    """`[insulation]` of a detail file with `skin = "insulated"`: the MLI blanket's quilting (bake) and shading (shader)."""
+    missing = [k for k in INSULATION_KEYS if k not in table]
+    if missing or sorted(set(table) - set(INSULATION_KEYS)):
+        raise VehicleSpecError(f"{vehicle_id}: [insulation] needs exactly {INSULATION_KEYS}; missing {missing}, unknown {sorted(set(table) - set(INSULATION_KEYS))}")
+    albedo = table["albedo"]
+    if not (isinstance(albedo, list) and len(albedo) == 3 and all(_number(c) and 0.0 < c < 1.0 for c in albedo)):
+        raise VehicleSpecError(f"[insulation].albedo: three numbers in (0, 1), got {albedo!r}")
+    for k in INSULATION_KEYS[1:]:
+        if not _number(table[k]) or table[k] < 0.0:
+            raise VehicleSpecError(f"[insulation].{k}: must be a non-negative number, got {table[k]!r}")
+    for k in ("roughness", "metallic", "wrinkle_share", "seam_darkening"):
+        if table[k] > 1.0:
+            raise VehicleSpecError(f"[insulation].{k}: at most 1, got {table[k]!r}")
+    return {k: table[k] for k in INSULATION_KEYS}
+
+
+def rcs_pods_block(vehicle_id: str, ship: dict, drawing: dict) -> dict:
+    """The ship's RCS pods (station, azimuths from the config) with the drawn size of `[rcs_pods]`."""
+    for k in RCS_POD_KEYS:
+        if not _number(drawing.get(k)) or drawing[k] <= 0.0:
+            raise VehicleSpecError(f"[rcs_pods].{k}: must be a positive number, got {drawing.get(k)!r}")
+    pods = [{"id": p["id"], "station_m": float(p["station_m"]), "azimuths_deg": [float(a) for a in p["azimuths_deg"]]} for p in ship.get("rcs", {}).get("pod", [])]
+    if not pods:
+        raise VehicleSpecError(f"{vehicle_id}: [rcs_pods] needs [[stage.rcs.pod]] on the ship stage")
+    return {"pods": pods, "drawing": {k: drawing[k] for k in RCS_POD_KEYS}}
 
 
 def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
@@ -556,6 +589,10 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
         spec["variant"] = variant
     if "dorsal" in detail:  # tanker probes / depot drogues and the transfer connectors, placed by the vehicle config (Task 3)
         spec["dorsal"] = dorsal_block(vehicle_id, stages["ship"]["stage_id"], raw_ship, detail["dorsal"])
+    if is_variant and variant["skin"] == "insulated":  # the depot's MLI blanket look: baked map + shader numbers (Task 4)
+        spec["insulation"] = insulation_block(vehicle_id, detail.get("insulation", {}))
+    if "rcs_pods" in detail:  # drawn RCS pods at the config's pod stations (Task 4)
+        spec["rcs_pods"] = rcs_pods_block(vehicle_id, raw_ship, detail["rcs_pods"])
     return spec
 
 

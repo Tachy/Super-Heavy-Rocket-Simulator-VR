@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bpy  # noqa: E402
+import dorsal_layout as dl  # noqa: E402
 import vehicle_common as vc  # noqa: E402
 from hull_profile import Profile  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -323,7 +324,9 @@ def _build_chine(stage, detail, profile):
     return mesh
 
 
-def _build_raceway(stage, detail, profile):
+def _build_raceway(stage, detail, profile, dorsal=None):
+    """The ship's cable raceway. With a `dorsal` block (tanker, depot) the tube is routed sideways around the connector pedestals
+    (dorsal_layout.raceway_offset_m, drawing only, user ruling 2026-11-04); without one it is the unchanged Block 3 tube."""
     rw = detail["ship"]["raceway"]
     a = math.radians(stage["belly_azimuth_deg"] + rw["azimuth_from_belly_deg"])
     mesh = vc.VMesh()
@@ -331,18 +334,44 @@ def _build_raceway(stage, detail, profile):
     xs = [first + 2.0 * i for i in range(int((min(last, profile.x_barrel_end) - first) / 2.0) + 1)]
     xs += [x for x in profile.stations() if max(first, profile.x_barrel_end) < x < last and x - xs[-1] > 0.2]
     xs.append(last)
+    connectors, drawing = (dorsal["connectors"], dorsal["drawing"]) if dorsal else ([], None)
+    if connectors:
+        xs = sorted(set(xs) | set(dl.raceway_stations(first, last, connectors, drawing)))
+
+    def azimuth(x):  # the detour: an offset along the arc at the local hull radius
+        if not connectors:
+            return a
+        return a + dl.raceway_offset_m(x, connectors, drawing) / profile.base(x)
+
     r = rw["radius_m"]
     for k in range(len(xs) - 1):
-        p0 = vc.pt(xs[k], a, profile.base(xs[k]) + r * 0.5)
-        p1 = vc.pt(xs[k + 1], a, profile.base(xs[k + 1]) + r * 0.5)
+        p0 = vc.pt(xs[k], azimuth(xs[k]), profile.base(xs[k]) + r * 0.5)
+        p1 = vc.pt(xs[k + 1], azimuth(xs[k + 1]), profile.base(xs[k + 1]) + r * 0.5)
         vc.tube(mesh, p0, p1, r, RACEWAY_SIDES, ("raceway", 0), cap0=k == 0, cap1=k == len(xs) - 2)
-    er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
     foot = rw["foot_width_m"] / 2.0  # wider feet: flat saddles under the tube every FOOT_STEP_M
     x = first + 0.5 * FOOT_STEP_M
     while x < last:
-        vc.box(mesh, vc.pt(x, a, profile.base(x) + rw["foot_height_m"] / 2.0 - EMBED_M), X_AXIS, et, er,
-               (rw["foot_length_m"] / 2.0, foot, rw["foot_height_m"] / 2.0 + EMBED_M / 2.0))
+        if not connectors or dl.foot_clears_connectors(x, rw["foot_length_m"] / 2.0, foot, connectors, drawing):
+            af = azimuth(x)
+            er, et = vc.radial_dir(af), Vector((0.0, -math.sin(af), math.cos(af)))
+            vc.box(mesh, vc.pt(x, af, profile.base(x) + rw["foot_height_m"] / 2.0 - EMBED_M), X_AXIS, et, er,
+                   (rw["foot_length_m"] / 2.0, foot, rw["foot_height_m"] / 2.0 + EMBED_M / 2.0))
         x += FOOT_STEP_M
+    return mesh
+
+
+def _build_rcs_pods(stage, rcs, profile):
+    """Low pods (thruster covers) at the config's RCS pod stations and azimuths, standing on the drawn hull (the physics pods float at the
+    config radius, the drawn hull is the reference: docs/subsystems/vehicle-models.md, forward RCS pod). Size: `[rcs_pods]` of the detail file."""
+    d = rcs["drawing"]
+    mesh = vc.VMesh()
+    for pod in rcs["pods"]:
+        x = pod["station_m"]
+        for az_deg in pod["azimuths_deg"]:
+            a = math.radians(az_deg)
+            er, et = vc.radial_dir(a), Vector((0.0, -math.sin(a), math.cos(a)))
+            vc.box(mesh, vc.pt(x, a, profile.base(x) + d["height_m"] / 2.0 - EMBED_M), X_AXIS, et, er,
+                   (d["length_m"] / 2.0, d["width_m"] / 2.0, d["height_m"] / 2.0 + EMBED_M / 2.0))
     return mesh
 
 
@@ -368,7 +397,9 @@ def build_stage(spec, stage_id):
             parts["chine"] = _build_chine(stage, detail, profile)
         if variant.get("flaps", True):
             parts["hinge_covers"] = _build_hinge_covers(stage, detail, profile)
-        parts["raceway"] = _build_raceway(stage, detail, profile)
+        parts["raceway"] = _build_raceway(stage, detail, profile, spec.get("dorsal"))
+        if spec.get("rcs_pods"):
+            parts["rcs_pods"] = _build_rcs_pods(stage, spec["rcs_pods"], profile)
         parts["ports"] = _build_ports(stage, detail, profile)
     if stage.get("catch_pins") and stage_id != "booster":  # the booster's bearing is the fins' flat bar, no frame shows a pin
         parts["catch_pins"] = _build_catch_pins(stage, detail, profile)

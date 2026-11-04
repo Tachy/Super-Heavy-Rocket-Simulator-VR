@@ -224,6 +224,17 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
   2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
 
+- Dorsal raceway vs transfer connectors (plan 2026-11-04, Tasks 3 / 4; USER DECISION OPEN): the Block 3 raceway tube lies on the
+  dorsal centreline and the configs put both connectors on y = 0 (stations 8 and 24 m), so the tube would run into the connector
+  pedestals. Until the user decides, the DRAWING routes the tube sideways around the pedestals on the tanker and the depot only
+  (`[dorsal] raceway_detour_m` / `raceway_detour_ramp_m`, `dorsal_layout.raceway_offset_m`, `gen_hull.py`); physics and Block 3 are
+  untouched. Option 2 awaiting the user: move the connectors off the centreline in the configs (`starship_tanker.toml`,
+  `starship_depot.toml`, `starship_hls.toml`; the mated pair needs both ships' connectors mirrored), then drop the detour keys.
+- Probe / drogue element meaning (Tasks 3 / 4): the core (`probe_drogue_interface.hpp`) takes the tanker's `elements_m` as probe ROOTS
+  on the interface plane (head 0.5 m + 0.3 m stroke beyond it) and the depot's as drogue MOUTH centres, cone 0.5 m deep; the tanker
+  config comment and the Task 3 drawing take them as the extended probe TIPS. Drawn, the extended tips therefore end on the mouth
+  plane (touching, not inserted); the core seats the heads 0.5 m inside. Needs the user's call (which reading the config should have).
+
 ## Pad B drawing, open after the physics alignment plan (2026-11-01)
 - Slits between the cladding plates on the pad-side tower face: the sky shows through in places (`screenshots/pad-b-plan/fix6_leg.png`).
 - Tower braces have no gusset plates; the close-up photo shows them clearly (`nsf_padb_chopsticks_2025-02.jpg`).

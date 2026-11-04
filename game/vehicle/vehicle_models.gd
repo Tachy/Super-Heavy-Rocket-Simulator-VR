@@ -19,7 +19,7 @@ const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
 	# ship variants (plan 2026-11-04): the depot draws no flaps, the HLS has no booster (generators.toml "outputs")
 	"starship_tanker": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac", "dorsal_hardware"],
-	"starship_depot": ["booster", "ship", "grid_fin", "raptor", "rvac"],
+	"starship_depot": ["booster", "ship", "grid_fin", "raptor", "rvac", "dorsal_hardware"],
 	"starship_hls": ["ship", "raptor", "rvac"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
 	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism"], "iss": ["iss_station", "iss_arrays", "iss_rings"],
@@ -27,7 +27,7 @@ const MODEL_FILES := {
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
 	"starship_tanker": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
-	"starship_depot": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py"],
+	"starship_depot": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
 	"starship_hls": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_engine.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
 	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
@@ -223,6 +223,16 @@ static func _hull_materials(look: Dictionary, model_dir: String, vehicle_id: Str
 			material.set_shader_parameter("steel_slope_range", float(info["slope_range"]))
 			material.set_shader_parameter("steel_energy_range", float(info["slope_energy_range"]))
 			material.set_shader_parameter("steel_shift_steps", float(info.get("shift_steps", 0)))
+		if key == "ship" and not no_maps and look.get("skin_drawn", "steel") == "insulated":  # the depot's MLI blanket: its own baked map and shading
+			var blanket: Dictionary = (look.get("steel_map", {}) as Dictionary).get("insulated", {})
+			var blanket_map := _steel_map({"file": blanket.get("file", "")}, model_dir, vehicle_id)
+			if blanket_map != null:
+				var albedo: Array = blanket["albedo"]
+				material.set_shader_parameter("steel_textured", true)
+				material.set_shader_parameter("steel_map", blanket_map)
+				material.set_shader_parameter("steel_albedo", Color(albedo[0], albedo[1], albedo[2]))
+				material.set_shader_parameter("steel_roughness", float(blanket["roughness"]))
+				material.set_shader_parameter("steel_metallic", float(blanket["metallic"]))
 		if key == "flap" and steel_map != null:  # the panel lines of the lee face (same channels, no ring shift, no weld gate)
 			var info: Dictionary = look["steel_map"]
 			var flap_map := _steel_map({"file": info.get("flap_file", "")}, model_dir, vehicle_id)

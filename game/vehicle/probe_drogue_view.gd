@@ -1,7 +1,6 @@
-## The ship's dorsal transfer hardware (tanker: four docking probes, two propellant connectors; depot: drogues, Task 4), drawn in the ship stage's body frame.
+## The ship's dorsal transfer hardware (tanker: four docking probes, two propellant connectors; depot: four drogues), drawn in the ship stage's body frame.
 ## `set_state` is the only entry for the probe visuals. Parts: dorsal_hardware.gltf (frames and the statement that the shapes are invented [E]:
-## tools/structures/blender/gen_dorsal_hardware.py, config/vehicles/detail/starship_tanker.toml [dorsal]). Nodes: `probe_<i>` / `drogue_<i>` (origin = the config
-## element = the extended tip), `connector_<name>` (origin = the coupling face), `dock_fairing` (fixed). No physics here.
+## tools/structures/blender/gen_dorsal_hardware.py, config/vehicles/detail/starship_tanker.toml [dorsal]). Nodes: `probe_<i>` (origin = the config element = the extended tip) / `drogue_<i>` (origin = the centre of the mouth plane = the config element), `connector_<name>` (origin = the coupling face), `dock_fairing` (fixed). No physics here.
 class_name ProbeDrogueView
 extends Node3D
 
@@ -15,6 +14,8 @@ var _axis := Vector3.BACK
 var _stroke_m := 0.0
 var _elements: Array[Vector3] = []
 var _probes: Array[MeshInstance3D] = []
+var _drogues: Array[MeshInstance3D] = []
+var _cone := {}  # manifest "dorsal_drogue": mouth radius, depth, throat radius of the funnel (drogue ships)
 var _connectors: Dictionary = {}
 var _extension := 0.0
 var _captured := false
@@ -36,6 +37,9 @@ func build(models: Dictionary, material_of: Callable) -> void:
 		instance.position = element
 		if kind == "probe":
 			_probes.append(instance)
+		else:
+			_drogues.append(instance)  # the node origin is the centre of the mouth plane = the config element
+	_cone = manifest.get("dorsal_drogue", {})
 	if parts.has("dock_fairing"):
 		_instance("dock_fairing", parts, material_of, self)
 	var connectors: Dictionary = manifest["dorsal_connectors"]
@@ -64,6 +68,30 @@ func is_captured() -> bool:
 
 func probe_count() -> int:
 	return _probes.size()
+
+
+func drogue_count() -> int:
+	return _drogues.size()
+
+
+## The centre of drogue i's mouth plane in this view's frame, from the mesh itself: the rim, the highest point along the port axis, on the axis line.
+func drogue_mouth_m(i: int) -> Vector3:
+	return _drogues[i].position + _axis * _axial_max(_drogues[i])
+
+
+## Is `point_m` (this view's frame) inside the funnel of drogue i: between the mouth plane and the floor along the axis, within the cone's radius there?
+## `tolerance_m` widens every bound (the closed cone, mouth plane included).
+func inside_drogue_cone(i: int, point_m: Vector3, tolerance_m: float) -> bool:
+	var rel := point_m - drogue_mouth_m(i)
+	var below := -rel.dot(_axis)  # metres below the mouth plane
+	var depth := float(_cone["drogue_depth_m"])
+	if below < -tolerance_m or below > depth + tolerance_m:
+		return false
+	var lateral := (rel + _axis * below).length()
+	var mouth := float(_cone["drogue_mouth_radius_m"])
+	var throat := float(_cone["drogue_throat_radius_m"])
+	var radius := mouth - (mouth - throat) * clampf(below, 0.0, depth) / depth
+	return lateral <= radius + tolerance_m
 
 
 ## The probe's tip (its highest point along the port axis, on the axis line) in this view's frame, from the mesh itself.

@@ -37,9 +37,12 @@ def _mesh_points(doc, buffers, name):
 
 
 def _load_gltf():
-    path = MODELS / "dorsal_hardware.gltf"
+    return _load_gltf_at(MODELS / "dorsal_hardware.gltf")
+
+
+def _load_gltf_at(path):
     if not path.is_file():
-        pytest.skip("data/models/starship_tanker/dorsal_hardware.gltf not generated")
+        pytest.skip(f"{path} not generated")
     doc = json.loads(path.read_text(encoding="utf-8"))
     buffers = [base64.b64decode(b["uri"].split(",", 1)[1]) if b["uri"].startswith("data:") else (path.parent / b["uri"]).read_bytes()
                for b in doc["buffers"]]

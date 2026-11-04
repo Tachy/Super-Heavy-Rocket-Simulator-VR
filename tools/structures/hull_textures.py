@@ -39,6 +39,8 @@ DOT_RADIUS_M = 0.018      # [E] ~4 texels: not resolved in the frames, reads as 
 DOT_LINE_SHARE = 0.6     # [E] share of the stringer lines that carry dots: frames (booster and ship, f12 / NSF photos): bands, not a grid
 DOT_DROPOUT = 0.2        # [E] share of dots missing along a line (same frames: broken rows)
 DOT_COVERAGE = 0.8        # [E] darkening share of a dot in the A channel
+INSULATED_FILE_NAME = "hull_insulated.png"
+INSULATED_SEED = SEED + 31
 FLAP_FILE_NAME = "flap_lee.png"
 FLAP_SIZE = (1024, 342)   # texels along the hinge, span: the aft flap's 12 x 4 m
 FLAP_PERIOD_M = (12.0, 4.0)
@@ -129,6 +131,47 @@ def bake(radius_m: float, hull: dict) -> np.ndarray:
     return np.rint(out * 255.0).astype(np.uint8)
 
 
+def bake_insulated(radius_m: float, hull: dict, ins: dict) -> np.ndarray:
+    """(SIZE_V, SIZE_U, 4) uint8, same channels and periods as `bake`, for the depot's MLI blanket (spec["insulation"]): a quilted outer layer.
+
+    Pillows of `pillow_width_m` x `pillow_height_m` (rounded to whole cells per period) bulge `pillow_bulge_m` (a sine hump, creased at the
+    stitched seams), plus soft wrinkles (the steel map's dent octaves, scaled to `wrinkle_share` of the pillow slope rms); the seam tape
+    darkens the A channel by `seam_darkening` over `seam_half_width_m` either side of every seam. No rings, no welds: a blanket."""
+    pu, pv = periods_m(radius_m, hull["ring_pitch_m"])
+    du, dv = pu / SIZE_U, pv / SIZE_V
+    nu, nv = max(1, round(pu / ins["pillow_width_m"])), max(1, round(pv / ins["pillow_height_m"]))
+    u = (np.arange(SIZE_U) + 0.5) * du
+    v = (np.arange(SIZE_V) + 0.5) * dv
+    fu, fv = (u * nu / pu) % 1.0, (v * nv / pv) % 1.0
+    h = ins["pillow_bulge_m"] * (np.sin(math.pi * fv)[:, None] * np.sin(math.pi * fu)[None, :]) ** 0.5
+    sx = (np.roll(h, -1, axis=1) - np.roll(h, 1, axis=1)) / (2.0 * du)
+    sy = (np.roll(h, -1, axis=0) - np.roll(h, 1, axis=0)) / (2.0 * dv)
+    # the sqrt hump has an infinite slope at the seam; the finite difference clips it at one texel, which is the crease
+    pillow_rms = math.sqrt(float(np.mean(sx * sx + sy * sy)))
+    rng = np.random.default_rng(INSULATED_SEED)
+    w = np.zeros((SIZE_V, SIZE_U))
+    for cu, cv, weight in DENT_OCTAVES:
+        w += weight * (_periodic_noise(rng, cu, cv, SIZE_U, SIZE_V) - 0.5) * (pu / cu + pv / cv) * 0.5
+    wx = (np.roll(w, -1, axis=1) - np.roll(w, 1, axis=1)) / (2.0 * du)
+    wy = (np.roll(w, -1, axis=0) - np.roll(w, 1, axis=0)) / (2.0 * dv)
+    gain = ins["wrinkle_share"] * pillow_rms / math.sqrt(float(np.mean(wx * wx + wy * wy)))
+    sx, sy = sx + gain * wx, sy + gain * wy
+    seam_u = np.minimum(fu, 1.0 - fu) * pu / nu  # distance to the nearest seam, metres
+    seam_v = np.minimum(fv, 1.0 - fv) * pv / nv
+    half = ins["seam_half_width_m"]
+    tape_u = np.clip((half - seam_u) / du + 0.5, 0.0, 1.0)
+    tape_v = np.clip((half - seam_v) / dv + 0.5, 0.0, 1.0)
+    tape = np.maximum(tape_v[:, None], tape_u[None, :])
+    lim = SLOPE_RANGE / 2.0
+    sx, sy = np.clip(sx, -lim, lim), np.clip(sy, -lim, lim)
+    out = np.empty((SIZE_V, SIZE_U, 4))
+    out[..., 0] = 0.5 + sx / SLOPE_RANGE
+    out[..., 1] = 0.5 + sy / SLOPE_RANGE
+    out[..., 2] = np.clip((sx * sx + sy * sy) / SLOPE_ENERGY_RANGE, 0.0, 1.0)
+    out[..., 3] = ins["seam_darkening"] * tape
+    return np.rint(out * 255.0).astype(np.uint8)
+
+
 def bake_flap() -> np.ndarray:
     """Panel lines of the flaps' bare lee face, same channels as the hull map, not tiling: columns, rows, two stiffeners."""
     w, h = FLAP_SIZE
@@ -181,6 +224,11 @@ def write(out_dir, spec: dict) -> dict:
     (out_dir / FILE_NAME).write_bytes(png_bytes(bake(radius, hull)))
     pu, pv = periods_m(radius, hull["ring_pitch_m"])
     (out_dir / FLAP_FILE_NAME).write_bytes(png_bytes(bake_flap()))
-    return {"file": FILE_NAME, "flap_file": FLAP_FILE_NAME, "flap_period_m": list(FLAP_PERIOD_M),
+    entry = {}
+    if spec.get("insulation"):  # a variant with the insulated skin (depot): its own map, the shader numbers travel with it
+        ins = spec["insulation"]
+        (out_dir / INSULATED_FILE_NAME).write_bytes(png_bytes(bake_insulated(radius, hull, ins)))
+        entry["insulated"] = {"file": INSULATED_FILE_NAME, "albedo": ins["albedo"], "roughness": ins["roughness"], "metallic": ins["metallic"]}
+    return {**entry, "file": FILE_NAME, "flap_file": FLAP_FILE_NAME, "flap_period_m": list(FLAP_PERIOD_M),
             "shift_steps": STRINGERS_PER_TILE, "period_u_m": pu, "period_v_m": pv, "size": [SIZE_U, SIZE_V], "slope_range": SLOPE_RANGE,
             "slope_energy_range": SLOPE_ENERGY_RANGE, "texel_m": [pu / SIZE_U, pv / SIZE_V]}

@@ -309,8 +309,10 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict, tab
     if "variant" in spec:  # a ship variant (tanker, depot, HLS): the switches, the ship stage's id; no tiles = zero coverage
         look["variant"] = spec["variant"]
         look["stage_ids"] = {role: st["stage_id"] for role, st in spec["stages"].items()}
-        # TODO(Task 4 / Task 5): the "insulated" and "white" skins are baked there; until then every skin draws as steel.
-        look["skin_drawn"] = "steel"
+        # Skins: "insulated" is baked by hull_textures.bake_insulated (Task 4); TODO(Task 5): "white" until then draws as steel.
+        look["skin_drawn"] = "insulated" if spec["variant"]["skin"] == "insulated" and "insulation" in spec else "steel"
+        if "rcs_pods" in spec:  # drawn RCS pods: dark covers (DARK_PARTS "dark")
+            look["part_materials"] = {"rcs_pods": "dark"}
         if not spec["variant"]["tiles"]:
             look["tiles"]["coverage_half_angle_deg"] = [0.0] * len(look["tiles"]["coverage_half_angle_deg"])
     manifest = {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),

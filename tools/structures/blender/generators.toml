@@ -51,10 +51,10 @@ generators = ["gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py", 
 
 [starship_depot]
 kind = "starship"
-outputs = ["booster.gltf", "ship.gltf", "grid_fin.gltf", "raptor.gltf", "rvac.gltf"]
-scripts = ["common.py", "vehicle_common.py", "hull_profile.py"]
+outputs = ["booster.gltf", "ship.gltf", "grid_fin.gltf", "raptor.gltf", "rvac.gltf", "dorsal_hardware.gltf"]
+scripts = ["common.py", "vehicle_common.py", "hull_profile.py", "dorsal_layout.py"]
 bakers = ["hull_textures", "hull_tiles"]
-generators = ["gen_hull.py", "gen_grid_fin.py", "gen_engine.py"]
+generators = ["gen_hull.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"]
 
 [starship_hls]
 kind = "starship"

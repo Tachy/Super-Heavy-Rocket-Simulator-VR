@@ -4,8 +4,7 @@ Used by gen_dorsal_hardware.py (the mesh), by vehicle_spec / build_models (the m
 the vehicle config (elements, positions, axes) and the `[dorsal]` table of the detail file.
 
 Local part frame: +X is the interface normal (the port's `axis`, out of the vehicle), the part is a body of revolution about it, profiles are
-(x, r). Origin: probe = the extended TIP (the config element); drogue = the floor point where the tip rests (the config element, the funnel opens
-towards +X); connector = the centre of the coupling face (the config position). The generator rotates +X onto the port axis and leaves the
+(x, r). Origin: probe = the extended TIP (the config element); drogue = the centre of its MOUTH plane (the config element; the funnel narrows towards -X); connector = the centre of the coupling face (the config position). The generator rotates +X onto the port axis and leaves the
 origin, so a game node only translates (probe: by the stroke along the axis).
 """
 import math
@@ -70,16 +69,36 @@ def probe_head_total_m(d):
     return d["probe_head_length_m"] + d["probe_head_collar_m"]
 
 
-def drogue_runs(d):
-    """Funnel about +x: floor at x = 0 (radius throat), cone out to the mouth at x = depth, rim, outer cone and solid foot below the floor."""
+def drogue_runs(d, stand_length_m=None):
+    """Funnel about +x: the MOUTH plane at x = 0 (the config element, core: `probe_drogue_interface.hpp` "drogue mouths in the plane x = 0"),
+    the cone narrows to the floor at x = -depth (radius throat), a solid foot under the floor, then a stand (radius throat + wall) down to
+    x = -stand_length_m (the barrel, reached by `stand_length`) so the funnel does not float above the hull."""
     depth, mouth, throat = d["drogue_depth_m"], d["drogue_mouth_radius_m"], d["drogue_throat_radius_m"]
     wall, foot = d["drogue_wall_m"], d["drogue_foot_m"]
     outer_mouth = mouth + wall
-    return [([(0.0, 0.0), (0.0, throat)], SKIN_FLAT),
-            ([(0.0, throat), (depth, mouth)], "in"),
-            ([(depth, mouth), (depth, outer_mouth)], SKIN_FLAT),
-            ([(depth, outer_mouth), (-foot, throat + wall)], "out"),
-            ([(-foot, throat + wall), (-foot, 0.0)], (-1.0, 0.0, 0.0))]
+    neck = throat + wall
+    bottom = -(depth + foot) if stand_length_m is None else -stand_length_m
+    if bottom > -(depth + foot):
+        raise ValueError("drogue stand ends above the funnel's foot")
+    return [([(-depth, 0.0), (-depth, throat)], SKIN_FLAT),
+            ([(-depth, throat), (0.0, mouth)], "in"),
+            ([(0.0, mouth), (0.0, outer_mouth)], SKIN_FLAT),
+            ([(0.0, outer_mouth), (-depth - foot, neck)], "out"),
+            ([(-depth - foot, neck), (bottom, neck)], "out"),
+            ([(bottom, neck), (bottom, 0.0)], (-1.0, 0.0, 0.0))]
+
+
+def stand_length(d, hull_radius_m, element_m, axis):
+    """Distance from a drogue's mouth plane down to the foot of its stand: to the barrel along the port axis plus the hidden embed."""
+    return hull_distance_m(hull_radius_m, element_m, axis) + d["connector_embed_m"]
+
+
+def drogue_cone_radius_m(d, depth_below_mouth_m):
+    """Inner radius of the funnel at `depth_below_mouth_m` (0 at the mouth), None outside the funnel."""
+    depth = d["drogue_depth_m"]
+    if depth_below_mouth_m < 0.0 or depth_below_mouth_m > depth:
+        return None
+    return d["drogue_mouth_radius_m"] - (d["drogue_mouth_radius_m"] - d["drogue_throat_radius_m"]) * depth_below_mouth_m / depth
 
 
 def fairing_geometry(d, hull_radius_m, element_m, axis):
@@ -123,5 +142,50 @@ def block(spec_dorsal, hull_radius_m):
             "dorsal_nodes": [n["node"] for n in nodes], "dorsal_mechanism": nodes[0]["kind"], "dorsal_axis": list(first["axis"]),
             "probe_stroke_m": d["probe_stroke_m"], "dorsal_fairing_height_m": d["fairing_height_m"],
             "dorsal_hull_radius_m": hull_radius_m,
+            "dorsal_port": {k: list(first[k]) for k in ("position_m", "axis", "up")},
+            "dorsal_drogue": {k: d[k] for k in ("drogue_mouth_radius_m", "drogue_depth_m", "drogue_throat_radius_m")},
             "dorsal_connectors": {c["node"]: {"position_m": c["position_m"], "axis": c["axis"]}
                                   for c in connector_nodes(spec_dorsal["connectors"], first["axis"])}}
+
+
+def _smoothstep(t):
+    t = min(max(t, 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def raceway_offset_m(x_m, connectors, d):
+    """Drawn sideways offset (metres along the arc, towards increasing azimuth) of the dorsal raceway at station `x_m`.
+
+    The Block 3 raceway tube lies on the dorsal centreline and the config puts both transfer connectors on it (y = 0), so the tube would run into
+    the connector pedestals. User ruling 2026-11-04: until decided otherwise, route the tube around the pedestals IN THE DRAWING ONLY (a bump of
+    `raceway_detour_m` over each pedestal, plateau over its radius, smooth ramps); physics and config stay. Zero away from the connectors."""
+    best = 0.0
+    for c in connectors:
+        dx = abs(x_m - c["position_m"][0]) - d["connector_pedestal_radius_m"]
+        best = max(best, d["raceway_detour_m"] * (1.0 - _smoothstep(dx / d["raceway_detour_ramp_m"])))
+    return best
+
+
+def raceway_stations(first_m, last_m, connectors, d, step_m=0.25):
+    """Extra stations for the tube inside the detour bumps (a smooth S needs a short step); sorted, within (first, last)."""
+    out = []
+    reach = d["connector_pedestal_radius_m"] + d["raceway_detour_ramp_m"]
+    for c in connectors:
+        x = c["position_m"][0] - reach
+        while x <= c["position_m"][0] + reach + 1e-9:
+            if first_m < x < last_m:
+                out.append(round(x, 6))
+            x += step_m
+    return sorted(set(out))
+
+
+def foot_clears_connectors(x_m, half_length_m, half_width_m, connectors, d, gap_m=0.02):
+    """True when a raceway foot (box x +- half_length, lateral offset(x) +- half_width) stays `gap_m` outside every connector pedestal circle."""
+    off = raceway_offset_m(x_m, connectors, d)
+    for c in connectors:
+        cx = c["position_m"][0]
+        nx = min(max(cx, x_m - half_length_m), x_m + half_length_m)  # nearest point of the box to the pedestal centre
+        ny = min(max(0.0, off - half_width_m), off + half_width_m)
+        if math.hypot(nx - cx, ny) < d["connector_pedestal_radius_m"] + gap_m:
+            return False
+    return True

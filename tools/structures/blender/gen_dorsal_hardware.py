@@ -1,6 +1,6 @@
 """Dorsal transfer hardware: gen_dorsal_hardware.py -- --spec <json> --out <dir> writes dorsal_hardware.gltf (ship variants with a `[dorsal]` table).
 
-Tanker: four docking PROBES (soft_capture "active") and two transfer connectors. The same code draws DROGUES for a passive port (the depot, Task 4).
+Tanker: four docking PROBES (soft_capture "active") and two transfer connectors. The same code draws DROGUES for a passive port (the depot, Task 4: node origin = the centre of the mouth plane = the config element).
 Frame: the vehicle's body frame (station X, nose +X), so the file lines up with ship.gltf. Nodes (shapes and the invented-hardware statement:
 config/vehicles/detail/starship_tanker.toml [dorsal]; layout and local frames: dorsal_layout.py):
   `probe_<i>` / `drogue_<i>`  origin = the config element (probe: the extended tip), +interface normal = the port axis; the game moves a probe by the stroke
@@ -58,7 +58,7 @@ def main():
             g = dl.fairing_geometry(d, hull_r, n["element_m"], axis)
             merge(fairing, revolved(dl.fairing_runs(d, g), seg, d["fairing_radius_m"]), frame(axis, n["element_m"]))
         else:
-            part = revolved(dl.drogue_runs(d), seg, d["drogue_mouth_radius_m"])
+            part = revolved(dl.drogue_runs(d, dl.stand_length(d, hull_r, n["element_m"], axis)), seg, d["drogue_mouth_radius_m"])
         mesh = vc.VMesh()
         merge(mesh, part, frame(axis))  # rotation only: the node's origin is the element
         tris += mesh.to_object(n["node"], root)[1]
