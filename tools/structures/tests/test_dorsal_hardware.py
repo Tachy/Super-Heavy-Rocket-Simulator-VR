@@ -113,3 +113,19 @@ def test_connector_faces_on_config_positions():
         pts = _mesh_points(doc, buffers, name)
         assert abs(max(p[2] for p in pts)) < TOLERANCE_M  # the face is the top of the part: local 0
         assert manifest["dorsal_connectors"][name]["position_m"] == c["position_m"]
+
+
+def test_from_entry_appends_ports_and_connectors_to_the_source_stage(tmp_path):
+    """As core/src/config/vehicle_config.cpp load_stage_from: the entry's [[docking_port]] / [[transfer_connector]] are added to the source stage's, not replacing them."""
+    (tmp_path / "src.toml").write_text(
+        '[vehicle]\nid = "src"\n[[stage]]\nid = "ship"\nlength_m = 1.0\n'
+        '[[stage.docking_port]]\nid = "own"\n[[stage.transfer_connector]]\nid = "own_c"\n', encoding="utf-8")
+    (tmp_path / "var.toml").write_text(
+        '[vehicle]\nid = "var"\n[[stage]]\nfrom = "src:ship"\n'
+        '[[stage.docking_port]]\nid = "added"\n[[stage.transfer_connector]]\nid = "added_c"\n', encoding="utf-8")
+    (tmp_path / "only_source.toml").write_text('[vehicle]\nid = "o"\n[[stage]]\nfrom = "src:ship"\n', encoding="utf-8")
+    ship = vehicle_spec.resolve_stages("var", tmp_path)[0]
+    assert [p["id"] for p in ship["docking_port"]] == ["own", "added"]
+    assert [c["id"] for c in ship["transfer_connector"]] == ["own_c", "added_c"]
+    kept = vehicle_spec.resolve_stages("only_source", tmp_path)[0]
+    assert [p["id"] for p in kept["docking_port"]] == ["own"]  # no entry tables: the source's stay

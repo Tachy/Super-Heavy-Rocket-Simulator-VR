@@ -443,9 +443,9 @@ def resolve_stages(vehicle_id: str, vehicles_dir: Path = VEHICLES, _depth: int =
                 raise VehicleSpecError(f"{vehicle_id}: tank {change['id']!r} is not on {entry['from']!r}")
             target.update(change)
         taken = {**source, "tank": tanks}
-        for key in ("docking_port", "transfer_connector"):  # hardware the variant adds to the ship (the tanker's dorsal probes and connectors)
+        for key in ("docking_port", "transfer_connector"):  # appended to the source stage's lists, as the core's append_docking_ports does
             if key in entry:
-                taken[key] = entry[key]
+                taken[key] = list(source.get(key, [])) + list(entry[key])
         stages.append(taken)
     return stages
 
