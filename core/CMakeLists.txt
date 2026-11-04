@@ -187,6 +187,7 @@ add_library(starsim_core STATIC
     src/config/geoid_config.cpp
     src/config/atmosphere_optics_config.cpp
     src/config/earth_terrain_config.cpp
+    src/config/moon_surface_config.cpp
     src/sim/lunar_site.cpp
     src/sim/earth_terrain_loader.cpp
     src/sim/terrain_cache.cpp

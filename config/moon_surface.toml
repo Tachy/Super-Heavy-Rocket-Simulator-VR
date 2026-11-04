@@ -1,0 +1,67 @@
+# Procedural lunar near-ground surface: measured statistics for the small craters, the regolith roughness below the
+# LOLA resolution, the rocks and the Hapke reflectance (docs/subsystems/moon-surface.md, section Sources, has every
+# reference in full and the reasons for each choice). Provenance tags: [S] sourced, [E] estimate, [D] derived.
+# Sizes are diameters in metres, densities are cumulative counts N(>D) per square metre.
+#
+# Size-frequency forms (core/include/starsim/config/moon_surface_config.hpp):
+#   form = "power":       N(>D) = density_per_m2 * (D / reference_diameter_m)^(-exponent)
+#   form = "exponential": N(>D) = density_per_m2 * exp(-exponent * D)          (exponent in 1/m)
+# valid over [min_diameter_m, max_diameter_m].
+
+[craters]
+# Equilibrium (steady-state) population: craters below a few hundred m on every lunar surface older than ~1 Gy sit at
+# equilibrium, N(>D) proportional to D^-2 (Gault 1970; Shoemaker & Morris 1970 at all five Surveyor sites; Xiao &
+# Werner 2015; Minton et al. 2019). The production function (Neukum) lies above it below the crossover diameter and is
+# therefore not used.
+depth_to_diameter_fresh = 0.13     # [S] Sun et al. 2018 median of ~850 fresh small craters (cited in arXiv:2008.10132); Stopar et al. 2017: 0.11-0.17 for fresh D < 400 m
+depth_to_diameter_degraded = 0.07  # [E] Mahanti et al. 2018: small craters at Apollo 16/17 mostly degraded, mean d/D < 0.1, 99 % within 0.04-0.17; counting limit d/D = 0.05 (Minton et al. 2019)
+rim_height_to_diameter = 0.024     # [D] Pike 1977 fresh simple craters rim/depth = 0.036/0.196 = 0.184, applied to d/D 0.13
+degraded_fraction = 0.70           # [S] Mahanti et al. 2018 (LROC): ~70 % class C (degraded) at the Apollo 16 highland site (88 % at Apollo 17)
+
+[craters.sfd]
+form = "power"
+reference_diameter_m = 1.0
+density_per_m2 = 0.0336            # [S] Minton et al. 2019 Fit 1, Apollo 15 counts 10-50 m: N(>r) = 0.0084 r^-2 = 2.2 % of geometric saturation (0.385 r^-2, Gault 1970); in diameter 4 x 0.0084
+exponent = 2.0                     # [S] equilibrium slope ~2 on all terrains (Xiao & Werner 2015; Gault 1970; Minton et al. 2019)
+min_diameter_m = 0.01              # [E] finest drawn scale (spec); steady state observed down to 0.13 m at Surveyor 7 and cm in Surveyor frames, extended by geometric similarity
+max_diameter_m = 2000.0            # [E] up to the LOLA_16 grid (1.9 km) on the far side; the 20 m site tiles resolve D > ~100 m (generator fades out by resolution)
+
+[roughness]
+# Self-affine regolith undulation that is not a resolved crater or rock: RMS height (standard deviation of the
+# detrended elevation within a square window of side W) scales as rms_height_at_baseline_m * (W / baseline_m)^H.
+hurst_exponent = 0.78              # [S] Guo et al. 2021 (Chang'e-4, 5 mm DTM): H = 0.78, 0.85, 0.85, 0.71, 0.51 in the five natural subregions -> median 0.78 (range 0.6-0.85, cm-m scale)
+rms_height_at_baseline_m = 0.004   # [S] Guo et al. 2021: median RMS height 4 mm in a 125 mm window (range 1-18 mm)
+baseline_m = 0.125                 # [S] Guo et al. 2021 window size
+
+[rocks]
+axis_b_to_a_mean = 0.71            # [S] Fujiwara et al. 1978 impact fragments a:b:c = 2:sqrt2:1; LRO NAC boulders mostly ~0.7 (range 0.3-0.9; Kumar et al., Krishna & Kumar 2016)
+axis_c_to_a_mean = 0.50            # [S] Fujiwara et al. 1978 (c is not measurable from orbit)
+axis_ratio_sd = 0.15               # [E] spread of the NAC b/a range 0.3-0.9 around 0.7
+burial_fraction_mean = 0.3         # [E] share of the rock height below the regolith surface; no lunar measurement found
+burial_fraction_sd = 0.15          # [E]
+albedo_to_regolith = 1.35          # [E] single-scattering albedo ratio 0.65 / 0.48 used by Marshal, Ruesch, Woehler et al. (EGU22-12217) for NAC boulder fields
+abundance_source = "diviner"       # [S] Diviner GDR L3 rock abundance (Bandfield et al. 2011), NASA PDS public domain; covers 60 S - 60 N only, outside "uniform"
+abundance_scale = 1.0              # [D] the SFD below is the mean regolith population; Diviner scales it locally by RA / 0.0068 (its own area fraction of 0.5-10 m rocks)
+
+[rocks.sfd]
+form = "power"
+reference_diameter_m = 1.0
+density_per_m2 = 0.00154           # [S] Surveyor VI fragment counts (Shoemaker & Morris 1968), fit N = 0.154 d^-2.286 per 100 m^2 (Cintala & McBride 1995, Table 3)
+exponent = 2.286                   # [S] same fit (+-0.094); Surveyor I/III/VII: 1.78 / 2.56 / 1.80
+min_diameter_m = 0.01              # [S] Surveyor frames resolve fragments of mm to dm; 0.01 m = finest drawn scale
+max_diameter_m = 10.0              # [E] extrapolated beyond ~1 m (single power law mm-m: Li et al. 2017); N(>10 m) = 8 per km^2; area of 0.5-10 m rocks 0.68 % (Diviner: typically < 1 %)
+
+[hapke]
+# Hapke (2012) model as fitted by Sato et al. (2014) to LROC WAC data, 643 nm band. Values are the medians of the
+# published 1-degree map WAC_HAPKEPARAMMAP_643NM over the brighter half (w above the global median, a highland proxy),
+# computed by us from the PDS product. Phase function: double Henyey-Greenstein
+#   p(g) = (1+c)/2 (1-b^2)/(1-2b cos g+b^2)^1.5 + (1-c)/2 (1-b^2)/(1+2b cos g+b^2)^1.5   (c > 0: backscattering).
+w = 0.429                          # [D] Sato et al. 2014 map, highland-proxy median (global median 0.395)
+b = 0.220                          # [D] same (global 0.228; Sato: 0.23-0.24 highlands)
+c = 0.514                          # [D] same (global 0.420)
+bs0 = 1.61                         # [D] same (global 1.66; Sato: 1.60 highlands at 689 nm)
+hs = 0.054                         # [D] same (global 0.051)
+bc0 = 0.0                          # [S] Sato et al. 2014: CBOE not fitted (fixed 0)
+hc = 1.0                           # [S] Sato et al. 2014: fixed (inactive with bc0 = 0)
+theta_bar_deg = 23.657             # [S] Sato et al. 2014: fixed effective photometric roughness (sub-pixel)
+porosity_k = 1.0                   # [S] Sato et al. 2014 fitted with filling factor 0 (K = 1); Hapke & Sato 2016 porosity 83 % would give K ~ 1.3 but w was fitted with K = 1

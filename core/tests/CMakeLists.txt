@@ -178,6 +178,7 @@ add_executable(starsim_core_tests
     test_optim_solver.cpp
     test_optim_validation.cpp
     test_launch_site_config.cpp
+    test_moon_surface_config.cpp
     test_mission_start_places.cpp
     test_contact_primitives.cpp
     test_tower_geometry.cpp

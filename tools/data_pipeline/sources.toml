@@ -506,3 +506,59 @@ target = "config/vehicles/detail/iss.toml"
 kind = "licence_only"
 license = "NASA 3D Resources: free and without copyright (README); NASA media usage guidelines apply"
 credit = "International Space Station model, NASA 3D Resources"
+
+# Procedural Moon surface (plan 2026-11-04): measured statistics of config/moon_surface.toml. Literature entries carry
+# only numbers (facts); docs/subsystems/moon-surface.md, section Sources, gives tables / figures and the choices.
+[[source]]
+id = "diviner_rock_abundance"
+name = "LRO Diviner GDR Level 3 rock abundance map (average, simple cylindrical, 60 S - 60 N; Bandfield et al. 2011) - local scale of the rock population"
+url = "https://pds-geosciences.wustl.edu/missions/lro/diviner.htm"
+target = "config/moon_surface.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO Diviner Lunar Radiometer Experiment team (UCLA / JPL, D. A. Paige et al.); J. L. Bandfield et al. 2011, JGR 116, doi:10.1029/2011JE003866; NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lroc_wac_hapke_parameter_map"
+name = "LROC WAC Hapke photometric parameter maps, WAC_HAPKEPARAMMAP_643NM (1 deg; Sato et al. 2014) - the Hapke parameters of config/moon_surface.toml are medians of this map"
+url = "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/WAC_HAPKEPARAMMAP/"
+target = "config/moon_surface.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "H. Sato, M. S. Robinson, B. Hapke, B. W. Denevi, A. K. Boyd (2014), Resolved Hapke parameter maps of the Moon, JGR Planets 119, 1775-1805; LROC team (ASU), NASA PDS"
+
+[[source]]
+id = "lit_small_crater_equilibrium"
+name = "Small-crater equilibrium: Minton et al. 2019 (Icarus, arXiv:1902.07746), Xiao & Werner 2015 (JGR Planets 120, 2277), Gault 1970 (Radio Science 5, 273), Shoemaker & Morris 1970 (Radio Science 5, 129)"
+url = "https://arxiv.org/abs/1902.07746"
+target = "config/moon_surface.toml"
+kind = "licence_only"
+license = "Published papers; only numerical values are used"
+credit = "Crater statistics after Minton et al. (2019), Xiao & Werner (2015), Gault (1970), Shoemaker & Morris (1970)"
+
+[[source]]
+id = "lit_crater_morphometry"
+name = "Small-crater morphometry: Mahanti et al. 2018 (Icarus 299, 475), Stopar et al. 2017 (Icarus 298, 34), Pike 1977 (Impact and Explosion Cratering, 489)"
+url = "https://doi.org/10.1016/j.icarus.2017.08.018"
+target = "config/moon_surface.toml"
+kind = "licence_only"
+license = "Published papers; only numerical values are used"
+credit = "Crater shapes after Mahanti et al. (2018), Stopar et al. (2017), Pike (1977)"
+
+[[source]]
+id = "lit_regolith_roughness"
+name = "Regolith roughness mm-dm: Guo et al. 2021, Millimeter- to decimeter-scale surface roughness of the Moon at the Chang'e-4 exploration region (GRL 48, e2021GL094931); Cai & Fa 2020 (JGR Planets 125, e2020JE006429)"
+url = "https://doi.org/10.1029/2021GL094931"
+target = "config/moon_surface.toml"
+kind = "licence_only"
+license = "Published papers; only numerical values are used"
+credit = "Roughness after Guo et al. (2021) and Cai & Fa (2020)"
+
+[[source]]
+id = "lit_rock_statistics"
+name = "Rock statistics: Cintala & McBride 1995, Block distributions on the lunar surface (NASA TM-104804; Surveyor fits after Shoemaker & Morris 1968), Li et al. 2017 (Planet. Space Sci., rock SFDs at lunar landing sites), Fujiwara et al. 1978 (Icarus 31, 277), Krishna & Kumar 2016 (Icarus, Censorinus ejecta boulders)"
+url = "https://www.lpi.usra.edu/lunar/documents/NASA_TM_104804_Lunar_blocks.pdf"
+target = "config/moon_surface.toml"
+kind = "licence_only"
+license = "NASA technical memorandum (public) and published papers; only numerical values are used"
+credit = "Rock statistics after Cintala & McBride (1995), Shoemaker & Morris (1968), Li et al. (2017), Fujiwara et al. (1978), Krishna & Kumar (2016)"
