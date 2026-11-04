@@ -11,35 +11,9 @@ catch_pins = false    # [E] catch pins on the ship: none, it is not caught (conf
 payload_door = false  # [E] cargo door in the hull: none
 skin = "insulated"    # [E] light MLI skin: hull_textures.bake_insulated, numbers in [insulation] below
 
-# Dorsal transfer hardware (plan 2026-11-04, Task 4): the four docking DROGUES and the two propellant connectors on the ship's
-# dorsal side. Positions come from config/vehicles/starship_tanker.toml ([[stage.docking_port]] elements_m, [[stage.transfer_connector]]
-# position_m). There is NO photo of the V3 docking hardware (screenshots/depot_tanker_hls_ref/INDEX.md section 7): the shapes
-# below are an invented probe-drogue system of plausible size, not a copy of anything. These are the tanker's numbers, repeated: the depot's drogues are the mating half of the tanker's probes (probe keys unused here).
+# Dorsal transfer hardware: the drawing numbers are shared with the other probe-drogue ships (config/vehicles/detail/dock_hardware.toml).
 [dorsal]
-probe_stroke_m = 0.30           # [E] probe travel between stowed and extended; short because the config puts the extended tips only 0.5 m above the barrel
-fairing_height_m = 0.25         # [E] top of each probe fairing above the hull radius (4.75 m); the stowed tip (extended - stroke = 4.70 m) sits below it, the extended tip 0.25 m above
-fairing_radius_m = 0.42         # [E] fairing outer radius, ~3x the probe head so the bore swallows the head
-fairing_chamfer_m = 0.08        # [E] chamfer of the fairing's top rim
-fairing_bore_clearance_m = 0.03 # [E] gap between probe head and bore wall
-fairing_embed_m = 0.10          # [E] how far the fairing's foot reaches below the hull surface (hidden)
-probe_head_radius_m = 0.11      # [E] capture head, a cone on a short collar
-probe_head_length_m = 0.28      # [E] length of the cone
-probe_head_collar_m = 0.06      # [E] cylindrical collar behind the cone
-probe_shaft_radius_m = 0.045    # [E] shaft behind the head
-probe_shaft_length_m = 1.10     # [E] tip to the foot of the shaft; longer than stroke + head so the shaft never leaves its bore
-probe_tip_flat_radius_m = 0.02  # [E] blunt tip
-drogue_mouth_radius_m = 0.45    # [E] funnel opening of the depot's drogue, the capture envelope of the pair; the mouth plane is the config element (core: probe_drogue_interface.hpp, "drogue mouths in the plane x = 0")
-drogue_depth_m = 0.35           # [E] funnel depth from the mouth plane (the config element) down to the floor (the core's cone is 0.50 m deep)
-drogue_throat_radius_m = 0.13   # [E] floor radius, larger than the probe head (0.11)
-drogue_wall_m = 0.03            # [E] funnel wall thickness
-drogue_foot_m = 0.06            # [E] solid base under the floor
-connector_pedestal_radius_m = 0.32  # [E] housing of a transfer connector
-connector_nozzle_wall_m = 0.02      # [E] coupling wall around the config's line diameter
-connector_nozzle_length_m = 0.12    # [E] coupling stands this far above its pedestal
-connector_embed_m = 0.10            # [E] foot below the hull surface (hidden)
-raceway_detour_m = 0.75             # [E] the Block 3 raceway tube lies on the dorsal centreline where the config puts both connectors (y = 0): in the drawing only, the tube swings this far sideways over each pedestal (user ruling 2026-11-04, open point in docs/known-issues.md); 0.75 m clears the 0.32 m pedestal by the tube radius 0.12 and its 0.35 m half-width foot
-raceway_detour_ramp_m = 2.0         # [E] run of the S-bend either side of the pedestal plateau; keeps the bend gentle (0.75 m over 2 m); the bump ends 1.3 m before the nearest probe fairing (x = 12 m)
-segments = 32                       # [E] sides of every round part
+shared = true  # [E] use dock_hardware.toml
 
 # Insulated skin (plan 2026-11-04, Task 4): the 3 t MLI blanket of config/vehicles/starship_depot.toml, drawn by texture only (baked into
 # hull_insulated.png by tools/structures/hull_textures.py bake_insulated, no geometry). No photo of a depot exists; the look is a quilted
@@ -50,7 +24,7 @@ roughness = 0.70             # [E] woven cloth, matt
 metallic = 0.0               # [E] a dielectric cover
 pillow_width_m = 0.60        # [E] blanket quilting pitch around the barrel (MLI blankets are stitched in panels of this order)
 pillow_height_m = 0.45       # [E] along the barrel
-pillow_bulge_m = 0.015       # [E] "slightly quilted": a 1.5 cm hump over a 0.6 m pillow (0.02 read as a tile grid in the demo render)
+pillow_bulge_m = 0.008       # [E] "slightly quilted": an 8 mm hump over a 0.6 m pillow (2 cm read as a tile grid, 1.5 cm still heavy under raking sun)
 wrinkle_share = 0.35         # [E] soft wrinkles, slope rms as a share of the pillows'
 seam_darkening = 0.5         # [E] stitch tape at the seams, share of the shader's weld darkening
 seam_half_width_m = 0.012    # [E] half width of the tape

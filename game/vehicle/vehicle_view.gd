@@ -177,7 +177,7 @@ func _docking_of(sim: Object, modelled: bool) -> Dictionary:
 func _pose_probes(docking: Dictionary) -> void:
 	if probe_drogue == null:
 		return
-	var extension := ProbeDrogueView.extension_for(docking, probe_drogue.extension())
+	var extension := ProbeDrogueView.extension_for(docking, probe_drogue.extension(), probe_drogue.seated_extension())
 	if not is_nan(look_probe_extension):
 		extension = look_probe_extension
 	probe_drogue.set_state(extension, ProbeDrogueView.captured_for(docking))

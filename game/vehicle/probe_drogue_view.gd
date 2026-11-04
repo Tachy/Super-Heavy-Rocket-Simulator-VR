@@ -11,7 +11,9 @@ const EXTENDED_DOCKING := ["Kontakt", "Weichfang", "Einzug", "Haken schließen",
 const KEEP_PROXIMITY := ["Halt", "Rückzug", "Abbruch"]
 
 var _axis := Vector3.BACK
-var _stroke_m := 0.0
+var _stroke_m := 0.0  # travel from stowed to extended (manifest probe_stroke_m, derived from the core's cone depth + extension)
+var _stowed_m := 0.0  # tip offset along the axis from the ROOT (the config element): stowed
+var _seated_extension := 1.0  # the extension 0..1 at which a head sits in its seat (the docked state)
 var _elements: Array[Vector3] = []
 var _probes: Array[MeshInstance3D] = []
 var _drogues: Array[MeshInstance3D] = []
@@ -25,13 +27,15 @@ var _captured := false
 func build(models: Dictionary, material_of: Callable) -> void:
 	var manifest: Dictionary = models["manifest"]
 	var parts: Dictionary = models["dorsal"]
-	_axis = _vec(manifest["dorsal_axis"]).normalized()
+	_axis = vec(manifest["dorsal_axis"]).normalized()
 	_stroke_m = float(manifest["probe_stroke_m"])
+	_stowed_m = float(manifest["probe_tip_offsets_m"]["stowed"])
+	_seated_extension = float(manifest["probe_seated_extension"])
 	var kind := String(manifest["dorsal_mechanism"])
 	var names: Array = manifest["dorsal_nodes"]
 	var elements: Array = manifest["dorsal_elements_m"]
 	for i in names.size():
-		var element := _vec(elements[i])
+		var element := vec(elements[i])
 		_elements.append(element)
 		var instance := _instance(String(names[i]), parts, material_of, self)
 		instance.position = element
@@ -45,17 +49,22 @@ func build(models: Dictionary, material_of: Callable) -> void:
 	var connectors: Dictionary = manifest["dorsal_connectors"]
 	for node_name: String in connectors:
 		var instance := _instance(node_name, parts, material_of, self)
-		instance.position = _vec(connectors[node_name]["position_m"])
+		instance.position = vec(connectors[node_name]["position_m"])
 		_connectors[node_name] = instance
 	set_state(0.0, false)
 
 
-## extension: 0 stowed .. 1 out (the drawing's `probe_stroke_m`, [E]); captured: the probes hold a drogue (stored, the V3 latch is not drawn). Drogues do not move.
+## extension: 0 stowed .. 1 extended (travel = the manifest's probe_stroke_m, derived from the core's cone depth and extension); captured: the probes hold a drogue (stored, the V3 latch is not drawn). Drogues do not move.
 func set_state(extension: float, captured: bool) -> void:
 	_extension = clampf(extension, 0.0, 1.0)
 	_captured = captured
 	for i in _probes.size():
-		_probes[i].position = _elements[i] - _axis * _stroke_m * (1.0 - _extension)
+		_probes[i].position = _elements[i] + _axis * (_stowed_m + _stroke_m * _extension)  # the element is the ROOT, the node origin the tip
+
+
+## The extension at which a head sits in its drogue's seat (the docked pose, the core's extension retracted to 0): between stowed (0) and extended (1).
+func seated_extension() -> float:
+	return _seated_extension
 
 
 func extension() -> float:
@@ -122,13 +131,19 @@ func _axial_max(instance: MeshInstance3D) -> float:
 	return best
 
 
-## The extension the snapshot's docking_state asks for: 1 in the final approach, contact and until the hooks open again (probes out), 0 otherwise;
-## Halt / Rückzug / Abbruch keep `previous`. Mapping only.
-static func extension_for(docking: Dictionary, previous: float) -> float:
+## The extension the snapshot's docking_state asks for: 1 (extended: core extension_m beyond the seated length) in the final approach, contact and
+## soft capture, halfway to `seated` during the draw-in ("Einzug"), `seated` (heads in their seats) from the hooks closing until they open again, docked or
+## latched; 0 (stowed) otherwise; Halt / Rückzug / Abbruch keep `previous`. Mapping only.
+static func extension_for(docking: Dictionary, previous: float, seated: float) -> float:
 	if not docking.get("present", false):
 		return 0.0
-	if docking.get("docked", false) or docking.get("latched", false) or EXTENDED_DOCKING.has(String(docking.get("docking_phase", ""))):
+	var phase := String(docking.get("docking_phase", ""))
+	if phase == "Kontakt" or phase == "Weichfang":
 		return 1.0
+	if phase == "Einzug":
+		return 0.5 * (1.0 + seated)
+	if docking.get("docked", false) or docking.get("latched", false) or EXTENDED_DOCKING.has(phase):
+		return seated
 	var proximity := String(docking.get("proximity_phase", ""))
 	if EXTENDED_PROXIMITY.has(proximity):
 		return 1.0
@@ -148,5 +163,5 @@ func _instance(part: String, parts: Dictionary, material_of: Callable, parent: N
 	return instance
 
 
-static func _vec(values: Array) -> Vector3:
+static func vec(values: Array) -> Vector3:
 	return Vector3(float(values[0]), float(values[1]), float(values[2]))

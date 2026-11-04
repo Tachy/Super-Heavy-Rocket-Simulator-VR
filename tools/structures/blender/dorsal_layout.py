@@ -3,6 +3,7 @@
 Used by gen_dorsal_hardware.py (the mesh), by vehicle_spec / build_models (the manifest block) and by the tests. The numbers come from
 the vehicle config (elements, positions, axes) and the `[dorsal]` table of the detail file.
 
+Probe node: origin = the extended TIP (root + cone_depth + extension along the axis, see probe_offsets_m); the config element is the ROOT.
 Local part frame: +X is the interface normal (the port's `axis`, out of the vehicle), the part is a body of revolution about it, profiles are
 (x, r). Origin: probe = the extended TIP (the config element); drogue = the centre of its MOUTH plane (the config element; the funnel narrows towards -X); connector = the centre of the coupling face (the config position). The generator rotates +X onto the port axis and leaves the
 origin, so a game node only translates (probe: by the stroke along the axis).
@@ -101,11 +102,28 @@ def drogue_cone_radius_m(d, depth_below_mouth_m):
     return d["drogue_mouth_radius_m"] - (d["drogue_mouth_radius_m"] - d["drogue_throat_radius_m"]) * depth_below_mouth_m / depth
 
 
+def probe_offsets_m(d, hull_radius_m, element_m, axis):
+    """Tip positions of a probe along the port axis, relative to its ROOT (the config element, on the interface plane; core
+    `probe_drogue_interface.hpp`: a probe stands cone_depth + extension on the plane): stowed (just below the fairing top), seated (a head in its
+    drogue's seat = cone_depth, the docked state with the extension retracted to 0) and extended (cone_depth + extension)."""
+    stowed = hull_radius_m + d["fairing_height_m"] - d["probe_stowed_clearance_m"] - axial_m(element_m, axis)
+    seated = d["drogue_depth_m"]
+    extended = d["drogue_depth_m"] + d["probe_extension_m"]
+    return {"stowed": stowed, "seated": seated, "extended": extended}
+
+
+def probe_travel_m(d, hull_radius_m, element_m, axis):
+    o = probe_offsets_m(d, hull_radius_m, element_m, axis)
+    return o["extended"] - o["stowed"]
+
+
 def fairing_geometry(d, hull_radius_m, element_m, axis):
-    """Local (about the element's axis line) numbers of one probe fairing: top x, floor of the bore, foot x. All relative to the element, along +x."""
-    top = hull_radius_m + d["fairing_height_m"] - axial_m(element_m, axis)
-    floor = -(d["probe_stroke_m"] + probe_head_total_m(d)) - 0.02
-    foot = -(hull_distance_m(hull_radius_m, element_m, axis) + d["fairing_embed_m"])
+    """Local numbers of one probe fairing about the axis line through the element, along +x measured from the EXTENDED tip: top x, floor of the bore, foot x."""
+    ext = probe_offsets_m(d, hull_radius_m, element_m, axis)["extended"]
+    tip_m = [e + a * ext for e, a in zip(element_m, axis)]
+    top = hull_radius_m + d["fairing_height_m"] - axial_m(tip_m, axis)
+    floor = -(probe_travel_m(d, hull_radius_m, element_m, axis) + probe_head_total_m(d)) - 0.02
+    foot = -(hull_distance_m(hull_radius_m, tip_m, axis) + d["fairing_embed_m"])
     if floor <= foot:
         raise ValueError("fairing bore floor reaches the hull: lower the stroke or head")
     return {"top_x": top, "floor_x": floor, "foot_x": foot}
@@ -140,7 +158,10 @@ def block(spec_dorsal, hull_radius_m):
     first = spec_dorsal["ports"][0]
     return {"dorsal_stage_id": spec_dorsal["stage_id"], "dorsal_elements_m": [n["element_m"] for n in nodes],
             "dorsal_nodes": [n["node"] for n in nodes], "dorsal_mechanism": nodes[0]["kind"], "dorsal_axis": list(first["axis"]),
-            "probe_stroke_m": d["probe_stroke_m"], "dorsal_fairing_height_m": d["fairing_height_m"],
+            "probe_stroke_m": probe_travel_m(d, hull_radius_m, nodes[0]["element_m"], first["axis"]),
+            "probe_tip_offsets_m": probe_offsets_m(d, hull_radius_m, nodes[0]["element_m"], first["axis"]),
+            "probe_seated_extension": (lambda o: (o["seated"] - o["stowed"]) / (o["extended"] - o["stowed"]))(probe_offsets_m(d, hull_radius_m, nodes[0]["element_m"], first["axis"])),
+            "dorsal_fairing_height_m": d["fairing_height_m"],
             "dorsal_hull_radius_m": hull_radius_m,
             "dorsal_port": {k: list(first[k]) for k in ("position_m", "axis", "up")},
             "dorsal_drogue": {k: d[k] for k in ("drogue_mouth_radius_m", "drogue_depth_m", "drogue_throat_radius_m")},

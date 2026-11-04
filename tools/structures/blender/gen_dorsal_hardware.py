@@ -2,8 +2,8 @@
 
 Tanker: four docking PROBES (soft_capture "active") and two transfer connectors. The same code draws DROGUES for a passive port (the depot, Task 4: node origin = the centre of the mouth plane = the config element).
 Frame: the vehicle's body frame (station X, nose +X), so the file lines up with ship.gltf. Nodes (shapes and the invented-hardware statement:
-config/vehicles/detail/starship_tanker.toml [dorsal]; layout and local frames: dorsal_layout.py):
-  `probe_<i>` / `drogue_<i>`  origin = the config element (probe: the extended tip), +interface normal = the port axis; the game moves a probe by the stroke
+config/vehicles/detail/dock_hardware.toml [dorsal]; layout and local frames: dorsal_layout.py):
+  `probe_<i>` / `drogue_<i>`  origin = probe: the EXTENDED TIP (config element = the probe ROOT, tip at root + cone_depth + extension), drogue: the centre of the mouth (the config element); +x = the port axis; the game moves a probe along it
   `connector_<name>`          origin = the centre of the coupling face (config position_m)
   `dock_fairing`              fixed, in body coordinates: one fairing with a bore per probe element (none for drogues)
 """
@@ -56,7 +56,8 @@ def main():
         if n["kind"] == "probe":
             part = revolved(dl.probe_runs(d), seg, d["probe_head_radius_m"])
             g = dl.fairing_geometry(d, hull_r, n["element_m"], axis)
-            merge(fairing, revolved(dl.fairing_runs(d, g), seg, d["fairing_radius_m"]), frame(axis, n["element_m"]))
+            tip = [e + a * dl.probe_offsets_m(d, hull_r, n["element_m"], axis)["extended"] for e, a in zip(n["element_m"], axis)]
+            merge(fairing, revolved(dl.fairing_runs(d, g), seg, d["fairing_radius_m"]), frame(axis, tip))
         else:
             part = revolved(dl.drogue_runs(d, dl.stand_length(d, hull_r, n["element_m"], axis)), seg, d["drogue_mouth_radius_m"])
         mesh = vc.VMesh()

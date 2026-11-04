@@ -63,8 +63,8 @@ def test_spec_carries_the_config_ports_and_connectors():
 def test_dorsal_drawing_values_are_tagged_and_validated():
     path = vehicle_spec.VEHICLES / "detail" / "starship_tanker.toml"
     assert vehicle_spec.value_lines_without_tag(path) == []
-    with pytest.raises(vehicle_spec.VehicleSpecError, match="probe_stroke_m"):
-        vehicle_spec.dorsal_block("x", "ship", _config_ship(), {k: 1.0 for k in vehicle_spec.DORSAL_KEYS if k != "probe_stroke_m"})
+    with pytest.raises(vehicle_spec.VehicleSpecError, match="probe_extension_m"):
+        vehicle_spec.dorsal_block("x", "ship", _config_ship(), {k: 1.0 for k in vehicle_spec.DORSAL_KEYS if k != "probe_extension_m"})
 
 
 def test_probe_tip_is_the_local_origin_and_stowed_tip_sits_inside_the_fairing():
@@ -74,10 +74,13 @@ def test_probe_tip_is_the_local_origin_and_stowed_tip_sits_inside_the_fairing():
     assert max(x for x, _ in prof) == 0.0 and prof[0] == (0.0, d["probe_tip_flat_radius_m"])
     hull_r = 0.5 * spec["stages"]["ship"]["diameter_m"]
     for n in dl.element_nodes(spec["dorsal"]["ports"]):
-        stowed_axial = dl.axial_m(n["element_m"], n["axis"]) - d["probe_stroke_m"]
+        off = dl.probe_offsets_m(d, hull_r, n["element_m"], n["axis"])
+        stowed_axial = dl.axial_m(n["element_m"], n["axis"]) + off["stowed"]
         assert stowed_axial <= hull_r + d["fairing_height_m"]
+        assert off["extended"] == pytest.approx(d["drogue_depth_m"] + d["probe_extension_m"])  # the core: a probe stands cone_depth + extension on the plane
+        assert off["seated"] == d["drogue_depth_m"]
         g = dl.fairing_geometry(d, hull_r, n["element_m"], n["axis"])
-        assert g["floor_x"] < -d["probe_stroke_m"] - dl.probe_head_total_m(d)  # the stowed head fits in its bore
+        assert g["floor_x"] < -dl.probe_travel_m(d, hull_r, n["element_m"], n["axis"]) - dl.probe_head_total_m(d)  # the stowed head fits in its bore
         assert g["foot_x"] < g["floor_x"]
 
 
@@ -87,7 +90,8 @@ def test_manifest_block_names_the_elements_and_the_stroke():
     manifest = build_models.vehicle_manifest(spec, "h", "v", {}, table)
     assert manifest["dorsal_elements_m"] == _config_ship()["docking_port"][0]["elements_m"]
     assert manifest["dorsal_nodes"] == ["probe_0", "probe_1", "probe_2", "probe_3"]
-    assert manifest["probe_stroke_m"] == spec["dorsal"]["drawing"]["probe_stroke_m"]
+    assert manifest["probe_stroke_m"] == pytest.approx(manifest["probe_tip_offsets_m"]["extended"] - manifest["probe_tip_offsets_m"]["stowed"])
+    assert 0.0 < manifest["probe_seated_extension"] < 1.0
     assert set(manifest["dorsal_connectors"]) == {"connector_lox", "connector_ch4"}
     assert "dorsal_hardware.gltf" in manifest["files"] and "ship.gltf" in manifest["files"]
 
@@ -102,7 +106,7 @@ def test_probe_tips_on_config_elements():
         pts = _mesh_points(doc, buffers, f"probe_{i}")
         tip = max(pts, key=lambda p: p[2])
         assert abs(tip[2]) < TOLERANCE_M and abs(tip[0]) < TOLERANCE_M + 0.03 and abs(tip[1]) < TOLERANCE_M + 0.03, (i, tip)
-        assert max(p[2] for p in pts) < TOLERANCE_M  # nothing above the element
+        assert max(p[2] for p in pts) < TOLERANCE_M  # the mesh tip is the node origin (the game puts it root + extended offset along the axis)
         # origin of the node is applied by the game from the manifest; it must equal the config element
     manifest = json.loads((MODELS / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["dorsal_elements_m"] == ship["docking_port"][0]["elements_m"]

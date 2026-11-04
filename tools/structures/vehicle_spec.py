@@ -398,6 +398,7 @@ def load_generic(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
 
 VARIANT_BOOLS = ("tiles", "flaps", "chine", "catch_pins", "payload_door")
 VARIANT_SKINS = ("steel", "insulated", "white")
+DOCK_HARDWARE = "dock_hardware.toml"  # the shared probe-drogue drawing table (detail/), `[dorsal] shared = true` in a ship's detail file
 VARIANT_BASE = "starship_block3"  # a variant's detail file holds only [variant] and its own tables; the rest is Block 3's
 
 
@@ -450,7 +451,7 @@ def resolve_stages(vehicle_id: str, vehicles_dir: Path = VEHICLES, _depth: int =
     return stages
 
 
-DORSAL_KEYS = ("probe_stroke_m", "fairing_height_m", "fairing_radius_m", "fairing_chamfer_m", "fairing_bore_clearance_m", "fairing_embed_m",
+DORSAL_KEYS = ("probe_extension_m", "probe_stowed_clearance_m", "fairing_height_m", "fairing_radius_m", "fairing_chamfer_m", "fairing_bore_clearance_m", "fairing_embed_m",
                "probe_head_radius_m", "probe_head_length_m", "probe_head_collar_m", "probe_shaft_radius_m", "probe_shaft_length_m",
                "probe_tip_flat_radius_m", "drogue_mouth_radius_m", "drogue_depth_m", "drogue_throat_radius_m", "drogue_wall_m", "drogue_foot_m",
                "connector_pedestal_radius_m", "connector_nozzle_wall_m", "connector_nozzle_length_m", "connector_embed_m", "raceway_detour_m", "raceway_detour_ramp_m",
@@ -520,6 +521,9 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
         with open(vehicles_dir / "detail" / f"{VARIANT_BASE}.toml", "rb") as f:
             base = tomllib.load(f)
         detail = {**base, **detail}  # table level: a variant may replace a whole table
+    if detail.get("dorsal", {}).get("shared"):  # the probe-drogue drawing numbers are one table for every ship that has them (Task 4 fix, I2)
+        with open(vehicles_dir / "detail" / DOCK_HARDWARE, "rb") as f:
+            detail = {**detail, "dorsal": tomllib.load(f)["dorsal"]}
     variant = variant_of(detail)
     validate_detail(detail)
     stages = {}

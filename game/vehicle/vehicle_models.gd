@@ -457,6 +457,7 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	if VARIANT_VEHICLES.has(vehicle_id):  # the rest of the detail tables and the taken-over stages
 		sources.append(_repo_dir().path_join("config/vehicles/detail/%s.toml" % VARIANT_BASE))
 		sources.append(_repo_dir().path_join("config/vehicles/%s.toml" % VARIANT_BASE))
+		sources.append(_repo_dir().path_join("config/vehicles/detail/dock_hardware.toml"))  # the shared probe-drogue drawing numbers
 	for script: String in SOURCE_SCRIPTS[vehicle_id]:
 		sources.append(_repo_dir().path_join("tools/structures/blender").path_join(script))
 	for baker: String in SOURCE_BAKERS[vehicle_id]:

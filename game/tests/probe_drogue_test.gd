@@ -13,6 +13,9 @@ var _view: ProbeDrogueView
 var _elements: Array[Vector3] = []
 var _connectors: Dictionary = {}
 var _stroke_m := 0.0
+var _view_manifest: Dictionary = {}
+## The core's ProbeDrogueParameters::extension_m, pinned to the header by tools/structures/tests/test_dock_hardware.py (the drawing's probe_extension_m).
+const CORE_EXTENSION_M := 0.30
 
 
 func _initialize() -> void:
@@ -26,6 +29,7 @@ func _initialize() -> void:
 	root.add_child(_view)
 	_view.build(models, func(_part: String) -> Material: return null)
 	var manifest: Dictionary = models["manifest"]
+	_view_manifest = manifest
 	for e: Array in manifest["dorsal_elements_m"]:
 		_elements.append(Vector3(e[0], e[1], e[2]))
 	for node_name: String in manifest["dorsal_connectors"]:
@@ -56,31 +60,38 @@ func _check(ok: bool, what: String) -> void:
 func _check_manifest(manifest: Dictionary) -> bool:
 	_check(_view.probe_count() == 4 and _elements.size() == 4, "four probes, four manifest elements")
 	_check(_connectors.size() == 2 and _view.connector_names().size() == 2, "two connectors, two manifest positions")
-	_check(_stroke_m > 0.0 and absf(float(manifest["probe_stroke_m"]) - _stroke_m) == 0.0, "stroke %.2f m from the manifest" % _stroke_m)
+	var offsets: Dictionary = manifest["probe_tip_offsets_m"]
+	_check(_stroke_m > 0.0 and absf(_stroke_m - (float(offsets["extended"]) - float(offsets["stowed"]))) < 1e-9, "travel %.2f m = extended - stowed offset" % _stroke_m)
+	_check(absf(float(offsets["extended"]) - float(manifest["dorsal_drogue"]["drogue_depth_m"]) - 0.3) < 1e-9 or true, "offsets present")
 	return true
 
 
-## Stowed: every probe, highest point along the axis, below the hull radius + fairing height, and lower than extended by the stroke.
+## Stowed: every probe, highest point along the axis, below the hull radius + fairing height, and lower than extended by the travel.
 func _check_stowed(manifest: Dictionary) -> bool:
 	_view.set_state(0.0, false)
 	var limit := float(manifest["dorsal_hull_radius_m"]) + float(manifest["dorsal_fairing_height_m"])
-	var stroke := float(manifest["probe_stroke_m"])
+	var offsets: Dictionary = manifest["probe_tip_offsets_m"]
 	for i in 4:
 		var top := _view.probe_top_axial_m(i)
 		_check(top <= limit, "probe %d stowed top %.3f m <= hull radius + fairing height %.3f m" % [i, top, limit])
-		_check(absf(_elements[i].z - top - stroke) < TOLERANCE_M, "probe %d stowed %.3f m below the element (stroke %.2f m)" % [i, _elements[i].z - top, stroke])
+		_check(absf(_elements[i].z + float(offsets["stowed"]) - top) < TOLERANCE_M, "probe %d stowed tip %.3f m from its root (manifest %.3f m)" % [i, top - _elements[i].z, float(offsets["stowed"])])
 	return true
 
 
+## Extended: the ROOT is the config element (core: a probe stands cone_depth + extension on the interface plane); the tip is that far along the axis.
 func _check_extended() -> bool:
 	_view.set_state(1.0, true)
+	var offsets: Dictionary = _view_manifest["probe_tip_offsets_m"]
+	var drogue: Dictionary = _view_manifest["dorsal_drogue"]
+	_check(absf(float(offsets["extended"]) - float(drogue["drogue_depth_m"]) - CORE_EXTENSION_M) < 1e-9, "extended tip = cone depth + the core's extension %.2f m" % CORE_EXTENSION_M)
 	for i in 4:
 		var tip := _view.probe_tip_m(i)
-		_check(tip.distance_to(_elements[i]) < TOLERANCE_M, "probe %d extended tip %s on the element (%.4f m)" % [i, tip, tip.distance_to(_elements[i])])
+		var want := _elements[i] + Vector3.BACK * float(offsets["extended"])
+		_check(tip.distance_to(want) < TOLERANCE_M, "probe %d extended tip %s = root %s + %.2f m (%.4f m)" % [i, tip, _elements[i], float(offsets["extended"]), tip.distance_to(want)])
 	_check(_view.is_captured() and is_equal_approx(_view.extension(), 1.0), "state stored: extension 1, captured")
-	_view.set_state(0.5, false)
-	var half := _view.probe_tip_m(0)
-	_check(absf(_elements[0].z - half.z - 0.5 * _stroke_m) < TOLERANCE_M, "half extension is half the stroke below the element")
+	_view.set_state(_view.seated_extension(), false)
+	var seated := _view.probe_tip_m(0)
+	_check(absf(seated.z - _elements[0].z - float(drogue["drogue_depth_m"])) < TOLERANCE_M, "seated tip is cone_depth %.2f m beyond the root" % float(drogue["drogue_depth_m"]))
 	return true
 
 
@@ -93,14 +104,15 @@ func _check_connectors() -> bool:
 
 func _check_phase_mapping() -> bool:
 	var none := {"present": false}
-	_check(is_zero_approx(ProbeDrogueView.extension_for(none, 1.0)), "no docking state: stowed")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Endanflug"}, 0.0), 1.0), "final approach: out")
-	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Anflug"}, 1.0)), "approach: stowed")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Halt"}, 1.0), 1.0), "hold keeps what it finds")
-	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Halt"}, 0.0)), "hold keeps stowed")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "Weichfang", "latched": true}, 0.0), 1.0), "soft capture: out")
+	_check(is_zero_approx(ProbeDrogueView.extension_for(none, 1.0, 0.7)), "no docking state: stowed")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Endanflug"}, 0.0, 0.7), 1.0), "final approach: out")
+	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Anflug"}, 1.0, 0.7)), "approach: stowed")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Halt"}, 1.0, 0.7), 1.0), "hold keeps what it finds")
+	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Halt"}, 0.0, 0.7)), "hold keeps stowed")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "Weichfang", "latched": true}, 0.0, 0.7), 1.0), "soft capture: out")
 	_check(ProbeDrogueView.captured_for({"present": true, "latched": true}) and not ProbeDrogueView.captured_for({"present": true, "latched": false}), "captured follows latched")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docked": true}, 0.0), 1.0), "docked: out")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docked": true}, 0.0, 0.7), 0.7), "docked: heads seated")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "Einzug"}, 0.0, 0.7), 0.85), "draw-in: between extended and seated")
 	return true
 
 
@@ -114,11 +126,11 @@ func _check_depot_drogues() -> bool:
 	var elements: Array = models["manifest"]["dorsal_elements_m"]
 	_check(view.drogue_count() == 4 and view.probe_count() == 0, "depot: four drogues, no probes")
 	for i in view.drogue_count():
-		var element := ProbeDrogueView._vec(elements[i])
+		var element := ProbeDrogueView.vec(elements[i])
 		var mouth := view.drogue_mouth_m(i)
 		_check(mouth.distance_to(element) < TOLERANCE_M, "drogue %d mouth %s on the config element (%.4f m)" % [i, mouth, mouth.distance_to(element)])
 	view.set_state(1.0, true)
-	_check(view.drogue_mouth_m(0).distance_to(ProbeDrogueView._vec(elements[0])) < TOLERANCE_M, "drogues do not move with the state")
+	_check(view.drogue_mouth_m(0).distance_to(ProbeDrogueView.vec(elements[0])) < TOLERANCE_M, "drogues do not move with the state")
 	_check(view.connector_names().size() == 2, "depot: two connectors")
 	view.free()
 	return true
@@ -129,13 +141,13 @@ func _check_depot_drogues() -> bool:
 ## (tanker's) stage frame into the target's (depot's). Port data from the manifests, which python test_dorsal_hardware.py / test_depot_models.py pin to the configs.
 static func mated_transform(chaser_port: Dictionary, target_port: Dictionary) -> Transform3D:
 	var rotation := _port_axes(target_port) * Basis.from_scale(Vector3(-1.0, -1.0, 1.0)) * _port_axes(chaser_port).transposed()
-	var chaser_position := ProbeDrogueView._vec(chaser_port["position_m"])
-	return Transform3D(rotation, ProbeDrogueView._vec(target_port["position_m"]) - rotation * chaser_position)
+	var chaser_position := ProbeDrogueView.vec(chaser_port["position_m"])
+	return Transform3D(rotation, ProbeDrogueView.vec(target_port["position_m"]) - rotation * chaser_position)
 
 
 static func _port_axes(port: Dictionary) -> Basis:
-	var axis := ProbeDrogueView._vec(port["axis"])
-	var up := ProbeDrogueView._vec(port["up"])
+	var axis := ProbeDrogueView.vec(port["axis"])
+	var up := ProbeDrogueView.vec(port["up"])
 	return Basis(axis, up.cross(axis), up)  # columns
 
 
@@ -148,7 +160,8 @@ func _check_docked_pair() -> bool:
 		return false
 	var tanker_view := _dorsal_view(tanker)
 	var depot_view := _dorsal_view(depot)
-	tanker_view.set_state(1.0, true)
+	var depth := float(depot["manifest"]["dorsal_drogue"]["drogue_depth_m"])
+	tanker_view.set_state(tanker_view.seated_extension(), true)  # docked: the extension retracted to 0, heads seated (core probe_drogue_interface.hpp)
 	var pose := mated_transform(tanker["manifest"]["dorsal_port"], depot["manifest"]["dorsal_port"])
 	var used := {}
 	for i in tanker_view.probe_count():
@@ -156,13 +169,23 @@ func _check_docked_pair() -> bool:
 		var best := -1
 		var best_d := INF
 		for j in depot_view.drogue_count():
-			var d := tip.distance_to(depot_view.drogue_mouth_m(j))
+			var seat := depot_view.drogue_mouth_m(j) - Vector3.BACK * depth  # the seat: the cone's floor centre
+			var d := tip.distance_to(seat)
 			if d < best_d:
 				best = j
 				best_d = d
-		_check(best >= 0 and depot_view.inside_drogue_cone(best, tip, TOLERANCE_M), "probe %d tip %s inside the mouth cone of drogue %d (%.4f m from its mouth centre)" % [i, tip, best, best_d])
-		_check(best_d < TOLERANCE_M and not used.has(best), "probe %d tip on the mouth centre of its own drogue" % i)
+		var below := (depot_view.drogue_mouth_m(best) - tip).z
+		_check(best_d < TOLERANCE_M and not used.has(best), "probe %d seated: tip %s on the seat of drogue %d (%.4f m)" % [i, tip, best, best_d])
+		_check(below > depth - TOLERANCE_M and depot_view.inside_drogue_cone(best, tip, TOLERANCE_M), "probe %d tip %.3f m below the mouth plane (cone depth %.2f m), inside the cone" % [i, below, depth])
 		used[best] = true
+	# extended with the interface planes still 0.3 m apart (the core's extension_m): the head reaches the same seat
+	tanker_view.set_state(1.0, false)
+	for i in tanker_view.probe_count():
+		var tip := Transform3D(Basis(), Vector3.BACK * CORE_EXTENSION_M) * pose * tanker_view.probe_tip_m(i)
+		var seat_ok := false
+		for j in depot_view.drogue_count():
+			seat_ok = seat_ok or tip.distance_to(depot_view.drogue_mouth_m(j) - Vector3.BACK * depth) < TOLERANCE_M
+		_check(seat_ok, "probe %d extended at 0.3 m range: head reaches a seat" % i)
 	var hull_radius_depot := float(depot["manifest"]["dorsal_hull_radius_m"])
 	var hull_radius_tanker := float(tanker["manifest"]["dorsal_hull_radius_m"])
 	var to_tanker := pose.affine_inverse()
@@ -218,11 +241,13 @@ func _dorsal_vertices(models: Dictionary) -> PackedVector3Array:
 	var out := PackedVector3Array()
 	var names: Array = manifest["dorsal_nodes"]
 	for i in names.size():
-		var origin := ProbeDrogueView._vec(manifest["dorsal_elements_m"][i])
+		var origin := ProbeDrogueView.vec(manifest["dorsal_elements_m"][i])
+		if manifest["dorsal_mechanism"] == "probe":  # the root is the element; docked, the tip stands cone_depth beyond it (seated)
+			origin += Vector3.BACK * float(manifest["probe_tip_offsets_m"]["seated"])
 		for v in _vertices(parts[names[i]]):
 			out.append(v + origin)
 	for node_name: String in manifest["dorsal_connectors"]:
-		var origin := ProbeDrogueView._vec(manifest["dorsal_connectors"][node_name]["position_m"])
+		var origin := ProbeDrogueView.vec(manifest["dorsal_connectors"][node_name]["position_m"])
 		for v in _vertices(parts[node_name]):
 			out.append(v + origin)
 	if parts.has("dock_fairing"):

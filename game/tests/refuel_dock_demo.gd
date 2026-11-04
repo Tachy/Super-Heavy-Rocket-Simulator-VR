@@ -9,10 +9,11 @@ extends SceneTree
 const FRAMES_TO_SETTLE := 8
 const PairTest := preload("res://tests/probe_drogue_test.gd")
 ## [name, range of the tanker from the mated pose along the port axis (m), probe extension 0..1, captured]
-const PHASES := [["approach", 40.0, 0.0, false], ["final", 6.0, 0.0, false], ["probes_out", 2.5, 1.0, false], ["contact", 0.0, 1.0, false], ["captured", 0.0, 1.0, true]]
+## (extension -1 = the view's seated extension: heads in their seats). Contact is at 0.3 m (the core's extension_m): the extended heads reach the seats, then the draw-in closes the gap.
+const PHASES := [["approach", 40.0, 0.0, false], ["final", 6.0, 1.0, false], ["probes_out", 2.5, 1.0, false], ["contact", 0.3, 1.0, false], ["captured", 0.0, -1.0, true]]
 ## [name, camera position, aim point, fov]: the whole pair from the side, and the interface between the hulls (dorsal gap) at the first probe/drogue.
 const VIEWS := {"pair": [Vector3(20.0, -110.0, 20.0), Vector3(20.0, 0.0, 14.0), 30.0],
-		"close": [Vector3(8.5, -9.0, 5.9), Vector3(12.0, -1.5, 5.4), 24.0]}
+		"close": [Vector3(8.5, -9.0, 5.9), Vector3(12.0, -1.5, 5.0), 24.0]}
 
 var _depot_models: Dictionary
 var _tanker_models: Dictionary
@@ -112,7 +113,7 @@ func _dorsal(models: Dictionary, parent: Node3D) -> ProbeDrogueView:
 func _apply() -> void:
 	var phase: Array = PHASES[_phase]
 	_tanker_node.transform = Transform3D(Basis(), Vector3(0.0, 0.0, float(phase[1]))) * _pose
-	_tanker_view.set_state(float(phase[2]), bool(phase[3]))
+	_tanker_view.set_state(float(phase[2]) if float(phase[2]) >= 0.0 else _tanker_view.seated_extension(), bool(phase[3]))
 	_depot_view.set_state(0.0, false)  # the drogues are passive
 	var view: Array = VIEWS[VIEWS.keys()[_view_index]]
 	_camera.fov = float(view[2])

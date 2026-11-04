@@ -1,0 +1,32 @@
+# Shared drawing numbers of the probe-drogue docking hardware (plan 2026-11-04, Tasks 3 / 4; HLS: Task 6): ONE table for the tanker, the
+# depot and the HLS (their detail files say `shared = true` under [dorsal]). Positions come from the vehicle configs ([[stage.docking_port]]
+# elements_m = probe ROOTS on the tanker / HLS, drogue MOUTH centres on the depot; [[stage.transfer_connector]] position_m), as the core reads them.
+# The cone, seat, head and stroke are the core's ProbeDrogueParameters defaults (C++), mirrored here and pinned to the header by
+# tools/structures/tests/test_dock_hardware.py. The rest is INVENTED [E]: no photo of the V3 docking hardware exists
+# (screenshots/depot_tanker_hls_ref/INDEX.md section 7). Every value line carries [E] or [S].
+[dorsal]
+probe_extension_m = 0.30  # [E] core default extension_m (core/include/starsim/contact/probe_drogue_interface.hpp ProbeDrogueParameters): the stroke beyond the seated length; the head seats at cone_depth, extended it stands cone_depth + this beyond the interface plane
+probe_stowed_clearance_m = 0.05  # [E] stowed tip this far below the fairing top
+fairing_height_m = 0.25         # [E] top of each probe fairing above the hull radius (4.75 m); the stowed tip (4.70 m) sits below it
+fairing_radius_m = 0.22  # [E] fairing outer radius, ~2x the core head radius 0.05 + bore clearance, well inside the drogue mouth (0.35)
+fairing_chamfer_m = 0.05        # [E] chamfer of the fairing's top rim
+fairing_bore_clearance_m = 0.03 # [E] gap between probe head and bore wall
+fairing_embed_m = 0.10          # [E] how far the fairing's foot reaches below the hull surface (hidden)
+probe_head_radius_m = 0.05  # [E] core default (core/include/starsim/contact/probe_drogue_interface.hpp ProbeDrogueParameters: cone_depth_m 0.50, mouth_radius_m 0.35, seat_radius_m 0.06, head_radius_m 0.05)
+probe_head_length_m = 0.28      # [E] length of the cone
+probe_head_collar_m = 0.06      # [E] cylindrical collar behind the cone
+probe_shaft_radius_m = 0.03  # [E] shaft behind the head (thinner than the core head radius 0.05)
+probe_shaft_length_m = 1.60  # [E] tip to the foot of the shaft; longer than travel (1.10 m) + head so the shaft stays in its bore and hidden in the hull at full extension
+probe_tip_flat_radius_m = 0.02  # [E] blunt tip
+drogue_mouth_radius_m = 0.35  # [E] core default (core/include/starsim/contact/probe_drogue_interface.hpp ProbeDrogueParameters: cone_depth_m 0.50, mouth_radius_m 0.35, seat_radius_m 0.06, head_radius_m 0.05)
+drogue_depth_m = 0.50  # [E] core default (core/include/starsim/contact/probe_drogue_interface.hpp ProbeDrogueParameters: cone_depth_m 0.50, mouth_radius_m 0.35, seat_radius_m 0.06, head_radius_m 0.05)
+drogue_throat_radius_m = 0.06  # [E] core default (core/include/starsim/contact/probe_drogue_interface.hpp ProbeDrogueParameters: cone_depth_m 0.50, mouth_radius_m 0.35, seat_radius_m 0.06, head_radius_m 0.05)
+drogue_wall_m = 0.03            # [E] funnel wall thickness
+drogue_foot_m = 0.06            # [E] solid base under the floor
+connector_pedestal_radius_m = 0.32  # [E] housing of a transfer connector
+connector_nozzle_wall_m = 0.02      # [E] coupling wall around the config's line diameter
+connector_nozzle_length_m = 0.12    # [E] coupling stands this far above its pedestal
+connector_embed_m = 0.10            # [E] foot below the hull surface (hidden)
+raceway_detour_m = 0.75             # [E] the Block 3 raceway tube lies on the dorsal centreline where the config puts both connectors (y = 0): in the drawing only, the tube swings this far sideways over each pedestal (user ruling 2026-11-04, open point in docs/known-issues.md); 0.75 m clears the 0.32 m pedestal by the tube radius 0.12 and its 0.35 m half-width foot
+raceway_detour_ramp_m = 2.0         # [E] run of the S-bend either side of the pedestal plateau; keeps the bend gentle (0.75 m over 2 m); the bump ends 1.3 m before the nearest probe fairing (x = 12 m)
+segments = 32                       # [E] sides of every round part
