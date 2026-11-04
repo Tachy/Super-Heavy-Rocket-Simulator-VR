@@ -808,6 +808,7 @@ void FlightSession::reset_mission_state() {
     burn_.reset();
     ship_return_ = false;
     deorbit_plan_.reset();
+    reset_entry_vent();
     ++deorbit_generation_;  // a background plan of the old mission is dropped when it arrives
     attitude_mode_ = {};
     payload_separation_.reset();
@@ -820,6 +821,8 @@ void FlightSession::reset_mission_state() {
     burn_abort_reason_.clear();  // f2 review I1: a gas ingestion ended the last flight, not the next one
     scheduled_liftoff_.reset();
     rcs_burn_lit_ = false;
+    meco_to_boostback_s_ = 0.0;  // Task 5 minor: the last flight's MECO -> boostback forecast does not carry over
+    meco_to_boostback_epoch_.reset();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,

@@ -369,8 +369,13 @@ deorbit_pointing_error_deg = 0.1         # [E]
 # ~0.3 t, the turn to the burn and the entry ~3 t [D: r5 tanker_flight_orbit; 1.5 t before left the caught tanker 0 t]
 return_gas_kg = 3500.0
 # Main-tank residue the flaps cannot trim in the entry (gnc::entry_residue_limit: the 177 t ship ~5.9 t on top of full
-# headers) is vented between the deorbit burn and the entry interface (planner plan Task 12b): 50 kg/s [E] - the
-# campaign's heaviest excess (21 t) in 7 min, inside the ~0.5 h coast from the burn to the interface
+# headers) is vented before the entry (planner plan Task 12b; the part the coast from the burn to the entry guidance,
+# ~12 min, cannot take goes while the ship waits for its burn, final fix I2): 50 kg/s [E]. No published figure.
+# Order of magnitude from the discharge of settled liquid through one 2-inch (DN50) dump line per main tank at ~2 bar
+# ullage over vacuum, m_dot = Cd A sqrt(2 rho dp) with Cd 0.6: LOX ~25 kg/s + CH4 ~15 kg/s = ~40 kg/s; 50 kg/s is of
+# that order. The value itself was picked so that the entry campaign's heaviest excess (21 t) leaves in 7 min - an
+# identification against the campaign, not a measurement. The settling a liquid dump needs in free fall is not
+# modelled (the vent draws the main tanks directly).
 entry_vent_rate_kg_s = 50.0
 # The propellant a rendezvous keeps beyond the ship's own return (the tanker inherits it; planner plan Task 8, fix round
 # 1). The session adds the return need itself (FlightSession::rendezvous_floors: the deorbit burn from the station's

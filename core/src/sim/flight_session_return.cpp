@@ -70,7 +70,7 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
         flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, capsule_entry_target(), parameters);
         return;
     }
-    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    const auto& schedule = *alpha_schedule(stage.aero.entry_alpha_table);
     // gate ahead of the tower's catch axis (b3), else over the pad centre
     const auto site = return_site(flying.body->vehicle());
     auto landing = gnc::ship_landing_parameters(flying.body->vehicle());
@@ -246,7 +246,9 @@ std::optional<FlightSession::DeorbitReplanInputs> FlightSession::deorbit_plan_in
     in.epoch = epoch_;
     in.state = {s.position_gcrf_m, s.velocity_gcrf_mps};
     in.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
-    in.schedule = std::make_shared<const gnc::AlphaSchedule>(gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table));
+    in.burn_thrust_n = configurations.front().thrust_n;
+    in.burn_lead_s = burn_lead_s();
+    in.schedule = alpha_schedule(stage.aero.entry_alpha_table);
     in.target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
     in.parameters = given;
     in.parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);  // its cutoff residual and pointing error
@@ -261,21 +263,11 @@ void FlightSession::set_inputs_body(DeorbitReplanInputs& in, const vehicle::Flig
     const auto& stage = vehicle.stages().front().config;
     const auto guidance = gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital);
     in.onboard = std::make_shared<const gnc::EntryGuidance>(body, *in.schedule, in.target, guidance);
+    // Task 12b: main-tank residue the flaps cannot trim is vented before the interface; its limit and the vented ship's
+    // onboard model are derived by plan_from_inputs (the planner's thread, final fix I1)
+    in.vent_rate_kgps = stage.entry_vent_rate_kgps;
     in.max_main_propellant_kg = std::numeric_limits<double>::infinity();
-    in.onboard_vented.reset();
     in.main_propellant_kg = vehicle.main_propellant_kg();
-    if (stage.entry_vent_rate_kgps > 0.0) {
-        // Task 12b: main-tank residue the flaps cannot trim is vented before the interface (arm_entry_vent); the
-        // onboard model of the vented ship (its CG) for a plan whose burn leaves more (plan_from_inputs)
-        const auto limit = gnc::entry_residue_limit(vehicle, *in.schedule);
-        if (limit.excess_kg() > 0.0) {
-            in.max_main_propellant_kg = limit.max_main_propellant_kg;
-            auto vented = vehicle.copy_upper(0);
-            gnc::draw_main_tanks(*vented, limit.excess_kg());
-            const vehicle::FlightBody vented_body(std::move(vented), body.state());
-            in.onboard_vented = std::make_shared<const gnc::EntryGuidance>(vented_body, *in.schedule, in.target, guidance);
-        }
-    }
     in.parameters.reach_check = gnc::entry_reach_check(*in.onboard);  // the onboard guidance's rules and limits
     in.mass_kg = vehicle.mass_properties().mass_kg;
     in.propellant_kg = vehicle.propellant_kg();
@@ -291,19 +283,68 @@ gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const 
     if (in.measure_drag && !(in.parameters.drag_area_per_mass_m2pkg > 0.0)) {
         in.parameters.drag_area_per_mass_m2pkg = drag_area_per_mass_flown(*in.copy, env, gravity, in.epoch);
     }
-    const auto plan = gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard->model(), in.target, in.mass_kg,
-                                        in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, in.parameters);
+    const auto as_is = [&] {
+        return gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard->model(), in.target, in.mass_kg,
+                                 in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, in.parameters);
+    };
     // Task 12b: the burn leaves more main-tank residue than the flaps trim - the ship vents the excess before the
-    // interface, so the entry is planned again with the vented mass and the vented ship's trim. A return that stays
-    // within the limit is planned as before (no second plan).
-    if (!in.onboard_vented || !(plan.feasible || plan.short_of_reserve) ||
-        in.main_propellant_kg - plan.propellant_kg <= in.max_main_propellant_kg) {
-        return plan;
+    // interface, so its entry is planned with the vented mass and the vented ship's trim. A return that stays within
+    // the limit is planned as it is. The limit (a bisection over EntryAeroTable builds) and the vented onboard model
+    // are derived here, on the planner's thread (final fix I1). A ship already within the limit is planned once as it
+    // is; one beyond it first vented (the usual case: the excess outweighs the burn - one plan, final fix I1), and as it
+    // is only when the vented plan fails or its burn takes the whole excess.
+    if (!(in.vent_rate_kgps > 0.0)) return as_is();
+    const auto& ship = in.copy->vehicle();
+    if (!(in.max_main_propellant_kg < std::numeric_limits<double>::infinity())) {
+        in.max_main_propellant_kg = gnc::entry_residue_limit(ship, *in.schedule).max_main_propellant_kg;
     }
+    if (in.main_propellant_kg <= in.max_main_propellant_kg) return as_is();
+    const auto& stage = ship.stages().front().config;
+    const auto guidance = gnc::entry_guidance_parameters(ship.source_config(), stage, gnc::EntryKind::Orbital);
+    auto vented_ship = ship.copy_upper(0);
+    gnc::draw_main_tanks(*vented_ship, in.main_propellant_kg - in.max_main_propellant_kg);
+    const vehicle::FlightBody vented_body(std::move(vented_ship), in.copy->state());
+    const gnc::EntryGuidance onboard_vented(vented_body, *in.schedule, in.target, guidance);
     auto vented = in.parameters;
     vented.max_entry_mass_kg = in.mass_kg - (in.main_propellant_kg - in.max_main_propellant_kg);
-    return gnc::plan_deorbit(in.state, in.epoch, gravity, earth, in.onboard_vented->model(), in.target, in.mass_kg,
-                             in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, vented);
+    auto result = gnc::plan_deorbit(in.state, in.epoch, gravity, earth, onboard_vented.model(), in.target, in.mass_kg,
+                                    in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, vented);
+    if (!(result.feasible || result.short_of_reserve) || in.main_propellant_kg - result.propellant_kg <= in.max_main_propellant_kg) {
+        return as_is();
+    }
+    const double excess_kg = result.entry_vent_kg;
+    // Final fix I2: the vent must end before the entry guidance starts. What the coast from the burn to it cannot take
+    // is vented while the ship waits for its burn (set_entry_vent_plan); a pass whose wait is too short for that share
+    // is passed over for a later one - the burn pushed back by at least the missing vent time.
+    for (int attempt = 0; attempt < vent_pass_attempts && (result.feasible || result.short_of_reserve); ++attempt) {
+        const double missing_s = vent_time_missing_s(in, result);
+        if (!(missing_s > 0.0)) return result;
+        vented.lead_s = (result.node.epoch - in.epoch) + missing_s;
+        result = gnc::plan_deorbit(in.state, in.epoch, gravity, earth, onboard_vented.model(), in.target, in.mass_kg,
+                                   in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, vented);
+    }
+    if ((result.feasible || result.short_of_reserve) && !(vent_time_missing_s(in, result) > 0.0)) return result;
+    gnc::DeorbitPlan refused;
+    char text[220];
+    std::snprintf(text, sizeof text,
+                  "Keine Rückkehr möglich: %.1f t Resttreibstoff in den Haupttanks lassen sich in keinem Überflug im "
+                  "Suchfenster bis zum Eintritt ablassen (%.0f kg/s)",
+                  excess_kg / 1000.0, in.vent_rate_kgps);
+    refused.reason = text;
+    return refused;
+}
+
+double FlightSession::vent_time_missing_s(const DeorbitReplanInputs& in, const gnc::DeorbitPlan& plan) {
+    if (!(plan.entry_vent_kg > 0.0) || !(in.vent_rate_kgps > 0.0)) return 0.0;
+    const double half_burn_s =
+        in.burn_thrust_n > 0.0
+            ? 0.5 * gnc::burn_duration_s(plan.delta_v_mps, in.mass_kg, in.burn_thrust_n, in.burn_thrust_n / in.exhaust_velocity_mps)
+            : 0.0;
+    // from the burn's end to the entry guidance (entry_start_epoch: the interface less entry_lead_s), and from the
+    // snapshot to the burn's preparation
+    const double after_s = std::max(0.0, plan.entry_interface_epoch - entry_lead_s - (plan.node.epoch + half_burn_s));
+    const double before_s = std::max(0.0, plan.node.epoch - half_burn_s - in.burn_lead_s - in.epoch);
+    return plan.entry_vent_kg / in.vent_rate_kgps - after_s - before_s;
 }
 
 void FlightSession::log_dispersion_note(const gnc::DeorbitPlan& plan) {
@@ -349,6 +390,7 @@ std::optional<bool> FlightSession::begin_ship_return(bool background) {
         ship_return_then_ = {};
         deorbit_plan_ = gnc::DeorbitPlan{};
         deorbit_plan_->reason = why;
+        reset_entry_vent();
         return false;
     }
     return begin_ship_return(*parameters, background);
@@ -367,6 +409,7 @@ std::optional<bool> FlightSession::submit_ship_return(const gnc::DeorbitParamete
     const auto wall = std::chrono::steady_clock::now();  // diagnostics
     ship_return_ = false;
     deorbit_plan_.reset();
+    reset_entry_vent();  // final review M6: nothing of an earlier return's vent carries into this one
     ++deorbit_generation_;  // a background plan or re-plan of an earlier return is dropped when it arrives
     ship_return_task_.discard();
     deorbit_parameters_ = parameters;
@@ -487,6 +530,7 @@ bool FlightSession::apply_ship_return(const DeorbitReplanResult& result) {
     }
     ship_return_ = true;
     log_dispersion_note(*deorbit_plan_);
+    set_entry_vent_plan(*deorbit_plan_, in.max_main_propellant_kg, result.now, result.at_burn);
     deorbit_replan_due_ = deorbit_plan_->node.epoch - in.epoch > deorbit_replan_age_s;
     deorbit_track_epoch_ = in.epoch;
     deorbit_track_state_ = in.state;
@@ -515,6 +559,7 @@ void FlightSession::replan_ship_deorbit() {
         // Real-time play (Task 11b): the planner and the boil-off flight run on a worker with an environment of their
         // own; the old plan stays armed until the result is applied (its burn is >= deorbit_replan_lead_s away).
         deorbit_replan_deadline_ = epoch_ + ship_return_budget_s_;  // waited for from here (time warp meanwhile)
+        deorbit_replan_wall_start_ = std::chrono::steady_clock::now();
         auto worker = worker_environment();
         deorbit_replan_task_.submit([in = std::move(*inputs), worker] {
             return compute_deorbit_plan(in, worker->gravity(), worker->earth(), worker->env());
@@ -527,7 +572,16 @@ void FlightSession::replan_ship_deorbit() {
 void FlightSession::poll_deorbit_replan(bool wait) {
     if (deorbit_replan_orphan_) return;  // its owner ended: reaped, never applied
     const bool due = wait || !realtime_planning_ || epoch_ - deorbit_replan_deadline_ >= 0.0;
-    if (auto result = deorbit_replan_task_.collect(due)) apply_deorbit_replan(*result);
+    const auto poll_start = std::chrono::steady_clock::now();
+    if (auto result = deorbit_replan_task_.collect(due)) {
+        if (std::getenv("STARSIM_DEBUG_REALTIME")) {  // diagnostics: the worker's time and the sim thread's wait
+            const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            const auto now = std::chrono::steady_clock::now();
+            std::printf("[realtime] deorbit re-plan: worker %.0f ms, waited %.0f ms on the sim thread (%s)\n",
+                        ms(deorbit_replan_wall_start_, now), ms(poll_start, now), due ? "due" : "ready");
+        }
+        apply_deorbit_replan(*result);
+    }
 }
 
 std::optional<FlightSession::DeorbitReplanInputs> FlightSession::prepare_deorbit_replan() {
@@ -630,6 +684,7 @@ void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
         if (execute_burn(plan.node, stage.deorbit_engine_groups)) {
             node = plan.node;
             log_dispersion_note(*deorbit_plan_);
+            set_entry_vent_plan(*deorbit_plan_, in.max_main_propellant_kg, result.now, result.at_burn);
         } else {
             deorbit_plan_->node = old_node;
             execute_burn(old_node, stage.deorbit_engine_groups);
@@ -814,26 +869,89 @@ void FlightSession::apply_return_command(const Flying& flying, const gnc::Attitu
     if (!r.flap_rad.empty()) command.flap_rad = r.flap_rad;
 }
 
-void FlightSession::arm_entry_vent() {
+std::shared_ptr<const gnc::AlphaSchedule> FlightSession::alpha_schedule(const std::string& table) const {
+    auto& cached = alpha_schedules_[table];
+    if (!cached) cached = std::make_shared<const gnc::AlphaSchedule>(gnc::load_alpha_schedule(config_dir_, table));
+    return cached;
+}
+
+void FlightSession::reset_entry_vent() {
     entry_vent_remaining_kg_ = 0.0;
     entry_vented_kg_ = 0.0;
+    entry_residue_limit_kg_ = std::numeric_limits<double>::infinity();
+    entry_vent_floor_kg_ = std::numeric_limits<double>::infinity();
+}
+
+void FlightSession::set_entry_vent_plan(const gnc::DeorbitPlan& plan, double max_main_propellant_kg,
+                                        const MainPropellant& now, const MainPropellant& at_burn) {
+    entry_residue_limit_kg_ = max_main_propellant_kg;
+    entry_vent_floor_kg_ = std::numeric_limits<double>::infinity();
+    if (bodies_.empty() || !(plan.entry_vent_kg > 0.0)) return;
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const double rate = vehicle.stages().front().config.entry_vent_rate_kgps;
+    if (!(rate > 0.0) || !(max_main_propellant_kg < std::numeric_limits<double>::infinity())) return;
+    // the coast from the burn's end to the entry guidance (vent_time_missing_s's, with the ship's mass now)
+    double half_burn_s = 0.0;
+    const auto configurations = burn_configurations(&vehicle.stages().front().config.deorbit_engine_groups);
+    if (!configurations.empty()) {
+        const auto& c = configurations.front();
+        half_burn_s = 0.5 * gnc::burn_duration_s(plan.delta_v_mps, vehicle.mass_properties().mass_kg, c.thrust_n, c.mass_flow_kgps);
+    }
+    const double after_s = std::max(0.0, plan.entry_interface_epoch - entry_lead_s - (plan.node.epoch + half_burn_s));
+    // Kept for the burn while venting before it: its propellant with the commit margin, the settling gas and the
+    // boil-off until it (as boil_off_shortfall checks it); the coast after the burn vents at least that much again.
+    const double keep_kg = (commit_burn_margin - 1.0) * plan.propellant_kg + settling_gas_kg() +
+                           std::max(0.0, now.total() - at_burn.total());
+    const double floor_kg = max_main_propellant_kg + plan.propellant_kg + std::max(rate * after_s, keep_kg);
+    const double main_kg = vehicle.main_propellant_kg();
+    if (!(main_kg > floor_kg)) return;  // the coast after the burn holds the whole vent: it starts at the cutoff
+    entry_vent_floor_kg_ = floor_kg;
+    std::printf("[entry vent] the coast after the burn (%.0f s) vents %.2f t of %.2f t: %.2f t vented before the burn "
+                "(main tanks %.2f t -> %.2f t)\n",
+                after_s, rate * after_s / 1000.0, plan.entry_vent_kg / 1000.0, (main_kg - floor_kg) / 1000.0,
+                main_kg / 1000.0, floor_kg / 1000.0);
+}
+
+void FlightSession::arm_entry_vent() {
+    entry_vent_remaining_kg_ = 0.0;
+    entry_vent_floor_kg_ = std::numeric_limits<double>::infinity();  // the burn is done: the wait's share ends
     if (bodies_.empty()) return;
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const auto& stage = vehicle.stages().front().config;
-    if (!(stage.entry_vent_rate_kgps > 0.0) || stage.aero.entry_alpha_table.empty()) return;
-    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
-    const auto limit = gnc::entry_residue_limit(vehicle, schedule);
-    entry_vent_remaining_kg_ = limit.excess_kg();
+    if (!(stage.entry_vent_rate_kgps > 0.0) || !(entry_residue_limit_kg_ < std::numeric_limits<double>::infinity())) return;
+    // the limit the armed plan derived on the planner's thread (final fix I1: no bisection, no file read here)
+    const double main_kg = vehicle.main_propellant_kg();
+    entry_vent_remaining_kg_ = std::max(0.0, main_kg - entry_residue_limit_kg_);
     if (entry_vent_remaining_kg_ > 0.0) {
         std::printf("[entry vent] main tanks %.2f t, the flaps trim the entry with %.2f t: venting %.2f t at %.0f kg/s, "
                     "%.0f s before the entry guidance\n",
-                    limit.main_propellant_kg / 1000.0, limit.max_main_propellant_kg / 1000.0,
-                    entry_vent_remaining_kg_ / 1000.0, stage.entry_vent_rate_kgps, entry_start_ - epoch_);
+                    main_kg / 1000.0, entry_residue_limit_kg_ / 1000.0, entry_vent_remaining_kg_ / 1000.0,
+                    stage.entry_vent_rate_kgps, entry_start_ - epoch_);
     }
 }
 
 void FlightSession::vent_entry_residue(double dt_s) {
-    if (!(entry_vent_remaining_kg_ > 0.0) || bodies_.empty()) return;
+    if (bodies_.empty()) return;
+    if (entry_vent_floor_kg_ < std::numeric_limits<double>::infinity()) {
+        // the wait before the burn (final fix I2): down to the floor, never once its preparation or the burn began
+        auto& vehicle = bodies_[controlled_].body->vehicle();
+        if (!ship_return_ || autopilot_.state != AutopilotState::Burn) {
+            entry_vent_floor_kg_ = std::numeric_limits<double>::infinity();
+            return;
+        }
+        if (autopilot_.burn.ignite || autopilot_.burn.time_to_ignition_s <= burn_lead_s()) return;
+        const double share_kg = vehicle.main_propellant_kg() - entry_vent_floor_kg_;
+        if (!(share_kg > 0.0)) {
+            entry_vent_remaining_kg_ = 0.0;
+            return;
+        }
+        const double kg = std::min(share_kg, vehicle.stages().front().config.entry_vent_rate_kgps * dt_s);
+        gnc::draw_main_tanks(vehicle, kg);
+        entry_vented_kg_ += kg;
+        entry_vent_remaining_kg_ = share_kg - kg;
+        return;
+    }
+    if (!(entry_vent_remaining_kg_ > 0.0)) return;
     auto& flying = bodies_[controlled_];
     if (flying.entry_guidance || flying.ship_landing || flying.body->impacted() || autopilot_.state != AutopilotState::Return) {
         // the interface reached (or the return ended) before the vent: what is left stays on board

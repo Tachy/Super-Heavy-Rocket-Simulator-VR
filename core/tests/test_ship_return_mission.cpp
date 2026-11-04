@@ -328,10 +328,53 @@ TEST_CASE("A ship return vents the residue its flaps cannot trim before the entr
     std::printf("  main tanks: %.2f t taken beyond the planned burn of %.2f t\n", used_beyond_plan_kg / 1000.0,
                 planned_burn_kg / 1000.0);
     CHECK(planned_vent_kg - session.entry_vented_kg() == Catch::Approx(used_beyond_plan_kg).margin(200.0));
-    CHECK(vehicle.main_propellant_kg() <= limit.max_main_propellant_kg + 1.0);
+    // final fix I1: the session vents to the limit its plan derived before the burn (on the planner's thread); the
+    // limit drawn from the burn's end agrees within the bisection's 100 kg tolerance
+    CHECK(vehicle.main_propellant_kg() <= session.entry_residue_limit_kg() + 1.0);
+    CHECK(session.entry_residue_limit_kg() == Catch::Approx(limit.max_main_propellant_kg).margin(100.0));
     CHECK(headers() == Catch::Approx(headers_after_burn).margin(1.0));  // landing propellant untouched
     CHECK(mass_after_burn - vehicle.mass_properties().mass_kg >= session.entry_vented_kg() - 1.0);  // mass left
     CHECK(vehicle.mass_properties().cg_station_m > cg_at_read + 0.1);  // the aft residue left: CG forward
+}
+
+// Final fix I2: a residue far beyond what the coast from the burn to the entry guidance can vent (~150 t at 50 kg/s:
+// ~50 min against ~0.5 h) - key R on a ship as a tanker is after its ascent. The part the coast cannot take is vented
+// while the ship waits for its burn; the plan's pass holds the whole vent, and the ship enters within its trim limit.
+TEST_CASE("A ship return with a heavy residue vents part of it before the burn", "[ship][session][deorbit][entry][slow]") {
+    auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    m.propellant_kg = 190000.0;  // 35 t headers + ~155 t main
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    const bool planned = session.plan_ship_return(deorbit_parameters(m));
+    REQUIRE(session.ship_return_plan() != nullptr);
+    INFO(session.ship_return_plan()->reason);
+    REQUIRE(planned);  // a pass whose wait and coast hold the vent exists (hours of passes in the window)
+    const auto plan = *session.ship_return_plan();
+    const double rate = session.body(0).vehicle().stages().front().config.entry_vent_rate_kgps;
+    const double coast_s = plan.entry_interface_epoch - sim::FlightSession::entry_lead_s - plan.node.epoch;
+    std::printf("heavy residue: plan vents %.2f t (%.0f s at %.0f kg/s), coast after the burn %.0f s, burn %.1f h ahead\n",
+                plan.entry_vent_kg / 1000.0, plan.entry_vent_kg / rate, rate, coast_s,
+                (plan.node.epoch - session.epoch()) / 3600.0);
+    REQUIRE(plan.entry_vent_kg / rate > coast_s);  // the premise: the coast alone is too short
+    while (session.autopilot().state == sim::AutopilotState::Burn) session.advance_to(session.epoch() + 60.0, 400000);
+    INFO(session.burn_abort_reason());
+    REQUIRE(session.autopilot().state == sim::AutopilotState::Return);
+    const double vented_before_burn_kg = session.entry_vented_kg();
+    while (!session.entry_guidance(0) && session.epoch() - session.ship_return_plan()->entry_interface_epoch < 0.0) {
+        session.advance_to(session.epoch() + 30.0, 400000);
+    }
+    REQUIRE(session.entry_guidance(0) != nullptr);
+    const auto& vehicle = session.body(0).vehicle();
+    std::printf("  vented %.2f t before the burn, %.2f t in all; main tanks at the entry %.2f t (limit %.2f t)\n",
+                vented_before_burn_kg / 1000.0, session.entry_vented_kg() / 1000.0, vehicle.main_propellant_kg() / 1000.0,
+                session.entry_residue_limit_kg() / 1000.0);
+    CHECK(vented_before_burn_kg > 0.0);
+    CHECK(session.entry_vent_remaining_kg() == 0.0);
+    CHECK(vehicle.main_propellant_kg() <= session.entry_residue_limit_kg() + 1.0);
+    // final review M6: a new return request (here refused: the ship is in its entry) starts with nothing vented
+    CHECK_FALSE(session.plan_ship_return(deorbit_parameters(m)));
+    CHECK(session.entry_vented_kg() == 0.0);
+    CHECK(session.entry_vent_remaining_kg() == 0.0);
 }
 
 // Task 11b: in real-time play the far deorbit re-plan runs off the sim thread; the old plan stays armed until the new

@@ -518,8 +518,9 @@ public:
     int ship_return_resubmits() const { return ship_return_resubmits_; }
     int deorbit_replans_dropped() const { return deorbit_replans_dropped_; }  // background re-plans that came too late
     // [E] Sim time after which a background return plan (key R, a mission leg, the tanker reserve, a far re-plan) is
-    // waited for: the slowest measured with margin (the tanker reserve 36.6-38.2 s; a return plan 8.4-9.3 s,
-    // ship-entry-return.md); at warp 1 it is not reached.
+    // waited for: the slowest measured with margin (final fix 2026-11-04, with the entry residue vent: the tanker
+    // reserve 24.3-29.6 s, key R 9.2 s, a far re-plan 8.3 s; a return that vents is planned once, vented, not twice);
+    // at warp 1 it is not reached.
     static constexpr double ship_return_budget_s = 60.0;
     void set_ship_return_budget_s(double s) { ship_return_budget_s_ = s; }  // tests: a longer wait than at warp 1
     // Tests: the session's own polls of a background return plan skip (a result that arrives late, after a warp).
@@ -527,9 +528,14 @@ public:
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
     // Entry residue vent (planner plan Task 12b): after a ship return's deorbit burn the main-tank residue its flaps
     // cannot trim in the entry (gnc::entry_residue_limit) leaves through the vents at [stage.recovery]
-    // entry_vent_rate_kg_s until the entry guidance starts; header tanks untouched. Still to vent, and vented so far.
+    // entry_vent_rate_kg_s until the entry guidance starts; header tanks untouched. When the coast from the burn to the
+    // entry guidance is too short for it, the part that does not fit is vented while the ship waits for its burn (the
+    // burn's propellant, its margin and the boil-off kept; final fix I2), and the planner takes a pass whose wait and
+    // coast hold the whole vent. Still to vent (before the burn: what is left of its share), vented so far for this
+    // return, and the limit the armed plan derived (infinity: none).
     double entry_vent_remaining_kg() const { return entry_vent_remaining_kg_; }
     double entry_vented_kg() const { return entry_vented_kg_; }
+    double entry_residue_limit_kg() const { return entry_residue_limit_kg_; }
     // Far deorbit re-plans (replan_ship_deorbit): applied so far, and one working on a background thread (real-time play).
     int deorbit_replans() const { return deorbit_replans_; }
     bool deorbit_replan_pending() const { return deorbit_replan_task_.busy(); }
@@ -1375,11 +1381,14 @@ private:
         gnc::DeorbitPlan old_plan;
         gnc::DeorbitParameters parameters;
         std::shared_ptr<const gnc::EntryGuidance> onboard;
-        // Task 12b: the most main-tank propellant the flaps trim in the entry (infinity: no limit) and the onboard
-        // guidance of the ship vented to it; plan_from_inputs plans again with them when its burn leaves more
+        // Task 12b: the ship's vent rate (0: it vents nothing) and the most main-tank propellant its flaps trim in the
+        // entry - infinity until plan_from_inputs derived it (gnc::entry_residue_limit, on the worker in real-time
+        // play: final fix I1); with more after its burn it plans again with the vented ship (built there too)
+        double vent_rate_kgps = 0.0;
         double max_main_propellant_kg = std::numeric_limits<double>::infinity();
         double main_propellant_kg = 0.0;
-        std::shared_ptr<const gnc::EntryGuidance> onboard_vented;
+        double burn_thrust_n = 0.0;  // the deorbit engine set's (the burn's duration: the time left to vent)
+        double burn_lead_s = 0.0;    // its preparation before ignition (no vent then)
         gnc::EntryTarget target;
         double mass_kg = 0.0;
         double exhaust_velocity_mps = 0.0;
@@ -1406,6 +1415,13 @@ private:
     // The planner on them (with measure_drag and no drag: the drag flown ahead first, written to the inputs).
     static gnc::DeorbitPlan plan_from_inputs(DeorbitReplanInputs& inputs, const environment::GravityModel& gravity,
                                              const frames::BodyOrientation& earth, const vehicle::FlightEnvironment& env);
+    // Final fix I2: the vent time of `plan`'s residue (entry_vent_kg at the inputs' vent rate) the wait before its burn
+    // (from the snapshot to the burn's preparation) and the coast after it (to the entry guidance) cannot hold;
+    // <= 0: it fits.
+    static double vent_time_missing_s(const DeorbitReplanInputs& inputs, const gnc::DeorbitPlan& plan);
+    // [D] later passes tried for a vent that does not fit (each pushes the burn back by the missing vent time; one
+    // is enough unless a pass's coast is far shorter than the next's)
+    static constexpr int vent_pass_attempts = 3;
     // ... and the boil-off flight to the flown plan's burn: everything that runs on a worker in real-time play.
     static DeorbitReplanResult compute_deorbit_plan(DeorbitReplanInputs inputs, const environment::GravityModel& gravity,
                                                     const frames::BodyOrientation& earth,
@@ -1437,6 +1453,7 @@ private:
     double ship_return_begin_ms_ = 0.0;  // diagnostics: the background request's sim-thread part
     int ship_return_resubmits_ = 0;
     time::Epoch deorbit_replan_deadline_;
+    std::chrono::steady_clock::time_point deorbit_replan_wall_start_;  // diagnostics (STARSIM_DEBUG_REALTIME)
     int deorbit_replans_dropped_ = 0;
     bool iss_return_requested_ = false;  // the ISS departure leg's return request is under way
     time::Epoch entry_start_;                       // state Return: entry guidance from here
@@ -1726,8 +1743,19 @@ private:
     double vent_docked_boil_off(double dt_s, const math::Vec3& push_station_mps2);  // returns the vented kg
     void arm_entry_vent();               // after a ship return's deorbit burn: the excess to vent before the interface
     void vent_entry_residue(double dt_s);  // the vent over the last `dt_s` (ticks and coasts)
+    // A ship return plan armed (first plan or re-plan, final fix I1/I2): its residue limit (derived on the planner's
+    // thread) and, when its excess does not fit into the coast from the burn to the entry guidance, the main-tank
+    // fill to vent down to while waiting for the burn. `now` / `at_burn`: the main tanks now and at its burn.
+    void set_entry_vent_plan(const gnc::DeorbitPlan& plan, double max_main_propellant_kg, const MainPropellant& now,
+                             const MainPropellant& at_burn);
+    void reset_entry_vent();  // a new return (or none): nothing vented, nothing to vent
     double entry_vent_remaining_kg_ = 0.0;
     double entry_vented_kg_ = 0.0;
+    double entry_residue_limit_kg_ = std::numeric_limits<double>::infinity();
+    double entry_vent_floor_kg_ = std::numeric_limits<double>::infinity();  // before the burn: vented down to this
+    // Alpha schedules by table (read once: no file read on the sim thread after the first)
+    std::shared_ptr<const gnc::AlphaSchedule> alpha_schedule(const std::string& table) const;
+    mutable std::map<std::string, std::shared_ptr<const gnc::AlphaSchedule>> alpha_schedules_;
     void docked_update(double dt_s, bool after_coast);
     void reset_docked_update();
     std::optional<PropellantTransfer> transfer_;

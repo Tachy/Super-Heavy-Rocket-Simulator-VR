@@ -51,16 +51,27 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   bisects the main tanks' fill (both drawn in proportion, headers untouched; 100 kg) for the largest residue with margin
   > 0. 177 t ship: 5.85 t main on top of the full headers (40.85 t on board, CG 24.50 m); the flown allocation agrees
   (RCS share of the trim <= 2e-5 at 11 points of a belly-first descent at the limit, 1.0 with 27 t). The return planner
-  (`FlightSession::plan_from_inputs`) plans as before; when that plan's burn leaves more main-tank propellant than the
-  limit, it plans again with the entry predictor's mass capped at the vented mass (`DeorbitParameters::
-  max_entry_mass_kg`) and the onboard model's trim from the vented ship (`set_inputs_body` builds both models; a return
-  within the limit is planned exactly as before - a first version that always used the vented model moved the
-  phase-45 return's gate to 305 m); the plan carries
+  (`FlightSession::plan_from_inputs`) derives the limit itself (on the worker in real-time play, final fix I1: the
+  bisection's ~10-12 EntryAeroTable builds had put key R's sim-thread share at 193 ms; now 12.4 ms, worker 9.2 s, far
+  re-plan max step 15.1 ms, tanker reserve worker 24-30 s). A ship within the limit is planned as it is (exactly as
+  before); one beyond it is planned with the entry predictor's mass capped at the vented mass (`DeorbitParameters::
+  max_entry_mass_kg`) and the onboard model's trim from the vented ship (built there too), and as it is only when that
+  plan fails or its burn takes the whole excess (one plan for a venting return instead of two; a first version that
+  always used the vented model moved the phase-45 return's gate to 305 m); the plan carries
   its estimate `DeorbitPlan::entry_vent_kg` (rocket-equation burn; the flown burn, settling gas and boil-off take ~3 t
-  more, so the flown vent is smaller). After the deorbit burn `FlightSession::arm_entry_vent` takes the excess of the
-  live ship and `vent_entry_residue` vents it at `[stage.recovery] entry_vent_rate_kg_s` (50 kg/s [E], required for a
-  ship caught by the tower) in ticks and coasts until the entry guidance starts - mass leaves the main tanks, the CG
-  moves forward (35 t main: 21.3 t vented in 7 min, CG 23.02 -> 24.53 m). Vented, not burnt in the deorbit: the excess
+  more, so the flown vent is smaller). The vent must end before the entry guidance (final fix I2): what the coast from
+  the burn's end to the entry guidance (~12 min from LEO) cannot take is vented while the ship waits for its burn
+  (`FlightSession::set_entry_vent_plan`: down to the limit + the burn's propellant + the larger of the coast's vent and
+  the burn's commit margin, settling gas and boil-off to the burn; never during the burn's preparation); a pass whose
+  wait is too short is passed over for a later one (`vent_time_missing_s`, burn pushed back by the missing time, up to
+  `vent_pass_attempts` = 3), refused with "Keine Rückkehr möglich: ... lassen sich in keinem Überflug im Suchfenster
+  bis zum Eintritt ablassen" when none fits. After the deorbit burn `FlightSession::arm_entry_vent` takes the live
+  ship's excess over the limit the armed plan derived (no bisection, no file read on the sim thread; alpha schedules are
+  read once per table, `FlightSession::alpha_schedule`) and `vent_entry_residue` vents it at `[stage.recovery]
+  entry_vent_rate_kg_s` (50 kg/s [E], required for a ship caught by the tower; basis in the vehicle file) in ticks and
+  coasts until the entry guidance starts - mass leaves the main tanks, the CG moves forward (35 t main: 21.3 t vented
+  in 7 min, CG 23.02 -> 24.53 m; 155 t main: 141.8 t planned, 106.8 t vented in the 20 h wait, 141.2 t in all, 5.53 t
+  main at the entry against the 5.84 t limit). A new return request clears the vent state. Vented, not burnt in the deorbit: the excess
   (up to ~21 t) on the belly Raptor would add hundreds of m/s and move the planned interface; venting keeps the burn and
   the entry the planner flew ahead. HUD return block "Restablassen" (planned / vented / still open; bindings `return`
   `entry_vent_planned_t`, `entry_vent_remaining_t`, `entry_vented_t`), log line `[entry vent]`. Not applied to the lunar
@@ -324,7 +335,9 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   departed or missed by 1.3-5.4 km, `docs/history/guidance-missions.md`). `STARSIM_ENTRY_CASE=<i>` flies one case.
   Load limit held. Guided 6-DOF 8.5 m. Residue limit: "The entry residue limit: the flaps alone trim the schedule up
   to it" (`[entry][flap][trim]`); vent in flight: "A ship return vents the residue its flaps cannot trim before the
-  entry" (`[slow]`, 87 s: 35 t main, 21.28 t vented in 7 min, headers untouched, CG 23.02 -> 24.53 m).
+  entry" (`[slow]`, 87 s: 35 t main, 21.28 t vented in 7 min, headers untouched, CG 23.02 -> 24.53 m); a residue the
+  coast cannot take: "A ship return with a heavy residue vents part of it before the burn" (`[slow]`, ~25 s: 155 t
+  main, 141.8 t to vent = 2836 s against a 737 s coast, 106.8 t vented before the burn, 5.53 t main at the entry).
 - Flip/catch: test from the gate caught 0.01 m, 0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10
   m, +-10 m/s, propellant 35 t + 0-3.5 t, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the
   engine-failure case aborts upright (lost 0; offset <= 0.17 m, sink <= 0.97 m/s, caught cases >= 3.8 t; without the sink scaling of `upright_descent` that case is lost). Session test from Mach 2.6, 28 km west: gate < 1 m, caught 0.02 m, 0.95 m/s, 2.1 t

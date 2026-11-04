@@ -176,7 +176,10 @@ flow separation (vacuum engines).
   navigation].
 - `[stage.recovery]` `entry_vent_rate_kg_s` (> 0, required for a ship caught by the tower): how fast the ship vents the
   main-tank residue its flaps cannot trim in the entry (`gnc::entry_residue_limit`, derived) between the deorbit burn
-  and the entry interface. Ship 50 kg/s [E].
+  and the entry guidance; what that coast cannot take is vented while the ship waits for its burn, and the deorbit
+  planner takes a pass whose wait and coast hold the whole vent (refused with a German reason when none in the window
+  does). Ship 50 kg/s [E: order of magnitude of a 2-inch dump line per main tank at ~2 bar; the value itself identified
+  against the entry campaign's 21 t excess in 7 min - see the vehicle file].
 - `[stage.recovery]` `landing_fresh_trust_region_weight`, `landing_fresh_attitude_violation_weight`: SCvx settings of fresh plans (no warm start); 0 keeps the defaults (`docs/subsystems/falcon9.md` "Fresh landing plans").
 - `[stage.engine_group]` `station_m` may be negative: the Falcon 9's second stage stands on the interstage top with its engine below station 0 (`falcon9.md` "Stack"); so may a tank's `base_station_m`.
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry

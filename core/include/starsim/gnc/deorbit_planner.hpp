@@ -52,7 +52,7 @@ struct DeorbitParameters {
     // > 0: the entry predictor's mass (a capsule drops its trunk after the burn); 0: the mass after the burn.
     double entry_mass_kg = 0.0;
     // > 0: the most the ship enters with (planner plan Task 12b): main-tank residue its flaps cannot trim in the entry
-    // (gnc::entry_residue_limit) is vented between the burn and the interface, so the entry predictor flies at most this
+    // (gnc::entry_residue_limit) is vented before the entry (after the burn, the rest while waiting for it), so the entry predictor flies at most this
     // mass. The session sets it from the ship (dry + headers + the trimmable main residue); 0: no limit.
     double max_entry_mass_kg = 0.0;
     // Orbital drag of the coast, C_D A / m (US76 density, air co-rotating with the Earth); 0: drag-free. A tracked
