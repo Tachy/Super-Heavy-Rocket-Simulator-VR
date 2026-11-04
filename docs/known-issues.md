@@ -249,3 +249,6 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Plan Task 6 step 2 (`[slow]` catch cases) did not run by user decision; it moves to the vehicle plan's campaign gate.
 - `tower_handover_check` is red (2026-11-01): 8 failures on fa226c8, 7 on aae1e5d, about 6 % near/mid against its limit. Cause not traced; not known whether it was green before the leg colour change e67af13.
 - Tower head underside 140.5 m, 1.4 m above the lattice top where the photo reads level: at 139.1 m the sheave block would enter the head at +0.7 m carriage offset, the stroke allows +4 m, and it clears to +2.1 m as built.
+
+## Depot/tanker/HLS models, open after the final review (2026-11-04)
+- Probes follow the controlled body's `docking_state` only (`game/vehicle/vehicle_view.gd` ~178): a docked tanker/HLS that is not the controlled body (e.g. after switching to the depot) shows stowed probes. Fix later: a per-body docked flag in the snapshot (read-only bindings field).

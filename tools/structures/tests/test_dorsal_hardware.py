@@ -97,7 +97,7 @@ def test_manifest_block_names_the_elements_and_the_stroke():
 
 
 def test_probe_tips_on_config_elements():
-    """The extended tip (the glTF's highest point along the axis, on the axis line) is the node's origin, which the game puts on `elements_m`."""
+    """Current meaning: `elements_m` is the probe ROOT (interface plane); the node origin is the tip, extended = root + cone depth + extension, docked = seated head 0.5 m inside the drogue mouth. See the assertions below for the exact reference."""
     doc, buffers = _load_gltf()
     ship = _config_ship()
     axis = ship["docking_port"][0]["axis"]

@@ -273,7 +273,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			last_event = "Stufentrennung"
 		KEY_B:
 			sim.deploy_legs()
-			last_event = "Landebeine ausfahren"
+			var legs: Dictionary = sim.body_legs(sim.controlled_index())
+			if legs.get("present", false) and not legs.get("fixed", false):
+				last_event = "Landebeine ausfahren"  # only vehicles with deployable legs
 		KEY_P:
 			_engage_ascent()
 		KEY_O:

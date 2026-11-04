@@ -1,6 +1,6 @@
 ## The ship's dorsal transfer hardware (tanker: four docking probes, two propellant connectors; depot: four drogues), drawn in the ship stage's body frame.
 ## `set_state` is the only entry for the probe visuals. Parts: dorsal_hardware.gltf (frames and the statement that the shapes are invented [E]:
-## tools/structures/blender/gen_dorsal_hardware.py, config/vehicles/detail/starship_tanker.toml [dorsal]). Nodes: `probe_<i>` (origin = the config element = the extended tip) / `drogue_<i>` (origin = the centre of the mouth plane = the config element), `connector_<name>` (origin = the coupling face), `dock_fairing` (fixed). No physics here.
+## tools/structures/blender/gen_dorsal_hardware.py, config/vehicles/detail/starship_tanker.toml [dorsal]). Nodes: `probe_<i>` (origin = the probe TIP: extended = root + cone depth + extension, seated = root + cone depth; the config element is the probe ROOT on the interface plane) / `drogue_<i>` (origin = the centre of the mouth plane = the config element), `connector_<name>` (origin = the coupling face), `dock_fairing` (fixed). No physics here.
 class_name ProbeDrogueView
 extends Node3D
 
