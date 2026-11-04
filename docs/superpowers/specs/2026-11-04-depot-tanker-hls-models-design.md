@@ -48,10 +48,11 @@ the orchestrator's call; the user can overrule any of it.
   must coincide with the config points the physics uses.
 
 ## Standing decisions
-- **Rebuild everything real; reality wins over config** (user 2026-11-02). Photos and real data win over the config
-  where they exist; a disagreeing config value is corrected, tagged, and goes through before / after runs of the
-  campaigns that use it. Where no reality data exist (V3-era HLS legs, drogue positions) the config values (sized by our
-  physics) are drawn and the gap is marked [E].
+- **Rebuild everything real; no config or physics change without the user's decision** (user 2026-11-04). A reference
+  that disagrees with a vehicle config value is put to the user as a proposal (config value, reference value, source,
+  affected campaigns); until the user decides, the config value is drawn. There are no photos of these vehicles, so
+  the config values (sized by our physics) define them; gaps are marked [E]. Only an approved change is applied,
+  tagged, and goes through before / after runs of the campaigns that use it.
 - **Same pipeline** (`docs/subsystems/vehicle-models.md`): physics config is the master; `config/vehicles/detail/<id>.toml`
   holds the rest and repeats no physics key; `tools/structures/blender/generators.toml` lists the generators; glTF +
   manifest into git-ignored `data/models/<id>/`; `vehicle_models.gd` / `vehicle_view.gd` load and pose.

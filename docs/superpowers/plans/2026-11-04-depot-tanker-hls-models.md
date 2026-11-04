@@ -12,7 +12,7 @@
 
 ## Global Constraints
 - Own rebuild of everything; no third-party mesh in the repo or the game. A reference's terms are checked before download; references stay in git-ignored `screenshots/depot_tanker_hls_ref/`.
-- Reality wins over config where reality data exist: a disagreeing config value is corrected, tagged [S]/[E]/[D], and goes through before / after runs. Where none exist, the config values are drawn and the gap is marked [E].
+- No vehicle config or physics change from references without the user's decision (user 2026-11-04): a reference that disagrees with the config becomes a proposal (config value, reference value, source, affected campaigns) for the user; until the user decides, the config values are drawn. With no photos of these vehicles, the config values are the definition (gaps marked [E]). Only a change the user approves is applied, tagged, and goes through before / after runs.
 - Drawn probe tips / drogue mouths, connector faces, leg feet and thruster exits coincide with the config points the physics uses (tolerance 0.01 m unless a task says otherwise).
 - Block 3 ship / booster output byte-identical (manifest hash test `test_starship_hash_is_the_one_of_the_fixed_generator_list` and the deterministic position / UV / index compare).
 - Simple hulls, detail by texture and shader; geometry for the silhouette, legs, thrusters, docking hardware, elevator.
@@ -38,7 +38,7 @@
 - Create: `.superpowers/sdd/2026-11-04-depot-tanker-hls-models/baseline.md`
 
 - [ ] **Step 1:** Flight 12-14 webcast frames (`data/webcasts/`, ffmpeg path in memory / `docs/setup.md`) and photos at the URLs in `INDEX.md` (open in a browser, measure by scaling, do not store unclear-licence images): V3 docking drogues and propellant ports (count, placement nose vs dorsal / leeward, size), payload door presence on V3; HLS renders and mockup photos for legs, solar band extent, windows, airlock / elevator track and basket, landing-thruster ports. Each finding with source, method, [S]/[E] in `INDEX.md` sections 5-6. Frame crops to `screenshots/depot_tanker_hls_ref/frames/`.
-- [ ] **Step 2:** For each config value a finding contradicts (`[[stage.docking_port]]`, `[[stage.transfer_connector]]`, `[stage.landing_legs]`, landing-thruster engine group stations, RCS pods), list config value, measured value, source in `baseline.md` under "Corrections"; corrections are applied in the vehicle's task.
+- [ ] **Step 2:** For each config value a finding contradicts (`[[stage.docking_port]]`, `[[stage.transfer_connector]]`, `[stage.landing_legs]`, landing-thruster engine group stations, RCS pods), list config value, measured value, source, affected campaigns in `baseline.md` under "Proposals for the user"; the orchestrator puts them to the user. Nothing is applied without the user's decision.
 - [ ] **Step 3:** Baseline on the current tree, background, outputs to files, every result read: `[refuelling]`, `[docking]`, `[prop_transfer]`, `[campaign]`, `[campaign_flown]`, `[hls]`, `[lunar]`, `[legs]`, each also with `[slow]`. Table per case: value, limit, pass.
 - [ ] **Step 4:** Commit nothing in the repo except notes the ledger needs; report.
 
@@ -65,7 +65,7 @@
 **Interfaces:**
 - Consumes: `[[stage.docking_port]]` (`mechanism = "probe_drogue"`, `position_m`, `axis`, `up`, `elements_m`, `soft_capture`), `[[stage.transfer_connector]]` (`position_m`, `line_diameter_m`); snapshot `docked` and the refuelling block (`bindings/src/flight_snapshot_refuelling.cpp`).
 - Produces: `dorsal_hardware.gltf` per vehicle with nodes `probe_<i>` / `drogue_<i>` (origin at the config element, axis +interface normal), `connector_lox`, `connector_ch4`, `dock_fairing`; manifest `dorsal_elements_m`, `probe_stroke_m`; `ProbeDrogueView.set_state(extension: float, captured: bool) -> void` (extension 0..1 of `probe_stroke_m` [E]), the only entry for docking visuals. The view drives it from the snapshot: extended during the final approach / docked phase, stowed otherwise (choose the snapshot fields; if none tell the phase, add one in the bindings, no logic in GDScript beyond the mapping).
-- [ ] **Step 1:** Apply Task 1 corrections for the tanker, if any: `vehicle_report.py starship_tanker`, re-run `[refuelling]`, `[docking]`, `[prop_transfer]` with `[slow]`; table old, new, limit.
+- [ ] **Step 1:** Only if the user approved a Task 1 proposal for the tanker: apply it, `vehicle_report.py starship_tanker`, re-run `[refuelling]`, `[docking]`, `[prop_transfer]` with `[slow]`; table old, new, limit.
 - [ ] **Step 2:** Failing tests: `test_probe_tips_on_config_elements` (extended tip within 0.01 m of each `elements_m` point); `probe_drogue_test.gd`: `set_state(0, false)` keeps every probe inside its stowed envelope (below the hull radius + fairing height), `set_state(1, true)` puts tips on the elements; connector faces on `position_m` within 0.01 m.
 - [ ] **Step 3:** Implement; green.
 - [ ] **Step 4:** Renders in `screenshots/depot_tanker_hls/tanker_*` via `vehicle_look_shots.gd` (side, dorsal close, probes stowed / extended, on the booster); compare with Task 1 frames; send. Commit, push.
@@ -80,7 +80,7 @@
 **Interfaces:**
 - Consumes: Task 2 variant (`skin = "insulated"`, no tiles / flaps / chine / pins), Task 3 `dorsal_hardware.gltf` and `ProbeDrogueView`.
 - Produces: depot model with drogues (`drogue_<i>`, mouth plane at the config element), RCS pods at the config stations; the demo scene places a tanker in the depot's docked pose from the configs and runs approach, extension, capture through `set_state` only.
-- [ ] **Step 1:** Task 1 corrections for the depot (mirror any tanker change: the configs say "mirror images"); same re-runs as Task 3 Step 1 if anything changed.
+- [ ] **Step 1:** Only user-approved Task 1 proposals for the depot (mirror an approved tanker change: the configs say "mirror images"); same re-runs as Task 3 Step 1 if anything changed.
 - [ ] **Step 2:** Failing tests: `test_drogue_mouths_on_config_elements`; docked pair in `probe_drogue_test.gd`: with tanker and depot posed as the sim's docked state (port planes coincident, axes opposite, `up` aligned), each extended probe tip lies inside its drogue's mouth cone and no hull mesh vertex of one ship lies inside the other's hull radius; same for the HLS once Task 6 exists (marked pending until then).
 - [ ] **Step 3:** Implement, insulated skin as a baked map (light, slightly quilted MLI look by texture, no geometry); green; Block 3 still byte-identical.
 - [ ] **Step 4:** Renders `depot_*`: alone in sunlight and shade, docked pair, demo phases; send. Commit, push.
@@ -95,7 +95,7 @@
 **Interfaces:**
 - Consumes: the HLS landing-thruster engine group(s) in `starship_hls.toml` (positions, directions, count), `[[stage.docking_port]]` entries (nose port if configured; otherwise the drawn nose port is marked visual-only [E] and noted as an open point, no physics added).
 - Produces: `hls_parts.gltf` nodes `solar_band`, `windows`, `nose_port`, `thruster_<i>` (exit plane centre on the config engine position, axis on its direction); manifest `thruster_exit_m`.
-- [ ] **Step 1:** Task 1 corrections (thruster stations, count): `vehicle_report.py starship_hls`, re-run `[hls]`, `[lunar]`, `[legs]` with `[slow]`; planner fixes if red; table.
+- [ ] **Step 1:** Only user-approved Task 1 proposals (thruster stations, count): `vehicle_report.py starship_hls`, re-run `[hls]`, `[lunar]`, `[legs]` with `[slow]`; planner fixes if red; table.
 - [ ] **Step 2:** Failing tests: `test_thruster_exits_on_config_positions` (0.01 m, axis within 0.5 deg); `vehicle_view_test.gd`: a firing landing thruster's plume starts at `thruster_exit_m`.
 - [ ] **Step 3:** Implement; green.
 - [ ] **Step 4:** Renders `hls_*` (side, nose, band, thrusters firing); send. Commit, push.
