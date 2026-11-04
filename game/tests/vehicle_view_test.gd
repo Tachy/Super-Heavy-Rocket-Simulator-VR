@@ -691,6 +691,17 @@ func _check_ship_variants(snapshot: Dictionary) -> void:
 		_check(is_same(tanker._stage_models[0], block3) and (tanker._stage_models[1] as Dictionary).is_empty(),
 				"tanker with Block 3 models only: booster modelled by starship_block3, ship cylinders")
 		_check(tanker.find_children("stage_booster", "Node3D", true, false).size() == 1, "tanker: booster node from the Block 3 set")
+	# the notice follows the stage's mapped set: a stale starship_hls under starship_hls_launch (not a model id itself)
+	var hls_launch: Array = [{"id": "booster", "base_station_m": 0.0, "length_m": 72.3, "diameter_m": 9.0, "nose_length_m": 0.0,
+			"vehicle_id": "starship_hls_launch", "name": "b"}, {"id": "hls", "base_station_m": 72.3, "length_m": 52.1,
+			"diameter_m": 9.0, "nose_length_m": 13.0, "vehicle_id": "starship_hls_launch", "name": "h"}]
+	VehicleModels.load_for("starship_hls")  # stale in the scratch folder: reason "stale"
+	_check(VehicleView._notice_text(hls_launch).contains("veraltet"), "hls_launch: the stale starship_hls set shows the notice")
+	var launch_view := VehicleView.new()
+	_views.append(launch_view)
+	root.add_child(launch_view)
+	launch_view.sync(hls_launch, [], [], [], 0.0)
+	_check(launch_view.find_children("ModelNotice", "Label3D", true, false).size() == 1, "hls_launch view: one notice")
 	VehicleModels.clear_cache()  # also resets root_override
 	OS.move_to_trash(scratch)
 	VehicleModels.load_for(VEHICLE)  # the real set again for the cases after this one

@@ -298,9 +298,17 @@ func _stage_hull(index: int) -> Dictionary:
 	return _stage_models[index].get("hulls", {}).get(_stage_ids[index], {})
 
 
-## German notice for the first vehicle of the stage list whose models are stale or missing ("" = none).
+## German notice for the first model set of the stage list that is stale or missing ("" = none): the vehicles named by the
+## list and, for a single vehicle, the sets that draw its stages (hls_launch: starship_hls, starship_block3).
 static func _notice_text(stages: Array) -> String:
-	for id in _vehicle_ids(stages):
+	var ids := _vehicle_ids(stages)
+	var wanted: Array[String] = ids.duplicate()
+	if ids.size() == 1:
+		for stage: Dictionary in stages:
+			var set_id := VehicleModels.model_set_for_stage(ids[0], stage["id"])
+			if not wanted.has(set_id):
+				wanted.append(set_id)
+	for id in wanted:
 		var text := VehicleModels.notice(id)
 		if text != "":
 			return text
