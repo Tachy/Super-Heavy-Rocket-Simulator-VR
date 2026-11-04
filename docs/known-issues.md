@@ -250,3 +250,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 
 ## Depot/tanker/HLS models, open after the final review (2026-11-04)
 - Probes follow the controlled body's `docking_state` only (`game/vehicle/vehicle_view.gd` ~178): a docked tanker/HLS that is not the controlled body (e.g. after switching to the depot) shows stowed probes. Fix later: a per-body docked flag in the snapshot (read-only bindings field).
+- Procedural Moon surface detail (Moon procedural surface plan Task 2, `docs/subsystems/moon-surface.md`): outside the
+  site tiles the generated craters (to 2 km) and roughness (to ~1 km wavelength) are statistical, not the real features
+  there (LOLA_16 does not resolve them); band_start uses LOLA_16's latitude spacing (1.9 km), so near the poles,
+  where its longitude spacing is finer (172 m at -84.8 deg), some 0.2-1.9 km detail is both in LOLA_16 and generated;
+  the roughness is ~6 % rougher near the 8 cube corners (skewed face lattice; craters + roughness 4.09 mm there,
+  above Guo's 4 mm before rocks); queries inside the +-13.6 km face blend band along the cube edges cost ~3-6 x more.

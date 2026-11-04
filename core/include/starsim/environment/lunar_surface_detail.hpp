@@ -29,11 +29,19 @@ double crater_profile_m(const Crater& crater, double distance_m);
 // a pure function of the body-fixed (MOON_ME) direction (integer hash, no state, no library random numbers). Rocks are
 // a separate layer (LunarRocks) on top of this relief.
 //
-// Band limits: a query with min_wavelength_m = L > 0 returns the mean of the full-detail relief over the L x L square
-// around the point aligned with the local face axes (e_s, e_t): craters of diameter >= L/8 enter with their exact
-// area mean over the square, smaller ones with the expected mean of their population (blended over L/16 - L/8);
-// roughness octaves of lattice spacing >= L/8 with their exact square mean, finer ones (zero mean) fade out over
-// L/16 - L/8. L = 0 is the full detail.
+// Zero mean: LOLA heights are area means, so every crater octave enters as its deviation from the population's mean
+// relief (CraterOctave::mean_relief_m) and the roughness is zero-mean value noise - the detail does not shift LOLA.
+//
+// Faces: the roughness lattices belong to one cube face each (continued beyond its edges); within face_blend_band of
+// a face edge the field is the face_blend of the 2-3 face fields (weights / sqrt(sum w^2): same variance), so the
+// relief at any L is continuous across edges and corners and depends on the direction only.
+//
+// Band limits: a query with min_wavelength_m = L > 0 returns the mean of the full-detail relief over the footprint
+// p + a e_s + b e_t, |a|, |b| <= L/2 (the face lattice's (s, t) parallelogram; across an edge the face_blend-weighted
+// set of the faces' parallelograms): craters of diameter >= L/8 enter with their exact area mean (polygon integral),
+// smaller ones fade out over L/16 - L/8 (their mean deviation is ~0); roughness octaves of lattice spacing >= L/8 with
+// their exact mean (separable; over another face's sheared parallelogram by a composite midpoint rule), finer ones
+// fade out over L/16 - L/8. L = 0 is the full detail.
 //
 // Bands: craters up to 5 x band_start_m (at the crater centre) and roughness octaves up to band_start_m, the LOLA
 // resolution at the point blended by the tile weight - what LOLA resolves is not generated again.
@@ -79,7 +87,7 @@ public:
 
 private:
     struct Query;
-    Query make_query(const math::Vec3& unit) const;
+    Query make_query(const math::Vec3& unit, bool for_craters = true) const;  // false: face blend only
     double craters_at(const Query& q, double min_wavelength_m) const;
     double roughness_at(const Query& q, double min_wavelength_m, double scale_m) const;
     void craters_in_cell_of(int octave, const FaceCell& cell, std::vector<Crater>& out) const;

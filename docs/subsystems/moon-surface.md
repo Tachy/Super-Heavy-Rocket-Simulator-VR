@@ -35,30 +35,43 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; ro
   ((r/R)^-3 - 1/27) / (1 - 1/27) outside to 3R (zero there: the earlier (r/R)^-3 cut at 3R left a step of rim/27);
   degraded rim scaled with depth (0.0129 D). A crater is generated only where LOLA does not resolve it: D <= 5 x
   band_start at its centre.
+- Zero mean: the profile's volume is negative (-0.37 depth R^2), so a crater population lowers the mean surface by
+  about -5.4e-4 x D per diameter octave [D, 2D] (summed: -0.044 m for craters <= 100 m in a tile core, -1.08 m for
+  craters to 2 km on the global grid). LOLA heights are area means that already hold this, so every octave enters as
+  its deviation from the population mean (`CraterOctave::mean_relief_m`, density x expected volume, at the point's
+  band_start). The detailed surface keeps LOLA's mean height; relief(L) is 0 for L far above every generated band.
 - Roughness: value noise with quintic fade on one face lattice per octave (spacing 5 mm, doubling, to 2 x the coarsest
   band start); the number of cells per face edge is a prime, so no lattice line is shared between octaves (no grid
-  pinning) and face-edge nodes coincide on both faces (they hash once, by the lowest face index). Octave amplitude
+  pinning). Every face has its own lattice, continued beyond its edges; within 0.01 face units of an edge (+-13.6 km,
+  `face_blend_band`, ~2 % of the surface) the field is the `face_blend` of the 2 (3 at a corner) face fields:
+  smoothstep weights h(s) h(t), normalised by sqrt(sum w^2) so the blend of independent fields keeps the variance.
+  The field depends on the direction only and is C1 across edges and corners. Octave amplitude
   A (local spacing / 0.125 m)^0.78 with the local cell size (sqrt of the area element, 0.84-1 of nominal); A is
   derived at construction so that the median plane-detrended RMS in 125 mm windows (Guo's statistic, 25 x 25 samples,
   1536 windows at hashed places) equals `rms_height_at_baseline_m` (3.7 mm). Octaves fade out between band_start / 2
   and band_start.
 - band_start_m = tile pixel scale x tile_weight + global spacing (1.9 km) x (1 - tile_weight): continuous over the
   1 km tile blend (20 m in a tile core).
-- Band limit L > 0 (terrain nodes, coarse queries): the mean of the full relief over the L x L square aligned with the
-  local face axes. Craters with D >= L/8: exact square mean (closed-form corner integrals of the profile in polar form;
-  for L < R/16 inside one smooth part the bowl's exact quadratic mean or a second-order Taylor of the flank); smaller
-  craters: their expected mean (-0.2 mm per octave), blended over L/16 - L/8. Roughness octaves with spacing >= L/8:
-  exact square mean (separable fade integrals; nodes beyond a face edge are the nearest nodes of the neighbouring face);
-  finer octaves (zero mean) fade out over L/16 - L/8.
-- Cost (Release, this machine): full-detail query ~7 us, 1 m square mean ~15 us; construction ~0.75 s (the roughness
-  normalisation).
+- Band limit L > 0 (terrain nodes, coarse queries): the mean of the full relief over the footprint p + a e_s + b e_t,
+  |a|, |b| <= L/2 - the face lattice's (s, t) parallelogram (axes up to ~25 deg from orthogonal near face corners),
+  one footprint for both layers; inside the face blend band the `face_blend`-weighted set of the faces'
+  parallelograms. Craters with D >= L/8: exact mean (polygon integral as four centre-to-edge triangles, each a
+  closed-form polar wedge of the profile; for L < R/16 inside one smooth part the bowl's exact quadratic mean or a
+  second-order Taylor of the flank); smaller craters fade out over L/16 - L/8 (their mean deviation is ~0). Roughness
+  octaves with spacing >= L/8: exact mean over the own face's parallelogram (separable fade integrals); over another
+  blend face's parallelogram (sheared in this lattice) a composite midpoint rule with 3 samples per cell for
+  octaves >= L/4, ramping to the own parallelogram at L/8; finer octaves (zero mean) fade out over L/16 - L/8.
+  relief(L) is continuous across face edges and corners for every L.
+- Cost (Release, this machine): full-detail query ~7 us, 1 m mean ~19 us; inside the face blend band ~59 us (half
+  full detail, half 1 m: 2-3 lattices and the cross means); construction 0.7-1.0 s (the roughness normalisation).
 
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
   `face_cell_of`, `face_cell_point`, `face_cell_neighbourhood` (3 x 3, duplicates at cube corners),
   `face_cells_within` (all faces), `face_cell_level_for_size` (finest level with cells >= the size),
-  `face_cell_area_m2`, `face_coord_of` / `face_coord_on` / `face_direction` / `face_frame` (metric, local scale).
+  `face_cell_area_m2`, `face_coord_of` / `face_coord_on` / `face_direction` / `face_frame` (metric, local scale),
+  `face_blend` / `face_blend_band` (partition of unity over the faces near an edge).
 - `core/include/starsim/environment/lunar_surface_detail.hpp`, `core/src/environment/lunar_surface_detail.cpp`:
   `LunarSurfaceDetail(config, lola)` with `relief_m` / `crater_relief_m` / `roughness_relief_m(unit, min_wavelength_m)`,
   `band_start_m`, `finest_wavelength_m` (0.01 m), `craters_in_cell`, `craters_within`, `crater_profile_m`,
@@ -92,11 +105,19 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; ro
   - roughness (Guo's statistic, ruling of 2026-11-04): roughness alone at the site 3.70 mm (configured 3.7, tolerance
     15 %); windows 0.1 / 1 / 10 m on the global grid 1.016 / 1.000 / 0.977 x the law 3.7 mm (W / 0.125)^0.78
     (tolerance 15 %); craters + roughness at the site 3.90 mm <= the measured total 4 mm (rocks follow in Task 3);
-  - band limit: |relief(L) - mean of relief(0) over the L x L square (24 x 24 samples)| <= 0.1 x RMS of the removed
-    band at every one of 60 points: L = 10 / 1 / 0.1 m: max 0.028 / 0.032 / 0.033 x (RMS removed 0.16 / 0.025 /
-    0.0033 m);
-  - seams: 1200 pairs 1 mm and 1 um apart across face edges and 480 pairs through the 8 cube corners within the
-    1 mm step bound of the field (1.8 mm per mm; 1 cm: 15.7 mm);
+  - band limit: |relief(L) - mean of relief(0) over the footprint (24 x 24 samples per face parallelogram, blend
+    weighted)| <= 0.1 x RMS of the removed band at every one of 60 points, L = 10 / 1 / 0.1 m: site max 0.028 / 0.032
+    / 0.032 x (RMS removed 0.16 / 0.025 / 0.0033 m); face corner region outside the blend (s, t ~ +-0.9-0.98) 0.022 /
+    0.029 / 0.022; inside the face blend band across edges and at corners 0.034 / 0.042 / 0.047;
+  - seams, full detail: 1200 pairs 1 mm and 1 um apart across face edges and 480 pairs through the 8 cube corners
+    within the 1 mm step bound of the field (1.8 mm per mm; 1 cm: 15.5 mm); the 1 um pairs are the continuity gate;
+  - seams, band-limited (L = 0.1 / 1 / 10 m): 600 pairs across edges and 480 through corners (1 mm and 1 um) within
+    the 1 mm step bound of relief(L) off the edges (0.93 / 0.76 / 0.57 mm); worst 1 um pair 0.67-0.78 of its bound,
+    i.e. the field's slope, no step (before fix round 1 the step was up to 1.07 mm, ~1160 x the bound);
+  - zero mean: mean of relief(L) over a grid of L x L squares tiling a patch, tolerance 4 standard errors: tile core
+    5 km, 400 x 250 m: -0.0007 m (s.e. 0.0027; the population mean it removed is -0.044 m); global grid 200 km,
+    1600 x 5 km: +0.019 m (s.e. 0.045; removed -1.08 m); relief(L) = 0 exactly for L = 2 km in the tile core and
+    100 km on the global grid;
   - tile blend: band_start 20 m in the core, 1895 m outside, steps within the smoothstep slope; relief steps over 1 cm
     within the 1 cm bound across the blend;
   - poles (-90, -89.9999, +90 deg): finite for L = 0, 0.1, 1, 10 m, 1 mm neighbours within the bound;
@@ -210,7 +231,10 @@ geometry (g near 0) is not observed there. The published global-average table of
   profile; Task 3 validates the summed surface against Guo's 4 mm (see Validation).
 - band_start uses the global grid's latitude spacing (1.9 km) everywhere; near the poles LOLA_16's longitude spacing
   is finer (172 m at -84.8 deg), so outside the tiles there some 0.2-1.9 km detail is both in LOLA_16 and generated.
-- Roughness is ~6 % rougher near the 8 cube corners (skewed face lattice); band-limited square means near face edges
-  take nodes beyond the edge from the nearest node of the neighbouring face (approximate there; full detail exact).
+- Roughness is ~6 % rougher near the 8 cube corners (skewed face lattice; craters + roughness 4.09 mm there, above
+  Guo's 4 mm before rocks): Task 3's summed check should include a corner window, or the amplitude could take the
+  lattice skew into account. (Stationarity numbers measured before the face blend of fix round 1.)
+- Queries inside the face blend band (+-13.6 km along the 12 cube edges) cost ~3-6 x more (cross footprint means);
+  terrain nodes there (Task 7) should cache.
 - Generated craters up to 2 km and roughness up to ~1 km wavelength outside the tiles are statistical, not the real
   features at those places (LOLA_16 does not resolve them).

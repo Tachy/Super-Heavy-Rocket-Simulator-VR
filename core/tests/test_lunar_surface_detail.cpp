@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -128,8 +129,9 @@ double median_window_rms(const Vec3& centre, double patch_m, double window_m, in
     return v[count / 2];
 }
 
-// Largest full-detail relief difference over 1 mm (or `step_m`) steps at `count` points around the given centres.
-double step_bound(const std::vector<Vec3>& centres, double step_m, int count) {
+// Largest relief difference (band limit `limit_m`, 0: full detail) over 1 mm (or `step_m`) steps at `count` points
+// around the given centres (all far from cube face edges).
+double step_bound(const std::vector<Vec3>& centres, double step_m, int count, double limit_m = 0.0) {
     double bound = 0.0;
     for (int k = 0; k < count; ++k) {
         const Tangent t = tangent(centres[k % centres.size()]);
@@ -137,7 +139,7 @@ double step_bound(const std::vector<Vec3>& centres, double step_m, int count) {
         const double a = constants::two_pi * unit_hash(5, k);
         const Tangent tp = tangent(p);
         const Vec3 q = at(tp, step_m * std::cos(a), step_m * std::sin(a));
-        bound = std::max(bound, std::abs(detail().relief_m(p, 0.0) - detail().relief_m(q, 0.0)));
+        bound = std::max(bound, std::abs(detail().relief_m(p, limit_m) - detail().relief_m(q, limit_m)));
     }
     return bound;
 }
@@ -213,6 +215,19 @@ TEST_CASE("Detail is deterministic across calls and threads", "[moon_surface][en
     const auto t2 = std::chrono::steady_clock::now();
     const auto us = [](auto a, auto b) { return std::chrono::duration<double, std::micro>(b - a).count() / count; };
     std::printf("relief query: full detail %.2f us, 1 m square mean %.2f us (not gated)\n", us(t0, t1), us(t1, t2));
+    {
+        // Inside the face blend band (2-3 face lattices; footprint means over sheared parallelograms).
+        double sink = 0.0;
+        const auto b0 = std::chrono::steady_clock::now();
+        for (int k = 0; k < count; ++k) {
+            sink += d.relief_m(environment::face_direction(k % 6, 1.0 + 0.01 * (2.0 * unit_hash(24, k) - 1.0),
+                                                           2.0 * unit_hash(25, k) - 1.0),
+                               k % 2 == 0 ? 0.0 : 1.0);
+        }
+        const auto b1 = std::chrono::steady_clock::now();
+        std::printf("relief query in the face blend band (half full, half 1 m): %.2f us (not gated)\n", us(b0, b1));
+        CHECK(std::isfinite(sink));
+    }
     std::vector<double> full2(count), coarse2(count);
     std::vector<std::thread> threads;
     for (int t = 0; t < 4; ++t) {
@@ -241,6 +256,8 @@ TEST_CASE("Detail is deterministic across calls and threads", "[moon_surface][en
 TEST_CASE("Crater counts per size octave match the configured SFD", "[moon_surface][environment]") {
     const auto& d = detail();
     const auto& sfd = d.config().craters.sfd;
+    // On the global grid rather than the site patch: the 1-50 m population is the same in the tile core (only craters
+    // above 5 x 20 m are left to LOLA there), and the 20 km disc of the 1-2 m bin would leave the 6 km tile core.
     const Vec3 centre = direction(global_lat, global_lon);
     const std::array<std::pair<double, double>, 6> bins = {
         {{1.0, 2.0}, {2.0, 4.0}, {4.0, 8.0}, {8.0, 16.0}, {16.0, 32.0}, {32.0, 50.0}}};
@@ -295,41 +312,74 @@ TEST_CASE("Roughness continues the LOLA spectrum", "[moon_surface][environment]"
     CHECK(summed >= at_site);
 }
 
+// The footprint of relief(L) is the L x L (s, t) parallelogram of the face lattice; across a face edge (face_blend
+// band) it is the blend-weighted set of the faces' parallelograms. Reference: the full detail averaged over that.
+static double footprint_mean(const Vec3& p, double limit, int samples) {
+    const auto blend = environment::face_blend(p, environment::face_blend_band);
+    double mean = 0.0;
+    for (int f = 0; f < blend.count; ++f) {
+        const auto& fc = blend.coord[f];
+        const auto frame = environment::face_frame(fc.face, fc.s, fc.t, R);
+        const double ds = 0.5 * limit / frame.m_s, dt = 0.5 * limit / frame.m_t;
+        double face_mean = 0.0;
+        for (int a = 0; a < samples; ++a) {
+            for (int b = 0; b < samples; ++b) {
+                const double s = fc.s + ds * (2.0 * (a + 0.5) / samples - 1.0);
+                const double t = fc.t + dt * (2.0 * (b + 0.5) / samples - 1.0);
+                face_mean += detail().relief_m(environment::face_direction(fc.face, s, t), 0.0);
+            }
+        }
+        mean += blend.weight[f] * face_mean / (samples * samples);
+    }
+    return mean;
+}
+
 TEST_CASE("Band-limited relief is the average of the finer relief", "[moon_surface][environment]") {
     const auto& d = detail();
     const Vec3 site = direction(site_lat, site_lon);
     constexpr int points = 60, samples = 24;
-    for (const double limit : {10.0, 1.0, 0.1}) {
-        std::vector<double> removed, diff;
-        for (int k = 0; k < points; ++k) {
-            const Vec3 p = at(tangent(site), (unit_hash(30, k) - 0.5) * 4000.0, (unit_hash(31, k) - 0.5) * 4000.0);
-            const auto fc = environment::face_coord_of(p);
-            const auto frame = environment::face_frame(fc.face, fc.s, fc.t, R);
-            const double ds = 0.5 * limit / frame.m_s, dt = 0.5 * limit / frame.m_t;
-            double mean = 0.0;
-            for (int a = 0; a < samples; ++a) {
-                for (int b = 0; b < samples; ++b) {
-                    const double s = fc.s + ds * (2.0 * (a + 0.5) / samples - 1.0);
-                    const double t = fc.t + dt * (2.0 * (b + 0.5) / samples - 1.0);
-                    mean += d.relief_m(environment::face_direction(fc.face, s, t), 0.0);
-                }
+    // Site (tile core, near the -Z face centre), a face corner region outside the face blend (lattice axes up to
+    // ~25 deg from orthogonal) and points within the blend band across face edges and at corners.
+    const auto site_point = [&](int k) {
+        return at(tangent(site), (unit_hash(30, k) - 0.5) * 4000.0, (unit_hash(31, k) - 0.5) * 4000.0);
+    };
+    const auto corner_point = [&](int k) {
+        return environment::face_direction(static_cast<int>(unit_hash(32, k) * 6), 0.9 + 0.08 * unit_hash(33, k),
+                                           -0.9 - 0.08 * unit_hash(34, k));
+    };
+    const auto blend_point = [&](int k) {
+        const double across = 1.0 + environment::face_blend_band * (2.0 * unit_hash(35, k) - 1.0);
+        const double along = k % 2 == 0 ? 2.0 * unit_hash(36, k) - 1.0 : across;  // odd k: at a corner
+        return environment::face_direction(static_cast<int>(unit_hash(37, k) * 6), across, along);
+    };
+    struct Region {
+        const char* name;
+        std::function<Vec3(int)> point;
+    };
+    for (const Region& region : {Region{"site", site_point}, Region{"face corner", corner_point},
+                                 Region{"edge blend", blend_point}}) {
+        for (const double limit : {10.0, 1.0, 0.1}) {
+            std::vector<double> removed, diff;
+            for (int k = 0; k < points; ++k) {
+                const Vec3 p = region.point(k);
+                const double mean = footprint_mean(p, limit, samples);
+                const double coarse = d.relief_m(p, limit);
+                removed.push_back(d.relief_m(p, 0.0) - coarse);
+                diff.push_back(coarse - mean);
             }
-            mean /= samples * samples;
-            const double coarse = d.relief_m(p, limit);
-            removed.push_back(d.relief_m(p, 0.0) - coarse);
-            diff.push_back(coarse - mean);
+            double rms_removed = 0.0, rms_diff = 0.0, max_diff = 0.0;
+            for (int k = 0; k < points; ++k) {
+                rms_removed += removed[k] * removed[k];
+                rms_diff += diff[k] * diff[k];
+                max_diff = std::max(max_diff, std::abs(diff[k]));
+            }
+            rms_removed = std::sqrt(rms_removed / points);
+            rms_diff = std::sqrt(rms_diff / points);
+            std::printf("%-11s limit %5.1f m: removed band RMS %.5f m, |coarse - footprint mean| RMS %.5f m, max %.5f m "
+                        "(%.3f)\n",
+                        region.name, limit, rms_removed, rms_diff, max_diff, max_diff / rms_removed);
+            CHECK(max_diff <= 0.1 * rms_removed);
         }
-        double rms_removed = 0.0, rms_diff = 0.0, max_diff = 0.0;
-        for (int k = 0; k < points; ++k) {
-            rms_removed += removed[k] * removed[k];
-            rms_diff += diff[k] * diff[k];
-            max_diff = std::max(max_diff, std::abs(diff[k]));
-        }
-        rms_removed = std::sqrt(rms_removed / points);
-        rms_diff = std::sqrt(rms_diff / points);
-        std::printf("limit %5.1f m: removed band RMS %.5f m, |coarse - square mean| RMS %.5f m, max %.5f m (%.3f)\n",
-                    limit, rms_removed, rms_diff, max_diff, max_diff / rms_removed);
-        CHECK(max_diff <= 0.1 * rms_removed);
     }
 }
 
@@ -340,7 +390,8 @@ TEST_CASE("No seam at cube face edges and corners", "[moon_surface][environment]
     CHECK(bound > 0.0);
     int crossings = 0;
     for (int k = 0; k < 600; ++k) {
-        // A point on a random face edge, the pair 1 mm apart across it, and the pair 1 um apart.
+        // A point on a random face edge, the pair 1 mm apart across it, and the pair 1 um apart. The 1 mm bound (max
+        // slope seen off the edges) is loose; the 1 um pairs (bound / 1000) are the real continuity gate.
         const int face = static_cast<int>(unit_hash(40, k) * 6);
         const int side = static_cast<int>(unit_hash(41, k) * 4);
         const double along = 2.0 * unit_hash(42, k) - 1.0;
@@ -369,6 +420,50 @@ TEST_CASE("No seam at cube face edges and corners", "[moon_surface][environment]
         }
         CHECK(std::isfinite(d.relief_m(c, 0.0)));
         CHECK(std::isfinite(d.relief_m(c, 1.0)));
+    }
+}
+
+// Terrain nodes sample band-limited relief at both sides of a face edge: relief(L) must be continuous there too. Same
+// structure as the full-detail case: the 1 um pairs (bound / 1000) prove continuity, the 1 mm pairs the slope.
+TEST_CASE("No seam at face edges and corners for band-limited relief", "[moon_surface][environment]") {
+    const auto& d = detail();
+    for (const double limit : {0.1, 1.0, 10.0}) {
+        const double bound = step_bound(bound_centres(), 1e-3, 4000, limit);
+        double worst_edge = 0.0, worst_corner = 0.0;  // largest |difference| / allowed, 1 um pairs
+        for (int k = 0; k < 300; ++k) {
+            const int face = static_cast<int>(unit_hash(44, k) * 6);
+            const int side = static_cast<int>(unit_hash(45, k) * 4);
+            const double along = 2.0 * unit_hash(46, k) - 1.0;
+            const double s = side == 0 ? 1.0 : side == 1 ? -1.0 : along;
+            const double t = side == 2 ? 1.0 : side == 3 ? -1.0 : along;
+            const Vec3 e = environment::face_direction(face, s, t);
+            const auto frame = environment::face_frame(face, s, t, R);
+            const Vec3 across = side < 2 ? frame.e_s : frame.e_t;
+            for (const double gap : {1e-3, 1e-6}) {
+                const Vec3 a = math::normalized(e - across * (0.5 * gap / R));
+                const Vec3 b = math::normalized(e + across * (0.5 * gap / R));
+                const double diff = std::abs(d.relief_m(a, limit) - d.relief_m(b, limit));
+                CHECK(diff <= bound * gap / 1e-3);
+                if (gap < 1e-4) worst_edge = std::max(worst_edge, diff / (bound * gap / 1e-3));
+            }
+        }
+        for (int corner = 0; corner < 8; ++corner) {
+            const Vec3 c =
+                math::normalized(Vec3{corner & 1 ? 1.0 : -1.0, corner & 2 ? 1.0 : -1.0, corner & 4 ? 1.0 : -1.0});
+            const Tangent t = tangent(c);
+            for (int k = 0; k < 30; ++k) {
+                const double a = constants::two_pi * unit_hash(47, corner * 100 + k);
+                for (const double gap : {1e-3, 1e-6}) {
+                    const Vec3 p = at(t, 0.5 * gap * std::cos(a), 0.5 * gap * std::sin(a));
+                    const Vec3 q = at(t, -0.5 * gap * std::cos(a), -0.5 * gap * std::sin(a));
+                    const double diff = std::abs(d.relief_m(p, limit) - d.relief_m(q, limit));
+                    CHECK(diff <= bound * gap / 1e-3);
+                    if (gap < 1e-4) worst_corner = std::max(worst_corner, diff / (bound * gap / 1e-3));
+                }
+            }
+        }
+        std::printf("limit %5.1f m: 1 mm step bound %.3e m, worst 1 um pair / allowed: edges %.3f, corners %.3f\n",
+                    limit, bound, worst_edge, worst_corner);
     }
 }
 
@@ -443,4 +538,41 @@ TEST_CASE("No band below the LOLA resolution is counted twice", "[moon_surface][
     // of them is generated, on the global grid they are.
     CHECK(d.roughness_relief_m(site, 640.0) == 0.0);
     CHECK(d.roughness_relief_m(global, 640.0) != 0.0);
+}
+
+// LOLA heights are area means that already contain the craters: the procedural layer must add relief, not lower the
+// mean surface. Patch mean = mean of relief(L) over a grid of L x L squares tiling the patch (relief(L) is the
+// footprint mean of the full detail); tolerance 4 standard errors of that mean (squares treated as independent).
+TEST_CASE("The procedural relief keeps the LOLA mean height", "[moon_surface][environment]") {
+    const auto& d = detail();
+    const auto patch_mean = [&](const Vec3& centre, double patch_m, double limit_m, const char* name) {
+        const Tangent t = tangent(centre);
+        const int n = static_cast<int>(std::lround(patch_m / limit_m));
+        double sum = 0.0, sum2 = 0.0;
+        for (int i = 0; i < n; ++i) {
+            for (int j = 0; j < n; ++j) {
+                const double v = d.relief_m(at(t, (i + 0.5) * limit_m - 0.5 * patch_m, (j + 0.5) * limit_m - 0.5 * patch_m),
+                                            limit_m);
+                sum += v;
+                sum2 += v * v;
+            }
+        }
+        const double count = static_cast<double>(n) * n;
+        const double mean = sum / count;
+        const double se = std::sqrt(std::max(0.0, sum2 / count - mean * mean) / (count - 1.0));
+        double population = 0.0;  // the crater population's mean relief (what a non-zero-mean layer would add)
+        for (const auto& o : d.crater_octaves()) {
+            if (o.max_diameter_m <= 5.0 * d.band_start_m(centre)) population += o.mean_relief_m;
+        }
+        std::printf("%s: %d x %d squares of %.0f m: mean relief %+.4f m, standard error %.4f m (crater population "
+                    "mean %+.4f m)\n",
+                    name, n, n, limit_m, mean, se, population);
+        CHECK(std::abs(mean) <= 4.0 * se);
+    };
+    patch_mean(direction(site_lat, site_lon), 5000.0, 250.0, "site tile core");
+    patch_mean(direction(global_lat, global_lon), 200000.0, 5000.0, "global grid");
+    // Far above every generated band nothing is left (site: a 2 km square stays inside the 6 km tile core, where
+    // nothing above 100 m and no roughness above 20 m is generated).
+    CHECK(d.relief_m(direction(site_lat, site_lon), 2000.0) == 0.0);
+    CHECK(d.relief_m(direction(global_lat, global_lon), 1e5) == 0.0);
 }

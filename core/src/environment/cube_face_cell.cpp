@@ -23,8 +23,6 @@ constexpr double quarter_pi = 0.25 * constants::pi;
 
 std::int64_t cells_per_edge(int level) { return std::int64_t{1} << level; }
 
-// Margin on the local cell width when collecting the cells around a point (metric change over the range, [E]).
-constexpr double cell_range_margin = 1.1;
 
 }  // namespace
 
@@ -59,6 +57,28 @@ FaceCoord face_coord_of(const Vec3& unit) {
     }
     if (dot(unit, face_normal(face)) < 0.0) ++face;
     return face_coord_on(face, unit);
+}
+
+FaceBlend face_blend(const Vec3& unit, double band) {
+    const auto h = [band](double x) {
+        const double y = std::clamp((1.0 + band - std::abs(x)) / (2.0 * band), 0.0, 1.0);
+        return y * y * (3.0 - 2.0 * y);
+    };
+    FaceBlend b;
+    double total = 0.0;
+    for (int face = 0; face < 6 && b.count < 3; ++face) {
+        // w > 0 needs |s|, |t| < 1 + band, i.e. well inside the face's half-space (dot > 0.6).
+        if (dot(unit, face_normal(face)) <= 0.5) continue;
+        const FaceCoord c = face_coord_on(face, unit);
+        const double w = h(c.s) * h(c.t);
+        if (w <= 0.0) continue;
+        b.coord[static_cast<size_t>(b.count)] = c;
+        b.weight[static_cast<size_t>(b.count)] = w;
+        ++b.count;
+        total += w;
+    }
+    for (int k = 0; k < b.count; ++k) b.weight[static_cast<size_t>(k)] /= total;
+    return b;
 }
 
 FaceFrame face_frame(int face, double s, double t, double sphere_radius_m) {
@@ -125,8 +145,8 @@ std::vector<FaceCell> face_cells_within(const Vec3& unit, int level, double radi
         const FaceFrame f = face_frame(face, sc, tc, sphere_radius_m);
         // Width across the lines of constant s (t): metres per cell times the sine of the angle between e_s and e_t.
         const double sin_angle = std::max(norm(cross(f.e_s, f.e_t)), 0.5);
-        const double cells_s = cell_range_margin * radius_m / (f.m_s * 2.0 / n * sin_angle);
-        const double cells_t = cell_range_margin * radius_m / (f.m_t * 2.0 / n * sin_angle);
+        const double cells_s = face_cell_range_margin * radius_m / (f.m_s * 2.0 / n * sin_angle);
+        const double cells_t = face_cell_range_margin * radius_m / (f.m_t * 2.0 / n * sin_angle);
         const double u = (c.s + 1.0) * 0.5 * n, v = (c.t + 1.0) * 0.5 * n;
         const auto lo = [count](double x) {
             return std::clamp(static_cast<std::int64_t>(std::floor(x)), std::int64_t{0}, count);

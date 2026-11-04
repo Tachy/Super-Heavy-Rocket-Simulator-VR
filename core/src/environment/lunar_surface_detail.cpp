@@ -34,6 +34,16 @@ constexpr int mean_field_steps = 32;
 constexpr int window_samples = 25;
 constexpr double normalisation_top_octave = 1024.0;
 constexpr int normalisation_windows = 1536;
+// Crater search: faces whose normal is within ~90 deg of the query hold candidate cells (the reach is << R), and a
+// 5 % margin on the (s, t) cull distance for the metric change between the query and the crater ([E]).
+constexpr double min_face_view_cos = 1e-3;
+constexpr double crater_cull_margin = 1.05;
+// Roughness footprint means over another blend face's (sheared) parallelogram, only inside the face blend band:
+// composite midpoint rule with 3 samples per lattice cell across, 4 to 96 per side ([E], checked by the band-limit
+// test in the blend band).
+constexpr double cross_samples_per_cell = 3.0;
+constexpr int min_cross_samples = 4;
+constexpr int max_cross_samples = 96;
 // Value-noise node values are uniform in [-1, 1]: sqrt(3) gives unit variance.
 const double unit_variance_gain = std::sqrt(3.0);
 
@@ -174,43 +184,83 @@ double polar_wedge(const CraterShape& f, double a, double other) {
     return sum;
 }
 
-// Signed corner integral C(X, Y) = sgn X sgn Y C(|X|, |Y|) (the shape is even in x and y); 0 on the axes.
-double crater_corner(const CraterShape& f, double x, double y) {
-    const double ax = std::abs(x), ay = std::abs(y);
-    if (ax < 1e-12 || ay < 1e-12) return 0.0;  // the corner on an axis: a zero-width wedge (error O(1e-12))
-    const double sign = (x < 0.0) != (y < 0.0) ? -1.0 : 1.0;
-    return sign * (polar_wedge(f, ax, ay) + polar_wedge(f, ay, ax));
+// An edge line closer than this to the crater centre (crater radii) adds a zero-width wedge: skipped (error O(1e-12)).
+constexpr double min_wedge_distance = 1e-12;
+
+// P(a, Theta) for a signed along-edge coordinate t = a tan Theta (P is odd in Theta).
+double signed_wedge(const CraterShape& f, double a, double t) {
+    return t >= 0.0 ? polar_wedge(f, a, t) : -polar_wedge(f, a, -t);
 }
 
-// Below this square size / crater radius a square lying wholly inside one smooth part of the profile uses the
+// Signed integral of the crater over the triangle (crater centre, P, Q) (positive when counter-clockwise): the wedge
+// between the polar angles of P and Q out to the line PQ at distance a = |P x u| (u the unit vector P -> Q), whose
+// points sit at a sec theta: P(a, t_Q) - P(a, t_P) with t the along-line coordinate from the foot of the
+// perpendicular. A rectangle's four triangles reproduce the corner integrals.
+double crater_triangle(const CraterShape& f, double px, double py, double qx, double qy) {
+    const double dx = qx - px, dy = qy - py;
+    const double len = std::hypot(dx, dy);
+    if (len == 0.0) return 0.0;
+    const double ux = dx / len, uy = dy / len;
+    const double signed_a = px * uy - py * ux;
+    const double a = std::abs(signed_a);
+    if (a < min_wedge_distance) return 0.0;
+    const double tp = px * ux + py * uy;
+    const double wedge = signed_wedge(f, a, tp + len) - signed_wedge(f, a, tp);
+    return signed_a > 0.0 ? wedge : -wedge;
+}
+
+// Distance from the origin to the segment P Q.
+double segment_distance(double px, double py, double qx, double qy) {
+    const double dx = qx - px, dy = qy - py;
+    const double l2 = dx * dx + dy * dy;
+    const double t = l2 > 0.0 ? std::clamp(-(px * dx + py * dy) / l2, 0.0, 1.0) : 0.0;
+    return std::hypot(px + t * dx, py + t * dy);
+}
+
+// Below this footprint size / crater radius a footprint lying wholly inside one smooth part of the profile uses the
 // closed-form mean (bowl: exact; rim flank: second-order Taylor, error ~0.2 (L/R)^4 rim < 3e-6 rim) instead of the
-// corner differences, which lose ~1e-16 (R/L)^2 of the depth to cancellation ([D]).
+// triangle sums, which lose ~1e-16 (R/L)^2 of the depth to cancellation ([D]).
 constexpr double small_square_ratio = 1.0 / 16.0;
 
-// Mean of a crater over the L x L square centred at the query, the crater centre at (x, y) metres from it.
-double crater_box_mean_m(const Crater& c, double x, double y, double limit_m) {
+// Mean of a crater over the footprint p + a e_s + b e_t, |a|, |b| <= L/2 (the face lattice's (s, t) parallelogram,
+// the same footprint the roughness means use). Tangent-plane coordinates: e1 = e_s, e2 = e_t made orthogonal, so
+// e_s = (1, 0), e_t = (cos_st, sin_st) with sin_st > 0; the crater centre at (x, y) metres from the query point.
+double crater_box_mean_m(const Crater& c, double x, double y, double cos_st, double sin_st, double limit_m) {
     const double radius = 0.5 * c.diameter_m;
     const double eps = limit_m / radius;
-    const double cx = -x / radius, cy = -y / radius;  // square centre in crater units
-    const double x0 = cx - 0.5 * eps, x1 = cx + 0.5 * eps, y0 = cy - 0.5 * eps, y1 = cy + 0.5 * eps;
-    const double near_x = std::max({x0, -x1, 0.0}), near_y = std::max({y0, -y1, 0.0});
-    const double r_min = std::hypot(near_x, near_y);
+    const double cx = -x / radius, cy = -y / radius;  // footprint centre in crater units, crater at the origin
+    const double ax = 0.5 * eps, bx = 0.5 * eps * cos_st, by = 0.5 * eps * sin_st;  // half sides A = (ax, 0), B
+    // Corners counter-clockwise: c - A - B, c + A - B, c + A + B, c - A + B.
+    const std::array<double, 4> vx = {cx - ax - bx, cx + ax - bx, cx + ax + bx, cx - ax + bx};
+    const std::array<double, 4> vy = {cy - by, cy - by, cy + by, cy + by};
+    // Origin inside: its parallelogram coordinates (alpha along A, beta along B) within [-1, 1].
+    const double beta = -cy / by, alpha = (-cx - beta * bx) / ax;
+    double r_min = 0.0, r_max = 0.0;
+    if (std::abs(alpha) > 1.0 || std::abs(beta) > 1.0) {
+        r_min = std::numeric_limits<double>::max();
+        for (size_t k = 0; k < 4; ++k) {
+            r_min = std::min(r_min, segment_distance(vx[k], vy[k], vx[(k + 1) % 4], vy[(k + 1) % 4]));
+        }
+    }
     if (r_min >= 3.0) return 0.0;
+    for (size_t k = 0; k < 4; ++k) r_max = std::max(r_max, std::hypot(vx[k], vy[k]));
     if (eps <= small_square_ratio) {
-        const double r_max = std::hypot(std::max(std::abs(x0), std::abs(x1)), std::max(std::abs(y0), std::abs(y1)));
-        if (r_max <= 1.0) {  // the bowl is quadratic: the square mean of x^2 + y^2 adds eps^2 / 6
+        if (r_max <= 1.0) {  // the bowl is quadratic: the footprint mean of x^2 + y^2 adds (|A|^2 + |B|^2) / 3 = eps^2/6
             return c.rim_height_m - c.depth_m + c.depth_m * (cx * cx + cy * cy + eps * eps / 6.0);
         }
-        if (r_min >= 1.0 && r_max <= 3.0) {  // laplacian of rho^-3 in the plane: 9 rho^-5
+        if (r_min >= 1.0 && r_max <= 3.0) {
+            // Second order: mean = g(c) + (A^T H A + B^T H B) / 6, H of rho^-3: -3 rho^-5 I + 15 rho^-7 c c^T.
             const double rho = std::hypot(cx, cy);
-            const double r3 = rho * rho * rho;
-            return c.rim_height_m * rim_c * (1.0 / r3 + eps * eps / 24.0 * 9.0 / (r3 * rho * rho) - 1.0 / 27.0);
+            const double r3 = rho * rho * rho, r5 = r3 * rho * rho;
+            const double ca = cx, cb = cx * cos_st + cy * sin_st;  // c . e_s, c . e_t
+            const double curvature = -6.0 / r5 + 15.0 * (ca * ca + cb * cb) / (r5 * rho * rho);
+            return c.rim_height_m * rim_c * (1.0 / r3 + eps * eps / 24.0 * curvature - 1.0 / 27.0);
         }
     }
     const CraterShape f{c.depth_m, c.rim_height_m};
-    const double integral = crater_corner(f, x1, y1) - crater_corner(f, x0, y1) - crater_corner(f, x1, y0) +
-                            crater_corner(f, x0, y0);
-    return integral / (eps * eps);
+    double integral = 0.0;
+    for (size_t k = 0; k < 4; ++k) integral += crater_triangle(f, vx[k], vy[k], vx[(k + 1) % 4], vy[(k + 1) % 4]);
+    return integral / (eps * eps * sin_st);
 }
 
 // Per-face view of a query point for the cell searches (continued coordinates and metric at the clamped point).
@@ -243,8 +293,8 @@ struct CellRange {
 CellRange cell_range(const FaceView& v, int level, double reach_m) {
     const std::int64_t count = std::int64_t{1} << level;
     const double n = static_cast<double>(count);
-    const double cells_s = 1.1 * reach_m / (v.m_s * 2.0 / n * v.sin_angle);
-    const double cells_t = 1.1 * reach_m / (v.m_t * 2.0 / n * v.sin_angle);
+    const double cells_s = face_cell_range_margin * reach_m / (v.m_s * 2.0 / n * v.sin_angle);
+    const double cells_t = face_cell_range_margin * reach_m / (v.m_t * 2.0 / n * v.sin_angle);
     const double u = (v.c.s + 1.0) * 0.5 * n, w = (v.c.t + 1.0) * 0.5 * n;
     if (u + cells_s < 0.0 || w + cells_t < 0.0 || u - cells_s >= n || w - cells_t >= n) return {};
     const auto clamp_index = [count](double x) {
@@ -264,11 +314,19 @@ double crater_profile_m(const Crater& c, double distance_m) {
 
 struct LunarSurfaceDetail::Query {
     Vec3 p;
-    FaceCoord fc;
-    FaceFrame frame;
-    Vec3 e1, e2;  // orthonormal: e1 = e_s, e2 = e_t made orthogonal
     double band_start_m = 0.0;
-    std::array<FaceView, 6> views;
+    // The faces whose lattices define the point (face_blend: one inside a face, two across an edge, three at a corner).
+    struct BlendFace {
+        FaceCoord c;       // continued coordinates
+        FaceFrame frame;   // at the continued coordinates
+        Vec3 e1, e2;       // orthonormal: e1 = e_s, e2 = e_t made orthogonal
+        double cos_st = 0.0, sin_st = 1.0;  // e_t = cos_st e1 + sin_st e2
+        double w_crater = 0.0;  // partition of unity (sum 1): footprint weights of the crater means
+        double w_rough = 0.0;   // w / sqrt(sum w^2): blends independent face fields with unchanged variance
+    };
+    int blend_count = 0;
+    std::array<BlendFace, 3> blend;
+    std::array<FaceView, 6> views;  // crater cell search
 };
 
 LunarSurfaceDetail::LunarSurfaceDetail(config::MoonSurfaceConfig config, std::shared_ptr<const LunarTerrain> lola)
@@ -314,19 +372,32 @@ double LunarSurfaceDetail::band_start_m(const Vec3& unit) const {
     return blend.weight * blend.scale_m + (1.0 - blend.weight) * lola_->global_resolution_m();
 }
 
-LunarSurfaceDetail::Query LunarSurfaceDetail::make_query(const Vec3& unit) const {
+LunarSurfaceDetail::Query LunarSurfaceDetail::make_query(const Vec3& unit, bool for_craters) const {
     Query q;
     q.p = unit;
-    q.fc = face_coord_of(unit);
-    q.frame = face_frame(q.fc.face, q.fc.s, q.fc.t, sphere_radius_m_);
-    q.e1 = q.frame.e_s;
-    q.e2 = math::normalized(q.frame.e_t - q.e1 * dot(q.frame.e_t, q.e1));
+    const FaceBlend fb = face_blend(unit, face_blend_band);
+    double sum_w2 = 0.0;
+    for (int k = 0; k < fb.count; ++k) sum_w2 += fb.weight[static_cast<size_t>(k)] * fb.weight[static_cast<size_t>(k)];
+    const double rough_norm = 1.0 / std::sqrt(sum_w2);
+    q.blend_count = fb.count;
+    for (int k = 0; k < fb.count; ++k) {
+        Query::BlendFace& b = q.blend[static_cast<size_t>(k)];
+        b.c = fb.coord[static_cast<size_t>(k)];
+        b.frame = face_frame(b.c.face, b.c.s, b.c.t, sphere_radius_m_);
+        b.e1 = b.frame.e_s;
+        b.cos_st = dot(b.frame.e_t, b.e1);
+        b.e2 = math::normalized(b.frame.e_t - b.e1 * b.cos_st);
+        b.sin_st = dot(b.frame.e_t, b.e2);
+        b.w_crater = fb.weight[static_cast<size_t>(k)];
+        b.w_rough = fb.weight[static_cast<size_t>(k)] * rough_norm;
+    }
+    if (!for_craters) return q;
     q.band_start_m = band_start_m(unit);
     for (int face = 0; face < 6; ++face) {
-        if (dot(unit, face_normal(face)) <= 1e-3) continue;
+        if (dot(unit, face_normal(face)) <= min_face_view_cos) continue;
         FaceView& v = q.views[static_cast<size_t>(face)];
         v.used = true;
-        v.c = face == q.fc.face ? q.fc : face_coord_on(face, unit);
+        v.c = face_coord_on(face, unit);
         const FaceFrame f = face_frame(face, std::clamp(v.c.s, -1.0, 1.0), std::clamp(v.c.t, -1.0, 1.0),
                                        sphere_radius_m_);
         v.m_s = f.m_s;
@@ -428,16 +499,18 @@ double LunarSurfaceDetail::craters_at(const Query& q, double limit_m) const {
                              ? smooth01(std::log2(std::sqrt(o.min_diameter_m * o.max_diameter_m) /
                                                   (box_exact_fraction * limit_m)) + 1.0)
                              : 1.0;
-        if (w < 1.0) sum += (1.0 - w) * crater_mean_field_m(static_cast<int>(k), q.band_start_m);
         if (w <= 0.0) continue;
-        const double reach =
-            crater_reach_per_diameter * o.max_diameter_m + (limit_m > 0.0 ? limit_m * std::sqrt(0.5) : 0.0);
+        // Zero mean: LOLA heights are area means that already hold the craters' mean, so each octave enters as its
+        // deviation from the population mean (an octave below the footprint, w = 0, then adds exactly nothing).
+        sum -= w * crater_mean_field_m(static_cast<int>(k), q.band_start_m);
+        // The footprint's half diagonal is at most L (|e_s +- e_t| <= 2).
+        const double reach = crater_reach_per_diameter * o.max_diameter_m + (limit_m > 0.0 ? limit_m : 0.0);
         const double n = static_cast<double>(std::int64_t{1} << o.level);
         for (int face = 0; face < 6; ++face) {
             const FaceView& v = q.views[static_cast<size_t>(face)];
             if (!v.used) continue;
             const CellRange r = cell_range(v, o.level, reach);
-            const double cull = 1.05 * reach * v.cull_factor;
+            const double cull = crater_cull_margin * reach * v.cull_factor;
             for (std::int64_t j = r.j0; j <= r.j1; ++j) {
                 for (std::int64_t i = r.i0; i <= r.i1; ++i) {
                     const FaceCell cell{face, o.level, i, j};
@@ -452,7 +525,12 @@ double LunarSurfaceDetail::craters_at(const Query& q, double limit_m) const {
                         if (!complete_crater(static_cast<int>(k), cell, h, m, s01, t01, cr)) continue;
                         if (limit_m > 0.0) {
                             const Vec3 offset = (cr.centre_unit - q.p) * sphere_radius_m_;
-                            sum += w * crater_box_mean_m(cr, dot(offset, q.e1), dot(offset, q.e2), limit_m);
+                            for (int b = 0; b < q.blend_count; ++b) {
+                                const Query::BlendFace& bf = q.blend[static_cast<size_t>(b)];
+                                sum += w * bf.w_crater *
+                                       crater_box_mean_m(cr, dot(offset, bf.e1), dot(offset, bf.e2), bf.cos_st,
+                                                         bf.sin_st, limit_m);
+                            }
                         } else {
                             sum += crater_profile_m(cr, sphere_radius_m_ * norm(q.p - cr.centre_unit));
                         }
@@ -465,25 +543,8 @@ double LunarSurfaceDetail::craters_at(const Query& q, double limit_m) const {
 }
 
 double LunarSurfaceDetail::roughness_node(int octave, int face, std::int64_t j, std::int64_t k) const {
-    const std::int64_t n = roughness_octaves_[static_cast<size_t>(octave)].cells_per_edge;
-    if (j <= 0 || j >= n || k <= 0 || k >= n) {
-        // On a face edge or beyond it: the node of the face that owns the direction, the lowest face index where two
-        // or three faces share it (edge / corner nodes hash identically from every side); beyond an edge (square
-        // means only) the nearest node of the neighbouring face.
-        const double nd = static_cast<double>(n);
-        const Vec3 d = face_direction(face, -1.0 + 2.0 * static_cast<double>(j) / nd,
-                                      -1.0 + 2.0 * static_cast<double>(k) / nd);
-        const double comps[3] = {d.x, d.y, d.z};
-        const double top = std::max({std::abs(d.x), std::abs(d.y), std::abs(d.z)});
-        int owner = 6;
-        for (int axis = 0; axis < 3; ++axis) {
-            if (std::abs(comps[axis]) >= top - 1e-12) owner = std::min(owner, 2 * axis + (comps[axis] < 0.0 ? 1 : 0));
-        }
-        const FaceCoord c = face_coord_on(owner, d);
-        face = owner;
-        j = std::clamp(static_cast<std::int64_t>(std::llround((c.s + 1.0) * 0.5 * nd)), std::int64_t{0}, n);
-        k = std::clamp(static_cast<std::int64_t>(std::llround((c.t + 1.0) * 0.5 * nd)), std::int64_t{0}, n);
-    }
+    // Every face has its own lattice, continued beyond its edges (indices < 0 or > cells_per_edge); faces are joined
+    // by the face blend, not by shared nodes.
     const std::uint64_t h = surface_hash((surface_stream::roughness << 8) | static_cast<std::uint64_t>(face),
                                          static_cast<std::uint64_t>(octave), static_cast<std::uint64_t>(j),
                                          static_cast<std::uint64_t>(k));
@@ -500,49 +561,91 @@ double LunarSurfaceDetail::roughness_at(const Query& q, double limit_m, double s
         if (w_top <= 0.0) continue;
         const double w_box = limit_m > 0.0 ? smooth01(std::log2(o.spacing_m / (box_exact_fraction * limit_m)) + 1.0) : 1.0;
         if (w_box <= 0.0) continue;
-        const double amplitude =
-            scale_m * unit_variance_gain * std::pow(q.frame.scale * o.spacing_m / r.baseline_m, r.hurst_exponent);
         const std::int64_t n = o.cells_per_edge;
         const double nd = static_cast<double>(n);
-        const double u = (q.fc.s + 1.0) * 0.5 * nd, v = (q.fc.t + 1.0) * 0.5 * nd;
         const int oct = static_cast<int>(m);
-        double value = 0.0;
-        if (limit_m <= 0.0) {
-            const std::int64_t j0 = std::clamp(static_cast<std::int64_t>(std::floor(u)), std::int64_t{0}, n - 1);
-            const std::int64_t k0 = std::clamp(static_cast<std::int64_t>(std::floor(v)), std::int64_t{0}, n - 1);
-            const double fu = fade(std::clamp(u - static_cast<double>(j0), 0.0, 1.0));
-            const double fv = fade(std::clamp(v - static_cast<double>(k0), 0.0, 1.0));
-            const int face = q.fc.face;
-            value = (1.0 - fv) * ((1.0 - fu) * roughness_node(oct, face, j0, k0) + fu * roughness_node(oct, face, j0 + 1, k0)) +
-                    fv * ((1.0 - fu) * roughness_node(oct, face, j0, k0 + 1) + fu * roughness_node(oct, face, j0 + 1, k0 + 1));
-        } else {
-            // Exact mean over the square: the basis is a product of 1-D fade hats, so the mean separates.
-            const double du = 0.5 * limit_m / q.frame.m_s * 0.5 * nd, dv = 0.5 * limit_m / q.frame.m_t * 0.5 * nd;
-            const double u0 = u - du, u1 = u + du, v0 = v - dv, v1 = v + dv;
-            const std::int64_t ja = static_cast<std::int64_t>(std::floor(u0)), jb = static_cast<std::int64_t>(std::floor(u1)) + 1;
-            const std::int64_t ka = static_cast<std::int64_t>(std::floor(v0)), kb = static_cast<std::int64_t>(std::floor(v1)) + 1;
-            constexpr std::int64_t max_nodes = 64;
-            if (jb - ja + 1 > max_nodes || kb - ka + 1 > max_nodes) {
-                throw std::logic_error("LunarSurfaceDetail: square mean spans too many lattice nodes");
-            }
-            std::array<double, max_nodes> wy{};
-            for (std::int64_t k = ka; k <= kb; ++k) wy[static_cast<size_t>(k - ka)] = basis_integral(k, v0, v1);
-            for (std::int64_t j = ja; j <= jb; ++j) {
-                const double wx = basis_integral(j, u0, u1);
-                if (wx == 0.0) continue;
-                double row = 0.0;
-                for (std::int64_t k = ka; k <= kb; ++k) {
-                    const double wk = wy[static_cast<size_t>(k - ka)];
-                    if (wk != 0.0) row += wk * roughness_node(oct, q.fc.face, j, k);
+        for (int bi = 0; bi < q.blend_count; ++bi) {
+            const Query::BlendFace& b = q.blend[static_cast<size_t>(bi)];
+            const int face = b.c.face;
+            const double amplitude =
+                scale_m * unit_variance_gain * std::pow(b.frame.scale * o.spacing_m / r.baseline_m, r.hurst_exponent);
+            const double u = (b.c.s + 1.0) * 0.5 * nd, v = (b.c.t + 1.0) * 0.5 * nd;
+            // This face's lattice field at lattice coordinates (x, y).
+            const auto field = [&](double x, double y) {
+                const auto j0 = static_cast<std::int64_t>(std::floor(x));
+                const auto k0 = static_cast<std::int64_t>(std::floor(y));
+                const double fu = fade(x - static_cast<double>(j0));
+                const double fv = fade(y - static_cast<double>(k0));
+                return (1.0 - fv) * ((1.0 - fu) * roughness_node(oct, face, j0, k0) +
+                                     fu * roughness_node(oct, face, j0 + 1, k0)) +
+                       fv * ((1.0 - fu) * roughness_node(oct, face, j0, k0 + 1) +
+                             fu * roughness_node(oct, face, j0 + 1, k0 + 1));
+            };
+            double value = 0.0;
+            if (limit_m <= 0.0) {
+                value = field(u, v);
+            } else {
+                // The footprint is the crater-weighted set of the blend faces' (s, t) parallelograms (one face away
+                // from edges). Over this face's own parallelogram the mean is exact: the basis is a product of 1-D
+                // fade hats, so it separates.
+                const double du = 0.5 * limit_m / b.frame.m_s * 0.5 * nd, dv = 0.5 * limit_m / b.frame.m_t * 0.5 * nd;
+                const double u0 = u - du, u1 = u + du, v0 = v - dv, v1 = v + dv;
+                const auto ja = static_cast<std::int64_t>(std::floor(u0)), jb = static_cast<std::int64_t>(std::floor(u1)) + 1;
+                const auto ka = static_cast<std::int64_t>(std::floor(v0)), kb = static_cast<std::int64_t>(std::floor(v1)) + 1;
+                constexpr std::int64_t max_nodes = 64;
+                if (jb - ja + 1 > max_nodes || kb - ka + 1 > max_nodes) {
+                    throw std::logic_error("LunarSurfaceDetail: square mean spans too many lattice nodes");
                 }
-                value += wx * row;
+                std::array<double, max_nodes> wy{};
+                for (std::int64_t k = ka; k <= kb; ++k) wy[static_cast<size_t>(k - ka)] = basis_integral(k, v0, v1);
+                double own = 0.0;
+                for (std::int64_t j = ja; j <= jb; ++j) {
+                    const double wx = basis_integral(j, u0, u1);
+                    if (wx == 0.0) continue;
+                    double row = 0.0;
+                    for (std::int64_t k = ka; k <= kb; ++k) {
+                        const double wk = wy[static_cast<size_t>(k - ka)];
+                        if (wk != 0.0) row += wk * roughness_node(oct, face, j, k);
+                    }
+                    own += wx * row;
+                }
+                const double own_mean = own / ((u1 - u0) * (v1 - v0));
+                // Another blend face's parallelogram is sheared in this lattice: composite midpoint rule
+                // (cross_samples_per_cell per lattice cell). Octaves finer than L/8 (and, ramping in, up to L/4) use
+                // this face's own parallelogram instead: their footprint means are small, and the quadrature cost
+                // grows with (L / spacing)^2.
+                const double cross_weight = smooth01(std::log2(o.spacing_m / (box_exact_fraction * limit_m)));
+                value = own_mean * (b.w_crater + (1.0 - cross_weight) * (1.0 - b.w_crater));
+                for (int gi = 0; gi < q.blend_count && cross_weight > 0.0; ++gi) {
+                    if (gi == bi) continue;
+                    const Query::BlendFace& g = q.blend[static_cast<size_t>(gi)];
+                    const auto to_lattice = [&](const Vec3& metres) {
+                        const double x2 = dot(metres, b.e2) / b.sin_st;  // along e_t (m)
+                        const double x1 = dot(metres, b.e1) - b.cos_st * x2;  // along e_s (m)
+                        return std::pair{x1 / b.frame.m_s * 0.5 * nd, x2 / b.frame.m_t * 0.5 * nd};
+                    };
+                    const auto [au, av] = to_lattice(g.frame.e_s * (0.5 * limit_m));
+                    const auto [bu, bv] = to_lattice(g.frame.e_t * (0.5 * limit_m));
+                    const double cells = 2.0 * std::max(std::abs(au) + std::abs(bu), std::abs(av) + std::abs(bv));
+                    const int count = std::clamp(static_cast<int>(std::ceil(cross_samples_per_cell * cells)),
+                                                 min_cross_samples, max_cross_samples);
+                    double cross = 0.0;
+                    for (int i = 0; i < count; ++i) {
+                        const double alpha = -1.0 + (2.0 * i + 1.0) / count;
+                        for (int k = 0; k < count; ++k) {
+                            const double beta = -1.0 + (2.0 * k + 1.0) / count;
+                            cross += field(u + alpha * au + beta * bu, v + alpha * av + beta * bv);
+                        }
+                    }
+                    value += cross_weight * g.w_crater * cross / (static_cast<double>(count) * count);
+                }
             }
-            value /= (u1 - u0) * (v1 - v0);
+            sum += w_top * w_box * b.w_rough * amplitude * value;
         }
-        sum += w_top * w_box * amplitude * value;
     }
     return sum;
 }
+
 
 double LunarSurfaceDetail::derive_roughness_scale() const {
     const double window = config_.roughness.baseline_m;
@@ -563,10 +666,7 @@ double LunarSurfaceDetail::derive_roughness_scale() const {
             for (int b = 0; b < window_samples; ++b) {
                 const Vec3 p = math::normalized(
                     centre + (e1 * ((a - half) * spacing) + e2 * ((b - half) * spacing)) / sphere_radius_m_);
-                Query q;
-                q.p = p;
-                q.fc = face_coord_of(p);
-                q.frame = face_frame(q.fc.face, q.fc.s, q.fc.t, sphere_radius_m_);
+                Query q = make_query(p, false);
                 q.band_start_m = 2.0 * normalisation_top_octave * window;
                 z[static_cast<size_t>(a * window_samples + b)] = roughness_at(q, 0.0, 1.0);
             }

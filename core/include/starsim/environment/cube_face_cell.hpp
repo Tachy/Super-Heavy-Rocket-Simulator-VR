@@ -58,6 +58,23 @@ std::array<FaceCell, 9> face_cell_neighbourhood(const FaceCell& c);
 // each face the disc reaches.
 std::vector<FaceCell> face_cells_within(const math::Vec3& unit, int level, double radius_m, double sphere_radius_m);
 
+// Margin on the local cell width when collecting the cells around a point (metric change over the range, [E]).
+inline constexpr double face_cell_range_margin = 1.1;
+
+// Smooth partition of unity over the faces around a direction, for fields defined per face lattice that must not
+// step at face edges: face f weighs h(s_f) h(t_f) (continued coordinates, h = smoothstep from 1 at |x| = 1 - band
+// to 0 at 1 + band), normalised to sum 1. Inside a face farther than `band` from its edges only that face (weight 1);
+// across an edge two faces, at a corner three. Depends only on the direction (no face is preferred).
+struct FaceBlend {
+    int count = 0;
+    std::array<FaceCoord, 3> coord;
+    std::array<double, 3> weight{};
+};
+FaceBlend face_blend(const math::Vec3& unit, double band);
+// Default blend half-width in face coordinates: 0.01 = +-13.6 km on the Moon at an edge midpoint, wide against every
+// band-limited footprint the terrain asks for (<= a few km), narrow against the face ([D]).
+inline constexpr double face_blend_band = 0.01;
+
 // Nominal cell size (edge length at the face centre): R pi/2 / 2^level. Cells are 0.7-1.0 times as wide elsewhere
 // (narrowest across an edge midpoint, [D] from the warp's metric).
 double face_cell_nominal_size_m(int level, double sphere_radius_m);
