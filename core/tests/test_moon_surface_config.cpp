@@ -4,6 +4,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <numbers>
+#include <random>
 #include <string>
 
 #include "starsim/config/moon_surface_config.hpp"
@@ -60,6 +62,9 @@ TEST_CASE("The shipped Moon surface config loads with sources-sane values", "[mo
     CHECK(std::isfinite(r.baseline_m));
     CHECK(r.hurst_exponent > 0.5);
     CHECK(r.hurst_exponent < 1.0);
+    CHECK(std::isfinite(r.rms_height_measured_total_m));
+    CHECK(r.rms_height_at_baseline_m > 0.0);
+    CHECK(r.rms_height_at_baseline_m <= r.rms_height_measured_total_m);  // residual after craters and rocks
 
     const auto& k = cfg.rocks;
     for (double v : {k.axis_b_to_a_mean, k.axis_c_to_a_mean, k.axis_ratio_sd, k.burial_fraction_mean,
@@ -69,6 +74,14 @@ TEST_CASE("The shipped Moon surface config loads with sources-sane values", "[mo
     CHECK(k.axis_c_to_a_mean <= k.axis_b_to_a_mean);
     CHECK(k.axis_b_to_a_mean <= 1.0);
     CHECK((k.abundance_source == "uniform" || k.abundance_source == "diviner"));
+    // The abundance reference fraction is the disc area of the configured rock law over
+    // [abundance_reference_min_diameter_m, max]: integral of (pi/4) D^2 |dN/dD| dD for the power form.
+    REQUIRE(k.sfd.form == "power");
+    const double beta = k.sfd.exponent;
+    const double d0 = k.abundance_reference_min_diameter_m, d1 = k.sfd.max_diameter_m;
+    const double area = std::numbers::pi / 4.0 * k.sfd.density_per_m2 * beta * std::pow(k.sfd.reference_diameter_m, beta) *
+                        (std::pow(d1, 2.0 - beta) - std::pow(d0, 2.0 - beta)) / (2.0 - beta);
+    CHECK(std::abs(area / k.abundance_reference_area_fraction - 1.0) < 0.02);
 
     const auto& h = cfg.hapke;
     for (double v : {h.w, h.b, h.c, h.bs0, h.hs, h.bc0, h.hc, h.theta_bar_rad, h.porosity_k}) {
@@ -76,13 +89,23 @@ TEST_CASE("The shipped Moon surface config loads with sources-sane values", "[mo
     }
     CHECK(h.w > 0.0);
     CHECK(h.w < 1.0);
+    CHECK(std::abs(h.c) <= 1.0);  // double Henyey-Greenstein weight (Hapke 2012)
     CHECK(h.theta_bar_rad > 0.0);
     CHECK(h.theta_bar_rad < 1.0);  // ~23.7 deg, read in degrees
 }
 
 TEST_CASE("A missing key names it in German", "[moon_surface][config]") {
-    // Copy of the shipped file without the Hurst exponent, under a unique name (ctest runs cases in parallel).
-    const auto path = std::filesystem::temp_directory_path() / "starsim_moon_surface_missing_key_test.toml";
+    // Copy of the shipped file without the Hurst exponent, under a unique name (ctest runs cases in parallel); the
+    // guard removes it also when an assertion fails.
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("starsim_moon_surface_missing_key_" + std::to_string(std::random_device{}()) + ".toml");
+    struct Cleanup {
+        std::filesystem::path p;
+        ~Cleanup() {
+            std::error_code ec;
+            std::filesystem::remove(p, ec);
+        }
+    } cleanup{path};
     {
         std::ifstream in(shipped);
         std::ofstream out(path);
@@ -99,5 +122,4 @@ TEST_CASE("A missing key names it in German", "[moon_surface][config]") {
         CHECK_THAT(message, Catch::Matchers::ContainsSubstring("hurst_exponent"));
         CHECK_THAT(message, Catch::Matchers::ContainsSubstring("fehlt"));
     }
-    std::filesystem::remove(path);
 }

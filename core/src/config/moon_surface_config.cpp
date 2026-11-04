@@ -102,6 +102,10 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     if (cfg.roughness.hurst_exponent >= 1.0) g.fail("'roughness.hurst_exponent' muss kleiner als 1 sein");
     cfg.roughness.rms_height_at_baseline_m = g.positive(roughness, "rms_height_at_baseline_m");
     cfg.roughness.baseline_m = g.positive(roughness, "baseline_m");
+    cfg.roughness.rms_height_measured_total_m = g.positive(roughness, "rms_height_measured_total_m");
+    if (cfg.roughness.rms_height_at_baseline_m > cfg.roughness.rms_height_measured_total_m) {
+        g.fail("'roughness.rms_height_at_baseline_m' (Rest) darf nicht größer als rms_height_measured_total_m sein");
+    }
 
     const auto& rocks = top.table(doc.root, "rocks");
     const Reader k(doc, "rocks");
@@ -114,6 +118,8 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     cfg.rocks.albedo_to_regolith = k.positive(rocks, "albedo_to_regolith");
     cfg.rocks.abundance_source = k.choice(rocks, "abundance_source", "uniform", "diviner");
     cfg.rocks.abundance_scale = k.positive(rocks, "abundance_scale");
+    cfg.rocks.abundance_reference_area_fraction = k.fraction(rocks, "abundance_reference_area_fraction");
+    cfg.rocks.abundance_reference_min_diameter_m = k.positive(rocks, "abundance_reference_min_diameter_m");
     if (cfg.rocks.axis_c_to_a_mean > cfg.rocks.axis_b_to_a_mean) {
         k.fail("'rocks.axis_c_to_a_mean' darf nicht größer als axis_b_to_a_mean sein");
     }
@@ -124,6 +130,7 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     if (cfg.hapke.w >= 1.0) h.fail("'hapke.w' muss kleiner als 1 sein");
     cfg.hapke.b = h.fraction(hapke, "b");
     cfg.hapke.c = h.number(hapke, "c");
+    if (std::abs(cfg.hapke.c) > 1.0) h.fail("'hapke.c' muss zwischen -1 und 1 liegen (Hapke 2012)");
     cfg.hapke.bs0 = h.non_negative(hapke, "bs0");
     cfg.hapke.hs = h.non_negative(hapke, "hs");
     cfg.hapke.bc0 = h.non_negative(hapke, "bc0");
