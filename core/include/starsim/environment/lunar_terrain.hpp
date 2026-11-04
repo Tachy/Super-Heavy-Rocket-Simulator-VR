@@ -66,6 +66,16 @@ public:
     double height_at_fixed_m(const math::Vec3& fixed_m) const override;  // below the point's direction
     math::Vec3 normal_fixed(const math::Vec3& fixed_m) const override;  // outward unit normal of the surface there
     bool in_tile(double latitude_rad, double longitude_rad) const;
+    // The tile blend at a direction, as used inside height_at_direction_m: weight 1 in a tile's core, falling to 0 at
+    // its edge (smoothstep over blend_m), 0 on the global grid; scale_m is that tile's pixel scale (0 outside tiles).
+    struct TileBlend {
+        double weight = 0.0;
+        double scale_m = 0.0;
+    };
+    TileBlend tile_blend(const math::Vec3& unit) const;
+    double tile_weight(const math::Vec3& unit) const { return tile_blend(unit).weight; }
+    double global_resolution_m() const;  // the global grid's spacing at the equator
+    double finest_resolution_m() const;  // the smallest of the tiles' pixel scales and the global spacing
     double sphere_radius_m() const { return sphere_radius_m_; }
 
 private:

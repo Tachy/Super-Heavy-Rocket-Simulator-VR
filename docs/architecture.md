@@ -12,7 +12,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   EGM2008 geoid as the sea level; `environment::terrain_horizon` (terrain horizon elevations by a great-circle
   march, and the banded bake of a terrain node's vertex lattice, for the Moon's terrain shadows;
   `StarsimCore.horizon_elevations` / `horizon_elevation_rad`); one shared immutable instance per data set, `sim::shared_earth_terrain` /
-  `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; on the Earth terrain a site's
+  `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; the Moon's procedural
+  near-ground relief below LOLA, `environment::LunarSurfaceDetail` (hashed craters and regolith roughness on cube-face
+  cells, band-limited queries; `docs/subsystems/moon-surface.md`); on the Earth terrain a site's
   leg landing tracks bodies within 5 km of the site; the sea state at a drone ship's station: long-crested JONSWAP sea,
   deterministic by seed; the Earth's atmosphere optics and precomputed scattering: a float64 port of Bruneton 2017 -
   transmittance / scattering / irradiance tables in luminance with 5 orders + geometric tail, the WGS84 stretch, CPU

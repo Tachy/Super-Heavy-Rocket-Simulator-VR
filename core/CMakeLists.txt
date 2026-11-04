@@ -161,6 +161,8 @@ add_library(starsim_core STATIC
     src/contact/catch_trigger.cpp
     src/contact/tower_collision.cpp
     src/environment/lunar_terrain.cpp
+    src/environment/cube_face_cell.cpp
+    src/environment/lunar_surface_detail.cpp
     src/environment/terrain_horizon.cpp
     src/environment/geographic_grid.cpp
     src/environment/geoid.cpp

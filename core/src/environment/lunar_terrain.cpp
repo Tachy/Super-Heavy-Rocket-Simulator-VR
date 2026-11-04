@@ -111,7 +111,7 @@ double LunarTerrain::resolution_m(double latitude_rad, double longitude_rad) con
         const auto [line, sample] = tile.position(latitude_rad, longitude_rad);
         if (tile.inside(line, sample)) return tile.scale_m;
     }
-    return sphere_radius_m_ * constants::deg_to_rad / global_.pixels_per_degree;
+    return global_resolution_m();
 }
 
 double LunarTerrain::finest_resolution_within_m(double latitude_rad, double longitude_rad, double radius_m) const {
@@ -138,6 +138,26 @@ bool LunarTerrain::in_tile(double latitude_rad, double longitude_rad) const {
         if (tile.inside(line, sample)) return true;
     }
     return false;
+}
+
+LunarTerrain::TileBlend LunarTerrain::tile_blend(const Vec3& unit) const {
+    for (const auto& tile : tiles_) {
+        const auto [line, sample] = tile.position_of_direction(unit);
+        if (!tile.inside(line, sample)) continue;
+        const double x = tile.edge_distance_px(line, sample) * tile.scale_m / blend_m;
+        return {x >= 1.0 ? 1.0 : x * x * (3.0 - 2.0 * x), tile.scale_m};
+    }
+    return {};
+}
+
+double LunarTerrain::global_resolution_m() const {
+    return sphere_radius_m_ * constants::deg_to_rad / global_.pixels_per_degree;
+}
+
+double LunarTerrain::finest_resolution_m() const {
+    double finest = global_resolution_m();
+    for (const auto& tile : tiles_) finest = std::min(finest, tile.scale_m);
+    return finest;
 }
 
 double LunarTerrain::height_at_fixed_m(const Vec3& fixed_m) const {

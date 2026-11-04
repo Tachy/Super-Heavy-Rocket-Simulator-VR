@@ -17,7 +17,9 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   1e7 N/m, damping 3e6 N s/m [E], crush 4.5 MN [E]. Terrain: `config/lunar_sites.toml` (default `mons_mouton_im2`,
   IM-2's landing point [S], 5,322 m above the sphere); `fetch.py` crops LOLA `LDEM_80S_20M` to 20 x 20 km per site by
   one HTTP range request and fetches the global `LDEM_16` into `data/terrain/`. `environment::LunarTerrain` (tile
-  inside, global grid outside, 1 km smoothstep blend; normals by central differences over 10 m) through
+  inside, global grid outside, 1 km smoothstep blend - `tile_blend` / `tile_weight` expose it, `global_resolution_m`,
+  `finest_resolution_m` the grid spacings, for the procedural detail of `moon-surface.md`; normals by central
+  differences over 10 m) through
   `ReferenceBody::set_terrain` / `surface_height_m` / `surface_normal_fixed`; `FlightSession::set_moon_terrain`,
   `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Leg landings work on any reference body
   (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal

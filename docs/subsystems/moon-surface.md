@@ -1,10 +1,12 @@
 # Moon procedural near-ground surface
 
 Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 1 (statistics and config).
+`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 2 (craters and regolith
+roughness in the core; rocks, physics, rendering follow).
 
 ## Model
-Measured statistics only so far (`config/moon_surface.toml`); the generator (Task 2-3) builds on them.
+Measured statistics in `config/moon_surface.toml`; the generator `environment::LunarSurfaceDetail` (craters +
+roughness, Task 2) draws them as a pure function of the body-fixed direction; rocks (Task 3) follow.
 - Small craters: equilibrium population, cumulative N(>D) = 0.0336 D^-2 per m^2 (2.2 % of geometric saturation),
   0.01 m - 2 km; 70 % degraded (d/D 0.07), 30 % fresh (d/D 0.13, rim height 0.024 D).
 - Regolith roughness (what is not a crater or rock): self-affine, RMS height in a window W = 3.7 mm (W / 0.125 m)^0.78
@@ -20,7 +22,48 @@ Measured statistics only so far (`config/moon_surface.toml`); the generator (Tas
 - Hapke (643 nm, highland proxy): w 0.429, b 0.220, c 0.514, B_S0 1.61, h_S 0.054, B_C0 0, h_C 1, theta_bar
   23.657 deg, K 1.
 
+### Generator (Task 2)
+- Determinism: integer hash only (`surface_hash`, SplitMix64 chain; streams `(stream << 8) | face` for craters,
+  roughness, rocks), no library random numbers, no state; bitwise identical across calls, threads and instances.
+- Cells: cube-face cells with exactly the mapping of `game/world/terrain/cube_sphere.gd` (face, level, i, j = the terrain
+  quadtree key). Cells beyond a face edge are found per face from the point's continued face coordinates, so features
+  are continuous across edges and corners.
+- Craters: one diameter octave (0.01 m, doubling, to 2 km) per cell level, cells >= 3.34 D_max nominal (reach 1.5 D <=
+  0.45 cell; cells are >= 0.7 nominal wide everywhere), 1-5 expected per cell; count Poisson from the hash with the
+  exact cell area (area element at the cell centre), position uniform in the cell, D by the inverse cumulative SFD,
+  fresh / degraded by `degraded_fraction`. Profile: parabolic bowl rim - depth + depth (r/R)^2 inside, rim
+  ((r/R)^-3 - 1/27) / (1 - 1/27) outside to 3R (zero there: the earlier (r/R)^-3 cut at 3R left a step of rim/27);
+  degraded rim scaled with depth (0.0129 D). A crater is generated only where LOLA does not resolve it: D <= 5 x
+  band_start at its centre.
+- Roughness: value noise with quintic fade on one face lattice per octave (spacing 5 mm, doubling, to 2 x the coarsest
+  band start); the number of cells per face edge is a prime, so no lattice line is shared between octaves (no grid
+  pinning) and face-edge nodes coincide on both faces (they hash once, by the lowest face index). Octave amplitude
+  A (local spacing / 0.125 m)^0.78 with the local cell size (sqrt of the area element, 0.84-1 of nominal); A is
+  derived at construction so that the median plane-detrended RMS in 125 mm windows (Guo's statistic, 25 x 25 samples,
+  1536 windows at hashed places) equals `rms_height_at_baseline_m` (3.7 mm). Octaves fade out between band_start / 2
+  and band_start.
+- band_start_m = tile pixel scale x tile_weight + global spacing (1.9 km) x (1 - tile_weight): continuous over the
+  1 km tile blend (20 m in a tile core).
+- Band limit L > 0 (terrain nodes, coarse queries): the mean of the full relief over the L x L square aligned with the
+  local face axes. Craters with D >= L/8: exact square mean (closed-form corner integrals of the profile in polar form;
+  for L < R/16 inside one smooth part the bowl's exact quadratic mean or a second-order Taylor of the flank); smaller
+  craters: their expected mean (-0.2 mm per octave), blended over L/16 - L/8. Roughness octaves with spacing >= L/8:
+  exact square mean (separable fade integrals; nodes beyond a face edge are the nearest nodes of the neighbouring face);
+  finer octaves (zero mean) fade out over L/16 - L/8.
+- Cost (Release, this machine): full-detail query ~7 us, 1 m square mean ~15 us; construction ~0.75 s (the roughness
+  normalisation).
+
 ## Code
+- `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
+- `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
+  `face_cell_of`, `face_cell_point`, `face_cell_neighbourhood` (3 x 3, duplicates at cube corners),
+  `face_cells_within` (all faces), `face_cell_level_for_size` (finest level with cells >= the size),
+  `face_cell_area_m2`, `face_coord_of` / `face_coord_on` / `face_direction` / `face_frame` (metric, local scale).
+- `core/include/starsim/environment/lunar_surface_detail.hpp`, `core/src/environment/lunar_surface_detail.cpp`:
+  `LunarSurfaceDetail(config, lola)` with `relief_m` / `crater_relief_m` / `roughness_relief_m(unit, min_wavelength_m)`,
+  `band_start_m`, `finest_wavelength_m` (0.01 m), `craters_in_cell`, `craters_within`, `crater_profile_m`,
+  `crater_octaves`, `roughness_octaves`, `roughness_scale_m`. It knows nothing about rocks.
+- `LunarTerrain::tile_blend` / `tile_weight` / `global_resolution_m` / `finest_resolution_m` (`lunar.md`).
 - `core/include/starsim/config/moon_surface_config.hpp`, `core/src/config/moon_surface_config.cpp`:
   `config::load_moon_surface_config(file)` -> `MoonSurfaceConfig` (craters, roughness, rocks, hapke);
   `SizeFrequency::cumulative_density_per_m2(D)` (forms `power` | `exponential`, not clipped to [min, max]).
@@ -39,10 +82,31 @@ Measured statistics only so far (`config/moon_surface.toml`); the generator (Tas
   to <= 0.01 m, both cumulative laws strictly decreasing over their ranges, roughness residual <= measured total, the
   abundance reference fraction equals the integral of the rock law within 2 %; a missing key is named in German. The
   loader rejects |c| > 1 and a residual above the total.
-- For Task 2 (open validation item): the summed generated surface (craters + rocks + roughness) must reproduce Guo's
-  statistic, median plane-detrended RMS height in 125 mm windows at 5 mm sampling = 4 mm (`rms_height_measured_total_m`),
-  within a documented tolerance; the residual was derived with assumed crater and rock profiles (see Sources), so it is
-  re-derived if the Task 2/3 profiles differ.
+- `[moon_surface][environment]` (`core/tests/test_lunar_surface_detail.cpp`, synthetic flat LOLA with one 8 km tile at
+  -84.79 deg; all fast, ~10 s together):
+  - face cells: cube_sphere.gd mapping, cell centres map back, edge directions bit-identical, corner neighbourhood
+    reaches three faces, `face_cells_within` covers every point of the radius;
+  - determinism: 10^4 points, full and 1 m queries, 4 threads and a second instance: bitwise equal;
+  - crater counts on the global grid, bins 1-2 ... 32-50 m with 1500 expected each: 1511, 1540, 1483, 1425, 1502,
+    1498 (3 sigma 116); fresh share and d/D per crater; > 100 m within 20 km: 4375 vs 4212 expected;
+  - roughness (Guo's statistic, ruling of 2026-11-04): roughness alone at the site 3.70 mm (configured 3.7, tolerance
+    15 %); windows 0.1 / 1 / 10 m on the global grid 1.016 / 1.000 / 0.977 x the law 3.7 mm (W / 0.125)^0.78
+    (tolerance 15 %); craters + roughness at the site 3.90 mm <= the measured total 4 mm (rocks follow in Task 3);
+  - band limit: |relief(L) - mean of relief(0) over the L x L square (24 x 24 samples)| <= 0.1 x RMS of the removed
+    band at every one of 60 points: L = 10 / 1 / 0.1 m: max 0.028 / 0.032 / 0.033 x (RMS removed 0.16 / 0.025 /
+    0.0033 m);
+  - seams: 1200 pairs 1 mm and 1 um apart across face edges and 480 pairs through the 8 cube corners within the
+    1 mm step bound of the field (1.8 mm per mm; 1 cm: 15.7 mm);
+  - tile blend: band_start 20 m in the core, 1895 m outside, steps within the smoothstep slope; relief steps over 1 cm
+    within the 1 cm bound across the blend;
+  - poles (-90, -89.9999, +90 deg): finite for L = 0, 0.1, 1, 10 m, 1 mm neighbours within the bound;
+  - nothing counted twice: no crater above 5 x 20 m in the tile core (craters 50-100 m exist), every crater
+    D <= 5 x band_start at its centre, a 640 m square mean of the roughness is 0 in the tile core.
+- Roughness stationarity (diagnostic, 3000 windows each, not a test): 3.72 mm at a face centre, 3.76 at an edge
+  midpoint, 3.94 near a cube corner (the skewed lattice there, +6 %), 3.75 at the site; craters + roughness
+  3.88-3.95 mm (4.09 near a corner).
+- Open for Task 3: craters + rocks + roughness against Guo's total 4 mm (the residual makes the sum ~4.0 mm; a
+  tolerance, not "<= 4 mm", fits that check).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -75,12 +139,13 @@ craters and rocks that we also generate down to 0.01 m (336 craters and 57 rocks
 generator therefore draws only the residual. Method: a Monte Carlo patch (8 m x 8 m, 5 mm pixels as in Guo, 4096
 windows of 125 mm) of the configured populations: craters 0.01-4 m from the configured SFD, 70 % degraded (d/D 0.07,
 rim scaled with depth to 0.013 D) / 30 % fresh (d/D 0.13, rim 0.024 D), profile assumed as a parabolic bowl
-(rim-to-floor depth d) with the rim outside falling as h (r/R)^-3 to 3R; rocks 0.01-4 m from the configured SFD as
+(rim-to-floor depth d) with the rim outside falling as h ((r/R)^-3 - 1/27) / (1 - 1/27) to 3R (the generator's
+profile; continuous at 3R); rocks 0.01-4 m from the configured SFD as
 ellipsoids a:b:c = 1:0.71:0.50 (D = long axis), 30 % of the height buried, added on top; plus a spectral fBm with
 H = 0.78. Guo's statistic is the median over windows of the plane-detrended standard deviation, so the residual is
 the fBm amplitude for which the summed surface has a median of 4 mm. Larger features add only curvature in a 125 mm
-window (a fresh 5 m crater: about 0.1 mm) and are left out. Results, seeds 1-8: craters alone median 0.50 mm, rocks
-alone 0.24 mm, craters + rocks 0.73-0.79 mm (mean-square based 2.1-3.6 mm, dominated by the rare large rocks);
+window (a fresh 5 m crater: about 0.1 mm) and are left out. Results, seeds 1-8 (with the continuous rim profile; the earlier (r/R)^-3 cut at 3R gave the
+same residual): craters alone median 0.44-0.48 mm, rocks alone 0.24 mm, craters + rocks 0.73-0.79 mm (mean-square based 2.1-3.6 mm, dominated by the rare large rocks);
 residual 3.72-3.76 mm -> 3.7 mm. Sensitivity: crater density x 0.3 / x 2.3 (0.7 % / 5 % of geometric saturation)
 gives 3.85 / 3.51 mm, rock density x 2 gives 3.64 mm, crater x 2.3 with rock x 2 gives 3.41 mm. Subtracting mean
 variances instead (sqrt(4^2 - c^2 - r^2)) gives 1.8-3.4 mm and is not stable, because the mean square is carried by
@@ -141,5 +206,11 @@ geometry (g near 0) is not observed there. The published global-average table of
 - Units of the Cintala & McBride Table 3 fit (D in m, N per 100 m^2) read from a scanned table; the Diviner-scale
   area check supports metres.
 - Diviner's lower rock-size limit (0.5 m chosen) is not pinned down; it sets the local abundance factor within 1.45x.
-- The roughness residual (3.7 mm) rests on assumed crater/rock profiles; Task 2 validates the summed surface against
-  Guo's 4 mm (see Validation).
+- The roughness residual (3.7 mm) rests on the generator's crater profile (re-derived, unchanged) and an assumed rock
+  profile; Task 3 validates the summed surface against Guo's 4 mm (see Validation).
+- band_start uses the global grid's latitude spacing (1.9 km) everywhere; near the poles LOLA_16's longitude spacing
+  is finer (172 m at -84.8 deg), so outside the tiles there some 0.2-1.9 km detail is both in LOLA_16 and generated.
+- Roughness is ~6 % rougher near the 8 cube corners (skewed face lattice); band-limited square means near face edges
+  take nodes beyond the edge from the nearest node of the neighbouring face (approximate there; full detail exact).
+- Generated craters up to 2 km and roughness up to ~1 km wavelength outside the tiles are statistical, not the real
+  features at those places (LOLA_16 does not resolve them).

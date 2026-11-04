@@ -2,7 +2,8 @@
 
 Synthesises a patch of the generated surface at Guo et al. 2021's DTM resolution (5 mm) and evaluates their statistic:
 RMS height = standard deviation of the plane-detrended elevation in square windows of side 125 mm, median over windows.
-Craters: equilibrium SFD, parabolic bowl (rim-to-floor depth d), rim h, exterior rim falloff h (r/R)^-3.
+Craters: equilibrium SFD, parabolic bowl (rim-to-floor depth d), rim h, exterior rim falloff h ((r/R)^-3 - 1/27) / (1 - 1/27)
+(continuous at 3R, as in core/src/environment/lunar_surface_detail.cpp).
 Rocks: half-ellipsoid caps a:b:c, burial fraction of the full height below the surface, added on top.
 Constants mirror config/moon_surface.toml (keep in sync). Result recorded in docs/subsystems/moon-surface.md
 (Regolith roughness): residual 3.72-3.76 mm over seeds 1-8.
@@ -57,7 +58,7 @@ def craters():
         def f(X, Y, R=R, d=d, h=h):
             r = np.hypot(X, Y)
             inner = h - d + d * (r / R) ** 2
-            outer = h * (np.maximum(r, R) / R) ** -3
+            outer = h * ((np.maximum(r, R) / R) ** -3 - 1.0 / 27.0) / (1.0 - 1.0 / 27.0)
             out = np.where(r < R, inner, outer)
             return np.where(r < ext, out, 0.0)
         stamp(z, cx, cy, ext, f)
