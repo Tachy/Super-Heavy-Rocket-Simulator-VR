@@ -1,12 +1,13 @@
 # Moon procedural near-ground surface
 
 Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 2 (craters and regolith
-roughness in the core; rocks, physics, rendering follow).
+`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 3 (craters, regolith
+roughness and rocks in the core; physics, rendering follow).
 
 ## Model
 Measured statistics in `config/moon_surface.toml`; the generator `environment::LunarSurfaceDetail` (craters +
-roughness, Task 2) draws them as a pure function of the body-fixed direction; rocks (Task 3) follow.
+roughness, Task 2) draws them as a pure function of the body-fixed direction; the rocks (`environment::LunarRocks`, Task 3) stand
+on top of that relief.
 - Small craters: equilibrium population, cumulative N(>D) = 0.0336 D^-2 per m^2 (2.2 % of geometric saturation),
   0.01 m - 2 km; 70 % degraded (d/D 0.07), 30 % fresh (d/D 0.13, rim height 0.024 D).
 - Regolith roughness (what is not a crater or rock): self-affine, RMS height in a window W = 3.7 mm (W / 0.125 m)^0.78
@@ -65,6 +66,30 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; ro
 - Cost (Release, this machine): full-detail query ~7 us, 1 m mean ~19 us; inside the face blend band ~59 us (half
   full detail, half 1 m: 2-3 lattices and the cross means); construction 0.7-1.0 s (the roughness normalisation).
 
+### Rocks (Task 3)
+- Templates (`RockTemplates`): 16 star-shaped radial functions r(dir) = exp(sum of 8 random plane waves, a_k = 0.30 / f_k,
+  f_k 1.5-5 rad) scaled to max r = 1 (sampled on 20000 directions, margin 0.5 %), so a rock's semi-axes a, b, c bound
+  it exactly; meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with vertex dir r(dir), true surface normals.
+  All values [E] (appearance only); everything from the integer hash.
+- Population (`LunarRocks`): one diameter octave (0.01 m, doubling, to 10 m: 10 octaves) per face-cell level, cells >= 4 x
+  D_max nominal; count Poisson (exact cell area x abundance factor at the cell centre x octave density), position uniform
+  in the cell (each rock belongs to exactly one cell: found from both sides of a face edge, no duplicates), D by the
+  inverse cumulative SFD, b/a 0.71 +- 0.15 (clamped 0.3-1), c/a 0.50 +- 0.15 (0.2 - b/a), burial share of the height
+  0.3 +- 0.15 (clamped 0-0.6; `burial_m` = (2 f - 1) c, negative = centre above the ground), template and yaw random, the
+  c axis vertical (rests on its flattest side, [E]), albedo = `albedo_to_regolith`. D = 2 a (bounding long axis).
+  Normal-like draws are the sum of 6 uniforms (no library distributions).
+- Ground: the rock stands on LOLA + `relief_m(base, 0)` at its base point, on the plane tangent there (small rocks on
+  slopes are not tilted; a 10 m rock on a steep slope would be).
+- Rock top: `rock_top(rock, unit)` scans the vertical line through `unit` downward from +c in 48 steps, bisects the
+  first inside point (f = |u| - r(u/|u|)) and returns height above the sphere = base + z_top - burial + d^2 / 2R with the
+  outward normal (template normal through the inverse axis scaling); nullopt where the rock is not above its base height.
+- Abundance: `abundance_scale` x (uniform 1 outside the map). A `RockAbundanceMap` (cylindrical float grid, area
+  fraction, |lat| <= 60 deg) is optional; inside it the factor is map / `abundance_reference_area_fraction` (0.0068),
+  blended smoothstep to 1 over the last 5 deg below the map edge (`abundance_blend_band_rad`, 150 km: no step). The
+  real Diviner product is NOT installed (see Open points); without a map every place gets the uniform law.
+- `cover_fraction(min, max)`: area share of discs (pi/4) D^2, analytic for the power law (0.0311 for 0.01-10 m,
+  0.00678 for 0.5-10 m). `rocks_touching(unit, r, min)` returns rocks with base within r + a (hazard / contact queries).
+
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
@@ -76,6 +101,11 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; ro
   `LunarSurfaceDetail(config, lola)` with `relief_m` / `crater_relief_m` / `roughness_relief_m(unit, min_wavelength_m)`,
   `band_start_m`, `finest_wavelength_m` (0.01 m), `craters_in_cell`, `craters_within`, `crater_profile_m`,
   `crater_octaves`, `roughness_octaves`, `roughness_scale_m`. It knows nothing about rocks.
+- `core/include/starsim/environment/rock_templates.hpp`, `core/src/environment/rock_templates.cpp`: `RockTemplates`
+  (`radius`, `normal`, `mesh(id, lod)`, 16 templates x 4 LODs), `TemplateMesh`.
+- `core/include/starsim/environment/lunar_rocks.hpp`, `core/src/environment/lunar_rocks.cpp`: `LunarRocks(detail, map)`:
+  `rocks_in_cell`, `rocks_near`, `rocks_touching`, `rock_top`, `cover_fraction`, `abundance_factor`, `octaves`; `Rock`,
+  `RockAbundanceMap`. `core/src/environment/surface_sampling.hpp`: Poisson / inverse SFD shared with the craters.
 - `LunarTerrain::tile_blend` / `tile_weight` / `global_resolution_m` / `finest_resolution_m` (`lunar.md`).
 - `core/include/starsim/config/moon_surface_config.hpp`, `core/src/config/moon_surface_config.cpp`:
   `config::load_moon_surface_config(file)` -> `MoonSurfaceConfig` (craters, roughness, rocks, hapke);
@@ -104,7 +134,7 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; ro
     1498 (3 sigma 116); fresh share and d/D per crater; > 100 m within 20 km: 4375 vs 4212 expected;
   - roughness (Guo's statistic, ruling of 2026-11-04): roughness alone at the site 3.70 mm (configured 3.7, tolerance
     15 %); windows 0.1 / 1 / 10 m on the global grid 1.016 / 1.000 / 0.977 x the law 3.7 mm (W / 0.125)^0.78
-    (tolerance 15 %); craters + roughness at the site 3.90 mm <= the measured total 4 mm (rocks follow in Task 3);
+    (tolerance 15 %); craters + roughness at the site 3.90 mm <= the measured total 4 mm (rocks: see below);
   - band limit: |relief(L) - mean of relief(0) over the footprint (24 x 24 samples per face parallelogram, blend
     weighted)| <= 0.1 x RMS of the removed band at every one of 60 points, L = 10 / 1 / 0.1 m: site max 0.028 / 0.032
     / 0.032 x (RMS removed 0.16 / 0.025 / 0.0033 m); face corner region outside the blend (s, t ~ +-0.9-0.98) 0.022 /
@@ -126,8 +156,23 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; ro
 - Roughness stationarity (diagnostic, 3000 windows each, not a test): 3.72 mm at a face centre, 3.76 at an edge
   midpoint, 3.94 near a cube corner (the skewed lattice there, +6 %), 3.75 at the site; craters + roughness
   3.88-3.95 mm (4.09 near a corner).
-- Open for Task 3: craters + rocks + roughness against Guo's total 4 mm (the residual makes the sum ~4.0 mm; a
-  tolerance, not "<= 4 mm", fits that check).
+- `[moon_surface][environment]` (`core/tests/test_lunar_rocks.cpp`, Task 3):
+  - counts per bin on the global grid (1500 expected each, 3 sigma 116): 0.01-0.02 m 1515, 0.03-0.07 1511, 0.1-0.2 1432,
+    0.3-0.6 1517, 1-2 1515, 3-6 1455, 6-10 1554; with a synthetic map (3 x reference) 3 x the uniform counts on the map,
+    1 x outside; the factor is monotone and steps < 0.4 % of the jump per 0.01 deg across the blend band;
+  - ownership: 82 3 x 3 blocks (2 cube corners, 80 cells along a face edge): no duplicate id, every rock's cell is the
+    cell that lists it, and the rocks found by position equal the union of the block's cells;
+  - tops: every top of the > 100 rocks of a 200 m disc (40 sample points each) lies above base height and below base - burial + c + d^2/2R,
+    unit normals facing up; templates: r > 0.2 and <= 1 (max > 0.97) on 10^4 directions, every mesh at every LOD closed
+    and oriented (each directed edge once with its reverse, V - E + F = 2, every triangle faces outward), LOD 0 vertices
+    within 1 % of r, unit outward normals; determinism on 4 threads (own and shared instance), also at -90 deg;
+  - cover fraction: formula 0.0311 / 0.00678; a 30 m patch of 0.02-0.5 m rocks 0.01814 vs formula 0.01781 (+1.8 %, 5 %);
+  - `[slow]` summed roughness (median plane-detrended 125 mm window std, 600 windows over 2 km, rock tops entered as
+    max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 3.927 mm vs the measured total 4.000 mm
+    (-1.8 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.130 mm (+3.3 %). The corner excess of the skewed
+    lattice is unchanged after the face blend (4.090 vs 3.845 at the site = +6.4 %) and stays inside 10 % of the total, so
+    the amplitude is not touched. The rock tops add only 0.08 mm to the median (rare rocks dominate the mean square,
+    not the median).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -216,8 +261,10 @@ geometry (g near 0) is not observed there. The published global-average table of
 (paywalled).
 
 ## Open points
-- Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies. Download
-  and the fallback are Task 3.
+- Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies (done). The
+  map itself is not downloaded and no loader exists: `LunarRocks` takes a `RockAbundanceMap` built by the caller; the
+  PDS GDR product's exact file layout was not examined, `tools/data_pipeline/fetch.py` has no Diviner entry. Until then
+  every place has the uniform law (the map path is tested with synthetic maps only).
 - Burial, rock albedo ratio and degraded d/D are estimates; no direct lunar measurements found.
 - One Hurst exponent for cm to tens of m although the measured breakover is 1-2 m (H 0.78 below, ~0.9 above).
 - Units of Shoemaker & Morris' 10^10.9 not confirmed from the original paper (used only as a comparison).

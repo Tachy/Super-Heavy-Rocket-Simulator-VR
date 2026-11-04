@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "starsim/environment/surface_hash.hpp"
+#include "surface_sampling.hpp"
 #include "starsim/math/constants.hpp"
 
 namespace starsim::environment {
@@ -67,17 +68,7 @@ double basis_integral(std::int64_t j, double a, double b) {
     return sum;
 }
 
-int poisson(double u, double lambda) {
-    double p = std::exp(-lambda), cdf = p;
-    int n = 0;
-    while (u > cdf) {
-        ++n;
-        p *= lambda / n;
-        if (p <= cdf * 1e-17) break;  // no further mass (u within rounding of 1)
-        cdf += p;
-    }
-    return n;
-}
+using sampling::poisson;
 
 // Miller-Rabin, deterministic for n < 2^32 with bases 2, 7, 61 (Jaeschke 1993).
 bool is_prime(std::uint64_t n) {
@@ -120,12 +111,7 @@ std::uint64_t next_prime(std::uint64_t n) {
     return n;
 }
 
-double inverse_cumulative(const config::SizeFrequency& sfd, double cumulative_per_m2) {
-    if (sfd.form == "power") {
-        return sfd.reference_diameter_m * std::pow(cumulative_per_m2 / sfd.density_per_m2, -1.0 / sfd.exponent);
-    }
-    return -std::log(cumulative_per_m2 / sfd.density_per_m2) / sfd.exponent;  // "exponential"
-}
+using sampling::inverse_cumulative;
 
 // Exact area integral of a crater over the rectangle [0, X] x [0, Y] (crater-centred, units of the crater radius,
 // X, Y > 0). In polar coordinates the rectangle is rho < min(X sec theta, Y csc theta), so with the radial integral
