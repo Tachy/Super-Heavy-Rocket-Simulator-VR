@@ -84,6 +84,39 @@ struct ScvxLandingCommand {
 double landing_throttle(const vehicle::Vehicle& vehicle, const std::vector<std::string>& run_groups, double thrust_n,
                         double pressure_pa);
 
+// A first plan in real-time play (Task 11b fix round 1) is planned from the state predicted at a hand-over epoch ahead
+// of its snapshot: the vehicle flies a known hold until then (the ship its flip thrust along the axis, the booster its
+// unpowered fall, the HLS its braking thrust), the plan takes effect at the hand-over, and a plan that is not there by
+// then is waited for (the synchronous solve). So the sim time between snapshot and plan is the hold, never more.
+struct FirstPlanHold {
+    double duration_s = 0.0;                  // snapshot -> hand-over (0: the plan takes effect at its snapshot)
+    std::optional<math::Vec3> thrust_body_n;  // the held thrust, body axes; none: the snapshot's thrust along the body axis
+    bool engines_running = true;              // false: no engine burns in the hold (no mass flow)
+    // The held thrust comes down from its start at the start set's throttle rate to its minimum (the ship commands its
+    // flip engines to minimum throttle: the flip thrust held for seconds would turn the sink into a climb).
+    bool throttle_down = false;
+};
+
+// The hold's length from the measured first-plan wall times (process-wide, per vehicle kind: the solves differ by an
+// order of magnitude): margin x the latest measured wall time, at least the plan latency, at most first_plan_hold_max_s.
+// Before a first measurement the kind's measured reference (Task 3 / 11b).
+enum class FirstPlanKind { Booster, Ship, Lunar };
+double first_plan_hold_s(FirstPlanKind kind);
+void record_first_plan_wall_s(FirstPlanKind kind, double wall_s);
+// [E] Bound of the hold. Past it the sim waits for the plan (as the synchronous first plan always did): the gap between
+// the snapshot and the plan's start stays the predicted hold. 3 s of the ship's flip thrust (3 engines at 0.8) is about
+// the flip's own settling time; the booster's unpowered fall over 3 s is the timing error the ignition criterion already
+// tolerates (~1 s over 120 s, booster_return.cpp forecast_landing) times three.
+constexpr double first_plan_hold_max_s = 3.0;
+constexpr double first_plan_hold_margin = 1.3;  // [E] over the latest measured wall time
+
+// The state after `hold` from x under the held thrust (planning model; attitude and body rate held - the attitude
+// controller keeps them).
+DescentState predict_hold(const DescentModel& model, const DescentState& x, const math::Vec3& thrust_body_n,
+                          bool engines_running, double duration_s, bool throttle_down = false);
+// The held thrust's magnitude after `t_s` (throttle_down: at the start set's throttle rate down to its minimum).
+double hold_thrust_n(const DescentModel& model, double thrust_n, bool throttle_down, double t_s);
+
 // Landing burn on SCvx plans: the first plan synchronously at ignition, re-plans every replan_interval_s from a
 // snapshot (worker thread, effective at snapshot + latency), tracking of the active plan (thrust acceleration with a
 // position/velocity correction, attitude with feed-forward, pins rolled across the arms), engine switch at the
@@ -96,12 +129,17 @@ public:
     // First plan; false if it failed (the caller falls back to other guidance). Synchronous: begin + poll.
     bool start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     // The first plan in parts (Task 11b): begin takes the snapshot at `epoch` and plans - on the replanner's worker with
-    // `background` (real-time play: the vehicle flies on meanwhile), else at once; poll gives the outcome once it is
-    // decided (the refused catch's abort plan and the abort without the water are planned in turn, from the same
-    // snapshot): true - the plan takes effect at `epoch` (as start's), false - it failed. Same requests either way, so
-    // the same plans; update() only after poll returned true.
-    void begin(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch, bool background);
+    // `background` (real-time play: the vehicle flies the hold meanwhile), else at once; poll gives the outcome at the
+    // hand-over (epoch + hold.duration_s; the refused catch's abort plan and the abort without the water are planned
+    // in turn, from the same predicted state): true - the plan takes effect at the hand-over, false - it failed. At
+    // the hand-over poll waits for a plan still under way. Same requests either way, so the same plans; update() only
+    // after poll returned true.
+    void begin(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch, bool background,
+               const FirstPlanHold& hold = {});
     std::optional<bool> poll(time::Epoch now);
+    bool first_plan_pending() const { return first_snapshot_.has_value() || first_decided_.has_value(); }
+    time::Epoch handover_epoch() const { return first_handover_; }
+    double first_plan_wall_s() const { return first_wall_s_; }  // begin -> decided (diagnostics, the hold's budget)
     ScvxLandingCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     bool aborting() const { return aborting_; }
@@ -162,10 +200,16 @@ private:
     // made at once, and its wall-clock start (diagnostics).
     std::optional<DescentSnapshot> first_snapshot_;
     time::Epoch first_epoch_;
+    time::Epoch first_handover_;  // the first plan takes effect here (first_epoch_ + the hold)
+    FirstPlanHold first_hold_;
+    std::optional<DescentState> first_initial_;  // the first plan's start: the snapshot state flown through the hold
     int first_stage_ = 0;
     bool first_background_ = false;
     std::optional<PlanOutcome> first_outcome_;
+    std::optional<bool> first_decided_;  // decided before the hand-over: given at it
     std::chrono::steady_clock::time_point first_wall_start_;
+    double first_wall_s_ = 0.0;
+    double first_begin_ms_ = 0.0;  // the snapshot, the hold's prediction and the submission (sim thread)
     DescentModel model_;  // of the latest snapshot (gravity after the plan's end)
     time::Epoch next_request_;
     int engine_set_ = 0;  // phase whose engine set runs (only ever increases)

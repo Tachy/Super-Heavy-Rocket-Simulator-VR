@@ -113,6 +113,25 @@ private:
     void launch(FlightSession& s);
     void watch_flight(FlightSession& s);
     void fly_first_return(const FlightSession& s);
+    // The first tanker's return in a side session (decision 3), self-contained on its inputs: on a worker in real-time
+    // play (fix round 1, I3) with the worker environment's sources, else at once with the campaign's.
+    struct FirstReturnInputs {
+        bool ignition_settling = false;
+        LaunchSite site;
+        vehicle::RigidBodyState state;
+        time::Epoch epoch;
+        gnc::DeorbitParameters deorbit;
+    };
+    struct FirstReturn {
+        ReturnResult result = ReturnResult::Flying;
+        double main_kg = 0.0;
+        std::string note;
+    };
+    static FirstReturn fly_side_return(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
+                                       const frames::BodyOrientation& moon, const std::filesystem::path& config_dir,
+                                       const FirstReturnInputs& inputs, std::unique_ptr<vehicle::Vehicle> tanker);
+    void store_first_return(const FirstReturn& r);
+    void collect_first_return(bool wait);  // a side flight from the worker, if there (wait: until it is)
     void finish(FlightSession& s);
     void end(const std::string& reason);
     void book_attitude_gas(FlightSession& s, double dt_s);
@@ -137,6 +156,7 @@ private:
     double depot_height_m_ = 0.0;             // at the latest plan
     std::optional<time::Epoch> next_arrival_;  // the latest plan's Waypoint 0 of the next flight
     bool placed_fill_set_ = false;
+    gnc::BackgroundTask<FirstReturn> first_return_task_;  // last: destroyed first (waits for a running side flight)
 };
 
 // start_mission's refuelling_campaign_flown: the depot launched (depot_launch) or placed, the driver installed. Needs

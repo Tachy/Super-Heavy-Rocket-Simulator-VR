@@ -86,6 +86,7 @@ void FlightSession::mark_rendezvous_at_waypoint0_for_test() {
 void FlightSession::iss_enter(IssMissionLeg leg, std::string status) {
     iss_leg_ = leg;
     iss_status_ = std::move(status);
+    if (leg == IssMissionLeg::Departure) iss_return_requested_ = false;
     if (bodies_.empty() || controlled_ >= bodies_.size()) return;
     const auto& v = bodies_[controlled_].body->vehicle();
     MissionMark mark{leg, epoch_, v.mass_properties().mass_kg, v.main_propellant_kg(), v.rcs_supply_kg(), 0.0};
@@ -100,7 +101,12 @@ void FlightSession::iss_start_transfer() {
     std::optional<TransferRequest> request;
     std::string reason;
     if (*q.transfer == MissionTransfer::TankerReserve) {
-        request = tanker_transfer_request(&reason);
+        // real-time play (fix round 1, I3): the reserve's two return plans and the boil-off flight on a worker while the
+        // pair stays docked; else at once
+        const auto reserve = realtime_planning_ || tanker_reserve_task_.busy() ? poll_tanker_reserve(&reason)
+                                                                               : tanker_reserve(&reason);
+        if (!reserve && reason.empty()) return;  // still planning: the Docked leg asks again next tick
+        if (reserve) request = tanker_transfer_request(*reserve);
     } else {  // the chaser's main tanks up to full; the station down to empty
         TransferRequest r;
         r.direction = TransferDirection::StationToChaser;
@@ -321,8 +327,20 @@ void FlightSession::run_iss_mission() {
                 return;
             }
             if (q.ship_return) {
-                release_tower();  // the booster has been lifted off since the launch (no-op without one)
-                if (plan_ship_return(*q.ship_return)) {
+                if (!iss_return_requested_) {
+                    release_tower();  // the booster has been lifted off since the launch (no-op without one)
+                    // real-time play (fix round 1, I3): planned on a worker while the ship drifts on; else at once
+                    begin_ship_return(*q.ship_return, realtime_planning_);
+                    iss_return_requested_ = true;
+                }
+                // the latest request's outcome (the pilot's key R may have replaced this one: its plan is flown)
+                const auto outcome = ship_return_outcome();
+                if (!outcome) {
+                    iss_status_ = "Abflug: Rückkehr wird geplant";
+                    return;
+                }
+                iss_return_requested_ = false;
+                if (*outcome) {
                     iss_enter(IssMissionLeg::Return, "Rückkehr geplant");
                 } else {
                     iss_end(ship_return_plan() ? ship_return_plan()->reason : std::string("Rückkehr nicht möglich"));

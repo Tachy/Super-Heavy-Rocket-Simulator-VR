@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include "starsim/config/drone_ship_config.hpp"
@@ -499,8 +501,29 @@ public:
     // snapshot (same plan). Without `background`, or refused at once: the outcome now. A new begin drops a pending one.
     std::optional<bool> begin_ship_return(bool background);
     std::optional<bool> begin_ship_return(const gnc::DeorbitParameters& parameters, bool background);
+    // The latest request's outcome once decided (none while it plans). The session polls a background plan itself each
+    // step; it is waited for once ship_return_budget_s of sim time has passed since its snapshot (time warp, an
+    // unpaced test). A plan whose burn came closer than its preparation meanwhile is never armed: planned again from
+    // the state now (ship_return_resubmits).
     std::optional<bool> poll_ship_return(bool wait);
     bool ship_return_pending() const { return ship_return_task_.busy(); }
+    bool ship_return_ready() const { return ship_return_task_.ready(); }  // its worker is done, the session has not polled
+    // Each begin_ship_return is a request (increasing id): a later one replaces a pending one (key R's poll then reports
+    // it cancelled, fix round 1 I4).
+    std::uint64_t ship_return_request() const { return ship_return_request_; }
+    // Request `id`'s outcome (polls it): none while it plans; false with the German *cancelled once a later request
+    // replaced it.
+    std::optional<bool> ship_return_request_outcome(std::uint64_t id, std::string* cancelled);
+    std::optional<bool> ship_return_outcome() const { return ship_return_outcome_; }
+    int ship_return_resubmits() const { return ship_return_resubmits_; }
+    int deorbit_replans_dropped() const { return deorbit_replans_dropped_; }  // background re-plans that came too late
+    // [E] Sim time after which a background return plan (key R, a mission leg, the tanker reserve, a far re-plan) is
+    // waited for: the slowest measured with margin (the tanker reserve 36.6-38.2 s; a return plan 8.4-9.3 s,
+    // ship-entry-return.md); at warp 1 it is not reached.
+    static constexpr double ship_return_budget_s = 60.0;
+    void set_ship_return_budget_s(double s) { ship_return_budget_s_ = s; }  // tests: a longer wait than at warp 1
+    // Tests: the session's own polls of a background return plan skip (a result that arrives late, after a warp).
+    void hold_ship_return_polls_for_test(bool hold) { hold_ship_return_polls_ = hold; }
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
     // Far deorbit re-plans (replan_ship_deorbit): applied so far, and one working on a background thread (real-time play).
     int deorbit_replans() const { return deorbit_replans_; }
@@ -701,7 +724,7 @@ public:
     // abort (not returning, no sea at the site, already down or on the arms): then nothing changes.
     // Lunar l4: the controlled body in step PoweredDescent aborts to orbit (step AbortAscent) when the propellant
     // suffices (LunarAscentGuidance::abort_delta_v_mps against the rocket equation, reserve as the landing setup's),
-    // else false with "Abbruch nicht möglich: ..." and the landing continues.
+    // else false with "Abbruch nicht mÃ¶glich: ..." and the landing continues.
     bool abort_landing(size_t body_index);
     // Attitude mode of the controlled body while no autopilot phase steers it (state Off / Orbit; d2). Any mode but Free
     // keeps the session ticking (pulsed RCS hold); Free lets it coast. Pilot input is ignored while a mode is held.
@@ -948,7 +971,7 @@ public:
     // thrust, an impulse every request.step_s, gas from its main tanks). Masses and CGs follow (set_tank_mass), both
     // ships keep boiling off. False with a German transfer_state().status when refused: not docked, the autopilot
     // active, no coupled connectors or no transfer pressures on either ship, nothing to move; a second start while one
-    // runs is refused in docking_status() ("Transfer läuft bereits") and keeps the running state. Undocking is refused
+    // runs is refused in docking_status() ("Transfer lÃ¤uft bereits") and keeps the running state. Undocking is refused
     // while a transfer runs.
     bool start_transfer(const TransferRequest& request);
     void stop_transfer();
@@ -1258,7 +1281,9 @@ private:
     std::optional<LaunchSite> landing_zone_;
     std::optional<config::SplashdownZoneConfig> splashdown_zone_;
     bool towers_enabled_ = true;
-    bool realtime_planning_ = false;
+    // Off unless set; STARSIM_REALTIME_PLANNING (diagnostics) starts every session in real-time planning - measurements
+    // of the background paths in the test scenarios (not paced: the waits at the hand-overs show the worker times).
+    bool realtime_planning_ = std::getenv("STARSIM_REALTIME_PLANNING") != nullptr;
     std::unique_ptr<CatchTowerSim> tower_;
     std::unique_ptr<LegLandingSim> legs_;  // always present (site ground plane by default)
     std::optional<environment::SeaState> sea_state_;  // set_sea_state
@@ -1336,8 +1361,11 @@ private:
         double propellant_kg = 0.0;
         double landing_propellant_kg = 0.0;
         std::shared_ptr<const vehicle::FlightBody> copy;  // the ship as it is (the boil-off flight ahead)
+        std::shared_ptr<const gnc::AlphaSchedule> schedule;  // the onboard guidance's (set_inputs_body)
         std::uint64_t generation = 0;
     };
+    // The body-dependent inputs (onboard guidance, its reach check, mass, propellant, copy) from `body`.
+    static void set_inputs_body(DeorbitReplanInputs& inputs, const vehicle::FlightBody& body);
     struct DeorbitReplanResult {
         DeorbitReplanInputs inputs;
         gnc::DeorbitPlan plan;
@@ -1368,6 +1396,24 @@ private:
     std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
                                                   const MainPropellant& at_burn) const;
     std::uint64_t deorbit_generation_ = 0;  // a new ship return plan: background re-plans of the old one are dropped
+    // Background ship return plans (fix round 1): the request's id and outcome, its parameters (re-submitted when its
+    // burn came too close meanwhile), the sim epoch from which it is waited for, its wall start (diagnostics).
+    std::optional<bool> submit_ship_return(const gnc::DeorbitParameters& parameters, bool background);
+    // The burn of `node` on `groups` still lies beyond its preparation (burn_lead_s) from now.
+    bool burn_still_ahead(const gnc::BurnNode& node, const std::vector<std::string>& groups) const;
+    std::uint64_t ship_return_request_ = 0;
+    std::optional<bool> ship_return_outcome_;
+    std::function<void(bool)> ship_return_then_;  // the request's continuation (a mission leg), run with its outcome
+    gnc::DeorbitParameters ship_return_parameters_;
+    time::Epoch ship_return_deadline_;
+    double ship_return_budget_s_ = ship_return_budget_s;
+    bool hold_ship_return_polls_ = false;
+    std::chrono::steady_clock::time_point ship_return_wall_start_;
+    double ship_return_begin_ms_ = 0.0;  // diagnostics: the background request's sim-thread part
+    int ship_return_resubmits_ = 0;
+    time::Epoch deorbit_replan_deadline_;
+    int deorbit_replans_dropped_ = 0;
+    bool iss_return_requested_ = false;  // the ISS departure leg's return request is under way
     time::Epoch entry_start_;                       // state Return: entry guidance from here
     CapsuleReturnStep capsule_return_step_ = CapsuleReturnStep::None;
     time::Epoch capsule_step_epoch_;                // the next timed step (trunk jettison, nose cone)
@@ -1541,8 +1587,30 @@ private:
     // main propellant; nullopt with a German *reason without them.
     std::optional<mission::TankerReserveParameters> return_reserve_parameters(double delta_v_mps,
                                                                               std::string* reason) const;
-    // A copy of the controlled ship alone in its state, its main tanks holding `reserve` (in proportion to capacity).
-    std::unique_ptr<vehicle::FlightBody> holding(const mission::TankerReserve& reserve) const;
+    // A copy of the ship `body` alone in its state, its main tanks holding `reserve` (in proportion to capacity).
+    static std::unique_ptr<vehicle::FlightBody> holding(const vehicle::FlightBody& body, const mission::TankerReserve& reserve);
+    // tanker_reserve in parts (fix round 1, I3): the inputs on the sim thread, the two return plans and the boil-off
+    // flight on their own (a worker in real-time play: poll_tanker_reserve), the wait from the session's epoch.
+    struct TankerReserveInputs {
+        DeorbitReplanInputs full;  // the docked ship's return (its copy is the ship the reserve copies come from)
+        mission::TankerReserveParameters parameters;  // without the delta-v (the plans give it)
+        double dry_with_headers_kg = 0.0;
+    };
+    struct TankerReserveResult {
+        std::optional<mission::TankerReserve> reserve;
+        std::string reason;  // German, without a reserve
+        time::Epoch node_epoch;
+    };
+    std::optional<TankerReserveInputs> tanker_reserve_inputs(std::string* reason) const;
+    static TankerReserveResult compute_tanker_reserve(const TankerReserveInputs& inputs, const environment::GravityModel& gravity,
+                                                      const frames::BodyOrientation& earth, const vehicle::FlightEnvironment& env);
+    std::optional<mission::TankerReserve> finish_tanker_reserve(const TankerReserveResult& result, std::string* reason) const;
+    // Real-time play: starts the reserve on a worker, then gives it once there (waited for tanker_reserve_deadline_ on);
+    // none with an empty *reason while it plans, none with the German *reason when refused.
+    std::optional<mission::TankerReserve> poll_tanker_reserve(std::string* reason);
+    static TransferRequest tanker_transfer_request(const mission::TankerReserve& reserve);
+    time::Epoch tanker_reserve_deadline_;
+    std::chrono::steady_clock::time_point tanker_reserve_wall_start_;  // diagnostics
     // The deorbit settings of the controlled ship's return: the running mission's ship return, else the vehicle's
     // [stage.recovery] return_mission; nullopt with a German *reason without either.
     std::optional<gnc::DeorbitParameters> ship_return_settings(std::string* reason) const;
@@ -1680,6 +1748,7 @@ private:
     // Last members: destroyed first (each waits for its running plan; they hold their own copies and worker environments).
     gnc::BackgroundTask<DeorbitReplanResult> deorbit_replan_task_;
     gnc::BackgroundTask<DeorbitReplanResult> ship_return_task_;  // begin_ship_return in the background
+    gnc::BackgroundTask<TankerReserveResult> tanker_reserve_task_;  // poll_tanker_reserve
 };
 
 }  // namespace starsim::sim

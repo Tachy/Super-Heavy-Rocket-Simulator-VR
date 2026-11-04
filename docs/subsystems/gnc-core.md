@@ -61,6 +61,16 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   body torque); `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay
   open). Re-plans may draw on half the propellant reserve at a penalty, aborts on all of it (not the ship); a converged
   plan that tilts the final set > 3 deg beyond its soft limit counts as unreachable where there is a sea.
+  First plans in real-time play (planner plan Task 11b fix round 1, `gnc::FirstPlanHold`): planned on the worker from
+  the state a known hold leads to (`predict_hold`, planning model, attitude held) and in effect at the hand-over
+  `hold` later; a plan not there by then is waited for. Hold = 1.3 x the latest measured first-plan wall time of the
+  kind (booster / ship / HLS; references 0.95 / 1.87 / 1.0 s), at least the plan latency, at most 3 s
+  (`first_plan_hold_max_s`). The holds: the ship its flip engines coming down to minimum throttle at the set's
+  throttle rate (`throttle_down`; the flip's 0.8 held 2.4 s turned the sink into a climb, all three attempts failed);
+  the booster its unpowered fall, begun when the guidance's own ignition on the predicted fall (else the stop
+  height's trend over >= 1 s: tick to tick it jitters by ~16 m, a 5 ms trend began it at 7.6 km) lies within the hold,
+  lit at the hand-over (its start-up counts from there); the HLS its braking thrust, begun the hold before the
+  approach t_go. Off (tests, warp): synchronous, unchanged.
 - SCvx landing aborts (all vehicles; the pilot's `abort_landing` too): a first plan that finds the target unreachable
   aborts at once; `failures_before_abort` (2) re-plans with a virtual control above the stall threshold, or
   `unconverged_before_abort` (4) unconverged re-plans of any kind, give the target up and plan for the sea.

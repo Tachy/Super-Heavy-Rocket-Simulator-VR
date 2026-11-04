@@ -1,6 +1,8 @@
 #include "starsim/gnc/scvx_landing.hpp"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -66,6 +68,12 @@ DescentState predict_on_plan(const DescentModel& model, const DescentPlan& plan,
     return x;
 }
 
+// The latest measured first-plan wall time per kind (seconds; 0: none yet).
+std::array<std::atomic<double>, 3>& measured_first_plan_s() {
+    static std::array<std::atomic<double>, 3> measured{};
+    return measured;
+}
+
 // Diagnostics (STARSIM_DEBUG_PLAN_PATH): one line per plan, then its nodes in the plan frame.
 void print_plan_path(const DescentPlan& plan, double since_first_s, double solve_ms) {
     if (!std::getenv("STARSIM_DEBUG_PLAN_PATH")) return;
@@ -81,6 +89,52 @@ void print_plan_path(const DescentPlan& plan, double since_first_s, double solve
 }
 
 }  // namespace
+
+double first_plan_hold_s(FirstPlanKind kind) {
+    // [M] references before a first measurement: the booster's synchronous first plans 0.25-0.95 s (Task 3), the
+    // ship's first plan on the worker 1.87 s (Task 11b, Mach 2.6 paced), the HLS approach plan 1.0 s (fix round 1).
+    constexpr std::array<double, 3> reference_s{0.95, 1.87, 1.0};
+    const auto k = static_cast<size_t>(kind);
+    const double measured = measured_first_plan_s()[k].load();
+    const double wall = measured > 0.0 ? measured : reference_s[k];
+    return std::clamp(first_plan_hold_margin * wall, ScvxLandingParameters{}.plan_latency_s, first_plan_hold_max_s);
+}
+
+void record_first_plan_wall_s(FirstPlanKind kind, double wall_s) {
+    if (wall_s > 0.0) measured_first_plan_s()[static_cast<size_t>(kind)].store(wall_s);
+}
+
+double hold_thrust_n(const DescentModel& model, double thrust_n, bool throttle_down, double t_s) {
+    const auto& set = model.engine_sets[0];
+    if (!throttle_down || !(set.throttle_rate_per_s > 0.0)) return thrust_n;
+    return std::max(thrust_n - set.throttle_rate_per_s * set.thrust_max_n * t_s, std::min(set.thrust_min_n, thrust_n));
+}
+
+DescentState predict_hold(const DescentModel& model, const DescentState& x0, const Vec3& thrust_body_n,
+                          bool engines_running, double duration_s, bool throttle_down) {
+    if (!(duration_s > 0.0)) return x0;
+    const double u0 = norm(thrust_body_n);
+    const auto f = [&](const DescentState& y, double t) {
+        Vec3 u;
+        if (engines_running && u0 > 0.0) u = thrust_body_n * (hold_thrust_n(model, u0, throttle_down, t) / u0);
+        auto d = model.derivative(y, u, 0);
+        if (!engines_running) d[descent_index::mass] = 0.0;  // the model's flow has a pressure term that burns at zero thrust
+        for (int i = descent_index::attitude; i < descent_index::rate + 3; ++i) d[i] = 0.0;  // held by the controller
+        return d;
+    };
+    const int steps = std::max(1, static_cast<int>(std::ceil(duration_s / prediction_step_s)));
+    const double h = duration_s / steps;
+    DescentState x = x0;
+    for (int i = 0; i < steps; ++i) {
+        const double t = i * h;
+        const auto k1 = f(x, t);
+        const auto k2 = f(x + k1 * (0.5 * h), t + 0.5 * h);
+        const auto k3 = f(x + k2 * (0.5 * h), t + 0.5 * h);
+        const auto k4 = f(x + k3 * h, t + h);
+        x = x + (k1 + k2 * 2.0 + k3 * 2.0 + k4) * (h / 6.0);
+    }
+    return x;
+}
 
 double landing_throttle(const vehicle::Vehicle& v, const std::vector<std::string>& run_groups, double thrust_n,
                         double pressure_pa) {
@@ -122,9 +176,16 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     const auto& groups = parameters_.snapshot.phase_groups;
     const bool drops = std::any_of(groups[0].begin(), groups[0].end(),
                                    [&](const std::string& g) { return !contains(groups[1], g); });
+    // A first plan after a hold (real-time play): it starts at the hand-over, from the state the hold leads to.
+    const double hold_s = !plan_ && first_initial_ ? first_hold_.duration_s : 0.0;
+    if (hold_s > 0.0) {
+        r.initial = *first_initial_;
+        r.start_offset_s = hold_s;
+    }
     if (start_phase == 0 && drops && !aborting_) {
         // counted from the plan's start (a re-plan starts the latency after the snapshot)
-        const double offset_s = plan_ ? parameters_.plan_latency_s : 0.0;
+        // (a hold with the engines off: their start-up begins at the hand-over, the plan's start)
+        const double offset_s = plan_ ? parameters_.plan_latency_s : first_hold_.engines_running ? hold_s : 0.0;
         r.settings.limits.phase0_min_s =
             std::max((1.0 - std::min(snapshot.phase0_spool, 1.0)) * snapshot.startup_s - offset_s, 0.0);
     }
@@ -142,7 +203,9 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     // 0.5 / s (~19 m/s^2 flown on 212 t): ~9 m/s of sink braked off unplanned, the catch ~3 s later than planned.
     const bool running = !plan_ && snapshot.thrust_n > 0.0 && snapshot.phase0_spool >= 1.0;
     if (plan_ || running) {
-        r.settings.limits.initial_thrust_n = snapshot.thrust_n;
+        // after a hold: the thrust it ends on (the hold's own throttle-down)
+        r.settings.limits.initial_thrust_n =
+            hold_s > 0.0 ? hold_thrust_n(snapshot.model, snapshot.thrust_n, first_hold_.throttle_down, hold_s) : snapshot.thrust_n;
         r.settings.limits.initial_thrust_window_s = plan_ ? parameters_.plan_latency_s : 0.0;
     }
     if (aborting_) r.settings.limits.min_phase_s = {};  // mid-flight: no forced phase durations
@@ -260,43 +323,79 @@ bool ScvxLandingGuidance::request_abort() {
 
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
     begin(body, env, epoch, false);
-    return *poll(epoch);  // planned at once: decided
+    const bool started = *poll(epoch);  // planned at once: decided
+    if (std::getenv("STARSIM_DEBUG_REALTIME")) {  // diagnostics: the sim thread's hold
+        std::printf("[realtime] first plan at once: %.0f ms on the sim thread\n", 1000.0 * first_wall_s_);
+    }
+    return started;
 }
 
 void ScvxLandingGuidance::begin(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
-                                bool background) {
-    if (first_snapshot_ || replanner_.busy()) throw std::logic_error("ScvxLandingGuidance::begin while a first plan is under way");
+                                bool background, const FirstPlanHold& hold) {
+    if (first_plan_pending() || replanner_.busy()) {
+        throw std::logic_error("ScvxLandingGuidance::begin while a first plan is under way");
+    }
     first_wall_start_ = std::chrono::steady_clock::now();  // diagnostics: the first plan's wall time
     first_snapshot_ = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
     model_ = first_snapshot_->model;
     first_epoch_ = epoch;
+    first_hold_ = hold;
+    first_handover_ = epoch + std::max(hold.duration_s, 0.0);
+    first_initial_.reset();
+    if (hold.duration_s > 0.0) {
+        const auto& s = *first_snapshot_;
+        const Vec3 thrust = hold.thrust_body_n.value_or(Vec3{s.thrust_n, 0.0, 0.0});
+        first_initial_ =
+            predict_hold(s.model, s.initial, thrust, hold.engines_running, hold.duration_s, hold.throttle_down);
+    }
     first_stage_ = 0;
     first_background_ = background;
     check_sea_reach(*first_snapshot_, 0);  // an abort requested before the first plan
     submit_first();
+    first_begin_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - first_wall_start_).count();
 }
 
 void ScvxLandingGuidance::submit_first() {
     auto r = request(*first_snapshot_, 0);
     if (first_background_) {
-        replanner_.submit(std::move(r), 0.0);  // in effect at the snapshot, as the one made at once
+        replanner_.submit(std::move(r), 0.0);  // collected as soon as it is there; it takes effect at the hand-over
     } else {
         first_outcome_ = replanner_.plan_now(r);
     }
 }
 
 std::optional<bool> ScvxLandingGuidance::poll(time::Epoch now) {
+    // At the hand-over a plan still under way is waited for (the synchronous solve): the hold never runs longer.
+    const bool due = now - first_handover_ >= -epoch_tolerance_s;
+    const auto poll_start = std::chrono::steady_clock::now();
     while (first_snapshot_) {
         std::optional<PlanOutcome> outcome = std::exchange(first_outcome_, std::nullopt);
-        if (!outcome) outcome = replanner_.collect(now, false);
+        if (!outcome) outcome = replanner_.collect(now, due || !parameters_.realtime);
         if (!outcome) return std::nullopt;  // still planning
-        if (const auto decided = first_step(*outcome)) return decided;
+        if (const auto decided = first_step(*outcome)) {
+            first_wall_s_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - first_wall_start_).count();
+            first_decided_ = decided;
+        }
     }
-    return std::nullopt;
+    if (!due || !first_decided_) return std::nullopt;
+    if (first_background_ && std::getenv("STARSIM_DEBUG_REALTIME")) {  // diagnostics: the sim thread's share
+        std::printf("[realtime] first plan: begin %.1f ms on the sim thread, worker %.0f ms, hold %.2f s, waited %.0f ms at "
+                    "the hand-over\n",
+                    first_begin_ms_, 1000.0 * first_wall_s_, first_hold_.duration_s,
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - poll_start).count());
+    }
+    return std::exchange(first_decided_, std::nullopt);
 }
 
 std::optional<bool> ScvxLandingGuidance::first_step(const PlanOutcome& outcome) {
     const auto& snapshot = *first_snapshot_;
+    // An abort requested while the catch plan was computed (real-time play): plan the abort from the same state instead.
+    if (aborting_ && outcome.plan->goal != DescentGoal::Abort) {
+        first_stage_ = 1;
+        check_sea_reach(snapshot, 0);
+        submit_first();
+        return std::nullopt;
+    }
     if (first_stage_ < 1) {
         first_stage_ = 1;
         if ((!outcome.plan->converged || beyond_limits(*outcome.plan)) && site_.sea && !aborting_) {
@@ -339,7 +438,7 @@ std::optional<bool> ScvxLandingGuidance::first_step(const PlanOutcome& outcome) 
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - first_wall_start_).count(),
                     first_background_ ? " (background)" : "");
     }
-    const time::Epoch epoch = first_epoch_;
+    const time::Epoch epoch = first_handover_;  // the snapshot itself without a hold
     first_snapshot_.reset();
     first_plan_epoch_ = epoch;
     print_plan_path(*outcome.plan, 0.0, outcome.solve_ms);

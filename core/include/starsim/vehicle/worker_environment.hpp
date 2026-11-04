@@ -45,6 +45,7 @@ public:
     const FlightEnvironment& env() const { return *env_; }
     const environment::GravityModel& gravity() const { return gravity_; }
     const frames::BodyOrientation& earth() const { return earth_; }
+    const frames::BodyOrientation* moon_orientation() const { return moon_orientation_ ? &*moon_orientation_ : nullptr; }
 
 private:
     EnvironmentSources sources_;

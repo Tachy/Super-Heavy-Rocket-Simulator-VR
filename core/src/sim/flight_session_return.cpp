@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <utility>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -244,22 +245,28 @@ std::optional<FlightSession::DeorbitReplanInputs> FlightSession::deorbit_plan_in
     in.epoch = epoch_;
     in.state = {s.position_gcrf_m, s.velocity_gcrf_mps};
     in.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
-    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    in.schedule = std::make_shared<const gnc::AlphaSchedule>(gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table));
     in.target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters(vehicle));
-    in.onboard = std::make_shared<const gnc::EntryGuidance>(
-        body, schedule, in.target, gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
     in.parameters = given;
-    in.parameters.reach_check = gnc::entry_reach_check(*in.onboard);  // the onboard guidance's rules and limits
     in.parameters.burn_dispersion = gnc::deorbit_burn_dispersion(stage);  // its cutoff residual and pointing error
-    in.mass_kg = vehicle.mass_properties().mass_kg;
-    in.propellant_kg = vehicle.propellant_kg();
     in.landing_propellant_kg = stage.landing_propellant_kg;
-    // the flights ahead (drag, boil-off) start from a copy of the ship as it is (its ground height)
-    auto copy = std::make_shared<vehicle::FlightBody>(vehicle.copy_upper(0), s);
-    copy->set_ground_height(body.ground_height_m());
-    in.copy = std::move(copy);
+    set_inputs_body(in, body);
     in.generation = deorbit_generation_;
     return in;
+}
+
+void FlightSession::set_inputs_body(DeorbitReplanInputs& in, const vehicle::FlightBody& body) {
+    const auto& vehicle = body.vehicle();
+    const auto& stage = vehicle.stages().front().config;
+    in.onboard = std::make_shared<const gnc::EntryGuidance>(
+        body, *in.schedule, in.target, gnc::entry_guidance_parameters(vehicle.source_config(), stage, gnc::EntryKind::Orbital));
+    in.parameters.reach_check = gnc::entry_reach_check(*in.onboard);  // the onboard guidance's rules and limits
+    in.mass_kg = vehicle.mass_properties().mass_kg;
+    in.propellant_kg = vehicle.propellant_kg();
+    // the flights ahead (drag, boil-off) start from a copy of the ship as it is (its ground height)
+    auto copy = std::make_shared<vehicle::FlightBody>(vehicle.copy_upper(0), body.state());
+    copy->set_ground_height(body.ground_height_m());
+    in.copy = std::move(copy);
 }
 
 gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const environment::GravityModel& gravity,
@@ -309,6 +316,10 @@ std::optional<bool> FlightSession::begin_ship_return(bool background) {
     if (!parameters) {
         ship_return_ = false;
         ++deorbit_generation_;
+        ship_return_task_.discard();
+        ++ship_return_request_;
+        ship_return_outcome_ = false;
+        ship_return_then_ = {};
         deorbit_plan_ = gnc::DeorbitPlan{};
         deorbit_plan_->reason = why;
         return false;
@@ -317,6 +328,16 @@ std::optional<bool> FlightSession::begin_ship_return(bool background) {
 }
 
 std::optional<bool> FlightSession::begin_ship_return(const gnc::DeorbitParameters& parameters, bool background) {
+    ++ship_return_request_;  // a pending earlier request is replaced (its poll reports it cancelled)
+    ship_return_outcome_.reset();
+    ship_return_then_ = {};
+    const auto submitted = submit_ship_return(parameters, background);
+    if (submitted) ship_return_outcome_ = *submitted;
+    return submitted;
+}
+
+std::optional<bool> FlightSession::submit_ship_return(const gnc::DeorbitParameters& parameters, bool background) {
+    const auto wall = std::chrono::steady_clock::now();  // diagnostics
     ship_return_ = false;
     deorbit_plan_.reset();
     ++deorbit_generation_;  // a background plan or re-plan of an earlier return is dropped when it arrives
@@ -338,19 +359,81 @@ std::optional<bool> FlightSession::begin_ship_return(const gnc::DeorbitParameter
     inputs->measure_drag = true;  // no drag given: the ship's own, flown ahead
     if (background) {
         // Real-time play (Task 11b): the drag flight, the planner and the boil-off flight on a worker; the ship coasts on.
+        // Waited for once ship_return_budget_s of sim time has passed (time warp meanwhile).
+        ship_return_parameters_ = parameters;
+        ship_return_deadline_ = epoch_ + ship_return_budget_s_;
+        ship_return_wall_start_ = wall;
         auto worker = worker_environment();
         ship_return_task_.submit([in = std::move(*inputs), worker] {
             return compute_deorbit_plan(in, worker->gravity(), worker->earth(), worker->env());
         });
+        ship_return_begin_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
         return std::nullopt;
     }
-    return apply_ship_return(compute_deorbit_plan(std::move(*inputs), gravity_, earth_, env_));
+    const bool applied = apply_ship_return(compute_deorbit_plan(std::move(*inputs), gravity_, earth_, env_));
+    if (std::getenv("STARSIM_DEBUG_REALTIME")) {  // diagnostics: the sim thread's hold
+        std::printf("[realtime] ship return at once: %.0f ms on the sim thread\n",
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count());
+    }
+    return applied;
 }
 
 std::optional<bool> FlightSession::poll_ship_return(bool wait) {
-    auto result = ship_return_task_.collect(wait);
-    if (!result) return std::nullopt;
-    return apply_ship_return(*result);
+    const auto decide = [this](bool outcome) {
+        ship_return_outcome_ = outcome;
+        if (ship_return_then_) std::exchange(ship_return_then_, {})(outcome);
+    };
+    while (ship_return_task_.busy()) {
+        const bool due = wait || !realtime_planning_ || epoch_ - ship_return_deadline_ >= 0.0;
+        const auto poll_start = std::chrono::steady_clock::now();
+        auto result = ship_return_task_.collect(due);
+        if (!result) break;
+        const auto& plan = result->plan;
+        const auto& groups = bodies_.empty() ? std::vector<std::string>{}
+                                             : bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
+        if (result->inputs.generation == deorbit_generation_ && plan.feasible && !bodies_.empty() &&
+            !burn_still_ahead(plan.node, groups)) {
+            // Fix round 1 (I1): its burn came too close while it was planned (time warp meanwhile) - never armed;
+            // planned again from the state now.
+            ++ship_return_resubmits_;
+            std::printf("[deorbit] background return plan stale (burn %.0f s ahead): planned again from the state now\n",
+                        plan.node.epoch - epoch_);
+            if (const auto refused = submit_ship_return(ship_return_parameters_, true)) decide(*refused);
+            continue;
+        }
+        const auto apply_start = std::chrono::steady_clock::now();
+        const bool applied = apply_ship_return(*result);
+        if (std::getenv("STARSIM_DEBUG_REALTIME")) {  // diagnostics: the sim thread's share
+            const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            const auto now = std::chrono::steady_clock::now();
+            std::printf("[realtime] ship return: begin %.1f ms + wait %.0f ms + apply %.1f ms on the sim thread, worker "
+                        "%.0f ms, applied %.1f s after its snapshot\n",
+                        ship_return_begin_ms_, ms(poll_start, apply_start), ms(apply_start, now),
+                        ms(ship_return_wall_start_, apply_start), epoch_ - result->inputs.epoch);
+        }
+        decide(applied);
+    }
+    return ship_return_outcome_;
+}
+
+std::optional<bool> FlightSession::ship_return_request_outcome(std::uint64_t id, std::string* cancelled) {
+    if (id != ship_return_request_) {
+        if (cancelled) *cancelled = "Rückkehrplanung abgebrochen: eine andere Rückkehr wurde geplant";
+        return false;
+    }
+    return poll_ship_return(false);
+}
+
+bool FlightSession::burn_still_ahead(const gnc::BurnNode& node, const std::vector<std::string>& groups) const {
+    // The configuration start_burn picks (no RCS fallback for a forced set); its ignition half the burn before the node.
+    const double dv = norm(node.delta_v_gcrf_mps);
+    const double mass_kg = bodies_[controlled_].body->vehicle().mass_properties().mass_kg;
+    for (const auto& c : burn_configurations(&groups)) {
+        if (c.minimum_dv_mps > 0.25 * dv) continue;
+        const double to_ignition_s = node.epoch - epoch_ - 0.5 * gnc::burn_duration_s(dv, mass_kg, c.thrust_n, c.mass_flow_kgps);
+        return to_ignition_s > burn_lead_s();
+    }
+    return true;  // no configuration: execute_burn refuses it itself
 }
 
 bool FlightSession::apply_ship_return(const DeorbitReplanResult& result) {
@@ -396,6 +479,7 @@ void FlightSession::replan_ship_deorbit() {
         // Real-time play (Task 11b): the planner and the boil-off flight run on a worker with an environment of their
         // own; the old plan stays armed until the result is applied (its burn is >= deorbit_replan_lead_s away).
         deorbit_replan_task_.discard();  // one of an earlier return (it is not due before its own was applied)
+        deorbit_replan_deadline_ = epoch_ + ship_return_budget_s_;  // waited for from here (time warp meanwhile)
         auto worker = worker_environment();
         deorbit_replan_task_.submit([in = std::move(*inputs), worker] {
             return compute_deorbit_plan(in, worker->gravity(), worker->earth(), worker->env());
@@ -406,7 +490,8 @@ void FlightSession::replan_ship_deorbit() {
 }
 
 void FlightSession::poll_deorbit_replan(bool wait) {
-    if (auto result = deorbit_replan_task_.collect(wait)) apply_deorbit_replan(*result);
+    const bool due = wait || !realtime_planning_ || epoch_ - deorbit_replan_deadline_ >= 0.0;
+    if (auto result = deorbit_replan_task_.collect(due)) apply_deorbit_replan(*result);
 }
 
 std::optional<FlightSession::DeorbitReplanInputs> FlightSession::prepare_deorbit_replan() {
@@ -457,10 +542,22 @@ void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
         bodies_.empty()) {
         return;
     }
+    const auto& stage = bodies_[controlled_].body->vehicle().stages().front().config;
+    if (epoch_ != in.epoch) {
+        // Fix round 1 (I1), a re-plan from the worker: the armed burn's preparation or the burn itself has begun (time
+        // warp while it was planned) - the old plan flies on, never re-armed mid-burn; a new pass that came too close is
+        // not taken (the old plan flies; its own re-plan follows at its next tracking time if it is still far).
+        const bool started = autopilot_.burn.ignite || autopilot_.burn.time_to_ignition_s <= burn_lead_s();
+        if (started || (result.plan.feasible && !burn_still_ahead(result.plan.node, stage.deorbit_engine_groups))) {
+            ++deorbit_replans_dropped_;
+            std::printf("[deorbit] background re-plan dropped: %s\n",
+                        started ? "the burn is being prepared or flown" : "its burn came too close while it was planned");
+            return;
+        }
+    }
     ++deorbit_replans_;
     const auto& plan = result.plan;
     const auto& old_node = in.old_node;
-    const auto& stage = bodies_[controlled_].body->vehicle().stages().front().config;
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
         std::printf("[deorbit] re-plan %.0f s before the old node (tracked %.1f h, CdA/m %.3e m2/kg): %s, burn %+.1f s "
                     "from it, %.2f m/s (old %.2f m/s), cross %.1f km%s\n",

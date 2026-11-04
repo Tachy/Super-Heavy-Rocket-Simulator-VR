@@ -144,7 +144,8 @@ EntryTarget ShipGateAim::operator()(const EntryGuidance::TerminalGate& gate) {
     const double along_mps = dot(gate.velocity_itrf_mps, along);
     const double mass_kg = gate.body.vehicle().mass_properties().mass_kg;
     const Vec3 up = site_up(site_);
-    if (auto done = task_.collect(false)) {  // real-time play: a prediction from the worker
+    // real-time play: a prediction from the worker (switched off meanwhile - time warp: waited for, as at once)
+    if (auto done = task_.collect(!realtime_)) {
         flip_ = std::move(*done);
         print_flip(*flip_, -dot(gate.velocity_itrf_mps, up), gate.height_m, ", worker");
     }
@@ -163,7 +164,9 @@ EntryTarget ShipGateAim::operator()(const EntryGuidance::TerminalGate& gate) {
         if (realtime_ && worker_environment_) {
             // Copies of every input; the worker environment samples the same sources as the session's (bit for bit).
             std::shared_ptr<const vehicle::Vehicle> ship = gate.body.vehicle().copy_upper(0);
-            auto environment = worker_environment_();
+            // one environment for all refreshes (warm caches; one task at a time, ordered by the future)
+            if (!environment_) environment_ = worker_environment_();
+            auto environment = environment_;
             task_.submit([ship, state, environment, epoch = gate.epoch, site = site_, parameters = parameters_,
                           controller = controller_, tick_s = tick_s_, along] {
                 return predict_ship_flip(*ship, state, environment->env(), epoch, site, parameters, controller, tick_s,

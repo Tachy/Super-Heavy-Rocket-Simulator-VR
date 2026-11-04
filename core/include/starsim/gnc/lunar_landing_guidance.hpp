@@ -134,6 +134,11 @@ private:
     std::string status_;
     bool debug_ = false;  // STARSIM_DEBUG_LUNAR_DESCENT
     time::Epoch next_debug_;
+    // Real-time play (Task 11b fix round 1): the approach's first plan on the worker, begun the hold before the hand-over
+    // t_go from the state the braking thrust leads to; the braking law flies on until the hand-over.
+    void approach_started(bool started);
+    std::optional<ReturnCommand> last_braking_;   // the braking law's latest command (held should the law fail meanwhile)
+    std::unique_ptr<ScvxLandingGuidance> pending_;  // last: destroyed first
 };
 
 }  // namespace starsim::gnc

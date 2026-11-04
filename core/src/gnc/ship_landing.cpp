@@ -170,11 +170,16 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             pending_ = std::make_unique<ScvxLandingGuidance>(site_, parameters_.scvx);
             if (abort_requested_) pending_->request_abort();
             attempt_epoch_ = epoch;
-            // real-time play: planned on the worker while the flip command above holds (Task 11b); else at once
-            pending_->begin(body, env, epoch, parameters_.scvx.realtime);
+            // Real-time play (Task 11b): planned on the worker from the state the flip command above leads to over the
+            // hold (its thrust along the axis), taking effect at the hand-over; else at once.
+            FirstPlanHold hold;
+            if (parameters_.scvx.realtime) hold.duration_s = first_plan_hold_s(FirstPlanKind::Ship);
+            hold.throttle_down = true;  // the flip engines to minimum throttle meanwhile (below)
+            pending_->begin(body, env, epoch, parameters_.scvx.realtime, hold);
         }
         if (pending_) {
             if (const auto started = pending_->poll(epoch)) {
+                if (parameters_.scvx.realtime) record_first_plan_wall_s(FirstPlanKind::Ship, pending_->first_plan_wall_s());
                 if (*started) {
                     scvx_ = std::move(pending_);
                     phase_ = ReturnPhase::LandingBurn;
@@ -185,6 +190,17 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                     if (first_plan_attempts_ >= parameters_.first_plans_before_descent) upright_descent_ = true;
                 }
             }
+        }
+        if (pending_ && pending_->first_plan_pending()) {
+            // Real-time play: the hold the plan starts from - the flip engines down to their minimum throttle (3 engines
+            // at the flip's 0.8 brake ~45 m/s^2: held for the plan's ~2 s the sink would turn into a climb).
+            double minimum = 0.0;
+            for (const auto& e : body.vehicle().stages().front().engines) {
+                if (std::find(cmd.run_groups.begin(), cmd.run_groups.end(), e.group_id) != cmd.run_groups.end()) {
+                    minimum = std::max(minimum, e.performance->config().throttle_min);
+                }
+            }
+            cmd.throttle = minimum;
         }
     }
     if (phase_ == ReturnPhase::LandingBurn && !upright_descent_) {

@@ -220,6 +220,7 @@ private:
     std::optional<time::Epoch> flip_epoch_;
     std::optional<double> flip_time_to_gate_s_;  // at the latest refresh
     WorkerEnvironmentSource worker_environment_;
+    std::shared_ptr<vehicle::WorkerEnvironment> environment_;  // built at the first worker prediction
     bool realtime_ = false;
     int refreshes_ = 0;
     int analytic_aims_ = 0;

@@ -441,7 +441,34 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
         }
         if (phase_ == ReturnPhase::Coast && descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
             const auto burn = predict_landing_burn(body, env, epoch);
-            if (burn.stop_height_m <= 0.0) phase_ = ReturnPhase::LandingBurn;
+            if (realtime_first_plan() && !pending_) {
+                // Real-time play (Task 11b fix round 1): the first plan starts on the worker the hold before the
+                // ignition the stop height's trend predicts, from the state the unpowered fall leads to; the engines
+                // light at the hand-over with the plan.
+                const double hold_s = first_plan_hold_s(FirstPlanKind::Booster);
+                std::optional<double> to_ignition_s;
+                if (burn.stop_height_m <= 0.0) {
+                    to_ignition_s = hold_s;  // no forecast ahead of it: lit one hold late
+                } else if (fall_ignition_epoch_ && *fall_ignition_epoch_ >= epoch) {
+                    // the guidance's own ignition on the predicted fall (within ~1 s, forecast_landing)
+                    if (*fall_ignition_epoch_ - epoch <= hold_s) to_ignition_s = *fall_ignition_epoch_ - epoch;
+                } else if (last_stop_height_ && epoch - last_stop_height_->first >= stop_height_trend_s) {
+                    // else the stop height's trend over at least stop_height_trend_s (tick to tick it jitters by ~16 m)
+                    const double rate = (last_stop_height_->second - burn.stop_height_m) / (epoch - last_stop_height_->first);
+                    if (rate > 0.0 && burn.stop_height_m / rate <= hold_s) to_ignition_s = burn.stop_height_m / rate;
+                }
+                if (to_ignition_s && std::getenv("STARSIM_DEBUG_REALTIME")) {
+                    std::printf("[realtime] booster first plan begun: stop height %.1f m (previous %.1f m %.3f s before), "
+                                "ignition in %.2f s, height %.0f m\n",
+                                burn.stop_height_m, last_stop_height_ ? last_stop_height_->second : 0.0,
+                                last_stop_height_ ? epoch - last_stop_height_->first : 0.0, *to_ignition_s, height);
+                }
+                if (to_ignition_s) begin_landing(body, env, epoch, *to_ignition_s);
+            }
+            if (!last_stop_height_ || epoch - last_stop_height_->first >= stop_height_trend_s) {
+                last_stop_height_ = std::make_pair(epoch, burn.stop_height_m);
+            }
+            if (burn.stop_height_m <= 0.0 && !pending_) phase_ = ReturnPhase::LandingBurn;
             if (phase_ == ReturnPhase::LandingBurn) {
                 // lit now: its own time to go takes over below
             } else if (pending_entry_burn(body.vehicle())) {  // the burn prediction does not know the entry burn ahead
@@ -449,6 +476,20 @@ ReturnCommand BoosterReturnGuidance::steer(const vehicle::FlightBody& body, cons
                 forecast_.touchdown.reset();
             } else {
                 forecast_landing(burn, height - target_bottom_height_m_, -dot(v_fixed, site_up), epoch);
+            }
+        }
+        if (pending_) {
+            if (pending_->first_plan_pending()) forecast_.landing_ignition = pending_->handover_epoch();
+            if (const auto started = pending_->poll(epoch)) {  // the hand-over: lit with the plan (or the explicit laws)
+                record_first_plan_wall_s(FirstPlanKind::Booster, pending_->first_plan_wall_s());
+                phase_ = ReturnPhase::LandingBurn;
+                landing_started_ = true;
+                if (*started) {
+                    scvx_ = std::move(pending_);
+                } else {
+                    pending_.reset();  // fallback: the explicit laws
+                    if (abort_requested_ && !ditch_) retarget_to_sea();
+                }
             }
         }
         cmd.phase = phase_;
@@ -565,12 +606,14 @@ void BoosterReturnGuidance::forecast_landing(const BurnPrediction& burn, double 
 void BoosterReturnGuidance::set_realtime(bool realtime) {
     parameters_.scvx.realtime = realtime;
     if (scvx_) scvx_->set_realtime(realtime);
+    if (pending_) pending_->set_realtime(realtime);
 }
 
-void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
-                                          time::Epoch epoch) {
-    landing_started_ = true;
-    if (!parameters_.scvx_landing || !(site_.catch_target || site_.pad)) return;
+bool BoosterReturnGuidance::realtime_first_plan() const {
+    return parameters_.scvx.realtime && !landing_started_ && parameters_.scvx_landing && (site_.catch_target || site_.pad);
+}
+
+std::unique_ptr<ScvxLandingGuidance> BoosterReturnGuidance::landing_guidance() const {
     auto p = parameters_.scvx;
     p.snapshot.phase_groups = {parameters_.landing_ignition_groups, parameters_.landing_divert_groups,
                                parameters_.landing_groups};
@@ -578,8 +621,25 @@ void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const
     // the end, see DescentLimits::approach_time_constant_s).
     if (site_.pad) p.settings.limits.approach_time_constant_s = 0.0;
     p.snapshot.normal_force_scale = drag_scale_;  // the measured hull aerodynamics also scale the planned normal force
-    scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
-    if (abort_requested_) scvx_->request_abort();
+    auto guidance = std::make_unique<ScvxLandingGuidance>(site_, p);
+    if (abort_requested_) guidance->request_abort();
+    return guidance;
+}
+
+void BoosterReturnGuidance::begin_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                          time::Epoch epoch, double hold_s) {
+    pending_ = landing_guidance();
+    FirstPlanHold hold;
+    hold.duration_s = hold_s;
+    hold.engines_running = false;  // the unpowered fall until the ignition
+    pending_->begin(body, env, epoch, true, hold);
+}
+
+void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                          time::Epoch epoch) {
+    landing_started_ = true;
+    if (!parameters_.scvx_landing || !(site_.catch_target || site_.pad)) return;
+    scvx_ = landing_guidance();
     if (!scvx_->start(body, env, epoch)) {
         scvx_.reset();  // fallback: the explicit laws
         if (abort_requested_ && !ditch_) retarget_to_sea();
@@ -590,6 +650,7 @@ bool BoosterReturnGuidance::request_abort() {
     if (!site_.sea || phase_ == ReturnPhase::Landed || catch_contact_) return false;
     if (scvx_) return abort_requested_ = scvx_->request_abort();
     abort_requested_ = true;
+    if (pending_) pending_->request_abort();  // a first plan under way: it plans the abort (fix round 1, M1)
     if (landing_started_ && !ditch_) retarget_to_sea();  // explicit laws in charge: they must not aim at the arms
     return true;
 }

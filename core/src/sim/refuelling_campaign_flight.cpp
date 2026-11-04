@@ -1,8 +1,10 @@
 #include "starsim/sim/refuelling_campaign_flight.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <utility>
 
@@ -95,6 +97,7 @@ void RefuellingCampaignFlight::start_placed(time::Epoch epoch) {
 void RefuellingCampaignFlight::update(FlightSession& s) {
     const double dt = last_update_ ? s.epoch() - *last_update_ : 0.0;
     last_update_ = s.epoch();
+    collect_first_return(!s.realtime_planning());  // real-time play: the first tanker's return from its worker
     if (state_.phase == CampaignFlightPhase::Complete || state_.phase == CampaignFlightPhase::Ended) return;
     if (state_.start) book_attitude_gas(s, dt);
     if (s.station_index()) state_.depot_propellant_kg = main_kg(s, *s.station_index());
@@ -303,21 +306,19 @@ void RefuellingCampaignFlight::watch_flight(FlightSession& s) {
     state_.phase = CampaignFlightPhase::Planning;
 }
 
-void RefuellingCampaignFlight::fly_first_return(const FlightSession& s) {
-    // decision 3: in its own session from the departure state, to the catch at the tanker's launch site
-    const auto& tanker = s.body(s.controlled_index());
-    FlightSession side(sources_.ephemeris, sources_.earth, sources_.config_dir, environment::PointMassGravityConfig{},
-                       &sources_.moon);
+RefuellingCampaignFlight::FirstReturn RefuellingCampaignFlight::fly_side_return(
+    const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth, const frames::BodyOrientation& moon,
+    const std::filesystem::path& config_dir, const FirstReturnInputs& in, std::unique_ptr<vehicle::Vehicle> tanker) {
+    FirstReturn out;
+    FlightSession side(ephemeris, earth, config_dir, environment::PointMassGravityConfig{}, &moon);
     side.set_boil_off(true);
-    side.set_ignition_settling(s.ignition_settling());
-    const auto ascent = config::load_ascent_mission(sources_.config_dir, tanker_.ascent_id);
-    side.set_launch_site(launch_site_from_config(config::load_launch_site(sources_.config_dir, ascent.site_id)));
-    side.place_vehicle(tanker.vehicle().copy_upper(0), tanker.state(), s.epoch());
-    const auto deorbit = config::load_ship_return_mission(sources_.config_dir, tanker_.return_id).deorbit;
-    if (!side.plan_ship_return(ship_deorbit_parameters(deorbit))) {
-        state_.first_return = ReturnResult::Lost;
-        state_.first_return_note = side.ship_return_plan() ? side.ship_return_plan()->reason : "Rückkehr nicht möglich";
-        return;
+    side.set_ignition_settling(in.ignition_settling);
+    side.set_launch_site(in.site);
+    side.place_vehicle(std::move(tanker), in.state, in.epoch);
+    if (!side.plan_ship_return(in.deorbit)) {
+        out.result = ReturnResult::Lost;
+        out.note = side.ship_return_plan() ? side.ship_return_plan()->reason : "Rückkehr nicht möglich";
+        return out;
     }
     const auto t0 = side.epoch();
     const double limit_s = FlightSession::tanker_reserve_search_s + 86400.0;  // the pass search + a day
@@ -325,13 +326,65 @@ void RefuellingCampaignFlight::fly_first_return(const FlightSession& s) {
            side.active()) {
         side.advance_to(side.epoch() + 3600.0);
     }
-    state_.first_return = side.ship_return_result(side.controlled_index());
-    state_.first_return_main_kg = side.body(side.controlled_index()).vehicle().main_propellant_kg();
-    state_.first_return_note = *state_.first_return == ReturnResult::Flying ? std::string("Rückkehr nicht beendet")
-                                                                            : std::string(to_string(*state_.first_return));
+    out.result = side.ship_return_result(side.controlled_index());
+    out.main_kg = side.body(side.controlled_index()).vehicle().main_propellant_kg();
+    out.note = out.result == ReturnResult::Flying ? std::string("Rückkehr nicht beendet") : std::string(to_string(out.result));
+    return out;
+}
+
+void RefuellingCampaignFlight::store_first_return(const FirstReturn& r) {
+    state_.first_return = r.result;
+    state_.first_return_main_kg = r.main_kg;
+    state_.first_return_note = r.note;
+}
+
+void RefuellingCampaignFlight::collect_first_return(bool wait) {
+    if (!first_return_task_.busy()) return;
+    if (const auto r = first_return_task_.collect(wait)) store_first_return(*r);
+}
+
+void RefuellingCampaignFlight::fly_first_return(const FlightSession& s) {
+    // decision 3: in its own session from the departure state, to the catch at the tanker's launch site
+    const auto& tanker = s.body(s.controlled_index());
+    FirstReturnInputs in;
+    in.ignition_settling = s.ignition_settling();
+    const auto ascent = config::load_ascent_mission(sources_.config_dir, tanker_.ascent_id);
+    in.site = launch_site_from_config(config::load_launch_site(sources_.config_dir, ascent.site_id));
+    in.state = tanker.state();
+    in.epoch = s.epoch();
+    in.deorbit = ship_deorbit_parameters(config::load_ship_return_mission(sources_.config_dir, tanker_.return_id).deorbit);
+    auto vehicle = tanker.vehicle().copy_upper(0);
+    const auto wall = std::chrono::steady_clock::now();  // diagnostics
+    const auto report = [wall](const char* what) {
+        if (std::getenv("STARSIM_DEBUG_REALTIME")) {
+            std::printf("[realtime] first tanker return %s: %.0f ms on the sim thread\n", what,
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count());
+        }
+    };
+    if (s.realtime_planning()) {
+        // Real-time play (fix round 1, I3): the whole side flight (its return plan, days of flight) on a worker with an
+        // environment of its own; the campaign goes on, the result is booked when it arrives (at the latest at the end).
+        auto worker = s.worker_environment();
+        auto held = std::make_shared<std::unique_ptr<vehicle::Vehicle>>(std::move(vehicle));
+        first_return_task_.submit([worker, held, in, config_dir = sources_.config_dir, wall] {
+            auto r = fly_side_return(*worker->env().ephemeris, worker->earth(), *worker->moon_orientation(), config_dir, in,
+                                     std::move(*held));
+            if (std::getenv("STARSIM_DEBUG_REALTIME")) {
+                std::printf("[realtime] first tanker return: worker %.0f ms\n",
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count());
+            }
+            return r;
+        });
+        report("begun");
+        return;
+    }
+    store_first_return(fly_side_return(sources_.ephemeris, sources_.earth, sources_.moon, sources_.config_dir, in,
+                                       std::move(vehicle)));
+    report("at once");
 }
 
 void RefuellingCampaignFlight::finish(FlightSession& s) {
+    collect_first_return(true);
     state_.phase = CampaignFlightPhase::Complete;
     state_.status = "Kampagne abgeschlossen";
     const double depot_now_kg = main_kg(s, *s.station_index());
@@ -342,6 +395,7 @@ void RefuellingCampaignFlight::finish(FlightSession& s) {
 }
 
 void RefuellingCampaignFlight::end(const std::string& reason) {
+    collect_first_return(true);
     state_.phase = CampaignFlightPhase::Ended;
     state_.status = "Kampagne beendet: " + reason;
     state_.next_launch.reset();

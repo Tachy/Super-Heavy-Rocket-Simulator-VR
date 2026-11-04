@@ -522,11 +522,13 @@ int64_t FlightSim::plan_ship_return() {
     // Task 11b: in real-time play the drag flight, the planner and the boil-off flight (seconds) run on a worker while
     // the ship coasts on; the outcome follows (command_finished). Time warp: at once, as before.
     return static_cast<int64_t>(post_deferred_active("plan_ship_return", [](sim::FlightSession& session) -> SessionPoll {
-        const auto first = session.begin_ship_return(session.realtime_planning());
-        return [first](sim::FlightSession& s) -> std::optional<Outcome> {
-            const auto done = first ? first : s.poll_ship_return(false);
+        session.begin_ship_return(session.realtime_planning());
+        // fix round 1 (I4): a return planned since (a mission leg) cancels this one - the command ends, later ones run
+        return [id = session.ship_return_request()](sim::FlightSession& s) -> std::optional<Outcome> {
+            std::string cancelled;
+            const auto done = s.ship_return_request_outcome(id, &cancelled);
             if (!done) return std::nullopt;
-            return Outcome{*done, {}};
+            return Outcome{*done, godot::String::utf8(cancelled.c_str())};
         };
     }));
 }

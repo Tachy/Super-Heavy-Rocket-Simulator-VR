@@ -267,8 +267,8 @@ void FlightSession::run_transfer_step(double dt_s) {
     transfer_thrust_n_ = out.thrust ? thrust : 0.0;
 }
 
-std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string* reason) const {
-    const auto refuse = [&](const std::string& why) -> std::optional<mission::TankerReserve> {
+std::optional<FlightSession::TankerReserveInputs> FlightSession::tanker_reserve_inputs(std::string* reason) const {
+    const auto refuse = [&](const std::string& why) -> std::optional<TankerReserveInputs> {
         if (reason) *reason = why;
         return std::nullopt;
     };
@@ -279,36 +279,120 @@ std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string*
     auto search = ship_return_settings(&why);
     if (!search) return refuse("Keine Reserve: " + why);
     search->search_window_s = tanker_reserve_search_s;
-    const auto first = ship_return_preview(*search);  // the full docked ship: only a first delta-v
-    if (!first.feasible) return refuse("Keine Reserve: " + first.reason);
-    const auto& body = *bodies_[controlled_].body;
-    auto p = return_reserve_parameters(first.delta_v_mps, &why);
+    // the full docked ship (ship_return_preview's refusals): only a first delta-v
+    gnc::DeorbitPlan refused;
+    const auto& flying = bodies_[controlled_];
+    std::optional<DeorbitReplanInputs> full;
+    if (flying.entry_guidance || flying.ship_landing) {
+        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+    } else {
+        full = deorbit_plan_inputs(*flying.body, *search, refused);
+    }
+    if (!full) return refuse("Keine Reserve: " + refused.reason);
+    full->measure_drag = true;
+    auto p = return_reserve_parameters(0.0, &why);  // its delta-v follows from the plans
     if (!p) return refuse("Keine Reserve: " + why);
-    const auto& vehicle = body.vehicle();
-    const double dry_with_headers_kg = vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg();
+    const auto& vehicle = flying.body->vehicle();
+    TankerReserveInputs in;
+    in.full = std::move(*full);
+    in.parameters = *p;
+    in.dry_with_headers_kg = vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg();
+    return in;
+}
+
+FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const TankerReserveInputs& in,
+                                                                        const environment::GravityModel& gravity,
+                                                                        const frames::BodyOrientation& earth,
+                                                                        const vehicle::FlightEnvironment& env) {
+    TankerReserveResult r;
+    auto full = in.full;
+    const auto first = plan_from_inputs(full, gravity, earth, env);
+    if (!first.feasible) {
+        r.reason = "Keine Reserve: " + first.reason;
+        return r;
+    }
+    auto p = in.parameters;
+    p.deorbit_delta_v_mps = first.delta_v_mps;
     // Fix round 1 (I2): the pass is chosen for the ship as it will wait and fly its return - holding only the reserve.
     // Planned on the full docked ship (406 t, C_D A / m 1.1e-3 m2/kg against 2.8e-3 at 222 t), the docked-pair
     // fixture's search took a pass 151 h ahead, while the flown return took one 8.6 h after the transfer start: the
     // reserve booked 6.6 t of boil-off where the flown pass's wait boils ~1.2 t.
-    auto reserve = mission::tanker_reserve(dry_with_headers_kg, *p);
-    const auto plan = ship_deorbit_plan(*holding(reserve), *search);
-    if (!plan.feasible) return refuse("Keine Reserve: " + plan.reason);
-    p->deorbit_delta_v_mps = plan.delta_v_mps;
-    reserve = mission::tanker_reserve(dry_with_headers_kg, *p);
+    auto reserve = mission::tanker_reserve(in.dry_with_headers_kg, p);
+    auto held = in.full;  // the same settings for the ship holding the reserve
+    set_inputs_body(held, *holding(*in.full.copy, reserve));
+    const auto plan = plan_from_inputs(held, gravity, earth, env);
+    if (!plan.feasible) {
+        r.reason = "Keine Reserve: " + plan.reason;
+        return r;
+    }
+    p.deorbit_delta_v_mps = plan.delta_v_mps;
+    reserve = mission::tanker_reserve(in.dry_with_headers_kg, p);
     // The boil-off of the wait for that burn by the thermal model: the copy holding the reserve flown ahead to the burn
     // (as boil_off_shortfall checks the return). Its fill sets the wetted wall; the boil-off itself (a few % of the
     // reserve) changes it too little for a second pass.
-    const auto at_burn = main_propellant_at(*holding(reserve), plan.node.epoch);
-    p->boil_off_oxidizer_kg = std::max(0.0, reserve.oxidizer_kg - at_burn.oxidizer_kg);
-    p->boil_off_fuel_kg = std::max(0.0, reserve.fuel_kg - at_burn.fuel_kg);
+    const auto at_burn = main_propellant_flown(*holding(*in.full.copy, reserve), env, in.full.epoch, plan.node.epoch);
+    p.boil_off_oxidizer_kg = std::max(0.0, reserve.oxidizer_kg - at_burn.oxidizer_kg);
+    p.boil_off_fuel_kg = std::max(0.0, reserve.fuel_kg - at_burn.fuel_kg);
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
         std::printf("[deorbit] tanker reserve: node at %.0f s TDB (+%.1f h), %.2f m/s, boil-off LOX %.2f t CH4 %.2f t\n",
-                    plan.node.epoch.tdb_seconds_past_j2000(), (plan.node.epoch - epoch_) / 3600.0, plan.delta_v_mps,
-                    p->boil_off_oxidizer_kg / 1000.0, p->boil_off_fuel_kg / 1000.0);
+                    plan.node.epoch.tdb_seconds_past_j2000(), (plan.node.epoch - in.full.epoch) / 3600.0, plan.delta_v_mps,
+                    p.boil_off_oxidizer_kg / 1000.0, p.boil_off_fuel_kg / 1000.0);
     }
-    auto result = mission::tanker_reserve(dry_with_headers_kg, *p);
-    result.wait_s = plan.node.epoch - epoch_;
-    return result;
+    r.reserve = mission::tanker_reserve(in.dry_with_headers_kg, p);
+    r.node_epoch = plan.node.epoch;
+    return r;
+}
+
+std::optional<mission::TankerReserve> FlightSession::finish_tanker_reserve(const TankerReserveResult& result,
+                                                                          std::string* reason) const {
+    if (!result.reserve) {
+        if (reason) *reason = result.reason;
+        return std::nullopt;
+    }
+    auto reserve = *result.reserve;
+    reserve.wait_s = result.node_epoch - epoch_;
+    return reserve;
+}
+
+std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string* reason) const {
+    const auto wall = std::chrono::steady_clock::now();  // diagnostics
+    const auto inputs = tanker_reserve_inputs(reason);
+    if (!inputs) return std::nullopt;
+    auto reserve = finish_tanker_reserve(compute_tanker_reserve(*inputs, gravity_, earth_, env_), reason);
+    if (std::getenv("STARSIM_DEBUG_REALTIME")) {  // diagnostics: the sim thread's hold
+        std::printf("[realtime] tanker reserve at once: %.0f ms on the sim thread\n",
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count());
+    }
+    return reserve;
+}
+
+std::optional<mission::TankerReserve> FlightSession::poll_tanker_reserve(std::string* reason) {
+    const auto ms_since = [](std::chrono::steady_clock::time_point t) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+    };
+    if (!tanker_reserve_task_.busy()) {
+        tanker_reserve_wall_start_ = std::chrono::steady_clock::now();
+        auto inputs = tanker_reserve_inputs(reason);
+        if (!inputs) return std::nullopt;  // refused: *reason says why
+        tanker_reserve_deadline_ = epoch_ + ship_return_budget_s_;  // waited for from here (time warp meanwhile)
+        auto worker = worker_environment();
+        tanker_reserve_task_.submit([in = std::move(*inputs), worker] {
+            return compute_tanker_reserve(in, worker->gravity(), worker->earth(), worker->env());
+        });
+        if (std::getenv("STARSIM_DEBUG_REALTIME")) {
+            std::printf("[realtime] tanker reserve: begin %.1f ms on the sim thread\n", ms_since(tanker_reserve_wall_start_));
+        }
+        return std::nullopt;
+    }
+    const bool due = !realtime_planning_ || epoch_ - tanker_reserve_deadline_ >= 0.0;
+    const auto poll_start = std::chrono::steady_clock::now();
+    const auto result = tanker_reserve_task_.collect(due);
+    if (!result) return std::nullopt;
+    if (std::getenv("STARSIM_DEBUG_REALTIME")) {
+        std::printf("[realtime] tanker reserve: worker done after %.0f ms, waited %.0f ms\n", ms_since(tanker_reserve_wall_start_),
+                    ms_since(poll_start));
+    }
+    return finish_tanker_reserve(*result, reason);
 }
 
 std::optional<mission::TankerReserveParameters> FlightSession::return_reserve_parameters(double delta_v_mps,
@@ -338,8 +422,8 @@ std::optional<mission::TankerReserveParameters> FlightSession::return_reserve_pa
     return p;
 }
 
-std::unique_ptr<vehicle::FlightBody> FlightSession::holding(const mission::TankerReserve& reserve) const {
-    const auto& body = *bodies_[controlled_].body;
+std::unique_ptr<vehicle::FlightBody> FlightSession::holding(const vehicle::FlightBody& body,
+                                                            const mission::TankerReserve& reserve) {
     auto copy = body.vehicle().copy_upper(0);  // the ship alone in orbit: its one stage holds the main tanks
     for (const auto contents : {config::TankContents::Oxidizer, config::TankContents::Fuel}) {
         double capacity_kg = 0.0;
@@ -361,9 +445,13 @@ std::unique_ptr<vehicle::FlightBody> FlightSession::holding(const mission::Tanke
 std::optional<TransferRequest> FlightSession::tanker_transfer_request(std::string* reason) const {
     const auto reserve = tanker_reserve(reason);
     if (!reserve) return std::nullopt;
+    return tanker_transfer_request(*reserve);
+}
+
+TransferRequest FlightSession::tanker_transfer_request(const mission::TankerReserve& reserve) {
     TransferRequest r;
     r.direction = TransferDirection::ChaserToStation;
-    r.delivering_floor_kg = {reserve->oxidizer_kg, reserve->fuel_kg};
+    r.delivering_floor_kg = {reserve.oxidizer_kg, reserve.fuel_kg};
     return r;
 }
 

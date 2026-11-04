@@ -171,6 +171,7 @@ LunarLandingGuidance::LunarLandingGuidance(LandingSite touchdown, double approac
 void LunarLandingGuidance::set_realtime(bool realtime) {
     parameters_.approach.realtime = realtime;
     if (approach_) approach_->set_realtime(realtime);
+    if (pending_) pending_->set_realtime(realtime);
 }
 
 std::vector<std::string> LunarLandingGuidance::braking_groups_now(const vehicle::Vehicle& vehicle, double demand_n,
@@ -242,7 +243,26 @@ ReturnCommand LunarLandingGuidance::braking(const vehicle::FlightBody& body, con
 
     ReturnCommand cmd;
     cmd.phase = ReturnPhase::LandingBurn;
-    if (!law.valid || law.time_to_go_s <= parameters_.approach_time_to_go_s) {
+    if (pending_) {
+        if (const auto started = pending_->poll(epoch)) {  // the hand-over
+            record_first_plan_wall_s(FirstPlanKind::Lunar, pending_->first_plan_wall_s());
+            approach_ = std::move(pending_);
+            approach_started(*started);
+            return phase_ == LunarDescentPhase::Approach ? approach_command(body, env, epoch) : cmd;
+        }
+        if (!law.valid && last_braking_) return *last_braking_;  // the braking law's last command until then
+    } else if (parameters_.approach.realtime && law.valid &&
+               law.time_to_go_s <= parameters_.approach_time_to_go_s + first_plan_hold_s(FirstPlanKind::Lunar)) {
+        // Real-time play: the approach planned on the worker from the state the braking thrust (held, body axes) leads
+        // to at the hand-over t_go; the law flies on until then.
+        pending_ = std::make_unique<ScvxLandingGuidance>(site_, parameters_.approach);
+        FirstPlanHold hold;
+        hold.duration_s = std::max(law.time_to_go_s - parameters_.approach_time_to_go_s, 0.0);
+        const double mass = body.vehicle().mass_properties().mass_kg;
+        hold.thrust_body_n = state_attitude(x).inverse_rotate(transpose(plan_to_guidance_) * law.thrust_acceleration_mps2 * mass);
+        pending_->begin(body, env, epoch, true, hold);
+    }
+    if (!pending_ && (!law.valid || law.time_to_go_s <= parameters_.approach_time_to_go_s)) {
         start_approach(body, env, epoch);
         return phase_ == LunarDescentPhase::Approach ? approach_command(body, env, epoch) : cmd;
     }
@@ -267,6 +287,7 @@ ReturnCommand LunarLandingGuidance::braking(const vehicle::FlightBody& body, con
                     s.angular_velocity_body_radps.y, s.angular_velocity_body_radps.z, set_groups_.front().c_str(),
                     next_lit_ ? " (+next)" : "");
     }
+    if (pending_) last_braking_ = cmd;
     return cmd;
 }
 
@@ -284,7 +305,11 @@ void LunarLandingGuidance::start_approach(const vehicle::FlightBody& body, const
                     braking_t_go_, rg.x, rg.y, rg.z, vg.x, vg.y, vg.z, body.vehicle().mass_properties().mass_kg / 1000.0,
                     axis.x, axis.y, axis.z, w.x, w.y, w.z);
     }
-    if (approach_->start(body, env, epoch)) {
+    approach_started(approach_->start(body, env, epoch));
+}
+
+void LunarLandingGuidance::approach_started(bool started) {
+    if (started) {
         phase_ = LunarDescentPhase::Approach;
         status_ = "Anflug";
     } else {

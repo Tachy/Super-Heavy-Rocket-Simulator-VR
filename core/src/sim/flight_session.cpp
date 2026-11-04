@@ -534,6 +534,7 @@ void FlightSession::set_realtime_planning(bool realtime) {
         if (flying.ship_landing) flying.ship_landing->set_realtime(realtime);
         if (flying.gate_aim) flying.gate_aim->set_realtime(realtime);
     }
+    if (lunar_landing_) lunar_landing_->set_realtime(realtime);
 }
 
 std::shared_ptr<vehicle::WorkerEnvironment> FlightSession::worker_environment() const {
@@ -960,6 +961,10 @@ double FlightSession::coast_allowance_s() const {
         }
     }
     if (transfer_ && transfer_->active()) allowance = std::min(allowance, transfer_next_ - epoch_);  // r4 steps
+    // background plans (real-time play): no coast past the epoch they are waited for (fix round 1)
+    if (ship_return_task_.busy()) allowance = std::min(allowance, ship_return_deadline_ - epoch_);
+    if (deorbit_replan_task_.busy()) allowance = std::min(allowance, deorbit_replan_deadline_ - epoch_);
+    if (tanker_reserve_task_.busy()) allowance = std::min(allowance, tanker_reserve_deadline_ - epoch_);
     return allowance > 1.0 ? allowance : 0.0;
 }
 
@@ -1022,6 +1027,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (legs_->deck_motion()) legs_->follow_deck(body_pointers(), env_, epoch_);  // landed stages ride the deck
             sync_docked();
             docked_update(coast, true);
+            if (ship_return_task_.busy() && !hold_ship_return_polls_) poll_ship_return(false);  // real-time play: a return plan from the worker
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
                 if (deorbit_replan_task_.busy()) poll_deorbit_replan(false);  // real-time play: from the worker
@@ -1033,6 +1039,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             continue;
         }
         report_gas_ingestion();
+        if (ship_return_task_.busy() && !hold_ship_return_polls_) poll_ship_return(false);  // real-time play: a return plan from the worker
         if (iss_mission_) run_iss_mission();  // also with the autopilot Off / Orbit (ISS i6)
         if (reboost_) run_reboost();          // refuelling f2: the station's burns
         if (staging_) run_staging();          // before the autopilot: the sequence may end its state Staging

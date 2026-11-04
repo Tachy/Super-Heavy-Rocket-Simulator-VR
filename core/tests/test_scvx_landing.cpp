@@ -12,6 +12,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
 #include "starsim/gnc/ship_landing.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -100,6 +101,72 @@ TEST_CASE("A first plan on the worker equals the one made at once", "[gnc][scvx_
     CHECK(a.axis_gcrf.y == b.axis_gcrf.y);
     CHECK(a.axis_gcrf.z == b.axis_gcrf.z);
     CHECK(a.time_to_go_s == b.time_to_go_s);
+}
+
+// Fix round 1 (I2): a first plan after a hold (the booster's unpowered fall) plans from the state the hold leads to and
+// takes effect at the hand-over; a solve slower than the hold is waited for there (the synchronous fallback), so the sim
+// time between snapshot and plan stays the hold. The plan equals the one made at once from the same hold, bit for bit.
+TEST_CASE("A first plan slower than its hold is waited for at the hand-over", "[gnc][scvx_landing][realtime]") {
+    Fixture f;
+    const auto& env = f.session->environment();
+    gnc::FirstPlanHold hold;
+    hold.duration_s = 0.5;
+    hold.engines_running = false;
+    constexpr auto solve_delay = std::chrono::milliseconds(1500);  // an artificially slow solve: longer than the hold
+    const auto slow = [plan = gnc::default_plan_function(), solve_delay](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        std::this_thread::sleep_for(solve_delay);
+        return plan(planner, r);
+    };
+    auto realtime = f.parameters();
+    realtime.realtime = true;
+    gnc::ScvxLandingGuidance at_once(f.session->return_site(f.body->vehicle()), f.parameters());
+    at_once.begin(*f.body, env, f.t0, false, hold);
+    REQUIRE_FALSE(at_once.poll(f.t0).has_value());  // decided, but only at the hand-over
+    REQUIRE(at_once.poll(f.t0 + hold.duration_s) == std::optional<bool>(true));
+    gnc::ScvxLandingGuidance background(f.session->return_site(f.body->vehicle()), realtime, slow);
+    const auto wall = std::chrono::steady_clock::now();
+    background.begin(*f.body, env, f.t0, true, hold);
+    const auto early = background.poll(f.t0 + 0.2);  // before the hand-over: does not wait
+    const double early_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
+    CHECK_FALSE(early.has_value());
+    CHECK(early_ms < 500.0);
+    const auto started = background.poll(f.t0 + hold.duration_s);  // the hand-over: waits for the slow solve
+    const double handover_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
+    std::printf("slow first plan: poll before the hand-over %.1f ms, plan at the hand-over after %.0f ms\n", early_ms,
+                handover_ms);
+    REQUIRE(started == std::optional<bool>(true));
+    CHECK(handover_ms >= 1400.0);
+    CHECK(background.plan_end_epoch() == at_once.plan_end_epoch());
+    CHECK(*at_once.plan_end_epoch() - (f.t0 + hold.duration_s) > 5.0);  // in effect from the hand-over
+    const auto a = at_once.update(*f.body, env, f.t0 + hold.duration_s + 0.2);
+    const auto b = background.update(*f.body, env, f.t0 + hold.duration_s + 0.2);
+    CHECK(a.throttle == b.throttle);
+    CHECK(a.axis_gcrf.x == b.axis_gcrf.x);
+    CHECK(a.axis_gcrf.y == b.axis_gcrf.y);
+    CHECK(a.axis_gcrf.z == b.axis_gcrf.z);
+    CHECK(a.time_to_go_s == b.time_to_go_s);
+}
+
+// The hold's prediction: an unpowered fall keeps its mass and gains less than g x t of sink (the drag at 250 m/s here
+// exceeds the weight: it slows by ~2 m/s); a held thrust burns propellant and brakes.
+TEST_CASE("The first plan's hold flies the planning model forward", "[gnc][scvx_landing][realtime]") {
+    Fixture f;
+    const auto snapshot = gnc::take_descent_snapshot(*f.body, f.session->environment(), f.t0,
+                                                     f.session->return_site(f.body->vehicle()),
+                                                     gnc::plan_frame(f.session->return_site(f.body->vehicle())),
+                                                     f.parameters().snapshot);
+    const auto& x0 = snapshot.initial;
+    const auto fall = gnc::predict_hold(snapshot.model, x0, {}, false, 1.0);
+    CHECK(fall[gnc::descent_index::mass] == x0[gnc::descent_index::mass]);
+    const double sink_gain = x0[gnc::descent_index::velocity] - fall[gnc::descent_index::velocity];  // x up
+    CHECK(sink_gain < constants::standard_gravity_mps2);  // gravity less the drag
+    CHECK(sink_gain > -10.0);
+    const double drop_m = x0[gnc::descent_index::position] - fall[gnc::descent_index::position];
+    CHECK(drop_m > 240.0);  // ~250 m/s over 1 s
+    CHECK(drop_m < 260.0);
+    const auto braked = gnc::predict_hold(snapshot.model, x0, {2.0e7, 0.0, 0.0}, true, 1.0);
+    CHECK(braked[gnc::descent_index::mass] < x0[gnc::descent_index::mass]);
+    CHECK(braked[gnc::descent_index::velocity] > fall[gnc::descent_index::velocity]);
 }
 
 TEST_CASE("A re-plan from a snapshot takes effect half a second later", "[gnc][scvx_landing]") {

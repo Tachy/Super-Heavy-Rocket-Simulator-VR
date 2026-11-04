@@ -24,6 +24,9 @@ public:
     BackgroundTask& operator=(const BackgroundTask&) = delete;
 
     bool busy() const { return pending_.valid(); }  // submitted and not yet collected
+    bool ready() const {  // its result is there (not yet collected)
+        return pending_.valid() && pending_.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    }
     void submit(std::function<T()> work) {
         if (busy()) throw std::logic_error("BackgroundTask::submit while a task is pending");
         pending_ = std::async(std::launch::async, std::move(work));

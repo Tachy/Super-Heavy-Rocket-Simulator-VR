@@ -344,6 +344,15 @@ private:
     void start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     void explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                           ReturnCommand& cmd);
+    std::unique_ptr<ScvxLandingGuidance> landing_guidance() const;  // the landing burn's guidance before its first plan
+    // Real-time play (Task 11b fix round 1): the first plan on the worker, `hold_s` before the predicted ignition.
+    bool realtime_first_plan() const;
+    void begin_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                       double hold_s);
+    // the burn prediction's stop height at least stop_height_trend_s ago (its trend: [E] 1 s; tick to tick it jitters)
+    std::optional<std::pair<time::Epoch, double>> last_stop_height_;
+    static constexpr double stop_height_trend_s = 1.0;
+    std::unique_ptr<ScvxLandingGuidance> pending_;  // its first plan under way (real-time play); last: destroyed first
 };
 
 }  // namespace starsim::gnc

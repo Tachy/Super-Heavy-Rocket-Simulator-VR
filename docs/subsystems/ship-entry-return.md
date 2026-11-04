@@ -132,11 +132,12 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   used only while no flown flip has settled - logged once per cause (`[gate-aim] analytic flip model ...`: "did not
   settle" / "no flip flown forward yet"), counted in `ShipGateAim::analytic_aims()` (N4). Checks: seed-18 gate from the exact state identical to the
   session's flip (4.93 s, 130.7 m, +34.6 m/s), from the re-aim's built state 4.80 s, 119.6 m, +32.2 m/s (-3/-8/-7 %);
-  Mach 2.6 flight with the N3 refresh (Task 11b): predicted flip end 3.48 s vs flown 3.53 s, gate 797 m, caught 0.18 m /
-  0.95 m/s sink with 10.3 t left (before N3: 3.92 vs 3.93 s, 72.1 m / +25.8 m/s vs ~71.5 m / +25.4 m/s; lead
-  ~164 m at v0 5.8 m/s, the analytic model: 252 m). Not in the lead: the plans' non-maximal braking; the first plan
-  takes effect at its snapshot (in real-time play it arrives later while the flip command holds, see "Planner work off
-  the sim thread"), so no latency term. The lead lies on the line tower ->
+  Mach 2.6 flight with the N3 refresh (Task 11b): the last refresh predicted the flip end 3.48 s vs flown 3.53 s, gate
+  797 m, caught 0.18 m / 0.95 m/s sink with 10.3 t left (before N3 the aim's last refresh, 803 m before the gate at
+  along 5.76 / sink 96.8 m/s: 3.83 s vs flown 3.93 s; from the exact gate state 3.92 s, 72.1 m / +25.8 m/s vs ~71.5 m /
+  +25.4 m/s; lead ~164 m at v0 5.8 m/s, the analytic model: 252 m). Not in the lead: the plans' non-maximal braking;
+  the first plan takes effect at its snapshot (in real-time play at the hand-over after the flip-thrust hold, planned
+  from the state the hold leads to - see "Planner work off the sim thread"), so no latency term. The lead lies on the line tower ->
   pad with `EntryTarget::nose_direction_itrf` to the tower; only that approach is robust (the arms stand across the
   line). The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): steering into the nose
   sector at fraction 0.2 (alpha ~86 deg), the turn ending inside its nearest edge by the lag at the turn's end [D]
@@ -234,28 +235,49 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   it is due, exactly as before - the same functions on the same inputs, so the same results (checked bit for bit:
   "A first plan on the worker equals the one made at once", "The flip prediction on a worker equals the one on the sim
   thread", "A far deorbit re-plan on the worker equals the one on the sim thread").
-  - Ship's first catch plan (`ScvxLandingGuidance::begin` / `poll`, `ShipLandingGuidance` holds the flip command
-    meanwhile; the refusal chain catch -> abort -> abort without the water runs from the one snapshot; the plan takes
-    effect at its snapshot as before, the tracking joins it where the ship is). Booster and HLS first plans still use
-    the synchronous `start`.
-  - Gate lead's flip prediction (`ShipGateAim`, a copy of the ship and a `vehicle::WorkerEnvironment`); the previous
-    prediction aims until the new one arrives.
-  - Far deorbit re-plans (`prepare_deorbit_replan` -> `compute_deorbit_plan` -> `apply_deorbit_replan`: planner, reach
-    check and the boil-off flight to the burn); the old plan stays armed (its burn is >= 3 h away); a result of a
-    return planned anew since (`deorbit_generation_`) is dropped.
-  - Key R (`begin_ship_return` / `poll_ship_return`; the binding posts it as a `SessionRunner::post_deferred` command:
-    the session flies on, later commands wait, `command_finished` follows the plan): the 24 h drag flight, the planner
-    and the boil-off flight.
+  - First landing plans of the ship, the booster and the HLS (`ScvxLandingGuidance::begin` / `poll` with a
+    `gnc::FirstPlanHold`, fix round 1): planned from the state the hold leads to (ship: flip thrust along the axis;
+    booster: the unpowered fall, begun when the stop height's trend puts the ignition within the hold, lit at the
+    hand-over; HLS: the braking thrust, begun the hold before the approach t_go) and in effect at the hand-over; a plan
+    not there by then is waited for, so the sim time between snapshot and plan is the hold (<= 3 s, 1.3 x the latest
+    measured wall time; see gnc-core). The refusal chain catch -> abort -> abort without the water plans from the same
+    predicted state; an abort requested meanwhile turns a catch plan that arrives into an abort plan from it (M1).
+  - Gate lead's flip prediction (`ShipGateAim`, a copy of the ship, one `vehicle::WorkerEnvironment` for all refreshes);
+    the previous prediction aims until the new one arrives; switched to warp meanwhile it is waited for.
+  - Return plans: key R (the binding's `SessionRunner::post_deferred` command follows request id
+    `ship_return_request_outcome`: ends with "Rückkehrplanung abgebrochen: eine andere Rückkehr wurde geplant" when a
+    mission leg plans another return meanwhile), the ISS departure leg (stays in Departure "Rückkehr wird geplant"),
+    the lunar b4 hand-over (its status via the request's continuation), the tanker reserve at the Docked leg
+    (`poll_tanker_reserve`: both return plans and the boil-off flight), the refuelling campaign's first tanker return
+    (the whole side flight, booked when it arrives, at the latest at the campaign's end); far deorbit re-plans
+    (`prepare_deorbit_replan` -> `compute_deorbit_plan` -> `apply_deorbit_replan`). The session polls them itself each
+    step and waits for them once `ship_return_budget_s` (60 s [E]) of sim time passed since the snapshot (no coast past
+    it) - at warp 1 never reached, at warp the plan lands within a minute of its snapshot. Applying checks the live
+    state (I1): a return plan whose burn is no longer beyond its preparation (`burn_still_ahead`, burn_lead_s) is never
+    armed and is planned again from the state then (`ship_return_resubmits`); a re-plan is dropped when the armed
+    burn's preparation has begun or its new burn came too close (`deorbit_replans_dropped`; the old plan flies).
   - `vehicle::WorkerEnvironment`: the session's interpolated ephemeris and orientations fill their node caches on demand
     (not thread-safe), so each worker gets its own on the same CSPICE sources (serialised by `detail::lock_spice`) and
     grids; a node is a pure function of its index. Each job owns copies of its inputs (vehicle copies, the onboard
     guidance, request structs); results are read only after the future's get.
-  - Still on the sim thread in real-time play: `plan_ship_return` from the ISS departure leg, the lunar return's b4
-    hand-over and the refuelling campaign; `tanker_reserve` (ship_return_preview: drag flight + planner); the
-    booster's and the HLS's first landing plans; the entry guidance's own predictor-corrector cycles.
-  - Diagnostics: `FlightSession::step_timing()` (wall time of each advance_to step, count over one tick); hidden cases
-    "Real-time play: entering ship from Mach 2.6 into the arms at the wall clock" (paced to the wall clock) and
-    "Real-time play: a far deorbit re-plan off the sim thread".
+  - Still on the sim thread in real-time play: the entry guidance's own predictor-corrector cycles (its first after
+    placement ~55 ms), the refuelling campaign's live re-plans (`plan_refuelling_campaign`); a new request or the
+    session's end waits for a running job (no cancellation; up to the job's rest).
+  - Diagnostics: `FlightSession::step_timing()`; `STARSIM_DEBUG_REALTIME` prints each path's sim-thread share and
+    worker time (and "at once" the synchronous hold); `STARSIM_REALTIME_PLANNING` starts every session in real-time
+    planning (unpaced test runs: the waits at the hand-overs show the worker times); hidden cases "Real-time play:
+    entering ship from Mach 2.6 into the arms at the wall clock" (paced) and "Real-time play: a far deorbit re-plan off
+    the sim thread".
+  - Holds on the sim thread, synchronous -> real-time play (fix round 1, this machine, `STARSIM_DEBUG_REALTIME`):
+    ship first catch plan 2.3 s step (Task 11b base) -> 0.1 ms begin, worker 1.7 s inside its 2.43 s hold, no wait
+    (paced Mach 2.6: flip + burn 7719 steps, 0 over 5 ms, max 1.1 ms; caught 0.25 m / 0.97 m/s); booster first plan
+    694 ms -> 0.1 ms (worker 0.7 s, hold 1.23 s; caught, pin load 1.67 MN against 1.30 MN); HLS approach plan
+    430 / 473 ms -> 0.1 ms (worker 0.42 / 0.48 s); key R 9.3 s -> 12 ms begin + 0.1 ms apply (paced: 1332 steps,
+    0 over, max 2.8 ms); ISS departure return 8.8 s -> same split; lunar b4 return 8.4 s -> same split; tanker reserve
+    38.2 s -> 2.4 ms begin (worker 36.6 s); far re-plan 8.8 s -> max step 15.2 ms (paced). The refuelling campaign's
+    side flight of the first tanker return is not measured (its plan alone ~9 s, then days of flight).
+    Physics cost of the holds (forced real-time, unpaced): b4 aircatch caught with 9.1 t left against 11.6 t
+    synchronous (the 2.43 s minimum-throttle hold), the booster with 53.5 t at ignition as before.
   `AutopilotState::Return` ("Rückkehr") coasts to 300 s before the entry interface, then entry guidance and flip/catch
   take over. From 200 km / 26.5 deg: burn after ~21-22 h, 65-78 m/s, 5.6-6.8 t.
 

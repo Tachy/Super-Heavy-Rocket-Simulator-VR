@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/sim/session_runner.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -288,8 +290,8 @@ TEST_CASE("Real-time play: a far deorbit re-plan off the sim thread", "[.][ship]
     const double begin_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
     session.reset_step_timing();
     while (!planned) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        session.advance_to(session.epoch() + 1.0, 400000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));  // warp 1: 50 ms of sim per 50 ms of wall time
+        session.advance_to(session.epoch() + 0.05, 400000);
         planned = session.poll_ship_return(false);
     }
     const double plan_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wall).count();
@@ -304,8 +306,8 @@ TEST_CASE("Real-time play: a far deorbit re-plan off the sim thread", "[.][ship]
     session.reset_step_timing();
     while (session.epoch() < replanned) {
         session.advance_to(session.epoch() + 60.0, 400000);
-        // real time: hours pass before the burn; the test waits for the worker instead
-        while (session.deorbit_replan_pending()) std::this_thread::sleep_for(std::chrono::milliseconds(5)), session.advance_to(session.epoch() + 1.0, 400000);
+        // real time: hours pass before the burn; the re-plan itself at warp 1 (50 ms of sim per 50 ms of wall time)
+        while (session.deorbit_replan_pending()) std::this_thread::sleep_for(std::chrono::milliseconds(50)), session.advance_to(session.epoch() + 0.05, 400000);
     }
     const auto timing = session.step_timing();
     std::printf("real-time deorbit: %ld steps through the re-plans, %ld over %.0f ms, max %.1f ms, %d re-plans applied\n",
@@ -349,6 +351,65 @@ TEST_CASE("A far deorbit re-plan on the worker equals the one on the sim thread"
     CHECK(a.node.delta_v_gcrf_mps.z == b.node.delta_v_gcrf_mps.z);
     CHECK(a.crossrange_m == b.crossrange_m);
     CHECK(a.boil_off_kg == b.boil_off_kg);
+}
+
+// Fix round 1 (I1): a background return plan is checked against the state when it is applied - time warp carried the
+// ship past its burn while it was planned: never armed, planned again from the state then (a later pass).
+TEST_CASE("Real-time play: a return plan whose burn passed meanwhile is planned again", "[ship][session][deorbit][realtime]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    session.set_realtime_planning(true);
+    session.set_ship_return_budget_s(1.0e7);  // never waited for by the sim time: the test lets the session run ahead
+    REQUIRE_FALSE(session.begin_ship_return(deorbit_parameters(m), true).has_value());
+    while (!session.ship_return_ready()) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // the pass it plans lies 20-22 h ahead (LEO): warp 30 h before the session sees the result (a result that arrives
+    // late - the session's own polls held)
+    session.hold_ship_return_polls_for_test(true);
+    session.advance_to(session.epoch() + 30.0 * 3600.0, 400000);
+    session.hold_ship_return_polls_for_test(false);
+    const auto planned = session.poll_ship_return(true);
+    REQUIRE(planned.has_value());
+    REQUIRE(session.ship_return_plan() != nullptr);
+    std::printf("stale return plan: %d re-submitted, new burn %.1f h after the warp\n", session.ship_return_resubmits(),
+                (session.ship_return_plan()->node.epoch - session.epoch()) / 3600.0);
+    CHECK(session.ship_return_resubmits() == 1);
+    CHECK(*planned);
+    CHECK(session.ship_return_plan()->node.epoch - session.epoch() > sim::FlightSession::burn_preparation_s);
+}
+
+// Fix round 1 (I4): key R's deferred command (as the binding posts it) ends when a mission leg plans another return
+// meanwhile - with a German note - and the commands after it run.
+TEST_CASE("Real-time play: key R's planning ends when another return replaces it", "[ship][session][deorbit][realtime][session_runner]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::SessionRunner runner(std::make_unique<sim::FlightSession>(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR),
+                              [](const sim::FlightSession&, time::Epoch) {});
+    runner.post([&](sim::FlightSession& s) {
+        place_mission(s, m);
+        s.set_realtime_planning(true);
+    });
+    std::atomic<bool> begun = false;
+    std::optional<bool> outcome;
+    std::string note;
+    const auto key_r = runner.post_deferred([&](sim::FlightSession& s) -> sim::SessionRunner::Poll {
+        s.begin_ship_return(deorbit_parameters(m), true);
+        begun = true;
+        return [&, id = s.ship_return_request()](sim::FlightSession& session) {
+            outcome = session.ship_return_request_outcome(id, &note);
+            return outcome.has_value();
+        };
+    });
+    while (!begun) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    runner.set_latest([&](sim::FlightSession& s) { s.plan_ship_return(deorbit_parameters(m)); });  // a leg's return
+    std::atomic<bool> later = false;
+    const auto after = runner.post([&](sim::FlightSession&) { later = true; });
+    REQUIRE(runner.wait_idle(120.0));
+    CHECK(runner.result(key_r).done);
+    CHECK(runner.result(after).done);
+    CHECK(later);
+    REQUIRE(outcome.has_value());
+    CHECK_FALSE(*outcome);
+    CHECK(note == "Rückkehrplanung abgebrochen: eine andere Rückkehr wurde geplant");
 }
 
 // Refuelling r2: the onboard computer counts the bare hull's boil-off until the burn - 7 t above the landing

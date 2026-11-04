@@ -588,8 +588,15 @@ void FlightSession::lunar_return_to_b4() {
     }
     const auto deorbit = lunar_return_->deorbit;
     lunar_abort("Rückkehr nach Starbase (b4)");  // the lunar flight ends here (autopilot Off): b4 takes over
-    if (!plan_ship_return(deorbit)) {
-        lunar_status_ = deorbit_plan_ ? deorbit_plan_->reason : std::string("Keine Rückkehr möglich");
+    const auto refused = [this] { lunar_status_ = deorbit_plan_ ? deorbit_plan_->reason : std::string("Keine Rückkehr möglich"); };
+    // real-time play (fix round 1, I3): the return planned on a worker while the ship coasts on; else at once
+    const auto planned = begin_ship_return(deorbit, realtime_planning_);
+    if (!planned) {
+        ship_return_then_ = [refused](bool ok) {
+            if (!ok) refused();
+        };
+    } else if (!*planned) {
+        refused();
     }
 }
 
