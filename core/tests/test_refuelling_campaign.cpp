@@ -69,8 +69,8 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(r.tanker.mission == "tanker_flight");
     CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(120.3e3));  // planner plan Task 12 re-measure (tanker 171 t, stretched tanks; was 68.4)
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
-    CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(1.1e3));  // flown campaign (ascent Task 5 re-calibration)
-    CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(2.0e3));
+    CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(2.5e3));  // flown campaign re-calibration 2026-11-04 (120.3 t tanker; was 1.1)
+    CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(3.5e3));  // was 2.0
     CHECK(r.hls.mission == "hls_refuel");
     CHECK(r.hls.main_at_docking_kg == Catch::Approx(198.2e3));  // Raptor nozzle 1.30 m re-measure 2026-11-03 (was 202.9)
     // the reference tanker is the configured one

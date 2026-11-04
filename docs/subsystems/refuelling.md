@@ -315,7 +315,7 @@ Plan files `docs/superpowers/archive/plans/2026-10-20-refuelling-r6-campaign.md`
   includes its phasing boil-off difference), held in the depot at its arrival; `CampaignFlight::phasing_orbit`; the
   depot-height lever shifts the candidates (insertion stays), so `altitude_cost_kg` keeps only the deorbit difference
   (Hohmann up from 200 km at the docked mass, deorbit difference to a 50 km perigee [E] at the return mass x 1.10).
-  Calibration (user 2026-10-21) [D]: `campaign_offset_below_t` 1.7 / `campaign_offset_above_t` 2.25 by the phasing
+  Calibration (user 2026-10-21) [D]: `campaign_offset_below_t` 2.5 / `campaign_offset_above_t` 3.5 (2026-11-04 re-calibration against the 120.3 t tanker, see the toml comment; 1.7 / 2.25 before) by the phasing
   orbit's periapsis against the depot's mean radius; the tanker's phasing boil-off with the flown free coast's 3.5
   t/day (orbit average at fixed LVLH said 15.9) and the HLS's 0.47 t/day [D].
 - Phasing orbit per launch window (f1): each window picks its phasing orbit (tanker only; depot passive).
@@ -458,11 +458,11 @@ Plan `docs/superpowers/archive/plans/2026-10-21-refuelling-f2-flown-campaign.md`
   tanker residue 152.6 t, rendezvous 19.78 t, delivered LOX / CH4 95.0 / 25.3 t, settling gas 1.20 t, main at undock
   10.85 t (the reserve planned from the return), at catch 1.24 t; depot fill 134.8 t; HLS main at docking 198.2 t
   (unchanged). Before (2026-11-03, Raptor nozzle 1.30 m): 98.1 / 15.66 / 54.6 / 13.8 / 0.98 / 12.59 / 0.68 t, depot
-  63.1 t. The campaign offsets were not re-calibrated (the full flown campaign was not re-flown); above-depot pad flight
+  63.1 t. The campaign offsets were re-calibrated afterwards (below 1.1 -> 2.5, above 2.0 -> 3.5 t; full flown run 2026-11-04: 7 tankers, 32.1 d, HLS at the depot 1118.8 t, comparison passed); above-depot pad flight
   220 x 240 km, Waypoint 0 9.9 h after liftoff (window 10.0 h). The "Numbers" above are the earlier measure.
 - Calculator answer (default, depot placed at 200 km, 48 h): **7 tanker flights, 25.25 days** (2026-11-04, planner plan
-  Task 12; 13 / 52.4 d before the tanker stretch, 12 / 51.0 d before the Raptor nozzle) (120.3 t per reference tanker;
-  levers now: 300 km 7 / 17.3 d, tanker dry -10 t 6 / 23.2 d). `--reference-phasing`: 14 / 224.7 d. Cadence: the 24 h pad turnaround against plane crossings
+  Task 12, unchanged by the offset re-calibration; 13 / 52.4 d before the tanker stretch, 12 / 51.0 d before the Raptor nozzle) (120.3 t per reference tanker;
+  levers now: 300 km 7 / 17.3 d, tanker dry -10 t 6 / 23.3 d). `--reference-phasing`: 7 / 114.1 d. Cadence: the 24 h pad turnaround against plane crossings
   ~23.4 h apart lets only every other crossing fly (`--interval-h 12`: 12 / 23.1 d); the gaps between runs are phases
   no candidate closes in 48 h; launches in runs of four per ~13.8 d phase cycle (r6 f1: 150 x 190 km when the depot is
   ahead, 220 x 240 / 250 x 270 km when behind). Levers (f1, 12 / 46.5 d baseline then): 300 km 13 / 31.9 d; tanker dry
