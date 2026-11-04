@@ -100,7 +100,8 @@ on top of that relief.
   float grid, area fraction, |lat| <= 60 deg, no data = NaN); `LunarRocks` without a map then throws a German error
   naming `fetch.py diviner_rock_abundance`, like the LOLA loader (decision: error, not a silent fallback). Inside the
   map the factor is map / `abundance_reference_area_fraction` (0.0068), blended smoothstep to 1 over the last 5 deg
-  below the map edge (`abundance_blend_band_rad`, 150 km: no step); a no-data pixel gives the uniform law.
+  below the map edge (`abundance_blend_band_rad`, 150 km: no step). No-data pixels are filled at load (`fill_rock_abundance_gaps`: mean of the valid 8-neighbours, front by
+  front, deterministic), so the factor is continuous across gaps; an all-NaN map gives the uniform law.
 - `cover_fraction(min, max)`: area share (pi/4) D^2 integrated over the law = the generated rocks' real plan-view area
   (0.0311 for 0.01-10 m, 0.00678 for 0.5-10 m). `rocks_touching(unit, r, min)` returns rocks with base within r + a
   (hazard / contact queries; cells searched within r + 1.77 D_max).
@@ -199,9 +200,10 @@ on top of that relief.
   - cover fraction: formula 0.0311 / 0.00678; real plan-view area of the 8083 rocks of 0.05-0.2 m in a 43 m disc at the
     site, measured with `rock_top` on 64 sunflower columns per rock: 0.00748 vs formula 0.00745 (+0.37 %, tolerance
     5 %); measured footprint / sum of pi D^2 / 4 = 0.9933 (tolerance 2 %); every rock's a <= 1.769 D;
-  - abundance source: "uniform" ignores a map, "diviner" without a map throws (names the fetch target), no-data pixels
-    give the uniform law; a 12 x 36 file in the real format (TOML header + int16, one missing DN) loads: pixel centres,
-    longitude wrap, NaN skipped in the bilinear; a missing file names fetch.py;
+  - abundance source: "uniform" ignores a map, "diviner" without a map throws (names the fetch target), an all-NaN map
+    gives the uniform law; gap fill: filled values lie in the valid range and the factor swept across a 10 x 20 hole and
+    a single missing pixel changes by no more than the map's own pixel step; a 12 x 36 file in the real format (TOML
+    header + int16, one missing DN) loads: pixel centres, longitude wrap, the gap filled with its neighbours' mean; a missing file names fetch.py;
   - `[slow]` summed roughness (median plane-detrended 125 mm window std, 600 windows over 2 km, rock tops entered as
     max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 4.049 mm vs the measured total 4.000 mm
     (+1.2 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.232 mm (+5.8 %). The corner excess of the skewed
@@ -304,8 +306,6 @@ geometry (g near 0) is not observed there. The published global-average table of
   call `load_rock_abundance_map`, and with the shipped "diviner" the map then has to be fetched.
 - The real map's median (0.002-0.004) is about half the reference 0.0068: with "diviner" the mid latitudes get ~0.5 x
   the Surveyor VI population. Points at the reference's 0.5 m lower limit or at the law (open, not changed).
-- No-data pixels (17 % of the equator row) fall back to the uniform law: a population step of up to ~2 x at the edge
-  of a gap (948 m pixels). A gap fill (nearest valid / smoothing) would remove it.
 - Size convention of the Surveyor fragment counts (long dimension vs mean / area-equivalent) not determined from the
   original paper; D is taken as the plan-view-area-equivalent diameter (exact for Diviner's area fraction). If the
   counts used the long dimension, rocks of a given count are ~10-30 % smaller than generated.

@@ -12,7 +12,7 @@ namespace starsim::environment {
 // Local rock abundance map: area fraction of the rocks Diviner sees (diameter >= abundance_reference_min_diameter_m)
 // on a simple-cylindrical grid over |latitude| <= lat_limit_rad (the Diviner GDR L3 rock abundance product covers
 // 60 S - 60 N). Line 0 is the northern edge, sample 0 longitude 0 (east positive); pixel centres at half steps.
-// No-data pixels are NaN.
+// No-data pixels are NaN (make_rock_abundance_map fills them).
 struct RockAbundanceMap {
     int lines = 0, samples = 0;
     double lat_limit_rad = 0.0;
@@ -22,7 +22,12 @@ struct RockAbundanceMap {
     double at(double latitude_rad, double longitude_rad) const;
 };
 
-// Converts the Diviner file (DN -> area fraction, missing DN -> NaN). Throws std::invalid_argument when its grid is
+// Replaces every NaN pixel by the mean of its valid neighbours, front by front (deterministic, order independent), so
+// the abundance factor is continuous across gaps: filled values stay within the range of the valid pixels. A map
+// without any valid pixel is left unchanged.
+void fill_rock_abundance_gaps(RockAbundanceMap& map);
+
+// Converts the Diviner file (DN -> area fraction, missing DN -> NaN, then gaps filled by fill_rock_abundance_gaps). Throws std::invalid_argument when its grid is
 // not the layout RockAbundanceMap assumes (lines symmetric about the equator, sample 0 centred half a pixel east of
 // longitude 0, max latitude = lines / 2 / ppd).
 RockAbundanceMap make_rock_abundance_map(const config::RockAbundanceFile& file);

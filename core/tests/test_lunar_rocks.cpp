@@ -520,13 +520,59 @@ TEST_CASE("abundance_source selects the abundance law", "[moon_surface][environm
     } catch (const std::invalid_argument& e) {
         CHECK(std::string(e.what()).find("fetch.py diviner_rock_abundance") != std::string::npos);
     }
-    // A no-data pixel falls back to the uniform law.
-    auto holes = std::make_shared<environment::RockAbundanceMap>(*constant_map(3.0 * cfg.abundance_reference_area_fraction));
-    std::fill(holes->area_fraction.begin(), holes->area_fraction.begin() + holes->samples * 60,
-              std::numeric_limits<float>::quiet_NaN());  // northern half
-    const LunarRocks holey(diviner_detail(), holes);
-    CHECK(holey.abundance_factor(direction(30.0 * deg, 1.0)) == cfg.abundance_scale);
-    CHECK(std::abs(holey.abundance_factor(direction(-30.0 * deg, 1.0)) - 3.0 * cfg.abundance_scale) < 1e-6);
+    // A map that is entirely no data has nothing to fill from: the uniform law.
+    auto empty = std::make_shared<environment::RockAbundanceMap>(*constant_map(1.0));
+    std::fill(empty->area_fraction.begin(), empty->area_fraction.end(), std::numeric_limits<float>::quiet_NaN());
+    const LunarRocks none(diviner_detail(), empty);
+    CHECK(none.abundance_factor(direction(30.0 * deg, 1.0)) == cfg.abundance_scale);
+}
+
+TEST_CASE("Diviner no-data gaps are filled: the abundance factor has no step", "[moon_surface][environment]") {
+    const auto& cfg = shared_detail()->config().rocks;
+    // A smooth synthetic map (0.5 .. 1.5 x reference, periodic in longitude) with a hole of 10 x 20
+    // pixels and a single missing pixel.
+    auto map = std::make_shared<environment::RockAbundanceMap>(*constant_map(1.0));
+    const double ref = cfg.abundance_reference_area_fraction;
+    const auto at = [&](int l, int s) -> float& { return map->area_fraction[static_cast<size_t>(l * map->samples + s)]; };
+    for (int l = 0; l < map->lines; ++l) {
+        for (int s = 0; s < map->samples; ++s) {
+            at(l, s) = static_cast<float>(ref * (1.0 + 0.5 * std::sin(0.05 * l) * std::cos(constants::two_pi * 3.0 * s / map->samples)));
+        }
+    }
+    float lo = std::numeric_limits<float>::max(), hi = 0.0f;
+    double max_pixel_step = 0.0;  // the map's own pixel-to-pixel variation
+    for (int l = 0; l < map->lines; ++l) {
+        for (int s = 0; s < map->samples; ++s) {
+            lo = std::min(lo, at(l, s));
+            hi = std::max(hi, at(l, s));
+            if (s + 1 < map->samples) max_pixel_step = std::max(max_pixel_step, double(std::abs(at(l, s + 1) - at(l, s))));
+        }
+    }
+    const auto nan = std::numeric_limits<float>::quiet_NaN();
+    for (int l = 40; l < 50; ++l) {
+        for (int s = 100; s < 120; ++s) at(l, s) = nan;
+    }
+    at(80, 30) = nan;
+    environment::fill_rock_abundance_gaps(*map);
+    for (const float v : map->area_fraction) {
+        REQUIRE(!std::isnan(v));
+        CHECK(v >= lo);
+        CHECK(v <= hi);
+    }
+    const LunarRocks with_map(diviner_detail(), map);
+    // Sweep along longitude through the hole (line 45) and the single pixel (line 80) in 1/8-pixel steps; the factor's
+    // change between neighbours stays within the map's own pixel step (as a factor).
+    const double bound = cfg.abundance_scale * max_pixel_step / ref;
+    const double lat_hole = (60.0 - 45.5 * 120.0 / map->lines) * deg;
+    const double lat_single = (60.0 - 80.5 * 120.0 / map->lines) * deg;
+    for (const double lat : {lat_hole, lat_single}) {
+        double previous = with_map.abundance_factor(direction(lat, 0.0));
+        for (int k = 1; k <= 8 * map->samples; ++k) {
+            const double f = with_map.abundance_factor(direction(lat, constants::two_pi * k / (8.0 * map->samples)));
+            CHECK(std::abs(f - previous) <= bound);
+            previous = f;
+        }
+    }
 }
 
 TEST_CASE("The Diviner rock abundance file loads into the map", "[moon_surface][environment]") {
@@ -558,10 +604,16 @@ TEST_CASE("The Diviner rock abundance file loads into the map", "[moon_surface][
     CHECK(std::abs(map->at(35.0 * deg, 45.0 * deg) - 0.001 * (10 * 2 + 4 % 3)) < 1e-6);
     // Longitude wraps: between sample 35 (355 deg) and sample 0 (5 deg).
     CHECK(std::abs(map->at(-5.0 * deg, 0.0) - 0.001 * 0.5 * ((10 * 6 + 35 % 3) + (10 * 6 + 0))) < 1e-6);
-    // The missing pixel (line 5, sample 7) is NaN and bilinear interpolation skips it.
-    CHECK(std::isnan(map->area_fraction[5 * samples + 7]));
-    CHECK(std::isnan(map->at(5.0 * deg, 75.0 * deg)));  // its centre (latitude 5 deg, longitude 75 deg)
-    CHECK(std::abs(map->at(5.0 * deg, 80.0 * deg) - 0.001 * (10 * 5 + 8 % 3)) < 1e-6);  // half way to sample 8
+    // The missing pixel (line 5, sample 7) is filled at load.
+    CHECK(!std::isnan(map->area_fraction[5 * samples + 7]));
+    // The loader fills it with the mean of the 8 pixels around it.
+    double ring = 0.0;
+    for (int dl = -1; dl <= 1; ++dl) {
+        for (int ds = -1; ds <= 1; ++ds) {
+            if (dl != 0 || ds != 0) ring += 0.001 * (10 * (5 + dl) + (7 + ds) % 3);
+        }
+    }
+    CHECK(std::abs(map->at(5.0 * deg, 75.0 * deg) - ring / 8.0) < 1e-6);  // its centre (5 deg, 75 deg)
     // "uniform" reads nothing; "diviner" with no file names fetch.py.
     diviner_cfg.abundance_source = "uniform";
     CHECK(environment::load_rock_abundance_map(diviner_cfg, dir / "absent") == nullptr);

@@ -43,6 +43,49 @@ double RockAbundanceMap::at(double latitude_rad, double longitude_rad) const {
     return weight > 0.0 ? sum / weight : std::numeric_limits<double>::quiet_NaN();
 }
 
+void fill_rock_abundance_gaps(RockAbundanceMap& map) {
+    const auto index = [&](int l, int s) {
+        return static_cast<size_t>(l) * static_cast<size_t>(map.samples) +
+               static_cast<size_t>(((s % map.samples) + map.samples) % map.samples);
+    };
+    std::vector<size_t> open;
+    for (size_t i = 0; i < map.area_fraction.size(); ++i) {
+        if (std::isnan(map.area_fraction[i])) open.push_back(i);
+    }
+    // Front by front: a gap pixel takes the mean of its valid 8-neighbours as of the front's start (so the result does
+    // not depend on the scan order); the front advances one pixel per pass until the gap is closed.
+    std::vector<float> filled;
+    while (!open.empty()) {
+        filled.assign(open.size(), std::numeric_limits<float>::quiet_NaN());
+        for (size_t k = 0; k < open.size(); ++k) {
+            const int l = static_cast<int>(open[k] / static_cast<size_t>(map.samples));
+            const int s = static_cast<int>(open[k] % static_cast<size_t>(map.samples));
+            double sum = 0.0;
+            int n = 0;
+            for (int dl = -1; dl <= 1; ++dl) {
+                if (l + dl < 0 || l + dl >= map.lines) continue;
+                for (int ds = -1; ds <= 1; ++ds) {
+                    const float v = map.area_fraction[index(l + dl, s + ds)];
+                    if (std::isnan(v)) continue;
+                    sum += v;
+                    ++n;
+                }
+            }
+            if (n > 0) filled[k] = static_cast<float>(sum / n);
+        }
+        std::vector<size_t> still_open;
+        for (size_t k = 0; k < open.size(); ++k) {
+            if (std::isnan(filled[k])) {
+                still_open.push_back(open[k]);
+            } else {
+                map.area_fraction[open[k]] = filled[k];
+            }
+        }
+        if (still_open.size() == open.size()) break;  // no valid pixel anywhere: nothing to fill from
+        open.swap(still_open);
+    }
+}
+
 RockAbundanceMap make_rock_abundance_map(const config::RockAbundanceFile& file) {
     const double ppd = file.pixels_per_degree;
     const bool layout_ok = file.lines >= 2 && file.samples >= 2 &&
@@ -63,6 +106,7 @@ RockAbundanceMap make_rock_abundance_map(const config::RockAbundanceFile& file) 
         return dn == file.missing_dn ? std::numeric_limits<float>::quiet_NaN()
                                      : static_cast<float>(dn * file.dn_scale);
     });
+    fill_rock_abundance_gaps(map);
     return map;
 }
 
