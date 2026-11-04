@@ -63,7 +63,8 @@ def legs_block(hls):
     return {"stroke_m": legs["stroke_m"], "stroke_axis": [1.0, 0.0, 0.0], "foot_station_m": legs["foot_station_m"],
             "footprint_radius_m": legs["footprint_radius_m"], "hull_radius_m": legs["hull_radius_m"],
             "rig": ll.leg_rig(hls["drawing"]["landing_leg"], legs),
-            "legs": [{"leg_node": n["leg_node"], "foot_node": n["foot_node"], "pusher_node": n["pusher_node"], "mount_node": n["mount_node"],
+            "legs": [{"leg_node": n["leg_node"], "shock_node": n["shock_node"], "stem_node": n["stem_node"], "foot_node": n["foot_node"],
+                      "pusher_node": n["pusher_node"], "mount_node": n["mount_node"],
                       "azimuth_deg": n["azimuth_deg"], "foot_m": list(ll.foot_point(legs, n["azimuth_rad"]))} for n in ll.foot_nodes(legs)]}
 
 

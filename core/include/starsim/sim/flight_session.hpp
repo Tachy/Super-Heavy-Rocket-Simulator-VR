@@ -1509,6 +1509,11 @@ private:
     void reset_lunar();
     // The descent steps from DescentWait to Lost (flight_session_lunar_descent.cpp).
     void run_lunar_descent_steps(Flying& flying);
+    // The onboard computer's leg safety (Task 6b fix 1), every tick at every control level: a lunar lander's
+    // deployable legs go out once its feet would reach the ground within deploy_time_s + deploy_margin_s in free fall
+    // from the current sink rate (the worst case: no thrust), so they are out before any touchdown. The descent guidance
+    // commands them earlier (braking time-to-go); this covers a pilot's landing.
+    void lunar_leg_safety(Flying& flying);
     void lunar_sun_coast(Flying& flying);  // Sun pointing of a coast (Coast, DescentWait) and its re-points
     void lunar_descent_wait();             // DescentWait for the next descent burn (trim, then DOI)
     bool lunar_descent_burn(const gnc::BurnNode& node, LunarStep step);  // trim / DOI, recorded

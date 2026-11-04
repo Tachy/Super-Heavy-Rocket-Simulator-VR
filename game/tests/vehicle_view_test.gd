@@ -1115,10 +1115,23 @@ func _check_hls_legs() -> bool:
 	legs["compression_m"] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 	view.sync([hls], [], [], [], 0.0, legs)
 	_check((node.find_child("foot_1", false, false) as Node3D).transform.origin.is_zero_approx(), "hls: compression 0 returns the nominal pose")
-	# Task 6b: stowed (deployment 0) every leg part lies within the skin + stowed_thickness_m, outside the skin, on the hull's station span
+	# Task 6b (fix 1): stowed (deployment 0) every leg part lies outside the skin and within the bound of the fold geometry, computed here from the
+	# config's kinematics and the detail table (not from the drawing or the manifest): the leg tube and the folded sleeve on the hinge radius, the pad
+	# flat with its top face sleeve radius + pivot gap off the leg's line, bottom face out, rim at hypot(r_bottom, pad radius); stations from the hinge
+	# less the root radius to the folded pad's centre (hinge + leg + knuckle height - pad height) + the pad radius.
 	var block: Dictionary = models["manifest"]["hls_legs"]
 	var rig: Dictionary = block["rig"]
 	var hull_r := float(block["hull_radius_m"])
+	var detail: Dictionary = TomlLite.parse(FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://").path_join(
+			"../config/vehicles/detail/starship_hls.toml")))["landing_leg"]
+	var hr := float(cfg["hinge_radius_m"])
+	var hs := float(cfg["hinge_station_m"])
+	var kh := float(cfg["knuckle_height_m"])
+	var leg_length := Vector2(float(cfg["foot_station_m"]) + kh - hs, float(cfg["footprint_radius_m"]) - hr).length()
+	var r_bound := maxf(Vector2(hr + float(detail["sleeve_radius_m"]) + float(detail["pad_pivot_gap_m"]) + float(detail["pad_height_m"]),
+			float(detail["pad_radius_m"])).length(), hr + maxf(float(detail["leg_root_radius_m"]), float(detail["sleeve_radius_m"])))
+	var s_bound_lo := hs - float(detail["leg_root_radius_m"])
+	var s_bound_hi := hs + leg_length + kh - float(detail["pad_height_m"]) + float(detail["pad_radius_m"])
 	legs["deployment"] = 0.0
 	view.sync([hls], [], [], [], 0.0, legs)
 	var r_lo := INF
@@ -1126,17 +1139,21 @@ func _check_hls_legs() -> bool:
 	var s_lo := INF
 	var s_hi := -INF
 	for i in azimuths.size():
-		for part: String in ["leg_%d" % i, "foot_%d" % i, "pusher_%d" % i]:
+		for part: String in ["leg_%d" % i, "shock_%d" % i, "stem_%d" % i, "foot_%d" % i, "pusher_%d" % i]:
 			var mi := node.find_child(part, false, false) as MeshInstance3D
+			if mi == null:
+				_check(false, "hls: node %s drawn" % part)
+				return false
 			for v in _mesh_vertices(mi.mesh as ArrayMesh):
 				var p := mi.transform * v
 				r_lo = minf(r_lo, Vector2(p.y, p.z).length())
 				r_hi = maxf(r_hi, Vector2(p.y, p.z).length())
 				s_lo = minf(s_lo, p.x)
 				s_hi = maxf(s_hi, p.x)
-	print("    hls stowed legs: radius %.3f..%.3f m (skin %.2f + %.2f), station %.3f..%.3f m" % [r_lo, r_hi, hull_r, float(rig["stowed_thickness_m"]), s_lo, s_hi])
-	_check(r_hi <= hull_r + float(rig["stowed_thickness_m"]) and r_lo > hull_r and s_lo > 0.0 and s_hi < 52.1,
-			"hls: stowed legs, feet and pushers inside the skin + stowed thickness, outside the skin, above the hull base")
+	print("    hls stowed legs: radius %.3f..%.3f m (skin %.2f, fold bound %.3f), station %.3f..%.3f m (bound %.3f..%.3f)" % [r_lo, r_hi, hull_r, r_bound, s_lo, s_hi, s_bound_lo, s_bound_hi])
+	_check(r_hi <= r_bound + 0.001 and r_lo > hull_r and s_lo >= s_bound_lo - 0.001 and s_hi <= s_bound_hi + 0.001,
+			"hls: stowed legs, sleeves, stems, pads and pushers within the fold geometry's bound, outside the skin, on its station span")
+	_check(r_hi - hull_r < 0.9, "hls: stowed nearly flush (%.3f m off the skin; the pad folded flat)" % (r_hi - hull_r))
 	# deployment 0..1 in 0.05 steps: the foot moves at most 25 % of its path per sample, and lands on the config's point at 1
 	var smooth_ok := true
 	for i in azimuths.size():
@@ -1144,7 +1161,7 @@ func _check_hls_legs() -> bool:
 		var foot_m := Vector3(float(cfg["foot_station_m"]), float(cfg["footprint_radius_m"]) * cos(a), float(cfg["footprint_radius_m"]) * sin(a))
 		var path: Array[Vector3] = []
 		for k in 21:
-			path.append((VehicleModels.hls_leg_pose(rig, float(azimuths[i]), 0.05 * k)["leg"] as Transform3D) * foot_m)
+			path.append((VehicleModels.hls_leg_pose(rig, float(azimuths[i]), 0.05 * k)["foot"] as Transform3D) * foot_m)
 		var total := 0.0
 		var longest := 0.0
 		for k in 20:
@@ -1194,7 +1211,7 @@ func _check_hls_stack_legs() -> bool:
 			booster_top = maxf(booster_top, (xf * v).x)
 	var legs_low := INF
 	for i in 6:
-		for part: String in ["leg_%d" % i, "foot_%d" % i, "pusher_%d" % i]:
+		for part: String in ["leg_%d" % i, "shock_%d" % i, "stem_%d" % i, "foot_%d" % i, "pusher_%d" % i]:
 			var m := hls_node.find_child(part, false, false) as MeshInstance3D
 			var xf := to_view * _relative(m, view)
 			for v in _mesh_vertices(m.mesh as ArrayMesh):

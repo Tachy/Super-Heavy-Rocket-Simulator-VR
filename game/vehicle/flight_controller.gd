@@ -5,14 +5,14 @@ extends Node
 ## to it, and only the onboard-computer commands are active: P ascent autopilot (config/missions/leo_ascent.toml),
 ## O circularize at apoapsis, R return the ship to the site's tower (config/missions/ship_return_starbase.toml).
 ## Manual control (manual_control, later only in the cockpit and only for the selected vehicle): W/S pitch, A/D yaw,
-## Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps, K cutoff, G stage separation, M control mode,
-## X autopilot off; HOTAS (stick + throttle found by name): config/input_hotas.toml.
+## Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps, K cutoff, G stage separation, B landing legs out (irreversible;
+## the onboard computer deploys them anyway before a lunar touchdown), M control mode, X autopilot off; HOTAS (stick + throttle found by name): config/input_hotas.toml.
 
 const THROTTLE_KEY_RATE := 0.5  # per second
 ## [E] Countdown of a free launch (T-minus at the start, s); the sequence then runs from the countdown clock.
 const LAUNCH_COUNTDOWN_S := 60.0
 ## Single pilot actions of manual control (inactive in the external view).
-const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_M, KEY_X]
+const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_B, KEY_M, KEY_X]
 ## autopilot_status().state of a disengaged autopilot (sim::to_string(AutopilotState::Off)).
 const AUTOPILOT_OFF := "aus"
 ## last_event while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
@@ -271,6 +271,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_G:
 			sim.stage()
 			last_event = "Stufentrennung"
+		KEY_B:
+			sim.deploy_legs()
+			last_event = "Landebeine ausfahren"
 		KEY_P:
 			_engage_ascent()
 		KEY_O:

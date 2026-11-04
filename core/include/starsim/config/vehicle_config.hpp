@@ -257,6 +257,13 @@ struct LandingLegConfig {
     // locked deploy_margin_s before the powered descent's hand-over to the approach (gnc::LunarLandingGuidance).
     double deploy_margin_s = 0.0;
     double max_touchdown_tilt_rad = 0.0;
+    // Leg kinematics of a deployable lander leg (HLS, Task 6b fix 1; 0 = not given): a rigid leg hinged at
+    // (hinge_station_m from the stage bottom, hinge_radius_m off the axis) that lies along the hull when stowed and
+    // turns down and out to the knuckle knuckle_height_m above the foot; the foot (stem and pad) folds into the leg's
+    // line when stowed (contact::leg_pose). Read by the station collision (the legs where they are).
+    double hinge_station_m = 0.0;
+    double hinge_radius_m = 0.0;
+    double knuckle_height_m = 0.0;
 };
 
 // Heat shield and structure of a vehicle that enters the atmosphere (the ship). Judged while the stage flies alone.

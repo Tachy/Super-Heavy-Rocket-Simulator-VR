@@ -224,10 +224,15 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - **Autopilot** [Entschieden 2026-10-22]: In den Außenansichten fliegt immer der Autopilot. Beim Wechsel in die
   Außenansicht übernimmt er das gesteuerte Fahrzeug, falls er aus ist: auf der Rampe der Aufstiegs-Autopilot (wie
   Taste P), im Orbit ohne Plan der Orbit-Zustand des Autopiloten. Handsteuerung (Nicken/Gieren/Rollen, Schub, HOTAS)
-  und die Einzelaktionen I (Zünden), L (Klammern lösen), K (Aus), G (Stufentrennung), M (Steuermodus) und
-  X (Autopilot aus) sind hier ohne Wirkung; es bleiben die Befehle an den Bordrechner: P (Aufstieg), O (Zirkularisieren),
+  und die Einzelaktionen I (Zünden), L (Klammern lösen), K (Aus), G (Stufentrennung), B (Landebeine ausfahren),
+  M (Steuermodus) und X (Autopilot aus) sind hier ohne Wirkung; es bleiben die Befehle an den Bordrechner: P (Aufstieg), O (Zirkularisieren),
   R (Rückkehr zum Turm) und die Annäherungsbefehle. Handsteuerung gibt es später nur im Cockpit und nur für das gerade
   gewählte Fahrzeug.
+- **Landebeine (HLS)** [umgesetzt 2026-11-04]: Die sechs Beine liegen beim Start, im Aufstieg und im Raum
+  eingeklappt am Rumpf (Fuß nach oben, der Fußteller flach über der Beinspitze) und klappen vor der Mondlandung nach
+  unten aus (wie bei Falcon 9). Der Landeanflug fährt sie vor dem Anflug aus; der Bordrechner fährt sie auf jeder
+  Steuerstufe aus, spätestens wenn der Boden im freien Fall in 15 s erreicht wäre (Sicherheitsfunktion, auch bei
+  Handsteuerung). In der Handsteuerung fährt Taste **B** sie sofort aus ("Landebeine ausfahren"; nicht umkehrbar).
 - **Missionsstart** [umgesetzt 2026-10-24]: Unter "Start vorbereiten" im Zeit-Panel stehen drei Auswahlfelder und
   der Knopf **"Starten"**: **Ort** (erst die Startrampen von `config/launch_sites.toml`, dann die Startorte im Flug aus
   `config/start_places.toml`: "Erdorbit", "ISS (angedockt)", "Mondumlaufbahn"; nur Orte, an denen etwas startet), **Fahrzeug**

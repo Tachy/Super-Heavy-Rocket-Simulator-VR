@@ -409,6 +409,13 @@ int64_t FlightSim::cutoff() {
     }));
 }
 
+int64_t FlightSim::deploy_legs() {
+    return static_cast<int64_t>(post_active("deploy_legs", [](sim::FlightSession& session) {
+        session.deploy_legs(session.controlled_index());
+        return Outcome{true, {}};
+    }));
+}
+
 int64_t FlightSim::release_clamps() {
     return static_cast<int64_t>(post_active("release_clamps", [](sim::FlightSession& session) {
         session.release_clamps();
@@ -780,6 +787,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_rate_mode", "enabled"), &FlightSim::set_rate_mode);
     ClassDB::bind_method(D_METHOD("ignite"), &FlightSim::ignite);
     ClassDB::bind_method(D_METHOD("cutoff"), &FlightSim::cutoff);
+    ClassDB::bind_method(D_METHOD("deploy_legs"), &FlightSim::deploy_legs);
     ClassDB::bind_method(D_METHOD("release_clamps"), &FlightSim::release_clamps);
     ClassDB::bind_method(D_METHOD("stage"), &FlightSim::stage);
     ClassDB::bind_method(D_METHOD("body_count"), &FlightSim::body_count);

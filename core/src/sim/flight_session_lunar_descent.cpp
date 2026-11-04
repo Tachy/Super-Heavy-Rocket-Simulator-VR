@@ -224,6 +224,25 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
     return true;
 }
 
+void FlightSession::lunar_leg_safety(Flying& flying) {
+    auto& body = *flying.body;
+    auto& v = body.vehicle();
+    if (!v.has_landing_legs() || v.legs_deploying() || body.resting() || body.impacted() || body.docked()) return;
+    const auto& stage = v.stages().front().config;
+    if (stage.landing_legs.fixed || !stage.lunar_landing) return;  // a lunar lander's deployable legs only
+    if (body.reference_body(env_, epoch_) != ephemeris::Body::Moon) return;
+    const auto c = body.ground_clearance(env_, epoch_);
+    const double feet_m = c.height_m - (v.mass_properties().cg_station_m - stage.landing_legs.foot_station_m);
+    const double lead_s = stage.landing_legs.deploy_time_s + stage.landing_legs.deploy_margin_s;
+    // Worst case, as the onboard computer cannot know the pilot's thrust: the time to the ground in free fall from the
+    // current sink rate under the local lunar gravity (a hover deploys them 0.5 g t^2 = 182 m up at a 15 s lead).
+    const double r = norm(body.state().position_gcrf_m - env_.moon->centre_gcrf(epoch_).position_m);
+    const double g = constants::moon_gm_m3ps2 / (r * r);
+    const double fall_s =
+        feet_m <= 0.0 ? 0.0 : (-c.sink_mps + std::sqrt(c.sink_mps * c.sink_mps + 2.0 * g * feet_m)) / g;
+    if (fall_s <= lead_s) v.deploy_legs();
+}
+
 void FlightSession::run_lunar_descent_steps(Flying& flying) {
     switch (lunar_step_) {
         case LunarStep::DescentWait: {

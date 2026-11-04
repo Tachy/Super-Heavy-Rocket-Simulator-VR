@@ -1,17 +1,18 @@
 """HLS legs, airlock hatch, elevator track and basket as primitive lists, pure Python (no Blender): ('tube', p0, p1, r0, r1) and
 ('box', centre, ex, ey, ez, half), every point in the stage's body frame (station X, nose +X, (Y, Z) = r (cos a, sin a)).
 
-Numbers: config/vehicles/detail/starship_hls.toml [landing_leg] / [airlock] / [elevator] (drawing, [E]); the leg placement is the config's
-[stage.landing_legs] (azimuths, footprint radius, foot station, stroke), unchanged (user ruling 2026-11-04).
+Numbers: config/vehicles/detail/starship_hls.toml [landing_leg] / [airlock] / [elevator] (drawing, [E]); the leg placement and its kinematics
+are the config's [stage.landing_legs] (azimuths, footprint radius, foot station, stroke, hinge_station_m, hinge_radius_m, knuckle_height_m).
 
-Deployable legs (Task 6b, user 2026-11-04): each leg is one rigid body (node `leg_<i>`: the leg tube from its hinge on the skirt to the knuckle
-sleeve above the foot) with the foot (node `foot_<i>`: pad and piston stem) carried by it, DRAWN DEPLOYED. The rig is a function of the
-deployment d only (leg_rig, pose): both nodes turn about the hinge (tangent axis through (hinge_station, hinge_radius)) by
-(1 - d) x (stowed angle - deployed angle) - at d = 1 the pose is the identity, so the drawn foot is the core's foot. The pusher (node
-`pusher_<i>`, drawn along +X with unit length) runs from its fixed hull anchor to its point on the leg and is stretched to that distance (as
-Falcon 9's); `leg_mount_<i>` (hinge clevis and pusher anchor bracket) stays fixed on the hull.
-The foot's reference point is the CENTRE OF THE PAD'S BOTTOM FACE = the core's foot point (station foot_station, radius footprint, azimuth): the pad
-node is translated along +X (the stroke axis = the station axis, core contact model) by the leg's compression, inside the leg's pose.
+Deployable legs (Task 6b, user 2026-11-04, like Falcon 9's): every node is DRAWN DEPLOYED and posed by the deployment d only (leg_rig, pose_point;
+the same kinematics as the core's contact::leg_pose and the view's VehicleModels.hls_leg_pose). In the leg's radial plane:
+  `leg_<i>`    the rigid tube hinge H -> knuckle K; turns about H by (1 - d) x (0 - phi): stowed along the hull, tip up.
+  `shock_<i>`  the knuckle sleeve (vertical when deployed); with the leg, then about K by (1 - d) x (phi - 180 deg): stowed in the leg's line.
+  `stem_<i>`   the piston stem: as the sleeve, slid along its +X (deployed: the station axis) by the leg's compression.
+  `foot_<i>`   the pad (+ its ball-joint hub): as the stem, then about the pad pivot Q by (1 - d) x 90 deg: stowed flat over the folded stem.
+  `pusher_<i>` drawn along +X with unit length; the view stretches it from its fixed hull anchor to its point on the leg (as Falcon 9's).
+  `leg_mount_<i>` hinge clevis and pusher anchor bracket, fixed on the hull.
+At d = 1 every pose is the identity: the drawn pad's BOTTOM FACE CENTRE is the core's foot point (station foot_station, radius footprint, azimuth).
 """
 import math
 
@@ -40,37 +41,62 @@ def foot_point(legs, a_rad):
     return point(legs["foot_station_m"], a_rad, legs["footprint_radius_m"])
 
 
+NODE_KINDS = ("leg", "shock", "stem", "foot")
+
+
 def foot_nodes(legs):
-    return [{"index": i, "leg_node": f"leg_{i}", "foot_node": f"foot_{i}", "pusher_node": f"pusher_{i}", "mount_node": f"leg_mount_{i}",
-             "azimuth_deg": a, "azimuth_rad": math.radians(a)} for i, a in enumerate(legs["azimuths_deg"])]
+    return [{"index": i, "leg_node": f"leg_{i}", "shock_node": f"shock_{i}", "stem_node": f"stem_{i}", "foot_node": f"foot_{i}",
+             "pusher_node": f"pusher_{i}", "mount_node": f"leg_mount_{i}", "azimuth_deg": a, "azimuth_rad": math.radians(a)}
+            for i, a in enumerate(legs["azimuths_deg"])]
 
 
-def knuckle_station_m(d, legs):
-    """Station of the leg's tip (the knuckle sleeve's centre) above the foot: pad, the free stem (more than the stroke), half the sleeve."""
-    return legs["foot_station_m"] + d["pad_height_m"] + d["sleeve_gap_m"] + 0.5 * d["sleeve_length_m"]
+def sleeve_gap_m(d, legs):
+    """Free stem between the pad's top and the sleeve: what the config's knuckle height leaves for it (must exceed the stroke)."""
+    return legs["knuckle_height_m"] - d["pad_height_m"] - 0.5 * d["sleeve_length_m"]
+
+
+def knuckle_station_m(legs):
+    return legs["foot_station_m"] + legs["knuckle_height_m"]
 
 
 def leg_rig(d, legs):
-    """The rig in the leg's radial plane (station s, radius r): the hinge, the leg's length and its angles from +X towards the radial
-    (deployed: hinge -> knuckle above the config's foot; stowed: the detail's angle, 0 = along the hull), the pusher's anchor and point."""
-    hs, hr = d["hinge_station_m"], d["hinge_radius_m"]
-    ds, dr = knuckle_station_m(d, legs) - hs, legs["footprint_radius_m"] - hr
-    return {"hinge_station_m": hs, "hinge_radius_m": hr, "length_m": math.hypot(ds, dr),
-            "deployed_angle_deg": math.degrees(math.atan2(dr, ds)), "stowed_angle_deg": d["stowed_angle_deg"],
+    """The rig in the leg's radial plane (station s, radius r): hinge, knuckle, the leg's length and deployed angle phi (from +X towards the
+    radial), the foot's and the pad's fold angles and the pad pivot, the pusher's anchor and point, and the stowed thickness that follows
+    from the folded geometry (the pad's rim: it lies on the sleeve's outer face + a gap, its bottom face outwards)."""
+    hs, hr, R = legs["hinge_station_m"], legs["hinge_radius_m"], legs["footprint_radius_m"]
+    ks = knuckle_station_m(legs)
+    phi = math.degrees(math.atan2(R - hr, ks - hs))
+    h = 0.5 * (d["sleeve_radius_m"] + d["pad_pivot_gap_m"])  # pivot offset: stowed the pad's top face lies 2 h off the leg's axis
+    pad_top_s = legs["foot_station_m"] + d["pad_height_m"]
+    pad_rim_r = math.hypot(hr + 2.0 * h + d["pad_height_m"], d["pad_radius_m"])
+    return {"hinge_station_m": hs, "hinge_radius_m": hr, "knuckle_station_m": ks, "knuckle_radius_m": R,
+            "length_m": math.hypot(ks - hs, R - hr), "deployed_angle_deg": phi, "stowed_angle_deg": 0.0,
+            "foot_fold_deg": phi - 180.0, "pad_fold_deg": 90.0, "pad_pivot_station_m": pad_top_s + h, "pad_pivot_radius_m": R - h,
             "pusher_anchor_station_m": d["pusher_anchor_station_m"], "pusher_anchor_radius_m": d["pusher_anchor_radius_m"],
-            "pusher_leg_u_m": d["pusher_leg_u_m"], "stowed_thickness_m": d["stowed_thickness_m"]}
+            "pusher_leg_u_m": d["pusher_leg_u_m"], "stowed_thickness_m": pad_rim_r - legs["hull_radius_m"]}
 
 
-def pose_point(rig, a_rad, deployment, p):
-    """A body-frame point of the deployed drawing (leg or foot) in the pose of `deployment` (0 stowed .. 1 deployed): turned about the hinge's
-    tangent axis in the leg's radial plane (a positive angle turns +X towards the radial)."""
-    d = min(max(deployment, 0.0), 1.0)
-    delta = math.radians((1.0 - d) * (rig["stowed_angle_deg"] - rig["deployed_angle_deg"]))
+def _turn(p, a_rad, pivot_s, pivot_r, angle_deg):
+    """`p` turned about the tangent axis through (pivot_s, pivot_r) at azimuth `a_rad` (a positive angle turns +X towards the radial)."""
     er, et = radial(a_rad), tangent(a_rad)
-    s, r = p[0] - rig["hinge_station_m"], p[1] * er[1] + p[2] * er[2] - rig["hinge_radius_m"]
+    s, r = p[0] - pivot_s, p[1] * er[1] + p[2] * er[2] - pivot_r
     t = p[1] * et[1] + p[2] * et[2]
-    s2, r2 = s * math.cos(delta) - r * math.sin(delta), s * math.sin(delta) + r * math.cos(delta)
-    return _add(_add((rig["hinge_station_m"] + s2, 0.0, 0.0), _mul(er, rig["hinge_radius_m"] + r2)), _mul(et, t))
+    c, n = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+    return _add(_add((pivot_s + s * c - r * n, 0.0, 0.0), _mul(er, pivot_r + s * n + r * c)), _mul(et, t))
+
+
+def pose_point(rig, a_rad, deployment, p, kind="leg", compression_m=0.0):
+    """A body-frame point of the deployed drawing of a `kind` node ("leg", "shock", "stem", "foot") in the pose of `deployment` (0 stowed ..
+    1 deployed) and the leg's compression (stem and foot slide along the deployed +X). Innermost first: pad fold, slide, foot fold, leg turn."""
+    u = 1.0 - min(max(deployment, 0.0), 1.0)
+    level = NODE_KINDS.index(kind)
+    if level >= 3:
+        p = _turn(p, a_rad, rig["pad_pivot_station_m"], rig["pad_pivot_radius_m"], u * rig["pad_fold_deg"])
+    if level >= 2:
+        p = _add(p, (compression_m, 0.0, 0.0))
+    if level >= 1:
+        p = _turn(p, a_rad, rig["knuckle_station_m"], rig["knuckle_radius_m"], u * rig["foot_fold_deg"])
+    return _turn(p, a_rad, rig["hinge_station_m"], rig["hinge_radius_m"], u * (rig["stowed_angle_deg"] - rig["deployed_angle_deg"]))
 
 
 def pusher_ends(rig, a_rad, deployment):
@@ -82,37 +108,48 @@ def pusher_ends(rig, a_rad, deployment):
 
 
 def foot_prims(d, legs, a_rad):
-    """Pad (frustum, bottom face on the foot point) and the piston stem up into the knuckle sleeve. Moves with the compression."""
+    """The pad (frustum, bottom face on the foot point) and the hub of its ball joint (pad top -> pivot)."""
+    rig = leg_rig(d, legs)
     f = foot_point(legs, a_rad)
     top = _add(f, (d["pad_height_m"], 0.0, 0.0))
-    stem_top = _add(f, (d["pad_height_m"] + d["sleeve_gap_m"] + d["stem_inside_m"], 0.0, 0.0))
+    pivot = point(rig["pad_pivot_station_m"], a_rad, rig["pad_pivot_radius_m"])
     return [("tube", f, top, d["pad_radius_m"], 0.75 * d["pad_radius_m"]),
-            ("tube", top, stem_top, d["stem_radius_m"], d["stem_radius_m"])]
+            ("tube", top, pivot, d["hub_radius_m"], d["hub_radius_m"])]
+
+
+def stem_prims(d, legs, a_rad):
+    """The piston stem from the pad's top up into the knuckle sleeve."""
+    f = foot_point(legs, a_rad)
+    return [("tube", _add(f, (d["pad_height_m"], 0.0, 0.0)), _add(f, (d["pad_height_m"] + sleeve_gap_m(d, legs) + d["stem_inside_m"], 0.0, 0.0)),
+             d["stem_radius_m"], d["stem_radius_m"])]
 
 
 def sleeve_span(d, legs):
-    """(bottom station, top station) of the knuckle sleeve at the leg's tip: its bottom a `sleeve_gap_m` above the pad (more than the stroke)."""
-    bottom = legs["foot_station_m"] + d["pad_height_m"] + d["sleeve_gap_m"]
-    return bottom, bottom + d["sleeve_length_m"]
+    """(bottom station, top station) of the knuckle sleeve: centred on the knuckle, its bottom the free stem above the pad (more than the stroke)."""
+    k = knuckle_station_m(legs)
+    return k - 0.5 * d["sleeve_length_m"], k + 0.5 * d["sleeve_length_m"]
+
+
+def shock_prims(d, legs, a_rad):
+    """The knuckle sleeve the stem slides in (vertical, deployed)."""
+    bottom, top = sleeve_span(d, legs)
+    r_foot = legs["footprint_radius_m"]
+    return [("tube", point(bottom, a_rad, r_foot), point(top, a_rad, r_foot), d["sleeve_radius_m"], d["sleeve_radius_m"])]
 
 
 def leg_prims(d, legs, a_rad):
-    """The rigid leg, deployed: the tube from the hinge to the knuckle and the vertical knuckle sleeve the stem slides in."""
-    rig = leg_rig(d, legs)
-    bottom, top = sleeve_span(d, legs)
-    r_foot = legs["footprint_radius_m"]
-    hinge = point(rig["hinge_station_m"], a_rad, rig["hinge_radius_m"])
-    knuckle = point(knuckle_station_m(d, legs), a_rad, r_foot)
-    return [("tube", point(bottom, a_rad, r_foot), point(top, a_rad, r_foot), d["sleeve_radius_m"], d["sleeve_radius_m"]),
-            ("tube", hinge, knuckle, d["leg_root_radius_m"], d["leg_tip_radius_m"])]
+    """The rigid leg, deployed: the tube from the hinge to the knuckle."""
+    hinge = point(legs["hinge_station_m"], a_rad, legs["hinge_radius_m"])
+    knuckle = point(knuckle_station_m(legs), a_rad, legs["footprint_radius_m"])
+    return [("tube", hinge, knuckle, d["leg_root_radius_m"], d["leg_tip_radius_m"])]
 
 
-def mount_prims(d, hull_radius_m, a_rad):
+def mount_prims(d, legs, hull_radius_m, a_rad):
     """Fixed on the hull: the hinge clevis under the leg's root and the pusher's anchor bracket (both from inside the skin to the axis radius)."""
     et, er, ex = tangent(a_rad), radial(a_rad), (1.0, 0.0, 0.0)
     embed = d["attach_embed_m"]
     prims = []
-    for st, r_axis, half_station, half_width in ((d["hinge_station_m"], d["hinge_radius_m"], 0.5 * d["clevis_height_m"], 0.5 * d["clevis_width_m"]),
+    for st, r_axis, half_station, half_width in ((legs["hinge_station_m"], legs["hinge_radius_m"], 0.5 * d["clevis_height_m"], 0.5 * d["clevis_width_m"]),
                                                  (d["pusher_anchor_station_m"], d["pusher_anchor_radius_m"], 0.5 * d["anchor_size_m"], 0.5 * d["anchor_size_m"])):
         r0 = hull_radius_m - embed
         centre = point(st, a_rad, 0.5 * (r0 + r_axis))

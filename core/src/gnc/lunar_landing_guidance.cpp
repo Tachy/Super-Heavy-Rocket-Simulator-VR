@@ -459,9 +459,13 @@ ReturnCommand LunarLandingGuidance::update(const vehicle::FlightBody& body, cons
         cmd.axis_gcrf = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});  // hold
         cmd.abort = phase_ == LunarDescentPhase::Aborted;
     }
-    // Deployable legs: out before the approach (see leg_deploy_lead_s); sticky once commanded.
-    legs_commanded_ = legs_commanded_ || phase_ != LunarDescentPhase::Braking ||
-                      braking_t_go_ <= parameters_.approach_time_to_go_s + parameters_.leg_deploy_lead_s;
+    // Deployable legs: out before the approach (see leg_deploy_lead_s); sticky once commanded. An abort (Aborted) does
+    // not deploy them: it climbs back to orbit (a terminal descent without a plan is phase Terminal).
+    const bool flying_down = phase_ == LunarDescentPhase::Approach || phase_ == LunarDescentPhase::Terminal ||
+                             phase_ == LunarDescentPhase::Touchdown;
+    legs_commanded_ = legs_commanded_ || flying_down ||
+                      (phase_ == LunarDescentPhase::Braking &&
+                       braking_t_go_ <= parameters_.approach_time_to_go_s + parameters_.leg_deploy_lead_s);
     cmd.deploy_legs = legs_commanded_;
     started_ = true;
     last_update_ = epoch;

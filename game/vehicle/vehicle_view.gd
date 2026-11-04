@@ -49,7 +49,7 @@ static var look_probe_extension := NAN
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
 var _engine_poses: Array[Transform3D] = []  # last pose per engine, stage-local body coordinates (headless tests)
-var _hls_legs: Array[Dictionary] = []  # per HLS leg: {"index", "azimuth_deg", "rig", "leg", "foot", "pusher", "lowest"}, posed by deployment and compression
+var _hls_legs: Array[Dictionary] = []  # per HLS leg: {"index", "azimuth_deg", "rig", "lowest", "nodes": kind -> node}, posed by deployment and compression
 var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "pusher"}
 ## The Crew Dragon's nose cone: {"node", "nose"} (manifest nose block) or {}; the fraction (0 closed .. 1 open) eases towards the
 ## snapshot's binary nose_cone_open at 1 / open_time_s per second: a view easing, no state of the simulation.
@@ -395,14 +395,15 @@ func _collect_hls_legs(ms: Dictionary, stage_node: Node3D, lowest: bool) -> void
 		return
 	for i in (block["legs"] as Array).size():
 		var entry: Dictionary = block["legs"][i]
-		_hls_legs.append({"index": i, "azimuth_deg": float(entry["azimuth_deg"]), "rig": block["rig"], "lowest": lowest,
-				"leg": stage_node.find_child(String(entry["leg_node"]), false, false), "foot": stage_node.find_child(String(entry["foot_node"]), false, false),
-				"pusher": stage_node.find_child(String(entry["pusher_node"]), false, false)})
+		var nodes := {}
+		for kind: String in ["leg", "shock", "stem", "foot", "pusher"]:
+			nodes[kind] = stage_node.find_child(String(entry.get(kind + "_node", "")), false, false)
+		_hls_legs.append({"index": i, "azimuth_deg": float(entry["azimuth_deg"]), "rig": block["rig"], "lowest": lowest, "nodes": nodes})
 
 
-## The HLS's deployable legs (Task 6b): leg and foot turn about the hinge by the deployment (snapshot `legs.deployment` on the lowest stage, else stowed;
-## `look_leg_deployment` overrides it for shots), the pusher spans anchor to leg; each pad slides up along the station axis (+X of the deployed drawing)
-## by its leg's compression (snapshot `legs.compression_m`, the core contact model; at most the stroke). No compression in the snapshot = the nominal pose.
+## The HLS's deployable legs (Task 6b): leg, sleeve, stem, pad and pusher posed by the deployment (VehicleModels.hls_leg_pose; snapshot `legs.deployment`
+## on the lowest stage, else stowed; `look_leg_deployment` overrides it for shots); stem and pad slide up along the station axis (+X of the deployed drawing)
+## by the leg's compression (snapshot `legs.compression_m`, the core contact model; at most the stroke). No compression in the snapshot = the nominal pose.
 func _pose_hls_legs(legs: Dictionary) -> void:
 	if _hls_legs.is_empty():
 		return
@@ -414,15 +415,12 @@ func _pose_hls_legs(legs: Dictionary) -> void:
 		var deployment := snapshot if entry["lowest"] else 0.0
 		if not is_nan(look_leg_deployment):
 			deployment = look_leg_deployment
-		var pose := VehicleModels.hls_leg_pose(entry["rig"], entry["azimuth_deg"], deployment)
 		var i: int = entry["index"]
 		var c := minf(float(compression[i]), stroke) if entry["lowest"] and i < compression.size() else 0.0
-		if entry["leg"] != null:
-			(entry["leg"] as Node3D).transform = pose["leg"]
-		if entry["foot"] != null:
-			(entry["foot"] as Node3D).transform = pose["leg"] * Transform3D(Basis.IDENTITY, Vector3(maxf(c, 0.0), 0.0, 0.0))
-		if entry["pusher"] != null:
-			(entry["pusher"] as Node3D).transform = pose["pusher"]
+		var pose := VehicleModels.hls_leg_pose(entry["rig"], entry["azimuth_deg"], deployment, c)
+		for kind: String in entry["nodes"]:
+			if entry["nodes"][kind] != null:
+				(entry["nodes"][kind] as Node3D).transform = pose[kind]
 
 
 ## The manifest's thruster entry (exit plane centre, stage-local body frame) of a snapshot engine that is one of the HLS's landing thrusters: an auxiliary

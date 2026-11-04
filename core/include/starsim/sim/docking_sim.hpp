@@ -57,7 +57,12 @@ private:
     contact::DockingMechanism mechanism_;
     contact::StationCollisionParameters collision_p_;  // before hull_body_m_: it is built from them
     contact::StationShape shape_;
-    std::vector<math::Vec3> hull_body_m_;  // chaser vehicle frame
+    config::VehicleConfig chaser_config_;
+    // Chaser hull and leg points (vehicle frame) for the leg deployment they were built at (Task 6b fix 1: the legs
+    // where they are); rebuilt when the chaser's deployment changes.
+    mutable std::vector<math::Vec3> hull_body_m_;
+    mutable double hull_deployment_ = -1.0;
+    const std::vector<math::Vec3>& hull_points(const vehicle::FlightBody& chaser) const;
     std::optional<double> collision_impulse_ns_;
     bool hull_contact_ = false;
     math::Vec3 balance_n_, last_force_n_;

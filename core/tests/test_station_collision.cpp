@@ -30,7 +30,7 @@ TEST_CASE("point_in_capsule: depth and outward normal", "[iss][docking]") {
 TEST_CASE("Hull sample points of the Crew Dragon: trunk, tapered capsule, docking system left out", "[iss][docking]") {
     const auto dragon = config::load_vehicle(config_dir, "crew_dragon");
     const contact::StationCollisionParameters p;
-    const auto pts = contact::hull_sample_points(dragon, p);
+    const auto pts = contact::hull_sample_points(dragon, p, 0.0);
     REQUIRE(pts.size() > 50);
     double max_x = 0.0, max_r_top = 0.0, max_r = 0.0;
     for (const auto& q : pts) {
@@ -59,7 +59,7 @@ TEST_CASE("Hull sample points stop below a nose port listed after a dorsal port"
     top.docking_ports.insert(top.docking_ports.begin(), dorsal);  // the nose port is no longer the first
     const contact::StationCollisionParameters p;
     double max_x = 0.0;
-    for (const auto& q : contact::hull_sample_points(dragon, p)) max_x = std::max(max_x, q.x);
+    for (const auto& q : contact::hull_sample_points(dragon, p, 0.0)) max_x = std::max(max_x, q.x);
     CHECK(max_x <= dragon.stages.front().length_m + nose.position_m.x - p.port_clearance_m + 1e-9);
 }
 
@@ -93,7 +93,7 @@ TEST_CASE("Hull contact: a Dragon docked at either IDA touches nothing", "[iss][
     const auto dragon = config::load_vehicle(config_dir, "crew_dragon");
     const auto shape = contact::station_shape(iss);
     const contact::StationCollisionParameters p;
-    const auto pts = contact::hull_sample_points(dragon, p);
+    const auto pts = contact::hull_sample_points(dragon, p, 0.0);
     const double port_station = dragon.stages.front().length_m + dragon.stages.back().docking_ports.front().position_m.x;  // Dragon port in its vehicle frame
     for (const auto& port : iss.stages.front().docking_ports) {
         std::vector<Vec3> in_station;

@@ -1,5 +1,7 @@
 #include "starsim/contact/station_collision.hpp"
 
+#include "starsim/contact/leg_kinematics.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -9,7 +11,8 @@ namespace starsim::contact {
 
 using math::Vec3;
 
-std::vector<math::Vec3> hull_sample_points(const config::VehicleConfig& vehicle, const StationCollisionParameters& p) {
+std::vector<math::Vec3> hull_sample_points(const config::VehicleConfig& vehicle, const StationCollisionParameters& p,
+                                           double leg_deployment) {
     std::vector<math::Vec3> points;
     double base = 0.0;
     for (size_t i = 0; i < vehicle.stages.size(); ++i) {
@@ -34,15 +37,25 @@ std::vector<math::Vec3> hull_sample_points(const config::VehicleConfig& vehicle,
                 points.push_back({x, r * std::cos(phi), r * std::sin(phi)});
             }
         }
-        // landing-leg struts (HLS): from the hull at leg_root_station_m to the deployed foot (refuelling r3: the legs
-        // must clear the depot)
+        // landing legs (HLS): where they are (Task 6b fix 1). With the leg kinematics: the leg's line hinge -> knuckle ->
+        // foot in the pose of the deployment (contact::leg_pose; stowed along the hull at the hinge radius). Without
+        // them (legs never near a station): the strut from the hull at leg_root_station_m to the deployed foot, once out.
         const auto& legs = s.landing_legs;
+        const auto segment = [&](const Vec3& a, const Vec3& b) {
+            const int n = std::max(1, static_cast<int>(std::ceil(norm(b - a) / p.ring_spacing_m)));
+            for (int k = 0; k <= n; ++k) points.push_back(a + (static_cast<double>(k) / n) * (b - a));
+        };
+        const Vec3 offset{base, 0.0, 0.0};
         for (const double az : legs.azimuths_rad) {
-            const Vec3 dir{0.0, std::cos(az), std::sin(az)};
-            const Vec3 root = Vec3{base + p.leg_root_station_m, 0.0, 0.0} + r0 * dir;
-            const Vec3 foot = Vec3{base + legs.foot_station_m, 0.0, 0.0} + legs.footprint_radius_m * dir;
-            const int n = std::max(1, static_cast<int>(std::ceil(norm(foot - root) / p.ring_spacing_m)));
-            for (int k = 0; k <= n; ++k) points.push_back(root + (static_cast<double>(k) / n) * (foot - root));
+            if (has_leg_kinematics(legs)) {
+                const auto pose = leg_pose(legs, az, i == 0 ? leg_deployment : 0.0);
+                segment(offset + pose.hinge_m, offset + pose.knuckle_m);
+                segment(offset + pose.knuckle_m, offset + pose.foot_m);
+            } else if (i == 0 && leg_deployment > 0.0) {
+                const Vec3 dir{0.0, std::cos(az), std::sin(az)};
+                segment(offset + Vec3{p.leg_root_station_m, 0.0, 0.0} + r0 * dir,
+                        offset + Vec3{legs.foot_station_m, 0.0, 0.0} + legs.footprint_radius_m * dir);
+            }
         }
         base += s.length_m;
     }

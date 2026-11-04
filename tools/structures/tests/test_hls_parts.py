@@ -253,23 +253,42 @@ def _drawn(prims):
     return pts
 
 
+def _stowed_bound(d, legs):
+    """Independent of the drawing: the stowed leg's outermost radius and station span from the hull, the leg section and the fold
+    geometry. The leg tube lies on the hinge radius (root radius around it), the folded sleeve too (its radius around it); the pad lies flat
+    with its top face the pivot gap outside the sleeve, its bottom face outwards, so its rim reaches hypot(r_bottom, pad radius). Stations:
+    from the hinge (less the root radius) to the folded pad's centre (hinge + leg length + knuckle height - pad height) + the pad radius."""
+    hr, hs = legs["hinge_radius_m"], legs["hinge_station_m"]
+    length = math.hypot(legs["foot_station_m"] + legs["knuckle_height_m"] - hs, legs["footprint_radius_m"] - hr)
+    r_pad = math.hypot(hr + d["sleeve_radius_m"] + d["pad_pivot_gap_m"] + d["pad_height_m"], d["pad_radius_m"])
+    r_max = max(r_pad, hr + d["leg_root_radius_m"], hr + d["sleeve_radius_m"])
+    s_max = hs + length + legs["knuckle_height_m"] - d["pad_height_m"] + d["pad_radius_m"]
+    return r_max, hs - d["leg_root_radius_m"], s_max
+
+
 def test_leg_rig_deploys_from_along_the_hull_to_the_config_foot():
-    """Task 6b: stowed (0) every leg and foot point lies within the skin + stowed_thickness_m (and outside the skin), above the hull base and
-    below the landing thrusters; deployed (1) the pose is the identity (the foot on the config's point); the pusher spans anchor to leg."""
+    """Task 6b (+ fix 1): stowed (0) every leg, sleeve, stem and pad point lies outside the skin and within the bound of the fold geometry
+    (_stowed_bound, not the drawing), on that station span; the rig's stowed thickness is that bound; deployed (1) every pose is the
+    identity (the foot on the config's point); the pusher spans anchor to leg."""
     spec = vehicle_spec.load_starship("starship_hls")["hls_parts"]
     d, legs = spec["drawing"]["landing_leg"], spec["legs"]
     rig = ll.leg_rig(d, legs)
     hull = legs["hull_radius_m"]
+    r_max, s_min, s_max = _stowed_bound(d, legs)
+    assert rig["stowed_thickness_m"] == pytest.approx(r_max - hull, abs=1e-9)
     for az in legs["azimuths_deg"]:
         a = math.radians(az)
-        drawn = _drawn(ll.leg_prims(d, legs, a) + ll.foot_prims(d, legs, a))
-        stowed = np.array([ll.pose_point(rig, a, 0.0, p) for p in drawn])
+        parts = {"leg": ll.leg_prims(d, legs, a), "shock": ll.shock_prims(d, legs, a), "stem": ll.stem_prims(d, legs, a),
+                 "foot": ll.foot_prims(d, legs, a)}
+        stowed = np.array([ll.pose_point(rig, a, 0.0, q, kind) for kind, prims in parts.items() for q in _drawn(prims)])
         r = np.hypot(stowed[:, 1], stowed[:, 2])
-        assert r.max() <= hull + d["stowed_thickness_m"] and r.min() > hull
-        assert stowed[:, 0].min() > 0.0 and stowed[:, 0].max() < 12.0
+        assert r.max() <= r_max + 1e-6 and r.min() > hull
+        assert stowed[:, 0].min() >= s_min - 1e-6 and stowed[:, 0].max() <= s_max + 1e-6
         foot = ll.foot_point(legs, a)
-        assert np.linalg.norm(np.array(ll.pose_point(rig, a, 1.0, foot)) - np.array(foot)) < 1e-9
+        for kind in ll.NODE_KINDS:
+            assert np.linalg.norm(np.array(ll.pose_point(rig, a, 1.0, foot, kind)) - np.array(foot)) < 1e-9
         anchor, on_leg = ll.pusher_ends(rig, a, 0.0)
         assert 0.0 < math.dist(anchor, on_leg) < math.dist(*ll.pusher_ends(rig, a, 1.0))
     assert rig["deployed_angle_deg"] == pytest.approx(97.52, abs=0.01) and rig["stowed_angle_deg"] == 0.0
+    assert rig["stowed_thickness_m"] < 0.9  # flat: the pad over the folded foot, not on a radial stem (fix 1)
 

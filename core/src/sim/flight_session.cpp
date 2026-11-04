@@ -1078,6 +1078,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 auto& v = bodies_[i].body->vehicle();
                 if (bodies_[i].return_command.deploy_legs && v.leg_deployment() == 0.0) v.deploy_legs();
             }
+            lunar_leg_safety(bodies_[i]);  // the onboard computer's leg rule, at every control level
             auto& flying = bodies_[i];
             if (flying.entry_guidance && !flying.ship_landing && !flying.body->impacted()) {
                 flying.entry_command = flying.entry_guidance->update(*flying.body, env_, epoch_);

@@ -23,16 +23,24 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`). The Earth takes the `environment::Terrain` interface
   (earth-terrain.md). Leg tracks start only near the body's own ground.
-- Legs (Task 6b, user 2026-11-04): `deploy_time_s` 10 s, `deploy_margin_s` 5 s [E]. Stowed on the pad, in the ascent, in space and in the LLO
-  (deployment 0); `begin_powered_descent` no longer deploys them: `LunarLandingGuidance` sets `ReturnCommand::deploy_legs` (sticky) once the
-  braking time-to-go is at most `approach_time_to_go_s` (15 s) + `leg_deploy_lead_s` (= deploy_time_s + deploy_margin_s from
-  `lunar_landing_parameters`, 0 for fixed legs) = 30 s, and in every later phase at once (aborted approach, terminal without plan); the session
-  applies it in `PoweredDescent`. So they lock 5 s before the hand-over to the approach - the last point of the timeline known ahead (the
-  approach's length is planned at the hand-over; its last phase starts the terminal descent). Measured (566 t PDI): 0.00 at PDI, out at t_go
-  30.0 s, 1.00 at the hand-over and at the first foot contact; the liftoff keeps them out (no retraction). A pilot who takes over in the braking
-  phase deploys them himself (`FlightSession::deploy_legs`). The station collision points (`contact::station_collision`) keep the deployed
-  struts in every state (conservative: they clear the mated depot). Test: `[lunar_descent_flight][hls][legs]` "The HLS deploys its legs before
-  the approach and keeps them out for the liftoff".
+- Legs (Task 6b, user 2026-11-04; fix 1): `deploy_time_s` 10 s, `deploy_margin_s` 5 s, kinematics `hinge_station_m` 0.5, `hinge_radius_m` 4.8,
+  `knuckle_height_m` 1.05 [E] (`contact::leg_pose`: the leg turns about its skirt hinge, the foot folds into its line; stowed along the hull, tip up).
+  Stowed on the pad, in the ascent, in space and in the LLO (deployment 0). Two triggers, both sticky, the deployment cannot be reversed:
+  (1) `LunarLandingGuidance` sets `ReturnCommand::deploy_legs` once the braking time-to-go is at most `approach_time_to_go_s` (15 s) +
+  `leg_deploy_lead_s` (= deploy_time_s + deploy_margin_s from `lunar_landing_parameters`, 0 for fixed legs) = 30 s, and in Approach / Terminal /
+  Touchdown at once (not in Aborted: an abort to orbit keeps them stowed); the session applies it in `PoweredDescent`. They lock 5 s before the
+  hand-over to the approach - the last point of the timeline known ahead. (2) The onboard computer's safety function
+  (`FlightSession::lunar_leg_safety`, every tick, at every control level incl. manual): a lunar lander's deployable legs go out once the free-fall
+  time of its feet to the ground (current sink, local lunar gravity, no thrust: the worst case) is at most deploy_time_s + deploy_margin_s (a hover
+  182 m up). The pilot can deploy them at once (key B, `FlightSim::deploy_legs`, "Landebeine ausfahren"). Measured (566 t PDI): 0.00 at PDI, out at
+  t_go 30.0 s, 1.00 at the hand-over and at the first foot contact; the liftoff keeps them out. Manual drop (engines off, autopilot off, legs
+  stowed, 300 m, 1.5 m/s): out at 307 m CG altitude, 1.00 at the first contact. Station collision (`contact::station_collision`,
+  `DockingSim` rebuilds its points when the deployment changes): the legs' line hinge -> knuckle -> foot where they are; mated to the depot the
+  nearest leg point is 1.817 m (stowed) / 2.208 m (deployed) from the depot. The sampled line lies on the hinge radius when stowed; the drawn pads
+  stand up to 0.53 m beyond it (0.825 m off the skin) and are not sampled (the drawn docked pair clears them by 0.78 m, vehicle-models.md).
+  Tests: `[lunar_descent_flight][hls][legs]` "The HLS deploys its legs before the approach and keeps them out for the liftoff", `[hls][legs][lunar]`
+  "A manual descent with the legs stowed reaches the ground with them deployed", `[contact][legs]` "HLS leg kinematics...", `[refuelling][docking]`
+  "HLS legs clear the depot when mated".
 - l3 outbound: `mission/position_targeter` (fixed-time position in the full model; needs a patched-conic first guess on
   long arcs; finite burns via `set_finite_burn` / `mission::apply_finite_burn`), `orbit/cr3bp`, `mission/nrho_reference`
   (9:2 southern L2 NRHO [S: Zimovan 2017 seed], multiple shooting in the full model: periods 6.25-6.71 d, perilune

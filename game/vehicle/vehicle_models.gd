@@ -652,22 +652,31 @@ static func leg_poses(rig: Dictionary, azimuth_deg: float, deployment: float) ->
 	return {"main": main, "pusher": Transform3D(Basis(along, z.cross(x), z), anchor)}
 
 
-## Rig of an HLS leg (Task 6b), a function of the deployment only (stage-local body frame): {"leg": the transform of the leg and foot nodes, which are
-## drawn deployed - a turn about the hinge's tangent axis by (1 - d) x (stowed - deployed angle), the identity at d = 1; "pusher": the pusher node (drawn
+## Rig of an HLS leg (Task 6b + fix 1), a function of the deployment (and the leg's compression) only, stage-local body frame. The nodes are drawn
+## deployed; every pose is the identity at d = 1. {"leg": turned about the hinge by (1 - d) x (stowed - deployed angle); "shock": the leg's pose, then
+## folded about the knuckle by (1 - d) x foot_fold_deg (stowed in the leg's line); "stem": the shock's pose with the compression along its +X;
+## "foot": the stem's pose, then about the pad pivot by (1 - d) x pad_fold_deg (stowed flat over the folded stem); "pusher": the pusher node (drawn
 ## along +X with unit length) from its hull anchor to its point on the leg, +X stretched to that distance}. `rig`: manifest hls_legs.rig
-## (hls_legs_layout.leg_rig). Mirrors hls_legs_layout.pose_point / pusher_ends.
-static func hls_leg_pose(rig: Dictionary, azimuth_deg: float, deployment: float) -> Dictionary:
+## (hls_legs_layout.leg_rig). Mirrors hls_legs_layout.pose_point / pusher_ends and the core's contact::leg_pose.
+static func hls_leg_pose(rig: Dictionary, azimuth_deg: float, deployment: float, compression_m := 0.0) -> Dictionary:
 	var a := deg_to_rad(azimuth_deg)
 	var e_r := Vector3(0.0, cos(a), sin(a))
 	var tangent := Vector3(0.0, -sin(a), cos(a))  # X x e_r: a positive turn about it takes +X towards the radial
+	var u_fold := 1.0 - clampf(deployment, 0.0, 1.0)
 	var deployed := deg_to_rad(float(rig["deployed_angle_deg"]))
-	var delta := (1.0 - clampf(deployment, 0.0, 1.0)) * (deg_to_rad(float(rig["stowed_angle_deg"])) - deployed)
+	var turn_about := func(station: float, radius: float, angle: float) -> Transform3D:
+		var pivot := Vector3(station, 0.0, 0.0) + e_r * radius
+		var b := Basis(tangent, angle)
+		return Transform3D(b, pivot - b * pivot)
 	var hinge := Vector3(float(rig["hinge_station_m"]), 0.0, 0.0) + e_r * float(rig["hinge_radius_m"])
-	var turn := Basis(tangent, delta)
-	var leg := Transform3D(turn, hinge - turn * hinge)
+	var leg: Transform3D = turn_about.call(float(rig["hinge_station_m"]), float(rig["hinge_radius_m"]),
+			u_fold * (deg_to_rad(float(rig["stowed_angle_deg"])) - deployed))
+	var shock: Transform3D = leg * turn_about.call(float(rig["knuckle_station_m"]), float(rig["knuckle_radius_m"]), u_fold * deg_to_rad(float(rig["foot_fold_deg"])))
+	var stem := shock * Transform3D(Basis.IDENTITY, Vector3(maxf(compression_m, 0.0), 0.0, 0.0))
+	var foot: Transform3D = stem * turn_about.call(float(rig["pad_pivot_station_m"]), float(rig["pad_pivot_radius_m"]), u_fold * deg_to_rad(float(rig["pad_fold_deg"])))
 	var u := float(rig["pusher_leg_u_m"])
 	var on_leg := leg * (hinge + (Vector3.RIGHT * cos(deployed) + e_r * sin(deployed)) * u)
 	var anchor := Vector3(float(rig["pusher_anchor_station_m"]), 0.0, 0.0) + e_r * float(rig["pusher_anchor_radius_m"])
 	var along := on_leg - anchor
 	var x := along.normalized()
-	return {"leg": leg, "pusher": Transform3D(Basis(along, tangent.cross(x), tangent), anchor)}
+	return {"leg": leg, "shock": shock, "stem": stem, "foot": foot, "pusher": Transform3D(Basis(along, tangent.cross(x), tangent), anchor)}

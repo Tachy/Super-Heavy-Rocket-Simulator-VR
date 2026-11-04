@@ -110,8 +110,16 @@ deploy_time_s = 10.0                     # [E] no published figure: an unhurried
                                          # 7.5 m leg with no air load (Falcon 9: 2 s, pneumatic, against the airflow)
 deploy_margin_s = 5.0                    # [E] locked this long before the descent's hand-over to the approach (as
                                          # Falcon 9's margin): a failed lock is seen while an abort to orbit is still open
+hinge_station_m = 0.5                    # [E] Falcon 9 style (user 2026-11-04): hinge at the leg's lower end on the aft
+                                         # skirt ring, 0.5 m above the hull base - clear of the hot-stage ring below
+                                         # station 0 on the booster
+hinge_radius_m = 4.8                     # [E] hinge axis 0.3 m off the 4.5 m skin: the stowed leg (a ~0.5 m tube)
+                                         # lies along the hull on this radius
+knuckle_height_m = 1.05                  # [E] knuckle above the foot: pad 0.15 + free stem 0.65 (more than the 0.6 m
+                                         # stroke) + half the 0.5 m sleeve; stowed the foot folds into the leg's line
+                                         # (contact::leg_pose: leg 7.26 m, deployed 97.5 deg from the station axis)
 stroke_m = 0.6
-crush_force_n = 4.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4 x3
+crush_force_n = 4.5e6                   # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4 x3
                                          # for a 662 t landing (l2's 1.5 MN crushed through on 8 deg); kept for the
                                          # real 260-340 t: the drop tests land both without a bounce
 stiffness_n_m = 1.0e7                    # 6-9 mm static in lunar gravity (221-340 t)

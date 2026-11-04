@@ -54,7 +54,7 @@ config::VehicleConfig hls(double propellant_kg) {
 // Places the HLS upright over the site-frame point (east, north) with the foot over the highest ground `clearance_m`
 // above it, moving at `velocity_enu_mps` relative to the Moon. Site frame and surface of the session's leg simulation.
 void place_over_site(Fixture& fx, const config::VehicleConfig& cfg, double clearance_m, const Vec3& velocity_enu_mps,
-                     double east_m = 0.0, double north_m = 0.0) {
+                     double east_m = 0.0, double north_m = 0.0, bool legs_out = true) {
     const auto& legs = fx.session.leg_landing();
     const vehicle::Vehicle probe(cfg, STARSIM_CONFIG_DIR);
     const double cg = probe.mass_properties().cg_station_m;
@@ -74,7 +74,7 @@ void place_over_site(Fixture& fx, const config::VehicleConfig& cfg, double clear
     const math::Mat3 site_to_gcrf = frame.transform.rotation * legs.site_to_fixed();
     const auto attitude = math::Quat::from_matrix(site_to_gcrf * contact::from_columns({0, 0, 1}, {0, 1, 0}, {-1, 0, 0}));
     fx.session.place_body(cfg, {r, v, attitude, {}}, fx.t0);
-    fx.session.set_leg_deployment(0, 1.0);  // Task 6b: a landing HLS has its legs out
+    if (legs_out) fx.session.set_leg_deployment(0, 1.0);  // Task 6b: a landing HLS has its legs out
 }
 
 sim::LegSite lunar_site_on_sphere() { return {ephemeris::Body::Moon, site_lat, site_lon, 0.0, 10000.0}; }
@@ -127,6 +127,30 @@ TEST_CASE("An HLS set down gently at a lunar site lands and follows the Moon", "
     CHECK(norm(fixed1 - fixed0) < 1e-3);
     CHECK(fx.session.body(0).resting());
     CHECK(fx.session.telemetry(0).reference_body == ephemeris::Body::Moon);
+}
+
+// Task 6b fix 1 (I3): the onboard computer's leg rule at every control level. A manual descent (no autopilot, no
+// guidance) with the legs stowed and the engines off - the worst case the rule assumes - falls from 300 m: the legs
+// go out once the free-fall time to the ground is deploy_time_s + deploy_margin_s and are locked at the first contact.
+TEST_CASE("A manual descent with the legs stowed reaches the ground with them deployed", "[hls][legs][lunar]") {
+    Fixture fx;
+    fx.session.set_landing_surface(lunar_site_on_sphere(), contact::LandingSurface{});
+    place_over_site(fx, hls(100.0e3), 300.0, {0.0, 0.0, -1.5}, 0.0, 0.0, false);
+    REQUIRE(fx.session.autopilot().state == sim::AutopilotState::Off);
+    REQUIRE(fx.session.body(0).vehicle().leg_deployment() == 0.0);
+    double deploy_height_m = -1.0, at_contact = -1.0;
+    for (int i = 0; i < 1200 && at_contact < 0.0; ++i) {
+        fx.session.advance_to(fx.session.epoch() + 0.05, 100);
+        const auto& v = fx.session.body(0).vehicle();
+        if (deploy_height_m < 0.0 && v.legs_deploying()) deploy_height_m = fx.session.telemetry(0).altitude_m;
+        if (fx.session.leg_touchdown(0) != sim::LegTouchdown::None || fx.session.body(0).impacted()) {
+            at_contact = v.leg_deployment();
+        }
+    }
+    std::printf("[hls_legs] manual drop: legs out at %.1f m (CG altitude), %.2f at the first contact, %s\n", deploy_height_m,
+                at_contact, sim::to_string(fx.session.leg_touchdown(0)));
+    CHECK(deploy_height_m > 0.0);
+    CHECK(at_contact == 1.0);
 }
 
 TEST_CASE("An HLS touching the Moon far from the landing site is judged by its own ground contact", "[hls][legs][lunar]") {

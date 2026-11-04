@@ -14,7 +14,16 @@ DockingSim::DockingSim(std::string chaser_port, std::string station_port, const 
       station_port_(std::move(station_port)),
       mechanism_(p),
       shape_(contact::station_shape(station_config)),
-      hull_body_m_(contact::hull_sample_points(chaser_config, collision_p_)) {}
+      chaser_config_(chaser_config) {}
+
+const std::vector<math::Vec3>& DockingSim::hull_points(const vehicle::FlightBody& chaser) const {
+    const double deployment = chaser.vehicle().leg_deployment();
+    if (deployment != hull_deployment_) {
+        hull_body_m_ = contact::hull_sample_points(chaser_config_, collision_p_, deployment);
+        hull_deployment_ = deployment;
+    }
+    return hull_body_m_;
+}
 
 double DockingSim::coast_limit_s(const vehicle::FlightBody& chaser, const vehicle::FlightBody& station) const {
     if (chaser.docked()) return std::numeric_limits<double>::infinity();
@@ -24,7 +33,7 @@ double DockingSim::coast_limit_s(const vehicle::FlightBody& chaser, const vehicl
     const double range = norm(d);
     const math::Vec3 cg_body = chaser.vehicle().mass_properties().cg_point_m();
     double reach = 0.0;
-    for (const auto& p : hull_body_m_) reach = std::max(reach, norm(p - cg_body));
+    for (const auto& p : hull_points(chaser)) reach = std::max(reach, norm(p - cg_body));
     double clearance = 0.0;
     if (range > collision_p_.check_range_m) {
         clearance = range - collision_p_.check_range_m;  // to where the shape check takes over (review i5: no free coast)
@@ -96,10 +105,11 @@ void DockingSim::before_tick(vehicle::FlightBody& chaser, vehicle::FlightBody& s
         const math::Vec3 omega_c = rc * cs.angular_velocity_body_radps;
         const math::Vec3 omega_s = rs * ss.angular_velocity_body_radps;
         std::vector<math::Vec3> points, velocities;
-        points.reserve(hull_body_m_.size());
-        velocities.reserve(hull_body_m_.size());
+        const auto& hull = hull_points(chaser);
+        points.reserve(hull.size());
+        velocities.reserve(hull.size());
         const math::Vec3 cg_body = mp.cg_point_m();
-        for (const auto& p : hull_body_m_) {
+        for (const auto& p : hull) {
             const math::Vec3 r = rc * (p - cg_body);
             const math::Vec3 at = cs.position_gcrf_m + r;
             const math::Vec3 v = cs.velocity_gcrf_mps + cross(omega_c, r);

@@ -4,8 +4,8 @@ Frame: the stage's body frame (station X, nose +X), so the file lines up with sh
 profiles in hls_layout.py), every vertex in body coordinates:
   `thruster_<i>`  one landing thruster pod per config engine of the `landing` group: the EXIT PLANE CENTRE on the config position, the axis (local +X of
                   the profile) on the config thrust direction; bell and pod lie behind the exit plane, towards the hull
-  `leg_<i>` `foot_<i>`  the six deployable legs (tube and knuckle sleeve) and their pads with the piston stem, drawn DEPLOYED; the view turns both about
-                  the hinge by the deployment and slides the pad along +X by the compression (Task 6b, hls_legs_layout.py)
+  `leg_<i>` `shock_<i>` `stem_<i>` `foot_<i>`  the six deployable legs: tube, knuckle sleeve, piston stem, pad with its ball-joint hub, drawn DEPLOYED;
+                  the view poses them by the deployment (leg turn, foot fold, pad fold) and slides stem and pad by the compression (Task 6b, hls_legs_layout.py)
   `pusher_<i>`     the leg's pusher in its own frame (+X, unit length; the view stretches it from the anchor to the leg)
   `leg_mount_<i>`  hinge clevis and pusher anchor on the hull (fixed); `airlock_hatch`, `elevator_track`, `elevator_basket` fixed nodes (Task 6)
   `nose_port`     visual-only docking collar on the nose tip (not in the config, no physics)
@@ -54,9 +54,11 @@ def main():
     sides = int(d["landing_leg"]["sides"])
     for n in ll.foot_nodes(legs):
         for name, prims in ((n["leg_node"], ll.leg_prims(d["landing_leg"], legs, n["azimuth_rad"])),
+                            (n["shock_node"], ll.shock_prims(d["landing_leg"], legs, n["azimuth_rad"])),
+                            (n["stem_node"], ll.stem_prims(d["landing_leg"], legs, n["azimuth_rad"])),
                             (n["foot_node"], ll.foot_prims(d["landing_leg"], legs, n["azimuth_rad"])),
                             (n["pusher_node"], ll.pusher_prims(d["landing_leg"])),
-                            (n["mount_node"], ll.mount_prims(d["landing_leg"], hull_r, n["azimuth_rad"]))):
+                            (n["mount_node"], ll.mount_prims(d["landing_leg"], legs, hull_r, n["azimuth_rad"]))):
             tris += _mesh_of(prims, sides).to_object(name, root)[1]
     tris += _mesh_of(ll.hatch_prims(dict(d["airlock"]), hull_r), sides).to_object("airlock_hatch", root)[1]
     tris += _mesh_of(ll.track_prims(d["elevator"], hull_r), sides).to_object("elevator_track", root)[1]

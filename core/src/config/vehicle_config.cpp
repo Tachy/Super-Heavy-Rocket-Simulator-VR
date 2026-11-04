@@ -686,6 +686,17 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             s.landing_legs.max_touchdown_tilt_rad >= constants::pi / 2.0) {
             doc.fail("landing_legs: deploy_margin_s >= 0 and max_touchdown_tilt_deg in [0, 90) (0: not set)");
         }
+        s.landing_legs.hinge_station_m = doc.number_or(*legs, "hinge_station_m", 0.0);
+        s.landing_legs.hinge_radius_m = doc.number_or(*legs, "hinge_radius_m", 0.0);
+        s.landing_legs.knuckle_height_m = doc.number_or(*legs, "knuckle_height_m", 0.0);
+        const bool rig = legs->contains("hinge_station_m") || legs->contains("hinge_radius_m") ||
+                         legs->contains("knuckle_height_m");
+        if (rig && (s.landing_legs.fixed || !(s.landing_legs.hinge_radius_m > 0.0) ||
+                    !(s.landing_legs.knuckle_height_m > 0.0) ||
+                    s.landing_legs.hinge_radius_m >= s.landing_legs.footprint_radius_m)) {
+            doc.fail("landing_legs: hinge_station_m, hinge_radius_m (< footprint_radius_m) and knuckle_height_m > 0 belong "
+                     "together, on deployable legs");
+        }
     }
     if (auto rcs = t["rcs"].as_table()) s.rcs = load_rcs(doc, *rcs, s.tanks);
     for (const auto& thruster : s.rcs.thrusters) {

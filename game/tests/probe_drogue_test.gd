@@ -237,23 +237,23 @@ func _check_hls_pair() -> bool:
 	var legs_block: Dictionary = hls["manifest"]["hls_legs"]
 	var moving := {}
 	for entry: Dictionary in legs_block["legs"]:
-		for key: String in ["leg_node", "foot_node", "pusher_node"]:
-			moving[String(entry[key])] = [float(entry["azimuth_deg"]), key == "pusher_node"]
+		for kind: String in ["leg", "shock", "stem", "foot", "pusher"]:
+			moving[String(entry[kind + "_node"])] = [float(entry["azimuth_deg"]), kind]
 	for deployment: float in [0.0, 1.0]:
 		var seen := 0
 		for part_name: String in parts:
-			if not (part_name.begins_with("leg_") or part_name.begins_with("foot_") or part_name.begins_with("pusher_") or part_name.begins_with("airlock")
-					or part_name.begins_with("elevator")):
+			if not (part_name.begins_with("leg_") or part_name.begins_with("foot_") or part_name.begins_with("pusher_") or part_name.begins_with("shock_")
+					or part_name.begins_with("stem_") or part_name.begins_with("airlock") or part_name.begins_with("elevator")):
 				continue
 			seen += 1
 			var local := Transform3D.IDENTITY
 			if moving.has(part_name):
 				var rig_pose := VehicleModels.hls_leg_pose(legs_block["rig"], moving[part_name][0], deployment)
-				local = rig_pose["pusher"] if moving[part_name][1] else rig_pose["leg"]
+				local = rig_pose[moving[part_name][1]]
 			var near := _min_axis_distance(_vertices(parts[part_name]), pose * local)
 			_check(near > radius_depot, "HLS %s (deployment %.0f) outside the depot's hull radius: nearest vertex %.3f m from the depot's axis (hull radius %.3f m)"
 					% [part_name, deployment, near, radius_depot])
-		_check(seen == 27, "HLS pair: six legs, feet, pushers and mounts, airlock hatch, elevator track and basket checked (%d)" % seen)
+		_check(seen == 39, "HLS pair: six legs, sleeves, stems, feet, pushers and mounts, airlock hatch, elevator track and basket checked (%d)" % seen)
 	hls_view.free()
 	depot_view.free()
 	return true

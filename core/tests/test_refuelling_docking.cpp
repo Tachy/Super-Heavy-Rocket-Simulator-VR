@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -17,6 +18,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/probe_drogue_interface.hpp"
 #include "starsim/contact/probe_drogue_mechanism.hpp"
+#include "starsim/contact/primitives.hpp"
 #include "starsim/contact/station_collision.hpp"
 #include "starsim/frames/lvlh.hpp"
 #include "starsim/sim/station_limits.hpp"
@@ -402,7 +404,7 @@ TEST_CASE("Hull sampling: the tanker's whole hull clears the mated depot by ~1 m
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     const auto depot = config::top_stage_config(config::load_vehicle(config_dir, "starship_depot"));
     const contact::StationCollisionParameters cp;
-    const auto points = contact::hull_sample_points(tanker, cp);
+    const auto points = contact::hull_sample_points(tanker, cp, 0.0);
     double top = 0.0;
     for (const auto& q : points) top = std::max(top, q.x);
     CHECK(top > 50.0);  // not cut at the dorsal port (x = 20 m)
@@ -418,20 +420,43 @@ TEST_CASE("Hull sampling: the tanker's whole hull clears the mated depot by ~1 m
     CHECK(contact::hull_contact(shape, closer, zero, {}, cp).any);
 }
 
-TEST_CASE("HLS legs clear the depot when mated (r1 open point)", "[refuelling][docking][hls]") {
+// Task 6b fix 1: the collision points follow the leg deployment (contact::leg_pose) - docked in space the legs are
+// stowed; both poses must clear the mated depot. Clearance: the nearest leg point to the depot's primitives.
+TEST_CASE("HLS legs clear the depot when mated (r1 open point)", "[refuelling][docking][hls][legs]") {
     const auto hls = config::top_stage_config(config::load_vehicle(config_dir, "starship_hls"));
     const auto depot = config::top_stage_config(config::load_vehicle(config_dir, "starship_depot"));
     const contact::StationCollisionParameters cp;
-    const auto points = contact::hull_sample_points(hls, cp);
-    double reach = 0.0;
-    for (const auto& q : points) reach = std::max(reach, std::hypot(q.y, q.z));
-    CHECK(reach == Catch::Approx(12.0).margin(0.01));  // the leg feet are sampled
+    const auto shape = contact::station_shape(depot);
     const auto t = vehicle::mated_stage_transform(hls.stages.back().docking_ports.front(),
                                                   depot.stages.back().docking_ports.front());
-    std::vector<Vec3> mated, zero(points.size());
-    for (const auto& q : points) mated.push_back(t.apply(q));
-    const auto contact = contact::hull_contact(contact::station_shape(depot), mated, zero, {}, cp);
-    CHECK_FALSE(contact.any);
+    const double hull_r = 0.5 * hls.stages.front().diameter_m;
+    const auto clearance = [&](const Vec3& q) {
+        double c = 1e9;
+        for (const auto& cap : shape.capsules) {
+            const Vec3 ab = cap.b_m - cap.a_m;
+            const double u = std::clamp(dot(q - cap.a_m, ab) / dot(ab, ab), 0.0, 1.0);
+            c = std::min(c, norm(q - (cap.a_m + u * ab)) - cap.radius_m);
+        }
+        for (const auto& b : shape.boxes) c = std::min(c, contact::distance_to_box(b, q));
+        return c;
+    };
+    for (const double deployment : {0.0, 1.0}) {
+        CAPTURE(deployment);
+        const auto points = contact::hull_sample_points(hls, cp, deployment);
+        double reach = 0.0, legs_clear = 1e9;
+        std::vector<Vec3> mated, zero(points.size());
+        for (const auto& q : points) {
+            reach = std::max(reach, std::hypot(q.y, q.z));
+            mated.push_back(t.apply(q));
+            if (std::hypot(q.y, q.z) > hull_r + 0.01) legs_clear = std::min(legs_clear, clearance(mated.back()));
+        }
+        std::printf("[hls_pair] legs %.0f: reach %.3f m from the HLS axis, nearest leg point %.3f m from the depot\n",
+                    deployment, reach, legs_clear);
+        // deployed the feet are sampled at the footprint; stowed the leg line lies on the hinge radius
+        CHECK(reach == Catch::Approx(deployment == 1.0 ? 12.0 : hls.stages.front().landing_legs.hinge_radius_m).margin(0.01));
+        CHECK(legs_clear > 0.0);
+        CHECK_FALSE(contact::hull_contact(shape, mated, zero, {}, cp).any);
+    }
 }
 
 TEST_CASE("Tanker from Waypoint 2 to hard capture at the depot", "[refuelling][docking][proximity]") {

@@ -6,9 +6,10 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "2c28bd7c77865397"  # models plan Task 6b 2026-11-04: HLS legs deployable (stowed at launch and in Earth orbit, deploy keys added):
-                                    # no leg state enters these flights (leg contact only on a leg site near the ground; the station collision keeps
-                                    # the deployed struts), numbers kept; final fix 2026-11-04: ship entry_vent_rate_kg_s comment (its basis) and raptor3.toml spacing only, values unchanged: numbers kept;
+inputs_digest = "1e8f85ca825208a7"  # models plan Task 6b 2026-11-04 + fix 1: HLS legs deployable (stowed at launch and in Earth orbit; deploy and
+                                    # kinematics keys added). Leg contact only on a leg site near the ground; the station collision now samples the legs
+                                    # where they are (stowed: along the hull on the 4.8 m hinge radius, no contact with the depot, 1.82 m clear) - only
+                                    # the proximity coast limit's reach changes (stowed legs reach less); hls_refuel re-flown in fix 1, see task-6b-report; final fix 2026-11-04: ship entry_vent_rate_kg_s comment (its basis) and raptor3.toml spacing only, values unchanged: numbers kept;
                                     # planner plan Task 12b 2026-11-04: ship entry_vent_rate_kg_s added; tanker_flight re-flown, no vent (main
                                     # at catch 1.46 t, within its 0.3 t; the other numbers identical), numbers kept;
                                     # planner plan Task 12 2026-11-04: depot + tanker pad flights re-measured (ship 177 t, tanker 171 t

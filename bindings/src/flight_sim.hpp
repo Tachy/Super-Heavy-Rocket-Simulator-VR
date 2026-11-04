@@ -105,6 +105,7 @@ public:
     int64_t set_rate_mode(bool enabled);
     int64_t ignite();
     int64_t cutoff();
+    int64_t deploy_legs();  // the controlled vehicle's landing legs (pilot; irreversible)
     int64_t release_clamps();
     int64_t stage();
 

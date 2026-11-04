@@ -9,6 +9,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/landing_legs.hpp"
+#include "starsim/contact/leg_kinematics.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -185,4 +186,30 @@ TEST_CASE("Foot compression along the stroke axis puts each HLS foot on a 7 degr
     CHECK(highest_c - lowest_c > 0.05);  // really different compressions (tilt over 12 m footprint: ~0.2 m)
     CHECK(contact::foot_compression_along_axis_m(0.01, Vec3{0.0, 0.0, 1.0}, Vec3{1.0, 0.0, 0.0}) == 0.0);  // surface parallel to the axis
     CHECK(contact::foot_compression_along_axis_m(-0.01, Vec3{0.0, 0.0, 1.0}, Vec3{0.0, 0.0, 1.0}) == 0.0);
+}
+
+// Task 6b fix 1: the leg kinematics (contact::leg_pose) - deployed the foot is the config's foot point, stowed the leg and
+// its folded foot lie along the hull on the hinge radius, tip up; in between the foot moves smoothly.
+TEST_CASE("HLS leg kinematics: deployed on the config foot, stowed along the hull", "[contact][legs]") {
+    const auto legs = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls").stages.front().landing_legs;
+    REQUIRE(contact::has_leg_kinematics(legs));
+    for (const double az : legs.azimuths_rad) {
+        const Vec3 radial{0.0, std::cos(az), std::sin(az)};
+        const auto out = contact::leg_pose(legs, az, 1.0);
+        CHECK(norm(out.foot_m - (Vec3{legs.foot_station_m, 0.0, 0.0} + legs.footprint_radius_m * radial)) < 1e-9);
+        CHECK(norm(out.knuckle_m - out.foot_m - Vec3{legs.knuckle_height_m, 0.0, 0.0}) < 1e-9);
+        const auto in = contact::leg_pose(legs, az, 0.0);
+        const double length = norm(out.knuckle_m - out.hinge_m);
+        CHECK(norm(in.knuckle_m - (in.hinge_m + Vec3{length, 0.0, 0.0})) < 1e-9);  // along the hull, tip up
+        CHECK(norm(in.foot_m - (in.knuckle_m + Vec3{legs.knuckle_height_m, 0.0, 0.0})) < 1e-9);  // folded into the line
+        CHECK(dot(in.foot_m, radial) == Catch::Approx(legs.hinge_radius_m));
+        double path = 0.0, longest = 0.0;
+        for (int k = 0; k < 20; ++k) {
+            const double step = norm(contact::leg_pose(legs, az, 0.05 * (k + 1)).foot_m - contact::leg_pose(legs, az, 0.05 * k).foot_m);
+            path += step;
+            longest = std::max(longest, step);
+        }
+        CHECK(longest < 0.25 * path);
+    }
+    CHECK(contact::leg_deployed_angle_rad(legs) == Catch::Approx(97.5164 * deg).margin(1e-4));
 }
