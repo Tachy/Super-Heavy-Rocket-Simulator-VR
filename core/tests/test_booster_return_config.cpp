@@ -187,6 +187,22 @@ TEST_CASE("Super Heavy return parameters come from its config", "[gnc][booster][
     CHECK(flip_s < 1.08 * flown_flip_s);
 }
 
+// Diagnostic (planner plan Task 12b, watch list of Task 4b): FlightBody keeps the state position when burning moves the
+// CG along the hull, so the hull drifts against the trajectory by the CG station's change. The Super Heavy CG over its
+// loads: liftoff (full), the separation's 293 t, the landing burn's ignition (53.5 t, FAA case) and a caught residue.
+TEST_CASE("Diagnostic: Super Heavy CG station over its propellant", "[.diag_drift]") {
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    const auto& stage = cfg.stages.front();
+    double full_kg = 0.0;
+    for (const auto& t : stage.tanks) {
+        if (t.contents != config::TankContents::Rcs) full_kg += t.mass_kg;
+    }
+    for (const double kg : {full_kg, 293.0e3, 53.5e3, 20.0e3, 10.0e3}) {
+        const auto m = vehicle::settled_stage_mass_properties(cfg, stage, kg);
+        std::printf("[drift] Super Heavy %.1f t propellant: CG station %.3f m\n", kg / 1000.0, m.cg_station_m);
+    }
+}
+
 TEST_CASE("The attitude loop's turn model: braking law, gimbal slew and the turn axis", "[gnc][config]") {
     const auto gains = gnc::booster_return_attitude_gains;
     const double pi = constants::pi, a = 0.1, tol = 0.2, gimbal = 15.0 * deg;

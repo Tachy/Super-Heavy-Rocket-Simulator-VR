@@ -293,8 +293,9 @@ TEST_CASE("Lunar return campaign (direct): seeds 13-15", "[lunar][return][valida
 TEST_CASE("Lunar return campaign (direct): seeds 16-18", "[lunar][return][validation][nightly]") { CHECK(fly_seeds(16, 18, false) == 3); }
 TEST_CASE("Lunar return campaign (direct): seeds 19-21", "[lunar][return][validation][nightly]") { CHECK(fly_seeds(19, 21, false) == 3); }
 
-// Reduced direct campaign (seeds named by the test tiers plan): seed 2 is the known red (upright abort,
-// docs/known-issues.md) and keeps this case red until it is fixed; 18 is the former refuelling-f3 miss (lateral LQR).
+// Reduced direct campaign (seeds named by the test tiers plan): seed 2 was the known red (upright abort) and is caught
+// since planner plan Task 12; the known red moved to seed 11 (upright abort with 8.2 t, gate 0.62 km across; nightly
+// "seeds 10-12", docs/known-issues.md); 18 is the former refuelling-f3 miss (lateral LQR).
 TEST_CASE("Lunar return campaign (direct): seed 2", "[lunar][return][validation][slow]") { CHECK(fly_seeds(2, 2, false) == 1); }
 TEST_CASE("Lunar return campaign (direct): seed 12", "[lunar][return][validation][slow]") { CHECK(fly_seeds(12, 12, false) == 1); }
 TEST_CASE("Lunar return campaign (direct): seed 15", "[lunar][return][validation][slow]") { CHECK(fly_seeds(15, 15, false) == 1); }
