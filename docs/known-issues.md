@@ -247,7 +247,3 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Plan Task 6 step 2 (`[slow]` catch cases) did not run by user decision; it moves to the vehicle plan's campaign gate.
 - `tower_handover_check` is red (2026-11-01): 8 failures on fa226c8, 7 on aae1e5d, about 6 % near/mid against its limit. Cause not traced; not known whether it was green before the leg colour change e67af13.
 - Tower head underside 140.5 m, 1.4 m above the lattice top where the photo reads level: at 139.1 m the sheave block would enter the head at +0.7 m carriage offset, the stroke allows +4 m, and it clears to +2.1 m as built.
-
-## Lunar landing mission lands in the dark (found 2026-11-04, HLS models Task 6)
-- `config/missions/hls_lunar_llo.toml` (and the NRHO / depot variants) have `epoch_utc = 2026-11-02`: the HLS touches down at the IM-2 site (84.79 S) ~9.7 days later, Sun elevation -1.4 deg (the terrain horizon there is +2.8 deg), and lifts off after the 24 h stay still in shadow: the Sun light energy is 0 and the lander is black. Not a lighting bug (checked with `vehicle_look_shots.gd --sun_report`): the site is lit only about days 13.4-28.9 after 2026-11-02 (Sun 2.5-6.8 deg high). Landing windows would have to be chosen (a later `epoch_utc`; the core tests pin 2026-11-02); the user decides. The look scripts' `--utc` does not move a lunar mission.
-

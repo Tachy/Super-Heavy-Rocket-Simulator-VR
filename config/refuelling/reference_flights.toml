@@ -6,7 +6,7 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "1e8f85ca825208a7"  # models plan Task 6b 2026-11-04 + fix 1: HLS legs deployable (stowed at launch and in Earth orbit; deploy and
+inputs_digest = "5203f820f811f5d7"  # models plan Task 6c 2026-11-04: lunar epoch 2026-11-13 (daylight at the landing site), hls_refuel earliest_utc 2026-10-31 (13 d before it), hls_refuel_orbit 2026-11-11; no number changed: the nightly hls_refuel pad flight and hls_refuel_orbit pass their 1 % / 0.3 t checks against the stored numbers, the flown campaign passes against the calculator; models plan Task 6b 2026-11-04 + fix 1: HLS legs deployable (stowed at launch and in Earth orbit; deploy and
                                     # kinematics keys added). Leg contact only on a leg site near the ground; the station collision now samples the legs
                                     # where they are (stowed: along the hull on the 4.8 m hinge radius, no contact with the depot, 1.82 m clear) - only
                                     # the proximity coast limit's reach changes (stowed legs reach less); hls_refuel re-flown in fix 1, see task-6b-report; final fix 2026-11-04: ship entry_vent_rate_kg_s comment (its basis) and raptor3.toml spacing only, values unchanged: numbers kept;

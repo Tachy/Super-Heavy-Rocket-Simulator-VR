@@ -49,12 +49,15 @@ public:
     LunarArrival evaluate(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                           const math::Vec3& delta_v_mps) const;
 
+    // Without `initial_delta_v` the Lambert guess is used; when its Newton iteration stalls (the guessed arc hits the
+    // Moon and the steps creep along the family of impacting arcs) the guess past the opposite limb is tried.
     TransferSolution solve(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                            const LunarArrivalTarget& target, std::optional<math::Vec3> initial_delta_v = {}) const;
 
-    // Lambert-based first guess (Earth two-body) aimed beside the Moon at the target epoch.
+    // Lambert-based first guess (Earth two-body) aimed beside the Moon at the target epoch: past the limb on the
+    // `side` (+1 / -1) of the transfer plane's normal x Moon direction.
     math::Vec3 lambert_guess(const math::StateVector& state_at_burn, time::Epoch burn_epoch,
-                             const LunarArrivalTarget& target) const;
+                             const LunarArrivalTarget& target, double side = 1.0) const;
 
     // Searches one parking-orbit period after `earliest` (in `step_s` steps) for the burn time with the
     // smallest Lambert delta-v that arrives at `arrival_epoch`. Returns the burn epoch.
@@ -73,6 +76,9 @@ public:
     void set_finite_burn(std::optional<FiniteBurnModel> model) { finite_ = model; }
 
 private:
+    // The Newton iteration from the first guess `dv`.
+    TransferSolution newton(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                            const LunarArrivalTarget& target, math::Vec3 dv) const;
     math::StateVector coast(const math::StateVector& state, time::Epoch from, time::Epoch to) const;
 
     const environment::GravityModel& gravity_;

@@ -1176,8 +1176,11 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
     while (f.lunar.epoch() - s.epoch < 1200.0 && f.lunar.tower()->phase() != sim::CatchPhase::Caught) {
         f.lunar.advance_to(f.lunar.epoch() + 1.0);
     }
-    const time::Epoch start = f.lunar.epoch();
-    while (f.lunar.epoch() - start < 10.0 * 86400.0 && f.lunar.iss_mission_leg() != IssMissionLeg::Complete &&
+    // the HLS waits for the lunar mission's epoch (which sets how long): fly to it and one day past it (task 6c: the epoch
+    // moved to 2026-11-13, the liftoff came earlier in the 13 d before it than the former fixed 10 d allowed)
+    const time::Epoch lunar_epoch = f.clock.from_utc(
+        config::load_lunar_landing_mission(refuelling_test::config_dir, "hls_lunar_llo_depot").epoch_utc);
+    while (f.lunar.epoch() < lunar_epoch + 86400.0 && f.lunar.iss_mission_leg() != IssMissionLeg::Complete &&
            f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
         f.lunar.advance_to(f.lunar.epoch() + 600.0);
     }

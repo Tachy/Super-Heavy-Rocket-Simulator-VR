@@ -152,6 +152,15 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
 ## Standing decisions
 - Plan like mission planners: find the departure window, no epoch hopping (user 2026-10-18); re-plan from flight data.
 - Lunar plane wait is refused honestly rather than re-targeting (user 2026-10-16).
+- The shipped lunar missions land in daylight (user 2026-11-04): `epoch_utc = 2026-11-13` in `hls_lunar_llo`, `hls_lunar_llo_depot`,
+  `hls_lunar_nrho`; `hls_refuel` / `hls_refuel_orbit` start 13 / 2 d before it. The Mons Mouton site (84.79 S) is lit only about half of
+  each 29.5 d cycle with the Sun at most 6.8 deg high, so the epoch is chosen with `tools/lunar_sun_scan.py` (Sun elevation minus the
+  LOLA terrain horizon in the Sun's azimuth, needs the touchdown offset of the flown plan): touchdown 2026-11-22 ~01:20 UTC, liftoff 24 h
+  later, margin >= 7.6 deg over the stay (the previous 2026-11-02 landed at -4.9 deg margin). Epoch limits met on the way: the plane of
+  the 26.5 deg depot does not reach the Moon on 11-08 / 11-09 (declination); the TLI Newton (`LunarTransferTargeter::solve`) stalled from
+  the Lambert guess at 2026-11-12 and 11-14 (LLO) and 11-11 (depot variant) (first arc hits the Moon, 40 steps along impacting arcs at 55 deg): it now retries from
+  the guess past the other limb (`lambert_guess(..., side = -1)`), test "The LLO outbound plan is found at the epochs where the first guess
+  stalled". Re-choose the epoch with the scan when a plan change moves the touchdown.
 
 ## Validation
 - Lunar propagation `test_lunar_propagation.cpp`: 100 km LLO and a 3,000 x 70,000 km orbit one day Earth-centred vs

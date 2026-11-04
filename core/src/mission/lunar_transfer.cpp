@@ -88,12 +88,12 @@ LunarArrival LunarTransferTargeter::evaluate(const StateVector& state, time::Epo
 }
 
 Vec3 LunarTransferTargeter::lambert_guess(const StateVector& at_burn, time::Epoch burn_epoch,
-                                          const LunarArrivalTarget& target) const {
+                                          const LunarArrivalTarget& target, double side) const {
     const Vec3 moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, target.periselene_epoch).position_m;
     const Vec3 normal = math::normalized(cross(at_burn.position_m, at_burn.velocity_mps));
     // Aim beside the Moon (in the transfer plane) instead of at its centre.
-    const Vec3 side = math::normalized(cross(normal, moon));
-    const Vec3 aim = moon + side * (constants::moon_mean_radius_m + target.periselene_altitude_m);
+    const Vec3 side_dir = side * math::normalized(cross(normal, moon));
+    const Vec3 aim = moon + side_dir * (constants::moon_mean_radius_m + target.periselene_altitude_m);
     const auto lambert = orbit::solve_lambert(at_burn.position_m, aim, target.periselene_epoch - burn_epoch,
                                               gm_earth_, normal);
     return lambert ? lambert->departure_velocity_mps - at_burn.velocity_mps : Vec3{};
@@ -129,8 +129,21 @@ time::Epoch LunarTransferTargeter::best_departure(const StateVector& state, time
 TransferSolution LunarTransferTargeter::solve(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                                               const LunarArrivalTarget& target,
                                               std::optional<Vec3> initial_delta_v) const {
+    if (initial_delta_v) return newton(state, epoch, burn_epoch, target, *initial_delta_v);
+    const StateVector at_burn = coast(state, epoch, burn_epoch);
+    auto solution = newton(state, epoch, burn_epoch, target, lambert_guess(at_burn, burn_epoch, target));
+    if (!solution.converged) {
+        // Seen at some epochs (LLO transfer from 2026-11-12 and -14): the first arc hits the Moon, 40 steps creep
+        // along impacting arcs at 55 deg; from the other limb the same Newton converges.
+        auto other = newton(state, epoch, burn_epoch, target, lambert_guess(at_burn, burn_epoch, target, -1.0));
+        if (other.converged) return other;
+    }
+    return solution;
+}
+
+TransferSolution LunarTransferTargeter::newton(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                                               const LunarArrivalTarget& target, Vec3 dv) const {
     TransferSolution solution;
-    Vec3 dv = initial_delta_v ? *initial_delta_v : lambert_guess(coast(state, epoch, burn_epoch), burn_epoch, target);
 
     // B-plane style targeting: periselene altitude and lunar inclination; the arrival time stays free
     // (it follows from the energy). Two constraints, three unknowns: minimum-norm Newton steps find the

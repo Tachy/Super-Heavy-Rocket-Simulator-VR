@@ -59,7 +59,7 @@ TEST_CASE("start_mission plans the HLS outbound flight", "[sim][lunar][mission]"
     CHECK(start.return_planned);
     CHECK(start.refusal.empty());
     CHECK(session.lunar_step() == sim::LunarStep::Departure);
-    CHECK(session.epoch().tdb_seconds_past_j2000() == time.from_utc({2026, 11, 2, 0, 0, 0.0}).tdb_seconds_past_j2000());
+    CHECK(session.epoch().tdb_seconds_past_j2000() == time.from_utc({2026, 11, 13, 0, 0, 0.0}).tdb_seconds_past_j2000());  // the mission's epoch_utc: daylight at the site (was 2026-11-02; task 6c)
     // circular 200 km parking orbit
     const auto& s = session.body(session.controlled_index()).state();
     CHECK_THAT(norm(s.position_gcrf_m) - constants::wgs84_semi_major_axis_m, WithinAbs(200e3, 1.0));
@@ -128,6 +128,28 @@ TEST_CASE("Mission 1 closes in the LLO with the 120 t HLS; NRHO and 204 t are re
             CHECK(s.refusal.find("Mission nicht durchführbar") != std::string::npos);
             CHECK(session.lunar_step() == sim::LunarStep::None);
         }
+    }
+}
+
+// Task 6c: from these epochs the Lambert first guess (aimed past one limb of the Moon) left the TLI Newton creeping along
+// impacting arcs ("Kein Transfer zum Mond gefunden", 40 steps at 55 deg, -1,260 km periselene); the guess past the other
+// limb converges. Both used to be refused.
+TEST_CASE("The LLO outbound plan is found at the epochs where the first guess stalled", "[sim][lunar][mission]") {
+    test::spice_session();
+    spice::SpiceEphemeris ephemeris;
+    auto earth = spice::SpiceOrientation::earth();
+    auto moon = spice::SpiceOrientation::moon_mean_earth();
+    spice::SpiceTimeConverter time;
+    auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo");
+    for (const int day : {12, 14}) {
+        m.epoch_utc = {2026, 11, day, 0, 0, 0.0};
+        sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
+        const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc));
+        CAPTURE(day, s.refusal);
+        CHECK(s.return_planned);
+        CHECK(s.refusal.empty());
+        REQUIRE(session.lunar_outbound_plan());
+        CHECK_THAT(norm(session.lunar_outbound_plan()->tli.delta_v_gcrf_mps), WithinAbs(3.2e3, 0.2e3));  // [D] the same TLI as the other epochs (3,142-3,195 m/s in the probe)
     }
 }
 
