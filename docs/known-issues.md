@@ -12,6 +12,17 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   the catch", `plan_speed`, "Flaps pinned at their stops", every ship return / catch / lunar / Falcon 9 / Dragon campaign.
   Nightly (30 cases, 1931 s): 29 green incl. the full flown refuelling campaign against the calculator; red "Lunar
   return campaign (direct): seeds 10-12" (seed 11, below). The other 149 default-tier cases of the plan's tags green.
+- Planner plan close-out (2026-11-04, final review + re-review `final-review.md` / `final-rereview.md` in the plan's
+  workspace), open minors: `vent_pass_attempts` = 3 is a search-loop cap, not a [D] value; the vent-fit check counts
+  the wait from the snapshot without margin, so a marginal fit can enter up to ~3 t above the residue limit; the
+  later-pass and refusal paths of the vent-fit search are untested; the first key R reads the alpha schedule file once
+  on the sim thread; tanker reserve worker 41.5-50.4 s against its 60 s budget; tanker phasing floor 5.0 t against
+  5.04 t flown (Task 8 N1) and the rendezvous floor without boil-off (N2); Task 4 N1 (yaw spill into saturated roll),
+  N2 (arm-top source session vs test), the "Fang verfehlt" path untested; no drone-ship tilt-rate test; Falcon 9 flip
+  case 4 cause pinned to a commit, not a mechanism; HUD "Manöver ... Brenndauer 0.0 s" while the burn is 55 min ahead
+  (pre-existing, seen in `screenshots/entry_vent/hud_planned.png`). Refuelling offsets re-calibrated 2026-11-04
+  (7b8a42e): flown campaign 7 tankers / 32.1 d, calculator 7 / 25.25 d, the tool's
+  comparison passed (`refuelling-recal-report.md`).
 - Entry trim with main-tank residue: closed by planner plan Task 12b (controller ruling 2026-11-04, a planner item):
   the return planner vents the main-tank residue the flaps cannot trim before the entry interface
   (`gnc::entry_residue_limit`, 5.85 t main on top of the full headers for the 177 t ship; `ship-entry-return.md`).
