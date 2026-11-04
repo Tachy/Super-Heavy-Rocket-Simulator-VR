@@ -6,7 +6,7 @@ the Sun's azimuth, the same MoonSunHorizon data the game renders with) and evalu
 For every candidate mission epoch (the mission's [orbit] epoch_utc) the surface stay is [epoch + touchdown_offset,
 epoch + touchdown_offset + stay]; the table lists the minimum margin over that stay. The touchdown offset is not
 computed here: take it from the flown mission (STARSIM_DEBUG_LUNAR_SESSION=1 on the "Lunar mission epoch probe" case,
-status line "Landed", days after the epoch) and pass it with --landing-offset-d.
+first "Oberflächenaufenthalt" status line, days after the epoch; STARSIM_LUNAR_SPAN_D must reach past it) and pass it with --landing-offset-d.
 
 Usage (repo root):
   python tools/lunar_sun_scan.py --start 2026-11-02T00:00:00 --days 60 --landing-offset-d 9.7 --stay-h 24 \
@@ -74,12 +74,17 @@ def main() -> None:
     if not epochs:
         epochs = [(start + dt.timedelta(days=k), a.landing_offset_d)
                   for k in range(int(a.days - a.landing_offset_d - a.stay_h / 24.0))]
-    print(f"site {a.site} lat {lat} lon {lon}; touchdown = epoch + {a.landing_offset_d} d, stay {a.stay_h} h, "
+    per_epoch = bool(a.epochs) and any("@" in item for item in a.epochs.split(","))
+    offset_text = "epoch + per-epoch offset (the @ values; default %s d)" % a.landing_offset_d if per_epoch else f"epoch + {a.landing_offset_d} d"
+    print(f"site {a.site} lat {lat} lon {lon}; touchdown = {offset_text}, stay {a.stay_h} h, "
           f"requirement margin >= {a.min_margin} deg (margin = Sun elevation - terrain horizon in the Sun's azimuth)")
     print(f"{'epoch (UTC)':<20} {'touchdown (UTC)':<17} {'margin touchdown':>16} {'margin liftoff':>14} {'min over stay':>13} {'min Sun el':>10}  OK")
     for e, offset_d in epochs:
         t0 = (e - start).total_seconds() / 3600.0 + offset_d * 24.0
         t1 = t0 + a.stay_h
+        if t0 < rows[0][0] - 1e-9 or t1 > rows[-1][0] + 1e-9:
+            print(f"WARNING: the stay of epoch {e.isoformat()} ([{t0:.1f}, {t1:.1f}] h) is not wholly inside the scanned span "
+                  f"([{rows[0][0]:.1f}, {rows[-1][0]:.1f}] h): its minimum covers only the scanned part")
         lo, m0, m1, el = min_margin(rows, t0, t1)
         td = start + dt.timedelta(hours=t0)
         print(f"{e.isoformat():<20} {td.strftime('%Y-%m-%dT%H:%M'):<17} {m0:16.2f} {m1:14.2f} {lo:13.2f} {el:10.2f}  {'yes' if lo >= a.min_margin else '-'}")

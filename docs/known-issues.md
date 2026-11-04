@@ -230,11 +230,13 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   (`[dorsal] raceway_detour_m` / `raceway_detour_ramp_m`, `dorsal_layout.raceway_offset_m`, `gen_hull.py`); physics and Block 3 are
   untouched. Option 2 awaiting the user: move the connectors off the centreline in the configs (`starship_tanker.toml`,
   `starship_depot.toml`, `starship_hls.toml`; the mated pair needs both ships' connectors mirrored), then drop the detour keys.
-- HLS nose docking port (plan 2026-11-04, Task 5): NASA's docking page and the concept render show an IDSS-class port on the HLS nose, but
+- HLS nose docking port (plan 2026-11-04, Task 5; PLANNED, user 2026-11-04: crew transfer, the crew arrives on a Starship): NASA's docking page and the concept render show an IDSS-class port on the HLS nose, but
   `config/vehicles/starship_hls.toml` has only the dorsal `transfer_dock`. The nose port is drawn VISUAL ONLY (`[nose_port]` of
-  `detail/starship_hls.toml`, node `nose_port`, manifest `hls_nose_port.visual_only`): no docking physics, no port frame, nothing in the core. Open: whether the
-  HLS gets a configured nose port (Orion / Gateway-style docking in the lunar missions); until then nothing can dock there. The drawn collar stands 0.10 m above the
-  config length (52.1 m).
+  `detail/starship_hls.toml`, node `nose_port`, manifest `hls_nose_port.visual_only`): no docking physics, no port frame, nothing in the core. The user wants a real (physics) nose port later,
+  for crew transfer from a crew Starship; until then nothing can dock there. The drawn collar stands 0.10 m above the config length (52.1 m).
+- Pilot cannot fire the HLS landing thrusters manually (plan 2026-11-04, Task 6b): the autopilot lights the 12 landing thrusters; a piloted manual landing has no thruster command (the legs have one: key B
+  "Landebeine ausfahren"), so it cannot be flown or tested by hand. Gap for the M7 controls.
+- HLS stowed leg pads vs core collision (Task 6b minor): the core's collision points do not sample the stowed pad rim (drawn pad 0.776 m from the depot's hull, core 1.817 m); stated, not fitted.
 - HLS landing thrusters (plan 2026-11-04, Task 5): drawn exactly as the config's `landing` group resolves them (12, ring 4.6 m, station 40.0 m, cant 15 deg
   toward the axis). The thrust axis then lies 15 deg off the hull's station axis, so the exit plane stands across the hull (aft-facing pods), which the 2021 render's
   "port cutouts" do not show either way; the config is unchanged (user ruling 2026-11-04: no proposal approved).

@@ -14,7 +14,7 @@ vehicle = "starship_hls"
 site = "mons_mouton_im2"         # config/lunar_sites.toml (l4 lands there)
 
 [orbit]
-epoch_utc = "2026-11-13T00:00:00"   # [E] chosen for daylight at the site (user 2026-11-04): touchdown ~2026-11-22 01:20 UTC, liftoff 24 h later, Sun >= 7.6 deg above the terrain horizon over the stay (tools/lunar_sun_scan.py)
+epoch_utc = "2026-11-13T00:00:00"   # [E] chosen for daylight at the site (user 2026-11-04): touchdown ~2026-11-22 01:20 UTC, liftoff 24 h later, Sun >= 7.59 deg above the terrain horizon over the stay (tools/lunar_sun_scan.py)
 height_km = 200.0                # [S] spec: 200 x 200 km after the depot (NASA OIG IG-26-004)
 inclination_deg = 28.5           # [E] Florida launch azimuth east; the RAAN is computed (plane through the Moon at arrival)
 argument_of_latitude_deg = 0.0

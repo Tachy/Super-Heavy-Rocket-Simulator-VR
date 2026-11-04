@@ -91,6 +91,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   full run (the 619 s run was the last one). Rows marked "<= 384" were 460 s before the split; ctest packing and 24 parallel processes stretch it. Some sets
   are slower than the audit figures although cases moved out (`[falcon9]`, `[ascent_planner]`, `[docking]`): this run
   is cold-cache and 24 processes compete for memory bandwidth (cache state of the audit run not recorded).
+- Refuelling / lunar sets (2026-11-04, depot/tanker/HLS models plan Task 7, 24 logical processors, GPU work running alongside): `-TestFilter "[refuelling],[docking],[prop_transfer],[campaign],[campaign_flown],[hls],[lunar],[legs]"` with `[slow]` (no `-Fast`, no nightly):
+  380 cases, 380 passed, 2404 s wall (40 min; the longest case `tanker_flight: pad -> booster caught -> docked -> transfer -> ship caught` finishes last; Mission 1 LLO 769 s, `hls_refuel_orbit` 1380 s). The `[nightly]` flown refuelling campaign case
+  (`[campaign_flown]` against the calculator) is not in it and takes about 52 min wall alone (Task 6c's 28-case nightly run: 2803 s): background, output to a file.
 - Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
   in a file; check its state every 10 minutes (failures so far, a case hanging or far beyond its usual time). When
   tests are going wrong, stop the run early and fix the cause instead of waiting for the end.
