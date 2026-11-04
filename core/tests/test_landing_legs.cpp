@@ -142,41 +142,48 @@ TEST_CASE("A foot beyond the deck edge drops to the sea", "[contact][legs]") {
 }
 
 // Foot compression for the models (plan 2026-11-04, Task 6): a drawn foot raised by it along the station axis stands on the surface.
+// Tilted body (the station axis 0.6 deg off the 7 deg slope's normal, so it is neither vertical nor normal), all six feet in the ground by different amounts.
+// The contact point of a foot is computed independently of the core's formula: the line foot + s * axis against the plane z = tan(7 deg) * y.
 TEST_CASE("Foot compression along the stroke axis puts each HLS foot on a 7 degree slope", "[contact][legs]") {
     const auto legs = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls").stages.front().landing_legs;
     REQUIRE(legs.fixed);
     const auto g = contact::make_leg_geometry(legs, 0.0, 4.5);
     REQUIRE(g.feet.size() == 6);
+    const double slope_rad = 7.0 * deg;
     contact::LandingSurface slope;
-    slope.field = std::make_shared<contact::PlaneField>(7.0 * deg, 0.0);
-    // Upright body (station axis = up). The CG height puts the highest foot 0.004 m into the slope; the others lie in the air or in it.
-    auto pose = upright(g, 12.0, 0.0);
-    double lowest_clearance = 1e9;  // site z of the foot above the surface, smallest
-    for (const auto& foot : g.feet) {
-        const Vec3 p = pose.cg_m + pose.body_to_site * (foot - Vec3{12.0, 0.0, 0.0});
-        lowest_clearance = std::min(lowest_clearance, p.z - slope.field->below(p.x, p.y).height_m);
-    }
-    pose.cg_m.z -= lowest_clearance + 0.004;
+    slope.field = std::make_shared<contact::PlaneField>(slope_rad, 0.0);  // rises towards the north: z = tan(slope) * y
+    const double tilt_rad = slope_rad + 0.6 * deg;  // the axis leans away from the vertical towards the downhill side (south)
+    const Vec3 axis{0.0, -std::sin(tilt_rad), std::cos(tilt_rad)};
+    const Vec3 east{1.0, 0.0, 0.0};
+    contact::SitePose pose;
+    pose.cg_station_m = 12.0;
+    pose.body_to_site = contact::from_columns(axis, east, cross(axis, east));
+    const Vec3 normal{0.0, -std::sin(slope_rad), std::cos(slope_rad)};
+    auto foot_site = [&](size_t i) { return pose.cg_m + pose.body_to_site * (g.feet[i] - Vec3{12.0, 0.0, 0.0}); };
+    pose.cg_m = {0.0, 0.0, 20.0};
+    double highest = -1e9;  // the foot highest above the plane (along the normal): it must be in the ground too
+    for (size_t i = 0; i < 6; ++i) highest = std::max(highest, dot(normal, foot_site(i)));
+    pose.cg_m -= normal * (highest + 0.005);  // the highest foot 5 mm in, the others deeper
     std::vector<double> crushed(6, 0.0);
     const auto c = contact::leg_contact(g, crushed, pose, slope);
     REQUIRE(c.foot_compression_m.size() == 6);
-    const Vec3 axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
-    int touching = 0;
+    CHECK(c.feet_in_contact == 6);
+    double lowest_c = 1e9, highest_c = 0.0;
     for (size_t i = 0; i < 6; ++i) {
-        const Vec3 p = pose.cg_m + pose.body_to_site * (g.feet[i] - Vec3{12.0, 0.0, 0.0});
-        const auto support = slope.field->below(p.x, p.y);
-        const double depth = (support.height_m - p.z) * support.normal.z;
-        if (depth <= 0.0) {
-            CHECK(c.foot_compression_m[i] == 0.0);
-            continue;
-        }
-        ++touching;
-        // the foot raised by the compression lies on the surface (the plane's height at its own place)
-        const Vec3 q = p + axis * c.foot_compression_m[i];
-        CHECK(std::abs(q.z - slope.field->below(q.x, q.y).height_m) < 0.02);
-        CHECK(c.foot_compression_m[i] == Catch::Approx(depth / support.normal.z).epsilon(1e-9));  // station axis = up here
+        const Vec3 p = foot_site(i);
+        // independent contact point: the foot's line along the station axis meets the plane z = tan(slope) y
+        const double t = std::tan(slope_rad);
+        const double s = (t * p.y - p.z) / (axis.z - t * axis.y);
+        const Vec3 contact_point = p + axis * s;
+        CHECK(std::abs(contact_point.z - t * contact_point.y) < 1e-9);
+        CHECK(std::abs(c.foot_compression_m[i] - s) < 0.02);
+        const Vec3 raised = p + axis * c.foot_compression_m[i];
+        CHECK(norm(raised - contact_point) < 0.02);
+        CHECK(std::abs(raised.z - t * raised.y) < 0.02);
+        lowest_c = std::min(lowest_c, c.foot_compression_m[i]);
+        highest_c = std::max(highest_c, c.foot_compression_m[i]);
     }
-    CHECK(touching >= 1);
+    CHECK(highest_c - lowest_c > 0.05);  // really different compressions (tilt over 12 m footprint: ~0.2 m)
     CHECK(contact::foot_compression_along_axis_m(0.01, Vec3{0.0, 0.0, 1.0}, Vec3{1.0, 0.0, 0.0}) == 0.0);  // surface parallel to the axis
     CHECK(contact::foot_compression_along_axis_m(-0.01, Vec3{0.0, 0.0, 1.0}, Vec3{0.0, 0.0, 1.0}) == 0.0);
 }

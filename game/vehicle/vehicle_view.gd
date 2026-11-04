@@ -49,8 +49,7 @@ static var look_probe_extension := NAN
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
 var _engine_poses: Array[Transform3D] = []  # last pose per engine, stage-local body coordinates (headless tests)
-var _hls_feet: Array[Node3D] = []  # foot_<i> of the HLS (index = leg), posed by the leg's compression; the stage the legs belong to is the lowest
-var _hls_feet_stage := -1
+var _hls_feet: Array[Node3D] = []  # foot_<i> of the HLS (index = leg), posed by the leg's compression
 var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "pusher"}
 ## The Crew Dragon's nose cone: {"node", "nose"} (manifest nose block) or {}; the fraction (0 closed .. 1 open) eases towards the
 ## snapshot's binary nose_cone_open at 1 / open_time_s per second: a view easing, no state of the simulation.
@@ -262,7 +261,6 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	_fin_nodes.clear()
 	_leg_nodes.clear()
 	_hls_feet.clear()
-	_hls_feet_stage = -1
 	_nose = {}
 	docking_mechanism = null
 	probe_drogue = null
@@ -386,12 +384,12 @@ func _build_hls_parts(stages: Array, stage_nodes: Array[Node3D]) -> void:
 			instance.mesh = parts[part]
 			instance.material_override = _hull_material(_hull_kind(part, stages[i], ms), ms)
 			stage_nodes[i].add_child(instance)
-			if part.begins_with("foot_") and i == 0:  # the lowest stage's legs (the snapshot's `legs`)
+			# Only the lowest stage's feet follow the snapshot's `legs` (core: stages().front()): a stacked HLS sits on the booster, which has no legs, so its feet stay nominal.
+			if part.begins_with("foot_") and i == 0:
 				var index := int(part.trim_prefix("foot_"))
 				if _hls_feet.size() <= index:
 					_hls_feet.resize(index + 1)
 				_hls_feet[index] = instance
-				_hls_feet_stage = i
 
 
 ## The fixed legs' feet: each pad slides up along the station axis (+X of the stage's body frame) by its leg's compression (snapshot `legs.compression_m`, the

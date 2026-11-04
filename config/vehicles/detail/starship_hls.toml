@@ -122,7 +122,7 @@ frame_width_m = 0.10          # [E] frame bar
 [elevator]
 azimuth_deg = 150.0           # [E] under the hatch
 track_from_station_m = 33.5   # [E] the hatch sill
-track_to_station_m = -1.0     # [E] down to the skirt: ground at -1.5 m (the foot station); NASA: ~30 m drop
+track_to_station_m = 0.0      # [E] down to the hull base (station 0, the skirt edge): no hull stands behind the rails below it; NASA: ~30 m drop
 rail_gauge_m = 0.90           # [E] the mockup's two rails stand about as far apart as a suit is wide
 rail_width_m = 0.14           # [E] rail flat width
 rail_depth_m = 0.08           # [E] rail height off its brackets
