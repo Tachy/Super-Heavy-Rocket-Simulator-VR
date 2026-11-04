@@ -8,7 +8,7 @@
 
 **Tech Stack:** Blender Python, Python tools, GDScript, Godot shaders; C++ core / bindings only where a config value or a snapshot field is missing.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-depot-tanker-hls-models-design.md`
+**Spec:** `docs/superpowers/archive/specs/2026-11-04-depot-tanker-hls-models-design.md`
 
 ## Global Constraints
 - Own rebuild of everything; no third-party mesh in the repo or the game. A reference's terms are checked before download; references stay in git-ignored `screenshots/depot_tanker_hls_ref/`.
