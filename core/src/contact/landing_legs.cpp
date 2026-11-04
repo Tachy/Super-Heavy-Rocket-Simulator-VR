@@ -18,7 +18,14 @@ constexpr int base_samples = 12;
 
 Vec3 radial(double azimuth_rad) { return {0.0, std::cos(azimuth_rad), std::sin(azimuth_rad)}; }
 
+constexpr double min_axis_cosine = 0.1;  // [E] a surface that steep to the stroke axis gives no meaningful stroke
+
 }  // namespace
+
+double foot_compression_along_axis_m(double depth_m, const Vec3& n, const Vec3& axis) {
+    const double c = dot(n, axis);
+    return depth_m > 0.0 && c > min_axis_cosine ? depth_m / c : 0.0;
+}
 
 LegGeometry make_leg_geometry(const config::LandingLegConfig& legs, double stage_base_station_m, double hull_radius_m) {
     LegGeometry g;
@@ -38,6 +45,8 @@ LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, 
                        const LandingSurface& surface, const FrictionLimit* friction_limit) {
     LegContact result;
     crushed_m.resize(legs.feet.size(), 0.0);
+    result.foot_compression_m.assign(legs.feet.size(), 0.0);
+    const Vec3 station_axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
     const auto& c = legs.config;
     auto site_point = [&](const Vec3& b) { return pose.cg_m + pose.body_to_site * (b - Vec3{pose.cg_station_m, 0.0, 0.0}); };
     // Feet that touch supported ground (they share the friction limit).
@@ -60,6 +69,7 @@ LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, 
         const Vec3 n = support.normal;
         const double depth = (support.height_m - p.z) * n.z;  // penetration along the normal (flat: n.z = 1)
         if (depth <= 0.0) continue;
+        result.foot_compression_m[i] = support.water ? 0.0 : foot_compression_along_axis_m(depth, n, station_axis);
         if (support.water) {
             result.water = true;
             continue;

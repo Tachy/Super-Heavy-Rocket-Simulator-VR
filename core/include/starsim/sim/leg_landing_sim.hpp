@@ -68,6 +68,9 @@ public:
     void release(const vehicle::FlightBody& body);
     bool in_contact(const vehicle::FlightBody& body) const;          // any foot in the last tick
     std::vector<double> crushed_m(const vehicle::FlightBody& body) const;  // crush stroke used per foot
+    // How far each foot is pushed in along the station axis in the last tick (contact::LegContact::foot_compression_m);
+    // empty without a track, zeros while off the site. Read only, for the models.
+    std::vector<double> foot_compression_m(const vehicle::FlightBody& body) const;
 
     // Site frame of a body-fixed position, and the pose of a body in it.
     math::Vec3 to_site(const math::Vec3& fixed_m) const;

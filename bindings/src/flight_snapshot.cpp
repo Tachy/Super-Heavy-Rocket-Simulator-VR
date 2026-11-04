@@ -171,6 +171,13 @@ godot::Dictionary body_legs(const sim::FlightSession& session, size_t index) {
     godot::Array azimuths;
     for (const double a : legs.azimuths_rad) azimuths.push_back(a * constants::rad_to_deg);
     d["azimuths_deg"] = azimuths;
+    d["fixed"] = legs.fixed;
+    d["stroke_m"] = legs.stroke_m;
+    // per foot: pushed in along the station axis (core contact model), 0 off the ground; the models raise the feet by it
+    godot::Array compression;
+    const auto pushed = session.leg_foot_compression_m(index);
+    for (size_t i = 0; i < legs.azimuths_rad.size(); ++i) compression.push_back(i < pushed.size() ? pushed[i] : 0.0);
+    d["compression_m"] = compression;
     return d;
 }
 

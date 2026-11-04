@@ -52,6 +52,7 @@ func _initialize() -> void:
 	_check_ship_variants(snapshot)
 	_check(_check_tanker_dorsal() == true, "check_tanker_dorsal ran to its end (an aborted check is a failure)")
 	_check(_check_hls_parts() == true, "check_hls_parts ran to its end (an aborted check is a failure)")
+	_check(_check_hls_legs() == true, "check_hls_legs ran to its end (an aborted check is a failure)")
 	_check(_check_falcon9() == true, "check_falcon9 ran to its end (an aborted check is a failure)")
 	_check(_check_dragon() == true, "check_dragon ran to its end (an aborted check is a failure)")
 	_check(_check_iss() == true, "check_iss ran to its end (an aborted check is a failure)")
@@ -1064,6 +1065,73 @@ func _check_hls_parts() -> bool:
 				ok = false
 		_check(ok, "hls (base %.1f): every firing landing thruster's plume starts at thruster_exit_m, along the exhaust, exit radius" % base)
 	return true
+
+
+## The HLS's six fixed legs (Task 6): the pad's bottom face centre on the config's foot point (station, footprint radius, azimuth) uncompressed, the pad raised by
+## the snapshot's per-leg compression along +X (the station axis, clamped to the stroke), airlock hatch, elevator track and basket present.
+func _check_hls_legs() -> bool:
+	var models := VehicleModels.load_for("starship_hls")
+	if models.is_empty() or (models.get("hls_parts", {}) as Dictionary).is_empty():
+		print("  (no HLS models: HLS leg cases skipped)")
+		return true
+	var config := TomlLite.parse("[[stage]]" + FileAccess.get_file_as_string(ProjectSettings.globalize_path("res://").path_join(
+			"../config/vehicles/starship_hls.toml")).split("[[stage]]", false)[1])
+	var cfg: Dictionary = config["stage"][0]["landing_legs"]
+	var azimuths: Array = cfg["azimuths_deg"]
+	var legs := {"present": true, "fixed": true, "stroke_m": float(cfg["stroke_m"]), "azimuths_deg": azimuths}
+	var hls := {"id": "hls", "base_station_m": 0.0, "length_m": 52.1, "diameter_m": 9.0, "nose_length_m": 13.4, "vehicle_id": "starship_hls"}
+	var view := VehicleView.new()
+	_views.append(view)
+	root.add_child(view)
+	view.sync([hls], [], [], [], 0.0, legs)
+	var node := view.find_child("stage_hls", true, false) as Node3D
+	_check(node != null and node.find_child("airlock_hatch", false, false) != null and node.find_child("elevator_track", false, false) != null
+			and node.find_child("elevator_basket", false, false) != null, "hls: airlock hatch, elevator track and basket on the stage")
+	var bottoms_ok := true
+	for i in azimuths.size():
+		var foot := node.find_child("foot_%d" % i, false, false) as MeshInstance3D
+		_check(foot != null and node.find_child("leg_%d" % i, false, false) != null, "hls: leg_%d and foot_%d" % [i, i])
+		var centre := _bottom_centre(foot.mesh as ArrayMesh)
+		var a := deg_to_rad(float(azimuths[i]))
+		var want := Vector3(float(cfg["foot_station_m"]), float(cfg["footprint_radius_m"]) * cos(a), float(cfg["footprint_radius_m"]) * sin(a))
+		if centre.distance_to(want) > 0.01 or not foot.transform.origin.is_zero_approx():
+			bottoms_ok = false
+			print("    foot %d: bottom centre %s, want %s" % [i, centre, want])
+	_check(bottoms_ok, "hls: uncompressed foot centre within 0.01 m of (station %.1f, radius %.1f, leg azimuth) for all six" % [float(cfg["foot_station_m"]), float(cfg["footprint_radius_m"])])
+	var pushed := [0.0, 0.1, 0.25, 0.45, 0.6, 0.9]  # the last exceeds the stroke: clamped
+	legs["compression_m"] = pushed
+	view.sync([hls], [], [], [], 0.0, legs)
+	var rise_ok := true
+	for i in azimuths.size():
+		var foot := node.find_child("foot_%d" % i, false, false) as MeshInstance3D
+		var want_c := minf(float(pushed[i]), float(cfg["stroke_m"]))
+		var a := deg_to_rad(float(azimuths[i]))
+		var centre := foot.transform * _bottom_centre(foot.mesh as ArrayMesh)
+		var base := Vector3(float(cfg["foot_station_m"]) + want_c, float(cfg["footprint_radius_m"]) * cos(a), float(cfg["footprint_radius_m"]) * sin(a))
+		if centre.distance_to(base) > 0.01:
+			rise_ok = false
+	_check(rise_ok, "hls: a foot with compression c stands c higher along the station axis (clamped to the stroke)")
+	legs["compression_m"] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	view.sync([hls], [], [], [], 0.0, legs)
+	_check((node.find_child("foot_1", false, false) as Node3D).transform.origin.is_zero_approx(), "hls: compression 0 returns the nominal pose")
+	return true
+
+
+## Centre (bounding box, the pad is a regular polygon) of the lowest-station vertices (the pad's bottom face) of a mesh in the stage's body frame.
+func _bottom_centre(mesh: ArrayMesh) -> Vector3:
+	var points := PackedVector3Array()
+	for surface in mesh.get_surface_count():
+		points.append_array(mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX])
+	var low := INF
+	for p in points:
+		low = minf(low, p.x)
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
+	for p in points:
+		if p.x < low + 0.001:
+			lo = lo.min(p)
+			hi = hi.max(p)
+	return 0.5 * (lo + hi)
 
 
 func _view(snapshot: Dictionary, vehicle_id: String) -> VehicleView:

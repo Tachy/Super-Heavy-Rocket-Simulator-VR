@@ -7,6 +7,8 @@ and the pod lie behind it (X > 0, towards the hull).
 """
 import math
 
+import hls_legs_layout as ll
+
 
 def thruster_nodes(thrusters):
     """One node per config thruster, named by its index in the stage's engine list order of the landing group."""
@@ -54,6 +56,15 @@ def nose_port_runs(d, length_m):
             ([(hub_top, d["hub_radius_m"]), (hub_top, 0.0)], (1.0, 0.0, 0.0))]
 
 
+def legs_block(hls):
+    """Manifest entry `hls_legs`: per leg the nodes and the foot point (the core's: station, radius, azimuth; bottom centre of the pad), the stroke axis."""
+    legs = hls["legs"]
+    return {"stroke_m": legs["stroke_m"], "stroke_axis": [1.0, 0.0, 0.0], "foot_station_m": legs["foot_station_m"],
+            "footprint_radius_m": legs["footprint_radius_m"],
+            "legs": [{"leg_node": n["leg_node"], "foot_node": n["foot_node"], "azimuth_deg": n["azimuth_deg"],
+                      "foot_m": list(ll.foot_point(legs, n["azimuth_rad"]))} for n in ll.foot_nodes(legs)]}
+
+
 def block(hls):
     """Manifest entries (top-level keys): the thruster exit planes (stage-local body frame), the nose port, the textured parts' places."""
     d = hls["drawing"]
@@ -61,6 +72,10 @@ def block(hls):
     return {"hls_stage_id": hls["stage_id"],
             "thruster_exit_m": [{"node": n["node"], "exit_m": list(n["position_m"]), "axis": list(n["axis"]),
                                  "exit_diameter_m": n["exit_diameter_m"], "pod_radius_m": pod_radius_m(d["landing_thruster"], n)} for n in nodes],
+            "hls_legs": legs_block(hls),
+            "hls_airlock": {k: hls["drawing"]["airlock"][k] for k in ("azimuth_deg", "sill_station_m", "height_m", "width_m")},
+            "hls_elevator": {k: hls["drawing"]["elevator"][k] for k in ("azimuth_deg", "track_from_station_m", "track_to_station_m", "basket_bottom_station_m",
+                                                                         "basket_width_m", "basket_depth_m", "basket_height_m")},
             "hls_nose_port": {"visual_only": True, "station_m": hls["length_m"], "height_m": d["nose_port"]["height_m"], "radius_m": d["nose_port"]["radius_m"]},
             "hls_solar_band": {"station_from_m": d["solar_band"]["station_from_m"], "station_to_m": d["solar_band"]["station_to_m"]},
             "hls_windows": {k: d["windows"][k] for k in ("station_m", "azimuth_deg", "count", "pitch_m", "width_m", "height_m")}}

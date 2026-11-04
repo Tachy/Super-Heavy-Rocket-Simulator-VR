@@ -177,3 +177,52 @@ def test_dorsal_hardware_is_drawn_for_the_hls():
     assert sorted(manifest["dorsal_connectors"]) == ["connector_ch4", "connector_lox"]
     doc, buffers = _hls_gltf("dorsal_hardware.gltf")
     assert {n["name"] for n in doc["nodes"] if n.get("name", "").startswith("probe_")} == {f"probe_{i}" for i in range(4)}
+
+
+def _config_legs():
+    return _config_ship()["landing_legs"]
+
+
+def _bottom_centre(pts):
+    low = pts[:, 0].min()
+    sel = pts[pts[:, 0] < low + 0.001]
+    return 0.5 * (sel.min(axis=0) + sel.max(axis=0))
+
+
+def test_spec_legs_are_the_config_legs():
+    legs = vehicle_spec.load_starship("starship_hls")["hls_parts"]["legs"]
+    cfg = _config_legs()
+    assert (legs["azimuths_deg"], legs["footprint_radius_m"], legs["foot_station_m"], legs["stroke_m"]) == (
+        cfg["azimuths_deg"], cfg["footprint_radius_m"], cfg["foot_station_m"], cfg["stroke_m"])
+    assert (len(legs["azimuths_deg"]), legs["footprint_radius_m"], legs["foot_station_m"], legs["stroke_m"]) == (6, 12.0, -1.5, 0.6)  # the config this task draws (unchanged)
+    assert vehicle_spec.value_lines_without_tag(vehicle_spec.VEHICLES / "detail" / "starship_hls.toml") == []
+
+
+def test_feet_stand_on_the_config_foot_points():
+    """The pad's bottom face centre of every `foot_<i>` is on (station, radius, azimuth) of the config, 0.01 m; the leg reaches from the foot's sleeve to the hull."""
+    doc, buffers = _hls_gltf("hls_parts.gltf")
+    cfg = _config_legs()
+    for i, az in enumerate(cfg["azimuths_deg"]):
+        a = math.radians(az)
+        want = np.array([cfg["foot_station_m"], cfg["footprint_radius_m"] * math.cos(a), cfg["footprint_radius_m"] * math.sin(a)])
+        foot = np.array(td._mesh_points(doc, buffers, f"foot_{i}"), dtype=float)
+        assert np.linalg.norm(_bottom_centre(foot) - want) < TOL_M
+        leg = np.array(td._mesh_points(doc, buffers, f"leg_{i}"), dtype=float)
+        radial = np.hypot(leg[:, 1], leg[:, 2])
+        assert radial.max() > cfg["footprint_radius_m"] - 0.3 and radial.min() < 4.5  # from the sleeve at the foot into the hull
+        # the sleeve stays clear of the pad at full stroke: the lowest leg point is above the pad's top by the stroke
+        assert leg[:, 0].min() > cfg["foot_station_m"] + 0.15 + cfg["stroke_m"]
+
+
+def test_manifest_has_legs_airlock_and_elevator():
+    manifest = json.loads((MODELS / "manifest.json").read_text(encoding="utf-8"))
+    cfg = _config_legs()
+    legs = manifest["hls_legs"]
+    assert legs["stroke_m"] == cfg["stroke_m"] and legs["stroke_axis"] == [1.0, 0.0, 0.0] and len(legs["legs"]) == 6
+    doc, _ = _hls_gltf("hls_parts.gltf")
+    names = {n["name"] for n in doc["nodes"]}
+    assert {"airlock_hatch", "elevator_track", "elevator_basket"} <= names and {f"leg_{i}" for i in range(6)} <= names and {f"foot_{i}" for i in range(6)} <= names
+    assert manifest["hls_airlock"]["azimuth_deg"] == manifest["hls_elevator"]["azimuth_deg"] == 150.0
+    # the elevator stands between two legs (120 and 180), clear of both feet
+    assert min(abs(150.0 - az) for az in cfg["azimuths_deg"]) == 30.0
+

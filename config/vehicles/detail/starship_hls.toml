@@ -84,3 +84,58 @@ embed_m = 0.30               # [E] collar foot below the cap, inside the hull
 recess_m = 0.06              # [E] depth of the recessed docking face below the collar's rim
 face_radius_m = 0.36         # [E] inner radius of the collar's rim: the capture-ring opening of an IDSS-class port (outer ring 0.8 m dia scaled to the tip)
 hub_radius_m = 0.14          # [E] central hub of the docking face
+
+# Landing legs (plan 2026-11-04, Task 6). Count, azimuths, footprint radius (12.0 m), foot station (-1.5 m) and stroke (0.6 m) are the config's
+# [stage.landing_legs] (user ruling 2026-11-04: unchanged); only the drawing is here. Basis: the 2021 NASA render (INDEX.md 5c): splayed truss legs,
+# large round pads. Each leg: a vertical sleeve at the foot, a main strut up to the hull and a lower brace; the pad and its piston stem (node foot_<i>)
+# slide into the sleeve along the station axis by the leg's compression (core contact model).
+[landing_leg]
+pad_radius_m = 1.0            # [E] render: pad ~2 m across next to the 9 m hull (pixel ratio on the left foot, 55 px at 24 px/m)
+pad_height_m = 0.15           # [E] thin dished plate
+stem_radius_m = 0.14          # [E] piston stem
+stem_inside_m = 0.50          # [E] the stem reaches this far into the sleeve at rest, so it never leaves it at full stroke
+sleeve_gap_m = 0.80           # [E] sleeve bottom above the pad top: the config stroke 0.6 m plus a 0.2 m margin (the pad never touches the sleeve)
+sleeve_radius_m = 0.24        # [E] sleeve around the 0.14 m stem
+sleeve_length_m = 1.30        # [E] sleeve length (joint of strut and brace on it)
+strut_radius_m = 0.30         # [E] main strut at the hull end (render: slender truss member ~0.5 m)
+brace_radius_m = 0.20         # [E] lower brace
+strut_attach_station_m = 7.0  # [E] render: the strut meets the hull about one pad radius per metre of height; ~7 m above the skirt, where the skirt ends and the tank wall stiffens
+brace_attach_station_m = 1.0  # [E] brace meets the hull at the skirt ring
+attach_embed_m = 0.05         # [E] struts and saddles enter the hull surface by this much (no gap on the curved wall)
+saddle_height_m = 1.20        # [E] hull saddle of the main strut (station extent)
+saddle_thickness_m = 0.12     # [E] saddle standing off the hull
+saddle_width_m = 0.80         # [E] saddle across the hull
+sides = 16                    # [E] sides of the round members
+
+# Airlock hatch (NASA 2024-04-30 airlock and suit test, INDEX.md section 2): the crew leaves by a side hatch above the elevator. A fixed drawing (no state)
+# at the head of the elevator track; the dimensions come from a suited astronaut (~0.9 m across the backpack, ~1.9 m tall) with a hand's room around.
+[airlock]
+azimuth_deg = 150.0           # [E] between the legs at 120 and 180 deg and away from the dorsal side (90 deg) and the window row (0 deg)
+sill_station_m = 33.5         # [E] the band's lower edge 33 m (the render: the hatch is the dark panel at the band's lower left) + a 0.5 m sill
+height_m = 2.0                # [E] a suited astronaut ~1.9 m
+width_m = 1.1                 # [E] 0.9 m backpack + clearance
+frame_depth_m = 0.10          # [E] raised frame
+frame_width_m = 0.10          # [E] frame bar
+
+# Elevator (NASA 2024-05-03 full-scale basket mockup photo, INDEX.md section 2; the 2021 render shows the cable track on the hull down to the ground).
+# Fixed pose at the top of the track at the hatch sill (no sim state; a later sim value moves the basket node).
+[elevator]
+azimuth_deg = 150.0           # [E] under the hatch
+track_from_station_m = 33.5   # [E] the hatch sill
+track_to_station_m = -1.0     # [E] down to the skirt: ground at -1.5 m (the foot station); NASA: ~30 m drop
+rail_gauge_m = 0.90           # [E] the mockup's two rails stand about as far apart as a suit is wide
+rail_width_m = 0.14           # [E] rail flat width
+rail_depth_m = 0.08           # [E] rail height off its brackets
+rail_stand_off_m = 0.06       # [E] brackets between the hull and the rail
+bracket_count = 24            # [E] one every 1.5 m
+cable_radius_m = 0.02         # [E] hoist cable between the rails (the photo shows a pair of wire ropes and a drum on each top corner)
+basket_width_m = 2.20         # [E] the photo: the cage is ~2.4 suit widths across (two astronauts side by side with elbow room), suit 0.9 m
+basket_depth_m = 1.40         # [E] the photo: a suit with its backpack ~0.7 m deep, two back to back
+basket_height_m = 2.30        # [E] open frame above the waist-high mesh: a suited astronaut stands in it (1.9 m + the top frame)
+wall_height_m = 1.20          # [E] photo: the mesh wall reaches the astronauts' waist
+basket_bottom_station_m = 33.4  # [E] floor at the hatch sill (-0.1 m)
+basket_clearance_m = 0.45     # [E] gap between the hull and the basket's hull-side face (rails, brackets and the cable run in it)
+frame_m = 0.06                # [E] frame bar
+mesh_bars = 8                 # [E] the photo's mesh is ~9 cells across one panel; bars at that pitch (the mesh itself is too fine to draw)
+mesh_bar_m = 0.02             # [E] bar thickness
+

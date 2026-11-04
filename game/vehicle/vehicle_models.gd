@@ -28,7 +28,7 @@ const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
 	"starship_tanker": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
 	"starship_depot": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
-	"starship_hls": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "hls_layout.py", "gen_hull.py", "gen_engine.py", "gen_dorsal_hardware.py", "gen_hls_parts.py"],
+	"starship_hls": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "hls_layout.py", "hls_legs_layout.py", "gen_hull.py", "gen_engine.py", "gen_dorsal_hardware.py", "gen_hls_parts.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
 	"crew_dragon": ["vehicle_common.py", "gen_dragon.py", "idss_mechanism.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }

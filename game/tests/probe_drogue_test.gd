@@ -204,17 +204,44 @@ func _check_docked_pair() -> bool:
 	return true
 
 
-## The HLS pair (tanker or depot on the HLS): the HLS gets its dorsal hardware in Task 6. Pending, not a pass.
+## The HLS docked under the depot as the core poses it (mated_transform from the two manifests' ports): the four probes seated on the depot's drogue seats, the
+## HLS's hull and its legs, feet, airlock, elevator track and basket outside the depot's hull radius (the 12 m footprint stands wider than the 10 m axis distance:
+## the legs at 60 / 120 / 240 / 300 deg pass the depot's hull at the clearance r3 left, the pad centre of 12 m x sin 60 deg = 10.4 m lies 6.0 m from its axis, its edge 5.0 m).
 func _check_hls_pair() -> bool:
 	var hls := VehicleModels.load_for("starship_hls")
-	if hls.is_empty() or (hls.get("dorsal", {}) as Dictionary).is_empty():
-		print("pending (Task 6): HLS docked pair - starship_hls has no dorsal hardware yet")
-		return true
-	# Task 5 gave the HLS its dorsal hardware (four probes, two connectors, as the tanker's); the docked HLS pair is Task 6's check.
-	var view := _dorsal_view(hls)
-	_check(view.probe_count() == 4 and view.connector_names().size() == 2, "HLS: four probes and two connectors drawn")
-	view.free()
-	print("pending (Task 6): HLS docked pair - the pair arithmetic of _check_docked_pair is not run for the HLS yet")
+	var depot := VehicleModels.load_for("starship_depot")
+	if hls.is_empty() or (hls.get("dorsal", {}) as Dictionary).is_empty() or (hls.get("hls_parts", {}) as Dictionary).is_empty():
+		_check(false, "HLS pair: starship_hls models generated (%s)" % VehicleModels.fallback_reason("starship_hls"))
+		return false
+	if depot.is_empty() or (depot.get("dorsal", {}) as Dictionary).is_empty():
+		_check(false, "HLS pair: starship_depot models generated")
+		return false
+	var hls_view := _dorsal_view(hls)
+	var depot_view := _dorsal_view(depot)
+	_check(hls_view.probe_count() == 4 and hls_view.connector_names().size() == 2, "HLS: four probes and two connectors drawn")
+	var depth := float(depot["manifest"]["dorsal_drogue"]["drogue_depth_m"])
+	hls_view.set_state(hls_view.seated_extension(), true)
+	var pose := mated_transform(hls["manifest"]["dorsal_port"], depot["manifest"]["dorsal_port"])
+	for i in hls_view.probe_count():
+		var tip := pose * hls_view.probe_tip_m(i)
+		var best_d := INF
+		for j in depot_view.drogue_count():
+			best_d = minf(best_d, tip.distance_to(depot_view.drogue_mouth_m(j) - Vector3.BACK * depth))
+		_check(best_d < TOLERANCE_M, "HLS probe %d seated on a depot drogue seat (%.4f m)" % [i, best_d])
+	var radius_depot := float(depot["manifest"]["dorsal_hull_radius_m"])
+	var hull := _vertices(hls["hulls"][VehicleModels.ship_stage_id(hls)]["hull"])
+	_check(_min_axis_distance(hull, pose) > radius_depot, "HLS hull outside the depot's hull radius (%.3f m)" % _min_axis_distance(hull, pose))
+	var parts: Dictionary = hls["hls_parts"]
+	var legs_seen := 0
+	for part_name: String in parts:
+		if not (part_name.begins_with("leg_") or part_name.begins_with("foot_") or part_name.begins_with("airlock") or part_name.begins_with("elevator")):
+			continue
+		legs_seen += 1
+		var near := _min_axis_distance(_vertices(parts[part_name]), pose)
+		_check(near > radius_depot, "HLS %s outside the depot's hull radius: nearest vertex %.3f m from the depot's axis (hull radius %.3f m)" % [part_name, near, radius_depot])
+	_check(legs_seen == 15, "HLS pair: six legs, six feet, airlock hatch, elevator track and basket checked (%d)" % legs_seen)
+	hls_view.free()
+	depot_view.free()
 	return true
 
 

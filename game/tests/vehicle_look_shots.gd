@@ -89,6 +89,12 @@ func _setup() -> bool:
 		_scan(sim)
 		quit(0)
 		return true
+	if _args.has("events"):  # --events: the mission timeline's events (seconds after T-0), then exit
+		var zero := _rig.zero_tdb_s(sim)
+		for e: Dictionary in sim.mission_timeline().get("events", []):
+			print("event t+%.0f s  %s" % [float(e["tdb_s"]) - zero, e["kind"]])
+		quit(0)
+		return true
 	_rig.fly_to_target(sim)
 	_rig.print_bodies(sim)
 	if _args.has("hide_ui"):
@@ -107,6 +113,28 @@ func _setup() -> bool:
 	return false
 
 
+## --sun_report: where the Sun stands at body 0 (elevation above the local horizontal, azimuth), the lunar terrain's horizon in that azimuth and
+## the fractions the Sun light is made of (diagnostic of a lit / unlit scene).
+func _sun_report(sim: FlightSim) -> void:
+	var w := _world
+	var p := sim.body_position_gcrf_m(0)
+	var to_fixed := w.moon.fixed_to_gcrf.transposed()
+	var p_fixed: Vector3 = to_fixed * (p - w.moon_gcrf_m)
+	var sun_fixed: Vector3 = to_fixed * (w.sun_apparent_from_earth_m - w.moon_gcrf_m)
+	var up := p_fixed.normalized()
+	var dir := (sun_fixed - p_fixed).normalized()
+	var lon := atan2(up.y, up.x)
+	var east := Vector3(-sin(lon), cos(lon), 0.0)
+	var north := up.cross(east)
+	var az := fposmod(rad_to_deg(atan2(dir.dot(east), dir.dot(north))), 360.0)
+	var lat := rad_to_deg(asin(up.z))
+	var terrain := w._moon_terrain_sun_fraction(p)
+	var horizon := w.core.horizon_elevation_rad("moon", lat, rad_to_deg(lon), p_fixed.length() - Atmosphere.MOON_RADIUS_M, deg_to_rad(az))
+	print("sun_report: lat %.3f lon %.3f height %.0f m  sun elevation %.3f deg azimuth %.1f  horizon there %.3f deg  terrain fraction %s  mean-sphere fraction %.3f  light energy %.3f" % [
+			lat, rad_to_deg(lon), p_fixed.length() - Atmosphere.MOON_RADIUS_M, rad_to_deg(asin(dir.dot(up))), az, rad_to_deg(horizon),
+			terrain, 1.0 - w.core.solar_eclipse_fraction_gcrf(p, w.clock.tdb_s), w.sun_light.light_energy])
+
+
 ## --scan=from,to,step: the largest |flap| / |fin| deflection per body at each mission time.
 func _scan(sim: FlightSim) -> void:
 	var spec := String(_args["scan"]).split(",")
@@ -123,6 +151,9 @@ func _scan(sim: FlightSim) -> void:
 			for f: Dictionary in sim.body_grid_fins(i):
 				fin = maxf(fin, absf(f["deflection_deg"]))
 			line += "  [%d] alt %.1f km flap %.0f fin %.0f" % [i, sim.telemetry(i).get("altitude_m", 0.0) / 1000.0, flap, fin]
+			var legs: Dictionary = sim.body_legs(i)
+			if legs.get("present", false):
+				line += " legs %s compression %s" % [legs.get("touchdown", ""), (legs.get("compression_m", []) as Array).map(func(c): return snappedf(c, 0.001))]
 		print(line)
 		t += float(spec[2])
 
@@ -173,6 +204,8 @@ func _shoot() -> bool:
 		print("vehicle_look_shots: ambient energy %s, sky mode %s, reflected %s, ambient src %s, sun energy %.3f, focus %s" % [
 				env.ambient_light_energy, env.sky.process_mode, env.reflected_light_source, env.ambient_light_source,
 				_world.sun_light.light_energy, _world.focus])
+		if _args.has("sun_report"):
+			_sun_report(sim)
 		if _args.has("nudge"):  # the clock moved by that many seconds once (the Sun moves, the sky uniforms change)
 			_world.clock.set_time(_world.clock.tdb_s + float(_args["nudge"]))
 		match String(_args.get("poke", "")):  # which change makes Godot re-render the radiance cubemap

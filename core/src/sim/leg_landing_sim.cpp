@@ -291,4 +291,11 @@ std::vector<double> LegLandingSim::crushed_m(const vehicle::FlightBody& body) co
     return it == tracks_.end() ? std::vector<double>{} : it->second.crushed_m;
 }
 
+std::vector<double> LegLandingSim::foot_compression_m(const vehicle::FlightBody& body) const {
+    const auto it = tracks_.find(&body);
+    if (it == tracks_.end()) return {};
+    if (!it->second.on_site) return std::vector<double>(it->second.geometry.feet.size(), 0.0);
+    return it->second.contact.foot_compression_m;
+}
+
 }  // namespace starsim::sim

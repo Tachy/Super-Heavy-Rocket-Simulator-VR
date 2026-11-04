@@ -818,6 +818,9 @@ public:
     const LegLandingSim& leg_landing() const { return *legs_; }
     LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
     std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }
+    std::vector<double> leg_foot_compression_m(size_t body_index) const {
+        return legs_->foot_compression_m(*bodies_.at(body_index).body);
+    }
     // Dispersion injection (tests, training): an instantaneous velocity change of a body, e.g. the residual of a burn
     // (tail-off, misalignment) beyond what the closed-loop cutoff removes.
     void apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps);

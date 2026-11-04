@@ -1,6 +1,8 @@
 // Landing surface and crush-core leg contact (milestone c2, pure contact units).
 
+#include <algorithm>
 #include <cmath>
+#include <memory>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -137,4 +139,44 @@ TEST_CASE("A foot beyond the deck edge drops to the sea", "[contact][legs]") {
     pose.cg_m.z -= 3.5;  // sunk below the sea level: the feet over the water are in the water
     std::vector<double> crushed2(4, 0.0);
     CHECK(contact::leg_contact(g, crushed2, pose, ship).water);
+}
+
+// Foot compression for the models (plan 2026-11-04, Task 6): a drawn foot raised by it along the station axis stands on the surface.
+TEST_CASE("Foot compression along the stroke axis puts each HLS foot on a 7 degree slope", "[contact][legs]") {
+    const auto legs = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls").stages.front().landing_legs;
+    REQUIRE(legs.fixed);
+    const auto g = contact::make_leg_geometry(legs, 0.0, 4.5);
+    REQUIRE(g.feet.size() == 6);
+    contact::LandingSurface slope;
+    slope.field = std::make_shared<contact::PlaneField>(7.0 * deg, 0.0);
+    // Upright body (station axis = up). The CG height puts the highest foot 0.004 m into the slope; the others lie in the air or in it.
+    auto pose = upright(g, 12.0, 0.0);
+    double lowest_clearance = 1e9;  // site z of the foot above the surface, smallest
+    for (const auto& foot : g.feet) {
+        const Vec3 p = pose.cg_m + pose.body_to_site * (foot - Vec3{12.0, 0.0, 0.0});
+        lowest_clearance = std::min(lowest_clearance, p.z - slope.field->below(p.x, p.y).height_m);
+    }
+    pose.cg_m.z -= lowest_clearance + 0.004;
+    std::vector<double> crushed(6, 0.0);
+    const auto c = contact::leg_contact(g, crushed, pose, slope);
+    REQUIRE(c.foot_compression_m.size() == 6);
+    const Vec3 axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
+    int touching = 0;
+    for (size_t i = 0; i < 6; ++i) {
+        const Vec3 p = pose.cg_m + pose.body_to_site * (g.feet[i] - Vec3{12.0, 0.0, 0.0});
+        const auto support = slope.field->below(p.x, p.y);
+        const double depth = (support.height_m - p.z) * support.normal.z;
+        if (depth <= 0.0) {
+            CHECK(c.foot_compression_m[i] == 0.0);
+            continue;
+        }
+        ++touching;
+        // the foot raised by the compression lies on the surface (the plane's height at its own place)
+        const Vec3 q = p + axis * c.foot_compression_m[i];
+        CHECK(std::abs(q.z - slope.field->below(q.x, q.y).height_m) < 0.02);
+        CHECK(c.foot_compression_m[i] == Catch::Approx(depth / support.normal.z).epsilon(1e-9));  // station axis = up here
+    }
+    CHECK(touching >= 1);
+    CHECK(contact::foot_compression_along_axis_m(0.01, Vec3{0.0, 0.0, 1.0}, Vec3{1.0, 0.0, 0.0}) == 0.0);  // surface parallel to the axis
+    CHECK(contact::foot_compression_along_axis_m(-0.01, Vec3{0.0, 0.0, 1.0}, Vec3{0.0, 0.0, 1.0}) == 0.0);
 }

@@ -26,7 +26,16 @@ struct LegContact {
     bool stroke_exhausted = false; // a crush core used up: the leg fails
     bool base_contact = false;     // the base ring below the surface
     double max_foot_force_n = 0.0;
+    // Per foot (one entry per foot, 0 where it does not touch): how far the foot is pushed in along the leg's stroke axis,
+    // the stage's station axis (the feet only move along it, towards the hull): the penetration along the surface normal
+    // over the cosine between the normal and the station axis. A drawn foot rises by it, so it stands on the surface.
+    // Read only (the models); nothing in the force depends on it.
+    std::vector<double> foot_compression_m;
 };
+
+// The foot compression for a penetration depth along the surface normal `n` (site frame) and the stage's station axis
+// `axis` (site frame): depth / (n . axis); 0 for depth <= 0 or a surface almost parallel to the axis (cosine < 0.1).
+double foot_compression_along_axis_m(double depth_m, const math::Vec3& n, const math::Vec3& axis);
 
 // The body's inertia for friction that stays stable with explicit (start-of-tick) forces: a foot's friction is capped
 // at what stops its slip within the tick (effective mass at the foot incl. rotation, shared by the feet in contact).
