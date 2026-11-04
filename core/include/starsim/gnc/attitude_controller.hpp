@@ -42,6 +42,10 @@ public:
     struct Gains {
         double natural_frequency_rad_s = 0.8;
         double damping_ratio = 0.9;
+        // The rate loop's gain kd = 2 zeta wn (torque = I kd (rate_command - rate)) and the error -> rate-command gain
+        // wn^2 / kd: the one derivation the controller and its turn model share (Task 5 minor)
+        double rate_gain_per_s() const { return 2.0 * damping_ratio * natural_frequency_rad_s; }
+        double error_gain_per_s() const { return natural_frequency_rad_s * natural_frequency_rad_s / rate_gain_per_s(); }
         bool grid_fins = false;  // use the grid fins (descent); otherwise they stay neutral
         // Use the flaps (ship entry): they trim the modelled aerodynamic moment and steer; otherwise they hold.
         bool flaps = false;

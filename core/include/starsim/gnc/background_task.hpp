@@ -1,6 +1,9 @@
 #pragma once
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
 #include <functional>
 #include <future>
 #include <optional>
@@ -62,7 +65,10 @@ public:
         if (!pending_.valid()) return;
         try {
             pending_.get();
-        } catch (...) {  // a dropped result's failure is no one's concern
+        } catch (const std::exception& e) {  // a dropped result's failure is no one's concern - but visible (11b M4)
+            if (std::getenv("STARSIM_DEBUG_REALTIME")) std::printf("[realtime] dropped background job failed: %s\n", e.what());
+        } catch (...) {
+            if (std::getenv("STARSIM_DEBUG_REALTIME")) std::printf("[realtime] dropped background job failed\n");
         }
     }
 

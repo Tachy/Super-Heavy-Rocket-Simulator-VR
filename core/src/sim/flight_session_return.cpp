@@ -236,6 +236,10 @@ std::optional<FlightSession::DeorbitReplanInputs> FlightSession::deorbit_plan_in
         refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
         return std::nullopt;
     }
+    if (!stage.ship_landing) {  // Task 3 M5: a refusal, not an exception on the sim thread
+        refused.reason = "Keine Rückkehr möglich: das Schiff hat keine Landeparameter für den Fang";
+        return std::nullopt;
+    }
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
     if (configurations.empty()) {
         refused.reason = "Deorbit-Triebwerk nicht verfügbar";

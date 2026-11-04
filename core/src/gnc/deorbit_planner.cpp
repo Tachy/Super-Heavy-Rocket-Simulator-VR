@@ -307,6 +307,9 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     for (int i = 0; i < 2; ++i) {
         std::snprintf(magnitude_name[i], sizeof magnitude_name[i], "Deorbit-Impuls %c%.2g %%", i == 0 ? '+' : '-',
                       100.0 * e.magnitude_fraction);
+        for (char* c = magnitude_name[i]; *c; ++c) {
+            if (*c == '.') *c = ',';  // German decimal comma (UI text; Task 7 M14)
+        }
     }
     const BurnError burn_errors[] = {
         {magnitude_name[0], e.magnitude_fraction, 0.0, 0.0, 0.0},

@@ -6,7 +6,7 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "e360a8a54228211f"  # final fix 2026-11-04: ship entry_vent_rate_kg_s comment only (its basis), value unchanged: numbers kept;
+inputs_digest = "e6c03087848b3019"  # final fix 2026-11-04: ship entry_vent_rate_kg_s comment (its basis) and raptor3.toml spacing only, values unchanged: numbers kept;
                                     # planner plan Task 12b 2026-11-04: ship entry_vent_rate_kg_s added; tanker_flight re-flown, no vent (main
                                     # at catch 1.46 t, within its 0.3 t; the other numbers identical), numbers kept;
                                     # planner plan Task 12 2026-11-04: depot + tanker pad flights re-measured (ship 177 t, tanker 171 t

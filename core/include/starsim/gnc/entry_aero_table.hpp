@@ -58,9 +58,10 @@ public:
     double lowest_trimmed_alpha_rad(double mach) const;
     // How far the flaps' pitch trim along the schedule stays inside their stops (planner plan Task 12b): over the Mach
     // grid, the smallest distance of any flap of the trim the table holds (the settled one, else the antisymmetric) from
-    // its stops - the upper `max_deflection_rad` and the lower the lowest usable deflection in that flow (edge-on /
-    // the hull's shadow, aero::flap_lowest_usable_deflection_rad). <= 0: somewhere the flaps alone cannot hold the
-    // schedule in pitch. +infinity without flaps (a capsule).
+    // its stops - the upper `max_deflection_rad` and the lower the flap allocation's own lower stop in that flow
+    // (gnc::flap_lower_stop_rad: the lowest effective deflection, above the geometric lowest usable one - the floor
+    // AttitudeController allocates against; the geometric stop alone gave a limit the flown allocation could not
+    // hold). <= 0: somewhere the flaps alone cannot hold the schedule in pitch. +infinity without flaps (a capsule).
     double schedule_trim_margin_rad() const { return schedule_trim_margin_rad_; }
 
 private:

@@ -68,7 +68,41 @@ std::filesystem::path without(const std::string& file, const std::string& from) 
     return dir;
 }
 
+// The same with `from` replaced by `to`, in a directory of its own (`tag`).
+std::filesystem::path replaced(const std::string& tag, const std::string& file, const std::string& from, const std::string& to) {
+    namespace fs = std::filesystem;
+    const fs::path src = STARSIM_CONFIG_DIR;
+    const fs::path dir = fs::temp_directory_path() / ("starsim_config_range_" + tag);
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    fs::copy(src, dir, fs::copy_options::recursive);
+    std::ifstream in(src / "vehicles" / file);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, from.size(), to);
+    std::ofstream(dir / "vehicles" / file) << text;
+    return dir;
+}
+
 }  // namespace
+
+// Final fix (Task 7 M15, Task 4b minor): out-of-range keys are refused with one message per key.
+TEST_CASE("Range checks: the deorbit dispersion keys and the dry CG", "[deorbit][config]") {
+    using Catch::Matchers::ContainsSubstring;
+    CHECK_THROWS_WITH(config::load_vehicle(replaced("residual", "starship_block3.toml", "deorbit_cutoff_residual = 0.002",
+                                                    "deorbit_cutoff_residual = 0.2"),
+                                           "starship_block3"),
+                      ContainsSubstring("deorbit_cutoff_residual must be below 0.1"));
+    CHECK_THROWS_WITH(config::load_vehicle(replaced("pointing", "crew_dragon.toml", "deorbit_pointing_error_deg = 0.1",
+                                                    "deorbit_pointing_error_deg = 12"),
+                                           "crew_dragon"),
+                      ContainsSubstring("deorbit_pointing_error_deg must be below 10"));
+    CHECK_THROWS_WITH(config::load_vehicle(replaced("dry_cg", "starship_block3.toml", "dry_cg_station_m = 22.03",
+                                                    "dry_cg_station_m = 99.0"),
+                                           "starship_block3"),
+                      ContainsSubstring("dry_cg_station_m must lie within the stage"));
+}
 
 // The deorbit burn's dispersion the planner checks is the vehicle's guided cutoff residual (fix round 4, I6): required
 // for every stage returning from orbit.

@@ -206,7 +206,10 @@ bool better_descent_plan(const DescentPlan& a, const DescentPlan& b, const ScvxS
     const bool a_feasible = a.feasible(settings), b_feasible = b.feasible(settings);
     if (a_feasible != b_feasible) return a_feasible;
     if (!a_feasible) {
-        if (a.keep_out_overlap_m != b.keep_out_overlap_m) return a.keep_out_overlap_m < b.keep_out_overlap_m;
+        // an overlap only (Task 5 minor: a negative value is clearance - two plans clear of the keep-out are ranked by
+        // their tilt excess, not by how far they stay clear)
+        const double a_overlap = std::max(0.0, a.keep_out_overlap_m), b_overlap = std::max(0.0, b.keep_out_overlap_m);
+        if (a_overlap != b_overlap) return a_overlap < b_overlap;
         if (a.planned_tilt_excess != b.planned_tilt_excess) return a.planned_tilt_excess < b.planned_tilt_excess;
     }
     return a.reference.x.back()[descent_index::mass] > b.reference.x.back()[descent_index::mass];

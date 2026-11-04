@@ -309,6 +309,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.hull_top_diameter_m = t["hull_top_diameter_m"].value_or(0.0);
     s.dry_mass_kg = doc.number(t, "dry_mass_kg");
     s.dry_cg_station_m = doc.number(t, "dry_cg_station_m");
+    // Task 4b minor: the dry CG lies on the hull (station 0 at its base)
+    if (!(s.dry_cg_station_m > 0.0 && s.dry_cg_station_m < s.length_m)) {
+        doc.fail("stage '" + s.id + "': dry_cg_station_m must lie within the stage (0 < x < length_m)");
+    }
     if (const auto* offset = t["dry_cg_offset_m"].as_array()) {
         if (offset->size() != 2) doc.fail("dry_cg_offset_m must be [y, z]");
         const auto y = (*offset)[0].value<double>(), z = (*offset)[1].value<double>();
@@ -779,7 +783,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             switch_limits("landing_switch_max_rate_rad_s", 1.0, p.landing_switch_max_rate_radps);
             p.landing_gimbal_fraction = doc.number_or(table, "landing_gimbal_fraction", p.landing_gimbal_fraction);
             if (p.landing_gimbal_fraction < 0.0 || p.landing_gimbal_fraction > 1.0) {
-                doc.fail("landing_gimbal_fraction must be in [0, 1] (0: the default allowance)");
+                doc.fail("landing_gimbal_fraction must be in (0, 1] (required for a returning booster)");
             }
             p.landing_fresh_trust_region_weight =
                 doc.number_or(table, "landing_fresh_trust_region_weight", p.landing_fresh_trust_region_weight);
@@ -889,8 +893,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             }
             s.deorbit_cutoff_residual = doc.positive(*recovery, "deorbit_cutoff_residual");
             s.deorbit_pointing_error_rad = doc.positive(*recovery, "deorbit_pointing_error_deg") * constants::deg_to_rad;
-            if (s.deorbit_cutoff_residual >= 0.1 || s.deorbit_pointing_error_rad >= 10.0 * constants::deg_to_rad) {
-                doc.fail("stage.recovery: deorbit_cutoff_residual < 0.1 (a fraction) and deorbit_pointing_error_deg < 10");
+            // Task 7 M15: one message per key, in the file's range-check form
+            if (s.deorbit_cutoff_residual >= 0.1) {
+                doc.fail("stage.recovery.deorbit_cutoff_residual must be below 0.1 (a fraction of the burn's delta-v)");
+            }
+            if (s.deorbit_pointing_error_rad >= 10.0 * constants::deg_to_rad) {
+                doc.fail("stage.recovery.deorbit_pointing_error_deg must be below 10");
             }
         }
         // A returning first stage (gnc::booster_return_parameters): every key its return guidance flies on is required.
@@ -1025,6 +1033,9 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     // Task 4b: its CG from the mass budget)
     if (t.contains("dry_mass_kg")) s.dry_mass_kg = doc.positive(t, "dry_mass_kg");
     if (t.contains("dry_cg_station_m")) s.dry_cg_station_m = doc.number(t, "dry_cg_station_m");
+    if (!(s.dry_cg_station_m > 0.0 && s.dry_cg_station_m < s.length_m)) {  // Task 4b minor
+        doc.fail("stage.from = "" + from + "": dry_cg_station_m must lie within the stage (0 < x < length_m)");
+    }
     // a variant's resized tanks (planner plan Task 4b: the tanker's main tanks stretched into the cargo bay): each entry
     // names a tank of the source and sets its full load and / or base station; it cannot add or remove a tank
     if (auto tanks = t["tank"].as_array()) {

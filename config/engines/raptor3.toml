@@ -4,7 +4,7 @@ wiki_raptor = "https://en.wikipedia.org/wiki/SpaceX_Raptor (retrieved 2026-10-12
 wiki_sh = "https://en.wikipedia.org/wiki/SpaceX_Super_Heavy (retrieved 2026-10-12): Block 3 Isp SL 330 s / vac 350 s"
 satnews = "https://satnews.com/2026/05/14/spacex-debuts-starship-v3-redefining-heavy-lift-launch-capability/"
 user_nozzle = "User ruling 2026-11-03: Raptor 3 nozzle exit 1.30 m (secondary sources, ~40:1 expansion; no SpaceX figure found); 280 tf and Isp 330 s at sea level stay, the vacuum values follow from the exit area (Wikipedia's 350 s vacuum Isp is not followed)"
-block3_summary ="Project decision 2026-10-12 (Block 3 summary: 33 Raptor 3, ~280 tf per engine at sea level)"
+block3_summary = "Project decision 2026-10-12 (Block 3 summary: 33 Raptor 3, ~280 tf per engine at sea level)"
 
 [engine]
 id = "raptor3"

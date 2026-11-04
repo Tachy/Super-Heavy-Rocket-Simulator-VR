@@ -413,8 +413,8 @@ double AttitudeController::gimbal_turn_time_s(const Gains& gains, const GimbalTu
     if (!(turn.accel_radps2 > 0.0) || !(turn.gimbal_max_rad > 0.0)) {
         throw std::invalid_argument("gimbal_turn_time_s: needs gimbal authority (accel_radps2 and gimbal_max_rad > 0)");
     }
-    const double kd = 2.0 * gains.damping_ratio * gains.natural_frequency_rad_s;
-    const double gain = gains.natural_frequency_rad_s * gains.natural_frequency_rad_s / kd;
+    const double kd = gains.rate_gain_per_s();
+    const double gain = gains.error_gain_per_s();
     const double sin_max = std::sin(turn.gimbal_max_rad);
     const double slew = turn.gimbal_rate_radps > 0.0 ? turn.gimbal_rate_radps * turn_model_step_s
                                                      : std::numeric_limits<double>::infinity();
@@ -594,7 +594,7 @@ ControlOutput AttitudeController::steer_rates(const vehicle::FlightBody& body, d
     const auto mass = body.vehicle().mass_properties();
     const Vec3& w = body.state().angular_velocity_body_radps;
     const Vec3& inertia = mass.inertia_kg_m2;
-    const double k = 2.0 * gains_.damping_ratio * gains_.natural_frequency_rad_s;
+    const double k = gains_.rate_gain_per_s();
     const Vec3 torque{inertia.x * k * (rates_body_radps.x - w.x), inertia.y * k * (rates_body_radps.y - w.y),
                       inertia.z * k * (rates_body_radps.z - w.z)};
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);
@@ -611,8 +611,7 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
     const double roll_error = error.x;
 
     // Torque = I * kd * (rate_command - rate); for small errors this is I * (wn^2 e - kd w).
-    const double wn = gains_.natural_frequency_rad_s;
-    const double kd = 2.0 * gains_.damping_ratio * wn;
+    const double kd = gains_.rate_gain_per_s();
     const Vec3& w = state.angular_velocity_body_radps;
     const Vec3& inertia = mass.inertia_kg_m2;
     const Authority a = gimbal_authority(body, mass.cg_station_m, ambient_pressure_pa);
@@ -626,7 +625,7 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
         const double torque = (gimbal_moment > 0.0 ? gimbal_moment * std::sin(a.gimbal_max_rad) : rcs_torque) + fin_torque;
         return moment_of_inertia > 0.0 ? torque / moment_of_inertia : 0.0;
     };
-    const double gain = wn * wn / kd;
+    const double gain = gains_.error_gain_per_s();
     const Vec3 ff_rate = feedforward ? Vec3{feedforward->roll_rate ? feedforward->rate_body_radps.x : 0.0,
                                             feedforward->rate_body_radps.y, feedforward->rate_body_radps.z}
                                      : Vec3{};

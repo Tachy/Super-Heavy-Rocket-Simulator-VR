@@ -302,7 +302,7 @@ struct ReturnProfile {
     // Per engine switch (optional, 2 values; 0: no limit): the tilt and the pitch/yaw rate at the switch.
     std::vector<double> landing_switch_max_tilt_rad;
     std::vector<double> landing_switch_max_rate_radps;
-    double landing_gimbal_fraction = 0.0;  // planned share of the gimbal deflection (0: DescentLimits default)
+    double landing_gimbal_fraction = 0.0;  // planned share of the gimbal deflection (required > 0 for a return)
     double landing_fresh_trust_region_weight = 0.0;  // SCvx trust-region weight of fresh plans (0: DescentWeights default)
     double landing_fresh_attitude_violation_weight = 0.0;  // SCvx soft tilt / rate limit penalty of fresh plans (0: same)
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
