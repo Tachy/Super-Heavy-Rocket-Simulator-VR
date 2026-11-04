@@ -442,8 +442,39 @@ def resolve_stages(vehicle_id: str, vehicles_dir: Path = VEHICLES, _depth: int =
             if target is None:
                 raise VehicleSpecError(f"{vehicle_id}: tank {change['id']!r} is not on {entry['from']!r}")
             target.update(change)
-        stages.append({**source, "tank": tanks})
+        taken = {**source, "tank": tanks}
+        for key in ("docking_port", "transfer_connector"):  # hardware the variant adds to the ship (the tanker's dorsal probes and connectors)
+            if key in entry:
+                taken[key] = entry[key]
+        stages.append(taken)
     return stages
+
+
+DORSAL_KEYS = ("probe_stroke_m", "fairing_height_m", "fairing_radius_m", "fairing_chamfer_m", "fairing_bore_clearance_m", "fairing_embed_m",
+               "probe_head_radius_m", "probe_head_length_m", "probe_head_collar_m", "probe_shaft_radius_m", "probe_shaft_length_m",
+               "probe_tip_flat_radius_m", "drogue_mouth_radius_m", "drogue_depth_m", "drogue_throat_radius_m", "drogue_wall_m", "drogue_foot_m",
+               "connector_pedestal_radius_m", "connector_nozzle_wall_m", "connector_nozzle_length_m", "connector_embed_m", "segments")
+
+
+def dorsal_block(vehicle_id: str, stage_id: str, ship: dict, drawing: dict) -> dict:
+    """The ship's `[[docking_port]]` (probe_drogue only) and `[[transfer_connector]]` tables with the `[dorsal]` drawing numbers."""
+    for k in DORSAL_KEYS:
+        v = drawing.get(k)
+        if not _number(v) or v <= 0.0:
+            raise VehicleSpecError(f"[dorsal].{k}: must be a positive number, got {v!r}")
+    ports = []
+    for p in ship.get("docking_port", []):
+        if p.get("mechanism") != "probe_drogue":
+            raise VehicleSpecError(f"{vehicle_id}: docking port {p.get('id')!r}: only probe_drogue ports are drawn by [dorsal]")
+        if p.get("soft_capture") not in ("active", "passive"):
+            raise VehicleSpecError(f"{vehicle_id}: docking port {p['id']!r}: soft_capture must be 'active' (probes) or 'passive' (drogues)")
+        ports.append({k: p[k] for k in ("id", "mechanism", "position_m", "axis", "up", "soft_capture", "elements_m")})
+    if not ports:
+        raise VehicleSpecError(f"{vehicle_id}: [dorsal] needs a probe_drogue docking port on the ship stage")
+    if len({tuple(p["axis"]) for p in ports}) > 1:
+        raise VehicleSpecError(f"{vehicle_id}: the dorsal ports must share one axis")
+    connectors = [{k: c[k] for k in ("id", "position_m", "line_diameter_m")} for c in ship.get("transfer_connector", [])]
+    return {"stage_id": stage_id, "ports": ports, "connectors": connectors, "drawing": {k: drawing[k] for k in DORSAL_KEYS}}
 
 
 def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: Path = ENGINES) -> dict:
@@ -460,8 +491,11 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
     validate_detail(detail)
     stages = {}
     engine_ids = set()
+    raw_ship = None
     for s in resolve_stages(vehicle_id, vehicles_dir):
         role = "booster" if s["id"] == "booster" else "ship"
+        if role == "ship":
+            raw_ship = s
         if role in stages:
             raise VehicleSpecError(f"{vehicle_id}: two stages of the role '{role}'")
         aero = s.get("aero", {})
@@ -520,6 +554,8 @@ def load_starship(vehicle_id: str, vehicles_dir: Path = VEHICLES, engines_dir: P
     spec = {"vehicle_id": vehicle_id, "stages": stages, "engines": engine_spec, "detail": detail}
     if is_variant:
         spec["variant"] = variant
+    if "dorsal" in detail:  # tanker probes / depot drogues and the transfer connectors, placed by the vehicle config (Task 3)
+        spec["dorsal"] = dorsal_block(vehicle_id, stages["ship"]["stage_id"], raw_ship, detail["dorsal"])
     return spec
 
 

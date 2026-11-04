@@ -18,7 +18,7 @@ const MANIFEST := "manifest.json"
 const MODEL_FILES := {
 	"starship_block3": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
 	# ship variants (plan 2026-11-04): the depot draws no flaps, the HLS has no booster (generators.toml "outputs")
-	"starship_tanker": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac"],
+	"starship_tanker": ["booster", "ship", "flap_fwd", "flap_aft", "grid_fin", "raptor", "rvac", "dorsal_hardware"],
 	"starship_depot": ["booster", "ship", "grid_fin", "raptor", "rvac"],
 	"starship_hls": ["ship", "raptor", "rvac"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
@@ -26,7 +26,7 @@ const MODEL_FILES := {
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
-	"starship_tanker": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
+	"starship_tanker": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
 	"starship_depot": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py"],
 	"starship_hls": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_engine.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
@@ -194,6 +194,7 @@ static func _load(vehicle_id: String) -> Dictionary:
 		"flap": {"fwd": parts["flap_fwd"], "aft": parts["flap_aft"]} if parts.has("flap_fwd") else {},
 		"grid_fin": parts.get("grid_fin", {}),
 		"engine": {false: parts["raptor"], true: parts["rvac"]},
+		"dorsal": parts.get("dorsal_hardware", {}),  # ProbeDrogueView: frames in gen_dorsal_hardware.py; {} on a ship with none
 		"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
 	}
 

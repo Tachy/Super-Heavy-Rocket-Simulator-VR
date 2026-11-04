@@ -50,6 +50,7 @@ func _initialize() -> void:
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
 	_check_other_model_vehicles(snapshot)
 	_check_ship_variants(snapshot)
+	_check(_check_tanker_dorsal() == true, "check_tanker_dorsal ran to its end (an aborted check is a failure)")
 	_check(_check_falcon9() == true, "check_falcon9 ran to its end (an aborted check is a failure)")
 	_check(_check_dragon() == true, "check_dragon ran to its end (an aborted check is a failure)")
 	_check(_check_iss() == true, "check_iss ran to its end (an aborted check is a failure)")
@@ -986,6 +987,34 @@ func _separated(snapshot: Dictionary, stages: Array) -> Dictionary:
 		copy["station_aft_m"] -= shift
 		flaps.append(copy)
 	return {"stages": [ship], "engines": engines, "flaps": flaps, "grid_fins": []}
+
+
+## The tanker's dorsal probes: built on the ship stage, driven by the snapshot's docking state (final approach: out, none: stowed). Skipped without generated models.
+func _check_tanker_dorsal() -> bool:
+	var models := VehicleModels.load_for("starship_tanker")
+	if models.is_empty() or (models.get("dorsal", {}) as Dictionary).is_empty():
+		print("  (no tanker dorsal models: dorsal cases skipped; run python tools/structures/build_models.py --vehicle starship_tanker)")
+		return true
+	var ship := {"id": "ship", "base_station_m": 0.0, "length_m": 52.1, "diameter_m": 9.0, "nose_length_m": 13.4, "vehicle_id": "starship_tanker"}
+	var view := VehicleView.new()
+	_views.append(view)
+	root.add_child(view)
+	view.sync([ship], [], [], [], 0.0, {}, {}, {})
+	_check(view.probe_drogue != null and view.probe_drogue.probe_count() == 4, "tanker: four dorsal probes on the ship stage")
+	_check(view.probe_drogue != null and is_zero_approx(view.probe_drogue.extension()), "tanker: no docking state, probes stowed")
+	view.sync([ship], [], [], [], 0.0, {}, {}, {"present": true, "proximity_phase": "Endanflug", "latched": false})
+	_check(is_equal_approx(view.probe_drogue.extension(), 1.0) and not view.probe_drogue.is_captured(), "tanker: final approach, probes out, not captured")
+	view.sync([ship], [], [], [], 0.0, {}, {}, {"present": true, "docking_phase": "Weichfang", "latched": true})
+	_check(view.probe_drogue.is_captured(), "tanker: soft capture, captured")
+	view.sync([ship], [], [], [], 0.0, {}, {}, {})
+	_check(is_zero_approx(view.probe_drogue.extension()), "tanker: docking state gone, probes stowed")
+	var block3 := {"id": "ship", "base_station_m": 0.0, "length_m": 52.1, "diameter_m": 9.0, "nose_length_m": 13.4, "vehicle_id": "starship_block3"}
+	var other := VehicleView.new()
+	_views.append(other)
+	root.add_child(other)
+	other.sync([block3], [], [], [], 0.0)
+	_check(other.probe_drogue == null, "Block 3 ship: no dorsal hardware")
+	return true
 
 
 func _view(snapshot: Dictionary, vehicle_id: String) -> VehicleView:

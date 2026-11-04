@@ -15,6 +15,7 @@
 #   --flaps=<deg>  draws every flap at that deflection (0 folded, 90 broadside); the physics is not touched
 #   --legacy_hud  shows the old HUD (F1) in the shots: its return block (deorbit, "Restablassen", "Achtung")
 #   --legs=<0..1>  draws the landing legs at that deployment; the physics is not touched
+#   --probes=<0..1>  draws the tanker's docking probes at that extension (0 stowed, 1 out); the physics is not touched
 #   --nose=<0..1>  draws the Crew Dragon's nose cone at that opening (1 = open); the physics is not touched
 extends SceneTree
 
@@ -75,6 +76,8 @@ func _setup() -> bool:
 		VehicleView.look_flap_deg = float(_args["flaps"])
 	if _args.has("legs"):
 		VehicleView.look_leg_deployment = float(_args["legs"])
+	if _args.has("probes"):
+		VehicleView.look_probe_extension = float(_args["probes"])
 	if _args.has("nose"):
 		VehicleView.look_nose_fraction = float(_args["nose"])
 	_rig = VehicleRig.new(_world, _args)

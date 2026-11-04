@@ -31,6 +31,7 @@ import iss_textures  # noqa: E402
 import surface_textures  # noqa: E402
 import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
+import dorsal_layout  # noqa: E402  (blender/, put on the path by vehicle_spec)
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = ROOT / "tools" / "structures" / "blender"
@@ -173,7 +174,7 @@ def vehicle_hash(spec_text: str, version: str, table: dict) -> str:
 def vehicle_outputs(spec: dict, table: dict | None = None) -> tuple:
     if table is not None and "outputs" in table:
         return tuple(table["outputs"])
-    return VEHICLE_FIXED_OUTPUTS + tuple(e["file"] for _, e in sorted(spec["engines"].items()))
+    return VEHICLE_FIXED_OUTPUTS + tuple(e["file"] for _, e in sorted(spec["engines"].items())) + tuple((table or {}).get("extra_outputs", ()))
 
 
 def falcon9_manifest(spec: dict, digest: str, version: str, triangles: dict, table: dict) -> dict:
@@ -312,8 +313,11 @@ def vehicle_manifest(spec: dict, digest: str, version: str, triangles: dict, tab
         look["skin_drawn"] = "steel"
         if not spec["variant"]["tiles"]:
             look["tiles"]["coverage_half_angle_deg"] = [0.0] * len(look["tiles"]["coverage_half_angle_deg"])
-    return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
-            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": flaps, "engines": engines, "look": look}
+    manifest = {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
+                "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": flaps, "engines": engines, "look": look}
+    if "dorsal" in spec:  # probes / drogues, connectors, fairing (dorsal_hardware.gltf): where they sit and the probe stroke
+        manifest.update(dorsal_layout.block(spec["dorsal"], 0.5 * spec["stages"]["ship"]["diameter_m"]))
+    return manifest
 
 
 def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False, blender: str | None = None,

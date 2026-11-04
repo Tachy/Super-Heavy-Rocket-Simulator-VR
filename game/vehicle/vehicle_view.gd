@@ -37,6 +37,8 @@ static var look_flap_deg := NAN
 static var look_leg_deployment := NAN
 ## The same for the Crew Dragon's nose cone (`--nose`, 0 closed .. 1 open, shown at once).
 static var look_nose_fraction := NAN
+## The same for the ship's docking probes (`--probes`, 0 stowed .. 1 out, shown at once).
+static var look_probe_extension := NAN
 
 var _flap_nodes: Array[Dictionary] = []  # per flap: {"node", "entry"} (manifest entry); the node is null without a model
 var _fin_nodes: Array[Dictionary] = []  # per grid fin: {"node", "stage"}
@@ -46,6 +48,7 @@ var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "push
 ## snapshot's binary nose_cone_open at 1 / open_time_s per second: a view easing, no state of the simulation.
 var _nose := {}
 var docking_mechanism: DockingMechanismView = null  # the capsule's, null on any other vehicle; rebuilt with the stage nodes
+var probe_drogue: ProbeDrogueView = null  # the tanker's dorsal probes and connectors, null on any other vehicle; rebuilt with the stage nodes
 var _nose_fraction := 0.0
 var _nose_target := 0.0
 var _nose_settled := false  # the first snapshot after a build shows the state as it is (no opening on appearing)
@@ -90,7 +93,7 @@ func update_view(sim: Object, camera_gcrf_m: Vector3) -> void:
 		return  # nothing to draw: no posing, no plumes (a new stage list is still built, so the next view is right)
 	sync(stages, sim.body_engines(body_index), sim.body_flaps(body_index) if modelled else [],
 			sim.body_grid_fins(body_index) if modelled else [], sim.telemetry(body_index).get("altitude_m", 0.0),
-			sim.body_legs(body_index) if modelled else {}, sim.capsule_state(body_index) if modelled else {})
+			sim.body_legs(body_index) if modelled else {}, sim.capsule_state(body_index) if modelled else {}, _docking_of(sim, modelled))
 	if not visible:
 		return
 	var attitude := Basis(sim.body_attitude_gcrf(body_index) as Quaternion)
@@ -101,7 +104,7 @@ func update_view(sim: Object, camera_gcrf_m: Vector3) -> void:
 
 ## The snapshot -> nodes step of update_view (no sim, no placement): rebuilds on a new stage list, then poses the
 ## engines, flaps, grid fins and legs of the models and the plumes. `flaps`, `grid_fins`, `legs`: read only when models are shown.
-func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitude_m: float, legs := {}, capsule := {}) -> void:
+func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitude_m: float, legs := {}, capsule := {}, docking := {}) -> void:
 	var signature := _signature(stages)
 	if signature != _built_signature:
 		_ensure_sets(stages)
@@ -111,6 +114,7 @@ func sync(stages: Array, engines: Array, flaps: Array, grid_fins: Array, altitud
 		_pose_models(stages, engines, flaps, grid_fins)
 		_pose_legs(legs)
 		_set_nose_target(capsule)
+		_pose_probes(docking)
 	_update_plumes(engines, altitude_m)
 
 
@@ -160,6 +164,23 @@ func _load_sets(stages: Array) -> Array[Dictionary]:
 	elif not _model_sets.is_empty():
 		_models = _model_sets[0]
 	return _model_sets
+
+
+## The snapshot's docking state when this is the controlled body and wears probes (the state belongs to the controlled vehicle), else {}.
+func _docking_of(sim: Object, modelled: bool) -> Dictionary:
+	if not modelled or probe_drogue == null or not sim.has_method("docking_state") or sim.controlled_index() != body_index:
+		return {}
+	return sim.docking_state()
+
+
+## Probes out in the final approach / docked phase, stowed otherwise (ProbeDrogueView.extension_for; a view mapping, no simulation state).
+func _pose_probes(docking: Dictionary) -> void:
+	if probe_drogue == null:
+		return
+	var extension := ProbeDrogueView.extension_for(docking, probe_drogue.extension())
+	if not is_nan(look_probe_extension):
+		extension = look_probe_extension
+	probe_drogue.set_state(extension, ProbeDrogueView.captured_for(docking))
 
 
 ## Closed -> open and back: eased towards the snapshot's nose_cone_open (capsule_state; {} or not present = closed, as on a stack).
@@ -233,6 +254,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	_leg_nodes.clear()
 	_nose = {}
 	docking_mechanism = null
+	probe_drogue = null
 	_nose_settled = false
 	var axis_rotation := Basis(Vector3.RIGHT, PI / 2.0)  # CylinderMesh +Y -> render +Z (= body +x)
 	var staged: Array[bool] = []
@@ -258,6 +280,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	if not stage_nodes.is_empty():
 		_build_legs(legs, stage_nodes[0], _stage_models[0])
 	_build_nose(stages, stage_nodes)
+	_build_dorsal(stages, stage_nodes)
 	_build_joints(stages, stage_nodes)
 
 
@@ -321,6 +344,20 @@ func _build_docking_mechanism(stage: Dictionary, stage_node: Node3D, ms: Diction
 	docking_mechanism.name = "docking_mechanism"
 	stage_node.add_child(docking_mechanism)
 	docking_mechanism.build(ms, func(part: String) -> Material: return _hull_material(_hull_kind(part, stage, ms), ms))
+
+
+## The ship's dorsal probes, drogues and connectors (dorsal_hardware.gltf) on the stage the manifest names, stowed until _pose_probes.
+func _build_dorsal(stages: Array, stage_nodes: Array[Node3D]) -> void:
+	for i in stages.size():
+		var ms: Dictionary = _stage_models[i]
+		if stage_nodes[i] == null or (ms.get("dorsal", {}) as Dictionary).is_empty() or String(ms["manifest"].get("dorsal_stage_id", "")) != String(stages[i]["id"]):
+			continue
+		probe_drogue = ProbeDrogueView.new()
+		probe_drogue.name = "probe_drogue"
+		stage_nodes[i].add_child(probe_drogue)
+		var stage: Dictionary = stages[i]
+		probe_drogue.build(ms, func(part: String) -> Material: return _hull_material(_hull_kind(part, stage, ms), ms))
+		return
 
 
 ## The Crew Dragon's nose cone on its capsule stage, hinged at the manifest's point; posed by _apply_nose.

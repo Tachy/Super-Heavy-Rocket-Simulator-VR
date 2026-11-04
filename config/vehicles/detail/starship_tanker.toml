@@ -10,3 +10,31 @@ chine = true          # [E] tiled chine strips beside the tile field: as Block 3
 catch_pins = true     # [E] catch pins on the ship: as Block 3
 payload_door = false  # [E] cargo door in the hull: none drawn until the cargo-bay work
 skin = "steel"        # [E] Block 3 steel skin
+
+# Dorsal transfer hardware (plan 2026-11-04, Task 3): the four docking probes and the two propellant connectors on the ship's
+# dorsal side. Positions come from config/vehicles/starship_tanker.toml ([[stage.docking_port]] elements_m, [[stage.transfer_connector]]
+# position_m). There is NO photo of the V3 docking hardware (screenshots/depot_tanker_hls_ref/INDEX.md section 7): the shapes
+# below are an invented probe-drogue system of plausible size, not a copy of anything. The same keys draw the depot's drogues (Task 4).
+[dorsal]
+probe_stroke_m = 0.30           # [E] probe travel between stowed and extended; short because the config puts the extended tips only 0.5 m above the barrel
+fairing_height_m = 0.25         # [E] top of each probe fairing above the hull radius (4.75 m); the stowed tip (extended - stroke = 4.70 m) sits below it, the extended tip 0.25 m above
+fairing_radius_m = 0.42         # [E] fairing outer radius, ~3x the probe head so the bore swallows the head
+fairing_chamfer_m = 0.08        # [E] chamfer of the fairing's top rim
+fairing_bore_clearance_m = 0.03 # [E] gap between probe head and bore wall
+fairing_embed_m = 0.10          # [E] how far the fairing's foot reaches below the hull surface (hidden)
+probe_head_radius_m = 0.11      # [E] capture head, a cone on a short collar
+probe_head_length_m = 0.28      # [E] length of the cone
+probe_head_collar_m = 0.06      # [E] cylindrical collar behind the cone
+probe_shaft_radius_m = 0.045    # [E] shaft behind the head
+probe_shaft_length_m = 1.10     # [E] tip to the foot of the shaft; longer than stroke + head so the shaft never leaves its bore
+probe_tip_flat_radius_m = 0.02  # [E] blunt tip
+drogue_mouth_radius_m = 0.45    # [E] funnel opening of the depot's drogue (Task 4), the capture envelope of the pair
+drogue_depth_m = 0.35           # [E] funnel depth from the mouth down to the floor, where the probe tip rests (the config element)
+drogue_throat_radius_m = 0.13   # [E] floor radius, larger than the probe head (0.11)
+drogue_wall_m = 0.03            # [E] funnel wall thickness
+drogue_foot_m = 0.06            # [E] solid base under the floor
+connector_pedestal_radius_m = 0.32  # [E] housing of a transfer connector
+connector_nozzle_wall_m = 0.02      # [E] coupling wall around the config's line diameter
+connector_nozzle_length_m = 0.12    # [E] coupling stands this far above its pedestal
+connector_embed_m = 0.10            # [E] foot below the hull surface (hidden)
+segments = 32                       # [E] sides of every round part

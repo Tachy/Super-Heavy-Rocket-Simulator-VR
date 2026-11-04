@@ -6,6 +6,7 @@
 #               "iss": spec by vehicle_spec.load_iss (the ports of the config, the drawing tables, the IDSS numbers of Dragon's detail file);
 #               "generic": vehicle config + detail file, no table validation yet (later tasks add their own).
 #   outputs     files every generator together must write (not the Starship: vehicle_outputs knows its fixed set).
+#   extra_outputs  a Starship variant that keeps the fixed set and adds files (the tanker's dorsal_hardware.gltf).
 #   scripts     helper modules in this folder that the generators import (hashed into the manifest, in this order).
 #   bakers      Python texture modules in tools/structures/ (hashed after the scripts, in this order).
 #   generators  Blender scripts, run in this order with --spec <json> --out <dir>.
@@ -43,9 +44,10 @@ outputs = ["iss_station.gltf", "iss_arrays.gltf", "iss_rings.gltf"]
 # Tasks 3-6 add their own generators to these entries. The depot and HLS draw no flaps (no gen_flap); the HLS has no booster.
 [starship_tanker]
 kind = "starship"
-scripts = ["common.py", "vehicle_common.py", "hull_profile.py"]
+extra_outputs = ["dorsal_hardware.gltf"]
+scripts = ["common.py", "vehicle_common.py", "hull_profile.py", "dorsal_layout.py"]
 bakers = ["hull_textures", "hull_tiles"]
-generators = ["gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"]
+generators = ["gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"]
 
 [starship_depot]
 kind = "starship"
