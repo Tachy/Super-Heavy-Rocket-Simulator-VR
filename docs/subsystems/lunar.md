@@ -161,6 +161,8 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   the Lambert guess at 2026-11-12 and 11-14 (LLO) and 11-11 (depot variant) (first arc hits the Moon, 40 steps along impacting arcs at 55 deg): it now retries from
   the guess past the other limb (`lambert_guess(..., side = -1)`), test "The LLO outbound plan is found at the epochs where the first guess
   stalled". Re-choose the epoch with the scan when a plan change moves the touchdown.
+- The HLS landing thrusters are never fired by hand (user 2026-11-04: not feasible): the lunar landing guidance lights them; no pilot
+  thruster command is planned (the pilot keeps key B for the legs).
 
 ## Validation
 - Lunar propagation `test_lunar_propagation.cpp`: 100 km LLO and a 3,000 x 70,000 km orbit one day Earth-centred vs
