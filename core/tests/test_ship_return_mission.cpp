@@ -403,7 +403,10 @@ TEST_CASE("Real-time play: key R's planning ends when another return replaces it
     runner.set_latest([&](sim::FlightSession& s) { s.plan_ship_return(deorbit_parameters(m)); });  // a leg's return
     std::atomic<bool> later = false;
     const auto after = runner.post([&](sim::FlightSession&) { later = true; });
-    REQUIRE(runner.wait_idle(120.0));
+    // fix round 3: no latency cap (the case is about the outcome and the command order; set_latest's plan joins the
+    // running worker and then plans at once - two real plans, minutes on a loaded machine); the ctest timeout guards a
+    // hang
+    REQUIRE(runner.wait_idle(1800.0));
     CHECK(runner.result(key_r).done);
     CHECK(runner.result(after).done);
     CHECK(later);
@@ -417,9 +420,11 @@ TEST_CASE("Real-time play: key R's planning ends when another return replaces it
 TEST_CASE("Real-time play: disengaging during a far re-plan leaves the coast free", "[ship][session][deorbit][realtime]") {
     const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    test::WorkerGate gate;  // after the session: a failed check releases the held job first
     place_mission(session, m);
     session.set_realtime_planning(true);
     REQUIRE(session.plan_ship_return(deorbit_parameters(m)));
+    session.set_worker_gate_for_test(gate.future);
     const auto burn = session.ship_return_plan()->node.epoch;
     REQUIRE(burn - session.epoch() > sim::FlightSession::deorbit_replan_age_s);
     while (!session.deorbit_replan_pending() && session.autopilot().state == sim::AutopilotState::Burn &&
@@ -428,17 +433,33 @@ TEST_CASE("Real-time play: disengaging during a far re-plan leaves the coast fre
     }
     REQUIRE(session.deorbit_replan_pending());
     session.disengage_autopilot();
-    session.advance_to(session.epoch() + 120.0, 400000);  // past the 60 s deadline of the (now ownerless) job
-    for (int i = 0; i < 400 && session.deorbit_replan_pending(); ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        session.advance_to(session.epoch() + 1.0, 400000);
-    }
-    CHECK_FALSE(session.deorbit_replan_pending());  // reaped, never applied
-    CHECK(session.deorbit_replans() == 0);
+    session.advance_to(session.epoch() + 1.0, 400000);  // one tick: the job is orphaned
+    // fix round 3: the orphan is held by the gate - the coast is free while it still runs (no wall-clock wait)
     session.reset_step_timing();
-    session.advance_to(session.epoch() + 3600.0, 400000);
-    INFO("steps for one hour: " << session.step_timing().steps);
+    session.advance_to(session.epoch() + 3600.0, 400000);  // far past the job's 60 s deadline
+    INFO("steps for one hour with the orphan running: " << session.step_timing().steps);
     CHECK(session.step_timing().steps < 2000);  // coasting (200 Hz ticking would be 720000)
+    CHECK(session.deorbit_replan_pending());    // still held: the coast did not wait for it
+    // a new return while the orphan still runs: its own re-plan falls due meanwhile - deferred, never a join of the
+    // running orphan on the sim thread (a join would hang here: the gate is closed)
+    auto later = deorbit_parameters(m);  // a pass far enough ahead for a far re-plan
+    later.lead_s = sim::FlightSession::deorbit_replan_age_s + 3600.0;
+    REQUIRE(session.plan_ship_return(later));
+    const auto burn2 = session.ship_return_plan()->node.epoch;
+    REQUIRE(burn2 - session.epoch() > sim::FlightSession::deorbit_replan_age_s);
+    test::WorkerGate second;
+    session.set_worker_gate_for_test(second.future);
+    session.advance_to(burn2 - sim::FlightSession::deorbit_replan_lead_s + 600.0, 400000);  // its re-plan is due
+    CHECK(session.autopilot().state == sim::AutopilotState::Burn);
+    CHECK(session.deorbit_replan_pending());  // the orphan, still held
+    // the orphan ends in a failure (the gate calls it off): reaped on the next tick, never rethrown, never applied;
+    // the deferred re-plan then starts (held by the second gate)
+    gate.set(false);
+    session.wait_background_jobs_for_test();
+    CHECK_NOTHROW(session.advance_to(session.epoch() + 1.0, 400000));
+    for (int i = 0; i < 10 && !session.deorbit_replan_pending(); ++i) session.advance_to(session.epoch() + 1.0, 400000);
+    CHECK(session.deorbit_replan_pending());  // the new return's re-plan, submitted after the reap
+    CHECK(session.deorbit_replans() == 0);
 }
 
 // Refuelling r2: the onboard computer counts the bare hull's boil-off until the burn - 7 t above the landing

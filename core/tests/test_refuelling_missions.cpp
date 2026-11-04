@@ -386,31 +386,69 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
 
 // Fix round 2 (N-a): the reserve's worker job lives with the Docked leg. The mission ends while it runs: the job is
 // orphaned (no coast clamp, no result used), and the next docking plans a fresh one.
+// Fix round 3: the job is held by a test gate (state, not wall time): the coast is free while the orphan still runs.
 TEST_CASE("Docked tanker: a reserve job whose leg ended is dropped, the next docking plans anew", "[refuelling][iss_mission][realtime]") {
     test::spice_session();
     DockedAtDepot f;
+    test::WorkerGate gate;  // after the session: a failed check calls the held job off first
     f.session.set_realtime_planning(true);
+    f.session.set_worker_gate_for_test(gate.future);
     f.session.set_iss_mission(f.tanker_sequence());
     for (int i = 0; i < 20 && !f.session.tanker_reserve_pending(); ++i) f.session.advance_to(f.session.epoch() + 0.1);
     REQUIRE(f.session.tanker_reserve_pending());
+    CHECK(f.session.tanker_reserve_submits() == 1);
     f.session.set_iss_mission(std::nullopt);  // the leg ends while the job runs
-    f.session.advance_to(f.session.epoch() + 120.0);  // past the job's 60 s deadline
-    for (int i = 0; i < 3000 && f.session.tanker_reserve_pending(); ++i) {  // wall-clock bound (a loaded machine)
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        f.session.advance_to(f.session.epoch() + 1.0);
-    }
-    REQUIRE_FALSE(f.session.tanker_reserve_pending());  // reaped
-    CHECK(f.leg() != IssMissionLeg::Transfer);
+    f.session.advance_to(f.session.epoch() + 1.0);
     f.session.reset_step_timing();
-    f.session.advance_to(f.session.epoch() + 600.0);
-    INFO("steps for ten minutes: " << f.session.step_timing().steps);
-    CHECK(f.session.step_timing().steps < 2000);  // the pair coasts again
-    // the next docking (the pair is still docked): a fresh reserve is planned, not the old result reused
+    f.session.advance_to(f.session.epoch() + 600.0);  // far past the job's 60 s deadline
+    INFO("steps for ten minutes with the orphan running: " << f.session.step_timing().steps);
+    CHECK(f.session.step_timing().steps < 2000);  // the pair coasts (no clamp to the orphan's deadline)
+    CHECK(f.session.tanker_reserve_pending());    // still held: nothing waited for it
+    // the job fails (the gate calls it off): reaped on the next tick, its failure not rethrown out of advance_to
+    gate.set(false);
+    f.session.wait_background_jobs_for_test();
+    CHECK_NOTHROW(f.session.advance_to(f.session.epoch() + 1.0));
+    CHECK_FALSE(f.session.tanker_reserve_pending());
+    CHECK(f.leg() != IssMissionLeg::Transfer);
+}
+
+// Fix round 3: a new sequence on the still-docked pair while the old sequence's reserve job runs - once with ticks in
+// between, once without (set_iss_mission itself orphans the job): the old result is never used, the new sequence plans
+// its own reserve after the old job ended, and that one is used.
+TEST_CASE("Docked tanker: re-arming while the old reserve job runs never reuses it", "[refuelling][iss_mission][realtime]") {
+    test::spice_session();
+    const bool tick_between = GENERATE(true, false);
+    INFO("ticks between the end and the new sequence: " << tick_between);
+    DockedAtDepot f;
+    test::WorkerGate old_gate;  // after the session: a failed check calls the held jobs off first
+    test::WorkerGate new_gate;
+    f.session.set_realtime_planning(true);
+    f.session.set_worker_gate_for_test(old_gate.future);
     f.session.set_iss_mission(f.tanker_sequence());
     for (int i = 0; i < 20 && !f.session.tanker_reserve_pending(); ++i) f.session.advance_to(f.session.epoch() + 0.1);
-    CHECK(f.session.tanker_reserve_pending());
-    for (int i = 0; i < 120 && f.leg() == IssMissionLeg::Docked; ++i) f.session.advance_to(f.session.epoch() + 1.0);
-    CHECK(f.leg() == IssMissionLeg::Transfer);
+    REQUIRE(f.session.tanker_reserve_pending());
+    REQUIRE(f.session.tanker_reserve_submits() == 1);
+    f.session.set_iss_mission(std::nullopt);
+    if (tick_between) f.session.advance_to(f.session.epoch() + 1.0);
+    f.session.set_iss_mission(f.tanker_sequence());  // the next docking: the pair is still docked
+    REQUIRE(f.leg() == IssMissionLeg::Docked);
+    // inside the 60 s deadline: a session that took the held job over would wait for it there (a hang, not a red)
+    for (int i = 0; i < 30; ++i) f.session.advance_to(f.session.epoch() + 1.0);
+    CHECK(f.leg() == IssMissionLeg::Docked);           // no Transfer from the old job, nothing waited for it
+    CHECK(f.session.tanker_reserve_submits() == 1);    // the new sequence waits for the old job to end
+    // the old job ends (in a failure: a session that took it over would rethrow it out of advance_to); the new
+    // sequence's own job is submitted after it, from the state then
+    f.session.set_worker_gate_for_test(new_gate.future);
+    old_gate.set(false);
+    f.session.wait_background_jobs_for_test();
+    CHECK_NOTHROW(f.session.advance_to(f.session.epoch() + 1.0));
+    CHECK(f.leg() == IssMissionLeg::Docked);
+    for (int i = 0; i < 20 && f.session.tanker_reserve_submits() < 2; ++i) f.session.advance_to(f.session.epoch() + 0.1);
+    CHECK(f.session.tanker_reserve_submits() == 2);
+    CHECK(f.session.tanker_reserve_pending());  // the new job (held): its result, not the old one, ends the Docked leg
+    CHECK(f.leg() == IssMissionLeg::Docked);
+    // the new job's own result leading to Transfer: "Docked tanker: transfer down to the reserve ..." (forced real
+    // time); not repeated here (a real reserve plan, ~38 s of worker time)
 }
 
 TEST_CASE("Docked tanker: the ship return flies to the catch", "[refuelling][iss_mission][ship][slow]") {

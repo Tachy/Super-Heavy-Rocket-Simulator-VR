@@ -474,14 +474,19 @@ double FlightSession::deorbit_replan_in_s() const {
 }
 
 void FlightSession::replan_ship_deorbit() {
+    if (realtime_planning_ && deorbit_replan_task_.busy()) {
+        // a job of an earlier return still runs (its own is not due before it was applied): orphaned, reaped without
+        // a wait when done; this re-plan stays due and starts on a tick after it (fix round 3: the sim thread never
+        // joins a running job here)
+        deorbit_replan_orphan_ = true;
+        return;
+    }
     deorbit_replan_due_ = false;
     auto inputs = prepare_deorbit_replan();
     if (!inputs) return;
     if (realtime_planning_) {
         // Real-time play (Task 11b): the planner and the boil-off flight run on a worker with an environment of their
         // own; the old plan stays armed until the result is applied (its burn is >= deorbit_replan_lead_s away).
-        deorbit_replan_task_.discard();  // one of an earlier return (it is not due before its own was applied)
-        deorbit_replan_orphan_ = false;
         deorbit_replan_deadline_ = epoch_ + ship_return_budget_s_;  // waited for from here (time warp meanwhile)
         auto worker = worker_environment();
         deorbit_replan_task_.submit([in = std::move(*inputs), worker] {

@@ -29,7 +29,27 @@ public:
     }
     void submit(std::function<T()> work) {
         if (busy()) throw std::logic_error("BackgroundTask::submit while a task is pending");
+        if (gate_.valid()) {  // tests only (fix round 3): the job is held until the test opens the gate
+            work = [gate = gate_, inner = std::move(work)]() -> T {
+                if (!gate.get()) throw std::runtime_error("BackgroundTask: job called off by its test gate");
+                return inner();
+            };
+        }
         pending_ = std::async(std::launch::async, std::move(work));
+    }
+    // Tests only: jobs submitted from now on wait for `gate` before they run; true runs them, false (or a broken
+    // promise) lets them fail at once without running. An invalid future removes the gate (production: never set).
+    void set_gate_for_test(std::shared_future<bool> gate) { gate_ = std::move(gate); }
+    // Tests only: blocks until a submitted job has ended (its result stays to be collected).
+    void wait_done() const {
+        if (pending_.valid()) pending_.wait();
+    }
+    // Drops a finished job's result without blocking (its failure included: a dropped result's failure is no one's
+    // concern). True when nothing is pending afterwards.
+    bool reap() {
+        if (!ready()) return !busy();
+        discard();
+        return true;
     }
     // The result once ready (wait: block until it is); none while it works or without a task. Rethrows its exception.
     std::optional<T> collect(bool wait) {
@@ -48,6 +68,7 @@ public:
 
 private:
     std::future<T> pending_;
+    std::shared_future<bool> gate_;  // tests only
 };
 
 }  // namespace starsim::gnc

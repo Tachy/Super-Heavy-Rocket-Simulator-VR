@@ -380,6 +380,7 @@ std::optional<mission::TankerReserve> FlightSession::poll_tanker_reserve(std::st
         tanker_reserve_task_.submit([in = std::move(*inputs), worker] {
             return compute_tanker_reserve(in, worker->gravity(), worker->earth(), worker->env());
         });
+        ++tanker_reserve_submits_;
         if (std::getenv("STARSIM_DEBUG_REALTIME")) {
             std::printf("[realtime] tanker reserve: begin %.1f ms on the sim thread\n", ms_since(tanker_reserve_wall_start_));
         }

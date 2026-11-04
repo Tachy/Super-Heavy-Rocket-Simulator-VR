@@ -529,6 +529,20 @@ public:
     int deorbit_replans() const { return deorbit_replans_; }
     bool deorbit_replan_pending() const { return deorbit_replan_task_.busy(); }
     bool tanker_reserve_pending() const { return tanker_reserve_task_.busy(); }  // fix round 2 (N-a): also an orphan
+    int tanker_reserve_submits() const { return tanker_reserve_submits_; }  // background reserve jobs started
+    // Tests only (fix round 3): the background jobs (return, far re-plan, tanker reserve) submitted from now on wait for
+    // `gate` (true: run, false: fail without running; gnc::BackgroundTask::set_gate_for_test); and a wait until the
+    // submitted ones have ended (their results stay to be collected by the session's own polls).
+    void set_worker_gate_for_test(const std::shared_future<bool>& gate) {
+        deorbit_replan_task_.set_gate_for_test(gate);
+        ship_return_task_.set_gate_for_test(gate);
+        tanker_reserve_task_.set_gate_for_test(gate);
+    }
+    void wait_background_jobs_for_test() const {
+        deorbit_replan_task_.wait_done();
+        ship_return_task_.wait_done();
+        tanker_reserve_task_.wait_done();
+    }
     // The deorbit plan the controlled ship's return would take now (plan_ship_return's planner and refusals without
     // the boil-off check; also while docked: the held state), not stored and not flown (refuelling r4).
     gnc::DeorbitPlan ship_return_preview(const gnc::DeorbitParameters& parameters = {}) const;
@@ -1755,6 +1769,7 @@ private:
     // coast, nobody collects its result, it is reaped (dropped) when it is done, and its owner's next task waits for it.
     bool deorbit_replan_orphan_ = false;
     bool tanker_reserve_orphan_ = false;
+    int tanker_reserve_submits_ = 0;
     void release_background_tasks();
 };
 

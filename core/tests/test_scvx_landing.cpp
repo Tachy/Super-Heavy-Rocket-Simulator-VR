@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -179,6 +181,48 @@ TEST_CASE("A re-plan from a snapshot takes effect half a second later", "[gnc][s
     CHECK(guidance.statistics().plans == 1);
     guidance.update(*f.body, env, f.t0 + 1.5);
     CHECK(guidance.statistics().plans == 2);
+}
+
+// Fix round 3 of planner Task 11b: in real-time play a re-plan is used when it arrives, but one later than
+// one re-plan interval past its epoch of effect is waited for (a slow / loaded machine never leaves the vehicle on an old
+// plan for long). The solve is held by a gate: state, not wall time.
+TEST_CASE("Real-time play: a re-plan held past its late bound is waited for", "[gnc][scvx_landing][realtime]") {
+    Fixture f;
+    std::promise<void> gate;
+    const auto opened = gate.get_future().share();
+    bool open = false;
+    const auto open_gate = [&] {
+        if (!open) gate.set_value();
+        open = true;
+    };
+    int calls = 0;  // the worker's count: read only after the plan was collected
+    const gnc::PlanFunction held = [opened, &calls, plan = gnc::default_plan_function()](gnc::DescentPlanner& planner,
+                                                                                         const gnc::PlanRequest& r) {
+        if (calls++ > 0) opened.wait();  // the first plan (synchronous) runs at once
+        return plan(planner, r);
+    };
+    auto realtime = f.parameters();
+    realtime.realtime = true;
+    {
+        gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), realtime, held);
+        struct OpenAtExit {  // a failed check must not leave the worker held (the guidance's destructor waits for it)
+            std::function<void()> open;
+            ~OpenAtExit() { open(); }
+        } at_exit{open_gate};
+        const auto& env = f.session->environment();
+        REQUIRE(guidance.start(*f.body, env, f.t0));
+        guidance.update(*f.body, env, f.t0 + 1.0);  // the re-plan's snapshot; it takes effect at +1.5
+        const double latency = realtime.plan_latency_s;
+        guidance.update(*f.body, env, f.t0 + 1.0 + latency);  // due, still held: flown on the old plan, no wait
+        const double late = realtime.replan_interval_s;  // the late bound: one re-plan interval past the effect
+        guidance.update(*f.body, env, f.t0 + 1.0 + latency + late - 0.1);
+        CHECK(guidance.statistics().plans == 1);
+        // the gate opens; the solve itself still runs - a non-waiting collect would usually miss it, the late bound
+        // waits for it
+        open_gate();
+        guidance.update(*f.body, env, f.t0 + 1.0 + latency + late);
+        CHECK(guidance.statistics().plans == 2);
+    }
 }
 
 TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") {

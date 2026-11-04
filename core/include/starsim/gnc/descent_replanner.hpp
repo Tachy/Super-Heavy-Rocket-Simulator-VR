@@ -48,6 +48,11 @@ public:
     // Precondition: !busy(). `latency_s`: this request's own (a first plan in real-time play takes effect when ready: 0).
     void submit(PlanRequest request, std::optional<double> latency_s = std::nullopt);
     bool busy() const { return pending_.valid(); }     // submitted and not yet collected
+    // The pending request's epoch of effect (snapshot + latency); none without one.
+    std::optional<time::Epoch> effect_epoch() const {
+        if (!busy()) return std::nullopt;
+        return pending_snapshot_ + pending_latency_s_;
+    }
     std::optional<PlanOutcome> collect(time::Epoch now, bool wait);
 
 private:

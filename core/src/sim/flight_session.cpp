@@ -999,14 +999,10 @@ private:
 void FlightSession::release_background_tasks() {
     if (deorbit_replan_task_.busy() && autopilot_.state != AutopilotState::Burn) deorbit_replan_orphan_ = true;
     if (tanker_reserve_task_.busy() && !(iss_mission_ && iss_leg_ == IssMissionLeg::Docked)) tanker_reserve_orphan_ = true;
-    if (deorbit_replan_orphan_) {
-        deorbit_replan_task_.collect(false);  // the result of an ended owner is dropped
-        if (!deorbit_replan_task_.busy()) deorbit_replan_orphan_ = false;
-    }
-    if (tanker_reserve_orphan_) {
-        tanker_reserve_task_.collect(false);
-        if (!tanker_reserve_task_.busy()) tanker_reserve_orphan_ = false;
-    }
+    // the result of an ended owner is dropped once done, never waited for; its failure too (fix round 3: not rethrown
+    // out of advance_to)
+    if (deorbit_replan_orphan_ && deorbit_replan_task_.reap()) deorbit_replan_orphan_ = false;
+    if (tanker_reserve_orphan_ && tanker_reserve_task_.reap()) tanker_reserve_orphan_ = false;
 }
 
 time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {

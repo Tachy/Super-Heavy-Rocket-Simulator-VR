@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fstream>
+#include <future>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -42,5 +43,22 @@ inline std::vector<std::vector<double>> read_fixture(const std::string& name) {
     }
     return rows;
 }
+
+// Holds background planner jobs (FlightSession::set_worker_gate_for_test) until the test decides: set(true) runs them,
+// set(false) lets them fail without running. Declare it after the session: a failed check then calls the held jobs
+// off before the session's destructor waits for them.
+struct WorkerGate {
+    std::promise<bool> decide;
+    std::shared_future<bool> future = decide.get_future().share();
+    bool decided = false;
+    void set(bool run) {
+        if (!decided) decide.set_value(run);
+        decided = true;
+    }
+    WorkerGate() = default;
+    WorkerGate(const WorkerGate&) = delete;
+    WorkerGate& operator=(const WorkerGate&) = delete;
+    ~WorkerGate() { set(false); }
+};
 
 }  // namespace starsim::test

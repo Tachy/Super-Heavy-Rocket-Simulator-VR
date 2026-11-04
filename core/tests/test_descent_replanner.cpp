@@ -2,6 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <future>
+#include <optional>
 #include <thread>
 
 #include "starsim/gnc/descent_replanner.hpp"
@@ -52,15 +55,39 @@ TEST_CASE("Waiting mode blocks until the plan is ready", "[gnc][replanner]") {
     CHECK(replanner.collect(at(0.5), true).has_value());
 }
 
+// Fix round 3 of planner Task 11b: bound by state, not by the wall clock - the plan is held by a gate the test opens;
+// a collect that waited would never return (the ctest timeout catches it).
 TEST_CASE("Real-time mode never waits for a slow plan", "[gnc][replanner]") {
-    DescentReplanner replanner(0.5, fake(std::chrono::milliseconds(300)));
-    replanner.submit(request(0.0));
-    const auto start = std::chrono::steady_clock::now();
-    CHECK_FALSE(replanner.collect(at(0.5), false).has_value());
-    CHECK(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(50));
-    CHECK(replanner.busy());
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));
-    CHECK(replanner.collect(at(0.6), false).has_value());  // used once it arrives
+    std::promise<void> gate;
+    const auto opened = gate.get_future().share();
+    bool open = false;
+    const auto open_gate = [&] {
+        if (!open) gate.set_value();
+        open = true;
+    };
+    {
+        DescentReplanner replanner(0.5, [opened](DescentPlanner&, const PlanRequest& r) {
+            opened.wait();
+            DescentPlan p;
+            p.start_phase = r.start_phase;
+            p.converged = true;
+            return p;
+        });
+        struct OpenAtExit {  // a failed check must not leave the worker held (the replanner's destructor waits for it)
+            std::function<void()> open;
+            ~OpenAtExit() { open(); }
+        } at_exit{open_gate};
+        replanner.submit(request(0.0, 2));
+        CHECK_FALSE(replanner.collect(at(0.5), false).has_value());  // returned while the plan is still held
+        CHECK(replanner.busy());
+        CHECK_FALSE(replanner.collect(at(0.6), false).has_value());
+        open_gate();
+        std::optional<PlanOutcome> outcome;
+        while (!(outcome = replanner.collect(at(0.7), false))) std::this_thread::yield();  // used once it arrives
+        REQUIRE(outcome->plan != nullptr);
+        CHECK(outcome->plan->start_phase == 2);
+        CHECK_FALSE(replanner.busy());
+    }
 }
 
 TEST_CASE("The first plan is made synchronously", "[gnc][replanner]") {

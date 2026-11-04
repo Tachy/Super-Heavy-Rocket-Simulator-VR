@@ -56,6 +56,9 @@ double main_free_kg(const vehicle::Vehicle& v, config::TankContents contents) {
 }  // namespace
 
 void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) {
+    // a new sequence is a new owner: a reserve job of the old one is never handed over, also when the new one enters
+    // the Docked leg before a tick (fix round 3)
+    if (tanker_reserve_task_.busy()) tanker_reserve_orphan_ = true;
     iss_mission_ = std::move(sequence);
     ++iss_generation_;  // a continuation that sets a new sequence must not be ended as the old one (r5 minor)
     raise_start_epoch_.reset();

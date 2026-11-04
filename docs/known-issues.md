@@ -14,7 +14,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   one cycle (M2).
   Fix round 2: a background job lives with its owner (the far re-plan with the Burn state, the tanker reserve with the
   Docked leg); when the owner ends (reset, disengage, undock, mission end) it is orphaned: no coast clamp, its result is
-  dropped when it is done, and the owner's next job waits for it. A booster already at its stop height when it is first
+  dropped when it is done (its failure too), and the owner's next job waits for it (a new ISS sequence is a new owner;
+  a far re-plan due while an orphan runs starts on a tick after it is reaped, the sim thread never joins it). A booster already at its stop height when it is first
   seen starts its landing plan synchronously (~0.7 s sim-thread step) instead of one hold late. The refuelling first
   return's side flight on the worker interpolates the worker's interpolated ephemeris again (sub-mm): not bit-identical
   to the synchronous side flight (identical with real-time planning off).

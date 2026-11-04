@@ -461,7 +461,14 @@ std::optional<time::Epoch> ScvxLandingGuidance::plan_end_epoch() const {
 
 ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                                time::Epoch epoch) {
-    if (auto outcome = replanner_.collect(epoch, !parameters_.realtime)) accept(*outcome);
+    // Real-time play (fix round 3 of planner Task 11b): a re-plan one re-plan interval past its epoch of effect
+    // (snapshot + latency) is waited for, as the first plan at its hand-over - the plans never come further apart than
+    // the synchronous cadence's interval + latency + interval, however slow or loaded the machine. Under the full
+    // parallel test load (7-13 s solves) a paced Mach 2.6 run that never waited flew 2 plans in the whole burn and
+    // struck the tower; with a 3 s bound 8 plans, still struck (sink 3.7 m/s); with this bound caught (0.13 m).
+    const auto effect = replanner_.effect_epoch();
+    const bool late = effect && epoch - *effect >= parameters_.replan_interval_s - epoch_tolerance_s;
+    if (auto outcome = replanner_.collect(epoch, !parameters_.realtime || late)) accept(*outcome);
 
     const double t = epoch - plan_epoch_;
     const double time_to_go = plan_->duration_s() - t;
