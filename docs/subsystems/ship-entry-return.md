@@ -52,12 +52,14 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   > 0. 177 t ship: 5.85 t main on top of the full headers (40.85 t on board, CG 24.50 m); the flown allocation agrees
   (RCS share of the trim <= 2e-5 at 11 points of a belly-first descent at the limit, 1.0 with 27 t). The return planner
   (`FlightSession::plan_from_inputs`) derives the limit itself (on the worker in real-time play, final fix I1: the
-  bisection's ~10-12 EntryAeroTable builds had put key R's sim-thread share at 193 ms; now 12.4 ms, worker 9.2 s, far
-  re-plan max step 15.1 ms, tanker reserve worker 24-30 s). A ship within the limit is planned as it is (exactly as
-  before); one beyond it is planned with the entry predictor's mass capped at the vented mass (`DeorbitParameters::
-  max_entry_mass_kg`) and the onboard model's trim from the vented ship (built there too), and as it is only when that
-  plan fails or its burn takes the whole excess (one plan for a venting return instead of two; a first version that
-  always used the vented model moved the phase-45 return's gate to 305 m); the plan carries
+  bisection's ~10-12 EntryAeroTable builds had put key R's sim-thread share at 193 ms; now 12.4-15.9 ms, worker
+  18.1 s, the tanker reserve worker 41.5-50.4 s against the 60 s `ship_return_budget_s`; the far re-plan's sim-thread steps stay at ~15 ms, a wait comes only
+  once 60 s of sim time pass, i.e. under time warp). A ship whose as-is plan's burn
+  stays within the limit is planned as it is (exactly as before); otherwise it is planned again with the entry
+  predictor's mass capped at the vented mass (`DeorbitParameters::max_entry_mass_kg`) and the onboard model's trim from
+  the vented ship (built there too). Deciding on the vented plan's own burn instead (one plan fewer: worker 9.2 s,
+  tanker reserve 24-30 s) moved the phase-45 return's gate from 26 to 305 m (its burn leaves the main tanks around the
+  limit), as a first Task 12b version that always used the vented model did; the plan carries
   its estimate `DeorbitPlan::entry_vent_kg` (rocket-equation burn; the flown burn, settling gas and boil-off take ~3 t
   more, so the flown vent is smaller). The vent must end before the entry guidance (final fix I2): what the coast from
   the burn's end to the entry guidance (~12 min from LEO) cannot take is vented while the ship waits for its burn

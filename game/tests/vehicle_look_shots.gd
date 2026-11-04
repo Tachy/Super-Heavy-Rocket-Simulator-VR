@@ -13,6 +13,7 @@
 #     --stereo) and saves <label>_eye0.png / <label>_eye1.png per shot (the fov field is then the headset's)
 #   --utc=2024-04-08T18:42:00  --out_dir=<dir>
 #   --flaps=<deg>  draws every flap at that deflection (0 folded, 90 broadside); the physics is not touched
+#   --legacy_hud  shows the old HUD (F1) in the shots: its return block (deorbit, "Restablassen", "Achtung")
 #   --legs=<0..1>  draws the landing legs at that deployment; the physics is not touched
 #   --nose=<0..1>  draws the Crew Dragon's nose cone at that opening (1 = open); the physics is not touched
 extends SceneTree
@@ -86,6 +87,8 @@ func _setup() -> bool:
 	_rig.print_bodies(sim)
 	if _args.has("hide_ui"):
 		_rig.hide_ui(_main)
+	elif _args.has("legacy_hud"):  # F1: the old HUD (FlightHud: autopilot, burn and return blocks) too
+		(_main.get("legacy_hud") as CanvasLayer).visible = true
 	if _stereo != null:  # the VR panel (menu, overlay) is not part of the views
 		for child in _main.get_node("/root/XrManager").origin.get_children():
 			if child is VrOverlayPanel:

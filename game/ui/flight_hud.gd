@@ -123,8 +123,10 @@ func _process_unprofiled(_delta: float) -> void:
 				lines.append("  Restablassen  %.1f t abgelassen" % r["entry_vented_t"])
 			elif r.get("entry_vent_planned_t", 0.0) > 0.0:
 				lines.append("  Restablassen  %.1f t vor dem Eintritt geplant" % r["entry_vent_planned_t"])
-		if not r.get("dispersion_robust", true):  # also a return the mission planned (ISS undocking, capsule mission)
-			lines.append("  Achtung       %s" % r.get("dispersion_note", "nicht gegen alle Streuungen robust"))
+			# the pass's dispersion note concerns the deorbit and the interface: shown until the entry (Task 7 M16).
+			# Also a return the mission planned (ISS undocking, capsule mission).
+			if not r.get("dispersion_robust", true):
+				lines.append("  Achtung       %s" % r.get("dispersion_note", "nicht gegen alle Streuungen robust"))
 	if world.flight.last_event != "":
 		lines.append("Ereignis: %s" % world.flight.last_event)
 	lines.append("")

@@ -292,17 +292,18 @@ gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const 
                                  in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, in.parameters);
     };
     // Task 12b: the burn leaves more main-tank residue than the flaps trim - the ship vents the excess before the
-    // interface, so its entry is planned with the vented mass and the vented ship's trim. A return that stays within
-    // the limit is planned as it is. The limit (a bisection over EntryAeroTable builds) and the vented onboard model
-    // are derived here, on the planner's thread (final fix I1). A ship already within the limit is planned once as it
-    // is; one beyond it first vented (the usual case: the excess outweighs the burn - one plan, final fix I1), and as it
-    // is only when the vented plan fails or its burn takes the whole excess.
-    if (!(in.vent_rate_kgps > 0.0)) return as_is();
+    // interface, so the entry is planned again with the vented mass and the vented ship's trim. A return that stays
+    // within the limit is planned as it is (one plan). The limit (a bisection over EntryAeroTable builds) and the vented
+    // onboard model are derived here, on the planner's thread (final fix I1). The decision stays on the as-is plan's
+    // burn: deciding on the vented plan's own burn (one plan fewer) moved the phase-45 return's gate from 35 to 305 m
+    // (its burn leaves the main tanks just around the limit; final fix measure 2026-11-04).
+    const auto plan = as_is();
+    if (!(in.vent_rate_kgps > 0.0) || !(plan.feasible || plan.short_of_reserve)) return plan;
     const auto& ship = in.copy->vehicle();
     if (!(in.max_main_propellant_kg < std::numeric_limits<double>::infinity())) {
         in.max_main_propellant_kg = gnc::entry_residue_limit(ship, *in.schedule).max_main_propellant_kg;
     }
-    if (in.main_propellant_kg <= in.max_main_propellant_kg) return as_is();
+    if (in.main_propellant_kg - plan.propellant_kg <= in.max_main_propellant_kg) return plan;
     const auto& stage = ship.stages().front().config;
     const auto guidance = gnc::entry_guidance_parameters(ship.source_config(), stage, gnc::EntryKind::Orbital);
     auto vented_ship = ship.copy_upper(0);
@@ -313,9 +314,7 @@ gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const 
     vented.max_entry_mass_kg = in.mass_kg - (in.main_propellant_kg - in.max_main_propellant_kg);
     auto result = gnc::plan_deorbit(in.state, in.epoch, gravity, earth, onboard_vented.model(), in.target, in.mass_kg,
                                     in.exhaust_velocity_mps, in.propellant_kg, in.landing_propellant_kg, vented);
-    if (!(result.feasible || result.short_of_reserve) || in.main_propellant_kg - result.propellant_kg <= in.max_main_propellant_kg) {
-        return as_is();
-    }
+    if (!(result.feasible || result.short_of_reserve) || !in.check_vent_fit) return result;
     const double excess_kg = result.entry_vent_kg;
     // Final fix I2: the vent must end before the entry guidance starts. What the coast from the burn to it cannot take
     // is vented while the ship waits for its burn (set_entry_vent_plan); a pass whose wait is too short for that share

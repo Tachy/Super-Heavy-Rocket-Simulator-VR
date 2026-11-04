@@ -290,6 +290,7 @@ std::optional<FlightSession::TankerReserveInputs> FlightSession::tanker_reserve_
     }
     if (!full) return refuse("Keine Reserve: " + refused.reason);
     full->measure_drag = true;
+    full->check_vent_fit = false;  // only its delta-v is used: the held ship's return is the one checked
     auto p = return_reserve_parameters(0.0, &why);  // its delta-v follows from the plans
     if (!p) return refuse("Keine Reserve: " + why);
     const auto& vehicle = flying.body->vehicle();
@@ -319,6 +320,7 @@ FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const T
     // reserve booked 6.6 t of boil-off where the flown pass's wait boils ~1.2 t.
     auto reserve = mission::tanker_reserve(in.dry_with_headers_kg, p);
     auto held = in.full;  // the same settings for the ship holding the reserve
+    held.check_vent_fit = true;
     set_inputs_body(held, *holding(*in.full.copy, reserve));
     const auto plan = plan_from_inputs(held, gravity, earth, env);
     if (!plan.feasible) {

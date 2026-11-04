@@ -68,6 +68,9 @@ phasing_boil_off_t_per_day = 3.5
 # 74.25 t): above 4 flights -2.6..+2.1 t (mean +0.43 t on 1.6), below 1 flight +1.6 t (on -0.5).
 # M8a Task 7: the offsets stay calibrated against the 74.25 t reference delivery and are kept with the re-measured
 # 73.6 t (the full flown campaign and the placed campaign passed against the calculator with them).
+# STALE (final review M4, 2026-11-04): the reference delivery is now 120.3 t (171 t tanker with stretched tanks,
+# planner plan Task 12); these offsets were calibrated against 74.25 t and have not been re-calibrated - the full flown
+# campaign (refuelling_report --fly) was not re-flown against the stretched tanker. Their ~1-2 t is ~1-2 % of a delivery.
 campaign_offset_below_t = 1.1
 campaign_offset_above_t = 2.0
 # [D] f2 2026-10-22: the depot's velocity gain from a tanker transfer's settling push (prograde: the pair flies nose

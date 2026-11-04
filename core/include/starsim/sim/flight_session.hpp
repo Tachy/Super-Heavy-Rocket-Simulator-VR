@@ -518,9 +518,9 @@ public:
     int ship_return_resubmits() const { return ship_return_resubmits_; }
     int deorbit_replans_dropped() const { return deorbit_replans_dropped_; }  // background re-plans that came too late
     // [E] Sim time after which a background return plan (key R, a mission leg, the tanker reserve, a far re-plan) is
-    // waited for: the slowest measured with margin (final fix 2026-11-04, with the entry residue vent: the tanker
-    // reserve 24.3-29.6 s, key R 9.2 s, a far re-plan 8.3 s; a return that vents is planned once, vented, not twice);
-    // at warp 1 it is not reached.
+    // waited for: the slowest measured with margin (final fix 2026-11-04, with the entry residue vent - a venting return
+    // is planned twice, as it is and vented: the tanker reserve 41.5-50.4 s, key R 18.1 s, a far re-plan 17.7 s; before
+    // the vent 36.6-38.2 / 9.3 / 8.8 s); at warp 1 it is not reached.
     static constexpr double ship_return_budget_s = 60.0;
     void set_ship_return_budget_s(double s) { ship_return_budget_s_ = s; }  // tests: a longer wait than at warp 1
     // Tests: the session's own polls of a background return plan skip (a result that arrives late, after a warp).
@@ -1389,6 +1389,9 @@ private:
         double main_propellant_kg = 0.0;
         double burn_thrust_n = 0.0;  // the deorbit engine set's (the burn's duration: the time left to vent)
         double burn_lead_s = 0.0;    // its preparation before ignition (no vent then)
+        // Final fix I2: the vent is checked to fit before the entry (a later pass when not). Off for the tanker reserve's
+        // first delta-v guess on the full docked ship, which never flies that return (the held ship's plan is checked).
+        bool check_vent_fit = true;
         gnc::EntryTarget target;
         double mass_kg = 0.0;
         double exhaust_velocity_mps = 0.0;
