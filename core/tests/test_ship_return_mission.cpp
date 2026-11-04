@@ -111,8 +111,11 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
                 plan->delta_v_mps, plan->propellant_kg / 1000.0, plan->entry_flight_path_rad / deg, plan->entry_speed_mps,
                 plan->crossrange_m / 1000.0);
     if (!run.planned) return run;
-    const time::Epoch interface = plan->entry_interface_epoch;
     while (session.autopilot().state == sim::AutopilotState::Burn) session.advance_to(session.epoch() + 60.0, 400000);
+    // the plan flown: a far plan is planned again from the tracked state before its burn and may take a later pass
+    // (planner plan Task 12: dispersed case 3's 369 km pass lost its robustness to a late ignition, the re-plan took
+    // the next one, 1.5 h later)
+    const time::Epoch interface = session.ship_return_plan()->entry_interface_epoch;
     if (error.scale != 0.0 || error.pointing_rad != 0.0) {
         const Vec3 u = math::normalized(plan->node.delta_v_gcrf_mps);
         const Vec3 a = math::normalized(cross(session.body(0).state().position_gcrf_m, session.body(0).state().velocity_gcrf_mps));

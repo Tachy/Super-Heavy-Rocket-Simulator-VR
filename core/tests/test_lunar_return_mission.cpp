@@ -267,7 +267,9 @@ TEST_CASE("Lunar return start from the NRHO plans the departure burn and the pow
     CHECK(budget.tei_delta_v_mps > 300.0);
     CHECK(budget.tei_delta_v_mps < 600.0);
     const auto& v = t.session.body(t.session.controlled_index()).vehicle();
-    CHECK(v.propellant_kg() > 150e3);
+    // [D] 177 t dry (planner plan Task 3b; 150 t was set for 255 t dry) + 35 t landing + reserve after TEI ~0.45 and
+    // braking ~0.83 km/s at Isp ~375 s: ~137 t + the coast's boil-off (flown 144.5 t, planner plan Task 12)
+    CHECK(v.propellant_kg() > 130e3);
     CHECK(v.propellant_kg() < 400e3);
 }
 
