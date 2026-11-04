@@ -23,7 +23,13 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `ReferenceBody::set_terrain` / `surface_height_m` / `surface_normal_fixed`; `FlightSession::set_moon_terrain`,
   `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Leg landings work on any reference body
   (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal
-  (`contact::SurfaceField`: `PlaneField`, `TerrainField`). The Earth takes the `environment::Terrain` interface
+  (`contact::SurfaceField`: `PlaneField`, `TerrainField`). Footpads are discs (`foot_pad_radius_m`, HLS 1.0 m [E],
+  user-approved 2026-11-04; 0 = point foot): each foot stands on `below_disc`, the highest support under the pad and the
+  normal there; the base ring asks `height_below`. On the composed Moon surface (`DetailedLunarTerrain`, procedural
+  craters, roughness and rocks; fidelity flags `moon_surface_detail` / `moon_rocks`, default on;
+  `sim::shared_moon_surface`, used by the `lunar_landing` mission) that is the max-filtered contact surface of
+  `moon-surface.md` (Physics surface); with detail off or on LOLA alone it is the point query (bit-for-bit).
+  `FlightSession::moon_terrain()` stays LOLA, `moon_surface()` is what ground and legs use. The Earth takes the `environment::Terrain` interface
   (earth-terrain.md). Leg tracks start only near the body's own ground.
 - Legs (Task 6b, user 2026-11-04; fix 1): `deploy_time_s` 10 s, `deploy_margin_s` 5 s, kinematics `hinge_station_m` 0.5, `hinge_radius_m` 4.8,
   `knuckle_height_m` 1.05 [E] (`contact::leg_pose`: the leg turns about its skirt hinge, the foot folds into its line; stowed along the hull, tip up).

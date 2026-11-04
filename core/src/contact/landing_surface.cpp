@@ -22,6 +22,27 @@ TerrainField::TerrainField(const environment::ReferenceBody& body, const Vec3& o
                            std::shared_ptr<const environment::Terrain> terrain)
     : terrain_(std::move(terrain)), body_(body), origin_fixed_m_(origin_fixed_m), site_to_fixed_(site_to_fixed) {
     if (terrain_) body_.set_terrain(terrain_.get());
+    const auto* detailed = dynamic_cast<const environment::DetailedLunarTerrain*>(body_.terrain());
+    if (detailed && detailed->detail_on() && body_.shape().flattening == 0.0) detailed_ = detailed;
+}
+
+SurfaceSupport TerrainField::detailed_support(double east_m, double north_m, double radius_m) const {
+    const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
+    const Vec3 up = site_to_fixed_ * Vec3{0.0, 0.0, 1.0};
+    const Vec3 centre = math::normalized(q);
+    const auto s = detailed_->support_under_disc(centre, up, radius_m);
+    const Vec3 surface = centre * (body_.shape().semi_major_axis_m + s.height_m);
+    return {dot(surface - origin_fixed_m_, up), false, transpose(site_to_fixed_) * s.normal_fixed};
+}
+
+SurfaceSupport TerrainField::below_disc(double east_m, double north_m, double radius_m) const {
+    if (!detailed_ || !(radius_m > 0.0)) return below(east_m, north_m);
+    return detailed_support(east_m, north_m, radius_m);
+}
+
+SurfaceSupport TerrainField::height_below(double east_m, double north_m) const {
+    if (!detailed_) return below(east_m, north_m);
+    return detailed_support(east_m, north_m, 0.0);
 }
 
 SurfaceSupport TerrainField::below(double east_m, double north_m) const {
@@ -52,6 +73,14 @@ LandingSurface::Support LandingSurface::below(double east_m, double north_m) con
         return {0.0, true};
     }
     return {0.0, false};
+}
+
+LandingSurface::Support LandingSurface::below_disc(double east_m, double north_m, double radius_m) const {
+    return field ? field->below_disc(east_m, north_m, radius_m) : below(east_m, north_m);
+}
+
+LandingSurface::Support LandingSurface::height_below(double east_m, double north_m) const {
+    return field ? field->height_below(east_m, north_m) : below(east_m, north_m);
 }
 
 DeckSeaField::DeckSeaField(const LandingSurface::Deck& deck, const math::Mat3& carrier_to_site,

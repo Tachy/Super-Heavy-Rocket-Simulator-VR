@@ -1461,12 +1461,55 @@ void FlightSession::set_moon_terrain(std::shared_ptr<const environment::LunarTer
         }
     }
     moon_terrain_ = std::move(terrain);
-    moon_->set_terrain(moon_terrain_.get());
+    moon_surface_parts_.reset();
+    moon_surface_ = moon_terrain_;
+    moon_->set_terrain(moon_surface_.get());
     // A lunar landing site was built on the old terrain (its height, its surface): it must be set again.
     if (legs_->site().body == ephemeris::Body::Moon) {
         legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     }
     lunar_site_.reset();
+}
+
+void FlightSession::set_moon_terrain(std::shared_ptr<const environment::DetailedLunarTerrain> surface) {
+    set_moon_terrain(surface ? surface->lola_shared() : nullptr);  // checks, drops a lunar site
+    moon_surface_parts_ = std::move(surface);
+    apply_moon_surface();
+}
+
+// The physics surface from the composed parts and the flags (the given surface itself when its options match, so its
+// contact cache is shared); a lunar landing site is rebuilt on it.
+void FlightSession::apply_moon_surface() {
+    if (!moon_surface_parts_) return;
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        if (bodies_[i].body->resting() && reference_body(i) == ephemeris::Body::Moon) {
+            throw std::runtime_error("Mondoberfläche kann nicht geändert werden, solange ein Fahrzeug auf dem Mond steht");
+        }
+    }
+    const auto& parts = *moon_surface_parts_;
+    const environment::SurfaceDetailOptions wanted = moon_surface_options_;
+    if (parts.options() == wanted) {
+        moon_surface_ = moon_surface_parts_;
+    } else if (wanted.detail && !parts.detail_shared()) {
+        throw std::runtime_error("Mondoberfläche: das Oberflächendetail wurde nicht geladen");
+    } else if (wanted.detail && wanted.rocks && !parts.rocks_shared()) {
+        throw std::runtime_error("Mondoberfläche: die Felsbrocken wurden nicht geladen");
+    } else {
+        moon_surface_ = std::make_shared<const environment::DetailedLunarTerrain>(
+            parts.lola_shared(), parts.detail_shared(), parts.rocks_shared(), wanted);
+    }
+    moon_->set_terrain(moon_surface_.get());
+    if (lunar_site_) set_lunar_landing_site(LunarSite(*lunar_site_));
+}
+
+void FlightSession::set_moon_surface_detail(bool on) {
+    moon_surface_options_.detail = on;
+    apply_moon_surface();
+}
+
+void FlightSession::set_moon_rocks(bool on) {
+    moon_surface_options_.rocks = on;
+    apply_moon_surface();
 }
 
 void FlightSession::set_lunar_landing_site(const LunarSite& site) {
@@ -1476,7 +1519,7 @@ void FlightSession::set_lunar_landing_site(const LunarSite& site) {
     const auto frame = LegLandingSim::site_frame(leg_site, moon_->shape());
     contact::LandingSurface surface;
     surface.field =
-        std::make_shared<contact::TerrainField>(*moon_, frame.origin_fixed_m, frame.site_to_fixed, moon_terrain_);
+        std::make_shared<contact::TerrainField>(*moon_, frame.origin_fixed_m, frame.site_to_fixed, moon_surface_);
     set_landing_surface(leg_site, std::move(surface));
     lunar_site_ = site;
 }

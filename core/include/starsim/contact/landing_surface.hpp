@@ -5,6 +5,7 @@
 
 #include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/math/mat3.hpp"
 #include "starsim/math/vec3.hpp"
@@ -23,6 +24,14 @@ class SurfaceField {
 public:
     virtual ~SurfaceField() = default;
     virtual SurfaceSupport below(double east_m, double north_m) const = 0;
+    // Support of a flat footpad disc of radius_m centred at (east, north), level in the site frame: the highest support
+    // under it and the normal there. Default: the point below the centre.
+    virtual SurfaceSupport below_disc(double east_m, double north_m, double /*radius_m*/) const {
+        return below(east_m, north_m);
+    }
+    // Height and water only (the normal is left at its default): for points that only ask whether they are below the
+    // surface. Default: below.
+    virtual SurfaceSupport height_below(double east_m, double north_m) const { return below(east_m, north_m); }
 };
 
 // A plane through the site origin rising towards `uphill_azimuth_rad` (clockwise from north) at `slope_rad`.
@@ -42,15 +51,23 @@ private:
 // through the site-plane point (east, north, 0) (a sphere: its radial) - it includes the drop of the curved surface
 // below the plane; that point lies |(east, north)| x height / R off the vertical (< 1 mm within 100 m of the site).
 // Water where the terrain says so (Earth: the sea at the geoid).
+// On a DetailedLunarTerrain with detail on, below_disc (radius > 0) is its support_under_disc and height_below its
+// contact surface at the point (support_under_disc with radius 0); otherwise both are below (bit-for-bit the point
+// query of a LOLA-only surface).
 class TerrainField final : public SurfaceField {
 public:
     // `terrain` (optional): the body's terrain, shared so the field keeps it alive (the ReferenceBody only points to it).
     TerrainField(const environment::ReferenceBody& body, const math::Vec3& origin_fixed_m, const math::Mat3& site_to_fixed,
                  std::shared_ptr<const environment::Terrain> terrain = nullptr);
     SurfaceSupport below(double east_m, double north_m) const override;
+    SurfaceSupport below_disc(double east_m, double north_m, double radius_m) const override;
+    SurfaceSupport height_below(double east_m, double north_m) const override;
 
 private:
+    SurfaceSupport detailed_support(double east_m, double north_m, double radius_m) const;
+
     std::shared_ptr<const environment::Terrain> terrain_;
+    const environment::DetailedLunarTerrain* detailed_ = nullptr;  // terrain_ when it is one with detail on
     environment::ReferenceBody body_;
     math::Vec3 origin_fixed_m_;
     math::Mat3 site_to_fixed_;
@@ -75,6 +92,10 @@ struct LandingSurface {
 
     using Support = SurfaceSupport;
     Support below(double east_m, double north_m) const;
+    // A footpad disc: the field's below_disc; the plane, deck and sea are level, the point below the centre.
+    Support below_disc(double east_m, double north_m, double radius_m) const;
+    // Height and water only: the field's height_below, else below.
+    Support height_below(double east_m, double north_m) const;
 };
 
 // A moving drone-ship deck seen from its deck-attached frame (the site frame carried along by the deck's heave, roll

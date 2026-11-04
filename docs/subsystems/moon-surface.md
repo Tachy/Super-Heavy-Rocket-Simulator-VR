@@ -1,8 +1,8 @@
 # Moon procedural near-ground surface
 
 Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 3 (craters, regolith
-roughness and rocks in the core; physics, rendering follow).
+`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 4 (craters, regolith
+roughness and rocks in the core; the composed physics surface and disc footpads; planner and rendering follow).
 
 ## Model
 Measured statistics in `config/moon_surface.toml`; the generator `environment::LunarSurfaceDetail` (craters +
@@ -106,6 +106,54 @@ on top of that relief.
   (0.0311 for 0.01-10 m, 0.00678 for 0.5-10 m). `rocks_touching(unit, r, min)` returns rocks with base within r + a
   (hazard / contact queries; cells searched within r + 1.77 D_max).
 
+### Physics surface (Task 4)
+- `environment::DetailedLunarTerrain(lola, detail, rocks, SurfaceDetailOptions{detail, rocks})` is the Moon's
+  `Terrain` for the physics: max(LOLA + relief, rock tops). Fidelity flags `moon_surface_detail` / `moon_rocks`
+  (default on; rocks need the detail). Detail off forwards every override to `LunarTerrain` (bit-for-bit, incl. the
+  10 m normal step) and `support_under_disc` is the point query at the disc centre.
+- Detail on, point queries (`height_m`, `height_at_direction_m`, `height_at_fixed_m`): LOLA `height_at_direction_m`
+  + `relief_m(unit, 0)` + every rock (>= 0.01 m) whose top covers the point (~13 us: relief 6 us, `rocks_touching` at
+  radius 0 ~6.6 us). `normal_fixed`: central differences over +-1 m (`detail_normal_step_m`, [E] the HLS pad radius;
+  `normal_step_m(fixed)` reports it). `resolution_m` / `finest_resolution_within_m`: 0.01 m. `max_height_m`: LOLA's +
+  a practical relief bound (two fresh rims per crater octave, mean-field shifts, the value-noise maximum) + twice the
+  largest rock semi-axis. `height_limited_m(unit, L, D_min)`: relief averaged over L and only rocks >= D_min
+  ((0, 0) is the full point query, bitwise).
+- Contact surface (`support_under_disc(centre, up, r)`, `contact_ground_m`): the pads feel LOLA + the full relief
+  interpolated bilinearly on a cube-face lattice of 2^26 nodes per face edge (4.07 cm nominal, 3.4-4.1 cm) and the
+  rocks >= 5 cm (`contact_min_rock_diameter_m`). Both scales lie inside the few-cm sinkage of a loaded pad in regolith
+  ([E]; a 5 cm rock buried 0.3 of its height stands 2-3 cm proud; the omitted sub-lattice relief has an RMS of ~2 mm).
+  A disc is level (normal to `up`); its support is the highest point under it, heights referred to the centre's
+  vertical (a point d off the centre counts d^2 / 2R lower): ground = max over a pattern of 25 samples (centre, 8 at
+  r/2, 16 on the rim, [E]: the rim ring finds the rim of a bowl the pad sits in) with the normal of the least-squares
+  plane through them (the pad-scale slope; in a bowl the pad bears on the rim all round and that normal is the axis);
+  a rock whose peak lies under the disc counts with its peak and its own normal there; a rock cut by the rim with the
+  highest point of the rim arc over it (5 coarse samples over the arc it can cover, 8 golden-section steps). Rocks are
+  tried highest peak first and stop once a peak is not above the best support. Peaks: per template the highest column
+  top (41 x 41 grid + pattern search, computed once, ~0.1 s), per rock `rock_top` there. r = 0: the contact surface
+  at the point (normal from central differences of the contact ground over +-1 m).
+- Cache: per face cell of level 18 (10.4 m nominal) the lattice nodes (256 x 256, filled lazily, computed outside the
+  lock) and the rocks >= 5 cm that may touch the cell (`rocks_touching` from the cell centre, radius = largest
+  centre-to-corner chord x 1.01) with their peaks; at most 64 cells of each kind (LRU). Node values and rock lists
+  are pure functions of the cell, so a cached query equals a fresh one bit for bit (tested). One mutex; the node
+  computation runs outside it.
+- Cost (Release, this machine, six 1 m pads on a 12 m footprint at the site): first tick 3.4-6.5 ms (cold cache:
+  ~600 nodes and ~10 rock cells), sliding 1 mm per tick 100-155 us per tick (new nodes as the pattern moves), resting
+  22-42 us per tick (measured in the test run and under the parallel suite; budget < 50 us).
+- Legs (`contact::leg_contact`): each foot's support is `LandingSurface::below_disc(e, n, foot_pad_radius_m)` (computed
+  once per foot per tick); the base ring asks `height_below` (height and water only: the contact surface at the point,
+  no normal). `TerrainField` routes `below_disc` (r > 0) to `support_under_disc` and `height_below` to the contact
+  surface only for a `DetailedLunarTerrain` with detail on; otherwise both are `below` (bit-for-bit today's point
+  feet). Vehicle config `[stage.landing_legs] foot_pad_radius_m` (default 0 = point foot); `starship_hls.toml` 1.0 m
+  [E] (drawn pad, user-approved 2026-11-04).
+- Session: `sim::shared_moon_surface(config_dir, data_dir, options)` caches the composed surface per (directories,
+  options) and its parts (LOLA via `shared_lunar_terrain`, one `LunarSurfaceDetail`, one `LunarRocks` with the
+  Diviner map, loaded only with rocks on). `FlightSession::set_moon_terrain(DetailedLunarTerrain)` keeps
+  `moon_terrain()` = LOLA (telemetry `altitude_terrain_m`, planners, game queries) and uses
+  `moon_surface()` for the ground and the legs: the given surface when its options match the session's flags, else a
+  rebuild from its parts; `set_moon_surface_detail` / `set_moon_rocks` re-apply at once and rebuild a lunar landing
+  site on the new surface (refused while a body rests on the Moon). The `lunar_landing` mission loads all parts
+  (`{true, true}`) and hands them to the session. `set_moon_terrain(LunarTerrain)` stays the LOLA-only surface.
+
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
@@ -138,6 +186,13 @@ on top of that relief.
   `config::load_moon_surface_config(file)` -> `MoonSurfaceConfig` (craters, roughness, rocks, hapke);
   `SizeFrequency::cumulative_density_per_m2(D)` (forms `power` | `exponential`, not clipped to [min, max]).
   Missing / bad keys throw `ConfigError` with a German message naming the full key (`roughness.hurst_exponent`).
+- `core/include/starsim/environment/detailed_lunar_terrain.hpp`, `core/src/environment/detailed_lunar_terrain.cpp`:
+  `DetailedLunarTerrain`, `SurfaceDetailOptions`, `support_under_disc` / `DiscSupport`, `contact_ground_m`,
+  `height_limited_m`, `normal_step_m`, the contact cache.
+- `contact::SurfaceField::below_disc` / `height_below`, `LandingSurface::below_disc` / `height_below`,
+  `TerrainField` (`core/include/starsim/contact/landing_surface.hpp`); `contact::leg_contact` feet on `below_disc`.
+- `sim::shared_moon_surface` (`core/include/starsim/sim/terrain_cache.hpp`); `FlightSession::set_moon_terrain`
+  overloads, `set_moon_surface_detail`, `set_moon_rocks`, `moon_surface()`; `lunar_landing_mission.cpp` load_site.
 
 ## Standing decisions
 - Equilibrium, not the Neukum production function, for the small craters: every surface older than ~1 Gy is at
@@ -210,6 +265,31 @@ on top of that relief.
     lattice is unchanged after the face blend (4.090 vs 3.845 at the site = +6.4 %) and stays inside 10 % of the total, so
     the amplitude is not touched. The rock tops add 0.20 mm (site) to the median (rare rocks dominate the mean square,
     not the median).
+- Physics surface (Task 4, `core/tests/test_detailed_lunar_terrain.cpp`, synthetic flat LOLA + the shipped config
+  with the uniform law; `[moon_surface][terrain]` / `[contact]`):
+  - detail off on the real LOLA (10^4 points, half within 15 km of the site): heights by latitude / longitude,
+    direction and fixed point, normals (memcmp), resolutions, `normal_step_m`, `height_limited_m` and the disc
+    support (= point query) all `==` LunarTerrain, with and without the detail parts present; `max_height_m` equal;
+  - disc support vs brute force (polar grid 100 x 240 + 8000 rim points of `rock_top` over the disc): 6 peaks 1 mm
+    inside the pad edge and 3 rocks cut by the rim (D 0.41-0.64 m): height within 0.01 mm (tolerance 1 mm), normal
+    within 0.0007-0.011 rad (tolerance 0.05);
+  - cached query == fresh instance bit for bit (40 discs and 40 point supports);
+  - pads centred in 8 craters of 6-16 m (rocks off): pattern max vs a dense max (41 x 80) of the same ground within
+    1.5 cm (tolerance 3 cm). A single-crater geometry check is not possible on the real relief (roughness RMS 0.19 m
+    at 20 m, overlapping craters: no crater of 6-16 m near the site is isolated); the leg response to a crater and a
+    rock is tested on an analytic field (`[moon_surface][contact][legs]` in `test_terrain_contact.cpp`: rock under the
+    pad 0.6 m off the foot compresses by rock top + preload, a 1 m pad in a 3 m bowl by preload + bowl(1 m), a point
+    foot misses the rock and stands on the bowl floor, all within 1 mm; radius 0 = the point query exactly);
+  - `height_limited_m(p, 0, 0) == height_at_direction_m(p)` (200 points); without rocks the band-limited height at
+    L = 4 / 1 m equals the footprint mean of the full ground to 0.0021 / 0.0008 m (removed band RMS 0.072 / 0.027 m;
+    tolerance 0.1 x);
+  - cost: see Physics surface (resting < 50 us gated).
+- `[terrain_cache][moon_surface][data][slow]`: the real Diviner map (3840 x 11520) loads with its gap fill in 0.44 s;
+  the first `shared_moon_surface({true, true})` 1.65 s (detail construction ~1 s + map); one instance per options, one
+  detail generator, LOLA shared with `shared_lunar_terrain`.
+- `[hls][legs][lunar][terrain][moon_surface][data][slow]` (`test_hls_landing.cpp`): the HLS (1 m pads) dropped at
+  1 m/s on the composed surface at the flattest LOLA spot near Mons Mouton (spot chosen with the flag off, then on)
+  lands and rests, no crush.
 - Diviner product check (python, label + three rows by range request, not the 88 MB file): the label layout above;
   median RA 0.004 at the equator (17 % no data in that row), 0.003 at 57 N, 0.002 at 60 S; p95 0.006-0.008.
 
@@ -301,9 +381,18 @@ geometry (g near 0) is not observed there. The published global-average table of
 
 ## Open points
 - Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies (done). The
-  loader is tested on a synthetic file in the real format; the full 88 MB product has not been loaded by a test (the
-  label and three rows were checked). Nothing constructs `LunarRocks` outside the tests yet: the caller (Task 7) must
-  call `load_rock_abundance_map`, and with the shipped "diviner" the map then has to be fetched.
+  full 88 MB product is loaded by `shared_moon_surface` (0.44 s incl. gap fill) and must be fetched
+  (`fetch.py diviner_rock_abundance`); how it is packaged for the release is the user's decision (open).
+- Contact surface: the pads feel the relief on a 4 cm lattice and rocks >= 5 cm (both [E], below the pad sinkage); the
+  disc pattern (25 samples) can miss up to ~1.5 cm of sub-pattern roughness (measured); a rock's highest point under
+  a level disc is taken at its peak (exact) or on the rim arc (search). The pad is level in the site frame (not
+  pivoting): on a planar slope s every pad stands r tan s higher (1 m pad, 8 deg: 0.14 m), the tilt is unchanged.
+- Physics cost: a pad sliding 1 mm per tick costs 100-155 us per tick for six pads (new lattice nodes), the first tick
+  3-6 ms; Task 5's planner queries many candidate points cold (each pad ~100 nodes x 6 us) - prefetching the
+  touchdown area or a coarser candidate check first may be needed there.
+- Point queries with detail (ground contact of every body at the Moon via `ReferenceBody`, two per body per tick in
+  `FlightBody::resolve_ground_contact`) cost ~13 us each (LOLA alone ~0.02 us); `normal_fixed` with detail ~50 us.
+  Telemetry `altitude_terrain_m` stays on LOLA.
 - The real map's median (0.002-0.004) is about half the reference 0.0068: with "diviner" the mid latitudes get ~0.5 x
   the Surveyor VI population. Points at the reference's 0.5 m lower limit or at the law (open, not changed).
 - Size convention of the Surveyor fragment counts (long dimension vs mean / area-equivalent) not determined from the

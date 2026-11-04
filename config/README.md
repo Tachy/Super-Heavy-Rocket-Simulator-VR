@@ -185,7 +185,9 @@ flow separation (vacuum engines).
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
   (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
   per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
-  plastically over at most `stroke_m`; more is an impact) and the foot's Coulomb `friction`. `fixed = true`: always
+  plastically over at most `stroke_m`; more is an impact) and the foot's Coulomb `friction`. `foot_pad_radius_m`
+  (optional, default 0 = point foot): footpad disc; the foot stands on the highest support under it (HLS 1.0 m [E],
+  the drawn pad, user-approved 2026-11-04). `fixed = true`: always
   deployed (HLS; `deploy_time_s` not needed). A `"leg_landing"` first stage also needs `deploy_margin_s` (legs
   commanded out `deploy_time_s` + this before the planned touchdown) and `max_touchdown_tilt_deg` (thrust tilt from the
   vertical at the touchdown).

@@ -31,6 +31,7 @@
 
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/environment/atmosphere.hpp"
+#include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/geoid.hpp"
 #include "starsim/environment/gravity.hpp"
@@ -778,6 +779,20 @@ public:
     // Lunar terrain for ground, leg contact and the tick-near-ground decision at the Moon (lunar l2; needs the Moon
     // orientation). nullptr: the sphere. Drops a lunar landing site (set it again on the new terrain).
     void set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain);
+    // The composed surface (sim::shared_moon_surface): ground and leg contact on LOLA + procedural detail + rocks as the
+    // fidelity flags below say (the session rebuilds it from the surface's parts when they differ from its options);
+    // moon_terrain() stays the LOLA terrain (telemetry, planners, game queries).
+    void set_moon_terrain(std::shared_ptr<const environment::DetailedLunarTerrain> surface);
+    void set_moon_terrain(std::nullptr_t) { set_moon_terrain(std::shared_ptr<const environment::LunarTerrain>{}); }
+    // Fidelity flags moon_surface_detail / moon_rocks (default on): procedural craters and roughness, rocks in the
+    // physics surface of a composed terrain. Off = the LOLA-only surface bit-for-bit (10 m normal step, point feet).
+    // Re-applied at once (a lunar landing site is rebuilt on the new surface); not while a body rests on the Moon.
+    void set_moon_surface_detail(bool on);
+    void set_moon_rocks(bool on);
+    bool moon_surface_detail() const { return moon_surface_options_.detail; }
+    bool moon_rocks() const { return moon_surface_options_.rocks; }
+    // The surface the physics uses at the Moon (the composed one per the flags, else the LOLA terrain; nullptr: sphere).
+    const environment::Terrain* moon_surface() const { return moon_surface_.get(); }
     // Leg landings at a lunar site on its terrain (set_moon_terrain first), tracking bodies within the site's tile.
     void set_lunar_landing_site(const LunarSite& site);
     // The lunar landing site the legs land on (nullptr: none - also after set_moon_terrain or set_landing_surface) and
@@ -1205,6 +1220,10 @@ private:
     environment::Us76Atmosphere atmosphere_;
     std::optional<environment::ReferenceBody> moon_;  // lunar l1: with a Moon orientation
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;  // lunar l2
+    std::shared_ptr<const environment::DetailedLunarTerrain> moon_surface_parts_;  // the composed surface given, if any
+    std::shared_ptr<const environment::Terrain> moon_surface_;  // what ground and legs use (moon_terrain_ without parts)
+    environment::SurfaceDetailOptions moon_surface_options_;    // fidelity flags
+    void apply_moon_surface();
     std::optional<LunarSite> lunar_site_;                            // set_lunar_landing_site
     // lunar l5: Earth air radiation (config/aero); shared with the entry guidance's predictor
     std::shared_ptr<const aero::RadiativeHeatingTable> radiative_heating_;

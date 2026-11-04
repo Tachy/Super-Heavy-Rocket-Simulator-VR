@@ -19,21 +19,24 @@ namespace starsim::sim {
 namespace {
 
 struct PlacedSite {
-    std::shared_ptr<const environment::LunarTerrain> terrain;
+    std::shared_ptr<const environment::LunarTerrain> terrain;  // LOLA: the site height, the planners
+    std::shared_ptr<const environment::DetailedLunarTerrain> surface;  // the physics surface (all parts loaded)
     LunarSite site;
 };
 
-// The Moon's terrain (the data pipeline's directory next to config/: repository layout) and the mission's site on it.
+// The Moon's terrain (the data pipeline's directory next to config/: repository layout), the composed surface with
+// every part (the session picks the fidelity flags from them) and the mission's site on it.
 PlacedSite load_site(const config::LunarLandingMission& m, const std::filesystem::path& config_dir) {
     const auto site = config::load_lunar_site(config_dir, m.site_id);
     PlacedSite placed;
-    placed.terrain = shared_lunar_terrain(config_dir, config_dir.parent_path() / "data");
+    placed.surface = shared_moon_surface(config_dir, config_dir.parent_path() / "data", {true, true});
+    placed.terrain = placed.surface->lola_shared();
     placed.site = lunar_site(site, *placed.terrain);
     return placed;
 }
 
 void set_site(FlightSession& session, const PlacedSite& placed) {
-    session.set_moon_terrain(placed.terrain);
+    session.set_moon_terrain(placed.surface);
     session.set_lunar_landing_site(placed.site);
 }
 

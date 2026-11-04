@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 
 #include <catch2/catch_approx.hpp>
@@ -21,6 +22,7 @@
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/sim/mission_start.hpp"
+#include "starsim/sim/terrain_cache.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -244,6 +246,48 @@ TEST_CASE("An HLS lands on the LOLA terrain at the flattest spot near the site",
     CHECK(run_drop(fx) == sim::LegTouchdown::Landed);
     // The feet stand on the terrain: spring compression of millimetres, no crush at 1 m/s
     for (double c : fx.session.leg_crushed_m(0)) CHECK(c < 0.01);
+    CHECK(fx.session.body(0).resting());
+}
+
+TEST_CASE("An HLS lands with its disc footpads on the procedural surface", "[hls][legs][lunar][terrain][moon_surface][data][slow]") {
+    const std::filesystem::path data = STARSIM_DATA_DIR;
+    if (!std::filesystem::exists(data / "terrain" / "diviner_rock_abundance.i16")) SKIP("Diviner data not installed");
+    Fixture fx;
+    const auto composed = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
+    fx.session.set_moon_terrain(composed);
+    CHECK(fx.session.moon_surface() == composed.get());
+    CHECK(fx.session.moon_terrain() == &composed->lola());
+    const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), composed->lola());
+    fx.session.set_lunar_landing_site(site);
+    // The flags: detail off gives the LOLA-only surface (the spot search below as on LOLA), back on the composed one.
+    fx.session.set_moon_surface_detail(false);
+    CHECK(fx.session.moon_surface() != composed.get());
+    CHECK(fx.session.lunar_landing_site() != nullptr);  // rebuilt on the new surface
+    const auto& surface = fx.session.leg_landing().surface();
+    const auto cfg = hls(100.0e3);
+    CHECK(cfg.stages.front().landing_legs.foot_pad_radius_m == 1.0);
+    const double r = cfg.stages.front().landing_legs.footprint_radius_m;
+    double best = 1e9, be = 0.0, bn = 0.0;
+    for (int i = -10; i <= 10; ++i) {
+        for (int j = -10; j <= 10; ++j) {
+            double worst = 0.0;
+            for (int k = -1; k < 6; ++k) {
+                const double a = k * 60.0 * deg;
+                const double e = 50.0 * i - (k < 0 ? 0.0 : r * std::sin(a));
+                const double n = 50.0 * j + (k < 0 ? 0.0 : r * std::cos(a));
+                worst = std::max(worst, std::acos(std::min(1.0, surface.below(e, n).normal.z)));
+            }
+            if (worst < best) best = worst, be = 50.0 * i, bn = 50.0 * j;
+        }
+    }
+    fx.session.set_moon_surface_detail(true);
+    CHECK(fx.session.moon_surface() == composed.get());
+    place_over_site(fx, cfg, 0.5, {0.0, 0.0, -1.0}, be, bn);
+    const auto outcome = run_drop(fx);
+    const auto& crushed = fx.session.leg_crushed_m(0);
+    std::printf("[hls] procedural surface: spot (%.0f, %.0f) m, outcome %d, crushed max %.4f m\n", be, bn,
+                static_cast<int>(outcome), *std::max_element(crushed.begin(), crushed.end()));
+    CHECK(outcome == sim::LegTouchdown::Landed);
     CHECK(fx.session.body(0).resting());
 }
 

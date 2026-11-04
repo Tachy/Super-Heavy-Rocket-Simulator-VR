@@ -680,6 +680,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.landing_legs.stiffness_n_m = doc.positive(*legs, "stiffness_n_m");
         s.landing_legs.damping_n_s_m = doc.positive(*legs, "damping_n_s_m");
         s.landing_legs.friction = doc.positive(*legs, "friction");
+        s.landing_legs.foot_pad_radius_m = doc.number_or(*legs, "foot_pad_radius_m", 0.0);
+        if (!(s.landing_legs.foot_pad_radius_m >= 0.0)) doc.fail("landing_legs.foot_pad_radius_m must be >= 0");
         s.landing_legs.deploy_margin_s = doc.number_or(*legs, "deploy_margin_s", 0.0);
         s.landing_legs.max_touchdown_tilt_rad = doc.number_or(*legs, "max_touchdown_tilt_deg", 0.0) * constants::deg_to_rad;
         if (s.landing_legs.deploy_margin_s < 0.0 || s.landing_legs.max_touchdown_tilt_rad < 0.0 ||

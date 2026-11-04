@@ -120,3 +120,67 @@ TEST_CASE("A terrain field follows the body's surface in the site frame", "[cont
     CHECK(std::abs(here.height_m) < 1e-6);
     CHECK(here.normal.z == Catch::Approx(1.0));
 }
+
+namespace {
+
+// Level ground with a rock (spherical cap: height 0.2 m, plan radius 0.3 m, 0.6 m north of foot 0 at (0, 8)) and a
+// shallow bowl (radius 3 m, depth 0.05 m, centred under foot 3 at (0, -8)). The disc support is the analytic maximum
+// of the surface over the disc (cap: its top when the cap centre lies under the disc, else its height at the disc
+// point nearest to it; bowl: at the disc point farthest from its centre).
+class BumpField final : public contact::SurfaceField {
+public:
+    static constexpr double rock_x = 0.0, rock_y = 8.6, rock_h = 0.2, rock_r = 0.3;
+    static constexpr double bowl_x = 0.0, bowl_y = -8.0, bowl_r = 3.0, bowl_d = 0.05;
+    static double cap(double d) { return d < rock_r ? rock_h * (1.0 - d * d / (rock_r * rock_r)) : 0.0; }
+    static double bowl(double d) { return d < bowl_r ? -bowl_d + bowl_d * d * d / (bowl_r * bowl_r) : 0.0; }
+    contact::SurfaceSupport below(double e, double n) const override { return below_disc(e, n, 0.0); }
+    contact::SurfaceSupport below_disc(double e, double n, double r) const override {
+        const double d_rock = std::hypot(e - rock_x, n - rock_y), d_bowl = std::hypot(e - bowl_x, n - bowl_y);
+        double h = d_bowl < bowl_r ? bowl(std::min(d_bowl + r, bowl_r)) : 0.0;  // level ground outside the bowl
+        if (d_rock - r < rock_r) h = std::max(h, cap(std::max(d_rock - r, 0.0)));
+        return {h, false, {0.0, 0.0, 1.0}};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("A foot on a rock compresses that leg; a foot in a small crater extends", "[moon_surface][contact][legs]") {
+    contact::LandingSurface surface;
+    surface.field = std::make_shared<BumpField>();
+    constexpr double preload = 0.05;  // feet 5 cm below the level ground
+    const auto pose = upright(21.5 - preload);
+    auto with_pad = legs();
+    with_pad.foot_pad_radius_m = 1.0;
+    std::vector<double> crushed;
+    const auto disc = contact::leg_contact(contact::make_leg_geometry(with_pad, 0.0, 4.5), crushed, pose, surface);
+    crushed.clear();
+    const auto point = contact::leg_contact(contact::make_leg_geometry(legs(), 0.0, 4.5), crushed, pose, surface);
+    // Foot 0 at (0, 8): the rock (0.6 m off) lies under the 1 m pad: compressed by the rock top + preload; a point foot
+    // misses it. Foot 3 at (0, -8): the pad rests on the bowl at 1 m from its centre (-0.0444 m): compressed less than
+    // on level ground; a point foot at the bowl floor (-0.05 m) only just touches.
+    const double pad_in_bowl = BumpField::bowl(1.0);
+    CHECK(std::abs(disc.foot_compression_m[0] - (BumpField::rock_h + preload)) <= 1e-3);
+    CHECK(std::abs(point.foot_compression_m[0] - preload) <= 1e-3);
+    CHECK(std::abs(disc.foot_compression_m[3] - (preload + pad_in_bowl)) <= 1e-3);
+    CHECK(disc.foot_compression_m[3] < disc.foot_compression_m[1]);
+    CHECK(std::abs(point.foot_compression_m[3] - (preload - BumpField::bowl_d)) <= 1e-3);
+    for (const size_t i : {size_t{1}, size_t{2}, size_t{4}, size_t{5}}) {
+        CHECK(std::abs(disc.foot_compression_m[i] - preload) <= 1e-3);
+    }
+}
+
+TEST_CASE("A point foot (foot_pad_radius_m = 0) keeps the point query", "[moon_surface][contact][legs]") {
+    contact::LandingSurface surface;
+    surface.field = std::make_shared<BumpField>();
+    const auto pose = upright(21.5 - 0.05);
+    std::vector<double> a, b;
+    const auto geometry = contact::make_leg_geometry(legs(), 0.0, 4.5);
+    const auto with_field = contact::leg_contact(geometry, a, pose, surface);
+    CHECK(legs().foot_pad_radius_m == 0.0);
+    for (size_t i = 0; i < geometry.feet.size(); ++i) {
+        const auto p = pose.cg_m + pose.body_to_site * (geometry.feet[i] - Vec3{pose.cg_station_m, 0.0, 0.0});
+        const auto s = surface.below(p.x, p.y);
+        CHECK(with_field.foot_compression_m[i] == std::max(0.0, s.height_m - p.z));
+    }
+    (void)b;
+}

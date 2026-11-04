@@ -250,7 +250,10 @@ struct LandingLegConfig {
     double stiffness_n_m = 0.0;        // before the core crushes
     double damping_n_s_m = 0.0;
     double friction = 0.0;             // Coulomb, foot on the surface
-    bool fixed = false;                // always deployed (HLS): no deployment, deploy_time_s unused
+    // Footpad disc radius: the foot stands on the highest support under the disc (contact::LandingSurface::below_disc);
+    // 0 = a point foot.
+    double foot_pad_radius_m = 0.0;
+    bool fixed = false;               // always deployed (HLS): no deployment, deploy_time_s unused
     // A returning booster's landing burn (required for recovery method "leg_landing"): the legs are commanded out
     // deploy_time_s + deploy_margin_s before the planned touchdown, and the thrust tilt from the vertical at the
     // touchdown is at most max_touchdown_tilt_rad (structural limit of the landing). A lunar lander with deployable legs:
