@@ -65,9 +65,9 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
 TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelling][campaign][config]") {
     const auto r = config::load_refuelling_reference(config_dir);
     CHECK(r.depot.mission == "depot_launch");
-    CHECK(r.depot.initial_propellant_kg == Catch::Approx(63.1e3));  // Raptor nozzle 1.30 m re-measure 2026-11-03 (was 69.3)
+    CHECK(r.depot.initial_propellant_kg == Catch::Approx(134.8e3));  // planner plan Task 12 re-measure (depot dry 158.5 t; was 63.1)
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(68.4e3));  // Raptor nozzle 1.30 m re-measure 2026-11-03 (was 73.4)
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(120.3e3));  // planner plan Task 12 re-measure (tanker 171 t, stretched tanks; was 68.4)
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(1.1e3));  // flown campaign (ascent Task 5 re-calibration)
     CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(2.0e3));
@@ -566,9 +566,11 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     // planned kick (tanker 18.1 deg instead of the webcast-tuned 14) leaves 105.6 t instead of 93.0 t after the ascent,
     // 74.25 t delivered per tanker, the campaign offsets re-calibrated; 12 / 50.99 d after the vehicle physics
     // re-measure; 13 / 52.37 d after the Raptor nozzle 1.30 m re-measure 2026-11-03: 68.4 t delivered per tanker instead
-    // of 73.4 t, depot fill 63.1 t instead of 69.3 t, campaign offsets not re-calibrated)
-    CHECK(r.result.tanker_flights == 13);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(52.37).margin(0.05));
+    // of 73.4 t, depot fill 63.1 t instead of 69.3 t, campaign offsets not re-calibrated; 7 / 25.25 d after the planner
+    // plan Task 12 re-measure 2026-11-04: tanker 171 t dry with stretched tanks delivers 120.3 t instead of 68.4 t, the
+    // depot (158.5 t dry) arrives with 134.8 t instead of 63.1 t, campaign offsets not re-calibrated)
+    CHECK(r.result.tanker_flights == 7);
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(25.25).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {
@@ -613,7 +615,8 @@ TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campa
     CHECK(h.altitude_cost_kg > 0.0);
     CHECK(h.drag_makeup_kgps < base.drag_makeup_kgps);
     sim::CampaignLevers lighter;
-    lighter.tanker_dry_mass_kg = 199.0e3;
+    // 10 t below the measured tanker (planner plan Task 12: 199 t was 10 t below the 209 t tanker of before)
+    lighter.tanker_dry_mass_kg = config::load_refuelling_reference(config_dir).tanker.dry_mass_kg - 10.0e3;
     const auto l = sim::plan_refuelling_campaign(s.get(), lighter);
     print("dry -10 t", l);
     CHECK(l.tanker_base_delivered_kg == Catch::Approx(base.tanker_base_delivered_kg + 9.9e3).margin(1.0));
