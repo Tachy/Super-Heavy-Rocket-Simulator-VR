@@ -83,6 +83,11 @@ public:
     // Tower of the current flight: {present, opening_rad, carriage_offset_m, phase (German)}.
     godot::Dictionary tower_state() const;
     int64_t set_booster_return(bool enabled);
+    // Fidelity flags moon_surface_detail / moon_rocks (default on): procedural craters / roughness and rocks in the
+    // physics surface at the Moon (FlightSession::set_moon_surface_detail). Commands: not ok while a body rests on the
+    // Moon (the session refuses; the flag keeps its value).
+    int64_t set_moon_surface_detail(bool enabled);
+    int64_t set_moon_rocks(bool enabled);
     // Pilot's abort of a returning body's landing or catch: it ditches at sea (return_state "abort"). Not ok when the
     // guidance cannot abort (not returning, no sea, already down or on the arms).
     int64_t abort_landing(int index);

@@ -2,7 +2,9 @@
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -30,6 +32,9 @@
 #include "starsim/environment/weather_snapshot_build.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
 #include "starsim/environment/weather_source.hpp"
+#include "starsim/environment/cube_face_cell.hpp"
+#include "starsim/environment/detailed_lunar_terrain.hpp"
+#include "starsim/environment/rock_templates.hpp"
 #include "starsim/environment/surface_samples.hpp"
 #include "starsim/environment/terrain_horizon.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -305,6 +310,19 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
             say(std::string("Mondgelände nicht ladbar - glatte Kugel: ") + e.what());
         }
     }
+    moon_surface_.reset();
+    if (moon_terrain_ != nullptr) {
+        // The composed surface (LOLA + detail + rocks); rocks need the Diviner map: without it detail only.
+        for (const bool rocks : {true, false}) {
+            try {
+                moon_surface_ = sim::shared_moon_surface(config, data_dir, {true, rocks});
+                if (!rocks) say("Mondfelsen ohne Diviner-Karte nicht verfügbar - Oberflächendetail ohne Felsen");
+                break;
+            } catch (const std::exception& e) {
+                if (!rocks) say(std::string("Mondoberflächendetail nicht ladbar - nur LOLA: ") + e.what());
+            }
+        }
+    }
     godot::Dictionary result;
     result["earth"] = earth_terrain_ != nullptr;
     result["moon"] = moon_terrain_ != nullptr;
@@ -349,6 +367,198 @@ godot::Dictionary StarsimCore::surface_samples(const godot::String& body, const 
     return result;
 }
 
+void StarsimCore::set_moon_surface_detail(bool on) { moon_detail_on_ = on; }
+void StarsimCore::set_moon_rocks(bool on) { moon_rocks_on_ = on; }
+
+godot::Dictionary StarsimCore::surface_samples_detail(const godot::String& body,
+                                                      const godot::PackedFloat64Array& latitudes_deg,
+                                                      const godot::PackedFloat64Array& longitudes_deg,
+                                                      double min_wavelength_m, double min_rock_diameter_m) const {
+    if (body.to_lower() != "moon" || moon_surface_ == nullptr || !moon_detail_on_) {
+        return surface_samples(body, latitudes_deg, longitudes_deg);  // detail off: the LOLA samples
+    }
+    godot::Dictionary result;
+    if (latitudes_deg.size() != longitudes_deg.size()) {
+        godot::UtilityFunctions::push_error(
+            "StarsimCore.surface_samples_detail: Breiten und Längen müssen gleich viele sein");
+        result["present"] = false;
+        result["height_m"] = godot::PackedFloat64Array();
+        result["water"] = godot::PackedByteArray();
+        return result;
+    }
+    const auto n = latitudes_deg.size();
+    const double rock_min_m = moon_rocks_on_ ? min_rock_diameter_m : std::numeric_limits<double>::infinity();
+    godot::PackedFloat64Array heights;
+    godot::PackedByteArray water;
+    heights.resize(n);
+    water.resize(n);
+    for (int64_t k = 0; k < n; ++k) {
+        const double lat = latitudes_deg[k] * constants::deg_to_rad;
+        const double lon = longitudes_deg[k] * constants::deg_to_rad;
+        const math::Vec3 unit{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+        heights[k] = moon_surface_->height_limited_m(unit, min_wavelength_m, rock_min_m);
+        water[k] = 0;
+    }
+    result["present"] = true;
+    result["height_m"] = heights;
+    result["water"] = water;
+    return result;
+}
+
+godot::Dictionary StarsimCore::moon_rocks(int face, int level, int64_t i, int64_t j, double min_diameter_m) const {
+    godot::PackedInt64Array ids;
+    godot::PackedFloat64Array base, basis, axes, diameter, burial, base_height, albedo;
+    godot::PackedInt32Array templates;
+    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && face >= 0 && face < 6 && level >= 0 &&
+        level <= environment::max_face_cell_level) {
+        const double radius_m = moon_surface_->detail().sphere_radius_m();
+        const auto rocks = moon_surface_->rocks().rocks_in_cell({face, level, i, j}, min_diameter_m);
+        const auto count = static_cast<int64_t>(rocks.size());
+        ids.resize(count);
+        base.resize(3 * count);
+        basis.resize(9 * count);
+        axes.resize(3 * count);
+        diameter.resize(count);
+        burial.resize(count);
+        base_height.resize(count);
+        albedo.resize(count);
+        templates.resize(count);
+        for (int64_t k = 0; k < count; ++k) {
+            const auto& r = rocks[static_cast<size_t>(k)];
+            ids[k] = static_cast<int64_t>(r.id);
+            const math::Vec3 p = r.base_unit * (radius_m + r.base_height_m);
+            base[3 * k] = p.x, base[3 * k + 1] = p.y, base[3 * k + 2] = p.z;
+            for (int c = 0; c < 3; ++c) {
+                const math::Vec3 axis = math::column(r.local_to_fixed, c);
+                basis[9 * k + 3 * c] = axis.x, basis[9 * k + 3 * c + 1] = axis.y, basis[9 * k + 3 * c + 2] = axis.z;
+            }
+            axes[3 * k] = r.axes_m.x, axes[3 * k + 1] = r.axes_m.y, axes[3 * k + 2] = r.axes_m.z;
+            diameter[k] = r.diameter_m;
+            burial[k] = r.burial_m;
+            base_height[k] = r.base_height_m;
+            albedo[k] = r.albedo_factor;
+            templates[k] = r.template_id;
+        }
+    }
+    godot::Dictionary result;
+    result["ids"] = ids;
+    result["base_fixed_m"] = base;
+    result["basis"] = basis;
+    result["axes_m"] = axes;
+    result["diameter_m"] = diameter;
+    result["burial_m"] = burial;
+    result["base_height_m"] = base_height;
+    result["albedo"] = albedo;
+    result["template"] = templates;
+    return result;
+}
+
+godot::Dictionary StarsimCore::rock_template_mesh(int id, int lod) const {
+    godot::PackedVector3Array vertices, normals;
+    godot::PackedInt32Array indices;
+    if (id >= 0 && id < environment::RockTemplates::count && lod >= 0 && lod < environment::RockTemplates::lods) {
+        const auto& mesh = environment::RockTemplates::instance().mesh(id, lod);
+        vertices.resize(static_cast<int64_t>(mesh.vertices.size()));
+        normals.resize(static_cast<int64_t>(mesh.normals.size()));
+        indices.resize(static_cast<int64_t>(mesh.indices.size()));
+        for (size_t k = 0; k < mesh.vertices.size(); ++k) vertices[static_cast<int64_t>(k)] = to_godot(mesh.vertices[k]);
+        for (size_t k = 0; k < mesh.normals.size(); ++k) normals[static_cast<int64_t>(k)] = to_godot(mesh.normals[k]);
+        for (size_t k = 0; k < mesh.indices.size(); ++k) indices[static_cast<int64_t>(k)] = mesh.indices[k];
+    }
+    godot::Dictionary result;
+    result["vertices"] = vertices;
+    result["normals"] = normals;
+    result["indices"] = indices;
+    return result;
+}
+
+namespace {
+
+godot::Dictionary sfd_dictionary(const config::SizeFrequency& sfd) {
+    godot::Dictionary d;
+    d["form"] = godot::String::utf8(sfd.form.c_str());
+    d["reference_diameter_m"] = sfd.reference_diameter_m;
+    d["density_per_m2"] = sfd.density_per_m2;
+    d["exponent"] = sfd.exponent;
+    d["min_diameter_m"] = sfd.min_diameter_m;
+    d["max_diameter_m"] = sfd.max_diameter_m;
+    return d;
+}
+
+constexpr int cover_samples = 33;  // [E] log-spaced diameters over the rock law's range (3.3 per octave)
+
+}  // namespace
+
+godot::Dictionary StarsimCore::moon_surface_statistics() const {
+    godot::Dictionary result;
+    result["present"] = moon_surface_ != nullptr;
+    if (moon_surface_ == nullptr) return result;
+    const auto& detail = moon_surface_->detail();
+    const auto& cfg = detail.config();
+    result["sphere_radius_m"] = detail.sphere_radius_m();
+    result["finest_wavelength_m"] = detail.finest_wavelength_m();
+    result["roughness_scale_m"] = detail.roughness_scale_m();
+
+    godot::Dictionary hapke;
+    hapke["w"] = cfg.hapke.w;
+    hapke["b"] = cfg.hapke.b;
+    hapke["c"] = cfg.hapke.c;
+    hapke["bs0"] = cfg.hapke.bs0;
+    hapke["hs"] = cfg.hapke.hs;
+    hapke["bc0"] = cfg.hapke.bc0;
+    hapke["hc"] = cfg.hapke.hc;
+    hapke["theta_bar_rad"] = cfg.hapke.theta_bar_rad;
+    hapke["porosity_k"] = cfg.hapke.porosity_k;
+    result["hapke"] = hapke;
+
+    godot::Dictionary craters;
+    craters["sfd"] = sfd_dictionary(cfg.craters.sfd);
+    craters["depth_to_diameter_fresh"] = cfg.craters.depth_to_diameter_fresh;
+    craters["depth_to_diameter_degraded"] = cfg.craters.depth_to_diameter_degraded;
+    craters["rim_height_to_diameter"] = cfg.craters.rim_height_to_diameter;
+    craters["degraded_fraction"] = cfg.craters.degraded_fraction;
+    result["craters"] = craters;
+
+    godot::Dictionary roughness;
+    roughness["hurst_exponent"] = cfg.roughness.hurst_exponent;
+    roughness["rms_height_at_baseline_m"] = cfg.roughness.rms_height_at_baseline_m;
+    roughness["baseline_m"] = cfg.roughness.baseline_m;
+    roughness["rms_height_measured_total_m"] = cfg.roughness.rms_height_measured_total_m;
+    result["roughness"] = roughness;
+
+    godot::Dictionary rocks;
+    rocks["sfd"] = sfd_dictionary(cfg.rocks.sfd);
+    rocks["axis_b_to_a_mean"] = cfg.rocks.axis_b_to_a_mean;
+    rocks["axis_c_to_a_mean"] = cfg.rocks.axis_c_to_a_mean;
+    rocks["axis_ratio_sd"] = cfg.rocks.axis_ratio_sd;
+    rocks["burial_fraction_mean"] = cfg.rocks.burial_fraction_mean;
+    rocks["burial_fraction_sd"] = cfg.rocks.burial_fraction_sd;
+    rocks["albedo_to_regolith"] = cfg.rocks.albedo_to_regolith;
+    rocks["abundance_source"] = godot::String::utf8(cfg.rocks.abundance_source.c_str());
+    rocks["abundance_scale"] = cfg.rocks.abundance_scale;
+    rocks["abundance_reference_area_fraction"] = cfg.rocks.abundance_reference_area_fraction;
+    rocks["abundance_reference_min_diameter_m"] = cfg.rocks.abundance_reference_min_diameter_m;
+    // cover_above_m[k] = area share of the rocks with diameter in [cover_diameters_m[k], D_max]: the share the shader
+    // takes from the albedo / roughness model for rocks smaller than the ones drawn as meshes.
+    godot::PackedFloat64Array diameters, cover_above;
+    const bool rocks_present = moon_surface_->rocks_shared() != nullptr;
+    if (rocks_present) {
+        const double d_min = cfg.rocks.sfd.min_diameter_m, d_max = cfg.rocks.sfd.max_diameter_m;
+        diameters.resize(cover_samples);
+        cover_above.resize(cover_samples);
+        for (int k = 0; k < cover_samples; ++k) {
+            const double d = d_min * std::pow(d_max / d_min, static_cast<double>(k) / (cover_samples - 1));
+            diameters[k] = d;
+            cover_above[k] = moon_surface_->rocks().cover_fraction(d, d_max);
+        }
+    }
+    rocks["cover_diameters_m"] = diameters;
+    rocks["cover_above_m"] = cover_above;
+    result["rocks"] = rocks;
+    result["rocks_present"] = rocks_present;
+    return result;
+}
+
 double StarsimCore::surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const {
     const environment::Terrain* terrain = terrain_of(body);
     if (terrain == nullptr) return std::numeric_limits<double>::infinity();
@@ -359,6 +569,9 @@ double StarsimCore::surface_finest_resolution_m(const godot::String& body,
                                                 const godot::PackedFloat64Array& latitudes_deg,
                                                 const godot::PackedFloat64Array& longitudes_deg) const {
     const environment::Terrain* terrain = terrain_of(body);
+    if (terrain != nullptr && body.to_lower() == "moon" && moon_surface_ != nullptr && moon_detail_on_) {
+        terrain = moon_surface_.get();  // the procedural limit
+    }
     if (terrain == nullptr) return std::numeric_limits<double>::infinity();
     if (latitudes_deg.size() != longitudes_deg.size()) {
         godot::UtilityFunctions::push_error(
@@ -1067,6 +1280,14 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("load_terrain", "config_dir"), &StarsimCore::load_terrain);
     ClassDB::bind_method(D_METHOD("surface_samples", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_samples);
+    ClassDB::bind_method(D_METHOD("set_moon_surface_detail", "on"), &StarsimCore::set_moon_surface_detail);
+    ClassDB::bind_method(D_METHOD("set_moon_rocks", "on"), &StarsimCore::set_moon_rocks);
+    ClassDB::bind_method(D_METHOD("surface_samples_detail", "body", "latitudes_deg", "longitudes_deg",
+                                  "min_wavelength_m", "min_rock_diameter_m"),
+                         &StarsimCore::surface_samples_detail);
+    ClassDB::bind_method(D_METHOD("moon_rocks", "face", "level", "i", "j", "min_diameter_m"), &StarsimCore::moon_rocks);
+    ClassDB::bind_method(D_METHOD("rock_template_mesh", "id", "lod"), &StarsimCore::rock_template_mesh);
+    ClassDB::bind_method(D_METHOD("moon_surface_statistics"), &StarsimCore::moon_surface_statistics);
     ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
                          &StarsimCore::surface_resolution_m);
     ClassDB::bind_method(D_METHOD("horizon_elevations", "body", "latitudes_deg", "longitudes_deg", "heights_m",

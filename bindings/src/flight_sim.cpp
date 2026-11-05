@@ -338,6 +338,20 @@ int64_t FlightSim::set_booster_return(bool enabled) {
     }));
 }
 
+int64_t FlightSim::set_moon_surface_detail(bool enabled) {
+    return static_cast<int64_t>(post("set_moon_surface_detail", [enabled](sim::FlightSession& session) {
+        session.set_moon_surface_detail(enabled);
+        return Outcome{true, {}};
+    }));
+}
+
+int64_t FlightSim::set_moon_rocks(bool enabled) {
+    return static_cast<int64_t>(post("set_moon_rocks", [enabled](sim::FlightSession& session) {
+        session.set_moon_rocks(enabled);
+        return Outcome{true, {}};
+    }));
+}
+
 int64_t FlightSim::abort_landing(int index) {
     return static_cast<int64_t>(post_active("abort_landing", [index](sim::FlightSession& session) {
         if (index < 0 || static_cast<size_t>(index) >= session.body_count()) {
@@ -776,6 +790,8 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("site_tower", "site_id"), &FlightSim::site_tower);
     ClassDB::bind_method(D_METHOD("tower_state"), &FlightSim::tower_state);
     ClassDB::bind_method(D_METHOD("set_booster_return", "enabled"), &FlightSim::set_booster_return);
+    ClassDB::bind_method(D_METHOD("set_moon_surface_detail", "enabled"), &FlightSim::set_moon_surface_detail);
+    ClassDB::bind_method(D_METHOD("set_moon_rocks", "enabled"), &FlightSim::set_moon_rocks);
     ClassDB::bind_method(D_METHOD("set_realtime_planning", "enabled"), &FlightSim::set_realtime_planning);
     ClassDB::bind_method(D_METHOD("abort_landing", "index"), &FlightSim::abort_landing);
     ClassDB::bind_method(D_METHOD("return_state", "index"), &FlightSim::return_state);

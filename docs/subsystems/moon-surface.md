@@ -221,6 +221,24 @@ on top of that relief.
   the legs have pads; the `lunar_landing` mission's reachability check the same. There is no live re-selection after
   a dispersion in the descent (the guidance flies to the planned point): an open point.
 
+### Bindings (Task 6)
+- `StarsimCore.load_terrain` also builds the composed surface (`sim::shared_moon_surface`, detail + rocks; without the
+  Diviner map detail only, with a German line). `StarsimCore.set_moon_surface_detail` / `set_moon_rocks` (default on;
+  call from one thread) switch the game-side queries; `FlightSim.set_moon_surface_detail` / `set_moon_rocks` post the
+  session flags as commands.
+- `surface_samples_detail(body, lats_deg, lons_deg, min_wavelength_m, min_rock_diameter_m)`: same keys as
+  `surface_samples`; `LunarSurfaceDetail` band limit + rocks >= the diameter (INF = none). Detail off or rocks off: LOLA
+  / no rock tops (detail off is identical to `surface_samples`). Measured in the debug extension: ~44 us per point at
+  full detail (5 points, cold).
+- `moon_rocks(face, level, i, j, min_d)`: rocks of one cube-face cell (empty at a level no octave uses); per rock
+  `ids`, `base_fixed_m` (3, radius R + base height), `basis` (9 = local_to_fixed as three column vectors a, b, up),
+  `axes_m` (3), `diameter_m`, `burial_m`, `base_height_m`, `albedo`, `template`.
+- `rock_template_mesh(id, lod)` (lod 0..3 = 2562 / 642 / 162 / 42 vertices); `moon_surface_statistics()` (Hapke, crater
+  / rock SFD, roughness, rock cover samples `cover_diameters_m` / `cover_above_m`: 33 log-spaced diameters).
+- `surface_finest_resolution_m("moon")` returns 0.01 m with detail on: the terrain quadtree's `can_split` then follows
+  the curvature spacing only (Task 7 to review).
+- Thread safety: queries are const and use per-thread memos; the flags are atomics.
+
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,

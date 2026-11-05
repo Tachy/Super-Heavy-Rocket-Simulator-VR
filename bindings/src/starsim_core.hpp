@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -12,7 +13,9 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -21,6 +24,7 @@
 #include "starsim/environment/atmospheric_refraction.hpp"
 #include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
+#include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
@@ -91,10 +95,40 @@ public:
     // Thread-safe (immutable terrains, no SPICE): callable from WorkerThreadPool threads after load_terrain.
     godot::Dictionary surface_samples(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
                                       const godot::PackedFloat64Array& longitudes_deg) const;
+
+    // Procedural lunar surface (docs/subsystems/moon-surface.md), loaded by load_terrain together with the LOLA terrain
+    // (rocks need the Diviner map: without it the surface is built without rocks and a line says so). All positions
+    // Moon-fixed, float64. Thread-safe like surface_samples (const queries of the shared surface).
+    // Flags (default on; same meaning as the FlightSim fidelity flags): detail off = LOLA heights, no rocks; rocks off =
+    // no rock tops, moon_rocks empty. Call from one thread (like load_terrain).
+    void set_moon_surface_detail(bool on);
+    void set_moon_rocks(bool on);
+    // Same dictionary as surface_samples (present, height_m, water), heights of the detailed surface with the relief
+    // averaged over min_wavelength_m (0 = full detail) and the rocks of at least min_rock_diameter_m (INF = none);
+    // present only for "moon" with the surface loaded. Detail off: identical to surface_samples.
+    godot::Dictionary surface_samples_detail(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
+                                             const godot::PackedFloat64Array& longitudes_deg, double min_wavelength_m,
+                                             double min_rock_diameter_m) const;
+    // The rocks of one face cell (cube-face key as game/world/terrain/cube_sphere.gd) with diameter >= min_diameter_m:
+    // {ids: PackedInt64Array, base_fixed_m: 3 per rock (the base point, radius R + base_height), basis: 9 per rock
+    // (local_to_fixed as three column vectors: a-axis, b-axis, up), axes_m: 3 per rock (a, b, c), diameter_m, burial_m,
+    // base_height_m, albedo: PackedFloat64Array (1 per rock), template: PackedInt32Array}. Empty arrays for a level no
+    // rock octave uses, with rocks off or without the surface. Rocks stand in exactly one cell.
+    godot::Dictionary moon_rocks(int face, int level, int64_t i, int64_t j, double min_diameter_m) const;
+    // Unit-size mesh of a rock template (id 0..15, lod 0..3 = near..speck): {vertices: PackedVector3Array, normals,
+    // indices: PackedInt32Array}; empty on a bad id / lod. Scale by axes_m, orient by basis.
+    godot::Dictionary rock_template_mesh(int id, int lod) const;
+    // The surface's statistics for the shaders: {present, sphere_radius_m, hapke: {w, b, c, bs0, hs, bc0, hc,
+    // theta_bar_rad, porosity_k}, craters: {sfd..., depth_to_diameter_*, ...}, roughness: {...}, rocks: {sfd...,
+    // axis ratios, burial, albedo_to_regolith, abundance_scale, cover_diameters_m / cover_above_m (cover_fraction(D,
+    // D_max) at log-spaced D: the area share of the rocks of at least D)}, finest_wavelength_m,
+    // roughness_scale_m, rocks_present}. Empty dictionary (present false) without the surface.
+    godot::Dictionary moon_surface_statistics() const;
     // Spacing in metres of the finest terrain grid at a point; INF without the terrain.
     double surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const;
     // The finest of those spacings over latitude / longitude points (degrees; a renderer node's lattice); INF without
     // the terrain or points. Thread-safe like surface_samples.
+    // For "moon" with the detail on this is the procedural limit (the finest generated wavelength, ~0.01 m).
     double surface_finest_resolution_m(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
                                        const godot::PackedFloat64Array& longitudes_deg) const;
 
@@ -240,6 +274,8 @@ private:
 
     std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
+    std::shared_ptr<const environment::DetailedLunarTerrain> moon_surface_;  // load_terrain(); nullptr when absent
+    std::atomic<bool> moon_detail_on_{true}, moon_rocks_on_{true};
     std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;

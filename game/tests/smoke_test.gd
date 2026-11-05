@@ -66,6 +66,7 @@ func _initialize() -> void:
 				and is_inf(core.surface_resolution_m("earth", 0.0, 0.0)), "no Earth terrain: surface_samples not present")
 	if not terrain_present.get("moon", false):
 		_check(not core.surface_samples("moon", lat_arr, lon_arr).get("present", true), "no Moon terrain: not present")
+	_check_moon_surface(core, terrain_present.get("moon", false))
 	# Terrain horizon bindings: an n x n lattice with 16 azimuths, a single march; none without the terrain.
 	var h_lat := PackedFloat64Array()
 	var h_lon := PackedFloat64Array()
@@ -99,6 +100,79 @@ func _initialize() -> void:
 
 	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
+
+
+## Procedural lunar surface bindings (Moon procedural surface plan, Task 6): sizes are consistent, detail off equals
+## surface_samples, rocks and template meshes come through, the statistics carry the shader parameters.
+func _check_moon_surface(core: StarsimCore, moon_loaded: bool) -> void:
+	var lat := PackedFloat64Array()
+	var lon := PackedFloat64Array()
+	for k in 5:
+		lat.append(-84.79 + k * 1e-5)
+		lon.append(29.19 + k * 1e-5)
+	var stats: Dictionary = core.moon_surface_statistics()
+	var mesh: Dictionary = core.rock_template_mesh(3, 2)
+	_check((mesh["vertices"] as PackedVector3Array).size() == 162 and (mesh["normals"] as PackedVector3Array).size() == 162
+			and (mesh["indices"] as PackedInt32Array).size() % 3 == 0 and (mesh["indices"] as PackedInt32Array).size() > 0
+			and (core.rock_template_mesh(99, 0)["vertices"] as PackedVector3Array).is_empty(),
+			"rock_template_mesh: icosphere 2 has 162 vertices, bad id empty")
+	if not moon_loaded:
+		_check(not stats.get("present", true) and not core.surface_samples_detail("moon", lat, lon, 0.0, 0.0).get("present", true),
+				"no Moon terrain: no surface statistics, no detail samples")
+		return
+	var base: Dictionary = core.surface_samples("moon", lat, lon)
+	var t0 := Time.get_ticks_usec()
+	var full: Dictionary = core.surface_samples_detail("moon", lat, lon, 0.0, 0.0)
+	var full_us := float(Time.get_ticks_usec() - t0) / lat.size()
+	var heights := full["height_m"] as PackedFloat64Array
+	var lola := base["height_m"] as PackedFloat64Array
+	var differs := false
+	for k in lat.size():
+		differs = differs or absf(heights[k] - lola[k]) > 1e-6
+	_check(full.get("present", false) and heights.size() == lat.size() and (full["water"] as PackedByteArray).size() == lat.size()
+			and differs, "surface_samples_detail: detail on adds relief (%.1f us per point)" % full_us)
+	var coarse: Dictionary = core.surface_samples_detail("moon", lat, lon, 1000.0, INF)
+	_check((coarse["height_m"] as PackedFloat64Array).size() == lat.size(), "surface_samples_detail: band-limited, no rocks")
+	_check(core.surface_finest_resolution_m("moon", lat, lon) <= 0.011, "surface_finest_resolution_m: procedural limit with detail on")
+	var rocks := _find_rocks(core, lat[0], lon[0])
+	if rocks.is_empty():
+		_check(false, "moon_rocks: found a cell with rocks near the Moon test site")
+	else:
+		var n := (rocks["ids"] as PackedInt64Array).size()
+		_check(n > 0 and (rocks["base_fixed_m"] as PackedFloat64Array).size() == 3 * n
+				and (rocks["basis"] as PackedFloat64Array).size() == 9 * n and (rocks["axes_m"] as PackedFloat64Array).size() == 3 * n
+				and (rocks["burial_m"] as PackedFloat64Array).size() == n and (rocks["base_height_m"] as PackedFloat64Array).size() == n
+				and (rocks["albedo"] as PackedFloat64Array).size() == n and (rocks["template"] as PackedInt32Array).size() == n,
+				"moon_rocks: %d rocks with consistent array sizes" % n)
+		var b := rocks["base_fixed_m"] as PackedFloat64Array
+		var radius := Vector3(b[0], b[1], b[2]).length()
+		_check(absf(radius - 1737400.0 - (rocks["base_height_m"] as PackedFloat64Array)[0]) < 1e-6,
+				"moon_rocks: base_fixed_m lies at R + base_height_m")
+	_check(stats.get("present", false) and stats["hapke"].has("w") and stats["rocks"].has("cover_above_m")
+			and (stats["rocks"]["cover_above_m"] as PackedFloat64Array).size() == (stats["rocks"]["cover_diameters_m"] as PackedFloat64Array).size(),
+			"moon_surface_statistics: Hapke, SFD, roughness and cover samples")
+	core.set_moon_rocks(false)
+	_check((core.moon_rocks(0, 0, 0, 0, 0.0)["ids"] as PackedInt64Array).is_empty(), "moon_rocks flag off: no rocks")
+	core.set_moon_rocks(true)
+	core.set_moon_surface_detail(false)
+	var off: Dictionary = core.surface_samples_detail("moon", lat, lon, 0.0, 0.0)
+	_check(off["height_m"] == base["height_m"] and off["water"] == base["water"] and off.get("present", false),
+			"detail off: surface_samples_detail equals surface_samples")
+	_check(core.surface_finest_resolution_m("moon", lat, lon) > 0.011, "detail off: the LOLA resolution again")
+	core.set_moon_surface_detail(true)
+
+
+## First cell with rocks of >= 0.1 m among the cells (+-4) around the site, searched by level.
+func _find_rocks(core: StarsimCore, lat_deg: float, lon_deg: float) -> Dictionary:
+	for level in range(8, 30):
+		var key := CubeSphere.key_at(Vector3(cos(deg_to_rad(lat_deg)) * cos(deg_to_rad(lon_deg)),
+				cos(deg_to_rad(lat_deg)) * sin(deg_to_rad(lon_deg)), sin(deg_to_rad(lat_deg))), level)
+		for di in range(-4, 5):
+			for dj in range(-4, 5):
+				var r: Dictionary = core.moon_rocks(key.x, level, key.z + di, key.w + dj, 0.1)
+				if not (r["ids"] as PackedInt64Array).is_empty():
+					return r
+	return {}
 
 
 func _check(condition: bool, label: String) -> void:
