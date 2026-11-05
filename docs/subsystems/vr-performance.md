@@ -147,3 +147,9 @@ Stereo mock at the VR target (3534 x 2838 per eye), 2 m above IM-2, terrain only
 target ~4 ms remain for the plan's textures, Hapke shading, rocks and near-field shadows (Tasks 8-12); Task 13's budget
 table starts from these numbers. Hapke shading (Task 9): +0.05 ms at 1600 x 900 (2 m, detail on: 1.74 against 1.69 ms
 median); not yet measured in the stereo mock.
+
+Regolith detail shading (Task 10), 2 m above IM-2, elevation -20 deg, median of 240 frames: 1600 x 900 1.82 -> 2.27 ms
+(+0.45); stereo mock (3534 x 2838 per eye) 5.76 -> 7.21 ms (+1.45: statistics alone +0.34, the textures +1.11 with
+half-float slope maps; float32 maps +1.47; trilinear instead of anisotropic filtering would save another 0.28 ms, not
+taken: the grazing VR view keeps its texture detail). 1.8 ms of the 9 ms GPU target remain for rocks and near-field
+shadows (Tasks 11-12): Task 13's budget table.

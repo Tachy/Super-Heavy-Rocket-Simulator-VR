@@ -1,10 +1,11 @@
 # Moon procedural near-ground surface
 
 Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 9 (craters, regolith
+`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 10 (craters, regolith
 roughness and rocks in the core; the composed physics surface and disc footpads; the touchdown hazard check; the
-bindings; the terrain mesh down to the cm detail; the baked textures; Hapke reflectance for globe and terrain; rocks,
-the statistical shading and near-field shadows in the renderer follow).
+bindings; the terrain mesh down to the cm detail; the baked textures; Hapke reflectance for globe and terrain; the
+regolith detail shading with the statistics of the unresolved surface; rocks as geometry and near-field shadows in the
+renderer follow).
 
 ## Model
 Measured statistics in `config/moon_surface.toml`; the generator `environment::LunarSurfaceDetail` (craters +
@@ -296,8 +297,71 @@ on top of that relief.
   1.35 / A_Hapke(0) = 5.420 [D] (`Atmosphere.hapke_normalisation`): the full-phase disc equals the Lommel-Seeliger law's
   (both at K&S's full-Moon illuminance, the regolith scale's calibration point), so the albedo map's mean brightness is
   unchanged at full Moon; away from it the disc follows Hapke's own phase curve (Validation).
-- Mean slope: terrain nodes take `terrain_moon.gdshader`'s `hapke_theta_bar_rad` (default -1 = the globe's); the
-  scale-dependent value (only the roughness not drawn as geometry) is Task 10's.
+- Mean slope: with the detail shading a terrain fragment takes the residual of its node (Regolith shading below);
+  without it (detail off) the globe's 23.657 deg. `terrain_moon.gdshader`'s `hapke_theta_bar_rad` >= 0 overrides both
+  (tests, diagnostics).
+
+### Regolith shading (Task 10)
+- Core reference `environment/unresolved_shading.hpp` (`UnresolvedShadingModel`, `make_unresolved_shading_model`),
+  mirrored by `game/shaders/moon_detail.gdshaderinc`; wired by `MoonDetailShading` (`game/world/terrain/
+  moon_detail_shading.gd`: template uniforms from `StarsimCore.moon_unresolved_shading`, the textures, the abundance
+  map; per-node uniforms through `TerrainQuadtree.node_parameters`). Detail off (or `render_check
+  --moon_detail_shading=off`): none of it runs (`detail_shading` false), the shader is Task 9's.
+- Slope budget (residual theta_bar): Hapke's theta_bar is the globe fit's sub-pixel roughness; for Hapke's Gaussian
+  slopes the mean square slope is S^2 = pi tan^2 theta_bar = 0.603. A node of vertex spacing L draws drawn(L) of it:
+  its vertices are the relief's L x L box mean, its normals central differences over 2 L; drawn(L) applies exactly
+  that filter to the statistical surface - per roughness octave the spectral transfer of the generator's value noise
+  (quintic fade kernel; `regolith_drawn_fraction`: 1 at L << s, 0.39 at L = s/2, 0.083 at L = s), per crater size the
+  same filter in real space on the crater profile (`crater_drawn_fraction`, 3 x 3 lattice offsets), summed over the
+  generator's octaves (5 mm .. 3.8 km) and the crater law (1 cm .. 2 km); tabulated at 4 per octave (1 mm .. 17 km).
+  The fragment's residual is tan theta_res = sqrt((S^2 - drawn(L_eff)) / pi), L_eff = node spacing x 2^morph (the
+  morph slides a node onto its parent's surface, so a split changes nothing). Values: L22 (1 cm) 20.8 deg, 10 cm 22.4,
+  1 m 23.0, 10 m 23.4, 100 m 23.6, 1 km 23.65, beyond the bands the globe's 23.657. The whole generated surface holds
+  S^2 = 0.296 (roughness octaves 0.252, craters 0.045); the rest, 0.307, is relief below the generator (< 5 mm: the
+  law continued to ~0.6 mm would hold it, Helfenstein & Shepard 1999). The texture relief is NOT subtracted (below).
+  Rocks are not in the budget (explicit terms below).
+- Statistical shadows (Sun term only; the earthshine keeps the horizon maps alone, spec section 4): the drawn mesh relief
+  finer than the horizon map's grid (drawn(L_eff) - drawn(H), H = the horizon owner's nominal spacing) casts no shadow
+  in the renderer, so the Sun term is multiplied by Smith's G1 = 1 / (1 + Lambda) for a Gaussian surface of that slope
+  variance (Lambda(a) = (erf a - 1) / 2 + exp(-a^2) / (2 a sqrt pi), a = tan e / S). The Sun's elevation e is its
+  margin over the horizon map in its azimuth (`terrain_visible_fraction`'s margin: a slope facing the Sun raises it),
+  over the local horizontal where no map is read. The near-field shadow map (Task 12) takes over inside its range.
+- Unresolved rocks (D below the geometry threshold; until Task 11 every rock): Boolean model of half-spheroids of plan
+  radius D/2 and height eta D (eta 0.383, the cover-weighted mean of generated rocks' exposed height / D, measured with
+  `rock_top` at the base): cover C = abundance x cover(D_min, d_geo) (the law's closed form), visible rock share 1 -
+  exp(-C) with reflectance ratio rho = I/F(1.35 w) / I/F(w) = 1.494 (standard geometry i 30, e 0, g 30; 1.43-1.54
+  over (87, 75, 12) .. (85, 20, 80) deg), lit-face gain G(e) (Lommel-Seeliger radiance of the half-spheroid seen from
+  the zenith over the flat ground's, tabulated every 2 deg, floor 1 deg: 4.9 at 2 deg, 2.2 at 5, 1.4 at 10, 1.0 at
+  20, 0.92 at 45 deg), cast shadows sigma = (sqrt(1 + 4 eta^2 cot^2 e) - 1) / 2 per rock area (exact projection).
+  Sun factor = G1 x [exp(-C (1 + sigma)) + (1 - exp(-C)) rho G] / N, earthshine factor = [exp(-C) + (1 - exp(-C)) rho]
+  / N, N = exp(-C_all) + (1 - exp(-C_all)) rho: the albedo mosaic already holds every rock, so with every rock
+  statistical the earthshine factor is exactly 1 (the WAC mean never shifts). d_geo = `rock_geometry_pixels` x distance
+  x pixel angle (`ROCK_PIXEL_THRESHOLD` 1.5 px when Task 11 draws rocks; 0 now = no rock geometry). The abundance
+  factor comes from a 2880 x 1440 (1/8 deg) equirectangular map of `LunarRocks::abundance_factor`
+  (`StarsimCore.moon_rock_abundance_grid`), sampled like the colour map; the site (-84.8 deg) is outside Diviner: 1.
+  Craters have no albedo share (no data); unresolved craters enter through theta_res.
+- Regolith textures (Task 8 maps s0, s1, s2): face-lattice coordinates (u, v) = the node grid position x the level's
+  nominal spacing R pi / (2 x 64 x 2^level) from the node corner, plus a per-node origin computed in float64 (modulo the
+  tile, and the skewed hex coordinate modulo 256 cells), so the texture is continuous across nodes of a face.
+  Stochastic hex tiling: triangle grid of cell = tile / 2, a hashed offset per grid vertex (integer hash, period 256
+  cells), the three samples blended variance-preserving (sum w s / sqrt(sum w^2)), `textureGrad` with the continuous
+  coordinate's derivatives (anisotropic mips). The maps are loaded as zero-mean two-channel half-float slope maps
+  (`MoonDetailShading.slope_image`: the 8-bit normals put a zero slope on code 128 = +0.0039 and Godot's rounded 8-bit
+  mips drift by ~1 code: a 4-7 % mean shift of the modulation under a low Sun before this). Scale i's amplitude weight
+  at L_eff is the share of its band's height variance the mesh does not draw (`MoonDetailShading.texture_weight`: the
+  mesh keeps sinc^6(pi L / lambda) of a wavelength - L x L box mean, linear interpolation between vertices - so
+  w^2 = sum V (1 - sinc^6) / sum V over the band's octave law V ~ lambda^(2H); tabulated 4 per octave from 1 mm; e.g. at
+  L22 0.88 / 0.22 / 0.03, at L19 1.00 / 0.88 / 0.22, at L17 1.00 / 1.00 / 0.65). The Task 8 handoff's log-linear rule
+  (0 at lambda_min / 2, 1 at lambda_max / 2) left the summed roughness 25-28 % short at L20-L19: replaced. A scale is
+  skipped below weight 0.1 ([E], < 0.016 rms slope) and once the footprint's short axis exceeds its lambda_max (the mip
+  has averaged its slopes away). The height gradient is mapped onto the surface through the screen-space cotangent
+  frame.
+- The texture relief casts no shadows, so it does not tilt the Hapke normal (a normal-mapped field under a 3-7 deg
+  Sun averages 1.2-3 x brighter than Hapke's model of the same roughness: numpy experiment in the Task 10 report). It
+  modulates each light by 1 + tanh(k . grad h), k = (l + v) / (mu0 + mu) - l / mu0 (d ln R / d grad h of the
+  single-scattering law at the mesh normal): odd in grad h, so the mean over the symmetric slope field is unchanged and
+  the texture slopes stay in theta_res's budget; first-order exact for gentle slopes, saturating to lit / dark facets
+  under a low Sun (0 .. 2 x the mean).
 - Crest lines (Task 7 M1): with Hapke, a terrain fragment whose interpolated normal faces away from the eye is shaded
   with its triangle's facet normal (`dFdx`/`dFdy` of `camera_offset`); Hapke's grazing-view rise is also smaller (I/F at
   mu 1e-3 / at mu = mu0 = 0.5: 1.41 against Lommel-Seeliger's 2.0). The Lommel-Seeliger law is unchanged bit for bit
@@ -310,6 +374,15 @@ on top of that relief.
   `disc_integrated_reflectance` (Task 9). Bindings `load_moon_hapke`, `moon_hapke_reflectance`,
   `moon_hapke_disc_reflectance`; `game/shaders/moon_hapke.gdshaderinc`, `game/tests/hapke_patch.gdshader`, `game/tests/hapke_patch_production.gdshader`.
 - `tools/moon_textures/bake_moon_detail.py`, `test_bake_moon_detail.py`, `contact_sheet.py` (Task 8).
+- `core/include/starsim/environment/unresolved_shading.hpp`, `core/src/environment/unresolved_shading.cpp`,
+  `core/tests/test_unresolved_shading.cpp` (Task 10): `UnresolvedShadingModel`, `make_unresolved_shading_model`,
+  `slope_variance_from_theta_bar` / `theta_bar_from_slope_variance`, `regolith_drawn_fraction`, `crater_drawn_fraction`,
+  `drawn_slope_variance_direct` / `drawn_slope_variance`, `residual_theta_bar`, `unshadowed_slope_variance`,
+  `smith_lit_fraction`, `rock_cover`, `rock_shadow_per_cover`, `rock_lit_gain` / `rock_lit_gain_table`,
+  `unresolved_light_factors`. Bindings `moon_unresolved_shading`, `moon_unresolved_light_factors`,
+  `moon_residual_theta_bar`, `moon_rock_abundance_grid`. `game/shaders/moon_detail.gdshaderinc`,
+  `game/world/terrain/moon_detail_shading.gd` (`MoonDetailShading`), `TerrainQuadtree.node_parameters`;
+  tests `game/tests/moon_detail_checks.gd`, `game/tests/moon_detail_patch.gdshader`.
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
   `face_cell_of`, `face_cell_point`, `face_cell_neighbourhood` (3 x 3, duplicates at cube corners),
@@ -532,6 +605,36 @@ on top of that relief.
   (max 1). GPU (1600 x 900, 2 m, detail on, median of 120 frames, two rounds): Hapke 1.736 / 1.742 ms against
   Lommel-Seeliger 1.684 / 1.688 ms (+0.05 ms); stereo VR not measured (Task 13).
 
+- Regolith shading (Task 10): `[moon_surface][unresolved_shading]` (9 cases, `core/tests/test_unresolved_shading.cpp`):
+  the regolith slope variance of the model against the generator's field (central differences at 4000 points, full
+  detail): 0.2456 vs 0.2464 (-0.3 %, gate 7 %); the mesh-drawn slope variance (relief_m at spacing L, central
+  differences over 2 L, 20000 points over 4 km) against the model at L = 0.02 / 0.08 / 0.32 / 1.28 m: roughness 1.00 /
+  1.00 / 1.00 / 1.00, craters 0.97 / 0.97 / 0.96 / 0.96 (gates 10 / 20 %; before the transfer functions, with "octaves
+  >= L drawn", the model was 1.26-2.40 x the mesh); crater slope integral closed form against the profile's numeric
+  integral 1e-4; Smith's G1 against its defining integral 1e-6; rock cast shadow against a ray-cast projection 1 %;
+  lit-face gain limits; light factors (all rocks statistical: earthshine factor 1 exactly; Sun below the horizon: 0);
+  residual theta_bar monotonic, largest change per 1 % spacing step 1.9e-4 rad. Game (`moon_surface_check.gd`,
+  `MoonDetailChecks`, `--detail_only` skips the quadtrees): fade continuity over 1 cm - 30 km in 1 % steps (theta
+  1.9e-4 rad, Sun factor 0.10 %); with a GPU, flat patches through `moon_detail_patch.gdshader` against the core
+  (moon_hapke_norm x I/F(theta_res) x factor), 512 x 512 readback: statistics only -0.05 / -0.04 / -0.03 % (Sun 7 / 15 /
+  30 deg), with the texture modulation -0.07 / -0.02 % (50 m patches) and -0.02 / -0.04 % (2 m patches, L22), earthshine
+  only (Sun 5 deg below) -0.04 % at abundance 1 and 40 and with no detail (gate 2 %). Summed roughness (Guo's statistic,
+  96 windows, mesh = core heights at the level's vertices bilinear, + textures at their weights) at L22 .. L17: 4.02 /
+  3.78 / 3.50 / 3.49 / 3.49 / 3.42 mm against the measured 4 mm (gate 10 %): L20-L17 FAIL (-12.6 .. -14.6 %, open
+  point). No double roughness anywhere (largest +0.6 %).
+- Site brightness (render_check, IM-2, 2026-11-22T01:20 UTC, Sun 6.75 deg, elevation -20 deg, eye adapted; mean 8-bit of
+  the image, `--moon_detail_shading=off` = Task 9's shading in the same view): 2 m 35.0 -> 30.3 (-13 %), 20 m 38.4 -> 35.8
+  (-7 %), 200 m 37.4 -> 35.9 (-4 %); grazing view (2 m, -6 deg) 24.9 -> 21.9; nadir from 1.2 km 36.4 -> 35.3 (-3 %). The
+  near ground darkens most: Smith's statistical shadows of the drawn cm relief (G1 ~0.70 at 7 deg) outweigh the smaller
+  residual theta_bar (x1.02-1.25); rocks x0.96. All of it is shadowing physics, none tuned. Against the LROC NAC frame
+  M1434867405 (90 cm pixels, `screenshots/moon_surface/task10/nadir_lroc_nac_left_render_right.png`, a different Sun) the
+  render shows far fewer resolved 5-50 m craters: the generated crater density (equilibrium, 2.2 % of saturation) looks
+  low for this site - for the comparisons of Tasks 11 / 13.
+- Detail off and Lommel-Seeliger with detail off pixel-identical to Task 9 (render_check `--deterministic
+  --fixed_exposure`, IM-2, 2 m and 20 m, the old `terrain_moon.gdshader` swapped in: 0 px; a first version that
+  multiplied the old expression by the factors 1.0 differed in 2-7 px by 1 LSB, so the detail-off branch keeps the old
+  expression).
+
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
 
@@ -626,15 +729,33 @@ J. Hollan from Kieffer & Stone 2005 Table 4 (amper.ped.muni.cz, "kindly sent by 
 paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservative isotropic scattering.
 
 ## Open points
-- Hapke on the terrain until Task 10: every node uses the globe's mean slope 23.657 deg (the 1-degree fit's sub-pixel
-  roughness, part of which the mesh now draws as relief: partly double-counted, the share is sized by Task 10), so the
-  low polar Sun is shadowed more than before; Lommel-Seeliger has no shadowing at all and is overbright at i ~ 87 deg, so
-  part of the darkening is physics (photometric roughness comes from sub-mm to cm scales, Helfenstein & Shepard 1999;
-  Shepard & Campbell 1998). The IM-2 site views are
-  20-25 % darker on average than with Lommel-Seeliger (mean 8-bit 43.9 -> 35.3 at 2 m, 52.5 -> 39.6 at 20 m, 52.9 ->
-  41.2 at 200 m; core: i 87 / e 75 deg, Hapke / Lommel-Seeliger 0.74 at 12 deg phase down to 0.31 at 162 deg, with
-  theta_bar 0 0.99 - 3.2). Task 10 (Ruling T9 I2) sets theta_bar per node from the slopes the mesh and textures actually draw
-  (tan^2 theta_res = tan^2 theta_bar - tan^2 theta_drawn), never pushed toward 0 to recover the former brightness.
+- Summed roughness at L20-L17 (4-33 cm nodes) is 12.6-14.6 % below the measured 4 mm (gate 10 %): the textures alone
+  give 3.58 mm (Guo, all three bands at full weight; the bake's quarter-octave band-edge tapers lose ~3 % against the
+  3.7 mm calibration), the craters smaller than ~4 x the node spacing are drawn neither by the mesh nor by a texture
+  (craters + roughness 3.90 mm at full detail), the rocks (0.1 mm) come with Task 11. A crater detail texture or
+  untapered band edges would close it (controller's decision).
+- Site brightness under the polar Sun (Task 9 found the terrain 20-25 % darker than with Lommel-Seeliger): with the
+  residual theta_bar the near ground loses less to Hapke's shadowing (theta 20.8 deg at 1 cm: x1.02-1.25 by phase at
+  i 83, e 70 deg), but the drawn cm relief now carries Smith's statistical shadows (G1 0.70 at 7 deg, 0.40 at 3 deg for
+  a 1 cm node under a 20 m horizon grid) and the rocks their shadows (x0.96 at 7 deg). Net, IM-2 2026-11-22T01:20 (Sun
+  6.75 deg), mean 8-bit against Task 9's shading in the same views: -13 % at 2 m, -7 % at 20 m, -4 % at 200 m (Validation).
+  Both are physics; no term was tuned.
+- Two roughness-shadowing theories meet at the fade: far away Hapke's 1984 model (theta_bar) shadows the relief, near
+  the camera the drawn mesh with Smith's G1. For Gaussian slopes they agree within ~5-17 % looking down-Sun or across
+  it, but looking into a low Sun the microfacet side is up to 2-6 x darker (numpy experiment, Task 10 report): a
+  brightness gradient with distance in that view direction. The near-field shadow map (Task 12) replaces G1 inside its
+  range with real shadows (then the same comparison against Hapke applies).
+- The texture relief (s0-s2) casts no shadows; it only modulates the radiance (mean-preserving). Real cast shadows of
+  pebbles (horizon maps of the height textures, the spec's "height-map pebbles with self-shadowing") are not built.
+- Rock lit-face gain and cast shadows assume a nadir view and half-spheroids (eta from the generated rocks); oblique
+  views (rocks hiding ground, side faces seen) are not modelled. Task 11's geometry-vs-statistics check will show the
+  size of that.
+- `rock_geometry_pixels` is 0 until Task 11 (no rock geometry; every rock statistical).
+- Texture coordinates follow the cube face lattice: across the 12 cube face edges the regolith texture is discontinuous
+  (statistically the same both sides; a visible line only at cm-m footprints right at an edge; IM-2 is mid-face).
+- drawn(L) counts the vertex normals' slopes; the rasterizer interpolates normals across triangles (smoother, a little
+  less slope variance drawn than counted).
+- The abundance map is 1/8 deg (3.8 km): finer Diviner structure (crater ejecta below ~4 km) is smoothed.
 - ROLO coefficients (665.1 nm) are a third-party transcription (Hollan, from Tom Stone), unchecked against Kieffer &
   Stone 2005 Table 4 [E]; only the shape is gated (a level error would not show). The user may check the table. ROLO
   validity is 1.55-97 deg (paper sec. 3.3.1); 97-120 deg has no gated reference (K&S 1991 informative only; Lane &

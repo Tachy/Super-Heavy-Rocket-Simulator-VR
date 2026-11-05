@@ -815,6 +815,12 @@ func _setup_moon_terrain() -> void:
 	material.set_shader_parameter("albedo_texture", _moon_material.get_shader_parameter("albedo_texture"))
 	material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)
 	material.set_shader_parameter("sun_radius_m", SUN_RADIUS_M)
+	# Regolith detail textures and the unresolved-surface statistics (moon_detail.gdshaderinc; detail on only).
+	var detail: Dictionary = MoonDetailShading.configure(core, material, moon_surface_detail)
+	if not detail.is_empty():
+		var tiles: Array = detail["tiles"]
+		moon_terrain.node_parameters = func(key: Vector4i, owner: Vector4i) -> Dictionary:
+			return MoonDetailShading.node_parameters(key, owner, MOON_RADIUS_M, tiles)
 	moon_terrain.name = "MoonTerrain"
 	moon_terrain.camera_global = "moon_terrain_camera"  # project.godot [shader_globals], read by terrain_moon.gdshader
 	moon.add_child(moon_terrain)

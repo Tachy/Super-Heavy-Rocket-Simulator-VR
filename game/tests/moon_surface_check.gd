@@ -13,9 +13,16 @@
 #   with Hapke x hapke_normalisation against the Lommel-Seeliger law within 3 %; with a GPU (run without --headless) the
 #   shader parity: a flat patch drawn through moon_hapke.gdshaderinc and through the production wiring (moon_regolith, configure_moon_brdf globals) at four geometries against the core's
 #   hapke_reflectance (StarsimCore.moon_hapke_reflectance) within 2 %, after a readback calibration.
+# - Regolith detail shading (Task 10; MoonDetailChecks): the summed mesh + texture roughness at Guo's 125 mm baseline
+#   (4 mm +- 10 % at levels 22 .. 17), the residual theta_bar and light factors continuous in the node spacing, the rock
+#   abundance grid; with a GPU flat patches through moon_detail_patch.gdshader (the production detail include) against
+#   the core: (a) the statistical radiance (residual theta_bar, Smith, rock albedo / shadow / lit faces) with and without
+#   the texture modulation within 2 %, (b) an earthshine-only patch (Sun below the horizon) equal to the core's
+#   earthshine with no shadow share at any abundance and spacing.
 # Run: godot --headless --path game --script res://tests/moon_surface_check.gd [-- --measure]
 #      godot --path game --script res://tests/moon_surface_check.gd [-- --hapke_only]  (GPU: + the shader parity;
-#      --hapke_only: only the Hapke checks, no terrain data needed)
+#      --hapke_only: only the Hapke checks, no terrain data needed; --detail_only: the Task 10 detail checks and the Hapke
+#      checks, no quadtree runs)
 # --measure also prints node counts and summed build time of a synchronous tree converged 2 / 20 / 200 / 2000 m above
 # the site (detail off / on), the time of a 67 x 67 surface_samples_detail batch per level and moon_rocks on rock-rich
 # cells (the Diviner map's maxima and Tycho).
@@ -36,6 +43,21 @@ const PARITY_FRAMES := 4  ## frames rendered after each uniform change before th
 ## (incidence, emission, phase) in deg: the standard geometry, oblique, grazing view, near opposition.
 const PARITY_GEOMETRIES := [Vector3(30, 0, 30), Vector3(60, 30, 50), Vector3(20, 75, 85), Vector3(10, 8, 3)]
 const PARITY_THETA_OVERRIDE_RAD := 0.1  ## a terrain node's hapke_theta_bar_rad for the production override check
+const DETAIL_VIEWPORT := 512  ## the detail patches' readback (whole viewport mean)
+## Detail patches: (incidence, emission, phase) deg, patch edge m, node spacing m, horizon spacing m, abundance,
+## textures, sun / earth on (an earthshine-only patch has the Sun 5 deg below the horizon).
+const DETAIL_STEPS := [
+	[Vector3(83, 30, 60), 50.0, 0.3264, 20.0, 1.0, false, true],
+	[Vector3(75, 0, 75), 50.0, 0.3264, 20.0, 1.0, false, true],
+	[Vector3(60, 45, 30), 50.0, 0.0102, 20.0, 3.0, false, true],
+	[Vector3(83, 30, 60), 50.0, 0.3264, 20.0, 1.0, true, true],
+	[Vector3(75, 0, 75), 50.0, 0.3264, 20.0, 1.0, true, true],
+	[Vector3(83, 30, 60), 2.0, 0.0102, 20.0, 1.0, true, true],
+	[Vector3(60, 45, 30), 2.0, 0.0102, 20.0, 1.0, true, true],
+	[Vector3(83, 30, 60), 50.0, 0.0102, 20.0, 1.0, false, false],
+	[Vector3(83, 30, 60), 50.0, 0.0102, 20.0, 40.0, true, false],
+	[Vector3(83, 30, 60), 50.0, 3000.0, 3000.0, 0.0, false, false],
+]
 ## The Diviner rock abundance map's highest valid 3 x 3 pixel means (selenographic deg; RA 0.357 / 0.349 / 0.343,
 ## searched over the whole 60 S - 60 N map in fix round 1) and Tycho's floor (-43.31, -11.36) for comparison.
 const ROCKY_POINTS := [Vector2(39.3594, -0.1719), Vector2(8.1094, -53.9844), Vector2(-24.8281, -45.1406),
@@ -56,6 +78,9 @@ var _parity_camera: Camera3D
 var _parity_step := -1
 var _parity_wait := 0
 var _parity_srgb := false  ## the readback came back sRGB-encoded (calibration), decoded before the comparison
+var _detail_stats: Dictionary = {}  ## StarsimCore.moon_unresolved_shading (full runs)
+var _detail_material: ShaderMaterial
+var _detail_tiles: Array = []
 
 
 func _initialize() -> void:
@@ -74,12 +99,21 @@ func _initialize() -> void:
 		quit(0)
 		return
 	_core.set_moon_surface_detail(true)
-	_check_mesh_matches_core()
-	_check_parent_child()
-	_check_seams_face_edge_and_pole()
-	_check_tree_and_horizons()
+	var detail_only := OS.get_cmdline_user_args().has("--detail_only")
+	if not detail_only:
+		_check_mesh_matches_core()
+		_check_parent_child()
+		_check_seams_face_edge_and_pole()
+		_check_tree_and_horizons()
+	_detail_stats = _core.moon_unresolved_shading()
+	_check(bool(_detail_stats.get("present", false)), "unresolved-surface statistics built (moon_unresolved_shading)")
+	if not _detail_stats.is_empty() and bool(_detail_stats["present"]):
+		MoonDetailChecks.continuity(_core, _check)
+		MoonDetailChecks.abundance_grid(_core, _check)
+		MoonDetailChecks.summed_roughness(_core, _site, _check)
 	_core.set_moon_surface_detail(false)
-	_check_detail_off()
+	if not detail_only:
+		_check_detail_off()
 	if OS.get_cmdline_user_args().has("--measure"):
 		_measure()
 	_hapke_checks()
@@ -570,6 +604,15 @@ func _start_parity() -> void:
 	for geometry: Vector3 in PARITY_GEOMETRIES:
 		_parity_steps.append({"kind": "production", "geometry": geometry, "theta": -1.0})
 	_parity_steps.append({"kind": "production", "geometry": PARITY_GEOMETRIES[1], "theta": PARITY_THETA_OVERRIDE_RAD})
+	if bool(_detail_stats.get("present", false)):
+		_detail_material = ShaderMaterial.new()
+		_detail_material.shader = load("res://tests/moon_detail_patch.gdshader")
+		_detail_tiles = MoonDetailShading.configure(_core, _detail_material, true).get("tiles", [])
+		_detail_material.set_shader_parameter("gain", PARITY_GAIN)
+		for entry: Array in DETAIL_STEPS:
+			_parity_steps.append({"kind": "detail", "geometry": entry[0], "theta": -1.0, "size": entry[1],
+					"spacing": entry[2], "horizon": entry[3], "abundance": entry[4], "textures": entry[5],
+					"sun": entry[6]})
 	_parity_viewport.add_child(patch)
 	_parity_camera = Camera3D.new()
 	_parity_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -585,7 +628,22 @@ func _set_parity_geometry(step: int) -> void:
 	var entry: Dictionary = _parity_steps[step]
 	var geometry: Vector3 = entry["geometry"]
 	var production: bool = entry["kind"] == "production"
+	var detail: bool = entry["kind"] == "detail"
 	var material := _parity_production if production else _parity_material
+	if detail:
+		material = _detail_material
+		var edge: float = entry["size"]
+		(_parity_patch.mesh as PlaneMesh).size = Vector2(edge, edge)
+		_parity_camera.size = edge / 2.0
+		_parity_viewport.size = Vector2i(DETAIL_VIEWPORT, DETAIL_VIEWPORT)
+		material.set_shader_parameter("detail_cell_m", edge / 64.0)
+		material.set_shader_parameter("detail_origin", [Vector4.ZERO, Vector4.ZERO, Vector4.ZERO])
+		material.set_shader_parameter("patch_spacing_m", float(entry["spacing"]))
+		material.set_shader_parameter("detail_horizon_spacing_m", float(entry["horizon"]))
+		material.set_shader_parameter("patch_abundance", float(entry["abundance"]))
+		material.set_shader_parameter("detail_textures", bool(entry["textures"]) and not _detail_tiles.is_empty())
+		material.set_shader_parameter("sun_on", 1.0 if entry["sun"] else 0.0)
+		material.set_shader_parameter("earth_on", 0.0 if entry["sun"] else 1.0)
 	_parity_patch.material_override = material
 	if production:
 		material.set_shader_parameter("hapke_theta_bar_rad", float(entry["theta"]))
@@ -599,15 +657,31 @@ func _set_parity_geometry(step: int) -> void:
 	var to_eye := Vector3(sin(e), cos(e), 0.0)
 	var to_light := Vector3(sin(i) * cos(psi), cos(i), sin(i) * sin(psi))
 	material.set_shader_parameter("light_world", to_light)
+	if detail:
+		# The earthshine-only patch: the Earth where the Sun was, the Sun 5 deg below the horizon.
+		material.set_shader_parameter("earth_world", to_light)
+		if not entry["sun"]:
+			material.set_shader_parameter("light_world", Vector3(cos(deg_to_rad(5.0)), -sin(deg_to_rad(5.0)), 0.0))
 	_parity_material.set_shader_parameter("calibrate", step == 0)
-	_parity_camera.look_at_from_position(to_eye * 10.0, Vector3.ZERO, Vector3(0, 0, 1))  # before it enters the tree
+	# VIEW in a fragment is the direction to the camera point even with an orthographic camera: far away for the detail
+	# patches (12.5 m views), so the emission angle varies < 0.2 deg over the image.
+	var distance := 200.0 * _parity_camera.size if detail else 10.0
+	_parity_camera.far = 2.0 * distance + 100.0
+	_parity_camera.look_at_from_position(to_eye * distance, Vector3.ZERO, Vector3(0, 0, 1))  # before it enters the tree
 	_parity_wait = PARITY_FRAMES
 
 
-## Mean red of the viewport's central 8 x 8 pixels (linear; sRGB-decoded when the calibration found it encoded).
+## Mean red of the viewport's central 8 x 8 pixels (linear; sRGB-decoded when the calibration found it encoded); the
+## detail patches: the whole viewport.
 func _parity_read() -> float:
 	var image := _parity_viewport.get_texture().get_image()
 	var total := 0.0
+	if _parity_viewport.size.x == DETAIL_VIEWPORT:
+		for y in DETAIL_VIEWPORT:
+			for x in DETAIL_VIEWPORT:
+				var c := image.get_pixel(x, y)
+				total += c.srgb_to_linear().r if _parity_srgb else c.r
+		return total / float(DETAIL_VIEWPORT * DETAIL_VIEWPORT)
 	for y in range(12, 20):
 		for x in range(12, 20):
 			var c := image.get_pixel(x, y)
@@ -633,6 +707,8 @@ func _process(_delta: float) -> bool:
 		_check(absf(value / expected - 1.0) < 0.01, "parity readback calibration: %.5f for %.5f%s (format %d)"
 				% [value, expected, " (sRGB-decoded)" if _parity_srgb else "",
 				_parity_viewport.get_texture().get_image().get_format()])
+	elif _parity_steps[_parity_step]["kind"] == "detail":
+		_check_detail_patch(_parity_steps[_parity_step], value / PARITY_GAIN)
 	else:
 		var entry: Dictionary = _parity_steps[_parity_step]
 		var geometry: Vector3 = entry["geometry"]
@@ -654,3 +730,29 @@ func _process(_delta: float) -> bool:
 		return false
 	_set_parity_geometry(_parity_step)
 	return false
+
+
+## A detail patch against the core: moon_hapke_norm x I/F(mu0, mu, g, residual theta_bar) x the light factor (sun or
+## earthshine), the textures' modulation being mean-preserving.
+func _check_detail_patch(entry: Dictionary, shader: float) -> void:
+	var geometry: Vector3 = entry["geometry"]
+	var spacing: float = entry["spacing"]
+	var theta := _core.moon_residual_theta_bar(spacing)
+	var norm := Atmosphere.hapke_normalisation(float(_hapke["disc_reflectance_full"]))
+	var factors := _core.moon_unresolved_light_factors(float(entry["abundance"]), INF, spacing, float(entry["horizon"]),
+			deg_to_rad(90.0 - geometry.x))
+	var core := norm * _core.moon_hapke_reflectance(cos(deg_to_rad(geometry.x)), cos(deg_to_rad(geometry.y)),
+			deg_to_rad(geometry.z), theta)
+	var what := ""
+	if entry["sun"]:
+		core *= factors.x
+		what = "Sun %.0f deg" % (90.0 - geometry.x)
+	else:
+		core *= factors.y
+		what = "earthshine only (Sun 5 deg below), Earth %.0f deg" % (90.0 - geometry.x)
+	_check(absf(shader / core - 1.0) < PARITY_TOLERANCE,
+			"detail patch %s, e %.0f g %.0f, %.0f m, spacing %.4f m, horizon %.0f m, abundance %.0f, textures %s: shader %.5f "
+			% [what, geometry.y, geometry.z, entry["size"], spacing, entry["horizon"], entry["abundance"],
+			"on" if entry["textures"] else "off", shader]
+			+ "core %.5f (%+.2f %%; theta_bar %.2f deg, factor %.3f)" % [core, 100.0 * (shader / core - 1.0),
+			rad_to_deg(theta), factors.x if entry["sun"] else factors.y])

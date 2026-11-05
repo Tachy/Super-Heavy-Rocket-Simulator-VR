@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
@@ -26,6 +27,7 @@
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/unresolved_shading.hpp"
 #include "starsim/config/moon_surface_config.hpp"
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
@@ -135,6 +137,23 @@ public:
     double moon_hapke_reflectance(double mu0, double mu, double phase_rad, double theta_bar_rad) const;
     // The uniform sphere's disc-integrated I/F at the phase angle (ROLO's disc-equivalent reflectance).
     double moon_hapke_disc_reflectance(double phase_rad, double theta_bar_rad) const;
+    // Statistics of the relief the renderer does not draw (core environment/unresolved_shading.hpp; Task 10 of the Moon
+    // procedural surface plan), built once on the first call after load_terrain (~1 s): {present, total_slope_variance,
+    // drawn_table (PackedFloat64Array: the mesh-drawn mean square slope at spacing drawn_table_min_spacing_m x
+    // 2^(k / drawn_table_per_octave)), drawn_table_min_spacing_m, drawn_table_per_octave, rock_cover_coefficient,
+    // rock_cover_exponent, rock_min_diameter_m, rock_max_diameter_m, rock_exposed_height_per_diameter,
+    // rock_reflectance_ratio, rock_lit_gain (PackedFloat64Array), lit_gain_step_rad, lit_gain_floor_rad}. present false
+    // without the surface. Call from one thread; afterwards the queries below are thread-safe.
+    godot::Dictionary moon_unresolved_shading();
+    // Core reference of the shader's light factors (unresolved_light_factors): Vector2(sun, earth); (1, 1) before
+    // moon_unresolved_shading.
+    godot::Vector2 moon_unresolved_light_factors(double abundance, double geometry_min_diameter_m, double spacing_m,
+                                                 double horizon_spacing_m, double sun_elevation_rad) const;
+    // Residual Hapke mean slope (rad) of a node with vertex spacing spacing_m; the globe's before moon_unresolved_shading.
+    double moon_residual_theta_bar(double spacing_m) const;
+    // Rock abundance factor (LunarRocks::abundance_factor: Diviner map / reference, 1 outside it; 1 without rocks) at
+    // the pixel centres of a width x height equirectangular grid (row 0 at 90 N, column 0 at 180 W), row-major.
+    godot::PackedFloat32Array moon_rock_abundance_grid(int width, int height) const;
     // Spacing in metres of the finest terrain grid at a point; INF without the terrain.
     double surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const;
     // The finest of those spacings over latitude / longitude points (degrees; a renderer node's lattice); INF without
@@ -296,6 +315,7 @@ private:
     std::shared_ptr<const environment::DetailedLunarTerrain> moon_surface_;  // load_terrain(); nullptr when absent
     config::HapkeParameters moon_hapke_;  // load_moon_hapke()
     bool moon_hapke_loaded_ = false;
+    std::unique_ptr<environment::UnresolvedShadingModel> moon_unresolved_;  // moon_unresolved_shading()
     std::atomic<bool> moon_detail_on_{true}, moon_rocks_on_{true};
     std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)

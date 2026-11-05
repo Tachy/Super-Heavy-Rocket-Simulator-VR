@@ -580,3 +580,12 @@ target = "core/tests/test_hapke.cpp"
 kind = "licence_only"
 license = "ISIS3: public domain (CC0-1.0); published papers: only numerical values are used"
 credit = "Hapke model checks against USGS ISIS3 (public domain) and the ROLO model of Kieffer & Stone (2005)"
+
+[[source]]
+id = "lit_unresolved_shading"
+name = "Unresolved lunar surface shading (moon procedural surface Task 10): Smith 1967 (IEEE Trans. Antennas Propag. 15, 668; shadowing function of a Gaussian surface), Hapke 1984 (Icarus 59, 41; mean slope of a Gaussian slope distribution), Heitz & Neyret 2018 (HPG; stochastic hex tiling), Abramowitz & Stegun 7.1.26 (erf); look reference LROC NAC M1434867405 (IM-2 landing region, 90 cm pixel scale, lroc.im-ldi.com/images/1401), compared side by side, not shipped"
+url = "https://lroc.im-ldi.com/images/1401"
+target = "core/src/environment/unresolved_shading.cpp"
+kind = "licence_only"
+license = "LROC images: NASA mission data, not copyrighted (credit NASA/GSFC/Arizona State University); published papers: only methods and numerical values are used"
+credit = "Unresolved-surface shading after Smith (1967), Hapke (1984), Heitz & Neyret (2018); LROC NAC reference image NASA/GSFC/Arizona State University"

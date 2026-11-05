@@ -16,6 +16,7 @@ render_mode unshaded, cull_back;
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
 #include "res://shaders/moon_regolith.gdshaderinc"
+#include "res://shaders/moon_detail.gdshaderinc"
 
 // CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -44,8 +45,8 @@ uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
 // Diagnostic tint (render_check --moon_diag): 0 off; 1 red where the interpolated normal faces away from the eye
 // (dot(n, to_eye) < REGOLITH_MU_MIN: regolith_reflectance's limb replacement, Lommel-Seeliger at its 2x maximum).
 uniform int diag_mode = 0;
-// Hapke's mean slope for this node (rad): the roughness the node does not draw as geometry (scale-dependent, moon
-// procedural surface plan Task 10); negative: the globe's (moon_hapke_theta_bar_rad).
+// Hapke's mean slope override (rad; tests, diagnostics); negative: with detail shading the residual of the node's
+// effective spacing (moon_detail.gdshaderinc), without it the globe's (moon_hapke_theta_bar_rad).
 uniform float hapke_theta_bar_rad = -1.0;
 
 varying vec3 local_position;
@@ -53,10 +54,14 @@ varying vec3 local_normal;
 varying vec2 horizon_uv;  // the horizon map's texture coordinates, from CUSTOM2 (the position in the vertex grid, 0 .. 64)
 varying vec2 global_uv;  // equirectangular u (continuous in the node), v
 varying vec3 camera_offset;  // fragment - camera (node-local render axes, metres; exact near the camera)
+varying float morph_factor;  // the vertex morph (0: this level, 1: the parent's surface)
+varying vec2 grid_position;  // CUSTOM2: the vertex grid position (0 .. 64), the detail textures' coordinate
 
 void vertex() {
 	vec3 camera_local = terrain_camera_local(moon_terrain_camera_hi, moon_terrain_camera_lo);
 	float morph = terrain_morph_factor(VERTEX, camera_local);
+	morph_factor = morph;
+	grid_position = CUSTOM2.xy;
 	VERTEX += CUSTOM0.xyz * morph;
 	NORMAL = normalize(mix(NORMAL, CUSTOM3.xyz, morph));
 	local_position = VERTEX + vertex_offset;
@@ -71,11 +76,14 @@ void vertex() {
 // light's azimuth against the disc's elevation, the circular segment above a straight horizon (exact: d = signed
 // height of the centre over the horizon in disc radii, area = 1/2 + (d sqrt(1 - d^2) + asin d) / pi).
 // east / north: the fragment's local axes, up: its radial direction; uv: the horizon map's texture coordinates.
-float terrain_visible_fraction(vec3 to_light, float radius_m, vec3 east, vec3 north, vec3 up, vec2 uv) {
+// margin: the disc centre's elevation over the horizon in its azimuth (rad; its elevation when no fetch is needed).
+float terrain_visible_fraction(vec3 to_light, float radius_m, vec3 east, vec3 north, vec3 up, vec2 uv,
+		inout float margin) {
 	float distance_m = length(to_light);
 	vec3 direction = to_light / distance_m;
 	float angular_radius = radius_m / distance_m;  // asin(x) = x to 3.5e-6 (Sun) / 4.6e-5 (Earth) relative
 	float elevation = asin(clamp(dot(direction, up), -1.0, 1.0));
+	margin = elevation;
 	if (elevation - angular_radius > horizon_max_rad) {
 		return 1.0;  // the whole disc above the node's highest horizon: no fetch
 	}
@@ -88,6 +96,7 @@ float terrain_visible_fraction(vec3 to_light, float radius_m, vec3 east, vec3 no
 	// The next sector is in the same layer except after the layer's last azimuth.
 	float next = c0 < 3 ? block[(c0 + 1) & 3] : textureLod(horizon_map, vec3(uv, float((layer + 1) & 3)), 0.0).x;
 	float horizon = mix(block[c0], next, fract(sector));
+	margin = elevation - horizon;
 	float d = clamp((elevation - horizon) / angular_radius, -1.0, 1.0);
 	return clamp(0.5 + (d * sqrt(1.0 - d * d) + asin(d)) / PI, 0.0, 1.0);
 }
@@ -109,13 +118,21 @@ void fragment() {
 		vec3 f = normalize(facet);
 		n = dot(f, to_eye) < 0.0 ? -f : f;
 	}
-	float theta_bar = hapke_theta_bar_rad < 0.0 ? moon_hapke_theta_bar_rad : hapke_theta_bar_rad;
+	// Detail shading (moon_detail.gdshaderinc): the effective vertex spacing (the morph slides to the parent's 2 x),
+	// the texture relief's height gradient (derivatives taken in uniform control flow).
+	float spacing_eff = detail_cell_m * exp2(morph_factor);
+	vec3 detail_gradient = detail_texture_gradient(grid_position, camera_offset, n, spacing_eff);
+	float theta_bar = hapke_theta_bar_rad >= 0.0 ? hapke_theta_bar_rad
+			: (detail_shading ? detail_theta_bar(spacing_eff) : moon_hapke_theta_bar_rad);
 	float mu0_raw = dot(n, normalize(to_sun));
 	float mu0 = max(mu0_raw, 0.0);
 	float mu = max(dot(n, to_eye), 1e-3);
 	float lommel_seeliger = 2.0 * mu0 / (mu0 + mu);
 	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, to_earth, earth_radius_m);
 	float sun_visible = 1.0;  // above the terrain horizon
+	// The Sun's elevation over the horizon in its azimuth (the detail statistics' macroscopic elevation; over the local
+	// horizontal where no horizon map is read).
+	float sun_margin = asin(clamp(dot(normalize(to_sun), normalize(local_position)), -1.0, 1.0));
 	float earth_visible = 1.0;
 	if (horizon_enabled) {
 		// A light that cannot reach the fragment anyway (below the relief's horizon, or the Sun with no umbra
@@ -129,16 +146,40 @@ void fragment() {
 		east = length(east) > POLE_EAST_MIN ? normalize(east) : vec3(0.0, 0.0, 1.0);
 		vec3 north = cross(up, east);
 		if (sun_matters) {
-			sun_visible = terrain_visible_fraction(to_sun, sun_radius_m, east, north, up, horizon_uv);
+			sun_visible = terrain_visible_fraction(to_sun, sun_radius_m, east, north, up, horizon_uv, sun_margin);
 		}
 		if (earth_matters) {
-			earth_visible = terrain_visible_fraction(to_earth, earth_radius_m, east, north, up, horizon_uv);
+			float earth_margin = 0.0;
+			earth_visible = terrain_visible_fraction(to_earth, earth_radius_m, east, north, up, horizon_uv,
+					earth_margin);
 		}
 	}
+	vec2 detail_factors = vec2(1.0);
+	float sun_modulation = 1.0;
+	float earth_modulation = 1.0;
+	if (detail_shading) {
+		float abundance = texture(detail_rock_abundance, global_uv).r;
+		// Rocks from rock_geometry_pixels of projected size are geometry (Task 11): d = pixels x distance x pixel angle.
+		float pixel_angle = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+		float geometry_min_m = rock_geometry_pixels > 0.0 ? rock_geometry_pixels * length(camera_offset) * pixel_angle
+				: 1.0e30;
+		detail_factors = detail_light_factors(abundance, geometry_min_m, spacing_eff, detail_horizon_spacing_m,
+				sun_margin);
+		sun_modulation = detail_modulation(detail_gradient, n, normalize(to_sun), to_eye);
+		earth_modulation = detail_modulation(detail_gradient, n, normalize(to_earth), to_eye);
+	}
 	// The Sun and the earthshine through the one regolith reflectance (night-vision fix round I3).
-	float light = moon_regolith_scale * (regolith_reflectance_rough(n, normalize(to_sun), to_eye, theta_bar) * sunlit
-			* sun_visible * moon_sun_scene + regolith_reflectance_rough(n, normalize(to_earth), to_eye, theta_bar)
-			* earth_visible * moon_earthshine);
+	float sun_reflectance = regolith_reflectance_rough(n, normalize(to_sun), to_eye, theta_bar);
+	float earth_reflectance = regolith_reflectance_rough(n, normalize(to_earth), to_eye, theta_bar);
+	float light;
+	if (detail_shading) {
+		light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene * detail_factors.x
+				* sun_modulation + earth_reflectance * earth_visible * moon_earthshine * detail_factors.y
+				* earth_modulation);
+	} else {  // Task 9's expression as it was (detail off stays pixel-identical)
+		light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene + earth_reflectance
+				* earth_visible * moon_earthshine);
+	}
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;

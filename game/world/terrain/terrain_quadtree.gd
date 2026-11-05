@@ -62,6 +62,9 @@ var upload_budget_ms := UPLOAD_BUDGET_MS
 ## Prefix of the global shader uniforms <prefix>_hi / <prefix>_lo that receive the camera's body-local render position
 ## (project.godot [shader_globals], read by the body's terrain shader); "" (tests): not written.
 var camera_global := ""
+## Per-node material uniforms beyond the built mesh (the Moon's detail shading, MoonDetailShading.node_parameters):
+## (key, horizon_owner) -> {uniform: value}; unset: none.
+var node_parameters := Callable()
 ## {nodes_drawn, nodes_loading, uploads_last_frame, update_ms (main-thread time of the last update), builds (node builds
 ## collected so far), build_ms (their summed worker time), horizon_bakes (builds that baked a horizon map),
 ## max_drawn_level (the deepest drawn leaf's level: the one under the camera)}
@@ -586,6 +589,10 @@ func _upload(result: Dictionary) -> void:
 				coverage.end.x, coverage.end.y))
 		material.set_shader_parameter(crop_name + "_fade_m", float(crop["fade_m"]))
 	var horizon_owner: Vector4i = result["horizon_owner"]
+	if node_parameters.is_valid():
+		var extra: Dictionary = node_parameters.call(key, horizon_owner)
+		for param: String in extra:
+			material.set_shader_parameter(param, extra[param])
 	var horizon_map: Texture2DArray = null
 	var horizon_max_rad := 0.0
 	if result["horizon"] != null:  # bodies without horizon maps (the Earth) build none

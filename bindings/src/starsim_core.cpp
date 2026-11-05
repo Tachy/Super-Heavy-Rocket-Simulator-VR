@@ -317,6 +317,7 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
         for (const bool rocks : {true, false}) {
             try {
                 moon_surface_ = sim::shared_moon_surface(config, data_dir, {true, rocks});
+                moon_unresolved_.reset();
                 if (!rocks) say("Mondfelsen ohne Diviner-Karte nicht verfügbar - Oberflächendetail ohne Felsen");
                 break;
             } catch (const std::exception& e) {
@@ -534,6 +535,73 @@ double StarsimCore::moon_hapke_reflectance(double mu0, double mu, double phase_r
 double StarsimCore::moon_hapke_disc_reflectance(double phase_rad, double theta_bar_rad) const {
     if (!moon_hapke_loaded_) return 0.0;
     return environment::hapke_disc_reflectance(moon_hapke_, phase_rad, theta_bar_rad);
+}
+
+godot::Dictionary StarsimCore::moon_unresolved_shading() {
+    godot::Dictionary result;
+    result["present"] = false;
+    if (moon_surface_ == nullptr) return result;
+    if (!moon_unresolved_) {
+        try {
+            moon_unresolved_ = std::make_unique<environment::UnresolvedShadingModel>(
+                environment::make_unresolved_shading_model(moon_surface_->detail(), moon_surface_->rocks_shared().get()));
+        } catch (const std::exception& e) {
+            godot::UtilityFunctions::push_warning(godot::String::utf8(e.what()));
+            return result;
+        }
+    }
+    const auto& m = *moon_unresolved_;
+    const auto packed = [](const std::vector<double>& v) {
+        godot::PackedFloat64Array a;
+        a.resize(static_cast<int64_t>(v.size()));
+        for (size_t k = 0; k < v.size(); ++k) a[static_cast<int64_t>(k)] = v[k];
+        return a;
+    };
+    result["present"] = true;
+    result["total_slope_variance"] = m.total_slope_variance;
+    result["drawn_table"] = packed(m.drawn_table);
+    result["drawn_table_min_spacing_m"] = environment::UnresolvedShadingModel::drawn_table_min_spacing_m;
+    result["drawn_table_per_octave"] = environment::UnresolvedShadingModel::drawn_table_per_octave;
+    result["rock_cover_coefficient"] = m.rock_cover_coefficient;
+    result["rock_cover_exponent"] = m.rock_cover_exponent;
+    result["rock_min_diameter_m"] = m.rock_min_diameter_m;
+    result["rock_max_diameter_m"] = m.rock_max_diameter_m;
+    result["rock_exposed_height_per_diameter"] = m.rock_exposed_height_per_diameter;
+    result["rock_reflectance_ratio"] = m.rock_reflectance_ratio;
+    result["rock_lit_gain"] = packed(m.rock_lit_gain);
+    result["lit_gain_step_rad"] = environment::UnresolvedShadingModel::lit_gain_step_rad;
+    result["lit_gain_floor_rad"] = environment::lit_gain_floor_rad;
+    return result;
+}
+
+godot::Vector2 StarsimCore::moon_unresolved_light_factors(double abundance, double geometry_min_diameter_m,
+                                                          double spacing_m, double horizon_spacing_m,
+                                                          double sun_elevation_rad) const {
+    if (!moon_unresolved_) return {1.0, 1.0};
+    const auto f = environment::unresolved_light_factors(*moon_unresolved_, abundance, geometry_min_diameter_m,
+                                                         spacing_m, horizon_spacing_m, sun_elevation_rad);
+    return {static_cast<real_t>(f.sun), static_cast<real_t>(f.earth)};
+}
+
+double StarsimCore::moon_residual_theta_bar(double spacing_m) const {
+    if (!moon_unresolved_) return moon_surface_ ? moon_surface_->detail().config().hapke.theta_bar_rad : 0.0;
+    return environment::residual_theta_bar(*moon_unresolved_, spacing_m);
+}
+
+godot::PackedFloat32Array StarsimCore::moon_rock_abundance_grid(int width, int height) const {
+    godot::PackedFloat32Array out;
+    if (width <= 0 || height <= 0) return out;
+    out.resize(static_cast<int64_t>(width) * height);
+    const auto rocks = moon_surface_ ? moon_surface_->rocks_shared() : nullptr;
+    for (int j = 0; j < height; ++j) {
+        const double lat = (90.0 - (j + 0.5) * 180.0 / height) * constants::deg_to_rad;
+        for (int i = 0; i < width; ++i) {
+            const double lon = (-180.0 + (i + 0.5) * 360.0 / width) * constants::deg_to_rad;
+            const math::Vec3 unit{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+            out[static_cast<int64_t>(j) * width + i] = rocks ? static_cast<float>(rocks->abundance_factor(unit)) : 1.0f;
+        }
+    }
+    return out;
 }
 
 godot::Dictionary StarsimCore::moon_surface_statistics() const {
@@ -1352,6 +1420,13 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::moon_hapke_reflectance);
     ClassDB::bind_method(D_METHOD("moon_hapke_disc_reflectance", "phase_rad", "theta_bar_rad"),
                          &StarsimCore::moon_hapke_disc_reflectance);
+    ClassDB::bind_method(D_METHOD("moon_unresolved_shading"), &StarsimCore::moon_unresolved_shading);
+    ClassDB::bind_method(D_METHOD("moon_unresolved_light_factors", "abundance", "geometry_min_diameter_m", "spacing_m",
+                                  "horizon_spacing_m", "sun_elevation_rad"),
+                         &StarsimCore::moon_unresolved_light_factors);
+    ClassDB::bind_method(D_METHOD("moon_residual_theta_bar", "spacing_m"), &StarsimCore::moon_residual_theta_bar);
+    ClassDB::bind_method(D_METHOD("moon_rock_abundance_grid", "width", "height"),
+                         &StarsimCore::moon_rock_abundance_grid);
     ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
                          &StarsimCore::surface_resolution_m);
     ClassDB::bind_method(D_METHOD("horizon_elevations", "body", "latitudes_deg", "longitudes_deg", "heights_m",

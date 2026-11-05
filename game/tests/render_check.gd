@@ -7,6 +7,7 @@
 #          surface there, the Earth's or the Moon's, --eye_height=2 above it) with --azimuth / --elevation / --fov
 #          [--moon_detail=off] (the fidelity flag moon_surface_detail off: the LOLA-only Moon as before the detail)
 #          [--moon_brdf=lommel_seeliger] (the game setting World.moon_brdf: the former Moon BRDF instead of Hapke)
+#          [--moon_detail_shading=off] (detail on, but no regolith textures / unresolved statistics: Task 9's shading)
 #          [--moon_diag=1] (terrain_moon.gdshader diag_mode: 1 tints red the fragments whose interpolated normal faces
 #          away from the eye). The log's "Moon load" line: the deepest drawn level's wall-time timeline since the view
 #          was placed (or the last climb move) and the time until the terrain settled.
@@ -121,6 +122,7 @@ func _initialize() -> void:
 		return
 	World.moon_surface_detail = _args.get("moon_detail", "on") != "off"  # read at the Moon terrain's setup
 	World.moon_brdf = String(_args.get("moon_brdf", "hapke"))  # read in World._ready
+	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
