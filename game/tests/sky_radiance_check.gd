@@ -380,6 +380,8 @@ func _go_to(p: Dictionary) -> void:
 	_display_exposure = p.get("exposure", 1.0)
 	environment.tonemap_exposure = _display_exposure
 	_world.atmosphere.vision_effect.enabled = false
+	# The white-plate rule: the phases' gain references and the time-lapse's gain steps predate the field meter (Task 14).
+	_world.atmosphere.scene_referred_adaptation = false
 	_world.atmosphere.eye_adaptation_enabled = p["adapt"]
 	_world.clock.warp = 0.0
 	_world.clock.set_time(_world.core.utc_to_tdb_s(p["utc"]))

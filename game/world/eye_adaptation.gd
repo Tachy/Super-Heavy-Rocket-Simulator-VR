@@ -114,6 +114,14 @@ const DARK_TIME_CONSTANT_S := 110.0
 ## (22 mag/arcsec^2 ~ 1.7e-4 cd/m^2), so the star threshold there is the sky's (Schaefer: +0.06 mag at the floor); the
 ## t.v.i. functions are flat far above it.
 const LUMINANCE_FLOOR_CD_M2 := 1.0e-6
+## [S: the 18 % grey card of reflected-light metering, ISO 2720:1974; Reinhard et al. 2002, "Photographic tone
+## reproduction for digital images", SIGGRAPH 2002: the log-average luminance mapped to the key 0.18] The scene-referred
+## rule (Task 14, Atmosphere.scene_referred_adaptation): the eye adapts to the field it sees, L_f (AdaptationMeter, the
+## centre-weighted log average), and the field is taken as the mid grey of its scene: the adaptation luminance (a
+## white, as the white-plate rule's) is L_f / FIELD_MID_GREY. The white-plate rule assumed that field (18 % of the plate
+## under the scene's light, a grey world); the field rule measures it - in a grey world the two are identical, a darker
+## field (regolith, the Earth's ocean from orbit) is seen brighter, a brighter one (snow, cloud tops) darker.
+const FIELD_MID_GREY := 0.18
 
 ## The cone gain this frame (the pre-exposure on every physical luminance; 1 = the fixed day exposure).
 var gain := 1.0

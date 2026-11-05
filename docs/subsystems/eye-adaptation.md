@@ -10,7 +10,41 @@ shaders:
 
 ## Model
 
-- **Eye adaptation** [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
+- **Scene-referred adaptation** [Task 14 of the Moon surface plan, user 2026-11-05; `adaptation_meter.gd`, fidelity
+  flag `Atmosphere.scene_referred_adaptation`, on in the game; the user argument `--analytic_adaptation` switches it
+  off]: the eye adapts to the luminance of the field it sees, one rule for every scene. `AdaptationMeter`, a
+  CompositorEffect before `VisionEffect` (world.gd's Compositor only; the GPU check's has none), samples the HDR frame
+  after the transparent pass on a sparse grid (~65 000 samples per view), de-gains each sample to cd/m^2 (scene value /
+  that frame's `scene_per_cd_m2`) and adds it, Gaussian-weighted toward the image centre (sigma 0.5 half diagonals
+  [E: Moon & Spencer 1945, the surround's weight falls with eccentricity]), into two 128-bin log histograms (photopic,
+  scotopic; 1e-6 .. 1e6 cd/m^2, bin 0 black). Both VR eyes go into one histogram (one adaptation, no eye difference).
+  The histograms come back asynchronously (`buffer_get_data_async`, every ~2-4 frames, no stall). The field luminance
+  L_f (`field_log_average`): the weighted geometric mean, the brightest 2 % of the weight cut (Sun disc, glints [E]),
+  bins more than 3.7 decades below the highest bin left excluded (no signal at that adaptation [S: Kunkel & Reinhard
+  2010, simultaneous range ~3.7 log units]; a black sky beside lit ground does not pull it down; a field with nothing
+  above black gives 0, the dark-adapted floor). The field is taken as its scene's mid grey [S: the 18 % card of
+  reflected metering, ISO 2720; Reinhard et al. 2002, the log average mapped to the key 0.18]: the adaptation
+  luminance L_a = L_f / `FIELD_MID_GREY` (0.18), the scotopic one likewise, and everything downstream is the white-plate
+  rule's (Ferwerda gains, mesopic k, CIECAM02 factors, star floor, pacing, clamp [1, 1e5], cap at L_ref). The white-plate
+  rule assumed the field to be 18 % of the plate (a grey world); the field rule measures it: identical in a grey world,
+  a darker field (regolith under a low Sun, the ocean from orbit) is seen brighter, a brighter one darker
+  [call 2026-11-05: an earlier variant evaluated the t.v.i. at L_f against a display adapted to 0.18 L_ref - Weber-equal,
+  but it darkened every night scene 5.5x (max gain 0.18 x 12 583), so not kept]. A view jump (`snap_adaptation`) drops older measurements; the eye stays snapped
+  to the new view's field while its terrain streams in (World sets `view_loading`) and at least 1 s
+  (`FIELD_SNAP_MIN_S` [call]). Until the first measurement of a view, without a RenderingDevice, or 30 frames without
+  one (`FIELD_STALE_FRAMES`), the white-plate rule below applies. Display-referred emitters (plume, stars, VR panel)
+  count with their displayed value (a bright plume light-adapts the eye; the log mean keeps that a stable fixed point).
+  Values (render_check, 2026-11-05, field L_f / white-plate L_a / gain before -> after; PNGs
+  `screenshots/eye_adaptation/task14/`): Starbase viewpoint noon (Sun 48 deg, view east) 2475 / 37 624 / 1.146 -> 3.14;
+  dusk (Sun -3.8 deg) 3.99 / 43.8 (glow) / 858 -> 1379; night (no Moon, lamps 2 km off) black / floor / 12 583 ->
+  12 583; 400 km by day (view 20 deg down, limb haze) 2558 / 43 121 / 1.000 -> 3.03; IM-2 2 m (Sun 6.75 deg) 456-586 /
+  43 448 / 1.000 -> 17.1; Apollo 11 down-Sun (Sun 14.5 deg) 661-712 / 41 064 / 1.000 -> 11.2; lunar night under a
+  nearly full Earth (0 N 45 E, 2026-11-07T14:00, view west) 0.033 / 5.71 (Earth in view) / 3012 -> 9334 (rods 0.75).
+  The Earth's day scenes measured ~6 % of the plate, not the grey world's 18 % (dark marsh imagery, the ocean through
+  haze): they render ~2.7-3x brighter. Apollo 11 regolith on sunlit ground (AS11-40-5903, rectangle 0.65-0.95 x
+  0.30-0.50): photo 147, render before 46, after 144 (8-bit luma); left 0.02-0.30: photo 117, after 135.
+- **White-plate rule** (the fallback and the GPU check's / headless tests' rule; formerly the only one):
+  [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
   the game, off in the GPU check's comparisons]: cone gain on every physical luminance (tables, Sun light, Moon, Sun
   disc, city lights; plumes and the stars' own brightness are display-referred). L_a = the largest of: down = a white
   plate at the eye under the transmitted Sun at normal incidence and the sky, (E_sun,n + E_sky) / pi x the visible
@@ -153,7 +187,9 @@ shaders:
 
 - Eye model: Ferwerda 1996 cone/rod t.v.i. with Jensen 2000 rod saturation, CIECAM02 brightness / chroma terms,
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
-- View-independent adaptation (VR-stable); Earth-in-view stays physical (no display-side highlight treatment).
+- Scene-referred adaptation to the measured field (user 2026-11-05, Task 14): one rule for every scene, one value for
+  both VR eyes (formerly view-independent; the white-plate rule is the fallback). Earth-in-view stays physical (no
+  display-side highlight treatment).
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
 
 ## Open points and known limits
@@ -165,3 +201,15 @@ shaders:
   lunar night side the cloudy Earth is brighter than adapted to); the earthshine's Bond albedo 0.306 holds the clouds
   on average. Follow-up: the 13 directions through the cloud column.
 - Eclipsed-Moon corona not modelled; no per-pixel / foveal adaptation.
+- Scene-referred rule (Task 14): `moon_rock.gdshader` (unshaded) does not multiply by `atmosphere_exposure_gain`, so
+  drawn rocks stay at gain 1 while the regolith follows the gain (dark rocks on the lunar day at gain 11-17, black at
+  night); the rocks also bias the field measurement low (IM-2: 586 -> 456 cd/m^2). Fix: `ALBEDO *= atmosphere_exposure_gain`
+  as terrain_moon does (the file was in another task's hands, not changed here).
+- The field follows the view: head turns change the gain (light 0.5 s), and each 2 % change of `luminance_scale` redraws
+  the sky's radiance cube (`SkyRadianceRefresh`) - more redraws in VR than with the view-independent plate rule; not
+  measured yet.
+- The rendered Apollo 11 regolith (490 cd/m^2 in the foreground probe, field 660-710) is 3-6x below the core's Hapke
+  I/F x E_sun,n / pi at that geometry (I/F 0.08-0.10 at 25-30 deg down-Sun -> 3400-4300 cd/m^2 with the highland w
+  0.429); the photo's f/11 1/250 ISO 160 exposure (mid grey 2363 cd/m^2) also points to ~2000+ cd/m^2. The field rule
+  hides this (it normalises the field), the camera mode does not: an open point of the Moon shading, not of the
+  adaptation.

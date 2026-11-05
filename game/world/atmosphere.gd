@@ -195,6 +195,37 @@ var last_target_cd_m2 := 0.0
 var last_target_scotopic_cd_m2 := 0.0
 ## Night vision's rod step on the HDR scene (attached to the WorldEnvironment's Compositor: world.gd, the GPU check).
 var vision_effect := VisionEffect.new()
+## The field luminance meter (scene-referred adaptation, Task 14; attached before vision_effect in world.gd's
+## Compositor; not in the GPU check's, which keeps the analytic rule).
+var adaptation_meter := AdaptationMeter.new()
+## Fidelity flag (Task 14): the eye adapts to the field it sees (AdaptationMeter, EyeAdaptation.FIELD_MID_GREY); off,
+## or until the meter has measured the view: the white-plate rule (adaptation_luminance). The user argument
+## --analytic_adaptation switches it off at start (before / after comparisons).
+var scene_referred_adaptation := not OS.get_cmdline_user_args().has("--analytic_adaptation")
+## The view is still streaming in (World: terrain nodes loading): a snapped view stays snapped to the field until the
+## meter has seen it settled.
+var view_loading := false
+## The field luminance at the last measurement (cd/m^2, photopic and scotopic; AdaptationMeter.field_log_average) and
+## whether this frame's adaptation came from it.
+var last_field_cd_m2 := 0.0
+var last_field_scotopic_cd_m2 := 0.0
+var adaptation_from_field := false
+## [call] Frames without a new field measurement before the analytic rule takes over again (the meter answers every
+## ~2-4 frames).
+const FIELD_STALE_FRAMES := 30
+## --adaptation_log: every this many measurements one log line.
+const ADAPTATION_LOG_EVERY := 20
+## [call] After a view jump the eye stays snapped to the measured field at least this long (wall time, s): the new
+## view's streamed terrain may start loading only some frames after the jump.
+const FIELD_SNAP_MIN_S := 1.0
+var _field_epoch := 0
+var _field_serial := 0
+var _field_valid := false
+var _field_snap := true
+var _field_snap_start_ms := 0
+var _field_loading := false
+var _field_age := 0
+var _log_adaptation := OS.get_cmdline_user_args().has("--adaptation_log")
 var _moon_direction_fixed := Vector3.ZERO
 var _cloud_cache := {}  ## cloud_light_at per frame: [position, direction, probe, frame] -> Vector3
 ## The direct Sun through the clouds as drawn (World: CloudLayer.direct_sun_transmittance(key, position_itrf_m) -> T or
@@ -334,13 +365,28 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	brightness = 1.0
 	chroma = 1.0
 	moonlight_active = false
+	adaptation_from_field = false
 	if eye_adaptation_enabled:
 		var moon_fixed := gcrf_to_fixed * (moon_gcrf_m - earth_center_gcrf_m) if moon_gcrf_m != Vector3.ZERO else Vector3.ZERO
 		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au, moon_fixed)
 		luminance = maxf(luminance, lamp_adaptation_cd_m2)  # lamp-lit surfaces in view (white)
 		var scotopic := maxf(last_target_scotopic_cd_m2,
 				lamp_adaptation_cd_m2 * Vector3.ONE.dot(EyeAdaptation.SCOTOPIC_WEIGHTS))  # white lamps light the rods too
-		_eye.advance(luminance, scotopic, reference_luminance(d_au), adaptation_dt_s)
+		_take_field_measurement()
+		if scene_referred_adaptation and _field_valid:
+			# The scene-referred rule (EyeAdaptation.FIELD_MID_GREY): the white the measured field implies takes the
+			# place of the white plate. The analytic terms above stay for the report and as the fallback.
+			adaptation_from_field = true
+			if _field_snap:
+				_eye.snap()
+			_eye.advance(last_field_cd_m2 / EyeAdaptation.FIELD_MID_GREY,
+					last_field_scotopic_cd_m2 / EyeAdaptation.FIELD_MID_GREY, reference_luminance(d_au), adaptation_dt_s)
+			# A new view stays snapped while it is still streaming in, and at least FIELD_SNAP_MIN_S after the jump
+			# (the streaming may not have started on its first frames).
+			_field_snap = _field_snap and (_field_loading
+					or Time.get_ticks_msec() - _field_snap_start_ms < int(FIELD_SNAP_MIN_S * 1000.0))
+		else:
+			_eye.advance(luminance, scotopic, reference_luminance(d_au), adaptation_dt_s)
 		exposure_gain = _eye.gain
 		adaptation_cd_m2 = _eye.adaptation_cd_m2
 		scotopic_cd_m2 = _eye.scotopic_cd_m2
@@ -362,6 +408,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	scene_per_cd_m2 = base * display_gain
 	ShaderGlobals.set_value(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
 	ShaderGlobals.set_value(&"atmosphere_exposure_gain", display_gain)
+	# The field meter reads this frame back in true luminance (nothing measured with the adaptation off).
+	adaptation_meter.set_frame(scene_per_cd_m2 if eye_adaptation_enabled else 0.0, _field_epoch, view_loading)
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
@@ -1055,6 +1103,37 @@ static func penumbra_touches(sun_m: Vector3, moon_m: Vector3, radius_m: float) -
 ## The next update takes the eye as adapted to its view (a new view, a test's fixed instant).
 func snap_adaptation() -> void:
 	_eye.snap()
+	_field_epoch += 1  # field results of the old view are dropped; the first ones of the new view snap the eye
+	_field_valid = false
+	_field_snap = true
+	_field_snap_start_ms = Time.get_ticks_msec()
+
+
+## The newest field measurement of this view (AdaptationMeter): last_field_cd_m2 / last_field_scotopic_cd_m2 and
+## _field_valid. A measurement older than FIELD_STALE_FRAMES frames (the meter detached or not running) falls back to
+## the analytic rule, the next one snaps again.
+func _take_field_measurement() -> void:
+	var result := adaptation_meter.take_result(_field_epoch, _field_serial)
+	if result.is_empty():
+		_field_age += 1
+		if _field_age > FIELD_STALE_FRAMES and _field_valid:
+			_field_valid = false
+			_field_snap = true
+		return
+	_field_age = 0
+	_field_serial = result[2]
+	var counts: PackedInt32Array = result[0]
+	var photopic := AdaptationMeter.field_log_average(counts, 0)
+	if photopic < 0.0:
+		return
+	last_field_cd_m2 = photopic
+	last_field_scotopic_cd_m2 = maxf(AdaptationMeter.field_log_average(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0)
+	_field_loading = result[1]
+	_field_valid = true
+	if _log_adaptation and _field_serial % ADAPTATION_LOG_EVERY == 0:
+		print("adaptation: field %s cd/m^2 (scotopic %s), %s, white-plate rule %s cd/m^2" % [
+				last_field_cd_m2, last_field_scotopic_cd_m2, "loading" if _field_loading else "settled",
+				last_target_cd_m2])
 
 
 ## The Sun light of Godot's lit materials (vehicles, structures: world.gd's DirectionalLight3D) at an Earth-fixed point:

@@ -108,7 +108,8 @@ vehicles still fly through `Us76Atmosphere`).
   `atmosphere_precompute.*` (parallel over table rows), `atmosphere_scattering.*` (CPU evaluation: sun transmittance,
   sky luminance, sky luminance to a point, sun + sky illuminance), `atmosphere_table_file.*` (cache),
   `atmospheric_refraction`, `eclipse.cpp`.
-- Game: `game/world/atmosphere.gd` (`Atmosphere`), `world/eye_adaptation.gd`, `world/vision_effect.gd`,
+- Game: `game/world/atmosphere.gd` (`Atmosphere`), `world/eye_adaptation.gd`, `world/adaptation_meter.gd` (the field meter, eye-adaptation.md),
+  `world/vision_effect.gd`,
   `world/refraction.gd`, `world/lit_aerial.gd`, `world.gd`; shaders `atmosphere.gdshaderinc`, `sky.gdshader`,
   `earth.gdshader` / `earth_clouds.gdshader` (both `earth_surface.gdshaderinc`), `terrain_earth.gdshader`,
   `terrain_moon.gdshader`, `moon.gdshader`, `moon_regolith.gdshaderinc`,

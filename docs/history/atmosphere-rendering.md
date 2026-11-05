@@ -464,3 +464,13 @@ moved the jump (the exclusion's edge) ... edges seen at about Sun -2, -5 and -7 
 counts the step." Measured by the sweep test before the fix: pad jump 0.92 in ln target at Sun 0 deg, 20 km up 0.66 at
 -7.1 deg and 0.62 in the glow at -5.0 deg (a sample entering the 8 deg cutoff). Old values: Sun -3 deg at the pad 464
 (half the glow, 90.8 cd/m^2). Now a soft exclusion and a fade with the Sun's elevation.
+
+## Eye adaptation to the white plate in the game, superseded 2026-11-05 (Task 14, scene-referred)
+Until 2026-11-05 the game's adaptation luminance was the white-plate rule alone (largest of the Sun's plate, the Earth
+in view, the Moon in view, the twilight glow, the lamps; view-independent). It assumed a grey-world field (18 % of the
+plate); on the sunlit Moon the gain stayed 1.000 (plate 41 064 cd/m^2) while the regolith in view measured 660 cd/m^2
+(Apollo 11 view: rendered ground 46 / 255 against the photo's 147). Game values then: Starbase noon gain 1.146, dusk
+(Sun -3.8 deg) 858, 400 km by day 1.000, IM-2 and Apollo 11 1.000, lunar night under the nearly full Earth 3012. The
+rule stays as the fallback and in the GPU checks; the game now adapts to the measured field (eye-adaptation.md). A first
+variant (Ferwerda t.v.i. at L_f, display adapted to 0.18 L_ref) was dropped the same day: it lowered the night's
+maximum gain 5.5x (12 583 -> 2265).

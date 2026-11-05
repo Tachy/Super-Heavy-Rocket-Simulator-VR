@@ -272,6 +272,8 @@ func update_world() -> void:
 	for view in towers:  # the eye sees the lamp-lit surfaces of a site in front of it
 		lamp_cd_m2 = maxf(lamp_cd_m2, view.lamp_adaptation_cd_m2())
 	atmosphere.lamp_adaptation_cd_m2 = lamp_cd_m2
+	# A new view stays snapped to its field until the streamed terrain has loaded (scene-referred adaptation).
+	atmosphere.view_loading = int(earth_terrain.stats.get("nodes_loading", 0)) + int(moon_terrain.stats.get("nodes_loading", 0)) > 0
 	var camera_sun_fraction := 1.0 - core.solar_eclipse_fraction_gcrf(cam, t)
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
@@ -914,7 +916,9 @@ func _setup_environment() -> void:
 	# The cloud pass (CloudEffect, before the transparent pass) and night vision's rod step (EyeAdaptation,
 	# VisionEffect: after the transparent pass, before glow and AgX).
 	var compositor := Compositor.new()
-	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.vision_effect]
+	# The field meter of the eye adaptation (AdaptationMeter, Task 14) reads the cones' image before the rod step.
+	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.adaptation_meter,
+			atmosphere.vision_effect]
 	world_environment.compositor = compositor
 	add_child(world_environment)
 
