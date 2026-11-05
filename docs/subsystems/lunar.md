@@ -79,8 +79,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   footprint slope <= 8 deg, roughness 0.5 m, glide cone clear); on the composed surface (session `moon_surface()`
   with detail on, the `lunar_landing` mission) also the hazard check of `moon-surface.md` (Touchdown hazard check: feet
   step <= stroke 0.6 m, slope over the six pads, ground and rocks under the hull base <= 0.9 m, every roll; limits
-  from the vehicle config by `touchdown_hazard_limits`). IM-2: the nominal point fails (a foot step of 0.78 m), the
-  target moves 20 m.
+  from the vehicle config by `touchdown_hazard_limits`; the hull's rest plane over the feet, every roll). IM-2: the
+  nominal point fails, the target moves 28.3 m. With the hazard check `TouchdownPoint::height_m` is the feet's rest
+  plane under the centre (IM-2: ~0.9 m above LOLA), so the descent targets the height the pads stand on, not LOLA.
+  The landing campaign flies the composed surface (21 / 21 within 1 m, `moon-surface.md`).
   Masses: HLS ~573 t in the LLO, ~566 t at PDI (~500 t NRHO variant), lands ~315 t. Site pass: the LLO waits for a pass
   of the polar site within `max_crossrange_km` (20 km) and trims the plane ~90 deg before it (user 2026-10-15); the
   wait cannot be shortened by the mission epoch (user 2026-10-16: "refuse honestly"; 5.8 d for Mons Mouton). DOI on the
@@ -97,7 +99,9 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   hand-over state, both switch starts; planner plan Task 6 - the former fixed 50/10/30 s phase times left 3.4 t less at
   566 and 500 t PDI); the lateral LQR effort is the vehicle's `[stage.lunar_landing] lateral_effort_fraction` (0.05
   [E]); `gnc::lunar_landing_parameters(stage)` applies it in `begin_powered_descent`. Terminal descent (Apollo P66 style, `LunarDescentPhase::Terminal`, "Endanflug"): 1 m/s sink,
-  throttle >= 0.1 above the minimum and <= 0.95 of the weight floor. Engines off on leg contact. Surface stay: resting
+  throttle >= 0.1 above the minimum and <= 0.95 of the weight floor. Engines off on leg contact, and the attitude hold
+  released (no RCS from the first leg contact, `LunarDescentPhase::Touchdown`): the hull settles on its feet as a free
+  rigid body, as real landers do at contact. Surface stay: resting
   on the legs for `stay_hours`; no boil-off. Ascent (`gnc/lunar_ascent_guidance`, `gnc/peg_steering`): the Raptors start
   at 30 m, vertical rise to 150 m, abort check margin 0.15 (vehicle keys `[stage.lunar_ascent]` [E], applied by
   `gnc::lunar_ascent_parameters(stage)` at liftoff and abort; a stage with fixed legs, or with legs and either table, without every key of `[stage.lunar_landing]` /

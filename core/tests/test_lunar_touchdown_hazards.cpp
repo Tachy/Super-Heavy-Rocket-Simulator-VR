@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -83,10 +84,11 @@ std::pair<double, double> east_north(double lat, double lon, const Vec3& unit) {
     return {dot(d, east), dot(d, north)};
 }
 
-// Independent check of a selected point at one roll: the six feet on support_under_disc, their plane's slope and
-// peak-to-peak spread (heights along the point's vertical).
+// Independent check of a selected point at one roll: the six feet on support_under_disc (heights along the point's
+// vertical) and the plane the hull rests on, found as the supporting plane (every foot on or below it) of a foot
+// triangle containing the centre: its slope and the deepest foot below it.
 struct FeetCheck {
-    double slope_rad, spread_m;
+    double slope_rad, hang_m;
 };
 FeetCheck feet_at_roll(const DetailedLunarTerrain& s, const mission::TouchdownPoint& p, double roll_rad,
                        const mission::TouchdownHazardLimits& h) {
@@ -100,16 +102,39 @@ FeetCheck feet_at_roll(const DetailedLunarTerrain& s, const mission::TouchdownPo
         const Vec3 u = math::normalized(origin + east * e + north * n);
         pts.push_back({e, n, dot(u * (R + s.support_under_disc(u, up, h.foot_pad_radius_m).height_m) - origin, up)});
     }
-    // Evenly spaced legs: the plane's normal equations decouple.
-    double sez = 0, snz = 0, see = 0, snn = 0, sz = 0;
-    for (const auto& q : pts) sez += q.x * q.z, snz += q.y * q.z, see += q.x * q.x, snn += q.y * q.y, sz += q.z;
-    const double a = sez / see, b = snz / snn, c = sz / pts.size();
-    double lo = 1e9, hi = -1e9;
-    for (const auto& q : pts) {
-        lo = std::min(lo, q.z - (a * q.x + b * q.y + c));
-        hi = std::max(hi, q.z - (a * q.x + b * q.y + c));
+    struct Supporting {
+        double c, slope, hang;
+    };
+    std::vector<Supporting> supporting;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        for (size_t j = i + 1; j < pts.size(); ++j) {
+            for (size_t k = j + 1; k < pts.size(); ++k) {
+                const Vec3 nrm = cross(pts[j] - pts[i], pts[k] - pts[i]);
+                if (std::abs(nrm.z) < 1e-9) continue;
+                const double a = -nrm.x / nrm.z, b = -nrm.y / nrm.z, c = pts[i].z - a * pts[i].x - b * pts[i].y;
+                double hang = 0.0;
+                bool all_below = true;
+                for (const auto& q : pts) {
+                    all_below = all_below && q.z <= a * q.x + b * q.y + c + 1e-9;
+                    hang = std::max(hang, a * q.x + b * q.y + c - q.z);
+                }
+                const auto side = [](const Vec3& p0, const Vec3& p1) { return p0.x * p1.y - p0.y * p1.x; };
+                const double s1 = side(pts[i], pts[j]), s2 = side(pts[j], pts[k]), s3 = side(pts[k], pts[i]);
+                const bool inside = (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+                if (all_below && inside) supporting.push_back({c, std::atan(std::hypot(a, b)), hang});
+            }
+        }
     }
-    return {std::atan(std::hypot(a, b)), hi - lo};
+    // the highest supporting planes at the centre (two when it balances on opposite feet): the worst of them
+    double top = -1e9;
+    for (const auto& q : supporting) top = std::max(top, q.c);
+    FeetCheck worst{0.0, 0.0};
+    for (const auto& q : supporting) {
+        if (q.c < top - 1e-9) continue;
+        worst.slope_rad = std::max(worst.slope_rad, q.slope);
+        worst.hang_m = std::max(worst.hang_m, q.hang);
+    }
+    return worst;
 }
 
 }  // namespace
@@ -126,6 +151,91 @@ TEST_CASE("The hazard limits follow from the HLS config", "[moon_surface][lunar]
     config::StageConfig no_legs = stage;
     no_legs.landing_legs.foot_pad_radius_m = 0.0;
     CHECK_THROWS_AS(mission::touchdown_hazard_limits(no_legs), std::invalid_argument);
+}
+
+// Fix round 1 (review I2): the hull rests on the facet of the feet's upper convex hull under its axis, not on their
+// least-squares plane. Six HLS feet on a 7 deg plane, the foot farthest uphill raised by 0.5 m (within the 0.6 m step):
+// the least-squares plane stays below the 8 deg limit, the rest plane through the raised foot exceeds it.
+TEST_CASE("The rest plane is the feet's upper hull facet under the axis", "[moon_surface][lunar][mission]") {
+    const auto h = mission::touchdown_hazard_limits(hls_stage());
+    const double tan7 = std::tan(7.0 * deg);
+    std::vector<Vec3> pts;
+    for (const double az : h.leg_azimuths_rad) {
+        const double e = footprint_m * std::sin(az), n = footprint_m * std::cos(az);
+        pts.push_back({e, n, tan7 * n});
+    }
+    const auto uphill = std::max_element(pts.begin(), pts.end(), [](const Vec3& a, const Vec3& b) { return a.y < b.y; });
+    uphill->z += 0.5;
+    const auto facets = mission::touchdown_rest_planes(pts);
+    REQUIRE_FALSE(facets.empty());
+    // Independent: the supporting planes (every foot on or below) of the foot triangles that contain the centre, the
+    // highest at the centre.
+    struct Supporting {
+        double a, b, c;
+    };
+    std::vector<Supporting> supporting;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        for (size_t j = i + 1; j < pts.size(); ++j) {
+            for (size_t k = j + 1; k < pts.size(); ++k) {
+                const Vec3 nrm = cross(pts[j] - pts[i], pts[k] - pts[i]);
+                if (std::abs(nrm.z) < 1e-9) continue;
+                const double a = -nrm.x / nrm.z, b = -nrm.y / nrm.z, c = pts[i].z - a * pts[i].x - b * pts[i].y;
+                bool all_below = true;
+                for (const auto& q : pts) all_below = all_below && q.z <= a * q.x + b * q.y + c + 1e-9;
+                // the centre inside the triangle (or on an edge): on the same side of all three edges
+                const auto side = [](const Vec3& p0, const Vec3& p1) { return p0.x * p1.y - p0.y * p1.x; };
+                const double s1 = side(pts[i], pts[j]), s2 = side(pts[j], pts[k]), s3 = side(pts[k], pts[i]);
+                const double eps = 1e-9;
+                const bool inside = (s1 >= -eps && s2 >= -eps && s3 >= -eps) || (s1 <= eps && s2 <= eps && s3 <= eps);
+                if (all_below && inside) supporting.push_back({a, b, c});
+            }
+        }
+    }
+    double top = -1e9;
+    for (const auto& q : supporting) top = std::max(top, q.c);
+    std::vector<Supporting> expected;
+    for (const auto& q : supporting) {
+        if (q.c < top - 1e-9) continue;
+        const bool dup = std::any_of(expected.begin(), expected.end(), [&](const Supporting& e) {
+            return std::abs(e.a - q.a) < 1e-9 && std::abs(e.b - q.b) < 1e-9;
+        });
+        if (!dup) expected.push_back(q);
+    }
+    REQUIRE(facets.size() == expected.size());
+    double max_slope = 0.0, max_hang = 0.0;
+    for (const auto& f : facets) {
+        const bool match = std::any_of(expected.begin(), expected.end(), [&](const Supporting& e) {
+            return std::abs(e.a - f.a) < 1e-12 && std::abs(e.b - f.b) < 1e-12 && std::abs(e.c - f.c) < 1e-12;
+        });
+        CHECK(match);
+        double hang = 0.0;
+        for (const auto& q : pts) hang = std::max(hang, f.at(q.x, q.y) - q.z);
+        CHECK(f.hang_m == Catch::Approx(hang).margin(1e-12));
+        max_slope = std::max(max_slope, f.slope_rad());
+        max_hang = std::max(max_hang, f.hang_m);
+    }
+    double sez = 0, snz = 0, see = 0, snn = 0;
+    for (const auto& q : pts) sez += q.x * q.z, snz += q.y * q.z, see += q.x * q.x, snn += q.y * q.y;
+    const double lsq_slope = std::atan(std::hypot(sez / see, snz / snn));
+    const mission::LunarDescentParameters p;
+    std::printf("[touchdown_hazards] %zu rest facet(s): steepest %.2f deg, least-squares %.2f deg, deepest hang %.3f m\n",
+                facets.size(), max_slope / deg, lsq_slope / deg, max_hang);
+    CHECK(lsq_slope < p.slope_limit_rad);
+    CHECK(max_slope > p.slope_limit_rad);
+    CHECK(max_hang > 0.0);
+    CHECK(max_hang < h.max_foot_step_m);
+
+    // On a plane the rest plane is that plane (one facet, however many triangles span it); nothing hangs.
+    std::vector<Vec3> flat;
+    for (const auto& q : pts) flat.push_back({q.x, q.y, 0.1 * q.x + 0.05 * q.y + 1.0});
+    const auto on_plane = mission::touchdown_rest_planes(flat);
+    REQUIRE(on_plane.size() == 1);
+    CHECK(on_plane[0].a == Catch::Approx(0.1).margin(1e-12));
+    CHECK(on_plane[0].b == Catch::Approx(0.05).margin(1e-12));
+    CHECK(on_plane[0].c == Catch::Approx(1.0).margin(1e-12));
+    CHECK(on_plane[0].hang_m < 1e-12);
+    // Feet all on one side of the axis: no rest plane (the hull tips).
+    CHECK(mission::touchdown_rest_planes({{3.0, 1.0, 0.0}, {4.0, -1.0, 0.0}, {5.0, 0.0, 0.0}}).empty());
 }
 
 TEST_CASE("A rock under a planned footpad moves the target to the nearest safe spot", "[moon_surface][lunar][mission]") {
@@ -165,14 +275,17 @@ TEST_CASE("A rock under a planned footpad moves the target to the nearest safe s
     CHECK(point->slope_rad <= p.slope_limit_rad);
     CHECK(point->max_foot_step_m <= h.max_foot_step_m);
     CHECK(point->min_bell_clearance_m >= 0.0);
-    // The nearest safe spot: the grid's next ring (20 m) or the one after it, not farther, on a flat field.
-    CHECK(point->offset_m <= 2.0 * std::sqrt(2.0) * p.touchdown_grid_m + 1e-9);
+    // The nearest safe spot (review M2): no grid candidate nearer than the result passes - the search limited to just
+    // inside its offset finds nothing.
+    auto nearer = p;
+    nearer.touchdown_search_radius_m = point->offset_m - 1e-6;
+    CHECK_FALSE(mission::select_touchdown_point(*s, target_lat, target_lon, 0.0, footprint_m, nearer, h));
     // Independent check at rolls between the sampled ones (the feet on the pad support, as the leg contact).
     for (const double roll : {0.0, 7.0 * deg, 23.0 * deg, 41.0 * deg}) {
         const auto c = feet_at_roll(*s, *point, roll, h);
         CAPTURE(roll);
         CHECK(c.slope_rad <= p.slope_limit_rad);
-        CHECK(c.spread_m <= h.max_foot_step_m);
+        CHECK(c.hang_m <= h.max_foot_step_m);
     }
 }
 
@@ -229,5 +342,32 @@ TEST_CASE("The IM-2 site with full detail has a safe point within the search rad
         CHECK(point->slope_rad <= p.slope_limit_rad);
         CHECK(point->max_foot_step_m <= h.max_foot_step_m);
         CHECK(point->min_bell_clearance_m >= 0.0);
+    }
+}
+
+// Review I3: the cost of a refused site. Hidden (minutes): "[.touchdown_worst]". A bell clearance below zero refuses
+// every candidate only after its full roll sweep and the base check - the most work a candidate can cost - so this is
+// the worst case over the whole 1 km search at IM-2 (every LOLA-admissible candidate checked). A step limit of 1 cm
+// is the cheap refusal (the bound or the first roll).
+TEST_CASE("Worst-case time of a refused site at IM-2", "[.touchdown_worst]") {
+    const std::filesystem::path data = STARSIM_DATA_DIR;
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
+    const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
+    mission::LunarDescentParameters p;
+    if (const char* r = std::getenv("STARSIM_TOUCHDOWN_RADIUS_M")) p.touchdown_search_radius_m = std::atof(r);  // profiling
+    for (const int variant : {0, 1}) {
+        auto h = mission::touchdown_hazard_limits(hls_stage());
+        if (variant == 0) h.max_foot_step_m = 0.01;
+        else h.bell_clearance_m = -1.0;
+        for (int call = 0; call < 2; ++call) {
+            const auto t0 = std::chrono::steady_clock::now();
+            const auto point = mission::select_touchdown_point(*surface, site.latitude_rad, site.longitude_rad,
+                                                               call == 0 ? 180.0 * deg : 0.0, footprint_m, p, h);
+            const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::printf("[touchdown_hazards] refused site (%s), call %d: %s, %.2f s\n",
+                        variant == 0 ? "step 1 cm" : "bell clearance -1 m", call + 1, point ? "found" : "refused", s);
+            std::fflush(stdout);
+            CHECK_FALSE(point);
+        }
     }
 }

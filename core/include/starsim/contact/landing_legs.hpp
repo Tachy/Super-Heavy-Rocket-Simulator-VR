@@ -46,11 +46,29 @@ struct FrictionLimit {
     double dt_s = 0.0;
 };
 
+// Stick-slip state of one foot: while the pad touches, the point on the surface it sticks to (contact frame). Reset
+// when the foot leaves the surface.
+struct FootStick {
+    bool anchored = false;
+    math::Vec3 anchor_m;
+};
+
+// Stick-slip friction (with a FrictionLimit and a FootStick state): a sticking pad is held at its anchor by a
+// tangential spring-damper tuned per tick to the body's effective mass at the foot (shared by the feet in contact):
+// natural frequency stick_omega_dt / dt, critically damped. Explicit stability: omega dt = 0.2 and the damper's
+// 2 omega dt = 0.4 stay well inside the explicit bounds (omega dt < 2, c dt / m < 2). Static load below mu N: the pad
+// holds with a constant offset F_t / k (mm), no creep. Above it the pad slips at mu N (capped to what stops its slip
+// within the tick, as the regularised law) and the anchor follows so that the spring alone carries the slip force.
+inline constexpr double stick_omega_dt = 0.2;  // [E]
+
 // Penalty contact of the feet with the surface. Each foot is a spring-damper (stiffness, damping) in series with a
 // crush core: once the force reaches the crush force the core crushes plastically (constant force, the stroke used so
-// far in `crushed_m`, one per foot, grows; no rebound). Regularised Coulomb friction against the slip. A foot over
-// water gets no support (it sinks: `water` once below the sea). The base ring only reports contact (no force).
+// far in `crushed_m`, one per foot, grows; no rebound). Friction: Coulomb stick-slip (see above) when both
+// `friction_limit` and `stick` (one entry per foot, resized here) are given; otherwise the regularised law (mu N
+// against the slip, linear below friction_regularization 0.1 m/s - a steady creep under any tangential load). A foot
+// over water gets no support (it sinks: `water` once below the sea). The base ring only reports contact (no force).
 LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, const SitePose& pose,
-                       const LandingSurface& surface, const FrictionLimit* friction_limit = nullptr);
+                       const LandingSurface& surface, const FrictionLimit* friction_limit = nullptr,
+                       std::vector<FootStick>* stick = nullptr);
 
 }  // namespace starsim::contact

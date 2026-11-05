@@ -213,3 +213,59 @@ TEST_CASE("HLS leg kinematics: deployed on the config foot, stowed along the hul
     }
     CHECK(contact::leg_deployed_angle_rad(legs) == Catch::Approx(97.5164 * deg).margin(1e-4));
 }
+
+// Fix round 1 of Task 5 (Moon procedural surface plan): Coulomb stick-slip friction. An upright HLS (translation only,
+// rotation locked: the friction limit's inertia is huge, so the stick spring is tuned to the full mass) stands on a
+// plane in lunar gravity, integrated semi-implicitly at the session's 200 Hz tick.
+namespace {
+struct SlopeRun {
+    double drift_m;      // horizontal travel between t = 10 s and t = 30 s
+    double speed_mps;    // horizontal speed at the end
+};
+SlopeRun stand_on_slope(double slope_deg, double duration_s) {
+    const auto legs = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls").stages.front().landing_legs;
+    const auto g = contact::make_leg_geometry(legs, 0.0, 4.5);
+    contact::LandingSurface slope;
+    slope.field = std::make_shared<contact::PlaneField>(slope_deg * deg, 0.0);  // rises towards the north
+    constexpr double mass_kg = 315.0e3, gravity_mps2 = 1.62, dt_s = 0.005;  // HLS ~0.51 MN on the Moon
+    const contact::FrictionLimit limit{mass_kg, {1e15, 1e15, 1e15}, dt_s};
+    auto pose = upright(g, 12.0, 0.0);
+    // start with the foot nearest the plane just touching
+    double nearest = 1e9;
+    for (const auto& f : g.feet) {
+        const Vec3 p = pose.cg_m + pose.body_to_site * (f - Vec3{12.0, 0.0, 0.0});
+        nearest = std::min(nearest, p.z - std::tan(slope_deg * deg) * p.y);
+    }
+    pose.cg_m.z -= nearest;
+    std::vector<double> crushed;
+    std::vector<contact::FootStick> stick;
+    Vec3 at_10s;
+    const int steps = static_cast<int>(duration_s / dt_s);
+    for (int i = 0; i < steps; ++i) {
+        if (i == static_cast<int>(10.0 / dt_s)) at_10s = pose.cg_m;
+        const auto c = contact::leg_contact(g, crushed, pose, slope, &limit, &stick);
+        pose.velocity_mps += (c.force_n / mass_kg + Vec3{0.0, 0.0, -gravity_mps2}) * dt_s;
+        pose.cg_m += pose.velocity_mps * dt_s;
+    }
+    return {std::hypot(pose.cg_m.x - at_10s.x, pose.cg_m.y - at_10s.y),
+            std::hypot(pose.velocity_mps.x, pose.velocity_mps.y)};
+}
+}  // namespace
+
+TEST_CASE("Stick friction: a lander resting on a 9 degree plane does not creep", "[contact][legs]") {
+    // tan 9 deg = 0.16 of the load tangential, below mu = 0.6: the pads stick. The regularised law crept at
+    // 0.1 m/s x 0.16 / 0.6 ~ 2.6 cm/s (0.5 m in 20 s).
+    const auto run = stand_on_slope(9.0, 30.0);
+    CAPTURE(run.drift_m, run.speed_mps);
+    CHECK(run.drift_m < 1.0e-3);
+    CHECK(run.speed_mps < 1.0e-4);
+}
+
+TEST_CASE("Stick friction: above the friction angle the lander slides at g (sin - mu cos)", "[contact][legs]") {
+    // 35 deg > atan 0.6 = 31 deg: the pads slip; along the slope a = 1.62 (sin 35 - 0.6 cos 35) = 0.133 m/s^2.
+    const auto run = stand_on_slope(35.0, 12.0);
+    const double expected = 1.62 * (std::sin(35.0 * deg) - 0.6 * std::cos(35.0 * deg)) * std::cos(35.0 * deg);
+    CAPTURE(run.speed_mps, expected);
+    // horizontal speed after 12 s of sliding from rest (the first contact settles within a fraction of a second)
+    CHECK(run.speed_mps == Catch::Approx(expected * 12.0).epsilon(0.1));
+}

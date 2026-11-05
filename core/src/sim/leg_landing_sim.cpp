@@ -202,12 +202,13 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         if (v.leg_deployment() < 1.0) {  // legs still moving: no support, only the base can touch
             auto base_only = tr.geometry;
             base_only.feet.clear();
+            tr.stick.clear();
             tr.contact = contact::leg_contact(base_only, tr.crushed_m, contact_pose, contact_surface);
             continue;
         }
         const auto mass = v.mass_properties();
         const contact::FrictionLimit limit{mass.mass_kg, mass.inertia_kg_m2, tick_s_};
-        tr.contact = contact::leg_contact(tr.geometry, tr.crushed_m, contact_pose, contact_surface, &limit);
+        tr.contact = contact::leg_contact(tr.geometry, tr.crushed_m, contact_pose, contact_surface, &limit, &tr.stick);
         if (tr.contact.feet_in_contact > 0) {
             body->apply_external_wrench(contact_to_gcrf * tr.contact.force_n,
                                         body->state().attitude.inverse_rotate(contact_to_gcrf * tr.contact.torque_nm));

@@ -53,12 +53,14 @@ double braking_range_m(double pdi_speed_mps, double mass_kg, double thrust_n, co
 struct TouchdownPoint {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    double height_m = 0.0;   // terrain above the sphere (with the hazard check: the footpad plane under the centre)
-    double slope_rad = 0.0;  // of the footprint's plane (with the hazard check: the steepest footpad plane of any roll)
+    // Terrain above the sphere. With the hazard check: the feet's rest plane under the centre (mean over the rolls) -
+    // the descent then targets the height the pads stand on (at IM-2 ~1 m above LOLA), not the LOLA height.
+    double height_m = 0.0;
+    double slope_rad = 0.0;  // of the footprint's plane (with the hazard check: the steepest rest plane of any roll)
     double offset_m = 0.0;   // from the mission's site
-    // Diagnostics of the hazard check (NaN where it did not run: LOLA only or detail off). The largest peak-to-peak
-    // deviation of the six foot supports from their plane over the rolls, and the smallest gap between the highest
-    // ground or rock under the hull base and the lowest engine exit with the legs fully stroked (>= 0 when admissible).
+    // Diagnostics of the hazard check (NaN where it did not run: LOLA only or detail off). The deepest foot hanging
+    // below the rest plane over the rolls, and the smallest gap between the highest ground or rock under the hull base
+    // and the lowest engine exit with the legs fully stroked (>= 0 when admissible).
     double max_foot_step_m = std::numeric_limits<double>::quiet_NaN();
     double min_bell_clearance_m = std::numeric_limits<double>::quiet_NaN();
 };
@@ -67,19 +69,41 @@ struct TouchdownPoint {
 // vehicle config).
 struct TouchdownHazardLimits {
     double foot_pad_radius_m = 0.0;  // the footpad disc ([stage.landing_legs] foot_pad_radius_m)
-    double max_foot_step_m = 0.0;    // per-foot height spread the legs absorb: peak-to-peak off the feet's plane
+    double max_foot_step_m = 0.0;    // deepest foot hanging below the rest plane (a conservative bound, see below)
     double bell_clearance_m = 0.0;   // lowest engine exit above the footpad plane minus margin (the full leg stroke)
     double base_radius_m = 0.0;      // the hull base disc the engine bells lie in (rocks and ground under it)
     std::vector<double> leg_azimuths_rad;  // the legs on the footprint circle (the roll at touchdown is free)
 };
 
-// From a lander stage's config ([D]): foot_pad_radius_m as configured; max_foot_step_m = stroke_m (the crush core's
-// travel takes a foot that stands higher than the plane through the others; a larger step bottoms the leg out);
-// bell_clearance_m = (lowest engine-group station - foot_station_m) - stroke_m (the exits sit at their group's station
-// - the HLS's are flush with the aft end, detail file engine_recess 0 - and the legs may stroke fully at touchdown);
-// base_radius_m = diameter_m / 2 (the bells lie inside the hull, whose aft edge is at the same station). Throws
-// std::invalid_argument for a stage without legs, footpad radius or engines.
+// From a lander stage's config ([D]):
+// - foot_pad_radius_m as configured;
+// - max_foot_step_m = stroke_m, a conservative bound on the hanging feet and on the tilt to a third foot: statically
+//   no crush core crushes (HLS: 4.5 MN per leg against ~0.5 MN lunar weight, 6-9 mm elastic), so the legs do not level
+//   the feet - the rigid hull rests on the three feet of its rest plane and the others hang below it. A hang within
+//   the stroke keeps a rock-to-rest-plane mismatch small against the leg geometry (a rocking onto another facet tilts
+//   the hull by at most ~atan(stroke / footprint radius), 2.9 deg for the HLS) and leaves a foot that lands on the high
+//   point the crush stroke to take it;
+// - bell_clearance_m = (lowest engine-group station - foot_station_m) - stroke_m. Assumption: an engine group's
+//   station_m (its thrust point) is its exit plane - true for the HLS (detail file engine_recess 0, exits flush with the
+//   aft end); a lander with recessed or protruding nozzles needs the exit station here (generous otherwise). The legs
+//   may stroke fully at touchdown;
+// - base_radius_m = diameter_m / 2 (the bells lie inside the hull, whose aft edge is at the same station).
+// Throws std::invalid_argument for a stage without legs, footpad radius or engines.
 TouchdownHazardLimits touchdown_hazard_limits(const config::StageConfig& stage);
+
+// The planes a rigid lander rests on over its feet, given as (east, north, height) with the hull axis at e = n = 0: the
+// facets of the feet's upper convex hull above the centre - the foot triangles containing the centre whose plane is
+// highest there (the feet's concave envelope at the centre) and has every foot on or below it. One facet, or two when
+// the centre lies on the hull's edge between two opposite feet (common for an even leg count: the hull balances on
+// them and may tip onto either side - both are checked). hang_m: the deepest foot below the facet. Empty when no
+// triangle of feet contains the centre (the hull would tip).
+struct TouchdownRestPlane {
+    double a = 0.0, b = 0.0, c = 0.0;  // z = a e + b n + c
+    double hang_m = 0.0;
+    double at(double e, double n) const { return a * e + b * n + c; }
+    double slope_rad() const;
+};
+std::vector<TouchdownRestPlane> touchdown_rest_planes(const std::vector<math::Vec3>& feet_enz);
 
 // Nearest admissible touchdown point to (latitude, longitude) for an approach towards `approach_azimuth_rad`
 // (clockwise from north): footprint (the leg circle and its centre) fits a plane within the slope and roughness limits,
@@ -93,9 +117,12 @@ std::optional<TouchdownPoint> select_touchdown_point(const environment::LunarTer
 // candidates that pass the LOLA checks above (nearest first) the first whose footprint is admissible for every roll of
 // the lander about its axis (the roll at touchdown is not controlled): the six feet stand on the pivoting-pad support
 // the leg contact uses (support_under_disc), sampled on the footprint circle at hazard_roll_spacing_per_pad_radius x
-// the pad radius; per roll the feet's least-squares plane is within the slope limit, the feet's peak-to-peak deviation
-// from it within max_foot_step_m, and the ground and rock tops under the hull base disc rise above it by at most
-// bell_clearance_m. Detail off: the LOLA-only selection above on surface.lola(), bit for bit.
+// the pad radius; per roll the rest planes over the feet (touchdown_rest_planes) are within the slope limit, the deepest
+// hanging foot within max_foot_step_m, and the ground and rock tops under the hull base disc rise above each rest plane
+// by at most bell_clearance_m. Before any disc query a cheap bound refuses a candidate whose opposite feet already
+// exceed the step limit (support_upper_bound_m against the ground under the pad centres). The hazard results are
+// memoised per candidate for the surface / footprint / limits (they do not depend on the approach azimuth). Detail
+// off: the LOLA-only selection above on surface.lola(), bit for bit.
 std::optional<TouchdownPoint> select_touchdown_point(const environment::DetailedLunarTerrain& surface,
                                                      double latitude_rad, double longitude_rad,
                                                      double approach_azimuth_rad, double footprint_radius_m,

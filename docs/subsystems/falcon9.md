@@ -22,7 +22,9 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 - Landing legs (`contact/landing_legs`, `contact/landing_surface`, `sim/leg_landing_sim`): `Vehicle::deploy_legs`
   (sticky, `deploy_time_s`; `FlightSession::deploy_legs` / `set_leg_deployment`); once the legs move `LegLandingSim`
   owns the ground contact: four feet as spring-dampers in series with plastic crush cores (`stroke_m`,
-  `crush_force_n`), friction capped at what stops a foot's slip within a tick. Surface: the site's ground plane with
+  `crush_force_n`), Coulomb stick-slip friction (a sticking pad held at its anchor by a tangential spring-damper tuned
+  per tick to the effective mass at the foot, `contact::stick_omega_dt`; slipping at mu N, capped at what stops a
+  foot's slip within a tick). Surface: the site's ground plane with
   shoreline, or a deck over the sea (`FlightSession::set_landing_surface`). Judgement (`FlightSession::leg_touchdown`):
   "gelandet" (>= 3 feet, engines off, at rest 2 s -> `FlightBody::hold_landed`), "umgekippt" (> 30 deg on a foot),
   "Aufprall" (core used up, base on the surface, legs not fully out), "Wasserung".

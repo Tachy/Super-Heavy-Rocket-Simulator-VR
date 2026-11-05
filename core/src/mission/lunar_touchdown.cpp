@@ -12,10 +12,20 @@
 //   plane by more than the ground does (an upper bound of each rock's top decides whether its footprint is sampled).
 
 #include <algorithm>
+#include <bit>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "starsim/mission/lunar_descent.hpp"
@@ -112,39 +122,29 @@ LocalFrame local_frame(const LatLon& c, double height_m, double sphere_m) {
     return {up * (sphere_m + height_m), {-so, co, 0.0}, {-sl * co, -sl * so, cl}, up, sphere_m};
 }
 
-struct Plane {
-    double a, b, c;  // z = a e + b n + c
-    double at(double e, double n) const { return a * e + b * n + c; }
-};
-
-// Least-squares plane through (e, n, z) points (>= 3, not collinear).
-Plane fit_plane(const std::vector<math::Vec3>& pts) {
-    double s1 = 0, se = 0, sn = 0, see = 0, snn = 0, sen = 0, sz = 0, sez = 0, snz = 0;
-    for (const auto& p : pts) {
-        s1 += 1.0;
-        se += p.x;
-        sn += p.y;
-        see += p.x * p.x;
-        snn += p.y * p.y;
-        sen += p.x * p.y;
-        sz += p.z;
-        sez += p.x * p.z;
-        snz += p.y * p.z;
-    }
-    // [see sen se; sen snn sn; se sn s1] (a b c) = (sez snz sz), Cramer's rule.
-    const auto det3 = [](double a11, double a12, double a13, double a21, double a22, double a23, double a31, double a32,
-                         double a33) {
-        return a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31) + a13 * (a21 * a32 - a22 * a31);
-    };
-    const double d = det3(see, sen, se, sen, snn, sn, se, sn, s1);
-    return {det3(sez, sen, se, snz, snn, sn, sz, sn, s1) / d, det3(see, sez, se, sen, snz, sn, se, sz, s1) / d,
-            det3(see, sen, sez, sen, snn, snz, se, sn, sz) / d};
-}
-
 struct HazardResult {
     bool admissible = false;
     double height_m = 0.0, slope_rad = 0.0, max_step_m = 0.0, min_clearance_m = 0.0;
 };
+
+// Antipodal leg pairs (k, k') of the layout, or empty when not every leg has an opposite one.
+std::vector<std::pair<int, int>> antipodal_pairs(const std::vector<double>& azimuths_rad) {
+    constexpr double tolerance_rad = 1e-9;
+    std::vector<std::pair<int, int>> pairs;
+    const int legs = static_cast<int>(azimuths_rad.size());
+    for (int k = 0; k < legs; ++k) {
+        int opposite = -1;
+        for (int j = 0; j < legs && opposite < 0; ++j) {
+            const double d = std::remainder(azimuths_rad[static_cast<size_t>(j)] - azimuths_rad[static_cast<size_t>(k)] -
+                                                constants::pi,
+                                            constants::two_pi);
+            if (std::abs(d) < tolerance_rad) opposite = j;
+        }
+        if (opposite < 0) return {};
+        if (k < opposite) pairs.emplace_back(k, opposite);
+    }
+    return pairs;
+}
 
 // The hazard check of one candidate (centre on its LOLA height) for every roll; stops at the first failed roll.
 HazardResult check_hazards(const environment::DetailedLunarTerrain& surface, const LatLon& centre, double lola_height_m,
@@ -157,42 +157,77 @@ HazardResult check_hazards(const environment::DetailedLunarTerrain& surface, con
                                            (hazard_roll_spacing_per_pad_radius * h.foot_pad_radius_m)));
     rolls = ((rolls + legs - 1) / legs) * legs;
     const double step = constants::two_pi / rolls;
+    const auto key_of = [&](double azimuth) {
+        double az = std::fmod(azimuth, constants::two_pi);
+        if (az < 0.0) az += constants::two_pi;
+        return std::llround(az / step * 1.0e6);
+    };
+    const auto foot_az = [&](int roll, int leg) { return roll * step + h.leg_azimuths_rad[static_cast<size_t>(leg)]; };
+
+    // Cheap reject of a roll before its disc queries: for evenly paired legs the deepest hanging foot below the rest
+    // plane is at least half the spread of the opposite pairs' height sums (a rest plane P is linear,
+    // P(k) + P(k') = 2 P(0), and P(0), the feet's concave envelope at the centre, is at least every pair's mean),
+    // bounded with the pad support's cheap lower (the contact ground at the pad centre, one of the disc samples) and
+    // upper bounds (support_upper_bound_m). A roll that already exceeds the step limit this way refuses the candidate.
+    const auto pairs = antipodal_pairs(h.leg_azimuths_rad);
+    std::unordered_map<long long, std::pair<double, double>> bounds;  // azimuth key -> (lower, upper) local heights
+    const auto bound = [&](double azimuth) -> const std::pair<double, double>& {
+        const long long key = key_of(azimuth);
+        const auto it = bounds.find(key);
+        if (it != bounds.end()) return it->second;
+        const double e = footprint_radius_m * std::sin(azimuth), n = footprint_radius_m * std::cos(azimuth);
+        const math::Vec3 u = f.vertical(e, n);
+        const double lower = f.local_height(u, surface.contact_ground_m(u));
+        const double upper = f.local_height(u, surface.support_upper_bound_m(u, f.up, h.foot_pad_radius_m));
+        return bounds.emplace(key, std::pair{lower, std::max(lower, upper)}).first->second;
+    };
+    const auto bound_rejects = [&](int roll) {
+        if (pairs.empty()) return false;
+        double max_low = -std::numeric_limits<double>::infinity(), min_high = -max_low;
+        for (const auto& [k, j] : pairs) {
+            const auto& bk = bound(foot_az(roll, k));
+            const auto& bj = bound(foot_az(roll, j));
+            max_low = std::max(max_low, bk.first + bj.first);
+            min_high = std::min(min_high, bk.second + bj.second);
+        }
+        return 0.5 * (max_low - min_high) > h.max_foot_step_m;
+    };
 
     std::unordered_map<long long, math::Vec3> feet;  // quantised azimuth -> (e, n, z)
     const auto foot = [&](double azimuth) -> const math::Vec3& {
-        double az = std::fmod(azimuth, constants::two_pi);
-        if (az < 0.0) az += constants::two_pi;
-        const long long key = std::llround(az / step * 1.0e6);
+        const long long key = key_of(azimuth);
         const auto it = feet.find(key);
         if (it != feet.end()) return it->second;
-        const double e = footprint_radius_m * std::sin(az), n = footprint_radius_m * std::cos(az);
+        const double e = footprint_radius_m * std::sin(azimuth), n = footprint_radius_m * std::cos(azimuth);
         const math::Vec3 u = f.vertical(e, n);
         const auto s = surface.support_under_disc(u, f.up, h.foot_pad_radius_m);
         return feet.emplace(key, math::Vec3{e, n, f.local_height(u, s.height_m)}).first->second;
     };
 
     HazardResult r;
-    std::vector<Plane> planes;
+    std::vector<TouchdownRestPlane> planes;  // every roll's facets
     std::vector<math::Vec3> pts(static_cast<size_t>(legs));
     double height_sum = 0.0;
+    int roll_count = 0;
     for (int i = 0; i < rolls; ++i) {
-        for (int k = 0; k < legs; ++k) pts[static_cast<size_t>(k)] = foot(i * step + h.leg_azimuths_rad[static_cast<size_t>(k)]);
-        const Plane pl = fit_plane(pts);
-        double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-        for (const auto& q : pts) {
-            const double d = q.z - pl.at(q.x, q.y);
-            lo = std::min(lo, d);
-            hi = std::max(hi, d);
+        if (bound_rejects(i)) {
+            r.max_step_m = std::numeric_limits<double>::infinity();  // refused by the bound (no exact value)
+            return r;
         }
-        const double slope = std::atan(std::hypot(pl.a, pl.b));
-        r.slope_rad = std::max(r.slope_rad, slope);
-        r.max_step_m = std::max(r.max_step_m, hi - lo);
-        if (slope > p.slope_limit_rad || hi - lo > h.max_foot_step_m) return r;
-        planes.push_back(pl);
-        height_sum += pl.c;
+        for (int k = 0; k < legs; ++k) pts[static_cast<size_t>(k)] = foot(foot_az(i, k));
+        const auto facets = touchdown_rest_planes(pts);
+        if (facets.empty()) return r;  // no foot triangle under the axis: the hull would tip
+        for (const auto& rest : facets) {  // balanced on an edge: it may tip onto either side
+            r.slope_rad = std::max(r.slope_rad, rest.slope_rad());
+            r.max_step_m = std::max(r.max_step_m, rest.hang_m);
+            if (rest.slope_rad() > p.slope_limit_rad || rest.hang_m > h.max_foot_step_m) return r;
+            planes.push_back(rest);
+        }
+        height_sum += facets.front().c;
+        ++roll_count;
     }
 
-    // Hull base: the ground's highest rise above each roll's plane, then the rocks that can top it.
+    // Hull base: the ground's highest rise above each roll's rest plane, then the rocks that can top it.
     std::vector<double> rise(planes.size(), -std::numeric_limits<double>::infinity());
     const auto add_sample = [&](double e, double n, double z) {
         for (size_t i = 0; i < planes.size(); ++i) rise[i] = std::max(rise[i], z - planes[i].at(e, n));
@@ -236,8 +271,72 @@ HazardResult check_hazards(const environment::DetailedLunarTerrain& surface, con
     for (const double x : rise) r.min_clearance_m = std::min(r.min_clearance_m, h.bell_clearance_m - x);
     if (r.min_clearance_m < 0.0) return r;
     r.admissible = true;
-    r.height_m = lola_height_m + height_sum / static_cast<double>(planes.size());
+    r.height_m = lola_height_m + height_sum / static_cast<double>(roll_count);
     return r;
+}
+
+// Memo of the hazard results (they do not depend on the approach azimuth, only the glide cone does): the mission's
+// reachability check (both azimuths) and the descent planner ask for the same candidates. One context at a time (the
+// surface's parts by ownership - a freed and reallocated part never matches -, its options, the footprint, the slope
+// limit and the hazard limits); per candidate centre (latitude / longitude bits). Thread-safe (the lock is not held
+// while a candidate is checked).
+class HazardMemo {
+public:
+    std::optional<HazardResult> find(const environment::DetailedLunarTerrain& s, double footprint_m,
+                                     const LunarDescentParameters& p, const TouchdownHazardLimits& h,
+                                     const LatLon& c) {
+        const std::lock_guard lock(mutex_);
+        if (!same_context(s, footprint_m, p, h)) return std::nullopt;
+        const auto it = results_.find(key(c));
+        if (it == results_.end()) return std::nullopt;
+        return it->second;
+    }
+    void store(const environment::DetailedLunarTerrain& s, double footprint_m, const LunarDescentParameters& p,
+               const TouchdownHazardLimits& h, const LatLon& c, const HazardResult& r) {
+        const std::lock_guard lock(mutex_);
+        if (!same_context(s, footprint_m, p, h) || results_.size() >= max_entries) {
+            results_.clear();
+            lola_ = s.lola_shared();
+            detail_ = s.detail_shared();
+            rocks_ = s.rocks_shared();
+            options_ = s.options();
+            footprint_m_ = footprint_m;
+            slope_limit_rad_ = p.slope_limit_rad;
+            limits_ = h;
+        }
+        results_[key(c)] = r;
+    }
+
+private:
+    static constexpr size_t max_entries = 50'000;  // [E] > the ~7,850 candidates of a 1 km / 20 m search, ~3 MB
+    static std::pair<std::uint64_t, std::uint64_t> key(const LatLon& c) {
+        return {std::bit_cast<std::uint64_t>(c.latitude_rad), std::bit_cast<std::uint64_t>(c.longitude_rad)};
+    }
+    template <typename T>
+    static bool same_owner(const std::weak_ptr<const T>& w, const std::shared_ptr<const T>& s) {
+        return !w.owner_before(s) && !s.owner_before(w) && (s != nullptr || w.expired());
+    }
+    bool same_context(const environment::DetailedLunarTerrain& s, double footprint_m, const LunarDescentParameters& p,
+                      const TouchdownHazardLimits& h) const {
+        return !lola_.expired() && same_owner(lola_, s.lola_shared()) && same_owner(detail_, s.detail_shared()) &&
+               same_owner(rocks_, s.rocks_shared()) && options_ == s.options() && footprint_m_ == footprint_m &&
+               slope_limit_rad_ == p.slope_limit_rad && limits_.foot_pad_radius_m == h.foot_pad_radius_m &&
+               limits_.max_foot_step_m == h.max_foot_step_m && limits_.bell_clearance_m == h.bell_clearance_m &&
+               limits_.base_radius_m == h.base_radius_m && limits_.leg_azimuths_rad == h.leg_azimuths_rad;
+    }
+    std::mutex mutex_;
+    std::weak_ptr<const environment::LunarTerrain> lola_;
+    std::weak_ptr<const environment::LunarSurfaceDetail> detail_;
+    std::weak_ptr<const environment::LunarRocks> rocks_;
+    environment::SurfaceDetailOptions options_;
+    double footprint_m_ = 0.0, slope_limit_rad_ = 0.0;
+    TouchdownHazardLimits limits_;
+    std::map<std::pair<std::uint64_t, std::uint64_t>, HazardResult> results_;
+};
+
+HazardMemo& hazard_memo() {
+    static HazardMemo memo;
+    return memo;
 }
 
 // Candidates on the grid, nearest first; the first that passes the LOLA checks and `accept` (filling the point's
@@ -298,9 +397,24 @@ std::optional<TouchdownPoint> select_touchdown_point(const environment::Detailed
     if (hazards.leg_azimuths_rad.size() < 3 || !(hazards.foot_pad_radius_m > 0.0) || !(footprint_radius_m > 0.0)) {
         throw std::invalid_argument("select_touchdown_point: Gefahrenprüfung braucht mindestens drei Beine und Fußteller");
     }
-    return search(surface.lola(), latitude_rad, longitude_rad, approach_azimuth_rad, footprint_radius_m, p,
+    static const bool debug = std::getenv("STARSIM_DEBUG_TOUCHDOWN") != nullptr;  // diagnostics
+    int checked = 0, by_bound = 0, remembered = 0;
+    double checked_ms = 0.0;
+    auto result = search(surface.lola(), latitude_rad, longitude_rad, approach_azimuth_rad, footprint_radius_m, p,
                   [&](const LatLon& centre, TouchdownPoint& point) {
-                      const auto r = check_hazards(surface, centre, point.height_m, footprint_radius_m, p, hazards);
+                      auto& memo = hazard_memo();
+                      auto known = memo.find(surface, footprint_radius_m, p, hazards, centre);
+                      if (known) {
+                          ++remembered;
+                      } else {
+                          const auto t0 = std::chrono::steady_clock::now();
+                          known = check_hazards(surface, centre, point.height_m, footprint_radius_m, p, hazards);
+                          checked_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                          ++checked;
+                          by_bound += std::isinf(known->max_step_m) ? 1 : 0;
+                          memo.store(surface, footprint_radius_m, p, hazards, centre, *known);
+                      }
+                      const HazardResult& r = *known;
                       if (!r.admissible) return false;
                       point.height_m = r.height_m;
                       point.slope_rad = r.slope_rad;
@@ -308,6 +422,61 @@ std::optional<TouchdownPoint> select_touchdown_point(const environment::Detailed
                       point.min_bell_clearance_m = r.min_clearance_m;
                       return true;
                   });
+    if (debug) {
+        std::printf("[touchdown] hazard checks %d (%d refused by the bound, %.1f ms), %d from the memo: %s\n", checked,
+                    by_bound, checked_ms, remembered, result ? "found" : "refused");
+    }
+    return result;
+}
+
+double TouchdownRestPlane::slope_rad() const { return std::atan(std::hypot(a, b)); }
+
+std::vector<TouchdownRestPlane> touchdown_rest_planes(const std::vector<math::Vec3>& feet_enz) {
+    // Barycentric tolerance for the centre on a triangle's edge (between two opposite feet).
+    constexpr double edge_tolerance = 1e-12;
+    constexpr double tie_m = 1e-9;  // [E] plane heights at the centre this close are a tie; a foot this far above a
+                                    // plane still counts as on it
+    std::vector<TouchdownRestPlane> candidates;
+    double highest = -std::numeric_limits<double>::infinity();
+    const size_t count = feet_enz.size();
+    for (size_t i = 0; i < count; ++i) {
+        for (size_t j = i + 1; j < count; ++j) {
+            for (size_t k = j + 1; k < count; ++k) {
+                const auto& A = feet_enz[i];
+                const auto& B = feet_enz[j];
+                const auto& C = feet_enz[k];
+                const double det = (B.x - A.x) * (C.y - A.y) - (C.x - A.x) * (B.y - A.y);
+                if (std::abs(det) < 1e-12) continue;  // collinear in plan view
+                // barycentric coordinates of the centre (0, 0)
+                const double wb = ((-A.x) * (C.y - A.y) - (C.x - A.x) * (-A.y)) / det;
+                const double wc = ((B.x - A.x) * (-A.y) - (-A.x) * (B.y - A.y)) / det;
+                const double wa = 1.0 - wb - wc;
+                if (wa < -edge_tolerance || wb < -edge_tolerance || wc < -edge_tolerance) continue;
+                const math::Vec3 normal = cross(B - A, C - A);  // plane z = a e + b n + c through A, B, C
+                const double a = -normal.x / normal.z, b = -normal.y / normal.z;
+                candidates.push_back({a, b, A.z - a * A.x - b * A.y, 0.0});
+                highest = std::max(highest, candidates.back().c);
+            }
+        }
+    }
+    // The envelope's facets at the centre: the highest planes there that support every foot (two when the centre lies
+    // on the upper hull's edge between two opposite feet - one on each side of it).
+    std::vector<TouchdownRestPlane> facets, tied;
+    for (auto& plane : candidates) {
+        if (plane.c < highest - tie_m) continue;
+        bool supports = true;
+        for (const auto& q : feet_enz) {
+            const double below = plane.at(q.x, q.y) - q.z;
+            supports = supports && below > -tie_m;
+            plane.hang_m = std::max(plane.hang_m, below);
+        }
+        auto& into = supports ? facets : tied;
+        const bool known = std::any_of(into.begin(), into.end(), [&](const TouchdownRestPlane& q) {
+            return std::abs(q.a - plane.a) < tie_m && std::abs(q.b - plane.b) < tie_m && std::abs(q.c - plane.c) < tie_m;
+        });  // coplanar feet give the same facet from several triangles
+        if (!known) into.push_back(plane);
+    }
+    return facets.empty() ? tied : facets;  // rounding: the tied planes when none supports within tie_m
 }
 
 TouchdownHazardLimits touchdown_hazard_limits(const config::StageConfig& stage) {

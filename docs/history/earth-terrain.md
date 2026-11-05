@@ -116,3 +116,7 @@ and on the geoid at sea; the renderer (Plan B, section "Terrain rendering") draw
     terrain" - landed 0.01 m from the centre, 6.4 t left, feet at -26.0356 m on the -26.0300 m plateau (5.6 mm leg
     contact compression).
 
+- Leg creep on slopes (open point until 2026-11-05): the regularised leg friction (linear below 0.1 m/s slip) let
+  landing legs creep downhill at ~0.054 m/s on slopes >= 2 deg, so a touchdown on a slope was never judged landed.
+  Replaced by Coulomb stick-slip friction in `contact::leg_contact` (Moon procedural surface plan, Task 5 fix round 1;
+  `[contact][legs]` "Stick friction: a lander resting on a 9 degree plane does not creep").

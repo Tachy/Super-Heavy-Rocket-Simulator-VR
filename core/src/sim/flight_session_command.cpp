@@ -79,6 +79,14 @@ vehicle::VehicleCommand FlightSession::steering_command_for(size_t index, double
     const bool lunar_descent = lunar_step_ == LunarStep::PoweredDescent && lunar_landing_;
     const bool lunar_ascent =
         (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent) && lunar_ascent_;
+    if (index == controlled_ && autopilot_.state == AutopilotState::Lunar && lunar_descent &&
+        (lunar_landing_->phase() == gnc::LunarDescentPhase::Touchdown ||
+         lunar_landing_->phase() == gnc::LunarDescentPhase::Landed)) {
+        // After the first leg contact the guidance releases the attitude hold, as real landers do at contact: engines
+        // and RCS off, the hull settles on its feet as a free rigid body (an RCS rate damper held it on two feet for
+        // ~50 s on uneven ground).
+        return command;
+    }
     if (index == controlled_ && autopilot_.state == AutopilotState::Lunar && (lunar_descent || lunar_ascent)) {
         // Powered lunar descent and ascent: flown as the ship's landing burn (gimbals + RCS; the fixed vacuum Raptors:
         // RCS only; the canted landing thrusters: differential throttling).

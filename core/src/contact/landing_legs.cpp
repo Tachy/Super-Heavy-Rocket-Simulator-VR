@@ -43,10 +43,16 @@ LegGeometry make_leg_geometry(const config::LandingLegConfig& legs, double stage
 }
 
 LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, const SitePose& pose,
-                       const LandingSurface& surface, const FrictionLimit* friction_limit) {
+                       const LandingSurface& surface, const FrictionLimit* friction_limit,
+                       std::vector<FootStick>* stick) {
     LegContact result;
     crushed_m.resize(legs.feet.size(), 0.0);
     result.foot_compression_m.assign(legs.feet.size(), 0.0);
+    const bool stick_slip = friction_limit && stick;
+    if (stick) stick->resize(legs.feet.size());
+    const auto release = [&](size_t i) {
+        if (stick) (*stick)[i].anchored = false;
+    };
     const Vec3 station_axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
     const auto& c = legs.config;
     auto site_point = [&](const Vec3& b) { return pose.cg_m + pose.body_to_site * (b - Vec3{pose.cg_station_m, 0.0, 0.0}); };
@@ -81,27 +87,63 @@ LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, 
         const auto& support = supports[i];
         const Vec3 n = support.normal;
         const double depth = (support.height_m - p.z) * n.z;  // penetration along the normal (flat: n.z = 1)
-        if (depth <= 0.0) continue;
+        if (depth <= 0.0) {
+            release(i);
+            continue;
+        }
         result.foot_compression_m[i] = support.water ? 0.0 : foot_compression_along_axis_m(depth, n, station_axis);
         if (support.water) {
             result.water = true;
+            release(i);
             continue;
         }
         const Vec3 v = pose.velocity_mps + cross(pose.angular_velocity_radps, p - pose.cg_m);
         const double v_n = dot(v, n);
         double f_n = c.stiffness_n_m * (depth - crushed_m[i]) - c.damping_n_s_m * v_n;
-        if (f_n <= 0.0) continue;
+        if (f_n <= 0.0) {
+            release(i);
+            continue;
+        }
         if (f_n > c.crush_force_n) {  // the core crushes: the elastic part stays at the crush force
             crushed_m[i] = std::max(crushed_m[i], depth - c.crush_force_n / c.stiffness_n_m);
             f_n = c.crush_force_n;
         }
         if (crushed_m[i] > c.stroke_m) result.stroke_exhausted = true;
         const Vec3 slip = v - n * v_n;  // in the surface (flat: (v.x, v.y, 0) exactly)
-        Vec3 friction = slip * (-c.friction * f_n / std::max(norm(slip), friction_regularization_mps));
-        if (friction_limit && norm(slip) > 0.0) {
-            const double stop = effective_mass(p - pose.cg_m, slip / norm(slip)) * norm(slip) /
-                                (friction_limit->dt_s * std::max(touching, 1));
-            if (norm(friction) > stop) friction = friction * (stop / norm(friction));
+        // Caps a slip force to what stops the foot's slip within the tick (explicit stability, shared by the feet).
+        const auto cap_to_stop = [&](Vec3 force) {
+            if (norm(slip) > 0.0) {
+                const double stop = effective_mass(p - pose.cg_m, slip / norm(slip)) * norm(slip) /
+                                    (friction_limit->dt_s * std::max(touching, 1));
+                if (norm(force) > stop) force = force * (stop / norm(force));
+            }
+            return force;
+        };
+        Vec3 friction;
+        if (stick_slip) {
+            auto& s = (*stick)[i];
+            if (!s.anchored) {
+                s.anchored = true;
+                s.anchor_m = p;
+            }
+            // Stick spring tuned to the smallest effective mass over the tangent plane (the stiffest stable choice).
+            const Vec3 t1 = normalized(std::abs(n.x) < 0.9 ? cross(n, Vec3{1.0, 0.0, 0.0}) : cross(n, Vec3{0.0, 1.0, 0.0}));
+            const Vec3 t2 = cross(n, t1);
+            const double mass = std::min(effective_mass(p - pose.cg_m, t1), effective_mass(p - pose.cg_m, t2)) /
+                                std::max(touching, 1);
+            const double omega = stick_omega_dt / friction_limit->dt_s;
+            const double k = mass * omega * omega, damping = 2.0 * mass * omega;
+            const Vec3 offset = p - s.anchor_m;
+            const Vec3 d = offset - n * dot(offset, n);  // tangential
+            friction = d * -k - slip * damping;
+            const double limit = c.friction * f_n;
+            if (norm(friction) > limit) {  // slips: Coulomb force, the anchor follows the pad
+                friction = cap_to_stop(friction * (limit / norm(friction)));
+                s.anchor_m = p + friction / k;  // the new tangential offset p - anchor is -friction / k
+            }
+        } else {
+            friction = slip * (-c.friction * f_n / std::max(norm(slip), friction_regularization_mps));
+            if (friction_limit) friction = cap_to_stop(friction);
         }
         const Vec3 f = n * f_n + friction;
         result.force_n += f;

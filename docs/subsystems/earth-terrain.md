@@ -116,8 +116,5 @@ and on the geoid at sea; the renderer (`docs/subsystems/terrain-rendering.md`) d
 
 ## Open points and known limits
 
-- Landing legs creep downhill at ~0.054 m/s on slopes >= 2 deg (the regularised friction in
-  `contact/landing_legs.cpp`, a `PlaneField` the same) and are never judged landed there. The plateaus are flat, so no
-  site landing is affected; an off-plateau touchdown on a slope stays "moving". Not fixed.
 - Lakes / inland depressions below mean sea level count as water; no tides or mean dynamic topography.
 - GLO-30 (surface model) vs 3DEP (bare earth) seam offsets up to ~1 m, absorbed by the 500 m blend.

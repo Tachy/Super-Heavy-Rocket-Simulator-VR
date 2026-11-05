@@ -1,7 +1,9 @@
 // Lunar landing campaign (spec l4): from PDI with state +-1 km / +-5 m/s per axis, thrust +-2 %, propellant +-5 % and
 // touchdown points on the real terrain (the admissible point nearest to a random spot within 1 km of the site): 21 / 21
 // land within 1 m at <= 1 m/s. Aborts from 3 / 1 / 0.3 km reach orbit. Single cases: "[.lunar_case]" with
-// STARSIM_LUNAR_CASE=<seed>.
+// STARSIM_LUNAR_CASE=<seed>. Flown on the shipped composed surface (Moon procedural surface plan, Task 5 fix round 1):
+// LOLA + procedural craters and roughness + rocks under the footpads, the touchdown points chosen with the hazard check
+// (as FlightSession::plan_lunar_landing does).
 
 #include <cmath>
 #include <cstdio>
@@ -11,10 +13,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/lunar_site_config.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_descent.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/terrain_cache.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "lunar_test_support.hpp"
 #include "test_support.hpp"
@@ -56,12 +60,12 @@ struct Fixture {
     spice::SpiceOrientation moon_me = spice::SpiceOrientation::moon_mean_earth();
     sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
     time::Epoch t0 = spice::SpiceTimeConverter().from_utc({2026, 11, 6, 0, 0, 0.0});
-    std::shared_ptr<const environment::LunarTerrain> terrain;
+    std::shared_ptr<const environment::DetailedLunarTerrain> surface;
     sim::LunarSite site;
     Fixture() {
-        terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
-        session.set_moon_terrain(terrain);
-        site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
+        surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, {true, true});
+        session.set_moon_terrain(surface);
+        site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), surface->lola());
         session.set_lunar_landing_site(site);
     }
     // The admissible touchdown point nearest to the spot (east, north) metres from the site centre.
@@ -69,8 +73,9 @@ struct Fixture {
         const double r = constants::moon_mean_radius_m;
         const double lat = site.config.latitude_rad + north_m / r;
         const double lon = site.config.longitude_rad + east_m / (r * std::cos(site.config.latitude_rad));
-        const auto p = mission::select_touchdown_point(*terrain, lat, lon, approach_azimuth_rad, footprint_radius_m,
-                                                       mission::LunarDescentParameters{});
+        const auto p = mission::select_touchdown_point(
+            *surface, lat, lon, approach_azimuth_rad, footprint_radius_m, mission::LunarDescentParameters{},
+            mission::touchdown_hazard_limits(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls").stages.front()));
         REQUIRE(p);
         return *p;
     }

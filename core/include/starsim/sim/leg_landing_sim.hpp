@@ -99,6 +99,7 @@ private:
     struct Track {
         contact::LegGeometry geometry;
         std::vector<double> crushed_m;
+        std::vector<contact::FootStick> stick;  // stick-slip anchors of the feet (contact frame)
         contact::LegContact contact;
         double at_rest_s = 0.0;
         LegTouchdown touchdown = LegTouchdown::None;

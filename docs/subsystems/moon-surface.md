@@ -183,19 +183,32 @@ on top of that relief.
 - Hazard check, for every roll (the roll at touchdown is not controlled): the feet stand on `support_under_disc` (the
   pivoting pad the legs feel; frame as `contact::TerrainField`: verticals through the candidate's tangent-plane
   points, heights along its up), sampled on the footprint circle at <= 0.5 pad radius ([E]
-  `hazard_roll_spacing_per_pad_radius`; HLS: 156 azimuths, 26 rolls of the six legs). Per roll: the least-squares
-  plane through the six feet within `slope_limit_rad`; the feet's peak-to-peak deviation from it within
+  `hazard_roll_spacing_per_pad_radius`; HLS: 156 azimuths, 26 rolls of the six legs). Per roll the hull rests on the
+  facet(s) of the feet's upper convex hull above the axis (`mission::touchdown_rest_planes`: the foot triangles
+  containing the centre whose plane is highest there and has every foot on or below it; two facets when the centre
+  lies on the edge between two opposite feet - common for six legs: the hull balances there and may tip onto either
+  side, both are checked). Each facet: slope within `slope_limit_rad`; the deepest foot hanging below it within
   `max_foot_step_m`; the contact ground under the hull base disc (0.5 m grid [E]) and the contact tops of the rocks
-  >= 5 cm that can rise above it (an upper bound decides; then 13 x 13 samples over the rock's +-a square [E]) at
-  most `bell_clearance_m` above the plane.
+  >= 5 cm that can rise above it (an upper bound decides; then 13 x 13 samples over the rock's +-a square [E]) at most
+  `bell_clearance_m` above it. Before a roll's disc queries a cheap bound may refuse it (opposite feet: the deepest
+  hang is at least half the spread of the pairs' height sums, from the ground at the pad centres and
+  `support_upper_bound_m`); at IM-2 it never fires (the upper bounds are generous) - kept as it is rigorous and free
+  where the cells are warm.
+- Memo: the hazard result of a candidate does not depend on the approach azimuth (only the glide cone does); it is
+  memoised per candidate centre for the surface's parts (by ownership), options, footprint, slope limit and hazard
+  limits (one context, <= 50,000 entries [E], thread-safe). The mission's reachability check (both azimuths) and the
+  descent planner then pay the hazard check once.
 - Limits from the vehicle config (`mission::touchdown_hazard_limits(StageConfig)`, [D]): `foot_pad_radius_m` (HLS
-  1.0 m); `max_foot_step_m` = `stroke_m` (0.6 m: the crush core's travel takes a foot standing higher than the others'
-  plane); `bell_clearance_m` = (lowest engine-group `station_m` - `foot_station_m`) - `stroke_m` = (0 + 1.5) - 0.6 =
-  0.9 m (the exits sit at their group's station - the HLS's are flush with the aft end, detail file `engine_recess` 0 -
-  and the legs may stroke fully); `base_radius_m` = `diameter_m` / 2 = 4.5 m (the bells lie inside the hull, whose aft
-  edge is at the same station). `TouchdownPoint` with the check: `height_m` the feet plane under the centre (mean over
-  the rolls), `slope_rad` the steepest feet plane, `max_foot_step_m`, `min_bell_clearance_m` (the gap with the legs
-  fully stroked).
+  1.0 m); `max_foot_step_m` = `stroke_m` (0.6 m) - a conservative bound on the hanging feet and on the tilt to a
+  third foot, not crush absorption: statically no core crushes (4.5 MN per leg against ~0.5 MN lunar weight, 6-9 mm
+  elastic), so the rigid hull rests on its rest facet and the other feet hang; a rocking onto another facet tilts it
+  by at most ~atan(0.6 / 12) = 2.9 deg; `bell_clearance_m` = (lowest engine-group `station_m` - `foot_station_m`) -
+  `stroke_m` = (0 + 1.5) - 0.6 = 0.9 m (assumes the group's thrust point `station_m` is its exit plane - the HLS's
+  exits are flush with the aft end, detail file `engine_recess` 0; a lander with recessed nozzles needs its exit
+  station - and the legs may stroke fully); `base_radius_m` = `diameter_m` / 2 = 4.5 m (the bells lie inside the
+  hull, whose aft edge is at the same station). `TouchdownPoint` with the check: `height_m` the rest plane under the
+  centre (mean over the rolls), `slope_rad` the steepest rest facet, `max_foot_step_m` the deepest hang,
+  `min_bell_clearance_m` (the gap with the legs fully stroked).
 - Users: `LunarDescentPlanner::plan(..., const DetailedLunarTerrain&, ..., TouchdownHazardLimits)`;
   `FlightSession::plan_lunar_landing` takes it when `moon_surface()` is a `DetailedLunarTerrain` with detail on and
   the legs have pads; the `lunar_landing` mission's reachability check the same. There is no live re-selection after
@@ -245,7 +258,7 @@ on top of that relief.
 - `sim::shared_moon_surface` (`core/include/starsim/sim/terrain_cache.hpp`); `FlightSession::set_moon_terrain`
   overloads, `set_moon_surface_detail`, `set_moon_rocks`, `moon_surface()`; `lunar_landing_mission.cpp` load_site.
 - `core/include/starsim/mission/lunar_descent.hpp`, `core/src/mission/lunar_touchdown.cpp`: `TouchdownHazardLimits`,
-  `touchdown_hazard_limits`, the hazard-checking `select_touchdown_point` overload, `TouchdownPoint::max_foot_step_m` /
+  `touchdown_hazard_limits`, `touchdown_rest_planes`, the hazard memo, the hazard-checking `select_touchdown_point` overload, `TouchdownPoint::max_foot_step_m` /
   `min_bell_clearance_m`; `LunarDescentPlanner::plan` overload on the composed surface.
 
 ## Standing decisions
@@ -359,12 +372,18 @@ on top of that relief.
   1 m/s on the composed surface at the flattest LOLA spot near Mons Mouton (spot chosen with the flag off, then on)
   lands and rests, no crush.
 - `[moon_surface][lunar][mission]` (`test_lunar_touchdown_hazards.cpp`): the limits from `starship_hls.toml` (pad
-  1.0 m, step 0.6 m, bell clearance 0.9 m, base 4.5 m); on flat LOLA with the procedural detail and rocks, a target
-  12 m east of the highest rock within 400 m (D 8.70 m, pad support 6.18 m above the ground) moves 56.6 m (slope 1.60
-  deg, step 0.582 m, clearance 0.463 m, 395 ms), checked independently at rolls between the samples; detail off gives
-  the LOLA point bit for bit at IM-2 (both approach directions); IM-2 with full detail: the nominal point fails (feet
-  step 0.781 m; slope 3.66 deg and rise under the base 0.304 m would pass), the target moves 20.0 m (slope 3.39 deg,
-  step 0.512 m, clearance 0.563 m), 64.6 ms cold, 1.6 ms for the second approach direction on the warm cache.
+  1.0 m, step 0.6 m, bell clearance 0.9 m, base 4.5 m); the rest planes (six HLS feet on 7 deg, the uphill foot
+  raised 0.5 m: two facets, steepest 8.20 deg against a least-squares 7.78 deg, hang 0.500 m; matched against an
+  independent supporting-plane search; a plane gives one facet, feet on one side none); on flat LOLA with the
+  procedural detail and rocks, a target 12 m east of the highest rock within 400 m (D 8.70 m, pad support 6.18 m above
+  the ground) moves 60.0 m (slope 1.74 deg, hang 0.586 m, clearance 0.738 m, 337-420 ms cold), no nearer grid
+  candidate passes (the search limited to just inside the offset finds nothing), independently re-checked at rolls
+  between the samples; detail off gives the LOLA point bit for bit at IM-2 (both approach directions); IM-2 with full
+  detail: the target moves 28.3 m (slope 3.19 deg, hang 0.461 m, clearance 0.572 m), 111-179 ms cold, 0.2 ms for the
+  second approach direction (memo). Hidden `[.touchdown_worst]`: the refused-site times above.
+- `[contact][legs]` (`test_landing_legs.cpp`): stick-slip friction - an upright HLS (translation only) on a 9 deg plane
+  in lunar gravity does not creep (< 1 mm in 20 s; the regularised law crept 0.52 m at 2.6 cm/s); on 35 deg (above
+  the 31 deg friction angle) it slides at g (sin - mu cos) within 10 %.
 - Diviner product check (python, label + three rows by range request, not the 88 MB file): the label layout above;
   median RA 0.004 at the equator (17 % no data in that row), 0.003 at 57 N, 0.002 at 60 S; p95 0.006-0.008.
 
@@ -471,18 +490,22 @@ geometry (g near 0) is not observed there. The published global-average table of
 - Upper bound for skipping feet: `bound_slope` 2 is a practical bound (overlapping steep crater walls could exceed it
   in principle); a violation only delays a foot's contact query until it is below the bound.
 - Physics cost: the first tick on a cold surface ~0.2 ms. The touchdown hazard check runs on LOLA-admissible
-  candidates only and stops at the first admissible one (IM-2: two candidates, ~65 ms cold).
+  candidates only and stops at the first admissible one (IM-2: 111 ms cold, 0.2 ms for the second approach direction
+  from the memo). A refused site is expensive: the whole 1 km search at IM-2 checks 7,449 candidates at ~23-33 ms each,
+  dominated by cold contact-cell builds (the 64-cell cache cannot hold the search area) - 169 s when every candidate
+  fails at its first roll, 249 s worst case (every candidate through the full roll sweep and the base check), 0.2 s
+  for the next call from the memo. Synchronous at the mission start; no budget cap (a cap could refuse a site whose
+  safe spot lies farther out).
 - No terminal re-targeting: after a dispersion the descent flies to the planned point; a live re-selection would call
   the same `select_touchdown_point` on the live state (spec: re-plan from flight data) - not built.
 - The roll at touchdown is free, so every roll must be safe (conservative); a roll-controlled touchdown could pick the
   roll that clears the rocks.
-- Lunar landing campaign on the composed surface (Task 5 trial, not committed: the campaign still runs on LOLA):
-  20 / 21 within the 1 m gate; seed 7 lands ("gelandet", sink 1.03 m/s) 1.12 m off (LOLA: 0.36 m). The guidance
-  reaches the point within 2 cm at the first contact; afterwards the HLS stands on two feet for ~50 s and creeps at
-  ~2 cm/s under the regularised leg friction (`friction_regularization_mps` 0.1 m/s: friction grows linearly below it)
-  before a third foot touches - a rigid body on two feet with its CG 21 m up would tip onto a third foot within
-  seconds. A leg-contact matter (stick friction / two-foot balance), not the selection: the feet at that point pass
-  the hazard check (step <= 0.6 m, pad normals <= 18 deg, under the 31 deg friction angle).
+- Lunar landing campaign on the composed surface (`[lunar_campaign][slow]`, Task 5 fix round 1): 21 / 21 within the
+  1 m gate, misses 0.01-0.91 m (seed 17 0.91 m and seed 5 0.89 m are the closest to the gate; seed 7, 1.12 m before
+  the fix, now 0.09 m). The earlier two-foot stance (~50 s, ~2 cm/s creep) had two causes, both fixed: the guidance
+  held the attitude with the RCS after the first contact (a rate damper about the line through two feet - now
+  released at contact) and the regularised leg friction crept under any tangential load (now Coulomb stick-slip,
+  `contact::leg_contact`).
 - Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
   `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
   over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated
