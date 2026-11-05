@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "starsim/math/constants.hpp"
 
@@ -49,12 +50,17 @@ LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, 
     const Vec3 station_axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
     const auto& c = legs.config;
     auto site_point = [&](const Vec3& b) { return pose.cg_m + pose.body_to_site * (b - Vec3{pose.cg_station_m, 0.0, 0.0}); };
-    // Each foot's pad stands on the highest support under its disc (a point foot for foot_pad_radius_m = 0).
+    // Each foot's pad on the support under its disc (a point foot for foot_pad_radius_m = 0). A foot above the
+    // surface's upper bound touches nothing: its query is skipped (the same result - no depth, not touching).
     std::vector<SurfaceSupport> supports;
     supports.reserve(legs.feet.size());
     for (const auto& foot : legs.feet) {
         const Vec3 p = site_point(foot);
-        supports.push_back(surface.below_disc(p.x, p.y, c.foot_pad_radius_m));
+        if (p.z >= surface.below_disc_upper_bound(p.x, p.y, c.foot_pad_radius_m)) {
+            supports.push_back({-std::numeric_limits<double>::infinity(), false, {0.0, 0.0, 1.0}});
+        } else {
+            supports.push_back(surface.below_disc(p.x, p.y, c.foot_pad_radius_m));
+        }
     }
     // Feet that touch supported ground (they share the friction limit).
     int touching = 0;
@@ -105,6 +111,7 @@ LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, 
     }
     for (const auto& b : legs.base_ring) {
         const Vec3 p = site_point(b);
+        if (p.z >= surface.height_below_upper_bound(p.x, p.y)) continue;
         const auto support = surface.height_below(p.x, p.y);
         if (p.z < support.height_m) {
             if (support.water) result.water = true;

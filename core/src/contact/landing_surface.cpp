@@ -1,6 +1,7 @@
 #include "starsim/contact/landing_surface.hpp"
 
 #include <cmath>
+#include <limits>
 
 #include "starsim/frames/geodetic.hpp"
 
@@ -42,7 +43,28 @@ SurfaceSupport TerrainField::below_disc(double east_m, double north_m, double ra
 
 SurfaceSupport TerrainField::height_below(double east_m, double north_m) const {
     if (!detailed_) return below(east_m, north_m);
-    return detailed_support(east_m, north_m, 0.0);
+    const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
+    return {site_height(east_m, north_m, detailed_->contact_height_m(math::normalized(q))), false};
+}
+
+double TerrainField::site_height(double east_m, double north_m, double height_m) const {
+    const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
+    const Vec3 up = site_to_fixed_ * Vec3{0.0, 0.0, 1.0};
+    return dot(math::normalized(q) * (body_.shape().semi_major_axis_m + height_m) - origin_fixed_m_, up);
+}
+
+double TerrainField::below_disc_upper_bound(double east_m, double north_m, double radius_m) const {
+    if (!detailed_ || !(radius_m > 0.0)) return std::numeric_limits<double>::infinity();
+    const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
+    const Vec3 up = site_to_fixed_ * Vec3{0.0, 0.0, 1.0};
+    return site_height(east_m, north_m, detailed_->support_upper_bound_m(math::normalized(q), up, radius_m));
+}
+
+double TerrainField::height_below_upper_bound(double east_m, double north_m) const {
+    if (!detailed_) return std::numeric_limits<double>::infinity();
+    const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
+    const Vec3 up = site_to_fixed_ * Vec3{0.0, 0.0, 1.0};
+    return site_height(east_m, north_m, detailed_->support_upper_bound_m(math::normalized(q), up, 0.0));
 }
 
 SurfaceSupport TerrainField::below(double east_m, double north_m) const {
@@ -81,6 +103,14 @@ LandingSurface::Support LandingSurface::below_disc(double east_m, double north_m
 
 LandingSurface::Support LandingSurface::height_below(double east_m, double north_m) const {
     return field ? field->height_below(east_m, north_m) : below(east_m, north_m);
+}
+
+double LandingSurface::below_disc_upper_bound(double east_m, double north_m, double radius_m) const {
+    return field ? field->below_disc_upper_bound(east_m, north_m, radius_m) : std::numeric_limits<double>::infinity();
+}
+
+double LandingSurface::height_below_upper_bound(double east_m, double north_m) const {
+    return field ? field->height_below_upper_bound(east_m, north_m) : std::numeric_limits<double>::infinity();
 }
 
 DeckSeaField::DeckSeaField(const LandingSurface::Deck& deck, const math::Mat3& carrier_to_site,

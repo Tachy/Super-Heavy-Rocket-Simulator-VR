@@ -34,6 +34,18 @@ public:
     // Top of the unit-size surface on the vertical line (x, y) (unit coordinates, |(x, y)| < 1): highest z inside the
     // rock, found by a scan from z = 1 down in top_scan_steps steps and bisection; nullopt when the line misses the rock.
     std::optional<double> column_top(int id, double x, double y) const;
+    // column_top interpolated bilinearly between the footprint columns (the footprint_columns^2 grid of column centres,
+    // computed once): ~20 ns instead of the scan's ~4 us, within ~1e-4 of the unit size of column_top (curvature x
+    // cell^2 / 8). nullopt where a corner column misses the rock or (x, y) lies outside the grid of column centres
+    // (a band of half a column at the outline).
+    std::optional<double> column_top_interpolated(int id, double x, double y) const;
+    // The footprint column (i, j)'s top (column centre x = -1 + (2 i + 1) / footprint_columns, y likewise): NaN where
+    // the column misses the rock.
+    double column_grid_node(int id, int i, int j) const {
+        return shapes_[static_cast<size_t>(id)].column_grid[static_cast<size_t>(i * footprint_columns + j)];
+    }
+    // Highest footprint column top (>= every column_top_interpolated value).
+    double column_grid_max(int id) const { return shapes_[static_cast<size_t>(id)].column_grid_max; }
     // Lowest and highest point of the unit-size surface (sampled; the vertical extent of the template).
     double bottom_z(int id) const { return shapes_[static_cast<size_t>(id)].bottom_z; }
     double top_z(int id) const { return shapes_[static_cast<size_t>(id)].top_z; }
@@ -60,6 +72,8 @@ private:
         double scale = 1.0;  // 1 / sampled maximum
         double bottom_z = -1.0, top_z = 1.0;
         std::vector<double> column_tops;  // sorted tops of the footprint columns that hit the rock
+        std::vector<double> column_grid;  // footprint_columns^2 column tops by (i, j), NaN where the column misses
+        double column_grid_max = -1.0;
     };
     double raw_radius(const Shape& shape, const math::Vec3& dir_unit) const;
 

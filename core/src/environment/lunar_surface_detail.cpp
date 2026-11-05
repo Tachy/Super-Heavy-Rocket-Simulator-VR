@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <memory>
+#include <tuple>
 #include <utility>
 
 #include "starsim/environment/surface_hash.hpp"
@@ -318,6 +321,8 @@ struct LunarSurfaceDetail::Query {
 LunarSurfaceDetail::LunarSurfaceDetail(config::MoonSurfaceConfig config, std::shared_ptr<const LunarTerrain> lola)
     : config_(std::move(config)), lola_(std::move(lola)) {
     if (!lola_) throw std::invalid_argument("LunarSurfaceDetail: kein Mondgelaende (LOLA) uebergeben");
+    static std::atomic<std::uint64_t> next_instance_id{1};
+    instance_id_ = next_instance_id.fetch_add(1);
     const auto& sfd = config_.craters.sfd;
     if (sfd.form != "power" && sfd.form != "exponential") {
         throw std::invalid_argument("LunarSurfaceDetail: unbekannte Groessenverteilung '" + sfd.form + "'");
@@ -333,7 +338,9 @@ LunarSurfaceDetail::LunarSurfaceDetail(config::MoonSurfaceConfig config, std::sh
         o.min_diameter_m = d_lo;
         o.max_diameter_m = d_hi;
         o.level = face_cell_level_for_size(crater_cell_per_diameter * d_hi, sphere_radius_m_);
-        o.density_per_m2 = sfd.cumulative_density_per_m2(d_lo) - sfd.cumulative_density_per_m2(d_hi);
+        o.cumulative_min_per_m2 = sfd.cumulative_density_per_m2(d_lo);
+        o.cumulative_max_per_m2 = sfd.cumulative_density_per_m2(d_hi);
+        o.density_per_m2 = o.cumulative_min_per_m2 - o.cumulative_max_per_m2;
         crater_octaves_.push_back(o);
         d_lo = d_hi;
     }
@@ -346,7 +353,10 @@ LunarSurfaceDetail::LunarSurfaceDetail(config::MoonSurfaceConfig config, std::sh
     const double top_m = 2.0 * std::max(lola_->global_resolution_m(), finest_band_start_m_);
     for (double target = 0.5 * finest_wavelength_m(); target <= top_m; target *= 2.0) {
         const auto n = next_prime(static_cast<std::uint64_t>(std::llround(face_edge_m / target)));
-        roughness_octaves_.push_back({static_cast<std::int64_t>(n), face_edge_m / static_cast<double>(n)});
+        RoughnessOctave o{static_cast<std::int64_t>(n), face_edge_m / static_cast<double>(n)};
+        o.relative_amplitude = unit_variance_gain * std::pow(o.spacing_m / config_.roughness.baseline_m,
+                                                             config_.roughness.hurst_exponent);
+        roughness_octaves_.push_back(o);
     }
     roughness_scale_m_ = derive_roughness_scale();
 }
@@ -428,8 +438,8 @@ bool LunarSurfaceDetail::complete_crater(int octave, const FaceCell& cell, std::
     const CraterOctave& o = crater_octaves_[static_cast<size_t>(octave)];
     const auto& c = config_.craters;
     const auto mu = static_cast<std::uint64_t>(m);
-    const double n_lo = c.sfd.cumulative_density_per_m2(o.min_diameter_m);
-    const double n_hi = c.sfd.cumulative_density_per_m2(o.max_diameter_m);
+    const double n_lo = o.cumulative_min_per_m2;
+    const double n_hi = o.cumulative_max_per_m2;
     const double d = inverse_cumulative(c.sfd, n_lo - hash_unit(surface_hash(cell_hash, mu, 2, 0)) * (n_lo - n_hi));
     const Vec3 centre = face_cell_point(cell, s01, t01);
     if (d > lola_crater_pixels * finest_band_start_m_ && d > lola_crater_pixels * band_start_m(centre)) return false;
@@ -477,8 +487,52 @@ std::vector<Crater> LunarSurfaceDetail::craters_within(const Vec3& unit, double 
     return out;
 }
 
+const double* LunarSurfaceDetail::crater_mean_fields(double band_start_m) const {
+    struct Memo {
+        std::uint64_t instance = 0;
+        double band_start_m = 0.0;
+        std::vector<double> values;
+    };
+    thread_local Memo memo;
+    if (memo.instance != instance_id_ || memo.band_start_m != band_start_m) {
+        memo.values.resize(crater_octaves_.size());
+        for (size_t k = 0; k < crater_octaves_.size(); ++k) {
+            memo.values[k] = crater_mean_field_m(static_cast<int>(k), band_start_m);
+        }
+        memo.instance = instance_id_;
+        memo.band_start_m = band_start_m;
+    }
+    return memo.values.data();
+}
+
+const LunarSurfaceDetail::CraterCellMemo::Slot* LunarSurfaceDetail::memo_cell(int octave, const FaceCell& cell,
+                                                                               std::uint64_t cell_hash) const {
+    thread_local std::unique_ptr<CraterCellMemo> memo;
+    if (!memo) memo = std::make_unique<CraterCellMemo>();
+    CraterCellMemo::Slot& slot = memo->table[static_cast<size_t>(cell_hash & (CraterCellMemo::slots - 1))];
+    if (slot.instance == instance_id_ && slot.octave == octave && slot.face == cell.face && slot.i == cell.i &&
+        slot.j == cell.j) {
+        return &slot;
+    }
+    const int count = crater_count(octave, cell, cell_hash);
+    if (count > CraterCellMemo::max_draws) return nullptr;  // rare: generated in place
+    slot.instance = instance_id_;
+    slot.octave = octave;
+    slot.face = cell.face;
+    slot.i = cell.i;
+    slot.j = cell.j;
+    slot.count = count;
+    for (int m = 0; m < count; ++m) {
+        const auto k = static_cast<size_t>(m);
+        std::tie(slot.s01[k], slot.t01[k]) = crater_position_draw(cell_hash, m);
+        slot.complete[k] = complete_crater(octave, cell, cell_hash, m, slot.s01[k], slot.t01[k], slot.crater[k]);
+    }
+    return &slot;
+}
+
 double LunarSurfaceDetail::craters_at(const Query& q, double limit_m) const {
     double sum = 0.0;
+    const double* mean_field = crater_mean_fields(q.band_start_m);
     for (size_t k = 0; k < crater_octaves_.size(); ++k) {
         const CraterOctave& o = crater_octaves_[k];
         const double w = limit_m > 0.0
@@ -488,7 +542,7 @@ double LunarSurfaceDetail::craters_at(const Query& q, double limit_m) const {
         if (w <= 0.0) continue;
         // Zero mean: LOLA heights are area means that already hold the craters' mean, so each octave enters as its
         // deviation from the population mean (an octave below the footprint, w = 0, then adds exactly nothing).
-        sum -= w * crater_mean_field_m(static_cast<int>(k), q.band_start_m);
+        sum -= w * mean_field[k];
         // The footprint's half diagonal is at most L (|e_s +- e_t| <= 2).
         const double reach = crater_reach_per_diameter * o.max_diameter_m + (limit_m > 0.0 ? limit_m : 0.0);
         const double n = static_cast<double>(std::int64_t{1} << o.level);
@@ -497,18 +551,29 @@ double LunarSurfaceDetail::craters_at(const Query& q, double limit_m) const {
             if (!v.used) continue;
             const CellRange r = cell_range(v, o.level, reach);
             const double cull = crater_cull_margin * reach * v.cull_factor;
+            const double cull_squared = cull * cull;  // squared compare: hypot is slow, and a crater at the cull
+                                                      // distance lies beyond its reach (adds exactly 0) either way
             for (std::int64_t j = r.j0; j <= r.j1; ++j) {
                 for (std::int64_t i = r.i0; i <= r.i1; ++i) {
                     const FaceCell cell{face, o.level, i, j};
                     const std::uint64_t h = crater_cell_hash(cell);
-                    const int count = crater_count(static_cast<int>(k), cell, h);
+                    const CraterCellMemo::Slot* memo = memo_cell(static_cast<int>(k), cell, h);
+                    const int count = memo ? memo->count : crater_count(static_cast<int>(k), cell, h);
                     for (int m = 0; m < count; ++m) {
-                        const auto [s01, t01] = crater_position_draw(h, m);
+                        const auto [s01, t01] = memo ? std::pair{memo->s01[static_cast<size_t>(m)],
+                                                                 memo->t01[static_cast<size_t>(m)]}
+                                                     : crater_position_draw(h, m);
                         const double ds = (-1.0 + 2.0 * (static_cast<double>(i) + s01) / n) - v.c.s;
                         const double dt = (-1.0 + 2.0 * (static_cast<double>(j) + t01) / n) - v.c.t;
-                        if (std::hypot(ds * v.m_s, dt * v.m_t) > cull) continue;
+                        const double es = ds * v.m_s, et = dt * v.m_t;
+                        if (es * es + et * et > cull_squared) continue;
                         Crater cr;
-                        if (!complete_crater(static_cast<int>(k), cell, h, m, s01, t01, cr)) continue;
+                        if (memo) {
+                            if (!memo->complete[static_cast<size_t>(m)]) continue;
+                            cr = memo->crater[static_cast<size_t>(m)];
+                        } else if (!complete_crater(static_cast<int>(k), cell, h, m, s01, t01, cr)) {
+                            continue;
+                        }
                         if (limit_m > 0.0) {
                             const Vec3 offset = (cr.centre_unit - q.p) * sphere_radius_m_;
                             for (int b = 0; b < q.blend_count; ++b) {
@@ -537,13 +602,37 @@ double LunarSurfaceDetail::roughness_node(int octave, int face, std::int64_t j, 
     return 2.0 * hash_unit(h) - 1.0;
 }
 
+const double* LunarSurfaceDetail::roughness_top_weights(double band_start_m) const {
+    struct Memo {
+        std::uint64_t instance = 0;
+        double band_start_m = 0.0;
+        std::vector<double> values;
+    };
+    thread_local Memo memo;
+    if (memo.instance != instance_id_ || memo.band_start_m != band_start_m) {
+        memo.values.resize(roughness_octaves_.size());
+        for (size_t m = 0; m < roughness_octaves_.size(); ++m) {
+            // Top: full up to half the band start, none from the band start (LOLA resolves 2-pixel wavelengths, [E]).
+            memo.values[m] = smooth01(std::log2(band_start_m / roughness_octaves_[m].spacing_m));
+        }
+        memo.instance = instance_id_;
+        memo.band_start_m = band_start_m;
+    }
+    return memo.values.data();
+}
+
 double LunarSurfaceDetail::roughness_at(const Query& q, double limit_m, double scale_m) const {
     const auto& r = config_.roughness;
     double sum = 0.0;
+    const double* top_weights = roughness_top_weights(q.band_start_m);
+    // The amplitude's metric factor per blend face: (local scale)^H (the octave's part is precomputed).
+    std::array<double, 3> metric{};
+    for (int bi = 0; bi < q.blend_count; ++bi) {
+        metric[static_cast<size_t>(bi)] = std::pow(q.blend[static_cast<size_t>(bi)].frame.scale, r.hurst_exponent);
+    }
     for (size_t m = 0; m < roughness_octaves_.size(); ++m) {
         const RoughnessOctave& o = roughness_octaves_[m];
-        // Top: full up to half the band start, none from the band start (LOLA resolves 2-pixel wavelengths, [E]).
-        const double w_top = smooth01(std::log2(q.band_start_m / o.spacing_m));
+        const double w_top = top_weights[m];
         if (w_top <= 0.0) continue;
         const double w_box = limit_m > 0.0 ? smooth01(std::log2(o.spacing_m / (box_exact_fraction * limit_m)) + 1.0) : 1.0;
         if (w_box <= 0.0) continue;
@@ -553,8 +642,7 @@ double LunarSurfaceDetail::roughness_at(const Query& q, double limit_m, double s
         for (int bi = 0; bi < q.blend_count; ++bi) {
             const Query::BlendFace& b = q.blend[static_cast<size_t>(bi)];
             const int face = b.c.face;
-            const double amplitude =
-                scale_m * unit_variance_gain * std::pow(b.frame.scale * o.spacing_m / r.baseline_m, r.hurst_exponent);
+            const double amplitude = scale_m * o.relative_amplitude * metric[static_cast<size_t>(bi)];
             const double u = (b.c.s + 1.0) * 0.5 * nd, v = (b.c.t + 1.0) * 0.5 * nd;
             // This face's lattice field at lattice coordinates (x, y).
             const auto field = [&](double x, double y) {

@@ -247,8 +247,12 @@ set(STARSIM_PLAN_CACHE_DIR "${CMAKE_BINARY_DIR}/plan_cache")
 add_custom_command(TARGET starsim_core_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${STARSIM_PLAN_CACHE_DIR}"
     VERBATIM)
-catch_discover_tests(starsim_core_tests TEST_SPEC "~[plan_speed]" ADD_TAGS_AS_LABELS
+catch_discover_tests(starsim_core_tests TEST_SPEC "~[plan_speed]~[contact_speed]" ADD_TAGS_AS_LABELS
     PROPERTIES ENVIRONMENT "STARSIM_PLAN_CACHE_DIR=${STARSIM_PLAN_CACHE_DIR}")
 # Wall-time checks run alone: under the suite's parallel load the LLO plan took 12-20 s against 10 s (l6 review).
 add_test(NAME plan_speed COMMAND starsim_core_tests "[plan_speed]")
 set_tests_properties(plan_speed PROPERTIES RUN_SERIAL TRUE LABELS "plan_speed")
+# The six-pad leg-contact cost gate (50 us per tick) likewise: alone 25 / 35 / 12 us resting / sliding / descending,
+# 46 / 58 / 15 us under the parallel load (Moon procedural surface plan, Task 4). Selected with its subsystems' tags.
+add_test(NAME contact_speed COMMAND starsim_core_tests "[contact_speed]")
+set_tests_properties(contact_speed PROPERTIES RUN_SERIAL TRUE LABELS "contact_speed;moon_surface;terrain;contact;legs")

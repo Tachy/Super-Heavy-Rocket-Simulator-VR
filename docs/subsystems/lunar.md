@@ -24,11 +24,13 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Leg landings work on any reference body
   (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`). Footpads are discs (`foot_pad_radius_m`, HLS 1.0 m [E],
-  user-approved 2026-11-04; 0 = point foot): each foot stands on `below_disc`, the highest support under the pad and the
-  normal there; the base ring asks `height_below`. On the composed Moon surface (`DetailedLunarTerrain`, procedural
-  craters, roughness and rocks; fidelity flags `moon_surface_detail` / `moon_rocks`, default on;
-  `sim::shared_moon_surface`, used by the `lunar_landing` mission) that is the max-filtered contact surface of
-  `moon-surface.md` (Physics surface); with detail off or on LOLA alone it is the point query (bit-for-bit).
+  user-approved 2026-11-04; 0 = point foot): each foot stands on `below_disc` (the pad's support and normal), the base
+  ring asks `height_below`; feet and ring points above the field's upper bounds are skipped (same result). On the
+  composed Moon surface (`DetailedLunarTerrain`, procedural craters, roughness and rocks; fidelity flags
+  `moon_surface_detail` / `moon_rocks`, default on; `sim::shared_moon_surface`, used by the `lunar_landing` mission)
+  that is the pivoting pad on the contact surface of `moon-surface.md` (Physics surface: plane fitted to the ground
+  under the pad + the highest protrusion of ground or rock; the base ring includes the rocks); with detail off or on
+  LOLA alone it is the point query (bit-for-bit).
   `FlightSession::moon_terrain()` stays LOLA, `moon_surface()` is what ground and legs use. The Earth takes the `environment::Terrain` interface
   (earth-terrain.md). Leg tracks start only near the body's own ground.
 - Legs (Task 6b, user 2026-11-04; fix 1): `deploy_time_s` 10 s, `deploy_margin_s` 5 s, kinematics `hinge_station_m` 0.5, `hinge_radius_m` 4.8,

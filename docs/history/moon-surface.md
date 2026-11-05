@@ -13,3 +13,10 @@ Superseded states of `docs/subsystems/moon-surface.md`.
   parallelogram: relief(L) stepped at face edges (1 um pairs up to 1.07 mm apart, ~1160 x the slope bound, at
   L = 0.1-10 m). Replaced by per-face continued lattices joined by `face_blend` and one parallelogram footprint for
   both layers.
+- Physics surface, first version (Task 4, 05353f7), superseded in fix round 1 (2026-11-05): the footpad disc was level in
+  the site frame and stood on the highest point under it (max filter); on a planar slope s every pad stood r tan s
+  higher (1 m pad, 8 deg: 0.14 m) and a rim rock lifted it by its full height - replaced by the pivoting pad (ruling I2).
+  The contact lattice was 2^26 per face edge (4.07 cm, sub-lattice RMS ~2 mm): six pads sliding 1 mm per tick cost
+  100-155 us per tick then (per-node relief 6 us), 48-51 us after the relief memos - replaced by 2^25 (8.1 cm, 34-36 us).
+  Rocks were evaluated with `rock_top` (column scan, ~4.4 us per call; ~60 calls per tick with pivoting pads, ~250 us)
+  - replaced by the interpolated footprint column tops. The point contact (r = 0, base ring) ignored rocks (review I1).

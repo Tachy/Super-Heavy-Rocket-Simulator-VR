@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -31,6 +32,9 @@ constexpr double patch_radius_margin = 1.01;
 // steps around the best ([E]: brackets the arc to ~5 % of its span; the rock top is smooth there).
 constexpr int arc_coarse_samples = 5;
 constexpr int arc_golden_steps = 8;
+// Node climb over a rock's footprint columns: at most this many steps ([E]: 96 columns across, a climb from the peak
+// node takes a few).
+constexpr int max_climb_steps = 200;
 // Template peak search: grid over the unit disc, then a pattern search to this step ([E]).
 constexpr int peak_grid = 41;
 constexpr double peak_min_step = 1e-6;
@@ -91,6 +95,29 @@ const std::array<TemplatePeak, RockTemplates::count>& template_peaks() {
     return peaks;
 }
 
+// LunarRocks::rock_top with the template's column top interpolated on its footprint grid
+// (RockTemplates::column_top_interpolated): the rock top of the contact surface. Height only.
+std::optional<double> contact_top(const Rock& rock, const Vec3& unit, double sphere_radius, double* ux_out = nullptr,
+                                  double* uy_out = nullptr, double* top_out = nullptr) {
+    const Vec3 offset = (unit - rock.base_unit) * sphere_radius;
+    const double x = dot(offset, math::column(rock.local_to_fixed, 0)), y = dot(offset, math::column(rock.local_to_fixed, 1));
+    const double ux = x / rock.axes_m.x, uy = y / rock.axes_m.y;
+    if (ux * ux + uy * uy >= 1.0) return std::nullopt;
+    const auto top = RockTemplates::instance().column_top_interpolated(rock.template_id, ux, uy);
+    if (!top) return std::nullopt;
+    const double above_base = rock.axes_m.z * *top - rock.burial_m;
+    if (above_base <= 0.0) return std::nullopt;
+    if (ux_out) *ux_out = ux, *uy_out = uy, *top_out = *top;
+    return rock.base_height_m + above_base + (x * x + y * y) / (2.0 * sphere_radius);
+}
+
+// The rock's outward unit normal (body-fixed) at the unit-size surface point (ux, uy, top), as LunarRocks::rock_top.
+Vec3 contact_top_normal(const Rock& rock, double ux, double uy, double top) {
+    const Vec3 n_unit = RockTemplates::instance().normal(rock.template_id, Vec3{ux, uy, top});
+    const Vec3 n_local = math::normalized({n_unit.x / rock.axes_m.x, n_unit.y / rock.axes_m.y, n_unit.z / rock.axes_m.z});
+    return rock.local_to_fixed * n_local;
+}
+
 struct PatchKey {
     int face = 0;
     std::int64_t i = 0, j = 0;
@@ -130,9 +157,11 @@ struct DetailedLunarTerrain::ContactCache {
         Vec3 peak_unit;
         double peak_height_m = 0.0;
         Vec3 peak_normal;
+        double top_bound_m = 0.0;  // no point of the rock's top lies higher (peak + a^2 / 2R)
     };
     struct RockPatch {
         std::vector<RockEntry> rocks;
+        double max_peak_m = -std::numeric_limits<double>::infinity();  // max top_bound_m
     };
     struct RockSlot {
         std::shared_ptr<const RockPatch> patch;
@@ -234,99 +263,123 @@ double DetailedLunarTerrain::finest_resolution_within_m(double latitude_rad, dou
                            : lola_->finest_resolution_within_m(latitude_rad, longitude_rad, radius_m);
 }
 
-double DetailedLunarTerrain::contact_ground_m(const Vec3& unit) const {
-    const double lola = lola_->height_at_direction_m(unit);
-    if (!options_.detail) return lola;
-    const FaceCoord fc = face_coord_of(unit);
-    const double u = (fc.s + 1.0) * 0.5 * lattice_nodes_per_edge, v = (fc.t + 1.0) * 0.5 * lattice_nodes_per_edge;
-    const auto j0 = static_cast<std::int64_t>(std::floor(u)), k0 = static_cast<std::int64_t>(std::floor(v));
-    const double fu = u - static_cast<double>(j0), fv = v - static_cast<double>(k0);
-    std::array<double, 4> node{};  // (j0, k0), (j0 + 1, k0), (j0, k0 + 1), (j0 + 1, k0 + 1)
-    const auto slot = [&](int n) { return std::pair{j0 + (n & 1), k0 + (n >> 1)}; };
-    ContactCache& c = *cache_;
-    bool missing = false;
-    {
-        std::lock_guard lock(c.mutex);
-        for (int n = 0; n < 4; ++n) {
-            const auto [j, k] = slot(n);
-            auto& patch = c.ground[{fc.face, j >> patch_shift, k >> patch_shift}];
-            patch.used = ++c.clock;
-            node[static_cast<size_t>(n)] = patch.nodes[static_cast<size_t>((j & patch_mask) * patch_nodes + (k & patch_mask))];
-            missing = missing || std::isnan(node[static_cast<size_t>(n)]);
-        }
-    }
-    if (missing) {
-        // Computed outside the lock (pure function of the node: whoever stores it stores the same value).
-        for (int n = 0; n < 4; ++n) {
-            if (!std::isnan(node[static_cast<size_t>(n)])) continue;
-            const auto [j, k] = slot(n);
-            const double s = -1.0 + 2.0 * static_cast<double>(j) / lattice_nodes_per_edge;
-            const double t = -1.0 + 2.0 * static_cast<double>(k) / lattice_nodes_per_edge;
-            node[static_cast<size_t>(n)] = detail_->relief_m(face_direction(fc.face, s, t), 0.0);
-        }
-        std::lock_guard lock(c.mutex);
-        for (int n = 0; n < 4; ++n) {
-            const auto [j, k] = slot(n);
-            auto& patch = c.ground[{fc.face, j >> patch_shift, k >> patch_shift}];
-            patch.used = ++c.clock;
-            patch.nodes[static_cast<size_t>((j & patch_mask) * patch_nodes + (k & patch_mask))] = node[static_cast<size_t>(n)];
-        }
-        evict(c.ground, static_cast<size_t>(max_cached_patches));
-    }
-    const double relief = (1.0 - fv) * ((1.0 - fu) * node[0] + fu * node[1]) + fv * ((1.0 - fu) * node[2] + fu * node[3]);
-    return lola + relief;
+std::optional<std::pair<double, Vec3>> DetailedLunarTerrain::contact_rock_top(const Rock& rock, const Vec3& unit) const {
+    double ux = 0.0, uy = 0.0, top = 0.0;
+    const auto h = contact_top(rock, unit, sphere_radius_m_, &ux, &uy, &top);
+    if (!h) return std::nullopt;
+    return std::pair{*h, contact_top_normal(rock, ux, uy, top)};
 }
 
-DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const Vec3& centre_unit, const Vec3& up_fixed,
-                                                                           double radius_m) const {
-    if (!options_.detail) {
-        const Vec3 fixed = centre_unit * sphere_radius_m_;
-        return {lola_->height_at_fixed_m(fixed), lola_->normal_fixed(fixed)};
-    }
-    const double r = std::max(radius_m, 0.0);
-    const double two_r_sphere = 2.0 * sphere_radius_m_;
-    const Vec3 up = math::normalized(up_fixed);
-    const Tangent t = tangent_of(up);
-    const auto at = [&](double x, double y) {
-        return math::normalized(centre_unit + (t.e1 * x + t.e2 * y) / sphere_radius_m_);
-    };
+const LunarSurfaceDetail& DetailedLunarTerrain::detail() const {
+    if (!detail_) throw std::logic_error("DetailedLunarTerrain: kein Oberflaechendetail geladen");
+    return *detail_;
+}
 
-    // Ground: the max over the sample pattern; the normal of the plane fitted through it.
-    double best = -std::numeric_limits<double>::infinity();
-    Vec3 normal;
-    if (r > 0.0) {
-        double sum = 0.0, sum_x = 0.0, sum_y = 0.0, sum_xx = 0.0, sum_yy = 0.0;
-        int count = 0;
-        const auto sample = [&](double x, double y) {
-            const double g = contact_ground_m(at(x, y)) - (x * x + y * y) / two_r_sphere;
-            best = std::max(best, g);
-            sum += g, sum_x += g * x, sum_y += g * y, sum_xx += x * x, sum_yy += y * y;
-            ++count;
-        };
-        sample(0.0, 0.0);
-        for (const auto& [ring, rho] : {std::pair{disc_inner_ring, 0.5 * r}, std::pair{disc_rim_ring, r}}) {
-            for (int k = 0; k < ring; ++k) {
-                const double phi = constants::two_pi * k / ring;
-                sample(rho * std::cos(phi), rho * std::sin(phi));
+const LunarRocks& DetailedLunarTerrain::rocks() const {
+    if (!rocks_) throw std::logic_error("DetailedLunarTerrain: keine Felsbrocken geladen");
+    return *rocks_;
+}
+
+double DetailedLunarTerrain::contact_ground_m(const Vec3& unit) const {
+    double out = 0.0;
+    contact_ground_batch(&unit, 1, &out);
+    return out;
+}
+
+void DetailedLunarTerrain::contact_ground_batch(const Vec3* units, int count, double* out) const {
+    if (!options_.detail) {
+        for (int i = 0; i < count; ++i) out[i] = lola_->height_at_direction_m(units[i]);
+        return;
+    }
+    constexpr int chunk = 32;
+    struct Sample {
+        int face = 0;
+        std::int64_t j0 = 0, k0 = 0;
+        double fu = 0.0, fv = 0.0;
+        std::array<double, 4> node{};  // (j0, k0), (j0 + 1, k0), (j0, k0 + 1), (j0 + 1, k0 + 1)
+    };
+    std::array<Sample, chunk> samples;
+    ContactCache& c = *cache_;
+    const auto node_jk = [](const Sample& s, int n) { return std::pair{s.j0 + (n & 1), s.k0 + (n >> 1)}; };
+    for (int first = 0; first < count; first += chunk) {
+        const int n_samples = std::min(chunk, count - first);
+        for (int i = 0; i < n_samples; ++i) {
+            const FaceCoord fc = face_coord_of(units[first + i]);
+            const double u = (fc.s + 1.0) * 0.5 * lattice_nodes_per_edge, v = (fc.t + 1.0) * 0.5 * lattice_nodes_per_edge;
+            Sample& s = samples[static_cast<size_t>(i)];
+            s.face = fc.face;
+            s.j0 = static_cast<std::int64_t>(std::floor(u));
+            s.k0 = static_cast<std::int64_t>(std::floor(v));
+            s.fu = u - static_cast<double>(s.j0);
+            s.fv = v - static_cast<double>(s.k0);
+        }
+        bool missing = false;
+        {
+            std::lock_guard lock(c.mutex);
+            PatchKey last_key{-1, 0, 0};
+            ContactCache::GroundPatch* patch = nullptr;
+            for (int i = 0; i < n_samples; ++i) {
+                Sample& s = samples[static_cast<size_t>(i)];
+                for (int n = 0; n < 4; ++n) {
+                    const auto [j, k] = node_jk(s, n);
+                    const PatchKey key{s.face, j >> patch_shift, k >> patch_shift};
+                    if (!patch || !(key == last_key)) {
+                        patch = &c.ground[key];
+                        patch->used = ++c.clock;
+                        last_key = key;
+                    }
+                    const double value = patch->nodes[static_cast<size_t>((j & patch_mask) * patch_nodes + (k & patch_mask))];
+                    s.node[static_cast<size_t>(n)] = value;
+                    missing = missing || std::isnan(value);
+                }
             }
         }
-        // The pattern is symmetric: the plane's slopes are independent of each other and of the mean.
-        const double gx = sum_x / sum_xx, gy = sum_y / sum_yy;
-        normal = math::normalized(up - t.e1 * gx - t.e2 * gy);
-    } else {
-        best = contact_ground_m(centre_unit);
-        const double s = detail_normal_step_m;
-        const double gx = (contact_ground_m(at(s, 0.0)) - contact_ground_m(at(-s, 0.0))) / (2.0 * s);
-        const double gy = (contact_ground_m(at(0.0, s)) - contact_ground_m(at(0.0, -s))) / (2.0 * s);
-        normal = math::normalized(up - t.e1 * gx - t.e2 * gy);
+        if (missing) {
+            // Computed outside the lock (a pure function of the node: whoever stores it stores the same value).
+            for (int i = 0; i < n_samples; ++i) {
+                Sample& s = samples[static_cast<size_t>(i)];
+                for (int n = 0; n < 4; ++n) {
+                    if (!std::isnan(s.node[static_cast<size_t>(n)])) continue;
+                    const auto [j, k] = node_jk(s, n);
+                    const double ss = -1.0 + 2.0 * static_cast<double>(j) / lattice_nodes_per_edge;
+                    const double tt = -1.0 + 2.0 * static_cast<double>(k) / lattice_nodes_per_edge;
+                    s.node[static_cast<size_t>(n)] = detail_->relief_m(face_direction(s.face, ss, tt), 0.0);
+                }
+            }
+            std::lock_guard lock(c.mutex);
+            for (int i = 0; i < n_samples; ++i) {
+                const Sample& s = samples[static_cast<size_t>(i)];
+                for (int n = 0; n < 4; ++n) {
+                    const auto [j, k] = node_jk(s, n);
+                    auto& patch = c.ground[{s.face, j >> patch_shift, k >> patch_shift}];
+                    patch.used = ++c.clock;
+                    patch.nodes[static_cast<size_t>((j & patch_mask) * patch_nodes + (k & patch_mask))] =
+                        s.node[static_cast<size_t>(n)];
+                }
+            }
+            evict(c.ground, static_cast<size_t>(max_cached_patches));
+        }
+        for (int i = 0; i < n_samples; ++i) {
+            const Sample& s = samples[static_cast<size_t>(i)];
+            const auto& node = s.node;
+            const double relief = (1.0 - s.fv) * ((1.0 - s.fu) * node[0] + s.fu * node[1]) +
+                                  s.fv * ((1.0 - s.fu) * node[2] + s.fu * node[3]);
+            out[first + i] = lola_->height_at_direction_m(units[first + i]) + relief;
+        }
     }
-    if (!rocks_on()) return {best, normal};
+}
 
-    // Rocks that may reach the disc, from the cached cells it touches (each cell holds every rock that may touch it).
+struct DetailedLunarTerrain::RockQuery {
+    std::vector<const ContactCache::RockEntry*> candidates;           // base within radius + a (unsorted, unique)
+    std::vector<std::shared_ptr<const ContactCache::RockPatch>> held;  // keeps the entries alive
+    double max_peak_m = -std::numeric_limits<double>::infinity();      // of the cells searched (incl. a^2 / 2R)
+};
+
+void DetailedLunarTerrain::gather_rocks(const Vec3& centre_unit, double radius_m, RockQuery& out,
+                                        bool with_candidates) const {
     ContactCache& c = *cache_;
-    std::vector<const ContactCache::RockEntry*> candidates;
-    std::vector<std::shared_ptr<const ContactCache::RockPatch>> held;
-    for (const FaceCell& cell : face_cells_within(centre_unit, contact_patch_level, r, sphere_radius_m_)) {
+    // Each cell holds every rock that may touch it: a point needs only its own cell.
+    const auto visit = [&](const FaceCell& cell) {
         const PatchKey key{cell.face, cell.i, cell.j};
         std::shared_ptr<const ContactCache::RockPatch> patch;
         {
@@ -351,10 +404,20 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
                 const Vec3 offset = math::column(rock.local_to_fixed, 0) * (rock.axes_m.x * p.x) +
                                     math::column(rock.local_to_fixed, 1) * (rock.axes_m.y * p.y);
                 e.peak_unit = math::normalized(rock.base_unit + offset / sphere_radius_m_);
-                if (const auto top = rocks_->rock_top(rock, e.peak_unit)) {
+                // No contact top lies above the highest footprint column (+ the curvature term a^2 / 2R).
+                const double highest = rock.axes_m.z * RockTemplates::instance().column_grid_max(rock.template_id) -
+                                       rock.burial_m;
+                if (highest > 0.0) {
                     e.peak_valid = true;
-                    e.peak_height_m = top->first;
-                    e.peak_normal = top->second;
+                    e.top_bound_m = rock.base_height_m + highest + rock.axes_m.x * rock.axes_m.x / (2.0 * sphere_radius_m_);
+                    built->max_peak_m = std::max(built->max_peak_m, e.top_bound_m);
+                    double ux = 0.0, uy = 0.0, top = 0.0;
+                    if (const auto h = contact_top(rock, e.peak_unit, sphere_radius_m_, &ux, &uy, &top)) {
+                        e.peak_height_m = *h;
+                        e.peak_normal = contact_top_normal(rock, ux, uy, top);
+                    } else {
+                        e.peak_height_m = -std::numeric_limits<double>::infinity();
+                    }
                 }
                 built->rocks.push_back(e);
             }
@@ -365,75 +428,270 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
             patch = slot.patch;
             evict(c.rocks, static_cast<size_t>(max_cached_patches));
         }
+        out.max_peak_m = std::max(out.max_peak_m, patch->max_peak_m);
+        if (!with_candidates) return;
         for (const auto& e : patch->rocks) {
-            if (e.peak_valid && sphere_radius_m_ * norm(e.rock.base_unit - centre_unit) <= r + e.rock.axes_m.x) {
-                candidates.push_back(&e);
+            if (e.peak_valid && sphere_radius_m_ * norm(e.rock.base_unit - centre_unit) <= radius_m + e.rock.axes_m.x) {
+                out.candidates.push_back(&e);
             }
         }
-        held.push_back(std::move(patch));
+        out.held.push_back(std::move(patch));
+    };
+    if (radius_m > 0.0) {
+        for (const FaceCell& cell : face_cells_within(centre_unit, contact_patch_level, radius_m, sphere_radius_m_)) visit(cell);
+    } else {
+        visit(face_cell_of(centre_unit, contact_patch_level));
     }
-    // Highest peaks first (ties by id: a fixed order); a rock whose peak is not above the best so far cannot win.
-    std::sort(candidates.begin(), candidates.end(), [](const auto* a, const auto* b) {
-        return a->peak_height_m != b->peak_height_m ? a->peak_height_m > b->peak_height_m : a->rock.id < b->rock.id;
+    // A rock touching several cells is listed by each: once (a fixed order by id).
+    std::sort(out.candidates.begin(), out.candidates.end(),
+              [](const auto* a, const auto* b) { return a->rock.id < b->rock.id; });
+    out.candidates.erase(std::unique(out.candidates.begin(), out.candidates.end(),
+                                     [](const auto* a, const auto* b) { return a->rock.id == b->rock.id; }),
+                         out.candidates.end());
+}
+
+DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::point_contact(const Vec3& unit, const Vec3& up_fixed,
+                                                                      bool with_normal) const {
+    double best = contact_ground_m(unit);
+    Vec3 normal;
+    if (with_normal) {
+        const Vec3 up = math::normalized(up_fixed);
+        const Tangent t = tangent_of(up);
+        const auto at = [&](double x, double y) { return math::normalized(unit + (t.e1 * x + t.e2 * y) / sphere_radius_m_); };
+        const double s = detail_normal_step_m;
+        const double gx = (contact_ground_m(at(s, 0.0)) - contact_ground_m(at(-s, 0.0))) / (2.0 * s);
+        const double gy = (contact_ground_m(at(0.0, s)) - contact_ground_m(at(0.0, -s))) / (2.0 * s);
+        normal = math::normalized(up - t.e1 * gx - t.e2 * gy);
+    }
+    if (!rocks_on()) return {best, normal};
+    // Every contact-size rock whose footprint covers the point: the highest top there (highest bound first).
+    RockQuery q;
+    gather_rocks(unit, 0.0, q);
+    std::sort(q.candidates.begin(), q.candidates.end(), [](const auto* a, const auto* b) {
+        return a->top_bound_m != b->top_bound_m ? a->top_bound_m > b->top_bound_m : a->rock.id < b->rock.id;
     });
-    candidates.erase(std::unique(candidates.begin(), candidates.end(),
-                                 [](const auto* a, const auto* b) { return a->rock.id == b->rock.id; }),
-                     candidates.end());
-    for (const auto* e : candidates) {
-        if (e->peak_height_m <= best) break;
-        const Vec3 d = (e->peak_unit - centre_unit) * sphere_radius_m_;
-        const double px = dot(d, t.e1), py = dot(d, t.e2);
-        if (px * px + py * py <= r * r) {  // the peak lies under the disc: the rock's highest point there
-            const double h = e->peak_height_m - (px * px + py * py) / two_r_sphere;
-            if (h > best) best = h, normal = e->peak_normal;
-            continue;
+    for (const auto* e : q.candidates) {
+        if (e->top_bound_m <= best) break;
+        double ux = 0.0, uy = 0.0, top = 0.0;
+        if (const auto h = contact_top(e->rock, unit, sphere_radius_m_, &ux, &uy, &top); h && *h > best) {
+            best = *h;
+            if (with_normal) normal = contact_top_normal(e->rock, ux, uy, top);
         }
-        if (r <= 0.0) continue;
-        // The rock is cut by the rim: the highest point of the rim arc within the rock's reach.
-        const Vec3 b = (e->rock.base_unit - centre_unit) * sphere_radius_m_;
-        const double bx = dot(b, t.e1), by = dot(b, t.e2), db = std::hypot(bx, by), a = e->rock.axes_m.x;
-        double half_span = constants::pi;
-        if (db > 0.0) {
-            const double cos_span = (r * r + db * db - a * a) / (2.0 * r * db);
-            if (cos_span >= 1.0) continue;
-            if (cos_span > -1.0) half_span = std::acos(cos_span);
-        }
-        const double theta_b = std::atan2(by, bx);
-        const double rim_drop = r * r / two_r_sphere;
-        std::pair<double, Vec3> found{-std::numeric_limits<double>::infinity(), Vec3{}};
-        const auto value = [&](double theta) {
-            const auto top = rocks_->rock_top(e->rock, at(r * std::cos(theta), r * std::sin(theta)));
-            if (!top) return -std::numeric_limits<double>::infinity();
-            const double h = top->first - rim_drop;
-            if (h > found.first) found = {h, top->second};
-            return h;
-        };
-        const double step = 2.0 * half_span / arc_coarse_samples;
-        double best_theta = theta_b, best_value = -std::numeric_limits<double>::infinity();
-        for (int k = 0; k < arc_coarse_samples; ++k) {
-            const double theta = theta_b - half_span + (k + 0.5) * step;
-            const double v = value(theta);
-            if (v > best_value) best_value = v, best_theta = theta;
-        }
-        if (best_value == -std::numeric_limits<double>::infinity()) continue;
-        constexpr double golden = 0.6180339887498949;  // (sqrt 5 - 1) / 2
-        double lo = best_theta - step, hi = best_theta + step;
-        double x1 = hi - golden * (hi - lo), x2 = lo + golden * (hi - lo);
-        double f1 = value(x1), f2 = value(x2);
-        for (int k = 0; k < arc_golden_steps; ++k) {
-            if (f1 >= f2) {
-                hi = x2, x2 = x1, f2 = f1;
-                x1 = hi - golden * (hi - lo);
-                f1 = value(x1);
-            } else {
-                lo = x1, x1 = x2, f1 = f2;
-                x2 = lo + golden * (hi - lo);
-                f2 = value(x2);
-            }
-        }
-        if (found.first > best) best = found.first, normal = found.second;
     }
     return {best, normal};
+}
+
+double DetailedLunarTerrain::contact_height_m(const Vec3& unit) const {
+    if (!options_.detail) return lola_->height_at_direction_m(unit);
+    return point_contact(unit, unit, false).height_m;
+}
+
+double DetailedLunarTerrain::support_upper_bound_m(const Vec3& centre_unit, const Vec3& /*up_fixed*/,
+                                                   double radius_m) const {
+    if (!options_.detail) return std::numeric_limits<double>::infinity();
+    const double r = std::max(radius_m, 0.0);
+    const double ground = contact_ground_m(centre_unit);
+    double peaks = -std::numeric_limits<double>::infinity();
+    if (rocks_on()) {
+        RockQuery q;
+        gather_rocks(centre_unit, r, q, false);
+        peaks = q.max_peak_m;
+    }
+    if (r == 0.0) return std::max(ground, peaks);
+    // support = max over the disc of (surface - plane slope . offset) <= max(surface) + |slope| r, where the ground
+    // stays within bound_slope r of the centre's and |slope| r <= bound_tilt_gain (max - min of the ground samples).
+    return std::max(ground + bound_slope * r, peaks) + bound_tilt_gain * 2.0 * bound_slope * r;
+}
+
+DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const Vec3& centre_unit, const Vec3& up_fixed,
+                                                                           double radius_m) const {
+    if (!options_.detail) {
+        const Vec3 fixed = centre_unit * sphere_radius_m_;
+        return {lola_->height_at_fixed_m(fixed), lola_->normal_fixed(fixed)};
+    }
+    const double r = std::max(radius_m, 0.0);
+    if (r == 0.0) return point_contact(centre_unit, up_fixed, true);
+    const double two_r_sphere = 2.0 * sphere_radius_m_;
+    const Vec3 up = math::normalized(up_fixed);
+    const Tangent t = tangent_of(up);
+    const auto at = [&](double x, double y) {
+        return math::normalized(centre_unit + (t.e1 * x + t.e2 * y) / sphere_radius_m_);
+    };
+
+    // The pad's plane: least-squares through the ground at the sample pattern (symmetric: the slopes are independent
+    // of each other and of the mean, which is the plane's height at the centre).
+    constexpr int samples = 1 + disc_inner_ring + disc_rim_ring;
+    std::array<double, samples> xs{}, ys{}, g{};
+    std::array<Vec3, samples> units;
+    {
+        int i = 1;
+        for (const auto& [ring, rho] : {std::pair{disc_inner_ring, 0.5 * r}, std::pair{disc_rim_ring, r}}) {
+            for (int k = 0; k < ring; ++k, ++i) {
+                const double phi = constants::two_pi * k / ring;
+                xs[static_cast<size_t>(i)] = rho * std::cos(phi);
+                ys[static_cast<size_t>(i)] = rho * std::sin(phi);
+            }
+        }
+        for (int k = 0; k < samples; ++k) units[static_cast<size_t>(k)] = at(xs[static_cast<size_t>(k)], ys[static_cast<size_t>(k)]);
+    }
+    contact_ground_batch(units.data(), samples, g.data());
+    double sum = 0.0, sum_x = 0.0, sum_y = 0.0, sum_xx = 0.0, sum_yy = 0.0;
+    for (size_t k = 0; k < samples; ++k) {
+        g[k] -= (xs[k] * xs[k] + ys[k] * ys[k]) / two_r_sphere;
+        sum += g[k], sum_x += g[k] * xs[k], sum_y += g[k] * ys[k], sum_xx += xs[k] * xs[k], sum_yy += ys[k] * ys[k];
+    }
+    const double mean = sum / samples, gx = sum_x / sum_xx, gy = sum_y / sum_yy;
+    const auto plane = [&](double x, double y) { return mean + gx * x + gy * y; };
+    // The highest protrusion above the plane, and the pad's normal.
+    double best = -std::numeric_limits<double>::infinity();
+    for (size_t k = 0; k < samples; ++k) best = std::max(best, g[k] - plane(xs[k], ys[k]));
+    Vec3 normal = math::normalized(up - t.e1 * gx - t.e2 * gy);
+    if (!rocks_on()) return {mean + best, normal};
+
+    // Rocks, by an upper bound of their protrusion: top <= top_bound, the plane over the footprint (base +- a) >= its
+    // height at the base - |slope| a. First every peak under the disc (cached, free), then the searches only for the
+    // rocks whose bound still exceeds the best protrusion, highest bound first.
+    //
+    // A rock's contact top is bilinear between its template's footprint columns, and the plane is linear in the same
+    // coordinates: inside the disc the protrusion is greatest at a column node - found by climbing over the nodes from
+    // the peak (or from the best rim point). On the rim (a rock the rim cuts) it is searched along the arc.
+    const double slope = std::hypot(gx, gy);
+    RockQuery q;
+    gather_rocks(centre_unit, r, q);
+    struct Candidate {
+        const ContactCache::RockEntry* e;
+        double bx, by, px, py, bound;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(q.candidates.size());
+    const ContactCache::RockEntry* winner = nullptr;  // the rock carrying the pad, and where
+    double winner_x = 0.0, winner_y = 0.0;
+    for (const auto* e : q.candidates) {
+        const Vec3 b = (e->rock.base_unit - centre_unit) * sphere_radius_m_;
+        const Vec3 d = (e->peak_unit - centre_unit) * sphere_radius_m_;
+        const double bx = dot(b, t.e1), by = dot(b, t.e2), px = dot(d, t.e1), py = dot(d, t.e2);
+        const double bound = e->top_bound_m - plane(bx, by) + slope * e->rock.axes_m.x;
+        if (bound <= best) continue;
+        candidates.push_back({e, bx, by, px, py, bound});
+        if (px * px + py * py <= r * r) {  // the peak under the disc: its protrusion
+            const double p = e->peak_height_m - (px * px + py * py) / two_r_sphere - plane(px, py);
+            if (p > best) best = p, winner = e, winner_x = px, winner_y = py;
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        return a.bound != b.bound ? a.bound > b.bound : a.e->rock.id < b.e->rock.id;
+    });
+    const RockTemplates& templates = RockTemplates::instance();
+    constexpr int columns = RockTemplates::footprint_columns;
+    constexpr double golden = 0.6180339887498949;  // (sqrt 5 - 1) / 2
+    for (const Candidate& cand : candidates) {
+        if (cand.bound <= best) break;
+        const Rock& rock = cand.e->rock;
+        const double a = rock.axes_m.x;
+        double found = -std::numeric_limits<double>::infinity(), found_x = 0.0, found_y = 0.0;
+        // Protrusion of the rock's contact top at disc point (x, y) above the plane (-inf where it misses).
+        const auto protrusion = [&](double x, double y) {
+            const auto top = contact_top(rock, at(x, y), sphere_radius_m_);
+            if (!top) return -std::numeric_limits<double>::infinity();
+            const double p = *top - (x * x + y * y) / two_r_sphere - plane(x, y);
+            if (p > found) found = p, found_x = x, found_y = y;
+            return p;
+        };
+        // The footprint column node (i, j): its disc point and protrusion (-inf outside the disc or where it misses).
+        const Vec3 ea = math::column(rock.local_to_fixed, 0), eb = math::column(rock.local_to_fixed, 1);
+        const double ea1 = dot(ea, t.e1), ea2 = dot(ea, t.e2), eb1 = dot(eb, t.e1), eb2 = dot(eb, t.e2);
+        const auto node = [&](int i, int j) {
+            if (i < 0 || j < 0 || i >= columns || j >= columns) return -std::numeric_limits<double>::infinity();
+            const double z = templates.column_grid_node(rock.template_id, i, j);
+            const double above_base = rock.axes_m.z * z - rock.burial_m;
+            if (std::isnan(z) || above_base <= 0.0) return -std::numeric_limits<double>::infinity();
+            const double xr = a * (-1.0 + (2.0 * i + 1.0) / columns), yr = rock.axes_m.y * (-1.0 + (2.0 * j + 1.0) / columns);
+            const double x = cand.bx + ea1 * xr + eb1 * yr, y = cand.by + ea2 * xr + eb2 * yr;
+            if (x * x + y * y > r * r) return -std::numeric_limits<double>::infinity();
+            const double height = rock.base_height_m + above_base + (xr * xr + yr * yr) / two_r_sphere;
+            const double p = height - (x * x + y * y) / two_r_sphere - plane(x, y);
+            if (p > found) found = p, found_x = x, found_y = y;
+            return p;
+        };
+        // The node nearest the disc point (x, y).
+        const auto nearest_node = [&](double x, double y) {
+            const double dx = x - cand.bx, dy = y - cand.by;
+            const double ux = (ea1 * dx + ea2 * dy) / a, uy = (eb1 * dx + eb2 * dy) / rock.axes_m.y;
+            return std::pair{static_cast<int>(std::lround((ux + 1.0) * 0.5 * columns - 0.5)),
+                             static_cast<int>(std::lround((uy + 1.0) * 0.5 * columns - 0.5))};
+        };
+        // Climb over the nodes to a local maximum of the protrusion.
+        const auto climb = [&](int i, int j) {
+            double value = node(i, j);
+            for (int step = 0; step < max_climb_steps; ++step) {
+                int bi = i, bj = j;
+                double bv = value;
+                for (int di = -1; di <= 1; ++di) {
+                    for (int dj = -1; dj <= 1; ++dj) {
+                        if (di == 0 && dj == 0) continue;
+                        const double v = node(i + di, j + dj);
+                        if (v > bv) bv = v, bi = i + di, bj = j + dj;
+                    }
+                }
+                if (bi == i && bj == j) return;
+                i = bi, j = bj, value = bv;
+            }
+        };
+        const bool peak_inside = cand.px * cand.px + cand.py * cand.py <= r * r;
+        if (peak_inside) {
+            const auto [i, j] = nearest_node(cand.px, cand.py);
+            climb(i, j);
+        }
+        // Along the rim arc the rock covers (a rock the rim cuts), then inward from the best rim point.
+        const double db = std::hypot(cand.bx, cand.by);
+        if (db + a > r && cand.bound > std::max(best, found)) {
+            double half_span = constants::pi;
+            bool crosses = true;
+            if (db > 0.0) {
+                const double cos_span = (r * r + db * db - a * a) / (2.0 * r * db);
+                if (cos_span >= 1.0) crosses = false;
+                else if (cos_span > -1.0) half_span = std::acos(cos_span);
+            }
+            if (crosses) {
+                const double theta_b = std::atan2(cand.by, cand.bx);
+                const auto rim = [&](double theta) { return protrusion(r * std::cos(theta), r * std::sin(theta)); };
+                const double step = 2.0 * half_span / arc_coarse_samples;
+                double best_theta = theta_b, best_value = -std::numeric_limits<double>::infinity();
+                for (int k = 0; k < arc_coarse_samples; ++k) {
+                    const double theta = theta_b - half_span + (k + 0.5) * step;
+                    const double v = rim(theta);
+                    if (v > best_value) best_value = v, best_theta = theta;
+                }
+                if (best_value > -std::numeric_limits<double>::infinity()) {
+                    double lo = best_theta - step, hi = best_theta + step;
+                    double x1 = hi - golden * (hi - lo), x2 = lo + golden * (hi - lo);
+                    double f1 = rim(x1), f2 = rim(x2);
+                    for (int k = 0; k < arc_golden_steps; ++k) {
+                        if (f1 >= f2) {
+                            hi = x2, x2 = x1, f2 = f1;
+                            x1 = hi - golden * (hi - lo);
+                            f1 = rim(x1);
+                        } else {
+                            lo = x1, x1 = x2, f1 = f2;
+                            x2 = lo + golden * (hi - lo);
+                            f2 = rim(x2);
+                        }
+                    }
+                    if (!peak_inside) {  // the protrusion may grow inward on a tilted plane
+                        const double rim_x = found_x, rim_y = found_y;
+                        const auto [i, j] = nearest_node(rim_x, rim_y);
+                        climb(i, j);
+                    }
+                }
+            }
+        }
+        if (found > best) best = found, winner = cand.e, winner_x = found_x, winner_y = found_y;
+    }
+    if (winner) {  // the carrying rock's normal there
+        if (const auto top = contact_rock_top(winner->rock, at(winner_x, winner_y))) normal = top->second;
+        else normal = winner->peak_normal;
+    }
+    return {mean + best, normal};
 }
 
 }  // namespace starsim::environment

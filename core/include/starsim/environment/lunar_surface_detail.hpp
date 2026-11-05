@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -66,6 +67,7 @@ public:
         int level = 0;                 // face-cell level (cells >= 3.34 x max diameter: the reach 1.5 D <= 0.45 cell)
         double density_per_m2 = 0.0;   // N(min) - N(max)
         double mean_relief_m = 0.0;    // expected mean relief of the octave's craters per unit area (m)
+        double cumulative_min_per_m2 = 0.0, cumulative_max_per_m2 = 0.0;  // N(min), N(max) (precomputed draws)
     };
     const std::vector<CraterOctave>& crater_octaves() const { return crater_octaves_; }
     // Generated craters with centres in the cell (empty for a level no octave uses).
@@ -79,6 +81,7 @@ public:
     struct RoughnessOctave {
         std::int64_t cells_per_edge = 0;
         double spacing_m = 0.0;  // nominal (face centre)
+        double relative_amplitude = 0.0;  // sqrt 3 (spacing / baseline)^H: x scale x (local metric scale)^H
     };
     const std::vector<RoughnessOctave>& roughness_octaves() const { return roughness_octaves_; }
     // Amplitude scale (m), derived at construction: median plane-detrended RMS height of the generated roughness in
@@ -87,6 +90,23 @@ public:
 
 private:
     struct Query;
+    // Per-thread memo of generated crater cells (direct-mapped by the cell hash): nearby queries share most cells, and
+    // generating a cell (count, positions, completion) dominated a point query. A hit returns the same draws, so the
+    // relief is bit for bit the one generated in place.
+    struct CraterCellMemo {
+        static constexpr int slots = 2048;     // [E] ~1 MB per thread
+        static constexpr int max_draws = 6;    // cells with more draws (rare) are generated in place
+        struct Slot {  // the key and positions first (read for every cell), the craters after (read on a near draw)
+            std::uint64_t instance = 0;  // 0: empty
+            int octave = -1, face = -1, count = 0;
+            std::int64_t i = 0, j = 0;
+            std::array<double, max_draws> s01{}, t01{};
+            std::array<bool, max_draws> complete{};
+            std::array<Crater, max_draws> crater;
+        };
+        std::vector<Slot> table = std::vector<Slot>(slots);
+    };
+    const CraterCellMemo::Slot* memo_cell(int octave, const FaceCell& cell, std::uint64_t cell_hash) const;
     Query make_query(const math::Vec3& unit, bool for_craters = true) const;  // false: face blend only
     double craters_at(const Query& q, double min_wavelength_m) const;
     double roughness_at(const Query& q, double min_wavelength_m, double scale_m) const;
@@ -96,6 +116,11 @@ private:
     bool complete_crater(int octave, const FaceCell& cell, std::uint64_t cell_hash, int m, double s01, double t01,
                          Crater& out) const;
     double crater_mean_field_m(int octave, double band_start_m) const;
+    // Every octave's crater_mean_field_m at band_start_m, memoised per thread for the last band start (the same values;
+    // the field is a 32-step sum that otherwise dominates a point query). Valid until this thread's next call.
+    const double* crater_mean_fields(double band_start_m) const;
+    // Every roughness octave's top weight smooth01(log2(band_start / spacing)), memoised per thread likewise.
+    const double* roughness_top_weights(double band_start_m) const;
     double roughness_node(int octave, int face, std::int64_t j, std::int64_t k) const;
     double derive_roughness_scale() const;
 
@@ -107,6 +132,7 @@ private:
     std::vector<CraterOctave> crater_octaves_;
     std::vector<RoughnessOctave> roughness_octaves_;
     double roughness_scale_m_ = 0.0;
+    std::uint64_t instance_id_ = 0;  // unique per instance (keys the per-thread mean-field memo)
 };
 
 }  // namespace starsim::environment

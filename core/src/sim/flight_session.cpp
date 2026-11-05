@@ -1503,13 +1503,27 @@ void FlightSession::apply_moon_surface() {
 }
 
 void FlightSession::set_moon_surface_detail(bool on) {
+    // The flag changes only with the surface: a refused apply (a body resting on the Moon) keeps the old one.
+    const bool before = moon_surface_options_.detail;
     moon_surface_options_.detail = on;
-    apply_moon_surface();
+    try {
+        apply_moon_surface();
+    } catch (...) {
+        moon_surface_options_.detail = before;
+        throw;
+    }
 }
 
 void FlightSession::set_moon_rocks(bool on) {
+    // The flag changes only with the surface: a refused apply (a body resting on the Moon) keeps the old one.
+    const bool before = moon_surface_options_.rocks;
     moon_surface_options_.rocks = on;
-    apply_moon_surface();
+    try {
+        apply_moon_surface();
+    } catch (...) {
+        moon_surface_options_.rocks = before;
+        throw;
+    }
 }
 
 void FlightSession::set_lunar_landing_site(const LunarSite& site) {

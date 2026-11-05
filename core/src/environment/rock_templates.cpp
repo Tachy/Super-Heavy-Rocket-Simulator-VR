@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <map>
 #include <utility>
@@ -109,13 +110,20 @@ RockTemplates::RockTemplates() {
             shape.bottom_z = std::min(shape.bottom_z, height);
             shape.top_z = std::max(shape.top_z, height);
         }
-        // Footprint grid: the top of every column, for the exposed plan-view area at any cut height.
+        // Footprint grid: the top of every column, for the exposed plan-view area at any cut height (and the
+        // interpolated column tops).
+        shape.column_grid.assign(static_cast<size_t>(footprint_columns * footprint_columns),
+                                 std::numeric_limits<double>::quiet_NaN());
         for (int i = 0; i < footprint_columns; ++i) {
             for (int j = 0; j < footprint_columns; ++j) {
                 const double x = -1.0 + (2.0 * i + 1.0) / footprint_columns;
                 const double y = -1.0 + (2.0 * j + 1.0) / footprint_columns;
                 if (x * x + y * y >= 1.0) continue;
-                if (const auto top = column_top(id, x, y)) shape.column_tops.push_back(*top);
+                if (const auto top = column_top(id, x, y)) {
+                    shape.column_tops.push_back(*top);
+                    shape.column_grid[static_cast<size_t>(i * footprint_columns + j)] = *top;
+                    shape.column_grid_max = std::max(shape.column_grid_max, *top);
+                }
             }
         }
         std::sort(shape.column_tops.begin(), shape.column_tops.end());
@@ -150,6 +158,19 @@ Vec3 RockTemplates::normal(int id, const Vec3& dir_local) const {
         return (radius(id, d + t * normal_step) - radius(id, d - t * normal_step)) / (2.0 * normal_step);
     };
     return math::normalized(d - (t1 * slope(t1) + t2 * slope(t2)) / radius(id, d));
+}
+
+std::optional<double> RockTemplates::column_top_interpolated(int id, double x, double y) const {
+    const double u = (x + 1.0) * 0.5 * footprint_columns - 0.5, v = (y + 1.0) * 0.5 * footprint_columns - 0.5;
+    if (!(u >= 0.0 && v >= 0.0 && u < footprint_columns - 1 && v < footprint_columns - 1)) return std::nullopt;
+    const int i = static_cast<int>(u), j = static_cast<int>(v);
+    const double fu = u - i, fv = v - j;
+    const auto& grid = shapes_[static_cast<size_t>(id)].column_grid;
+    const auto at = [&](int a, int b) { return grid[static_cast<size_t>(a * footprint_columns + b)]; };
+    const double z00 = at(i, j), z10 = at(i + 1, j), z01 = at(i, j + 1), z11 = at(i + 1, j + 1);
+    const double z = (1.0 - fv) * ((1.0 - fu) * z00 + fu * z10) + fv * ((1.0 - fu) * z01 + fu * z11);
+    if (std::isnan(z)) return std::nullopt;  // a corner misses the rock
+    return z;
 }
 
 std::optional<double> RockTemplates::column_top(int id, double x, double y) const {

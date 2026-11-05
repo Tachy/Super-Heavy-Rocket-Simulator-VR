@@ -112,46 +112,65 @@ on top of that relief.
   (default on; rocks need the detail). Detail off forwards every override to `LunarTerrain` (bit-for-bit, incl. the
   10 m normal step) and `support_under_disc` is the point query at the disc centre.
 - Detail on, point queries (`height_m`, `height_at_direction_m`, `height_at_fixed_m`): LOLA `height_at_direction_m`
-  + `relief_m(unit, 0)` + every rock (>= 0.01 m) whose top covers the point (~13 us: relief 6 us, `rocks_touching` at
-  radius 0 ~6.6 us). `normal_fixed`: central differences over +-1 m (`detail_normal_step_m`, [E] the HLS pad radius;
+  + `relief_m(unit, 0)` + every rock (>= 0.01 m) whose top covers the point (relief ~2.4 us with the memos, 6 us before;
+  `rocks_touching` at radius 0 ~6.6 us). `normal_fixed`: central differences over +-1 m (`detail_normal_step_m`, [E] the HLS pad radius;
   `normal_step_m(fixed)` reports it). `resolution_m` / `finest_resolution_within_m`: 0.01 m. `max_height_m`: LOLA's +
   a practical relief bound (two fresh rims per crater octave, mean-field shifts, the value-noise maximum) + twice the
   largest rock semi-axis. `height_limited_m(unit, L, D_min)`: relief averaged over L and only rocks >= D_min
   ((0, 0) is the full point query, bitwise).
-- Contact surface (`support_under_disc(centre, up, r)`, `contact_ground_m`): the pads feel LOLA + the full relief
-  interpolated bilinearly on a cube-face lattice of 2^26 nodes per face edge (4.07 cm nominal, 3.4-4.1 cm) and the
-  rocks >= 5 cm (`contact_min_rock_diameter_m`). Both scales lie inside the few-cm sinkage of a loaded pad in regolith
-  ([E]; a 5 cm rock buried 0.3 of its height stands 2-3 cm proud; the omitted sub-lattice relief has an RMS of ~2 mm).
-  A disc is level (normal to `up`); its support is the highest point under it, heights referred to the centre's
-  vertical (a point d off the centre counts d^2 / 2R lower): ground = max over a pattern of 25 samples (centre, 8 at
-  r/2, 16 on the rim, [E]: the rim ring finds the rim of a bowl the pad sits in) with the normal of the least-squares
-  plane through them (the pad-scale slope; in a bowl the pad bears on the rim all round and that normal is the axis);
-  a rock whose peak lies under the disc counts with its peak and its own normal there; a rock cut by the rim with the
-  highest point of the rim arc over it (5 coarse samples over the arc it can cover, 8 golden-section steps). Rocks are
-  tried highest peak first and stop once a peak is not above the best support. Peaks: per template the highest column
-  top (41 x 41 grid + pattern search, computed once, ~0.1 s), per rock `rock_top` there. r = 0: the contact surface
-  at the point (normal from central differences of the contact ground over +-1 m).
-- Cache: per face cell of level 18 (10.4 m nominal) the lattice nodes (256 x 256, filled lazily, computed outside the
-  lock) and the rocks >= 5 cm that may touch the cell (`rocks_touching` from the cell centre, radius = largest
-  centre-to-corner chord x 1.01) with their peaks; at most 64 cells of each kind (LRU). Node values and rock lists
-  are pure functions of the cell, so a cached query equals a fresh one bit for bit (tested). One mutex; the node
-  computation runs outside it.
-- Cost (Release, this machine, six 1 m pads on a 12 m footprint at the site): first tick 3.4-6.5 ms (cold cache:
-  ~600 nodes and ~10 rock cells), sliding 1 mm per tick 100-155 us per tick (new nodes as the pattern moves), resting
-  22-42 us per tick (measured in the test run and under the parallel suite; budget < 50 us).
-- Legs (`contact::leg_contact`): each foot's support is `LandingSurface::below_disc(e, n, foot_pad_radius_m)` (computed
-  once per foot per tick); the base ring asks `height_below` (height and water only: the contact surface at the point,
-  no normal). `TerrainField` routes `below_disc` (r > 0) to `support_under_disc` and `height_below` to the contact
-  surface only for a `DetailedLunarTerrain` with detail on; otherwise both are `below` (bit-for-bit today's point
-  feet). Vehicle config `[stage.landing_legs] foot_pad_radius_m` (default 0 = point foot); `starship_hls.toml` 1.0 m
-  [E] (drawn pad, user-approved 2026-11-04).
+- Contact surface (`support_under_disc(centre, up, r)`, `contact_height_m`, `contact_ground_m`, `contact_rock_top`):
+  the pads feel LOLA + the full relief interpolated bilinearly on a cube-face lattice of 2^25 nodes per face edge
+  (8.1 cm nominal, 6.8-8.1 cm) and the rocks >= 5 cm (`contact_min_rock_diameter_m`) with their contact top (the
+  template's column tops interpolated on its 96 x 96 footprint grid, `RockTemplates::column_top_interpolated`: within
+  1e-4 m of `rock_top` for the tested rocks, ~20 ns instead of ~4 us). Both scales lie inside the few-cm sinkage of a
+  loaded pad in regolith ([E]; a 5 cm rock buried 0.3 of its height stands 2-3 cm proud; the omitted sub-lattice relief
+  has an RMS of 4.4 mm, 2.5 mm at 4 cm - the 4 cm lattice put six sliding pads over the 50 us budget, see Cost).
+- Pivoting pad (ruling I2, fix round 1 of Task 4; the HLS pad sits on a ball joint): heights are referred to the disc
+  centre's vertical (a point d off the centre counts d^2 / 2R lower); the pad's plane is the least-squares plane
+  through the contact ground at a pattern of 25 samples (centre, 8 at r/2, 16 on the rim, [E]); the support is the
+  plane's height at the centre (the samples' mean) plus the highest protrusion of the contact surface above the plane
+  within the disc - a ground sample or a rock. On a plane the support is the plane's height under the centre (a point
+  foot); a rock lifts the pad by its protrusion above the fitted plane (a level pad would take the full rock height).
+  Normal: the plane's, or the carrying rock's at the point where it protrudes most. Rocks are taken in the order of an
+  upper bound of their protrusion (top bound - plane at the base + slope x a) with early stop; first every peak under
+  the disc (cached per rock, free), then: inside the disc the protrusion of the bilinear contact top above the linear
+  plane is greatest at a footprint column node - found by climbing over the nodes from the peak; a rock the rim cuts is
+  searched along its rim arc (5 coarse samples, 8 golden-section steps) and climbed inward from the best rim point.
+  Peaks: per template the highest column top (41 x 41 grid + pattern search, computed once). r = 0 (`contact_height_m`,
+  the base ring): the ground at the point and every contact-size rock covering it (normal: the ground's over +-1 m or
+  the rock's).
+- Upper bound (`support_upper_bound_m`, `SurfaceField::below_disc_upper_bound` / `height_below_upper_bound`): legs skip
+  the query of a foot or base-ring point above it (the same leg result: no depth, not touching). r = 0: max(ground at
+  the point, highest rock top bound of its cache cell) - rigorous. r > 0: max(ground at the centre + 2 r, rock bound)
+  + 0.98 x 2 x 2 r ([E] `bound_slope` 2: the contact ground stays within 2 r of the centre's over the pad - fresh crater
+  walls reach 0.52; [D] `bound_tilt_gain` 0.98 bounds the fitted plane's tilt x r by the samples' spread).
+- Cache: per face cell of level 18 (10.4 m nominal) the lattice nodes (128 x 128, filled lazily, computed outside the
+  lock, one locked pass per disc) and the rocks >= 5 cm that may touch the cell (`rocks_touching` from the cell centre,
+  radius = largest centre-to-corner chord x 1.01) with their peaks and top bounds; at most 64 cells of each kind (LRU).
+  Node values and rock lists are pure functions of the cell, so a cached query equals a fresh one bit for bit
+  (tested). A point needs only its own cell. `LunarSurfaceDetail` memoises per thread the generated crater cells
+  (2048 direct-mapped slots, ~1 MB) and the band-start-dependent octave terms (crater mean field, roughness top
+  weights): the same values, a full-detail relief point 2.4 us instead of 6 us.
+- Cost (Release, this machine, `[contact_speed]`, run alone as CTest `contact_speed`; whole `leg_contact` of the HLS:
+  six 1 m pads on a 12 m footprint + 12 base-ring points through `TerrainField`, medians of 7 x 200 ticks): resting
+  25 us, sliding 1 mm per tick (0.2 m/s at 200 Hz) 34-36 us, descending from 50 m at 2 m/s with 0.2 m/s drift 12 us
+  (mean of 5,000 ticks; feet and ring above their bound skipped), first tick on a cold surface 0.2 ms (budget < 50 us
+  per tick, gated). Under the parallel suite the same case measured 46 / 58 / 15 us, hence the serial run.
+- Legs (`contact::leg_contact`): each foot's support is `LandingSurface::below_disc(e, n, foot_pad_radius_m)` (once
+  per foot per tick, skipped above `below_disc_upper_bound`); the base ring asks `height_below` (height and water
+  only: the contact surface at the point incl. rocks, skipped above `height_below_upper_bound`). `TerrainField` routes
+  `below_disc` (r > 0) to `support_under_disc` and `height_below` to `contact_height_m` only for a
+  `DetailedLunarTerrain` with detail on; otherwise both are `below` (bit-for-bit today's point feet) and the bounds
+  infinite. Vehicle config `[stage.landing_legs] foot_pad_radius_m` (default 0 = point foot); `starship_hls.toml`
+  1.0 m [E] (drawn pad, user-approved 2026-11-04).
 - Session: `sim::shared_moon_surface(config_dir, data_dir, options)` caches the composed surface per (directories,
   options) and its parts (LOLA via `shared_lunar_terrain`, one `LunarSurfaceDetail`, one `LunarRocks` with the
   Diviner map, loaded only with rocks on). `FlightSession::set_moon_terrain(DetailedLunarTerrain)` keeps
   `moon_terrain()` = LOLA (telemetry `altitude_terrain_m`, planners, game queries) and uses
   `moon_surface()` for the ground and the legs: the given surface when its options match the session's flags, else a
   rebuild from its parts; `set_moon_surface_detail` / `set_moon_rocks` re-apply at once and rebuild a lunar landing
-  site on the new surface (refused while a body rests on the Moon). The `lunar_landing` mission loads all parts
+  site on the new surface (refused while a body rests on the Moon; the flag then keeps its old value). The
+  `lunar_landing` mission loads all parts
   (`{true, true}`) and hands them to the session. `set_moon_terrain(LunarTerrain)` stays the LOLA-only surface.
 
 ## Code
@@ -187,10 +206,14 @@ on top of that relief.
   `SizeFrequency::cumulative_density_per_m2(D)` (forms `power` | `exponential`, not clipped to [min, max]).
   Missing / bad keys throw `ConfigError` with a German message naming the full key (`roughness.hurst_exponent`).
 - `core/include/starsim/environment/detailed_lunar_terrain.hpp`, `core/src/environment/detailed_lunar_terrain.cpp`:
-  `DetailedLunarTerrain`, `SurfaceDetailOptions`, `support_under_disc` / `DiscSupport`, `contact_ground_m`,
-  `height_limited_m`, `normal_step_m`, the contact cache.
-- `contact::SurfaceField::below_disc` / `height_below`, `LandingSurface::below_disc` / `height_below`,
-  `TerrainField` (`core/include/starsim/contact/landing_surface.hpp`); `contact::leg_contact` feet on `below_disc`.
+  `DetailedLunarTerrain`, `SurfaceDetailOptions`, `support_under_disc` / `DiscSupport`, `contact_height_m`,
+  `support_upper_bound_m`, `contact_ground_m`, `contact_rock_top`, `height_limited_m`, `normal_step_m`, the contact
+  cache; `detail()` / `rocks()` throw `std::logic_error` where the part is absent.
+- `RockTemplates::column_top_interpolated` / `column_grid_node` / `column_grid_max` (the footprint grid's column tops,
+  kept from construction).
+- `contact::SurfaceField::below_disc` / `height_below` / `below_disc_upper_bound` / `height_below_upper_bound`, the same
+  on `LandingSurface`, `TerrainField` (`core/include/starsim/contact/landing_surface.hpp`); `contact::leg_contact`
+  feet on `below_disc`, the base ring on `height_below`, both skipped above the bounds.
 - `sim::shared_moon_surface` (`core/include/starsim/sim/terrain_cache.hpp`); `FlightSession::set_moon_terrain`
   overloads, `set_moon_surface_detail`, `set_moon_rocks`, `moon_surface()`; `lunar_landing_mission.cpp` load_site.
 
@@ -270,20 +293,34 @@ on top of that relief.
   - detail off on the real LOLA (10^4 points, half within 15 km of the site): heights by latitude / longitude,
     direction and fixed point, normals (memcmp), resolutions, `normal_step_m`, `height_limited_m` and the disc
     support (= point query) all `==` LunarTerrain, with and without the detail parts present; `max_height_m` equal;
-  - disc support vs brute force (polar grid 100 x 240 + 8000 rim points of `rock_top` over the disc): 6 peaks 1 mm
-    inside the pad edge and 3 rocks cut by the rim (D 0.41-0.64 m): height within 0.01 mm (tolerance 1 mm), normal
-    within 0.0007-0.011 rad (tolerance 0.05);
-  - cached query == fresh instance bit for bit (40 discs and 40 point supports);
-  - pads centred in 8 craters of 6-16 m (rocks off): pattern max vs a dense max (41 x 80) of the same ground within
-    1.5 cm (tolerance 3 cm). A single-crater geometry check is not possible on the real relief (roughness RMS 0.19 m
-    at 20 m, overlapping craters: no crater of 6-16 m near the site is isolated); the leg response to a crater and a
-    rock is tested on an analytic field (`[moon_surface][contact][legs]` in `test_terrain_contact.cpp`: rock under the
-    pad 0.6 m off the foot compresses by rock top + preload, a 1 m pad in a 3 m bowl by preload + bowl(1 m), a point
-    foot misses the rock and stands on the bowl floor, all within 1 mm; radius 0 = the point query exactly);
+  - pivoting pad on a 9 deg plane (sloped synthetic site tile, craters and roughness off; true slope 9.018 deg):
+    support = the plane's height under the centre within 0 m (tolerance 1 mm), normal = the plane's within 2.1e-6 rad
+    (tolerance 1e-3); a level pad would stand 0.1587 m higher (checked > 0.1, so the case tells them apart);
+  - a rock at the downhill rim of a pad on the 9 deg plane (3 peaks 1 mm inside the edge, 4 rocks cut by the rim, D
+    0.41-0.44 m): support = plane height + the rock's protrusion above the pad's plane by brute force (polar grid
+    100 x 240 + 8000 rim points of `rock_top` minus the plane) within 0.05 mm (tolerance 1 mm), normal within 0.012 rad
+    (tolerance 0.05); a level pad on the same rock stands 0.158 m lower (checked > 0.1);
+  - the same on the procedural ground (plane fitted to the rough ground; 5 peaks under the edge, 3 rim cuts, D
+    0.41-0.64 m): within 0.10 mm, normals within 0.047 rad;
+  - flat ground (no relief, no rocks): support = the ground at the centre (1e-9 m), normal radial; a 1 m pad centred
+    in an isolated crater (craters >= 4 m only, D 4.6-5.8 m): the bowl's height at 1 m from the centre within
+    0.041 mm (tolerance 1 mm), normal on the axis;
+  - point contact (r = 0, the base ring) on 4 rock peaks: = max(ground, contact tops of every contact-size rock)
+    exactly, its normal the rock's; the contact top within 1e-4 m / 0.02 rad of `rock_top`; the upper bound above it;
+    a base-ring point between the ground and the rock top touches (`base_contact`), 1 mm above the top it does not
+    (through `TerrainField` and `leg_contact`);
+  - cached query == fresh instance bit for bit (40 discs and 40 point supports); the pad never stands below the ground
+    at its centre;
+  - pads centred in 8 craters of 6-16 m (rocks off): plane + pattern protrusion vs plane + a dense protrusion (21 x 40)
+    of the same ground within 3 cm ([E]), normal = the fitted plane's;
+  - mutation check (fix round 1): with the plane's tilt forced to 0 (a level pad) and the point contact without rocks,
+    6 cases went red (9 deg plane, rim rock on the plane, procedural rock, procedural craters, point contact, base
+    ring); restored, green;
   - `height_limited_m(p, 0, 0) == height_at_direction_m(p)` (200 points); without rocks the band-limited height at
     L = 4 / 1 m equals the footprint mean of the full ground to 0.0021 / 0.0008 m (removed band RMS 0.072 / 0.027 m;
     tolerance 0.1 x);
-  - cost: see Physics surface (resting < 50 us gated).
+  - cost (`[contact_speed]`, CTest `contact_speed`, RUN_SERIAL): see Physics surface; resting, sliding and descending
+    each < 50 us gated (medians of 7 x 200 ticks).
 - `[terrain_cache][moon_surface][data][slow]`: the real Diviner map (3840 x 11520) loads with its gap fill in 0.44 s;
   the first `shared_moon_surface({true, true})` 1.65 s (detail construction ~1 s + map); one instance per options, one
   detail generator, LOLA shared with `shared_lunar_terrain`.
@@ -383,13 +420,25 @@ geometry (g near 0) is not observed there. The published global-average table of
 - Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies (done). The
   full 88 MB product is loaded by `shared_moon_surface` (0.44 s incl. gap fill) and must be fetched
   (`fetch.py diviner_rock_abundance`); how it is packaged for the release is the user's decision (open).
-- Contact surface: the pads feel the relief on a 4 cm lattice and rocks >= 5 cm (both [E], below the pad sinkage); the
-  disc pattern (25 samples) can miss up to ~1.5 cm of sub-pattern roughness (measured); a rock's highest point under
-  a level disc is taken at its peak (exact) or on the rim arc (search). The pad is level in the site frame (not
-  pivoting): on a planar slope s every pad stands r tan s higher (1 m pad, 8 deg: 0.14 m), the tilt is unchanged.
-- Physics cost: a pad sliding 1 mm per tick costs 100-155 us per tick for six pads (new lattice nodes), the first tick
-  3-6 ms; Task 5's planner queries many candidate points cold (each pad ~100 nodes x 6 us) - prefetching the
-  touchdown area or a coarser candidate check first may be needed there.
+- Contact surface: the pads feel the relief on an 8 cm lattice (sub-lattice RMS 4.4 mm) and rocks >= 5 cm (both [E],
+  below the pad sinkage); the 8 cm (instead of 4 cm) lattice was chosen in fix round 1 of Task 4 for the six-pad cost
+  gate (sliding 34-36 us against 48-51 us) - one constant (`contact_lattice_level`) if the controller wants 4 cm back.
+  The disc pattern (25 samples) can miss up to ~1.5 cm of sub-pattern roughness. Rocks: the contact top is the
+  template's column tops interpolated (<= 1e-4 m from `rock_top` for the tested rocks); the greatest protrusion is
+  found at a column node by a climb from the peak (a local maximum: a rock with two separate summits under the pad may
+  be read at the lower one) or along the rim arc.
+- Pivoting pad: the pad stays parallel to the plane fitted to the ground and is lifted by the highest protrusion (the
+  ruling); a real ball-joint pad on a rim rock would tilt onto the rock and the ground opposite, lifting its joint by
+  roughly half as much. No joint range limit is modelled.
+- Upper bound for skipping feet: `bound_slope` 2 is a practical bound (overlapping steep crater walls could exceed it
+  in principle); a violation only delays a foot's contact query until it is below the bound.
+- Physics cost: the first tick on a cold surface ~0.2 ms; Task 5's planner querying many cold candidate points needs
+  prefetching or a coarse pre-check (each new lattice node ~2.4 us).
+- Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
+  `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
+  over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated
+  rock tops). They differ by mm-cm; routing the body contact through the contact surface would need the body contact
+  to know the site frame - left as is (a hull touching the ground is an impact either way).
 - Point queries with detail (ground contact of every body at the Moon via `ReferenceBody`, two per body per tick in
   `FlightBody::resolve_ground_contact`) cost ~13 us each (LOLA alone ~0.02 us); `normal_fixed` with detail ~50 us.
   Telemetry `altitude_terrain_m` stays on LOLA.
