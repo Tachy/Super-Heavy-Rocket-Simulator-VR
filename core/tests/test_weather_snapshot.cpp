@@ -519,6 +519,20 @@ TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {
     std::filesystem::remove(damaged);
 }
 
+TEST_CASE("A snapshot is written next to a foreign file whose name has no ANSI mapping", "[weather]") {
+    // The temp-file sweep reads every name in the directory; a name outside the ANSI code page (CJK, emoji) must not
+    // make the write fail (it threw "No mapping for the Unicode character" on Windows).
+    const auto dir = unique_temp("weather_unicode_dir");
+    std::filesystem::create_directories(dir);
+    const auto foreign = dir / std::filesystem::path(u8"中文_\U0001F600.txt");
+    write_bytes(foreign, {'x'});
+    const auto file = dir / "slab.wthr";
+    CHECK_NOTHROW(write_weather_snapshot(file, WeatherSnapshot::uniform_slab(9, 16, 2000.0, 3000.0, 3e-4, 1.0)));
+    CHECK(read_weather_snapshot(file).has_value());
+    CHECK(std::filesystem::exists(foreign));
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("Lifting condensation level follows Romps' exact expression", "[weather]") {
     // Reference: an independent Python port of the published code of Romps 2017 (J. Atmos. Sci. 74, 3891, doi:10.1175/
     // JAS-D-17-0102.1; scipy.special.lambertw, branch -1, his constants), dew point -> vapour pressure with his

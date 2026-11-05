@@ -67,8 +67,11 @@ void remove_stale_temp_files(const std::filesystem::path& directory, std::string
     std::error_code ec;
     std::filesystem::directory_iterator it(directory, ec), end;
     for (; !ec && it != end; it.increment(ec)) {
-        const std::string name = it->path().filename().string();
-        if (name.find(name_marker) == std::string::npos) continue;
+        // UTF-8, not path::string(): on Windows string() converts to the ANSI code page and throws for a foreign file
+        // whose name has no mapping there (the shared temp directory holds files of other programs).
+        const std::u8string name8 = it->path().filename().u8string();
+        const std::string_view name(reinterpret_cast<const char*>(name8.data()), name8.size());
+        if (name.find(name_marker) == std::string_view::npos) continue;
         std::error_code entry_error;
         const auto written = it->last_write_time(entry_error);
         if (!entry_error && now - written > stale_temp_file_age) std::filesystem::remove(it->path(), entry_error);
