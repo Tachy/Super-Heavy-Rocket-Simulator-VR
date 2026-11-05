@@ -161,6 +161,18 @@ Drawn rocks (moon procedural surface Task 11, `MoonRockLayer`), stereo mock, 2 m
 -20 deg, median of 120 frames, budget control held (`--rock_budget=off`): rocks off 7.77 / 7.87 ms (two rounds); first
 version (every listed instance through the vertex shader) 10.48 / 10.48 (+2.6; a flat-colour fragment 10.22: the cost
 is the vertex work of collapsed instances); with the per-node visible counts (diameter-sorted lists, prefix drawn)
-8.57 ms with pebbles from 1 cm, 8.35 from 2 cm (shipped: +0.53 ms), 8.16 from 4 cm. ~0.6 ms remain for the near-field
-shadows (Task 12). Over budget the layer raises `rock_threshold_scale` (log rate 0.5 / s per unit of relative
-overload of the 9 ms VR / 14 ms desktop GPU target, logged), never a count cut.
+8.57 ms with pebbles from 1 cm, 8.35 from 2 cm (shipped: +0.53 ms), 8.16 from 4 cm.
+
+Task 11 fix round B (user decision 2026-11-05: on the Moon below 90 fps is acceptable, quality first; the rock control
+is only a floor guard at 22.2 ms GPU = 45 fps, the main-thread hitch gate of 5 ms stays). Same views, median of 120
+frames, two alternating rounds: IM-2 2 m rocks off 8.08 / 8.14 ms (was 7.77 / 7.87: the 1024 px regolith maps and
+the earthshine statistics), rocks on 8.73 / 8.76 ms (+0.63 ms, 4.48 M drawn rock vertices: 0.14 ns per vertex; facet
+normals per fragment included). Diviner boulder field (39.36 N, -0.17 E, abundance load factor 3.81 at the camera,
+Sun 48.6 deg, 600 frames): rocks off 9.88 ms; rocks on with the floor guard 20.1 ms median (p99 27.8; the scale rose
+from the load factor to ~7.7; 97 M drawn vertices at scale 1, 0.21 ns per vertex), pool 650 MB. Before the guard
+learnt the rocks' cost (0.05 ns per vertex assumed) it held at 30.3 ms: the estimate now uses the higher measured
+value (`ROCK_NS_PER_VERTEX` 0.21). The stereo mock is 3534 x 2838 per eye; the headset's 5294 x 4250 draws ~2.5 x the
+rocks (M3, T13). Pool memory: ~210-220 MB of GPU buffers at IM-2 2 m once warmed (`MoonRockLayer.PREWARM`, per (LOD,
+capacity) key), 650 MB in the boulder field. Main thread: the rock layer's share during a 10 km camera jump max
+1.1-1.2 ms per frame (attach queue 2 ms budget incl. the pool warming, visible counts 0.5 ms); the quadtree's own
+update without rocks max 13.5 ms (known-issues, T13).

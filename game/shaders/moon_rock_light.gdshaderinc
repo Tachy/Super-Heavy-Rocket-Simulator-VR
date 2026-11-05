@@ -5,8 +5,9 @@
 // the single-scattering albedo albedo_factor x w (config rocks.albedo_to_regolith; the statistical layer's reflectance
 // ratio rho is this law's ratio at the mosaics' standard geometry) and the globe's mean slope (rho's definition), on
 // the albedo map's value divided by the mosaic norm N = exp(-C_all) + (1 - exp(-C_all)) rho (the map holds every rock,
-// like the ground's factors), the Sun term times Smith's G1 of the node's unshadowed drawn relief (the ground's own
-// factor: the model's drawn rock radiance is rho G1 G(e) / N per plan area). Lit faces and the terminator come from the
+// like the ground's factors), each light's term (Sun and earthshine) times Smith's G1 of the node's unshadowed drawn
+// relief at that light's elevation (the ground's own factor: the model's drawn rock radiance is rho G1(e) G(e) / N per
+// plan area). Lit faces and the terminator come from the
 // drawn shape itself. The rock texture's slopes modulate each light like the regolith texture (mean-preserving
 // 1 + tanh(k . grad h)). At the base the rock blends into the regolith over ROCK_FILLET_PER_DIAMETER x D (dust fillet,
 // burial blend): the regolith's reflectance on the local vertical with the node's residual mean slope.

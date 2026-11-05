@@ -26,13 +26,14 @@ void fragment() {
 	vec3 gradient = detail_texture_gradient(UV * 64.0, VERTEX, n, patch_spacing_m);
 	float theta_bar = detail_shading ? detail_theta_bar(patch_spacing_m) : moon_hapke_theta_bar_rad;
 	float elevation = asin(clamp(dot(n, to_sun), -1.0, 1.0));
+	float earth_elevation = asin(clamp(dot(n, to_earth), -1.0, 1.0));
 	vec2 factors = vec2(1.0);
 	float sun_modulation = 1.0;
 	float earth_modulation = 1.0;
 	if (detail_shading) {
 		// The threshold diameter: the override of the rock patch steps (Task 11), else no rock geometry.
 		factors = detail_light_factors(patch_abundance, detail_rock_threshold_m(0.0, 1.0e30, patch_abundance), patch_spacing_m,
-				detail_horizon_spacing_m, elevation);
+				detail_horizon_spacing_m, elevation, earth_elevation);
 		sun_modulation = detail_modulation(gradient, n, to_sun, to_eye);
 		earth_modulation = detail_modulation(gradient, n, to_earth, to_eye);
 	}

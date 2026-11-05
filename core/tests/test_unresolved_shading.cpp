@@ -332,31 +332,46 @@ TEST_CASE("Rock lit-face gain: limits and growth toward a low Sun", "[moon_surfa
     CHECK(environment::rock_lit_gain(0.35, 0.1 * deg) == environment::rock_lit_gain(0.35, environment::lit_gain_floor_rad));
 }
 
-TEST_CASE("Light factors: albedo share keeps the mosaic mean, the earthshine sees no shadow share",
+TEST_CASE("Light factors: the Sun and the earthshine follow one directional-light law, each at its own elevation",
           "[moon_surface][unresolved_shading]") {
     const auto& m = shared_model();
-    // Every rock statistical: the earthshine factor is the mosaic's mean exactly, at any Sun elevation and spacing.
+    // The earthshine is a directional light like the Sun (Earth disc ~1.9 deg): its factor at elevation e is the Sun's
+    // at e, independently of the other light's elevation; below the horizon both are 0.
     for (const double e_deg : {-5.0, 2.0, 7.0, 40.0}) {
         for (const double spacing : {0.01, 1.0, 100.0}) {
-            const auto f = environment::unresolved_light_factors(m, 1.0, inf, spacing, 20.0, e_deg * deg);
-            CHECK(std::abs(f.earth - 1.0) < 1e-12);
-            if (e_deg < 0.0) CHECK(f.sun == 0.0);
+            for (const double d : {inf, 0.3}) {
+                const auto f = environment::unresolved_light_factors(m, 1.0, d, spacing, 20.0, e_deg * deg, 20.0 * deg);
+                const auto swapped =
+                    environment::unresolved_light_factors(m, 1.0, d, spacing, 20.0, 20.0 * deg, e_deg * deg);
+                CHECK(swapped.earth == f.sun);
+                CHECK(swapped.sun == f.earth);
+                if (e_deg < 0.0) CHECK(f.sun == 0.0);
+            }
         }
     }
-    // Rocks above the geometry threshold drawn elsewhere: the statistical share drops their albedo share.
-    const auto drawn = environment::unresolved_light_factors(m, 1.0, 0.5, 1.0, 20.0, 30.0 * deg);
-    CHECK(drawn.earth < 1.0);
+    // A low Earth: the rocks' cast shadows dim the earthlit ground, their lit faces brighten it; with every rock
+    // statistical and no unshadowed drawn relief the factor is [exp(-C (1 + sigma)) + (1 - exp(-C)) rho G] / N.
+    {
+        const double e = 7.0 * deg;
+        const auto f = environment::unresolved_light_factors(m, 1.0, inf, 1.0e4, 1.0e4, 40.0 * deg, e);
+        const double c = environment::rock_cover(m, 0.0, inf);
+        const double rho = m.rock_reflectance_ratio;
+        const double norm = std::exp(-c) + (1.0 - std::exp(-c)) * rho;
+        const double sigma = environment::rock_shadow_per_cover(m.rock_exposed_height_per_diameter, std::sin(e));
+        const double expected =
+            (std::exp(-c * (1.0 + sigma)) + (1.0 - std::exp(-c)) * rho * environment::rock_lit_gain_table(m, e)) / norm;
+        CHECK(std::abs(f.earth - expected) < 1e-12);
+    }
     // No rocks at all (abundance 0) and no drawn relief below the horizon spacing: both factors 1.
-    const auto bare = environment::unresolved_light_factors(m, 0.0, inf, 1.0e4, 1.0e4, 7.0 * deg);
+    const auto bare = environment::unresolved_light_factors(m, 0.0, inf, 1.0e4, 1.0e4, 7.0 * deg, 3.0 * deg);
     CHECK(std::abs(bare.sun - 1.0) < 1e-12);
     CHECK(std::abs(bare.earth - 1.0) < 1e-12);
     for (const double e_deg : {3.0, 7.0, 15.0, 30.0, 60.0}) {
-        const auto near = environment::unresolved_light_factors(m, 1.0, inf, 0.01, 20.0, e_deg * deg);
-        const auto rocks = environment::unresolved_light_factors(m, 1.0, inf, 1.0e4, 1.0e4, e_deg * deg);
-        std::printf("  Sun %4.1f deg: sun factor 1 cm node %.3f (Smith G1 %.3f), rocks alone %.3f; earth %.3f\n", e_deg,
-                    near.sun,
+        const auto near = environment::unresolved_light_factors(m, 1.0, inf, 0.01, 20.0, e_deg * deg, e_deg * deg);
+        const auto rocks = environment::unresolved_light_factors(m, 1.0, inf, 1.0e4, 1.0e4, e_deg * deg, e_deg * deg);
+        std::printf("  light %4.1f deg: factor 1 cm node %.3f (Smith G1 %.3f), rocks alone %.3f\n", e_deg, near.sun,
                     environment::smith_lit_fraction(std::tan(e_deg * deg), environment::unshadowed_slope_variance(m, 0.01, 20.0)),
-                    rocks.sun, near.earth);
+                    rocks.sun);
     }
 }
 
@@ -392,29 +407,33 @@ TEST_CASE("Rock growth band: statistical cover, no rock counted twice, the drawn
         CHECK(c - previous < 0.003 * c_all);
         previous = c;
     }
-    // Drawn rocks (mean radiance rho G1 G / N per plan area) on the visible ground exp(-C_g) plus that ground's factors
-    // give the all-statistical mean exactly: Sun (their shadows statistical) and earthshine.
+    // Drawn rocks (mean radiance rho G1(e) G(e) / N per plan area for either light) on the visible ground exp(-C_g)
+    // plus that ground's factors give the all-statistical mean exactly: Sun and earthshine (shadows statistical).
     for (const double abundance : {1.0, 6.0}) {
         for (const double d : {0.01, 0.04, 0.3, 3.0}) {
             for (const double e_deg : {3.0, 7.0, 30.0}) {
                 const double e = e_deg * deg;
-                const auto all = environment::unresolved_light_factors(m, abundance, inf, 0.02, 20.0, e);
-                const auto ground = environment::unresolved_light_factors(m, abundance, d, 0.02, 20.0, e);
+                const double e_earth = 0.5 * e + 2.0 * deg;  // a different elevation for the Earth
+                const auto all = environment::unresolved_light_factors(m, abundance, inf, 0.02, 20.0, e, e_earth);
+                const auto ground = environment::unresolved_light_factors(m, abundance, d, 0.02, 20.0, e, e_earth);
                 const double c_g = abundance * (c_all - environment::rock_statistical_cover(m, d));
                 const double norm = std::exp(-abundance * c_all) + (1.0 - std::exp(-abundance * c_all)) * m.rock_reflectance_ratio;
-                const double lit = environment::smith_lit_fraction(std::tan(e), environment::unshadowed_slope_variance(m, 0.02, 20.0));
+                const double unshadowed = environment::unshadowed_slope_variance(m, 0.02, 20.0);
+                const double lit = environment::smith_lit_fraction(std::tan(e), unshadowed);
+                const double lit_earth = environment::smith_lit_fraction(std::tan(e_earth), unshadowed);
                 const double rock_sun = lit * m.rock_reflectance_ratio * environment::rock_lit_gain_table(m, e) / norm;
-                const double rock_earth = m.rock_reflectance_ratio / norm;
+                const double rock_earth =
+                    lit_earth * m.rock_reflectance_ratio * environment::rock_lit_gain_table(m, e_earth) / norm;
                 CHECK(std::abs(std::exp(-c_g) * ground.sun + (1.0 - std::exp(-c_g)) * rock_sun - all.sun) < 1e-12);
                 CHECK(std::abs(std::exp(-c_g) * ground.earth + (1.0 - std::exp(-c_g)) * rock_earth - all.earth) < 1e-12);
             }
         }
     }
     // With the drawn rocks' own shadows (Task 12's shadow map) the ground loses only the statistical rocks' shadows.
-    const auto own = environment::unresolved_light_factors(m, 1.0, 0.04, 0.02, 20.0, 7.0 * deg, false);
-    const auto stat = environment::unresolved_light_factors(m, 1.0, 0.04, 0.02, 20.0, 7.0 * deg, true);
+    const auto own = environment::unresolved_light_factors(m, 1.0, 0.04, 0.02, 20.0, 7.0 * deg, 5.0 * deg, false);
+    const auto stat = environment::unresolved_light_factors(m, 1.0, 0.04, 0.02, 20.0, 7.0 * deg, 5.0 * deg, true);
     CHECK(own.sun > stat.sun);
-    CHECK(own.earth == stat.earth);
+    CHECK(own.earth > stat.earth);
 }
 
 TEST_CASE("Shipped model: rock shape and reflectance ratio", "[moon_surface][unresolved_shading]") {

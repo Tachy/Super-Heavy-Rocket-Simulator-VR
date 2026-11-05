@@ -449,7 +449,7 @@ double rock_statistical_cover(const UnresolvedShadingModel& m, double geometry_m
 UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m, double abundance,
                                                 double geometry_min_diameter_m, double spacing_m,
                                                 double horizon_spacing_m, double sun_elevation_rad,
-                                                bool geometry_shadows_statistical) {
+                                                double earth_elevation_rad, bool geometry_shadows_statistical) {
     UnresolvedLightFactors out;
     const double rho = m.rock_reflectance_ratio;
     const double c_all = abundance * rock_cover(m, m.rock_min_diameter_m, m.rock_max_diameter_m);
@@ -457,16 +457,18 @@ UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m,
     const double c_drawn = geometry_shadows_statistical ? std::max(c_all - c, 0.0) : 0.0;
     const double norm = std::exp(-c_all) + (1.0 - std::exp(-c_all)) * rho;
     const double rock_share = 1.0 - std::exp(-c);
-    out.earth = (std::exp(-c) + rock_share * rho) / norm;
-    const double se = std::sin(sun_elevation_rad);
-    if (se <= 0.0) {
-        out.sun = 0.0;
-        return out;
-    }
-    const double lit = smith_lit_fraction(std::tan(sun_elevation_rad),
-                                          unshadowed_slope_variance(m, spacing_m, horizon_spacing_m));
-    const double sigma = rock_shadow_per_cover(m.rock_exposed_height_per_diameter, se);
-    out.sun = lit * (std::exp(-c * (1.0 + sigma) - c_drawn * sigma) + rock_share * rho * rock_lit_gain_table(m, sun_elevation_rad)) / norm;
+    const double unshadowed = unshadowed_slope_variance(m, spacing_m, horizon_spacing_m);
+    // One directional light (the Sun, or the Earth's disc as the earthshine's source) at macroscopic elevation e.
+    const auto light = [&](double elevation_rad) {
+        const double se = std::sin(elevation_rad);
+        if (se <= 0.0) return 0.0;
+        const double lit = smith_lit_fraction(std::tan(elevation_rad), unshadowed);
+        const double sigma = rock_shadow_per_cover(m.rock_exposed_height_per_diameter, se);
+        return lit * (std::exp(-c * (1.0 + sigma) - c_drawn * sigma) +
+                      rock_share * rho * rock_lit_gain_table(m, elevation_rad)) / norm;
+    };
+    out.sun = light(sun_elevation_rad);
+    out.earth = light(earth_elevation_rad);
     return out;
 }
 

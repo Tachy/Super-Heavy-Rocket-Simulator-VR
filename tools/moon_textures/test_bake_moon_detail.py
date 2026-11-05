@@ -75,10 +75,10 @@ def test_crater_field_is_periodic():
     craters = bake.load_craters()
     name, tile, lam_lo, lam_hi, seed = bake.REGOLITH_SCALES[1][:5]
     population = bake.crater_population(craters, tile, lam_lo, lam_hi, seed)
-    field = bake.crater_field(population, bake.SIZE_PX, tile / bake.SIZE_PX)
+    field = bake.crater_field(population, bake.REGOLITH_SIZE_PX, tile / bake.REGOLITH_SIZE_PX)
     shifted = dict(population, x=(population["x"] + 0.5 * tile) % tile, y=(population["y"] + 0.5 * tile) % tile)
-    moved = bake.crater_field(shifted, bake.SIZE_PX, tile / bake.SIZE_PX)
-    half = bake.SIZE_PX // 2
+    moved = bake.crater_field(shifted, bake.REGOLITH_SIZE_PX, tile / bake.REGOLITH_SIZE_PX)
+    half = bake.REGOLITH_SIZE_PX // 2
     assert np.max(np.abs(np.roll(field, (half, half), axis=(0, 1)) - moved)) < 1e-12 * np.abs(field).max()
 
 
@@ -144,7 +144,7 @@ def test_slope_maps_are_the_gradient_of_the_heights(baked):
     first, _, meta = baked
     for scale in meta["scales"]:
         raw = np.frombuffer((first / f"regolith_slope_{scale['name']}.rgbah").read_bytes(), dtype="<f2")
-        slopes = raw.reshape(bake.SIZE_PX, bake.SIZE_PX, 4).astype(np.float64)
+        slopes = raw.reshape(bake.REGOLITH_SIZE_PX, bake.REGOLITH_SIZE_PX, 4).astype(np.float64)
         for k, (heights, height_scale) in enumerate(((decoded_heights(first, scale), scale["height_scale_m"]),
                                                      (decoded_craters(first, scale), scale["crater_height_scale_m"]))):
             dx, drow = bake.slopes_from_height(heights, scale["pixel_m"])
@@ -180,6 +180,29 @@ def test_crater_population_follows_the_config_law(baked):
     r = np.array([0.0, 0.5, 0.75, 1.5, 1.6])
     h = bake.crater_profile(0.13, 0.024, 0.5, r)
     assert np.allclose(h, [0.024 - 0.13, 0.024, 0.024 * (1.0 / 1.5**3 - 1.0 / 27.0) * 27.0 / 26.0, 0.0, 0.0])
+
+
+def test_pebbles_follow_the_rock_law(baked):
+    # The pebbles (1 cm .. PEBBLE_MAX_DIAMETER_M) only in s0: count = the rock law's expectation on the tile (abundance 1),
+    # diameters inside the range, bump height PEBBLE_ETA x D; the crater component holds craters + pebbles (variances add).
+    first, _, meta = baked
+    rocks = bake.load_rocks()
+    sfd = rocks["sfd"]
+    for scale, entry in zip(meta["scales"], bake.REGOLITH_SCALES):
+        if scale["name"] != "s0":
+            assert scale["pebble_count"] == 0, scale["name"]
+            continue
+        n = lambda d: sfd["density_per_m2"] * (d / sfd["reference_diameter_m"]) ** -sfd["exponent"]  # noqa: E731
+        law = (n(sfd["min_diameter_m"]) - n(bake.PEBBLE_MAX_DIAMETER_M)) * scale["tile_m"] ** 2
+        assert abs(scale["pebble_expected_count"] / law - 1.0) < 1e-12
+        assert scale["pebble_count"] == round(law) and scale["pebble_count"] > 0
+        population = bake.pebble_population(rocks, entry[1], entry[2], min(entry[3], bake.PEBBLE_MAX_DIAMETER_M), entry[4])
+        assert np.all((population["d"] >= sfd["min_diameter_m"]) & (population["d"] < bake.PEBBLE_MAX_DIAMETER_M))
+        single = dict(population, x=population["x"][:1], y=population["y"][:1], d=population["d"][:1])
+        bump = bake.pebble_field(single, bake.REGOLITH_SIZE_PX, scale["pixel_m"])
+        assert abs((bump.max() - bump.min()) / (bake.PEBBLE_ETA * population["d"][0]) - 1.0) < 0.02
+        combined = scale["crater_only_rms_m"] ** 2 + scale["pebble_rms_m"] ** 2
+        assert abs(scale["crater_rms_m"] ** 2 / combined - 1.0) < 0.1
 
 
 VALIDATION_SCRIPT = Path(__file__).resolve().parents[1] / "validation" / "moon_roughness_residual.py"
@@ -250,7 +273,7 @@ def test_metadata_matches_the_files(baked):
     assert [r["name"] for r in parsed["regolith"]] == ["s0", "s1", "s2", "s3"]
     assert parsed["hurst_exponent"] == meta["hurst_exponent"]
     for r in parsed["regolith"]:
-        assert r["tile_m"] / 512 == pytest.approx(r["pixel_m"])
+        assert r["tile_m"] / bake.REGOLITH_SIZE_PX == pytest.approx(r["pixel_m"])
     # bands are contiguous and disjoint
     assert parsed["regolith"][2]["wavelength_max_m"] == parsed["regolith"][3]["wavelength_min_m"]
     assert parsed["regolith"][0]["wavelength_max_m"] == parsed["regolith"][1]["wavelength_min_m"]

@@ -15,7 +15,8 @@ const LEVELS := [22, 21, 20, 19, 18, 17]
 ## Guo's statistic of mesh + textures at each level's spacing: the median plane-detrended RMS of 25 x 25 samples (5 mm)
 ## of the node mesh (the core's band-limited heights at its vertices, bilinear between them) plus every texture scale's
 ## regolith and crater components at their weights (MoonDetailShading.texture_weight / crater_weight; the two
-## components of a scale at the same texture position, as the shader fetches them). Returns lines; failures via check.
+## components of a scale at the same texture position, as the shader fetches them) plus the drawn rocks' tops (the
+## core's rocks from PEBBLE_GEOMETRY_LIMIT_M at the samples). Returns lines; failures via check.
 static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) -> void:
 	var dir := Paths.data_dir().path_join(MoonDetailShading.TEXTURE_DIR)
 	var table: Dictionary = TomlLite.load_file(dir.path_join("moon_detail.toml"))
@@ -37,6 +38,28 @@ static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) 
 	var centre := CubeSphere.geodetic_direction(site.x, site.y)
 	var east := Vector3(0, 0, 1).cross(centre).normalized()
 	var north := centre.cross(east)
+	# The drawn rocks (D >= MoonRockLayer.PEBBLE_GEOMETRY_LIMIT_M; smaller ones are the texture's pebble bumps) on top:
+	# per window the core's rock-top increment at the samples, the same at every level (Task 11 fix round: what is
+	# drawn is mesh + textures + rock geometry, and Guo's 4 mm includes the rocks).
+	var rock_dh: Array[PackedFloat64Array] = []
+	for w in WINDOWS:
+		var ox := (_hash(w, 1) - 0.5) * 1000.0
+		var oy := (_hash(w, 2) - 0.5) * 1000.0
+		var lats := PackedFloat64Array()
+		var lons := PackedFloat64Array()
+		for b in GUO_SAMPLES:
+			for a in GUO_SAMPLES:
+				var u := (centre + (east * (ox + a * GUO_PIXEL_M) + north * (oy + b * GUO_PIXEL_M)) / R).normalized()
+				var ll := CubeSphere.lat_lon_deg(u)
+				lats.append(ll.x)
+				lons.append(ll.y)
+		var with_rocks: PackedFloat64Array = core.surface_samples_detail("moon", lats, lons, 0.0,
+				MoonRockLayer.PEBBLE_GEOMETRY_LIMIT_M)["height_m"]
+		var bare: PackedFloat64Array = core.surface_samples_detail("moon", lats, lons, 0.0, INF)["height_m"]
+		var dh := PackedFloat64Array()
+		for k in with_rocks.size():
+			dh.append(with_rocks[k] - bare[k])
+		rock_dh.append(dh)
 	for level: int in LEVELS:
 		var spacing := MoonDetailShading.cell_m(level, R)
 		var rms := PackedFloat64Array()
@@ -75,7 +98,7 @@ static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) 
 					var h10 := mesh[jb * nv + ia + 1]
 					var h01 := mesh[(jb + 1) * nv + ia]
 					var h11 := mesh[(jb + 1) * nv + ia + 1]
-					var h := lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fy)
+					var h := lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fy) + rock_dh[w][b * GUO_SAMPLES + a]
 					for k in maps.size():
 						if weights[k] > 0.0:
 							var sl: int = maps[k]["slot"]
@@ -90,7 +113,7 @@ static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) 
 		for k in range(0, maps.size(), 2):
 			listed.append("%.2f/%.2f" % [weights[k], weights[k + 1]])
 		check.call(absf(median / target - 1.0) < ROUGHNESS_TOLERANCE,
-				"summed roughness mesh + textures, level %d (spacing %.4f m, weights regolith/craters %s): Guo median "
+				"summed roughness mesh + textures + drawn rocks, level %d (spacing %.4f m, weights regolith/craters %s): Guo median "
 				% [level, spacing, " ".join(listed)]
 				+ "%.2f mm against %.1f mm (%+.1f %%, gate 10 %%)" % [1000.0 * median, 1000.0 * target,
 				100.0 * (median / target - 1.0)])
@@ -102,11 +125,11 @@ static func continuity(core: StarsimCore, check: Callable) -> void:
 	var worst_theta := 0.0
 	var worst_sun := 0.0
 	var previous_theta := core.moon_residual_theta_bar(0.01)
-	var previous_sun := core.moon_unresolved_light_factors(1.0, INF, 0.01, 20.0, deg_to_rad(7.0)).x
+	var previous_sun := core.moon_unresolved_light_factors(1.0, INF, 0.01, 20.0, deg_to_rad(7.0), deg_to_rad(7.0)).x
 	var d := 0.0101
 	while d < 3.0e4:
 		var theta := core.moon_residual_theta_bar(d)
-		var sun := core.moon_unresolved_light_factors(1.0, INF, d, 20.0, deg_to_rad(7.0)).x
+		var sun := core.moon_unresolved_light_factors(1.0, INF, d, 20.0, deg_to_rad(7.0), deg_to_rad(7.0)).x
 		worst_theta = maxf(worst_theta, absf(theta - previous_theta))
 		worst_sun = maxf(worst_sun, absf(sun - previous_sun) / maxf(sun, 1e-6))
 		previous_theta = theta

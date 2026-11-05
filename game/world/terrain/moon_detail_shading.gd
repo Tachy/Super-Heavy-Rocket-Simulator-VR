@@ -19,8 +19,8 @@ const WEIGHT_PER_OCTAVE := 4
 const WEIGHT_MIN_SPACING_M := 1.0e-3
 ## [D] Wavelength samples per band for the weight (log-spaced midpoints; < 0.5 % against 4x more).
 const WEIGHT_BAND_SAMPLES := 48
-## The baked slope maps' size (bake_moon_detail.py SIZE_PX): four half floats per texel.
-const SLOPE_SIZE_PX := 512
+## The baked slope maps' size (bake_moon_detail.py REGOLITH_SIZE_PX): four half floats per texel.
+const SLOPE_SIZE_PX := 1024
 ## Diagnostics switch (render_check --moon_detail_shading=off): false leaves the detail shading off with the detail on.
 static var enabled := true
 
@@ -155,8 +155,20 @@ static func scales_entry(scales: Array, name: String) -> Dictionary:
 ## Amplitude weight of a scale's crater component (craters of the core's law with D in [crater_min_diameter_m,
 ## crater_max_diameter_m), moon_detail.toml) on a mesh of vertex spacing L: sqrt of the share of their slope variance
 ## the mesh does not draw, 1 - the mean of the core's crater_drawn_fraction(D / L) over the band weighted by the
-## law's slope variance per ln D (~ D^q, q = 2 - b). The table (stats crater_fraction) is the core's.
+## law's slope variance per ln D (~ D^q, q = 2 - b). The table (stats crater_fraction) is the core's. A scale whose
+## crater component also holds the pebbles (bake_moon_detail.py: rocks below MoonRockLayer.PEBBLE_GEOMETRY_LIMIT_M, never
+## mesh-drawn, weight 1) gets the variance-combined weight sqrt((w_c^2 V_craters + V_pebbles) / (V_craters +
+## V_pebbles)) (heights: crater_only_rms_m, pebble_rms_m).
 static func crater_weight(entry: Dictionary, stats: Dictionary, spacing_m: float) -> float:
+	var w_c := _crater_only_weight(entry, stats, spacing_m)
+	var v_p := pow(float(entry.get("pebble_rms_m", 0.0)), 2.0)
+	if v_p <= 0.0:
+		return w_c
+	var v_c := pow(float(entry.get("crater_only_rms_m", 0.0)), 2.0)
+	return sqrt((w_c * w_c * v_c + v_p) / (v_c + v_p))
+
+
+static func _crater_only_weight(entry: Dictionary, stats: Dictionary, spacing_m: float) -> float:
 	var d_lo := float(entry.get("crater_min_diameter_m", 0.0))
 	var d_hi := float(entry.get("crater_max_diameter_m", 0.0))
 	var table: PackedFloat64Array = stats.get("crater_fraction", PackedFloat64Array())

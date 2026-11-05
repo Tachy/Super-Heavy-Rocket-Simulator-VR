@@ -123,9 +123,13 @@ public:
     // LunarRocks::rocks_in_region) with diameter >= min_diameter_m, sorted by diameter descending (ties by id); plus "error" (German) when the core refuses (min
     // too small for the cell). The renderer's per-node rock list (moon_rock_layer.gd, worker threads).
     godot::Dictionary moon_rocks_in_node(int face, int level, int64_t i, int64_t j, double min_diameter_m) const;
-    // Unit-size mesh of a rock template (id 0..15, lod 0..3 = near..speck): {vertices: PackedVector3Array, normals,
-    // indices: PackedInt32Array}; empty on a bad id / lod. Scale by axes_m, orient by basis.
+    // Unit-size mesh of a rock template (id 0..31, lod 0..3 = near..speck): {vertices: PackedVector3Array, normals,
+    // indices: PackedInt32Array, planes: PackedFloat64Array (per face n.x, n.y, n.z, h: n . p <= h), quadric (the
+    // ellipsoid p^T Q p <= 1, 9 values row-major), top_z, bottom_z}; empty arrays on a bad id / lod. Scale by axes_m,
+    // orient by basis.
     godot::Dictionary rock_template_mesh(int id, int lod) const;
+    // RockTemplates::exposed_area: plan-view area of the unit-size rock above z = cut_z (unit disc = pi).
+    double rock_template_exposed_area(int id, double cut_z) const;
     // The surface's statistics for the shaders: {present, sphere_radius_m, hapke: {w, b, c, bs0, hs, bc0, hc,
     // theta_bar_rad, porosity_k}, craters: {sfd..., depth_to_diameter_*, ...}, roughness: {...}, rocks: {sfd...,
     // axis ratios, burial, albedo_to_regolith, abundance_scale, cover_diameters_m / cover_above_m (cover_fraction(D,
@@ -155,7 +159,8 @@ public:
     // Core reference of the shader's light factors (unresolved_light_factors): Vector2(sun, earth); (1, 1) before
     // moon_unresolved_shading.
     godot::Vector2 moon_unresolved_light_factors(double abundance, double geometry_min_diameter_m, double spacing_m,
-                                                 double horizon_spacing_m, double sun_elevation_rad) const;
+                                                 double horizon_spacing_m, double sun_elevation_rad,
+                                                 double earth_elevation_rad) const;
     // Residual Hapke mean slope (rad) of a node with vertex spacing spacing_m; the globe's before moon_unresolved_shading.
     double moon_residual_theta_bar(double spacing_m) const;
     // Rock abundance factor (LunarRocks::abundance_factor: Diviner map / reference, 1 outside it; 1 without rocks) at

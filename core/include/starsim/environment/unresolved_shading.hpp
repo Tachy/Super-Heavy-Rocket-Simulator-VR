@@ -17,7 +17,7 @@
 // (the globe's mean), pi eta the mean |grad h| over a half-spheroid's plan area (height eta D, plan radius D / 2: the
 // integral of H r / (a^2 sqrt(1 - r^2 / a^2)) over the disc is pi^2 H a / 2); S^2 = pi ((2/pi) <tan>_regolith)^2.
 //
-// Statistical shadows (the Sun only; the earthshine keeps the horizon maps alone, spec section 4): the drawn mesh
+// Statistical shadows (the Sun and the earthshine, each at its own elevation; Task 11 fix round I1): the drawn mesh
 // relief finer than the horizon map's grid casts no shadow in the renderer (until the near-field shadow map), so its
 // lit share is Smith's shadowing function G1 of a Gaussian surface with that slope variance, drawn(L) - drawn(H) for
 // the horizon grid spacing H; the unresolved rocks cast shadows behind them (Boolean model of half-spheroids).
@@ -126,13 +126,14 @@ double rock_statistical_cover(const UnresolvedShadingModel& m, double geometry_m
 // Light factors on the regolith's Hapke radiance of a ground fragment for the unresolved surface: rocks below the
 // geometry threshold geometry_min_diameter_m (infinity: every rock statistical; growth band as in
 // rock_statistical_cover) at the local abundance factor, the drawn mesh relief finer than the horizon grid (Smith), the
-// Sun at macroscopic elevation (over the terrain horizon).
-// sun = G1 x [exp(-C (1 + sigma) - C_g sigma') + (1 - exp(-C)) rho G(e)] / N, earth = [exp(-C) + (1 - exp(-C)) rho] / N,
+// Sun and the Earth (the earthshine's source: a directional light like the Sun, disc ~1.9 deg) each at its own
+// macroscopic elevation e (over the terrain horizon). Per light:
+// f(e) = G1(e) x [exp(-C (1 + sigma(e)) - C_g sigma'(e)) + (1 - exp(-C)) rho G(e)] / N (0 for e <= 0),
 // C = abundance x rock_statistical_cover(geometry_min), C_g = abundance x rock_cover(all) - C (the drawn rocks' share),
-// N = exp(-C_all) + (1 - exp(-C_all)) rho (the albedo mosaic is the mean with every rock: all rocks statistical give
-// earth = 1). sigma' = sigma while the drawn rocks cast no shadow (geometry_shadows_statistical; until the near-field
-// shadow map, Task 12), else 0. The factors hold for the ground the drawn rocks leave visible (exp(-C_g) of it): a drawn
-// rock's own mean radiance per plan area is rho G1 G(e) / N in the model (moon_rock.gdshader draws it).
+// N = exp(-C_all) + (1 - exp(-C_all)) rho (the albedo mosaic is the mean with every rock). sigma' = sigma while the
+// drawn rocks cast no shadow (geometry_shadows_statistical; until the near-field shadow map, Task 12), else 0. The
+// factors hold for the ground the drawn rocks leave visible (exp(-C_g) of it): a drawn rock's own mean radiance per
+// plan area is rho G1(e) G(e) / N in the model for either light (moon_rock.gdshader draws it).
 struct UnresolvedLightFactors {
     double sun = 1.0;
     double earth = 1.0;
@@ -140,6 +141,7 @@ struct UnresolvedLightFactors {
 UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m, double abundance,
                                                 double geometry_min_diameter_m, double spacing_m,
                                                 double horizon_spacing_m, double sun_elevation_rad,
+                                                double earth_elevation_rad,
                                                 bool geometry_shadows_statistical = true);
 
 }  // namespace starsim::environment

@@ -70,6 +70,11 @@ public:
     double fragment_c_to_a(int id) const { return shapes_[static_cast<size_t>(id)].c_to_a; }
     double c_axis_tilt_rad(int id) const { return shapes_[static_cast<size_t>(id)].tilt_rad; }
     int plane_count(int id) const { return shapes_[static_cast<size_t>(id)].planes; }
+    // The constraints themselves (template frame, unit size): face k is n . p <= h (|n| = 1), the ellipsoid
+    // p^T Q p <= 1 - for the renderer's exact per-fragment facet normals (moon_rock.gdshader).
+    math::Vec3 plane_normal(int id, int k) const { return shapes_[static_cast<size_t>(id)].normal[static_cast<size_t>(k)]; }
+    double plane_distance(int id, int k) const { return shapes_[static_cast<size_t>(id)].distance[static_cast<size_t>(k)]; }
+    const math::Mat3& quadric(int id) const { return shapes_[static_cast<size_t>(id)].quadric; }
     bool eroded(int id) const { return shapes_[static_cast<size_t>(id)].eroded; }
 
     // Columns per side of the footprint grid ([E]: ~7200 columns inside the unit disc; area error well below 1 %).

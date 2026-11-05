@@ -512,11 +512,37 @@ godot::Dictionary StarsimCore::rock_template_mesh(int id, int lod) const {
         for (size_t k = 0; k < mesh.normals.size(); ++k) normals[static_cast<int64_t>(k)] = to_godot(mesh.normals[k]);
         for (size_t k = 0; k < mesh.indices.size(); ++k) indices[static_cast<int64_t>(k)] = mesh.indices[k];
     }
+    godot::PackedFloat64Array planes, quadric;
+    double top_z = 1.0, bottom_z = -1.0;
+    if (id >= 0 && id < environment::RockTemplates::count) {
+        const auto& templates = environment::RockTemplates::instance();
+        for (int k = 0; k < templates.plane_count(id); ++k) {
+            const auto n = templates.plane_normal(id, k);
+            planes.append(n.x);
+            planes.append(n.y);
+            planes.append(n.z);
+            planes.append(templates.plane_distance(id, k));
+        }
+        for (const auto& row : templates.quadric(id).m) {
+            for (const double v : row) quadric.append(v);
+        }
+        top_z = templates.top_z(id);
+        bottom_z = templates.bottom_z(id);
+    }
     godot::Dictionary result;
     result["vertices"] = vertices;
     result["normals"] = normals;
     result["indices"] = indices;
+    result["planes"] = planes;    // per face: normal x, y, z, distance (n . p <= h)
+    result["quadric"] = quadric;  // the ellipsoid p^T Q p <= 1, row-major
+    result["top_z"] = top_z;      // exact extent of the unit-size body along z
+    result["bottom_z"] = bottom_z;
     return result;
+}
+
+double StarsimCore::rock_template_exposed_area(int id, double cut_z) const {
+    if (id < 0 || id >= environment::RockTemplates::count) return 0.0;
+    return environment::RockTemplates::instance().exposed_area(id, cut_z);
 }
 
 namespace {
@@ -619,10 +645,12 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
 
 godot::Vector2 StarsimCore::moon_unresolved_light_factors(double abundance, double geometry_min_diameter_m,
                                                           double spacing_m, double horizon_spacing_m,
-                                                          double sun_elevation_rad) const {
+                                                          double sun_elevation_rad,
+                                                          double earth_elevation_rad) const {
     if (!moon_unresolved_) return {1.0, 1.0};
     const auto f = environment::unresolved_light_factors(*moon_unresolved_, abundance, geometry_min_diameter_m,
-                                                         spacing_m, horizon_spacing_m, sun_elevation_rad);
+                                                         spacing_m, horizon_spacing_m, sun_elevation_rad,
+                                                         earth_elevation_rad);
     return {static_cast<real_t>(f.sun), static_cast<real_t>(f.earth)};
 }
 
@@ -1455,6 +1483,8 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("moon_rocks_in_node", "face", "level", "i", "j", "min_diameter_m"),
                          &StarsimCore::moon_rocks_in_node);
     ClassDB::bind_method(D_METHOD("rock_template_mesh", "id", "lod"), &StarsimCore::rock_template_mesh);
+    ClassDB::bind_method(D_METHOD("rock_template_exposed_area", "id", "cut_z"),
+                         &StarsimCore::rock_template_exposed_area);
     ClassDB::bind_method(D_METHOD("moon_surface_statistics"), &StarsimCore::moon_surface_statistics);
     ClassDB::bind_method(D_METHOD("load_moon_hapke", "config_dir"), &StarsimCore::load_moon_hapke);
     ClassDB::bind_method(D_METHOD("moon_hapke_reflectance", "mu0", "mu", "phase_rad", "theta_bar_rad"),
@@ -1463,7 +1493,7 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::moon_hapke_disc_reflectance);
     ClassDB::bind_method(D_METHOD("moon_unresolved_shading"), &StarsimCore::moon_unresolved_shading);
     ClassDB::bind_method(D_METHOD("moon_unresolved_light_factors", "abundance", "geometry_min_diameter_m", "spacing_m",
-                                  "horizon_spacing_m", "sun_elevation_rad"),
+                                  "horizon_spacing_m", "sun_elevation_rad", "earth_elevation_rad"),
                          &StarsimCore::moon_unresolved_light_factors);
     ClassDB::bind_method(D_METHOD("moon_residual_theta_bar", "spacing_m"), &StarsimCore::moon_residual_theta_bar);
     ClassDB::bind_method(D_METHOD("moon_rock_abundance_grid", "width", "height"),

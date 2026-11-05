@@ -169,6 +169,7 @@ static func patch_rocks(core: StarsimCore, top_z: PackedFloat32Array, center_dir
 	var buffer := PackedFloat32Array()
 	var count := 0
 	var area := 0.0
+	var diameters := PackedFloat64Array()
 	var half := 0.5 * edge_m
 	for key: Vector4i in keys:
 		var data: Dictionary = core.moon_rocks_in_node(key.x, key.y, key.z, key.w, min_d)
@@ -198,7 +199,8 @@ static func patch_rocks(core: StarsimCore, top_z: PackedFloat32Array, center_dir
 					top_z[templates[r]] - burial[r] / axes[3 * r + 2], albedo[r], templates[r]])
 			count += 1
 			area += 0.25 * PI * diameter[r] * diameter[r]
-	return {"buffer": buffer, "count": count, "cover": area / (edge_m * edge_m)}
+			diameters.append(diameter[r])
+	return {"buffer": buffer, "count": count, "cover": area / (edge_m * edge_m), "diameters": diameters}
 
 
 ## The camera jump (blocking: the updates are 11 ms apart, the workers build meanwhile). {settle_ms, jump_frames,
@@ -232,9 +234,10 @@ static func camera_jump(tree: TerrainQuadtree, layer: MoonRockLayer, site_fixed:
 	# The rock layer's own main-thread share (attach at uploads, detach at releases) is what Task 11 adds; the
 	# quadtree's selection / dispatch / upload cost without rocks is printed by --jump_baseline (pre-existing).
 	check.call(rock_worst < JUMP_MAIN_THREAD_MS and frames < JUMP_MAX_FRAMES and jump_frames < JUMP_MAX_FRAMES,
-			line + "; the rock layer's share max %.2f ms per frame (gate %.0f ms), p99 %.2f ms, %d frames over, largest single attach %.2f ms (material, multimeshes, nodes: %s)" % [
+			line + "; the rock layer's share max %.2f ms per frame (gate %.0f ms), p99 %.2f ms, %d frames over, largest single attach %.2f ms (material, multimeshes: %s); pool %d instances (%.0f MB), %d allocations after the prewarm, %d unpooled, peak in use per bucket %s, slowest allocation %.2f ms" % [
 			rock_worst, JUMP_MAIN_THREAD_MS, rock_p99, rock_over, float(layer.stats.get("max_attach_ms", 0.0)),
-			layer.stats.get("max_attach_parts_ms", [])]
+			layer.stats.get("max_attach_parts_ms", []), layer.stats["pool_instances"], layer.stats["pool_mb"],
+			layer.stats["allocations"], layer.stats["unpooled"], layer.stats["bucket_peak"], float(layer.stats.get("max_allocate_ms", 0.0))]
 			+ "; rock instances %d before, %d after; worker rock lists %d nodes, %.1f ms summed, %.1f ms max per node (%d rocks max)"
 			% [settled_rocks, layer.stats["attached_instances"], layer.stats["nodes_built"], layer.stats["build_ms"],
 			layer.stats["max_node_ms"], layer.stats["max_node_rocks"]])
@@ -259,24 +262,38 @@ static func _stream(tree: TerrainQuadtree, camera_fixed: Vector3, times: Array[f
 		idle = idle + 1 if tree.stats["nodes_loading"] == 0 else 0
 		if idle >= 30:
 			return frame
+		# A frame is drawn between the updates as in the game: the RenderingDevice recycles its staging buffers at a
+		# frame. Without it the uploads of hundreds of updates pile up and one upload stalls on the full staging pool
+		# (measured: a single 17 ms buffer call per run, on whichever call hit it - terrain mesh, MultiMesh mesh or
+		# buffer; Task 11 fix B report).
+		RenderingServer.force_draw(false)
 		OS.delay_msec(JUMP_FRAME_MS)
 	return JUMP_MAX_FRAMES
 
 
-## The budget control: the threshold scale rises smoothly while the GPU frame is over the target (no step), relaxes
-## back below it, stays in [1, SCALE_MAX], ignores an unmeasured frame.
+## The budget control (GPU floor guard): the threshold scale rises smoothly while the GPU frame is over the floor and the
+## rocks' own cost could bring it back (no step), holds when the frame without the rocks is already over the floor (no
+## wind-up on terrain cost), relaxes back below the floor, stays in [1, SCALE_MAX], ignores an unmeasured frame, and
+## does nothing at a frame under the floor (the 9 ms VR target no longer trades rock quality).
 static func budget(check: Callable) -> void:
+	var floor_ms := MoonRockLayer.GPU_FLOOR_MS
 	var scale := 1.0
 	var largest_step := 0.0
-	for frame in 900:  # 10 s at 90 Hz, 50 % over the target
-		var next := MoonRockLayer.budget_step(scale, 13.5, 9.0, 1.0 / 90.0)
+	for frame in 900:  # 10 s at 90 Hz, 50 % over the floor, the rocks 60 % of the frame
+		var next := MoonRockLayer.budget_step(scale, 1.5 * floor_ms, floor_ms, 1.0 / 90.0, 0.9 * floor_ms)
 		largest_step = maxf(largest_step, next / scale - 1.0)
 		scale = next
-	var held := MoonRockLayer.budget_step(scale, 0.0, 9.0, 1.0 / 90.0)
+	var held := MoonRockLayer.budget_step(scale, 0.0, floor_ms, 1.0 / 90.0, 1.0)
+	var terrain := 1.0
+	for frame in 900:  # the terrain alone over the floor, the rocks 0.4 ms: no wind-up
+		terrain = MoonRockLayer.budget_step(terrain, 1.2 * floor_ms, floor_ms, 1.0 / 90.0, 0.4)
+	var nominal := 1.0
+	for frame in 900:  # 12 ms, under the floor (over the old 9 ms target): the nominal threshold stays
+		nominal = MoonRockLayer.budget_step(nominal, 12.0, floor_ms, 1.0 / 90.0, 3.0)
 	var relaxed := scale
 	for frame in 9000:
-		relaxed = MoonRockLayer.budget_step(relaxed, 6.0, 9.0, 1.0 / 90.0)
+		relaxed = MoonRockLayer.budget_step(relaxed, 0.5 * floor_ms, floor_ms, 1.0 / 90.0, 1.0)
 	check.call(scale > 2.0 and scale <= MoonRockLayer.SCALE_MAX and largest_step < 0.01 and held == scale
-			and relaxed == 1.0,
-			"rock budget control: 50 %% over the target for 10 s -> scale %.2f (largest step %.2f %% per frame), unmeasured frame keeps it, back to %.2f after 100 s below"
-			% [scale, 100.0 * largest_step, relaxed])
+			and terrain == 1.0 and nominal == 1.0 and relaxed == 1.0,
+			"rock budget control (floor %.1f ms): 50 %% over for 10 s -> scale %.2f (largest step %.2f %% per frame), unmeasured frame keeps it, terrain alone over the floor -> %.2f (no wind-up), 12 ms -> %.2f (nominal), back to %.2f after 100 s below"
+			% [floor_ms, scale, 100.0 * largest_step, terrain, nominal, relaxed])

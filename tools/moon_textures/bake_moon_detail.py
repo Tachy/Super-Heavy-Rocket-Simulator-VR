@@ -16,11 +16,12 @@ deviation of 25 x 25 sample windows (spacing 5 mm, 125 mm side) of a full-spectr
 roughness.rms_height_at_baseline_m (3.7 mm). The T10 shader blends each scale in only where the mesh no longer
 resolves it (the mesh resolves wavelengths >= 2 x its vertex spacing: 2 cm at the finest level 22, 1.02 cm spacing).
 
-Scales (512 x 512 px each, the bands are disjoint and contiguous, 3 octaves each, tile / lambda_hi = 8):
-    s0: tile 0.32 m,   pixel 0.625 mm, wavelengths 5 mm .. 40 mm    (flat 5.95 .. 36.7 mm, content to 43.6 mm)
-    s1: tile 2.56 m,   pixel 5 mm,     wavelengths 40 mm .. 320 mm  (flat 43.6 .. 293 mm, content 36.7 .. 349 mm)
-    s2: tile 20.48 m,  pixel 40 mm,    wavelengths 320 mm .. 2.56 m (flat 349 mm .. 2.35 m, content 293 mm .. 2.79 m)
-    s3: tile 163.84 m, pixel 320 mm,   wavelengths 2.56 .. 20.48 m  (flat 2.79 .. 17.2 m, content from 2.35 m)
+Scales (1024 x 1024 px each, the bands are disjoint and contiguous, 3 octaves each, tile / lambda_hi = 16 - 2 x 2 of
+the former 512 px tiles since the Task 11 fix round, so each map holds four tiles' worth of craters and pebbles):
+    s0: tile 0.64 m,   pixel 0.625 mm, wavelengths 5 mm .. 40 mm    (flat 5.95 .. 36.7 mm, content to 43.6 mm)
+    s1: tile 5.12 m,   pixel 5 mm,     wavelengths 40 mm .. 320 mm  (flat 43.6 .. 293 mm, content 36.7 .. 349 mm)
+    s2: tile 40.96 m,  pixel 40 mm,    wavelengths 320 mm .. 2.56 m (flat 349 mm .. 2.35 m, content 293 mm .. 2.79 m)
+    s3: tile 327.68 m, pixel 320 mm,   wavelengths 2.56 .. 20.48 m  (flat 2.79 .. 17.2 m, content from 2.35 m)
 (wavelength_min_m / wavelength_max_m in moon_detail.toml). The outer edges (5 mm, 20.48 m) carry a raised-cosine taper
 of a quarter octave inside the band. The shared edges are complementary: cos / sin amplitude ramps straddling the edge
 over a quarter octave (an eighth on each side), so the two neighbours' spectral variance sums to exactly the law at
@@ -33,6 +34,14 @@ each crater in exactly one scale): Poisson count of the law's expectation on the
 the law's inverse cumulative, the core's crater_profile_m (bowl to R, (r / R)^-3 rim flank to 3 R), zero mean. They are
 kept as a separate component, so the shader weights each by the share the mesh does not draw (regolith: the band's
 spectral transfer; craters: the core's crater_drawn_fraction) - one texture fetch for both.
+
+Pebbles (Task 11 fix round, review I3): the rocks below MoonRockLayer.PEBBLE_GEOMETRY_LIMIT_M (2 cm, from the law's
+1 cm) are never instances; they sit in the crater component of the scale whose band holds them (s0) as discrete
+half-spheroid bumps (plan radius D / 2, height PEBBLE_ETA x D: the statistical rock layer's shape), count and sizes
+from config [rocks.sfd] at abundance 1 (stratified quantiles, uniform positions). Their radiance mean stays in the
+statistical layer: the texture relief only modulates (mean-preserving), and the rocks' slopes are outside the
+regolith's theta_bar budget (unresolved_shading), so nothing is counted twice. MoonDetailShading weights the s0 crater
+component by variance: sqrt((w_c^2 V_craters + V_pebbles) / (V_craters + V_pebbles)) (pebbles never mesh-drawn).
 
 Files per scale: regolith_height_<s>.png and crater_height_<s>.png (16-bit greyscale, value = 32768 + h /
 height_scale_m * 32767, scales in moon_detail.toml; the tests integrate them), regolith_slope_<s>.rgbah (the shader's
@@ -63,7 +72,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = REPO_ROOT / "config" / "moon_surface.toml"
 DEFAULT_OUT = REPO_ROOT / "data" / "textures" / "moon_detail"
 
-SIZE_PX = 512                       # [E] every map; mipmapped by Godot
+SIZE_PX = 512                       # [E] the rock maps; mipmapped by Godot
+REGOLITH_SIZE_PX = 1024             # [E] the regolith / crater maps: 2 x 2 of the former 512 px tiles per scale (Task 11
+#   fix B, Task 10 re-review N3): four times the crater (and pebble) population per realisation, so the summed-roughness
+#   margin no longer hangs on the few top-octave craters of one small tile
+PEBBLE_ETA = 0.571                  # [D] exposed height / D of the rocks: the core's measured_eta of the angular templates
+#   (Task 11 fix A report; unresolved_shading's rock_exposed_height_per_diameter, printed by the [unresolved_shading]
+#   test) - the statistical layer's half-spheroid shape, which the pebble bumps take
+PEBBLE_MAX_DIAMETER_M = 0.02        # MoonRockLayer.PEBBLE_GEOMETRY_LIMIT_M: rocks below it are never instances
+PEBBLE_SEED_OFFSET = 70             # pebble draws of scale <seed> use seed + PEBBLE_SEED_OFFSET
 TAPER_OCTAVES = 0.25                # [E] raised-cosine taper inside the outer band edges; straddle width of the shared ones
 GUO_WINDOW_SAMPLES = 25             # [S] Guo et al. 2021: 25 x 25 samples (5 mm DTM, 125 mm window)
 GUO_PIXEL_M = 0.005                 # [S] Guo et al. 2021 DTM pixel
@@ -82,10 +99,10 @@ ROCK_LAMBDA_MIN_PX = 4.0            # [E] finest wavelength of the rock height f
 
 # name, tile edge [m], lambda_lo [m], lambda_hi [m], seed, lower edge shared, upper edge shared
 REGOLITH_SCALES = (
-    ("s0", 0.32, 0.005, 0.040, 1101, False, True),
-    ("s1", 2.56, 0.040, 0.320, 1102, True, True),
-    ("s2", 20.48, 0.320, 2.560, 1103, True, True),
-    ("s3", 163.84, 2.560, 20.48, 1104, True, False),
+    ("s0", 0.64, 0.005, 0.040, 1101, False, True),
+    ("s1", 5.12, 0.040, 0.320, 1102, True, True),
+    ("s2", 40.96, 0.320, 2.560, 1103, True, True),
+    ("s3", 327.68, 2.560, 20.48, 1104, True, False),
 )
 CRATER_SEED_OFFSET = 50             # crater draws of scale <seed> use seed + CRATER_SEED_OFFSET
 CRATER_REACH_RADII = 3.0            # crater_profile_m is zero from 3 R (core lunar_surface_detail.cpp)
@@ -100,6 +117,49 @@ def load_roughness(path: Path = CONFIG_FILE) -> dict:
 def load_craters(path: Path = CONFIG_FILE) -> dict:
     with path.open("rb") as f:
         return tomllib.load(f)["craters"]
+
+
+def load_rocks(path: Path = CONFIG_FILE) -> dict:
+    with path.open("rb") as f:
+        return tomllib.load(f)["rocks"]
+
+
+def pebble_population(rocks: dict, tile_m: float, d_lo: float, d_hi: float, seed: int) -> dict:
+    """Pebbles of the config rock law (rocks.sfd, N(>D) = density (D / ref)^-b, abundance 1: the mean population) with D in
+    [d_lo, d_hi) on a periodic tile: the expected count rounded, uniform positions, D at stratified quantiles of the
+    law's inverse cumulative (as crater_population)."""
+    sfd = rocks["sfd"]
+    if sfd["form"] != "power":
+        raise ValueError("bake_moon_detail: rocks.sfd must be a power law")
+    d_lo, d_hi = max(d_lo, sfd["min_diameter_m"]), min(d_hi, sfd["max_diameter_m"])
+    rng = np.random.default_rng(seed + PEBBLE_SEED_OFFSET)
+    if d_hi <= d_lo:
+        return {"x": np.zeros(0), "y": np.zeros(0), "d": np.zeros(0), "expected": 0.0, "d_lo": 0.0, "d_hi": 0.0}
+    b = sfd["exponent"]
+    cumulative = lambda d: sfd["density_per_m2"] * (d / sfd["reference_diameter_m"]) ** -b  # noqa: E731
+    expected = (cumulative(d_lo) - cumulative(d_hi)) * tile_m**2
+    count = int(round(expected))
+    x, y = rng.uniform(0.0, tile_m, count), rng.uniform(0.0, tile_m, count)
+    u = (np.arange(count) + rng.uniform(0.0, 1.0, count)) / max(count, 1)
+    d = d_lo * (1.0 - u * (1.0 - (d_hi / d_lo) ** -b)) ** (-1.0 / b)
+    return {"x": x, "y": y, "d": d, "expected": expected, "d_lo": d_lo, "d_hi": d_hi}
+
+
+def pebble_field(population: dict, size_px: int, pixel_m: float) -> np.ndarray:
+    """Periodic height field of the pebbles: half-spheroid bumps (plan radius D / 2, height PEBBLE_ETA x D - the
+    statistical rock layer's shape) at the pixel centres, overlaps by the maximum (one surface), zero mean."""
+    field = np.zeros((size_px, size_px))
+    for x, y, d in zip(population["x"], population["y"], population["d"]):
+        radius = 0.5 * d
+        reach = int(np.ceil(radius / pixel_m)) + 1
+        cx, cy = x / pixel_m - 0.5, y / pixel_m - 0.5
+        cols = np.arange(int(np.floor(cx)) - reach, int(np.floor(cx)) + reach + 2)
+        rows = np.arange(int(np.floor(cy)) - reach, int(np.floor(cy)) + reach + 2)
+        r = np.hypot((cols[None, :] - cx) * pixel_m, (rows[:, None] - cy) * pixel_m)
+        bump = PEBBLE_ETA * d * np.sqrt(np.clip(1.0 - (r / radius) ** 2, 0.0, 1.0))
+        index = np.ix_(rows % size_px, cols % size_px)
+        field[index] = np.maximum(field[index], bump)
+    return field - field.mean()
 
 
 def crater_cumulative(craters: dict, diameter_m: float) -> float:
@@ -342,11 +402,18 @@ def bake(out_dir: Path, config_file: Path = CONFIG_FILE) -> dict:
     meta = {"hurst_exponent": hurst, "baseline_m": baseline, "rms_height_at_baseline_m": roughness["rms_height_at_baseline_m"],
             "octave_amplitude_m": amplitude, "scales": []}
     craters = load_craters(config_file)
+    rocks_config = load_rocks(config_file)
     for name, tile, lam_lo, lam_hi, seed, shared_lo, shared_hi in REGOLITH_SCALES:
-        pixel = tile / SIZE_PX
-        height = synthesise(SIZE_PX, pixel, lam_lo, lam_hi, amplitude, hurst, baseline, seed, shared_lo, shared_hi)
+        pixel = tile / REGOLITH_SIZE_PX
+        height = synthesise(REGOLITH_SIZE_PX, pixel, lam_lo, lam_hi, amplitude, hurst, baseline, seed, shared_lo,
+                            shared_hi)
         population = crater_population(craters, tile, lam_lo, lam_hi, seed)
-        crater_height = crater_field(population, SIZE_PX, pixel)
+        crater_only = crater_field(population, REGOLITH_SIZE_PX, pixel)
+        # Pebbles (rocks below PEBBLE_MAX_DIAMETER_M, never instances) as discrete bumps in the scale whose band holds
+        # them, in the crater component (the shader's weights combine the two by variance: MoonDetailShading).
+        pebbles = pebble_population(rocks_config, tile, lam_lo, min(lam_hi, PEBBLE_MAX_DIAMETER_M), seed)
+        pebble_height = pebble_field(pebbles, REGOLITH_SIZE_PX, pixel)
+        crater_height = crater_only + pebble_height
         code, scale = encode_height(height)
         save_png(code, out_dir / f"regolith_height_{name}.png")
         crater_code, crater_scale = encode_height(crater_height)
@@ -359,7 +426,12 @@ def bake(out_dir: Path, config_file: Path = CONFIG_FILE) -> dict:
                                "crater_min_diameter_m": d_lo, "crater_max_diameter_m": d_hi,
                                "crater_count": int(population["d"].size),
                                "crater_expected_count": float(population["expected"]),
-                               "crater_height_scale_m": crater_scale, "crater_rms_m": float(crater_height.std())})
+                               "crater_height_scale_m": crater_scale, "crater_rms_m": float(crater_height.std()),
+                               "crater_only_rms_m": float(crater_only.std()),
+                               "pebble_min_diameter_m": pebbles["d_lo"], "pebble_max_diameter_m": pebbles["d_hi"],
+                               "pebble_count": int(pebbles["d"].size),
+                               "pebble_expected_count": float(pebbles["expected"]),
+                               "pebble_rms_m": float(pebble_height.std())})
     rocks = []
     for variant in range(4):
         height, albedo = rock_variant(variant, amplitude, baseline)

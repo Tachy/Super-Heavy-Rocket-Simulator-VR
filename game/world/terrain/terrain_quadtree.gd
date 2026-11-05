@@ -233,6 +233,8 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 	var t0 := Time.get_ticks_usec()
 	_collect_builds()
 	_upload_finished()
+	if rock_layer != null:
+		rock_layer.process_queue()  # the queued nodes' rocks, within the layer's own per-frame budget
 	var t1 := Time.get_ticks_usec()
 	_frame += 1
 	_reached_count = 0
@@ -269,7 +271,8 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 		for node in _drawn:
 			deepest = maxi(deepest, node.key.y)
 		stats["max_drawn_level"] = deepest
-	stats["nodes_loading"] = _pending.size() + _in_flight.size() + _finished.size()
+	stats["nodes_loading"] = _pending.size() + _in_flight.size() + _finished.size() \
+			+ (int(rock_layer.stats["queued"]) if rock_layer != null else 0)
 
 
 ## Keys of the drawn leaves (they tile the sphere).
@@ -355,7 +358,9 @@ func _draw_leaf(node: _Node) -> void:
 	_drawn.append(node)
 
 
-## The node's children once all four are uploaded; until then the missing ones are requested and the uploaded ones kept.
+## The node's children once all four are uploaded (and their rocks attached: MoonRockLayer's queue, so the parent's
+## rocks do not vanish before the children's appear); until then the missing ones are requested and the uploaded ones
+## kept.
 func _gather_children(node: _Node) -> void:
 	var keys := CubeSphere.children(node.key)
 	var ready := true
@@ -364,6 +369,8 @@ func _gather_children(node: _Node) -> void:
 			ready = false
 			_request(key, key if node.children_bake else node.horizon_owner, node.band_heights,
 					node.center_fixed.length())
+		elif rock_layer != null and rock_layer.is_pending((_nodes[key] as _Node).instance):
+			ready = false
 	if ready:
 		node.band_heights = PackedFloat64Array()  # every child uploaded (a later re-split samples the band again)
 	for key in keys:

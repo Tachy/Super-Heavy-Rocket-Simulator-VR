@@ -110,6 +110,8 @@ var _rock_layer: MoonRockLayer  ## the rock patches' and transform checks' layer
 var _rock_patch: MultiMeshInstance3D
 var _rock_material: ShaderMaterial
 var _rock_cover := 0.0  ## realised plan-view cover of the patch's rocks (D >= ROCK_PATCH_MIN_D_M) in the viewed square
+var _rock_diameters := PackedFloat64Array()  ## the viewed square's rock diameters (the realised expectation)
+var _rock_view_edge_m := 1.0
 var _rocks_only := false
 
 
@@ -163,9 +165,11 @@ func _rock_checks() -> void:
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/terrain_moon.gdshader")
 	MoonDetailShading.configure(_core, material, true)
-	_rock_layer = MoonRockLayer.new(_core, material)
+	_rock_layer = MoonRockLayer.new(_core, material, false)  # lists and the patch only: no pool
 	MoonRockChecks.transforms(_core, _rock_layer, _site, _check)
 	MoonRockChecks.budget(_check)
+	if OS.get_cmdline_user_args().has("--no_jump"):  # diagnostics: the rock patches only
+		return
 	var site_fixed := CubeSphere.geodetic_direction(_site.x, _site.y) * (R + _ground_m(true) + 2.0)
 	if OS.get_cmdline_user_args().has("--jump_baseline"):  # the same jump without the rock layer (info)
 		var bare := TerrainQuadtree.new()
@@ -822,8 +826,10 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 	var spacing: float = entry["spacing"]
 	var theta := _core.moon_residual_theta_bar(spacing)
 	var norm := Atmosphere.hapke_normalisation(float(_hapke["disc_reflectance_full"]))
+	# The active light (Sun, or the Earth in the earthshine-only cases) at elevation 90 - i; each factor depends only on
+	# its own light's elevation.
 	var factors := _core.moon_unresolved_light_factors(float(entry["abundance"]), INF, spacing, float(entry["horizon"]),
-			deg_to_rad(90.0 - geometry.x))
+			deg_to_rad(90.0 - geometry.x), deg_to_rad(90.0 - geometry.x))
 	var core := norm * _core.moon_hapke_reflectance(cos(deg_to_rad(geometry.x)), cos(deg_to_rad(geometry.y)),
 			deg_to_rad(geometry.z), theta)
 	var what := ""
@@ -831,12 +837,33 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 		what = "with drawn rocks from %.2f m (growth to %.2f m; realised cover >= %.2f m %.4f, law %.4f): " % [
 				float(entry["threshold"]), 2.0 * float(entry["threshold"]), ROCK_PATCH_MIN_D_M, _rock_cover,
 				_law_cover(ROCK_PATCH_MIN_D_M)]
+	var factor := factors.x if entry["sun"] else factors.y
 	if entry["sun"]:
-		core *= factors.x
 		what += "Sun %.0f deg" % (90.0 - geometry.x)
 	else:
-		core *= factors.y
 		what += "earthshine only (Sun 5 deg below), Earth %.0f deg" % (90.0 - geometry.x)
+	if entry["kind"] == "rocks":
+		# Review I2: the law's mean against the patch's REALISED drawn cover (the viewed square's rocks above the
+		# threshold, area-weighted by the growth share x), so the realisation's cover excess and the model are separated.
+		# Drawn rocks' mean radiance from the core's closure (all = e^-Cg ground + (1 - e^-Cg) rock with the law's Cg).
+		var d := float(entry["threshold"])
+		var elevation := deg_to_rad(90.0 - geometry.x)
+		var ground_v := _core.moon_unresolved_light_factors(float(entry["abundance"]), d, spacing, float(entry["horizon"]),
+				elevation, elevation)
+		var ground := ground_v.x if entry["sun"] else ground_v.y
+		var c_law := _law_drawn_cover(d)
+		var rock := (factor - exp(-c_law) * ground) / (1.0 - exp(-c_law))
+		var c_real := 0.0
+		for diameter in _rock_diameters:
+			c_real += 0.25 * PI * diameter * diameter * clampf(log(diameter / d) / log(2.0), 0.0, 1.0)
+		c_real /= _rock_view_edge_m * _rock_view_edge_m
+		var realised := exp(-c_real) * ground + (1.0 - exp(-c_real)) * rock
+		print("  info  rock patch d %.2f m, %s: drawn cover realised %.5f, law %.5f; shader against the law's mean %+.2f %%, against the realised drawn cover %+.2f %%"
+				% [d, "Sun" if entry["sun"] else "earthshine", c_real, c_law,
+				100.0 * (shader / (core * factor) - 1.0), 100.0 * (shader / (core * realised) - 1.0)])
+		what += " [against the realised drawn cover %.5f (law %.5f)]" % [c_real, c_law]
+		factor = realised
+	core *= factor
 	_check(absf(shader / core - 1.0) < PARITY_TOLERANCE,
 			"detail patch %s, e %.0f g %.0f, %.0f m, spacing %.4f m, horizon %.0f m, abundance %.0f, textures %s: shader %.5f "
 			% [what, geometry.y, geometry.z, entry["size"], spacing, entry["horizon"], entry["abundance"],
@@ -854,6 +881,8 @@ func _start_rock_patch() -> void:
 	var data := MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, ROCK_PATCH_EDGE_M, ROCK_PATCH_MIN_D_M)
 	var viewed := MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, 0.5 * ROCK_PATCH_VIEW_M, ROCK_PATCH_MIN_D_M)
 	_rock_cover = float(viewed["cover"])
+	_rock_diameters = viewed["diameters"]
+	_rock_view_edge_m = 0.5 * ROCK_PATCH_VIEW_M
 	_core.set_moon_surface_detail(false)
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
@@ -876,6 +905,8 @@ func _start_rock_patch() -> void:
 	_rock_material.set_shader_parameter("earth_radius_m", World.EARTH_MEAN_RADIUS_M)
 	_rock_material.set_shader_parameter("detail_cell_m", ROCK_PATCH_SPACING_M)
 	_rock_material.set_shader_parameter("detail_horizon_spacing_m", ROCK_PATCH_HORIZON_M)
+	# Diagnostics: --rock_vertex_normals draws the interpolated vertex normals instead of the exact facets.
+	_rock_material.set_shader_parameter("rock_facet_normals", not OS.get_cmdline_user_args().has("--rock_vertex_normals"))
 	_rock_patch = MultiMeshInstance3D.new()
 	_rock_patch.multimesh = multimesh
 	_rock_patch.material_override = _rock_material
@@ -890,6 +921,19 @@ func _start_rock_patch() -> void:
 
 
 ## The law's rock cover from d up (abundance 1): the statistics' closed form (coef (D_max^q - d^q)).
+## The law's drawn cover at threshold d (abundance 1): every rock from 2 d, the band [d, 2 d] weighted by the growth
+## share log2(D / d) (= C_all - the core's rock_statistical_cover), midpoint rule in ln D.
+func _law_drawn_cover(d: float) -> float:
+	var q := float(_detail_stats["rock_cover_exponent"])
+	var coef := float(_detail_stats["rock_cover_coefficient"])
+	var band := 0.0
+	var steps := 2000
+	for k in steps:
+		var diameter := d * pow(2.0, (k + 0.5) / steps)
+		band += coef * q * pow(diameter, q) * log(2.0) / steps * (k + 0.5) / steps
+	return _law_cover(2.0 * d) + band
+
+
 func _law_cover(d: float) -> float:
 	var q := float(_detail_stats["rock_cover_exponent"])
 	return float(_detail_stats["rock_cover_coefficient"]) * (pow(float(_detail_stats["rock_max_diameter_m"]), q) - pow(d, q))

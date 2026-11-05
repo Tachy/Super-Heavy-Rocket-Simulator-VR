@@ -42,6 +42,9 @@
 #          --cloud_detail_levels=0..3 (the detail levels), --cloud_scattering=table|closed (the multiple-scattering
 #          model: Monte Carlo table, default; closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
+# Camera exposure: --camera_exposure=<f-number>,<shutter s>,<ISO> displays the scene as that film camera exposes it
+#          (ISO 2720 meter constant 12.5, mid grey 18 %, linear, clipped; the eye adaptation off) - photo comparisons;
+#          with --luminance_probe=<x0>,<y0>,<x1>,<y1> (image fractions) the rectangle's mean luminance in cd/m^2 is printed.
 # Image identity: --deterministic[=64] once settled saves after exactly that many more frames (with --fixed_exposure,
 #          for before / after comparisons; the HUD's frame-rate line hidden). --repeat_identical[=2] once settled compares that many consecutive frames
 #          of the unchanged scene: any differing pixel fails (exit code 1; the HUD's frame-rate line hidden).
@@ -300,6 +303,8 @@ func _process(_delta: float) -> bool:
 			world.moon_terrain.set_material_parameter("diag_mode", int(_args["moon_diag"]))
 		_load_restart()
 	_frames += 1
+	if _args.has("camera_exposure"):
+		_apply_camera_exposure(world)
 	_track_moon_load(world)
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
@@ -380,12 +385,64 @@ func _process(_delta: float) -> bool:
 			if not _save_stereo_images(world, out):
 				return false
 		else:
-			var error := root.get_viewport().get_texture().get_image().save_png(out)
+			var image := root.get_viewport().get_texture().get_image()
+			var error := image.save_png(out)
 			print("render_check: saved %s (error %d)" % [out, error])
+			if _args.has("camera_exposure") and _args.has("luminance_probe"):
+				_print_probe_luminance(image)
 		if _repeat_failed:
 			quit(1)
 		return true  # quit
 	return false
+
+
+## [S] ISO 2720:1974 reflected-light meter calibration constant K (cd s / m^2; 12.5 for most makers): a meter reads a
+## scene luminance L as correct for N^2 / t = L S / K.
+const METER_CALIBRATION_K := 12.5
+## [S] ISO 2720 / the zone system: the luminance the meter reads is rendered as a mid grey of 18 % reflectance.
+const METER_MID_GREY := 0.18
+
+
+## The luminance (cd/m^2) a camera at f-number N, shutter t (s) and film speed S (ISO arithmetic) renders as mid grey:
+## L = K N^2 / (t S).
+static func camera_mid_luminance(f_number: float, shutter_s: float, iso: float) -> float:
+	return METER_CALIBRATION_K * f_number * f_number / (shutter_s * iso)
+
+
+## --camera_exposure=<N>,<t s>,<ISO>: the display as that camera exposes (eye adaptation off, linear curve, no glow):
+## display linear value = METER_MID_GREY x L / L_mid, clipped at 1 (no film shoulder), then the sRGB transfer.
+func _apply_camera_exposure(world: World) -> void:
+	var spec: PackedStringArray = String(_args["camera_exposure"]).split(",")
+	var mid := camera_mid_luminance(float(spec[0]), float(spec[1]), float(spec[2]))
+	world.atmosphere.eye_adaptation_enabled = false
+	world._environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	world._environment.glow_enabled = false
+	if world.atmosphere.scene_per_cd_m2 > 0.0:
+		world._environment.tonemap_exposure = METER_MID_GREY / (mid * world.atmosphere.scene_per_cd_m2)
+
+
+## --luminance_probe=<x0>,<y0>,<x1>,<y1> (image fractions) with --camera_exposure: the probe rectangle's mean luminance
+## (BT.709 luma of the linear display values back through the camera's scale) and its clipped share.
+func _print_probe_luminance(image: Image) -> void:
+	var r: PackedStringArray = String(_args["luminance_probe"]).split(",")
+	var spec: PackedStringArray = String(_args["camera_exposure"]).split(",")
+	var mid := camera_mid_luminance(float(spec[0]), float(spec[1]), float(spec[2]))
+	var w := image.get_width()
+	var h := image.get_height()
+	var sum := 0.0
+	var clipped := 0
+	var n := 0
+	for y in range(int(float(r[1]) * h), int(float(r[3]) * h)):
+		for x in range(int(float(r[0]) * w), int(float(r[2]) * w)):
+			var c := image.get_pixel(x, y)
+			if maxf(c.r, maxf(c.g, c.b)) >= 254.5 / 255.0:
+				clipped += 1
+			var lin := c.srgb_to_linear()
+			sum += 0.2126 * lin.r + 0.7152 * lin.g + 0.0722 * lin.b
+			n += 1
+	var luminance := sum / maxi(n, 1) / METER_MID_GREY * mid
+	print("render_check: probe luminance %.1f cd/m^2 (camera mid grey %.1f cd/m^2, %d px, %.1f %% clipped)" % [
+			luminance, mid, n, 100.0 * clipped / maxi(n, 1)])
 
 
 ## --gpu_time[=120]: collects the root viewport's GPU render time of that many frames; true when done (printed).

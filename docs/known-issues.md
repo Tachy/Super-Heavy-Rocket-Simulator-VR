@@ -260,6 +260,19 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   shadow beyond Task 12's near field and floors / rims read their horizon from the LOLA height (~1 deg over a few km
   at south-pole Sun elevations; `docs/subsystems/moon-surface.md` open points).
 
+## Moon procedural surface plan, Task 11 fix round B (2026-11-05)
+- Moon terrain quadtree main thread while streaming after a 10 km camera jump at 2 m: max 13.5 ms, p99 12.8 ms per
+  update without rocks (selection, dispatch, upload; Task 7 code) - over the 5 ms hitch gate the rock layer meets
+  (its own share max 1.2 ms). Goes to T13 (VR budget).
+- Moon terrain GPU cost alone exceeds the old 9 ms VR target in boulder fields (9.9 ms stereo mock at the Diviner
+  maximum, 8.1 ms at IM-2); the rock control no longer compensates terrain cost (it holds and logs). T13 reports the
+  Moon frame times (user 2026-11-05: below 90 fps acceptable on the Moon).
+- Lunar ground luminance (`docs/subsystems/moon-surface.md`, Task 11 fix B report): the albedo texture (CGI Moon Kit
+  colour mosaic, sRGB-decoded) makes the maria ~4.3 x darker than its global mean - about twice the contrast reported
+  for mare / highland normal albedo - so mare sites (Apollo 11, 15, 17) render ~2-3 x darker than photometry suggests;
+  and the eye adaptation (white plate under the Sun, 41 000 cd/m^2) shows the regolith ~6 stops below the plate (Apollo 11 view: ground 490 cd/m^2).
+  Both await a decision (albedo source; scene-luminance adaptation T14).
+
 ## Moon procedural surface plan, Task 5 (2026-11-05)
 - Refused landing site at mission start: the touchdown search checks every candidate of the 1 km search (IM-2:
   7,449) before it refuses. Parallel ring-wise search (i7-13700K, 22 threads): 15.8 s when every candidate fails at

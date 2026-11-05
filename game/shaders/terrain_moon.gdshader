@@ -32,7 +32,9 @@ uniform float earth_radius_m;
 // The constants of moon.gdshader (same look as the body mesh from scaled space).
 uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
 // Diagnostic tint (render_check --moon_diag): 0 off; 1 red where the interpolated normal faces away from the eye
-// (dot(n, to_eye) < REGOLITH_MU_MIN: regolith_reflectance's limb replacement, Lommel-Seeliger at its 2x maximum).
+// (dot(n, to_eye) < REGOLITH_MU_MIN: regolith_reflectance's limb replacement, Lommel-Seeliger at its 2x maximum);
+// 2 red where the shading normal faces away from the Sun (self-shadow by the normal), blue where the horizon map hides
+// more than half the Sun (cast shadow), magenta both; 3 the drawn triangle's own (facet) normal for the shading.
 uniform int diag_mode = 0;
 // Hapke's mean slope override (rad; tests, diagnostics); negative: with detail shading the residual of the node's
 // effective spacing (moon_detail.gdshaderinc), without it the globe's (moon_hapke_theta_bar_rad).
@@ -71,6 +73,10 @@ void fragment() {
 	// steps are ~0.1 m), in uniform control flow for the derivatives.
 	vec3 facet = cross(dFdx(camera_offset), dFdy(camera_offset));
 	bool normal_away = dot(n, to_eye) < REGOLITH_MU_MIN;  // the diagnostic's set (before the replacement)
+	if (diag_mode == 3 && dot(facet, facet) > 0.0) {
+		vec3 f3 = normalize(facet);
+		n = dot(f3, to_eye) < 0.0 ? -f3 : f3;
+	}
 	if (moon_brdf == 1 && normal_away && dot(facet, facet) > 0.0) {
 		// Hapke only (the Lommel-Seeliger law stays bit-identical): the interpolated vertex normal faces away from the
 		// eye on a triangle that faces it (crests seen at grazing view: the vertex normals are central differences over
@@ -95,6 +101,8 @@ void fragment() {
 	// horizontal where no horizon map is read).
 	float sun_margin = asin(clamp(dot(normalize(to_sun), normalize(local_position)), -1.0, 1.0));
 	float earth_visible = 1.0;
+	// The same for the Earth (the earthshine's statistics; terrain_visible_fraction refines it over the horizon).
+	float earth_margin = asin(clamp(dot(normalize(to_earth), normalize(local_position)), -1.0, 1.0));
 	if (horizon_enabled) {
 		// A light that cannot reach the fragment anyway (below the relief's horizon, or the Sun with no umbra
 		// glow) skips its horizon; the silhouette's normal replacement (regolith_reflectance) is kept clear.
@@ -109,8 +117,7 @@ void fragment() {
 		if (sun_matters) {
 			sun_visible = terrain_visible_fraction(to_sun, sun_radius_m, east, north, up, horizon_uv, sun_margin);
 		}
-		if (earth_matters) {
-			float earth_margin = 0.0;
+		if (earth_matters || detail_shading) {
 			earth_visible = terrain_visible_fraction(to_earth, earth_radius_m, east, north, up, horizon_uv,
 					earth_margin);
 		}
@@ -124,7 +131,7 @@ void fragment() {
 		// moon_rock.gdshader), the rest statistical.
 		float geometry_min_m = detail_rock_threshold_m(length(camera_offset), rock_node_min_m, abundance);
 		detail_factors = detail_light_factors(abundance, geometry_min_m, spacing_eff, detail_horizon_spacing_m,
-				sun_margin);
+				sun_margin, earth_margin);
 		sun_modulation = detail_modulation(detail_gradient, n, normalize(to_sun), to_eye);
 		earth_modulation = detail_modulation(detail_gradient, n, normalize(to_earth), to_eye);
 	}
@@ -156,6 +163,9 @@ void fragment() {
 	}
 	if (diag_mode == 1 && normal_away) {
 		color = vec3(1.0, 0.0, 0.0);
+	}
+	if (diag_mode == 2 && (mu0_raw <= 0.0 || sun_visible < 0.5)) {
+		color = vec3(mu0_raw <= 0.0 ? 1.0 : 0.0, 0.0, sun_visible < 0.5 ? 1.0 : 0.0);
 	}
 	ALBEDO = color;
 }
