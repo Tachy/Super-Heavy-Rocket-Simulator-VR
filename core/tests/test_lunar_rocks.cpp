@@ -119,13 +119,45 @@ double measured_footprint_m2(const LunarRocks& lr, const Rock& r, int points) {
 }
 
 // Lowest and highest vertex of a template's finest mesh (independent of the sampled extents in RockTemplates).
-std::pair<double, double> mesh_z_extent(int template_id) {
-    double lo = 1.0, hi = -1.0;
-    for (const Vec3& v : RockTemplates::instance().mesh(template_id, 0).vertices) {
-        lo = std::min(lo, v.z);
-        hi = std::max(hi, v.z);
+// Maximum of f(d) over the unit sphere, independent of the templates' own construction: 20000 hashed directions, the
+// best 16 refined by a pattern search (8 tangent directions, halving steps down to 1e-11 rad).
+template <class F>
+double sphere_max(const F& f, std::uint64_t salt) {
+    std::vector<std::pair<double, Vec3>> samples;
+    for (int k = 0; k < 20000; ++k) {
+        const double z = 2.0 * unit_hash(salt, static_cast<std::uint64_t>(k), 1) - 1.0, phi = constants::two_pi * unit_hash(salt, static_cast<std::uint64_t>(k), 2);
+        const double rho = std::sqrt(1.0 - z * z);
+        const Vec3 d{rho * std::cos(phi), rho * std::sin(phi), z};
+        samples.emplace_back(f(d), d);
     }
-    return {lo, hi};
+    std::partial_sort(samples.begin(), samples.begin() + 16, samples.end(),
+                      [](const auto& a, const auto& b) { return a.first > b.first; });
+    double best = -std::numeric_limits<double>::infinity();
+    for (int c = 0; c < 16; ++c) {
+        Vec3 d = samples[static_cast<size_t>(c)].second;
+        double value = samples[static_cast<size_t>(c)].first, step = 0.02;
+        while (step > 1e-11) {
+            const Vec3 t1 = math::normalized(cross(std::abs(d.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, d));
+            const Vec3 t2 = cross(d, t1);
+            bool moved = false;
+            for (int k = 0; k < 8 && !moved; ++k) {
+                const double angle = constants::two_pi * k / 8.0;
+                const Vec3 trial = math::normalized(d + (t1 * std::cos(angle) + t2 * std::sin(angle)) * step);
+                if (const double v = f(trial); v > value) value = v, d = trial, moved = true;
+            }
+            if (!moved) step *= 0.5;
+        }
+        best = std::max(best, value);
+    }
+    return best;
+}
+
+// Vertical extent of a template (lowest, highest z of its surface), measured by sphere_max on z r(d).
+std::pair<double, double> refined_z_extent(int template_id) {
+    const RockTemplates& t = RockTemplates::instance();
+    const auto id = static_cast<std::uint64_t>(template_id);
+    return {-sphere_max([&](const Vec3& d) { return -d.z * t.radius(template_id, d); }, 2 * id + 100),
+            sphere_max([&](const Vec3& d) { return d.z * t.radius(template_id, d); }, 2 * id + 101)};
 }
 
 const LunarRocks& rocks() {
@@ -353,10 +385,12 @@ TEST_CASE("The buried share of the rock height is the configured one", "[moon_su
     const auto found = rocks().rocks_near(direction(site_lat, site_lon), 60.0, 0.1);
     REQUIRE(found.size() > 2000);
     // Share by height (the config's definition: share of the rock height below the regolith surface), measured on the
-    // template's finest mesh: ground at -burial_m from the centre, rock from c z_lo to c z_hi.
+    // template's exact vertical extent (bottom_z / top_z, checked against an independent search in "Rock templates are
+    // angular impact fragments"): ground at -burial_m from the centre, rock from c z_lo to c z_hi.
+    const RockTemplates& t = RockTemplates::instance();
     double sum = 0.0, lowest = 1.0, highest = 0.0;
     for (const Rock& r : found) {
-        const auto [z_lo, z_hi] = mesh_z_extent(r.template_id);
+        const double z_lo = t.bottom_z(r.template_id), z_hi = t.top_z(r.template_id);
         const double share = (r.burial_m / r.axes_m.z - z_lo) / (z_hi - z_lo);
         sum += share;
         lowest = std::min(lowest, share);
@@ -366,11 +400,10 @@ TEST_CASE("The buried share of the rock height is the configured one", "[moon_su
     const double sigma_mean = cfg.burial_fraction_sd / std::sqrt(static_cast<double>(found.size()));
     std::printf("buried share: mean %.4f (configured %.2f, 3 sigma %.4f), range %.4f-%.4f over %zu rocks\n", mean,
                 cfg.burial_fraction_mean, 3.0 * sigma_mean, lowest, highest, found.size());
-    // Mesh vertices sit on the surface but can miss its extreme points by ~1e-3 of the unit size.
-    constexpr double mesh_tolerance = 0.005;
-    CHECK(std::abs(mean - cfg.burial_fraction_mean) <= 3.0 * sigma_mean + mesh_tolerance);
-    CHECK(lowest >= -mesh_tolerance);
-    CHECK(highest <= 0.6 + mesh_tolerance);
+    constexpr double extent_tolerance = 1e-9;  // rounding
+    CHECK(std::abs(mean - cfg.burial_fraction_mean) <= 3.0 * sigma_mean + extent_tolerance);
+    CHECK(lowest >= -extent_tolerance);
+    CHECK(highest <= 0.6 + extent_tolerance);
 }
 
 TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]") {
@@ -384,9 +417,13 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
             r_min = std::min(r_min, r);
             r_max = std::max(r_max, r);
         }
-        CHECK(r_min > 0.2);  // positive, and no needle
+        // Positive, and no needle: the thinnest fragment (c/a 0.2) cut by 35 % keeps ~0.13 of its long semi-axis.
+        CHECK(r_min > 0.1);
         CHECK(r_max <= 1.0);
-        CHECK(r_max > 0.97);  // normalised: the rock reaches its bounding axes
+        // Normalised: the rock reaches its bounding axes (the corners found by the refined search; margin 0.5 %).
+        const double r_peak = sphere_max([&](const Vec3& d) { return t.radius(id, d); }, static_cast<std::uint64_t>(id) + 300);
+        CHECK(r_peak <= 1.0);
+        CHECK(r_peak > 0.99);
         // Exposed plan-view area: the whole projection below the rock, nothing above it, shrinking in between.
         const double full = t.exposed_area(id, t.bottom_z(id) - 1e-3);
         CHECK(full > 0.2 * constants::pi);
@@ -432,6 +469,112 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
             }
         }
     }
+}
+
+TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environment]") {
+    const RockTemplates& t = RockTemplates::instance();
+    // Axis law (Fujiwara et al. / Michikami et al. 2016): mean b/a 0.71, c/a 0.50, spread 0.15 (clamped), so the
+    // template means lie within 3 sigma of the mean (sigma = 0.15 / sqrt(count)).
+    double sum_b = 0.0, sum_c = 0.0;
+    int eroded = 0, tilted = 0;
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        CHECK(t.fragment_c_to_a(id) <= t.fragment_b_to_a(id));
+        CHECK(t.fragment_b_to_a(id) <= 1.0);
+        sum_b += t.fragment_b_to_a(id);
+        sum_c += t.fragment_c_to_a(id);
+        eroded += t.eroded(id) ? 1 : 0;
+        tilted += t.c_axis_tilt_rad(id) > 30.0 * deg ? 1 : 0;
+    }
+    const double sigma = 0.15 / std::sqrt(static_cast<double>(RockTemplates::count));
+    const double mean_b = sum_b / RockTemplates::count, mean_c = sum_c / RockTemplates::count;
+    std::printf("templates: mean b/a %.3f, c/a %.3f (law 0.71, 0.50, 3 sigma %.3f), eroded %d, c axis tilted > 30 deg %d of %d\n",
+                mean_b, mean_c, 3.0 * sigma, eroded, tilted, RockTemplates::count);
+    CHECK(std::abs(mean_b - 0.71) <= 3.0 * sigma);
+    CHECK(std::abs(mean_c - 0.50) <= 3.0 * sigma);
+    CHECK(eroded >= 1);                           // both fresh and eroded fragments
+    CHECK(eroded < RockTemplates::count);
+    CHECK(tilted >= RockTemplates::count / 5);   // the c axis is not always vertical
+    CHECK(tilted < RockTemplates::count);
+
+    double worst_extent_gap = 0.0;
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        // Faceted: on a fresh fragment most of the surface is planar faces. A plane's normal is constant over its face:
+        // neighbouring directions with the same normal; across an edge the normal jumps (sharp edge, no blend).
+        int planar = 0, samples = 0, sharp = 0;
+        for (int k = 0; k < 2000; ++k) {
+            const double z = 2.0 * unit_hash(id, k, 7) - 1.0, phi = constants::two_pi * unit_hash(id, k, 8);
+            const double rho = std::sqrt(1.0 - z * z);
+            const Vec3 d{rho * std::cos(phi), rho * std::sin(phi), z};
+            const Vec3 n0 = t.normal(id, d);
+            const Vec3 e = math::normalized(cross(std::abs(d.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, d));
+            const Vec3 n1 = t.normal(id, d + e * 1e-3);
+            ++samples;
+            const bool on_face = norm(n1 - n0) < 1e-12;  // same face (an ellipsoid normal turns by ~1e-3)
+            if (on_face) ++planar;
+            // An edge: 0.05 rad on, still on a face (its normal constant), but a different face's normal.
+            const Vec3 far = d + e * 0.05;
+            const Vec3 n2 = t.normal(id, far), n3 = t.normal(id, far + e * 1e-3);
+            if (on_face && norm(n3 - n2) < 1e-12 && norm(n2 - n0) > 0.1) ++sharp;
+        }
+        const double planar_share = static_cast<double>(planar) / samples;
+        std::printf("template %2d: %s, %2d faces, b/a %.2f c/a %.2f, tilt %4.1f deg, planar share %.2f, edge pairs %d\n", id,
+                    t.eroded(id) ? "eroded" : "fresh ", t.plane_count(id), t.fragment_b_to_a(id), t.fragment_c_to_a(id),
+                    t.c_axis_tilt_rad(id) / deg, planar_share, sharp);
+        if (!t.eroded(id)) {
+            CHECK(planar_share > 0.8);
+            CHECK(sharp > 0);
+        }
+        // Exact column tops: the point (x, y, top) lies on the surface (radial function), and no column rises above
+        // top_z; top_z is reached (within a grid cell's slope).
+        double highest = -1.0, lowest = 1.0;
+        for (int i = 0; i < 64; ++i) {
+            for (int j = 0; j < 64; ++j) {
+                const double x = -1.0 + (2.0 * i + 1.0) / 64.0, y = -1.0 + (2.0 * j + 1.0) / 64.0;
+                if (const auto top = t.column_top(id, x, y)) {
+                    const Vec3 p{x, y, *top};
+                    CHECK(std::abs(norm(p) - t.radius(id, p)) < 1e-9);
+                    CHECK(*top <= t.top_z(id) + 1e-12);
+                    highest = std::max(highest, *top);
+                }
+                // The bottom: the lowest point inside the column (mirror: the column top of -z is not exposed, so scan).
+                for (int s = 0; s <= 200; ++s) {
+                    const Vec3 p{x, y, -1.0 + 2.0 * s / 200.0};
+                    if (norm(p) > 1e-9 && norm(p) <= t.radius(id, p)) {
+                        lowest = std::min(lowest, p.z);
+                        break;
+                    }
+                }
+            }
+        }
+        CHECK(highest > t.top_z(id) - 0.05);
+        CHECK(lowest >= t.bottom_z(id) - 1e-9);
+        CHECK(lowest < t.bottom_z(id) + 0.05);
+        CHECK(highest <= t.top_z(id) + 1e-12);
+        // top_z / bottom_z (the exact support: an enumeration of the extreme points) against an independent search on
+        // the surface: no surface point lies beyond them, and the search (which can stall on a ridge of the
+        // polyhedron) gets close to them.
+        const auto [z_lo, z_hi] = refined_z_extent(id);
+        CHECK(z_hi <= t.top_z(id) + 1e-9);
+        CHECK(z_lo >= t.bottom_z(id) - 1e-9);
+        CHECK(z_hi > t.top_z(id) - 2e-3);
+        CHECK(z_lo < t.bottom_z(id) + 2e-3);
+        worst_extent_gap = std::max({worst_extent_gap, t.top_z(id) - z_hi, z_lo - t.bottom_z(id)});
+        // support_point along tilted directions: on the surface, no surface point beyond it, and the contact normal of
+        // a pad with normal u pressing there is u (u lies in the normal cone at the support point: face, edge or vertex).
+        for (int k = 0; k < 3; ++k) {
+            const auto ku = static_cast<std::uint64_t>(k);
+            const double z = 0.2 + 0.8 * unit_hash(id, ku, 11), phi = constants::two_pi * unit_hash(id, ku, 12);
+            const Vec3 u{std::sqrt(1.0 - z * z) * std::cos(phi), std::sqrt(1.0 - z * z) * std::sin(phi), z};
+            const Vec3 p = t.support_point(id, u);
+            CHECK(std::abs(norm(p) - t.radius(id, p)) < 1e-9);
+            const double searched =
+                sphere_max([&](const Vec3& d) { return dot(u, d) * t.radius(id, d); }, 1000 + 8 * static_cast<std::uint64_t>(id) + ku);
+            CHECK(searched <= dot(u, p) + 1e-9);
+            CHECK(searched > dot(u, p) - 2e-3);
+            CHECK(norm(t.normal_toward(id, p, u, 1e-9) - u) < 1e-6);
+        }
+    }
+    std::printf("vertical extent: the independent search stays within %.2e of the exact support\n", worst_extent_gap);
 }
 
 TEST_CASE("Rocks are deterministic and pole-regular", "[moon_surface][environment]") {

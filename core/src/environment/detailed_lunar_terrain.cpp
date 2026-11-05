@@ -96,15 +96,15 @@ const std::array<TemplatePeak, RockTemplates::count>& template_peaks() {
     return peaks;
 }
 
-// LunarRocks::rock_top with the template's column top interpolated on its footprint grid
-// (RockTemplates::column_top_interpolated): the rock top of the contact surface. Height only.
+// LunarRocks::rock_top's height (the template's exact column top, RockTemplates::column_top): the rock top of the
+// contact surface. Height only.
 std::optional<double> contact_top(const Rock& rock, const Vec3& unit, double sphere_radius, double* ux_out = nullptr,
                                   double* uy_out = nullptr, double* top_out = nullptr) {
     const Vec3 offset = (unit - rock.base_unit) * sphere_radius;
     const double x = dot(offset, math::column(rock.local_to_fixed, 0)), y = dot(offset, math::column(rock.local_to_fixed, 1));
     const double ux = x / rock.axes_m.x, uy = y / rock.axes_m.y;
     if (ux * ux + uy * uy >= 1.0) return std::nullopt;
-    const auto top = RockTemplates::instance().column_top_interpolated(rock.template_id, ux, uy);
+    const auto top = RockTemplates::instance().column_top(rock.template_id, ux, uy);
     if (!top) return std::nullopt;
     const double above_base = rock.axes_m.z * *top - rock.burial_m;
     if (above_base <= 0.0) return std::nullopt;
@@ -416,8 +416,8 @@ void DetailedLunarTerrain::gather_rocks(const Vec3& centre_unit, double radius_m
                 const Vec3 offset = math::column(rock.local_to_fixed, 0) * (rock.axes_m.x * p.x) +
                                     math::column(rock.local_to_fixed, 1) * (rock.axes_m.y * p.y);
                 e.peak_unit = math::normalized(rock.base_unit + offset / sphere_radius_m_);
-                // No contact top lies above the highest footprint column (+ the curvature term a^2 / 2R).
-                const double highest = rock.axes_m.z * RockTemplates::instance().column_grid_max(rock.template_id) -
+                // No contact top lies above the template's highest point (+ the curvature term a^2 / 2R).
+                const double highest = rock.axes_m.z * RockTemplates::instance().top_z(rock.template_id) -
                                        rock.burial_m;
                 if (highest > 0.0) {
                     e.peak_valid = true;
@@ -564,9 +564,9 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
     // height at the base - |slope| a. First every peak under the disc (cached, free), then the searches only for the
     // rocks whose bound still exceeds the best protrusion, highest bound first.
     //
-    // A rock's contact top is bilinear between its template's footprint columns, and the plane is linear in the same
-    // coordinates: inside the disc the protrusion is greatest at a column node - found by climbing over the nodes from
-    // the peak (or from the best rim point). On the rim (a rock the rim cuts) it is searched along the arc.
+    // Inside the disc the protrusion is approached by climbing over the rock's footprint column nodes from the peak (or
+    // from the best rim point); on the rim (a rock the rim cuts) it is searched along the arc. The winning rock's point
+    // is then refined to its support point along the pad normal (its exact top peaks at a vertex or an edge).
     const double slope = std::hypot(gx, gy);
     RockQuery q;
     gather_rocks(centre_unit, r, q);
@@ -699,8 +699,28 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
         }
         if (found > best) best = found, winner = cand.e, winner_x = found_x, winner_y = found_y;
     }
-    if (winner) {  // the carrying rock's normal there
-        if (const auto top = contact_rock_top(winner->rock, at(winner_x, winner_y))) normal = top->second;
+    if (winner) {
+        // The rock's contact top is exact (a convex polyhedron): its protrusion above the plane peaks at a vertex, an
+        // edge or on the rim, generally between the footprint nodes the climb visits. Inside the disc that peak is the
+        // rock's support point along the pad's normal (RockTemplates::support_point; the sphere's curvature over the
+        // pad, ~1e-7 m, aside); a rock the rim cuts keeps the rim search's point.
+        const Rock& rock = winner->rock;
+        const Vec3 u = math::transpose(rock.local_to_fixed) * normal;  // a = b = c: the template frame is the rock's
+        const Vec3 p = RockTemplates::instance().support_point(rock.template_id, u);
+        const Vec3 point = math::normalized(rock.base_unit + (math::column(rock.local_to_fixed, 0) * (rock.axes_m.x * p.x) +
+                                                              math::column(rock.local_to_fixed, 1) * (rock.axes_m.y * p.y)) /
+                                                                 sphere_radius_m_);
+        const double px = dot(point - centre_unit, t.e1) * sphere_radius_m_;
+        const double py = dot(point - centre_unit, t.e2) * sphere_radius_m_;
+        if (px * px + py * py <= r * r) {
+            if (const auto top = contact_top(rock, at(px, py), sphere_radius_m_)) {
+                const double value = *top - (px * px + py * py) / two_r_sphere - plane(px, py);
+                if (value > best) best = value, winner_x = px, winner_y = py;
+            }
+        }
+        // The carrying rock's contact normal there for the pad (its own normal where the rock meets it with an edge or
+        // a vertex).
+        if (const auto top = rocks_->rock_top(rock, at(winner_x, winner_y), normal)) normal = top->second;
         else normal = winner->peak_normal;
     }
     return {mean + best, normal};

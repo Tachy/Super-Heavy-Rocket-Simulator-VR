@@ -33,7 +33,7 @@ const NODE_NEAR_FACTOR := 2.0
 const NODE_FAR_FACTOR := 8.0
 ## The core's rock templates (RockTemplates::count) and LODs (RockTemplates::lods); one more LOD here: the bare
 ## icosahedron (the first 12 vertices of every icosphere), for rocks below LOD_MIN_PX[3].
-const TEMPLATES := 16
+const TEMPLATES := 32
 const CORE_LODS := 4
 const LODS := 5
 ## [E] Lower edge of each LOD's projected-diameter band (px; LOD 0 = 2562 vertices, LOD 4 = 12): the chord sagitta of the

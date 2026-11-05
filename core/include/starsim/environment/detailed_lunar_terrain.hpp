@@ -123,9 +123,8 @@ public:
     double support_upper_bound_m(const math::Vec3& centre_unit, const math::Vec3& up_fixed, double radius_m) const;
     // The contact surface's ground at a direction: LOLA + the relief interpolated on the contact lattice.
     double contact_ground_m(const math::Vec3& unit) const;
-    // The contact surface's top of a rock along `unit` and its normal: LunarRocks::rock_top with the template's column
-    // top interpolated on its footprint grid (RockTemplates::column_top_interpolated: ~1e-4 of the rock's height from
-    // rock_top, ~200 x faster). nullopt where the vertical misses the rock above its base.
+    // The contact surface's top of a rock along `unit` and its normal: LunarRocks::rock_top (the template's exact
+    // column top, RockTemplates::column_top). nullopt where the vertical misses the rock above its base.
     std::optional<std::pair<double, math::Vec3>> contact_rock_top(const Rock& rock, const math::Vec3& unit) const;
 
     const LunarTerrain& lola() const { return *lola_; }

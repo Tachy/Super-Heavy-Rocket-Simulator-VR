@@ -32,11 +32,10 @@ struct RegolithRoughness {
     double rms_height_measured_total_m = 0.0;
 };
 
-// Discrete rocks: size law, ellipsoid axis ratios (a >= b >= c), burial (share of the height below the surface),
+// Discrete rocks: size law (shapes: RockTemplates), burial (share of the height below the surface),
 // albedo relative to the regolith, local abundance field ("uniform" | "diviner") with a global scale.
 struct RockPopulation {
     SizeFrequency sfd;
-    double axis_b_to_a_mean = 0.0, axis_c_to_a_mean = 0.0, axis_ratio_sd = 0.0;
     double burial_fraction_mean = 0.0, burial_fraction_sd = 0.0, albedo_to_regolith = 0.0;
     std::string abundance_source;
     double abundance_scale = 1.0;

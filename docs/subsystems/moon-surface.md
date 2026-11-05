@@ -71,28 +71,38 @@ on top of that relief.
   full detail, half 1 m: 2-3 lattices and the cross means); construction 0.7-1.0 s (the roughness normalisation).
 
 ### Rocks (Task 3)
-- Templates (`RockTemplates`): 16 star-shaped radial functions r(dir) = exp(sum of 8 random plane waves, a_k = 0.30 / f_k,
-  f_k 1.5-5 rad) scaled to max r = 1 (sampled on 20000 directions, margin 0.5 %), so a rock's semi-axes a, b, c bound
-  it; the shape fills them only partly (mean r ~0.66). meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with
-  vertex dir r(dir), true surface normals. Per template: vertical extent `bottom_z` / `top_z` (same 20000 directions),
-  `column_top(x, y)` (scan from z = 1 down in 48 steps + 40 bisections; the one criterion `rock_top` also uses) and
-  `exposed_area(cut_z)` = plan-view area of the part above the plane z = cut_z, from the column tops of a 96 x 96 grid
-  over [-1, 1]^2. All values [E] (appearance only); everything from the integer hash.
+- Templates (`RockTemplates`, fix A of Task 11): 32 angular impact fragments. Each is a convex body: an ellipsoid with
+  semi-axes 1 : b/a : c/a (b/a 0.71 +- 0.15 clamped 0.3-1, c/b 0.71 +- 0.15, c/a >= 0.2: the 2 : sqrt2 : 1 fragment law
+  of Fujiwara et al. / Michikami et al. 2016, sampled: template means b/a 0.709, c/a 0.496) cut by K hash-seeded planes
+  (fracture faces: tangent planes at a jittered Fibonacci set of points on the ellipsoid, pushed in). Fresh fragments
+  (70 %, [E]): 16-24 faces cut 15-40 % deep, the whole surface planar (planar share of directions 0.94-1.00), sharp
+  edges; eroded ones (30 %, [E]; boulders wear down, Basilevsky et al. 2013 / 2015): 5-8 faces cut 3-12 %, mostly the
+  rounded ellipsoid (planar share 0.19-0.37). The fragment is turned (half resting: c axis within 25 deg of the vertical;
+  half uniformly random: embedded ejecta; [E], no measured tilt distribution found; 16 of 32 templates have the c axis
+  > 30 deg off the vertical) and scaled so that max r = 1 (20000 Fibonacci directions, the best 32 refined by a pattern
+  search, margin 0.5 %). r(dir) is the exact ray exit distance; `normal` the active face's (or the ellipsoid's) normal;
+  `column_top(x, y)` exact (the least upper bound of the constraints on the vertical line, ~50 ns); `support_point(u)`
+  exact (the ellipsoid's maximum, each face ellipse's maximum or a precomputed edge end / vertex); `bottom_z` / `top_z`
+  = the support along -z / +z; `normal_toward(p, reference, tol)` the normal-cone vector nearest a contact's own normal
+  (on an edge or a vertex a pad keeps its normal). Meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with
+  vertex dir r(dir) and the exact face normals (edges soften over one triangle). `exposed_area(cut_z)` = plan-view area
+  of the part above the plane z = cut_z, from the column tops of a 96 x 96 grid over [-1, 1]^2. Template construction
+  (32 templates): within a rock test case of 0.55-0.64 s in all. Everything from the integer hash.
 - Population (`LunarRocks`): one diameter octave (0.01 m, doubling, to 10 m: 10 octaves) per face-cell level, cells >= 4 x
   D_max nominal; count Poisson (exact cell area x abundance factor at the cell centre x octave density), position uniform
   in the cell (each rock belongs to exactly one cell: found from both sides of a face edge, no duplicates), D by the
-  inverse cumulative SFD, b/a 0.71 +- 0.15 (clamped 0.3-1), c/a 0.50 +- 0.15 (0.2 - b/a), burial share f of the height
-  0.3 +- 0.15 (clamped 0-0.6, symmetric about the mean, so the mean share stays 0.3), template and yaw random, the c
-  axis vertical (rests on its flattest side, [E]), albedo = `albedo_to_regolith`. Normal-like draws are the sum of 6
+  inverse cumulative SFD, burial share f of the height 0.3 +- 0.15 (clamped 0-0.6, symmetric about the mean, so the
+  mean share stays 0.3), template and yaw random, size isotropic (a = b = c: the template carries the fragment's axis
+  ratios and tilt), albedo = `albedo_to_regolith`. Normal-like draws are the sum of 6
   uniforms (no library distributions).
 - Size convention: D is the plan-view-area-equivalent diameter: the rock's area seen from above (the part above the
-  ground) is pi D^2 / 4. Per rock a = (D / 2) sqrt(pi / ((b/a) exposed_area(cut))), so a is ~0.84 D for a typical rock and at
-  most 1.77 D (`max_semi_axis_per_diameter`: b/a 0.3, burial 0.6, least filled template); the visible long dimension is
-  ~1.1-1.3 D. This is the area definition of Diviner rock abundance (the normalisation 0.0068 stays a disc integral and
+  ground) is pi D^2 / 4. Per rock a = (D / 2) sqrt(pi / exposed_area(cut)), at most 1.144 D (`max_semi_axis_per_diameter`: burial 0.6,
+  the template with the least exposed area). This is the area definition of Diviner rock abundance (the normalisation 0.0068 stays a disc integral and
   is exact); the Surveyor counts' own convention is an open point.
 - Burial by height (the config's definition): ground at cut = bottom_z + f (top_z - bottom_z) of the template,
   `burial_m` = c x cut (depth of the centre below the ground; negative = centre above it).
-- Ground: the rock stands on LOLA + `relief_m(base, 0)` at its base point, on the plane tangent there; no rock is tilted.
+- Ground: the rock stands on LOLA + `relief_m(base, 0)` at its base point, on the plane tangent there; the rock is not tilted with the slope (its
+  fragment tilt is the template's).
   On a slope the ground falls away on the downhill side, so part of the underside is exposed and the uphill side is
   buried deeper (Open points).
 - Rock top: `rock_top(rock, unit)` takes the template's `column_top` at (x/a, y/b) and returns height above the sphere =
@@ -107,7 +117,7 @@ on top of that relief.
   front, deterministic), so the factor is continuous across gaps; an all-NaN map gives the uniform law.
 - `cover_fraction(min, max)`: area share (pi/4) D^2 integrated over the law = the generated rocks' real plan-view area
   (0.0311 for 0.01-10 m, 0.00678 for 0.5-10 m). `rocks_touching(unit, r, min)` returns rocks with base within r + a
-  (hazard / contact queries; cells searched within r + 1.77 D_max).
+  (hazard / contact queries; cells searched within r + 1.144 D_max).
 
 ### Physics surface (Task 4)
 - `environment::DetailedLunarTerrain(lola, detail, rocks, SurfaceDetailOptions{detail, rocks})` is the Moon's
@@ -124,8 +134,7 @@ on top of that relief.
 - Contact surface (`support_under_disc(centre, up, r)`, `contact_height_m`, `contact_ground_m`, `contact_rock_top`):
   the pads feel LOLA + the full relief interpolated bilinearly on a cube-face lattice of 2^25 nodes per face edge
   (8.1 cm nominal, 6.8-8.1 cm) and the rocks >= 5 cm (`contact_min_rock_diameter_m`) with their contact top (the
-  template's column tops interpolated on its 96 x 96 footprint grid, `RockTemplates::column_top_interpolated`: within
-  1e-4 m of `rock_top` for the tested rocks, ~20 ns instead of ~4 us). Both scales lie inside the few-cm sinkage of a
+  template's exact column top, `RockTemplates::column_top`, ~50 ns: the same surface as `rock_top`). Both scales lie inside the few-cm sinkage of a
   loaded pad in regolith ([E]; a 5 cm rock buried 0.3 of its height stands 2-3 cm proud; the omitted sub-lattice relief
   has an RMS of 4.4 mm, 2.5 mm at 4 cm - the 4 cm lattice put six sliding pads over the 50 us budget, see Cost).
 - Pivoting pad (ruling I2, fix round 1 of Task 4; the HLS pad sits on a ball joint): heights are referred to the disc
@@ -139,6 +148,11 @@ on top of that relief.
   the disc (cached per rock, free), then: inside the disc the protrusion of the bilinear contact top above the linear
   plane is greatest at a footprint column node - found by climbing over the nodes from the peak; a rock the rim cuts is
   searched along its rim arc (5 coarse samples, 8 golden-section steps) and climbed inward from the best rim point.
+  The winning rock's point is then moved to its support point along the pad normal (`support_point`; the polyhedron's
+  protrusion peaks at a vertex or an edge between the nodes) when that lies inside the disc. The carrying rock's normal
+  is `LunarRocks::rock_top(rock, unit, pad normal)`: on a face its normal, on an edge or a vertex (within
+  `contact_edge_tolerance_m` = 1 mm, [E]) the pad's own normal if it lies in the normal cone, else the nearest edge /
+  face normal.
   Peaks: per template the highest column top (41 x 41 grid + pattern search, computed once). r = 0 (`contact_height_m`,
   the base ring): the ground at the point and every contact-size rock covering it (normal: the ground's over +-1 m or
   the rock's).
@@ -351,7 +365,7 @@ on top of that relief.
   margin over the horizon map in its azimuth (`terrain_visible_fraction`'s margin: a slope facing the Sun raises it),
   over the local horizontal where no map is read. The near-field shadow map (Task 12) takes over inside its range.
 - Unresolved rocks (D below the geometry threshold d_geo, the growth band weighted; Rocks drawn below): Boolean model of
-  half-spheroids of plan radius D/2 and height eta D (eta 0.383, the cover-weighted mean of generated rocks' exposed
+  half-spheroids of plan radius D/2 and height eta D (eta 0.571, the cover-weighted mean of generated rocks' exposed
   height / D, measured with `rock_top` at the base): cover C = abundance x `rock_statistical_cover(d_geo)` (every rock
   below d_geo, the band [d_geo, 2 d_geo] with weight 1 - log2(D / d_geo), closed form over the law), visible rock share 1 -
   exp(-C) with reflectance ratio rho = I/F(1.35 w) / I/F(w) = 1.494 (standard geometry i 30, e 0, g 30; 1.43-1.54
@@ -427,9 +441,9 @@ on top of that relief.
   PEBBLE_GEOMETRY_LIMIT_M; the limit goes to both shaders (`rock_node_min_m`), so a rock a node does not list stays
   statistical. At the upload `attach` adds one `MultiMeshInstance3D` per non-empty LOD as children of the node's mesh
   instance (they show / hide with it); `detach` at the release.
-- One mesh per LOD for all 16 templates: the unit icosphere of the core's LOD (2562 / 642 / 162 / 42 vertices) plus the
+- One mesh per LOD for all 32 templates: the unit icosphere of the core's LOD (2562 / 642 / 162 / 42 vertices) plus the
   bare icosahedron (12, its first 12 vertices) as LOD 4; each vertex takes its template's radius and normal from a
-  float texture (column VERTEX_ID, row LOD x 16 + template). LOD bands of projected diameter: >= 100 / 30-100 / 10-30 /
+  float texture (column VERTEX_ID, row LOD x 32 + template). LOD bands of projected diameter: >= 100 / 30-100 / 10-30 /
   4-10 / < 4 px (icosphere chord sagitta < ~0.3 px at each band's lower edge); the LOD and band ride in the mesh's
   CUSTOM0 (no instance uniforms: their global buffer overflowed with thousands of node MultiMeshes). A rock goes into
   every LOD whose band it can reach between the node's nearest (2.0 x size) and farthest (8 x size) camera distance;
@@ -490,7 +504,8 @@ on top of that relief.
   `band_start_m`, `finest_wavelength_m` (0.01 m), `craters_in_cell`, `craters_within`, `crater_profile_m`,
   `crater_octaves`, `roughness_octaves`, `roughness_scale_m`. It knows nothing about rocks.
 - `core/include/starsim/environment/rock_templates.hpp`, `core/src/environment/rock_templates.cpp`: `RockTemplates`
-  (`radius`, `normal`, `mesh(id, lod)`, `column_top`, `bottom_z`, `top_z`, `exposed_area`, 16 templates x 4 LODs),
+  (`radius`, `normal`, `normal_toward`, `support_point`, `mesh(id, lod)`, `column_top`, `column_grid_node`,
+  `bottom_z`, `top_z`, `exposed_area`, fragment statistics, 32 templates x 4 LODs),
   `TemplateMesh`.
 - `core/include/starsim/environment/lunar_rocks.hpp`, `core/src/environment/lunar_rocks.cpp`: `LunarRocks(detail, map)`:
   `rocks_in_cell`, `rocks_near`, `rocks_touching`, `rock_top`, `cover_fraction`, `abundance_factor`, `octaves`,
@@ -514,8 +529,7 @@ on top of that relief.
   `DetailedLunarTerrain`, `SurfaceDetailOptions`, `support_under_disc` / `DiscSupport`, `contact_height_m`,
   `support_upper_bound_m`, `contact_ground_m`, `contact_rock_top`, `height_limited_m`, `normal_step_m`, the contact
   cache; `detail()` / `rocks()` throw `std::logic_error` where the part is absent.
-- `RockTemplates::column_top_interpolated` / `column_grid_node` / `column_grid_max` (the footprint grid's column tops,
-  kept from construction).
+- `RockTemplates::column_grid_node` (the footprint grid's exact column tops, kept from construction; the node climb).
 - `contact::SurfaceField::below_disc` / `height_below` / `below_disc_upper_bound` / `height_below_upper_bound`, the same
   on `LandingSurface`, `TerrainField` (`core/include/starsim/contact/landing_surface.hpp`); `contact::leg_contact`
   feet on `below_disc`, the base ring on `height_below`, both skipped above the bounds.
@@ -597,25 +611,32 @@ on top of that relief.
     cell that lists it, and the rocks found by position equal the union of the block's cells;
   - tops: every top of the > 100 rocks of a 200 m disc (40 sample points each; 7307 hits) lies above base height and
     below base - burial + c top_z + d^2/2R, and on the rock's surface (|u| - r(u) worst 4.8e-14), unit normals facing up;
-  - burial: buried share of the height measured on the LOD 0 mesh extents, 3350 rocks >= 0.1 m within 60 m of the
-    site: mean 0.3001 (configured 0.30, 3 sigma 0.0078), range -0.0009 - 0.6005;
-  - templates: r > 0.2 and <= 1 (max > 0.97) on 10^4 directions; exposed area full below the rock (0.2 pi - pi), 0 above,
+  - burial: buried share of the height on the templates' exact extent, 3350 rocks >= 0.1 m within 60 m of the
+    site: mean 0.3003 (configured 0.30, 3 sigma 0.0078), range 0 - 0.6000 (tolerance 1e-9);
+  - fragments: template means b/a 0.709, c/a 0.496 (law 0.71 / 0.50, 3 sigma 0.080); 7 of 32 eroded, 16 of 32 with the
+    c axis > 30 deg off the vertical; fresh templates planar share of 2000 directions > 0.8 (0.94-1.00) with face-to-face
+    normal jumps (edges); exact column tops lie on the surface (|p| - r(p) < 1e-9) and below top_z; top_z / bottom_z
+    and `support_point` along 3 tilted directions per template against an independent sphere search (20000 directions,
+    16 refined): nothing beyond them, the search within 8.2e-4 of them (it can stall on a ridge); `normal_toward` at the
+    support point returns the direction (1e-6);
+  - templates: r > 0.1 (thinnest fragment ~0.13) and <= 1 on 10^4 directions, refined maximum in (0.99, 1]; exposed area full below the rock (0.2 pi - pi), 0 above,
     monotone; every mesh at every LOD closed
     and oriented (each directed edge once with its reverse, V - E + F = 2, every triangle faces outward), LOD 0 vertices
     within 1 % of r, unit outward normals; determinism on 4 threads (own and shared instance), also at -90 deg;
   - cover fraction: formula 0.0311 / 0.00678; real plan-view area of the 8083 rocks of 0.05-0.2 m in a 43 m disc at the
-    site, measured with `rock_top` on 64 sunflower columns per rock: 0.00748 vs formula 0.00745 (+0.37 %, tolerance
-    5 %); measured footprint / sum of pi D^2 / 4 = 0.9933 (tolerance 2 %); every rock's a <= 1.769 D;
+    site, measured with `rock_top` on 64 sunflower columns per rock: 0.00759 vs formula 0.00745 (+1.86 %, tolerance
+    5 %); measured footprint / sum of pi D^2 / 4 = 1.0080 (tolerance 2 %); every rock's a <= 1.144 D;
   - abundance source: "uniform" ignores a map, "diviner" without a map throws (names the fetch target), an all-NaN map
     gives the uniform law; gap fill: filled values lie in the valid range and the factor swept across a 10 x 20 hole and
     a single missing pixel changes by no more than the map's own pixel step; a 12 x 36 file in the real format (TOML
     header + int16, one missing DN) loads: pixel centres, longitude wrap, the gap filled with its neighbours' mean; a missing file names fetch.py;
   - `[slow]` summed roughness (median plane-detrended 125 mm window std, 600 windows over 2 km, rock tops entered as
-    max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 4.049 mm vs the measured total 4.000 mm
-    (+1.2 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.232 mm (+5.8 %). The corner excess of the skewed
+    max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 4.159 mm vs the measured total 4.000 mm
+    (+4.0 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.290 mm (+7.3 %). The corner excess of the skewed
     lattice is unchanged after the face blend (4.090 vs 3.845 at the site = +6.4 %) and stays inside 10 % of the total, so
-    the amplitude is not touched. The rock tops add 0.20 mm (site) to the median (rare rocks dominate the mean square,
-    not the median).
+    the amplitude is not touched. The rock tops add 0.31 mm (site) to the median with the fragment templates (taller exposed
+    rocks, eta 0.571; rare rocks dominate the mean square, not the median). The residual `rms_height_at_baseline_m`
+    (0.0037, median-matched with the former smooth templates) was not re-derived (open point).
 - Physics surface (Task 4, `core/tests/test_detailed_lunar_terrain.cpp`, synthetic flat LOLA + the shipped config
   with the uniform law; `[moon_surface][terrain]` / `[contact]`):
   - detail off on the real LOLA (10^4 points, half within 15 km of the site): heights by latitude / longitude,
@@ -828,8 +849,10 @@ Extrapolated to 100 m the residual term gives 0.68 m, below the NAC totals with 
 | N(>D) = 0.154 D^-2.286 per 100 m^2, D in m (= 1.54e-3 D^-2.286 per m^2) | [S] | Cintala & McBride 1995 (NASA TM-104804) Table 3: power-law fits to the Surveyor fragment counts of Shoemaker & Morris 1968; Surveyor VI (mare, mature regolith; exponent +-0.094) | mm - dm measured |
 | other Surveyor sites | - | I: 0.797 D^-1.779; III: 0.049 D^-2.559; VII (Tycho ejecta, highland): 2.666 D^-1.802 | mm - dm |
 | max 10 m | [E] | extrapolation | - |
-| b/a 0.71, c/a 0.50 | [S] | Fujiwara et al. 1978 (Icarus 31) impact fragments a:b:c = 2:sqrt2:1; LRO NAC boulders b/a mostly ~0.7, 0.3-0.9 (Kumar et al., NGRI; Krishna & Kumar 2016) | NAC: m-dam |
+| fragment b/a 0.71, c/b 0.71 (c/a 0.50) | [S] | Fujiwara et al. 1978 (Icarus 31) impact fragments a:b:c = 2:sqrt2:1; Michikami et al. 2016 (Icarus 264): catastrophic-disruption fragments b/a ~0.7, c/a ~0.5, cratering fragments to c/a ~0.2; LRO NAC boulders b/a mostly ~0.7, 0.3-0.9 (Kumar et al., NGRI; Krishna & Kumar 2016). Constants in `rock_templates.cpp` (no longer config keys) | NAC: m-dam |
 | sd 0.15 | [E] | spread of the NAC range | - |
+| fresh / eroded 70 / 30 %, faces 16-24 / 5-8, cut 15-40 / 3-12 % | [E] | Basilevsky et al. 2013 (PSS 89) / 2015 (PSS 117): boulders wear down and break up (survival ~40-80 Myr for 1-2 m); share from the Apollo photo comparison | - |
+| tilt: 50 % resting (c axis <= 25 deg off vertical), 50 % uniform | [E] | no measured lunar tilt / H/D distribution retrieved (lead: Demidov & Basilevsky, Lunokhod / Apollo panoramas) | - |
 | burial 0.3 +- 0.15 | [E] | no lunar measurement found | - |
 | albedo 1.35 x regolith | [E] | w_rock 0.65 / w_regolith 0.48 of the synthetic NAC boulder-field model of Marshal, Ruesch, Woehler et al. (EGU22-12217), taken there from earlier work; Ruesch et al. 2024 (JGR) found boulders near Reiner Gamma with w like the regolith | - |
 | abundance reference 0.0068 for 0.5-10 m | [D] / [E] | disc area of the law, (pi/4) k b (D1^(2-b) - D0^(2-b)) / (2-b) = 0.00678 with D0 = 0.5 m [E: middle of Diviner's ~0.1-1 m sensitivity, Bandfield et al. 2011]; D0 = 1 m would give 0.0047 (local factor 1.45x higher), D0 = 0.1 m 0.0137 | - |
@@ -906,8 +929,9 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 - Rock attach spikes: one node's MultiMesh creation took 25.9 ms during a camera jump (likely a GPU buffer-heap growth);
   a MultiMesh pool with fixed capacity buckets would turn allocations into buffer updates.
 - Drawn rocks (Task 11): no cast shadows yet (their shadow is statistical on the ground until Task 12), so under a low
-  Sun they look lit-only; shapes are smooth (Task 3's radial templates) - against Apollo photos (compare/ images, Task 11
-  report) real clasts are angular with black shadows. Rocks stand on the full-detail ground while coarse nodes draw the
+  Sun they look lit-only; shapes are angular fragments since fix A of Task 11; their tilt distribution and the
+  fresh / eroded share are [E] (no lunar measurement retrieved), the exposed H/D (eta 0.571) is not checked against a
+  measured distribution. Rocks stand on the full-detail ground while coarse nodes draw the
   band-limited surface (sub-pixel by the numbers, not measured on screen). Pebbles 1-2 cm are neither instances nor in
   the height maps (the statistical layer carries their radiance). Boulder fields: the abundance factor (threshold x
   abundance^(1/b)) is an [E] load rule; at the Diviner maximum (abundance ~52) the lists still hold 2.4 M rocks (5.4 M
@@ -937,9 +961,8 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   below the pad sinkage); the 8 cm (instead of 4 cm) lattice was chosen in fix round 1 of Task 4 for the six-pad cost
   gate (sliding 34-36 us against 48-51 us) - one constant (`contact_lattice_level`) if the controller wants 4 cm back.
   The disc pattern (25 samples) can miss up to ~1.5 cm of sub-pattern roughness. Rocks: the contact top is the
-  template's column tops interpolated (<= 1e-4 m from `rock_top` for the tested rocks); the greatest protrusion is
-  found at a column node by a climb from the peak (a local maximum: a rock with two separate summits under the pad may
-  be read at the lower one) or along the rim arc.
+  template's exact column top (`rock_top`'s surface); the greatest protrusion is found by a node climb from the peak and
+  the support point along the pad normal (convex rocks: one summit) or along the rim arc (golden section, ~0.15 mm).
 - Pivoting pad: the pad stays parallel to the plane fitted to the ground and is lifted by the highest protrusion (the
   ruling); a real ball-joint pad on a rim rock would tilt onto the rock and the ground opposite, lifting its joint by
   roughly half as much. No joint range limit is modelled.

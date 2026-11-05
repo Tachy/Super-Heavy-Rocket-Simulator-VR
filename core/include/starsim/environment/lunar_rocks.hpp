@@ -16,9 +16,10 @@
 
 namespace starsim::environment {
 
-// One generated rock. Frame: local x = longest axis (a), y = b, z = c = the local vertical (the rock rests on its
-// flattest side, [E]), yawed at random about the vertical. The rock's surface is centre + local_to_fixed *
-// (a x, b y, c z) with (x, y, z) = r(dir) dir of its template (r <= 1: a, b, c bound the rock).
+// One generated rock. Frame: local z = the local vertical, x and y horizontal, yawed at random about the vertical. The
+// rock's surface is centre + local_to_fixed * (a x, b y, c z) with (x, y, z) = r(dir) dir of its template (r <= 1:
+// a, b, c bound the rock). The template carries the fragment's shape (axis ratios ~2 : sqrt2 : 1, facets) and its tilt,
+// so a = b = c: the rock's isotropic size.
 //
 // Size convention: diameter_m is the plan-view-area-equivalent diameter, the diameter of the disc with the area the
 // rock covers as seen from above (the part above the ground: a b x RockTemplates::exposed_area at the burial cut).
@@ -40,7 +41,7 @@ struct Rock {
 // Deterministic rock population on top of LunarSurfaceDetail: a pure function of the body-fixed direction (integer
 // hash, no state). Rocks of one diameter octave (0.01 m, doubling, to 10 m) live in the face cells of one level (centre
 // inside the cell: every rock belongs to exactly one cell, found from both sides of a face edge); count Poisson from
-// the hash, position uniform in the cell, D by the inverse cumulative SFD, shape ratios, burial, template and yaw from
+// the hash, position uniform in the cell, D by the inverse cumulative SFD, burial, template and yaw from
 // the hash. Local abundance multiplies the density: abundance_scale x (the map blended to 1 over a band at the map
 // edge), evaluated at the cell centre. Thread-safe (const).
 class LunarRocks {
@@ -86,14 +87,21 @@ public:
     // local ground, and a nullopt can hide rock above it (take max(ground, top) for heights; do not read nullopt as
     // "no rock" in a contact or hazard query).
     std::optional<std::pair<double, math::Vec3>> rock_top(const Rock& rock, const math::Vec3& unit) const;
+    // rock_top with the contact normal of a flat body (a pad) with normal reference_fixed pressing on the rock there:
+    // RockTemplates::normal_toward within contact_edge_tolerance_m (on a face its normal; on an edge or a vertex the
+    // pad's own normal if it lies in the normal cone, else the nearest edge / face normal).
+    std::optional<std::pair<double, math::Vec3>> rock_top(const Rock& rock, const math::Vec3& unit,
+                                                          const math::Vec3& reference_fixed) const;
+    // Faces within this distance of a contact point count as touching it ([E]: well below the pad's sinkage).
+    static constexpr double contact_edge_tolerance_m = 1e-3;
 
     // Area share of the configured rocks with diameter in [min, max] (abundance 1 x abundance_scale), clipped to the
     // law's validity range: the integral of pi D^2 / 4 over the law, which is the plan-view area of the generated
     // rocks (D is their area-equivalent diameter). For the shading.
     double cover_fraction(double min_diameter_m, double max_diameter_m) const;
 
-    // Largest long semi-axis a per diameter D of any rock (the thinnest b / a and the deepest burial of the least
-    // filled template): the reach of rocks_touching.
+    // Largest semi-axis a per diameter D of any rock (the deepest burial of the template with the least exposed
+    // area): the reach of rocks_touching.
     double max_semi_axis_per_diameter() const { return max_semi_axis_per_diameter_; }
 
     // Half width of the map -> uniform blend below the map's latitude limit: 5 deg = 150 km on the Moon, several
@@ -113,7 +121,6 @@ private:
                  std::vector<Rock>& out) const;
     double cell_factor(const FaceCell& cell) const;
     double burial_fraction(std::uint64_t id) const;
-    double b_to_a(std::uint64_t id) const;
 
     std::shared_ptr<const LunarSurfaceDetail> detail_;
     std::shared_ptr<const RockAbundanceMap> abundance_;

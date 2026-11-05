@@ -110,9 +110,6 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     const auto& rocks = top.table(doc.root, "rocks");
     const Reader k(doc, "rocks");
     cfg.rocks.sfd = read_sfd(doc, rocks, "rocks");
-    cfg.rocks.axis_b_to_a_mean = k.fraction(rocks, "axis_b_to_a_mean");
-    cfg.rocks.axis_c_to_a_mean = k.fraction(rocks, "axis_c_to_a_mean");
-    cfg.rocks.axis_ratio_sd = k.non_negative(rocks, "axis_ratio_sd");
     cfg.rocks.burial_fraction_mean = k.fraction(rocks, "burial_fraction_mean");
     cfg.rocks.burial_fraction_sd = k.non_negative(rocks, "burial_fraction_sd");
     cfg.rocks.albedo_to_regolith = k.positive(rocks, "albedo_to_regolith");
@@ -120,9 +117,6 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     cfg.rocks.abundance_scale = k.positive(rocks, "abundance_scale");
     cfg.rocks.abundance_reference_area_fraction = k.fraction(rocks, "abundance_reference_area_fraction");
     cfg.rocks.abundance_reference_min_diameter_m = k.positive(rocks, "abundance_reference_min_diameter_m");
-    if (cfg.rocks.axis_c_to_a_mean > cfg.rocks.axis_b_to_a_mean) {
-        k.fail("'rocks.axis_c_to_a_mean' darf nicht größer als axis_b_to_a_mean sein");
-    }
 
     const auto& hapke = top.table(doc.root, "hapke");
     const Reader h(doc, "hapke");

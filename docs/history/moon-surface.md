@@ -20,3 +20,10 @@ Superseded states of `docs/subsystems/moon-surface.md`.
   100-155 us per tick then (per-node relief 6 us), 48-51 us after the relief memos - replaced by 2^25 (8.1 cm, 34-36 us).
   Rocks were evaluated with `rock_top` (column scan, ~4.4 us per call; ~60 calls per tick with pivoting pads, ~250 us)
   - replaced by the interpolated footprint column tops. The point contact (r = 0, base ring) ignored rocks (review I1).
+- Rock templates, first version (Task 3, superseded by fix A of Task 11, 2026-11-05): 16 smooth star-shaped radial
+  functions r = exp(sum of 8 random plane waves, a_k = 0.30 / f_k, f_k 1.5-5 rad), scaled to max r = 1 (mean r ~0.66);
+  per rock b/a 0.71 +- 0.15 and c/a 0.50 +- 0.15 (config keys `axis_b_to_a_mean`, `axis_c_to_a_mean`, `axis_ratio_sd`)
+  stretched the template with the c axis always vertical (every rock lay on its flattest side). Against the Apollo
+  photos (Task 11 compare/ images) the rocks were rounded, flattened "bread loaves"; cover-weighted exposed eta 0.383,
+  `max_semi_axis_per_diameter` 1.77 D. The contact top was the template's column tops interpolated bilinearly on the
+  96 x 96 footprint grid (`column_top_interpolated`, ~1e-4 of the height from the scan-based `column_top`, ~4 us).

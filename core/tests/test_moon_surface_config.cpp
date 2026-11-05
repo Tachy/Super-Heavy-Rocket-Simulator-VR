@@ -67,12 +67,9 @@ TEST_CASE("The shipped Moon surface config loads with sources-sane values", "[mo
     CHECK(r.rms_height_at_baseline_m <= r.rms_height_measured_total_m);  // residual after craters and rocks
 
     const auto& k = cfg.rocks;
-    for (double v : {k.axis_b_to_a_mean, k.axis_c_to_a_mean, k.axis_ratio_sd, k.burial_fraction_mean,
-                     k.burial_fraction_sd, k.albedo_to_regolith, k.abundance_scale}) {
+    for (double v : {k.burial_fraction_mean, k.burial_fraction_sd, k.albedo_to_regolith, k.abundance_scale}) {
         CHECK(std::isfinite(v));
     }
-    CHECK(k.axis_c_to_a_mean <= k.axis_b_to_a_mean);
-    CHECK(k.axis_b_to_a_mean <= 1.0);
     CHECK((k.abundance_source == "uniform" || k.abundance_source == "diviner"));
     // The abundance reference fraction is the disc area of the configured rock law over
     // [abundance_reference_min_diameter_m, max]: integral of (pi/4) D^2 |dN/dD| dD for the power form.

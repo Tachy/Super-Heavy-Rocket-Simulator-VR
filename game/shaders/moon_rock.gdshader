@@ -2,7 +2,7 @@ shader_type spatial;
 // Drawn lunar rocks (moon procedural surface plan Task 11; MoonRockLayer): one MultiMesh per terrain node and template
 // LOD, instances = the core's rocks of the node (StarsimCore.moon_rocks_in_node). The mesh is the unit icosphere of the
 // LOD (vertex = direction); each vertex takes its template's radius r(dir) and normal from rock_template_data (row
-// lod x 16 + template, column VERTEX_ID), so all 16 templates share one mesh per LOD and the instance transform (the
+// lod x 32 + template, column VERTEX_ID), so all 32 templates share one mesh per LOD and the instance transform (the
 // core's basis x semi-axes, the centre burial_m below the base point, relative to the node centre) places the rock.
 //
 // Drawn by projected size, from one reference point (the camera; in VR the head centre: MODELVIEW_MATRIX is the
@@ -26,7 +26,7 @@ render_mode unshaded, cull_back;
 #include "res://shaders/moon_rock_light.gdshaderinc"
 
 // MoonRockLayer.TEMPLATES (core RockTemplates::count).
-const int ROCK_TEMPLATES = 16;
+const int ROCK_TEMPLATES = 32;
 
 global uniform vec3 moon_sun_position_local;
 global uniform vec3 moon_earth_position_local;
@@ -36,7 +36,7 @@ global uniform mat3 moon_world_to_local;
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 // RGBA float: (normal xyz, radius r) of template t's vertex k at LOD l in texel (k, l x ROCK_TEMPLATES + t).
 uniform sampler2D rock_template_data : filter_nearest, repeat_disable;
-uniform float rock_top_z[16];  // per template: the highest vertex z (unit template; LOD 0)
+uniform float rock_top_z[32];  // per template: the highest vertex z (unit template; LOD 0)
 // The baked rock textures (data/textures/moon_detail): relative albedo (value x 255 / 128, mean 1) and tangent-space
 // normals, one layer per variant (template % layers), tile rock_texture_tile_m.
 uniform sampler2DArray rock_albedo_maps : filter_linear_mipmap_anisotropic, repeat_enable;

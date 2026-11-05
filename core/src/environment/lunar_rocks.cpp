@@ -14,11 +14,9 @@ using math::Vec3;
 
 namespace {
 
-// Share of the rock height below the ground is limited to [0, 0.6] and the axis ratios to the NAC range ([E]): keeps
-// every rock a rock (visible above the ground, c <= b <= a, b/a >= 0.3 as measured on NAC boulders). The burial clamp
-// is symmetric about the configured mean 0.3, so the mean share stays the configured one.
+// Share of the rock height below the ground is limited to [0, 0.6] ([E]): keeps every rock visible above the ground.
+// The burial clamp is symmetric about the configured mean 0.3, so the mean share stays the configured one.
 constexpr double max_burial_fraction = 0.6;
-constexpr double min_axis_ratio = 0.3, max_axis_ratio = 1.0, min_c_to_a = 0.2;
 // Normal-ish draws: sum of six uniforms (variance 1/2) scaled to unit variance, truncated at +-4.2 sigma [E].
 constexpr int normal_draws = 6;
 
@@ -88,7 +86,7 @@ LunarRocks::LunarRocks(std::shared_ptr<const LunarSurfaceDetail> detail,
     for (int t = 0; t < RockTemplates::count; ++t) {
         least_area = std::min(least_area, templates.exposed_area(t, burial_cut(templates, t, max_burial_fraction)));
     }
-    max_semi_axis_per_diameter_ = 0.5 * std::sqrt(constants::pi / (min_axis_ratio * least_area));
+    max_semi_axis_per_diameter_ = 0.5 * std::sqrt(constants::pi / least_area);
 }
 
 std::vector<float> LunarRocks::abundance_grid(int width, int height) const {
@@ -127,11 +125,6 @@ double LunarRocks::burial_fraction(std::uint64_t id) const {
                       max_burial_fraction);
 }
 
-double LunarRocks::b_to_a(std::uint64_t id) const {
-    const auto& cfg = detail_->config().rocks;
-    return std::clamp(cfg.axis_b_to_a_mean + cfg.axis_ratio_sd * normal_draw(id, 3), min_axis_ratio, max_axis_ratio);
-}
-
 void LunarRocks::collect(int octave, const FaceCell& cell, double min_diameter_m, const Filter* filter,
                          std::vector<Rock>& out) const {
     const Octave& o = octaves_[static_cast<size_t>(octave)];
@@ -149,12 +142,12 @@ void LunarRocks::collect(int octave, const FaceCell& cell, double min_diameter_m
         const double d = sampling::inverse_cumulative(cfg.sfd, n_lo - unit_of(id, 2) * (n_lo - n_hi));
         if (d < min_diameter_m) continue;
         const Vec3 base = face_cell_point(cell, unit_of(id, 0), unit_of(id, 1));
-        // Shape: template, b / a and burial share first; a then makes the plan-view area above the ground pi D^2 / 4.
+        // Shape: template (its fragment axis ratios and tilt) and burial share first; the size a then makes the
+        // plan-view area above the ground pi D^2 / 4.
         const int template_id =
             std::min(static_cast<int>(unit_of(id, 6) * RockTemplates::count), RockTemplates::count - 1);
-        const double q = b_to_a(id);
         const double cut = burial_cut(templates, template_id, burial_fraction(id));
-        const double a = 0.5 * d * std::sqrt(constants::pi / (q * templates.exposed_area(template_id, cut)));
+        const double a = 0.5 * d * std::sqrt(constants::pi / templates.exposed_area(template_id, cut));
         if (filter) {
             const double limit = filter->radius_m + (filter->add_extent ? a : 0.0);
             if (radius * norm(base - filter->unit) > limit) continue;
@@ -163,13 +156,11 @@ void LunarRocks::collect(int octave, const FaceCell& cell, double min_diameter_m
         r.id = id;
         r.base_unit = base;
         r.diameter_m = d;
-        const double c_to_a =
-            std::clamp(cfg.axis_c_to_a_mean + cfg.axis_ratio_sd * normal_draw(id, 4), min_c_to_a, q);
-        r.axes_m = {a, a * q, a * c_to_a};
+        r.axes_m = {a, a, a};  // isotropic: the template carries the fragment's axis ratios and tilt
         r.burial_m = cut * r.axes_m.z;
         r.template_id = template_id;
         r.albedo_factor = cfg.albedo_to_regolith;
-        // Frame: yaw about the vertical (the rock rests on its flattest side).
+        // Frame: yaw about the vertical (the template's own rotation tilts the fragment).
         const Vec3 t1 = math::normalized(cross(std::abs(base.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, base));
         const Vec3 t2 = cross(base, t1);
         const double yaw = constants::two_pi * unit_of(id, 7);
@@ -263,6 +254,24 @@ std::optional<std::pair<double, Vec3>> LunarRocks::rock_top(const Rock& rock, co
     const Vec3 n_local = math::normalized({n_unit.x / a, n_unit.y / b, n_unit.z / c});
     const double height = rock.base_height_m + above_base + (x * x + y * y) / (2.0 * sphere_radius);
     return std::pair{height, rock.local_to_fixed * n_local};
+}
+
+std::optional<std::pair<double, Vec3>> LunarRocks::rock_top(const Rock& rock, const Vec3& unit,
+                                                           const Vec3& reference_fixed) const {
+    auto top = rock_top(rock, unit);
+    if (!top) return top;
+    // a = b = c (isotropic rocks): the template frame maps to the fixed frame by local_to_fixed alone.
+    const double sphere_radius = detail_->sphere_radius_m();
+    const Vec3 offset = (unit - rock.base_unit) * sphere_radius;
+    const double a = rock.axes_m.x;
+    const double ux = dot(offset, math::column(rock.local_to_fixed, 0)) / a;
+    const double uy = dot(offset, math::column(rock.local_to_fixed, 1)) / a;
+    const double uz = (top->first - rock.base_height_m - (ux * ux + uy * uy) * a * a / (2.0 * sphere_radius) + rock.burial_m) / a;
+    const Vec3 n_unit = RockTemplates::instance().normal_toward(
+        rock.template_id, Vec3{ux, uy, uz}, math::transpose(rock.local_to_fixed) * reference_fixed,
+        contact_edge_tolerance_m / a);
+    top->second = rock.local_to_fixed * n_unit;
+    return top;
 }
 
 double LunarRocks::cover_fraction(double min_diameter_m, double max_diameter_m) const {

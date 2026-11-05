@@ -181,11 +181,18 @@ struct Highest {
 Highest brute_rock_max(const environment::LunarRocks& lr, const Rock& rock, const Tangent& disc, double radius,
                        const Plane& plane = {}) {
     Highest best;
+    double best_x = 0.0, best_y = 0.0;
     const auto try_point = [&](double x, double y) {
+        if (x * x + y * y > radius * radius * (1.0 + 1e-12)) return false;
         if (const auto top = lr.rock_top(rock, at(disc, x, y))) {
             const double h = top->first - (x * x + y * y) / (2.0 * R) - plane.at(x, y);
-            if (h > best.height_m) best = {h, top->second, at(disc, x, y)};
+            if (h > best.height_m) {
+                best = {h, top->second, at(disc, x, y)};
+                best_x = x, best_y = y;
+                return true;
+            }
         }
+        return false;
     };
     constexpr int rings = 100, per_ring = 240, rim = 8000;
     for (int i = 1; i <= rings; ++i) {
@@ -200,6 +207,22 @@ Highest brute_rock_max(const environment::LunarRocks& lr, const Rock& rock, cons
         try_point(radius * std::cos(phi), radius * std::sin(phi));
     }
     try_point(0.0, 0.0);
+    // The rocks are polyhedra: the protrusion peaks at a vertex, an edge or on the rim, between the samples. Refine by a
+    // pattern search (8 directions, from the ring spacing down to 1e-6 m) and take the contact normal there for a pad
+    // with the plane's normal (LunarRocks::rock_top with a reference normal: on an edge or vertex the pad's own normal
+    // when it lies in the normal cone).
+    if (std::isfinite(best.height_m)) {
+        for (double step = radius / rings; step > 1e-6;) {
+            bool moved = false;
+            for (int k = 0; k < 8 && !moved; ++k) {
+                const double phi = constants::two_pi * k / 8.0;
+                moved = try_point(best_x + step * std::cos(phi), best_y + step * std::sin(phi));
+            }
+            if (!moved) step *= 0.5;
+        }
+        const Vec3 pad_normal = math::normalized(disc.c - disc.e1 * plane.gx - disc.e2 * plane.gy);
+        if (const auto top = lr.rock_top(rock, best.unit, pad_normal)) best.normal = top->second;
+    }
     return best;
 }
 

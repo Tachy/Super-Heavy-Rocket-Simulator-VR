@@ -38,9 +38,8 @@ rms_height_at_baseline_m = 0.0037  # [D] residual drawn by the roughness generat
 baseline_m = 0.125                 # [S] Guo et al. 2021 window size
 
 [rocks]
-axis_b_to_a_mean = 0.71            # [S] Fujiwara et al. 1978 impact fragments a:b:c = 2:sqrt2:1; LRO NAC boulders mostly ~0.7 (range 0.3-0.9; Kumar et al., Krishna & Kumar 2016)
-axis_c_to_a_mean = 0.50            # [S] Fujiwara et al. 1978 (c is not measurable from orbit)
-axis_ratio_sd = 0.15               # [E] spread of the NAC b/a range 0.3-0.9 around 0.7
+# Rock shapes (impact-fragment axis law 2:sqrt2:1, facets, tilt) are the core's rock templates
+# (core/src/environment/rock_templates.cpp, sources there); a rock scales its template isotropically.
 burial_fraction_mean = 0.3         # [E] share of the rock height below the regolith surface; no lunar measurement found
 burial_fraction_sd = 0.15          # [E]
 albedo_to_regolith = 1.35          # [E] single-scattering albedo ratio 0.65 / 0.48 used by Marshal, Ruesch, Woehler et al. (EGU22-12217) for NAC boulder fields

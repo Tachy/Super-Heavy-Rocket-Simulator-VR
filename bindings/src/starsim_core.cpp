@@ -685,9 +685,6 @@ godot::Dictionary StarsimCore::moon_surface_statistics() const {
 
     godot::Dictionary rocks;
     rocks["sfd"] = sfd_dictionary(cfg.rocks.sfd);
-    rocks["axis_b_to_a_mean"] = cfg.rocks.axis_b_to_a_mean;
-    rocks["axis_c_to_a_mean"] = cfg.rocks.axis_c_to_a_mean;
-    rocks["axis_ratio_sd"] = cfg.rocks.axis_ratio_sd;
     rocks["burial_fraction_mean"] = cfg.rocks.burial_fraction_mean;
     rocks["burial_fraction_sd"] = cfg.rocks.burial_fraction_sd;
     rocks["albedo_to_regolith"] = cfg.rocks.albedo_to_regolith;
