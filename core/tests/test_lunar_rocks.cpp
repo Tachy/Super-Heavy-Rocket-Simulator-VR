@@ -130,18 +130,18 @@ double sphere_max(const F& f, std::uint64_t salt) {
         const Vec3 d{rho * std::cos(phi), rho * std::sin(phi), z};
         samples.emplace_back(f(d), d);
     }
-    std::partial_sort(samples.begin(), samples.begin() + 16, samples.end(),
+    std::partial_sort(samples.begin(), samples.begin() + 64, samples.end(),
                       [](const auto& a, const auto& b) { return a.first > b.first; });
     double best = -std::numeric_limits<double>::infinity();
-    for (int c = 0; c < 16; ++c) {
+    for (int c = 0; c < 64; ++c) {
         Vec3 d = samples[static_cast<size_t>(c)].second;
         double value = samples[static_cast<size_t>(c)].first, step = 0.02;
         while (step > 1e-11) {
             const Vec3 t1 = math::normalized(cross(std::abs(d.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, d));
             const Vec3 t2 = cross(d, t1);
             bool moved = false;
-            for (int k = 0; k < 8 && !moved; ++k) {
-                const double angle = constants::two_pi * k / 8.0;
+            for (int k = 0; k < 32 && !moved; ++k) {
+                const double angle = constants::two_pi * k / 32.0;
                 const Vec3 trial = math::normalized(d + (t1 * std::cos(angle) + t2 * std::sin(angle)) * step);
                 if (const double v = f(trial); v > value) value = v, d = trial, moved = true;
             }
@@ -493,8 +493,20 @@ TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environ
     CHECK(std::abs(mean_c - 0.50) <= 3.0 * sigma);
     CHECK(eroded >= 1);                           // both fresh and eroded fragments
     CHECK(eroded < RockTemplates::count);
-    CHECK(tilted >= RockTemplates::count / 5);   // the c axis is not always vertical
-    CHECK(tilted < RockTemplates::count);
+    // Resting fragments (ruling R4): c axis near the vertical, rms tilt 25 deg, none beyond the 60 deg cap; the scatter
+    // still tilts some by more than 30 deg (Rayleigh: ~24 % expected).
+    double tilt_square = 0.0, max_tilt = 0.0;
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        tilt_square += t.c_axis_tilt_rad(id) * t.c_axis_tilt_rad(id);
+        max_tilt = std::max(max_tilt, t.c_axis_tilt_rad(id));
+    }
+    const double rms_tilt = std::sqrt(tilt_square / RockTemplates::count);
+    std::printf("templates: rms c-axis tilt %.1f deg, max %.1f deg\n", rms_tilt / deg, max_tilt / deg);
+    CHECK(tilted >= 1);
+    CHECK(tilted <= RockTemplates::count / 2);
+    CHECK(rms_tilt > 15.0 * deg);
+    CHECK(rms_tilt < 35.0 * deg);
+    CHECK(max_tilt <= 60.0 * deg + 1e-9);
 
     double worst_extent_gap = 0.0;
     for (int id = 0; id < RockTemplates::count; ++id) {
@@ -575,6 +587,55 @@ TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environ
         }
     }
     std::printf("vertical extent: the independent search stays within %.2e of the exact support\n", worst_extent_gap);
+}
+
+TEST_CASE("Pad contact normal on hand-built vertices and faces", "[moon_surface][environment][contact]") {
+    // Review m1: expectations independent of the code under test. A vertex is solved here from three of the template's
+    // planes (Cramer's rule) and checked inside every other plane and the ellipsoid; a pad whose normal lies inside the
+    // three faces' cone (their normalised sum) rests on that vertex with its own normal. A face point is the foot of the
+    // origin on a plane, strictly inside the rest; a pad tilted 0.3 rad from that face gets the face normal.
+    const RockTemplates& t = RockTemplates::instance();
+    const auto inside = [&](int id, const Vec3& p, int a, int b, int c) {
+        for (int k = 0; k < t.plane_count(id); ++k) {
+            if (k == a || k == b || k == c) continue;
+            if (dot(t.plane_normal(id, k), p) > t.plane_distance(id, k) - 1e-6) return false;
+        }
+        return dot(p, t.quadric(id) * p) < 1.0 - 1e-6;
+    };
+    const auto det = [](const Vec3& a, const Vec3& b, const Vec3& c) { return dot(a, cross(b, c)); };
+    int vertices = 0, faces = 0;
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        if (t.eroded(id)) continue;
+        const int n = t.plane_count(id);
+        for (int a = 0; a < n && vertices < 4 * (id + 1); ++a) {
+            const Vec3 na = t.plane_normal(id, a);
+            const Vec3 face_point = na * t.plane_distance(id, a);
+            if (inside(id, face_point, a, -1, -1)) {
+                const Vec3 side = math::normalized(cross(na, std::abs(na.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}));
+                const Vec3 pad = math::normalized(na * std::cos(0.3) + side * std::sin(0.3));
+                CHECK(norm(t.normal_toward(id, face_point, pad, 1e-9) - na) < 1e-12);
+                ++faces;
+            }
+            for (int b = a + 1; b < n; ++b) {
+                for (int c = b + 1; c < n; ++c) {
+                    const Vec3 nb = t.plane_normal(id, b), nc = t.plane_normal(id, c);
+                    // Rows na, nb, nc; right-hand side the distances.
+                    const double d = det(na, nb, nc);
+                    if (std::abs(d) < 1e-3) continue;
+                    const Vec3 h{t.plane_distance(id, a), t.plane_distance(id, b), t.plane_distance(id, c)};
+                    const Vec3 cx{na.x, nb.x, nc.x}, cy{na.y, nb.y, nc.y}, cz{na.z, nb.z, nc.z};
+                    const Vec3 p{det(h, cy, cz) / d, det(cx, h, cz) / d, det(cx, cy, h) / d};
+                    if (!inside(id, p, a, b, c)) continue;
+                    const Vec3 pad = math::normalized(na + nb + nc);
+                    CHECK(norm(t.normal_toward(id, p, pad, 1e-9) - pad) < 1e-9);
+                    ++vertices;
+                }
+            }
+        }
+    }
+    std::printf("hand-built contact normals: %d vertices, %d faces\n", vertices, faces);
+    CHECK(vertices >= 20);
+    CHECK(faces >= 10);
 }
 
 TEST_CASE("Rocks are deterministic and pole-regular", "[moon_surface][environment]") {

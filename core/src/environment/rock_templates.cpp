@@ -35,12 +35,14 @@ constexpr double fresh_chip_min = 0.15, fresh_chip_span = 0.25;         // [E] c
 constexpr int eroded_planes_min = 5, eroded_planes_span = 4;            // [E] 5-8 shallow faces
 constexpr double eroded_chip_min = 0.03, eroded_chip_span = 0.09;       // [E] 3-12 %: mostly the rounded ellipsoid
 constexpr double plane_jitter = 0.4;                                    // [E] of the Fibonacci spacing: irregular faces
-// Orientation: a fragment that came to rest lies near its flattest face; ejecta embedded on landing and rocks rotated
-// by later impacts take any orientation. No measured tilt distribution found ([E]; the review's lead, Demidov &
-// Basilevsky's Lunokhod/Apollo H/D measurements, could not be retrieved): half resting (c axis within 25 deg of the
-// vertical, uniform in solid angle), half uniformly random.
-constexpr double resting_share = 0.5;                                   // [E]
-constexpr double resting_max_tilt_rad = 25.0 * constants::deg_to_rad;   // [E]
+// Orientation: a fragment rests gravitationally stable on (near) its broadest face, so its shortest (c) axis stands near
+// the vertical; local slopes, clods under the rock and partial burial scatter it (controller ruling R4, 2026-11-05: no
+// upright balanced slabs, which the Apollo panoramas do not show). No measured tilt distribution found ([E]; the
+// review's lead, Demidov & Basilevsky's Lunokhod/Apollo H/D measurements, could not be retrieved by two web searches):
+// the tilt is a 2-D Gaussian on the tangent plane (Rayleigh-distributed angle) with an rms tilt of 25 deg, capped at
+// 60 deg (a slab tipped further would fall onto a face).
+constexpr double rms_tilt_rad = 25.0 * constants::deg_to_rad;  // [E] ruling R4
+constexpr double max_tilt_rad = 60.0 * constants::deg_to_rad;  // [E] stability cap
 
 constexpr int normal_draws = 6;           // normal-like draws: sum of six uniforms (no library distributions)
 constexpr int sample_points = 20000;      // Fibonacci directions that find the maximum radius
@@ -322,14 +324,11 @@ RockTemplates::RockTemplates() {
             ball.h.push_back(h);
         }
         // Orientation: fragment frame -> template frame.
-        Mat3 turn;
-        if (unit(seed, 9, 0) < resting_share) {
-            const double cos_tilt = 1.0 - unit(seed, 9, 1) * (1.0 - std::cos(resting_max_tilt_rad));
-            turn = rotation_z(constants::two_pi * unit(seed, 9, 2)) * rotation_y(std::acos(cos_tilt)) *
-                   rotation_z(constants::two_pi * unit(seed, 9, 3));
-        } else {
-            turn = uniform_rotation(unit(seed, 10, 0), unit(seed, 10, 1), unit(seed, 10, 2));
-        }
+        const double tilt_x = rms_tilt_rad / std::sqrt(2.0) * normal_draw(seed, 9);
+        const double tilt_y = rms_tilt_rad / std::sqrt(2.0) * normal_draw(seed, 10);
+        const double tilt = std::min(std::hypot(tilt_x, tilt_y), max_tilt_rad);
+        const Mat3 turn = rotation_z(std::atan2(tilt_y, tilt_x)) * rotation_y(tilt) *
+                          rotation_z(constants::two_pi * unit(seed, 11, 0));
         shape.tilt_rad = std::acos(std::min(1.0, std::abs(turn.m[2][2])));
         for (int k = 0; k < planes; ++k) {
             shape.normal[static_cast<size_t>(k)] = turn * fragment_normal[static_cast<size_t>(k)];

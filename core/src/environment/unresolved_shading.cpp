@@ -1,15 +1,20 @@
 #include "starsim/environment/unresolved_shading.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <mutex>
+#include <utility>
 #include <stdexcept>
 
 #include "starsim/environment/cube_face_cell.hpp"
 #include "starsim/environment/hapke.hpp"
 #include "starsim/environment/lunar_rocks.hpp"
 #include "starsim/environment/lunar_surface_detail.hpp"
+#include "starsim/environment/rock_templates.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::environment {
@@ -280,11 +285,12 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         const double mu0 = std::cos(30.0 * constants::deg_to_rad), g = 30.0 * constants::deg_to_rad;
         m.rock_reflectance_ratio = hapke_reflectance(rock, mu0, 1.0, g, cfg.hapke.theta_bar_rad) /
                                    hapke_reflectance(cfg.hapke, mu0, 1.0, g, cfg.hapke.theta_bar_rad);
-        m.rock_lit_gain.resize(UnresolvedShadingModel::lit_gain_samples);
-        for (int k = 0; k < UnresolvedShadingModel::lit_gain_samples; ++k) {
-            m.rock_lit_gain[static_cast<size_t>(k)] =
-                rock_lit_gain(m.rock_exposed_height_per_diameter, k * UnresolvedShadingModel::lit_gain_step_rad);
-        }
+        // G(e) and sigma(e) of the generated angular rocks (Task 11 fix C, R1; the half-spheroid laws rock_lit_gain /
+        // rock_shadow_per_cover stay as the reference shapes of the tests).
+        const RockLightTables tables =
+            template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
+        m.rock_lit_gain = tables.gain;
+        m.rock_shadow = tables.shadow;
         // The rocks' share of the globe's mean slope (header comment): out of the regolith's budget.
         m.rock_area_share = 1.0 - std::exp(-rock_cover(m, m.rock_min_diameter_m, m.rock_max_diameter_m));
         m.rock_mean_tan = m.rock_area_share * pi * m.rock_exposed_height_per_diameter;
@@ -423,6 +429,132 @@ double rock_lit_gain_table(const UnresolvedShadingModel& m, double elevation_rad
     return m.rock_lit_gain[static_cast<size_t>(k)] * (1.0 - f) + m.rock_lit_gain[static_cast<size_t>(k) + 1] * f;
 }
 
+double rock_shadow_table(const UnresolvedShadingModel& m, double elevation_rad) {
+    if (m.rock_shadow.empty()) return 0.0;
+    const double x = std::clamp(elevation_rad / UnresolvedShadingModel::lit_gain_step_rad, 0.0,
+                                static_cast<double>(UnresolvedShadingModel::lit_gain_samples - 1));
+    const int k = std::min(static_cast<int>(x), UnresolvedShadingModel::lit_gain_samples - 2);
+    const double f = x - k;
+    return m.rock_shadow[static_cast<size_t>(k)] * (1.0 - f) + m.rock_shadow[static_cast<size_t>(k) + 1] * f;
+}
+
+RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell) {
+    constexpr int n = UnresolvedShadingModel::lit_gain_samples;
+    RockLightTables out;
+    out.gain.assign(n, 0.0);
+    out.shadow.assign(n, 0.0);
+    if (columns.empty()) return out;
+    std::array<double, n> se{}, ce{}, cot{};
+    for (int k = 0; k < n; ++k) {
+        const double e = std::clamp(k * UnresolvedShadingModel::lit_gain_step_rad, lit_gain_floor_rad, 0.5 * pi);
+        se[static_cast<size_t>(k)] = std::sin(e);
+        ce[static_cast<size_t>(k)] = std::cos(e);
+        cot[static_cast<size_t>(k)] = ce[static_cast<size_t>(k)] / se[static_cast<size_t>(k)];
+    }
+    double reach = 0.0;
+    for (const RockColumn& c : columns) reach = std::max(reach, std::hypot(c.x, c.y));
+    const int bins = 2 * static_cast<int>(std::ceil(reach / cell)) + 3;
+    const double plan_area = static_cast<double>(columns.size()) * cell * cell;
+    std::vector<double> footprint_start(static_cast<size_t>(bins));
+    std::vector<double> shadow_start(static_cast<size_t>(bins) * n);
+    for (int a = 0; a < rock_light_azimuths; ++a) {
+        const double psi = 2.0 * pi * (a + 0.5) / rock_light_azimuths;
+        const double cp = std::cos(psi), sp = std::sin(psi);
+        // Mean half-width along s of a column square cut by a line along s: cell / 2 / max(|cos|, |sin|) on average
+        // over the cut position is the square's area over its width across s; [D] the area-preserving choice.
+        const double half_extent = 0.5 * cell * cell / (cell * (std::abs(cp) + std::abs(sp)));
+        std::fill(footprint_start.begin(), footprint_start.end(), std::numeric_limits<double>::infinity());
+        std::fill(shadow_start.begin(), shadow_start.end(), std::numeric_limits<double>::infinity());
+        for (const RockColumn& c : columns) {
+            // s along the light's azimuth (the light stands toward +s), w across; the shadow of the top falls at
+            // s - height cot e on the ground.
+            const double s = c.x * cp + c.y * sp, w = -c.x * sp + c.y * cp;
+            const auto bin = static_cast<size_t>(std::floor(w / cell + 0.5) + (bins - 1) / 2);
+            // The footprint is the union of the column squares (its area is the plan area below); the shadow comes
+            // from the top surface's points.
+            footprint_start[bin] = std::min(footprint_start[bin], s - half_extent);
+            const double nh = c.normal.x * cp + c.normal.y * sp, nz = c.normal.z;
+            for (int k = 0; k < n; ++k) {
+                const auto ku = static_cast<size_t>(k);
+                double& start = shadow_start[bin * n + ku];
+                start = std::min(start, s - c.height * cot[ku]);
+                const double mu0 = nh * ce[ku] + nz * se[ku];
+                if (mu0 > 0.0) out.gain[ku] += mu0 / (mu0 + nz);
+            }
+        }
+        for (int b = 0; b < bins; ++b) {
+            const double f1 = footprint_start[static_cast<size_t>(b)];
+            if (!std::isfinite(f1)) continue;
+            for (int k = 0; k < n; ++k) {
+                out.shadow[static_cast<size_t>(k)] +=
+                    std::max(0.0, f1 - shadow_start[static_cast<size_t>(b) * n + static_cast<size_t>(k)]) * cell;
+            }
+        }
+    }
+    for (int k = 0; k < n; ++k) {
+        const auto ku = static_cast<size_t>(k);
+        out.gain[ku] /= static_cast<double>(columns.size()) * rock_light_azimuths * (se[ku] / (se[ku] + 1.0));
+        out.shadow[ku] /= plan_area * rock_light_azimuths;
+    }
+    return out;
+}
+
+RockLightTables template_rock_light_tables(double burial_mean, double burial_sd) {
+    static std::mutex mutex;
+    static std::map<std::pair<double, double>, RockLightTables> cache;
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (const auto it = cache.find({burial_mean, burial_sd}); it != cache.end()) return it->second;
+    constexpr int n = UnresolvedShadingModel::lit_gain_samples;
+    constexpr int grid = 64;  // [D] columns per side: half-spheroid G within 0.7 %, sigma 1.1 % of (1 + sigma) (test)
+    constexpr int burial_nodes = 9;  // [D] N in [-4, 4] step 1, Gaussian weights (the clamp is in the nodes)
+    const RockTemplates& templates = RockTemplates::instance();
+    const double cell = 2.0 / grid;
+    // Every template's top columns once (the cut only selects them).
+    struct Top {
+        double x, y, z;
+        math::Vec3 normal;
+    };
+    std::vector<std::vector<Top>> tops(RockTemplates::count);
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        for (int i = 0; i < grid; ++i) {
+            for (int j = 0; j < grid; ++j) {
+                const double x = -1.0 + (i + 0.5) * cell, y = -1.0 + (j + 0.5) * cell;
+                if (const auto z = templates.column_top(id, x, y)) {
+                    tops[static_cast<size_t>(id)].push_back({x, y, *z, templates.normal(id, math::Vec3{x, y, *z})});
+                }
+            }
+        }
+    }
+    RockLightTables out;
+    out.gain.assign(n, 0.0);
+    out.shadow.assign(n, 0.0);
+    double weights = 0.0;
+    for (int q = 0; q < burial_nodes; ++q) {
+        const double z = q - 0.5 * (burial_nodes - 1);
+        const double weight = std::exp(-0.5 * z * z);
+        const double f = std::clamp(burial_mean + burial_sd * z, 0.0, LunarRocks::max_burial_fraction);
+        for (int id = 0; id < RockTemplates::count; ++id) {
+            const double cut = templates.bottom_z(id) + f * (templates.top_z(id) - templates.bottom_z(id));
+            std::vector<RockColumn> columns;
+            for (const Top& t : tops[static_cast<size_t>(id)]) {
+                if (t.z > cut) columns.push_back({t.x, t.y, t.z - cut, t.normal});
+            }
+            const RockLightTables one = rock_light_tables(columns, cell);
+            for (int k = 0; k < n; ++k) {
+                out.gain[static_cast<size_t>(k)] += weight * one.gain[static_cast<size_t>(k)];
+                out.shadow[static_cast<size_t>(k)] += weight * one.shadow[static_cast<size_t>(k)];
+            }
+            weights += weight;
+        }
+    }
+    for (int k = 0; k < n; ++k) {
+        out.gain[static_cast<size_t>(k)] /= weights;
+        out.shadow[static_cast<size_t>(k)] /= weights;
+    }
+    cache.emplace(std::make_pair(burial_mean, burial_sd), out);
+    return out;
+}
+
 double rock_statistical_cover(const UnresolvedShadingModel& m, double geometry_min_diameter_m) {
     const double d = geometry_min_diameter_m;
     double cover = rock_cover(m, m.rock_min_diameter_m, d);
@@ -463,7 +595,7 @@ UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m,
         const double se = std::sin(elevation_rad);
         if (se <= 0.0) return 0.0;
         const double lit = smith_lit_fraction(std::tan(elevation_rad), unshadowed);
-        const double sigma = rock_shadow_per_cover(m.rock_exposed_height_per_diameter, se);
+        const double sigma = rock_shadow_table(m, elevation_rad);
         return lit * (std::exp(-c * (1.0 + sigma) - c_drawn * sigma) +
                       rock_share * rho * rock_lit_gain_table(m, elevation_rad)) / norm;
     };

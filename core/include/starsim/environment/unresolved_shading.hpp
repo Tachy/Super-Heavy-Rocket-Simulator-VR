@@ -20,7 +20,8 @@
 // Statistical shadows (the Sun and the earthshine, each at its own elevation; Task 11 fix round I1): the drawn mesh
 // relief finer than the horizon map's grid casts no shadow in the renderer (until the near-field shadow map), so its
 // lit share is Smith's shadowing function G1 of a Gaussian surface with that slope variance, drawn(L) - drawn(H) for
-// the horizon grid spacing H; the unresolved rocks cast shadows behind them (Boolean model of half-spheroids).
+// the horizon grid spacing H; the unresolved rocks cast shadows behind them (Boolean model; the shadow per cover and the
+// lit gain measured on the generated angular rocks, template_rock_light_tables).
 //
 // Everything is a pure function of the configuration and the generator's octave definition; thread-safe.
 
@@ -28,6 +29,7 @@
 
 #include "starsim/config/moon_surface_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/vec3.hpp"
 
 namespace starsim::environment {
 
@@ -63,7 +65,10 @@ struct UnresolvedShadingModel {
     double rock_max_diameter_m = 0.0;
     double rock_exposed_height_per_diameter = 0.0;  // eta: mean height of the part above the ground / D
     double rock_reflectance_ratio = 1.0;            // Hapke I/F(albedo_to_regolith x w) / I/F(w), standard geometry
-    std::vector<double> rock_lit_gain;              // rock_lit_gain() at elevations k x lit_gain_step_rad, k = 0..N-1
+    // G(e) and sigma(e) of the generated rocks (template_rock_light_tables: the angular templates, Task 11 fix C R1) at
+    // elevations k x lit_gain_step_rad, k = 0..N-1.
+    std::vector<double> rock_lit_gain;
+    std::vector<double> rock_shadow;
     static constexpr int lit_gain_samples = 46;
     static constexpr double lit_gain_step_rad = 2.0 * constants::deg_to_rad;  // [D] 2 deg: 0 .. 90 deg, linear between
 };
@@ -116,6 +121,31 @@ double rock_lit_gain(double eta, double elevation_rad);
 inline constexpr double lit_gain_floor_rad = 1.0 * constants::deg_to_rad;  // [E] the gain grows as 1 / sin e
 // The model's tabulated gain (linear between the samples), as the shader reads it.
 double rock_lit_gain_table(const UnresolvedShadingModel& m, double elevation_rad);
+// The model's tabulated cast shadow per cover sigma(e) (linear between the samples), as the shader reads it.
+double rock_shadow_table(const UnresolvedShadingModel& m, double elevation_rad);
+
+// One column of a rock's exposed top on a plan grid: position (rock frame, plan), height of the top above the ground
+// cut and the unit surface normal there.
+struct RockColumn {
+    double x = 0.0, y = 0.0, height = 0.0;
+    math::Vec3 normal{0.0, 0.0, 1.0};
+};
+// Lit gain G(e) and cast shadow per cover sigma(e) of one rock given by its exposed top columns (plan grid of spacing
+// cell), averaged over rock_light_azimuths light azimuths, at the model's table elevations k x lit_gain_step_rad
+// (clamped to >= lit_gain_floor_rad). G is rock_lit_gain's quantity (Lommel-Seeliger seen from the zenith, per plan
+// area, over the flat ground's); sigma the ground in the cast shadow outside the rock's plan view per plan-view area:
+// per grid line along the light's azimuth the convex rock's shadow interval beyond its footprint (exact for a convex
+// rock up to the grid).
+struct RockLightTables {
+    std::vector<double> gain;
+    std::vector<double> shadow;
+};
+inline constexpr int rock_light_azimuths = 8;  // [D] the rocks' yaw is uniform; 8 azimuths: < 1 % against 32
+RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell);
+// The same averaged over the generator's rocks: the 32 angular templates (RockTemplates) at the burial law
+// (clamp(mean + sd N, 0, LunarRocks::max_burial_fraction), Gauss quadrature in N), each rock's plan area equal (the
+// generator scales each template to the area-equivalent D). Cached per (mean, sd); thread-safe.
+RockLightTables template_rock_light_tables(double burial_mean, double burial_sd);
 
 // Statistical rock cover (abundance 1) at the geometry threshold d (Task 11's growth band): rocks below d count fully,
 // rocks in [d, 2 d] with weight 1 - log2(D / d) (the drawn rock rises out of the ground over the band, exposed height

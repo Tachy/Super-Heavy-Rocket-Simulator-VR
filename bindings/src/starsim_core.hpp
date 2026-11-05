@@ -150,7 +150,7 @@ public:
     // drawn_table (PackedFloat64Array: the mesh-drawn mean square slope at spacing drawn_table_min_spacing_m x
     // 2^(k / drawn_table_per_octave)), drawn_table_min_spacing_m, drawn_table_per_octave, rock_cover_coefficient,
     // rock_cover_exponent, rock_min_diameter_m, rock_max_diameter_m, rock_exposed_height_per_diameter,
-    // rock_reflectance_ratio, rock_lit_gain (PackedFloat64Array), lit_gain_step_rad, lit_gain_floor_rad,
+    // rock_reflectance_ratio, rock_lit_gain, rock_shadow (PackedFloat64Array), lit_gain_step_rad, lit_gain_floor_rad,
     // globe_slope_variance, rock_area_share, rock_mean_tan, crater_fraction (PackedFloat64Array: crater_drawn_fraction
     // at D / L = 2^(k / 2 - crater_fraction_lowest_octaves): the texture craters' weights),
     // crater_fraction_lowest_octaves, crater_slope_exponent (q = 2 - b: crater slope variance per ln D ~ D^q)}. present

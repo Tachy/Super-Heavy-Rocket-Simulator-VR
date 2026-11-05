@@ -94,6 +94,9 @@ public:
                                                           const math::Vec3& reference_fixed) const;
     // Faces within this distance of a contact point count as touching it ([E]: well below the pad's sinkage).
     static constexpr double contact_edge_tolerance_m = 1e-3;
+    // Share of the rock height below the ground is limited to [0, 0.6] ([E]): keeps every rock visible above the
+    // ground. The burial clamp is symmetric about the configured mean 0.3, so the mean share stays the configured one.
+    static constexpr double max_burial_fraction = 0.6;
 
     // Area share of the configured rocks with diameter in [min, max] (abundance 1 x abundance_scale), clipped to the
     // law's validity range: the integral of pi D^2 / 4 over the law, which is the plan-view area of the generated

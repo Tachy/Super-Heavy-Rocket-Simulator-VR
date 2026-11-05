@@ -76,7 +76,7 @@ SIZE_PX = 512                       # [E] the rock maps; mipmapped by Godot
 REGOLITH_SIZE_PX = 1024             # [E] the regolith / crater maps: 2 x 2 of the former 512 px tiles per scale (Task 11
 #   fix B, Task 10 re-review N3): four times the crater (and pebble) population per realisation, so the summed-roughness
 #   margin no longer hangs on the few top-octave craters of one small tile
-PEBBLE_ETA = 0.571                  # [D] exposed height / D of the rocks: the core's measured_eta of the angular templates
+PEBBLE_ETA = 0.444                  # [D] exposed height / D of the rocks: the core's measured_eta of the resting angular templates (fix C)
 #   (Task 11 fix A report; unresolved_shading's rock_exposed_height_per_diameter, printed by the [unresolved_shading]
 #   test) - the statistical layer's half-spheroid shape, which the pebble bumps take
 PEBBLE_MAX_DIAMETER_M = 0.02        # MoonRockLayer.PEBBLE_GEOMETRY_LIMIT_M: rocks below it are never instances

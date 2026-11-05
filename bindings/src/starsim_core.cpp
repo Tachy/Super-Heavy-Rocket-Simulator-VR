@@ -632,6 +632,7 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
     result["rock_exposed_height_per_diameter"] = m.rock_exposed_height_per_diameter;
     result["rock_reflectance_ratio"] = m.rock_reflectance_ratio;
     result["rock_lit_gain"] = packed(m.rock_lit_gain);
+    result["rock_shadow"] = packed(m.rock_shadow);
     result["lit_gain_step_rad"] = environment::UnresolvedShadingModel::lit_gain_step_rad;
     result["lit_gain_floor_rad"] = environment::lit_gain_floor_rad;
     result["globe_slope_variance"] = m.globe_slope_variance;

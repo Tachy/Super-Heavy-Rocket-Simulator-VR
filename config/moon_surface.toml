@@ -34,7 +34,7 @@ hurst_exponent = 0.78              # [S] Guo et al. 2021 (Chang'e-4, 5 mm DTM): 
 # above; the generator draws only the residual (derivation: docs/subsystems/moon-surface.md, Regolith roughness;
 # tools/validation/moon_roughness_residual.py).
 rms_height_measured_total_m = 0.004  # [S] Guo et al. 2021: median RMS height 4 mm in a 125 mm window (range 1-18 mm); target of the summed-surface validation
-rms_height_at_baseline_m = 0.0037  # [D] residual drawn by the roughness generator: median-matched so that craters + rocks + roughness give Guo's median 4 mm at 125 mm (3.72-3.76 mm over 8 seeds; 3.4-3.85 mm for 0.3-2.3x crater and 1-2x rock density)
+rms_height_at_baseline_m = 0.00362 # [D] residual drawn by the roughness generator so that craters + roughness + rock tops give Guo's median 4 mm at 125 mm at the site (core [slow] sum case; quadrature re-derivation for the resting angular rocks, docs/subsystems/moon-surface.md "Regolith roughness")
 baseline_m = 0.125                 # [S] Guo et al. 2021 window size
 
 [rocks]

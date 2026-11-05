@@ -14,9 +14,6 @@ using math::Vec3;
 
 namespace {
 
-// Share of the rock height below the ground is limited to [0, 0.6] ([E]): keeps every rock visible above the ground.
-// The burial clamp is symmetric about the configured mean 0.3, so the mean share stays the configured one.
-constexpr double max_burial_fraction = 0.6;
 // Normal-ish draws: sum of six uniforms (variance 1/2) scaled to unit variance, truncated at +-4.2 sigma [E].
 constexpr int normal_draws = 6;
 

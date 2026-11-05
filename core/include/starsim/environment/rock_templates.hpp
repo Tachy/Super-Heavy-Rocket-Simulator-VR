@@ -19,7 +19,7 @@ struct TemplateMesh {
 // 1 : b/a : c/a (the impact-fragment axis law, Fujiwara et al. 1978 / Michikami et al. 2016: mean 2 : sqrt2 : 1, with
 // scatter) and K hash-seeded half-spaces (planar fracture faces: flat facets meeting in sharp edges). Fresh fragments
 // have many deep cuts (almost no ellipsoid surface left); eroded ones a few shallow cuts (mostly the rounded ellipsoid).
-// The fragment is turned by a hash-seeded rotation (the c axis tilted: resting or embedded at random) and scaled so
+// The fragment is turned by a hash-seeded rotation (resting: the c axis near the vertical, rms tilt 25 deg) and scaled so
 // that max r = 1. Template frame: z = the local vertical; a rock scales it isotropically by its size (LunarRocks).
 // Being convex and containing the origin, every template is star-shaped: r(dir) is the exact ray exit distance, and the
 // column top on a vertical line is exact and cheap (min / max over the constraints). Meshes: icosphere subdivision 4,

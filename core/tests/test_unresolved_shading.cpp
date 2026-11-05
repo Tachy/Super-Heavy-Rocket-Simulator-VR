@@ -332,6 +332,40 @@ TEST_CASE("Rock lit-face gain: limits and growth toward a low Sun", "[moon_surfa
     CHECK(environment::rock_lit_gain(0.35, 0.1 * deg) == environment::rock_lit_gain(0.35, environment::lit_gain_floor_rad));
 }
 
+TEST_CASE("Rock light tables from columns: the half-spheroid's exact laws", "[moon_surface][unresolved_shading]") {
+    // A half-spheroid of plan radius 1 and height h = 2 eta on the column grid: G(e) and sigma(e) of rock_light_tables
+    // against rock_lit_gain / rock_shadow_per_cover (independent integrals of the same quantities).
+    for (const double eta : {0.2, 0.35, 0.5}) {
+        const double h = 2.0 * eta;
+        for (const int grid : {64, 128}) {
+            const double cell = 2.0 / grid;
+            std::vector<environment::RockColumn> columns;
+            for (int i = 0; i < grid; ++i) {
+                for (int j = 0; j < grid; ++j) {
+                    const double x = -1.0 + (i + 0.5) * cell, y = -1.0 + (j + 0.5) * cell, r2 = x * x + y * y;
+                    if (r2 >= 1.0) continue;
+                    const double z = h * std::sqrt(1.0 - r2);
+                    columns.push_back({x, y, z, math::normalized(math::Vec3{x, y, z / (h * h)})});
+                }
+            }
+            const auto t = environment::rock_light_tables(columns, cell);
+            double worst_g = 0.0, worst_s = 0.0;
+            for (int k = 2; k < UnresolvedShadingModel::lit_gain_samples - 1; ++k) {  // 4 .. 88 deg
+                const double e = k * UnresolvedShadingModel::lit_gain_step_rad;
+                worst_g = std::max(worst_g, std::abs(t.gain[static_cast<size_t>(k)] / environment::rock_lit_gain(eta, e) - 1.0));
+                const double s = environment::rock_shadow_per_cover(eta, std::sin(e));
+                // The rock darkens its cover share by 1 + sigma (exp(-C (1 + sigma))): the error relative to that. The
+                // grid's error is first order (~cell / 3 of shadow length per line, the rim's discretisation).
+                worst_s = std::max(worst_s, std::abs(t.shadow[static_cast<size_t>(k)] - s) / (1.0 + s));
+            }
+            std::printf("  half-spheroid eta %.2f grid %3d: worst G error %.4f, worst sigma error / (1 + sigma) %.4f (4-88 deg)\n",
+                        eta, grid, worst_g, worst_s);
+            CHECK(worst_g < (grid == 64 ? 0.02 : 0.01));
+            CHECK(worst_s < (grid == 64 ? 0.015 : 0.008));
+        }
+    }
+}
+
 TEST_CASE("Light factors: the Sun and the earthshine follow one directional-light law, each at its own elevation",
           "[moon_surface][unresolved_shading]") {
     const auto& m = shared_model();
@@ -357,7 +391,7 @@ TEST_CASE("Light factors: the Sun and the earthshine follow one directional-ligh
         const double c = environment::rock_cover(m, 0.0, inf);
         const double rho = m.rock_reflectance_ratio;
         const double norm = std::exp(-c) + (1.0 - std::exp(-c)) * rho;
-        const double sigma = environment::rock_shadow_per_cover(m.rock_exposed_height_per_diameter, std::sin(e));
+        const double sigma = environment::rock_shadow_table(m, e);
         const double expected =
             (std::exp(-c * (1.0 + sigma)) + (1.0 - std::exp(-c)) * rho * environment::rock_lit_gain_table(m, e)) / norm;
         CHECK(std::abs(f.earth - expected) < 1e-12);
@@ -462,8 +496,17 @@ TEST_CASE("Shipped model: rock shape and reflectance ratio", "[moon_surface][unr
     }
     CHECK(m.rock_reflectance_ratio > cfg.rocks.albedo_to_regolith - 0.05);
     REQUIRE(m.rock_lit_gain.size() == static_cast<size_t>(UnresolvedShadingModel::lit_gain_samples));
-    CHECK(std::abs(environment::rock_lit_gain_table(m, 20.0 * deg) -
-                   environment::rock_lit_gain(m.rock_exposed_height_per_diameter, 20.0 * deg)) < 1e-12);
+    REQUIRE(m.rock_shadow.size() == static_cast<size_t>(UnresolvedShadingModel::lit_gain_samples));
+    const auto tables = environment::template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
+    CHECK(std::abs(environment::rock_lit_gain_table(m, 20.0 * deg) - tables.gain[10]) < 1e-12);
+    CHECK(std::abs(environment::rock_shadow_table(m, 20.0 * deg) - tables.shadow[10]) < 1e-12);
+    // The generated angular rocks against the half-spheroid of the same eta (printed for the docs, R1).
+    for (const double e_deg : {2.0, 4.0, 8.0, 14.0, 20.0, 30.0, 50.0, 80.0}) {
+        const double e = e_deg * deg, eta = m.rock_exposed_height_per_diameter;
+        std::printf("    e %4.1f deg: templates G %.3f sigma %.3f | half-spheroid G %.3f sigma %.3f\n", e_deg,
+                    environment::rock_lit_gain_table(m, e), environment::rock_shadow_table(m, e),
+                    environment::rock_lit_gain(eta, e), environment::rock_shadow_per_cover(eta, std::sin(e)));
+    }
     // Deterministic: a second build gives the same numbers bit for bit.
     const auto again = environment::make_unresolved_shading_model(*shared_detail(), &shared_rocks());
     CHECK(again.rock_exposed_height_per_diameter == m.rock_exposed_height_per_diameter);

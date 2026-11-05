@@ -567,6 +567,10 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
     // Inside the disc the protrusion is approached by climbing over the rock's footprint column nodes from the peak (or
     // from the best rim point); on the rim (a rock the rim cuts) it is searched along the arc. The winning rock's point
     // is then refined to its support point along the pad normal (its exact top peaks at a vertex or an edge).
+    // Bound of that choice (review m2): only the winner is refined, so a losing rock whose true peak lies between its
+    // footprint nodes can out-protrude the winner by at most its node-grid sag (the polyhedron's top between nodes of
+    // spacing 2 a / footprint_columns); measured against the brute-force maximum: <= 0.15 mm (test_detailed_lunar_terrain
+    // "pivoting footpad" cases), below the contact tolerance of 1 mm.
     const double slope = std::hypot(gx, gy);
     RockQuery q;
     gather_rocks(centre_unit, r, q);
