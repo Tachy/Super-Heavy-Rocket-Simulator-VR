@@ -100,7 +100,8 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   ruling and why it looked brown: `docs/history/launch-structures.md` "Leg colour".
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
-  frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`).
+  frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`). The steel is rough and matte
+  (user 2026-11-05): metallic 0, roughness 0.85 clean / 0.95 grimy, so it scatters diffusely.
 - `TowerView.build` frees its children first (no duplicates on a rebuild); both arm boxes are chopsticks (the models' +Y points
   to the axis; the -across arm is mirrored by a negative scale), both pivots stand on the common axis `hinge_pivot_m`. `update_state` also places the
   carriage (hinge height + offset) and the cables. `render_check --catch_hull=<station>` hangs a static hull with fins in the arms for

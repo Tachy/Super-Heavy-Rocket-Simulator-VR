@@ -16,9 +16,11 @@ uniform float grime_scale_m = 2.5;     // noise feature size
 uniform float grime_strength = 0.45;   // darkening at the dirtiest
 uniform float texture_contrast = 1.0;  // 0 = the tint alone, 1 = the texture's full light / dark variation around its mean
 uniform vec3 texture_mean = vec3(0.205, 0.248, 0.294);  // linear mean of the colour map (the variation is texel / mean)
-uniform float roughness_clean = 0.40;
-uniform float roughness_dirty = 0.80;
-uniform float metallic = 0.65;
+// [E] user 2026-11-05: the tower steel is rough and matte (weathered galvanised / mill-scale surface: a dielectric
+// oxide layer, no mirror-like metal reflection), so the members scatter diffusely; was metallic 0.65, roughness 0.4-0.8.
+uniform float roughness_clean = 0.85;
+uniform float roughness_dirty = 0.95;
+uniform float metallic = 0.0;
 
 varying vec3 member_position;  // VERTEX x instance scale (metres along the member's own axes)
 varying vec3 member_normal;
