@@ -197,3 +197,14 @@ rocks: boulder field without casters (receivers only) 44.4 ms, + terrain casters
 wall term with Smith's G1 per lit horizon sector (added last in fix 1) measured 16.75 ms at IM-2 in one round (+0.7 ms
 against 16.03 / 16.09; not repeated).
 
+## Earth near-field Sun shadows (moon procedural surface plan Task 16, 2026-11-05)
+Stereo mock (3534 x 2838 per eye), Starbase Pad B with Starship on the mount, 2026-10-15 21:30 UTC (Sun 31 deg), ground
+eye 150 m and 400 m east of the pad aimed at the vehicle (render_check `--vehicle=starship_block3 --site=starbase_pad2
+--watch_from_site=150|400`), weather off, median of 120 frames, two interleaved rounds. Before Task 16 (unshaded
+terrain, no shadow map): 4.10 / 4.02 ms (150 m), 4.39 / 4.33 ms (400 m). Task 16, shadows off (the lit terrain's off
+path): 4.19 / 4.20 and 4.28 / 4.28 ms (no measurable cost). Shadows on with the committed settings (8192 px atlas,
+4 splits, PCSS HIGH): 5.48 / 5.50 and 5.50 / 5.51 ms: +1.2-1.3 ms, 5.5 ms of the 11.1 ms frame. Soft-filter quality
+(same views, one session): LOW 4.84 / 4.77 and 4.85 / 4.79 ms (+0.5-0.6), MEDIUM 4.88 / 4.95 and 5.02 / 5.03, HIGH
+5.80 / 5.41 and 5.44 / 5.50; LOW and MEDIUM left a visible grain in the wide penumbrae on the terrain, hence HIGH.
+Some runs shared the machine with another agent's Godot runs; the medians agree within 0.1 ms across
+rounds. Not measured: the headset itself, the pad with weather on (the 45 Hz rule applies there).

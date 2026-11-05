@@ -168,6 +168,28 @@ on top; it replaced the interim `GroundPatch`.
   through the cloud shadow maps, the Sun's diffuse light and the sky light through the column, the sea's reflected sky
   under the deck. Its ~15 extra global samplers per node need `rendering_device/d3d12/max_resource_descriptors`
   262144 in project.godot.
+- **Near-field Sun shadows (Earth)** (moon procedural surface plan Task 16, `EarthNearShadow`,
+  `game/world/earth_near_shadow.gd`, `earth_near_shadow.gdshaderinc`): the Moon's technique (moon-surface.md "Near-field
+  shadows") on the Earth. Godot's directional shadow map of the Sun's DirectionalLight (`World.sun_light`), PSSM 4 splits
+  (0.1 / 0.2 / 0.5 of the range, blended), 8192 px atlas with 32-bit depth, PCSS with the solar disc's angular diameter
+  (0.533 deg at 1 AU), soft filter HIGH (LOW, the Moon's, left a grain in the wide penumbrae on the terrain), bias
+  0.03 / normal bias 1.0 [E]; one shadow pass for both VR eyes (multiview).
+  Range [E]: the shadow of a CASTER_HEIGHT_M 147.9 m caster (the tower head) x 1.25 at the Sun's elevation, at least
+  500 m, quantised in 2^(1/4) steps (no split resize every frame), + 4 x the eye's height, at most 4 km; Godot fades the
+  last 20 %. Casters: the pad structures (tower lattice near and mid tiers, head, chopsticks, carriage, QD arm, mount,
+  hardstand), vehicles, the drone ship (Godot's default); the Earth terrain does not cast (`cast_shadows` false: the pad
+  plateau is flat, the relief's own shading is the normal). Receivers: every lit material (structures, vehicles, incl.
+  the lattice on itself and the vehicle on the mount) and `terrain_earth.gdshader`, lit only for that
+  (`ambient_light_disabled`, `specular_disabled`): the direct Sun inside the map's range goes to light() and is multiplied
+  by the map there (D [w + (1 - w) S], Godot's ATTENUATION), everything else (sky light, the clouds' diffuse Sun, the Moon,
+  the in-scattered light) stays in EMISSION, unshadowed. The direct Sun is the transmitted one (atmosphere, cloud shadow
+  maps) seen through the aerial perspective's transmittance; on the sea its diffuse Sun and glint (water_radiance is
+  linear in the Sun's visible fraction: the sea minus the same sea without it). Active with the fidelity setting
+  `earth_near_shadows` (`user://settings.cfg` [graphics], default on; the time panel's "Schatten Erde"; render_check
+  `--earth_near_shadows=off`), the Moon's near shadows off, the Sun above -1.1 deg and the eye within 20 km of the
+  Earth's ground (SurfaceClearance); above it the light casts nothing (no cost in orbit). Both shadow classes drive the
+  one light: `MoonNearShadow.update` first, `EarthNearShadow.update` only while the Moon's is off; the directional atlas
+  goes back to the project's when neither is active.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
   colour map, `terrain_moon.gdshader` (Hapke by default, the former Lommel-Seeliger law with the game setting `World.moon_brdf` = "lommel_seeliger" (moon-surface.md, Hapke reflectance) + Earth shadow + earthshine + terrain shadows; with the detail on the regolith detail shading of `moon_detail.gdshaderinc`: residual Hapke mean slope per node spacing, statistical shadows and unresolved rocks, the baked regolith normal maps by stochastic hex tiling - moon-surface.md, Regolith shading). The Moon's rocks are drawn per node as instanced meshes by projected size (`TerrainQuadtree.rock_layer` = `MoonRockLayer`: the rock list built with the node on its worker, MultiMeshInstance3Ds attached at the upload as children of the node's mesh instance, detached at the release; moon-surface.md, Rocks drawn). Per-node uniforms beyond the mesh come through `TerrainQuadtree.node_parameters` (the Moon: `MoonDetailShading.node_parameters`); `terrain_visible_fraction` also returns the light's margin over the horizon. Detail off: leaf level 12, 10.4 m spacing at
   the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m;
@@ -220,7 +242,10 @@ on top; it replaced the interim `GroundPatch`.
 
 - `game/world/terrain/`: `cube_sphere.gd`, `height_source.gd`, `imagery_source.gd`, `terrain_node_builder.gd`
   (worker-safe), `terrain_quadtree.gd`, `water_waves.gd`.
-- Shaders: `terrain_earth.gdshader`, `terrain_moon.gdshader`, `terrain_morph.gdshaderinc`, `water.gdshaderinc`.
+- Shaders: `terrain_earth.gdshader`, `terrain_moon.gdshader`, `terrain_morph.gdshaderinc`, `water.gdshaderinc`,
+  `earth_near_shadow.gdshaderinc` (Task 16).
+- Earth near-field Sun shadows: `game/world/earth_near_shadow.gd` (`World.earth_near_shadow`); shadow-length probe
+  `game/tests/earth_shadow_length.gd` (render_check `--shadow_length`).
 - Imagery pipeline: `tools/data_pipeline/imagery.py`, `config/imagery.toml`; surface albedo
   `tools/data_pipeline/earth_albedo.py`, `config/earth_albedo.toml` (tests `test_imagery.py`, `test_earth_albedo.py`).
 - Performance run: `game/tests/terrain_perf.gd` (GPU).
@@ -235,6 +260,15 @@ on top; it replaced the interim `GroundPatch`.
 
 ## Validation
 
+- Earth near-field Sun shadows (Task 16): the Pad B tower's shadow tip (render_check `--shadow_length`, `EarthShadowLength`:
+  a nadir view 500 m over the pad, the shadowed ground pixels from the on / off frames at the direct Sun's 50 % contour,
+  against the largest (P - O).a + (h - dh) / tan e over the 91 330 casting vertices: the head's roof, 147.9 m; dh the
+  terrain at the tip over the site). Hard shadows (map resolution alone, tolerance 2 texels / sin e + 2 image pixels):
+  Sun 39.5 deg -1.89 m (tol 6.57), 31.1 deg -2.24 m (7.75), 11.4 deg -4.23 m (9.33). With the solar-disc penumbra (+ half
+  its ground length, theta h / sin^2 e): 39.5 deg -3.24 m (8.26), 31.1 deg -4.07 m (10.31), 11.4 deg -12.73 m (26.84).
+  The terrain beyond the plateau lies 2.5-6 m over the site at the 11 deg tip (without dh the probe read -17 m). Off
+  path: the same deterministic frame as the unshaded shader before Task 16 within 1 pixel of 1 440 000 (8-bit diff 1);
+  on: 0.96 % of the pixels change (the shadows). Headless `earth_near_shadow_test.gd`: range rule, activity, setting.
 - Camera-precision test: relative error < 3e-7. Quadtree test: morph start < end for every level >= 2 on both bodies.
 - Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface (detail
   off; `terrain_quadtree_test.gd` runs the Moon with the detail off as the regression baseline).

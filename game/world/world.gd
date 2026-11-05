@@ -56,6 +56,8 @@ var sun_light := DirectionalLight3D.new()
 var moon_light := DirectionalLight3D.new()
 ## The Sun's near-field shadow map on the Moon (Task 12; sun_light's shadow settings and the shaders' globals).
 var moon_near_shadow := MoonNearShadow.new()
+## The Sun's near-field shadow map on the Earth (Task 16; the same light, while the Moon's is off).
+var earth_near_shadow := EarthNearShadow.new()
 var stars := StarField.new()
 var moon_orbit := OrbitLine.new()
 var flight := FlightController.new()
@@ -335,6 +337,7 @@ func update_world() -> void:
 	_place_sun(sun_from_camera)
 	_update_sun_light(t, cam)
 	_update_moon_near_shadow(cam, sun_from_camera.length())
+	_update_earth_near_shadow(cam, camera_fixed, sun_from_camera)
 	FrameProfiler.end(&"sun")
 	FrameProfiler.begin(&"flight_views")
 	flight.place_views(self, cam)
@@ -654,6 +657,20 @@ func _update_moon_near_shadow(camera_gcrf_m: Vector3, sun_distance_m: float) -> 
 	moon_near_shadow.update(sun_light, moon_terrain.active, height_m, sun_distance_m, eye,
 			camera.get_camera_projection() if camera != null else Projection(),
 			Frames.to_render((camera_gcrf_m - moon_gcrf_m).normalized()))
+
+
+## The near-field Sun shadows near the Earth's ground (EarthNearShadow, Task 16), after the Moon's: the eye's height over
+## the terrain under it (SurfaceClearance; sampled only near the ground, else INF) and the Sun's elevation over the
+## geocentric vertical (within 0.2 deg of the geodetic one; it sizes the range and switches off below the horizon).
+func _update_earth_near_shadow(camera_gcrf_m: Vector3, camera_fixed_m: Vector3, sun_from_camera_m: Vector3) -> void:
+	var height_m := INF
+	# |p| - a is never above the height over the ellipsoid (the ellipsoid's radius is at most a): an eye with it beyond
+	# ACTIVE_HEIGHT_M + 9 km (the highest ground, 8.8 km) is out of the near shadows without a terrain sample.
+	if camera_fixed_m.length() - EARTH_SEMI_MAJOR_AXIS_M < EarthNearShadow.ACTIVE_HEIGHT_M + 9000.0:
+		height_m = SurfaceClearance.surface_distance_m(camera_fixed_m, _earth_heights)
+	var sin_e := sun_from_camera_m.normalized().dot(camera_gcrf_m.normalized())
+	earth_near_shadow.update(sun_light, moon_near_shadow.active, height_m, asin(clampf(sin_e, -1.0, 1.0)),
+			sun_from_camera_m.length())
 
 
 ## Draws the radiance cubemap anew when the sky has really changed (SkyRadianceRefresh): the write to the sky material is

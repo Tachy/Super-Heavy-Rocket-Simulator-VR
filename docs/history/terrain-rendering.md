@@ -136,3 +136,8 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   (0.016), so the Gulf read as a lighter, streaked rectangle with open sea brightened out to 50 km by a land-product
   bias (`orbit400_day_before_after.png`). Level steps then: Sentinel-2 vs the day texture -0.3 % / -0.1 % over the 10 km
   edge band, global spots Starbase +18 %, beach +17 %, Cape -12 % against MCD43A4; tiles 275 MB.
+
+## Unshaded Earth terrain (superseded 2026-11-05, moon procedural surface plan Task 16)
+`terrain_earth.gdshader` was `render_mode unshaded` with everything in ALBEDO; vehicles and structures cast no shadow on
+the Earth's terrain (known-issues: "shadows on the ground only on the Moon"). Since Task 16 it is lit only for the
+near-field Sun shadow map's light() (the off path gives the same image).

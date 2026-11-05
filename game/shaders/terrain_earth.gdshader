@@ -10,8 +10,11 @@ shader_type spatial;
 // Positions are in the body's local render frame (metres, unscaled): vertex_offset restores them from the node centre;
 // the atmosphere takes the fragment's camera-relative offset (camera_offset, exact near the camera), never the
 // difference of two absolute float32 positions.
-render_mode unshaded, cull_back;
+// Lit only for the near-field Sun shadow map's light() (earth_near_shadow.gdshaderinc, Task 16): no ambient, no
+// specular; everything else goes to EMISSION as the unshaded shader's ALBEDO did.
+render_mode cull_back, ambient_light_disabled, specular_disabled;
 
+#include "res://shaders/earth_near_shadow.gdshaderinc"
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
@@ -195,6 +198,19 @@ void fragment() {
 	// CLOUD_LIGHT_END
 	vec3 sea = water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, sunlit,
 			sun_normal, sky_light, sky_reflected);
+	// The direct Sun's part of the land and sea radiance (Task 16: what the near-field shadow map gates), only inside the
+	// map's range: the land's Sun term and the sea's Sun-driven terms (its diffuse Sun and glint; water_radiance is
+	// linear in sunlit: the Sun's sea minus the same sea without the Sun's direct light, before the Moon's pass).
+	float near_fade = earth_near_fade(-VERTEX.z);
+	vec3 direct = vec3(0.0);
+	if (near_fade < 1.0) {
+		direct = albedo * (sun_normal * max(dot(n, normalize(earth_sun_position_local)), 0.0) * sunlit);
+		if (water > 0.0) {
+			vec3 sea_unlit = water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, 0.0,
+					sun_normal, sky_light, sky_reflected);
+			direct = mix(direct, sea - sea_unlit, water);
+		}
+	}
 	if (moonlit && water > 0.0) {
 		// The same sea under the Moon: its diffuse light, the moonlit sky reflected and the Moon's glitter path.
 		vec3 moon_reflected = atm_moon_sky_at_offset(camera_offset, water_reflected_direction(n, wave_n, to_camera));
@@ -209,11 +225,25 @@ void fragment() {
 		vec3 transmittance;
 		vec3 in_scatter = atm_to_point_offset(camera_offset, transmittance);
 		color = day * transmittance + in_scatter;
+		direct *= transmittance;
 	}
-	ALBEDO = color;
+	vec3 gated = direct * (1.0 - near_fade);  // w = 1 (off, beyond the range): 0
 	// CLOUD_LIGHT_BEGIN
 	if (clouded && cloud_debug_output == 5) {
-		ALBEDO = cloud.xyz;  // checks (cloud_check.gd): the cloud light factors themselves
+		color = cloud.xyz;  // checks (cloud_check.gd): the cloud light factors themselves
+		gated = vec3(0.0);
 	}
 	// CLOUD_LIGHT_END
+	EMISSION = near_fade < 1.0 ? max(color - gated, vec3(0.0)) : color;
+	ALBEDO = vec3(1.0);  // light()'s gate only (no ambient, no specular)
+	SPECULAR = 0.0;
+	ROUGHNESS = 1.0;
+	earth_near_radiance = gated;
+	earth_near_fade_w = near_fade;
+	earth_near_sun_view = normalize(mat3(VIEW_MATRIX) * (mat3(MODEL_MATRIX) * normalize(to_sun)));
+}
+
+void light() {
+	DIFFUSE_LIGHT += earth_near_light(earth_near_radiance, earth_near_fade_w, earth_near_sun_view, LIGHT,
+			LIGHT_IS_DIRECTIONAL, ATTENUATION);
 }

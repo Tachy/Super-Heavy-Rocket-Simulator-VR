@@ -20,6 +20,11 @@
 #          [--moon_diag=1] (terrain_moon.gdshader diag_mode: 1 tints red the fragments whose interpolated normal faces
 #          away from the eye). The log's "Moon load" line: the deepest drawn level's wall-time timeline since the view
 #          was placed (or the last climb move) and the time until the terrain settled.
+# Earth near-field Sun shadows (Task 16, EarthNearShadow): [--earth_near_shadows=off] (the fidelity setting off: the
+#          render before Task 16), [--earth_shadow_splits=1|2|4] [--earth_shadow_soft=off] [--earth_shadow_atlas=<px>]
+#          [--earth_shadow_bias=<bias>,<normal bias>] [--earth_shadow_quality=hard|very_low|low|medium|high|ultra];
+#          [--shadow_length] once settled: the tower's shadow tip measured against its casters' geometry
+#          (EarthShadowLength; the view: an eye high over the pad looking down), exit code 1 outside the tolerance.
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed); with it [--catch_hull=<station m>] a
 #          static booster hull with that hull station on the arm deck (a picture of the closed pose, no flight).
@@ -119,6 +124,7 @@ var _terrain_idle := 0  ## consecutive frames without terrain loading
 var _found_event_tdb_s := NAN  ## --at_event: the event's instant found by flying (_fly_until_event)
 var _deterministic_left := -1  ## --deterministic: frames still to draw after the reset (-1: not yet reset)
 var _cache_settled := 0  ## --repeat_identical: consecutive frames with the light cache settled
+var _shadow_length: EarthShadowLength = null  ## --shadow_length (Task 16)
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_wall_us: Array[int] = []  ## --gpu_series: the wall clock of each measured frame
@@ -168,6 +174,16 @@ func _initialize() -> void:
 	MoonNearShadow.soft = _args.get("moon_shadow_soft", "on") != "off"
 	if _args.has("moon_shadow_quality"):
 		MoonNearShadow.soft_quality = ["hard", "very_low", "low", "medium", "high", "ultra"].find(String(_args["moon_shadow_quality"])) as RenderingServer.ShadowQuality
+	EarthNearShadow.enabled = _args.get("earth_near_shadows", "on") != "off"  # the fidelity setting (Task 16)
+	EarthNearShadow.splits = int(_args.get("earth_shadow_splits", "4"))
+	EarthNearShadow.soft = _args.get("earth_shadow_soft", "on") != "off"
+	EarthNearShadow.atlas_size = int(_args.get("earth_shadow_atlas", str(EarthNearShadow.ATLAS_SIZE)))
+	if _args.has("earth_shadow_quality"):
+		EarthNearShadow.soft_quality = ["hard", "very_low", "low", "medium", "high", "ultra"].find(String(_args["earth_shadow_quality"])) as RenderingServer.ShadowQuality
+	if _args.has("earth_shadow_bias"):
+		var biases := String(_args["earth_shadow_bias"]).split(",")
+		EarthNearShadow.bias = float(biases[0])
+		EarthNearShadow.normal_bias = float(biases[1])
 	MoonRockLayer.budget_enabled = _args.get("rock_budget", "on") != "off" and not _args.has("deterministic")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
@@ -374,6 +390,15 @@ func _process(_delta: float) -> bool:
 			return false
 		if _args.has("gpu_time") and not _gpu_frames(world):
 			return false
+		if _args.has("shadow_length"):  # Task 16: the tower's shadow tip against its geometry (EarthShadowLength)
+			if _shadow_length == null:
+				_shadow_length = EarthShadowLength.new()
+			if not _shadow_length.step(world, root.get_viewport()):
+				return false
+			print("render_check: shadow length ", _shadow_length.report)
+			if _args.has("out"):  # the shadowed frame beside the saved (unshadowed) one
+				_shadow_length.image_on.save_png(String(_args["out"]).get_basename() + "_on.png")
+			_repeat_failed = _repeat_failed or not _shadow_length.passed
 		print("render_check: ", world.weather.status_text())
 		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
 				world.clouds.field_texture_bytes / 1.0e6, world.clouds.last_upload_ms])

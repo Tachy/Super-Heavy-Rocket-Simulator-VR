@@ -14,7 +14,9 @@ class_name LatticeBuilder
 ##                                   light solids) instead of ~10,
 ##   far   (> MID_END_M)             a box with the lattice shader tower_far.gdshader (analytic, filtered coverage of the
 ##                                   measured pitch: members thinner than a pixel become a density, never shimmer).
-## Members cast no shadow: the game's Sun has no shadow maps (the ground shader is unshaded), so nothing would receive it.
+## Shadows (Task 16, EarthNearShadow): the near and mid tiers cast the Sun's near-field shadow (each tier while it is drawn:
+## Godot takes the visibility ranges from the camera in the shadow pass too); the far tier (alpha-to-coverage box
+## beyond 5 km, outside the shadow range's ground) does not.
 
 const FACES := 4
 const LEGS := 4
@@ -151,7 +153,7 @@ static func _build_section(detail: Dictionary, index: int, base_m: float, profil
 	mid.mesh = _merged([[[leg_mesh, leg_transforms]], brace_parts, [[unit_box, dark_boxes]], [[unit_box, plate_boxes]],
 			[[unit_box, plinth_boxes]]],
 			[materials["leg"], materials["brace"], materials["dark"], materials["clad"], materials["plinth"]])
-	mid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	set_range(mid, NEAR_END_M, MID_END_M)
 	node.add_child(mid)
 
@@ -369,7 +371,7 @@ static func _instances(node_name: String, mesh: Mesh, transforms: Array[Transfor
 	instance.name = node_name
 	instance.multimesh = multimesh
 	instance.material_override = material
-	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	return instance
 
 

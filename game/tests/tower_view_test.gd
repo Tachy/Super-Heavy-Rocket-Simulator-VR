@@ -83,9 +83,13 @@ func _check_lattice(models: Dictionary, boxes: TowerView) -> void:
 			var frame_node := node.get_node("head_frame") as MultiMeshInstance3D
 			_check(frame_node.multimesh.instance_count == 4, "top: four frame members under the head's roof")
 		_check_hand_over(node, models["detail"], section, i, sections.size(), LatticeBuilder.total_height_m(models["detail"]))
-		_check(node.get_node_or_null("shadow_proxy") == null, "section %d: no shadow proxy (the Sun casts no shadows)" % i)
+		_check(node.get_node_or_null("shadow_proxy") == null, "section %d: no shadow proxy (the members cast)" % i)
+		# Task 16 (EarthNearShadow): the near and mid tiers cast the Sun's near-field shadow, the far box does not.
 		_check((node.get_node("face_0") as MultiMeshInstance3D).cast_shadow
-				== GeometryInstance3D.SHADOW_CASTING_SETTING_OFF, "section %d: members cast no shadow" % i)
+				== GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				and (node.get_node("mid") as GeometryInstance3D).cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				and (node.get_node("far") as GeometryInstance3D).cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+				"section %d: near and mid members cast the Sun's shadow, the far box not" % i)
 	var detail_lattice: float = models["detail"]["tower"]["lattice_height_m"]
 	_check(absf(top_m - 139.0) < 0.2 and absf(top_m - detail_lattice) < 0.01, "lattice panels end at %.2f m (139)" % top_m)
 	_check(floors == 26, "26 floors: %d" % floors)

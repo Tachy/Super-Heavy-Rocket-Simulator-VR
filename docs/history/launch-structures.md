@@ -77,3 +77,9 @@ Earlier mount ring (until 2026-11-03): outer 10.4 m, opening 9.0 m [E], clamp in
 Photo-based ruling 2026-11-01 (nsf_padb_chopsticks_2025-02): legs bright galvanised silver, slightly cool, linear ~0.30 (tint (0.57, 0.58, 0.61)),
 braces ~0.04 (0.22, 0.22, 0.235), plinth and cladding plates one material, light grey ~0.30 (0.58, 0.58, 0.57), metallic 0.3, roughness 0.7;
 QD arm hardware used the plate material; head bands metallic 0.3. Replaced by the webcast-frame values in launch-structures.md.
+
+## No Sun shadows on the Earth (superseded 2026-11-05, moon procedural surface plan Task 16)
+Until Task 16 the tower members cast no shadow and there was no shadow proxy: the game's Sun (`world.gd`
+DirectionalLight) had no shadow map and `terrain_earth.gdshader` was unshaded, so the tower, mount and vehicles cast no
+shadow on the ground or on each other (a real one was left open: Sun shadows or a baked / analytic tower shadow on the
+terrain shader). Task 16 chose the Sun's directional shadow map (`EarthNearShadow`), as on the Moon.

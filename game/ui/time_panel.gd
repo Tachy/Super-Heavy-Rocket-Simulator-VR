@@ -101,6 +101,15 @@ func _ready() -> void:
 		MoonNearShadow.enabled = on
 		MoonNearShadow.save_enabled_setting(on))
 	box.add_child(moon_shadow_box)
+	# Fidelity setting earth_near_shadows (EarthNearShadow, Task 16): the Sun's shadow map near the Earth's ground.
+	var earth_shadow_box := CheckBox.new()
+	earth_shadow_box.text = "Schatten Erde"
+	earth_shadow_box.tooltip_text = "Schattenkarte der Sonne in Bodennähe auf der Erde (Turm, Startrampe, Fahrzeuge)"
+	earth_shadow_box.button_pressed = EarthNearShadow.enabled
+	earth_shadow_box.toggled.connect(func(on: bool) -> void:
+		EarthNearShadow.enabled = on
+		EarthNearShadow.save_enabled_setting(on))
+	box.add_child(earth_shadow_box)
 
 	box.add_child(HSeparator.new())
 	var launch_label := Label.new()

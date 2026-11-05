@@ -73,10 +73,11 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   section, the cladding plates on face 0 where the section overlaps 12.2-79 m) and on the top
   section `head_frame` (four frame horizontals under the head's roof plate) and, in the far tier, `far_head_legs` (the legs from the far box's top to the roof plate). Panels = round(height / brace pitch), floors = round(height /
   floor pitch): the two are independent. The layout functions (`dark_solids`, `clad_solids`, `top_frame_members`,
-  `face_members`) are public for the headless test. Members cast no shadow, and there is no
-  shadow proxy: the game's Sun (`world.gd` DirectionalLight) has no shadow maps and `terrain_earth.gdshader` is unshaded,
-  so the tower casts no shadow on the ground today (a real one is its own decision: Sun shadows or a baked / analytic
-  tower shadow on the terrain shader). Footprint on the physics box's pad-side face and base; head top 147.9 m and
+  `face_members`) are public for the headless test. Sun shadows (moon procedural surface plan Task 16,
+  `EarthNearShadow`; terrain-rendering.md "Near-field Sun shadows (Earth)"): the near and mid tiers cast (every member
+  while the near tier is drawn, the merged mesh from 300 m), the far tier (alpha-to-coverage box beyond 5 km) does not; no
+  shadow proxy. Head, chopsticks, carriage, QD arm, mount and hardstand cast and receive through Godot's lighting, the
+  terrain through `terrain_earth.gdshader`'s light(). Footprint on the physics box's pad-side face and base; head top 147.9 m and
   silhouette top 146.9 m against the box's 146 m.
 - Tower head (`[tower.head]`, `mechazilla_layout.head_outline / head / head_faces`, static model `rails.gltf`, the same at every distance; read on `padb_tower_top_cabin_2026-04`, user 2026-11-01). Plan: the tower's square stays at the rear (rear corner and both neighbouring corners in place), only the front (hinge) corner is pulled out along the diagonal, 1.3 +-0.3 m past the hinge axis (the axis stays, about 0.6 m past the outer cable group as the photo shows it; the two groups need >= 1.2 m to lie inside). Section, top down: roof plate 0.9 m, 0.2 m proud; on the two front edges closed plate walls of 7 vertical panels in two tones with a row of brackets along the top and a 0.6 m bottom band; floor 0.4 m on 0.4 m beams, the load beam over the axis carries the cables (underside 140.5 m, 1.4 m over the lattice top). The two rear sides stay open onto the lattice, with one chevron each drawn; the legs run up to the roof plate. Small platform at the point. The sheave block's top (138.4 m at rest) clears the underside up to +2.1 m carriage offset. Not visible on any photo: the rear of the head, the inside of the walls. Weathering stains are not drawn, only the panels' tones.
 - Distance hand-over (visibility ranges, hard swap, no fade): near `legs`/`face_n`/`decks`/`clad`/`head_frame` up to

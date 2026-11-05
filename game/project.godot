@@ -70,6 +70,10 @@ moon_near_shadow={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+earth_near_shadow={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 moon_eye_world={
 "type": "vec3",
 "value": Vector3(0, 0, 0)

@@ -284,10 +284,16 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   footprint moves while the hull tips onto the downhill feet and overshoots (5.1-5.3 deg slopes;
   `docs/subsystems/moon-surface.md`). Cause (foot slip during the tip vs. leg stroke) not traced.
 
+## Moon procedural surface plan, Task 16: Sun shadows on the Earth (2026-11-05)
+- The Earth's near-field shadow map covers 500 m-4 km of view depth around the eye (terrain-rendering.md "Near-field Sun
+  shadows (Earth)"); beyond it (and above 20 km, at night) nothing casts. A vehicle's own shadows on itself switch off
+  when the eye climbs through 20 km over the ground (a step, as on the Moon).
+- The Earth terrain casts no shadow (dunes, levees): only structures and vehicles do; the relief keeps its normal shading.
+- Cost +1.2-1.3 ms in the stereo mock at the pad (vr-performance.md); not measured in the headset nor with weather on.
+- The tower's far tier (alpha-to-coverage box beyond 5 km) casts nothing; at that distance the tower's ground shadow lies
+  beyond the shadow range anyway.
+
 ## Moon procedural surface plan, Task 12 (2026-11-05)
-- Vehicles and structures cast shadows on the ground only on the Moon (near-field Sun shadow map, `docs/subsystems/
-  moon-surface.md` Near-field shadows; 150 m-4 km around the eye). On the Earth the Sun light has no shadow map and
-  `terrain_earth.gdshader` is unshaded: no vehicle or tower shadow on the terrain there (launch-structures.md).
 - Near-field shadows and Task 12's statistics cost GPU time: stereo mock (3534 x 2838 per eye) at IM-2 2 m 9.3 ms before
   Task 12, 11.7 without the map, 16.1 with it; in the Diviner boulder field 32.9 / 37.0 / 51.5 ms (vr-performance.md;
   the boulder field is over the 45 fps floor without shadows already, T13).
