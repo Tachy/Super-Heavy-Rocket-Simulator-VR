@@ -14,6 +14,8 @@ const ROW := CELLS + 1
 ## Lattice with one ring outside the node (seamless normals by central differences).
 const LATTICE := CELLS + 3
 const GRID_VERTICES := ROW * ROW
+## The parent level's lattice over the node: every second lattice line, one parent cell outside (its normals).
+const PARENT_LATTICE := CELLS / 2 + 3
 ## [E] Skirt depth in grid cells of the node edge: hides cracks between neighbours one level apart.
 const SKIRT_DEPTH_CELLS := 2.0
 const WATER_MASK_PX := 128
@@ -43,38 +45,51 @@ static var SKIRT_EDGE: PackedInt32Array = _make_skirt_edge()
 static var INDICES: PackedInt32Array = _make_indices()
 
 
+## Nominal vertex spacing (m) of a level on a body of mean radius radius_m: a cube face edge (pi / 2 of arc) halved per
+## level, over CELLS. One value per level (not a node's own edge, which differs per node): what depends on it (the
+## detail's band limit, the horizon march) is then identical on the shared edge of two neighbours of a level.
+static func level_spacing_m(level: int, radius_m: float) -> float:
+	return radius_m * (PI / 2.0) / float(1 << level) / CELLS
+
+
 ## Mesh data of node `key` (CubeSphere key) on a body of mean radius radius_m. imagery may be null (no imagery).
-static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, radius_m: float) -> Dictionary:
+## horizon_owner: the node whose horizon map this node draws with (an ancestor or itself, TerrainQuadtree): only a node
+## that owns its horizon bakes one; the others return "horizon" null and sample the owner's map.
+##
+## Procedural detail (the Moon with the core's moon_surface_detail on: the finest resolution lies below the measured
+## data's): heights are band-limited to the level's vertex spacing (the area mean over a vertex cell, so a parent is the
+## mean of its children and nothing aliases), and every vertex morphs to the parent's surface - the even vertices too,
+## to the parent level's band-limited height at the same point - with the parent's normals; fully morphed, a node
+## is its parent's mesh. Without detail the even vertices are the parent's own (morph 0) as before.
+static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, radius_m: float,
+		horizon_owner := Vector4i(-1, -1, -1, -1)) -> Dictionary:
 	var face := key.x
 	var level := key.y
 	var box := CubeSphere.lat_lon_box(key)
 	var box_center_lon := box.get_center().x
 	var center_lon := CubeSphere.lat_lon_deg(CubeSphere.node_center(key)).y
+	if horizon_owner.x < 0:
+		horizon_owner = key
 
 	# Lattice directions (geodetic normals), geodetic coordinates and heights (one sample call).
-	var warp_s := PackedFloat64Array()
-	var warp_t := PackedFloat64Array()
-	for n in LATTICE:
-		warp_s.append(CubeSphere.warp(CubeSphere.lattice_coordinate(key.z, level, n - 1, CELLS)))
-		warp_t.append(CubeSphere.warp(CubeSphere.lattice_coordinate(key.w, level, n - 1, CELLS)))
 	var count := LATTICE * LATTICE
-	var dirs := PackedVector3Array()
-	var lats := PackedFloat64Array()
-	var lons := PackedFloat64Array()  # raw atan2 longitudes (sampling); a pole takes the node centre's
-	dirs.resize(count)
-	lats.resize(count)
-	lons.resize(count)
-	var k := 0
-	for lb in LATTICE:
-		var b_warp := warp_t[lb]
-		for la in LATTICE:
-			var d := CubeSphere.direction_warped(face, warp_s[la], b_warp)
-			var horizontal := sqrt(d.x * d.x + d.y * d.y)
-			dirs[k] = d
-			lats[k] = rad_to_deg(atan2(d.z, horizontal))
-			lons[k] = rad_to_deg(atan2(d.y, d.x)) if horizontal > CubeSphere.POLE_EPSILON else center_lon
-			k += 1
-	var height_m: PackedFloat64Array = heights.sample(lats, lons)["height_m"]
+	var lattice := _lattice(key, -1, 1, LATTICE, center_lon)
+	var dirs: PackedVector3Array = lattice[0]
+	var lats: PackedFloat64Array = lattice[1]
+	var lons: PackedFloat64Array = lattice[2]  # raw atan2 longitudes (sampling); a pole takes the node centre's
+	var max_resolution_m := heights.finest_resolution_m(lats, lons)
+	var data_resolution_m := heights.data_resolution_m(lats, lons) if heights.may_have_detail() else max_resolution_m
+	var detail := max_resolution_m < data_resolution_m
+	var spacing_m := level_spacing_m(level, radius_m)
+	var height_m: PackedFloat64Array
+	var data_height_m: PackedFloat64Array  # the measured data's heights: the horizon's observers
+	if detail:
+		height_m = heights.sample_band_limited(lats, lons, spacing_m)["height_m"]
+		if horizon_owner == key and heights.has_horizon():
+			data_height_m = heights.sample(lats, lons)["height_m"]
+	else:
+		height_m = heights.sample(lats, lons)["height_m"]
+		data_height_m = height_m
 	var fixed := heights.positions_fixed(dirs, height_m)
 	var center_fixed := fixed[(CELLS / 2 + 1) * LATTICE + CELLS / 2 + 1]
 	# Lattice relative to the centre in render axes (Frames.to_render inlined: (x, y, z) -> (y, z, x)); a rotation, so
@@ -84,6 +99,29 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	for i in count:
 		var q := fixed[i] - center_fixed
 		rel[i] = Vector3(q.y, q.z, q.x)
+	var k := 0
+
+	# The parent level's surface at the even lattice points, relative to the centre in render axes (PARENT_LATTICE
+	# points, every second lattice line from one parent cell outside the node: the parent's normals by central
+	# differences). Without detail these are the node's own even points.
+	var parent_rel := PackedVector3Array()
+	parent_rel.resize(PARENT_LATTICE * PARENT_LATTICE)
+	if detail and level > TerrainQuadtree.ROOT_LEVEL:
+		var p_lattice := _lattice(key, -2, 2, PARENT_LATTICE, center_lon)
+		var p_dirs: PackedVector3Array = p_lattice[0]
+		var p_lats: PackedFloat64Array = p_lattice[1]
+		var p_lons: PackedFloat64Array = p_lattice[2]
+		var p_heights: PackedFloat64Array = heights.sample_band_limited(p_lats, p_lons, 2.0 * spacing_m)["height_m"]
+		var p_fixed := heights.positions_fixed(p_dirs, p_heights)
+		for i in p_fixed.size():
+			var q := p_fixed[i] - center_fixed
+			parent_rel[i] = Vector3(q.y, q.z, q.x)
+	else:
+		detail = detail and level > TerrainQuadtree.ROOT_LEVEL  # the roots never morph: their own points
+		for n in PARENT_LATTICE:
+			var lb := clampi(2 * n - 1, 0, LATTICE - 1)  # the outer ring (unused without detail) clamped
+			for m in PARENT_LATTICE:
+				parent_rel[n * PARENT_LATTICE + m] = rel[lb * LATTICE + clampi(2 * m - 1, 0, LATTICE - 1)]
 
 	# Imagery crops: the fine one and the base (next coarser source) under it.
 	var texel_deg := box.size.y / IMAGERY_TEXELS
@@ -99,7 +137,9 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	var mask_v_scale := 1.0 / box.size.y
 
 	var horizon_start_us := Time.get_ticks_usec()
-	var horizon := _horizon_layers(key, heights, radius_m, lats, lons, height_m)
+	var horizon := {"layers": null, "max_rad": 0.0}
+	if horizon_owner == key:
+		horizon = _horizon_layers(key, heights, radius_m, lats, lons, data_height_m)
 	var horizon_ms := (Time.get_ticks_usec() - horizon_start_us) / 1000.0
 
 	var total := GRID_VERTICES + SKIRT_EDGE.size()
@@ -140,18 +180,22 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 			var p := rel[k]
 			vertices[v] = p
 			normals[v] = (rel[k + 1] - rel[k - 1]).cross(rel[k + LATTICE] - rel[k - LATTICE]).normalized()
-			# Morph target: the parent level's surface, zero (resize fill) on even vertices: the mean of the two even
-			# neighbours along an edge, inside a parent cell the mean of the parent triangles' shared diagonal
-			# ((a + 1, b - 1) - (a - 1, b + 1), the split INDICES uses), which is where the parent's mesh passes.
+			# Morph target: the parent level's surface. Even vertices: the parent's vertex there (without detail the
+			# vertex itself: zero, the resize fill). Odd ones: the mean of the two even neighbours along an edge, inside
+			# a parent cell the mean of the parent triangles' shared diagonal ((a + 1, b - 1) - (a - 1, b + 1), the
+			# split INDICES uses), which is where the parent's mesh passes.
 			var i4 := 4 * v
-			if a & 1 or odd_b:
+			var pk := ((b >> 1) + 1) * PARENT_LATTICE + (a >> 1) + 1  # parent point at (a, b) rounded down to even
+			if a & 1 or odd_b or detail:
 				var m: Vector3
 				if a & 1 and odd_b:
-					m = (rel[k + 1 - LATTICE] + rel[k - 1 + LATTICE]) * 0.5 - p
+					m = (parent_rel[pk + 1] + parent_rel[pk + PARENT_LATTICE]) * 0.5 - p
 				elif odd_b:
-					m = (rel[k - LATTICE] + rel[k + LATTICE]) * 0.5 - p
+					m = (parent_rel[pk] + parent_rel[pk + PARENT_LATTICE]) * 0.5 - p
+				elif a & 1:
+					m = (parent_rel[pk] + parent_rel[pk + 1]) * 0.5 - p
 				else:
-					m = (rel[k - 1] + rel[k + 1]) * 0.5 - p
+					m = parent_rel[pk] - p
 				morph[i4] = m.x
 				morph[i4 + 1] = m.y
 				morph[i4 + 2] = m.z
@@ -171,20 +215,30 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 				custom2[2 * v + 1] = (mask_north - lat) * mask_v_scale
 			v += 1
 
-	# Parent-level normals: even vertices keep their own; odd ones the normalised mean of the neighbours their morph target
-	# interpolates (odd vertices never lie on the border, so every neighbour is a grid vertex).
+	# Parent-level normals: even vertices the parent's normal there (without detail their own; with detail by central
+	# differences over the parent lattice, as the parent computes it); odd ones the normalised mean of the even
+	# neighbours their morph target interpolates (odd vertices never lie on the border, so every neighbour is a grid
+	# vertex).
+	var parent_normals := normals
+	if detail:
+		parent_normals = normals.duplicate()
+		for b in range(0, ROW, 2):
+			for a in range(0, ROW, 2):
+				var pk := ((b >> 1) + 1) * PARENT_LATTICE + (a >> 1) + 1
+				parent_normals[b * ROW + a] = (parent_rel[pk + 1] - parent_rel[pk - 1]).cross(
+						parent_rel[pk + PARENT_LATTICE] - parent_rel[pk - PARENT_LATTICE]).normalized()
 	var custom3 := PackedFloat32Array()
 	custom3.resize(3 * total)
 	for b in ROW:
 		for a in ROW:
 			v = b * ROW + a
-			var n := normals[v]
+			var n := parent_normals[v]
 			if a & 1 and b & 1:
-				n = (normals[v + 1 - ROW] + normals[v - 1 + ROW]).normalized()
+				n = (parent_normals[v + 1 - ROW] + parent_normals[v - 1 + ROW]).normalized()
 			elif b & 1:
-				n = (normals[v - ROW] + normals[v + ROW]).normalized()
+				n = (parent_normals[v - ROW] + parent_normals[v + ROW]).normalized()
 			elif a & 1:
-				n = (normals[v - 1] + normals[v + 1]).normalized()
+				n = (parent_normals[v - 1] + parent_normals[v + 1]).normalized()
 			custom3[3 * v] = n.x
 			custom3[3 * v + 1] = n.y
 			custom3[3 * v + 2] = n.z
@@ -234,11 +288,43 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		"horizon": horizon["layers"],  # Array[Image] (HORIZON_LAYERS); null: a body without horizon maps / terrain data
 		"horizon_max_rad": horizon["max_rad"],
 		"horizon_ms": horizon_ms,
+		"horizon_owner": horizon_owner,
 		"lat_lon_box": box,
 		# The finest data anywhere on the lattice: the quadtree stops splitting where even this is coarser than the mesh;
-		# a site tile covering only part of the node still counts (a lattice cell or more of it).
-		"max_resolution_m": heights.finest_resolution_m(lats, lons),
+		# a site tile covering only part of the node still counts (a lattice cell or more of it). With the Moon's
+		# procedural detail on, the procedural limit (~0.01 m).
+		"max_resolution_m": max_resolution_m,
+		# The same for the measured data alone (LOLA): horizon maps are baked down to the level where it ends.
+		"data_resolution_m": data_resolution_m,
 	}
+
+
+## Directions (geodetic normals), latitudes and longitudes (deg; raw atan2, a pole takes center_lon) of an n x n
+## lattice of node `key`: lattice lines first, first + step, ... (in grid cells from the node's corner, row-major):
+## [dirs, lats, lons].
+static func _lattice(key: Vector4i, first: int, step: int, n: int, center_lon: float) -> Array:
+	var warp_s := PackedFloat64Array()
+	var warp_t := PackedFloat64Array()
+	for c in n:
+		warp_s.append(CubeSphere.warp(CubeSphere.lattice_coordinate(key.z, key.y, first + c * step, CELLS)))
+		warp_t.append(CubeSphere.warp(CubeSphere.lattice_coordinate(key.w, key.y, first + c * step, CELLS)))
+	var dirs := PackedVector3Array()
+	var lats := PackedFloat64Array()
+	var lons := PackedFloat64Array()
+	dirs.resize(n * n)
+	lats.resize(n * n)
+	lons.resize(n * n)
+	var k := 0
+	for lb in n:
+		var b_warp := warp_t[lb]
+		for la in n:
+			var d := CubeSphere.direction_warped(key.x, warp_s[la], b_warp)
+			var horizontal := sqrt(d.x * d.x + d.y * d.y)
+			dirs[k] = d
+			lats[k] = rad_to_deg(atan2(d.z, horizontal))
+			lons[k] = rad_to_deg(atan2(d.y, d.x)) if horizontal > CubeSphere.POLE_EPSILON else center_lon
+			k += 1
+	return [dirs, lats, lons]
 
 
 ## The node's horizon map as HORIZON_LAYERS images (the layers of a Texture2DArray) of HORIZON_ROW x HORIZON_ROW
@@ -276,7 +362,7 @@ static func _horizon_layers(key: Vector4i, heights: HeightSource, radius_m: floa
 			grid_heights.append(height_m[k])
 	# One spacing per level (a cube face edge, pi / 2 of arc, halved per level), not this node's own longest edge: the
 	# march depends on it, so neighbours of a level must use the same value for their shared edge to match.
-	var spacing_m := radius_m * (PI / 2.0) / float(1 << key.y) / CELLS * HORIZON_STRIDE
+	var spacing_m := level_spacing_m(key.y, radius_m) * HORIZON_STRIDE
 	var elevations := heights.horizon_elevations(grid_lats, grid_lons, grid_heights, N_AZ, spacing_m, true)
 	if elevations.size() != HORIZON_TEXELS * N_AZ:
 		return none

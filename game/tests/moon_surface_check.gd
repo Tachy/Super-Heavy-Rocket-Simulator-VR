@@ -1,0 +1,375 @@
+# Headless consistency checks of the Moon terrain mesh with the procedural surface detail (moon procedural surface plan,
+# Task 7; needs data/ with the lunar terrain and the Diviner rock map):
+# - a level-18 node at the IM-2 site: its mesh vertices are the core's band-limited heights (surface_samples_detail at
+#   the level's vertex spacing) within 0.004 m;
+# - parent / child: the child fully morphed is its parent's mesh (vertices and normals), unmorphed it carries the finer
+#   detail; two neighbours of a level share their edge (unmorphed and morphed);
+# - horizon maps are baked only down to the measured data's level; deeper nodes draw with their owner's map, whose grid
+#   they address through horizon_grid_scale / offset (same directions);
+# - the tree refines to level 22 (1 cm spacing) 2 m above the ground with the detail on, and stops at the LOLA level as
+#   before with it off;
+# - detail off: no node samples the detail (band-limited path off) and every node owns its horizon.
+# Run: godot --headless --path game --script res://tests/moon_surface_check.gd [-- --measure]
+# --measure also prints node counts and summed build time of a synchronous tree converged 2 / 20 / 200 / 2000 m above
+# the site (detail off / on), the time of a 67 x 67 surface_samples_detail batch per level and moon_rocks on rock-rich
+# cells (Tycho).
+extends SceneTree
+
+const R := HeightSource.MOON_RADIUS_M
+const CELLS := TerrainNodeBuilder.CELLS
+const ROW := TerrainNodeBuilder.ROW
+const MESH_TOLERANCE_M := 0.004  ## the brief's mesh-vs-core tolerance (float32 vertices, a few um at level 18)
+const SEAM_TOLERANCE_M := 1.0e-4  ## float32 vertices relative to two node centres tens of metres apart
+const MAX_FRAMES := 4000
+const CLIMB_HEIGHTS_M := [2.0, 20.0, 200.0, 2000.0]
+## Tycho's floor and ejecta (selenographic deg): rock-rich in the Diviner map (young crater).
+const ROCKY_POINTS := [Vector2(-43.31, -11.36), Vector2(-42.5, -11.4), Vector2(-44.2, -11.0), Vector2(-43.3, -13.2)]
+
+var _failures := 0
+var _core: StarsimCore
+var _site := Vector2.ZERO
+
+
+func _initialize() -> void:
+	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
+	var site: Dictionary = TomlLite.load_file(config_dir.path_join("lunar_sites.toml"))["site"][0]
+	_site = Vector2(float(site["latitude_deg"]), float(site["longitude_deg"]))
+	_core = StarsimCore.new()
+	var loaded := _core.load_terrain(config_dir)
+	if not bool(loaded.get("moon", false)) or not bool(_core.moon_surface_statistics().get("present", false)):
+		print("  note  data/ lunar terrain or the detailed surface absent: checks skipped")
+		print("MOON SURFACE CHECK SKIPPED")
+		quit(0)
+		return
+	_core.set_moon_surface_detail(true)
+	_check_mesh_matches_core()
+	_check_parent_child()
+	_check_tree_and_horizons()
+	_core.set_moon_surface_detail(false)
+	_check_detail_off()
+	if OS.get_cmdline_user_args().has("--measure"):
+		_measure()
+	print("MOON SURFACE CHECK ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
+	quit(0 if _failures == 0 else 1)
+
+
+func _check(ok: bool, what: String) -> void:
+	print("  %s  %s" % ["ok  " if ok else "FAIL", what])
+	if not ok:
+		_failures += 1
+
+
+func _heights() -> HeightSource:
+	var heights := HeightSource.new()
+	heights.body = "moon"
+	heights.core = _core
+	return heights
+
+
+func _site_key(level: int) -> Vector4i:
+	return CubeSphere.key_at(CubeSphere.geodetic_direction(_site.x, _site.y), level)
+
+
+## Body-fixed position of grid vertex v of a built node (morph 0, or fully morphed with morph 1).
+static func _vertex_fixed(node: Dictionary, v: int, morph := 0.0) -> Vector3:
+	var p: Vector3 = node["vertices"][v]
+	var m: PackedFloat32Array = node["morph"]
+	p += Vector3(m[4 * v], m[4 * v + 1], m[4 * v + 2]) * morph
+	return node["center_fixed"] + Frames.from_render(p)
+
+
+# Level 18 at the site: every grid vertex's height above the sphere equals surface_samples_detail at the level's
+# spacing at that vertex (lat / lon from the vertex direction).
+func _check_mesh_matches_core() -> void:
+	var key := _site_key(18)
+	var node := TerrainNodeBuilder.build(key, _heights(), null, R)
+	var lats := PackedFloat64Array()
+	var lons := PackedFloat64Array()
+	var drawn := PackedFloat64Array()
+	for v in TerrainNodeBuilder.GRID_VERTICES:
+		var p := _vertex_fixed(node, v)
+		var ll := CubeSphere.lat_lon_deg(p.normalized())
+		lats.append(ll.x)
+		lons.append(ll.y)
+		drawn.append(p.length() - R)
+	var spacing := TerrainNodeBuilder.level_spacing_m(18, R)
+	var core_h: PackedFloat64Array = _core.surface_samples_detail("moon", lats, lons, spacing, INF)["height_m"]
+	var lola: PackedFloat64Array = _core.surface_samples("moon", lats, lons)["height_m"]
+	var worst := 0.0
+	var detail := 0.0
+	for v in drawn.size():
+		worst = maxf(worst, absf(drawn[v] - core_h[v]))
+		detail = maxf(detail, absf(core_h[v] - lola[v]))
+	_check(worst < MESH_TOLERANCE_M and detail > 10.0 * MESH_TOLERANCE_M,
+			"level 18 at the site: mesh = band-limited core heights within %.4f m (worst %s m; detail vs LOLA up to %.3f m)"
+			% [MESH_TOLERANCE_M, String.num_scientific(worst), detail])
+
+
+# Parent (level 17) and child (level 18) at the site, and the child's neighbour of its level.
+func _check_parent_child() -> void:
+	var heights := _heights()
+	var child_key := _site_key(18)
+	var parent_key := CubeSphere.parent(child_key)
+	var parent := TerrainNodeBuilder.build(parent_key, heights, null, R)
+	var child := TerrainNodeBuilder.build(child_key, heights, null, R)
+	var off_a := (child_key.z & 1) * (CELLS / 2)
+	var off_b := (child_key.w & 1) * (CELLS / 2)
+	var worst_morphed := 0.0
+	var worst_unmorphed := 0.0
+	var worst_normal := 0.0
+	var parent_normals: PackedVector3Array = parent["normals"]
+	var custom3: PackedFloat32Array = child["custom3"]
+	for b in ROW:
+		for a in ROW:
+			var v := b * ROW + a
+			# The parent's surface at the child vertex: its vertex (even) or the midpoint of the parent edge / diagonal
+			# the vertex lies on (the parent's triangles pass there).
+			var pa := off_a + (a >> 1)
+			var pb := off_b + (b >> 1)
+			var target: Vector3
+			if a & 1 and b & 1:
+				target = (_vertex_fixed(parent, pb * ROW + pa + 1) + _vertex_fixed(parent, (pb + 1) * ROW + pa)) * 0.5
+			elif b & 1:
+				target = (_vertex_fixed(parent, pb * ROW + pa) + _vertex_fixed(parent, (pb + 1) * ROW + pa)) * 0.5
+			elif a & 1:
+				target = (_vertex_fixed(parent, pb * ROW + pa) + _vertex_fixed(parent, pb * ROW + pa + 1)) * 0.5
+			else:
+				target = _vertex_fixed(parent, pb * ROW + pa)
+				var n := Vector3(custom3[3 * v], custom3[3 * v + 1], custom3[3 * v + 2])
+				worst_normal = maxf(worst_normal, n.angle_to(parent_normals[pb * ROW + pa]))
+			worst_morphed = maxf(worst_morphed, _vertex_fixed(child, v, 1.0).distance_to(target))
+			worst_unmorphed = maxf(worst_unmorphed, _vertex_fixed(child, v).distance_to(target))
+	_check(worst_morphed < SEAM_TOLERANCE_M and worst_normal < 1.0e-5,
+			"child fully morphed = parent mesh (worst %s m, parent normals %s rad); unmorphed it differs by up to %.3f m"
+			% [String.num_scientific(worst_morphed), String.num_scientific(worst_normal), worst_unmorphed])
+	_check(worst_unmorphed > 10.0 * SEAM_TOLERANCE_M, "the child carries detail its parent does not (%.3f m)"
+			% worst_unmorphed)
+	# Same-level neighbour (+s): its a = 0 column is the child's a = 64 column, unmorphed and morphed.
+	var right_key := Vector4i(child_key.x, child_key.y, child_key.z + 1, child_key.w)
+	var right := TerrainNodeBuilder.build(right_key, heights, null, R)
+	var worst_edge := 0.0
+	for b in ROW:
+		for morph in [0.0, 0.5, 1.0]:
+			worst_edge = maxf(worst_edge, _vertex_fixed(child, b * ROW + CELLS, morph).distance_to(
+					_vertex_fixed(right, b * ROW, morph)))
+	_check(worst_edge < SEAM_TOLERANCE_M, "neighbours of a level share their edge at morph 0 / 0.5 / 1 (worst %s m)"
+			% String.num_scientific(worst_edge))
+
+
+# A synchronous tree converged 2 m above the site with the detail on: the leaf under the camera is level 22; every
+# uploaded node either owns its horizon map (its parent splits on LOLA alone) or draws with an ancestor's that owns one
+# and whose children do not bake; horizon bakes are counted; a deep node's grid maps onto the owner's grid.
+func _check_tree_and_horizons() -> void:
+	var tree := _make_tree(_heights())
+	var ground := _ground_m(true)
+	var converge_ms := _converge(tree, _heights().position_fixed(_site.x, _site.y, ground + 2.0))
+	var leaf := _leaf_at(tree, _site.x, _site.y)
+	_check(leaf.y == TerrainQuadtree.MAX_LEVEL, "detail on, 2 m above the site: leaf level %d (spacing %.4f m), %d nodes, %d drawn, %.1f s"
+			% [leaf.y, TerrainNodeBuilder.level_spacing_m(leaf.y, R), tree.uploaded_keys().size(),
+			tree.drawn_keys().size(), converge_ms / 1000.0])
+	var owners_ok := true
+	var owned := 0
+	var borrowed := 0
+	var owner_levels := {}
+	var deep_key := Vector4i(-1, -1, -1, -1)
+	for key in tree.uploaded_keys():
+		var info := tree.node_info(key)
+		var owner: Vector4i = info["horizon_owner"]
+		if owner == key:
+			owned += 1
+			owners_ok = owners_ok and info["horizon_map"] != null
+			if key.y > TerrainQuadtree.ROOT_LEVEL:
+				owners_ok = owners_ok and tree.node_info(CubeSphere.parent(key))["children_bake"]
+		else:
+			borrowed += 1
+			var ancestor := key
+			while ancestor.y > owner.y:
+				ancestor = CubeSphere.parent(ancestor)
+			var owner_info := tree.node_info(owner)
+			owners_ok = owners_ok and ancestor == owner and not owner_info.is_empty() \
+					and owner_info["horizon_owner"] == owner and not owner_info["children_bake"] \
+					and info["horizon_map"] == owner_info["horizon_map"] and info["horizon_map"] != null
+			owner_levels[owner.y] = true
+			if key.y > deep_key.y:
+				deep_key = key
+	_check(owners_ok and borrowed > 0 and tree.stats["horizon_bakes"] == owned,
+			"horizon maps: %d nodes bake (stats %d), %d draw with an ancestor's (owner levels %s)"
+			% [owned, tree.stats["horizon_bakes"], borrowed, owner_levels.keys()])
+	_check(not owner_levels.has(leaf.y) and owner_levels.size() > 0 and owner_levels.keys().max() <= 13,
+			"owners stop at the LOLA level (deepest owner level %s; the 20 m tile ends at level 12)"
+			% owner_levels.keys().max())
+	# The deepest node's grid in its owner's grid: the same face coordinates at every corner and the centre.
+	var info := tree.node_info(deep_key)
+	var owner_key: Vector4i = info["horizon_owner"]
+	var material: ShaderMaterial = info["material"]
+	var scale: float = material.get_shader_parameter("horizon_grid_scale")
+	var offset: Vector2 = material.get_shader_parameter("horizon_grid_offset")
+	var worst := 0.0
+	for g: Vector2 in [Vector2(0, 0), Vector2(CELLS, 0), Vector2(0, CELLS), Vector2(CELLS, CELLS), Vector2(32, 32)]:
+		var o := g * scale + offset
+		var s_node := -1.0 + 2.0 * (deep_key.z * CELLS + g.x) / float(CELLS << deep_key.y)
+		var s_owner := -1.0 + 2.0 * (owner_key.z * CELLS + o.x) / float(CELLS << owner_key.y)
+		var t_node := -1.0 + 2.0 * (deep_key.w * CELLS + g.y) / float(CELLS << deep_key.y)
+		var t_owner := -1.0 + 2.0 * (owner_key.w * CELLS + o.y) / float(CELLS << owner_key.y)
+		worst = maxf(worst, maxf(absf(s_node - s_owner), absf(t_node - t_owner)))
+	_check(worst < 1.0e-12 and scale < 1.0, "level %d node addresses its level-%d owner's grid (scale %s, offset %s, "
+			% [deep_key.y, owner_key.y, scale, offset] + "face coordinate error %s)" % String.num_scientific(worst))
+	tree.free()
+
+
+# Detail off: the tree stops at the LOLA level (20 m tile: level 12, 10.4 m) 2 m above the site, every node owns its
+# horizon map, no node is band-limited (even vertices do not morph).
+func _check_detail_off() -> void:
+	var tree := _make_tree(_heights())
+	_converge(tree, _heights().position_fixed(_site.x, _site.y, _ground_m(false) + 2.0))
+	var leaf := _leaf_at(tree, _site.x, _site.y)
+	var all_owned := true
+	for key in tree.uploaded_keys():
+		all_owned = all_owned and tree.node_info(key)["horizon_owner"] == key
+	var node := TerrainNodeBuilder.build(_site_key(12), _heights(), null, R)
+	var even_still := true
+	var morph: PackedFloat32Array = node["morph"]
+	for b in range(0, ROW, 2):
+		for a in range(0, ROW, 2):
+			var v := b * ROW + a
+			even_still = even_still and morph[4 * v] == 0.0 and morph[4 * v + 1] == 0.0 and morph[4 * v + 2] == 0.0
+	_check(leaf.y == 12 and all_owned and even_still and tree.stats["horizon_bakes"] == tree.stats["builds"],
+			"detail off: leaf level %d, every node bakes its own horizon (%d of %d builds), even vertices do not morph"
+			% [leaf.y, tree.stats["horizon_bakes"], tree.stats["builds"]])
+	tree.free()
+
+
+func _make_tree(heights: HeightSource) -> TerrainQuadtree:
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/terrain_moon.gdshader")
+	var tree := TerrainQuadtree.new()
+	tree.synchronous = true
+	root.add_child(tree)
+	tree.setup(heights, null, R, material)
+	return tree
+
+
+## Updates until nothing is loading; returns the time taken (ms).
+func _converge(tree: TerrainQuadtree, camera_fixed_m: Vector3) -> int:
+	var start := Time.get_ticks_msec()
+	for frame in MAX_FRAMES:
+		tree.update_for_camera(camera_fixed_m)
+		if tree.stats["nodes_loading"] == 0 and tree.stats["uploads_last_frame"] == 0:
+			return Time.get_ticks_msec() - start
+	_check(false, "quadtree converged within %d frames" % MAX_FRAMES)
+	return Time.get_ticks_msec() - start
+
+
+func _leaf_at(tree: TerrainQuadtree, lat: float, lon: float) -> Vector4i:
+	var dir := CubeSphere.geodetic_direction(lat, lon)
+	for key in tree.drawn_keys():
+		if CubeSphere.key_at(dir, key.y) == key:
+			return key
+	return Vector4i(-1, -1, -1, -1)
+
+
+## The site's surface height: the full detail (rocks left out) or LOLA.
+func _ground_m(detail: bool) -> float:
+	var lat := PackedFloat64Array([_site.x])
+	var lon := PackedFloat64Array([_site.y])
+	var samples: Dictionary = _core.surface_samples_detail("moon", lat, lon, 0.0, INF) if detail \
+			else _core.surface_samples("moon", lat, lon)
+	return (samples["height_m"] as PackedFloat64Array)[0]
+
+
+## Selenographic (lat, lon) in deg of a polar stereographic tile pixel (line, sample) (terrain_quadtree_test.gd).
+static func _tile_point(tile: Dictionary, line: float, sample: float) -> Vector2:
+	var scale := float(tile["scale_m"])
+	var x := (sample + float(tile["first_sample"]) - float(tile["pole_sample"])) * scale
+	var y := (line + float(tile["first_line"]) - float(tile["pole_line"])) * scale
+	var rho := sqrt(x * x + y * y)
+	var lat := 2.0 * atan(rho / (2.0 * float(tile["sphere_radius_m"]))) - PI / 2.0
+	return Vector2(rad_to_deg(lat), rad_to_deg(atan2(x, -y)))
+
+
+func _measure() -> void:
+	print("  measure  synchronous tree above the site (one thread; build = summed TerrainNodeBuilder time)")
+	for detail in [false, true]:
+		_core.set_moon_surface_detail(detail)
+		for h: float in CLIMB_HEIGHTS_M:
+			var tree := _make_tree(_heights())
+			var ms := _converge(tree, _heights().position_fixed(_site.x, _site.y, _ground_m(detail) + h))
+			var levels := {}
+			for key in tree.drawn_keys():
+				levels[key.y] = int(levels.get(key.y, 0)) + 1
+			var builds: int = tree.stats["builds"]
+			print("  measure  detail %s, %5.0f m: %4d nodes uploaded, %4d drawn, leaf level %2d, %4d horizon bakes, "
+					% ["on " if detail else "off", h, tree.uploaded_keys().size(), tree.drawn_keys().size(),
+					_leaf_at(tree, _site.x, _site.y).y, tree.stats["horizon_bakes"]]
+					+ "build %.1f s (%.1f ms/node), converge %.1f s" % [tree.stats["build_ms"] / 1000.0,
+					tree.stats["build_ms"] / maxf(builds, 1), ms / 1000.0])
+			tree.free()
+	_core.set_moon_surface_detail(true)
+	print("  measure  surface_samples_detail, 67 x 67 lattice (band limit = level spacing, rocks off)")
+	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
+	var site: Dictionary = TomlLite.load_file(config_dir.path_join("lunar_sites.toml"))["site"][0]
+	var tile: Dictionary = TomlLite.load_file(config_dir.path_join("../data/terrain").simplify_path()
+			.path_join(str(site["id"]) + ".toml"))["grid"]
+	var tile_edge := _tile_point(tile, 0.5 * (int(tile["lines"]) - 1), int(tile["samples"]) - 1 - 500.0
+			/ float(tile["scale_m"]))
+	var places := []
+	for level in [6, 9, 12, 15, 18, 20, 22]:
+		places.append(["site", _site_key(level)])
+	for level in [12, 18, 22]:
+		places.append(["tile blend band (500 m inside the tile edge)",
+				CubeSphere.key_at(CubeSphere.geodetic_direction(tile_edge.x, tile_edge.y), level)])
+		places.append(["cube face edge (0, 45)", CubeSphere.key_at(CubeSphere.geodetic_direction(0.0, 45.0), level)])
+	for place: Array in places:
+		var key: Vector4i = place[1]
+		var level := key.y
+		var lats := PackedFloat64Array()
+		var lons := PackedFloat64Array()
+		for b in TerrainNodeBuilder.LATTICE:
+			for a in TerrainNodeBuilder.LATTICE:
+				var d := CubeSphere.direction(key.x, CubeSphere.lattice_coordinate(key.z, level, a - 1, CELLS),
+						CubeSphere.lattice_coordinate(key.w, level, b - 1, CELLS))
+				var ll := CubeSphere.lat_lon_deg(d)
+				lats.append(ll.x)
+				lons.append(ll.y)
+		var spacing := TerrainNodeBuilder.level_spacing_m(level, R)
+		var t0 := Time.get_ticks_usec()
+		_core.surface_samples_detail("moon", lats, lons, spacing, INF)
+		var t1 := Time.get_ticks_usec()
+		_core.surface_samples_detail("moon", lats, lons, spacing, INF)
+		var t2 := Time.get_ticks_usec()
+		_core.surface_samples("moon", lats, lons)
+		var t3 := Time.get_ticks_usec()
+		print("  measure  %s level %2d (%.4f m): detail cold %.1f ms, warm %.1f ms (%.1f us/point); LOLA %.2f ms"
+				% [place[0], level, spacing, (t1 - t0) / 1000.0, (t2 - t1) / 1000.0, (t2 - t1) / float(lats.size()),
+				(t3 - t2) / 1000.0])
+	var heights := _heights()
+	for place: Array in places:
+		var key: Vector4i = place[1]
+		var node := TerrainNodeBuilder.build(key, heights, null, R, CubeSphere.parent(key))
+		var t0 := Time.get_ticks_usec()
+		TerrainNodeBuilder.build(key, heights, null, R, CubeSphere.parent(key))
+		print("  measure  node build (no horizon bake) %s level %d: %.1f ms" % [place[0], key.y,
+				(Time.get_ticks_usec() - t0) / 1000.0])
+		node.clear()
+	print("  measure  moon_rocks on rock-rich cells (Tycho), 3 x 3 cells per point and level, D >= 0.01 m")
+	for level in range(16, 26):
+		var worst_us := 0
+		var most := 0
+		var total_us := 0
+		var cells := 0
+		var rocks := 0
+		for point: Vector2 in ROCKY_POINTS:
+			var key := CubeSphere.key_at(CubeSphere.geodetic_direction(point.x, point.y), level)
+			for dj in range(-1, 2):
+				for di in range(-1, 2):
+					var t0 := Time.get_ticks_usec()
+					var found: Dictionary = _core.moon_rocks(key.x, level, key.z + di, key.w + dj, 0.01)
+					var us := Time.get_ticks_usec() - t0
+					var n := (found["ids"] as PackedInt64Array).size()
+					worst_us = maxi(worst_us, us)
+					most = maxi(most, n)
+					total_us += us
+					rocks += n
+					cells += 1
+		print("  measure  rocks level %d: %d cells, %d rocks (most %d in a cell), %.1f us/cell mean, worst %d us"
+				% [level, cells, rocks, most, total_us / float(cells), worst_us])

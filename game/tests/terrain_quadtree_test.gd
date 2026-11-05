@@ -41,6 +41,9 @@ func _initialize() -> void:
 	_sites = TomlLite.load_file(_config_dir.path_join("launch_sites.toml")).get("site", [])
 	_core = StarsimCore.new()
 	var loaded := _core.load_terrain(_config_dir)
+	# The LOLA-only Moon (the fidelity flag moon_surface_detail off: the regression baseline of the terrain as before the
+	# procedural detail; the detail on is checked by moon_surface_check.gd).
+	_core.set_moon_surface_detail(false)
 	_terrain = bool(loaded.get("earth", false))
 	_moon_terrain = bool(loaded.get("moon", false))
 	_check_morph_ranges()

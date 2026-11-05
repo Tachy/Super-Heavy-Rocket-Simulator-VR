@@ -132,6 +132,10 @@ public:
     // For "moon" with the detail on this is the procedural limit (the finest generated wavelength, ~0.01 m).
     double surface_finest_resolution_m(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
                                        const godot::PackedFloat64Array& longitudes_deg) const;
+    // The same over the terrain data alone (LOLA for "moon", the procedural detail left out, whatever its flag): the
+    // level where the data ends (the renderer bakes terrain horizons down to it).
+    double surface_data_resolution_m(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
+                                     const godot::PackedFloat64Array& longitudes_deg) const;
 
     // Terrain horizon (terrain shadows; the Moon's sphere only, "earth" and unknown bodies have none): horizon
     // elevations (rad, + above the local horizontal) of an n x n vertex lattice of a terrain node (row-major,
@@ -271,6 +275,10 @@ protected:
 
 private:
     const environment::Terrain* terrain_of(const godot::String& body) const;
+    // environment::finest_resolution_m over degree arrays; INF for a null terrain or mismatched sizes (pushes an error
+    // naming `caller`).
+    static double finest_resolution_of(const environment::Terrain* terrain, const godot::PackedFloat64Array& latitudes_deg,
+                                       const godot::PackedFloat64Array& longitudes_deg, const char* caller);
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere() const;
 
     std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent

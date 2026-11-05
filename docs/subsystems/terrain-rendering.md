@@ -14,13 +14,26 @@ on top; it replaced the interim `GroundPatch`.
   (hides cracks between neighbours one level apart), vertices float32 relative to the node centre (float64
   body-fixed). Heights: one `surface_samples` call per node on a 67 x 67 lattice (one ring outside for seamless
   central-difference normals); without data/ the flat rule (site height near the sites, the ellipsoid / geoid
-  elsewhere).
+  elsewhere). On the Moon with the procedural detail on (fidelity flag `moon_surface_detail`, `moon-surface.md`; the
+  builder sees it as `surface_finest_resolution_m` < `surface_data_resolution_m`) the heights are
+  `surface_samples_detail` band-limited to the level's nominal vertex spacing (`TerrainNodeBuilder.level_spacing_m`,
+  R pi/2 / 2^L / 64, one value per level so neighbours of a level match on their edge; rocks left out): the area mean
+  over a vertex cell, so nothing finer than the mesh aliases and a parent is the mean of its children. A second call
+  samples the parent level's band (2 x the spacing) on the 35 x 35 even lattice points (one parent cell outside) for
+  the morph target. Detail off: `surface_samples` exactly as before (builder output bit-identical, SHA-256 of every
+  array before / after the change).
 - **LOD.** A node splits when the camera is closer to its bounding sphere than `LOD_FACTOR` x its size and its mesh
   spacing is coarser than the finest data under the whole lattice (`surface_finest_resolution_m`) or, where data is
   coarser or absent, than the curvature limit sqrt(8 R x 1 cm) (714 m Earth, 373 m Moon: cells sag <= 1 cm, so
-  vehicles stand on the drawn ground); it merges beyond `MERGE_FACTOR` 1.15 x that distance; `MAX_LEVEL` 21;
+  vehicles stand on the drawn ground); it merges beyond `MERGE_FACTOR` 1.15 x that distance; `MAX_LEVEL` 22;
   `LOD_FACTOR` 2.5. A parent stays drawn until all four children are uploaded (the drawn leaves always tile the
-  sphere). At Pad 2 with data the leaf under the camera reaches level 18 (1 m 3DEP cells).
+  sphere). At Pad 2 with data the leaf under the camera reaches level 18 (1 m 3DEP cells). This is the screen-size
+  (mipmap) rule: height and lateral distance enter as one distance, and a cell projects to at most 1 / (64 K) =
+  6.3 mrad when its node splits, so drawn cells span ~4.5-9 px of the VR target (0.69 mrad per px at the centre,
+  3534 px per eye) and ~4-8 px of a 1600 px desktop view at 70 deg: no node is split finer than that pixel footprint.
+  With the Moon's procedural detail the data limit is the detail's finest wavelength (0.01 m), so the Moon refines to
+  level 22 (1.02 cm spacing, `MAX_LEVEL`) under a camera ~2 m above the ground; detail off it stops at the LOLA level
+  as before.
 - **Morph.** Odd vertices carry the offset to the parent level's surface (CUSTOM0) and the parent-level normal
   (CUSTOM3); the shader blends both by the camera distance between `morph_start_m` and `morph_end_m`, set per node from
   `LOD_FACTOR` / `MERGE_FACTOR` so that a node is unmorphed whenever its children appear or vanish and a child is
@@ -28,7 +41,10 @@ on top; it replaced the interim `GroundPatch`.
   on both bodies; at K 2.5 the band is ~0.55 node sizes, smallest margin of start below end 0.05 of the end; quadtree
   test). The level-1 roots never morph. A node drawn for the first time also starts fully morphed (`morph_floor` 1 ->
   0 over `MORPH_IN_S` 0.5 s [E]): children whose upload came late slide in instead of popping; a parent shown again
-  after a merge gets no floor.
+  after a merge gets no floor. With the Moon's procedural detail the even vertices morph too, to the parent band's
+  height at the same point (the parent's own vertex there), and the parent-level normals of the even vertices are the
+  parent's central differences over that lattice: fully morphed a node is its parent's mesh (within float32 rounding),
+  unmorphed it carries the band between its and its parent's spacing.
 - **Camera precision.** The camera's body-local position reaches the shaders as one global per body and frame, float32
   hi + lo parts (`earth_terrain_camera_hi/lo`, `moon_terrain_camera_hi/lo`); each node's centre likewise per instance
   (`vertex_offset`, `vertex_offset_lo`, set once at upload). The shader forms (hi_c - hi_n) + (lo_c - lo_n): float32
@@ -78,7 +94,7 @@ on top; it replaced the interim `GroundPatch`.
   under the deck. Its ~15 extra global samplers per node need `rendering_device/d3d12/max_resource_descriptors`
   262144 in project.godot.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
-  colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine + terrain shadows). Leaf level 12, 10.4 m spacing at
+  colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine + terrain shadows). Detail off: leaf level 12, 10.4 m spacing at
   the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m;
   level 7, spacing 333 m). The lander's CG is drawn 18.11 m above the drawn surface = the session's `altitude_terrain_m`, 0.8 m from
   the site.
@@ -100,7 +116,16 @@ on top; it replaced the interim `GroundPatch`.
   horizon, the Sun with no umbra glow) skips its horizon. The visible fraction is the exact circular segment of the disc
   (angular radius r / distance) above that straight horizon; it multiplies the Sun term, the umbra glow and (own horizon,
   the Earth's disc) the earthshine. `sun_radius_m` / `earth_radius_m` are set from World (no shader defaults). Local
-  east / north come from the Moon-fixed position (pole +Y, any east at a pole). All levels get a horizon: the lattice
+  east / north come from the Moon-fixed position (pole +Y, any east at a pole). **Horizon owners:** a node bakes its own
+  map only down to the measured data's level - the nodes the tree had before the procedural detail: a child bakes when
+  its parent owns a map and would split on the LOLA resolution alone (`surface_data_resolution_m`, the `children_bake`
+  flag; at IM-2 owners stop at level 12). Deeper nodes draw with that owner's `Texture2DArray` (an ancestor, uploaded
+  while any descendant is wanted) and its `horizon_max_rad`; the quadtree sets `horizon_grid_scale` 2^-d and
+  `horizon_grid_offset` ((i - i_o 2^d), (j - j_o 2^d)) x 64 x 2^-d (d = level difference, exact dyadic floats), and the
+  shader takes the owner texel at CUSTOM2 x scale + offset (the lattices are linear in the face coordinates, so it is
+  the same point). With the detail the bake's observers are the LOLA heights (the march is over LOLA; the band-limited
+  vertices differ by up to ~10^2 m at coarse levels), so the maps equal the detail-off ones. Detail off every node owns
+  its map (as before). All baked levels get a horizon: the lattice
   march's step cap is max(1000 m, spacing / 2) (core), a single-point query keeps 1000 m. Bake and encode per node (one thread,
   idle machine, IM-2, stride 1, 2026-10-30): level 1 109 ms, 2 210, 3 385, 4 662, 5 220, 6 67, 7 54, 8 46, 9-12 38-39
   (the leaf 38 ms, of which the GDScript maximum loop ~5 ms). Levels 1-4 are expensive because their coarse lattice
@@ -123,6 +148,7 @@ on top; it replaced the interim `GroundPatch`.
 - Shaders: `terrain_earth.gdshader`, `terrain_moon.gdshader`, `terrain_morph.gdshaderinc`, `water.gdshaderinc`.
 - Imagery pipeline: `tools/data_pipeline/imagery.py`, `config/imagery.toml`.
 - Performance run: `game/tests/terrain_perf.gd` (GPU).
+- Moon procedural detail checks and cost runs: `game/tests/moon_surface_check.gd` (headless).
 
 ## Standing decisions
 
@@ -134,7 +160,31 @@ on top; it replaced the interim `GroundPatch`.
 ## Validation
 
 - Camera-precision test: relative error < 3e-7. Quadtree test: morph start < end for every level >= 2 on both bodies.
-- Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface.
+- Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface (detail
+  off; `terrain_quadtree_test.gd` runs the Moon with the detail off as the regression baseline).
+- Moon with the procedural detail (`game/tests/moon_surface_check.gd`, headless, ~25 min with its two converged trees;
+  `-- --measure` adds the cost runs, ~70 min): level 18 at IM-2 mesh = `surface_samples_detail` at the level spacing
+  (worst 6e-10 m in the builder's float64 arrays, tolerance 0.004 m; the detail differs from LOLA there by up to
+  0.52 m); child fully morphed = parent mesh (1.6e-9 m, normals 2e-8 rad), unmorphed 0.053 m of finer detail;
+  same-level neighbours share their edge at morph 0 / 0.5 / 1 (0 m); 2 m above IM-2 the leaf is level 22, 1208 of
+  2700 nodes bake a horizon (the detail-off tree's 1208), 1492 draw with an owner's (owner levels 7, 8, 9, 12), a level
+  22 node addresses its level-12 owner's grid exactly; detail off: leaf 12, every node bakes, even vertices still.
+  Detail off is identical to before: SHA-256 of every builder array of six nodes (Moon L5 / L7 / L12 / pole, Earth
+  with data and flat) before / after the change equal, and render_check images at 2 / 20 / 200 / 2000 m pixel-identical
+  (`--moon_detail=off --fixed_exposure --deterministic=32`). A render with the skirts tinted showed no skirt pixel at
+  2 m (no cracks).
+- Moon cost, IM-2 (one thread, synchronous tree from scratch, debug extension, i7-13700K; `--measure`), nodes uploaded
+  / drawn / leaf level / summed build time, detail off -> on: 2 m 1208 / 912 / 12 / 214 s -> 2700 / 2031 / 22 / 555 s;
+  20 m 1208 / 912 / 12 / 215 s -> 2284 / 1719 / 19 / 517 s; 200 m 1208 / 912 / 12 / 214 s -> 1856 / 1398 / 16 / 450 s;
+  2000 m 1180 / 891 / 12 / 212 s -> 1436 / 1083 / 13 / 384 s (the state between Tasks 6 and 7, LOLA sampled down to
+  level 21: 2 m 2600 / 1956 / 21 / 309 s). Node build without a bake 127-164 ms at levels 6-18 and 67-90 ms at 20-22
+  (the 67 x 67 band-limited batch 85-108 ms = 19-24 us per point, 28-44 ms at levels 20-22; LOLA 0.2 ms); in the tile
+  blend band about the same (155 / 169 / 74 ms at levels 12 / 18 / 22), in the cube face blend band 3-4x (420 / 519 /
+  274 ms, batch 67-83 us per point). Baking nodes add the band-limited batch to their bake. In a real window
+  (render_check, 8 builds in flight) the 2 m view settles after 3168 frames instead of 1290. GPU (median, RTX 4090,
+  detail off -> on): 1600 x 900 at 2 / 20 / 200 / 2000 m 1.29 / 1.29 / 0.84 / 0.96 ms -> 1.97 / 1.27 / 1.22 / 1.03 ms;
+  stereo mock at the VR target (3534 x 2838 per eye) 2 m 3.24 -> 4.96 ms (two interleaved rounds each, +1.7 ms: ~2.2x
+  the drawn triangles).
 - Performance (`terrain_perf.gd`, RTX 4090, D3D12, 2560 x 1440, vsync off, the editor binary the game runs with, clock
   at warp 1): descent above Pad 2 400 km -> 2 m in 60 s, 360 deg pan at 2 m on the plateau 180 m east of the mount,
   360 deg pan 50 m above the pad, jump to LC-39A. Final (K 2.5), frame ms p50 / p99 / max: descent 3.3 / 6.3 / 10.9,
@@ -151,6 +201,15 @@ on top; it replaced the interim `GroundPatch`.
   `class_name` terrain scripts.
 
 ## Open points and known limits
+
+- Moon with the procedural detail: node builds cost 70-520 ms each (two `surface_samples_detail` batches, serial per
+  call in the binding), so a site loads ~2.5x longer from scratch (2 m: 555 s summed, ~70 s on 8 workers) and the face
+  blend band is 3-4x dearer still; open: a per-node height cache or reuse of the parent's band (the parent already
+  holds the 2 x spacing heights at the even points), a release build of the extension, a parallel batch in the core.
+- At grazing view the detailed relief shows thin bright lines along ridge crests (Lommel-Seeliger brightens towards
+  mu -> 0; no skirt or crack pixels there, checked with tinted skirts); the Hapke shading (Task 9) changes this.
+- The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
+  does not rebuild its tree on a change.
 
 - Open for the user, unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site
   coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.

@@ -5,6 +5,7 @@
 #          [--watch_from_site[=2000]] (afterwards: seen from the ground 2000 m east of the site, aimed at the vehicle)
 # Ground view: --lat= --lon= [--height=] [--body=moon] (selenographic, MOON_ME; --height defaults to the core's
 #          surface there, the Earth's or the Moon's, --eye_height=2 above it) with --azimuth / --elevation / --fov
+#          [--moon_detail=off] (the fidelity flag moon_surface_detail off: the LOLA-only Moon as before the detail)
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed); with it [--catch_hull=<station m>] a
 #          static booster hull with that hull station on the arm deck (a picture of the closed pose, no flight).
@@ -24,9 +25,10 @@
 #          the settle waits until the baked volume's first set is baked and shown;
 #          --climb=<eye height m>,... [--climb_lon=<deg per step>] (a ground view: after the first settle
 #          the eye moves to each height in turn, each step waiting until the baked volume has re-baked about the new eye;
-#          a step that does not within CLIMB_MAX_FRAMES fails the run, exit code 1), --cloud_detail_levels=0..3 (the
-#          detail levels), --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default;
-#          closed form).
+#          a step that does not within CLIMB_MAX_FRAMES fails the run, exit code 1; without clouds shown, the Moon, a step
+#          waits for the settled terrain only; with --out each step also saves <out>_climb<height>.png),
+#          --cloud_detail_levels=0..3 (the detail levels), --cloud_scattering=table|closed (the multiple-scattering
+#          model: Monte Carlo table, default; closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Image identity: --deterministic[=64] once settled saves after exactly that many more frames (with --fixed_exposure,
 #          for before / after comparisons; the HUD's frame-rate line hidden). --repeat_identical[=2] once settled compares that many consecutive frames
@@ -110,6 +112,7 @@ func _initialize() -> void:
 		_args["look_at_sun"] = ""
 	if _args.has("stereo") and not _start_stereo(String(_args["stereo"])):
 		return
+	World.moon_surface_detail = _args.get("moon_detail", "on") != "off"  # read at the Moon terrain's setup
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
@@ -426,8 +429,10 @@ func _climb_done(world: World, settled: bool) -> bool:
 		return false
 	var heights: PackedFloat64Array = String(_args["climb"]).split_floats(",", false)
 	var baked := world.clouds.effect.baked
+	# Without clouds shown (the Moon) a step waits for the settled terrain only.
+	var clouds_shown: bool = baked != null and bool(ShaderGlobals.value(&"cloud_enabled"))
 	if _climb_next > 0:
-		var rebaked := baked != null and baked.bakes_done > _climb_bakes
+		var rebaked := not clouds_shown or baked.bakes_done > _climb_bakes
 		if not (settled and rebaked):
 			if _frames - _climb_move_frame > CLIMB_MAX_FRAMES:
 				print("render_check: climb FAIL: the step to %.0f m did not re-bake within %d frames (bakes %d -> %d)"
@@ -436,10 +441,19 @@ func _climb_done(world: World, settled: bool) -> bool:
 				_climb_failed = true
 				quit(1)
 			return false
-		var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") + ShaderGlobals.value(&"atmosphere_camera_lo")
-		print("render_check: climb step %d at %.0f m: %d frames, bakes %d -> %d, shown anchor %.0f m from the eye" % [
-				_climb_next, heights[_climb_next - 1], _frames - _climb_move_frame, _climb_bakes, baked.bakes_done,
-				baked.shown_anchor().distance_to(camera)])
+		if clouds_shown:
+			var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") 					+ ShaderGlobals.value(&"atmosphere_camera_lo")
+			print("render_check: climb step %d at %.0f m: %d frames, bakes %d -> %d, shown anchor %.0f m from the eye" % [
+					_climb_next, heights[_climb_next - 1], _frames - _climb_move_frame, _climb_bakes, baked.bakes_done,
+					baked.shown_anchor().distance_to(camera)])
+		else:
+			print("render_check: climb step %d at %.0f m: %d frames, terrain Earth %s, Moon %s" % [_climb_next,
+					heights[_climb_next - 1], _frames - _climb_move_frame, world.earth_terrain.stats,
+					world.moon_terrain.stats])
+		if _args.has("out"):  # each step's image beside the final one: <out>_climb<height>.png
+			var step_png := "%s_climb%.0f.png" % [String(_args["out"]).get_basename(), heights[_climb_next - 1]]
+			print("render_check: saved %s (error %d)" % [step_png,
+					root.get_viewport().get_texture().get_image().save_png(step_png)])
 	if _climb_next < heights.size():
 		var site: Dictionary = world.ground_site.duplicate()
 		site["eye_height_m"] = heights[_climb_next]
@@ -853,7 +867,8 @@ func _print_lunar_placement(world: World) -> void:
 
 
 # Ground view at --lat / --lon on the Earth or (--body=moon) the Moon; --height defaults to the core's surface there
-# (StarsimCore.surface_samples: the terrain, else the ellipsoid / the mean sphere), the eye --eye_height above it.
+# (StarsimCore.surface_samples_detail: the terrain with the Moon's procedural relief, else the ellipsoid / the mean
+# sphere), the eye --eye_height above it.
 func _view_from_ground(world: World) -> void:
 	var lat := float(_args["lat"])
 	var lon := float(_args["lon"])
@@ -862,7 +877,9 @@ func _view_from_ground(world: World) -> void:
 	if not _args.has("height"):
 		# The core's surface (the Earth terrain or the ellipsoid, the lunar terrain or the mean sphere): an eye at 0 m on
 		# the ellipsoid stood ~150 m inside the terrain at Dallas (night-vision review I5).
-		var samples: Dictionary = world.core.surface_samples(body, PackedFloat64Array([lat]), PackedFloat64Array([lon]))
+		# On the Moon with the procedural detail its full relief (rocks left out; = surface_samples without the detail).
+		var samples: Dictionary = world.core.surface_samples_detail(body, PackedFloat64Array([lat]),
+				PackedFloat64Array([lon]), 0.0, INF)
 		height = samples["height_m"][0] if bool(samples["present"]) else 0.0
 		print("render_check: %s ground view at %.4f, %.4f: surface %.2f m" % [body, lat, lon, height])
 	var site := {"id": "custom", "name": "custom", "body": body, "latitude_deg": lat, "longitude_deg": lon,

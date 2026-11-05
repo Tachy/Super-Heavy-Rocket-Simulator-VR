@@ -16,7 +16,9 @@ extends Node3D
 
 const LOD_FACTOR := 2.5  ## [E] split distance / node size (Task 9 measurement: see docs/subsystems.md)
 const MERGE_FACTOR := 1.15  ## [E] merge hysteresis
-const MAX_LEVEL := 21  ## [E] safety cap: ~7 cm cells at the Earth
+## [E] Safety cap: 7.5 cm cells at the Earth (where data or the curvature stop far above it); on the Moon level 22 is
+## 1.02 cm vertex spacing, the procedural detail's finest wavelength (~0.01 m): the finest drawn scale.
+const MAX_LEVEL := 22
 const ROOT_LEVEL := 1  ## the 6 x 4 level-1 nodes are built at setup and never freed
 ## [E] Main-thread time per frame for uploads (mesh + crop textures + water mask, ~0.3-1 ms each; at least one per frame).
 const UPLOAD_BUDGET_MS := 2.0
@@ -53,8 +55,10 @@ var upload_budget_ms := UPLOAD_BUDGET_MS
 ## Prefix of the global shader uniforms <prefix>_hi / <prefix>_lo that receive the camera's body-local render position
 ## (project.godot [shader_globals], read by the body's terrain shader); "" (tests): not written.
 var camera_global := ""
-## {nodes_drawn, nodes_loading, uploads_last_frame, update_ms (main-thread time of the last update)}
-var stats := {"nodes_drawn": 0, "nodes_loading": 0, "uploads_last_frame": 0, "update_ms": 0.0}
+## {nodes_drawn, nodes_loading, uploads_last_frame, update_ms (main-thread time of the last update), builds (node builds
+## collected so far), build_ms (their summed worker time), horizon_bakes (builds that baked a horizon map)}
+var stats := {"nodes_drawn": 0, "nodes_loading": 0, "uploads_last_frame": 0, "update_ms": 0.0, "builds": 0,
+		"build_ms": 0.0, "horizon_bakes": 0}
 var height_source: HeightSource
 var imagery: ImagerySource
 var radius_m := 1.0
@@ -97,6 +101,14 @@ class _Node:
 	var merge_distance_sq := 0.0
 	var morph_range_m := Vector2.ZERO  ## (start, end): morph 0 closer than start, 1 beyond end
 	var max_resolution_m := INF
+	## The node whose horizon map it draws with (itself, or below the measured data's level an ancestor:
+	## TerrainNodeBuilder.build) and that map (null: none).
+	var horizon_owner: Vector4i
+	var horizon_map: Texture2DArray
+	var horizon_max_rad := 0.0
+	## Its children own horizon maps: it owns one and would split on the measured data alone (the tree before the
+	## procedural detail; without detail the same as can_split).
+	var children_bake := false
 	var split := false
 	var children: Array[_Node] = []  ## the four children while split (all uploaded)
 	var reached_frame := -1
@@ -127,7 +139,9 @@ func setup(heights: HeightSource, imagery_source: ImagerySource, body_radius_m: 
 		for j in 1 << ROOT_LEVEL:
 			for i in 1 << ROOT_LEVEL:
 				var key := Vector4i(face, ROOT_LEVEL, i, j)
-				_upload(_build(key, height_source, imagery, radius_m))
+				var result := _build(key, height_source, imagery, radius_m)
+				_count_build(result)
+				_upload(result)
 				_roots.append(_nodes[key])
 	for node in _roots:
 		node.instance.visible = true
@@ -241,14 +255,22 @@ func visible_keys() -> Array[Vector4i]:
 	return keys
 
 
-## {center_fixed, radius_m, size_m, split, morph_range_m, morph_floor} of an uploaded node, {} otherwise (tests,
-## diagnostics).
+## {center_fixed, radius_m, size_m, split, morph_range_m, morph_floor, horizon_owner, horizon_map, children_bake,
+## material} of an uploaded node, {} otherwise (tests, diagnostics).
 func node_info(key: Vector4i) -> Dictionary:
 	if not _nodes.has(key):
 		return {}
 	var node: _Node = _nodes[key]
 	return {"center_fixed": node.center_fixed, "radius_m": node.radius_m, "size_m": node.size_m, "split": node.split,
-			"morph_range_m": node.morph_range_m, "morph_floor": node.morph_floor}
+			"morph_range_m": node.morph_range_m, "morph_floor": node.morph_floor, "horizon_owner": node.horizon_owner,
+			"horizon_map": node.horizon_map, "children_bake": node.children_bake, "material": node.material}
+
+
+## Keys of every uploaded node (drawn leaves and their hidden ancestors; tests, diagnostics).
+func uploaded_keys() -> Array[Vector4i]:
+	var keys: Array[Vector4i] = []
+	keys.assign(_nodes.keys())
+	return keys
 
 
 func _exit_tree() -> void:
@@ -298,7 +320,7 @@ func _gather_children(node: _Node) -> void:
 	for key in keys:
 		if not _nodes.has(key):
 			ready = false
-			_request(key)
+			_request(key, key if node.children_bake else node.horizon_owner)
 	for key in keys:
 		var child: _Node = _nodes.get(key)
 		if child == null:
@@ -310,10 +332,11 @@ func _gather_children(node: _Node) -> void:
 			_reached_count += 1
 
 
-func _request(key: Vector4i) -> void:
+## Requests node `key`, built with its horizon owner (TerrainNodeBuilder.build).
+func _request(key: Vector4i, horizon_owner: Vector4i) -> void:
 	_wanted[key] = true
 	if not _in_flight.has(key) and not _finished.has(key):
-		_pending[key] = true
+		_pending[key] = horizon_owner
 
 
 ## Visibility from the drawn sets (only changes touch instances); a node drawn for the first time starts its morph
@@ -409,31 +432,43 @@ func _dispatch() -> void:
 	for key in order:
 		if not synchronous and _in_flight.size() >= MAX_BUILDS_IN_FLIGHT:
 			break
+		var owner: Vector4i = _pending[key]
 		_pending.erase(key)
 		if synchronous:
-			_finished[key] = _build(key, height_source, imagery, radius_m)
+			_finished[key] = _build(key, height_source, imagery, radius_m, owner)
+			_count_build(_finished[key])
 		else:
-			_in_flight[key] = WorkerThreadPool.add_task(_build_task.bind(key, height_source, imagery, radius_m),
+			_in_flight[key] = WorkerThreadPool.add_task(_build_task.bind(key, height_source, imagery, radius_m, owner),
 					false, "terrain node")
 
 
 ## Worker task: builds one node and stores the result for the main thread.
-func _build_task(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource, body_radius_m: float) -> void:
-	var result := _build(key, heights, imagery_source, body_radius_m)
+func _build_task(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource, body_radius_m: float,
+		horizon_owner: Vector4i) -> void:
+	var result := _build(key, heights, imagery_source, body_radius_m, horizon_owner)
 	_results_mutex.lock()
 	_results[key] = result
 	_results_mutex.unlock()
 
 
-## TerrainNodeBuilder.build plus the node's bounding radius (thread-safe, pure data).
+## TerrainNodeBuilder.build plus the node's bounding radius and its build time (build_ms; thread-safe, pure data).
 static func _build(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource,
-		body_radius_m: float) -> Dictionary:
-	var result := TerrainNodeBuilder.build(key, heights, imagery_source, body_radius_m)
+		body_radius_m: float, horizon_owner := Vector4i(-1, -1, -1, -1)) -> Dictionary:
+	var start_us := Time.get_ticks_usec()
+	var result := TerrainNodeBuilder.build(key, heights, imagery_source, body_radius_m, horizon_owner)
 	var radius_sq := 0.0
 	for v: Vector3 in result["vertices"]:
 		radius_sq = maxf(radius_sq, v.length_squared())
 	result["radius_m"] = sqrt(radius_sq)
+	result["build_ms"] = (Time.get_ticks_usec() - start_us) * 1.0e-3
 	return result
+
+
+func _count_build(result: Dictionary) -> void:
+	stats["builds"] += 1
+	stats["build_ms"] += float(result["build_ms"])
+	if result["horizon"] != null:
+		stats["horizon_bakes"] += 1
 
 
 ## Completed worker tasks: results move to the upload queue (unwanted ones are dropped at the next dispatch).
@@ -450,6 +485,7 @@ func _collect_builds() -> void:
 		var result: Dictionary = _results[key]
 		_results.erase(key)
 		_results_mutex.unlock()
+		_count_build(result)
 		_finished[key] = result
 
 
@@ -504,12 +540,30 @@ func _upload(result: Dictionary) -> void:
 		material.set_shader_parameter(crop_name + "_coverage_deg", Vector4(coverage.position.x, coverage.position.y,
 				coverage.end.x, coverage.end.y))
 		material.set_shader_parameter(crop_name + "_fade_m", float(crop["fade_m"]))
+	var horizon_owner: Vector4i = result["horizon_owner"]
+	var horizon_map: Texture2DArray = null
+	var horizon_max_rad := 0.0
 	if result["horizon"] != null:  # bodies without horizon maps (the Earth) build none
-		var horizon_map := Texture2DArray.new()
+		horizon_map = Texture2DArray.new()
 		horizon_map.create_from_images(result["horizon"])
+		horizon_max_rad = float(result["horizon_max_rad"])
+	elif horizon_owner != key and _nodes.has(horizon_owner):
+		# Below the measured data's level: the owner's (an ancestor's, uploaded while any descendant is wanted) map, its
+		# grid addressed through the node's place in it (the lattices are linear in the face coordinates).
+		var owner: _Node = _nodes[horizon_owner]
+		horizon_map = owner.horizon_map
+		horizon_max_rad = owner.horizon_max_rad
+		if horizon_map != null:
+			var depth := key.y - horizon_owner.y
+			var scale := 1.0 / float(1 << depth)
+			material.set_shader_parameter("horizon_grid_scale", scale)
+			material.set_shader_parameter("horizon_grid_offset", Vector2(
+					float(key.z - (horizon_owner.z << depth)), float(key.w - (horizon_owner.w << depth)))
+					* (TerrainNodeBuilder.CELLS * scale))
+	if horizon_map != null:
 		material.set_shader_parameter("horizon_map", horizon_map)
 		material.set_shader_parameter("horizon_stride", float(TerrainNodeBuilder.HORIZON_STRIDE))
-		material.set_shader_parameter("horizon_max_rad", float(result["horizon_max_rad"]))
+		material.set_shader_parameter("horizon_max_rad", horizon_max_rad)
 		material.set_shader_parameter("horizon_enabled", true)
 	if result["water_mask"] != null:  # bodies without water (the Moon) build none
 		material.set_shader_parameter("water_mask", ImageTexture.create_from_image(result["water_mask"]))
@@ -523,6 +577,11 @@ func _upload(result: Dictionary) -> void:
 	node.max_resolution_m = result["max_resolution_m"]
 	node.can_split = key.y < MAX_LEVEL \
 			and node.size_m / TerrainNodeBuilder.CELLS > minf(node.max_resolution_m, curvature_spacing_m)
+	node.horizon_owner = horizon_owner
+	node.horizon_map = horizon_map
+	node.horizon_max_rad = horizon_max_rad
+	node.children_bake = horizon_owner == key and key.y < MAX_LEVEL \
+			and node.size_m / TerrainNodeBuilder.CELLS > minf(float(result["data_resolution_m"]), curvature_spacing_m)
 	node.split_distance_sq = pow(LOD_FACTOR * node.size_m + node.radius_m, 2.0)
 	node.merge_distance_sq = pow(MERGE_FACTOR * LOD_FACTOR * node.size_m + node.radius_m, 2.0)
 	node.material = material

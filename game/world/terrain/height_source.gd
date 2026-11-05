@@ -52,6 +52,18 @@ func sample(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> Dicti
 	return {"height_m": heights, "water": water}
 
 
+## The same heights band-limited to min_wavelength_m (the Moon's procedural detail averaged over a footprint of that
+## size, StarsimCore.surface_samples_detail; rocks left out): a terrain node asks with its vertex spacing. Without the
+## detail (another body, no core, or the core's moon_surface_detail flag off) exactly sample().
+func sample_band_limited(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array,
+		min_wavelength_m: float) -> Dictionary:
+	if body == "moon" and core != null:
+		var samples: Dictionary = core.surface_samples_detail(body, lats_deg, lons_deg, min_wavelength_m, INF)
+		if bool(samples["present"]):
+			return {"height_m": samples["height_m"], "water": samples["water"]}
+	return sample(lats_deg, lons_deg)
+
+
 ## Whether the body can have water at all (the Earth's sea on the geoid; the Moon has none): bodies without skip the
 ## per-node water mask.
 func has_water() -> bool:
@@ -87,6 +99,20 @@ func finest_resolution_m(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Ar
 	if core == null:
 		return INF
 	return core.surface_finest_resolution_m(body, lats_deg, lons_deg)
+
+
+## Whether the surface can carry procedural detail below the measured data (the Moon with the core; whether it is on
+## shows finest_resolution_m() < data_resolution_m()).
+func may_have_detail() -> bool:
+	return body == "moon" and core != null
+
+
+## The finest resolution of the measured terrain data alone (LOLA on the Moon, the procedural detail left out) over the
+## given points; equals finest_resolution_m() where no procedural detail is on. INF without terrain data.
+func data_resolution_m(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> float:
+	if core == null:
+		return INF
+	return core.surface_data_resolution_m(body, lats_deg, lons_deg)
 
 
 ## Body-fixed position (m) of a point at height_m above the reference surface (Earth: WGS84, Moon: sphere).

@@ -26,6 +26,10 @@ global uniform vec3 moon_terrain_camera_lo;
 // The node's horizon map: layer c (RGBAH, row x row) texel (i, j) = grid vertex (i, j) * horizon_stride, azimuths
 // 4 c .. 4 c + 3 (elevation, rad); texel centres are the vertices, so the filter interpolates between them.
 uniform float horizon_stride = 1.0;  // grid vertices per texel (TerrainNodeBuilder.HORIZON_STRIDE, set by the quadtree)
+// A node below the measured data's level draws with its ancestor's map (the map's owner): its grid position maps to
+// the owner's grid as CUSTOM2 * scale + offset (1, 0: the node's own map; set by the quadtree).
+uniform float horizon_grid_scale = 1.0;
+uniform vec2 horizon_grid_offset = vec2(0.0);
 uniform sampler2DArray horizon_map : filter_linear, repeat_disable;
 uniform float horizon_max_rad = 0.0;  // the highest elevation in the map (with margin): a light above it is not hidden
 uniform bool horizon_enabled = false;  // a node without a horizon (no terrain data) lights without terrain shadows
@@ -51,8 +55,8 @@ void vertex() {
 	local_position = VERTEX + vertex_offset;
 	local_normal = NORMAL;
 	global_uv = CUSTOM1.xy;
-	// Texel centres are the grid vertices.
-	horizon_uv = (CUSTOM2.xy / horizon_stride + 0.5) / float(textureSize(horizon_map, 0).x);
+	// Texel centres are the (owner's) grid vertices.
+	horizon_uv = ((CUSTOM2.xy * horizon_grid_scale + horizon_grid_offset) / horizon_stride + 0.5) / float(textureSize(horizon_map, 0).x);
 	camera_offset = VERTEX - camera_local;
 }
 

@@ -41,6 +41,9 @@ var towers: Array[TowerView] = []  ## catch towers of the launch sites
 var drone_ship: DroneShipView = null  ## the drone ship of the flight's landing zone (while it has a deck)
 var moon := CelestialBody.new()
 var moon_terrain := TerrainQuadtree.new()  ## streamed lunar surface (LDEM_16 + site tiles) while not in scaled space
+## Fidelity flag moon_surface_detail for the world created next (read at the Moon terrain's setup; the core and the
+## flight follow it): off draws the LOLA-only surface as before the procedural detail (render_check --moon_detail=off).
+static var moon_surface_detail := true
 var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
 ## The Moon's light on Godot's lit materials at night (Atmosphere.moon_light_at; energy 0 by day; no shadows).
@@ -796,6 +799,8 @@ func _setup_earth_terrain(data_dir: String) -> void:
 ## moon.fixed_to_gcrf; no imagery: terrain_moon.gdshader takes the albedo from moon_color through the global UV.
 ## After _setup_earth_terrain (which loads the core's terrain).
 func _setup_moon_terrain() -> void:
+	core.set_moon_surface_detail(moon_surface_detail)  # before the first node build (the roots, below)
+	flight.sim.set_moon_surface_detail(moon_surface_detail)
 	var heights := HeightSource.new()
 	_moon_heights = heights
 	heights.body = "moon"

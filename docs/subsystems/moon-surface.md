@@ -1,9 +1,9 @@
 # Moon procedural near-ground surface
 
 Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 5 (craters, regolith
-roughness and rocks in the core; the composed physics surface and disc footpads; the touchdown hazard check;
-rendering follows).
+`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 7 (craters, regolith
+roughness and rocks in the core; the composed physics surface and disc footpads; the touchdown hazard check; the
+bindings; the terrain mesh down to the cm detail; rocks, shading and shadows in the renderer follow).
 
 ## Model
 Measured statistics in `config/moon_surface.toml`; the generator `environment::LunarSurfaceDetail` (craters +
@@ -235,9 +235,18 @@ on top of that relief.
   `axes_m` (3), `diameter_m`, `burial_m`, `base_height_m`, `albedo`, `template`.
 - `rock_template_mesh(id, lod)` (lod 0..3 = 2562 / 642 / 162 / 42 vertices); `moon_surface_statistics()` (Hapke, crater
   / rock SFD, roughness, rock cover samples `cover_diameters_m` / `cover_above_m`: 33 log-spaced diameters).
-- `surface_finest_resolution_m("moon")` returns 0.01 m with detail on: the terrain quadtree's `can_split` then follows
-  the curvature spacing only (Task 7 to review).
+- `surface_finest_resolution_m("moon")` returns 0.01 m with detail on (the quadtree's data limit, Task 7);
+  `surface_data_resolution_m(body, lats, lons)` (Task 7) the same over the measured data alone (LOLA), whatever the
+  flag.
 - Thread safety: queries are const and use per-thread memos; the flags are atomics.
+
+### Terrain mesh (Task 7)
+- The Moon's quadtree draws the band-limited surface: every node samples `surface_samples_detail` at its level's
+  vertex spacing (rocks off) and morphs all vertices to its parent's band; it refines by the existing screen-size rule
+  down to level 22 (1.02 cm) near the camera; horizon maps are baked only down to the LOLA level, deeper nodes use their
+  owner's. Details, numbers and costs: `terrain-rendering.md`. `World.moon_surface_detail` (static, read at the Moon
+  terrain's setup; render_check `--moon_detail=off`) sets the core's and the flight's flag; switching it for a running
+  world needs a rebuilt Moon tree (not built). `SurfaceClearance` keeps cameras above the full-detail surface.
 
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
@@ -572,6 +581,6 @@ geometry (g near 0) is not observed there. The published global-average table of
   Guo's 4 mm before rocks): Task 3's summed check should include a corner window, or the amplitude could take the
   lattice skew into account. (Stationarity numbers measured before the face blend of fix round 1.)
 - Queries inside the face blend band (+-13.6 km along the 12 cube edges) cost ~3-6 x more (cross footprint means);
-  terrain nodes there (Task 7) should cache.
+  terrain nodes there build 3-4x slower (Task 7: 274-519 ms per node against 67-164 ms elsewhere); no cache yet.
 - Generated craters up to 2 km and roughness up to ~1 km wavelength outside the tiles are statistical, not the real
   features at those places (LOLA_16 does not resolve them).

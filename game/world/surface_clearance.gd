@@ -2,8 +2,8 @@ class_name SurfaceClearance
 extends RefCounted
 ## Keeps a camera at least MIN_CLEARANCE_M above the terrain surface of the Earth and the Moon (user 2026-10-29: no
 ## camera may come closer than 1 m or pierce the surface). The surface is the terrain renderer's height source
-## (HeightSource: the core's terrain / sea on the geoid, else the flat rule / mean sphere); a camera below it is moved
-## out along the local vertical to the surface + the clearance.
+## (HeightSource: the core's terrain / sea on the geoid with the Moon's procedural relief at full detail, else the flat
+## rule / mean sphere); a camera below it is moved out along the local vertical to the surface + the clearance.
 
 const MIN_CLEARANCE_M := 1.0
 const _WGS84_E2 := 6.69437999014e-3  ## [S: NIMA TR8350.2] first eccentricity squared
@@ -14,7 +14,7 @@ static func clamp_fixed(p_fixed_m: Vector3, heights: HeightSource) -> Vector3:
 	if heights == null or p_fixed_m.length() < 1.0:
 		return p_fixed_m
 	var geo := _geodetic(p_fixed_m, heights.body == "earth")  # (lat_deg, lon_deg, height above the reference surface)
-	var surface: Dictionary = heights.sample(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]))
+	var surface: Dictionary = heights.sample_band_limited(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]), 0.0)
 	var floor_m: float = (surface["height_m"] as PackedFloat64Array)[0] + MIN_CLEARANCE_M
 	if geo.z >= floor_m:
 		return p_fixed_m
@@ -27,7 +27,7 @@ static func surface_distance_m(p_fixed_m: Vector3, heights: HeightSource) -> flo
 	var geo := _geodetic(p_fixed_m, heights == null or heights.body == "earth")
 	if heights == null:
 		return maxf(geo.z, 0.0)
-	var surface: Dictionary = heights.sample(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]))
+	var surface: Dictionary = heights.sample_band_limited(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]), 0.0)
 	return maxf(geo.z - (surface["height_m"] as PackedFloat64Array)[0], 0.0)
 
 

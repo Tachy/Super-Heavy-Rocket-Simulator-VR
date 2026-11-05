@@ -575,10 +575,22 @@ double StarsimCore::surface_finest_resolution_m(const godot::String& body,
     if (terrain != nullptr && body.to_lower() == "moon" && moon_surface_ != nullptr && moon_detail_on_) {
         terrain = moon_surface_.get();  // the procedural limit
     }
+    return finest_resolution_of(terrain, latitudes_deg, longitudes_deg, "surface_finest_resolution_m");
+}
+
+double StarsimCore::surface_data_resolution_m(const godot::String& body,
+                                              const godot::PackedFloat64Array& latitudes_deg,
+                                              const godot::PackedFloat64Array& longitudes_deg) const {
+    return finest_resolution_of(terrain_of(body), latitudes_deg, longitudes_deg, "surface_data_resolution_m");
+}
+
+double StarsimCore::finest_resolution_of(const environment::Terrain* terrain,
+                                         const godot::PackedFloat64Array& latitudes_deg,
+                                         const godot::PackedFloat64Array& longitudes_deg, const char* caller) {
     if (terrain == nullptr) return std::numeric_limits<double>::infinity();
     if (latitudes_deg.size() != longitudes_deg.size()) {
-        godot::UtilityFunctions::push_error(
-            "StarsimCore.surface_finest_resolution_m: Breiten und Längen müssen gleich viele sein");
+        godot::UtilityFunctions::push_error(godot::String("StarsimCore.") + caller +
+                                            ": Breiten und Längen müssen gleich viele sein");
         return std::numeric_limits<double>::infinity();
     }
     const auto n = static_cast<size_t>(latitudes_deg.size());
@@ -1302,6 +1314,8 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("terrain_max_height_m", "body"), &StarsimCore::terrain_max_height_m);
     ClassDB::bind_method(D_METHOD("surface_finest_resolution_m", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_finest_resolution_m);
+    ClassDB::bind_method(D_METHOD("surface_data_resolution_m", "body", "latitudes_deg", "longitudes_deg"),
+                         &StarsimCore::surface_data_resolution_m);
     ClassDB::bind_method(D_METHOD("load_atmosphere", "config_dir", "cache_dir"), &StarsimCore::load_atmosphere);
     ClassDB::bind_method(D_METHOD("atmosphere_sun_transmittance", "position_itrf_m", "sun_direction_itrf"),
                          &StarsimCore::atmosphere_sun_transmittance);
