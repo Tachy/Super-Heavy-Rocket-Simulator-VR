@@ -8,7 +8,13 @@
 # - earthshine only (the Sun 5 deg below the horizon, the Earth 7 deg up): the near shadows on and off give the same
 #   pixels;
 # - off: with the near shadows off the image equals the former unshaded shader's (--old_shader=<path>: the shader's
-#   text before Task 12, e.g. from `git show dbb5c598:game/shaders/terrain_moon.gdshader`), pixel for pixel.
+#   text before Task 12, e.g. from `git show dbb5c598:game/shaders/terrain_moon.gdshader`), pixel for pixel;
+# - a lander on the ground (Task 12 fix 1, review I1): the HLS model (data/models/starship_hls, VehicleModels; legs
+#   deployed, feet on the ground) placed statically on the flat ground at a Sun elevation of 20 deg shadows the ground:
+#   the shadow's half-shadow point on the centre line lies between the geometric tip (the model's vertices projected
+#   along the Sun, + 1 m) and the tip minus the solar disc's penumbra at the model's top (a pointed nose's shadow narrows
+#   into the penumbra), and the ground halfway along the shadow keeps no Sun;
+# - the fidelity setting's persistence (user settings file round trip, a test file).
 # Run: godot --path game --script res://tests/moon_shadow_check.gd [-- --old_shader=<abs path>] [--out=<dir>]
 extends SceneTree
 
@@ -20,6 +26,14 @@ const CASTER_WIDTH_M := 0.5
 const SUN_ELEVATION_DEG := 7.0
 const LENGTH_TOLERANCE_M := 1.0  ## the brief's gate
 const FRAMES := 8  ## frames after each change before the readback
+const HLS_VEHICLE := "starship_hls"
+const HLS_SUN_ELEVATION_DEG := 20.0
+const HLS_VIEW_M := 220.0  ## orthographic view edge for the lander's shadow (m)
+const HLS_CAMERA_Y_M := 200.0
+## The eye height handed to MoonNearShadow for the lander step: its range (150 + 4 h m) holds the orthographic camera's
+## view depth (HLS_CAMERA_Y_M) inside the unfaded part.
+const HLS_NEAR_HEIGHT_M := 100.0
+const TIP_MARGIN_M := 1.0  ## beyond the geometric tip (the rock gate's tolerance)
 
 var _viewport: SubViewport
 var _camera: Camera3D
@@ -34,6 +48,9 @@ var _wait := 0
 var _images := {}
 var _failures := 0
 var _out_dir := ""
+var _hls: Node3D  ## the lander model (null: no fresh models)
+var _hls_tip_m := NAN  ## the geometric shadow tip along the Sun's azimuth (m from the axis)
+var _hls_height_m := 0.0
 
 
 func _initialize() -> void:
@@ -63,7 +80,7 @@ func _initialize() -> void:
 	# The ground: a flat 400 m square through the production terrain shader; the Moon-local frame is the world's,
 	# offset to the surface (vertex_offset: the node centre's local position).
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(400.0, 400.0)
+	plane.size = Vector2(400.0, 400.0)  # also holds the lander's shadow (view x -184 .. 36 m)
 	plane.subdivide_width = 100
 	plane.subdivide_depth = 100
 	_ground = MeshInstance3D.new()
@@ -107,6 +124,9 @@ func _initialize() -> void:
 				old.code = text
 				_steps.append({"name": "off_old", "sun": SUN_ELEVATION_DEG, "earth": 7.0, "near": false, "caster": false,
 						"shader": old})
+	if not OS.get_cmdline_user_args().has("--no_lander"):  # last: it moves the camera and stays in the scene
+		_steps.append({"name": "hls", "sun": HLS_SUN_ELEVATION_DEG, "earth": -10.0, "near": true, "caster": false,
+				"hls": true})
 	_next()
 
 
@@ -124,7 +144,21 @@ func _next() -> void:
 	_light.basis = Basis.looking_at(-sun, Vector3.UP if absf(sun.y) < 0.99 else Vector3.RIGHT)
 	_light.visible = float(step["sun"]) > -90.0
 	MoonNearShadow.enabled = bool(step["near"])
-	_near.update(_light, true, 2.0, Atmosphere.ASTRONOMICAL_UNIT_M, _camera.position)
+	var lander := bool(step.get("hls", false))
+	if lander:
+		# Loaded only now: its materials' pipelines compiling in the background changed the identity steps' images by
+		# 2 codes (the engine's fallback pipelines) when it was there from the start.
+		_hls = _build_hls()
+		if _hls == null:
+			_next()
+			return
+		_viewport.add_child(_hls)
+		_camera.size = HLS_VIEW_M
+		_camera.far = 2.0 * HLS_CAMERA_Y_M
+		var centre_x := -0.5 * _hls_tip_m
+		_camera.look_at_from_position(Vector3(centre_x, HLS_CAMERA_Y_M, 0.0), Vector3(centre_x, 0.0, 0.0), Vector3(0, 0, -1))
+	ShaderGlobals.set_value(&"moon_terrain_camera_hi", Vector3(0.0, R, 0.0) + _camera.position)
+	_near.update(_light, true, HLS_NEAR_HEIGHT_M if lander else 2.0, Atmosphere.ASTRONOMICAL_UNIT_M, _camera.position)
 	_caster.visible = bool(step["caster"])
 	_ground.material_override = _material
 	if step.has("shader"):
@@ -133,7 +167,7 @@ func _next() -> void:
 		for p in ["albedo_texture", "sun_radius_m", "earth_radius_m"]:
 			old.set_shader_parameter(p, _material.get_shader_parameter(p))
 		_ground.material_override = old
-	_wait = FRAMES
+	_wait = FRAMES * (4 if lander else 1)
 
 
 ## Unit direction at elevation / azimuth (deg) in the ground's frame (+Y up, azimuth 0 along +X).
@@ -165,6 +199,14 @@ func _finish() -> void:
 		_check_same("near shadows off: the shader before Task 12", _images["off_new"], _images["off_old"])
 	else:
 		print("moon_shadow_check:   info  no --old_shader: the off-identity check skipped")
+	if _images.has("hls"):
+		_check_hls(_images["hls"])
+	elif OS.get_cmdline_user_args().has("--no_lander"):
+		print("moon_shadow_check:   info  --no_lander: the lander check skipped")
+	else:
+		_check(false, "lander shadow: no %s model (%s; run python tools/structures/build_models.py --vehicle %s)" % [
+				HLS_VEHICLE, VehicleModels.fallback_reason(HLS_VEHICLE), HLS_VEHICLE])
+	_check_setting()
 	print("moon_shadow_check: %s" % ("PASS" if _failures == 0 else "FAIL (%d failures)" % _failures))
 	quit(0 if _failures == 0 else 1)
 
@@ -228,3 +270,86 @@ func _check(ok: bool, message: String) -> void:
 
 func _fail(message: String) -> void:
 	_check(false, message)
+
+
+## The HLS model (hull, legs, pods; no engines - under the hull, they cast no shadow beyond its own) standing on the
+## ground at the origin: body X (the station axis) up, the feet's lowest point at y = 0. Null without fresh models.
+func _build_hls() -> Node3D:
+	var models := VehicleModels.load_for(HLS_VEHICLE)
+	if models.is_empty():
+		return null
+	var meshes: Array[Mesh] = []
+	for part: Dictionary in [(models["hulls"] as Dictionary).values()[0], models.get("hls_parts", {}),
+			models.get("dorsal", {})]:
+		for mesh: Mesh in part.values():
+			meshes.append(mesh)
+	# Body (x, y, z) -> (y, z, x)... here x up: the cyclic map body X -> +Y, Y -> +Z, Z -> +X (a rotation).
+	var body_up := Basis(Vector3(0, 1, 0), Vector3(0, 0, 1), Vector3(1, 0, 0))
+	var node := Node3D.new()
+	var lowest := INF
+	var points: Array[Vector3] = []
+	for mesh in meshes:
+		var instance := MeshInstance3D.new()
+		instance.mesh = mesh
+		instance.transform = Transform3D(body_up, Vector3.ZERO)
+		node.add_child(instance)
+		for surface in mesh.get_surface_count():
+			var vertices: PackedVector3Array = mesh.surface_get_arrays(surface)[Mesh.ARRAY_VERTEX]
+			for v in vertices:
+				var w := body_up * v
+				points.append(w)
+				lowest = minf(lowest, w.y)
+	node.position = Vector3(0.0, -lowest, 0.0)
+	# The geometric shadow tip along the Sun's azimuth (0: the shadow runs along -X): each vertex projected along the Sun.
+	var sun := _direction(HLS_SUN_ELEVATION_DEG, 0.0)
+	_hls_tip_m = 0.0
+	for w in points:
+		var height := w.y - lowest
+		_hls_height_m = maxf(_hls_height_m, height)
+		var ground := Vector3(w.x, 0.0, w.z) - Vector3(sun.x, 0.0, sun.z) * (height / sun.y)
+		if absf(ground.z) < 0.5:  # on the centre line (the image row the check reads)
+			_hls_tip_m = maxf(_hls_tip_m, -ground.x)
+	print("moon_shadow_check:   info  %s model: %d meshes, %.1f m tall, geometric shadow tip %.1f m at Sun %.0f deg" % [
+			HLS_VEHICLE, meshes.size(), _hls_height_m, _hls_tip_m, HLS_SUN_ELEVATION_DEG])
+	return node
+
+
+## The lander's shadow along the centre line (image row of world z = 0; columns of world x).
+func _check_hls(image: Image) -> void:
+	var px_per_m := SIZE / HLS_VIEW_M
+	var centre_x := -0.5 * _hls_tip_m
+	var column := func(world_x: float) -> int: return int(round((world_x - centre_x) * px_per_m + SIZE * 0.5))
+	var row := SIZE / 2
+	var level := func(x: int) -> float:
+		var total := 0.0
+		for dy in range(-2, 3):
+			total += image.get_pixel(x, row + dy).r
+		return total / 5.0
+	var lit: float = level.call(column.call(-_hls_tip_m - 0.1 * HLS_VIEW_M))  # beyond the tip
+	var umbra: float = level.call(column.call(-0.5 * _hls_tip_m))  # halfway along the shadow
+	var half := 0.5 * (lit + umbra)
+	var tip_m := NAN
+	for x in range(column.call(-0.5 * _hls_tip_m), column.call(-_hls_tip_m - 0.1 * HLS_VIEW_M), -1):
+		if level.call(x) >= half:
+			tip_m = -((x - SIZE * 0.5) / px_per_m + centre_x)
+			break
+	var r := deg_to_rad(0.5 * MoonNearShadow.solar_disc_diameter_deg(Atmosphere.ASTRONOMICAL_UNIT_M))
+	var e := deg_to_rad(HLS_SUN_ELEVATION_DEG)
+	var penumbra := _hls_height_m * (1.0 / tan(e - r) - 1.0 / tan(e + r))
+	_check(tip_m <= _hls_tip_m + TIP_MARGIN_M and tip_m >= _hls_tip_m - penumbra,
+			"lander (%s, %.1f m tall) on the ground at Sun %.0f deg: shadow tip %.1f m (half-shadow point), geometric tip %.1f m, penumbra at the top %.1f m: within [%.1f, %.1f] m"
+			% [HLS_VEHICLE, _hls_height_m, HLS_SUN_ELEVATION_DEG, tip_m, _hls_tip_m, penumbra, _hls_tip_m - penumbra,
+			_hls_tip_m + TIP_MARGIN_M])
+	_check(umbra < 0.02 * lit, "the lander's shadow keeps no Sun halfway: %.5f of the lit ground's %.5f" % [umbra, lit])
+
+
+## The fidelity setting's round trip through a settings file of this check (never the user's).
+func _check_setting() -> void:
+	var path := OS.get_user_data_dir().path_join("moon_shadow_check_settings_%d.cfg" % OS.get_process_id())
+	MoonNearShadow.save_enabled_setting(false, path)
+	var off := MoonNearShadow.load_enabled_setting(path)
+	MoonNearShadow.save_enabled_setting(true, path)
+	var on := MoonNearShadow.load_enabled_setting(path)
+	DirAccess.remove_absolute(path)
+	var missing := MoonNearShadow.load_enabled_setting(path)
+	_check(not off and on and missing, "setting moon_near_shadows persists (off %s, on %s, no file: %s)" % [off, on, missing])

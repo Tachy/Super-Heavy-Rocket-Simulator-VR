@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -334,6 +335,7 @@ private:
     config::HapkeParameters moon_hapke_;  // load_moon_hapke()
     bool moon_hapke_loaded_ = false;
     std::unique_ptr<environment::UnresolvedShadingModel> moon_unresolved_;  // moon_unresolved_shading()
+    std::filesystem::path moon_cache_dir_;  // data/cache (load_terrain): the rock view tables' file cache
     std::atomic<bool> moon_detail_on_{true}, moon_rocks_on_{true};
     std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)

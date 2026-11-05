@@ -63,8 +63,10 @@ uniform float detail_rock_shadow[46];
 uniform sampler2D detail_rock_view : filter_linear, repeat_disable;
 uniform bool detail_rock_view_present = false;
 uniform vec2 detail_view_step = vec2(0.0349065850, 0.523598776);  // view elevation, azimuth difference steps (rad)
-// The regolith's Hapke directional-hemispherical albedo on the gain grid (the fill light, moon_fill.gdshaderinc).
-uniform float detail_hemispherical_albedo[46];
+// The regolith's Hapke directional-hemispherical albedo A_h(mu) at mu = k / DETAIL_ALBEDO_MU_STEPS (the fill light,
+// moon_fill.gdshaderinc; MoonDetailShading resamples the core's elevation table: no asin per lookup, review I5).
+const int DETAIL_ALBEDO_MU_STEPS = 90;
+uniform float detail_hemispherical_albedo_mu[91];
 // The abundance factor (LunarRocks::abundance_factor), equirectangular like moon_color (u = (lon + 180) / 360).
 uniform sampler2D detail_rock_abundance : filter_linear, repeat_enable;
 // Rocks drawn as geometry (Task 11, MoonRockLayer): from moon_rock_threshold_px pixels of projected size
@@ -309,6 +311,42 @@ vec2 detail_light_factors_view(float abundance, float geometry_min_m, float spac
 			sun_elevation, zenith ? 0.5 * DETAIL_PI : view_elevation, view.y, sigma_view),
 			detail_light_factor_view(c, c_drawn, rock_seen, norm, unshadowed, earth_elevation,
 			zenith ? 0.5 * DETAIL_PI : view_elevation, view.z, sigma_view));
+}
+
+// The Sun's factor alone from an oblique eye (detail_light_factors_view(...).x; the near-field map's second call: the
+// earthshine's is not needed there, review I5).
+float detail_sun_factor_view(float abundance, float geometry_min_m, float spacing_m, float horizon_spacing_m,
+		float sun_elevation, vec3 view, float sun_map_resolved_m) {
+	bool sun_map = sun_map_resolved_m >= 0.0;
+	float rho = detail_rock_shape.y;
+	float c_all = abundance * detail_rock_cover(detail_rock_law.z, detail_rock_law.w);
+	float c = abundance * detail_rock_statistical_cover(geometry_min_m);
+	float c_drawn = rock_geometry_shadows_statistical ? max(c_all - c, 0.0) : 0.0;
+	float c_uncast = rock_geometry_shadows_statistical
+			? max(abundance * detail_rock_statistical_cover(DETAIL_SHADOW_CASTER_FACTOR * geometry_min_m) - c, 0.0) : 0.0;
+	float norm = exp(-c_all) + (1.0 - exp(-c_all)) * rho;
+	bool zenith = !detail_rock_view_present || view.x >= 0.5 * DETAIL_PI;
+	float view_elevation = max(view.x, detail_rock_shape.w);
+	float sigma_view = zenith ? 0.0 : detail_shadow(view_elevation);
+	float rock_seen = 1.0 - exp(-c * (1.0 + sigma_view));
+	float unshadowed = max(detail_drawn(spacing_m) - detail_drawn(horizon_spacing_m), 0.0);
+	float unresolved = sun_map ? max(detail_drawn(spacing_m) - detail_drawn(sun_map_resolved_m), 0.0) : unshadowed;
+	return detail_light_factor_view(c, sun_map ? c_uncast : c_drawn, rock_seen, norm, unresolved, sun_elevation,
+			zenith ? 0.5 * DETAIL_PI : view_elevation, view.y, sigma_view);
+}
+
+// The ground's lit share as a hemispherical exitance (the fill light's emitter, review I2 of Task 12): the zenith-view
+// law at the Sun's macroscopic elevation (Smith's G1, the rocks' statistical shadows and lit faces), independent of the
+// eye's direction.
+float detail_sun_factor_nadir(float abundance, float geometry_min_m, float spacing_m, float horizon_spacing_m,
+		float sun_elevation) {
+	float rho = detail_rock_shape.y;
+	float c_all = abundance * detail_rock_cover(detail_rock_law.z, detail_rock_law.w);
+	float c = abundance * detail_rock_statistical_cover(geometry_min_m);
+	float c_drawn = rock_geometry_shadows_statistical ? max(c_all - c, 0.0) : 0.0;
+	float norm = exp(-c_all) + (1.0 - exp(-c_all)) * rho;
+	float unshadowed = max(detail_drawn(spacing_m) - detail_drawn(horizon_spacing_m), 0.0);
+	return detail_light_factor(c, c_drawn, 1.0 - exp(-c), norm, unshadowed, sun_elevation);
 }
 
 vec2 detail_light_factors(float abundance, float geometry_min_m, float spacing_m, float horizon_spacing_m,

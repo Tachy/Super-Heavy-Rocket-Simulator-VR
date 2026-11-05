@@ -719,3 +719,39 @@ TEST_CASE("Hapke hemispherical albedo: isotropic scatterers 1 - gamma H(mu0), th
         CHECK(environment::hemispherical_albedo_table(m, e * deg) < 0.4);
     }
 }
+
+TEST_CASE("Rock view tables' file cache: bit-identical round trip, the key guards inputs and format",
+          "[moon_surface][unresolved_shading]") {
+    // Review I5 of Task 12: the game reads the tables from data/cache instead of building them (~8 s) at each start.
+    const auto& m = shared_model();
+    const auto& cfg = shared_detail()->config();
+    const double mean = cfg.rocks.burial_fraction_mean, sd = cfg.rocks.burial_fraction_sd;
+    const std::uint64_t key = environment::rock_view_cache_key(mean, sd);
+    CHECK(key == environment::rock_view_cache_key(mean, sd));
+    CHECK(key != environment::rock_view_cache_key(mean, sd + 0.01));
+    CHECK(key != environment::rock_view_cache_key(mean + 0.01, sd));
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_rock_view_cache_test";
+    std::filesystem::remove_all(dir);
+    const auto file = dir / environment::rock_view_cache_name;
+    environment::RockViewModel model{m.rock_view_excess, m.rock_view_gain_ratio};
+    environment::write_rock_view_cache(file, key, model);
+    REQUIRE(std::filesystem::exists(file));
+    environment::RockViewModel back;
+    REQUIRE(environment::read_rock_view_cache(file, key, back));
+    CHECK(back.excess == model.excess);  // bit for bit
+    CHECK(back.gain_ratio == model.gain_ratio);
+    environment::RockViewModel other;
+    CHECK_FALSE(environment::read_rock_view_cache(file, key + 1, other));
+    CHECK(other.excess.empty());
+    // A truncated file is refused.
+    std::filesystem::resize_file(file, std::filesystem::file_size(file) - 8);
+    CHECK_FALSE(environment::read_rock_view_cache(file, key, other));
+    // template_rock_view_tables takes a matching file instead of building (a burial law nothing else uses: no
+    // in-process entry; the file holds the shipped tables, so a build would differ).
+    const double mean2 = 0.123, sd2 = 0.0456;
+    environment::write_rock_view_cache(file, environment::rock_view_cache_key(mean2, sd2), model);
+    const auto read = environment::template_rock_view_tables(mean2, sd2, file);
+    CHECK(read.excess == model.excess);
+    CHECK(read.gain_ratio == model.gain_ratio);
+    std::filesystem::remove_all(dir);
+}

@@ -222,6 +222,8 @@ static func camera_jump(tree: TerrainQuadtree, layer: MoonRockLayer, site_fixed:
 	var jumped := (up * site_fixed.length() + east * JUMP_DISTANCE_M).normalized() * site_fixed.length()
 	var times: Array[float] = []
 	worst_phases.clear()
+	if layer != null:
+		layer.stats["worst_rock_frame_ms"] = 0.0  # the jump's own worst frame
 	var jump_frames := _stream(tree, jumped, times, worst_phases, layer, rock_ms)
 	rock_ms.sort()
 	var rock_worst: float = rock_ms.back() if not rock_ms.is_empty() else 0.0
@@ -252,7 +254,17 @@ static func camera_jump(tree: TerrainQuadtree, layer: MoonRockLayer, site_fixed:
 			% [float(layer.stats.get("pool_peak_mb", 0.0)), MoonRockLayer.POOL_MAX_MB,
 			int(layer.stats.get("over_bound_nodes", 0)), int(layer.stats.get("parked_nodes", 0)),
 			int(layer.stats.get("trimmed", 0)), float(layer.stats.get("max_frame_upload_mb", 0.0)),
-			int(ProjectSettings.get_setting("rendering/rendering_device/staging_buffer/max_size_mb", 128))])
+			int(ProjectSettings.get_setting("rendering/rendering_device/staging_buffer/max_size_mb", 128))]
+			+ "; %d evicted (pool entries handed over), %d still waiting; shadow casters: %d attached later, %d released (reach %.0f m + rock shadow)"
+			% [int(layer.stats.get("evicted", 0)), int(layer.stats.get("retry_nodes", 0)),
+			int(layer.stats.get("casters_attached_late", 0)), int(layer.stats.get("casters_released", 0)),
+			MoonNearShadow.caster_range_m]
+			+ "; transfers refused: no donor %d, donor too near %d, buckets not covered %d; worst queue frame %s"
+			% [int(layer.stats.get("transfer_no_donor", 0)), int(layer.stats.get("transfer_donor_near", 0)),
+			int(layer.stats.get("transfer_uncovered", 0)), layer.stats.get("worst_queue_frame", {})]
+			+ "; the worst rock frame's parts (ms) %s; slowest detach %.2f ms (%d MultiMeshes)" % [
+			layer.stats.get("worst_rock_frame", {}), float(layer.stats.get("max_detach_ms", 0.0)),
+			int(layer.stats.get("max_detach_multimeshes", 0))])
 
 
 ## Updates every JUMP_FRAME_MS until nothing has loaded for 30 updates; returns the update count, appends each
@@ -263,9 +275,17 @@ static func _stream(tree: TerrainQuadtree, camera_fixed: Vector3, times: Array[f
 	var worst := -1.0
 	for frame in JUMP_MAX_FRAMES:
 		var rock_before: float = layer.stats["main_ms"] if layer != null else 0.0
+		var parts_before: Dictionary = (layer.stats.get("parts_ms", {}) as Dictionary).duplicate() if layer != null else {}
 		tree.update_for_camera(camera_fixed, JUMP_FRAME_MS / 1000.0)
 		if layer != null:
-			rock_ms.append(float(layer.stats["main_ms"]) - rock_before)
+			var rock := float(layer.stats["main_ms"]) - rock_before
+			rock_ms.append(rock)
+			if rock > float(layer.stats.get("worst_rock_frame_ms", 0.0)):  # its parts (diagnostics)
+				layer.stats["worst_rock_frame_ms"] = rock
+				var split := {}
+				for part: String in layer.stats.get("parts_ms", {}):
+					split[part] = snappedf(float(layer.stats["parts_ms"][part]) - float(parts_before.get(part, 0.0)), 0.01)
+				layer.stats["worst_rock_frame"] = split
 		var ms := float(tree.stats["update_ms"])
 		times.append(ms)
 		if ms > worst:

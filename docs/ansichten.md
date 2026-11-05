@@ -174,6 +174,10 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   als Standard): aus = keine Wolken, die Szene wie vor dem Wetter (Pixel für Pixel), und kein Download. Die Wolken
   sind echte Volumen, überall auf der Erde sichtbar: von unten am Startplatz, beim Aufstieg hindurch (innen ein
   helles Grau, oben ein Wolkenmeer), aus dem Orbit als Decke mit Schatten und aus der Mondrichtung als Erde mit Wolken.
+- **Schalter "Mondschatten nah"** im Zeit-Panel (Kontrollkästchen unter "Wetter", gemerkt in den Einstellungen, an als
+  Standard) [umgesetzt 2026-11-05]: die Schattenkarte der Sonne in Bodennähe auf dem Mond (150 m bis 4 km um das Auge):
+  Steine, Gelände, Lander und Strukturen werfen echte Schatten mit dem Halbschatten der Sonnenscheibe. Aus = nur die
+  statistischen Schatten (die Helligkeit im Mittel bleibt, die einzelnen Schatten fehlen); kostet weniger GPU-Zeit.
 - **Bildrate** [umgesetzt 2026-10-26]: letzte Zeile im Zeit-Panel (auch im VR-Panel), z. B. "Bildrate: 45 fps
   (22.2 ms)" - die Bilder der letzten Sekunde. In VR heißt die halbe Headset-Rate (45 bei 90 Hz), dass die Runtime
   Zwischenbilder rechnet.

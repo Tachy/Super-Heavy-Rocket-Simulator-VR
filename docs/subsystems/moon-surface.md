@@ -495,10 +495,16 @@ on top of that relief.
   node stays statistical in a retry set (`stats.over_bound_nodes`, `retry_nodes`; logged when it doubles, with the nearest waiting
   node's distance). The retry set's nearest node is requeued when the pool is under 90 % of the bound, or every
   RETRY_INTERVAL_FRAMES 15 when a farther attached node exists (Task 12, review N1 of the Task 11 fix C re-review: before,
-  a refused node was never retried and FIFO chose). Eviction of the farthest attached node (EVICT_DISTANCE_RATIO 1.25,
-  the farthest from a budgeted sweep `_far_scan`) is built but OFF (EVICTIONS_PER_FRAME 0): in the boulder jump it gave
-  34.7 ms main-thread spikes (open point). Attaches also respect ALLOCATED_INSTANCES_PER_FRAME 16384 [E] newly
-  allocated pool instances per frame (the shadow casters' buckets come with the node).
+  a refused node was never retried and FIFO chose). Eviction (Task 12 fix 1, EVICTIONS_PER_FRAME 1): at the bound the
+  farthest attached nodes beyond EVICT_DISTANCE_RATIO 1.25 x the waiting node's distance (from the budgeted sweep
+  `_far_scan`, farthest first, at most EVICT_DONORS_MAX 4 together) hand their pooled MultiMeshes straight to the waiting
+  node (`_transfer_to`: each bucket from the free pool of its exact key or from a donor node of the same LOD with the
+  smallest capacity >= the chunk's, zero-padded) and wait in the retry set; nothing is allocated or freed (releasing them
+  to the pool let the trim free and re-allocate GPU buffers: 34.7 ms spikes in the first version). When the donors cannot
+  cover the waiting node's buckets nothing is evicted (in the boulder field the near nodes need LOD 0-2 buckets the far
+  nodes do not hold: the jump evicted none). Attaches also respect ALLOCATED_INSTANCES_PER_FRAME 16384 [E] newly
+  allocated pool instances per frame. A released node's worker lists (MBs in a boulder field) are freed on a worker task
+  (`_dispose_released`): freeing them in `detach` stalled the main thread up to 3 ms per node.
   Free entries beyond a bucket's prewarm count are released after TRIM_IDLE_S 10 s without a take, one per frame.
   `free_all` (called by `TerrainQuadtree._exit_tree`) frees the pools' orphan entries at shutdown (review n3: thousands
   of leaked MultiMesh RIDs at exit before).
@@ -573,7 +579,12 @@ on top of that relief.
   default), the drawn rocks from SHADOW_CASTER_FACTOR 4 x the geometry threshold [E, measured]: per node and LOD a second
   pooled MultiMesh with the D-sorted list's prefix from 4 x the node limit, `SHADOWS_ONLY`, its visible count from 4 x the
   frame's cut (`MoonRockLayer`), the shader's shadow pass (`IN_SHADOW_PASS`) taking 4 x the threshold for the growth band
-  and the eye's distance (`moon_eye_world`) instead of the light's view. A rock of ~1.5 px is 1-2 shadow texels wide (its
+  and the eye's distance (`moon_eye_world`) instead of the light's view. Only near the eye (Task 12 fix 1, review C1):
+  a node's casters are attached while its nearest point lies within the map's range plus its tallest rock's shadow
+  (height / tan of the Sun's elevation, tan at least CASTER_TAN_FLOOR 1 deg, that extra at most the range;
+  `MoonNearShadow.caster_range_m` / `caster_tan_sun`, published per frame) and released beyond CASTER_RELEASE_RATIO 1.2 x
+  it; the farthest-node sweep moves them (at most CASTER_ATTACHES_PER_FRAME 2 per frame). Godot samples no caster
+  beyond the range, so the far nodes' casters were pure cost (pool allocations in a camera jump, shadow-pass vertices). A rock of ~1.5 px is 1-2 shadow texels wide (its
   shadow unresolved), and with every drawn rock casting the shadow pass cost +78 ms in the stereo mock in a boulder field.
   The drawn rocks between d and 4 d keep their Sun shadows statistical (C_g' = abundance x rock_statistical_cover(4 d) - C,
   core `shadow_caster_factor`).
@@ -587,14 +598,18 @@ on top of that relief.
   up (Smith only for drawn(L) - drawn(T), T = 2 texels of the split at the fragment's depth; `moon_near_shadow_texel` /
   `_split` from Godot's split spheres, `MoonNearShadow.split_texels`). Beyond the range w = 1: the statistical layer as
   before; the earthshine has no map. Vehicles receive through Godot's lighting.
-- Off (`moon_near_shadows` off or away from the ground): w = 1, no `light()` term, the materials' former expressions in
-  EMISSION: pixel-identical to the unshaded Task 11 shader (`moon_shadow_check.gd`).
+- Off (`moon_near_shadows` off or away from the ground): w = 1, no `light()` term, the statistical Sun shadows alone. With
+  the detail statistics off this is pixel-identical to the unshaded Task 11 shader (`moon_shadow_check.gd`); with them on
+  the oblique-eye rock terms and the fill light stay (Task 12 fix 1, review I3: they are physics of the statistics, not
+  of the map; the flag switches the map only). The setting is persisted (`user://settings.cfg` [graphics]
+  `moon_near_shadows`, default on) and switched in the time panel ("Mondschatten nah"). Leaving the Moon's ground
+  restores the project's directional shadow atlas size / depth and soft-shadow quality (review m2).
 - Oblique eye (review T11-C5 R1): the statistical rocks hide the ground behind them and show their sides. From the
-  templates (`rock_view_tables`, `template_rock_view_tables`: the LOD-2 meshes cut at the burial law, 4 yaws): the ground
+  templates (`rock_view_tables`, `template_rock_view_tables`: the LOD-2 meshes cut at the burial law, 5 burial nodes, 2 yaws): the ground
   a convex rock hides from a direction is its projection along it (P_v; the light's shadow incl. footprint P_l), X = (|P_v| -
   |P_l n P_v|) / A the ground hidden from the eye outside the light's shadow, and the Lommel-Seeliger radiance of the
   faces seen (projected-area weighted) over the flat ground's, as a ratio R to the zenith view's gain. Tables at view
-  elevation 0-90 deg / 10 deg, light-eye azimuth difference 0-180 / 30 deg, the light on the gain grid (RG float texture
+  elevation 0-90 deg / 2 deg, light-eye azimuth difference 0-180 / 30 deg, the light on the gain grid (RG float texture
   `detail_rock_view`). Per light: f = F x [exp(-C (1 + sigma + X) - C_g' max(sigma - sigma_v + X, 0)) + (1 - exp(-C
   (1 + sigma_v))) rho G R] / N, sigma_v = sigma(e_view) the hidden ground per cover; from the zenith the nadir law.
   F, the drawn relief's statistical lit share, is the share of the SEEN surface that is lit: Smith's height-direction-
@@ -610,7 +625,14 @@ on top of that relief.
   grid: 0.1355 at a 2 deg Sun, 0.1337 at 7, 0.1294 at 30, 0.1203 at 90 deg), a receiver of normal n sees the ground below
   its horizontal plane over (1 - n.up) / 2 and the terrain above the horizon over the azimuth mean of sin^2 h (the node's
   horizon map, 16 sectors; each sector's wall lit at its own incidence, its slope taken as h [E]; weight (1 + n.up) / 2
-  for a tilted receiver [E]), and scatters it back as A_h(mu_view) (reciprocity). In the materials' units the ground's
+  for a tilted receiver [E]; every wall with mu0 > 0 counts as lit, its own shadowing ignored [E], so the walls count
+  only as far as the receiver itself sees the Sun (its horizon-map visibility V; [E] a lower bound: without it a valley
+  floor in terrain shadow at IM-2 with a 0.07 deg Sun took 9.7 x its earthshine radiance from walls that are themselves
+  in shadow, with steps at the horizon maps' node borders - Task 12 fix 1), and scatters it back as A_h(mu_view) (reciprocity). The surround's lit share
+  is the zenith-view statistical factor (`detail_sun_factor_nadir`; the rocks: Smith's G1) times the receiver's horizon
+  visibility - a hemispherical exitance that does not turn with the eye (Task 12 fix 1, review I2: the eye's view factor
+  was used first). A_h is resampled onto a mu grid (k / 90; `MoonDetailShading.hemispherical_albedo_mu`): no asin per
+  lookup (review I5). In the materials' units the ground's
   I/F scale is albedo x moon_regolith_scale x moon_hapke_norm. Flat open ground gets ~nothing; rock faces and slopes turned
   from the Sun get ~1-2 % of the lit ground's radiance at a 7-11 deg Sun. Terrain and rocks only (vehicles take theirs
   from the sky's radiance cube, which holds the lunar ground); not the earthshine (its exitance ~1e-4 of the Sun's). Off:
@@ -697,16 +719,22 @@ on top of that relief.
   (`split_texels`); statics `enabled` (fidelity `moon_near_shadows`), `fill_enabled`, diagnostics `terrain_casts`,
   `rocks_cast`, `splits`, `soft`, `soft_quality`), `World._update_moon_near_shadow`, `TerrainQuadtree.cast_shadows`;
   `game/shaders/moon_near_shadow.gdshaderinc` (`moon_near_fade`, `moon_near_resolved_m`, `moon_near_light`),
-  `game/shaders/moon_fill.gdshaderinc` (`moon_fill_albedo`, `moon_fill_reflectance`); in `moon_detail.gdshaderinc`
-  `detail_view_geometry`, `detail_rock_view_terms`, `detail_smith_visible`, `detail_light_factors_view`,
-  DETAIL_SHADOW_CASTER_FACTOR; `MoonRockLayer`: SHADOW_CASTER_FACTOR (shadow-only MultiMeshes, `shadow_lods`), the retry
-  set / eviction, `free_all`. Core (`environment/unresolved_shading`): `UnresolvedView`, the `unresolved_light_factors`
+  `game/shaders/moon_fill.gdshaderinc` (`moon_fill_albedo` (mu grid), `moon_fill_reflectance`); in
+  `moon_detail.gdshaderinc` `detail_view_geometry`, `detail_rock_view_terms`, `detail_smith_visible`,
+  `detail_light_factors_view`, `detail_sun_factor_view` (the map's Sun-only call), `detail_sun_factor_nadir` (the fill's
+  emitter), DETAIL_SHADOW_CASTER_FACTOR; `MoonRockLayer`: SHADOW_CASTER_FACTOR (shadow-only MultiMeshes, `shadow_lods`),
+  the casters' reach (`_casts`, `_sweep_casters`, `_attach_casters`, `_release_casters`), the retry set, eviction by
+  hand-over (`_transfer_to`, `_plan_transfer`, `_take_slot`), `_dispose_released`, `free_all`; `MoonNearShadow`
+  `publish_caster_reach`, `load_enabled_setting` / `save_enabled_setting`; the time panel's check box. Core (`environment/unresolved_shading`): `UnresolvedView`, the `unresolved_light_factors`
   overload with it, `shadow_caster_factor`, `smith_visible_lit_fraction`, `RockViewTables` / `rock_view_tables`,
   `RockViewModel` / `template_rock_view_tables`, `rock_view_excess_table`, `rock_view_gain_ratio_table`,
-  `hapke_hemispherical_albedo`, `hemispherical_albedo_table`, `RockLightTables::mean_tan`; bindings
+  `hapke_hemispherical_albedo`, `hemispherical_albedo_table`, `RockLightTables::mean_tan`, the view tables' file cache
+  (`rock_view_cache_key`, `read_rock_view_cache`, `write_rock_view_cache`; `make_unresolved_shading_model(..., cache_dir)`,
+  the binding passes `data/cache`); bindings
   `moon_unresolved_shading` (+ rock_view_excess, rock_view_gain_ratio, view_* axes, hemispherical_albedo),
   `moon_unresolved_light_factors(..., view_elevation_rad, sun_view_azimuth_rad, earth_view_azimuth_rad, sun_shadow_map,
-  shadow_map_resolved_m)`. Tests `game/tests/moon_shadow_check.gd`; render_check `--moon_near_shadows=off`,
+  shadow_map_resolved_m)`. Tests `game/tests/moon_shadow_check.gd` (`--no_lander`), moon_surface_check
+  `--boulder_jump_only`, `--no_rock_casters`; render_check `--moon_near_shadows=off`,
   `--moon_fill=off`, `--moon_shadow_casters=terrain,rocks`, `--moon_shadow_splits`, `--moon_shadow_soft=off`,
   `--moon_shadow_quality`.
 
@@ -719,7 +747,19 @@ on top of that relief.
   porosity K ~ 1.3 would need a refit of w.
 - The Moon's brightness anchor stays K&S's full-Moon illuminance (the regolith scale): Hapke is normalised to the
   former globe at phase 0, not to its absolute I/F (the albedo map is relative: its large-scale contrast follows the
-  WAC w map, its mean is anchored by the full Moon).
+  WAC w map, its mean is anchored by the full Moon). Kept after the A15 comparison (ruling T12-B, 2026-11-05): the render
+  is a visible-band (photopic) luminance, and K&S's illuminance is V-band. The A15 brightness budget (Task 12 report n2,
+  review): the in-game probe (azimuth 60 deg from the Sun, i 70.9, e 57.3, g 102.7 deg) reads 433 cd/m^2 against
+  798 cd/m^2 from Sato's absolute I/F with the site's WAC w (3x3 mean 0.318) - 0.54x. Of that, ~0.85 is the probe's
+  relief and rock shadows (the render's own flat-ground model gives 512 cd/m^2) and ~0.64 the scale albedo x R x norm
+  against Sato's I/F ratio at the site (0.438 against 0.683). The 0.64 splits (review estimates, not measured here) into
+  ~0.84 local map factor (the probe's sub-degree mosaic detail and the map's i30/e0/g30 definition against Sato's 1-deg
+  cell at g 102.7) and ~0.77 disc-integrated anchor, which itself is ~1/1.15 (the known level offset of the WAC-Hapke
+  w against ROLO 665 nm: Hapke with w 0.429 is 0.377 mag brighter than ROLO) times ~1/1.13 (Sato's w is at 643 nm;
+  the lunar reflectance rises ~10-15 % from 550 to 650 nm, so a 643-nm reflectance with a photopic solar illuminance
+  overstates the luminance). The phase-0 normalisation point adds ~4 % (Hapke disc 0.849 against K&S 0.883 at 2 deg).
+  So both sources agree within their bands; no anchor change. The camera comparison also depends on the assumed f/8 [E]
+  (mid grey 1250 cd/m^2 there).
 
 ## Validation
 - `[moon_surface][config]`: the shipped file loads, every field finite, 0.5 < H < 1, 0 < w < 1, |c| <= 1, rocks down
@@ -980,6 +1020,22 @@ on top of that relief.
   0.9-1.0 / 1.0-1.15 of the range): down-Sun 1.000 / 1.003 / 1.001 / 1.001, across 1.005 / 1.006 / 1.000 / 1.000, into
   the Sun 0.999 / 0.980 / 0.981 / 0.998 (dark ground, 0.3 % of the down-Sun radiance; gate 2 %). Before Smith's
   visible-lit fraction and the 2-deg view grid it was +2.0 .. +4.2 % (down-Sun).
+- Task 12 fix 1 (2026-11-05). Red step: `moon_shadow_check` with the game files before Task 12 fails (no shadow: "umbra"
+  0.0257 against lit 0.0305, half-shadow 13.8 m); the lander check without the map fails (tip 129.4 m, halfway 0.081 of
+  the lit 0.125). Green: the 2 m box 15.98 m (16.29 +- 1), umbra 0, penumbra 1.25 m; earthshine-only on/off 0 px; off
+  against the Task 11 shader 0 px; the HLS model (63 meshes, 53.7 m tall, feet on flat ground, Sun 20 deg) shadow tip
+  147.7 m (half-shadow point) against the geometric tip 148.0 m (window [tip - penumbra 4.3 m, tip + 1 m]), its shadow
+  halfway keeps no Sun; the setting's file round trip. Relief identity (IM-2 2026-11-13T06:00, Sun 0.07 deg, the eye in
+  terrain shadow, detail on, camera exposure): near shadows on / off with the fill 0 px; fill on / off 0.79 % of the
+  pixels, ground mean x1.57 (partly sunlit receivers seeing sunlit walls; before the walls' gate and G1 x9.7). Gates
+  unchanged (detail patches -1.49 .. +0.23 %, rock gate at abundance 1 / 3 / 10 as above); handover (A11) across
+  1.011 / 1.002 / 1.000 / 1.000, down-Sun 1.001 / 1.002 / 1.001 / 1.001, into the Sun 0.983 / 0.990 / 0.983 / 0.995;
+  sky_radiance_check PASS (IM2_READ_EXPOSURE 2.5), atmosphere_check PASS. Core: the view tables' cache round trip bit
+  for bit, the key guards burial law and format, a truncated file is refused. Camera jumps (moon_surface_check
+  --rocks_only, 2 runs): IM-2 max 4.52 / 3.26 ms (pass); boulder field 30.7 ms (one 29 ms pool allocation, 3 frames
+  over) / 4.76 ms (pass); without any rock casters the boulder jump also had single 22-28 ms allocation stalls (A/B).
+  Load: the statistics build 1311 ms without the cache file, 439 ms with it (the whole render_check process 36.5 / 35.5 s;
+  the ~8 s of Task 12's first version were the core tests' process - the game shared the build with its other loading).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -1097,6 +1153,11 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 - The pebble bumps of the s0 texture are baked at abundance 1 (they do not scale in boulder fields; review m6).
 - Summed roughness (mesh + textures + drawn rocks): the GD gate (10 %) re-measured after fix C's residual 3.62 mm and
   the resting templates: see Validation (Rocks drawn).
+- Fill light at a grazing Sun: the walls' term reads the node's horizon map, so faint steps at the horizon maps' node
+  borders remain in partly sunlit ground at a 0.07 deg Sun (Task 12 fix 1 relief image); the walls' own cast shadows are
+  only bounded (receiver's V, G1), not computed. Shadow-only rock MultiMeshes draw the LOD the rock is drawn with: in the
+  boulder field the rock casters cost +5.6 ms (receivers +7.4, terrain casters +1.5; vr-performance.md) - a LOD bias of
+  +1 for the shadow MultiMeshes (review I5) is not built.
 - The texture craters cast no shadows inside their bowls - the main cue of small craters under a low Sun (the LROC
   frame's dark crater floors); they only modulate the radiance (mean-preserving). The near-field shadow map draws the
   mesh's craters only; horizon maps of the crater textures would add the texture's. Craters above 20 m (beyond s3) on coarse leaves are left to the mesh (it
@@ -1127,12 +1188,15 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 - The regolith texture relief (s0-s3) casts no shadows; it only modulates the radiance (mean-preserving). Real cast shadows of
   pebbles (horizon maps of the height textures, the spec's "height-map pebbles with self-shadowing") are not built.
 - The oblique eye's rock terms (Task 12) use the LOD-2 template meshes (162 vertices), 2 yaws and 5 burial nodes [D]
-  (the table build takes ~8 s more at start-up on 24 threads: a cache or a coarser grid would cut it); mutual shading of
+  (the table build takes ~8 s on 24 threads; cached in `data/cache/rock_view_tables.bin` since fix 1, keyed by the
+  templates, the burial law and the grid: built once, then read; the core tests still build it); mutual shading of
   statistical rocks (one rock's shadow on another's seen face) is left out; the earthshine uses the same tables.
 - Shadow map: the drawn rocks below 4 x the geometry threshold cast no map shadow (statistical, by design); Godot's
   directional shadow fades by view depth, not distance (the fade's 2 % ring sits a little closer at the image edges);
   the texture relief, the pebbles and the 1-2 cm rocks cast none (statistical); PCSS LOW quality, normal bias 1 texel
-  [E] - a hard PCF map came out 3-6 % darker on the relief than the PCSS one (acne / bias, Task 12 report).
+  [E] - a hard PCF map came out 3-6 % darker on the relief than the PCSS one (acne / bias, Task 12 report). Into a low
+  Sun the handover reads 0.980 / 0.981 in two depth bands at A11 (dark ground): at the 2 % gate, little margin (review
+  m3). The 8192 px 32-bit atlas (256 MB) is held only while the near shadows are active (restored on leaving).
 - Drawn rocks (Task 11): shapes are angular fragments since fix A of Task 11; their tilt distribution and the
   fresh / eroded share are [E] (no lunar measurement retrieved), the exposed H/D (eta 0.444) is not checked against a
   measured distribution. Rocks stand on the full-detail ground while coarse
@@ -1142,10 +1206,11 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   change at run time leaves the lists; the node limit keeps the radiance consistent). The quadtree's own main-thread
   update exceeds 5 ms while streaming after a camera jump (13.5 ms max without rocks; Task 7 code, known-issues, T13).
 - Rock pool memory: bounded at 512 MB (fix C); boulder fields beyond it keep nodes statistical; a retry set requeues
-  them nearest first (Task 12, review N1); eviction of farther attached nodes for nearer ones is built but off (34.7 ms
-  main-thread spikes in the boulder jump). Boulder-field camera jump since Task 12 (the rocks' shadow casters attach
-  with their node): the rock layer's share max 5.9-8.0 ms in 3-5 frames over the 5 ms gate (Task 11 fix C: 3.87 ms);
-  IM-2 2.7-3.4 ms (pass). The OpenXR path's attach / upload cost is
+  them nearest first (Task 12, review N1); eviction hands far nodes' pooled MultiMeshes to nearer ones (fix 1) but in the
+  boulder field no far node holds the LOD 0-2 buckets a near node needs, so it evicts none there (near nodes then stay
+  statistical, radiance-continuous). Boulder-field camera jump after fix 1: the rock layer's share p99 3.3-3.9 ms, but
+  1-2 frames per run over the 5 ms gate - single pool allocations stalling 22-28 ms once per run and ~5 ms attach-queue
+  frames, the same without any rock shadow casters (A/B); IM-2 passes. The OpenXR path's attach / upload cost is
   not measured (T13).
 - The 1-2 cm pebbles are texture bumps without cast shadows (the texture relief casts none); their mean shadow is in the
   statistical layer.

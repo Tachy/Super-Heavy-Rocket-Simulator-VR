@@ -643,14 +643,17 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 		moon_light.light_energy = moon_lit[1]
 
 
-## The near-field Sun shadows near the Moon's ground (MoonNearShadow): the eye's height over the terrain under it (the
-## ground height _moon_earth_visible samples; the mean sphere without terrain data).
+## The near-field Sun shadows near the Moon's ground (MoonNearShadow): the eye's height over the terrain under it. The
+## ground height is the one _moon_earth_visible samples for the Earth's visibility (review m5): the terrain's height under
+## the eye above the Moon's mean sphere (core surface_samples, refreshed when the eye moved EARTH_HORIZON_EYE_STEP_M; 0,
+## the mean sphere, without terrain data). The local vertical at the eye gives the Sun's elevation (the rock casters' reach).
 func _update_moon_near_shadow(camera_gcrf_m: Vector3, sun_distance_m: float) -> void:
 	var height_m := (camera_gcrf_m - moon_gcrf_m).length() - MOON_RADIUS_M - _earth_horizon_ground_height_m
 	var camera := get_viewport().get_camera_3d()
 	var eye := camera.global_position if camera != null else Vector3.ZERO
 	moon_near_shadow.update(sun_light, moon_terrain.active, height_m, sun_distance_m, eye,
-			camera.get_camera_projection() if camera != null else Projection())
+			camera.get_camera_projection() if camera != null else Projection(),
+			Frames.to_render((camera_gcrf_m - moon_gcrf_m).normalized()))
 
 
 ## Draws the radiance cubemap anew when the sky has really changed (SkyRadianceRefresh): the write to the sky material is

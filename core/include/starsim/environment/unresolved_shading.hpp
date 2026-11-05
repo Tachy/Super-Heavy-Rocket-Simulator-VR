@@ -25,6 +25,8 @@
 //
 // Everything is a pure function of the configuration and the generator's octave definition; thread-safe.
 
+#include <cstdint>
+#include <filesystem>
 #include <vector>
 
 #include "starsim/config/moon_surface_config.hpp"
@@ -91,7 +93,9 @@ struct UnresolvedShadingModel {
 // Builds the model from the generator (octave spacings and amplitude scale), its configuration (craters, Hapke) and
 // the rocks (null: no rock term). The rocks' eta is measured on generated rocks (rock_top at the base, a fixed set
 // of cells per octave). Power-law size distributions only (std::invalid_argument otherwise).
-UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& detail, const LunarRocks* rocks);
+// cache_dir non-empty: the rock view tables' file cache (template_rock_view_tables) lives there.
+UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& detail, const LunarRocks* rocks,
+                                                     const std::filesystem::path& cache_dir = {});
 
 // Hapke mean slope <-> mean square slope magnitude: S^2 = pi tan^2(theta_bar).
 double slope_variance_from_theta_bar(double theta_bar_rad);
@@ -194,7 +198,20 @@ struct RockViewModel {
     std::vector<double> excess;
     std::vector<double> gain_ratio;
 };
-RockViewModel template_rock_view_tables(double burial_mean, double burial_sd);
+// cache_file non-empty (review I5 of Task 12: the tables cost ~8 s of the model build): read from that file when its
+// key matches (rock_view_cache_key), else computed and written there (a failed write is ignored). The tables are
+// deterministic, so the cached ones are the computed ones bit for bit.
+RockViewModel template_rock_view_tables(double burial_mean, double burial_sd,
+                                        const std::filesystem::path& cache_file = {});
+// The file cache's key: FNV-1a over a format version, the grid sizes, the burial law and the templates' LOD-2 meshes
+// (vertices and indices) the tables are built from.
+std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd);
+// The cache file's name in a cache directory.
+inline constexpr const char* rock_view_cache_name = "rock_view_tables.bin";
+// The cache file's read (false: missing, another key or a broken file; out untouched) and write (a unique temporary
+// renamed over the file; failures ignored).
+bool read_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, RockViewModel& out);
+void write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, const RockViewModel& m);
 // Model table lookups (trilinear; elevations clamped to [floor, 90 deg], dphi folded to [0, pi]).
 double rock_view_excess_table(const UnresolvedShadingModel& m, double light_elevation_rad, double view_elevation_rad,
                               double azimuth_difference_rad);

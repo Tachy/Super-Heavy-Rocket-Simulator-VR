@@ -287,7 +287,8 @@ void fragment() {
 		float ground_k = dot(albedo, vec3(0.2126, 0.7152, 0.0722)) * moon_regolith_scale * moon_hapke_norm;
 		// The rock's own response to diffuse light: the regolith's A_h x its reflectance ratio (rho), on the mosaic norm.
 		light += moon_regolith_scale * moon_sun_scene * sunlit * moon_fill_reflectance(n, up, normalize(to_sun),
-				dot(n, to_eye), lit * sun_visible, ground_k, horizon_enabled, east_f, cross(up, east_f), uv_f)
+				dot(n, to_eye), moon_rock_lit(sun_margin, detail_cell_m, detail_horizon_spacing_m, vec2(0.5 * DETAIL_PI, 0.0))
+				* sun_visible, sun_visible, ground_k, horizon_enabled, east_f, cross(up, east_f), uv_f)
 				* mix(1.0, detail_rock_shape.y, fillet) / norm;
 	}
 	float gain = atmosphere_enabled ? atmosphere_exposure_gain : 1.0;

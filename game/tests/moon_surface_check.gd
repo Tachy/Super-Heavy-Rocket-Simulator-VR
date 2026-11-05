@@ -174,20 +174,27 @@ func _rock_checks() -> void:
 	if OS.get_cmdline_user_args().has("--no_jump"):  # diagnostics: the rock patches only
 		return
 	var site_fixed := CubeSphere.geodetic_direction(_site.x, _site.y) * (R + _ground_m(true) + 2.0)
+	# The near-field shadow's caster reach as World publishes it 2 m above the ground (range 150 + 4 x 2 m), with a low
+	# Sun (7 deg: the longest rock shadows the gate's Step 1 uses) - the rock casters attach only within it (review C1).
+	MoonNearShadow.publish_caster_reach(MoonNearShadow.RANGE_MIN_M + MoonNearShadow.RANGE_PER_HEIGHT * 2.0,
+			deg_to_rad(7.0))
+	if OS.get_cmdline_user_args().has("--no_rock_casters"):  # diagnostics: the jump without any rock shadow casters
+		MoonNearShadow.publish_caster_reach(0.0, deg_to_rad(7.0))
 	if OS.get_cmdline_user_args().has("--jump_baseline"):  # the same jump without the rock layer (info)
 		var bare := TerrainQuadtree.new()
 		root.add_child(bare)
 		bare.setup(_heights(), null, R, material)
 		MoonRockChecks.camera_jump(bare, null, site_fixed, _check)
 		bare.free()
-	var tree := TerrainQuadtree.new()
-	root.add_child(tree)
-	var layer := MoonRockLayer.new(_core, material)
-	layer.pixel_angle_rad = MoonRockChecks.CHECK_PIXEL_ANGLE
-	tree.rock_layer = layer
-	tree.setup(_heights(), null, R, material)
-	MoonRockChecks.camera_jump(tree, layer, site_fixed, _check)
-	tree.free()
+	if not OS.get_cmdline_user_args().has("--boulder_jump_only"):  # diagnostics: the boulder field's jump alone
+		var tree := TerrainQuadtree.new()
+		root.add_child(tree)
+		var layer := MoonRockLayer.new(_core, material)
+		layer.pixel_angle_rad = MoonRockChecks.CHECK_PIXEL_ANGLE
+		tree.rock_layer = layer
+		tree.setup(_heights(), null, R, material)
+		MoonRockChecks.camera_jump(tree, layer, site_fixed, _check)
+		tree.free()
 	# The same jump in the Diviner boulder field (review R3: the longest lists, chunked; the pool bound).
 	var rocky: Vector2 = ROCKY_POINTS[0]
 	var rocky_dir := CubeSphere.geodetic_direction(rocky.x, rocky.y)

@@ -92,6 +92,15 @@ func _ready() -> void:
 		world.weather.enabled = on
 		WeatherService.save_enabled_setting(on))
 	box.add_child(weather_box)
+	# Fidelity setting moon_near_shadows (MoonNearShadow): the Sun's shadow map near the lunar ground.
+	var moon_shadow_box := CheckBox.new()
+	moon_shadow_box.text = "Mondschatten nah"
+	moon_shadow_box.tooltip_text = "Schattenkarte der Sonne in Bodennähe auf dem Mond (Steine, Gelände, Fahrzeuge)"
+	moon_shadow_box.button_pressed = MoonNearShadow.enabled
+	moon_shadow_box.toggled.connect(func(on: bool) -> void:
+		MoonNearShadow.enabled = on
+		MoonNearShadow.save_enabled_setting(on))
+	box.add_child(moon_shadow_box)
 
 	box.add_child(HSeparator.new())
 	var launch_label := Label.new()

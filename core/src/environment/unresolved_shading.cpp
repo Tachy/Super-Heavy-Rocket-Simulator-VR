@@ -4,6 +4,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <string>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -227,7 +231,8 @@ double erf_lambda(double a) {
 
 }  // namespace
 
-UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& detail, const LunarRocks* rocks) {
+UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& detail, const LunarRocks* rocks,
+                                                     const std::filesystem::path& cache_dir) {
     const auto& cfg = detail.config();
     UnresolvedShadingModel m;
     m.globe_slope_variance = slope_variance_from_theta_bar(cfg.hapke.theta_bar_rad);
@@ -302,7 +307,9 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         m.rock_lit_gain = tables.gain;
         m.rock_shadow = tables.shadow;
         // Oblique views (Task 12): the ground the rocks hide from the eye and their seen sides.
-        const RockViewModel view = template_rock_view_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
+        const RockViewModel view =
+            template_rock_view_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd,
+                                      cache_dir.empty() ? std::filesystem::path{} : cache_dir / rock_view_cache_name);
         m.rock_view_excess = view.excess;
         m.rock_view_gain_ratio = view.gain_ratio;
         // The rocks' share of the globe's mean slope (header comment): out of the regolith's budget.
@@ -835,14 +842,131 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
     return out;
 }
 
-RockViewModel template_rock_view_tables(double burial_mean, double burial_sd) {
+namespace {
+
+constexpr int rock_view_burial_nodes = 5;  // [D] N in [-2, 2] step 1 (the tails beyond weigh < 3 %: the view terms vary slowly with the burial)
+constexpr int rock_view_lod = 2;           // [D] 162 vertices: the polygons' areas within ~1 % of LOD 1 (test)
+// Bump when the tables' algorithm changes (the key also holds the inputs).
+constexpr std::uint64_t rock_view_cache_version = 1;
+constexpr std::uint64_t rock_view_cache_magic = 0x5356'5452'4F43'4B31ULL;  // "SVTROCK1"
+
+struct Fnv {
+    std::uint64_t h = 1469598103934665603ULL;
+    void bytes(const void* p, size_t n) {
+        const auto* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; ++i) {
+            h ^= b[i];
+            h *= 1099511628211ULL;
+        }
+    }
+    template <class T>
+    void value(T v) { bytes(&v, sizeof v); }
+};
+
+}  // namespace
+
+bool read_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, RockViewModel& out) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return false;
+    std::uint64_t head[3] = {0, 0, 0};
+    in.read(reinterpret_cast<char*>(head), sizeof head);
+    if (!in || head[0] != rock_view_cache_magic || head[1] != key || head[2] != view_table_size) return false;
+    RockViewModel m;
+    m.excess.resize(view_table_size);
+    m.gain_ratio.resize(view_table_size);
+    in.read(reinterpret_cast<char*>(m.excess.data()), static_cast<std::streamsize>(view_table_size * sizeof(double)));
+    in.read(reinterpret_cast<char*>(m.gain_ratio.data()), static_cast<std::streamsize>(view_table_size * sizeof(double)));
+    if (!in || in.peek() != std::ifstream::traits_type::eof()) return false;
+    out = std::move(m);
+    return true;
+}
+
+void write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, const RockViewModel& m) {
+    if (m.excess.size() != view_table_size || m.gain_ratio.size() != view_table_size) return;
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    // A unique temporary beside it, then renamed over the cache (no reader sees a half-written file).
+    Fnv unique;
+    unique.value(key);
+    unique.value(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    unique.value(reinterpret_cast<std::uintptr_t>(&m));
+    std::filesystem::path tmp = file;
+    tmp += "." + std::to_string(unique.h) + ".tmp";
+    {
+        std::ofstream outf(tmp, std::ios::binary | std::ios::trunc);
+        if (!outf) return;
+        const std::uint64_t head[3] = {rock_view_cache_magic, key, view_table_size};
+        outf.write(reinterpret_cast<const char*>(head), sizeof head);
+        outf.write(reinterpret_cast<const char*>(m.excess.data()),
+                   static_cast<std::streamsize>(m.excess.size() * sizeof(double)));
+        outf.write(reinterpret_cast<const char*>(m.gain_ratio.data()),
+                   static_cast<std::streamsize>(m.gain_ratio.size() * sizeof(double)));
+        if (!outf) {
+            outf.close();
+            std::filesystem::remove(tmp, ec);
+            return;
+        }
+    }
+    std::filesystem::rename(tmp, file, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
+}
+
+namespace {
+
+RockViewModel compute_template_rock_view_tables(double burial_mean, double burial_sd);
+
+}  // namespace
+
+std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd) {
+    using M = UnresolvedShadingModel;
+    Fnv f;
+    f.value(rock_view_cache_version);
+    f.value(view_table_size);
+    f.value(M::view_elevation_step_rad);
+    f.value(M::view_azimuth_step_rad);
+    f.value(M::lit_gain_step_rad);
+    f.value(lit_gain_floor_rad);
+    f.value(rock_view_yaws);
+    f.value(rock_view_burial_nodes);
+    f.value(burial_mean);
+    f.value(burial_sd);
+    f.value(LunarRocks::max_burial_fraction);
+    const RockTemplates& templates = RockTemplates::instance();
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        const TemplateMesh& mesh = templates.mesh(id, rock_view_lod);
+        for (const math::Vec3& v : mesh.vertices) {
+            f.value(v.x);
+            f.value(v.y);
+            f.value(v.z);
+        }
+        f.bytes(mesh.indices.data(), mesh.indices.size() * sizeof(int));
+        f.value(templates.bottom_z(id));
+        f.value(templates.top_z(id));
+    }
+    return f.h;
+}
+
+RockViewModel template_rock_view_tables(double burial_mean, double burial_sd, const std::filesystem::path& cache_file) {
     static std::mutex mutex;
     static std::map<std::pair<double, double>, RockViewModel> cache;
     const std::lock_guard<std::mutex> lock(mutex);
     if (const auto it = cache.find({burial_mean, burial_sd}); it != cache.end()) return it->second;
+    RockViewModel out;
+    const std::uint64_t key = cache_file.empty() ? 0 : rock_view_cache_key(burial_mean, burial_sd);
+    if (cache_file.empty() || !read_rock_view_cache(cache_file, key, out)) {
+        out = compute_template_rock_view_tables(burial_mean, burial_sd);
+        if (!cache_file.empty()) write_rock_view_cache(cache_file, key, out);
+    }
+    cache.emplace(std::make_pair(burial_mean, burial_sd), out);
+    return out;
+}
+
+namespace {
+
+RockViewModel compute_template_rock_view_tables(double burial_mean, double burial_sd) {
     using M = UnresolvedShadingModel;
-    constexpr int burial_nodes = 5;  // [D] N in [-2, 2] step 1 (the tails beyond weigh < 3 %: the view terms vary slowly with the burial)
-    constexpr int lod = 2;           // [D] 162 vertices: the polygons' areas within ~1 % of LOD 1 (test)
+    constexpr int burial_nodes = rock_view_burial_nodes;
+    constexpr int lod = rock_view_lod;
     const RockTemplates& templates = RockTemplates::instance();
     struct Sum {
         std::vector<double> excess, flux, hidden_plus_one, flux_nadir;
@@ -902,9 +1026,10 @@ RockViewModel template_rock_view_tables(double burial_mean, double burial_sd) {
             }
         }
     }
-    cache.emplace(std::make_pair(burial_mean, burial_sd), out);
     return out;
 }
+
+}  // namespace
 
 double rock_view_excess_table(const UnresolvedShadingModel& m, double light_elevation_rad, double view_elevation_rad,
                               double azimuth_difference_rad) {

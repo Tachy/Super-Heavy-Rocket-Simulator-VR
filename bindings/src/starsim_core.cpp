@@ -284,6 +284,7 @@ godot::Dictionary StarsimCore::atmospheric_refraction(const godot::Vector3& came
 godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
     const std::filesystem::path config(config_dir.utf8().get_data());
     const auto data_dir = config.parent_path() / "data";
+    moon_cache_dir_ = data_dir / "cache";
     const auto say = [](const std::string& message) { godot::UtilityFunctions::print(godot::String::utf8(message.c_str())); };
     earth_terrain_.reset();
     moon_terrain_.reset();
@@ -607,7 +608,8 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
     if (!moon_unresolved_) {
         try {
             moon_unresolved_ = std::make_unique<environment::UnresolvedShadingModel>(
-                environment::make_unresolved_shading_model(moon_surface_->detail(), moon_surface_->rocks_shared().get()));
+                environment::make_unresolved_shading_model(moon_surface_->detail(), moon_surface_->rocks_shared().get(),
+                                                          moon_cache_dir_));
         } catch (const std::exception& e) {
             godot::UtilityFunctions::push_warning(godot::String::utf8(e.what()));
             return result;

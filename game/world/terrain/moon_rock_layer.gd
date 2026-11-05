@@ -61,6 +61,15 @@ const FLOATS_PER_INSTANCE := 20  ## transform 12, colour 4, custom 4
 ## [E] moon_detail.gdshaderinc DETAIL_SHADOW_CASTER_FACTOR (core shadow_caster_factor): the drawn rocks cast the near-field
 ## shadow from this many times the geometry threshold (moon_rock.gdshader's shadow pass), below it statistically.
 const SHADOW_CASTER_FACTOR := 4.0
+## Shadow casters only near the eye (Task 12 fix 1, review C1): a node's shadow-only MultiMeshes are attached while the
+## node lies within the near-field shadow map's reach - MoonNearShadow.caster_range_m plus its tallest rock's shadow
+## length (height / tan of the Sun's elevation, at least CASTER_TAN_FLOOR), that extra at most the range - and released
+## beyond CASTER_RELEASE_RATIO x the reach (hysteresis). Godot's directional map ends at the range: casters beyond it
+## and their shadows' reach are never sampled. The farthest-node sweep (_far_scan) moves nodes in and out, at most
+## CASTER_ATTACHES_PER_FRAME attaches per frame.
+const CASTER_RELEASE_RATIO := 1.2  ## [E]
+const CASTER_ATTACHES_PER_FRAME := 2  ## [E]
+const CASTER_TAN_FLOOR := 0.0175  ## [E] tan 1 deg: below, the reach is the range's double anyway
 ## Texels per template row of rock_shape_data: MAX_PLANES planes (n, h), 3 quadric rows, (plane count, bottom, top, 0).
 const SHAPE_TEXELS := MAX_PLANES + 4
 ## Samples of the plan-area tables (rock_area_data): forward A(z) / A_max over [bottom_z, top_z], inverse z(a) over
@@ -113,11 +122,14 @@ const POOL_MAX_MB := 512.0
 const EVICT_DISTANCE_RATIO := 1.25
 ## [E] Frames between two looks at the retry set while the pool has no room (a scan of the attached nodes).
 const RETRY_INTERVAL_FRAMES := 15
-## [E, measured] Evictions per frame. 0: OFF. With 2 the Task 12 boulder jump had main-thread spikes of 34.7 ms (the
-## evicted node's MultiMeshes released, its buckets trimmed and re-allocated for the nearer node) against 7.2 ms without;
-## the retry set and its nearest-first requeue stay. Open point (Task 12 report): an eviction that keeps the pool entries
-## for the nearer node instead of trimming them.
-const EVICTIONS_PER_FRAME := 0
+## [E, measured] Evictions per frame (counted against ATTACH_BUDGET_US). An eviction hands the farther node's pooled
+## MultiMeshes straight to the waiting node (_transfer_to: same LOD, capacity at least the chunk's) and allocates nothing;
+## releasing them to the pool instead (Task 12 first version) let the trim free and re-allocate GPU buffers: 34.7 ms
+## spikes in the boulder jump. No donor covering the waiting node's buckets: no eviction, the node stays in the retry set.
+const EVICTIONS_PER_FRAME := 1
+## [E] Farther nodes one eviction may take together to cover the waiting node's buckets (a near node in a boulder field
+## lists far more rocks than a far one).
+const EVICT_DONORS_MAX := 4
 ## [E] Attached nodes looked at per frame for the farthest ones, and how many of them a sweep keeps.
 const FAR_SCAN_PER_FRAME := 128
 const FAR_KEEP := 16
@@ -144,7 +156,7 @@ const COPIED_NODE_PARAMETERS: Array[StringName] = [&"horizon_map", &"horizon_str
 const COPIED_TEMPLATE_PARAMETERS: Array[StringName] = [&"detail_shading", &"detail_total_slope_variance",
 		&"detail_drawn_table", &"detail_drawn_axis", &"detail_rock_law", &"detail_rock_shape", &"detail_rock_lit_gain",
 		&"detail_rock_shadow", &"detail_rock_view", &"detail_rock_view_present", &"detail_view_step",
-		&"detail_hemispherical_albedo",
+		&"detail_hemispherical_albedo_mu",
 		&"detail_rock_abundance", &"albedo_texture", &"sun_radius_m", &"earth_radius_m"]
 
 ## Diagnostics switches (render_check): rocks drawn at all (false: every rock statistical, no lists built) and the
@@ -213,6 +225,15 @@ var _far_ready: Array = []  ## the last complete sweep's farthest attached nodes
 var _far_sweep: Array = []  ## the running sweep's
 var _far_cursor := 0
 var _evictions_this_frame := 0
+var _caster_attaches_this_frame := 0
+## An eviction's hand-over (_transfer_to): requested pool key -> Array of [MultiMeshInstance3D, its own pool key].
+var _donated := {}
+## Review m1: the nodes counted in stats.over_bound_nodes (a requeued node going over the bound again counts once).
+var _over_counted := {}
+## Released nodes' worker rock lists (MBs each in a boulder field): their last references go to a worker task, which
+## frees them off the main thread (Task 12 fix 1: freeing them in detach() stalled the main thread up to 3 ms per node).
+var _graveyard: Array = []
+var _disposal_tasks: Array[int] = []
 
 
 ## Template meshes and textures from the core, the material template from the Moon terrain's (its detail uniforms,
@@ -265,6 +286,7 @@ func _prewarm_step() -> bool:
 		if int(_prewarm_left[key]) <= 0:
 			_prewarm_left.erase(key)
 	stats["main_ms"] += (Time.get_ticks_usec() - start_us) * 1.0e-3
+	_part_ms("warm", Time.get_ticks_usec() - start_us)
 	return true
 
 
@@ -550,6 +572,7 @@ func build_node(key: Vector4i, center_fixed: Vector3, radius_m: float) -> Dictio
 		minus_d.append(PackedFloat32Array())
 	var lo := Vector3(INF, INF, INF)
 	var hi := -lo
+	var max_height_m := 0.0  # the tallest rock's top over its base (the shadow casters' reach)
 	var instance := PackedFloat32Array()
 	instance.resize(FLOATS_PER_INSTANCE)
 	for r in n:
@@ -602,6 +625,7 @@ func build_node(key: Vector4i, center_fixed: Vector3, radius_m: float) -> Dictio
 				buffers[lod].append_array(instance)
 				counts[lod] += 1
 				minus_d[lod].append(-d)
+		max_height_m = maxf(max_height_m, c * top_z[template_id] - burial[r])
 		var reach := Vector3.ONE * axes[b3]
 		var origin := Vector3(o.y, o.z, o.x)
 		lo = lo.min(origin - reach)
@@ -663,7 +687,7 @@ func build_node(key: Vector4i, center_fixed: Vector3, radius_m: float) -> Dictio
 	return {"node_min_m": min_d, "count": n, "buffers": chunks, "counts": counts, "chunk_counts": chunk_counts,
 			"capacities": capacities, "aabb": AABB(lo, hi - lo), "ids": ids, "build_ms": ms, "minus_d": minus_d,
 			"factor": factor, "shadow_buffers": shadow_buffers, "shadow_counts": shadow_counts,
-			"shadow_capacities": shadow_capacities}
+			"shadow_capacities": shadow_capacities, "max_height_m": max_height_m}
 
 
 ## Main thread, at the node's upload: the node's terrain material starts with every rock statistical; a node with rocks
@@ -677,6 +701,7 @@ func attach(instance: MeshInstance3D, rocks: Dictionary, terrain_material: Shade
 		_queue_order.append(id)
 	stats["queued"] = _queue.size()
 	stats["main_ms"] += (Time.get_ticks_usec() - start_us) * 1.0e-3
+	_part_ms("attach", Time.get_ticks_usec() - start_us)
 
 
 ## True while the node's rocks wait in the attach queue (TerrainQuadtree keeps its parent drawn meanwhile).
@@ -697,6 +722,7 @@ func park(instance: MeshInstance3D) -> void:
 	(entry["terrain_material"] as ShaderMaterial).set_shader_parameter("rock_node_min_m", 1.0e30)
 	stats["parked_nodes"] = _parked.size()
 	stats["main_ms"] += (Time.get_ticks_usec() - start_us) * 1.0e-3
+	_part_ms("park", Time.get_ticks_usec() - start_us)
 
 
 ## Main thread, before a split node merges (TerrainQuadtree): true when its rocks are attached; a parked node is queued
@@ -719,6 +745,7 @@ func process_queue(camera_fixed_m := Vector3.ZERO) -> void:
 	if camera_fixed_m != Vector3.ZERO:
 		_camera_render = Frames.to_render(camera_fixed_m)  # the eviction / retry distances (also without update())
 	_evictions_this_frame = 0
+	_caster_attaches_this_frame = 0
 	_allocations_this_frame = 0
 	_allocated_instances_this_frame = 0
 	_trimmed_this_frame = 0
@@ -728,6 +755,7 @@ func process_queue(camera_fixed_m := Vector3.ZERO) -> void:
 	_prewarm_step()
 	warm_us = Time.get_ticks_usec() - warm_us
 	_trim_idle()
+	_dispose_released()
 	var t_far := Time.get_ticks_usec()
 	_far_scan()
 	var t_requeue := Time.get_ticks_usec()
@@ -744,21 +772,23 @@ func process_queue(camera_fixed_m := Vector3.ZERO) -> void:
 		if item.is_empty():
 			_queue_order.pop_front()
 			continue
-		var verdict := _can_attach(item[1])
+		var verdict := _can_attach(item)
 		if verdict == ATTACH_WAIT:
 			break  # the pool may grow by ALLOCATIONS_PER_FRAME per frame: wait for the next frame
-		if verdict == ATTACH_OVER_BOUND:
-			# A farther attached node gives its lists up (they go to the free pool, trimmed for this node's buckets).
-			if _evict_farther_than(_queued_distance(item) * EVICT_DISTANCE_RATIO):
-				done += 1
-				continue
 		_queue_order.pop_front()
 		_queue.erase(id)
 		done += 1  # a node kept statistical counts too: the loop stays inside the frame's budget
 		if verdict == ATTACH_OVER_BOUND:
-			stats["over_bound_nodes"] = int(stats.get("over_bound_nodes", 0)) + 1
+			# A farther attached node hands its pooled MultiMeshes over (nothing allocated, nothing freed).
+			if _transfer_to(item, _queued_distance(item) * EVICT_DISTANCE_RATIO):
+				_over_counted.erase(id)
+				continue
+			if not _over_counted.has(id):
+				_over_counted[id] = true
+				stats["over_bound_nodes"] = int(stats.get("over_bound_nodes", 0)) + 1
 			_retry[id] = item  # its terrain material keeps rock_node_min_m = 1e30: every rock statistical
 			continue
+		_over_counted.erase(id)
 		_attach_now(item[0], item[1], item[2])
 	var t_shadow := Time.get_ticks_usec()
 	stats["max_queue_loop_ms"] = maxf(float(stats.get("max_queue_loop_ms", 0.0)), (t_shadow - t_loop) * 1.0e-3)
@@ -778,7 +808,24 @@ func process_queue(camera_fixed_m := Vector3.ZERO) -> void:
 	stats["queued"] = _queue.size()
 	# Review m3: the buffer bytes this frame's attaches uploaded (against the RenderingDevice staging pool).
 	stats["max_frame_upload_mb"] = maxf(float(stats.get("max_frame_upload_mb", 0.0)), _frame_upload_bytes / 1048576.0)
-	stats["main_ms"] += (Time.get_ticks_usec() - start_us - warm_us) * 1.0e-3  # the warming counted itself
+	var end_us := Time.get_ticks_usec()
+	stats["main_ms"] += (end_us - start_us - warm_us) * 1.0e-3  # the warming counted itself
+	_part_ms("queue", end_us - start_us - warm_us)
+	if (end_us - start_us) * 1.0e-3 > float((stats.get("worst_queue_frame", {"ms": 0.0}) as Dictionary)["ms"]):
+		# Diagnostics (the camera-jump gate): the slowest process_queue frame's parts.
+		stats["worst_queue_frame"] = {"ms": (end_us - start_us) * 1.0e-3, "warm": warm_us * 1.0e-3,
+				"far": (t_requeue - t_far) * 1.0e-3, "requeue": (t_loop - t_requeue) * 1.0e-3,
+				"loop": (t_shadow - t_loop) * 1.0e-3, "items": done, "allocations": _allocations_this_frame,
+				"allocated_instances": _allocated_instances_this_frame, "caster_attaches": _caster_attaches_this_frame,
+				"evictions": _evictions_this_frame}
+
+
+## Diagnostics (the camera-jump check): main-thread time per part, summed (stats.parts_ms).
+func _part_ms(part: String, us: int) -> void:
+	if not stats.has("parts_ms"):
+		stats["parts_ms"] = {}
+	var parts: Dictionary = stats["parts_ms"]
+	parts[part] = float(parts.get(part, 0.0)) + us * 1.0e-3
 
 
 const ATTACH_NOW := 0
@@ -794,22 +841,111 @@ func _queued_distance(item: Array) -> float:
 	return (instance.position + (item[1]["aabb"] as AABB).get_center()).distance_to(_camera_render)
 
 
-## Review N1: the farthest attached node beyond limit_m returns its lists to the pools and waits in the retry set
-## (statistical meanwhile: radiance-continuous). True when one was evicted. One scan of the attached nodes.
-func _evict_farther_than(limit_m: float) -> bool:
+## Review N1 / Task 12 fix 1: the farthest attached node beyond limit_m hands its pooled MultiMeshes straight to the
+## waiting node item (each of the item's buckets - the chunks and, near the eye, the shadow casters - from the free pool
+## of its exact key or from the donor's node of the same LOD with the smallest capacity >= the chunk's; zero padding
+## fills the larger buffer) and waits in the retry set (statistical meanwhile: radiance-continuous). Nothing is allocated
+## or freed (the free-and-reallocate step made the 34.7 ms spikes). False (no eviction) when the donor cannot cover every
+## bucket. The item is attached here.
+func _transfer_to(item: Array, limit_m: float) -> bool:
 	if _evictions_this_frame >= EVICTIONS_PER_FRAME:
 		return false
-	var farthest := _farthest_entry()
-	if farthest.is_empty() or float(farthest["far_m"]) <= limit_m:
+	var rocks: Dictionary = item[1]
+	var wanted: Array = []  # [lod, capacity]
+	var capacities: Array = rocks["capacities"]
+	for lod in LODS:
+		for capacity: int in capacities[lod]:
+			wanted.append([lod, capacity])
+	if _casts(item[0], rocks, 1.0):
+		var shadow_capacities: PackedInt32Array = rocks["shadow_capacities"]
+		for lod in LODS:
+			if shadow_capacities[lod] > 0:
+				wanted.append([lod, shadow_capacities[lod]])
+	wanted.sort_custom(func(a: Array, b: Array) -> bool: return int(a[1]) > int(b[1]))
+	# The donors: the farthest nodes of the last sweep (FAR_KEEP of them, farthest first) beyond limit_m, taken one after
+	# the other (at most EVICT_DONORS_MAX) until their pooled MultiMeshes cover the item's buckets.
+	var donors: Array = []  # [index in _far_ready, entry]
+	var offered: Array = []  # [node, its pool key, donor number]
+	var assigned := {-1: true}  # offered index -> the requested pool key
+	var at := 0
+	while at < _far_ready.size() and donors.size() < EVICT_DONORS_MAX:
+		var candidate: Dictionary = _far_ready[at][1]
+		var instance_ok := is_instance_valid(candidate["instance"])
+		if not instance_ok or not _entries.has((candidate["instance"] as MeshInstance3D).get_instance_id()):
+			_far_ready.remove_at(at)
+			continue
+		if float(_far_ready[at][0]) <= limit_m:
+			break  # farthest first: the rest are nearer
+		for slot: Array in candidate["lods"]:
+			offered.append([slot[3], int(slot[4]), donors.size()])
+		for slot: Array in candidate["shadow_lods"]:
+			offered.append([slot[3], int(slot[4]), donors.size()])
+		donors.append([at, candidate])
+		at += 1
+		assigned = _plan_transfer(wanted, offered)
+		if not assigned.has(-1):
+			break
+	if assigned.has(-1):
+		var reason := "transfer_uncovered" if not donors.is_empty() else ("transfer_donor_near"
+				if not _far_ready.is_empty() else "transfer_no_donor")
+		stats[reason] = int(stats.get(reason, 0)) + 1
 		return false
-	_far_ready.pop_front()  # the next farthest of the sweep for the next eviction
+	for k in range(donors.size() - 1, -1, -1):
+		_far_ready.remove_at(int(donors[k][0]))
 	_evictions_this_frame += 1
-	var instance: MeshInstance3D = farthest["instance"]
-	_remove_entry(instance, farthest)
-	(farthest["terrain_material"] as ShaderMaterial).set_shader_parameter("rock_node_min_m", 1.0e30)
-	_retry[instance.get_instance_id()] = [instance, farthest["rocks"], farthest["terrain_material"]]
+	_donated = {}
+	for i in offered.size():
+		var donor: Dictionary = donors[int(offered[i][2])][1]
+		var node: MultiMeshInstance3D = offered[i][0]
+		(donor["instance"] as MeshInstance3D).remove_child(node)
+		node.material_override = null
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if assigned.has(i):
+			var key: int = assigned[i]
+			if not _donated.has(key):
+				_donated[key] = []
+			(_donated[key] as Array).append(offered[i])
+		else:
+			_release_to_pool(node, int(offered[i][1]))
+	for pair: Array in donors:
+		var donor: Dictionary = pair[1]
+		var donor_instance: MeshInstance3D = donor["instance"]
+		_unlink_entry(donor_instance, donor)
+		(donor["terrain_material"] as ShaderMaterial).set_shader_parameter("rock_node_min_m", 1.0e30)
+		_retry[donor_instance.get_instance_id()] = [donor_instance, donor["rocks"], donor["terrain_material"]]
+	_attach_now(item[0], item[1], item[2])
+	for key: int in _donated:  # none expected: every assigned node is taken
+		for slot: Array in _donated[key]:
+			_release_to_pool(slot[0], int(slot[1]))
+	_donated = {}
+	stats["evicted_donors"] = int(stats.get("evicted_donors", 0)) + donors.size()
 	stats["evicted"] = int(stats.get("evicted", 0)) + 1
 	return true
+
+
+## The hand-over plan: per offered node (index) the requested pool key it serves, the requests (sorted by capacity,
+## largest first) served first from the free pool of their exact key, else by the offered node of the same LOD with the
+## smallest capacity >= the request's. {-1: true} when some request finds none.
+func _plan_transfer(wanted: Array, offered: Array) -> Dictionary:
+	var from_free := {}  # pool key -> requests served by the free pool
+	var assigned := {}
+	for request: Array in wanted:
+		var key := pool_key(int(request[0]), int(request[1]))
+		if (_free.get(key, []) as Array).size() > int(from_free.get(key, 0)):
+			from_free[key] = int(from_free.get(key, 0)) + 1
+			continue
+		var best := -1
+		for i in offered.size():
+			if assigned.has(i):
+				continue
+			var own: int = offered[i][1]
+			var fits := own / POOL_KEY_PER_LOD == int(request[0]) and own % POOL_KEY_PER_LOD >= int(request[1])
+			if fits and (best < 0 or own < int(offered[best][1])):
+				best = i
+		if best < 0:
+			return {-1: true}
+		assigned[best] = key
+	return assigned
 
 
 ## The attached node farthest from the camera ({} with none), its distance in "far_m": from the last complete sweep
@@ -839,6 +975,7 @@ func _far_scan() -> void:
 			_far_cursor = 0
 		var entry: Dictionary = _list[_far_cursor]
 		var d := (entry["center"] as Vector3).distance_to(_camera_render)
+		_sweep_casters(entry, d)
 		if _far_sweep.size() < FAR_KEEP or d > float(_far_sweep.back()[0]):
 			var at := 0
 			while at < _far_sweep.size() and float(_far_sweep[at][0]) >= d:
@@ -854,14 +991,138 @@ func _far_scan() -> void:
 			break
 
 
+## Task 12 fix 1 (review C1): an attached node's shadow casters on as it comes within their reach, off beyond
+## CASTER_RELEASE_RATIO x the reach (d: its centre's distance from the camera; one node of the sweep).
+func _sweep_casters(entry: Dictionary, d: float) -> void:
+	var rocks: Dictionary = entry["rocks"]
+	if not _has_casters(rocks):
+		return
+	var reach := _caster_reach_m(rocks)
+	var near := maxf(d - float(entry["half_diagonal"]), 0.0)
+	var on := not (entry["shadow_lods"] as Array).is_empty()
+	if on and (reach < 0.0 or near > reach * CASTER_RELEASE_RATIO):
+		_release_casters(entry)
+		stats["casters_released"] = int(stats.get("casters_released", 0)) + 1
+	elif not on and reach >= 0.0 and near < reach and _caster_attaches_this_frame < CASTER_ATTACHES_PER_FRAME \
+			and _caster_room(rocks):
+		_attach_casters(entry)
+		_caster_attaches_this_frame += 1
+		stats["casters_attached_late"] = int(stats.get("casters_attached_late", 0)) + 1
+
+
+## Whether the node's rock list has shadow casters at all.
+static func _has_casters(rocks: Dictionary) -> bool:
+	for n: int in rocks.get("shadow_counts", PackedInt32Array()):
+		if n > 0:
+			return true
+	return false
+
+
+## The casters' reach (m from the camera to the node's nearest point; < 0: no near-field shadows, no casters).
+func _caster_reach_m(rocks: Dictionary) -> float:
+	var range_m := MoonNearShadow.caster_range_m
+	if range_m <= 0.0:
+		return -1.0
+	var tan_e := maxf(MoonNearShadow.caster_tan_sun, CASTER_TAN_FLOOR)
+	return range_m + minf(float(rocks.get("max_height_m", 0.0)) / tan_e, range_m)
+
+
+## Whether a node (its mesh instance and rock list) casts now: within ratio x the casters' reach.
+func _casts(instance: MeshInstance3D, rocks: Dictionary, ratio: float) -> bool:
+	if not _has_casters(rocks) or not is_instance_valid(instance):
+		return false
+	var reach := _caster_reach_m(rocks)
+	if reach < 0.0:
+		return false
+	var aabb: AABB = rocks["aabb"]
+	var near := maxf((instance.position + aabb.get_center()).distance_to(_camera_render) - 0.5 * aabb.size.length(), 0.0)
+	return near < reach * ratio
+
+
+## Whether the node's casters find pooled MultiMeshes or may allocate them this frame (no trimming: a node without room
+## tries again at its next sweep).
+func _caster_room(rocks: Dictionary) -> bool:
+	var wanted := {}
+	var shadow_capacities: PackedInt32Array = rocks["shadow_capacities"]
+	for lod in LODS:
+		if shadow_capacities[lod] > 0:
+			var key := pool_key(lod, shadow_capacities[lod])
+			wanted[key] = int(wanted.get(key, 0)) + 1
+	var needed := 0
+	var needed_instances := 0
+	for key: int in wanted:
+		var missing := maxi(int(wanted[key]) - (_free.get(key, []) as Array).size(), 0)
+		needed += missing
+		needed_instances += missing * (key % POOL_KEY_PER_LOD)
+	if needed == 0:
+		return true
+	if _mb(int(stats["pool_instances"]) + needed_instances) > POOL_MAX_MB:
+		return false
+	if _allocated_instances_this_frame > 0 and _allocated_instances_this_frame + needed_instances > ALLOCATED_INSTANCES_PER_FRAME:
+		return false
+	return _allocations_this_frame + needed <= ALLOCATIONS_PER_FRAME
+
+
+## The node's shadow-only MultiMeshes (build_node's caster prefix per LOD) attached: [MultiMesh, -D of the LOD list, lod,
+## node, pool key, 0, instances]; the visible counts are recomputed at the next round (entry threshold reset).
+func _attach_casters(entry: Dictionary) -> void:
+	var rocks: Dictionary = entry["rocks"]
+	var instance: MeshInstance3D = entry["instance"]
+	var shadow_buffers: Array = rocks.get("shadow_buffers", [])
+	var minus_d: Array = rocks["minus_d"]
+	var lods: Array = []
+	for lod in shadow_buffers.size():
+		var n_shadow: int = (rocks["shadow_counts"] as PackedInt32Array)[lod]
+		if n_shadow <= 0:
+			continue
+		var taken := _take_slot(lod, (rocks["shadow_capacities"] as PackedInt32Array)[lod])
+		var node: MultiMeshInstance3D = taken[0]
+		var buffer := _fit(shadow_buffers[lod], int(taken[1]) % POOL_KEY_PER_LOD)
+		RenderingServer.multimesh_set_buffer(node.multimesh.get_rid(), buffer)
+		_frame_upload_bytes += buffer.size() * 4
+		node.multimesh.custom_aabb = rocks["aabb"]
+		node.multimesh.visible_instance_count = n_shadow
+		node.material_override = entry["material"]
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		instance.add_child(node)
+		lods.append([node.multimesh, minus_d[lod], lod, node, int(taken[1]), 0, n_shadow])
+	entry["shadow_lods"] = lods
+	entry["threshold"] = -1.0  # the casters' visible prefix at the next count round
+
+
+## The node's shadow casters back to the pools.
+func _release_casters(entry: Dictionary) -> void:
+	var instance: MeshInstance3D = entry["instance"]
+	for item: Array in entry["shadow_lods"]:
+		var node: MultiMeshInstance3D = item[3]
+		instance.remove_child(node)
+		node.material_override = null
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_release_to_pool(node, int(item[4]))
+	entry["shadow_lods"] = []
+
+
+## A buffer zero-padded to capacity instances (a handed-over MultiMesh may be a larger bucket than the chunk's).
+static func _fit(buffer: PackedFloat32Array, capacity: int) -> PackedFloat32Array:
+	var size := capacity * FLOATS_PER_INSTANCE
+	if buffer.size() == size:
+		return buffer
+	var padded := buffer.duplicate()
+	var from := padded.size()
+	padded.resize(size)
+	for i in range(from, size):
+		padded[i] = 0.0
+	return padded
+
+
 ## Review N1: the nearest node of the retry set back into the attach queue when the pool has room or (every
-## RETRY_INTERVAL_FRAMES) when some attached node is EVICT_DISTANCE_RATIO farther.
+## RETRY_INTERVAL_FRAMES, with evictions on) when some attached node is EVICT_DISTANCE_RATIO farther.
 func _requeue_retry() -> void:
 	if _retry.is_empty():
 		return
 	_retry_frame += 1
 	var room := float(stats["pool_mb"]) < POOL_MAX_MB * 0.9
-	if not room and _retry_frame % RETRY_INTERVAL_FRAMES != 0:
+	if not room and (EVICTIONS_PER_FRAME == 0 or _retry_frame % RETRY_INTERVAL_FRAMES != 0):
 		return
 	var best_id := -1
 	var best_m := INF
@@ -884,6 +1145,23 @@ func _requeue_retry() -> void:
 	_queue_order.push_front(best_id)
 
 
+## The released rock lists' last references handed to a worker task (it drops them: the buffers are freed there); the
+## finished tasks collected.
+func _dispose_released() -> void:
+	var running: Array[int] = []
+	for task_id in _disposal_tasks:
+		if WorkerThreadPool.is_task_completed(task_id):
+			WorkerThreadPool.wait_for_task_completion(task_id)
+		else:
+			running.append(task_id)
+	_disposal_tasks = running
+	if _graveyard.is_empty():
+		return
+	var batch := _graveyard
+	_graveyard = []
+	_disposal_tasks.append(WorkerThreadPool.add_task(func() -> void: batch.clear()))
+
+
 ## Review n3 (Task 11 fix C re-review): frees the pools' free entries (MultiMeshInstance3D nodes outside the tree) and
 ## drops the queues; the attached ones are children of the quadtree's node instances and go with them. Called by
 ## TerrainQuadtree._exit_tree.
@@ -894,6 +1172,10 @@ func free_all() -> void:
 				node.free()
 	_free.clear()
 	_free_materials.clear()
+	for task_id in _disposal_tasks:
+		WorkerThreadPool.wait_for_task_completion(task_id)
+	_disposal_tasks.clear()
+	_graveyard.clear()
 	_parked.clear()
 	_queue.clear()
 	_queue_order.clear()
@@ -902,15 +1184,17 @@ func free_all() -> void:
 
 ## Whether every chunk of the node finds a pooled MultiMesh or may allocate one this frame (ATTACH_NOW / ATTACH_WAIT),
 ## or whether the allocations would take the pool over POOL_MAX_MB even after trimming free entries (ATTACH_OVER_BOUND).
-func _can_attach(rocks: Dictionary) -> int:
+func _can_attach(item: Array) -> int:
+	var rocks: Dictionary = item[1]
 	var capacities: Array = rocks["capacities"]
+	var casts := _casts(item[0], rocks, 1.0)  # the casters come with the node only within their reach (C1)
 	var wanted := {}
 	for lod in LODS:
 		for capacity: int in capacities[lod]:
 			var key := pool_key(lod, capacity)
 			wanted[key] = int(wanted.get(key, 0)) + 1
 		var shadow_capacity: int = (rocks.get("shadow_capacities", PackedInt32Array([0, 0, 0, 0, 0])) as PackedInt32Array)[lod]
-		if shadow_capacity > 0:  # the shadow casters' bucket (attached with the node)
+		if casts and shadow_capacity > 0:  # the shadow casters' bucket (attached with the node)
 			var shadow_key := pool_key(lod, shadow_capacity)
 			wanted[shadow_key] = int(wanted.get(shadow_key, 0)) + 1
 	var needed := 0
@@ -1006,11 +1290,12 @@ func _attach_now(instance: MeshInstance3D, rocks: Dictionary, terrain_material: 
 		for c in lod_counts.size():
 			var t0 := Time.get_ticks_usec()
 			var capacity: int = (capacities[lod] as PackedInt32Array)[c]
-			var key := pool_key(lod, capacity)
-			var node := _take(lod, capacity)
+			var taken := _take_slot(lod, capacity)
+			var node: MultiMeshInstance3D = taken[0]
+			var key: int = taken[1]
 			var multimesh := node.multimesh
 			var t1 := Time.get_ticks_usec()
-			var chunk: PackedFloat32Array = (buffers[lod] as Array)[c]
+			var chunk := _fit((buffers[lod] as Array)[c], key % POOL_KEY_PER_LOD)
 			RenderingServer.multimesh_set_buffer(multimesh.get_rid(), chunk)
 			_frame_upload_bytes += chunk.size() * 4
 			var t2 := Time.get_ticks_usec()
@@ -1027,25 +1312,10 @@ func _attach_now(instance: MeshInstance3D, rocks: Dictionary, terrain_material: 
 			entry["work"] = int(entry["work"]) + lod_counts[c] * LOD_VERTICES[lod]
 			stats["attached_instances"] += lod_counts[c]
 			offset += lod_counts[c]
-	# The shadow pass's casters (build_node): [MultiMesh, -D of the LOD list, lod, node, pool key, 0, instances].
+	# The shadow pass's casters (build_node), only within their reach (review C1; _sweep_casters moves them later).
 	entry["shadow_lods"] = []
-	var shadow_buffers: Array = rocks.get("shadow_buffers", [])
-	for lod in shadow_buffers.size():
-		var n_shadow: int = (rocks["shadow_counts"] as PackedInt32Array)[lod]
-		if n_shadow <= 0:
-			continue
-		var capacity: int = (rocks["shadow_capacities"] as PackedInt32Array)[lod]
-		var node := _take(lod, capacity)
-		var buffer: PackedFloat32Array = shadow_buffers[lod]
-		RenderingServer.multimesh_set_buffer(node.multimesh.get_rid(), buffer)
-		_frame_upload_bytes += buffer.size() * 4
-		node.multimesh.custom_aabb = aabb
-		node.multimesh.visible_instance_count = n_shadow
-		node.material_override = material
-		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
-		instance.add_child(node)
-		(entry["shadow_lods"] as Array).append([node.multimesh, minus_d[lod], lod, node, pool_key(lod, capacity), 0,
-				n_shadow])
+	if _casts(instance, rocks, 1.0):
+		_attach_casters(entry)
 	terrain_material.set_shader_parameter("rock_node_min_m", min_d)
 	stats["attached_nodes"] += 1
 	var total_ms := (Time.get_ticks_usec() - start_us) * 1.0e-3
@@ -1059,6 +1329,18 @@ func _attach_now(instance: MeshInstance3D, rocks: Dictionary, terrain_material: 
 	entry["index"] = _list.size()
 	_list.append(entry)
 	_entries[instance.get_instance_id()] = entry
+
+
+## [node, its pool key] for a chunk of the LOD and capacity: an eviction's handed-over node assigned to that bucket
+## (_transfer_to; it may be a larger bucket), else _take.
+func _take_slot(lod: int, capacity: int) -> Array:
+	var key := pool_key(lod, capacity)
+	var donated: Array = _donated.get(key, [])
+	if not donated.is_empty():
+		var slot: Array = donated.pop_back()
+		_last_take_ms[int(slot[1])] = Time.get_ticks_msec()  # the trim keeps its bucket
+		return slot
+	return [_take(lod, capacity), key]
 
 
 ## A pooled MultiMeshInstance3D of the LOD and capacity (allocated when the bucket is empty).
@@ -1117,29 +1399,36 @@ func _release_to_pool(node: MultiMeshInstance3D, key: int) -> void:
 func detach(instance: MeshInstance3D) -> void:
 	var start_us := Time.get_ticks_usec()
 	var id := instance.get_instance_id()
+	# The node's rock lists (queued, waiting, parked or attached) freed on a worker (_dispose_released).
+	for held: Variant in [_queue.get(id), _retry.get(id), _parked.get(id)]:
+		if held is Array and (held as Array).size() > 1:
+			_graveyard.append(held)
+	if _entries.has(id):
+		_graveyard.append((_entries[id] as Dictionary)["rocks"])
 	_queue.erase(id)  # its _queue_order slot is skipped
 	_retry.erase(id)
+	_over_counted.erase(id)
 	if _parked.erase(id):
 		stats["parked_nodes"] = _parked.size()
 	var entry: Dictionary = _entries.get(id, {})
+	var multimeshes := 0
 	if not entry.is_empty():
+		multimeshes = (entry["lods"] as Array).size() + (entry["shadow_lods"] as Array).size()
 		_remove_entry(instance, entry)
 	stats["queued"] = _queue.size()
+	var us := Time.get_ticks_usec() - start_us
+	if us * 1.0e-3 > float(stats.get("max_detach_ms", 0.0)):
+		stats["max_detach_multimeshes"] = multimeshes  # diagnostics: the slowest detach's MultiMesh count
 	stats["main_ms"] += (Time.get_ticks_usec() - start_us) * 1.0e-3
+	_part_ms("detach", Time.get_ticks_usec() - start_us)
 	stats["max_detach_ms"] = maxf(float(stats.get("max_detach_ms", 0.0)), (Time.get_ticks_usec() - start_us) * 1.0e-3)
 
 
 ## An attached node's MultiMeshes and material back to the pools, the entry out of the lists.
 func _remove_entry(instance: MeshInstance3D, entry: Dictionary) -> void:
-	var index: int = entry["index"]
-	var last: Dictionary = _list.back()
-	_list[index] = last
-	last["index"] = index
-	_list.pop_back()
-	_entries.erase(instance.get_instance_id())
+	_unlink_entry(instance, entry)
 	for item: Array in entry["lods"]:
 		var node: MultiMeshInstance3D = item[3]
-		stats["attached_instances"] -= int(item[6])
 		instance.remove_child(node)
 		node.material_override = null
 		_release_to_pool(node, int(item[4]))
@@ -1149,6 +1438,18 @@ func _remove_entry(instance: MeshInstance3D, entry: Dictionary) -> void:
 		node.material_override = null
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_release_to_pool(node, int(item[4]))
+
+
+## The entry out of the lists and the counts, its material back to the pool (its MultiMeshes stay with the caller).
+func _unlink_entry(instance: MeshInstance3D, entry: Dictionary) -> void:
+	var index: int = entry["index"]
+	var last: Dictionary = _list.back()
+	_list[index] = last
+	last["index"] = index
+	_list.pop_back()
+	_entries.erase(instance.get_instance_id())
+	for item: Array in entry["lods"]:
+		stats["attached_instances"] -= int(item[6])
 	_free_materials.append(entry["material"])
 	stats["attached_nodes"] -= 1
 

@@ -187,4 +187,13 @@ loop and the PCSS lookups; hard PCF instead saves 2.0 ms), + terrain casters 16.
 splits instead of 4 -1.1 ms. With every drawn rock casting the boulder field took 120.7 ms (42.3 off: the shadow pass ran
 every listed rock's vertices once per split), hence the casting threshold 4 x the geometry threshold (separate
 shadow-only MultiMeshes with their own visible prefix) and PCSS LOW (medium and ultra give the same mean radiance).
+Task 12 fix 1, same views, median of 120 frames, two rounds each: the game before Task 12 (62ee7474^ game files, the
+current core) IM-2 9.30 / 9.31 ms, boulder field 32.2 / 33.6 ms; Task 12 as committed (same session) IM-2 off 11.92 /
+on 16.39, boulder off 38.3 / on 51.9; after fix 1 IM-2 off 11.63 / 11.71, on 16.03 / 16.09 ms, boulder off 37.3 / 36.7,
+on 51.4 / 51.7 ms. So Task 12 costs +6.8 ms at IM-2 (+2.4 the oblique-eye terms and fill, +4.4 the map) and +18.5 ms in
+the boulder field (+4.1 statistics, +14.4 the map). Gating the rock casters by the map's reach (fix 1) removed the far
+nodes' casters but changed the GPU time by < 0.5 ms: the map's cost is the receivers, the terrain casters and the near
+rocks: boulder field without casters (receivers only) 44.4 ms, + terrain casters 45.9, + rock casters 51.5. The fill's
+wall term with Smith's G1 per lit horizon sector (added last in fix 1) measured 16.75 ms at IM-2 in one round (+0.7 ms
+against 16.03 / 16.09; not repeated).
 

@@ -31,7 +31,10 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 	material.set_shader_parameter("detail_textures", false)
 	if not detail_on or not enabled:
 		return {}
+	var start_us := Time.get_ticks_usec()
 	var stats: Dictionary = core.moon_unresolved_shading()
+	print("[MoonDetailShading] unresolved statistics in %.0f ms (rock view tables from data/cache when present)" % (
+			(Time.get_ticks_usec() - start_us) * 1.0e-3))
 	if not bool(stats.get("present", false)):
 		return {}
 	var drawn := PackedFloat32Array(Array(stats["drawn_table"]))
@@ -61,8 +64,8 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 				Image.create_from_data(gains, rows, false, Image.FORMAT_RGF, view.to_byte_array())))
 		material.set_shader_parameter("detail_view_step", Vector2(float(stats["view_elevation_step_rad"]),
 				float(stats["view_azimuth_step_rad"])))
-	material.set_shader_parameter("detail_hemispherical_albedo",
-			PackedFloat32Array(Array(stats.get("hemispherical_albedo", PackedFloat64Array()))))
+	material.set_shader_parameter("detail_hemispherical_albedo_mu", hemispherical_albedo_mu(
+			PackedFloat64Array(stats.get("hemispherical_albedo", PackedFloat64Array())), float(stats["lit_gain_step_rad"])))
 	var grid: PackedFloat32Array = core.moon_rock_abundance_grid(ABUNDANCE_WIDTH, ABUNDANCE_HEIGHT)
 	var abundance := Image.create_from_data(ABUNDANCE_WIDTH, ABUNDANCE_HEIGHT, false, Image.FORMAT_RF,
 			grid.to_byte_array())
@@ -71,6 +74,22 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 	var tiles := _configure_textures(material, stats)
 	stats["tiles"] = tiles
 	return stats
+
+
+## The fill light's A_h table resampled from the core's elevation grid (k x step_rad, linear between) onto the shader's mu
+## grid mu = k / MU_STEPS (moon_detail.gdshaderinc DETAIL_ALBEDO_MU_STEPS; review I5 of Task 12: no asin per lookup).
+const MU_STEPS := 90
+static func hemispherical_albedo_mu(by_elevation: PackedFloat64Array, step_rad: float) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(MU_STEPS + 1)
+	out.fill(0.0)
+	if by_elevation.size() < 2 or step_rad <= 0.0:
+		return out
+	for k in MU_STEPS + 1:
+		var x := clampf(asin(float(k) / MU_STEPS) / step_rad, 0.0, by_elevation.size() - 1.0)
+		var i := mini(int(x), by_elevation.size() - 2)
+		out[k] = lerpf(by_elevation[i], by_elevation[i + 1], x - i)
+	return out
 
 
 ## Loads the regolith slope maps (mipmapped) and their scale table; returns [tile_m, hex_cell_m] per scale ([] when

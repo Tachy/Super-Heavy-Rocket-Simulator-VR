@@ -62,8 +62,11 @@ const PHASE_NEEDS := {"pad_day_again": ["pad_day"], "pad_day_ground_off": ["pad_
 		"pad_day_thin_deck": ["pad_day", "pad_day_ground_off"], "pad_day_overcast": ["pad_day", "pad_day_ground_off"],
 		"earth_elevation_+1": ["earth_elevation_ref"], "earth_elevation_-1": ["earth_elevation_ref"]}
 # [E] Display gain of a dim phase (tonemap_exposure on the linear curve): lifts the plate clear of the display's lowest codes,
-# where a ratio is only quantisation; no effect on the cube.
-const IM2_READ_EXPOSURE := 2.0
+# where a ratio is only quantisation; no effect on the cube. IM-2: 2.5 since Task 11 fix C (moon procedural surface plan)
+# darkened the regolith there 0.86x (MOON_NEAR_SIDE_DISC_ALBEDO 0.2245 -> 0.2611, the albedo map re-fitted beyond
+# +-70 deg): at 2.0 the plate read (50 50 50), just under READ_MIN_LEVEL, with the regolith ratio still in its tolerance
+# (0.951; Task 12 review).
+const IM2_READ_EXPOSURE := 2.5
 const TRANSIT_READ_EXPOSURE := 700.0
 const STEADY_READ_EXPOSURE := 4.0
 const READ_MIN_LEVEL := 50.0 / 255.0

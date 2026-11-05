@@ -27,3 +27,11 @@ Superseded states of `docs/subsystems/moon-surface.md`.
   photos (Task 11 compare/ images) the rocks were rounded, flattened "bread loaves"; cover-weighted exposed eta 0.383,
   `max_semi_axis_per_diameter` 1.77 D. The contact top was the template's column tops interpolated bilinearly on the
   96 x 96 footprint grid (`column_top_interpolated`, ~1e-4 of the height from the scan-based `column_top`, ~4 us).
+- Near-field shadows, first version (Task 12, 62ee7474; superseded by fix 1, 2026-11-05): every attached rock node took
+  its shadow-only MultiMeshes with it, whatever its distance (boulder-field camera jump 5.9-8.0 ms on the rock layer's
+  main-thread share; the shadow pass drew casters Godot never sampled beyond the range). Eviction at the pool bound
+  released the far node's MultiMeshes to the pool, whose trim then freed and re-allocated GPU buffers for the nearer node
+  (34.7 ms spikes), so it was switched off (EVICTIONS_PER_FRAME 0). The fill light's emitter was the eye's view factor
+  (G2/G1(v), the oblique-eye rock terms) instead of a hemispherical exitance, and A_h was looked up by elevation (asin per
+  lookup). The rock view tables were built at every start (~8 s on 24 threads). The near-shadow map's second factor call
+  computed the earthshine's factor too (unused).

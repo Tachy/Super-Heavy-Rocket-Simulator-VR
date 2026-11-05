@@ -9,12 +9,22 @@ extends RefCounted
 ## moon_near_shadow.gdshaderinc), every lit material (vehicles). Beyond the range Godot fades the shadow out over its last
 ## FADE_START share and the receivers blend the statistical shadow share in with the same weight (no step).
 ## Active only near the Moon's ground with the fidelity setting moon_near_shadows on; elsewhere the Sun light casts no
-## shadow (the Earth: unchanged) and the globals say off (the shaders' former expressions).
+## shadow (the Earth: unchanged) and the globals say off: the receivers keep the statistical Sun shadows alone (the
+## oblique-eye rock terms and the fill light are physics of the statistics, not of the map, and stay; Task 12 fix 1, I3).
+## The directional shadow atlas and the soft-shadow quality go back to the project's on leaving the Moon's ground.
 
-## Fidelity setting moon_near_shadows (render_check --moon_near_shadows=off; the settings' graphics page).
-static var enabled := true
-## The fill light from the sunlit terrain around (moon_fill.gdshaderinc), with the shadows (render_check --moon_fill=off).
+## The persisted setting (user://settings.cfg [graphics] moon_near_shadows, default on; the time panel's check box).
+const SETTINGS_FILE := "user://settings.cfg"
+## Fidelity setting moon_near_shadows (render_check --moon_near_shadows=off; the time panel's "Mondschatten nah").
+static var enabled := load_enabled_setting()
+## The fill light from the sunlit terrain around (moon_fill.gdshaderinc; diagnostics: render_check --moon_fill=off). Not
+## tied to the shadow map: a physical term of the statistics.
 static var fill_enabled := true
+## The rocks' shadow casters' reach (MoonRockLayer, review C1 of Task 12): the map's range (m, 0: no near shadows, no
+## casters) and the tangent of the Sun's elevation at the eye. update() publishes them; harnesses without a World set
+## them through publish_caster_reach.
+static var caster_range_m := 0.0
+static var caster_tan_sun := 0.0
 ## Diagnostics (render_check --moon_shadow_casters=terrain,rocks / --moon_shadow_splits / --moon_shadow_soft): which
 ## of the Moon's own geometry casts (read at the terrain's setup / the rock pool's allocation), the PSSM split count
 ## (1, 2 or 4) and the PCSS softening (off: Godot's PCF only).
@@ -56,18 +66,30 @@ var _logged_range_m := 0.0
 ## eye over the terrain under it; sun_distance_m: the eye to the Sun (the disc's angular diameter); eye_world: the eye in
 ## the render world (the head centre in VR).
 func update(sun_light: DirectionalLight3D, moon_terrain_active: bool, height_over_ground_m: float, sun_distance_m: float,
-		eye_world: Vector3, projection := Projection()) -> void:
+		eye_world: Vector3, projection := Projection(), up_world := Vector3.ZERO) -> void:
 	active = enabled and moon_terrain_active and height_over_ground_m < ACTIVE_HEIGHT_M
 	sun_light.shadow_enabled = active
 	ShaderGlobals.set_value(&"moon_eye_world", eye_world)
 	if not active:
 		ShaderGlobals.set_value(&"moon_near_shadow", Vector4(0.0, 0.0, 0.0, 1.0 if fill_enabled else 0.0))
+		caster_range_m = 0.0
+		if _atlas_set:  # review m2: the project's atlas and filter back (the Earth draws no directional shadow)
+			RenderingServer.directional_shadow_atlas_set_size(
+					int(ProjectSettings.get_setting("rendering/lights_and_shadows/directional_shadow/size", 4096)),
+					bool(ProjectSettings.get_setting("rendering/lights_and_shadows/directional_shadow/16_bits", true)))
+			RenderingServer.directional_soft_shadow_filter_set_quality(int(ProjectSettings.get_setting(
+					"rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality", 2)))
+			_atlas_set = false
 		return
 	if not _atlas_set:
 		RenderingServer.directional_shadow_atlas_set_size(ATLAS_SIZE, false)
 		RenderingServer.directional_soft_shadow_filter_set_quality(soft_quality)
 		_atlas_set = true
 	range_m = clampf(RANGE_MIN_M + RANGE_PER_HEIGHT * maxf(height_over_ground_m, 0.0), RANGE_MIN_M, RANGE_MAX_M)
+	# The Sun's elevation at the eye (the light shines along its -Z): the rock casters' reach.
+	var to_sun := (sun_light.global_basis if sun_light.is_inside_tree() else sun_light.basis).z.normalized()
+	var sin_e := to_sun.dot(up_world.normalized()) if up_world != Vector3.ZERO else 1.0
+	publish_caster_reach(range_m, asin(clampf(sin_e, -1.0, 1.0)))
 	sun_light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if splits >= 4 \
 			else (DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if splits == 2 else DirectionalLight3D.SHADOW_ORTHOGONAL)
 	sun_light.directional_shadow_max_distance = range_m
@@ -134,6 +156,27 @@ static func split_texels(range_m: float, near_m: float, tan_y: float, aspect: fl
 	for i in range(count, 4):
 		texel[i] = texel[count - 1]
 	return [texel, far]
+
+
+## The rock casters' reach (MoonRockLayer): the map's range and the Sun's elevation at the eye (rad).
+static func publish_caster_reach(range_m_value: float, sun_elevation_rad: float) -> void:
+	caster_range_m = range_m_value
+	caster_tan_sun = tan(clampf(sun_elevation_rad, -0.5 * PI + 1.0e-6, 0.5 * PI - 1.0e-6))
+
+
+## The persisted fidelity setting (default on; a missing or unreadable file: on).
+static func load_enabled_setting(path := SETTINGS_FILE) -> bool:
+	var config := ConfigFile.new()
+	if config.load(path) != OK:
+		return true
+	return bool(config.get_value("graphics", "moon_near_shadows", true))
+
+
+static func save_enabled_setting(value: bool, path := SETTINGS_FILE) -> void:
+	var config := ConfigFile.new()
+	config.load(path)  # keeps the other settings; a missing file starts empty
+	config.set_value("graphics", "moon_near_shadows", value)
+	config.save(path)
 
 
 ## The Sun's apparent angular diameter (deg) at sun_distance_m (0.533 deg at 1 AU).

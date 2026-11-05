@@ -12,8 +12,10 @@
 // without what the map draws (moon_detail.gdshaderinc). Godot's ATTENUATION is the faded shadow w + (1 - w) S, hence
 // (1 - w) min(V, S) = min((1 - w) V, ATTENUATION - w). The earthshine has no shadow map: unchanged.
 // Off (moon_near_shadow.x 0, the fidelity setting moon_near_shadows or away from the Moon's ground): w = 1, nothing goes
-// to light(), the materials' expressions are the former ones (EMISSION = the former ALBEDO; the lit pipeline adds no
-// ambient, specular or light term: ambient_light_disabled, specular_disabled, SPECULAR 0).
+// to light(); the lit pipeline adds no ambient, specular or light term (ambient_light_disabled, specular_disabled,
+// SPECULAR 0). With the detail statistics off the expressions are Task 9's (pixel-identical, moon_shadow_check); with
+// them on the statistical Sun shadows stay, together with Task 12's oblique-eye rock terms and the fill light
+// (moon_fill.gdshaderinc), which are physics of the statistics, not of the map (Task 12 fix 1, review I3).
 
 // (on: 1 / 0, fade_from (m of view depth), fade_to (m), fill light: 1 / 0) - MoonNearShadow, per frame.
 global uniform vec4 moon_near_shadow;
