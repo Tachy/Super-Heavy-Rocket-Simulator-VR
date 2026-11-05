@@ -50,7 +50,7 @@ const SPLITS := Vector3(0.1, 0.2, 0.5)
 ## [E] The shadow fades out over the range's last 20 % (Godot's fade_start); the terrain's light() uses the same weight.
 const FADE_START := 0.8
 ## [E, measured Task 16] Directional shadow atlas 8192 px (4096 per split), 32-bit depth (the light's depth range spans
-## km at a low Sun).
+## km at a low Sun). VRAM: 8192 x 8192 x 4 B = 256 MB while active (computed, docs vr-performance.md).
 const ATLAS_SIZE := 8192
 ## [E, renders Task 16] Bias in Godot's units (shadow_bias x the split's texel; normal bias along the receiver's normal in
 ## texels): no acne on the hardstand, the hulls and the members at 5-60 deg Sun, contact kept at the tower foot.

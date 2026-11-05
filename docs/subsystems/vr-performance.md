@@ -208,3 +208,7 @@ path): 4.19 / 4.20 and 4.28 / 4.28 ms (no measurable cost). Shadows on with the 
 5.80 / 5.41 and 5.44 / 5.50; LOW and MEDIUM left a visible grain in the wide penumbrae on the terrain, hence HIGH.
 Some runs shared the machine with another agent's Godot runs; the medians agree within 0.1 ms across
 rounds. Not measured: the headset itself, the pad with weather on (the 45 Hz rule applies there).
+Memory (computed, not measured): the directional shadow atlas is 8192 x 8192 px at 32-bit depth = 256 MB of VRAM, held
+while the Earth shadows are active (below 20 km, Sun up) and shared with the Moon's (same size, never both). It comes on
+top of the per-eye target and the cloud / terrain textures; the RTX 4090 has 24 GB. A smaller atlas (`--earth_shadow_atlas`)
+or 16-bit depth was not tried: 4096 per split is the texel size the length check's tolerance was derived for.

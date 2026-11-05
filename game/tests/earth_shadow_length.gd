@@ -1,6 +1,7 @@
 class_name EarthShadowLength
 extends RefCounted
 ## render_check --shadow_length (moon procedural surface plan Task 16): the Pad B tower's Sun shadow on the ground, measured
+## (the hard-shadow run is the geometric gate; the soft run is a plausibility check only; keep the eye over the tower's centre).
 ## in the image against the casters' geometry. Once the view has settled with the Earth's near shadows on, the frame is
 ## kept (A), the shadows are switched off for a few frames and the frame kept again (B); the shadow is where the radiance
 ## ratio A / B falls below the midpoint between 1 (lit) and the umbra's ratio (the direct Sun's 50 % contour: the

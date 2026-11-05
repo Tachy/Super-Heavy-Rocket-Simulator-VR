@@ -269,6 +269,10 @@ on top; it replaced the interim `GroundPatch`.
   The terrain beyond the plateau lies 2.5-6 m over the site at the 11 deg tip (without dh the probe read -17 m). Off
   path: the same deterministic frame as the unshaded shader before Task 16 within 1 pixel of 1 440 000 (8-bit diff 1);
   on: 0.96 % of the pixels change (the shadows). Headless `earth_near_shadow_test.gd`: range rule, activity, setting.
+  The soft rows are a plausibility check only (the hard rows are the geometric gate; the 11.4 deg soft prediction moved
+  734 to 716 m between PCSS LOW and HIGH because the tip pixel, hence dh, moved). Rerun: `render_check --shadow_length`
+  (options in the header of `game/tests/render_check.gd`; GPU, no `--headless`); keep the eye over the tower's centre
+  (in a nadir view the shadowed upper tower's pixels project beyond their footprint and could lengthen the tip).
 - Camera-precision test: relative error < 3e-7. Quadtree test: morph start < end for every level >= 2 on both bodies.
 - Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface (detail
   off; `terrain_quadtree_test.gd` runs the Moon with the detail off as the regression baseline).
@@ -354,8 +358,8 @@ on top; it replaced the interim `GroundPatch`.
   bake's banded interpolation is within 0.3-1 deg worst case of a single-ray march); the horizon is taken in the disc
   centre's azimuth; nodes without terrain data have none; near the eye (within 150 m-4 km, the Moon only) the Sun's
   shadow map adds the drawn relief's, rocks', vehicles' and structures' shadows (moon-surface.md, Near-field shadows;
-  `terrain_moon.gdshader` is a lit material only for that, its `light()`; the Earth's terrain stays unshaded, without
-  vehicle shadows); the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
+  `terrain_moon.gdshader` is a lit material only for that, its `light()`; the Earth's terrain receives the structures'
+  and vehicles' shadows the same way, see Near-field Sun shadows (Earth), but casts none itself); the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
   consistent but arbitrary north (the shader's pole fallback east; the baked pole vertex follows its neighbour);
   near-pole nodes (not only the pole vertex) bilinearly mix horizons of vertices whose norths differ by degrees (the
   azimuth profile is re-sampled in the bake, not by the GPU's filter), so shadow edges there are less accurate than
