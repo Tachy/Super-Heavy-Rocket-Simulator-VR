@@ -189,6 +189,9 @@ Mirror $Data (Join-Path $package "data") @("/XD", (Join-Path $Data "raw"), (Join
 $analog = Join-Path $Data "weather\analog"
 if (Test-Path (Join-Path $analog "index.json")) { Mirror $analog (Join-Path $package "data\weather\analog") @() }
 else { Write-Warning "data/weather/analog is missing (python tools/data_pipeline/fetch.py weather_analog): the package has no offline weather" }
+if (-not (Test-Path (Join-Path $package "data\textures\moon_detail\moon_detail.toml"))) {
+    throw "The package lacks data/textures/moon_detail (python tools/data_pipeline/fetch.py moon_detail)"
+}
 if (-not (Test-Path (Join-Path $package "data\atmosphere\earth_atmosphere.bin"))) { throw "The package lacks data/atmosphere/earth_atmosphere.bin" }
 Mirror (Join-Path $Data "terrain\earth") (Join-Path $terrainPart "data\terrain\earth") @()
 Mirror (Join-Path $Data "imagery") (Join-Path $imageryPart "data\imagery") @()

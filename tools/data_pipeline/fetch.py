@@ -71,6 +71,16 @@ def main() -> int:
 
             rock_abundance.fetch(source, REPO_ROOT, download, args.force)
             continue
+        if source.get("kind") == "moon_detail":  # procedural regolith / rock textures, baked offline, no download
+            sys.path.insert(0, str(REPO_ROOT / "tools" / "moon_textures"))
+            import bake_moon_detail  # lazy: needs numpy and Pillow
+
+            if (target.exists() and not args.force):
+                print("  already present")
+            else:
+                bake_moon_detail.bake(target.parent)
+                print(f"  baked into {target.parent}")
+            continue
         if source.get("kind") == "iss_oem":  # ISS OEM: always fetched, every version archived (iss_oem.py)
             iss_oem.fetch(source, REPO_ROOT, download)
             continue

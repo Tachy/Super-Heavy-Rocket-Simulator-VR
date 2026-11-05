@@ -15,7 +15,9 @@ One-time setup:
 # The weather_analog step is opt-in (a bare fetch.py skips it): after building the core run
 # `python tools/data_pipeline/fetch.py weather_analog` (needs build/core/weather_snapshot.exe); it downloads 48 ERA5 hours (the 15th of each
 # month at 00/06/12/18 UTC of 2025, ~65 MB raw each, deleted after use) and writes data/weather/analog (48 x 8.6 MB, ~400 MB)
-python tools/data_pipeline/fetch.py
+python tools/data_pipeline/fetch.py        # a bare fetch also bakes data/textures/moon_detail (procedural Moon regolith / rock textures, 4.4 MB,
+                                           # ~10 s, no download; `fetch.py --force moon_detail` rebakes; tests: python -m pytest tools/moon_textures).
+                                           # tools/package.ps1 ships them with the base data (data/textures is mirrored whole)
 python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow)
 
 # Engine sources (git-ignored, pinned)

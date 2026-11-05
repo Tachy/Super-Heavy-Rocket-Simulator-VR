@@ -519,6 +519,15 @@ license = "NASA PDS data: public domain (NASA data and images are not copyrighte
 credit = "LRO Diviner Lunar Radiometer Experiment team (UCLA / JPL, D. A. Paige et al.); J. L. Bandfield et al. 2011, JGR 116, doi:10.1029/2011JE003866; NASA Planetary Data System Geosciences Node"
 
 [[source]]
+id = "moon_detail"
+name = "Procedural lunar regolith and rock textures (own offline bake, tools/moon_textures/bake_moon_detail.py; no imagery or third-party data; spectrum exponent H from Guo et al. 2021)"
+url = "https://doi.org/10.1029/2021GL094931"
+target = "data/textures/moon_detail/moon_detail.toml"
+kind = "moon_detail"
+license = "own work (generated procedurally; the Hurst exponent and roughness amplitude are published measurements, not copyrightable)"
+credit = "Y. Guo et al. 2021, Geophys. Res. Lett. 48, e2021GL094931 (regolith roughness statistics, Chang'e-4)"
+
+[[source]]
 id = "lroc_wac_hapke_parameter_map"
 name = "LROC WAC Hapke photometric parameter maps, WAC_HAPKEPARAMMAP_643NM (1 deg; Sato et al. 2014) - the Hapke parameters of config/moon_surface.toml are medians of this map"
 url = "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/WAC_HAPKEPARAMMAP/"

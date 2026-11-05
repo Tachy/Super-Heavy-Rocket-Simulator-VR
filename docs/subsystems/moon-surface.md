@@ -252,7 +252,29 @@ on top of that relief.
   Children read their parent band from the parent's kept heights, builds go camera-first with 16 at once, and pole
   lattice points are sampled at longitude 0 (fix round 1; `terrain-rendering.md` "Morph", "Poles", "Loading").
 
+### Baked textures (Task 8)
+- `python tools/data_pipeline/fetch.py moon_detail` (also part of a bare fetch; `tools/moon_textures/bake_moon_detail.py`)
+  writes `data/textures/moon_detail/` (4.4 MB, shipped with the base data): `regolith_{height,normal}_{s0,s1,s2}.png`,
+  `rock_{albedo,normal}_{0..3}.png`, `moon_detail.toml` (tile sizes, band edges, height scales, calibrated amplitude).
+  Procedural only, fixed numpy seeds, byte-identical rebakes.
+- Band split (no double counting): the textures carry ONLY wavelengths below the mesh's vertex spacing, from the same
+  law as the core roughness (octave variance a^2 (lambda / 0.125 m)^(2 H), H from `roughness.hurst_exponent`). Three
+  disjoint, contiguous bands of 3 octaves, 512 px each (tile = 8 x the longest wavelength): s0 5-40 mm (tile 0.32 m),
+  s1 40-320 mm (2.56 m), s2 0.32-2.56 m (20.48 m); a quarter-octave raised-cosine taper inside each edge. The mesh
+  resolves wavelengths >= 2 x spacing (finest level 22: 1.02 cm -> 2 cm), so the T10 shader fades each scale in only where
+  the mesh no longer resolves it (s0 below ~2 cm near the camera; s1 / s2 farther out where the node spacing grows).
+- Amplitude: the octave constant a = 2.29 mm is calibrated at bake time exactly as the core does (Guo's statistic:
+  median plane-detrended std of 25 x 25 windows at 5 mm spacing, 1536 windows, of a full-spectrum 10.24 m field = 3.7 mm
+  `rms_height_at_baseline_m`). Heights 16-bit (`32768 + h / height_scale_m * 32767`), normals 8-bit tangent space OpenGL
+  (green = up = image top) from the metric pixel size, periodic differences. Band RMS heights 1.04 / 5.4 / 26.5 mm,
+  RMS slopes 0.39 / 0.25 / 0.16.
+- Rock set (triplanar, tile 1 m, 512 px): relative albedo (8-bit, 128 = 1.0, decoded mean 1.0000, sd 0.10-0.12; the
+  shader multiplies by `rocks.albedo_to_regolith`, so the WAC mean never shifts) and normals; variants fine grain,
+  vesicular, breccia, fractured. All rock-texture amplitudes are [E] (spectrum H 0.8, regolith amplitude, albedo sd
+  0.10): the config holds no rock-surface data.
+
 ## Code
+- `tools/moon_textures/bake_moon_detail.py`, `test_bake_moon_detail.py`, `contact_sheet.py` (Task 8).
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
   `face_cell_of`, `face_cell_point`, `face_cell_neighbourhood` (3 x 3, duplicates at cube corners),
@@ -340,6 +362,13 @@ on top of that relief.
   - poles (-90, -89.9999, +90 deg): finite for L = 0, 0.1, 1, 10 m, 1 mm neighbours within the bound;
   - nothing counted twice: no crater above 5 x 20 m in the tile core (craters 50-100 m exist), every crater
     D <= 5 x band_start at its centre, a 640 m square mean of the roughness is 0 in the tile core.
+- Baked textures (Task 8, `python -m pytest tools/moon_textures`, 7 tests, ~6 s): bake twice -> every file byte-identical;
+  every map seamless (wrap-around neighbour difference rms <= 1.2 x the interior one, seam maximum <= interior maximum + 1
+  LSB: a map with slope cannot have a 1 LSB edge difference, so seamless is tested relative to the interior step);
+  band variance in three log sub-bands of each scale's flat part vs the config law (measured / law amplitude 0.96-1.06,
+  tolerance 15 %), Hurst exponent from the band ratio within 0.15, nothing above the band; an independent full-spectrum
+  field (other seed) gives Guo's statistic 0.99 / 0.99 / 0.98 / 0.96 / 0.96 x the law at 125 mm / 0.25 / 0.5 / 1 / 2 m
+  windows (tolerance 15 % at 125 mm, 0.5 m, 1 m); rock albedo mean 1.000 within 1 %.
 - Roughness stationarity (diagnostic, 3000 windows each, not a test): 3.72 mm at a face centre, 3.76 at an edge
   midpoint, 3.94 near a cube corner (the skewed lattice there, +6 %), 3.75 at the site; craters + roughness
   3.88-3.95 mm (4.09 near a corner).
