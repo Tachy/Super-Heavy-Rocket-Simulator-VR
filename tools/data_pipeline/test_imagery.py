@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
+import earth_albedo as ea  # noqa: E402
 import imagery as im  # noqa: E402
 import earth_terrain as et  # noqa: E402
 
@@ -59,46 +60,61 @@ def test_median_ignores_clouds():
     assert im.clear_median(rgb, scl)[1, 1, 0] == 0
 
 
-def test_colour_match_recovers_gain():
-    """NAIP-style per-channel fit recovers a synthetic per-channel gain / offset."""
-    rng = np.random.default_rng(3)
-    src = rng.uniform(20.0, 200.0, size=(500, 3))
-    gain_true = np.array([1.3, 1.1, 0.9])
-    offset_true = np.array([-10.0, 4.0, 12.0])
-    ref = src * gain_true + offset_true + rng.normal(0.0, 0.3, size=src.shape)
-    gain, offset = im.fit_gain_offset(src, ref)
-    assert gain == pytest.approx(gain_true, rel=0.01)
-    assert offset == pytest.approx(offset_true, abs=1.0)
+def test_median_keeps_uint16():
+    rgb = np.zeros((3, 1, 1, 3), dtype=np.uint16)
+    rgb[0], rgb[1], rgb[2] = 2600, 3000, 9000
+    scl = np.full((3, 1, 1), 4, dtype=np.uint8)
+    out = im.clear_median(rgb, scl)
+    assert out.dtype == np.uint16 and out[0, 0, 0] == 3000
 
 
-def test_luminance_fit_gains_equal_across_channels():
-    rng = np.random.default_rng(4)
-    src = rng.uniform(20.0, 200.0, size=(500, 3))
-    ref = np.clip(src[:, [0]] * 0 + (src @ np.array(im.LUMA_WEIGHTS))[:, None] * 0.8 - 12.0, 0, 255) + np.array([0.0, 0.0, 0.0])
-    gain, offset = im.fit_gain_offset(src, ref, luminance=True)
-    assert gain[0] == gain[1] == gain[2] and offset[0] == offset[1] == offset[2]
-    assert gain[0] == pytest.approx(0.8, rel=0.01) and offset[0] == pytest.approx(-12.0, abs=1.0)
+def test_tci_decode_is_linear_reflectance():
+    """TCI = floor(1 + DN x 254 / 2500): count t decodes to the centre of its reflectance bin; 0 stays no data."""
+    dn = np.arange(0, 2500, 7, dtype=np.float64)
+    t = np.floor(1 + dn * 254.0 / 2500.0)
+    rho = im.tci_to_reflectance(t)
+    assert np.abs(rho - dn * 1e-4).max() <= 0.5 * 2500.0 / 254.0 * 1e-4 + 1e-12
+    assert im.tci_to_reflectance(np.array([0]))[0] == 0.0
+    assert im.tci_to_reflectance(np.array([255]))[0] == pytest.approx(0.2505, abs=1e-3)  # saturated: >= 0.25
 
 
-def test_fit_fallback_is_all_or_nothing():
-    rng = np.random.default_rng(6)
-    src = rng.uniform(20.0, 200.0, size=(300, 3))
-    ref = src * 1.2 + 5.0
-    ref[:, 2] = 90.0  # no variation in ONE channel: every channel falls back to a mean match with gain 1
-    gain, offset = im.fit_gain_offset(src, ref)
-    assert gain == pytest.approx([1.0, 1.0, 1.0])
-    assert offset == pytest.approx(ref.mean(axis=0) - src.mean(axis=0))
-    # a single channel with an implausible gain is an error naming the source, not a silent substitute
-    ref = src * np.array([1.0, 1.0, 8.0])
-    with pytest.raises(ValueError, match="s2_test"):
-        im.fit_gain_offset(src, ref, name="s2_test")
+def test_to_reflectance_scale_and_naip_table(tmp_path):
+    raw = np.array([[[1000, 2000, 3000]]], dtype=np.uint16)
+    assert im.to_reflectance(raw, {"kind": "scale", "scale": 1e-4})[0, 0].tolist() == pytest.approx([0.1, 0.2, 0.3])
+    luts = np.tile(np.linspace(0.0, 0.5, 256), (3, 1))
+    ratio = np.full((4, 4, 3), 2.0, dtype=np.float32)
+    path = tmp_path / "gain.npy"
+    np.save(path, ratio)
+    transfer = {"kind": "naip", "luts": luts, "ratio": {"path": str(path), "box": (0.0, 1.0, 0.0, 1.0)}}
+    counts = np.array([[[255, 0, 51]]], dtype=np.uint8)
+    out = im.to_reflectance(counts, transfer, np.array([[0.5]]), np.array([[0.5]]))
+    assert out[0, 0].tolist() == pytest.approx([1.0, 0.0, 0.2])
 
 
-def test_apply_gain_offset_keeps_nodata():
-    rgb = np.array([[[0, 0, 0], [100, 100, 100]]], dtype=np.uint8)
-    out = im.apply_gain_offset(rgb, np.array([1.3, 1.3, 1.3]), np.array([-10.0, -10.0, -10.0]))
-    assert out[0, 0].tolist() == [0, 0, 0]
-    assert out[0, 1].tolist() == [120, 120, 120]
+def test_local_ratio_follows_reference_means():
+    """The sliding-window gain makes the source's local means follow the reference: a bright flat (reference twice the
+    source over one half) keeps its brightness instead of being pulled to the box mean."""
+    src = np.full((200, 200, 3), 0.1)
+    ref = src.copy()
+    ref[:, :100] = 0.2
+    valid = np.ones((200, 200), dtype=bool)
+    ratio = im.local_ratio(ref, src, valid, sigma_px=5.0)
+    assert ratio[:, :80].mean() == pytest.approx(2.0, rel=1e-3)
+    assert ratio[:, 120:].mean() == pytest.approx(1.0, rel=1e-3)
+    # cells without data inside the window do not bias it; without any data it is 1; the gain is clipped
+    valid[:, :] = False
+    assert (im.local_ratio(ref, src, valid, sigma_px=5.0) == 1.0).all()
+    assert im.local_ratio(ref * 10, src, np.ones((200, 200), dtype=bool), 5.0).max() == im.NAIP_RATIO_LIMITS[1]
+
+
+def test_sample_ratio_bilinear_on_cell_centres(tmp_path):
+    grid = np.zeros((2, 2, 3), dtype=np.float32)
+    grid[:, 1] = 1.0  # east column 1
+    path = tmp_path / "r.npy"
+    np.save(path, grid)
+    r = {"path": str(path), "box": (0.0, 2.0, 0.0, 2.0)}
+    assert im.sample_ratio(r, np.array([1.0]), np.array([1.0]))[0, 0] == pytest.approx(0.5)  # between the centres
+    assert im.sample_ratio(r, np.array([1.0]), np.array([1.8]))[0, 0] == pytest.approx(1.0)  # clamped at the edge
 
 
 def test_downsample_pyramid():
@@ -106,13 +122,16 @@ def test_downsample_pyramid():
     kids = [rng.integers(0, 256, size=(256, 256, 3), dtype=np.uint8) for _ in range(4)]  # tl, tr, bl, br
     parent = im.downsample_children(*kids)
     assert parent.shape == (256, 256, 3) and parent.dtype == np.uint8
-    big = np.zeros((512, 512, 3))
+    big = np.zeros((512, 512, 3), dtype=np.uint8)
     big[:256, :256], big[:256, 256:], big[256:, :256], big[256:, 256:] = kids
-    expected = big.reshape(256, 2, 256, 2, 3).mean(axis=(1, 3))
-    assert np.abs(parent.astype(float) - expected).max() <= 0.5 + 1e-9
+    valid = big.any(axis=-1)[..., None]
+    lin = (ea.decode_srgb(big) * valid).reshape(256, 2, 256, 2, 3).sum(axis=(1, 3))
+    n = valid.reshape(256, 2, 256, 2, 1).sum(axis=(1, 3))
+    expected = ea.encode_srgb(lin / np.maximum(n, 1))  # the mean in reflectance (linear), encoded again
+    assert np.abs(parent.astype(int) - np.maximum(expected, 1).astype(int)).max() <= 1
     # a missing child counts as nodata (zeros)
     parent = im.downsample_children(kids[0], None, None, None)
-    assert parent[:128, :128].mean() == pytest.approx(kids[0].reshape(128, 2, 128, 2, 3).mean(axis=(1, 3)).mean(), abs=0.5)
+    assert (parent[:128, :128] > 0).all()
     assert parent[:, 128:].max() == 0
 
 
@@ -180,10 +199,10 @@ def test_pyramid_identical_for_any_worker_count(tmp_path):
                        transform=from_bounds(west, south, west + size, south + size, 600, 600)) as dst:
         dst.write(data)
     box = (south + 0.002, south + size - 0.002, west + 0.002, west + size - 0.002)
-    gain, offset = np.array([0.8, 0.9, 1.0]), np.array([-5.0, 0.0, 3.0])
+    transfer = {"kind": "scale", "scale": 1.0 / 300.0}
     counts = {}
     for workers in (1, 4):
-        counts[workers] = im.write_pyramid([tif], box, (1e-5, 2e-5), gain, offset, 13, 15, tmp_path / f"w{workers}",
+        counts[workers] = im.write_pyramid([tif], box, (1e-5, 2e-5), transfer, 13, 15, tmp_path / f"w{workers}",
                                            log=lambda *_: None, workers=workers)
     assert counts[1] == counts[4] and counts[1][15] > 4
     files1 = sorted(p.relative_to(tmp_path / "w1") for p in (tmp_path / "w1").rglob("*.jpg"))
@@ -224,6 +243,38 @@ def test_s2_block_worker_median_from_local_scenes(tmp_path):
     assert (out == 110).all()
     # a block entirely outside every scene
     assert im._s2_block((scenes, 640, 0, 64, 64))[2] is None
+
+
+def test_s2_reflectance_decodes_tci_and_recomputes_saturated_pixels(tmp_path):
+    """reflectance.tif: the TCI composite decoded; TCI-saturated pixels from the median of the reflectance bands."""
+    import rasterio
+    from rasterio.transform import from_origin
+
+    def write(path, data, res, dtype):
+        with rasterio.open(path, "w", driver="GTiff", width=data.shape[2], height=data.shape[1], count=data.shape[0],
+                           dtype=dtype, crs="EPSG:32614", transform=from_origin(500000, 2900000, res, res)) as d:
+            d.write(data)
+
+    items = []
+    for name, dn, scl in (("a", 3000, 4), ("b", 3400, 4), ("c", 9000, 9)):  # c is cloud
+        d = tmp_path / name
+        d.mkdir()
+        write(d / "TCI.tif", np.full((3, 64, 64), 255, dtype=np.uint8), 10, "uint8")
+        for band in im.S2_REFLECTANCE_BANDS:
+            write(d / f"{band}.tif", np.full((1, 64, 64), dn, dtype=np.uint16), 10, "uint16")
+        write(d / "SCL.tif", np.full((1, 32, 32), scl, dtype=np.uint8), 20, "uint8")
+        items.append({"id": name, "visual": str(d / "TCI.tif"), "scl": str(d / "SCL.tif")})
+    comp = np.full((3, 64, 64), 101, dtype=np.uint8)
+    comp[:, 10:12, 20:22] = 255  # saturated in the TCI median
+    comp[:, 40, 40] = 0  # no data
+    write(tmp_path / "composite.tif", comp, 10, "uint8")
+    path, saturated = im.build_s2_reflectance(items, tmp_path / "composite.tif", tmp_path, False, lambda *_: None, 1)
+    assert saturated == 4
+    with rasterio.open(path) as ds:
+        out = ds.read()
+    assert out[0, 0, 0] == round((101 - 0.5) * im.S2_TCI_REFLECTANCE_PER_COUNT / im.S2_REFLECTANCE_SCALE)
+    assert (out[:, 10:12, 20:22] == 3200).all()  # median of the two clear scenes, not 0.25
+    assert (out[:, 40, 40] == 0).all()
 
 
 def test_downsample_never_averages_nodata():
@@ -270,15 +321,15 @@ def test_pyramid_fill_leaves_no_nodata_inside_coverage(tmp_path, with_reference)
     src = _write_raster(tmp_path / "src.tif", data, (west, south, west + size, south + size))
     box = (south + 0.002, south + size - 0.002, west + 0.002, west + size - 0.002)
     texture = np.zeros((180, 360, 3))
-    texture[...] = (30.0, 60.0, 90.0)
+    texture[...] = (0.03, 0.06, 0.09)  # the day texture in reflectance
     fill = {"texture": im.texture_window(texture, box)}
     if with_reference:
         ref = _write_raster(tmp_path / "ref.tif", np.full((3, 100, 100), 100, dtype=np.uint8),
                             (west - 0.01, south - 0.01, west + size + 0.01, south + size + 0.01))
-        fill["reference"] = ([ref], np.array([0.5, 0.5, 0.5]), np.array([10.0, 20.0, 30.0]))
-    expected_fill = (60.0, 70.0, 80.0) if with_reference else (30.0, 60.0, 90.0)
+        fill["reference"] = ([ref], {"kind": "scale", "scale": 0.002})
+    expected_fill = ea.encode_srgb((0.2, 0.2, 0.2) if with_reference else (0.03, 0.06, 0.09)).astype(float)
     messages = []
-    counts = im.write_pyramid([src], box, (0.0, 0.0), np.ones(3), np.zeros(3), 13, 15, tmp_path / "out",
+    counts = im.write_pyramid([src], box, (0.0, 0.0), {"kind": "scale", "scale": 0.001}, 13, 15, tmp_path / "out",
                               log=messages.append, workers=1, fill=fill)
     assert any("no-data pixels left inside the box: 0" in m for m in messages)  # counted before the JPEG encoding
     for z in (13, 14, 15):

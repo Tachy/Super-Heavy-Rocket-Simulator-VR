@@ -76,21 +76,51 @@ on top; it replaced the interim `GroundPatch`.
 - **Imagery** (pipeline `tools/data_pipeline/imagery.py`, `config/imagery.toml`; tiles EPSG:4326 TMS, 256 px JPEG):
   NAIP 0.6 m (Planetary Computer; z14-17, `fade_m` 500 m) - Starbase 2022 (4 scenes), Cape 2021 (7 scenes), shifted
   NAD83 -> ITRF; own Sentinel-2 L2A 2025 clear-pixel median composite 10 m (z8-13, `fade_m` 5 km) - 72 scenes per
-  area; 417 MB in all. Colour fit (no colour step between the sources and the global day texture): Sentinel-2 -> day
-  texture with one luminance gain + offset (Starbase 0.796 / -26.3, Cape 0.659 / -0.75), NAIP -> its area's
-  Sentinel-2 composite per channel at 10 m (Starbase gains [0.566, 0.400, 0.347], Cape [0.600, 0.628, 0.582]). No data
-  inside a box (the Atlantic beyond the Cape DOQQs, Sentinel-2 composite gaps) is filled before writing, in final
-  colours: NAIP from its area's fitted Sentinel-2 composite, Sentinel-2 from the day texture; every tile of a box is
-  written (Cape NAIP 11306 tiles, Starbase NAIP 6379, S2 10543 / 10276), lower levels average valid pixels only; the
-  run logs the no-data pixels left inside each box (0 for all four). Remaining dark sea inside the S2 boxes is data,
-  not holes (the day texture's open ocean is near-black, the fit pulls the S2 sea onto it); rectangular scene / MGRS
-  brightness steps over open water remain (no water mask in the pipeline). `fetch.py --retile imagery` refits and
-  retiles from the cached clips without network; `--workers N` runs on all cores (bit-identical to serial). In the
-  renderer each node gets a fine crop and the next coarser source as base (`ImagerySource.crop`, <= 3 x 3 tiles, cut
-  to the node box + 2 px and converted to RGBA8 with mipmaps on the worker); the shader blends day texture -> base ->
-  fine with per-fragment coverage fades of width max(`fade_m`, camera distance x 0.05 rad [E]): a source edge never
-  reads as a line from orbit. Consequence: a fine patch smaller than about 0.1 x its viewing distance fades out
-  entirely from far away (the base / day texture shows instead).
+  area; 275 MB in all (Starbase NAIP 6379 tiles 37 MB, Cape NAIP 11306 / 79 MB, S2 10276 / 76 MB and 10543 / 83 MB).
+- **Surface albedo** (Task 15 of the Moon surface plan, `tools/data_pipeline/earth_albedo.py`, `config/earth_albedo.toml`):
+  every Earth ground texel - the day texture and all tiles - holds the surface reflectance per channel (R, G, B ~
+  MODIS bands 1 / 4 / 3 = Sentinel-2 B04 / B03 / B02), sRGB-encoded (IEC 61966-2-1); the shaders' only decode is the
+  GPU's sRGB decode of their `source_color` samplers (`terrain_earth`, `earth_surface`, `sky`), the BRDF / atmosphere
+  shading is unchanged. Per level:
+  - Global (`data/textures/earth_day.jpg`, 5400 x 2700, written by `prepare.py`): land from a MODIS MCD43A4 v061 NBAR
+    climatology (`fetch.py earth_albedo`: every land tile at the COG's 3.7 km overview, per pixel the median over the
+    mid-month products Jan-Jun and Dec 2025 plus Jul-Nov 2024 - the Planetary Computer lacks 2025-07..11 -, at least 3
+    valid, averaged into the texture's pixels: 4.98 M of 14.58 M pixels). Elsewhere (sea, sea ice, polar night) the
+    Blue Marble Next Generation (Dec 2004) through per-channel monotone tables count -> reflectance, fitted to MCD43A4
+    NBAR of 2004-12-16 (279 tiles, 3.0 M pixels; luminance error per pixel median 10 %, 90th percentile 59 % - snow
+    and season). Inside each Sentinel-2 box the texture carries the Sentinel-2 reflectance averaged into its pixels,
+    and outside the box the edge ratio Sentinel-2 / MODIS fades out over 50 km (`EMBED_FEATHER_M` [E]): the two
+    calibrated products differ there (land in the 10 km edge band: Sentinel-2 +18 % at Starbase, -11 % at the Cape),
+    and the embedding spreads that over the feather instead of drawing it as a step where the renderer fades between
+    the levels. 2.9 MB (JPEG quality 95).
+  - Sentinel-2: the L2A surface reflectance itself, no fit: the TCI median decoded with its measured linear
+    quantisation (TCI = floor(1 + DN x 254 / 2500), DN = reflectance x 1e4: fit 0.101604 DN + 0.497, rms 0.4 counts on
+    S2B_14RNN_20251116), and the pixels saturated in the TCI (reflectance >= 0.25: beaches, flats, roofs; Starbase 1.54 M
+    in 182 of 400 blocks, Cape 1.21 M in 195) recomputed as the median of the B04 / B03 / B02 bands with the same
+    clear-pixel rule (`data/raw/imagery/<id>/reflectance.tif`, uint16).
+  - NAIP (not calibrated): per channel a monotone table count -> reflectance fitted to the area's Sentinel-2
+    reflectance on a 10 m lattice, then a local gain = Sentinel-2 / tabled NAIP over a Gaussian sliding window
+    (sigma `NAIP_RATIO_SIGMA_M` 50 m [E], NAIP rendered at 2.5 m and tabled before the 10 m means, gain clipped to
+    0.5..2 [E]; median 1.00, 5-95 % 0.78-1.43 Starbase / 0.67-1.23 Cape, clipped 7.6 % / 3.8 % of the cells - ground
+    changed between NAIP 2021/22 and Sentinel-2 2025), so bright local flats keep their brightness.
+  No data inside a box (the Atlantic beyond the Cape DOQQs, Sentinel-2 composite gaps) is filled before writing, in
+  reflectance: NAIP from its area's Sentinel-2 reflectance, Sentinel-2 from the day texture; every tile of a box is
+  written, lower levels are reflectance (linear) means of the valid pixels; the run logs the no-data pixels left inside
+  each box (0 for all four). Rectangular scene / MGRS brightness steps over open water remain (no water mask in the
+  pipeline). `fetch.py --retile imagery` refits and retiles from the cached clips / composites / reflectance files
+  without network; `--workers N` runs on all cores (bit-identical to serial).
+  Validation (luminance of the reflectance, `screenshots/earth_albedo/task15/` and the task report): the six spots
+  within +-25 % of their references at every level the game draws there - global 12 km box vs MCD43A4 NBAR
+  (Jul 2024 - Jun 2025 median): Starbase pad +18 %, Boca Chica beach +17 %, Cape LC-39A -12 %, Sahara 25 N 25 E -2 %,
+  Amazon 5 S 65 W +4 %, Kansas 38.5 N 98.5 W 0 %; Sentinel-2 z13 and NAIP z17 200 m boxes vs Sentinel-2 L2A band
+  medians: pad -1 % / +4 %, beach -3 % / -1 %, Cape +1 % / +6 %. Level steps (mean over the transition): NAIP vs
+  Sentinel-2 over the NAIP boxes +0.4 % Starbase / +0.9 % Cape (median 250 m cell 1.2 % / 1.0 %), Sentinel-2 vs the
+  day texture in the 10 km band inside the box edge -0.3 % / -0.4 % (median 10 km cell 1.9 % / 3.2 %).
+  In the renderer each node gets a fine crop and the next coarser source as base (`ImagerySource.crop`, <= 3 x 3
+  tiles, cut to the node box + 2 px and converted to RGBA8 with mipmaps on the worker); the shader blends day texture
+  -> base -> fine with per-fragment coverage fades of width max(`fade_m`, camera distance x 0.05 rad [E]): a source
+  edge never reads as a line from orbit. Consequence: a fine patch smaller than about 0.1 x its viewing distance fades
+  out entirely from far away (the base / day texture shows instead).
 - **Sea** (`water.gdshaderinc`): where the node's 128 x 128 water mask (the core's water flag) says sea, the geoid
   surface is shaded by a calm-sea model: body colour from the imagery where it covers, else the day texture, lit
   diffusely x (1 - F); Fresnel (Schlick, n = 1.333 [S]) times the reflected sky (the atmosphere model's sky along the
@@ -163,7 +193,8 @@ on top; it replaced the interim `GroundPatch`.
 - `game/world/terrain/`: `cube_sphere.gd`, `height_source.gd`, `imagery_source.gd`, `terrain_node_builder.gd`
   (worker-safe), `terrain_quadtree.gd`, `water_waves.gd`.
 - Shaders: `terrain_earth.gdshader`, `terrain_moon.gdshader`, `terrain_morph.gdshaderinc`, `water.gdshaderinc`.
-- Imagery pipeline: `tools/data_pipeline/imagery.py`, `config/imagery.toml`.
+- Imagery pipeline: `tools/data_pipeline/imagery.py`, `config/imagery.toml`; surface albedo
+  `tools/data_pipeline/earth_albedo.py`, `config/earth_albedo.toml` (tests `test_imagery.py`, `test_earth_albedo.py`).
 - Performance run: `game/tests/terrain_perf.gd` (GPU).
 - Moon procedural detail checks and cost runs: `game/tests/moon_surface_check.gd` (headless).
 

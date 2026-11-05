@@ -232,13 +232,6 @@ shaders:
   as terrain_moon does (the file was in another task's hands, not changed here).
 - No per-pixel / foveal term in the field rule: a small bright object (a gibbous Earth of ~2 deg in a lunar-night
   view, a distant plume) stays inside the 2 % highlight cut, so a gaze at it does not adapt to it.
-- Earth ground albedo: the imagery chain (NAIP -> Sentinel-2 composite -> the day texture, `terrain-rendering.md`) is
-  anchored to the Blue Marble day texture, a display product, not calibrated reflectance (sRGB-decoded spot checks:
-  Sahara 0.27, Amazon 0.035, Kansas 0.054, Starbase 0.035 at 12 km - against MODIS visible albedos ~0.3-0.4, 0.03-0.05,
-  0.06-0.10). Near the pad the NAIP z17 crop draws 0.05 while the Sentinel-2 composite in the same view sector is 0.17
-  mean / 0.11 median (over the whole NAIP box both ~0.05: the per-channel fit matches box means, not bright local
-  flats). The field rule normalises this away like the Moon's; an imagery-calibration point (data pipeline), not
-  adaptation.
 - The VR panel was not in the stereo mock's lunar-night view (`--keep_vr_panel`), and the night plume seen from
   500 m (fov 25 deg) stays inside the 2 % highlight cut; the run-away the meter now avoids was therefore not
   reproduced in a render, only excluded by construction (display-referred shaders in the transparent pass, test).

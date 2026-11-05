@@ -7,18 +7,24 @@ Sources (config/imagery.toml, one entry per product and area):
   sentinel2_median  Element84 Earth Search, `sentinel-2-l2a` (Copernicus Sentinel data 2025, free and open), scenes of 2025
                     with eo:cloud_cover < 20, up to 8 per MGRS tile; per-pixel median of the clear pixels (SCL classes
                     4, 5, 6, 7), WGS84 UTM (no datum shift), kept as a GeoTIFF composite in data/raw/imagery/<id>/.
-Both are fitted per channel (gain, offset; least squares on a 1 km lattice) to data/textures/earth_day.jpg so that the imagery
-meets the day texture without a colour step; the fit is stored in the index and applied when the tiles are written.
+Every tile holds surface reflectance, sRGB-encoded (earth_albedo.py: the one transfer of all Earth imagery):
+  Sentinel-2  L2A surface reflectance without display stretch: the median of the visual (TCI) bands decoded with their
+              linear quantisation (`S2_TCI_REFLECTANCE_PER_COUNT`); pixels saturated in the TCI (reflectance >= 0.25:
+              beaches, flats, roofs) are recomputed from the B04 / B03 / B02 reflectance bands (`build_s2_reflectance`,
+              reflectance.tif next to the composite).
+  NAIP        not calibrated: a per-channel monotone table count -> reflectance fitted to the area's Sentinel-2
+              reflectance on a 10 m lattice, then a local gain (Gaussian sliding window, `NAIP_RATIO_SIGMA_M`) so the
+              NAIP means follow the Sentinel-2 reflectance under them everywhere (bright local flats keep their brightness).
 
 Output (EPSG:4326 TMS, level z has 2^(z+1) x 2^z tiles of 256 x 256 px, tile size 180 / 2^z deg, x counts east from 180 W,
 y counts south from 90 N, pixel centres at (i + 0.5) / 256 of the tile):
   data/imagery/earth/<source id>/<z>/<x>/<y>.jpg     (JPEG quality 88 [E])
   data/imagery/earth/<source id>/meta.toml           per source, compiled into
-  data/imagery/earth/index.toml                      id, product, year, min/max level, exact coverage, fade_m, gain/offset
-No data (sea beyond the NAIP scenes, Sentinel-2 composite gaps) is filled before a tile is written, in final colours:
-NAIP from its area's fitted Sentinel-2 composite, then (and Sentinel-2 directly) from the day texture. Every tile of the
-box is written; tiles entirely outside the box are not. Lower levels are 2 x 2 means of the valid pixels of the 4 decoded
-children (no data never enters a mean).
+  data/imagery/earth/index.toml                      id, product, year, min/max level, exact coverage, fade_m, transfer
+No data (sea beyond the NAIP scenes, Sentinel-2 composite gaps) is filled before a tile is written, in reflectance:
+NAIP from its area's Sentinel-2 reflectance, then (and Sentinel-2 directly) from the calibrated day texture. Every tile of
+the box is written; tiles entirely outside the box are not. Lower levels are 2 x 2 means of the valid pixels of the 4
+decoded children in reflectance (linear; no data never enters a mean).
 
 Usage: python tools/data_pipeline/fetch.py [--force] imagery
 """
@@ -39,6 +45,7 @@ from pathlib import Path
 
 import numpy as np
 
+import earth_albedo as ea
 import earth_terrain as et
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,11 +62,17 @@ S2_YEAR = 2025
 S2_PIXEL_M = 10.0  # [S] Sentinel-2 visual (TCI) band spacing
 S2_READ_THREADS = 8  # scene reads per block worker
 S2_BLOCK_PX = 1024  # composite block (read + median + write unit); multiple of the GTiff block of 512
-LATTICE_M = 1000.0  # [E] colour-fit lattice spacing against the day texture
-MIN_REF_STD = 3.0  # 8-bit counts: below this the reference carries no gain information (12 km day texture over a small box)
-GAIN_LIMITS = (0.2, 5.0)  # [E] sanity bounds of the fitted gain (outside: an error, not a fallback)
-LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)  # [S] ITU-R BT.709 luma
-NAIP_FIT_CELL_M = 10.0  # NAIP is fitted against the Sentinel-2 composite at its own resolution
+# [D] Sentinel-2 L2A TCI quantisation, measured on S2B_14RNN_20251116 (1000 x 1000 px, Earth Search COGs whose DN =
+# reflectance x 1e4, BOA offset applied): TCI = 0.101604 DN + 0.497 (rms 0.4 counts) = floor(1 + DN x 254 / 2500) in
+# all three bands, so a count t decodes to reflectance (t - 0.5) x 2500 / 254 x 1e-4; t = 255 means >= 0.25 (saturated).
+S2_TCI_REFLECTANCE_PER_COUNT = 2500.0 / 254.0 * 1e-4
+S2_TCI_SATURATED = 255
+S2_REFLECTANCE_SCALE = 1e-4  # [S] Earth Search sentinel-2-l2a band COGs (earthsearch:boa_offset_applied): DN x 1e-4
+S2_REFLECTANCE_BANDS = ("B04", "B03", "B02")  # [S] red, green, blue (10 m)
+NAIP_FIT_CELL_M = 10.0  # NAIP is fitted against the Sentinel-2 reflectance at its resolution
+NAIP_FIT_SUBCELLS = 4  # NAIP rendered at 2.5 m, the table applied, then averaged into the 10 m cells (no Jensen bias)
+NAIP_RATIO_SIGMA_M = 50.0  # [E] Gaussian sliding window of the local NAIP gain (5 Sentinel-2 pixels)
+NAIP_RATIO_LIMITS = (0.5, 2.0)  # [E] bounds of the local gain (NAIP 2021/22 vs Sentinel-2 2025: changed ground)
 NAIP_STAC = "https://planetarycomputer.microsoft.com/api/stac/v1"
 NAIP_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/naip"
 S2_STAC = "https://earth-search.aws.element84.com/v1"
@@ -95,9 +108,9 @@ def tile_path(root: Path, z: int, x: int, y: int) -> Path:
 # ----------------------------------------------------------------------------------------------- pixel operations
 
 def clear_median(rgb: np.ndarray, scl: np.ndarray) -> np.ndarray:
-    """Per-pixel, per-channel median over the scenes whose SCL class is clear. rgb (n, h, w, 3) uint8 (0 = no data), scl
-    (n, h, w) uint8. A pixel without any clear scene takes the median of its valid (non-zero) scenes instead of a hole;
-    without valid scenes it stays 0."""
+    """Per-pixel, per-channel median over the scenes whose SCL class is clear. rgb (n, h, w, 3) uint8 or uint16 (0 = no
+    data), scl (n, h, w) uint8. A pixel without any clear scene takes the median of its valid (non-zero) scenes instead of
+    a hole; without valid scenes it stays 0. The result keeps the input's dtype."""
     valid = rgb.any(axis=-1)
     clear = valid & np.isin(scl, SCL_CLEAR)
     use = np.where(clear.any(axis=0)[None], clear, valid)
@@ -110,55 +123,48 @@ def clear_median(rgb: np.ndarray, scl: np.ndarray) -> np.ndarray:
     idx_hi = np.broadcast_to(hi[None, ..., None], (1,) + hi.shape + (3,))
     median = 0.5 * (np.take_along_axis(stack, idx_lo, axis=0)[0] + np.take_along_axis(stack, idx_hi, axis=0)[0])
     median[count == 0] = 0.0
-    return np.rint(np.nan_to_num(median)).astype(np.uint8)
+    return np.rint(np.nan_to_num(median)).astype(rgb.dtype)
 
 
-def fit_gain_offset(src: np.ndarray, ref: np.ndarray, *, luminance: bool = False,
-                    name: str = "?") -> tuple[np.ndarray, np.ndarray]:
-    """Least squares ref ~ gain * src + offset on (N, 3) samples -> (gain (3), offset (3)).
-    per channel (default), or with `luminance` ONE gain and ONE offset fitted on the Rec. 709 luma and applied equally to
-    R, G and B (keeps the source's own colour balance). A reference without variation (std < MIN_REF_STD in any fitted
-    channel) falls back to a mean match with gain 1 in ALL channels. A fitted gain outside GAIN_LIMITS is an error
-    (no silent substitution)."""
-    src, ref = np.asarray(src, dtype=np.float64), np.asarray(ref, dtype=np.float64)
-    if luminance:
-        w = np.array(LUMA_WEIGHTS)
-        s_set, r_set = (src @ w)[:, None], (ref @ w)[:, None]
-    else:
-        s_set, r_set = src, ref
-    n = s_set.shape[1]
-    gain, offset = np.ones(n), np.zeros(n)
-    if all(r_set[:, c].std() >= MIN_REF_STD and s_set[:, c].std() > 1e-9 for c in range(n)):
-        for c in range(n):
-            a = np.stack([s_set[:, c], np.ones(len(s_set))], axis=1)
-            gain[c] = float(np.linalg.lstsq(a, r_set[:, c], rcond=None)[0][0])
-        if not all(GAIN_LIMITS[0] <= g <= GAIN_LIMITS[1] for g in gain):
-            raise ValueError(f"{name}: Farbabgleich unplausibel (gain {np.round(gain, 3).tolist()} ausserhalb "
-                             f"{GAIN_LIMITS}); gain outside the plausible range, check the source / reference")
-    offset = r_set.mean(axis=0) - gain * s_set.mean(axis=0)
-    if luminance:
-        return np.full(3, gain[0]), np.full(3, offset[0])
-    return gain, offset
+def tci_to_reflectance(tci: np.ndarray) -> np.ndarray:
+    """Sentinel-2 L2A TCI counts -> surface reflectance (float64); count 0 (no data) -> 0."""
+    t = np.asarray(tci, dtype=np.float64)
+    return np.where(t > 0, (t - 0.5) * S2_TCI_REFLECTANCE_PER_COUNT, 0.0)
 
 
-def apply_gain_offset(rgb: np.ndarray, gain: np.ndarray, offset: np.ndarray) -> np.ndarray:
-    """gain * rgb + offset clipped to 8 bit; no-data pixels (all channels 0) stay 0."""
-    out = np.clip(np.rint(rgb.astype(np.float64) * gain + offset), 1, 255).astype(np.uint8)  # 1: only no data is 0
-    out[~rgb.any(axis=-1)] = 0
+def to_reflectance(raw: np.ndarray, transfer: dict, lat=None, lon=None) -> np.ndarray:
+    """A source's raw pixels (h, w, 3) -> surface reflectance (h, w, 3) float64. `transfer`: {"kind": "scale", "scale"}
+    (the Sentinel-2 reflectance composite: DN x scale) or {"kind": "naip", "luts": (3, 256), "ratio": local gain window
+    dict (`sample_ratio`)} with the pixel-centre grids `lat` / `lon` (degrees)."""
+    if transfer["kind"] == "scale":
+        return np.asarray(raw, dtype=np.float64) * transfer["scale"]
+    if transfer["kind"] == "naip":
+        rho = ea.apply_lut(raw, np.asarray(transfer["luts"]))
+        if transfer.get("ratio") is not None:
+            rho = rho * sample_ratio(transfer["ratio"], lat, lon)
+        return rho
+    raise ValueError(f"unknown transfer {transfer['kind']}")
+
+
+def encode_tile(rho: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Reflectance -> sRGB-encoded 8-bit tile; valid pixels at least 1 (0 in all channels marks no data)."""
+    out = np.maximum(ea.encode_srgb(rho), 1).astype(np.uint8)
+    out[~valid] = 0
     return out
 
 
 def downsample_children(tl, tr, bl, br) -> np.ndarray:
-    """The parent tile: 2 x 2 mean of the VALID pixels (not all channels 0) of the four (256, 256, 3) children; no data never
-    enters a mean. A parent pixel without any valid child pixel (a missing child (None) is no data) stays 0."""
+    """The parent tile: 2 x 2 mean in reflectance (linear, sRGB-decoded) of the VALID pixels (not all channels 0) of the
+    four (256, 256, 3) children, encoded again; no data never enters a mean. A parent pixel without any valid child pixel
+    (a missing child (None) is no data) stays 0."""
     zero = np.zeros((TILE_PX, TILE_PX, 3), dtype=np.uint8)
     rows = [np.concatenate([c if c is not None else zero for c in row], axis=1) for row in ((tl, tr), (bl, br))]
     big = np.concatenate(rows, axis=0)
     valid = big.any(axis=-1).reshape(TILE_PX, 2, TILE_PX, 2, 1)
-    total = (big.astype(np.float64).reshape(TILE_PX, 2, TILE_PX, 2, 3) * valid).sum(axis=(1, 3))
+    total = (ea.decode_srgb(big).reshape(TILE_PX, 2, TILE_PX, 2, 3) * valid).sum(axis=(1, 3))
     count = valid.sum(axis=(1, 3))
     mean = np.divide(total, count, out=np.zeros_like(total), where=count > 0)
-    return np.rint(mean).astype(np.uint8)
+    return encode_tile(mean, count[..., 0] > 0)
 
 
 # ----------------------------------------------------------------------------------------------- rendering
@@ -172,8 +178,8 @@ def naip_shift_deg(box: Box) -> tuple[float, float]:
 def render_box(datasets, box: Box, shift_deg: tuple[float, float], width: int, height: int,
                resampling=None) -> tuple[np.ndarray, np.ndarray]:
     """Reproject the first three bands of every dataset into the geographic box (width x height pixels, edges at the box
-    bounds) -> (rgb (h, w, 3) uint8, valid (h, w)). `shift_deg` = (dlat, dlon) moves the content north / east (datum
-    shift); a source value of 0 is no data."""
+    bounds) -> (rgb (h, w, 3) in the datasets' dtype, valid (h, w)). `shift_deg` = (dlat, dlon) moves the content north /
+    east (datum shift); a source value of 0 is no data."""
     import rasterio
     from rasterio.transform import from_bounds
     from rasterio.warp import Resampling, reproject, transform_bounds
@@ -183,7 +189,7 @@ def render_box(datasets, box: Box, shift_deg: tuple[float, float], width: int, h
     dlat, dlon = shift_deg
     # destination grid labelled in the source datum: the pixel at ITRF position P shows the source at P - shift
     dst_transform = from_bounds(west - dlon, south - dlat, east - dlon, north - dlat, width, height)
-    out = np.zeros((3, height, width), dtype=np.uint8)
+    out = np.zeros((3, height, width), dtype=np.dtype(datasets[0].dtypes[0]) if datasets else np.uint8)
     for ds in datasets:
         b = transform_bounds(ds.crs, "EPSG:4326", *ds.bounds)
         if b[2] <= west - dlon or b[0] >= east - dlon or b[3] <= south - dlat or b[1] >= north - dlat:
@@ -226,14 +232,16 @@ def write_tile(root: Path, z: int, x: int, y: int, rgb: np.ndarray) -> int:
 # ----------------------------------------------------------------------------------------------- colour match
 
 def load_day_texture(path: Path) -> np.ndarray:
+    """The calibrated day texture (earth_albedo.py transfer) as reflectance (h, w, 3) float64."""
     from PIL import Image
 
     with Image.open(path) as img:
-        return np.asarray(img.convert("RGB"), dtype=np.float64)
+        return ea.decode_srgb(np.asarray(img.convert("RGB")))
 
 
 def sample_day_texture(texture: np.ndarray, lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
-    """Bilinear samples (N, 3) of the equirectangular day texture (u = (lon + 180) / 360, v = (90 - lat) / 180)."""
+    """Bilinear samples (N, 3) of the equirectangular day texture (u = (lon + 180) / 360, v = (90 - lat) / 180), in
+    the texture's values (reflectance from `load_day_texture`: filtered after the decode, as on the GPU)."""
     h, w, _ = texture.shape
     return _sample_texture(texture, 0, 0, h, w, lats, lons)
 
@@ -280,34 +288,92 @@ def sample_texture_window(win: dict, lats, lons) -> np.ndarray:
     return _sample_texture(win["rgb"], win["row0"], win["col0"], win["full_h"], win["full_w"], lats, lons)
 
 
-def fit_to_reference(datasets, box: Box, shift_deg, texture: np.ndarray, reference=None,
-                     name: str = "?") -> tuple[np.ndarray, np.ndarray]:
-    """Colour fit. Without `reference`: ONE luminance gain + offset (equal in R, G, B) of the imagery averaged on a 1 km
-    lattice against the day texture (a ~7 km texel cannot support per-channel fits). With `reference` = (datasets, gain,
-    offset) of an already fitted source (NAIP: the Sentinel-2 composite of its area): per-channel least squares on a
-    10 m lattice."""
+def gaussian_mean(values: np.ndarray, weight: np.ndarray, sigma_px: float) -> np.ndarray:
+    """Normalised Gaussian convolution: the weighted local mean of (h, w, c) values with (h, w) weights (0 = no data);
+    NaN where no weight lies within reach."""
+    import cv2
+
+    w = weight.astype(np.float32)
+    num = cv2.GaussianBlur(values.astype(np.float32) * w[..., None], (0, 0), sigma_px, borderType=cv2.BORDER_REFLECT)
+    den = cv2.GaussianBlur(w, (0, 0), sigma_px, borderType=cv2.BORDER_REFLECT)
+    if num.ndim == 2:
+        num = num[..., None]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(den[..., None] > 1e-6, num / den[..., None], np.nan)
+
+
+def local_ratio(reference: np.ndarray, source: np.ndarray, valid: np.ndarray, sigma_px: float,
+                limits: tuple[float, float] = NAIP_RATIO_LIMITS) -> np.ndarray:
+    """Per-channel local gain reference / source over a Gaussian sliding window (both means over the cells valid in
+    both), clipped to `limits`; 1 where the window holds no valid cell."""
+    ref_mean = gaussian_mean(reference, valid, sigma_px)
+    src_mean = gaussian_mean(source, valid, sigma_px)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ratio = ref_mean / src_mean
+    ratio = np.where(np.isfinite(ratio), ratio, 1.0)
+    return np.clip(ratio, *limits).astype(np.float32)
+
+
+_RATIO_CACHE: dict[str, np.ndarray] = {}
+
+
+def sample_ratio(ratio: dict, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Bilinear samples of a local gain grid {"path": .npy (ny, nx, 3) on the lattice of "box" (cell centres), "box"} at
+    the given latitudes / longitudes (degrees); clamped at the grid edge."""
+    grid = _RATIO_CACHE.get(ratio["path"])
+    if grid is None:
+        grid = _RATIO_CACHE[ratio["path"]] = np.load(ratio["path"])
+    south, north, west, east = ratio["box"]
+    ny, nx, _ = grid.shape
+    fx = np.clip((np.asarray(lon) - west) / (east - west) * nx - 0.5, 0.0, nx - 1.0)
+    fy = np.clip((north - np.asarray(lat)) / (north - south) * ny - 0.5, 0.0, ny - 1.0)
+    x0 = np.minimum(np.floor(fx).astype(int), max(nx - 2, 0))
+    y0 = np.minimum(np.floor(fy).astype(int), max(ny - 2, 0))
+    x1, y1 = np.minimum(x0 + 1, nx - 1), np.minimum(y0 + 1, ny - 1)
+    wx, wy = (fx - x0)[..., None], (fy - y0)[..., None]
+    top = (1 - wx) * grid[y0, x0] + wx * grid[y0, x1]
+    bottom = (1 - wx) * grid[y1, x0] + wx * grid[y1, x1]
+    return (1 - wy) * top + wy * bottom
+
+
+def fit_naip(datasets, box: Box, shift_deg, ref_datasets, ref_transfer: dict, ratio_path: Path,
+             log=print) -> dict:
+    """The NAIP transfer against the area's Sentinel-2 reflectance on a 10 m lattice over the box: per channel a monotone
+    table count -> reflectance (the 10 m mean counts against the reflectance, `earth_albedo.monotone_lut`), then the local
+    gain: the reflectance over the tabled NAIP, both rendered on the lattice (NAIP at 2.5 m, the table applied, averaged
+    into the cells), as Gaussian sliding-window means (`NAIP_RATIO_SIGMA_M`), saved to `ratio_path` (.npy).
+    Returns the transfer dict for `to_reflectance` plus fit statistics."""
     from rasterio.warp import Resampling
 
     south, north, west, east = box
     lat_c = (south + north) / 2.0
-    cell_m = LATTICE_M if reference is None else NAIP_FIT_CELL_M
-    ny = max(2, round((north - south) * M_PER_DEG_LAT / cell_m))
-    nx = max(2, round((east - west) * M_PER_DEG_LAT * math.cos(math.radians(lat_c)) / cell_m))
-    rgb, valid = render_box(datasets, box, shift_deg, nx, ny, Resampling.average)
-    if reference is None:
-        lats = north - (np.arange(ny) + 0.5) * (north - south) / ny
-        lons = west + (np.arange(nx) + 0.5) * (east - west) / nx
-        lon_g, lat_g = np.meshgrid(lons, lats)
-        ref = sample_day_texture(texture, lat_g[valid], lon_g[valid])
-    else:
-        ref_datasets, ref_gain, ref_offset = reference
-        ref_rgb, ref_valid = render_box(ref_datasets, box, (0.0, 0.0), nx, ny, Resampling.average)
-        valid = valid & ref_valid
-        ref = apply_gain_offset(ref_rgb, ref_gain, ref_offset)[valid].astype(np.float64)
-    src = rgb[valid].astype(np.float64)
-    if len(src) < 4:
-        raise RuntimeError("Keine gueltigen Bildpunkte fuer den Farbabgleich")
-    return fit_gain_offset(src, ref, luminance=reference is None, name=name)
+    ny = max(2, round((north - south) * M_PER_DEG_LAT / NAIP_FIT_CELL_M))
+    nx = max(2, round((east - west) * M_PER_DEG_LAT * math.cos(math.radians(lat_c)) / NAIP_FIT_CELL_M))
+    counts, valid = render_box(datasets, box, shift_deg, nx, ny, Resampling.average)
+    ref_raw, ref_valid = render_box(ref_datasets, box, (0.0, 0.0), nx, ny, Resampling.average)
+    ref = to_reflectance(ref_raw, ref_transfer)
+    both = valid & ref_valid
+    if both.sum() < 100:
+        raise RuntimeError("Keine gueltigen Bildpunkte fuer den NAIP-Abgleich")
+    luts = np.stack([ea.monotone_lut(counts[both][:, c], ref[both][:, c]) for c in range(3)])
+    k = NAIP_FIT_SUBCELLS
+    fine, fine_valid = render_box(datasets, box, shift_deg, nx * k, ny * k, Resampling.bilinear)
+    tabled = ea.apply_lut(fine, luts.astype(np.float32)) * fine_valid[..., None]
+    cell_sum = tabled.reshape(ny, k, nx, k, 3).sum(axis=(1, 3))
+    cell_n = fine_valid.reshape(ny, k, nx, k).sum(axis=(1, 3))
+    naip = np.divide(cell_sum, cell_n[..., None], out=np.zeros_like(cell_sum), where=cell_n[..., None] > 0)
+    both &= cell_n > 0
+    ratio = local_ratio(ref, naip, both, NAIP_RATIO_SIGMA_M / NAIP_FIT_CELL_M)
+    ratio_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(ratio_path, ratio)
+    y = ea.LUMA_WEIGHTS
+    stats = {"cells": int(both.sum()), "ratio_p05": np.percentile(ratio[both] @ y, 5).item(),
+             "ratio_median": np.median(ratio[both] @ y).item(), "ratio_p95": np.percentile(ratio[both] @ y, 95).item(),
+             "ratio_clipped": float(((ratio[both] <= NAIP_RATIO_LIMITS[0]) | (ratio[both] >= NAIP_RATIO_LIMITS[1]))
+                                    .any(axis=-1).mean()),
+             "luma_ref_mean": float((ref[both] @ y).mean()), "luma_table_mean": float((naip[both] @ y).mean())}
+    log(f"    NAIP fit: {stats}")
+    return {"kind": "naip", "luts": luts, "ratio": {"path": str(ratio_path), "box": box}, "stats": stats}
 
 
 # ----------------------------------------------------------------------------------------------- pyramid
@@ -386,23 +452,25 @@ def pixel_centres(bounds: Box, n: int = TILE_PX) -> tuple[np.ndarray, np.ndarray
     return lat_g, lon_g
 
 
-def fill_nodata(rgb: np.ndarray, valid: np.ndarray, bounds: Box, reference=None, texture=None) -> np.ndarray:
-    """Fill the no-data pixels of a colour-fitted tile in its FINAL colours: first from `reference` = (datasets, gain,
-    offset), the fitted Sentinel-2 composite of the area (for NAIP; rendered without datum shift, its fit applied), then
-    from `texture` (a `texture_window` of the day texture, the Sentinel-2 fit target, used as is). Returns the tile;
-    pixels neither layer covers stay 0."""
-    out = rgb.copy()
+def fill_nodata(rho: np.ndarray, valid: np.ndarray, bounds: Box, reference=None, texture=None) -> tuple[np.ndarray, np.ndarray]:
+    """Fill the no-data pixels of a tile in reflectance: first from `reference` = (datasets, transfer), the Sentinel-2
+    reflectance of the area (for NAIP; rendered without datum shift), then from `texture` (a `texture_window` of the
+    calibrated day texture in reflectance). Returns (reflectance, valid); pixels neither layer covers stay invalid."""
+    out = rho.copy()
+    valid = valid.copy()
     hole = ~valid
     if hole.any() and reference is not None:
-        ref_datasets, ref_gain, ref_offset = reference
-        ref_rgb, ref_valid = render_box(ref_datasets, bounds, (0.0, 0.0), rgb.shape[1], rgb.shape[0])
+        ref_datasets, ref_transfer = reference
+        ref_raw, ref_valid = render_box(ref_datasets, bounds, (0.0, 0.0), rho.shape[1], rho.shape[0])
         take = hole & ref_valid
-        out[take] = apply_gain_offset(ref_rgb, ref_gain, ref_offset)[take]
+        out[take] = to_reflectance(ref_raw, ref_transfer)[take]
+        valid |= take
         hole &= ~ref_valid
     if hole.any() and texture is not None:
-        lat_g, lon_g = pixel_centres(bounds, rgb.shape[0])
-        out[hole] = np.clip(np.rint(sample_texture_window(texture, lat_g[hole], lon_g[hole])), 1, 255).astype(np.uint8)
-    return out
+        lat_g, lon_g = pixel_centres(bounds, rho.shape[0])
+        out[hole] = sample_texture_window(texture, lat_g[hole], lon_g[hole])
+        valid |= hole
+    return out, valid
 
 
 def _nodata_inside(tile: np.ndarray, bounds: Box, box: Box) -> int:
@@ -414,25 +482,27 @@ def _nodata_inside(tile: np.ndarray, bounds: Box, box: Box) -> int:
 
 
 def _render_chunk(task) -> tuple[int, int]:
-    """Worker: render + colour-fit (+ no-data fill) + write the finest-level tiles of one chunk -> (written count, no-data
-    pixels left inside the box). Without a fill, tiles without any valid pixel are skipped."""
+    """Worker: render + transfer to reflectance (+ no-data fill) + encode + write the finest-level tiles of one chunk ->
+    (written count, no-data pixels left inside the box). Without a fill, tiles without any valid pixel are skipped."""
     import rasterio
 
-    paths, root, z, tiles, shift_deg, gain, offset, fill, box = task
+    paths, root, z, tiles, shift_deg, transfer, fill, box = task
     datasets = [rasterio.open(p) for p in paths]
     ref_datasets = [rasterio.open(p) for p in fill["reference"][0]] if fill and fill.get("reference") else []
     try:
-        reference = (ref_datasets, fill["reference"][1], fill["reference"][2]) if ref_datasets else None
+        reference = (ref_datasets, fill["reference"][1]) if ref_datasets else None
         texture = fill.get("texture") if fill else None
         n = left = 0
         for x, y in tiles:
             bounds = tile_bounds(z, x, y)
-            rgb, valid = render_tile(datasets, bounds, shift_deg)
+            raw, valid = render_tile(datasets, bounds, shift_deg)
             if not fill and not valid.any():
                 continue
-            tile = apply_gain_offset(rgb, gain, offset)
+            lat_g, lon_g = pixel_centres(bounds, TILE_PX)
+            rho = to_reflectance(raw, transfer, lat_g, lon_g)
             if fill:
-                tile = fill_nodata(tile, valid, bounds, reference, texture)
+                rho, valid = fill_nodata(rho, valid, bounds, reference, texture)
+            tile = encode_tile(rho, valid)
             left += _nodata_inside(tile, bounds, box)
             write_tile(Path(root), z, x, y, tile)
             n += 1
@@ -455,20 +525,20 @@ def _downsample_chunk(task) -> int:
     return n
 
 
-def write_pyramid(paths: list[Path], box: Box, shift_deg, gain, offset, min_level: int, max_level: int, root: Path,
+def write_pyramid(paths: list[Path], box: Box, shift_deg, transfer: dict, min_level: int, max_level: int, root: Path,
                   log=print, workers: int = 1, fill: dict | None = None) -> dict[int, int]:
-    """Finest level rendered from the raster files (colour fit applied), lower levels as box means of the decoded
-    children, tiles in parallel (`workers` processes; the files do not depend on the count). `fill` = {"reference":
-    (paths, gain, offset) (optional), "texture": texture_window}: no data is filled before writing (`fill_nodata`) and
-    every tile of the box is written. Returns {level: count}."""
+    """Finest level rendered from the raster files (`transfer` to reflectance, `to_reflectance`, sRGB-encoded), lower
+    levels as reflectance box means of the decoded children, tiles in parallel (`workers` processes; the files do not
+    depend on the count). `fill` = {"reference": (paths, transfer) (optional), "texture": texture_window}: no data is
+    filled before writing (`fill_nodata`) and every tile of the box is written. Returns {level: count}."""
     counts: dict[int, int] = {}
     south, north, west, east = box
     paths = [str(p) for p in paths]
     if fill and fill.get("reference"):
-        ref_paths, ref_gain, ref_offset = fill["reference"]
-        fill = dict(fill, reference=([str(p) for p in ref_paths], ref_gain, ref_offset))
+        ref_paths, ref_transfer = fill["reference"]
+        fill = dict(fill, reference=([str(p) for p in ref_paths], ref_transfer))
     tiles = tiles_for_box(max_level, south, north, west, east)
-    tasks = [(paths, str(root), max_level, c, shift_deg, gain, offset, fill, box) for c in _chunks(tiles, TILE_CHUNK)]
+    tasks = [(paths, str(root), max_level, c, shift_deg, transfer, fill, box) for c in _chunks(tiles, TILE_CHUNK)]
     results = list(iter_tasks(_render_chunk, tasks, workers))
     counts[max_level] = sum(r[0] for r in results)
     log(f"    z{max_level}: {counts[max_level]} tiles, no-data pixels left inside the box: {sum(r[1] for r in results)}")
@@ -623,13 +693,15 @@ def s2_items(box: Box, raw_dir: Path, force: bool, log=print) -> list[dict]:
 
 def _s2_block(task):
     """Worker: the median of one composite block -> (r0, c0, (h, w, 3) uint8 or None when no scene covers it).
-    Reads the intersecting scenes on a few threads (network latency)."""
+    Reads the intersecting scenes on a few threads (network latency). Task (scenes, r0, c0, h, w[, bands]): with `bands`
+    true the reflectance bands B04 / B03 / B02 (uint16, next to each scene's visual file) instead of the visual bands."""
     import rasterio
     from rasterio.enums import Resampling
     from rasterio.windows import Window
 
     _gdal_http_env()
-    scenes, r0, c0, h, w = task
+    scenes, r0, c0, h, w = task[:5]
+    bands = len(task) > 5 and task[5]
 
     def read_item(scene):
         ra, ca = max(r0 + scene["row_off"], 0), max(c0 + scene["col_off"], 0)
@@ -640,9 +712,18 @@ def _s2_block(task):
         scl_win = Window(ca / 2.0, ra / 2.0, (cb - ca) / 2.0, (rb - ra) / 2.0)
 
         def go():
-            with rasterio.open(scene["visual"]) as v, rasterio.open(scene["scl"]) as s:
-                return (v.read([1, 2, 3], window=win),
-                        s.read(1, window=scl_win, out_shape=(rb - ra, cb - ca), resampling=Resampling.nearest))
+            with rasterio.open(scene["scl"]) as s:
+                scl = s.read(1, window=scl_win, out_shape=(rb - ra, cb - ca), resampling=Resampling.nearest)
+            if not bands:
+                with rasterio.open(scene["visual"]) as v:
+                    return v.read([1, 2, 3], window=win), scl
+            visual = scene["visual"]
+            base = visual[:max(visual.rfind("/"), visual.rfind("\\"))]  # the band files lie next to the visual file
+            rgb = []
+            for band in S2_REFLECTANCE_BANDS:
+                with rasterio.open(f"{base}/{band}.tif") as b:
+                    rgb.append(b.read(1, window=win))
+            return np.stack(rgb), scl
 
         rgb, scl = _retry(go, scene["id"], lambda *_: None)
         return ra - scene["row_off"] - r0, ca - scene["col_off"] - c0, rgb, scl
@@ -651,7 +732,7 @@ def _s2_block(task):
         parts = [p for p in pool.map(read_item, scenes) if p is not None]
     if not parts:
         return r0, c0, None
-    rgb = np.zeros((len(parts), h, w, 3), dtype=np.uint8)
+    rgb = np.zeros((len(parts), h, w, 3), dtype=np.uint16 if bands else np.uint8)
     scl = np.zeros((len(parts), h, w), dtype=np.uint8)
     for n, (dr, dc, v, sc) in enumerate(parts):
         rgb[n, dr:dr + v.shape[1], dc:dc + v.shape[2]] = np.moveaxis(v, 0, -1)
@@ -732,6 +813,74 @@ def build_s2_composite(items: list[dict], box: Box, raw_dir: Path, force: bool, 
     return final
 
 
+def build_s2_reflectance(items: list[dict], composite: Path, raw_dir: Path, force: bool, log=print,
+                         workers: int | None = None) -> tuple[Path, int]:
+    """The composite as surface reflectance (uint16, reflectance x 1e4, 0 = no data; reflectance.tif on the composite's
+    grid): the TCI median decoded (`tci_to_reflectance`); pixels saturated in any TCI channel (>= 0.25) take the median
+    of the B04 / B03 / B02 reflectance bands with the same clear-pixel rule, recomputed for the blocks holding them
+    (network). Returns (path, saturated pixel count)."""
+    import rasterio
+    from rasterio.windows import Window
+
+    _gdal_http_env()
+    final = raw_dir / "reflectance.tif"
+    meta_file = raw_dir / "reflectance.json"
+    if final.exists() and meta_file.exists() and not force:
+        return final, int(json.loads(meta_file.read_text())["saturated_pixels"])
+    partial = raw_dir / "reflectance.partial.tif"
+    with rasterio.open(composite) as src:
+        crs, transform, width, height = src.crs, src.transform, src.width, src.height
+        profile = dict(driver="GTiff", width=width, height=height, count=3, dtype="uint16", crs=crs,
+                       transform=transform, tiled=True, blockxsize=512, blockysize=512, compress="deflate",
+                       predictor=2, BIGTIFF="YES", nodata=0)
+        saturated_blocks, saturated = [], 0
+        with rasterio.open(partial, "w", **profile) as dst:
+            for r0 in range(0, height, S2_BLOCK_PX):
+                for c0 in range(0, width, S2_BLOCK_PX):
+                    win = Window(c0, r0, min(S2_BLOCK_PX, width - c0), min(S2_BLOCK_PX, height - r0))
+                    tci = np.moveaxis(src.read(window=win), 0, -1)
+                    sat = (tci == S2_TCI_SATURATED).any(axis=-1)
+                    if sat.any():
+                        saturated_blocks.append((r0, c0, int(win.height), int(win.width)))
+                        saturated += int(sat.sum())
+                    rho = np.rint(tci_to_reflectance(tci) / S2_REFLECTANCE_SCALE)
+                    out = np.where(tci.any(axis=-1)[..., None], np.maximum(rho, 1), 0).astype(np.uint16)
+                    dst.write(np.moveaxis(out, -1, 0), window=win)
+    log(f"    reflectance: {saturated} TCI-saturated pixels in {len(saturated_blocks)} blocks -> reflectance bands")
+    if saturated_blocks:
+        def probe(item):
+            with rasterio.open(item["visual"]) as ds:
+                return item, ds.crs, ds.transform, ds.width, ds.height
+
+        with ThreadPoolExecutor(8) as pool:
+            infos = list(pool.map(lambda it: _retry(lambda: probe(it), it["id"], log), items))
+        scenes = []
+        for item, scrs, t, w, h in infos:
+            if scrs != crs:
+                continue
+            col_off, row_off = (transform.c - t.c) / S2_PIXEL_M, (t.f - transform.f) / S2_PIXEL_M
+            scenes.append({"id": item["id"], "visual": item["visual"], "scl": item["scl"], "row_off": round(row_off),
+                           "col_off": round(col_off), "width": w, "height": h})
+        tasks = [(scenes, r0, c0, h, w, True) for r0, c0, h, w in saturated_blocks]
+        t0 = time.time()
+        n = 0
+        with rasterio.open(composite) as src, rasterio.open(partial, "r+") as dst:
+            for r0, c0, med in iter_tasks(_s2_block, tasks, resolve_workers(workers, S2_WORKER_BYTES, log, "bands")):
+                n += 1
+                if med is None:
+                    continue
+                h, w = med.shape[:2]
+                win = Window(c0, r0, w, h)
+                sat = (np.moveaxis(src.read(window=win), 0, -1) == S2_TCI_SATURATED).any(axis=-1) & med.any(axis=-1)
+                cur = np.moveaxis(dst.read(window=win), 0, -1)
+                cur[sat] = np.maximum(med[sat], 1)
+                dst.write(np.moveaxis(cur, -1, 0), window=win)
+                log(f"    reflectance bands block {n}/{len(tasks)} ({time.time() - t0:.0f} s)")
+    partial.replace(final)
+    meta_file.write_text(json.dumps({"saturated_pixels": saturated, "saturated_blocks": len(saturated_blocks)}))
+    return final, saturated
+
+
 # ----------------------------------------------------------------------------------------------- driver
 
 def load_config(path: Path = CONFIG_FILE) -> dict:
@@ -754,8 +903,10 @@ def meta_text(m: dict) -> str:
              f'scenes = {m["scenes"]}', f'min_level = {m["min_level"]}', f'max_level = {m["max_level"]}',
              f'north_deg = {m["north_deg"]:.7f}', f'south_deg = {m["south_deg"]:.7f}',
              f'west_deg = {m["west_deg"]:.7f}', f'east_deg = {m["east_deg"]:.7f}', f'fade_m = {m["fade_m"]:.1f}',
-             f'gain_rgb = {_fmt_list(m["gain_rgb"])}', f'offset_rgb = {_fmt_list(m["offset_rgb"])}',
-             f'tile_count = {m["tile_count"]}', ""]
+             f'tile_count = {m["tile_count"]}']
+    for k, v in m.get("extra", {}).items():
+        lines.append(f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {v}" if isinstance(v, int) else f"{k} = {v:.6f}")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -775,21 +926,33 @@ def _dir_size(path: Path) -> int:
 
 
 def s2_reference(sid: str, src: dict, areas: dict, repo_root: Path):
-    """(composite path list, gain, offset) of the fitted Sentinel-2 source of the same area, None when not built yet."""
+    """(reflectance path list, transfer) of the Sentinel-2 source of the same area, None when not built yet."""
     cfg = load_config(repo_root / "config" / "imagery.toml")
     for other in cfg["source"]:
         if other["product"] == "sentinel2_median" and other["area"] == src["area"]:
-            meta = repo_root / "data" / "imagery" / "earth" / other["id"] / "meta.toml"
-            composite = repo_root / "data" / "raw" / "imagery" / other["id"] / "composite.tif"
-            if meta.exists() and composite.exists():
-                m = tomllib.loads(meta.read_text(encoding="utf-8"))["source"][0]
-                return [composite], np.array(m["gain_rgb"]), np.array(m["offset_rgb"])
-    print(f"  {sid}: kein Sentinel-2-Abgleich verfuegbar, Farbabgleich gegen die Tagestextur")
-    return None
+            reflectance = repo_root / "data" / "raw" / "imagery" / other["id"] / "reflectance.tif"
+            if reflectance.exists():
+                return [reflectance], S2_TRANSFER
+    raise RuntimeError(f"{sid}: keine Sentinel-2-Reflektanz des Gebiets {src['area']} (fetch.py imagery baut sie zuerst)")
+
+
+S2_TRANSFER = {"kind": "scale", "scale": S2_REFLECTANCE_SCALE}
+
+
+def s2_reflectance(src: dict, areas: dict[str, dict], repo_root: Path, force: bool, log=print,
+                   workers: int | None = None) -> tuple[Path, int, int]:
+    """A Sentinel-2 source's reflectance.tif (items, composite and reflectance built when missing or forced) ->
+    (path, TCI-saturated pixel count, scene count)."""
+    raw_dir = repo_root / "data" / "raw" / "imagery" / src["id"]
+    items = s2_items(source_box(src, areas), raw_dir, force, log)
+    composite = build_s2_composite(items, source_box(src, areas), raw_dir, force, log, workers)
+    path, saturated = build_s2_reflectance(items, composite, raw_dir, force, log, workers)
+    return path, saturated, len(items)
 
 
 def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np.ndarray, force: bool, log=print,
                  workers: int | None = None) -> dict:
+    """One source's tile pyramid. `texture`: the calibrated day texture in reflectance (`load_day_texture`)."""
     import rasterio
 
     sid, product = src["id"], src["product"]
@@ -798,34 +961,35 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
     root = repo_root / "data" / "imagery" / "earth" / sid
     if root.exists():
         shutil.rmtree(root)
+    reference, extra = None, {}
     if product == "naip":
         paths, year, covered = naip_clips(sid, box, raw_dir, force, log)
         shift, scenes = naip_shift_deg(box), len(paths)
+        reference = s2_reference(sid, src, areas, repo_root)
+        datasets = [rasterio.open(p) for p in paths]
+        ref_datasets = [rasterio.open(p) for p in reference[0]]
+        try:
+            transfer = fit_naip(datasets, covered, shift, ref_datasets, reference[1], raw_dir / "local_gain.npy", log)
+        finally:
+            for ds in datasets + ref_datasets:
+                ds.close()
+        extra = {"transfer": "naip_table_local_gain", **{f"fit_{k}": v for k, v in transfer.pop("stats").items()}}
     elif product == "sentinel2_median":
-        items = s2_items(box, raw_dir, force, log)
-        paths, year, covered, shift, scenes = [build_s2_composite(items, box, raw_dir, force, log, workers)], S2_YEAR, box, (0.0, 0.0), len(items)
+        # built (or forced) by fetch() before the day texture: here only read from the cache
+        reflectance, saturated, scenes = s2_reflectance(src, areas, repo_root, False, log, workers)
+        paths, year, covered, shift = [reflectance], S2_YEAR, box, (0.0, 0.0)
+        transfer = S2_TRANSFER
+        extra = {"transfer": "sentinel2_l2a_reflectance", "tci_saturated_pixels": saturated}
     else:
         raise ValueError(f"unbekanntes Produkt {product}")
-    reference = None
-    if product == "naip":  # the day texture is ~7 km per pixel: far too coarse for an 11 km box
-        reference = s2_reference(sid, src, areas, repo_root)
-    datasets = [rasterio.open(p) for p in paths]
-    ref_datasets = [rasterio.open(p) for p in reference[0]] if reference else []
-    try:
-        fit_reference = (ref_datasets, reference[1], reference[2]) if reference else None
-        gain, offset = fit_to_reference(datasets, covered, shift, texture, fit_reference, name=sid)
-        log(f"  {sid}: gain {np.round(gain, 3).tolist()}, offset {np.round(offset, 2).tolist()}")
-        # no data inside the box (sea beyond the scenes, composite gaps) is filled in final colours before writing
-        fill = {"reference": reference, "texture": texture_window(texture, covered)}
-        counts = write_pyramid(paths, covered, shift, gain, offset, src["min_level"], src["max_level"], root, log,
-                               resolve_workers(workers, TILE_WORKER_BYTES, log, "tiles"), fill)
-    finally:
-        for ds in datasets + ref_datasets:
-            ds.close()
+    # no data inside the box (sea beyond the scenes, composite gaps) is filled in reflectance before writing
+    fill = {"reference": reference, "texture": texture_window(texture, covered)}
+    counts = write_pyramid(paths, covered, shift, transfer, src["min_level"], src["max_level"], root, log,
+                           resolve_workers(workers, TILE_WORKER_BYTES, log, "tiles"), fill)
     south, north, west, east = covered
     meta = {"id": sid, "product": product, "year": year, "scenes": scenes, "min_level": src["min_level"],
             "max_level": src["max_level"], "north_deg": north, "south_deg": south, "west_deg": west, "east_deg": east,
-            "fade_m": FADE_M[product], "gain_rgb": gain, "offset_rgb": offset, "tile_count": sum(counts.values())}
+            "fade_m": FADE_M[product], "extra": extra, "tile_count": sum(counts.values())}
     (root / "meta.toml").write_text(meta_text(meta), encoding="utf-8")
     log(f"  {sid}: {sum(counts.values())} tiles {counts}, {_dir_size(root) / 1e6:.1f} MB")
     return meta
@@ -833,20 +997,22 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
 
 def fetch(source: dict, repo_root: Path, download, force: bool = False, retile: bool = False,
           workers: int | None = None) -> None:
-    """`retile`: rebuild the fit and all tiles from the cached clips / composites (no network), keeping the raw caches."""
+    """`retile`: rebuild the fits and all tiles from the cached clips / composites / reflectance files (no network once
+    reflectance.tif exists), keeping the raw caches."""
     cfg = load_config(repo_root / "config" / "imagery.toml")
     areas = {a["id"]: a for a in et.load_config(repo_root / "config" / "earth_terrain.toml")["area"]}
-    day = repo_root / "data" / "textures" / "earth_day.jpg"
-    if not day.exists():  # fresh checkout: fetch.py runs before prepare.py, which copies this very file
-        day = repo_root / "data" / "raw" / "earth_day_5400.jpg"
-    texture = load_day_texture(day)
+    # the Sentinel-2 reflectance first: the calibrated day texture embeds it (earth_albedo.py, as prepare.py writes it)
+    for src in cfg["source"]:
+        if src["product"] == "sentinel2_median":
+            s2_reflectance(src, areas, repo_root, force, lambda s: print(s, flush=True), workers)
+    texture = ea.decode_srgb(ea.build_day_texture(repo_root))
     out_dir = repo_root / "data" / "imagery" / "earth"
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     print(f"  workers: {resolve_workers(workers, TILE_WORKER_BYTES, print, 'tiles')} (CPUs usable: "
           f"{getattr(os, 'process_cpu_count', os.cpu_count)() or 1}{', --workers ' + str(workers) if workers else ''})", flush=True)
-    # Sentinel-2 first: the NAIP colour fit uses the fitted composite of its area as the reference
-    rebuilt_areas: set[str] = set()  # a re-fitted Sentinel-2 composite invalidates the NAIP fitted against it
+    # Sentinel-2 first: the NAIP fit uses the Sentinel-2 reflectance of its area as the reference
+    rebuilt_areas: set[str] = set()  # a rebuilt Sentinel-2 source invalidates the NAIP fitted against it
     for src in sorted(cfg["source"], key=lambda s: s["product"] == "naip"):
         if (out_dir / src["id"] / "meta.toml").exists() and not force and not retile                 and not (src["product"] == "naip" and src["area"] in rebuilt_areas):
             print(f"  {src['id']}: already present")

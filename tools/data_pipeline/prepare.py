@@ -3,7 +3,8 @@
 Usage: python tools/data_pipeline/prepare.py
 
 Outputs (git-ignored):
-  data/textures/earth_day.jpg     equirectangular, lon -180..180, lat 90..-90
+  data/textures/earth_day.jpg     surface reflectance, sRGB-encoded (earth_albedo.py); equirectangular, lon -180..180,
+                                  lat 90..-90
   data/textures/moon_color.png    LROC colour mosaic, large-scale albedo from the WAC Hapke w map (moon_albedo.py;
                                   equirectangular, lon -180..180)
   data/stars/stars.csv            stars to magnitude 7.5: ra_deg, dec_deg, mag, color_index (ICRS / J2000)
@@ -13,7 +14,6 @@ from __future__ import annotations
 
 import csv
 import gzip
-import shutil
 import sys
 from pathlib import Path
 
@@ -31,7 +31,11 @@ Image.MAX_IMAGE_PIXELS = 200_000_000  # trusted NASA mosaics exceed Pillow's def
 def prepare_textures() -> None:
     TEXTURES.mkdir(parents=True, exist_ok=True)
     if (RAW / "earth_day_5400.jpg").exists():
-        shutil.copyfile(RAW / "earth_day_5400.jpg", TEXTURES / "earth_day.jpg")
+        # surface reflectance, sRGB-encoded: MODIS NBAR climatology on land, the Blue Marble through the fitted tables
+        # elsewhere (earth_albedo.py)
+        import earth_albedo
+
+        earth_albedo.write_day_texture(REPO_ROOT, TEXTURES / "earth_day.jpg")
     else:
         print("earth_day: raw file missing (fetch.py earth_day), skipped")
     if (RAW / "moon_color_4k.tif").exists():

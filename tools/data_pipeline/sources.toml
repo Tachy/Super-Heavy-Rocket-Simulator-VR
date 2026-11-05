@@ -127,7 +127,7 @@ credit = "NASA Johnson Space Center, Flight Operations Directorate (TOPO): ISS T
 
 [[source]]
 id = "earth_day"
-name = "Blue Marble Next Generation, December 2004, 5400x2700 (no relief shading)"
+name = "Blue Marble Next Generation, December 2004, 5400x2700 (no relief shading) - the global day texture where the MODIS climatology has no samples (sea, sea ice), mapped to reflectance by config/earth_albedo.toml (earth_albedo.py)"
 url = "https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74218/world.200412.3x5400x2700.jpg"
 target = "data/raw/earth_day_5400.jpg"
 license = "NASA Earth Observatory imagery: public domain (credit requested)"
@@ -253,6 +253,16 @@ license = "ETOPO 2022 and USGS 3DEP: public domain (US Government works); NOAA G
 credit = "NOAA NCEI ETOPO 2022 (doi:10.25921/fd45-gt74); USGS 3D Elevation Program; NOAA NGS GEOID18 (via cdn.proj.org); Contains modified Copernicus DEM GLO-30 data (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA, all rights reserved"
 
 [[source]]
+id = "earth_albedo"
+name = "MODIS MCD43A4 v061 nadir BRDF-adjusted reflectance (NBAR, bands 1 / 4 / 3, 500 m, read at its 3.7 km overview) via the Microsoft Planetary Computer: the 2025 monthly-median land reflectance of the global day texture, and (2004-12-16) the fit of config/earth_albedo.toml"
+url = "https://planetarycomputer.microsoft.com/api/stac/v1"
+target = "data/raw/earth_albedo_modis_2025.npz"
+kind = "earth_albedo"
+# collection modis-43A4-061 (COGs in modiseuwest.blob.core.windows.net, SAS via https://planetarycomputer.microsoft.com/api/sas/v1/sign)
+license = "NASA EOSDIS LP DAAC MODIS data: no restrictions on use, sale or redistribution (NASA Earth science data policy; public domain)"
+credit = "Schaaf, C., Wang, Z. (2021). MODIS/Terra+Aqua BRDF/Albedo Nadir BRDF Adjusted Ref Daily L3 Global 500m V061 (MCD43A4), NASA EOSDIS Land Processes DAAC, doi:10.5067/MODIS/MCD43A4.061; via the Microsoft Planetary Computer"
+
+[[source]]
 id = "imagery"
 name = "Earth imagery tile pyramids: USDA NAIP 0.6 m (Microsoft Planetary Computer) around the pads and an own 2025 Sentinel-2 L2A clear-pixel median composite at 10 m (Element84 Earth Search) over 200 x 200 km - terrain rendering"
 url = "https://planetarycomputer.microsoft.com/api/stac/v1"
@@ -260,7 +270,8 @@ target = "data/imagery/earth/index.toml"
 kind = "imagery"
 # other endpoints used by tools/data_pipeline/imagery.py (documented here, not downloaded by the generic fetch):
 #   NAIP SAS token  https://planetarycomputer.microsoft.com/api/sas/v1/token/naip
-#   Sentinel-2 L2A  https://earth-search.aws.element84.com/v1  (collection sentinel-2-l2a, COGs on the public sentinel-cogs bucket)
+#   Sentinel-2 L2A  https://earth-search.aws.element84.com/v1  (collection sentinel-2-l2a, COGs on the public sentinel-cogs bucket;
+#                   visual TCI for the composite, B04 / B03 / B02 reflectance for the TCI-saturated pixels)
 license = "USDA NAIP: public domain (US Government work, FSA); Copernicus Sentinel-2 data: free, full and open (EU Regulation 1159/2013 and Copernicus legal notice), redistribution of derived products allowed with attribution"
 credit = "Contains modified Copernicus Sentinel data 2025 (processed by the starsim data pipeline: clear-pixel median composite); USDA Farm Service Agency National Agriculture Imagery Program (NAIP) via the Microsoft Planetary Computer; Sentinel-2 L2A COGs via Element 84 Earth Search / AWS Open Data"
 

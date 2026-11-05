@@ -94,6 +94,11 @@ def main() -> int:
 
             earth_terrain.fetch(source, REPO_ROOT, download, args.force)
             continue
+        if source.get("kind") == "earth_albedo":  # MODIS NBAR climatology of the global day texture (earth_albedo.py)
+            import earth_albedo  # lazy: needs numpy, rasterio and pystac-client
+
+            earth_albedo.fetch(source, REPO_ROOT, download, args.force)
+            continue
         if source.get("kind") == "imagery":  # NAIP + Sentinel-2 median composite -> EPSG:4326 tile pyramid (imagery.py)
             import imagery  # lazy: needs numpy, rasterio, pyproj, Pillow and pystac-client
 

@@ -117,3 +117,16 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
 - **Horizon maps only up to 1 km spacing (superseded 2026-10-30):** nodes coarser than `HORIZON_MAX_SPACING_M` = 1000 m
   (level <= 5) had none because their bake cost 0.2-1.4 s each (the first site load went 5 s -> 40 s with all levels);
   the lattice step cap now follows the spacing and the maps are 4 half-float layers of a Texture2DArray, so every level has one.
+- **Imagery colour fit to the Blue Marble (superseded by the calibrated surface albedo, Moon surface plan Task 15,
+  2026-11-05):** "Colour fit (no colour step between the sources and the global day texture): Sentinel-2 -> day
+  texture with one luminance gain + offset (Starbase 0.796 / -26.3, Cape 0.659 / -0.75), NAIP -> its area's
+  Sentinel-2 composite per channel at 10 m (Starbase gains [0.566, 0.400, 0.347], Cape [0.600, 0.628, 0.582]). No data
+  inside a box ... is filled before writing, in final colours ... Remaining dark sea inside the S2 boxes is data, not
+  holes (the day texture's open ocean is near-black, the fit pulls the S2 sea onto it)." The day texture was the Blue
+  Marble Next Generation (Dec 2004) copied as is - a display product - and the shaders sRGB-decoded its counts as
+  albedo; tiles 417 MB. Measured before the change (luminance of the sRGB-decoded reflectance; references MODIS MCD43A4
+  NBAR over 12 km, Sentinel-2 L2A band medians over 200 m): global level Starbase 0.038 (MODIS Dec 2004 0.065), Cape
+  0.013 (0.052), Sahara 25 N 25 E 0.299 (0.215), Amazon 5 S 65 W 0.017 (0.040), Kansas 0.050 (0.068); Sentinel-2 z13
+  at the pad 0.250 (L2A 0.206), NAIP z17 at the pad 0.090 (0.206), Boca Chica beach NAIP 0.089 (0.167), Cape LC-39A
+  NAIP 0.110 (0.205). Level steps: NAIP vs Sentinel-2 over the NAIP boxes -14 % (Starbase) / -9 % (Cape), median 250 m
+  cell step 37 % / 16 %; Sentinel-2 vs the day texture in the 10 km edge band +4 % / -7 %.
