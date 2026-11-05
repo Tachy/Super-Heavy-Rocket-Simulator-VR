@@ -92,12 +92,16 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   length) to 3.6 px (VR eye, 1500 px) wide; at 1 km, where it began before, it lost the truss at VR focal lengths.
   Nothing else of this plan draws in the transparent pass (steel / dark / chopstick materials have no alpha).
   Why these ranges and why no dither: `tower_handover_check.gd` below.
-- Colours (user 2026-11-01 against the photo nsf_padb_chopsticks_2025-02): legs bright galvanised silver and clean, linear albedo ~0.30 [E]
-  (slightly cool: the overcast photo reads the leg faces (117, 120, 134) .. (139, 140, 157) sRGB, the sunlit edge 220), braces / decks / bundle
-  dark, albedo ~0.04 (photo (50, 50, 62)), plinth / plates light grey ~0.30. The tint IS the albedo (sRGB values of a
-  `source_color` uniform); the Metal032 map only modulates it (`texture_contrast` 0.25 legs, 0.5 braces) and the grime stays weak on the
-  legs (0.08, braces 0.3). The far shader's `leg_colour`, `steel_colour`, `dark_colour`, `clad_colour` are the same albedos. Earlier
-  ruling and why it looked brown: `docs/history/launch-structures.md` "Leg colour".
+- Colours (user 2026-11-05 "nach Webcast-Bildern"; frames and measurements: `.superpowers/sdd/2026-11-04-moon-procedural-surface/tower-steel-frames.md`,
+  crops in `screenshots/tower_reference/`), all [E], tint = albedo (sRGB of a `source_color` uniform, sun cast divided out): legs weathered
+  galvanised, mid-grey slightly brown-warm, linear ~(0.16, 0.14, 0.125) (f14_2095 right leg sunlit mean 122/104/90 in warm low sun, f13_2040,
+  f12_1860); braces darker, linear ~0.06 (f13_2040, f14_2095 truss pixels 37-56); plinth plate-clad steel warm grey-tan ~(0.17, 0.15, 0.12)
+  (f14_2095 crop_f14_plinth, sunlit 104/102/95), its own material and instance node `plinth`; cladding plates neutral mid-grey ~0.13
+  (f13_2040); QD arm dark grey matte ~0.04 (`arm_grey`); head walls / bands unchanged albedo, metallic 0; chopsticks / carriage stay matte
+  black. Every one of them metallic 0, roughness 0.8-0.95 (frames: satin-matte, no mirror highlight on any member). Metal032 colour map
+  modulates the legs (contrast 0.25) and braces (0.5); its NormalGL map triplanar at strength 0.5 (missing file: smooth). Open: plinth
+  panel seams are not drawn (the plinth is a unit box); the far shader's `leg_colour`, `steel_colour`, `clad_colour` follow the new
+  albedos. Earlier values: `docs/history/launch-structures.md` "Tower colours before the webcast frames".
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
   frame + procedural grime per instance; decks dark; chopstick matte black (`black_paint`). The steel is rough and matte

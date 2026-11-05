@@ -77,7 +77,7 @@ static func leg_line_m(face_width_m: float, leg_size_m: float) -> float:
 	return 0.5 * face_width_m - 0.5 * leg_size_m
 
 
-## Material set of build(): {"leg", "brace", "dark", "clad"}.
+## Material set of build(): {"leg", "brace", "dark", "clad", "plinth"}.
 ## detail: TomlLite dictionary of the detail file; profiles: {name: Mesh}.
 static func build(detail: Dictionary, profiles: Dictionary, materials: Dictionary) -> Node3D:
 	var root := Node3D.new()
@@ -124,8 +124,13 @@ static func _build_section(detail: Dictionary, index: int, base_m: float, profil
 		instance.rotation.y = face * 0.5 * PI
 		near.append(instance)
 	near.append(_instances("decks", unit_box, dark_boxes, materials["dark"]))
-	if not clad_boxes.is_empty():
-		near.append(_instances("clad", unit_box, clad_boxes, materials["clad"]))
+	# The plinth is the first light solid of the first section (clad_solids): its own material, apart from the plates.
+	var plinth_boxes := clad_boxes.slice(0, 1) if index == 0 else ([] as Array[Transform3D])
+	var plate_boxes := clad_boxes.slice(1) if index == 0 else clad_boxes
+	if not plinth_boxes.is_empty():
+		near.append(_instances("plinth", unit_box, plinth_boxes, materials["plinth"]))
+	if not plate_boxes.is_empty():
+		near.append(_instances("clad", unit_box, plate_boxes, materials["clad"]))
 	if not frame.is_empty():
 		near.append(_instances("head_frame", brace_mesh, frame, materials["brace"]))
 	for instance in near:
@@ -143,8 +148,9 @@ static func _build_section(detail: Dictionary, index: int, base_m: float, profil
 		brace_parts.append([brace_mesh, frame])
 	var mid := MeshInstance3D.new()
 	mid.name = "mid"
-	mid.mesh = _merged([[[leg_mesh, leg_transforms]], brace_parts, [[unit_box, dark_boxes]], [[unit_box, clad_boxes]]],
-			[materials["leg"], materials["brace"], materials["dark"], materials["clad"]])
+	mid.mesh = _merged([[[leg_mesh, leg_transforms]], brace_parts, [[unit_box, dark_boxes]], [[unit_box, plate_boxes]],
+			[[unit_box, plinth_boxes]]],
+			[materials["leg"], materials["brace"], materials["dark"], materials["clad"], materials["plinth"]])
 	mid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	set_range(mid, NEAR_END_M, MID_END_M)
 	node.add_child(mid)

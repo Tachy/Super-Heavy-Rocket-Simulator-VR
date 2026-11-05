@@ -72,3 +72,8 @@ Earlier cable text: Their upper ends meet the fixed crown beam on the tower top 
 Earlier stack clearance text (until the Raptor 3 nozzle change 2026-11-03): bells in rings 1.0 / 2.6 / 4.1 m, margin 0.04 m: none inside the mount polygons; a 8 m opening is caught (negative control).
 
 Earlier mount ring (until 2026-11-03): outer 10.4 m, opening 9.0 m [E], clamp inner radius 4.55 m, hood root X -5.6 m, QD head face 4.85 m (unchanged); with the 4.40 m Raptor ring the outer bells reached beyond it (2052 points inside the bells' envelope), so the opening was widened to 10.0 m (outer 11.6 m).
+
+## Tower colours before the webcast frames (superseded 2026-11-05)
+Photo-based ruling 2026-11-01 (nsf_padb_chopsticks_2025-02): legs bright galvanised silver, slightly cool, linear ~0.30 (tint (0.57, 0.58, 0.61)),
+braces ~0.04 (0.22, 0.22, 0.235), plinth and cladding plates one material, light grey ~0.30 (0.58, 0.58, 0.57), metallic 0.3, roughness 0.7;
+QD arm hardware used the plate material; head bands metallic 0.3. Replaced by the webcast-frame values in launch-structures.md.

@@ -10,6 +10,9 @@ shader_type spatial;
 
 uniform sampler2D steel_albedo : source_color, filter_linear_mipmap, repeat_enable;
 uniform bool use_texture = false;
+uniform sampler2D steel_normal : hint_normal, filter_linear_mipmap, repeat_enable;  // Metal032 NormalGL, same triplanar frame
+uniform bool use_normal = false;
+uniform float normal_strength = 0.5;  // [E] modest: the frames show satin weathered faces, no relief (tower-steel-frames.md)
 uniform vec4 tint : source_color = vec4(1.0);
 uniform float texel_scale_m = 2.0;     // the texture repeats every 2 m
 uniform float grime_scale_m = 2.5;     // noise feature size
@@ -24,6 +27,7 @@ uniform float metallic = 0.0;
 
 varying vec3 member_position;  // VERTEX x instance scale (metres along the member's own axes)
 varying vec3 member_normal;
+varying vec3 member_scale;
 varying vec3 instance_offset;
 varying vec3 world_offset;     // fragment - the render origin (= the atmosphere's camera), world axes
 
@@ -46,6 +50,7 @@ float value_noise(vec3 p) {
 void vertex() {
 	vec3 scale = vec3(length(MODEL_MATRIX[0].xyz), length(MODEL_MATRIX[1].xyz), length(MODEL_MATRIX[2].xyz));
 	member_position = VERTEX * scale;
+	member_scale = scale;
 	member_normal = NORMAL;
 	float id = float(INSTANCE_ID);
 	instance_offset = vec3(fract(id * 0.618034), fract(id * 0.414214), fract(id * 0.732051)) * 97.0;
@@ -65,6 +70,17 @@ void fragment() {
 		vec3 texel = texture(steel_albedo, p.yz).rgb * w.x + texture(steel_albedo, p.xz).rgb * w.y
 				+ texture(steel_albedo, p.xy).rgb * w.z;
 		colour *= mix(vec3(1.0), texel / texture_mean, texture_contrast);
+	}
+	if (use_normal) {
+		vec3 w = pow(abs(member_normal), vec3(4.0));
+		w /= w.x + w.y + w.z;
+		vec3 p = member_position / texel_scale_m;
+		vec2 a = (texture(steel_normal, p.yz).xy * 2.0 - 1.0) * normal_strength;
+		vec2 b = (texture(steel_normal, p.xz).xy * 2.0 - 1.0) * normal_strength;
+		vec2 c = (texture(steel_normal, p.xy).xy * 2.0 - 1.0) * normal_strength;
+		vec3 n = normalize(normalize(member_normal) + w.x * vec3(0.0, a.x, a.y) + w.y * vec3(b.x, 0.0, b.y) + w.z * vec3(c.x, c.y, 0.0));
+		vec3 n_world = normalize(mat3(MODEL_MATRIX) * (n / (member_scale * member_scale)));
+		NORMAL = normalize((VIEW_MATRIX * vec4(n_world, 0.0)).xyz);
 	}
 	vec3 q = (member_position + instance_offset) / grime_scale_m;
 	float grime = smoothstep(0.35, 0.8, 0.65 * value_noise(q) + 0.35 * value_noise(q * 3.1));

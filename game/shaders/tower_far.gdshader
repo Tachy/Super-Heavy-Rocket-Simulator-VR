@@ -29,10 +29,10 @@ uniform float clad_lo_m = 0.0;  // cladding plates on the pad-side face (-Z) bet
 uniform float clad_hi_m = 0.0;
 uniform float clad_half_m = 3.8;  // plates reach to this |u| (between the legs)
 // Colours of the merged tier (tower_material.gd): braces linear albedo ~0.04, legs ~0.15, deck / bundle black, plates ~0.30.
-uniform vec4 steel_colour : source_color = vec4(0.22, 0.22, 0.22, 1.0);
-uniform vec4 leg_colour : source_color = vec4(0.57, 0.58, 0.61, 1.0);
+uniform vec4 steel_colour : source_color = vec4(0.28, 0.265, 0.25, 1.0);
+uniform vec4 leg_colour : source_color = vec4(0.44, 0.41, 0.385, 1.0);
 uniform vec4 dark_colour : source_color = vec4(0.035, 0.038, 0.042, 1.0);
-uniform vec4 clad_colour : source_color = vec4(0.58, 0.58, 0.57, 1.0);
+uniform vec4 clad_colour : source_color = vec4(0.40, 0.39, 0.37, 1.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;

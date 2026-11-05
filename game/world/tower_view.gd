@@ -381,7 +381,7 @@ func _build_qd_arm(models: Dictionary, geometry: Dictionary) -> void:
 	mount.name = "QdArmMount"
 	mount.basis = Frames.basis_to_render(Basis(heading, up.cross(heading), up))
 	mount.position = Frames.to_render(root_site + up * float(models["detail"]["qd_arm"]["deck_m"]))
-	_qd_arm = StructureModels.model_node("QdArm", models["qd_arm"], {"hardware": TowerMaterial.clad()},
+	_qd_arm = StructureModels.model_node("QdArm", models["qd_arm"], {"hardware": TowerMaterial.arm_grey()},
 			TowerMaterial.black_paint())
 	mount.add_child(_qd_arm)
 	add_child(mount)
