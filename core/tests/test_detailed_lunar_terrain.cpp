@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -580,6 +582,29 @@ TEST_CASE("Full-detail height agrees with the band-limited height at its limit p
                     max_diff);
         CHECK(max_diff <= 0.1 * rms_removed);
     }
+}
+
+TEST_CASE("The parallel height batch equals the serial point queries bit for bit, also with concurrent callers",
+          "[moon_surface][terrain]") {
+    const auto& s = *surface();
+    const auto t = tangent(direction(site_lat, site_lon));
+    std::vector<Vec3> units;
+    for (int k = 0; k < 67 * 67; ++k) units.push_back(at(t, (unit_hash(30, k) - 0.5) * 400.0, (unit_hash(31, k) - 0.5) * 400.0));
+    for (const double limit : {0.0, 0.16, 10.0}) {
+        std::vector<double> serial(units.size());
+        for (size_t i = 0; i < units.size(); ++i) serial[i] = s.height_limited_m(units[i], limit, 0.05);
+        std::vector<double> batch(units.size());
+        s.heights_limited_m(units, limit, 0.05, batch);
+        CHECK(batch == serial);
+        // Four callers at once (the game's worker threads): each gets its share of the budget, same heights.
+        std::vector<std::vector<double>> results(4, std::vector<double>(units.size()));
+        std::vector<std::thread> callers;
+        for (auto& r : results) callers.emplace_back([&s, &units, &r, limit] { s.heights_limited_m(units, limit, 0.05, r); });
+        for (auto& c : callers) c.join();
+        for (const auto& r : results) CHECK(r == serial);
+    }
+    std::vector<double> wrong(3);
+    CHECK_THROWS_AS(s.heights_limited_m(units, 1.0, 0.05, wrong), std::invalid_argument);
 }
 
 TEST_CASE("Physics query cost", "[moon_surface][terrain][contact][legs][contact_speed]") {

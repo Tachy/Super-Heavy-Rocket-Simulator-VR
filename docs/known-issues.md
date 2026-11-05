@@ -256,6 +256,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   where its longitude spacing is finer (172 m at -84.8 deg), some 0.2-1.9 km detail is both in LOLA_16 and generated;
   the roughness is ~6 % rougher near the 8 cube corners (skewed face lattice; craters + roughness 4.09 mm there,
   above Guo's 4 mm before rocks); queries inside the +-13.6 km face blend band along the cube edges cost ~3-6 x more.
+  Moon terrain horizons (Task 7): baked over LOLA from LOLA observer heights, so the procedural relief casts no terrain
+  shadow beyond Task 12's near field and floors / rims read their horizon from the LOLA height (~1 deg over a few km
+  at south-pole Sun elevations; `docs/subsystems/moon-surface.md` open points).
 
 ## Moon procedural surface plan, Task 5 (2026-11-05)
 - Refused landing site at mission start: the touchdown search checks every candidate of the 1 km search (IM-2:

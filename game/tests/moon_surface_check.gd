@@ -12,7 +12,7 @@
 # Run: godot --headless --path game --script res://tests/moon_surface_check.gd [-- --measure]
 # --measure also prints node counts and summed build time of a synchronous tree converged 2 / 20 / 200 / 2000 m above
 # the site (detail off / on), the time of a 67 x 67 surface_samples_detail batch per level and moon_rocks on rock-rich
-# cells (Tycho).
+# cells (the Diviner map's maxima and Tycho).
 extends SceneTree
 
 const R := HeightSource.MOON_RADIUS_M
@@ -22,8 +22,10 @@ const MESH_TOLERANCE_M := 0.004  ## the brief's mesh-vs-core tolerance (float32 
 const SEAM_TOLERANCE_M := 1.0e-4  ## float32 vertices relative to two node centres tens of metres apart
 const MAX_FRAMES := 4000
 const CLIMB_HEIGHTS_M := [2.0, 20.0, 200.0, 2000.0]
-## Tycho's floor and ejecta (selenographic deg): rock-rich in the Diviner map (young crater).
-const ROCKY_POINTS := [Vector2(-43.31, -11.36), Vector2(-42.5, -11.4), Vector2(-44.2, -11.0), Vector2(-43.3, -13.2)]
+## The Diviner rock abundance map's highest valid 3 x 3 pixel means (selenographic deg; RA 0.357 / 0.349 / 0.343,
+## searched over the whole 60 S - 60 N map in fix round 1) and Tycho's floor (-43.31, -11.36) for comparison.
+const ROCKY_POINTS := [Vector2(39.3594, -0.1719), Vector2(8.1094, -53.9844), Vector2(-24.8281, -45.1406),
+		Vector2(-43.31, -11.36)]
 
 var _failures := 0
 var _core: StarsimCore
@@ -44,6 +46,7 @@ func _initialize() -> void:
 	_core.set_moon_surface_detail(true)
 	_check_mesh_matches_core()
 	_check_parent_child()
+	_check_seams_face_edge_and_pole()
 	_check_tree_and_horizons()
 	_core.set_moon_surface_detail(false)
 	_check_detail_off()
@@ -144,6 +147,14 @@ func _check_parent_child() -> void:
 			% [String.num_scientific(worst_morphed), String.num_scientific(worst_normal), worst_unmorphed])
 	_check(worst_unmorphed > 10.0 * SEAM_TOLERANCE_M, "the child carries detail its parent does not (%.3f m)"
 			% worst_unmorphed)
+	# The child built from its parent's band heights (the quadtree's path) equals the child that samples the band.
+	var from_parent := TerrainNodeBuilder.build(child_key, heights, null, R, Vector4i(-1, -1, -1, -1),
+			parent["band_heights"])
+	var same := true
+	for channel in ["vertices", "normals", "morph", "custom3"]:
+		same = same and from_parent[channel] == child[channel]
+	_check(same and (parent["band_heights"] as PackedFloat64Array).size() == TerrainNodeBuilder.LATTICE ** 2,
+			"child from the parent's band heights = child sampling the parent band (vertices, normals, morph, custom3 equal)")
 	# Same-level neighbour (+s): its a = 0 column is the child's a = 64 column, unmorphed and morphed.
 	var right_key := Vector4i(child_key.x, child_key.y, child_key.z + 1, child_key.w)
 	var right := TerrainNodeBuilder.build(right_key, heights, null, R)
@@ -154,6 +165,61 @@ func _check_parent_child() -> void:
 					_vertex_fixed(right, b * ROW, morph)))
 	_check(worst_edge < SEAM_TOLERANCE_M, "neighbours of a level share their edge at morph 0 / 0.5 / 1 (worst %s m)"
 			% String.num_scientific(worst_edge))
+
+
+# Detail on across a cube face edge (faces 0 / 1 just north of lat 0 at lon 45) and around the +z pole (the four level-L nodes
+# meeting at the face centre): neighbours share every vertex of their common edge at morph 0 / 0.5 / 1.
+func _check_seams_face_edge_and_pole() -> void:
+	var heights := _heights()
+	const L := 16
+	var west := CubeSphere.key_at(CubeSphere.geodetic_direction(1.0e-4, 45.0 - 1.0e-6), L)
+	var east := CubeSphere.key_at(CubeSphere.geodetic_direction(1.0e-4, 45.0 + 1.0e-6), L)
+	var edge := _shared_edge(TerrainNodeBuilder.build(west, heights, null, R), TerrainNodeBuilder.build(east, heights, null, R))
+	_check(west.x != east.x and edge[0] == ROW and edge[1] < SEAM_TOLERANCE_M,
+			"cube face edge %s / %s: %d shared vertices (want %d), worst gap %s m at morph 0 / 0.5 / 1"
+			% [west, east, edge[0], ROW, String.num_scientific(edge[1])])
+	var pole_key := CubeSphere.key_at(Vector3(0.0, 0.0, 1.0), L)
+	var c := 1 << (L - 1)
+	var around: Array[Dictionary] = []
+	for k: Vector2i in [Vector2i(c - 1, c - 1), Vector2i(c, c - 1), Vector2i(c, c), Vector2i(c - 1, c)]:
+		around.append(TerrainNodeBuilder.build(Vector4i(pole_key.x, L, k.x, k.y), heights, null, R))
+	var counts: Array[int] = []
+	var worst := 0.0
+	for n in 4:
+		var pair := _shared_edge(around[n], around[(n + 1) % 4])
+		counts.append(pair[0])
+		worst = maxf(worst, pair[1])
+	_check(counts == [ROW, ROW, ROW, ROW] and worst < SEAM_TOLERANCE_M,
+			"pole: the four level-%d nodes around it share their edges (%s vertices each), worst gap %s m at morph 0 / 0.5 / 1"
+			% [L, counts, String.num_scientific(worst)])
+
+
+## [shared border vertices of two built nodes (matched by position at morph 0 within SEAM_TOLERANCE_M), worst distance
+## of those pairs at morph 0 / 0.5 / 1].
+func _shared_edge(a: Dictionary, b: Dictionary) -> Array:
+	var border: Array[int] = []
+	for e in TerrainNodeBuilder.SKIRT_EDGE:
+		border.append(e)
+	var b_points: Array[Vector3] = []
+	for e in border:
+		b_points.append(_vertex_fixed(b, e))
+	var shared := 0
+	var worst := 0.0
+	for ea in border:
+		var pa := _vertex_fixed(a, ea)
+		var best := -1
+		var best_d := INF
+		for i in border.size():
+			var d := pa.distance_to(b_points[i])
+			if d < best_d:
+				best_d = d
+				best = i
+		if best_d >= SEAM_TOLERANCE_M:
+			continue
+		shared += 1
+		for morph in [0.0, 0.5, 1.0]:
+			worst = maxf(worst, _vertex_fixed(a, ea, morph).distance_to(_vertex_fixed(b, border[best], morph)))
+	return [shared, worst]
 
 
 # A synchronous tree converged 2 m above the site with the detail on: the leaf under the camera is level 22; every
@@ -351,7 +417,7 @@ func _measure() -> void:
 		print("  measure  node build (no horizon bake) %s level %d: %.1f ms" % [place[0], key.y,
 				(Time.get_ticks_usec() - t0) / 1000.0])
 		node.clear()
-	print("  measure  moon_rocks on rock-rich cells (Tycho), 3 x 3 cells per point and level, D >= 0.01 m")
+	print("  measure  moon_rocks on rock-rich cells (Diviner maxima, Tycho), 3 x 3 cells per point and level, D >= 0.01 m")
 	for level in range(16, 26):
 		var worst_us := 0
 		var most := 0

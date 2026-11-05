@@ -61,8 +61,12 @@ static func level_spacing_m(level: int, radius_m: float) -> float:
 ## mean of its children and nothing aliases), and every vertex morphs to the parent's surface - the even vertices too,
 ## to the parent level's band-limited height at the same point - with the parent's normals; fully morphed, a node
 ## is its parent's mesh. Without detail the even vertices are the parent's own (morph 0) as before.
+## parent_band: the parent's "band_heights" (its LATTICE x LATTICE band-limited heights, see the result): the parent
+## level's heights at this node's even lattice points are read from it instead of sampled (the same lattice points,
+## exactly: lattice_coordinate is dyadic, so the child's line 2 n - 2 is the parent's line q * 32 + n - 1 bit for bit,
+## and the band limit is the parent's spacing). Empty: sampled (a second core batch).
 static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, radius_m: float,
-		horizon_owner := Vector4i(-1, -1, -1, -1)) -> Dictionary:
+		horizon_owner := Vector4i(-1, -1, -1, -1), parent_band := PackedFloat64Array()) -> Dictionary:
 	var face := key.x
 	var level := key.y
 	var box := CubeSphere.lat_lon_box(key)
@@ -76,19 +80,22 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	var lattice := _lattice(key, -1, 1, LATTICE, center_lon)
 	var dirs: PackedVector3Array = lattice[0]
 	var lats: PackedFloat64Array = lattice[1]
-	var lons: PackedFloat64Array = lattice[2]  # raw atan2 longitudes (sampling); a pole takes the node centre's
-	var max_resolution_m := heights.finest_resolution_m(lats, lons)
-	var data_resolution_m := heights.data_resolution_m(lats, lons) if heights.may_have_detail() else max_resolution_m
+	var lons: PackedFloat64Array = lattice[2]  # raw atan2 longitudes (uv); a pole takes the node centre's
+	var sample_lons: PackedFloat64Array = lattice[3]  # the same with a pole at longitude 0 (sampling)
+	var max_resolution_m := heights.finest_resolution_m(lats, sample_lons)
+	var data_resolution_m := heights.data_resolution_m(lats, sample_lons) if heights.may_have_detail() \
+			else max_resolution_m
 	var detail := max_resolution_m < data_resolution_m
+	var band_limited := detail  # height_m is band-limited (the roots too, though they never morph)
 	var spacing_m := level_spacing_m(level, radius_m)
 	var height_m: PackedFloat64Array
 	var data_height_m: PackedFloat64Array  # the measured data's heights: the horizon's observers
 	if detail:
-		height_m = heights.sample_band_limited(lats, lons, spacing_m)["height_m"]
+		height_m = heights.sample_band_limited(lats, sample_lons, spacing_m)["height_m"]
 		if horizon_owner == key and heights.has_horizon():
-			data_height_m = heights.sample(lats, lons)["height_m"]
+			data_height_m = heights.sample(lats, sample_lons)["height_m"]
 	else:
-		height_m = heights.sample(lats, lons)["height_m"]
+		height_m = heights.sample(lats, sample_lons)["height_m"]
 		data_height_m = height_m
 	var fixed := heights.positions_fixed(dirs, height_m)
 	var center_fixed := fixed[(CELLS / 2 + 1) * LATTICE + CELLS / 2 + 1]
@@ -109,9 +116,11 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	if detail and level > TerrainQuadtree.ROOT_LEVEL:
 		var p_lattice := _lattice(key, -2, 2, PARENT_LATTICE, center_lon)
 		var p_dirs: PackedVector3Array = p_lattice[0]
-		var p_lats: PackedFloat64Array = p_lattice[1]
-		var p_lons: PackedFloat64Array = p_lattice[2]
-		var p_heights: PackedFloat64Array = heights.sample_band_limited(p_lats, p_lons, 2.0 * spacing_m)["height_m"]
+		var p_heights: PackedFloat64Array
+		if parent_band.size() == count:
+			p_heights = parent_quadrant(parent_band, key)
+		else:
+			p_heights = heights.sample_band_limited(p_lattice[1], p_lattice[3], 2.0 * spacing_m)["height_m"]
 		var p_fixed := heights.positions_fixed(p_dirs, p_heights)
 		for i in p_fixed.size():
 			var q := p_fixed[i] - center_fixed
@@ -296,12 +305,35 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		"max_resolution_m": max_resolution_m,
 		# The same for the measured data alone (LOLA): horizon maps are baked down to the level where it ends.
 		"data_resolution_m": data_resolution_m,
+		# With procedural detail the node's band-limited lattice heights (LATTICE x LATTICE, float64): its children's
+		# parent_band. Empty without detail.
+		"band_heights": height_m if band_limited else PackedFloat64Array(),
 	}
+
+
+## The parent level's heights at child `key`'s PARENT_LATTICE x PARENT_LATTICE even lattice points (child lines -2, 0,
+## .., 66), read from the parent's LATTICE x LATTICE band heights: child line 2 n - 2 is the parent's line
+## q * CELLS / 2 + n - 1 (q: the child's quadrant along that axis), stored at index q * CELLS / 2 + n.
+static func parent_quadrant(parent_band: PackedFloat64Array, key: Vector4i) -> PackedFloat64Array:
+	var out := PackedFloat64Array()
+	out.resize(PARENT_LATTICE * PARENT_LATTICE)
+	var first_a := (key.z & 1) * (CELLS / 2)
+	var first_b := (key.w & 1) * (CELLS / 2)
+	var i := 0
+	for n in PARENT_LATTICE:
+		var row := (first_b + n) * LATTICE + first_a
+		for m in PARENT_LATTICE:
+			out[i] = parent_band[row + m]
+			i += 1
+	return out
 
 
 ## Directions (geodetic normals), latitudes and longitudes (deg; raw atan2, a pole takes center_lon) of an n x n
 ## lattice of node `key`: lattice lines first, first + step, ... (in grid cells from the node's corner, row-major):
-## [dirs, lats, lons].
+## [dirs, lats, lons, sample_lons]. sample_lons: lons with a pole at longitude 0 - heights are sampled there, so every
+## node meeting at a pole asks the terrain for the same point (a latitude-longitude grid's polar row holds different
+## heights per longitude: with center_lon the four nodes around a pole drew their shared corner up to ~110 m apart,
+## found by moon_surface_check's pole seam check).
 static func _lattice(key: Vector4i, first: int, step: int, n: int, center_lon: float) -> Array:
 	var warp_s := PackedFloat64Array()
 	var warp_t := PackedFloat64Array()
@@ -314,6 +346,7 @@ static func _lattice(key: Vector4i, first: int, step: int, n: int, center_lon: f
 	dirs.resize(n * n)
 	lats.resize(n * n)
 	lons.resize(n * n)
+	var poles := PackedInt32Array()
 	var k := 0
 	for lb in n:
 		var b_warp := warp_t[lb]
@@ -322,9 +355,18 @@ static func _lattice(key: Vector4i, first: int, step: int, n: int, center_lon: f
 			var horizontal := sqrt(d.x * d.x + d.y * d.y)
 			dirs[k] = d
 			lats[k] = rad_to_deg(atan2(d.z, horizontal))
-			lons[k] = rad_to_deg(atan2(d.y, d.x)) if horizontal > CubeSphere.POLE_EPSILON else center_lon
+			if horizontal > CubeSphere.POLE_EPSILON:
+				lons[k] = rad_to_deg(atan2(d.y, d.x))
+			else:
+				lons[k] = center_lon
+				poles.append(k)
 			k += 1
-	return [dirs, lats, lons]
+	var sample_lons := lons
+	if not poles.is_empty():
+		sample_lons = lons.duplicate()
+		for p in poles:
+			sample_lons[p] = 0.0
+	return [dirs, lats, lons, sample_lons]
 
 
 ## The node's horizon map as HORIZON_LAYERS images (the layers of a Texture2DArray) of HORIZON_ROW x HORIZON_ROW

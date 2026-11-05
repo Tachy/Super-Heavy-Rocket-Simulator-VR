@@ -40,6 +40,9 @@ uniform float sun_radius_m;
 uniform float earth_radius_m;
 // The constants of moon.gdshader (same look as the body mesh from scaled space).
 uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
+// Diagnostic tint (render_check --moon_diag): 0 off; 1 red where the interpolated normal faces away from the eye
+// (dot(n, to_eye) < REGOLITH_MU_MIN: regolith_reflectance's limb replacement, Lommel-Seeliger at its 2x maximum).
+uniform int diag_mode = 0;
 
 varying vec3 local_position;
 varying vec3 local_normal;
@@ -131,6 +134,9 @@ void fragment() {
 		vec3 sky = atm_sky_to_far_object(atm_camera_local(), atmosphere_world_to_earth * direction_world,
 				length(camera_offset), transmittance);
 		color = color * atmosphere_exposure_gain * transmittance + sky;  // the eye adaptation's exposure gain on the lit Moon
+	}
+	if (diag_mode == 1 && dot(n, to_eye) < REGOLITH_MU_MIN) {
+		color = vec3(1.0, 0.0, 0.0);
 	}
 	ALBEDO = color;
 }

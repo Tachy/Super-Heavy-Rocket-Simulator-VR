@@ -6,6 +6,9 @@
 # Ground view: --lat= --lon= [--height=] [--body=moon] (selenographic, MOON_ME; --height defaults to the core's
 #          surface there, the Earth's or the Moon's, --eye_height=2 above it) with --azimuth / --elevation / --fov
 #          [--moon_detail=off] (the fidelity flag moon_surface_detail off: the LOLA-only Moon as before the detail)
+#          [--moon_diag=1] (terrain_moon.gdshader diag_mode: 1 tints red the fragments whose interpolated normal faces
+#          away from the eye). The log's "Moon load" line: the deepest drawn level's wall-time timeline since the view
+#          was placed (or the last climb move) and the time until the terrain settled.
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed); with it [--catch_hull=<station m>] a
 #          static booster hull with that hull station on the arm deck (a picture of the closed pose, no flight).
@@ -98,6 +101,9 @@ var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render t
 var _gpu_passes := {}  ## --gpu_passes: timestamp name -> Array of the measured frames' GPU ms
 var _sweep_left: Array[float] = []  ## --divisor_sweep: the divisors still to measure
 var _sweep_wait := -1  ## --divisor_sweep: frames left to settle at the current divisor (-1: not started)
+var _load_start_us := 0  ## the view's placement (frame 0) or the last climb move: the Moon load timeline's zero
+var _load_levels: Array[String] = []  ## the Moon's deepest drawn level each time it deepened since then (level@s)
+var _load_deepest := 0
 
 func _initialize() -> void:
 	var arguments := _with_cloud_view(OS.get_cmdline_user_args())
@@ -265,7 +271,11 @@ func _process(_delta: float) -> bool:
 			for child in _main.get_node("/root/XrManager").origin.get_children():
 				if child is VrOverlayPanel:
 					child.visible = false
+		if _args.has("moon_diag"):  # terrain_moon.gdshader diagnostic tint (diag_mode; 1: normals facing away)
+			world.moon_terrain.set_material_parameter("diag_mode", int(_args["moon_diag"]))
+		_load_restart()
 	_frames += 1
+	_track_moon_load(world)
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
 	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables
@@ -300,6 +310,7 @@ func _process(_delta: float) -> bool:
 				world._radiance_cloud_factors[0], world._radiance_cloud_factors[1]])
 		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
 				world.moon_terrain.stats])
+		print("render_check: Moon load ", _load_summary())
 		if _args.has("webcast"):
 			var arc := (_main.get("overlay_host") as OverlayHost).overlay.timeline_arc
 			print("render_check: timeline scale ", arc.time_scale, " now ", arc.now_tdb_s, " events ", arc.events.size())
@@ -442,7 +453,8 @@ func _climb_done(world: World, settled: bool) -> bool:
 				quit(1)
 			return false
 		if clouds_shown:
-			var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") 					+ ShaderGlobals.value(&"atmosphere_camera_lo")
+			var camera: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") \
+					+ ShaderGlobals.value(&"atmosphere_camera_lo")
 			print("render_check: climb step %d at %.0f m: %d frames, bakes %d -> %d, shown anchor %.0f m from the eye" % [
 					_climb_next, heights[_climb_next - 1], _frames - _climb_move_frame, _climb_bakes, baked.bakes_done,
 					baked.shown_anchor().distance_to(camera)])
@@ -450,6 +462,7 @@ func _climb_done(world: World, settled: bool) -> bool:
 			print("render_check: climb step %d at %.0f m: %d frames, terrain Earth %s, Moon %s" % [_climb_next,
 					heights[_climb_next - 1], _frames - _climb_move_frame, world.earth_terrain.stats,
 					world.moon_terrain.stats])
+			print("render_check: climb step %d Moon load %s" % [_climb_next, _load_summary()])
 		if _args.has("out"):  # each step's image beside the final one: <out>_climb<height>.png
 			var step_png := "%s_climb%.0f.png" % [String(_args["out"]).get_basename(), heights[_climb_next - 1]]
 			print("render_check: saved %s (error %d)" % [step_png,
@@ -461,10 +474,36 @@ func _climb_done(world: World, settled: bool) -> bool:
 		world.set_ground_site(site)
 		_climb_bakes = baked.bakes_done if baked != null else 0
 		_climb_move_frame = _frames
+		_load_restart()
 		_climb_next += 1
 		return false
 	_climb_finished = true
 	return true
+
+
+## Restarts the Moon load timeline (the view placed or moved).
+func _load_restart() -> void:
+	_load_start_us = Time.get_ticks_usec()
+	_load_levels.clear()
+	_load_deepest = 0
+
+
+## Records the wall time (s since _load_restart) whenever the Moon's deepest drawn level changes.
+func _track_moon_load(world: World) -> void:
+	var deepest: int = world.moon_terrain.stats.get("max_drawn_level", -1)
+	if deepest < 0:  # a quadtree without the stat (before/after comparisons with older code)
+		deepest = 0
+		for key in world.moon_terrain.drawn_keys():
+			deepest = maxi(deepest, key.y)
+	if deepest != _load_deepest:
+		_load_deepest = deepest
+		_load_levels.append("L%d@%.2fs" % [deepest, (Time.get_ticks_usec() - _load_start_us) * 1.0e-6])
+
+
+## "deepest level timeline [...], settled after X s (wall)".
+func _load_summary() -> String:
+	return "deepest drawn level timeline %s, settled after %.2f s wall" % [", ".join(_load_levels),
+			(Time.get_ticks_usec() - _load_start_us) * 1.0e-6]
 
 
 func _bake_waiting(world: World) -> bool:

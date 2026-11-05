@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "starsim/environment/lunar_rocks.hpp"
 #include "starsim/environment/lunar_surface_detail.hpp"
@@ -89,6 +90,11 @@ public:
     // Height with the relief averaged over min_wavelength_m (LunarSurfaceDetail::relief_m) and only the rocks of at
     // least min_rock_diameter_m: max(LOLA + relief, their tops). (0, 0) is height_at_direction_m. Detail off: LOLA.
     double height_limited_m(const math::Vec3& unit, double min_wavelength_m, double min_rock_diameter_m) const;
+    // height_limited_m for every direction of `units` into heights_m (same size, else std::invalid_argument), in
+    // parallel over the cores left free by other running batches (detail::for_each_index_budgeted): bit for bit the
+    // serial loop at any thread count. Terrain node builds call it from several worker threads at once.
+    void heights_limited_m(const std::vector<math::Vec3>& units, double min_wavelength_m, double min_rock_diameter_m,
+                           std::vector<double>& heights_m) const;
 
     // Support of a footpad disc of radius_m centred below centre_unit on its ball joint (the pad pivots onto the ground,
     // HLS detail file): the pad's plane is the least-squares plane through the contact ground at the disc's sample

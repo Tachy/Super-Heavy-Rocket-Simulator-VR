@@ -228,8 +228,10 @@ on top of that relief.
   session flags as commands.
 - `surface_samples_detail(body, lats_deg, lons_deg, min_wavelength_m, min_rock_diameter_m)`: same keys as
   `surface_samples`; `LunarSurfaceDetail` band limit + rocks >= the diameter (INF = none). Detail off or rocks off: LOLA
-  / no rock tops (detail off is identical to `surface_samples`). Measured in the debug extension: ~44 us per point at
-  full detail (5 points, cold).
+  / no rock tops (detail off is identical to `surface_samples`). Batches run in parallel in the core
+  (`DetailedLunarTerrain::heights_limited_m`, a thread budget shared by all running batches, bit for bit the serial
+  loop; [moon_surface] test with four concurrent callers): a 67 x 67 node lattice at IM-2 takes 5.6-6.8 ms alone
+  (1.3-1.5 us per point; levels 6-18) against 46-58 ms serial (10-13 us per point; 0.6 / 6.3 us at level 22).
 - `moon_rocks(face, level, i, j, min_d)`: rocks of one cube-face cell (empty at a level no octave uses); per rock
   `ids`, `base_fixed_m` (3, radius R + base height), `basis` (9 = local_to_fixed as three column vectors a, b, up),
   `axes_m` (3), `diameter_m`, `burial_m`, `base_height_m`, `albedo`, `template`.
@@ -247,6 +249,8 @@ on top of that relief.
   owner's. Details, numbers and costs: `terrain-rendering.md`. `World.moon_surface_detail` (static, read at the Moon
   terrain's setup; render_check `--moon_detail=off`) sets the core's and the flight's flag; switching it for a running
   world needs a rebuilt Moon tree (not built). `SurfaceClearance` keeps cameras above the full-detail surface.
+  Children read their parent band from the parent's kept heights, builds go camera-first with 16 at once, and pole
+  lattice points are sampled at longitude 0 (fix round 1; `terrain-rendering.md` "Morph", "Poles", "Loading").
 
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
@@ -581,6 +585,10 @@ geometry (g near 0) is not observed there. The published global-average table of
   Guo's 4 mm before rocks): Task 3's summed check should include a corner window, or the amplitude could take the
   lattice skew into account. (Stationarity numbers measured before the face blend of fix round 1.)
 - Queries inside the face blend band (+-13.6 km along the 12 cube edges) cost ~3-6 x more (cross footprint means);
-  terrain nodes there build 3-4x slower (Task 7: 274-519 ms per node against 67-164 ms elsewhere); no cache yet.
+  terrain nodes there build ~2x slower (fix round 1 of Task 7: 44-59 ms per node against 24-34 ms elsewhere).
+- Terrain horizons are baked over LOLA with LOLA observer heights, while the drawn surface is band-limited (up to ~10^2 m
+  apart at owner levels outside the site tiles): the procedural relief casts no terrain shadow beyond the near-field
+  shadows (Task 12), and crater floors / rims read their horizon from the LOLA height (at south-pole Sun elevations of
+  1-2 deg ~1 deg of horizon error over a few km). Within the plan's design (Task 7 review M2).
 - Generated craters up to 2 km and roughness up to ~1 km wavelength outside the tiles are statistical, not the real
   features at those places (LOLA_16 does not resolve them).

@@ -139,3 +139,10 @@ every frame (`--radiance_every_frame`, its largest duty cycle; the game's rule: 
 per-frame series (`--gpu_series`), REALTIME not needed. The p99 of 5-7 ms is in the static runs as well, not the cube.
 Project-wide anisotropy 8x (level 3) against the former default 4x (level 2): Earth terrain 2.96 (2.74) vs 2.94 (2.73),
 Moon terrain 1.24 (1.14) vs 1.22 (1.12): +0.02 ms, kept.
+
+## Moon procedural surface (2026-11-05)
+
+Stereo mock at the VR target (3534 x 2838 per eye), 2 m above IM-2, terrain only (no clouds on the Moon): detail off
+3.24 ms, detail on 4.96 ms (+1.7 ms, ~2.2x the drawn triangles; Moon procedural surface plan Task 7). Of the 9 ms GPU
+target ~4 ms remain for the plan's textures, Hapke shading, rocks and near-field shadows (Tasks 8-12); Task 13's budget
+table starts from these numbers.

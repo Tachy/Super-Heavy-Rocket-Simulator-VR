@@ -45,6 +45,14 @@ on top; it replaced the interim `GroundPatch`.
   height at the same point (the parent's own vertex there), and the parent-level normals of the even vertices are the
   parent's central differences over that lattice: fully morphed a node is its parent's mesh (within float32 rounding),
   unmorphed it carries the band between its and its parent's spacing.
+  The parent band's heights are not sampled again: the parent keeps its band-limited lattice heights
+  (`band_heights`, 36 KB) while it can split and its children are not all uploaded, and each child reads its 35 x 35
+  even points from them (`TerrainNodeBuilder.parent_quadrant`; `lattice_coordinate` is dyadic, so they are the same
+  points bit for bit; a re-split after a merge samples them).
+- **Poles.** Heights are sampled at longitude 0 for a lattice point on a pole (`_lattice`'s `sample_lons`; uv and the
+  horizon bake keep the node centre's longitude): a latitude-longitude grid's polar row holds different heights per
+  longitude, and with each node's own centre longitude the four nodes around a pole drew their shared corner up to
+  ~110 m apart (LOLA, detail on and off; found by `moon_surface_check.gd`'s pole seam check, fix round 1).
 - **Camera precision.** The camera's body-local position reaches the shaders as one global per body and frame, float32
   hi + lo parts (`earth_terrain_camera_hi/lo`, `moon_terrain_camera_hi/lo`); each node's centre likewise per instance
   (`vertex_offset`, `vertex_offset_lo`, set once at upload). The shader forms (hi_c - hi_n) + (lo_c - lo_n): float32
@@ -56,6 +64,15 @@ on top; it replaced the interim `GroundPatch`.
   ~2000 nodes. `POOL_MAX` 4096 MeshInstance3Ds are recycled. Godot's threaded culling is off
   (`rendering/limits/spatial_indexer/threaded_cull_minimum_instances` = 1000000 in project.godot): it posts one slice
   per pool thread and waits for all of them, so behind running terrain builds the render thread stalled 15-30 ms.
+  With the Moon's procedural detail (a tree that uploaded a band-limited node) builds go camera-first: ordered by the
+  distance from the camera's ground point (below the camera on the parent's surface radius) to the node, less
+  `CAMERA_FIRST_HALF_DIAGONAL` 0.75 [D] of its nominal size, over that size, then the level - so the chain of nodes
+  under the camera builds level after level ahead of the wide rings; `MAX_BUILDS_IN_FLIGHT_DETAIL` 16 [E] at once as
+  high-priority pool tasks (low-priority tasks share `low_priority_thread_ratio` 0.3 of the pool: 7 of 24 threads;
+  20 measured 24.4 s against 26.4 s for a 2 m spawn, not worth the extra contention). `surface_samples_detail` runs in
+  parallel in the core (`DetailedLunarTerrain::heights_limited_m`: the threads of all running batches share
+  hardware threads - 2, so a lone batch spreads over ~17 threads and many concurrent ones stay near one each; bit for
+  bit the serial loop). Without detail the order and the cap are as before (level first, 8 low-priority tasks).
 - **Imagery** (pipeline `tools/data_pipeline/imagery.py`, `config/imagery.toml`; tiles EPSG:4326 TMS, 256 px JPEG):
   NAIP 0.6 m (Planetary Computer; z14-17, `fade_m` 500 m) - Starbase 2022 (4 scenes), Cape 2021 (7 scenes), shifted
   NAD83 -> ITRF; own Sentinel-2 L2A 2025 clear-pixel median composite 10 m (z8-13, `fade_m` 5 km) - 72 scenes per
@@ -162,29 +179,41 @@ on top; it replaced the interim `GroundPatch`.
 - Camera-precision test: relative error < 3e-7. Quadtree test: morph start < end for every level >= 2 on both bodies.
 - Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface (detail
   off; `terrain_quadtree_test.gd` runs the Moon with the detail off as the regression baseline).
-- Moon with the procedural detail (`game/tests/moon_surface_check.gd`, headless, ~25 min with its two converged trees;
-  `-- --measure` adds the cost runs, ~70 min): level 18 at IM-2 mesh = `surface_samples_detail` at the level spacing
+- Moon with the procedural detail (`game/tests/moon_surface_check.gd`, headless, ~10 min with its two converged trees;
+  `-- --measure` adds the cost runs, ~31 min in all): level 18 at IM-2 mesh = `surface_samples_detail` at the level spacing
   (worst 6e-10 m in the builder's float64 arrays, tolerance 0.004 m; the detail differs from LOLA there by up to
   0.52 m); child fully morphed = parent mesh (1.6e-9 m, normals 2e-8 rad), unmorphed 0.053 m of finer detail;
-  same-level neighbours share their edge at morph 0 / 0.5 / 1 (0 m); 2 m above IM-2 the leaf is level 22, 1208 of
+  same-level neighbours share their edge at morph 0 / 0.5 / 1 (0 m), also across a cube face edge (faces 0 / 2,
+  level 16: 65 shared vertices, 0 m) and around the +z pole (the four level-16 nodes: 65 each, 7e-15 m; before the pole
+  sampling fix 64 each and up to 110 m); a child built from its parent's band heights equals one that samples the
+  band (vertices, normals, morph, custom3 identical); 2 m above IM-2 the leaf is level 22, 1208 of
   2700 nodes bake a horizon (the detail-off tree's 1208), 1492 draw with an owner's (owner levels 7, 8, 9, 12), a level
   22 node addresses its level-12 owner's grid exactly; detail off: leaf 12, every node bakes, even vertices still.
   Detail off is identical to before: SHA-256 of every builder array of six nodes (Moon L5 / L7 / L12 / pole, Earth
   with data and flat) before / after the change equal, and render_check images at 2 / 20 / 200 / 2000 m pixel-identical
   (`--moon_detail=off --fixed_exposure --deterministic=32`). A render with the skirts tinted showed no skirt pixel at
   2 m (no cracks).
-- Moon cost, IM-2 (one thread, synchronous tree from scratch, debug extension, i7-13700K; `--measure`), nodes uploaded
-  / drawn / leaf level / summed build time, detail off -> on: 2 m 1208 / 912 / 12 / 214 s -> 2700 / 2031 / 22 / 555 s;
-  20 m 1208 / 912 / 12 / 215 s -> 2284 / 1719 / 19 / 517 s; 200 m 1208 / 912 / 12 / 214 s -> 1856 / 1398 / 16 / 450 s;
-  2000 m 1180 / 891 / 12 / 212 s -> 1436 / 1083 / 13 / 384 s (the state between Tasks 6 and 7, LOLA sampled down to
-  level 21: 2 m 2600 / 1956 / 21 / 309 s). Node build without a bake 127-164 ms at levels 6-18 and 67-90 ms at 20-22
-  (the 67 x 67 band-limited batch 85-108 ms = 19-24 us per point, 28-44 ms at levels 20-22; LOLA 0.2 ms); in the tile
-  blend band about the same (155 / 169 / 74 ms at levels 12 / 18 / 22), in the cube face blend band 3-4x (420 / 519 /
-  274 ms, batch 67-83 us per point). Baking nodes add the band-limited batch to their bake. In a real window
-  (render_check, 8 builds in flight) the 2 m view settles after 3168 frames instead of 1290. GPU (median, RTX 4090,
-  detail off -> on): 1600 x 900 at 2 / 20 / 200 / 2000 m 1.29 / 1.29 / 0.84 / 0.96 ms -> 1.97 / 1.27 / 1.22 / 1.03 ms;
-  stereo mock at the VR target (3534 x 2838 per eye) 2 m 3.24 -> 4.96 ms (two interleaved rounds each, +1.7 ms: ~2.2x
-  the drawn triangles).
+- Moon cost, IM-2 (i7-13700K, editor binary, the shipped extension build: CMake Release /O2), fix round 1 of Task 7.
+  Real window (render_check, 1600 x 900, wall clock; "deepest drawn level" = the leaf under the camera):
+  2 m spawn: full view 50.5 s -> 26.4 s, level 22 under the camera 49.8 s -> 7.0 s (level 21 at 6.8 s; the first
+  ~3.5 s are the root chain's whole-face horizon bakes); 2000 m -> 2 m teleport: full view 16.4 s -> 7.9 s, level 22
+  15.7 s -> 1.5 s. Steps: parent band reuse + camera-first order 46.8 s / 14.4 s (level 22 6.3 s / 1.35 s); + the
+  parallel core batch 36.4 s / 10.5 s; + 16 high-priority builds 26.4 s / 7.9 s (20: 24.4 s / 7.3 s). Summed worker
+  time 346 s -> 361 s (more contention per build; 2700 builds, 1208 bakes). Upward climb steps need no builds.
+  Synchronous tree, one GDScript thread (`--measure`), nodes uploaded / drawn / leaf / summed build, detail off ->
+  on: 2 m 1208 / 912 / 12 / 223 s -> 2700 / 2031 / 22 / 177 s; 20 m 220 s -> 2284 / 1719 / 19 / 165 s; 200 m
+  123 s -> 1856 / 1398 / 16 / 153 s; 2000 m 1180 / 891 / 12 / 121 s -> 1436 / 1083 / 13 / 140 s (Task 7 before the fix:
+  2 m 555 s). The single-thread timings vary ~2x between runs (the same detail-off tree took 223 s and 123 s): the
+  13700K's efficiency cores; the cost spread of Task 7's review M4 (10-13 vs 19-24 us per point) is the same effect.
+  67 x 67 `surface_samples_detail` batch alone: 5.6-7.3 ms at levels 6-18 (1.2-1.6 us per point), 2.8-3.8 ms at
+  20-22; serial before 46-58 ms (10-13 us per point); tile blend band the same, cube face blend band 3x (19.5-23 ms).
+  Node build without a bake 24-34 ms (face band 44-59 ms); a bake adds 15-60 ms (more at coarse levels).
+  `moon_rocks` at the Diviner map's richest cells (3 x 3 pixel means: RA 0.357 at (39.36, -0.17), 0.349 at
+  (8.11, -53.98), 0.343 at (-24.83, -45.14); with Tycho's floor; 3 x 3 cells per point, D >= 0.01 m): levels 16-25
+  15-28 us per cell mean, worst 196 us; at most 21 rocks in a cell (level 25), 60-360 rocks per level over the 36
+  cells. GPU (median, RTX 4090, detail off -> on): 1600 x 900 at 2 / 20 / 200 / 2000 m 1.29 / 1.29 / 0.84 / 0.96 ms
+  -> 1.97 / 1.27 / 1.22 / 1.03 ms; stereo mock at the VR target (3534 x 2838 per eye) 2 m 3.24 -> 4.96 ms (+1.7 ms,
+  ~2.2x the drawn triangles; `vr-performance.md`).
 - Performance (`terrain_perf.gd`, RTX 4090, D3D12, 2560 x 1440, vsync off, the editor binary the game runs with, clock
   at warp 1): descent above Pad 2 400 km -> 2 m in 60 s, 360 deg pan at 2 m on the plateau 180 m east of the mount,
   360 deg pan 50 m above the pad, jump to LC-39A. Final (K 2.5), frame ms p50 / p99 / max: descent 3.3 / 6.3 / 10.9,
@@ -202,12 +231,20 @@ on top; it replaced the interim `GroundPatch`.
 
 ## Open points and known limits
 
-- Moon with the procedural detail: node builds cost 70-520 ms each (two `surface_samples_detail` batches, serial per
-  call in the binding), so a site loads ~2.5x longer from scratch (2 m: 555 s summed, ~70 s on 8 workers) and the face
-  blend band is 3-4x dearer still; open: a per-node height cache or reuse of the parent's band (the parent already
-  holds the 2 x spacing heights at the even points), a release build of the extension, a parallel batch in the core.
-- At grazing view the detailed relief shows thin bright lines along ridge crests (Lommel-Seeliger brightens towards
-  mu -> 0; no skirt or crack pixels there, checked with tinted skirts); the Hapke shading (Task 9) changes this.
+- Moon with the procedural detail: a fresh 2 m spawn takes 26 s until the whole view is built (the cm detail under
+  the camera after 7 s), a teleport 8 s (1.5 s); CPU-bound (16 builds at once on 24 threads; ~2700 builds and 1208
+  horizon bakes, GDScript mesh assembly ~20 ms each). A 10 s spawn needs less work per node (e.g. the horizon bake or
+  the builder's loops in the core) - open. Not measured in the exported release template (production builds refuse
+  `--path`); the extension is the same DLL there.
+- At grazing view the detailed relief shows thin bright lines along ridge crests. Diagnosis (render_check
+  `--moon_diag=1`, IM-2 2 m, `screenshots/moon_surface/task7/fix1/crest_*_crop.png`): the fragments whose interpolated
+  vertex normal faces away from the eye (5818 of 936000 ground pixels) lie on those lines - there
+  `regolith_reflectance` turns the normal onto the limb and Lommel-Seeliger takes its 2x maximum, an artefact of the
+  central-difference vertex normals leaning beyond the crest, not physics. A tested fix (shade such fragments with the
+  triangle's facet normal from `dFdx`/`dFdy` of `camera_offset`) dims the lines (14845 pixels change, mean -5.6/255)
+  but changes 0.3-0.6 % of the detail-off pixels too (2 / 200 m), so it is not applied pending a decision; the rest of
+  the lines are near-grazing front-facing facets (Lommel-Seeliger at small mu), which the Hapke shading (Task 9)
+  changes.
 - The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
   does not rebuild its tree on a change.
 

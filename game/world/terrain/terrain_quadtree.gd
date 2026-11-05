@@ -24,6 +24,10 @@ const ROOT_LEVEL := 1  ## the 6 x 4 level-1 nodes are built at setup and never f
 const UPLOAD_BUDGET_MS := 2.0
 const UPLOADS_PER_FRAME := 16  ## [E] cap on uploads per frame on top of the time budget
 const MAX_BUILDS_IN_FLIGHT := 8  ## [E] worker tasks at once (~20-40 ms each); leaves cores for the engine and the sim
+## [E] With procedural detail (Moon nodes 60-180 ms each, ~2700 at a 2 m view): this many at once, as high-priority
+## pool tasks (low-priority ones share threading/worker_pool/low_priority_thread_ratio 0.3 of the pool: 7 of 24
+## threads); the pool's remaining threads and the simulation / render / main threads stay free.
+const MAX_BUILDS_IN_FLIGHT_DETAIL := 16
 ## [E] Largest chord sagitta of a mesh cell on the body's curvature (m): without finer data a node still splits until its
 ## cells sag at most this far below the surface (flat rule: vehicles stand on the drawn ground within 1 cm).
 const MAX_SAGITTA_M := 0.01
@@ -44,6 +48,9 @@ const RELEASE_MIN_PER_FRAME := 16
 const MORPH_START_CLAMP := 0.99
 ## Morph range of the level-1 roots: they have no parent mesh, so they never morph (the shader's default: factor 0).
 const NO_MORPH := Vector2(1.0e30, 2.0e30)
+## [D] Half the diagonal of a node in units of its nominal edge (sqrt 2 / 2, rounded up for the warped cells): the
+## camera-first build order measures the distance to the node's nearest part.
+const CAMERA_FIRST_HALF_DIAGONAL := 0.75
 
 ## False while the body is in scaled space (centre beyond CelestialBody.SCALED_SPACE_DISTANCE_M): then nothing is drawn
 ## and the body's ellipsoid mesh stands in.
@@ -56,9 +63,10 @@ var upload_budget_ms := UPLOAD_BUDGET_MS
 ## (project.godot [shader_globals], read by the body's terrain shader); "" (tests): not written.
 var camera_global := ""
 ## {nodes_drawn, nodes_loading, uploads_last_frame, update_ms (main-thread time of the last update), builds (node builds
-## collected so far), build_ms (their summed worker time), horizon_bakes (builds that baked a horizon map)}
+## collected so far), build_ms (their summed worker time), horizon_bakes (builds that baked a horizon map),
+## max_drawn_level (the deepest drawn leaf's level: the one under the camera)}
 var stats := {"nodes_drawn": 0, "nodes_loading": 0, "uploads_last_frame": 0, "update_ms": 0.0, "builds": 0,
-		"build_ms": 0.0, "horizon_bakes": 0}
+		"build_ms": 0.0, "horizon_bakes": 0, "max_drawn_level": 0}
 var height_source: HeightSource
 var imagery: ImagerySource
 var radius_m := 1.0
@@ -85,6 +93,8 @@ var _releasing: Array[_Node] = []  ## dropped nodes whose resources are released
 var _camera_fixed_m := Vector3.ZERO
 var _camera_hi_name := &""
 var _camera_lo_name := &""
+## A node with procedural detail was uploaded: builds go camera-first (_dispatch); without detail level-first as before.
+var _detail := false
 
 
 class _Node:
@@ -109,6 +119,9 @@ class _Node:
 	## Its children own horizon maps: it owns one and would split on the measured data alone (the tree before the
 	## procedural detail; without detail the same as can_split).
 	var children_bake := false
+	## With procedural detail: its band-limited lattice heights (TerrainNodeBuilder "band_heights", 36 KB), kept while
+	## it can split and its children are not all uploaded; they build their parent band from it (no second batch).
+	var band_heights := PackedFloat64Array()
 	var split := false
 	var children: Array[_Node] = []  ## the four children while split (all uploaded)
 	var reached_frame := -1
@@ -234,6 +247,11 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 	_update_visibility(delta_s)
 	_release_some()
 	stats["nodes_drawn"] = _drawn.size()
+	if _selection_changed:
+		var deepest := 0
+		for node in _drawn:
+			deepest = maxi(deepest, node.key.y)
+		stats["max_drawn_level"] = deepest
 	stats["nodes_loading"] = _pending.size() + _in_flight.size() + _finished.size()
 
 
@@ -264,6 +282,13 @@ func node_info(key: Vector4i) -> Dictionary:
 	return {"center_fixed": node.center_fixed, "radius_m": node.radius_m, "size_m": node.size_m, "split": node.split,
 			"morph_range_m": node.morph_range_m, "morph_floor": node.morph_floor, "horizon_owner": node.horizon_owner,
 			"horizon_map": node.horizon_map, "children_bake": node.children_bake, "material": node.material}
+
+
+## Sets a shader parameter on the template and every uploaded node's material (diagnostics).
+func set_material_parameter(param: StringName, value: Variant) -> void:
+	_template.set_shader_parameter(param, value)
+	for node: _Node in _nodes.values():
+		node.material.set_shader_parameter(param, value)
 
 
 ## Keys of every uploaded node (drawn leaves and their hidden ancestors; tests, diagnostics).
@@ -320,7 +345,10 @@ func _gather_children(node: _Node) -> void:
 	for key in keys:
 		if not _nodes.has(key):
 			ready = false
-			_request(key, key if node.children_bake else node.horizon_owner)
+			_request(key, key if node.children_bake else node.horizon_owner, node.band_heights,
+					node.center_fixed.length())
+	if ready:
+		node.band_heights = PackedFloat64Array()  # every child uploaded (a later re-split samples the band again)
 	for key in keys:
 		var child: _Node = _nodes.get(key)
 		if child == null:
@@ -332,11 +360,12 @@ func _gather_children(node: _Node) -> void:
 			_reached_count += 1
 
 
-## Requests node `key`, built with its horizon owner (TerrainNodeBuilder.build).
-func _request(key: Vector4i, horizon_owner: Vector4i) -> void:
+## Requests node `key`, built with its horizon owner and its parent's band heights (TerrainNodeBuilder.build);
+## surface_radius_m: the parent's centre distance from the body centre (where the node's surface lies, for the order).
+func _request(key: Vector4i, horizon_owner: Vector4i, parent_band: PackedFloat64Array, surface_radius_m: float) -> void:
 	_wanted[key] = true
 	if not _in_flight.has(key) and not _finished.has(key):
-		_pending[key] = horizon_owner
+		_pending[key] = [horizon_owner, parent_band, surface_radius_m]
 
 
 ## Visibility from the drawn sets (only changes touch instances); a node drawn for the first time starts its morph
@@ -425,27 +454,42 @@ func _dispatch() -> void:
 			_pending.erase(key)
 	var order: Array[Vector4i] = []
 	order.assign(_pending.keys())
-	var priority := {}  # level first, then the distance of the node centre to the camera
-	for key in order:
-		priority[key] = Vector2(key.y, (CubeSphere.node_center(key) * radius_m).distance_to(_camera_fixed_m))
+	var priority := {}
+	if _detail:
+		# Procedural detail (deep chains of nodes under the camera): nearest in node sizes first - the distance from the
+		# camera's ground point (below the camera on the parent's surface radius: a site km above the sphere and the
+		# camera's height both drop out) to the node (its centre less half its diagonal, CAMERA_FIRST_HALF_DIAGONAL)
+		# over its nominal size, so the chain under the camera (distance ~0) builds level after level ahead of the wide
+		# rings, then the level.
+		var down := _camera_fixed_m.normalized()
+		for key in order:
+			var size_m := radius_m * (PI / 2.0) / float(1 << key.y)
+			var surface_r := float((_pending[key] as Array)[2])
+			var distance_m := (CubeSphere.node_center(key) * surface_r).distance_to(down * surface_r)
+			priority[key] = Vector2(maxf(distance_m - CAMERA_FIRST_HALF_DIAGONAL * size_m, 0.0) / size_m, key.y)
+	else:
+		for key in order:  # level first, then the distance of the node centre to the camera
+			priority[key] = Vector2(key.y, (CubeSphere.node_center(key) * radius_m).distance_to(_camera_fixed_m))
 	order.sort_custom(func(a: Vector4i, b: Vector4i) -> bool: return priority[a] < priority[b])
 	for key in order:
-		if not synchronous and _in_flight.size() >= MAX_BUILDS_IN_FLIGHT:
+		if not synchronous and _in_flight.size() >= (MAX_BUILDS_IN_FLIGHT_DETAIL if _detail else MAX_BUILDS_IN_FLIGHT):
 			break
-		var owner: Vector4i = _pending[key]
+		var request: Array = _pending[key]
+		var owner: Vector4i = request[0]
+		var parent_band: PackedFloat64Array = request[1]
 		_pending.erase(key)
 		if synchronous:
-			_finished[key] = _build(key, height_source, imagery, radius_m, owner)
+			_finished[key] = _build(key, height_source, imagery, radius_m, owner, parent_band)
 			_count_build(_finished[key])
 		else:
-			_in_flight[key] = WorkerThreadPool.add_task(_build_task.bind(key, height_source, imagery, radius_m, owner),
-					false, "terrain node")
+			_in_flight[key] = WorkerThreadPool.add_task(_build_task.bind(key, height_source, imagery, radius_m, owner,
+					parent_band), _detail, "terrain node")
 
 
 ## Worker task: builds one node and stores the result for the main thread.
 func _build_task(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource, body_radius_m: float,
-		horizon_owner: Vector4i) -> void:
-	var result := _build(key, heights, imagery_source, body_radius_m, horizon_owner)
+		horizon_owner: Vector4i, parent_band: PackedFloat64Array) -> void:
+	var result := _build(key, heights, imagery_source, body_radius_m, horizon_owner, parent_band)
 	_results_mutex.lock()
 	_results[key] = result
 	_results_mutex.unlock()
@@ -453,9 +497,10 @@ func _build_task(key: Vector4i, heights: HeightSource, imagery_source: ImagerySo
 
 ## TerrainNodeBuilder.build plus the node's bounding radius and its build time (build_ms; thread-safe, pure data).
 static func _build(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource,
-		body_radius_m: float, horizon_owner := Vector4i(-1, -1, -1, -1)) -> Dictionary:
+		body_radius_m: float, horizon_owner := Vector4i(-1, -1, -1, -1),
+		parent_band := PackedFloat64Array()) -> Dictionary:
 	var start_us := Time.get_ticks_usec()
-	var result := TerrainNodeBuilder.build(key, heights, imagery_source, body_radius_m, horizon_owner)
+	var result := TerrainNodeBuilder.build(key, heights, imagery_source, body_radius_m, horizon_owner, parent_band)
 	var radius_sq := 0.0
 	for v: Vector3 in result["vertices"]:
 		radius_sq = maxf(radius_sq, v.length_squared())
@@ -560,6 +605,9 @@ func _upload(result: Dictionary) -> void:
 			material.set_shader_parameter("horizon_grid_offset", Vector2(
 					float(key.z - (horizon_owner.z << depth)), float(key.w - (horizon_owner.w << depth)))
 					* (TerrainNodeBuilder.CELLS * scale))
+	elif horizon_owner != key:  # unreachable while owners (ancestors) stay uploaded: a broken invariant shows
+		push_warning("TerrainQuadtree: horizon owner %s of %s not uploaded; drawn without terrain shadows"
+				% [horizon_owner, key])
 	if horizon_map != null:
 		material.set_shader_parameter("horizon_map", horizon_map)
 		material.set_shader_parameter("horizon_stride", float(TerrainNodeBuilder.HORIZON_STRIDE))
@@ -582,6 +630,11 @@ func _upload(result: Dictionary) -> void:
 	node.horizon_max_rad = horizon_max_rad
 	node.children_bake = horizon_owner == key and key.y < MAX_LEVEL \
 			and node.size_m / TerrainNodeBuilder.CELLS > minf(float(result["data_resolution_m"]), curvature_spacing_m)
+	var band: PackedFloat64Array = result.get("band_heights", PackedFloat64Array())
+	if not band.is_empty():
+		_detail = true
+		if node.can_split:
+			node.band_heights = band
 	node.split_distance_sq = pow(LOD_FACTOR * node.size_m + node.radius_m, 2.0)
 	node.merge_distance_sq = pow(MERGE_FACTOR * LOD_FACTOR * node.size_m + node.radius_m, 2.0)
 	node.material = material

@@ -388,15 +388,20 @@ godot::Dictionary StarsimCore::surface_samples_detail(const godot::String& body,
     }
     const auto n = latitudes_deg.size();
     const double rock_min_m = moon_rocks_on_ ? min_rock_diameter_m : std::numeric_limits<double>::infinity();
+    std::vector<math::Vec3> units(static_cast<size_t>(n));
+    for (int64_t k = 0; k < n; ++k) {
+        const double lat = latitudes_deg[k] * constants::deg_to_rad;
+        const double lon = longitudes_deg[k] * constants::deg_to_rad;
+        units[static_cast<size_t>(k)] = {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+    }
+    std::vector<double> limited(units.size());
+    moon_surface_->heights_limited_m(units, min_wavelength_m, rock_min_m, limited);  // parallel, = the serial loop
     godot::PackedFloat64Array heights;
     godot::PackedByteArray water;
     heights.resize(n);
     water.resize(n);
     for (int64_t k = 0; k < n; ++k) {
-        const double lat = latitudes_deg[k] * constants::deg_to_rad;
-        const double lon = longitudes_deg[k] * constants::deg_to_rad;
-        const math::Vec3 unit{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
-        heights[k] = moon_surface_->height_limited_m(unit, min_wavelength_m, rock_min_m);
+        heights[k] = limited[static_cast<size_t>(k)];
         water[k] = 0;
     }
     result["present"] = true;

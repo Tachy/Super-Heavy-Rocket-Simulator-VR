@@ -14,6 +14,7 @@
 #include "starsim/environment/cube_face_cell.hpp"
 #include "starsim/environment/rock_templates.hpp"
 #include "starsim/math/constants.hpp"
+#include "parallel_batch.hpp"
 
 namespace starsim::environment {
 
@@ -217,6 +218,17 @@ double DetailedLunarTerrain::height_limited_m(const Vec3& unit, double min_wavel
         }
     }
     return h;
+}
+
+void DetailedLunarTerrain::heights_limited_m(const std::vector<Vec3>& units, double min_wavelength_m,
+                                             double min_rock_diameter_m, std::vector<double>& heights_m) const {
+    if (heights_m.size() != units.size()) {
+        throw std::invalid_argument("DetailedLunarTerrain::heights_limited_m: Richtungen und Hoehen verschieden lang");
+    }
+    starsim::environment::detail::for_each_index_budgeted(static_cast<int>(units.size()), [&](int k) {
+        const auto i = static_cast<size_t>(k);
+        heights_m[i] = height_limited_m(units[i], min_wavelength_m, min_rock_diameter_m);
+    });
 }
 
 double DetailedLunarTerrain::full_height_m(const Vec3& unit) const { return height_limited_m(unit, 0.0, 0.0); }
