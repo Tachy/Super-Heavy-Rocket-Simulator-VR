@@ -1,5 +1,6 @@
 shader_type spatial;
-// Moon terrain node (TerrainQuadtree): the model of moon.gdshader (the regolith reflectance of moon_regolith.gdshaderinc, Earth shadow with the
+// Moon terrain node (TerrainQuadtree): the model of moon.gdshader (the regolith reflectance of moon_regolith.gdshaderinc:
+// Hapke by default, the former Lommel-Seeliger law with moon_brdf 0; Earth shadow with the
 // reddened umbra glow, physical earthshine) on the relief normal, with geomorphing. Albedo: the global colour map
 // (moon_color, equirectangular) through CUSTOM1's global UV; the Moon has no imagery crops and no water.
 // Terrain shadows: the core's baked horizon (16 azimuths per grid vertex, TerrainNodeBuilder._horizon_image) hides the
@@ -43,6 +44,9 @@ uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
 // Diagnostic tint (render_check --moon_diag): 0 off; 1 red where the interpolated normal faces away from the eye
 // (dot(n, to_eye) < REGOLITH_MU_MIN: regolith_reflectance's limb replacement, Lommel-Seeliger at its 2x maximum).
 uniform int diag_mode = 0;
+// Hapke's mean slope for this node (rad): the roughness the node does not draw as geometry (scale-dependent, moon
+// procedural surface plan Task 10); negative: the globe's (moon_hapke_theta_bar_rad).
+uniform float hapke_theta_bar_rad = -1.0;
 
 varying vec3 local_position;
 varying vec3 local_normal;
@@ -93,6 +97,19 @@ void fragment() {
 	vec3 to_sun = moon_sun_position_local - local_position;
 	vec3 to_earth = moon_earth_position_local - local_position;
 	vec3 to_eye = normalize(-camera_offset);
+	// The drawn triangle's own (facet) normal, from camera_offset (exact near the camera; local_position's float32
+	// steps are ~0.1 m), in uniform control flow for the derivatives.
+	vec3 facet = cross(dFdx(camera_offset), dFdy(camera_offset));
+	bool normal_away = dot(n, to_eye) < REGOLITH_MU_MIN;  // the diagnostic's set (before the replacement)
+	if (moon_brdf == 1 && normal_away && dot(facet, facet) > 0.0) {
+		// Hapke only (the Lommel-Seeliger law stays bit-identical): the interpolated vertex normal faces away from the
+		// eye on a triangle that faces it (crests seen at grazing view: the vertex normals are central differences over
+		// two cells and lean beyond the crest). The limb replacement then lit thin bright lines along the crests (Task 7
+		// review M1); the triangle's own orientation is what the eye sees there.
+		vec3 f = normalize(facet);
+		n = dot(f, to_eye) < 0.0 ? -f : f;
+	}
+	float theta_bar = hapke_theta_bar_rad < 0.0 ? moon_hapke_theta_bar_rad : hapke_theta_bar_rad;
 	float mu0_raw = dot(n, normalize(to_sun));
 	float mu0 = max(mu0_raw, 0.0);
 	float mu = max(dot(n, to_eye), 1e-3);
@@ -119,8 +136,9 @@ void fragment() {
 		}
 	}
 	// The Sun and the earthshine through the one regolith reflectance (night-vision fix round I3).
-	float light = moon_regolith_scale * (regolith_reflectance(n, normalize(to_sun), to_eye) * sunlit * sun_visible
-			* moon_sun_scene + regolith_reflectance(n, normalize(to_earth), to_eye) * earth_visible * moon_earthshine);
+	float light = moon_regolith_scale * (regolith_reflectance_rough(n, normalize(to_sun), to_eye, theta_bar) * sunlit
+			* sun_visible * moon_sun_scene + regolith_reflectance_rough(n, normalize(to_earth), to_eye, theta_bar)
+			* earth_visible * moon_earthshine);
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
@@ -135,7 +153,7 @@ void fragment() {
 				length(camera_offset), transmittance);
 		color = color * atmosphere_exposure_gain * transmittance + sky;  // the eye adaptation's exposure gain on the lit Moon
 	}
-	if (diag_mode == 1 && dot(n, to_eye) < REGOLITH_MU_MIN) {
+	if (diag_mode == 1 && normal_away) {
 		color = vec3(1.0, 0.0, 0.0);
 	}
 	ALBEDO = color;

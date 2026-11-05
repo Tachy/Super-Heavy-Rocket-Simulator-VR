@@ -49,7 +49,8 @@ const EARTH_MEAN_RADIUS_M := 6371000.0
 ## (0.2997; the near side 0.255) - the albedo the Moon shaders multiply.
 const MOON_MEAN_TEXTURE_ALBEDO := 0.30
 ## The regolith's reflectance (shaders/moon_regolith.gdshaderinc, regolith_reflectance here; night-vision fix round I3,
-## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor, for the Sun and the earthshine alike.
+## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor (or Hapke x hapke_normalisation, the
+## default since the moon procedural surface plan Task 9), for the Sun and the earthshine alike.
 ## [D: tools/validation/moon_disc_calibration.py] the albedo texture's near-side mean weighted by projected area
 ## (cos^2 lat cos lon, sRGB-decoded, BT.709): the full-phase disc seen from the Earth (the maria pull it below the
 ## sphere's 0.30).
@@ -213,6 +214,12 @@ var _fixed_to_gcrf := Basis.IDENTITY
 var _earth_center_gcrf_m := Vector3.ZERO
 
 var _core: StarsimCore
+## The regolith's BRDF (configure_moon_brdf; static like regolith_reflectance): Hapke through the core, else the
+## former Lommel-Seeliger law.
+static var moon_brdf_hapke := false
+static var _hapke_core: StarsimCore = null
+static var _hapke_theta_bar_rad := 0.0
+static var _hapke_norm := 0.0
 var _task_id := -1
 var _result := {}  ## written by the worker task, read after it completed
 var _textures: Array[Texture] = []  ## keeps the uploaded textures alive
@@ -623,7 +630,8 @@ static func regolith_phase_factor(cos_g: float) -> float:
 	return moon_opposition(g_deg) * relative / maxf(phi, 1.0e-6)
 
 
-## Lommel-Seeliger x f(g) for unit vectors (the shaders' regolith_reflectance): 0 with the light below the horizon.
+## The regolith's BRDF for unit vectors (the shaders' regolith_reflectance, moon_regolith.gdshaderinc): Hapke x the
+## normalisation (moon_brdf_hapke, the core's I/F) or Lommel-Seeliger x f(g); 0 with the light below the horizon.
 ## A normal facing away from the eye is taken onto the limb first (the shader's silhouette fix: REGOLITH_MU_MIN).
 static func regolith_reflectance(n: Vector3, to_light: Vector3, to_eye: Vector3) -> float:
 	var mu := n.dot(to_eye)
@@ -633,7 +641,41 @@ static func regolith_reflectance(n: Vector3, to_light: Vector3, to_eye: Vector3)
 	var mu0 := n.dot(to_light)
 	if mu0 <= 0.0:
 		return 0.0
-	return 2.0 * mu0 / (mu0 + mu) * regolith_phase_factor(to_light.dot(to_eye))
+	var cos_g := to_light.dot(to_eye)
+	if moon_brdf_hapke:
+		return _hapke_norm * _hapke_core.moon_hapke_reflectance(mu0, mu, acos(clampf(cos_g, -1.0, 1.0)),
+				_hapke_theta_bar_rad)
+	return 2.0 * mu0 / (mu0 + mu) * regolith_phase_factor(cos_g)
+
+
+## Hapke's normalisation [D] (the shaders' moon_hapke_norm): the uniform Hapke sphere's disc-integrated I/F at phase 0
+## (disc_full, StarsimCore.load_moon_hapke) scaled to the Lommel-Seeliger law's full-phase disc, MOON_OPPOSITION_PEAK
+## (Lommel-Seeliger x f integrates to 1 x the surge at phase 0): the full Moon - the regolith scale's calibration point,
+## K&S's illuminance - keeps its brightness with either law, and so does the albedo map's mean.
+static func hapke_normalisation(disc_full: float) -> float:
+	return MOON_OPPOSITION_PEAK / disc_full
+
+
+## Chooses the regolith's BRDF (World.moon_brdf: "hapke" or "lommel_seeliger") for the shaders (globals moon_brdf,
+## moon_hapke_*) and regolith_reflectance: loads the Hapke parameters through the core (config/moon_surface.toml).
+## Without them the former law stays and a warning says so.
+static func configure_moon_brdf(core: StarsimCore, config_dir: String, brdf: String) -> void:
+	var hapke: Dictionary = core.load_moon_hapke(config_dir)
+	var present := bool(hapke.get("present", false))
+	if brdf == "hapke" and not present:
+		push_warning("Atmosphere: %s - Mond mit Lommel-Seeliger" % String(hapke.get("error", "keine Hapke-Parameter")))
+	moon_brdf_hapke = brdf == "hapke" and present
+	_hapke_core = core if present else null
+	if present:
+		_hapke_theta_bar_rad = float(hapke["theta_bar_rad"])
+		_hapke_norm = hapke_normalisation(float(hapke["disc_reflectance_full"]))
+		ShaderGlobals.set_value(&"moon_hapke_albedo_phase", Vector4(float(hapke["w"]), float(hapke["b"]),
+				float(hapke["c"]), float(hapke["porosity_k"])))
+		ShaderGlobals.set_value(&"moon_hapke_opposition", Vector4(float(hapke["bs0"]), float(hapke["hs"]),
+				float(hapke["bc0"]), float(hapke["hc"])))
+		ShaderGlobals.set_value(&"moon_hapke_theta_bar_rad", _hapke_theta_bar_rad)
+		ShaderGlobals.set_value(&"moon_hapke_norm", _hapke_norm)
+	ShaderGlobals.set_value(&"moon_brdf", 1 if moon_brdf_hapke else 0)
 
 
 ## The Moon's light for Godot's lit materials (world.gd's second DirectionalLight3D) at an Earth-fixed point:

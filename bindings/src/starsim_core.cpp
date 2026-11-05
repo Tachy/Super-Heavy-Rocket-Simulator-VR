@@ -29,6 +29,7 @@
 #include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/cloud_volume_bake.hpp"
 #include "starsim/environment/eclipse.hpp"
+#include "starsim/environment/hapke.hpp"
 #include "starsim/environment/weather_snapshot_build.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
 #include "starsim/environment/weather_source.hpp"
@@ -496,6 +497,44 @@ godot::Dictionary sfd_dictionary(const config::SizeFrequency& sfd) {
 constexpr int cover_samples = 33;  // [E] log-spaced diameters over the rock law's range (3.3 per octave)
 
 }  // namespace
+
+godot::Dictionary StarsimCore::load_moon_hapke(const godot::String& config_dir) {
+    godot::Dictionary result;
+    moon_hapke_loaded_ = false;
+    try {
+        moon_hapke_ = config::load_moon_surface_config(std::filesystem::path(config_dir.utf8().get_data()) /
+                                                       "moon_surface.toml")
+                          .hapke;
+    } catch (const std::exception& e) {
+        result["present"] = false;
+        result["error"] = godot::String::utf8((std::string("Hapke-Parameter nicht ladbar: ") + e.what()).c_str());
+        return result;
+    }
+    moon_hapke_loaded_ = true;
+    const auto& h = moon_hapke_;
+    result["present"] = true;
+    result["w"] = h.w;
+    result["b"] = h.b;
+    result["c"] = h.c;
+    result["bs0"] = h.bs0;
+    result["hs"] = h.hs;
+    result["bc0"] = h.bc0;
+    result["hc"] = h.hc;
+    result["theta_bar_rad"] = h.theta_bar_rad;
+    result["porosity_k"] = h.porosity_k;
+    result["disc_reflectance_full"] = environment::hapke_disc_reflectance(h, 0.0, h.theta_bar_rad);
+    return result;
+}
+
+double StarsimCore::moon_hapke_reflectance(double mu0, double mu, double phase_rad, double theta_bar_rad) const {
+    if (!moon_hapke_loaded_) return 0.0;
+    return environment::hapke_reflectance(moon_hapke_, mu0, mu, phase_rad, theta_bar_rad);
+}
+
+double StarsimCore::moon_hapke_disc_reflectance(double phase_rad, double theta_bar_rad) const {
+    if (!moon_hapke_loaded_) return 0.0;
+    return environment::hapke_disc_reflectance(moon_hapke_, phase_rad, theta_bar_rad);
+}
 
 godot::Dictionary StarsimCore::moon_surface_statistics() const {
     godot::Dictionary result;
@@ -1308,6 +1347,11 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("moon_rocks", "face", "level", "i", "j", "min_diameter_m"), &StarsimCore::moon_rocks);
     ClassDB::bind_method(D_METHOD("rock_template_mesh", "id", "lod"), &StarsimCore::rock_template_mesh);
     ClassDB::bind_method(D_METHOD("moon_surface_statistics"), &StarsimCore::moon_surface_statistics);
+    ClassDB::bind_method(D_METHOD("load_moon_hapke", "config_dir"), &StarsimCore::load_moon_hapke);
+    ClassDB::bind_method(D_METHOD("moon_hapke_reflectance", "mu0", "mu", "phase_rad", "theta_bar_rad"),
+                         &StarsimCore::moon_hapke_reflectance);
+    ClassDB::bind_method(D_METHOD("moon_hapke_disc_reflectance", "phase_rad", "theta_bar_rad"),
+                         &StarsimCore::moon_hapke_disc_reflectance);
     ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
                          &StarsimCore::surface_resolution_m);
     ClassDB::bind_method(D_METHOD("horizon_elevations", "body", "latitudes_deg", "longitudes_deg", "heights_m",

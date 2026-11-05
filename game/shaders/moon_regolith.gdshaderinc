@@ -1,5 +1,12 @@
 // The lunar regolith's reflectance, one BRDF for every light on it (the Sun, the earthshine) - moon.gdshader,
-// terrain_moon.gdshader; mirrored by Atmosphere.regolith_reflectance (the eye adaptation's Moon in view): keep in sync.
+// terrain_moon.gdshader, sky.gdshader (the radiance map's lunar ground); mirrored by Atmosphere.regolith_reflectance (the
+// eye adaptation's Moon in view): keep in sync. Two laws, chosen by the global moon_brdf (World.moon_brdf, set by
+// Atmosphere.configure_moon_brdf):
+// 1 "hapke" (default): moon_hapke_norm x Hapke's I/F (moon_hapke.gdshaderinc, the core's hapke_reflectance with
+//   config/moon_surface.toml [hapke]); moon_hapke_norm = 1.35 / the uniform Hapke sphere's disc-integrated I/F at
+//   phase 0, so the full-phase disc equals the Lommel-Seeliger law's (K&S's full Moon, the regolith scale's
+//   calibration point) and the albedo map's mean brightness stays.
+// 0 "lommel_seeliger" (the former law, bit-identical):
 // Scene value = albedo x moon_regolith_scale x E x LS(mu0, mu) x f(g), E the light's scene value on a white Lambertian
 // at normal incidence (moon_sun_scene for the Sun, moon_earthshine for the earthshine), LS = 2 mu0 / (mu0 + mu)
 // Lommel-Seeliger (1 at mu0 = mu) and f(g) the phase correction at the local phase angle g (light - surface - eye) that
@@ -24,6 +31,17 @@ global uniform float moon_regolith_scale;
 global uniform float moon_sun_scene;
 // The same under the earthshine (Atmosphere.earthshine_scene), without the gain.
 global uniform float moon_earthshine;
+// The BRDF (above): 0 Lommel-Seeliger x K&S, 1 Hapke.
+global uniform int moon_brdf;
+// Hapke parameters (Atmosphere.configure_moon_brdf from the core): (w, b, c, K) and (B_S0, h_S, B_C0, h_C).
+global uniform vec4 moon_hapke_albedo_phase;
+global uniform vec4 moon_hapke_opposition;
+// The mean slope of the globe's unresolved roughness (rad; the fit's sub-pixel value). Terrain materials pass their own
+// (scale-dependent) through regolith_reflectance_rough.
+global uniform float moon_hapke_theta_bar_rad;
+global uniform float moon_hapke_norm;
+
+#include "res://shaders/moon_hapke.gdshaderinc"
 
 float regolith_phase_factor(float cos_g) {
 	float g_deg = min(degrees(acos(clamp(cos_g, -1.0, 1.0))), REGOLITH_PHASE_MAX_DEG);
@@ -45,7 +63,8 @@ const float REGOLITH_MU_MIN = 1.0e-3;
 // behind the limb lit the rim: in a total solar eclipse (the Sun behind the Moon, phase ~180 deg, f held at 150 deg)
 // rim fragments with mu0 > 0 and mu clamped got the full sunlit Lommel-Seeliger value - white pixels around the
 // eclipsed Moon (brightness-term task 2, 2026-10-25).
-float regolith_reflectance(vec3 n, vec3 to_light, vec3 to_eye) {
+// theta_bar: Hapke's mean slope of the roughness not drawn as geometry (unused by Lommel-Seeliger).
+float regolith_reflectance_rough(vec3 n, vec3 to_light, vec3 to_eye, float theta_bar) {
 	float mu = dot(n, to_eye);
 	if (mu < REGOLITH_MU_MIN) {
 		n = normalize(n + to_eye * (REGOLITH_MU_MIN - mu));
@@ -55,5 +74,14 @@ float regolith_reflectance(vec3 n, vec3 to_light, vec3 to_eye) {
 	if (mu0 <= 0.0) {
 		return 0.0;
 	}
+	if (moon_brdf == 1) {
+		return moon_hapke_norm * hapke_reflectance(moon_hapke_albedo_phase, moon_hapke_opposition, mu0, mu,
+				dot(to_light, to_eye), theta_bar);
+	}
 	return 2.0 * mu0 / (mu0 + mu) * regolith_phase_factor(dot(to_light, to_eye));
+}
+
+// The same with the globe's mean slope.
+float regolith_reflectance(vec3 n, vec3 to_light, vec3 to_eye) {
+	return regolith_reflectance_rough(n, to_light, to_eye, moon_hapke_theta_bar_rad);
 }

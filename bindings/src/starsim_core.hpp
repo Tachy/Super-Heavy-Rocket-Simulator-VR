@@ -26,6 +26,7 @@
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/config/moon_surface_config.hpp"
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/cloud_render_field.hpp"
@@ -125,6 +126,15 @@ public:
     // D_max) at log-spaced D: the area share of the rocks of at least D)}, finest_wavelength_m,
     // roughness_scale_m, rocks_present}. Empty dictionary (present false) without the surface.
     godot::Dictionary moon_surface_statistics() const;
+    // Hapke reflectance of the lunar regolith (core environment/hapke.hpp; config_dir/moon_surface.toml [hapke], no
+    // terrain data needed): load_moon_hapke reads the parameters and returns {present, w, b, c, bs0, hs, bc0, hc,
+    // theta_bar_rad, porosity_k, disc_reflectance_full (the uniform sphere's disc-integrated I/F at phase 0 with
+    // theta_bar_rad), error (German, when absent)}. Call from one thread before the queries; the queries are thread-safe.
+    godot::Dictionary load_moon_hapke(const godot::String& config_dir);
+    // I/F for cos incidence / cos emission, phase angle and mean slope (rad); 0 before load_moon_hapke.
+    double moon_hapke_reflectance(double mu0, double mu, double phase_rad, double theta_bar_rad) const;
+    // The uniform sphere's disc-integrated I/F at the phase angle (ROLO's disc-equivalent reflectance).
+    double moon_hapke_disc_reflectance(double phase_rad, double theta_bar_rad) const;
     // Spacing in metres of the finest terrain grid at a point; INF without the terrain.
     double surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const;
     // The finest of those spacings over latitude / longitude points (degrees; a renderer node's lattice); INF without
@@ -284,6 +294,8 @@ private:
     std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
     std::shared_ptr<const environment::DetailedLunarTerrain> moon_surface_;  // load_terrain(); nullptr when absent
+    config::HapkeParameters moon_hapke_;  // load_moon_hapke()
+    bool moon_hapke_loaded_ = false;
     std::atomic<bool> moon_detail_on_{true}, moon_rocks_on_{true};
     std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)

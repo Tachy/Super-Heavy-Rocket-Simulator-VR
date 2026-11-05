@@ -182,6 +182,7 @@ add_executable(starsim_core_tests
     test_moon_surface_config.cpp
     test_lunar_surface_detail.cpp
     test_lunar_rocks.cpp
+    test_hapke.cpp
     test_detailed_lunar_terrain.cpp
     test_mission_start_places.cpp
     test_contact_primitives.cpp

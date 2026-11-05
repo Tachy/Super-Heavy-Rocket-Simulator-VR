@@ -571,3 +571,12 @@ target = "config/moon_surface.toml"
 kind = "licence_only"
 license = "NASA technical memorandum (public) and published papers; only numerical values are used"
 credit = "Rock statistics after Cintala & McBride (1995), Shoemaker & Morris (1968), Li et al. (2017), Fujiwara et al. (1978), Krishna & Kumar (2016)"
+
+[[source]]
+id = "lit_hapke_validation"
+name = "Hapke reflectance validation: USGS ISIS3 photometric Hapke models (isis/src/base/objs/Hapke: unit-test truth values), ROLO lunar disc reflectance model of Kieffer & Stone 2005 (AJ 129, 2887; 665.1 nm coefficients as transcribed by J. Hollan, amper.ped.muni.cz/light/luminance/moon_cal/r554.gnp), Chandrasekhar 1960 (Radiative Transfer, H function), Hapke 2002 (Icarus 157, 523), Hapke 1984 (Icarus 59, 41), Hapke 2012 (Theory of Reflectance and Emittance Spectroscopy)"
+url = "https://github.com/DOI-USGS/ISIS3/tree/dev/isis/src/base/objs/Hapke"
+target = "core/tests/test_hapke.cpp"
+kind = "licence_only"
+license = "ISIS3: public domain (CC0-1.0); published papers: only numerical values are used"
+credit = "Hapke model checks against USGS ISIS3 (public domain) and the ROLO model of Kieffer & Stone (2005)"

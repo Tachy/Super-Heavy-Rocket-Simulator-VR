@@ -1,7 +1,8 @@
 shader_type spatial;
-// Moon: the regolith's reflectance (moon_regolith.gdshaderinc: Lommel-Seeliger with the phase law of Krisciunas &
-// Schaefer 1991 - a flat-looking full Moon with its opposition surge), Earth shadow (lunar eclipses) and physical
-// earthshine through the same reflectance; seen through the Earth's atmosphere (opaque: color x
+// Moon: the regolith's reflectance (moon_regolith.gdshaderinc: Hapke 2012 with the Sato et al. 2014 parameters by
+// default, the globe's mean slope moon_hapke_theta_bar_rad; or the former Lommel-Seeliger law with the phase law of
+// Krisciunas & Schaefer 1991; both a flat-looking full Moon with its opposition surge), Earth shadow (lunar
+// eclipses) and physical earthshine through the same reflectance; seen through the Earth's atmosphere (opaque: color x
 // T + the sky in front of it - the pale daytime Moon), nothing added when the camera is outside the atmosphere and the
 // Moon lies before the ray's entry.
 render_mode unshaded, cull_back;

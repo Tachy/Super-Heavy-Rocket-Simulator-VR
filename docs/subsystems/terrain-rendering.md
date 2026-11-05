@@ -111,7 +111,7 @@ on top; it replaced the interim `GroundPatch`.
   under the deck. Its ~15 extra global samplers per node need `rendering_device/d3d12/max_resource_descriptors`
   262144 in project.godot.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
-  colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine + terrain shadows). Detail off: leaf level 12, 10.4 m spacing at
+  colour map, `terrain_moon.gdshader` (Hapke by default, the former Lommel-Seeliger law with the game setting `World.moon_brdf` = "lommel_seeliger" (moon-surface.md, Hapke reflectance) + Earth shadow + earthshine + terrain shadows). Detail off: leaf level 12, 10.4 m spacing at
   the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m;
   level 7, spacing 333 m). The lander's CG is drawn 18.11 m above the drawn surface = the session's `altitude_terrain_m`, 0.8 m from
   the site.
@@ -236,15 +236,12 @@ on top; it replaced the interim `GroundPatch`.
   horizon bakes, GDScript mesh assembly ~20 ms each). A 10 s spawn needs less work per node (e.g. the horizon bake or
   the builder's loops in the core) - open. Not measured in the exported release template (production builds refuse
   `--path`); the extension is the same DLL there.
-- At grazing view the detailed relief shows thin bright lines along ridge crests. Diagnosis (render_check
-  `--moon_diag=1`, IM-2 2 m, `screenshots/moon_surface/task7/fix1/crest_*_crop.png`): the fragments whose interpolated
-  vertex normal faces away from the eye (5818 of 936000 ground pixels) lie on those lines - there
-  `regolith_reflectance` turns the normal onto the limb and Lommel-Seeliger takes its 2x maximum, an artefact of the
-  central-difference vertex normals leaning beyond the crest, not physics. A tested fix (shade such fragments with the
-  triangle's facet normal from `dFdx`/`dFdy` of `camera_offset`) dims the lines (14845 pixels change, mean -5.6/255)
-  but changes 0.3-0.6 % of the detail-off pixels too (2 / 200 m), so it is not applied pending a decision; the rest of
-  the lines are near-grazing front-facing facets (Lommel-Seeliger at small mu), which the Hapke shading (Task 9)
-  changes.
+- Crest lines at grazing view (Task 7 review M1): fragments whose interpolated vertex normal faces away from the eye
+  (central-difference vertex normals leaning beyond a crest) got `regolith_reflectance`'s limb replacement and
+  Lommel-Seeliger's 2x maximum. With Hapke (default, Task 9) such fragments are shaded with the triangle's facet normal
+  (`dFdx`/`dFdy` of `camera_offset`) and Hapke's grazing-view rise is smaller: at IM-2, 2 m, the pixels brighter than
+  their 7 x 7 median by > 40 fell from 1463 to 134 (`screenshots/moon_surface/task9/crest_before_above_after_h2_crop.png`).
+  With `World.moon_brdf` = "lommel_seeliger" the lines stay (that law is kept bit-identical).
 - The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
   does not rebuild its tree on a change.
 

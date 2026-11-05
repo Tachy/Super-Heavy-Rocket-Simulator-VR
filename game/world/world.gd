@@ -44,6 +44,10 @@ var moon_terrain := TerrainQuadtree.new()  ## streamed lunar surface (LDEM_16 + 
 ## Fidelity flag moon_surface_detail for the world created next (read at the Moon terrain's setup; the core and the
 ## flight follow it): off draws the LOLA-only surface as before the procedural detail (render_check --moon_detail=off).
 static var moon_surface_detail := true
+## Game setting moon_brdf for the world created next: "hapke" (default; Hapke 2012 with the Sato et al. 2014
+## parameters, config/moon_surface.toml) or "lommel_seeliger" (the former law; render_check --moon_brdf=lommel_seeliger).
+## Read in _ready (Atmosphere.configure_moon_brdf).
+static var moon_brdf := "hapke"
 var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
 ## The Moon's light on Godot's lit materials at night (Atmosphere.moon_light_at; energy 0 by day; no shadows).
@@ -122,6 +126,7 @@ func _ready() -> void:
 	await LoadingScreen.step("Himmel und Atmosphäre vorbereiten")
 	_setup_environment()
 	atmosphere.start_loading(core, Paths.config_dir(), data_dir.path_join("atmosphere"))
+	Atmosphere.configure_moon_brdf(core, Paths.config_dir(), moon_brdf)
 	await LoadingScreen.step("Wetterdienst und Wolken einrichten")
 	add_child(weather_fetcher)
 	weather.enabled = WeatherService.load_enabled_setting()

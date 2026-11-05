@@ -168,6 +168,7 @@ add_library(starsim_core STATIC
     src/environment/detailed_lunar_terrain.cpp
     src/environment/rock_abundance_map.cpp
     src/environment/terrain_horizon.cpp
+    src/environment/hapke.cpp
     src/environment/geographic_grid.cpp
     src/environment/geoid.cpp
     src/environment/atmosphere_optics.cpp
