@@ -23,12 +23,15 @@ float moon_rock_norm(float abundance) {
 	return exp(-c_all) + (1.0 - exp(-c_all)) * detail_rock_shape.y;
 }
 
-// Smith's G1 of the node's drawn relief below the horizon grid (the ground's own factor), Sun at macroscopic elevation.
-float moon_rock_lit(float elevation, float spacing_m, float horizon_spacing_m) {
+// The lit share of the node's drawn relief below the horizon grid as the eye sees it (the ground's own factor; Task 12:
+// Smith's visible-lit fraction, detail_smith_visible), the light at macroscopic elevation; view: (view elevation, the
+// light's azimuth difference to the eye).
+float moon_rock_lit(float elevation, float spacing_m, float horizon_spacing_m, vec2 view) {
 	if (elevation <= 0.0) {
 		return 0.0;
 	}
-	return detail_smith(tan(elevation), max(detail_drawn(spacing_m) - detail_drawn(horizon_spacing_m), 0.0));
+	return detail_smith_visible(tan(elevation), view.x, view.y,
+			max(detail_drawn(spacing_m) - detail_drawn(horizon_spacing_m), 0.0));
 }
 
 // Reflectance of the rock surface (unit normal n) for one light, the fillet blend toward the regolith (up: the local

@@ -35,6 +35,7 @@ namespace starsim::environment {
 
 class LunarSurfaceDetail;
 class LunarRocks;
+struct TemplateMesh;
 
 struct UnresolvedShadingModel {
     double globe_slope_variance = 0.0;  // pi tan^2(theta_bar) of the Hapke fit (rocks included)
@@ -71,6 +72,20 @@ struct UnresolvedShadingModel {
     std::vector<double> rock_shadow;
     static constexpr int lit_gain_samples = 46;
     static constexpr double lit_gain_step_rad = 2.0 * constants::deg_to_rad;  // [D] 2 deg: 0 .. 90 deg, linear between
+    // View-dependent rock terms (Task 12, review T11-C5 R1; template_rock_view_tables): at view elevation index kv
+    // (kv x view_elevation_step_rad, floor lit_gain_floor_rad), light-view azimuth difference index ka (ka x
+    // view_azimuth_step_rad) and light elevation index k (the gain grid), entry ((kv x view_azimuth_samples + ka) x
+    // lit_gain_samples + k): the ground hidden from the eye outside the light's shadow per cover (X) and the drawn
+    // shape's seen-radiance gain over its zenith-view value (G_v / G). Empty: nadir view only.
+    std::vector<double> rock_view_excess;
+    std::vector<double> rock_view_gain_ratio;
+    static constexpr int view_elevation_samples = 46;
+    static constexpr double view_elevation_step_rad = 2.0 * constants::deg_to_rad;  // [D] 0 .. 90 deg (X changes fast at a low eye)
+    static constexpr int view_azimuth_samples = 7;
+    static constexpr double view_azimuth_step_rad = 30.0 * constants::deg_to_rad;  // [D] 0 .. 180 deg
+    // Hapke directional-hemispherical albedo A_h(mu0) of the regolith (the globe's parameters and theta_bar) at
+    // elevations k x lit_gain_step_rad (mu0 = sin e): the terrain inter-reflection fill (Task 12).
+    std::vector<double> hemispherical_albedo;
 };
 
 // Builds the model from the generator (octave spacings and amplitude scale), its configuration (craters, Hapke) and
@@ -109,6 +124,13 @@ double unshadowed_slope_variance(const UnresolvedShadingModel& m, double spacing
 // magnitude) slope_variance for a light at elevation with tangent tan_elevation over the mean plane (0 at elevation
 // <= 0, 1 for a smooth surface). Lambda(a) = (erf(a) - 1) / 2 + exp(-a^2) / (2 a sqrt(pi)), a = tan / sqrt(variance).
 double smith_lit_fraction(double tan_elevation, double slope_variance);
+// The lit share of the surface the eye sees (Task 12): Smith's height-direction-correlated masking-shadowing over the
+// masking, G2(l, v) / G1(v), G2 = 1 / (1 + max(Lambda_l, Lambda_v) + lambda(phi) min(Lambda_l, Lambda_v)) with
+// lambda(phi) = 4.41 phi / (4.41 phi + 1) (Heitz 2014, JCGT 3(2), eq. 103, after van Ginneken et al. 1998), phi the
+// azimuth difference between the light and the eye: from the light's own direction the eye sees no shadow (shadow
+// hiding), from the zenith (tan_view = infinity, Lambda_v = 0) it is G1(l).
+double smith_visible_lit_fraction(double tan_light, double tan_view, double azimuth_difference_rad,
+                                  double slope_variance);
 
 // Rock cover (area share, abundance 1) of diameters [d_lo, d_hi] (clipped to the law's range).
 double rock_cover(const UnresolvedShadingModel& m, double d_lo_m, double d_hi_m);
@@ -139,6 +161,7 @@ struct RockColumn {
 struct RockLightTables {
     std::vector<double> gain;
     std::vector<double> shadow;
+    double mean_tan = 0.0;  // mean |grad h| of the exposed top per plan area (the rocks' share of Hapke's mean slope)
 };
 inline constexpr int rock_light_azimuths = 8;  // [D] the rocks' yaw is uniform; 8 azimuths: < 1 % against 32
 RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell);
@@ -146,6 +169,43 @@ RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double
 // (clamp(mean + sd N, 0, LunarRocks::max_burial_fraction), Gauss quadrature in N), each rock's plan area equal (the
 // generator scales each template to the area-equivalent D). Cached per (mean, sd); thread-safe.
 RockLightTables template_rock_light_tables(double burial_mean, double burial_sd);
+
+// View-dependent terms of one convex rock (Task 12): its exposed part (above the ground cut z = cut of the template
+// mesh's convex hull) seen from view elevation e_v with the light at elevation e_l and the light-view azimuth difference
+// dphi. The ground a convex body hides from a direction is the body's projection along it onto the ground (P_v; the
+// light's shadow region incl. the footprint is P_l): X = (|P_v| - |P_l n P_v|) / A (the ground hidden from the eye
+// outside the light's shadow, per plan area A = |P(zenith)|); the seen radiance gain is the Lommel-Seeliger radiance of
+// the faces seen (projected-area weighted) over the flat ground's at (e_l, e_v), times |P_v| / A (the rock's share of
+// the image per plan area). Averaged over yaws. Tables in the model's layout (rock_view_excess):
+// excess = X, flux = gain x |P_v| / A, hidden = |P_v| / A - 1 (= sigma(e_v) of the polygon), flux_nadir = the zenith
+// view's gain per light elevation.
+struct RockViewTables {
+    std::vector<double> excess;
+    std::vector<double> flux;
+    std::vector<double> hidden;
+    std::vector<double> flux_nadir;
+};
+inline constexpr int rock_view_yaws = 2;  // [D] yaws per rock (the 32 templates' own orientations are random)
+RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut);
+// The generator's mean over the 32 templates (LOD 2 meshes) and the burial law (as template_rock_light_tables); the
+// excess as the template mean, the gain ratio as mean(flux) / mean(1 + hidden) over the zenith view's gain. Cached,
+// thread-safe.
+struct RockViewModel {
+    std::vector<double> excess;
+    std::vector<double> gain_ratio;
+};
+RockViewModel template_rock_view_tables(double burial_mean, double burial_sd);
+// Model table lookups (trilinear; elevations clamped to [floor, 90 deg], dphi folded to [0, pi]).
+double rock_view_excess_table(const UnresolvedShadingModel& m, double light_elevation_rad, double view_elevation_rad,
+                              double azimuth_difference_rad);
+double rock_view_gain_ratio_table(const UnresolvedShadingModel& m, double light_elevation_rad,
+                                  double view_elevation_rad, double azimuth_difference_rad);
+
+// Hapke directional-hemispherical albedo A_h(mu0) = 1 / (pi mu0) Int I/F(mu0, mu, g) mu dOmega (Gauss-Legendre in mu,
+// midpoint in azimuth; the reflected over the incident flux) with mean slope theta_bar.
+double hapke_hemispherical_albedo(const config::HapkeParameters& p, double mu0, double theta_bar_rad);
+// The model's tabulated A_h at elevation e (mu0 = sin e; linear between the samples, the lit-gain grid).
+double hemispherical_albedo_table(const UnresolvedShadingModel& m, double elevation_rad);
 
 // Statistical rock cover (abundance 1) at the geometry threshold d (Task 11's growth band): rocks below d count fully,
 // rocks in [d, 2 d] with weight 1 - log2(D / d) (the drawn rock rises out of the ground over the band, exposed height
@@ -173,5 +233,38 @@ UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m,
                                                 double horizon_spacing_m, double sun_elevation_rad,
                                                 double earth_elevation_rad,
                                                 bool geometry_shadows_statistical = true);
+
+// The same seen from an eye at view elevation e_v over the mean plane (Task 12, review T11-C5 R1: an oblique eye sees
+// the rocks hide the ground behind them and their lit / dark sides), with the near-field shadow map (Task 12) for the
+// Sun. Per light at elevation e and light-eye azimuth difference dphi:
+// f(e) = G1(e) x [exp(-C (1 + sigma(e) + X) - C_g' max(sigma(e) - sigma(e_v) + X, 0))
+//                 + (1 - exp(-C (1 + sigma(e_v)))) rho G(e) R(e, e_v, dphi)] / N,
+// X = rock_view_excess_table (the ground hidden from the eye outside the light's shadow, per cover; 0 from the
+// zenith), R = rock_view_gain_ratio_table, sigma(e_v) the hidden ground per cover (the shadow law at the view's
+// elevation). C_g' = C_g where the drawn rocks' shadows are statistical for that light, else 0 (their visible shadow,
+// sigma - omega, omega = sigma(e_v) - X the overlap of the light's and the view's hidden regions). From the zenith
+// (e_v = 90 deg) it is the nadir law above. sun_shadow_map: the near-field shadow map draws the Sun's shadows of the drawn
+// mesh relief down to shadow_map_resolved_m (G1 of the finer drawn relief only, drawn(L) - drawn(T)) and of the drawn
+// rocks from shadow_caster_factor x d (C_g' their statistical share below it); the earthshine keeps both statistical.
+// [E, measured: Task 12 report] The drawn rocks cast the near-field shadow from this many times the geometry threshold
+// diameter d (their own growth band [F d, 2 F d] in the shadow pass): a rock of ~1.5 px is ~1-2 shadow-map texels wide,
+// its shadow unresolved, and every drawn rock in the shadow pass cost +78 ms in the stereo mock in a boulder field. The
+// drawn rocks below F d keep their Sun shadows statistical (C_g' = abundance x rock_statistical_cover(F d) - C).
+inline constexpr double shadow_caster_factor = 4.0;
+
+struct UnresolvedView {
+    double elevation_rad = 0.5 * constants::pi;  // the eye over the mean plane
+    double sun_azimuth_difference_rad = 0.0;      // between the horizontal directions to the Sun and to the eye
+    double earth_azimuth_difference_rad = 0.0;
+    bool sun_shadow_map = false;
+    // With the map: the smallest relief wavelength the map resolves (2 shadow-map texels, the sampling's Nyquist
+    // scale; 0: all); the drawn relief finer than it keeps Smith's G1 for the Sun (drawn(L) - drawn(T)).
+    double shadow_map_resolved_m = 0.0;
+};
+UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m, double abundance,
+                                                double geometry_min_diameter_m, double spacing_m,
+                                                double horizon_spacing_m, double sun_elevation_rad,
+                                                double earth_elevation_rad, bool geometry_shadows_statistical,
+                                                const UnresolvedView& view);
 
 }  // namespace starsim::environment

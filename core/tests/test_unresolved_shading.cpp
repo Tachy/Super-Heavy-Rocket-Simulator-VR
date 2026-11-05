@@ -144,9 +144,17 @@ TEST_CASE("Rocks out of the slope budget: regolith and rocks add up to the globe
           "[moon_surface][unresolved_shading]") {
     const auto& m = shared_model();
     const double theta = shared_detail()->config().hapke.theta_bar_rad;
-    // Hapke's mean-tan form: (1 - A) <tan>_regolith + A pi eta = <tan>_globe = (pi / 2) tan theta_bar.
+    // Hapke's mean-tan form: (1 - A) <tan>_regolith + A <tan>_rock = <tan>_globe = (pi / 2) tan theta_bar, <tan>_rock the
+    // generated templates' mean |grad h| per plan area (review n1 of the Task 11 fix C re-review; pi eta of the
+    // half-spheroid before).
+    const auto& cfg = shared_detail()->config();
+    const double rocks_tan =
+        environment::template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd).mean_tan;
+    std::printf("  templates' mean |grad h| %.4f against the half-spheroid's pi eta %.4f\n", rocks_tan,
+                pi * m.rock_exposed_height_per_diameter);
+    CHECK(rocks_tan > 0.3);
+    CHECK(rocks_tan < 3.0);
     const double regolith_tan = 0.5 * pi * std::tan(environment::theta_bar_from_slope_variance(m.total_slope_variance));
-    const double rocks_tan = pi * m.rock_exposed_height_per_diameter;
     CHECK(std::abs((1.0 - m.rock_area_share) * regolith_tan + m.rock_area_share * rocks_tan -
                    0.5 * pi * std::tan(theta)) < 1e-12);
     CHECK(std::abs(m.rock_area_share - (1.0 - std::exp(-environment::rock_cover(m, 0.0, inf)))) < 1e-15);
@@ -163,7 +171,7 @@ TEST_CASE("Rocks out of the slope budget: regolith and rocks add up to the globe
         const double r = (k + 0.5) / n * a;
         sum += height * r / (a * a * std::sqrt(1.0 - r * r / (a * a))) * 2.0 * pi * r * (a / n);
     }
-    CHECK(std::abs(sum / (pi * a * a) / rocks_tan - 1.0) < 2e-3);  // the rim's integrable singularity limits the sum
+    CHECK(std::abs(sum / (pi * a * a) / (pi * eta) - 1.0) < 2e-3);  // the rim's integrable singularity limits the sum
     std::printf("  rocks out of the budget: area share %.4f, mean tan %.4f of the globe's %.4f; theta_bar globe %.3f deg,"
                 " regolith %.3f deg; S^2 %.4f -> %.4f\n", m.rock_area_share, m.rock_mean_tan,
                 0.5 * pi * std::tan(theta), theta / deg,
@@ -362,6 +370,10 @@ TEST_CASE("Rock light tables from columns: the half-spheroid's exact laws", "[mo
                         eta, grid, worst_g, worst_s);
             CHECK(worst_g < (grid == 64 ? 0.02 : 0.01));
             CHECK(worst_s < (grid == 64 ? 0.015 : 0.008));
+            // The mean |grad h| per plan area (the rocks' share of Hapke's mean slope): pi eta for the half-spheroid; the
+            // rim's integrable singularity converges slowly on the grid.
+            std::printf("    mean |grad h| %.4f against pi eta %.4f\n", t.mean_tan, pi * eta);
+            CHECK(std::abs(t.mean_tan / (pi * eta) - 1.0) < (grid == 64 ? 0.06 : 0.04));
         }
     }
 }
@@ -512,4 +524,198 @@ TEST_CASE("Shipped model: rock shape and reflectance ratio", "[moon_surface][unr
     CHECK(again.rock_exposed_height_per_diameter == m.rock_exposed_height_per_diameter);
     CHECK(again.drawn_table == m.drawn_table);
     CHECK(again.crater_fraction == m.crater_fraction);
+}
+
+namespace {
+
+// A half-spheroid of plan radius 1 and height h as a closed convex mesh (latitude-longitude rings, cut at z = 0 by the
+// caller's cut 0): the reference shape of the view tables.
+environment::TemplateMesh half_spheroid_mesh(double h, int rings, int sectors) {
+    environment::TemplateMesh mesh;
+    for (int i = 0; i <= rings; ++i) {
+        const double u = 0.5 * pi * i / rings;  // 0 at the top
+        for (int j = 0; j < sectors; ++j) {
+            const double phi = 2.0 * pi * j / sectors;
+            mesh.vertices.push_back({std::sin(u) * std::cos(phi), std::sin(u) * std::sin(phi), h * std::cos(u)});
+        }
+    }
+    // A bottom ring slightly below the cut closes the body (the cut removes it).
+    for (int j = 0; j < sectors; ++j) {
+        const double phi = 2.0 * pi * j / sectors;
+        mesh.vertices.push_back({std::cos(phi), std::sin(phi), -0.01});
+    }
+    for (int i = 0; i <= rings; ++i) {
+        for (int j = 0; j < sectors; ++j) {
+            const int a = i * sectors + j, b = i * sectors + (j + 1) % sectors;
+            const int c = (i + 1) * sectors + j, d = (i + 1) * sectors + (j + 1) % sectors;
+            mesh.indices.insert(mesh.indices.end(), {a, c, b, b, c, d});
+        }
+    }
+    return mesh;
+}
+
+size_t view_entry(int kv, int ka, int k) {
+    return (static_cast<size_t>(kv) * UnresolvedShadingModel::view_azimuth_samples + static_cast<size_t>(ka)) *
+               UnresolvedShadingModel::lit_gain_samples + static_cast<size_t>(k);
+}
+
+}  // namespace
+
+TEST_CASE("Rock view tables: a half-spheroid's hidden ground, overlap limits and seen radiance",
+          "[moon_surface][unresolved_shading]") {
+    // Task 12 (review T11-C5 R1). The ground a convex body hides from the eye is the shadow of a light at the eye's
+    // place: the polygon's hidden area against the closed form rock_shadow_per_cover; from the light's own direction
+    // (dphi 0, same elevation) the eye sees no ground outside the shadow (X = 0) and every seen face is lit at
+    // mu0 = mu (Lommel-Seeliger 1/2 = the flat ground's at that geometry: gain x |P_v| / A = 1 + hidden); from the
+    // opposite azimuth the two regions share only the footprint (X = hidden).
+    using M = UnresolvedShadingModel;
+    for (const double eta : {0.25, 0.5}) {
+        const auto mesh = half_spheroid_mesh(2.0 * eta, 48, 192);
+        const auto t = environment::rock_view_tables(mesh, 0.0);
+        double worst_hidden = 0.0, worst_same = 0.0, worst_opposite = 0.0, worst_flux = 0.0;
+        for (int kv = 1; kv < M::view_elevation_samples - 1; ++kv) {  // 2 .. 88 deg
+            const double ev = kv * M::view_elevation_step_rad;
+            const int k_same = static_cast<int>(std::lround(ev / M::lit_gain_step_rad));
+            const double closed = environment::rock_shadow_per_cover(eta, std::sin(ev));
+            worst_hidden = std::max(worst_hidden, std::abs(t.hidden[view_entry(kv, 0, 0)] - closed) / (1.0 + closed));
+            worst_same = std::max(worst_same, std::abs(t.excess[view_entry(kv, 0, k_same)]) / (1.0 + closed));
+            worst_opposite = std::max(worst_opposite, std::abs(t.excess[view_entry(kv, M::view_azimuth_samples - 1, k_same)] -
+                                                               t.hidden[view_entry(kv, 0, 0)]) / (1.0 + closed));
+            worst_flux = std::max(worst_flux, std::abs(t.flux[view_entry(kv, 0, k_same)] /
+                                                       (1.0 + t.hidden[view_entry(kv, 0, k_same)]) - 1.0));
+        }
+        std::printf("  view tables half-spheroid eta %.2f: hidden %.4f, X same-direction %.4f, X opposite %.4f, "
+                    "flux at phase 0 %.4f (worst, 2-88 deg)\n", eta, worst_hidden, worst_same, worst_opposite, worst_flux);
+        CHECK(worst_hidden < 0.01);
+        CHECK(worst_same < 0.01);
+        CHECK(worst_opposite < 0.01);
+        CHECK(worst_flux < 0.01);
+        // From the zenith nothing outside the footprint is hidden.
+        CHECK(std::abs(t.hidden[view_entry(M::view_elevation_samples - 1, 0, 10)]) < 1e-9);
+    }
+}
+
+TEST_CASE("Light factors from an oblique eye: the zenith view is the nadir law, the excess darkens the ground",
+          "[moon_surface][unresolved_shading]") {
+    const auto& m = shared_model();
+    using M = UnresolvedShadingModel;
+    REQUIRE(m.rock_view_excess.size() == static_cast<size_t>(M::view_elevation_samples * M::view_azimuth_samples *
+                                                             M::lit_gain_samples));
+    for (const double abundance : {1.0, 10.0}) {
+        for (const double d : {0.1, inf}) {
+            const auto nadir = environment::unresolved_light_factors(m, abundance, d, 0.3264, 20.0, 7 * deg, 12 * deg);
+            const auto zenith = environment::unresolved_light_factors(m, abundance, d, 0.3264, 20.0, 7 * deg, 12 * deg,
+                                                                      true, environment::UnresolvedView{});
+            CHECK(zenith.sun == nadir.sun);
+            CHECK(zenith.earth == nadir.earth);
+        }
+    }
+    // The excess and the seen gain at the Task 11 rock gate's geometry (Sun 7 deg, eye 60 deg, 37 deg apart) and a
+    // grazing eye; printed for the docs.
+    for (const auto& [es, ev, dphi] : {std::array<double, 3>{7, 60, 37}, {7, 60, 180}, {7, 10, 0}, {7, 10, 90},
+                                       {30, 20, 90}, {30, 20, 180}}) {
+        std::printf("    Sun %2.0f deg, eye %2.0f deg, dphi %3.0f deg: X %.3f, gain ratio %.3f, sigma(eye) %.3f\n", es, ev,
+                    dphi, environment::rock_view_excess_table(m, es * deg, ev * deg, dphi * deg),
+                    environment::rock_view_gain_ratio_table(m, es * deg, ev * deg, dphi * deg),
+                    environment::rock_shadow_table(m, ev * deg));
+        CHECK(environment::rock_view_excess_table(m, es * deg, ev * deg, dphi * deg) >= 0.0);
+    }
+    // Down-Sun the eye sees the rocks' lit sides: brighter than from the zenith; up-Sun their dark sides.
+    CHECK(environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, 0.0) > 1.0);
+    CHECK(environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, pi) < 1.0);
+    // The near-field shadow map takes the Sun's drawn-rock shadows and the drawn relief's G1 off the statistics; the
+    // earthshine keeps them.
+    environment::UnresolvedView mapped;
+    mapped.sun_shadow_map = true;
+    const auto with_map = environment::unresolved_light_factors(m, 1.0, 0.1, 0.0102, 20.0, 7 * deg, 7 * deg, false, mapped);
+    const auto without = environment::unresolved_light_factors(m, 1.0, 0.1, 0.0102, 20.0, 7 * deg, 7 * deg, true,
+                                                               environment::UnresolvedView{});
+    const auto no_drawn = environment::unresolved_light_factors(m, 1.0, 0.1, 0.0102, 20.0, 7 * deg, 7 * deg, false,
+                                                                environment::UnresolvedView{});
+    const double g1 = environment::smith_lit_fraction(std::tan(7 * deg),
+                                                      environment::unshadowed_slope_variance(m, 0.0102, 20.0));
+    CHECK(std::abs(with_map.sun - no_drawn.sun / g1) < 1e-12);
+    // The drawn rocks below shadow_caster_factor x d keep their Sun shadows statistical: between no drawn shadow and
+    // all of them statistical, and exactly the latter with every drawn rock below the casting threshold.
+    const auto mapped_drawn = environment::unresolved_light_factors(m, 1.0, 0.1, 0.0102, 20.0, 7 * deg, 7 * deg, true,
+                                                                    mapped);
+    CHECK(mapped_drawn.sun < with_map.sun);
+    CHECK(mapped_drawn.sun > without.sun / g1);
+    const auto all_uncast = environment::unresolved_light_factors(m, 1.0, 4.0, 0.0102, 20.0, 7 * deg, 7 * deg, true,
+                                                                  mapped);
+    const auto all_stat = environment::unresolved_light_factors(m, 1.0, 4.0, 0.0102, 20.0, 7 * deg, 7 * deg, true,
+                                                                environment::UnresolvedView{});
+    CHECK(std::abs(all_uncast.sun - all_stat.sun / g1) < 1e-12);
+    CHECK(with_map.earth == no_drawn.earth);
+    CHECK(mapped_drawn.earth == without.earth);
+    // A map that resolves the relief only from 0.5 m: the drawn relief finer than that keeps its Smith factor.
+    environment::UnresolvedView coarse = mapped;
+    coarse.shadow_map_resolved_m = 0.5;
+    const auto with_coarse = environment::unresolved_light_factors(m, 1.0, 0.1, 0.0102, 20.0, 7 * deg, 7 * deg, false, coarse);
+    const double g1_coarse = environment::smith_lit_fraction(std::tan(7 * deg),
+                                                             environment::unshadowed_slope_variance(m, 0.0102, 0.5));
+    CHECK(std::abs(with_coarse.sun - with_map.sun * g1_coarse) < 1e-12);
+    CHECK(g1_coarse < 1.0);
+    CHECK(g1_coarse > g1);
+}
+
+TEST_CASE("Smith visible-lit fraction: zenith limit, shadow hiding, monotone in the azimuth difference",
+          "[moon_surface][unresolved_shading]") {
+    const double v = 0.3;
+    for (const double el : {3.0, 7.0, 20.0}) {
+        const double tl = std::tan(el * deg);
+        CHECK(std::abs(environment::smith_visible_lit_fraction(tl, inf, 1.0, v) -
+                       environment::smith_lit_fraction(tl, v)) < 1e-15);
+        // The eye at the light's place sees no shadow.
+        CHECK(std::abs(environment::smith_visible_lit_fraction(tl, tl, 0.0, v) - 1.0) < 1e-15);
+        double previous = 2.0;
+        for (const double phi : {0.0, 0.5, 1.0, 2.0, pi}) {
+            const double f = environment::smith_visible_lit_fraction(tl, std::tan(30 * deg), phi, v);
+            CHECK(f <= previous + 1e-15);
+            CHECK(f > 0.0);
+            previous = f;
+        }
+        // Opposite azimuths at a high eye: close to the uncorrelated product's (1 + Lv) / (1 + Ll + Lv).
+        std::printf("    Sun %4.1f deg: G1 %.4f, eye 30 deg same azimuth %.4f, opposite %.4f\n", el,
+                    environment::smith_lit_fraction(tl, v),
+                    environment::smith_visible_lit_fraction(tl, std::tan(30 * deg), 0.0, v),
+                    environment::smith_visible_lit_fraction(tl, std::tan(30 * deg), pi, v));
+    }
+}
+
+TEST_CASE("Hapke hemispherical albedo: isotropic scatterers 1 - gamma H(mu0), the shipped regolith's range",
+          "[moon_surface][unresolved_shading]") {
+    // Isotropic single scattering, no opposition effect, smooth, K = 1: A_h(mu0) = 1 - sqrt(1 - w) H(mu0) (Hapke 2012,
+    // eq. 10.33 with the exact H; the 2002 approximation of H is within 1 %: at w 0.9, 1 - gamma H ~0.5, the identity holds to ~2 %).
+    config::HapkeParameters iso;
+    iso.w = 0.9;
+    iso.b = 0.0;
+    iso.c = 0.0;
+    iso.porosity_k = 1.0;
+    double worst = 0.0;
+    for (const double mu0 : {0.05, 0.2, 0.5, 0.8, 1.0}) {
+        const double expected = 1.0 - std::sqrt(1.0 - iso.w) *
+                                          environment::hapke_h_function(mu0, iso.w, environment::HapkeHFunction::hapke_2002);
+        worst = std::max(worst, std::abs(environment::hapke_hemispherical_albedo(iso, mu0, 0.0) / expected - 1.0));
+    }
+    std::printf("  isotropic A_h against 1 - gamma H: worst %.4f\n", worst);
+    CHECK(worst < 0.03);  // [D] the H approximation's error, amplified by 1 - gamma H ~ 0.5
+    // The integration itself, exactly: at w -> 0 single scattering dominates, A_h = (w / 2) (1 - mu0 ln(1 + 1 / mu0))
+    // (Lommel-Seeliger's hemispherical integral; multiple scattering adds O(w) relative).
+    config::HapkeParameters thin = iso;
+    thin.w = 1e-4;
+    double worst_ls = 0.0;
+    for (const double mu0 : {0.05, 0.2, 0.5, 0.8, 1.0}) {
+        const double expected = 0.5 * thin.w * (1.0 - mu0 * std::log(1.0 + 1.0 / mu0));
+        worst_ls = std::max(worst_ls, std::abs(environment::hapke_hemispherical_albedo(thin, mu0, 0.0) / expected - 1.0));
+    }
+    std::printf("  single-scattering limit: worst %.5f\n", worst_ls);
+    CHECK(worst_ls < 1e-3);
+    const auto& m = shared_model();
+    REQUIRE(m.hemispherical_albedo.size() == static_cast<size_t>(UnresolvedShadingModel::lit_gain_samples));
+    for (const double e : {2.0, 7.0, 15.0, 30.0, 60.0, 90.0}) {
+        std::printf("    regolith A_h at Sun %2.0f deg: %.4f\n", e, environment::hemispherical_albedo_table(m, e * deg));
+        CHECK(environment::hemispherical_albedo_table(m, e * deg) > 0.02);
+        CHECK(environment::hemispherical_albedo_table(m, e * deg) < 0.4);
+    }
 }

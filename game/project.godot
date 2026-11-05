@@ -66,6 +66,22 @@ moon_hapke_opposition={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+moon_near_shadow={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+moon_eye_world={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+moon_near_shadow_texel={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+moon_near_shadow_split={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 moon_rock_pixel_angle={
 "type": "float",
 "value": 0.001

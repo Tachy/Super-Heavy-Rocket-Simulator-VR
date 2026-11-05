@@ -45,6 +45,24 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 			float(stats["rock_reflectance_ratio"]), float(stats["lit_gain_step_rad"]), float(stats["lit_gain_floor_rad"])))
 	material.set_shader_parameter("detail_rock_lit_gain", PackedFloat32Array(Array(stats["rock_lit_gain"])))
 	material.set_shader_parameter("detail_rock_shadow", PackedFloat32Array(Array(stats["rock_shadow"])))
+	# Task 12: the oblique eye's rock terms (RG float texture, the core's table layout) and the fill's albedo.
+	var excess := PackedFloat64Array(stats.get("rock_view_excess", PackedFloat64Array()))
+	var ratio := PackedFloat64Array(stats.get("rock_view_gain_ratio", PackedFloat64Array()))
+	var gains := Array(stats["rock_lit_gain"]).size()
+	material.set_shader_parameter("detail_rock_view_present", excess.size() > 0 and excess.size() == ratio.size())
+	if excess.size() > 0 and excess.size() == ratio.size():
+		var rows := excess.size() / gains
+		var view := PackedFloat32Array()
+		view.resize(2 * excess.size())
+		for k in excess.size():
+			view[2 * k] = excess[k]
+			view[2 * k + 1] = ratio[k]
+		material.set_shader_parameter("detail_rock_view", ImageTexture.create_from_image(
+				Image.create_from_data(gains, rows, false, Image.FORMAT_RGF, view.to_byte_array())))
+		material.set_shader_parameter("detail_view_step", Vector2(float(stats["view_elevation_step_rad"]),
+				float(stats["view_azimuth_step_rad"])))
+	material.set_shader_parameter("detail_hemispherical_albedo",
+			PackedFloat32Array(Array(stats.get("hemispherical_albedo", PackedFloat64Array()))))
 	var grid: PackedFloat32Array = core.moon_rock_abundance_grid(ABUNDANCE_WIDTH, ABUNDANCE_HEIGHT)
 	var abundance := Image.create_from_data(ABUNDANCE_WIDTH, ABUNDANCE_HEIGHT, false, Image.FORMAT_RF,
 			grid.to_byte_array())

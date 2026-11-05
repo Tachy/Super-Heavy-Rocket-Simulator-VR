@@ -29,6 +29,8 @@ const int DETAIL_HEX_PERIOD = 256;
 // [D] The core's tables (unresolved_shading.hpp): drawn_table_samples, lit_gain_samples.
 const int DETAIL_DRAWN_SAMPLES = 97;
 const int DETAIL_GAIN_SAMPLES = 46;
+const int DETAIL_VIEW_ELEVATIONS = 46;  // core UnresolvedShadingModel::view_elevation_samples
+const int DETAIL_VIEW_AZIMUTHS = 7;  // view_azimuth_samples
 // MoonDetailShading.WEIGHT_SAMPLES / WEIGHT_PER_OCTAVE (texture weights from 1 mm, 4 per octave, to 16 m).
 const int DETAIL_SCALES = 4;
 const int DETAIL_WEIGHT_SAMPLES = 57;
@@ -55,6 +57,14 @@ uniform vec4 detail_rock_shape = vec4(0.0, 1.0, 1.0, 0.0);
 uniform float detail_rock_lit_gain[46];
 // The rocks' cast shadow per cover sigma(e) on the same elevation grid (core rock_shadow: the generated angular rocks).
 uniform float detail_rock_shadow[46];
+// Oblique eye (Task 12; core rock_view_excess_table / rock_view_gain_ratio_table): R = X, the ground hidden from the eye
+// outside the light's shadow per cover, G = the rocks' seen-radiance gain over the zenith view's; texel (k light
+// elevation on the gain grid, row kv x DETAIL_VIEW_AZIMUTHS + ka), filtered linearly along the light's elevation.
+uniform sampler2D detail_rock_view : filter_linear, repeat_disable;
+uniform bool detail_rock_view_present = false;
+uniform vec2 detail_view_step = vec2(0.0349065850, 0.523598776);  // view elevation, azimuth difference steps (rad)
+// The regolith's Hapke directional-hemispherical albedo on the gain grid (the fill light, moon_fill.gdshaderinc).
+uniform float detail_hemispherical_albedo[46];
 // The abundance factor (LunarRocks::abundance_factor), equirectangular like moon_color (u = (lon + 180) / 360).
 uniform sampler2D detail_rock_abundance : filter_linear, repeat_enable;
 // Rocks drawn as geometry (Task 11, MoonRockLayer): from moon_rock_threshold_px pixels of projected size
@@ -173,6 +183,10 @@ float detail_rock_threshold_m(float distance_m, float node_min_m, float abundanc
 	return max(pixels * moon_rock_pixel_angle * distance_m, node_min_m);
 }
 
+// [E] core shadow_caster_factor: the drawn rocks cast the near-field shadow map from this many times the geometry
+// threshold (their own growth band in the shadow pass, moon_rock.gdshader); below it their Sun shadows stay statistical.
+const float DETAIL_SHADOW_CASTER_FACTOR = 4.0;
+
 float detail_gain(float elevation) {
 	float x = clamp(elevation / detail_rock_shape.z, 0.0, float(DETAIL_GAIN_SAMPLES - 1));
 	int k = min(int(x), DETAIL_GAIN_SAMPLES - 2);
@@ -184,6 +198,61 @@ float detail_shadow(float elevation) {
 	float x = clamp(elevation / detail_rock_shape.z, 0.0, float(DETAIL_GAIN_SAMPLES - 1));
 	int k = min(int(x), DETAIL_GAIN_SAMPLES - 2);
 	return mix(detail_rock_shadow[k], detail_rock_shadow[k + 1], x - float(k));
+}
+
+// The oblique eye's (X, gain ratio) at the light's elevation, the view's elevation and the azimuth difference (rad,
+// [0, pi]); (0, 1) from the zenith or without the table.
+vec2 detail_rock_view_terms(float elevation, float view_elevation, float azimuth_difference) {
+	if (!detail_rock_view_present || view_elevation >= 0.5 * DETAIL_PI) {
+		return vec2(0.0, 1.0);
+	}
+	float u = (clamp(elevation / detail_rock_shape.z, 0.0, float(DETAIL_GAIN_SAMPLES - 1)) + 0.5)
+			/ float(DETAIL_GAIN_SAMPLES);
+	float xv = clamp(view_elevation / detail_view_step.x, 0.0, float(DETAIL_VIEW_ELEVATIONS - 1));
+	float xa = clamp(azimuth_difference / detail_view_step.y, 0.0, float(DETAIL_VIEW_AZIMUTHS - 1));
+	int kv = min(int(xv), DETAIL_VIEW_ELEVATIONS - 2);
+	int ka = min(int(xa), DETAIL_VIEW_AZIMUTHS - 2);
+	float rows = float(DETAIL_VIEW_ELEVATIONS * DETAIL_VIEW_AZIMUTHS);
+	float r = float(kv * DETAIL_VIEW_AZIMUTHS + ka);
+	vec2 t00 = texture(detail_rock_view, vec2(u, (r + 0.5) / rows)).rg;
+	vec2 t01 = texture(detail_rock_view, vec2(u, (r + 1.5) / rows)).rg;
+	vec2 t10 = texture(detail_rock_view, vec2(u, (r + float(DETAIL_VIEW_AZIMUTHS) + 0.5) / rows)).rg;
+	vec2 t11 = texture(detail_rock_view, vec2(u, (r + float(DETAIL_VIEW_AZIMUTHS) + 1.5) / rows)).rg;
+	float fa = xa - float(ka);
+	return mix(mix(t00, t01, fa), mix(t10, t11, fa), xv - float(kv));
+}
+
+// The view geometry of a fragment over the local vertical up: (view elevation, Sun azimuth difference, Earth azimuth
+// difference), rad.
+vec3 detail_view_geometry(vec3 up, vec3 to_eye, vec3 to_sun, vec3 to_earth) {
+	vec3 v = to_eye - up * dot(to_eye, up);
+	vec3 s = to_sun - up * dot(to_sun, up);
+	vec3 e = to_earth - up * dot(to_earth, up);
+	float lv = length(v);
+	float sun_dphi = lv > 1.0e-6 && length(s) > 1.0e-6 ? acos(clamp(dot(v, s) / (lv * length(s)), -1.0, 1.0)) : 0.0;
+	float earth_dphi = lv > 1.0e-6 && length(e) > 1.0e-6 ? acos(clamp(dot(v, e) / (lv * length(e)), -1.0, 1.0)) : 0.0;
+	return vec3(asin(clamp(dot(to_eye, up), -1.0, 1.0)), sun_dphi, earth_dphi);
+}
+
+// The lit share of the surface the eye sees (core smith_visible_lit_fraction): Smith's height-direction-correlated
+// G2(l, v) / G1(v) (Heitz 2014 after van Ginneken et al. 1998); view_elevation >= pi / 2: G1(l).
+float detail_smith_visible(float tan_light, float view_elevation, float azimuth_difference, float variance) {
+	if (tan_light <= 0.0) {
+		return 0.0;
+	}
+	if (variance <= 0.0) {
+		return 1.0;
+	}
+	if (view_elevation >= 0.5 * DETAIL_PI) {
+		return detail_smith(tan_light, variance);
+	}
+	float s = sqrt(variance);
+	float a = tan_light / s;
+	float lambda_l = 0.5 * (detail_erf(a) - 1.0) + exp(-a * a) / (2.0 * a * sqrt(DETAIL_PI));
+	float b = tan(view_elevation) / s;
+	float lambda_v = 0.5 * (detail_erf(b) - 1.0) + exp(-b * b) / (2.0 * b * sqrt(DETAIL_PI));
+	float correlation = 4.41 * azimuth_difference / (4.41 * azimuth_difference + 1.0);
+	return (1.0 + lambda_v) / (1.0 + max(lambda_l, lambda_v) + correlation * min(lambda_l, lambda_v));
 }
 
 // One directional light's factor (core unresolved_light_factors' f(e)): c, c_drawn, rock_share, norm as there.
@@ -201,6 +270,47 @@ float detail_light_factor(float c, float c_drawn, float rock_share, float norm, 
 // (sun, earth) factors of the ground (core unresolved_light_factors). geometry_min_m: the threshold diameter
 // (detail_rock_threshold_m; 1e30: every rock statistical); sun_elevation / earth_elevation: the lights' macroscopic
 // elevations (rad; the earthshine's source is a directional light like the Sun: the same law at its own elevation).
+// The same seen from an oblique eye (core unresolved_light_factors with UnresolvedView): view = (view elevation, Sun
+// and Earth azimuth differences; detail_view_geometry); sun_map_resolved_m >= 0: the near-field shadow map draws the
+// Sun's shadows of the drawn rocks from DETAIL_SHADOW_CASTER_FACTOR x the threshold and of the drawn relief from that
+// wavelength up (Smith for the finer drawn relief only); < 0: no map.
+float detail_light_factor_view(float c, float c_drawn, float rock_seen, float norm, float unshadowed, float elevation,
+		float view_elevation, float azimuth_difference, float sigma_view) {
+	float se = sin(elevation);
+	if (se <= 0.0) {
+		return 0.0;
+	}
+	float lit = detail_smith_visible(tan(elevation), view_elevation, azimuth_difference, unshadowed);
+	float sigma = detail_shadow(elevation);
+	vec2 terms = detail_rock_view_terms(elevation, view_elevation, azimuth_difference);
+	float drawn_visible = max(sigma - sigma_view + terms.x, 0.0);
+	return lit * (exp(-c * (1.0 + sigma + terms.x) - c_drawn * drawn_visible)
+			+ rock_seen * detail_rock_shape.y * detail_gain(elevation) * terms.y) / norm;
+}
+
+vec2 detail_light_factors_view(float abundance, float geometry_min_m, float spacing_m, float horizon_spacing_m,
+		float sun_elevation, float earth_elevation, vec3 view, float sun_map_resolved_m) {
+	bool sun_map = sun_map_resolved_m >= 0.0;
+	float rho = detail_rock_shape.y;
+	float c_all = abundance * detail_rock_cover(detail_rock_law.z, detail_rock_law.w);
+	float c = abundance * detail_rock_statistical_cover(geometry_min_m);
+	float c_drawn = rock_geometry_shadows_statistical ? max(c_all - c, 0.0) : 0.0;
+	// With the map: the drawn rocks below the shadow pass's threshold cast none, theirs stay statistical.
+	float c_uncast = rock_geometry_shadows_statistical
+			? max(abundance * detail_rock_statistical_cover(DETAIL_SHADOW_CASTER_FACTOR * geometry_min_m) - c, 0.0) : 0.0;
+	float norm = exp(-c_all) + (1.0 - exp(-c_all)) * rho;
+	bool zenith = !detail_rock_view_present || view.x >= 0.5 * DETAIL_PI;
+	float view_elevation = max(view.x, detail_rock_shape.w);
+	float sigma_view = zenith ? 0.0 : detail_shadow(view_elevation);
+	float rock_seen = 1.0 - exp(-c * (1.0 + sigma_view));
+	float unshadowed = max(detail_drawn(spacing_m) - detail_drawn(horizon_spacing_m), 0.0);
+	float unresolved = sun_map ? max(detail_drawn(spacing_m) - detail_drawn(sun_map_resolved_m), 0.0) : unshadowed;
+	return vec2(detail_light_factor_view(c, sun_map ? c_uncast : c_drawn, rock_seen, norm, unresolved,
+			sun_elevation, zenith ? 0.5 * DETAIL_PI : view_elevation, view.y, sigma_view),
+			detail_light_factor_view(c, c_drawn, rock_seen, norm, unshadowed, earth_elevation,
+			zenith ? 0.5 * DETAIL_PI : view_elevation, view.z, sigma_view));
+}
+
 vec2 detail_light_factors(float abundance, float geometry_min_m, float spacing_m, float horizon_spacing_m,
 		float sun_elevation, float earth_elevation) {
 	float rho = detail_rock_shape.y;

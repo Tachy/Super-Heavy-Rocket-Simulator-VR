@@ -176,3 +176,15 @@ rocks (M3, T13). Pool memory: ~210-220 MB of GPU buffers at IM-2 2 m once warmed
 capacity) key), 650 MB in the boulder field. Main thread: the rock layer's share during a 10 km camera jump max
 1.1-1.2 ms per frame (attach queue 2 ms budget incl. the pool warming, visible counts 0.5 ms); the quadtree's own
 update without rocks max 13.5 ms (known-issues, T13).
+
+Near-field Sun shadows (moon procedural surface Task 12, `MoonNearShadow`), stereo mock, 2 m above IM-2 (Sun 6.75 deg),
+azimuth 150 deg from the Sun, elevation -20 deg, fov 60, median of 120 frames, `--rock_budget=off`, two alternating
+rounds: shadows off 12.18 / 12.09 ms, on 16.81 / 16.07 ms (+4.0-4.6 ms). The off numbers include Task 12's oblique-eye
+rock terms and fill light (11.5-11.7 ms with the first, coarser view table; Task 11's 8.7 ms were another view). Diviner
+boulder field (39.36 N, -0.17 E, same instant and view): 39.4 -> 51.8 ms (+12.4 ms). Breakdown at IM-2 (first version,
+every drawn rock casting, PCSS medium; off 11.6 ms): receivers only, no casters 14.1 ms (+2.5: the lit pipeline's light
+loop and the PCSS lookups; hard PCF instead saves 2.0 ms), + terrain casters 16.0, + rock casters 16.3, all 17.6 ms; 2
+splits instead of 4 -1.1 ms. With every drawn rock casting the boulder field took 120.7 ms (42.3 off: the shadow pass ran
+every listed rock's vertices once per split), hence the casting threshold 4 x the geometry threshold (separate
+shadow-only MultiMeshes with their own visible prefix) and PCSS LOW (medium and ultra give the same mean radiance).
+

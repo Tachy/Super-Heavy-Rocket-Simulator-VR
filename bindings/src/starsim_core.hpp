@@ -153,14 +153,20 @@ public:
     // rock_reflectance_ratio, rock_lit_gain, rock_shadow (PackedFloat64Array), lit_gain_step_rad, lit_gain_floor_rad,
     // globe_slope_variance, rock_area_share, rock_mean_tan, crater_fraction (PackedFloat64Array: crater_drawn_fraction
     // at D / L = 2^(k / 2 - crater_fraction_lowest_octaves): the texture craters' weights),
-    // crater_fraction_lowest_octaves, crater_slope_exponent (q = 2 - b: crater slope variance per ln D ~ D^q)}. present
+    // crater_fraction_lowest_octaves, crater_slope_exponent (q = 2 - b: crater slope variance per ln D ~ D^q),
+    // rock_view_excess, rock_view_gain_ratio (PackedFloat64Array, layout of UnresolvedShadingModel), view_elevation_samples,
+    // view_elevation_step_rad, view_azimuth_samples, view_azimuth_step_rad, hemispherical_albedo (on the gain grid)}. present
     // false without the surface. Call from one thread; afterwards the queries below are thread-safe.
     godot::Dictionary moon_unresolved_shading();
     // Core reference of the shader's light factors (unresolved_light_factors): Vector2(sun, earth); (1, 1) before
-    // moon_unresolved_shading.
+    // moon_unresolved_shading. The eye at view_elevation_rad over the mean plane (pi / 2: the nadir law), the azimuth
+    // differences light - eye; sun_shadow_map: the near-field shadow map draws the Sun's drawn-rock and relief shadows
+    // (the relief from shadow_map_resolved_m up).
     godot::Vector2 moon_unresolved_light_factors(double abundance, double geometry_min_diameter_m, double spacing_m,
                                                  double horizon_spacing_m, double sun_elevation_rad,
-                                                 double earth_elevation_rad) const;
+                                                 double earth_elevation_rad, double view_elevation_rad,
+                                                 double sun_view_azimuth_rad, double earth_view_azimuth_rad,
+                                                 bool sun_shadow_map, double shadow_map_resolved_m) const;
     // Residual Hapke mean slope (rad) of a node with vertex spacing spacing_m; the globe's before moon_unresolved_shading.
     double moon_residual_theta_bar(double spacing_m) const;
     // Rock abundance factor (LunarRocks::abundance_factor: Diviner map / reference, 1 outside it; 1 without rocks) at

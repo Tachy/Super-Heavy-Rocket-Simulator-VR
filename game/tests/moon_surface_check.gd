@@ -848,8 +848,12 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 	var norm := Atmosphere.hapke_normalisation(float(_hapke["disc_reflectance_full"]))
 	# The active light (Sun, or the Earth in the earthshine-only cases) at elevation 90 - i; each factor depends only on
 	# its own light's elevation.
+	# The eye at 90 - e over the patch, psi between the light's and the eye's azimuths (Task 12: the oblique eye's rock
+	# terms; the patch camera is far away, its view direction uniform).
+	var view_elevation := deg_to_rad(90.0 - geometry.y)
+	var psi := _azimuth_difference(geometry)
 	var factors := _core.moon_unresolved_light_factors(float(entry["abundance"]), INF, spacing, float(entry["horizon"]),
-			deg_to_rad(90.0 - geometry.x), deg_to_rad(90.0 - geometry.x))
+			deg_to_rad(90.0 - geometry.x), deg_to_rad(90.0 - geometry.x), view_elevation, psi, psi)
 	var core := norm * _core.moon_hapke_reflectance(cos(deg_to_rad(geometry.x)), cos(deg_to_rad(geometry.y)),
 			deg_to_rad(geometry.z), theta)
 	var what := ""
@@ -869,15 +873,18 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 		var d := float(entry["threshold"])
 		var elevation := deg_to_rad(90.0 - geometry.x)
 		var ground_v := _core.moon_unresolved_light_factors(float(entry["abundance"]), d, spacing, float(entry["horizon"]),
-				elevation, elevation)
+				elevation, elevation, view_elevation, psi, psi)
 		var ground := ground_v.x if entry["sun"] else ground_v.y
 		var c_law := float(entry["abundance"]) * _law_drawn_cover(d)  # the law at the patch's abundance
-		var rock := (factor - exp(-c_law) * ground) / (1.0 - exp(-c_law))
+		# The drawn rocks hide the ground over their plan area and the region behind them (sigma at the eye's
+		# elevation per cover): the eye sees exp(-C_g (1 + sigma_v)) of the ground (core unresolved_light_factors).
+		var hidden := 1.0 + _rock_shadow_table(view_elevation)
+		var rock := (factor - exp(-c_law * hidden) * ground) / (1.0 - exp(-c_law * hidden))
 		var c_real := 0.0
 		for diameter in _rock_diameters:
 			c_real += 0.25 * PI * diameter * diameter * clampf(log(diameter / d) / log(2.0), 0.0, 1.0)
 		c_real /= _rock_view_edge_m * _rock_view_edge_m
-		var realised := exp(-c_real) * ground + (1.0 - exp(-c_real)) * rock
+		var realised := exp(-c_real * hidden) * ground + (1.0 - exp(-c_real * hidden)) * rock
 		print("  info  rock patch d %.2f m, %s: drawn cover realised %.5f, law %.5f; shader against the law's mean %+.2f %%, against the realised drawn cover %+.2f %%"
 				% [d, "Sun" if entry["sun"] else "earthshine", c_real, c_law,
 				100.0 * (shader / (core * factor) - 1.0), 100.0 * (shader / (core * realised) - 1.0)])
@@ -960,6 +967,26 @@ func _start_rock_patch() -> void:
 	print("  info  rock patch: %d rocks >= %.2f m over %.0f m (cover in the viewed %.0f m square: %.4f, law %.4f)" % [
 			int(data["count"]), ROCK_PATCH_MIN_D_M, ROCK_PATCH_EDGE_M, 0.5 * ROCK_PATCH_VIEW_M, _rock_cover,
 			_law_cover(ROCK_PATCH_MIN_D_M)])
+
+
+## The angle between the horizontal directions to the light and to the eye of a patch geometry (i, e, g deg).
+func _azimuth_difference(geometry: Vector3) -> float:
+	var i := deg_to_rad(geometry.x)
+	var e := deg_to_rad(geometry.y)
+	if sin(i) * sin(e) <= 1.0e-9:
+		return 0.0
+	return acos(clampf((cos(deg_to_rad(geometry.z)) - cos(i) * cos(e)) / (sin(i) * sin(e)), -1.0, 1.0))
+
+
+## The core's rock shadow per cover sigma(e) (the statistics' table, linear; the floor below its first sample).
+func _rock_shadow_table(elevation: float) -> float:
+	if elevation >= 0.5 * PI:
+		return 0.0
+	var table: Array = Array(_detail_stats["rock_shadow"])
+	var e := maxf(elevation, float(_detail_stats["lit_gain_floor_rad"]))
+	var x := clampf(e / float(_detail_stats["lit_gain_step_rad"]), 0.0, table.size() - 1.0)
+	var k := mini(int(x), table.size() - 2)
+	return lerpf(float(table[k]), float(table[k + 1]), x - k)
 
 
 ## The law's rock cover from d up (abundance 1): the statistics' closed form (coef (D_max^q - d^q)).

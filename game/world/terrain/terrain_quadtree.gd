@@ -68,6 +68,9 @@ var node_parameters := Callable()
 ## The Moon's drawn rocks (Task 11): built with each node on its worker, attached at the upload, detached at the
 ## release; null: none.
 var rock_layer: MoonRockLayer = null
+## The node meshes cast the Sun's directional shadow (the Moon's near-field shadows, Task 12; the Earth's terrain casts
+## none: its Sun light has no shadow map).
+var cast_shadows := false
 ## {nodes_drawn, nodes_loading, uploads_last_frame, update_ms (main-thread time of the last update), builds (node builds
 ## collected so far), build_ms (their summed worker time), horizon_bakes (builds that baked a horizon map),
 ## max_drawn_level (the deepest drawn leaf's level: the one under the camera), phase_ms (the last update's main-thread
@@ -234,7 +237,7 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 	_collect_builds()
 	_upload_finished()
 	if rock_layer != null:
-		rock_layer.process_queue()  # the queued nodes' rocks, within the layer's own per-frame budget
+		rock_layer.process_queue(_camera_fixed_m)  # the queued nodes' rocks, within the layer's own per-frame budget
 	var t1 := Time.get_ticks_usec()
 	_frame += 1
 	_reached_count = 0
@@ -324,6 +327,8 @@ func _exit_tree() -> void:
 	for task_id: int in _in_flight.values():
 		WorkerThreadPool.wait_for_task_completion(task_id)
 	_in_flight.clear()
+	if rock_layer != null:
+		rock_layer.free_all()  # the pools' orphan MultiMesh nodes (review n3)
 
 
 ## Hot path (every uploaded node of the drawn tree, every frame; GDScript costs ~1 us per node, so the loop is flat):
@@ -702,6 +707,7 @@ func _upload(result: Dictionary) -> void:
 
 func _new_instance() -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
-	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows \
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(instance)
 	return instance

@@ -283,3 +283,17 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Lunar campaign seeds 5 / 17 land 0.89 / 0.91 m off (gate 1 m) although the first contact is 0.02 m off: the
   footprint moves while the hull tips onto the downhill feet and overshoots (5.1-5.3 deg slopes;
   `docs/subsystems/moon-surface.md`). Cause (foot slip during the tip vs. leg stroke) not traced.
+
+## Moon procedural surface plan, Task 12 (2026-11-05)
+- Vehicles and structures cast shadows on the ground only on the Moon (near-field Sun shadow map, `docs/subsystems/
+  moon-surface.md` Near-field shadows; 150 m-4 km around the eye). On the Earth the Sun light has no shadow map and
+  `terrain_earth.gdshader` is unshaded: no vehicle or tower shadow on the terrain there (launch-structures.md).
+- Near-field shadows cost GPU time: stereo mock (3534 x 2838 per eye) at IM-2 2 m +4.0-4.6 ms and in the Diviner boulder
+  field +12.4 ms (vr-performance.md); the boulder field is over the 45 fps floor without shadows already (T13).
+- The oblique eye's rock tables (`template_rock_view_tables`) take ~8 s more when the unresolved-shading model is built
+  (game load, every `[unresolved_shading]` test process; 24 threads): a cache or a coarser grid would cut it.
+- Boulder-field camera jump (moon_surface_check --rocks_only, Diviner maximum): the rock layer's main-thread share max
+  5.9-8.0 ms, 3-5 frames over the 5 ms gate since Task 12 (shadow-caster MultiMeshes attached with each node; Task 11
+  fix C: 3.87 ms); the IM-2 jump passes (2.7-3.4 ms). Eviction of far nodes at the pool bound (review N1) is off: 34.7 ms
+  spikes. Goes to T13 with the quadtree's own release / upload spikes (40+ ms).
+

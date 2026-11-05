@@ -19,14 +19,19 @@ shader_type spatial;
 // Light (moon_rock_light.gdshaderinc): Hapke rock law, the node's horizon map at the base for the Sun and the
 // earthshine, the Earth's shadow on the Sun, Smith's G1 of the node's drawn relief for each light at its own elevation;
 // the rock textures (triplanar in the rock's own metres, weights by the facet normal) as albedo variation and
-// mean-preserving slope modulation.
-render_mode unshaded, cull_back;
+// mean-preserving slope modulation. Near the eye the Sun's shadow map (moon_near_shadow.gdshaderinc, Task 12): the rocks
+// cast it (the shadow pass selects them from the eye, moon_eye_world) and receive it; the fill light from the sunlit
+// ground around (moon_fill.gdshaderinc).
+// Lit only for the near-field shadow map's light(): no ambient, no specular.
+render_mode cull_back, ambient_light_disabled, specular_disabled;
 
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/moon_regolith.gdshaderinc"
 #include "res://shaders/moon_detail.gdshaderinc"
 #include "res://shaders/moon_horizon.gdshaderinc"
 #include "res://shaders/moon_rock_light.gdshaderinc"
+#include "res://shaders/moon_near_shadow.gdshaderinc"
+#include "res://shaders/moon_fill.gdshaderinc"
 
 // MoonRockLayer.TEMPLATES (core RockTemplates::count).
 const int ROCK_TEMPLATES = 32;
@@ -104,10 +109,16 @@ void vertex() {
 	rock_custom = INSTANCE_CUSTOM;
 	rock_place = COLOR;
 	float diameter = INSTANCE_CUSTOM.x;
-	float distance_m = length(MODELVIEW_MATRIX[3].xyz);
+	// From the eye, also in the shadow pass (its view is the light's): the caster is the rock the eye sees.
+	float distance_m = IN_SHADOW_PASS ? length(MODEL_MATRIX[3].xyz - moon_eye_world) : length(MODELVIEW_MATRIX[3].xyz);
 	float pixels = diameter / max(distance_m * moon_rock_pixel_angle, 1.0e-30);
 	float abundance_here = textureLod(detail_rock_abundance, COLOR.zw, 0.0).r;
 	float threshold = detail_rock_threshold_m(distance_m, rock_node_min_m, abundance_here);
+	if (IN_SHADOW_PASS) {
+		// The shadow pass's own threshold (DETAIL_SHADOW_CASTER_FACTOR): a smaller drawn rock casts no map shadow (its
+		// shadow stays statistical on the ground); from there the caster grows over its own band like the rock.
+		threshold *= DETAIL_SHADOW_CASTER_FACTOR;
+	}
 	float growth = clamp(log2(diameter / threshold), 0.0, 1.0);
 	int rock_lod = int(CUSTOM0.x + 0.5);
 	// The test override (rock patch) draws whatever LOD it is given.
@@ -247,11 +258,50 @@ void fragment() {
 			ground_theta_bar);
 	// Smith's G1 of the node's unshadowed drawn relief for each light at its macroscopic elevation (the ground's own
 	// factor; review I1: the earthshine is a directional light like the Sun).
-	float lit = moon_rock_lit(sun_margin, detail_cell_m, detail_horizon_spacing_m);
-	float earth_lit = moon_rock_lit(earth_margin, detail_cell_m, detail_horizon_spacing_m);
-	float light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene * lit
-			+ earth_reflectance * earth_visible * moon_earthshine * earth_lit) / moon_rock_norm(abundance);
+	vec3 view = detail_view_geometry(up, to_eye, normalize(to_sun), normalize(to_earth));
+	float lit = moon_rock_lit(sun_margin, detail_cell_m, detail_horizon_spacing_m, view.xy);
+	float earth_lit = moon_rock_lit(earth_margin, detail_cell_m, detail_horizon_spacing_m, view.xz);
+	float norm = moon_rock_norm(abundance);
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
-	ALBEDO = albedo * relative_albedo * light * (atmosphere_enabled ? atmosphere_exposure_gain : 1.0);
+	float fade = moon_near_fade(-VERTEX.z);
+	float light;
+	float near_radiance = 0.0;
+	if (fade >= 1.0) {
+		light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene * lit
+				+ earth_reflectance * earth_visible * moon_earthshine * earth_lit) / norm;
+	} else {
+		// Inside the shadow map's range it draws the relief's and the rocks' shadows: Smith only for the drawn relief
+		// finer than the map resolves.
+		float sun_base = moon_regolith_scale * sun_reflectance * sunlit * moon_sun_scene / norm;
+		light = sun_base * sun_visible * lit * fade + moon_regolith_scale * earth_reflectance * earth_visible
+				* moon_earthshine * earth_lit / norm;
+		near_radiance = sun_base * moon_rock_lit(sun_margin, detail_cell_m, moon_near_resolved_m(-VERTEX.z), view.xy);
+	}
+	// Light from the sunlit ground around (the rock's faces turned from the Sun see it; moon_fill.gdshaderinc).
+	if (moon_brdf == 1) {
+		vec3 east_f = vec3(up.z, 0.0, -up.x);
+		east_f = length(east_f) > POLE_EAST_MIN ? normalize(east_f) : vec3(0.0, 0.0, 1.0);
+		vec2 uv_f = ((rock_place.xy * horizon_grid_scale + horizon_grid_offset) / horizon_stride + 0.5)
+				/ float(textureSize(horizon_map, 0).x);
+		float ground_k = dot(albedo, vec3(0.2126, 0.7152, 0.0722)) * moon_regolith_scale * moon_hapke_norm;
+		// The rock's own response to diffuse light: the regolith's A_h x its reflectance ratio (rho), on the mosaic norm.
+		light += moon_regolith_scale * moon_sun_scene * sunlit * moon_fill_reflectance(n, up, normalize(to_sun),
+				dot(n, to_eye), lit * sun_visible, ground_k, horizon_enabled, east_f, cross(up, east_f), uv_f)
+				* mix(1.0, detail_rock_shape.y, fillet) / norm;
+	}
+	float gain = atmosphere_enabled ? atmosphere_exposure_gain : 1.0;
+	EMISSION = albedo * relative_albedo * light * gain;
+	ALBEDO = albedo * relative_albedo * gain;
+	SPECULAR = 0.0;
+	ROUGHNESS = 1.0;
+	near_sun_radiance = near_radiance;
+	near_fade = fade;
+	near_horizon = sun_visible;
+	near_sun_view = normalize(mat3(VIEW_MATRIX) * (transpose(moon_world_to_local) * normalize(to_sun)));
+}
+
+void light() {
+	DIFFUSE_LIGHT += vec3(moon_near_light(near_sun_radiance, near_fade, near_horizon, near_sun_view, LIGHT,
+			LIGHT_IS_DIRECTIONAL, ATTENUATION));
 }

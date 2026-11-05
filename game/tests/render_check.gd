@@ -9,6 +9,8 @@
 #          [--moon_brdf=lommel_seeliger] (the game setting World.moon_brdf: the former Moon BRDF instead of Hapke)
 #          [--moon_detail_shading=off] (detail on, but no regolith textures / unresolved statistics: Task 9's shading)
 #          [--rocks=off] (no rock geometry: every rock in the statistical layer, MoonRockLayer.geometry_enabled)
+#          [--moon_near_shadows=off] (no near-field Sun shadow map on the Moon, MoonNearShadow.enabled; Task 12)
+#          [--moon_fill=off] (no terrain inter-reflection fill light, MoonNearShadow.fill_enabled)
 #          [--rock_budget=off] (rock_threshold_scale held at --rock_scale=<f>, default 1; --deterministic implies it)
 #          [--rock_scale_sweep=<from>,<to>,<frames>] (once settled: rock_threshold_scale stepped per frame, the camera
 #          held; with --out each frame saved as <out>_sweep<frame>.png - the rocks' popping check)
@@ -156,6 +158,16 @@ func _initialize() -> void:
 	World.moon_brdf = String(_args.get("moon_brdf", "hapke"))  # read in World._ready
 	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
 	MoonRockLayer.geometry_enabled = _args.get("rocks", "on") != "off"
+	MoonNearShadow.enabled = _args.get("moon_near_shadows", "on") != "off"  # the fidelity setting (Task 12)
+	MoonNearShadow.fill_enabled = _args.get("moon_fill", "on") != "off"
+	if _args.has("moon_shadow_casters"):
+		var casters: String = _args["moon_shadow_casters"]
+		MoonNearShadow.terrain_casts = casters.contains("terrain")
+		MoonNearShadow.rocks_cast = casters.contains("rocks")
+	MoonNearShadow.splits = int(_args.get("moon_shadow_splits", "4"))
+	MoonNearShadow.soft = _args.get("moon_shadow_soft", "on") != "off"
+	if _args.has("moon_shadow_quality"):
+		MoonNearShadow.soft_quality = ["hard", "very_low", "low", "medium", "high", "ultra"].find(String(_args["moon_shadow_quality"])) as RenderingServer.ShadowQuality
 	MoonRockLayer.budget_enabled = _args.get("rock_budget", "on") != "off" and not _args.has("deterministic")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)

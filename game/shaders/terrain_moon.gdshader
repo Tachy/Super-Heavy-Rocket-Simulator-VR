@@ -5,12 +5,14 @@ shader_type spatial;
 // (moon_color, equirectangular) through CUSTOM1's global UV; the Moon has no imagery crops and no water.
 // Terrain shadows: the core's baked horizon (16 azimuths per grid vertex, TerrainNodeBuilder._horizon_image) hides the
 // Sun and the earthshine behind crater rims and mountains: the visible fraction of each light's disc above the horizon
-// in its azimuth (linear between the two neighbouring sectors, bilinear between the vertices). Not modelled: the
-// shadows of vehicles and of structures below the grid's resolution, the disc's azimuthal extent (the horizon is
-// taken in the disc centre's azimuth), light scattered into a shadow.
+// in its azimuth (linear between the two neighbouring sectors, bilinear between the vertices). Near the eye the Sun's
+// shadow map (moon_near_shadow.gdshaderinc, Task 12) adds the shadows of the drawn relief, rocks, vehicles and
+// structures; light scattered into shadows from the sunlit terrain around: moon_fill.gdshaderinc. Not modelled: the
+// disc's azimuthal extent in the horizon (taken in the disc centre's azimuth).
 // Positions are in the Moon's local render frame (metres, unscaled): vertex_offset restores them from the node centre.
 // Seen through the Earth's atmosphere like moon.gdshader (a lunar ground view never crosses it).
-render_mode unshaded, cull_back;
+// Lit only for the near-field shadow map's light() (moon_near_shadow.gdshaderinc): no ambient, no specular.
+render_mode cull_back, ambient_light_disabled, specular_disabled;
 
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
@@ -18,6 +20,8 @@ render_mode unshaded, cull_back;
 #include "res://shaders/moon_regolith.gdshaderinc"
 #include "res://shaders/moon_detail.gdshaderinc"
 #include "res://shaders/moon_horizon.gdshaderinc"
+#include "res://shaders/moon_near_shadow.gdshaderinc"
+#include "res://shaders/moon_fill.gdshaderinc"
 
 // CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -123,35 +127,66 @@ void fragment() {
 		}
 	}
 	vec2 detail_factors = vec2(1.0);
+	vec2 near_factors = vec2(1.0);
 	float sun_modulation = 1.0;
 	float earth_modulation = 1.0;
+	// The near-field shadow map's fade (1: beyond its range or off) and the eye's view geometry over the local vertical.
+	float fade = moon_near_fade(-VERTEX.z);
+	vec3 up_local = normalize(local_position);
 	if (detail_shading) {
 		float abundance = texture(detail_rock_abundance, global_uv).r;
 		// Rocks above the threshold diameter at this distance are geometry (Task 11, MoonRockLayer; the same rule as
 		// moon_rock.gdshader), the rest statistical.
 		float geometry_min_m = detail_rock_threshold_m(length(camera_offset), rock_node_min_m, abundance);
-		detail_factors = detail_light_factors(abundance, geometry_min_m, spacing_eff, detail_horizon_spacing_m,
-				sun_margin, earth_margin);
+		vec3 view = detail_view_geometry(up_local, to_eye, normalize(to_sun), normalize(to_earth));
+		detail_factors = detail_light_factors_view(abundance, geometry_min_m, spacing_eff, detail_horizon_spacing_m,
+				sun_margin, earth_margin, view, -1.0);
+		if (fade < 1.0) {
+			near_factors = detail_light_factors_view(abundance, geometry_min_m, spacing_eff, detail_horizon_spacing_m,
+					sun_margin, earth_margin, view, moon_near_resolved_m(-VERTEX.z));
+		}
 		sun_modulation = detail_modulation(detail_gradient, n, normalize(to_sun), to_eye);
 		earth_modulation = detail_modulation(detail_gradient, n, normalize(to_earth), to_eye);
 	}
 	// The Sun and the earthshine through the one regolith reflectance (night-vision fix round I3).
 	float sun_reflectance = regolith_reflectance_rough(n, normalize(to_sun), to_eye, theta_bar);
 	float earth_reflectance = regolith_reflectance_rough(n, normalize(to_earth), to_eye, theta_bar);
-	float light;
-	if (detail_shading) {
-		light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene * detail_factors.x
-				* sun_modulation + earth_reflectance * earth_visible * moon_earthshine * detail_factors.y
-				* earth_modulation);
-	} else {  // Task 9's expression as it was (detail off stays pixel-identical)
-		light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene + earth_reflectance
-				* earth_visible * moon_earthshine);
-	}
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
+	float light;
+	float near_radiance = 0.0;  // the Sun's part the near-field shadow map gates (light())
+	if (detail_shading) {
+		if (fade >= 1.0) {
+			light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene * detail_factors.x
+					* sun_modulation + earth_reflectance * earth_visible * moon_earthshine * detail_factors.y
+					* earth_modulation);
+		} else {
+			float sun_base = moon_regolith_scale * sun_reflectance * sunlit * moon_sun_scene * sun_modulation;
+			light = sun_base * sun_visible * detail_factors.x * fade + moon_regolith_scale * earth_reflectance
+					* earth_visible * moon_earthshine * detail_factors.y * earth_modulation;
+			near_radiance = sun_base * near_factors.x;
+		}
+		// Light from the sunlit terrain around (moon_fill.gdshaderinc).
+		if (moon_brdf == 1) {
+			vec3 east_f = vec3(up_local.z, 0.0, -up_local.x);
+			east_f = length(east_f) > POLE_EAST_MIN ? normalize(east_f) : vec3(0.0, 0.0, 1.0);
+			float ground_k = dot(albedo, vec3(0.2126, 0.7152, 0.0722)) * moon_regolith_scale * moon_hapke_norm;
+			light += moon_regolith_scale * moon_sun_scene * sunlit * moon_fill_reflectance(n, up_local, normalize(to_sun),
+					dot(n, to_eye), detail_factors.x * sun_visible, ground_k, horizon_enabled, east_f,
+					cross(up_local, east_f), horizon_uv);
+		}
+	} else if (fade >= 1.0) {  // Task 9's expression as it was (detail off stays pixel-identical)
+		light = moon_regolith_scale * (sun_reflectance * sunlit * sun_visible * moon_sun_scene + earth_reflectance
+				* earth_visible * moon_earthshine);
+	} else {
+		float sun_base = moon_regolith_scale * sun_reflectance * sunlit * moon_sun_scene;
+		light = sun_base * sun_visible * fade + moon_regolith_scale * earth_reflectance * earth_visible * moon_earthshine;
+		near_radiance = sun_base;
+	}
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * sun_visible * lommel_seeliger;
 	vec3 color = albedo * (light + eclipse_light);
+	vec3 gate = albedo;  // what multiplies the light() part (the shadow-gated Sun)
 	if (atmosphere_enabled) {
 		// Through the Earth's atmosphere only if the view ray crosses it before the ground (a camera near the Moon:
 		// never; atm_sky_to_far_object).
@@ -160,6 +195,7 @@ void fragment() {
 		vec3 sky = atm_sky_to_far_object(atm_camera_local(), atmosphere_world_to_earth * direction_world,
 				length(camera_offset), transmittance);
 		color = color * atmosphere_exposure_gain * transmittance + sky;  // the eye adaptation's exposure gain on the lit Moon
+		gate = gate * atmosphere_exposure_gain * transmittance;
 	}
 	if (diag_mode == 1 && normal_away) {
 		color = vec3(1.0, 0.0, 0.0);
@@ -167,5 +203,20 @@ void fragment() {
 	if (diag_mode == 2 && (mu0_raw <= 0.0 || sun_visible < 0.5)) {
 		color = vec3(mu0_raw <= 0.0 ? 1.0 : 0.0, 0.0, sun_visible < 0.5 ? 1.0 : 0.0);
 	}
-	ALBEDO = color;
+	if (diag_mode != 0) {
+		near_radiance = 0.0;
+	}
+	EMISSION = color;
+	ALBEDO = gate;
+	SPECULAR = 0.0;
+	ROUGHNESS = 1.0;
+	near_sun_radiance = near_radiance;
+	near_fade = fade;
+	near_horizon = sun_visible;
+	near_sun_view = normalize(mat3(VIEW_MATRIX) * (mat3(MODEL_MATRIX) * normalize(to_sun)));
+}
+
+void light() {
+	DIFFUSE_LIGHT += vec3(moon_near_light(near_sun_radiance, near_fade, near_horizon, near_sun_view, LIGHT,
+			LIGHT_IS_DIRECTIONAL, ATTENUATION));
 }

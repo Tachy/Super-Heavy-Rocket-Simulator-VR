@@ -641,17 +641,33 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
     result["crater_fraction"] = packed(m.crater_fraction);
     result["crater_fraction_lowest_octaves"] = environment::UnresolvedShadingModel::crater_fraction_lowest_octaves;
     result["crater_slope_exponent"] = m.crater_exponent;
+    // Task 12: the oblique eye's rock terms and the fill light's hemispherical albedo.
+    result["rock_view_excess"] = packed(m.rock_view_excess);
+    result["rock_view_gain_ratio"] = packed(m.rock_view_gain_ratio);
+    result["view_elevation_samples"] = environment::UnresolvedShadingModel::view_elevation_samples;
+    result["view_elevation_step_rad"] = environment::UnresolvedShadingModel::view_elevation_step_rad;
+    result["view_azimuth_samples"] = environment::UnresolvedShadingModel::view_azimuth_samples;
+    result["view_azimuth_step_rad"] = environment::UnresolvedShadingModel::view_azimuth_step_rad;
+    result["hemispherical_albedo"] = packed(m.hemispherical_albedo);
     return result;
 }
 
 godot::Vector2 StarsimCore::moon_unresolved_light_factors(double abundance, double geometry_min_diameter_m,
                                                           double spacing_m, double horizon_spacing_m,
                                                           double sun_elevation_rad,
-                                                          double earth_elevation_rad) const {
+                                                          double earth_elevation_rad, double view_elevation_rad,
+                                                          double sun_view_azimuth_rad, double earth_view_azimuth_rad,
+                                                          bool sun_shadow_map, double shadow_map_resolved_m) const {
     if (!moon_unresolved_) return {1.0, 1.0};
+    environment::UnresolvedView view;
+    view.elevation_rad = view_elevation_rad;
+    view.sun_azimuth_difference_rad = sun_view_azimuth_rad;
+    view.earth_azimuth_difference_rad = earth_view_azimuth_rad;
+    view.sun_shadow_map = sun_shadow_map;
+    view.shadow_map_resolved_m = shadow_map_resolved_m;
     const auto f = environment::unresolved_light_factors(*moon_unresolved_, abundance, geometry_min_diameter_m,
                                                          spacing_m, horizon_spacing_m, sun_elevation_rad,
-                                                         earth_elevation_rad);
+                                                         earth_elevation_rad, true, view);
     return {static_cast<real_t>(f.sun), static_cast<real_t>(f.earth)};
 }
 
@@ -1494,8 +1510,11 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::moon_hapke_disc_reflectance);
     ClassDB::bind_method(D_METHOD("moon_unresolved_shading"), &StarsimCore::moon_unresolved_shading);
     ClassDB::bind_method(D_METHOD("moon_unresolved_light_factors", "abundance", "geometry_min_diameter_m", "spacing_m",
-                                  "horizon_spacing_m", "sun_elevation_rad", "earth_elevation_rad"),
-                         &StarsimCore::moon_unresolved_light_factors);
+                                  "horizon_spacing_m", "sun_elevation_rad", "earth_elevation_rad",
+                                  "view_elevation_rad", "sun_view_azimuth_rad", "earth_view_azimuth_rad",
+                                  "sun_shadow_map", "shadow_map_resolved_m"),
+                         &StarsimCore::moon_unresolved_light_factors, DEFVAL(1.5707963267948966), DEFVAL(0.0), DEFVAL(0.0),
+                         DEFVAL(false), DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("moon_residual_theta_bar", "spacing_m"), &StarsimCore::moon_residual_theta_bar);
     ClassDB::bind_method(D_METHOD("moon_rock_abundance_grid", "width", "height"),
                          &StarsimCore::moon_rock_abundance_grid);

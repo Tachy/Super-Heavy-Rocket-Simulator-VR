@@ -54,6 +54,8 @@ var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
 ## The Moon's light on Godot's lit materials at night (Atmosphere.moon_light_at; energy 0 by day; no shadows).
 var moon_light := DirectionalLight3D.new()
+## The Sun's near-field shadow map on the Moon (Task 12; sun_light's shadow settings and the shaders' globals).
+var moon_near_shadow := MoonNearShadow.new()
 var stars := StarField.new()
 var moon_orbit := OrbitLine.new()
 var flight := FlightController.new()
@@ -332,6 +334,7 @@ func update_world() -> void:
 	FrameProfiler.begin(&"sun")
 	_place_sun(sun_from_camera)
 	_update_sun_light(t, cam)
+	_update_moon_near_shadow(cam, sun_from_camera.length())
 	FrameProfiler.end(&"sun")
 	FrameProfiler.begin(&"flight_views")
 	flight.place_views(self, cam)
@@ -640,6 +643,16 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 		moon_light.light_energy = moon_lit[1]
 
 
+## The near-field Sun shadows near the Moon's ground (MoonNearShadow): the eye's height over the terrain under it (the
+## ground height _moon_earth_visible samples; the mean sphere without terrain data).
+func _update_moon_near_shadow(camera_gcrf_m: Vector3, sun_distance_m: float) -> void:
+	var height_m := (camera_gcrf_m - moon_gcrf_m).length() - MOON_RADIUS_M - _earth_horizon_ground_height_m
+	var camera := get_viewport().get_camera_3d()
+	var eye := camera.global_position if camera != null else Vector3.ZERO
+	moon_near_shadow.update(sun_light, moon_terrain.active, height_m, sun_distance_m, eye,
+			camera.get_camera_projection() if camera != null else Projection())
+
+
 ## Draws the radiance cubemap anew when the sky has really changed (SkyRadianceRefresh): the write to the sky material is
 ## what makes Godot do it, over a few frames (INCREMENTAL). Near the Moon the cube also shows the lunar ground, whose place
 ## and lights are set with that write, for the cube alone (sky.gdshader).
@@ -833,6 +846,7 @@ func _setup_moon_terrain() -> void:
 		moon_terrain.rock_layer = moon_rocks
 	moon_terrain.name = "MoonTerrain"
 	moon_terrain.camera_global = "moon_terrain_camera"  # project.godot [shader_globals], read by terrain_moon.gdshader
+	moon_terrain.cast_shadows = MoonNearShadow.terrain_casts  # the near-field Sun shadow's casters (MoonNearShadow)
 	moon.add_child(moon_terrain)
 	moon_terrain.setup(heights, null, MOON_RADIUS_M, material)
 

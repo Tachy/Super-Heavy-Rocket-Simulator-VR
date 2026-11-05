@@ -9,6 +9,8 @@
 #include <mutex>
 #include <utility>
 #include <stdexcept>
+#include <thread>
+#include <vector>
 
 #include "starsim/environment/cube_face_cell.hpp"
 #include "starsim/environment/hapke.hpp"
@@ -262,6 +264,14 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         m.crater_fraction[static_cast<size_t>(k)] = crater_drawn_fraction(craters, 1.0 / d_over_l);
     }
 
+    // The fill light's hemispherical albedo of the regolith (Task 12): the globe's parameters and mean slope.
+    m.hemispherical_albedo.resize(UnresolvedShadingModel::lit_gain_samples);
+    for (int k = 0; k < UnresolvedShadingModel::lit_gain_samples; ++k) {
+        const double e = std::max(k * UnresolvedShadingModel::lit_gain_step_rad, lit_gain_floor_rad);
+        m.hemispherical_albedo[static_cast<size_t>(k)] =
+            hapke_hemispherical_albedo(cfg.hapke, std::sin(e), cfg.hapke.theta_bar_rad);
+    }
+
     m.drawn_table.resize(UnresolvedShadingModel::drawn_table_samples);
     for (int k = 0; k < UnresolvedShadingModel::drawn_table_samples; ++k) {
         const double spacing = UnresolvedShadingModel::drawn_table_min_spacing_m *
@@ -291,9 +301,15 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
             template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
         m.rock_lit_gain = tables.gain;
         m.rock_shadow = tables.shadow;
+        // Oblique views (Task 12): the ground the rocks hide from the eye and their seen sides.
+        const RockViewModel view = template_rock_view_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
+        m.rock_view_excess = view.excess;
+        m.rock_view_gain_ratio = view.gain_ratio;
         // The rocks' share of the globe's mean slope (header comment): out of the regolith's budget.
         m.rock_area_share = 1.0 - std::exp(-rock_cover(m, m.rock_min_diameter_m, m.rock_max_diameter_m));
-        m.rock_mean_tan = m.rock_area_share * pi * m.rock_exposed_height_per_diameter;
+        // The templates' own mean |grad h| per plan area (review n1 of the Task 11 fix C re-review: the half-spheroid's
+        // pi eta before), the shape the light tables describe.
+        m.rock_mean_tan = m.rock_area_share * tables.mean_tan;
         const double globe_mean_tan = 0.5 * pi * std::tan(cfg.hapke.theta_bar_rad);
         const double regolith_mean_tan = (globe_mean_tan - m.rock_mean_tan) / (1.0 - m.rock_area_share);
         if (!(regolith_mean_tan > 0.0)) {
@@ -381,6 +397,20 @@ double smith_lit_fraction(double tan_elevation, double slope_variance) {
     if (slope_variance <= 0.0) return 1.0;
     const double a = tan_elevation / std::sqrt(slope_variance);
     return 1.0 / (1.0 + erf_lambda(a));
+}
+
+double smith_visible_lit_fraction(double tan_light, double tan_view, double azimuth_difference_rad,
+                                  double slope_variance) {
+    if (tan_light <= 0.0) return 0.0;
+    if (slope_variance <= 0.0) return 1.0;
+    const double s = std::sqrt(slope_variance);
+    const double lambda_l = erf_lambda(tan_light / s);
+    const double lambda_v = (std::isinf(tan_view) || !(tan_view > 0.0)) ? 0.0 : erf_lambda(tan_view / s);
+    double phi = std::fmod(std::abs(azimuth_difference_rad), 2.0 * pi);
+    if (phi > pi) phi = 2.0 * pi - phi;
+    const double correlation = 4.41 * phi / (4.41 * phi + 1.0);
+    return (1.0 + lambda_v) /
+           (1.0 + std::max(lambda_l, lambda_v) + correlation * std::min(lambda_l, lambda_v));
 }
 
 double rock_cover(const UnresolvedShadingModel& m, double d_lo_m, double d_hi_m) {
@@ -496,6 +526,13 @@ RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double
         out.gain[ku] /= static_cast<double>(columns.size()) * rock_light_azimuths * (se[ku] / (se[ku] + 1.0));
         out.shadow[ku] /= plan_area * rock_light_azimuths;
     }
+    // Mean |grad h| of the top per plan area (each column's facet slope; steep rim columns clamped at [D] n_z 1e-3).
+    double tan_sum = 0.0;
+    for (const RockColumn& c : columns) {
+        const double nz = std::max(c.normal.z, 1e-3);
+        tan_sum += std::sqrt(std::max(0.0, 1.0 - nz * nz)) / nz;
+    }
+    out.mean_tan = tan_sum / static_cast<double>(columns.size());
     return out;
 }
 
@@ -544,6 +581,7 @@ RockLightTables template_rock_light_tables(double burial_mean, double burial_sd)
                 out.gain[static_cast<size_t>(k)] += weight * one.gain[static_cast<size_t>(k)];
                 out.shadow[static_cast<size_t>(k)] += weight * one.shadow[static_cast<size_t>(k)];
             }
+            out.mean_tan += weight * one.mean_tan;
             weights += weight;
         }
     }
@@ -551,6 +589,7 @@ RockLightTables template_rock_light_tables(double burial_mean, double burial_sd)
         out.gain[static_cast<size_t>(k)] /= weights;
         out.shadow[static_cast<size_t>(k)] /= weights;
     }
+    out.mean_tan /= weights;
     cache.emplace(std::make_pair(burial_mean, burial_sd), out);
     return out;
 }
@@ -578,29 +617,412 @@ double rock_statistical_cover(const UnresolvedShadingModel& m, double geometry_m
     return cover;
 }
 
+namespace {
+
+struct Point2 {
+    double x, y;
+};
+
+double cross2(const Point2& o, const Point2& a, const Point2& b) {
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+// Convex hull (Andrew's monotone chain), counter-clockwise, no collinear points.
+std::vector<Point2> convex_hull(std::vector<Point2> p) {
+    std::sort(p.begin(), p.end(), [](const Point2& a, const Point2& b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+    if (p.size() < 3) return p;
+    std::vector<Point2> h(2 * p.size());
+    size_t k = 0;
+    for (size_t i = 0; i < p.size(); ++i) {
+        while (k >= 2 && cross2(h[k - 2], h[k - 1], p[i]) <= 0.0) --k;
+        h[k++] = p[i];
+    }
+    for (size_t i = p.size() - 1, t = k + 1; i > 0; --i) {
+        while (k >= t && cross2(h[k - 2], h[k - 1], p[i - 1]) <= 0.0) --k;
+        h[k++] = p[i - 1];
+    }
+    h.resize(k - 1);
+    return h;
+}
+
+double polygon_area(const std::vector<Point2>& p) {
+    double a = 0.0;
+    for (size_t i = 0; i < p.size(); ++i) {
+        const Point2& u = p[i];
+        const Point2& v = p[(i + 1) % p.size()];
+        a += u.x * v.y - v.x * u.y;
+    }
+    return 0.5 * std::abs(a);
+}
+
+// Area of the intersection of two convex counter-clockwise polygons (Sutherland-Hodgman).
+double intersection_area(const std::vector<Point2>& subject, const std::vector<Point2>& clip) {
+    std::vector<Point2> out = subject, in;
+    for (size_t i = 0; i < clip.size() && !out.empty(); ++i) {
+        const Point2& a = clip[i];
+        const Point2& b = clip[(i + 1) % clip.size()];
+        in.swap(out);
+        out.clear();
+        for (size_t j = 0; j < in.size(); ++j) {
+            const Point2& p = in[j];
+            const Point2& q = in[(j + 1) % in.size()];
+            const double dp = cross2(a, b, p), dq = cross2(a, b, q);
+            if (dp >= 0.0) out.push_back(p);
+            if ((dp >= 0.0) != (dq >= 0.0)) {
+                const double t = dp / (dp - dq);
+                out.push_back({p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)});
+            }
+        }
+    }
+    return out.size() < 3 ? 0.0 : polygon_area(out);
+}
+
+struct ExposedFace {
+    math::Vec3 normal;
+    double area;
+};
+
+// The template mesh's part above z = cut: its points (heights above the cut) and faces.
+void exposed_part(const TemplateMesh& mesh, double cut, std::vector<math::Vec3>& points,
+                  std::vector<ExposedFace>& faces) {
+    for (const math::Vec3& v : mesh.vertices) {
+        if (v.z > cut) points.push_back({v.x, v.y, v.z - cut});
+    }
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        const math::Vec3 tri[3] = {mesh.vertices[static_cast<size_t>(mesh.indices[t])],
+                                   mesh.vertices[static_cast<size_t>(mesh.indices[t + 1])],
+                                   mesh.vertices[static_cast<size_t>(mesh.indices[t + 2])]};
+        // Clip the triangle to z >= cut (polygon of up to 4 vertices).
+        std::vector<math::Vec3> poly;
+        for (int i = 0; i < 3; ++i) {
+            const math::Vec3& p = tri[i];
+            const math::Vec3& q = tri[(i + 1) % 3];
+            const double dp = p.z - cut, dq = q.z - cut;
+            if (dp >= 0.0) poly.push_back(p);
+            if ((dp >= 0.0) != (dq >= 0.0)) {
+                const double s = dp / (dp - dq);
+                const math::Vec3 x = p + (q - p) * s;
+                poly.push_back(x);
+                points.push_back({x.x, x.y, 0.0});
+            }
+        }
+        if (poly.size() < 3) continue;
+        math::Vec3 n{0.0, 0.0, 0.0};
+        for (size_t i = 1; i + 1 < poly.size(); ++i) n = n + math::cross(poly[i] - poly[0], poly[i + 1] - poly[0]);
+        const double twice = std::sqrt(math::dot(n, n));
+        if (twice <= 0.0) continue;
+        faces.push_back({n / twice, 0.5 * twice});
+    }
+}
+
+// The ground region a convex body hides from direction (elevation e, azimuth psi of the horizontal direction toward
+// the light / eye): its points pushed away from that direction by height x cot e, the convex hull.
+std::vector<Point2> projection(const std::vector<math::Vec3>& points, double cot_e, double cos_psi, double sin_psi) {
+    std::vector<Point2> p;
+    p.reserve(points.size());
+    for (const math::Vec3& v : points) p.push_back({v.x - v.z * cot_e * cos_psi, v.y - v.z * cot_e * sin_psi});
+    return convex_hull(std::move(p));
+}
+
+double view_elevation_at(int kv) {
+    return std::clamp(kv * UnresolvedShadingModel::view_elevation_step_rad, lit_gain_floor_rad, 0.5 * pi);
+}
+double light_elevation_at(int k) {
+    return std::clamp(k * UnresolvedShadingModel::lit_gain_step_rad, lit_gain_floor_rad, 0.5 * pi);
+}
+
+constexpr size_t view_table_size = static_cast<size_t>(UnresolvedShadingModel::view_elevation_samples) *
+                                   UnresolvedShadingModel::view_azimuth_samples * UnresolvedShadingModel::lit_gain_samples;
+
+size_t view_index(int kv, int ka, int k) {
+    return (static_cast<size_t>(kv) * UnresolvedShadingModel::view_azimuth_samples + static_cast<size_t>(ka)) *
+               UnresolvedShadingModel::lit_gain_samples + static_cast<size_t>(k);
+}
+
+double trilinear_view(const std::vector<double>& t, double light_elevation_rad, double view_elevation_rad,
+                      double azimuth_difference_rad, double nadir_value) {
+    if (t.empty()) return nadir_value;
+    using M = UnresolvedShadingModel;
+    const double xl = std::clamp(light_elevation_rad / M::lit_gain_step_rad, 0.0, M::lit_gain_samples - 1.0);
+    const double xv = std::clamp(view_elevation_rad / M::view_elevation_step_rad, 0.0, M::view_elevation_samples - 1.0);
+    double a = std::fmod(std::abs(azimuth_difference_rad), 2.0 * pi);
+    if (a > pi) a = 2.0 * pi - a;
+    const double xa = std::clamp(a / M::view_azimuth_step_rad, 0.0, M::view_azimuth_samples - 1.0);
+    const int kl = std::min(static_cast<int>(xl), M::lit_gain_samples - 2);
+    const int kv = std::min(static_cast<int>(xv), M::view_elevation_samples - 2);
+    const int ka = std::min(static_cast<int>(xa), M::view_azimuth_samples - 2);
+    const double fl = xl - kl, fv = xv - kv, fa = xa - ka;
+    double r = 0.0;
+    for (int dv = 0; dv < 2; ++dv) {
+        for (int da = 0; da < 2; ++da) {
+            const double w = (dv ? fv : 1.0 - fv) * (da ? fa : 1.0 - fa);
+            r += w * ((1.0 - fl) * t[view_index(kv + dv, ka + da, kl)] + fl * t[view_index(kv + dv, ka + da, kl + 1)]);
+        }
+    }
+    return r;
+}
+
+}  // namespace
+
+RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
+    using M = UnresolvedShadingModel;
+    RockViewTables out;
+    out.excess.assign(view_table_size, 0.0);
+    out.flux.assign(view_table_size, 0.0);
+    out.hidden.assign(view_table_size, 0.0);
+    out.flux_nadir.assign(M::lit_gain_samples, 0.0);
+    std::vector<math::Vec3> points;
+    std::vector<ExposedFace> faces;
+    exposed_part(mesh, cut, points, faces);
+    if (points.size() < 3) return out;
+    const double plan_area = polygon_area(projection(points, 0.0, 1.0, 0.0));
+    if (!(plan_area > 0.0)) return out;
+    struct SeenFace {
+        double weight, mu, a, b;
+    };
+    std::vector<SeenFace> seen;
+    for (int yaw = 0; yaw < rock_view_yaws; ++yaw) {
+        const double psi = 2.0 * pi * (yaw + 0.5) / rock_view_yaws;  // the light's azimuth
+        std::vector<std::vector<Point2>> light_regions(M::lit_gain_samples);
+        for (int k = 0; k < M::lit_gain_samples; ++k) {
+            const double e = light_elevation_at(k);
+            light_regions[static_cast<size_t>(k)] = projection(points, std::cos(e) / std::sin(e), std::cos(psi), std::sin(psi));
+        }
+        for (int kv = 0; kv < M::view_elevation_samples; ++kv) {
+            const double ev = view_elevation_at(kv);
+            const double sev = std::sin(ev), cev = std::cos(ev);
+            for (int ka = 0; ka < M::view_azimuth_samples; ++ka) {
+                const double phi = psi + ka * M::view_azimuth_step_rad;  // the eye's azimuth
+                const std::vector<Point2> view_region = projection(points, cev / sev, std::cos(phi), std::sin(phi));
+                const double view_area = polygon_area(view_region);
+                const math::Vec3 v{cev * std::cos(phi), cev * std::sin(phi), sev};
+                // The faces the eye sees: projected area, mu, and the light's cosine as ce x a + se x b.
+                seen.clear();
+                double den = 0.0;
+                for (const ExposedFace& f : faces) {
+                    const double mu = math::dot(f.normal, v);
+                    if (mu <= 0.0) continue;
+                    den += f.area * mu;
+                    seen.push_back({f.area * mu, mu, f.normal.x * std::cos(psi) + f.normal.y * std::sin(psi), f.normal.z});
+                }
+                for (int k = 0; k < M::lit_gain_samples; ++k) {
+                    const double e = light_elevation_at(k);
+                    const double se = std::sin(e), ce = std::cos(e);
+                    const size_t i = view_index(kv, ka, k);
+                    out.excess[i] += (view_area - intersection_area(view_region, light_regions[static_cast<size_t>(k)])) /
+                                     plan_area;
+                    out.hidden[i] += view_area / plan_area - 1.0;
+                    // Seen radiance: Lommel-Seeliger per seen face, projected-area weighted, over the flat ground's.
+                    double num = 0.0;
+                    for (const SeenFace& f : seen) {
+                        const double mu0 = ce * f.a + se * f.b;
+                        if (mu0 > 0.0) num += f.weight * mu0 / (mu0 + f.mu);
+                    }
+                    const double flat = se / (se + sev);
+                    if (den > 0.0) out.flux[i] += num / den / flat * (view_area / plan_area);
+                }
+            }
+        }
+    }
+    for (size_t i = 0; i < view_table_size; ++i) {
+        out.excess[i] /= rock_view_yaws;
+        out.hidden[i] /= rock_view_yaws;
+        out.flux[i] /= rock_view_yaws;
+    }
+    for (int k = 0; k < M::lit_gain_samples; ++k) {
+        out.flux_nadir[static_cast<size_t>(k)] = out.flux[view_index(M::view_elevation_samples - 1, 0, k)];
+    }
+    return out;
+}
+
+RockViewModel template_rock_view_tables(double burial_mean, double burial_sd) {
+    static std::mutex mutex;
+    static std::map<std::pair<double, double>, RockViewModel> cache;
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (const auto it = cache.find({burial_mean, burial_sd}); it != cache.end()) return it->second;
+    using M = UnresolvedShadingModel;
+    constexpr int burial_nodes = 5;  // [D] N in [-2, 2] step 1 (the tails beyond weigh < 3 %: the view terms vary slowly with the burial)
+    constexpr int lod = 2;           // [D] 162 vertices: the polygons' areas within ~1 % of LOD 1 (test)
+    const RockTemplates& templates = RockTemplates::instance();
+    struct Sum {
+        std::vector<double> excess, flux, hidden_plus_one, flux_nadir;
+        double weights = 0.0;
+    };
+    std::vector<Sum> sums(RockTemplates::count);
+    std::vector<std::thread> workers;
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        workers.emplace_back([&, id] {
+            Sum& s = sums[static_cast<size_t>(id)];
+            s.excess.assign(view_table_size, 0.0);
+            s.flux.assign(view_table_size, 0.0);
+            s.hidden_plus_one.assign(view_table_size, 0.0);
+            s.flux_nadir.assign(M::lit_gain_samples, 0.0);
+            for (int q = 0; q < burial_nodes; ++q) {
+                const double z = q - 0.5 * (burial_nodes - 1);
+                const double weight = std::exp(-0.5 * z * z);
+                const double f = std::clamp(burial_mean + burial_sd * z, 0.0, LunarRocks::max_burial_fraction);
+                const double cut = templates.bottom_z(id) + f * (templates.top_z(id) - templates.bottom_z(id));
+                const RockViewTables one = rock_view_tables(templates.mesh(id, lod), cut);
+                for (size_t i = 0; i < view_table_size; ++i) {
+                    s.excess[i] += weight * one.excess[i];
+                    s.flux[i] += weight * one.flux[i];
+                    s.hidden_plus_one[i] += weight * (1.0 + one.hidden[i]);
+                }
+                for (int k = 0; k < M::lit_gain_samples; ++k) {
+                    s.flux_nadir[static_cast<size_t>(k)] += weight * one.flux_nadir[static_cast<size_t>(k)];
+                }
+                s.weights += weight;
+            }
+        });
+    }
+    for (std::thread& w : workers) w.join();
+    std::vector<double> excess(view_table_size, 0.0), flux(view_table_size, 0.0), hidden(view_table_size, 0.0),
+        flux_nadir(M::lit_gain_samples, 0.0);
+    double weights = 0.0;
+    for (const Sum& s : sums) {
+        for (size_t i = 0; i < view_table_size; ++i) {
+            excess[i] += s.excess[i];
+            flux[i] += s.flux[i];
+            hidden[i] += s.hidden_plus_one[i];
+        }
+        for (size_t k = 0; k < flux_nadir.size(); ++k) flux_nadir[k] += s.flux_nadir[k];
+        weights += s.weights;
+    }
+    RockViewModel out;
+    out.excess.resize(view_table_size);
+    out.gain_ratio.resize(view_table_size);
+    for (int kv = 0; kv < M::view_elevation_samples; ++kv) {
+        for (int ka = 0; ka < M::view_azimuth_samples; ++ka) {
+            for (int k = 0; k < M::lit_gain_samples; ++k) {
+                const size_t i = view_index(kv, ka, k);
+                const bool zenith = kv == M::view_elevation_samples - 1;  // exact: no excess, the zenith gain
+                out.excess[i] = zenith ? 0.0 : excess[i] / weights;
+                const double nadir = flux_nadir[static_cast<size_t>(k)];
+                out.gain_ratio[i] = zenith || !(nadir > 0.0) ? 1.0 : (flux[i] / hidden[i]) / (nadir / weights);
+            }
+        }
+    }
+    cache.emplace(std::make_pair(burial_mean, burial_sd), out);
+    return out;
+}
+
+double rock_view_excess_table(const UnresolvedShadingModel& m, double light_elevation_rad, double view_elevation_rad,
+                              double azimuth_difference_rad) {
+    return trilinear_view(m.rock_view_excess, light_elevation_rad, view_elevation_rad, azimuth_difference_rad, 0.0);
+}
+
+double rock_view_gain_ratio_table(const UnresolvedShadingModel& m, double light_elevation_rad,
+                                  double view_elevation_rad, double azimuth_difference_rad) {
+    return trilinear_view(m.rock_view_gain_ratio, light_elevation_rad, view_elevation_rad, azimuth_difference_rad, 1.0);
+}
+
+double hapke_hemispherical_albedo(const config::HapkeParameters& p, double mu0, double theta_bar_rad) {
+    if (!(mu0 > 0.0)) return 0.0;
+    mu0 = std::min(mu0, 1.0);
+    // [D] 48-node Gauss-Legendre in mu (on [0, 1]) x 96 azimuths: < 1e-4 against twice the nodes.
+    constexpr int n_mu = 48, n_phi = 96;
+    static const std::pair<std::vector<double>, std::vector<double>> gl = [] {
+        std::vector<double> x(n_mu), w(n_mu);
+        for (int i = 0; i < n_mu; ++i) {
+            double z = std::cos(pi * (i + 0.75) / (n_mu + 0.5));
+            for (int it = 0; it < 100; ++it) {
+                double p0 = 1.0, p1 = z;
+                for (int k = 2; k <= n_mu; ++k) {
+                    const double p2 = ((2.0 * k - 1.0) * z * p1 - (k - 1.0) * p0) / k;
+                    p0 = p1;
+                    p1 = p2;
+                }
+                const double dp = n_mu * (z * p1 - p0) / (z * z - 1.0);
+                const double dz = p1 / dp;
+                z -= dz;
+                if (std::abs(dz) < 1e-15) break;
+            }
+            double p0 = 1.0, p1 = z;
+            for (int k = 2; k <= n_mu; ++k) {
+                const double p2 = ((2.0 * k - 1.0) * z * p1 - (k - 1.0) * p0) / k;
+                p0 = p1;
+                p1 = p2;
+            }
+            const double dp = n_mu * (z * p1 - p0) / (z * z - 1.0);
+            x[static_cast<size_t>(i)] = 0.5 * (1.0 + z);
+            w[static_cast<size_t>(i)] = 1.0 / ((1.0 - z * z) * dp * dp);  // 2 / (...) on [-1, 1], halved on [0, 1]
+        }
+        return std::make_pair(x, w);
+    }();
+    const double sin_i = std::sqrt(std::max(0.0, 1.0 - mu0 * mu0));
+    double sum = 0.0;
+    for (int i = 0; i < n_mu; ++i) {
+        const double mu = gl.first[static_cast<size_t>(i)];
+        const double sin_e = std::sqrt(std::max(0.0, 1.0 - mu * mu));
+        double ring = 0.0;
+        for (int j = 0; j < n_phi; ++j) {
+            const double phi = (j + 0.5) / n_phi * 2.0 * pi;
+            const double cos_g = std::clamp(mu0 * mu + sin_i * sin_e * std::cos(phi), -1.0, 1.0);
+            ring += hapke_reflectance(p, mu0, mu, std::acos(cos_g), theta_bar_rad);
+        }
+        sum += gl.second[static_cast<size_t>(i)] * mu * ring * (2.0 * pi / n_phi);
+    }
+    return sum / (pi * mu0);
+}
+
+double hemispherical_albedo_table(const UnresolvedShadingModel& m, double elevation_rad) {
+    if (m.hemispherical_albedo.empty()) return 0.0;
+    const double x = std::clamp(elevation_rad / UnresolvedShadingModel::lit_gain_step_rad, 0.0,
+                                static_cast<double>(UnresolvedShadingModel::lit_gain_samples - 1));
+    const int k = std::min(static_cast<int>(x), UnresolvedShadingModel::lit_gain_samples - 2);
+    const double f = x - k;
+    return m.hemispherical_albedo[static_cast<size_t>(k)] * (1.0 - f) +
+           m.hemispherical_albedo[static_cast<size_t>(k) + 1] * f;
+}
+
 UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m, double abundance,
                                                 double geometry_min_diameter_m, double spacing_m,
                                                 double horizon_spacing_m, double sun_elevation_rad,
                                                 double earth_elevation_rad, bool geometry_shadows_statistical) {
+    return unresolved_light_factors(m, abundance, geometry_min_diameter_m, spacing_m, horizon_spacing_m,
+                                    sun_elevation_rad, earth_elevation_rad, geometry_shadows_statistical,
+                                    UnresolvedView{});
+}
+
+UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m, double abundance,
+                                                double geometry_min_diameter_m, double spacing_m,
+                                                double horizon_spacing_m, double sun_elevation_rad,
+                                                double earth_elevation_rad, bool geometry_shadows_statistical,
+                                                const UnresolvedView& view) {
     UnresolvedLightFactors out;
     const double rho = m.rock_reflectance_ratio;
     const double c_all = abundance * rock_cover(m, m.rock_min_diameter_m, m.rock_max_diameter_m);
     const double c = abundance * rock_statistical_cover(m, geometry_min_diameter_m);
     const double c_drawn = geometry_shadows_statistical ? std::max(c_all - c, 0.0) : 0.0;
     const double norm = std::exp(-c_all) + (1.0 - std::exp(-c_all)) * rho;
-    const double rock_share = 1.0 - std::exp(-c);
+    const bool zenith = !(view.elevation_rad < 0.5 * pi);
+    const double ev = std::max(view.elevation_rad, lit_gain_floor_rad);
+    const double sigma_view = zenith ? 0.0 : rock_shadow_table(m, ev);
+    const double rock_seen = 1.0 - std::exp(-c * (1.0 + sigma_view));
     const double unshadowed = unshadowed_slope_variance(m, spacing_m, horizon_spacing_m);
+    const double unresolved_by_map = unshadowed_slope_variance(m, spacing_m, view.shadow_map_resolved_m);
+    // With the near-field map the drawn rocks below shadow_caster_factor x d cast no map shadow: theirs stay statistical.
+    const double c_uncast =
+        geometry_shadows_statistical
+            ? std::max(abundance * rock_statistical_cover(m, shadow_caster_factor * geometry_min_diameter_m) - c, 0.0)
+            : 0.0;
     // One directional light (the Sun, or the Earth's disc as the earthshine's source) at macroscopic elevation e.
-    const auto light = [&](double elevation_rad) {
+    const auto light = [&](double elevation_rad, double azimuth_difference_rad, bool shadow_map) {
         const double se = std::sin(elevation_rad);
         if (se <= 0.0) return 0.0;
-        const double lit = smith_lit_fraction(std::tan(elevation_rad), unshadowed);
+        const double variance = shadow_map ? unresolved_by_map : unshadowed;
+        const double lit = zenith ? smith_lit_fraction(std::tan(elevation_rad), variance)
+                                  : smith_visible_lit_fraction(std::tan(elevation_rad), std::tan(ev),
+                                                               azimuth_difference_rad, variance);
         const double sigma = rock_shadow_table(m, elevation_rad);
-        return lit * (std::exp(-c * (1.0 + sigma) - c_drawn * sigma) +
-                      rock_share * rho * rock_lit_gain_table(m, elevation_rad)) / norm;
+        const double excess = zenith ? 0.0 : rock_view_excess_table(m, elevation_rad, ev, azimuth_difference_rad);
+        const double ratio = zenith ? 1.0 : rock_view_gain_ratio_table(m, elevation_rad, ev, azimuth_difference_rad);
+        const double drawn_visible_shadow = std::max(sigma - sigma_view + excess, 0.0);
+        return lit * (std::exp(-c * (1.0 + sigma + excess) - (shadow_map ? c_uncast : c_drawn) * drawn_visible_shadow) +
+                      rock_seen * rho * rock_lit_gain_table(m, elevation_rad) * ratio) / norm;
     };
-    out.sun = light(sun_elevation_rad);
-    out.earth = light(earth_elevation_rad);
+    out.sun = light(sun_elevation_rad, view.sun_azimuth_difference_rad, view.sun_shadow_map);
+    out.earth = light(earth_elevation_rad, view.earth_azimuth_difference_rad, false);
     return out;
 }
 
