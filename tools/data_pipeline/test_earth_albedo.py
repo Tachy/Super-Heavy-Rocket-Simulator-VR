@@ -119,3 +119,27 @@ def test_embed_sentinel2_takes_the_box_and_feathers_outside(tmp_path):
     far = out[px(26.0, -97.0 + 1.0 + 0.45)][0]  # ~45 km out: nearly faded
     assert 0.15 < edge < 0.2 and 0.1 <= far < edge
     assert out[px(26.0, -90.0)] == pytest.approx([0.1] * 3)  # beyond the feather: untouched
+
+
+def test_land_fraction_from_relief_above_the_geoid(tmp_path):
+    """3 x 3 relief nodes per pixel; land = ellipsoidal height minus the geoid above the core's water threshold."""
+    h, w = 4, 8
+    (tmp_path / "data" / "terrain" / "earth").mkdir(parents=True)
+    (tmp_path / "data" / "geoid").mkdir(parents=True)
+    relief = np.full((2 * h + 1, 2 * w), -100, dtype="<i2")
+    relief[:, :w] = 20  # west half: 20 m ellipsoidal
+    relief.tofile(tmp_path / "data" / "terrain" / "earth" / "r.i16")
+    geoid = np.full((5, 10), 1000, dtype="<i2")  # 10 m undulation (dn 0.01 m)
+    geoid.tofile(tmp_path / "data" / "geoid" / "g.i16")
+
+    def header(name, lines, samples):
+        return (f'[grid]\nheights = "{name}"\nlines = {lines}\nsamples = {samples}\ndn_scale_m = {1.0 if name == "r.i16" else 0.01}\n'
+                f'north_latitude_deg = 90.0\nwest_longitude_deg = -180.0\nstep_latitude_deg = {180.0 / (lines - 1)}\n'
+                f'step_longitude_deg = {360.0 / samples}\n')
+    (tmp_path / "data" / "terrain" / "earth" / "global_relief.toml").write_text(header("r.i16", 2 * h + 1, 2 * w))
+    (tmp_path / "data" / "geoid" / "egm2008_25.toml").write_text(header("g.i16", 5, 10))
+    frac = ea.land_fraction(tmp_path, h, w)
+    assert frac[:, 1].tolist() == pytest.approx([1.0] * h)  # 20 m - 10 m: land
+    assert frac[:, 5].tolist() == pytest.approx([0.0] * h)
+    assert frac[0, 3] == pytest.approx(2.0 / 3.0)  # the pixel at the edge sees one sea column of three
+    assert ea.land_fraction(tmp_path, h + 1, w) is None  # a grid that does not match

@@ -85,14 +85,16 @@ on top; it replaced the interim `GroundPatch`.
   - Global (`data/textures/earth_day.jpg`, 5400 x 2700, written by `prepare.py`): land from a MODIS MCD43A4 v061 NBAR
     climatology (`fetch.py earth_albedo`: every land tile at the COG's 3.7 km overview, per pixel the median over the
     mid-month products Jan-Jun and Dec 2025 plus Jul-Nov 2024 - the Planetary Computer lacks 2025-07..11 -, at least 3
-    valid, averaged into the texture's pixels: 4.98 M of 14.58 M pixels). Elsewhere (sea, sea ice, polar night) the
+    valid, averaged into the texture's pixels, taken where ETOPO 2022 + EGM2008 say the pixel is at least half land
+    (the core's water rule, `land_fraction`): 4.14 M of 14.58 M pixels; the 0.83 M water pixels with MCD43A4 values -
+    cloud- and glint-bright offshore spots - are left out). Elsewhere (sea, sea ice, polar night) the
     Blue Marble Next Generation (Dec 2004) through per-channel monotone tables count -> reflectance, fitted to MCD43A4
     NBAR of 2004-12-16 (279 tiles, 3.0 M pixels; luminance error per pixel median 10 %, 90th percentile 59 % - snow
     and season). Inside each Sentinel-2 box the texture carries the Sentinel-2 reflectance averaged into its pixels,
     and outside the box the edge ratio Sentinel-2 / MODIS fades out over 50 km (`EMBED_FEATHER_M` [E]): the two
     calibrated products differ there (land in the 10 km edge band: Sentinel-2 +18 % at Starbase, -11 % at the Cape),
     and the embedding spreads that over the feather instead of drawing it as a step where the renderer fades between
-    the levels. 2.9 MB (JPEG quality 95).
+    the levels. 2.5 MB (JPEG quality 95).
   - Sentinel-2: the L2A surface reflectance itself, no fit: the TCI median decoded with its measured linear
     quantisation (TCI = floor(1 + DN x 254 / 2500), DN = reflectance x 1e4: fit 0.101604 DN + 0.497, rms 0.4 counts on
     S2B_14RNN_20251116), and the pixels saturated in the TCI (reflectance >= 0.25: beaches, flats, roofs; Starbase 1.54 M
@@ -276,6 +278,15 @@ on top; it replaced the interim `GroundPatch`.
 - The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
   does not rebuild its tree on a change.
 
+- Earth surface albedo (Task 15): the Sentinel-2 sea is brighter than the global level's sea (10 km edge band:
+  luminance 0.035 vs the Blue Marble table's 0.016 at Starbase; Sen2Cor L2A over turbid coastal water, residual glint)
+  and keeps its rectangular scene / MGRS steps, so from orbit the Sentinel-2 box reads as a lighter, streaked patch of
+  the Gulf (`screenshots/earth_albedo/task15/orbit400_day_before_after.png`); a water mask in the pipeline (sea
+  pixels from one consistent water reflectance) is open. The global sea itself is the Blue Marble through land-fitted
+  tables (no calibrated ocean product; water-leaving reflectance is left to the sea shader's body colour). The two
+  calibrated land products disagree by 10-20 % at the Sentinel-2 box edges (Sentinel-2 2025 median of the least
+  cloudy scenes vs the MODIS NBAR monthly median), spread over the 50 km feather. The global level's land is an annual
+  median: no seasons and no snow cover outside the permanently snow-covered areas.
 - Open for the user, unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site
   coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.
 - Terrain-load draw stall (~1 run in 3 shows one 11-17 ms frame inside the RenderingServer draw; engine-internal,

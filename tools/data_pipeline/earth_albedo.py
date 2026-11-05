@@ -58,6 +58,8 @@ CLIMATOLOGY_MIN_DATES = 3  # [E] valid monthly products per MODIS pixel for a me
 CLIMATOLOGY_MIN_SAMPLES = 1  # MODIS pixels per day-texture pixel for the climatology to replace the tables
 EMBED_FEATHER_M = 50_000.0  # [E] fade of the Sentinel-2 / global ratio outside a Sentinel-2 box
 EMBED_SIGMA_PX = 2.0  # [E] Gaussian extension of the box-edge ratio (texture pixels, ~7 km)
+CLIMATOLOGY_MIN_LAND_FRACTION = 0.5  # [E] land share of a pixel (ETOPO + geoid) for the climatology
+WATER_THRESHOLD_M = 0.05  # [S] = core EarthTerrain::water_threshold_m: orthometric height at or below is sea
 CLIMATOLOGY_FILE = REPO_ROOT / "data" / "raw" / f"earth_albedo_modis_{CLIMATOLOGY_YEAR}.npz"
 
 
@@ -392,10 +394,44 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print) -> np.ndarray:
     return rho
 
 
+def land_fraction(repo_root: Path, h: int, w: int) -> np.ndarray | None:
+    """Per pixel of an equirectangular h x w grid the fraction of ETOPO 2022 relief nodes (data/terrain/earth/
+    global_relief, ellipsoidal) above the geoid (data/geoid/egm2008_25) by more than the core's water threshold - the
+    renderer's sea rule. The 3 x 3 nodes around each pixel of a grid at half the node spacing; None without the data."""
+    import tomllib as tl
+
+    relief_toml = repo_root / "data" / "terrain" / "earth" / "global_relief.toml"
+    geoid_toml = repo_root / "data" / "geoid" / "egm2008_25.toml"
+    if not (relief_toml.exists() and geoid_toml.exists()):
+        return None
+
+    def grid(toml_path: Path) -> tuple[np.ndarray, dict]:
+        g = tl.loads(toml_path.read_text(encoding="utf-8"))["grid"]
+        a = np.fromfile(toml_path.with_name(g["heights"]), dtype="<i2").reshape(g["lines"], g["samples"])
+        return a.astype(np.float32) * float(g["dn_scale_m"]), g
+
+    relief, rg = grid(relief_toml)
+    geoid, gg = grid(geoid_toml)
+    lines, samples = relief.shape
+    if lines != 2 * h + 1 or samples != 2 * w:
+        return None
+    lat = rg["north_latitude_deg"] - np.arange(lines) * rg["step_latitude_deg"]
+    lon = rg["west_longitude_deg"] + np.arange(samples) * rg["step_longitude_deg"]
+    gi = np.clip(np.rint((gg["north_latitude_deg"] - lat) / gg["step_latitude_deg"]).astype(int), 0, geoid.shape[0] - 1)
+    gj = np.rint((lon - gg["west_longitude_deg"]) / gg["step_longitude_deg"]).astype(int) % geoid.shape[1]
+    land = (relief - geoid[gi][:, gj] > WATER_THRESHOLD_M).astype(np.float32)
+    land = np.concatenate([land, land[:, :1]], axis=1)  # wrap in longitude
+    frac = np.zeros((h, w), dtype=np.float32)
+    for dr in range(3):
+        for dc in range(3):
+            frac += land[dr:dr + 2 * h:2, dc:dc + 2 * w:2]
+    return frac / 9.0
+
+
 def build_day_texture(repo_root: Path = REPO_ROOT, embed: bool = True) -> np.ndarray:
     """The calibrated day texture as sRGB-encoded counts (h, w, 3): the MODIS climatology where it has samples
     (`CLIMATOLOGY_MIN_SAMPLES`), elsewhere (sea, sea ice, polar night, persistent cloud) the Blue Marble through the
-    tables; with `embed` the Sentinel-2 level inside it (`embed_sentinel2`, where its reflectance.tif exists). Without
+    tables (a pixel takes the climatology only where ETOPO says it is mostly land); with `embed` the Sentinel-2 level inside it (`embed_sentinel2`, where its reflectance.tif exists). Without
     the climatology file only the tables (with a warning)."""
     from PIL import Image
 
@@ -409,6 +445,11 @@ def build_day_texture(repo_root: Path = REPO_ROOT, embed: bool = True) -> np.nda
         if land.shape != rho.shape:
             raise ValueError(f"{clim}: grid {land.shape} differs from the day texture {rho.shape}")
         take = hits >= CLIMATOLOGY_MIN_SAMPLES
+        frac = land_fraction(repo_root, *rho.shape[:2])
+        if frac is not None:  # MODIS NBAR of water pixels in land tiles (cloud, glint) is no sea albedo
+            take &= frac >= CLIMATOLOGY_MIN_LAND_FRACTION
+        else:
+            print("  earth_albedo: no ETOPO relief / geoid (fetch.py earth_terrain geoid_egm2008): no land mask")
         rho[take] = land[take]
     else:
         print(f"  earth_albedo: {clim} missing (fetch.py earth_albedo): the Blue Marble through the tables only")
