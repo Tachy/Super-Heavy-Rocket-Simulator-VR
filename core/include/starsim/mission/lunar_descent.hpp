@@ -31,6 +31,9 @@ struct LunarDescentParameters {
     double roughness_limit_m = 0.5;             // [E] terrain off the footprint's plane (leg stroke 0.6 m)
     double touchdown_search_radius_m = 1000.0;  // [E]
     double touchdown_grid_m = 20.0;             // the LOLA tile's pixel
+    // Threads of the detailed touchdown search (select_touchdown_point with hazard limits): 0 = the hardware's threads
+    // less two, 1 = serial. The chosen point does not depend on it (nearest admissible candidate either way).
+    int touchdown_search_threads = 0;
     double glide_slope_rad = 30.0 * constants::deg_to_rad;  // the SCvx glide cone (DescentLimits)
     double glide_check_range_m = 3000.0;        // [E] the approach from the high gate
     double glide_margin_m = 50.0;               // [E] terrain below the cone by at least this
@@ -119,10 +122,11 @@ std::optional<TouchdownPoint> select_touchdown_point(const environment::LunarTer
 // the leg contact uses (support_under_disc), sampled on the footprint circle at hazard_roll_spacing_per_pad_radius x
 // the pad radius; per roll the rest planes over the feet (touchdown_rest_planes) are within the slope limit, the deepest
 // hanging foot within max_foot_step_m, and the ground and rock tops under the hull base disc rise above each rest plane
-// by at most bell_clearance_m. Before any disc query a cheap bound refuses a candidate whose opposite feet already
-// exceed the step limit (support_upper_bound_m against the ground under the pad centres). The hazard results are
-// memoised per candidate for the surface / footprint / limits (they do not depend on the approach azimuth). Detail
-// off: the LOLA-only selection above on surface.lola(), bit for bit.
+// by at most bell_clearance_m. The hazard results are memoised per candidate for the surface / footprint / limits
+// (they do not depend on the approach azimuth). The candidates are checked ring by ring (touchdown_grid_m wide,
+// nearest ring first) on touchdown_search_threads threads and the first admissible one in the serial order is taken:
+// the same point as the serial search, bit for bit. Detail off: the LOLA-only selection above on surface.lola(), bit
+// for bit.
 std::optional<TouchdownPoint> select_touchdown_point(const environment::DetailedLunarTerrain& surface,
                                                      double latitude_rad, double longitude_rad,
                                                      double approach_azimuth_rad, double footprint_radius_m,

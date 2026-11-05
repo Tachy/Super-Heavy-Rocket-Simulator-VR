@@ -147,7 +147,8 @@ on top of that relief.
   walls reach 0.52; [D] `bound_tilt_gain` 0.98 bounds the fitted plane's tilt x r by the samples' spread).
 - Cache: per face cell of level 18 (10.4 m nominal) the lattice nodes (128 x 128, filled lazily, computed outside the
   lock, one locked pass per disc) and the rocks >= 5 cm that may touch the cell (`rocks_touching` from the cell centre,
-  radius = largest centre-to-corner chord x 1.01) with their peaks and top bounds; at most 64 cells of each kind (LRU).
+  radius = largest centre-to-corner chord x 1.01) with their peaks and top bounds; at most 256 cells of each kind (LRU,
+  ~32 MB of nodes; sized for the parallel touchdown search: 64 cells thrashed there).
   Node values and rock lists are pure functions of the cell, so a cached query equals a fresh one bit for bit
   (tested). A point needs only its own cell. `LunarSurfaceDetail` memoises per thread the generated crater cells
   (2048 direct-mapped slots, ~1 MB) and the band-start-dependent octave terms (crater mean field, roughness top
@@ -190,14 +191,20 @@ on top of that relief.
   side, both are checked). Each facet: slope within `slope_limit_rad`; the deepest foot hanging below it within
   `max_foot_step_m`; the contact ground under the hull base disc (0.5 m grid [E]) and the contact tops of the rocks
   >= 5 cm that can rise above it (an upper bound decides; then 13 x 13 samples over the rock's +-a square [E]) at most
-  `bell_clearance_m` above it. Before a roll's disc queries a cheap bound may refuse it (opposite feet: the deepest
-  hang is at least half the spread of the pairs' height sums, from the ground at the pad centres and
-  `support_upper_bound_m`); at IM-2 it never fires (the upper bounds are generous) - kept as it is rigorous and free
-  where the cells are warm.
+  `bell_clearance_m` above it. (A cheap pair-sum bound before the disc queries was removed in fix round 2: it never
+  fired, not even on all 7,449 candidates with a 1 cm step limit.)
 - Memo: the hazard result of a candidate does not depend on the approach azimuth (only the glide cone does); it is
   memoised per candidate centre for the surface's parts (by ownership), options, footprint, slope limit and hazard
   limits (one context, <= 50,000 entries [E], thread-safe). The mission's reachability check (both azimuths) and the
   descent planner then pay the hazard check once.
+- Parallel search (Task 5 fix round 2): with detail on, the candidates are checked ring by ring (`touchdown_grid_m`
+  wide, nearest ring first) on `LunarDescentParameters::touchdown_search_threads` threads (0: hardware threads less
+  two, as the weather builds; 1: serial), taken in azimuth order so that the candidates in flight share surface cells.
+  The first admissible candidate of the first ring that has one, in the serial (offset, grid) order, is taken: the
+  same point as the serial search bit for bit (test "The parallel touchdown search picks the serial point bit for
+  bit": serial against 3 and 22 threads, each on a fresh memo, point 60 m off / refused). `check_hazards` is pure;
+  the contact cache copies node values under its lock, computes missing nodes outside it and keeps rock cells alive by
+  `shared_ptr`, the crater memos are per thread - no shared mutable state outside the locks.
 - Limits from the vehicle config (`mission::touchdown_hazard_limits(StageConfig)`, [D]): `foot_pad_radius_m` (HLS
   1.0 m); `max_foot_step_m` = `stroke_m` (0.6 m) - a conservative bound on the hanging feet and on the tilt to a
   third foot, not crush absorption: statically no core crushes (4.5 MN per leg against ~0.5 MN lunar weight, 6-9 mm
@@ -490,12 +497,13 @@ geometry (g near 0) is not observed there. The published global-average table of
 - Upper bound for skipping feet: `bound_slope` 2 is a practical bound (overlapping steep crater walls could exceed it
   in principle); a violation only delays a foot's contact query until it is below the bound.
 - Physics cost: the first tick on a cold surface ~0.2 ms. The touchdown hazard check runs on LOLA-admissible
-  candidates only and stops at the first admissible one (IM-2: 111 ms cold, 0.2 ms for the second approach direction
-  from the memo). A refused site is expensive: the whole 1 km search at IM-2 checks 7,449 candidates at ~23-33 ms each,
-  dominated by cold contact-cell builds (the 64-cell cache cannot hold the search area) - 169 s when every candidate
-  fails at its first roll, 249 s worst case (every candidate through the full roll sweep and the base check), 0.2 s
-  for the next call from the memo. Synchronous at the mission start; no budget cap (a cap could refuse a site whose
-  safe spot lies farther out).
+  candidates only (IM-2: 136 ms cold on 22 threads, 172-176 ms serial in the same session; 0.4-0.8 ms for the second
+  approach direction from the memo). A refused site checks every candidate: the whole 1 km search at IM-2 has 7,449,
+  i7-13700K, 22 threads: 15.8 s when every candidate fails at its first roll (serial 168.9 s), 29.5 s worst case
+  (every candidate through the full roll sweep and the base check; serial 250-290 s), 0.1-0.2 s for the next call
+  from the memo. Per check the threads take ~2x the serial time (hyper-threads and E-cores), so the speed-up is
+  ~10x. Synchronous at the mission start; no budget cap (a cap could refuse a site whose safe spot lies farther out).
+  The worst case is over the 20 s target: `docs/known-issues.md`.
 - No terminal re-targeting: after a dispersion the descent flies to the planned point; a live re-selection would call
   the same `select_touchdown_point` on the live state (spec: re-plan from flight data) - not built.
 - The roll at touchdown is free, so every roll must be safe (conservative); a roll-controlled touchdown could pick the
@@ -506,6 +514,12 @@ geometry (g near 0) is not observed there. The published global-average table of
   held the attitude with the RCS after the first contact (a rate damper about the line through two feet - now
   released at contact) and the regularised leg friction crept under any tangential load (now Coulomb stick-slip,
   `contact::leg_contact`).
+  The 0.89 / 0.91 m of seeds 5 / 17 (slopes 5.1 / 5.3 deg) arise after the first contact, not in the guidance: at
+  first contact the footprint centre is 0.02 m off (lateral 0.009 / 0.006 m/s; `LunarTouchdown::first_contact_offset_m`,
+  printed by the campaign). Trace of seed 5 (200 Hz): the offset stays <= 0.1 m while the hull tips onto the downhill
+  feet up to ~5 deg (2.3 s), grows to 0.89 m while it overshoots to 7.8 deg and swings back (2.3-7.4 s), then stays
+  constant while the hull rocks 3.2-5.7 deg for ~15 s. Mechanism (foot slip during the tip vs. leg stroke) not traced:
+  open point.
 - Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
   `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
   over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated

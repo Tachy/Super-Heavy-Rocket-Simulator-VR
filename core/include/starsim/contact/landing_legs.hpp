@@ -57,8 +57,9 @@ struct FootStick {
 // tangential spring-damper tuned per tick to the body's effective mass at the foot (shared by the feet in contact):
 // natural frequency stick_omega_dt / dt, critically damped. Explicit stability: omega dt = 0.2 and the damper's
 // 2 omega dt = 0.4 stay well inside the explicit bounds (omega dt < 2, c dt / m < 2). Static load below mu N: the pad
-// holds with a constant offset F_t / k (mm), no creep. Above it the pad slips at mu N (capped to what stops its slip
-// within the tick, as the regularised law) and the anchor follows so that the spring alone carries the slip force.
+// holds with a constant offset F_t / k, no creep (k ~ m / dt^2, so the offset scales with dt^2: ~mm at the session's
+// 200 Hz, ~0.16 m for the HLS on 9 deg at 20 Hz). Above it the pad slips at mu N (capped to what stops its slip within
+// the tick, as the regularised law) and the anchor follows so that the spring alone carries the slip force.
 inline constexpr double stick_omega_dt = 0.2;  // [E]
 
 // Penalty contact of the feet with the surface. Each foot is a spring-damper (stiffness, damping) in series with a

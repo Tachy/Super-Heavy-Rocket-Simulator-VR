@@ -53,7 +53,10 @@ public:
     // Cache cells: face cells of level 18 (10.4 m nominal), 128 x 128 lattice nodes each ([E]: a pad and its rock reach
     // touch a few cells).
     static constexpr int contact_patch_level = 18;
-    static constexpr int max_cached_patches = 64;  // [E] ~8 MB of lattice nodes; the oldest cell is dropped beyond
+    // [E] ~32 MB of lattice nodes; the oldest cell is dropped beyond. Sized for the parallel touchdown search (Task 5
+    // fix round 2, IM-2, 1 km refused site on 22 threads): 64 cells thrashed (full sweep 100 s), 256 -> 29.5 s,
+    // 1024 -> 27.5 s. The leg contact needs a few cells.
+    static constexpr int max_cached_patches = 256;
     // Disc sample pattern: the centre, a ring of 8 at half the radius and a ring of 16 on the rim ([E]: the rim ring
     // finds the rim of a bowl the pad sits in; finer relief is what the max filter is meant to smooth).
     static constexpr int disc_inner_ring = 8;

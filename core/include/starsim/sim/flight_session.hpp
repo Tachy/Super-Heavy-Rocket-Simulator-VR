@@ -178,6 +178,7 @@ struct LunarTouchdown {
     double offset_m = 0.0;     // horizontal distance of the footprint centre from the touchdown point (judgement)
     double sink_mps = 0.0;     // at the first leg contact, relative to the Moon
     double lateral_mps = 0.0;  // at the first leg contact
+    double first_contact_offset_m = 0.0;  // the footprint centre's offset at the first leg contact (diagnostic)
 };
 
 // A lunar landing from the LLO (plan_lunar_landing, l4).

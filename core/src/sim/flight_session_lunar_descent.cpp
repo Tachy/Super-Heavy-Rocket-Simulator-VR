@@ -351,10 +351,26 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             const auto frame = moon_->frame(epoch_);
             const auto& s = body.state();
             const bool contact = legs_->in_contact(body);
+            // Where it stands: the footprint centre (the hull axis at the feet's station - on a slope the 21 m high CG
+            // leans ~0.9 m downhill) against the touchdown point, both in the leg site's east / north / up frame.
+            const auto footprint_offset_m = [&] {
+                const double r_point = constants::moon_mean_radius_m + lunar_touchdown_point_.height_m;
+                const double lat = lunar_touchdown_point_.latitude_rad, lon = lunar_touchdown_point_.longitude_rad;
+                const math::Vec3 point_fixed{r_point * std::cos(lat) * std::cos(lon),
+                                             r_point * std::cos(lat) * std::sin(lon), r_point * std::sin(lat)};
+                const auto& vehicle = body.vehicle();
+                const double below_cg_m =
+                    vehicle.mass_properties().cg_station_m - vehicle.stages().front().config.landing_legs.foot_station_m;
+                const math::Vec3 footprint =
+                    s.position_gcrf_m - s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}) * below_cg_m;
+                const math::Vec3 d = legs_->to_site(frame.to_fixed(footprint)) - legs_->to_site(point_fixed);
+                return std::hypot(d.x, d.y);
+            };
             const auto record_contact = [&] {
                 const math::Vec3 rel = frame.relative_velocity(s.position_gcrf_m, s.velocity_gcrf_mps);
                 const math::Vec3 up = math::normalized(s.position_gcrf_m - frame.centre_gcrf_m);
-                lunar_touchdown_ = LunarTouchdown{LegTouchdown::None, 0.0, -dot(rel, up), norm(rel - up * dot(rel, up))};
+                lunar_touchdown_ = LunarTouchdown{LegTouchdown::None, 0.0, -dot(rel, up), norm(rel - up * dot(rel, up)),
+                                                  footprint_offset_m()};
             };
             if (contact && !lunar_touchdown_) record_contact();
             flying.return_command = lunar_landing_->update(body, env_, epoch_, contact);
@@ -392,18 +408,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             if (judged == LegTouchdown::None && !body.impacted()) break;
             if (!lunar_touchdown_) record_contact();  // an impact before any leg contact
             lunar_touchdown_->outcome = body.impacted() ? LegTouchdown::Impact : judged;
-            // Where it stands: the footprint centre (the hull axis at the feet's station - on a slope the 21 m high CG
-            // leans ~0.9 m downhill) against the touchdown point, both in the leg site's east / north / up frame.
-            const double r_point = constants::moon_mean_radius_m + lunar_touchdown_point_.height_m;
-            const double lat = lunar_touchdown_point_.latitude_rad, lon = lunar_touchdown_point_.longitude_rad;
-            const math::Vec3 point_fixed{r_point * std::cos(lat) * std::cos(lon), r_point * std::cos(lat) * std::sin(lon),
-                                         r_point * std::sin(lat)};
-            const auto& vehicle = body.vehicle();
-            const double below_cg_m =
-                vehicle.mass_properties().cg_station_m - vehicle.stages().front().config.landing_legs.foot_station_m;
-            const math::Vec3 footprint = s.position_gcrf_m - s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}) * below_cg_m;
-            const math::Vec3 d = legs_->to_site(frame.to_fixed(footprint)) - legs_->to_site(point_fixed);
-            lunar_touchdown_->offset_m = std::hypot(d.x, d.y);
+            lunar_touchdown_->offset_m = footprint_offset_m();
             if (lunar_touchdown_->outcome == LegTouchdown::Landed) {
                 lunar_landing_->mark_landed();
                 lunar_landed_epoch_ = epoch_;

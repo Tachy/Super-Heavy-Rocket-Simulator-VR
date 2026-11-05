@@ -3,27 +3,32 @@
 // Design decisions:
 // - The LOLA checks (footprint plane, roughness, glide cone) run first for every candidate, nearest first, exactly as
 //   without the detailed surface: they are the cheap pre-check, and detail off is that selection bit for bit.
-// - The hazard check of the detailed surface runs only on candidates that pass them, and stops at the first admissible
-//   one. Feet use DetailedLunarTerrain::support_under_disc (the pivoting pad the leg contact feels) at the same frame
-//   convention as contact::TerrainField (a vertical through the candidate's tangent-plane point; heights along the
-//   candidate's up). The roll at touchdown is not controlled: every roll is checked (feet sampled on the footprint
+// - The hazard check of the detailed surface runs only on candidates that pass them. With detail on the candidates are
+//   checked ring by ring in parallel (a refused site checks every candidate: minutes serially) and the first admissible
+//   one in the serial order wins, so the point is the serial one bit for bit; check_hazards is pure and the surface's
+//   caches are thread-safe. Feet use DetailedLunarTerrain::support_under_disc (the pivoting pad the leg contact feels)
+//   at the same frame convention as contact::TerrainField (a vertical through the candidate's tangent-plane point;
+//   heights along the candidate's up). The roll at touchdown is not controlled: every roll is checked (feet sampled on the footprint
 //   circle, the base disc's samples once per candidate).
 // - The hull base (bells): the contact ground on a grid plus the contact tops of the rocks that can reach above the
 //   plane by more than the ground does (an upper bound of each rock's top decides whether its footprint is sampled).
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -39,6 +44,10 @@ constexpr int footprint_samples = 12;  // points on the leg circle (independent 
 // bounding square (+- a) with k = rock_samples_per_semi_axis ([E]).
 constexpr double base_grid_m = 0.5;
 constexpr int rock_samples_per_semi_axis = 6;
+// Parallel candidate search: cores left to the 200 Hz flight simulation and the render thread while it runs (as the
+// in-game weather builds), and a cap on the pool.
+constexpr int search_cores_left_free = 2;
+constexpr int max_search_threads = 32;
 
 struct LatLon {
     double latitude_rad;
@@ -127,25 +136,6 @@ struct HazardResult {
     double height_m = 0.0, slope_rad = 0.0, max_step_m = 0.0, min_clearance_m = 0.0;
 };
 
-// Antipodal leg pairs (k, k') of the layout, or empty when not every leg has an opposite one.
-std::vector<std::pair<int, int>> antipodal_pairs(const std::vector<double>& azimuths_rad) {
-    constexpr double tolerance_rad = 1e-9;
-    std::vector<std::pair<int, int>> pairs;
-    const int legs = static_cast<int>(azimuths_rad.size());
-    for (int k = 0; k < legs; ++k) {
-        int opposite = -1;
-        for (int j = 0; j < legs && opposite < 0; ++j) {
-            const double d = std::remainder(azimuths_rad[static_cast<size_t>(j)] - azimuths_rad[static_cast<size_t>(k)] -
-                                                constants::pi,
-                                            constants::two_pi);
-            if (std::abs(d) < tolerance_rad) opposite = j;
-        }
-        if (opposite < 0) return {};
-        if (k < opposite) pairs.emplace_back(k, opposite);
-    }
-    return pairs;
-}
-
 // The hazard check of one candidate (centre on its LOLA height) for every roll; stops at the first failed roll.
 HazardResult check_hazards(const environment::DetailedLunarTerrain& surface, const LatLon& centre, double lola_height_m,
                            double footprint_radius_m, const LunarDescentParameters& p, const TouchdownHazardLimits& h) {
@@ -164,35 +154,6 @@ HazardResult check_hazards(const environment::DetailedLunarTerrain& surface, con
     };
     const auto foot_az = [&](int roll, int leg) { return roll * step + h.leg_azimuths_rad[static_cast<size_t>(leg)]; };
 
-    // Cheap reject of a roll before its disc queries: for evenly paired legs the deepest hanging foot below the rest
-    // plane is at least half the spread of the opposite pairs' height sums (a rest plane P is linear,
-    // P(k) + P(k') = 2 P(0), and P(0), the feet's concave envelope at the centre, is at least every pair's mean),
-    // bounded with the pad support's cheap lower (the contact ground at the pad centre, one of the disc samples) and
-    // upper bounds (support_upper_bound_m). A roll that already exceeds the step limit this way refuses the candidate.
-    const auto pairs = antipodal_pairs(h.leg_azimuths_rad);
-    std::unordered_map<long long, std::pair<double, double>> bounds;  // azimuth key -> (lower, upper) local heights
-    const auto bound = [&](double azimuth) -> const std::pair<double, double>& {
-        const long long key = key_of(azimuth);
-        const auto it = bounds.find(key);
-        if (it != bounds.end()) return it->second;
-        const double e = footprint_radius_m * std::sin(azimuth), n = footprint_radius_m * std::cos(azimuth);
-        const math::Vec3 u = f.vertical(e, n);
-        const double lower = f.local_height(u, surface.contact_ground_m(u));
-        const double upper = f.local_height(u, surface.support_upper_bound_m(u, f.up, h.foot_pad_radius_m));
-        return bounds.emplace(key, std::pair{lower, std::max(lower, upper)}).first->second;
-    };
-    const auto bound_rejects = [&](int roll) {
-        if (pairs.empty()) return false;
-        double max_low = -std::numeric_limits<double>::infinity(), min_high = -max_low;
-        for (const auto& [k, j] : pairs) {
-            const auto& bk = bound(foot_az(roll, k));
-            const auto& bj = bound(foot_az(roll, j));
-            max_low = std::max(max_low, bk.first + bj.first);
-            min_high = std::min(min_high, bk.second + bj.second);
-        }
-        return 0.5 * (max_low - min_high) > h.max_foot_step_m;
-    };
-
     std::unordered_map<long long, math::Vec3> feet;  // quantised azimuth -> (e, n, z)
     const auto foot = [&](double azimuth) -> const math::Vec3& {
         const long long key = key_of(azimuth);
@@ -210,10 +171,6 @@ HazardResult check_hazards(const environment::DetailedLunarTerrain& surface, con
     double height_sum = 0.0;
     int roll_count = 0;
     for (int i = 0; i < rolls; ++i) {
-        if (bound_rejects(i)) {
-            r.max_step_m = std::numeric_limits<double>::infinity();  // refused by the bound (no exact value)
-            return r;
-        }
         for (int k = 0; k < legs; ++k) pts[static_cast<size_t>(k)] = foot(foot_az(i, k));
         const auto facets = touchdown_rest_planes(pts);
         if (facets.empty()) return r;  // no foot triangle under the axis: the hull would tip
@@ -339,17 +296,14 @@ HazardMemo& hazard_memo() {
     return memo;
 }
 
-// Candidates on the grid, nearest first; the first that passes the LOLA checks and `accept` (filling the point's
-// remaining fields) is returned.
-template <typename Accept>
-std::optional<TouchdownPoint> search(const environment::LunarTerrain& terrain, double latitude_rad,
-                                     double longitude_rad, double approach_azimuth_rad, double footprint_radius_m,
-                                     const LunarDescentParameters& p, Accept&& accept) {
-    struct Candidate {
-        double offset_m;
-        double east_m;
-        double north_m;
-    };
+struct Candidate {
+    double offset_m;
+    double east_m;
+    double north_m;
+};
+
+// The candidate grid in the site's east/north plane within the search radius, nearest first (ties in grid order).
+std::vector<Candidate> sorted_candidates(const LunarDescentParameters& p) {
     std::vector<Candidate> candidates;
     const int n = static_cast<int>(std::floor(p.touchdown_search_radius_m / p.touchdown_grid_m));
     for (int i = -n; i <= n; ++i) {
@@ -361,27 +315,121 @@ std::optional<TouchdownPoint> search(const environment::LunarTerrain& terrain, d
     }
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const Candidate& a, const Candidate& b) { return a.offset_m < b.offset_m; });
+    return candidates;
+}
 
+// Worker threads of the parallel search: `requested` if positive, else the hardware's threads less the cores left to
+// the flight simulation and render threads (at least 1, at most max_search_threads).
+int search_thread_count(int requested) {
+    if (requested > 0) return std::min(requested, max_search_threads);
+    const int hardware = static_cast<int>(std::thread::hardware_concurrency());
+    return std::clamp(hardware - search_cores_left_free, 1, max_search_threads);
+}
+
+// Runs fn(i) for i in [0, count) on `threads` threads (the calling thread is one; dynamic: each takes the next index).
+// The first exception is rethrown on the calling thread after all have joined.
+template <typename Fn>
+void parallel_for(int count, int threads, Fn&& fn) {
+    threads = std::min(threads, count);
+    if (threads <= 1) {
+        for (int i = 0; i < count; ++i) fn(i);
+        return;
+    }
+    std::atomic<int> next{0};
+    std::vector<std::exception_ptr> errors(static_cast<size_t>(threads));
+    const auto work = [&](int t) {
+        try {
+            for (int i = next.fetch_add(1); i < count; i = next.fetch_add(1)) fn(i);
+        } catch (...) {
+            errors[static_cast<size_t>(t)] = std::current_exception();
+            next.store(count);  // the others stop at their next index
+        }
+    };
+    std::vector<std::thread> pool;
+    pool.reserve(static_cast<size_t>(threads - 1));
+    for (int t = 1; t < threads; ++t) pool.emplace_back(work, t);
+    work(0);
+    for (auto& th : pool) th.join();
+    for (const auto& e : errors) {
+        if (e) std::rethrow_exception(e);
+    }
+}
+
+// The nearest candidate for which `evaluate` (a pure, thread-safe function of the candidate returning the point or
+// nothing) gives a point. Serial (threads 1): candidates in order, stops at the first point. Parallel: ring by ring of
+// touchdown_grid_m width (nearest ring first), every candidate of a ring evaluated, the first point in candidate order
+// taken - the same candidate as the serial order, so the same point bit for bit.
+template <typename Evaluate>
+std::optional<TouchdownPoint> nearest_admissible(const std::vector<Candidate>& candidates, double ring_m, int threads,
+                                                 Evaluate&& evaluate) {
+    const int count = static_cast<int>(candidates.size());
+    if (threads <= 1) {
+        for (int i = 0; i < count; ++i) {
+            if (auto point = evaluate(candidates[static_cast<size_t>(i)])) return point;
+        }
+        return std::nullopt;
+    }
+    std::vector<std::optional<TouchdownPoint>> results;
+    std::vector<int> order;  // evaluation order within the ring: by azimuth
+    for (int first = 0; first < count;) {
+        const double ring = std::floor(candidates[static_cast<size_t>(first)].offset_m / ring_m);
+        int end = first + 1;
+        while (end < count && std::floor(candidates[static_cast<size_t>(end)].offset_m / ring_m) == ring) ++end;
+        // The threads take the candidates in azimuth order, so the ones in flight are neighbours whose footprints
+        // share surface cells (the grid spacing is below the footprint's diameter): the cells stay in the surface's
+        // contact cache. Only the evaluation order; the choice below is by candidate index.
+        order.resize(static_cast<size_t>(end - first));
+        for (int i = 0; i < end - first; ++i) order[static_cast<size_t>(i)] = i;
+        const auto azimuth = [&](int i) {
+            const Candidate& c = candidates[static_cast<size_t>(first + i)];
+            return std::atan2(c.east_m, c.north_m);
+        };
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            const double za = azimuth(a), zb = azimuth(b);
+            return za < zb || (za == zb && a < b);
+        });
+        results.assign(static_cast<size_t>(end - first), std::nullopt);
+        parallel_for(end - first, threads, [&](int k) {
+            const int i = order[static_cast<size_t>(k)];
+            results[static_cast<size_t>(i)] = evaluate(candidates[static_cast<size_t>(first + i)]);
+        });
+        for (auto& r : results) {
+            if (r) return r;
+        }
+        first = end;
+    }
+    return std::nullopt;
+}
+
+// Candidates on the grid, nearest first; the nearest that passes the LOLA checks and `accept` (filling the point's
+// remaining fields; pure and thread-safe when threads > 1) is returned.
+template <typename Accept>
+std::optional<TouchdownPoint> search(const environment::LunarTerrain& terrain, double latitude_rad,
+                                     double longitude_rad, double approach_azimuth_rad, double footprint_radius_m,
+                                     const LunarDescentParameters& p, int threads, Accept&& accept) {
     const LatLon site{latitude_rad, longitude_rad};
     const double sphere_m = terrain.sphere_radius_m();
     const double site_height_m = terrain.height_m(latitude_rad, longitude_rad);
-    for (const auto& c : candidates) {
+    return nearest_admissible(sorted_candidates(p), p.touchdown_grid_m, threads,
+                              [&](const Candidate& c) -> std::optional<TouchdownPoint> {
         const auto centre = offset_position(site, c.east_m, c.north_m, sphere_m + site_height_m);
         const auto fit = fit_footprint(terrain, centre, footprint_radius_m, sphere_m);
-        if (fit.slope_rad > p.slope_limit_rad || fit.roughness_m > p.roughness_limit_m) continue;
-        if (!glide_cone_clear(terrain, centre, fit.centre_height_m, approach_azimuth_rad, sphere_m, p)) continue;
+        if (fit.slope_rad > p.slope_limit_rad || fit.roughness_m > p.roughness_limit_m) return std::nullopt;
+        if (!glide_cone_clear(terrain, centre, fit.centre_height_m, approach_azimuth_rad, sphere_m, p)) {
+            return std::nullopt;
+        }
         TouchdownPoint point{centre.latitude_rad, centre.longitude_rad, fit.centre_height_m, fit.slope_rad,
                              c.offset_m};
-        if (accept(centre, point)) return point;
-    }
-    return std::nullopt;
+        if (!accept(centre, point)) return std::nullopt;
+        return point;
+    });
 }
 }  // namespace
 
 std::optional<TouchdownPoint> select_touchdown_point(const environment::LunarTerrain& terrain, double latitude_rad,
                                                      double longitude_rad, double approach_azimuth_rad,
                                                      double footprint_radius_m, const LunarDescentParameters& p) {
-    return search(terrain, latitude_rad, longitude_rad, approach_azimuth_rad, footprint_radius_m, p,
+    return search(terrain, latitude_rad, longitude_rad, approach_azimuth_rad, footprint_radius_m, p, 1,
                   [](const LatLon&, TouchdownPoint&) { return true; });
 }
 
@@ -398,33 +446,38 @@ std::optional<TouchdownPoint> select_touchdown_point(const environment::Detailed
         throw std::invalid_argument("select_touchdown_point: Gefahrenprüfung braucht mindestens drei Beine und Fußteller");
     }
     static const bool debug = std::getenv("STARSIM_DEBUG_TOUCHDOWN") != nullptr;  // diagnostics
-    int checked = 0, by_bound = 0, remembered = 0;
-    double checked_ms = 0.0;
+    std::atomic<int> checked{0}, remembered{0};
+    std::atomic<std::int64_t> checked_us{0};
+    const int threads = search_thread_count(p.touchdown_search_threads);
+    const auto t_start = std::chrono::steady_clock::now();
     auto result = search(surface.lola(), latitude_rad, longitude_rad, approach_azimuth_rad, footprint_radius_m, p,
-                  [&](const LatLon& centre, TouchdownPoint& point) {
-                      auto& memo = hazard_memo();
-                      auto known = memo.find(surface, footprint_radius_m, p, hazards, centre);
-                      if (known) {
-                          ++remembered;
-                      } else {
-                          const auto t0 = std::chrono::steady_clock::now();
-                          known = check_hazards(surface, centre, point.height_m, footprint_radius_m, p, hazards);
-                          checked_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-                          ++checked;
-                          by_bound += std::isinf(known->max_step_m) ? 1 : 0;
-                          memo.store(surface, footprint_radius_m, p, hazards, centre, *known);
-                      }
-                      const HazardResult& r = *known;
-                      if (!r.admissible) return false;
-                      point.height_m = r.height_m;
-                      point.slope_rad = r.slope_rad;
-                      point.max_foot_step_m = r.max_step_m;
-                      point.min_bell_clearance_m = r.min_clearance_m;
-                      return true;
-                  });
+                         threads, [&](const LatLon& centre, TouchdownPoint& point) {
+                             auto& memo = hazard_memo();
+                             auto known = memo.find(surface, footprint_radius_m, p, hazards, centre);
+                             if (known) {
+                                 ++remembered;
+                             } else {
+                                 const auto t0 = std::chrono::steady_clock::now();
+                                 known = check_hazards(surface, centre, point.height_m, footprint_radius_m, p, hazards);
+                                 checked_us += std::chrono::duration_cast<std::chrono::microseconds>(
+                                                   std::chrono::steady_clock::now() - t0).count();
+                                 ++checked;
+                                 memo.store(surface, footprint_radius_m, p, hazards, centre, *known);
+                             }
+                             const HazardResult& r = *known;
+                             if (!r.admissible) return false;
+                             point.height_m = r.height_m;
+                             point.slope_rad = r.slope_rad;
+                             point.max_foot_step_m = r.max_step_m;
+                             point.min_bell_clearance_m = r.min_clearance_m;
+                             return true;
+                         });
     if (debug) {
-        std::printf("[touchdown] hazard checks %d (%d refused by the bound, %.1f ms), %d from the memo: %s\n", checked,
-                    by_bound, checked_ms, remembered, result ? "found" : "refused");
+        const double wall_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
+        std::printf("[touchdown] %d threads, %.1f ms: hazard checks %d (%.1f ms summed), %d from the memo: %s\n",
+                    threads, wall_ms, checked.load(), checked_us.load() * 1e-3, remembered.load(),
+                    result ? "found" : "refused");
     }
     return result;
 }

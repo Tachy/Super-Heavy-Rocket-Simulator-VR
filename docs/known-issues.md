@@ -256,3 +256,14 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   where its longitude spacing is finer (172 m at -84.8 deg), some 0.2-1.9 km detail is both in LOLA_16 and generated;
   the roughness is ~6 % rougher near the 8 cube corners (skewed face lattice; craters + roughness 4.09 mm there,
   above Guo's 4 mm before rocks); queries inside the +-13.6 km face blend band along the cube edges cost ~3-6 x more.
+
+## Moon procedural surface plan, Task 5 (2026-11-05)
+- Refused landing site at mission start: the touchdown search checks every candidate of the 1 km search (IM-2:
+  7,449) before it refuses. Parallel ring-wise search (i7-13700K, 22 threads): 15.8 s when every candidate fails at
+  its first roll, 29.5 s worst case (every candidate through all rolls and the base check) - over the 20 s target
+  (serial: 169 s / 250-290 s). Synchronous; no cap by ruling (a cap could refuse a site that has a safe point). Only
+  IM-2 ships (136 ms, it finds a point 28.3 m off). Further options: an asynchronous check with a status line
+  ("Landeplatz wird geprüft"), or a cheaper roll sweep.
+- Lunar campaign seeds 5 / 17 land 0.89 / 0.91 m off (gate 1 m) although the first contact is 0.02 m off: the
+  footprint moves while the hull tips onto the downhill feet and overshoots (5.1-5.3 deg slopes;
+  `docs/subsystems/moon-surface.md`). Cause (foot slip during the tip vs. leg stroke) not traced.

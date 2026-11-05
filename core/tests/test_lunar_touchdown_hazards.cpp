@@ -2,8 +2,10 @@
 // spread on the pivoting-pad support, the slope over the feet and the rock tops under the bells.
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -289,6 +291,65 @@ TEST_CASE("A rock under a planned footpad moves the target to the nearest safe s
     }
 }
 
+// Review I3': the candidates are checked ring by ring in parallel. The chosen point must be the serial one bit for bit
+// and the concurrent checks (cold surface cells built on several threads at once) must give the serial values. Each
+// search runs on a fresh memo (a search with other limits replaces the memo's context first), so every candidate is
+// really checked on the threads.
+TEST_CASE("The parallel touchdown search picks the serial point bit for bit", "[moon_surface][lunar][mission]") {
+    const auto s = flat_surface();
+    const auto base = mission::touchdown_hazard_limits(hls_stage());
+    const auto rocks = s->rocks().rocks_near(direction(site_lat, site_lon), 400.0, 1.0);
+    REQUIRE_FALSE(rocks.empty());
+    const auto proud = [](const environment::Rock& r) { return r.axes_m.z - r.burial_m; };
+    const auto rock = *std::max_element(rocks.begin(), rocks.end(),
+                                        [&](const auto& a, const auto& b) { return proud(a) < proud(b); });
+    const double rock_lat = std::asin(rock.base_unit.z), rock_lon = std::atan2(rock.base_unit.y, rock.base_unit.x);
+    const double target_lat = rock_lat, target_lon = rock_lon + footprint_m / (R * std::cos(rock_lat));
+
+    const auto fresh_search = [&](const mission::TouchdownHazardLimits& h, mission::LunarDescentParameters p,
+                                  int threads) {
+        auto other = h;
+        other.base_radius_m += 1e-3;  // another memo context: the next search checks every candidate again
+        auto tiny = p;
+        tiny.touchdown_search_radius_m = 0.0;
+        (void)mission::select_touchdown_point(*s, target_lat, target_lon, 0.0, footprint_m, tiny, other);
+        p.touchdown_search_threads = threads;
+        return mission::select_touchdown_point(*s, target_lat, target_lon, 0.0, footprint_m, p, h);
+    };
+    struct Variant {
+        const char* name;
+        double max_step_m, bell_clearance_m, radius_m;
+    };
+    for (const Variant v : {Variant{"HLS limits (point 60 m off)", base.max_foot_step_m, base.bell_clearance_m, 200.0},
+                            Variant{"step 0.25 m", 0.25, base.bell_clearance_m, 200.0},
+                            Variant{"refused (bell clearance -1 m)", base.max_foot_step_m, -1.0, 100.0}}) {
+        auto h = base;
+        h.max_foot_step_m = v.max_step_m;
+        h.bell_clearance_m = v.bell_clearance_m;
+        mission::LunarDescentParameters p;
+        p.touchdown_search_radius_m = v.radius_m;
+        const auto serial = fresh_search(h, p, 1);
+        for (const int threads : {3, 0}) {
+            const auto parallel = fresh_search(h, p, threads);
+            CAPTURE(v.name, threads);
+            std::printf("[touchdown_hazards] parallel search (%s, %d threads): %s\n", v.name, threads,
+                        parallel ? "found" : "refused");
+            REQUIRE(serial.has_value() == parallel.has_value());
+            if (!serial) continue;
+            CHECK(std::bit_cast<std::uint64_t>(parallel->latitude_rad) == std::bit_cast<std::uint64_t>(serial->latitude_rad));
+            CHECK(std::bit_cast<std::uint64_t>(parallel->longitude_rad) ==
+                  std::bit_cast<std::uint64_t>(serial->longitude_rad));
+            CHECK(std::bit_cast<std::uint64_t>(parallel->height_m) == std::bit_cast<std::uint64_t>(serial->height_m));
+            CHECK(std::bit_cast<std::uint64_t>(parallel->slope_rad) == std::bit_cast<std::uint64_t>(serial->slope_rad));
+            CHECK(parallel->offset_m == serial->offset_m);
+            CHECK(std::bit_cast<std::uint64_t>(parallel->max_foot_step_m) ==
+                  std::bit_cast<std::uint64_t>(serial->max_foot_step_m));
+            CHECK(std::bit_cast<std::uint64_t>(parallel->min_bell_clearance_m) ==
+                  std::bit_cast<std::uint64_t>(serial->min_bell_clearance_m));
+        }
+    }
+}
+
 TEST_CASE("Detail off selects the same point as before", "[moon_surface][lunar][mission][terrain][data]") {
     const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
     const auto lola = sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
@@ -319,7 +380,8 @@ TEST_CASE("The IM-2 site with full detail has a safe point within the search rad
     const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
     const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
     const auto h = mission::touchdown_hazard_limits(hls_stage());
-    const mission::LunarDescentParameters p;
+    mission::LunarDescentParameters p;
+    if (const char* t = std::getenv("STARSIM_TOUCHDOWN_THREADS")) p.touchdown_search_threads = std::atoi(t);  // profiling
     for (const double az : {180.0 * deg, 0.0}) {
         const auto lola = mission::select_touchdown_point(surface->lola(), site.latitude_rad, site.longitude_rad, az,
                                                           footprint_m, p);
@@ -355,6 +417,7 @@ TEST_CASE("Worst-case time of a refused site at IM-2", "[.touchdown_worst]") {
     const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
     mission::LunarDescentParameters p;
     if (const char* r = std::getenv("STARSIM_TOUCHDOWN_RADIUS_M")) p.touchdown_search_radius_m = std::atof(r);  // profiling
+    if (const char* t = std::getenv("STARSIM_TOUCHDOWN_THREADS")) p.touchdown_search_threads = std::atoi(t);  // profiling
     for (const int variant : {0, 1}) {
         auto h = mission::touchdown_hazard_limits(hls_stage());
         if (variant == 0) h.max_foot_step_m = 0.01;

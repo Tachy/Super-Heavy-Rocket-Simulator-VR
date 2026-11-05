@@ -89,6 +89,7 @@ struct Fixture {
 struct Run {
     sim::LegTouchdown outcome = sim::LegTouchdown::None;
     double offset_m = 0.0, sink_mps = 0.0, m0_t = 0.0, used_t = 0.0, slope_deg = 0.0;
+    double first_contact_offset_m = 0.0, lateral_mps = 0.0;  // at the first leg contact (review M-c)
     std::string status;
 };
 
@@ -117,6 +118,8 @@ Run fly(const Dispersion& d) {
         r.outcome = td->outcome;
         r.offset_m = td->offset_m;
         r.sink_mps = td->sink_mps;
+        r.first_contact_offset_m = td->first_contact_offset_m;
+        r.lateral_mps = td->lateral_mps;
     }
     return r;
 }
@@ -126,10 +129,10 @@ int fly_seeds(unsigned first, unsigned last) {
     for (unsigned seed = first; seed <= last; ++seed) {
         const auto d = dispersion(seed);
         const auto run = fly(d);
-        std::printf("[lunar_campaign] case %2u: thrust %.3f, propellant %.3f, spot %.0f/%.0f m, slope %.1f deg: %s, offset %.2f m, "
-                    "sink %.2f m/s, %.1f t at PDI, %.1f t used, %s\n",
+        std::printf("[lunar_campaign] case %2u: thrust %.3f, propellant %.3f, spot %.0f/%.0f m, slope %.1f deg: %s, offset %.2f m "
+                    "(%.2f m at first contact, lateral %.3f m/s), sink %.2f m/s, %.1f t at PDI, %.1f t used, %s\n",
                     seed, d.thrust_factor, d.mass_factor, d.east_m, d.north_m, run.slope_deg, sim::to_string(run.outcome),
-                    run.offset_m, run.sink_mps, run.m0_t, run.used_t, run.status.c_str());
+                    run.offset_m, run.first_contact_offset_m, run.lateral_mps, run.sink_mps, run.m0_t, run.used_t, run.status.c_str());
         std::fflush(stdout);
         if (run.outcome == sim::LegTouchdown::Landed && run.offset_m < 1.0 && run.sink_mps <= 1.1) ++landed;
     }

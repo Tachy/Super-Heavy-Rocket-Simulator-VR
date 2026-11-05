@@ -12,6 +12,7 @@
 #include "starsim/contact/leg_kinematics.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/quat.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -268,4 +269,87 @@ TEST_CASE("Stick friction: above the friction angle the lander slides at g (sin 
     CAPTURE(run.speed_mps, expected);
     // horizontal speed after 12 s of sliding from rest (the first contact settles within a fraction of a second)
     CHECK(run.speed_mps == Catch::Approx(expected * 12.0).epsilon(0.1));
+}
+
+// Review M-a (Task 5 fix round 2): the stick spring with rotation free. The Falcon 9 first stage (small roll inertia,
+// feet 9 m out: the case that once reversed its spin every tick) rests on a plane at the 200 Hz tick as a rigid body
+// (translation and attitude integrated semi-implicitly), optionally with a roll rate at first contact.
+namespace {
+struct RigidSlopeRun {
+    double drift_m;            // CG travel between t = 10 s and t = 30 s
+    double max_rate_radps;     // largest |angular velocity| between t = 10 s and t = 30 s
+    double final_rate_radps;   // |angular velocity| at the end
+    int roll_reversals;        // sign changes of the roll rate (about the body axis) above 1e-6 rad/s after t = 10 s
+};
+RigidSlopeRun rigid_stage_on_slope(double slope_deg, double initial_roll_radps) {
+    const auto legs = falcon_legs();
+    const auto g = contact::make_leg_geometry(legs, 0.0, 1.83);
+    contact::LandingSurface slope;
+    slope.field = std::make_shared<contact::PlaneField>(slope_deg * deg, 0.0);  // rises towards the north
+    // [E] landed stage ~27 t (25 t dry + residuals, as the load test above); roll ~45 t m^2 (FrictionLimit's note),
+    // pitch / yaw of a 41 m rod m L^2 / 12.
+    constexpr double mass_kg = 27.0e3, gravity_mps2 = 9.81, dt_s = 0.005, cg_station_m = 12.0;
+    const Vec3 inertia_body{45.0e3, 27.0e3 * 41.0 * 41.0 / 12.0, 27.0e3 * 41.0 * 41.0 / 12.0};
+    const contact::FrictionLimit limit{mass_kg, inertia_body, dt_s};
+    // Standing normal to the plane (body x along its normal), every foot just touching.
+    auto pose = upright(g, cg_station_m, 0.0);
+    math::Quat q = math::Quat::from_axis_angle({1.0, 0.0, 0.0}, slope_deg * deg) * math::Quat::from_matrix(pose.body_to_site);
+    pose.body_to_site = q.to_matrix();
+    const Vec3 normal{0.0, -std::sin(slope_deg * deg), std::cos(slope_deg * deg)};
+    pose.cg_m = normal * (cg_station_m - g.feet.front().x);
+    double nearest = 1e9;
+    for (const auto& f : g.feet) {
+        const Vec3 p = pose.cg_m + pose.body_to_site * (f - Vec3{cg_station_m, 0.0, 0.0});
+        nearest = std::min(nearest, (p.z - std::tan(slope_deg * deg) * p.y) * std::cos(slope_deg * deg));
+    }
+    pose.cg_m -= normal * nearest;
+    pose.angular_velocity_radps = normal * initial_roll_radps;
+    std::vector<double> crushed;
+    std::vector<contact::FootStick> stick;
+    RigidSlopeRun run{0.0, 0.0, 0.0, 0};
+    Vec3 at_10s;
+    double last_roll = 0.0;
+    const int steps = static_cast<int>(30.0 / dt_s), settle = static_cast<int>(10.0 / dt_s);
+    for (int i = 0; i < steps; ++i) {
+        if (i == settle) at_10s = pose.cg_m;
+        const auto c = contact::leg_contact(g, crushed, pose, slope, &limit, &stick);
+        pose.velocity_mps += (c.force_n / mass_kg + Vec3{0.0, 0.0, -gravity_mps2}) * dt_s;
+        pose.cg_m += pose.velocity_mps * dt_s;
+        // Euler's equations in the body frame, then the attitude by the body rate over the tick.
+        const Vec3 w_b = transpose(pose.body_to_site) * pose.angular_velocity_radps;
+        const Vec3 t_b = transpose(pose.body_to_site) * c.torque_nm;
+        const Vec3 h_b{inertia_body.x * w_b.x, inertia_body.y * w_b.y, inertia_body.z * w_b.z};
+        const Vec3 rhs = t_b - cross(w_b, h_b);
+        const Vec3 w_new{w_b.x + rhs.x / inertia_body.x * dt_s, w_b.y + rhs.y / inertia_body.y * dt_s,
+                         w_b.z + rhs.z / inertia_body.z * dt_s};
+        const double rate = norm(w_new);
+        if (rate > 0.0) q = (q * math::Quat::from_axis_angle(w_new, rate * dt_s)).normalized();
+        pose.body_to_site = q.to_matrix();
+        pose.angular_velocity_radps = pose.body_to_site * w_new;
+        if (i >= settle) {
+            run.max_rate_radps = std::max(run.max_rate_radps, rate);
+            if (std::abs(w_new.x) > 1e-6) {
+                if (last_roll != 0.0 && (w_new.x > 0.0) != (last_roll > 0.0)) ++run.roll_reversals;
+                last_roll = w_new.x;
+            }
+        }
+        run.final_rate_radps = rate;
+    }
+    run.drift_m = norm(pose.cg_m - at_10s);
+    return run;
+}
+}  // namespace
+
+TEST_CASE("Stick friction: a Falcon 9 stage with free rotation rests on a slope without creep or roll cycle",
+          "[contact][legs]") {
+    for (const double slope_deg : {2.0, 5.0}) {
+        for (const double roll_radps : {0.0, 0.05}) {
+            const auto run = rigid_stage_on_slope(slope_deg, roll_radps);
+            CAPTURE(slope_deg, roll_radps, run.drift_m, run.max_rate_radps, run.final_rate_radps, run.roll_reversals);
+            CHECK(run.drift_m < 1.0e-3);
+            CHECK(run.max_rate_radps < 1.0e-4);
+            CHECK(run.final_rate_radps < 1.0e-5);
+            CHECK(run.roll_reversals == 0);
+        }
+    }
 }
