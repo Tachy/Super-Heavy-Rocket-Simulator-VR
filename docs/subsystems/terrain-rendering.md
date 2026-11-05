@@ -90,11 +90,24 @@ on top; it replaced the interim `GroundPatch`.
     cloud- and glint-bright offshore spots - are left out). Elsewhere (sea, sea ice, polar night) the
     Blue Marble Next Generation (Dec 2004) through per-channel monotone tables count -> reflectance, fitted to MCD43A4
     NBAR of 2004-12-16 (279 tiles, 3.0 M pixels; luminance error per pixel median 10 %, 90th percentile 59 % - snow
-    and season). Inside each Sentinel-2 box the texture carries the Sentinel-2 reflectance averaged into its pixels,
-    and outside the box the edge ratio Sentinel-2 / MODIS fades out over 50 km (`EMBED_FEATHER_M` [E]): the two
-    calibrated products differ there (land in the 10 km edge band: Sentinel-2 +18 % at Starbase, -11 % at the Cape),
-    and the embedding spreads that over the feather instead of drawing it as a step where the renderer fades between
-    the levels. 2.5 MB (JPEG quality 95).
+    and season). Inside each Sentinel-2 box the land texture pixels carry the Sentinel-2 reflectance of the land pixels
+    averaged into them, and outside the box the edge ratio Sentinel-2 / MODIS of the land pixels fades out over 50 km
+    on land pixels only (`EMBED_FEATHER_M` [E]): the two calibrated land products differ there (Sentinel-2 +9.5 % at
+    Starbase, -10 % at the Cape against the climatology), and the embedding spreads that over the feather instead of
+    drawing it as a step where the renderer fades between the levels. The sea is never embedded (a land-only
+    construction: the feather is justified by the land disagreement, not by a sea bias): sea pixels inside a box keep
+    the global sea plus the mean brightness of their water pixels above the open-water pedestal (below). 2.5 MB (JPEG
+    quality 95).
+  - Water in the tiles (`earth_albedo.WaterMask`, the renderer's sea rule: orthometric height <= 0.05 m from the 1 m
+    local grid where it covers, else the GLO-30 regional grid, minus EGM2008): a water pixel of a Sentinel-2 or NAIP
+    tile takes the global level's sea (`sea_only`: the day texture with land pixels replaced by the nearest sea pixel, so
+    the 7 km land pixels do not bleed into the sea) plus the imagery's brightness above the open-water pedestal
+    (`open_water_pedestal`: per channel the 90th percentile of the Sentinel-2 reflectance over water > 2 km from any
+    non-water pixel, measured per area, written to meta.toml: Starbase [0.045, 0.066, 0.063], Cape [0.014, 0.035,
+    0.039]). The pedestal is what Sen2Cor L2A reports over the sea of the scene (turbidity, glint, scene steps), so
+    open water reads the calibrated sea, while shallow bottoms, tidal flats and surf keep their brightness: the Boca
+    Chica wind-tidal flats are flagged water by the rule (and drawn as water by the game) but are bright bottom
+    (L2A ~0.16), so a plain sea replacement would turn them deep-sea dark.
   - Sentinel-2: the L2A surface reflectance itself, no fit: the TCI median decoded with its measured linear
     quantisation (TCI = floor(1 + DN x 254 / 2500), DN = reflectance x 1e4: fit 0.101604 DN + 0.497, rms 0.4 counts on
     S2B_14RNN_20251116), and the pixels saturated in the TCI (reflectance >= 0.25: beaches, flats, roofs; Starbase 1.54 M
@@ -108,16 +121,29 @@ on top; it replaced the interim `GroundPatch`.
   No data inside a box (the Atlantic beyond the Cape DOQQs, Sentinel-2 composite gaps) is filled before writing, in
   reflectance: NAIP from its area's Sentinel-2 reflectance, Sentinel-2 from the day texture; every tile of a box is
   written, lower levels are reflectance (linear) means of the valid pixels; the run logs the no-data pixels left inside
-  each box (0 for all four). Rectangular scene / MGRS brightness steps over open water remain (no water mask in the
-  pipeline). `fetch.py --retile imagery` refits and retiles from the cached clips / composites / reflectance files
+  each box (0 for all four). `fetch.py --retile imagery` refits and retiles from the cached clips / composites / reflectance files
   without network; `--workers N` runs on all cores (bit-identical to serial).
-  Validation (luminance of the reflectance, `screenshots/earth_albedo/task15/` and the task report): the six spots
+  Validation (luminance of the reflectance, `screenshots/earth_albedo/task15/` and the task reports): the six spots
   within +-25 % of their references at every level the game draws there - global 12 km box vs MCD43A4 NBAR
-  (Jul 2024 - Jun 2025 median): Starbase pad +18 %, Boca Chica beach +17 %, Cape LC-39A -12 %, Sahara 25 N 25 E -2 %,
+  (Jul 2024 - Jun 2025 median): Starbase pad +3 %, Boca Chica beach 0 %, Cape LC-39A +2 %, Sahara 25 N 25 E -2 %,
   Amazon 5 S 65 W +4 %, Kansas 38.5 N 98.5 W 0 %; Sentinel-2 z13 and NAIP z17 200 m boxes vs Sentinel-2 L2A band
-  medians: pad -1 % / +4 %, beach -3 % / -1 %, Cape +1 % / +6 %. Level steps (mean over the transition): NAIP vs
-  Sentinel-2 over the NAIP boxes +0.4 % Starbase / +0.9 % Cape (median 250 m cell 1.2 % / 1.0 %), Sentinel-2 vs the
-  day texture in the 10 km band inside the box edge -0.3 % / -0.4 % (median 10 km cell 1.9 % / 3.2 %).
+  medians: pad -1 % / +4 %, beach +8 % / +10 % (the spot lies on the tidal flats: water pixels with their excess over
+  the pedestal), Cape +1 % / +6 %. Level steps (mean over the transition): NAIP vs Sentinel-2 over the NAIP boxes
+  +0.2 % Starbase / -2.5 % Cape (median 250 m cell 1.1 % / 1.4 %, 90th percentile 3 % / 17 % - dark Cape sea cells),
+  Sentinel-2 vs the day texture in the 10 km band inside the box edge +4.6 % / +2.1 % over all cells (land +4.9 % /
+  +2.4 %, sea -0.8 % / +1.0 %).
+  Which checks are independent: (a) independent of the chain - Sentinel-2 L2A (ESA Sen2Cor, own median composite) vs
+  MODIS MCD43A4 NBAR (NASA, native 500 m, the same 12 dates) at 0.005 deg cells of the land pixels, 60 048 / 63 394
+  cells: mean ratio +11.6 % Starbase (median cell 1.10, 10-90 % 0.97-1.26, r = 0.80), -9.3 % Cape (median 0.85, 10-90 %
+  0.69-1.09, r = 0.82), per channel R / G / B Starbase 1.16 / 1.09 / 1.36, Cape 0.95 / 0.88 / 1.14 (the blue bands
+  differ in width and in the aerosol correction); the Sahara / Amazon / Kansas global values against the Dec 2004
+  MODIS NBAR through the tables (-2 % / +4 % / 0 % against 0.068 for Kansas: season sensitivity); the TCI decode fit
+  (rms 0.4 counts). The two land products differ by 10-20 %, which is the real uncertainty of the level. (b) Self-
+  consistency, not independent: the global spots vs MCD43A4 (the texture is built from the same product: checks
+  binning, mask, encoding, JPEG), the Sentinel-2 spots vs band medians with the same clear-pixel rule as
+  `reflectance.tif`, and every NAIP spot (the NAIP level is the Sentinel-2 reflectance by construction of the 50 m
+  gain, which absorbs any NAIP error; its absolute level is that of Sentinel-2). A published surface albedo (field site
+  / AERONET) is not used: no free product was found that matches the visible bands at a spot.
   In the renderer each node gets a fine crop and the next coarser source as base (`ImagerySource.crop`, <= 3 x 3
   tiles, cut to the node box + 2 px and converted to RGBA8 with mipmaps on the worker); the shader blends day texture
   -> base -> fine with per-fragment coverage fades of width max(`fade_m`, camera distance x 0.05 rad [E]): a source
@@ -278,14 +304,13 @@ on top; it replaced the interim `GroundPatch`.
 - The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
   does not rebuild its tree on a change.
 
-- Earth surface albedo (Task 15): the Sentinel-2 sea is brighter than the global level's sea (10 km edge band:
-  luminance 0.035 vs the Blue Marble table's 0.016 at Starbase; Sen2Cor L2A over turbid coastal water, residual glint)
-  and keeps its rectangular scene / MGRS steps, so from orbit the Sentinel-2 box reads as a lighter, streaked patch of
-  the Gulf (`screenshots/earth_albedo/task15/orbit400_day_before_after.png`); a water mask in the pipeline (sea
-  pixels from one consistent water reflectance) is open. The global sea itself is the Blue Marble through land-fitted
-  tables (no calibrated ocean product; water-leaving reflectance is left to the sea shader's body colour). The two
-  calibrated land products disagree by 10-20 % at the Sentinel-2 box edges (Sentinel-2 2025 median of the least
-  cloudy scenes vs the MODIS NBAR monthly median), spread over the 50 km feather. The global level's land is an annual
+- Earth surface albedo (Task 15): the global sea is the Blue Marble through land-fitted tables (no calibrated ocean
+  product; water-leaving reflectance is left to the sea shader's body colour); the Gulf at Starbase is turbid (Sentinel-2
+  open water luminance ~0.04 vs 0.016 of the table), so it reads darker than the satellite shows. The water rule
+  (0.05 m) flags tidal flats as water; their brightness is kept through the pedestal rule, which is an [E] construction
+  (90th percentile of the open-water L2A), and the Cape NAIP sea cells step up to 17 % (90th percentile, dark cells)
+  against Sentinel-2. The two calibrated land products disagree by 10-20 % (Sentinel-2 2025 median of the least cloudy
+  scenes vs the MODIS NBAR monthly median), spread over the 50 km land feather. The global level's land is an annual
   median: no seasons and no snow cover outside the permanently snow-covered areas.
 - Open for the user, unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site
   coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.
@@ -293,8 +318,10 @@ on top; it replaced the interim `GroundPatch`.
   worker-pool dependent; see CLAUDE.md known issues).
 - Moon shadows: shadow edges are as sharp as the grid (vertex spacing, 10 m at the sites, 333 m on the far side; the
   bake's banded interpolation is within 0.3-1 deg worst case of a single-ray march); the horizon is taken in the disc
-  centre's azimuth; nodes without terrain data have none; no shadows of vehicles or of
-  structures; the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
+  centre's azimuth; nodes without terrain data have none; near the eye (within 150 m-4 km, the Moon only) the Sun's
+  shadow map adds the drawn relief's, rocks', vehicles' and structures' shadows (moon-surface.md, Near-field shadows;
+  `terrain_moon.gdshader` is a lit material only for that, its `light()`; the Earth's terrain stays unshaded, without
+  vehicle shadows); the bake dominates a lunar site's first load (see above); the first triangles at a pole use a
   consistent but arbitrary north (the shader's pole fallback east; the baked pole vertex follows its neighbour);
   near-pole nodes (not only the pole vertex) bilinearly mix horizons of vertices whose norths differ by degrees (the
   azimuth profile is re-sampled in the bake, not by the GPU's filter), so shadow edges there are less accurate than

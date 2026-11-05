@@ -459,7 +459,9 @@ B04 / B03 / B02 bands: `data/raw/imagery/<id>/reflectance.tif`), no fit to the d
 reflectance of its area: a monotone table per channel at 10 m, then a local gain over a 50 m Gaussian window (clipped to
 0.5..2). No data inside a box (sea beyond the NAIP scenes, Sentinel-2 composite gaps) is filled before writing, in
 reflectance: NAIP from the Sentinel-2 reflectance, Sentinel-2 from the day texture; every tile of a box is written, and
-the lower levels average only valid pixels, in reflectance (linear).
+the lower levels average only valid pixels, in reflectance (linear). Water pixels (the renderer's sea rule from the height
+grids, `earth_albedo.WaterMask`) of both sources read the global level's sea plus the imagery's brightness above the
+per-area open-water pedestal (`open_water_pedestal` in the source's meta.toml): the imagery is a land product.
 `python tools/data_pipeline/fetch.py --retile imagery` redoes the fits and all tiles from the cached clips / composites /
 reflectance files in `data/raw/imagery/` (network only to build a missing reflectance.tif); rebuilding Sentinel-2 (also `--retile`) always re-fits the NAIP of its area.
 Parallelism: tile writing and the Sentinel-2 composite blocks run on a process pool; the worker count is `--workers N`, else

@@ -60,6 +60,11 @@ EMBED_FEATHER_M = 50_000.0  # [E] fade of the Sentinel-2 / global ratio outside 
 EMBED_SIGMA_PX = 2.0  # [E] Gaussian extension of the box-edge ratio (texture pixels, ~7 km)
 CLIMATOLOGY_MIN_LAND_FRACTION = 0.5  # [E] land share of a pixel (ETOPO + geoid) for the climatology
 WATER_THRESHOLD_M = 0.05  # [S] = core EarthTerrain::water_threshold_m: orthometric height at or below is sea
+OPEN_WATER_DIST_M = 2000.0  # [E] water farther than this from any non-water pixel is open water (no visible bottom)
+OPEN_WATER_PERCENTILE = 90.0  # [E] of the imagery over open water: the pedestal above which the brightness is bottom / surf
+OPEN_WATER_DECIMATION = 8  # the pedestal is read from every 8th pixel (80 m) of the Sentinel-2 file
+LAND_BLOCK_PX = 512  # block of the land-only Sentinel-2 file
+LAND_LATTICE_PX = 64  # lat / lon of a block's pixels from a lattice of this spacing (UTM to geographic is smooth: sub-mm)
 CLIMATOLOGY_FILE = REPO_ROOT / "data" / "raw" / f"earth_albedo_modis_{CLIMATOLOGY_YEAR}.npz"
 
 
@@ -330,12 +335,94 @@ def build_climatology(out: Path = CLIMATOLOGY_FILE, size: tuple[int, int] = (270
     return stats
 
 
-def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print) -> np.ndarray:
-    """The Sentinel-2 level inside the global one: in every Sentinel-2 box (config/imagery.toml) the texture pixels whose
-    centre lies inside take the box mean of the Sentinel-2 reflectance (reflectance.tif, averaged into the pixel), so the
-    two levels draw the same mean where the renderer fades between them; outside, the log ratio Sentinel-2 / global at the
-    box edge (Gaussian-extended, `EMBED_SIGMA_PX`) fades out linearly over `EMBED_FEATHER_M` - the products' difference
-    (MODIS NBAR climatology vs the 2025 Sentinel-2 median, ~10-20 % on land) spread over the feather instead of a step."""
+def _lattice_bilinear(nodes: np.ndarray, rows: np.ndarray, cols: np.ndarray, fr: np.ndarray, fc: np.ndarray) -> np.ndarray:
+    """Bilinear interpolation of lattice values (nodes at rows x cols) to every pixel row fr x column fc."""
+    ri = np.clip(np.searchsorted(rows, fr, side="right") - 1, 0, len(rows) - 2)
+    ci = np.clip(np.searchsorted(cols, fc, side="right") - 1, 0, len(cols) - 2)
+    wr = ((fr - rows[ri]) / (rows[ri + 1] - rows[ri]))[:, None]
+    wc = ((fc - cols[ci]) / (cols[ci + 1] - cols[ci]))[None, :]
+    r0, r1, c0, c1 = ri[:, None], (ri + 1)[:, None], ci[None, :], (ci + 1)[None, :]
+    return (1 - wr) * ((1 - wc) * nodes[r0, c0] + wc * nodes[r0, c1]) + wr * ((1 - wc) * nodes[r1, c0] + wc * nodes[r1, c1])
+
+
+def open_water_pedestal(reflectance: Path, mask: "WaterMask") -> np.ndarray:
+    """Per channel (R, G, B) the `OPEN_WATER_PERCENTILE` of the Sentinel-2 reflectance over open water (water by the
+    renderer's rule, > `OPEN_WATER_DIST_M` from any non-water pixel): what Sen2Cor L2A reports over the sea of this scene
+    (turbidity, glint, scene-wise steps) - not water-leaving reflectance of the calibrated ocean level. Water pixels of the
+    tiles keep only the brightness above it (shallow bottoms, flats, surf) on top of the global sea; zeros when the file
+    has no open water."""
+    import rasterio
+    from pyproj import Transformer
+    from rasterio.enums import Resampling
+    from scipy.ndimage import distance_transform_edt
+
+    f = OPEN_WATER_DECIMATION
+    with rasterio.open(reflectance) as ds:
+        h, w = ds.height // f, ds.width // f
+        a = ds.read(out_shape=(3, h, w), resampling=Resampling.nearest).astype(np.float64) * 1e-4
+        t = ds.transform  # north-up
+        cols, rows = np.meshgrid((np.arange(w) + 0.5) * f, (np.arange(h) + 0.5) * f)
+        lon, lat = Transformer.from_crs(ds.crs, "EPSG:4326", always_xy=True).transform(t.c + t.a * cols, t.f + t.e * rows)
+        pixel_m = abs(t.a) * f * (111320.0 if ds.crs.is_geographic else 1.0)  # metres (degrees: at the equator)
+    water = mask.water(np.asarray(lat), np.asarray(lon))
+    open_water = water & (a > 0).all(axis=0) & (distance_transform_edt(water) * pixel_m > OPEN_WATER_DIST_M)
+    if open_water.sum() < 100:
+        return np.zeros(3)
+    return np.percentile(a[:, open_water], OPEN_WATER_PERCENTILE, axis=1)
+
+
+def build_land_reflectance(reflectance: Path, out: Path, mask: "WaterMask", pedestal: np.ndarray, log=print) -> Path:
+    """The Sentinel-2 level split by the renderer's water rule at every 10 m pixel, for the global texture's embedding
+    (uint16, reflectance x 1e4; cached beside the source, raw, not shipped): bands 1-3 the land reflectance (water = 0, no
+    data), bands 4-6 the brightness above the open-water `pedestal` on water pixels (+ 1 count so that 0 stays no data:
+    the excess is the value minus 1) - what the tiles keep on top of the global sea on water pixels."""
+    import rasterio
+    from pyproj import Transformer
+    from rasterio.windows import Window
+
+    if out.exists() and out.stat().st_mtime >= reflectance.stat().st_mtime:
+        return out
+    partial = out.with_suffix(".partial.tif")
+    ped_dn = np.asarray(pedestal, dtype=np.float64)[:, None] * 1e4
+    with rasterio.open(reflectance) as src:
+        to_geo = Transformer.from_crs(src.crs, "EPSG:4326", always_xy=True)
+        profile = dict(src.profile, BIGTIFF="YES", count=6)
+        step = LAND_LATTICE_PX
+        with rasterio.open(partial, "w", **profile) as dst:
+            for r0 in range(0, src.height, LAND_BLOCK_PX):
+                for c0 in range(0, src.width, LAND_BLOCK_PX):
+                    win = Window(c0, r0, min(LAND_BLOCK_PX, src.width - c0), min(LAND_BLOCK_PX, src.height - r0))
+                    data = src.read(window=win)
+                    excess = np.zeros_like(data)
+                    if data.any():
+                        h, w = int(win.height), int(win.width)
+                        rows, cols = np.unique(np.append(np.arange(0, h, step), h - 1)), np.unique(np.append(np.arange(0, w, step), w - 1))
+                        cg, rg_ = np.meshgrid(cols, rows)
+                        t = src.transform  # north-up
+                        x, y = t.c + t.a * (c0 + cg + 0.5), t.f + t.e * (r0 + rg_ + 0.5)
+                        lon_n, lat_n = to_geo.transform(np.asarray(x), np.asarray(y))
+                        fr, fc = np.arange(h), np.arange(w)
+                        lat = _lattice_bilinear(lat_n, rows, cols, fr, fc)
+                        lon = _lattice_bilinear(lon_n, rows, cols, fr, fc)
+                        wet = mask.water(lat, lon)
+                        excess[:, wet] = np.minimum(np.maximum(data[:, wet] - ped_dn, 0.0), 65534.0).astype(np.uint16) + 1
+                        excess[:, ~(data > 0).all(axis=0)] = 0  # no imagery: no excess either
+                        data[:, wet] = 0
+                    dst.write(np.concatenate([data, excess]), window=win)
+    partial.replace(out)
+    log(f"  earth_albedo: land / water-excess Sentinel-2 {out.name}")
+    return out
+
+
+def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print, land: np.ndarray | None = None) -> np.ndarray:
+    """The Sentinel-2 level inside the global one, land only: in every Sentinel-2 box (config/imagery.toml) the land texture
+    pixels (`land`) whose centre lies inside take the mean of the Sentinel-2 reflectance of the land pixels (renderer's water
+    rule, `build_land_reflectance`), so the two levels draw the same mean on land where the renderer fades between them;
+    outside, the log ratio Sentinel-2 / global of the land pixels at the box edge (Gaussian-extended, `EMBED_SIGMA_PX`) fades
+    out linearly over `EMBED_FEATHER_M` on land pixels only - the land products' difference (MODIS NBAR climatology vs the
+    2025 Sentinel-2 median, ~10-20 %) spread over the feather instead of a step. A sea texture pixel inside a box keeps the
+    global sea level plus the mean brightness of its water pixels above the open-water pedestal (what the tiles draw there:
+    shallow bottoms, flats, surf), never the Sentinel-2 sea itself (no calibrated ocean product at 10 m)."""
     import cv2
     import rasterio
     from rasterio.transform import from_bounds
@@ -356,6 +443,14 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print) -> np.ndarray:
         if not path.exists():
             log(f"  earth_albedo: {path} missing, {src['id']} not embedded")
             continue
+        split = False
+        if WaterMask.available(repo_root, src["area"]):
+            mask = WaterMask(repo_root, src["area"])
+            path = build_land_reflectance(path, path.with_name("reflectance_split.tif"), mask,
+                                          open_water_pedestal(path, mask), log)
+            split = True
+        else:
+            log(f"  earth_albedo: no height grids / geoid for {src['area']}: {src['id']} embedded with its sea")
         south, north, west, east = im.source_box(src, areas)
         lat_c = (south + north) / 2.0
         m_per_px_y = math.pi * 6371000.0 / h
@@ -371,13 +466,19 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print) -> np.ndarray:
         with rasterio.open(path) as ds:
             reproject(source=rasterio.band(ds, [1, 2, 3]), destination=s2, dst_transform=transform, dst_crs="EPSG:4326",
                       resampling=Resampling.average, src_nodata=0, dst_nodata=0)
+            wet = np.zeros_like(s2)
+            if split:
+                reproject(source=rasterio.band(ds, [4, 5, 6]), destination=wet, dst_transform=transform, dst_crs="EPSG:4326",
+                          resampling=Resampling.average, src_nodata=0, dst_nodata=0)
         s2 = np.moveaxis(s2, 0, -1).astype(np.float64) * im.S2_REFLECTANCE_SCALE
+        wet = np.moveaxis(np.where(wet > 0, wet - 1.0, 0.0), 0, -1).astype(np.float64) * im.S2_REFLECTANCE_SCALE  # excess
         lat = 90.0 - (np.arange(r0, r1) + 0.5) * 180.0 / h
         lon = -180.0 + (np.arange(c0, c1) + 0.5) * 360.0 / w
         lon_g, lat_g = np.meshgrid(lon, lat)
         inside = (lat_g > south) & (lat_g < north) & (lon_g > west) & (lon_g < east)
         win = rho[r0:r1, c0:c1].copy()
-        valid = inside & (s2 > 0).all(axis=-1) & (win > 0).all(axis=-1)
+        land_win = np.ones(inside.shape, dtype=bool) if land is None else land[r0:r1, c0:c1]
+        valid = inside & land_win & (s2 > 0).all(axis=-1) & (win > 0).all(axis=-1)
         log_ratio = np.where(valid[..., None], np.log(np.where(valid[..., None], s2 / np.maximum(win, 1e-6), 1.0)), 0.0)
         num = cv2.GaussianBlur((log_ratio * valid[..., None]).astype(np.float32), (0, 0), EMBED_SIGMA_PX)
         den = cv2.GaussianBlur(valid.astype(np.float32), (0, 0), EMBED_SIGMA_PX)
@@ -385,13 +486,66 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print) -> np.ndarray:
         dy = np.maximum(np.maximum(lat_g - north, south - lat_g), 0.0) * 111320.0
         dx = np.maximum(np.maximum(lon_g - east, west - lon_g), 0.0) * 111320.0 * math.cos(math.radians(lat_c))
         fade = np.clip(1.0 - np.hypot(dx, dy) / EMBED_FEATHER_M, 0.0, 1.0)
-        out = win * np.exp(ext * fade[..., None])
+        out = np.where(land_win[..., None], win * np.exp(ext * fade[..., None]), win + (wet if split else 0.0) * inside[..., None])
         out[valid] = s2[valid]
         rho[r0:r1, c0:c1] = out
         y = LUMA_WEIGHTS
         log(f"  earth_albedo: {src['id']} embedded ({int(valid.sum())} pixels; box mean luminance Sentinel-2 "
             f"{float((s2[valid] @ y).mean()):.4f} vs global {float((win[valid] @ y).mean()):.4f})")
     return rho
+
+
+def read_grid_toml(toml_path: Path) -> tuple[np.ndarray, dict]:
+    """A height / undulation grid of data/terrain, data/geoid (header toml + int16 file, memory-mapped) -> (metres, header)."""
+    g = tomllib.loads(toml_path.read_text(encoding="utf-8"))["grid"]
+    a = np.memmap(toml_path.with_name(g["heights"]), dtype="<i2", mode="r", shape=(g["lines"], g["samples"]))
+    return a, g
+
+
+def _bilinear_points(array: np.ndarray, g: dict, lat: np.ndarray, lon: np.ndarray, wrap: bool = False) -> np.ndarray:
+    """Bilinear metres of a grid file at the points (lat, lon) (same shape); outside the grid clamps to the edge."""
+    fi = np.clip((g["north_latitude_deg"] - lat) / g["step_latitude_deg"], 0.0, g["lines"] - 1.0)
+    fj = (lon - g["west_longitude_deg"]) / g["step_longitude_deg"]
+    if wrap:
+        fj = fj % g["samples"]
+    fj = np.clip(fj, 0.0, g["samples"] - 1.0)
+    i0 = np.minimum(fi.astype(np.int64), g["lines"] - 2)
+    j0 = np.minimum(fj.astype(np.int64), g["samples"] - 2)
+    wi, wj = fi - i0, fj - j0
+    v = ((1 - wi) * ((1 - wj) * array[i0, j0] + wj * array[i0, j0 + 1])
+         + wi * ((1 - wj) * array[i0 + 1, j0] + wj * array[i0 + 1, j0 + 1]))
+    return v * float(g["dn_scale_m"])
+
+
+class WaterMask:
+    """The renderer's sea rule (orthometric height <= WATER_THRESHOLD_M, core EarthTerrain::water_threshold_m) at any point
+    of an imagery area, from the height grids the game itself loads: the 1 m local grid where it covers the point, else the
+    regional GLO-30 grid, minus the EGM2008 undulation. Used for the imagery tiles and the land-only Sentinel-2 embedding."""
+
+    @staticmethod
+    def available(repo_root: Path, area: str) -> bool:
+        return ((repo_root / "data" / "terrain" / "earth" / f"{area}_regional.toml").exists()
+                and (repo_root / "data" / "geoid" / "egm2008_25.toml").exists())
+
+    def __init__(self, repo_root: Path, area: str):
+        terrain = repo_root / "data" / "terrain" / "earth"
+        self.regional, self.rg = read_grid_toml(terrain / f"{area}_regional.toml")
+        local_toml = terrain / f"{area}_local.toml"
+        self.local, self.lg = read_grid_toml(local_toml) if local_toml.exists() else (None, None)
+        self.geoid, self.gg = read_grid_toml(repo_root / "data" / "geoid" / "egm2008_25.toml")
+
+    def water(self, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+        """True where the point is sea (arrays of one shape)."""
+        h = _bilinear_points(self.regional, self.rg, lat, lon)
+        if self.local is not None:
+            g = self.lg
+            south = g["north_latitude_deg"] - (g["lines"] - 1) * g["step_latitude_deg"]
+            east = g["west_longitude_deg"] + (g["samples"] - 1) * g["step_longitude_deg"]
+            inside = (lat <= g["north_latitude_deg"]) & (lat >= south) & (lon >= g["west_longitude_deg"]) & (lon <= east)
+            if inside.any():
+                h = np.where(inside, _bilinear_points(self.local, g, lat, lon), h)
+        n = _bilinear_points(self.geoid, self.gg, lat, lon, wrap=True)
+        return (h - n) <= WATER_THRESHOLD_M
 
 
 def land_fraction(repo_root: Path, h: int, w: int) -> np.ndarray | None:
@@ -428,33 +582,51 @@ def land_fraction(repo_root: Path, h: int, w: int) -> np.ndarray | None:
     return frac / 9.0
 
 
+def sea_only(texture: np.ndarray, repo_root: Path) -> np.ndarray:
+    """The day texture (reflectance) with every land pixel replaced by the nearest sea pixel (the sea level of the global
+    texture continued under the coast): the 10 m tiles take their sea pixels from it, so the 7 km pixels of land do not
+    bleed into the sea by bilinear sampling. Unchanged without the land mask."""
+    from scipy.ndimage import distance_transform_edt
+
+    frac = land_fraction(repo_root, *texture.shape[:2])
+    if frac is None:
+        return texture
+    land = frac >= CLIMATOLOGY_MIN_LAND_FRACTION
+    if land.all() or not land.any():
+        return texture
+    idx = distance_transform_edt(land, return_distances=False, return_indices=True)
+    return texture[idx[0], idx[1]]
+
+
 def build_day_texture(repo_root: Path = REPO_ROOT, embed: bool = True) -> np.ndarray:
     """The calibrated day texture as sRGB-encoded counts (h, w, 3): the MODIS climatology where it has samples
     (`CLIMATOLOGY_MIN_SAMPLES`), elsewhere (sea, sea ice, polar night, persistent cloud) the Blue Marble through the
-    tables (a pixel takes the climatology only where ETOPO says it is mostly land); with `embed` the Sentinel-2 level inside it (`embed_sentinel2`, where its reflectance.tif exists). Without
-    the climatology file only the tables (with a warning)."""
+    tables (a pixel takes the climatology only where ETOPO says it is mostly land); with `embed` the land-only Sentinel-2
+    level inside it (`embed_sentinel2`, where its reflectance.tif exists). Without the climatology file only the tables
+    (with a warning)."""
     from PIL import Image
 
     with Image.open(repo_root / "data" / "raw" / "earth_day_5400.jpg") as img:
         counts = np.asarray(img.convert("RGB"))
     rho = apply_lut(counts, load_luts(repo_root / "config" / "earth_albedo.toml"))
     clim = repo_root / CLIMATOLOGY_FILE.relative_to(REPO_ROOT)
+    frac = land_fraction(repo_root, *rho.shape[:2])
+    if frac is None:
+        print("  earth_albedo: no ETOPO relief / geoid (fetch.py earth_terrain geoid_egm2008): no land mask")
+    land_mask = None if frac is None else frac >= CLIMATOLOGY_MIN_LAND_FRACTION
     if clim.exists():
         with np.load(clim) as z:
             land, hits = z["rho"].astype(np.float64), z["hits"]
         if land.shape != rho.shape:
             raise ValueError(f"{clim}: grid {land.shape} differs from the day texture {rho.shape}")
         take = hits >= CLIMATOLOGY_MIN_SAMPLES
-        frac = land_fraction(repo_root, *rho.shape[:2])
-        if frac is not None:  # MODIS NBAR of water pixels in land tiles (cloud, glint) is no sea albedo
-            take &= frac >= CLIMATOLOGY_MIN_LAND_FRACTION
-        else:
-            print("  earth_albedo: no ETOPO relief / geoid (fetch.py earth_terrain geoid_egm2008): no land mask")
+        if land_mask is not None:  # MODIS NBAR of water pixels in land tiles (cloud, glint) is no sea albedo
+            take &= land_mask
         rho[take] = land[take]
     else:
         print(f"  earth_albedo: {clim} missing (fetch.py earth_albedo): the Blue Marble through the tables only")
     if embed:
-        rho = embed_sentinel2(rho, repo_root)
+        rho = embed_sentinel2(rho, repo_root, land=land_mask)
     return encode_srgb(rho)
 
 

@@ -254,7 +254,7 @@ credit = "NOAA NCEI ETOPO 2022 (doi:10.25921/fd45-gt74); USGS 3D Elevation Progr
 
 [[source]]
 id = "earth_albedo"
-name = "MODIS MCD43A4 v061 nadir BRDF-adjusted reflectance (NBAR, bands 1 / 4 / 3, 500 m, read at its 3.7 km overview) via the Microsoft Planetary Computer: the 2025 monthly-median land reflectance of the global day texture, and (2004-12-16) the fit of config/earth_albedo.toml"
+name = "MODIS MCD43A4 v061 nadir BRDF-adjusted reflectance (NBAR, bands 1 / 4 / 3, 500 m, read at its 3.7 km overview) via the Microsoft Planetary Computer: the monthly-median land reflectance (mid-month products Jan-Jun and Dec 2025, Jul-Nov 2024) of the global day texture, the fit of config/earth_albedo.toml (2004-12-16), and the native 500 m cross-check of the Sentinel-2 level"
 url = "https://planetarycomputer.microsoft.com/api/stac/v1"
 target = "data/raw/earth_albedo_modis_2025.npz"
 kind = "earth_albedo"

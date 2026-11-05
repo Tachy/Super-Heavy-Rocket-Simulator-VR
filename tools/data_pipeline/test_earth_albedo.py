@@ -143,3 +143,119 @@ def test_land_fraction_from_relief_above_the_geoid(tmp_path):
     assert frac[:, 5].tolist() == pytest.approx([0.0] * h)
     assert frac[0, 3] == pytest.approx(2.0 / 3.0)  # the pixel at the edge sees one sea column of three
     assert ea.land_fraction(tmp_path, h + 1, w) is None  # a grid that does not match
+
+
+def _write_area_grids(root: Path, area: str = "t") -> None:
+    """Regional grid 0.1 deg steps over lat 25..27, lon -98..-96: 0 m ellipsoidal west of -97 (sea over a 0 m geoid),
+    +10 m east of it; geoid file all 0."""
+    (root / "data" / "terrain" / "earth").mkdir(parents=True, exist_ok=True)
+    (root / "data" / "geoid").mkdir(parents=True, exist_ok=True)
+    lines, samples = 21, 21
+    heights = np.zeros((lines, samples), dtype="<i2")
+    heights[:, 11:] = 100  # 0.1 m scale: 10 m
+    heights.tofile(root / "data" / "terrain" / "earth" / f"{area}_regional.i16")
+    np.zeros((181, 360), dtype="<i2").tofile(root / "data" / "geoid" / "g.i16")
+    (root / "data" / "terrain" / "earth" / f"{area}_regional.toml").write_text(
+        f'[grid]\nheights = "{area}_regional.i16"\nlines = {lines}\nsamples = {samples}\ndn_scale_m = 0.1\n'
+        'north_latitude_deg = 27.0\nwest_longitude_deg = -98.0\nstep_latitude_deg = 0.1\nstep_longitude_deg = 0.1\n')
+    (root / "data" / "geoid" / "egm2008_25.toml").write_text(
+        '[grid]\nheights = "g.i16"\nlines = 181\nsamples = 360\ndn_scale_m = 0.01\nnorth_latitude_deg = 90.0\n'
+        'west_longitude_deg = -180.0\nstep_latitude_deg = 1.0\nstep_longitude_deg = 1.0\n')
+
+
+def test_water_mask_follows_the_renderers_sea_rule(tmp_path):
+    _write_area_grids(tmp_path)
+    mask = ea.WaterMask(tmp_path, "t")
+    lat = np.array([[26.0, 26.0, 26.0]])
+    lon = np.array([[-97.5, -96.5, -96.9]])  # sea, land (10 m), inside the ramp between the two
+    assert mask.water(lat, lon).tolist() == [[True, False, False]]  # 0 m is sea (<= 0.05 m); the ramp is above 0.05 m
+
+
+def test_land_reflectance_removes_the_sea_only(tmp_path):
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    _write_area_grids(tmp_path)
+    src = tmp_path / "reflectance.tif"
+    with rasterio.open(src, "w", driver="GTiff", width=100, height=100, count=3, dtype="uint16", crs="EPSG:4326",
+                       transform=from_bounds(-98.0, 25.0, -96.0, 27.0, 100, 100), nodata=0) as d:
+        d.write(np.full((3, 100, 100), 2000, dtype=np.uint16))
+        d.write(np.full((100, 10), 3000, dtype=np.uint16), 1, window=rasterio.windows.Window(0, 0, 10, 100))  # bright sea strip
+    out = ea.build_land_reflectance(src, tmp_path / "land.tif", ea.WaterMask(tmp_path, "t"), np.array([0.25, 0.25, 0.25]),
+                                    log=lambda *_: None)
+    with rasterio.open(out) as d:
+        a = d.read()
+    assert (a[:3, :, :5] == 0).all() and (a[:3, :, 95:] == 2000).all()  # west sea gone from the land bands, east land kept
+    assert (a[3:, :, 95:] == 0).all()  # no water excess on land
+    assert (a[3, :, 20:25] == 1).all()  # sea below the pedestal: excess 0 (+ 1 count)
+    assert (a[3, :, :5] == 1 + 500).all() and (a[4, :, :5] == 1).all()  # red of the strip: 0.3 - 0.25 above the pedestal
+
+
+def test_embed_sentinel2_is_land_only(tmp_path):
+    """Sea texture pixels keep the global level and the feather ratio ignores them; land pixels take Sentinel-2."""
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    _write_area_grids(tmp_path)  # sea west of -97, land east: lon -97.0 is the coast
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "imagery.toml").write_text(
+        '[[source]]\nid = "s2_t"\nproduct = "sentinel2_median"\narea = "t"\nbox = "regional"\nmin_level = 8\n'
+        'max_level = 13\n', encoding="utf-8")
+    (tmp_path / "config" / "earth_terrain.toml").write_text(
+        '[[area]]\nid = "t"\nlatitude_deg = 26.0\nlongitude_deg = -97.0\nlocal_half_size_m = 5000.0\n'
+        'regional_half_size_m = 100000.0\n', encoding="utf-8")
+    raw = tmp_path / "data" / "raw" / "imagery" / "s2_t"
+    raw.mkdir(parents=True)
+    with rasterio.open(raw / "reflectance.tif", "w", driver="GTiff", width=200, height=200, count=3, dtype="uint16",
+                       crs="EPSG:4326", transform=from_bounds(-98.0, 25.0, -96.0, 27.0, 200, 200), nodata=0) as d:
+        d.write(np.full((3, 200, 200), 2000, dtype=np.uint16))
+    h, w = 2700, 5400
+    land = np.zeros((h, w), dtype=bool)
+    land[:, int((-97.0 + 180.0) / 360.0 * w):] = True
+    out = ea.embed_sentinel2(np.full((h, w, 3), 0.1), tmp_path, log=lambda *_: None, land=land)
+    px = lambda lat, lon: (int((90.0 - lat) / 180.0 * h), int((lon + 180.0) / 360.0 * w))  # noqa: E731
+    assert out[px(26.0, -96.5)] == pytest.approx([0.2] * 3, rel=1e-3)  # land inside: Sentinel-2
+    assert out[px(26.0, -97.5)] == pytest.approx([0.1] * 3)  # sea inside the box: the global level
+    assert out[px(26.0, -95.8)][0] > 0.1  # land beyond the box edge: the feathered ratio
+    assert out[px(26.0, -98.15)] == pytest.approx([0.1] * 3)  # sea beyond the box edge: untouched (no feather on sea)
+
+
+def test_sea_only_continues_the_sea_under_land(tmp_path):
+    h, w = 4, 8
+    (tmp_path / "data" / "terrain" / "earth").mkdir(parents=True)
+    (tmp_path / "data" / "geoid").mkdir(parents=True)
+    relief = np.full((2 * h + 1, 2 * w), -100, dtype="<i2")
+    relief[:, :w] = 20  # west half land
+    relief.tofile(tmp_path / "data" / "terrain" / "earth" / "r.i16")
+    np.full((5, 10), 1000, dtype="<i2").tofile(tmp_path / "data" / "geoid" / "g.i16")
+
+    def header(name, lines, samples, scale):
+        return (f'[grid]\nheights = "{name}"\nlines = {lines}\nsamples = {samples}\ndn_scale_m = {scale}\n'
+                f'north_latitude_deg = 90.0\nwest_longitude_deg = -180.0\nstep_latitude_deg = {180.0 / (lines - 1)}\n'
+                f'step_longitude_deg = {360.0 / samples}\n')
+    (tmp_path / "data" / "terrain" / "earth" / "global_relief.toml").write_text(header("r.i16", 2 * h + 1, 2 * w, 1.0))
+    (tmp_path / "data" / "geoid" / "egm2008_25.toml").write_text(header("g.i16", 5, 10, 0.01))
+    tex = np.zeros((h, w, 3))
+    tex[:, :w // 2] = 0.5  # land texels
+    tex[:, w // 2:] = 0.02  # sea texels
+    out = ea.sea_only(tex, tmp_path)
+    assert out[:, :w // 2].max() == pytest.approx(0.02)  # land texels carry the neighbouring sea value
+    assert out[:, w // 2:].max() == pytest.approx(0.02)
+
+
+def test_open_water_pedestal_is_read_over_open_water_only(tmp_path):
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    _write_area_grids(tmp_path)  # sea west of -97, land east
+    n = 800
+    a = np.full((3, n, n), 2000, dtype=np.uint16)  # land 0.2
+    a[:, :, : n // 2] = 500  # sea 0.05
+    a[:, :, 20:30] = 1500  # a bright surf strip near the west edge of the file is still open water (> 2 km from land)
+    src = tmp_path / "r.tif"
+    with rasterio.open(src, "w", driver="GTiff", width=n, height=n, count=3, dtype="uint16", crs="EPSG:4326",
+                       transform=from_bounds(-98.0, 25.0, -96.0, 27.0, n, n), nodata=0) as d:
+        d.write(a)
+    ped = ea.open_water_pedestal(src, ea.WaterMask(tmp_path, "t"))
+    # file pixel ~ 0.0025 deg ~ 275 m: the land edge is at column 400, the open water starts ~2 km (8 px x 8) before it
+    assert ped.tolist() == pytest.approx([0.05] * 3, abs=0.01)  # the strip is a few % of the open water: below p90

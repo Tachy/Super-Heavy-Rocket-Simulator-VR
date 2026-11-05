@@ -130,3 +130,9 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   at the pad 0.250 (L2A 0.206), NAIP z17 at the pad 0.090 (0.206), Boca Chica beach NAIP 0.089 (0.167), Cape LC-39A
   NAIP 0.110 (0.205). Level steps: NAIP vs Sentinel-2 over the NAIP boxes -14 % (Starbase) / -9 % (Cape), median 250 m
   cell step 37 % / 16 %; Sentinel-2 vs the day texture in the 10 km edge band +4 % / -7 %.
+- **Sentinel-2 sea embedded in the global texture (superseded by the land-only embedding, Task 15 fix 1, 2026-11-05):**
+  the first calibrated build took the Sentinel-2 box mean over all pixels, sea included, and extended the box-edge log
+  ratio over 50 km outside the box. Sentinel-2 L2A sea (Starbase 0.035, MGRS scene steps) is brighter than the table sea
+  (0.016), so the Gulf read as a lighter, streaked rectangle with open sea brightened out to 50 km by a land-product
+  bias (`orbit400_day_before_after.png`). Level steps then: Sentinel-2 vs the day texture -0.3 % / -0.1 % over the 10 km
+  edge band, global spots Starbase +18 %, beach +17 %, Cape -12 % against MCD43A4; tiles 275 MB.

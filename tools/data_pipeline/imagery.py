@@ -452,16 +452,26 @@ def pixel_centres(bounds: Box, n: int = TILE_PX) -> tuple[np.ndarray, np.ndarray
     return lat_g, lon_g
 
 
-def fill_nodata(rho: np.ndarray, valid: np.ndarray, bounds: Box, reference=None, texture=None) -> tuple[np.ndarray, np.ndarray]:
+def fill_nodata(rho: np.ndarray, valid: np.ndarray, bounds: Box, reference=None, texture=None,
+                water=None, sea_texture=None, pedestal=None) -> tuple[np.ndarray, np.ndarray]:
     """Fill the no-data pixels of a tile in reflectance: first from `reference` = (datasets, transfer), the Sentinel-2
     reflectance of the area (for NAIP; rendered without datum shift), then from `texture` (a `texture_window` of the
-    calibrated day texture in reflectance). Returns (reflectance, valid); pixels neither layer covers stay invalid."""
+    calibrated day texture in reflectance). `water` (bool, tile shape; the renderer's sea rule): sea pixels are no data
+    whatever the imagery shows and take the global level only - the imagery is a land product (L2A over turbid water,
+    glint, scene steps); they read `sea_texture` (the global level's sea continued under the coast, `earth_albedo.sea_only`)
+    when given, plus - with `pedestal` (per channel, `earth_albedo.open_water_pedestal`) - the imagery's brightness above
+    that open-water level where the imagery has data (shallow bottoms, flats, surf). Returns (reflectance, valid); pixels neither layer covers stay invalid."""
     out = rho.copy()
     valid = valid.copy()
+    seen = valid.copy()  # the imagery's own coverage
+    if water is not None:
+        valid &= ~water
     hole = ~valid
     if hole.any() and reference is not None:
         ref_datasets, ref_transfer = reference
         ref_raw, ref_valid = render_box(ref_datasets, bounds, (0.0, 0.0), rho.shape[1], rho.shape[0])
+        if water is not None:
+            ref_valid = ref_valid & ~water
         take = hole & ref_valid
         out[take] = to_reflectance(ref_raw, ref_transfer)[take]
         valid |= take
@@ -469,6 +479,12 @@ def fill_nodata(rho: np.ndarray, valid: np.ndarray, bounds: Box, reference=None,
     if hole.any() and texture is not None:
         lat_g, lon_g = pixel_centres(bounds, rho.shape[0])
         out[hole] = sample_texture_window(texture, lat_g[hole], lon_g[hole])
+        if water is not None and sea_texture is not None:
+            sea = hole & water
+            out[sea] = sample_texture_window(sea_texture, lat_g[sea], lon_g[sea])
+            if pedestal is not None:
+                shallow = sea & seen
+                out[shallow] += np.maximum(rho[shallow] - np.asarray(pedestal), 0.0)
         valid |= hole
     return out, valid
 
@@ -487,11 +503,14 @@ def _render_chunk(task) -> tuple[int, int]:
     import rasterio
 
     paths, root, z, tiles, shift_deg, transfer, fill, box = task
+    sea = ea.WaterMask(Path(fill["water"][0]), fill["water"][1]) if fill and fill.get("water") else None
     datasets = [rasterio.open(p) for p in paths]
     ref_datasets = [rasterio.open(p) for p in fill["reference"][0]] if fill and fill.get("reference") else []
     try:
         reference = (ref_datasets, fill["reference"][1]) if ref_datasets else None
         texture = fill.get("texture") if fill else None
+        sea_texture = fill.get("sea_texture") if fill else None
+        pedestal = fill.get("water_pedestal") if fill else None
         n = left = 0
         for x, y in tiles:
             bounds = tile_bounds(z, x, y)
@@ -501,7 +520,8 @@ def _render_chunk(task) -> tuple[int, int]:
             lat_g, lon_g = pixel_centres(bounds, TILE_PX)
             rho = to_reflectance(raw, transfer, lat_g, lon_g)
             if fill:
-                rho, valid = fill_nodata(rho, valid, bounds, reference, texture)
+                water = sea.water(lat_g, lon_g) if sea is not None else None
+                rho, valid = fill_nodata(rho, valid, bounds, reference, texture, water, sea_texture, pedestal)
             tile = encode_tile(rho, valid)
             left += _nodata_inside(tile, bounds, box)
             write_tile(Path(root), z, x, y, tile)
@@ -905,7 +925,8 @@ def meta_text(m: dict) -> str:
              f'west_deg = {m["west_deg"]:.7f}', f'east_deg = {m["east_deg"]:.7f}', f'fade_m = {m["fade_m"]:.1f}',
              f'tile_count = {m["tile_count"]}']
     for k, v in m.get("extra", {}).items():
-        lines.append(f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {v}" if isinstance(v, int) else f"{k} = {v:.6f}")
+        lines.append(f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {v}" if isinstance(v, (int, list))
+                     else f"{k} = {v:.6f}")
     lines.append("")
     return "\n".join(lines)
 
@@ -951,8 +972,9 @@ def s2_reflectance(src: dict, areas: dict[str, dict], repo_root: Path, force: bo
 
 
 def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np.ndarray, force: bool, log=print,
-                 workers: int | None = None) -> dict:
-    """One source's tile pyramid. `texture`: the calibrated day texture in reflectance (`load_day_texture`)."""
+                 workers: int | None = None, sea_texture: np.ndarray | None = None) -> dict:
+    """One source's tile pyramid. `texture`: the calibrated day texture in reflectance, `sea_texture`: its sea continued
+    under the coast (`earth_albedo.sea_only`); the sea of every tile (renderer's water rule) is taken from it."""
     import rasterio
 
     sid, product = src["id"], src["product"]
@@ -983,7 +1005,13 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
     else:
         raise ValueError(f"unbekanntes Produkt {product}")
     # no data inside the box (sea beyond the scenes, composite gaps) is filled in reflectance before writing
-    fill = {"reference": reference, "texture": texture_window(texture, covered)}
+    s2_file = repo_root / "data" / "raw" / "imagery" / f"s2_{src['area']}" / "reflectance.tif"
+    pedestal = ea.open_water_pedestal(s2_file, ea.WaterMask(repo_root, src["area"])) if s2_file.exists() else None
+    if pedestal is not None:
+        extra["open_water_pedestal"] = [round(float(v), 4) for v in pedestal]
+    fill = {"reference": reference, "texture": texture_window(texture, covered), "water": (str(repo_root), src["area"]),
+            "water_pedestal": pedestal,
+            "sea_texture": texture_window(sea_texture if sea_texture is not None else texture, covered)}
     counts = write_pyramid(paths, covered, shift, transfer, src["min_level"], src["max_level"], root, log,
                            resolve_workers(workers, TILE_WORKER_BYTES, log, "tiles"), fill)
     south, north, west, east = covered
@@ -1006,6 +1034,7 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False, retile: 
         if src["product"] == "sentinel2_median":
             s2_reflectance(src, areas, repo_root, force, lambda s: print(s, flush=True), workers)
     texture = ea.decode_srgb(ea.build_day_texture(repo_root))
+    sea_texture = ea.sea_only(texture, repo_root)
     out_dir = repo_root / "data" / "imagery" / "earth"
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -1018,7 +1047,8 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False, retile: 
             print(f"  {src['id']}: already present")
             continue
         print(f"  {src['id']}: {src['product']} over {src['area']} ({src['box']} box)", flush=True)
-        build_source(src, areas, repo_root, texture, force, log=lambda s: print(s, flush=True), workers=workers)
+        build_source(src, areas, repo_root, texture, force, log=lambda s: print(s, flush=True), workers=workers,
+                     sea_texture=sea_texture)
         if src["product"] == "sentinel2_median":
             rebuilt_areas.add(src["area"])
         write_index(out_dir, [s["id"] for s in cfg["source"]])

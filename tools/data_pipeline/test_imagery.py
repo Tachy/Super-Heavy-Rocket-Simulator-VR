@@ -342,3 +342,34 @@ def test_pyramid_fill_leaves_no_nodata_inside_coverage(tmp_path, with_reference)
     probe = (south + size - 0.006, south + size - 0.003, west + size - 0.006, west + size - 0.003)
     for rgb, inside in _tile_pixels_inside(tmp_path / "out", 15, probe).values():
         assert rgb[inside].mean(axis=0) == pytest.approx(expected_fill, abs=3.0)
+
+
+def test_fill_nodata_takes_the_sea_from_the_global_level_only():
+    """Sea pixels (water rule) are no data whatever the imagery and the reference show: they read the sea texture, land
+    pixels keep the imagery."""
+    box = (0.0, 1.0, 0.0, 1.0)
+    n = 4
+    rho = np.full((n, n, 3), 0.2)
+    valid = np.ones((n, n), dtype=bool)
+    water = np.zeros((n, n), dtype=bool)
+    water[:, :2] = True
+    land_tex = np.full((8, 8, 3), 0.3)
+    sea_tex = np.full((8, 8, 3), 0.02)
+    out, ok = im.fill_nodata(rho, valid, box, None, im.texture_window(land_tex, box), water, im.texture_window(sea_tex, box))
+    assert ok.all()
+    assert out[:, :2] == pytest.approx(0.02)
+    assert out[:, 2:] == pytest.approx(0.2)
+
+
+def test_fill_nodata_keeps_the_brightness_above_the_open_water_pedestal():
+    """Sea pixels read the sea texture plus the imagery's excess over the open-water pedestal (shallow bottoms, surf);
+    imagery at or below the pedestal is dropped."""
+    box = (0.0, 1.0, 0.0, 1.0)
+    rho = np.full((4, 4, 3), 0.05)
+    rho[:, 1] = 0.15  # bright shallow column
+    water = np.ones((4, 4), dtype=bool)
+    tex = im.texture_window(np.full((8, 8, 3), 0.02), box)
+    out, ok = im.fill_nodata(rho, np.ones((4, 4), dtype=bool), box, None, tex, water, tex, pedestal=np.array([0.06, 0.06, 0.06]))
+    assert ok.all()
+    assert out[:, 0] == pytest.approx(0.02)  # 0.05 is below the pedestal 0.06
+    assert out[:, 1] == pytest.approx(0.02 + 0.09)
