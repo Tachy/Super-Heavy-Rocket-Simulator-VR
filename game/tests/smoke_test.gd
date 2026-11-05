@@ -148,6 +148,13 @@ func _check_moon_surface(core: StarsimCore, moon_loaded: bool) -> void:
 		var radius := Vector3(b[0], b[1], b[2]).length()
 		_check(absf(radius - 1737400.0 - (rocks["base_height_m"] as PackedFloat64Array)[0]) < 1e-6,
 				"moon_rocks: base_fixed_m lies at R + base_height_m")
+		_check_rock_values(rocks)
+	_check_rock_robustness_and_threads(core, lat[0], lon[0])
+	var coarse_h := coarse["height_m"] as PackedFloat64Array
+	var band_differs := false
+	for k in lat.size():
+		band_differs = band_differs or absf(coarse_h[k] - heights[k]) > 1e-6
+	_check(band_differs, "surface_samples_detail: min_wavelength 1000 m differs from full detail")
 	_check(stats.get("present", false) and stats["hapke"].has("w") and stats["rocks"].has("cover_above_m")
 			and (stats["rocks"]["cover_above_m"] as PackedFloat64Array).size() == (stats["rocks"]["cover_diameters_m"] as PackedFloat64Array).size(),
 			"moon_surface_statistics: Hapke, SFD, roughness and cover samples")
@@ -160,6 +167,87 @@ func _check_moon_surface(core: StarsimCore, moon_loaded: bool) -> void:
 			"detail off: surface_samples_detail equals surface_samples")
 	_check(core.surface_finest_resolution_m("moon", lat, lon) > 0.011, "detail off: the LOLA resolution again")
 	core.set_moon_surface_detail(true)
+
+
+## Basis columns orthonormal, axes positive, albedo in a sane range.
+func _check_rock_values(rocks: Dictionary) -> void:
+	var basis := rocks["basis"] as PackedFloat64Array
+	var axes := rocks["axes_m"] as PackedFloat64Array
+	var albedo := rocks["albedo"] as PackedFloat64Array
+	var ortho := true
+	for k in albedo.size():
+		var c: Array[Vector3] = []
+		for m in 3:
+			c.append(Vector3(basis[9 * k + 3 * m], basis[9 * k + 3 * m + 1], basis[9 * k + 3 * m + 2]))
+		for m in 3:
+			ortho = ortho and absf(c[m].length() - 1.0) < 1e-9 and absf(c[m].dot(c[(m + 1) % 3])) < 1e-9
+	var positive := true
+	for v in axes:
+		positive = positive and v > 0.0
+	var albedo_ok := true
+	for a in albedo:
+		albedo_ok = albedo_ok and a > 0.0 and a <= 2.0
+	_check(ortho, "moon_rocks: basis columns orthonormal")
+	_check(positive, "moon_rocks: axes_m positive")
+	_check(albedo_ok, "moon_rocks: albedo factor in (0, 2]")
+
+
+## Out-of-range cells and NaN give empty results; 4 threads query concurrently and agree with the serial result;
+## per-call timings are printed (informative).
+func _check_rock_robustness_and_threads(core: StarsimCore, lat_deg: float, lon_deg: float) -> void:
+	var empty := true
+	for args in [[6, 8, 0, 0], [-1, 8, 0, 0], [0, -1, 0, 0], [0, 31, 0, 0], [0, 8, -1, 0], [0, 8, 0, 256], [0, 8, 1 << 40, 0]]:
+		empty = empty and (core.moon_rocks(args[0], args[1], args[2], args[3], 0.1)["ids"] as PackedInt64Array).is_empty()
+	empty = empty and (core.moon_rocks(0, 8, 0, 0, NAN)["ids"] as PackedInt64Array).is_empty()
+	_check(empty, "moon_rocks: out-of-range cell, level or NaN size gives empty")
+	var unit := Vector3(cos(deg_to_rad(lat_deg)) * cos(deg_to_rad(lon_deg)), cos(deg_to_rad(lat_deg)) * sin(deg_to_rad(lon_deg)), sin(deg_to_rad(lat_deg)))
+	var busy_level := 18
+	var busy_count := -1
+	for min_d in [0.1, 0.02]:
+		for level in range(12, 29, 2):
+			var key := CubeSphere.key_at(unit, level)
+			var n := 0
+			var t0 := Time.get_ticks_usec()
+			for di in range(-1, 2):
+				for dj in range(-1, 2):
+					n += (core.moon_rocks(key.x, level, key.z + di, key.w + dj, min_d)["ids"] as PackedInt64Array).size()
+			print("  info  moon_rocks D>=%.2f level %d: %.0f us per cell, %d rocks in 9 cells (cold)" % [min_d, level, float(Time.get_ticks_usec() - t0) / 9.0, n])
+			if n > busy_count:
+				busy_count = n
+				busy_level = level
+	var key18 := CubeSphere.key_at(unit, busy_level)
+	var serial := _cells_ids(core, key18, busy_level)
+	print("  info  thread test cell: level %d, %d rocks" % [busy_level, serial.size()])
+	var threads: Array[Thread] = []
+	for t in 4:
+		var th := Thread.new()
+		th.start(func() -> bool:
+			var same := true
+			for rep in 20:
+				same = same and _cells_ids(core, key18, busy_level) == serial
+				var h := core.surface_samples_detail("moon", PackedFloat64Array([lat_deg + rep * 1e-4]),
+						PackedFloat64Array([lon_deg]), 0.0, 0.0)
+				same = same and (h["height_m"] as PackedFloat64Array).size() == 1
+			return same)
+		threads.append(th)
+	var all_same := true
+	for th in threads:
+		all_same = bool(th.wait_to_finish()) and all_same
+	_check(all_same, "4 threads: moon_rocks and surface_samples_detail agree with the serial result")
+	core.set_moon_rocks(false)
+	var off := core.surface_samples_detail("moon", PackedFloat64Array([lat_deg]), PackedFloat64Array([lon_deg]), 0.0, 0.0)
+	_check((off["height_m"] as PackedFloat64Array).size() == 1 and (core.moon_rocks(key18.x, busy_level, key18.z, key18.w, 0.02)["ids"] as PackedInt64Array).is_empty(),
+			"rocks off: heights still come, moon_rocks empty, no error")
+	core.set_moon_rocks(true)
+
+
+## Rock ids of the 3x3 cells around `key` (concatenated).
+func _cells_ids(core: StarsimCore, key: Vector4i, level: int) -> PackedInt64Array:
+	var all := PackedInt64Array()
+	for di in range(-1, 2):
+		for dj in range(-1, 2):
+			all.append_array(core.moon_rocks(key.x, level, key.z + di, key.w + dj, 0.02)["ids"] as PackedInt64Array)
+	return all
 
 
 ## First cell with rocks of >= 0.1 m among the cells (+-4) around the site, searched by level.

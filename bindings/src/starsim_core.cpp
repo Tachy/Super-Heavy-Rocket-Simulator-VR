@@ -409,8 +409,11 @@ godot::Dictionary StarsimCore::moon_rocks(int face, int level, int64_t i, int64_
     godot::PackedInt64Array ids;
     godot::PackedFloat64Array base, basis, axes, diameter, burial, base_height, albedo;
     godot::PackedInt32Array templates;
-    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && face >= 0 && face < 6 && level >= 0 &&
-        level <= environment::max_face_cell_level) {
+    // Out-of-range cells (and a NaN size) give an empty result; the rock layer may be absent (no Diviner map).
+    const bool cell_ok = face >= 0 && face < 6 && level >= 0 && level <= environment::max_face_cell_level && i >= 0 &&
+                         j >= 0 && i < (int64_t{1} << level) && j < (int64_t{1} << level) && !std::isnan(min_diameter_m);
+    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && moon_surface_->rocks_on() &&
+        moon_surface_->rocks_shared() != nullptr && cell_ok) {
         const double radius_m = moon_surface_->detail().sphere_radius_m();
         const auto rocks = moon_surface_->rocks().rocks_in_cell({face, level, i, j}, min_diameter_m);
         const auto count = static_cast<int64_t>(rocks.size());

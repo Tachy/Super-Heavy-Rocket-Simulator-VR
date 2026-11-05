@@ -100,7 +100,8 @@ public:
     // (rocks need the Diviner map: without it the surface is built without rocks and a line says so). All positions
     // Moon-fixed, float64. Thread-safe like surface_samples (const queries of the shared surface).
     // Flags (default on; same meaning as the FlightSim fidelity flags): detail off = LOLA heights, no rocks; rocks off =
-    // no rock tops, moon_rocks empty. Call from one thread (like load_terrain).
+    // no rock tops, moon_rocks empty. Call from one thread (like load_terrain). load_terrain must have finished before
+    // any query (surface_samples_detail, moon_rocks, moon_surface_statistics) runs, from any thread.
     void set_moon_surface_detail(bool on);
     void set_moon_rocks(bool on);
     // Same dictionary as surface_samples (present, height_m, water), heights of the detailed surface with the relief
