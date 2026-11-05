@@ -30,7 +30,9 @@ void fragment() {
 	float sun_modulation = 1.0;
 	float earth_modulation = 1.0;
 	if (detail_shading) {
-		factors = detail_light_factors(patch_abundance, 1.0e30, patch_spacing_m, detail_horizon_spacing_m, elevation);
+		// The threshold diameter: the override of the rock patch steps (Task 11), else no rock geometry.
+		factors = detail_light_factors(patch_abundance, detail_rock_threshold_m(0.0, 1.0e30, patch_abundance), patch_spacing_m,
+				detail_horizon_spacing_m, elevation);
 		sun_modulation = detail_modulation(gradient, n, to_sun, to_eye);
 		earth_modulation = detail_modulation(gradient, n, to_earth, to_eye);
 	}

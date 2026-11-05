@@ -268,6 +268,42 @@ TEST_CASE("Every rock belongs to exactly one cell", "[moon_surface][environment]
     CHECK(total > 20);
 }
 
+TEST_CASE("Rocks in a region: the children partition it, octaves above and below its level", "[moon_surface][environment]") {
+    // A level-17 region (~20 m) at the site: octaves from 4 cm live on finer levels (descendant cells), the metre
+    // octaves on coarser ones (the ancestor cell, filtered); one at a face corner too.
+    for (const FaceCell& region : {environment::face_cell_of(direction(site_lat, site_lon), 17), FaceCell{4, 17, 0, 0}}) {
+        const double min_d = 0.04;
+        const auto parent = rocks().rocks_in_region(region, min_d);
+        std::set<std::uint64_t> parent_ids;
+        for (const Rock& r : parent) {
+            CHECK(parent_ids.insert(r.id).second);  // no duplicate
+            CHECK(environment::face_cell_of(r.base_unit, region.level) == region);
+            CHECK(r.diameter_m >= min_d);
+        }
+        std::set<std::uint64_t> child_ids;
+        const FaceCell children[4] = {{region.face, region.level + 1, 2 * region.i, 2 * region.j},
+                                      {region.face, region.level + 1, 2 * region.i + 1, 2 * region.j},
+                                      {region.face, region.level + 1, 2 * region.i, 2 * region.j + 1},
+                                      {region.face, region.level + 1, 2 * region.i + 1, 2 * region.j + 1}};
+        for (const FaceCell& child : children) {
+            for (const Rock& r : rocks().rocks_in_region(child, min_d)) CHECK(child_ids.insert(r.id).second);
+        }
+        CHECK(child_ids == parent_ids);
+        // The same set by position: every rock near the region whose base lies in it.
+        const Vec3 middle = environment::face_cell_point(region, 0.5, 0.5);
+        std::set<std::uint64_t> by_position;
+        for (const Rock& r : rocks().rocks_near(middle, environment::face_cell_nominal_size_m(region.level, R), min_d)) {
+            if (environment::face_cell_of(r.base_unit, region.level) == region) by_position.insert(r.id);
+        }
+        CHECK(by_position == parent_ids);
+        std::printf("  region %d/%d/%lld/%lld: %zu rocks >= %.2f m\n", region.face, region.level,
+                    static_cast<long long>(region.i), static_cast<long long>(region.j), parent_ids.size(), min_d);
+        CHECK(parent_ids.size() > 100);
+    }
+    // A coarse region with the finest octave asked for: refused, not a hang.
+    CHECK_THROWS_AS(rocks().rocks_in_region(FaceCell{0, 8, 0, 0}, 0.0), std::invalid_argument);
+}
+
 TEST_CASE("A rock top lies above the ground and below its full height", "[moon_surface][environment]") {
     const Vec3 centre = direction(site_lat, site_lon);
     const auto found = rocks().rocks_near(centre, 200.0, 0.5);

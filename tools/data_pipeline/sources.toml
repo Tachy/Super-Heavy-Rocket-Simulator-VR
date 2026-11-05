@@ -589,3 +589,12 @@ target = "core/src/environment/unresolved_shading.cpp"
 kind = "licence_only"
 license = "LROC images: NASA mission data, not copyrighted (credit NASA/GSFC/Arizona State University); published papers: only methods and numerical values are used"
 credit = "Unresolved-surface shading after Smith (1967), Hapke (1984), Heitz & Neyret (2018); LROC NAC reference image NASA/GSFC/Arizona State University"
+
+[[source]]
+id = "apollo_surface_photos_look_reference"
+name = "Apollo surface photographs as look references for the drawn rocks and regolith (moon procedural surface Task 11): AS11-40-5903 (Tranquility Base, 1969-07-21), AS15-86-11603 (Hadley-Apennine, 1971-07-31), AS17-140-21497 (Taurus-Littrow station 6, 1972-12-13/14); compared side by side with renders, not shipped"
+url = "https://images.nasa.gov/details/as15-86-11603"
+target = "game/world/terrain/moon_rock_layer.gd"
+kind = "licence_only"
+license = "NASA photographs: public domain (US government work, NASA media usage guidelines); AS11-40-5903 from the LPI Apollo Image Atlas (www.lpi.usra.edu/resources/apollo/images/print/AS11/40/5903.jpg), AS15-86-11603 and AS17-140-21497 from images.nasa.gov (~large.jpg)"
+credit = "Apollo surface photographs AS11-40-5903, AS15-86-11603, AS17-140-21497: NASA (look references, not shipped)"

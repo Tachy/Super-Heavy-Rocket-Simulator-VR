@@ -19,6 +19,12 @@
 #   the core: (a) the statistical radiance (residual theta_bar, Smith, rock albedo / shadow / lit faces) with and without
 #   the texture modulation within 2 %, (b) an earthshine-only patch (Sun below the horizon) equal to the core's
 #   earthshine with no shadow share at any abundance and spacing.
+# - Drawn rocks (Task 11; MoonRockChecks): a node's rock buffers against the core's rocks found cell by cell (ids,
+#   centres within 1 mm); with a GPU the radiance gate with real rocks crossing the threshold: a 120 m patch with the
+#   core's rocks drawn through moon_rock.gdshader above a fixed threshold diameter (growth band to 2 x) on the
+#   statistical ground of moon_detail_patch.gdshader, mean against the core's all-statistical expectation within 2 %;
+#   a camera jump of 10 km with a streamed tree and the rock layer: the main thread under 5 ms per frame.
+#   --rocks_only: only these (and the Hapke calibration step).
 # Run: godot --headless --path game --script res://tests/moon_surface_check.gd [-- --measure]
 #      godot --path game --script res://tests/moon_surface_check.gd [-- --hapke_only]  (GPU: + the shader parity;
 #      --hapke_only: only the Hapke checks, no terrain data needed; --detail_only: the Task 10 detail checks and the Hapke
@@ -60,6 +66,25 @@ const DETAIL_STEPS := [
 ]
 ## The Diviner rock abundance map's highest valid 3 x 3 pixel means (selenographic deg; RA 0.357 / 0.349 / 0.343,
 ## searched over the whole 60 S - 60 N map in fix round 1) and Tycho's floor (-43.31, -11.36) for comparison.
+## Rock patches (Task 11): (incidence, emission, phase) deg, threshold diameter m, sun / earth on. Patch edge
+## ROCK_PATCH_EDGE_M (the rocks gathered over it), viewed ROCK_PATCH_VIEW_M wide, node spacing 0.3264 m, horizon 20 m,
+## abundance 1 (the site), regolith textures off, rock textures on.
+const ROCK_STEPS := [
+	[Vector3(83, 30, 60), 0.1, true],
+	[Vector3(83, 30, 60), 0.2, true],
+	[Vector3(83, 30, 60), 0.4, true],
+	[Vector3(83, 30, 60), 0.8, true],
+	[Vector3(75, 0, 75), 0.1, true],
+	[Vector3(75, 0, 75), 0.4, true],
+	[Vector3(60, 45, 30), 0.1, true],
+	[Vector3(60, 45, 30), 0.4, true],
+	[Vector3(83, 30, 60), 0.1, false],
+]
+const ROCK_PATCH_EDGE_M := 140.0
+const ROCK_PATCH_VIEW_M := 100.0  ## the patch plane (the camera shows its central half)
+const ROCK_PATCH_SPACING_M := 0.3264
+const ROCK_PATCH_HORIZON_M := 20.0
+const ROCK_PATCH_MIN_D_M := 0.1  ## the smallest threshold of ROCK_STEPS: the rocks gathered
 const ROCKY_POINTS := [Vector2(39.3594, -0.1719), Vector2(8.1094, -53.9844), Vector2(-24.8281, -45.1406),
 		Vector2(-43.31, -11.36)]
 
@@ -81,6 +106,11 @@ var _parity_srgb := false  ## the readback came back sRGB-encoded (calibration),
 var _detail_stats: Dictionary = {}  ## StarsimCore.moon_unresolved_shading (full runs)
 var _detail_material: ShaderMaterial
 var _detail_tiles: Array = []
+var _rock_layer: MoonRockLayer  ## the rock patches' and transform checks' layer (templates, material)
+var _rock_patch: MultiMeshInstance3D
+var _rock_material: ShaderMaterial
+var _rock_cover := 0.0  ## realised plan-view cover of the patch's rocks (D >= ROCK_PATCH_MIN_D_M) in the viewed square
+var _rocks_only := false
 
 
 func _initialize() -> void:
@@ -100,6 +130,12 @@ func _initialize() -> void:
 		return
 	_core.set_moon_surface_detail(true)
 	var detail_only := OS.get_cmdline_user_args().has("--detail_only")
+	_rocks_only = OS.get_cmdline_user_args().has("--rocks_only")
+	if _rocks_only:
+		_detail_stats = _core.moon_unresolved_shading()
+		_rock_checks()
+		_hapke_checks()
+		return
 	if not detail_only:
 		_check_mesh_matches_core()
 		_check_parent_child()
@@ -111,12 +147,40 @@ func _initialize() -> void:
 		MoonDetailChecks.continuity(_core, _check)
 		MoonDetailChecks.abundance_grid(_core, _check)
 		MoonDetailChecks.summed_roughness(_core, _site, _check)
+	if not detail_only:
+		_rock_checks()
 	_core.set_moon_surface_detail(false)
 	if not detail_only:
 		_check_detail_off()
 	if OS.get_cmdline_user_args().has("--measure"):
 		_measure()
 	_hapke_checks()
+
+
+## Task 11: the rock layer (on a terrain material configured like the game's), its node buffers against the core, the
+## camera jump with a streamed tree.
+func _rock_checks() -> void:
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/terrain_moon.gdshader")
+	MoonDetailShading.configure(_core, material, true)
+	_rock_layer = MoonRockLayer.new(_core, material)
+	MoonRockChecks.transforms(_core, _rock_layer, _site, _check)
+	MoonRockChecks.budget(_check)
+	var site_fixed := CubeSphere.geodetic_direction(_site.x, _site.y) * (R + _ground_m(true) + 2.0)
+	if OS.get_cmdline_user_args().has("--jump_baseline"):  # the same jump without the rock layer (info)
+		var bare := TerrainQuadtree.new()
+		root.add_child(bare)
+		bare.setup(_heights(), null, R, material)
+		MoonRockChecks.camera_jump(bare, null, site_fixed, _check)
+		bare.free()
+	var tree := TerrainQuadtree.new()
+	root.add_child(tree)
+	var layer := MoonRockLayer.new(_core, material)
+	layer.pixel_angle_rad = MoonRockChecks.CHECK_PIXEL_ANGLE
+	tree.rock_layer = layer
+	tree.setup(_heights(), null, R, material)
+	MoonRockChecks.camera_jump(tree, layer, site_fixed, _check)
+	tree.free()
 
 
 ## The Hapke checks; the shader parity (GPU only) continues in _process, then _finish.
@@ -613,6 +677,12 @@ func _start_parity() -> void:
 			_parity_steps.append({"kind": "detail", "geometry": entry[0], "theta": -1.0, "size": entry[1],
 					"spacing": entry[2], "horizon": entry[3], "abundance": entry[4], "textures": entry[5],
 					"sun": entry[6]})
+	if _rock_layer != null and _detail_material != null:
+		_start_rock_patch()
+		for entry: Array in ROCK_STEPS:
+			_parity_steps.append({"kind": "rocks", "geometry": entry[0], "theta": -1.0, "size": ROCK_PATCH_VIEW_M,
+					"spacing": ROCK_PATCH_SPACING_M, "horizon": ROCK_PATCH_HORIZON_M, "abundance": 1.0, "textures": false,
+					"sun": entry[2], "threshold": entry[1]})
 	_parity_viewport.add_child(patch)
 	_parity_camera = Camera3D.new()
 	_parity_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -628,7 +698,8 @@ func _set_parity_geometry(step: int) -> void:
 	var entry: Dictionary = _parity_steps[step]
 	var geometry: Vector3 = entry["geometry"]
 	var production: bool = entry["kind"] == "production"
-	var detail: bool = entry["kind"] == "detail"
+	var rocks: bool = entry["kind"] == "rocks"
+	var detail: bool = entry["kind"] == "detail" or rocks
 	var material := _parity_production if production else _parity_material
 	if detail:
 		material = _detail_material
@@ -644,6 +715,13 @@ func _set_parity_geometry(step: int) -> void:
 		material.set_shader_parameter("detail_textures", bool(entry["textures"]) and not _detail_tiles.is_empty())
 		material.set_shader_parameter("sun_on", 1.0 if entry["sun"] else 0.0)
 		material.set_shader_parameter("earth_on", 0.0 if entry["sun"] else 1.0)
+		material.set_shader_parameter("rock_geometry_override_m", float(entry["threshold"]) if rocks else -1.0)
+		if _rock_patch != null:
+			_rock_patch.visible = rocks
+			_rock_patch.material_override.set_shader_parameter("rock_geometry_override_m",
+					float(entry["threshold"]) if rocks else -1.0)
+			ShaderGlobals.set_value(&"moon_sun_scene", 1.0 if entry["sun"] else 0.0)
+			ShaderGlobals.set_value(&"moon_earthshine", 0.0 if entry["sun"] else 1.0)
 	_parity_patch.material_override = material
 	if production:
 		material.set_shader_parameter("hapke_theta_bar_rad", float(entry["theta"]))
@@ -662,6 +740,11 @@ func _set_parity_geometry(step: int) -> void:
 		material.set_shader_parameter("earth_world", to_light)
 		if not entry["sun"]:
 			material.set_shader_parameter("light_world", Vector3(cos(deg_to_rad(5.0)), -sin(deg_to_rad(5.0)), 0.0))
+		if rocks:  # the rock shader's lights: far along the patch's directions (the Earth clear of the Sun)
+			var sun_dir: Vector3 = material.get_shader_parameter("light_world")
+			var earth_dir: Vector3 = to_light if not entry["sun"] else -to_light
+			ShaderGlobals.set_value(&"moon_sun_position_local", sun_dir.normalized() * Atmosphere.ASTRONOMICAL_UNIT_M)
+			ShaderGlobals.set_value(&"moon_earth_position_local", earth_dir.normalized() * 3.844e8)  # [S] mean Earth-Moon distance (m)
 	_parity_material.set_shader_parameter("calibrate", step == 0)
 	# VIEW in a fragment is the direction to the camera point even with an orthographic camera: far away for the detail
 	# patches (12.5 m views), so the emission angle varies < 0.2 deg over the image.
@@ -707,7 +790,7 @@ func _process(_delta: float) -> bool:
 		_check(absf(value / expected - 1.0) < 0.01, "parity readback calibration: %.5f for %.5f%s (format %d)"
 				% [value, expected, " (sRGB-decoded)" if _parity_srgb else "",
 				_parity_viewport.get_texture().get_image().get_format()])
-	elif _parity_steps[_parity_step]["kind"] == "detail":
+	elif _parity_steps[_parity_step]["kind"] == "detail" or _parity_steps[_parity_step]["kind"] == "rocks":
 		_check_detail_patch(_parity_steps[_parity_step], value / PARITY_GAIN)
 	else:
 		var entry: Dictionary = _parity_steps[_parity_step]
@@ -744,15 +827,69 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 	var core := norm * _core.moon_hapke_reflectance(cos(deg_to_rad(geometry.x)), cos(deg_to_rad(geometry.y)),
 			deg_to_rad(geometry.z), theta)
 	var what := ""
+	if entry["kind"] == "rocks":
+		what = "with drawn rocks from %.2f m (growth to %.2f m; realised cover >= %.2f m %.4f, law %.4f): " % [
+				float(entry["threshold"]), 2.0 * float(entry["threshold"]), ROCK_PATCH_MIN_D_M, _rock_cover,
+				_law_cover(ROCK_PATCH_MIN_D_M)]
 	if entry["sun"]:
 		core *= factors.x
-		what = "Sun %.0f deg" % (90.0 - geometry.x)
+		what += "Sun %.0f deg" % (90.0 - geometry.x)
 	else:
 		core *= factors.y
-		what = "earthshine only (Sun 5 deg below), Earth %.0f deg" % (90.0 - geometry.x)
+		what += "earthshine only (Sun 5 deg below), Earth %.0f deg" % (90.0 - geometry.x)
 	_check(absf(shader / core - 1.0) < PARITY_TOLERANCE,
 			"detail patch %s, e %.0f g %.0f, %.0f m, spacing %.4f m, horizon %.0f m, abundance %.0f, textures %s: shader %.5f "
 			% [what, geometry.y, geometry.z, entry["size"], spacing, entry["horizon"], entry["abundance"],
 			"on" if entry["textures"] else "off", shader]
 			+ "core %.5f (%+.2f %%; theta_bar %.2f deg, factor %.3f)" % [core, 100.0 * (shader / core - 1.0),
 			rad_to_deg(theta), factors.x if entry["sun"] else factors.y])
+
+
+## The rock patch: the core's rocks around the site (D >= ROCK_PATCH_MIN_D_M, ROCK_PATCH_EDGE_M square) as one LOD-1
+## MultiMesh through the production rock shader, on the flat patch's frame (the Moon-local frame = the patch's world:
+## moon_world_to_local identity; Sun / Earth far along the patch's light directions, set per step).
+func _start_rock_patch() -> void:
+	_core.set_moon_surface_detail(true)  # the full run switched it off for the detail-off checks; the rocks need it
+	var dir := CubeSphere.geodetic_direction(_site.x, _site.y)
+	var data := MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, ROCK_PATCH_EDGE_M, ROCK_PATCH_MIN_D_M)
+	var viewed := MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, 0.5 * ROCK_PATCH_VIEW_M, ROCK_PATCH_MIN_D_M)
+	_rock_cover = float(viewed["cover"])
+	_core.set_moon_surface_detail(false)
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.use_colors = true
+	multimesh.use_custom_data = true
+	multimesh.mesh = _rock_layer.meshes[1]
+	multimesh.instance_count = int(data["count"])
+	multimesh.buffer = data["buffer"]
+	_rock_material = _rock_layer.material_template.duplicate()
+	for param in MoonRockLayer.COPIED_TEMPLATE_PARAMETERS:
+		if param != &"albedo_texture" and param != &"sun_radius_m" and param != &"earth_radius_m":
+			_rock_material.set_shader_parameter(param, _detail_material.get_shader_parameter(param))
+	var white := Image.create(1, 1, false, Image.FORMAT_RGBF)
+	white.set_pixel(0, 0, Color(1, 1, 1))
+	_rock_material.set_shader_parameter("albedo_texture", ImageTexture.create_from_image(white))
+	var abundance := Image.create(1, 1, false, Image.FORMAT_RF)
+	abundance.set_pixel(0, 0, Color(1, 0, 0))
+	_rock_material.set_shader_parameter("detail_rock_abundance", ImageTexture.create_from_image(abundance))
+	_rock_material.set_shader_parameter("sun_radius_m", World.SUN_RADIUS_M)
+	_rock_material.set_shader_parameter("earth_radius_m", World.EARTH_MEAN_RADIUS_M)
+	_rock_material.set_shader_parameter("detail_cell_m", ROCK_PATCH_SPACING_M)
+	_rock_material.set_shader_parameter("detail_horizon_spacing_m", ROCK_PATCH_HORIZON_M)
+	_rock_patch = MultiMeshInstance3D.new()
+	_rock_patch.multimesh = multimesh
+	_rock_patch.material_override = _rock_material
+	_rock_patch.visible = false
+	_parity_viewport.add_child(_rock_patch)
+	ShaderGlobals.set_value(&"moon_regolith_scale", PARITY_GAIN)
+	ShaderGlobals.set_value(&"moon_world_to_local", Basis.IDENTITY)
+	ShaderGlobals.set_value(&"moon_rock_threshold_px", 0.0)
+	print("  info  rock patch: %d rocks >= %.2f m over %.0f m (cover in the viewed %.0f m square: %.4f, law %.4f)" % [
+			int(data["count"]), ROCK_PATCH_MIN_D_M, ROCK_PATCH_EDGE_M, 0.5 * ROCK_PATCH_VIEW_M, _rock_cover,
+			_law_cover(ROCK_PATCH_MIN_D_M)])
+
+
+## The law's rock cover from d up (abundance 1): the statistics' closed form (coef (D_max^q - d^q)).
+func _law_cover(d: float) -> float:
+	var q := float(_detail_stats["rock_cover_exponent"])
+	return float(_detail_stats["rock_cover_coefficient"]) * (pow(float(_detail_stats["rock_max_diameter_m"]), q) - pow(d, q))

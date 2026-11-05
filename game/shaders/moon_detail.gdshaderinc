@@ -23,6 +23,7 @@
 
 // [S] Moon procedural surface spec: geometry from ~1-2 px projected size (ROCK_PIXEL_THRESHOLD = 1.5 px, [E]).
 const float DETAIL_PI = 3.14159265358979;
+const float DETAIL_LN2 = 0.693147180559945;
 // [D] Hex lattice period in cells (the hash repeats after DETAIL_HEX_PERIOD cells; per scale 256 x tile / 2).
 const int DETAIL_HEX_PERIOD = 256;
 // [D] The core's tables (unresolved_shading.hpp): drawn_table_samples, lit_gain_samples.
@@ -54,8 +55,20 @@ uniform vec4 detail_rock_shape = vec4(0.0, 1.0, 1.0, 0.0);
 uniform float detail_rock_lit_gain[46];
 // The abundance factor (LunarRocks::abundance_factor), equirectangular like moon_color (u = (lon + 180) / 360).
 uniform sampler2D detail_rock_abundance : filter_linear, repeat_enable;
-// Rocks drawn as geometry from this many pixels of projected size (Task 11); 0: none, every rock statistical.
-uniform float rock_geometry_pixels = 0.0;
+// Rocks drawn as geometry (Task 11, MoonRockLayer): from moon_rock_threshold_px pixels of projected size
+// (ROCK_PIXEL_THRESHOLD x rock_threshold_scale; 0: no rock geometry, every rock statistical) at moon_rock_pixel_angle
+// (rad per pixel of the active render target), distances from the eye (the head centre in VR); a rock rises out of the
+// ground over the growth band [d, 2 d] (d = the threshold diameter at its distance), mirrored here by the statistical
+// weight 1 - log2(D / d) (core rock_statistical_cover).
+global uniform float moon_rock_pixel_angle;
+global uniform float moon_rock_threshold_px;
+// Per node: the smallest rock diameter the node's rock list holds (MoonRockLayer; 1e30: none drawn). The threshold
+// diameter is never below it, so a rock the node does not draw stays statistical.
+uniform float rock_node_min_m = 1.0e30;
+// The drawn rocks' cast shadows are statistical on the ground (until the near-field shadow map, Task 12: false there).
+uniform bool rock_geometry_shadows_statistical = true;
+// Tests (moon_surface_check's rock patch): > 0 fixes the threshold diameter (no distance, no node limit).
+uniform float rock_geometry_override_m = -1.0;
 // Per node (TerrainQuadtree): the nominal vertex spacing; per scale the node corner's texture coordinate modulo the
 // tile (xy, m) and its skewed hex coordinate modulo DETAIL_HEX_PERIOD (zw); the horizon map's grid spacing.
 uniform float detail_cell_m = 1.0;
@@ -110,18 +123,65 @@ float detail_rock_cover(float d_lo, float d_hi) {
 	return detail_rock_law.x * (pow(hi, detail_rock_law.y) - pow(lo, detail_rock_law.y));
 }
 
+// Statistical rock cover at the threshold diameter d (core rock_statistical_cover): every rock below d, the growth band
+// [d, 2 d] weighted 1 - x, x = log2(D / d) (closed form over the power law), nothing above.
+float detail_rock_statistical_cover(float d) {
+	float cover = detail_rock_cover(detail_rock_law.z, d);
+	if (!(d < detail_rock_law.w) || detail_rock_law.x == 0.0 || d <= 0.0) {
+		return cover;
+	}
+	float x0 = max(0.0, log2(detail_rock_law.z / d));
+	float x1 = min(1.0, log2(detail_rock_law.w / d));
+	if (x1 <= x0) {
+		return cover;
+	}
+	float q = detail_rock_law.y;
+	float k = q * DETAIL_LN2;
+	float integral;
+	if (abs(k) < 1.0e-6) {
+		integral = (x1 - 0.5 * x1 * x1) - (x0 - 0.5 * x0 * x0);
+	} else {
+		integral = exp(k * x1) * ((1.0 - x1) / k + 1.0 / (k * k)) - exp(k * x0) * ((1.0 - x0) / k + 1.0 / (k * k));
+	}
+	return cover + detail_rock_law.x * q * DETAIL_LN2 * pow(d, q) * integral;
+}
+
+// The density factor of the threshold (MoonRockLayer.abundance_threshold_factor): above the mean population
+// (abundance > 1) the threshold grows as abundance^(1 / b) (b the law's cumulative exponent, 2 - q), so the number of
+// drawn rocks per pixel area stays the mean population's: a predictable load rule, boulder fields draw their smaller
+// rocks statistically. 1 at abundance <= 1.
+float detail_rock_abundance_factor(float abundance) {
+	return abundance > 1.0 ? pow(abundance, 1.0 / (2.0 - detail_rock_law.y)) : 1.0;
+}
+
+// The threshold diameter of a fragment or rock at distance_m from the eye at the local abundance factor on a node
+// whose rock list starts at node_min_m (1e30: no rock geometry).
+float detail_rock_threshold_m(float distance_m, float node_min_m, float abundance) {
+	if (rock_geometry_override_m > 0.0) {
+		return rock_geometry_override_m;
+	}
+	if (moon_rock_threshold_px <= 0.0) {
+		return 1.0e30;
+	}
+	return max(moon_rock_threshold_px * moon_rock_pixel_angle * distance_m * detail_rock_abundance_factor(abundance),
+			node_min_m);
+}
+
 float detail_gain(float elevation) {
 	float x = clamp(elevation / detail_rock_shape.z, 0.0, float(DETAIL_GAIN_SAMPLES - 1));
 	int k = min(int(x), DETAIL_GAIN_SAMPLES - 2);
 	return mix(detail_rock_lit_gain[k], detail_rock_lit_gain[k + 1], x - float(k));
 }
 
-// (sun, earth) factors (core unresolved_light_factors). elevation: the Sun's macroscopic elevation (rad).
+// (sun, earth) factors of the ground (core unresolved_light_factors). geometry_min_m: the threshold diameter
+// (detail_rock_threshold_m; 1e30: every rock statistical); elevation: the Sun's macroscopic elevation (rad).
 vec2 detail_light_factors(float abundance, float geometry_min_m, float spacing_m, float horizon_spacing_m,
 		float elevation) {
 	float rho = detail_rock_shape.y;
 	float c_all = abundance * detail_rock_cover(detail_rock_law.z, detail_rock_law.w);
-	float c = abundance * detail_rock_cover(detail_rock_law.z, geometry_min_m);
+	float c = abundance * detail_rock_statistical_cover(geometry_min_m);
+	// The drawn rocks' share; their cast shadows stay statistical on the visible ground (until Task 12).
+	float c_drawn = rock_geometry_shadows_statistical ? max(c_all - c, 0.0) : 0.0;
 	float norm = exp(-c_all) + (1.0 - exp(-c_all)) * rho;
 	float rock_share = 1.0 - exp(-c);
 	float earth = (exp(-c) + rock_share * rho) / norm;
@@ -134,7 +194,7 @@ vec2 detail_light_factors(float abundance, float geometry_min_m, float spacing_m
 	float cot = sqrt(max(1.0 - se * se, 0.0)) / se;
 	float eta = detail_rock_shape.x;
 	float sigma = 0.5 * (sqrt(1.0 + 4.0 * eta * eta * cot * cot) - 1.0);
-	float sun = lit * (exp(-c * (1.0 + sigma)) + rock_share * rho * detail_gain(elevation)) / norm;
+	float sun = lit * (exp(-c * (1.0 + sigma) - c_drawn * sigma) + rock_share * rho * detail_gain(elevation)) / norm;
 	return vec2(sun, earth);
 }
 

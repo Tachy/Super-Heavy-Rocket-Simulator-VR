@@ -67,6 +67,13 @@ public:
 
     // Rocks standing in the cell (octaves whose level is the cell's level; empty otherwise), diameter >= min.
     std::vector<Rock> rocks_in_cell(const FaceCell& cell, double min_diameter_m) const;
+    // Rocks of every octave whose base lies in the face cell `region` (any level; a terrain node of the same key),
+    // diameter >= min: octaves on finer levels from all descendant cells, octaves on coarser levels from the
+    // ancestor cell filtered by face_cell_of(base, region.level). The four children of a region hold exactly its
+    // rocks. Throws std::invalid_argument when an octave would need more than 4^max_region_descent cells (min too
+    // small for the region).
+    std::vector<Rock> rocks_in_region(const FaceCell& region, double min_diameter_m) const;
+    static constexpr int max_region_descent = 10;  // [D] at most ~1e6 cells per octave in one query
     // Rocks whose base lies within radius_m (chord on the reference sphere) of `unit`.
     std::vector<Rock> rocks_near(const math::Vec3& unit, double radius_m, double min_diameter_m) const;
     // Rocks that may touch the disc: base within radius_m + the rock's long semi-axis a.

@@ -17,6 +17,7 @@ render_mode unshaded, cull_back;
 #include "res://shaders/terrain_morph.gdshaderinc"
 #include "res://shaders/moon_regolith.gdshaderinc"
 #include "res://shaders/moon_detail.gdshaderinc"
+#include "res://shaders/moon_horizon.gdshaderinc"
 
 // CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -25,18 +26,6 @@ global uniform vec3 moon_earth_position_local;  // from the Moon's centre (World
 // The camera's Moon-local render position, float32 hi + lo parts (TerrainQuadtree.camera_global, once per frame).
 global uniform vec3 moon_terrain_camera_hi;
 global uniform vec3 moon_terrain_camera_lo;
-// The node's horizon map: layer c (RGBAH, row x row) texel (i, j) = grid vertex (i, j) * horizon_stride, azimuths
-// 4 c .. 4 c + 3 (elevation, rad); texel centres are the vertices, so the filter interpolates between them.
-uniform float horizon_stride = 1.0;  // grid vertices per texel (TerrainNodeBuilder.HORIZON_STRIDE, set by the quadtree)
-// A node below the measured data's level draws with its ancestor's map (the map's owner): its grid position maps to
-// the owner's grid as CUSTOM2 * scale + offset (1, 0: the node's own map; set by the quadtree).
-uniform float horizon_grid_scale = 1.0;
-uniform vec2 horizon_grid_offset = vec2(0.0);
-uniform sampler2DArray horizon_map : filter_linear, repeat_disable;
-uniform float horizon_max_rad = 0.0;  // the highest elevation in the map (with margin): a light above it is not hidden
-uniform bool horizon_enabled = false;  // a node without a horizon (no terrain data) lights without terrain shadows
-// [E] |east| of the unnormalised east (cos latitude) below which the fragment counts as at a pole (within ~1e-6 rad).
-const float POLE_EAST_MIN = 1e-6;
 // Set from GDScript (World: the Sun's and the Earth's radius).
 uniform float sun_radius_m;
 uniform float earth_radius_m;
@@ -72,34 +61,6 @@ void vertex() {
 	camera_offset = VERTEX - camera_local;
 }
 
-// Fraction of the disc of radius `radius_m` at `to_light` above the terrain horizon: the horizon elevation in the
-// light's azimuth against the disc's elevation, the circular segment above a straight horizon (exact: d = signed
-// height of the centre over the horizon in disc radii, area = 1/2 + (d sqrt(1 - d^2) + asin d) / pi).
-// east / north: the fragment's local axes, up: its radial direction; uv: the horizon map's texture coordinates.
-// margin: the disc centre's elevation over the horizon in its azimuth (rad; its elevation when no fetch is needed).
-float terrain_visible_fraction(vec3 to_light, float radius_m, vec3 east, vec3 north, vec3 up, vec2 uv,
-		inout float margin) {
-	float distance_m = length(to_light);
-	vec3 direction = to_light / distance_m;
-	float angular_radius = radius_m / distance_m;  // asin(x) = x to 3.5e-6 (Sun) / 4.6e-5 (Earth) relative
-	float elevation = asin(clamp(dot(direction, up), -1.0, 1.0));
-	margin = elevation;
-	if (elevation - angular_radius > horizon_max_rad) {
-		return 1.0;  // the whole disc above the node's highest horizon: no fetch
-	}
-	float azimuth = atan(dot(direction, east), dot(direction, north));
-	float sector = (azimuth < 0.0 ? azimuth + TAU : azimuth) * (16.0 / TAU);
-	int k0 = int(floor(sector)) & 15;
-	int c0 = k0 & 3;
-	int layer = k0 >> 2;
-	vec4 block = textureLod(horizon_map, vec3(uv, float(layer)), 0.0);
-	// The next sector is in the same layer except after the layer's last azimuth.
-	float next = c0 < 3 ? block[(c0 + 1) & 3] : textureLod(horizon_map, vec3(uv, float((layer + 1) & 3)), 0.0).x;
-	float horizon = mix(block[c0], next, fract(sector));
-	margin = elevation - horizon;
-	float d = clamp((elevation - horizon) / angular_radius, -1.0, 1.0);
-	return clamp(0.5 + (d * sqrt(1.0 - d * d) + asin(d)) / PI, 0.0, 1.0);
-}
 
 void fragment() {
 	vec3 n = normalize(local_normal);
@@ -159,10 +120,9 @@ void fragment() {
 	float earth_modulation = 1.0;
 	if (detail_shading) {
 		float abundance = texture(detail_rock_abundance, global_uv).r;
-		// Rocks from rock_geometry_pixels of projected size are geometry (Task 11): d = pixels x distance x pixel angle.
-		float pixel_angle = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
-		float geometry_min_m = rock_geometry_pixels > 0.0 ? rock_geometry_pixels * length(camera_offset) * pixel_angle
-				: 1.0e30;
+		// Rocks above the threshold diameter at this distance are geometry (Task 11, MoonRockLayer; the same rule as
+		// moon_rock.gdshader), the rest statistical.
+		float geometry_min_m = detail_rock_threshold_m(length(camera_offset), rock_node_min_m, abundance);
 		detail_factors = detail_light_factors(abundance, geometry_min_m, spacing_eff, detail_horizon_spacing_m,
 				sun_margin);
 		sun_modulation = detail_modulation(detail_gradient, n, normalize(to_sun), to_eye);

@@ -156,3 +156,11 @@ shadows (Tasks 11-12): Task 13's budget table. Task 10 fix round (crater compone
 half-float maps, scale s3), same views, median of 120 frames, two alternating rounds: 1600 x 900 1.80 -> 2.32 ms
 (+0.52, was +0.45); stereo mock 5.69 / 5.78 -> 7.85 / 7.86 ms (+2.1, was +1.45): ~1.15 ms remain for Tasks 11-12. A
 per-fragment analytic crater field (the review's preferred route) cost 13.0 against 7.6 ms (+5.4 ms) and was dropped.
+
+Drawn rocks (moon procedural surface Task 11, `MoonRockLayer`), stereo mock, 2 m above IM-2 (Sun 6.75 deg), elevation
+-20 deg, median of 120 frames, budget control held (`--rock_budget=off`): rocks off 7.77 / 7.87 ms (two rounds); first
+version (every listed instance through the vertex shader) 10.48 / 10.48 (+2.6; a flat-colour fragment 10.22: the cost
+is the vertex work of collapsed instances); with the per-node visible counts (diameter-sorted lists, prefix drawn)
+8.57 ms with pebbles from 1 cm, 8.35 from 2 cm (shipped: +0.53 ms), 8.16 from 4 cm. ~0.6 ms remain for the near-field
+shadows (Task 12). Over budget the layer raises `rock_threshold_scale` (log rate 0.5 / s per unit of relative
+overload of the 9 ms VR / 14 ms desktop GPU target, logged), never a count cut.

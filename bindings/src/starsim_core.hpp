@@ -119,6 +119,10 @@ public:
     // base_height_m, albedo: PackedFloat64Array (1 per rock), template: PackedInt32Array}. Empty arrays for a level no
     // rock octave uses, with rocks off or without the surface. Rocks stand in exactly one cell.
     godot::Dictionary moon_rocks(int face, int level, int64_t i, int64_t j, double min_diameter_m) const;
+    // The same fields for every rock whose base lies in the face cell (a terrain node's key, any level; all octaves:
+    // LunarRocks::rocks_in_region) with diameter >= min_diameter_m, sorted by diameter descending (ties by id); plus "error" (German) when the core refuses (min
+    // too small for the cell). The renderer's per-node rock list (moon_rock_layer.gd, worker threads).
+    godot::Dictionary moon_rocks_in_node(int face, int level, int64_t i, int64_t j, double min_diameter_m) const;
     // Unit-size mesh of a rock template (id 0..15, lod 0..3 = near..speck): {vertices: PackedVector3Array, normals,
     // indices: PackedInt32Array}; empty on a bad id / lod. Scale by axes_m, orient by basis.
     godot::Dictionary rock_template_mesh(int id, int lod) const;

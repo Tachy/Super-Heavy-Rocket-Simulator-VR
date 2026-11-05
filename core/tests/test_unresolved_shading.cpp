@@ -360,6 +360,63 @@ TEST_CASE("Light factors: albedo share keeps the mosaic mean, the earthshine see
     }
 }
 
+TEST_CASE("Rock growth band: statistical cover, no rock counted twice, the drawn share closes the radiance",
+          "[moon_surface][unresolved_shading]") {
+    const auto& m = shared_model();
+    const double c_all = environment::rock_cover(m, 0.0, inf);
+    CHECK(environment::rock_statistical_cover(m, inf) == c_all);
+    CHECK(environment::rock_statistical_cover(m, 0.0) == 0.0);
+    // Closed form against a midpoint integral of the weight over the law (dC/dD = coef q D^(q-1)).
+    for (const double d : {0.003, 0.007, 0.01, 0.0137, 0.05, 1.0, 5.0, 6.0, 9.9, 20.0}) {
+        double numeric = 0.0;
+        const int n = 200000;
+        const double lo = std::log(m.rock_min_diameter_m), hi = std::log(m.rock_max_diameter_m);
+        for (int i = 0; i < n; ++i) {
+            const double diameter = std::exp(lo + (i + 0.5) / n * (hi - lo));
+            const double x = std::log2(diameter / d);
+            const double w = x <= 0.0 ? 1.0 : (x >= 1.0 ? 0.0 : 1.0 - x);
+            numeric += w * m.rock_cover_coefficient * m.rock_cover_exponent *
+                       std::pow(diameter, m.rock_cover_exponent) * (hi - lo) / n;
+        }
+        const double closed = environment::rock_statistical_cover(m, d);
+        CHECK(std::abs(closed - numeric) < 1e-6 * c_all);
+        // Between the hard cut at d and at 2 d (the band's two ends).
+        CHECK(closed >= environment::rock_cover(m, 0.0, d) - 1e-15);
+        CHECK(closed <= environment::rock_cover(m, 0.0, 2.0 * d) + 1e-15);
+    }
+    // Continuous and monotone in the threshold (1 % steps from 5 mm to 30 m).
+    double previous = environment::rock_statistical_cover(m, 0.005);
+    for (double d = 0.005 * 1.01; d < 30.0; d *= 1.01) {
+        const double c = environment::rock_statistical_cover(m, d);
+        CHECK(c >= previous);
+        CHECK(c - previous < 0.003 * c_all);
+        previous = c;
+    }
+    // Drawn rocks (mean radiance rho G1 G / N per plan area) on the visible ground exp(-C_g) plus that ground's factors
+    // give the all-statistical mean exactly: Sun (their shadows statistical) and earthshine.
+    for (const double abundance : {1.0, 6.0}) {
+        for (const double d : {0.01, 0.04, 0.3, 3.0}) {
+            for (const double e_deg : {3.0, 7.0, 30.0}) {
+                const double e = e_deg * deg;
+                const auto all = environment::unresolved_light_factors(m, abundance, inf, 0.02, 20.0, e);
+                const auto ground = environment::unresolved_light_factors(m, abundance, d, 0.02, 20.0, e);
+                const double c_g = abundance * (c_all - environment::rock_statistical_cover(m, d));
+                const double norm = std::exp(-abundance * c_all) + (1.0 - std::exp(-abundance * c_all)) * m.rock_reflectance_ratio;
+                const double lit = environment::smith_lit_fraction(std::tan(e), environment::unshadowed_slope_variance(m, 0.02, 20.0));
+                const double rock_sun = lit * m.rock_reflectance_ratio * environment::rock_lit_gain_table(m, e) / norm;
+                const double rock_earth = m.rock_reflectance_ratio / norm;
+                CHECK(std::abs(std::exp(-c_g) * ground.sun + (1.0 - std::exp(-c_g)) * rock_sun - all.sun) < 1e-12);
+                CHECK(std::abs(std::exp(-c_g) * ground.earth + (1.0 - std::exp(-c_g)) * rock_earth - all.earth) < 1e-12);
+            }
+        }
+    }
+    // With the drawn rocks' own shadows (Task 12's shadow map) the ground loses only the statistical rocks' shadows.
+    const auto own = environment::unresolved_light_factors(m, 1.0, 0.04, 0.02, 20.0, 7.0 * deg, false);
+    const auto stat = environment::unresolved_light_factors(m, 1.0, 0.04, 0.02, 20.0, 7.0 * deg, true);
+    CHECK(own.sun > stat.sun);
+    CHECK(own.earth == stat.earth);
+}
+
 TEST_CASE("Shipped model: rock shape and reflectance ratio", "[moon_surface][unresolved_shading]") {
     const auto& m = shared_model();
     const auto& cfg = shared_detail()->config();

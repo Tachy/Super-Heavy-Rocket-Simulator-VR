@@ -423,13 +423,38 @@ double rock_lit_gain_table(const UnresolvedShadingModel& m, double elevation_rad
     return m.rock_lit_gain[static_cast<size_t>(k)] * (1.0 - f) + m.rock_lit_gain[static_cast<size_t>(k) + 1] * f;
 }
 
+double rock_statistical_cover(const UnresolvedShadingModel& m, double geometry_min_diameter_m) {
+    const double d = geometry_min_diameter_m;
+    double cover = rock_cover(m, m.rock_min_diameter_m, d);
+    if (!(d < m.rock_max_diameter_m) || m.rock_cover_coefficient == 0.0 || !(d > 0.0)) return cover;
+    // Band [d, 2 d] clipped to the law, in x = log2(D / d): dC/dx = coef q ln2 d^q e^(k x), k = q ln2, weight 1 - x.
+    const double x0 = std::max(0.0, std::log2(m.rock_min_diameter_m / d));
+    const double x1 = std::min(1.0, std::log2(m.rock_max_diameter_m / d));
+    if (x1 <= x0) return cover;
+    const double q = m.rock_cover_exponent;
+    const double ln2 = std::log(2.0);
+    const double k = q * ln2;
+    // Integral of (1 - x) e^(k x) over [x0, x1].
+    double integral;
+    if (std::abs(k) < 1e-9) {
+        integral = (x1 - 0.5 * x1 * x1) - (x0 - 0.5 * x0 * x0);
+    } else {
+        const auto antiderivative = [k](double x) { return std::exp(k * x) * ((1.0 - x) / k + 1.0 / (k * k)); };
+        integral = antiderivative(x1) - antiderivative(x0);
+    }
+    cover += m.rock_cover_coefficient * q * ln2 * std::pow(d, q) * integral;
+    return cover;
+}
+
 UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m, double abundance,
                                                 double geometry_min_diameter_m, double spacing_m,
-                                                double horizon_spacing_m, double sun_elevation_rad) {
+                                                double horizon_spacing_m, double sun_elevation_rad,
+                                                bool geometry_shadows_statistical) {
     UnresolvedLightFactors out;
     const double rho = m.rock_reflectance_ratio;
     const double c_all = abundance * rock_cover(m, m.rock_min_diameter_m, m.rock_max_diameter_m);
-    const double c = abundance * rock_cover(m, m.rock_min_diameter_m, geometry_min_diameter_m);
+    const double c = abundance * rock_statistical_cover(m, geometry_min_diameter_m);
+    const double c_drawn = geometry_shadows_statistical ? std::max(c_all - c, 0.0) : 0.0;
     const double norm = std::exp(-c_all) + (1.0 - std::exp(-c_all)) * rho;
     const double rock_share = 1.0 - std::exp(-c);
     out.earth = (std::exp(-c) + rock_share * rho) / norm;
@@ -441,7 +466,7 @@ UnresolvedLightFactors unresolved_light_factors(const UnresolvedShadingModel& m,
     const double lit = smith_lit_fraction(std::tan(sun_elevation_rad),
                                           unshadowed_slope_variance(m, spacing_m, horizon_spacing_m));
     const double sigma = rock_shadow_per_cover(m.rock_exposed_height_per_diameter, se);
-    out.sun = lit * (std::exp(-c * (1.0 + sigma)) + rock_share * rho * rock_lit_gain_table(m, sun_elevation_rad)) / norm;
+    out.sun = lit * (std::exp(-c * (1.0 + sigma) - c_drawn * sigma) + rock_share * rho * rock_lit_gain_table(m, sun_elevation_rad)) / norm;
     return out;
 }
 

@@ -65,8 +65,11 @@ static func level_spacing_m(level: int, radius_m: float) -> float:
 ## level's heights at this node's even lattice points are read from it instead of sampled (the same lattice points,
 ## exactly: lattice_coordinate is dyadic, so the child's line 2 n - 2 is the parent's line q * 32 + n - 1 bit for bit,
 ## and the band limit is the parent's spacing). Empty: sampled (a second core batch).
+## rock_layer: the Moon's drawn rocks (MoonRockLayer, Task 11; null: none): the node's rock list, built here on the
+## worker ("rocks" in the result, MoonRockLayer.build_node).
 static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, radius_m: float,
-		horizon_owner := Vector4i(-1, -1, -1, -1), parent_band := PackedFloat64Array()) -> Dictionary:
+		horizon_owner := Vector4i(-1, -1, -1, -1), parent_band := PackedFloat64Array(),
+		rock_layer: MoonRockLayer = null) -> Dictionary:
 	var face := key.x
 	var level := key.y
 	var box := CubeSphere.lat_lon_box(key)
@@ -308,6 +311,8 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		# With procedural detail the node's band-limited lattice heights (LATTICE x LATTICE, float64): its children's
 		# parent_band. Empty without detail.
 		"band_heights": height_m if band_limited else PackedFloat64Array(),
+		# The drawn rocks' list (MoonRockLayer.build_node; {} without a rock layer).
+		"rocks": rock_layer.build_node(key, center_fixed, radius_m) if rock_layer != null else {},
 	}
 
 

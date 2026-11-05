@@ -8,6 +8,13 @@
 #          [--moon_detail=off] (the fidelity flag moon_surface_detail off: the LOLA-only Moon as before the detail)
 #          [--moon_brdf=lommel_seeliger] (the game setting World.moon_brdf: the former Moon BRDF instead of Hapke)
 #          [--moon_detail_shading=off] (detail on, but no regolith textures / unresolved statistics: Task 9's shading)
+#          [--rocks=off] (no rock geometry: every rock in the statistical layer, MoonRockLayer.geometry_enabled)
+#          [--rock_budget=off] (rock_threshold_scale held at --rock_scale=<f>, default 1; --deterministic implies it)
+#          [--rock_scale_sweep=<from>,<to>,<frames>] (once settled: rock_threshold_scale stepped per frame, the camera
+#          held; with --out each frame saved as <out>_sweep<frame>.png - the rocks' popping check)
+#          [--approach=<from m>,<to m>,<steps>] (after the first settle the eye moves toward the --lat / --lon point
+#          along the view azimuth, at --eye_height, distances geometric from..to; each step waits for the settled
+#          terrain and with --out saves <out>_approach<step>.png; the log prints each step's distance)
 #          [--moon_diag=1] (terrain_moon.gdshader diag_mode: 1 tints red the fragments whose interpolated normal faces
 #          away from the eye). The log's "Moon load" line: the deepest drawn level's wall-time timeline since the view
 #          was placed (or the last climb move) and the time until the terrain settled.
@@ -42,6 +49,7 @@
 # Tower lamps: on as in the game (between civil dusk and dawn); --no_tower_lights leaves them out (day comparison).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
+#          --azimuth_from_sun=<deg> aims a ground view that far clockwise from the Sun's azimuth (180: down-Sun) at --elevation.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
 #          optical depth (liquid = tau / 150 000 kg/m^3: beta = 150 LWC) and the view aimed at the Sun (static clouds Task 9).
 # GPU time: --gpu_time[=120] once settled, the root viewport's measured GPU render time over that many frames (median,
@@ -87,6 +95,11 @@ var _climb_move_frame := 0  ## --climb: the frame of the last move
 var _climb_bakes := 0  ## --climb: CloudBaked.bakes_done at the last move
 var _climb_failed := false
 var _climb_finished := false  ## --climb: every step done (the image may take a few more frames)
+var _approach_next := 0  ## --approach: the next step (0: none moved yet)
+var _approach_move_frame := 0
+var _approach_finished := false
+var _sweep_frame := -1  ## --rock_scale_sweep: the next frame (-1: not started)
+var _approach_target := {}  ## --approach: the ground site of the first placement (the target point)
 var _stereo: StereoMockXr  ## --stereo: the stand-in headset
 var _stereo_capture_frames := 0
 var _main: Node
@@ -123,6 +136,8 @@ func _initialize() -> void:
 	World.moon_surface_detail = _args.get("moon_detail", "on") != "off"  # read at the Moon terrain's setup
 	World.moon_brdf = String(_args.get("moon_brdf", "hapke"))  # read in World._ready
 	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
+	MoonRockLayer.geometry_enabled = _args.get("rocks", "on") != "off"
+	MoonRockLayer.budget_enabled = _args.get("rock_budget", "on") != "off" and not _args.has("deterministic")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
@@ -243,6 +258,10 @@ func _process(_delta: float) -> bool:
 		if _args.has("fov"): cam.fov = float(_args["fov"])
 		if _args.has("look_at_sun"):
 			_aim_at_sun(world)
+		if _args.has("azimuth_from_sun"):  # the view azimuth relative to the Sun's (deg; 180: down-Sun), --elevation kept
+			_aim_at_sun(world)
+			world.camera.azimuth += deg_to_rad(float(_args["azimuth_from_sun"]))
+			world.camera.elevation = deg_to_rad(float(_args.get("elevation", "0")))
 		if _args.has("look_at_moon"):
 			_aim_at_moon(world)
 		if _args.has("view_from"):
@@ -275,6 +294,8 @@ func _process(_delta: float) -> bool:
 			for child in _main.get_node("/root/XrManager").origin.get_children():
 				if child is VrOverlayPanel:
 					child.visible = false
+		if _args.has("rock_scale") and world.moon_rocks != null:
+			world.moon_rocks.threshold_scale = float(_args["rock_scale"])
 		if _args.has("moon_diag"):  # terrain_moon.gdshader diagnostic tint (diag_mode; 1: normals facing away)
 			world.moon_terrain.set_material_parameter("diag_mode", int(_args["moon_diag"]))
 		_load_restart()
@@ -296,6 +317,10 @@ func _process(_delta: float) -> bool:
 			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES)
 	if _args.has("climb") and (settled or _climb_next > 0) and not _climb_done(world, settled):
 		return false
+	if _args.has("approach") and (settled or _approach_next > 0) and not _approach_done(world, settled):
+		return false
+	if _args.has("rock_scale_sweep") and settled and not _rock_sweep_done(world):
+		return false
 	if settled:
 		if _args.has("deterministic"):
 			if _deterministic_left < 0:  # the same number of frames from here in every run
@@ -315,6 +340,9 @@ func _process(_delta: float) -> bool:
 		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
 				world.moon_terrain.stats])
 		print("render_check: Moon load ", _load_summary())
+		if world.moon_rocks != null:
+			print("render_check: Moon rocks %s, threshold scale %.3f, pixel angle %.7f rad" % [world.moon_rocks.stats,
+					world.moon_rocks.threshold_scale, world.moon_rocks.pixel_angle_rad])
 		if _args.has("webcast"):
 			var arc := (_main.get("overlay_host") as OverlayHost).overlay.timeline_arc
 			print("render_check: timeline scale ", arc.time_scale, " now ", arc.now_tdb_s, " events ", arc.events.size())
@@ -483,6 +511,74 @@ func _climb_done(world: World, settled: bool) -> bool:
 		return false
 	_climb_finished = true
 	return true
+
+
+## --approach: like --climb, the eye moved toward the first placement's ground point along the view azimuth (a
+## horizontal approach at the eye height), one step per settled view. True once every step is done.
+func _approach_done(world: World, settled: bool) -> bool:
+	if _approach_finished:
+		return true
+	var spec: PackedFloat64Array = String(_args["approach"]).split_floats(",", false)
+	var steps := maxi(int(spec[2]), 2)
+	if _approach_next > 0:
+		if not settled:
+			if _frames - _approach_move_frame > CLIMB_MAX_FRAMES:
+				print("render_check: approach FAIL: step %d did not settle within %d frames" % [_approach_next, CLIMB_MAX_FRAMES])
+				quit(1)
+			return false
+		var rocks := world.moon_rocks
+		print("render_check: approach step %d at %.3f m: %d frames, Moon %s, rocks %s, threshold scale %.3f" % [
+				_approach_next, _approach_distance(spec, steps, _approach_next - 1), _frames - _approach_move_frame,
+				world.moon_terrain.stats, rocks.stats if rocks != null else {}, rocks.threshold_scale if rocks != null else 0.0])
+		if _args.has("out"):
+			var step_png := "%s_approach%03d.png" % [String(_args["out"]).get_basename(), _approach_next - 1]
+			print("render_check: saved %s (error %d)" % [step_png,
+					root.get_viewport().get_texture().get_image().save_png(step_png)])
+	if _approach_next == 0:
+		_approach_target = world.ground_site.duplicate()
+	if _approach_next < steps:
+		var site: Dictionary = _approach_target.duplicate()
+		var r := _approach_distance(spec, steps, _approach_next)
+		var azimuth := world.camera.azimuth
+		var lat := float(site["latitude_deg"])
+		var radius := World.MOON_RADIUS_M if site.get("body", "earth") == "moon" else 6371000.0
+		lat -= rad_to_deg(r * cos(azimuth) / radius)
+		var lon := float(site["longitude_deg"]) - rad_to_deg(r * sin(azimuth) / (radius * cos(deg_to_rad(lat))))
+		var samples: Dictionary = world.core.surface_samples_detail(String(site.get("body", "earth")),
+				PackedFloat64Array([lat]), PackedFloat64Array([lon]), 0.0, INF)
+		site["latitude_deg"] = lat
+		site["longitude_deg"] = lon
+		if bool(samples["present"]):
+			site["height_m"] = (samples["height_m"] as PackedFloat64Array)[0]
+		world.set_ground_site(site)
+		world.camera.azimuth = azimuth
+		_approach_move_frame = _frames
+		_load_restart()
+		_approach_next += 1
+		return false
+	_approach_finished = true
+	return true
+
+
+## --rock_scale_sweep=<from>,<to>,<frames>: the camera held, rock_threshold_scale stepped geometrically from..to, one
+## step per frame, each frame saved as <out>_sweep<frame>.png (the popping check: only the rocks change). True when done.
+func _rock_sweep_done(world: World) -> bool:
+	var spec: PackedFloat64Array = String(_args["rock_scale_sweep"]).split_floats(",", false)
+	var frames := maxi(int(spec[2]), 2)
+	if _sweep_frame >= frames:
+		return true
+	if _sweep_frame >= 0 and _args.has("out"):
+		root.get_viewport().get_texture().get_image().save_png("%s_sweep%03d.png" % [String(_args["out"]).get_basename(),
+				_sweep_frame])
+	_sweep_frame += 1
+	if _sweep_frame < frames and world.moon_rocks != null:
+		world.moon_rocks.threshold_scale = spec[0] * pow(spec[1] / spec[0], float(_sweep_frame) / float(frames - 1))
+	return _sweep_frame >= frames
+
+
+## --approach: the eye's distance (m) from the target at a step (geometric from..to).
+static func _approach_distance(spec: PackedFloat64Array, steps: int, step: int) -> float:
+	return spec[0] * pow(spec[1] / spec[0], float(step) / float(steps - 1))
 
 
 ## Restarts the Moon load timeline (the view placed or moved).

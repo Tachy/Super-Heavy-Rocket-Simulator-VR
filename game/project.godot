@@ -66,6 +66,18 @@ moon_hapke_opposition={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+moon_rock_pixel_angle={
+"type": "float",
+"value": 0.001
+}
+moon_rock_threshold_px={
+"type": "float",
+"value": 0.0
+}
+moon_world_to_local={
+"type": "mat3",
+"value": Basis(1, 0, 0, 0, 1, 0, 0, 0, 1)
+}
 moon_hapke_theta_bar_rad={
 "type": "float",
 "value": 0.0

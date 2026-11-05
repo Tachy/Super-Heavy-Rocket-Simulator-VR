@@ -190,6 +190,35 @@ std::vector<Rock> LunarRocks::rocks_in_cell(const FaceCell& cell, double min_dia
     return out;
 }
 
+std::vector<Rock> LunarRocks::rocks_in_region(const FaceCell& region, double min_diameter_m) const {
+    std::vector<Rock> out;
+    for (size_t k = 0; k < octaves_.size(); ++k) {
+        const Octave& o = octaves_[k];
+        if (o.max_diameter_m <= min_diameter_m) continue;
+        if (o.level >= region.level) {
+            const int shift = o.level - region.level;
+            if (shift > max_region_descent) {
+                throw std::invalid_argument("LunarRocks::rocks_in_region: zu viele Zellen (Mindestdurchmesser zu klein)");
+            }
+            const std::int64_t n = std::int64_t{1} << shift;
+            for (std::int64_t j = region.j * n; j < (region.j + 1) * n; ++j) {
+                for (std::int64_t i = region.i * n; i < (region.i + 1) * n; ++i) {
+                    collect(static_cast<int>(k), FaceCell{region.face, o.level, i, j}, min_diameter_m, nullptr, out);
+                }
+            }
+        } else {
+            const int shift = region.level - o.level;
+            std::vector<Rock> coarse;
+            collect(static_cast<int>(k), FaceCell{region.face, o.level, region.i >> shift, region.j >> shift},
+                    min_diameter_m, nullptr, coarse);
+            for (const Rock& r : coarse) {
+                if (face_cell_of(r.base_unit, region.level) == region) out.push_back(r);
+            }
+        }
+    }
+    return out;
+}
+
 std::vector<Rock> LunarRocks::rocks_near(const Vec3& unit, double radius_m, double min_diameter_m) const {
     std::vector<Rock> out;
     const Filter filter{unit, radius_m, false};

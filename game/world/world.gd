@@ -41,6 +41,8 @@ var towers: Array[TowerView] = []  ## catch towers of the launch sites
 var drone_ship: DroneShipView = null  ## the drone ship of the flight's landing zone (while it has a deck)
 var moon := CelestialBody.new()
 var moon_terrain := TerrainQuadtree.new()  ## streamed lunar surface (LDEM_16 + site tiles) while not in scaled space
+## The Moon's rocks drawn by projected size (Task 11; with the detail shading on, else null).
+var moon_rocks: MoonRockLayer = null
 ## Fidelity flag moon_surface_detail for the world created next (read at the Moon terrain's setup; the core and the
 ## flight follow it): off draws the LOLA-only surface as before the procedural detail (render_check --moon_detail=off).
 static var moon_surface_detail := true
@@ -300,7 +302,10 @@ func update_world() -> void:
 	earth.body_mesh_visible = not earth_terrain.active
 	FrameProfiler.begin(&"moon")
 	moon.place(cam)
-	moon_terrain.update_for_camera(moon.fixed_to_gcrf.transposed() * (cam - moon_gcrf_m), _delta)
+	var camera_moon_fixed := moon.fixed_to_gcrf.transposed() * (cam - moon_gcrf_m)
+	moon_terrain.update_for_camera(camera_moon_fixed, _delta)
+	if moon_rocks != null:
+		moon_rocks.update(get_viewport(), moon_terrain.global_basis, _delta, camera_moon_fixed)
 	FrameProfiler.end(&"moon")
 	moon.body_mesh_visible = not moon_terrain.active
 	FrameProfiler.begin(&"shader_globals")
@@ -821,6 +826,9 @@ func _setup_moon_terrain() -> void:
 		var tiles: Array = detail["tiles"]
 		moon_terrain.node_parameters = func(key: Vector4i, owner: Vector4i) -> Dictionary:
 			return MoonDetailShading.node_parameters(key, owner, MOON_RADIUS_M, tiles)
+		# Rocks drawn by projected size (the statistical layer above takes the rest).
+		moon_rocks = MoonRockLayer.new(core, material)
+		moon_terrain.rock_layer = moon_rocks
 	moon_terrain.name = "MoonTerrain"
 	moon_terrain.camera_global = "moon_terrain_camera"  # project.godot [shader_globals], read by terrain_moon.gdshader
 	moon.add_child(moon_terrain)

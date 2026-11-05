@@ -412,43 +412,38 @@ godot::Dictionary StarsimCore::surface_samples_detail(const godot::String& body,
     return result;
 }
 
-godot::Dictionary StarsimCore::moon_rocks(int face, int level, int64_t i, int64_t j, double min_diameter_m) const {
+namespace {
+
+// Packs rocks into the moon_rocks dictionary (header comment of StarsimCore::moon_rocks).
+godot::Dictionary rock_dictionary(const std::vector<environment::Rock>& rocks, double radius_m) {
     godot::PackedInt64Array ids;
     godot::PackedFloat64Array base, basis, axes, diameter, burial, base_height, albedo;
     godot::PackedInt32Array templates;
-    // Out-of-range cells (and a NaN size) give an empty result; the rock layer may be absent (no Diviner map).
-    const bool cell_ok = face >= 0 && face < 6 && level >= 0 && level <= environment::max_face_cell_level && i >= 0 &&
-                         j >= 0 && i < (int64_t{1} << level) && j < (int64_t{1} << level) && !std::isnan(min_diameter_m);
-    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && moon_surface_->rocks_on() &&
-        moon_surface_->rocks_shared() != nullptr && cell_ok) {
-        const double radius_m = moon_surface_->detail().sphere_radius_m();
-        const auto rocks = moon_surface_->rocks().rocks_in_cell({face, level, i, j}, min_diameter_m);
-        const auto count = static_cast<int64_t>(rocks.size());
-        ids.resize(count);
-        base.resize(3 * count);
-        basis.resize(9 * count);
-        axes.resize(3 * count);
-        diameter.resize(count);
-        burial.resize(count);
-        base_height.resize(count);
-        albedo.resize(count);
-        templates.resize(count);
-        for (int64_t k = 0; k < count; ++k) {
-            const auto& r = rocks[static_cast<size_t>(k)];
-            ids[k] = static_cast<int64_t>(r.id);
-            const math::Vec3 p = r.base_unit * (radius_m + r.base_height_m);
-            base[3 * k] = p.x, base[3 * k + 1] = p.y, base[3 * k + 2] = p.z;
-            for (int c = 0; c < 3; ++c) {
-                const math::Vec3 axis = math::column(r.local_to_fixed, c);
-                basis[9 * k + 3 * c] = axis.x, basis[9 * k + 3 * c + 1] = axis.y, basis[9 * k + 3 * c + 2] = axis.z;
-            }
-            axes[3 * k] = r.axes_m.x, axes[3 * k + 1] = r.axes_m.y, axes[3 * k + 2] = r.axes_m.z;
-            diameter[k] = r.diameter_m;
-            burial[k] = r.burial_m;
-            base_height[k] = r.base_height_m;
-            albedo[k] = r.albedo_factor;
-            templates[k] = r.template_id;
+    const auto count = static_cast<int64_t>(rocks.size());
+    ids.resize(count);
+    base.resize(3 * count);
+    basis.resize(9 * count);
+    axes.resize(3 * count);
+    diameter.resize(count);
+    burial.resize(count);
+    base_height.resize(count);
+    albedo.resize(count);
+    templates.resize(count);
+    for (int64_t k = 0; k < count; ++k) {
+        const auto& r = rocks[static_cast<size_t>(k)];
+        ids[k] = static_cast<int64_t>(r.id);
+        const math::Vec3 p = r.base_unit * (radius_m + r.base_height_m);
+        base[3 * k] = p.x, base[3 * k + 1] = p.y, base[3 * k + 2] = p.z;
+        for (int c = 0; c < 3; ++c) {
+            const math::Vec3 axis = math::column(r.local_to_fixed, c);
+            basis[9 * k + 3 * c] = axis.x, basis[9 * k + 3 * c + 1] = axis.y, basis[9 * k + 3 * c + 2] = axis.z;
         }
+        axes[3 * k] = r.axes_m.x, axes[3 * k + 1] = r.axes_m.y, axes[3 * k + 2] = r.axes_m.z;
+        diameter[k] = r.diameter_m;
+        burial[k] = r.burial_m;
+        base_height[k] = r.base_height_m;
+        albedo[k] = r.albedo_factor;
+        templates[k] = r.template_id;
     }
     godot::Dictionary result;
     result["ids"] = ids;
@@ -460,6 +455,48 @@ godot::Dictionary StarsimCore::moon_rocks(int face, int level, int64_t i, int64_
     result["base_height_m"] = base_height;
     result["albedo"] = albedo;
     result["template"] = templates;
+    return result;
+}
+
+bool face_cell_ok(int face, int level, int64_t i, int64_t j, double min_diameter_m) {
+    return face >= 0 && face < 6 && level >= 0 && level <= environment::max_face_cell_level && i >= 0 && j >= 0 &&
+           i < (int64_t{1} << level) && j < (int64_t{1} << level) && !std::isnan(min_diameter_m);
+}
+
+}  // namespace
+
+godot::Dictionary StarsimCore::moon_rocks(int face, int level, int64_t i, int64_t j, double min_diameter_m) const {
+    // Out-of-range cells (and a NaN size) give an empty result; the rock layer may be absent (no Diviner map).
+    std::vector<environment::Rock> rocks;
+    double radius_m = 0.0;
+    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && moon_surface_->rocks_on() &&
+        moon_surface_->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
+        radius_m = moon_surface_->detail().sphere_radius_m();
+        rocks = moon_surface_->rocks().rocks_in_cell({face, level, i, j}, min_diameter_m);
+    }
+    return rock_dictionary(rocks, radius_m);
+}
+
+godot::Dictionary StarsimCore::moon_rocks_in_node(int face, int level, int64_t i, int64_t j,
+                                                  double min_diameter_m) const {
+    std::vector<environment::Rock> rocks;
+    double radius_m = 0.0;
+    godot::String error;
+    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && moon_surface_->rocks_on() &&
+        moon_surface_->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
+        radius_m = moon_surface_->detail().sphere_radius_m();
+        try {
+            rocks = moon_surface_->rocks().rocks_in_region({face, level, i, j}, min_diameter_m);
+            // Largest first (ties by id): the renderer draws a prefix of each list (MoonRockLayer visible counts).
+            std::sort(rocks.begin(), rocks.end(), [](const environment::Rock& a, const environment::Rock& b) {
+                return a.diameter_m != b.diameter_m ? a.diameter_m > b.diameter_m : a.id < b.id;
+            });
+        } catch (const std::exception& e) {
+            error = godot::String::utf8(e.what());
+        }
+    }
+    godot::Dictionary result = rock_dictionary(rocks, radius_m);
+    if (!error.is_empty()) result["error"] = error;
     return result;
 }
 
@@ -1418,6 +1455,8 @@ void StarsimCore::_bind_methods() {
                                   "min_wavelength_m", "min_rock_diameter_m"),
                          &StarsimCore::surface_samples_detail);
     ClassDB::bind_method(D_METHOD("moon_rocks", "face", "level", "i", "j", "min_diameter_m"), &StarsimCore::moon_rocks);
+    ClassDB::bind_method(D_METHOD("moon_rocks_in_node", "face", "level", "i", "j", "min_diameter_m"),
+                         &StarsimCore::moon_rocks_in_node);
     ClassDB::bind_method(D_METHOD("rock_template_mesh", "id", "lod"), &StarsimCore::rock_template_mesh);
     ClassDB::bind_method(D_METHOD("moon_surface_statistics"), &StarsimCore::moon_surface_statistics);
     ClassDB::bind_method(D_METHOD("load_moon_hapke", "config_dir"), &StarsimCore::load_moon_hapke);

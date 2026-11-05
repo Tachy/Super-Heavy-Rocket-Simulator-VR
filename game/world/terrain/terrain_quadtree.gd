@@ -65,11 +65,15 @@ var camera_global := ""
 ## Per-node material uniforms beyond the built mesh (the Moon's detail shading, MoonDetailShading.node_parameters):
 ## (key, horizon_owner) -> {uniform: value}; unset: none.
 var node_parameters := Callable()
+## The Moon's drawn rocks (Task 11): built with each node on its worker, attached at the upload, detached at the
+## release; null: none.
+var rock_layer: MoonRockLayer = null
 ## {nodes_drawn, nodes_loading, uploads_last_frame, update_ms (main-thread time of the last update), builds (node builds
 ## collected so far), build_ms (their summed worker time), horizon_bakes (builds that baked a horizon map),
-## max_drawn_level (the deepest drawn leaf's level: the one under the camera)}
+## max_drawn_level (the deepest drawn leaf's level: the one under the camera), phase_ms (the last update's main-thread
+## time per phase: upload, select, free, dispatch, visibility, release)}
 var stats := {"nodes_drawn": 0, "nodes_loading": 0, "uploads_last_frame": 0, "update_ms": 0.0, "builds": 0,
-		"build_ms": 0.0, "horizon_bakes": 0, "max_drawn_level": 0}
+		"build_ms": 0.0, "horizon_bakes": 0, "max_drawn_level": 0, "phase_ms": {}}
 var height_source: HeightSource
 var imagery: ImagerySource
 var radius_m := 1.0
@@ -155,7 +159,8 @@ func setup(heights: HeightSource, imagery_source: ImagerySource, body_radius_m: 
 		for j in 1 << ROOT_LEVEL:
 			for i in 1 << ROOT_LEVEL:
 				var key := Vector4i(face, ROOT_LEVEL, i, j)
-				var result := _build(key, height_source, imagery, radius_m)
+				var result := _build(key, height_source, imagery, radius_m, Vector4i(-1, -1, -1, -1),
+						PackedFloat64Array(), rock_layer)
 				_count_build(result)
 				_upload(result)
 				_roots.append(_nodes[key])
@@ -225,8 +230,10 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 		var camera_render := split_float32(Frames.to_render(camera_fixed_m))
 		ShaderGlobals.set_value(_camera_hi_name, camera_render[0])
 		ShaderGlobals.set_value(_camera_lo_name, camera_render[1])
+	var t0 := Time.get_ticks_usec()
 	_collect_builds()
 	_upload_finished()
+	var t1 := Time.get_ticks_usec()
 	_frame += 1
 	_reached_count = 0
 	_wanted.clear()
@@ -244,11 +251,18 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 		else:
 			_draw_leaf(node)
 	_reached_count += _roots.size()
+	var t2 := Time.get_ticks_usec()
 	if _reached_count < _nodes.size():
 		_free_unreached()
+	var t3 := Time.get_ticks_usec()
 	_dispatch()
+	var t4 := Time.get_ticks_usec()
 	_update_visibility(delta_s)
+	var t5 := Time.get_ticks_usec()
 	_release_some()
+	var t6 := Time.get_ticks_usec()
+	stats["phase_ms"] = {"upload": (t1 - t0) * 1.0e-3, "select": (t2 - t1) * 1.0e-3, "free": (t3 - t2) * 1.0e-3,
+			"dispatch": (t4 - t3) * 1.0e-3, "visibility": (t5 - t4) * 1.0e-3, "release": (t6 - t5) * 1.0e-3}
 	stats["nodes_drawn"] = _drawn.size()
 	if _selection_changed:
 		var deepest := 0
@@ -433,6 +447,8 @@ func _release_some() -> void:
 		if released >= RELEASE_MIN_PER_FRAME and Time.get_ticks_usec() - start_us >= RELEASE_BUDGET_MS * 1000.0:
 			break
 		var node: _Node = _releasing.pop_back()
+		if rock_layer != null:
+			rock_layer.detach(node.instance)
 		node.instance.mesh = null
 		node.instance.material_override = null
 		if _pool.size() < POOL_MAX:
@@ -482,17 +498,17 @@ func _dispatch() -> void:
 		var parent_band: PackedFloat64Array = request[1]
 		_pending.erase(key)
 		if synchronous:
-			_finished[key] = _build(key, height_source, imagery, radius_m, owner, parent_band)
+			_finished[key] = _build(key, height_source, imagery, radius_m, owner, parent_band, rock_layer)
 			_count_build(_finished[key])
 		else:
 			_in_flight[key] = WorkerThreadPool.add_task(_build_task.bind(key, height_source, imagery, radius_m, owner,
-					parent_band), _detail, "terrain node")
+					parent_band, rock_layer), _detail, "terrain node")
 
 
 ## Worker task: builds one node and stores the result for the main thread.
 func _build_task(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource, body_radius_m: float,
-		horizon_owner: Vector4i, parent_band: PackedFloat64Array) -> void:
-	var result := _build(key, heights, imagery_source, body_radius_m, horizon_owner, parent_band)
+		horizon_owner: Vector4i, parent_band: PackedFloat64Array, rocks: MoonRockLayer) -> void:
+	var result := _build(key, heights, imagery_source, body_radius_m, horizon_owner, parent_band, rocks)
 	_results_mutex.lock()
 	_results[key] = result
 	_results_mutex.unlock()
@@ -501,9 +517,10 @@ func _build_task(key: Vector4i, heights: HeightSource, imagery_source: ImagerySo
 ## TerrainNodeBuilder.build plus the node's bounding radius and its build time (build_ms; thread-safe, pure data).
 static func _build(key: Vector4i, heights: HeightSource, imagery_source: ImagerySource,
 		body_radius_m: float, horizon_owner := Vector4i(-1, -1, -1, -1),
-		parent_band := PackedFloat64Array()) -> Dictionary:
+		parent_band := PackedFloat64Array(), rocks: MoonRockLayer = null) -> Dictionary:
 	var start_us := Time.get_ticks_usec()
-	var result := TerrainNodeBuilder.build(key, heights, imagery_source, body_radius_m, horizon_owner, parent_band)
+	var result := TerrainNodeBuilder.build(key, heights, imagery_source, body_radius_m, horizon_owner, parent_band,
+			rocks)
 	var radius_sq := 0.0
 	for v: Vector3 in result["vertices"]:
 		radius_sq = maxf(radius_sq, v.length_squared())
@@ -657,6 +674,8 @@ func _upload(result: Dictionary) -> void:
 	node.instance.set_instance_shader_parameter(&"morph_start_m", node.morph_range_m.x)
 	node.instance.set_instance_shader_parameter(&"morph_end_m", node.morph_range_m.y)
 	node.instance.set_instance_shader_parameter(&"morph_floor", 0.0)
+	if rock_layer != null:
+		rock_layer.attach(node.instance, result.get("rocks", {}), material)
 	node.instance.visible = false
 	_nodes[key] = node
 
