@@ -308,7 +308,7 @@ on top of that relief.
 - `core/include/starsim/environment/hapke.hpp`, `core/src/environment/hapke.cpp`: `hapke_reflectance`, `hapke_h_function`
   (`HapkeHFunction` 2002 | 1981), `hapke_phase_function`, `hapke_roughness`, `hapke_disc_reflectance`,
   `disc_integrated_reflectance` (Task 9). Bindings `load_moon_hapke`, `moon_hapke_reflectance`,
-  `moon_hapke_disc_reflectance`; `game/shaders/moon_hapke.gdshaderinc`, `game/tests/hapke_patch.gdshader`.
+  `moon_hapke_disc_reflectance`; `game/shaders/moon_hapke.gdshaderinc`, `game/tests/hapke_patch.gdshader`, `game/tests/hapke_patch_production.gdshader`.
 - `tools/moon_textures/bake_moon_detail.py`, `test_bake_moon_detail.py`, `contact_sheet.py` (Task 8).
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
@@ -508,16 +508,25 @@ on top of that relief.
     643 nm is brighter than ROLO's whole near side incl. maria), shape residual about it at most 0.056 mag (12 deg; gate
     0.1 mag), Hapke slightly flatter (+0.055 at 5-10 deg, -0.054 at 97 deg). Against K&S 1991 Eq. 9 (5-120 deg) the
     shape residual reaches 0.130 mag (informative; K&S is the older V-band summary);
-  - full Moon: Hapke x 5.420 against the former globe at phase 0 within 3 % (1.0000: the normalisation point, here
-    re-integrated independently); printed: ratio 0.984 / 0.973 / 0.962 / 0.964 / 0.995 / 1.058 / 1.029 at 0.5 / 1 / 2 /
+  - normalisation identity (Ruling T9 I1; not an independent physics check, the gain is defined at this point): Hapke x
+    5.420 against the former globe at phase 0 within 3 % (1.0000, re-integrated independently: checks integrator and
+    wiring); at the realistic full-Moon phases 1.5 / 2 / 3 / 5 deg within 5 % (0.96-0.995, accepted: it moves toward
+    ROLO; the ROLO phase curve above carries the physics); printed: ratio 0.984 / 0.973 / 0.962 / 0.964 / 0.995 / 1.058 / 1.029 at 0.5 / 1 / 2 /
     3 / 5 / 7 / 10 deg (Hapke's surge falls off between K&S's linear surge and ROLO's steeper one: disc at 2 deg / 0 deg
-    = 0.849 Hapke, 0.883 K&S, 0.834 ROLO).
+    = 0.849 Hapke, 0.883 K&S, 0.834 ROLO, the last extrapolated below its 1.55 deg validity).
+  - CBOE and porosity K (Fix round 1; not in the shipped set, B_C0 = 0 and K = 1, and not in the ISIS truths):
+    r x (1 + B_C0 B_C) against an independently written B_C(g) at five phases (1e-12), B_C(0) = 1, the effect off at
+    B_C0 = 0; K = 1.2 against the smooth closed form with H(mu/K) (1e-12), linear in K as w -> 0, reciprocity with K.
 - Game (Task 9): `moon_surface_check.gd` - the eye adaptation's mirror (`Atmosphere.regolith_reflectance`, through the
   core) integrated over the disc: Hapke / Lommel-Seeliger 1.0000 at phase 0 (gate 3 %), 0.962 / 0.995 / 1.029 / 1.055 /
   1.134 / 1.188 at 2 / 5 / 10 / 30 / 60 / 90 deg (Hapke's crescent is brighter than K&S's; against ROLO it is within
   0.06 mag); with a GPU the shader parity: a flat patch through `moon_hapke.gdshaderinc` (HDR readback, calibrated to
   0.50000 for 0.5) against the core at (i, e, g) = (30, 0, 30), (60, 30, 50), (20, 75, 85), (10, 8, 3) deg: -0.03 /
-  -0.05 / -0.03 / -0.08 % (gate 2 %). Renders (render_check, IM-2, 2026-11-22T01:20 UTC): detail off with
+  -0.05 / -0.03 / -0.08 % (gate 2 %); and the production wiring (`game/tests/hapke_patch_production.gdshader`:
+  `regolith_reflectance_rough` from `moon_regolith.gdshaderinc` with the globals `configure_moon_brdf` sets, and
+  terrain_moon.gdshader's theta_bar resolution) against moon_hapke_norm x core at the same four geometries: -0.02 /
+  -0.04 / -0.02 / -0.09 %, and with a terrain node's override theta_bar 0.1 rad -0.03 % (gate 2 %; the terrain_moon /
+  moon materials themselves are not rendered by the check, they call this function). Renders (render_check, IM-2, 2026-11-22T01:20 UTC): detail off with
   `--moon_brdf=lommel_seeliger` against the code before Task 9: globe, 2 m, 20 m 0 px different; 200 m 2440 px (max 25 /
   255) - a second run of the same new code differs from its first by 2304 px (streaming timing), from the old by 262 px
   (max 1). GPU (1600 x 900, 2 m, detail on, median of 120 frames, two rounds): Hapke 1.736 / 1.742 ms against
@@ -618,11 +627,23 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 
 ## Open points
 - Hapke on the terrain until Task 10: every node uses the globe's mean slope 23.657 deg (the 1-degree fit's sub-pixel
-  roughness, which includes relief the mesh now draws), so the low polar Sun is shadowed twice: the IM-2 site views are
+  roughness, part of which the mesh now draws as relief: partly double-counted, the share is sized by Task 10), so the
+  low polar Sun is shadowed more than before; Lommel-Seeliger has no shadowing at all and is overbright at i ~ 87 deg, so
+  part of the darkening is physics (photometric roughness comes from sub-mm to cm scales, Helfenstein & Shepard 1999;
+  Shepard & Campbell 1998). The IM-2 site views are
   20-25 % darker on average than with Lommel-Seeliger (mean 8-bit 43.9 -> 35.3 at 2 m, 52.5 -> 39.6 at 20 m, 52.9 ->
   41.2 at 200 m; core: i 87 / e 75 deg, Hapke / Lommel-Seeliger 0.74 at 12 deg phase down to 0.31 at 162 deg, with
-  theta_bar 0 0.99 - 3.2). Task 10 sets the scale-dependent theta_bar per node (`hapke_theta_bar_rad`).
-- The full-Moon normalisation is the phase-0 point; at 2-3 deg phase the Hapke disc is 3.6-3.8 % below the former
+  theta_bar 0 0.99 - 3.2). Task 10 (Ruling T9 I2) sets theta_bar per node from the slopes the mesh and textures actually draw
+  (tan^2 theta_res = tan^2 theta_bar - tan^2 theta_drawn), never pushed toward 0 to recover the former brightness.
+- ROLO coefficients (665.1 nm) are a third-party transcription (Hollan, from Tom Stone), unchecked against Kieffer &
+  Stone 2005 Table 4 [E]; only the shape is gated (a level error would not show). The user may check the table. ROLO
+  validity is 1.55-97 deg (paper sec. 3.3.1); 97-120 deg has no gated reference (K&S 1991 informative only; Lane &
+  Irvine 1973 or Buratti et al. 1996 would add one).
+- Future, physically better: one global w scales the albedo map only as a gain; per-texel w by inverting Hapke at the
+  WAC mosaic's normalisation geometry (i 30, e 0, g 30; a monotone 1-D LUT) and anchoring the level to ROLO would drop
+  `moon_hapke_norm` (maria have a smaller multiple-scattering share). The level offset m_Hapke - m_ROLO = -0.377 mag also
+  shows the highland-proxy w is not the near-side mean.
+- The full-Moon normalisation is the phase-0 point (Ruling T9 I1: accepted, no retuning); at 2-3 deg phase the Hapke disc is 3.6-3.8 % below the former
   globe's (Hapke's surge narrower than K&S's linear one, close to ROLO's), at 7 deg 5.8 % above.
 - Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies (done). The
   full 88 MB product is loaded by `shared_moon_surface` (0.44 s incl. gap fill) and must be fetched

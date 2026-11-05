@@ -9,9 +9,9 @@
 # - the tree refines to level 22 (1 cm spacing) 2 m above the ground with the detail on, and stops at the LOLA level as
 #   before with it off;
 # - detail off: no node samples the detail (band-limited path off) and every node owns its horizon.
-# - Hapke (Task 9): the full-Moon disc of Atmosphere.regolith_reflectance (the eye adaptation's mirror of the shaders)
+# - Hapke (Task 9): the normalisation identity (phase-0 disc, Ruling T9 I1) of Atmosphere.regolith_reflectance (the eye adaptation's mirror of the shaders)
 #   with Hapke x hapke_normalisation against the Lommel-Seeliger law within 3 %; with a GPU (run without --headless) the
-#   shader parity: a flat patch drawn through moon_hapke.gdshaderinc at four geometries against the core's
+#   shader parity: a flat patch drawn through moon_hapke.gdshaderinc and through the production wiring (moon_regolith, configure_moon_brdf globals) at four geometries against the core's
 #   hapke_reflectance (StarsimCore.moon_hapke_reflectance) within 2 %, after a readback calibration.
 # Run: godot --headless --path game --script res://tests/moon_surface_check.gd [-- --measure]
 #      godot --path game --script res://tests/moon_surface_check.gd [-- --hapke_only]  (GPU: + the shader parity;
@@ -35,6 +35,7 @@ const PARITY_CALIBRATION := 0.25  ## hapke_patch.gdshader's constant in calibrat
 const PARITY_FRAMES := 4  ## frames rendered after each uniform change before the readback
 ## (incidence, emission, phase) in deg: the standard geometry, oblique, grazing view, near opposition.
 const PARITY_GEOMETRIES := [Vector3(30, 0, 30), Vector3(60, 30, 50), Vector3(20, 75, 85), Vector3(10, 8, 3)]
+const PARITY_THETA_OVERRIDE_RAD := 0.1  ## a terrain node's hapke_theta_bar_rad for the production override check
 ## The Diviner rock abundance map's highest valid 3 x 3 pixel means (selenographic deg; RA 0.357 / 0.349 / 0.343,
 ## searched over the whole 60 S - 60 N map in fix round 1) and Tycho's floor (-43.31, -11.36) for comparison.
 const ROCKY_POINTS := [Vector2(39.3594, -0.1719), Vector2(8.1094, -53.9844), Vector2(-24.8281, -45.1406),
@@ -48,6 +49,9 @@ var _config_dir := ""
 var _hapke: Dictionary = {}
 var _parity_viewport: SubViewport
 var _parity_material: ShaderMaterial
+var _parity_production: ShaderMaterial  ## through moon_regolith.gdshaderinc and the configure_moon_brdf globals
+var _parity_patch: MeshInstance3D
+var _parity_steps: Array = []  ## {kind, geometry, theta}: calibration, include-only patch, production (globe / override)
 var _parity_camera: Camera3D
 var _parity_step := -1
 var _parity_wait := 0
@@ -504,8 +508,9 @@ static func _disc_mean(g: float) -> float:
 	return total / PI
 
 
-## Full-Moon disc: Hapke x hapke_normalisation (the eye adaptation's mirror, through the core) against the former
-## Lommel-Seeliger law, at phase 0 within 3 % (the regolith scale's calibration point); other phases printed.
+## Normalisation identity (not an independent physics check; Ruling T9 I1): Hapke x hapke_normalisation (the eye
+## adaptation's mirror, through the core) equals the former Lommel-Seeliger disc at phase 0, the point the gain is
+## defined at. Other phases printed (0.96-0.995 at 2-5 deg: accepted, it moves toward ROLO).
 func _check_hapke_full_moon() -> void:
 	Atmosphere.configure_moon_brdf(_core, _config_dir, "hapke")
 	_check(Atmosphere.moon_brdf_hapke, "Hapke parameters loaded (config/moon_surface.toml) and the BRDF set to Hapke")
@@ -518,10 +523,11 @@ func _check_hapke_full_moon() -> void:
 		Atmosphere.moon_brdf_hapke = false
 		var lommel := _disc_mean(g)
 		Atmosphere.moon_brdf_hapke = true
-		var line := "full-Moon disc at phase %.0f deg: Hapke %.4f, Lommel-Seeliger %.4f (ratio %.4f)" \
+		var line := "disc at phase %.0f deg: Hapke %.4f, Lommel-Seeliger %.4f (ratio %.4f)" \
 				% [g_deg, hapke, lommel, hapke / lommel]
 		if g_deg == 0.0:
-			_check(absf(hapke / lommel - 1.0) < FULL_MOON_TOLERANCE, line + " within 3 %")
+			_check(absf(hapke / lommel - 1.0) < FULL_MOON_TOLERANCE,
+					"normalisation identity (Ruling T9 I1, holds by construction): " + line + " within 3 %")
 		else:
 			print("  info  " + line)
 
@@ -554,6 +560,16 @@ func _start_parity() -> void:
 	_parity_material.set_shader_parameter("theta_bar", float(_hapke["theta_bar_rad"]))
 	_parity_material.set_shader_parameter("gain", PARITY_GAIN)
 	patch.material_override = _parity_material
+	_parity_patch = patch
+	_parity_production = ShaderMaterial.new()
+	_parity_production.shader = load("res://tests/hapke_patch_production.gdshader")
+	_parity_production.set_shader_parameter("gain", PARITY_GAIN)
+	_parity_steps = [{"kind": "calibrate", "geometry": PARITY_GEOMETRIES[0], "theta": -1.0}]
+	for geometry: Vector3 in PARITY_GEOMETRIES:
+		_parity_steps.append({"kind": "patch", "geometry": geometry, "theta": -1.0})
+	for geometry: Vector3 in PARITY_GEOMETRIES:
+		_parity_steps.append({"kind": "production", "geometry": geometry, "theta": -1.0})
+	_parity_steps.append({"kind": "production", "geometry": PARITY_GEOMETRIES[1], "theta": PARITY_THETA_OVERRIDE_RAD})
 	_parity_viewport.add_child(patch)
 	_parity_camera = Camera3D.new()
 	_parity_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -564,9 +580,15 @@ func _start_parity() -> void:
 	_set_parity_geometry(0)
 
 
-## Step 0: calibration (constant output); step k >= 1: PARITY_GEOMETRIES[k - 1].
+## Step 0: calibration (constant output); then the include-only patch, then the production wiring (_parity_steps).
 func _set_parity_geometry(step: int) -> void:
-	var geometry: Vector3 = PARITY_GEOMETRIES[maxi(step - 1, 0)]
+	var entry: Dictionary = _parity_steps[step]
+	var geometry: Vector3 = entry["geometry"]
+	var production: bool = entry["kind"] == "production"
+	var material := _parity_production if production else _parity_material
+	_parity_patch.material_override = material
+	if production:
+		material.set_shader_parameter("hapke_theta_bar_rad", float(entry["theta"]))
 	var i := deg_to_rad(geometry.x)
 	var e := deg_to_rad(geometry.y)
 	var g := deg_to_rad(geometry.z)
@@ -576,7 +598,7 @@ func _set_parity_geometry(step: int) -> void:
 	var psi := acos(cos_psi)
 	var to_eye := Vector3(sin(e), cos(e), 0.0)
 	var to_light := Vector3(sin(i) * cos(psi), cos(i), sin(i) * sin(psi))
-	_parity_material.set_shader_parameter("light_world", to_light)
+	material.set_shader_parameter("light_world", to_light)
 	_parity_material.set_shader_parameter("calibrate", step == 0)
 	_parity_camera.look_at_from_position(to_eye * 10.0, Vector3.ZERO, Vector3(0, 0, 1))  # before it enters the tree
 	_parity_wait = PARITY_FRAMES
@@ -612,15 +634,21 @@ func _process(_delta: float) -> bool:
 				% [value, expected, " (sRGB-decoded)" if _parity_srgb else "",
 				_parity_viewport.get_texture().get_image().get_format()])
 	else:
-		var geometry: Vector3 = PARITY_GEOMETRIES[_parity_step - 1]
+		var entry: Dictionary = _parity_steps[_parity_step]
+		var geometry: Vector3 = entry["geometry"]
+		var production: bool = entry["kind"] == "production"
+		var theta := float(_hapke["theta_bar_rad"]) if float(entry["theta"]) < 0.0 else float(entry["theta"])
 		var core := _core.moon_hapke_reflectance(cos(deg_to_rad(geometry.x)), cos(deg_to_rad(geometry.y)),
-				deg_to_rad(geometry.z), float(_hapke["theta_bar_rad"]))
+				deg_to_rad(geometry.z), theta)
+		if production:  # regolith_reflectance_rough = moon_hapke_norm x Hapke I/F
+			core *= Atmosphere.hapke_normalisation(float(_hapke["disc_reflectance_full"]))
 		var shader := value / PARITY_GAIN
 		_check(absf(shader / core - 1.0) < PARITY_TOLERANCE,
-				"Hapke shader parity (i %.0f, e %.0f, g %.0f deg): shader %.5f core %.5f (%+.2f %%)"
-				% [geometry.x, geometry.y, geometry.z, shader, core, 100.0 * (shader / core - 1.0)])
+				"Hapke %s parity (i %.0f, e %.0f, g %.0f deg, theta_bar %.3f rad): shader %.5f core %.5f (%+.2f %%)"
+				% ["production-wiring" if production else "include", geometry.x, geometry.y, geometry.z, theta, shader,
+				core, 100.0 * (shader / core - 1.0)])
 	_parity_step += 1
-	if _parity_step > PARITY_GEOMETRIES.size():
+	if _parity_step >= _parity_steps.size():
 		_parity_step = -1
 		_finish()
 		return false

@@ -251,7 +251,8 @@ TEST_CASE("Hapke: disc-integrated phase curve against ROLO 665 nm", "[moon_surfa
     std::printf("  K&S 1991 Eq. 9, 5-120 deg: worst shape residual %.3f mag (informative)\n", ks_worst);
 }
 
-TEST_CASE("Hapke: full-Moon disc against the former Lommel-Seeliger globe", "[moon_surface][hapke]") {
+TEST_CASE("Hapke: normalisation identity at phase 0 and the disc at realistic full-Moon phases",
+          "[moon_surface][hapke]") {
     const auto p = shipped_hapke();
     const double norm = game_normalisation(p);
     std::printf("  normalisation 1.35 / A_Hapke(0) = %.5f (A_Hapke(0) = %.5f)\n", norm,
@@ -259,12 +260,80 @@ TEST_CASE("Hapke: full-Moon disc against the former Lommel-Seeliger globe", "[mo
     for (double g : {0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0}) {
         const double hapke = norm * environment::hapke_disc_reflectance(p, g * deg, p.theta_bar_rad, 96);
         const double old_globe = old_globe_disc(g);
-        std::printf("    g %4.1f  Hapke x norm %.5f  former globe %.5f  ratio %.4f  ROLO(g)/ROLO(0) %.4f\n", g, hapke,
-                    old_globe, hapke / old_globe, g >= 1.55 ? rolo_665(g) / rolo_665(0.0) : NAN);
+        std::printf("    g %4.1f  Hapke x norm %.5f  former globe %.5f  ratio %.4f  ROLO(g)/ROLO(0) %.4f%s\n", g, hapke,
+                    old_globe, hapke / old_globe, rolo_665(g) / rolo_665(0.0), g < 1.55 ? " (ROLO extrapolated)" : "");
     }
-    // The full Moon (phase 0, the regolith scale's calibration point, Atmosphere.regolith_scale): independently
-    // integrated discs (order 96 against the normalisation's 48; the former globe through the Lommel-Seeliger
-    // integrator) within the plan's 3 %.
+    // NORMALISATION IDENTITY, not an independent physics check (Ruling T9 I1): the gain is defined as 1.35 / A_Hapke(0),
+    // the former globe's full-phase disc (the regolith scale's calibration point, Atmosphere.regolith_scale). The
+    // discs are integrated independently (order 96 against the normalisation's 48; the former globe through the
+    // Lommel-Seeliger integrator), so this checks the integrator and the wiring, not Hapke.
     const double full_hapke = norm * environment::hapke_disc_reflectance(p, 0.0, p.theta_bar_rad, 96);
     CHECK(relative_error(full_hapke, old_globe_disc(0.0)) < 0.03);
+    // A real full Moon outside an eclipse is at g = 1.5-5 deg: Hapke is 0.96-1.0 of the former law (3.8 % low at 2 deg).
+    // Accepted by Ruling T9 I1: the difference moves toward ROLO (disc(2)/disc(0): Hapke 0.849, K&S 0.883, ROLO 0.834,
+    // the latter extrapolated below 1.55 deg), the physics gate is the ROLO phase curve above. Gate 5 %.
+    for (double g : {1.5, 2.0, 3.0, 5.0}) {
+        const double hapke = norm * environment::hapke_disc_reflectance(p, g * deg, p.theta_bar_rad, 96);
+        INFO("g " << g);
+        CHECK(relative_error(hapke, old_globe_disc(g)) < 0.05);
+    }
+}
+
+// CBOE (Hapke 2012): r x (1 + B_C0 B_C(g)), B_C = (1 + (1 - e^-z)/z) / (2 (1 + z)^2), z = tan(g/2) / h_C. Not in the
+// shipped set (B_C0 = 0) and not in the ISIS truths; the reference below is written out independently of hapke.cpp.
+TEST_CASE("Hapke: coherent-backscatter opposition effect (CBOE)", "[moon_surface][hapke]") {
+    auto p = shipped_hapke();
+    auto with_cboe = p;
+    with_cboe.bc0 = 0.6;
+    with_cboe.hc = 0.05;
+    const double mu0 = std::cos(35 * deg), mu = std::cos(20 * deg);
+    for (double g_deg : {0.5, 2.0, 5.0, 20.0, 60.0}) {
+        const double g = g_deg * deg;
+        const double z = std::tan(0.5 * g) / with_cboe.hc;
+        const double b_c = (1.0 + (1.0 - std::exp(-z)) / z) / (2.0 * (1.0 + z) * (1.0 + z));
+        const double base = environment::hapke_reflectance(p, mu0, mu, g, p.theta_bar_rad);
+        const double boosted = environment::hapke_reflectance(with_cboe, mu0, mu, g, p.theta_bar_rad);
+        INFO("g " << g_deg);
+        CHECK(relative_error(boosted / base, 1.0 + with_cboe.bc0 * b_c) < 1e-12);
+    }
+    // B_C(0) = 1: the full factor 1 + B_C0 at zero phase; and decreasing toward large phase.
+    const double at_zero = environment::hapke_reflectance(with_cboe, 1.0, 1.0, 0.0, 0.0) /
+                           environment::hapke_reflectance(p, 1.0, 1.0, 0.0, 0.0);
+    CHECK(relative_error(at_zero, 1.0 + with_cboe.bc0) < 1e-9);
+    CHECK(environment::hapke_reflectance(with_cboe, mu0, mu, 1.0, 0.0) / environment::hapke_reflectance(p, mu0, mu, 1.0, 0.0) <
+          1.0 + 0.01 * with_cboe.bc0);
+    // B_C0 = 0 or h_C = 0 switch the effect off.
+    with_cboe.bc0 = 0.0;
+    CHECK(environment::hapke_reflectance(with_cboe, mu0, mu, 0.1, p.theta_bar_rad) ==
+          environment::hapke_reflectance(p, mu0, mu, 0.1, p.theta_bar_rad));
+}
+
+// Porosity K (Hapke 2012 eq. 8.x): r = K w/4 mu0/(mu0 + mu) [p (1 + B) + H(mu0/K) H(mu/K) - 1] (smooth surface).
+TEST_CASE("Hapke: porosity coefficient K", "[moon_surface][hapke]") {
+    auto p = shipped_hapke();
+    p.porosity_k = 1.2;
+    const double mu0 = std::cos(40 * deg), mu = std::cos(25 * deg), g = 55 * deg;
+    const double hs = 1.0 / (1.0 + std::tan(0.5 * g) / p.hs);
+    const auto h = [&](double x) { return environment::hapke_h_function(x, p.w, HapkeHFunction::hapke_2002); };
+    const double expected = p.porosity_k * 0.25 * p.w * mu0 / (mu0 + mu) *
+                            (environment::hapke_phase_function(p.b, p.c, g) * (1.0 + p.bs0 * hs) +
+                             h(mu0 / p.porosity_k) * h(mu / p.porosity_k) - 1.0);
+    CHECK(relative_error(environment::hapke_reflectance(p, mu0, mu, g, 0.0), expected) < 1e-12);
+    // The single-scattering limit (w -> 0): linear in K.
+    auto dark = p;
+    dark.w = 1e-6;
+    auto dark_k1 = dark;
+    dark_k1.porosity_k = 1.0;
+    CHECK(relative_error(environment::hapke_reflectance(dark, mu0, mu, g, 0.0) /
+                             environment::hapke_reflectance(dark_k1, mu0, mu, g, 0.0),
+                         p.porosity_k) < 1e-4);
+    // K differs from 1 measurably at the shipped albedo (the path is live), and K = 1 reproduces the plain IMSA.
+    auto plain = p;
+    plain.porosity_k = 1.0;
+    CHECK(relative_error(environment::hapke_reflectance(p, mu0, mu, g, 0.0),
+                         environment::hapke_reflectance(plain, mu0, mu, g, 0.0)) > 0.01);
+    // Rough surface with K: reciprocity still holds.
+    CHECK(std::abs(environment::hapke_reflectance(p, mu0, mu, g, p.theta_bar_rad) / mu0 /
+                       (environment::hapke_reflectance(p, mu, mu0, g, p.theta_bar_rad) / mu) -
+                   1.0) < 1e-12);
 }
