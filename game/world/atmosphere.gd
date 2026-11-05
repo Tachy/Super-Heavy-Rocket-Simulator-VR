@@ -46,15 +46,16 @@ const LIMB_SAMPLE_HEIGHT_M := 10000.0
 const EARTH_MEAN_RADIUS_M := 6371000.0
 ## [D] Mean albedo-texture value of the lunar surface: data/textures/moon_color.png (CGI Moon Kit, LROC WAC colour
 ## mosaic, tools/data_pipeline/sources.toml "moon_color") sRGB-decoded, BT.709 luminance, area-weighted over the sphere
-## (0.2997; the near side 0.255) - the albedo the Moon shaders multiply.
+## (0.2997, kept by the WAC w-map tie of tools/data_pipeline/moon_albedo.py) - the albedo the Moon shaders multiply.
 const MOON_MEAN_TEXTURE_ALBEDO := 0.30
 ## The regolith's reflectance (shaders/moon_regolith.gdshaderinc, regolith_reflectance here; night-vision fix round I3,
 ## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor (or Hapke x hapke_normalisation, the
 ## default since the moon procedural surface plan Task 9), for the Sun and the earthshine alike.
 ## [D: tools/validation/moon_disc_calibration.py] the albedo texture's near-side mean weighted by projected area
 ## (cos^2 lat cos lon, sRGB-decoded, BT.709): the full-phase disc seen from the Earth (the maria pull it below the
-## sphere's 0.30).
-const MOON_NEAR_SIDE_DISC_ALBEDO := 0.2245
+## sphere's 0.30). The texture's large-scale albedo follows the WAC Hapke w map since Task 11 fix C
+## (tools/data_pipeline/moon_albedo.py; the bare colour mosaic gave 0.2245).
+const MOON_NEAR_SIDE_DISC_ALBEDO := 0.2611
 ## [S: K&S 1991 sec. 2, as Schaefer's skycalc applies it] the opposition surge: the Moon's illuminance x (1.35 - 0.05 a)
 ## for phase angles a < 7 deg (1 at 7 deg). The shaders' REGOLITH_* constants: keep in sync.
 const MOON_OPPOSITION_PEAK := 1.35

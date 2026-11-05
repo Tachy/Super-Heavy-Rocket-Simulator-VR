@@ -95,7 +95,9 @@ shaders:
     shaders draw it - mean texture albedo 0.30 [D: `moon_color.png` area-weighted, sRGB-decoded, BT.709] x the regolith
     reflectance (R x LS x f(g) for the Sun, x the solar disc the Earth leaves at the ground point, and the same for the
     earthshine) - averaged cosine-weighted over the lunar cap (4 rings uniform in sin^2 x 8 azimuths) x (R / r)^2.
-    The lunar ground sphere is the mean sphere, or 2 m below an eye standing below it. Values: lunar day 1.000 (Moon
+    The lunar ground sphere is the mean sphere, or 2 m below an eye standing below it. Values (measured with the regolith
+    scale R 0.5126; since Task 11 fix C's albedo tie to the WAC w map R is 0.4408 at an unchanged mean albedo 0.30, so
+    this analytic Moon term is 0.86 x these values; moon-surface.md, Hapke reflectance): lunar day 1.000 (Moon
     term 3264 cd/m^2, Sun plate 42 400); deep space halfway to the Moon 1.000; lunar night under a nearly full Earth
     (phase 10 deg): Earth in view 6.17 cd/m^2, Moon in view 0.20, earthshine 7.35 lux, cone gain 2845 (Weber 6872).
     At partial phases the 13-direction cap underestimates the Earth by up to ~2x (half Earth) [call: view-independent,

@@ -13,14 +13,15 @@ roughness, Task 2) draws them as a pure function of the body-fixed direction; th
 on top of that relief.
 - Small craters: equilibrium population, cumulative N(>D) = 0.0336 D^-2 per m^2 (2.2 % of geometric saturation),
   0.01 m - 2 km; 70 % degraded (d/D 0.07), 30 % fresh (d/D 0.13, rim height 0.024 D).
-- Regolith roughness (what is not a crater or rock): self-affine, RMS height in a window W = 3.7 mm (W / 0.125 m)^0.78
-  (1 m: 1.9 cm, 20 m: 0.19 m, 100 m: 0.68 m). How the config is consumed: `roughness.rms_height_at_baseline_m`
-  (3.7 mm, [D]) is the RESIDUAL the roughness generator draws; `roughness.rms_height_measured_total_m` (4 mm, Guo
+- Regolith roughness (what is not a crater or rock): self-affine, RMS height in a window W = 3.62 mm (W / 0.125 m)^0.78
+  (1 m: 1.8 cm, 20 m: 0.19 m, 100 m: 0.66 m). How the config is consumed: `roughness.rms_height_at_baseline_m`
+  (3.62 mm, [D]) is the RESIDUAL the roughness generator draws; `roughness.rms_height_measured_total_m` (4 mm, Guo
   et al. 2021) is the measured total of the natural surface and is used only as the target of validations of the
   summed surface (craters + rocks + roughness). Derivation in Sources, Regolith roughness.
 - Rocks: N(>D) = 1.54e-3 D^-2.286 per m^2, 0.01 - 10 m (N(>1 cm) = 57 per m^2, N(>10 cm) = 0.30 per m^2,
   N(>1 m) = 1.5 per 1000 m^2, N(>10 m) = 8 per km^2; area covered 3.1 % for 0.01-10 m, 0.68 % for 0.5-10 m). Axis
-  ratios b/a 0.71, c/a 0.50 (sd 0.15), burial 0.3 +- 0.15 of the height, single-scattering albedo 1.35 x regolith;
+  ratios b/a 0.71, c/a 0.50 (sd 0.15), resting (c axis near the vertical, rms tilt 25 deg), burial 0.3 +- 0.15 of the
+  height, single-scattering albedo 1.35 x regolith;
   D = plan-view-area-equivalent diameter (the generated rocks cover exactly the law's disc area).
   Local abundance: Diviner rock abundance (60 S - 60 N) divided by `rocks.abundance_reference_area_fraction` (0.0068,
   the disc area the law gives for 0.5-10 m, lower limit `rocks.abundance_reference_min_diameter_m`); uniform elsewhere.
@@ -53,7 +54,7 @@ on top of that relief.
   The field depends on the direction only and is C1 across edges and corners. Octave amplitude
   A (local spacing / 0.125 m)^0.78 with the local cell size (sqrt of the area element, 0.84-1 of nominal); A is
   derived at construction so that the median plane-detrended RMS in 125 mm windows (Guo's statistic, 25 x 25 samples,
-  1536 windows at hashed places) equals `rms_height_at_baseline_m` (3.7 mm). Octaves fade out between band_start / 2
+  1536 windows at hashed places) equals `rms_height_at_baseline_m` (3.62 mm). Octaves fade out between band_start / 2
   and band_start.
 - band_start_m = tile pixel scale x tile_weight + global spacing (1.9 km) x (1 - tile_weight): continuous over the
   1 km tile blend (20 m in a tile core).
@@ -77,9 +78,11 @@ on top of that relief.
   (fracture faces: tangent planes at a jittered Fibonacci set of points on the ellipsoid, pushed in). Fresh fragments
   (70 %, [E]): 16-24 faces cut 15-40 % deep, the whole surface planar (planar share of directions 0.94-1.00), sharp
   edges; eroded ones (30 %, [E]; boulders wear down, Basilevsky et al. 2013 / 2015): 5-8 faces cut 3-12 %, mostly the
-  rounded ellipsoid (planar share 0.19-0.37). The fragment is turned (half resting: c axis within 25 deg of the vertical;
-  half uniformly random: embedded ejecta; [E], no measured tilt distribution found; 16 of 32 templates have the c axis
-  > 30 deg off the vertical) and scaled so that max r = 1 (20000 Fibonacci directions, the best 32 refined by a pattern
+  rounded ellipsoid (planar share 0.19-0.37). The fragment is turned to rest gravitationally stable (controller ruling
+  R4, Task 11 fix C: no upright balanced slabs, which the Apollo panoramas do not show): its shortest (c) axis near the
+  vertical, tilted by a 2-D Gaussian on the tangent plane with 25 deg rms ([E]: slopes, clods, burial; no measured tilt
+  distribution retrieved), capped at 60 deg; template rms tilt 25.2 deg, max 45.5 deg, 9 of 32 above 30 deg) and scaled
+  so that max r = 1 (20000 Fibonacci directions, the best 32 refined by a pattern
   search, margin 0.5 %). r(dir) is the exact ray exit distance; `normal` the active face's (or the ellipsoid's) normal;
   `column_top(x, y)` exact (the least upper bound of the constraints on the vertical line, ~50 ns); `support_point(u)`
   exact (the ellipsoid's maximum, each face ellipse's maximum or a precomputed edge end / vertex); `bottom_z` / `top_z`
@@ -96,7 +99,7 @@ on top of that relief.
   ratios and tilt), albedo = `albedo_to_regolith`. Normal-like draws are the sum of 6
   uniforms (no library distributions).
 - Size convention: D is the plan-view-area-equivalent diameter: the rock's area seen from above (the part above the
-  ground) is pi D^2 / 4. Per rock a = (D / 2) sqrt(pi / exposed_area(cut)), at most 1.144 D (`max_semi_axis_per_diameter`: burial 0.6,
+  ground) is pi D^2 / 4. Per rock a = (D / 2) sqrt(pi / exposed_area(cut)), at most 1.007 D (`max_semi_axis_per_diameter`: burial 0.6,
   the template with the least exposed area). This is the area definition of Diviner rock abundance (the normalisation 0.0068 stays a disc integral and
   is exact); the Surveyor counts' own convention is an open point.
 - Burial by height (the config's definition): ground at cut = bottom_z + f (top_z - bottom_z) of the template,
@@ -303,8 +306,8 @@ on top of that relief.
   s0-s2 (scaled from the 512 px values by the measured rms ratio; s3 not re-measured). s0's crater component also holds
   the pebbles (Rocks drawn). The crater relief is a separate component (its own height PNG, the slope map's blue / alpha),
   so the shader weights it with the core's crater drawn fraction, not the regolith's transfer.
-- Amplitude: the octave constant a = 2.29 mm is calibrated at bake time exactly as the core does (Guo's statistic:
-  median plane-detrended std of 25 x 25 windows at 5 mm spacing, 1536 windows, of a full-spectrum 10.24 m field = 3.7 mm
+- Amplitude: the octave constant a = 2.242 mm is calibrated at bake time exactly as the core does (Guo's statistic:
+  median plane-detrended std of 25 x 25 windows at 5 mm spacing, 1536 windows, of a full-spectrum 10.24 m field = 3.62 mm
   `rms_height_at_baseline_m`). Heights 16-bit (`32768 + h / height_scale_m * 32767`), normals 8-bit tangent space OpenGL
   (green = up = image top) from the metric pixel size, periodic differences. Band RMS heights 1.04 / 5.4 / 26.5 mm,
   RMS slopes 0.39 / 0.25 / 0.16.
@@ -330,6 +333,18 @@ on top of that relief.
   1.35 / A_Hapke(0) = 5.420 [D] (`Atmosphere.hapke_normalisation`): the full-phase disc equals the Lommel-Seeliger law's
   (both at K&S's full-Moon illuminance, the regolith scale's calibration point), so the albedo map's mean brightness is
   unchanged at full Moon; away from it the disc follows Hapke's own phase curve (Validation).
+- Albedo map (Task 11 fix C, ruling T11-C4): `data/textures/moon_color.png` is the CGI Moon Kit colour mosaic with its
+  large-scale brightness tied to the LROC WAC Hapke w map (Sato et al. 2014, 1 deg, +-70 deg;
+  `tools/data_pipeline/moon_albedo.py`, run by `prepare.py`; source `lroc_wac_hapke_parameter_map`): per 1-deg cell
+  the relative reflectance A = I/F(w) / I/F(0.429) (Hapke 2012 with the config's b, c, B_S0, h_S, K 1 at i 30, e 0,
+  g 30 deg; the roughness factor does not depend on w and cancels), bilinear; the mosaic keeps the hue and the detail
+  below 1 deg with its contrast compressed by gamma = 0.449 (least squares of log A on the mosaic's log 1-deg
+  luminance); beyond +-70 deg and in fill cells the same fit, blended over 65-70 deg; the sphere mean (0.2997) is kept.
+  Mare Tranquillitatis (0-8 N, 20-30 E) / highland (12-20 S, 10-20 E): w 0.222 / 0.390, mosaic luminance 0.071 / 0.302
+  (ratio 0.234) -> 0.157 / 0.302 (0.518 = the Hapke I/F ratio of the two w, 0.520). The bare mosaic's sRGB contrast
+  made mare ground ~2x too dark (fix B's U1 b). With the near-side disc mean 0.2245 -> 0.2611 the regolith scale R
+  (`Atmosphere.MOON_NEAR_SIDE_DISC_ALBEDO`, `tools/validation/moon_disc_calibration.py`) is 0.5126 -> 0.4408, so the
+  full Moon keeps K&S's illuminance; mare ground under the Sun is ~1.96 x brighter (0.069 x 0.513 -> 0.157 x 0.441).
 - Mean slope: with the detail shading a terrain fragment takes the residual of its node (Regolith shading below);
   without it (detail off) the globe's 23.657 deg. `terrain_moon.gdshader`'s `hapke_theta_bar_rad` >= 0 overrides both
   (tests, diagnostics).
@@ -344,9 +359,9 @@ on top of that relief.
   slopes the mean square slope is S^2 = pi tan^2 theta_bar = 0.603. The globe's pixels contain the rocks, which the
   renderer models explicitly (below; geometry from Task 11), so their share comes out first, in Hapke's mean-tan form
   (tan theta_bar = (2/pi) <|grad h|>): <tan>_regolith = (<tan>_globe - A pi eta) / (1 - A), A = 1 - exp(-C_all) =
-  0.0306 the rocks' area share at abundance 1 (the globe's mean), pi eta = 1.20 a half-spheroid's mean |grad h| over its
-  plan area (closed form, checked by a midpoint sum): <tan> 0.688 -> 0.674, theta_bar 23.657 -> 23.158 deg, S^2 0.603 ->
-  0.575 (`[unresolved_shading]` test: regolith and rocks add up to the globe's mean tan to 1e-12; without rocks nothing
+  0.0306 the rocks' area share at abundance 1 (the globe's mean), pi eta = 1.39 a half-spheroid's mean |grad h| over its
+  plan area (closed form, checked by a midpoint sum; eta 0.444): <tan> 0.688 -> 0.666, theta_bar 23.657 -> 22.972 deg,
+  S^2 0.603 -> 0.5645 (`[unresolved_shading]` test: regolith and rocks add up to the globe's mean tan to 1e-12; without rocks nothing
   comes out). Before the Task 10 fix round the rocks were shadowed twice (in theta_bar and by their explicit terms,
   review I2). A node of vertex spacing L draws drawn(L) of it:
   its vertices are the relief's L x L box mean, its normals central differences over 2 L; drawn(L) applies exactly
@@ -355,9 +370,9 @@ on top of that relief.
   same filter in real space on the crater profile (`crater_drawn_fraction`, 3 x 3 lattice offsets), summed over the
   generator's octaves (5 mm .. 3.8 km) and the crater law (1 cm .. 2 km); tabulated at 4 per octave (1 mm .. 17 km).
   The fragment's residual is tan theta_res = sqrt((S^2 - drawn(L_eff)) / pi), L_eff = node spacing x 2^morph (the
-  morph slides a node onto its parent's surface, so a split changes nothing). Values: L22 (1 cm) 20.2 deg, 10 cm 21.9,
-  1 m 22.5, 10 m 22.8, 100 m 23.1, 1 km 23.15, beyond the bands the regolith's 23.158. The whole generated surface holds
-  S^2 = 0.296 (roughness octaves 0.252, craters 0.045); the rest, 0.278, is relief below the generator (< 5 mm: the
+  morph slides a node onto its parent's surface, so a split changes nothing). Values: L22 (1 cm) 20.1 deg, 10 cm 21.7,
+  1 m 22.3, 10 m 22.7, 100 m 22.9, 1 km 22.97, beyond the bands the regolith's 22.972. The whole generated surface holds
+  S^2 = 0.286 (roughness octaves 0.241, craters 0.045); the rest, 0.279, is relief below the generator (< 5 mm: the
   law continued to ~0.6 mm would hold it, Helfenstein & Shepard 1999). The texture relief (regolith and craters) is NOT
   subtracted (below).
 - Statistical shadows (the Sun and the earthshine, each at its own elevation: the Earth's disc, ~1.9 deg, is a
@@ -368,18 +383,28 @@ on top of that relief.
   margin over the horizon map in its azimuth (`terrain_visible_fraction`'s margin: a slope facing the light raises it),
   over the local horizontal where no map is read. The near-field shadow map (Task 12) takes over inside its range.
 - Unresolved rocks (D below the geometry threshold d_geo, the growth band weighted; Rocks drawn below): Boolean model of
-  half-spheroids of plan radius D/2 and height eta D (eta 0.571, the cover-weighted mean of generated rocks' exposed
-  height / D, measured with `rock_top` at the base): cover C = abundance x `rock_statistical_cover(d_geo)` (every rock
+  the generated rocks (eta 0.444, the cover-weighted mean of generated rocks' exposed height / D, measured with
+  `rock_top` at the base; it sets the slope-budget share above): cover C = abundance x `rock_statistical_cover(d_geo)` (every rock
   below d_geo, the band [d_geo, 2 d_geo] with weight 1 - log2(D / d_geo), closed form over the law), visible rock share 1 -
   exp(-C) with reflectance ratio rho = I/F(1.35 w) / I/F(w) = 1.494 (standard geometry i 30, e 0, g 30; 1.43-1.54
-  over (87, 75, 12) .. (85, 20, 80) deg), lit-face gain G(e) (Lommel-Seeliger radiance of the half-spheroid seen from
-  the zenith over the flat ground's, tabulated every 2 deg, floor 1 deg: 4.9 at 2 deg, 2.2 at 5, 1.4 at 10, 1.0 at
-  20, 0.92 at 45 deg), cast shadows sigma = (sqrt(1 + 4 eta^2 cot^2 e) - 1) / 2 per rock area (exact projection).
+  over (87, 75, 12) .. (85, 20, 80) deg), lit-face gain G(e) (Lommel-Seeliger radiance of the rock seen from the zenith
+  per plan area over the flat ground's) and cast shadow outside the rock per rock plan area sigma(e), both measured on
+  the 32 angular templates (Task 11 fix C, review R1; `template_rock_light_tables`): each template's exposed top
+  columns (64 x 64 grid over [-1, 1]^2: height above the ground cut, facet normal), averaged over 8 light azimuths
+  (the yaw is uniform) and the burial law (9 Gauss nodes of clamp(0.3 + 0.15 N, 0, 0.6)), every rock the same plan
+  area; sigma per grid line along the light's azimuth as the convex rock's shadow interval beyond its footprint
+  (`rock_light_tables`; on a half-spheroid it reproduces the exact laws below to 0.7 % (G) and 1.1 % of 1 + sigma).
+  Tabulated every 2 deg, floor 1 deg (G / sigma: 2 deg 4.75 / 14.8, 4 deg 2.60 / 7.2, 8 deg 1.55 / 3.35, 14 deg
+  1.13 / 1.73, 20 deg 0.99 / 1.09, 30 deg 0.92 / 0.61, 50 deg 0.93 / 0.24; the half-spheroid of the same eta:
+  5.50 / 12.2, 2.97 / 5.9, 1.72 / 2.70, 1.22 / 1.35, 1.03 / 0.82, 0.93 / 0.42, 0.91 / 0.12: the resting fragments' flat
+  tops catch less of a low Sun, their steep sides cast longer shadows). The half-spheroid laws (`rock_lit_gain`,
+  `rock_shadow_per_cover` = (sqrt(1 + 4 eta^2 cot^2 e) - 1) / 2) remain as the tables' reference shapes in the tests.
+  The shader reads both tables (`detail_rock_lit_gain`, `detail_rock_shadow`).
   Per light at its elevation e: factor = G1(e) x [exp(-C (1 + sigma(e)) - C_g sigma(e)) + (1 - exp(-C)) rho G(e)] / N,
   N = exp(-C_all) + (1 - exp(-C_all)) rho (the albedo mosaic already holds every rock). The earthshine factor is no
   longer 1 with every rock statistical: under a low Earth the rocks' shadows and lit faces act as under a low Sun (e.g.
-  Earth 7 deg, abundance 1, horizon grid 20 m: 0.847 on a 0.33 m node, 0.651 on a 1 cm node with its Smith G1 - the
-  Sun's factors at 7 deg). C_g = abundance x cover - C is the
+  Earth 7 deg, abundance 1: the rocks alone 0.921, 0.647 on a 1 cm node under a 20 m horizon grid with its Smith G1 -
+  the Sun's factors at 7 deg). C_g = abundance x cover - C is the
   drawn rocks' share: they cast no shadow yet, so their shadow stays statistical on the ground they leave visible
   (`rock_geometry_shadows_statistical`, false once Task 12's shadow map takes over); with a drawn rock's mean radiance
   rho G1(e) G(e) / N per plan area for either light, the visible ground exp(-C_g) and the drawn rocks add up to the
@@ -444,18 +469,26 @@ on top of that relief.
   exposed height (template z units), albedo factor, template). List limit = 1.5 px at NODE_NEAR_FACTOR 2.0 x the node
   size (a drawn leaf of the level is never nearer: it splits at 2.5 x), the MAX_LEVEL leaf under the camera from
   PEBBLE_GEOMETRY_LIMIT_M; the limit goes to both shaders (`rock_node_min_m`), so a rock a node does not list stays
-  statistical. Each LOD buffer is zero-padded on the worker to its pool bucket (powers of two from 64 to 16384
-  instances; larger lists an exact unpooled MultiMesh).
+  statistical. Each LOD list is split on the worker into chunks of at most 16384 instances, each zero-padded to its
+  pool bucket (64 x 2^(k/2): half-octave steps 64, 91, 128, 181, ... 16384, padding waste < 41 %; fix C, review R3), so
+  a boulder field's long lists are several pooled MultiMeshes (no exact, unpooled allocation on the main thread).
 - Main thread (review C1, fix round B): at the upload `attach` only queues the node; its terrain material keeps
   `rock_node_min_m` = 1e30 (every rock statistical, radiance-continuous) until `process_queue` (each quadtree update,
   ATTACH_BUDGET_US 2 ms per frame shared with the pool warming) attaches it: a pooled `MultiMeshInstance3D` per
-  non-empty LOD (child of the node's mesh instance, shows / hides with it), filled by one
+  non-empty chunk (child of the node's mesh instance, shows / hides with it), filled by one
   `RenderingServer.multimesh_set_buffer`, a pooled material with the node's parameters set. Pools per (LOD, capacity)
   key: a pooled MultiMesh keeps its LOD mesh for life (setting `MultiMesh.mesh` on a filled one was a 16 ms call).
-  PREWARM [E, measured] warms ~6000 entries (~210 MB GPU at the IM-2 2 m peak) and 1500 materials within 1.5 ms per
-  frame once the Moon terrain is active; beyond, on-demand allocation (~0.15 ms each, at most 12 per frame). The
-  quadtree shows a node's children only once their rocks are attached (`is_pending`), so the parent's rocks never
-  vanish before the children's appear. `detach` at the release returns everything to the pools.
+  PREWARM [E, measured with power-of-two buckets; each count split half and half with the half-octave bucket below]
+  warms ~6000 entries and 1500 materials within 1.5 ms per frame once the Moon terrain is active and the camera is
+  below 50 km (not from orbit); beyond, on-demand allocation (~0.15 ms each, at most 12 per frame). The quadtree shows
+  a node's children only once their rocks are attached (`is_pending`), so the parent's rocks never vanish before the
+  children's appear. `detach` at the release returns everything to the pools.
+- Pool bound (fix C, review R3): when a node splits, its hidden rock lists go back to the pools (`park`; the worker
+  lists stay in memory); before it merges, `ready_to_merge` queues them again and the quadtree keeps the children drawn
+  until they are attached (`_merge_or_keep`), as at a split. The pool's GPU buffers are bounded by POOL_MAX_MB 512 [E]:
+  an attach that would exceed it first frees free entries of other buckets (largest first), and if still over, the
+  queued node stays statistical (radiance-continuous; `stats.over_bound_nodes`, logged when it doubles). Free entries
+  beyond a bucket's prewarm count are released after TRIM_IDLE_S 10 s without a take, one per frame.
 - One mesh per LOD for all 32 templates: the unit icosphere of the core's LOD (2562 / 642 / 162 / 42 vertices) plus the
   bare icosahedron (12, its first 12 vertices) as LOD 4; each vertex takes its template's radius and normal from a
   float texture (column VERTEX_ID, row LOD x 32 + template). LOD bands of projected diameter: >= 100 / 30-100 / 10-30 /
@@ -500,6 +533,9 @@ on top of that relief.
   the facet normal): relative albedo and the mean-preserving slope modulation. Dust fillet / burial blend: over 0.05 D
   above the ground plane the rock blends into the regolith's reflectance on the local vertical ([E]). The drawn rocks
   cast no shadows yet: their shadow stays statistical on the ground (Regolith shading) until Task 12's shadow map.
+  The eye adaptation's `atmosphere_exposure_gain` multiplies the rock radiance as it does the lit ground's in
+  `terrain_moon.gdshader` (fix C; rocks are drawn only near a camera at the Moon, so the ground's atmosphere
+  transmittance / in-scatter are identity there); the radiance gate runs with a gain of 4 to check it.
 - Pebbles: PEBBLE_GEOMETRY_LIMIT_M = 0.02 m [E, measured]: rocks of 1-2 cm are never instances (stereo mock +0.75 /
   +0.53 / +0.34 ms over rocks off at 1 / 2 / 4 cm). Their radiance stays in the ground's statistical layer (albedo
   share, cast shadows, lit faces); as discrete clasts they are bumps in the regolith texture relief (review I3,
@@ -593,8 +629,8 @@ on top of that relief.
 - Hapke parameters stay the self-consistent Sato et al. (2014) set (K = 1, B_C0 = 0, theta_bar fixed): mixing in a
   porosity K ~ 1.3 would need a refit of w.
 - The Moon's brightness anchor stays K&S's full-Moon illuminance (the regolith scale): Hapke is normalised to the
-  former globe at phase 0, not to its absolute I/F (the albedo map is a relative colour mosaic, not calibrated
-  reflectance).
+  former globe at phase 0, not to its absolute I/F (the albedo map is relative: its large-scale contrast follows the
+  WAC w map, its mean is anchored by the full Moon).
 
 ## Validation
 - `[moon_surface][config]`: the shipped file loads, every field finite, 0.5 < H < 1, 0 < w < 1, |c| <= 1, rocks down
@@ -608,9 +644,9 @@ on top of that relief.
   - determinism: 10^4 points, full and 1 m queries, 4 threads and a second instance: bitwise equal;
   - crater counts on the global grid, bins 1-2 ... 32-50 m with 1500 expected each: 1511, 1540, 1483, 1425, 1502,
     1498 (3 sigma 116); fresh share and d/D per crater; > 100 m within 20 km: 4375 vs 4212 expected;
-  - roughness (Guo's statistic, ruling of 2026-11-04): roughness alone at the site 3.70 mm (configured 3.7, tolerance
-    15 %); windows 0.1 / 1 / 10 m on the global grid 1.016 / 1.000 / 0.977 x the law 3.7 mm (W / 0.125)^0.78
-    (tolerance 15 %); craters + roughness at the site 3.90 mm <= the measured total 4 mm (rocks: see below);
+  - roughness (Guo's statistic, ruling of 2026-11-04): roughness alone at the site 3.620 mm (configured 3.62, tolerance
+    15 %); windows 0.1 / 1 / 10 m on the global grid 1.016 / 1.000 / 0.977 x the law 3.62 mm (W / 0.125)^0.78
+    (tolerance 15 %); craters + roughness at the site 3.82 mm <= the measured total 4 mm (rocks: see below);
   - band limit: |relief(L) - mean of relief(0) over the footprint (24 x 24 samples per face parallelogram, blend
     weighted)| <= 0.1 x RMS of the removed band at every one of 60 points, L = 10 / 1 / 0.1 m: site max 0.028 / 0.032
     / 0.032 x (RMS removed 0.16 / 0.025 / 0.0033 m); face corner region outside the blend (s, t ~ +-0.9-0.98) 0.022 /
@@ -669,12 +705,11 @@ on top of that relief.
     a single missing pixel changes by no more than the map's own pixel step; a 12 x 36 file in the real format (TOML
     header + int16, one missing DN) loads: pixel centres, longitude wrap, the gap filled with its neighbours' mean; a missing file names fetch.py;
   - `[slow]` summed roughness (median plane-detrended 125 mm window std, 600 windows over 2 km, rock tops entered as
-    max(ground, rock top)): site craters + roughness 3.845 mm, + rock tops 4.159 mm vs the measured total 4.000 mm
-    (+4.0 %, tolerance 10 %); near the cube corner (1,1,1) 4.090 -> 4.290 mm (+7.3 %). The corner excess of the skewed
-    lattice is unchanged after the face blend (4.090 vs 3.845 at the site = +6.4 %) and stays inside 10 % of the total, so
-    the amplitude is not touched. The rock tops add 0.31 mm (site) to the median with the fragment templates (taller exposed
-    rocks, eta 0.571; rare rocks dominate the mean square, not the median). The residual `rms_height_at_baseline_m`
-    (0.0037, median-matched with the former smooth templates) was not re-derived (open point).
+    max(ground, rock top)): site craters + roughness 3.772 mm, + rock tops 4.003 mm vs the measured total 4.000 mm
+    (+0.1 %, tolerance 10 %); near the cube corner (1,1,1) 4.001 -> 4.139 mm (+3.5 %). The corner excess of the skewed
+    lattice (4.001 vs 3.772 at the site = +6.1 %) stays inside 10 % of the total, so the amplitude is not touched. The
+    rock tops add 0.23 mm (site) to the median with the resting fragment templates (eta 0.444). The residual 3.62 mm is
+    re-derived from this case (Sources, Regolith roughness).
 - Physics surface (Task 4, `core/tests/test_detailed_lunar_terrain.cpp`, synthetic flat LOLA + the shipped config
   with the uniform law; `[moon_surface][terrain]` / `[contact]`):
   - detail off on the real LOLA (10^4 points, half within 15 km of the site): heights by latitude / longitude,
@@ -862,7 +897,7 @@ count close to the median of the Robbins et al. 2014 counter ensemble) lies in t
 |---|---|---|---|
 | H = 0.78 | [S] | Guo et al. 2021 (GRL 48, e2021GL094931), Chang'e-4 5 mm DTM, sec. 3.2: H = 0.78, 0.85, 0.85, 0.71, 0.51 for the five natural subregions (0.61 rover tracks, excluded), median 0.78; breakover 0.5-2 m | 10 mm - 2.5 m |
 | RMS 4 mm at 125 mm (measured total) | [S] | Guo et al. 2021 sec. 3.1: RMS height (std. dev. in a window) median 4 mm at 125 mm, 1-18 mm | 15 mm - 1.25 m |
-| residual 3.7 mm at 125 mm | [D] | derived below (`tools/validation/moon_roughness_residual.py`) | 125 mm |
+| residual 3.62 mm at 125 mm | [D] | derived below (core `[slow]` summed-roughness case; first estimate `tools/validation/moon_roughness_residual.py`) | 125 mm |
 
 Residual (no double counting): Guo's 5 mm DTM is the whole natural surface, so its 4 mm already contains the cm-dm
 craters and rocks that we also generate down to 0.01 m (336 craters and 57 rocks per m^2 above 1 cm). The roughness
@@ -883,6 +918,14 @@ a few windows with large rocks while Guo reports the median. The residual is fix
 Guo's H; at larger windows the craters' share grows, which is why the summed-surface validation (Validation) checks
 the total. Check at 1 m windows (seeds 1-2): craters + rocks median 4.65 mm (seed 1); the residual matching Guo extrapolated (4 mm x 8^0.78 = 20.2 mm) is 17.4-18.2 mm, the 3.7 mm law extrapolates to 18.6 mm (2-7 % apart), so one residual with Guo's H holds from 125 mm to 1 m.
 
+Re-derivation on the generated surface (Task 11 fix C; the Monte Carlo above assumed smooth ellipsoids, the generator
+now draws resting angular templates, eta 0.444): the core's `[slow]` case "Craters, roughness and rock tops sum to the
+measured total roughness" (site, 600 windows over 2 km) with the former 3.7 mm gave craters + roughness 3.845 mm and
++ rock tops 4.073 mm. Medians of independent parts add roughly in quadrature, so the residual r that brings the sum to
+4.000 mm is r = sqrt(4.000^2 - (4.073^2 - 3.845^2) - (3.845^2 - 3.700^2)) = 3.62 mm [D]. Check with 3.62 mm: craters +
+roughness 3.772 mm, + rock tops 4.003 mm (+0.1 %); roughness alone 3.620 mm. (Fix B's 3.52 mm was the same formula with
+the tilted templates of fix A, eta 0.571, before ruling R4.)
+
 Disagreement: at metre-hectometre scales H ~ 0.9 (Cai 2019 LPSC 2343 / Cai & Fa 2020, NAC DTMs: maria and highlands
 median 0.9; RMS height in 100 m windows 1.28 m maria, 3.90 m highlands); LOLA 17 m - 2.7 km: highlands 0.95, maria
 0.76 (Rosenburg et al. 2011). Those lie above the 1-2 m breakover, at scales where craters dominate; the cm-m
@@ -898,7 +941,7 @@ Extrapolated to 100 m the residual term gives 0.68 m, below the NAC totals with 
 | fragment b/a 0.71, c/b 0.71 (c/a 0.50) | [S] | Fujiwara et al. 1978 (Icarus 31) impact fragments a:b:c = 2:sqrt2:1; Michikami et al. 2016 (Icarus 264): catastrophic-disruption fragments b/a ~0.7, c/a ~0.5, cratering fragments to c/a ~0.2; LRO NAC boulders b/a mostly ~0.7, 0.3-0.9 (Kumar et al., NGRI; Krishna & Kumar 2016). Constants in `rock_templates.cpp` (no longer config keys) | NAC: m-dam |
 | sd 0.15 | [E] | spread of the NAC range | - |
 | fresh / eroded 70 / 30 %, faces 16-24 / 5-8, cut 15-40 / 3-12 % | [E] | Basilevsky et al. 2013 (PSS 89) / 2015 (PSS 117): boulders wear down and break up (survival ~40-80 Myr for 1-2 m); share from the Apollo photo comparison | - |
-| tilt: 50 % resting (c axis <= 25 deg off vertical), 50 % uniform | [E] | no measured lunar tilt / H/D distribution retrieved (lead: Demidov & Basilevsky, Lunokhod / Apollo panoramas) | - |
+| tilt: resting, c axis near the vertical, 2-D Gaussian 25 deg rms, cap 60 deg (ruling R4) | [E] | no measured lunar tilt / H/D distribution retrieved (lead: Demidov & Basilevsky, Lunokhod / Apollo panoramas; not found by two web searches) | - |
 | burial 0.3 +- 0.15 | [E] | no lunar measurement found | - |
 | albedo 1.35 x regolith | [E] | w_rock 0.65 / w_regolith 0.48 of the synthetic NAC boulder-field model of Marshal, Ruesch, Woehler et al. (EGU22-12217), taken there from earlier work; Ruesch et al. 2024 (JGR) found boulders near Reiner Gamma with w like the regolith | - |
 | abundance reference 0.0068 for 0.5-10 m | [D] / [E] | disc area of the law, (pi/4) k b (D1^(2-b) - D0^(2-b)) / (2-b) = 0.00678 with D0 = 0.5 m [E: middle of Diviner's ~0.1-1 m sensitivity, Bandfield et al. 2011]; D0 = 1 m would give 0.0047 (local factor 1.45x higher), D0 = 0.1 m 0.0137 | - |
@@ -934,10 +977,18 @@ J. Hollan from Kieffer & Stone 2005 Table 4 (amper.ped.muni.cz, "kindly sent by 
 paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservative isotropic scattering.
 
 ## Open points
-- Summed roughness (mesh + textures + drawn rocks, Task 11 fix round): -4.7 to +5.8 % over L22-L17 (gate 10 %). The
-  residual `rms_height_at_baseline_m` 3.7 mm [D] was median-matched with the pre-fix-A rock templates; with the angular
-  templates the core's summed median is 4.16 mm (+4.0 %) - re-derived value in the Task 11 fix B report, not applied
-  (config change for the user's decision: it also moves the contact surface and the bake's amplitude).
+- Dark dm-m wrinkles at the Apollo 11 view (Task 11 fix C, review R2): measured, not over-steep. Drawn mesh at the A11
+  site (vertices the box mean over L, normals central differences over 2 L, three 48 x 48 patches): rms slope per axis
+  1 cm 11-22 deg (law 15.0), 10 cm 7-10 deg (law 10.4), 1 m 5-11 deg (law 7.4), 3 m 5-10 deg (law 6.3), the patch spread
+  from the heavy-tailed craters; facets facing away from the 14.5 deg Sun 9-26 % at 1 cm (Gaussian law 16.7 %), 0-11 %
+  at 10 cm (7.9 %), 0-6 % at 1 m (2.4 %). In the render (`--moon_diag=2`, rows 0.65-1.0 of the down-Sun view) 5-6 % of
+  the pixels. The relief follows the slope budget (Guo's cm roughness + the Minton equilibrium craters); LOLA's 25 m
+  slopes at the site were not compared (no LOLA slope map in the project). What the photo has and the render has not is
+  the fill light in self-shadowed facets (interreflection from the sunlit surroundings, a few % of the lit radiance);
+  proposed with Task 12's shadows.
+- The pebble bumps of the s0 texture are baked at abundance 1 (they do not scale in boulder fields; review m6).
+- Summed roughness (mesh + textures + drawn rocks): the GD gate (10 %) re-measured after fix C's residual 3.62 mm and
+  the resting templates: see Validation (Rocks drawn).
 - The texture craters cast no shadows inside their bowls - the main cue of small craters under a low Sun (the LROC
   frame's dark crater floors); they only modulate the radiance (mean-preserving). Task 12's shadow map, or horizon maps
   of the crater textures, would add them. Craters above 20 m (beyond s3) on coarse leaves are left to the mesh (it
@@ -966,22 +1017,26 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   range with real shadows (then the same comparison against Hapke applies).
 - The regolith texture relief (s0-s3) casts no shadows; it only modulates the radiance (mean-preserving). Real cast shadows of
   pebbles (horizon maps of the height textures, the spec's "height-map pebbles with self-shadowing") are not built.
-- Rock lit-face gain and cast shadows assume a nadir view and half-spheroids (eta from the generated rocks); oblique
-  views (rocks hiding ground, side faces seen) are not modelled. Task 11's geometry-vs-statistics check will show the
-  size of that.
+- Rock lit-face gain and cast shadows come from the generated templates (fix C) but assume a nadir view: oblique views
+  (rocks hiding the ground behind them, their camera-facing sides seen) are not modelled. Measured with the rock patch
+  at Sun 7 deg, e 30, g 60 (against the realised drawn cover): +0.76 % at abundance 1, +1.39 % at 3, +4.93 % at 10
+  (d 0.1 m; over the 2 % gate at 10). Per drawn cover that is an excess of ~0.3-0.5 x the flat ground's radiance, about
+  the view occlusion: the occluded area per cover is the shadow law at the view's elevation, sigma(60 deg) ~0.15, and the
+  hidden ground there is mostly the rock's own shadow (camera 37 deg from the Sun's azimuth), replaced by lit rock
+  (rho G ~2.6): 0.15 x 2.6 ~ 0.4. A view-dependent rock term (occlusion sigma(e_view), its overlap with the shadow by
+  the azimuth difference - Hapke's shadow hiding -, the visible facets' radiance) needs a (light, view, azimuth) table
+  from the templates; proposed for Task 12 / 13 together with the drawn rocks' shadows.
 - Drawn rocks (Task 11): no cast shadows yet (their shadow is statistical on the ground until Task 12), so under a low
   Sun they look lit-only; shapes are angular fragments since fix A of Task 11; their tilt distribution and the
-  fresh / eroded share are [E] (no lunar measurement retrieved), the exposed H/D (eta 0.571) is not checked against a
-  measured distribution. The statistical lit-face gain and shadows use half-spheroids of that eta: against the angular
-  templates the rock patch at Sun 7 deg reads +1.1-1.3 % over the expectation with its realised drawn cover (the
-  half-spheroid stand-in vs the facets), 0.0-0.5 % at 15-30 deg. Rocks stand on the full-detail ground while coarse
+  fresh / eroded share are [E] (no lunar measurement retrieved), the exposed H/D (eta 0.444) is not checked against a
+  measured distribution. Rocks stand on the full-detail ground while coarse
   nodes draw the band-limited surface (sub-pixel by the numbers, not measured on screen). Boulder fields: the abundance
   load factor is an [E] load rule (the control's static floor); at the Diviner maximum (abundance ~52) the lists still
   hold 2.4 M rocks (5.4 M instance entries, ~430 MB). Node lists are built at the pixel angle of their build time (a
   change at run time leaves the lists; the node limit keeps the radiance consistent). The quadtree's own main-thread
   update exceeds 5 ms while streaming after a camera jump (13.5 ms max without rocks; Task 7 code, known-issues, T13).
-- Rock pool memory: ~210 MB of GPU buffers once warmed (IM-2 2 m peak per (LOD, capacity) key; hidden ancestors keep
-  their buffers), allocated over the first seconds on the Moon; boulder fields grow it on demand.
+- Rock pool memory: bounded at 512 MB (fix C); boulder fields beyond it keep nodes statistical. The OpenXR path's
+  attach / upload cost is not measured (T13).
 - The 1-2 cm pebbles are texture bumps without cast shadows (the texture relief casts none); their mean shadow is in the
   statistical layer.
 - Texture coordinates follow the cube face lattice: across the 12 cube face edges the regolith texture is discontinuous
@@ -1063,8 +1118,8 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 - Units of the Cintala & McBride Table 3 fit (D in m, N per 100 m^2) read from a scanned table; the Diviner-scale
   area check supports metres.
 - Diviner's lower rock-size limit (0.5 m chosen) is not pinned down; it sets the local abundance factor within 1.45x.
-- The roughness residual (3.7 mm) rests on the generator's crater profile (re-derived, unchanged) and an assumed rock
-  profile; Task 3 validates the summed surface against Guo's 4 mm (see Validation).
+- The roughness residual (3.62 mm) is matched to Guo's 4 mm median at the site on the generated surface (craters,
+  roughness, resting rock tops); its H is Guo's.
 - band_start uses the global grid's latitude spacing (1.9 km) everywhere; near the poles LOLA_16's longitude spacing
   is finer (172 m at -84.8 deg), so outside the tiles there some 0.2-1.9 km detail is both in LOLA_16 and generated.
 - Roughness is ~6 % rougher near the 8 cube corners (skewed face lattice; craters + roughness 4.09 mm there, above

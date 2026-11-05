@@ -85,6 +85,8 @@ const ROCK_PATCH_VIEW_M := 100.0  ## the patch plane (the camera shows its centr
 const ROCK_PATCH_SPACING_M := 0.3264
 const ROCK_PATCH_HORIZON_M := 20.0
 const ROCK_PATCH_MIN_D_M := 0.1  ## the smallest threshold of ROCK_STEPS: the rocks gathered
+## [D] The rock patch's eye-adaptation gain (any value != 1: the gate then tests that the rock shader applies it).
+const ROCK_PATCH_EXPOSURE_GAIN := 4.0
 const ROCKY_POINTS := [Vector2(39.3594, -0.1719), Vector2(8.1094, -53.9844), Vector2(-24.8281, -45.1406),
 		Vector2(-43.31, -11.36)]
 
@@ -113,6 +115,7 @@ var _rock_cover := 0.0  ## realised plan-view cover of the patch's rocks (D >= R
 var _rock_diameters := PackedFloat64Array()  ## the viewed square's rock diameters (the realised expectation)
 var _rock_view_edge_m := 1.0
 var _rocks_only := false
+var _rock_patch_abundance := 1.0  ## the rock patch's abundance factor (--rock_patch_abundance: a boulder-field flank)
 
 
 func _initialize() -> void:
@@ -185,6 +188,22 @@ func _rock_checks() -> void:
 	tree.setup(_heights(), null, R, material)
 	MoonRockChecks.camera_jump(tree, layer, site_fixed, _check)
 	tree.free()
+	# The same jump in the Diviner boulder field (review R3: the longest lists, chunked; the pool bound).
+	var rocky: Vector2 = ROCKY_POINTS[0]
+	var rocky_dir := CubeSphere.geodetic_direction(rocky.x, rocky.y)
+	var rocky_ground: Dictionary = _core.surface_samples_detail("moon", PackedFloat64Array([rocky.x]),
+			PackedFloat64Array([rocky.y]), 0.0, INF)
+	var rocky_fixed := rocky_dir * (R + (rocky_ground["height_m"] as PackedFloat64Array)[0] + 2.0)
+	var rocky_tree := TerrainQuadtree.new()
+	root.add_child(rocky_tree)
+	var rocky_layer := MoonRockLayer.new(_core, material)
+	rocky_layer.pixel_angle_rad = MoonRockChecks.CHECK_PIXEL_ANGLE
+	rocky_tree.rock_layer = rocky_layer
+	rocky_tree.setup(_heights(), null, R, material)
+	print("  info  boulder field (%.2f N, %.2f E, abundance %.1f): the same camera jump" % [rocky.x, rocky.y,
+			rocky_layer.abundance_at(rocky_dir)])
+	MoonRockChecks.camera_jump(rocky_tree, rocky_layer, rocky_fixed, _check)
+	rocky_tree.free()
 
 
 ## The Hapke checks; the shader parity (GPU only) continues in _process, then _finish.
@@ -685,7 +704,8 @@ func _start_parity() -> void:
 		_start_rock_patch()
 		for entry: Array in ROCK_STEPS:
 			_parity_steps.append({"kind": "rocks", "geometry": entry[0], "theta": -1.0, "size": ROCK_PATCH_VIEW_M,
-					"spacing": ROCK_PATCH_SPACING_M, "horizon": ROCK_PATCH_HORIZON_M, "abundance": 1.0, "textures": false,
+					"spacing": ROCK_PATCH_SPACING_M, "horizon": ROCK_PATCH_HORIZON_M, "abundance": _rock_patch_abundance,
+					"textures": false,
 					"sun": entry[2], "threshold": entry[1]})
 	_parity_viewport.add_child(patch)
 	_parity_camera = Camera3D.new()
@@ -851,7 +871,7 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 		var ground_v := _core.moon_unresolved_light_factors(float(entry["abundance"]), d, spacing, float(entry["horizon"]),
 				elevation, elevation)
 		var ground := ground_v.x if entry["sun"] else ground_v.y
-		var c_law := _law_drawn_cover(d)
+		var c_law := float(entry["abundance"]) * _law_drawn_cover(d)  # the law at the patch's abundance
 		var rock := (factor - exp(-c_law) * ground) / (1.0 - exp(-c_law))
 		var c_real := 0.0
 		for diameter in _rock_diameters:
@@ -878,7 +898,25 @@ func _check_detail_patch(entry: Dictionary, shader: float) -> void:
 func _start_rock_patch() -> void:
 	_core.set_moon_surface_detail(true)  # the full run switched it off for the detail-off checks; the rocks need it
 	var dir := CubeSphere.geodetic_direction(_site.x, _site.y)
-	var data := MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, ROCK_PATCH_EDGE_M, ROCK_PATCH_MIN_D_M)
+	# --rock_patch_abundance=A (review R1: the drawn / statistical balance at abundance 3, 10): the patch moves south
+	# from the boulder field ROCKY_POINTS[0] to where the abundance map has fallen to A (bisection on the meridian).
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--rock_patch_abundance="):
+			var wanted := float(arg.get_slice("=", 1))
+			var rocky: Vector2 = ROCKY_POINTS[0]
+			var near := 0.0
+			var far := 1.0  # deg south of the field
+			for k in 60:
+				var mid := 0.5 * (near + far)
+				if _rock_layer.abundance_at(CubeSphere.geodetic_direction(rocky.x - mid, rocky.y)) > wanted:
+					near = mid
+				else:
+					far = mid
+			dir = CubeSphere.geodetic_direction(rocky.x - near, rocky.y)
+			_rock_patch_abundance = _rock_layer.abundance_at(dir)
+			print("  info  rock patch at %.5f N, %.5f E: abundance %.2f (asked %.2f)" % [rocky.x - near, rocky.y,
+					_rock_patch_abundance, wanted])
+	var data :=MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, ROCK_PATCH_EDGE_M, ROCK_PATCH_MIN_D_M)
 	var viewed := MoonRockChecks.patch_rocks(_core, _rock_layer.top_z, dir, 0.5 * ROCK_PATCH_VIEW_M, ROCK_PATCH_MIN_D_M)
 	_rock_cover = float(viewed["cover"])
 	_rock_diameters = viewed["diameters"]
@@ -899,7 +937,7 @@ func _start_rock_patch() -> void:
 	white.set_pixel(0, 0, Color(1, 1, 1))
 	_rock_material.set_shader_parameter("albedo_texture", ImageTexture.create_from_image(white))
 	var abundance := Image.create(1, 1, false, Image.FORMAT_RF)
-	abundance.set_pixel(0, 0, Color(1, 0, 0))
+	abundance.set_pixel(0, 0, Color(_rock_patch_abundance, 0, 0))
 	_rock_material.set_shader_parameter("detail_rock_abundance", ImageTexture.create_from_image(abundance))
 	_rock_material.set_shader_parameter("sun_radius_m", World.SUN_RADIUS_M)
 	_rock_material.set_shader_parameter("earth_radius_m", World.EARTH_MEAN_RADIUS_M)
@@ -912,7 +950,11 @@ func _start_rock_patch() -> void:
 	_rock_patch.material_override = _rock_material
 	_rock_patch.visible = false
 	_parity_viewport.add_child(_rock_patch)
-	ShaderGlobals.set_value(&"moon_regolith_scale", PARITY_GAIN)
+	# The rocks get the eye adaptation's exposure gain like the ground (fix C): split PARITY_GAIN into a regolith scale
+	# and ROCK_PATCH_EXPOSURE_GAIN != 1, so a rock shader without the gain misses the gate by that factor.
+	ShaderGlobals.set_value(&"moon_regolith_scale", PARITY_GAIN / ROCK_PATCH_EXPOSURE_GAIN)
+	ShaderGlobals.set_value(&"atmosphere_enabled", true)
+	ShaderGlobals.set_value(&"atmosphere_exposure_gain", ROCK_PATCH_EXPOSURE_GAIN)
 	ShaderGlobals.set_value(&"moon_world_to_local", Basis.IDENTITY)
 	ShaderGlobals.set_value(&"moon_rock_threshold_px", 0.0)
 	print("  info  rock patch: %d rocks >= %.2f m over %.0f m (cover in the viewed %.0f m square: %.4f, law %.4f)" % [

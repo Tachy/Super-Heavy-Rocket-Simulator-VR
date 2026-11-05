@@ -35,6 +35,11 @@ global uniform vec3 moon_sun_position_local;
 global uniform vec3 moon_earth_position_local;
 // The Moon's local render frame from the world frame (MoonRockLayer.update, per frame): normals and light directions.
 global uniform mat3 moon_world_to_local;
+// The eye adaptation's exposure gain (atmosphere.gd), applied as terrain_moon.gdshader applies it to the lit Moon (Task
+// 11 fix C). Rocks are drawn only near a camera at the Moon, whose view ray never crosses the Earth's atmosphere: no
+// transmittance or in-scatter term (terrain_moon's is identity there).
+global uniform bool atmosphere_enabled;
+global uniform float atmosphere_exposure_gain;
 
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 // RGBA float: (normal xyz, radius r) of template t's vertex k at LOD l in texel (k, l x ROCK_TEMPLATES + t).
@@ -248,5 +253,5 @@ void fragment() {
 			+ earth_reflectance * earth_visible * moon_earthshine * earth_lit) / moon_rock_norm(abundance);
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
-	ALBEDO = albedo * relative_albedo * light;
+	ALBEDO = albedo * relative_albedo * light * (atmosphere_enabled ? atmosphere_exposure_gain : 1.0);
 }

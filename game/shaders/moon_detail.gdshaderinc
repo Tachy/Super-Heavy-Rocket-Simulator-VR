@@ -53,6 +53,8 @@ uniform vec2 detail_drawn_axis = vec2(1.0e-3, 4.0);  // drawn_table_min_spacing_
 uniform vec4 detail_rock_law = vec4(0.0);
 uniform vec4 detail_rock_shape = vec4(0.0, 1.0, 1.0, 0.0);
 uniform float detail_rock_lit_gain[46];
+// The rocks' cast shadow per cover sigma(e) on the same elevation grid (core rock_shadow: the generated angular rocks).
+uniform float detail_rock_shadow[46];
 // The abundance factor (LunarRocks::abundance_factor), equirectangular like moon_color (u = (lon + 180) / 360).
 uniform sampler2D detail_rock_abundance : filter_linear, repeat_enable;
 // Rocks drawn as geometry (Task 11, MoonRockLayer): from moon_rock_threshold_px pixels of projected size
@@ -177,6 +179,13 @@ float detail_gain(float elevation) {
 	return mix(detail_rock_lit_gain[k], detail_rock_lit_gain[k + 1], x - float(k));
 }
 
+// The rocks' cast shadow per cover sigma(e) (core rock_shadow_table; same elevation grid as the gain).
+float detail_shadow(float elevation) {
+	float x = clamp(elevation / detail_rock_shape.z, 0.0, float(DETAIL_GAIN_SAMPLES - 1));
+	int k = min(int(x), DETAIL_GAIN_SAMPLES - 2);
+	return mix(detail_rock_shadow[k], detail_rock_shadow[k + 1], x - float(k));
+}
+
 // One directional light's factor (core unresolved_light_factors' f(e)): c, c_drawn, rock_share, norm as there.
 float detail_light_factor(float c, float c_drawn, float rock_share, float norm, float unshadowed, float elevation) {
 	float se = sin(elevation);
@@ -184,9 +193,7 @@ float detail_light_factor(float c, float c_drawn, float rock_share, float norm, 
 		return 0.0;
 	}
 	float lit = detail_smith(tan(elevation), unshadowed);
-	float cot = sqrt(max(1.0 - se * se, 0.0)) / se;
-	float eta = detail_rock_shape.x;
-	float sigma = 0.5 * (sqrt(1.0 + 4.0 * eta * eta * cot * cot) - 1.0);
+	float sigma = detail_shadow(elevation);
 	return lit * (exp(-c * (1.0 + sigma) - c_drawn * sigma) + rock_share * detail_rock_shape.y * detail_gain(elevation))
 			/ norm;
 }

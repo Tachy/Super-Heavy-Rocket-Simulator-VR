@@ -14,10 +14,12 @@ extends RefCounted
 ##
 ## Main thread (TerrainQuadtree): attach() at the node's upload only queues the node (its terrain material keeps
 ## rock_node_min_m = 1e30: every rock statistical, radiance-continuous); process_queue() (each quadtree update) attaches
-## queued nodes within ATTACH_BUDGET_US per frame, taking preallocated MultiMeshes from a pool of power-of-two capacity
-## buckets (a buffer upload, no allocation; at most ALLOCATIONS_PER_FRAME new pool entries per frame) and pooled
-## materials; the quadtree shows a node's children only once their rocks are attached (no rock pops at a split).
-## detach() at the node's release returns everything to the pools.
+## queued nodes within ATTACH_BUDGET_US per frame, taking preallocated MultiMeshes from a pool of half-octave capacity
+## buckets (a buffer upload, no allocation; at most ALLOCATIONS_PER_FRAME new pool entries per frame; lists longer than
+## BUCKET_MAX come as several chunks) and pooled materials; the quadtree shows a node's children only once their rocks
+## are attached (no rock pops at a split). A split node's hidden rock lists go back to the pools (park) and are queued
+## again before it merges (ready_to_merge; the quadtree keeps the children drawn until then). The pool is bounded
+## (POOL_MAX_MB; idle free entries trimmed). detach() at the node's release returns everything to the pools.
 ##
 ## The node's list limit: rocks smaller than ROCK_PIXEL_THRESHOLD pixels x the abundance load factor at the nearest
 ## distance the camera can have to a drawn leaf of that level (NODE_NEAR_FACTOR x its size: it splits at
@@ -89,13 +91,27 @@ const COUNTS_BUDGET_US := 500
 ## pool MultiMeshes per frame (a fresh GPU buffer; the rest of the attaches only upload into pooled ones).
 const ATTACH_BUDGET_US := 2000
 const ALLOCATIONS_PER_FRAME := 12
-## Pool buckets per LOD: capacities BUCKET_MIN x 2^k up to BUCKET_MAX instances; larger LOD lists get an exact,
-## unpooled MultiMesh (counted in stats.unpooled). Key = LOD x POOL_KEY_PER_LOD + capacity (pool_key).
+## Pool buckets per LOD: capacities BUCKET_MIN x 2^(k/2) (half-octave steps: padding waste < 41 %, ~17 % mean; review
+## R3) up to BUCKET_MAX instances; a longer LOD list is split on the worker into BUCKET_MAX chunks, each a pooled
+## MultiMesh (no exact, unpooled allocation on the main thread). Key = LOD x POOL_KEY_PER_LOD + capacity (pool_key).
 const BUCKET_MIN := 64
 const BUCKET_MAX := 16384
 const POOL_KEY_PER_LOD := 1000000
+## [E] Bound of the pool's GPU buffers (review R3: ~2 % of the user's 24 GB). An attach that would exceed it first
+## trims free pool entries; if still over, the queued node stays statistical (its rocks in the ground's statistical
+## layer: radiance-continuous), counted in stats.over_bound_nodes and logged.
+const POOL_MAX_MB := 512.0
+## [E] Free pool entries beyond the key's prewarm count are released once their key saw no take for TRIM_IDLE_S, one
+## per frame.
+const TRIM_IDLE_S := 10.0
+## [E] Free entries released per frame to make room under the bound (each a queued GPU buffer release).
+const TRIM_PER_FRAME := 16
+## [E] The pools warm only below this height above the Moon's mean sphere (not from orbit).
+const PREWARM_MAX_HEIGHT_M := 50000.0
 ## [E, measured: Task 11 fix B report, IM-2 2 m camera jump] Pool entries allocated at start-up per pool key (about the
 ## peak use after a 10 km jump; the pool grows beyond on demand within the attach budget, ~0.15 ms per allocation).
+## Measured with power-of-two buckets: each count is split half and half between its bucket and the half-octave bucket
+## below (_init).
 const PREWARM := {64: 290, 1000064: 1160, 2000064: 1660, 3000064: 460, 3000128: 620, 3000256: 570, 3000512: 160,
 		4000064: 200, 4000128: 80, 4000256: 170, 4000512: 320, 4001024: 560, 4002048: 680}
 const PREWARM_MATERIALS := 1500
@@ -107,6 +123,7 @@ const COPIED_NODE_PARAMETERS: Array[StringName] = [&"horizon_map", &"horizon_str
 		&"horizon_enabled", &"horizon_grid_scale", &"horizon_grid_offset", &"detail_cell_m", &"detail_horizon_spacing_m"]
 const COPIED_TEMPLATE_PARAMETERS: Array[StringName] = [&"detail_shading", &"detail_total_slope_variance",
 		&"detail_drawn_table", &"detail_drawn_axis", &"detail_rock_law", &"detail_rock_shape", &"detail_rock_lit_gain",
+		&"detail_rock_shadow",
 		&"detail_rock_abundance", &"albedo_texture", &"sun_radius_m", &"earth_radius_m"]
 
 ## Diagnostics switches (render_check): rocks drawn at all (false: every rock statistical, no lists built) and the
@@ -144,6 +161,8 @@ var _list: Array = []
 var _cursor := 0
 var _cycle_work := 0  ## drawn vertices summed over the visible entries in the current round-robin cycle
 var _drawn_vertices := 0  ## the last full cycle's sum
+var _cycle_min_factor := INF  ## the lowest load factor of the visible entries in the current cycle
+var _min_visible_factor := INF  ## the last full cycle's (INF: none seen yet)
 ## Attach queue: mesh instance id -> [instance, rocks, terrain material] (FIFO order in _queue_order).
 var _queue := {}
 var _queue_order: Array[int] = []
@@ -153,7 +172,16 @@ var _free_materials: Array[ShaderMaterial] = []
 var _in_use := {}  ## pool key -> pooled MultiMeshes attached now
 var _prewarm_left := {}  ## pool key -> entries still to allocate (_prewarm_step)
 var _prewarm_materials_left := 0
+var _prewarm_target := {}  ## pool key -> its prewarm count (the trim keeps that many free entries)
+var _last_take_ms := {}  ## pool key -> Time.get_ticks_msec() of its last take
 var _allocations_this_frame := 0
+var _frame_upload_bytes := 0  ## MultiMesh buffer bytes uploaded by this frame's attaches
+var _trimmed_this_frame := 0
+## Hidden split parents whose rock lists were released (park): mesh instance id -> [rocks, terrain material]; requeued
+## when the node is about to merge (ready_to_merge).
+var _parked := {}
+var _height_m := 0.0  ## camera height above the Moon's mean sphere (update(); 0 until known: the pools may warm)
+var _logged_bound := 0
 
 
 ## Template meshes and textures from the core, the material template from the Moon terrain's (its detail uniforms,
@@ -171,15 +199,24 @@ func _init(starsim_core: StarsimCore, terrain_template: ShaderMaterial, prewarm 
 	var law: Variant = terrain_template.get_shader_parameter("detail_rock_law")
 	_cover_exponent = (law as Vector4).y if law is Vector4 else 0.0
 	_load_textures()
+	for key: int in PREWARM:
+		var capacity := key % POOL_KEY_PER_LOD
+		var count: int = PREWARM[key]
+		var lower := bucket_capacity(int(capacity * 0.7071)) if capacity > BUCKET_MIN else capacity
+		var lower_key := key - capacity + lower
+		var upper := count - count / 2 if lower != capacity else count
+		_prewarm_target[key] = int(_prewarm_target.get(key, 0)) + upper
+		if lower != capacity:
+			_prewarm_target[lower_key] = int(_prewarm_target.get(lower_key, 0)) + count / 2
 	if prewarm and geometry_enabled:
-		_prewarm_left = PREWARM.duplicate()
+		_prewarm_left = _prewarm_target.duplicate()
 		_prewarm_materials_left = PREWARM_MATERIALS
 
 
 ## Warms the pools off the critical path (process_queue, once the Moon terrain is active): pool entries and materials
 ## until PREWARM_BUDGET_US of this frame is spent. True while some are left.
 func _prewarm_step() -> bool:
-	if _prewarm_left.is_empty() and _prewarm_materials_left <= 0:
+	if (_prewarm_left.is_empty() and _prewarm_materials_left <= 0) or _height_m > PREWARM_MAX_HEIGHT_M:
 		return false
 	var start_us := Time.get_ticks_usec()
 	while Time.get_ticks_usec() - start_us < PREWARM_BUDGET_US:
@@ -428,19 +465,20 @@ func node_abundance(key: Vector4i) -> float:
 	return lowest
 
 
-## Pool bucket capacity for a LOD list of n instances (0: unpooled, n itself).
+## Pool bucket capacity for a list (chunk) of n <= BUCKET_MAX instances: the smallest BUCKET_MIN x 2^(k/2) >= n.
 static func bucket_capacity(n: int) -> int:
-	if n > BUCKET_MAX:
-		return 0
+	var k := 0
 	var capacity := BUCKET_MIN
-	while capacity < n:
-		capacity *= 2
-	return capacity
+	while capacity < n and capacity < BUCKET_MAX:
+		k += 1
+		capacity = roundi(BUCKET_MIN * pow(2.0, 0.5 * k))
+	return mini(capacity, BUCKET_MAX)
 
 
-## Worker: the node's rock list as MultiMesh buffers. {node_min_m, count, buffers: Array[PackedFloat32Array] per LOD
-## (zero-padded to capacities[lod] instances), counts, capacities: PackedInt32Array, aabb (node-local render axes), ids,
-## build_ms, minus_d, factor}; {} without the geometry.
+## Worker: the node's rock list as MultiMesh buffers. {node_min_m, count, buffers: per LOD an Array of chunk buffers
+## (PackedFloat32Array, <= BUCKET_MAX instances each, zero-padded to capacities[lod][chunk]), counts (per LOD),
+## chunk_counts / capacities (per LOD: PackedInt32Array per chunk), aabb (node-local render axes), ids, build_ms,
+## minus_d (per LOD, the whole list), factor}; {} without the geometry.
 func build_node(key: Vector4i, center_fixed: Vector3, radius_m: float) -> Dictionary:
 	if not geometry_enabled:
 		return {}
@@ -537,16 +575,33 @@ func build_node(key: Vector4i, center_fixed: Vector3, radius_m: float) -> Dictio
 		var origin := Vector3(o.y, o.z, o.x)
 		lo = lo.min(origin - reach)
 		hi = hi.max(origin + reach)
-	# Zero-pad each list to its pool bucket (the main thread only uploads; zero transforms draw nothing).
-	var capacities := PackedInt32Array()
+	# Split each list into chunks of at most BUCKET_MAX and zero-pad each chunk to its pool bucket (the main thread only
+	# uploads; zero transforms draw nothing).
+	var chunks: Array = []  # per LOD: Array of PackedFloat32Array
+	var chunk_counts: Array = []  # per LOD: PackedInt32Array
+	var capacities: Array = []  # per LOD: PackedInt32Array
 	for lod in LODS:
-		var capacity := bucket_capacity(counts[lod]) if counts[lod] > 0 else 0
-		capacities.append(capacity)
-		if capacity > counts[lod]:
-			var pad := PackedFloat32Array()
-			pad.resize((capacity - counts[lod]) * FLOATS_PER_INSTANCE)
-			pad.fill(0.0)
-			buffers[lod].append_array(pad)
+		var lod_chunks: Array[PackedFloat32Array] = []
+		var lod_counts := PackedInt32Array()
+		var lod_capacities := PackedInt32Array()
+		var start := 0
+		while start < counts[lod]:
+			var n_chunk := mini(BUCKET_MAX, counts[lod] - start)
+			var capacity := bucket_capacity(n_chunk)
+			var chunk: PackedFloat32Array = buffers[lod] if n_chunk == counts[lod] else buffers[lod].slice(
+					start * FLOATS_PER_INSTANCE, (start + n_chunk) * FLOATS_PER_INSTANCE)
+			if capacity > n_chunk:
+				var pad := PackedFloat32Array()
+				pad.resize((capacity - n_chunk) * FLOATS_PER_INSTANCE)
+				pad.fill(0.0)
+				chunk.append_array(pad)
+			lod_chunks.append(chunk)
+			lod_counts.append(n_chunk)
+			lod_capacities.append(capacity)
+			start += n_chunk
+		chunks.append(lod_chunks)
+		chunk_counts.append(lod_counts)
+		capacities.append(lod_capacities)
 	var ms := (Time.get_ticks_usec() - start_us) * 1.0e-3
 	_stats_mutex.lock()
 	stats["nodes_built"] += 1
@@ -555,8 +610,9 @@ func build_node(key: Vector4i, center_fixed: Vector3, radius_m: float) -> Dictio
 	stats["max_node_ms"] = maxf(stats["max_node_ms"], ms)
 	stats["max_node_rocks"] = maxi(stats["max_node_rocks"], n)
 	_stats_mutex.unlock()
-	return {"node_min_m": min_d, "count": n, "buffers": buffers, "counts": counts, "capacities": capacities,
-			"aabb": AABB(lo, hi - lo), "ids": ids, "build_ms": ms, "minus_d": minus_d, "factor": factor}
+	return {"node_min_m": min_d, "count": n, "buffers": chunks, "counts": counts, "chunk_counts": chunk_counts,
+			"capacities": capacities, "aabb": AABB(lo, hi - lo), "ids": ids, "build_ms": ms, "minus_d": minus_d,
+			"factor": factor}
 
 
 ## Main thread, at the node's upload: the node's terrain material starts with every rock statistical; a node with rocks
@@ -577,16 +633,46 @@ func is_pending(instance: MeshInstance3D) -> bool:
 	return _queue.has(instance.get_instance_id())
 
 
-## Main thread, once per quadtree update: queued nodes attached in FIFO order until ATTACH_BUDGET_US is spent (at least
-## one when nothing is over budget) or the pool cannot grow further this frame.
+## Main thread, when a split node's four children are drawn (TerrainQuadtree): the hidden parent's rock lists go back to
+## the pools (review R3: hidden ancestors held most of the pool); its worker lists are kept for ready_to_merge.
+func park(instance: MeshInstance3D) -> void:
+	var id := instance.get_instance_id()
+	var entry: Dictionary = _entries.get(id, {})
+	if entry.is_empty():
+		return  # no rocks, or still queued (it attaches and stays until the next split)
+	var start_us := Time.get_ticks_usec()
+	_parked[id] = [entry["rocks"], entry["terrain_material"]]
+	_remove_entry(instance, entry)
+	(entry["terrain_material"] as ShaderMaterial).set_shader_parameter("rock_node_min_m", 1.0e30)
+	stats["parked_nodes"] = _parked.size()
+	stats["main_ms"] += (Time.get_ticks_usec() - start_us) * 1.0e-3
+
+
+## Main thread, before a split node merges (TerrainQuadtree): true when its rocks are attached; a parked node is queued
+## again (false until attached: the quadtree keeps its children drawn meanwhile, as at a split).
+func ready_to_merge(instance: MeshInstance3D) -> bool:
+	var id := instance.get_instance_id()
+	if _parked.has(id):
+		var parked: Array = _parked[id]
+		_parked.erase(id)
+		stats["parked_nodes"] = _parked.size()
+		attach(instance, parked[0], parked[1])
+		return false
+	return not _queue.has(id)
+
+
+## Main thread, once per quadtree update: the pool warming and trimming, then queued nodes attached in FIFO order until
+## ATTACH_BUDGET_US is spent (at least one when nothing is over budget) or the pool cannot grow further this frame. A node
+## whose attach would take the pool over POOL_MAX_MB (after trimming free entries) stays statistical.
 func process_queue() -> void:
 	_allocations_this_frame = 0
+	_trimmed_this_frame = 0
+	_frame_upload_bytes = 0
 	var start_us := Time.get_ticks_usec()  # the warming shares the attach budget
 	var warm_us := start_us
 	_prewarm_step()
-	if _queue_order.is_empty():
-		return
 	warm_us = Time.get_ticks_usec() - warm_us
+	_trim_idle()
 	var done := 0
 	while not _queue_order.is_empty():
 		if done > 0 and Time.get_ticks_usec() - start_us >= ATTACH_BUDGET_US:
@@ -596,31 +682,97 @@ func process_queue() -> void:
 		if item.is_empty():
 			_queue_order.pop_front()
 			continue
-		if not _can_attach(item[1]):
+		var verdict := _can_attach(item[1])
+		if verdict == ATTACH_WAIT:
 			break  # the pool may grow by ALLOCATIONS_PER_FRAME per frame: wait for the next frame
 		_queue_order.pop_front()
 		_queue.erase(id)
+		done += 1  # a node kept statistical counts too: the loop stays inside the frame's budget
+		if verdict == ATTACH_OVER_BOUND:
+			stats["over_bound_nodes"] = int(stats.get("over_bound_nodes", 0)) + 1
+			continue  # its terrain material keeps rock_node_min_m = 1e30: every rock statistical
 		_attach_now(item[0], item[1], item[2])
-		done += 1
+	var over := int(stats.get("over_bound_nodes", 0))
+	if over > _logged_bound:
+		print("[MoonRockLayer] pool at its %.0f MB bound: %d nodes kept statistical so far (pool %.0f MB)" % [
+				POOL_MAX_MB, over, float(stats["pool_mb"])])
+		_logged_bound = over * 2  # log again when it doubled
 	stats["queued"] = _queue.size()
+	# Review m3: the buffer bytes this frame's attaches uploaded (against the RenderingDevice staging pool).
+	stats["max_frame_upload_mb"] = maxf(float(stats.get("max_frame_upload_mb", 0.0)), _frame_upload_bytes / 1048576.0)
 	stats["main_ms"] += (Time.get_ticks_usec() - start_us - warm_us) * 1.0e-3  # the warming counted itself
 
 
-## Whether every LOD list of the node finds a pooled MultiMesh or may allocate one this frame.
-func _can_attach(rocks: Dictionary) -> bool:
-	var capacities: PackedInt32Array = rocks["capacities"]
-	var counts: PackedInt32Array = rocks["counts"]
-	var needed := 0
+const ATTACH_NOW := 0
+const ATTACH_WAIT := 1
+const ATTACH_OVER_BOUND := 2
+
+
+## Whether every chunk of the node finds a pooled MultiMesh or may allocate one this frame (ATTACH_NOW / ATTACH_WAIT),
+## or whether the allocations would take the pool over POOL_MAX_MB even after trimming free entries (ATTACH_OVER_BOUND).
+func _can_attach(rocks: Dictionary) -> int:
+	var capacities: Array = rocks["capacities"]
 	var wanted := {}
 	for lod in LODS:
-		if counts[lod] == 0:
-			continue
-		var key := pool_key(lod, capacities[lod])
-		wanted[key] = int(wanted.get(key, 0)) + 1
+		for capacity: int in capacities[lod]:
+			var key := pool_key(lod, capacity)
+			wanted[key] = int(wanted.get(key, 0)) + 1
+	var needed := 0
+	var needed_instances := 0
 	for key: int in wanted:
 		var free: Array = _free.get(key, [])
-		needed += maxi(int(wanted[key]) - (free.size() if key % POOL_KEY_PER_LOD > 0 else 0), 0)
-	return needed == 0 or _allocations_this_frame + needed <= ALLOCATIONS_PER_FRAME
+		var missing := maxi(int(wanted[key]) - free.size(), 0)
+		needed += missing
+		needed_instances += missing * (key % POOL_KEY_PER_LOD)
+	if needed == 0:
+		return ATTACH_NOW
+	var over_mb := _mb(int(stats["pool_instances"]) + needed_instances) - POOL_MAX_MB
+	if over_mb > 0.0:
+		var freeable := _trim_free(over_mb, wanted)
+		if _mb(int(stats["pool_instances"]) + needed_instances) > POOL_MAX_MB:
+			# More free entries left than this frame may release: try again next frame; none left: over the bound.
+			return ATTACH_WAIT if freeable else ATTACH_OVER_BOUND
+	return ATTACH_NOW if _allocations_this_frame + needed <= ALLOCATIONS_PER_FRAME else ATTACH_WAIT
+
+
+static func _mb(instances: int) -> float:
+	return instances * FLOATS_PER_INSTANCE * 4.0 / 1048576.0
+
+
+## Frees free pool entries of other keys than `keep` (largest buckets first) until at least `mb` are released, at most
+## TRIM_PER_FRAME per frame. True while free entries of other keys are left (the bound can still be met later).
+func _trim_free(mb: float, keep: Dictionary) -> bool:
+	var keys := _free.keys()
+	keys.sort_custom(func(a: int, b: int) -> bool: return a % POOL_KEY_PER_LOD > b % POOL_KEY_PER_LOD)
+	var freed := 0.0
+	var left := false
+	for key: int in keys:
+		if keep.has(key):
+			continue
+		var free: Array = _free[key]
+		while not free.is_empty() and freed < mb and _trimmed_this_frame < TRIM_PER_FRAME:
+			_free_entry(free.pop_back(), key)
+			freed += _mb(key % POOL_KEY_PER_LOD)
+			_trimmed_this_frame += 1
+		left = left or not free.is_empty()
+	return left
+
+
+## One free entry beyond its key's prewarm count, of a key without a take for TRIM_IDLE_S, released per frame.
+func _trim_idle() -> void:
+	var now := Time.get_ticks_msec()
+	for key: int in _free:
+		var free: Array = _free[key]
+		if free.size() > int(_prewarm_target.get(key, 0)) and now - int(_last_take_ms.get(key, 0)) > TRIM_IDLE_S * 1000.0:
+			_free_entry(free.pop_back(), key)
+			stats["trimmed"] = int(stats.get("trimmed", 0)) + 1
+			return
+
+
+func _free_entry(node: MultiMeshInstance3D, key: int) -> void:
+	stats["pool_instances"] -= key % POOL_KEY_PER_LOD
+	stats["pool_mb"] = _mb(int(stats["pool_instances"]))
+	node.queue_free()
 
 
 ## Pool key of a LOD's bucket: a pooled MultiMesh keeps its LOD mesh for life (setting MultiMesh.mesh on a filled
@@ -640,36 +792,42 @@ func _attach_now(instance: MeshInstance3D, rocks: Dictionary, terrain_material: 
 	material.set_shader_parameter("node_center_local", instance.position)
 	var t_material := Time.get_ticks_usec()
 	var buffers: Array = rocks["buffers"]
-	var counts: PackedInt32Array = rocks["counts"]
-	var capacities: PackedInt32Array = rocks["capacities"]
+	var chunk_counts: Array = rocks["chunk_counts"]
+	var capacities: Array = rocks["capacities"]
 	var aabb: AABB = rocks["aabb"]
 	var minus_d: Array = rocks["minus_d"]
 	var entry := {"instance": instance, "center": instance.position + aabb.get_center(), "factor": rocks["factor"],
 			"half_diagonal": 0.5 * aabb.size.length(), "node_min_m": min_d, "lods": [], "material": material,
-			"work": 0}
+			"work": 0, "rocks": rocks, "terrain_material": terrain_material}
 	var t_mm := 0
 	var t_take := 0
 	var t_buffer := 0
 	for lod in LODS:
-		if counts[lod] == 0:
-			continue
-		var t0 := Time.get_ticks_usec()
-		var key := pool_key(lod, capacities[lod])
-		var node := _take(lod, capacities[lod], counts[lod])
-		var multimesh := node.multimesh
-		var t1 := Time.get_ticks_usec()
-		RenderingServer.multimesh_set_buffer(multimesh.get_rid(), buffers[lod])
-		var t2 := Time.get_ticks_usec()
-		multimesh.custom_aabb = aabb
-		multimesh.visible_instance_count = counts[lod]
-		node.material_override = material
-		instance.add_child(node)
-		t_mm += Time.get_ticks_usec() - t0
-		t_take += t1 - t0
-		t_buffer += t2 - t1
-		(entry["lods"] as Array).append([multimesh, minus_d[lod], lod, node, key])
-		entry["work"] = int(entry["work"]) + counts[lod] * LOD_VERTICES[lod]
-		stats["attached_instances"] += counts[lod]
+		var lod_counts: PackedInt32Array = chunk_counts[lod]
+		var offset := 0
+		for c in lod_counts.size():
+			var t0 := Time.get_ticks_usec()
+			var capacity: int = (capacities[lod] as PackedInt32Array)[c]
+			var key := pool_key(lod, capacity)
+			var node := _take(lod, capacity)
+			var multimesh := node.multimesh
+			var t1 := Time.get_ticks_usec()
+			var chunk: PackedFloat32Array = (buffers[lod] as Array)[c]
+			RenderingServer.multimesh_set_buffer(multimesh.get_rid(), chunk)
+			_frame_upload_bytes += chunk.size() * 4
+			var t2 := Time.get_ticks_usec()
+			multimesh.custom_aabb = aabb
+			multimesh.visible_instance_count = lod_counts[c]
+			node.material_override = material
+			instance.add_child(node)
+			t_mm += Time.get_ticks_usec() - t0
+			t_take += t1 - t0
+			t_buffer += t2 - t1
+			# [MultiMesh, -D of the whole LOD list, lod, node, pool key, first list index, instances in the chunk]
+			(entry["lods"] as Array).append([multimesh, minus_d[lod], lod, node, key, offset, lod_counts[c]])
+			entry["work"] = int(entry["work"]) + lod_counts[c] * LOD_VERTICES[lod]
+			stats["attached_instances"] += lod_counts[c]
+			offset += lod_counts[c]
 	terrain_material.set_shader_parameter("rock_node_min_m", min_d)
 	stats["attached_nodes"] += 1
 	var total_ms := (Time.get_ticks_usec() - start_us) * 1.0e-3
@@ -685,16 +843,12 @@ func _attach_now(instance: MeshInstance3D, rocks: Dictionary, terrain_material: 
 	_entries[instance.get_instance_id()] = entry
 
 
-## A pooled MultiMeshInstance3D of the LOD and capacity (allocated when the bucket is empty; capacity 0: an exact
-## unpooled one).
-func _take(lod: int, capacity: int, count: int) -> MultiMeshInstance3D:
-	if capacity == 0:
-		stats["unpooled"] += 1
-		_allocations_this_frame += 1
-		return _allocate(lod, count)
+## A pooled MultiMeshInstance3D of the LOD and capacity (allocated when the bucket is empty).
+func _take(lod: int, capacity: int) -> MultiMeshInstance3D:
 	var key := pool_key(lod, capacity)
 	var used := int(_in_use.get(key, 0)) + 1
 	_in_use[key] = used
+	_last_take_ms[key] = Time.get_ticks_msec()
 	var peak: Dictionary = stats["bucket_peak"]
 	peak[key] = maxi(int(peak.get(key, 0)), used)
 	var free: Array = _free.get(key, [])
@@ -725,17 +879,13 @@ func _allocate_now(lod: int, capacity: int) -> MultiMeshInstance3D:
 	node.set_meta(&"moon_rocks", true)
 	stats["allocations"] += 1
 	stats["pool_instances"] += capacity
-	stats["pool_mb"] = float(stats["pool_instances"]) * FLOATS_PER_INSTANCE * 4.0 / 1048576.0
+	stats["pool_mb"] = _mb(int(stats["pool_instances"]))
+	stats["pool_peak_mb"] = maxf(float(stats.get("pool_peak_mb", 0.0)), float(stats["pool_mb"]))
 	return node
 
 
 func _release_to_pool(node: MultiMeshInstance3D, key: int) -> void:
 	node.multimesh.visible_instance_count = 0
-	if key % POOL_KEY_PER_LOD == 0:  # unpooled
-		stats["pool_instances"] -= node.multimesh.instance_count
-		stats["pool_mb"] = float(stats["pool_instances"]) * FLOATS_PER_INSTANCE * 4.0 / 1048576.0
-		node.queue_free()
-		return
 	if not _free.has(key):
 		_free[key] = []
 	(_free[key] as Array).append(node)
@@ -743,30 +893,37 @@ func _release_to_pool(node: MultiMeshInstance3D, key: int) -> void:
 		_in_use[key] = maxi(int(_in_use[key]) - 1, 0)
 
 
-## Main thread, at the node's release: its queue entry dropped or its rock instances returned to the pools (the mesh
-## instance returns to the quadtree's pool).
+## Main thread, at the node's release: its queue entry dropped, its parked lists forgotten, or its rock instances returned
+## to the pools (the mesh instance returns to the quadtree's pool).
 func detach(instance: MeshInstance3D) -> void:
 	var start_us := Time.get_ticks_usec()
 	var id := instance.get_instance_id()
 	_queue.erase(id)  # its _queue_order slot is skipped
+	if _parked.erase(id):
+		stats["parked_nodes"] = _parked.size()
 	var entry: Dictionary = _entries.get(id, {})
 	if not entry.is_empty():
-		var index: int = entry["index"]
-		var last: Dictionary = _list.back()
-		_list[index] = last
-		last["index"] = index
-		_list.pop_back()
-		_entries.erase(id)
-		for item: Array in entry["lods"]:
-			var node: MultiMeshInstance3D = item[3]
-			stats["attached_instances"] -= (item[1] as PackedFloat32Array).size()
-			instance.remove_child(node)
-			node.material_override = null
-			_release_to_pool(node, int(item[4]))
-		_free_materials.append(entry["material"])
-		stats["attached_nodes"] -= 1
+		_remove_entry(instance, entry)
 	stats["queued"] = _queue.size()
 	stats["main_ms"] += (Time.get_ticks_usec() - start_us) * 1.0e-3
+
+
+## An attached node's MultiMeshes and material back to the pools, the entry out of the lists.
+func _remove_entry(instance: MeshInstance3D, entry: Dictionary) -> void:
+	var index: int = entry["index"]
+	var last: Dictionary = _list.back()
+	_list[index] = last
+	last["index"] = index
+	_list.pop_back()
+	_entries.erase(instance.get_instance_id())
+	for item: Array in entry["lods"]:
+		var node: MultiMeshInstance3D = item[3]
+		stats["attached_instances"] -= int(item[6])
+		instance.remove_child(node)
+		node.material_override = null
+		_release_to_pool(node, int(item[4]))
+	_free_materials.append(entry["material"])
+	stats["attached_nodes"] -= 1
 
 
 ## The rock MultiMeshes attached to a quadtree node instance (tests; the LOD is the mesh's CUSTOM0.x).
@@ -782,7 +939,9 @@ static func attached(instance: MeshInstance3D) -> Array:
 ## the load factor at the camera, the globals moon_rock_pixel_angle / moon_rock_threshold_px / moon_world_to_local.
 func update(viewport: Viewport, moon_local_to_world: Basis, delta_s: float, camera_fixed_m := Vector3.ZERO) -> void:
 	pixel_angle_rad = pixel_angle(viewport)
-	var factor := abundance_threshold_factor(abundance_at(camera_fixed_m)) if camera_fixed_m != Vector3.ZERO else 1.0
+	if camera_fixed_m != Vector3.ZERO:
+		_height_m = camera_fixed_m.length() - Atmosphere.MOON_RADIUS_M
+	var factor :=abundance_threshold_factor(abundance_at(camera_fixed_m)) if camera_fixed_m != Vector3.ZERO else 1.0
 	stats["load_factor"] = factor
 	var rock_ms := _drawn_vertices * ROCK_NS_PER_VERTEX * 1.0e-6
 	stats["rock_gpu_ms_estimate"] = rock_ms
@@ -794,10 +953,11 @@ func update(viewport: Viewport, moon_local_to_world: Basis, delta_s: float, came
 			_measuring = true
 		gpu_ms = RenderingServer.viewport_get_measured_render_time_gpu(viewport.get_viewport_rid())
 		stats["gpu_ms"] = gpu_ms
-		# The effective threshold is 1.5 px x max(scale, load factor): a rise starts from the load factor at the camera
-		# (below it the scale changes nothing there).
-		if gpu_ms > GPU_FLOOR_MS and gpu_ms - rock_ms < GPU_FLOOR_MS and threshold_scale < factor:
-			threshold_scale = minf(factor, SCALE_MAX)
+		# The effective threshold is 1.5 px x max(scale, load factor): a rise starts from the lowest load factor of the
+		# visible nodes (below it the scale changes nothing anywhere in view, so the jump pops no rock; review m4).
+		var floor_factor := minf(factor, _min_visible_factor)
+		if gpu_ms > GPU_FLOOR_MS and gpu_ms - rock_ms < GPU_FLOOR_MS and threshold_scale < floor_factor:
+			threshold_scale = minf(floor_factor, SCALE_MAX)
 		threshold_scale = budget_step(threshold_scale, gpu_ms, GPU_FLOOR_MS, delta_s, rock_ms)
 		var terrain_over := gpu_ms - rock_ms >= GPU_FLOOR_MS
 		if terrain_over:
@@ -841,13 +1001,16 @@ func _update_visible_counts(camera_render: Vector3) -> void:
 		if k % 32 == 31 and Time.get_ticks_usec() - start_us > COUNTS_BUDGET_US:
 			_cursor = index  # continue here next frame
 			return
-		if index == 0:  # a cycle completed: publish its sum
+		if index == 0:  # a cycle completed: publish its sums
 			_drawn_vertices = _cycle_work
 			_cycle_work = 0
+			_min_visible_factor = _cycle_min_factor
+			_cycle_min_factor = INF
 		var entry: Dictionary = _list[index]
 		var instance: MeshInstance3D = entry["instance"]
 		if not instance.visible:
 			continue
+		_cycle_min_factor = minf(_cycle_min_factor, float(entry["factor"]))
 		var last_near: float = entry["near"]
 		if entry["threshold"] == scale_rad and (entry["camera"] as Vector3).distance_squared_to(camera_render) \
 				< COUNTS_MOVE_FRACTION * COUNTS_MOVE_FRACTION * last_near * last_near:
@@ -865,7 +1028,8 @@ func _update_visible_counts(camera_render: Vector3) -> void:
 			var multimesh: MultiMesh = item[0]
 			var minus_d: PackedFloat32Array = item[1]
 			var lod := int(item[2])
-			var count := minus_d.bsearch(-maxf(cut, LOD_MIN_PX[lod] * per_px * near), false)
+			var listed := minus_d.bsearch(-maxf(cut, LOD_MIN_PX[lod] * per_px * near), false)
+			var count := clampi(listed - int(item[5]), 0, int(item[6]))  # this chunk's share of the visible prefix
 			if multimesh.visible_instance_count != count:
 				multimesh.visible_instance_count = count
 			work += count * LOD_VERTICES[lod]

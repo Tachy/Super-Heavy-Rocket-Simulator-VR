@@ -250,6 +250,8 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 		if node.can_split and node.center_fixed.distance_squared_to(camera) \
 				< (node.merge_distance_sq if node.split else node.split_distance_sq):
 			_split_or_draw(node)
+		elif node.split:
+			_merge_or_keep(node)
 		else:
 			_draw_leaf(node)
 	_reached_count += _roots.size()
@@ -336,6 +338,8 @@ func _split_or_draw(node: _Node) -> void:
 	if not node.split:
 		node.split = true
 		_selection_changed = true
+		if rock_layer != null:
+			rock_layer.park(node.instance)  # hidden from now on: its rock lists back to the pools
 	var camera := _camera_fixed_m
 	for child in node.children:
 		child.reached_frame = _frame
@@ -343,10 +347,19 @@ func _split_or_draw(node: _Node) -> void:
 				< (child.merge_distance_sq if child.split else child.split_distance_sq):
 			_split_or_draw(child)
 		elif child.split:
-			_draw_leaf(child)
+			_merge_or_keep(child)
 		else:
 			_drawn.append(child)
 	_reached_count += 4
+
+
+## A split node beyond its merge distance merges once its rocks are attached again (MoonRockLayer.ready_to_merge queues
+## a parked node's lists); until then it stays split, so the children's rocks do not vanish before the parent's appear.
+func _merge_or_keep(node: _Node) -> void:
+	if rock_layer != null and not rock_layer.ready_to_merge(node.instance):
+		_split_or_draw(node)
+	else:
+		_draw_leaf(node)
 
 
 ## A drawn leaf; a node that was split merges (its children are no longer reached and are freed this frame).

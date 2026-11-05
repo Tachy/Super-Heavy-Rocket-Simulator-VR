@@ -529,10 +529,9 @@ credit = "Y. Guo et al. 2021, Geophys. Res. Lett. 48, e2021GL094931 (regolith ro
 
 [[source]]
 id = "lroc_wac_hapke_parameter_map"
-name = "LROC WAC Hapke photometric parameter maps, WAC_HAPKEPARAMMAP_643NM (1 deg; Sato et al. 2014) - the Hapke parameters of config/moon_surface.toml are medians of this map"
-url = "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/WAC_HAPKEPARAMMAP/"
-target = "config/moon_surface.toml"
-kind = "licence_only"
+name = "LROC WAC Hapke photometric parameter maps, WAC_HAPKEPARAMMAP_643NM (1 deg; Sato et al. 2014) - the Hapke parameters of config/moon_surface.toml are medians of this map; its w band sets the large-scale albedo of data/textures/moon_color.png (prepare.py)"
+url = "https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/WAC_HAPKEPARAMMAP/WAC_HAPKEPARAMMAP_643NM.IMG"
+target = "data/raw/WAC_HAPKEPARAMMAP_643NM.IMG"
 license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
 credit = "H. Sato, M. S. Robinson, B. Hapke, B. W. Denevi, A. K. Boyd (2014), Resolved Hapke parameter maps of the Moon, JGR Planets 119, 1775-1805; LROC team (ASU), NASA PDS"
 

@@ -44,6 +44,7 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 	material.set_shader_parameter("detail_rock_shape", Vector4(float(stats["rock_exposed_height_per_diameter"]),
 			float(stats["rock_reflectance_ratio"]), float(stats["lit_gain_step_rad"]), float(stats["lit_gain_floor_rad"])))
 	material.set_shader_parameter("detail_rock_lit_gain", PackedFloat32Array(Array(stats["rock_lit_gain"])))
+	material.set_shader_parameter("detail_rock_shadow", PackedFloat32Array(Array(stats["rock_shadow"])))
 	var grid: PackedFloat32Array = core.moon_rock_abundance_grid(ABUNDANCE_WIDTH, ABUNDANCE_HEIGHT)
 	var abundance := Image.create_from_data(ABUNDANCE_WIDTH, ABUNDANCE_HEIGHT, false, Image.FORMAT_RF,
 			grid.to_byte_array())

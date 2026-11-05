@@ -4,7 +4,8 @@ Usage: python tools/data_pipeline/prepare.py
 
 Outputs (git-ignored):
   data/textures/earth_day.jpg     equirectangular, lon -180..180, lat 90..-90
-  data/textures/moon_color.png    LROC colour mosaic (equirectangular, lon -180..180)
+  data/textures/moon_color.png    LROC colour mosaic, large-scale albedo from the WAC Hapke w map (moon_albedo.py;
+                                  equirectangular, lon -180..180)
   data/stars/stars.csv            stars to magnitude 7.5: ra_deg, dec_deg, mag, color_index (ICRS / J2000)
 """
 
@@ -29,13 +30,31 @@ Image.MAX_IMAGE_PIXELS = 200_000_000  # trusted NASA mosaics exceed Pillow's def
 
 def prepare_textures() -> None:
     TEXTURES.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(RAW / "earth_day_5400.jpg", TEXTURES / "earth_day.jpg")
-    with Image.open(RAW / "moon_color_4k.tif") as moon:
-        moon.convert("RGB").save(TEXTURES / "moon_color.png", optimize=True)
+    if (RAW / "earth_day_5400.jpg").exists():
+        shutil.copyfile(RAW / "earth_day_5400.jpg", TEXTURES / "earth_day.jpg")
+    else:
+        print("earth_day: raw file missing (fetch.py earth_day), skipped")
+    if (RAW / "moon_color_4k.tif").exists():
+        # The large-scale albedo from the WAC Hapke w map when present (moon_albedo.py; Task 11 fix C).
+        import moon_albedo
+
+        stats = moon_albedo.prepare(RAW / "moon_color_4k.tif", RAW / "WAC_HAPKEPARAMMAP_643NM.IMG",
+                                    REPO_ROOT / "config" / "moon_surface.toml", TEXTURES / "moon_color.png")
+        if stats:
+            print(f"moon_color: tied to the WAC w map: mare / highland {stats['mosaic_ratio']:.3f} -> "
+                  f"{stats['out_ratio']:.3f} (Hapke I/F ratio of w {stats['w_mare']:.3f} / {stats['w_highland']:.3f}: "
+                  f"{stats['reflectance_ratio']:.3f}), fine-detail exponent {stats['gamma']:.3f}")
+        else:
+            print("moon_color: WAC w map missing (fetch.py lroc_wac_hapke_parameter_map): the mosaic as it is")
+    else:
+        print("moon_color: raw file missing (fetch.py moon_color), skipped")
     print(f"textures -> {TEXTURES}")
 
 
 def prepare_stars() -> None:
+    if not (RAW / "hyg_v44.csv.gz").exists():
+        print("stars: raw file missing (fetch.py hyg_stars), skipped")
+        return
     STARS.mkdir(parents=True, exist_ok=True)
     count = 0
     with gzip.open(RAW / "hyg_v44.csv.gz", "rt", encoding="utf-8", newline="") as src, \

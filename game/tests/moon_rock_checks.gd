@@ -38,17 +38,24 @@ static func transforms(core: StarsimCore, layer: MoonRockLayer, site: Vector2, c
 		var ids: PackedInt64Array = rocks.get("ids", PackedInt64Array())
 		var buffers: Array = rocks.get("buffers", [])
 		var counts: PackedInt32Array = rocks.get("counts", PackedInt32Array())
+		var chunk_counts: Array = rocks.get("chunk_counts", [])
 		var in_some_lod := 0
 		var consistent := true
 		for lod in counts.size():
-			var buffer: PackedFloat32Array = buffers[lod]
-			for k in counts[lod]:
-				var f := buffer.slice(k * MoonRockLayer.FLOATS_PER_INSTANCE, (k + 1) * MoonRockLayer.FLOATS_PER_INSTANCE)
-				var key_id := _instance_key(f)
-				if drawn.has(key_id):
-					consistent = consistent and drawn[key_id] == f
-				else:
-					drawn[key_id] = f
+			var listed := 0
+			for c in (chunk_counts[lod] as PackedInt32Array).size():
+				var buffer: PackedFloat32Array = (buffers[lod] as Array)[c]
+				var n_chunk: int = (chunk_counts[lod] as PackedInt32Array)[c]
+				listed += n_chunk
+				consistent = consistent and n_chunk <= MoonRockLayer.BUCKET_MAX
+				for k in n_chunk:
+					var f := buffer.slice(k * MoonRockLayer.FLOATS_PER_INSTANCE, (k + 1) * MoonRockLayer.FLOATS_PER_INSTANCE)
+					var key_id := _instance_key(f)
+					if drawn.has(key_id):
+						consistent = consistent and drawn[key_id] == f
+					else:
+						drawn[key_id] = f
+			consistent = consistent and listed == counts[lod]
 		# Match by the instance's centre (the buffer carries no id): every core rock's instance at its centre.
 		var worst_m := 0.0
 		var worst_axis := 0.0
@@ -240,7 +247,12 @@ static func camera_jump(tree: TerrainQuadtree, layer: MoonRockLayer, site_fixed:
 			layer.stats["allocations"], layer.stats["unpooled"], layer.stats["bucket_peak"], float(layer.stats.get("max_allocate_ms", 0.0))]
 			+ "; rock instances %d before, %d after; worker rock lists %d nodes, %.1f ms summed, %.1f ms max per node (%d rocks max)"
 			% [settled_rocks, layer.stats["attached_instances"], layer.stats["nodes_built"], layer.stats["build_ms"],
-			layer.stats["max_node_ms"], layer.stats["max_node_rocks"]])
+			layer.stats["max_node_ms"], layer.stats["max_node_rocks"]]
+			+ "; pool peak %.0f MB (bound %.0f), %d nodes kept statistical at the bound, %d parked, %d trimmed; largest upload per frame %.1f MB (staging pool %d MB)"
+			% [float(layer.stats.get("pool_peak_mb", 0.0)), MoonRockLayer.POOL_MAX_MB,
+			int(layer.stats.get("over_bound_nodes", 0)), int(layer.stats.get("parked_nodes", 0)),
+			int(layer.stats.get("trimmed", 0)), float(layer.stats.get("max_frame_upload_mb", 0.0)),
+			int(ProjectSettings.get_setting("rendering/rendering_device/staging_buffer/max_size_mb", 128))])
 
 
 ## Updates every JUMP_FRAME_MS until nothing has loaded for 30 updates; returns the update count, appends each
