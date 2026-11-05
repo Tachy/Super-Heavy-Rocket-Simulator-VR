@@ -913,10 +913,12 @@ func _setup_environment() -> void:
 	environment.glow_intensity = 0.6
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
-	# The cloud pass (CloudEffect, before the transparent pass) and night vision's rod step (EyeAdaptation,
-	# VisionEffect: after the transparent pass, before glow and AgX).
+	# The cloud pass (CloudEffect, before the transparent pass), the eye's field meter and night vision's rod step
+	# (EyeAdaptation, VisionEffect: after the transparent pass, before glow and AgX).
 	var compositor := Compositor.new()
-	# The field meter of the eye adaptation (AdaptationMeter, Task 14) reads the cones' image before the rod step.
+	# The field meter of the eye adaptation (AdaptationMeter, Task 14) reads the cones' image before the transparent pass
+	# (after the cloud pass, whose result it composites itself) and before the rod step.
+	atmosphere.adaptation_meter.cloud_effect = clouds.effect
 	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.adaptation_meter,
 			atmosphere.vision_effect]
 	world_environment.compositor = compositor

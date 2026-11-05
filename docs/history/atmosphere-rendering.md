@@ -474,3 +474,9 @@ plate); on the sunlit Moon the gain stayed 1.000 (plate 41 064 cd/m^2) while the
 rule stays as the fallback and in the GPU checks; the game now adapts to the measured field (eye-adaptation.md). A first
 variant (Ferwerda t.v.i. at L_f, display adapted to 0.18 L_ref) was dropped the same day: it lowered the night's
 maximum gain 5.5x (12 583 -> 2265).
+The field meter first ran after the transparent pass (2026-11-05, commit ecdde670): the display-referred emitters
+(plume, stars, orbit lines, labels, VR panel) were counted with their fixed display value, which feeds the gain back on
+itself and in a black field runs it to a clamp set by the emitter (review I-1). Since the fix round the same day it runs
+before the transparent pass and composites the cloud pass itself; it measures every 4th frame (measuring every frame
+cost +0.25 ms in the stereo mock, the extra MSAA resolve). Before the fix the doc also listed the gains before -> after
+the switch to the field rule; those "before" values are the white-plate ones above.

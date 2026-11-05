@@ -218,6 +218,9 @@ const ADAPTATION_LOG_EVERY := 20
 ## [call] After a view jump the eye stays snapped to the measured field at least this long (wall time, s): the new
 ## view's streamed terrain may start loading only some frames after the jump.
 const FIELD_SNAP_MIN_S := 1.0
+## Checks (render_check --gain_probe): > 0 holds the cone gain at this value (the eye is not advanced; the meter keeps
+## measuring), so the field measured at two gains shows whether the measurement feeds back on the gain.
+var field_probe_gain := 0.0
 var _field_epoch := 0
 var _field_serial := 0
 var _field_valid := false
@@ -394,6 +397,9 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		brightness = _eye.brightness
 		chroma = _eye.chroma
 		moonlight_active = moonlight_relative_value * reference_luminance(d_au) >= MOONLIGHT_MIN_SHARE * adaptation_cd_m2
+		if field_probe_gain > 0.0:
+			exposure_gain = field_probe_gain
+			brightness = 1.0
 	ShaderGlobals.set_value(&"atmosphere_adaptation_cd_m2", adaptation_cd_m2)
 	ShaderGlobals.set_value(&"atmosphere_moon_light",
 			moonlight_relative_value if moonlight_active else 0.0)
@@ -1111,14 +1117,13 @@ func snap_adaptation() -> void:
 
 ## The newest field measurement of this view (AdaptationMeter): last_field_cd_m2 / last_field_scotopic_cd_m2 and
 ## _field_valid. A measurement older than FIELD_STALE_FRAMES frames (the meter detached or not running) falls back to
-## the analytic rule, the next one snaps again.
+## the analytic rule; the next one takes over paced (review M-6: no visible step after a hitch; only a new view snaps).
 func _take_field_measurement() -> void:
 	var result := adaptation_meter.take_result(_field_epoch, _field_serial)
 	if result.is_empty():
 		_field_age += 1
 		if _field_age > FIELD_STALE_FRAMES and _field_valid:
 			_field_valid = false
-			_field_snap = true
 		return
 	_field_age = 0
 	_field_serial = result[2]

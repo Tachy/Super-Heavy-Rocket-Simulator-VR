@@ -13,36 +13,58 @@ shaders:
 - **Scene-referred adaptation** [Task 14 of the Moon surface plan, user 2026-11-05; `adaptation_meter.gd`, fidelity
   flag `Atmosphere.scene_referred_adaptation`, on in the game; the user argument `--analytic_adaptation` switches it
   off]: the eye adapts to the luminance of the field it sees, one rule for every scene. `AdaptationMeter`, a
-  CompositorEffect before `VisionEffect` (world.gd's Compositor only; the GPU check's has none), samples the HDR frame
-  after the transparent pass on a sparse grid (~65 000 samples per view), de-gains each sample to cd/m^2 (scene value /
-  that frame's `scene_per_cd_m2`) and adds it, Gaussian-weighted toward the image centre (sigma 0.5 half diagonals
-  [E: Moon & Spencer 1945, the surround's weight falls with eccentricity]), into two 128-bin log histograms (photopic,
+  CompositorEffect (world.gd's Compositor only; the GPU check's has none), samples the HDR frame before the transparent
+  pass (after the opaque pass, the sky and the cloud pass; MSAA resolved for it) on a sparse grid (~65 000 samples per
+  view), composites the cloud pass's result over each sample as the transparent pass's composite quad does
+  (`CloudEffect.frame_output_layer`: T x scene + colour), de-gains it to cd/m^2 (scene value / that frame's
+  `scene_per_cd_m2`) and adds it, Gaussian-weighted toward the image centre (sigma 0.5 half diagonals
+  [E: Moon & Spencer 1945, the surround's weight falls with eccentricity; call: from the image centre, no per-eye
+  projection centre or solid-angle weight]), into two 128-bin log histograms (photopic,
   scotopic; 1e-6 .. 1e6 cd/m^2, bin 0 black). Both VR eyes go into one histogram (one adaptation, no eye difference).
   The histograms come back asynchronously (`buffer_get_data_async`, every ~2-4 frames, no stall). The field luminance
   L_f (`field_log_average`): the weighted geometric mean, the brightest 2 % of the weight cut (Sun disc, glints [E]),
   bins more than 3.7 decades below the highest bin left excluded (no signal at that adaptation [S: Kunkel & Reinhard
   2010, simultaneous range ~3.7 log units]; a black sky beside lit ground does not pull it down; a field with nothing
-  above black gives 0, the dark-adapted floor). The field is taken as its scene's mid grey [S: the 18 % card of
-  reflected metering, ISO 2720; Reinhard et al. 2002, the log average mapped to the key 0.18]: the adaptation
+  above black gives 0, the dark-adapted floor). The field is taken as its scene's mid grey [E: a convention with two
+  readings - the photographers' 18 % grey card (a reflected-light meter calibrated to ISO 2720's K = 12.5 renders
+  the metered luminance as a ~12-18 % grey, by maker) and Reinhard et al. 2002's display key 0.18 for the log
+  average]: the adaptation
   luminance L_a = L_f / `FIELD_MID_GREY` (0.18), the scotopic one likewise, and everything downstream is the white-plate
   rule's (Ferwerda gains, mesopic k, CIECAM02 factors, star floor, pacing, clamp [1, 1e5], cap at L_ref). The white-plate
   rule assumed the field to be 18 % of the plate (a grey world); the field rule measures it: identical in a grey world,
-  a darker field (regolith under a low Sun, the ocean from orbit) is seen brighter, a brighter one darker
-  [call 2026-11-05: an earlier variant evaluated the t.v.i. at L_f against a display adapted to 0.18 L_ref - Weber-equal,
-  but it darkened every night scene 5.5x (max gain 0.18 x 12 583), so not kept]. A view jump (`snap_adaptation`) drops older measurements; the eye stays snapped
+  a darker field (regolith under a low Sun, the ocean from orbit) is seen brighter, a brighter one darker.
+  A view jump (`snap_adaptation`) drops older measurements; the eye stays snapped
   to the new view's field while its terrain streams in (World sets `view_loading`) and at least 1 s
   (`FIELD_SNAP_MIN_S` [call]). Until the first measurement of a view, without a RenderingDevice, or 30 frames without
-  one (`FIELD_STALE_FRAMES`), the white-plate rule below applies. Display-referred emitters (plume, stars, VR panel)
-  count with their displayed value (a bright plume light-adapts the eye; the log mean keeps that a stable fixed point).
-  Values (render_check, 2026-11-05, field L_f / white-plate L_a / gain before -> after; PNGs
-  `screenshots/eye_adaptation/task14/`): Starbase viewpoint noon (Sun 48 deg, view east) 2475 / 37 624 / 1.146 -> 3.14;
-  dusk (Sun -3.8 deg) 3.99 / 43.8 (glow) / 858 -> 1379; night (no Moon, lamps 2 km off) black / floor / 12 583 ->
-  12 583; 400 km by day (view 20 deg down, limb haze) 2558 / 43 121 / 1.000 -> 3.03; IM-2 2 m (Sun 6.75 deg) 456-586 /
-  43 448 / 1.000 -> 17.1; Apollo 11 down-Sun (Sun 14.5 deg) 661-712 / 41 064 / 1.000 -> 11.2; lunar night under a
-  nearly full Earth (0 N 45 E, 2026-11-07T14:00, view west) 0.033 / 5.71 (Earth in view) / 3012 -> 9334 (rods 0.75).
-  The Earth's day scenes measured ~6 % of the plate, not the grey world's 18 % (dark marsh imagery, the ocean through
-  haze): they render ~2.7-3x brighter. Apollo 11 regolith on sunlit ground (AS11-40-5903, rectangle 0.65-0.95 x
-  0.30-0.50): photo 147, render before 46, after 144 (8-bit luma); left 0.02-0.30: photo 117, after 135.
+  one (`FIELD_STALE_FRAMES`), the white-plate rule below applies; the next measurement takes over paced (no step; only
+  a new view snaps). The meter measures every 4th frame (`MEASURE_EVERY` [call]; only then it asks for the MSAA
+  resolve). Display-referred emitters (vision.gdshaderinc `vision_display_referred`: plume, the stars' own
+  brightness, orbit lines, labels, the VR panel) all draw in the transparent pass, after the meter: they are not
+  counted. Counted, their fixed display value D de-gains to D / gain and feeds the gain back on itself (log g_new =
+  C + s log g, s their weight share; in a black field s = 1 and the gain runs to a clamp set by D);
+  `adaptation_meter_test.gd` checks that every display-referred shader has a blend mode. Feedback slope measured with
+  `render_check --gain_probe` (field at two held gains, s = -d ln L_f / d ln g): pad noon 0.0000, pad noon under a
+  tau-15 overcast 0.0000 (field 2226 cd/m^2 both with the meter's own cloud composite and measured after the
+  transparent pass), Apollo 11 0.033, lunar night 0.027 (both from the rocks drawn without the gain, open points);
+  every start gain goes to the same target.
+  Values (render_check, 2026-11-05, field L_f / white-plate L_a / gain; PNGs `screenshots/eye_adaptation/task14/`):
+  Starbase viewpoint noon (Sun 48 deg, view east) 2475 / 37 624 / 3.14; dusk (Sun -3.8 deg) 3.99 / 43.8 (glow) / 1379;
+  night (no Moon, lamps 2 km off) black / floor / 12 583; 400 km by day (view 20 deg down, limb haze) 2558 / 43 121 /
+  3.03; IM-2 2 m (Sun 6.75 deg) 456-586 / 43 448 / 17.1; Apollo 11 down-Sun (Sun 14.5 deg) 661-712 / 41 064 / 11.2;
+  lunar night under a nearly full Earth (0 N 45 E, 2026-11-07T14:00, view west) 0.033 / 5.71 (Earth in view) / 9334
+  (rods 0.75). The Earth's day scenes measure ~6 % of the plate, not the grey world's 18 %. Pad noon in the camera mode
+  (f/16 1/100 s ISO 100): ground (rows 0.80-0.98) 1874 cd/m^2, sky band (rows 0.05-0.30, ~110 deg from the Sun's
+  azimuth) 3136 cd/m^2; a white horizontal plate there is ~29 000 cd/m^2 (from the 37 624 plate, Sun 48 deg, [E] ~15-20
+  klux sky), so the ground draws as reflectance ~0.064 - the terrain shading is linear in the imagery's albedo and that
+  imagery (NAIP z17 in the view sector, sRGB-decoded BT.709) is 0.051 mean / 0.048 median. The dark ground is the
+  imagery's calibration, not the shading (open points). Apollo 11 regolith (AS11-40-5903, rectangle 0.65-0.95 x
+  0.30-0.50): photo 147, render 144 (8-bit luma); left 0.02-0.30: photo 117, render 135 - a consistency check (photo
+  and render are both field-metered, so they agree by construction), not a validation of the regolith's luminance.
+  Cost (render_check --gpu_time 600, pad noon, RTX 4090): desktop 1920 x 1080 1.84 ms with the meter, 1.82-1.85 without;
+  stereo mock (3534 x 2838 per eye) 4.23 ms with the meter (every 4th frame), 4.29 without; measuring every frame it
+  was 4.54-4.55 (+0.25 ms, the extra MSAA resolve). Sky radiance cube with the view-following gain: a head nodding
+  -30 .. +40 deg every 4 s redraws it 0.5 times per second (gain 2.97-3.30), and redrawing it every frame changes the
+  stereo GPU time by < 0.02 ms.
 - **White-plate rule** (the fallback and the GPU check's / headless tests' rule; formerly the only one):
   [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
   the game, off in the GPU check's comparisons]: cone gain on every physical luminance (tables, Sun light, Moon, Sun
@@ -189,7 +211,8 @@ shaders:
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
 - Scene-referred adaptation to the measured field (user 2026-11-05, Task 14): one rule for every scene, one value for
   both VR eyes (formerly view-independent; the white-plate rule is the fallback). Earth-in-view stays physical (no
-  display-side highlight treatment).
+  display-side highlight treatment). Display-referred emitters never set the adaptation (the meter runs before the
+  transparent pass; Task 14 fix round 1, review I-1).
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
 
 ## Open points and known limits
@@ -205,9 +228,18 @@ shaders:
   drawn rocks stay at gain 1 while the regolith follows the gain (dark rocks on the lunar day at gain 11-17, black at
   night); the rocks also bias the field measurement low (IM-2: 586 -> 456 cd/m^2). Fix: `ALBEDO *= atmosphere_exposure_gain`
   as terrain_moon does (the file was in another task's hands, not changed here).
-- The field follows the view: head turns change the gain (light 0.5 s), and each 2 % change of `luminance_scale` redraws
-  the sky's radiance cube (`SkyRadianceRefresh`) - more redraws in VR than with the view-independent plate rule; not
-  measured yet.
+- No per-pixel / foveal term in the field rule: a small bright object (a gibbous Earth of ~2 deg in a lunar-night
+  view, a distant plume) stays inside the 2 % highlight cut, so a gaze at it does not adapt to it.
+- Earth ground albedo: the imagery chain (NAIP -> Sentinel-2 composite -> the day texture, `terrain-rendering.md`) is
+  anchored to the Blue Marble day texture, a display product, not calibrated reflectance (sRGB-decoded spot checks:
+  Sahara 0.27, Amazon 0.035, Kansas 0.054, Starbase 0.035 at 12 km - against MODIS visible albedos ~0.3-0.4, 0.03-0.05,
+  0.06-0.10). Near the pad the NAIP z17 crop draws 0.05 while the Sentinel-2 composite in the same view sector is 0.17
+  mean / 0.11 median (over the whole NAIP box both ~0.05: the per-channel fit matches box means, not bright local
+  flats). The field rule normalises this away like the Moon's; an imagery-calibration point (data pipeline), not
+  adaptation.
+- The VR panel was not in the stereo mock's lunar-night view (`--keep_vr_panel`), and the night plume seen from
+  500 m (fov 25 deg) stays inside the 2 % highlight cut; the run-away the meter now avoids was therefore not
+  reproduced in a render, only excluded by construction (display-referred shaders in the transparent pass, test).
 - The rendered Apollo 11 regolith (490 cd/m^2 in the foreground probe, field 660-710) is 3-6x below the core's Hapke
   I/F x E_sun,n / pi at that geometry (I/F 0.08-0.10 at 25-30 deg down-Sun -> 3400-4300 cd/m^2 with the highland w
   0.429); the photo's f/11 1/250 ISO 160 exposure (mid grey 2363 cd/m^2) also points to ~2000+ cd/m^2. The field rule

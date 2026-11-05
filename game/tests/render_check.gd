@@ -59,7 +59,12 @@
 #          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy);
 #          --radiance_every_frame: the sky's radiance cubemap marked dirty each frame (its largest duty cycle);
 #          --gpu_passes: also per GPU timestamp interval (the cloud pass's kernels, the bake, shadow maps), the baked
-#          volume settled first.
+#          volume settled first; --elevation_sweep=<min>,<max>,<period s>: the view nods over the measured frames (the sky
+#          cube's redraws per second and the gain range printed).
+# Field meter (eye adaptation): --meter=off detaches it (its cost); --meter_post_transparent measures after the
+#          transparent pass (Task 14's first placement, display-referred emitters counted); --gain_probe=<g1>,<g2> holds
+#          the gain at each value once settled and prints the field measured there and the feedback slope;
+#          --keep_vr_panel (with --stereo) leaves the VR panel in the view.
 # Shadow map dump: --shadow_dump=<file> writes the cloud shadow maps (near, far; raw RGBA32F) once settled and prints
 #          their frame (baked shadow step; with STARSIM_BAKED_DEFINES=CLOUD_SHADOW_BAKED_DIAG the baked fill's check
 #          values instead of the maps, cloud_baked.gdshaderinc cloud_shadow_fill_diag).
@@ -119,6 +124,17 @@ var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render t
 var _gpu_passes := {}  ## --gpu_passes: timestamp name -> Array of the measured frames' GPU ms
 var _sweep_left: Array[float] = []  ## --divisor_sweep: the divisors still to measure
 var _sweep_wait := -1  ## --divisor_sweep: frames left to settle at the current divisor (-1: not started)
+## --gain_probe: frames at each held gain, and after the release before the image (the field snap needs >= 1 s).
+const GAIN_PROBE_FRAMES := 40
+const GAIN_PROBE_RELEASE_FRAMES := 120
+var _probe_stage := -1  ## --gain_probe: the gain held now (-1: not started; == count: released)
+var _probe_wait := 0
+var _probe_fields: Array[float] = []
+var _sweep_start_s := -1.0  ## --elevation_sweep: wall time of the first measured frame
+var _sweep_serial := 0  ## --elevation_sweep: the radiance cube's serial then
+var _sweep_elapsed_s := 0.0
+var _sweep_gain_min := INF
+var _sweep_gain_max := 0.0
 var _load_start_us := 0  ## the view's placement (frame 0) or the last climb move: the Moon load timeline's zero
 var _load_levels: Array[String] = []  ## the Moon's deepest drawn level each time it deepened since then (level@s)
 var _load_deepest := 0
@@ -243,6 +259,13 @@ func _process(_delta: float) -> bool:
 			TimePanel.show_frame_rate = false
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
+		if _args.has("meter_post_transparent"):  # the field meter after the transparent pass (Task 14's first placement)
+			world.atmosphere.adaptation_meter.post_transparent = true
+		if _args.get("meter", "on") == "off":  # the field meter detached (its cost; the white-plate rule then)
+			for environment: WorldEnvironment in world.find_children("*", "WorldEnvironment", true, false):
+				var effects := environment.compositor.compositor_effects
+				effects.erase(world.atmosphere.adaptation_meter)
+				environment.compositor.compositor_effects = effects
 		world.refraction.enabled = not _args.has("no_refraction")
 		if _args.has("no_tower_lights"):
 			for tower in world.towers:
@@ -293,7 +316,7 @@ func _process(_delta: float) -> bool:
 		# 25, then ~0.24 s of light adaptation over the settle frames: ~7.5 on a sunlit view). The world's own update this
 		# frame (after this script's _process) takes the snap at the final pose.
 		world.atmosphere.snap_adaptation()
-		if _stereo != null:  # the VR panel (menu, overlay) is not part of the cloud views
+		if _stereo != null and not _args.has("keep_vr_panel"):  # the VR panel is not part of the cloud views
 			for child in _main.get_node("/root/XrManager").origin.get_children():
 				if child is VrOverlayPanel:
 					child.visible = false
@@ -334,6 +357,8 @@ func _process(_delta: float) -> bool:
 				_deterministic_left -= 1
 				return false
 		if _args.has("repeat_identical") and not _repeat_frames(world):
+			return false
+		if _args.has("gain_probe") and not _gain_probe_done(world):
 			return false
 		if _args.has("gpu_time") and not _gpu_frames(world):
 			return false
@@ -470,6 +495,8 @@ func _gpu_frames(world: World) -> bool:
 		_record_gpu_passes()
 	if _args.has("radiance_every_frame"):
 		world._sky_material.set_shader_parameter("radiance_serial", float(_frames))
+	if _args.has("elevation_sweep"):
+		_sweep_elevation(world)
 	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
 	_gpu_wall_us.append(Time.get_ticks_usec())
 	if _gpu_ms.size() < wanted:
@@ -492,6 +519,8 @@ func _gpu_frames(world: World) -> bool:
 	print("render_check: GPU render time over %d frames: median %.3f ms, p99 %.3f ms, mean %.3f ms (render scale %.2f, %s)"
 			% [wanted, sorted[wanted / 2], sorted[mini(wanted - 1, int(0.99 * wanted))], total / wanted,
 			root.scaling_3d_scale, root.size])
+	if _args.has("elevation_sweep"):
+		_print_elevation_sweep(world)
 	for name: String in _gpu_passes:
 		var ms: Array = _gpu_passes[name]
 		while ms.size() < wanted:  # frames without that interval
@@ -506,6 +535,70 @@ func _gpu_frames(world: World) -> bool:
 			_next_sweep_divisor(world)
 			return false
 	return true
+
+
+## --gain_probe=<g1>,<g2>[,...]: once settled, the cone gain held at each value in turn (Atmosphere.field_probe_gain)
+## for GAIN_PROBE_FRAMES frames and the field the meter measures there printed with the gain it implies
+## (EyeAdaptation.cone_gain of L_f / FIELD_MID_GREY) and the feedback slope s = -d ln L_f / d ln g between the first and
+## the last (0: the field does not depend on the gain, every start gain goes to the same target; review I-1). Then the
+## eye is released and snapped again; true once the adapted view has settled (the image is saved as usual).
+func _gain_probe_done(world: World) -> bool:
+	var a := world.atmosphere
+	var gains := String(_args["gain_probe"]).split(",", false)
+	if _probe_wait > 0:
+		_probe_wait -= 1
+		return false
+	if _probe_stage >= 0 and _probe_stage < gains.size():
+		_probe_fields.append(a.last_field_cd_m2 if a.adaptation_from_field else -1.0)
+	_probe_stage += 1
+	if _probe_stage < gains.size():
+		a.field_probe_gain = float(gains[_probe_stage])
+		a.snap_adaptation()  # a new epoch: only measurements at this gain count
+		_probe_wait = GAIN_PROBE_FRAMES
+		return false
+	if _probe_stage == gains.size():
+		var reference := a.reference_luminance(1.0)
+		for k in range(gains.size()):
+			var field: float = _probe_fields[k]
+			print("render_check: gain probe: gain %s -> field %s cd/m^2, implied cone gain %s" % [gains[k], field,
+					EyeAdaptation.cone_gain(field / EyeAdaptation.FIELD_MID_GREY, reference) if field > 0.0 else -1.0])
+		var first: float = _probe_fields[0]
+		var last: float = _probe_fields[gains.size() - 1]
+		if first > 0.0 and last > 0.0:
+			print("render_check: gain probe: feedback slope s = %.4f" % (-log(last / first)
+					/ log(float(gains[gains.size() - 1]) / float(gains[0]))))
+		a.field_probe_gain = 0.0
+		a.snap_adaptation()
+		_probe_wait = GAIN_PROBE_RELEASE_FRAMES
+		return false
+	return true
+
+
+## --elevation_sweep=<min deg>,<max deg>,<period s> (with --gpu_time): the view's elevation swept sinusoidally over the
+## measured frames (a head nodding between ground and sky); prints the sky radiance cube's redraws per second and the
+## gain's range (review I-3: the view-following gain redraws the cube at every 2 % step).
+func _sweep_elevation(world: World) -> void:
+	var spec := String(_args["elevation_sweep"]).split(",")
+	var now_s := Time.get_ticks_usec() / 1.0e6
+	if _sweep_start_s < 0.0:
+		_sweep_start_s = now_s
+		_sweep_serial = world._radiance_serial
+		_sweep_gain_min = INF
+		_sweep_gain_max = 0.0
+	var low := deg_to_rad(float(spec[0]))
+	var high := deg_to_rad(float(spec[1]))
+	var phase := TAU * (now_s - _sweep_start_s) / float(spec[2])
+	world.camera.elevation = 0.5 * (low + high) - 0.5 * (high - low) * cos(phase)
+	_sweep_gain_min = minf(_sweep_gain_min, world.atmosphere.exposure_gain)
+	_sweep_gain_max = maxf(_sweep_gain_max, world.atmosphere.exposure_gain)
+	_sweep_elapsed_s = now_s - _sweep_start_s
+
+
+func _print_elevation_sweep(world: World) -> void:
+	var redraws := world._radiance_serial - _sweep_serial
+	print("render_check: elevation sweep %s: %d radiance cube redraws in %.2f s (%.2f per s), gain %.3f .. %.3f" % [
+			_args["elevation_sweep"], redraws, _sweep_elapsed_s, redraws / maxf(_sweep_elapsed_s, 1.0e-3),
+			_sweep_gain_min, _sweep_gain_max])
 
 
 ## --divisor_sweep: the next divisor, its settle frames, the measurement restarted.

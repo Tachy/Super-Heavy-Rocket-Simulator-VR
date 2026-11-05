@@ -93,6 +93,15 @@ func _init() -> void:
 	RenderingServer.call_on_render_thread(_create)
 
 
+## Render thread, after this frame's pass (the eye adaptation's field meter, AdaptationMeter, runs next in the same
+## stage): the full-resolution result layer of a view (premultiplied colour, .a the background's transmittance) when the
+## pass drew this frame, else an invalid RID (no clouds over the scene this frame).
+func frame_output_layer(view: int) -> RID:
+	if not bool(stats.get("valid", false)) or view >= _views.size():
+		return RID()
+	return _views[view]["output_slice"]
+
+
 ## Main thread: the quality preset's resolution divisor, applied on the render thread.
 func set_quality(divisor: float) -> void:
 	RenderingServer.call_on_render_thread(_set_quality.bind(divisor))

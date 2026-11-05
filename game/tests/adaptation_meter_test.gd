@@ -73,5 +73,26 @@ func _initialize() -> void:
 			1e-12)
 	_near("Apollo 11 field", EyeAdaptation.cone_gain(660.0 / grey, reference), reference * grey / 660.0, 1e-9)
 
+	# The compute's sizes follow the constants (review M-1): the shared histogram holds both histograms, no placeholder
+	# is left, and the placement is before the transparent pass (review I-1: display-referred emitters not counted).
+	var source := AdaptationMeter.shader_source()
+	_near("shared histogram size", float(source.contains("local_bins[%d]" % (BINS * 2))), 1.0, 0.0)
+	_near("no placeholder left", float(source.contains("TOTAL_BINS") or source.contains("GROUP_EDGE")), 0.0, 0.0)
+	# Every display-referred emitter (vision_display_referred) draws in the transparent pass (a blend mode), so the
+	# meter, before that pass, never counts it: the field does not feed back on the gain.
+	var dir := DirAccess.open("res://shaders")
+	for file in dir.get_files():
+		if not file.ends_with(".gdshader"):
+			continue
+		var code := FileAccess.get_file_as_string("res://shaders/" + file)
+		if code.contains("vision_display_referred("):
+			var mode := code.substr(code.find("render_mode"), 200)
+			if not mode.contains("blend_"):
+				print("adaptation_meter_test: FAIL %s is display-referred but not in the transparent pass" % file)
+				_failures += 1
+	var meter := AdaptationMeter.new()
+	_near("before the transparent pass", float(meter.effect_callback_type),
+			float(CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT), 0.0)
+
 	print("adaptation_meter_test: %s" % ("PASS" if _failures == 0 else "%d FAILED" % _failures))
 	quit(1 if _failures > 0 else 0)

@@ -114,8 +114,10 @@ const DARK_TIME_CONSTANT_S := 110.0
 ## (22 mag/arcsec^2 ~ 1.7e-4 cd/m^2), so the star threshold there is the sky's (Schaefer: +0.06 mag at the floor); the
 ## t.v.i. functions are flat far above it.
 const LUMINANCE_FLOOR_CD_M2 := 1.0e-6
-## [S: the 18 % grey card of reflected-light metering, ISO 2720:1974; Reinhard et al. 2002, "Photographic tone
-## reproduction for digital images", SIGGRAPH 2002: the log-average luminance mapped to the key 0.18] The scene-referred
+## [E: a convention with two readings, both ~0.12-0.18: the photographers' 18 % grey card (a reflected-light meter
+## calibrated to ISO 2720:1974's K = 12.5 cd s/m^2 renders the metered luminance as a ~12-18 % grey, depending on the
+## maker's assumptions) and Reinhard et al. 2002, "Photographic tone reproduction for digital images", SIGGRAPH 2002: the
+## log-average luminance mapped to the display key 0.18 (review M-3: not a measured constant)] The scene-referred
 ## rule (Task 14, Atmosphere.scene_referred_adaptation): the eye adapts to the field it sees, L_f (AdaptationMeter, the
 ## centre-weighted log average), and the field is taken as the mid grey of its scene: the adaptation luminance (a
 ## white, as the white-plate rule's) is L_f / FIELD_MID_GREY. The white-plate rule assumed that field (18 % of the plate
