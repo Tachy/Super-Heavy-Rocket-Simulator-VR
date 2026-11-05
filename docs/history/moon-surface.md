@@ -35,3 +35,27 @@ Superseded states of `docs/subsystems/moon-surface.md`.
   (G2/G1(v), the oblique-eye rock terms) instead of a hemispherical exitance, and A_h was looked up by elevation (asin per
   lookup). The rock view tables were built at every start (~8 s on 24 threads). The near-shadow map's second factor call
   computed the earthshine's factor too (unused).
+- Rock templates, convex fragments (fix A of Task 11, superseded by Task 17, 2026-11-05): 32 angular impact fragments. Each is a convex body: an ellipsoid with
+  semi-axes 1 : b/a : c/a (b/a 0.71 +- 0.15 clamped 0.3-1, c/b 0.71 +- 0.15, c/a >= 0.2: the 2 : sqrt2 : 1 fragment law
+  of Fujiwara et al. / Michikami et al. 2016, sampled: template means b/a 0.709, c/a 0.496) cut by K hash-seeded planes
+  (fracture faces: tangent planes at a jittered Fibonacci set of points on the ellipsoid, pushed in). Fresh fragments
+  (70 %, [E]): 16-24 faces cut 15-40 % deep, the whole surface planar (planar share of directions 0.94-1.00), sharp
+  edges; eroded ones (30 %, [E]; boulders wear down, Basilevsky et al. 2013 / 2015): 5-8 faces cut 3-12 %, mostly the
+  rounded ellipsoid (planar share 0.19-0.37). The fragment is turned to rest gravitationally stable (controller ruling
+  R4, Task 11 fix C: no upright balanced slabs, which the Apollo panoramas do not show): its shortest (c) axis near the
+  vertical, tilted by a 2-D Gaussian on the tangent plane with 25 deg rms ([E]: slopes, clods, burial; no measured tilt
+  distribution retrieved), capped at 60 deg; template rms tilt 25.2 deg, max 45.5 deg, 9 of 32 above 30 deg) and scaled
+  so that max r = 1 (20000 Fibonacci directions, the best 32 refined by a pattern
+  search, margin 0.5 %). r(dir) is the exact ray exit distance; `normal` the active face's (or the ellipsoid's) normal;
+  `column_top(x, y)` exact (the least upper bound of the constraints on the vertical line, ~50 ns); `support_point(u)`
+  exact (the ellipsoid's maximum, each face ellipse's maximum or a precomputed edge end / vertex); `bottom_z` / `top_z`
+  = the support along -z / +z; `normal_toward(p, reference, tol)` the normal-cone vector nearest a contact's own normal
+  (on an edge or a vertex a pad keeps its normal). Meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with
+  vertex dir r(dir) and the exact face normals (edges soften over one triangle). `exposed_area(cut_z)` = plan-view area
+  of the part above the plane z = cut_z, from the column tops of a 96 x 96 grid over [-1, 1]^2. Template construction
+  (32 templates): within a rock test case of 0.55-0.64 s in all. Everything from the integer hash.
+  Drawn with per-fragment facet normals from the convex constraints (`rock_shape_data`: up to 24 planes and the
+  ellipsoid's quadric per template; the active constraint at the interpolated template position): hard facet edges at
+  every LOD. LODs icosphere 4 / 3 / 2 / 1 (5120 / 1280 / 320 / 80 triangles, bands >= 100 / 30-100 / 10-30 / 4-10 px)
+  plus the icosahedron. User 2026-11-05 (screenshots/moon_surface/compare/user/a17_boulder_real_left_render_right.jpg):
+  the rocks looked like crystals - clean convex polyhedra with flat, evenly lit faces and sharp straight edges.

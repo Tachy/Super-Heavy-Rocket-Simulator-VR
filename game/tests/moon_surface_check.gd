@@ -959,8 +959,8 @@ func _start_rock_patch() -> void:
 	_rock_material.set_shader_parameter("earth_radius_m", World.EARTH_MEAN_RADIUS_M)
 	_rock_material.set_shader_parameter("detail_cell_m", ROCK_PATCH_SPACING_M)
 	_rock_material.set_shader_parameter("detail_horizon_spacing_m", ROCK_PATCH_HORIZON_M)
-	# Diagnostics: --rock_vertex_normals draws the interpolated vertex normals instead of the exact facets.
-	_rock_material.set_shader_parameter("rock_facet_normals", not OS.get_cmdline_user_args().has("--rock_vertex_normals"))
+	# Diagnostics: --rock_no_surface draws the bare mesh normals and albedo (no rock texture, no dust; Task 17).
+	_rock_material.set_shader_parameter("rock_surface", not OS.get_cmdline_user_args().has("--rock_no_surface"))
 	_rock_patch = MultiMeshInstance3D.new()
 	_rock_patch.multimesh = multimesh
 	_rock_patch.material_override = _rock_material

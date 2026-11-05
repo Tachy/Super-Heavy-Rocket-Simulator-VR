@@ -10,8 +10,10 @@ shader_type spatial;
 // x max(rock_threshold_scale, the abundance load factor) pixels, never below the node's list limit); a rock with D < d
 // is not drawn (it is in the ground's statistical layer), from d to 2 d it rises out of the ground so that its exposed
 // plan area is the share x = log2(D / d) of its nominal one (the template's plan-area tables; the statistical weight
-// 1 - x mirrors it in area, no rock counted twice), above 2 d it stands at its nominal burial. Normals per fragment
-// from the template's convex constraints (faces and ellipsoid): hard facet edges at every LOD.
+// 1 - x mirrors it in area, no rock counted twice), above 2 d it stands at its nominal burial. Normals: the template's
+// per-vertex normals (the core's fractured, eroded surface, smoothed over the LOD's vertex spacing; Task 17), tilted
+// per fragment by the procedural cm-scale rock texture; dust on up-facing parts and in the template's concavities
+// (moon_rock_surface.gdshaderinc).
 // The LOD MultiMesh draws an instance only inside its band of projected diameter (CUSTOM0), so each rock is drawn by
 // exactly one LOD. Instance data: transform; colour = (grid a, grid b: the base in the node's vertex grid, the horizon
 // map's coordinate; global u, v: the albedo map's); custom = (D, nominal exposed height in template z units (top_z -
@@ -30,6 +32,7 @@ render_mode cull_back, ambient_light_disabled, specular_disabled;
 #include "res://shaders/moon_detail.gdshaderinc"
 #include "res://shaders/moon_horizon.gdshaderinc"
 #include "res://shaders/moon_rock_light.gdshaderinc"
+#include "res://shaders/moon_rock_surface.gdshaderinc"
 #include "res://shaders/moon_near_shadow.gdshaderinc"
 #include "res://shaders/moon_fill.gdshaderinc"
 
@@ -49,9 +52,10 @@ global uniform float atmosphere_exposure_gain;
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 // RGBA float: (normal xyz, radius r) of template t's vertex k at LOD l in texel (k, l x ROCK_TEMPLATES + t).
 uniform sampler2D rock_template_data : filter_nearest, repeat_disable;
+// R float: the cavity term (0..1, core TemplateMesh::cavity) of template t's vertex k at LOD l, same layout.
+uniform sampler2D rock_template_cavity : filter_nearest, repeat_disable;
 uniform float rock_top_z[32];  // per template: the highest vertex z (unit template; LOD 0)
-// Per template row (MoonRockLayer._build_shape_tables): texels 0..23 the faces (n, h: n . p <= h), 24..26 the
-// ellipsoid's quadric rows (p^T Q p <= 1), 27 (face count, bottom z, top z, 0) - unit template frame.
+// Per template row (MoonRockLayer._build_shape_tables): texel 0 = (0, bottom z, top z, 0) - unit template frame.
 uniform sampler2D rock_shape_data : filter_nearest, repeat_disable;
 // Per template row: R = exposed plan area A(z) / A_max at z = bottom + (top - bottom) k / 63, G = the highest z with
 // A(z) >= a A_max at a = k / 63.
@@ -72,9 +76,11 @@ uniform vec3 node_center_local = vec3(0.0);
 
 varying vec3 rock_up;  // the local vertical (the instance basis' third column), local frame
 varying vec3 rock_template_position;  // unit-template position before the growth band's sinking: facets, triplanar
-varying vec3 rock_vertex_normal;  // the template's per-vertex normal, interpolated (diagnostics: rock_facet_normals off)
-// Diagnostics (moon_surface_check): false draws the interpolated vertex normals instead of the exact facet normals.
-uniform bool rock_facet_normals = true;
+varying vec3 rock_vertex_normal;  // the template's per-vertex normal, interpolated
+varying float rock_cavity;  // the template's per-vertex cavity term, interpolated
+// Diagnostics (moon_surface_check --rock_no_surface): false draws the bare mesh normals and albedo (no rock texture,
+// no dust).
+uniform bool rock_surface = true;
 varying vec3 rock_x;  // template axes in the Moon local render frame divided by the (isotropic) scale: template
 varying vec3 rock_y;  // vectors -> local frame
 varying vec3 rock_z;
@@ -82,6 +88,12 @@ varying float rock_scale_m;  // the template's metres per unit (isotropic: Lunar
 varying float height_above_ground_m;
 varying flat vec4 rock_custom;  // INSTANCE_CUSTOM
 varying flat vec4 rock_place;  // COLOR (grid a, grid b, global u, v)
+varying flat float rock_lod_v;  // the mesh's LOD (CUSTOM0.x)
+// [E] Share of the LOD triangle's own (flat) normal in the shading normal per LOD (Task 17, controller look feedback:
+// small rocks read as smooth eggs with interpolated normals). The coarse LODs cannot carry the relief's chips; their
+// facets show the sampled fragment as an angular body - Apollo cobbles are mostly angular to subangular. LOD 0-1
+// keep the smooth interpolated normals of the resolved relief (hard edges from the geometry itself).
+const float ROCK_FLAT_SHARE[6] = float[](0.0, 0.25, 0.6, 0.85, 1.0, 1.0);
 
 // The template's plan-area tables (linear between samples).
 float rock_area_forward(int template_id, float z, float bottom, float top) {
@@ -121,6 +133,7 @@ void vertex() {
 	}
 	float growth = clamp(log2(diameter / threshold), 0.0, 1.0);
 	int rock_lod = int(CUSTOM0.x + 0.5);
+	rock_lod_v = CUSTOM0.x;
 	// The test override (rock patch) draws whatever LOD it is given.
 	bool band = rock_geometry_override_m > 0.0 || (pixels >= CUSTOM0.y && pixels < CUSTOM0.z);
 	if (growth <= 0.0 || !band) {
@@ -128,6 +141,7 @@ void vertex() {
 		rock_up = vec3(0.0, 0.0, 1.0);
 		rock_template_position = vec3(0.0);
 		rock_vertex_normal = vec3(0.0, 0.0, 1.0);
+		rock_cavity = 0.0;
 		rock_x = vec3(1.0, 0.0, 0.0);
 		rock_y = vec3(0.0, 1.0, 0.0);
 		rock_z = vec3(0.0, 0.0, 1.0);
@@ -139,12 +153,13 @@ void vertex() {
 		vec3 p = VERTEX * t.w;
 		rock_template_position = p;
 		rock_vertex_normal = t.xyz;
+		rock_cavity = texelFetch(rock_template_cavity, ivec2(VERTEX_ID, rock_lod * ROCK_TEMPLATES + template_id), 0).r;
 		float exposed = INSTANCE_CUSTOM.y;  // top_z - burial / c: the nominal exposed height (template z units)
 		float ground_z = rock_top_z[template_id] - exposed;
 		// Growth band (review I2): the rock rises so that its exposed PLAN AREA is the share x = growth of its nominal
 		// one - what occludes the ground, and what the statistical weight 1 - x of the ground's layer mirrors. The cut
 		// z_t with A(z_t) = x A(ground_z) from the template's tables; sunk by z_t - ground_z (fully buried at x = 0).
-		vec4 extent = texelFetch(rock_shape_data, ivec2(27, template_id), 0);
+		vec4 extent = texelFetch(rock_shape_data, ivec2(0, template_id), 0);
 		float nominal_area = rock_area_forward(template_id, ground_z, extent.y, extent.z);
 		float sink = max(rock_area_inverse(template_id, growth * nominal_area) - ground_z, 0.0);
 		sink = min(sink, (1.0 - growth) * ROCK_RISE_HEIGHT_TAIL * exposed);
@@ -162,31 +177,6 @@ void vertex() {
 		rock_scale_m = scale;
 		height_above_ground_m = (p.z - ground_z) * scale;  // the ground plane stays at ground_z (p already sunk)
 	}
-}
-
-// Exact outward normal of the convex template at the (interpolated) unit-template position p: the active constraint
-// is the one p is closest to violating (faces: n . p - h; the ellipsoid: (sqrt(p^T Q p) - 1) over its gradient's
-// length, a distance to first order). Between two faces the larger wins: a sharp crease along the projected edge, no
-// smoothing across cut planes (Task 11 fix B: hard facet edges).
-vec3 rock_facet_normal(int template_id, vec3 p) {
-	vec4 extent = texelFetch(rock_shape_data, ivec2(27, template_id), 0);
-	vec3 q0 = texelFetch(rock_shape_data, ivec2(24, template_id), 0).xyz;
-	vec3 q1 = texelFetch(rock_shape_data, ivec2(25, template_id), 0).xyz;
-	vec3 q2 = texelFetch(rock_shape_data, ivec2(26, template_id), 0).xyz;
-	vec3 qp = vec3(dot(q0, p), dot(q1, p), dot(q2, p));
-	float v = max(dot(p, qp), 1.0e-12);
-	float best = (sqrt(v) - 1.0) * sqrt(v) / max(length(qp), 1.0e-12);
-	vec3 normal = qp;
-	int faces = int(extent.x + 0.5);
-	for (int k = 0; k < faces; k++) {
-		vec4 plane = texelFetch(rock_shape_data, ivec2(k, template_id), 0);
-		float g = dot(plane.xyz, p) - plane.w;
-		if (g > best) {
-			best = g;
-			normal = plane.xyz;
-		}
-	}
-	return normalize(normal);
 }
 
 // Triplanar albedo (relative, mean 1) and height gradient (rock-local metres) of the rock textures.
@@ -211,10 +201,30 @@ vec4 rock_texture(vec3 position_m, vec3 model_normal, int layer) {
 }
 
 void fragment() {
-	int template_id = clamp(int(rock_custom.w + 0.5), 0, ROCK_TEMPLATES - 1);
-	vec3 model_normal = rock_facet_normals ? rock_facet_normal(template_id, rock_template_position)
-			: normalize(rock_vertex_normal);
+	vec3 model_normal = normalize(rock_vertex_normal);
+	float flat_share = ROCK_FLAT_SHARE[clamp(int(rock_lod_v + 0.5), 0, 5)];
+	if (flat_share > 0.0) {
+		vec3 facet = cross(dFdx(rock_template_position), dFdy(rock_template_position));
+		if (dot(facet, facet) > 1.0e-30) {
+			facet = normalize(facet);
+			facet = dot(facet, model_normal) < 0.0 ? -facet : facet;
+			model_normal = normalize(mix(model_normal, facet, flat_share));
+		}
+	}
 	mat3 to_local = mat3(rock_x, rock_y, rock_z);
+	// Rock texture and dust (moon_rock_surface.gdshaderinc) in the rock's own metres; a per-rock offset (its global
+	// albedo-map coordinate) keeps rocks of one template from sharing their texture.
+	vec3 rock_m = rock_template_position * rock_scale_m + vec3(fract(rock_place.zw * 7919.0) * 97.0, 0.0);
+	float pixel_m = max(length(fwidth(rock_m)), 1.0e-6);
+	float dust = 0.0;
+	float surface_albedo = 1.0;
+	if (rock_surface) {
+		vec4 detail = rock_surface_detail(rock_m, pixel_m);
+		dust = rock_dust(model_normal.z, rock_cavity, rock_m);
+		vec3 g = detail.xyz * (1.0 - 0.5 * dust);  // [E] a thin dust layer keeps half the relief of the rock beneath
+		model_normal = normalize(model_normal - (g - model_normal * dot(g, model_normal)));
+		surface_albedo = mix(detail.w, 1.0, dust);
+	}
 	vec3 n = normalize(to_local * model_normal);
 	vec3 up = normalize(rock_up);
 	vec3 to_sun = moon_sun_position_local - node_center_local;
@@ -251,7 +261,8 @@ void fragment() {
 		earth_visible = terrain_visible_fraction(to_earth, earth_radius_m, east, north, up, uv, earth_margin);
 	}
 	float ground_theta_bar = detail_theta_bar(detail_cell_m);
-	float albedo_factor = rock_custom.z;
+	// Dusted surface reflects like the regolith (factor 1); the bare rock carries the law's excess over the dust share.
+	float albedo_factor = rock_surface ? mix(rock_bare_albedo_factor(rock_custom.z), 1.0, dust) : rock_custom.z;
 	float sun_reflectance = moon_rock_reflectance(n, up, normalize(to_sun), to_eye, albedo_factor, gradient, fillet,
 			ground_theta_bar);
 	float earth_reflectance = moon_rock_reflectance(n, up, normalize(to_earth), to_eye, albedo_factor, gradient, fillet,
@@ -287,13 +298,13 @@ void fragment() {
 		float ground_k = dot(albedo, vec3(0.2126, 0.7152, 0.0722)) * moon_regolith_scale * moon_hapke_norm;
 		// The rock's own response to diffuse light: the regolith's A_h x its reflectance ratio (rho), on the mosaic norm.
 		light += moon_regolith_scale * moon_sun_scene * sunlit * moon_fill_reflectance(n, up, normalize(to_sun),
-				dot(n, to_eye), moon_rock_lit(sun_margin, detail_cell_m, detail_horizon_spacing_m, vec2(0.5 * DETAIL_PI, 0.0))
+				dot(n, to_eye), moon_fill_emitter(abundance, detail_cell_m, detail_horizon_spacing_m, sun_margin)
 				* sun_visible, sun_visible, ground_k, horizon_enabled, east_f, cross(up, east_f), uv_f)
 				* mix(1.0, detail_rock_shape.y, fillet) / norm;
 	}
 	float gain = atmosphere_enabled ? atmosphere_exposure_gain : 1.0;
-	EMISSION = albedo * relative_albedo * light * gain;
-	ALBEDO = albedo * relative_albedo * gain;
+	EMISSION = albedo * relative_albedo * surface_albedo * light * gain;
+	ALBEDO = albedo * relative_albedo * surface_albedo * gain;
 	SPECULAR = 0.0;
 	ROUGHNESS = 1.0;
 	near_sun_radiance = near_radiance;

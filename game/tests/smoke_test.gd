@@ -111,11 +111,12 @@ func _check_moon_surface(core: StarsimCore, moon_loaded: bool) -> void:
 		lat.append(-84.79 + k * 1e-5)
 		lon.append(29.19 + k * 1e-5)
 	var stats: Dictionary = core.moon_surface_statistics()
-	var mesh: Dictionary = core.rock_template_mesh(3, 2)
+	var mesh: Dictionary = core.rock_template_mesh(3, 3)
 	_check((mesh["vertices"] as PackedVector3Array).size() == 162 and (mesh["normals"] as PackedVector3Array).size() == 162
+			and (mesh["cavity"] as PackedFloat32Array).size() == 162
 			and (mesh["indices"] as PackedInt32Array).size() % 3 == 0 and (mesh["indices"] as PackedInt32Array).size() > 0
 			and (core.rock_template_mesh(99, 0)["vertices"] as PackedVector3Array).is_empty(),
-			"rock_template_mesh: icosphere 2 has 162 vertices, bad id empty")
+			"rock_template_mesh: LOD 3 (icosphere 2) has 162 vertices and cavities, bad id empty")
 	if not moon_loaded:
 		_check(not stats.get("present", true) and not core.surface_samples_detail("moon", lat, lon, 0.0, 0.0).get("present", true),
 				"no Moon terrain: no surface statistics, no detail samples")

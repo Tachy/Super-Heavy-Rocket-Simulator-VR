@@ -30,9 +30,11 @@ constexpr std::int64_t patch_mask = patch_nodes - 1;
 // A cell's points lie within its largest centre-to-corner chord; 1 % margin for the edges' curvature ([E]).
 constexpr double patch_radius_margin = 1.01;
 // Rim arc search for a rock cut by the disc rim: coarse samples over the arc the rock can cover, then golden-section
-// steps around the best ([E]: brackets the arc to ~5 % of its span; the rock top is smooth there).
-constexpr int arc_coarse_samples = 5;
-constexpr int arc_golden_steps = 8;
+// steps around the best ([E]; Task 17: the fractured templates' top is piecewise planar with many small facets, so the
+// arc is sampled finer (9 coarse samples, 12 golden steps: bracket ~0.1 % of the span): the 5 / 8 of the smooth convex templates left the
+// maximum up to 0.1 mm low on a neighbouring facet, whose normal differed by up to 0.19 rad).
+constexpr int arc_coarse_samples = 9;
+constexpr int arc_golden_steps = 12;
 // Node climb over a rock's footprint columns: at most this many steps ([E]: 96 columns across, a climb from the peak
 // node takes a few).
 constexpr int max_climb_steps = 200;
@@ -704,8 +706,8 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
         if (found > best) best = found, winner = cand.e, winner_x = found_x, winner_y = found_y;
     }
     if (winner) {
-        // The rock's contact top is exact (a convex polyhedron): its protrusion above the plane peaks at a vertex, an
-        // edge or on the rim, generally between the footprint nodes the climb visits. Inside the disc that peak is the
+        // The rock's contact top is exact (its LOD-0 polyhedron, Task 17: not convex): its protrusion above the plane
+        // peaks at a vertex or on the rim, generally between the footprint nodes the climb visits. Inside the disc that peak is the
         // rock's support point along the pad's normal (RockTemplates::support_point; the sphere's curvature over the
         // pad, ~1e-7 m, aside); a rock the rim cuts keeps the rim search's point.
         const Rock& rock = winner->rock;

@@ -503,40 +503,29 @@ godot::Dictionary StarsimCore::moon_rocks_in_node(int face, int level, int64_t i
 
 godot::Dictionary StarsimCore::rock_template_mesh(int id, int lod) const {
     godot::PackedVector3Array vertices, normals;
+    godot::PackedFloat32Array cavity;
     godot::PackedInt32Array indices;
+    double top_z = 1.0, bottom_z = -1.0;
     if (id >= 0 && id < environment::RockTemplates::count && lod >= 0 && lod < environment::RockTemplates::lods) {
-        const auto& mesh = environment::RockTemplates::instance().mesh(id, lod);
+        const auto& templates = environment::RockTemplates::instance();
+        const auto& mesh = templates.mesh(id, lod);
         vertices.resize(static_cast<int64_t>(mesh.vertices.size()));
         normals.resize(static_cast<int64_t>(mesh.normals.size()));
+        cavity.resize(static_cast<int64_t>(mesh.cavity.size()));
         indices.resize(static_cast<int64_t>(mesh.indices.size()));
         for (size_t k = 0; k < mesh.vertices.size(); ++k) vertices[static_cast<int64_t>(k)] = to_godot(mesh.vertices[k]);
         for (size_t k = 0; k < mesh.normals.size(); ++k) normals[static_cast<int64_t>(k)] = to_godot(mesh.normals[k]);
+        for (size_t k = 0; k < mesh.cavity.size(); ++k) cavity[static_cast<int64_t>(k)] = static_cast<float>(mesh.cavity[k]);
         for (size_t k = 0; k < mesh.indices.size(); ++k) indices[static_cast<int64_t>(k)] = mesh.indices[k];
-    }
-    godot::PackedFloat64Array planes, quadric;
-    double top_z = 1.0, bottom_z = -1.0;
-    if (id >= 0 && id < environment::RockTemplates::count) {
-        const auto& templates = environment::RockTemplates::instance();
-        for (int k = 0; k < templates.plane_count(id); ++k) {
-            const auto n = templates.plane_normal(id, k);
-            planes.append(n.x);
-            planes.append(n.y);
-            planes.append(n.z);
-            planes.append(templates.plane_distance(id, k));
-        }
-        for (const auto& row : templates.quadric(id).m) {
-            for (const double v : row) quadric.append(v);
-        }
         top_z = templates.top_z(id);
         bottom_z = templates.bottom_z(id);
     }
     godot::Dictionary result;
     result["vertices"] = vertices;
     result["normals"] = normals;
+    result["cavity"] = cavity;  // per vertex 0..1: depth in a concavity (the renderer's dust)
     result["indices"] = indices;
-    result["planes"] = planes;    // per face: normal x, y, z, distance (n . p <= h)
-    result["quadric"] = quadric;  // the ellipsoid p^T Q p <= 1, row-major
-    result["top_z"] = top_z;      // exact extent of the unit-size body along z
+    result["top_z"] = top_z;      // exact extent of the unit-size body along z (LOD-0 vertices)
     result["bottom_z"] = bottom_z;
     return result;
 }

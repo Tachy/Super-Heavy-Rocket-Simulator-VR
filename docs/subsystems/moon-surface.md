@@ -72,25 +72,47 @@ on top of that relief.
   full detail, half 1 m: 2-3 lattices and the cross means); construction 0.7-1.0 s (the roughness normalisation).
 
 ### Rocks (Task 3)
-- Templates (`RockTemplates`, fix A of Task 11): 32 angular impact fragments. Each is a convex body: an ellipsoid with
-  semi-axes 1 : b/a : c/a (b/a 0.71 +- 0.15 clamped 0.3-1, c/b 0.71 +- 0.15, c/a >= 0.2: the 2 : sqrt2 : 1 fragment law
-  of Fujiwara et al. / Michikami et al. 2016, sampled: template means b/a 0.709, c/a 0.496) cut by K hash-seeded planes
-  (fracture faces: tangent planes at a jittered Fibonacci set of points on the ellipsoid, pushed in). Fresh fragments
-  (70 %, [E]): 16-24 faces cut 15-40 % deep, the whole surface planar (planar share of directions 0.94-1.00), sharp
-  edges; eroded ones (30 %, [E]; boulders wear down, Basilevsky et al. 2013 / 2015): 5-8 faces cut 3-12 %, mostly the
-  rounded ellipsoid (planar share 0.19-0.37). The fragment is turned to rest gravitationally stable (controller ruling
-  R4, Task 11 fix C: no upright balanced slabs, which the Apollo panoramas do not show): its shortest (c) axis near the
-  vertical, tilted by a 2-D Gaussian on the tangent plane with 25 deg rms ([E]: slopes, clods, burial; no measured tilt
-  distribution retrieved), capped at 60 deg; template rms tilt 25.2 deg, max 45.5 deg, 9 of 32 above 30 deg) and scaled
-  so that max r = 1 (20000 Fibonacci directions, the best 32 refined by a pattern
-  search, margin 0.5 %). r(dir) is the exact ray exit distance; `normal` the active face's (or the ellipsoid's) normal;
-  `column_top(x, y)` exact (the least upper bound of the constraints on the vertical line, ~50 ns); `support_point(u)`
-  exact (the ellipsoid's maximum, each face ellipse's maximum or a precomputed edge end / vertex); `bottom_z` / `top_z`
-  = the support along -z / +z; `normal_toward(p, reference, tol)` the normal-cone vector nearest a contact's own normal
-  (on an edge or a vertex a pad keeps its normal). Meshes = icosphere 4/3/2/1 (2562 / 642 / 162 / 42 vertices) with
-  vertex dir r(dir) and the exact face normals (edges soften over one triangle). `exposed_area(cut_z)` = plan-view area
-  of the part above the plane z = cut_z, from the column tops of a 96 x 96 grid over [-1, 1]^2. Template construction
-  (32 templates): within a rock test case of 0.55-0.64 s in all. Everything from the integer hash.
+- Templates (`RockTemplates`, Task 17; the convex fragments of Task 11 fix A: history): 32 fractured, eroded impact
+  fragments, star-shaped about the origin. The fragment: an ellipsoid with semi-axes 1 : b/a : c/a (b/a 0.71 +- 0.15
+  clamped 0.3-1, c/b 0.71 +- 0.15, c/a >= 0.2: the 2 : sqrt2 : 1 law of Fujiwara et al. / Michikami et al. 2016;
+  template means b/a 0.709, c/a 0.496) cut by K hash-seeded primary fracture planes (fresh 70 % [E]: 16-24 planes cut
+  15-40 %; eroded 30 % [E]: 5-8 planes cut 3-12 %). Multi-scale relief on it (lengths in units of the long semi-axis,
+  all [E] from the Apollo photo comparison; no measured facet / step statistics found):
+  - chips: shallow planar cuts at the support along hashed directions: secondary 10-16 (fresh, 4-10 % deep) / 4-8
+    (eroded, 2-5 %), tertiary 20-30 (0.8-2.5 %) / 8-12 (0.5-1.5 %): edges and corners broken into smaller facets;
+  - steps: a chip on one side of a wall plane only (removed: floor n . p > h and wall m . p > g, both half-spaces
+    excluding the origin, so r stays continuous): fresh 5-8 major (4-8 % deep) + 8-12 minor (1.5-3.5 %), eroded 2-3 +
+    3-5; 60 % on a primary face (floor 0-0.04 rad off its normal: a terrace across the face), the riser leaning 35-63
+    deg from the tangent plane (steeper risers sampled radially drew dotted slits);
+  - pits 1-2 (fresh) / 2-4 (eroded), the radius sunk by 2-5 % x (1 - (angle / reach)^2)^2, reach 0.15-0.5 rad, and
+    the same kernel of either sign as undulation (8-13 kernels, 0-1.2 % fresh / 0-2.5 % eroded, reach 0.35-0.8 rad):
+    warped, not flat, fracture faces;
+  - erosion: every convex edge and corner rounded by a compact smooth minimum of the constraints' exit distances (t_min
+    - rho ln(1 + sum (1 - x / 3)^3), x = (t - t_min) / rho; faces farther than 3 rho from an edge stay planar), rho
+    fresh 0.6-1.4 %, eroded 3.5-7 % of the size: micrometeorite abrasion ~1 mm/Myr (Hoerz et al. 1975) over metre
+    boulder lifetimes of ~40-150 Myr (Basilevsky et al. 2013 / 2015) rounds old boulders over cm-dm, fresh fragments
+    keep chipped near-sharp edges; [E] as a share of the size (age grows with size).
+  The relief removes material unevenly: a stretch along the fragment axes restores the relief-free fragment's extent
+  ratios exactly (the axis law holds for the drawn body). Then the resting pose (ruling R4: c axis near the vertical,
+  2-D Gaussian tilt 25 deg rms, cap 60 deg; template rms 25.2 deg, max 45.5 deg, 9 of 32 above 30 deg) and the scale
+  to a farthest vertex at r = 1.
+  The rock IS its LOD-0 polyhedron (icosphere 5: 10242 vertices, 20480 triangles, vertex = dir r(dir)): `radius` /
+  `normal` (the triangle the ray leaves through, found by descending the icosphere hierarchy, ~0.1 us), `column_top`
+  (highest crossing of the up-facing triangles in a 64 x 64 xy bin grid, exact for the polyhedron), `support_point`
+  (the extreme vertex; candidates per cube-map cell of 6 x 16 x 16 cells, exact: a vertex can be the maximum for some
+  u in the cell only if u0 . (v - w0) >= -sin(alpha) |v - w0|), `bottom_z` / `top_z` (extreme vertices),
+  `normal_toward` (the cone of every triangle normal within the tolerance, 24^3 spatial bins). The same body for the
+  renderer, the contact (column tops, support), the hazard check and the statistical tables. Render meshes:
+  icospheres 5 / 4 / 3 / 2 / 1 (10242 / 2562 / 642 / 162 / 42 vertices; the coarser vertex sets are prefixes of the
+  finer: the same surface sampled coarser) with per-LOD vertex normals from central differences of r over 0.2 of the
+  LOD's edge angle (smoothed over its own spacing: no aliasing) and a per-vertex cavity term (mean sine of the elevation
+  of a ring of neighbours above the tangent plane, full at 0.3: step corners, pits, cracks; the renderer's dust).
+  `exposed_area(cut_z)` = plan-view area of the part above z = cut_z, from the column tops of a 96 x 96 grid.
+  Construction: the 32 templates on 32 threads, ~3 s per process (test start).
+  Shape statistics (core test "Rock templates are fractured, eroded impact fragments", [slow]): volume per D^3 (D from
+  the plan-view silhouette) of the template set +0.9 % against the relief-free fragments (gate 3 %; single templates
+  scatter -15 / +9 %: where chips, steps and pits fall changes a fragment's compactness), extent ratios within 0.3 %;
+  fresh templates keep > 30 deg creases; every template has concave edges.
 - Population (`LunarRocks`): one diameter octave (0.01 m, doubling, to 10 m: 10 octaves) per face-cell level, cells >= 4 x
   D_max nominal; count Poisson (exact cell area x abundance factor at the cell centre x octave density), position uniform
   in the cell (each rock belongs to exactly one cell: found from both sides of a face edge, no duplicates), D by the
@@ -137,7 +159,8 @@ on top of that relief.
 - Contact surface (`support_under_disc(centre, up, r)`, `contact_height_m`, `contact_ground_m`, `contact_rock_top`):
   the pads feel LOLA + the full relief interpolated bilinearly on a cube-face lattice of 2^25 nodes per face edge
   (8.1 cm nominal, 6.8-8.1 cm) and the rocks >= 5 cm (`contact_min_rock_diameter_m`) with their contact top (the
-  template's exact column top, `RockTemplates::column_top`, ~50 ns: the same surface as `rock_top`). Both scales lie inside the few-cm sinkage of a
+  template's exact column top, `RockTemplates::column_top` on its LOD-0 polyhedron (Task 17: up-facing triangles
+  binned 96 x 96 with precomputed edge functions, highest first): the same surface as `rock_top`). Both scales lie inside the few-cm sinkage of a
   loaded pad in regolith ([E]; a 5 cm rock buried 0.3 of its height stands 2-3 cm proud; the omitted sub-lattice relief
   has an RMS of 4.4 mm, 2.5 mm at 4 cm - the 4 cm lattice put six sliding pads over the 50 us budget, see Cost).
 - Pivoting pad (ruling I2, fix round 1 of Task 4; the HLS pad sits on a ball joint): heights are referred to the disc
@@ -150,7 +173,7 @@ on top of that relief.
   upper bound of their protrusion (top bound - plane at the base + slope x a) with early stop; first every peak under
   the disc (cached per rock, free), then: inside the disc the protrusion of the bilinear contact top above the linear
   plane is greatest at a footprint column node - found by climbing over the nodes from the peak; a rock the rim cuts is
-  searched along its rim arc (5 coarse samples, 8 golden-section steps) and climbed inward from the best rim point.
+  searched along its rim arc (9 coarse samples, 12 golden-section steps; 5 / 8 before Task 17, too coarse for the faceted templates) and climbed inward from the best rim point.
   The winning rock's point is then moved to its support point along the pad normal (`support_point`; the polyhedron's
   protrusion peaks at a vertex or an edge between the nodes) when that lies inside the disc. The carrying rock's normal
   is `LunarRocks::rock_top(rock, unit, pad normal)`: on a face its normal, on an edge or a vertex (within
@@ -174,9 +197,11 @@ on top of that relief.
   weights): the same values, a full-detail relief point 2.4 us instead of 6 us.
 - Cost (Release, this machine, `[contact_speed]`, run alone as CTest `contact_speed`; whole `leg_contact` of the HLS:
   six 1 m pads on a 12 m footprint + 12 base-ring points through `TerrainField`, medians of 7 x 200 ticks): resting
-  25 us, sliding 1 mm per tick (0.2 m/s at 200 Hz) 34-36 us, descending from 50 m at 2 m/s with 0.2 m/s drift 12 us
-  (mean of 5,000 ticks; feet and ring above their bound skipped), first tick on a cold surface 0.2 ms (budget < 50 us
-  per tick, gated). Under the parallel suite the same case measured 46 / 58 / 15 us, hence the serial run.
+  32 us, sliding 1 mm per tick (0.2 m/s at 200 Hz) 51.5-52.8 us, descending from 50 m at 2 m/s with 0.2 m/s drift 13 us
+  (mean of 5,000 ticks; feet and ring above their bound skipped), first tick on a cold surface 0.21 ms (budget < 50 us
+  per tick, gated: sliding OVER the budget since Task 17 - open point). The convex Task 11 templates measured 28.7 /
+  37-39 / 11.5 us on the same machine the same evening (25 / 34-36 / 12 us when first measured). Under the parallel
+  suite the case measures 35-55 / 52-68 / 13-21 us, hence the serial run.
 - Legs (`contact::leg_contact`): each foot's support is `LandingSurface::below_disc(e, n, foot_pad_radius_m)` (once
   per foot per tick, skipped above `below_disc_upper_bound`); the base ring asks `height_below` (height and water
   only: the contact surface at the point incl. rocks, skipped above `height_below_upper_bound`). `TerrainField` routes
@@ -254,7 +279,8 @@ on top of that relief.
 - `moon_rocks(face, level, i, j, min_d)`: rocks of one cube-face cell (empty at a level no octave uses); per rock
   `ids`, `base_fixed_m` (3, radius R + base height), `basis` (9 = local_to_fixed as three column vectors a, b, up),
   `axes_m` (3), `diameter_m`, `burial_m`, `base_height_m`, `albedo`, `template`.
-- `rock_template_mesh(id, lod)` (lod 0..3 = 2562 / 642 / 162 / 42 vertices); `moon_surface_statistics()` (Hapke, crater
+- `rock_template_mesh(id, lod)` (lod 0..4 = 10242 / 2562 / 642 / 162 / 42 vertices; vertices, normals, cavity,
+  indices, top_z, bottom_z); `moon_surface_statistics()` (Hapke, crater
   / rock SFD, roughness, rock cover samples `cover_diameters_m` / `cover_above_m`: 33 log-spaced diameters).
 - `surface_finest_resolution_m("moon")` returns 0.01 m with detail on (the quadtree's data limit, Task 7);
   `surface_data_resolution_m(body, lats, lons)` (Task 7) the same over the measured data alone (LOLA), whatever the
@@ -511,10 +537,12 @@ on top of that relief.
   Free entries beyond a bucket's prewarm count are released after TRIM_IDLE_S 10 s without a take, one per frame.
   `free_all` (called by `TerrainQuadtree._exit_tree`) frees the pools' orphan entries at shutdown (review n3: thousands
   of leaked MultiMesh RIDs at exit before).
-- One mesh per LOD for all 32 templates: the unit icosphere of the core's LOD (2562 / 642 / 162 / 42 vertices) plus the
-  bare icosahedron (12, its first 12 vertices) as LOD 4; each vertex takes its template's radius and normal from a
-  float texture (column VERTEX_ID, row LOD x 32 + template). LOD bands of projected diameter: >= 100 / 30-100 / 10-30 /
-  4-10 / < 4 px (icosphere chord sagitta < ~0.3 px at each band's lower edge); the LOD and band ride in the mesh's
+- One mesh per LOD for all 32 templates: the unit icosphere of the core's LOD (10242 / 2562 / 642 / 162 / 42
+  vertices; 20480 / 5120 / 1280 / 320 / 80 triangles) plus the bare icosahedron (12, its first 12 vertices; 20
+  triangles) as LOD 5; each vertex takes its template's radius and normal from a float texture and its cavity term from
+  an R float texture (column VERTEX_ID, row LOD x 32 + template; 10242 wide). LOD bands of projected diameter: >= 300 /
+  100-300 / 30-100 / 10-30 / 4-10 / < 4 px (icosphere chord sagitta < ~0.3 px at each band's lower edge from LOD 1 on;
+  LOD 0 for the near boulders draws the finest steps and chips; Task 11: 2562 vertices from 100 px, no 300 px band); the LOD and band ride in the mesh's
   CUSTOM0 (no instance uniforms: their global buffer overflowed with thousands of node MultiMeshes). A rock goes into
   every LOD whose band it can reach between the node's nearest (2.0 x size) and farthest (8 x size) camera distance;
   the shader draws it only in the LOD holding its current size.
@@ -553,11 +581,20 @@ on top of that relief.
   on a rise above the eye sees the eye below its local horizontal, where Smith's Lambda(v) has no meaning and G2 / G1
   crosses a zero denominator (Task 12 fix 2, review N1: blown-out and black rocks above the eye's horizontal plane in the
   boulder field with the near shadows off; with them on the map's resolved band left no Smith term near the eye).
-  Normals per fragment from the template's convex constraints (`rock_shape_data`: up to 24 faces n . p <= h and the
-  ellipsoid's quadric; the active constraint is the one the interpolated template position is closest to violating):
-  hard facet edges at every LOD, no smoothing across cut planes (fix round B; the rock patch's radiance is the same
-  with the interpolated vertex normals within 0.05 %). The rock textures (triplanar in the rock's own metres, weights by
-  the facet normal): relative albedo and the mean-preserving slope modulation. Dust fillet / burial blend: over 0.05 D
+  Normals (Task 17): the template's interpolated per-vertex normals, mixed with the LOD triangle's own flat normal by
+  LOD (0 / 0.25 / 0.6 / 0.85 / 1 / 1 [E]: the coarse LODs cannot carry the chips, their facets show the sampled
+  fragment as an angular body - small rocks read as smooth eggs with interpolated normals, controller look review),
+  then tilted by the procedural rock surface (`moon_rock_surface.gdshaderinc`): value-noise height field with analytic
+  gradient in the rock's own metres (stable under the floating origin; per-rock offset), five octaves 25 cm - 1.1 cm,
+  slope 0.08 at 25 cm rising as a self-affine H = 0.8 surface (~0.25 rms in all), octaves below 4 px faded; grain
+  albedo +-8 % per fine octave; crack lines (zero set of a 35 cm noise, 45 % darker). Dust: coverage = 0.8 x patch
+  (0.5-1, 40 cm noise) x clamp(smoothstep(0.6, 0.95, n_z) + cavity) on up-facing parts and in concavities; dusted
+  surface reflects like the regolith (albedo factor 1) with half the rock relief; the bare rock's factor is raised to
+  1 + (f - 1) / (1 - 0.343) so the mean over the templates' exposed plan area (0.343, core test "Dust share of the rock
+  templates") stays the rock law's f (`albedo_to_regolith`, boulders seen from orbit, dust included): the statistical
+  layer's rho is unchanged. `--rock_no_surface` (moon_surface_check) draws without texture and dust. The baked rock
+  textures (triplanar in the rock's own metres, weights by the vertex normal): relative albedo and the mean-preserving
+  slope modulation. Dust fillet / burial blend: over 0.05 D
   above the ground plane the rock blends into the regolith's reflectance on the local vertical ([E]). The drawn rocks
   cast and receive the near-field Sun shadow (below).
   The eye adaptation's `atmosphere_exposure_gain` multiplies the rock radiance as it does the lit ground's in
@@ -579,8 +616,8 @@ on top of that relief.
   give the same mean within 0.02 %, Task 12 report), bias 0.03 / normal bias 1.0 [E]. Range RANGE_MIN_M 150 m + 4 x the
   eye's height over the ground, at most 4 km [E]; Godot fades the shadow over the last 20 % (fade_start 0.8). Active only
   with the fidelity setting `moon_near_shadows` (`MoonNearShadow.enabled`; render_check `--moon_near_shadows=off`), the
-  Moon terrain drawn and the eye within 20 km of the ground; elsewhere the Sun light casts no shadow (the Earth: unchanged)
-  and the globals say off. Chosen over a custom pass: the engine's pass is shared by both VR eyes (multiview: one shadow
+  Moon terrain drawn and the eye within 20 km of the ground; elsewhere MoonNearShadow casts no shadow (at the Earth the separate EarthNearShadow does, Task 16:
+  `launch-structures.md`, `terrain-rendering.md`) and the globals say off. Chosen over a custom pass: the engine's pass is shared by both VR eyes (multiview: one shadow
   pass, identical shadows in both eyes, checked in the stereo mock images), has the PCSS solar-disc penumbra and gives
   vehicles and structures their shadows on each other for free; its measured cost is below (and in vr-performance.md).
 - Casters: the Moon terrain nodes (`TerrainQuadtree.cast_shadows`, the Earth's false), vehicles and structures (Godot's
@@ -720,8 +757,8 @@ on top of that relief.
   `min_bell_clearance_m`; `LunarDescentPlanner::plan` overload on the composed surface.
 - Task 11: `LunarRocks::rocks_in_region` (`max_region_descent` 10), `rock_statistical_cover`, the
   `earth_elevation_rad` and `geometry_shadows_statistical` arguments of `unresolved_light_factors`
-  (`environment/unresolved_shading`); `RockTemplates::plane_normal` / `plane_distance` / `quadric`; bindings
-  `StarsimCore.moon_rocks_in_node`, `rock_template_mesh` (+ planes, quadric, top_z, bottom_z),
+  (`environment/unresolved_shading`); bindings `StarsimCore.moon_rocks_in_node`,
+  `rock_template_mesh` (+ cavity, top_z, bottom_z; Task 17 dropped planes / quadric),
   `rock_template_exposed_area`, `moon_unresolved_light_factors(..., earth_elevation_rad)`;
   `game/world/terrain/moon_rock_layer.gd` (`MoonRockLayer`: lists, pools, attach queue, floor guard),
   `TerrainQuadtree` (`process_queue` per update, children wait for `is_pending`), `game/shaders/moon_rock.gdshader`,
@@ -1061,6 +1098,15 @@ on top of that relief.
   over) / 4.76 ms (pass); without any rock casters the boulder jump also had single 22-28 ms allocation stalls (A/B).
   Load: the statistics build 1311 ms without the cache file, 439 ms with it (the whole render_check process 36.5 / 35.5 s;
   the ~8 s of Task 12's first version were the core tests' process - the game shared the build with its other loading).
+- Task 17 (fractured rock templates, 2026-11-05): core [slow] tags 247 / 250 (fail: lunar campaign 8-14, seed 14 at
+  8 deg 1.39-1.51 m - also at the Task 12 head, 1.52 m; contact_speed sliding 51.5-52.8 us alone, 37-39 us with the
+  convex templates; one rim-cut case of "A rock at the rim lifts the pivoting pad": heights within 0.02 mm, normal
+  0.115 rad off on a near-tie of two facets). Campaigns 1-7 / 15-21 7 / 7 (offsets 0.04-0.34 / 0.16-0.84 m). IM-2
+  hazard: offset 28.3 m, slope 3.12 deg unchanged, step 0.467 -> 0.468 m, bell clearance 0.552 -> 0.548 m. Summed
+  roughness at the site + rock tops 4.003 -> 4.014 mm (residual 3.62 mm kept: the formula gives 3.610). Rock patch
+  radiance gates unchanged (within -0.25..+0.06 %). GPU stereo mock: IM-2 2 m 17.7 ms, boulder field 48.2 ms (drawn
+  vertices +1 %). Camera jumps: IM-2 rock share 3.6-3.9 ms; boulder field one 24-31 ms pool allocation per run (2 of 2,
+  T12-C). Images: screenshots/moon_surface/task17/.
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -1130,6 +1176,8 @@ Extrapolated to 100 m the residual term gives 0.68 m, below the NAC totals with 
 | fragment b/a 0.71, c/b 0.71 (c/a 0.50) | [S] | Fujiwara et al. 1978 (Icarus 31) impact fragments a:b:c = 2:sqrt2:1; Michikami et al. 2016 (Icarus 264): catastrophic-disruption fragments b/a ~0.7, c/a ~0.5, cratering fragments to c/a ~0.2; LRO NAC boulders b/a mostly ~0.7, 0.3-0.9 (Kumar et al., NGRI; Krishna & Kumar 2016). Constants in `rock_templates.cpp` (no longer config keys) | NAC: m-dam |
 | sd 0.15 | [E] | spread of the NAC range | - |
 | fresh / eroded 70 / 30 %, faces 16-24 / 5-8, cut 15-40 / 3-12 % | [E] | Basilevsky et al. 2013 (PSS 89) / 2015 (PSS 117): boulders wear down and break up (survival ~40-80 Myr for 1-2 m); share from the Apollo photo comparison | - |
+| relief: chips, steps, pits, undulation (counts / depths in Rocks (Task 3)) | [E] | Apollo 17 station 6 / 7 boulders (user image 2026-11-05, AS17-140-21497): faces broken into facets and steps, chipped edges, hollows; no measured statistics found | - |
+| erosion radius fresh 0.6-1.4 %, eroded 3.5-7 % of the size | [E] | micrometeorite abrasion ~1 mm/Myr (Hoerz et al. 1975, The Moon 13) x boulder lifetimes ~40-150 Myr (Basilevsky et al. 2013 / 2015) | - |
 | tilt: resting, c axis near the vertical, 2-D Gaussian 25 deg rms, cap 60 deg (ruling R4) | [E] | no measured lunar tilt / H/D distribution retrieved (lead: Demidov & Basilevsky, Lunokhod / Apollo panoramas; not found by two web searches) | - |
 | burial 0.3 +- 0.15 | [E] | no lunar measurement found | - |
 | albedo 1.35 x regolith | [E] | w_rock 0.65 / w_regolith 0.48 of the synthetic NAC boulder-field model of Marshal, Ruesch, Woehler et al. (EGU22-12217), taken there from earlier work; Ruesch et al. 2024 (JGR) found boulders near Reiner Gamma with w like the regolith | - |
@@ -1264,7 +1312,7 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   gate (sliding 34-36 us against 48-51 us) - one constant (`contact_lattice_level`) if the controller wants 4 cm back.
   The disc pattern (25 samples) can miss up to ~1.5 cm of sub-pattern roughness. Rocks: the contact top is the
   template's exact column top (`rock_top`'s surface); the greatest protrusion is found by a node climb from the peak and
-  the support point along the pad normal (convex rocks: one summit) or along the rim arc (golden section, ~0.15 mm).
+  the support point along the pad normal (the polyhedron's extreme vertex) or along the rim arc (golden section, ~0.15 mm).
 - Pivoting pad: the pad stays parallel to the plane fitted to the ground and is lifted by the highest protrusion (the
   ruling); a real ball-joint pad on a rim rock would tilt onto the rock and the ground opposite, lifting its joint by
   roughly half as much. No joint range limit is modelled.
@@ -1335,3 +1383,8 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   1-2 deg ~1 deg of horizon error over a few km). Within the plan's design (Task 7 review M2).
 - Generated craters up to 2 km and roughness up to ~1 km wavelength outside the tiles are statistical, not the real
   features at those places (LOLA_16 does not resolve them).
+- Rocks (Task 17): contact_speed sliding over its 50 us budget with the faceted templates (51.5-52.8 us alone); the
+  pivoting-pad rim-cut normal on facet near-ties; big boulders still lack large fractures (10-30 % of the size),
+  splitting cracks and overhangs (star-shaped body); LOD-0 step edges show the mesh spacing up close; single templates'
+  volume per D^3 scatters -15 / +9 % (mean +0.9 %); the base fillet band (Task 11) reads as an untextured strip on big
+  rocks; boulder-field camera jump pool-allocation stall (T12-C) in 2 of 2 runs.

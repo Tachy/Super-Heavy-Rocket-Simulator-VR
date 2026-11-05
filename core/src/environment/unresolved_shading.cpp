@@ -845,7 +845,7 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
 namespace {
 
 constexpr int rock_view_burial_nodes = 5;  // [D] N in [-2, 2] step 1 (the tails beyond weigh < 3 %: the view terms vary slowly with the burial)
-constexpr int rock_view_lod = 2;           // [D] 162 vertices: the polygons' areas within ~1 % of LOD 1 (test)
+constexpr int rock_view_lod = 3;           // [D] icosphere 2, 162 vertices: the polygons' areas within ~1 % of the next finer LOD (Task 11 test); the Task 17 relief is mostly below its spacing, so the convex-hull regions below are close
 // Bump when the tables' algorithm changes (the key also holds the inputs).
 constexpr std::uint64_t rock_view_cache_version = 1;
 constexpr std::uint64_t rock_view_cache_magic = 0x5356'5452'4F43'4B31ULL;  // "SVTROCK1"

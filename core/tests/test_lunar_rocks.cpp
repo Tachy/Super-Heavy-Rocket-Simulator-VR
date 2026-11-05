@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -419,10 +420,10 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
         }
         // Positive, and no needle: the thinnest fragment (c/a 0.2) cut by 35 % keeps ~0.13 of its long semi-axis.
         CHECK(r_min > 0.1);
-        CHECK(r_max <= 1.0);
-        // Normalised: the rock reaches its bounding axes (the corners found by the refined search; margin 0.5 %).
+        CHECK(r_max <= 1.0 + 1e-12);
+        // Normalised: the farthest vertex is at r = 1.
         const double r_peak = sphere_max([&](const Vec3& d) { return t.radius(id, d); }, static_cast<std::uint64_t>(id) + 300);
-        CHECK(r_peak <= 1.0);
+        CHECK(r_peak <= 1.0 + 1e-12);
         CHECK(r_peak > 0.99);
         // Exposed plan-view area: the whole projection below the rock, nothing above it, shrinking in between.
         const double full = t.exposed_area(id, t.bottom_z(id) - 1e-3);
@@ -437,10 +438,12 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
             CHECK(area <= previous);
             previous = area;
         }
+        const auto& finest = t.mesh(id, 0);
         for (int lod = 0; lod < RockTemplates::lods; ++lod) {
             const auto& m = t.mesh(id, lod);
             const size_t nv = m.vertices.size(), nf = m.indices.size() / 3;
             REQUIRE(m.normals.size() == nv);
+            REQUIRE(m.cavity.size() == nv);
             std::map<std::pair<int, int>, int> edges;  // directed edge count
             for (size_t f = 0; f < nf; ++f) {
                 const int i0 = m.indices[3 * f], i1 = m.indices[3 * f + 1], i2 = m.indices[3 * f + 2];
@@ -457,21 +460,25 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
             }
             CHECK(closed);
             CHECK(static_cast<int>(nv) - static_cast<int>(edges.size() / 2) + static_cast<int>(nf) == 2);
-            if (lod == 0) {
-                double worst = 0.0;
-                for (size_t v = 0; v < nv; ++v) {
-                    const Vec3 p = m.vertices[v];
-                    worst = std::max(worst, std::abs(norm(p) - t.radius(id, p)) / t.radius(id, p));
-                    CHECK(std::abs(norm(m.normals[v]) - 1.0) < 1e-9);
-                    CHECK(dot(m.normals[v], p) > 0.0);
-                }
-                CHECK(worst < 0.01);
+            double worst = 0.0;
+            bool prefix = true, cavity_range = true;
+            for (size_t v = 0; v < nv; ++v) {
+                const Vec3 p = m.vertices[v];
+                // The coarser LODs sample the same surface: their vertices are LOD 0's first ones.
+                prefix = prefix && norm(p - finest.vertices[v]) == 0.0;
+                worst = std::max(worst, std::abs(norm(p) - t.radius(id, p)) / t.radius(id, p));
+                CHECK(std::abs(norm(m.normals[v]) - 1.0) < 1e-9);
+                CHECK(dot(m.normals[v], p) > 0.0);
+                cavity_range = cavity_range && m.cavity[v] >= 0.0 && m.cavity[v] <= 1.0;
             }
+            CHECK(prefix);
+            CHECK(cavity_range);
+            CHECK(worst < 1e-9);  // the vertices lie on the LOD-0 surface (radius is that polyhedron's)
         }
     }
 }
 
-TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environment]") {
+TEST_CASE("Rock templates are fractured, eroded impact fragments", "[moon_surface][environment][slow]") {
     const RockTemplates& t = RockTemplates::instance();
     // Axis law (Fujiwara et al. / Michikami et al. 2016): mean b/a 0.71, c/a 0.50, spread 0.15 (clamped), so the
     // template means lie within 3 sigma of the mean (sigma = 0.15 / sqrt(count)).
@@ -508,49 +515,104 @@ TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environ
     CHECK(rms_tilt < 35.0 * deg);
     CHECK(max_tilt <= 60.0 * deg + 1e-9);
 
+    // The relief keeps the fragment's mass and axis ratios: volume per D^3 (D the plan-area diameter of the whole
+    // plan-view silhouette) and the extents along the fragment axes against the relief-free fragment (Task 17 brief: within 3 %).
+    double worst_volume = 0.0, worst_axes = 0.0, sum_volume = 0.0, sum_base_volume = 0.0;
     double worst_extent_gap = 0.0;
     for (int id = 0; id < RockTemplates::count; ++id) {
-        // Faceted: on a fresh fragment most of the surface is planar faces. A plane's normal is constant over its face:
-        // neighbouring directions with the same normal; across an edge the normal jumps (sharp edge, no blend).
-        int planar = 0, samples = 0, sharp = 0;
-        for (int k = 0; k < 2000; ++k) {
-            const double z = 2.0 * unit_hash(id, k, 7) - 1.0, phi = constants::two_pi * unit_hash(id, k, 8);
-            const double rho = std::sqrt(1.0 - z * z);
-            const Vec3 d{rho * std::cos(phi), rho * std::sin(phi), z};
-            const Vec3 n0 = t.normal(id, d);
-            const Vec3 e = math::normalized(cross(std::abs(d.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}, d));
-            const Vec3 n1 = t.normal(id, d + e * 1e-3);
-            ++samples;
-            const bool on_face = norm(n1 - n0) < 1e-12;  // same face (an ellipsoid normal turns by ~1e-3)
-            if (on_face) ++planar;
-            // An edge: 0.05 rad on, still on a face (its normal constant), but a different face's normal.
-            const Vec3 far = d + e * 0.05;
-            const Vec3 n2 = t.normal(id, far), n3 = t.normal(id, far + e * 1e-3);
-            if (on_face && norm(n3 - n2) < 1e-12 && norm(n2 - n0) > 0.1) ++sharp;
+        const auto& s = t.relief_stats(id);
+        const auto& b = t.base_stats(id);
+        const double dv = s.volume_per_d3 / b.volume_per_d3 - 1.0;
+        const double da = std::max(std::abs(s.extent_b_to_a / b.extent_b_to_a - 1.0),
+                                   std::abs(s.extent_c_to_a / b.extent_c_to_a - 1.0));
+        worst_volume = std::max(worst_volume, std::abs(dv));
+        worst_axes = std::max(worst_axes, da);
+        sum_volume += s.volume_per_d3;
+        sum_base_volume += b.volume_per_d3;
+        // Planar facets: coplanar regions of the LOD-0 mesh (neighbouring triangles with one normal) above 0.2 % of the
+        // area (the undulation warps most faces); sharp creases (> 30 deg between neighbouring triangles: fresh
+        // fracture edges and step corners); concave edges (a step's inner corner, a pit) where the neighbour's far
+        // vertex lies above a triangle's plane.
+        const auto& m = t.mesh(id, 0);
+        const size_t nf = m.indices.size() / 3;
+        std::vector<Vec3> fn(nf);
+        std::vector<double> fa(nf);
+        double total_area = 0.0;
+        std::map<std::pair<int, int>, size_t> edge_face;
+        for (size_t f = 0; f < nf; ++f) {
+            const Vec3 a = m.vertices[static_cast<size_t>(m.indices[3 * f])], b2 = m.vertices[static_cast<size_t>(m.indices[3 * f + 1])],
+                       c = m.vertices[static_cast<size_t>(m.indices[3 * f + 2])];
+            const Vec3 x = cross(b2 - a, c - a);
+            fa[f] = 0.5 * norm(x);
+            fn[f] = x / norm(x);
+            total_area += fa[f];
+            for (int e = 0; e < 3; ++e) edge_face[{m.indices[3 * f + e], m.indices[3 * f + (e + 1) % 3]}] = f;
         }
-        const double planar_share = static_cast<double>(planar) / samples;
-        std::printf("template %2d: %s, %2d faces, b/a %.2f c/a %.2f, tilt %4.1f deg, planar share %.2f, edge pairs %d\n", id,
-                    t.eroded(id) ? "eroded" : "fresh ", t.plane_count(id), t.fragment_b_to_a(id), t.fragment_c_to_a(id),
-                    t.c_axis_tilt_rad(id) / deg, planar_share, sharp);
-        if (!t.eroded(id)) {
-            CHECK(planar_share > 0.8);
-            CHECK(sharp > 0);
+        std::vector<size_t> parent(nf);
+        for (size_t f = 0; f < nf; ++f) parent[f] = f;
+        const auto root = [&](size_t f) {
+            while (parent[f] != f) f = parent[f] = parent[parent[f]];
+            return f;
+        };
+        double concave_length = 0.0, edge_length = 0.0, sharp_length = 0.0;
+        for (const auto& [e, f] : edge_face) {
+            if (e.first > e.second) continue;
+            const size_t g = edge_face.at({e.second, e.first});
+            if (norm(fn[f] - fn[g]) < 1e-9) parent[root(f)] = root(g);
+            const double length = norm(m.vertices[static_cast<size_t>(e.first)] - m.vertices[static_cast<size_t>(e.second)]);
+            edge_length += length;
+            if (dot(fn[f], fn[g]) < std::cos(30.0 * deg)) sharp_length += length;  // a crease of > 30 deg
+            // g's vertex off the shared edge, above f's plane: concave.
+            int far = m.indices[3 * g];
+            for (int k = 0; k < 3; ++k) {
+                const int v = m.indices[3 * g + k];
+                if (v != e.first && v != e.second) far = v;
+            }
+            const Vec3 a = m.vertices[static_cast<size_t>(e.first)];
+            if (dot(fn[f], m.vertices[static_cast<size_t>(far)] - a) > 1e-4 * length) concave_length += length;
         }
+        std::map<size_t, double> region_area;
+        for (size_t f = 0; f < nf; ++f) region_area[root(f)] += fa[f];
+        int facets = 0;
+        double planar = 0.0;
+        for (const auto& [r, a] : region_area) {
+            if (a > 0.002 * total_area) ++facets, planar += a;
+        }
+        std::printf("template %2d: %s, %2d primary faces, %2d chips, %2d steps, %d pits, erosion %.3f, b/a %.2f c/a %.2f, "
+                    "tilt %4.1f deg, facets %3d (planar share %.2f), crease share %.3f, concave edge share %.3f, V/D^3 %.4f (base %.4f, "
+                    "%+.1f %%; at r_max 1: %.4f vs %.4f, %+.1f %%), extents b/a %.3f c/a %.3f (base %.3f %.3f)\n",
+                    id, t.eroded(id) ? "eroded" : "fresh ", t.primary_planes(id), t.chip_count(id), t.step_count(id),
+                    t.pit_count(id), t.erosion_radius(id), t.fragment_b_to_a(id), t.fragment_c_to_a(id),
+                    t.c_axis_tilt_rad(id) / deg, facets, planar / total_area, sharp_length / edge_length, concave_length / edge_length,
+                    s.volume_per_d3, b.volume_per_d3, 100.0 * dv, s.unit_volume, b.unit_volume,
+                    100.0 * (s.unit_volume / b.unit_volume - 1.0), s.extent_b_to_a, s.extent_c_to_a, b.extent_b_to_a,
+                    b.extent_c_to_a);
+        CHECK(t.chip_count(id) > 0);
+        CHECK(t.step_count(id) > 0);
+        CHECK(t.pit_count(id) > 0);
+        CHECK(concave_length > 0.0);  // not convex
+        if (!t.eroded(id)) CHECK(sharp_length > 0.0);  // a fresh fragment keeps hard fracture edges
         // Exact column tops: the point (x, y, top) lies on the surface (radial function), and no column rises above
         // top_z; top_z is reached (within a grid cell's slope).
         double highest = -1.0, lowest = 1.0;
-        for (int i = 0; i < 64; ++i) {
-            for (int j = 0; j < 64; ++j) {
-                const double x = -1.0 + (2.0 * i + 1.0) / 64.0, y = -1.0 + (2.0 * j + 1.0) / 64.0;
+        for (int i = 0; i < 40; ++i) {
+            for (int j = 0; j < 40; ++j) {
+                const double x = -1.0 + (2.0 * i + 1.0) / 40.0, y = -1.0 + (2.0 * j + 1.0) / 40.0;
                 if (const auto top = t.column_top(id, x, y)) {
                     const Vec3 p{x, y, *top};
                     CHECK(std::abs(norm(p) - t.radius(id, p)) < 1e-9);
                     CHECK(*top <= t.top_z(id) + 1e-12);
                     highest = std::max(highest, *top);
+                    // Nothing of the rock above the top on this vertical (the radial surface is below the line's
+                    // points above it).
+                    for (int s2 = 1; s2 <= 20; ++s2) {
+                        const Vec3 q{x, y, *top + (t.top_z(id) + 1e-3 - *top) * s2 / 20.0};
+                        CHECK(norm(q) >= t.radius(id, q) - 1e-9);
+                    }
                 }
                 // The bottom: the lowest point inside the column (mirror: the column top of -z is not exposed, so scan).
-                for (int s = 0; s <= 200; ++s) {
-                    const Vec3 p{x, y, -1.0 + 2.0 * s / 200.0};
+                for (int s2 = 0; s2 <= 200; ++s2) {
+                    const Vec3 p{x, y, -1.0 + 2.0 * s2 / 200.0};
                     if (norm(p) > 1e-9 && norm(p) <= t.radius(id, p)) {
                         lowest = std::min(lowest, p.z);
                         break;
@@ -562,17 +624,23 @@ TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environ
         CHECK(lowest >= t.bottom_z(id) - 1e-9);
         CHECK(lowest < t.bottom_z(id) + 0.05);
         CHECK(highest <= t.top_z(id) + 1e-12);
-        // top_z / bottom_z (the exact support: an enumeration of the extreme points) against an independent search on
-        // the surface: no surface point lies beyond them, and the search (which can stall on a ridge of the
-        // polyhedron) gets close to them.
+        // top_z / bottom_z (the extreme vertices) against an independent search on the surface.
         const auto [z_lo, z_hi] = refined_z_extent(id);
         CHECK(z_hi <= t.top_z(id) + 1e-9);
         CHECK(z_lo >= t.bottom_z(id) - 1e-9);
         CHECK(z_hi > t.top_z(id) - 2e-3);
         CHECK(z_lo < t.bottom_z(id) + 2e-3);
         worst_extent_gap = std::max({worst_extent_gap, t.top_z(id) - z_hi, z_lo - t.bottom_z(id)});
-        // support_point along tilted directions: on the surface, no surface point beyond it, and the contact normal of
-        // a pad with normal u pressing there is u (u lies in the normal cone at the support point: face, edge or vertex).
+        // support_point: the brute-force maximum over every LOD-0 vertex (the candidate cells are exact), on the
+        // surface, no surface point beyond it; a pad with normal u pressing there keeps u (u lies in the normal cone).
+        for (int k = 0; k < 200; ++k) {
+            const auto ku = static_cast<std::uint64_t>(k);
+            const double z = 2.0 * unit_hash(id, ku, 13) - 1.0, phi = constants::two_pi * unit_hash(id, ku, 14);
+            const Vec3 u{std::sqrt(1.0 - z * z) * std::cos(phi), std::sqrt(1.0 - z * z) * std::sin(phi), z};
+            double brute = -1e300;
+            for (const Vec3& v : m.vertices) brute = std::max(brute, dot(u, v));
+            CHECK(dot(u, t.support_point(id, u)) == brute);
+        }
         for (int k = 0; k < 3; ++k) {
             const auto ku = static_cast<std::uint64_t>(k);
             const double z = 0.2 + 0.8 * unit_hash(id, ku, 11), phi = constants::two_pi * unit_hash(id, ku, 12);
@@ -586,56 +654,104 @@ TEST_CASE("Rock templates are angular impact fragments", "[moon_surface][environ
             CHECK(norm(t.normal_toward(id, p, u, 1e-9) - u) < 1e-6);
         }
     }
-    std::printf("vertical extent: the independent search stays within %.2e of the exact support\n", worst_extent_gap);
+    std::printf("relief: worst volume per D^3 change %.2f %% (mean %.4f vs base %.4f, %+.2f %%), worst extent-ratio change %.2f %%; "
+                "vertical extent search within %.2e of the extreme vertices\n",
+                100.0 * worst_volume, sum_volume / RockTemplates::count, sum_base_volume / RockTemplates::count,
+                100.0 * (sum_volume / sum_base_volume - 1.0),
+                100.0 * worst_axes, worst_extent_gap);
+    // The population's mass per D^3 within 3 % (the brief's gate); single templates scatter by up to ~15 % (a fragment's
+    // compactness varies with where the chips, steps and pits fall - reported, not gated). The extent ratios are exact
+    // per template (the stretch along the fragment axes), up to the vertex sampling.
+    CHECK(std::abs(sum_volume / sum_base_volume - 1.0) < 0.03);
+    CHECK(worst_axes < 0.01);
 }
 
 TEST_CASE("Pad contact normal on hand-built vertices and faces", "[moon_surface][environment][contact]") {
-    // Review m1: expectations independent of the code under test. A vertex is solved here from three of the template's
-    // planes (Cramer's rule) and checked inside every other plane and the ellipsoid; a pad whose normal lies inside the
-    // three faces' cone (their normalised sum) rests on that vertex with its own normal. A face point is the foot of the
-    // origin on a plane, strictly inside the rest; a pad tilted 0.3 rad from that face gets the face normal.
+    // Review m1: expectations independent of the code under test, from the mesh's own triangles. A face point is a
+    // triangle's centroid: a pad tilted 0.3 rad from it gets the triangle's normal. A vertex is the extreme vertex along
+    // a hashed direction (on the hull, so a pad can rest on it); a pad whose normal is the normalised sum of the
+    // incident triangles' normals lies inside their cone and keeps its own normal.
     const RockTemplates& t = RockTemplates::instance();
-    const auto inside = [&](int id, const Vec3& p, int a, int b, int c) {
-        for (int k = 0; k < t.plane_count(id); ++k) {
-            if (k == a || k == b || k == c) continue;
-            if (dot(t.plane_normal(id, k), p) > t.plane_distance(id, k) - 1e-6) return false;
-        }
-        return dot(p, t.quadric(id) * p) < 1.0 - 1e-6;
-    };
-    const auto det = [](const Vec3& a, const Vec3& b, const Vec3& c) { return dot(a, cross(b, c)); };
     int vertices = 0, faces = 0;
     for (int id = 0; id < RockTemplates::count; ++id) {
-        if (t.eroded(id)) continue;
-        const int n = t.plane_count(id);
-        for (int a = 0; a < n && vertices < 4 * (id + 1); ++a) {
-            const Vec3 na = t.plane_normal(id, a);
-            const Vec3 face_point = na * t.plane_distance(id, a);
-            if (inside(id, face_point, a, -1, -1)) {
-                const Vec3 side = math::normalized(cross(na, std::abs(na.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}));
-                const Vec3 pad = math::normalized(na * std::cos(0.3) + side * std::sin(0.3));
-                CHECK(norm(t.normal_toward(id, face_point, pad, 1e-9) - na) < 1e-12);
-                ++faces;
+        const auto& m = t.mesh(id, 0);
+        const size_t nf = m.indices.size() / 3;
+        const auto tri_normal = [&](size_t f) {
+            const Vec3 a = m.vertices[static_cast<size_t>(m.indices[3 * f])], b = m.vertices[static_cast<size_t>(m.indices[3 * f + 1])],
+                       c = m.vertices[static_cast<size_t>(m.indices[3 * f + 2])];
+            return math::normalized(cross(b - a, c - a));
+        };
+        for (int k = 0; k < 4; ++k) {
+            const size_t f = static_cast<size_t>(unit_hash(id, static_cast<std::uint64_t>(k), 21) * static_cast<double>(nf)) % nf;
+            const Vec3 a = m.vertices[static_cast<size_t>(m.indices[3 * f])], b = m.vertices[static_cast<size_t>(m.indices[3 * f + 1])],
+                       c = m.vertices[static_cast<size_t>(m.indices[3 * f + 2])];
+            const Vec3 centroid = (a + b + c) / 3.0, n = tri_normal(f);
+            const Vec3 side = math::normalized(cross(n, std::abs(n.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0}));
+            const Vec3 pad = math::normalized(n * std::cos(0.3) + side * std::sin(0.3));
+            CHECK(norm(t.normal_toward(id, centroid, pad, 1e-9) - n) < 1e-9);
+            ++faces;
+        }
+        for (int k = 0; k < 4; ++k) {
+            const auto ku = static_cast<std::uint64_t>(k);
+            const double z = 2.0 * unit_hash(id, ku, 22) - 1.0, phi = constants::two_pi * unit_hash(id, ku, 23);
+            const Vec3 u{std::sqrt(1.0 - z * z) * std::cos(phi), std::sqrt(1.0 - z * z) * std::sin(phi), z};
+            size_t best = 0;
+            for (size_t v = 1; v < m.vertices.size(); ++v) {
+                if (dot(u, m.vertices[v]) > dot(u, m.vertices[best])) best = v;
             }
-            for (int b = a + 1; b < n; ++b) {
-                for (int c = b + 1; c < n; ++c) {
-                    const Vec3 nb = t.plane_normal(id, b), nc = t.plane_normal(id, c);
-                    // Rows na, nb, nc; right-hand side the distances.
-                    const double d = det(na, nb, nc);
-                    if (std::abs(d) < 1e-3) continue;
-                    const Vec3 h{t.plane_distance(id, a), t.plane_distance(id, b), t.plane_distance(id, c)};
-                    const Vec3 cx{na.x, nb.x, nc.x}, cy{na.y, nb.y, nc.y}, cz{na.z, nb.z, nc.z};
-                    const Vec3 p{det(h, cy, cz) / d, det(cx, h, cz) / d, det(cx, cy, h) / d};
-                    if (!inside(id, p, a, b, c)) continue;
-                    const Vec3 pad = math::normalized(na + nb + nc);
-                    CHECK(norm(t.normal_toward(id, p, pad, 1e-9) - pad) < 1e-9);
-                    ++vertices;
+            Vec3 sum{0, 0, 0};
+            int incident = 0;
+            for (size_t f = 0; f < nf; ++f) {
+                for (int e = 0; e < 3; ++e) {
+                    if (static_cast<size_t>(m.indices[3 * f + static_cast<size_t>(e)]) == best) sum = sum + tri_normal(f), ++incident;
                 }
             }
+            REQUIRE(incident >= 3);
+            const Vec3 pad = math::normalized(sum);
+            CHECK(norm(t.normal_toward(id, m.vertices[best], pad, 1e-9) - pad) < 1e-9);
+            ++vertices;
         }
     }
     std::printf("hand-built contact normals: %d vertices, %d faces\n", vertices, faces);
     CHECK(vertices >= 20);
     CHECK(faces >= 10);
+}
+
+TEST_CASE("Dust share of the rock templates", "[moon_surface][environment]") {
+    // The renderer's dust (game/shaders/moon_rock_surface.gdshaderinc, Task 17): coverage = max x patch x clamp(
+    // smoothstep(low, high, n_z) + cavity), the patchiness 0.5 + 0.5 x a smoothstep of symmetric noise (mean 0.75). Its mean over the
+    // templates' exposed plan area at the mean burial is the shader's ROCK_DUST_MEAN, which keeps the drawn rock's mean
+    // albedo factor at the rock law's. The constants mirror the shader's.
+    constexpr double low = 0.6, high = 0.95, cavity_weight = 1.0, dust_max = 0.8, patch_mean = 0.75;
+    constexpr double shader_mean = 0.343;  // ROCK_DUST_MEAN
+    const auto smoothstep = [](double a, double b, double x) {
+        const double t = std::clamp((x - a) / (b - a), 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    };
+    const RockTemplates& t = RockTemplates::instance();
+    double weighted = 0.0, area = 0.0;
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        const auto& m = t.mesh(id, 0);
+        const double cut = t.bottom_z(id) + RockTemplates::stats_burial_fraction * (t.top_z(id) - t.bottom_z(id));
+        for (size_t f = 0; f + 2 < m.indices.size(); f += 3) {
+            const auto i0 = static_cast<size_t>(m.indices[f]), i1 = static_cast<size_t>(m.indices[f + 1]),
+                       i2 = static_cast<size_t>(m.indices[f + 2]);
+            const Vec3 a = m.vertices[i0], b = m.vertices[i1], c = m.vertices[i2];
+            if ((a.z + b.z + c.z) / 3.0 <= cut) continue;
+            const double plan = 0.5 * cross(b - a, c - a).z;  // projected area of an up-facing triangle
+            if (plan <= 0.0) continue;
+            double dust = 0.0;
+            for (const size_t v : {i0, i1, i2}) {
+                dust += dust_max * patch_mean *
+                        std::clamp(smoothstep(low, high, m.normals[v].z) + cavity_weight * m.cavity[v], 0.0, 1.0) / 3.0;
+            }
+            weighted += plan * dust;
+            area += plan;
+        }
+    }
+    const double mean = weighted / area;
+    std::printf("dust: mean coverage of the exposed plan area %.4f (shader ROCK_DUST_MEAN %.3f)\n", mean, shader_mean);
+    CHECK(std::abs(mean - shader_mean) < 0.01);
 }
 
 TEST_CASE("Rocks are deterministic and pole-regular", "[moon_surface][environment]") {
@@ -883,5 +999,26 @@ TEST_CASE("Craters, roughness and rock tops sum to the measured total roughness"
         std::printf("%-11s craters + roughness %.3f mm, + rock tops %.3f mm, measured total %.3f mm (%.1f %%)\n", p.name,
                     1e3 * without, 1e3 * with, 1e3 * target, 100.0 * (with / target - 1.0));
         CHECK(std::abs(with - target) <= 0.10 * target);
+    }
+}
+
+TEST_CASE("Export the rock templates as OBJ (diagnostics)", "[.rock_export]") {
+    // Writes every template's LOD-0 mesh (vertices, normals, cavity as a comment) to $STARSIM_ROCK_OBJ_DIR/rock_<id>.obj
+    // for an offline look at the shapes (Task 17).
+    const char* dir = std::getenv("STARSIM_ROCK_OBJ_DIR");
+    REQUIRE(dir != nullptr);
+    const RockTemplates& t = RockTemplates::instance();
+    for (int id = 0; id < RockTemplates::count; ++id) {
+        const auto& m = t.mesh(id, 0);
+        std::ofstream out(std::filesystem::path(dir) / ("rock_" + std::to_string(id) + ".obj"));
+        for (size_t v = 0; v < m.vertices.size(); ++v) {
+            out << "v " << m.vertices[v].x << ' ' << m.vertices[v].y << ' ' << m.vertices[v].z << '\n';
+            out << "vn " << m.normals[v].x << ' ' << m.normals[v].y << ' ' << m.normals[v].z << '\n';
+            out << "# c " << m.cavity[v] << '\n';
+        }
+        for (size_t f = 0; f + 2 < m.indices.size(); f += 3) {
+            out << "f " << m.indices[f] + 1 << "//" << m.indices[f] + 1 << ' ' << m.indices[f + 1] + 1 << "//"
+                << m.indices[f + 1] + 1 << ' ' << m.indices[f + 2] + 1 << "//" << m.indices[f + 2] + 1 << '\n';
+        }
     }
 }

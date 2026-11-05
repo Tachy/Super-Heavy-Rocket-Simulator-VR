@@ -242,12 +242,12 @@ std::optional<std::pair<double, Vec3>> LunarRocks::rock_top(const Rock& rock, co
     if (ux * ux + uy * uy >= 1.0) return std::nullopt;
 
     const RockTemplates& templates = RockTemplates::instance();
-    const auto top = templates.column_top(rock.template_id, ux, uy);
-    if (!top) return std::nullopt;
-    const double above_base = c * *top - rock.burial_m;
+    const auto hit = templates.column_hit(rock.template_id, ux, uy);
+    if (!hit) return std::nullopt;
+    const double above_base = c * hit->first - rock.burial_m;
     if (above_base <= 0.0) return std::nullopt;
 
-    const Vec3 n_unit = templates.normal(rock.template_id, Vec3{ux, uy, *top});
+    const Vec3 n_unit = hit->second;
     const Vec3 n_local = math::normalized({n_unit.x / a, n_unit.y / b, n_unit.z / c});
     const double height = rock.base_height_m + above_base + (x * x + y * y) / (2.0 * sphere_radius);
     return std::pair{height, rock.local_to_fixed * n_local};

@@ -44,19 +44,19 @@ const NODE_NEAR_FACTOR := 2.0
 ## [E] Farthest distance of a drawn node's rock from the camera in node sizes (the parent merges at MERGE_FACTOR x
 ## LOD_FACTOR x its size = ~5.8 x the node's size, plus the node's extent).
 const NODE_FAR_FACTOR := 8.0
-## The core's rock templates (RockTemplates::count, max_planes) and LODs (RockTemplates::lods); one more LOD here: the
-## bare icosahedron (the first 12 vertices of every icosphere), for rocks below LOD_MIN_PX[3].
+## The core's rock templates (RockTemplates::count) and LODs (RockTemplates::lods: icospheres 5..1); one more LOD here:
+## the bare icosahedron (the first 12 vertices of every icosphere), for rocks below LOD_MIN_PX[4].
 const TEMPLATES := 32
-const MAX_PLANES := 24
-const CORE_LODS := 4
-const LODS := 5
-## [E] Lower edge of each LOD's projected-diameter band (px; LOD 0 = 2562 vertices, LOD 4 = 12): the chord sagitta of the
-## icosphere's edges stays below ~0.3 px at every band's lower edge (subdivision s: sagitta ~ (1.107 / 2^s / 2)^2 / 2 of
-## the radius).
-const LOD_MIN_PX: Array[float] = [100.0, 30.0, 10.0, 4.0, 0.0]
-const LOD_VERTICES: Array[int] = [2562, 642, 162, 42, 12]
-## Vertex count of LOD 0 (the template texture's width).
-const MAX_VERTICES := 2562
+const CORE_LODS := 5
+const LODS := 6
+## [E] Lower edge of each LOD's projected-diameter band (px; LOD 0 = 10242 vertices, LOD 5 = 12): the chord sagitta of
+## the icosphere's edges stays below ~0.3 px at every band's lower edge from LOD 1 on (subdivision s: sagitta ~ (1.107 /
+## 2^s / 2)^2 / 2 of the radius); LOD 0 (Task 17) draws the fractured relief's finest steps and chips (core spacing
+## ~3.5 cm per metre of rock) for rocks above 300 px - the near boulders only.
+const LOD_MIN_PX: Array[float] = [300.0, 100.0, 30.0, 10.0, 4.0, 0.0]
+const LOD_VERTICES: Array[int] = [10242, 2562, 642, 162, 42, 12]
+## Vertex count of LOD 0 (the template textures' width).
+const MAX_VERTICES := 10242
 const FLOATS_PER_INSTANCE := 20  ## transform 12, colour 4, custom 4
 ## [E] moon_detail.gdshaderinc DETAIL_SHADOW_CASTER_FACTOR (core shadow_caster_factor): the drawn rocks cast the near-field
 ## shadow from this many times the geometry threshold (moon_rock.gdshader's shadow pass), below it statistically.
@@ -70,8 +70,8 @@ const SHADOW_CASTER_FACTOR := 4.0
 const CASTER_RELEASE_RATIO := 1.2  ## [E]
 const CASTER_ATTACHES_PER_FRAME := 2  ## [E]
 const CASTER_TAN_FLOOR := 0.0175  ## [E] tan 1 deg: below, the reach is the range's double anyway
-## Texels per template row of rock_shape_data: MAX_PLANES planes (n, h), 3 quadric rows, (plane count, bottom, top, 0).
-const SHAPE_TEXELS := MAX_PLANES + 4
+## Texels per template row of rock_shape_data: (0, bottom, top, 0).
+const SHAPE_TEXELS := 1
 ## Samples of the plan-area tables (rock_area_data): forward A(z) / A_max over [bottom_z, top_z], inverse z(a) over
 ## a in [0, 1].
 const AREA_SAMPLES := 64
@@ -290,13 +290,16 @@ func _prewarm_step() -> bool:
 	return true
 
 
-## Meshes per LOD (unit icosphere directions; LOD 4: the icosahedron), the template texture (normal, radius per vertex),
-## the shape texture (the convex body's constraints: exact facet normals per fragment) and the plan-area tables (the
-## growth band's rise), from StarsimCore.rock_template_mesh / rock_template_exposed_area.
+## Meshes per LOD (unit icosphere directions; LOD 5: the icosahedron), the template textures (normal, radius per vertex;
+## the cavity term per vertex: the dust), the shape texture (vertical extent) and the plan-area tables (the growth
+## band's rise), from StarsimCore.rock_template_mesh / rock_template_exposed_area.
 func _build_templates() -> void:
 	var texels := PackedFloat32Array()
 	texels.resize(MAX_VERTICES * LODS * TEMPLATES * 4)
 	texels.fill(0.0)
+	var cavities := PackedFloat32Array()
+	cavities.resize(MAX_VERTICES * LODS * TEMPLATES)
+	cavities.fill(0.0)
 	top_z.resize(TEMPLATES)
 	for lod in LODS:
 		var core_lod := mini(lod, CORE_LODS - 1)
@@ -306,6 +309,7 @@ func _build_templates() -> void:
 			var mesh: Dictionary = core.rock_template_mesh(t, core_lod)
 			var vertices: PackedVector3Array = mesh["vertices"]
 			var normals: PackedVector3Array = mesh["normals"]
+			var cavity: PackedFloat32Array = mesh["cavity"]
 			var count := vertices.size() if lod < CORE_LODS else 12
 			if t == 0:
 				for k in count:
@@ -317,6 +321,7 @@ func _build_templates() -> void:
 				texels[i + 1] = normals[k].y
 				texels[i + 2] = normals[k].z
 				texels[i + 3] = vertices[k].length()
+				cavities[(lod * TEMPLATES + t) * MAX_VERTICES + k] = cavity[k]
 				if lod == 0:
 					top_z[t] = maxf(top_z[t], vertices[k].z) if k > 0 else vertices[k].z
 		var arrays := []
@@ -347,11 +352,13 @@ func _build_templates() -> void:
 	var image := Image.create_from_data(MAX_VERTICES, LODS * TEMPLATES, false, Image.FORMAT_RGBAF,
 			texels.to_byte_array())
 	material_template.set_shader_parameter("rock_template_data", ImageTexture.create_from_image(image))
+	var cavity_image := Image.create_from_data(MAX_VERTICES, LODS * TEMPLATES, false, Image.FORMAT_RF,
+			cavities.to_byte_array())
+	material_template.set_shader_parameter("rock_template_cavity", ImageTexture.create_from_image(cavity_image))
 	_build_shape_tables()
 
 
-## rock_shape_data (RGBAF, SHAPE_TEXELS x TEMPLATES): per face (n, h) - unused faces never active -, the quadric's rows,
-## (plane count, bottom_z, top_z, 0). rock_area_data (RGF, AREA_SAMPLES x TEMPLATES): R = the exposed plan area A(z) /
+## rock_shape_data (RGBAF, SHAPE_TEXELS x TEMPLATES): (0, bottom_z, top_z, 0). rock_area_data (RGF, AREA_SAMPLES x TEMPLATES): R = the exposed plan area A(z) /
 ## A_max at z = bottom + (top - bottom) k / (AREA_SAMPLES - 1), G = its inverse, the highest z with A(z) >= a A_max at
 ## a = k / (AREA_SAMPLES - 1) (A is non-increasing in z).
 func _build_shape_tables() -> void:
@@ -362,25 +369,11 @@ func _build_shape_tables() -> void:
 	area.resize(AREA_SAMPLES * TEMPLATES * 2)
 	for t in TEMPLATES:
 		var mesh: Dictionary = core.rock_template_mesh(t, 0)
-		var planes: PackedFloat64Array = mesh["planes"]
-		var quadric: PackedFloat64Array = mesh["quadric"]
 		var row := t * SHAPE_TEXELS * 4
-		var count := planes.size() / 4
-		for k in MAX_PLANES:
-			var i := row + 4 * k
-			if k < count:
-				for c in 4:
-					shape[i + c] = planes[4 * k + c]
-			else:
-				shape[i + 3] = 1.0e9  # 0 . p <= 1e9: never the active constraint
-		for r in 3:
-			for c in 3:
-				shape[row + 4 * (MAX_PLANES + r) + c] = quadric[3 * r + c]
 		var bottom: float = mesh["bottom_z"]
 		var top: float = mesh["top_z"]
-		shape[row + 4 * (MAX_PLANES + 3)] = count
-		shape[row + 4 * (MAX_PLANES + 3) + 1] = bottom
-		shape[row + 4 * (MAX_PLANES + 3) + 2] = top
+		shape[row + 1] = bottom
+		shape[row + 2] = top
 		var forward := PackedFloat64Array()
 		for k in AREA_SAMPLES:
 			forward.append(core.rock_template_exposed_area(t, bottom + (top - bottom) * k / (AREA_SAMPLES - 1.0)))

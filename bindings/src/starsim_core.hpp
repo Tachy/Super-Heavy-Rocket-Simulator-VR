@@ -124,10 +124,9 @@ public:
     // LunarRocks::rocks_in_region) with diameter >= min_diameter_m, sorted by diameter descending (ties by id); plus "error" (German) when the core refuses (min
     // too small for the cell). The renderer's per-node rock list (moon_rock_layer.gd, worker threads).
     godot::Dictionary moon_rocks_in_node(int face, int level, int64_t i, int64_t j, double min_diameter_m) const;
-    // Unit-size mesh of a rock template (id 0..31, lod 0..3 = near..speck): {vertices: PackedVector3Array, normals,
-    // indices: PackedInt32Array, planes: PackedFloat64Array (per face n.x, n.y, n.z, h: n . p <= h), quadric (the
-    // ellipsoid p^T Q p <= 1, 9 values row-major), top_z, bottom_z}; empty arrays on a bad id / lod. Scale by axes_m,
-    // orient by basis.
+    // Unit-size mesh of a rock template (id 0..31, lod 0..4 = near..speck, icospheres 5..1): {vertices:
+    // PackedVector3Array, normals, cavity: PackedFloat32Array (per vertex 0..1, the dust's concavity term), indices:
+    // PackedInt32Array, top_z, bottom_z}; empty arrays on a bad id / lod. Scale by axes_m, orient by basis.
     godot::Dictionary rock_template_mesh(int id, int lod) const;
     // RockTemplates::exposed_area: plan-view area of the unit-size rock above z = cut_z (unit disc = pi).
     double rock_template_exposed_area(int id, double cut_z) const;
