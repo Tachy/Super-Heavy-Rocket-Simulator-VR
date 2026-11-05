@@ -368,8 +368,8 @@ on top of that relief.
   - poles (-90, -89.9999, +90 deg): finite for L = 0, 0.1, 1, 10 m, 1 mm neighbours within the bound;
   - nothing counted twice: no crater above 5 x 20 m in the tile core (craters 50-100 m exist), every crater
     D <= 5 x band_start at its centre, a 640 m square mean of the roughness is 0 in the tile core.
-- Baked textures (Task 8, `python -m pytest tools/moon_textures`, 7 tests, ~6 s): bake twice -> every file byte-identical;
-  every map seamless (wrap-around neighbour difference rms <= 1.2 x the interior one, seam maximum <= interior maximum + 1
+- Baked textures (Task 8, `python -m pytest tools/moon_textures`, 8 tests, ~6 s): bake twice -> every file byte-identical;
+  every map seamless (wrap-around neighbour difference rms <= 1.1 x the interior one, seam maximum <= interior maximum + 1
   LSB: a map with slope cannot have a 1 LSB edge difference, so seamless is tested relative to the interior step);
   band variance in three log sub-bands of each scale's flat part vs the config law (measured / law amplitude 0.96-1.06,
   tolerance 15 %), Hurst exponent from the band ratio within 0.15, nothing above the band; an independent full-spectrum
