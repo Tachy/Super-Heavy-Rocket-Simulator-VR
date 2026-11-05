@@ -75,6 +75,12 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `...-lunar-l4-mass-correction.md`):
   mission 1 (`hls_lunar_llo`) flies LEO -> LLO -> descent -> surface stay -> ascent -> LLO
   (`sim::start_lunar_landing_mission`).
+  Touchdown point (`mission::select_touchdown_point`): nearest admissible point on a 20 m grid within 1 km (LOLA:
+  footprint slope <= 8 deg, roughness 0.5 m, glide cone clear); on the composed surface (session `moon_surface()`
+  with detail on, the `lunar_landing` mission) also the hazard check of `moon-surface.md` (Touchdown hazard check: feet
+  step <= stroke 0.6 m, slope over the six pads, ground and rocks under the hull base <= 0.9 m, every roll; limits
+  from the vehicle config by `touchdown_hazard_limits`). IM-2: the nominal point fails (a foot step of 0.78 m), the
+  target moves 20 m.
   Masses: HLS ~573 t in the LLO, ~566 t at PDI (~500 t NRHO variant), lands ~315 t. Site pass: the LLO waits for a pass
   of the polar site within `max_crossrange_km` (20 km) and trims the plane ~90 deg before it (user 2026-10-15); the
   wait cannot be shortened by the mission epoch (user 2026-10-16: "refuse honestly"; 5.8 d for Mons Mouton). DOI on the

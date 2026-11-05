@@ -1,8 +1,12 @@
 #pragma once
 
+#include <limits>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/ephemeris/ephemeris.hpp"
@@ -49,10 +53,33 @@ double braking_range_m(double pdi_speed_mps, double mass_kg, double thrust_n, co
 struct TouchdownPoint {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    double height_m = 0.0;   // terrain above the sphere
-    double slope_rad = 0.0;  // of the footprint's plane
+    double height_m = 0.0;   // terrain above the sphere (with the hazard check: the footpad plane under the centre)
+    double slope_rad = 0.0;  // of the footprint's plane (with the hazard check: the steepest footpad plane of any roll)
     double offset_m = 0.0;   // from the mission's site
+    // Diagnostics of the hazard check (NaN where it did not run: LOLA only or detail off). The largest peak-to-peak
+    // deviation of the six foot supports from their plane over the rolls, and the smallest gap between the highest
+    // ground or rock under the hull base and the lowest engine exit with the legs fully stroked (>= 0 when admissible).
+    double max_foot_step_m = std::numeric_limits<double>::quiet_NaN();
+    double min_bell_clearance_m = std::numeric_limits<double>::quiet_NaN();
 };
+
+// What a lander's feet and hull base admit on the detailed surface (touchdown_hazard_limits derives them from the
+// vehicle config).
+struct TouchdownHazardLimits {
+    double foot_pad_radius_m = 0.0;  // the footpad disc ([stage.landing_legs] foot_pad_radius_m)
+    double max_foot_step_m = 0.0;    // per-foot height spread the legs absorb: peak-to-peak off the feet's plane
+    double bell_clearance_m = 0.0;   // lowest engine exit above the footpad plane minus margin (the full leg stroke)
+    double base_radius_m = 0.0;      // the hull base disc the engine bells lie in (rocks and ground under it)
+    std::vector<double> leg_azimuths_rad;  // the legs on the footprint circle (the roll at touchdown is free)
+};
+
+// From a lander stage's config ([D]): foot_pad_radius_m as configured; max_foot_step_m = stroke_m (the crush core's
+// travel takes a foot that stands higher than the plane through the others; a larger step bottoms the leg out);
+// bell_clearance_m = (lowest engine-group station - foot_station_m) - stroke_m (the exits sit at their group's station
+// - the HLS's are flush with the aft end, detail file engine_recess 0 - and the legs may stroke fully at touchdown);
+// base_radius_m = diameter_m / 2 (the bells lie inside the hull, whose aft edge is at the same station). Throws
+// std::invalid_argument for a stage without legs, footpad radius or engines.
+TouchdownHazardLimits touchdown_hazard_limits(const config::StageConfig& stage);
 
 // Nearest admissible touchdown point to (latitude, longitude) for an approach towards `approach_azimuth_rad`
 // (clockwise from north): footprint (the leg circle and its centre) fits a plane within the slope and roughness limits,
@@ -61,6 +88,22 @@ struct TouchdownPoint {
 std::optional<TouchdownPoint> select_touchdown_point(const environment::LunarTerrain& terrain, double latitude_rad,
                                                      double longitude_rad, double approach_azimuth_rad,
                                                      double footprint_radius_m, const LunarDescentParameters& p);
+
+// The same on the composed physics surface, with the hazard check of the detailed surface on top (detail on): of the
+// candidates that pass the LOLA checks above (nearest first) the first whose footprint is admissible for every roll of
+// the lander about its axis (the roll at touchdown is not controlled): the six feet stand on the pivoting-pad support
+// the leg contact uses (support_under_disc), sampled on the footprint circle at hazard_roll_spacing_per_pad_radius x
+// the pad radius; per roll the feet's least-squares plane is within the slope limit, the feet's peak-to-peak deviation
+// from it within max_foot_step_m, and the ground and rock tops under the hull base disc rise above it by at most
+// bell_clearance_m. Detail off: the LOLA-only selection above on surface.lola(), bit for bit.
+std::optional<TouchdownPoint> select_touchdown_point(const environment::DetailedLunarTerrain& surface,
+                                                     double latitude_rad, double longitude_rad,
+                                                     double approach_azimuth_rad, double footprint_radius_m,
+                                                     const LunarDescentParameters& p,
+                                                     const TouchdownHazardLimits& hazards);
+// Roll samples of the footprint circle at most this x the pad radius apart ([E]: half a pad, so a rock between two
+// sampled pad positions lies well inside one of them).
+inline constexpr double hazard_roll_spacing_per_pad_radius = 0.5;
 
 struct LunarDescentPlan {
     bool feasible = false;
@@ -91,8 +134,19 @@ public:
                           const environment::LunarTerrain& terrain, double site_latitude_rad,
                           double site_longitude_rad, double footprint_radius_m,
                           const LunarDescentParameters& p) const;
+    // The same with the touchdown point chosen on the composed surface with the hazard check (LOLA queries on
+    // surface.lola()).
+    LunarDescentPlan plan(const math::StateVector& state_gcrf, time::Epoch epoch,
+                          const environment::DetailedLunarTerrain& surface, double site_latitude_rad,
+                          double site_longitude_rad, double footprint_radius_m, const LunarDescentParameters& p,
+                          const TouchdownHazardLimits& hazards) const;
 
 private:
+    LunarDescentPlan plan_impl(const math::StateVector& state_gcrf, time::Epoch epoch,
+                               const environment::LunarTerrain& terrain,
+                               const environment::DetailedLunarTerrain* surface, double site_latitude_rad,
+                               double site_longitude_rad, double footprint_radius_m, const LunarDescentParameters& p,
+                               const TouchdownHazardLimits* hazards) const;
     const environment::GravityModel& gravity_;
     const ephemeris::Ephemeris& ephemeris_;
     const frames::BodyOrientation& moon_orientation_;

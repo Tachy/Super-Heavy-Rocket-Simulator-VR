@@ -182,6 +182,25 @@ LunarDescentPlan LunarDescentPlanner::plan(const StateVector& state_gcrf, time::
                                            const environment::LunarTerrain& terrain, double site_latitude_rad,
                                            double site_longitude_rad, double footprint_radius_m,
                                            const LunarDescentParameters& p) const {
+    return plan_impl(state_gcrf, epoch, terrain, nullptr, site_latitude_rad, site_longitude_rad, footprint_radius_m, p,
+                     nullptr);
+}
+
+LunarDescentPlan LunarDescentPlanner::plan(const StateVector& state_gcrf, time::Epoch epoch,
+                                           const environment::DetailedLunarTerrain& surface, double site_latitude_rad,
+                                           double site_longitude_rad, double footprint_radius_m,
+                                           const LunarDescentParameters& p,
+                                           const TouchdownHazardLimits& hazards) const {
+    return plan_impl(state_gcrf, epoch, surface.lola(), &surface, site_latitude_rad, site_longitude_rad,
+                     footprint_radius_m, p, &hazards);
+}
+
+LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, time::Epoch epoch,
+                                                const environment::LunarTerrain& terrain,
+                                                const environment::DetailedLunarTerrain* surface,
+                                                double site_latitude_rad, double site_longitude_rad,
+                                                double footprint_radius_m, const LunarDescentParameters& p,
+                                                const TouchdownHazardLimits* hazards) const {
     LunarDescentPlan plan;
     const Predictor predict(gravity_, ephemeris_, moon_orientation_);
     if (!terrain.in_tile(site_latitude_rad, site_longitude_rad)) {
@@ -230,10 +249,17 @@ LunarDescentPlan LunarDescentPlanner::plan(const StateVector& state_gcrf, time::
             const Vec3 north = cross(s, east);
             plan.approach_azimuth_rad = std::atan2(dot(ground_v, east), dot(ground_v, north));
 
-            const auto touchdown = select_touchdown_point(terrain, site_latitude_rad, site_longitude_rad,
-                                                          plan.approach_azimuth_rad, footprint_radius_m, p);
+            const auto touchdown =
+                surface && hazards
+                    ? select_touchdown_point(*surface, site_latitude_rad, site_longitude_rad, plan.approach_azimuth_rad,
+                                             footprint_radius_m, p, *hazards)
+                    : select_touchdown_point(terrain, site_latitude_rad, site_longitude_rad, plan.approach_azimuth_rad,
+                                             footprint_radius_m, p);
             if (!touchdown) {
-                plan.reason = refusal("Kein Landepunkt mit höchstens %.0f Grad Hangneigung im Umkreis von %.0f m",
+                plan.reason = refusal(surface && hazards && surface->detail_on()
+                                          ? "Kein Landepunkt mit höchstens %.0f Grad Hangneigung, frei von Felsen unter "
+                                            "Füßen und Triebwerken, im Umkreis von %.0f m"
+                                          : "Kein Landepunkt mit höchstens %.0f Grad Hangneigung im Umkreis von %.0f m",
                                       p.slope_limit_rad / constants::deg_to_rad, p.touchdown_search_radius_m);
                 return plan;
             }

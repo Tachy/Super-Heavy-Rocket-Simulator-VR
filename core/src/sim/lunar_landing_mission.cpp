@@ -75,12 +75,19 @@ MissionStart plan_from_live_state(FlightSession& session, const config::LunarLan
     const auto setup = lunar_landing_setup(m);
     const auto& v = session.body(session.controlled_index()).vehicle();
     // A touchdown point within the slope limit for the approach of a polar pass (either direction).
-    const double footprint_m = v.stages().front().config.landing_legs.footprint_radius_m;
+    const auto& stage = v.stages().front().config;
+    const double footprint_m = stage.landing_legs.footprint_radius_m;
+    // On the session's composed surface (its fidelity flags) with the hazard check, as the descent planner selects.
+    const auto* surface = dynamic_cast<const environment::DetailedLunarTerrain*>(session.moon_surface());
+    const bool hazards = surface && surface->detail_on() && stage.landing_legs.foot_pad_radius_m > 0.0;
     bool reachable = false;
     for (const double azimuth : {0.0, constants::pi}) {
+        const double lat = placed.site.config.latitude_rad, lon = placed.site.config.longitude_rad;
         reachable = reachable ||
-                    mission::select_touchdown_point(*placed.terrain, placed.site.config.latitude_rad,
-                                                    placed.site.config.longitude_rad, azimuth, footprint_m, setup.descent)
+                    (hazards ? mission::select_touchdown_point(*surface, lat, lon, azimuth, footprint_m, setup.descent,
+                                                               mission::touchdown_hazard_limits(stage))
+                             : mission::select_touchdown_point(*placed.terrain, lat, lon, azimuth, footprint_m,
+                                                               setup.descent))
                         .has_value();
     }
     if (!reachable) return refuse("Mission nicht durchführbar: kein Landepunkt innerhalb der Hangneigungsgrenze");

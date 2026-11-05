@@ -108,8 +108,17 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
     const mission::LunarDescentPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
     mission::LunarDescentPlan plan;
     try {
-        plan = planner.plan(controlled_state(), epoch_, *moon_terrain_, site.latitude_rad, site.longitude_rad,
-                            legs.footprint_radius_m, descent);
+        // On the composed surface the touchdown point also clears rocks under the feet and the bells (the core surface
+        // stands in for the hazard sensor); LOLA alone otherwise.
+        const auto* surface = dynamic_cast<const environment::DetailedLunarTerrain*>(moon_surface_.get());
+        if (surface && surface->detail_on() && legs.foot_pad_radius_m > 0.0) {
+            plan = planner.plan(controlled_state(), epoch_, *surface, site.latitude_rad, site.longitude_rad,
+                                legs.footprint_radius_m, descent,
+                                mission::touchdown_hazard_limits(vehicle.stages().front().config));
+        } else {
+            plan = planner.plan(controlled_state(), epoch_, *moon_terrain_, site.latitude_rad, site.longitude_rad,
+                                legs.footprint_radius_m, descent);
+        }
     } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
         lunar_status_ = "Kein Abstieg: Planung fehlgeschlagen";
         return false;

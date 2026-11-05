@@ -1,8 +1,9 @@
 # Moon procedural near-ground surface
 
 Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 4 (craters, regolith
-roughness and rocks in the core; the composed physics surface and disc footpads; planner and rendering follow).
+`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 5 (craters, regolith
+roughness and rocks in the core; the composed physics surface and disc footpads; the touchdown hazard check;
+rendering follows).
 
 ## Model
 Measured statistics in `config/moon_surface.toml`; the generator `environment::LunarSurfaceDetail` (craters +
@@ -173,6 +174,33 @@ on top of that relief.
   `lunar_landing` mission loads all parts
   (`{true, true}`) and hands them to the session. `set_moon_terrain(LunarTerrain)` stays the LOLA-only surface.
 
+### Touchdown hazard check (Task 5)
+- `mission::select_touchdown_point(const DetailedLunarTerrain&, lat, lon, approach_azimuth, footprint_radius, p,
+  TouchdownHazardLimits)`: the candidates of the LOLA selection (20 m grid, nearest first, within
+  `touchdown_search_radius_m`) pass the LOLA checks first (footprint plane slope, roughness 0.5 m, glide cone - the
+  cheap pre-check); the first that also passes the hazard check on the composed surface is the target. Detail off:
+  the LOLA selection on `lola()` bit for bit (diagnostics NaN).
+- Hazard check, for every roll (the roll at touchdown is not controlled): the feet stand on `support_under_disc` (the
+  pivoting pad the legs feel; frame as `contact::TerrainField`: verticals through the candidate's tangent-plane
+  points, heights along its up), sampled on the footprint circle at <= 0.5 pad radius ([E]
+  `hazard_roll_spacing_per_pad_radius`; HLS: 156 azimuths, 26 rolls of the six legs). Per roll: the least-squares
+  plane through the six feet within `slope_limit_rad`; the feet's peak-to-peak deviation from it within
+  `max_foot_step_m`; the contact ground under the hull base disc (0.5 m grid [E]) and the contact tops of the rocks
+  >= 5 cm that can rise above it (an upper bound decides; then 13 x 13 samples over the rock's +-a square [E]) at
+  most `bell_clearance_m` above the plane.
+- Limits from the vehicle config (`mission::touchdown_hazard_limits(StageConfig)`, [D]): `foot_pad_radius_m` (HLS
+  1.0 m); `max_foot_step_m` = `stroke_m` (0.6 m: the crush core's travel takes a foot standing higher than the others'
+  plane); `bell_clearance_m` = (lowest engine-group `station_m` - `foot_station_m`) - `stroke_m` = (0 + 1.5) - 0.6 =
+  0.9 m (the exits sit at their group's station - the HLS's are flush with the aft end, detail file `engine_recess` 0 -
+  and the legs may stroke fully); `base_radius_m` = `diameter_m` / 2 = 4.5 m (the bells lie inside the hull, whose aft
+  edge is at the same station). `TouchdownPoint` with the check: `height_m` the feet plane under the centre (mean over
+  the rolls), `slope_rad` the steepest feet plane, `max_foot_step_m`, `min_bell_clearance_m` (the gap with the legs
+  fully stroked).
+- Users: `LunarDescentPlanner::plan(..., const DetailedLunarTerrain&, ..., TouchdownHazardLimits)`;
+  `FlightSession::plan_lunar_landing` takes it when `moon_surface()` is a `DetailedLunarTerrain` with detail on and
+  the legs have pads; the `lunar_landing` mission's reachability check the same. There is no live re-selection after
+  a dispersion in the descent (the guidance flies to the planned point): an open point.
+
 ## Code
 - `core/include/starsim/environment/surface_hash.hpp`: `surface_hash(a, b, c, d)`, `hash_unit`, `surface_stream`.
 - `core/include/starsim/environment/cube_face_cell.hpp`, `core/src/environment/cube_face_cell.cpp`: `FaceCell`,
@@ -216,6 +244,9 @@ on top of that relief.
   feet on `below_disc`, the base ring on `height_below`, both skipped above the bounds.
 - `sim::shared_moon_surface` (`core/include/starsim/sim/terrain_cache.hpp`); `FlightSession::set_moon_terrain`
   overloads, `set_moon_surface_detail`, `set_moon_rocks`, `moon_surface()`; `lunar_landing_mission.cpp` load_site.
+- `core/include/starsim/mission/lunar_descent.hpp`, `core/src/mission/lunar_touchdown.cpp`: `TouchdownHazardLimits`,
+  `touchdown_hazard_limits`, the hazard-checking `select_touchdown_point` overload, `TouchdownPoint::max_foot_step_m` /
+  `min_bell_clearance_m`; `LunarDescentPlanner::plan` overload on the composed surface.
 
 ## Standing decisions
 - Equilibrium, not the Neukum production function, for the small craters: every surface older than ~1 Gy is at
@@ -327,6 +358,13 @@ on top of that relief.
 - `[hls][legs][lunar][terrain][moon_surface][data][slow]` (`test_hls_landing.cpp`): the HLS (1 m pads) dropped at
   1 m/s on the composed surface at the flattest LOLA spot near Mons Mouton (spot chosen with the flag off, then on)
   lands and rests, no crush.
+- `[moon_surface][lunar][mission]` (`test_lunar_touchdown_hazards.cpp`): the limits from `starship_hls.toml` (pad
+  1.0 m, step 0.6 m, bell clearance 0.9 m, base 4.5 m); on flat LOLA with the procedural detail and rocks, a target
+  12 m east of the highest rock within 400 m (D 8.70 m, pad support 6.18 m above the ground) moves 56.6 m (slope 1.60
+  deg, step 0.582 m, clearance 0.463 m, 395 ms), checked independently at rolls between the samples; detail off gives
+  the LOLA point bit for bit at IM-2 (both approach directions); IM-2 with full detail: the nominal point fails (feet
+  step 0.781 m; slope 3.66 deg and rise under the base 0.304 m would pass), the target moves 20.0 m (slope 3.39 deg,
+  step 0.512 m, clearance 0.563 m), 64.6 ms cold, 1.6 ms for the second approach direction on the warm cache.
 - Diviner product check (python, label + three rows by range request, not the 88 MB file): the label layout above;
   median RA 0.004 at the equator (17 % no data in that row), 0.003 at 57 N, 0.002 at 60 S; p95 0.006-0.008.
 
@@ -432,8 +470,19 @@ geometry (g near 0) is not observed there. The published global-average table of
   roughly half as much. No joint range limit is modelled.
 - Upper bound for skipping feet: `bound_slope` 2 is a practical bound (overlapping steep crater walls could exceed it
   in principle); a violation only delays a foot's contact query until it is below the bound.
-- Physics cost: the first tick on a cold surface ~0.2 ms; Task 5's planner querying many cold candidate points needs
-  prefetching or a coarse pre-check (each new lattice node ~2.4 us).
+- Physics cost: the first tick on a cold surface ~0.2 ms. The touchdown hazard check runs on LOLA-admissible
+  candidates only and stops at the first admissible one (IM-2: two candidates, ~65 ms cold).
+- No terminal re-targeting: after a dispersion the descent flies to the planned point; a live re-selection would call
+  the same `select_touchdown_point` on the live state (spec: re-plan from flight data) - not built.
+- The roll at touchdown is free, so every roll must be safe (conservative); a roll-controlled touchdown could pick the
+  roll that clears the rocks.
+- Lunar landing campaign on the composed surface (Task 5 trial, not committed: the campaign still runs on LOLA):
+  20 / 21 within the 1 m gate; seed 7 lands ("gelandet", sink 1.03 m/s) 1.12 m off (LOLA: 0.36 m). The guidance
+  reaches the point within 2 cm at the first contact; afterwards the HLS stands on two feet for ~50 s and creeps at
+  ~2 cm/s under the regularised leg friction (`friction_regularization_mps` 0.1 m/s: friction grows linearly below it)
+  before a third foot touches - a rigid body on two feet with its CG 21 m up would tip onto a third foot within
+  seconds. A leg-contact matter (stick friction / two-foot balance), not the selection: the feet at that point pass
+  the hazard check (step <= 0.6 m, pad normals <= 18 deg, under the 31 deg friction angle).
 - Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
   `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
   over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated
