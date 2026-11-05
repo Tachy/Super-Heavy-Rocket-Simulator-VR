@@ -25,11 +25,20 @@ is tested). Heights: 16-bit greyscale PNG, value = 32768 + h / height_scale_m * 
 moon_detail.toml); normals: 8-bit RGB tangent space, OpenGL convention (red = +x right, green = +y up = towards the
 image top, blue = +z), slopes from the metric pixel size, periodic differences (seamless).
 
+T10 handoff: exact band edges per scale (wavelength, flat part inside the quarter-octave taper), for the fade by node
+vertex spacing d (the mesh resolves lambda >= 2 d, so scale i carries weight 0 once 2 d <= its lambda_min and 1 once
+2 d >= its lambda_max; blend log-linearly between):
+    s0: lambda_min 5 mm,   lambda_max 40 mm   (flat 5.95 .. 33.6 mm)  -> weight 0 for d <= 2.5 mm, 1 for d >= 20 mm
+    s1: lambda_min 40 mm,  lambda_max 320 mm  (flat 47.6 .. 269 mm)   -> weight 0 for d <= 20 mm,  1 for d >= 160 mm
+    s2: lambda_min 320 mm, lambda_max 2.56 m  (flat 381 mm .. 2.15 m) -> weight 0 for d <= 160 mm, 1 for d >= 1.28 m
+(the same values are in moon_detail.toml as wavelength_min_m / wavelength_max_m). Test for T10: mesh + textures at the
+125 mm baseline reproduce 4 mm +- 10 % (no double roughness across the handoff).
+
 Rock textures (triplanar set, 4 variants, 512 x 512 px, tile 1.0 m, 1.95 mm pixel): relative albedo (8-bit grey, value
 128 = 1.0, mean exactly 1.0 within quantisation: the shader multiplies by rocks.albedo_to_regolith, so the WAC mean is
 never shifted) and tangent-space normals. Variants: 0 fine grain, 1 vesicular (pits), 2 breccia (clast patches),
 3 fractured (crack grooves). All amplitudes of the rock textures are [E] (appearance only; the config holds no
-rock-surface texture data): spectrum H 0.8 with the regolith amplitude constant a, relative albedo sd 0.10.
+rock-surface texture data): spectrum H 0.8 with 0.5 x the regolith amplitude constant a (ROCK_AMPLITUDE_FACTOR, [E]), relative albedo sd 0.10.
 """
 
 from __future__ import annotations
@@ -58,6 +67,9 @@ PNG_COMPRESS_LEVEL = 9
 ROCK_TILE_M = 1.0                   # [E]
 ROCK_HURST = 0.8                    # [E] appearance only
 ROCK_ALBEDO_SD = 0.10               # [E] relative albedo variation of rock surfaces
+ROCK_AMPLITUDE_FACTOR = 0.5         # [E] rock-surface height amplitude / regolith octave amplitude a: bare rock has no loose
+#   grains, so its mm-scale relief is taken as half the regolith's (rms slope 0.21 instead of 0.43, which looked
+#   over-rough in the normal maps); no lunar rock-surface roughness data in the config
 ROCK_LAMBDA_MIN_PX = 4.0            # [E] finest wavelength of the rock height field in pixels
 
 # name, tile edge [m], lambda_lo [m], lambda_hi [m], seed
@@ -180,7 +192,8 @@ def rock_variant(variant: int, amplitude_m: float, baseline_m: float) -> tuple[n
     size, pixel = SIZE_PX, ROCK_TILE_M / SIZE_PX
     seed = ROCK_SEEDS[variant]
     rng = np.random.default_rng(seed + 100)
-    height = synthesise(size, pixel, ROCK_LAMBDA_MIN_PX * pixel, ROCK_TILE_M, amplitude_m, ROCK_HURST, baseline_m, seed)
+    height = synthesise(size, pixel, ROCK_LAMBDA_MIN_PX * pixel, ROCK_TILE_M, ROCK_AMPLITUDE_FACTOR * amplitude_m,
+                         ROCK_HURST, baseline_m, seed)
     albedo_noise = synthesise(size, pixel, 4.0 * pixel, ROCK_TILE_M / 2.0, 1.0, 0.6, baseline_m, seed + 50)
     albedo_noise /= albedo_noise.std()
     albedo = ROCK_ALBEDO_SD * albedo_noise

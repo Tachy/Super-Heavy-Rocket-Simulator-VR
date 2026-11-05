@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import sys
 import tomllib
 from pathlib import Path
@@ -62,7 +63,7 @@ def test_maps_tile_seamlessly(baked):
     first, _, _ = baked
     for path in sorted(first.glob("*.png")):
         ratio, seam_max, inner_max = seam_ratio(load(path))
-        assert ratio < 1.2, (path.name, ratio)    # a seam would raise it; step-edged maps (breccia) may sit below 1
+        assert ratio < 1.1, (path.name, ratio)    # a seam would raise it; step-edged maps (breccia) may sit below 1
         assert seam_max <= inner_max + 1, (path.name, seam_max, inner_max)
 
 
@@ -99,6 +100,38 @@ def test_regolith_spectrum_matches_config_law(baked, roughness):
         # nothing outside the band
         outside = radial_variance(field, scale["pixel_m"], 0.0, 1.0 / (scale["wavelength_max_m"] * 1.05))
         assert outside < 1e-6 * sum(measured)
+
+
+VALIDATION_SCRIPT = Path(__file__).resolve().parents[1] / "validation" / "moon_roughness_residual.py"
+
+
+def load_validation_functions() -> dict:
+    """Constants and the `fbm` / `window_rms` functions of tools/validation/moon_roughness_residual.py (the Python mirror of
+    the core's Guo statistic and roughness field), executed without running the script's crater / rock synthesis."""
+    tree = ast.parse(VALIDATION_SCRIPT.read_text(encoding="utf-8"))
+    keep = {"PX", "L", "N", "W_PX", "H", "rng", "fbm", "window_rms"}
+    body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in keep)
+            or (isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in keep for t in n.targets))]
+    body = [n for n in body if not (isinstance(n, ast.Assign) and "sys.argv" in ast.dump(n))]
+    namespace = {"np": np, "SEED": 3}
+    exec(compile(ast.Module(body=[ast.parse("rng = np.random.default_rng(SEED)").body[0]] + body, type_ignores=[]),
+                 str(VALIDATION_SCRIPT), "exec"), namespace)
+    return namespace
+
+
+def test_baked_amplitude_agrees_with_the_core_roughness_law_independently(baked, roughness):
+    # The validation script's field (spectrum k^-(H+1), 8 m patch, 5 mm samples, no bake code) is scaled so Guo's statistic
+    # (median window std, same code as the core's derive_roughness_scale mirrored there) is exactly the config 3.7 mm. Its
+    # octave variances must then equal the law with the baked amplitude a (calibrated separately, 10.24 m field).
+    v = load_validation_functions()
+    field = v["fbm"]()
+    field = field / np.median(v["window_rms"](field)) * roughness["rms_height_at_baseline_m"]
+    hurst, baseline = roughness["hurst_exponent"], roughness["baseline_m"]
+    a = baked[2]["octave_amplitude_m"]
+    for lam_hi, lam_lo in ((0.8, 0.4), (0.4, 0.2), (0.2, 0.1), (0.1, 0.05), (0.05, 0.025)):   # octaves, 25 mm .. 0.8 m
+        measured = radial_variance(field, v["PX"], 1.0 / lam_hi, 1.0 / lam_lo)
+        expected = law_variance(a, hurst, baseline, 1.0 / lam_hi, 1.0 / lam_lo)
+        assert abs(np.sqrt(measured / expected) - 1.0) < 0.10, (lam_hi, np.sqrt(measured / expected))
 
 
 def test_calibration_reproduces_the_config_roughness_at_several_windows(baked, roughness):

@@ -263,6 +263,11 @@ on top of that relief.
   s1 40-320 mm (2.56 m), s2 0.32-2.56 m (20.48 m); a quarter-octave raised-cosine taper inside each edge. The mesh
   resolves wavelengths >= 2 x spacing (finest level 22: 1.02 cm -> 2 cm), so the T10 shader fades each scale in only where
   the mesh no longer resolves it (s0 below ~2 cm near the camera; s1 / s2 farther out where the node spacing grows).
+  Exact edges for T10 (wavelength band, flat part inside the taper; weight of scale i = 0 for node spacing d <= lambda_min / 2,
+  1 for d >= lambda_max / 2, log-linear between; identical to `wavelength_min_m` / `wavelength_max_m` in `moon_detail.toml`):
+  s0 5-40 mm (flat 5.95-33.6 mm): d 2.5 -> 20 mm; s1 40-320 mm (flat 47.6-269 mm): d 20 -> 160 mm; s2 0.32-2.56 m
+  (flat 0.381-2.15 m): d 0.16 -> 1.28 m. The s1 / s2 bands overlap what the mesh carries at level 22 by design (ruling
+  T8 I-1). T10 acceptance test: mesh + textures at the 125 mm baseline give 4 mm +-10 % (no double roughness).
 - Amplitude: the octave constant a = 2.29 mm is calibrated at bake time exactly as the core does (Guo's statistic:
   median plane-detrended std of 25 x 25 windows at 5 mm spacing, 1536 windows, of a full-spectrum 10.24 m field = 3.7 mm
   `rms_height_at_baseline_m`). Heights 16-bit (`32768 + h / height_scale_m * 32767`), normals 8-bit tangent space OpenGL
@@ -270,8 +275,9 @@ on top of that relief.
   RMS slopes 0.39 / 0.25 / 0.16.
 - Rock set (triplanar, tile 1 m, 512 px): relative albedo (8-bit, 128 = 1.0, decoded mean 1.0000, sd 0.10-0.12; the
   shader multiplies by `rocks.albedo_to_regolith`, so the WAC mean never shifts) and normals; variants fine grain,
-  vesicular, breccia, fractured. All rock-texture amplitudes are [E] (spectrum H 0.8, regolith amplitude, albedo sd
-  0.10): the config holds no rock-surface data.
+  vesicular, breccia, fractured. All rock-texture amplitudes are [E] (spectrum H 0.8, 0.5 x the regolith amplitude a
+  = `ROCK_AMPLITUDE_FACTOR`: bare rock has no loose grains, rms slope 0.21 instead of 0.43 with the full regolith a, which
+  looked over-rough in the normal maps; albedo sd 0.10): the config holds no rock-surface data.
 
 ## Code
 - `tools/moon_textures/bake_moon_detail.py`, `test_bake_moon_detail.py`, `contact_sheet.py` (Task 8).
@@ -368,7 +374,9 @@ on top of that relief.
   band variance in three log sub-bands of each scale's flat part vs the config law (measured / law amplitude 0.96-1.06,
   tolerance 15 %), Hurst exponent from the band ratio within 0.15, nothing above the band; an independent full-spectrum
   field (other seed) gives Guo's statistic 0.99 / 0.99 / 0.98 / 0.96 / 0.96 x the law at 125 mm / 0.25 / 0.5 / 1 / 2 m
-  windows (tolerance 15 % at 125 mm, 0.5 m, 1 m); rock albedo mean 1.000 within 1 %.
+  windows (tolerance 15 % at 125 mm, 0.5 m, 1 m); core cross-check without bake code: the field of
+  `tools/validation/moon_roughness_residual.py` (its `fbm` + `window_rms`, 8 m patch) scaled to the config 3.7 mm Guo
+  statistic has octave variances (25 mm-0.8 m) 1.01-1.02 x the law with the baked a (tolerance 10 %); rock albedo mean 1.000 within 1 %.
 - Roughness stationarity (diagnostic, 3000 windows each, not a test): 3.72 mm at a face centre, 3.76 at an edge
   midpoint, 3.94 near a cube corner (the skewed lattice there, +6 %), 3.75 at the site; craters + roughness
   3.88-3.95 mm (4.09 near a corner).
