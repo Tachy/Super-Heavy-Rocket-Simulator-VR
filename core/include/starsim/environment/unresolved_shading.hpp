@@ -10,8 +10,12 @@
 // (LunarSurfaceDetail band limit) and its normals central differences over 2 L. drawn(L) is that mesh's mean square
 // slope of the statistical surface: per regolith octave (value noise, lattice spacing s) the exact spectral transfer
 // (box mean x central difference) of the octave's spectrum, per crater size the same filter applied to the crater
-// profile in real space. The node's residual theta_bar is S_res^2 = S^2 - drawn(L). Rocks are not in the budget: they
-// are discrete bodies, modelled explicitly (albedo share, cast shadows, lit faces).
+// profile in real space. The node's residual theta_bar is S_res^2 = S^2 - drawn(L). The rocks' share is taken out of
+// the budget: the globe fit's pixels contain the rocks, which the renderer models explicitly (albedo share, cast
+// shadows, lit faces; geometry from Task 11). In Hapke's mean-tan form (tan theta_bar = (2/pi) <|grad h|>):
+// <tan>_regolith = (<tan>_globe - A pi eta) / (1 - A), A = 1 - exp(-C_all) the rocks' area share at abundance 1
+// (the globe's mean), pi eta the mean |grad h| over a half-spheroid's plan area (height eta D, plan radius D / 2: the
+// integral of H r / (a^2 sqrt(1 - r^2 / a^2)) over the disc is pi^2 H a / 2); S^2 = pi ((2/pi) <tan>_regolith)^2.
 //
 // Statistical shadows (the Sun only; the earthshine keeps the horizon maps alone, spec section 4): the drawn mesh
 // relief finer than the horizon map's grid casts no shadow in the renderer (until the near-field shadow map), so its
@@ -31,7 +35,10 @@ class LunarSurfaceDetail;
 class LunarRocks;
 
 struct UnresolvedShadingModel {
-    double total_slope_variance = 0.0;  // pi tan^2(theta_bar) of the Hapke fit
+    double globe_slope_variance = 0.0;  // pi tan^2(theta_bar) of the Hapke fit (rocks included)
+    double rock_area_share = 0.0;       // A = 1 - exp(-C_all) at abundance 1
+    double rock_mean_tan = 0.0;         // A pi eta: the rocks' part of the globe's <|grad h|>
+    double total_slope_variance = 0.0;  // the regolith's budget: the globe's without the rocks (header comment)
     // Regolith roughness: the generator's octaves (lattice spacing, mean square slope of the octave's field).
     std::vector<double> regolith_octave_spacing_m;
     std::vector<double> regolith_octave_variance;
@@ -42,7 +49,7 @@ struct UnresolvedShadingModel {
     double crater_min_diameter_m = 0.0;
     double crater_max_diameter_m = 0.0;
     std::vector<double> crater_fraction;  // at D / L = 2^(k / 2 - crater_fraction_lowest_octaves), k = 0..
-    static constexpr int crater_fraction_lowest_octaves = 3;  // [D] D / L from 1/8 (below: 0) to 32 (above: the last)
+    static constexpr int crater_fraction_lowest_octaves = 3;  // [D] D / L from 1/8 (below: 0) to 128 (above: the last)
     static constexpr int crater_fraction_samples = 21;
     // drawn(L) at L = drawn_table_min_spacing_m x 2^(k / drawn_table_per_octave), linear in log2 L between, 0 beyond.
     std::vector<double> drawn_table;
@@ -76,6 +83,9 @@ double regolith_drawn_fraction(double spacing_over_lattice);
 // The same for a crater of the configured profile (fresh / degraded mix by their slope integrals), real-space mesh
 // sampling over a grid of lattice offsets; L = ratio x D.
 double crater_drawn_fraction(const config::CraterPopulation& craters, double spacing_over_diameter);
+// The model's tabulated crater_drawn_fraction at D / L (half-octave samples, linear between; 0 below D / L = 1/8, the
+// last sample above D / L = 128), as the shader reads it.
+double crater_drawn_fraction_table(const UnresolvedShadingModel& m, double diameter_over_spacing);
 
 // Mean square slope the mesh of spacing L draws of the generated surface: the regolith octaves with lattice spacing up
 // to regolith_top_spacing_m and the craters up to crater_top_diameter_m (direct sum; the table below uses the

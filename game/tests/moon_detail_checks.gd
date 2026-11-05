@@ -13,20 +13,27 @@ const LEVELS := [22, 21, 20, 19, 18, 17]
 
 
 ## Guo's statistic of mesh + textures at each level's spacing: the median plane-detrended RMS of 25 x 25 samples (5 mm)
-## of the node mesh (the core's band-limited heights at its vertices, bilinear between them) plus every texture scale
-## at its weight (MoonDetailShading.texture_weight). Returns lines; failures via check.
+## of the node mesh (the core's band-limited heights at its vertices, bilinear between them) plus every texture scale's
+## regolith and crater components at their weights (MoonDetailShading.texture_weight / crater_weight; the two
+## components of a scale at the same texture position, as the shader fetches them). Returns lines; failures via check.
 static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) -> void:
 	var dir := Paths.data_dir().path_join(MoonDetailShading.TEXTURE_DIR)
 	var table: Dictionary = TomlLite.load_file(dir.path_join("moon_detail.toml"))
 	var stats: Dictionary = core.moon_surface_statistics()
+	var unresolved: Dictionary = core.moon_unresolved_shading()
 	var target := float(stats["roughness"]["rms_height_measured_total_m"])
 	var maps := []
+	var slot := 0
 	for entry: Dictionary in table["regolith"]:
-		var image := Image.load_from_file(dir.path_join("regolith_height_%s.png" % entry["name"]))
-		image.convert(Image.FORMAT_RF)
-		maps.append({"image": image, "pixel_m": float(entry["pixel_m"]), "size": image.get_width(),
-				"scale_m": float(entry["height_scale_m"]), "lo": float(entry["wavelength_min_m"]),
-				"hi": float(entry["wavelength_max_m"])})
+		for crater in [false, true]:
+			var image := Image.load_from_file(dir.path_join("%s_height_%s.png"
+					% ["crater" if crater else "regolith", entry["name"]]))
+			image.convert(Image.FORMAT_RF)
+			maps.append({"image": image, "pixel_m": float(entry["pixel_m"]), "size": image.get_width(),
+					"scale_m": float(entry["crater_height_scale_m" if crater else "height_scale_m"]),
+					"lo": float(entry["wavelength_min_m"]), "hi": float(entry["wavelength_max_m"]), "crater": crater,
+					"entry": entry, "slot": slot})
+		slot += 1
 	var centre := CubeSphere.geodetic_direction(site.x, site.y)
 	var east := Vector3(0, 0, 1).cross(centre).normalized()
 	var north := centre.cross(east)
@@ -35,7 +42,8 @@ static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) 
 		var rms := PackedFloat64Array()
 		var weights := []
 		for m: Dictionary in maps:
-			weights.append(MoonDetailShading.texture_weight(m["lo"], m["hi"], float(table["hurst_exponent"]), spacing))
+			weights.append(MoonDetailShading.crater_weight(m["entry"], unresolved, spacing) if m["crater"]
+					else MoonDetailShading.texture_weight(m["lo"], m["hi"], float(table["hurst_exponent"]), spacing))
 		for w in WINDOWS:
 			var ox := (_hash(w, 1) - 0.5) * 1000.0
 			var oy := (_hash(w, 2) - 0.5) * 1000.0
@@ -70,17 +78,22 @@ static func summed_roughness(core: StarsimCore, site: Vector2, check: Callable) 
 					var h := lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fy)
 					for k in maps.size():
 						if weights[k] > 0.0:
-							h += weights[k] * _texture_height(maps[k], x + 37.1 * k + 101.3 * _hash(w, 3 + k),
-									y + 53.7 * k + 89.9 * _hash(w, 7 + k))
+							var sl: int = maps[k]["slot"]
+							h += weights[k] * _texture_height(maps[k], x + 37.1 * sl + 101.3 * _hash(w, 3 + sl),
+									y + 53.7 * sl + 89.9 * _hash(w, 7 + sl))
 					z.append(h)
 			rms.append(_detrended_rms(z))
 		var sorted := Array(rms)
 		sorted.sort()
 		var median: float = sorted[sorted.size() / 2]
+		var listed := PackedStringArray()
+		for k in range(0, maps.size(), 2):
+			listed.append("%.2f/%.2f" % [weights[k], weights[k + 1]])
 		check.call(absf(median / target - 1.0) < ROUGHNESS_TOLERANCE,
-				"summed roughness mesh + textures, level %d (spacing %.4f m, weights %.2f / %.2f / %.2f): Guo median %.2f mm "
-				% [level, spacing, weights[0], weights[1], weights[2], 1000.0 * median]
-				+ "against %.1f mm (%+.1f %%, gate 10 %%)" % [1000.0 * target, 100.0 * (median / target - 1.0)])
+				"summed roughness mesh + textures, level %d (spacing %.4f m, weights regolith/craters %s): Guo median "
+				% [level, spacing, " ".join(listed)]
+				+ "%.2f mm against %.1f mm (%+.1f %%, gate 10 %%)" % [1000.0 * median, 1000.0 * target,
+				100.0 * (median / target - 1.0)])
 
 
 ## The residual theta_bar and the light factors over node spacings in 1 % steps (a split halves the spacing through the

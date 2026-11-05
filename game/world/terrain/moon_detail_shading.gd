@@ -1,11 +1,11 @@
 class_name MoonDetailShading
 ## Material wiring of the Moon terrain's regolith detail and unresolved-surface statistics (moon_detail.gdshaderinc;
-## moon procedural surface plan Task 10): the baked regolith normal maps (data/textures/moon_detail, Task 8), the
+## moon procedural surface plan Task 10): the baked regolith + crater slope maps (data/textures/moon_detail), the
 ## core's statistics (StarsimCore.moon_unresolved_shading) and the rock abundance map, plus the per-node uniforms
 ## (texture origins, vertex and horizon-grid spacing) that TerrainQuadtree sets through node_parameters.
 
 const TEXTURE_DIR := "textures/moon_detail"
-const SCALES := ["s0", "s1", "s2"]
+const SCALES := ["s0", "s1", "s2", "s3"]
 ## [D] Hex cell = half a tile: every triangle-grid patch shows a different part of the map, tiles never repeat whole.
 const HEX_CELL_PER_TILE := 0.5
 ## The shader's DETAIL_HEX_PERIOD (cells after which the hash repeats).
@@ -19,6 +19,8 @@ const WEIGHT_PER_OCTAVE := 4
 const WEIGHT_MIN_SPACING_M := 1.0e-3
 ## [D] Wavelength samples per band for the weight (log-spaced midpoints; < 0.5 % against 4x more).
 const WEIGHT_BAND_SAMPLES := 48
+## The baked slope maps' size (bake_moon_detail.py SIZE_PX): four half floats per texel.
+const SLOPE_SIZE_PX := 512
 ## Diagnostics switch (render_check --moon_detail_shading=off): false leaves the detail shading off with the detail on.
 static var enabled := true
 
@@ -47,14 +49,14 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 			grid.to_byte_array())
 	material.set_shader_parameter("detail_rock_abundance", ImageTexture.create_from_image(abundance))
 	material.set_shader_parameter("detail_shading", true)
-	var tiles := _configure_textures(material)
+	var tiles := _configure_textures(material, stats)
 	stats["tiles"] = tiles
 	return stats
 
 
-## Loads the three regolith normal maps (mipmapped) and their scale table; returns [tile_m, hex_cell_m] per scale
-## ([] when absent).
-static func _configure_textures(material: ShaderMaterial) -> Array:
+## Loads the regolith slope maps (mipmapped) and their scale table; returns [tile_m, hex_cell_m] per scale ([] when
+## absent).
+static func _configure_textures(material: ShaderMaterial, stats: Dictionary) -> Array:
 	var dir := Paths.data_dir().path_join(TEXTURE_DIR)
 	var toml_path := dir.path_join("moon_detail.toml")
 	if not FileAccess.file_exists(toml_path):
@@ -70,22 +72,28 @@ static func _configure_textures(material: ShaderMaterial) -> Array:
 		for s: Dictionary in scales:
 			if s.get("name", "") == SCALES[i]:
 				entry = s
-		var path := dir.path_join("regolith_normal_%s.png" % SCALES[i])
-		if entry.is_empty() or not FileAccess.file_exists(path):
-			push_warning("MoonDetailShading: %s fehlt - Regolith ohne Detailtexturen" % path)
+		var path := dir.path_join("regolith_slope_%s.rgbah" % SCALES[i])
+		var image := slope_image(path)
+		if entry.is_empty() or image == null:
+			push_warning("MoonDetailShading: %s fehlt oder ist veraltet (python tools/data_pipeline/fetch.py --force "
+					% path + "moon_detail) - Regolith ohne Detailtexturen")
 			return []
-		material.set_shader_parameter("detail_slope_" + SCALES[i], ImageTexture.create_from_image(slope_image(path)))
+		material.set_shader_parameter("detail_slope_" + SCALES[i], ImageTexture.create_from_image(image))
 		var tile := float(entry["tile_m"])
 		params.append(Vector4(tile, tile * HEX_CELL_PER_TILE, float(entry["wavelength_min_m"]),
 				float(entry["wavelength_max_m"])))
 		tiles.append([tile, tile * HEX_CELL_PER_TILE])
 	var hurst := float(table["hurst_exponent"])
 	var weights := PackedFloat32Array()
-	for p: Vector4 in params:
+	var crater_weights := PackedFloat32Array()
+	for i in params.size():
+		var p: Vector4 = params[i]
 		for k in WEIGHT_SAMPLES:
 			var spacing := WEIGHT_MIN_SPACING_M * pow(2.0, float(k) / WEIGHT_PER_OCTAVE)
 			weights.append(texture_weight(p.z, p.w, hurst, spacing))
+			crater_weights.append(crater_weight(scales_entry(scales, SCALES[i]), stats, spacing))
 	material.set_shader_parameter("detail_weight_table", weights)
+	material.set_shader_parameter("detail_crater_weight_table", crater_weights)
 	material.set_shader_parameter("detail_scale", params)
 	material.set_shader_parameter("detail_textures", true)
 	return tiles
@@ -111,7 +119,7 @@ static func node_parameters(key: Vector4i, horizon_owner: Vector4i, radius_m: fl
 		var skew_v := 2.0 * v0 / sqrt(3.0) / hex
 		origins.append(Vector4(fposmod(u0, tile), fposmod(v0, tile), fposmod(skew_u, HEX_PERIOD),
 				fposmod(skew_v, HEX_PERIOD)))
-	while origins.size() < 3:
+	while origins.size() < SCALES.size():
 		origins.append(Vector4.ZERO)
 	return {"detail_cell_m": cell, "detail_origin": origins,
 			"detail_horizon_spacing_m": cell_m(horizon_owner.y, radius_m)}
@@ -136,33 +144,51 @@ static func texture_weight(lambda_min: float, lambda_max: float, hurst: float, s
 	return sqrt(clampf(missing / total, 0.0, 1.0))
 
 
-## The baked normal map as a two-channel half-float slope map (dh/du, dh/dv) with zero mean, mipmapped: slopes average
-## linearly, so a mip texel is the footprint's mean slope (8-bit normal maps would also carry the encoding's offset - a
-## zero slope sits on code 128 = +0.0039 - and Godot's rounded 8-bit mips drift by up to ~1 code over the chain).
-## OpenGL tangent space: red = +u, green = toward the image top = -v.
+## The scale's entry of moon_detail.toml's [[regolith]] list ({} when absent).
+static func scales_entry(scales: Array, name: String) -> Dictionary:
+	for s: Dictionary in scales:
+		if s.get("name", "") == name:
+			return s
+	return {}
+
+
+## Amplitude weight of a scale's crater component (craters of the core's law with D in [crater_min_diameter_m,
+## crater_max_diameter_m), moon_detail.toml) on a mesh of vertex spacing L: sqrt of the share of their slope variance
+## the mesh does not draw, 1 - the mean of the core's crater_drawn_fraction(D / L) over the band weighted by the
+## law's slope variance per ln D (~ D^q, q = 2 - b). The table (stats crater_fraction) is the core's.
+static func crater_weight(entry: Dictionary, stats: Dictionary, spacing_m: float) -> float:
+	var d_lo := float(entry.get("crater_min_diameter_m", 0.0))
+	var d_hi := float(entry.get("crater_max_diameter_m", 0.0))
+	var table: PackedFloat64Array = stats.get("crater_fraction", PackedFloat64Array())
+	if d_hi <= d_lo or table.size() < 2:
+		return 0.0
+	var lowest := float(stats["crater_fraction_lowest_octaves"])
+	var q := float(stats["crater_slope_exponent"])
+	var drawn := 0.0
+	var total := 0.0
+	for j in WEIGHT_BAND_SAMPLES:
+		var d := d_lo * pow(d_hi / d_lo, (j + 0.5) / WEIGHT_BAND_SAMPLES)
+		var v := pow(d, q)
+		var x := 2.0 * (log(d / spacing_m) / log(2.0) + lowest)  # crater_drawn_fraction_table
+		var f := 0.0
+		if x >= 0.0:
+			x = minf(x, table.size() - 1)
+			var k := mini(int(x), table.size() - 2)
+			f = lerpf(table[k], table[k + 1], x - k)
+		drawn += v * f
+		total += v
+	return sqrt(clampf(1.0 - drawn / total, 0.0, 1.0))
+
+
+## The baked slope map (bake_moon_detail.py: raw little-endian half floats - regolith dh/du, dh/dv, craters dh/du,
+## dh/dv - zero mean, from the float heights) mipmapped; null when absent or of the wrong size. Slopes average linearly,
+## so a mip texel is the footprint's mean slope.
 static func slope_image(path: String) -> Image:
-	var image := Image.load_from_file(path)
-	image.convert(Image.FORMAT_RGB8)
-	var w := image.get_width()
-	var h := image.get_height()
-	var src := image.get_data()
-	var slopes := PackedFloat32Array()
-	slopes.resize(2 * w * h)
-	var mean := Vector2.ZERO
-	for k in w * h:
-		var nx := src[3 * k] / 127.5 - 1.0
-		var ny := src[3 * k + 1] / 127.5 - 1.0
-		var nz := maxf(src[3 * k + 2] / 127.5 - 1.0, 0.05)
-		var sx := -nx / nz
-		var sy := ny / nz
-		slopes[2 * k] = sx
-		slopes[2 * k + 1] = sy
-		mean += Vector2(sx, sy)
-	mean /= float(w * h)
-	for k in w * h:
-		slopes[2 * k] -= mean.x
-		slopes[2 * k + 1] -= mean.y
-	var out := Image.create_from_data(w, h, false, Image.FORMAT_RGF, slopes.to_byte_array())
+	if not FileAccess.file_exists(path):
+		return null
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if bytes.size() != SLOPE_SIZE_PX * SLOPE_SIZE_PX * 8:
+		return null
+	var out := Image.create_from_data(SLOPE_SIZE_PX, SLOPE_SIZE_PX, false, Image.FORMAT_RGBAH, bytes)
 	out.generate_mipmaps()
-	out.convert(Image.FORMAT_RGH)  # half floats: half the texture bandwidth (slopes to ~1e-3 relative)
 	return out

@@ -152,4 +152,7 @@ Regolith detail shading (Task 10), 2 m above IM-2, elevation -20 deg, median of 
 (+0.45); stereo mock (3534 x 2838 per eye) 5.76 -> 7.21 ms (+1.45: statistics alone +0.34, the textures +1.11 with
 half-float slope maps; float32 maps +1.47; trilinear instead of anisotropic filtering would save another 0.28 ms, not
 taken: the grazing VR view keeps its texture detail). 1.8 ms of the 9 ms GPU target remain for rocks and near-field
-shadows (Tasks 11-12): Task 13's budget table.
+shadows (Tasks 11-12): Task 13's budget table. Task 10 fix round (crater component in the slope maps, four-channel
+half-float maps, scale s3), same views, median of 120 frames, two alternating rounds: 1600 x 900 1.80 -> 2.32 ms
+(+0.52, was +0.45); stereo mock 5.69 / 5.78 -> 7.85 / 7.86 ms (+2.1, was +1.45): ~1.15 ms remain for Tasks 11-12. A
+per-fragment analytic crater field (the review's preferred route) cost 13.0 against 7.6 ms (+5.4 ms) and was dropped.

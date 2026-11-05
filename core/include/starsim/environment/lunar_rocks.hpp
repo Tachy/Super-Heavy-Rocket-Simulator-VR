@@ -61,6 +61,9 @@ public:
     // pixel; inside the map the Diviner area fraction / abundance_reference_area_fraction, smoothly blended to the
     // uniform law over abundance_blend_band_rad below the map's latitude limit).
     double abundance_factor(const math::Vec3& unit) const;
+    // abundance_factor on an equirectangular grid (row 0 at +90 deg latitude, column 0 at -180 deg longitude, cell
+    // centres), row-major: the renderer's abundance map.
+    std::vector<float> abundance_grid(int width, int height) const;
 
     // Rocks standing in the cell (octaves whose level is the cell's level; empty otherwise), diameter >= min.
     std::vector<Rock> rocks_in_cell(const FaceCell& cell, double min_diameter_m) const;

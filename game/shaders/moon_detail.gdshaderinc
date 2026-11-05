@@ -11,9 +11,11 @@
 // - Sun factor: Smith's G1 for the drawn relief finer than the horizon map's grid (it casts no shadow here), the
 //   unresolved rocks' albedo share, cast shadows and lit faces (Boolean model); earthshine factor: the albedo share
 //   only (the earthshine keeps the horizon maps alone).
-// - The baked regolith normal maps (s0..s2, Task 8), each scale faded in by the node spacing (the share of its height
-//   variance the mesh does not draw) and out by the mip chain (pixel footprint), stochastic hex tiling (random offset
-//   per triangle-grid vertex, variance-preserving blend). The texture relief casts no shadows, so it does not tilt the
+// - The baked regolith slope maps (s0..s3, Task 8 and the Task 10 fix round), each holding two components: the
+//   self-affine regolith band and the craters of the core's law with D in the band. Each component is faded in by the
+//   node spacing (the share of its variance the mesh does not draw: the band's spectral transfer for the regolith, the
+//   core's crater_drawn_fraction for the craters) and out by the mip chain (pixel footprint), stochastic hex tiling
+//   (random offset per triangle-grid vertex, variance-preserving blend). The texture relief casts no shadows, so it does not tilt the
 //   Hapke normal: it modulates each light's radiance by 1 + tanh(k . grad h), k = d ln R / d grad h of the
 //   single-scattering law at the mesh normal. The modulation is odd in grad h, so a symmetric slope field leaves the
 //   mean radiance unchanged (the slopes stay in theta_bar's budget): first-order exact for gentle slopes, saturating to
@@ -27,18 +29,22 @@ const int DETAIL_HEX_PERIOD = 256;
 const int DETAIL_DRAWN_SAMPLES = 97;
 const int DETAIL_GAIN_SAMPLES = 46;
 // MoonDetailShading.WEIGHT_SAMPLES / WEIGHT_PER_OCTAVE (texture weights from 1 mm, 4 per octave, to 16 m).
+const int DETAIL_SCALES = 4;
 const int DETAIL_WEIGHT_SAMPLES = 57;
 const int DETAIL_WEIGHT_PER_OCTAVE = 4;
 
 uniform bool detail_shading = false;  // detail on and the statistics present (MoonDetailShading)
 uniform bool detail_textures = false;  // the baked maps present
-// The baked normal maps as zero-mean slope maps (dh/du, dh/dv; MoonDetailShading.slope_image), float, mipmapped.
+// The baked slope maps (regolith dh/du, dh/dv, craters dh/du, dh/dv; MoonDetailShading.slope_image), half float,
+// mipmapped.
 uniform sampler2D detail_slope_s0 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D detail_slope_s1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D detail_slope_s2 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D detail_slope_s3 : filter_linear_mipmap_anisotropic, repeat_enable;
 // Per scale: tile (m), hex cell (m), wavelength_min_m, wavelength_max_m (moon_detail.toml).
-uniform vec4 detail_scale[3];
-uniform float detail_weight_table[171];  // 3 x DETAIL_WEIGHT_SAMPLES
+uniform vec4 detail_scale[4];
+uniform float detail_weight_table[228];  // regolith: DETAIL_SCALES x DETAIL_WEIGHT_SAMPLES
+uniform float detail_crater_weight_table[228];  // craters: the same layout
 uniform float detail_total_slope_variance = 0.0;
 uniform float detail_drawn_table[97];
 uniform vec2 detail_drawn_axis = vec2(1.0e-3, 4.0);  // drawn_table_min_spacing_m, drawn_table_per_octave
@@ -53,7 +59,7 @@ uniform float rock_geometry_pixels = 0.0;
 // Per node (TerrainQuadtree): the nominal vertex spacing; per scale the node corner's texture coordinate modulo the
 // tile (xy, m) and its skewed hex coordinate modulo DETAIL_HEX_PERIOD (zw); the horizon map's grid spacing.
 uniform float detail_cell_m = 1.0;
-uniform vec4 detail_origin[3];
+uniform vec4 detail_origin[4];
 uniform float detail_horizon_spacing_m = 1.0e30;
 
 // drawn(L): the core's table, linear in log2 L, 0 beyond.
@@ -132,14 +138,16 @@ vec2 detail_light_factors(float abundance, float geometry_min_m, float spacing_m
 	return vec2(sun, earth);
 }
 
-// Amplitude weight of texture scale i at node spacing L (MoonDetailShading.texture_weight, tabulated at
-// DETAIL_WEIGHT_PER_OCTAVE per octave from 1 mm; linear in log2 L, clamped): the texture carries the band's height
-// variance the mesh does not draw.
-float detail_scale_weight(int i, float spacing_m) {
+// Amplitude weights (regolith, craters) of texture scale i at node spacing L (MoonDetailShading.texture_weight /
+// crater_weight, tabulated at DETAIL_WEIGHT_PER_OCTAVE per octave from 1 mm; linear in log2 L, clamped): the texture
+// carries the share of each component the mesh does not draw.
+vec2 detail_scale_weight(int i, float spacing_m) {
 	float x = clamp(log2(spacing_m / 1.0e-3) * float(DETAIL_WEIGHT_PER_OCTAVE), 0.0, float(DETAIL_WEIGHT_SAMPLES - 1));
 	int k = min(int(x), DETAIL_WEIGHT_SAMPLES - 2);
 	int base = i * DETAIL_WEIGHT_SAMPLES;
-	return mix(detail_weight_table[base + k], detail_weight_table[base + k + 1], x - float(k));
+	float f = x - float(k);
+	return vec2(mix(detail_weight_table[base + k], detail_weight_table[base + k + 1], f),
+			mix(detail_crater_weight_table[base + k], detail_crater_weight_table[base + k + 1], f));
 }
 
 uint detail_hash(ivec2 c, int scale) {
@@ -152,9 +160,10 @@ uint detail_hash(ivec2 c, int scale) {
 	return h;
 }
 
-// Height gradient (in texture metres, (u, v) = the face's (s, t) axes) of scale i: stochastic hex tiling of its normal
-// map. uv: the texture coordinate (m), skew: the skewed hex coordinate, duv_dx / duv_dy: screen derivatives of uv.
-vec2 detail_scale_slope(int i, vec2 uv, vec2 skew, vec2 duv_dx, vec2 duv_dy) {
+// Height gradients (in texture metres, (u, v) = the face's (s, t) axes) of scale i, regolith (xy) and craters (zw):
+// stochastic hex tiling of its slope map. uv: the texture coordinate (m), skew: the skewed hex coordinate,
+// duv_dx / duv_dy: screen derivatives of uv.
+vec4 detail_scale_slope(int i, vec2 uv, vec2 skew, vec2 duv_dx, vec2 duv_dy) {
 	float tile = detail_scale[i].x;
 	vec2 base = floor(skew);
 	vec2 f = skew - base;
@@ -178,19 +187,21 @@ vec2 detail_scale_slope(int i, vec2 uv, vec2 skew, vec2 duv_dx, vec2 duv_dy) {
 	ivec2 verts[3] = ivec2[3](v0, v1, v2);
 	vec2 dx = duv_dx / tile;
 	vec2 dy = duv_dy / tile;
-	vec2 sum = vec2(0.0);
+	vec4 sum = vec4(0.0);
 	for (int k = 0; k < 3; k++) {
 		ivec2 c = ((verts[k] % DETAIL_HEX_PERIOD) + DETAIL_HEX_PERIOD) % DETAIL_HEX_PERIOD;
 		uint h = detail_hash(c, i);
 		vec2 offset = vec2(float(h & 0xffffu), float(h >> 16u)) / 65536.0;
 		vec2 t = uv / tile + offset;
-		vec2 slope;
+		vec4 slope;
 		if (i == 0) {
-			slope = textureGrad(detail_slope_s0, t, dx, dy).rg;
+			slope = textureGrad(detail_slope_s0, t, dx, dy);
 		} else if (i == 1) {
-			slope = textureGrad(detail_slope_s1, t, dx, dy).rg;
+			slope = textureGrad(detail_slope_s1, t, dx, dy);
+		} else if (i == 2) {
+			slope = textureGrad(detail_slope_s2, t, dx, dy);
 		} else {
-			slope = textureGrad(detail_slope_s2, t, dx, dy).rg;
+			slope = textureGrad(detail_slope_s3, t, dx, dy);
 		}
 		sum += w[k] * slope;
 	}
@@ -221,10 +232,11 @@ vec3 detail_texture_gradient(vec2 grid, vec3 position, vec3 n, float spacing_m) 
 	vec3 grad_v = (p2 * dl_dx.y + p1 * dl_dy.y) / det;
 	vec2 slope = vec2(0.0);
 	const mat2 HEX_SKEW = mat2(vec2(1.0, 0.0), vec2(-0.57735027, 1.15470054));
-	for (int i = 0; i < 3; i++) {
-		float weight = detail_scale_weight(i, spacing_m);
-		// [E] Below 0.1 a scale adds < 0.016 rms slope (s2's 0.16 x 0.1), invisible: skip its three fetches.
-		if (weight < 0.1) {
+	for (int i = 0; i < DETAIL_SCALES; i++) {
+		vec2 weight = detail_scale_weight(i, spacing_m);
+		// [E] Below 0.1 a component adds < 0.016 rms slope (s2's regolith 0.16 x 0.1), invisible: skip the fetches when
+		// both are below.
+		if (max(weight.x, weight.y) < 0.1) {
 			continue;
 		}
 		// Once even the footprint's short axis (the anisotropic filter's mip) spans the band's longest wavelength, the
@@ -235,7 +247,8 @@ vec3 detail_texture_gradient(vec2 grid, vec3 position, vec3 n, float spacing_m) 
 		}
 		vec2 uv = detail_origin[i].xy + local;
 		vec2 skew = detail_origin[i].zw + HEX_SKEW * local / detail_scale[i].y;
-		slope += weight * detail_scale_slope(i, uv, skew, dl_dx, dl_dy);
+		vec4 s = detail_scale_slope(i, uv, skew, dl_dx, dl_dy);
+		slope += weight.x * s.xy + weight.y * s.zw;
 	}
 	return slope.x * grad_u + slope.y * grad_v;
 }

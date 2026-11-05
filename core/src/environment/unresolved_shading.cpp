@@ -223,7 +223,8 @@ double erf_lambda(double a) {
 UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& detail, const LunarRocks* rocks) {
     const auto& cfg = detail.config();
     UnresolvedShadingModel m;
-    m.total_slope_variance = slope_variance_from_theta_bar(cfg.hapke.theta_bar_rad);
+    m.globe_slope_variance = slope_variance_from_theta_bar(cfg.hapke.theta_bar_rad);
+    m.total_slope_variance = m.globe_slope_variance;  // the rocks' share comes out below (with the rocks)
 
     // Regolith: octave k's nodes have variance (scale x relative_amplitude)^2 / 3 = scale^2 (s / baseline)^(2 H) (node
     // values uniform in [-1, 1]); its mean square slope is g x that / s^2 (value_noise_gradient_factor).
@@ -284,6 +285,16 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
             m.rock_lit_gain[static_cast<size_t>(k)] =
                 rock_lit_gain(m.rock_exposed_height_per_diameter, k * UnresolvedShadingModel::lit_gain_step_rad);
         }
+        // The rocks' share of the globe's mean slope (header comment): out of the regolith's budget.
+        m.rock_area_share = 1.0 - std::exp(-rock_cover(m, m.rock_min_diameter_m, m.rock_max_diameter_m));
+        m.rock_mean_tan = m.rock_area_share * pi * m.rock_exposed_height_per_diameter;
+        const double globe_mean_tan = 0.5 * pi * std::tan(cfg.hapke.theta_bar_rad);
+        const double regolith_mean_tan = (globe_mean_tan - m.rock_mean_tan) / (1.0 - m.rock_area_share);
+        if (!(regolith_mean_tan > 0.0)) {
+            throw std::invalid_argument("Unaufgeloeste Schattierung: die Steine tragen mehr Hangneigung als der Hapke-Fit");
+        }
+        const double t = 2.0 / pi * regolith_mean_tan;
+        m.total_slope_variance = pi * t * t;
     }
     return m;
 }
@@ -314,6 +325,10 @@ double crater_drawn_fraction(const config::CraterPopulation& craters, double spa
     return (w_f * crater_profile_drawn_share(d_f, r_f, spacing_over_diameter) +
             w_d * crater_profile_drawn_share(d_d, r_d, spacing_over_diameter)) /
            (w_f + w_d);
+}
+
+double crater_drawn_fraction_table(const UnresolvedShadingModel& m, double diameter_over_spacing) {
+    return crater_fraction_from_table(m, diameter_over_spacing);
 }
 
 double drawn_slope_variance_direct(const UnresolvedShadingModel& m, double spacing_m, double regolith_top_spacing_m,

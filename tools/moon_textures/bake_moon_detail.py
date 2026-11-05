@@ -17,22 +17,30 @@ roughness.rms_height_at_baseline_m (3.7 mm). The T10 shader blends each scale in
 resolves it (the mesh resolves wavelengths >= 2 x its vertex spacing: 2 cm at the finest level 22, 1.02 cm spacing).
 
 Scales (512 x 512 px each, the bands are disjoint and contiguous, 3 octaves each, tile / lambda_hi = 8):
-    s0: tile 0.32 m,  pixel 0.625 mm, wavelengths 5 mm .. 40 mm
-    s1: tile 2.56 m,  pixel 5 mm,     wavelengths 40 mm .. 320 mm
-    s2: tile 20.48 m, pixel 40 mm,    wavelengths 320 mm .. 2.56 m
-The band edges carry a raised-cosine taper of a quarter octave inside the band (the flat part is where the spectrum
-is tested). Heights: 16-bit greyscale PNG, value = 32768 + h / height_scale_m * 32767 (scale per map in
-moon_detail.toml); normals: 8-bit RGB tangent space, OpenGL convention (red = +x right, green = +y up = towards the
-image top, blue = +z), slopes from the metric pixel size, periodic differences (seamless).
+    s0: tile 0.32 m,   pixel 0.625 mm, wavelengths 5 mm .. 40 mm    (flat 5.95 .. 36.7 mm, content to 43.6 mm)
+    s1: tile 2.56 m,   pixel 5 mm,     wavelengths 40 mm .. 320 mm  (flat 43.6 .. 293 mm, content 36.7 .. 349 mm)
+    s2: tile 20.48 m,  pixel 40 mm,    wavelengths 320 mm .. 2.56 m (flat 349 mm .. 2.35 m, content 293 mm .. 2.79 m)
+    s3: tile 163.84 m, pixel 320 mm,   wavelengths 2.56 .. 20.48 m  (flat 2.79 .. 17.2 m, content from 2.35 m)
+(wavelength_min_m / wavelength_max_m in moon_detail.toml). The outer edges (5 mm, 20.48 m) carry a raised-cosine taper
+of a quarter octave inside the band. The shared edges are complementary: cos / sin amplitude ramps straddling the edge
+over a quarter octave (an eighth on each side), so the two neighbours' spectral variance sums to exactly the law at
+every wavelength (the Task 10 review found the earlier inside tapers on both neighbours lost ~0.9 mm^2 of Guo's
+statistic).
 
-T10 handoff: exact band edges per scale (wavelength, flat part inside the quarter-octave taper), for the fade by node
-vertex spacing d (the mesh resolves lambda >= 2 d, so scale i carries weight 0 once 2 d <= its lambda_min and 1 once
-2 d >= its lambda_max; blend log-linearly between):
-    s0: lambda_min 5 mm,   lambda_max 40 mm   (flat 5.95 .. 33.6 mm)  -> weight 0 for d <= 2.5 mm, 1 for d >= 20 mm
-    s1: lambda_min 40 mm,  lambda_max 320 mm  (flat 47.6 .. 269 mm)   -> weight 0 for d <= 20 mm,  1 for d >= 160 mm
-    s2: lambda_min 320 mm, lambda_max 2.56 m  (flat 381 mm .. 2.15 m) -> weight 0 for d <= 160 mm, 1 for d >= 1.28 m
-(the same values are in moon_detail.toml as wavelength_min_m / wavelength_max_m). Test for T10: mesh + textures at the
-125 mm baseline reproduce 4 mm +- 10 % (no double roughness across the handoff).
+Craters (Task 10 fix round): every scale also carries the small craters of the core's law (config [craters]: N(>D) =
+density (D / ref)^-b, fresh / degraded depth per D, rim, degraded share) whose diameter lies in its band (D from 1 cm,
+each crater in exactly one scale): Poisson count of the law's expectation on the periodic tile, uniform positions, D by
+the law's inverse cumulative, the core's crater_profile_m (bowl to R, (r / R)^-3 rim flank to 3 R), zero mean. They are
+kept as a separate component, so the shader weights each by the share the mesh does not draw (regolith: the band's
+spectral transfer; craters: the core's crater_drawn_fraction) - one texture fetch for both.
+
+Files per scale: regolith_height_<s>.png and crater_height_<s>.png (16-bit greyscale, value = 32768 + h /
+height_scale_m * 32767, scales in moon_detail.toml; the tests integrate them), regolith_slope_<s>.rgbah (the shader's
+map: raw little-endian half floats, regolith dh/du, dh/dv, craters dh/du, dh/dv; u along the image row = +x, v down the
+image = +row; periodic central differences of the float heights, loaded without a per-pixel decode),
+regolith_normal_<s>.png (8-bit RGB tangent space of the sum, OpenGL convention: red = +x right, green = +y up = towards
+the image top, blue = +z; for previews). Test for T10: mesh + textures at the 125 mm baseline reproduce Guo's 4 mm
++- 10 % (no double roughness across the handoff).
 
 Rock textures (triplanar set, 4 variants, 512 x 512 px, tile 1.0 m, 1.95 mm pixel): relative albedo (8-bit grey, value
 128 = 1.0, mean exactly 1.0 within quantisation: the shader multiplies by rocks.albedo_to_regolith, so the WAC mean is
@@ -56,7 +64,7 @@ CONFIG_FILE = REPO_ROOT / "config" / "moon_surface.toml"
 DEFAULT_OUT = REPO_ROOT / "data" / "textures" / "moon_detail"
 
 SIZE_PX = 512                       # [E] every map; mipmapped by Godot
-TAPER_OCTAVES = 0.25                # [E] raised-cosine taper inside the band edges
+TAPER_OCTAVES = 0.25                # [E] raised-cosine taper inside the outer band edges; straddle width of the shared ones
 GUO_WINDOW_SAMPLES = 25             # [S] Guo et al. 2021: 25 x 25 samples (5 mm DTM, 125 mm window)
 GUO_PIXEL_M = 0.005                 # [S] Guo et al. 2021 DTM pixel
 CALIBRATION_SIZE_PX = 4096          # field for the amplitude calibration
@@ -72,12 +80,15 @@ ROCK_AMPLITUDE_FACTOR = 0.5         # [E] rock-surface height amplitude / regoli
 #   over-rough in the normal maps); no lunar rock-surface roughness data in the config
 ROCK_LAMBDA_MIN_PX = 4.0            # [E] finest wavelength of the rock height field in pixels
 
-# name, tile edge [m], lambda_lo [m], lambda_hi [m], seed
+# name, tile edge [m], lambda_lo [m], lambda_hi [m], seed, lower edge shared, upper edge shared
 REGOLITH_SCALES = (
-    ("s0", 0.32, 0.005, 0.040, 1101),
-    ("s1", 2.56, 0.040, 0.320, 1102),
-    ("s2", 20.48, 0.320, 2.560, 1103),
+    ("s0", 0.32, 0.005, 0.040, 1101, False, True),
+    ("s1", 2.56, 0.040, 0.320, 1102, True, True),
+    ("s2", 20.48, 0.320, 2.560, 1103, True, True),
+    ("s3", 163.84, 2.560, 20.48, 1104, True, False),
 )
+CRATER_SEED_OFFSET = 50             # crater draws of scale <seed> use seed + CRATER_SEED_OFFSET
+CRATER_REACH_RADII = 3.0            # crater_profile_m is zero from 3 R (core lunar_surface_detail.cpp)
 ROCK_SEEDS = (2201, 2202, 2203, 2204)
 
 
@@ -86,28 +97,105 @@ def load_roughness(path: Path = CONFIG_FILE) -> dict:
         return tomllib.load(f)["roughness"]
 
 
+def load_craters(path: Path = CONFIG_FILE) -> dict:
+    with path.open("rb") as f:
+        return tomllib.load(f)["craters"]
+
+
+def crater_cumulative(craters: dict, diameter_m: float) -> float:
+    """N(>D) per m^2 of the config law (power form, as SizeFrequency::cumulative_density_per_m2)."""
+    sfd = craters["sfd"]
+    if sfd["form"] != "power":
+        raise ValueError("bake_moon_detail: craters.sfd must be a power law")
+    return sfd["density_per_m2"] * (diameter_m / sfd["reference_diameter_m"]) ** -sfd["exponent"]
+
+
+def crater_band_range(craters: dict, lam_lo: float, lam_hi: float) -> tuple[float, float]:
+    """Diameters a scale carries: the band [lam_lo, lam_hi) clipped to the law's [min, max] (each crater in one band)."""
+    sfd = craters["sfd"]
+    return max(lam_lo, sfd["min_diameter_m"]), min(lam_hi, sfd["max_diameter_m"])
+
+
+def crater_profile(depth: np.ndarray, rim: np.ndarray, radius: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """crater_profile_m of the core: parabolic bowl to R, rim (r / R)^-3 law to 3 R (heights in m)."""
+    rho = r / radius
+    bowl = rim - depth + depth * rho**2
+    flank = rim * (1.0 / np.maximum(rho, 1.0) ** 3 - 1.0 / 27.0) * 27.0 / 26.0
+    return np.where(rho < 1.0, bowl, np.where(rho < CRATER_REACH_RADII, flank, 0.0))
+
+
+def crater_population(craters: dict, tile_m: float, lam_lo: float, lam_hi: float, seed: int) -> dict:
+    """Craters of the config law with D in the scale's band on a periodic tile: the expected count
+    (N(>D_lo) - N(>D_hi)) x tile^2 rounded, uniform positions, D by the law's inverse cumulative at stratified quantiles
+    ((k + jitter) / count), exactly the configured fresh / degraded share in random order (depth per D fresh /
+    degraded, rim = rim_height_to_diameter / depth_fresh x depth). Stratified, because a tile holds only ~6 craters in
+    its top octave, which carry most of the height variance: independent draws left the first bake's tiles at 0.59-1.24
+    x the law's crater variance."""
+    d_lo, d_hi = crater_band_range(craters, lam_lo, lam_hi)
+    rng = np.random.default_rng(seed + CRATER_SEED_OFFSET)
+    if d_hi <= d_lo:
+        return {"x": np.zeros(0), "y": np.zeros(0), "d": np.zeros(0), "depth": np.zeros(0), "rim": np.zeros(0),
+                "expected": 0.0}
+    n_lo, n_hi = crater_cumulative(craters, d_lo), crater_cumulative(craters, d_hi)
+    expected = (n_lo - n_hi) * tile_m**2
+    count = int(round(expected))
+    x, y = rng.uniform(0.0, tile_m, count), rng.uniform(0.0, tile_m, count)
+    b = craters["sfd"]["exponent"]
+    u = (np.arange(count) + rng.uniform(0.0, 1.0, count)) / max(count, 1)
+    d = d_lo * (1.0 - u * (1.0 - (d_hi / d_lo) ** -b)) ** (-1.0 / b)      # inverse of N(>D) inside [d_lo, d_hi)
+    fresh = np.zeros(count, dtype=bool)
+    fresh[:int(round(count * (1.0 - craters["degraded_fraction"])))] = True
+    rng.shuffle(fresh)
+    depth = d * np.where(fresh, craters["depth_to_diameter_fresh"], craters["depth_to_diameter_degraded"])
+    rim = craters["rim_height_to_diameter"] / craters["depth_to_diameter_fresh"] * depth
+    return {"x": x, "y": y, "d": d, "depth": depth, "rim": rim, "expected": expected}
+
+
+def crater_field(population: dict, size_px: int, pixel_m: float) -> np.ndarray:
+    """Periodic height field of the craters at the pixel centres, zero mean (LOLA heights are area means)."""
+    field = np.zeros((size_px, size_px))
+    for x, y, d, depth, rim in zip(population["x"], population["y"], population["d"], population["depth"],
+                                   population["rim"]):
+        radius = 0.5 * d
+        reach = int(np.ceil(CRATER_REACH_RADII * radius / pixel_m)) + 1
+        cx, cy = x / pixel_m - 0.5, y / pixel_m - 0.5                   # pixel centres at (i + 0.5) pixel
+        cols = np.arange(int(np.floor(cx)) - reach, int(np.floor(cx)) + reach + 2)
+        rows = np.arange(int(np.floor(cy)) - reach, int(np.floor(cy)) + reach + 2)
+        r = np.hypot((cols[None, :] - cx) * pixel_m, (rows[:, None] - cy) * pixel_m)
+        field[np.ix_(rows % size_px, cols % size_px)] += crater_profile(depth, rim, radius, r)
+    return field - field.mean()
+
+
 def octave_psd_constant(amplitude_m: float, hurst: float, baseline_m: float) -> float:
     """C of the spectral density S(k) = C k^-(2H+2) [m^2 per (cycle/m)^2] whose octave variance (k .. 2k) is
     a^2 (1 / (k baseline))^(2H): the self-affine roughness law of the core (octave labelled by its longest wavelength)."""
     return amplitude_m**2 * baseline_m ** (-2.0 * hurst) * 2.0 * hurst / (2.0 * np.pi * (1.0 - 2.0 ** (-2.0 * hurst)))
 
 
-def band_weight(wavelength_m: np.ndarray, lam_lo: float, lam_hi: float) -> np.ndarray:
-    """1 inside the band, raised-cosine to 0 over TAPER_OCTAVES inside both edges, 0 outside."""
+def band_weight(wavelength_m: np.ndarray, lam_lo: float, lam_hi: float, shared_lo: bool = False,
+                shared_hi: bool = False) -> np.ndarray:
+    """Amplitude weight: 1 inside the band. An outer edge: raised-cosine to 0 over TAPER_OCTAVES inside the band. A
+    shared edge: sin (upper band) / cos (lower band) of a quarter period over TAPER_OCTAVES centred on the edge, so the
+    squared weights of the two neighbours sum to 1."""
     with np.errstate(divide="ignore"):
         x = np.log2(wavelength_m)
     lo, hi = np.log2(lam_lo), np.log2(lam_hi)
-    w = np.zeros_like(x)
-    inside = (x >= lo) & (x <= hi)
-    up = np.clip((x - lo) / TAPER_OCTAVES, 0.0, 1.0)
-    down = np.clip((hi - x) / TAPER_OCTAVES, 0.0, 1.0)
-    taper = 0.5 - 0.5 * np.cos(np.pi * np.minimum(up, down))
-    w[inside] = taper[inside]
+    half = 0.5 * TAPER_OCTAVES
+    if shared_lo:   # rises from lo - half (0) to lo + half (1)
+        w_lo = np.sin(0.5 * np.pi * np.clip((x - lo + half) / TAPER_OCTAVES, 0.0, 1.0))
+    else:
+        w_lo = 0.5 - 0.5 * np.cos(np.pi * np.clip((x - lo) / TAPER_OCTAVES, 0.0, 1.0))
+    if shared_hi:   # falls from hi - half (1) to hi + half (0)
+        w_hi = np.cos(0.5 * np.pi * np.clip((x - hi + half) / TAPER_OCTAVES, 0.0, 1.0))
+    else:
+        w_hi = 0.5 - 0.5 * np.cos(np.pi * np.clip((hi - x) / TAPER_OCTAVES, 0.0, 1.0))
+    w = w_lo * w_hi
+    w[~np.isfinite(x)] = 0.0
     return w
 
 
 def synthesise(size_px: int, pixel_m: float, lam_lo: float, lam_hi: float, amplitude_m: float, hurst: float,
-               baseline_m: float, seed: int) -> np.ndarray:
+               baseline_m: float, seed: int, shared_lo: bool = False, shared_hi: bool = False) -> np.ndarray:
     """Periodic Gaussian field with the self-affine spectrum inside [lam_lo, lam_hi] (heights in metres)."""
     length = size_px * pixel_m
     fy = np.fft.fftfreq(size_px, d=pixel_m)[:, None]            # cycles / m
@@ -115,7 +203,7 @@ def synthesise(size_px: int, pixel_m: float, lam_lo: float, lam_hi: float, ampli
     k = np.hypot(fx, fy)
     k[0, 0] = 1.0
     c = octave_psd_constant(amplitude_m, hurst, baseline_m)
-    density = c * k ** (-(2.0 * hurst + 2.0)) * band_weight(1.0 / k, lam_lo, lam_hi) ** 2
+    density = c * k ** (-(2.0 * hurst + 2.0)) * band_weight(1.0 / k, lam_lo, lam_hi, shared_lo, shared_hi) ** 2
     density[0, 0] = 0.0
     dk = 1.0 / length
     gain = size_px * np.sqrt(density) * dk                       # |G|^2 = N^2 S dk^2 (variance per mode)
@@ -158,10 +246,25 @@ def calibrated_amplitude(roughness: dict) -> float:
     return trial * target / measured                             # the statistic is linear in the amplitude
 
 
-def normals_from_height(height_m: np.ndarray, pixel_m: float) -> np.ndarray:
-    """Tangent-space normals (OpenGL: +y up = image top) as uint8 RGB, periodic central differences."""
+def slopes_from_height(height_m: np.ndarray, pixel_m: float) -> tuple[np.ndarray, np.ndarray]:
+    """(dh/dx along a row, dh/drow down the image): periodic central differences (zero mean exactly)."""
     dx = (np.roll(height_m, -1, axis=1) - np.roll(height_m, 1, axis=1)) / (2.0 * pixel_m)
     drow = (np.roll(height_m, -1, axis=0) - np.roll(height_m, 1, axis=0)) / (2.0 * pixel_m)
+    return dx, drow
+
+
+def save_slopes(regolith_m: np.ndarray, craters_m: np.ndarray, pixel_m: float, path: Path) -> None:
+    """Raw little-endian half floats (regolith dh/dx, dh/drow, craters dh/dx, dh/drow), row-major (Godot
+    Image.FORMAT_RGBAH): the shader weights the two components separately."""
+    rx, rrow = slopes_from_height(regolith_m, pixel_m)
+    cx, crow = slopes_from_height(craters_m, pixel_m)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(np.stack([rx, rrow, cx, crow], axis=-1).astype("<f2").tobytes())
+
+
+def normals_from_height(height_m: np.ndarray, pixel_m: float) -> np.ndarray:
+    """Tangent-space normals (OpenGL: +y up = image top) as uint8 RGB, periodic central differences."""
+    dx, drow = slopes_from_height(height_m, pixel_m)
     n = np.stack([-dx, drow, np.ones_like(dx)], axis=-1)         # +y up = decreasing row: n_y = -dh/dy = +dh/drow
     n /= np.linalg.norm(n, axis=-1, keepdims=True)
     return np.clip(np.rint((n * 0.5 + 0.5) * 255.0), 0, 255).astype(np.uint8)
@@ -238,14 +341,25 @@ def bake(out_dir: Path, config_file: Path = CONFIG_FILE) -> dict:
     amplitude = calibrated_amplitude(roughness)
     meta = {"hurst_exponent": hurst, "baseline_m": baseline, "rms_height_at_baseline_m": roughness["rms_height_at_baseline_m"],
             "octave_amplitude_m": amplitude, "scales": []}
-    for name, tile, lam_lo, lam_hi, seed in REGOLITH_SCALES:
+    craters = load_craters(config_file)
+    for name, tile, lam_lo, lam_hi, seed, shared_lo, shared_hi in REGOLITH_SCALES:
         pixel = tile / SIZE_PX
-        height = synthesise(SIZE_PX, pixel, lam_lo, lam_hi, amplitude, hurst, baseline, seed)
+        height = synthesise(SIZE_PX, pixel, lam_lo, lam_hi, amplitude, hurst, baseline, seed, shared_lo, shared_hi)
+        population = crater_population(craters, tile, lam_lo, lam_hi, seed)
+        crater_height = crater_field(population, SIZE_PX, pixel)
         code, scale = encode_height(height)
         save_png(code, out_dir / f"regolith_height_{name}.png")
-        save_png(normals_from_height(height, pixel), out_dir / f"regolith_normal_{name}.png")
+        crater_code, crater_scale = encode_height(crater_height)
+        save_png(crater_code, out_dir / f"crater_height_{name}.png")
+        save_png(normals_from_height(height + crater_height, pixel), out_dir / f"regolith_normal_{name}.png")
+        save_slopes(height, crater_height, pixel, out_dir / f"regolith_slope_{name}.rgbah")
+        d_lo, d_hi = crater_band_range(craters, lam_lo, lam_hi)
         meta["scales"].append({"name": name, "tile_m": tile, "pixel_m": pixel, "wavelength_min_m": lam_lo,
-                               "wavelength_max_m": lam_hi, "height_scale_m": scale, "rms_m": float(height.std())})
+                               "wavelength_max_m": lam_hi, "height_scale_m": scale, "rms_m": float(height.std()),
+                               "crater_min_diameter_m": d_lo, "crater_max_diameter_m": d_hi,
+                               "crater_count": int(population["d"].size),
+                               "crater_expected_count": float(population["expected"]),
+                               "crater_height_scale_m": crater_scale, "crater_rms_m": float(crater_height.std())})
     rocks = []
     for variant in range(4):
         height, albedo = rock_variant(variant, amplitude, baseline)

@@ -571,6 +571,12 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
     result["rock_lit_gain"] = packed(m.rock_lit_gain);
     result["lit_gain_step_rad"] = environment::UnresolvedShadingModel::lit_gain_step_rad;
     result["lit_gain_floor_rad"] = environment::lit_gain_floor_rad;
+    result["globe_slope_variance"] = m.globe_slope_variance;
+    result["rock_area_share"] = m.rock_area_share;
+    result["rock_mean_tan"] = m.rock_mean_tan;
+    result["crater_fraction"] = packed(m.crater_fraction);
+    result["crater_fraction_lowest_octaves"] = environment::UnresolvedShadingModel::crater_fraction_lowest_octaves;
+    result["crater_slope_exponent"] = m.crater_exponent;
     return result;
 }
 
@@ -591,16 +597,15 @@ double StarsimCore::moon_residual_theta_bar(double spacing_m) const {
 godot::PackedFloat32Array StarsimCore::moon_rock_abundance_grid(int width, int height) const {
     godot::PackedFloat32Array out;
     if (width <= 0 || height <= 0) return out;
-    out.resize(static_cast<int64_t>(width) * height);
     const auto rocks = moon_surface_ ? moon_surface_->rocks_shared() : nullptr;
-    for (int j = 0; j < height; ++j) {
-        const double lat = (90.0 - (j + 0.5) * 180.0 / height) * constants::deg_to_rad;
-        for (int i = 0; i < width; ++i) {
-            const double lon = (-180.0 + (i + 0.5) * 360.0 / width) * constants::deg_to_rad;
-            const math::Vec3 unit{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
-            out[static_cast<int64_t>(j) * width + i] = rocks ? static_cast<float>(rocks->abundance_factor(unit)) : 1.0f;
-        }
+    if (!rocks) {
+        out.resize(static_cast<int64_t>(width) * height);
+        out.fill(1.0f);
+        return out;
     }
+    const std::vector<float> grid = rocks->abundance_grid(width, height);
+    out.resize(static_cast<int64_t>(grid.size()));
+    std::copy(grid.begin(), grid.end(), out.ptrw());
     return out;
 }
 

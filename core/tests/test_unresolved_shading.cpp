@@ -99,9 +99,11 @@ TEST_CASE("Hapke slope budget: theta_bar <-> mean square slope, residual by mesh
     const double theta = shared_detail()->config().hapke.theta_bar_rad;
     CHECK(std::abs(environment::theta_bar_from_slope_variance(environment::slope_variance_from_theta_bar(0.3)) - 0.3) <
           1e-14);
-    CHECK(std::abs(m.total_slope_variance - pi * std::tan(theta) * std::tan(theta)) < 1e-14);
-    // Beyond every generated band nothing is drawn: the globe's theta_bar.
-    CHECK(environment::residual_theta_bar(m, 1.0e7) == theta);
+    CHECK(std::abs(m.globe_slope_variance - pi * std::tan(theta) * std::tan(theta)) < 1e-14);
+    // Beyond every generated band nothing is drawn: the regolith's whole budget (the globe's without the rocks).
+    const double theta_regolith = environment::theta_bar_from_slope_variance(m.total_slope_variance);
+    CHECK(std::abs(environment::residual_theta_bar(m, 1.0e7) - theta_regolith) < 1e-14);
+    CHECK(theta_regolith < theta);
     // Monotonic and continuous in the spacing (fade continuity: no step when a node splits, d -> d / 2 continuously
     // through the morph): the largest change per 1 % spacing step.
     double previous = environment::residual_theta_bar(m, 0.01);
@@ -136,6 +138,37 @@ TEST_CASE("Hapke slope budget: theta_bar <-> mean square slope, residual by mesh
     CHECK(worst_step < 1.0e-3);
     CHECK(environment::residual_theta_bar(m, 0.01) > 0.0);  // the drawn relief never exceeds the budget
     CHECK(environment::residual_theta_bar(m, 0.01) < theta);
+}
+
+TEST_CASE("Rocks out of the slope budget: regolith and rocks add up to the globe's Hapke mean slope (no double shadow)",
+          "[moon_surface][unresolved_shading]") {
+    const auto& m = shared_model();
+    const double theta = shared_detail()->config().hapke.theta_bar_rad;
+    // Hapke's mean-tan form: (1 - A) <tan>_regolith + A pi eta = <tan>_globe = (pi / 2) tan theta_bar.
+    const double regolith_tan = 0.5 * pi * std::tan(environment::theta_bar_from_slope_variance(m.total_slope_variance));
+    const double rocks_tan = pi * m.rock_exposed_height_per_diameter;
+    CHECK(std::abs((1.0 - m.rock_area_share) * regolith_tan + m.rock_area_share * rocks_tan -
+                   0.5 * pi * std::tan(theta)) < 1e-12);
+    CHECK(std::abs(m.rock_area_share - (1.0 - std::exp(-environment::rock_cover(m, 0.0, inf)))) < 1e-15);
+    CHECK(m.rock_area_share > 0.0);
+    // Without the rocks nothing comes out: the regolith keeps the globe's budget.
+    const auto bare = environment::make_unresolved_shading_model(*shared_detail(), nullptr);
+    CHECK(bare.total_slope_variance == bare.globe_slope_variance);
+    CHECK(bare.rock_mean_tan == 0.0);
+    // The half-spheroid's mean |grad h| over its plan area is pi eta (closed form against a midpoint sum).
+    const double eta = m.rock_exposed_height_per_diameter, a = 0.5, height = eta;  // D = 1
+    constexpr int n = 200000;
+    double sum = 0.0;
+    for (int k = 0; k < n; ++k) {
+        const double r = (k + 0.5) / n * a;
+        sum += height * r / (a * a * std::sqrt(1.0 - r * r / (a * a))) * 2.0 * pi * r * (a / n);
+    }
+    CHECK(std::abs(sum / (pi * a * a) / rocks_tan - 1.0) < 2e-3);  // the rim's integrable singularity limits the sum
+    std::printf("  rocks out of the budget: area share %.4f, mean tan %.4f of the globe's %.4f; theta_bar globe %.3f deg,"
+                " regolith %.3f deg; S^2 %.4f -> %.4f\n", m.rock_area_share, m.rock_mean_tan,
+                0.5 * pi * std::tan(theta), theta / deg,
+                environment::theta_bar_from_slope_variance(m.total_slope_variance) / deg, m.globe_slope_variance,
+                m.total_slope_variance);
 }
 
 TEST_CASE("Crater slope variance is the profile's gradient integral over the size law",

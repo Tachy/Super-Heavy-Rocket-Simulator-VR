@@ -91,6 +91,22 @@ LunarRocks::LunarRocks(std::shared_ptr<const LunarSurfaceDetail> detail,
     max_semi_axis_per_diameter_ = 0.5 * std::sqrt(constants::pi / (min_axis_ratio * least_area));
 }
 
+std::vector<float> LunarRocks::abundance_grid(int width, int height) const {
+    std::vector<float> out;
+    if (width <= 0 || height <= 0) return out;
+    out.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+    for (int j = 0; j < height; ++j) {
+        const double lat = (90.0 - (j + 0.5) * 180.0 / height) * constants::deg_to_rad;
+        for (int i = 0; i < width; ++i) {
+            const double lon = (-180.0 + (i + 0.5) * 360.0 / width) * constants::deg_to_rad;
+            const Vec3 unit{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+            out[static_cast<size_t>(j) * static_cast<size_t>(width) + static_cast<size_t>(i)] =
+                static_cast<float>(abundance_factor(unit));
+        }
+    }
+    return out;
+}
+
 double LunarRocks::abundance_factor(const Vec3& unit) const {
     const auto& rocks = detail_->config().rocks;
     if (!abundance_ || rocks.abundance_reference_area_fraction <= 0.0) return rocks.abundance_scale;

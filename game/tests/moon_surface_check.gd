@@ -637,7 +637,7 @@ func _set_parity_geometry(step: int) -> void:
 		_parity_camera.size = edge / 2.0
 		_parity_viewport.size = Vector2i(DETAIL_VIEWPORT, DETAIL_VIEWPORT)
 		material.set_shader_parameter("detail_cell_m", edge / 64.0)
-		material.set_shader_parameter("detail_origin", [Vector4.ZERO, Vector4.ZERO, Vector4.ZERO])
+		material.set_shader_parameter("detail_origin", [Vector4.ZERO, Vector4.ZERO, Vector4.ZERO, Vector4.ZERO])
 		material.set_shader_parameter("patch_spacing_m", float(entry["spacing"]))
 		material.set_shader_parameter("detail_horizon_spacing_m", float(entry["horizon"]))
 		material.set_shader_parameter("patch_abundance", float(entry["abundance"]))
