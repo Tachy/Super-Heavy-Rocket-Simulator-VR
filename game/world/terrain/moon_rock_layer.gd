@@ -870,8 +870,7 @@ func _transfer_to(item: Array, limit_m: float) -> bool:
 	var at := 0
 	while at < _far_ready.size() and donors.size() < EVICT_DONORS_MAX:
 		var candidate: Dictionary = _far_ready[at][1]
-		var instance_ok := is_instance_valid(candidate["instance"])
-		if not instance_ok or not _entries.has((candidate["instance"] as MeshInstance3D).get_instance_id()):
+		if not _is_live(candidate):
 			_far_ready.remove_at(at)
 			continue
 		if float(_far_ready[at][0]) <= limit_m:
@@ -955,11 +954,21 @@ func _farthest_entry() -> Dictionary:
 	while not _far_ready.is_empty():
 		var item: Array = _far_ready[0]
 		var entry: Dictionary = item[1]
-		if is_instance_valid(entry["instance"]) and _entries.has((entry["instance"] as MeshInstance3D).get_instance_id()):
+		if _is_live(entry):
 			entry["far_m"] = item[0]
 			return entry
 		_far_ready.pop_front()
 	return {}
+
+
+## Whether a sweep's entry is still the attached one of its node (Task 12 fix 2, review N1): a node detached, handed over
+## or parked and attached again has a NEW entry Dictionary under the same instance id; the old one in _far_ready /
+## _far_sweep lists MultiMeshes that are no longer its own. Identity, not the id or content (== compares Dictionaries by
+## value).
+func _is_live(entry: Dictionary) -> bool:
+	if not is_instance_valid(entry["instance"]):
+		return false
+	return is_same(_entries.get((entry["instance"] as MeshInstance3D).get_instance_id()), entry)
 
 
 ## One step of the farthest-node sweep (each process_queue).
@@ -1400,9 +1409,17 @@ func detach(instance: MeshInstance3D) -> void:
 	var start_us := Time.get_ticks_usec()
 	var id := instance.get_instance_id()
 	# The node's rock lists (queued, waiting, parked or attached) freed on a worker (_dispose_released).
-	for held: Variant in [_queue.get(id), _retry.get(id), _parked.get(id)]:
-		if held is Array and (held as Array).size() > 1:
-			_graveyard.append(held)
+	# Only the rock lists (Dictionaries of Packed arrays and AABBs): never the items' terrain ShaderMaterial, whose last
+	# reference must not drop on the worker (review n2 of Task 12 fix 1).
+	var queued: Variant = _queue.get(id)
+	var waiting: Variant = _retry.get(id)
+	var parked: Variant = _parked.get(id)
+	if queued is Array and (queued as Array).size() > 1:
+		_graveyard.append(queued[1])
+	if waiting is Array and (waiting as Array).size() > 1:
+		_graveyard.append(waiting[1])
+	if parked is Array and not (parked as Array).is_empty():
+		_graveyard.append(parked[0])
 	if _entries.has(id):
 		_graveyard.append((_entries[id] as Dictionary)["rocks"])
 	_queue.erase(id)  # its _queue_order slot is skipped

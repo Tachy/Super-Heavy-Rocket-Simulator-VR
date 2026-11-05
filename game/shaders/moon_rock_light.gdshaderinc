@@ -25,12 +25,17 @@ float moon_rock_norm(float abundance) {
 
 // The lit share of the node's drawn relief below the horizon grid as the eye sees it (the ground's own factor; Task 12:
 // Smith's visible-lit fraction, detail_smith_visible), the light at macroscopic elevation; view: (view elevation, the
-// light's azimuth difference to the eye).
+// light's azimuth difference to the eye). The view elevation is clamped to the terrain's floor (detail_rock_shape.w,
+// lit_gain_floor_rad, as detail_light_factors_view does): a rock on a rise above the eye sees the eye BELOW its local
+// horizontal (view.x < 0), where Smith's Lambda(v) has no meaning and G2 / G1 crosses a zero denominator - the blown-out
+// and black rocks of Task 12 fix 2, N1. [E] The relief statistics are taken over the local vertical; the eye still sees
+// the macroscopically tilted surface from above, at the grazing floor.
 float moon_rock_lit(float elevation, float spacing_m, float horizon_spacing_m, vec2 view) {
 	if (elevation <= 0.0) {
 		return 0.0;
 	}
-	return detail_smith_visible(tan(elevation), view.x, view.y,
+	float view_elevation = view.x >= 0.5 * DETAIL_PI ? view.x : max(view.x, detail_rock_shape.w);
+	return detail_smith_visible(tan(elevation), view_elevation, view.y,
 			max(detail_drawn(spacing_m) - detail_drawn(horizon_spacing_m), 0.0));
 }
 

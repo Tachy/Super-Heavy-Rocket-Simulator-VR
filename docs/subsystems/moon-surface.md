@@ -504,7 +504,10 @@ on top of that relief.
   cover the waiting node's buckets nothing is evicted (in the boulder field the near nodes need LOD 0-2 buckets the far
   nodes do not hold: the jump evicted none). Attaches also respect ALLOCATED_INSTANCES_PER_FRAME 16384 [E] newly
   allocated pool instances per frame. A released node's worker lists (MBs in a boulder field) are freed on a worker task
-  (`_dispose_released`): freeing them in `detach` stalled the main thread up to 3 ms per node.
+  (`_dispose_released`; only the rock Dictionaries go there, never an item's terrain material): freeing them in `detach`
+  stalled the main thread up to 3 ms per node. The sweep's entries are checked by identity (`_is_live`: the node's
+  current entry Dictionary, Task 12 fix 2): a node detached, handed over or parked and attached again has a new entry,
+  and the stale one lists MultiMeshes that are no longer its own.
   Free entries beyond a bucket's prewarm count are released after TRIM_IDLE_S 10 s without a take, one per frame.
   `free_all` (called by `TerrainQuadtree._exit_tree`) frees the pools' orphan entries at shutdown (review n3: thousands
   of leaked MultiMesh RIDs at exit before).
@@ -544,7 +547,12 @@ on top of that relief.
 - Light (`moon_rock_light.gdshaderinc`): the statistical rock drawn - Hapke with w x albedo factor (1.35, the
   statistical layer's rho is this law's ratio at the mosaics' standard geometry) and the globe's theta_bar, on the
   albedo map / N, each light (Sun and earthshine) times Smith's G1 of the node's drawn relief at its own macroscopic
-  elevation (review I1), the node's horizon map at the base for the Sun and the earthshine, the Earth's shadow.
+  elevation (review I1; from an oblique eye the visible-lit fraction, Near-field shadows), the node's horizon map at the
+  base for the Sun and the earthshine, the Earth's shadow. The view elevation (over the rock's local vertical) is
+  clamped to the terrain's floor `lit_gain_floor_rad` 1 deg [E] as the ground's `detail_light_factors_view` does: a rock
+  on a rise above the eye sees the eye below its local horizontal, where Smith's Lambda(v) has no meaning and G2 / G1
+  crosses a zero denominator (Task 12 fix 2, review N1: blown-out and black rocks above the eye's horizontal plane in the
+  boulder field with the near shadows off; with them on the map's resolved band left no Smith term near the eye).
   Normals per fragment from the template's convex constraints (`rock_shape_data`: up to 24 faces n . p <= h and the
   ellipsoid's quadric; the active constraint is the one the interpolated template position is closest to violating):
   hard facet edges at every LOD, no smoothing across cut planes (fix round B; the rock patch's radiance is the same
@@ -625,13 +633,21 @@ on top of that relief.
   grid: 0.1355 at a 2 deg Sun, 0.1337 at 7, 0.1294 at 30, 0.1203 at 90 deg), a receiver of normal n sees the ground below
   its horizontal plane over (1 - n.up) / 2 and the terrain above the horizon over the azimuth mean of sin^2 h (the node's
   horizon map, 16 sectors; each sector's wall lit at its own incidence, its slope taken as h [E]; weight (1 + n.up) / 2
-  for a tilted receiver [E]; every wall with mu0 > 0 counts as lit, its own shadowing ignored [E], so the walls count
-  only as far as the receiver itself sees the Sun (its horizon-map visibility V; [E] a lower bound: without it a valley
-  floor in terrain shadow at IM-2 with a 0.07 deg Sun took 9.7 x its earthshine radiance from walls that are themselves
-  in shadow, with steps at the horizon maps' node borders - Task 12 fix 1), and scatters it back as A_h(mu_view) (reciprocity). The surround's lit share
-  is the zenith-view statistical factor (`detail_sun_factor_nadir`; the rocks: Smith's G1) times the receiver's horizon
-  visibility - a hemispherical exitance that does not turn with the eye (Task 12 fix 1, review I2: the eye's view factor
-  was used first). A_h is resampled onto a mu grid (k / 90; `MoonDetailShading.hemispherical_albedo_mu`): no asin per
+  for a tilted receiver [E]), and scatters it back as A_h(mu_view) (reciprocity). Each wall carries its own Sun
+  visibility (Task 12 fix 2, review N2; fix 1 gated every wall by the receiver's V, which zeroed the fill exactly in
+  terrain shadow): the occluder toward the Sun is the receiver's horizon H_s in the Sun's azimuth, a ridge across the
+  Sun's direction at distance x_s; a wall point at azimuth difference dphi, distance d and height d tan h sees it at
+  tan H_P = (x_s tan H_s - d tan h) / (x_s - d cos dphi); [E] d = x_s (wall and occluder equally far, a crater floor near
+  its middle): tan H_P = (tan H_s - tan h) / (1 - cos dphi), the solar disc's visible fraction above H_P, never below the
+  receiver's V (walls toward the Sun tend to the receiver's own occluder). It over-estimates the far wall's light for a
+  receiver close to that wall and under-estimates it close to the occluder. Each wall also carries Smith's G1 at its
+  incidence over the ground's band drawn(node spacing) - drawn(horizon spacing) (review n1: the finer relief is Hapke's
+  theta_bar inside A_h, the coarser the wall's tilt h). The surround's lit share is one emitter for terrain and rocks
+  (`moon_fill_emitter`, review N3): the zenith-view statistical factor with every rock statistical (Smith's G1, the
+  rocks' statistical shadows and lit faces: the plan-area mean of the ground with its rocks, independent of what the eye
+  draws), times the receiver's horizon visibility [E] (the near surround shares its shadow) - a hemispherical exitance
+  that does not turn with the eye (Task 12 fix 1, review I2). The rocks' call site (`moon_rock.gdshader`) still passes
+  Smith's G1 alone (owned by the rock-look task at the time of fix 2: open point). A_h is resampled onto a mu grid (k / 90; `MoonDetailShading.hemispherical_albedo_mu`): no asin per
   lookup (review I5). In the materials' units the ground's
   I/F scale is albedo x moon_regolith_scale x moon_hapke_norm. Flat open ground gets ~nothing; rock faces and slopes turned
   from the Sun get ~1-2 % of the lit ground's radiance at a 7-11 deg Sun. Terrain and rocks only (vehicles take theirs
@@ -719,7 +735,7 @@ on top of that relief.
   (`split_texels`); statics `enabled` (fidelity `moon_near_shadows`), `fill_enabled`, diagnostics `terrain_casts`,
   `rocks_cast`, `splits`, `soft`, `soft_quality`), `World._update_moon_near_shadow`, `TerrainQuadtree.cast_shadows`;
   `game/shaders/moon_near_shadow.gdshaderinc` (`moon_near_fade`, `moon_near_resolved_m`, `moon_near_light`),
-  `game/shaders/moon_fill.gdshaderinc` (`moon_fill_albedo` (mu grid), `moon_fill_reflectance`); in
+  `game/shaders/moon_fill.gdshaderinc` (`moon_fill_albedo` (mu grid), `moon_fill_emitter`, `moon_fill_disc_visible`, `moon_fill_reflectance`); in
   `moon_detail.gdshaderinc` `detail_view_geometry`, `detail_rock_view_terms`, `detail_smith_visible`,
   `detail_light_factors_view`, `detail_sun_factor_view` (the map's Sun-only call), `detail_sun_factor_nadir` (the fill's
   emitter), DETAIL_SHADOW_CASTER_FACTOR; `MoonRockLayer`: SHADOW_CASTER_FACTOR (shadow-only MultiMeshes, `shadow_lods`),
@@ -1026,8 +1042,17 @@ on top of that relief.
   against the Task 11 shader 0 px; the HLS model (63 meshes, 53.7 m tall, feet on flat ground, Sun 20 deg) shadow tip
   147.7 m (half-shadow point) against the geometric tip 148.0 m (window [tip - penumbra 4.3 m, tip + 1 m]), its shadow
   halfway keeps no Sun; the setting's file round trip. Relief identity (IM-2 2026-11-13T06:00, Sun 0.07 deg, the eye in
-  terrain shadow, detail on, camera exposure): near shadows on / off with the fill 0 px; fill on / off 0.79 % of the
-  pixels, ground mean x1.57 (partly sunlit receivers seeing sunlit walls; before the walls' gate and G1 x9.7). Gates
+  terrain shadow, detail on): near shadows on / off with the fill 0 px; fill on / off 1.6 % of the pixels differ (the
+  partly sunlit receivers). That view's near floor gets neither earthshine nor fill (99.5 % of its ground pixels are code 0
+  with the fill off even at a 60 x brighter exposure; its eye adapts to 0 cd/m^2, so the camera exposure is not
+  calibrated there): its ground-row ratios (x9.7 fix 1 ungated, x1.57 receiver-gated, x2.23 per-wall) divide by near-zero
+  codes and are not a measure. Shadowed floors at Sun 6.75 deg (IM-2 2026-11-22, 200 m, camera exposures 8 / 0.004 s /
+  ISO 160 and 4 / 0.02 s / ISO 1600, Task 12 fix 2, review N2): pixels below 2 % of the sunlit median (1192 cd/m^2)
+  2.77 cd/m^2 with the fill (p10 / p50 / p90 1.67 / 2.31 / 3.46), 0.04 cd/m^2 without (no earthshine there: the Earth is
+  below the horizon), 0.23 % of the sunlit median; expected [E] (E / pi) A_h(mu_r) sum sin^2 h mu0 A_h(mu0) / 16 with
+  rim walls h 5-15 deg lit at mu0 0.2-0.4 over half the azimuths ~ 0.1-1 % of the sunlit floor. Sunlit ground x1.0004.
+  Boulder field at the eye 2 m with the near shadows off (Task 12 fix 2, N1): no glow or blotch above the eye's
+  horizontal plane (the rock view-elevation clamp; A/B without it the artifact returns at the same line). Gates
   unchanged (detail patches -1.49 .. +0.23 %, rock gate at abundance 1 / 3 / 10 as above); handover (A11) across
   1.011 / 1.002 / 1.000 / 1.000, down-Sun 1.001 / 1.002 / 1.001 / 1.001, into the Sun 0.983 / 0.990 / 0.983 / 0.995;
   sky_radiance_check PASS (IM2_READ_EXPOSURE 2.5), atmosphere_check PASS. Core: the view tables' cache round trip bit
@@ -1154,8 +1179,10 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 - Summed roughness (mesh + textures + drawn rocks): the GD gate (10 %) re-measured after fix C's residual 3.62 mm and
   the resting templates: see Validation (Rocks drawn).
 - Fill light at a grazing Sun: the walls' term reads the node's horizon map, so faint steps at the horizon maps' node
-  borders remain in partly sunlit ground at a 0.07 deg Sun (Task 12 fix 1 relief image); the walls' own cast shadows are
-  only bounded (receiver's V, G1), not computed. Shadow-only rock MultiMeshes draw the LOD the rock is drawn with: in the
+  borders remain in partly sunlit ground at a 0.07 deg Sun (Task 12 fix 1 relief image); each wall's own Sun visibility
+  is estimated from the receiver's horizon with the wall and the occluder equally far [E], not computed. The rocks'
+  fill emitter is still Smith's G1 alone at the call site in `moon_rock.gdshader` (review N3 of Task 12 fix 1: the
+  terrain uses `moon_fill_emitter`; the one-line change belongs to the rock shader's owner). Shadow-only rock MultiMeshes draw the LOD the rock is drawn with: in the
   boulder field the rock casters cost +5.6 ms (receivers +7.4, terrain casters +1.5; vr-performance.md) - a LOD bias of
   +1 for the shadow MultiMeshes (review I5) is not built.
 - The texture craters cast no shadows inside their bowls - the main cue of small craters under a low Sun (the LROC

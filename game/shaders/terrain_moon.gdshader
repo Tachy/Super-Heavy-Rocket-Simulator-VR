@@ -129,7 +129,6 @@ void fragment() {
 	vec2 detail_factors = vec2(1.0);
 	float near_sun_factor = 1.0;
 	float abundance_here = 1.0;
-	float geometry_min_here = 1.0e30;
 	float sun_modulation = 1.0;
 	float earth_modulation = 1.0;
 	// The near-field shadow map's fade (1: beyond its range or off) and the eye's view geometry over the local vertical.
@@ -148,7 +147,6 @@ void fragment() {
 					sun_margin, view, moon_near_resolved_m(-VERTEX.z));
 		}
 		abundance_here = abundance;
-		geometry_min_here = geometry_min_m;
 		sun_modulation = detail_modulation(detail_gradient, n, normalize(to_sun), to_eye);
 		earth_modulation = detail_modulation(detail_gradient, n, normalize(to_earth), to_eye);
 	}
@@ -176,8 +174,9 @@ void fragment() {
 			vec3 east_f = vec3(up_local.z, 0.0, -up_local.x);
 			east_f = length(east_f) > POLE_EAST_MIN ? normalize(east_f) : vec3(0.0, 0.0, 1.0);
 			float ground_k = dot(albedo, vec3(0.2126, 0.7152, 0.0722)) * moon_regolith_scale * moon_hapke_norm;
-			float ground_lit = moon_near_shadow.w < 0.5 ? 0.0 : detail_sun_factor_nadir(abundance_here, geometry_min_here,
-					spacing_eff, detail_horizon_spacing_m, sun_margin) * sun_visible;
+			// The surround's exitance: the one emitter of terrain and rocks (moon_fill_emitter, review N3).
+			float ground_lit = moon_near_shadow.w < 0.5 ? 0.0
+					: moon_fill_emitter(abundance_here, spacing_eff, detail_horizon_spacing_m, sun_margin) * sun_visible;
 			light += moon_regolith_scale * moon_sun_scene * sunlit * moon_fill_reflectance(n, up_local, normalize(to_sun),
 					dot(n, to_eye), ground_lit, sun_visible, ground_k, horizon_enabled, east_f, cross(up_local, east_f),
 					horizon_uv);

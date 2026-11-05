@@ -184,6 +184,8 @@ class NeverDue:
 
 
 func _initialize() -> void:
+	# Task 12 fix 2 (review n3): the near shadows on whatever the user persisted in user://settings.cfg.
+	MoonNearShadow.enabled = true
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""

@@ -119,6 +119,8 @@ var _rock_patch_abundance := 1.0  ## the rock patch's abundance factor (--rock_p
 
 
 func _initialize() -> void:
+	# Task 12 fix 2 (review n3): the near shadows on whatever the user persisted in user://settings.cfg.
+	MoonNearShadow.enabled = true
 	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
 	var site: Dictionary = TomlLite.load_file(config_dir.path_join("lunar_sites.toml"))["site"][0]
 	_site = Vector2(float(site["latitude_deg"]), float(site["longitude_deg"]))

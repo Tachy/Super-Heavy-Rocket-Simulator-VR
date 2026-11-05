@@ -19,6 +19,8 @@ var _core := StarsimCore.new()
 
 
 func _initialize() -> void:
+	# Task 12 fix 2 (review n3): the near shadows on whatever the user persisted in user://settings.cfg.
+	MoonNearShadow.enabled = true
 	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
 	var present: Dictionary = _core.load_terrain(config_dir)
 	if not present.get("moon", false):
