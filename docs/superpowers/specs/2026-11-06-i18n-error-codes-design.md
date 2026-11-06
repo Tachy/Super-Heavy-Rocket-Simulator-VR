@@ -110,7 +110,10 @@ changes never touch code. The language is switched centrally and takes effect im
    reports. No grammar engine: plurals, optional clauses and "A or B" become separate keys/codes.
 4. Migration: the report type first; then per core area one task converts the core fields, the bindings and the game
    consumers together, and adds the German text (today's wording) and the English text to the tables in the same
-   task - every commit builds and runs, no dual fields, no temporary text adapter.
+   task - every commit builds and runs. Revised after planning (2026-11-06): statuses are glued as text across areas
+   (e.g. the ISS status from rendezvous/proximity/docking/transfer texts), so a temporary `legacy` code with one text
+   parameter bridges unconverted producers; consumers convert before producers; the bridge is deleted in the last task,
+   where a build failure exposes any leftover.
 5. Formatting: one default unit/precision per kind, overridable per placeholder in the table (`{slope:deg1}`,
    `{alt:km2}`) so today's displays keep their units and decimals; the placeholder check compares names, not formats.
 6. Scope in game/: every user-visible literal in game/ (GDScript, .tscn, shaders' on-screen text if any) moves; a
