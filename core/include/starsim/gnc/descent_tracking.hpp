@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "starsim/gnc/descent_planner.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -18,7 +20,25 @@ struct TrackingReference {
     math::Vec3 angular_acceleration_plan_radps2;
 };
 
-TrackingReference sample_plan(const DescentPlan& plan, const DescentModel& model, double t_s, double terminal_sink_mps);
+// The plan's own trajectory between its nodes: every interval propagated through the planning model from its start
+// node with the plan's first-order-hold thrust (as the discretisation does; the converged plan meets the next node
+// within the defect tolerance), sampled at most plan_path_step_s apart. The nodes alone are a chord of it: on the
+// ship's long pair phase (~1.9 s between nodes) the chord ran up to ~3 m above the braking path (an upward
+// acceleration a bends the path below the chord by ~a dt^2 / 8) and 1.6 deg off its axis, and the tracking held the
+// vehicle on that chord - higher and slower than planned, every re-plan later (r1 fix, 2026-11-06).
+struct PlanPath {
+    std::vector<double> t_s;         // from the plan's start, increasing
+    std::vector<DescentState> x;
+};
+// Sample spacing: the linear interpolation between samples leaves ~a h^2 / 8 = 2 mm of the path at a = 7 m/s^2.
+constexpr double plan_path_step_s = 0.05;
+PlanPath plan_path(const DescentPlan& plan, const DescentModel& model);
+// The path's state at t_s (linear between samples, quaternion normalised); t_s clamped to the path.
+DescentState path_state(const PlanPath& path, double t_s);
+
+// The reference at t_s: the path's state (empty path: the nodes' linear interpolation, DescentPlan::state_at).
+TrackingReference sample_plan(const DescentPlan& plan, const DescentModel& model, double t_s, double terminal_sink_mps,
+                              const PlanPath& path = {});
 
 struct TrackingGains {
     double frequency_rad_s = 0.6;     // [E] position loop (re-plans every second remove the rest)

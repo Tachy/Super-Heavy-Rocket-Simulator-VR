@@ -107,7 +107,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     -1.34 s at 207 s out (limit 1.0; was -2.15), -0.78 s after ~15 s: the online drag scale learns a 0.7 % drag
     deficit of the entry aero table below Mach 2.2 over that time (the predicted gate moves +0.57 s with it); the
     rest (~-0.8 s) is the pre-existing bias (-0.83 s at 290 t over a 179 s horizon, now 208 s). Entry aero table
-    fidelity, for plan Task 4.
+    fidelity, for plan Task 4. Red again 2026-11-06 (catch 4.30 s, the last 10 s 2.13 s): the tracking held the ship
+    on the chord between the plan's nodes (~1.9 s apart in the pair phase, ~3 m above the braking path), so it flew
+    higher and slower than planned and every re-plan ended later; the reference now follows the plan's own path
+    (`gnc::plan_path`, docs/subsystems/gnc-core.md). Catch 2.74 s at most, 1.00 s within the last 10 s.
   - Fixed on the way: the booster's landing-ignition forecast just past the apex (-54.7 s, a sink near zero; now the mean
     sink of the fall ahead is its floor: +8.6 s); `frames::fixed_to_geodetic` NaN within ~0.1 m of the axis (the
     yaw-demand fixture starts over the pole). Mass-relative fixtures restated: no usable corridor at 10.9 km/s (0.13

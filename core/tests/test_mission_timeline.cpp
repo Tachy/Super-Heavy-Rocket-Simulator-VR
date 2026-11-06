@@ -673,6 +673,8 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     // commanded, 83-89 deg flown) taught the online drag scale 1.09 from the transient and the gate ran 2.92 s late;
     // in the terminal phase the scales now hold while the largest full attitude error over the scale cycle exceeds
     // EntryGuidanceParameters::scale_max_attitude_error_rad.
+    // r1 fix 2026-11-06: the catch had drifted to -4.30 s (2.13 s within 10 s) - the tracking held the ship on the chord
+    // between the plan nodes, above its braking path; on the plan's own path (gnc::plan_path) -2.74 s, 1.00 s within 10 s.
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 1.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 60.0) <= 0.5);
     CHECK(max_drag_scale <= 1.03);  // no transient learnt as a model error

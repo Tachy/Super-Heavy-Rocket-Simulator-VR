@@ -270,6 +270,7 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     const bool strikes = abort_strikes(*outcome.plan);
     if (outcome.plan->converged && !stale && !beyond && !strikes) {
         plan_ = outcome.plan;
+        path_ = plan_path(*plan_, model_);  // on the model the plan was made on (its snapshot's: one request at a time)
         plan_epoch_ = outcome.snapshot_epoch + outcome.start_offset_s;
         consecutive_failures_ = 0;
         consecutive_unconverged_ = 0;
@@ -449,6 +450,7 @@ std::optional<bool> ScvxLandingGuidance::first_step(const PlanOutcome& outcome) 
         return false;
     }
     plan_ = outcome.plan;
+    path_ = plan_path(*plan_, model_);
     plan_epoch_ = epoch;
     next_request_ = epoch + parameters_.replan_interval_s;
     return true;
@@ -494,7 +496,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
     const auto body_frame = site_body_frame(site_, env, epoch);
     const auto& earth = body_frame.transform;  // the site body-fixed frame (Earth: ITRF93, Moon: MOON_ME)
     const auto x = plan_state(body, body_frame, frame_);
-    const auto ref = sample_plan(*plan_, model_, epoch - plan_epoch_, parameters_.snapshot.catch_sink_mps);
+    const auto ref = sample_plan(*plan_, model_, epoch - plan_epoch_, parameters_.snapshot.catch_sink_mps, path_);
     while (engine_set_ + 1 < descent_phases) {
         // Slower than the switch window on this set: switch now (its engines at minimum throttle would climb); else
         // at the planned switch, the run-down of the dropped engines ahead.

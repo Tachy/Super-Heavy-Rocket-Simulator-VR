@@ -58,7 +58,13 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   Nominal Block 3 case 6 iterations ~0.5 s fresh; re-plans 1-4 iterations < 0.5 s. In flight: `gnc/descent_snapshot`
   (the worker never calls SPICE), `gnc/descent_replanner` (worker thread, fixed sim-time latency),
   `gnc/descent_tracking`, `gnc/tvc_lateral` (LQR gains), `gnc/scvx_landing` (first plan, re-plans, abort to the sea,
-  body torque); `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay
+  body torque); the tracking reference (position, velocity, axis, rate for the position loop and the lateral LQR) is the
+  plan's own path, `gnc::plan_path`: each interval propagated through the planning model from its start node with
+  the first-order-hold thrust, as the discretisation does, sampled every 0.05 s (`plan_path_step_s`; ~2 mm of chord
+  at 7 m/s^2), built once per accepted plan on the plan's snapshot model. The nodes' chord (`DescentPlan::state_at`,
+  still the warm start's) ran up to 3.3 m / 3 m/s / 1.6 deg off the ship's braking path between nodes ~1.9 s apart -
+  during braking always above it - and the loop held the ship there: higher, slower, each re-plan later (flip and
+  catch: catch prediction 4.30 -> 2.74 s, r1 fix 2026-11-06). `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay
   open). Re-plans may draw on half the propellant reserve at a penalty, aborts on all of it (not the ship); a converged
   plan that tilts the final set > 3 deg beyond its soft limit counts as unreachable where there is a sea.
   First plans in real-time play (planner plan Task 11b fix round 1, `gnc::FirstPlanHold`): planned on the worker from

@@ -194,6 +194,7 @@ private:
     PlanFrame frame_;
     DescentReplanner replanner_;
     std::shared_ptr<const DescentPlan> plan_;
+    PlanPath path_;  // plan_'s own trajectory between its nodes: the tracking reference (sample_plan)
     time::Epoch plan_epoch_;
     time::Epoch first_plan_epoch_;  // diagnostics
     // The first plan under way (begin .. poll): its snapshot, epoch, which refusal step is next, the outcome of a plan
