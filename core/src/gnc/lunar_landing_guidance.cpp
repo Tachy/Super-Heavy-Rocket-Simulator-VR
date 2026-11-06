@@ -148,7 +148,7 @@ LunarLandingParameters hls_landing_parameters() {
 
 LunarLandingParameters lunar_landing_parameters(const config::StageConfig& stage, LunarLandingParameters base) {
     if (!stage.lunar_landing) {
-        throw std::runtime_error("die Stufe '" + stage.id + "' hat keine Mondlande-Werte ([stage.lunar_landing])");
+        throw std::runtime_error("stage '" + stage.id + "' has no lunar landing values ([stage.lunar_landing])");
     }
     base.approach.lateral_effort_fraction = stage.lunar_landing->lateral_effort_fraction;
     const auto& legs = stage.landing_legs;
@@ -188,7 +188,7 @@ std::vector<std::string> LunarLandingGuidance::braking_groups_now(const vehicle:
         set_groups_ = parameters_.engine_out_set;
         next_lit_ = false;
         below_set_s_ = 0.0;
-        status_ = "Triebwerksausfall: Bremsen auf den Meeresspiegel-Raptoren";
+        status_ = report::make(report::Code::lunar_descent_engine_out);
         if (debug_) std::printf("[lunar_descent] engine out: braking on the engine-out set\n");
     }
     demand_history_.emplace_back(epoch, demand_n);
@@ -313,17 +313,17 @@ void LunarLandingGuidance::start_approach(const vehicle::FlightBody& body, const
 void LunarLandingGuidance::approach_started(bool started) {
     if (started) {
         phase_ = LunarDescentPhase::Approach;
-        status_ = "Anflug";
+        status_ = report::make(report::Code::lunar_guidance_approach);
     } else {
         phase_ = LunarDescentPhase::Aborted;
-        status_ = "Anflug nicht planbar";
+        status_ = report::make(report::Code::lunar_guidance_approach_not_plannable);
     }
 }
 
 bool LunarLandingGuidance::land_without_approach() {
     if (phase_ != LunarDescentPhase::Aborted) return false;
     phase_ = LunarDescentPhase::Terminal;
-    status_ = "Endanflug ohne Plan";
+    status_ = report::make(report::Code::lunar_guidance_terminal_no_plan);
     return true;
 }
 
@@ -345,7 +345,7 @@ ReturnCommand LunarLandingGuidance::approach_command(const vehicle::FlightBody& 
     if (static_cast<size_t>(approach_->engine_set()) + 1 >= parameters_.approach.snapshot.phase_groups.size()) {
         // The last phase has begun: the terminal descent flies its set.
         phase_ = LunarDescentPhase::Terminal;
-        status_ = "Endanflug";
+        status_ = report::make(report::Code::lunar_guidance_terminal);
         if (debug_) std::printf("[lunar_descent] terminal descent (offset %.1f m)\n", c.offset_m);
         return terminal(body, env, epoch);
     }

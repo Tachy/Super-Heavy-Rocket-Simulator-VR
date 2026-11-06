@@ -83,11 +83,11 @@ TEST_CASE("HLS outbound autopilot to the 100 km polar LLO", "[sim][lunar][outbou
     CHECK_FALSE(fx.session.plan_lunar_outbound(p));  // a flight under way keeps its plan
     // One warp call over the whole transfer (review focus 1): the steps must not be skipped.
     fx.session.advance_to(p.arrival_epoch + 12.0 * 3600.0, 50'000'000);
-    INFO(fx.session.lunar_status());
+    INFO(report::describe(fx.session.lunar_status()));
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
     const auto [low, high] = fx.llo_range(3);
     std::printf("[validation] HLS outbound LLO: %.2f x %.2f km, %.0f t used, %s\n", low / 1000.0, high / 1000.0,
-                (m0 - fx.mass_kg()) / 1000.0, fx.session.lunar_status().c_str());
+                (m0 - fx.mass_kg()) / 1000.0, report::describe(fx.session.lunar_status()).c_str());
     CHECK(low > 99e3);  // spec: 100 km circular within 1 km
     CHECK(high < 101e3);
 }
@@ -104,7 +104,7 @@ TEST_CASE("HLS outbound autopilot to the NRHO and down to the LLO", "[sim][lunar
     REQUIRE(fx.session.plan_lunar_outbound(p));
     // The in-direct transfer joins the NRHO about a day after the swing-by at the arrival perilune.
     fx.session.advance_to(fx.session.lunar_outbound_plan()->insertion.epoch + 2.0 * 3600.0, 50'000'000);
-    INFO(fx.session.lunar_status());
+    INFO(report::describe(fx.session.lunar_status()));
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::InNrho);
     double worst_km = 0.0;
     for (int rev = 1; rev <= 3; ++rev) {
@@ -118,7 +118,7 @@ TEST_CASE("HLS outbound autopilot to the NRHO and down to the LLO", "[sim][lunar
 
     REQUIRE(fx.session.plan_lunar_orbit_transfer(mission::LunarOrbitKind::Llo, p.nrho));
     fx.session.advance_to(fx.session.epoch() + 9.0 * 86400.0, 50'000'000);
-    INFO(fx.session.lunar_status());
+    INFO(report::describe(fx.session.lunar_status()));
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
     const auto [low, high] = fx.llo_range(3);
     std::printf("[validation] NRHO -> LLO flown: %.2f x %.2f km\n", low / 1000.0, high / 1000.0);
@@ -139,7 +139,7 @@ TEST_CASE("Outbound MCCs are planned their turn and settling lead ahead", "[sim]
         lead = fx.session.settling_lead_s();  // with the tanks of the planning tick
         fx.session.advance_to(fx.session.epoch() + 5.0, 50'000'000);
     }
-    INFO(fx.session.lunar_status());
+    INFO(report::describe(fx.session.lunar_status()));
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::MidCourse);
     REQUIRE(lead > 0.0);
     const auto& mcc = fx.session.lunar_burns().back();
@@ -255,15 +255,15 @@ TEST_CASE("A planner exception in the tick aborts the lunar flight", "[sim][luna
     REQUIRE_NOTHROW(session.advance_to(session.lunar_outbound_plan()->tli.epoch, 50'000'000));
     CHECK(session.lunar_step() == sim::LunarStep::None);
     CHECK(session.autopilot().state == sim::AutopilotState::Off);
-    CHECK(session.lunar_status().find("Planung fehlgeschlagen") != std::string::npos);
+    CHECK(session.lunar_status().code == report::Code::lunar_flight_aborted_planning_failed);
 
-    // The planning entry point refuses with a German reason instead of throwing.
+    // The planning entry point refuses with a report instead of throwing.
     sim::FlightSession second{fx.ephemeris, fx.earth, STARSIM_CONFIG_DIR, {}, &failing};
     second.place_in_orbit("starship_hls", fx.parking(p.arrival_epoch), fx.t0);
     bool planned = true;
     REQUIRE_NOTHROW(planned = second.plan_lunar_outbound(p));
     CHECK_FALSE(planned);
-    CHECK(second.lunar_status().find("Planung fehlgeschlagen") != std::string::npos);
+    CHECK(second.lunar_status().code == report::Code::lunar_no_flight_planning_failed);
     CHECK(second.autopilot().state == sim::AutopilotState::Off);
 }
 
@@ -275,7 +275,7 @@ TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim
     fx.place(p.arrival_epoch);
     REQUIRE(fx.session.plan_lunar_outbound(p));
     fx.session.advance_to(fx.session.lunar_outbound_plan()->tli.epoch + 6.0 * 3600.0, 50'000'000);
-    INFO(fx.session.lunar_status() << " | " << sim::id_of(fx.session.autopilot().state));
+    INFO(report::describe(fx.session.lunar_status()) << " | " << sim::id_of(fx.session.autopilot().state));
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::Coast);
     fx.session.disengage_autopilot();
     const double m = fx.mass_kg();
@@ -291,7 +291,8 @@ TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim
     short_fx.session.place_in_orbit(config, short_fx.parking(p.arrival_epoch), short_fx.t0);
     CHECK_FALSE(short_fx.session.plan_lunar_outbound(p));
     REQUIRE(short_fx.session.lunar_outbound_plan() != nullptr);
-    CHECK(short_fx.session.lunar_outbound_plan()->reason.find("Treibstoff") != std::string::npos);
+    CHECK(short_fx.session.lunar_outbound_plan()->reason.code == report::Code::lunar_outbound_insufficient_propellant);
+    CHECK(short_fx.session.lunar_status().code == report::Code::lunar_outbound_insufficient_propellant);
     CHECK(short_fx.session.autopilot().state == sim::AutopilotState::Off);
 }
 
@@ -311,7 +312,7 @@ TEST_CASE("Lunar outbound: Moon-bound start refused, immediate departure keeps i
     moon_fx.session.place_in_orbit("starship_hls", {rel.position_m + moon.position_m, rel.velocity_mps + moon.velocity_mps},
                                    moon_fx.t0);
     CHECK_FALSE(moon_fx.session.plan_lunar_outbound(p));
-    CHECK(moon_fx.session.lunar_status().find("schon beim Mond") != std::string::npos);
+    CHECK(moon_fx.session.lunar_status().code == report::Code::lunar_no_flight_at_moon);
     CHECK(moon_fx.session.autopilot().state == sim::AutopilotState::Off);
 }
 
@@ -352,12 +353,12 @@ void fly_campaign_case(int i) {
     double offset_km = 0.0, low = 0.0, high = 0.0;
     if (llo) {
         fx.session.advance_to(p.arrival_epoch + 12.0 * 3600.0, 50'000'000);
-        INFO(fx.session.lunar_status());
+        INFO(report::describe(fx.session.lunar_status()));
         REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
         std::tie(low, high) = fx.llo_range(3);
     } else {
         fx.session.advance_to(fx.session.lunar_outbound_plan()->insertion.epoch + 2.0 * 3600.0, 50'000'000);
-        INFO(fx.session.lunar_status());
+        INFO(report::describe(fx.session.lunar_status()));
         REQUIRE(fx.session.lunar_step() == sim::LunarStep::InNrho);
         for (int rev = 1; rev <= 3; ++rev) {
             const auto tp = p.nrho->perilune_epochs()[rev];

@@ -32,7 +32,7 @@ godot::Dictionary lunar_descent(const sim::FlightSession& session) {
     if (!plan) return d;
     const auto& p = plan->touchdown;
     d["feasible"] = plan->feasible;
-    d["reason"] = legacy_report(plan->reason);
+    d["reason"] = report_dict(plan->reason);
     d["pdi_epoch_tdb_s"] = plan->pdi_epoch.tdb_seconds_past_j2000();
     d["touchdown_latitude_deg"] = p.latitude_rad * constants::rad_to_deg;
     d["touchdown_longitude_deg"] = p.longitude_rad * constants::rad_to_deg;
@@ -95,7 +95,7 @@ godot::Dictionary build_lunar_state(const sim::FlightSession& session) {
     d["present"] = present;
     if (!present) return d;
     d["step"] = qualified_id("lunar_step", sim::id_of(session.lunar_step()));
-    d["status"] = legacy_report(session.lunar_status());
+    d["status"] = report_dict(session.lunar_status());
     d["mission_complete"] = session.lunar_mission_complete();
     d["mission_ended"] = session.lunar_mission_ended();
     d["burns"] = lunar_burns(session);
@@ -114,6 +114,7 @@ godot::Dictionary build_lunar_site(const sim::FlightSession& session) {
     const double lat = site->config.latitude_rad, lon = site->config.longitude_rad;
     d["id"] = german(site->config.id);
     d["name"] = german(site->config.name);
+    d["name_key"] = german("lunar_site." + site->config.id + ".name");  // the table key of the shown name
     d["latitude_deg"] = lat * constants::rad_to_deg;
     d["longitude_deg"] = lon * constants::rad_to_deg;
     d["height_m"] = site->height_m;

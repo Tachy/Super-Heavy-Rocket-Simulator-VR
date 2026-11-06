@@ -90,7 +90,7 @@ struct Run {
     sim::LegTouchdown outcome = sim::LegTouchdown::None;
     double offset_m = 0.0, sink_mps = 0.0, m0_t = 0.0, used_t = 0.0, slope_deg = 0.0;
     double first_contact_offset_m = 0.0, lateral_mps = 0.0;  // at the first leg contact (review M-c)
-    std::string status;
+    report::Report status;
 };
 
 // PDI at the real mass (566 t, propellant x mass factor) with the braking range the planner computes for that mass,
@@ -132,7 +132,7 @@ int fly_seeds(unsigned first, unsigned last) {
         std::printf("[lunar_campaign] case %2u: thrust %.3f, propellant %.3f, spot %.0f/%.0f m, slope %.1f deg: %s, offset %.2f m "
                     "(%.2f m at first contact, lateral %.3f m/s), sink %.2f m/s, %.1f t at PDI, %.1f t used, %s\n",
                     seed, d.thrust_factor, d.mass_factor, d.east_m, d.north_m, run.slope_deg, sim::id_of(run.outcome),
-                    run.offset_m, run.first_contact_offset_m, run.lateral_mps, run.sink_mps, run.m0_t, run.used_t, run.status.c_str());
+                    run.offset_m, run.first_contact_offset_m, run.lateral_mps, run.sink_mps, run.m0_t, run.used_t, report::describe(run.status).c_str());
         std::fflush(stdout);
         if (run.outcome == sim::LegTouchdown::Landed && run.offset_m < 1.0 && run.sink_mps <= 1.1) ++landed;
     }
@@ -177,7 +177,7 @@ TEST_CASE("Aborts from 3, 1 and 0.3 km reach orbit", "[sim][lunar_campaign][abor
         fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
         std::printf("[lunar_campaign] abort from %.1f km at %.1f t: %.1f t used, altitude %.1f km, %s\n", h / 1000.0,
                     m0 / 1000.0, (m0 - fx.mass_kg()) / 1000.0, fx.altitude_m() / 1000.0,
-                    fx.session.lunar_status().c_str());
+                    report::describe(fx.session.lunar_status()).c_str());
         std::fflush(stdout);
         CAPTURE(h);
         CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);

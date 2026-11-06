@@ -11,6 +11,7 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/state_vector.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/mission/lunar_transfer.hpp"
 #include "starsim/mission/nrho_reference.hpp"
 #include "starsim/mission/position_targeter.hpp"
@@ -51,7 +52,7 @@ struct LunarOutboundParameters {
 
 struct OutboundPlan {
     bool feasible = false;
-    std::string reason;  // German when refused
+    report::Report reason;  // ok when feasible; else why it is refused
     gnc::BurnNode tli;
     // NRHO only: powered swing-by at the flyby periselene, and the periselene point and epoch the MCCs aim at.
     std::optional<gnc::BurnNode> powered_flyby;

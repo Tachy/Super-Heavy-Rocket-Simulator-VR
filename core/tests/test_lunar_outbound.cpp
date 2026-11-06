@@ -44,7 +44,7 @@ TEST_CASE("Outbound plan to the 100 km polar LLO", "[mission][lunar][outbound][v
     mission::LunarOutboundParameters p;
     p.arrival_epoch = fx.t0 + 4.0 * 86400.0;
     const auto plan = fx.planner.plan(fx.parking(p.arrival_epoch), fx.t0, p, hls_mass_kg, rvac_isp_s, 1600e3);
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     const double tli = norm(plan.tli.delta_v_gcrf_mps), loi = norm(plan.insertion.delta_v_gcrf_mps);
     std::printf("[validation] outbound LLO: TLI %.0f m/s, LOI %.0f m/s, %.0f t propellant\n", tli, loi,
@@ -65,7 +65,7 @@ TEST_CASE("Outbound plan to the NRHO", "[mission][lunar][outbound][nrho][validat
         fx.gravity, fx.ephemeris, mission::NrhoSeed{{{1.0221, 0.0, -0.1821}, {0.0, -0.1033, 0.0}}, 9, 2},
         p.arrival_epoch);
     const auto plan = fx.planner.plan(fx.parking(p.arrival_epoch), fx.t0, p, hls_mass_kg, rvac_isp_s, 1600e3);
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     REQUIRE(plan.powered_flyby);
     const double tli = norm(plan.tli.delta_v_gcrf_mps), plsb = norm(plan.powered_flyby->delta_v_gcrf_mps),
@@ -148,7 +148,7 @@ TEST_CASE("Outbound plan is refused without the propellant", "[mission][lunar][o
     // 7.6 km/s: enough for the outbound flight alone.)
     const auto plan = fx.planner.plan(fx.parking(p.arrival_epoch), fx.t0, p, 320e3, rvac_isp_s, 200e3);
     CHECK_FALSE(plan.feasible);
-    CHECK(plan.reason.find("Treibstoff") != std::string::npos);
+    CHECK(plan.reason.code == report::Code::lunar_outbound_insufficient_propellant);
 }
 
 TEST_CASE("LLO trim sets the opposite apsis", "[mission][lunar][outbound]") {

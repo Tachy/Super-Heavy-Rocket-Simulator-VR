@@ -1,7 +1,6 @@
 #include "starsim/mission/lunar_budget.hpp"
 
 #include <cmath>
-#include <cstdio>
 
 #include "starsim/math/constants.hpp"
 
@@ -14,11 +13,9 @@ BudgetResult lunar_budget(double initial_mass_kg, double dry_mass_kg, double res
     double mass_kg = initial_mass_kg;
     for (const auto& leg : legs) {
         mass_kg *= std::exp(-leg.delta_v_mps / (leg.isp_s * constants::standard_gravity_mps2));
-        if (mass_kg < floor_kg && result.reason.empty()) {
-            char text[160];
-            std::snprintf(text, sizeof(text), "Treibstoff reicht nicht: nach %s fehlen %.1f t", leg.name.c_str(),
-                          (floor_kg - mass_kg) / 1000.0);
-            result.reason = text;
+        if (mass_kg < floor_kg && result.reason.ok()) {
+            result.reason = report::make(report::Code::lunar_budget_short,
+                                         {report::ref("leg", "phase.lunar_leg." + leg.id), report::mass("missing", floor_kg - mass_kg)});
         }
     }
     result.final_mass_kg = mass_kg;

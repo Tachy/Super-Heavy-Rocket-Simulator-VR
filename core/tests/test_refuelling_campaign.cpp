@@ -43,12 +43,12 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
     plan.insertion.delta_v_gcrf_mps = {0.0, 900.0, 0.0};
     const auto legs = sim::lunar_mission_legs(m, plan, 375.0, 330.0);
     REQUIRE(legs.size() == 5);
-    CHECK(legs[0].name == "TLI");
+    CHECK(legs[0].id == "tli");
     CHECK(legs[0].delta_v_mps == Catch::Approx(3100.0));
-    CHECK(legs[1].name == "LOI");
+    CHECK(legs[1].id == "loi");
     CHECK(legs[1].delta_v_mps == Catch::Approx(900.0));
     CHECK(legs[3].isp_s == Catch::Approx(330.0));  // the approach on the landing set
-    CHECK(legs[4].name == "Aufstieg");
+    CHECK(legs[4].id == "ascent");
     CHECK(legs[2].delta_v_mps + legs[3].delta_v_mps == Catch::Approx(m.descent_delta_v_mps));
     // f3 (f4: per leg, as flown): TLI, LOI, DOI + PDI, the ascent's circularization; the approach continues the
     // braking, the ascent itself lights on the surface

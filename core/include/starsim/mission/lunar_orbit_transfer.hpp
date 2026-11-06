@@ -12,13 +12,14 @@
 #include "starsim/mission/lunar_transfer.hpp"
 #include "starsim/mission/nrho_reference.hpp"
 #include "starsim/mission/position_targeter.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/time/epoch.hpp"
 
 namespace starsim::mission {
 
 struct TwoBurnTransfer {
     bool feasible = false;
-    std::string reason;    // German when refused
+    report::Report reason;  // ok when feasible; else why it is refused
     gnc::BurnNode first;   // departure
     gnc::BurnNode second;  // predicted arrival burn (re-planned on arrival)
     double total_delta_v_mps = 0.0;

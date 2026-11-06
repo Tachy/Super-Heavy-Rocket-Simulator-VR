@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "toml_document.hpp"
 
 namespace starsim::config {
@@ -21,7 +22,7 @@ LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t) {
 }
 
 [[noreturn]] void missing(const std::filesystem::path& path) {
-    throw ConfigError("Geländedaten fehlen: " + path.string() + " - bitte python tools/data_pipeline/fetch.py ausführen");
+    throw report::Refusal(report::make(report::Code::data_lunar_terrain_missing, {report::data_name("path", path.string())}));
 }
 
 }  // namespace

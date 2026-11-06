@@ -102,7 +102,7 @@ double groups_vacuum_isp_s(const vehicle::Vehicle& vehicle, const std::vector<st
 
 LunarAscentParameters lunar_ascent_parameters(const config::StageConfig& stage, LunarAscentParameters base) {
     if (!stage.lunar_ascent) {
-        throw std::runtime_error("die Stufe '" + stage.id + "' hat keine Mondaufstiegs-Werte ([stage.lunar_ascent])");
+        throw std::runtime_error("stage '" + stage.id + "' has no lunar ascent values ([stage.lunar_ascent])");
     }
     base.raptor_start_height_m = stage.lunar_ascent->raptor_start_height_m;
     base.vertical_rise_height_m = stage.lunar_ascent->vertical_rise_height_m;
@@ -142,7 +142,7 @@ void LunarAscentGuidance::start(const vehicle::FlightBody& body, const environme
     ascent_groups_ = parameters_.ascent_groups;
     engine_out_ = false;
     steering_ = true;
-    status_.clear();
+    status_ = {};
     peg_.reset();
     bridge_groups_.clear();
     if (abort) {
@@ -213,7 +213,7 @@ LunarAscentCommand LunarAscentGuidance::update(const vehicle::FlightBody& body, 
             if (phase_ == LunarAscentPhase::Liftoff || phase_ == LunarAscentPhase::Vertical) {
                 bridge_groups_ = parameters_.liftoff_groups;
             }
-            status_ = "Triebwerksausfall: Aufstieg auf den Meeresspiegel-Raptoren";
+            status_ = report::make(report::Code::lunar_ascent_engine_out);
         }
     }
 

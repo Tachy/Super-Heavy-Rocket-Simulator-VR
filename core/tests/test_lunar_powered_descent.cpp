@@ -133,7 +133,7 @@ void print_result(const char* label, const Fixture& fx, const DescentResult& r) 
                 "%.1f -> %.1f (drop) -> %.1f t, %.0f m/s (%.0f m/s at 350 s), %s\n",
                 label, sim::id_of(r.outcome), r.offset_m, r.sink_mps, r.lateral_mps, r.braking_s, r.seconds,
                 r.m0 / 1000.0, r.m_drop / 1000.0, r.m1 / 1000.0, descent_delta_v_mps(r),
-                350.0 * constants::standard_gravity_mps2 * std::log(r.m0 / r.m1), fx.session.lunar_status().c_str());
+                350.0 * constants::standard_gravity_mps2 * std::log(r.m0 / r.m1), report::describe(fx.session.lunar_status()).c_str());
 }
 }  // namespace
 
@@ -207,5 +207,5 @@ TEST_CASE("Powered descent is refused without a lunar landing site", "[sim][luna
                                                                        ephemeris.gm_m3ps2(ephemeris::Body::Earth)),
                            time::Epoch::from_tdb_seconds_past_j2000(8.4e8));
     CHECK_FALSE(session.begin_powered_descent({}, 0.0));
-    CHECK(session.lunar_status().find("Landestelle") != std::string::npos);
+    CHECK(session.lunar_status().code == report::Code::lunar_approach_not_possible_no_site);
 }

@@ -7,6 +7,7 @@
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/gnc/peg_steering.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/time/epoch.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -83,7 +84,7 @@ public:
     void start(const vehicle::FlightBody& body, const environment::BodyFrame& moon, time::Epoch epoch, bool abort);
     LunarAscentCommand update(const vehicle::FlightBody& body, const environment::BodyFrame& moon, time::Epoch epoch);
     LunarAscentPhase phase() const { return phase_; }
-    const std::string& status() const { return status_; }  // German: engine-out notice
+    const report::Report& status() const { return status_; }  // the engine-out notice; ok when none
     const std::vector<std::string>& ascent_groups() const { return ascent_groups_; }
     // Propellant check for an abort from `body`'s state (rocket equation on the ascent set's vacuum Isp, the speed still
     // to gain to the insertion plus the sink to stop, times 1 + abort_delta_v_margin): the delta-v needed.
@@ -106,7 +107,7 @@ private:
     LunarAscentPhase phase_ = LunarAscentPhase::Liftoff;
     bool engine_out_ = false;
     bool steering_ = true;  // the steering set runs (until aligned on PEG's direction)
-    std::string status_;
+    report::Report status_;
     PegSteering peg_;
     bool debug_ = false;  // STARSIM_DEBUG_LUNAR_ASCENT
     time::Epoch next_debug_;

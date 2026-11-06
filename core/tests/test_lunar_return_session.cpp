@@ -61,7 +61,7 @@ TEST_CASE("Lunar return: TEI is flown and the coast reaches the braking height",
     start(t);
     const double planned_tei_mps = norm(t.session.lunar_return_plan()->tei.delta_v_gcrf_mps);
     run(t, 2.0 * 86400.0, 3600.0, [&] { return t.session.lunar_step() == sim::LunarStep::ReturnCoast; });
-    INFO(t.session.lunar_status());
+    INFO(report::describe(t.session.lunar_status()));
     REQUIRE(t.session.lunar_step() == sim::LunarStep::ReturnCoast);
     const auto* tei = burn_of(t.session, sim::LunarStep::Tei);
     REQUIRE(tei != nullptr);
@@ -125,7 +125,7 @@ void fly_direct_to_catch(test::LunarReturnSession& t) {
             peak_load_g = std::max(peak_load_g, norm(body.aero_acceleration_body_mps2()) / constants::standard_gravity_mps2);
         }
     }
-    INFO(t.session.lunar_status());
+    INFO(report::describe(t.session.lunar_status()));
     INFO(body.breakup_reason());
     const auto* braking = burn_of(t.session, sim::LunarStep::Braking);
     std::printf("[lunar return] TEI %.1f m/s (plan %.1f), braking %.1f m/s (plan %.1f), entry %.0f m/s %.2f deg, peak heat "
@@ -178,7 +178,7 @@ TEST_CASE("Lunar return: a botched TEI is re-planned from the flight data and ca
     t.session.apply_velocity_error(ship, tei->node.delta_v_gcrf_mps * fraction);
     fly_direct_to_catch(t);
     std::printf("[lunar return] botched TEI by %.1f %%: %d re-plan(s), status '%s'\n", 100.0 * fraction,
-                t.session.lunar_return_replans(), t.session.lunar_status().c_str());
+                t.session.lunar_return_replans(), report::describe(t.session.lunar_status()).c_str());
     CHECK(t.session.lunar_return_replans() >= 1);
 }
 
@@ -249,7 +249,7 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", 
                 std::printf("[aircatch] %.2f d: %s, autopilot %s, %s | %.1f km %.0f m/s, entry %s | b4 %s dv %.1f "
                             "node %+.2f h, EI %.2f deg\n",
                             day, sim::id_of(t.session.lunar_step()), sim::id_of(t.session.autopilot().state),
-                            t.session.lunar_status().c_str(), tel.altitude_m / 1000.0, tel.speed_relative_mps,
+                            report::describe(t.session.lunar_status()).c_str(), tel.altitude_m / 1000.0, tel.speed_relative_mps,
                             es ? gnc::id_of(es->phase) : "-", b4 ? (b4->feasible ? "ok" : "refused") : "-",
                             b4 ? b4->delta_v_mps : 0.0, b4 ? (b4->node.epoch - t.session.epoch()) / 3600.0 : 0.0,
                             b4 ? b4->entry_flight_path_rad / deg : 0.0);
@@ -318,7 +318,7 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", 
             deorbit_feasible = t.session.ship_return_plan()->feasible;
         }
     }
-    INFO(t.session.lunar_status());
+    INFO(report::describe(t.session.lunar_status()));
     INFO(body.breakup_reason());
     std::printf("[aircatch] exit %.1f x %.1f km, raised %.1f x %.1f km, deorbit %s, peak heat %.0f kW/m2, %s, "
                 "%.1f t left\n",
@@ -363,11 +363,11 @@ TEST_CASE("Aerocapture outcome names a capture that stays in the atmosphere", "[
         t.session.advance_to(t.session.epoch() + 86400.0, 200);
     }
     t.session.advance_to(t.session.epoch() + 1.0, 200);  // an impact in a call's last tick: the step machine judges it
-    INFO(t.session.lunar_status());
+    INFO(report::describe(t.session.lunar_status()));
     INFO(body.breakup_reason());
-    std::printf("[aircatch dispersed] %s | %s | peak heat %.0f kW/m2\n", t.session.lunar_status().c_str(),
+    std::printf("[aircatch dispersed] %s | %s | peak heat %.0f kW/m2\n", report::describe(t.session.lunar_status()).c_str(),
                 body.breakup_reason().c_str(), body.peak_heat_rate_w_m2() / 1000.0);
-    CHECK(t.session.lunar_status().find("Aircatch") != std::string::npos);
+    CHECK(std::string(report::id_of(t.session.lunar_status().code)).rfind("lunar.aerocapture", 0) == 0);
     CHECK(t.session.autopilot().state == sim::AutopilotState::Off);
     CHECK(burn_of(t.session, sim::LunarStep::PerigeeRaise) == nullptr);
 }

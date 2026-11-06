@@ -449,7 +449,7 @@ std::optional<TouchdownPoint> select_touchdown_point(const environment::Detailed
                                       footprint_radius_m, p);
     }
     if (hazards.leg_azimuths_rad.size() < 3 || !(hazards.foot_pad_radius_m > 0.0) || !(footprint_radius_m > 0.0)) {
-        throw std::invalid_argument("select_touchdown_point: Gefahrenprüfung braucht mindestens drei Beine und Fußteller");
+        throw std::invalid_argument("select_touchdown_point: the hazard check needs at least three legs and foot pads");
     }
     static const bool debug = std::getenv("STARSIM_DEBUG_TOUCHDOWN") != nullptr;  // diagnostics
     std::atomic<int> checked{0}, remembered{0};
@@ -541,7 +541,7 @@ std::vector<TouchdownRestPlane> touchdown_rest_planes(const std::vector<math::Ve
 TouchdownHazardLimits touchdown_hazard_limits(const config::StageConfig& stage) {
     const auto& legs = stage.landing_legs;
     if (legs.azimuths_rad.empty() || !(legs.foot_pad_radius_m > 0.0) || stage.engine_groups.empty()) {
-        throw std::invalid_argument("touchdown_hazard_limits: Stufe ohne Landebeine, Fußteller oder Triebwerke");
+        throw std::invalid_argument("touchdown_hazard_limits: stage without landing legs, foot pads or engines");
     }
     double lowest_exit_station_m = std::numeric_limits<double>::infinity();
     for (const auto& g : stage.engine_groups) lowest_exit_station_m = std::min(lowest_exit_station_m, g.station_m);

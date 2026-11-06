@@ -642,17 +642,17 @@ godot::Dictionary FlightSim::earth_surface(double latitude_deg, double longitude
 int64_t FlightSim::complete_pilot_correction() {
     return static_cast<int64_t>(post_active("complete_pilot_correction", [](sim::FlightSession& session) {
         if (session.lunar_step() != sim::LunarStep::PilotCorrection) {
-            return Outcome{false, legacy_report("Keine Korrektur von Hand anstehend")};
+            return Outcome{false, report_dict(report::make(report::Code::command_no_pilot_correction))};
         }
         session.complete_pilot_correction();
-        return Outcome{true, legacy_report(session.lunar_status())};
+        return Outcome{true, report_dict(session.lunar_status())};
     }));
 }
 
 int64_t FlightSim::replan_lunar_return() {
     return static_cast<int64_t>(post_active("replan_lunar_return", [](sim::FlightSession& session) {
         const bool ok = session.replan_lunar_return();
-        return Outcome{ok, legacy_report(session.lunar_status())};
+        return Outcome{ok, report_dict(session.lunar_status())};
     }));
 }
 

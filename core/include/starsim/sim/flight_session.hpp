@@ -126,7 +126,6 @@ enum class LunarStep {
     Aerocapture, CaptureCoast, PerigeeRaise, CaptureCircularize, EntryTrim, RepassTrim
 };
 const char* id_of(LunarStep step);
-const char* to_string(LunarStep step);  // German; transitional: removed by Task 8
 
 // Steps of a rendezvous (plan_rendezvous, ISS i3): Coast until the next burn's command epoch, Burn while it is under way
 // (the autopilot state is Burn meanwhile), Waypoint0 after the braking burn (400 m below the station; i4 continues).
@@ -606,7 +605,7 @@ public:
                                    mission::LloTarget llo = {});
     LunarStep lunar_step() const { return lunar_step_; }
     const mission::OutboundPlan* lunar_outbound_plan() const { return lunar_plan_ ? &*lunar_plan_ : nullptr; }
-    const std::string& lunar_status() const { return lunar_status_; }  // German status line
+    const report::Report& lunar_status() const { return lunar_status_; }  // status line (ok: none)
     const std::vector<LunarBurnRecord>& lunar_burns() const { return lunar_burns_; }  // of this lunar flight
     // Pilot-flown mid-course correction (LunarOutboundParameters::pilot_corrections): the cue while the step is
     // PilotCorrection, and the pilot's report that it is flown (the next correction is re-planned from the real state).
@@ -614,13 +613,13 @@ public:
     void complete_pilot_correction();
     // Powered descent of the controlled body from now (scenarios; the lunar landing step machine calls it at PDI): needs
     // the Moon orientation, a lunar landing site (set_lunar_landing_site) and a Moon-referenced body with legs. False
-    // with a German lunar_status() otherwise.
+    // with a lunar_status() otherwise.
     bool begin_powered_descent(const mission::TouchdownPoint& point, double approach_azimuth_rad,
                                gnc::LunarLandingParameters parameters = gnc::hls_landing_parameters());
     // Descent of the controlled vehicle from a closed lunar orbit (autopilot Off / Orbit or lunar step InLlo): plans the
     // site pass, plane trim, DOI and PDI (mission::LunarDescentPlanner on the lunar landing site's terrain), checks the
     // propellant for descent and ascent (mission::lunar_budget) and flies the steps; after "gelandet" the vehicle rests
-    // for surface_stay_s (step SurfaceStay, then Landed). False with a German lunar_status() when refused (a descent
+    // for surface_stay_s (step SurfaceStay, then Landed). False with a lunar_status() when refused (a descent
     // under way keeps its plan and status).
     bool plan_lunar_landing(const LunarLandingSetup& setup);
     const mission::LunarDescentPlan* lunar_descent_plan() const {
@@ -630,7 +629,7 @@ public:
     const std::optional<LunarTouchdown>& lunar_touchdown() const { return lunar_touchdown_; }
     // Ascent of the controlled vehicle standing landed on the Moon (lunar step Landed / SurfaceStay, or a body the leg
     // simulation judged "gelandet"), `liftoff_delay_s` from now (meanwhile step SurfaceStay): liftoff, PEG to the
-    // insertion, coast to the aposelene, circularisation -> InLlo. False with a German lunar_status() (not landed,
+    // insertion, coast to the aposelene, circularisation -> InLlo. False with a lunar_status() (not landed,
     // propellant short for orbit).
     bool plan_lunar_ascent(const gnc::LunarAscentParameters& parameters = {}, double liftoff_delay_s = 0.0);
     const gnc::LunarAscentGuidance* lunar_ascent_guidance() const { return lunar_ascent_.get(); }
@@ -641,7 +640,7 @@ public:
     static bool lunar_orbit_clears_terrain(double periselene_m, double aposelene_m);
     // Return of the controlled ship from lunar orbit (l5; autopilot Off / Orbit, Moon-referenced): plans TEI (NRHO:
     // departure burn + powered flyby), mid-course corrections and the braking burn (mission::EarthReturnPlanner on the
-    // vacuum Raptors) and flies them; direct: then the entry, flip and catch (state Return). False with a German
+    // vacuum Raptors) and flies them; direct: then the entry, flip and catch (state Return). False with a
     // lunar_status() when refused; a flight under way keeps its plan.
     bool plan_lunar_return(const LunarReturnSetup& setup);
     // Re-plans the return from the current flight data (l5 Task 10, user 2026-10-18): in the Earth-bound coast (after
@@ -650,14 +649,14 @@ public:
     // correction; the plan's arrival and braking burn follow it. Called automatically when a mid-course correction
     // does not converge or costs more than the budget's allowance (then taken only when the re-plan's correction +
     // braking burn is below `cheaper_than_mps`); the pilot / flight control trigger it by hand (l6). False with a
-    // German lunar_status().
+    // lunar_status().
     bool replan_lunar_return(double cheaper_than_mps = std::numeric_limits<double>::infinity());
     int lunar_return_replans() const { return lunar_replans_; }
     const mission::ReturnPlan* lunar_return_plan() const { return lunar_return_plan_ ? &*lunar_return_plan_ : nullptr; }
     // Chains the legs of a lunar landing mission after the flight planned now (start_lunar_landing_mission); empty
     // ends it. A refused leg ends the sequence in its orbit with the planner's reason in lunar_status().
     void set_lunar_mission(std::optional<LunarMissionSequence> sequence);
-    // The sequence's last leg reached (status "Mission abgeschlossen: ...").
+    // The sequence's last leg reached (status lunar.mission_complete).
     bool lunar_mission_complete() const { return lunar_mission_leg_ == LunarMissionLeg::Complete; }
     // The sequence ended early on a refused leg (status "Mission beendet: <reason>").
     bool lunar_mission_ended() const { return lunar_mission_leg_ == LunarMissionLeg::Ended; }
@@ -1506,10 +1505,10 @@ private:
     int lunar_trims_ = 0;
     time::Epoch lunar_tli_end_;
     time::Epoch lunar_next_repoint_;
-    std::string lunar_status_;
+    report::Report lunar_status_;
     gnc::SunHold lunar_sun_hold_;
     bool lunar_debug_ = false;     // STARSIM_DEBUG_LUNAR_SESSION, read once at construction
-    std::string lunar_debug_last_;  // last status printed by the diagnostics
+    report::Report lunar_debug_last_;  // last status printed by the diagnostics
     struct LunarPilotCall {
         gnc::BurnNode planned;
         time::Epoch window_end;
@@ -1529,7 +1528,7 @@ private:
     // Executes and records the burn (step: what it is); the burn returns to the state Lunar.
     bool lunar_burn(const gnc::BurnNode& node, bool main_engines, LunarStep step);
     std::vector<LunarBurnRecord> lunar_burns_;
-    void lunar_abort(const std::string& status);
+    void lunar_abort(report::Report status);
     void reset_lunar();
     // The descent steps from DescentWait to Lost (flight_session_lunar_descent.cpp).
     void run_lunar_descent_steps(Flying& flying);

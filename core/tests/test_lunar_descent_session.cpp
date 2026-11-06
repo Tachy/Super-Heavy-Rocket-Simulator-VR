@@ -80,7 +80,7 @@ TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and 
     std::printf("[lunar_descent_session] %s, offset %.2f m, sink %.2f m/s, wait %.2f d, %.1f t -> %.1f t landed, status %s\n",
                 sim::id_of(td->outcome), td->offset_m, td->sink_mps, (plan->pdi_epoch - fx.t0) / 86400.0,
                 m0 / 1000.0, fx.session.body(0).vehicle().mass_properties().mass_kg / 1000.0,
-                fx.session.lunar_status().c_str());
+                report::describe(fx.session.lunar_status()).c_str());
     CHECK(td->outcome == sim::LegTouchdown::Landed);
     CHECK(td->offset_m < 1.0);
     CHECK(fx.session.lunar_step() == sim::LunarStep::SurfaceStay);
@@ -126,7 +126,7 @@ TEST_CASE("PDI: settled propellant needs no push and lights on time",
     REQUIRE(fx.session.plan_lunar_landing(setup));
     const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
     const auto run = fly_pdi(fx, 1.0, 120.0);
-    INFO(fx.session.lunar_status() << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
+    INFO(report::describe(fx.session.lunar_status()) << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
          << fx.session.burn_abort_reason());
     REQUIRE(run.lit);
     CHECK_FALSE(run.pushed);
@@ -145,7 +145,7 @@ TEST_CASE("PDI: unsettled propellant holds the ignition while the push settles i
     const double lead = vehicle::settling_push(fx.session.body(0).vehicle(), 0).lead_s;  // the push's lead
     REQUIRE(lead > 10.0);
     const auto run = fly_pdi(fx, 0.0, sim::FlightSession::settling_hold_factor * lead + 300.0);
-    INFO(fx.session.lunar_status() << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
+    INFO(report::describe(fx.session.lunar_status()) << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
          << fx.session.burn_abort_reason());
     REQUIRE(run.lit);
     CHECK(run.pushed);
@@ -167,7 +167,7 @@ TEST_CASE("A surface stay of 0 h with an ascent lifts off at once", "[sim][lunar
     REQUIRE(fx.session.lunar_touchdown()->outcome == sim::LegTouchdown::Landed);
     fx.session.advance_to(fx.session.epoch() + 60.0, 50'000);
     std::printf("[lunar_descent_session] stay 0 h: step %d, %s\n", static_cast<int>(fx.session.lunar_step()),
-                fx.session.lunar_status().c_str());
+                report::describe(fx.session.lunar_status()).c_str());
     CHECK(fx.session.lunar_step() != sim::LunarStep::Landed);
     CHECK_FALSE(fx.session.body(0).resting());   // lifted off
 }
@@ -189,9 +189,11 @@ TEST_CASE("An ascent refused at the stay's end ends the mission sequence", "[sim
     REQUIRE(fx.session.lunar_touchdown()->outcome == sim::LegTouchdown::Landed);
     fx.session.advance_to(fx.session.epoch() + 60.0, 50'000);
     std::printf("[lunar_descent_session] refused ascent: step %d, %s\n", static_cast<int>(fx.session.lunar_step()),
-                fx.session.lunar_status().c_str());
+                report::describe(fx.session.lunar_status()).c_str());
     CHECK(fx.session.lunar_mission_ended());
-    CHECK(fx.session.lunar_status().rfind("Mission beendet: Kein Aufstieg", 0) == 0);
+    REQUIRE(fx.session.lunar_status().code == report::Code::lunar_mission_ended);
+    REQUIRE(fx.session.lunar_status().causes.size() == 1u);
+    CHECK(std::string(report::id_of(fx.session.lunar_status().causes.front().code)).rfind("lunar.no_ascent", 0) == 0);
     CHECK(fx.session.body(0).resting());
 }
 
@@ -248,19 +250,22 @@ TEST_CASE("Descent planning refusals","[sim][lunar_descent_session][terrain][dat
                                                                              fx.ephemeris.gm_m3ps2(ephemeris::Body::Earth)),
                                   fx.t0);
         CHECK_FALSE(fx.session.plan_lunar_landing({}));
-        CHECK(fx.session.lunar_status().find("Mondumlaufbahn") != std::string::npos);
+        CHECK(fx.session.lunar_status().code == report::Code::lunar_no_descent_not_in_orbit);
     }
     SECTION("propellant short for descent and ascent (204 t dry, half tanks)") {
         fx.place_in_llo(400e3, 0.5 * 86400.0, 204e3);
         CHECK_FALSE(fx.session.plan_lunar_landing({}));
-        CHECK(fx.session.lunar_status().find("Treibstoff") != std::string::npos);
+        CHECK(fx.session.lunar_status().code == report::Code::lunar_no_descent_budget);
     }
     SECTION("no admissible touchdown point (review focus 4)") {
         fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
         sim::LunarLandingSetup setup;
         setup.descent.slope_limit_rad = 0.01 * deg;
         CHECK_FALSE(fx.session.plan_lunar_landing(setup));
-        CHECK(fx.session.lunar_status().find("Landepunkt") != std::string::npos);
+        REQUIRE(fx.session.lunar_status().code == report::Code::lunar_no_descent_refused);
+        REQUIRE(fx.session.lunar_status().causes.size() == 1u);
+        CHECK((fx.session.lunar_status().causes.front().code == report::Code::lunar_no_touchdown_point ||
+               fx.session.lunar_status().causes.front().code == report::Code::lunar_no_touchdown_point_hazards));
         CHECK(fx.session.lunar_step() == sim::LunarStep::None);
         CHECK(fx.session.lunar_burns().empty());
     }

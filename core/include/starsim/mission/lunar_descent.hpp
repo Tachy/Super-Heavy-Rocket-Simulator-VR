@@ -14,6 +14,7 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/state_vector.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/time/epoch.hpp"
 
 namespace starsim::mission {
@@ -138,7 +139,7 @@ inline constexpr double hazard_roll_spacing_per_pad_radius = 0.5;
 
 struct LunarDescentPlan {
     bool feasible = false;
-    std::string reason;  // German when refused
+    report::Report reason;  // ok when feasible; else why it is refused
     std::optional<gnc::BurnNode> plane_trim;
     gnc::BurnNode doi;
     time::Epoch pdi_epoch;        // powered descent initiation (the braking guidance starts)

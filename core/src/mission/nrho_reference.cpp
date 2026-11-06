@@ -114,7 +114,7 @@ time::Epoch closest_approach(const environment::GravityModel& gravity, const eph
 // Step 1: the CR3BP periodic orbit of the resonant period, state at perilune.
 orbit::Cr3bpState cr3bp_perilune(double mu, const NrhoSeed& seed, double period) {
     const auto apolune = orbit::correct_periodic_orbit(mu, seed.apolune, period);
-    if (!apolune) throw std::runtime_error("NRHO: keine periodische Bahn im Dreikörperproblem gefunden");
+    if (!apolune) throw std::runtime_error("NRHO: no periodic orbit found in the three-body problem");
     return orbit::cr3bp_propagate(mu, *apolune, 0.5 * period);
 }
 
@@ -145,7 +145,7 @@ public:
                 std::fprintf(stderr, "NRHO shooting: %zu patches, iteration %d, max jump %.3f m, |F| %.4g\n", count,
                              it, max_jump_m_, norm2(f));
             if (ok) return it;
-            if (it >= options_.max_iterations) throw std::runtime_error("NRHO: Mehrfachschießverfahren konvergiert nicht");
+            if (it >= options_.max_iterations) throw std::runtime_error("NRHO: multiple shooting does not converge");
             jacobian(x, jac);
             const double before = norm2(f);
             minimum_norm_step(jac, f, step);
@@ -210,7 +210,7 @@ private:
                 for (size_t c = 0; c < cols; ++c) s += jac[a * cols + c] * jac[b * cols + c];
                 jjt[a * rows + b] = jjt[b * rows + a] = s;
             }
-        if (!solve_spd(jjt, f, rows)) throw std::runtime_error("NRHO: Mehrfachschießverfahren konvergiert nicht");
+        if (!solve_spd(jjt, f, rows)) throw std::runtime_error("NRHO: multiple shooting does not converge");
         std::fill(step.begin(), step.end(), 0.0);
         for (size_t c = 0; c < cols; ++c)
             for (size_t a = 0; a < rows; ++a) step[c] -= jac[a * cols + c] * f[a];
@@ -300,7 +300,7 @@ bool NrhoReference::covers(time::Epoch epoch) const {
 }
 
 StateVector NrhoReference::state_gcrf(time::Epoch epoch) const {
-    if (!covers(epoch)) throw std::out_of_range("NRHO: Epoche außerhalb der Referenzbahn");
+    if (!covers(epoch)) throw std::out_of_range("NRHO: epoch outside the reference orbit");
     size_t i = patch_epochs_.size() - 1;
     while (epoch - patch_epochs_[i] < 0.0) --i;  // last patch at or before the epoch
     if (epoch - patch_epochs_[i] == 0.0) return patch_states_[i];

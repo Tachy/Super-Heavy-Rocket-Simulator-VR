@@ -18,6 +18,8 @@
 #include "starsim/math/mat3.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/mission/nrho_reference.hpp"
+#include "starsim/report/report.hpp"
+#include "flight_session_lunar_detail.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -66,23 +68,13 @@ std::vector<std::string> qualified(const std::string& stage_id, const std::vecto
     return ids;
 }
 
-std::string tonnes(double kg) {
-    char text[32];
-    std::snprintf(text, sizeof text, "%.1f", kg / 1000.0);
-    std::string s = text;
-    for (auto& c : s) {
-        if (c == '.') c = ',';
-    }
-    return s;
-}
-
 }  // namespace
 
 config::VehicleConfig lunar_return_ship(const config::LunarReturnMission& m, const std::filesystem::path& config_dir,
                                         const config::VehicleConfig* vehicle) {
     auto cfg = vehicle ? *vehicle : config::load_vehicle(config_dir, m.vehicle_id);
     while (!cfg.stages.empty() && cfg.stages.front().id != m.stage_id) cfg.stages.erase(cfg.stages.begin());
-    if (cfg.stages.empty()) throw std::runtime_error("Mondrückkehr: Stufe '" + m.stage_id + "' fehlt im Fahrzeug");
+    if (cfg.stages.empty()) throw std::runtime_error("lunar return: stage '" + m.stage_id + "' is missing in the vehicle");
     return cfg;
 }
 
@@ -128,7 +120,9 @@ LunarReturnSetup lunar_return_setup(const config::LunarReturnMission& m, const m
 math::StateVector lunar_return_start_state(const FlightSession& session, const config::LunarReturnMission& m,
                                            time::Epoch epoch, const mission::EarthReturnParameters& ret) {
     if (ret.orbit == mission::LunarOrbitKind::Nrho) return ret.nrho->state_gcrf(epoch);
-    if (!session.moon_orientation()) throw std::runtime_error("Mondrückkehr: die Sitzung hat keine Mondorientierung");
+    if (!session.moon_orientation()) {
+        throw report::Refusal(report::make(report::Code::lunar_return_mission_no_moon_orientation));
+    }
     const auto& ephemeris = session.ephemeris();
     const math::Vec3 s = mission::return_asymptote(ephemeris, epoch + asymptote_lead_s, ret.flight_time_guess_s,
                                                    ret.target.site_itrf_m, session.earth_orientation());
@@ -141,11 +135,9 @@ math::StateVector lunar_return_start_state(const FlightSession& session, const c
     const double cos_declination = std::sqrt(1.0 - sin_declination * sin_declination);
     const double a = std::cos(m.llo_inclination_rad) / cos_declination;
     if (std::abs(a) > 1.0) {
-        char text[160];
-        std::snprintf(text, sizeof text,
-                      "Keine LLO mit %.1f° Bahnneigung enthält die Rückflug-Asymptote (Deklination %.1f°)",
-                      m.llo_inclination_rad / constants::deg_to_rad, std::asin(sin_declination) / constants::deg_to_rad);
-        throw std::runtime_error(text);
+        throw report::Refusal(report::make(report::Code::lunar_return_no_llo_for_asymptote,
+                                           {report::angle("inclination", m.llo_inclination_rad),
+                                            report::angle("declination", std::asin(sin_declination))}));
     }
     const math::Vec3 e1 = math::normalized(pole - s * sin_declination);
     const math::Vec3 e2 = cross(s, e1);
@@ -183,7 +175,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     LunarReturnBudget b;
     const auto& stage = ship.stages.front();
     if (stage.aero.entry_alpha_table.empty() || stage.heat_shield.nose_radius_m <= 0.0) {
-        b.reason = "Kein Eintrittskorridor: das Fahrzeug hat keinen Hitzeschild";
+        b.reason = report::make(report::Code::lunar_return_no_heat_shield);
         return b;
     }
     // Onboard entry model at the entry mass (dry + landing propellant), as the entry guidance will fly it.
@@ -213,7 +205,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     b.entry_speed_mps =
         gnc::max_entry_speed(corridor_model, q, m.min_corridor_width_rad, min_entry_speed_mps, max_entry_speed_mps);
     if (b.entry_speed_mps < min_entry_speed_mps) {
-        b.reason = "Kein Eintrittskorridor innerhalb der Hitzeschild-Grenzen";
+        b.reason = report::make(report::Code::lunar_return_no_entry_corridor);
         return b;
     }
     q.speed_mps = b.entry_speed_mps;
@@ -225,7 +217,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
         // the angle with the widest bank window; the guidance starts at the bank that exits at the apoapsis
         b.bank_window = gnc::widest_bank_window(corridor_model, q, b.corridor, setup.entry.max_bank_rad);
         if (!b.bank_window.exists) {
-            b.reason = "Kein Eintrittsfenster: keine Querneigung fängt ein und bleibt in den Grenzen";
+            b.reason = report::make(report::Code::lunar_return_no_entry_window);
             return b;
         }
         target.flight_path_rad = b.bank_window.flight_path_rad;
@@ -238,7 +230,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
             // initial bank must lie in its window; plan where the window is widest, aim with its middle.
             b.bank_window = gnc::widest_bank_window(corridor_model, q, b.corridor, setup.entry.max_bank_rad);
             if (!b.bank_window.exists) {
-                b.reason = "Kein Eintrittsfenster: keine Querneigung fängt ein und bleibt in den Grenzen";
+                b.reason = report::make(report::Code::lunar_return_no_entry_window);
                 return b;
             }
             target.flight_path_rad = b.bank_window.flight_path_rad;
@@ -255,7 +247,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     const auto burn_groups = qualified(stage.id, setup.burn_groups);
     const double isp_s = gnc::groups_vacuum_isp_s(entry_vehicle, burn_groups);
     if (!(isp_s > 0.0)) {
-        b.reason = "Kein Rückflug: keine Triebwerke für die Brennvorgänge";
+        b.reason = report::make(report::Code::lunar_return_no_engines);
         return b;
     }
     const double ve = isp_s * constants::standard_gravity_mps2;
@@ -277,7 +269,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
         if (i > 0) planner.set_finite_burn(vacuum_engines(entry_vehicle, burn_groups, initial_kg));
         const auto plan = planner.plan(state, epoch, planning, initial_kg, isp_s, initial_kg - dry_kg);
         if (!plan.feasible) {
-            b.reason = plan.reason;
+            b.reason = report::legacy(plan.reason);  // text until the Earth return planner is converted (Task 9)
             return b;
         }
         b.tei_delta_v_mps = plan.tei_delta_v_mps;
@@ -288,8 +280,8 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
                                coast_days * m.coast_attitude_kg_per_day + m.reserve_kg;
         b.propellant_kg = next_kg - dry_kg;
         if (b.propellant_kg > capacity) {
-            b.reason = "Kein Rückflug: Treibstoff (" + tonnes(b.propellant_kg) + " t) übersteigt die Tanks (" +
-                       tonnes(capacity) + " t)";
+            b.reason = report::make(report::Code::lunar_return_propellant_exceeds_tanks,
+                                    {report::mass("needed", b.propellant_kg), report::mass("capacity", capacity)});
             return b;
         }
         const bool converged = std::abs(next_kg - initial_kg) < propellant_tolerance_kg;
@@ -307,13 +299,13 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     s.kind = config::MissionKind::LunarReturn;
     session.set_boil_off(m.boil_off);
     s.epoch = epoch;
-    const auto refuse = [&](const std::string& reason) {
+    const auto refuse = [&](const report::Report& reason) {
         session.disengage_autopilot();
         s.return_planned = false;
-        s.refusal = reason;
+        s.refusal = report::transitional_text(reason);  // text until Task 10 (MissionStart)
         return s;
     };
-    if (!session.moon_orientation()) return refuse("Mondrückkehr: die Sitzung hat keine Mondorientierung");
+    if (!session.moon_orientation()) return refuse(report::make(report::Code::lunar_return_mission_no_moon_orientation));
     const auto site = config::load_launch_site(config_dir, m.site_id);
     session.set_launch_site(launch_site_from_config(site));
     const auto site_itrf = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
@@ -325,16 +317,16 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
         // the ship's own limits and RCS-derived rates on the preset (aerocapture: the orbital q limit, as before)
         setup.entry = gnc::entry_guidance_parameters(
             ship, ship.stages.front(), m.aerocapture ? gnc::EntryKind::Orbital : gnc::EntryKind::LunarReturn, setup.entry);
-    } catch (const std::runtime_error& e) {  // stage missing, NRHO reference not converged (German)
-        return refuse(e.what());
+    } catch (const std::runtime_error& e) {  // stage missing, NRHO reference not converged
+        return refuse(report::with_cause(report::make(report::Code::lunar_mission_setup_failed), detail::exception_report(e)));
     }
     LunarReturnBudget b;
     try {
         b = lunar_return_budget(session, config_dir, m, ship, epoch, setup);
-    } catch (const std::runtime_error& e) {  // no LLO of the mission's inclination through the asymptote (German)
-        b.reason = e.what();
-    } catch (const std::exception& e) {  // a planner failure (e.g. Kepler domain): refused in German, not thrown
-        b.reason = std::string("Rückflug nicht planbar: ") + e.what();
+    } catch (const report::Refusal& e) {  // no LLO of the mission's inclination through the asymptote
+        b.reason = e.report();
+    } catch (const std::exception& e) {  // a planner failure (e.g. Kepler domain): refused, not thrown
+        b.reason = report::with_cause(report::make(report::Code::lunar_return_not_plannable), report::legacy(e.what()));
     }
     if (budget) *budget = b;
     if (!b.closes) return refuse(b.reason);

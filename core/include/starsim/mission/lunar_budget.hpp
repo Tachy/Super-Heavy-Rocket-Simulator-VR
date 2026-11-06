@@ -3,11 +3,13 @@
 #include <string>
 #include <vector>
 
+#include "starsim/report/report.hpp"
+
 namespace starsim::mission {
 
 // One propulsive leg of a lunar mission budget.
 struct BudgetLeg {
-    std::string name;  // German (refusal text), e.g. "Abstieg"
+    std::string id;  // leg id: the table key is phase.lunar_leg.<id> (e.g. "descent")
     double delta_v_mps = 0.0;
     double isp_s = 0.0;  // vacuum
     int ignitions = 1;   // engine starts in flight (refuelling f3/f4: each needs settled propellant)
@@ -17,7 +19,7 @@ struct BudgetResult {
     bool closes = false;
     double final_mass_kg = 0.0;
     double margin_kg = 0.0;  // final - (dry + reserve); < 0 when it does not close
-    std::string reason;      // German when it does not close: the first leg after which the mass is short
+    report::Report reason;   // ok when it closes; else the first leg after which the mass is short
 };
 
 // Rocket equation over the legs in order; closes when the final mass >= dry + reserve.

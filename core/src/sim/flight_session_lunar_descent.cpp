@@ -32,21 +32,9 @@
 namespace starsim::sim {
 
 using detail::far_future_s;
-using detail::german;
+using detail::step_ref;
 
 namespace {
-// transitional: removed by Task 8 (the lost-landing status still embeds the German touchdown name)
-const char* german_touchdown(LegTouchdown touchdown) {
-    switch (touchdown) {
-        case LegTouchdown::None: return "";
-        case LegTouchdown::Landed: return "gelandet";
-        case LegTouchdown::TippedOver: return "umgekippt";
-        case LegTouchdown::Impact: return "Aufprall";
-        case LegTouchdown::Splashdown: return "Wasserung";
-    }
-    return "";
-}
-
 // Longest start-up of the engines in `groups`.
 double group_startup_s(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
     double startup_s = 0.0;
@@ -80,11 +68,11 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
         aposelene_m = e.semi_major_axis_m * (1.0 + e.eccentricity);
     }
     if (!in_orbit) {
-        lunar_status_ = "Kein Abstieg: nicht in einer Mondumlaufbahn";
+        lunar_status_ = report::make(report::Code::lunar_no_descent_not_in_orbit);
         return false;
     }
     if (!moon_terrain_ || legs_->site().body != ephemeris::Body::Moon) {
-        lunar_status_ = "Kein Abstieg: keine Landestelle gesetzt";
+        lunar_status_ = report::make(report::Code::lunar_no_descent_no_site);
         return false;
     }
     const auto& vehicle = bodies_[controlled_].body->vehicle();
@@ -93,17 +81,17 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
     const double vacuum_isp_s = sets.empty() ? 0.0 : gnc::groups_vacuum_isp_s(vehicle, sets.front());
     const double approach_isp_s = sets.empty() ? 0.0 : gnc::groups_vacuum_isp_s(vehicle, sets.back());
     if (legs.azimuths_rad.empty() || vacuum_isp_s <= 0.0 || approach_isp_s <= 0.0) {
-        lunar_status_ = "Kein Abstieg: Fahrzeug ohne Landebeine oder Abstiegstriebwerke";
+        lunar_status_ = report::make(report::Code::lunar_no_descent_no_legs_or_engines);
         return false;
     }
     const double mass_kg = vehicle.mass_properties().mass_kg;
     const auto budget = mission::lunar_budget(
         mass_kg, mass_kg - vehicle.propellant_kg(), setup.reserve_kg + settling_gas_kg(),  // f3: the braking settles
-        {{"Bremsphase", setup.braking_delta_v_mps, vacuum_isp_s},
-         {"Anflug", setup.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s},
-         {"Aufstieg", setup.ascent_delta_v_mps, vacuum_isp_s}});
+        {{"braking", setup.braking_delta_v_mps, vacuum_isp_s},
+         {"approach", setup.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s},
+         {"ascent", setup.ascent_delta_v_mps, vacuum_isp_s}});
     if (!budget.closes) {
-        lunar_status_ = "Kein Abstieg: " + budget.reason;
+        lunar_status_ = report::with_cause(report::make(report::Code::lunar_no_descent_budget), budget.reason);
         return false;
     }
     const auto& site = legs_->site();
@@ -131,11 +119,11 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
                                 legs.footprint_radius_m, descent);
         }
     } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
-        lunar_status_ = "Kein Abstieg: Planung fehlgeschlagen";
+        lunar_status_ = report::make(report::Code::lunar_no_descent_planning_failed);
         return false;
     }
     if (!plan.feasible) {
-        lunar_status_ = "Kein Abstieg: " + plan.reason;
+        lunar_status_ = report::with_cause(report::make(report::Code::lunar_no_descent_refused), plan.reason);
         return false;
     }
     lunar_descent_plan_ = plan;
@@ -168,14 +156,14 @@ void FlightSession::lunar_descent_wait() {
     lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
     // Ticks resume for the burn's preparation (as l3's trims: planned at least that far ahead)
     lunar_step_epoch_ = lunar_ignition_lead(node) - small_burn_margin_s;
-    lunar_status_ = std::string("Warten auf Überflug: ") + (trim ? "Bahnebenenkorrektur" : "DOI") + " in " +
-                    german((node.epoch - epoch_) / 3600.0, 1) + " h";
+    lunar_status_ = report::make(trim ? report::Code::lunar_descent_wait_trim : report::Code::lunar_descent_wait_doi,
+                                 {report::time("wait", node.epoch - epoch_)});
 }
 
 bool FlightSession::lunar_descent_burn(const gnc::BurnNode& node, LunarStep step) {
     if (!lunar_small_burn(node)) {
-        lunar_abort(std::string(step == LunarStep::Circularize ? "Aufstieg" : "Abstieg") +
-                    " abgebrochen: Brennvorgang nicht möglich");
+        lunar_abort(report::make(step == LunarStep::Circularize ? report::Code::lunar_ascent_aborted_burn_not_possible
+                                                                : report::Code::lunar_descent_aborted_burn_not_possible));
         return false;
     }
     lunar_burns_.push_back({step, node, bodies_[controlled_].body->vehicle().mass_properties().mass_kg});
@@ -205,27 +193,27 @@ bool FlightSession::lunar_small_burn(const gnc::BurnNode& node) {
 bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, double approach_azimuth_rad,
                                           gnc::LunarLandingParameters parameters) {
     if (!moon_) {
-        lunar_status_ = "Landeanflug nicht möglich: keine Mondorientierung";
+        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_no_moon_orientation);
         return false;
     }
     if (legs_->site().body != ephemeris::Body::Moon) {
-        lunar_status_ = "Landeanflug nicht möglich: keine Landestelle auf dem Mond (set_lunar_landing_site)";
+        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_no_site);
         return false;
     }
     if (bodies_.empty() || reference_body(controlled_) != ephemeris::Body::Moon) {
-        lunar_status_ = "Landeanflug nicht möglich: Fahrzeug nicht am Mond";
+        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_not_at_moon);
         return false;
     }
     auto& vehicle = bodies_[controlled_].body->vehicle();
     const auto& legs = vehicle.stages().front().config.landing_legs;
     if (legs.azimuths_rad.empty()) {
-        lunar_status_ = "Landeanflug nicht möglich: keine Landebeine";
+        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_no_legs);
         return false;
     }
     try {  // the vehicle's own approach keys ([stage.lunar_landing])
         parameters = gnc::lunar_landing_parameters(vehicle.stages().front().config, std::move(parameters));
-    } catch (const std::runtime_error& e) {
-        lunar_status_ = std::string("Landeanflug nicht möglich: ") + e.what();
+    } catch (const std::runtime_error&) {  // the stage has no [stage.lunar_landing] keys
+        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_no_landing_values);
         return false;
     }
     // Deployable legs stay stowed here: the guidance commands them out in the braking phase (leg_deploy_lead_s).
@@ -240,7 +228,7 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
     autopilot_.state = AutopilotState::Lunar;
     lunar_step_ = LunarStep::PoweredDescent;
     lunar_step_epoch_ = epoch_;
-    lunar_status_ = "Landeanflug";
+    lunar_status_ = report::make(report::Code::lunar_step, {step_ref("step", LunarStep::PoweredDescent)});
     return true;
 }
 
@@ -274,8 +262,8 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             attitude_mode_ = {};  // the burn executor turns to the burn attitude in its preparation
             if (lunar_descent_burn(node, trim ? LunarStep::PlaneTrim : LunarStep::Doi)) {
                 lunar_step_ = trim ? LunarStep::PlaneTrim : LunarStep::Doi;
-                lunar_status_ = std::string(trim ? "Bahnebenenkorrektur: " : "Abstiegsbahn (DOI): ") +
-                                german(norm(node.delta_v_gcrf_mps), 1) + " m/s";
+                lunar_status_ = report::make(trim ? report::Code::lunar_plane_trim : report::Code::lunar_doi,
+                                             {report::speed("dv", norm(node.delta_v_gcrf_mps))});
             }
             break;
         }
@@ -288,7 +276,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             lunar_step_ = LunarStep::DescentCoast;
             attitude_mode_ = {};
             lunar_step_epoch_ = plan.pdi_epoch - descent_attitude_lead_s;
-            lunar_status_ = "Freiflug zum Abstieg: PDI in " + german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
+            lunar_status_ = report::make(report::Code::lunar_descent_coast, {report::time("wait", plan.pdi_epoch - epoch_)});
             break;
         }
         case LunarStep::DescentCoast: {
@@ -303,8 +291,8 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                 const double startup_s = sets.empty() ? 0.0 : group_startup_s(flying.body->vehicle(), sets.front());
                 // refuelling f3: the settling push its lead before the braking Raptors light
                 lunar_step_epoch_ = plan.pdi_epoch - startup_s - settling_lead_s();
-                lunar_status_ = "Freiflug zum Abstieg: Bremslage, PDI in " +
-                                german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
+                lunar_status_ =
+                    report::make(report::Code::lunar_descent_coast_attitude, {report::time("wait", plan.pdi_epoch - epoch_)});
                 break;
             }
             const double lead = settling_lead_s();  // 0 without a need to settle (or without +x capability)
@@ -316,7 +304,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                 settling_push_ = true;
                 settling_hold_start_ = light;
                 lunar_step_epoch_ = light;
-                lunar_status_ = "Freiflug zum Abstieg: Settling, PDI in " + german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
+                lunar_status_ = report::make(report::Code::lunar_descent_coast_settling, {report::time("wait", plan.pdi_epoch - epoch_)});
                 break;
             }
             if (!settling_push_ && epoch_ < light - 1e-9) {  // settled already: no push, the Raptors light on time (M10)
@@ -333,8 +321,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             }
             settling_hold_start_.reset();
             if (!begin_powered_descent(plan.touchdown, plan.approach_azimuth_rad, setup.guidance)) {
-                const std::string status = lunar_status_;
-                lunar_abort(status);
+                lunar_abort(lunar_status_);
             }
             break;
         }
@@ -351,10 +338,10 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             lunar_step_epoch_ = epoch_ + far_future_s;
             // a refused ascent keeps its reason
             if (!lunar_landing_setup_ || !lunar_landing_setup_->ascent) {
-                lunar_status_ = "gelandet: Oberflächenaufenthalt beendet";
+                lunar_status_ = report::make(report::Code::lunar_landed_stay_ended);
             } else if (lunar_mission_) {  // review l4 M3: the sequence ends with the refusal
                 lunar_mission_leg_ = LunarMissionLeg::Ended;
-                lunar_status_ = "Mission beendet: " + lunar_status_;
+                lunar_status_ = report::with_cause(report::make(report::Code::lunar_mission_ended), std::move(lunar_status_));
             }
             break;
         case LunarStep::PoweredDescent: {
@@ -396,11 +383,11 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                     run_lunar_ascent_steps(flying);  // this tick's command from the ascent guidance
                     break;
                 }
-                lunar_status_ = "Landepunkt nicht erreichbar, Abbruch nicht möglich";
+                lunar_status_ = report::make(report::Code::lunar_target_unreachable_no_abort);
                 // Final review l4 I2: without an approach plan the guidance would cut the engines - set down with the
                 // terminal law instead (towards the touchdown point, the sink rate from the height).
                 if (lunar_landing_->land_without_approach()) {
-                    lunar_status_ += ": Endanflug ohne Plan";
+                    lunar_status_ = report::make(report::Code::lunar_target_unreachable_terminal);
                     flying.return_command = lunar_landing_->update(body, env_, epoch_, contact);
                 }
             }
@@ -411,9 +398,9 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                     flying.running_groups[e.group_id] = std::find(groups.begin(), groups.end(), e.group_id) != groups.end();
                 }
             }
-            if (!lunar_landing_->status().empty() && lunar_landing_->status() != lunar_status_ &&
+            if (!lunar_landing_->status().ok() && !report::same(lunar_landing_->status(), lunar_status_) &&
                 lunar_landing_->phase() == gnc::LunarDescentPhase::Aborted && !lunar_auto_abort_tried_) {
-                lunar_status_ = "Landeanflug: " + lunar_landing_->status();
+                lunar_status_ = report::with_cause(report::make(report::Code::lunar_approach_status), lunar_landing_->status());
             }
             const auto judged = legs_->touchdown(body);
             if (judged == LegTouchdown::None && !body.impacted()) break;
@@ -428,10 +415,10 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                 const bool stays = stay_s > 0.0 || (lunar_landing_setup_ && lunar_landing_setup_->ascent);
                 lunar_step_ = stays ? LunarStep::SurfaceStay : LunarStep::Landed;
                 lunar_step_epoch_ = stays ? lunar_landed_epoch_ + stay_s : epoch_ + far_future_s;
-                lunar_status_ = "gelandet: " + german(lunar_touchdown_->offset_m, 2) + " m vom Zielpunkt";
+                lunar_status_ = report::make(report::Code::lunar_landed, {report::length("offset", lunar_touchdown_->offset_m)});
             } else {
                 lunar_step_ = LunarStep::Lost;
-                lunar_status_ = std::string("verloren: ") + german_touchdown(lunar_touchdown_->outcome);
+                lunar_status_ = report::make(report::Code::lunar_lost, {report::ref("outcome", std::string("phase.leg_touchdown.") + id_of(lunar_touchdown_->outcome))});
                 autopilot_.state = AutopilotState::Off;
             }
             for (auto& [group, run] : flying.running_groups) run = false;

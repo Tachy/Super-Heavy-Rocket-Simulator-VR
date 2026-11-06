@@ -7,6 +7,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/entry_corridor.hpp"
 #include "starsim/math/state_vector.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/mission_start.hpp"
 
@@ -25,7 +26,7 @@ struct LunarReturnBudget {
     // (Task 9): the angle with the widest window from the bank that exits at the apoapsis, its low edge the warm start;
     // the entry speed is the highest with such a window at least 10 deg [E] wide.
     gnc::BankWindow bank_window;
-    std::string reason;            // German when refused
+    report::Report reason;         // ok when it closes; else why it is refused
 };
 
 // The mission's vehicle (`vehicle`: an override of the mission's) cut to its stage (the ship alone).

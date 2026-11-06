@@ -16,6 +16,8 @@
 #include "starsim/mission/nrho_reference.hpp"
 #include "starsim/mission/touchdown_search.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/report/report.hpp"
+#include "flight_session_lunar_detail.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/sim/terrain_cache.hpp"
 
@@ -48,11 +50,11 @@ void set_site(FlightSession& session, const PlacedSite& placed) {
 PlacedSite place(FlightSession& session, const config::LunarLandingMission& m, const std::filesystem::path& config_dir,
                  time::Epoch epoch, const config::VehicleConfig* vehicle) {
     if (!session.moon_orientation()) {
-        throw std::runtime_error("Mondlandung: die Sitzung hat keine Mondorientierung");
+        throw report::Refusal(report::make(report::Code::lunar_landing_no_moon_orientation));
     }
     const auto state = lunar_parking_state(session, m, epoch, m.parking_inclination_rad);
     if (!state) {
-        throw std::runtime_error("Kein Parkorbit durch die Mondbahnebene: Bahnneigung unter der Deklination des Mondes");
+        throw report::Refusal(report::make(report::Code::lunar_mission_no_parking_plane));
     }
     const auto placed = load_site(m, config_dir);
     if (vehicle) {
@@ -70,15 +72,18 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
     MissionStart s;
     s.kind = config::MissionKind::LunarLanding;
     s.epoch = epoch;
-    const auto refuse = [&](const std::string& reason) {
+    const auto refuse = [&](const report::Report& reason) {
         session.disengage_autopilot();
         s.return_planned = false;
-        s.refusal = reason;
+        s.refusal = report::transitional_text(reason);  // text until Task 10 (MissionStart)
         return s;
     };
     const auto setup = lunar_landing_setup(m);
     const auto& v = session.body(session.controlled_index()).vehicle();
-    if (!reachable) return refuse("Mission nicht durchführbar: kein Landepunkt innerhalb der Hangneigungsgrenze");
+    if (!reachable) {
+        return refuse(report::with_cause(report::make(report::Code::lunar_mission_infeasible),
+                                         report::make(report::Code::lunar_mission_no_touchdown_point)));
+    }
     const auto outbound = lunar_outbound_parameters(m, session.gravity(), session.ephemeris(), epoch);
     if (!session.plan_lunar_outbound(outbound)) return refuse(session.lunar_status());
     const double mass_kg = v.mass_properties().mass_kg;
@@ -86,7 +91,7 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
     const auto budget = lunar_mission_budget(m, *session.lunar_outbound_plan(), mass_kg, mass_kg - v.propellant_kg(),
                                              gnc::groups_vacuum_isp_s(v, sets.front()),
                                              gnc::groups_vacuum_isp_s(v, sets.back()), session.settling_gas_bound_kg());
-    if (!budget.closes) return refuse("Mission nicht durchführbar: " + budget.reason);
+    if (!budget.closes) return refuse(report::with_cause(report::make(report::Code::lunar_mission_infeasible), budget.reason));
     LunarMissionSequence sequence;
     sequence.landing = setup;
     sequence.via_nrho = outbound.orbit == mission::LunarOrbitKind::Nrho;
@@ -170,19 +175,19 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
                                                    double approach_isp_s) {
     const auto setup = lunar_landing_setup(m);
     const bool nrho = m.lunar_orbit == "nrho";
-    std::vector<mission::BudgetLeg> legs{{"TLI", norm(plan.tli.delta_v_gcrf_mps), vacuum_isp_s}};
+    std::vector<mission::BudgetLeg> legs{{"tli", norm(plan.tli.delta_v_gcrf_mps), vacuum_isp_s}};
     if (nrho) {
-        if (plan.powered_flyby) legs.push_back({"Swing-by", norm(plan.powered_flyby->delta_v_gcrf_mps), vacuum_isp_s});
-        legs.push_back({"Einschuss", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
-        legs.push_back({"NRHO -> LLO", m.nrho_to_llo_delta_v_mps, vacuum_isp_s, 2});  // departure + LLO arrival
+        if (plan.powered_flyby) legs.push_back({"swing_by", norm(plan.powered_flyby->delta_v_gcrf_mps), vacuum_isp_s});
+        legs.push_back({"insertion", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
+        legs.push_back({"nrho_to_llo", m.nrho_to_llo_delta_v_mps, vacuum_isp_s, 2});  // departure + LLO arrival
     } else {
-        legs.push_back({"LOI", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
+        legs.push_back({"loi", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
     }
-    legs.push_back({"Abstieg (Bremsphase)", setup.braking_delta_v_mps, vacuum_isp_s, 2});  // DOI + PDI
+    legs.push_back({"descent_braking", setup.braking_delta_v_mps, vacuum_isp_s, 2});  // DOI + PDI
     // the approach continues the braking burn
-    legs.push_back({"Abstieg (Anflug)", m.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s, 0});
-    legs.push_back({"Aufstieg", m.ascent_delta_v_mps, vacuum_isp_s, 1});  // lit landed; the circularization in orbit
-    if (nrho) legs.push_back({"LLO -> NRHO", m.llo_to_nrho_delta_v_mps, vacuum_isp_s, 2});
+    legs.push_back({"descent_approach", m.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s, 0});
+    legs.push_back({"ascent", m.ascent_delta_v_mps, vacuum_isp_s, 1});  // lit landed; the circularization in orbit
+    if (nrho) legs.push_back({"llo_to_nrho", m.llo_to_nrho_delta_v_mps, vacuum_isp_s, 2});
     return legs;
 }
 
@@ -207,12 +212,12 @@ DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const s
     PlacedSite placed;
     try {
         placed = place(session, m, config_dir, epoch, vehicle);
-    } catch (const std::runtime_error& e) {  // no plane, no Moon orientation, terrain files missing (German)
+    } catch (const std::runtime_error& e) {  // no plane, no Moon orientation, terrain files missing
         session.disengage_autopilot();
         MissionStart s;
         s.kind = config::MissionKind::LunarLanding;
         s.epoch = epoch;
-        s.refusal = e.what();
+        s.refusal = report::transitional_text(detail::exception_report(e));  // text until Task 10 (MissionStart)
         return {s};
     }
     return plan_from_live_state(session, m, epoch, placed);
@@ -237,23 +242,23 @@ std::optional<math::StateVector> lunar_parking_state(const FlightSession& sessio
 
 MissionStart continue_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                             const config::LunarLandingMission& m, time::Epoch epoch) {
-    const auto refuse = [&](const std::string& reason) {
+    const auto refuse = [&](const report::Report& reason) {
         session.disengage_autopilot();
         MissionStart s;
         s.kind = config::MissionKind::LunarLanding;
         s.epoch = epoch;
-        s.refusal = reason;
+        s.refusal = report::transitional_text(reason);  // text until Task 10 (MissionStart)
         return s;
     };
-    if (!session.moon_orientation()) return refuse("Mondlandung: die Sitzung hat keine Mondorientierung");
+    if (!session.moon_orientation()) return refuse(report::make(report::Code::lunar_landing_no_moon_orientation));
     if (session.epoch() > epoch + 0.5 * FlightSession::tick_s) {
-        return refuse("Mondmission: zu spät - die Sitzung steht nach dem Start der Mondmission");
+        return refuse(report::make(report::Code::lunar_mission_too_late));
     }
     PlacedSite placed;
     try {
         placed = load_site(m, config_dir);
-    } catch (const std::runtime_error& e) {  // terrain files missing (German)
-        return refuse(e.what());
+    } catch (const std::runtime_error& e) {  // terrain files missing
+        return refuse(detail::exception_report(e));
     }
     set_site(session, placed);
     // A mission leg inside the flight (refuelling: the HLS after the depot): decided here, on the session's thread.

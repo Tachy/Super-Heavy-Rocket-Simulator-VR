@@ -995,7 +995,7 @@ TEST_CASE("continue_lunar_landing_mission plans like the start from the same pla
     INFO(c.refusal);
     REQUIRE(c.refusal.empty());
     CHECK(norm(b.lunar_outbound_plan()->tli.delta_v_gcrf_mps) == Catch::Approx(tli_a).epsilon(1e-9));
-    CHECK(b.lunar_status() == f.lunar.lunar_status());
+    CHECK(report::same(b.lunar_status(), f.lunar.lunar_status()));
 }
 
 TEST_CASE("Continuation after the lunar epoch is refused", "[sim][lunar][refuelling]") {
@@ -1005,7 +1005,7 @@ TEST_CASE("Continuation after the lunar epoch is refused", "[sim][lunar][refuell
     const auto epoch = f.clock.from_utc(m.epoch_utc);
     sim::place_lunar_landing_mission(f.lunar, m, refuelling_test::config_dir, epoch + 3600.0);
     const auto c = sim::continue_lunar_landing_mission(f.lunar, refuelling_test::config_dir, m, epoch);
-    CHECK_THAT(c.refusal, Catch::Matchers::ContainsSubstring("zu spät"));
+    CHECK_THAT(c.refusal, Catch::Matchers::ContainsSubstring("lunar.mission_too_late"));  // text until Task 10
     CHECK(f.lunar.body_count() == 1u);  // nothing re-placed
 }
 

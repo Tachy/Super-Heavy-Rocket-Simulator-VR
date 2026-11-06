@@ -17,6 +17,7 @@
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
@@ -165,12 +166,12 @@ TEST_CASE("LOLA data: the site tile matches the pipeline's raw-grid check points
     CHECK(site.height_m < 7000.0);
 }
 
-TEST_CASE("Missing terrain data names the fetch script", "[terrain]") {
+TEST_CASE("Missing terrain data is a report code", "[terrain]") {
     try {
         sim::load_lunar_terrain(STARSIM_CONFIG_DIR, std::filesystem::temp_directory_path() / "starsim_no_data");
         FAIL("expected an error");
-    } catch (const std::runtime_error& e) {
-        CHECK(std::string(e.what()).find("tools/data_pipeline/fetch.py") != std::string::npos);
+    } catch (const report::Refusal& e) {
+        CHECK(e.report().code == report::Code::data_lunar_terrain_missing);
     }
 }
 

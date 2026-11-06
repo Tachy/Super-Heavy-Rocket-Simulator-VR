@@ -13,7 +13,6 @@
 namespace starsim::sim {
 
 using detail::far_future_s;
-using detail::german;
 
 time::Epoch FlightSession::lunar_next_mcc_epoch() const {
     const auto& p = *lunar_parameters_;
@@ -38,11 +37,12 @@ void FlightSession::lunar_enter_coast() {
     const time::Epoch mcc = lunar_next_mcc_epoch();
     if (mcc - epoch_ < 0.5 * far_future_s) {
         lunar_step_epoch_ = mcc - (p.pilot_corrections ? p.pilot_call_lead_s : 0.0);
-        lunar_status_ = "Freiflug: Kurskorrektur " + std::to_string(lunar_mcc_index_ + 1) + " in " +
-                        german((mcc - epoch_) / 3600.0, 1) + " h";
+        lunar_status_ = report::make(report::Code::lunar_coast_correction_in,
+                                     {report::count("index", static_cast<long long>(lunar_mcc_index_ + 1)),
+                                      report::time("wait", mcc - epoch_)});
     } else if (plan.powered_flyby && !lunar_flyby_done_) {
         lunar_step_epoch_ = lunar_ignition_lead(*plan.powered_flyby);
-        lunar_status_ = "Freiflug: Swing-by in " + german((plan.powered_flyby->epoch - epoch_) / 3600.0, 1) + " h";
+        lunar_status_ = report::make(report::Code::lunar_coast_flyby_in, {report::time("wait", plan.powered_flyby->epoch - epoch_)});
     } else {
         // LLO: the MCCs target the B-plane with the arrival time free - the LOI is timed on the periselene predicted
         // from the state now (the plan's epoch can be minutes off). NRHO: the insertion epoch is fixed by the plan.
@@ -52,7 +52,7 @@ void FlightSession::lunar_enter_coast() {
             if (const auto predicted = planner.insertion(controlled_state(), epoch_, p, plan)) insertion = *predicted;
         }
         lunar_step_epoch_ = lunar_ignition_lead(insertion);
-        lunar_status_ = "Freiflug: Einschuss in " + german((insertion.epoch - epoch_) / 3600.0, 1) + " h";
+        lunar_status_ = report::make(report::Code::lunar_coast_insertion_in, {report::time("wait", insertion.epoch - epoch_)});
     }
 }
 
@@ -78,37 +78,38 @@ void FlightSession::lunar_coast_event() {
                                     bodies_[controlled_].body->vehicle().mass_properties().mass_kg});
             lunar_step_ = LunarStep::PilotCorrection;
             attitude_mode_ = {};
-            lunar_status_ = "Kurskorrektur in " + german(p.pilot_call_lead_s / 60.0, 0) + " min: " +
-                            german(norm(mcc->delta_v_gcrf_mps), 1) + " m/s";
+            lunar_status_ = report::make(report::Code::lunar_correction_in,
+                                         {report::time("wait", p.pilot_call_lead_s), report::speed("dv", norm(mcc->delta_v_gcrf_mps))});
             return;
         }
         if (lunar_burn(*mcc, false, LunarStep::MidCourse)) {
             lunar_step_ = LunarStep::MidCourse;
-            lunar_status_ = "Kurskorrektur " + std::to_string(lunar_mcc_index_ + 1) + ": " +
-                            german(norm(mcc->delta_v_gcrf_mps), 2) + " m/s";
+            lunar_status_ = report::make(report::Code::lunar_correction,
+                                         {report::count("index", static_cast<long long>(lunar_mcc_index_ + 1)),
+                                          report::speed("dv", norm(mcc->delta_v_gcrf_mps))});
         }
         return;
     }
     if (plan.powered_flyby && !lunar_flyby_done_) {
         const auto swing = planner.powered_flyby(state, epoch_, p, plan);
         if (!swing) {
-            lunar_abort("Mondflug abgebrochen: Swing-by nicht planbar");
+            lunar_abort(report::make(report::Code::lunar_flight_aborted_flyby_not_plannable));
             return;
         }
         if (lunar_burn(*swing, true, LunarStep::PoweredFlyby)) {
             lunar_step_ = LunarStep::PoweredFlyby;
-            lunar_status_ = "Swing-by: " + german(norm(swing->delta_v_gcrf_mps), 0) + " m/s";
+            lunar_status_ = report::make(report::Code::lunar_flyby, {report::speed("dv", norm(swing->delta_v_gcrf_mps))});
         }
         return;
     }
     const auto insertion = planner.insertion(state, epoch_, p, plan);
     if (!insertion) {
-        lunar_abort("Mondflug abgebrochen: Einschuss nicht planbar");
+        lunar_abort(report::make(report::Code::lunar_flight_aborted_insertion_not_plannable));
         return;
     }
     if (lunar_burn(*insertion, true, LunarStep::Insertion)) {
         lunar_step_ = LunarStep::Insertion;
-        lunar_status_ = "Einschuss: " + german(norm(insertion->delta_v_gcrf_mps), 0) + " m/s";
+        lunar_status_ = report::make(report::Code::lunar_insertion, {report::speed("dv", norm(insertion->delta_v_gcrf_mps))});
     }
 }
 

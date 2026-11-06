@@ -99,7 +99,8 @@ struct Run {
     double peak_heat_w_m2 = 0.0, peak_load_g = 0.0, propellant_t = 0.0;
     double braking_height_m = 0.0;  // geodetic height of the braking burn's centre
     std::pair<double, double> exit_apsides{0.0, 0.0}, raised_apsides{0.0, 0.0};
-    std::string status, breakup, braking_status;
+    std::string breakup;
+    report::Report status, braking_status;
 };
 
 // Advances the session in calls of `step_s` until `done` or `until` (calls of at most `ticks` ticks).
@@ -137,11 +138,11 @@ Run fly(const Dispersion& d, bool aircatch) {
     run_until(s, t0 + 8.0 * 86400.0, 3600.0, 200,
               [&] { return body.impacted() || step() == sim::LunarStep::Braking || s.autopilot().state == sim::AutopilotState::Off; });
     run_until(s, s.epoch() + 3600.0, 5.0, 4000000, [&] {
-        if (step() == sim::LunarStep::Braking && r.braking_status.empty()) r.braking_status = s.lunar_status();
+        if (step() == sim::LunarStep::Braking && r.braking_status.ok()) r.braking_status = s.lunar_status();
         return burn_of(s, sim::LunarStep::Braking) != nullptr && step() != sim::LunarStep::Braking;
     });
     const auto* braking = burn_of(s, sim::LunarStep::Braking);
-    INFO(s.lunar_status());
+    INFO(report::describe(s.lunar_status()));
     REQUIRE(braking != nullptr);
     r.braking_mps = norm(braking->node.delta_v_gcrf_mps);
     {
@@ -211,7 +212,7 @@ Run fly(const Dispersion& d, bool aircatch) {
             static std::string last;
             static double last_print = -1e9;
             const std::string state = std::string(sim::id_of(step())) + " / " + sim::id_of(s.autopilot().state) +
-                                      " / " + s.lunar_status();
+                                      " / " + report::describe(s.lunar_status());
             const double now = s.epoch() - t0;
             if (state != last || now - last_print > (tel.altitude_m < 150e3 ? 20.0 : 6.0 * 3600.0)) {
                 last = state;
@@ -260,8 +261,8 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
             std::printf(", exit %.1f x %.1f km, raised %.1f x %.1f km", r.exit_apsides.first / 1000.0,
                         r.exit_apsides.second / 1000.0, r.raised_apsides.first / 1000.0, r.raised_apsides.second / 1000.0);
         }
-        std::printf(" | %s | %s, %.1f t left, %s%s%s\n", r.braking_status.c_str(), r.caught ? "caught" : sim::id_of(r.result), r.propellant_t,
-                    r.status.c_str(), r.breakup.empty() ? "" : " / ", r.breakup.c_str());
+        std::printf(" | %s | %s, %.1f t left, %s%s%s\n", report::describe(r.braking_status).c_str(), r.caught ? "caught" : sim::id_of(r.result), r.propellant_t,
+                    report::describe(r.status).c_str(), r.breakup.empty() ? "" : " / ", r.breakup.c_str());
         std::fflush(stdout);
         // The checks of the former nominal case "Lunar return direct: the ship is caught at Starbase" (test_lunar_return_session
         // .cpp): the braking burn at the mission's [return] braking_height_km 2000 km +-50 km, the shield intact

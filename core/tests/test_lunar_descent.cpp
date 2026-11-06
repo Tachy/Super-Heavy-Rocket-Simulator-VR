@@ -67,17 +67,18 @@ TEST_CASE("The braking range grows with the PDI mass and stays within its limits
 }
 
 TEST_CASE("The budget closes or names the leg where the propellant runs out", "[mission][lunar_descent_plan]") {
-    const auto ok = mission::lunar_budget(566e3, 120e3, 10e3, {{"Abstieg", 2000.0, 350.0}, {"Aufstieg", 1900.0, 350.0}});
+    const auto ok = mission::lunar_budget(566e3, 120e3, 10e3, {{"descent", 2000.0, 350.0}, {"ascent", 1900.0, 350.0}});
     CHECK(ok.closes);
     CHECK(ok.final_mass_kg == Catch::Approx(566e3 * std::exp(-3900.0 / (350.0 * 9.80665))).epsilon(1e-12));
-    const auto short_ = mission::lunar_budget(400e3, 204e3, 10e3, {{"Abstieg", 2000.0, 350.0}, {"Aufstieg", 1900.0, 350.0}});
+    const auto short_ = mission::lunar_budget(400e3, 204e3, 10e3, {{"descent", 2000.0, 350.0}, {"ascent", 1900.0, 350.0}});
     CHECK_FALSE(short_.closes);
-    CHECK(short_.reason.find("Aufstieg") != std::string::npos);
+    REQUIRE(short_.reason.code == report::Code::lunar_budget_short);
+    CHECK(short_.reason.params.front().text == "phase.lunar_leg.ascent");  // the leg where the propellant runs out
     CHECK(short_.margin_kg < 0.0);
 }
 
 TEST_CASE("The required mass closes the budget with zero margin", "[mission][lunar_descent_plan]") {
-    const std::vector<mission::BudgetLeg> legs{{"Abstieg", 1000.0, 350.0}, {"Aufstieg", 500.0, 380.0}};
+    const std::vector<mission::BudgetLeg> legs{{"descent", 1000.0, 350.0}, {"ascent", 500.0, 380.0}};
     const double g0 = constants::standard_gravity_mps2;
     const double expected = 110e3 * std::exp(500.0 / (380.0 * g0)) * std::exp(1000.0 / (350.0 * g0));
     const double m = mission::lunar_budget_required_mass(100e3, 10e3, legs);
@@ -109,7 +110,7 @@ TEST_CASE("Descent planning waits for the site's pass, trims the plane and lower
     const auto plan = planner.plan(fx.llo(0.5 * 86400.0), fx.t0, *fx.terrain, site_lat, site_lon, 12.0, p);
     std::printf("[lunar_descent] %s: pass in %.2f d, crossrange %.1f -> %.1f m, trim %.2f m/s, DOI %.2f m/s, "
                 "periselene %.2f km, PDI range %.1f km\n",
-                plan.feasible ? "feasible" : plan.reason.c_str(), (plan.site_pass_epoch - fx.t0) / 86400.0,
+                plan.feasible ? "feasible" : report::describe(plan.reason).c_str(), (plan.site_pass_epoch - fx.t0) / 86400.0,
                 plan.crossrange_before_trim_m, plan.crossrange_m,
                 plan.plane_trim ? norm(plan.plane_trim->delta_v_gcrf_mps) : 0.0, norm(plan.doi.delta_v_gcrf_mps),
                 plan.periselene_altitude_m / 1000.0, plan.pdi_range_m / 1000.0);
@@ -132,5 +133,5 @@ TEST_CASE("Descent planning refuses when no pass comes within reach", "[mission]
     p.search_s = 0.2 * 86400.0;            // the plane is aligned only after 5 days
     const auto plan = planner.plan(fx.llo(5.0 * 86400.0), fx.t0, *fx.terrain, site_lat, site_lon, 12.0, p);
     CHECK_FALSE(plan.feasible);
-    CHECK(plan.reason.find("Überflug") != std::string::npos);
+    CHECK(plan.reason.code == report::Code::lunar_no_site_pass);
 }

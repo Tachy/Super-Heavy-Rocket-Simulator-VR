@@ -89,7 +89,7 @@ bool LunarOutboundPlanner::plan_nrho(const StateVector& state, time::Epoch epoch
                                      const LunarOutboundParameters& p, OutboundPlan& plan) const {
     const auto t_insert = nrho_insertion_epoch(p);
     if (!t_insert) {
-        plan.reason = "NRHO-Referenz deckt die Ankunft nicht ab";
+        plan.reason = report::make(report::Code::lunar_nrho_not_covering_arrival);
         return false;
     }
     const auto reference = p.nrho->state_gcrf(*t_insert);
@@ -146,7 +146,7 @@ bool LunarOutboundPlanner::plan_nrho(const StateVector& state, time::Epoch epoch
         if (best_cost < before) best_grid = inclination;
     }
     if (!std::isfinite(best_cost)) {
-        plan.reason = "Kein Transfer zur NRHO gefunden";
+        plan.reason = report::make(report::Code::lunar_no_nrho_transfer);
         return false;
     }
     const double golden = 0.5 * (std::sqrt(5.0) - 1.0);
@@ -181,14 +181,14 @@ OutboundPlan LunarOutboundPlanner::plan(const StateVector& state, time::Epoch ep
     if (p.orbit == LunarOrbitKind::Llo) {
         const auto solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
         if (!solution.converged) {
-            plan.reason = "Kein Transfer zum Mond gefunden";
+            plan.reason = report::make(report::Code::lunar_no_moon_transfer);
             return plan;
         }
         plan.tli = solution.burn;
         plan.insertion = LunarTransferTargeter::orbit_insertion(solution.arrival, gm_moon_);
     } else {
         if (!p.nrho || !p.nrho->covers(p.arrival_epoch)) {
-            plan.reason = "NRHO-Referenz deckt die Ankunft nicht ab";
+            plan.reason = report::make(report::Code::lunar_nrho_not_covering_arrival);
             return plan;
         }
         if (!plan_nrho(state, epoch, burn_epoch, p, plan)) return plan;
@@ -200,10 +200,9 @@ OutboundPlan LunarOutboundPlanner::plan(const StateVector& state, time::Epoch ep
     plan.propellant_kg =
         mass_kg * (1.0 - std::exp(-plan.total_delta_v_mps / (isp_s * constants::standard_gravity_mps2)));
     if (plan.propellant_kg * (1.0 + p.reserve_fraction) > propellant_kg) {
-        char buffer[160];
-        std::snprintf(buffer, sizeof buffer, "Zu wenig Treibstoff für den Hinflug: %.0f t nötig, %.0f t an Bord",
-                      plan.propellant_kg * (1.0 + p.reserve_fraction) / 1000.0, propellant_kg / 1000.0);
-        plan.reason = buffer;
+        plan.reason = report::make(report::Code::lunar_outbound_insufficient_propellant,
+                                   {report::mass("needed", plan.propellant_kg * (1.0 + p.reserve_fraction)),
+                                    report::mass("onboard", propellant_kg)});
         return plan;
     }
     plan.feasible = true;

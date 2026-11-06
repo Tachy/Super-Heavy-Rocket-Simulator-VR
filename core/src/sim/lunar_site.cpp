@@ -18,7 +18,7 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
                                                                      const std::filesystem::path& data_dir) {
     auto global_file = config::load_terrain_grid_file(data_dir / "terrain" / "ldem_16.toml");
     if (global_file.projection != "simple_cylindrical") {
-        throw std::runtime_error("Mondgelände: ldem_16 ist kein zylindrisches Gitter");
+        throw std::runtime_error("lunar terrain: ldem_16 is not a cylindrical grid");
     }
     environment::CylindricalGrid global;
     global.pixels_per_degree = global_file.pixels_per_degree;
@@ -30,7 +30,7 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
     for (const auto& site : config::load_lunar_sites(config_dir)) {
         auto f = config::load_terrain_grid_file(data_dir / "terrain" / (site.id + ".toml"));
         if (f.projection != "polar_stereographic_south") {
-            throw std::runtime_error("Mondgelände: Kachel " + site.id + " ist nicht polarstereografisch (Süd)");
+            throw std::runtime_error("lunar terrain: tile " + site.id + " is not south polar stereographic");
         }
         environment::PolarStereographicTile t;
         t.sphere_radius_m = f.sphere_radius_m;
@@ -46,8 +46,8 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
         const auto [line, sample] = t.position(site.latitude_rad, site.longitude_rad);
         if (f.product != site.product || std::abs(line - half_px) > 1.0 || std::abs(sample - half_px) > 1.0 ||
             std::abs(half_px * f.scale_m - site.tile_half_size_m) > f.scale_m) {
-            throw config::ConfigError("Mondgelände: Kachel " + site.id +
-                                      " passt nicht mehr zu lunar_sites.toml - python tools/data_pipeline/fetch.py erneut ausführen");
+            throw config::ConfigError("lunar terrain: tile " + site.id +
+                                      " no longer matches lunar_sites.toml - run python tools/data_pipeline/fetch.py again");
         }
         tiles.push_back(std::move(t));
     }

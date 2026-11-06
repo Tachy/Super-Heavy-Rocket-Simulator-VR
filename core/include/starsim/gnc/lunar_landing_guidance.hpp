@@ -11,6 +11,7 @@
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::gnc {
 
@@ -100,7 +101,7 @@ public:
     bool land_without_approach();
     LunarDescentPhase phase() const { return phase_; }
     double braking_time_to_go_s() const { return braking_t_go_; }
-    const std::string& status() const { return status_; }  // German, e.g. why the approach could not be planned
+    const report::Report& status() const { return status_; }  // e.g. why the approach could not be planned; ok when none
     const ScvxLandingGuidance* approach() const { return approach_.get(); }
     // The braking set running now (index into braking_sets; the engine-out set replaces its groups).
     const std::vector<std::string>& braking_groups() const { return set_groups_; }
@@ -138,7 +139,7 @@ private:
     std::deque<std::pair<time::Epoch, double>> demand_history_;  // (epoch, thrust demand N) over demand_trend_s
     double braking_t_go_ = 0.0;
     bool legs_commanded_ = false;  // deployable legs commanded out (sticky; leg_deploy_lead_s)
-    std::string status_;
+    report::Report status_;
     bool debug_ = false;  // STARSIM_DEBUG_LUNAR_DESCENT
     time::Epoch next_debug_;
     // Real-time play (Task 11b fix round 1): the approach's first plan on the worker, begun the hold before the hand-over

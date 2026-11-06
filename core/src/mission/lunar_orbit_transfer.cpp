@@ -53,7 +53,7 @@ TwoBurnTransfer LunarOrbitTransfer::nrho_to_llo(const StateVector& state, time::
     TwoBurnTransfer result;
     const auto tp = next_perilune(nrho, epoch + min_lead_s);
     if (!tp) {
-        result.reason = "Kein Abstieg von der NRHO in die LLO gefunden";
+        result.reason = report::make(report::Code::lunar_no_nrho_to_llo_transfer);
         return result;
     }
     // Hohmann-like first guess: the perilune becomes the aposelene of an ellipse down to the LLO radius.
@@ -70,7 +70,7 @@ TwoBurnTransfer LunarOrbitTransfer::nrho_to_llo(const StateVector& state, time::
     const auto solution = transfer_.solve(state, epoch, *tp,
                                           {llo.altitude_m, llo.inclination_rad, *tp + half_period}, guess);
     if (!solution.converged) {
-        result.reason = "Kein Abstieg von der NRHO in die LLO gefunden";
+        result.reason = report::make(report::Code::lunar_no_nrho_to_llo_transfer);
         return result;
     }
     result.feasible = true;
@@ -151,7 +151,7 @@ TwoBurnTransfer LunarOrbitTransfer::llo_to_nrho(const StateVector& state, time::
     }
     if (!best.feasible) {
         best = {};
-        best.reason = "Kein Aufstieg von der LLO in die NRHO gefunden";
+        best.reason = report::make(report::Code::lunar_no_llo_to_nrho_transfer);
     }
     return best;
 }

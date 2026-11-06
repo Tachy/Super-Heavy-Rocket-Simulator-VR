@@ -156,11 +156,6 @@ std::pair<double, double> secant(F&& f, double x0, double f0, double x1, double 
     return {x1, f1};
 }
 
-std::string refusal(const char* format, double a, double b = 0.0) {
-    char text[200];
-    std::snprintf(text, sizeof(text), format, a, b);
-    return text;
-}
 }  // namespace
 
 double braking_range_m(double pdi_speed_mps, double mass_kg, double thrust_n, const BrakingRangeParameters& p) {
@@ -204,7 +199,7 @@ LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, t
     LunarDescentPlan plan;
     const Predictor predict(gravity_, ephemeris_, moon_orientation_);
     if (!terrain.in_tile(site_latitude_rad, site_longitude_rad)) {
-        plan.reason = "Landestelle außerhalb der Geländekachel (tools/data_pipeline/fetch.py)";
+        plan.reason = report::make(report::Code::lunar_site_outside_tile);
         return plan;
     }
     const auto rel0 = predict.relative(state_gcrf, epoch);
@@ -256,11 +251,11 @@ LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, t
                     : select_touchdown_point(terrain, site_latitude_rad, site_longitude_rad, plan.approach_azimuth_rad,
                                              footprint_radius_m, p);
             if (!touchdown) {
-                plan.reason = refusal(surface && hazards && surface->detail_on()
-                                          ? "Kein Landepunkt mit höchstens %.0f Grad Hangneigung, frei von Felsen unter "
-                                            "Füßen und Triebwerken, im Umkreis von %.0f m"
-                                          : "Kein Landepunkt mit höchstens %.0f Grad Hangneigung im Umkreis von %.0f m",
-                                      p.slope_limit_rad / constants::deg_to_rad, p.touchdown_search_radius_m);
+                plan.reason = report::make(surface && hazards && surface->detail_on()
+                                               ? report::Code::lunar_no_touchdown_point_hazards
+                                               : report::Code::lunar_no_touchdown_point,
+                                           {report::angle("slope", p.slope_limit_rad),
+                                            report::length("radius", p.touchdown_search_radius_m)});
                 return plan;
             }
             plan.touchdown = *touchdown;
@@ -328,7 +323,7 @@ LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, t
             const auto [doi_dv, doi_miss] = secant(periselene_miss, 0.0, periselene_miss(0.0), hohmann,
                                                    p.doi_tolerance_m, doi_iterations, "DOI");
             if (std::abs(doi_miss) > p.doi_tolerance_m) {
-                plan.reason = "Kein Abstiegsmanöver (DOI) gefunden";
+                plan.reason = report::make(report::Code::lunar_no_doi);
                 return plan;
             }
             plan.doi = {*doi_epoch, retrograde * doi_dv};
@@ -340,7 +335,7 @@ LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, t
             const auto pdi = predict.phase_epoch(descent, td_fixed, braking_angle, pdi_guess - trim_window_s,
                                                  pdi_guess + trim_window_s);
             if (!pdi) {
-                plan.reason = "Kein Beginn des Abstiegs (PDI) gefunden";
+                plan.reason = report::make(report::Code::lunar_no_pdi);
                 return plan;
             }
             plan.pdi_epoch = *pdi;
@@ -356,8 +351,7 @@ LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, t
             return plan;
         }
     }
-    plan.reason = refusal("Kein Überflug der Landestelle innerhalb von %.1f Tagen (Bahnebene zu weit entfernt)",
-                          p.search_s / 86400.0);
+    plan.reason = report::make(report::Code::lunar_no_site_pass, {report::number("days", p.search_s / 86400.0)});
     return plan;
 }
 

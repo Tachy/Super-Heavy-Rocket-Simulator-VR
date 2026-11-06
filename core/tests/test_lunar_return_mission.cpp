@@ -34,7 +34,7 @@ void print_budget(const char* what, const sim::LunarReturnBudget& b) {
     if (!std::getenv("STARSIM_VERBOSE")) return;
     std::printf("[lunar return] %s: closes %d (%s), propellant %.1f t, TEI %.1f m/s, braking %.1f m/s, entry %.0f m/s, "
                 "corridor %.2f .. %.2f deg (middle %.2f, width %.2f, %s), bank window at %.2f deg: %.1f .. %.1f deg\n",
-                what, b.closes ? 1 : 0, b.reason.c_str(), b.propellant_kg / 1000.0, b.tei_delta_v_mps,
+                what, b.closes ? 1 : 0, report::describe(b.reason).c_str(), b.propellant_kg / 1000.0, b.tei_delta_v_mps,
                 b.braking_delta_v_mps, b.entry_speed_mps, b.corridor.steep_rad / deg, b.corridor.shallow_rad / deg,
                 b.corridor.middle_rad / deg, b.corridor.width_rad / deg, b.corridor.limiting.c_str(),
                 b.bank_window.flight_path_rad / deg, b.bank_window.low_rad / deg, b.bank_window.high_rad / deg);
@@ -148,7 +148,7 @@ TEST_CASE("Lunar return start refuses without an entry corridor", "[lunar][retur
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
     CHECK_FALSE(s.return_planned);
-    CHECK_THAT(s.refusal, StartsWith("Kein Eintrittskorridor"));
+    CHECK_THAT(s.refusal, StartsWith("lunar.return_no_entry_corridor"));  // text until Task 10
 }
 
 TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][return][session]") {
@@ -164,7 +164,7 @@ TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
     CHECK_FALSE(s.return_planned);
-    CHECK_THAT(s.refusal, ContainsSubstring("Treibstoff"));
+    CHECK_THAT(s.refusal, ContainsSubstring("Treibstoff"));  // the Earth return planner's text (Task 9), carried as text until Task 10
 }
 
 // Header-tank plan review: TEI, mid-course corrections and the braking burn feed from the main tanks; the headers
@@ -183,7 +183,7 @@ TEST_CASE("Lunar return plan counts the main tanks only", "[lunar][return][sessi
     REQUIRE(b.closes);
     sim::place_lunar_return_ship(t.session, m, ship, epoch, b.propellant_kg - 25000.0, setup.ret);
     CHECK_FALSE(t.session.plan_lunar_return(setup));
-    CHECK_THAT(t.session.lunar_status(), ContainsSubstring("Treibstoff"));
+    CHECK_THAT(report::describe(t.session.lunar_status()), ContainsSubstring("Treibstoff"));  // the Earth return planner's text (Task 9)
 }
 
 TEST_CASE("An inclined LLO contains the return asymptote; below its declination none does", "[lunar][return]") {
@@ -296,6 +296,6 @@ TEST_CASE("Probe: Block 3 lunar return with boil-off", "[.r5_probe]") {
     std::printf("[r5 probe] Block 3 LLO return with boil-off: start %.1f t, end %.1f t (main %.1f t), %.1f d, caught %d, "
                 "impacted %d, status '%s', abort '%s'\n",
                 start_kg / 1e3, b.vehicle().propellant_kg() / 1e3, b.vehicle().main_propellant_kg() / 1e3,
-                (t.session.epoch() - t0) / 86400.0, b.caught(), b.impacted(), t.session.lunar_status().c_str(),
+                (t.session.epoch() - t0) / 86400.0, b.caught(), b.impacted(), report::describe(t.session.lunar_status()).c_str(),
                 t.session.burn_abort_reason().c_str());
 }

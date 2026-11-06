@@ -153,11 +153,13 @@ TEST_CASE("A lunar ascent is refused when the vehicle is not landed or lacks the
     Fixture fx;
     fx.place_over_site(hls(test::hls_landed_propellant_kg), 50.0, {});  // hovering 50 m up, not landed
     CHECK_FALSE(fx.session.plan_lunar_ascent({}, 0.0));
-    CHECK(fx.session.lunar_status().find("nicht gelandet") != std::string::npos);
+    CHECK(fx.session.lunar_status().code == report::Code::lunar_no_ascent_not_landed);
     Fixture dry;
     dry.land(hls(60e3));  // ~180 t: ~1.2 km/s, far short of the ~1.9 km/s to orbit
     CHECK_FALSE(dry.session.plan_lunar_ascent({}, 0.0));
-    CHECK(dry.session.lunar_status().find("Aufstieg") != std::string::npos);
+    REQUIRE(dry.session.lunar_status().code == report::Code::lunar_no_ascent_budget);
+    REQUIRE(dry.session.lunar_status().causes.size() == 1u);
+    CHECK(dry.session.lunar_status().causes.front().code == report::Code::lunar_budget_short);
     CHECK(dry.session.lunar_step() != sim::LunarStep::Ascent);
 }
 
@@ -187,7 +189,7 @@ TEST_CASE("After a 3-day stay under time warp the HLS ascends into the 100 km LL
         const double dv = 380.0 * constants::standard_gravity_mps2 * std::log(m0 / m1);
         std::printf("[lunar_ascent] liftoff %.1f t: LLO %.2f x %.2f km, %.1f t used (%.0f m/s at 380 s), peak %.2f m/s^2, %s\n",
                     m0 / 1000.0, low / 1000.0, high / 1000.0, (m0 - m1) / 1000.0, dv, peak,
-                    fx.session.lunar_status().c_str());
+                    report::describe(fx.session.lunar_status()).c_str());
         CHECK(low > 99e3);  // spec: the LLO within 1 km
         CHECK(high < 101e3);
         CHECK(dv == Catch::Approx(1900.0).margin(200.0));  // spec ~1.9 km/s
@@ -221,7 +223,7 @@ TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish t
     const double m1 = fx.mass_kg();
     const auto [low, high] = fx.llo_apsides();
     std::printf("[lunar_ascent] engine out 30 s into PEG: LLO %.2f x %.2f km, %.1f t used, peak %.2f m/s^2, %s\n",
-                low / 1000.0, high / 1000.0, (m0 - m1) / 1000.0, peak, fx.session.lunar_status().c_str());
+                low / 1000.0, high / 1000.0, (m0 - m1) / 1000.0, peak, report::describe(fx.session.lunar_status()).c_str());
     CHECK(low > 99e3);
     CHECK(high < 101e3);
 }
@@ -241,7 +243,7 @@ TEST_CASE("An abort 1 km above the touchdown point reaches orbit", "[sim][lunar_
     CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);
     std::printf("[lunar_ascent] abort from 1 km at %.1f t: %.1f t used, altitude %.1f km, peak %.2f m/s^2, %s\n",
                 m0 / 1000.0, (m0 - fx.mass_kg()) / 1000.0, fx.altitude_m() / 1000.0, peak,
-                fx.session.lunar_status().c_str());
+                report::describe(fx.session.lunar_status()).c_str());
     CHECK(fx.altitude_m() > 90e3);
 }
 
@@ -259,7 +261,7 @@ TEST_CASE("An abort without the propellant for orbit is refused and the landing 
     std::printf("[lunar_ascent] refusal case: %.1f t left at 1 km (dry %.0f t)\n", (fx.mass_kg() - dry_kg) / 1000.0,
                 dry_kg / 1000.0);
     CHECK_FALSE(fx.session.abort_landing(0));
-    CHECK(fx.session.lunar_status().find("Abbruch nicht möglich") != std::string::npos);
+    CHECK(fx.session.lunar_status().code == report::Code::lunar_abort_not_possible_propellant);
     CHECK(fx.session.lunar_step() == sim::LunarStep::PoweredDescent);
 }
 
@@ -277,7 +279,7 @@ TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
     }
     aborted = fx.session.lunar_step() == sim::LunarStep::AbortAscent;
     std::printf("[lunar_ascent] PDI 60 km short: step %s, %s\n", sim::id_of(fx.session.lunar_step()),
-                fx.session.lunar_status().c_str());
+                report::describe(fx.session.lunar_status()).c_str());
     REQUIRE(aborted);
     fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
     CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);
@@ -291,14 +293,20 @@ TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent"
     constexpr double dry_kg = 420e3, propellant_kg = 150e3;  // far too little for orbit (~1.9 km/s needs ~200 t)
     test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, propellant_kg, dry_kg, 60e3);
     REQUIRE(fx.session.begin_powered_descent(point, 180.0 * deg));
-    for (int i = 0; i < 1200 * 10 && fx.session.lunar_status().find("Abbruch nicht möglich") == std::string::npos &&
+    const auto abort_refused = [&] {  // the abort's refusal, then the guidance keeps flying (or lands without a plan)
+        const auto code = fx.session.lunar_status().code;
+        return code == report::Code::lunar_abort_not_possible_propellant ||
+               code == report::Code::lunar_target_unreachable_no_abort ||
+               code == report::Code::lunar_target_unreachable_terminal;
+    };
+    for (int i = 0; i < 1200 * 10 && !abort_refused() &&
                     fx.session.lunar_step() == sim::LunarStep::PoweredDescent;
          ++i) {
         fx.session.advance_to(fx.session.epoch() + 0.1, 100);
     }
     std::printf("[lunar_ascent] refused automatic abort: step %s, %s\n", sim::id_of(fx.session.lunar_step()),
-                fx.session.lunar_status().c_str());
-    REQUIRE(fx.session.lunar_status().find("Abbruch nicht möglich") != std::string::npos);
+                report::describe(fx.session.lunar_status()).c_str());
+    REQUIRE(abort_refused());
     fx.session.advance_to(fx.session.epoch() + 5.0, 1000);
     const auto* g = fx.session.lunar_landing_guidance();
     REQUIRE(g);

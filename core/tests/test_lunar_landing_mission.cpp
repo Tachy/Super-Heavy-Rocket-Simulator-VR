@@ -114,7 +114,7 @@ TEST_CASE("A parking orbit below the Moon's declination is refused", "[sim][luna
     mission.parking_inclination_rad = 2.0 * constants::deg_to_rad;  // the Moon is at ~20 deg declination then
     const auto epoch = spice::SpiceTimeConverter().from_utc({2026, 11, 2, 0, 0, 0.0});
     CHECK_THROWS_WITH(sim::place_lunar_landing_mission(session, mission, STARSIM_CONFIG_DIR, epoch),
-                      ContainsSubstring("Deklination"));
+                      ContainsSubstring("lunar.mission_no_parking_plane"));
 }
 
 TEST_CASE("A lunar landing mission needs a session with the Moon as a reference body", "[sim][lunar][mission]") {
@@ -125,7 +125,7 @@ TEST_CASE("A lunar landing mission needs a session with the Moon as a reference 
     const auto mission = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo");
     const auto epoch = spice::SpiceTimeConverter().from_utc({2026, 11, 2, 0, 0, 0.0});
     CHECK_THROWS_WITH(sim::place_lunar_landing_mission(session, mission, STARSIM_CONFIG_DIR, epoch),
-                      ContainsSubstring("Mondorientierung"));
+                      ContainsSubstring("lunar.landing_no_moon_orientation"));
 }
 
 TEST_CASE("Lunar landing missions load their descent, surface, ascent and budget sections", "[config][lunar]") {
@@ -155,7 +155,7 @@ TEST_CASE("Mission 1 closes in the LLO with the 120 t HLS; NRHO and 204 t are re
             const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc));
             CAPTURE(id, s.refusal);
             CHECK(s.return_planned == closes);
-            if (!closes) CHECK(s.refusal.find("Mission nicht durchführbar") != std::string::npos);
+            if (!closes) CHECK(s.refusal.find("lunar.mission_infeasible") != std::string::npos);  // text until Task 10
         }
         {
             auto heavy = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
@@ -164,7 +164,7 @@ TEST_CASE("Mission 1 closes in the LLO with the 120 t HLS; NRHO and 204 t are re
             const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc), &heavy);
             CAPTURE(id, s.refusal);
             CHECK_FALSE(s.return_planned);
-            CHECK(s.refusal.find("Mission nicht durchführbar") != std::string::npos);
+            CHECK(s.refusal.find("lunar.mission_infeasible") != std::string::npos);  // text until Task 10
             CHECK(session.lunar_step() == sim::LunarStep::None);
         }
     }
@@ -207,12 +207,12 @@ void fly_mission_1(const char* id, double span_days, sim::LunarStep end_step) {
     const double m0 = session.body(0).vehicle().mass_properties().mass_kg;
     session.advance_to(s.epoch + span_days * 86400.0, 200'000'000);
     const auto& td = session.lunar_touchdown();
-    INFO(session.lunar_status());
+    INFO(report::describe(session.lunar_status()));
     REQUIRE(td);
     std::printf("[lunar_mission] %s: %s, touchdown %.2f m / %.2f m/s, %.1f t left of %.0f t (propellant %.1f t), %s\n",
                 id, sim::id_of(td->outcome), td->offset_m, td->sink_mps,
                 session.body(0).vehicle().mass_properties().mass_kg / 1000.0, m0 / 1000.0,
-                session.body(0).vehicle().propellant_kg() / 1000.0, session.lunar_status().c_str());
+                session.body(0).vehicle().propellant_kg() / 1000.0, report::describe(session.lunar_status()).c_str());
     CHECK(td->outcome == sim::LegTouchdown::Landed);
     CHECK(td->offset_m < 1.0);
     CHECK(session.lunar_mission_complete());
@@ -245,5 +245,5 @@ TEST_CASE("Lunar mission epoch probe", "[.][lunar_epoch_probe]") {
     INFO(s.refusal);
     REQUIRE(s.return_planned);
     session.advance_to(epoch + (span ? std::atof(span) : 10.0) * 86400.0, 200'000'000);
-    std::printf("[epoch_probe] %s shift %s d: %s\n", id, shift ? shift : "0", session.lunar_status().c_str());
+    std::printf("[epoch_probe] %s shift %s d: %s\n", id, shift ? shift : "0", report::describe(session.lunar_status()).c_str());
 }

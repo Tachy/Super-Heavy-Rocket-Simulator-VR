@@ -36,7 +36,7 @@
 namespace starsim::sim {
 
 using detail::far_future_s;
-using detail::german;
+using detail::step_ref;
 using detail::vacuum_groups;
 
 bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
@@ -45,16 +45,16 @@ bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
         return false;  // a flight under way keeps its plan
     }
     if (!moon_orientation_) {
-        lunar_status_ = "Kein Rückflug: keine Mondorientierung";
+        lunar_status_ = report::make(report::Code::lunar_no_return_no_moon_orientation);
         return false;
     }
     if (reference_body(controlled_) != ephemeris::Body::Moon) {
-        lunar_status_ = "Kein Rückflug: nicht beim Mond";
+        lunar_status_ = report::make(report::Code::lunar_no_return_not_at_moon);
         return false;
     }
     const auto configurations = burn_configurations(&vacuum_groups);
     if (configurations.empty()) {
-        lunar_status_ = "Kein Rückflug: keine Vakuum-Triebwerke";
+        lunar_status_ = report::make(report::Code::lunar_no_return_no_vacuum_engines);
         return false;
     }
     const auto& vehicle = bodies_[controlled_].body->vehicle();
@@ -70,11 +70,11 @@ bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
                                           isp_s, vehicle.main_propellant_kg());  // main-fed; headers: landing
     } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
         lunar_return_plan_.reset();
-        lunar_status_ = "Kein Rückflug: Planung fehlgeschlagen";
+        lunar_status_ = report::make(report::Code::lunar_no_return_planning_failed);
         return false;
     }
     if (!lunar_return_plan_->feasible) {
-        lunar_status_ = lunar_return_plan_->reason;
+        lunar_status_ = report::legacy(lunar_return_plan_->reason);  // text until the Earth return planner is converted (Task 9)
         return false;
     }
     lunar_return_ = planned;
@@ -89,8 +89,9 @@ bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
                                                                    : *lunar_return_plan_->nrho_departure);
     autopilot_.state = AutopilotState::Lunar;
     attitude_mode_ = {};
-    lunar_status_ = "Rückflug: TEI " + german(lunar_return_plan_->tei_delta_v_mps, 0) + " m/s, Bremsen " +
-                    german(lunar_return_plan_->braking_delta_v_mps, 0) + " m/s geplant";
+    lunar_status_ = report::make(report::Code::lunar_return_planned,
+                                 {report::speed("tei", lunar_return_plan_->tei_delta_v_mps),
+                                  report::speed("braking", lunar_return_plan_->braking_delta_v_mps)});
     return true;
 }
 
@@ -102,10 +103,13 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
                                  lunar_step_ == LunarStep::CaptureCircularize;
         if (aerocapture) {
             flying.entry_guidance.reset();
-            lunar_abort(cause.empty() ? std::string("Aircatch: Aufschlag") : "Aircatch: zerbrochen (" + cause + ")");
+            lunar_abort(cause.empty() ? report::make(report::Code::lunar_aerocapture_impact)
+                                      : report::with_cause(report::make(report::Code::lunar_aerocapture_broke_up),
+                                                           report::legacy(cause)));
             return;
         }
-        lunar_abort("Rückflug beendet: " + (cause.empty() ? std::string("Aufschlag") : cause));
+        lunar_abort(cause.empty() ? report::make(report::Code::lunar_return_ended_impact)
+                                  : report::with_cause(report::make(report::Code::lunar_return_ended), report::legacy(cause)));
         return;
     }
     switch (lunar_step_) {
@@ -113,7 +117,7 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             if (epoch_ - lunar_step_epoch_ < 0.0) break;
             const auto configurations = burn_configurations(&vacuum_groups);
             if (configurations.empty()) {  // engines lost since the planning
-                lunar_abort("Rückflug abgebrochen: keine Vakuum-Triebwerke");
+                lunar_abort(report::make(report::Code::lunar_return_aborted_no_vacuum_engines));
                 break;
             }
             if (!lunar_return_departed_) {  // NRHO: the departure burn down to the return flyby, as planned
@@ -121,7 +125,7 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
                 if (lunar_burn(departure, true, LunarStep::ReturnDeparture)) {
                     lunar_return_departed_ = true;
                     lunar_step_epoch_ = lunar_ignition_lead(lunar_return_plan_->tei);
-                    lunar_status_ = "Abflug aus der NRHO: " + german(norm(departure.delta_v_gcrf_mps), 0) + " m/s";
+                    lunar_status_ = report::make(report::Code::lunar_nrho_departure, {report::speed("dv", norm(departure.delta_v_gcrf_mps))});
                 }
                 break;
             }
@@ -140,7 +144,7 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             }
             if (lunar_burn(tei, true, LunarStep::Tei)) {
                 lunar_step_ = LunarStep::Tei;
-                lunar_status_ = "TEI: " + german(norm(tei.delta_v_gcrf_mps), 0) + " m/s";
+                lunar_status_ = report::make(report::Code::lunar_tei, {report::speed("dv", norm(tei.delta_v_gcrf_mps))});
             }
             break;
         }
@@ -191,7 +195,7 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             } else if (telemetry(controlled_).altitude_m < aerocapture_floor_height_m) {
                 // deep in the air: the pass will not climb out again - the ship falls on (honest outcome)
                 flying.entry_guidance.reset();
-                lunar_abort("Aircatch: in der Atmosphäre geblieben");
+                lunar_abort(report::make(report::Code::lunar_aerocapture_stayed_in_atmosphere));
             }
             break;
         }
@@ -199,9 +203,8 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             lunar_sun_coast(flying);
             if (epoch_ - lunar_step_epoch_ < 0.0) break;
             const auto& groups = flying.body->vehicle().stages().front().config.deorbit_engine_groups;
-            const std::string name = to_string(lunar_capture_burn_step_);
             if (!execute_burn(lunar_capture_burn_, groups) && !lunar_small_burn(lunar_capture_burn_)) {
-                lunar_abort("Aircatch: " + name + " nicht möglich");
+                lunar_abort(report::make(report::Code::lunar_aerocapture_burn_not_possible, {step_ref("burn", lunar_capture_burn_step_)}));
                 break;
             }
             const auto centre = orbit::propagate_coast(gravity_, controlled_state(), epoch_, lunar_capture_burn_.epoch);
@@ -209,7 +212,9 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
                                     flying.body->vehicle().mass_properties().mass_kg, centre.state.position_m});
             lunar_step_ = lunar_capture_burn_step_;
             attitude_mode_ = {};
-            lunar_status_ = "Aircatch: " + name + " " + german(norm(lunar_capture_burn_.delta_v_gcrf_mps), 1) + " m/s";
+            lunar_status_ = report::make(report::Code::lunar_aerocapture_burn,
+                                         {step_ref("burn", lunar_capture_burn_step_),
+                                          report::speed("dv", norm(lunar_capture_burn_.delta_v_gcrf_mps))});
             break;
         }
         case LunarStep::RepassTrim:  // the perigee correction is flown: the next perigee is another pass
@@ -251,7 +256,7 @@ void FlightSession::lunar_return_enter_coast() {
     lunar_sun_hold_.start(epoch_);
     lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
     if (!lunar_return_braking_epoch_) {  // no Earth approach within 6 days: an MCC can still bring it back
-        lunar_status_ = "Rückflug: keine Annäherung an die Erde";
+        lunar_status_ = report::make(report::Code::lunar_return_no_earth_approach);
     }
     while (lunar_mcc_index_ < p.mcc_after_tei_s.size()) {
         const time::Epoch mcc = lunar_tli_end_ + p.mcc_after_tei_s[lunar_mcc_index_];
@@ -259,14 +264,15 @@ void FlightSession::lunar_return_enter_coast() {
             !lunar_return_braking_epoch_ || *lunar_return_braking_epoch_ - mcc >= p.mcc_min_before_braking_s;
         if (before_braking && mcc - epoch_ > 0.0) {
             lunar_step_epoch_ = mcc - burn_lead_s();
-            lunar_status_ = "Rückflug: Kurskorrektur " + std::to_string(lunar_mcc_index_ + 1) + " in " +
-                            german((mcc - epoch_) / 3600.0, 1) + " h";
+            lunar_status_ = report::make(report::Code::lunar_return_correction_in,
+                                         {report::count("index", static_cast<long long>(lunar_mcc_index_ + 1)),
+                                          report::time("wait", mcc - epoch_)});
             return;
         }
         ++lunar_mcc_index_;  // too close to the braking burn (or already past)
     }
     if (!lunar_return_braking_epoch_) {
-        lunar_abort("Rückflug abgebrochen: keine Annäherung an die Erde");
+        lunar_abort(report::make(report::Code::lunar_return_aborted_no_earth_approach));
         return;
     }
     const auto configurations = burn_configurations(&vacuum_groups);
@@ -277,7 +283,7 @@ void FlightSession::lunar_return_enter_coast() {
                                                  configurations.front().thrust_n, configurations.front().mass_flow_kgps);
     }
     lunar_step_epoch_ = *lunar_return_braking_epoch_ - half_burn_s - burn_lead_s();
-    lunar_status_ = "Rückflug: Bremsbrennen in " + german((*lunar_return_braking_epoch_ - epoch_) / 3600.0, 1) + " h";
+    lunar_status_ = report::make(report::Code::lunar_return_braking_in, {report::time("wait", *lunar_return_braking_epoch_ - epoch_)});
 }
 
 void FlightSession::lunar_return_coast_event() {
@@ -299,7 +305,7 @@ void FlightSession::lunar_return_coast_event() {
             const bool replanned = replan_lunar_return(back_mps);
             if (lunar_debug_) {
                 std::printf("[lunar] MCC %s: %s\n", converged ? "over the allowance" : "not converged",
-                            lunar_status_.c_str());
+                            report::describe(lunar_status_).c_str());
             }
             if (replanned) return;
             if (mcc) --lunar_mcc_index_;  // the correction back flies in this slot (ReturnCorrection counts it)
@@ -311,45 +317,46 @@ void FlightSession::lunar_return_coast_event() {
         }
         if (lunar_burn(*mcc, false, LunarStep::ReturnCorrection)) {
             lunar_step_ = LunarStep::ReturnCorrection;
-            lunar_status_ = "Kurskorrektur " + std::to_string(lunar_mcc_index_ + 1) + ": " +
-                            german(norm(mcc->delta_v_gcrf_mps), 2) + " m/s";
+            lunar_status_ = report::make(report::Code::lunar_correction,
+                                         {report::count("index", static_cast<long long>(lunar_mcc_index_ + 1)),
+                                          report::speed("dv", norm(mcc->delta_v_gcrf_mps))});
         }
         return;
     }
     const auto configurations = burn_configurations(&vacuum_groups);
     if (configurations.empty()) {
-        lunar_abort("Rückflug abgebrochen: keine Vakuum-Triebwerke");
+        lunar_abort(report::make(report::Code::lunar_return_aborted_no_vacuum_engines));
         return;
     }
     planner.set_finite_burn(mission::FiniteBurnModel{bodies_[controlled_].body->vehicle().mass_properties().mass_kg,
                                                      configurations.front().thrust_n,
                                                      configurations.front().mass_flow_kgps});
     auto braking = planner.braking(state, epoch_, p.target);
-    std::string status = "Bremsbrennen: ";
+    auto status_code = report::Code::lunar_braking;
     if (!braking) {
         // the plan's vis-viva impulse, retrograde at the predicted crossing
         const auto crossing = lunar_return_braking_epoch_ ? *lunar_return_braking_epoch_ : epoch_ + burn_lead_s();
         const auto at = orbit::propagate_coast(gravity_, state, epoch_, crossing).state;
         braking = gnc::BurnNode{crossing,
                                 -math::normalized(at.velocity_mps) * lunar_return_plan_->braking_delta_v_mps};
-        status = "Bremsbrennen ungelenkt: ";
+        status_code = report::Code::lunar_braking_unguided;
     }
     if (lunar_burn(*braking, true, LunarStep::Braking)) {
         lunar_step_ = LunarStep::Braking;
-        lunar_status_ = status + german(norm(braking->delta_v_gcrf_mps), 0) + " m/s";
+        lunar_status_ = report::make(status_code, {report::speed("dv", norm(braking->delta_v_gcrf_mps))});
     }
 }
 
 bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
     if (!lunar_return_ || !lunar_return_plan_ || lunar_step_ != LunarStep::ReturnCoast || bodies_.empty() ||
         bodies_[controlled_].body->impacted()) {
-        lunar_status_ = "Nachplanung: nur im Rückflug zur Erde (nach TEI, vor dem Bremsbrennen)";
+        lunar_status_ = report::make(report::Code::lunar_replan_only_in_return_coast);
         return false;
     }
     const auto& p = lunar_return_->ret;
     const auto configurations = burn_configurations(&vacuum_groups);
     if (configurations.empty()) {
-        lunar_status_ = "Nachplanung: keine Vakuum-Triebwerke";
+        lunar_status_ = report::make(report::Code::lunar_replan_no_vacuum_engines);
         return false;
     }
     mission::EarthReturnPlanner planner(gravity_, *env_.ephemeris, earth_);
@@ -361,7 +368,7 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
     const auto brake = planner.braking_epoch(state, epoch_, p.target);
     // no predicted approach (a TEI far off): the recovery is tried all the same - that is when it matters most
     if (brake && burn_epoch > *brake - p.mcc_min_before_braking_s) {
-        lunar_status_ = "Nachplanung: zu nah am Bremsbrennen";
+        lunar_status_ = report::make(report::Code::lunar_replan_too_close_to_braking);
         return false;
     }
     mission::ReturnBurn r;
@@ -371,8 +378,8 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
         r.converged = false;
     }
     if (!r.converged) {
-        lunar_status_ = brake ? "Nachplanung: kein Weg nach Starbase"
-                              : "Nachplanung: keine Annäherung an die Erde, kein Weg nach Starbase";
+        lunar_status_ = report::make(brake ? report::Code::lunar_replan_no_way_home
+                                           : report::Code::lunar_replan_no_approach_no_way_home);
         return false;
     }
     // propellant: the correction and the new braking burn above the landing propellant
@@ -383,11 +390,11 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
         vehicle.mass_properties().mass_kg * (1.0 - std::exp(-(dv + r.arrival.braking_delta_v_mps) / ve));
     const double available = vehicle.main_propellant_kg();  // the headers hold the landing propellant
     if (needed > available) {
-        lunar_status_ = "Nachplanung: Treibstoff reicht nicht (" + german((needed - available) / 1000.0, 1) + " t fehlen)";
+        lunar_status_ = report::make(report::Code::lunar_replan_propellant, {report::mass("missing", needed - available)});
         return false;
     }
     if (dv + r.arrival.braking_delta_v_mps >= cheaper_than_mps) {
-        lunar_status_ = "Nachplanung: nicht günstiger (" + german(dv + r.arrival.braking_delta_v_mps, 0) + " m/s)";
+        lunar_status_ = report::make(report::Code::lunar_replan_not_cheaper, {report::speed("dv", dv + r.arrival.braking_delta_v_mps)});
         return false;
     }
     lunar_return_->ret.target.lateral_offset_m = r.arrival.lateral_offset_m;
@@ -395,7 +402,7 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
     lunar_return_plan_->braking_delta_v_mps = r.arrival.braking_delta_v_mps;
     ++lunar_replans_;
     if (dv < p.mcc_threshold_mps) {
-        lunar_status_ = "Nachplanung: keine Korrektur nötig";
+        lunar_status_ = report::make(report::Code::lunar_replan_no_correction_needed);
         lunar_return_enter_coast();
         return true;
     }
@@ -403,8 +410,8 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
     if (!lunar_burn(r.burn, true, LunarStep::ReturnCorrection)) return false;
     lunar_replan_burn_ = true;
     lunar_step_ = LunarStep::ReturnCorrection;
-    lunar_status_ = "Nachplanung: Korrektur " + german(dv, 2) + " m/s, Bremsen " +
-                    german(r.arrival.braking_delta_v_mps, 0) + " m/s";
+    lunar_status_ = report::make(report::Code::lunar_replan_correction,
+                                 {report::speed("dv", dv), report::speed("braking", r.arrival.braking_delta_v_mps)});
     return true;
 }
 
@@ -423,7 +430,7 @@ void FlightSession::lunar_return_after_braking() {
     lunar_entry_trim_commanded_ = false;
     lunar_step_epoch_ = epoch_ + entry_trim_settle_s;
     attitude_mode_ = {};
-    lunar_status_ = "Eintrittskorrektur: Navigation";
+    lunar_status_ = report::make(report::Code::lunar_entry_navigation);
 }
 
 void FlightSession::lunar_return_entry_trim() {
@@ -446,7 +453,7 @@ void FlightSession::lunar_return_entry_trim() {
     lunar_burns_.push_back({LunarStep::EntryTrim, *trim, bodies_[controlled_].body->vehicle().mass_properties().mass_kg,
                             centre.position_m});
     lunar_entry_trim_commanded_ = true;
-    lunar_status_ = "Eintrittskorrektur: " + german(norm(trim->delta_v_gcrf_mps), 1) + " m/s";
+    lunar_status_ = report::make(report::Code::lunar_entry_trim, {report::speed("dv", norm(trim->delta_v_gcrf_mps))});
 }
 
 void FlightSession::lunar_return_enter_entry() {
@@ -457,7 +464,7 @@ void FlightSession::lunar_return_enter_entry() {
         deorbit_parameters_.entry_interface_height_m = target.interface_height_m;  // entry_start_epoch() uses it
         lunar_step_epoch_ = entry_start_epoch();  // the guidance starts at the entry lead
         attitude_mode_ = {};
-        lunar_status_ = "Aircatch: Eintritt mit " + german(lunar_return_arrival_speed(), 0) + " m/s";
+        lunar_status_ = report::make(report::Code::lunar_aerocapture_entry, {report::speed("speed", lunar_return_arrival_speed())});
         return;
     }
     lunar_step_ = LunarStep::EarthEntry;
@@ -467,14 +474,14 @@ void FlightSession::lunar_return_enter_entry() {
     autopilot_.state = AutopilotState::Return;
     entry_start_ = entry_start_epoch();
     attitude_mode_ = {};
-    lunar_status_ = "Wiedereintritt: " + german(lunar_return_arrival_speed(), 0) + " m/s";
+    lunar_status_ = report::make(report::Code::lunar_earth_entry, {report::speed("speed", lunar_return_arrival_speed())});
 }
 
 void FlightSession::lunar_return_captured(Flying& flying) {
     const auto state = controlled_state();
     const auto e = orbit::elements_from_state(state, constants::earth_gm_m3ps2);
     if (e.semi_major_axis_m <= 0.0 || e.eccentricity >= 1.0) {
-        lunar_abort("Aircatch: Bahn nicht geschlossen (Abprall)");
+        lunar_abort(report::make(report::Code::lunar_aerocapture_orbit_open));
         return;
     }
     const double gm = constants::earth_gm_m3ps2;
@@ -496,9 +503,9 @@ void FlightSession::lunar_return_captured(Flying& flying) {
     }
     if (!lunar_capture_coast(flying, *node, LunarStep::PerigeeRaise)) return;
     const double apoapsis_m = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
-    lunar_status_ = "Aircatch: Apogäum " + german(apoapsis_m / 1000.0, 0) + " km, Perigäumsanhebung " +
-                    german(norm(node->delta_v_gcrf_mps), 1) + " m/s in " + german((node->epoch - epoch_) / 60.0, 0) +
-                    " min";
+    lunar_status_ = report::make(report::Code::lunar_aerocapture_perigee_raise,
+                                 {report::length("apoapsis", apoapsis_m), report::speed("dv", norm(node->delta_v_gcrf_mps)),
+                                  report::time("wait", node->epoch - epoch_)});
 }
 
 bool FlightSession::lunar_capture_coast(Flying& flying, const gnc::BurnNode& node, LunarStep burn) {
@@ -515,9 +522,9 @@ bool FlightSession::lunar_capture_coast(Flying& flying, const gnc::BurnNode& nod
         const double needed_kg = mass_kg * (1.0 - std::exp(-dv_mps * c.mass_flow_kgps / c.thrust_n));
         const double main_kg = flying.body->vehicle().main_propellant_kg();
         if (needed_kg > main_kg) {
-            lunar_abort("Aircatch: " + std::string(to_string(burn)) + " nicht möglich (" + german(dv_mps, 0) +
-                        " m/s, " + german(needed_kg / 1000.0, 1) + " t nötig, " + german(main_kg / 1000.0, 1) +
-                        " t in den Haupttanks)");
+            lunar_abort(report::make(report::Code::lunar_aerocapture_burn_not_flyable,
+                                     {step_ref("burn", burn), report::speed("dv", dv_mps), report::mass("needed", needed_kg),
+                                      report::mass("available", main_kg)}));
             return false;
         }
     }
@@ -540,10 +547,10 @@ void FlightSession::lunar_return_repass(Flying& flying, double apoapsis_m) {
         return;
     }
     if (!lunar_capture_coast(flying, *node, LunarStep::RepassTrim)) return;
-    lunar_status_ = "Aircatch: Apogäum " + german(apoapsis_m / 1000.0, 0) + " km, Durchgang " +
-                    std::to_string(lunar_aerocapture_passes_ + 1) + " - Perigäumskorrektur " +
-                    german(norm(node->delta_v_gcrf_mps), 1) + " m/s in " + german((node->epoch - epoch_) / 60.0, 0) +
-                    " min";
+    lunar_status_ = report::make(report::Code::lunar_aerocapture_repass_trim,
+                                 {report::length("apoapsis", apoapsis_m),
+                                  report::count("passes", static_cast<long long>(lunar_aerocapture_passes_ + 1)),
+                                  report::speed("dv", norm(node->delta_v_gcrf_mps)), report::time("wait", node->epoch - epoch_)});
 }
 
 void FlightSession::lunar_return_next_pass() {
@@ -555,8 +562,9 @@ void FlightSession::lunar_return_next_pass() {
     attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};  // Sun-pointed as the capture coast
     lunar_sun_hold_.start(epoch_);
     lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
-    lunar_status_ = "Aircatch: Durchgang " + std::to_string(lunar_aerocapture_passes_) + " in " +
-                    german((lunar_step_epoch_ - epoch_) / 3600.0, 1) + " h";
+    lunar_status_ = report::make(report::Code::lunar_aerocapture_pass_in,
+                                 {report::count("passes", static_cast<long long>(lunar_aerocapture_passes_)),
+                                  report::time("wait", lunar_step_epoch_ - epoch_)});
 }
 
 void FlightSession::lunar_return_raised(Flying& flying) {
@@ -565,7 +573,7 @@ void FlightSession::lunar_return_raised(Flying& flying) {
     const double periapsis_m = e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m;
     const double apoapsis_m = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
     if (e.semi_major_axis_m <= 0.0 || e.eccentricity >= 1.0 || periapsis_m < capture_min_apsis_height_m) {
-        lunar_abort("Aircatch: Perigäum zu tief");
+        lunar_abort(report::make(report::Code::lunar_aerocapture_perigee_too_low));
         return;
     }
     const auto node = gnc::circularize_at_periapsis(state, epoch_, constants::earth_gm_m3ps2);
@@ -574,21 +582,24 @@ void FlightSession::lunar_return_raised(Flying& flying) {
         return;
     }
     if (!lunar_capture_coast(flying, *node, LunarStep::CaptureCircularize)) return;
-    lunar_status_ = "Aircatch: Perigäum " + german(periapsis_m / 1000.0, 0) + " km, Zirkularisierung " +
-                    german(norm(node->delta_v_gcrf_mps), 1) + " m/s in " + german((node->epoch - epoch_) / 60.0, 0) +
-                    " min";
+    lunar_status_ = report::make(report::Code::lunar_aerocapture_circularization,
+                                 {report::length("periapsis", periapsis_m), report::speed("dv", norm(node->delta_v_gcrf_mps)),
+                                  report::time("wait", node->epoch - epoch_)});
 }
 
 void FlightSession::lunar_return_to_b4() {
     const auto e = orbit::elements_from_state(controlled_state(), constants::earth_gm_m3ps2);
     const double periapsis_m = e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m;
     if (e.semi_major_axis_m <= 0.0 || e.eccentricity >= 1.0 || periapsis_m < capture_min_apsis_height_m) {
-        lunar_abort("Aircatch: Perigäum zu tief");
+        lunar_abort(report::make(report::Code::lunar_aerocapture_perigee_too_low));
         return;
     }
     const auto deorbit = lunar_return_->deorbit;
-    lunar_abort("Rückkehr nach Starbase (b4)");  // the lunar flight ends here (autopilot Off): b4 takes over
-    const auto refused = [this] { lunar_status_ = deorbit_plan_ ? deorbit_plan_->reason : std::string("Keine Rückkehr möglich"); };
+    lunar_abort(report::make(report::Code::lunar_return_to_base));  // the lunar flight ends here (autopilot Off): b4 takes over
+    const auto refused = [this] {
+        // the deorbit planner's reason is still text (Task 9)
+        lunar_status_ = deorbit_plan_ ? report::legacy(deorbit_plan_->reason) : report::make(report::Code::lunar_no_return_possible);
+    };
     // real-time play (fix round 1, I3): the return planned on a worker while the ship coasts on; else at once
     const auto planned = begin_ship_return(deorbit, realtime_planning_);
     if (!planned) {

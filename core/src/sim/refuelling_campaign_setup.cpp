@@ -25,6 +25,7 @@
 #include "starsim/vehicle/attitude_hold_gas.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
+#include "flight_session_lunar_detail.hpp"
 
 namespace starsim::sim {
 
@@ -80,7 +81,7 @@ double orbit_boil_off_kgps(vehicle::Vehicle& v, double main_kg, const math::Stat
 }
 
 struct HlsDemand {
-    std::string refusal;  // German; empty when planned
+    report::Report refusal;  // ok when planned
     CampaignHlsDemand values;
 };
 
@@ -92,8 +93,8 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
     session.set_ignition_settling(ignition_settling);  // the same flag as the windows' gas (f3 minor M7)
     try {
         place_lunar_landing_mission(session, lunar, src.config_dir, lunar_epoch, &hls_full);
-    } catch (const std::runtime_error& e) {  // no plane, terrain files missing (German)
-        d.refusal = e.what();
+    } catch (const std::runtime_error& e) {  // no plane, terrain files missing
+        d.refusal = detail::exception_report(e);
         return d;
     }
     if (!session.plan_lunar_outbound(lunar_outbound_parameters(lunar, session.gravity(), session.ephemeris(),
@@ -390,8 +391,8 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     } else {
         planned = hls_demand(src, lunar_at_depot, report.lunar_epoch, hls_full, settling);
     }
-    if (!planned.refusal.empty()) {
-        report.result.reason = report::legacy(planned.refusal);  // the lunar planners' reasons are still text
+    if (!planned.refusal.ok()) {
+        report.result.reason = planned.refusal;
         return report;
     }
     const auto& demand = planned.values;

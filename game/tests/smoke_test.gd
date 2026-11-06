@@ -761,7 +761,8 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	nrho.setup(config_dir)
 	var nid: int = nrho.start_mission("hls_lunar_nrho", tdb)
 	nrho.wait_idle(180.0)
-	_check(not nrho.result(nid).get("ok", true) and "nicht durchführbar" in str(nrho.result(nid).get("report", {}).get("params", {}).get("text", "")),
+	# the refusal is still carried as text (the code id) until Task 10 turns MissionStart into a report
+	_check(not nrho.result(nid).get("ok", true) and "lunar.mission_infeasible" in str(nrho.result(nid).get("report", {}).get("params", {}).get("text", "")),
 			"NRHO landing at 120 t is refused honestly")
 	print("  NRHO landing start (refused): %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	return true

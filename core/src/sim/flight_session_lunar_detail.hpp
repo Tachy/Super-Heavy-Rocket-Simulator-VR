@@ -1,12 +1,13 @@
 // Private helpers shared by the lunar FlightSession files (flight_session_lunar*.cpp). Not part of the public API.
 #pragma once
 
-#include <algorithm>
-#include <cstdio>
+#include <exception>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "starsim/report/report.hpp"
+#include "starsim/sim/flight_session.hpp"
 #include "starsim/time/epoch.hpp"
 
 namespace starsim::sim::detail {
@@ -24,13 +25,15 @@ inline std::optional<time::Epoch> first_after(const std::vector<time::Epoch>& ep
     return std::nullopt;
 }
 
-// German number with a decimal comma.
-inline std::string german(double value, int decimals) {
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.*f", decimals, value);
-    std::string s = text;
-    std::replace(s.begin(), s.end(), '.', ',');
-    return s;
+// A lunar step as a table-key reference (phase.lunar_step.<id>).
+inline report::Param step_ref(const char* name, LunarStep step) {
+    return report::ref(name, std::string("phase.lunar_step.") + id_of(step));
+}
+
+// The report an exception stands for: a refusal's own report, else its developer message as a legacy text.
+inline report::Report exception_report(const std::exception& e) {
+    if (const auto* refusal = dynamic_cast<const report::Refusal*>(&e)) return refusal->report();
+    return report::legacy(e.what());
 }
 
 }  // namespace starsim::sim::detail
