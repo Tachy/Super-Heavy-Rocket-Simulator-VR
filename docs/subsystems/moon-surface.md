@@ -273,7 +273,7 @@ on top of that relief.
   `std::async` thread and gives the first point - the synchronous point bit for bit. It holds the surface by
   `shared_ptr` and copies its parameters; it touches only the surface (no CSPICE, no session); the future's destructor
   waits for it. The mission start uses it: `sim::begin_lunar_landing_mission` places the HLS, starts the search over
-  both polar approach directions and returns a `sim::DeferredMissionStart` (status `"Landeplatz wird geprüft"`,
+  both polar approach directions and returns a `sim::DeferredMissionStart` (status `start.checking_landing_site`,
   `poll` / `wait`; `sim::start_mission_deferred` dispatches, `start_mission` = deferred + wait); LOLA only (detail
   off) is decided at once. `FlightSim.start_mission` posts it as a deferred command that holds the session
   (`SessionRunner::post_deferred(..., hold_session = true)`: no advance, no pilot input until the outcome) and puts
@@ -797,7 +797,7 @@ on top of that relief.
   `min_bell_clearance_m`; `LunarDescentPlanner::plan` overload on the composed surface.
 - U-7: `core/include/starsim/mission/touchdown_search.hpp` (`select_touchdown_point_async`);
   `sim::DeferredMissionStart` / `start_mission_deferred` (`sim/mission_start.hpp`), `begin_lunar_landing_mission`,
-  `touchdown_check_status` (`sim/lunar_landing_mission.hpp`); `SessionRunner::post_deferred(..., hold_session)`;
+  status `start.checking_landing_site`; `SessionRunner::post_deferred(..., hold_session)`;
   `FlightSession::moon_surface_shared()`; bindings `FlightSim::post_deferred` / `mission_started`,
   `SnapshotContext::mission_start_status`; `game/vehicle/flight_controller.gd` `_show_mission_start_status`.
 - Task 11: `LunarRocks::rocks_in_region` (`max_region_descent` 10), `rock_statistical_cover`, the

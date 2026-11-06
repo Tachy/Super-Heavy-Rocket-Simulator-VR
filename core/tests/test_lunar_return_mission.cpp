@@ -13,6 +13,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "lunar_return_test_support.hpp"
+#include "report_check.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -110,7 +111,7 @@ TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lun
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc),
                                                    nullptr, &budget);
     print_budget("LLO direct", budget);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(budget.closes);
     CHECK(s.return_planned);
     // [D] TEI ~0.9 + braking ~1.1 km/s (l5 Task 6; the plan estimated 1.5) + MCC + coast + landing + 10 t reserve:
@@ -148,7 +149,7 @@ TEST_CASE("Lunar return start refuses without an entry corridor", "[lunar][retur
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
     CHECK_FALSE(s.return_planned);
-    CHECK_THAT(s.refusal, StartsWith("lunar.return_no_entry_corridor"));  // text until Task 10
+    CHECK(s.refusal.code == report::Code::lunar_return_no_entry_corridor);
 }
 
 TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][return][session]") {
@@ -164,7 +165,8 @@ TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
     CHECK_FALSE(s.return_planned);
-    CHECK_THAT(s.refusal, ContainsSubstring("return.propellant_missing"));  // the Earth return planner's code, carried as text until Task 10
+    INFO(report::describe(s.refusal));
+    CHECK(report::describe(s.refusal).find("return.propellant_missing") != std::string::npos);  // the Earth return planner's code, somewhere in the chain
 }
 
 // Header-tank plan review: TEI, mid-course corrections and the braking burn feed from the main tanks; the headers
@@ -242,7 +244,7 @@ TEST_CASE("start_mission dispatches a lunar return", "[lunar][return][session]")
     test::LunarReturnSession t;
     const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo", {}, t.time);
     CHECK(s.kind == config::MissionKind::LunarReturn);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(s.return_planned);
     const auto& v = t.session.body(t.session.controlled_index()).vehicle();
     if (std::getenv("STARSIM_VERBOSE")) {
@@ -262,7 +264,7 @@ TEST_CASE("Lunar return start from the NRHO plans the departure burn and the pow
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc),
                                                    nullptr, &budget);
     print_budget("NRHO direct", budget);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(budget.closes);
     CHECK(budget.tei_delta_v_mps > 300.0);
     CHECK(budget.tei_delta_v_mps < 600.0);
@@ -283,8 +285,8 @@ TEST_CASE("Probe: Block 3 lunar return with boil-off", "[.r5_probe]") {
     m.boil_off = true;
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc),
                                                    nullptr, &budget);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     const double start_kg = t.session.body(t.session.controlled_index()).vehicle().propellant_kg();
     const auto t0 = t.session.epoch();
     while (t.session.epoch() - t0 < 8.0 * 86400.0) {

@@ -44,8 +44,8 @@ exactly as before (the fixed level deck; test `"A fixed deck gives exactly today
 
 - **Landing limits and refusal**: `max_deck_tilt_deg` 3 deg and `max_heave_rate_mps` 1.0 m/s [E] (significant values,
   against the legs' gentle contact <= 3 m/s, <= 10 deg with the touchdown speed on top). `sim::sea_state_refusal`
-  compares the deck's statistics with them; above -> "Seegang im Landegebiet zu hoch: Decksneigung 4.2° über der
-  Grenze 3.0° (signifikante Werte bei Hs 6.0 m, Tp 10 s)." `plan_launch` checks the provisional ship before the
+  compares the deck's statistics with them; above -> `ascent.sea_too_rough_tilt` / `_heave` / `_both` (tilt / heave rate, their limits, Hs, Tp; shown e.g.
+  "Seegang im Landegebiet zu hoch: Decksneigung 4,2° über der Grenze 3,0° (signifikante Werte bei Hs 6,0 m, Tp 10 s)."). `plan_launch` checks the provisional ship before the
   drone-ship trials (a sea too rough for every heading costs no drone-ship trial) and the chosen ship again after the
   impact prediction with its deck heading. RTLS and tower catches ignore the sea; calm, none or `deck_motion` off: no
   check. Limits in Hs (linear: the statistics scale with Hs; the tilt binds first everywhere), printed by the hidden

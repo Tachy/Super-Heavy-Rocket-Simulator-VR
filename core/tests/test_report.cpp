@@ -35,7 +35,7 @@ TEST_CASE("utc and data_name parameters", "[report]") {
     CHECK(n.kind == report::Kind::data_name);
     CHECK(n.text == "ISS_REBOOST_1");
     CHECK(std::string(report::id_of(n.kind)) == "data_name");
-    CHECK(report::transitional_text(report::make(report::Code::legacy, {n})) == "ISS_REBOOST_1");
+    CHECK(report::describe(report::make(report::Code::legacy, {n})) == "ISS_REBOOST_1");
 }
 
 TEST_CASE("UtcDateTime unix_seconds matches known dates", "[report][time]") {

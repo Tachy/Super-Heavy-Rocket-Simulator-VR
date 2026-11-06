@@ -23,7 +23,7 @@ struct MissionStart {
     // capsule return: the deorbit plan was feasible (else ship_return_plan()->reason); lunar landing: the mission was
     // planned (outbound flight, budget) and its legs chained
     bool return_planned = false;
-    std::string refusal;  // lunar landing: German reason when refused (start_lunar_landing_mission)
+    report::Report refusal;  // why the start was refused (ok: started)
     report::Reports warnings;  // ISS missions: the ISS source note, station reboosts in the mission window
     std::optional<mission::LaunchWindow> launch_window;  // ISS launch / rendezvous from a window's separation
 };
@@ -61,18 +61,18 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                            const StartOptions& options = {});
 
 // A mission start whose work may go on after the call (follow-up U-7). `done`: decided at once. Otherwise `status`
-// (German, UI) names the work that runs on a background thread, `poll` - called on the session's thread, with nothing
+// (a report, UI) names the work that runs on a background thread, `poll` - called on the session's thread, with nothing
 // else touching the session meanwhile - gives the start once that work is done (std::nullopt while it runs), and
 // `wait` blocks until then and gives it. Exactly one of poll / wait is called until it gives the start.
 struct DeferredMissionStart {
     std::optional<MissionStart> done;
-    std::string status;
+    report::Report status;
     std::function<std::optional<MissionStart>(FlightSession&)> poll;
     std::function<MissionStart(FlightSession&)> wait;
 };
 
 // start_mission, the lunar landing's touchdown search on a background thread (begin_lunar_landing_mission; status
-// "Landeplatz wird geprüft"); every other kind is decided at once. start_mission is this plus wait.
+// start.checking_landing_site); every other kind is decided at once. start_mission is this plus wait.
 DeferredMissionStart start_mission_deferred(FlightSession& session, const std::filesystem::path& config_dir,
                                             std::string_view mission_id, time::Epoch requested,
                                             const time::TimeScaleConverter& time, const StartOptions& options = {});

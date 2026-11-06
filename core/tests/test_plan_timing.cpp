@@ -16,7 +16,7 @@ double timed_start(const char* mission_id) {
     const auto start = sim::start_mission(s.session, STARSIM_CONFIG_DIR, mission_id, {}, s.time);
     const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     std::printf("[plan_timing] %-26s %7.1f s  planned %d  %s\n", mission_id, wall_s, start.return_planned ? 1 : 0,
-                start.refusal.c_str());
+                report::describe(start.refusal).c_str());
     if (const auto* plan = s.session.lunar_return_plan()) {
         std::printf("[plan_timing]   tei %.3f m/s  braking %.3f m/s  interface %.3f s  speed %.3f m/s  angle %.9f rad\n",
                     plan->tei_delta_v_mps, plan->braking_delta_v_mps,

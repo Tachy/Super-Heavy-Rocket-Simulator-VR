@@ -56,7 +56,7 @@ TEST_CASE("ISS mission sequence: proximity -> docking -> docked completes the mi
         s.advance_to(d.t0 + t + 10.0, 1000000);
         saw_docking = saw_docking || s.iss_mission_leg() == IssMissionLeg::Docking;
     }
-    INFO(report::transitional_text(s.iss_mission_status()));
+    INFO(report::describe(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Docked);
     CHECK(saw_docking);
     CHECK(s.docked());
@@ -172,7 +172,7 @@ TEST_CASE("ISS mission sequence: an undocking by hand before the undock epoch co
     s.advance_to(d.t0 + 10.0, 100000);
     REQUIRE(s.undock());  // the player undocks early (FlightSim::undock)
     s.advance_to(d.t0 + 1300.0, 1000000);
-    INFO(report::transitional_text(s.iss_mission_status()));
+    INFO(report::describe(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Departure);
     CHECK(s.iss_mission_status().code != report::Code::iss_ended);
 }

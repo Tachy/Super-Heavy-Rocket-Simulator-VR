@@ -50,10 +50,10 @@ std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, co
 // The onboard computer's sea-state check of a drone-ship landing (sea state and deck motion, Task 4): the deck motion
 // statistics (contact::DeckMotion::statistics, 2 sigma, spectral) of `ship` with its long axis along `heading_rad`
 // (clockwise from north) in `like`'s sea, against the ship's limits (max_deck_tilt_rad, max_heave_rate_mps). Returns
-// the German reason ("Seegang im Landegebiet zu hoch: ..." with each value above its limit and the limit) or nullopt:
+// the reason (ascent.sea_too_rough_*: each value above its limit and the limit) or nullopt:
 // within the limits, a calm sea or none, or the fidelity flag deck_motion off.
-std::optional<std::string> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
-                                             double heading_rad);
+std::optional<report::Report> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
+                                                double heading_rad);
 
 // The heading a drone ship holding station turns its deck to (sea state and deck motion, Task 4 fix round 1): in a
 // moving sea (`like`'s, fidelity flag deck_motion on) the heading of least significant deck tilt on the grid 0..180 deg
@@ -92,7 +92,7 @@ struct BoosterImpact {
 // with the booster's return planned at MECO (meco_propellant_kg) and the target orbit reached.
 struct AscentProfile {
     bool feasible = false;
-    std::string reason;  // German, shown to the player when not feasible
+    report::Report reason;  // shown to the player when not feasible (ok: feasible)
     double kick_angle_rad = 0.0;
     double upper_propellant_at_seco_kg = 0.0;
     int trial_flights = 0;  // flown for this answer (0: from the memo)
@@ -155,9 +155,8 @@ AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileR
 // (FlightSession::launch_from_pad with a LaunchSite::id) the launch is planned first (engage_planned_ascent on the pad
 // stack: the recovery, the reachable target and the kick, on trial flights on this thread - the countdown holds
 // meanwhile) and flown with the booster's return; a refused plan leaves the autopilot off, calls off a scheduled liftoff
-// and returns the German reason. Not clamped (in flight): engaged at once with the default `PitchProgram`, not planned
-// (the guidance takes over from the state now; a staging sequence under way keeps the state Staging). Returns ""
-// when engaged.
-std::string engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& target);
+// and returns the reason (ok: engaged). Not clamped (in flight): engaged at once with the default `PitchProgram`, not planned
+// (the guidance takes over from the state now; a staging sequence under way keeps the state Staging).
+report::Report engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& target);
 
 }  // namespace starsim::sim

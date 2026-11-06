@@ -176,7 +176,7 @@ func _dispersion_warning() -> String:
 
 
 ## While a mission start runs: the work the core reports for it (a lunar landing's touchdown search on a background
-## thread: "Landeplatz wird geprüft") becomes the status line until the outcome replaces it (_on_command_finished).
+## thread: start.checking_landing_site) becomes the status line until the outcome replaces it (_on_command_finished).
 func _show_mission_start_status() -> void:
 	if _pending_mission.is_empty():
 		return  # the outcome came in this frame

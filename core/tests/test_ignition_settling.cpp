@@ -304,7 +304,7 @@ TEST_CASE("Settling gas: the session's phasing plan reserves it per burn", "[ign
     mission::PhasingParameters p;
     p.mission_limit_s = 48.0 * 3600.0;
     const bool planned = f.session.plan_rendezvous(p);
-    INFO(report::transitional_text(f.session.rendezvous_status()));
+    INFO(report::describe(f.session.rendezvous_status()));
     REQUIRE(planned);
     REQUIRE(f.session.rendezvous_plan() != nullptr);
     CHECK(f.session.rendezvous_plan()->parameters.reserve_per_burn_kg == Catch::Approx(f.session.settling_gas_kg()));
@@ -367,7 +367,7 @@ TEST_CASE("The autopilot settles before a raise burn and the burn flies", "[igni
         f.session.advance_to(f.session.epoch() + 10.0);
         seen = seen || f.session.settling();
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK(seen);
     CHECK(f.session.iss_mission_leg() == sim::IssMissionLeg::Rendezvous);
     CHECK_FALSE(f.any_failed());

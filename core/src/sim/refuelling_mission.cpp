@@ -192,11 +192,11 @@ MissionStart launch_campaign_flight(FlightSession& session, const std::filesyste
     s.kind = m.kind;
     s.launch_window = w;
     if (!w.feasible) {
-        s.refusal = report::transitional_text(w.reason);  // text until Task 10
+        s.refusal = w.reason;
         return s;
     }
     if (std::abs(session.epoch() - w.liftoff) > FlightSession::tick_s) {
-        s.refusal = "Kampagnenflug: die Sitzung steht nicht am Startzeitpunkt";
+        s.refusal = report::make(report::Code::start_campaign_flight_not_at_liftoff);
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, m.ascent_id);
@@ -224,22 +224,22 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
     auto depot_cfg = m.depot;
     if (m.kind == config::MissionKind::HlsRefuel) {
         if (!session.moon_orientation()) {
-            s.refusal = "HLS-Betankung: die Sitzung hat keine Mondorientierung";
+            s.refusal = report::make(report::Code::start_hls_no_moon_orientation);
             return s;
         }
         lunar = config::load_lunar_landing_mission(config_dir, m.lunar_mission_id);
         if (std::abs(lunar.parking_inclination_rad - m.depot.inclination_rad) > 1e-9) {
-            s.refusal = "HLS-Betankung: Depotbahn und Parkbahn der Mondmission haben verschiedene Neigungen";
+            s.refusal = report::make(report::Code::start_hls_inclinations_differ);
             return s;
         }
         lunar_epoch = time.from_utc(lunar.epoch_utc);
         if (earliest >= lunar_epoch) {
-            s.refusal = "HLS-Betankung: frühester Start nach dem Start der Mondmission";
+            s.refusal = report::make(report::Code::start_hls_earliest_after_lunar);
             return s;
         }
         const auto parking = lunar_parking_state(session, lunar, lunar_epoch, lunar.parking_inclination_rad);
         if (!parking) {
-            s.refusal = "Kein Parkorbit durch die Mondbahnebene: Bahnneigung unter der Deklination des Mondes";
+            s.refusal = report::make(report::Code::start_no_parking_orbit_in_moon_plane);
             return s;
         }
         depot_cfg = depot_in_plane(m.depot, *parking, lunar_epoch, earliest, earth);
@@ -264,11 +264,11 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         const auto w = mission::plan_launch_window(pad, earth, depot_at, earliest, p, gm);
         s.launch_window = w;
         if (!w.feasible) {
-            s.refusal = report::transitional_text(w.reason);  // text until Task 10
+            s.refusal = w.reason;
             return s;
         }
         if (m.kind == config::MissionKind::HlsRefuel && w.liftoff >= lunar_epoch) {
-            s.refusal = "HLS-Betankung: Startfenster nach dem Start der Mondmission";
+            s.refusal = report::make(report::Code::start_hls_window_after_lunar);
             return s;
         }
         const auto launch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff, wait_from);
@@ -293,7 +293,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         session.set_launch_site(launch_site_from_config(site));  // the return site
         session.add_station(depot_vehicle, depot, earliest);
         if (!session.plan_rendezvous(phasing)) {
-            s.refusal = report::transitional_text(session.rendezvous_status());  // text until Task 10
+            s.refusal = session.rendezvous_status();
             session.clear_bodies();  // the mission does not start
             return s;
         }

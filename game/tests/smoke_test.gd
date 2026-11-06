@@ -637,8 +637,8 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	refused.wait_idle(60.0)
 	var refusal: Dictionary = refused.result(refusal_id)
 	_check(refusal.get("done", false) and not refusal.get("ok", true)
-			and str(refusal.get("report", {}).get("params", {}).get("text", "")) == "Kein Fangturm am Startplatz.",
-			"Starship at SLC-40: the launch is refused with the German reason (%s)" % str(refusal))
+			and refusal.get("report", {}).get("code", "") == "ascent.no_tower",
+			"Starship at SLC-40: the launch is refused with the code ascent.no_tower (%s)" % str(refusal))
 	_check(refused.is_active() and refused.autopilot_status().get("state", "") == "autopilot_state.off"
 			and not refused.autopilot_status().get("planning", true), "refused launch: on the pad, autopilot off, not planning")
 	var ship := FlightSim.new()
@@ -741,11 +741,11 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	var touchdown_status_seen := false
 	var status_wait := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - status_wait < 120000 and not land.result(lid).get("done", false):
-		if land.autopilot_status().get("mission_start_status", {}).get("params", {}).get("text", "") == "Landeplatz wird geprüft":
+		if land.autopilot_status().get("mission_start_status", {}).get("code", "") == "start.checking_landing_site":
 			touchdown_status_seen = true
 		OS.delay_msec(5)
 	_check(land.wait_idle(120.0) and land.result(lid).get("ok", false), "lunar landing mission starts")
-	_check(touchdown_status_seen, "lunar landing start: \"Landeplatz wird geprüft\" while the touchdown search runs")
+	_check(touchdown_status_seen, "lunar landing start: start.checking_landing_site while the touchdown search runs")
 	_check(land.autopilot_status().get("mission_start_status", {}).get("code", "x") == "ok",
 			"lunar landing start: the status is cleared with the outcome")
 	var site: Dictionary = land.lunar_site()
@@ -761,8 +761,8 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	nrho.setup(config_dir)
 	var nid: int = nrho.start_mission("hls_lunar_nrho", tdb)
 	nrho.wait_idle(180.0)
-	# the refusal is still carried as text (the code id) until Task 10 turns MissionStart into a report
-	_check(not nrho.result(nid).get("ok", true) and "lunar.mission_infeasible" in str(nrho.result(nid).get("report", {}).get("params", {}).get("text", "")),
+	# the refusal is a report: the NRHO mission does not close
+	_check(not nrho.result(nid).get("ok", true) and nrho.result(nid).get("report", {}).get("code", "") == "lunar.mission_infeasible",
 			"NRHO landing at 120 t is refused honestly")
 	print("  NRHO landing start (refused): %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	return true

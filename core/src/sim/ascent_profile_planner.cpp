@@ -49,7 +49,7 @@ constexpr int max_trials = 16;                   // [E] safeguard; Starship and 
 
 struct Trial {
     double propellant_kg = nan;
-    std::string reason;  // German, when infeasible
+    report::Report reason;  // why infeasible (ok: flown)
     std::optional<BoosterImpact> booster_impact;  // drone-ship requests
 };
 
@@ -107,7 +107,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
     program.kick_angle_rad = kick_angle_rad;
     session.engage_ascent_autopilot(request.target, program);
 
-    const char* return_unplannable = "Die Rückkehr der ersten Stufe ist nicht planbar.";
+    const auto return_unplannable = report::make(report::Code::ascent_trial_return_unplannable);
     const bool drone_ship = request.recovery.kind == RecoveryKind::DroneShip;
     const std::string booster_id = stack.stages.front().id;
     bool upper_lit = false;
@@ -145,7 +145,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
                             session.mission_time_s(), id_of(state), session.body_count(),
                             math::norm(body.state().velocity_gcrf_mps), body.breakup_reason().c_str());
             }
-            return {nan, "Die Rakete ist abgestürzt."};
+            return {nan, report::make(report::Code::ascent_trial_crashed)};
         }
         if (!separation && session.body_count() > 1) separation = session.epoch();
         if (drone_ship && separation && !impact &&
@@ -154,7 +154,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
                 const auto& b = session.body(i);
                 if (i != index && b.vehicle().stages().front().config.id == booster_id) {
                     impact = predict_booster_impact(session, b);
-                    if (!impact) return {nan, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar."};
+                    if (!impact) return {nan, report::make(report::Code::ascent_impact_unpredictable)};
                 }
             }
         }
@@ -200,7 +200,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
                                 (ra - constants::wgs84_semi_major_axis_m) / 1e3, math::norm(s.velocity_gcrf_mps),
                                 body.vehicle().mass_properties().mass_kg);
                 }
-                return {nan, "Die Oberstufe ist vor Brennschluss leer."};
+                return {nan, report::make(report::Code::ascent_trial_upper_empty)};
             }
             upper_lit = upper_lit || running;
             continue;
@@ -241,9 +241,9 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
         }
         if (std::abs(periapsis_m - target.periapsis_altitude_m) > orbit_tolerance_m ||
             std::abs(apoapsis_m - target.apoapsis_altitude_m) > orbit_tolerance_m) {
-            return {nan, "Die Oberstufe erreicht den Zielorbit nicht."};
+            return {nan, report::make(report::Code::ascent_trial_orbit_missed)};
         }
-        if (drone_ship && !impact) return {nan, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar."};
+        if (drone_ship && !impact) return {nan, report::make(report::Code::ascent_impact_unpredictable)};
         return {stage_propellant_kg(body.vehicle().stages().front()), {}, impact};
     }
     if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
@@ -251,7 +251,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
                     id_of(session.autopilot().state), session.epoch() - request.liftoff, session.mission_time_s(),
                     session.body_count());
     }
-    return {nan, "Die Oberstufe erreicht den Zielorbit nicht."};
+    return {nan, report::make(report::Code::ascent_trial_orbit_missed)};
 }
 
 // Everything of the request that shapes the trajectory: not the liftoff epoch (the Earth turns the same way at any
@@ -306,7 +306,7 @@ public:
         const auto best = best_index();
         result.trial_flights = static_cast<int>(points_.size());
         if (!best) {
-            result.reason = "Startprofil nicht planbar: " + last_reason_;
+            result.reason = report::with_cause(report::make(report::Code::ascent_profile_not_plannable), last_reason_);
             return result;
         }
         result.feasible = true;
@@ -329,7 +329,7 @@ private:
         const auto trial = fly_trial(like_, request_, kick_rad);
         if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
             std::printf("  [ascent planner] kick %6.3f deg: %s %.1f kg (%.1f s)\n", kick_rad / deg,
-                        std::isnan(trial.propellant_kg) ? trial.reason.c_str() : "", trial.propellant_kg,
+                        std::isnan(trial.propellant_kg) ? report::describe(trial.reason).c_str() : "", trial.propellant_kg,
                         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
         }
         if (std::isnan(trial.propellant_kg)) last_reason_ = trial.reason;
@@ -425,7 +425,7 @@ private:
     const FlightSession& like_;
     const AscentProfileRequest& request_;
     std::vector<Point> points_;  // by kick
-    std::string last_reason_ = "kein Versuchsflug.";
+    report::Report last_reason_ = report::make(report::Code::ascent_trial_none);
 };
 
 }  // namespace
@@ -481,27 +481,29 @@ std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, co
 }
 
 
-std::optional<std::string> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
-                                             double heading_rad) {
+std::optional<report::Report> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
+                                                double heading_rad) {
     const auto& sea = like.sea_state();
     if (!like.deck_motion() || !sea || sea->calm()) return std::nullopt;
     const auto s = contact::DeckMotion(*sea, ship.hull, heading_rad).statistics();
-    std::string excess;
-    char text[160];
-    if (s.significant_tilt_rad > ship.max_deck_tilt_rad) {
-        std::snprintf(text, sizeof text, "Decksneigung %.1f° über der Grenze %.1f°", s.significant_tilt_rad / deg,
-                      ship.max_deck_tilt_rad / deg);
-        excess = text;
+    const bool tilt = s.significant_tilt_rad > ship.max_deck_tilt_rad;
+    const bool heave = s.significant_heave_rate_mps > ship.max_heave_rate_mps;
+    if (!tilt && !heave) return std::nullopt;
+    const auto hs = report::length("hs", sea->config().significant_wave_height_m);
+    const auto tp = report::time("tp", sea->config().peak_period_s);
+    if (tilt && heave) {
+        return report::make(report::Code::ascent_sea_too_rough_both,
+                            {report::angle("tilt", s.significant_tilt_rad), report::angle("tilt_limit", ship.max_deck_tilt_rad),
+                             report::speed("heave", s.significant_heave_rate_mps),
+                             report::speed("heave_limit", ship.max_heave_rate_mps), hs, tp});
     }
-    if (s.significant_heave_rate_mps > ship.max_heave_rate_mps) {
-        std::snprintf(text, sizeof text, "Hubgeschwindigkeit des Decks %.2f m/s über der Grenze %.2f m/s",
-                      s.significant_heave_rate_mps, ship.max_heave_rate_mps);
-        excess += (excess.empty() ? "" : ", ") + std::string(text);
+    if (tilt) {
+        return report::make(report::Code::ascent_sea_too_rough_tilt,
+                            {report::angle("tilt", s.significant_tilt_rad), report::angle("tilt_limit", ship.max_deck_tilt_rad), hs, tp});
     }
-    if (excess.empty()) return std::nullopt;
-    std::snprintf(text, sizeof text, " (signifikante Werte bei Hs %.1f m, Tp %.0f s)",
-                  sea->config().significant_wave_height_m, sea->config().peak_period_s);
-    return "Seegang im Landegebiet zu hoch: " + excess + text;
+    return report::make(report::Code::ascent_sea_too_rough_heave,
+                        {report::speed("heave", s.significant_heave_rate_mps),
+                         report::speed("heave_limit", ship.max_heave_rate_mps), hs, tp});
 }
 
 double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad) {
@@ -551,26 +553,32 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
         profile.target = request.target;
         return profile;
     };
-    auto refused = [&](AscentProfile profile, const std::string& reason) {
+    // The refusal as the player reads it: the head alone, or (a profile that could not be planned) the unreachable
+    // target with the trial's reason as its cause.
+    auto refused = [&](AscentProfile profile, report::Report head) {
         profile.feasible = false;
-        profile.reason = profile.reason.empty() ? reason + "." : reason + " (" + profile.reason + ")";
+        if (profile.reason.ok()) {
+            profile.reason = std::move(head);
+        } else {
+            profile.reason = report::with_cause(report::make(report::Code::ascent_target_unreachable_because), profile.reason);
+        }
         return profile;
     };
-    const char* unreachable = "Ziel mit Booster-Rückkehr nicht erreichbar";
+    const auto unreachable = report::make(report::Code::ascent_target_unreachable);
 
     const auto first_stage = request_stack(dir, request).stages.front();
     const std::string& method = first_stage.recovery_method;
     if (method == "tower_catch") {
         AscentProfile none;
         none.target = request.target;
-        if (!site.tower) return refused(none, "Kein Fangturm am Startplatz");
+        if (!site.tower) return refused(none, report::make(report::Code::ascent_no_tower));
         auto profile = planned({RecoveryKind::TowerCatch, site.id, site.latitude_rad, site.longitude_rad, 0.0});
         return profile.feasible ? profile : refused(profile, unreachable);
     }
     if (method != "leg_landing") {
         AscentProfile none;
         none.target = request.target;
-        return refused(none, "Die erste Stufe hat keine Rückkehr");
+        return refused(none, report::make(report::Code::ascent_no_stage_return));
     }
     // Falcon 9: back to the site's landing zone whenever that closes with the RTLS return (SpaceX practice), even where
     // the drone ship would leave the upper stage more.
@@ -585,7 +593,7 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     if (!first_stage.drone_ship_meco) {
         AscentProfile none;
         none.target = request.target;
-        return refused(none, "Die erste Stufe hat keine Drohnenschiff-Rückkehr");
+        return refused(none, report::make(report::Code::ascent_no_drone_return));
     }
     const double provisional_ship_downrange_m = nominal_meco_impact_downrange_m(
         *first_stage.drone_ship_meco, constants::earth_gm_m3ps2, constants::wgs84_semi_major_axis_m);
@@ -599,7 +607,7 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     const double lon = site.longitude_rad + std::atan2(std::sin(azimuth) * std::sin(arc) * std::cos(site.latitude_rad),
                                                        std::cos(arc) - std::sin(site.latitude_rad) * std::sin(lat));
     // The ship comes from config/drone_ships.toml by where the stage comes down (service areas, nearest home port).
-    const char* no_ship = "Kein Drohnenschiff für dieses Seegebiet";
+    const auto no_ship = report::make(report::Code::ascent_no_drone_ship);
     const auto ships = config::load_drone_ships(dir);
     const auto provisional_ship = config::drone_ship_for(ships, lat, lon);
     if (!provisional_ship) {
@@ -618,7 +626,7 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     }
     auto profile = planned({RecoveryKind::DroneShip, provisional_ship->id, lat, lon, azimuth});
     if (!profile.feasible) return refused(profile, unreachable);
-    if (!profile.booster_impact) return refused(profile, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar");
+    if (!profile.booster_impact) return refused(profile, report::make(report::Code::ascent_impact_unpredictable));
     const auto& impact = *profile.booster_impact;
     const auto ship = config::drone_ship_for(ships, impact.latitude_rad, impact.longitude_rad);
     if (!ship) return refused(profile, no_ship);
@@ -643,15 +651,15 @@ AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileR
     return profile;
 }
 
-std::string engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& target) {
+report::Report engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& target) {
     if (!session.active() || !session.body(session.controlled_index()).clamped()) {
         session.engage_ascent_autopilot(target, gnc::PitchProgram{});
-        return {};
+        return report::Report{};
     }
     const auto& pad_stack = session.pad_stack();
     if (session.launch_site().id.empty() || !pad_stack) {
         session.schedule_liftoff(std::nullopt);
-        return "Startplanung nicht möglich: kein konfigurierter Startplatz.";
+        return report::make(report::Code::ascent_no_launch_site);
     }
     AscentProfileRequest request;
     request.site_id = session.launch_site().id;
@@ -668,7 +676,7 @@ std::string engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& t
         request.stack = pad_stack;
     }
     const auto profile = engage_planned_ascent(session, request);
-    return profile.feasible ? std::string() : profile.reason;
+    return profile.feasible ? report::Report{} : profile.reason;
 }
 
 }  // namespace starsim::sim

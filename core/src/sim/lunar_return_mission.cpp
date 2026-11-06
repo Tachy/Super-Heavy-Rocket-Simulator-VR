@@ -302,7 +302,7 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     const auto refuse = [&](const report::Report& reason) {
         session.disengage_autopilot();
         s.return_planned = false;
-        s.refusal = report::transitional_text(reason);  // text until Task 10 (MissionStart)
+        s.refusal = reason;
         return s;
     };
     if (!session.moon_orientation()) return refuse(report::make(report::Code::lunar_return_mission_no_moon_orientation));

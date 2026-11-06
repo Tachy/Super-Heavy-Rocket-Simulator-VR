@@ -221,7 +221,7 @@ TEST_CASE("Raise: two burns to an orbit above the depot, then the phasing plan",
     f.start();
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ascent);
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     const auto& marks = f.session.iss_mission_marks();
     CHECK(std::count_if(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Raise; }) == 2);
@@ -247,7 +247,7 @@ TEST_CASE("Raise: every below-depot candidate can be planned after its flown rai
     f.sequence.raise_to = mission::PhasingOrbit{re + periapsis_km * 1e3, re + 190e3};
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
 }
 
@@ -262,7 +262,7 @@ TEST_CASE("Raise: a candidate below the insertion periapsis never lowers it", "[
     const double rp0 = f.mean_apsides().first;  // the fixture's osculating 120 km periapsis is ~127 km mean
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     const auto [rp, ra] = f.mean_apsides();
     CHECK(rp == Catch::Approx(rp0).margin(3e3));  // [E] the mean periapsis kept (never lowered)
     CHECK(ra == Catch::Approx(re + 270e3).margin(3e3));
@@ -296,7 +296,7 @@ TEST_CASE("Raise: the phasing deadline counts from the separation, not from the 
     f.start();
     const auto separation = f.session.epoch();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     REQUIRE(f.session.rendezvous_deadline().has_value());
     CHECK(*f.session.rendezvous_deadline() - separation ==
@@ -312,7 +312,7 @@ TEST_CASE("Raise: a burn that runs dry ends the mission with its reason", "[refu
     f.fly_until(IssMissionLeg::Rendezvous, 2.0 * 3600.0);
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ended);
     // the cause is the burn abort reason (not yet a code, Task 11)
-    CHECK(report::transitional_text(f.session.iss_mission_status()).find("kein Treibstoff") != std::string::npos);
+    CHECK(report::describe(f.session.iss_mission_status()).find("kein Treibstoff") != std::string::npos);
 }
 
 namespace {
@@ -358,12 +358,12 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     for (int i = 0; i < 120 && f.leg() == IssMissionLeg::Docked; ++i) f.session.advance_to(f.session.epoch() + 1.0);
     REQUIRE(f.leg() == IssMissionLeg::Transfer);
     f.fly([&] { return f.leg() == IssMissionLeg::Departure || f.leg() == IssMissionLeg::Ended; }, 3600.0, 10.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Departure);
     CHECK(f.session.transfer_state().phase == sim::TransferPhase::Complete);
     CHECK(f.session.transfer_state().delivered_kg[0] > 140.0e3);  // r4: 144.6 t LOX
     f.fly([&] { return f.leg() != IssMissionLeg::Departure; }, 4.0 * 3600.0, 10.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Return);
     REQUIRE(f.session.ship_return_plan());
     CHECK(f.session.ship_return_plan()->feasible);
@@ -458,7 +458,7 @@ TEST_CASE("Docked tanker: the ship return flies to the catch", "[refuelling][iss
     f.session.set_iss_mission(f.tanker_sequence());
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 10.0 * 86400.0,
           600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Complete);
     const auto& tanker = f.session.body(f.session.controlled_index());
     CHECK(tanker.caught());
@@ -502,13 +502,13 @@ TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation",
     time::Epoch called{};
     q.continuation = [&](sim::FlightSession& s) {
         called = s.epoch();
-        return std::string();
+        return report::Report{};
     };
     f.session.set_iss_mission(q);
     const auto wall = std::chrono::steady_clock::now();
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 3.0 * 86400.0,
           3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Complete);
     CHECK(std::abs(called - at) <= 0.5 * sim::FlightSession::tick_s + 1e-6);
     // the depot's 600 t went into the HLS (less chill-down and boil-off), its main tanks not full yet
@@ -529,12 +529,12 @@ TEST_CASE("A continuation that installs a new sequence keeps it running", "[refu
         sim::IssMissionSequence next;  // a new flight to the station: it starts with the rendezvous leg
         next.station_port = "transfer_dock";
         s.set_iss_mission(next);
-        return std::string();
+        return report::Report{};
     };
     f.session.set_iss_mission(q);
     const auto& marks = f.session.iss_mission_marks();
     f.fly([&] { return !marks.empty() && marks.front().leg == IssMissionLeg::Rendezvous; }, 6.0 * 3600.0, 60.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE_FALSE(marks.empty());
     CHECK(marks.front().leg == IssMissionLeg::Rendezvous);  // set_iss_mission cleared the old sequence's marks
     CHECK(std::none_of(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Complete; }));
@@ -555,7 +555,7 @@ TEST_CASE("A sequence set after a hard capture goes through the Docked gate into
     q.transfer = sim::MissionTransfer::FillChaser;
     f.session.set_iss_mission(q);
     f.fly([&] { return f.session.iss_mission_leg() != IssMissionLeg::Docked; }, 600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Transfer);
     const auto& marks = f.session.iss_mission_marks();
     REQUIRE(marks.size() >= 2);
@@ -570,21 +570,21 @@ TEST_CASE("Continuation refusal ends the mission", "[refuelling][iss_mission]") 
     q.station_port = "transfer_dock";
     q.transfer = sim::MissionTransfer::FillChaser;
     q.continue_epoch = f.session.epoch() + 3.0 * 3600.0;
-    q.continuation = [](sim::FlightSession&) { return std::string("Mondmission: zu spät"); };
+    q.continuation = [](sim::FlightSession&) { return report::make(report::Code::lunar_mission_too_late); };
     f.session.set_iss_mission(q);
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 60.0);
     CHECK(f.leg() == IssMissionLeg::Ended);
     REQUIRE(f.session.iss_mission_status().code == report::Code::iss_ended);
     REQUIRE(f.session.iss_mission_status().causes.size() == 1);
-    CHECK(report::transitional_text(f.session.iss_mission_status().causes.front()) == "Mondmission: zu spät");  // legacy cause
+    CHECK(f.session.iss_mission_status().causes.front().code == report::Code::lunar_mission_too_late);
 }
 
 TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuelling][mission][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     CHECK(s.kind == config::MissionKind::DepotLaunch);
     CHECK(s.site_id == "starbase_pad2");
     CHECK(s.epoch == f.t0);  // the mission's epoch_utc
@@ -596,11 +596,11 @@ TEST_CASE("depot_launch: pad -> orbit, the depot becomes the station, the booste
           "[refuelling][mission][ascent][slow][ascent_planner]") {
     test::spice_session();
     refuelling_test::DepotSession f;
-    REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock).refusal.empty());
+    REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock).refusal.ok());
     while (f.session.epoch() - f.t0 < 1800.0 && f.session.iss_mission_leg() == IssMissionLeg::Ascent) {
         f.session.advance_to(f.session.epoch() + 1.0);
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     REQUIRE(f.session.station_index());
     const double insertion_s = f.session.iss_mission_marks().back().epoch - f.t0;
@@ -633,8 +633,8 @@ TEST_CASE("tanker_flight_orbit starts behind the depot and plans the phasing", "
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight_orbit", f.t0, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     CHECK(s.kind == config::MissionKind::TankerFlight);
     CHECK(s.epoch == f.t0);
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
@@ -652,8 +652,8 @@ TEST_CASE("tanker_flight finds a launch window into the depot plane within the u
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     REQUIRE(s.launch_window);
     CHECK(s.launch_window->feasible);
     CHECK(s.epoch == s.launch_window->liftoff);
@@ -685,8 +685,8 @@ TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelli
     auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, "tanker_flight");
     m.phasing_candidates_m = {{220.0e3, 240.0e3}, {250.0e3, 270.0e3}};  // only orbits above the depot (f1)
     const auto s = sim::start_refuelling_flight_mission(f.session, refuelling_test::config_dir, m, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     REQUIRE(s.launch_window->phasing_orbit);
     REQUIRE(s.launch_window->phasing_orbit->periapsis_radius_m > re + 200.0e3);
     REQUIRE(s.launch_window->schedule.above);
@@ -695,7 +695,7 @@ TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelli
            f.session.iss_mission_leg() != IssMissionLeg::Docked && f.session.iss_mission_leg() != IssMissionLeg::Ended) {
         f.session.advance_to(f.session.epoch() + 60.0);
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK((f.session.iss_mission_leg() == IssMissionLeg::Docking || f.session.iss_mission_leg() == IssMissionLeg::Docked));
     const auto wp0 = refuelling_test::mark(f.session, IssMissionLeg::Proximity);
     REQUIRE(wp0);
@@ -717,12 +717,12 @@ TEST_CASE("Refuelling flights: the window's separation estimate matches the flow
     sim::FlightSession session{f.ephemeris, f.earth, refuelling_test::config_dir, {}, &moon};
     const auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, id);
     const auto s = sim::start_mission(session, refuelling_test::config_dir, id, f.t0, f.clock);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     const auto& w = *s.launch_window;
     while (session.iss_mission_leg() == IssMissionLeg::Ascent && session.epoch() - w.liftoff < 1200.0) {
         session.advance_to(session.epoch() + 1.0);
     }
-    INFO(report::transitional_text(session.iss_mission_status()));
+    INFO(report::describe(session.iss_mission_status()));
     REQUIRE(session.iss_mission_leg() == IssMissionLeg::Raise);  // the 120 km insertion is raised at apoapsis
     const auto& marks = session.iss_mission_marks();  // Ascent, Raise
     REQUIRE(marks.size() >= 2u);
@@ -791,9 +791,9 @@ TEST_CASE("tanker_flight_orbit: phasing orbit -> docked -> transfer -> caught at
     test::spice_session();
     refuelling_test::DepotSession f;
     REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight_orbit", f.t0, f.clock)
-                .refusal.empty());
+                .refusal.ok());
     fly_mission(f, 12.0 * 86400.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     const auto n = refuelling_test::tanker_numbers(f.session);
     refuelling_test::print("tanker_flight_orbit", n);
@@ -807,14 +807,14 @@ TEST_CASE("tanker_flight: pad -> booster caught -> docked -> transfer -> ship ca
     test::spice_session();
     refuelling_test::DepotSession f;
     const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     // the ascent and the booster return are ticked: 1 s calls until the booster is caught
     while (f.session.epoch() - s.epoch < 1200.0 && f.session.tower()->phase() != sim::CatchPhase::Caught) {
         f.session.advance_to(f.session.epoch() + 1.0);
     }
     REQUIRE(f.session.tower()->phase() == sim::CatchPhase::Caught);
     fly_mission(f, 12.0 * 86400.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     const auto n = refuelling_test::tanker_numbers(f.session);
     refuelling_test::print("tanker_flight", n);
@@ -856,7 +856,7 @@ TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then pl
         f.session.advance_to(f.session.epoch() + 10.0);
         t += 10.0;
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     INFO(f.session.body(f.session.controlled_index()).breakup_reason());
     INFO("elapsed " << t << " s");
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
@@ -986,14 +986,14 @@ TEST_CASE("continue_lunar_landing_mission plans like the start from the same pla
     const auto m = config::load_lunar_landing_mission(refuelling_test::config_dir, "hls_lunar_llo");
     const auto epoch = f.clock.from_utc(m.epoch_utc);
     const auto a = sim::start_lunar_landing_mission(f.lunar, refuelling_test::config_dir, m, epoch);
-    INFO(a.refusal);
-    REQUIRE(a.refusal.empty());
+    INFO(report::describe(a.refusal));
+    REQUIRE(a.refusal.ok());
     const double tli_a = norm(f.lunar.lunar_outbound_plan()->tli.delta_v_gcrf_mps);
     sim::FlightSession b{f.ephemeris, f.earth, refuelling_test::config_dir, {}, &f.moon};
     sim::place_lunar_landing_mission(b, m, refuelling_test::config_dir, epoch);
     const auto c = sim::continue_lunar_landing_mission(b, refuelling_test::config_dir, m, epoch);
-    INFO(c.refusal);
-    REQUIRE(c.refusal.empty());
+    INFO(report::describe(c.refusal));
+    REQUIRE(c.refusal.ok());
     CHECK(norm(b.lunar_outbound_plan()->tli.delta_v_gcrf_mps) == Catch::Approx(tli_a).epsilon(1e-9));
     CHECK(report::same(b.lunar_status(), f.lunar.lunar_status()));
 }
@@ -1005,7 +1005,7 @@ TEST_CASE("Continuation after the lunar epoch is refused", "[sim][lunar][refuell
     const auto epoch = f.clock.from_utc(m.epoch_utc);
     sim::place_lunar_landing_mission(f.lunar, m, refuelling_test::config_dir, epoch + 3600.0);
     const auto c = sim::continue_lunar_landing_mission(f.lunar, refuelling_test::config_dir, m, epoch);
-    CHECK_THAT(c.refusal, Catch::Matchers::ContainsSubstring("lunar.mission_too_late"));  // text until Task 10
+    CHECK(c.refusal.code == report::Code::lunar_mission_too_late);
     CHECK(f.lunar.body_count() == 1u);  // nothing re-placed
 }
 
@@ -1013,8 +1013,8 @@ TEST_CASE("hls_refuel starts with the depot in the lunar mission's parking plane
     test::spice_session();
     LunarDepotSession f;
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     CHECK(s.kind == config::MissionKind::HlsRefuel);
     REQUIRE(f.lunar.iss_mission());
     REQUIRE(f.lunar.iss_mission()->continue_epoch);
@@ -1089,14 +1089,14 @@ TEST_CASE("A deorbit called off after the plan ends the mission", "[refuelling][
     f.session.set_tank_mass(ship, 0, "lox_main", 400.0);
     f.session.set_tank_mass(ship, 0, "ch4_main", 100.0);
     f.fly([&] { return f.leg() != IssMissionLeg::Return; }, 9.0 * 86400.0, 600.0);
-    std::printf("[r5] called-off deorbit: %s (abort: %s)\n", report::transitional_text(f.session.iss_mission_status()).c_str(),
+    std::printf("[r5] called-off deorbit: %s (abort: %s)\n", report::describe(f.session.iss_mission_status()).c_str(),
                 f.session.burn_abort_reason().c_str());
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK(f.leg() == IssMissionLeg::Ended);
     // at once, with the call-off's reason (before: days later "Schiff verloren")
     REQUIRE(f.session.iss_mission_status().code == report::Code::iss_ended);
     REQUIRE(f.session.iss_mission_status().causes.size() == 1);
-    CHECK_THAT(report::transitional_text(f.session.iss_mission_status().causes.front()),  // legacy cause (Task 11): burn_abort_reason_
+    CHECK_THAT(report::describe(f.session.iss_mission_status().causes.front()),  // legacy cause (Task 11): burn_abort_reason_
                Catch::Matchers::StartsWith("deorbit.boil_off_short"));
     CHECK_FALSE(f.session.body(ship).caught());
 }
@@ -1121,7 +1121,7 @@ TEST_CASE("Probe: hls_refuel_orbit timeline", "[.r5_probe]") {
     test::spice_session();
     LunarDepotSession f;
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     const time::Epoch start = f.lunar.epoch();
     const auto wall0 = std::chrono::steady_clock::now();
     auto last = wall0;
@@ -1136,14 +1136,14 @@ TEST_CASE("Probe: hls_refuel_orbit timeline", "[.r5_probe]") {
             std::printf("[probe] sim %7.2f h  wall %6.0f s (+%5.1f)  leg %-22s autopilot %-12s %s\n",
                         (f.lunar.epoch() - start) / 3600.0, wall_s, step_s, sim::id_of(f.lunar.iss_mission_leg()),
                         sim::id_of(f.lunar.autopilot().state),
-                        report::transitional_text(f.lunar.iss_mission_status()).c_str());
+                        report::describe(f.lunar.iss_mission_status()).c_str());
             std::fflush(stdout);
         }
-        if (wall_s > 900.0 || report::transitional_text(f.lunar.iss_mission_status()).find("Freigabe") != std::string::npos) break;
+        if (wall_s > 900.0 || report::describe(f.lunar.iss_mission_status()).find("Freigabe") != std::string::npos) break;
     }
     std::printf("[probe] end: sim %.2f h, leg %s, %s\n", (f.lunar.epoch() - start) / 3600.0,
                 sim::id_of(f.lunar.iss_mission_leg()),
-                report::transitional_text(f.lunar.iss_mission_status()).c_str());
+                report::describe(f.lunar.iss_mission_status()).c_str());
 }
 
 TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continues with the real tank load",
@@ -1151,14 +1151,14 @@ TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continu
     test::spice_session();
     LunarDepotSession f;
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     const time::Epoch start = f.lunar.epoch();
     while (f.lunar.epoch() - start < 8.0 * 86400.0 && f.lunar.iss_mission_leg() != IssMissionLeg::Complete &&
            f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
         f.lunar.advance_to(f.lunar.epoch() + 600.0);
     }
-    INFO(report::transitional_text(f.lunar.iss_mission_status()));
+    INFO(report::describe(f.lunar.iss_mission_status()));
     REQUIRE(f.lunar.iss_mission_leg() == IssMissionLeg::Complete);
     REQUIRE(f.lunar.lunar_outbound_plan());
     const auto& hls = f.lunar.body(f.lunar.controlled_index()).vehicle();
@@ -1179,8 +1179,8 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
     test::spice_session();
     LunarDepotSession f;
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel", f.t0, f.clock);
-    INFO(s.refusal);
-    REQUIRE(s.refusal.empty());
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.refusal.ok());
     while (f.lunar.epoch() - s.epoch < 1200.0 && f.lunar.tower()->phase() != sim::CatchPhase::Caught) {
         f.lunar.advance_to(f.lunar.epoch() + 1.0);
     }
@@ -1192,7 +1192,7 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
            f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
         f.lunar.advance_to(f.lunar.epoch() + 600.0);
     }
-    INFO(report::transitional_text(f.lunar.iss_mission_status()));
+    INFO(report::describe(f.lunar.iss_mission_status()));
     INFO("breakup: " << f.lunar.body(f.lunar.controlled_index()).breakup_reason() << ", tower "
                      << sim::id_of(f.lunar.tower()->phase()) << ", liftoff +"
                      << (f.lunar.epoch() - s.epoch) / 3600.0 << " h");

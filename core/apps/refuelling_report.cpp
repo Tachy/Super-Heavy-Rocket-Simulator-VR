@@ -30,8 +30,8 @@ int fly(const std::string& mission_id) {
     const spice::SpiceTimeConverter clock;
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR, environment::PointMassGravityConfig{}, &moon);
     const auto start = sim::start_mission(session, STARSIM_CONFIG_DIR, mission_id, {}, clock);
-    if (!start.refusal.empty()) {
-        std::cerr << "refuelling_report: " << start.refusal << "\n";
+    if (!start.refusal.ok()) {
+        std::cerr << "refuelling_report: " << report::describe(start.refusal) << "\n";
         return 1;
     }
     const auto* driver = dynamic_cast<const sim::RefuellingCampaignFlight*>(session.supervisor());

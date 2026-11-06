@@ -57,10 +57,10 @@ TEST_CASE("start_mission plans the HLS outbound flight", "[sim][lunar][mission]"
     const spice::SpiceTimeConverter time;
     sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
     const auto start = sim::start_mission(session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time);
-    INFO(start.refusal);
+    INFO(report::describe(start.refusal));
     CHECK(start.kind == config::MissionKind::LunarLanding);
     CHECK(start.return_planned);
-    CHECK(start.refusal.empty());
+    CHECK(start.refusal.ok());
     CHECK(session.lunar_step() == sim::LunarStep::Departure);
     CHECK(session.epoch().tdb_seconds_past_j2000() == time.from_utc({2026, 11, 13, 0, 0, 0.0}).tdb_seconds_past_j2000());  // the mission's epoch_utc: daylight at the site (was 2026-11-02; task 6c)
     // circular 200 km parking orbit
@@ -79,7 +79,7 @@ TEST_CASE("The deferred lunar landing start gives the synchronous start", "[sim]
     sim::FlightSession deferred_session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
     auto pending = sim::start_mission_deferred(deferred_session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time);
     REQUIRE_FALSE(pending.done);  // the composed surface with the hazard check: the search runs on its thread
-    CHECK(pending.status == "Landeplatz wird geprüft");
+    CHECK(pending.status.code == report::Code::start_checking_landing_site);
     REQUIRE(pending.poll);
     REQUIRE(pending.wait);
     CHECK(deferred_session.active());  // placed before the search
@@ -93,9 +93,9 @@ TEST_CASE("The deferred lunar landing start gives the synchronous start", "[sim]
     std::printf("[lunar_mission] deferred start: %d polls\n", polls);
     sim::FlightSession sync_session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
     const auto sync = sim::start_mission(sync_session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time);
-    CAPTURE(deferred->refusal, sync.refusal);
+    CAPTURE(report::describe(deferred->refusal), report::describe(sync.refusal));
     CHECK(deferred->return_planned == sync.return_planned);
-    CHECK(deferred->refusal == sync.refusal);
+    CHECK(report::same(deferred->refusal, sync.refusal));
     CHECK(deferred->epoch.tdb_seconds_past_j2000() == sync.epoch.tdb_seconds_past_j2000());
     CHECK(deferred_session.lunar_step() == sync_session.lunar_step());
     REQUIRE(deferred_session.lunar_outbound_plan());
@@ -153,18 +153,18 @@ TEST_CASE("Mission 1 closes in the LLO with the 120 t HLS; NRHO and 204 t are re
         {
             sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
             const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc));
-            CAPTURE(id, s.refusal);
+            CAPTURE(id, report::describe(s.refusal));
             CHECK(s.return_planned == closes);
-            if (!closes) CHECK(s.refusal.find("lunar.mission_infeasible") != std::string::npos);  // text until Task 10
+            if (!closes) CHECK(s.refusal.code == report::Code::lunar_mission_infeasible);
         }
         {
             auto heavy = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
             heavy.stages.front().dry_mass_kg = 204e3;   // the independent bottom-up estimate (spec)
             sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
             const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc), &heavy);
-            CAPTURE(id, s.refusal);
+            CAPTURE(id, report::describe(s.refusal));
             CHECK_FALSE(s.return_planned);
-            CHECK(s.refusal.find("lunar.mission_infeasible") != std::string::npos);  // text until Task 10
+            CHECK(s.refusal.code == report::Code::lunar_mission_infeasible);
             CHECK(session.lunar_step() == sim::LunarStep::None);
         }
     }
@@ -184,9 +184,9 @@ TEST_CASE("The LLO outbound plan is found at the epochs where the first guess st
         m.epoch_utc = {2026, 11, day, 0, 0, 0.0};
         sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
         const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc));
-        CAPTURE(day, s.refusal);
+        CAPTURE(day, report::describe(s.refusal));
         CHECK(s.return_planned);
-        CHECK(s.refusal.empty());
+        CHECK(s.refusal.ok());
         REQUIRE(session.lunar_outbound_plan());
         CHECK_THAT(norm(session.lunar_outbound_plan()->tli.delta_v_gcrf_mps), WithinAbs(3.2e3, 0.2e3));  // [D] the same TLI as the other epochs (3,142-3,195 m/s in the probe)
     }
@@ -202,7 +202,7 @@ void fly_mission_1(const char* id, double span_days, sim::LunarStep end_step) {
     spice::SpiceTimeConverter time;
     sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
     const auto s = sim::start_mission(session, STARSIM_CONFIG_DIR, id, {}, time);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(s.return_planned);
     const double m0 = session.body(0).vehicle().mass_properties().mass_kg;
     session.advance_to(s.epoch + span_days * 86400.0, 200'000'000);
@@ -242,7 +242,7 @@ TEST_CASE("Lunar mission epoch probe", "[.][lunar_epoch_probe]") {
     const auto epoch = time.from_utc(m.epoch_utc) + (shift ? std::atof(shift) : 0.0) * 86400.0;
     sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
     const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, epoch);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(s.return_planned);
     session.advance_to(epoch + (span ? std::atof(span) : 10.0) * 86400.0, 200'000'000);
     std::printf("[epoch_probe] %s shift %s d: %s\n", id, shift ? shift : "0", report::describe(session.lunar_status()).c_str());

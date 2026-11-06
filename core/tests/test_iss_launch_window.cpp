@@ -78,7 +78,7 @@ TEST_CASE("Launch window: at liftoff the ascent plane is the biased ISS plane", 
     const Fixture f;
     const time::Epoch earliest = f.clock.from_utc({2026, 10, 16, 0, 0, 0.0});
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(), earliest, f.parameters(), gm);
-    INFO(report::transitional_text(w.reason));
+    INFO(report::describe(w.reason));
     REQUIRE(w.feasible);
     CHECK(w.liftoff - earliest >= 0.0);
     // one northerly crossing per sidereal day; a rejected one (phase out of reach in 28 h) moves it a day on
@@ -128,7 +128,7 @@ TEST_CASE("Launch window: never before the earliest liftoff, also when the bias 
     for (const double after_s : {5.0, 30.0, 60.0}) {
         const time::Epoch earliest = w.liftoff + after_s;
         const auto later = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(), earliest, p, gm);
-        INFO(after_s << " s: " << report::transitional_text(later.reason));
+        INFO(after_s << " s: " << report::describe(later.reason));
         if (later.feasible) CHECK(later.liftoff - earliest >= 0.0);
     }
 }
@@ -176,7 +176,7 @@ TEST_CASE("Launch window: candidates - the cheapest feasible orbit, below or abo
     time::Epoch earliest = f.start;
     for (int i = 0; i < 12; ++i) {  // twelve consecutive windows
         const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, earliest, p, gm);
-        INFO(i << ": " << report::transitional_text(w.reason));
+        INFO(i << ": " << report::describe(w.reason));
         REQUIRE(w.feasible);
         REQUIRE(w.phasing_orbit);
         (w.phasing_orbit->periapsis_radius_m > re + 200e3 ? above : below)++;
@@ -260,7 +260,7 @@ TEST_CASE("Launch window: the refusal names every candidate's reason", "[iss][la
     p.search_s = 3.0 * 86400.0;
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
     REQUIRE_FALSE(w.feasible);
-    INFO(report::transitional_text(w.reason));
+    INFO(report::describe(w.reason));
     REQUIRE(w.reason.code == report::Code::launch_window_none);
     CHECK(std::any_of(w.reason.causes.begin(), w.reason.causes.end(),
                       [](const report::Report& r) { return r.code == report::Code::phasing_orbit_too_close; }));

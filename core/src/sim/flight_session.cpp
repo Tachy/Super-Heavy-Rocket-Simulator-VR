@@ -1369,7 +1369,7 @@ void FlightSession::set_earth_terrain(std::shared_ptr<const environment::EarthTe
     // Bodies resting on the Earth stand at the old ground: the order is terrain first, then placement.
     for (size_t i = 0; i < bodies_.size(); ++i) {
         if (bodies_[i].body->resting() && reference_body(i) == ephemeris::Body::Earth) {
-            throw std::runtime_error("Erdgelände muss vor dem Aufsetzen gesetzt werden");
+            throw std::runtime_error("the Earth terrain must be set before the vehicle is placed on the ground");
         }
     }
     earth_terrain_ = std::move(terrain);
@@ -1446,7 +1446,7 @@ void FlightSession::set_landing_surface(double latitude_rad, double longitude_ra
 
 void FlightSession::set_landing_surface(const LegSite& site, contact::LandingSurface surface) {
     if (site.body == ephemeris::Body::Moon && !moon_) {
-        throw std::runtime_error("Landeplatz auf dem Mond braucht die Mondorientierung");
+        throw std::runtime_error("a landing site on the Moon needs the Moon orientation");
     }
     const auto shape = site.body == ephemeris::Body::Moon ? moon_->shape() : frames::wgs84;
     lunar_site_.reset();
@@ -1454,11 +1454,11 @@ void FlightSession::set_landing_surface(const LegSite& site, contact::LandingSur
 }
 
 void FlightSession::set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain) {
-    if (!moon_) throw std::runtime_error("Mondgelände braucht die Mondorientierung");
+    if (!moon_) throw std::runtime_error("the Moon terrain needs the Moon orientation");
     // Bodies resting on the Moon stand at the old surface height: the order is terrain first, then placement.
     for (size_t i = 0; i < bodies_.size(); ++i) {
         if (bodies_[i].body->resting() && reference_body(i) == ephemeris::Body::Moon) {
-            throw std::runtime_error("Mondgelände muss vor dem Aufsetzen gesetzt werden");
+            throw std::runtime_error("the Moon terrain must be set before the vehicle is placed on the ground");
         }
     }
     moon_terrain_ = std::move(terrain);
@@ -1484,7 +1484,7 @@ void FlightSession::apply_moon_surface() {
     if (!moon_surface_parts_) return;
     for (size_t i = 0; i < bodies_.size(); ++i) {
         if (bodies_[i].body->resting() && reference_body(i) == ephemeris::Body::Moon) {
-            throw std::runtime_error("Mondoberfläche kann nicht geändert werden, solange ein Fahrzeug auf dem Mond steht");
+            throw std::runtime_error("the Moon surface cannot be changed while a vehicle stands on the Moon");
         }
     }
     const auto& parts = *moon_surface_parts_;
@@ -1492,9 +1492,9 @@ void FlightSession::apply_moon_surface() {
     if (parts.options() == wanted) {
         moon_surface_ = moon_surface_parts_;
     } else if (wanted.detail && !parts.detail_shared()) {
-        throw std::runtime_error("Mondoberfläche: das Oberflächendetail wurde nicht geladen");
+        throw std::runtime_error("Moon surface: the surface detail was not loaded");
     } else if (wanted.detail && wanted.rocks && !parts.rocks_shared()) {
-        throw std::runtime_error("Mondoberfläche: die Felsbrocken wurden nicht geladen");
+        throw std::runtime_error("Moon surface: the boulders were not loaded");
     } else {
         moon_surface_ = std::make_shared<const environment::DetailedLunarTerrain>(
             parts.lola_shared(), parts.detail_shared(), parts.rocks_shared(), wanted);
@@ -1528,7 +1528,7 @@ void FlightSession::set_moon_rocks(bool on) {
 }
 
 void FlightSession::set_lunar_landing_site(const LunarSite& site) {
-    if (!moon_ || !moon_terrain_) throw std::runtime_error("Mondlandeplatz braucht das Mondgelände (set_moon_terrain)");
+    if (!moon_ || !moon_terrain_) throw std::runtime_error("a lunar landing site needs the Moon terrain (set_moon_terrain)");
     const LegSite leg_site{ephemeris::Body::Moon, site.config.latitude_rad, site.config.longitude_rad, site.height_m,
                            site.config.tile_half_size_m};
     const auto frame = LegLandingSim::site_frame(leg_site, moon_->shape());

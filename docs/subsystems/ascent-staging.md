@@ -95,8 +95,8 @@ removed).
 - **Recovery choice** (`sim::plan_launch(like, request)`): raises a target inclination below the site's latitude to it,
   chooses the recovery (`RecoveryChoice`: TowerCatch / LandingZone / DroneShip; replaces the request's landing site, part of
   the memo key), then plans the kick. By `recovery_method`:
-  - `tower_catch` (Super Heavy): the site's tower; none -> "Kein Fangturm am Startplatz."; no plan with the catch ->
-    "Ziel mit Booster-Rückkehr nicht erreichbar (<trial reason>)". Never expendable.
+  - `tower_catch` (Super Heavy): the site's tower; none -> `ascent.no_tower`; no plan with the catch ->
+    `ascent.target_unreachable_because` (cause `ascent.profile_not_plannable` -> a trial code). Never expendable.
   - `leg_landing` (Falcon 9): the site's `landing_zone` (launch_sites.toml; SLC-40 -> LZ-40 [S]) when the plan with the
     RTLS return (MECO keeps the 12.1 t landing propellant) is feasible, also where the drone ship would leave more
     (SpaceX practice); else a drone ship from `config/drone_ships.toml` at the stage's impact predicted 10 s after the
@@ -131,7 +131,7 @@ removed).
   with its own payload, fairing kept, so memoised - or the loaded configuration as `stack`). While the command runs the
   session does not advance: the world clock holds at the pad snapshot's epoch, the T- clock stands ("Startvorbereitung:
   Bahn wird berechnet" as last_event and in the webcast's name line); the liftoff follows the plan, never the default
-  `PitchProgram`. Refused: the command is not ok with the reason (game: "Start abgelehnt: Kein Fangturm am Startplatz."),
+  `PitchProgram`. Refused: `engage_pad_ascent` returns the reason as a `report::Report` (ok: engaged; game: "Start abgelehnt: <text of ascent.no_tower>"),
   the vehicle stays on its pad. Key P on a clamped stack plans the same way. `engage_ascent_autopilot(target, program)`
   flies a given program (trial flights, studies, guidance tests). `FlightSim.start_mission` of a pad-launching mission
   (ascent, iss_launch, depot_launch, tanker_flight, hls_refuel, the flown campaign) publishes the planning flag before
@@ -139,7 +139,8 @@ removed).
 - **Plan cache for tests** (`sim/ascent_plan_cache.hpp`): test processes share plans through a write-once disk cache,
   active only when `STARSIM_PLAN_CACHE_DIR` is set (the test CMake: `build/plan_cache`; the game never does). Disk key =
   memo key + liftoff epoch (hexfloat) + FNV-1a hash of the config directory's contents (a plan from another hour differs
-  in the kick's last bits: tanker rendezvous moved by 1.6 t); temp name + rename; wiped on every relink of the test exe.
+  in the kick's last bits: tanker rendezvous moved by 1.6 t); temp name + rename; wiped on every relink of the test exe. Format version 2 (the plan's `reason` is a report: code id, parameters,
+  causes); a file of another version is a miss, flown again, never migrated.
   Tests that assert trial flights call `sim::disable_plan_cache()`; `plan_speed` runs without the cache. Warm cache -49 %
   summed test time on the ascent labels.
 

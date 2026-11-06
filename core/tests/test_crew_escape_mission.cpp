@@ -154,7 +154,7 @@ TEST_CASE("Crewed orbit return with an engine failed in the entry", "[crew_escap
 TEST_CASE("Crewed lunar direct return with an engine failed in the entry", "[crew_escape][mission][slow]") {
     test::LunarReturnSession t;
     const auto start = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_return_llo_crewed", {}, t.time);
-    INFO(start.refusal);
+    INFO(report::describe(start.refusal));
     REQUIRE(start.return_planned);
     REQUIRE(t.session.crew_escape_state() != nullptr);
     REQUIRE(fly_to_entry(t.session, 8.0 * 86400.0));

@@ -75,7 +75,7 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
     const auto refuse = [&](const report::Report& reason) {
         session.disengage_autopilot();
         s.return_planned = false;
-        s.refusal = report::transitional_text(reason);  // text until Task 10 (MissionStart)
+        s.refusal = reason;
         return s;
     };
     const auto setup = lunar_landing_setup(m);
@@ -129,7 +129,7 @@ DeferredMissionStart plan_from_live_state(FlightSession& session, const config::
                                               mission::touchdown_hazard_limits(stage))
             .share());
     DeferredMissionStart d;
-    d.status = touchdown_check_status;
+    d.status = report::make(report::Code::start_checking_landing_site);
     d.poll = [search, m, epoch](FlightSession& f) -> std::optional<MissionStart> {
         if (search->wait_for(std::chrono::seconds(0)) != std::future_status::ready) return std::nullopt;
         return plan_after_touchdown_check(f, m, epoch, search->get().has_value());
@@ -217,7 +217,7 @@ DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const s
         MissionStart s;
         s.kind = config::MissionKind::LunarLanding;
         s.epoch = epoch;
-        s.refusal = report::transitional_text(detail::exception_report(e));  // text until Task 10 (MissionStart)
+        s.refusal = detail::exception_report(e);
         return {s};
     }
     return plan_from_live_state(session, m, epoch, placed);
@@ -247,7 +247,7 @@ MissionStart continue_lunar_landing_mission(FlightSession& session, const std::f
         MissionStart s;
         s.kind = config::MissionKind::LunarLanding;
         s.epoch = epoch;
-        s.refusal = report::transitional_text(reason);  // text until Task 10 (MissionStart)
+        s.refusal = reason;
         return s;
     };
     if (!session.moon_orientation()) return refuse(report::make(report::Code::lunar_landing_no_moon_orientation));

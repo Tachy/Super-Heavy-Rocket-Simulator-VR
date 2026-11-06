@@ -417,12 +417,12 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::WaitContinue: {
             const auto continuation = q.continuation;  // the continuation may replace the sequence
             const auto generation = iss_generation_;
-            const std::string refusal = continuation(*this);
+            const report::Report refusal = continuation(*this);
             if (!iss_mission_ || iss_generation_ != generation) return;  // ended, or a new sequence runs
-            if (refusal.empty()) {
+            if (refusal.ok()) {
                 iss_enter(IssMissionLeg::Complete, simple(report::Code::iss_continued));
             } else {
-                iss_end(report::legacy(refusal));
+                iss_end(refusal);
             }
             return;
         }

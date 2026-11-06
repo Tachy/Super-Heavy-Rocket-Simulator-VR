@@ -53,14 +53,14 @@ TEST_CASE("ISS mission: crew_dragon_iss from the window's separation to hard cap
     const auto wall = std::chrono::steady_clock::now();
     const auto st = sim::start_iss_rendezvous_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
     const double planning_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall).count();
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     REQUIRE(st.launch_window);
     CHECK(planning_s < 10.0);  // spec: a few seconds
     CHECK(st.epoch == st.launch_window->separation);
     const double kg0 = f.session.body(f.session.controlled_index()).vehicle().rcs_propellant_kg();
     fly(f.session, [&] { return f.session.iss_mission_leg() == IssMissionLeg::Docked; }, 30.0 * 3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Docked);
     // the Dragon is held on the station now: its own tank still shows what the flight used
     const double used_kg = kg0 - f.session.body(f.session.controlled_index()).vehicle().rcs_propellant_kg();
@@ -81,12 +81,12 @@ TEST_CASE("ISS mission: crew_dragon_iss at IDA-3 with a set phase on the synthet
     m.iss_orbit = "synthetic";
     m.phase_rad = 40.0 * constants::deg_to_rad;
     const auto st = sim::start_iss_rendezvous_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     CHECK_FALSE(st.launch_window);
     CHECK(st.epoch == f.clock.from_utc(m.epoch_utc));
     fly(f.session, [&] { return f.session.iss_mission_leg() == IssMissionLeg::Docked; }, 30.0 * 3600.0);
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Docked);
     if (verbose()) {
         std::printf("[iss_mission] crew_dragon_iss IDA-3, 40 deg, synthetic: docked %.1f h after the start\n",
@@ -117,7 +117,7 @@ TEST_CASE("ISS mission: start_mission dispatches crew_dragon_iss", "[iss][iss_mi
     const auto st = sim::start_mission(f.session, rendezvous_test::config_dir, "crew_dragon_iss", {}, f.clock);
     CHECK(st.kind == config::MissionKind::IssRendezvous);
     // data/iss_oem may be absent on a fresh checkout: "auto" then flies the synthetic orbit - either way planned
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     CHECK(st.return_planned);
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     CHECK_FALSE(st.warnings.empty());  // at least the ISS source note
@@ -128,7 +128,7 @@ TEST_CASE("ISS mission: the window's separation estimate matches the flown ascen
     Session f;
     const auto m = config::load_iss_launch_mission(rendezvous_test::config_dir, "falcon9_crew_dragon_iss");
     const auto st = sim::start_iss_launch_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     REQUIRE(st.launch_window);
     const auto& w = *st.launch_window;
@@ -142,7 +142,7 @@ TEST_CASE("ISS mission: the window's separation estimate matches the flown ascen
     while (s.iss_mission_leg() == IssMissionLeg::Ascent && s.epoch() - w.liftoff < 1800.0) {
         s.advance_to(s.epoch() + 1.0, 100000);
     }
-    INFO(report::transitional_text(s.iss_mission_status()));
+    INFO(report::describe(s.iss_mission_status()));
     REQUIRE(s.iss_mission_leg() == IssMissionLeg::Rendezvous);
     const auto& dragon = s.body(s.controlled_index()).state();
     const double dt = s.epoch() - w.separation;
@@ -180,7 +180,7 @@ TEST_CASE("ISS mission: falcon9_crew_dragon_iss from the pad to hard capture", "
     Session f;
     const auto m = config::load_iss_launch_mission(rendezvous_test::config_dir, "falcon9_crew_dragon_iss");
     const auto st = sim::start_iss_launch_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.launch_window);
     CHECK(st.epoch == st.launch_window->liftoff);
     CHECK(st.site_id == "ccsfs_slc40");
@@ -191,7 +191,7 @@ TEST_CASE("ISS mission: falcon9_crew_dragon_iss from the pad to hard capture", "
     }
     const double kg0 = s.body(s.controlled_index()).vehicle().rcs_propellant_kg();
     fly(s, [&] { return s.iss_mission_leg() == IssMissionLeg::Docked; }, 30.0 * 3600.0);
-    INFO(report::transitional_text(s.iss_mission_status()));
+    INFO(report::describe(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Docked);
     CHECK(s.epoch() - st.launch_window->liftoff < m.mission_limit_s + 3.0 * 3600.0);
     if (verbose()) {
@@ -209,7 +209,7 @@ TEST_CASE("ISS mission: no launch window - refused, nothing launched", "[iss][is
     m.window.search_s = 86400.0;
     const auto st = sim::start_iss_launch_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
     CHECK_FALSE(st.return_planned);
-    CHECK(st.refusal.find("launch_window.none") != std::string::npos);  // the code id until Task 10
+    CHECK(st.refusal.code == report::Code::launch_window_none);
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::None);
     CHECK(f.session.body_count() == 0);
 }
@@ -220,7 +220,7 @@ TEST_CASE("ISS mission: crew_dragon_iss_departure - undock timed to the pass, sp
     Session f;
     const auto m = config::load_iss_departure_mission(rendezvous_test::config_dir, "crew_dragon_iss_departure");
     const auto st = sim::start_iss_departure_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     auto& s = f.session;
     CHECK(s.docked());
@@ -242,7 +242,7 @@ TEST_CASE("ISS mission: crew_dragon_iss_departure - undock timed to the pass, sp
         }
         s.advance_to(s.epoch() + step, 10000000);
     }
-    INFO(report::transitional_text(s.iss_mission_status()));
+    INFO(report::describe(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Complete);
     CHECK(s.capsule_return_step() == sim::CapsuleReturnStep::SplashedDown);
     REQUIRE(s.ship_return_plan());
@@ -260,7 +260,7 @@ TEST_CASE("ISS mission: start_mission dispatches the departure", "[iss][iss_miss
     test::spice_session();
     Session f;
     const auto st = sim::start_mission(f.session, rendezvous_test::config_dir, "crew_dragon_iss_departure", {}, f.clock);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     CHECK(st.kind == config::MissionKind::IssDeparture);
     CHECK(st.return_planned);
     CHECK(f.session.docked());
@@ -274,7 +274,7 @@ TEST_CASE("ISS mission: a refused rendezvous leaves no bodies behind", "[iss][is
     m.mission_limit_s = 1800.0;  // no phasing closes in half an hour
     const auto st = sim::start_iss_rendezvous_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
     CHECK_FALSE(st.return_planned);
-    CHECK_FALSE(st.refusal.empty());
+    CHECK_FALSE(st.refusal.ok());
     CHECK(f.session.body_count() == 0);  // the mission does not start (spec "Error handling")
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::None);
 }

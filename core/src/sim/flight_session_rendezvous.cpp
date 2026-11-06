@@ -496,8 +496,8 @@ void FlightSession::run_rendezvous(Flying& flying) {
         // a throwing planner would throw again on every tick: the rendezvous ends, the vehicle drifts
         rendezvous_abort(aborted(report::make(report::Code::rendezvous_planning_failed)));
     }
-    if (rendezvous_debug_ && report::transitional_text(rendezvous_status_) != rendezvous_debug_last_) {  // diagnostics
-        rendezvous_debug_last_ = report::transitional_text(rendezvous_status_);
+    if (rendezvous_debug_ && report::describe(rendezvous_status_) != rendezvous_debug_last_) {  // diagnostics
+        rendezvous_debug_last_ = report::describe(rendezvous_status_);
         const double range_m = station_index_ ? norm(station_state().position_m - controlled_state().position_m) : 0.0;
         std::printf("[rendezvous] %7.3f h  %-10s  range %.1f km  %.3f t  %s\n", mission_time_s() / 3600.0,
                     id_of(rendezvous_step_), range_m / 1000.0,

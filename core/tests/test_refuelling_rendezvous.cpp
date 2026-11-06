@@ -45,7 +45,7 @@ TEST_CASE("A tanker plans the coelliptic phasing to the depot on Raptor and cold
     f.session.place_in_orbit(refuelling_test::tanker_config(200.0e3), tanker_behind(f, 8.0), f.t0);
     f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
     REQUIRE(f.session.plan_rendezvous({}));
-    INFO(report::transitional_text(f.session.rendezvous_status()));
+    INFO(report::describe(f.session.rendezvous_status()));
     const auto* plan = f.session.rendezvous_plan();
     REQUIRE(plan);
     CHECK(plan->feasible);
@@ -98,7 +98,7 @@ TEST_CASE("A tanker with a failed belly Raptor plans on the cold gas or is refus
     }
     bool planned = false;
     REQUIRE_NOTHROW(planned = f.session.plan_rendezvous({}));
-    INFO(report::transitional_text(f.session.rendezvous_status()));
+    INFO(report::describe(f.session.rendezvous_status()));
     if (planned) {
         for (const auto& b : f.session.rendezvous_plan()->burns) CHECK(std::isfinite(norm(b.node.delta_v_gcrf_mps)));
     } else {
@@ -121,7 +121,7 @@ TEST_CASE("The tanker flies the phasing to Waypoint 0 below the depot", "[refuel
          t += 60.0) {
         f.session.advance_to(f.session.epoch() + 60.0);
     }
-    INFO(report::transitional_text(f.session.rendezvous_status()));
+    INFO(report::describe(f.session.rendezvous_status()));
     REQUIRE(f.session.rendezvous_step() == sim::RendezvousStep::Waypoint0);
     const auto& depot = f.session.body(1).state();
     const auto rel = orbit::lvlh_relative_state({depot.position_gcrf_m, depot.velocity_gcrf_mps},
@@ -164,7 +164,7 @@ TEST_CASE("Depot launch window from Starbase: the plane passes the pad about onc
         return refuelling_test::depot_state(f.earth, t, n * (t - f.t0));
     };
     const auto w1 = mission::plan_launch_window(pad, f.earth, depot, f.t0, p, constants::earth_gm_m3ps2);
-    INFO(report::transitional_text(w1.reason));
+    INFO(report::describe(w1.reason));
     REQUIRE(w1.feasible);
     CHECK(w1.schedule.feasible);
     // crossings about a day apart: the window is the (rejected + 1)-th crossing after t0
@@ -195,7 +195,7 @@ TEST_CASE("Tanker from its phasing orbit to hard capture at the depot", "[refuel
          t += 30.0) {
         f.session.advance_to(f.session.epoch() + 30.0);
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()) << " | " << test::code_id(f.session.proximity_status()) << " | "
+    INFO(report::describe(f.session.iss_mission_status()) << " | " << test::code_id(f.session.proximity_status()) << " | "
                                         << test::code_id(f.session.docking_status()));
     REQUIRE(f.session.iss_mission_leg() == sim::IssMissionLeg::Docked);
     REQUIRE(f.session.docked());

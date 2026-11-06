@@ -5,10 +5,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/report/report.hpp"
 #include "starsim/sim/ascent_plan_cache.hpp"
 
 using namespace starsim;
@@ -45,7 +47,14 @@ struct EnvGuard {
 sim::AscentProfile sample_profile() {
     sim::AscentProfile p;
     p.feasible = true;
-    p.reason = "Ziel erreicht \xC3\xA4 mit\nZeilenumbruch";
+    // a refusal reason with parameters of several kinds, a text with a space and a line break, and two nested causes
+    p.reason = report::with_cause(
+        report::make(report::Code::ascent_profile_not_plannable),
+        report::with_cause(report::make(report::Code::ascent_sea_too_rough_both,
+                                        {report::angle("tilt", 0.1234567890123), report::angle("tilt_limit", 0.07),
+                                         report::speed("heave", 1.25), report::speed("heave_limit", 1.0),
+                                         report::length("hs", 6.0), report::time("tp", 10.0)}),
+                           report::make(report::Code::legacy, {report::legacy_text("text", "Ziel erreicht \xC3\xA4 mit\nZeilenumbruch")})));
     p.kick_angle_rad = 0.2617993877991494;
     p.upper_propellant_at_seco_kg = 123456.789;
     p.trial_flights = 11;
@@ -64,7 +73,7 @@ sim::AscentProfile sample_profile() {
 
 void check_equal(const sim::AscentProfile& a, const sim::AscentProfile& b) {
     CHECK(a.feasible == b.feasible);
-    CHECK(a.reason == b.reason);
+    CHECK(report::same(a.reason, b.reason));
     CHECK(a.kick_angle_rad == b.kick_angle_rad);
     CHECK(a.upper_propellant_at_seco_kg == b.upper_propellant_at_seco_kg);
     CHECK(a.trial_flights == b.trial_flights);
@@ -104,12 +113,62 @@ TEST_CASE("encode/decode round trip is bit-exact", "[sim][plan_cache]") {
     REQUIRE(again);
     CHECK_FALSE(again->booster_impact);
     CHECK(std::isnan(again->upper_propellant_at_seco_kg));
+    CHECK(again->reason.ok());
+}
+
+TEST_CASE("a refusal reason survives the cache bit-exactly", "[sim][plan_cache]") {
+    sim::AscentProfile refused;
+    refused.feasible = false;
+    refused.reason = report::with_cause(report::make(report::Code::ascent_profile_not_plannable),
+                                        report::make(report::Code::ascent_trial_orbit_missed));
+    const auto decoded = sim::decode_profile(sim::encode_profile(refused));
+    REQUIRE(decoded);
+    CHECK_FALSE(decoded->feasible);
+    CHECK(report::same(decoded->reason, refused.reason));
+    CHECK(decoded->reason.code == report::Code::ascent_profile_not_plannable);
+    REQUIRE(decoded->reason.causes.size() == 1);
+    CHECK(decoded->reason.causes.front().code == report::Code::ascent_trial_orbit_missed);
+
+    // through the directory too, and the parameters of the sample keep their last bits
+    TempDir dir("refusal");
+    TempDir config("refusal_config");
+    write_file(config.path / "a.toml", "x");
+    EnvGuard env(dir.path.string());
+    sim::store_cached_plan("refused key", config.path, refused);
+    const auto loaded = sim::load_cached_plan("refused key", config.path);
+    REQUIRE(loaded);
+    CHECK(report::same(loaded->reason, refused.reason));
+}
+
+TEST_CASE("A plan cache file of the previous version is a miss", "[sim][plan_cache][cache]") {
+    // version 1 stored the reason as a German text: such a file is not migrated, the plan is flown again
+    auto old_text = sim::encode_profile(sample_profile());
+    const auto at = old_text.find("starsim-plan-cache 2");
+    REQUIRE(at == 0);
+    old_text.replace(0, std::string("starsim-plan-cache 2").size(), "starsim-plan-cache 1");
+    CHECK_FALSE(sim::decode_profile(old_text));
+
+    TempDir dir("old_version");
+    TempDir config("old_version_config");
+    write_file(config.path / "a.toml", "x");
+    EnvGuard env(dir.path.string());
+    sim::store_cached_plan("old key", config.path, sample_profile());
+    std::filesystem::path plan_file;
+    for (const auto& entry : std::filesystem::directory_iterator(dir.path)) plan_file = entry.path();
+    REQUIRE(plan_file.extension() == ".plan");
+    REQUIRE(sim::load_cached_plan("old key", config.path));
+    std::ifstream in(plan_file, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    text.replace(0, std::string("starsim-plan-cache 2").size(), "starsim-plan-cache 1");
+    write_file(plan_file, text);
+    CHECK_FALSE(sim::load_cached_plan("old key", config.path));
 }
 
 TEST_CASE("corrupt cache file is ignored", "[sim][plan_cache]") {
     CHECK_FALSE(sim::decode_profile(""));
     CHECK_FALSE(sim::decode_profile("starsim-plan-cache 1\n"));
-    CHECK_FALSE(sim::decode_profile("starsim-plan-cache 2\nend\n"));
+    CHECK_FALSE(sim::decode_profile("starsim-plan-cache 3\nend\n"));
     const auto text = sim::encode_profile(sample_profile());
     CHECK_FALSE(sim::decode_profile(text.substr(0, text.size() / 2)));
 

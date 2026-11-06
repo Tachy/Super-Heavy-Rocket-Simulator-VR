@@ -257,11 +257,11 @@ TEST_CASE("A campaign tanker launches beside the kept depot and flies its chain 
                                                constants::earth_gm_m3ps2);
     REQUIRE(w.feasible);
     // off the liftoff: refused, nothing changed
-    CHECK_FALSE(sim::launch_campaign_flight(f.session, dir, m, w, p).refusal.empty());
+    CHECK_FALSE(sim::launch_campaign_flight(f.session, dir, m, w, p).refusal.ok());
     CHECK(f.session.body_count() == 1u);
     f.session.advance_to(w.liftoff);
     const auto s = sim::launch_campaign_flight(f.session, dir, m, w, p);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     REQUIRE(f.session.iss_mission());
     CHECK_FALSE(f.session.iss_mission()->ship_return.has_value());
     CHECK(f.session.iss_mission()->transfer == sim::MissionTransfer::TankerReserve);
@@ -334,7 +334,7 @@ TEST_CASE("Flown campaign start: the placed depot is the station and the first f
     CampaignSession c;
     const auto s =
         sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     REQUIRE(c.driver());
     c.fly([&] { return !c.phase_is(sim::CampaignFlightPhase::Planning); }, 600.0, 60.0);
     const auto& st = c.driver()->state();
@@ -386,7 +386,7 @@ TEST_CASE("Flown campaign: station keeping when the depot is low and the next ar
     m.keeping_target_height_m = 210.0e3;
     m.keeping_min_lead_s = 3600.0;  // the first arrival is days away
     const auto s = sim::start_refuelling_campaign_flight(c.session, refuelling_test::config_dir, m, c.clock);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch) || c.ended(); }, 86400.0, 60.0);
     const auto& st = c.driver()->state();
     INFO(report::describe(st.status));
@@ -407,7 +407,7 @@ TEST_CASE("Flown campaign needs a session with the Moon orientation", "[campaign
     refuelling_test::DepotSession f;  // Earth only
     const auto s = sim::start_refuelling_campaign_flight(f.session, refuelling_test::config_dir, placed_mission(),
                                                          f.clock);
-    CHECK_FALSE(s.refusal.empty());
+    CHECK_FALSE(s.refusal.ok());
     CHECK(f.session.supervisor() == nullptr);
 }
 
@@ -521,7 +521,7 @@ TEST_CASE("Flown campaign: the depot launched, every tanker, the HLS - compared 
     CampaignSession c;
     const auto s =
         sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown", {}, c.clock);
-    REQUIRE(s.refusal.empty());
+    REQUIRE(s.refusal.ok());
     c.fly([&] { return c.ended(); }, 120.0 * 86400.0);
     const auto& st = c.driver()->state();
     const auto misses = c.driver()->comparison_misses();

@@ -235,9 +235,9 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
 void RefuellingCampaignFlight::launch(FlightSession& s) {
     const auto& m = state_.next_is_hls ? hls_ : tanker_;
     const auto started = launch_campaign_flight(s, sources_.config_dir, m, *next_->window, next_parameters_);
-    if (!started.refusal.empty()) {
+    if (!started.refusal.ok()) {
         state_.status = report::with_cause(report::make(report::Code::refuelling_status_launch_refused),
-                                           report::legacy(started.refusal));  // MissionStart::refusal is text until Task 10
+                                           started.refusal);
         state_.phase = CampaignFlightPhase::Planning;  // the next window
         return;
     }
@@ -502,7 +502,7 @@ MissionStart start_refuelling_campaign_flight(FlightSession& session, const std:
     MissionStart s;
     s.kind = config::MissionKind::RefuellingCampaignFlown;
     if (!session.moon_orientation()) {
-        s.refusal = "Kampagne: die Sitzung hat keine Mondorientierung";
+        s.refusal = report::make(report::Code::start_campaign_no_moon_orientation);
         return s;
     }
     session.set_supervisor(nullptr);

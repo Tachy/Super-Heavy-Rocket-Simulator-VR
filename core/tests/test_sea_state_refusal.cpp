@@ -16,6 +16,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/deck_motion.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/sim/ascent_plan_cache.hpp"
 #include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -90,7 +91,6 @@ sim::AscentProfileRequest falcon9_request(const char* mission_id) {
     return r;
 }
 
-bool starts_with(const std::string& text, const std::string& prefix) { return text.rfind(prefix, 0) == 0; }
 
 }  // namespace
 
@@ -145,14 +145,19 @@ TEST_CASE("sea_state_refusal: within the limits, above them, flag off", "[sim][a
     session.set_sea_state(sea(6.0, 10.0, 90.0 * deg));
     const auto reason = sim::sea_state_refusal(session, ship, 0.0);
     REQUIRE(reason);
-    std::printf("[sea_state] %s\n", reason->c_str());
-    CHECK(starts_with(*reason, "Seegang im Landegebiet zu hoch"));
+    std::printf("[sea_state] %s\n", report::describe(*reason).c_str());
+    CHECK((reason->code == report::Code::ascent_sea_too_rough_tilt || reason->code == report::Code::ascent_sea_too_rough_both));
     const auto stats = contact::DeckMotion(*session.sea_state(), ship.hull, 0.0).statistics();
-    char value[32], limit[32];
-    std::snprintf(value, sizeof value, "%.1f", stats.significant_tilt_rad / deg);
-    std::snprintf(limit, sizeof limit, "%.1f", ship.max_deck_tilt_rad / deg);
-    CHECK(reason->find(value) != std::string::npos);
-    CHECK(reason->find(limit) != std::string::npos);
+    const auto param = [&](const char* name) {
+        for (const auto& p : reason->params) {
+            if (std::string(p.name) == name) return p.value_si;
+        }
+        return -1.0;
+    };
+    CHECK(param("tilt") == stats.significant_tilt_rad);
+    CHECK(param("tilt_limit") == ship.max_deck_tilt_rad);
+    CHECK(param("hs") == session.sea_state()->config().significant_wave_height_m);
+    CHECK(param("tp") == session.sea_state()->config().peak_period_s);
 
     session.set_deck_motion(false);  // fidelity flag off: the old behaviour, no refusal
     CHECK_FALSE(sim::sea_state_refusal(session, ship, 0.0));
@@ -172,9 +177,11 @@ TEST_CASE("A rough-sea drone-ship launch is refused before its drone-ship trials
 
     like.set_sea_state(sea(6.0, 10.0, 60.0 * deg));
     const auto plan = sim::plan_launch(like, request);
-    std::printf("[sea_state] %s\n", plan.reason.c_str());
+    std::printf("[sea_state] %s\n", report::describe(plan.reason).c_str());
     CHECK_FALSE(plan.feasible);
-    CHECK(starts_with(plan.reason, "Seegang im Landegebiet zu hoch"));
+    CHECK((plan.reason.code == report::Code::ascent_sea_too_rough_tilt ||
+           plan.reason.code == report::Code::ascent_sea_too_rough_heave ||
+           plan.reason.code == report::Code::ascent_sea_too_rough_both));
     CHECK(plan.trial_flights == 0);  // RTLS from the memo, no drone-ship trial
     CHECK_FALSE(plan.booster_impact);
 }
@@ -220,7 +227,7 @@ TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_st
     const auto rough = sim::plan_launch(like, request);
     std::printf("[sea_state] ground track %.1f deg (tilt %.2f deg), deck heading %.1f deg (tilt %.2f deg)%s%s\n",
                 track_rad / deg, beam_tilt_rad / deg, rough.recovery.heading_rad / deg, least_tilt_rad / deg,
-                rough.feasible ? "" : " - ", rough.reason.c_str());
+                rough.feasible ? "" : " - ", report::describe(rough.reason).c_str());
     REQUIRE(rough.feasible);
     CHECK(rough.recovery.kind == sim::RecoveryKind::DroneShip);
     CHECK(rough.recovery.heading_rad == expected_rad);
@@ -254,7 +261,7 @@ TEST_CASE("A mission start sets its sea state; the next start without one resets
     const auto t0 = time.from_utc({2026, 10, 13, 10, 40, 0.0});  // test_falcon9_asds.cpp's start
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     const auto swell = sim::start_mission(session, dir, "falcon9_asds_swell", t0, time);
-    REQUIRE(swell.refusal.empty());
+    REQUIRE(swell.refusal.ok());
     REQUIRE(session.sea_state());
     CHECK(session.sea_state()->config().significant_wave_height_m == 1.5);
     REQUIRE(session.landing_zone());
@@ -262,7 +269,7 @@ TEST_CASE("A mission start sets its sea state; the next start without one resets
     CHECK(session.deck_pose());  // the drone ship set after the sea state moves with it
 
     const auto calm = sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_asds", t0, time);
-    REQUIRE(calm.refusal.empty());
+    REQUIRE(calm.refusal.ok());
     CHECK_FALSE(session.sea_state());
     CHECK_FALSE(session.deck_pose());
 }

@@ -28,7 +28,8 @@ void disable_plan_cache();
 // per config directory per process.
 std::string config_contents_hash(const std::filesystem::path& config_dir);
 
-// A versioned text format (first line "starsim-plan-cache 1"); doubles as hexfloat, so a round trip is bit-exact.
+// A versioned text format (first line "starsim-plan-cache 2"); doubles as hexfloat, so a round trip is bit-exact. The
+// reason is a report (code id, parameters, causes). A file of another version is a miss (flown again), never migrated.
 std::string encode_profile(const AscentProfile& profile);
 std::optional<AscentProfile> decode_profile(std::string_view text);  // nullopt on any parse error
 

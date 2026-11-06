@@ -210,7 +210,7 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
         const auto w = window_for(config_dir, launch, earth, station, time);
         s.launch_window = w;
         if (!w.feasible) {
-            s.refusal = report::transitional_text(w.reason);  // text until Task 10
+            s.refusal = w.reason;
             return s;
         }
         s.epoch = w.separation;
@@ -223,7 +223,7 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
     session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);
     s.warnings.push_back(st.note);
     if (!session.plan_rendezvous(phasing)) {
-        s.refusal = report::transitional_text(session.rendezvous_status());  // text until Task 10
+        s.refusal = session.rendezvous_status();
         session.clear_bodies();  // the mission does not start
         return s;
     }
@@ -248,7 +248,7 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
     const auto w = window_for(config_dir, mission, earth, station, time);
     s.launch_window = w;
     if (!w.feasible) {
-        s.refusal = report::transitional_text(w.reason);  // text until Task 10
+        s.refusal = w.reason;
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);
@@ -301,8 +301,7 @@ MissionStart start_iss_departure_mission(FlightSession& session, const std::file
     probe.lead_s = mission.undock_to_deorbit_s;
     const auto pass = session.capsule_return_preview(probe);
     if (!pass.feasible) {
-        s.refusal = report::transitional_text(  // text until Task 10
-            report::with_cause(report::make(report::Code::iss_no_return_opportunity), pass.reason));
+        s.refusal = report::with_cause(report::make(report::Code::iss_no_return_opportunity), pass.reason);
         session.clear_bodies();  // the probe placement goes: the mission does not start
         return s;
     }

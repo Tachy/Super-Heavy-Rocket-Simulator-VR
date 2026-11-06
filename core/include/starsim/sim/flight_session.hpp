@@ -161,7 +161,7 @@ struct IssMissionSequence {
     std::optional<MissionTransfer> transfer;                // Docked -> Transfer -> undock -> Departure
     std::optional<gnc::DeorbitParameters> ship_return;      // Departure -> release_tower + plan_ship_return -> Return
     std::optional<time::Epoch> continue_epoch;              // Departure -> WaitContinue until then -> continuation
-    std::function<std::string(FlightSession&)> continuation;  // German refusal; empty: it took over -> Complete
+    std::function<report::Report(FlightSession&)> continuation;  // the refusal; ok: it took over -> Complete
     // A proximity flight waiting at Waypoint 2 after a retreat (a failed capture) is resumed this often, then the
     // mission ends (refuelling r5: autonomous missions); 0 keeps the wait for the pilot (the ISS missions).
     int max_capture_retries = 0;

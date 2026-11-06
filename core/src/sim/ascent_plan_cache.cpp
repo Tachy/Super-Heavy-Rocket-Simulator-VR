@@ -11,6 +11,7 @@
 #include <mutex>
 #include <sstream>
 #include <system_error>
+#include <set>
 #include <vector>
 
 #ifdef _WIN32
@@ -23,7 +24,9 @@ namespace starsim::sim {
 
 namespace {
 
-constexpr const char* format_header = "starsim-plan-cache 1";
+// Version 2: the reason is a report (code id, parameters, causes), no longer a German text. A file of another version is
+// a miss (the plan is flown again and stored in the new format), never migrated.
+constexpr const char* format_header = "starsim-plan-cache 2";
 constexpr const char* profile_end = "end";
 
 std::atomic<bool> cache_disabled{false};
@@ -70,6 +73,15 @@ std::optional<std::string> from_hex(const std::string& s) {
         out += static_cast<char>(hi * 16 + lo);
     }
     return out;
+}
+
+// A parameter name must outlive the report that holds it (report::Param::name is a pointer): decoded names are
+// interned for the process.
+const char* interned(const std::string& name) {
+    static std::mutex mutex;
+    static std::set<std::string> names;
+    std::lock_guard lock(mutex);
+    return names.insert(name).first->c_str();
 }
 
 std::string hexfloat(double v) {
@@ -156,11 +168,77 @@ std::string config_contents_hash(const std::filesystem::path& config_dir) {
     return done[id] = hex64(h);
 }
 
+namespace {
+
+// A report as space separated tokens: id, parameter count, cause count; per parameter name, kind id, value (hexfloat)
+// and the text ("x" + hex, so an empty text is still a token); then the causes the same way.
+void append_report(std::ostringstream& out, const report::Report& r) {
+    out << report::id_of(r.code) << ' ' << r.params.size() << ' ' << r.causes.size();
+    for (const auto& p : r.params) {
+        out << ' ' << p.name << ' ' << report::id_of(p.kind) << ' ' << hexfloat(p.value_si) << " x" << to_hex(p.text);
+    }
+    for (const auto& c : r.causes) {
+        out << ' ';
+        append_report(out, c);
+    }
+}
+
+std::string encode_report(const report::Report& r) {
+    std::ostringstream out;
+    append_report(out, r);
+    return out.str();
+}
+
+std::optional<report::Kind> kind_from_id(const std::string& id) {
+    for (const auto kind : {report::Kind::angle, report::Kind::mass, report::Kind::length, report::Kind::speed,
+                            report::Kind::time, report::Kind::count, report::Kind::number, report::Kind::ref,
+                            report::Kind::legacy_text, report::Kind::utc, report::Kind::data_name}) {
+        if (id == report::id_of(kind)) return kind;
+    }
+    return std::nullopt;
+}
+
+std::optional<report::Report> read_report(std::istringstream& in, int depth) {
+    if (depth > 8) return std::nullopt;  // a plan's reason is two levels deep
+    std::string id;
+    std::size_t params = 0, causes = 0;
+    if (!(in >> id >> params >> causes) || params > 16 || causes > 8) return std::nullopt;
+    const auto code = report::code_from_id(id);
+    if (!code) return std::nullopt;
+    report::Report r;
+    r.code = *code;
+    for (std::size_t i = 0; i < params; ++i) {
+        std::string name, kind_id, value, text;
+        if (!(in >> name >> kind_id >> value >> text) || text.empty() || text.front() != 'x') return std::nullopt;
+        const auto kind = kind_from_id(kind_id);
+        const auto number = parse_double(value);
+        const auto decoded = from_hex(text.substr(1));
+        if (!kind || !number || !decoded) return std::nullopt;
+        r.params.push_back({interned(name), *kind, *number, *decoded});
+    }
+    for (std::size_t i = 0; i < causes; ++i) {
+        auto cause = read_report(in, depth + 1);
+        if (!cause) return std::nullopt;
+        r.causes.push_back(std::move(*cause));
+    }
+    return r;
+}
+
+std::optional<report::Report> decode_report(std::string_view text) {
+    std::istringstream in{std::string(text)};
+    auto r = read_report(in, 0);
+    std::string rest;
+    if (!r || (in >> rest)) return std::nullopt;  // trailing tokens: corrupt
+    return r;
+}
+
+}  // namespace
+
 std::string encode_profile(const AscentProfile& p) {
     std::ostringstream out;
     out << format_header << '\n';
     out << "feasible " << (p.feasible ? 1 : 0) << '\n';
-    out << "reason " << to_hex(p.reason) << '\n';
+    out << "reason " << encode_report(p.reason) << '\n';
     out << "kick " << hexfloat(p.kick_angle_rad) << '\n';
     out << "propellant " << hexfloat(p.upper_propellant_at_seco_kg) << '\n';
     out << "trials " << p.trial_flights << '\n';
@@ -214,7 +292,9 @@ std::optional<AscentProfile> decode_profile(std::string_view text) {
 
     const auto feasible = integer("feasible"), trials = integer("trials"), kind = integer("recovery_kind"),
                northerly = integer("target_northerly"), impact = integer("impact");
-    const auto reason = str("reason"), recovery_id = str("recovery_id");
+    const auto reason_field = fields.find("reason");
+    const auto reason = reason_field == fields.end() ? std::nullopt : decode_report(reason_field->second);
+    const auto recovery_id = str("recovery_id");
     const auto kick = num("kick"), propellant = num("propellant"), r_lat = num("recovery_lat"), r_lon = num("recovery_lon"),
                r_head = num("recovery_heading"), peri = num("target_peri"), apo = num("target_apo"),
                incl = num("target_incl"), i_lat = num("impact_lat"), i_lon = num("impact_lon"), i_head = num("impact_heading");

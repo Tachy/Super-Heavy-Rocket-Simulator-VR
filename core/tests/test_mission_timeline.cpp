@@ -438,7 +438,7 @@ TEST_CASE("An undocking mission starts its clock at the undocking", "[timeline]"
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
     const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "crew_dragon_iss_departure", {}, time);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     const auto& t = session.timeline();
     CHECK(t.recorded().empty());  // a scenario that starts docked: no Docking event
@@ -504,8 +504,8 @@ TEST_CASE("start_mission resets the timeline; campaign launches do not; a refuse
     std::ofstream(mission_file) << toml;
     const size_t events_before_refusal = t.recorded().size();
     const auto refused = sim::start_mission(session, dir / "config", "falcon9_crew_dragon_iss", session.epoch(), time);
-    INFO(refused.refusal);
-    CHECK_FALSE(refused.refusal.empty());
+    INFO(report::describe(refused.refusal));
+    CHECK_FALSE(refused.refusal.ok());
     CHECK(t.recorded().size() == events_before_refusal);
     CHECK(find_event(t, MissionEventKind::Liftoff));
     std::filesystem::remove_all(dir);
@@ -857,7 +857,7 @@ TEST_CASE("An ascent waiting on the pad counts down from the requested epoch; a 
     {
         sim::FlightSession waiting_session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
         const auto s = sim::start_mission(waiting_session, STARSIM_CONFIG_DIR, "crs35_ascent", later, time, waiting);
-        REQUIRE(s.refusal.empty());
+        REQUIRE(s.refusal.ok());
         REQUIRE(waiting_session.timeline().t0());
         CHECK(std::abs(*waiting_session.timeline().t0() - liftoff) < 1e-6);
         CHECK(std::abs((liftoff - s.epoch) - countdown_s) < 1e-6);
@@ -866,7 +866,7 @@ TEST_CASE("An ascent waiting on the pad counts down from the requested epoch; a 
     {
         sim::FlightSession direct_session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
         const auto s = sim::start_mission(direct_session, STARSIM_CONFIG_DIR, "crs35_ascent", later, time);
-        REQUIRE(s.refusal.empty());
+        REQUIRE(s.refusal.ok());
         CHECK(std::abs(s.epoch - liftoff) < 1e-6);
         CHECK(std::abs(direct_session.epoch() - liftoff) < 1e-6);
     }
@@ -924,7 +924,7 @@ TEST_CASE("An ISS launch waits only where the station source of its liftoff cove
     options.wait_on_pad = true;
     const auto requested = time.from_utc({2026, 9, 1, 0, 0, 0.0});  // long before the archived OEM
     const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss", requested, time, options);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     REQUIRE(st.launch_window);
     const auto archive = sim::iss_archive(STARSIM_CONFIG_DIR, time);
@@ -963,7 +963,7 @@ TEST_CASE("An ISS launch can wait on the pad for its window", "[timeline][slow][
     sim::StartOptions options;
     options.wait_on_pad = true;
     const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss", requested, time, options);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     REQUIRE(st.launch_window);
     CHECK(session.epoch() == requested);
@@ -1150,7 +1150,7 @@ TEST_CASE("The predicted undocking is the separation the mission records", "[tim
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
     const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "crew_dragon_iss_departure", {}, time);
-    INFO(st.refusal);
+    INFO(report::describe(st.refusal));
     REQUIRE(st.return_planned);
     REQUIRE(session.iss_mission());
     const auto command = *session.iss_mission()->undock_epoch;
@@ -1200,7 +1200,7 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe][ascent_planner]") {
         }
     }
     std::printf("  [probe] flown %.0f s, leg %s: %s; %zu bodies\n", session.epoch() - start,
-                sim::id_of(session.iss_mission_leg()), report::transitional_text(session.iss_mission_status()).c_str(), session.body_count());
+                sim::id_of(session.iss_mission_leg()), report::describe(session.iss_mission_status()).c_str(), session.body_count());
     (void)st;
 }
 

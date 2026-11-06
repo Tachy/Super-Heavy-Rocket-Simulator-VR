@@ -27,7 +27,7 @@ bool verbose() { return std::getenv("STARSIM_VERBOSE") != nullptr; }
 // Starts the LLO direct return through start_mission; REQUIREs the plan.
 void start(test::LunarReturnSession& t) {
     const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_return_llo", {}, t.time);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(s.return_planned);
     REQUIRE(t.session.lunar_step() == sim::LunarStep::ReturnDeparture);
     REQUIRE(t.session.lunar_return_plan() != nullptr);
@@ -185,7 +185,7 @@ TEST_CASE("Lunar return: a botched TEI is re-planned from the flight data and ca
 TEST_CASE("Lunar return from the NRHO: departure, powered flyby, caught at Starbase", "[lunar][return][session][slow]") {
     test::LunarReturnSession t;
     const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_return_nrho", {}, t.time);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(s.return_planned);
     REQUIRE(t.session.lunar_return_plan() != nullptr);
     REQUIRE(t.session.lunar_return_plan()->nrho_departure);
@@ -206,7 +206,7 @@ namespace {
 // Starts the LLO aerocapture return ("Aircatch") through start_mission; REQUIREs the plan.
 void start_aircatch(test::LunarReturnSession& t) {
     const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo", {}, t.time);
-    INFO(s.refusal);
+    INFO(report::describe(s.refusal));
     REQUIRE(s.return_planned);
     REQUIRE(t.session.lunar_step() == sim::LunarStep::ReturnDeparture);
 }
@@ -382,7 +382,7 @@ TEST_CASE("Lunar return start at a shifted epoch (probe)", "[.lunar_return_epoch
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, epoch);
     const auto* plan = t.session.lunar_return_plan();
     std::printf("[epoch probe] %+.1f h: %s %s departure %.1f m/s braking %.1f m/s\n", hours ? std::atof(hours) : 0.0,
-                s.return_planned ? "planned" : "refused", s.refusal.c_str(), plan ? plan->tei_delta_v_mps : 0.0,
+                s.return_planned ? "planned" : "refused", report::describe(s.refusal).c_str(), plan ? plan->tei_delta_v_mps : 0.0,
                 plan ? plan->braking_delta_v_mps : 0.0);
     CHECK(s.return_planned);
 }

@@ -22,6 +22,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/ascent_plan_cache.hpp"
 #include "starsim/sim/ascent_profile_planner.hpp"
@@ -100,7 +101,7 @@ sim::AscentProfile timed_plan(const sim::AscentProfileRequest& request, bool lau
     const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     std::printf("[ascent_planner] kick %.2f deg, upper-stage propellant at SECO %.1f t, %d trial flights, %.1f s%s%s\n",
                 plan.kick_angle_rad / deg, plan.upper_propellant_at_seco_kg / 1e3, plan.trial_flights, wall_s,
-                plan.feasible ? "" : " - infeasible: ", plan.reason.c_str());
+                plan.feasible ? "" : " - infeasible: ", report::describe(plan.reason).c_str());
     if (launch) {
         std::printf("[ascent_planner] recovery %d '%s' at %.4f / %.4f deg, heading %.1f deg; inclination %.3f deg\n",
                     static_cast<int>(plan.recovery.kind), plan.recovery.zone_or_ship_id.c_str(),
@@ -110,7 +111,6 @@ sim::AscentProfile timed_plan(const sim::AscentProfileRequest& request, bool lau
     return plan;
 }
 
-bool starts_with(const std::string& text, const std::string& prefix) { return text.rfind(prefix, 0) == 0; }
 
 // The first stage's impact on the planned launch, flown independently (the full return guidance on, the drone ship at
 // its chosen station) and predicted as config/missions/falcon9_asds.toml derives it: 10 s after the separation, drag and
@@ -351,7 +351,7 @@ TEST_CASE("Falcon 9 impact outside every service area is refused", "[sim][ascent
     request.site_id = "ksc_lc39a";
     const auto plan = sim::plan_launch(like, request);
     CHECK_FALSE(plan.feasible);
-    CHECK(plan.reason.find("Kein Drohnenschiff") != std::string::npos);
+    CHECK(plan.reason.code == report::Code::ascent_no_drone_ship);
     CHECK(plan.trial_flights == 0);
 }
 
@@ -360,7 +360,7 @@ TEST_CASE("Starship at a site without a tower is refused", "[sim][ascent_planner
     request.site_id = "ccsfs_slc40";
     const auto plan = timed_plan(request, true);
     CHECK_FALSE(plan.feasible);
-    CHECK(plan.reason == "Kein Fangturm am Startplatz.");
+    CHECK(report::same(plan.reason, report::make(report::Code::ascent_no_tower)));
     CHECK(plan.trial_flights == 0);
 }
 
@@ -371,7 +371,8 @@ TEST_CASE("An unreachable target is refused", "[sim][ascent_planner][slow]") {
     request.target.apoapsis_altitude_m = 2000e3;
     const auto plan = timed_plan(request, true);
     CHECK_FALSE(plan.feasible);
-    CHECK(starts_with(plan.reason, "Ziel mit Booster-Rückkehr nicht erreichbar"));
+    CHECK((plan.reason.code == report::Code::ascent_target_unreachable ||
+           plan.reason.code == report::Code::ascent_target_unreachable_because));
     CHECK(plan.trial_flights > 0);
 }
 
@@ -461,7 +462,7 @@ TEST_CASE("Mission starts plan their ascent; no mission file carries a kick", "[
     moved.site_id = "ccsfs_slc40";  // no tower to catch Super Heavy
     const auto refused = sim::start_ascent_mission(session, moved, STARSIM_CONFIG_DIR, liftoff());
     CHECK_FALSE(refused.feasible);
-    CHECK(refused.reason == "Kein Fangturm am Startplatz.");
+    CHECK(refused.reason.code == report::Code::ascent_no_tower);
     CHECK(session.autopilot().state == sim::AutopilotState::Off);
     CHECK(session.body(session.controlled_index()).clamped());
 }
@@ -501,7 +502,7 @@ TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_p
 
     const auto planned_at = session.epoch();
     const auto reason = sim::engage_pad_ascent(session, request.target);  // plans on the clamped stack
-    REQUIRE(reason.empty());
+    REQUIRE(reason.ok());
     CHECK(session.epoch() == planned_at);  // the countdown held while the computer planned
     // the free launch flies the vehicle file as configured: its own payload, fairing kept
     auto as_placed = request;
@@ -528,7 +529,7 @@ TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_p
                             sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_slc40")),
                             request.heading_rad, t0);
     refused.schedule_liftoff(t0 + 10.0);
-    CHECK(sim::engage_pad_ascent(refused, request.target) == "Kein Fangturm am Startplatz.");
+    CHECK(sim::engage_pad_ascent(refused, request.target).code == report::Code::ascent_no_tower);
     CHECK(refused.autopilot().state == sim::AutopilotState::Off);
     CHECK_FALSE(refused.scheduled_liftoff());
 }

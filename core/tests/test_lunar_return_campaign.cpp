@@ -114,7 +114,7 @@ Run fly(const Dispersion& d, bool aircatch) {
     auto& s = t.session;
     const auto start = sim::start_mission(s, STARSIM_CONFIG_DIR, aircatch ? "ship_lunar_aircatch_llo" : "ship_lunar_return_llo",
                                           {}, t.time);
-    INFO(start.refusal);
+    INFO(report::describe(start.refusal));
     REQUIRE(start.return_planned);
     const size_t ship = s.controlled_index();
     const auto& body = s.body(ship);

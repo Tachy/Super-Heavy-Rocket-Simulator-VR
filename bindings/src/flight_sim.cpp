@@ -70,14 +70,14 @@ void FlightSim::setup(const godot::String& config_dir) {
         try {
             session->set_earth_terrain(sim::shared_earth_terrain(config_dir_, data_dir));
             earth_terrain_ = session->earth_terrain_shared();
-            godot::UtilityFunctions::print(godot::String::utf8("Erdgelände geladen"));
+            godot::UtilityFunctions::print(godot::String("Earth terrain loaded"));
         } catch (const std::exception& e) {
-            const std::string message = std::string("Erdgelände nicht ladbar - flacher Boden: ") + e.what();
+            const std::string message = std::string("Earth terrain not loadable - flat ground: ") + e.what();
             godot::UtilityFunctions::print(godot::String::utf8(message.c_str()));
         }
     } else {
         godot::UtilityFunctions::print(
-            godot::String::utf8("Erdgelände fehlt - flacher Boden (python tools/data_pipeline/fetch.py)"));
+            godot::String("Earth terrain missing - flat ground (python tools/data_pipeline/fetch.py)"));
     }
     runner_ = std::make_unique<sim::SessionRunner>(
         std::move(session), [this](const sim::FlightSession& session, time::Epoch now) { observe(session, now); });
@@ -240,7 +240,7 @@ FlightSim::Outcome FlightSim::engage_planned(sim::FlightSession& session, const 
         observe(session, session.epoch());  // "Startvorbereitung": the pad and the planning flag while the plan runs
     }
     const auto reason = sim::engage_pad_ascent(session, target);
-    return Outcome{reason.empty(), legacy_report(reason)};
+    return Outcome{reason.ok(), report_dict(reason)};
 }
 
 int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
@@ -295,7 +295,7 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
                 return outcome;
             };
         }
-        context_.mission_start_status = legacy_report(start.status);  // the snapshot after this call
+        context_.mission_start_status = report_dict(start.status);  // the snapshot after this call
         return [this, id, poll = std::move(start.poll)](sim::FlightSession& s) -> std::optional<Outcome> {
             std::optional<sim::MissionStart> later;
             try {
@@ -321,7 +321,7 @@ FlightSim::Outcome FlightSim::mission_started(const sim::MissionStart& s, const 
     context_.iss_liftoff_tdb_s = from_window ? s.launch_window->liftoff.tdb_seconds_past_j2000() : 0.0;
     context_.iss_separation_tdb_s = from_window ? s.launch_window->separation.tdb_seconds_past_j2000() : 0.0;
     context_.iss_plane_bias_deg = from_window ? s.launch_window->plane_bias_rad * constants::rad_to_deg : 0.0;
-    if (!s.refusal.empty()) return Outcome{false, legacy_report(s.refusal)};
+    if (!s.refusal.ok()) return Outcome{false, report_dict(s.refusal)};
     return Outcome{true, report_dict(report::Report{})};
 }
 

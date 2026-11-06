@@ -18,7 +18,7 @@ namespace {
 // A decided start: one that succeeds (no refusal) begins the mission's own log - its setup (placing, docking in place)
 // is no event; a refused start keeps the flight's log.
 MissionStart decided(FlightSession& session, MissionStart s) {
-    if (s.refusal.empty()) session.reset_timeline();
+    if (s.refusal.ok()) session.reset_timeline();
     return s;
 }
 

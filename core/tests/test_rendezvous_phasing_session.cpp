@@ -76,7 +76,7 @@ struct Flight {
         }
         const auto r = relative();
         std::printf("[validation] %s: %s, re-plans %d, LVLH (%.1f, %.1f, %.1f) m (%.3f, %.3f, %.3f) m/s, %.0f kg used\n",
-                    name, report::transitional_text(session.rendezvous_status()).c_str(), session.rendezvous_replans(), r.position_m.x,
+                    name, report::describe(session.rendezvous_status()).c_str(), session.rendezvous_replans(), r.position_m.x,
                     r.position_m.y, r.position_m.z, r.velocity_mps.x, r.velocity_mps.y, r.velocity_mps.z,
                     2562.0 - session.body(session.controlled_index()).vehicle().rcs_propellant_kg());
     }
