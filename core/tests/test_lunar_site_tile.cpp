@@ -328,6 +328,9 @@ TEST_CASE("Lunar site tile: north polar tiles agree with LDEM_16", "[config][lun
     global.zero_line = global_file.zero_line;
     global.zero_sample = global_file.zero_sample;
     global.grid = {global_file.lines, global_file.samples, global_file.dn_scale_m, std::move(global_file.dn)};
+    // Orientation limit: measured rms against LDEM_16 is 72-104 m (ldem_45n_100m, ldem_80n_20m, ldem_60n_60m, 2026-11-06,
+    // fix round 1 of the lunar sites plan); a wrong sign or axis choice gives 800-1950 m.
+    constexpr double kOrientationRmsLimitM = 150.0;
     int checked = 0;
     for (const auto& entry : std::filesystem::directory_iterator(sites)) {
         if (entry.path().extension() != ".toml") continue;
@@ -340,7 +343,7 @@ TEST_CASE("Lunar site tile: north polar tiles agree with LDEM_16", "[config][lun
         }
         const double rms = std::sqrt(square / static_cast<double>(file.checks.size()));
         std::printf("[lunar_site_tile] %s: rms against LDEM_16 %.0f m\n", entry.path().filename().string().c_str(), rms);
-        CHECK(rms < 150.0 + 100.0);  // the pipeline's orientation limit is 150 m on a 21 x 21 lattice; 9 points here
+        CHECK(rms < kOrientationRmsLimitM);
         ++checked;
     }
     if (checked == 0) SKIP("no north polar site tile downloaded");
