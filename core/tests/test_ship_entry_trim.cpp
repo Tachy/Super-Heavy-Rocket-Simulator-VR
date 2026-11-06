@@ -88,7 +88,7 @@ bool pitch_trimmable(const vehicle::Vehicle& v, double mach, double alpha) {
 
 }  // namespace
 
-TEST_CASE("The terminal steering never asks for less alpha than the flaps can trim", "[entry][flap][trim][guidance]") {
+TEST_CASE("The terminal steering never asks for an alpha the flaps cannot trim", "[entry][flap][trim][guidance]") {
     const gnc::AlphaSchedule schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
     constexpr double search_step_rad = 1.0 * deg;  // the table's search step
     constexpr double table_alpha_min_rad = 40.0 * deg;
@@ -114,6 +114,13 @@ TEST_CASE("The terminal steering never asks for less alpha than the flaps can tr
             CHECK(most_lift <= nominal + 1e-9);
             CHECK(model.steering_alpha(0.5, mach) == Catch::Approx(nominal));
             if (nominal - most_lift > 1e-3) CHECK(model.steering_fraction(most_lift, mach) == Catch::Approx(1.0));
+            // Least lift is 90 deg or the highest alpha the flaps trim with control margin, never below the schedule.
+            const double highest = model.aero.highest_trimmed_alpha_rad(mach);
+            CHECK(highest >= nominal - 1e-9);
+            CHECK(highest <= constants::pi / 2.0 + 1e-9);
+            const double least_lift = model.steering_alpha(0.0, mach);
+            CHECK(least_lift == Catch::Approx(highest));
+            if (least_lift - nominal > 1e-3) CHECK(model.steering_fraction(least_lift, mach) == Catch::Approx(0.0));
         }
     }
 }
@@ -139,6 +146,20 @@ TEST_CASE("Ship entry trim dump", "[.][trim_dump]") {
         for (const double mach : {0.3, 0.8, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 8.0, 15.0, 25.0}) {
             row(mach, schedule.at(mach), true);
             for (double a = 40.0; a <= 140.0 + 1e-9; a += 20.0) row(mach, a * deg, false);
+        }
+    }
+}
+
+// Hidden: the terminal steering's trimmed alpha range per Mach (schedule, lowest, highest with control margin).
+TEST_CASE("Ship entry trimmed alpha range dump", "[.][trim_range_dump]") {
+    const gnc::AlphaSchedule schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
+    for (const double propellant : {35000.0, 38000.0, 41000.0}) {
+        const auto v = ship(propellant);
+        const gnc::EntryAeroTable table(*v, schedule);
+        for (const double mach : {0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 4.5, 5.0, 6.0, 8.0}) {
+            std::cout << "prop " << propellant / 1000.0 << " t mach " << mach << ": schedule " << schedule.at(mach) / deg
+                      << " lowest " << table.lowest_trimmed_alpha_rad(mach) / deg << " highest "
+                      << table.highest_trimmed_alpha_rad(mach) / deg << "\n";
         }
     }
 }

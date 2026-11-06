@@ -54,6 +54,7 @@ TEST_CASE("Entry attitude: alpha 60, bank 30 deg tilts the lift vector", "[entry
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
+#include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/gnc/entry_residue_limit.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -125,7 +126,8 @@ Trim trim(vehicle::FlightBody& body) {
 // guidance never commands it (steering about the schedule, terminal_alpha_authority_deg, acts only in the terminal phase
 // below Mach 5), and since the mesh centre-of-pressure table (47904b61) and the 177 t mass / CG (357c3b67) the forward
 // pair needs 79.7 deg to hold it. Terminal phase (Mach 4.5, 40 km): between the corridor points 45 km / 2500 m/s and
-// 35 km / 900 m/s of the residue-limit case below, at the schedule plus the steering authority from config.
+// 35 km / 900 m/s of the residue-limit case below, at both ends of what the terminal steering commands there (its
+// least-lift end, capped by the flaps' trim with control margin, and its most-lift end).
 // Low and slow: 5 km, 128 m/s, 75 deg.
 TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry][flap][trim]") {
     World world;
@@ -147,8 +149,22 @@ TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry
         cases.push_back({65000.0, 6500.0, (nominal + excursion_rad) / deg});
     }
     {
-        const auto [speed, nominal] = at_mach(40000.0, 4.5);
-        cases.push_back({40000.0, speed, (nominal + authority_rad) / deg});
+        // What the terminal steering can command there (EntryPredictorModel::steering_alpha, as EntryGuidance sets it
+        // up from this ship and config): its least-lift end (fraction 0, capped by the flaps' trim with control margin)
+        // and its most-lift end (fraction 1).
+        constexpr double mach = 4.5;
+        const auto [speed, nominal] = at_mach(40000.0, mach);
+        auto ship_body = entry_ship(40000.0, speed, nominal, world);
+        gnc::EntryPredictorModel model;
+        model.aero = gnc::EntryAeroTable(ship_body->vehicle(), schedule);
+        model.terminal_min_alpha_rad = ship.entry->terminal_min_alpha_rad;
+        model.terminal_alpha_authority_rad = authority_rad;
+        const double least_lift = model.steering_alpha(0.0, mach), most_lift = model.steering_alpha(1.0, mach);
+        CHECK(least_lift > nominal);  // the cap leaves room to steer above the schedule
+        CHECK(least_lift <= 0.5 * constants::pi);
+        CHECK(most_lift < nominal);
+        cases.push_back({40000.0, speed, least_lift / deg});
+        cases.push_back({40000.0, speed, most_lift / deg});
     }
     cases.push_back({5000.0, 128.0, 75.0});
     for (const auto& c : cases) {

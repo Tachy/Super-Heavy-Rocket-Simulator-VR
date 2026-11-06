@@ -69,6 +69,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
     // Total force (body axes) at Mach number and angle of attack (belly towards the flow), flaps in pitch trim.
     double trim_delta = 0.0;  // the last trimmed_force's antisymmetric pitch trim (forward mid + delta, aft mid - delta)
     double trim_aft = 0.0, trim_forward = 0.0;  // ... and its settled trim (offsets of the pairs from mid-range)
+    bool trim_bracketed = false;  // ... and whether the flaps trim it in pitch at all (else: the stop nearest to it)
     // `settle`: also find the settled trim (Newton); the lowest-alpha search needs only the antisymmetric one. Measured
     // (planner plan Task 4 fix round 1): the Newton adds ~20 us per call, 8 ms to a 396-call table (11.5 -> 19.6 ms per
     // build); the walk's 240 calls skip it (it cost ~5 ms more there).
@@ -111,6 +112,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
             delta = 0.5 * (lo + hi);
         }
         trim_delta = delta;
+        trim_bracketed = bracketed;
         trim_aft = -delta;
         trim_forward = delta;
         // The settled trim (the allocation's end point): pitch M(a, f) = 0 with the offsets from mid in the ratio of the
@@ -197,6 +199,30 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
             lowest_trimmed_alpha_rad_.push_back(lowest);
         }
     }
+    // Walking up from the schedule while the settled trim keeps every flap the control margin inside its stops (the
+    // terminal steering's least-lift end, EntryPredictorModel::steering_alpha).
+    if (stage.flap_table && !flaps.empty()) {
+        const auto within_margin = [&] {
+            if (!trim_bracketed) return false;
+            for (const auto& s : flaps) {
+                const double max = s.flap->max_deflection_rad;
+                const double d = 0.5 * max + (s.forward ? trim_forward : trim_aft);
+                if (d < trim_control_margin_rad || d > max - trim_control_margin_rad) return false;
+            }
+            return true;
+        };
+        for (double mach : mach_grid) {
+            double alpha = std::min(schedule.at(mach), constants::pi / 2.0);
+            double highest = alpha;
+            while (alpha < constants::pi / 2.0) {
+                alpha = std::min(alpha + trim_search_step_rad, constants::pi / 2.0);  // the last step ends on 90 deg
+                trimmed_force(mach, alpha);
+                if (!within_margin()) break;
+                highest = alpha;
+            }
+            highest_trimmed_alpha_rad_.push_back(highest);
+        }
+    }
     for (const auto& s : flaps) {
         flap_forward_.push_back(s.forward);
         flap_max_rad_.push_back(s.flap->max_deflection_rad);
@@ -263,6 +289,10 @@ double EntryAeroTable::cl_area_m2(double mach) const { return interpolate(mach_,
 
 double EntryAeroTable::lowest_trimmed_alpha_rad(double mach) const {
     return lowest_trimmed_alpha_rad_.empty() ? 0.0 : interpolate(mach_, lowest_trimmed_alpha_rad_, mach);
+}
+
+double EntryAeroTable::highest_trimmed_alpha_rad(double mach) const {
+    return highest_trimmed_alpha_rad_.empty() ? 0.0 : interpolate(mach_, highest_trimmed_alpha_rad_, mach);
 }
 
 std::vector<double> EntryAeroTable::trim_flap_rad(double mach) const {

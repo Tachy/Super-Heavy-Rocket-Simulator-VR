@@ -34,11 +34,12 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   by the CG station's change, not measured in flight). Super Heavy CG station 30.15 m full, 18.30 m at the
   separation's 293 t, 21.78 m at the landing burn's 53.5 t, 23.03 / 23.49 m at 20 / 10 t: over the landing burn at
   most 1.3-1.7 m along the (then vertical) axis - the catch pins' height, not the lateral catch geometry; the catch ends 0.0 m off the axis, max pin load 1.30 MN, every catch / pad campaign green. Open (no red).
-- Trim margin, "The ship trims belly first with control margin on its flaps": the hypersonic cases now follow the
-  schedule (Mach 21 / 65 km: schedule 53.2 deg and +6 deg: forward 45.8 / 52.4 deg, green). Red: the terminal point
-  (Mach 4.5 / 40 km, schedule 57 + `terminal_alpha_authority_deg` 20 = 77 deg) does not trim with the flaps alone: forward
-  pair at its 90 deg stop, aft 19.9, RCS pitch fraction 1.0 (limit 0.01). Gap between the guidance's steering range and the
-  flap authority at the 177 t ship; the limit is not changed (open, for the user's decision).
+- Trim margin, "The ship trims belly first with control margin on its flaps": green since 2026-11-06. The hypersonic
+  cases follow the schedule (Mach 21 / 65 km: schedule 53.2 deg and +6 deg: forward 45.8 / 52.4 deg); the terminal point
+  (Mach 4.5 / 40 km) checks both ends of what the terminal steering commands there: the least-lift end, capped by the
+  flaps' trim with 15 deg control margin (user 2026-11-06, `EntryAeroTable::highest_trimmed_alpha_rad`, 68 deg at 35 t:
+  forward 74.3, aft 24.9 deg) and the most-lift end (50 deg: 44.6 / 46.8 deg). Before the cap the steering could ask for
+  up to 90 deg there (schedule 57 + 20 = 77 deg left the forward pair at its stop). Details: ship-entry-return.md.
 - Default-tier run after the test tiers (2026-11-03, `.superpowers/sdd/2026-11-03-test-tiers/full_after.log`): 7 of 1513 red at that run (the "Docked tanker" case is green since 2026-11-03); ctest numbers shift with every added case, so the reds are named by test: the two settling cases (green since planner plan Task 9, below), the reduced direct lunar case "Lunar return campaign (direct): seed 2" (green in the Task 12 run), the two flap-trim cases (one since Task 3b, above); `plan_speed` is green since the re-measure of 2026-11-03. The timeline sampling case (formerly #711) was fixed by 9fbb94a and is green; #1147 is nightly.
 - Settling cases (red since 47904b6, ship hull CP table; green since planner plan Task 9, 2026-11-03): the fixture drifted free for 4 h at the 120 km insertion perigee (~101 km per pass with J2 against the two-body placement), where the tumbling hull fell at ~14,000 s; mission tankers raise that perigee at the first apoapsis and drift free (burn_drifting, no RCS) only in the 170 x 190 km phasing orbit, so the two cases fly there (from the mission configs), no attitude hold added, no limit changed; (the timeline sampling case, formerly #711, was fixed by 9fbb94a and is green); `plan_speed` (green since 2026-11-03: reference plans re-measured, see `docs/subsystems/lunar.md`).
 - Real-time play (planner plan Task 11b, fix round 1): every planner that held the sim thread for >= 0.4 s runs on a

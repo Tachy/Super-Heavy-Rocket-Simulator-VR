@@ -39,9 +39,17 @@ struct EntryPredictorModel {
         return bank_rate_radps + f * (fast_bank_rate_radps - bank_rate_radps);
     }
     // Terminal steering (EntryPredictorState::steered): angle of attack from the steering fraction f in [0, 1],
-    // piecewise linear and continuous: 0 -> 90 deg (no lift, so the steering vector is continuous through zero),
-    // 0.5 -> the entry's alpha schedule (the entry's own prediction), 1 -> `terminal_alpha_authority_rad` below it
-    // (most lift, at least the minimum alpha).
+    // piecewise linear and continuous: 0 -> the least-lift end (steering_least_lift_alpha: 90 deg, no lift, where the
+    // flaps trim it with control margin), 0.5 -> the entry's alpha schedule (the entry's own prediction), 1 ->
+    // `terminal_alpha_authority_rad` below it (most lift, at least the minimum alpha and the lowest trimmed alpha).
+    // Both ends are trimmed attitudes (user 2026-11-06). Where the least-lift end is 90 deg (below Mach ~2 at the
+    // entry mass: the belly flop, the nose sector) the steering vector is continuous through zero lift. Where the flaps
+    // cannot hold 90 deg (Mach 3-8: ~68 deg at 35 t, EntryAeroTable::highest_trimmed_alpha_rad) no trimmed attitude
+    // carries zero lift, so no steering law over trimmed attitudes is continuous there: the half f < 0.5 is stretched
+    // to the capped span (alpha linear in f, no flat part - a flat part leaves the Newton step no radial slope, the
+    // failure steering_difference guards against at the trim floor), and the lift jumps between opposite directions,
+    // by cl(least-lift alpha), only at the single point f = 0 (the guidance keeps the last lift direction below
+    // min_steering_fraction; the predictor flies no lift exactly at 0).
     double terminal_min_alpha_rad = 50.0 * constants::deg_to_rad;          // [E] trimmed range (b1)
     double terminal_alpha_authority_rad = 20.0 * constants::deg_to_rad;    // [E]
     double steering_freeze_gamma_rad = -70.0 * constants::deg_to_rad;      // [E]
@@ -89,19 +97,27 @@ struct EntryPredictorModel {
         const double floor = std::max(terminal_min_alpha_rad, aero.lowest_trimmed_alpha_rad(mach));
         return std::min(nominal, std::max(nominal - terminal_alpha_authority_rad, floor));
     }
+    // Least lift the steering may ask for: 90 deg (no lift), never above what the flaps trim with control margin at this
+    // Mach (EntryAeroTable::highest_trimmed_alpha_rad; no flaps - a table without that bound - 90 deg).
+    double steering_least_lift_alpha(double nominal, double mach) const {
+        const double cap = aero.highest_trimmed_alpha_rad(mach);
+        return cap > 0.0 ? std::clamp(cap, nominal, 0.5 * constants::pi) : 0.5 * constants::pi;
+    }
     double steering_alpha(double fraction, double mach) const {
         const double f = std::clamp(fraction, 0.0, 1.0);
         const double nominal = std::min(aero.alpha_rad(mach), 0.5 * constants::pi);
         const double most_lift = steering_most_lift_alpha(nominal, mach);
-        return f <= 0.5 ? 0.5 * constants::pi + (nominal - 0.5 * constants::pi) * (f / 0.5)
+        const double least_lift = steering_least_lift_alpha(nominal, mach);
+        return f <= 0.5 ? least_lift + (nominal - least_lift) * (f / 0.5)
                         : nominal + (most_lift - nominal) * ((f - 0.5) / 0.5);
     }
     double steering_fraction(double alpha_rad, double mach) const {
         const double nominal = std::min(aero.alpha_rad(mach), 0.5 * constants::pi);
         const double most_lift = steering_most_lift_alpha(nominal, mach);
         if (alpha_rad >= nominal) {
-            const double span = 0.5 * constants::pi - nominal;
-            return span > 1e-9 ? std::clamp(0.5 * (0.5 * constants::pi - alpha_rad) / span, 0.0, 0.5) : 0.5;
+            const double least_lift = steering_least_lift_alpha(nominal, mach);
+            const double span = least_lift - nominal;
+            return span > 1e-9 ? std::clamp(0.5 * (least_lift - alpha_rad) / span, 0.0, 0.5) : 0.5;
         }
         const double span = nominal - most_lift;
         return span > 1e-9 ? std::clamp(0.5 + 0.5 * (nominal - alpha_rad) / span, 0.5, 1.0) : 0.5;

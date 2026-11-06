@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/math/constants.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::gnc {
@@ -56,6 +57,14 @@ public:
     // The lowest angle of attack the flaps can trim in pitch below the schedule at this Mach (most lift the ship can hold;
     // 0: no flaps, no such bound).
     double lowest_trimmed_alpha_rad(double mach) const;
+    // The highest angle of attack above the schedule the flaps trim in pitch with control margin at this Mach (the
+    // terminal steering's least-lift end): walking up from the schedule in 1 deg steps, the last alpha whose settled trim
+    // (the allocation's end point, as trim_flap_rad) keeps every flap `trim_control_margin_rad` inside both geometric
+    // stops [margin, max - margin]. At least the schedule (min(schedule, 90 deg)), at most 90 deg; 0: no flaps, no bound.
+    double highest_trimmed_alpha_rad(double mach) const;
+    // Control margin of the flap trim [E]: the ship return spec (b1, 2026-10-13) - every trimmed deflection inside
+    // [15 deg, max - 15 deg], the window of the trim margin test ("The ship trims belly first with control margin").
+    static constexpr double trim_control_margin_rad = 15.0 * constants::deg_to_rad;
     // How far the flaps' pitch trim along the schedule stays inside their stops (planner plan Task 12b): over the Mach
     // grid, the smallest distance of any flap of the trim the table holds (the settled one, else the antisymmetric) from
     // its stops - the upper `max_deflection_rad` and the lower the flap allocation's own lower stop in that flow
@@ -67,6 +76,7 @@ public:
 private:
     double schedule_trim_margin_rad_ = std::numeric_limits<double>::infinity();
     std::vector<double> lowest_trimmed_alpha_rad_;  // per mach_
+    std::vector<double> highest_trimmed_alpha_rad_;  // per mach_
     AlphaSchedule schedule_;
     std::vector<double> mach_;
     std::vector<double> cd_area_m2_;
