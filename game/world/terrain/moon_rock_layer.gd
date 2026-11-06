@@ -55,8 +55,11 @@ const LODS := 6
 ## ~3.5 cm per metre of rock) for rocks above 300 px - the near boulders only.
 const LOD_MIN_PX: Array[float] = [300.0, 100.0, 30.0, 10.0, 4.0, 0.0]
 const LOD_VERTICES: Array[int] = [10242, 2562, 642, 162, 42, 12]
-## [E] The shadow-only MultiMeshes draw this many LODs coarser than the rock (Task 13; Task 12 fix 1: the casters cost
-## +5.6 ms in the boulder field at the drawn LOD): a caster of ~1.5 px is 1-2 shadow-map texels, its silhouette below that.
+## [E] The shadow-only MultiMeshes draw this many LODs coarser than the rock from LOD 1 on (Task 13; Task 12 fix 1: the
+## casters cost +5.6 ms in the boulder field at the drawn LOD): a caster of ~1.5 px is 1-2 shadow-map texels, its
+## silhouette below that. LOD 0 (> 300 px, the near boulders) casts with its own mesh (final review M-6): its chips'
+## self-shadows stay and the caster never lies outside the drawn concave surface. The shadow pools (pool LOD LODS + L) and
+## LOD 0 are not in PREWARM: their casters grow on demand within the attach budget.
 const SHADOW_LOD_BIAS := 1
 ## Vertex count of LOD 0 (the template textures' width).
 const MAX_VERTICES := 10242
@@ -356,10 +359,10 @@ func _build_templates() -> void:
 				Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
 		meshes.append(array_mesh)
 		lod_arrays.append(arrays)
-	# Shadow-only meshes (Task 13, Task 12 review I5): list LOD L casts with the geometry of L + SHADOW_LOD_BIAS (its
-	# vertex row) inside L's own pixel band, at pool LOD LODS + L (shadow_pool_lod).
+	# Shadow-only meshes (Task 13, Task 12 review I5): list LOD L >= 1 casts with the geometry of L + SHADOW_LOD_BIAS (its
+	# vertex row), LOD 0 with its own, inside L's own pixel band, at pool LOD LODS + L (shadow_pool_lod).
 	for lod in LODS:
-		var coarse := mini(lod + SHADOW_LOD_BIAS, LODS - 1)
+		var coarse := lod if lod == 0 else mini(lod + SHADOW_LOD_BIAS, LODS - 1)
 		var arrays: Array = (lod_arrays[coarse] as Array).duplicate()
 		var band := PackedFloat32Array()
 		for k in (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size():

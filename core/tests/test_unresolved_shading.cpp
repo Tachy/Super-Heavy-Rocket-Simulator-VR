@@ -630,11 +630,16 @@ TEST_CASE("Light factors from an oblique eye: the zenith view is the nadir law, 
         CHECK(environment::rock_view_excess_table(m, es * deg, ev * deg, dphi * deg) >= 0.0);
     }
     // Down-Sun the eye sees the rocks' lit sides: per cover more light than from the zenith (the image share
-    // 1 + sigma(e_v) times the gain ratio; Task 13: the ratio is per that share, which holds the plan view, so a tilted
-    // rock's lit ground under its near bulge makes the ratio itself dip below 1 at phase 0), and more than up-Sun, where
-    // the eye sees their dark sides.
+    // 1 + sigma(e_v) times the gain ratio R), and more than up-Sun, where the eye sees their dark sides. R itself is
+    // below 1 at phase 0 (Task 13; final review M-1): R = (|P_v| / |P_v u plan|) / G - the ratio is per the image share,
+    // which holds the plan view, so a tilted rock's lit ground under its near bulge is not in it, and with Hapke faces
+    // the zenith gain G(20 deg) is 1.02 > 1. The pair's product is pinned against the exact raster of the drawn LOD-1
+    // meshes ([.diag] "Rock statistics against the exact drawn templates", Sun 20 deg, eye 20 deg, phase 0: Hapke flux /
+    // nadir flux 1.8276, 2026-11-06), gate 2 % as the T17-A statistics (the tables come from LOD 3: 1.8457 there).
     const double down = environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, 0.0);
-    CHECK((1.0 + environment::rock_shadow_table(m, 20 * deg)) * down > 1.0);
+    const double down_per_cover = (1.0 + environment::rock_shadow_table(m, 20 * deg)) * down;
+    CHECK(down_per_cover > 1.0);
+    CHECK(std::abs(down_per_cover / 1.8276 - 1.0) < 0.02);
     CHECK(down > environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, pi));
     CHECK(environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, pi) < 1.0);
     // The near-field shadow map takes the Sun's drawn-rock shadows and the drawn relief's G1 off the statistics; the
@@ -784,6 +789,9 @@ TEST_CASE("Rock view tables' file cache: bit-identical round trip, the key guard
     // The version guard (review n4): a checksum of the shipped tables (rounded to 1e-6, so last-bit differences between
     // CPUs do not matter) pinned per rock_view_cache_version. When it fails, the tables changed: if the templates, the
     // burial law and the grids did not change, the algorithm did - bump rock_view_cache_version; then pin the printed sum.
+    // Pinned on one toolchain (MSVC 2022, x64): a value landing within rounding noise of a .5e-6 boundary can flip
+    // under another compiler or FMA contraction (final review M-9); on a new toolchain re-pin after checking that only
+    // the checksum, not the tables' tests, changed.
     std::uint64_t sum = 1469598103934665603ULL;
     for (const std::vector<double>* t : {&m.rock_view_excess, &m.rock_view_gain_ratio}) {
         for (const double v : *t) {
@@ -796,7 +804,7 @@ TEST_CASE("Rock view tables' file cache: bit-identical round trip, the key guard
     }
     std::printf("  rock view tables: version %llu, checksum %llu\n",
                 static_cast<unsigned long long>(environment::rock_view_cache_version), static_cast<unsigned long long>(sum));
-    constexpr std::uint64_t pinned_version = 3, pinned_checksum = 3411372721922603568ULL;  // update together
+    constexpr std::uint64_t pinned_version = 4, pinned_checksum = 15825981370465586646ULL;  // update together
     CHECK(environment::rock_view_cache_version == pinned_version);
     CHECK(sum == pinned_checksum);
 }

@@ -2,6 +2,7 @@
 // roughness and rocks, the footpad disc support and the fidelity flags.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -28,6 +30,8 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/terrain_cache.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+
+#include "../src/environment/parallel_batch.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -721,4 +725,24 @@ TEST_CASE("Physics query cost", "[moon_surface][terrain][contact][legs][contact_
     CHECK(resting_us < 50.0);
     CHECK(sliding_us < 50.0);
     CHECK(descending_us < 50.0);
+}
+
+TEST_CASE("A failing worker start leaves no index out, joins the started threads and releases the budget",
+          "[moon_surface][terrain]") {
+    // Final review m2: std::thread can throw std::system_error; the batch then runs the remaining chunks on the caller.
+    namespace detail = starsim::environment::detail;
+    const int count = 64 * detail::min_batch_chunk;
+    std::vector<std::atomic<int>> hits(static_cast<std::size_t>(count));
+    const int budget_before = detail::batch_threads_in_use().load();
+    int spawned = 0;
+    const auto failing_spawn = [&spawned](std::vector<std::thread>& pool, auto&& work) {
+        if (spawned >= 1) throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
+        ++spawned;
+        pool.emplace_back(std::forward<decltype(work)>(work));
+    };
+    detail::for_each_index_budgeted(count, [&hits](int k) { hits[static_cast<std::size_t>(k)].fetch_add(1); },
+                                    failing_spawn);
+    const bool each_once = std::all_of(hits.begin(), hits.end(), [](const std::atomic<int>& h) { return h.load() == 1; });
+    CHECK(each_once);
+    CHECK(detail::batch_threads_in_use().load() == budget_before);
 }

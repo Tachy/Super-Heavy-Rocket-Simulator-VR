@@ -84,6 +84,9 @@ func update(sun_light: DirectionalLight3D, moon_active: bool, height_over_ground
 		ShaderGlobals.set_value(&"earth_near_shadow", Vector4(0.0, 0.0, 0.0, 0.0))
 		if moon_active:
 			_atlas_set = false  # the Moon's settings are on the light and the atlas
+			# Final review m1: the Moon's shadows never fade; a fading Earth frame (20-30 km) must not leave its opacity on
+			# them (MoonNearShadow does not touch shadow_opacity).
+			sun_light.shadow_opacity = 1.0
 			return
 		sun_light.shadow_enabled = false
 		sun_light.shadow_opacity = 1.0

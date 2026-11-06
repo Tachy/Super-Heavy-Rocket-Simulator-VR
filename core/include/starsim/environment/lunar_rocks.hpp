@@ -71,8 +71,9 @@ public:
     // Rocks of every octave whose base lies in the face cell `region` (any level; a terrain node of the same key),
     // diameter >= min: octaves on finer levels from all descendant cells, octaves on coarser levels from the
     // ancestor cell filtered by face_cell_of(base, region.level). The four children of a region hold exactly its
-    // rocks. Throws std::invalid_argument when an octave would need more than 4^max_region_descent cells (min too
-    // small for the region).
+    // rocks. Sorted largest first (ties by id): the renderer draws a prefix of each list (MoonRockLayer visible counts).
+    // Throws std::invalid_argument when an octave would need more than 4^max_region_descent cells (min too small for
+    // the region).
     std::vector<Rock> rocks_in_region(const FaceCell& region, double min_diameter_m) const;
     static constexpr int max_region_descent = 10;  // [D] at most ~1e6 cells per octave in one query
     // Rocks whose base lies within radius_m (chord on the reference sphere) of `unit`.
@@ -102,6 +103,14 @@ public:
     // law's validity range: the integral of pi D^2 / 4 over the law, which is the plan-view area of the generated
     // rocks (D is their area-equivalent diameter). For the shading.
     double cover_fraction(double min_diameter_m, double max_diameter_m) const;
+    // cover_fraction(D, D_max) sampled at cover_curve_samples log-spaced diameters from the law's D_min to D_max: the
+    // shader's share of the rocks smaller than the ones drawn as meshes (the renderer interpolates it).
+    struct CoverCurve {
+        std::vector<double> diameters_m;
+        std::vector<double> cover_above;
+    };
+    static constexpr int cover_curve_samples = 33;  // [E] log-spaced diameters over the rock law's range (3.3 per octave)
+    CoverCurve cover_curve() const;
 
     // Largest semi-axis a per diameter D of any rock (the deepest burial of the template with the least exposed
     // area): the reach of rocks_touching.

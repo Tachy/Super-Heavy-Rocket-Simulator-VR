@@ -161,10 +161,12 @@ struct RockColumn {
 };
 // Lit gain G(e) and cast shadow per cover sigma(e) of one rock given by its exposed top columns (plan grid of spacing
 // cell), averaged over rock_light_azimuths light azimuths, at the model's table elevations k x lit_gain_step_rad
-// (clamped to >= lit_gain_floor_rad). G is rock_lit_gain's quantity (Lommel-Seeliger seen from the zenith, per plan
-// area, over the flat ground's); sigma the ground in the cast shadow outside the rock's plan view per plan-view area:
-// per grid line along the light's azimuth the convex rock's shadow interval beyond its footprint (exact for a convex
-// rock up to the grid).
+// (clamped to >= lit_gain_floor_rad). G is rock_lit_gain's quantity seen from the zenith, per plan area, over the flat
+// ground's under the same law (`law` below: the rock's Hapke law, or Lommel-Seeliger when null); sigma the ground in the
+// cast shadow outside the rock's plan view per plan-view area: per grid line along the light's azimuth the column tops'
+// shadow interval beyond the footprint (exact for a convex rock up to the grid). template_rock_light_tables keeps G from
+// the columns but takes sigma from the meshes' ground regions (rock_mesh_shadow's line regions, Task 13), not from these
+// column intervals.
 struct RockLightTables {
     std::vector<double> gain;
     std::vector<double> shadow;
@@ -182,15 +184,17 @@ RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double
 RockLightTables template_rock_light_tables(double burial_mean, double burial_sd,
                                            const config::HapkeParameters* law = nullptr);
 
-// View-dependent terms of one convex rock (Task 12): its exposed part (above the ground cut z = cut of the template
-// mesh's convex hull) seen from view elevation e_v with the light at elevation e_l and the light-view azimuth difference
-// dphi. The ground a convex body hides from a direction is the body's projection along it onto the ground (P_v; the
-// light's shadow region incl. the footprint is P_l): X = (|P_v| - |P_l n P_v|) / A (the ground hidden from the eye
-// outside the light's shadow, per plan area A = |P(zenith)|); the seen radiance gain is the Lommel-Seeliger radiance of
-// the faces seen (projected-area weighted) over the flat ground's at (e_l, e_v), times |P_v| / A (the rock's share of
-// the image per plan area). Averaged over yaws. Tables in the model's layout (rock_view_excess):
-// excess = X, flux = gain x |P_v| / A, hidden = |P_v| / A - 1 (= sigma(e_v) of the polygon), flux_nadir = the zenith
-// view's gain per light elevation.
+// View-dependent terms of one rock (Task 12, rebuilt in Task 13): the template mesh's exposed part (above the ground
+// cut z = cut) seen from view elevation e_v with the light at elevation e_l and the light-view azimuth difference dphi.
+// hidden: the ground the mesh hides from the eye, plan view included, per true plan area minus 1 (line regions as
+// rock_mesh_shadow, exact on each line for the non-convex templates). excess X = (|P_v| - |P_l n P_v|) / A: the hulls
+// of the exposed points pushed along the eye (P_v) and the light (P_l), each with the plan view (points at height 0),
+// per true plan area A (the line regions' plan; final review M-3: the same A as hidden and flux). flux: the seen
+// radiance of the faces the eye sees (z-buffer: back faces culled, nearest face wins, its visible area) under `law`
+// (the rock's Hapke law, Lommel-Seeliger when null) over the flat ground's at (e_l, e_v), per plan area seen at e_v
+// (A sin e_v). Averaged over yaws. Tables in the model's layout (rock_view_excess); flux_nadir = the zenith view's flux
+// per light elevation. Convention: the plan view counts as hidden, so lit ground under a near-side overhang that an
+// oblique eye sees is dropped (moon-surface.md, oblique-eye limits).
 struct RockViewTables {
     std::vector<double> excess;
     std::vector<double> flux;
@@ -222,7 +226,7 @@ RockViewModel template_rock_view_tables(double burial_mean, double burial_sd,
 // The tables' algorithm version, part of the cache key: bump it whenever the tables' computation changes (the key's
 // other inputs - grids, burial law, template meshes - change it by themselves). The test "Rock view tables' file
 // cache" pins a checksum of the shipped tables per version, so a change that forgets the bump fails there.
-inline constexpr std::uint64_t rock_view_cache_version = 3;  // 3: Task 13 line regions, z-buffer seen faces, plan hulls, Hapke faces
+inline constexpr std::uint64_t rock_view_cache_version = 4;  // 3: Task 13 line regions, z-buffer seen faces, plan hulls, Hapke faces; 4: X per true plan area (final review M-3)
 // The file cache's key: FNV-1a over rock_view_cache_version, the grid sizes, the burial law and the templates' LOD-2
 // meshes (vertices and indices) the tables are built from.
 std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd, const config::HapkeParameters* law = nullptr);

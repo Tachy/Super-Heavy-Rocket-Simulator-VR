@@ -1133,8 +1133,6 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut, const conf
             if (points[i].z > 0.0) points.push_back({points[i].x, points[i].y, 0.0});
         }
     }
-    const double hull_plan_area = polygon_area(projection(points, 0.0, 1.0, 0.0));
-    if (!(hull_plan_area > 0.0)) return out;
     const std::vector<ExposedPolygon> polys = exposed_polygons(mesh, cut);
     // The view elevations' cot (0 at the zenith) for the line regions.
     std::vector<double> view_cots(static_cast<size_t>(M::view_elevation_samples));
@@ -1170,10 +1168,12 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut, const conf
                     const double e = light_elevation_at(k);
                     const double se = std::sin(e), ce = std::cos(e);
                     const size_t i = view_index(kv, ka, k);
+                    // Per the true plan area, as hidden and flux (final review M-3; the hull of the plan is larger
+                    // for the non-convex templates).
                     out.excess[i] += (view_area - intersection_area(view_region, light_regions[static_cast<size_t>(k)])) /
-                                     hull_plan_area;
+                                     plan;
                     out.hidden[i] += hidden;
-                    // Seen radiance: Lommel-Seeliger per visible face area over the flat ground's, per plan area (the
+                    // Seen radiance: the face law per visible face area over the flat ground's, per plan area (the
                     // image of a plan area A seen at elevation ev covers A sin ev).
                     // The phase angle between the light (elevation e, azimuth psi) and the eye.
                     const double cos_phase = ce * cev * std::cos(phi - psi) + se * sev;
@@ -1206,8 +1206,7 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut, const conf
 namespace {
 
 constexpr int rock_view_burial_nodes = 5;  // [D] N in [-2, 2] step 1 (the tails beyond weigh < 3 %: the view terms vary slowly with the burial)
-constexpr int rock_view_lod = 3;           // [D] icosphere 2, 162 vertices: the polygons' areas within ~1 % of the next finer LOD (Task 11 test); the Task 17 relief is mostly below its spacing, so the convex-hull regions below are close
-// Bump when the tables' algorithm changes (the key also holds the inputs).
+constexpr int rock_view_lod = 3;           // [D] icosphere 2, 162 vertices: the polygons' areas within ~1 % of the next finer LOD (Task 11 test); the Task 17 relief is mostly below its spacing ([.diag] exact rasters of LOD 1 and LOD 3: hidden ground and seen flux within ~2 % of each other)
 constexpr std::uint64_t rock_view_cache_magic = 0x5356'5452'4F43'4B31ULL;  // "SVTROCK1"
 
 struct Fnv {

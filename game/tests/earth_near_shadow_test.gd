@@ -48,6 +48,12 @@ func _initialize() -> void:
 	light.shadow_enabled = true  # the Moon's settings on the light: left alone
 	shadow.update(light, true, 2.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
 	_check("the Moon's near shadows own the light", not shadow.active and light.shadow_enabled)
+	# Final review m1: the eye leaves the Earth inside the fade (25 km) and the Moon's shadows take the light in the next
+	# frame (teleport, site switch): the fade's opacity must not stay on the Moon's shadows.
+	shadow.update(light, false, 25000.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
+	shadow.update(light, true, 2.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
+	_check("the Moon's shadows get full opacity after a fading Earth frame", is_equal_approx(light.shadow_opacity, 1.0),
+			"opacity %.3f" % light.shadow_opacity)
 	EarthNearShadow.enabled = false
 	shadow.update(light, false, 2.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
 	_check("off with the setting", not shadow.active and not light.shadow_enabled)

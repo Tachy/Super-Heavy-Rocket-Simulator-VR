@@ -193,6 +193,13 @@ if (-not (Test-Path (Join-Path $package "data\textures\moon_detail\moon_detail.t
     throw "The package lacks data/textures/moon_detail (python tools/data_pipeline/fetch.py moon_detail)"
 }
 if (-not (Test-Path (Join-Path $package "data\atmosphere\earth_atmosphere.bin"))) { throw "The package lacks data/atmosphere/earth_atmosphere.bin" }
+# the lunar landing mission loads the Moon surface with rocks (sim::shared_moon_surface(..., {true, true})) and refuses to
+# start without the Diviner rock abundance map (the renderer alone would fall back to detail without rocks)
+foreach ($f in @("diviner_rock_abundance.toml", "diviner_rock_abundance.i16")) {
+    if (-not (Test-Path (Join-Path $package "data\terrain\$f"))) {
+        throw "The package lacks data/terrain/$f (python tools/data_pipeline/fetch.py diviner_rock_abundance): the lunar landing mission needs it"
+    }
+}
 Mirror (Join-Path $Data "terrain\earth") (Join-Path $terrainPart "data\terrain\earth") @()
 Mirror (Join-Path $Data "imagery") (Join-Path $imageryPart "data\imagery") @()
 

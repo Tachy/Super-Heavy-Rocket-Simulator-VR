@@ -487,11 +487,7 @@ godot::Dictionary StarsimCore::moon_rocks_in_node(int face, int level, int64_t i
         moon_surface_->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
         radius_m = moon_surface_->detail().sphere_radius_m();
         try {
-            rocks = moon_surface_->rocks().rocks_in_region({face, level, i, j}, min_diameter_m);
-            // Largest first (ties by id): the renderer draws a prefix of each list (MoonRockLayer visible counts).
-            std::sort(rocks.begin(), rocks.end(), [](const environment::Rock& a, const environment::Rock& b) {
-                return a.diameter_m != b.diameter_m ? a.diameter_m > b.diameter_m : a.id < b.id;
-            });
+            rocks = moon_surface_->rocks().rocks_in_region({face, level, i, j}, min_diameter_m);  // largest first
         } catch (const std::exception& e) {
             error = godot::String::utf8(e.what());
         }
@@ -547,8 +543,6 @@ godot::Dictionary sfd_dictionary(const config::SizeFrequency& sfd) {
     d["max_diameter_m"] = sfd.max_diameter_m;
     return d;
 }
-
-constexpr int cover_samples = 33;  // [E] log-spaced diameters over the rock law's range (3.3 per octave)
 
 }  // namespace
 
@@ -737,13 +731,12 @@ godot::Dictionary StarsimCore::moon_surface_statistics() const {
     godot::PackedFloat64Array diameters, cover_above;
     const bool rocks_present = moon_surface_->rocks_shared() != nullptr;
     if (rocks_present) {
-        const double d_min = cfg.rocks.sfd.min_diameter_m, d_max = cfg.rocks.sfd.max_diameter_m;
-        diameters.resize(cover_samples);
-        cover_above.resize(cover_samples);
-        for (int k = 0; k < cover_samples; ++k) {
-            const double d = d_min * std::pow(d_max / d_min, static_cast<double>(k) / (cover_samples - 1));
-            diameters[k] = d;
-            cover_above[k] = moon_surface_->rocks().cover_fraction(d, d_max);
+        const environment::LunarRocks::CoverCurve curve = moon_surface_->rocks().cover_curve();
+        diameters.resize(static_cast<int64_t>(curve.diameters_m.size()));
+        cover_above.resize(static_cast<int64_t>(curve.cover_above.size()));
+        for (size_t k = 0; k < curve.diameters_m.size(); ++k) {
+            diameters[static_cast<int64_t>(k)] = curve.diameters_m[k];
+            cover_above[static_cast<int64_t>(k)] = curve.cover_above[k];
         }
     }
     rocks["cover_diameters_m"] = diameters;

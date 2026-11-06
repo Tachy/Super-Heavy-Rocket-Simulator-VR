@@ -307,6 +307,10 @@ TEST_CASE("Rocks in a region: the children partition it, octaves above and below
     for (const FaceCell& region : {environment::face_cell_of(direction(site_lat, site_lon), 17), FaceCell{4, 17, 0, 0}}) {
         const double min_d = 0.04;
         const auto parent = rocks().rocks_in_region(region, min_d);
+        // Largest first, ties by id (final review m6: the renderer's prefix drawing relies on it).
+        CHECK(std::is_sorted(parent.begin(), parent.end(), [](const Rock& a, const Rock& b) {
+            return a.diameter_m != b.diameter_m ? a.diameter_m > b.diameter_m : a.id < b.id;
+        }));
         std::set<std::uint64_t> parent_ids;
         for (const Rock& r : parent) {
             CHECK(parent_ids.insert(r.id).second);  // no duplicate
@@ -335,6 +339,22 @@ TEST_CASE("Rocks in a region: the children partition it, octaves above and below
     }
     // A coarse region with the finest octave asked for: refused, not a hang.
     CHECK_THROWS_AS(rocks().rocks_in_region(FaceCell{0, 8, 0, 0}, 0.0), std::invalid_argument);
+}
+
+TEST_CASE("The cover curve samples cover_fraction log-spaced over the law's range", "[moon_surface][environment]") {
+    const auto curve = rocks().cover_curve();
+    const auto n = static_cast<size_t>(environment::LunarRocks::cover_curve_samples);
+    REQUIRE(curve.diameters_m.size() == n);
+    REQUIRE(curve.cover_above.size() == n);
+    const double d_min = curve.diameters_m.front(), d_max = curve.diameters_m.back();
+    CHECK(curve.cover_above.front() == rocks().cover_fraction(d_min, d_max));
+    CHECK(curve.cover_above.back() == 0.0);
+    for (size_t k = 1; k < n; ++k) {
+        CHECK(curve.diameters_m[k] > curve.diameters_m[k - 1]);
+        CHECK(curve.cover_above[k] <= curve.cover_above[k - 1]);
+        CHECK(std::abs(curve.diameters_m[k] / curve.diameters_m[k - 1] -
+                       std::pow(d_max / d_min, 1.0 / static_cast<double>(n - 1))) < 1e-12);
+    }
 }
 
 TEST_CASE("A rock top lies above the ground and below its full height", "[moon_surface][environment]") {

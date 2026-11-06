@@ -204,6 +204,9 @@ std::vector<Rock> LunarRocks::rocks_in_region(const FaceCell& region, double min
             }
         }
     }
+    std::sort(out.begin(), out.end(), [](const Rock& a, const Rock& b) {
+        return a.diameter_m != b.diameter_m ? a.diameter_m > b.diameter_m : a.id < b.id;
+    });
     return out;
 }
 
@@ -295,6 +298,20 @@ double LunarRocks::cover_fraction(double min_diameter_m, double max_diameter_m) 
         }
     }
     return cfg.abundance_scale * area;
+}
+
+LunarRocks::CoverCurve LunarRocks::cover_curve() const {
+    const auto& sfd = detail_->config().rocks.sfd;
+    const double d_min = sfd.min_diameter_m, d_max = sfd.max_diameter_m;
+    CoverCurve curve;
+    curve.diameters_m.resize(cover_curve_samples);
+    curve.cover_above.resize(cover_curve_samples);
+    for (int k = 0; k < cover_curve_samples; ++k) {
+        const double d = d_min * std::pow(d_max / d_min, static_cast<double>(k) / (cover_curve_samples - 1));
+        curve.diameters_m[static_cast<size_t>(k)] = d;
+        curve.cover_above[static_cast<size_t>(k)] = cover_fraction(d, d_max);
+    }
+    return curve;
 }
 
 }  // namespace starsim::environment

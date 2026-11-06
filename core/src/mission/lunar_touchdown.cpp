@@ -327,7 +327,9 @@ int search_thread_count(int requested) {
 }
 
 // Runs fn(i) for i in [0, count) on `threads` threads (the calling thread is one; dynamic: each takes the next index).
-// The first exception is rethrown on the calling thread after all have joined.
+// The first exception is rethrown on the calling thread after all have joined. If starting a worker fails
+// (std::system_error from std::thread, final review m2), no further workers are started: the calling thread and the
+// workers started so far take the remaining indices (dynamic), so the result is the same.
 template <typename Fn>
 void parallel_for(int count, int threads, Fn&& fn) {
     threads = std::min(threads, count);
@@ -347,7 +349,11 @@ void parallel_for(int count, int threads, Fn&& fn) {
     };
     std::vector<std::thread> pool;
     pool.reserve(static_cast<size_t>(threads - 1));
-    for (int t = 1; t < threads; ++t) pool.emplace_back(work, t);
+    try {
+        for (int t = 1; t < threads; ++t) pool.emplace_back(work, t);
+    } catch (...) {
+        // Thread creation failed: fewer workers; work(0) below drains the rest.
+    }
     work(0);
     for (auto& th : pool) th.join();
     for (const auto& e : errors) {

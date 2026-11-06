@@ -9,11 +9,10 @@ extends SceneTree
 
 const SITE_LAT_DEG := 25.99677
 const SITE_LON_DEG := -97.15804
-const DAY_TEXTURE := "res://../data/textures/earth_day.jpg"
-## [E] Materials as the game draws them (linear albedo): tower legs, braces, cladding (tower_material.gd), hardstand
-## (mount_textures.py TERRAIN_BRIGHT, linear luminance), the vehicle's stainless hull (vehicle_hull: 0.55 sRGB steel
-## measured as ~0.30 linear at low metallic share) - only the first four are used for the comparison with the render.
-const MATERIALS := {"leg": 0.16, "brace": 0.06, "clad": 0.13, "hardstand": 0.26, "terrain_local": 0.20}
+## [E] Materials as the game draws them (linear albedo): tower legs, braces, cladding (tower_material.gd); [D] the
+## hardstand: mount_textures.py TERRAIN_BRIGHT, the imagery mean inside the outline, linear luminance 0.195
+## (launch-structures.md; final review m4: not the rejected 95th-percentile 0.26).
+const MATERIALS := {"leg": 0.16, "brace": 0.06, "clad": 0.13, "hardstand": 0.195}
 
 var _args := {}
 var _main: Node
@@ -90,7 +89,6 @@ func _report(utc: String) -> void:
 	var up := eye_itrf.normalized()
 	var to_sun: Vector3 = (_world.earth.fixed_to_gcrf.transposed() * _world.sun_apparent_from_earth_m).normalized()
 	var sin_e := to_sun.dot(up)
-	var horizontal := (to_sun - up * sin_e).normalized()
 	var east := up.cross(Vector3(0, 0, 1)).normalized()
 	var north := east.cross(up).normalized()
 	var horizontal_lux: Dictionary = core.atmosphere_illuminance(eye_itrf, up, to_sun)
@@ -105,7 +103,6 @@ func _report(utc: String) -> void:
 			% [cube_albedo.x, cube_albedo.y, cube_albedo.z, local_albedo])
 	var cube_g := cube_albedo.y
 	var global_h := beam.y * sin_e + sky_h.y
-	var cos_i := clampf(horizontal.dot(to_sun), 0.0, 1.0)  # a face looking at the Sun: cos(incidence) = cos(e)
 	var face_direct := beam.y * cos(asin(sin_e))
 	var face_sky := 0.5 * sky_h.y  # the model's (1 + n.up) / 2 tilt, n.up = 0
 	for label in ["cube ground", "local ground"]:

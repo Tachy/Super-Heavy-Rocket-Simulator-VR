@@ -119,8 +119,12 @@ struct Exact {
     double excess = 0.0;      // |P_v \ P_l| / A
     double shadow = 0.0;      // |P_l| / A - 1
     double flux = 0.0;        // seen Lommel-Seeliger radiance per plan area over the flat ground's (face normals)
-    double flux_vertex = 0.0; // the same with the mesh's interpolated vertex normals (the renderer's normals)
-    double flux_nadir = 0.0;  // the zenith view's flux (face normals)
+    // With rock_hapke set (this file's diagnostic always sets it): the seen radiance under the rock's Hapke law (the
+    // renderer's law and the tables'), face normals, over the flat rock's under the same law; rock_hapke null: Lommel-
+    // Seeliger with the mesh's interpolated vertex normals (final review M-8: the column is the Hapke one, not vertex n).
+    double flux_hapke = 0.0;
+    double flux_nadir = 0.0;        // the zenith view's flux (Lommel-Seeliger, face normals)
+    double flux_nadir_hapke = 0.0;  // the zenith view's flux_hapke
 };
 
 // Exact terms of one template's exposed part for light (e_l, azimuth psi) and eye (e_v, azimuth psi + dphi).
@@ -162,7 +166,8 @@ Exact exact_terms(const TemplateMesh& mesh, double cut, double e_l, double e_v, 
     out.shadow = light.area() / area - 1.0;
     out.excess = view.area_and_not(light) / area;
     const Vec3 sun{std::cos(e_l) * std::cos(psi), std::cos(e_l) * std::sin(psi), std::sin(e_l)};
-    // z-buffer from an eye direction: flux per plan area over the flat ground's Lommel-Seeliger.
+    // z-buffer from an eye direction: flux per plan area over the flat ground's (Lommel-Seeliger, or the rock's Hapke
+    // law with rock_hapke set and vertex_normals true; see Exact::flux_hapke).
     const auto seen_flux = [&](double ev, double az, bool vertex_normals) {
         const Vec3 v{std::cos(ev) * std::cos(az), std::cos(ev) * std::sin(az), std::sin(ev)};
         const Vec3 u1 = math::normalized(math::cross(Vec3{0.0, 0.0, 1.0}, v).x == 0.0 &&
@@ -234,8 +239,9 @@ Exact exact_terms(const TemplateMesh& mesh, double cut, double e_l, double e_v, 
     };
     if (!with_flux) return out;
     out.flux = seen_flux(e_v, phi, false);
-    out.flux_vertex = seen_flux(e_v, phi, true);
+    out.flux_hapke = seen_flux(e_v, phi, true);
     out.flux_nadir = seen_flux(0.5 * pi, phi, false);
+    out.flux_nadir_hapke = seen_flux(0.5 * pi, phi, true);
     return out;
 }
 
@@ -256,8 +262,10 @@ TEST_CASE("Rock statistics against the exact drawn templates (diagnostic)", "[mo
     };
     // The rock patch's failing geometry (i 83, e 30, g 60: Sun 7 deg, eye 60 deg, azimuth difference 37.4 deg) on the
     // tables' grid points around it, and two others.
+    // The last one: the down-Sun check of test_unresolved_shading (Sun 20, eye 20, phase 0; final review M-1).
     const Geo geos[] = {{8.0 * deg, 60.0 * deg, 30.0 * deg}, {6.0 * deg, 60.0 * deg, 30.0 * deg},
-                        {16.0 * deg, 90.0 * deg, 0.0}, {30.0 * deg, 44.0 * deg, 30.0 * deg}};
+                        {16.0 * deg, 90.0 * deg, 0.0}, {30.0 * deg, 44.0 * deg, 30.0 * deg},
+                        {20.0 * deg, 20.0 * deg, 0.0}};
     for (int lod : {1, 3}) {
         for (const Geo& g : geos) {
             double w_sum = 0.0;
@@ -273,8 +281,8 @@ TEST_CASE("Rock statistics against the exact drawn templates (diagnostic)", "[mo
                         const double psi = 2.0 * pi * (yaw + 0.5) / 2.0;
                         const Exact e = exact_terms(mesh, cut, g.el, g.ev, g.dphi, psi);
                         ex.hidden += 0.5 * w * e.hidden, ex.excess += 0.5 * w * e.excess, ex.shadow += 0.5 * w * e.shadow;
-                        ex.flux += 0.5 * w * e.flux, ex.flux_vertex += 0.5 * w * e.flux_vertex;
-                        ex.flux_nadir += 0.5 * w * e.flux_nadir;
+                        ex.flux += 0.5 * w * e.flux, ex.flux_hapke += 0.5 * w * e.flux_hapke;
+                        ex.flux_nadir += 0.5 * w * e.flux_nadir, ex.flux_nadir_hapke += 0.5 * w * e.flux_nadir_hapke;
                     }
                     w_sum += w;
                 }
@@ -288,11 +296,12 @@ TEST_CASE("Rock statistics against the exact drawn templates (diagnostic)", "[mo
             const double table_flux = (1.0 + sigma_v) * lt.gain[static_cast<size_t>(kl)] * vt.gain_ratio[idx];
             std::printf("LOD %d e_l %4.1f e_v %4.1f dphi %4.1f | 1+hidden exact %.4f table %.4f | excess exact %.4f table %.4f"
                         " | shadow exact %.4f table %.4f | rock flux exact %.4f (Hapke %.4f) table %.4f | nadir flux exact"
-                        " %.4f columns G %.4f\n",
+                        " %.4f columns G %.4f | Hapke flux / nadir flux exact %.4f table (1+sigma_v) R %.4f\n",
                         lod, g.el / deg, g.ev / deg, g.dphi / deg, 1.0 + ex.hidden / w_sum, 1.0 + sigma_v,
                         ex.excess / w_sum, vt.excess[idx], ex.shadow / w_sum, lt.shadow[static_cast<size_t>(kl)],
-                        ex.flux / w_sum, ex.flux_vertex / w_sum, table_flux, ex.flux_nadir / w_sum,
-                        lt.gain[static_cast<size_t>(kl)]);
+                        ex.flux / w_sum, ex.flux_hapke / w_sum, table_flux, ex.flux_nadir / w_sum,
+                        lt.gain[static_cast<size_t>(kl)], ex.flux_hapke / ex.flux_nadir_hapke,
+                        (1.0 + sigma_v) * vt.gain_ratio[idx]);
         }
     }
     // The light tables' cast shadow (8 azimuths, 9 burial nodes) against the exact LOD-1 regions with the same

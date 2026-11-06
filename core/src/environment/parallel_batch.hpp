@@ -10,6 +10,7 @@
 #include <atomic>
 #include <exception>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace starsim::environment::detail {
@@ -34,39 +35,58 @@ inline int batch_thread_count(int count, int in_use, int hardware) {
     return std::clamp(free, 1, std::min(by_size, max_batch_threads));
 }
 
+// Starts a worker thread running `work` and appends it to `pool` (the default spawner of for_each_index_budgeted; a test
+// passes one that fails).
+struct ThreadSpawner {
+    template <class Work>
+    void operator()(std::vector<std::thread>& pool, Work&& work) const {
+        pool.emplace_back(std::forward<Work>(work));
+    }
+};
+
 // Runs fn(k) for k in [0, count): contiguous chunks on batch_thread_count() threads (the caller takes the first). An
-// exception in a worker is rethrown on the caller after all have joined.
-template <class Fn>
-void for_each_index_budgeted(int count, Fn fn) {
+// exception in a worker is rethrown on the caller after all have joined. If starting a worker fails (std::system_error
+// from std::thread, final review m2), no further workers are started and the caller runs the chunks that have no
+// thread: every index is still computed exactly once, the threads started so far are joined and the budget released.
+template <class Fn, class Spawn = ThreadSpawner>
+void for_each_index_budgeted(int count, Fn fn, Spawn spawn = {}) {
     if (count <= 0) return;
     auto& in_use = batch_threads_in_use();
     const int hardware = static_cast<int>(std::thread::hardware_concurrency());
     const int threads = batch_thread_count(count, in_use.load(std::memory_order_relaxed), hardware);
+    std::vector<std::exception_ptr> errors(static_cast<std::size_t>(threads));
+    std::vector<std::thread> pool;
+    pool.reserve(static_cast<std::size_t>(threads - 1));
     in_use.fetch_add(threads, std::memory_order_relaxed);
+    struct BudgetRelease {
+        std::atomic<int>& in_use;
+        int threads;
+        ~BudgetRelease() { in_use.fetch_sub(threads, std::memory_order_relaxed); }
+    } release{in_use, threads};
     const auto chunk = [&](int t) {
         const int begin = static_cast<int>(static_cast<long long>(count) * t / threads);
         const int end = static_cast<int>(static_cast<long long>(count) * (t + 1) / threads);
         for (int k = begin; k < end; ++k) fn(k);
     };
-    std::vector<std::exception_ptr> errors(static_cast<std::size_t>(threads));
-    std::vector<std::thread> pool;
-    pool.reserve(static_cast<std::size_t>(threads - 1));
-    for (int t = 1; t < threads; ++t) {
-        pool.emplace_back([&, t] {
-            try {
-                chunk(t);
-            } catch (...) {
-                errors[static_cast<std::size_t>(t)] = std::current_exception();
-            }
-        });
-    }
+    const auto guarded = [&](int t) {
+        try {
+            chunk(t);
+        } catch (...) {
+            errors[static_cast<std::size_t>(t)] = std::current_exception();
+        }
+    };
+    int started = 1;  // the caller's chunk 0
     try {
-        chunk(0);
+        for (int t = 1; t < threads; ++t) {
+            spawn(pool, [&guarded, t] { guarded(t); });
+            started = t + 1;
+        }
     } catch (...) {
-        errors[0] = std::current_exception();
+        // Thread creation failed: the remaining chunks run on the caller below.
     }
+    guarded(0);
+    for (int t = started; t < threads; ++t) guarded(t);
     for (auto& th : pool) th.join();
-    in_use.fetch_sub(threads, std::memory_order_relaxed);
     for (const auto& e : errors) {
         if (e) std::rethrow_exception(e);
     }
