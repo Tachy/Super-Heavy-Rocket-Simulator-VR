@@ -66,8 +66,8 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   (`FlightSession::set_entry_vent_plan`: down to the limit + the burn's propellant + the larger of the coast's vent and
   the burn's commit margin, settling gas and boil-off to the burn; never during the burn's preparation); a pass whose
   wait is too short is passed over for a later one (`vent_time_missing_s`, burn pushed back by the missing time, up to
-  `vent_pass_attempts` = 3), refused with "Keine Rückkehr möglich: ... lassen sich in keinem Überflug im Suchfenster
-  bis zum Eintritt ablassen" when none fits. After the deorbit burn `FlightSession::arm_entry_vent` takes the live
+  `vent_pass_attempts` = 3), refused with `deorbit.vent_impossible` (excess, vent rate; "... lassen sich in keinem Überflug im
+  Suchfenster bis zum Eintritt ablassen") when none fits. After the deorbit burn `FlightSession::arm_entry_vent` takes the live
   ship's excess over the limit the armed plan derived (no bisection, no file read on the sim thread; alpha schedules are
   read once per table, `FlightSession::alpha_schedule`) and `vent_entry_residue` vents it at `[stage.recovery]
   entry_vent_rate_kg_s` (50 kg/s [E], required for a ship caught by the tower; basis in the vehicle file) in ticks and
@@ -233,8 +233,8 @@ Spec `docs/superpowers/archive/specs/2026-10-13-ship-return-design.md`.
   +-5 % [E], an L/D error of a ~1 deg trim error); a capsule also its mass +-3 % (capsule campaign, known onboard). Ship
   12 dispersed cases, capsule 14. Every case must fly; when no pass in the window does, the planner takes, of the passes
   whose nominal flies within the corridor, the one with the most dispersed cases flying (`DeorbitPlan::dispersion_robust`
-  false, `reach_limiting_case` / `dispersion_note` German; printed as `[deorbit] Kein Überflug fliegt alle
-  Streuungen...` only when the session flies the plan - not for previews or reserve searches -, in the bindings'
+  false, `reach_limiting_case` is an `entry.case_*` report and `dispersion_note` the `deorbit.dispersion_note` report
+  (the limiting case as its cause); logged as `[deorbit] deorbit.dispersion_note(...)` only when the session flies the plan - not for previews or reserve searches -, in the bindings'
   `return` dictionary, the HUD's return block "Achtung" and the event line of `plan_ship_return` / `plan_capsule_return`).
   When the nominal flies but only dispersed cases of one energy side fail (shallower, faster, less drag, more lift,
   heavier, or the interface skipped; a case of energy below a quarter of one dispersion's size - an ignition-timing

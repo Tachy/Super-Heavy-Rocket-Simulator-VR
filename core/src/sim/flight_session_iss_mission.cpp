@@ -374,7 +374,7 @@ void FlightSession::run_iss_mission() {
                 if (*outcome) {
                     iss_enter(IssMissionLeg::Return, simple(report::Code::iss_return_planned));
                 } else {
-                    iss_end(ship_return_plan() ? report::legacy(ship_return_plan()->reason)
+                    iss_end(ship_return_plan() ? ship_return_plan()->reason
                                                : simple(report::Code::iss_return_not_possible));
                 }
                 return;
@@ -392,7 +392,7 @@ void FlightSession::run_iss_mission() {
             if (plan_capsule_return(p)) {
                 iss_enter(IssMissionLeg::Return, simple(report::Code::iss_return_planned));
             } else {
-                iss_end(deorbit_plan_ ? report::legacy(deorbit_plan_->reason) : simple(report::Code::iss_return_not_possible));
+                iss_end(deorbit_plan_ ? deorbit_plan_->reason : simple(report::Code::iss_return_not_possible));
             }
             return;
         }

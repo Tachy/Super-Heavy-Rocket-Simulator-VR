@@ -61,7 +61,7 @@ godot::Dictionary lunar_return(const sim::FlightSession& session) {
     d["present"] = plan != nullptr;
     if (!plan) return d;
     d["feasible"] = plan->feasible;
-    d["reason"] = legacy_report(plan->reason);
+    d["reason"] = report_dict(plan->reason);
     d["tei_delta_v_mps"] = plan->tei_delta_v_mps;
     d["braking_delta_v_mps"] = plan->braking_delta_v_mps;
     d["interface_epoch_tdb_s"] = plan->arrival.interface_epoch.tdb_seconds_past_j2000();

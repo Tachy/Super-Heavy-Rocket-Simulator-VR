@@ -58,7 +58,7 @@ bool FlightSession::crew_over_water(const math::Vec3& fixed_m) const {
     return over_water(*launch_site_.sea, enu.x, enu.y);
 }
 
-void FlightSession::crew_arm(const std::string& reason, bool early) {
+void FlightSession::crew_arm(const report::Report& reason, bool early) {
     auto& s = crew_->state;
     s.armed = true;
     s.early = early;
@@ -189,10 +189,10 @@ void FlightSession::run_crew_escape() {
         } else if (ship.ship_landing) {
             const auto* scvx = ship.ship_landing->scvx();
             if (ship.return_command.abort || ship.ship_landing->upright_descent_active() || (scvx && scvx->aborting())) {
-                crew_arm("Fang abgebrochen", false);
+                crew_arm(report::legacy("Fang abgebrochen"), false);  // text until Task 11
             } else if (ship.ship_landing->phase() == gnc::ReturnPhase::Landed && !ship.body->caught() &&
                        !(tower_ && tower_->in_contact(*ship.body))) {
-                crew_arm("Fang verfehlt", false);  // final review I1: the CG passed the catch point, no abort flag
+                crew_arm(report::legacy("Fang verfehlt"), false);  // text until Task 11  // final review I1: the CG passed the catch point, no abort flag
             } else if (!ship.return_command.run_groups.empty()) {
                 // final review I1: every commanded engine starved or failed (ran dry hovering at the arms)
                 bool any_alive = false;
@@ -202,7 +202,7 @@ void FlightSession::run_crew_escape() {
                         any_alive = true;
                     }
                 }
-                if (!any_alive) crew_arm("Triebwerke ohne Treibstoff: Fang nicht möglich", false);
+                if (!any_alive) crew_arm(report::legacy("Triebwerke ohne Treibstoff: Fang nicht möglich"), false);  // text until Task 11
             }
         }
     }

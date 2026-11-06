@@ -31,7 +31,7 @@ Vec3 rotated(const Vec3& x, const Vec3& k, double angle) {
 }
 
 struct Case {
-    std::string name;
+    report::Report name;  // entry.case_*
     EntryPredictorModel model;   // the truth (the dispersed aerodynamics and mass)
     double aero_factor = 1.0;    // truth over the onboard model's aerodynamics (EntryGuidance learns it: scale factors)
     EntryPredictorState entry;
@@ -228,7 +228,7 @@ std::vector<Guided> fly_all(const EntryReachCheck& check, const EntryGuidancePar
     std::atomic<size_t> next{0};
     const auto work = [&] {
         for (size_t i = next++; i < targets.size(); i = next++) {
-            const bool debug = trace_case != nullptr && cases[i].name == trace_case;
+            const bool debug = trace_case != nullptr && report::describe(cases[i].name) == trace_case;
             flown[i] = fly_guided(check, p, cases[i], warm_bank_rad, targets[i], debug);
         }
     };
@@ -244,19 +244,19 @@ std::vector<Guided> fly_all(const EntryReachCheck& check, const EntryGuidancePar
 
 std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double lift_fraction, double mass_fraction) {
     std::vector<EntryDispersion> cases;
-    char name[64];
+    using report::Code;
     for (const double sign : {-1.0, 1.0}) {
         EntryDispersion d;
-        std::snprintf(name, sizeof name, "Luft/Aerodynamik %+.0f %%", sign * 100.0 * aero_fraction);
-        d.name = name;
+        d.name = report::make(sign > 0.0 ? Code::entry_case_air_plus : Code::entry_case_air_minus,
+                              {report::number("fraction", aero_fraction)});
         d.aero_factor = 1.0 + sign * aero_fraction;
         cases.push_back(d);
     }
     if (lift_fraction > 0.0) {
         for (const double sign : {-1.0, 1.0}) {
             EntryDispersion d;
-            std::snprintf(name, sizeof name, "Auftrieb (L/D) %+.0f %%", sign * 100.0 * lift_fraction);
-            d.name = name;
+            d.name = report::make(sign > 0.0 ? Code::entry_case_lift_plus : Code::entry_case_lift_minus,
+                                  {report::number("fraction", lift_fraction)});
             d.lift_factor = 1.0 + sign * lift_fraction;
             cases.push_back(d);
         }
@@ -264,8 +264,8 @@ std::vector<EntryDispersion> entry_air_dispersions(double aero_fraction, double 
     if (mass_fraction > 0.0) {
         for (const double sign : {-1.0, 1.0}) {
             EntryDispersion d;
-            std::snprintf(name, sizeof name, "Masse %+.0f %%", sign * 100.0 * mass_fraction);
-            d.name = name;
+            d.name = report::make(sign > 0.0 ? Code::entry_case_mass_plus : Code::entry_case_mass_minus,
+                                  {report::number("fraction", mass_fraction)});
             d.mass_factor = 1.0 + sign * mass_fraction;
             cases.push_back(d);
         }
@@ -313,7 +313,7 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
     const double half_span_m = 0.5 * std::abs(ends[0] - ends[1]);
 
     // the cases: nominal, then each dispersed entry interface of the campaign
-    std::vector<Case> cases{{"nominal", model, 1.0, entry}};
+    std::vector<Case> cases{{report::make(report::Code::entry_case_nominal), model, 1.0, entry}};
     const Vec3 up = math::normalized(entry.position_itrf_m);
     const double speed = norm(entry.velocity_itrf_mps);
     const Vec3 u = entry.velocity_itrf_mps / speed;
@@ -366,7 +366,7 @@ EntryReachAssessment assess_entry_reach(const EntryPredictorModel& model, const 
             std::printf("[reach] %-24s flies %d (gate %d miss %.0f m, terminal %.0f m, corridor %d, %d constrained): "
                         "hand-over cross %.1f km after %.0f s, %d reversals (last %.0f s at %.0f m/s), peaks %.0f kW/m2 "
                         "%.2f g %.1f kPa\n",
-                        cases[i].name.c_str(), g.flies, g.reached_gate, g.gate_miss_m, g.terminal_miss_m, g.within_corridor,
+                        report::describe(cases[i].name).c_str(), g.flies, g.reached_gate, g.gate_miss_m, g.terminal_miss_m, g.within_corridor,
                         g.constrained_cycles,
                         g.handover_crossrange_m / 1000.0, g.handover_time_s, g.reversals, g.reversal_time_s,
                         g.reversal_speed_mps, g.peak_heat_rate_w_m2 / 1000.0, g.peak_load_g,

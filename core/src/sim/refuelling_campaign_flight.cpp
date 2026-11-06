@@ -335,7 +335,7 @@ RefuellingCampaignFlight::FirstReturn RefuellingCampaignFlight::fly_side_return(
     side.place_vehicle(std::move(tanker), in.state, in.epoch);
     if (!side.plan_ship_return(in.deorbit)) {
         out.result = ReturnResult::Lost;
-        out.note = side.ship_return_plan() ? report::legacy(side.ship_return_plan()->reason)  // the planner's text
+        out.note = side.ship_return_plan() ? side.ship_return_plan()->reason
                                            : report::make(report::Code::refuelling_return_not_possible);
         return out;
     }

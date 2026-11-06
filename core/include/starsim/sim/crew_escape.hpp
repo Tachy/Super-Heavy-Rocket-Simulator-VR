@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "starsim/gnc/ejection_seat.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::sim {
@@ -33,7 +34,7 @@ struct CrewMemberState {
 struct CrewEscapeState {
     bool armed = false;                // the onboard computer gave the ship up
     bool fired = false;                // the first seat fired
-    std::string give_up_reason;
+    report::Report give_up_reason;     // ok: not armed
     double give_up_time_s = 0.0;       // mission time
     bool early = false;                // given up in the entry above the minimum firing height: fire over water
     std::vector<CrewMemberState> members;

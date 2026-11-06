@@ -3,6 +3,7 @@
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 
 #include <string>
 #include <vector>
@@ -12,7 +13,7 @@ namespace starsim::gnc {
 // One dispersed entry: the interface (a state - a deorbit burn error propagated to it -, or offsets from the planned
 // entry) and the aerodynamics / mass against the model.
 struct EntryDispersion {
-    std::string name;  // German (UI: DeorbitPlan::reach_limiting_case)
+    report::Report name;  // shown via DeorbitPlan::reach_limiting_case (entry.case_*)
     bool has_state = false;  // the interface below (Earth-fixed); the offsets then only describe it (the planner's aim)
     math::Vec3 position_itrf_m, velocity_itrf_mps;
     double flight_path_rad = 0.0;  // > 0: shallower
@@ -73,7 +74,7 @@ EntryReachCheck entry_reach_check(const EntryGuidanceParameters& parameters, boo
 struct EntryReachAssessment {
     bool bracketed = false;        // every case (nominal and dispersed) flies to the target (assess_entry_reach)
     bool within_corridor = false;  // every case's flown peaks stay within the vehicle's limits
-    std::string limiting_case = "nominal";  // the first case that does not fly
+    report::Report limiting_case = report::make(report::Code::entry_case_nominal);  // the first case that does not fly
     bool nominal_flies = false;             // the nominal guided entry flies (gate, terminal, its corridor)
     int cases = 0;                          // the nominal and the dispersed cases
     int cases_flying = 0;                   // of them

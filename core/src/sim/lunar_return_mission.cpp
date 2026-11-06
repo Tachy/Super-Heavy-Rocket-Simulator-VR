@@ -269,7 +269,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
         if (i > 0) planner.set_finite_burn(vacuum_engines(entry_vehicle, burn_groups, initial_kg));
         const auto plan = planner.plan(state, epoch, planning, initial_kg, isp_s, initial_kg - dry_kg);
         if (!plan.feasible) {
-            b.reason = report::legacy(plan.reason);  // text until the Earth return planner is converted (Task 9)
+            b.reason = plan.reason;
             return b;
         }
         b.tei_delta_v_mps = plan.tei_delta_v_mps;

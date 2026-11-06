@@ -39,17 +39,15 @@ CatchFeasibility catch_feasibility(const vehicle::Vehicle& ship, const std::vect
     for (const auto& stage : ship.stages()) {
         for (const auto& e : stage.engines) {
             if (e.failed && std::find(flip_groups.begin(), flip_groups.end(), e.group_id) != flip_groups.end()) {
-                return {false, "Triebwerk ausgefallen (" + e.group_id + "): kein Fang möglich"};
+                return {false, report::make(report::Code::catch_engine_failed, {report::data_name("group", e.group_id)})};
             }
         }
     }
     const double usable_kg =
         landing_feed_propellant_kg(ship) - ship.stages().front().config.unusable_propellant.header_kg;
     if (usable_kg < catch_floor_kg) {
-        char text[128];
-        std::snprintf(text, sizeof text, "Treibstoff zu knapp (%.1f t nutzbar, Fang braucht %.1f t)",
-                      std::max(usable_kg, 0.0) / 1000.0, catch_floor_kg / 1000.0);
-        return {false, text};
+        return {false, report::make(report::Code::catch_propellant_short,
+                                    {report::mass("usable", std::max(usable_kg, 0.0)), report::mass("needed", catch_floor_kg)})};
     }
     return {};
 }

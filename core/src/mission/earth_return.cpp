@@ -911,7 +911,7 @@ ReturnPlan EarthReturnPlanner::plan_unprofiled(const StateVector& state, time::E
                                                double propellant_kg) const {
     ReturnPlan plan;
     if (p.orbit == LunarOrbitKind::Nrho && !p.nrho) {
-        plan.reason = "Kein Rückflug: NRHO-Referenz fehlt";
+        plan.reason = report::make(report::Code::return_no_nrho_reference);
         return plan;
     }
     double best = std::numeric_limits<double>::infinity();
@@ -951,22 +951,18 @@ ReturnPlan EarthReturnPlanner::plan_unprofiled(const StateVector& state, time::E
             consider(sol, norm(sol.burn.delta_v_gcrf_mps), std::nullopt);
         }
     }
-    char text[160];
     if (!std::isfinite(best)) {
         if (over_limit) {
-            std::snprintf(text, sizeof text, "Kein Rückflug: TEI über %.0f m/s (Bahnebene passt nicht)", p.max_tei_mps);
-            plan.reason = text;
+            plan.reason = report::make(report::Code::return_tei_over_limit, {report::speed("limit", p.max_tei_mps)});
         } else {
-            plan.reason = "Kein Rückflug: TEI nicht planbar";
+            plan.reason = report::make(report::Code::return_tei_not_plannable);
         }
         return plan;
     }
     const double total = plan.tei_delta_v_mps + plan.braking_delta_v_mps + p.mcc_allowance_mps;
     const double needed = mass_kg * (1.0 - std::exp(-total / (isp_s * constants::standard_gravity_mps2)));
     if (needed > propellant_kg) {
-        std::snprintf(text, sizeof text, "Kein Rückflug: Treibstoff reicht nicht (%.1f t fehlen)",
-                      (needed - propellant_kg) / 1000.0);
-        plan.reason = text;
+        plan.reason = report::make(report::Code::return_propellant_missing, {report::mass("missing", needed - propellant_kg)});
         return plan;
     }
     plan.feasible = true;

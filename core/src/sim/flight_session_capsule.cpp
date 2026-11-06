@@ -52,7 +52,7 @@ bool FlightSession::plan_capsule_return() {
     }
     if (mission_id.empty()) {
         deorbit_plan_ = gnc::DeorbitPlan{};
-        deorbit_plan_->reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
+        deorbit_plan_->reason = report::make(report::Code::return_no_return_mission);
         return false;
     }
     return plan_capsule_return(capsule_return_parameters(config::load_capsule_return_mission(config_dir_, mission_id)));
@@ -61,27 +61,27 @@ bool FlightSession::plan_capsule_return() {
 gnc::DeorbitPlan FlightSession::capsule_deorbit_plan(gnc::DeorbitParameters& parameters) const {
     gnc::DeorbitPlan refused;
     if (bodies_.empty()) {
-        refused.reason = "Keine Rückkehr möglich: keine Kapsel im Orbit";
+        refused.reason = report::make(report::Code::return_no_capsule_in_orbit);
         return refused;
     }
     const auto& flying = bodies_[controlled_];
     const auto& vehicle = flying.body->vehicle();
     const auto& stages = vehicle.stages();
     if (stages.back().config.aero.entry_profile != "capsule" || flying.entry_guidance) {
-        refused.reason = "Keine Rückkehr möglich: keine Kapsel im Orbit";
+        refused.reason = report::make(report::Code::return_no_capsule_in_orbit);
         return refused;
     }
     if (vehicle.payload_stacked()) {  // review d3 M2: the capsule must fly alone (released from the second stage)
-        refused.reason = "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe";
+        refused.reason = report::make(report::Code::return_capsule_on_upper_stage);
         return refused;
     }
     if (!splashdown_zone_) {
-        refused.reason = "Keine Rückkehr möglich: keine Wasserungszone";
+        refused.reason = report::make(report::Code::return_no_splashdown_zone);
         return refused;
     }
     const auto rcs = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
     if (!(rcs.force_n > 0.0)) {
-        refused.reason = "Keine Rückkehr möglich: keine Deorbit-Düsen";
+        refused.reason = report::make(report::Code::return_no_deorbit_thrusters);
         return refused;
     }
     parameters.burn_thrust_n = rcs.force_n;
@@ -126,7 +126,7 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
     if (!deorbit_plan_->feasible) return false;
     if (!execute_burn(deorbit_plan_->node) || !burn_config_.rcs) {
         deorbit_plan_->feasible = false;
-        deorbit_plan_->reason = "Deorbit-Brennvorgang auf den Düsen nicht möglich";
+        deorbit_plan_->reason = report::make(report::Code::deorbit_burn_on_thrusters_impossible);
         autopilot_.state = AutopilotState::Off;
         return false;
     }

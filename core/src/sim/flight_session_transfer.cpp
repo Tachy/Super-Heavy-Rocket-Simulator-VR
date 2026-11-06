@@ -279,9 +279,9 @@ std::optional<FlightSession::TankerReserveInputs> FlightSession::tanker_reserve_
     if (!docked()) return refuse(report::make(report::Code::refuelling_cause_not_docked));
     // The return's own deorbit settings (planner plan Task 8, Review Focus 4: no struct defaults). The delta-v hardly
     // depends on the pass; the depot plane meets the site only every few days within reach (r3).
-    std::string why;
+    report::Report why;
     auto search = ship_return_settings(&why);
-    if (!search) return refuse(report::legacy(why));  // the return planner's reason is still text (its task converts it)
+    if (!search) return refuse(why);
     search->search_window_s = tanker_reserve_search_s;
     // the full docked ship (ship_return_preview's refusals): only a first delta-v
     gnc::DeorbitPlan refused;
@@ -292,7 +292,7 @@ std::optional<FlightSession::TankerReserveInputs> FlightSession::tanker_reserve_
     } else {
         full = deorbit_plan_inputs(*flying.body, *search, refused);
     }
-    if (!full) return refuse(report::legacy(refused.reason));
+    if (!full) return refuse(refused.reason);
     full->measure_drag = true;
     full->check_vent_fit = false;  // only its delta-v is used: the held ship's return is the one checked
     report::Report parameters_why;
@@ -314,7 +314,7 @@ FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const T
     auto full = in.full;
     const auto first = plan_from_inputs(full, gravity, earth, env);
     if (!first.feasible) {
-        r.reason = no_reserve(report::legacy(first.reason));
+        r.reason = no_reserve(first.reason);
         return r;
     }
     auto p = in.parameters;
@@ -329,7 +329,7 @@ FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const T
     set_inputs_body(held, *holding(*in.full.copy, reserve));
     const auto plan = plan_from_inputs(held, gravity, earth, env);
     if (!plan.feasible) {
-        r.reason = no_reserve(report::legacy(plan.reason));
+        r.reason = no_reserve(plan.reason);
         return r;
     }
     p.deorbit_delta_v_mps = plan.delta_v_mps;

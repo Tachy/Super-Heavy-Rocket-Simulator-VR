@@ -40,15 +40,15 @@ EntryPrediction fly(const EntryPredictorModel& m, const CorridorQuery& q, double
 bool within_limits(const EntryPrediction& p, const CorridorQuery& q, std::string& limiting) {
     const auto& l = q.limits;
     if (l.max_heat_rate_w_m2 > 0.0 && p.peak_heat_rate_w_m2 > q.constraint_fraction * l.max_heat_rate_w_m2) {
-        limiting = "Hitzestrom";
+        limiting = "heat_rate";
         return false;
     }
     if (l.max_heat_load_j_m2 > 0.0 && p.heat_load_j_m2 > q.constraint_fraction * l.max_heat_load_j_m2) {
-        limiting = "Wärmelast";
+        limiting = "heat_load";
         return false;
     }
     if (l.max_load_g > 0.0 && p.peak_load_g > q.constraint_fraction * l.max_load_g) {
-        limiting = "Last";
+        limiting = "load";
         return false;
     }
     return true;
@@ -90,7 +90,7 @@ EntryCorridor entry_corridor(EntryPredictorModel model, const CorridorQuery& que
         const bool high_exit = never_dipped || (p.exited && (p.exit_apoapsis_height_m < 0.0 ||
                                                              p.exit_apoapsis_height_m >= query.aerocapture_apoapsis_m));
         if (capture && !high_exit) {
-            limiting = "Austritt";
+            limiting = "exit";
             return false;
         }
         return true;
@@ -98,7 +98,7 @@ EntryCorridor entry_corridor(EntryPredictorModel model, const CorridorQuery& que
     EntryCorridor c;
     const bool shallowest_admissible = admissible(shallowest_rad);
     if (!shallowest_admissible || !captures(steepest_rad)) {
-        c.limiting = shallowest_admissible ? "Kein Einfang" : limiting;
+        c.limiting = shallowest_admissible ? "no_capture" : limiting;
         return c;  // not even the shallowest entry stays within the limits, or no capture even steeply
     }
     c.shallow_rad = captures(shallowest_rad) ? shallowest_rad : boundary(steepest_rad, shallowest_rad, captures);

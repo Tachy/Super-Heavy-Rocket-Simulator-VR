@@ -37,7 +37,7 @@ const std::vector<std::string>& flip_groups() {
 TEST_CASE("A full landing load with all engines can try the catch", "[crew_escape][gnc]") {
     const auto f = gnc::catch_feasibility(ship_with(35000.0), flip_groups(), 25000.0);
     CHECK(f.feasible);
-    CHECK(f.reason.empty());
+    CHECK(f.reason.ok());
 }
 
 TEST_CASE("A failed flip engine gives the catch up", "[crew_escape][gnc]") {
@@ -48,13 +48,17 @@ TEST_CASE("A failed flip engine gives the catch up", "[crew_escape][gnc]") {
     }
     const auto f = gnc::catch_feasibility(ship, flip_groups(), 25000.0);
     CHECK_FALSE(f.feasible);
-    CHECK_THAT(f.reason, ContainsSubstring("Triebwerk"));
+    CHECK(f.reason.code == report::Code::catch_engine_failed);
+    REQUIRE(f.reason.params.size() == 1);
+    CHECK(f.reason.params.front().text == "ship/sea_level_2");
 }
 
 TEST_CASE("Too little propellant gives the catch up", "[crew_escape][gnc]") {
     const auto f = gnc::catch_feasibility(ship_with(15000.0), flip_groups(), 25000.0);
     CHECK_FALSE(f.feasible);
-    CHECK_THAT(f.reason, ContainsSubstring("Treibstoff"));
+    CHECK(f.reason.code == report::Code::catch_propellant_short);
+    CHECK(f.reason.params.front().value_si < 25000.0);  // usable below the floor
+    CHECK(f.reason.params.back().value_si == 25000.0);
 }
 
 // Planner plan Task 4 fix round 2: the floor is the ship's own catch need (the former fixed 30 t was the 290 t ship's).

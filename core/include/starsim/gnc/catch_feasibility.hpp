@@ -4,13 +4,14 @@
 #include <vector>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::gnc {
 
 struct CatchFeasibility {
     bool feasible = true;
-    std::string reason;  // German, empty when feasible
+    report::Report reason;  // ok when feasible
 };
 
 // Crew escape: can the onboard computer still try the catch? Not when an engine of the flip groups has failed (the

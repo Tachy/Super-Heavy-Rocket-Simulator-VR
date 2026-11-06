@@ -68,7 +68,7 @@ TEST_CASE("The ship has no usable lunar-return corridor at 10.9 km/s within its 
     const auto c = gnc::entry_corridor(model, q);
     print_corridor("ship direct", q.speed_mps, c);
     CHECK((!c.exists || c.width_rad < 1.0 * deg));
-    CHECK(c.limiting == "Hitzestrom");
+    CHECK(c.limiting == "heat_rate");
 }
 
 TEST_CASE("The ship's corridor at the highest admissible speed is at least 1 deg wide", "[ship][guidance][corridor]") {

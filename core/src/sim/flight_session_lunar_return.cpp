@@ -74,7 +74,7 @@ bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
         return false;
     }
     if (!lunar_return_plan_->feasible) {
-        lunar_status_ = report::legacy(lunar_return_plan_->reason);  // text until the Earth return planner is converted (Task 9)
+        lunar_status_ = lunar_return_plan_->reason;
         return false;
     }
     lunar_return_ = planned;
@@ -597,8 +597,7 @@ void FlightSession::lunar_return_to_b4() {
     const auto deorbit = lunar_return_->deorbit;
     lunar_abort(report::make(report::Code::lunar_return_to_base));  // the lunar flight ends here (autopilot Off): b4 takes over
     const auto refused = [this] {
-        // the deorbit planner's reason is still text (Task 9)
-        lunar_status_ = deorbit_plan_ ? report::legacy(deorbit_plan_->reason) : report::make(report::Code::lunar_no_return_possible);
+        lunar_status_ = deorbit_plan_ ? deorbit_plan_->reason : report::make(report::Code::lunar_no_return_possible);
     };
     // real-time play (fix round 1, I3): the return planned on a worker while the ship coasts on; else at once
     const auto planned = begin_ship_return(deorbit, realtime_planning_);

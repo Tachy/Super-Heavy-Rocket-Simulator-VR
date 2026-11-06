@@ -332,7 +332,7 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", 
     }
     if (const auto* plan = t.session.ship_return_plan()) {
         std::printf("[aircatch]   b4 deorbit %.1f m/s, wait %.1f h: %s\n", norm(plan->node.delta_v_gcrf_mps),
-                    (plan->node.epoch - start_epoch) / 3600.0, plan->reason.c_str());
+                    (plan->node.epoch - start_epoch) / 3600.0, report::describe(plan->reason).c_str());
     }
     REQUIRE(exited);
     CHECK(std::abs(exit_apsides.second - 400e3) < 100e3);

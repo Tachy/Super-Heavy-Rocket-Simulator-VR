@@ -30,7 +30,7 @@ struct EntryCorridor {
     double steep_rad = 0.0;    // undershoot boundary: full lift up stays within the limits (and, aerocapture, exits high enough)
     double middle_rad = 0.0;
     double width_rad = 0.0;
-    std::string limiting;      // German: what bounds the steep side ("Hitzestrom", "Wärmelast", "Last", "Austritt")
+    std::string limiting;      // developer id of what bounds the steep side: heat_rate, heat_load, load, exit, no_capture
 };
 
 // Corridor in flight-path angle at the interface by bisection on the predictor (constant full lift down / up), in

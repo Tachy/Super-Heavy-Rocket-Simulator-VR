@@ -1096,8 +1096,8 @@ TEST_CASE("A deorbit called off after the plan ends the mission", "[refuelling][
     // at once, with the call-off's reason (before: days later "Schiff verloren")
     REQUIRE(f.session.iss_mission_status().code == report::Code::iss_ended);
     REQUIRE(f.session.iss_mission_status().causes.size() == 1);
-    CHECK_THAT(report::transitional_text(f.session.iss_mission_status().causes.front()),  // legacy cause (Task 11)
-               Catch::Matchers::StartsWith("Zu wenig Treibstoff"));
+    CHECK_THAT(report::transitional_text(f.session.iss_mission_status().causes.front()),  // legacy cause (Task 11): burn_abort_reason_
+               Catch::Matchers::StartsWith("deorbit.boil_off_short"));
     CHECK_FALSE(f.session.body(ship).caught());
 }
 

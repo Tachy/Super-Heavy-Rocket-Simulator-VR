@@ -154,7 +154,7 @@ void fly_out(sim::FlightSession& session, double max_s, double step_s = 0.5, boo
 
 void print(const sim::FlightSession& session, const char* name) {
     const auto& s = *session.crew_escape_state();
-    std::printf("%s: armed %d fired %d (%s) early %d, give-up %.1f s\n", name, s.armed, s.fired, s.give_up_reason.c_str(),
+    std::printf("%s: armed %d fired %d (%s) early %d, give-up %.1f s\n", name, s.armed, s.fired, report::describe(s.give_up_reason).c_str(),
                 s.early, s.give_up_time_s);
     for (size_t i = 0; i < s.members.size(); ++i) {
         const auto& m = s.members[i];
@@ -211,7 +211,7 @@ TEST_CASE("Crewed ship with a failed engine before the gate gives up and the cre
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
     CHECK(s.early);
-    CHECK_THAT(s.give_up_reason, Catch::Matchers::ContainsSubstring("Triebwerk"));
+    CHECK(s.give_up_reason.code == report::Code::catch_engine_failed);
     CHECK(s.fired);
     CHECK(mapped);
     REQUIRE(s.members.size() == 4);
@@ -321,7 +321,7 @@ TEST_CASE("A load above the catch floor but short of the gate's need aborts the 
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
     CHECK_FALSE(s.early);
-    CHECK(s.give_up_reason == "Fang abgebrochen");
+    CHECK(report::same(s.give_up_reason, report::legacy("Fang abgebrochen")));  // legacy until Task 11
     CHECK(s.fired);
     CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {
@@ -360,7 +360,7 @@ TEST_CASE("A catch the guidance gives up for want of propellant ejects the crew"
     print(session, "catch abort");
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
-    CHECK(s.give_up_reason == "Fang abgebrochen");
+    CHECK(report::same(s.give_up_reason, report::legacy("Fang abgebrochen")));  // legacy until Task 11
     CHECK(s.fired);
     CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {

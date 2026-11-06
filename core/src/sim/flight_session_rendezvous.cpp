@@ -137,9 +137,9 @@ std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(
     // reserve books them (without the boil-off of a wait: its pass is not known before the docking).
     const auto& stage = vehicle.stages().front().config;
     if (stage.recovery_method == "tower_catch" && !stage.return_mission.empty() && station_index_) {
-        std::string why;  // the return planners' reasons are still text (their tasks convert them)
+        report::Report why;
         const auto settings = ship_return_settings(&why);
-        if (!settings) return refuse(report::legacy(why));
+        if (!settings) return refuse(why);
         const auto st = station_state();
         const auto e = orbit::elements_from_state(st, constants::earth_gm_m3ps2);
         const double dv = mission::entry_deorbit_delta_v_mps(

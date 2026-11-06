@@ -697,7 +697,7 @@ TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer r
     gnc::DeorbitParameters search;  // the depot plane meets Starbase within reach only every few days (r3)
     search.search_window_s = sim::FlightSession::tanker_reserve_search_s;
     const auto plan = f.session.ship_return_preview(search);
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     const auto reserve = f.session.tanker_reserve(&reason);
     INFO(report::describe(reason));

@@ -254,7 +254,7 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
     const bool planned = t.session.plan_ship_return(p);
     const auto* plan = t.session.ship_return_plan();
     REQUIRE(plan != nullptr);
-    INFO(plan->reason);
+    INFO(report::describe(plan->reason));
     REQUIRE(planned);
     const auto& body = t.session.body(0);
     while (!body.caught() && !body.impacted() && t.session.epoch() - epoch < 8.0 * 86400.0) {

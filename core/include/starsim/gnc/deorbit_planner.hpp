@@ -9,6 +9,7 @@
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/gnc/entry_reach_check.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/math/state_vector.hpp"
 #include "starsim/time/epoch.hpp"
 
@@ -68,7 +69,7 @@ struct DeorbitParameters {
 
 struct DeorbitPlan {
     bool feasible = false;
-    std::string reason;                   // German (UI), when not feasible
+    report::Report reason;                // why not feasible (ok: none)
     BurnNode node;                        // retrograde, impulsive at node.epoch
     double delta_v_mps = 0.0;
     time::Epoch entry_interface_epoch;    // coasting after the impulse
@@ -88,12 +89,12 @@ struct DeorbitPlan {
     // The pass flies for the nominal entry and every dispersed one (the burn's errors at the interface, the air:
     // assess_entry_reach); false: no pass in the window did; of those whose nominal guided entry flies within the
     // corridor the one with the most dispersed cases flying (the earliest of them) was taken, reach_limiting_case
-    // (German) names the first dispersed case it does not fly, and dispersion_note says so (German, for the UI).
+    // names the first dispersed case it does not fly, and dispersion_note says so.
     bool dispersion_robust = true;
-    std::string reach_limiting_case;
+    report::Report reach_limiting_case;  // ok: none (robust)
     int dispersed_cases = 0;          // checked (nominal not counted)
     int dispersed_cases_flying = 0;
-    std::string dispersion_note;      // empty when robust
+    report::Report dispersion_note;   // ok when robust
     int passes_checked = 0;
 };
 

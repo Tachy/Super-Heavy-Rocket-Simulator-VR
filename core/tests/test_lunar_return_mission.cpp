@@ -164,7 +164,7 @@ TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
     CHECK_FALSE(s.return_planned);
-    CHECK_THAT(s.refusal, ContainsSubstring("Treibstoff"));  // the Earth return planner's text (Task 9), carried as text until Task 10
+    CHECK_THAT(s.refusal, ContainsSubstring("return.propellant_missing"));  // the Earth return planner's code, carried as text until Task 10
 }
 
 // Header-tank plan review: TEI, mid-course corrections and the braking burn feed from the main tanks; the headers
@@ -183,7 +183,7 @@ TEST_CASE("Lunar return plan counts the main tanks only", "[lunar][return][sessi
     REQUIRE(b.closes);
     sim::place_lunar_return_ship(t.session, m, ship, epoch, b.propellant_kg - 25000.0, setup.ret);
     CHECK_FALSE(t.session.plan_lunar_return(setup));
-    CHECK_THAT(report::describe(t.session.lunar_status()), ContainsSubstring("Treibstoff"));  // the Earth return planner's text (Task 9)
+    CHECK(t.session.lunar_status().code == report::Code::return_propellant_missing);  // the Earth return planner's reason
 }
 
 TEST_CASE("An inclined LLO contains the return asymptote; below its declination none does", "[lunar][return]") {

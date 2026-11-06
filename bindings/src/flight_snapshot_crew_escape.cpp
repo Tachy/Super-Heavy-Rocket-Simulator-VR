@@ -48,7 +48,7 @@ godot::Dictionary build_crew_escape_state(const sim::FlightSession& session) {
     d["armed"] = s->armed;
     d["fired"] = s->fired;
     d["early"] = s->early;
-    d["reason"] = legacy_report(s->give_up_reason);
+    d["reason"] = report_dict(s->give_up_reason);
     d["give_up_time_s"] = s->give_up_time_s;
     godot::Array members;
     for (const auto& m : s->members) members.push_back(member_dictionary(session, m));

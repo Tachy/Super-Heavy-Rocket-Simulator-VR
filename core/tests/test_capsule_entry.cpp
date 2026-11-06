@@ -670,7 +670,7 @@ TEST_CASE("A finite deorbit burn ends where the planner predicts", "[dragon][deo
     const double thrust = d.session.body(0).vehicle().rcs_force_capability({1.0, 0.0, 0.0}).force_n;
     const double entry_mass = d.session.body(0).vehicle().mass_properties().mass_kg - 1500.0 - 500.0;
     const auto finite = d.plan(d.parameters(thrust), entry_mass);
-    INFO(finite.reason);
+    INFO(report::describe(finite.reason));
     REQUIRE(finite.feasible);
     DragonDeorbit d_impulse(dragon_raan_rad());
     const auto impulsive = d_impulse.plan(d_impulse.parameters(0.0), entry_mass);
@@ -858,7 +858,7 @@ TEST_CASE("No pass within reach refuses the capsule return", "[dragon][mission]"
     d.session.set_attitude_mode(mode);
     CHECK_FALSE(d.session.plan_capsule_return());
     REQUIRE(d.session.ship_return_plan() != nullptr);
-    CHECK_FALSE(d.session.ship_return_plan()->reason.empty());
+    CHECK_FALSE(d.session.ship_return_plan()->reason.ok());
     CHECK(d.session.attitude_mode().kind == gnc::AttitudeModeKind::Inertial);
     CHECK(d.session.capsule_return_step() == sim::CapsuleReturnStep::None);
     CHECK(d.session.autopilot().state == sim::AutopilotState::Off);
@@ -996,7 +996,7 @@ TEST_CASE("Capsule entry campaign case flown ahead by the deorbit planner's chec
     check.gate_tolerance_m = zone.radius_m;
     check.measure_reach = false;
     gnc::EntryDispersion truth;  // the flight's truth: its hull aerodynamics scaled
-    truth.name = "truth";
+    truth.name = report::make(report::Code::entry_case_air_plus);  // a developer label only
     truth.aero_factor = c.aero_factor;
     check.dispersions = {truth};
     const auto a = gnc::assess_entry_reach(model, entry, 30.0 * deg, guidance.target(), guidance.parameters().gate_height_m,
@@ -1027,7 +1027,7 @@ TEST_CASE("A finite deorbit burn ignites after the planning lead", "[dragon][deo
     p.lead_s = (first.node.epoch - d.session.epoch()) - 100.0;
     const auto tight = d.plan(p, 0.0);
     if (!tight.feasible) {  // that pass is out of reach now (no later one in the window): refused, not ignited early
-        CHECK_FALSE(tight.reason.empty());
+        CHECK_FALSE(tight.reason.ok());
         return;
     }
     const double duration = gnc::burn_duration_s(tight.delta_v_mps, mass, rcs.force_n, rcs.mass_flow_kgps);
@@ -1073,7 +1073,7 @@ TEST_CASE("A capsule still on the second stage refuses the capsule return", "[dr
     d.session.set_splashdown_zone(d.zone);
     CHECK_FALSE(d.session.plan_capsule_return());
     REQUIRE(d.session.ship_return_plan() != nullptr);
-    CHECK(d.session.ship_return_plan()->reason == "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe");
+    CHECK(d.session.ship_return_plan()->reason.code == report::Code::return_capsule_on_upper_stage);
 }
 
 TEST_CASE("A capsule released from the second stage plans its return", "[dragon][mission]") {

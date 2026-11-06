@@ -514,9 +514,9 @@ public:
     // Each begin_ship_return is a request (increasing id): a later one replaces a pending one (key R's poll then reports
     // it cancelled, fix round 1 I4).
     std::uint64_t ship_return_request() const { return ship_return_request_; }
-    // Request `id`'s outcome (polls it): none while it plans; false with the German *cancelled once a later request
-    // replaced it.
-    std::optional<bool> ship_return_request_outcome(std::uint64_t id, std::string* cancelled);
+    // Request `id`'s outcome (polls it): none while it plans; false with *cancelled (return.planning_cancelled) once a later
+    // request replaced it.
+    std::optional<bool> ship_return_request_outcome(std::uint64_t id, report::Report* cancelled);
     std::optional<bool> ship_return_outcome() const { return ship_return_outcome_; }
     int ship_return_resubmits() const { return ship_return_resubmits_; }
     int deorbit_replans_dropped() const { return deorbit_replans_dropped_; }  // background re-plans that came too late
@@ -1172,7 +1172,7 @@ private:
         std::optional<double> catch_floor_kg;  // gnc::ship_catch_propellant_floor_kg, set at the first entry tick
     };
     void run_crew_escape();
-    void crew_arm(const std::string& reason, bool early);
+    void crew_arm(const report::Report& reason, bool early);
     void crew_fire_seat(size_t member);
     void crew_judge(size_t member);
     double crew_height_m(const vehicle::FlightBody& body) const;  // above the ground (terrain, else the flat site ground)
@@ -1386,8 +1386,8 @@ private:
     double drag_area_per_mass_ahead() const;
     double drag_area_per_mass_ahead(const vehicle::FlightBody& body) const;
     // The deorbit burn of `plan` checked against the controlled ship's main tanks at the node (sets plan.boil_off_kg):
-    // a German refusal when they will not hold the burn.
-    std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const;
+    // a refusal (deorbit.boil_off_short) when they will not hold the burn; ok otherwise.
+    report::Report boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const;
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
     bool deorbit_replan_due_ = false;               // a far deorbit: planned again when its free drift ends
     time::Epoch deorbit_track_epoch_;               // onboard tracking: the arc from the first plan (drag estimate)
@@ -1463,8 +1463,8 @@ private:
     // The main tanks of `body` at `at`, flown ahead from `from` (main_propellant_at's flight, any environment).
     static MainPropellant main_propellant_flown(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                                 time::Epoch from, time::Epoch at);
-    std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
-                                                  const MainPropellant& at_burn) const;
+    report::Report boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
+                                      const MainPropellant& at_burn) const;
     std::uint64_t deorbit_generation_ = 0;  // a new ship return plan: background re-plans of the old one are dropped
     // Background ship return plans (fix round 1): the request's id and outcome, its parameters (re-submitted when its
     // burn came too close meanwhile), the sim epoch from which it is waited for, its wall start (diagnostics).
@@ -1689,9 +1689,9 @@ private:
     std::chrono::steady_clock::time_point tanker_reserve_wall_start_;  // diagnostics
     // The deorbit settings of the controlled ship's return: the running mission's ship return, else the vehicle's
     // [stage.recovery] return_mission; nullopt with a German *reason without either.
-    std::optional<gnc::DeorbitParameters> ship_return_settings(std::string* reason) const;
+    std::optional<gnc::DeorbitParameters> ship_return_settings(report::Report* reason) const;
     // The vehicle's [stage.recovery] return_mission alone (plan_ship_return without parameters): the one mapping.
-    std::optional<gnc::DeorbitParameters> vehicle_return_settings(std::string* reason) const;
+    std::optional<gnc::DeorbitParameters> vehicle_return_settings(report::Report* reason) const;
     bool execute_rendezvous_burn(const gnc::BurnNode& node);
     math::StateVector station_state() const;
     const config::StationProximityConfig& station_limits() const;  // the station stage's [stage.station.proximity]

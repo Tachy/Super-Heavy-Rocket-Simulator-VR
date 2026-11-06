@@ -109,7 +109,7 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
     const auto* plan = session.ship_return_plan();
     REQUIRE(plan != nullptr);
     std::printf("return plan: %s%s; burn in %.1f h, %.1f m/s (%.1f t), entry %.3f deg %.0f m/s, crossrange %.1f km\n",
-                plan->feasible ? "feasible" : "refused: ", plan->reason.c_str(), (plan->node.epoch - session.epoch()) / 3600.0,
+                plan->feasible ? "feasible" : "refused: ", report::describe(plan->reason).c_str(), (plan->node.epoch - session.epoch()) / 3600.0,
                 plan->delta_v_mps, plan->propellant_kg / 1000.0, plan->entry_flight_path_rad / deg, plan->entry_speed_mps,
                 plan->crossrange_m / 1000.0);
     if (!run.planned) return run;
@@ -347,7 +347,7 @@ TEST_CASE("A ship return with a heavy residue vents part of it before the burn",
     place_mission(session, m);
     const bool planned = session.plan_ship_return(deorbit_parameters(m));
     REQUIRE(session.ship_return_plan() != nullptr);
-    INFO(session.ship_return_plan()->reason);
+    INFO(report::describe(session.ship_return_plan()->reason));
     REQUIRE(planned);  // a pass whose wait and coast hold the vent exists (hours of passes in the window)
     const auto plan = *session.ship_return_plan();
     const double rate = session.body(0).vehicle().stages().front().config.entry_vent_rate_kgps;
@@ -490,7 +490,7 @@ TEST_CASE("Real-time play: key R's planning ends when another return replaces it
     });
     std::atomic<bool> begun = false;
     std::optional<bool> outcome;
-    std::string note;
+    report::Report note;
     const auto key_r = runner.post_deferred([&](sim::FlightSession& s) -> sim::SessionRunner::Poll {
         s.begin_ship_return(deorbit_parameters(m), true);
         begun = true;
@@ -512,7 +512,7 @@ TEST_CASE("Real-time play: key R's planning ends when another return replaces it
     CHECK(later);
     REQUIRE(outcome.has_value());
     CHECK_FALSE(*outcome);
-    CHECK(note == "Rückkehrplanung abgebrochen: eine andere Rückkehr wurde geplant");
+    CHECK(note.code == report::Code::return_planning_cancelled);
 }
 
 // Fix round 2 (N-a): a background re-plan lives with the Burn state - the pilot disengages while it runs: the job is
@@ -571,8 +571,9 @@ TEST_CASE("Ship return plan counts the boil-off until the pass", "[ship][session
     place_mission(session, m);
     CHECK_FALSE(session.plan_ship_return(deorbit_parameters(m)));
     REQUIRE(session.ship_return_plan() != nullptr);
-    INFO(session.ship_return_plan()->reason);
-    CHECK(session.ship_return_plan()->reason.find("verdampft") != std::string::npos);
+    INFO(report::describe(session.ship_return_plan()->reason));
+    CHECK((session.ship_return_plan()->reason.code == report::Code::deorbit_boil_off_short ||
+           session.ship_return_plan()->reason.code == report::Code::deorbit_propellant_short_boil_off));  // the boil-off clause
 
     sim::FlightSession without(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     without.set_boil_off(false);

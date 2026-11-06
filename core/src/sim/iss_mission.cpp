@@ -301,7 +301,8 @@ MissionStart start_iss_departure_mission(FlightSession& session, const std::file
     probe.lead_s = mission.undock_to_deorbit_s;
     const auto pass = session.capsule_return_preview(probe);
     if (!pass.feasible) {
-        s.refusal = "Keine Rückkehrgelegenheit: " + pass.reason;
+        s.refusal = report::transitional_text(  // text until Task 10
+            report::with_cause(report::make(report::Code::iss_no_return_opportunity), pass.reason));
         session.clear_bodies();  // the probe placement goes: the mission does not start
         return s;
     }

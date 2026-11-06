@@ -597,10 +597,10 @@ int64_t FlightSim::plan_ship_return() {
         session.begin_ship_return(session.realtime_planning());
         // fix round 1 (I4): a return planned since (a mission leg) cancels this one - the command ends, later ones run
         return [id = session.ship_return_request()](sim::FlightSession& s) -> std::optional<Outcome> {
-            std::string cancelled;
+            report::Report cancelled;
             const auto done = s.ship_return_request_outcome(id, &cancelled);
             if (!done) return std::nullopt;
-            return Outcome{*done, legacy_report(cancelled)};
+            return Outcome{*done, report_dict(cancelled)};
         };
     }));
 }

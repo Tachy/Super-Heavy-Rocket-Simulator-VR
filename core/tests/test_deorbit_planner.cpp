@@ -96,7 +96,7 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
     const auto p = plan(s);
     std::printf("deorbit plan: %s%s; burn %+.0f s, %.1f m/s (%.1f t), entry interface %+.0f s at %.3f deg, %.0f m/s, "
                 "downrange %.2f km, crossrange %.1f km, %d pass(es)\n",
-                p.feasible ? "feasible" : "refused: ", p.reason.c_str(), p.node.epoch - s.t0, p.delta_v_mps,
+                p.feasible ? "feasible" : "refused: ", report::describe(p.reason).c_str(), p.node.epoch - s.t0, p.delta_v_mps,
                 p.propellant_kg / 1000.0, p.entry_interface_epoch - s.t0, p.entry_flight_path_rad / deg,
                 p.entry_speed_mps, p.downrange_error_m / 1000.0, p.crossrange_m / 1000.0, p.passes_checked);
     REQUIRE(p.feasible);
@@ -107,7 +107,7 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
     // the one-sign half span ~650 km bounds it)
     CHECK(p.dispersed_cases == 12);
     CHECK(p.dispersion_robust);
-    CHECK(p.dispersion_note.empty());
+    CHECK(p.dispersion_note.ok());
     CHECK(p.crossrange_reach_m > 150e3);
     CHECK(p.crossrange_reach_m < 650e3);
     CHECK(std::abs(p.crossrange_m) <= p.crossrange_reach_m);
@@ -135,9 +135,9 @@ TEST_CASE("Deorbit planner hits the entry interface for Starbase", "[ship][deorb
 TEST_CASE("Deorbit planner refuses without the landing propellant", "[ship][deorbit]") {
     const auto s = setup(0.0, 37000.0);  // the burn needs ~5 t, the landing 35 t
     const auto p = plan(s);
-    INFO(p.reason);
+    INFO(report::describe(p.reason));
     CHECK_FALSE(p.feasible);
-    CHECK(p.reason.find("Treibstoff") != std::string::npos);
+    CHECK(p.reason.code == report::Code::deorbit_propellant_short);
 }
 
 // Refuelling r2: the main tanks boil off while the ship waits for its pass; the propellant at the burn counts.
@@ -151,10 +151,10 @@ TEST_CASE("Deorbit planner counts the boil-off until the burn", "[ship][deorbit]
     gnc::DeorbitParameters bare;
     bare.boil_off_kgps = 10000.0 / constants::seconds_per_day;  // a bare hull's order of magnitude
     const auto p = plan(s, bare);
-    INFO(p.reason);
+    INFO(report::describe(p.reason));
     CHECK_FALSE(p.feasible);
     CHECK(p.short_of_reserve);
-    CHECK(p.reason.find("verdampft") != std::string::npos);
+    CHECK(p.reason.code == report::Code::deorbit_propellant_short_boil_off);
 }
 
 TEST_CASE("Deorbit planner finds no pass in a short window", "[ship][deorbit]") {
@@ -162,9 +162,9 @@ TEST_CASE("Deorbit planner finds no pass in a short window", "[ship][deorbit]") 
     gnc::DeorbitParameters parameters;
     parameters.search_window_s = 1800.0;
     const auto p = plan(s, parameters);
-    INFO(p.reason);
+    INFO(report::describe(p.reason));
     CHECK_FALSE(p.feasible);
-    CHECK(p.reason.find("Überflug") != std::string::npos);
+    CHECK(p.reason.code == report::Code::deorbit_no_pass);
 }
 
 // Onboard tracking (l5 Task 10): the drag coefficient is solved from a day's arc of a coast with a known C_D A / m.

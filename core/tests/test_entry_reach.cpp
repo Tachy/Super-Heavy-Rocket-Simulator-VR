@@ -175,7 +175,7 @@ TEST_CASE("The planner's crossrange reach is what the entry guidance can fly", "
         CAPTURE(sign);
         std::printf("side %+.0f: reach %.1f km; %.1f km -> %d, %.1f km -> %d (%s)\n", sign, measured.reach_m / 1000.0,
                     inside.crossrange_m / 1000.0, inside.bracketed, beyond.crossrange_m / 1000.0, beyond.bracketed,
-                    beyond.limiting_case.c_str());
+                    report::describe(beyond.limiting_case).c_str());
         CHECK(measured.reach_m < half_span_m);
         CHECK(measured.reach_m >= centred.reach_m);  // the dispersions take their share
         CHECK(inside.bracketed);
@@ -222,11 +222,11 @@ TEST_CASE("Reach check cases: lift alone, interface missed, no energy side", "[d
     gnc::EntryReachCheck check;
     check.measure_reach = false;
     gnc::EntryDispersion mild;  // flies: sets the flight-path and speed sizes (as a cutoff residual case)
-    mild.name = "mild";
+    mild.name = report::make(report::Code::entry_case_burn_magnitude_plus);
     mild.flight_path_rad = 0.01 * deg;
     mild.speed_mps = 1.0;
     gnc::EntryDispersion skipped;  // the dispersed burn never reached the interface
-    skipped.name = "skipped";
+    skipped.name = report::make(report::Code::entry_case_burn_late);
     skipped.has_state = true;
     skipped.position_itrf_m = entry.position_itrf_m;
     skipped.velocity_itrf_mps = entry.velocity_itrf_mps;
@@ -235,13 +235,13 @@ TEST_CASE("Reach check cases: lift alone, interface missed, no energy side", "[d
     const auto missed = gnc::assess_entry_reach(model, entry, bank, target, gate_m, check);
     CHECK(missed.nominal_flies);
     CHECK_FALSE(missed.bracketed);
-    CHECK(missed.limiting_case == "skipped");
+    CHECK(report::same(missed.limiting_case, skipped.name));
     CHECK(missed.cases_flying == 2);
     CHECK(missed.aim_direction == -1);  // aim steeper
 
     // a timing-like case: its interface turned 30 deg off the track (it fails), its offsets noise
     gnc::EntryDispersion timing;
-    timing.name = "timing";
+    timing.name = report::make(report::Code::entry_case_burn_early);
     timing.has_state = true;
     timing.position_itrf_m = entry.position_itrf_m;
     const double turn = 30.0 * deg;
@@ -254,6 +254,6 @@ TEST_CASE("Reach check cases: lift alone, interface missed, no energy side", "[d
     const auto noisy = gnc::assess_entry_reach(model, entry, bank, target, gate_m, check);
     CHECK(noisy.nominal_flies);
     CHECK_FALSE(noisy.bracketed);
-    CHECK(noisy.limiting_case == "timing");
+    CHECK(report::same(noisy.limiting_case, timing.name));
     CHECK(noisy.aim_direction == 0);
 }

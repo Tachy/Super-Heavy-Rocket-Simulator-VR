@@ -88,7 +88,7 @@ void print_plan(const char* what, const mission::ReturnPlan& plan, double second
     std::printf("[return] %s: feasible %d (%s), TEI %.1f m/s, braking %.1f m/s, interface %.1f m/s %.3f deg, "
                 "perigee %.1f km, crossrange %.2f km (offset %.1f km, predicted %.2f km), downrange %.2f km, "
                 "flight %.2f d, %.1f s wall\n",
-                what, plan.feasible ? 1 : 0, plan.reason.c_str(), plan.tei_delta_v_mps, plan.braking_delta_v_mps,
+                what, plan.feasible ? 1 : 0, report::describe(plan.reason).c_str(), plan.tei_delta_v_mps, plan.braking_delta_v_mps,
                 plan.arrival.speed_mps, plan.arrival.flight_path_rad / deg, plan.arrival.perigee_height_m / 1000.0,
                 plan.arrival.crossrange_m / 1000.0, plan.arrival.lateral_offset_m / 1000.0,
                 plan.arrival.predicted_crossrange_m / 1000.0, plan.arrival.downrange_error_m / 1000.0,
@@ -112,7 +112,7 @@ TEST_CASE("TEI from an aligned LLO costs the literature's delta-v and arrives in
     const auto start = std::chrono::steady_clock::now();
     const auto plan = f.planner.plan(s, f.t0, p, ship_mass_kg, rvac_isp_s, ship_propellant_kg);
     print_plan("aligned LLO", plan, seconds_since(start));
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     CHECK(plan.tei_delta_v_mps > 800.0);   // [S] spec: ~0.85-0.9 km/s from the LLO
     CHECK(plan.tei_delta_v_mps < 1000.0);
@@ -134,7 +134,7 @@ TEST_CASE("TEI with the braking burn arrives at the target speed", "[lunar][retu
     const auto start = std::chrono::steady_clock::now();
     const auto plan = f.planner.plan(s, f.t0, p, ship_mass_kg, rvac_isp_s, ship_propellant_kg);
     print_plan("braked", plan, seconds_since(start));
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     CHECK(plan.arrival.braked);
     CHECK(std::abs(plan.arrival.speed_mps - 9600.0) < 50.0);  // vis-viva sizing; the in-flight braking re-plan is exact
@@ -161,7 +161,7 @@ TEST_CASE("TEI from the NRHO costs less than from the LLO", "[lunar][return]") {
     const auto start = std::chrono::steady_clock::now();
     const auto plan = f.planner.plan(p.nrho->state_gcrf(f.t0), f.t0, p, ship_mass_kg, rvac_isp_s, ship_propellant_kg);
     print_plan("NRHO", plan, seconds_since(start));
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     CHECK(plan.tei_delta_v_mps > 300.0);
     CHECK(plan.tei_delta_v_mps < 600.0);
@@ -225,7 +225,7 @@ TEST_CASE("The braking burn re-planned near the Earth hits speed, angle and the 
     const auto start = std::chrono::steady_clock::now();
     const auto plan = f.planner.plan(s, t0, p, ship_mass_kg, rvac_isp_s, ship_propellant_kg);
     print_plan("direct (gate)", plan, seconds_since(start));
-    INFO(plan.reason);
+    INFO(report::describe(plan.reason));
     REQUIRE(plan.feasible);
     // Task 8b: one bank sign's track aimed - it ends on the site, the arrival plane lies beside it
     CHECK(std::abs(plan.arrival.predicted_crossrange_m) < 2e3);
@@ -303,8 +303,8 @@ TEST_CASE("The braking burn re-planned near the Earth hits speed, angle and the 
 
 TEST_CASE("TEI from a misaligned LLO waits for the window or refuses", "[lunar][return]") {
     // Review Focus 1: LLO plane 13 deg off the asymptote (the mission-1 ascent after a 24 h stay). search_s 1 day:
-    // either feasible with tei_delta_v_mps reported (> the aligned case) or refused with a German reason containing
-    // "TEI"; never a converged burn above max_tei_mps.
+    // either feasible with tei_delta_v_mps reported (> the aligned case) or refused with a TEI reason
+    // (return.tei_*); never a converged burn above max_tei_mps.
     Fixture f;
     mission::EarthReturnParameters p;
     p.target.site_itrf_m = starbase_itrf();
@@ -322,7 +322,8 @@ TEST_CASE("TEI from a misaligned LLO waits for the window or refuses", "[lunar][
         CHECK(plan.tei_delta_v_mps > 800.0);
         CHECK(plan.tei_delta_v_mps <= p.max_tei_mps);
     } else {
-        CHECK(plan.reason.find("TEI") != std::string::npos);
+        CHECK((plan.reason.code == report::Code::return_tei_over_limit ||
+               plan.reason.code == report::Code::return_tei_not_plannable));
     }
 }
 

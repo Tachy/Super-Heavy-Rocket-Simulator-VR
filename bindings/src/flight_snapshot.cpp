@@ -373,6 +373,7 @@ godot::Dictionary splashdown_zone(const sim::FlightSession& session) {
     d["present"] = true;
     d["id"] = godot::String::utf8(z.id.c_str());
     d["name"] = godot::String::utf8(z.name.c_str());
+    d["name_key"] = godot::String::utf8(("zone." + z.id + ".name").c_str());  // the table key of the shown name
     d["latitude_deg"] = lat * constants::rad_to_deg;
     d["longitude_deg"] = lon * constants::rad_to_deg;
     d["radius_m"] = z.radius_m;
@@ -407,7 +408,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     if (const auto* plan = session.ship_return_plan()) {
         godot::Dictionary r;
         r["feasible"] = plan->feasible;
-        r["reason"] = legacy_report(plan->reason);
+        r["reason"] = report_dict(plan->reason);
         r["delta_v_mps"] = plan->delta_v_mps;
         r["propellant_t"] = plan->propellant_kg / 1000.0;
         r["burn_in_s"] = plan->node.epoch - session.epoch();
@@ -416,7 +417,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
         r["crossrange_reach_km"] = plan->crossrange_reach_m / 1000.0;
         // false: no pass flew every dispersed entry; the pass with the most dispersed cases flying was taken
         r["dispersion_robust"] = plan->dispersion_robust;
-        r["dispersion_note"] = legacy_report(plan->dispersion_note);
+        r["dispersion_note"] = report_dict(plan->dispersion_note);
         // Task 12b: main-tank residue vented before the interface (planned; still to vent / vented after the burn)
         r["entry_vent_planned_t"] = plan->entry_vent_kg / 1000.0;
         r["entry_vent_remaining_t"] = session.entry_vent_remaining_kg() / 1000.0;

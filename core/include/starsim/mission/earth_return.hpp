@@ -11,6 +11,7 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/math/state_vector.hpp"
 #include "starsim/mission/finite_burn.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
@@ -95,7 +96,7 @@ struct EarthReturnParameters {
 
 struct ReturnPlan {
     bool feasible = false;
-    std::string reason;  // German when refused
+    report::Report reason;  // why refused (ok: none)
     // NRHO: the departure burn dropping to the return flyby; `tei` is then the powered flyby at its periselene.
     std::optional<gnc::BurnNode> nrho_departure;
     gnc::BurnNode tei;

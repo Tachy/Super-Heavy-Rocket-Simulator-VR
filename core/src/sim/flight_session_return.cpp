@@ -166,13 +166,13 @@ double FlightSession::drag_area_per_mass_flown(const vehicle::FlightBody& body, 
     return beta;
 }
 
-std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const {
+report::Report FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const {
     const auto& body = *bodies_[controlled_].body;
     return boil_off_shortfall(plan, margin, main_tanks(body.vehicle()), main_propellant_at(body, plan.node.epoch));
 }
 
-std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
-                                                             const MainPropellant& at_burn) const {
+report::Report FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin, const MainPropellant& now,
+                                                 const MainPropellant& at_burn) const {
     const auto& body = *bodies_[controlled_].body;
     plan.boil_off_kg = now.total() - at_burn.total();
     // LOX and CH4 boil off in another ratio than the engine burns them (~3.2 against 3.6): the one that runs dry first
@@ -191,25 +191,22 @@ std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& p
                                                  : at_burn.total();
     // f3: the settling push before the burn takes its gas from the main tanks
     const double settling_kg = settling_gas_kg();
-    if (usable_kg >= margin * plan.propellant_kg + settling_kg) return std::nullopt;
-    char text[260];
-    std::snprintf(text, sizeof text,
-                  "Zu wenig Treibstoff: Deorbit %.1f t + Settling %.1f t, beim Brennvorgang in %.1f h nutzbar noch "
-                  "%.1f t in den Haupttanks (verdampft %.1f t)",
-                  plan.propellant_kg / 1000.0, settling_kg / 1000.0, (plan.node.epoch - epoch_) / 3600.0,
-                  usable_kg / 1000.0, plan.boil_off_kg / 1000.0);
-    return std::string(text);
+    if (usable_kg >= margin * plan.propellant_kg + settling_kg) return {};
+    return report::make(report::Code::deorbit_boil_off_short,
+                        {report::mass("deorbit", plan.propellant_kg), report::mass("settling", settling_kg),
+                         report::time("wait", plan.node.epoch - epoch_), report::mass("usable", usable_kg),
+                         report::mass("boiled", plan.boil_off_kg)});
 }
 
 gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& given, double* drag_used_m2pkg) const {
     gnc::DeorbitPlan refused;
     if (bodies_.empty()) {
-        refused.reason = "Keine Rückkehr möglich: kein Fahrzeug";
+        refused.reason = report::make(report::Code::return_no_vehicle);
         return refused;
     }
     const auto& flying = bodies_[controlled_];
     if (flying.entry_guidance || flying.ship_landing) {
-        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+        refused.reason = report::make(report::Code::return_no_ship_in_orbit);
         return refused;
     }
     return ship_deorbit_plan(*flying.body, given, drag_used_m2pkg);
@@ -233,16 +230,16 @@ std::optional<FlightSession::DeorbitReplanInputs> FlightSession::deorbit_plan_in
     const auto& vehicle = body.vehicle();
     const auto& stage = vehicle.stages().front().config;
     if (stage.aero.entry_alpha_table.empty() || stage.deorbit_engine_groups.empty()) {
-        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+        refused.reason = report::make(report::Code::return_no_ship_in_orbit);
         return std::nullopt;
     }
     if (!stage.ship_landing) {  // Task 3 M5: a refusal, not an exception on the sim thread
-        refused.reason = "Keine Rückkehr möglich: das Schiff hat keine Landeparameter für den Fang";
+        refused.reason = report::make(report::Code::return_no_landing_parameters);
         return std::nullopt;
     }
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
     if (configurations.empty()) {
-        refused.reason = "Deorbit-Triebwerk nicht verfügbar";
+        refused.reason = report::make(report::Code::deorbit_engine_unavailable);
         return std::nullopt;
     }
     DeorbitReplanInputs in;
@@ -328,12 +325,8 @@ gnc::DeorbitPlan FlightSession::plan_from_inputs(DeorbitReplanInputs& in, const 
     }
     if ((result.feasible || result.short_of_reserve) && !(vent_time_missing_s(in, result) > 0.0)) return result;
     gnc::DeorbitPlan refused;
-    char text[220];
-    std::snprintf(text, sizeof text,
-                  "Keine Rückkehr möglich: %.1f t Resttreibstoff in den Haupttanks lassen sich in keinem Überflug im "
-                  "Suchfenster bis zum Eintritt ablassen (%.0f kg/s)",
-                  excess_kg / 1000.0, in.vent_rate_kgps);
-    refused.reason = text;
+    refused.reason = report::make(report::Code::deorbit_vent_impossible,
+                                  {report::mass("excess", excess_kg), report::number("rate", in.vent_rate_kgps)});
     return refused;
 }
 
@@ -351,22 +344,22 @@ double FlightSession::vent_time_missing_s(const DeorbitReplanInputs& in, const g
 }
 
 void FlightSession::log_dispersion_note(const gnc::DeorbitPlan& plan) {
-    if (plan.feasible && !plan.dispersion_robust) std::printf("[deorbit] %s\n", plan.dispersion_note.c_str());
+    if (plan.feasible && !plan.dispersion_robust) std::printf("[deorbit] %s\n", report::describe(plan.dispersion_note).c_str());
 }
 
 gnc::DeorbitPlan FlightSession::ship_return_preview(const gnc::DeorbitParameters& parameters) const {
     return ship_deorbit_plan(parameters);
 }
 
-std::optional<gnc::DeorbitParameters> FlightSession::ship_return_settings(std::string* reason) const {
+std::optional<gnc::DeorbitParameters> FlightSession::ship_return_settings(report::Report* reason) const {
     if (iss_mission_ && iss_mission_->ship_return) return *iss_mission_->ship_return;  // the mission's own return
     return vehicle_return_settings(reason);
 }
 
-std::optional<gnc::DeorbitParameters> FlightSession::vehicle_return_settings(std::string* reason) const {
+std::optional<gnc::DeorbitParameters> FlightSession::vehicle_return_settings(report::Report* reason) const {
     const std::string mission_id = bodies_.empty() ? std::string() : bodies_[controlled_].body->vehicle().stages().front().config.return_mission;
     if (mission_id.empty()) {
-        if (reason) *reason = "Keine Rückkehr möglich: das Fahrzeug hat keine Rückkehrmission";
+        if (reason) *reason = report::make(report::Code::return_no_return_mission);
         return std::nullopt;
     }
     const auto m = config::load_ship_return_mission(config_dir_, mission_id);
@@ -382,7 +375,7 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
 }
 
 std::optional<bool> FlightSession::begin_ship_return(bool background) {
-    std::string why;
+    report::Report why;
     const auto parameters = vehicle_return_settings(&why);
     if (!parameters) {
         ship_return_ = false;
@@ -421,7 +414,7 @@ std::optional<bool> FlightSession::submit_ship_return(const gnc::DeorbitParamete
     std::optional<DeorbitReplanInputs> inputs;
     const auto& flying = bodies_[controlled_];
     if (flying.entry_guidance || flying.ship_landing) {
-        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+        refused.reason = report::make(report::Code::return_no_ship_in_orbit);
     } else {
         inputs = deorbit_plan_inputs(*flying.body, parameters, refused);
     }
@@ -491,9 +484,9 @@ std::optional<bool> FlightSession::poll_ship_return(bool wait) {
     return ship_return_outcome_;
 }
 
-std::optional<bool> FlightSession::ship_return_request_outcome(std::uint64_t id, std::string* cancelled) {
+std::optional<bool> FlightSession::ship_return_request_outcome(std::uint64_t id, report::Report* cancelled) {
     if (id != ship_return_request_) {
-        if (cancelled) *cancelled = "Rückkehrplanung abgebrochen: eine andere Rückkehr wurde geplant";
+        if (cancelled) *cancelled = report::make(report::Code::return_planning_cancelled);
         return false;
     }
     return poll_ship_return(false);
@@ -520,15 +513,16 @@ bool FlightSession::apply_ship_return(const DeorbitReplanResult& result) {
     deorbit_plan_ = result.plan;
     if (!deorbit_plan_->feasible) return false;
     // The earliest pass is the best one with boil-off too (a later one only has less left): it alone is checked.
-    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin, result.now, result.at_burn)) {
+    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin, result.now, result.at_burn);
+        !shortfall.ok()) {
         deorbit_plan_->feasible = false;
         deorbit_plan_->short_of_reserve = true;
-        deorbit_plan_->reason = *shortfall;
+        deorbit_plan_->reason = shortfall;
         return false;
     }
     if (!execute_burn(deorbit_plan_->node, stage.deorbit_engine_groups)) {
         deorbit_plan_->feasible = false;
-        deorbit_plan_->reason = "Deorbit-Brennvorgang zu klein für das Triebwerk";
+        deorbit_plan_->reason = report::make(report::Code::deorbit_burn_too_small);
         return false;
     }
     ship_return_ = true;
@@ -655,7 +649,7 @@ void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
         std::printf("[deorbit] re-plan %.0f s before the old node (tracked %.1f h, CdA/m %.3e m2/kg): %s, burn %+.1f s "
                     "from it, %.2f m/s (old %.2f m/s), cross %.1f km%s\n",
                     old_node.epoch - in.epoch, (in.epoch - deorbit_track_epoch_) / 3600.0,
-                    in.parameters.drag_area_per_mass_m2pkg, plan.feasible ? "feasible" : plan.reason.c_str(),
+                    in.parameters.drag_area_per_mass_m2pkg, plan.feasible ? "feasible" : report::describe(plan.reason).c_str(),
                     plan.feasible ? plan.node.epoch - old_node.epoch : 0.0, norm(plan.node.delta_v_gcrf_mps),
                     norm(old_node.delta_v_gcrf_mps), plan.crossrange_m / 1000.0,
                     epoch_ == in.epoch ? "" : " (worker)");
@@ -670,14 +664,15 @@ void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
     // ship stays in orbit instead of running dry in the burn.
     gnc::DeorbitPlan flown = plan.feasible || plan.short_of_reserve ? plan : *deorbit_plan_;
     {
-        if (const auto shortfall = boil_off_shortfall(flown, call_off_burn_margin, result.now, result.at_burn)) {
+        if (const auto shortfall = boil_off_shortfall(flown, call_off_burn_margin, result.now, result.at_burn);
+            !shortfall.ok()) {
             deorbit_plan_ = flown;
             deorbit_plan_->feasible = false;
             deorbit_plan_->short_of_reserve = true;
-            deorbit_plan_->reason = *shortfall;
+            deorbit_plan_->reason = shortfall;
             ship_return_ = false;
             disengage_autopilot();
-            burn_abort_reason_ = *shortfall;
+            burn_abort_reason_ = report::describe(shortfall);  // text until Task 11 turns burn_abort_reason_ into a report
             return;
         }
     }

@@ -71,7 +71,7 @@ void to_fixed(const frames::BodyOrientation& earth, time::Epoch epoch, const mat
 // A burn executed with an error: magnitude (fraction), pointing (rad: in the pitch plane - > 0 towards up -, across it -
 // > 0 towards the orbit normal) and ignition (s late).
 struct BurnError {
-    std::string name;
+    report::Report name;  // entry.case_*
     double magnitude = 0.0;
     double pitch_rad = 0.0;
     double yaw_rad = 0.0;
@@ -259,7 +259,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     integrators::integrate<6>(coast_dynamics(gravity, epoch, parameters.drag_area_per_mass_m2pkg), 0.0, math::pack(state_gcrf),
                               parameters.search_window_s, options, std::span(&decayed, 1), observer);
     if (samples.size() < 3) {
-        plan.reason = "Bahn nicht berechenbar";
+        plan.reason = report::make(report::Code::deorbit_orbit_not_computable);
         return plan;
     }
 
@@ -303,23 +303,18 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     // The reach check with the burn's execution errors propagated to the entry interface (each alone, both signs) added
     // to its dispersions (the air).
     const DeorbitBurnDispersion& e = parameters.burn_dispersion;
-    char magnitude_name[2][64];
-    for (int i = 0; i < 2; ++i) {
-        std::snprintf(magnitude_name[i], sizeof magnitude_name[i], "Deorbit-Impuls %c%.2g %%", i == 0 ? '+' : '-',
-                      100.0 * e.magnitude_fraction);
-        for (char* c = magnitude_name[i]; *c; ++c) {
-            if (*c == '.') *c = ',';  // German decimal comma (UI text; Task 7 M14)
-        }
-    }
+    using report::Code;
     const BurnError burn_errors[] = {
-        {magnitude_name[0], e.magnitude_fraction, 0.0, 0.0, 0.0},
-        {magnitude_name[1], -e.magnitude_fraction, 0.0, 0.0, 0.0},
-        {"Deorbit-Richtung hoch", 0.0, e.pointing_rad, 0.0, 0.0},
-        {"Deorbit-Richtung tief", 0.0, -e.pointing_rad, 0.0, 0.0},
-        {"Deorbit-Richtung links", 0.0, 0.0, e.pointing_rad, 0.0},
-        {"Deorbit-Richtung rechts", 0.0, 0.0, -e.pointing_rad, 0.0},
-        {"Zündung früh", 0.0, 0.0, 0.0, -e.timing_s},
-        {"Zündung spät", 0.0, 0.0, 0.0, e.timing_s},
+        {report::make(Code::entry_case_burn_magnitude_plus, {report::number("fraction", e.magnitude_fraction)}),
+         e.magnitude_fraction, 0.0, 0.0, 0.0},
+        {report::make(Code::entry_case_burn_magnitude_minus, {report::number("fraction", e.magnitude_fraction)}),
+         -e.magnitude_fraction, 0.0, 0.0, 0.0},
+        {report::make(Code::entry_case_burn_pointing_up), 0.0, e.pointing_rad, 0.0, 0.0},
+        {report::make(Code::entry_case_burn_pointing_down), 0.0, -e.pointing_rad, 0.0, 0.0},
+        {report::make(Code::entry_case_burn_pointing_left), 0.0, 0.0, e.pointing_rad, 0.0},
+        {report::make(Code::entry_case_burn_pointing_right), 0.0, 0.0, -e.pointing_rad, 0.0},
+        {report::make(Code::entry_case_burn_early), 0.0, 0.0, 0.0, -e.timing_s},
+        {report::make(Code::entry_case_burn_late), 0.0, 0.0, 0.0, e.timing_s},
     };
     const auto with_burn_dispersions = [&](time::Epoch t, double dv, const Shot& nominal) {
         EntryReachCheck check = parameters.reach_check;
@@ -340,7 +335,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
                 d.reaches_interface = false;
             }
             if (debug) {
-                std::printf("[deorbit]   %s: %s entry %+.0f s, gamma %+.4f deg, speed %+.2f m/s\n", error.name.c_str(),
+                std::printf("[deorbit]   %s: %s entry %+.0f s, gamma %+.4f deg, speed %+.2f m/s\n", report::describe(error.name).c_str(),
                             dispersed.valid ? "" : "NO INTERFACE", dispersed.entry_epoch - nominal.entry_epoch,
                             d.flight_path_rad / constants::deg_to_rad, d.speed_mps);
             }
@@ -361,16 +356,15 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         const Shot& shot = c.shot;
         const EntryReachAssessment& reach = c.reach;
         plan.dispersion_robust = robust;
-        plan.reach_limiting_case = robust ? "" : reach.limiting_case;
+        if (!robust) plan.reach_limiting_case = reach.limiting_case;
         plan.dispersed_cases = reach.cases - 1;
         plan.dispersed_cases_flying = reach.cases_flying - (reach.nominal_flies ? 1 : 0);
         if (!robust) {
-            char note[200];
-            std::snprintf(note, sizeof note,
-                          "Kein Überflug fliegt alle Streuungen: Überflug gewählt, der %d von %d Streufällen standhält "
-                          "(nicht: %s)",
-                          plan.dispersed_cases_flying, plan.dispersed_cases, plan.reach_limiting_case.c_str());
-            plan.dispersion_note = note;  // the session logs it when it flies the plan (not for a hypothetical one)
+            // the session logs it when it flies the plan (not for a hypothetical one)
+            plan.dispersion_note = report::with_cause(
+                report::make(Code::deorbit_dispersion_note, {report::count("flying", plan.dispersed_cases_flying),
+                                                              report::count("total", plan.dispersed_cases)}),
+                plan.reach_limiting_case);
         }
         plan.crossrange_reach_m = reach.reach_m;
         plan.reversal_speed_mps = reach.reversal_speed_mps;
@@ -394,19 +388,18 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         const double boiled_kg = parameters.boil_off_kgps * std::max(0.0, t - epoch);
         plan.boil_off_kg = boiled_kg;
         if (available_propellant_kg - boiled_kg - plan.propellant_kg < reserve_propellant_kg) {
-            char text[200];
             if (boiled_kg > 0.0) {
-                std::snprintf(text, sizeof text,
-                              "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t, bis zum Brennvorgang "
-                              "in %.1f h verdampft %.1f t",
-                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
-                              available_propellant_kg / 1000.0, (t - epoch) / 3600.0, boiled_kg / 1000.0);
+                plan.reason = report::make(Code::deorbit_propellant_short_boil_off,
+                                           {report::mass("deorbit", plan.propellant_kg),
+                                            report::mass("reserve", reserve_propellant_kg),
+                                            report::mass("onboard", available_propellant_kg),
+                                            report::time("wait", t - epoch), report::mass("boiled", boiled_kg)});
             } else {
-                std::snprintf(text, sizeof text, "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t",
-                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
-                              available_propellant_kg / 1000.0);
+                plan.reason = report::make(Code::deorbit_propellant_short,
+                                           {report::mass("deorbit", plan.propellant_kg),
+                                            report::mass("reserve", reserve_propellant_kg),
+                                            report::mass("onboard", available_propellant_kg)});
             }
-            plan.reason = text;
             plan.short_of_reserve = true;
             return plan;
         }
@@ -530,7 +523,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
                             "%.0f s, terminal miss %.0f m; peaks %.0f kW/m2 %.2f g %.1f kPa (cases up to %.0f kW/m2 %.2f g "
                             "%.1f kPa)%s\n",
                             shot.crossrange_m / 1000.0, reach.reach_m / 1000.0, reach.bracketed ? "" : " - not flyable: ",
-                            reach.bracketed ? "" : reach.limiting_case.c_str(), reach.reversals, reach.reversal_speed_mps,
+                            reach.bracketed ? "" : report::describe(reach.limiting_case).c_str(), reach.reversals, reach.reversal_speed_mps,
                             reach.handover_time_s, reach.terminal_miss_m, reach.peak_heat_rate_w_m2 / 1000.0,
                             reach.peak_load_g, reach.peak_dynamic_pressure_pa / 1000.0,
                             reach.worst_peak_heat_rate_w_m2 / 1000.0, reach.worst_peak_load_g,
@@ -555,10 +548,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         return finish(Candidate{t, dv, shot, reach}, true);
     }
     if (fallback) return finish(*fallback, false);
-    char text[160];
-    std::snprintf(text, sizeof text, "Kein Überflug des Ziels in Reichweite (%.0f h gesucht)",
-                  parameters.search_window_s / 3600.0);
-    plan.reason = text;
+    plan.reason = report::make(report::Code::deorbit_no_pass, {report::time("window", parameters.search_window_s)});
     return plan;
 }
 
