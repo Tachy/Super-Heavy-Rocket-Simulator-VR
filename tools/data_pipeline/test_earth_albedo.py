@@ -6,6 +6,8 @@ Run: python -m pytest tools/data_pipeline/test_earth_albedo.py
 import sys
 from pathlib import Path
 
+import math
+
 import numpy as np
 import pytest
 
@@ -192,7 +194,8 @@ def test_land_reflectance_removes_the_sea_only(tmp_path):
 
 
 def test_embed_sentinel2_is_land_only(tmp_path):
-    """Sea texture pixels keep the global level and the feather ratio ignores them; land pixels take Sentinel-2."""
+    """Land pixels take Sentinel-2; the feather ratio ignores sea pixels; sea pixels take the calibrated open-water level of
+    the box (the median of the L2A open water), fading back to the global sea over SEA_FEATHER_M."""
     import rasterio
     from rasterio.transform import from_bounds
 
@@ -215,9 +218,14 @@ def test_embed_sentinel2_is_land_only(tmp_path):
     out = ea.embed_sentinel2(np.full((h, w, 3), 0.1), tmp_path, log=lambda *_: None, land=land)
     px = lambda lat, lon: (int((90.0 - lat) / 180.0 * h), int((lon + 180.0) / 360.0 * w))  # noqa: E731
     assert out[px(26.0, -96.5)] == pytest.approx([0.2] * 3, rel=1e-3)  # land inside: Sentinel-2
-    assert out[px(26.0, -97.5)] == pytest.approx([0.1] * 3)  # sea inside the box: the global level
+    assert out[px(26.0, -97.5)] == pytest.approx([0.2] * 3, rel=1e-3)  # sea inside the box: the calibrated L2A open water
     assert out[px(26.0, -95.8)][0] > 0.1  # land beyond the box edge: the feathered ratio
-    assert out[px(26.0, -98.15)] == pytest.approx([0.1] * 3)  # sea beyond the box edge: untouched (no feather on sea)
+    # sea beyond the box edge: cosine fade from the calibrated level to the global one over SEA_FEATHER_M
+    dist_m = 0.15 * 111320.0 * math.cos(math.radians(26.0))
+    w_sea = 0.5 - 0.5 * math.cos(math.pi * (1.0 - dist_m / ea.SEA_FEATHER_M))
+    assert out[px(26.0, -98.15)][0] == pytest.approx(0.1 + 0.1 * w_sea, abs=0.01)
+    assert 0.1 < out[px(26.0, -98.15)][0] < 0.2
+    assert out[px(26.0, -99.5)] == pytest.approx([0.1] * 3)  # > 100 km beyond the box: the global sea
 
 
 def test_sea_only_continues_the_sea_under_land(tmp_path):
@@ -259,6 +267,24 @@ def test_open_water_pedestal_is_read_over_open_water_only(tmp_path):
     ped = ea.open_water_pedestal(src, ea.WaterMask(tmp_path, "t"))
     # file pixel ~ 0.0025 deg ~ 275 m: the land edge is at column 400, the open water starts ~2 km (8 px x 8) before it
     assert ped.tolist() == pytest.approx([0.05] * 3, abs=0.01)  # the strip is a few % of the open water: below p90
+
+
+def test_open_water_levels_median_and_pedestal(tmp_path):
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    _write_area_grids(tmp_path)
+    n = 800
+    a = np.full((3, n, n), 2000, dtype=np.uint16)
+    a[:, :, : n // 2] = 500  # open sea 0.05 ...
+    a[:, :, 20:60] = 1500  # ... with a bright 25 % of it
+    src = tmp_path / "r.tif"
+    with rasterio.open(src, "w", driver="GTiff", width=n, height=n, count=3, dtype="uint16", crs="EPSG:4326",
+                       transform=from_bounds(-98.0, 25.0, -96.0, 27.0, n, n), nodata=0) as d:
+        d.write(a)
+    ped, level = ea.open_water_levels(src, ea.WaterMask(tmp_path, "t"))
+    assert level.tolist() == pytest.approx([0.05] * 3, abs=0.005)  # the median ignores the bright quarter
+    assert (ped > level).all()  # the pedestal (p90) sits above it
 
 
 def test_open_water_pedestal_logs_when_there_is_no_open_water(tmp_path):

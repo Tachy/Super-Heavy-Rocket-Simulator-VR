@@ -62,6 +62,8 @@ CLIMATOLOGY_MIN_LAND_FRACTION = 0.5  # [E] land share of a pixel (ETOPO + geoid)
 WATER_THRESHOLD_M = 0.05  # [S] = core EarthTerrain::water_threshold_m: orthometric height at or below is sea
 OPEN_WATER_DIST_M = 2000.0  # [E] water farther than this from any non-water pixel is open water (no visible bottom)
 OPEN_WATER_PERCENTILE = 90.0  # [E] of the imagery over open water: the pedestal above which the brightness is bottom / surf
+OPEN_WATER_LEVEL_PERCENTILE = 50.0  # [E] the median of the L2A open water is the calibrated sea level of a Sentinel-2 box
+SEA_FEATHER_M = 100_000.0  # [E] fade of the calibrated sea level back to the global sea outside a Sentinel-2 box (cosine)
 OPEN_WATER_DECIMATION = 8  # the pedestal is read from every 8th pixel (80 m) of the Sentinel-2 file
 OPEN_WATER_MIN_PIXELS = 100  # [E] fewer open-water samples than this give no pedestal (zeros, logged)
 LAND_BLOCK_PX = 512  # block of the land-only Sentinel-2 file
@@ -346,12 +348,14 @@ def _lattice_bilinear(nodes: np.ndarray, rows: np.ndarray, cols: np.ndarray, fr:
     return (1 - wr) * ((1 - wc) * nodes[r0, c0] + wc * nodes[r0, c1]) + wr * ((1 - wc) * nodes[r1, c0] + wc * nodes[r1, c1])
 
 
-def open_water_pedestal(reflectance: Path, mask: "WaterMask", log=print) -> np.ndarray:
-    """Per channel (R, G, B) the `OPEN_WATER_PERCENTILE` of the Sentinel-2 reflectance over open water (water by the
-    renderer's rule, > `OPEN_WATER_DIST_M` from any non-water pixel): what Sen2Cor L2A reports over the sea of this scene
-    (turbidity, glint, scene-wise steps) - not water-leaving reflectance of the calibrated ocean level. Water pixels of the
-    tiles keep only the brightness above it (shallow bottoms, flats, surf) on top of the global sea; zeros (logged) when the
-    file has fewer than OPEN_WATER_MIN_PIXELS open-water samples: the embedding then adds the imagery's full water brightness."""
+def open_water_levels(reflectance: Path, mask: "WaterMask", log=print) -> tuple[np.ndarray, np.ndarray | None]:
+    """Per channel (R, G, B) of the Sentinel-2 reflectance over open water (water by the renderer's rule, > `OPEN_WATER_DIST_M`
+    from any non-water pixel): (pedestal, level). The pedestal is the `OPEN_WATER_PERCENTILE`: what Sen2Cor L2A reports over
+    the sea of this scene (turbidity, glint, scene-wise steps) - not water-leaving reflectance of the calibrated ocean level.
+    Water pixels of the tiles keep only the brightness above it (shallow bottoms, flats, surf) on top of the sea. The level
+    is the median (`OPEN_WATER_LEVEL_PERCENTILE`): the sea the day texture takes inside the box (`embed_sentinel2`). With
+    fewer than OPEN_WATER_MIN_PIXELS open-water samples (logged): pedestal zeros and level None - the embedding then adds the
+    imagery's full water brightness and leaves the global sea."""
     import rasterio
     from pyproj import Transformer
     from rasterio.enums import Resampling
@@ -369,9 +373,15 @@ def open_water_pedestal(reflectance: Path, mask: "WaterMask", log=print) -> np.n
     open_water = water & (a > 0).all(axis=0) & (distance_transform_edt(water) * pixel_m > OPEN_WATER_DIST_M)
     if open_water.sum() < OPEN_WATER_MIN_PIXELS:
         log(f"open_water_pedestal: only {int(open_water.sum())} open-water samples in {reflectance.name} (< {OPEN_WATER_MIN_PIXELS}): "
-            "pedestal zero, water pixels keep their full imagery brightness on top of the global sea")
-        return np.zeros(3)
-    return np.percentile(a[:, open_water], OPEN_WATER_PERCENTILE, axis=1)
+            "pedestal zero, water pixels keep their full imagery brightness on top of the global sea (no calibrated sea level)")
+        return np.zeros(3), None
+    return (np.percentile(a[:, open_water], OPEN_WATER_PERCENTILE, axis=1),
+            np.percentile(a[:, open_water], OPEN_WATER_LEVEL_PERCENTILE, axis=1))
+
+
+def open_water_pedestal(reflectance: Path, mask: "WaterMask", log=print) -> np.ndarray:
+    """The pedestal of `open_water_levels` (per channel 90th percentile of the L2A open water; zeros without samples)."""
+    return open_water_levels(reflectance, mask, log)[0]
 
 
 def build_land_reflectance(reflectance: Path, out: Path, mask: "WaterMask", pedestal: np.ndarray, log=print) -> Path:
@@ -446,11 +456,11 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print, land: np.ndarra
         if not path.exists():
             log(f"  earth_albedo: {path} missing, {src['id']} not embedded")
             continue
-        split = False
+        split, sea_level = False, None
         if WaterMask.available(repo_root, src["area"]):
             mask = WaterMask(repo_root, src["area"])
-            path = build_land_reflectance(path, path.with_name("reflectance_split.tif"), mask,
-                                          open_water_pedestal(path, mask), log)
+            pedestal, sea_level = open_water_levels(path, mask, log)
+            path = build_land_reflectance(path, path.with_name("reflectance_split.tif"), mask, pedestal, log)
             split = True
         else:
             log(f"  earth_albedo: no height grids / geoid for {src['area']}: {src['id']} embedded with its sea")
@@ -458,7 +468,8 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print, land: np.ndarra
         lat_c = (south + north) / 2.0
         m_per_px_y = math.pi * 6371000.0 / h
         m_per_px_x = m_per_px_y * 2.0 * h / w * math.cos(math.radians(lat_c))
-        pad_y, pad_x = int(EMBED_FEATHER_M / m_per_px_y) + 2, int(EMBED_FEATHER_M / m_per_px_x) + 2
+        reach_m = max(EMBED_FEATHER_M, SEA_FEATHER_M if sea_level is not None else 0.0)
+        pad_y, pad_x = int(reach_m / m_per_px_y) + 2, int(reach_m / m_per_px_x) + 2
         r0 = max(int(math.floor((90.0 - north) / 180.0 * h)) - pad_y, 0)
         r1 = min(int(math.ceil((90.0 - south) / 180.0 * h)) + pad_y, h)
         c0 = max(int(math.floor((west + 180.0) / 360.0 * w)) - pad_x, 0)
@@ -489,7 +500,12 @@ def embed_sentinel2(rho: np.ndarray, repo_root: Path, log=print, land: np.ndarra
         dy = np.maximum(np.maximum(lat_g - north, south - lat_g), 0.0) * 111320.0
         dx = np.maximum(np.maximum(lon_g - east, west - lon_g), 0.0) * 111320.0 * math.cos(math.radians(lat_c))
         fade = np.clip(1.0 - np.hypot(dx, dy) / EMBED_FEATHER_M, 0.0, 1.0)
-        out = np.where(land_win[..., None], win * np.exp(ext * fade[..., None]), win + (wet if split else 0.0) * inside[..., None])
+        sea = win + (wet if split else 0.0) * inside[..., None]
+        if sea_level is not None:  # the calibrated sea of the box, fading back to the global sea outside it (cosine)
+            reach = np.clip(1.0 - np.hypot(dx, dy) / SEA_FEATHER_M, 0.0, 1.0)
+            w_sea = (0.5 - 0.5 * np.cos(np.pi * reach))[..., None]
+            sea = win * (1.0 - w_sea) + sea_level * w_sea + (wet if split else 0.0) * inside[..., None]
+        out = np.where(land_win[..., None], win * np.exp(ext * fade[..., None]), sea)
         out[valid] = s2[valid]
         rho[r0:r1, c0:c1] = out
         y = LUMA_WEIGHTS
