@@ -442,7 +442,7 @@ static func fallback_reason(vehicle_id: String) -> String:
 	return String(_reasons.get(vehicle_id, ""))
 
 
-## German notice for the view while the cylinders stand for stale or missing models, else "" (also for "none": by design).
+## Text-table key of the notice for the view while the cylinders stand for stale or missing models, else "" (also for "none": by design).
 static func notice(vehicle_id: String) -> String:
 	return ModelNotice.text_for(fallback_reason(vehicle_id))
 

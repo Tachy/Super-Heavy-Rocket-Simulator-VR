@@ -79,7 +79,7 @@ static func fallback_reason(site_id: String) -> String:
 	return String(_reasons.get(site_id, ""))
 
 
-## German notice for the view while the site shows boxes for want of fresh models, else "".
+## Text-table key of the notice for the view while the site shows boxes for want of fresh models, else "".
 static func notice(site_id: String) -> String:
 	return ModelNotice.text_for(fallback_reason(site_id))
 

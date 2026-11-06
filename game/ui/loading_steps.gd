@@ -1,6 +1,6 @@
 class_name LoadingSteps
 extends RefCounted
-## The startup loading screen's data: the boot steps reported so far (German texts), the one running now and a short
+## The startup loading screen's data: the boot steps reported so far (text-table keys, `loading.*`; a text that is no key stays as it is), the one running now and a short
 ## dimmed history of the finished ones. Pure logic (no nodes), so it is unit-tested headless.
 
 const HISTORY_MAX := 4  ## finished steps shown dimmed above the current one
@@ -12,8 +12,14 @@ var _start_ms: Array[int] = []
 var _end_ms := 0
 
 
-## A new step starts at `now_ms`; the previous one ends. Empty text and a step after finish() are ignored.
-## A repeated text (the same step reported twice) only keeps the first start.
+## The text of a stored step in the active language: the table text of a key, or the entry itself when it is no key
+## (e.g. the status line of a long precomputation, already text).
+static func resolve(entry: String) -> String:
+	return I18n.text(entry) if I18n.has_key(entry) else entry
+
+
+## A new step (a text-table key) starts at `now_ms`; the previous one ends. An empty key and a step after finish() are
+## ignored. A repeated key (the same step reported twice) only keeps the first start.
 func add(text: String, now_ms: int) -> void:
 	if finished or text.is_empty() or (not _texts.is_empty() and _texts[-1] == text):
 		return
@@ -31,7 +37,7 @@ func count() -> int:
 	return _texts.size()
 
 
-## The text of step `index` (0 = the first reported).
+## The key of step `index` (0 = the first reported); resolve() turns it into text.
 func text_at(index: int) -> String:
 	return _texts[index]
 
@@ -61,5 +67,5 @@ func duration_ms(index: int, now_ms: int) -> int:
 func report_lines(now_ms: int) -> PackedStringArray:
 	var lines := PackedStringArray()
 	for i in _texts.size():
-		lines.append("%+7.2f s  %6.2f s  %s" % [_start_ms[i] / 1000.0, duration_ms(i, now_ms) / 1000.0, _texts[i]])
+		lines.append("%+7.2f s  %6.2f s  %s" % [_start_ms[i] / 1000.0, duration_ms(i, now_ms) / 1000.0, resolve(_texts[i])])
 	return lines

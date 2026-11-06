@@ -123,13 +123,13 @@ var booted := false  ## the whole setup of `_ready` is done (the per-frame updat
 
 func _ready() -> void:
 	var data_dir := Paths.data_dir()
-	await LoadingScreen.step("SPICE-Kernel (Ephemeriden, Erdorientierung) laden")
+	await LoadingScreen.step("loading.spice")
 	if not core.open(data_dir.path_join("spice")):
 		push_error("World: SPICE kernels missing - run tools/data_pipeline/fetch.py")
 		boot_finished.emit()
 		return
 	spice_ok = true
-	await LoadingScreen.step("Startplätze und Fahrzeugdaten laden")
+	await LoadingScreen.step("loading.sites_vehicles")
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	flight.setup(Paths.config_dir())
 	free_control.setup(Paths.config_dir())
@@ -138,11 +138,11 @@ func _ready() -> void:
 
 	add_child(clock)
 	add_child(camera)
-	await LoadingScreen.step("Himmel und Atmosphäre vorbereiten")
+	await LoadingScreen.step("loading.sky_atmosphere")
 	_setup_environment()
 	atmosphere.start_loading(core, Paths.config_dir(), data_dir.path_join("atmosphere"))
 	Atmosphere.configure_moon_brdf(core, Paths.config_dir(), moon_brdf)
-	await LoadingScreen.step("Wetterdienst und Wolken einrichten")
+	await LoadingScreen.step("loading.weather_clouds")
 	add_child(weather_fetcher)
 	weather.enabled = WeatherService.load_enabled_setting()
 	weather.setup(core, Paths.config_dir(), data_dir.path_join("weather/cache"), data_dir.path_join("weather/analog"),
@@ -159,7 +159,7 @@ func _ready() -> void:
 	atmosphere.direct_sun = clouds.direct_sun_transmittance  # the vehicles' and the eye's direct Sun: the drawn shapes
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: _sim_target_tdb_s = NAN)  # no lag after a jump
 	await _setup_bodies(data_dir)
-	await LoadingScreen.step("Wolken-Shader vorwärmen, Sternkatalog laden")
+	await LoadingScreen.step("loading.cloud_shaders")
 	_warm_earth_clouds_shader()
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
@@ -804,7 +804,7 @@ func _warm_earth_clouds_shader() -> void:
 
 
 func _setup_bodies(data_dir: String) -> void:
-	await LoadingScreen.step("Erdtextur laden")
+	await LoadingScreen.step("loading.earth_texture")
 	_earth_material.shader = _earth_shader
 	_earth_material.set_shader_parameter("day_texture", _load_texture(data_dir.path_join("textures/earth_day.jpg")))
 	_earth_material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
@@ -814,9 +814,9 @@ func _setup_bodies(data_dir: String) -> void:
 	earth.name = "Earth"
 	earth.setup(EARTH_SEMI_MAJOR_AXIS_M, EARTH_FLATTENING, _earth_material)
 	add_child(earth)
-	await LoadingScreen.step("Erdgelände und Satellitenbilder einrichten")
+	await LoadingScreen.step("loading.earth_terrain")
 	_setup_earth_terrain(data_dir)
-	await LoadingScreen.step("Startplätze und Fangtürme aufbauen")
+	await LoadingScreen.step("loading.sites_towers")
 	for site: Dictionary in sites:
 		earth.add_child(_make_pad(site))
 	for site: Dictionary in sites:
@@ -830,7 +830,7 @@ func _setup_bodies(data_dir: String) -> void:
 			if view.has_models:  # the mount model has its own ground (pit, ramps): no concrete disc over the footprint
 				earth.get_node("Pad_" + str(site["id"])).visible = false
 
-	await LoadingScreen.step("Mond und Mondgelände aufbauen")
+	await LoadingScreen.step("loading.moon")
 	_moon_material.shader = load("res://shaders/moon.gdshader")
 	_moon_material.set_shader_parameter("albedo_texture", _load_texture(data_dir.path_join("textures/moon_color.png")))
 	_moon_material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)

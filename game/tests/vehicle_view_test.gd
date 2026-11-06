@@ -44,7 +44,7 @@ func _initialize() -> void:
 			false).is_empty() and _cylinders(old) == 3, "other vehicle: cylinders only (booster 1, ship barrel + nose)")
 	_check(VehicleModels.fallback_reason(VEHICLE + "x") == "none" and VehicleModels.notice(VEHICLE + "x") == "",
 			"a vehicle without models by design: reason none, no notice")
-	_check(ModelNotice.text_for("stale").contains("veraltet") and ModelNotice.text_for("missing").contains("fehlen")
+	_check(ModelNotice.text_for("stale") == "notice.stale" and ModelNotice.text_for("missing") == "notice.missing"
 			and ModelNotice.text_for("none") == "" and ModelNotice.label("") == null, "notice texts: stale / missing / none")
 	var no_snapshot_id := _view(snapshot, "")
 	_check(_cylinders(no_snapshot_id) == 3, "a snapshot without vehicle_id keeps the cylinders")
@@ -699,7 +699,7 @@ func _check_ship_variants(snapshot: Dictionary) -> void:
 			"vehicle_id": "starship_hls_launch", "name": "b"}, {"id": "hls", "base_station_m": 72.3, "length_m": 52.1,
 			"diameter_m": 9.0, "nose_length_m": 13.0, "vehicle_id": "starship_hls_launch", "name": "h"}]
 	VehicleModels.load_for("starship_hls")  # stale in the scratch folder: reason "stale"
-	_check(VehicleView._notice_text(hls_launch).contains("veraltet"), "hls_launch: the stale starship_hls set shows the notice")
+	_check(VehicleView._notice_text(hls_launch) == "notice.stale", "hls_launch: the stale starship_hls set shows the notice")
 	var launch_view := VehicleView.new()
 	_views.append(launch_view)
 	root.add_child(launch_view)

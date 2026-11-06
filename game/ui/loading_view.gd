@@ -32,7 +32,7 @@ const SCROLL_S := 0.3  ## duration of one scroll step
 var _scale := 1.0
 var _title := Label.new()
 var _rows: Dictionary = {}  ## step index -> Label
-var _texts: Array[String] = []
+var _texts: Array[String] = []  ## the steps' keys (resolved when drawn: a language switch re-renders the rows)
 var _scroll := 0.0  ## slots the rows still have to move (new steps start it at 1)
 
 
@@ -48,6 +48,7 @@ func _init() -> void:
 	_style(_title, TITLE_SIZE, TITLE_COLOR)
 	add_child(_title)
 	resized.connect(_on_resized)
+	I18n.events.language_changed.connect(_on_language_changed)
 
 
 func show_steps(steps: LoadingSteps) -> void:
@@ -76,6 +77,15 @@ func _process(delta: float) -> void:
 		# A backlog of several steps scrolls faster, so it never lags behind the boot.
 		_scroll = maxf(0.0, _scroll - delta * maxf(1.0, _scroll) / SCROLL_S)
 		_layout()
+
+
+func _on_language_changed(_code: String) -> void:
+	_layout()
+
+
+func _exit_tree() -> void:
+	if I18n.events.language_changed.is_connected(_on_language_changed):
+		I18n.events.language_changed.disconnect(_on_language_changed)
 
 
 func _on_resized() -> void:
@@ -119,7 +129,7 @@ func _layout() -> void:
 			_rows[index] = label
 		var slot := float(count - 1 - index) - _scroll
 		var alpha := slot_alpha(slot)
-		label.text = _texts[index]
+		label.text = LoadingSteps.resolve(_texts[index])
 		label.visible = alpha > 0.004
 		var finished := clampf(slot, 0.0, 1.0)  ## 0 = running step, 1 = fully a history row
 		label.add_theme_color_override("font_color", CURRENT_COLOR.lerp(HISTORY_COLOR, finished))

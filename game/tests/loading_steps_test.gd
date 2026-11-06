@@ -6,6 +6,8 @@ var _failures := 0
 
 
 func _initialize() -> void:
+	var _events: I18nEvents = I18n.events  # the first access runs the static initialisers: before the path is set
+	I18n.settings_path = "user://loading_steps_test_%d.cfg" % OS.get_process_id()  # never touch the real setting
 	var steps := LoadingSteps.new()
 	_check(steps.current() == "" and steps.history().is_empty() and steps.count() == 0, "empty before the first step")
 	steps.add("Eins", 1000)
@@ -25,6 +27,25 @@ func _initialize() -> void:
 	_check(steps.finished and steps.current() == "Schritt 8" and steps.duration_ms(7, 99999) == 2000,
 			"after finish() nothing is added and the last step ends there")
 	_check(steps.report_lines(10000).size() == steps.count(), "one report line per step")
+
+	# steps are text-table keys, resolved when drawn; a text that is no key stays as it is
+	_check(LoadingSteps.resolve("loading.ui") == "Oberfläche aufbauen" and LoadingSteps.resolve("Schritt 8") == "Schritt 8",
+			"resolve: a key gives its table text, anything else itself")
+	var keyed := LoadingSteps.new()
+	keyed.add("loading.spice", 0)
+	keyed.add("loading.ui", 10)
+	keyed.title = "Titel"
+	var keyed_view := LoadingView.new()
+	keyed_view.size = Vector2(1600, 900)
+	root.add_child(keyed_view)
+	keyed_view.show_steps(keyed)
+	_check(_row_texts(keyed_view).has("Oberfläche aufbauen") and _row_texts(keyed_view).has("SPICE-Kernel (Ephemeriden, Erdorientierung) laden"),
+			"view: key steps in German (%s)" % [_row_texts(keyed_view)])
+	I18n.set_language("en")
+	_check(_row_texts(keyed_view).has("Building the user interface") and not _row_texts(keyed_view).has("Oberfläche aufbauen"),
+			"view: the rows follow a language switch (%s)" % [_row_texts(keyed_view)])
+	I18n.set_language("de")
+	keyed_view.free()
 
 	var view := LoadingView.new()
 	steps.title = "Titel"
@@ -74,8 +95,16 @@ func _initialize() -> void:
 	await _check_vr_lifecycle()
 	await _check_vr_timeout()
 
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(I18n.settings_path))
 	print("loading_steps_test: ", "FAILED" if _failures > 0 else "OK")
 	quit(1 if _failures > 0 else 0)
+
+
+func _row_texts(view: LoadingView) -> Array[String]:
+	var out: Array[String] = []
+	for label: Label in view.find_children("*", "Label", false, false):
+		out.append(label.text)
+	return out
 
 
 ## Stand-in for the XrManager autoload: what the VR screen uses (origin, camera; no OpenXR interface).

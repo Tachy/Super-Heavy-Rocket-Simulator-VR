@@ -26,7 +26,7 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has(SELF_CHECK_ARG):
 		_self_check()
 		return
-	await LoadingScreen.step("Oberfläche aufbauen")
+	await LoadingScreen.step("loading.ui")
 	overlay_host.overlay.world = world
 	add_child(overlay_host)
 	var xr := get_node_or_null("/root/XrManager")

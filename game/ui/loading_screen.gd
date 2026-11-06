@@ -1,7 +1,7 @@
 class_name LoadingScreen
 extends Node
 ## Startup loading screen: shows which boot step runs right now (light text on black, no progress bar). The boot code
-## reports each step with `await LoadingScreen.step("Wetter laden ...")` (a no-op without a screen, so tests and
+## reports each step with `await LoadingScreen.step("loading.weather")` (a text-table key) (a no-op without a screen, so tests and
 ## headless runs never notice). The boot scene creates it (`start`) before Main exists, Main's `start` call returns the
 ## same screen, and Main arms it at the end (`finish_when_idle`); it disappears for good after the first rendered
 ## world frames.
@@ -69,9 +69,9 @@ static func create(host: Node, wanted: Mode, xr: Node) -> LoadingScreen:
 
 
 ## Reports the step that starts now. A coroutine only in VR (one frame); elsewhere it returns at once.
-static func step(text: String) -> void:
+static func step(key: String) -> void:
 	if current != null:
-		await current._report(text)
+		await current._report(key)
 
 
 ## True while steps wait for rendered frames (VR): the boot code must then be awaited.
@@ -116,11 +116,11 @@ func _build() -> void:
 	_view.show_steps(steps)
 
 
-func _report(text: String) -> void:
+func _report(key: String) -> void:
 	var first := steps.count() == 0
 	var now_ms := Time.get_ticks_msec()
-	steps.add(text, now_ms)
-	print("[Boot] %+7.2f s  %s" % [now_ms / 1000.0, text])
+	steps.add(key, now_ms)
+	print("[Boot] %+7.2f s  %s" % [now_ms / 1000.0, LoadingSteps.resolve(key)])
 	_view.show_steps(steps)
 	if mode == Mode.DESKTOP:
 		_view.snap()  # the step blocks the main thread right after: no half-scrolled picture
@@ -187,7 +187,7 @@ func _process(_delta: float) -> void:
 	if not holding.is_empty():
 		var now_ms := Time.get_ticks_msec()
 		if steps.current() != holding:
-			print("[Boot] %+7.2f s  %s" % [now_ms / 1000.0, holding])
+			print("[Boot] %+7.2f s  %s" % [now_ms / 1000.0, LoadingSteps.resolve(holding)])
 		steps.add(holding, now_ms)
 		_view.show_steps(steps)
 		return

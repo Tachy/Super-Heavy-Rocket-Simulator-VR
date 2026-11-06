@@ -6,9 +6,8 @@ extends SceneTree
 
 const OUT_DIR := "res://../screenshots/loading_screen"
 const SIZE := Vector2i(1600, 900)  ## the project's window size, like the splash
-const TEXTS := ["SPICE-Kernel (Ephemeriden, Erdorientierung) laden", "Startplätze und Fahrzeugdaten laden",
-		"Himmel und Atmosphäre vorbereiten", "Wetterdienst und Wolken einrichten", "Erdtextur laden",
-		"Erdgelände und Satellitenbilder einrichten", "Startplätze und Fangtürme aufbauen"]
+const TEXTS := ["loading.spice", "loading.sites_vehicles", "loading.sky_atmosphere", "loading.weather_clouds",
+		"loading.earth_texture", "loading.earth_terrain", "loading.sites_towers"]  ## text-table keys
 ## (name, scroll position in 0..1 of the animation; -1 = at rest before the last step arrives)
 const STAGES := [["rest", -1.0], ["scroll_25", 0.25], ["scroll_55", 0.55], ["scroll_85", 0.85]]
 

@@ -3,14 +3,14 @@ extends Node
 ## The project's start scene (`run/main_scene`): a few lines that put the loading screen up at once and then bring in
 ## `main.tscn`. Creating the Main node blocks this thread for a moment (the cloud compute shaders are built on
 ## workers since 2026-10-30; it took about 20 s before), so the screen is visible about a second after the process start
-## and says what happens ("Hauptszene laden", "Hauptszene aufbauen"). The later boot steps (World._ready,
+## and says what happens (loading.main_scene_load / loading.main_scene_build). The later boot steps (World._ready,
 ## Main._ready) report into the same screen, which moves to the root when Main takes over.
 ## Tests and tools that load main.tscn themselves (--script) never see this scene; without a screen (headless,
 ## --self-check, --no-loading-screen) it just loads and switches.
 
 const MAIN_SCENE := "res://main.tscn"
-const STEP_LOAD := "Hauptszene laden"
-const STEP_BUILD := "Hauptszene aufbauen"
+const STEP_LOAD := "loading.main_scene_load"
+const STEP_BUILD := "loading.main_scene_build"
 
 
 func _ready() -> void:

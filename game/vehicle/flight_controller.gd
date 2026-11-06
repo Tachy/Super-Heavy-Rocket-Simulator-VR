@@ -15,10 +15,10 @@ const LAUNCH_COUNTDOWN_S := 60.0
 const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_B, KEY_M, KEY_X]
 ## autopilot_status().state of a disengaged autopilot (the qualified id of AutopilotState::Off).
 const AUTOPILOT_OFF := "autopilot_state.off"
-## last_event while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
-const PLANNING_EVENT := "Startvorbereitung: Bahn wird berechnet"
-## last_event while a mission that begins in flight (no ascent plan on the pad) is being started.
-const MISSION_START_EVENT := "Mission wird gestartet"
+## last_event_report while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
+const PLANNING_EVENT := {"key": "event.planning"}
+## last_event_report while a mission that begins in flight (no ascent plan on the pad) is being started.
+const MISSION_START_EVENT := {"key": "event.mission_starting"}
 ## Simulation target while a mission start runs (TDB s: J2000, before every mission epoch): the runner never steps
 ## backwards, so the session holds where it stands instead of racing towards the world clock - a return mission starts
 ## at its own epoch, days before it, and the clock only jumps there on mission_started.
@@ -37,10 +37,12 @@ var trail := FlightTrailView.new()  ## the flown paths (white)
 var navball: NavBall
 var overlay: FlightOverlay
 var ascent_target := {}
-var last_event := ""
+## The HUD's event line as data, resolved at draw time (event_text) so it follows a language switch: {key, params,
+## then} for a game event (params may hold nested event dictionaries or core reports), or a core report {code, ...}.
+var last_event_report := {}
 ## Manual control (pilot keys, HOTAS, I/L/K/G/M/X). Off in the external views; the cockpit (later) turns it on.
 var manual_control := false
-## Launch posted to the simulation thread and not yet finished: {id, site_id, text}.
+## Launch posted to the simulation thread and not yet finished: {id, site_id, event} (event: shown on success).
 var _pending_launch := {}
 ## Mission start posted to the simulation thread and not yet finished: {id, mission_id}.
 var _pending_mission := {}
@@ -74,12 +76,13 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 	var target := {} if manual_control else ascent_target
 	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s, target)
 	launch_site_id = ""
-	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [
-			vehicle_name if vehicle_name != "" else vehicle_id, I18n.text("site.%s.name" % site["id"])]}
+	_pending_launch = {"id": id, "site_id": site["id"], "event": {"key": "event.launch_at", "params": {
+			"vehicle": {"literal": vehicle_name if vehicle_name != "" else vehicle_id},
+			"site": {"key": "site.%s.name" % site["id"]}}}}
 	if id <= 0:
-		last_event = "Start fehlgeschlagen"
+		last_event_report = {"key": "event.start_failed"}
 	else:
-		last_event = "Start wird vorbereitet" if target.is_empty() else PLANNING_EVENT
+		last_event_report = {"key": "event.launch_preparing"} if target.is_empty() else PLANNING_EVENT
 	return id > 0
 
 
@@ -92,10 +95,10 @@ func start_mission(mission_id: String, tdb_s: float, on_pad := false) -> bool:
 	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S)
 	launch_site_id = ""
 	if id <= 0:
-		last_event = "Start fehlgeschlagen"
+		last_event_report = {"key": "event.start_failed"}
 		return false
 	_pending_mission = {"id": id, "mission_id": mission_id}
-	last_event = PLANNING_EVENT if on_pad else MISSION_START_EVENT
+	last_event_report = PLANNING_EVENT if on_pad else MISSION_START_EVENT
 	sim.advance_to(MISSION_HOLD_TDB_S)  # at once: the old target (the clock) must not outlive the post
 	return true
 
@@ -116,9 +119,9 @@ func _on_command_finished(id: int, command: String, ok: bool, report: Dictionary
 			# a refused plan leaves the vehicle on its pad: the site stays the flight's (its tower view)
 			launch_site_id = _pending_launch["site_id"] if ok or sim.is_active() else ""
 			if ok:
-				last_event = _pending_launch["text"]  # the clamped vehicle counts down and lifts off at T-0
+				last_event_report = _pending_launch["event"]  # the clamped vehicle counts down and lifts off at T-0
 			else:
-				last_event = _refusal_event(report)
+				last_event_report = _refusal_event(report)
 			_pending_launch = {}
 		"start_mission":
 			if id != _pending_mission.get("id", 0):
@@ -128,51 +131,74 @@ func _on_command_finished(id: int, command: String, ok: bool, report: Dictionary
 			launch_site_id = sim.mission_site_id() if sim.is_active() else ""
 			if ok:
 				var name_key := sim.mission_display_name()
-				last_event = "Mission: %s" % (I18n.text(name_key) if name_key != "" else mission_id)
+				last_event_report = {"key": "event.mission", "params": {
+						"name": {"key": name_key} if name_key != "" else {"literal": mission_id}}}
 			else:
-				last_event = _refusal_event(report)
+				last_event_report = _refusal_event(report)
 				_clock_resync = true  # the refused start may have placed a vehicle at its own epoch
 			mission_started.emit(ok, report)
 		"engage_ascent_autopilot":
-			last_event = "Aufstiegs-Autopilot aktiv" if ok else I18n.text("event.start_refused", {"reason": I18n.report_text(report)})
+			last_event_report = {"key": "event.ascent_active"} if ok \
+					else {"key": "event.start_refused", "params": {"reason": report}}
 		"engage_orbit_autopilot":
 			if ok:
-				last_event = "Autopilot: Orbit halten"
+				last_event_report = {"key": "event.orbit_hold"}
 		"plan_circularization":
-			last_event = "Zirkularisierung geplant" if ok \
-					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
+			last_event_report = {"key": "event.circularization_planned" if ok else "event.circularization_none"}
 		"plan_ship_return":
 			if ok:
-				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm" + _dispersion_warning()
+				last_event_report = {"key": "event.return_planned_ship", "then": _dispersion_warning()}
 			else:
-				last_event = _no_return_event("event.no_return_no_ship")
+				last_event_report = _no_return_event("event.no_return_no_ship")
 		"plan_capsule_return":
 			if ok:
-				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Wasserung" + _dispersion_warning()
+				last_event_report = {"key": "event.return_planned_capsule", "then": _dispersion_warning()}
 			else:
-				last_event = _no_return_event("event.no_return_no_capsule")
+				last_event_report = _no_return_event("event.no_return_no_capsule")
 
 
-## A refused start as the event line: "Start abgelehnt: <reason>", or "Start fehlgeschlagen" without a reason.
-func _refusal_event(report: Dictionary) -> String:
-	var reason := I18n.report_text(report)
-	return I18n.text("event.start_refused", {"reason": reason}) if reason != "" else I18n.text("event.start_failed")
+## A refused start as the event: "Start abgelehnt: <reason>", or "Start fehlgeschlagen" without a reason (an ok report).
+## A reason that renders empty counts as none (the former `reason != ""` test).
+static func _refusal_event(report: Dictionary) -> Dictionary:
+	if I18n.report_text(report) == "":
+		return {"key": "event.start_failed"}
+	return {"key": "event.start_refused", "params": {"reason": report}}
 
 
 ## The event for a return the planner refused: its reason, or the key's text when there is no plan (no ship / capsule).
-func _no_return_event(missing_key: String) -> String:
+func _no_return_event(missing_key: String) -> Dictionary:
 	var plan: Dictionary = sim.autopilot_status().get("return", {})
 	if not plan.has("reason"):
-		return I18n.text(missing_key)
-	return I18n.text("event.no_return", {"reason": I18n.report_text(plan["reason"])})
+		return {"key": missing_key}
+	return {"key": "event.no_return", "params": {"reason": plan["reason"]}}
 
 
-## The planned return's note when its pass does not fly every dispersed case (the planner's fallback), else "".
-func _dispersion_warning() -> String:
+## The planned return's note when its pass does not fly every dispersed case (the planner's fallback), else {}.
+func _dispersion_warning() -> Dictionary:
 	var plan: Dictionary = sim.autopilot_status().get("return", {})
 	if plan.get("dispersion_robust", true):
+		return {}
+	return {"key": "event.dispersion_warning", "params": {"note": plan.get("dispersion_note", {})}}
+
+
+## An event dictionary as text in the active language ("" for none). {key, params, then}: the table text of the key
+## with the params (a Dictionary param is a nested event {key..} / {literal} / core report {code..}, resolved the same
+## way), followed by the `then` event. A core report {code, ...} renders through I18n.report_text.
+static func event_text(event: Dictionary) -> String:
+	if event.is_empty():
 		return ""
-	return I18n.text("event.dispersion_warning", {"note": I18n.report_text(plan.get("dispersion_note", {}))})
+	if event.has("literal"):
+		return str(event["literal"])
+	if event.has("code"):
+		return I18n.report_text(event)
+	var params := {}
+	for name: String in event.get("params", {}):
+		var value: Variant = event["params"][name]
+		params[name] = event_text(value) if value is Dictionary else value
+	var text := I18n.text(str(event["key"]), params)
+	if event.has("then"):
+		text += event_text(event["then"])
+	return text
 
 
 ## While a mission start runs: the work the core reports for it (a lunar landing's touchdown search on a background
@@ -180,9 +206,9 @@ func _dispersion_warning() -> String:
 func _show_mission_start_status() -> void:
 	if _pending_mission.is_empty():
 		return  # the outcome came in this frame
-	var status: String = I18n.report_text(sim.autopilot_status().get("mission_start_status", {}))
-	if status != "":
-		last_event = status
+	var status: Dictionary = sim.autopilot_status().get("mission_start_status", {})
+	if I18n.report_text(status) != "":
+		last_event_report = status
 
 
 ## A mission start posted and not yet finished (the world clock holds meanwhile).
@@ -270,7 +296,7 @@ func _engage_ascent() -> void:
 	sim.engage_ascent_autopilot(ascent_target.get("periapsis_km", 200.0), ascent_target.get("apoapsis_km", 200.0),
 			ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
 	var on_pad: bool = sim.is_active() and sim.telemetry(sim.controlled_index()).get("clamped", false)
-	last_event = PLANNING_EVENT if on_pad else "Aufstiegs-Autopilot aktiv"
+	last_event_report = PLANNING_EVENT if on_pad else {"key": "event.ascent_active"}
 
 
 func controlled_position_gcrf() -> Vector3:
@@ -286,36 +312,36 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	match key.keycode:
 		KEY_I:
 			sim.ignite()
-			last_event = "Zündung"
+			last_event_report = {"key": "event.ignition"}
 		KEY_L:
 			sim.release_clamps()
-			last_event = "Klammern gelöst"
+			last_event_report = {"key": "event.clamps_released"}
 		KEY_K:
 			sim.cutoff()
-			last_event = "Triebwerke aus"
+			last_event_report = {"key": "event.engines_off"}
 		KEY_G:
 			sim.stage()
-			last_event = "Stufentrennung"
+			last_event_report = {"key": "event.staging"}
 		KEY_B:
 			sim.deploy_legs()
 			var legs: Dictionary = sim.body_legs(sim.controlled_index())
 			if legs.get("present", false) and not legs.get("fixed", false):
-				last_event = "Landebeine ausfahren"  # only vehicles with deployable legs
+				last_event_report = {"key": "event.legs_deploy"}  # only vehicles with deployable legs
 		KEY_P:
 			_engage_ascent()
 		KEY_O:
 			sim.plan_circularization()  # outcome: _on_command_finished
-			last_event = "Zirkularisierung wird geplant"
+			last_event_report = {"key": "event.circularization_planning"}
 		KEY_R:
 			sim.plan_ship_return()  # outcome: _on_command_finished
-			last_event = "Rückkehr wird geplant"
+			last_event_report = {"key": "event.return_planning"}
 		KEY_X:
 			sim.disengage_autopilot()
-			last_event = "Autopilot aus"
+			last_event_report = {"key": "event.autopilot_off"}
 		KEY_M:
 			rate_mode = not rate_mode
 			sim.set_rate_mode(rate_mode)
-			last_event = "Steuerung: %s" % ("Ratensteuerung (SAS)" if rate_mode else "Direkt (Gimbal)")
+			last_event_report = {"key": "event.control_mode", "params": {"mode": {"key": "hud.control_rate" if rate_mode else "hud.control_direct"}}}
 
 
 ## Feeds NavBall and flight director: local horizon, velocity vector, commanded direction.
@@ -370,7 +396,7 @@ func _read_input(delta: float) -> void:
 			_lever_initial = lever_value
 		elif not lever_armed and absf(lever_value - _lever_initial) > 0.02:
 			lever_armed = true
-			last_event = "Schubhebel aktiv"
+			last_event_report = {"key": "event.lever_active"}
 		if lever_armed:
 			throttle = (lever_value + 1.0) * 0.5
 	if _joydump:

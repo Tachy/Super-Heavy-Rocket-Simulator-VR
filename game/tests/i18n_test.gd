@@ -106,6 +106,36 @@ func _initialize() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(settings))
 	_check(I18n.saved_language() == "de", "no file: de")
 	I18n.set_language("de")
+
+	# stored HUD events resolve at draw time (Review Focus 1): the same data reads German, then English
+	I18n.reload_tables()
+	var ignition := {"key": "event.ignition"}
+	var refused := {"key": "event.start_refused", "params": {"reason": {"code": "command.internal_error", "params": {},
+			"kinds": {}, "causes": []}}}
+	var launched := {"key": "event.launch_at", "params": {"vehicle": {"literal": "Mk3"}, "site": {"key": "event.ignition"}}}
+	var planned := {"key": "event.return_planned_ship", "then": {"key": "event.dispersion_warning",
+			"params": {"note": {"code": "command.internal_error", "params": {}, "kinds": {}, "causes": []}}}}
+	var core_report := {"code": "command.internal_error", "params": {}, "kinds": {}, "causes": []}
+	_check(FlightController.event_text(ignition) == "Zündung", "event de: %s" % FlightController.event_text(ignition))
+	_check(FlightController.event_text(refused) == "Start abgelehnt: Interner Fehler im Befehl",
+			"event with a nested report, de: %s" % FlightController.event_text(refused))
+	_check(FlightController.event_text(launched) == "Mk3 auf Zündung", "event with literal and key params, de")
+	_check(FlightController.event_text(planned).begins_with("Rückkehr geplant: ") and FlightController.event_text(planned).contains(" - Achtung: "),
+			"event with a then-part, de: %s" % FlightController.event_text(planned))
+	_check(FlightController.event_text({}) == "" and FlightController.event_text(core_report) == "Interner Fehler im Befehl",
+			"empty event is empty, a core report renders itself")
+	_check(FlightHud.key_help().contains("Tab / Umschalt+Tab") and FlightHud.key_help().count("\n") == 2, "key help de")
+	I18n.set_language("en")
+	_check(FlightController.event_text(ignition) == "Ignition", "the stored event re-renders in English: %s" % FlightController.event_text(ignition))
+	_check(FlightController.event_text(refused) == "Start refused: Internal error in command", "nested report in English: %s" % FlightController.event_text(refused))
+	_check(FlightHud.key_help().contains("Tab / Shift+Tab"), "key help en")
+	_check(ModelNotice.text_for("stale") == "notice.stale" and I18n.text("notice.stale").begins_with("Placeholder model"), "model notice en")
+	var notice := ModelNotice.label("notice.stale")
+	_check(notice.text.begins_with("Placeholder model"), "notice label starts in the active language")
+	I18n.set_language("de")
+	_check(notice.text.begins_with("Platzhaltermodell"), "notice label follows the switch back to German: %s" % notice.text)
+	_check(FlightController.event_text(ignition) == "Zündung", "back to German")
+	notice.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(settings))
 	label.free()
 
