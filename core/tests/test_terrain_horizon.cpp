@@ -84,14 +84,15 @@ private:
 double brute_force_elevation_rad(const environment::Terrain& terrain, double lat, double lon, double h, double az) {
     constexpr double range_m = 400e3;
     const double r0 = R + h;
-    double best = -1e9, d = 10.0;
+    double best = -1e9, d = 1.0;
     while (d < range_m) {
         const double t = d / R;
         const auto [la, lo] = destination(lat, lon, az, t);
         const double r1 = R + terrain.height_m(la, lo);
         best = std::max(best, std::atan2(r1 * std::cos(t) - r0, r1 * std::sin(t)));
-        // Half a pixel, but near the observer finer too: a bilinear cell can rise 15 deg within a few hundred metres.
-        d += std::min(0.5 * terrain.resolution_m(la, lo), 10.0 + 0.0005 * d);
+        // Half a pixel, but near the observer finer too: a bilinear cell can rise 15 deg within a few hundred metres,
+        // and at 1 m: at 10 m the reference itself misses the slope tops the march (10 m steps) catches (see the LOLA test).
+        d += std::min(0.5 * terrain.resolution_m(la, lo), 1.0 + 0.00005 * d);
     }
     return best;
 }
@@ -156,7 +157,7 @@ TEST_CASE("LOLA data: the march agrees with a brute-force march and its early-ou
     const auto terrain = lunar_terrain_or_skip();
     std::mt19937 rng(20261030);
     std::uniform_real_distribution<double> u01(0.0, 1.0);
-    int compared = 0, outliers = 0;
+    int compared = 0, march_lower = 0;
     double worst_rad = 0.0;
     for (int i = 0; i < 64; ++i) {
         // Half the points over the whole Moon (LDEM_64), half within 30 km of the IM-2 site (20 m tile).
@@ -173,24 +174,24 @@ TEST_CASE("LOLA data: the march agrees with a brute-force march and its early-ou
             const double marched = environment::horizon_elevation_rad(*terrain, R, lat, lon, h, az, leaf_march);
             const double brute = brute_force_elevation_rad(*terrain, lat, lon, h, az);
             INFO("point " << i << " lat " << lat / deg << " lon " << lon / deg << " h " << h << " az " << k);
-            // Conservative: never higher. LDEM_64 (473 m; LDEM_16: 1.9 km) has steep bilinear walls a few tens of metres
-            // from an observer near the pole, where both marches sample the slope's top 10 m apart and differ by the
-            // sampling: a handful of rays, counted instead of asserted one by one (see `kOutlierLimit`).
-            if (marched - brute > tolerance_rad) ++outliers;
+            CHECK(marched - brute <= tolerance_rad);  // conservative: never higher
             if (brute < 5.0 * deg) {
-                if (std::abs(marched - brute) > tolerance_rad && marched - brute <= tolerance_rad) ++outliers;
+                // The march is allowed to be LOWER than the 1 m reference only by its first step (see below): counted.
+                if (brute - marched > tolerance_rad) ++march_lower;
                 worst_rad = std::max(worst_rad, std::abs(marched - brute));
                 ++compared;
             }
         }
     }
-    std::printf("[terrain_horizon] %d rays compared, worst |march - brute| = %.4f deg\n", compared, worst_rad / deg);
+    std::printf("[terrain_horizon] %d rays compared, %d marched lower than 1 m brute by > 0.1 deg, worst |march - brute| = %.4f deg\n",
+                compared, march_lower, worst_rad / deg);
     CHECK(compared > 500);
-    // Measured with LDEM_64 (2026-11-06, lunar sites plan task 4): 4 of the 1,024 rays outside 0.1 deg (all within 30 km
-    // of the IM-2 site at -84 deg, marched higher by 0.11-0.61 deg), worst |march - brute| 0.49 deg; with LDEM_16 none.
-    constexpr int kOutlierLimit = 8;
-    CHECK(outliers <= kOutlierLimit);
-    CHECK(worst_rad <= 0.7 * deg);
+    // Measured with LDEM_64 against the 1 m brute (2026-11-06, lunar sites plan task 4 fix round 1): the march is never
+    // higher; a few rays near the IM-2 site (-84 deg, LDEM_64 walls rising within the first 10 m) are lower. With a 10 m
+    // brute the reference itself was the inaccurate side (it showed the march higher by up to 0.61 deg on 2 rays).
+    constexpr int kMarchLowerLimit = 8;
+    CHECK(march_lower <= kMarchLowerLimit);
+    CHECK(worst_rad <= 0.9 * deg);
 }
 
 TEST_CASE("LOLA data: poles and the antimeridian give finite horizons", "[terrain_horizon][data]") {
@@ -298,8 +299,12 @@ NodeLattice make_lattice(const environment::Terrain& terrain, double lat0, doubl
 // worst / 99th percentile; checks the tolerance where the reference is below 5 deg.
 // The limits are the measured values with a margin (see the cases; the LOLA ones re-measured on LDEM_64 2026-11-06, whose
 // 4x finer relief moves banded vs full: IM-2 level 7 worst 0.68, lon 180 1.34 / p99 0.73, lon 100 0.58 / p99 0.25 deg,
-// limits before 0.65, 1.1 / 0.65, 0.5 / 0.2): where the reference is below 5 deg the worst and
-// the 99th percentile of |banded - full|, in degrees.
+// limits before 0.65, 1.1 / 0.65, 0.5 / 0.2). The band strides (`band_specs`, geometric: a band starts at 8 strides from
+// the vertex, in lattice spacings) are not tuned to a data grid; doubling the band starts (fix round 1 experiment, not
+// kept) restores the old limits (lon 180 0.57 / 0.31, lon 100 0.25 / 0.11, IM-2 level 7 0.32 / 0.12 deg) at +40-65 % bake time
+// on level 7 (80 -> 133 ms IM-2, 114 -> 184 ms far side), so the larger error is the finer relief's (ridge switches
+// inside a stride) and the stride choice stays Task 12's perf decision. Compared: where the reference is below 5 deg the
+// worst and the 99th percentile of |banded - full|, in degrees.
 void compare_banded(const environment::Terrain& terrain, double lat0, double lon0, double spacing_m,
                     const char* label, double worst_limit_deg, double p99_limit_deg) {
     const NodeLattice node = make_lattice(terrain, lat0, lon0, spacing_m);

@@ -56,8 +56,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   production=yes` in external/godot, ~5 min), core + extension, smoke test, exports `game/export_presets.cfg`, lays out
   `build/package` (exe next to `config/` + base `data/`; `Paths` uses the executable's folder in exported builds),
   self-checks the exported exe (`-- --self-check`, with and without the data parts) and writes the ZIPs (game, data
-  parts terrain / imagery / Diviner rock map (optional, 88 MB: without it the Moon rocks use the global statistical
-  abundance), each < 2 GB) and the Inno Setup installer (`tools/installer.iss`, all data inside: the repo
+  parts terrain / imagery / LDEM_64 (531 MB: without it the Moon is the smooth sphere, the game logs it) / Diviner rock map (optional, 88 MB: without it the Moon rocks use the global statistical
+  abundance), each < 2 GB; the base carries the preset lunar site tiles but never the opt-in test-site tiles) and the Inno Setup installer (`tools/installer.iss`, all data inside: the repo
   is private). `/build` publishes the release-please version, `/build-local` a local test installer. Version:
   `game/util/game_version.gd` (release-please `extra-files`; the action has `skip-github-release`).
 - Test workflow (user 2026-10-19, tiers 2026-11-03): run only what the change affects - the tags of the touched

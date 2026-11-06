@@ -306,19 +306,23 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
             say(std::string("Earth terrain not loadable - flat ground: ") + e.what());
         }
     }
-    bool moon_grid_present = false;
-    try {
-        moon_grid_present = std::filesystem::exists(data_dir / "terrain" / (config::load_lunar_global_grid_name(config) + ".toml"));
-    } catch (const std::exception&) {  // no lunar_sites.toml (a bare directory): nothing to load
+    bool moon_grid_present = false, moon_config_failed = false;
+    if (std::filesystem::exists(config / "lunar_sites.toml")) {  // no file (a bare directory): nothing to load
+        try {
+            moon_grid_present = std::filesystem::exists(data_dir / "terrain" / (config::load_lunar_global_grid_name(config) + ".toml"));
+        } catch (const std::exception& e) {  // a malformed config is not a missing download
+            say(std::string("Lunar sites config not loadable - smooth sphere: ") + e.what());
+            moon_config_failed = true;
+        }
     }
-    if (!moon_grid_present) {
-        say("Lunar terrain missing - smooth sphere (python tools/data_pipeline/fetch.py)");
-    } else {
+    if (moon_grid_present) {
         try {
             moon_terrain_ = sim::shared_lunar_terrain(config, data_dir);
         } catch (const std::exception& e) {
             say(std::string("Lunar terrain not loadable - smooth sphere: ") + e.what());
         }
+    } else if (!moon_config_failed) {
+        say("Lunar terrain missing - smooth sphere (python tools/data_pipeline/fetch.py)");
     }
     moon_surface_.reset();
     if (moon_terrain_ != nullptr) {

@@ -1,6 +1,6 @@
 ﻿; Installer of Super Heavy: Rocket Simulator VR (Inno Setup 6), built by tools/package.ps1:
 ;   ISCC /DAppVersion=1.2.3 /DFileVersion=1.2.3.0 /DSourceDir=<build\package> /DTerrainDir=<build\part_terrain>
-;        /DImageryDir=<build\part_imagery> /DDivinerDir=<build\part_diviner> /DOutputDir=<build> installer.iss
+;        /DImageryDir=<build\part_imagery> /DDivinerDir=<build\part_diviner> /DLdemDir=<build\part_ldem> /DOutputDir=<build> installer.iss
 ; Per user, no admin rights: %LOCALAPPDATA%\Programs\Super-Heavy-Rocket-Simulator-VR.
 ; Everything is inside (the repository is private, so the installer cannot fetch the data from the release); the
 ; Earth terrain, the aerial imagery and the Diviner rock map are optional components. A newer installer installs over an older one (same
@@ -23,6 +23,9 @@
 #endif
 #ifndef DivinerDir
   #define DivinerDir "..\build\part_diviner"
+#endif
+#ifndef LdemDir
+  #define LdemDir "..\build\part_ldem"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\build"
@@ -78,6 +81,8 @@ german.CompTerrain=Erdgelände um die Startplätze (hochauflösend; ohne: flache
 english.CompTerrain=Earth terrain around the launch sites (high resolution; without: flat ground)
 german.CompImagery=Luftbilder der Startplätze (NAIP / Sentinel-2)
 english.CompImagery=Aerial imagery of the launch sites (NAIP / Sentinel-2)
+german.CompLdem=Globales Mondgelände LDEM_64 (473 m; ohne: glatte Kugel)
+english.CompLdem=Global lunar terrain LDEM_64 (473 m; without: smooth sphere)
 german.CompDiviner=Felsenhäufigkeitskarte des Mondes (Diviner; ohne: globale statistische Häufigkeit)
 english.CompDiviner=Lunar rock abundance map (Diviner; without: global statistical abundance)
 
@@ -89,6 +94,7 @@ Name: "custom"; Description: "{cm:TypeCustom}"; Flags: iscustom
 Name: "main"; Description: "{cm:CompMain}"; Types: full custom; Flags: fixed
 Name: "terrain"; Description: "{cm:CompTerrain}"; Types: full
 Name: "imagery"; Description: "{cm:CompImagery}"; Types: full
+Name: "ldem"; Description: "{cm:CompLdem}"; Types: full
 Name: "diviner"; Description: "{cm:CompDiviner}"; Types: full
 
 [Tasks]
@@ -104,6 +110,7 @@ Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.i16"
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: main; Flags: ignoreversion recursesubdirs
 Source: "{#TerrainDir}\*"; DestDir: "{app}"; Components: terrain; Flags: ignoreversion recursesubdirs
 Source: "{#ImageryDir}\*"; DestDir: "{app}"; Components: imagery; Flags: ignoreversion recursesubdirs
+Source: "{#LdemDir}\*"; DestDir: "{app}"; Components: ldem; Flags: ignoreversion recursesubdirs
 Source: "{#DivinerDir}\*"; DestDir: "{app}"; Components: diviner; Flags: ignoreversion recursesubdirs
 
 [Icons]

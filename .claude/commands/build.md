@@ -16,7 +16,7 @@ once. The repository is private: the release and its assets are visible to colla
 - `git status` must be clean (untracked scratch like `tmp/` aside) and the branch `main`, up to date with
   `origin/main` (`git fetch` then compare). If not: say so and stop.
 - The runtime data must be complete: `data/spice`, `data/terrain/earth`, `data/imagery/earth/index.toml`,
-  `data/terrain/diviner_rock_abundance.toml` / `.i16` (the script checks it too; else `python tools/data_pipeline/fetch.py`).
+  `data/terrain/ldem_64.toml` / `.i16`, `data/terrain/diviner_rock_abundance.toml` / `.i16` (the script checks it too; else `python tools/data_pipeline/fetch.py`).
 - Find the open release PR of release-please:
   `gh pr list --state open --label "autorelease: pending" --json number,title,headRefName`
   Its title is `chore(main): release X.Y.Z`; X.Y.Z is the version.
@@ -31,11 +31,11 @@ once. The repository is private: the release and its assets are visible to colla
   the background with its output in `build/package_run.log` and report progress.
 - Write the release notes: the section `## [X.Y.Z]...` of `CHANGELOG.md` up to the next `## [` heading, into
   `build/release-notes-X.Y.Z.md`. Append a short German/English install note: the installer contains everything; the
-  ZIP `...-windows.zip` is playable on its own, `...-data-terrain.zip`, `...-data-imagery.zip` and `...-data-diviner.zip` unpack into the same
-  folder (Earth terrain, aerial imagery of the launch sites, the lunar rock abundance map).
+  ZIP `...-windows.zip` is playable on its own, `...-data-terrain.zip`, `...-data-imagery.zip`, `...-data-ldem.zip` and `...-data-diviner.zip` unpack into the same
+  folder (Earth terrain, aerial imagery of the launch sites, the global lunar terrain LDEM_64, the lunar rock abundance map).
 - `git checkout main`.
 - Show the user the files with sizes - `build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-setup.exe`, `...-windows.zip`,
-  `...-data-terrain.zip`, `...-data-imagery.zip`, `...-data-diviner.zip` - and the release notes, and ask (AskUserQuestion) whether to
+  `...-data-terrain.zip`, `...-data-imagery.zip`, `...-data-ldem.zip`, `...-data-diviner.zip` - and the release notes, and ask (AskUserQuestion) whether to
   publish: they may first want to try `build\package\Start-Desktop.cmd` / `Start-VR.cmd` or the installer. Without a
   yes: stop here, the build stays in `build/`.
 
@@ -46,7 +46,7 @@ once. The repository is private: the release and its assets are visible to colla
 - Create tag and release with all files in one step (gh uploads the files to a draft and publishes it only then, so
   the release never shows up without them; the five files are ~1-2 GB, the upload takes a while - run it in the
   background):
-  `gh release create vX.Y.Z --target <merge commit> --title vX.Y.Z --notes-file build/release-notes-X.Y.Z.md --latest build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-setup.exe build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-windows.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-terrain.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-imagery.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-diviner.zip`
+  `gh release create vX.Y.Z --target <merge commit> --title vX.Y.Z --notes-file build/release-notes-X.Y.Z.md --latest build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-setup.exe build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-windows.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-terrain.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-imagery.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-ldem.zip build/Super-Heavy-Rocket-Simulator-VR-X.Y.Z-data-diviner.zip`
 - Mark the PR as released, as release-please itself would (otherwise it stops preparing the next release PR:
   "untagged, merged release PRs outstanding"):
   `gh pr edit <number> --remove-label "autorelease: pending" --add-label "autorelease: tagged"`
