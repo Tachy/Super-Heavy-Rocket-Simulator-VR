@@ -1,0 +1,10 @@
+// Report code list: STARSIM_CODE(enumerator, "dotted.id", "param1,param2").
+// The enumerator is the id with '.' replaced by '_'. Parameter names are lowercase snake case.
+// Every entry needs a text under [report] in config/i18n/de.toml and en.toml (python tools/i18n_check.py codes).
+
+// general
+STARSIM_CODE(ok, "ok", "")
+STARSIM_CODE(legacy, "legacy", "text")
+
+// command
+STARSIM_CODE(command_internal_error, "command.internal_error", "")

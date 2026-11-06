@@ -8,6 +8,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(tomlplusplus)
 
 add_library(starsim_core STATIC
+    src/report/report.cpp
     src/config/vehicle_config.cpp
     src/config/propellant_loading.cpp
     src/config/drone_ship_config.cpp

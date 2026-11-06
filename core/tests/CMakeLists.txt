@@ -8,6 +8,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 add_executable(starsim_core_tests
+    test_report.cpp
     test_math.cpp
     test_utc_date_time.cpp
     test_geodetic.cpp

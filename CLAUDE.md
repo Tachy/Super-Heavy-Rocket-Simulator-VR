@@ -21,7 +21,7 @@ becomes superseded into its history file).
 
 ## Communication & language
 - Answer the user **in German**. Code, identifiers, comments, commit messages and docs in the repo: **English**.
-  UI text is German.
+  UI text comes from `config/i18n/<de|en>.toml` (German default, English; `python tools/i18n_check.py` keeps them complete).
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, ...): release-please builds the release PR and
   CHANGELOG.md. Releases are made by the user (merging that PR).
 
@@ -49,7 +49,7 @@ external/    Third-party sources & engine build (git-ignored).
 tests/       Validation fixtures (reference values from JPL Horizons etc.).
 ```
 - `core` is split into small modules with clear interfaces (`math`, `time`, `frames`, `ephemeris`, `spice`,
-  `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`,
+  `report`, `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`,
   `weather_decode`; what each holds: `docs/architecture.md`). Modules depend downwards only.
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them. CSPICE lives only in
   `core/src/spice/` (implements `time::TimeScaleConverter`, `ephemeris::Ephemeris`, `frames::BodyOrientation`); lz4 and
@@ -77,7 +77,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - Small files with one responsibility; prefer composition over inheritance.
 - No magic numbers: physical constants live in `core/include/starsim/math/constants.hpp` with their source.
 - CSPICE is not thread-safe: the `spice` adapters serialise every call with a process-wide lock (`detail::lock_spice`).
-- C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
+- C++ sources are UTF-8 (/utf-8). The core returns report codes with SI parameters (`core/include/starsim/report/`), no UI text; developer messages (config validation, internal errors, logs) are English.
 - Physics first (decision 2026-10-14): readings the physics cannot explain (e.g. webcast gauges) are not followed.
 
 ## Build & test (Windows, MSVC 2022 Build Tools, CMake, Ninja, SCons) - details in `docs/setup.md`
