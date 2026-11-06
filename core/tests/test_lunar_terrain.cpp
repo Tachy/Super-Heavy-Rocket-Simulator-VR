@@ -12,6 +12,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/data_missing.hpp"
 #include "starsim/config/lunar_site_config.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/environment/reference_body.hpp"
@@ -170,7 +171,7 @@ TEST_CASE("Missing terrain data is a report code", "[terrain]") {
     try {
         sim::load_lunar_terrain(STARSIM_CONFIG_DIR, std::filesystem::temp_directory_path() / "starsim_no_data");
         FAIL("expected an error");
-    } catch (const report::Refusal& e) {
+    } catch (const config::DataMissing& e) {
         CHECK(e.report().code == report::Code::data_lunar_terrain_missing);
     }
 }

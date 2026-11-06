@@ -49,7 +49,8 @@ bool FlightSession::plan_lunar_ascent(const gnc::LunarAscentParameters& paramete
     }
     const auto& vehicle = flying.body->vehicle();
     if (!vehicle.stages().front().config.lunar_ascent) {  // the liftoff applies its keys (gnc::lunar_ascent_parameters)
-        lunar_status_ = report::make(report::Code::lunar_no_ascent_no_ascent_values);
+        lunar_status_ = report::make(report::Code::lunar_no_ascent_no_ascent_values,
+                                     {report::data_name("stage", vehicle.stages().front().config.id)});
         return false;
     }
     const double isp_s = gnc::groups_vacuum_isp_s(vehicle, parameters.ascent_groups);
@@ -104,7 +105,8 @@ void FlightSession::lunar_liftoff(Flying& flying) {
             lunar_ascent_parameters_ ? *lunar_ascent_parameters_ : gnc::LunarAscentParameters{});
     } catch (const std::runtime_error&) {  // the stage has no [stage.lunar_ascent] keys
         lunar_ascent_parameters_.reset();
-        lunar_abort(report::make(report::Code::lunar_no_ascent_no_ascent_values));
+        lunar_abort(report::make(report::Code::lunar_no_ascent_no_ascent_values,
+                                     {report::data_name("stage", vehicle.stages().front().config.id)}));
         return;
     }
     lunar_ascent_parameters_.reset();
@@ -131,7 +133,8 @@ bool FlightSession::lunar_abort_to_orbit() {
                                                       ? *lunar_landing_setup_->ascent
                                                       : gnc::LunarAscentParameters{});
     } catch (const std::runtime_error&) {  // the stage has no [stage.lunar_ascent] keys
-        lunar_status_ = report::make(report::Code::lunar_abort_not_possible_no_ascent_values);
+        lunar_status_ = report::make(report::Code::lunar_abort_not_possible_no_ascent_values,
+                                     {report::data_name("stage", vehicle.stages().front().config.id)});
         return false;
     }
     const double reserve_kg = lunar_landing_setup_ ? lunar_landing_setup_->reserve_kg : default_ascent_reserve_kg;

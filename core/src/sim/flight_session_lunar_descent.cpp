@@ -213,7 +213,8 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
     try {  // the vehicle's own approach keys ([stage.lunar_landing])
         parameters = gnc::lunar_landing_parameters(vehicle.stages().front().config, std::move(parameters));
     } catch (const std::runtime_error&) {  // the stage has no [stage.lunar_landing] keys
-        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_no_landing_values);
+        lunar_status_ = report::make(report::Code::lunar_approach_not_possible_no_landing_values,
+                                     {report::data_name("stage", vehicle.stages().front().config.id)});
         return false;
     }
     // Deployable legs stay stowed here: the guidance commands them out in the braking phase (leg_deploy_lead_s).

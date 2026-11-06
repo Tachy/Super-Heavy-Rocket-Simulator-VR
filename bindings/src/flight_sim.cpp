@@ -9,6 +9,7 @@
 
 #include "report_dict.hpp"
 #include "starsim/config/crew_escape_config.hpp"
+#include "starsim/config/data_missing.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
@@ -113,6 +114,8 @@ std::uint64_t FlightSim::post(const char* name, SessionCommand command) {
             *outcome = command(session);
         } catch (const report::Refusal& refusal) {
             *outcome = Outcome{false, report_dict(refusal.report())};
+        } catch (const config::DataMissing& missing) {
+            *outcome = Outcome{false, report_dict(missing.report())};
         }
     });
     commands_[id] = {godot::String(name), outcome};
@@ -160,11 +163,16 @@ std::uint64_t FlightSim::post_deferred(const char* name, std::function<SessionPo
                         *outcome = std::move(*later);
                     } catch (const report::Refusal& refusal) {
                         *outcome = Outcome{false, report_dict(refusal.report())};
+                    } catch (const config::DataMissing& missing) {
+                        *outcome = Outcome{false, report_dict(missing.report())};
                     }
                     return true;
                 }};
             } catch (const report::Refusal& refusal) {
                 *outcome = Outcome{false, report_dict(refusal.report())};
+                return sim::SessionRunner::Poll{};
+            } catch (const config::DataMissing& missing) {
+                *outcome = Outcome{false, report_dict(missing.report())};
                 return sim::SessionRunner::Poll{};
             }
         },
