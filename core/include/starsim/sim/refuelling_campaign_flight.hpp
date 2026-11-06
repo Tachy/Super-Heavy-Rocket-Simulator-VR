@@ -15,6 +15,7 @@
 #include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/mission/refuelling_campaign.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/mission_start.hpp"
@@ -30,7 +31,7 @@ struct CampaignFlownRow {
     int number = 0;  // tankers 1..n in launch order (failed ones included); the HLS: 0
     bool hls = false;
     bool failed = false;
-    std::string note;             // German: why it failed, a window moved past the plan
+    report::Report note;          // why it failed, a window moved past the plan (ok: none)
     time::Epoch launch, arrival;  // liftoff; Waypoint 0 (the Proximity mark; failed before it: the end)
     std::optional<mission::PhasingOrbit> phasing_orbit;
     double delivered_kg = 0.0;    // tanker: into the depot (before the vent); HLS: received (before the vent)
@@ -61,7 +62,7 @@ struct CampaignFlightLosses {  // flown and booked, from the start to the end
 
 struct CampaignFlightState {
     CampaignFlightPhase phase = CampaignFlightPhase::DepotAscent;
-    std::string status;                // German
+    report::Report status;             // refuelling.status_* codes
     std::optional<time::Epoch> start;  // the depot became the station
     int tankers_flown = 0;             // delivered (not failed)
     int tankers_planned = 0;           // the latest live plan: flown + still planned
@@ -76,7 +77,7 @@ struct CampaignFlightState {
     double hls_propellant_kg = 0.0, hls_required_propellant_kg = 0.0;
     std::optional<ReturnResult> first_return;
     double first_return_main_kg = 0.0;
-    std::string first_return_note;  // German: why it did not fly / its status
+    report::Report first_return_note;  // why it did not fly / its status (refuelling.return_*)
 };
 
 // A tanker flight's phasing class: its phasing orbit's periapsis above the depot's mean radius (as
@@ -101,7 +102,7 @@ public:
     const CampaignFlightState& state() const { return state_; }
     // A placed depot (the session's only body, the station) at `epoch`: planning starts at once.
     void start_placed(time::Epoch epoch);
-    // The spec's pass check: German lines of every miss (empty: passed) - tanker count against the first plan, the
+    // The spec's pass check: developer lines (English, ASCII) of every miss (empty: passed) - tanker count against the first plan, the
     // arrivals against the live plans, the depot fill per arrival against the calculator's model of the flown window
     // (window_model, ascent Task 5), the phasing-class mix against the first plan (max_class_mix_difference), the
     // HLS's propellant.
@@ -125,7 +126,7 @@ private:
     struct FirstReturn {
         ReturnResult result = ReturnResult::Flying;
         double main_kg = 0.0;
-        std::string note;
+        report::Report note;
     };
     static FirstReturn fly_side_return(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
                                        const frames::BodyOrientation& moon, const std::filesystem::path& config_dir,
@@ -133,7 +134,7 @@ private:
     void store_first_return(const FirstReturn& r);
     void collect_first_return(bool wait);  // a side flight from the worker, if there (wait: until it is)
     void finish(FlightSession& s);
-    void end(const std::string& reason);
+    void end(report::Report reason);
     void book_attitude_gas(FlightSession& s, double dt_s);
 
     CampaignSources sources_;
@@ -151,7 +152,7 @@ private:
     double pending_gas_kg_ = 0.0;
     double delivered_total_kg_ = 0.0, hls_received_kg_ = 0.0, initial_fill_kg_ = 0.0;
     double depot_vent_kg_ = 0.0;  // the vent booked on the depot (the HLS's is drawn from the HLS)
-    std::string moved_note_;      // decision 2: the next row's note
+    report::Report moved_note_;   // decision 2: the next row's note (ok: none)
     double depot_lead_m_ = 0.0;               // at the latest plan: against the first plan's depot track
     double depot_height_m_ = 0.0;             // at the latest plan
     std::optional<time::Epoch> next_arrival_;  // the latest plan's Waypoint 0 of the next flight
@@ -160,7 +161,7 @@ private:
 };
 
 // start_mission's refuelling_campaign_flown: the depot launched (depot_launch) or placed, the driver installed. Needs
-// a session with the Moon orientation (the HLS demand); MissionStart.refusal (German) otherwise.
+// a session with the Moon orientation (the HLS demand); MissionStart.refusal otherwise.
 MissionStart start_refuelling_campaign_flight(FlightSession& session, const std::filesystem::path& config_dir,
                                               const config::RefuellingCampaignFlownMission& mission,
                                               const time::TimeScaleConverter& time);

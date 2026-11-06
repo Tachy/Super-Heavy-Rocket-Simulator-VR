@@ -70,7 +70,7 @@ CampaignLevers campaign_levers_from_args(const std::vector<std::string>& args) {
         }
         it->second.set(v * it->second.scale);
     }
-    if (const auto error = campaign_lever_error(l); !error.empty()) throw std::invalid_argument(error);
+    if (const auto error = campaign_lever_error(l); !error.ok()) throw std::invalid_argument(report::describe(error));
     return l;
 }
 
@@ -121,7 +121,7 @@ std::string campaign_report_text(const CampaignReport& r, const time::TimeScaleC
         out << "Tanker flights: " << r.result.tanker_flights
             << line(" (campaign %.1f days)\n", r.result.duration_s / seconds_per_day);
     } else {
-        out << "Campaign does not close after " << r.result.tanker_flights << " tanker flights: " << r.result.reason
+        out << "Campaign does not close after " << r.result.tanker_flights << " tanker flights: " << report::describe(r.result.reason)
             << "\n";
     }
     return out.str();
@@ -135,7 +135,7 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
     const auto day = [&](time::Epoch t) { return (t - start) / seconds_per_day; };
     out << "Flown refuelling campaign (f2)";
     if (st.start) out << " from " << utc_at(start);
-    out << " - " << id_of(st.phase) << ": " << st.status << "\n";
+    out << " - " << id_of(st.phase) << ": " << report::describe(st.status) << "\n";
     if (st.calculator) {
         out << line("  calculator (first plan, reported): %.0f tankers, %.1f days; HLS needs %.1f t propellant\n",
                     st.calculator->result.tanker_flights, st.calculator->result.duration_s / seconds_per_day,
@@ -160,7 +160,7 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
         out << (r.window_model ? line("  %14.1f", r.window_model->depot_after_kg / kg_per_t) : std::string(16, ' '));
         if (r.calculator) out << line("  %14.1f", r.calculator->depot_after_kg / kg_per_t);
         if (r.failed) out << "  FAILED";
-        if (!r.note.empty()) out << "  " << r.note;
+        if (!r.note.ok()) out << "  " << report::describe(r.note);
         out << "\n";
         // the flight's own numbers beside the calculator's booking (f2: the per-orbit calibration reads them)
         if (r.planned_arrival) out << line("        planned arrival %.2f d;", day(*r.planned_arrival));
@@ -195,7 +195,7 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
     if (st.first_return) {
         out << "  first tanker return: " << id_of(*st.first_return)
             << line(", main %.2f t", st.first_return_main_kg / kg_per_t);
-        if (!st.first_return_note.empty()) out << " (" << st.first_return_note << ")";
+        if (!st.first_return_note.ok()) out << " (" << report::describe(st.first_return_note) << ")";
         out << "\n";
     }
     out << line("\nTanker flights: %.0f flown (campaign ", st.tankers_flown);

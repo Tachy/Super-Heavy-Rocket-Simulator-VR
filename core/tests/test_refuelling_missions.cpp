@@ -346,9 +346,9 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     // Fix round 1 of planner Task 8 (I2): the reserve is planned for the burn the flown return takes - the ship holding
     // only the reserve, not the full docked ship (whose pass lay 151 h ahead: 6.6 t of boil-off booked against ~1.2 t
     // for the flown pass)
-    std::string why;
+    report::Report why;
     const auto reserve = f.session.tanker_reserve(&why);
-    INFO(why);
+    INFO(report::describe(why));
     REQUIRE(reserve);
     const time::Epoch reserve_burn = f.session.epoch() + reserve->wait_s;
     f.session.set_iss_mission(f.tanker_sequence());

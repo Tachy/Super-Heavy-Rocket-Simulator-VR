@@ -166,7 +166,7 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
   gives Bo >= 10 within 30 deg [E] of -x (`vehicle::outlet_check`).
 - Sequence (`sim/propellant_transfer`, pure state machine): Settling -> Chilldown (120 s [E], the chill-down mass
   vented from the delivering tanks; a chill-down after a pause vents again) -> Flowing -> Complete; an uncovered outlet
-  pauses ("Transfer unterbrochen: Treibstoff nicht am Auslass", without gas "... kein Kaltgas zum Setzen"); a pause
+  pauses (status code transfer.paused_not_at_outlet, without gas transfer.paused_no_gas); a pause
   longer than `max_pause_s` (600 s [E]) aborts ("Transfer abgebrochen: ..."). A line closes at the delivering floor, a
   full receiving tank or its limit.
 - Session (`FlightSession::start_transfer(TransferRequest)`, `stop_transfer`, `transfer_state`;

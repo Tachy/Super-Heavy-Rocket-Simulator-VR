@@ -40,7 +40,7 @@ PropellantTransfer::PropellantTransfer(std::array<TransferLine, 2> lines, Transf
     : lines_(lines), request_(request) {
     for (size_t k = 0; k < 2; ++k) state_.line_open[k] = line_open(request_, tanks, 0.0, k);
     state_.phase = TransferPhase::Settling;
-    state_.status = "Treibstoff wird gesetzt";
+    state_.status = report::make(report::Code::transfer_settling);
 }
 
 bool PropellantTransfer::active() const {
@@ -51,7 +51,7 @@ bool PropellantTransfer::active() const {
 void PropellantTransfer::stop() {
     if (!active()) return;
     state_.phase = TransferPhase::Stopped;
-    state_.status = "Transfer gestoppt";
+    state_.status = report::make(report::Code::transfer_stopped);
     state_.flow_kgps = {};
 }
 
@@ -68,8 +68,8 @@ void PropellantTransfer::pause(const TransferStepInput& in) {
         phase_elapsed_s_ = 0.0;  // the pause's own time (max_pause_s)
     }
     state_.phase = TransferPhase::Paused;
-    state_.status = in.thrust_available ? "Transfer unterbrochen: Treibstoff nicht am Auslass"
-                                        : "Transfer unterbrochen: kein Kaltgas zum Setzen";
+    state_.status = report::make(in.thrust_available ? report::Code::transfer_paused_not_at_outlet
+                                                     : report::Code::transfer_paused_no_gas);
     state_.flow_kgps = {};
 }
 
@@ -79,7 +79,7 @@ void PropellantTransfer::close_lines(const TransferTanks& tanks) {
     }
     if (!state_.line_open[0] && !state_.line_open[1]) {
         state_.phase = TransferPhase::Complete;
-        state_.status = "Transfer abgeschlossen";
+        state_.status = report::make(report::Code::transfer_complete);
         state_.flow_kgps = {};
     }
 }
@@ -97,7 +97,7 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         } else if (phase_elapsed_s_ >= in.settle_time_s) {
             if (in.settled) {
                 state_.phase = TransferPhase::Chilldown;
-                state_.status = "Leitungen werden gekühlt";
+                state_.status = report::make(report::Code::transfer_chilldown);
                 phase_elapsed_s_ = 0.0;
             } else {
                 pause(in);
@@ -108,13 +108,14 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         if (!(in.settled && in.thrust_available) && phase_elapsed_s_ >= request_.max_pause_s - 1e-9) {
             // review r4: an endless pause would push on the reserve's gas and block the undocking
             state_.phase = TransferPhase::Stopped;
-            state_.status = in.thrust_available ? "Transfer abgebrochen: Treibstoff nicht am Auslass"
-                                                : "Transfer abgebrochen: kein Kaltgas zum Setzen";
+            state_.status = report::make(in.thrust_available ? report::Code::transfer_aborted_not_at_outlet
+                                                             : report::Code::transfer_aborted_no_gas);
             break;
         }
         if (in.settled && in.thrust_available) {
             state_.phase = paused_from_;
-            state_.status = paused_from_ == TransferPhase::Flowing ? "Transfer läuft" : "Leitungen werden gekühlt";
+            state_.status = report::make(paused_from_ == TransferPhase::Flowing ? report::Code::transfer_flowing
+                                                                                : report::Code::transfer_chilldown);
             if (paused_from_ == TransferPhase::Chilldown) {  // the lines warmed in the pause: chilled (and vented) again
                 phase_elapsed_s_ = 0.0;
                 chill_round_kg_ = {};
@@ -138,7 +139,7 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         }
         if (phase_elapsed_s_ >= request_.chilldown_s - 1e-9) {
             state_.phase = TransferPhase::Flowing;
-            state_.status = "Transfer läuft";
+            state_.status = report::make(report::Code::transfer_flowing);
             phase_elapsed_s_ = 0.0;
         }
         break;

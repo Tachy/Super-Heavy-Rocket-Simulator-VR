@@ -146,8 +146,9 @@ std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(
             e.semi_major_axis_m * (1.0 + e.eccentricity),
             constants::wgs84_semi_major_axis_m + settings->entry_interface_height_m, settings->entry_flight_path_rad,
             constants::earth_gm_m3ps2);
-        const auto p = return_reserve_parameters(dv, &why);
-        if (!p) return refuse(report::legacy(why));
+        report::Report parameters_why;
+        const auto p = return_reserve_parameters(dv, &parameters_why);
+        if (!p) return refuse(std::move(parameters_why));
         const double need_kg =
             mission::tanker_reserve(vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg(), *p).total_kg;
         floors.proximity_kg += need_kg;

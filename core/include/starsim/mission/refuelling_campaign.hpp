@@ -11,6 +11,7 @@
 
 #include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/mission/phasing_schedule.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::mission {
 
@@ -79,7 +80,7 @@ struct CampaignTanker {
 
 struct CampaignResult {
     bool closes = false;
-    std::string reason;  // German when it does not close
+    report::Report reason;  // refuelling.* when it does not close, else ok
     int tanker_flights = 0;
     double duration_s = 0.0;  // campaign start -> HLS arrival
     std::optional<CampaignFlight> hls;
@@ -95,7 +96,7 @@ struct CampaignResult {
 // port_spacing_s apart) and add delivered x (1 - vent), clamped to the tank volume; before every tanker the HLS's
 // window is checked - the campaign closes when the depot holds the demand plus the HLS's extra demand and wait (both
 // grossed up by the vent; the extra may be negative) at its arrival. Ends with a
-// German reason when the demand exceeds the volume, a window is missing, a tanker adds nothing, or max_tankers.
+// report (reason) when the demand exceeds the volume, a window is missing, a tanker adds nothing, or max_tankers.
 CampaignResult refuelling_campaign(const CampaignInputs& inputs, const CampaignModels& models);
 
 // The gross depot draw that delivers `net_kg` when the share `vent_fraction` of the gross is vented (as the tankers'

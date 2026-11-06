@@ -101,7 +101,7 @@ const char* id_of(Kind kind) {
 
 Report legacy(std::string text) { return make(Code::legacy, {legacy_text("text", std::move(text))}); }
 
-std::string transitional_text(const Report& report) {
+std::string describe(const Report& report) {
     if (report.code == Code::legacy && !report.params.empty()) return report.params.front().text;
     std::string out(id_of(report.code));
     if (report.params.empty() && report.causes.empty()) return out;
@@ -117,7 +117,7 @@ std::string transitional_text(const Report& report) {
     for (const Report& c : report.causes) {
         if (!first) out += ", ";
         first = false;
-        out += "cause=" + transitional_text(c);
+        out += "cause=" + describe(c);
     }
     return out + ')';
 }

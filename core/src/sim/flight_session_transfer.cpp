@@ -29,6 +29,10 @@ const config::TransferConnectorConfig* connector_for(const vehicle::Vehicle& v, 
     return nullptr;
 }
 
+report::Report no_reserve(report::Report cause) {
+    return report::with_cause(report::make(report::Code::refuelling_no_reserve), std::move(cause));
+}
+
 const vehicle::Tank* find_tank(const vehicle::Vehicle& v, size_t stage, const std::string& id) {
     for (const auto& t : v.stages()[stage].tanks) {
         if (t.config.id == id) return &t;
@@ -99,10 +103,10 @@ void FlightSession::reset_docked_update() {
     docked_boil_off_last_ = {};
 }
 
-bool FlightSession::refuse_transfer(const char* reason) {
+bool FlightSession::refuse_transfer(report::Code cause) {
     transfer_.reset();
     transfer_refusal_ = {};
-    transfer_refusal_.status = reason;
+    transfer_refusal_.status = report::with_cause(report::make(report::Code::transfer_not_possible), report::make(cause));
     return false;
 }
 
@@ -122,12 +126,12 @@ bool FlightSession::start_transfer(const TransferRequest& request) {
         docking_status_ = report::make(report::Code::docking_transfer_running);
         return false;
     }
-    if (!docked()) return refuse_transfer("Transfer nicht möglich: nicht angedockt");
+    if (!docked()) return refuse_transfer(report::Code::transfer_cause_not_docked);
     if (docking_->mechanism().phase() != contact::DockingPhase::Docked) {  // the hooks open for the undocking (r4 minor)
-        return refuse_transfer("Transfer nicht möglich: Abkoppeln läuft");
+        return refuse_transfer(report::Code::transfer_cause_undocking);
     }
     if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
-        return refuse_transfer("Transfer nicht möglich: Autopilot aktiv");
+        return refuse_transfer(report::Code::transfer_cause_autopilot_active);
     }
     const size_t chaser = controlled_, station = *station_index_;
     TransferSides sides;
@@ -140,10 +144,10 @@ bool FlightSession::start_transfer(const TransferRequest& request) {
     for (size_t k = 0; k < 2; ++k) {
         const auto* dc = connector_for(dv, contents[k], &sides.delivering_stage[k]);
         const auto* rc = connector_for(rv, contents[k], &sides.receiving_stage[k]);
-        if (!dc || !rc) return refuse_transfer("Transfer nicht möglich: keine Transferkupplung");
+        if (!dc || !rc) return refuse_transfer(report::Code::transfer_cause_no_coupling);
         const auto& dp = dv.stages()[sides.delivering_stage[k]].config.propellant_transfer;
         const auto& rp = rv.stages()[sides.receiving_stage[k]].config.propellant_transfer;
-        if (!dp || !rp) return refuse_transfer("Transfer nicht möglich: kein Transfersystem");
+        if (!dp || !rp) return refuse_transfer(report::Code::transfer_cause_no_system);
         sides.delivering_tank[k] = dc->tank_id;
         sides.receiving_tank[k] = rc->tank_id;
         const auto* dt = find_tank(dv, sides.delivering_stage[k], dc->tank_id);
@@ -156,7 +160,7 @@ bool FlightSession::start_transfer(const TransferRequest& request) {
     transfer_sides_ = sides;
     const auto tanks = transfer_tanks();
     if (!PropellantTransfer::any_line_open(request, tanks)) {
-        return refuse_transfer("Transfer nicht möglich: nichts zu übertragen");
+        return refuse_transfer(report::Code::transfer_cause_nothing_to_transfer);
     }
     transfer_.emplace(lines, request, tanks);
     transfer_next_ = epoch_ + request.step_s;
@@ -267,32 +271,33 @@ void FlightSession::run_transfer_step(double dt_s) {
     transfer_thrust_n_ = out.thrust ? thrust : 0.0;
 }
 
-std::optional<FlightSession::TankerReserveInputs> FlightSession::tanker_reserve_inputs(std::string* reason) const {
-    const auto refuse = [&](const std::string& why) -> std::optional<TankerReserveInputs> {
-        if (reason) *reason = why;
+std::optional<FlightSession::TankerReserveInputs> FlightSession::tanker_reserve_inputs(report::Report* reason) const {
+    const auto refuse = [&](report::Report cause) -> std::optional<TankerReserveInputs> {
+        if (reason) *reason = no_reserve(std::move(cause));
         return std::nullopt;
     };
-    if (!docked()) return refuse("Keine Reserve: nicht angedockt");
+    if (!docked()) return refuse(report::make(report::Code::refuelling_cause_not_docked));
     // The return's own deorbit settings (planner plan Task 8, Review Focus 4: no struct defaults). The delta-v hardly
     // depends on the pass; the depot plane meets the site only every few days within reach (r3).
     std::string why;
     auto search = ship_return_settings(&why);
-    if (!search) return refuse("Keine Reserve: " + why);
+    if (!search) return refuse(report::legacy(why));  // the return planner's reason is still text (its task converts it)
     search->search_window_s = tanker_reserve_search_s;
     // the full docked ship (ship_return_preview's refusals): only a first delta-v
     gnc::DeorbitPlan refused;
     const auto& flying = bodies_[controlled_];
     std::optional<DeorbitReplanInputs> full;
     if (flying.entry_guidance || flying.ship_landing) {
-        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+        return refuse(report::make(report::Code::refuelling_cause_no_return_ship));
     } else {
         full = deorbit_plan_inputs(*flying.body, *search, refused);
     }
-    if (!full) return refuse("Keine Reserve: " + refused.reason);
+    if (!full) return refuse(report::legacy(refused.reason));
     full->measure_drag = true;
     full->check_vent_fit = false;  // only its delta-v is used: the held ship's return is the one checked
-    auto p = return_reserve_parameters(0.0, &why);  // its delta-v follows from the plans
-    if (!p) return refuse("Keine Reserve: " + why);
+    report::Report parameters_why;
+    auto p = return_reserve_parameters(0.0, &parameters_why);  // its delta-v follows from the plans
+    if (!p) return refuse(std::move(parameters_why));
     const auto& vehicle = flying.body->vehicle();
     TankerReserveInputs in;
     in.full = std::move(*full);
@@ -309,7 +314,7 @@ FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const T
     auto full = in.full;
     const auto first = plan_from_inputs(full, gravity, earth, env);
     if (!first.feasible) {
-        r.reason = "Keine Reserve: " + first.reason;
+        r.reason = no_reserve(report::legacy(first.reason));
         return r;
     }
     auto p = in.parameters;
@@ -324,7 +329,7 @@ FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const T
     set_inputs_body(held, *holding(*in.full.copy, reserve));
     const auto plan = plan_from_inputs(held, gravity, earth, env);
     if (!plan.feasible) {
-        r.reason = "Keine Reserve: " + plan.reason;
+        r.reason = no_reserve(report::legacy(plan.reason));
         return r;
     }
     p.deorbit_delta_v_mps = plan.delta_v_mps;
@@ -346,7 +351,7 @@ FlightSession::TankerReserveResult FlightSession::compute_tanker_reserve(const T
 }
 
 std::optional<mission::TankerReserve> FlightSession::finish_tanker_reserve(const TankerReserveResult& result,
-                                                                          std::string* reason) const {
+                                                                          report::Report* reason) const {
     if (!result.reserve) {
         if (reason) *reason = result.reason;
         return std::nullopt;
@@ -356,7 +361,7 @@ std::optional<mission::TankerReserve> FlightSession::finish_tanker_reserve(const
     return reserve;
 }
 
-std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string* reason) const {
+std::optional<mission::TankerReserve> FlightSession::tanker_reserve(report::Report* reason) const {
     const auto wall = std::chrono::steady_clock::now();  // diagnostics
     const auto inputs = tanker_reserve_inputs(reason);
     if (!inputs) return std::nullopt;
@@ -368,7 +373,7 @@ std::optional<mission::TankerReserve> FlightSession::tanker_reserve(std::string*
     return reserve;
 }
 
-std::optional<mission::TankerReserve> FlightSession::poll_tanker_reserve(std::string* reason) {
+std::optional<mission::TankerReserve> FlightSession::poll_tanker_reserve(report::Report* reason) {
     const auto ms_since = [](std::chrono::steady_clock::time_point t) {
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
     };
@@ -400,16 +405,16 @@ std::optional<mission::TankerReserve> FlightSession::poll_tanker_reserve(std::st
 }
 
 std::optional<mission::TankerReserveParameters> FlightSession::return_reserve_parameters(double delta_v_mps,
-                                                                                         std::string* reason) const {
-    const auto refuse = [&](const std::string& why) -> std::optional<mission::TankerReserveParameters> {
-        if (reason) *reason = why;
+                                                                                         report::Report* reason) const {
+    const auto refuse = [&](report::Code why) -> std::optional<mission::TankerReserveParameters> {
+        if (reason) *reason = report::make(why);
         return std::nullopt;
     };
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const auto& stage = vehicle.stages().front().config;
-    if (!(stage.return_gas_kg > 0.0)) return refuse("Schlüssel 'return_gas_kg' fehlt in [stage.recovery]");
+    if (!(stage.return_gas_kg > 0.0)) return refuse(report::Code::refuelling_cause_return_gas_missing);
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
-    if (configurations.empty()) return refuse("Deorbit-Triebwerk nicht verfügbar");
+    if (configurations.empty()) return refuse(report::Code::refuelling_cause_deorbit_engine_unavailable);
     mission::TankerReserveParameters p;
     p.deorbit_delta_v_mps = delta_v_mps;
     p.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
@@ -446,7 +451,7 @@ std::unique_ptr<vehicle::FlightBody> FlightSession::holding(const vehicle::Fligh
     return held;
 }
 
-std::optional<TransferRequest> FlightSession::tanker_transfer_request(std::string* reason) const {
+std::optional<TransferRequest> FlightSession::tanker_transfer_request(report::Report* reason) const {
     const auto reserve = tanker_reserve(reason);
     if (!reserve) return std::nullopt;
     return tanker_transfer_request(*reserve);

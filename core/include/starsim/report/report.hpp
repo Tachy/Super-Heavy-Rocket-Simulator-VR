@@ -73,9 +73,10 @@ const char* id_of(Kind kind);
 // transitional: removed by Task 16 (with Code::legacy): a not-yet-converted producer's text as a nested cause.
 Report legacy(std::string text);
 
-// transitional: removed by Task 7 (campaign status) and Task 10 (mission start): a not-yet-converted consumer that still
-// builds text gets the code id with its parameters and causes, e.g. "iss.ended(cause=iss.collision)". Not UI text.
-std::string transitional_text(const Report& report);
+// Developer rendering (logs, test output, the campaign text report; not UI text): the code id with its parameters and
+// causes, e.g. "iss.ended(cause=iss.collision)". transitional_text: removed by Task 10 (mission start), same function.
+std::string describe(const Report& report);
+inline std::string transitional_text(const Report& report) { return describe(report); }
 
 // Thrown where a core operation refuses; what() is the code id.
 class Refusal : public std::runtime_error {

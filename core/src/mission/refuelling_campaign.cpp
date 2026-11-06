@@ -1,17 +1,10 @@
 #include "starsim/mission/refuelling_campaign.hpp"
 
 #include <algorithm>
-#include <cstdio>
 
 namespace starsim::mission {
 
 namespace {
-
-std::string tonnes(double kg) {
-    char buffer[32];
-    std::snprintf(buffer, sizeof buffer, "%.1f t", kg / 1000.0);
-    return buffer;
-}
 
 struct Depot {
     double t_s = 0.0;
@@ -62,12 +55,12 @@ std::optional<CampaignFlight> next_slot(const std::function<std::optional<Campai
 CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModels& m) {
     CampaignResult r;
     if (!(in.transfer_vent_fraction >= 0.0 && in.transfer_vent_fraction < 1.0)) {
-        r.reason = "Abblaseanteil des Transfers muss zwischen 0 und 1 liegen";
+        r.reason = report::make(report::Code::refuelling_vent_fraction_invalid);
         return r;
     }
     if (in.demand_kg > in.depot_capacity_kg) {
-        r.reason = "Depotvolumen reicht nicht: " + tonnes(in.demand_kg) + " gefordert, " +
-                   tonnes(in.depot_capacity_kg) + " Tankvolumen";
+        r.reason = report::make(report::Code::refuelling_depot_volume_short,
+                                {report::mass("demand", in.demand_kg), report::mass("capacity", in.depot_capacity_kg)});
         return r;
     }
     Depot depot;
@@ -78,8 +71,8 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
     double last_launch_s = std::max(in.previous_launch_s, in.earliest_launch_s - in.launch_interval_s);
     double last_arrival_s = std::max(in.previous_arrival_s, -in.port_spacing_s);
     std::vector<double> after_kg;  // the fill after every tanker
-    const auto finish = [&](const std::string& reason) {
-        r.reason = reason;
+    const auto finish = [&](report::Report reason) {
+        r.reason = std::move(reason);
         r.losses = depot.losses;
         r.tanker_flights = static_cast<int>(r.tankers.size());
         return r;
@@ -89,13 +82,13 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         // HLS's extra demand may be negative - a phasing window cheaper than its reference (f4, f1 minor M3).
         const bool enough = depot.propellant_kg >= in.demand_kg;
         const auto hls = next_slot(m.next_hls, last_launch_s + in.launch_interval_s, last_arrival_s, in);
-        if (enough && !hls) return finish("Kein Startfenster für das HLS");
+        if (enough && !hls) return finish(report::make(report::Code::refuelling_no_hls_window));
         if (hls) {
             // the HLS's boil-off while it waits loaded for its launch, with its arrival's Sun (r6 minor)
             const double wait_kg = m.hls_wait_kg ? m.hls_wait_kg(hls->arrival_s) : 0.0;
             if (wait_kg > in.hls_tank_room_kg) {
-                return finish("HLS-Tanks zu klein für die Wartezeit: " + tonnes(wait_kg) + " Verdampfung, " +
-                              tonnes(in.hls_tank_room_kg) + " frei");
+                return finish(report::make(report::Code::refuelling_hls_wait_too_long,
+                                           {report::mass("wait", wait_kg), report::mass("room", in.hls_tank_room_kg)}));
             }
             Depot projected = depot;
             advance(projected, hls->arrival_s, in, m, nullptr);
@@ -104,8 +97,9 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
                 std::max(0.0, in.demand_kg + gross_for_net_kg(hls->extra_demand_kg + wait_kg, in.transfer_vent_fraction));
             if (enough && projected.propellant_kg < required_kg && depot.propellant_kg >= in.depot_capacity_kg) {
                 // review I2: full tanks, yet the losses until the HLS arrives eat into the demand
-                return finish("Depotvolumen reicht nicht für die Verluste bis zur HLS-Ankunft: " +
-                              tonnes(projected.propellant_kg) + " bei Ankunft, " + tonnes(required_kg) + " gefordert");
+                return finish(report::make(report::Code::refuelling_depot_losses_to_hls,
+                                           {report::mass("projected", projected.propellant_kg),
+                                            report::mass("required", required_kg)}));
             }
             if (projected.propellant_kg >= required_kg) {
                 advance(depot, hls->arrival_s, in, m, &r.fill);
@@ -114,14 +108,17 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
                 r.duration_s = hls->arrival_s;
                 r.depot_at_hls_kg = depot.propellant_kg;
                 r.hls_wait_kg = wait_kg;
-                return finish("");
+                return finish({});
             }
         }
         if (static_cast<int>(r.tankers.size()) >= in.max_tankers) {
-            return finish("Kampagne schließt nicht nach " + std::to_string(in.max_tankers) + " Tankerflügen");
+            return finish(report::make(report::Code::refuelling_not_closing, {report::count("count", in.max_tankers)}));
         }
         const auto slot = next_slot(m.next_tanker, last_launch_s + in.launch_interval_s, last_arrival_s, in);
-        if (!slot) return finish("Kein Startfenster für Tanker " + std::to_string(r.tankers.size() + 1));
+        if (!slot) {
+            return finish(report::make(report::Code::refuelling_no_tanker_window,
+                                       {report::count("number", static_cast<long long>(r.tankers.size()) + 1)}));
+        }
         advance(depot, slot->arrival_s, in, m, &r.fill);
         CampaignTanker t;
         t.flight = *slot;
@@ -138,15 +135,16 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         last_launch_s = slot->launch_s;
         last_arrival_s = slot->arrival_s;
         if (!delivers) {
-            return finish("Tanker liefert nichts: " + tonnes(slot->delivered_kg) +
-                          " nach Aufstieg, Phasenflug und Reserve");
+            return finish(report::make(report::Code::refuelling_tanker_delivers_nothing,
+                                       {report::mass("delivered", slot->delivered_kg)}));
         }
         // review I4: against the fill two tankers back - alternating window gaps lose over one long gap and gain
         // over the pair
         if (after_kg.size() >= 2 && depot.propellant_kg <= after_kg[after_kg.size() - 2] &&
             depot.propellant_kg < in.demand_kg) {
-            return finish("Verluste übersteigen die Lieferung: Depot " + tonnes(depot.propellant_kg) +
-                          " nach Tanker " + std::to_string(r.tankers.size()));
+            return finish(report::make(report::Code::refuelling_losses_exceed_delivery,
+                                       {report::mass("depot", depot.propellant_kg),
+                                        report::count("number", static_cast<long long>(r.tankers.size()))}));
         }
         after_kg.push_back(depot.propellant_kg);
     }

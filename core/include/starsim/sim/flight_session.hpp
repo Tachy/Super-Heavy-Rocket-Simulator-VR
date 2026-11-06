@@ -1030,10 +1030,10 @@ public:
     // ship return, else the vehicle's [stage.recovery] return_mission), the deorbit set's exhaust velocity and mixture
     // ratio, commit_burn_margin, [stage.recovery] return_gas_kg, [stage.tanks] unusable_propellant_kg.main and the
     // boil-off of the wait for the burn (a copy holding the reserve flown ahead to the burn, as boil_off_shortfall).
-    // nullopt with a German *reason when not docked or without a feasible return. tanker_transfer_request: a
+    // nullopt with a refuelling.no_reserve *reason when not docked or without a feasible return. tanker_transfer_request: a
     // ChaserToStation request with that reserve as the floors.
-    std::optional<mission::TankerReserve> tanker_reserve(std::string* reason = nullptr) const;
-    std::optional<TransferRequest> tanker_transfer_request(std::string* reason = nullptr) const;
+    std::optional<mission::TankerReserve> tanker_reserve(report::Report* reason = nullptr) const;
+    std::optional<TransferRequest> tanker_transfer_request(report::Report* reason = nullptr) const;
     // The controlled vehicle's gnc proximity parameters while a proximity flight runs (nullptr: none).
     const gnc::ProximityParameters* proximity_parameters() const { return proximity_ ? &proximity_->parameters() : nullptr; }
     // The propellant floors of the controlled vehicle's rendezvous (plan_rendezvous keeps `phasing_kg`, start_proximity
@@ -1661,9 +1661,9 @@ private:
     double rendezvous_budget_kg() const;
     // The inputs of mission::tanker_reserve for the controlled ship's return with a deorbit burn of `delta_v_mps` (no
     // boil-off): the deorbit set's exhaust velocity and mixture ratio, commit_burn_margin, return_gas_kg and the unusable
-    // main propellant; nullopt with a German *reason without them.
+    // main propellant; nullopt with a report *reason without them.
     std::optional<mission::TankerReserveParameters> return_reserve_parameters(double delta_v_mps,
-                                                                              std::string* reason) const;
+                                                                              report::Report* reason) const;
     // A copy of the ship `body` alone in its state, its main tanks holding `reserve` (in proportion to capacity).
     static std::unique_ptr<vehicle::FlightBody> holding(const vehicle::FlightBody& body, const mission::TankerReserve& reserve);
     // tanker_reserve in parts (fix round 1, I3): the inputs on the sim thread, the two return plans and the boil-off
@@ -1675,16 +1675,16 @@ private:
     };
     struct TankerReserveResult {
         std::optional<mission::TankerReserve> reserve;
-        std::string reason;  // German, without a reserve
+        report::Report reason;  // refuelling.no_reserve, without a reserve
         time::Epoch node_epoch;
     };
-    std::optional<TankerReserveInputs> tanker_reserve_inputs(std::string* reason) const;
+    std::optional<TankerReserveInputs> tanker_reserve_inputs(report::Report* reason) const;
     static TankerReserveResult compute_tanker_reserve(const TankerReserveInputs& inputs, const environment::GravityModel& gravity,
                                                       const frames::BodyOrientation& earth, const vehicle::FlightEnvironment& env);
-    std::optional<mission::TankerReserve> finish_tanker_reserve(const TankerReserveResult& result, std::string* reason) const;
+    std::optional<mission::TankerReserve> finish_tanker_reserve(const TankerReserveResult& result, report::Report* reason) const;
     // Real-time play: starts the reserve on a worker, then gives it once there (waited for tanker_reserve_deadline_ on);
-    // none with an empty *reason while it plans, none with the German *reason when refused.
-    std::optional<mission::TankerReserve> poll_tanker_reserve(std::string* reason);
+    // none with an ok *reason while it plans, none with the refusing *reason when refused.
+    std::optional<mission::TankerReserve> poll_tanker_reserve(report::Report* reason);
     static TransferRequest tanker_transfer_request(const mission::TankerReserve& reserve);
     time::Epoch tanker_reserve_deadline_;
     std::chrono::steady_clock::time_point tanker_reserve_wall_start_;  // diagnostics
@@ -1806,7 +1806,7 @@ private:
     } transfer_sides_;
     TransferTanks transfer_tanks() const;
     void run_transfer_step(double dt_s);
-    bool refuse_transfer(const char* reason);
+    bool refuse_transfer(report::Code cause);
     // plan_ship_return's planner; without a drag in `parameters` it coasts with drag_area_per_mass_ahead() (the value
     // used goes to `drag_used_m2pkg`)
     gnc::DeorbitPlan ship_deorbit_plan(const gnc::DeorbitParameters& parameters, double* drag_used_m2pkg = nullptr) const;

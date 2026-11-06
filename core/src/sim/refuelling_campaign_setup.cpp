@@ -79,12 +79,6 @@ double orbit_boil_off_kgps(vehicle::Vehicle& v, double main_kg, const math::Stat
     return rate.oxidizer_kgps + rate.fuel_kgps;
 }
 
-std::string tonnes(double kg) {
-    char buffer[32];
-    std::snprintf(buffer, sizeof buffer, "%.1f t", kg / 1000.0);
-    return buffer;
-}
-
 struct HlsDemand {
     std::string refusal;  // German; empty when planned
     CampaignHlsDemand values;
@@ -123,17 +117,17 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
 
 }  // namespace
 
-std::string campaign_lever_error(const CampaignLevers& l) {
+report::Report campaign_lever_error(const CampaignLevers& l) {
     const auto positive = [](const std::optional<double>& v) { return !v || (std::isfinite(*v) && *v > 0.0); };
     const auto non_negative = [](const std::optional<double>& v) { return !v || (std::isfinite(*v) && *v >= 0.0); };
-    if (!positive(l.depot_height_m)) return "Kampagne: Depothöhe muss positiv sein";
-    if (!positive(l.tanker_dry_mass_kg)) return "Kampagne: Trockenmasse des Tankers muss positiv sein";
-    if (!non_negative(l.tanker_reserve_kg)) return "Kampagne: Reserve des Tankers darf nicht negativ sein";
-    if (!positive(l.phasing_limit_s)) return "Kampagne: Grenze des Phasenflugs muss positiv sein";
-    if (!non_negative(l.depot_initial_kg)) return "Kampagne: Anfangsfüllung darf nicht negativ sein";
-    if (!positive(l.depot_insulation_scale)) return "Kampagne: Isolierfaktor muss positiv sein";
-    if (!positive(l.launch_interval_s)) return "Kampagne: Startabstand muss positiv sein";
-    if (!non_negative(l.hls_wait_s)) return "Kampagne: Wartezeit des HLS darf nicht negativ sein";
+    if (!positive(l.depot_height_m)) return report::make(report::Code::refuelling_lever_depot_height);
+    if (!positive(l.tanker_dry_mass_kg)) return report::make(report::Code::refuelling_lever_tanker_dry_mass);
+    if (!non_negative(l.tanker_reserve_kg)) return report::make(report::Code::refuelling_lever_tanker_reserve);
+    if (!positive(l.phasing_limit_s)) return report::make(report::Code::refuelling_lever_phasing_limit);
+    if (!non_negative(l.depot_initial_kg)) return report::make(report::Code::refuelling_lever_initial_fill);
+    if (!positive(l.depot_insulation_scale)) return report::make(report::Code::refuelling_lever_insulation_scale);
+    if (!positive(l.launch_interval_s)) return report::make(report::Code::refuelling_lever_launch_interval);
+    if (!non_negative(l.hls_wait_s)) return report::make(report::Code::refuelling_lever_hls_wait);
     return {};
 }
 
@@ -146,12 +140,12 @@ double campaign_delivery_offset_kg(const config::RefuellingReference::Tanker& ta
 CampaignReport plan_refuelling_campaign(const CampaignSources& src, const CampaignLevers& levers,
                                         const CampaignLive* live) {
     CampaignReport report;
-    if (auto error = campaign_lever_error(levers); !error.empty()) {
+    if (auto error = campaign_lever_error(levers); !error.ok()) {
         report.result.reason = std::move(error);
         return report;
     }
     if (live && levers.depot_height_m) {
-        report.result.reason = "Kampagne: im geflogenen Lauf gilt die Höhe des Depots";
+        report.result.reason = report::make(report::Code::refuelling_live_height_fixed);
         return report;
     }
     const auto& dir = src.config_dir;
@@ -266,7 +260,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
             single(tanker_mission, tanker_ascent, ve_tanker, tanker_window);
             single(hls_mission, hls_ascent, ve_hls, hls_window);
         } catch (const std::invalid_argument& e) {  // a mission config without the reference orbit (German)
-            report.result.reason = e.what();
+            report.result.reason = report::legacy(e.what());  // a mission config text (developer message, German)
             return report;
         }
     }
@@ -280,7 +274,8 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         const auto p = refuelling_window_parameters(tanker_mission, tanker_ascent, ve_tanker, gas_tanker);
         const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, config_start, p, gm);
         if (!w.feasible) {
-            report.result.reason = "Referenzfenster des Tankers: " + report::transitional_text(w.reason);  // text until Task 7
+            report.result.reason =
+                report::with_cause(report::make(report::Code::refuelling_reference_window_tanker), w.reason);
             return report;
         }
         report.reference_phasing_s = w.schedule.waypoint0_epoch - w.separation;
@@ -289,7 +284,8 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         const auto ph = refuelling_window_parameters(hls_mission, hls_ascent, ve_hls, gas_hls);
         const auto wh = mission::plan_launch_window(hls_pad, src.earth, reference_depot_at, config_start, ph, gm);
         if (!wh.feasible) {
-            report.result.reason = "Referenzfenster des HLS: " + report::transitional_text(wh.reason);  // text until Task 7
+            report.result.reason =
+                report::with_cause(report::make(report::Code::refuelling_reference_window_hls), wh.reason);
             return report;
         }
         hls_reference_cost = wh.cost;
@@ -395,7 +391,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         planned = hls_demand(src, lunar_at_depot, report.lunar_epoch, hls_full, settling);
     }
     if (!planned.refusal.empty()) {
-        report.result.reason = planned.refusal;
+        report.result.reason = report::legacy(planned.refusal);  // the lunar planners' reasons are still text
         return report;
     }
     const auto& demand = planned.values;
@@ -405,8 +401,9 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     report.hls_capacity_kg = demand.capacity_kg;
     const double required_propellant_kg = demand.required_mass_kg - demand.dry_mass_kg;
     if (required_propellant_kg > demand.capacity_kg) {
-        report.result.reason = "HLS-Tanks zu klein: " + tonnes(required_propellant_kg) + " gefordert, " +
-                               tonnes(demand.capacity_kg) + " Tankvolumen";
+        report.result.reason =
+            report::make(report::Code::refuelling_hls_tanks_small, {report::mass("required", required_propellant_kg),
+                                                                    report::mass("capacity", demand.capacity_kg)});
         return report;
     }
     vehicle::Vehicle hls(hls_full, dir);

@@ -20,16 +20,6 @@
 namespace starsim::sim {
 
 namespace {
-// transitional: removed by Task 7 (the note still carries the German result)
-const char* german_result(ReturnResult result) {
-    switch (result) {
-        case ReturnResult::Flying: return "fliegt";
-        case ReturnResult::Caught: return "gefangen";
-        case ReturnResult::UprightAbort: return "aufrecht abgebrochen";
-        case ReturnResult::Lost: return "verloren";
-    }
-    return "?";
-}
 
 constexpr double gas_batch_kg = 1.0;     // [E] the attitude gas is drawn in batches of this
 
@@ -70,7 +60,23 @@ const FlightSession::MissionMark* mark(const FlightSession& s, IssMissionLeg leg
     return nullptr;
 }
 
-std::string flight_name(bool hls, int number) { return hls ? std::string("HLS") : "Tanker " + std::to_string(number); }
+// A status code of a flight: the tanker variant carries the flight's number.
+report::Report flight_report(report::Code tanker, report::Code hls, bool is_hls, int number) {
+    return is_hls ? report::make(hls) : report::make(tanker, {report::count("number", number)});
+}
+
+// "<flight>: <cause>"
+report::Report flight_leg_report(bool is_hls, int number, report::Report cause) {
+    return report::with_cause(is_hls ? report::make(report::Code::refuelling_status_leg_hls)
+                                     : report::make(report::Code::refuelling_status_leg_tanker,
+                                                    {report::count("number", number)}),
+                              std::move(cause));
+}
+
+report::Report return_result_report(ReturnResult result) {
+    return report::make(report::Code::refuelling_return_result,
+                        {report::ref("result", std::string("phase.return_result.") + id_of(result))});
+}
 
 }  // namespace
 
@@ -95,13 +101,13 @@ RefuellingCampaignFlight::RefuellingCampaignFlight(CampaignSources sources,
       tanker_(config::load_refuelling_flight_mission(sources_.config_dir, reference_.tanker.mission)),
       hls_(config::load_refuelling_flight_mission(sources_.config_dir, reference_.hls.mission)),
       settings_(config::load_refuelling_campaign_settings(sources_.config_dir)) {
-    state_.status = "Depotstart";
+    state_.status = report::make(report::Code::refuelling_status_depot_ascent);
 }
 
 void RefuellingCampaignFlight::start_placed(time::Epoch epoch) {
     state_.start = epoch;
     state_.phase = CampaignFlightPhase::Planning;
-    state_.status = "Planung";
+    state_.status = report::make(report::Code::refuelling_status_planning);
 }
 
 void RefuellingCampaignFlight::update(FlightSession& s) {
@@ -113,7 +119,7 @@ void RefuellingCampaignFlight::update(FlightSession& s) {
     if (s.station_index()) state_.depot_propellant_kg = main_kg(s, *s.station_index());
     switch (state_.phase) {
         case CampaignFlightPhase::DepotAscent:
-            if (s.iss_mission_leg() == IssMissionLeg::Ended) return end(report::transitional_text(s.iss_mission_status()));
+            if (s.iss_mission_leg() == IssMissionLeg::Ended) return end(s.iss_mission_status());
             if (s.iss_mission_leg() != IssMissionLeg::Complete || !s.station_index()) return;
             s.keep_only_station();  // the caught booster goes
             return begin(s);
@@ -194,7 +200,7 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
     const bool tanker = !report.result.tankers.empty();
     next_ = tanker ? report.result.tankers.front().flight : *report.result.hls;
     next_model_ = tanker ? std::optional<mission::CampaignTanker>(report.result.tankers.front()) : std::nullopt;
-    if (!next_->window) return end("Planung ohne Startfenster");
+    if (!next_->window) return end(report::make(report::Code::refuelling_no_window_in_plan));
     next_parameters_ = tanker ? report.tanker_window : report.hls_window;
     state_.tankers_planned = state_.tankers_flown + report.result.tanker_flights;
     state_.next_launch = next_->window->liftoff;
@@ -202,7 +208,7 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
     state_.next_is_hls = !tanker;
     // decision 2: a window later than the previous plan's next one (a flight still under way, a re-plan)
     if (planned_second_launch_ && std::abs(*state_.next_launch - *planned_second_launch_) > 3600.0) {
-        moved_note_ = "Fenster verschoben gegenüber der vorigen Planung";
+        moved_note_ = report::make(report::Code::refuelling_note_window_moved);
     }
     planned_second_launch_.reset();
     if (tanker && report.result.tankers.size() > 1) {
@@ -215,20 +221,23 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
     if (s.station_mean_height_m() < mission_.keeping_min_height_m && arrival_in_s > mission_.keeping_min_lead_s) {
         if (s.start_station_reboost(mission_.keeping_target_height_m, mission_.keeping_engine_groups)) {
             state_.phase = CampaignFlightPhase::StationKeeping;
-            state_.status = "Bahnhaltung des Depots";
+            state_.status = report::make(report::Code::refuelling_status_keeping);
             return;
         }
-        state_.status = "Bahnhaltung abgelehnt: " + report::transitional_text(s.reboost_status());
+        state_.status = report::with_cause(report::make(report::Code::refuelling_status_keeping_refused), s.reboost_status());
     }
     state_.phase = CampaignFlightPhase::WaitLaunch;
-    state_.status = flight_name(!tanker, static_cast<int>(state_.rows.size()) + 1) + ": warten auf das Startfenster";
+    state_.status = flight_report(report::Code::refuelling_status_wait_launch_tanker,
+                                  report::Code::refuelling_status_wait_launch_hls, !tanker,
+                                  static_cast<int>(state_.rows.size()) + 1);
 }
 
 void RefuellingCampaignFlight::launch(FlightSession& s) {
     const auto& m = state_.next_is_hls ? hls_ : tanker_;
     const auto started = launch_campaign_flight(s, sources_.config_dir, m, *next_->window, next_parameters_);
     if (!started.refusal.empty()) {
-        state_.status = "Start abgelehnt: " + started.refusal;
+        state_.status = report::with_cause(report::make(report::Code::refuelling_status_launch_refused),
+                                           report::legacy(started.refusal));  // MissionStart::refusal is text until Task 10
         state_.phase = CampaignFlightPhase::Planning;  // the next window
         return;
     }
@@ -249,26 +258,24 @@ void RefuellingCampaignFlight::launch(FlightSession& s) {
     state_.rows.push_back(row);
     last_launch_ = s.epoch();
     state_.phase = CampaignFlightPhase::Flying;
-    state_.status = flight_name(row.hls, row.number) + ": im Flug";
+    state_.status = flight_report(report::Code::refuelling_status_in_flight_tanker,
+                                  report::Code::refuelling_status_in_flight_hls, row.hls, row.number);
 }
 
 void RefuellingCampaignFlight::watch_flight(FlightSession& s) {
     const auto leg = s.iss_mission_leg();
     if (leg != IssMissionLeg::Complete && leg != IssMissionLeg::Ended) {
-        state_.status = flight_name(state_.rows.back().hls, state_.rows.back().number) + ": " +
-                         report::transitional_text(s.iss_mission_status());
+        state_.status = flight_leg_report(state_.rows.back().hls, state_.rows.back().number, s.iss_mission_status());
         return;
     }
     auto& row = state_.rows.back();
     row.failed = leg == IssMissionLeg::Ended;
     const size_t depot = *s.station_index();
     if (row.failed) {
-        row.note = report::transitional_text(s.iss_mission_status());
-        char range[64];
-        std::snprintf(range, sizeof range, " (Abstand %.1f km)",
-                      norm(s.body(s.controlled_index()).state().position_gcrf_m - s.body(depot).state().position_gcrf_m) /
-                          1000.0);
-        row.note += range;
+        row.note = report::make(report::Code::refuelling_note_failed,
+                                {report::length("distance", norm(s.body(s.controlled_index()).state().position_gcrf_m -
+                                                                 s.body(depot).state().position_gcrf_m))});
+        row.note.causes.push_back(s.iss_mission_status());
     }
     const auto* arrive = mark(s, IssMissionLeg::Proximity);
     row.arrival = arrive ? arrive->epoch : s.epoch();
@@ -328,7 +335,8 @@ RefuellingCampaignFlight::FirstReturn RefuellingCampaignFlight::fly_side_return(
     side.place_vehicle(std::move(tanker), in.state, in.epoch);
     if (!side.plan_ship_return(in.deorbit)) {
         out.result = ReturnResult::Lost;
-        out.note = side.ship_return_plan() ? side.ship_return_plan()->reason : "Rückkehr nicht möglich";
+        out.note = side.ship_return_plan() ? report::legacy(side.ship_return_plan()->reason)  // the planner's text
+                                           : report::make(report::Code::refuelling_return_not_possible);
         return out;
     }
     const auto t0 = side.epoch();
@@ -339,7 +347,8 @@ RefuellingCampaignFlight::FirstReturn RefuellingCampaignFlight::fly_side_return(
     }
     out.result = side.ship_return_result(side.controlled_index());
     out.main_kg = side.body(side.controlled_index()).vehicle().main_propellant_kg();
-    out.note = out.result == ReturnResult::Flying ? std::string("Rückkehr nicht beendet") : std::string(german_result(out.result));
+    out.note = out.result == ReturnResult::Flying ? report::make(report::Code::refuelling_return_not_finished)
+                                                  : return_result_report(out.result);
     return out;
 }
 
@@ -397,7 +406,7 @@ void RefuellingCampaignFlight::fly_first_return(const FlightSession& s) {
 void RefuellingCampaignFlight::finish(FlightSession& s) {
     collect_first_return(true);
     state_.phase = CampaignFlightPhase::Complete;
-    state_.status = "Kampagne abgeschlossen";
+    state_.status = report::make(report::Code::refuelling_status_complete);
     const double depot_now_kg = main_kg(s, *s.station_index());
     auto& l = state_.losses;
     l.boil_off_kg = initial_fill_kg_ + delivered_total_kg_ - hls_received_kg_ - l.station_keeping_kg -
@@ -405,10 +414,10 @@ void RefuellingCampaignFlight::finish(FlightSession& s) {
     state_.next_launch.reset();
 }
 
-void RefuellingCampaignFlight::end(const std::string& reason) {
+void RefuellingCampaignFlight::end(report::Report reason) {
     collect_first_return(true);
     state_.phase = CampaignFlightPhase::Ended;
-    state_.status = "Kampagne beendet: " + reason;
+    state_.status = report::with_cause(report::make(report::Code::refuelling_status_ended), std::move(reason));
     state_.next_launch.reset();
 }
 
@@ -440,23 +449,23 @@ int phasing_class_mix_difference(const CampaignFlightState& state) {
 }
 
 std::vector<std::string> RefuellingCampaignFlight::comparison_misses() const {
-    if (!state_.calculator) return {"keine Rechnerplanung"};
+    if (!state_.calculator) return {"no calculator plan"};
     std::vector<std::string> misses;
     const auto& calc = state_.calculator->result;
     char line[200];
     if (state_.tankers_flown != calc.tanker_flights) {
-        std::snprintf(line, sizeof line, "Tankerzahl: geflogen %d, Rechner %d", state_.tankers_flown,
+        std::snprintf(line, sizeof line, "Tanker count: flown %d, calculator %d", state_.tankers_flown,
                       calc.tanker_flights);
         misses.emplace_back(line);
     }
-    if (!state_.hls_arrival || !state_.start) misses.emplace_back("HLS nicht angekommen");
+    if (!state_.hls_arrival || !state_.start) misses.emplace_back("HLS did not arrive");
     // user 2026-10-22: the arrivals (the HLS's: the duration) against the live plan made just before each launch;
     // the first plan's duration is only reported - its windows flip at thresholds (the latest launch to the same
     // arrival, 3 h) under ~100 km of phase and cascade by a phase cycle
     for (const auto& r : state_.rows) {
         if (r.failed || !r.planned_arrival || !state_.start) continue;
         if (std::abs(r.arrival - *r.planned_arrival) > mission_.duration_tolerance_s) {
-            std::snprintf(line, sizeof line, "%s: Ankunft geflogen %.2f d, geplant %.2f d",
+            std::snprintf(line, sizeof line, "%s: arrival flown %.2f d, planned %.2f d",
                           r.hls ? "HLS" : ("Tanker " + std::to_string(r.number)).c_str(),
                           (r.arrival - *state_.start) / 86400.0, (*r.planned_arrival - *state_.start) / 86400.0);
             misses.emplace_back(line);
@@ -468,19 +477,19 @@ std::vector<std::string> RefuellingCampaignFlight::comparison_misses() const {
         if (r.hls || r.failed || !r.window_model) continue;
         const double c = r.window_model->depot_after_kg;
         if (std::abs(r.depot_after_kg - c) > mission_.fill_tolerance * c) {
-            std::snprintf(line, sizeof line, "Tanker %d: Depot %.1f t geflogen, %.1f t Rechner", r.number,
+            std::snprintf(line, sizeof line, "Tanker %d: depot %.1f t flown, %.1f t calculator", r.number,
                           r.depot_after_kg / 1000.0, c / 1000.0);
             misses.emplace_back(line);
         }
     }
     if (const int mix = phasing_class_mix_difference(state_); mix > max_class_mix_difference(state_.tankers_flown)) {
         std::snprintf(line, sizeof line,
-                      "Phasenklassen: %d Tanker mehr oder weniger über dem Depot als im ersten Plan (erlaubt %d)", mix,
+                      "Phasing classes: %d tankers more or fewer above the depot than in the first plan (allowed %d)", mix,
                       max_class_mix_difference(state_.tankers_flown));
         misses.emplace_back(line);
     }
     if (state_.hls_arrival && state_.hls_propellant_kg < state_.hls_required_propellant_kg) {
-        std::snprintf(line, sizeof line, "HLS: %.1f t Treibstoff, %.1f t gefordert", state_.hls_propellant_kg / 1000.0,
+        std::snprintf(line, sizeof line, "HLS: %.1f t propellant, %.1f t required", state_.hls_propellant_kg / 1000.0,
                       state_.hls_required_propellant_kg / 1000.0);
         misses.emplace_back(line);
     }

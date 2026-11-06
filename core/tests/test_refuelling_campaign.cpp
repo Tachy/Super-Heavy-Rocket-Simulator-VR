@@ -357,7 +357,7 @@ TEST_CASE("Campaign: the HLS's wait at the depot boils off with the Sun of its a
     in.hls_tank_room_kg = 1e3;
     const auto small = mission::refuelling_campaign(in, models);
     CHECK_FALSE(small.closes);
-    CHECK_THAT(small.reason, Catch::Matchers::StartsWith("HLS-Tanks zu klein für die Wartezeit"));
+    CHECK(small.reason.code == report::Code::refuelling_hls_wait_too_long);
 }
 
 TEST_CASE("Campaign: a cheaper HLS phasing lowers the fill it needs", "[refuelling][campaign]") {
@@ -388,7 +388,7 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
         in.demand_kg = 1200e3;
         const auto r = mission::refuelling_campaign(in, constant_models(1.0, 100.0, 2.0));
         CHECK_FALSE(r.closes);
-        CHECK(r.reason.find("Depotvolumen") != std::string::npos);
+        CHECK(r.reason.code == report::Code::refuelling_depot_volume_short);
         CHECK(r.tankers.empty());
     }
     SECTION("losses eat the delivery") {
@@ -396,7 +396,7 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
         in.launch_interval_s = 2 * day;
         const auto r = mission::refuelling_campaign(in, constant_models(60.0, 100.0, 2.0));
         CHECK_FALSE(r.closes);
-        CHECK(r.reason.find("Verluste") != std::string::npos);
+        CHECK(r.reason.code == report::Code::refuelling_losses_exceed_delivery);
         CHECK(r.tanker_flights < 5);
         // an emptied depot books only what it held: the initial fill and the deliveries, never the full 60 t/day
         double held_kg = in.depot_initial_kg;
@@ -407,13 +407,13 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
     SECTION("a tanker that delivers nothing ends the campaign") {
         const auto r = mission::refuelling_campaign(simple_inputs(), constant_models(0.0, 0.0, 2.0));
         CHECK_FALSE(r.closes);
-        CHECK(r.reason.find("liefert nichts") != std::string::npos);
+        CHECK(r.reason.code == report::Code::refuelling_tanker_delivers_nothing);
         CHECK(r.tanker_flights == 1);
     }
     SECTION("a NaN delivery counts as nothing") {
         const auto r = mission::refuelling_campaign(simple_inputs(), constant_models(0.0, std::nan(""), 2.0));
         CHECK_FALSE(r.closes);
-        CHECK(r.reason.find("liefert nichts") != std::string::npos);
+        CHECK(r.reason.code == report::Code::refuelling_tanker_delivers_nothing);
         CHECK(r.tankers.front().depot_after_kg == Catch::Approx(50e3));
     }
     SECTION("no window") {
@@ -421,14 +421,16 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
         m.next_tanker = [](double) { return std::optional<mission::CampaignFlight>{}; };
         const auto r = mission::refuelling_campaign(simple_inputs(), m);
         CHECK_FALSE(r.closes);
-        CHECK(r.reason == "Kein Startfenster für Tanker 1");
+        CHECK(r.reason.code == report::Code::refuelling_no_tanker_window);
+        CHECK(r.reason.params.front().value_si == 1.0);
     }
     SECTION("max_tankers") {
         auto in = simple_inputs();
         in.max_tankers = 2;
         const auto r = mission::refuelling_campaign(in, constant_models(1.0, 100.0, 2.0));
         CHECK_FALSE(r.closes);
-        CHECK(r.reason.find("2 Tankerflügen") != std::string::npos);
+        CHECK(r.reason.code == report::Code::refuelling_not_closing);
+        CHECK(r.reason.params.front().value_si == 2.0);
     }
 }
 
@@ -515,8 +517,8 @@ void print(const char* tag, const sim::CampaignReport& r) {
                 r.hls_propellant_at_docking_kg / 1e3, r.tanker_base_delivered_kg / 1e3, r.altitude_cost_kg / 1e3,
                 r.reference_phasing_s / 3600.0, r.result.losses.boil_off_kg / 1e3,
                 r.result.losses.drag_makeup_kg / 1e3, r.result.losses.attitude_gas_kg / 1e3,
-                r.result.losses.transfer_vent_kg / 1e3, r.result.reason.empty() ? "" : " - ",
-                r.result.reason.c_str());
+                r.result.losses.transfer_vent_kg / 1e3, r.result.reason.ok() ? "" : " - ",
+                report::describe(r.result.reason).c_str());
     for (const auto& t : r.result.tankers) {
         std::printf("[r6]   launch %.2f d, arrival %.2f d, delivered %.1f t, depot %.1f t\n",
                     t.flight.launch_s / 86400.0, t.flight.arrival_s / 86400.0, t.flight.delivered_kg / 1e3,
@@ -588,7 +590,7 @@ TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", 
     live.demand = first.hls_demand;
     const auto r = sim::plan_refuelling_campaign(s.get(), {}, &live);
     print("live", r);
-    INFO(r.result.reason);
+    INFO(report::describe(r.result.reason));
     REQUIRE(r.result.closes);
     CHECK(r.start == epoch);
     CHECK(r.demand_kg == Catch::Approx(first.demand_kg));  // the cached demand
@@ -667,9 +669,9 @@ TEST_CASE("Campaign setup refusals", "[refuelling][campaign]") {
     sim::CampaignLevers greedy;
     greedy.tanker_reserve_kg = 200.0e3;  // keeps more than it carries
     const auto r = sim::plan_refuelling_campaign(s.get(), greedy);
-    INFO(r.result.reason);
+    INFO(report::describe(r.result.reason));
     CHECK_FALSE(r.result.closes);
-    CHECK(r.result.reason.find("liefert nichts") != std::string::npos);
+    CHECK(r.result.reason.code == report::Code::refuelling_tanker_delivers_nothing);
 }
 
 TEST_CASE("refuelling_report: levers from the command line", "[refuelling][campaign]") {
@@ -713,8 +715,8 @@ TEST_CASE("refuelling_report: the text names the answer and the reason", "[refue
     CHECK(text.find("Tanker flights: 12") != std::string::npos);
     CHECK(text.find("150 x 190 km") != std::string::npos);  // f1: the chosen phasing orbit
     r.result.closes = false;
-    r.result.reason = "Depotvolumen reicht nicht";
-    CHECK(sim::campaign_report_text(r, s.clock).find("Depotvolumen reicht nicht") != std::string::npos);
+    r.result.reason = report::make(report::Code::refuelling_depot_volume_short);
+    CHECK(sim::campaign_report_text(r, s.clock).find("refuelling.depot_volume_short") != std::string::npos);
 }
 
 TEST_CASE("Campaign: a full depot that cannot bridge the gap to the HLS ends at once", "[refuelling][campaign]") {
@@ -726,7 +728,7 @@ TEST_CASE("Campaign: a full depot that cannot bridge the gap to the HLS ends at 
     m.next_hls = [](double e) { return std::optional{mission::CampaignFlight{e, e + 10 * day, 0.0}}; };
     const auto r = mission::refuelling_campaign(in, m);
     CHECK_FALSE(r.closes);
-    CHECK(r.reason.find("bis zur HLS-Ankunft") != std::string::npos);
+    CHECK(r.reason.code == report::Code::refuelling_depot_losses_to_hls);
     CHECK(r.tanker_flights < 6);
 }
 
@@ -761,18 +763,18 @@ TEST_CASE("Campaign: alternating window gaps - a pair of tankers gains, one long
     };
     m.next_hls = [](double e) { return std::optional{mission::CampaignFlight{e, e, 0.0}}; };
     const auto r = mission::refuelling_campaign(in, m);
-    INFO(r.reason);
+    INFO(report::describe(r.reason));
     CHECK(r.closes);
 }
 
 TEST_CASE("Campaign levers are validated", "[refuelling][campaign]") {
     // review I3: one validator for the CLI and the game
     sim::CampaignLevers ok;
-    CHECK(sim::campaign_lever_error(ok).empty());
+    CHECK(sim::campaign_lever_error(ok).ok());
     const auto refused = [](auto set) {
         sim::CampaignLevers l;
         set(l);
-        return !sim::campaign_lever_error(l).empty();
+        return !sim::campaign_lever_error(l).ok();
     };
     CHECK(refused([](sim::CampaignLevers& l) { l.depot_insulation_scale = 0.0; }));
     CHECK(refused([](sim::CampaignLevers& l) { l.depot_height_m = -100e3; }));

@@ -182,7 +182,7 @@ TEST_CASE("Reboost: a low depot raises to 200 km in two burns and is the station
     fly_reboost(f.session);
     REQUIRE(f.session.last_reboost());
     const auto& r = *f.session.last_reboost();
-    INFO(report::transitional_text(r.reason));
+    INFO(report::describe(r.reason));
     CHECK(r.completed);
     CHECK(r.burns == 2);
     REQUIRE(f.session.station_index() == std::optional<size_t>{0});
@@ -229,7 +229,7 @@ TEST_CASE("Reboost: a refused burn leaves the depot a station", "[campaign_flown
     fly_reboost(f.session);
     CHECK_FALSE(f.session.station_reboost_active());
     REQUIRE(f.session.last_reboost());
-    INFO(report::transitional_text(f.session.last_reboost()->reason));
+    INFO(report::describe(f.session.last_reboost()->reason));
     CHECK_FALSE(f.session.last_reboost()->completed);
     CHECK_FALSE(f.session.last_reboost()->reason.ok());
     REQUIRE(f.session.station_index() == std::optional<size_t>{0});
@@ -269,7 +269,7 @@ TEST_CASE("A campaign tanker launches beside the kept depot and flies its chain 
     while (f.session.iss_mission_leg() == IssMissionLeg::Ascent && f.session.epoch() - w.liftoff < 1200.0) {
         f.session.advance_to(f.session.epoch() + 1.0);
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()));
+    INFO(report::describe(f.session.iss_mission_status()));
     CHECK((f.session.iss_mission_leg() == IssMissionLeg::Raise ||
            f.session.iss_mission_leg() == IssMissionLeg::Rendezvous));
     CHECK(f.session.station_index().has_value());
@@ -318,7 +318,7 @@ void print_rows(const sim::CampaignFlightState& st) {
                     r.residue_kg / 1e3, r.rendezvous_kg / 1e3, r.main_at_undock_kg / 1e3, r.delivered_kg / 1e3,
                     r.calculator ? r.calculator->flight.delivered_kg / 1e3 : 0.0, r.depot_after_kg / 1e3,
                     r.calculator ? r.calculator->depot_after_kg / 1e3 : 0.0, r.failed ? " FAILED " : " ",
-                    r.note.c_str());
+                    report::describe(r.note).c_str());
     }
     if (st.calculator && st.calculator->result.hls) {
         std::printf("[f2] calculator HLS: launch %.2f d arrival %.2f d, %d tankers, %.2f d\n",
@@ -338,7 +338,7 @@ TEST_CASE("Flown campaign start: the placed depot is the station and the first f
     REQUIRE(c.driver());
     c.fly([&] { return !c.phase_is(sim::CampaignFlightPhase::Planning); }, 600.0, 60.0);
     const auto& st = c.driver()->state();
-    INFO(st.status);
+    INFO(report::describe(st.status));
     REQUIRE(st.phase == sim::CampaignFlightPhase::WaitLaunch);
     REQUIRE(st.calculator);
     CHECK(st.calculator->result.tanker_flights == 2);  // shortfall 1.5 net deliveries
@@ -369,7 +369,7 @@ TEST_CASE("Flown campaign: a failed tanker flight is recorded and the campaign r
     c.session.mark_iss_leg_for_test(IssMissionLeg::Ended);
     c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch) || c.ended(); }, 600.0, 1.0);
     const auto& st = c.driver()->state();
-    INFO(st.status);
+    INFO(report::describe(st.status));
     REQUIRE(st.phase == sim::CampaignFlightPhase::WaitLaunch);
     REQUIRE(st.rows.size() == 1u);
     CHECK(st.rows[0].failed);
@@ -389,12 +389,12 @@ TEST_CASE("Flown campaign: station keeping when the depot is low and the next ar
     REQUIRE(s.refusal.empty());
     c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch) || c.ended(); }, 86400.0, 60.0);
     const auto& st = c.driver()->state();
-    INFO(st.status);
+    INFO(report::describe(st.status));
     REQUIRE(st.phase == sim::CampaignFlightPhase::WaitLaunch);
     for (const auto& r : st.reboosts) {
         std::printf("[f2] reboost %.2f-%.2f h: %d burns, cold gas %d, %.1f kg, %s\n", (r.start - *st.start) / 3600.0,
                     (r.end - *st.start) / 3600.0, r.burns, r.cold_gas ? 1 : 0, r.propellant_kg,
-                    (r.completed ? std::string("completed") : report::transitional_text(r.reason)).c_str());
+                    (r.completed ? std::string("completed") : report::describe(r.reason)).c_str());
     }
     REQUIRE(st.reboosts.size() == 1u);
     CHECK(st.reboosts[0].completed);
@@ -417,7 +417,7 @@ TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_fl
     c.fly([&] { return c.ended(); }, 40.0 * 86400.0);
     const auto& st = c.driver()->state();
     print_rows(st);
-    INFO(st.status);
+    INFO(report::describe(st.status));
     REQUIRE(st.phase == sim::CampaignFlightPhase::Complete);
     REQUIRE(st.calculator);
     CHECK(st.tankers_flown == st.calculator->result.tanker_flights);
@@ -430,7 +430,7 @@ TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_fl
     }
     CHECK(st.hls_propellant_kg >= st.hls_required_propellant_kg);
     REQUIRE(st.first_return);
-    INFO(st.first_return_note);
+    INFO(report::describe(st.first_return_note));
     CHECK((*st.first_return == sim::ReturnResult::Caught || *st.first_return == sim::ReturnResult::UprightAbort));
     CHECK(st.losses.attitude_gas_kg > 0.0);
     CHECK(st.losses.transfer_vent_kg > 0.0);
@@ -448,7 +448,7 @@ TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
                           refuelling_test::depot_state(f.earth, f.t0, 0.0, 193.0e3), f.t0);
     std::printf("start mean %.3f km\n", mean_height_km(f.session));
     std::printf("start %d: %s\n", f.session.start_station_reboost(200.0e3, belly) ? 1 : 0,
-                report::transitional_text(f.session.reboost_status()).c_str());
+                report::describe(f.session.reboost_status()).c_str());
     const auto t0 = f.session.epoch();
     while (f.session.station_reboost_active() && f.session.epoch() - t0 < 4.0 * 3600.0) {
         f.session.advance_to(f.session.epoch() + 60.0);
@@ -462,7 +462,7 @@ TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
                     (el.semi_major_axis_m * (1 + el.eccentricity) - constants::wgs84_semi_major_axis_m) / 1e3,
                     b.vehicle().main_propellant_kg());
     }
-    if (f.session.last_reboost()) std::printf("end: %s\n", report::transitional_text(f.session.last_reboost()->reason).c_str());
+    if (f.session.last_reboost()) std::printf("end: %s\n", report::describe(f.session.last_reboost()->reason).c_str());
     if (f.session.station_index()) std::printf("end mean %.3f km\n", mean_height_km(f.session));
 }
 
@@ -526,12 +526,12 @@ TEST_CASE("Flown campaign: the depot launched, every tanker, the HLS - compared 
     const auto& st = c.driver()->state();
     const auto misses = c.driver()->comparison_misses();
     std::printf("%s\n", sim::campaign_flight_text(st, misses, c.clock).c_str());
-    INFO(st.status);
+    INFO(report::describe(st.status));
     REQUIRE(st.phase == sim::CampaignFlightPhase::Complete);
     for (const auto& line : misses) UNSCOPED_INFO(line);
     CHECK(misses.empty());
     REQUIRE(st.first_return);
-    INFO(st.first_return_note);
+    INFO(report::describe(st.first_return_note));
     CHECK((*st.first_return == sim::ReturnResult::Caught || *st.first_return == sim::ReturnResult::UprightAbort));
     CHECK(st.hls_propellant_kg >= st.hls_required_propellant_kg);
 }

@@ -226,7 +226,7 @@ TEST_CASE("Transfer phases: settling, chill-down, flow to the floors, complete",
     b.run(3600.0, [](double) { return true; });
     const auto& s = b.transfer->state();
     CHECK(s.phase == sim::TransferPhase::Complete);
-    CHECK(s.status == "Transfer abgeschlossen");
+    CHECK(s.status.code == report::Code::transfer_complete);
     CHECK_FALSE(b.transfer->active());
     CHECK(b.tanks.delivering_kg[0] == Catch::Approx(10.0e3).margin(1e-6));
     CHECK(b.tanks.delivering_kg[1] == Catch::Approx(2.8e3).margin(1e-6));
@@ -288,7 +288,7 @@ TEST_CASE("An uncovered outlet pauses the transfer and a covered one resumes it"
     const double before = b.transfer->state().delivered_kg[0];
     b.run(50.0, [](double) { return false; });
     CHECK(b.transfer->state().phase == sim::TransferPhase::Paused);
-    CHECK(b.transfer->state().status == "Transfer unterbrochen: Treibstoff nicht am Auslass");
+    CHECK(b.transfer->state().status.code == report::Code::transfer_paused_not_at_outlet);
     CHECK(b.transfer->state().delivered_kg[0] == before);  // nothing flows unsettled, not even in the pausing step
     b.run(10.0, [](double) { return true; });
     CHECK(b.transfer->state().phase == sim::TransferPhase::Flowing);
@@ -308,7 +308,7 @@ TEST_CASE("Settling that never covers the outlets pauses; no thrust pauses with 
         b.start();
         b.run(30.0, [](double) { return false; }, false);
         CHECK(b.transfer->state().phase == sim::TransferPhase::Paused);
-        CHECK(b.transfer->state().status == "Transfer unterbrochen: kein Kaltgas zum Setzen");
+        CHECK(b.transfer->state().status.code == report::Code::transfer_paused_no_gas);
     }
 }
 
@@ -318,7 +318,7 @@ TEST_CASE("Stop closes the valves", "[refuelling][prop_transfer]") {
     b.run(400.0, [](double) { return true; });
     b.transfer->stop();
     CHECK(b.transfer->state().phase == sim::TransferPhase::Stopped);
-    CHECK(b.transfer->state().status == "Transfer gestoppt");
+    CHECK(b.transfer->state().status.code == report::Code::transfer_stopped);
     CHECK_FALSE(b.transfer->active());
     const auto out = b.transfer->step({});
     CHECK(out.moved_kg[0] == 0.0);
@@ -425,7 +425,7 @@ TEST_CASE("Tanker to depot: settle, chill, flow to the reserve; masses close, hu
     CHECK(f.session.transfer_state().phase == sim::TransferPhase::Settling);
     f.run_to_end(3600.0, 60.0);
     const auto& s = f.session.transfer_state();
-    INFO(s.status << ": " << s.elapsed_s << " s, LOX " << s.delivered_kg[0] << " CH4 " << s.delivered_kg[1]
+    INFO(test::code_id(s.status) << ": " << s.elapsed_s << " s, LOX " << s.delivered_kg[0] << " CH4 " << s.delivered_kg[1]
                   << " gas " << s.settling_gas_kg << " chill " << s.chilldown_kg[0] + s.chilldown_kg[1]
                   << " boil-off " << s.boil_off_kg << " thrust " << s.settling_thrust_n);
     REQUIRE(s.phase == sim::TransferPhase::Complete);
@@ -477,7 +477,7 @@ TEST_CASE("Depot to HLS: the limits end the transfer", "[refuelling][prop_transf
     REQUIRE(f.session.start_transfer(r));
     f.run_to_end(3600.0, 60.0);
     const auto& s = f.session.transfer_state();
-    INFO(s.status << ": " << s.elapsed_s << " s, gas " << s.settling_gas_kg);
+    INFO(test::code_id(s.status) << ": " << s.elapsed_s << " s, gas " << s.settling_gas_kg);
     REQUIRE(s.phase == sim::TransferPhase::Complete);
     CHECK(s.delivered_kg[0] == Catch::Approx(20.0e3).margin(1.0));
     CHECK(s.delivered_kg[1] == Catch::Approx(5.5e3).margin(1.0));
@@ -490,12 +490,12 @@ TEST_CASE("Transfer refusals and stop", "[refuelling][prop_transfer][docking]") 
     {
         refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
         CHECK_FALSE(f.session.start_transfer(tanker_request()));
-        CHECK(f.session.transfer_state().status == "Transfer nicht möglich: nicht angedockt");
+        CHECK(test::refused(f.session.transfer_state().status, report::Code::transfer_not_possible, report::Code::transfer_cause_not_docked));
     }
     {
         DockedPair f(refuelling_test::tanker_config(10.0e3));  // 7.8 t LOX / 2.2 t CH4: below the floors
         CHECK_FALSE(f.session.start_transfer(tanker_request()));
-        CHECK(f.session.transfer_state().status == "Transfer nicht möglich: nichts zu übertragen");
+        CHECK(test::refused(f.session.transfer_state().status, report::Code::transfer_not_possible, report::Code::transfer_cause_nothing_to_transfer));
     }
     {
         DockedPair f;
@@ -514,7 +514,7 @@ TEST_CASE("Transfer refusals and stop", "[refuelling][prop_transfer][docking]") 
         CHECK(f.tank(0, "lox_main") > lox - 50.0);  // only boil-off, no flow, no gas
         CHECK(f.session.undock());
         CHECK_FALSE(f.session.start_transfer(tanker_request()));  // the hooks open: no new transfer
-        CHECK(f.session.transfer_state().status == "Transfer nicht möglich: Abkoppeln läuft");
+        CHECK(test::refused(f.session.transfer_state().status, report::Code::transfer_not_possible, report::Code::transfer_cause_undocking));
     }
 }
 
@@ -527,9 +527,9 @@ TEST_CASE("The settling push gives only the impulse of the gas it drew", "[refue
     REQUIRE(f.session.start_transfer(r));
     f.session.advance_to(f.session.epoch() + 300.0, 1000000);
     const auto& s = f.session.transfer_state();
-    INFO(s.status << ", gas " << s.settling_gas_kg << " kg, impulse " << s.settling_impulse_ns << " Ns");
+    INFO(test::code_id(s.status) << ", gas " << s.settling_gas_kg << " kg, impulse " << s.settling_impulse_ns << " Ns");
     CHECK(s.phase == sim::TransferPhase::Paused);
-    CHECK(s.status == "Transfer unterbrochen: kein Kaltgas zum Setzen");
+    CHECK(s.status.code == report::Code::transfer_paused_no_gas);
     const double isp_s = f.session.body(0).vehicle().stages()[0].config.rcs.isp_s;
     CHECK(s.settling_impulse_ns <= s.settling_gas_kg * isp_s * constants::standard_gravity_mps2 * (1.0 + 1e-9));
     CHECK(s.settling_impulse_ns > 0.0);
@@ -543,7 +543,7 @@ TEST_CASE("Zero settling push: the liquid stays forward, the transfer pauses", "
     REQUIRE(f.session.start_transfer(r));
     f.session.advance_to(f.session.epoch() + 60.0, 1000000);
     CHECK(f.session.transfer_state().phase == sim::TransferPhase::Paused);
-    CHECK(f.session.transfer_state().status == "Transfer unterbrochen: Treibstoff nicht am Auslass");
+    CHECK(f.session.transfer_state().status.code == report::Code::transfer_paused_not_at_outlet);
     CHECK(f.session.transfer_state().delivered_kg[0] == 0.0);
 }
 
@@ -574,9 +574,9 @@ TEST_CASE("Tanker reserve from the vehicle config", "[refuelling][prop_transfer]
     DockedPair f;
     f.session.set_boil_off(true);
     const auto& stage = f.session.body(f.session.controlled_index()).vehicle().stages().front().config;
-    std::string reason;
+    report::Report reason;
     const auto reserve = f.session.tanker_reserve(&reason);
-    INFO(reason);
+    INFO(report::describe(reason));
     REQUIRE(reserve);
     const auto& in = reserve->inputs;
     // Review Focus 4: the search flies the return mission's deorbit settings, not DeorbitParameters{} defaults - for
@@ -664,7 +664,7 @@ TEST_CASE("Rendezvous floors: a returning ship keeps its own return, the HLS its
         REQUIRE(stage.rendezvous_reserve);
         report::Report why;
         const auto floors = f.session.rendezvous_floors(&why);
-        INFO(report::transitional_text(why));
+        INFO(report::describe(why));
         REQUIRE(floors);
         const double need = floors->proximity_kg - stage.rendezvous_reserve->proximity_kg;
         INFO("return need " << need << " kg");
@@ -693,14 +693,14 @@ TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer r
           "[refuelling][prop_transfer][docking][deorbit]") {
     test::spice_session();
     DockedPair f;
-    std::string reason;
+    report::Report reason;
     gnc::DeorbitParameters search;  // the depot plane meets Starbase within reach only every few days (r3)
     search.search_window_s = sim::FlightSession::tanker_reserve_search_s;
     const auto plan = f.session.ship_return_preview(search);
     INFO(plan.reason);
     REQUIRE(plan.feasible);
     const auto reserve = f.session.tanker_reserve(&reason);
-    INFO(reason);
+    INFO(report::describe(reason));
     REQUIRE(reserve);
     INFO("deorbit " << plan.delta_v_mps << " m/s, reserve " << reserve->total_kg << " kg (burn " << reserve->burn_kg
                     << ")");
@@ -716,7 +716,7 @@ TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer r
     // not docked: no reserve
     refuelling_test::TankerAtPort free({20.0, 0.0, 0.0});
     CHECK_FALSE(free.session.tanker_reserve(&reason));
-    CHECK(reason == "Keine Reserve: nicht angedockt");
+    CHECK(test::refused(reason, report::Code::refuelling_no_reserve, report::Code::refuelling_cause_not_docked));
 }
 
 TEST_CASE("A pause longer than max_pause_s aborts the transfer: no endless push (review r4)",
@@ -729,13 +729,13 @@ TEST_CASE("A pause longer than max_pause_s aborts the transfer: no endless push 
     CHECK(b.transfer->state().phase == sim::TransferPhase::Paused);
     b.run(20.0, [](double) { return false; });
     CHECK(b.transfer->state().phase == sim::TransferPhase::Stopped);
-    CHECK(b.transfer->state().status == "Transfer abgebrochen: Treibstoff nicht am Auslass");
+    CHECK(b.transfer->state().status.code == report::Code::transfer_aborted_not_at_outlet);
     CHECK_FALSE(b.transfer->active());
     Bench dry;
     dry.start();
     dry.run(dry.request.max_pause_s + 20.0, [](double) { return false; }, false);
     CHECK(dry.transfer->state().phase == sim::TransferPhase::Stopped);
-    CHECK(dry.transfer->state().status == "Transfer abgebrochen: kein Kaltgas zum Setzen");
+    CHECK(dry.transfer->state().status.code == report::Code::transfer_aborted_no_gas);
 }
 
 TEST_CASE("A new scenario on the session ends a running transfer (review r4)", "[refuelling][prop_transfer][docking]") {

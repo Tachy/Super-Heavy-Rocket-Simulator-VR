@@ -6,6 +6,7 @@
 #include <string>
 
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::sim {
 
@@ -60,7 +61,7 @@ struct TransferStepOutput {
 
 struct TransferState {
     TransferPhase phase = TransferPhase::Idle;
-    std::string status;  // German (UI)
+    report::Report status;  // transfer.* codes (the game renders the text); ok while Idle
     double elapsed_s = 0.0;
     std::array<double, 2> delivered_kg{};
     std::array<double, 2> flow_kgps{};     // of the last step

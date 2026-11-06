@@ -79,9 +79,9 @@ struct CampaignReport {
     mission::LaunchWindowParameters tanker_window, hls_window;  // as the windows were planned (f2: flown with them)
 };
 
-// The first lever out of range, as a German message (empty: all valid): heights, times and the insulation > 0, the
+// The first lever out of range, as a refuelling.lever_* report (ok: all valid): heights, times and the insulation > 0, the
 // reserve, the initial fill and the HLS wait >= 0, all finite (review I3: one check for the CLI and the game).
-std::string campaign_lever_error(const CampaignLevers& levers);
+report::Report campaign_lever_error(const CampaignLevers& levers);
 
 // f2: the flown campaign's calibration of a tanker's delivery by its phasing orbit's class - above the depot when the
 // orbit's periapsis lies above the depot's mean radius, else (and without a phasing orbit: the separation orbit) below.

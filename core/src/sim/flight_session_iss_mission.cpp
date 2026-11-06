@@ -122,13 +122,13 @@ void FlightSession::iss_end(report::Report reason) {
 void FlightSession::iss_start_transfer() {
     const auto& q = *iss_mission_;
     std::optional<TransferRequest> request;
-    std::string reason;
+    report::Report reason;
     if (*q.transfer == MissionTransfer::TankerReserve) {
         // real-time play (fix round 1, I3): the reserve's two return plans and the boil-off flight on a worker while the
         // pair stays docked; else at once
         const auto reserve = realtime_planning_ || tanker_reserve_task_.busy() ? poll_tanker_reserve(&reason)
                                                                                : tanker_reserve(&reason);
-        if (!reserve && reason.empty()) return;  // still planning: the Docked leg asks again next tick
+        if (!reserve && reason.ok()) return;  // still planning: the Docked leg asks again next tick
         if (reserve) request = tanker_transfer_request(*reserve);
     } else {  // the chaser's main tanks up to full; the station down to empty
         TransferRequest r;
@@ -137,9 +137,9 @@ void FlightSession::iss_start_transfer() {
         r.limit_kg = {main_free_kg(v, config::TankContents::Oxidizer), main_free_kg(v, config::TankContents::Fuel)};
         request = r;
     }
-    if (!request) return iss_end(report::legacy(reason));
+    if (!request) return iss_end(std::move(reason));
     if (!start_transfer(*request)) {
-        return iss_end(transfer_ && transfer_->active() ? docking_status_ : report::legacy(transfer_state().status));
+        return iss_end(transfer_ && transfer_->active() ? docking_status_ : transfer_state().status);
     }
     iss_enter(IssMissionLeg::Transfer, leg_report(IssMissionLeg::Transfer));
 }
@@ -246,7 +246,7 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::Proximity: iss_status_ = leg_status(iss_leg_, proximity_status_); break;
         case IssMissionLeg::Docking: iss_status_ = leg_status(iss_leg_, docking_status_); break;
         case IssMissionLeg::Transfer:
-            iss_status_ = leg_status(iss_leg_, report::legacy(transfer_state().status));
+            iss_status_ = leg_status(iss_leg_, transfer_state().status);
             break;
         case IssMissionLeg::Departure: iss_status_ = leg_status(iss_leg_, docking_status_); break;
         default: break;
@@ -332,7 +332,7 @@ void FlightSession::run_iss_mission() {
             if (collision_impulse_ns()) {  // r5 minor: a collision stops the transfer; report the collision
                 iss_end(simple(report::Code::iss_collision));
             } else if (transfer_state().phase == TransferPhase::Stopped) {
-                iss_end(report::legacy(transfer_state().status));
+                iss_end(transfer_state().status);
             } else if (undock()) {
                 iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, docking_status_));
             } else {
