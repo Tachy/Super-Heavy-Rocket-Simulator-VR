@@ -15,7 +15,7 @@ namespace starsim::sim {
 
 enum class CatchPhase { Open, Standby, Closing, Caught, Missed, Aborted };
 
-const char* to_string(CatchPhase phase);  // German UI text
+const char* id_of(CatchPhase phase);
 
 // The catch tower of the launch site during a flight: automatic arm control, contact forces on catchable
 // bodies (single stages with catch pins), tower collisions of all bodies, and the catch itself.

@@ -24,7 +24,7 @@ namespace starsim::gnc {
 // (CW transfer outside the sphere), "Umflug" (CW transfer to a fly-around point), "Anflug" (axial approach Waypoint 1
 // -> 2), "Endanflug" (Waypoint 2 -> contact), "Halt", "Rückzug", "Abbruch", "Kontakt".
 enum class ProximityPhase { Waypoint, Transfer, Flyaround, Approach, FinalApproach, Hold, Retreat, Abort, Contact };
-const char* to_string(ProximityPhase phase);
+const char* id_of(ProximityPhase phase);
 
 struct ProximityInput {
     time::Epoch epoch;

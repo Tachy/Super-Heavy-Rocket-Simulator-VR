@@ -318,8 +318,8 @@ TEST_CASE("Falcon 9 lands on the drone ship from the landing-burn ignition state
                                     t0, parameters, gnc::ReturnPhase::LandingBurn);
     const auto run = test::fly_to_touchdown(session, earth(), t0, 60.0);
     std::printf("[falcon9] drone ship: ignition at %.0f m: %s / %s, contact offset %.2f m, sink %.2f m/s, lateral %.2f "
-                "m/s, legs %.2f, ended %.2f m off, %.0f kg left\n", h, sim::to_string(run.touchdown),
-                sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
+                "m/s, legs %.2f, ended %.2f m off, %.0f kg left\n", h, sim::id_of(run.touchdown),
+                sim::id_of(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
                 run.legs_at_contact, run.offset_m, run.propellant_kg);
     CHECK(h > 2500.0);  // [D] Starlink 15-25: ~3.0 km
     CHECK(h < 3500.0);
@@ -347,7 +347,7 @@ TEST_CASE("A Falcon 9 stage that cannot reach the drone ship ditches beside it",
     const auto run = test::fly_to_touchdown(session, earth(), t0, 60.0);
     const auto* guidance = session.return_guidance(0);
     std::printf("[falcon9] drone ship abort: %s / %s, ended %.0f m from the deck centre, abort %d\n",
-                sim::to_string(run.touchdown), sim::to_string(run.outcome), run.offset_m,
+                sim::id_of(run.touchdown), sim::id_of(run.outcome), run.offset_m,
                 guidance && guidance->scvx() ? guidance->scvx()->aborting() : -1);
     REQUIRE(guidance->scvx() != nullptr);
     CHECK(guidance->scvx()->aborting());
@@ -383,7 +383,7 @@ TEST_CASE("A Falcon 9 landing aborted in mid-flight re-plans at the fresh-plan s
     }
     const auto* guidance = session.return_guidance(0);
     std::printf("[falcon9] mid-flight abort at %.0f m: %s / %s after %.1f s, %.1f t left, plans %d, failed %d\n", abort_height_m,
-                sim::to_string(session.leg_touchdown(0)), sim::to_string(session.landing_outcome(0)), t,
+                sim::id_of(session.leg_touchdown(0)), sim::id_of(session.landing_outcome(0)), t,
                 stage.vehicle().propellant_kg() / 1e3,
                 guidance && guidance->scvx() ? guidance->scvx()->statistics().plans : -1,
                 guidance && guidance->scvx() ? guidance->scvx()->statistics().failures : -1);
@@ -528,7 +528,7 @@ AsdsFlight fly_asds_mission() {
             const auto [h, v] = height_speed(stage);
             const Vec3 axis_now = stage.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
             std::printf("    T+%.0f s %s %.1f km %.0f m/s RCS %.0f kg miss %.0f m, axis error %.1f deg, rate %.3f rad/s\n",
-                        session.mission_time_s(), gnc::to_string(status->phase), h / 1e3, v,
+                        session.mission_time_s(), gnc::id_of(status->phase), h / 1e3, v,
                         stage.vehicle().rcs_propellant_kg(), status->impact_miss_m,
                         std::acos(std::clamp(dot(axis_now, status->axis_gcrf), -1.0, 1.0)) / deg,
                         norm(stage.state().angular_velocity_body_radps));        }
@@ -536,7 +536,7 @@ AsdsFlight fly_asds_mission() {
             const auto [h, v] = height_speed(stage);
             if (std::getenv("STARSIM_VERBOSE")) {
                 std::printf("  T+%.1f s %s: %.1f km, %.0f m/s, %.1f t, RCS %.0f kg, miss %.0f m\n", session.mission_time_s(),
-                            gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3,
+                            gnc::id_of(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3,
                             stage.vehicle().rcs_propellant_kg(), status->impact_miss_m);
             }
             if (status->phase == gnc::ReturnPhase::EntryBurn && entry_s < 0.0) {
@@ -580,7 +580,7 @@ AsdsFlight fly_asds_mission() {
     const double periapsis_km = (orbit.semi_major_axis_m * (1.0 - orbit.eccentricity) - constants::wgs84_semi_major_axis_m) / 1e3;
     const double apoapsis_km = (orbit.semi_major_axis_m * (1.0 + orbit.eccentricity) - constants::wgs84_semi_major_axis_m) / 1e3;
     std::printf("[validation] Falcon 9 ASDS: %.1f t to %.0f x %.0f km, i = %.2f deg (%s at T+%.0f s, %.1f t left in stage 2)\n", m.payload_kg / 1e3,
-                periapsis_km, apoapsis_km, orbit.inclination_rad / deg, sim::to_string(session.autopilot().state),
+                periapsis_km, apoapsis_km, orbit.inclination_rad / deg, sim::id_of(session.autopilot().state),
                 session.mission_time_s(), upper.vehicle().propellant_kg() / 1e3);
     std::printf("[validation] Falcon 9 ASDS: MECO T+%.0f s at %.1f km, %.0f km/h, %.1f t (Starlink 15-25: T+149 s, 60 km, "
                 "~8000 km/h, gauge ~47 t); entry burn T+%.0f s at %.1f km, %.0f km/h, %.1f t, %.1f deg off the burn axis "
@@ -589,7 +589,7 @@ AsdsFlight fly_asds_mission() {
                 "the deck centre, %.1f t left\n",
                 meco_s, meco_h / 1e3, meco_v * 3.6, meco_kg / 1e3, entry_s, entry_h / 1e3, entry_v * 3.6, entry_kg / 1e3,
                 entry_pointing_deg, entry_end_s, entry_end_v * 3.6, landing_s, landing_h / 1e3, landing_v,
-                landing_kg / 1e3, sim::to_string(outcome), touchdown_s, std::hypot(p.x, p.y), left_kg / 1e3);
+                landing_kg / 1e3, sim::id_of(outcome), touchdown_s, std::hypot(p.x, p.y), left_kg / 1e3);
     AsdsFlight f;
     f.meco_s = meco_s;
     f.entry_s = entry_s;
@@ -722,7 +722,7 @@ TEST_CASE("The drone-ship mission lands on a moving deck", "[slow][falcon9][asds
                 "heave %.2f m at %.2f m/s, roll %.2f deg, pitch %.2f deg (rates %.2f / %.2f deg/s); %.2f m from the deck "
                 "centre, %.1f t left\n",
                 m.sea_state->significant_wave_height_m, m.sea_state->peak_period_s, m.sea_state->heading_rad / deg,
-                deck_heading_rad / deg, contact_s, sim::to_string(outcome), before.sink_mps, norm(before.velocity_mps),
+                deck_heading_rad / deg, contact_s, sim::id_of(outcome), before.sink_mps, norm(before.velocity_mps),
                 before.tilt_rad / deg, pose_at.heave_m, pose_at.heave_rate_mps, pose_at.roll_rad / deg,
                 pose_at.pitch_rad / deg, pose_at.roll_rate_radps / deg, pose_at.pitch_rate_radps / deg, std::hypot(p.x, p.y),
                 stage.vehicle().propellant_kg() / 1e3);
@@ -856,7 +856,7 @@ void report_campaign(const char* name, const std::vector<AsdsDispersion>& cases,
         CAPTURE(i);
         std::printf("%s case %2zu: %s, contact %.2f m, sink %.2f m/s, lateral %.2f m/s, ended %.2f m off, %.0f kg left "
                     "(aero x%.2f); %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f, feedback %.2f (%d of %d)\n", name, i,
-                    sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
+                    sim::id_of(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
                     run.offset_m, run.propellant_kg, cases[i].aero_factor, run.scvx.plans, run.scvx.failures,
                     run.scvx.peak_gimbal_use, run.scvx.clipped_ticks, run.scvx.lateral_ticks, run.scvx.terminal_peak_gimbal_use, run.scvx.terminal_peak_feedback_use,
                     run.scvx.terminal_clipped_ticks, run.scvx.terminal_ticks);
@@ -944,7 +944,7 @@ TEST_CASE("Falcon 9 ASDS single MECO case", "[.][asds-single][ascent_planner]") 
         if (status->phase != last || std::fmod(t, 10.0) < 0.05) {
             const Vec3 axis = b.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
             std::printf("  t %.1f %s: enu %.0f,%.0f,%.0f v %.1f,%.1f,%.1f miss %.0f m, %.1f t, RCS %.0f kg, axis error %.1f deg\n",
-                        t, gnc::to_string(status->phase), p.x, p.y, p.z, v.x, v.y, v.z, status->impact_miss_m,
+                        t, gnc::id_of(status->phase), p.x, p.y, p.z, v.x, v.y, v.z, status->impact_miss_m,
                         b.vehicle().propellant_kg() / 1e3, b.vehicle().rcs_propellant_kg(),
                         std::acos(std::clamp(dot(axis, status->axis_gcrf), -1.0, 1.0)) / deg);
             last = status->phase;
@@ -954,7 +954,7 @@ TEST_CASE("Falcon 9 ASDS single MECO case", "[.][asds-single][ascent_planner]") 
     const auto* g = session.return_guidance(0);
     const auto stats = g && g->scvx() ? g->scvx()->statistics() : gnc::ScvxLandingGuidance::Statistics{};
     std::printf("[asds] seed %u: %s; %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f, feedback %.2f (%d of %d)\n", seed,
-                sim::to_string(session.landing_outcome(0)), stats.plans, stats.failures, stats.peak_gimbal_use,
+                sim::id_of(session.landing_outcome(0)), stats.plans, stats.failures, stats.peak_gimbal_use,
                 stats.clipped_ticks, stats.lateral_ticks, stats.terminal_peak_gimbal_use, stats.terminal_peak_feedback_use, stats.terminal_clipped_ticks,
                 stats.terminal_ticks);
 }

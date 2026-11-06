@@ -138,11 +138,11 @@ void fly_direct_to_catch(test::LunarReturnSession& t) {
     if (const auto* es = t.session.entry_status(t.session.controlled_index())) {
         const auto tel = t.session.telemetry(t.session.controlled_index());
         std::printf("[lunar return]   entry phase %s, downrange %.1f km, crossrange %.1f km, height %.0f m, %.0f m/s\n",
-                    gnc::to_string(es->phase), es->downrange_error_m / 1000.0, es->crossrange_m / 1000.0,
+                    gnc::id_of(es->phase), es->downrange_error_m / 1000.0, es->crossrange_m / 1000.0,
                     tel.altitude_m, tel.speed_relative_mps);
     }
     for (const auto& b : t.session.lunar_burns()) {
-        std::printf("[lunar return]   %s %.2f m/s at %.0f km\n", sim::to_string(b.step), norm(b.node.delta_v_gcrf_mps),
+        std::printf("[lunar return]   %s %.2f m/s at %.0f km\n", sim::id_of(b.step), norm(b.node.delta_v_gcrf_mps),
                     geodetic_height_m(t, b.centre_gcrf_m, b.node.epoch) / 1000.0);
     }
     REQUIRE(braking != nullptr);
@@ -248,9 +248,9 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", 
                 const auto* b4 = t.session.ship_return_plan();
                 std::printf("[aircatch] %.2f d: %s, autopilot %s, %s | %.1f km %.0f m/s, entry %s | b4 %s dv %.1f "
                             "node %+.2f h, EI %.2f deg\n",
-                            day, sim::to_string(t.session.lunar_step()), sim::to_string(t.session.autopilot().state),
+                            day, sim::id_of(t.session.lunar_step()), sim::id_of(t.session.autopilot().state),
                             t.session.lunar_status().c_str(), tel.altitude_m / 1000.0, tel.speed_relative_mps,
-                            es ? gnc::to_string(es->phase) : "-", b4 ? (b4->feasible ? "ok" : "refused") : "-",
+                            es ? gnc::id_of(es->phase) : "-", b4 ? (b4->feasible ? "ok" : "refused") : "-",
                             b4 ? b4->delta_v_mps : 0.0, b4 ? (b4->node.epoch - t.session.epoch()) / 3600.0 : 0.0,
                             b4 ? b4->entry_flight_path_rad / deg : 0.0);
                 std::fflush(stdout);
@@ -327,7 +327,7 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", 
                 body.peak_heat_rate_w_m2() / 1000.0,
                 body.caught() ? "caught" : body.impacted() ? "impacted" : "open", body.vehicle().propellant_kg() / 1000.0);
     for (const auto& b : t.session.lunar_burns()) {
-        std::printf("[aircatch]   %s %.2f m/s at %.0f km\n", sim::to_string(b.step), norm(b.node.delta_v_gcrf_mps),
+        std::printf("[aircatch]   %s %.2f m/s at %.0f km\n", sim::id_of(b.step), norm(b.node.delta_v_gcrf_mps),
                     geodetic_height_m(t, b.centre_gcrf_m, b.node.epoch) / 1000.0);
     }
     if (const auto* plan = t.session.ship_return_plan()) {

@@ -24,7 +24,7 @@
 namespace starsim::sim {
 
 enum class CampaignFlightPhase { DepotAscent, Planning, WaitLaunch, Flying, StationKeeping, Complete, Ended };
-const char* to_string(CampaignFlightPhase phase);  // German
+const char* id_of(CampaignFlightPhase phase);
 
 struct CampaignFlownRow {
     int number = 0;  // tankers 1..n in launch order (failed ones included); the HLS: 0

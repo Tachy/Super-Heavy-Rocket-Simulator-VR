@@ -154,7 +154,7 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
             const auto& w = session.body(0).state().angular_velocity_body_radps;
             std::printf("t %+.0f %s h %.1f km v %.0f Mach %.2f alpha %.1f (aoa %.1f) bank %.1f downrange %.1f km cross %.1f km "
                         "gamma %.1f w %.3f %.3f %.3f\n",
-                        session.epoch() - interface, gnc::to_string(s->phase), tel.altitude_m / 1000.0,
+                        session.epoch() - interface, gnc::id_of(s->phase), tel.altitude_m / 1000.0,
                         tel.speed_relative_mps, tel.mach, s->alpha_rad / deg, tel.angle_of_attack_rad / deg, s->bank_rad / deg,
                         s->downrange_error_m / 1000.0, s->crossrange_m / 1000.0, tel.flight_path_angle_rad / deg, w.x, w.y, w.z);
         }
@@ -192,7 +192,7 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
     }
     std::printf("return: gate %d after %.0f s from the entry interface, miss %.0f m; %s, offset %.2f m, lateral %.2f m/s, "
                 "sink %.2f m/s, %.1f t left\n",
-                run.gate, run.entry_s, run.gate_miss_m, sim::to_string(run.landing.tower_phase), run.landing.offset_m,
+                run.gate, run.entry_s, run.gate_miss_m, sim::id_of(run.landing.tower_phase), run.landing.offset_m,
                 run.landing.lateral_mps, run.landing.sink_mps, run.propellant_kg / 1000.0);
     std::fflush(stdout);  // a campaign's output in a file shows its progress
     return run;

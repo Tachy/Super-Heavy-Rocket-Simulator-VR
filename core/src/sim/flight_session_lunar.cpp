@@ -33,6 +33,51 @@ using detail::vacuum_groups;
 using detail::first_after;
 using detail::german;
 
+const char* id_of(LunarStep step) {  // i18n-ns: lunar_step
+    switch (step) {
+        case LunarStep::None: return "none";
+        case LunarStep::Departure: return "departure";
+        case LunarStep::Tli: return "tli";
+        case LunarStep::Coast: return "coast";
+        case LunarStep::MidCourse: return "mid_course";
+        case LunarStep::PilotCorrection: return "pilot_correction";
+        case LunarStep::PoweredFlyby: return "powered_flyby";
+        case LunarStep::Insertion: return "insertion";
+        case LunarStep::Trim: return "trim";
+        case LunarStep::InLlo: return "in_llo";
+        case LunarStep::InNrho: return "in_nrho";
+        case LunarStep::StationKeeping: return "station_keeping";
+        case LunarStep::TransferOut: return "transfer_out";
+        case LunarStep::TransferIn: return "transfer_in";
+        case LunarStep::DescentWait: return "descent_wait";
+        case LunarStep::PlaneTrim: return "plane_trim";
+        case LunarStep::Doi: return "doi";
+        case LunarStep::DescentCoast: return "descent_coast";
+        case LunarStep::PoweredDescent: return "powered_descent";
+        case LunarStep::Landed: return "landed";
+        case LunarStep::SurfaceStay: return "surface_stay";
+        case LunarStep::Ascent: return "ascent";
+        case LunarStep::AscentCoast: return "ascent_coast";
+        case LunarStep::Circularize: return "circularize";
+        case LunarStep::AbortAscent: return "abort_ascent";
+        case LunarStep::Lost: return "lost";
+        case LunarStep::ReturnDeparture: return "return_departure";
+        case LunarStep::Tei: return "tei";
+        case LunarStep::ReturnCoast: return "return_coast";
+        case LunarStep::ReturnCorrection: return "return_correction";
+        case LunarStep::Braking: return "braking";
+        case LunarStep::EarthEntry: return "earth_entry";
+        case LunarStep::Aerocapture: return "aerocapture";
+        case LunarStep::CaptureCoast: return "capture_coast";
+        case LunarStep::PerigeeRaise: return "perigee_raise";
+        case LunarStep::CaptureCircularize: return "capture_circularize";
+        case LunarStep::EntryTrim: return "entry_trim";
+        case LunarStep::RepassTrim: return "repass_trim";
+    }
+    return "";
+}
+
+// transitional: removed by Task 8 (statuses still embed the German step name)
 const char* to_string(LunarStep step) {
     switch (step) {
         case LunarStep::None: return "aus";
@@ -299,7 +344,7 @@ void FlightSession::run_lunar(Flying& flying) {
         lunar_debug_last_ = lunar_status_;
         const auto rel = mission::moon_relative(*env_.ephemeris, controlled_state(), epoch_);
         std::printf("[lunar] %.3f d  %-14s  Moon %.0f km  %.1f m/s  %.1f t  %s\n",
-                    (epoch_ - launch_epoch_) / 86400.0, to_string(lunar_step_), norm(rel.position_m) / 1000.0,
+                    (epoch_ - launch_epoch_) / 86400.0, id_of(lunar_step_), norm(rel.position_m) / 1000.0,
                     norm(rel.velocity_mps), flying.body->vehicle().mass_properties().mass_kg / 1000.0,
                     lunar_status_.c_str());
     }

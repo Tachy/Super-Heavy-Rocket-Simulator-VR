@@ -71,7 +71,7 @@ test::CatchRun fly(const Vec3& offset_enu_m, const Vec3& velocity_offset_mps) {
     if (const auto* g = session.return_guidance(0); g && g->scvx()) {
         const auto& s = g->scvx()->statistics();
         std::printf("ignition at %.0f m: %s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s, %d plans (%d failed), "
-                    "max %.0f ms\n", h, sim::to_string(run.tower_phase), run.offset_m, run.lateral_mps, run.sink_mps,
+                    "max %.0f ms\n", h, sim::id_of(run.tower_phase), run.offset_m, run.lateral_mps, run.sink_mps,
                     s.plans, s.failures, s.max_solve_ms);
     } else {
         std::printf("ignition at %.0f m: no SCvx guidance (fallback)\n", h);
@@ -121,7 +121,7 @@ TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea
     const auto tr = earth().fixed_to_gcrf(session.epoch());
     const Vec3 p = sim::site_enu_m(site, transpose(tr.rotation) * booster.state().position_gcrf_m);
     std::printf("[abort] at %.0f m: %s after %.1f s at %.0f m east / %.0f m north, %.1f t left\n", abort_height_m,
-                sim::to_string(session.landing_outcome(0)), t, p.x, p.y, booster.vehicle().propellant_kg() / 1e3);
+                sim::id_of(session.landing_outcome(0)), t, p.x, p.y, booster.vehicle().propellant_kg() / 1e3);
     CHECK(aborted);
     CHECK_FALSE(session.tower()->tower_struck());
     // The reach estimate decides at the abort. From 1500 and 800 m the water is in reach, with propellant left (planner
@@ -174,7 +174,7 @@ TEST_CASE("Booster abort clearance trace", "[.abort_clearance]") {
         trace.sample(session, earth(), 0, t);
     }
     std::printf("[clearance] booster abort at %.0f m: %s, struck %d, %.1f t left\n", abort_height_m,
-                sim::to_string(session.landing_outcome(0)), session.tower()->tower_struck() ? 1 : 0, booster.vehicle().propellant_kg() / 1e3);
+                sim::id_of(session.landing_outcome(0)), session.tower()->tower_struck() ? 1 : 0, booster.vehicle().propellant_kg() / 1e3);
 }
 
 TEST_CASE("An abort the guidance cannot fly leaves the tower's arms alone", "[gnc][catch][abort]") {
@@ -271,7 +271,7 @@ TEST_CASE("SCvx catch campaign: dispersions and an engine failure", "[gnc][catch
         const auto run = fly_dispersed(cases[i]);
         CAPTURE(i);
         std::printf("case %2zu: %s / %s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s\n", i,
-                    sim::to_string(run.tower_phase), sim::to_string(run.outcome), run.offset_m, run.lateral_mps, run.sink_mps);
+                    sim::id_of(run.tower_phase), sim::id_of(run.outcome), run.offset_m, run.lateral_mps, run.sink_mps);
         std::fflush(stdout);
         CHECK_FALSE(run.tower_struck);  // never, in any case
         if (run.caught_within_tolerance()) {

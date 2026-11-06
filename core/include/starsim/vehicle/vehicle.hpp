@@ -90,7 +90,7 @@ struct Flap {
 };
 
 enum class ParachuteState { Stowed, Open, Released, Torn };  // Open: inflating, reefed or full
-const char* to_string(ParachuteState state);  // German (UI): "Fallschirm gerissen" for a torn set
+const char* id_of(ParachuteState state);
 
 // A parachute set on a stage (d4): `drag_area_m2` covers all its canopies.
 struct Parachute {

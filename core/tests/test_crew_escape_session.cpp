@@ -160,9 +160,9 @@ void print(const sim::FlightSession& session, const char* name) {
         const auto& m = s.members[i];
         std::printf("  member %zu: %s, %s, fired %.1f s, peak %.1f g, clearance %.1f m, touchdown E %.0f N %.0f m %s at "
                     "%.1f m/s: %s %s\n",
-                    i, gnc::to_string(m.mode), gnc::to_string(m.phase), m.fire_time_s, m.peak_load_g, m.min_clearance_m,
+                    i, gnc::id_of(m.mode), gnc::id_of(m.phase), m.fire_time_s, m.peak_load_g, m.min_clearance_m,
                     m.touchdown_enu_m ? m.touchdown_enu_m->x : 0.0, m.touchdown_enu_m ? m.touchdown_enu_m->y : 0.0,
-                    m.touchdown_over_water ? "water" : "land", m.touchdown_sink_mps, sim::to_string(m.outcome),
+                    m.touchdown_over_water ? "water" : "land", m.touchdown_sink_mps, sim::id_of(m.outcome),
                     m.reason.c_str());
     }
     if (s.ship_impact_enu_m) {

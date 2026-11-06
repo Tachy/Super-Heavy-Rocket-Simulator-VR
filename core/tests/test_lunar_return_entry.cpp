@@ -111,7 +111,7 @@ HandoverFlight fly_handover(double density_factor, double aero_factor, double li
     f.seconds = t.session.epoch() - epoch;
     f.peak_heat_w_m2 = body.peak_heat_rate_w_m2();
     f.propellant_t = body.vehicle().propellant_kg() / 1000.0;
-    f.phase = es ? gnc::to_string(es->phase) : "-";
+    f.phase = es ? gnc::id_of(es->phase) : "-";
     f.downrange_km = es ? es->downrange_error_m / 1000.0 : 0.0;
     f.crossrange_km = es ? es->crossrange_m / 1000.0 : 0.0;
     f.breakup = body.breakup_reason();
@@ -270,7 +270,7 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
             if (returning && tel.altitude_m < 60e3 && calls++ % 2 == 0) {
                 std::printf("[b4 fixture] %.1f km %.0f m/s fpa %.1f, %.2f t, entry %s down %.2f km cross %.2f km\n",
                             tel.altitude_m / 1000.0, tel.speed_relative_mps, tel.flight_path_angle_rad / deg,
-                            body.vehicle().propellant_kg() / 1000.0, es ? gnc::to_string(es->phase) : "-",
+                            body.vehicle().propellant_kg() / 1000.0, es ? gnc::id_of(es->phase) : "-",
                             es ? es->downrange_error_m / 1000.0 : 0.0, es ? es->crossrange_m / 1000.0 : 0.0);
                 std::fflush(stdout);
             }
@@ -278,9 +278,9 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
                 last_state = state;
                 std::printf("[b4 fixture] %+.1f h %s: %.1f km %.0f m/s, %.1f t, remaining %.2f, ign %.0f s, entry %s, "
                             "rate %.5f\n",
-                            (t.session.epoch() - epoch) / 3600.0, sim::to_string(t.session.autopilot().state),
+                            (t.session.epoch() - epoch) / 3600.0, sim::id_of(t.session.autopilot().state),
                             tel.altitude_m / 1000.0, tel.speed_relative_mps, body.vehicle().propellant_kg() / 1000.0,
-                            burn.remaining_dv_mps, burn.time_to_ignition_s, es ? gnc::to_string(es->phase) : "-",
+                            burn.remaining_dv_mps, burn.time_to_ignition_s, es ? gnc::id_of(es->phase) : "-",
                             norm(body.state().angular_velocity_body_radps));
                 std::fflush(stdout);
             }
@@ -547,7 +547,7 @@ test::CatchRun replay_gate(const double (&g)[16], double aero, double density, d
     run.result = t.session.ship_return_result(0);
     const auto* guidance = t.session.ship_landing(0);
     std::printf("[gate replay] %s (%s), offset %.2f m, lateral %.2f m/s, sink %.2f m/s, %d plans (%d failed), %.1f t left\n",
-                sim::to_string(run.tower_phase), sim::to_string(run.result), run.offset_m, run.lateral_mps, run.sink_mps,
+                sim::id_of(run.tower_phase), sim::id_of(run.result), run.offset_m, run.lateral_mps, run.sink_mps,
                 guidance && guidance->scvx() ? guidance->scvx()->statistics().plans : 0,
                 guidance && guidance->scvx() ? guidance->scvx()->statistics().failures : 0,
                 t.session.body(0).vehicle().propellant_kg() / 1000.0);

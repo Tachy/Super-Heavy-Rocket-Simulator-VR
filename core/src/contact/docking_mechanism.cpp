@@ -18,17 +18,17 @@ math::Vec3 rotation_vector(const math::Mat3& r) {
 const math::Mat3 mated_axes = math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
 }  // namespace
 
-const char* to_string(DockingPhase phase) {
+const char* id_of(DockingPhase phase) {  // i18n-ns: docking_phase
     switch (phase) {
-        case DockingPhase::Ready: return "bereit";
-        case DockingPhase::Contact: return "Kontakt";
-        case DockingPhase::SoftCapture: return "Weichfang";
-        case DockingPhase::Retraction: return "Einzug";
-        case DockingPhase::HooksClosing: return "Haken schließen";
-        case DockingPhase::Docked: return "angedockt";
-        case DockingPhase::HooksOpening: return "Haken öffnen";
-        case DockingPhase::Separated: return "getrennt";
-        case DockingPhase::Failed: return "Fangen fehlgeschlagen";
+        case DockingPhase::Ready: return "ready";
+        case DockingPhase::Contact: return "contact";
+        case DockingPhase::SoftCapture: return "soft_capture";
+        case DockingPhase::Retraction: return "retraction";
+        case DockingPhase::HooksClosing: return "hooks_closing";
+        case DockingPhase::Docked: return "docked";
+        case DockingPhase::HooksOpening: return "hooks_opening";
+        case DockingPhase::Separated: return "separated";
+        case DockingPhase::Failed: return "failed";
     }
     return "";
 }

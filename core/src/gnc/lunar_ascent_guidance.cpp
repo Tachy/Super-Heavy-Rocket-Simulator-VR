@@ -110,13 +110,13 @@ LunarAscentParameters lunar_ascent_parameters(const config::StageConfig& stage, 
     return base;
 }
 
-const char* to_string(LunarAscentPhase phase) {
+const char* id_of(LunarAscentPhase phase) {  // i18n-ns: lunar_ascent_phase
     switch (phase) {
-        case LunarAscentPhase::Liftoff: return "Abheben";
-        case LunarAscentPhase::Vertical: return "Senkrechtaufstieg";
-        case LunarAscentPhase::Arrest: return "Sinken stoppen";
-        case LunarAscentPhase::Peg: return "PEG";
-        case LunarAscentPhase::Cutoff: return "Brennschluss";
+        case LunarAscentPhase::Liftoff: return "liftoff";
+        case LunarAscentPhase::Vertical: return "vertical";
+        case LunarAscentPhase::Arrest: return "arrest";
+        case LunarAscentPhase::Peg: return "peg";
+        case LunarAscentPhase::Cutoff: return "cutoff";
     }
     return "";
 }

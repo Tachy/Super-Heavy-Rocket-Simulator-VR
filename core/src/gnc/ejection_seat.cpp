@@ -7,24 +7,24 @@
 
 namespace starsim::gnc {
 
-const char* to_string(SeatPhase phase) {
+const char* id_of(SeatPhase phase) {  // i18n-ns: seat_phase
     switch (phase) {
-        case SeatPhase::Waiting: return "wartet";
-        case SeatPhase::Catapult: return "Katapult";
-        case SeatPhase::Rocket: return "Rakete";
-        case SeatPhase::Drogue: return "Bremsschirm";
-        case SeatPhase::Separated: return "vom Sitz getrennt";
-        case SeatPhase::Main: return "Hauptschirm";
-        case SeatPhase::Down: return "gelandet";
+        case SeatPhase::Waiting: return "waiting";
+        case SeatPhase::Catapult: return "catapult";
+        case SeatPhase::Rocket: return "rocket";
+        case SeatPhase::Drogue: return "drogue";
+        case SeatPhase::Separated: return "separated";
+        case SeatPhase::Main: return "main";
+        case SeatPhase::Down: return "down";
     }
     return "";
 }
 
-const char* to_string(SeatMode mode) {
+const char* id_of(SeatMode mode) {  // i18n-ns: seat_mode
     switch (mode) {
-        case SeatMode::Mode1: return "Modus 1";
-        case SeatMode::Mode2: return "Modus 2";
-        case SeatMode::Mode3: return "Modus 3";
+        case SeatMode::Mode1: return "mode1";
+        case SeatMode::Mode2: return "mode2";
+        case SeatMode::Mode3: return "mode3";
     }
     return "";
 }

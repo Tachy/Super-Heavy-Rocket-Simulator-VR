@@ -10,13 +10,13 @@ godot::Vector3 to_godot(const math::Vec3& v) { return {v.x, v.y, v.z}; }
 
 godot::Dictionary member_dictionary(const sim::FlightSession& session, const sim::CrewMemberState& m) {
     godot::Dictionary d;
-    d["phase"] = godot::String::utf8(gnc::to_string(m.phase));
-    d["mode"] = godot::String::utf8(gnc::to_string(m.mode));
+    d["phase"] = qualified_id("seat_phase", gnc::id_of(m.phase));
+    d["mode"] = qualified_id("seat_mode", gnc::id_of(m.mode));
     d["fire_time_s"] = m.fire_time_s;
     d["load_g"] = m.load_g;
     d["peak_load_g"] = m.peak_load_g;
     d["min_clearance_m"] = m.min_clearance_m;
-    d["outcome"] = godot::String::utf8(sim::to_string(m.outcome));
+    d["outcome"] = qualified_id("crew_outcome", sim::id_of(m.outcome));
     d["reason"] = legacy_report(m.reason);
     d["body_index"] = m.body_index ? static_cast<int64_t>(*m.body_index) : int64_t{-1};
     if (m.body_index && *m.body_index < session.body_count()) {

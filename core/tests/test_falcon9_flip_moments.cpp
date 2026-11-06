@@ -66,7 +66,7 @@ TEST_CASE("Falcon 9 flip: moments over the turn", "[.][f9-flip-moments][ascent_p
         const auto* status = session.return_status(0);
         const auto tel = session.telemetry(0);
         std::printf("%.2f %s %.1f %.1f %.2f %.3e %.1f %.1f %.1f %.1f %.1f %.1f %.1f %d %.0f\n", t - separation,
-                    status ? gnc::to_string(status->phase) : "-", off, elevation,
+                    status ? gnc::id_of(status->phase) : "-", off, elevation,
                     std::hypot(w.y, w.z) / constants::deg_to_rad, mass.inertia_kg_m2.y, mass.cg_station_m, mass.mass_kg / 1e3,
                     b.vehicle().rcs_supply_kg(), q, norm(hull) / 1e3, fins / 1e3, b.vehicle().max_rcs_torque_nm().y / 1e3,
                     tel.engines_running, tel.thrust_n / 1e3);

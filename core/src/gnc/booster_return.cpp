@@ -48,14 +48,14 @@ double lateral_acceleration(const vehicle::FlightBody& body, double speed, const
 
 }  // namespace
 
-const char* to_string(ReturnPhase phase) {
+const char* id_of(ReturnPhase phase) {  // i18n-ns: return_phase
     switch (phase) {
-        case ReturnPhase::Flip: return "Wende";
-        case ReturnPhase::Boostback: return "Boostback";
-        case ReturnPhase::Coast: return "Abstieg";
-        case ReturnPhase::EntryBurn: return "Wiedereintritt";
-        case ReturnPhase::LandingBurn: return "Landebrennen";
-        case ReturnPhase::Landed: return "Gelandet";
+        case ReturnPhase::Flip: return "flip";
+        case ReturnPhase::Boostback: return "boostback";
+        case ReturnPhase::Coast: return "coast";
+        case ReturnPhase::EntryBurn: return "entry_burn";
+        case ReturnPhase::LandingBurn: return "landing_burn";
+        case ReturnPhase::Landed: return "landed";
     }
     return "";
 }

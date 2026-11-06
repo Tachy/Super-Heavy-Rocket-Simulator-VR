@@ -91,7 +91,7 @@ TEST_CASE("The explicit fallback guidance ditches the booster at sea next to the
             next_print = t + (status->phase == gnc::ReturnPhase::LandingBurn ? 1.0 : 10.0);
             std::printf("  T+%6.1f %-13s alt %8.3f km  v %7.1f m/s  vz %7.1f  miss %8.0f m  thr %.2f  tgo %5.1f  eng %d  "
                         "prop %5.1f t\n",
-                        session.mission_time_s(), gnc::to_string(status->phase), tm.altitude_m / 1000.0,
+                        session.mission_time_s(), gnc::id_of(status->phase), tm.altitude_m / 1000.0,
                         tm.speed_relative_mps, tm.vertical_speed_mps, status->impact_miss_m, status->throttle, status->time_to_go_s,
                         tm.engines_running, tm.propellant_kg / 1000.0);
         }
@@ -141,7 +141,7 @@ TEST_CASE("The explicit fallback guidance ditches the booster at sea next to the
     const auto p = tower->geometry().to_site(transpose(t_end.rotation) * booster.state().position_gcrf_m);
     std::printf("[validation] %s explicit return: apogee %.1f km, tower %s, %.1f m from the catch axis, sink %.2f m/s, "
                 "lateral %.2f m/s, %.1f t propellant left\n",
-                vehicle_id.c_str(), max_altitude_km, sim::to_string(tower->phase()), std::hypot(p.x, p.y), last_sink_rate,
+                vehicle_id.c_str(), max_altitude_km, sim::id_of(tower->phase()), std::hypot(p.x, p.y), last_sink_rate,
                 last_side_speed, booster.vehicle().propellant_kg() / 1000.0);
     CHECK_FALSE(tower->tower_struck());
     CHECK(tower->phase() == sim::CatchPhase::Aborted);
@@ -222,7 +222,7 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
     const auto t_end = earth.fixed_to_gcrf(session.epoch());
     const auto p = tower->geometry().to_site(transpose(t_end.rotation) * session.body(0).state().position_gcrf_m);
     std::printf("%s: tower %s, booster %.1f m from the catch axis, max pin load %.2f MN\n", vehicle_id.c_str(),
-                sim::to_string(phase), std::hypot(p.x, p.y), tower->max_pin_load_n() / 1e6);
+                sim::id_of(phase), std::hypot(p.x, p.y), tower->max_pin_load_n() / 1e6);
     std::printf("%s: propellant at landing-burn ignition %.1f t\n", vehicle_id.c_str(), ignition_propellant_kg / 1e3);
     std::printf("%s: roll error at landing-burn ignition %.2f deg\n", vehicle_id.c_str(), ignition_roll_error_deg);
     // The landing-burn fixtures of test_scvx_catch start at the catch roll: the real coast has to bring it there.

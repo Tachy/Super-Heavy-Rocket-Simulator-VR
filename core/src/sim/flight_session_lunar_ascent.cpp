@@ -29,6 +29,20 @@ namespace starsim::sim {
 using detail::far_future_s;
 using detail::german;
 
+namespace {
+// transitional: removed by Task 8 (the ascent status still embeds the German phase name)
+const char* german_phase(gnc::LunarAscentPhase phase) {
+    switch (phase) {
+        case gnc::LunarAscentPhase::Liftoff: return "Abheben";
+        case gnc::LunarAscentPhase::Vertical: return "Senkrechtaufstieg";
+        case gnc::LunarAscentPhase::Arrest: return "Sinken stoppen";
+        case gnc::LunarAscentPhase::Peg: return "PEG";
+        case gnc::LunarAscentPhase::Cutoff: return "Brennschluss";
+    }
+    return "";
+}
+}  // namespace
+
 bool FlightSession::lunar_orbit_clears_terrain(double periselene_m, double aposelene_m) {
     const double clearance_m = constants::moon_mean_radius_m + constants::moon_max_terrain_height_m;
     return periselene_m >= clearance_m && aposelene_m >= clearance_m;
@@ -189,7 +203,7 @@ void FlightSession::run_lunar_ascent_steps(Flying& flying) {
                 }
             }
             const std::string prefix = lunar_step_ == LunarStep::Ascent ? "Aufstieg: " : "Abbruch zum Orbit: ";
-            const std::string status = prefix + (lunar_ascent_->status().empty() ? std::string(gnc::to_string(c.phase))
+            const std::string status = prefix + (lunar_ascent_->status().empty() ? std::string(german_phase(c.phase))
                                                                                  : lunar_ascent_->status());
             if (lunar_step_epoch_ - epoch_ < 0.0 || c.cutoff) lunar_status_ = status;  // the abort's reason first
             if (!c.cutoff) break;

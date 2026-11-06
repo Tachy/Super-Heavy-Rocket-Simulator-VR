@@ -11,12 +11,12 @@ namespace starsim::sim {
 // a booster lost at sea ("Wasserung").
 enum class LandingOutcome { Flying, Caught, Landed, Splashdown, Impact, BrokenUp, TippedOver, SplashedDown };
 
-const char* to_string(LandingOutcome outcome);
+const char* id_of(LandingOutcome outcome);
 
 // How a ship return ended (ship catch robustness, 2026-10-21): caught; an upright, controlled abort (water or ground
 // reached upright and slow - the ship may be lost, the abort did its job); lost (tumbled, hard impact, broken up).
 enum class ReturnResult { Flying, Caught, UprightAbort, Lost };
-const char* to_string(ReturnResult result);
+const char* id_of(ReturnResult result);
 inline constexpr double upright_abort_max_tilt_rad = 20.0 * constants::deg_to_rad;  // [E] spec
 inline constexpr double upright_abort_max_sink_mps = 5.0;  // [E] the upright descent brakes to <= 3 m/s; margin
 ReturnResult return_result(LandingOutcome outcome, double contact_tilt_rad, double contact_sink_mps);

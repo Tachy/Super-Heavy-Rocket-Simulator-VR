@@ -19,6 +19,12 @@ func _initialize() -> void:
 	_check(I18n.language() == "de", "the default language is German")
 	_check(I18n.text("ui.language.label") == "Sprache", "real table, de: ui.language.label")
 	_check(I18n.has_key("report.legacy") and I18n.has_key("report.command.internal_error"), "first report keys exist")
+	# real phase table (de): the ids the bindings send resolve to today's German words, not to their keys
+	for pair: Array in [["autopilot_state.off", "aus"], ["autopilot_state.upper_stage", "Oberstufe"],
+			["landing_outcome.flying", "fliegt"], ["docking_phase.soft_capture", "Weichfang"],
+			["proximity_phase.final_approach", "Endanflug"], ["catch_phase.aborted", "Abbruch"],
+			["mission_event_kind.meco", "MECO"], ["guidance_mode.upright", "aufrecht"]]:
+		_check(I18n.phase_text(pair[0]) == pair[1], "real phase table, de: %s -> %s" % [pair[0], I18n.phase_text(pair[0])])
 
 	var de := {
 		"report.t.steep": "zu steil: {slope:deg1} (Grenze {limit})",

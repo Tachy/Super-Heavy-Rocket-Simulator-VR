@@ -79,12 +79,12 @@ Vec3 entry_terminal_steering_step(const Vec3& steering, double j11, double j12, 
     return p;
 }
 
-const char* to_string(EntryPhase phase) {
+const char* id_of(EntryPhase phase) {  // i18n-ns: entry_phase
     switch (phase) {
-        case EntryPhase::Entry: return "Eintritt";
-        case EntryPhase::Terminal: return "Endanflug";
-        case EntryPhase::Gate: return "Tor";
-        case EntryPhase::Exit: return "Austritt";
+        case EntryPhase::Entry: return "entry";
+        case EntryPhase::Terminal: return "terminal";
+        case EntryPhase::Gate: return "gate";
+        case EntryPhase::Exit: return "exit";
     }
     return "?";
 }

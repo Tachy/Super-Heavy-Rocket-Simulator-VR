@@ -66,7 +66,7 @@ func _process_unprofiled(_delta: float) -> void:
 	if t.get("heat_warning", false):
 		lines.append("!!! Hitze / Last nahe der Grenze !!!")
 	if t.has("entry_phase"):  # entry guidance setpoint (flight director)
-		lines.append("Eintritt        %s%s" % [t["entry_phase"], "  (Korridorgrenze)" if t["entry_constrained"] else ""])
+		lines.append("Eintritt        %s%s" % [I18n.phase_text(t["entry_phase"]), "  (Korridorgrenze)" if t["entry_constrained"] else ""])
 		lines.append("  Soll Anstellw. %8.1f °  Ist %.1f °" % [t["entry_alpha_deg"], t["angle_of_attack_deg"]])
 		lines.append("  Soll Rollwinkel %7.1f °" % t["entry_bank_deg"])
 		lines.append("  Ablage längs %9.1f km  quer %.1f km" % [t["entry_downrange_km"], t["entry_crossrange_km"]])
@@ -85,22 +85,22 @@ func _process_unprofiled(_delta: float) -> void:
 		lines.append("*** Bodenkontakt ***")
 	var tower: Dictionary = sim.tower_state()
 	if tower.get("present", false) and sim.body_count() > 1:
-		lines.append("Turm            %s" % tower["phase"])
+		lines.append("Turm            %s" % I18n.phase_text(tower["phase"]))
 	for i in sim.body_count():  # returning vehicles: the booster (body 0 after staging) and the ship's flip and catch
 		var ret: Dictionary = sim.return_state(i)
 		if ret.get("present", false):
 			var label := "Booster" if i == 0 and sim.body_count() > 1 else "Ship"
-			lines.append("%-15s %s (%s)" % [label, ret["phase"], ret["guidance"]])
+			lines.append("%-15s %s (%s)" % [label, I18n.phase_text(ret["phase"]), I18n.phase_text(ret["guidance"])])
 			if ret["abort"] and not tower.get("present", false):
 				lines.append("Turm            Abbruch")
-			if ret["outcome"] != "fliegt":
-				lines.append("Ergebnis        %s" % ret["outcome"])
+			if ret["outcome"] != "landing_outcome.flying":
+				lines.append("Ergebnis        %s" % I18n.phase_text(ret["outcome"]))
 	var ap: Dictionary = sim.autopilot_status()
-	if ap.get("state", "aus") != "aus":
-		lines.append("Autopilot       %s" % ap["state"])
-		if ap["state"] in ["Booster", "Oberstufe"]:
-			lines.append("  Phase         %s" % ap["phase"])
-		if ap["state"] == "Oberstufe":
+	if ap.get("state", "autopilot_state.off") != "autopilot_state.off":
+		lines.append("Autopilot       %s" % I18n.phase_text(ap["state"]))
+		if ap["state"] in ["autopilot_state.booster", "autopilot_state.upper_stage"]:
+			lines.append("  Phase         %s" % I18n.phase_text(ap["phase"]))
+		if ap["state"] == "autopilot_state.upper_stage":
 			lines.append("  Restbrennzeit %9.1f s" % ap["time_to_go_s"])
 	if ap.has("burn"):
 		var b: Dictionary = ap["burn"]

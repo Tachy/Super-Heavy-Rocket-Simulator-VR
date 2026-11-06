@@ -17,7 +17,7 @@ namespace starsim::sim {
 // How a stage's touchdown on its legs ended.
 enum class LegTouchdown { None, Landed, TippedOver, Impact, Splashdown };
 
-const char* to_string(LegTouchdown touchdown);  // German UI text ("gelandet", "umgekippt", "Aufprall", "Wasserung")
+const char* id_of(LegTouchdown touchdown);
 
 // Where a leg landing simulation sits (lunar l2: any reference body): a point on the body's shape (Earth: WGS84 geodetic
 // height; Moon: the height above the sphere, i.e. the terrain height there) with the site frame east / north / up.

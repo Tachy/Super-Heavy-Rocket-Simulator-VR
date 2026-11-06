@@ -103,14 +103,14 @@ double set_max_thrust_n(const vehicle::Vehicle& vehicle, const std::vector<std::
     return thrust;
 }
 
-const char* to_string(LunarDescentPhase phase) {
+const char* id_of(LunarDescentPhase phase) {  // i18n-ns: lunar_descent_phase
     switch (phase) {
-        case LunarDescentPhase::Braking: return "Bremsphase";
-        case LunarDescentPhase::Approach: return "Anflug";
-        case LunarDescentPhase::Terminal: return "Endanflug";
-        case LunarDescentPhase::Touchdown: return "Aufsetzen";
-        case LunarDescentPhase::Landed: return "gelandet";
-        case LunarDescentPhase::Aborted: return "Abbruch";
+        case LunarDescentPhase::Braking: return "braking";
+        case LunarDescentPhase::Approach: return "approach";
+        case LunarDescentPhase::Terminal: return "terminal";
+        case LunarDescentPhase::Touchdown: return "touchdown";
+        case LunarDescentPhase::Landed: return "landed";
+        case LunarDescentPhase::Aborted: return "aborted";
     }
     return "";
 }

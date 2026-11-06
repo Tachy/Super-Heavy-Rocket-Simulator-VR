@@ -210,7 +210,7 @@ void fly_mission_1(const char* id, double span_days, sim::LunarStep end_step) {
     INFO(session.lunar_status());
     REQUIRE(td);
     std::printf("[lunar_mission] %s: %s, touchdown %.2f m / %.2f m/s, %.1f t left of %.0f t (propellant %.1f t), %s\n",
-                id, sim::to_string(td->outcome), td->offset_m, td->sink_mps,
+                id, sim::id_of(td->outcome), td->offset_m, td->sink_mps,
                 session.body(0).vehicle().mass_properties().mass_kg / 1000.0, m0 / 1000.0,
                 session.body(0).vehicle().propellant_kg() / 1000.0, session.lunar_status().c_str());
     CHECK(td->outcome == sim::LegTouchdown::Landed);

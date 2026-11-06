@@ -63,7 +63,7 @@ double booster_throttle_for_thrust(const vehicle::Vehicle& vehicle, double thrus
 
 enum class AscentPhase { Vertical, PitchKick, GravityTurn, ClosedLoop, Cutoff };
 
-const char* to_string(AscentPhase phase);
+const char* id_of(AscentPhase phase);
 
 struct GuidanceCommand {
     math::Vec3 thrust_direction_gcrf;  // where the body x-axis should point

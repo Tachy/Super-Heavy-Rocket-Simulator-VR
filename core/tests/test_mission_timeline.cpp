@@ -145,7 +145,7 @@ TEST_CASE("Recorded events stay sorted; predicted are replaced", "[timeline]") {
     REQUIRE(timeline.predicted().size() == 1);
     CHECK(timeline.predicted()[0].kind == MissionEventKind::Splashdown);
     CHECK(timeline.predicted()[0].predicted);
-    CHECK(std::string(sim::to_string(MissionEventKind::Meco)) == "MECO");
+    CHECK(std::string(sim::id_of(MissionEventKind::Meco)) == "meco");
 }
 
 namespace {
@@ -240,7 +240,7 @@ void print_prediction(const char* label, const PredictionTrack& p, const Mission
 void print_events(const sim::MissionTimeline& t) {
     if (!std::getenv("STARSIM_VERBOSE")) return;
     for (const auto& e : t.recorded()) {
-        std::printf("  [timeline] %.2f %-16s body %u %s\n", e.epoch.tdb_seconds_past_j2000(), sim::to_string(e.kind),
+        std::printf("  [timeline] %.2f %-16s body %u %s\n", e.epoch.tdb_seconds_past_j2000(), sim::id_of(e.kind),
                     e.body_serial, e.body_name.c_str());
     }
 }
@@ -1193,14 +1193,14 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe][ascent_planner]") {
         for (const auto& e : session.timeline().predicted()) predictions[{e.kind, e.body_serial}].sample(&e, session.epoch());
     }
     for (const auto& e : session.timeline().recorded()) {
-        std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::to_string(e.kind), e.body_serial,
+        std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::id_of(e.kind), e.body_serial,
                     e.body_name.c_str());
         if (const auto it = predictions.find({e.kind, e.body_serial}); it != predictions.end()) {
-            print_prediction(sim::to_string(e.kind), it->second, recorded_of(session.timeline(), e.kind, e.body_serial));
+            print_prediction(sim::id_of(e.kind), it->second, recorded_of(session.timeline(), e.kind, e.body_serial));
         }
     }
     std::printf("  [probe] flown %.0f s, leg %s: %s; %zu bodies\n", session.epoch() - start,
-                sim::to_string(session.iss_mission_leg()), session.iss_mission_status().c_str(), session.body_count());
+                sim::id_of(session.iss_mission_leg()), session.iss_mission_status().c_str(), session.body_count());
     (void)st;
 }
 
@@ -1272,10 +1272,10 @@ TEST_CASE("Return prediction probe", "[.][probe][timeline_probe]") {
     }
     session.advance_to(session.epoch() + 1.0, 1000);
     for (const auto& e : t.recorded()) {
-        std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::to_string(e.kind), e.body_serial,
+        std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::id_of(e.kind), e.body_serial,
                     e.body_name.c_str());
         if (const auto it = predictions.find({e.kind, e.body_serial}); it != predictions.end()) {
-            print_prediction(sim::to_string(e.kind), it->second, &e);
+            print_prediction(sim::id_of(e.kind), it->second, &e);
         }
     }
 }

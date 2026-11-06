@@ -104,7 +104,7 @@ DropResult run_drop(sim::FlightSession& session, bool one_call = false) {
     const auto enu = sim::site_enu_m(session.launch_site(), transpose(t.rotation) * session.body(0).state().position_gcrf_m);
     r.offset_m = std::hypot(enu.x, enu.y);
     std::printf("[legs] %-10s stroke %.3f m  crush work %.0f kJ  energy lost %.0f kJ  offset %.2f m\n",
-                sim::to_string(r.touchdown), r.max_stroke_m, r.crush_work_j / 1e3, r.energy_lost_j / 1e3, r.offset_m);
+                sim::id_of(r.touchdown), r.max_stroke_m, r.crush_work_j / 1e3, r.energy_lost_j / 1e3, r.offset_m);
     return r;
 }
 

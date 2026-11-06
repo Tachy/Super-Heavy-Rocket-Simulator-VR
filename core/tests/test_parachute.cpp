@@ -311,7 +311,7 @@ TEST_CASE("Sequencer: drogues at their height, mains below, release on the water
     CHECK(seq.main_height_m() == 1795.0);
     a = seq.update({0.0, 0.0, 0.0, true});
     CHECK_FALSE(a.release_mains);  // once
-    CHECK(std::string(gnc::to_string(gnc::ParachutePhase::Drogues)) == "Bremsschirme");
+    CHECK(std::string(gnc::id_of(gnc::ParachutePhase::Drogues)) == "drogues");
 }
 
 TEST_CASE("Sequencer: the drogues wait for the dynamic pressure; the mains still come at their height", "[parachute][gnc]") {
@@ -349,7 +349,7 @@ TEST_CASE("Sequencer: resting on the surface before any deployment ends the sequ
     CHECK(seq.phase() == gnc::ParachutePhase::Down);
 }
 
-TEST_CASE("A capsule under its mains rests on the water: gewassert", "[parachute][splashdown]") {
+TEST_CASE("A capsule under its mains rests on the water: splashed_down", "[parachute][splashdown]") {
     World w;
     time::Epoch t;
     auto body = falling_capsule(30.0, 7.0);
@@ -362,7 +362,7 @@ TEST_CASE("A capsule under its mains rests on the water: gewassert", "[parachute
     CHECK_FALSE(body->impacted());
     sim::LaunchSite site;  // any site: a splashdown vehicle is judged by its sink rate, not by the shoreline
     CHECK(sim::landing_outcome(*body, site, {}) == sim::LandingOutcome::SplashedDown);
-    CHECK(std::string(sim::to_string(sim::LandingOutcome::SplashedDown)) == "gewassert");
+    CHECK(std::string(sim::id_of(sim::LandingOutcome::SplashedDown)) == "splashed_down");
 }
 
 TEST_CASE("A capsule hitting the water faster than its limit is an impact", "[parachute][splashdown]") {
@@ -393,11 +393,11 @@ TEST_CASE("A capsule entry profile needs a capsule table", "[dragon][config]") {
                     config::ConfigError);
 }
 
-TEST_CASE("Parachute states read in German; a torn set says so", "[parachute][vehicle]") {
-    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Stowed)) == "verstaut");
-    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Open)) == "offen");
-    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Released)) == "abgeworfen");
-    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Torn)) == "Fallschirm gerissen");
+TEST_CASE("Parachute state ids; a torn set says so", "[parachute][vehicle]") {
+    CHECK(std::string(vehicle::id_of(vehicle::ParachuteState::Stowed)) == "stowed");
+    CHECK(std::string(vehicle::id_of(vehicle::ParachuteState::Open)) == "open");
+    CHECK(std::string(vehicle::id_of(vehicle::ParachuteState::Released)) == "released");
+    CHECK(std::string(vehicle::id_of(vehicle::ParachuteState::Torn)) == "torn");
 }
 
 TEST_CASE("The air velocity at a riser point is the body's when it does not rotate", "[parachute][body]") {

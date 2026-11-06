@@ -6,6 +6,19 @@
 
 namespace starsim::sim {
 
+const char* id_of(TransferPhase phase) {  // i18n-ns: transfer_phase
+    switch (phase) {
+        case TransferPhase::Idle: return "idle";
+        case TransferPhase::Settling: return "settling";
+        case TransferPhase::Chilldown: return "chilldown";
+        case TransferPhase::Flowing: return "flowing";
+        case TransferPhase::Paused: return "paused";
+        case TransferPhase::Complete: return "complete";
+        case TransferPhase::Stopped: return "stopped";
+    }
+    return "";
+}
+
 namespace {
 
 constexpr double closed_margin_kg = 1e-3;  // a line within a gram of its end is closed (rounding of the tank sums)

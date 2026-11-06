@@ -127,7 +127,7 @@ inline CatchRun fly_landing(sim::FlightSession& session, const frames::BodyOrien
                                  (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m));
             const auto* r = session.return_status(0);
             std::printf("  [catch] t %.1f cg %.2f,%.2f,%.1f v %.2f,%.2f,%.1f tower %s open %.3f contact %d thr %.2f groups %zu abort %d\n", t,
-                        p.x, p.y, p.z, v.x, v.y, v.z, sim::to_string(tower->phase()), tower->arms().opening_rad(),
+                        p.x, p.y, p.z, v.x, v.y, v.z, sim::id_of(tower->phase()), tower->arms().opening_rad(),
                         tower->in_contact(booster), r ? r->throttle : -1.0, r ? r->run_groups.size() : 0, r ? r->abort : 0);
         }
         if (!run.contact && tower && tower->in_contact(booster)) {

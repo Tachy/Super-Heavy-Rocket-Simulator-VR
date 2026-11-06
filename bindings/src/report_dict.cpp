@@ -36,6 +36,10 @@ godot::Array report_array(const report::Reports& reports) {
     return a;
 }
 
+godot::String qualified_id(const char* ns, const char* id) {
+    return godot::String::utf8(ns) + "." + godot::String::utf8(id);
+}
+
 godot::Dictionary legacy_report(const std::string& text) {
     if (text.empty()) return report_dict(report::Report{});
     return report_dict(report::make(report::Code::legacy, {report::legacy_text("text", text)}));

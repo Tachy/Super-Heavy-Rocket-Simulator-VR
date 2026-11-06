@@ -18,7 +18,7 @@ namespace starsim::contact {
 // extension; structural latches play the hooks.
 
 enum class DockingPhase { Ready, Contact, SoftCapture, Retraction, HooksClosing, Docked, HooksOpening, Separated, Failed };
-const char* to_string(DockingPhase phase);  // German
+const char* id_of(DockingPhase phase);
 
 struct DockingMechanismParameters {
     DockingInterfaceParameters interface;

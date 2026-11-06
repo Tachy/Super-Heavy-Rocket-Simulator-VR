@@ -116,5 +116,5 @@ TEST_CASE("The seat sequence ends on the surface", "[crew_escape][gnc]") {
     CHECK(s.phase() == SeatPhase::Main);
     s.update({40.0, 0.0, 0.0, true});
     CHECK(s.phase() == SeatPhase::Down);
-    CHECK(std::string(gnc::to_string(SeatPhase::Down)) == "gelandet");
+    CHECK(std::string(gnc::id_of(SeatPhase::Down)) == "down");
 }

@@ -37,12 +37,12 @@ namespace starsim::sim {
 using detail::german;
 using mission::PhasingBurnKind;
 
-const char* to_string(RendezvousStep step) {
+const char* id_of(RendezvousStep step) {  // i18n-ns: rendezvous_step
     switch (step) {
-        case RendezvousStep::None: return "aus";
-        case RendezvousStep::Coast: return "Phasing";
-        case RendezvousStep::Burn: return "Manöver";
-        case RendezvousStep::Waypoint0: return "Wegpunkt 0";
+        case RendezvousStep::None: return "none";
+        case RendezvousStep::Coast: return "coast";
+        case RendezvousStep::Burn: return "burn";
+        case RendezvousStep::Waypoint0: return "waypoint0";
     }
     return "";
 }
@@ -480,7 +480,7 @@ void FlightSession::run_rendezvous(Flying& flying) {
         rendezvous_debug_last_ = rendezvous_status_;
         const double range_m = station_index_ ? norm(station_state().position_m - controlled_state().position_m) : 0.0;
         std::printf("[rendezvous] %7.3f h  %-10s  range %.1f km  %.3f t  %s\n", mission_time_s() / 3600.0,
-                    to_string(rendezvous_step_), range_m / 1000.0,
+                    id_of(rendezvous_step_), range_m / 1000.0,
                     flying.body->vehicle().mass_properties().mass_kg / 1000.0, rendezvous_status_.c_str());
     }
 }

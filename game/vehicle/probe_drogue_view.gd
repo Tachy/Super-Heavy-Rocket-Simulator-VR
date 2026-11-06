@@ -4,11 +4,12 @@
 class_name ProbeDrogueView
 extends Node3D
 
-## Snapshot docking phases (docking_state, German strings of contact::to_string / gnc::to_string) in which the probes are out: the final approach,
-## contact and every phase until the hooks open again. Anything else stows them; "Halt", "Rückzug", "Abbruch" keep the state they find.
-const EXTENDED_PROXIMITY := ["Endanflug", "Kontakt"]
-const EXTENDED_DOCKING := ["Kontakt", "Weichfang", "Einzug", "Haken schließen", "angedockt", "Haken öffnen"]
-const KEEP_PROXIMITY := ["Halt", "Rückzug", "Abbruch"]
+## Snapshot docking phases (docking_state, qualified ids of docking_phase / proximity_phase) in which the probes are out: the final approach,
+## contact and every phase until the hooks open again. Anything else stows them; hold, retreat, abort keep the state they find.
+const EXTENDED_PROXIMITY := ["proximity_phase.final_approach", "proximity_phase.contact"]
+const EXTENDED_DOCKING := ["docking_phase.contact", "docking_phase.soft_capture", "docking_phase.retraction",
+		"docking_phase.hooks_closing", "docking_phase.docked", "docking_phase.hooks_opening"]
+const KEEP_PROXIMITY := ["proximity_phase.hold", "proximity_phase.retreat", "proximity_phase.abort"]
 
 var _axis := Vector3.BACK
 var _stroke_m := 0.0  # travel from stowed to extended (manifest probe_stroke_m, derived from the core's cone depth + extension)
@@ -132,15 +133,15 @@ func _axial_max(instance: MeshInstance3D) -> float:
 
 
 ## The extension the snapshot's docking_state asks for: 1 (extended: core extension_m beyond the seated length) in the final approach, contact and
-## soft capture, halfway to `seated` during the draw-in ("Einzug"), `seated` (heads in their seats) from the hooks closing until they open again, docked or
-## latched; 0 (stowed) otherwise; Halt / Rückzug / Abbruch keep `previous`. Mapping only.
+## soft capture, halfway to `seated` during the draw-in (retraction), `seated` (heads in their seats) from the hooks closing until they open again, docked or
+## latched; 0 (stowed) otherwise; hold / retreat / abort keep `previous`. Mapping only.
 static func extension_for(docking: Dictionary, previous: float, seated: float) -> float:
 	if not docking.get("present", false):
 		return 0.0
 	var phase := String(docking.get("docking_phase", ""))
-	if phase == "Kontakt" or phase == "Weichfang":
+	if phase == "docking_phase.contact" or phase == "docking_phase.soft_capture":
 		return 1.0
-	if phase == "Einzug":
+	if phase == "docking_phase.retraction":
 		return 0.5 * (1.0 + seated)
 	if docking.get("docked", false) or docking.get("latched", false) or EXTENDED_DOCKING.has(phase):
 		return seated

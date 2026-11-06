@@ -868,12 +868,12 @@ bool Vehicle::parachutes_out() const {
     return false;
 }
 
-const char* to_string(ParachuteState state) {
+const char* id_of(ParachuteState state) {  // i18n-ns: parachute_state
     switch (state) {
-        case ParachuteState::Stowed: return "verstaut";
-        case ParachuteState::Open: return "offen";
-        case ParachuteState::Released: return "abgeworfen";
-        case ParachuteState::Torn: return "Fallschirm gerissen";
+        case ParachuteState::Stowed: return "stowed";
+        case ParachuteState::Open: return "open";
+        case ParachuteState::Released: return "released";
+        case ParachuteState::Torn: return "torn";
     }
     return "?";
 }

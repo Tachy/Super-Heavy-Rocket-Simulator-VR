@@ -17,7 +17,7 @@ namespace starsim::gnc {
 // deorbit planned from the drift orbit replaces them). Same inputs as the proximity guidance.
 
 enum class DeparturePhase { UndockBurn, BackOut, DepartureBurn, Drift, Complete };
-const char* to_string(DeparturePhase phase);  // German
+const char* id_of(DeparturePhase phase);
 
 struct DepartureParameters {
     double undock_speed_mps = 0.15;  // [S: NASASpaceflight Crew-4 / Demo-1 "undock burn 1 ... 0.15 m/s"]

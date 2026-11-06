@@ -780,7 +780,7 @@ ReturnResult fly_capsule_return(sim::FlightSession& session, time::Epoch t0) {
         r.peak_g = std::max(r.peak_g, norm(session.body(session.controlled_index()).aero_acceleration_body_mps2()) /
                                           constants::standard_gravity_mps2);
         if (std::getenv("STARSIM_VERBOSE") && tel.altitude_m < 130000.0 && std::fmod(session.epoch() - t0, 20.0) < 1.0) {
-            std::printf("t %.0f %s h %.0f v %.0f\n", session.epoch() - t0, sim::to_string(session.capsule_return_step()),
+            std::printf("t %.0f %s h %.0f v %.0f\n", session.epoch() - t0, sim::id_of(session.capsule_return_step()),
                         tel.altitude_m, tel.speed_relative_mps);
         }
     }

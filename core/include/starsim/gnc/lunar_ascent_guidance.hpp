@@ -60,7 +60,7 @@ LunarAscentParameters lunar_ascent_parameters(const config::StageConfig& stage, 
 
 enum class LunarAscentPhase { Liftoff, Vertical, Arrest, Peg, Cutoff };
 // German: "Abheben", "Senkrechtaufstieg", "Sinken stoppen", "PEG", "Brennschluss"
-const char* to_string(LunarAscentPhase phase);
+const char* id_of(LunarAscentPhase phase);
 
 struct LunarAscentCommand {
     std::vector<std::string> run_groups;

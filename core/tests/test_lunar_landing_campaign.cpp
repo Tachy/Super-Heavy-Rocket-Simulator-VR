@@ -131,7 +131,7 @@ int fly_seeds(unsigned first, unsigned last) {
         const auto run = fly(d);
         std::printf("[lunar_campaign] case %2u: thrust %.3f, propellant %.3f, spot %.0f/%.0f m, slope %.1f deg: %s, offset %.2f m "
                     "(%.2f m at first contact, lateral %.3f m/s), sink %.2f m/s, %.1f t at PDI, %.1f t used, %s\n",
-                    seed, d.thrust_factor, d.mass_factor, d.east_m, d.north_m, run.slope_deg, sim::to_string(run.outcome),
+                    seed, d.thrust_factor, d.mass_factor, d.east_m, d.north_m, run.slope_deg, sim::id_of(run.outcome),
                     run.offset_m, run.first_contact_offset_m, run.lateral_mps, run.sink_mps, run.m0_t, run.used_t, run.status.c_str());
         std::fflush(stdout);
         if (run.outcome == sim::LegTouchdown::Landed && run.offset_m < 1.0 && run.sink_mps <= 1.1) ++landed;

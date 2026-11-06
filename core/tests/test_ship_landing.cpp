@@ -132,5 +132,5 @@ TEST_CASE("Ship return result: caught, upright abort or lost", "[ship][landing]"
     CHECK(sim::return_result(LandingOutcome::Splashdown, 5.0 * deg, 30.0) == ReturnResult::Lost);    // hard
     CHECK(sim::return_result(LandingOutcome::TippedOver, 5.0 * deg, 1.0) == ReturnResult::Lost);
     CHECK(sim::return_result(LandingOutcome::BrokenUp, 0.0, 0.0) == ReturnResult::Lost);
-    CHECK(std::string(sim::to_string(ReturnResult::UprightAbort)) == "aufrecht abgebrochen");
+    CHECK(std::string(sim::id_of(ReturnResult::UprightAbort)) == "upright_abort");
 }

@@ -16,7 +16,7 @@ namespace starsim::gnc {
 
 enum class LunarDescentPhase { Braking, Approach, Terminal, Touchdown, Landed, Aborted };
 // German: "Bremsphase", "Anflug", "Endanflug", "Aufsetzen", "gelandet", "Abbruch"
-const char* to_string(LunarDescentPhase phase);
+const char* id_of(LunarDescentPhase phase);
 
 // Terminal descent on the landing thrusters, after Apollo's P66 (rate of descent mode) [S: Bennett, "Apollo lunar
 // descent and ascent trajectories", NASA TM X-58040 (1970)]: the sink rate follows the height, the horizontal velocity

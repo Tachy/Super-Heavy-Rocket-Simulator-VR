@@ -28,13 +28,13 @@ bool engines_off(const vehicle::FlightBody& body) { return !body.vehicle().any_e
 
 }  // namespace
 
-const char* to_string(LegTouchdown touchdown) {
+const char* id_of(LegTouchdown touchdown) {  // i18n-ns: leg_touchdown
     switch (touchdown) {
-        case LegTouchdown::None: return "";
-        case LegTouchdown::Landed: return "gelandet";
-        case LegTouchdown::TippedOver: return "umgekippt";
-        case LegTouchdown::Impact: return "Aufprall";
-        case LegTouchdown::Splashdown: return "Wasserung";
+        case LegTouchdown::None: return "none";
+        case LegTouchdown::Landed: return "landed";
+        case LegTouchdown::TippedOver: return "tipped_over";
+        case LegTouchdown::Impact: return "impact";
+        case LegTouchdown::Splashdown: return "splashdown";
     }
     return "";
 }

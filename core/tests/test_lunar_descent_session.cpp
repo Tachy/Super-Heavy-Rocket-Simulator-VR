@@ -78,7 +78,7 @@ TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and 
     const auto& td = fx.session.lunar_touchdown();
     REQUIRE(td);
     std::printf("[lunar_descent_session] %s, offset %.2f m, sink %.2f m/s, wait %.2f d, %.1f t -> %.1f t landed, status %s\n",
-                sim::to_string(td->outcome), td->offset_m, td->sink_mps, (plan->pdi_epoch - fx.t0) / 86400.0,
+                sim::id_of(td->outcome), td->offset_m, td->sink_mps, (plan->pdi_epoch - fx.t0) / 86400.0,
                 m0 / 1000.0, fx.session.body(0).vehicle().mass_properties().mass_kg / 1000.0,
                 fx.session.lunar_status().c_str());
     CHECK(td->outcome == sim::LegTouchdown::Landed);
@@ -126,7 +126,7 @@ TEST_CASE("PDI: settled propellant needs no push and lights on time",
     REQUIRE(fx.session.plan_lunar_landing(setup));
     const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
     const auto run = fly_pdi(fx, 1.0, 120.0);
-    INFO(fx.session.lunar_status() << " / " << sim::to_string(fx.session.lunar_step()) << ", abort: "
+    INFO(fx.session.lunar_status() << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
          << fx.session.burn_abort_reason());
     REQUIRE(run.lit);
     CHECK_FALSE(run.pushed);
@@ -145,7 +145,7 @@ TEST_CASE("PDI: unsettled propellant holds the ignition while the push settles i
     const double lead = vehicle::settling_push(fx.session.body(0).vehicle(), 0).lead_s;  // the push's lead
     REQUIRE(lead > 10.0);
     const auto run = fly_pdi(fx, 0.0, sim::FlightSession::settling_hold_factor * lead + 300.0);
-    INFO(fx.session.lunar_status() << " / " << sim::to_string(fx.session.lunar_step()) << ", abort: "
+    INFO(fx.session.lunar_status() << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
          << fx.session.burn_abort_reason());
     REQUIRE(run.lit);
     CHECK(run.pushed);

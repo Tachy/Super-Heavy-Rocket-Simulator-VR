@@ -129,7 +129,7 @@ godot::Dictionary telemetry(const sim::FlightSession& session, size_t index) {
     d["breakup_reason"] = legacy_report(body.breakup_reason());
     d["skipped_out"] = body.skipped_out();
     if (const auto* e = session.entry_status(index)) {  // entry guidance setpoint (flight director)
-        d["entry_phase"] = godot::String::utf8(gnc::to_string(e->phase));
+        d["entry_phase"] = qualified_id("entry_phase", gnc::id_of(e->phase));
         d["entry_alpha_deg"] = e->alpha_rad * constants::rad_to_deg;
         d["entry_bank_deg"] = e->bank_rad * constants::rad_to_deg;
         d["entry_downrange_km"] = e->downrange_error_m / 1000.0;
@@ -163,7 +163,7 @@ godot::Dictionary body_legs(const sim::FlightSession& session, size_t index) {
     const auto& stage = vehicle.stages().front();
     const auto& legs = stage.config.landing_legs;
     d["deployment"] = vehicle.leg_deployment();
-    d["touchdown"] = godot::String::utf8(sim::to_string(session.leg_touchdown(index)));
+    d["touchdown"] = qualified_id("leg_touchdown", sim::id_of(session.leg_touchdown(index)));
     d["base_station_m"] = stage.base_station_m;
     d["hull_radius_m"] = 0.5 * stage.config.diameter_m;
     d["foot_station_m"] = legs.foot_station_m;
@@ -233,7 +233,7 @@ godot::Array body_parachutes(const sim::FlightSession& session, size_t index) {
             godot::Dictionary d;
             d["id"] = godot::String::utf8(p.config.id.c_str());
             d["role"] = godot::String::utf8(p.config.role.c_str());
-            d["state"] = godot::String::utf8(vehicle::to_string(p.state));
+            d["state"] = qualified_id("parachute_state", vehicle::id_of(p.state));
             d["count"] = p.config.count;
             d["attach_station_m"] = p.attach_station_m;
             d["drag_area_m2"] = p.drag_area_m2;
@@ -258,44 +258,44 @@ godot::Dictionary capsule_state(const sim::FlightSession& session, size_t index)
     d["nose_cone"] = vehicle.has_nose_cone();
     d["nose_cone_open"] = vehicle.nose_cone_open();
     d["trunk_attached"] = vehicle.stages().size() > 1;
-    d["return_step"] = godot::String::utf8(sim::to_string(session.capsule_return_step()));
+    d["return_step"] = qualified_id("capsule_return_step", sim::id_of(session.capsule_return_step()));
     const auto* sequencer = session.parachute_sequencer(index);
-    d["parachute_phase"] = sequencer ? godot::String::utf8(gnc::to_string(sequencer->phase())) : godot::String();
+    d["parachute_phase"] = sequencer ? qualified_id("parachute_phase", gnc::id_of(sequencer->phase())) : godot::String();
     d["parachute_torn"] = vehicle.parachute_torn();
     if (session.splashdown_zone()) d["splashdown_miss_m"] = session.splashdown_miss_m(index);
-    d["outcome"] = godot::String::utf8(sim::to_string(session.landing_outcome(index)));
+    d["outcome"] = qualified_id("landing_outcome", sim::id_of(session.landing_outcome(index)));
     return d;
 }
 
 godot::Dictionary return_state(const sim::FlightSession& session, size_t index, const godot::Dictionary& legs) {
     godot::Dictionary d;
     d["present"] = false;
-    d["outcome"] = godot::String::utf8(sim::to_string(session.landing_outcome(index)));
+    d["outcome"] = qualified_id("landing_outcome", sim::id_of(session.landing_outcome(index)));
     d["legs"] = legs;
     const auto* status = session.return_status(index);
     if (const auto* ship = session.ship_landing(index); !status && ship) {  // the ship from the gate (flip, catch, abort)
         const auto* scvx = ship->scvx();
         d["present"] = true;
-        d["phase"] = godot::String::utf8(gnc::to_string(ship->phase()));
-        d["guidance"] = godot::String::utf8(ship->upright_descent_active() ? "aufrecht" : "SCvx");
+        d["phase"] = qualified_id("return_phase", gnc::id_of(ship->phase()));
+        d["guidance"] = godot::String::utf8(ship->upright_descent_active() ? "guidance_mode.upright" : "guidance_mode.scvx");
         d["abort"] = ship->upright_descent_active() || (scvx && scvx->aborting());
         d["upright_descent"] = ship->upright_descent_active();
-        d["result"] = godot::String::utf8(sim::to_string(session.ship_return_result(index)));
+        d["result"] = qualified_id("return_result", sim::id_of(session.ship_return_result(index)));
         d["plans"] = scvx ? scvx->statistics().plans : 0;
         d["max_plan_ms"] = scvx ? scvx->statistics().max_solve_ms : 0.0;
         return d;
     }
     if (const auto* crew = session.crew_escape_state(); !status && crew && crew->armed && index == session.controlled_index()) {
         d["present"] = true;  // a crewed ship given up in the entry (no flip): flown to its impact
-        d["phase"] = godot::String::utf8("aufgegeben");
+        d["phase"] = godot::String::utf8("return_phase.given_up");
         d["abort"] = true;
-        d["result"] = godot::String::utf8(sim::to_string(session.ship_return_result(index)));
+        d["result"] = qualified_id("return_result", sim::id_of(session.ship_return_result(index)));
         return d;
     }
     if (!status) return d;
     d["present"] = true;
-    d["phase"] = godot::String::utf8(gnc::to_string(status->phase));
-    d["guidance"] = godot::String::utf8(status->scvx ? "SCvx" : "explizit");
+    d["phase"] = qualified_id("return_phase", gnc::id_of(status->phase));
+    d["guidance"] = godot::String::utf8(status->scvx ? "guidance_mode.scvx" : "guidance_mode.explicit");
     d["abort"] = status->abort;
     const auto* guidance = session.return_guidance(index);
     const auto* scvx = guidance ? guidance->scvx() : nullptr;
@@ -360,7 +360,7 @@ godot::Dictionary tower_state(const sim::FlightSession& session) {
     if (!tower) return d;
     d["opening_rad"] = tower->arms().opening_rad();
     d["carriage_offset_m"] = tower->arms().carriage_offset_m();
-    d["phase"] = godot::String::utf8(sim::to_string(tower->phase()));
+    d["phase"] = qualified_id("catch_phase", sim::id_of(tower->phase()));
     return d;
 }
 
@@ -386,9 +386,9 @@ godot::Dictionary splashdown_zone(const sim::FlightSession& session) {
 godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     godot::Dictionary d;
     const auto& ap = session.autopilot();
-    d["state"] = godot::String::utf8(sim::to_string(ap.state));
+    d["state"] = qualified_id("autopilot_state", sim::id_of(ap.state));
     d["engaged"] = ap.state != sim::AutopilotState::Off && ap.state != sim::AutopilotState::Orbit;
-    d["phase"] = godot::String::utf8(gnc::to_string(ap.guidance.phase));
+    d["phase"] = qualified_id("ascent_phase", gnc::id_of(ap.guidance.phase));
     d["time_to_go_s"] = ap.guidance.time_to_go_s;
     const bool burning = ap.state == sim::AutopilotState::Burn;
     d["direction"] = to_godot(burning ? ap.burn.direction_gcrf : ap.guidance.thrust_direction_gcrf);
@@ -424,7 +424,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
         d["return"] = r;
     }
     if (session.capsule_return_step() != sim::CapsuleReturnStep::None) {
-        d["capsule_step"] = godot::String::utf8(sim::to_string(session.capsule_return_step()));
+        d["capsule_step"] = qualified_id("capsule_return_step", sim::id_of(session.capsule_return_step()));
     }
     return d;
 }

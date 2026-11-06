@@ -91,7 +91,7 @@ TEST_CASE("starbase catch on the real terrain", "[data][slow][earth_terrain][asc
     const double ground_m = terrain->height_ellipsoid_m(g.latitude_rad, g.longitude_rad);
     std::printf("[earth_terrain] Starbase catch on the terrain: tower %s, booster %.2f m from the catch axis, %.2f m above "
                 "the tower base, ground %.3f m (site %.3f m), max pin load %.2f MN\n",
-                sim::to_string(tower->phase()), std::hypot(p.x, p.y), p.z, ground_m, site.height_m,
+                sim::id_of(tower->phase()), std::hypot(p.x, p.y), p.z, ground_m, site.height_m,
                 tower->max_pin_load_n() / 1e6);
     CHECK(std::abs(ground_m - site.height_m) <= 0.01);
     CHECK(std::abs(session.telemetry(0).altitude_terrain_m - (g.height_m - site.height_m)) <= 0.01);
@@ -128,7 +128,7 @@ TEST_CASE("Falcon 9 RTLS to LZ-40 on the real terrain", "[data][slow][earth_terr
     const double foot_m = geodetic(session, foot_gcrf).height_m;
     std::printf("[earth_terrain] Falcon 9 RTLS on the terrain: %s, %.2f m from the centre, feet at %.4f m (plateau %.4f m), "
                 "%.1f t left\n",
-                sim::to_string(session.landing_outcome(0)), std::hypot(p.x, p.y), foot_m, zone.height_m,
+                sim::id_of(session.landing_outcome(0)), std::hypot(p.x, p.y), foot_m, zone.height_m,
                 stage.vehicle().propellant_kg() / 1e3);
     // Same limits as the flat-ground case ("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40").
     CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);

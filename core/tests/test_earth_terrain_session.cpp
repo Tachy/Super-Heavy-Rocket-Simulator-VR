@@ -293,7 +293,7 @@ TEST_CASE("leg landing on a sloped terrain field", "[session][earth_terrain][leg
         }
         tilt_deg = tilt_from_vertical_deg(session, 0);
         std::printf("[earth terrain] F9 on a %.1f deg %s: %s, tilt %.3f deg\n", slope_deg, on_terrain ? "terrain" : "plane",
-                    sim::to_string(session.leg_touchdown(0)), tilt_deg);
+                    sim::id_of(session.leg_touchdown(0)), tilt_deg);
         CHECK(session.body(0).resting());
         return session.leg_touchdown(0);
     };

@@ -15,7 +15,7 @@ namespace starsim::gnc {
 
 enum class ReturnPhase { Flip, Boostback, Coast, EntryBurn, LandingBurn, Landed };
 
-const char* to_string(ReturnPhase phase);
+const char* id_of(ReturnPhase phase);
 
 // Production builds these from the vehicle config (booster_return_parameters); the member defaults are unit-test
 // fixtures only.

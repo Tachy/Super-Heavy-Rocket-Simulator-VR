@@ -131,7 +131,7 @@ double descent_delta_v_mps(const DescentResult& r) {
 void report(const char* label, const Fixture& fx, const DescentResult& r) {
     std::printf("[lunar_descent] %s: %s, offset %.2f m, sink %.2f m/s, lateral %.2f m/s, braking %.0f s, total %.0f s, "
                 "%.1f -> %.1f (drop) -> %.1f t, %.0f m/s (%.0f m/s at 350 s), %s\n",
-                label, sim::to_string(r.outcome), r.offset_m, r.sink_mps, r.lateral_mps, r.braking_s, r.seconds,
+                label, sim::id_of(r.outcome), r.offset_m, r.sink_mps, r.lateral_mps, r.braking_s, r.seconds,
                 r.m0 / 1000.0, r.m_drop / 1000.0, r.m1 / 1000.0, descent_delta_v_mps(r),
                 350.0 * constants::standard_gravity_mps2 * std::log(r.m0 / r.m1), fx.session.lunar_status().c_str());
 }

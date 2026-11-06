@@ -309,7 +309,7 @@ TEST_CASE("The touchdown is judged relative to the deck", "[legs][deck_motion][a
         const auto placed = session.epoch();
         const auto result = run_drop(session);
         std::printf("[deck] roll %.2f deg, stage %.1f deg to the deck (%.1f deg from the vertical): %s after %.2f s\n",
-                    pose.roll_rad / deg, tilt_to_deck_rad / deg, tilt_from_vertical / deg, sim::to_string(result),
+                    pose.roll_rad / deg, tilt_to_deck_rad / deg, tilt_from_vertical / deg, sim::id_of(result),
                     session.epoch() - placed);
         return std::pair{result, session.epoch() - placed};
     };

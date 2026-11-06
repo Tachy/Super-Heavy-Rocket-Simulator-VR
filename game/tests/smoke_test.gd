@@ -618,14 +618,14 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(pose_seen and pose_sane, "ASDS sea: the deck heaves and pitches (pose finite, axes orthonormal, bow up = pitch)")
 	var legs: Dictionary = f9.body_legs(0)
 	_check(legs.get("present", false) and (legs.get("azimuths_deg", []) as Array).size() == 4
-			and float(legs.get("deployment", 1.0)) == 0.0 and legs.get("touchdown", "x") == "", "Falcon 9 stack: four stowed legs")
+			and float(legs.get("deployment", 1.0)) == 0.0 and legs.get("touchdown", "x") == "leg_touchdown.none", "Falcon 9 stack: four stowed legs")
 	var fins: Array = f9.body_grid_fins(0)
 	_check(fins.size() == 4 and absf(float(fins[0].get("area_m2", 0.0)) - 1.8) < 1e-9, "Falcon 9 stack: four grid fins")
 	_check((f9.return_state(0) as Dictionary).has("legs"), "return state carries the legs")
 	_check(not _ok(f9, f9.start_mission("no_such_mission", tdb)), "unknown mission is refused")
 	_check(_ok(f9, f9.launch_from_site("falcon9_block5", "ccsfs_slc40", 0.0, tdb)), "Falcon 9 launches without a mission")
 	_advance(f9, tdb + 5.0)
-	_check(f9.autopilot_status().get("state", "") == "aus", "a plain launch after a mission starts with the autopilot off")
+	_check(f9.autopilot_status().get("state", "") == "autopilot_state.off", "a plain launch after a mission starts with the autopilot off")
 	_check(not f9.landing_zone().get("present", true), "a plain launch has no landing zone")
 	_check(f9.mission_site_id() == "ccsfs_slc40", "plain launch: its site")
 	_check(f9.body_legs(7).is_empty() and f9.body_grid_fins(7).is_empty(), "invalid body index: empty results")
@@ -639,7 +639,7 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(refusal.get("done", false) and not refusal.get("ok", true)
 			and str(refusal.get("report", {}).get("params", {}).get("text", "")) == "Kein Fangturm am Startplatz.",
 			"Starship at SLC-40: the launch is refused with the German reason (%s)" % str(refusal))
-	_check(refused.is_active() and refused.autopilot_status().get("state", "") == "aus"
+	_check(refused.is_active() and refused.autopilot_status().get("state", "") == "autopilot_state.off"
 			and not refused.autopilot_status().get("planning", true), "refused launch: on the pad, autopilot off, not planning")
 	var ship := FlightSim.new()
 	ship.setup(config_dir)
@@ -650,7 +650,7 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(_ok(ship, ship.start_mission("starship_leo", tdb)) and ship.mission_site_id() == "starbase_pad2",
 			"Starship LEO mission starts at Starbase")
 	_check(not _ok(ship, ship.abort_landing(0)), "abort refused for a body that is not returning")
-	_check(ship.is_active() and ship.tower_state().get("phase", "") != "Abbruch",
+	_check(ship.is_active() and ship.tower_state().get("phase", "") != "catch_phase.aborted",
 			"abort before staging changes nothing (tower not aborted)")
 	# a refuelling flight that starts on its phasing orbit does not plan an ascent: the flag never shows
 	var orbit := FlightSim.new()
@@ -693,14 +693,14 @@ func _check_dragon(config_dir: String, tdb: float) -> bool:
 	var capsule: Dictionary = ret.capsule_state(ret.controlled_index())
 	_check(capsule.get("present", false) and capsule.get("trunk_attached", false) and capsule.get("nose_cone_open", false),
 			"capsule on its trunk with the nose cone open")
-	_check(capsule.get("return_step", "") == "Deorbit-Brennvorgang", "the deorbit burn is planned")
+	_check(capsule.get("return_step", "") == "capsule_return_step.deorbit_burn", "the deorbit burn is planned")
 	_check(capsule.get("parachute_phase", "x") == "", "no parachute sequencer while the trunk is attached")
 	_check(ret.autopilot_status().get("return", {}).get("feasible", false), "the return plan is feasible")
-	_check(ret.autopilot_status().get("capsule_step", "") == "Deorbit-Brennvorgang", "autopilot status: capsule step")
+	_check(ret.autopilot_status().get("capsule_step", "") == "capsule_return_step.deorbit_burn", "autopilot status: capsule step")
 	var zone: Dictionary = ret.splashdown_zone()
 	_check(zone.get("present", false) and absf(float(zone.get("radius_m", 0.0)) - 2000.0) < 1e-9, "splashdown zone radius 2 km")
 	var chutes: Array = ret.body_parachutes(ret.controlled_index())
-	_check(chutes.size() == 2 and chutes[0].get("state", "") == "verstaut" and float(chutes[0].get("inflation", 1.0)) == 0.0,
+	_check(chutes.size() == 2 and chutes[0].get("state", "") == "parachute_state.stowed" and float(chutes[0].get("inflation", 1.0)) == 0.0,
 			"parachutes stowed")
 	_check(ret.body_rcs(ret.controlled_index()).size() == 16, "Crew Dragon alone: 16 Dracos")
 	_advance(ret, ret.mission_start_tdb_s() + 10.0)
@@ -781,7 +781,7 @@ func _check_iss(config_dir: String, tdb: float) -> bool:
 	var plan: Dictionary = sim.rendezvous_plan()
 	_check(plan.get("present", false) and plan.get("feasible", false), "rendezvous_plan feasible")
 	_check(plan.get("burns", []).size() >= 3, "rendezvous_plan has its burns")
-	_check(sim.iss_mission().get("leg", "") == "Phasenflug", "iss_mission in the phasing leg")
+	_check(sim.iss_mission().get("leg", "") == "iss_mission_leg.rendezvous", "iss_mission in the phasing leg")
 	_check(sim.iss_mission().get("separation_tdb_s", 0.0) > 0.0, "the start is a launch window's separation")
 	var geo: Dictionary = sim.station_geometry()
 	_check(geo.get("present", false) and geo["boxes"].size() + geo["capsules"].size() >= 9,
@@ -793,7 +793,7 @@ func _check_iss(config_dir: String, tdb: float) -> bool:
 	var und: int = sim.undock()
 	_check(sim.wait_idle(10.0) and not sim.result(und).get("ok", true), "undock refused while not docked")
 	_check(not sim.docking_state().get("docked", false), "not docked during phasing")
-	_check(sim.iss_mission().get("leg", "") == "Phasenflug", "refused commands leave the sequence running")
+	_check(sim.iss_mission().get("leg", "") == "iss_mission_leg.rendezvous", "refused commands leave the sequence running")
 
 	var pad := FlightSim.new()
 	pad.setup(config_dir)

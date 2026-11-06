@@ -95,14 +95,14 @@ enum class AutopilotState {
     Departure
 };
 
-const char* to_string(AutopilotState state);
+const char* id_of(AutopilotState state);
 
 // Steps of a capsule's return from orbit (FlightSession::plan_capsule_return).
 // Lost: the capsule impacted or broke up before resting on the water (autopilot off).
 enum class CapsuleReturnStep {
     None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate, Drogues, Mains, SplashedDown, Lost
 };
-const char* to_string(CapsuleReturnStep step);
+const char* id_of(CapsuleReturnStep step);
 
 // Steps of a lunar flight (plan_lunar_outbound / plan_lunar_orbit_transfer). Tli, MidCourse, PoweredFlyby, Insertion and
 // StationKeeping: that burn is under way (the autopilot state is Burn meanwhile); the others wait for their next event.
@@ -124,12 +124,13 @@ enum class LunarStep {
     AscentCoast, Circularize, AbortAscent, Lost, ReturnDeparture, Tei, ReturnCoast, ReturnCorrection, Braking, EarthEntry,
     Aerocapture, CaptureCoast, PerigeeRaise, CaptureCircularize, EntryTrim, RepassTrim
 };
-const char* to_string(LunarStep step);
+const char* id_of(LunarStep step);
+const char* to_string(LunarStep step);  // German; transitional: removed by Task 8
 
 // Steps of a rendezvous (plan_rendezvous, ISS i3): Coast until the next burn's command epoch, Burn while it is under way
 // (the autopilot state is Burn meanwhile), Waypoint0 after the braking burn (400 m below the station; i4 continues).
 enum class RendezvousStep { None, Coast, Burn, Waypoint0 };
-const char* to_string(RendezvousStep step);
+const char* id_of(RendezvousStep step);
 
 // ISS mission legs (i6, FlightSession::set_iss_mission): Ascent until the payload is separated, Rendezvous (phasing
 // to Waypoint 0), Proximity (to contact), Docking (capture .. hooks), Docked = complete; departure: WaitUndock,
@@ -138,7 +139,7 @@ const char* to_string(RendezvousStep step);
 // return to the catch; Raise lifts a low insertion perigee to the phasing orbit; WaitContinue holds a departed vehicle until its continuation (the lunar mission) takes over.
 enum class IssMissionLeg { None, Ascent, Raise, Rendezvous, Proximity, Docking, Docked, Transfer, WaitUndock, Departure,
                            Return, WaitContinue, Complete, Ended };
-const char* to_string(IssMissionLeg leg);  // German
+const char* id_of(IssMissionLeg leg);
 
 // The transfer of a docked chaser (refuelling r5): a tanker delivers down to its computed return reserve; the station
 // fills the chaser's main tanks up to full (down to its own empty tanks).

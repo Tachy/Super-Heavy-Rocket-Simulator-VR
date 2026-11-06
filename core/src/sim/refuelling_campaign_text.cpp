@@ -135,7 +135,7 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
     const auto day = [&](time::Epoch t) { return (t - start) / seconds_per_day; };
     out << "Flown refuelling campaign (f2)";
     if (st.start) out << " from " << utc_at(start);
-    out << " - " << to_string(st.phase) << ": " << st.status << "\n";
+    out << " - " << id_of(st.phase) << ": " << st.status << "\n";
     if (st.calculator) {
         out << line("  calculator (first plan, reported): %.0f tankers, %.1f days; HLS needs %.1f t propellant\n",
                     st.calculator->result.tanker_flights, st.calculator->result.duration_s / seconds_per_day,
@@ -193,7 +193,7 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
                     st.hls_propellant_kg / kg_per_t);
     }
     if (st.first_return) {
-        out << "  first tanker return: " << to_string(*st.first_return)
+        out << "  first tanker return: " << id_of(*st.first_return)
             << line(", main %.2f t", st.first_return_main_kg / kg_per_t);
         if (!st.first_return_note.empty()) out << " (" << st.first_return_note << ")";
         out << "\n";

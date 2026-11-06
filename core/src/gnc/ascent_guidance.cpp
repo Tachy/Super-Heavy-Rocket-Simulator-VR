@@ -67,13 +67,13 @@ double shutdown_time_s(const vehicle::Vehicle& v) {
 
 }  // namespace
 
-const char* to_string(AscentPhase phase) {
+const char* id_of(AscentPhase phase) {  // i18n-ns: ascent_phase
     switch (phase) {
-        case AscentPhase::Vertical: return "Senkrechter Aufstieg";
-        case AscentPhase::PitchKick: return "Nickmanöver";
-        case AscentPhase::GravityTurn: return "Gravity Turn";
-        case AscentPhase::ClosedLoop: return "Geschlossene Führung (PEG)";
-        case AscentPhase::Cutoff: return "Brennschluss";
+        case AscentPhase::Vertical: return "vertical";
+        case AscentPhase::PitchKick: return "pitch_kick";
+        case AscentPhase::GravityTurn: return "gravity_turn";
+        case AscentPhase::ClosedLoop: return "closed_loop";
+        case AscentPhase::Cutoff: return "cutoff";
     }
     return "";
 }

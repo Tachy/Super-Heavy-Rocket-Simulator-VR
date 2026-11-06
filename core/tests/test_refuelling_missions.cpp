@@ -377,7 +377,7 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     CHECK(marks[1].leg == IssMissionLeg::Transfer);
     if (verbose()) {
         for (const auto& m : marks) {
-            std::printf("[r5] %-24s +%8.0f s  main %.1f t  station %.1f t\n", sim::to_string(m.leg),
+            std::printf("[r5] %-24s +%8.0f s  main %.1f t  station %.1f t\n", sim::id_of(m.leg),
                         m.epoch - marks.front().epoch, m.chaser_main_propellant_kg / 1e3,
                         m.station_main_propellant_kg / 1e3);
         }
@@ -729,7 +729,7 @@ TEST_CASE("Refuelling flights: the window's separation estimate matches the flow
                                                    session.body(session.controlled_index()).state().velocity_gcrf_mps},
                                                   constants::earth_gm_m3ps2);
         const double ra = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
-        std::printf("[r5] at the end of the ascent leg: %s, %.1f x %.1f km\n", sim::to_string(marks[1].leg),
+        std::printf("[r5] at the end of the ascent leg: %s, %.1f x %.1f km\n", sim::id_of(marks[1].leg),
                     (e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m) / 1e3,
                     ra / 1e3);
         // the leg ends after the engines' tail-off (its ~12 m/s at 5 g lift the apoapsis by ~35 km)
@@ -774,7 +774,7 @@ void fly_mission(refuelling_test::DepotSession& f, double limit_s) {
     if (verbose()) {
         const auto& marks = f.session.iss_mission_marks();
         for (const auto& m : marks) {
-            std::printf("[r5] %-24s +%8.0f s  mass %.1f t  main %.2f t  station %.1f t\n", sim::to_string(m.leg),
+            std::printf("[r5] %-24s +%8.0f s  mass %.1f t  main %.2f t  station %.1f t\n", sim::id_of(m.leg),
                         m.epoch - marks.front().epoch, m.chaser_mass_kg / 1e3, m.chaser_main_propellant_kg / 1e3,
                         m.station_main_propellant_kg / 1e3);
         }
@@ -949,7 +949,7 @@ TEST_CASE("Tanker ascent levers", "[.r5_probe][ascent_planner]") {
         std::printf("[r5 probe] %-28s insertion %.0f s, %.1f x %.1f km, main %.1f t, in 170 x 190: %.1f t, booster %s\n",
                     variant.name, insertion_s, (rp - constants::wgs84_semi_major_axis_m) / 1e3,
                     (ra - constants::wgs84_semi_major_axis_m) / 1e3, main_kg / 1e3, equivalent / 1e3,
-                    sim::to_string(f.session.tower()->phase()));
+                    sim::id_of(f.session.tower()->phase()));
     }
 }
 
@@ -1128,14 +1128,14 @@ TEST_CASE("Probe: hls_refuel_orbit timeline", "[.r5_probe]") {
         const double wall_s = std::chrono::duration<double>(now - wall0).count();
         if (step_s > 2.0) {
             std::printf("[probe] sim %7.2f h  wall %6.0f s (+%5.1f)  leg %-22s autopilot %-12s %s\n",
-                        (f.lunar.epoch() - start) / 3600.0, wall_s, step_s, sim::to_string(f.lunar.iss_mission_leg()),
-                        sim::to_string(f.lunar.autopilot().state), f.lunar.iss_mission_status().c_str());
+                        (f.lunar.epoch() - start) / 3600.0, wall_s, step_s, sim::id_of(f.lunar.iss_mission_leg()),
+                        sim::id_of(f.lunar.autopilot().state), f.lunar.iss_mission_status().c_str());
             std::fflush(stdout);
         }
         if (wall_s > 900.0 || f.lunar.iss_mission_status().find("Freigabe") != std::string::npos) break;
     }
     std::printf("[probe] end: sim %.2f h, leg %s, %s\n", (f.lunar.epoch() - start) / 3600.0,
-                sim::to_string(f.lunar.iss_mission_leg()), f.lunar.iss_mission_status().c_str());
+                sim::id_of(f.lunar.iss_mission_leg()), f.lunar.iss_mission_status().c_str());
 }
 
 TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continues with the real tank load",
@@ -1186,10 +1186,10 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
     }
     INFO(f.lunar.iss_mission_status());
     INFO("breakup: " << f.lunar.body(f.lunar.controlled_index()).breakup_reason() << ", tower "
-                     << sim::to_string(f.lunar.tower()->phase()) << ", liftoff +"
+                     << sim::id_of(f.lunar.tower()->phase()) << ", liftoff +"
                      << (f.lunar.epoch() - s.epoch) / 3600.0 << " h");
     for (const auto& m : f.lunar.iss_mission_marks()) {
-        std::printf("[r5] hls_refuel %-24s +%9.0f s  main %.1f t  station %.1f t\n", sim::to_string(m.leg),
+        std::printf("[r5] hls_refuel %-24s +%9.0f s  main %.1f t  station %.1f t\n", sim::id_of(m.leg),
                     m.epoch - s.epoch, m.chaser_main_propellant_kg / 1e3, m.station_main_propellant_kg / 1e3);
     }
     REQUIRE(f.lunar.iss_mission_leg() == IssMissionLeg::Complete);

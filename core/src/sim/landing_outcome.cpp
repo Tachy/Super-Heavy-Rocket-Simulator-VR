@@ -8,16 +8,16 @@ namespace starsim::sim {
 
 using math::Vec3;
 
-const char* to_string(LandingOutcome outcome) {
+const char* id_of(LandingOutcome outcome) {  // i18n-ns: landing_outcome
     switch (outcome) {
-        case LandingOutcome::Flying: return "fliegt";
-        case LandingOutcome::Caught: return "gefangen";
-        case LandingOutcome::Landed: return "gelandet";
-        case LandingOutcome::Splashdown: return "Wasserung";
-        case LandingOutcome::Impact: return "Aufprall";
-        case LandingOutcome::BrokenUp: return "zerbrochen";
-        case LandingOutcome::TippedOver: return "umgekippt";
-        case LandingOutcome::SplashedDown: return "gewassert";
+        case LandingOutcome::Flying: return "flying";
+        case LandingOutcome::Caught: return "caught";
+        case LandingOutcome::Landed: return "landed";
+        case LandingOutcome::Splashdown: return "splashdown";
+        case LandingOutcome::Impact: return "impact";
+        case LandingOutcome::BrokenUp: return "broken_up";
+        case LandingOutcome::TippedOver: return "tipped_over";
+        case LandingOutcome::SplashedDown: return "splashed_down";
     }
     return "";
 }
@@ -33,12 +33,12 @@ Vec3 site_enu_m(const LaunchSite& site, const Vec3& itrf_m) {
     return {dot(d, Vec3{-so, co, 0.0}), dot(d, Vec3{-sl * co, -sl * so, cl}), dot(d, Vec3{cl * co, cl * so, sl})};
 }
 
-const char* to_string(ReturnResult result) {
+const char* id_of(ReturnResult result) {  // i18n-ns: return_result
     switch (result) {
-        case ReturnResult::Flying: return "fliegt";
-        case ReturnResult::Caught: return "gefangen";
-        case ReturnResult::UprightAbort: return "aufrecht abgebrochen";
-        case ReturnResult::Lost: return "verloren";
+        case ReturnResult::Flying: return "flying";
+        case ReturnResult::Caught: return "caught";
+        case ReturnResult::UprightAbort: return "upright_abort";
+        case ReturnResult::Lost: return "lost";
     }
     return "?";
 }

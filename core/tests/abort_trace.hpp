@@ -62,7 +62,7 @@ public:
                      top.z, radius, hull_to_box_m(bottom, top, radius, g.tower_box()),
                      hull_to_box_m(bottom, top, radius, g.arm_box(1, arms.opening_rad(), arms.carriage_offset_m())),
                      hull_to_box_m(bottom, top, radius, g.arm_box(-1, arms.opening_rad(), arms.carriage_offset_m())),
-                     sim::to_string(tower->phase()), arms.opening_rad());
+                     sim::id_of(tower->phase()), arms.opening_rad());
     }
 
 private:

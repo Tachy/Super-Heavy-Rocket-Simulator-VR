@@ -8,8 +8,8 @@ namespace starsim::gnc {
 // drogue, then the seat-man separation and the main; 3 high - the drogue is held until the low-mode height, then as 2.
 enum class SeatMode { Mode1, Mode2, Mode3 };
 enum class SeatPhase { Waiting, Catapult, Rocket, Drogue, Separated, Main, Down };
-const char* to_string(SeatPhase phase);  // German UI text
-const char* to_string(SeatMode mode);
+const char* id_of(SeatPhase phase);
+const char* id_of(SeatMode mode);
 
 // Equivalent airspeed of a dynamic pressure (US76 sea-level density).
 double equivalent_airspeed_mps(double dynamic_pressure_pa);

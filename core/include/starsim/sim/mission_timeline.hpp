@@ -33,7 +33,6 @@ enum class MissionEventKind {
 };
 
 // German display label of an event kind.
-const char* to_string(MissionEventKind kind);
 // Stable snake_case identifier of an event kind ("max_q", "stage_separation"), for scripts and data.
 const char* id_of(MissionEventKind kind);
 

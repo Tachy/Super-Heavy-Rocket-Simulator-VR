@@ -13,7 +13,7 @@ namespace starsim::gnc {
 
 enum class EntryPhase { Entry, Terminal, Gate, Exit };  // Exit: an aerocapture left the atmosphere
 
-const char* to_string(EntryPhase phase);
+const char* id_of(EntryPhase phase);
 
 struct EntryGuidanceParameters {
     // [E] above the target ground: the flip starts here (b3). Flight 13 relit at ~0.95 km / 101 m/s and flipped in

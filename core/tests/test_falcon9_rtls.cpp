@@ -178,7 +178,7 @@ TEST_CASE("Falcon 9 lands on LZ-40 from the landing-burn ignition state", "[gnc]
                                     t0, parameters, gnc::ReturnPhase::LandingBurn);
     const auto run = test::fly_to_touchdown(session, earth(), t0, 60.0);
     std::printf("[falcon9] ignition at %.0f m: %s / %s, contact offset %.2f m, sink %.2f m/s, lateral %.2f m/s, legs %.2f, "
-                "ended %.2f m off, %.0f kg left\n", h, sim::to_string(run.touchdown), sim::to_string(run.outcome),
+                "ended %.2f m off, %.0f kg left\n", h, sim::id_of(run.touchdown), sim::id_of(run.outcome),
                 run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps, run.legs_at_contact, run.offset_m,
                 run.propellant_kg);
     CHECK(h > 2500.0);
@@ -245,7 +245,7 @@ TEST_CASE("Falcon 9 RTLS landing campaign: dispersions at ignition", "[gnc][falc
         CAPTURE(i);
         std::printf("case %2zu: %s, contact %.2f m, sink %.2f m/s, lateral %.2f m/s, ended %.2f m off, %.0f kg left "
                     "(aero x%.2f); %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f, feedback %.2f (%d of %d)\n", i,
-                    sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
+                    sim::id_of(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
                     run.offset_m, run.propellant_kg, cases[i].aero_factor, run.scvx.plans, run.scvx.failures,
                     run.scvx.peak_gimbal_use, run.scvx.clipped_ticks, run.scvx.lateral_ticks, run.scvx.terminal_peak_gimbal_use, run.scvx.terminal_peak_feedback_use,
                     run.scvx.terminal_clipped_ticks, run.scvx.terminal_ticks);
@@ -320,14 +320,14 @@ RtlsFlight fly_rtls_mission() {
         if (!status) break;
         if (std::getenv("STARSIM_VERBOSE") && std::fmod(session.mission_time_s(), 5.0) < 0.05) {
             const auto [h, v] = height_speed(stage);
-            std::printf("    T+%.0f s %s %.1f km %.0f m/s miss %.0f m\n", session.mission_time_s(), gnc::to_string(status->phase),
+            std::printf("    T+%.0f s %s %.1f km %.0f m/s miss %.0f m\n", session.mission_time_s(), gnc::id_of(status->phase),
                         h / 1e3, v, status->impact_miss_m);
         }
         if (status->phase != last_phase) {
             if (std::getenv("STARSIM_VERBOSE")) {
                 const auto [h, v] = height_speed(stage);
                 std::printf("  T+%.1f s %s: %.1f km, %.0f m/s, %.1f t, miss %.0f m\n", session.mission_time_s(),
-                            gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3, status->impact_miss_m);
+                            gnc::id_of(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3, status->impact_miss_m);
             }
             last_phase = status->phase;
             if (status->phase == gnc::ReturnPhase::Boostback && boostback_s < 0.0) {
@@ -386,7 +386,7 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
                 "%.2f deg; ignition %.1f deg off the velocity at %.1f deg/s; three engines %.1f s after ignition; N2 %.0f kg at "
                 "the separation, %.0f kg left\n",
                 f.meco_s, f.meco_propellant_kg / 1e3, f.entry_s, f.entry_h / 1e3, f.landing_s, f.landing_h / 1e3, f.landing_v,
-                f.landing_propellant_kg / 1e3, sim::to_string(f.outcome), f.end_s, f.offset_m, f.boostback_s - f.meco_s,
+                f.landing_propellant_kg / 1e3, sim::id_of(f.outcome), f.end_s, f.offset_m, f.boostback_s - f.meco_s,
                 f.hold_tilt_deg, f.ignition_off_velocity_deg, f.ignition_rate_deg_s, f.three_engines_s - f.boostback_s,
                 f.n2_at_separation_kg, f.n2_left_kg);
     CHECK(f.meco_s > 0.0);
@@ -505,7 +505,7 @@ void fly_flip_campaign(int first, int last) {
         const auto f = fly_from_separation(d, rate, 1.0);
         CAPTURE(i);
         std::printf("flip case %2d: ignition %.2f s, %s, %.2f m off, %.0f kg left, %d plans (%d failed)\n", i, f.ignition_after_s,
-                    sim::to_string(f.run.outcome), f.run.offset_m, f.run.propellant_kg, f.run.scvx.plans, f.run.scvx.failures);
+                    sim::id_of(f.run.outcome), f.run.offset_m, f.run.propellant_kg, f.run.scvx.plans, f.run.scvx.failures);
         std::fflush(stdout);
         CHECK(f.run.outcome == sim::LandingOutcome::Landed);
         CHECK(f.ignition_after_s < 17.1);
@@ -545,7 +545,7 @@ TEST_CASE("Falcon 9 flip: a stuck or weak turn lights at the time limit and has 
     for (const double factor : {0.0, 0.5}) {
         const auto f = fly_from_separation(RtlsDispersion{}, Vec3{}, factor);
         std::printf("[validation] Falcon 9 flip, RCS x%.1f: ignition %.2f s, %s, %.2f m off, %.0f kg left\n", factor, f.ignition_after_s,
-                    sim::to_string(f.run.outcome), f.run.offset_m, f.run.propellant_kg);
+                    sim::id_of(f.run.outcome), f.run.offset_m, f.run.propellant_kg);
         CAPTURE(factor);
         CHECK(f.ignition_after_s < 17.1);
         CHECK((f.run.outcome == sim::LandingOutcome::Landed || f.run.outcome == sim::LandingOutcome::Splashdown));
@@ -568,8 +568,8 @@ TEST_CASE("A Falcon 9 stage that cannot reach the landing zone ditches at sea", 
                                     t0, parameters, gnc::ReturnPhase::LandingBurn);
     const auto run = test::fly_to_touchdown(session, earth(), t0, 60.0);
     const auto* guidance = session.return_guidance(0);
-    std::printf("[falcon9] abort: %s / %s, ended %.0f m from the zone, abort %d\n", sim::to_string(run.touchdown),
-                sim::to_string(run.outcome), run.offset_m, guidance && guidance->scvx() ? guidance->scvx()->aborting() : -1);
+    std::printf("[falcon9] abort: %s / %s, ended %.0f m from the zone, abort %d\n", sim::id_of(run.touchdown),
+                sim::id_of(run.outcome), run.offset_m, guidance && guidance->scvx() ? guidance->scvx()->aborting() : -1);
     REQUIRE(guidance->scvx() != nullptr);
     CHECK(guidance->scvx()->aborting());
     CHECK(run.outcome == sim::LandingOutcome::Splashdown);

@@ -71,7 +71,7 @@ vehicle::VehicleCommand FlightSession::steering_command_for(size_t index, double
                 std::printf(" | error %+.2f/%+.2f/%+.2f deg bias %+.2f/%+.2f/%+.2f deg k %.3f phase %s\n",
                             err.x / constants::deg_to_rad, err.y / constants::deg_to_rad, err.z / constants::deg_to_rad,
                             b.x / (inertia.x * 0.25) / constants::deg_to_rad, b.y / (inertia.y * 0.25) / constants::deg_to_rad,
-                            b.z / (inertia.z * 0.25) / constants::deg_to_rad, flying.entry_hull_moment_scale, gnc::to_string(e.phase));
+                            b.z / (inertia.z * 0.25) / constants::deg_to_rad, flying.entry_hull_moment_scale, gnc::id_of(e.phase));
             }
         }
         return command;

@@ -5,11 +5,11 @@
 
 namespace starsim::sim {
 
-const char* to_string(CrewOutcome outcome) {
+const char* id_of(CrewOutcome outcome) {  // i18n-ns: crew_outcome
     switch (outcome) {
-        case CrewOutcome::Flying: return "im Flug";
-        case CrewOutcome::Rescued: return "gerettet";
-        case CrewOutcome::Lost: return "verloren";
+        case CrewOutcome::Flying: return "flying";
+        case CrewOutcome::Rescued: return "rescued";
+        case CrewOutcome::Lost: return "lost";
     }
     return "";
 }

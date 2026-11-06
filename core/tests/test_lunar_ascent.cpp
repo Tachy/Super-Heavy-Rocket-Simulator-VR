@@ -276,7 +276,7 @@ TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
         fx.session.advance_to(fx.session.epoch() + 0.1, 100);
     }
     aborted = fx.session.lunar_step() == sim::LunarStep::AbortAscent;
-    std::printf("[lunar_ascent] PDI 60 km short: step %s, %s\n", sim::to_string(fx.session.lunar_step()),
+    std::printf("[lunar_ascent] PDI 60 km short: step %s, %s\n", sim::id_of(fx.session.lunar_step()),
                 fx.session.lunar_status().c_str());
     REQUIRE(aborted);
     fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
@@ -296,7 +296,7 @@ TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent"
          ++i) {
         fx.session.advance_to(fx.session.epoch() + 0.1, 100);
     }
-    std::printf("[lunar_ascent] refused automatic abort: step %s, %s\n", sim::to_string(fx.session.lunar_step()),
+    std::printf("[lunar_ascent] refused automatic abort: step %s, %s\n", sim::id_of(fx.session.lunar_step()),
                 fx.session.lunar_status().c_str());
     REQUIRE(fx.session.lunar_status().find("Abbruch nicht möglich") != std::string::npos);
     fx.session.advance_to(fx.session.epoch() + 5.0, 1000);
@@ -309,7 +309,7 @@ TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent"
     REQUIRE(fx.session.lunar_touchdown());
     const auto& td = *fx.session.lunar_touchdown();
     std::printf("[lunar_ascent] refused automatic abort outcome: %s, offset %.1f m, sink %.2f m/s, %.1f t\n",
-                sim::to_string(td.outcome), td.offset_m, td.sink_mps, fx.mass_kg() / 1000.0);
+                sim::id_of(td.outcome), td.offset_m, td.sink_mps, fx.mass_kg() / 1000.0);
 }
 
 // Sweep of the ascent's acceleration limit (hidden: run by name; records LunarAscentParameters::max_acceleration_mps2).
@@ -326,7 +326,7 @@ TEST_CASE("Lunar ascent acceleration limit sweep", "[.][lunar_ascent_sweep]") {
             const double m1 = fx.mass_kg();
             const auto [low, high] = fx.llo_apsides();
             std::printf("[sweep] %.0f t, limit %.2f g: %s, LLO %.2f x %.2f km, %.2f t used (%.0f m/s at 380 s)\n",
-                        m0 / 1000.0, limit_g, sim::to_string(fx.session.lunar_step()), low / 1000.0, high / 1000.0,
+                        m0 / 1000.0, limit_g, sim::id_of(fx.session.lunar_step()), low / 1000.0, high / 1000.0,
                         (m0 - m1) / 1000.0, 380.0 * constants::standard_gravity_mps2 * std::log(m0 / m1));
         }
     }

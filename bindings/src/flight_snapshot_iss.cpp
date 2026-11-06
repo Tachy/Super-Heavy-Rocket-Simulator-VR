@@ -75,7 +75,7 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
     d["present"] = true;
     d["feasible"] = plan->feasible;
     d["reason"] = legacy_report(plan->reason);
-    d["step"] = german(sim::to_string(session.rendezvous_step()));
+    d["step"] = qualified_id("rendezvous_step", sim::id_of(session.rendezvous_step()));
     d["status"] = legacy_report(session.rendezvous_status());
     d["replans"] = session.rendezvous_replans();
     d["total_delta_v_mps"] = plan->total_delta_v_mps;
@@ -84,7 +84,7 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
     godot::Array burns;
     for (const auto& b : session.rendezvous_burns()) {  // flown
         godot::Dictionary e;
-        e["kind"] = german(mission::german_name(b.kind));
+        e["kind"] = german(mission::german_name(b.kind));  // transitional: removed by Task 5
         e["epoch_tdb_s"] = b.node.epoch.tdb_seconds_past_j2000();
         e["delta_v_mps"] = norm(b.node.delta_v_gcrf_mps);
         e["flown"] = true;
@@ -95,7 +95,7 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
         const auto& b = plan->burns[i];
         if (!session.rendezvous_burns().empty() && b.node.epoch <= session.rendezvous_burns().back().node.epoch) continue;
         godot::Dictionary e;
-        e["kind"] = german(mission::german_name(b.kind));
+        e["kind"] = german(mission::german_name(b.kind));  // transitional: removed by Task 5
         e["epoch_tdb_s"] = b.node.epoch.tdb_seconds_past_j2000();
         e["delta_v_mps"] = norm(b.node.delta_v_gcrf_mps);
         e["flown"] = false;
@@ -114,9 +114,9 @@ godot::Dictionary build_docking_state(const sim::FlightSession& session) {
     if (!rel && !docking && !proximity && !departure) return absent();
     godot::Dictionary d;
     d["present"] = true;
-    d["proximity_phase"] = proximity ? german(gnc::to_string(*proximity)) : godot::String();
-    d["docking_phase"] = docking ? german(contact::to_string(*docking)) : godot::String();
-    d["departure_phase"] = departure ? german(gnc::to_string(*departure)) : godot::String();
+    d["proximity_phase"] = proximity ? qualified_id("proximity_phase", gnc::id_of(*proximity)) : godot::String();
+    d["docking_phase"] = docking ? qualified_id("docking_phase", contact::id_of(*docking)) : godot::String();
+    d["departure_phase"] = departure ? qualified_id("departure_phase", gnc::id_of(*departure)) : godot::String();
     d["status"] = legacy_report(!session.docking_status().empty() ? session.docking_status() : session.proximity_status());
     if (rel) {
         d["position_port_m"] = to_godot(rel->position_m);
@@ -198,7 +198,7 @@ godot::Dictionary build_iss_mission(const sim::FlightSession& session, const Sna
     if (!q && session.iss_mission_leg() == sim::IssMissionLeg::None) return absent();
     godot::Dictionary d;
     d["present"] = true;
-    d["leg"] = german(sim::to_string(session.iss_mission_leg()));
+    d["leg"] = qualified_id("iss_mission_leg", sim::id_of(session.iss_mission_leg()));
     d["status"] = legacy_report(session.iss_mission_status());
     d["port"] = q ? german(q->station_port) : godot::String();
     d["liftoff_tdb_s"] = context.iss_liftoff_tdb_s;

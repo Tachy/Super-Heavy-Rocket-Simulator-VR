@@ -26,19 +26,19 @@ void FlightSession::place_entering_capsule(const config::VehicleConfig& config, 
     start_entry_guidance(bodies_.front(), parameters);
 }
 
-const char* to_string(CapsuleReturnStep step) {
+const char* id_of(CapsuleReturnStep step) {  // i18n-ns: capsule_return_step
     switch (step) {
-        case CapsuleReturnStep::None: return "-";
-        case CapsuleReturnStep::DeorbitBurn: return "Deorbit-Brennvorgang";
-        case CapsuleReturnStep::TrunkJettison: return "Trunk-Abwurf";
-        case CapsuleReturnStep::NoseConeClose: return "Bugklappe schließen";
-        case CapsuleReturnStep::Coast: return "Freiflug";
-        case CapsuleReturnStep::Entry: return "Wiedereintritt";
-        case CapsuleReturnStep::Gate: return "Tor";
-        case CapsuleReturnStep::Drogues: return "Bremsschirme";
-        case CapsuleReturnStep::Mains: return "Hauptschirme";
-        case CapsuleReturnStep::SplashedDown: return "gewassert";
-        case CapsuleReturnStep::Lost: return "verloren";
+        case CapsuleReturnStep::None: return "none";
+        case CapsuleReturnStep::DeorbitBurn: return "deorbit_burn";
+        case CapsuleReturnStep::TrunkJettison: return "trunk_jettison";
+        case CapsuleReturnStep::NoseConeClose: return "nose_cone_close";
+        case CapsuleReturnStep::Coast: return "coast";
+        case CapsuleReturnStep::Entry: return "entry";
+        case CapsuleReturnStep::Gate: return "gate";
+        case CapsuleReturnStep::Drogues: return "drogues";
+        case CapsuleReturnStep::Mains: return "mains";
+        case CapsuleReturnStep::SplashedDown: return "splashed_down";
+        case CapsuleReturnStep::Lost: return "lost";
     }
     return "?";
 }

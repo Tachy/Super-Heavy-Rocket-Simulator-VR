@@ -81,21 +81,21 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
     docking_debug_ = std::getenv("STARSIM_DEBUG_DOCKING") != nullptr;
 }
 
-const char* to_string(AutopilotState state) {
+const char* id_of(AutopilotState state) {  // i18n-ns: autopilot_state
     switch (state) {
-        case AutopilotState::Off: return "aus";
-        case AutopilotState::PreLaunch: return "Startvorbereitung";
-        case AutopilotState::Booster: return "Booster";
-        case AutopilotState::Staging: return "Stufentrennung";
-        case AutopilotState::UpperStage: return "Oberstufe";
-        case AutopilotState::PayloadSeparation: return "Nutzlasttrennung";
-        case AutopilotState::Orbit: return "Orbit erreicht";
-        case AutopilotState::Burn: return "Manöver";
-        case AutopilotState::Return: return "Rückkehr";
-        case AutopilotState::Lunar: return "Mondflug";
-        case AutopilotState::Rendezvous: return "Rendezvous";
-        case AutopilotState::Proximity: return "Anflug";
-        case AutopilotState::Departure: return "Abflug";
+        case AutopilotState::Off: return "off";
+        case AutopilotState::PreLaunch: return "pre_launch";
+        case AutopilotState::Booster: return "booster";
+        case AutopilotState::Staging: return "staging";
+        case AutopilotState::UpperStage: return "upper_stage";
+        case AutopilotState::PayloadSeparation: return "payload_separation";
+        case AutopilotState::Orbit: return "orbit";
+        case AutopilotState::Burn: return "burn";
+        case AutopilotState::Return: return "return";
+        case AutopilotState::Lunar: return "lunar";
+        case AutopilotState::Rendezvous: return "rendezvous";
+        case AutopilotState::Proximity: return "proximity";
+        case AutopilotState::Departure: return "departure";
     }
     return "";
 }

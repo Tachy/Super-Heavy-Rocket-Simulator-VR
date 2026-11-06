@@ -5,33 +5,7 @@
 
 namespace starsim::sim {
 
-const char* to_string(MissionEventKind kind) {
-    switch (kind) {
-        case MissionEventKind::EngineStart: return "Triebwerksstart";
-        case MissionEventKind::Liftoff: return "Liftoff";
-        case MissionEventKind::MaxQ: return "Max Q";
-        case MissionEventKind::Meco: return "MECO";
-        case MissionEventKind::StageSeparation: return "Stufentrennung";
-        case MissionEventKind::Seco: return "SECO";
-        case MissionEventKind::Ignition: return "Zündung";
-        case MissionEventKind::Cutoff: return "Brennschluss";
-        case MissionEventKind::Boostback: return "Boostback";
-        case MissionEventKind::LandingBurn: return "Landezündung";
-        case MissionEventKind::EntryInterface: return "Wiedereintritt";
-        case MissionEventKind::Parachutes: return "Fallschirme";
-        case MissionEventKind::CrewEjection: return "Ausstieg Crew";
-        case MissionEventKind::Docking: return "Andocken";
-        case MissionEventKind::Undocking: return "Abkoppeln";
-        case MissionEventKind::Caught: return "Gefangen";
-        case MissionEventKind::Landed: return "Gelandet";
-        case MissionEventKind::Splashdown: return "Wasserung";
-        case MissionEventKind::Impact: return "Aufprall";
-        case MissionEventKind::Launch: return "Start";
-    }
-    return "";
-}
-
-const char* id_of(MissionEventKind kind) {
+const char* id_of(MissionEventKind kind) {  // i18n-ns: mission_event_kind
     switch (kind) {
         case MissionEventKind::EngineStart: return "engine_start";
         case MissionEventKind::Liftoff: return "liftoff";

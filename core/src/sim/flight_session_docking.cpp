@@ -458,7 +458,7 @@ void FlightSession::docking_diagnostics() {
     docking_debug_next_ = epoch_ + 1.0;
     const auto f = docking_->force_on_chaser_n();
     std::printf("[docking] %8.1f s  %-16s port (%.3f %.3f %.3f) m v (%.4f %.4f %.4f) m/s  F %.0f N  peak comp %.0f N\n",
-                mission_time_s(), contact::to_string(m.phase()), p.position_m.x, p.position_m.y, p.position_m.z,
+                mission_time_s(), contact::id_of(m.phase()), p.position_m.x, p.position_m.y, p.position_m.z,
                 p.velocity_mps.x, p.velocity_mps.y, p.velocity_mps.z, norm(f), m.peaks().compression_n);
 }
 

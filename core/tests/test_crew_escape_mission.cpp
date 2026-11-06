@@ -79,9 +79,9 @@ void print(const sim::FlightSession& session, const char* name) {
     const auto& s = *session.crew_escape_state();
     std::printf("%s: armed %d fired %d (%s)\n", name, s.armed, s.fired, s.give_up_reason.c_str());
     for (const auto& m : s.members) {
-        std::printf("  %s %s, peak %.1f g, clearance %.1f m, touchdown %s %.1f m/s: %s %s\n", gnc::to_string(m.mode),
-                    gnc::to_string(m.phase), m.peak_load_g, m.min_clearance_m, m.touchdown_over_water ? "water" : "land",
-                    m.touchdown_sink_mps, sim::to_string(m.outcome), m.reason.c_str());
+        std::printf("  %s %s, peak %.1f g, clearance %.1f m, touchdown %s %.1f m/s: %s %s\n", gnc::id_of(m.mode),
+                    gnc::id_of(m.phase), m.peak_load_g, m.min_clearance_m, m.touchdown_over_water ? "water" : "land",
+                    m.touchdown_sink_mps, sim::id_of(m.outcome), m.reason.c_str());
     }
 }
 

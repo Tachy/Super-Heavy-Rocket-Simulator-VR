@@ -55,7 +55,7 @@ double fly(proximity_test::DragonNearIss& d, double limit_s, bool check_corridor
 
 void print_events(const proximity_test::DragonNearIss& d) {
     for (const auto& e : *d.session.proximity_events()) {
-        std::printf("[validation]   %6.1f min  %-10s %s\n", (e.epoch - d.t0) / 60.0, gnc::to_string(e.phase),
+        std::printf("[validation]   %6.1f min  %-10s %s\n", (e.epoch - d.t0) / 60.0, gnc::id_of(e.phase),
                     e.status.c_str());
     }
 }
@@ -332,7 +332,7 @@ TEST_CASE("Hold and resume in the final approach", "[iss][proximity][session]") 
     }
     const auto rel = *s.relative_port_state();
     std::printf("[validation] hold at x %.2f m for 120 s: drift %.3f m, speed %.4f m/s, phase %s\n", at_hold.x,
-                worst_drift, norm(rel.velocity_mps), gnc::to_string(*s.proximity_phase()));
+                worst_drift, norm(rel.velocity_mps), gnc::id_of(*s.proximity_phase()));
     CHECK(*s.proximity_phase() == gnc::ProximityPhase::Hold);
     CHECK(norm(rel.velocity_mps) < 0.01);
     CHECK(worst_drift < 0.5);

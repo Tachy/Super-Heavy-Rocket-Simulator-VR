@@ -35,6 +35,17 @@ using detail::far_future_s;
 using detail::german;
 
 namespace {
+// transitional: removed by Task 8 (the lost-landing status still embeds the German touchdown name)
+const char* german_touchdown(LegTouchdown touchdown) {
+    switch (touchdown) {
+        case LegTouchdown::None: return "";
+        case LegTouchdown::Landed: return "gelandet";
+        case LegTouchdown::TippedOver: return "umgekippt";
+        case LegTouchdown::Impact: return "Aufprall";
+        case LegTouchdown::Splashdown: return "Wasserung";
+    }
+    return "";
+}
 
 // Longest start-up of the engines in `groups`.
 double group_startup_s(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
@@ -169,7 +180,7 @@ bool FlightSession::lunar_descent_burn(const gnc::BurnNode& node, LunarStep step
     }
     lunar_burns_.push_back({step, node, bodies_[controlled_].body->vehicle().mass_properties().mass_kg});
     if (lunar_debug_) {
-        std::printf("[lunar] %s: %.2f m/s on %s (%.0f kN)\n", to_string(step), norm(node.delta_v_gcrf_mps),
+        std::printf("[lunar] %s: %.2f m/s on %s (%.0f kN)\n", id_of(step), norm(node.delta_v_gcrf_mps),
                     burn_config_.rcs ? "RCS" : burn_config_.groups.front().c_str(), burn_config_.thrust_n / 1000.0);
     }
     return true;
@@ -420,7 +431,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                 lunar_status_ = "gelandet: " + german(lunar_touchdown_->offset_m, 2) + " m vom Zielpunkt";
             } else {
                 lunar_step_ = LunarStep::Lost;
-                lunar_status_ = std::string("verloren: ") + to_string(lunar_touchdown_->outcome);
+                lunar_status_ = std::string("verloren: ") + german_touchdown(lunar_touchdown_->outcome);
                 autopilot_.state = AutopilotState::Off;
             }
             for (auto& [group, run] : flying.running_groups) run = false;

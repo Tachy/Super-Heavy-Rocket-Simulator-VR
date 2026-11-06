@@ -8,7 +8,7 @@
 namespace starsim::gnc {
 
 enum class ParachutePhase { Armed, Drogues, Mains, Down };
-const char* to_string(ParachutePhase phase);
+const char* id_of(ParachutePhase phase);
 
 struct ParachuteSequencerInput {
     double height_m = 0.0;             // above the ground / sea

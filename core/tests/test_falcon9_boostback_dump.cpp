@@ -70,7 +70,7 @@ TEST_CASE("Falcon 9 CRS-35 first stage profile dump", "[.][f9-boostback-dump][as
         const auto* status = session.return_status(0);
         const Vec3 p = sim::site_enu_m(site, r_fixed);
         if (t < 120.0 || std::fmod(t, 0.5) != 0.0) continue;
-        out << session.mission_time_s() << ',' << (status ? gnc::to_string(status->phase) : "-") << ','
+        out << session.mission_time_s() << ',' << (status ? gnc::id_of(status->phase) : "-") << ','
             << tel.altitude_m / 1e3 << ',' << tel.speed_relative_mps * 3.6 << ',' << v_enu.z << ',' << dot(v_enu, down_enu)
             << ',' << dot(v_enu, cross_enu) << ',' << tel.flight_path_angle_rad / constants::deg_to_rad << ','
             << tel.mass_kg / 1e3 << ',' << tel.propellant_kg / 1e3 << ',' << b.vehicle().rcs_supply_kg() << ','

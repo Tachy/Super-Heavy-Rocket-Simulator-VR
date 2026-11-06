@@ -119,7 +119,7 @@ func _draw_unprofiled() -> void:
 		var font := WebcastStyle.label_font()
 		for k in shown.size():
 			var f := fraction_of(float(shown[k]["tdb_s"]) - now_tdb_s, time_scale)
-			var text := str(shown[k]["label"])
+			var text := I18n.phase_text("mission_event_kind." + str(shown[k]["kind"]))
 			var side := label_side(text, f, sides[k], font, keep_out)
 			if side != SIDE_NONE:
 				_draw_label(text, f, side == SIDE_BELOW, Color(WebcastStyle.WHITE, fade_alpha(f)), font)

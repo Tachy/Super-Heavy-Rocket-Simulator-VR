@@ -5,13 +5,13 @@
 
 namespace starsim::gnc {
 
-const char* to_string(DeparturePhase phase) {
+const char* id_of(DeparturePhase phase) {  // i18n-ns: departure_phase
     switch (phase) {
-        case DeparturePhase::UndockBurn: return "Abkoppelimpuls";
-        case DeparturePhase::BackOut: return "Rückzug vom Port";
-        case DeparturePhase::DepartureBurn: return "Abflugmanöver";
-        case DeparturePhase::Drift: return "Abflug";
-        case DeparturePhase::Complete: return "Abflug abgeschlossen";
+        case DeparturePhase::UndockBurn: return "undock_burn";
+        case DeparturePhase::BackOut: return "back_out";
+        case DeparturePhase::DepartureBurn: return "departure_burn";
+        case DeparturePhase::Drift: return "drift";
+        case DeparturePhase::Complete: return "complete";
     }
     return "";
 }
@@ -39,14 +39,14 @@ ProximityOutput DepartureGuidance::update(const ProximityInput& in) {
     ProximityOutput out;
     if (!started_) {
         started_ = true;
-        enter(DeparturePhase::UndockBurn, to_string(DeparturePhase::UndockBurn), in.epoch);
+        enter(DeparturePhase::UndockBurn, "Abkoppelimpuls", in.epoch);  // transitional: removed by Task 6
     }
     switch (phase_) {
         case DeparturePhase::UndockBurn:
         case DeparturePhase::BackOut: {
             if (phase_ == DeparturePhase::UndockBurn &&
                 in.port.velocity_mps.x >= d_.undock_speed_mps - d_.undock_tolerance_mps) {
-                enter(DeparturePhase::BackOut, to_string(DeparturePhase::BackOut), in.epoch);
+                enter(DeparturePhase::BackOut, "Rückzug vom Port", in.epoch);  // transitional: removed by Task 6
             }
             if (phase_ == DeparturePhase::BackOut && in.port.position_m.x >= d_.burn_range_m) {
                 burn_ = breakout_delta_v(in.cg_lvlh, in.mean_motion_radps, p_);
@@ -80,7 +80,7 @@ ProximityOutput DepartureGuidance::update(const ProximityInput& in) {
         const math::Vec3 r = in.cg_lvlh.position_m;
         const math::Vec3 a = d_.ellipsoid_semi_axes_m;
         if ((r.x / a.x) * (r.x / a.x) + (r.y / a.y) * (r.y / a.y) + (r.z / a.z) * (r.z / a.z) > 1.0) {
-            enter(DeparturePhase::Complete, to_string(DeparturePhase::Complete), in.epoch);
+            enter(DeparturePhase::Complete, "Abflug abgeschlossen", in.epoch);  // transitional: removed by Task 6
         }
     }
     out.attitude_hold = false;  // drifting: the session may coast

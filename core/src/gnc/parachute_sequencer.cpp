@@ -14,12 +14,12 @@ bool q_allows(const config::ParachuteConfig& set, double q_pa) {
 
 }  // namespace
 
-const char* to_string(ParachutePhase phase) {
+const char* id_of(ParachutePhase phase) {  // i18n-ns: parachute_phase
     switch (phase) {
-        case ParachutePhase::Armed: return "bereit";
-        case ParachutePhase::Drogues: return "Bremsschirme";
-        case ParachutePhase::Mains: return "Hauptschirme";
-        case ParachutePhase::Down: return "unten";
+        case ParachutePhase::Armed: return "armed";
+        case ParachutePhase::Drogues: return "drogues";
+        case ParachutePhase::Mains: return "mains";
+        case ParachutePhase::Down: return "down";
     }
     return "?";
 }

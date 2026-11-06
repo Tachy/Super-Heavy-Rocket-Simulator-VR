@@ -20,6 +20,16 @@
 namespace starsim::sim {
 
 namespace {
+// transitional: removed by Task 7 (the note still carries the German result)
+const char* german_result(ReturnResult result) {
+    switch (result) {
+        case ReturnResult::Flying: return "fliegt";
+        case ReturnResult::Caught: return "gefangen";
+        case ReturnResult::UprightAbort: return "aufrecht abgebrochen";
+        case ReturnResult::Lost: return "verloren";
+    }
+    return "?";
+}
 
 constexpr double gas_batch_kg = 1.0;     // [E] the attitude gas is drawn in batches of this
 
@@ -64,15 +74,15 @@ std::string flight_name(bool hls, int number) { return hls ? std::string("HLS") 
 
 }  // namespace
 
-const char* to_string(CampaignFlightPhase phase) {
+const char* id_of(CampaignFlightPhase phase) {  // i18n-ns: campaign_flight_phase
     switch (phase) {
-        case CampaignFlightPhase::DepotAscent: return "Depotstart";
-        case CampaignFlightPhase::Planning: return "Planung";
-        case CampaignFlightPhase::WaitLaunch: return "Warten auf das Startfenster";
-        case CampaignFlightPhase::Flying: return "Flug";
-        case CampaignFlightPhase::StationKeeping: return "Bahnhaltung";
-        case CampaignFlightPhase::Complete: return "Abgeschlossen";
-        case CampaignFlightPhase::Ended: return "Beendet";
+        case CampaignFlightPhase::DepotAscent: return "depot_ascent";
+        case CampaignFlightPhase::Planning: return "planning";
+        case CampaignFlightPhase::WaitLaunch: return "wait_launch";
+        case CampaignFlightPhase::Flying: return "flying";
+        case CampaignFlightPhase::StationKeeping: return "station_keeping";
+        case CampaignFlightPhase::Complete: return "complete";
+        case CampaignFlightPhase::Ended: return "ended";
     }
     return "?";
 }
@@ -328,7 +338,7 @@ RefuellingCampaignFlight::FirstReturn RefuellingCampaignFlight::fly_side_return(
     }
     out.result = side.ship_return_result(side.controlled_index());
     out.main_kg = side.body(side.controlled_index()).vehicle().main_propellant_kg();
-    out.note = out.result == ReturnResult::Flying ? std::string("Rückkehr nicht beendet") : std::string(to_string(out.result));
+    out.note = out.result == ReturnResult::Flying ? std::string("Rückkehr nicht beendet") : std::string(german_result(out.result));
     return out;
 }
 

@@ -13,8 +13,8 @@ const THROTTLE_KEY_RATE := 0.5  # per second
 const LAUNCH_COUNTDOWN_S := 60.0
 ## Single pilot actions of manual control (inactive in the external view).
 const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_B, KEY_M, KEY_X]
-## autopilot_status().state of a disengaged autopilot (sim::to_string(AutopilotState::Off)).
-const AUTOPILOT_OFF := "aus"
+## autopilot_status().state of a disengaged autopilot (the qualified id of AutopilotState::Off).
+const AUTOPILOT_OFF := "autopilot_state.off"
 ## last_event while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
 const PLANNING_EVENT := "Startvorbereitung: Bahn wird berechnet"
 ## last_event while a mission that begins in flight (no ascent plan on the pad) is being started.

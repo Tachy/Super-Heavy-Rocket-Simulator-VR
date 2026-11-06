@@ -105,14 +105,14 @@ func _check_connectors() -> bool:
 func _check_phase_mapping() -> bool:
 	var none := {"present": false}
 	_check(is_zero_approx(ProbeDrogueView.extension_for(none, 1.0, 0.7)), "no docking state: stowed")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Endanflug"}, 0.0, 0.7), 1.0), "final approach: out")
-	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Anflug"}, 1.0, 0.7)), "approach: stowed")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Halt"}, 1.0, 0.7), 1.0), "hold keeps what it finds")
-	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "Halt"}, 0.0, 0.7)), "hold keeps stowed")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "Weichfang", "latched": true}, 0.0, 0.7), 1.0), "soft capture: out")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "proximity_phase.final_approach"}, 0.0, 0.7), 1.0), "final approach: out")
+	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "proximity_phase.approach"}, 1.0, 0.7)), "approach: stowed")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "proximity_phase.hold"}, 1.0, 0.7), 1.0), "hold keeps what it finds")
+	_check(is_zero_approx(ProbeDrogueView.extension_for({"present": true, "proximity_phase": "proximity_phase.hold"}, 0.0, 0.7)), "hold keeps stowed")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "docking_phase.soft_capture", "latched": true}, 0.0, 0.7), 1.0), "soft capture: out")
 	_check(ProbeDrogueView.captured_for({"present": true, "latched": true}) and not ProbeDrogueView.captured_for({"present": true, "latched": false}), "captured follows latched")
 	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docked": true}, 0.0, 0.7), 0.7), "docked: heads seated")
-	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "Einzug"}, 0.0, 0.7), 0.85), "draw-in: between extended and seated")
+	_check(is_equal_approx(ProbeDrogueView.extension_for({"present": true, "docking_phase": "docking_phase.retraction"}, 0.0, 0.7), 0.85), "draw-in: between extended and seated")
 	return true
 
 

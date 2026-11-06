@@ -275,7 +275,7 @@ TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim
     fx.place(p.arrival_epoch);
     REQUIRE(fx.session.plan_lunar_outbound(p));
     fx.session.advance_to(fx.session.lunar_outbound_plan()->tli.epoch + 6.0 * 3600.0, 50'000'000);
-    INFO(fx.session.lunar_status() << " | " << sim::to_string(fx.session.autopilot().state));
+    INFO(fx.session.lunar_status() << " | " << sim::id_of(fx.session.autopilot().state));
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::Coast);
     fx.session.disengage_autopilot();
     const double m = fx.mass_kg();

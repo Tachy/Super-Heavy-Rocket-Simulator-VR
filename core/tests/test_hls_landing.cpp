@@ -103,7 +103,7 @@ sim::LegTouchdown drop_on_slope(double slope_deg, double uphill_azimuth_deg, dou
     double stroke = 0.0;
     for (double c : fx.session.leg_crushed_m(0)) stroke = std::max(stroke, c);
     std::printf("[hls] %3.0f t propellant, slope %4.1f deg uphill %5.1f deg: %-10s crushed %.3f m\n",
-                propellant_kg / 1e3, slope_deg, uphill_azimuth_deg, sim::to_string(result), stroke);
+                propellant_kg / 1e3, slope_deg, uphill_azimuth_deg, sim::id_of(result), stroke);
     return result;
 }
 
@@ -150,7 +150,7 @@ TEST_CASE("A manual descent with the legs stowed reaches the ground with them de
         }
     }
     std::printf("[hls_legs] manual drop: legs out at %.1f m (CG altitude), %.2f at the first contact, %s\n", deploy_height_m,
-                at_contact, sim::to_string(fx.session.leg_touchdown(0)));
+                at_contact, sim::id_of(fx.session.leg_touchdown(0)));
     CHECK(deploy_height_m > 0.0);
     CHECK(at_contact == 1.0);
 }

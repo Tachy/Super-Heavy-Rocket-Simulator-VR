@@ -20,17 +20,17 @@ double max_abs(const Vec3& v) { return std::max({std::abs(v.x), std::abs(v.y), s
 
 }  // namespace
 
-const char* to_string(ProximityPhase phase) {
+const char* id_of(ProximityPhase phase) {  // i18n-ns: proximity_phase
     switch (phase) {
-        case ProximityPhase::Waypoint: return "Wegpunkt";
-        case ProximityPhase::Transfer: return "Annäherung";
-        case ProximityPhase::Flyaround: return "Umflug";
-        case ProximityPhase::Approach: return "Anflug";
-        case ProximityPhase::FinalApproach: return "Endanflug";
-        case ProximityPhase::Hold: return "Halt";
-        case ProximityPhase::Retreat: return "Rückzug";
-        case ProximityPhase::Abort: return "Abbruch";
-        case ProximityPhase::Contact: return "Kontakt";
+        case ProximityPhase::Waypoint: return "waypoint";
+        case ProximityPhase::Transfer: return "transfer";
+        case ProximityPhase::Flyaround: return "flyaround";
+        case ProximityPhase::Approach: return "approach";
+        case ProximityPhase::FinalApproach: return "final_approach";
+        case ProximityPhase::Hold: return "hold";
+        case ProximityPhase::Retreat: return "retreat";
+        case ProximityPhase::Abort: return "abort";
+        case ProximityPhase::Contact: return "contact";
     }
     return "";
 }

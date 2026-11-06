@@ -106,12 +106,12 @@ TEST_CASE("Vehicles without a heat shield and stacks are not judged", "[heating]
 
 #include "starsim/sim/landing_outcome.hpp"
 
-TEST_CASE("A broken-up ship's outcome is 'zerbrochen'", "[heating][vehicle]") {
+TEST_CASE("A broken-up ship's outcome id is broken_up", "[heating][vehicle]") {
     World world;
     auto body = ship(40000.0, {7000.0, 0.0, 0.0});
     fly(*body, world, 0.1);
     REQUIRE(body->impacted());
     sim::LaunchSite site;
     CHECK(sim::landing_outcome(*body, site, {}) == sim::LandingOutcome::BrokenUp);
-    CHECK(std::string(sim::to_string(sim::LandingOutcome::BrokenUp)) == "zerbrochen");
+    CHECK(std::string(sim::id_of(sim::LandingOutcome::BrokenUp)) == "broken_up");
 }

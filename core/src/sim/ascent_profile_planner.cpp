@@ -142,7 +142,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
         if (body.impacted()) {
             if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
                 std::printf("  [ascent planner] impact T+%.1f s, state %s, %zu bodies, speed %.1f m/s: %s\n",
-                            session.mission_time_s(), to_string(state), session.body_count(),
+                            session.mission_time_s(), id_of(state), session.body_count(),
                             math::norm(body.state().velocity_gcrf_mps), body.breakup_reason().c_str());
             }
             return {nan, "Die Rakete ist abgestürzt."};
@@ -248,7 +248,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
     }
     if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
         std::printf("  [ascent planner] no SECO: state %s at %.1f s after placement, T+%.1f s, %zu bodies\n",
-                    to_string(session.autopilot().state), session.epoch() - request.liftoff, session.mission_time_s(),
+                    id_of(session.autopilot().state), session.epoch() - request.liftoff, session.mission_time_s(),
                     session.body_count());
     }
     return {nan, "Die Oberstufe erreicht den Zielorbit nicht."};

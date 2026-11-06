@@ -74,7 +74,7 @@ double fly_to_gate(sim::FlightSession& session, time::Epoch t0) {
             const auto* s = session.entry_status(0);
             const auto tel = session.telemetry(0);
             std::printf("t %.0f %s h %.0f Mach %.2f alpha %.1f bank %.1f downrange %.0f cross %.0f\n", time_s,
-                        gnc::to_string(s->phase), tel.altitude_m, tel.mach, s->alpha_rad / deg, s->bank_rad / deg,
+                        gnc::id_of(s->phase), tel.altitude_m, tel.mach, s->alpha_rad / deg, s->bank_rad / deg,
                         s->downrange_error_m, s->crossrange_m);
         }
     }
@@ -107,7 +107,7 @@ TEST_CASE("Session flies an entering ship to the gate over Starbase", "[ship][gu
     const auto* status = session.entry_status(0);
     REQUIRE(status != nullptr);
     std::printf("session entry: %s after %.0f s, height %.0f m, miss %.1f m (gate %.0f m from the pad), nose %.1f deg off the tower direction\n",
-                gnc::to_string(status->phase), time_s, dot(d, up), miss, norm(lead - up * dot(lead, up)),
+                gnc::id_of(status->phase), time_s, dot(d, up), miss, norm(lead - up * dot(lead, up)),
                 nose_off_deg);
     CHECK(status->phase == gnc::EntryPhase::Gate);
     CHECK_FALSE(session.body(0).impacted());
@@ -147,7 +147,7 @@ TEST_CASE("Session flies an entering ship from Mach 2.6 into the tower's arms", 
     REQUIRE(g != nullptr);
     std::printf("entry to catch: gate after %.0f s, flip %.2f s (predicted %.2f s) ending at %.0f m; %s, offset %.2f m, "
                 "lateral %.2f m/s, sink %.2f m/s, %.1f t propellant left\n",
-                time_s, g->flip_duration_s(), flip.flip_end_s, g->flip_end_height_m(), sim::to_string(run.tower_phase),
+                time_s, g->flip_duration_s(), flip.flip_end_s, g->flip_end_height_m(), sim::id_of(run.tower_phase),
                 run.offset_m, run.lateral_mps, run.sink_mps, session.body(0).vehicle().propellant_kg() / 1000.0);
     CHECK(flip.flip_end_s == Catch::Approx(g->flip_duration_s()).epsilon(0.10));
     CHECK_FALSE(run.tower_struck);
@@ -184,7 +184,7 @@ TEST_CASE("Real-time play: entering ship from Mach 2.6 into the arms at the wall
                 "%s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s\n",
                 entry.steps, entry.over_budget, entry.budget_ms, entry.max_ms, (t0 + time_s) - entry.max_at, landing.steps,
                 landing.over_budget, landing.max_ms, landing.max_at - (t0 + time_s), g->first_plan_attempts(),
-                run.scvx.plans, run.scvx.max_solve_ms, sim::to_string(run.tower_phase), run.offset_m, run.lateral_mps,
+                run.scvx.plans, run.scvx.max_solve_ms, sim::id_of(run.tower_phase), run.offset_m, run.lateral_mps,
                 run.sink_mps);
     CHECK_FALSE(run.tower_struck);
     CHECK(run.caught_within_tolerance());

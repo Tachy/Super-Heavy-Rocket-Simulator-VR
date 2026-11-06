@@ -16,7 +16,7 @@ godot::Array lunar_burns(const sim::FlightSession& session) {
     godot::Array burns;
     for (const auto& b : session.lunar_burns()) {
         godot::Dictionary d;
-        d["step"] = godot::String::utf8(sim::to_string(b.step));
+        d["step"] = qualified_id("lunar_step", sim::id_of(b.step));
         d["epoch_tdb_s"] = b.node.epoch.tdb_seconds_past_j2000();
         d["delta_v_mps"] = norm(b.node.delta_v_gcrf_mps);
         d["mass_kg"] = b.mass_kg;
@@ -48,7 +48,7 @@ godot::Dictionary lunar_touchdown(const sim::FlightSession& session) {
     const auto& touchdown = session.lunar_touchdown();
     d["present"] = touchdown.has_value();
     if (!touchdown) return d;
-    d["outcome"] = godot::String::utf8(sim::to_string(touchdown->outcome));
+    d["outcome"] = qualified_id("leg_touchdown", sim::id_of(touchdown->outcome));
     d["offset_m"] = touchdown->offset_m;
     d["sink_mps"] = touchdown->sink_mps;
     d["lateral_mps"] = touchdown->lateral_mps;
@@ -94,7 +94,7 @@ godot::Dictionary build_lunar_state(const sim::FlightSession& session) {
                           session.lunar_mission_complete() || session.lunar_mission_ended());
     d["present"] = present;
     if (!present) return d;
-    d["step"] = godot::String::utf8(sim::to_string(session.lunar_step()));
+    d["step"] = qualified_id("lunar_step", sim::id_of(session.lunar_step()));
     d["status"] = legacy_report(session.lunar_status());
     d["mission_complete"] = session.lunar_mission_complete();
     d["mission_ended"] = session.lunar_mission_ended();

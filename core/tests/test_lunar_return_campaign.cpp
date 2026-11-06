@@ -210,7 +210,7 @@ Run fly(const Dispersion& d, bool aircatch) {
         if (std::getenv("STARSIM_VERBOSE")) {  // progress, flushed: a phase that hangs shows within minutes
             static std::string last;
             static double last_print = -1e9;
-            const std::string state = std::string(sim::to_string(step())) + " / " + sim::to_string(s.autopilot().state) +
+            const std::string state = std::string(sim::id_of(step())) + " / " + sim::id_of(s.autopilot().state) +
                                       " / " + s.lunar_status();
             const double now = s.epoch() - t0;
             if (state != last || now - last_print > (tel.altitude_m < 150e3 ? 20.0 : 6.0 * 3600.0)) {
@@ -228,7 +228,7 @@ Run fly(const Dispersion& d, bool aircatch) {
     if (const auto* trim = burn_of(s, sim::LunarStep::EntryTrim)) r.trim_mps = norm(trim->node.delta_v_gcrf_mps);
     if (std::getenv("STARSIM_VERBOSE")) {  // where the propellant went: each burn's mass at its command
         for (const auto& b : s.lunar_burns()) {
-            std::printf("[campaign]   %s %.2f m/s at %.1f t\n", sim::to_string(b.step), norm(b.node.delta_v_gcrf_mps),
+            std::printf("[campaign]   %s %.2f m/s at %.1f t\n", sim::id_of(b.step), norm(b.node.delta_v_gcrf_mps),
                         b.mass_kg / 1000.0);
         }
     }
@@ -260,7 +260,7 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
             std::printf(", exit %.1f x %.1f km, raised %.1f x %.1f km", r.exit_apsides.first / 1000.0,
                         r.exit_apsides.second / 1000.0, r.raised_apsides.first / 1000.0, r.raised_apsides.second / 1000.0);
         }
-        std::printf(" | %s | %s, %.1f t left, %s%s%s\n", r.braking_status.c_str(), r.caught ? "caught" : sim::to_string(r.result), r.propellant_t,
+        std::printf(" | %s | %s, %.1f t left, %s%s%s\n", r.braking_status.c_str(), r.caught ? "caught" : sim::id_of(r.result), r.propellant_t,
                     r.status.c_str(), r.breakup.empty() ? "" : " / ", r.breakup.c_str());
         std::fflush(stdout);
         // The checks of the former nominal case "Lunar return direct: the ship is caught at Starbase" (test_lunar_return_session

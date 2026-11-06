@@ -16,6 +16,7 @@ namespace starsim::sim {
 // uncovered outlet pauses Chilldown / Flowing (and ends a Settling that did not settle); a covered one resumes.
 enum class TransferDirection { ChaserToStation, StationToChaser };
 enum class TransferPhase { Idle, Settling, Chilldown, Flowing, Paused, Complete, Stopped };
+const char* id_of(TransferPhase phase);
 inline constexpr size_t transfer_oxidizer = 0;  // line indices
 inline constexpr size_t transfer_fuel = 1;
 

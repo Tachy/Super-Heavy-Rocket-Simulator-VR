@@ -13,22 +13,22 @@
 
 namespace starsim::sim {
 
-const char* to_string(IssMissionLeg leg) {
+const char* id_of(IssMissionLeg leg) {  // i18n-ns: iss_mission_leg
     switch (leg) {
-        case IssMissionLeg::None: return "keine";
-        case IssMissionLeg::Ascent: return "Aufstieg";
-        case IssMissionLeg::Raise: return "Phasing-Bahn anheben";
-        case IssMissionLeg::Rendezvous: return "Phasenflug";
-        case IssMissionLeg::Proximity: return "Annäherung";
-        case IssMissionLeg::Docking: return "Andocken";
-        case IssMissionLeg::Docked: return "Angedockt";
-        case IssMissionLeg::Transfer: return "Treibstofftransfer";
-        case IssMissionLeg::WaitUndock: return "Warten auf Abkoppeln";
-        case IssMissionLeg::Departure: return "Abflug";
-        case IssMissionLeg::Return: return "Rückkehr";
-        case IssMissionLeg::WaitContinue: return "Warten auf Fortsetzung";
-        case IssMissionLeg::Complete: return "Abgeschlossen";
-        case IssMissionLeg::Ended: return "Beendet";
+        case IssMissionLeg::None: return "none";
+        case IssMissionLeg::Ascent: return "ascent";
+        case IssMissionLeg::Raise: return "raise";
+        case IssMissionLeg::Rendezvous: return "rendezvous";
+        case IssMissionLeg::Proximity: return "proximity";
+        case IssMissionLeg::Docking: return "docking";
+        case IssMissionLeg::Docked: return "docked";
+        case IssMissionLeg::Transfer: return "transfer";
+        case IssMissionLeg::WaitUndock: return "wait_undock";
+        case IssMissionLeg::Departure: return "departure";
+        case IssMissionLeg::Return: return "return";
+        case IssMissionLeg::WaitContinue: return "wait_continue";
+        case IssMissionLeg::Complete: return "complete";
+        case IssMissionLeg::Ended: return "ended";
     }
     return "";
 }

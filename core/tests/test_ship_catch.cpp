@@ -103,7 +103,7 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr, bool* d
     }
     std::printf("ship from the gate: %s (%s), offset %.2f m, lateral %.2f m/s, sink %.2f m/s, first plan attempts %d, %d plans "
                 "(%d failed), %.1f t propellant left\n",
-                sim::to_string(run.tower_phase), sim::to_string(run.result), run.offset_m, run.lateral_mps, run.sink_mps, g ? g->first_plan_attempts() : -1,
+                sim::id_of(run.tower_phase), sim::id_of(run.result), run.offset_m, run.lateral_mps, run.sink_mps, g ? g->first_plan_attempts() : -1,
                 g && g->scvx() ? g->scvx()->statistics().plans : 0, g && g->scvx() ? g->scvx()->statistics().failures : 0,
                 session.body(0).vehicle().propellant_kg() / 1000.0);
     (void)flip_s;
@@ -244,7 +244,7 @@ TEST_CASE("Ship abort clearance trace", "[.abort_clearance]") {
         trace.sample(session, earth(), 0, s);
     }
     std::printf("[clearance] gate %s seed %u ship abort at %.0f m: accepted %d, water kept %d, %s / %s, struck %d, %.1f t left\n", gate_text ? gate_text : "950", seed, abort_height_m,
-                abort_accepted ? 1 : 0, water_kept ? 1 : 0, sim::to_string(session.landing_outcome(0)), sim::to_string(session.ship_return_result(0)),
+                abort_accepted ? 1 : 0, water_kept ? 1 : 0, sim::id_of(session.landing_outcome(0)), sim::id_of(session.ship_return_result(0)),
                 session.tower()->tower_struck() ? 1 : 0, ship.vehicle().propellant_kg() / 1e3);
 }
 

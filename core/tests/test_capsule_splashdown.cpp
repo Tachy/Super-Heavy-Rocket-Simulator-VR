@@ -261,7 +261,7 @@ TEST_CASE("Drogues held back by dynamic pressure: the mains tear and the capsule
     const auto d = fly_down(s.session);
     const auto& mains = s.session.body(0).vehicle().stages().front().parachutes[1];
     std::printf("no drogues: mains at %.0f m / %.0f m/s, peak %.0f kN per canopy, peak %.2f g, %s at %.1f m/s\n",
-                d.main_height_m, d.main_speed_mps, mains.peak_load_n / 1000.0, d.peak_g, sim::to_string(d.outcome), d.sink_mps);
+                d.main_height_m, d.main_speed_mps, mains.peak_load_n / 1000.0, d.peak_g, sim::id_of(d.outcome), d.sink_mps);
     CHECK(d.drogue_s < 0.0);
     CHECK(s.session.body(0).vehicle().parachute_torn());
     CHECK(d.sink_mps > 9.0);
@@ -455,7 +455,7 @@ void fly_dispersed_campaign(int first, int count) {
                     "planned %d, waited %.1f h, %s, %.2f km from the centre, %.1f m/s, peak %.2f g, %.1f min ignition -> "
                     "splashdown\n",
                     i, c.phase_offset_deg, (c.rcs_scale - 1.0) * 100.0, c.burn_scale * 100.0, c.pointing_rad / deg,
-                    r.planned, r.wait_h, sim::to_string(r.descent.outcome), r.descent.miss_m / 1000.0,
+                    r.planned, r.wait_h, sim::id_of(r.descent.outcome), r.descent.miss_m / 1000.0,
                     r.descent.sink_mps, r.descent.peak_g, r.splashdown_after_ignition_s / 60.0);
         INFO("case " << i);
         CHECK(r.planned);
@@ -473,7 +473,7 @@ TEST_CASE("Crew Dragon return campaign: cases 4-7", "[dragon][mission][validatio
 TEST_CASE("Crew Dragon return single case", "[.][dragon]") {
     const char* index = std::getenv("STARSIM_DRAGON_CASE");
     const auto r = fly_mission(dispersion_case(index ? std::atoi(index) : 0));
-    std::printf("single case: %s, %.2f km from the centre, gate at %.2f km\n", sim::to_string(r.descent.outcome),
+    std::printf("single case: %s, %.2f km from the centre, gate at %.2f km\n", sim::id_of(r.descent.outcome),
                 r.descent.miss_m / 1000.0, r.descent.drogue_height_m / 1000.0);
 }
 
@@ -496,6 +496,6 @@ TEST_CASE("A capsule return without mains ends lost, not under its drogues", "[d
     REQUIRE(r.planned);
     CHECK(r.descent.outcome == sim::LandingOutcome::Impact);  // ~50 m/s under the drogues alone
     CHECK(r.final_step == sim::CapsuleReturnStep::Lost);
-    CHECK(std::string(sim::to_string(r.final_step)) == "verloren");
+    CHECK(std::string(sim::id_of(r.final_step)) == "lost");
     CHECK(r.final_autopilot == sim::AutopilotState::Off);
 }

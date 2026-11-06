@@ -35,14 +35,14 @@ constexpr double pin_tip_margin_m = 0.4;       // [E]
 
 }  // namespace
 
-const char* to_string(CatchPhase phase) {
+const char* id_of(CatchPhase phase) {  // i18n-ns: catch_phase
     switch (phase) {
-        case CatchPhase::Open: return "offen";
-        case CatchPhase::Standby: return "bereit";
-        case CatchPhase::Closing: return "schließt";
-        case CatchPhase::Caught: return "gefangen";
-        case CatchPhase::Missed: return "verfehlt";
-        case CatchPhase::Aborted: return "Abbruch";
+        case CatchPhase::Open: return "open";
+        case CatchPhase::Standby: return "standby";
+        case CatchPhase::Closing: return "closing";
+        case CatchPhase::Caught: return "caught";
+        case CatchPhase::Missed: return "missed";
+        case CatchPhase::Aborted: return "aborted";
     }
     return "";
 }

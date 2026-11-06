@@ -243,7 +243,7 @@ TEST_CASE("Guided 6-DOF entry flies to the gate", "[ship][guidance]") {
         for (size_t i = 0; i < samples.size(); i += 30) {
             const auto& g = samples[i];
             std::cout << "t " << g.t_s << " h " << g.telemetry.altitude_m / 1e3 << " v " << g.telemetry.speed_relative_mps
-                      << " " << gnc::to_string(g.command.phase) << " bank " << g.command.bank_rad / deg << " alpha "
+                      << " " << gnc::id_of(g.command.phase) << " bank " << g.command.bank_rad / deg << " alpha "
                       << g.command.alpha_rad / deg << " downrange " << g.command.downrange_error_m / 1e3 << " cross "
                       << g.command.crossrange_m / 1e3 << " scales " << g.command.drag_scale << "/"
                       << g.command.lift_scale << "\n";

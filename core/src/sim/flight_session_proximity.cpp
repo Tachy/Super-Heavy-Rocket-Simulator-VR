@@ -227,7 +227,7 @@ void FlightSession::proximity_diagnostics(const gnc::ProximityInput& in, const g
     if (events.size() < proximity_debug_events_) proximity_debug_events_ = 0;  // a new flight
     for (; proximity_debug_events_ < events.size(); ++proximity_debug_events_) {
         const auto& e = events[proximity_debug_events_];
-        std::printf("[proximity] %8.1f s  %-10s %s\n", mission_time_s(), gnc::to_string(e.phase), e.status.c_str());
+        std::printf("[proximity] %8.1f s  %-10s %s\n", mission_time_s(), gnc::id_of(e.phase), e.status.c_str());
     }
     if (epoch_ < proximity_debug_next_) return;
     proximity_debug_next_ = epoch_ + 60.0;
