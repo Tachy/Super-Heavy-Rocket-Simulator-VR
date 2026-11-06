@@ -5,8 +5,12 @@
 #include <cstdio>
 #include <memory>
 
+#include <algorithm>
+
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/lunar_site_config.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/mission/lunar_transfer.hpp"
@@ -53,6 +57,88 @@ TEST_CASE("Outbound plan to the 100 km polar LLO", "[mission][lunar][outbound][v
     CHECK(tli < 3250.0);
     CHECK(loi > 800.0);  // [S] spec: LOI ~0.82-0.9 km/s
     CHECK(loi < 920.0);
+}
+
+namespace {
+// The LLO through a site (plan 2026-11-06 Task 7): planned with the plane through the site at the touchdown, flown
+// impulsively in the full model (TLI, LOI at the plan's periselene), coasted to the touchdown; the site's distance from
+// the orbit plane then (m). Prints the plan's numbers.
+double llo_site_distance_m(Fixture& fx, const char* site_id) {
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, site_id);
+    mission::LunarOutboundParameters p;
+    p.arrival_epoch = fx.t0 + 4.0 * 86400.0;
+    p.llo_site = mission::LloSiteTarget{site.latitude_rad, site.longitude_rad, p.arrival_epoch + 8.0 * 3600.0};
+    const auto parking = fx.parking(p.arrival_epoch);
+    const auto plan = fx.planner.plan(parking, fx.t0, p, hls_mass_kg, rvac_isp_s, 1600e3);
+    INFO(report::describe(plan.reason));
+    REQUIRE(plan.feasible);
+    REQUIRE(plan.llo_plane_normal_moon_inertial);
+    const mission::PositionTargeter coast{fx.gravity};
+    auto s = coast.coast(parking, fx.t0, plan.tli.epoch);
+    s.velocity_mps += plan.tli.delta_v_gcrf_mps;
+    s = coast.coast(s, plan.tli.epoch, plan.insertion.epoch);
+    s.velocity_mps += plan.insertion.delta_v_gcrf_mps;
+    REQUIRE(plan.llo_touchdown);
+    const time::Epoch touchdown = *plan.llo_touchdown;
+    s = coast.coast(s, plan.insertion.epoch, touchdown);
+    const auto rel = mission::moon_relative(fx.ephemeris, s, touchdown);
+    const math::Vec3 h = math::normalized(cross(rel.position_m, rel.velocity_mps));
+    const auto rotation = fx.moon.fixed_to_gcrf(touchdown).rotation;
+    const math::Vec3 site_dir = rotation * math::Vec3{std::cos(site.latitude_rad) * std::cos(site.longitude_rad),
+                                                      std::cos(site.latitude_rad) * std::sin(site.longitude_rad),
+                                                      std::sin(site.latitude_rad)};
+    const math::Vec3 pole = rotation * math::Vec3{0.0, 0.0, 1.0};
+    const double r = constants::moon_mean_radius_m;
+    const double distance = r * std::asin(std::abs(dot(h, site_dir)));
+    const double planned = r * std::asin(std::abs(dot(*plan.llo_plane_normal_moon_inertial, site_dir)));
+    const auto el = orbit::elements_from_state(rel, fx.ephemeris.gm_m3ps2(ephemeris::Body::Moon));
+    std::printf("[validation] LLO through %s: TLI %.1f m/s, LOI %.1f m/s, i %.2f deg, LLO %.1f x %.1f km, site %.2f km "
+                "off the plane at touchdown (planned plane %.3f km), arrival %+.2f h\n",
+                site_id, norm(plan.tli.delta_v_gcrf_mps), norm(plan.insertion.delta_v_gcrf_mps),
+                std::acos(std::clamp(dot(h, pole), -1.0, 1.0)) / deg,
+                (el.semi_major_axis_m * (1.0 - el.eccentricity) - r) / 1000.0,
+                (el.semi_major_axis_m * (1.0 + el.eccentricity) - r) / 1000.0, distance / 1000.0, planned / 1000.0,
+                (plan.insertion.epoch - p.arrival_epoch) / 3600.0);
+    CHECK(dot(h, *plan.llo_plane_normal_moon_inertial) > 0.0);  // the planned sense of motion
+    CHECK(norm(plan.insertion.delta_v_gcrf_mps) > 800.0);         // [S] spec: LOI ~0.82-0.9 km/s, as the polar LLO
+    CHECK(norm(plan.insertion.delta_v_gcrf_mps) < 920.0);
+    return distance;
+}
+}  // namespace
+
+TEST_CASE("LLO for Apollo 11 at 0.7 N passes the site within 20 km at touchdown", "[mission][lunar][outbound][validation]") {
+    test::spice_session();
+    Fixture fx;
+    CHECK(llo_site_distance_m(fx, "apollo_11") < 20e3);  // max_crossrange_km: the descent's pass search takes it
+}
+
+TEST_CASE("LLO for Apollo 15 at 26 N passes the site within 20 km at touchdown", "[mission][lunar][outbound][validation]") {
+    test::spice_session();
+    Fixture fx;
+    CHECK(llo_site_distance_m(fx, "apollo_15") < 20e3);
+}
+
+TEST_CASE("The LLO plane through a site holds the site and the asymptote in the arrival's sense", "[mission][lunar][outbound]") {
+    test::spice_session();
+    Fixture fx;
+    const auto rotation = fx.moon.fixed_to_gcrf(fx.t0).rotation;
+    const math::Vec3 pole = rotation * math::Vec3{0.0, 0.0, 1.0};
+    const double lat = 20.0 * deg, lon = 30.0 * deg;
+    const math::Vec3 site = rotation * math::Vec3{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+    const math::Vec3 asymptote = math::normalized(rotation * math::Vec3{-0.3, 1.0, 0.05});
+    const auto n = mission::llo_plane_through_site(fx.moon, lat, lon, fx.t0, asymptote);
+    CHECK(std::abs(norm(n) - 1.0) < 1e-12);
+    CHECK(std::abs(dot(n, site)) < 1e-12);
+    CHECK(std::abs(dot(n, asymptote)) < 1e-12);
+    CHECK(dot(n, pole) >= 0.0);
+    // the reversed asymptote gives the same plane (same sense: prograde)
+    CHECK(dot(mission::llo_plane_through_site(fx.moon, lat, lon, fx.t0, -asymptote), n) > 1.0 - 1e-12);
+    // the sense of a given arrival plane (turned from it, not reversed)
+    CHECK(dot(mission::llo_plane_through_site(fx.moon, lat, lon, fx.t0, asymptote, -pole), n) < -1.0 + 1e-12);
+    // a site on the asymptote: the plane through it of least inclination
+    const math::Vec3 on_axis = mission::llo_plane_through_site(fx.moon, lat, lon, fx.t0, site);
+    CHECK(std::abs(dot(on_axis, site)) < 1e-12);
+    CHECK(std::acos(dot(on_axis, pole)) == Catch::Approx(lat).margin(1e-9));
 }
 
 TEST_CASE("Outbound plan to the NRHO", "[mission][lunar][outbound][nrho][validation][slow]") {

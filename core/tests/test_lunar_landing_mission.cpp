@@ -1,6 +1,7 @@
 // Mission config lunar_landing: loading, placement in the parking orbit through the Moon's plane, start_mission
 // dispatch, and refusal without a plane.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -38,7 +39,9 @@ TEST_CASE("Lunar landing missions load", "[config][lunar]") {
     REQUIRE(llo.mcc_after_tli_s.size() == 2);
     CHECK_THAT(llo.mcc_after_tli_s[1], WithinAbs(2.5 * 86400.0, 1e-6));
     CHECK_THAT(llo.llo_altitude_m, WithinAbs(100e3, 1e-6));
-    CHECK_THAT(llo.llo_inclination_rad, WithinAbs(90.0 * deg, 1e-12));
+    CHECK_FALSE(llo.llo_inclination_rad);  // Task 7 (lunar sites): the plane is chosen through the site
+    REQUIRE(llo.touchdown_utc);
+    CHECK(*llo.touchdown_utc == time::UtcDateTime{2026, 11, 22, 1, 20, 0.0});
     const auto nrho = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
     CHECK(nrho.lunar_orbit == "nrho");
     CHECK(nrho.nrho_revolutions == 9);
@@ -66,6 +69,33 @@ TEST_CASE("start_mission plans the HLS outbound flight", "[sim][lunar][mission]"
     // circular 200 km parking orbit
     const auto& s = session.body(session.controlled_index()).state();
     CHECK_THAT(norm(s.position_gcrf_m) - constants::wgs84_semi_major_axis_m, WithinAbs(200e3, 1.0));
+}
+
+// Lunar sites plan Task 7: the LLO plane is chosen through the site at the mission's touchdown (no inclination in the
+// mission). For Mons Mouton (84.79 S) that plane is the polar one the mission flew before within the 20 km the old
+// polar plane passed the site by, and the mission still closes.
+TEST_CASE("mons mouton mission unchanged: inclination within 1 deg of polar and the same feasibility", "[sim][lunar][mission]") {
+    test::spice_session();
+    spice::SpiceEphemeris ephemeris;
+    const auto earth = spice::SpiceOrientation::earth();
+    const auto moon = spice::SpiceOrientation::moon_mean_earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
+    const auto start = sim::start_mission(session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time);
+    INFO(report::describe(start.refusal));
+    REQUIRE(start.return_planned);
+    CHECK(start.refusal.ok());
+    const auto* plan = session.lunar_outbound_plan();
+    REQUIRE(plan);
+    REQUIRE(plan->llo_plane_normal_moon_inertial);
+    const auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo");
+    const auto touchdown = time.from_utc(*m.touchdown_utc);
+    const auto rotation = moon.fixed_to_gcrf(touchdown).rotation;
+    const math::Vec3 pole{rotation(0, 2), rotation(1, 2), rotation(2, 2)};
+    const double inclination = std::acos(std::clamp(dot(*plan->llo_plane_normal_moon_inertial, pole), -1.0, 1.0));
+    std::printf("[lunar_mission] Mons Mouton LLO: i %.3f deg, TLI %.1f m/s, LOI %.1f m/s\n", inclination / constants::deg_to_rad,
+                norm(plan->tli.delta_v_gcrf_mps), norm(plan->insertion.delta_v_gcrf_mps));
+    CHECK(std::abs(inclination - 0.5 * constants::pi) < 1.0 * constants::deg_to_rad);
 }
 
 // Follow-up U-7: the start with the touchdown search on a background thread reports its status while the search runs
@@ -155,7 +185,12 @@ TEST_CASE("Mission 1 closes in the LLO with the 120 t HLS; NRHO and 204 t are re
             const auto s = sim::start_lunar_landing_mission(session, STARSIM_CONFIG_DIR, m, time.from_utc(m.epoch_utc));
             CAPTURE(id, report::describe(s.refusal));
             CHECK(s.return_planned == closes);
-            if (!closes) CHECK(s.refusal.code == report::Code::lunar_mission_infeasible);
+            if (!closes) {
+                CHECK(s.refusal.code == report::Code::lunar_mission_infeasible);
+                // the NRHO stays as it is: the site is out of its reach on this budget (plan 2026-11-06 Task 7)
+                REQUIRE(s.refusal.causes.size() == 1u);
+                CHECK(s.refusal.causes.front().code == report::Code::lunar_nrho_site_unreachable);
+            }
         }
         {
             auto heavy = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);

@@ -1,6 +1,6 @@
 # Lunar missions: reference bodies, HLS, outbound, landing, ascent, return, game interface
 
-History and the reasons behind superseded decisions: `docs/history/guidance-missions.md`.
+History and the reasons behind superseded decisions: `docs/history/lunar.md`, older `docs/history/guidance-missions.md`.
 Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
 
 ## Model
@@ -95,7 +95,20 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   (9:2 southern L2 NRHO [S: Zimovan 2017 seed], multiple shooting in the full model: periods 6.25-6.71 d, perilune
   2,861-3,670 km, apolune 69,804-71,706 km [Gateway: 6.26-6.76 d, rp 3,195-3,557 km, Davis et al. AAS 2020]; use
   `perilune_epochs()`, never `first + k P`), `mission/lunar_outbound` (LLO: TLI 3,142 m/s impulsive / 3,182 m/s finite,
-  LOI 856 m/s; NRHO via a powered lunar swing-by (user 2026-10-15) after Kikuchi et al. ISSFD 2024: TLI 3,162 m/s,
+  LOI 856 m/s; the LLO plane is free per site and window (lunar sites plan Task 7, user 2026-11-06: "die Neigung des
+  Orbits kann frei gewaehlt werden"): `LloTarget{altitude_m, plane_normal_moon_inertial, inclination_rad}` - with
+  `LunarOutboundParameters::llo_site` {latitude, longitude, touchdown or `first_pass_after_arrival_s`} the planner
+  solves the inclination-targeted transfer (polar by default), holds its arrival epoch and turns its plane about its
+  incoming asymptote (`mission::arrival_axis`) onto `llo_plane_through_site(moon, lat, lon, touchdown, asymptote,
+  sense)` - the plane through the site at the touchdown and the asymptote (no plane change at the LOI; the sense of
+  the transfer it is turned from, else prograde; a site within ~0.6 deg of the axis: the plane through the axis of
+  least inclination); a fixed point of plane and asymptote (2 solves, 1e-5 rad). `LunarArrivalTarget` takes the plane
+  normal (residual: the turn about the arrival axis, atan2, 1e-4 rad) and `hold_arrival_epoch` (a third constraint,
+  10 s: the arrival time is otherwise free and drifts along a nearly flat family - a day for ~2 m/s of TLI - turning
+  the asymptote ~13 deg/day); `OutboundPlan::llo_plane_normal_moon_inertial`, `llo_arrival_epoch`, `llo_touchdown`;
+  the finite TLI and the MCCs aim at the plan's plane with its arrival held. A plane turned with the arrival held from
+  the start creeps (Apollo 11: 77 deg, 40 Newton steps), so the first turn runs with the arrival free and the fixed
+  point holds it. NRHO via a powered lunar swing-by (user 2026-10-15) after Kikuchi et al. ISSFD 2024: TLI 3,162 m/s,
   swing-by 243 m/s at 100 km, insertion 224 m/s ~1.3 d later; MCCs, LLO trims, propellant check),
   `mission/lunar_orbit_transfer` (NRHO -> LLO 660 + 216 = 876 m/s; LLO -> NRHO arrives anywhere on the reference (user
   2026-10-15) in one-day windows: 725 m/s right after the LLO arrival; NRHO station keeping at apolune when the
@@ -125,9 +138,16 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   0.02 m first contact: rigid-body rocking after the engines-off contact, the hull swinging round a single sticking
   downhill foot - traced in follow-up U-8, `moon-surface.md` open points; accepted by the user 2026-11-06 as real behaviour of a tall lander with free roll at the 8 deg slope limit, a known red; known-issues). The mission start checks the
   touchdown point on a background thread (status "Landeplatz wird geprüft", follow-up U-7, `moon-surface.md`).
-  Masses: HLS ~573 t in the LLO, ~566 t at PDI (~500 t NRHO variant), lands ~315 t. Site pass: the LLO waits for a pass
-  of the polar site within `max_crossrange_km` (20 km) and trims the plane ~90 deg before it (user 2026-10-15); the
-  wait cannot be shortened by the mission epoch (user 2026-10-16: "refuse honestly"; 5.8 d for Mons Mouton). DOI on the
+  Masses: HLS ~573 t in the LLO, ~566 t at PDI (~500 t NRHO variant), lands ~315 t. Site pass: the LLO plane holds
+  the site at the planned touchdown (`[descent] touchdown_utc`, Mons Mouton 2026-11-22 01:20 / depot variant 18:45 UTC,
+  the daylight touchdowns of the epoch scan; without it the first pass after the arrival: 2 settling revolutions +
+  `min_lead_s` + 1.25 revolutions, `sim::lunar_first_pass_after_arrival_s`); `LunarDescentParameters::planned_touchdown`
+  makes the descent skip passes earlier than half a revolution before it, then it takes the first pass within
+  `max_crossrange_km` (20 km) and trims the residual plane ~90 deg before it (user 2026-10-15) - the residual
+  crossrange, not the wait. `[lunar_orbit] inclination_deg` (optional) keeps the inclination-targeted LLO for explicit
+  missions (they wait for the pass as before). The NRHO variant keeps its orbit and the polar LLO from it (the descent
+  waits for the pass); its start budget decides: not closing is `lunar.mission_infeasible` <-
+  `lunar.nrho_site_unreachable(latitude, budget_short)` <- the leg that runs short. DOI on the
   vacuum Raptors at minimum (periselene 15 km above the site), trims / DOI / circularisation on the single sea-level
   Raptor (`lunar_small_burn`, transients <= 60 % of the burn [E]). Braking (`gnc/apollo_braking`, Klumpp R-695 quartic
   targets) on the 3 RVacs + RCS attitude (user 2026-10-15: Isp 380 vs 350), then sea_level_1, then the landing
@@ -147,7 +167,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   on the legs for `stay_hours`; no boil-off. Ascent (`gnc/lunar_ascent_guidance`, `gnc/peg_steering`): the Raptors start
   at 30 m, vertical rise to 150 m, abort check margin 0.15 (vehicle keys `[stage.lunar_ascent]` [E], applied by
   `gnc::lunar_ascent_parameters(stage)` at liftoff and abort; a stage with fixed legs, or with legs and either table, without every key of `[stage.lunar_landing]` /
-  `[stage.lunar_ascent]` is refused at load (tables without legs too), "Mondlandung ... fehlt"), PEG to 15 km x 100 km on the 3 RVacs (user 2026-10-15), landing thrusters steer by differential throttling
+  `[stage.lunar_ascent]` is refused at load (tables without legs too), "Mondlandung ... fehlt"), PEG to 15 km x 100 km on the 3 RVacs (user 2026-10-15),
+  plane `LunarAscentParameters::plane_normal_moon_inertial` turned onto the plane through the liftoff point closest to
+  it (`gnc::ascent_plane_through`; the session fills in the plane the powered descent began in - least plane change
+  back to the landing LLO; none: polar through the liftoff point, north), landing thrusters steer by differential throttling
   until the RVac axis is within 2 deg of PEG, acceleration limit 1.5 g [D], circularised at the aposelene. RVac
   engine-out: the other two cut, the 3 sea-level Raptors take over. Aborts (`abort_landing`, automatic when the
   approach cannot be planned): Arrest (climb) then PEG once a fresh solve steers below 0.85 radial or the ballistic
@@ -213,7 +236,8 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
 
 ## Standing decisions
 - Plan like mission planners: find the departure window, no epoch hopping (user 2026-10-18); re-plan from flight data.
-- Lunar plane wait is refused honestly rather than re-targeting (user 2026-10-16).
+- Lunar plane wait is refused honestly rather than re-targeting in the LLO (user 2026-10-16); the plane itself is
+  chosen per site and window when the outbound flight is planned (user 2026-11-06).
 - The shipped lunar missions land in daylight (user 2026-11-04): `epoch_utc = 2026-11-13` in `hls_lunar_llo`, `hls_lunar_llo_depot`,
   `hls_lunar_nrho`; `hls_refuel` / `hls_refuel_orbit` start 13 / 2 d before it. The Mons Mouton site (84.79 S) is lit only about half of
   each 29.5 d cycle with the Sun at most 6.8 deg high, so the epoch is chosen with `tools/lunar_sun_scan.py` (Sun elevation minus the

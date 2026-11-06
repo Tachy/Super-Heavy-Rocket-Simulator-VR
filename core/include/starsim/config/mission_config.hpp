@@ -98,7 +98,9 @@ struct LunarLandingMission {
     std::vector<double> mcc_after_tli_s;
     std::string lunar_orbit;  // "llo" | "nrho"
     double llo_altitude_m = 0.0;
-    double llo_inclination_rad = 0.0;
+    // [lunar_orbit] inclination_deg: an explicit LLO inclination (the node follows the arrival); absent: the plane is
+    // chosen through the site at the touchdown (mission::llo_plane_through_site)
+    std::optional<double> llo_inclination_rad;
     math::Vec3 nrho_apolune_position{}, nrho_apolune_velocity{};  // CR3BP seed (nondimensional)
     int nrho_revolutions = 0, nrho_synodic_months = 0, nrho_reference_revolutions = 0;
     // [descent] (lunar l4; defaults as mission::LunarDescentParameters)
@@ -107,6 +109,9 @@ struct LunarLandingMission {
     double max_crossrange_m = 20.0e3;
     double slope_limit_rad = 8.0 * constants::deg_to_rad;
     double touchdown_search_radius_m = 1000.0;
+    // [descent] touchdown_utc: the landing the mission is planned for (its Sun, its stay); the LLO plane holds the site
+    // then and the descent takes that pass. Absent: the first pass after the LLO arrival.
+    std::optional<time::UtcDateTime> touchdown_utc;
     // [surface]
     double surface_stay_s = 0.0;
     // [ascent] (defaults as gnc::LunarAscentParameters)

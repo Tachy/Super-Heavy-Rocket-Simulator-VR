@@ -279,6 +279,7 @@ STARSIM_CODE(lunar_no_touchdown_point_hazards, "lunar.no_touchdown_point_hazards
 STARSIM_CODE(lunar_no_doi, "lunar.no_doi", "")
 STARSIM_CODE(lunar_no_pdi, "lunar.no_pdi", "")
 STARSIM_CODE(lunar_no_site_pass, "lunar.no_site_pass", "days")
+STARSIM_CODE(lunar_nrho_site_unreachable, "lunar.nrho_site_unreachable", "latitude,budget_short")
 STARSIM_CODE(lunar_no_nrho_to_llo_transfer, "lunar.no_nrho_to_llo_transfer", "")
 STARSIM_CODE(lunar_no_llo_to_nrho_transfer, "lunar.no_llo_to_nrho_transfer", "")
 STARSIM_CODE(lunar_nrho_not_covering_arrival, "lunar.nrho_not_covering_arrival", "")

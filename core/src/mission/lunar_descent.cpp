@@ -208,7 +208,10 @@ LunarDescentPlan LunarDescentPlanner::plan_impl(const StateVector& state_gcrf, t
     const double period = constants::two_pi * std::sqrt(sma * sma * sma / gm_moon_);
     const double radius_m = terrain.sphere_radius_m();
     const Vec3 site_fixed = fixed_unit(site_latitude_rad, site_longitude_rad);
-    const time::Epoch earliest_pass = epoch + p.min_lead_s + 1.25 * period;
+    time::Epoch earliest_pass = epoch + p.min_lead_s + 1.25 * period;
+    if (p.planned_touchdown && *p.planned_touchdown - 0.5 * period > earliest_pass) {
+        earliest_pass = *p.planned_touchdown - 0.5 * period;
+    }
 
     // Pass search: samples of the coasting LLO, a pass where phi crosses zero from + to - (|phi| small: not the
     // antipode's wrap from +pi to -pi); its epoch refined on the samples' bracket.

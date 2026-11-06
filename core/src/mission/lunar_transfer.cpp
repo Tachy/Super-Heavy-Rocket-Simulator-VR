@@ -22,8 +22,31 @@ constexpr double max_transfer_s = 10.0 * 86400.0;
 constexpr double lunar_vicinity_m = 1.0e8;     // closest approaches farther away do not count
 constexpr double finite_difference_mps = 0.01;  // Jacobian step
 constexpr double max_newton_step_mps = 100.0;
+constexpr double plane_tolerance_rad = 1e-4;   // the plane's turn about the arrival axis, as the inclination's
+constexpr double arrival_epoch_tolerance_s = 10.0;  // [E] a held arrival epoch: fixes the asymptote to ~1e-4 rad
+
+// Turn of the arrival plane about the arrival axis from the target plane (rad, (-pi, pi]): 0 on the target plane, pi
+// on the same plane flown the other way round.
+double plane_turn_rad(const StateVector& relative, double gm_moon, const Vec3& target_normal) {
+    const Vec3 a = arrival_axis(relative, gm_moon);
+    const Vec3 n = math::normalized(target_normal - a * dot(a, target_normal));
+    const Vec3 h = math::normalized(cross(relative.position_m, relative.velocity_mps));
+    return std::atan2(dot(h, cross(a, n)), dot(h, n));
+}
 
 }  // namespace
+
+Vec3 arrival_axis(const StateVector& rel, double gm_moon) {
+    const Vec3 h = cross(rel.position_m, rel.velocity_mps);
+    const Vec3 e_vec = cross(rel.velocity_mps, h) / gm_moon - math::normalized(rel.position_m);
+    const double e = norm(e_vec);
+    if (e <= 1.0) return -math::normalized(rel.position_m);  // closed: the aposelene opposite the periselene
+    // Incoming asymptote: the velocity direction at true anomaly -acos(-1/e), (p + sqrt(e^2 - 1) q) / e with p the
+    // periapsis direction and q = h x p.
+    const Vec3 p = e_vec / e;
+    const Vec3 q = cross(math::normalized(h), p);
+    return (p + q * std::sqrt(e * e - 1.0)) / e;
+}
 
 LunarTransferTargeter::LunarTransferTargeter(const environment::GravityModel& gravity,
                                              const ephemeris::Ephemeris& ephemeris,
@@ -131,6 +154,10 @@ TransferSolution LunarTransferTargeter::solve(const StateVector& state, time::Ep
                                               std::optional<Vec3> initial_delta_v) const {
     if (initial_delta_v) return newton(state, epoch, burn_epoch, target, *initial_delta_v);
     const StateVector at_burn = coast(state, epoch, burn_epoch);
+    if (const auto guess = plane_guess(at_burn, burn_epoch, target)) {  // a target plane: aimed at its B-vector first
+        auto aimed = newton(state, epoch, burn_epoch, target, *guess);
+        if (aimed.converged) return aimed;
+    }
     auto solution = newton(state, epoch, burn_epoch, target, lambert_guess(at_burn, burn_epoch, target));
     if (!solution.converged) {
         // Seen at some epochs (LLO transfer from 2026-11-12 and -14): the first arc hits the Moon, 40 steps creep
@@ -145,14 +172,23 @@ TransferSolution LunarTransferTargeter::newton(const StateVector& state, time::E
                                                const LunarArrivalTarget& target, Vec3 dv) const {
     TransferSolution solution;
 
-    // B-plane style targeting: periselene altitude and lunar inclination; the arrival time stays free
-    // (it follows from the energy). Two constraints, three unknowns: minimum-norm Newton steps find the
-    // smallest correction. Scaled residuals: 100 km, 0.1 rad.
-    auto residual = [&](const LunarArrival& a) {
-        return std::array<double, 2>{(a.periselene_altitude_m - target.periselene_altitude_m) / 1.0e5,
-                                     (a.inclination_rad - target.inclination_rad) / 0.1};
+    // B-plane style targeting: periselene altitude and lunar inclination (or the plane's turn about the arrival axis
+    // onto the target plane); the arrival time stays free (it follows from the energy) unless the target holds it. Two
+    // constraints, three unknowns: minimum-norm Newton steps find the smallest correction; three: the Newton step.
+    // Scaled residuals: 100 km, 0.1 rad, 1 h.
+    auto angle_error = [&](const LunarArrival& a) {
+        return target.plane_normal_moon_inertial
+                   ? plane_turn_rad(a.relative_state, gm_moon_, *target.plane_normal_moon_inertial)
+                   : a.inclination_rad - target.inclination_rad;
     };
-    auto size = [](const std::array<double, 2>& r) { return std::hypot(r[0], r[1]); };
+    const int m = target.hold_arrival_epoch ? 3 : 2;
+    auto residual = [&](const LunarArrival& a) {
+        return std::array<double, 3>{(a.periselene_altitude_m - target.periselene_altitude_m) / 1.0e5,
+                                     angle_error(a) / 0.1,
+                                     target.hold_arrival_epoch ? (a.periselene_epoch - target.periselene_epoch) / 3600.0
+                                                               : 0.0};
+    };
+    auto size = [](const std::array<double, 3>& r) { return std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]); };
     for (int iteration = 1; iteration <= 40; ++iteration) {
         solution.iterations = iteration;
         const auto arrival = evaluate(state, epoch, burn_epoch, dv);
@@ -166,28 +202,49 @@ TransferSolution LunarTransferTargeter::newton(const StateVector& state, time::E
                         arrival.periselene_epoch - target.periselene_epoch);
         }
         if (std::abs(arrival.periselene_altitude_m - target.periselene_altitude_m) < 50.0 &&
-            std::abs(arrival.inclination_rad - target.inclination_rad) < 1e-4) {
+            std::abs(angle_error(arrival)) < plane_tolerance_rad &&
+            (!target.hold_arrival_epoch ||
+             std::abs(arrival.periselene_epoch - target.periselene_epoch) < arrival_epoch_tolerance_s)) {
             solution.converged = true;
             return solution;
         }
-        // Jacobian (2 x 3) by forward differences.
-        std::array<std::array<double, 3>, 2> j{};
+        // Jacobian (m x 3) by forward differences.
+        std::array<std::array<double, 3>, 3> j{};
         for (int c = 0; c < 3; ++c) {
             Vec3 perturbed = dv;
             (c == 0 ? perturbed.x : c == 1 ? perturbed.y : perturbed.z) += finite_difference_mps;
             const auto a = evaluate(state, epoch, burn_epoch, perturbed);
             if (!a.reached) return solution;
             const auto fp = residual(a);
-            for (int r = 0; r < 2; ++r) j[r][c] = (fp[r] - f[r]) / finite_difference_mps;
+            for (int r = 0; r < m; ++r) j[r][c] = (fp[r] - f[r]) / finite_difference_mps;
         }
-        // Minimum-norm step: delta = J^T (J J^T)^-1 (-f).
-        const double m00 = j[0][0] * j[0][0] + j[0][1] * j[0][1] + j[0][2] * j[0][2];
-        const double m01 = j[0][0] * j[1][0] + j[0][1] * j[1][1] + j[0][2] * j[1][2];
-        const double m11 = j[1][0] * j[1][0] + j[1][1] * j[1][1] + j[1][2] * j[1][2];
-        const double det = m00 * m11 - m01 * m01;
-        const double y0 = (m11 * -f[0] - m01 * -f[1]) / det;
-        const double y1 = (m00 * -f[1] - m01 * -f[0]) / det;
-        Vec3 delta{j[0][0] * y0 + j[1][0] * y1, j[0][1] * y0 + j[1][1] * y1, j[0][2] * y0 + j[1][2] * y1};
+        Vec3 delta;
+        if (m == 2) {
+            // Minimum-norm step: delta = J^T (J J^T)^-1 (-f).
+            const double m00 = j[0][0] * j[0][0] + j[0][1] * j[0][1] + j[0][2] * j[0][2];
+            const double m01 = j[0][0] * j[1][0] + j[0][1] * j[1][1] + j[0][2] * j[1][2];
+            const double m11 = j[1][0] * j[1][0] + j[1][1] * j[1][1] + j[1][2] * j[1][2];
+            const double det = m00 * m11 - m01 * m01;
+            const double y0 = (m11 * -f[0] - m01 * -f[1]) / det;
+            const double y1 = (m00 * -f[1] - m01 * -f[0]) / det;
+            delta = {j[0][0] * y0 + j[1][0] * y1, j[0][1] * y0 + j[1][1] * y1, j[0][2] * y0 + j[1][2] * y1};
+        } else {
+            // Square: delta = J^-1 (-f) (Cramer's rule).
+            const auto det3 = [](const std::array<std::array<double, 3>, 3>& a) {
+                return a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+                       a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                       a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+            };
+            const double det = det3(j);
+            if (det == 0.0) return solution;
+            std::array<double, 3> x{};
+            for (int c = 0; c < 3; ++c) {
+                auto jc = j;
+                for (int r = 0; r < 3; ++r) jc[r][c] = -f[r];
+                x[c] = det3(jc) / det;
+            }
+            delta = {x[0], x[1], x[2]};
+        }
         if (norm(delta) > max_newton_step_mps) delta = delta * (max_newton_step_mps / norm(delta));
         // Backtracking line search: the lunar flyby is strongly non-linear.
         double lambda = 1.0;
@@ -198,6 +255,25 @@ TransferSolution LunarTransferTargeter::newton(const StateVector& state, time::E
         dv += delta * lambda;
     }
     return solution;
+}
+
+std::optional<Vec3> LunarTransferTargeter::plane_guess(const StateVector& at_burn, time::Epoch burn_epoch,
+                                                       const LunarArrivalTarget& target) const {
+    if (!target.plane_normal_moon_inertial) return std::nullopt;
+    const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, target.periselene_epoch);
+    const Vec3 normal = math::normalized(cross(at_burn.position_m, at_burn.velocity_mps));
+    const double tof = target.periselene_epoch - burn_epoch;
+    const auto centre = orbit::solve_lambert(at_burn.position_m, moon.position_m, tof, gm_earth_, normal);
+    if (!centre) return std::nullopt;
+    // B-vector of the target plane: h = B x v_inf, so B is along v_inf x h.
+    const Vec3 a = math::normalized(centre->arrival_velocity_mps - moon.velocity_mps);
+    const Vec3 n = *target.plane_normal_moon_inertial;
+    const Vec3 b = cross(a, n - a * dot(a, n));
+    if (norm(b) < 1e-9) return std::nullopt;
+    const Vec3 aim = moon.position_m + math::normalized(b) * (constants::moon_mean_radius_m + target.periselene_altitude_m);
+    const auto arc = orbit::solve_lambert(at_burn.position_m, aim, tof, gm_earth_, normal);
+    if (!arc) return std::nullopt;
+    return arc->departure_velocity_mps - at_burn.velocity_mps;
 }
 
 std::optional<double> LunarTransferTargeter::parking_orbit_raan(time::Epoch arrival_epoch,

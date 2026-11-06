@@ -13,10 +13,11 @@
 //   holds), the gimballed sea-level Raptors start and PEG continues on them (it sees their thrust and flow). Before PEG
 //   the landing thrusters bridge the start-up.
 // - PEG target: radius R + site height + insertion altitude, horizontal at the vis-viva speed of the ellipse to
-//   R + aposelene, radial 0, terminal semi-major axis of that ellipse; plane: polar through the liftoff point (normal
-//   cross(r_hat, pole), towards the north for `northerly`), inertial, fixed at start. A polar plane through the liftoff
-//   point always passes over it: no launch window (a fixed target plane - rendezvous with a depot, M9 - would need one).
-//   PEG state: Moon-relative inertial (BodyFrame::centred).
+//   R + aposelene, radial 0, terminal semi-major axis of that ellipse; plane: the requested plane's normal turned onto
+//   the plane through the liftoff point closest to it (ascent_plane_through; the mission asks for its landing LLO plane:
+//   least plane change), else polar through the liftoff point (normal cross(r_hat, pole), towards the north); inertial,
+//   fixed at start. A plane through the liftoff point always passes over it: no launch window (a fixed target plane -
+//   rendezvous with a depot, M9 - would need one). PEG state: Moon-relative inertial (BodyFrame::centred).
 // - Abort: the plane is the current Moon-relative orbital plane; while the vertical speed is below abort_min_climb_mps
 //   the ascent set thrusts along the local vertical tilted towards the downrange horizontal (at most abort_max_tilt_rad,
 //   keeping 1.2 x the weight vertical) at full throttle (phase Arrest); engines running at the abort (the approach
@@ -100,6 +101,13 @@ double groups_vacuum_isp_s(const vehicle::Vehicle& vehicle, const std::vector<st
     return mass_flow_kgps > 0.0 ? thrust_n / mass_flow_kgps / constants::standard_gravity_mps2 : 0.0;
 }
 
+std::optional<Vec3> ascent_plane_through(const Vec3& position, const Vec3& normal) {
+    const Vec3 r_hat = math::normalized(position);
+    const Vec3 n = normal - r_hat * dot(r_hat, normal);
+    if (norm(n) < 1e-9 * norm(normal)) return std::nullopt;
+    return math::normalized(n);
+}
+
 LunarAscentParameters lunar_ascent_parameters(const config::StageConfig& stage, LunarAscentParameters base) {
     if (!stage.lunar_ascent) {
         throw std::runtime_error("stage '" + stage.id + "' has no lunar ascent values ([stage.lunar_ascent])");
@@ -158,8 +166,10 @@ void LunarAscentGuidance::start(const vehicle::FlightBody& body, const environme
                                                                                   : LunarAscentPhase::Peg;
     } else {
         const Vec3 pole = moon.transform.rotation * Vec3{0.0, 0.0, 1.0};
-        const Vec3 normal = math::normalized(cross(r_hat, pole));
-        target_.plane_normal = parameters_.northerly ? normal : -normal;
+        const auto requested = parameters_.plane_normal_moon_inertial
+                                   ? ascent_plane_through(rel.position_m, *parameters_.plane_normal_moon_inertial)
+                                   : std::nullopt;
+        target_.plane_normal = requested ? *requested : math::normalized(cross(r_hat, pole));
         bridge_groups_ = parameters_.liftoff_groups;
         phase_ = LunarAscentPhase::Liftoff;
     }

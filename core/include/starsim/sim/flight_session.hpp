@@ -1548,6 +1548,9 @@ private:
     std::unique_ptr<gnc::LunarLandingGuidance> lunar_landing_;
     std::optional<LunarTouchdown> lunar_touchdown_;
     mission::TouchdownPoint lunar_touchdown_point_;
+    // The plane the powered descent began in (Moon-centred GCRF normal at PDI): the ascent flies the plane through the
+    // liftoff point closest to it (least plane change), unless its parameters name another.
+    std::optional<math::Vec3> lunar_landing_plane_normal_;
     // The ascent steps (flight_session_lunar_ascent.cpp).
     void run_lunar_ascent_steps(Flying& flying);
     void lunar_liftoff(Flying& flying);  // releases the landed body, starts the ascent guidance (step Ascent)

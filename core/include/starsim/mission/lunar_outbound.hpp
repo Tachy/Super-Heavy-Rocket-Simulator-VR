@@ -21,14 +21,40 @@ namespace starsim::mission {
 
 enum class LunarOrbitKind { Llo, Nrho };
 
+// The LLO: a plane chosen by its normal (Moon-centred, GCRF axes), else by the inclination (the node then follows the
+// arrival: polar by default, explicit missions).
 struct LloTarget {
-    double altitude_m = 100e3;                     // [S] spec: 100 km circular
-    double inclination_rad = 0.5 * constants::pi;  // polar, relative to the MOON_ME equator
+    double altitude_m = 100e3;  // [S] spec: 100 km circular
+    std::optional<math::Vec3> plane_normal_moon_inertial;
+    double inclination_rad = 0.5 * constants::pi;  // relative to the MOON_ME equator; used without a plane normal
 };
+
+// The landing the LLO is chosen for (user 2026-11-06: "die Neigung des Orbits kann frei gewaehlt werden"): the plane
+// holds the site at the touchdown epoch (llo_plane_through_site); MOON_ME latitude / longitude.
+struct LloSiteTarget {
+    double latitude_rad = 0.0;
+    double longitude_rad = 0.0;
+    std::optional<time::Epoch> touchdown;     // planned (a window, the mission's touchdown_utc) ...
+    double first_pass_after_arrival_s = 0.0;  // ... else this long after the transfer's arrival
+};
+
+// The plane that holds the site at `touchdown` and the arrival axis `arrival_asymptote_moon_inertial` (the incoming
+// asymptote: every plane through it is reached at the LOI cost of the arrival, so this one costs no plane change). Of
+// its two senses the one of `arrival_normal_moon_inertial` (the arrival plane it is turned from: the other sense passes
+// the Moon on its other side - another transfer), without one the prograde (normal on the Moon's north side). A site
+// (nearly) on the axis is in every plane through it: then the plane through the axis of least inclination. Unit
+// normal, Moon-centred GCRF axes. The same holds for a transfer from a lunar orbit with its burn point as the axis.
+math::Vec3 llo_plane_through_site(const frames::BodyOrientation& moon, double latitude_rad, double longitude_rad,
+                                  time::Epoch touchdown, const math::Vec3& arrival_asymptote_moon_inertial,
+                                  const std::optional<math::Vec3>& arrival_normal_moon_inertial = std::nullopt);
 
 struct LunarOutboundParameters {
     LunarOrbitKind orbit = LunarOrbitKind::Llo;
     LloTarget llo;
+    // LLO without a plane normal: the plane is chosen through this site at its touchdown (plan() records it in
+    // OutboundPlan::llo_plane_normal_moon_inertial; the later solves of that plan - finite TLI, MCCs - aim at it and
+    // hold the plan's arrival epoch).
+    std::optional<LloSiteTarget> llo_site;
     std::shared_ptr<const NrhoReference> nrho;  // required for Nrho
     // LLO: planned periselene. NRHO: the reference's perilune the flight joins: the powered flyby happens about then
     // and the insertion follows on the arc after it.
@@ -58,6 +84,11 @@ struct OutboundPlan {
     std::optional<gnc::BurnNode> powered_flyby;
     PositionTarget flyby_target;
     gnc::BurnNode insertion;  // LLO: LOI at periselene; NRHO: insertion on the reference (re-planned in flight)
+    // LLO: the plane the TLI aims at (the parameters' normal, or the one chosen through llo_site); empty when the
+    // inclination is targeted.
+    std::optional<math::Vec3> llo_plane_normal_moon_inertial;
+    time::Epoch llo_arrival_epoch;           // with a plane: the arrival the later solves hold (its asymptote)
+    std::optional<time::Epoch> llo_touchdown;  // with llo_site: the touchdown the plane holds the site at
     double total_delta_v_mps = 0.0;
     double propellant_kg = 0.0;  // rocket equation on the vacuum Raptors
 };
@@ -106,7 +137,12 @@ public:
                                           const LunarOutboundParameters& p, double min_lead_s = 0.0) const;
 
 private:
-    LunarArrivalTarget llo_target(const LunarOutboundParameters& p) const;
+    // The LLO arrival the solves aim at: the parameters' plane normal, else the plan's chosen plane, else the inclination.
+    LunarArrivalTarget llo_target(const LunarOutboundParameters& p, const OutboundPlan* plan = nullptr) const;
+    // The TLI into the plane through p.llo_site (fixed point on the arrival asymptote, arrival held); records the plane,
+    // the held arrival and the touchdown in `plan`.
+    TransferSolution solve_through_site(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                                        const LunarOutboundParameters& p, OutboundPlan& plan) const;
     bool plan_nrho(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                    const LunarOutboundParameters& p, OutboundPlan& plan) const;
     std::optional<time::Epoch> nrho_insertion_epoch(const LunarOutboundParameters& p) const;

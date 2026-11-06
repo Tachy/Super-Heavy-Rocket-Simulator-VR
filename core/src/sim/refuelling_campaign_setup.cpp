@@ -97,8 +97,9 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
         d.refusal = detail::exception_report(e);
         return d;
     }
+    const auto* site = session.lunar_landing_site();
     if (!session.plan_lunar_outbound(lunar_outbound_parameters(lunar, session.gravity(), session.ephemeris(),
-                                                               lunar_epoch))) {
+                                                               lunar_epoch, site ? &site->config : nullptr))) {
         d.refusal = session.lunar_status();
         return d;
     }

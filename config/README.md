@@ -367,14 +367,17 @@ flow separation (vacuum engines).
   `argument_of_latitude_deg`; the RAAN is computed so the plane passes through the Moon at arrival); `[transfer]`
   `flight_time_days` (from the scenario start to the arrival), `earliest_departure_h` (0 = as early as possible; the
   session never plans the TLI centre earlier than 30 min after the start), `mcc_after_tli_days`;
-  `[lunar_orbit]` `kind = "llo" | "nrho"`, for an LLO `altitude_km`, `inclination_deg`; for an NRHO an `[nrho]` table
+  `[lunar_orbit]` `kind = "llo" | "nrho"`, for an LLO `altitude_km` and optional `inclination_deg` (absent, as in the
+  shipped LLO missions: the plane is chosen through the site at the touchdown, `mission::llo_plane_through_site`); for an NRHO an `[nrho]` table
   with the CR3BP seed at apolune (`apolune_position`, `apolune_velocity`, nondimensional), `revolutions` /
   `synodic_months` (resonance) and `reference_revolutions` (span of the full-model reference). The session needs a Moon
   orientation (the game's FlightSim has none yet - lunar l6).
   Since lunar l4 the mission flies on to the surface and back to the LLO (`sim::start_lunar_landing_mission`):
   `[descent]` `pdi_altitude_above_site_km` (periselene after the DOI), `braking_range_km` (fallback; the planner sizes
   the range from the mass), `max_crossrange_km` (the LLO waits for a site pass within this; a plane trim removes the
-  rest), `slope_limit_deg`, `touchdown_search_radius_m` (admissible point nearest to the site); `[surface]`
+  rest), `slope_limit_deg`, `touchdown_search_radius_m` (admissible point nearest to the site), optional
+  `touchdown_utc` (the landing the mission is planned for: the LLO plane holds the site then and the descent takes that
+  pass; absent: the first pass after the LLO arrival); `[surface]`
   `stay_hours`; `[ascent]` `insertion_altitude_above_site_km` (PEG cutoff), `aposelene_km` (circularised there);
   `[budget]` delta-v of the legs not planned at the start (`descent_delta_v_mps`, `ascent_delta_v_mps`, for the NRHO
   variant `nrho_to_llo_delta_v_mps` / `llo_to_nrho_delta_v_mps`) and `reserve_kg`: the start refuses a mission whose

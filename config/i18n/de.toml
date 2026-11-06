@@ -250,6 +250,7 @@ lunar.no_touchdown_point_hazards = "Kein Landepunkt mit höchstens {slope:deg0} 
 lunar.no_doi = "Kein Abstiegsmanöver (DOI) gefunden"
 lunar.no_pdi = "Kein Beginn des Abstiegs (PDI) gefunden"
 lunar.no_site_pass = "Kein Überflug der Landestelle innerhalb von {days:n1} Tagen (Bahnebene zu weit entfernt)"
+lunar.nrho_site_unreachable = "Die Landestelle bei {latitude:deg1} ist vom NRHO aus nicht erreichbar: es fehlen {budget_short:t1} Treibstoff"
 lunar.no_nrho_to_llo_transfer = "Kein Abstieg von der NRHO in die LLO gefunden"
 lunar.no_llo_to_nrho_transfer = "Kein Aufstieg von der LLO in die NRHO gefunden"
 lunar.nrho_not_covering_arrival = "NRHO-Referenz deckt die Ankunft nicht ab"

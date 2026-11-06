@@ -110,6 +110,8 @@ void FlightSession::lunar_liftoff(Flying& flying) {
         return;
     }
     lunar_ascent_parameters_.reset();
+    // The landing LLO's plane (least plane change back into it) unless the plan named a plane.
+    if (!parameters.plane_normal_moon_inertial) parameters.plane_normal_moon_inertial = lunar_landing_plane_normal_;
     body.release_landed();
     legs_->release(body);
     lunar_ascent_ = std::make_unique<gnc::LunarAscentGuidance>(

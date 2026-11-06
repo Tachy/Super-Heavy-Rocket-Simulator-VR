@@ -38,6 +38,10 @@ struct LunarDescentParameters {
     double glide_slope_rad = 30.0 * constants::deg_to_rad;  // the SCvx glide cone (DescentLimits)
     double glide_check_range_m = 3000.0;        // [E] the approach from the high gate
     double glide_margin_m = 50.0;               // [E] terrain below the cone by at least this
+    // The touchdown the LLO plane was chosen for (its plane holds the site then): passes earlier than half a revolution
+    // before it are not taken - the site may be within max_crossrange_m days before (near the poles, low inclinations),
+    // but the mission (its Sun, its stay) is planned for this one. Empty: the first pass that qualifies.
+    std::optional<time::Epoch> planned_touchdown;
 };
 
 // Ground range of the braking phase for a lander at PDI (l4 mass correction: the HLS reaches PDI with 500-570 t, not

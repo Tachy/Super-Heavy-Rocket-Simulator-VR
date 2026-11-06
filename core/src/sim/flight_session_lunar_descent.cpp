@@ -224,6 +224,10 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
     lunar_landing_->set_realtime(realtime_planning_);
     lunar_touchdown_.reset();
     lunar_touchdown_point_ = point;
+    {
+        const auto rel = mission::moon_relative(*env_.ephemeris, controlled_state(), epoch_);
+        lunar_landing_plane_normal_ = math::normalized(cross(rel.position_m, rel.velocity_mps));
+    }
     lunar_auto_abort_tried_ = false;
     attitude_mode_ = {};
     autopilot_.state = AutopilotState::Lunar;

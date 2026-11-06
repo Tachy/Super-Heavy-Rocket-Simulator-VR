@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,7 +40,10 @@ struct LunarAscentParameters {
     double vertical_rise_height_m = 150.0;   // PEG from here
     double insertion_altitude_above_site_m = 15.0e3;  // [E] Apollo inserted ~18 km up; >= 10.8 km clears all terrain
     double aposelene_altitude_m = 100.0e3;   // the LLO (spec)
-    bool northerly = true;                   // polar plane through the site, launched towards the north
+    // The ascent plane by its normal (Moon-centred, GCRF axes; the motion's sense with it): the plane through the
+    // liftoff point closest to it is flown (ascent_plane_through). Empty: the polar plane through the liftoff point,
+    // launched towards the north.
+    std::optional<math::Vec3> plane_normal_moon_inertial;
     double abort_min_climb_mps = 5.0;        // [E] abort: climb at least this before PEG takes over ...
     // [E] ... and until a fresh PEG solution steers below this radial share: PEG's time to go comes from the horizontal
     // speed still to gain - from a fast, low state (an abort at the high gate: 1.4 km/s, 14 km below the insertion) it
@@ -54,6 +58,12 @@ struct LunarAscentParameters {
     // variant's optimum, farthest from that edge.
     double max_acceleration_mps2 = 1.5 * constants::standard_gravity_mps2;
 };
+
+// The plane through the point `position_moon_inertial` (Moon-centred) closest to the plane of `normal_moon_inertial`
+// (least plane change): the normal's component along the point removed, renormalised, same sense. Empty when the point
+// lies on the normal (every plane through it is as far).
+std::optional<math::Vec3> ascent_plane_through(const math::Vec3& position_moon_inertial,
+                                               const math::Vec3& normal_moon_inertial);
 
 // `base` with the stage's [stage.lunar_ascent] values (Raptor start and vertical rise heights, abort margin). Throws
 // std::runtime_error (German) for a stage without them (not a lunar lander).

@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include "starsim/config/lunar_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/mission/lunar_budget.hpp"
@@ -71,10 +72,21 @@ std::optional<math::StateVector> lunar_parking_state(const FlightSession& sessio
 MissionStart continue_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                             const config::LunarLandingMission& mission, time::Epoch epoch);
 
+// The touchdown the mission started at `epoch` is planned for: [descent] touchdown_utc (relative to [orbit] epoch_utc,
+// which `epoch` is); empty without it.
+std::optional<time::Epoch> lunar_planned_touchdown(const config::LunarLandingMission& mission, time::Epoch epoch);
+
+// Without a planned touchdown: the first pass after the LLO arrival the session can take - the trims' settling
+// revolutions, then the descent planner's minimum lead and 1.25 revolutions.
+double lunar_first_pass_after_arrival_s(const config::LunarLandingMission& mission, double gm_moon_m3ps2);
+
 // Outbound parameters of the mission started at `epoch` (FlightSession::plan_lunar_outbound); the NRHO variant builds
-// its reference (multiple shooting, ~15 s) with the first perilune at the arrival.
+// its reference (multiple shooting, ~15 s) with the first perilune at the arrival. LLO without [lunar_orbit]
+// inclination_deg: the plane is chosen through `site` at lunar_planned_touchdown, else at the first pass after the
+// arrival (without a site: polar).
 mission::LunarOutboundParameters lunar_outbound_parameters(const config::LunarLandingMission& mission,
                                                            const environment::GravityModel& gravity,
-                                                           const ephemeris::Ephemeris& ephemeris, time::Epoch epoch);
+                                                           const ephemeris::Ephemeris& ephemeris, time::Epoch epoch,
+                                                           const config::LunarSiteConfig* site = nullptr);
 
 }  // namespace starsim::sim

@@ -41,10 +41,10 @@ struct Fixture {
     time::Epoch t0 = spice::SpiceTimeConverter().from_utc({2026, 11, 6, 0, 0, 0.0});
     std::shared_ptr<const environment::LunarTerrain> terrain;
     sim::LunarSite site;
-    Fixture() {
-        terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
+    explicit Fixture(const char* site_id = "mons_mouton_im2") {
+        terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, site_id));
         session.set_moon_terrain(terrain);
-        site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
+        site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, site_id), *terrain);
         session.set_lunar_landing_site(site);
     }
     const environment::LunarTerrain* session_terrain() const { return terrain.get(); }
@@ -194,6 +194,38 @@ TEST_CASE("After a 3-day stay under time warp the HLS ascends into the 100 km LL
         CHECK(high < 101e3);
         CHECK(dv == Catch::Approx(1900.0).margin(200.0));  // spec ~1.9 km/s
     }
+}
+
+// Lunar sites plan Task 7: the ascent flies a given plane (the mission's landing LLO plane) - here a 60 deg azimuth
+// from Apollo 17 (20.19 N), neither polar nor through the pole: the LLO after the circularisation holds that plane.
+TEST_CASE("ascent from 20 N inserts into the requested plane within 0.05 deg", "[gnc][lunar_ascent][terrain][data]") {
+    const auto a17 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_17");
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, a17)) SKIP("Apollo 17 tile not installed");
+    Fixture fx("apollo_17");
+    fx.land(hls(test::hls_landed_propellant_kg));
+    const auto c = fx.ephemeris.state_gcrf(ephemeris::Body::Moon, fx.session.epoch());
+    const Vec3 r_hat = math::normalized(fx.session.body(0).state().position_gcrf_m - c.position_m);
+    const auto rotation = fx.moon_me.fixed_to_gcrf(fx.session.epoch()).rotation;
+    const Vec3 pole = rotation * Vec3{0.0, 0.0, 1.0};
+    const Vec3 east = math::normalized(cross(pole, r_hat));
+    const Vec3 north = cross(r_hat, east);
+    const double azimuth = 60.0 * deg;
+    const Vec3 requested = math::normalized(cross(r_hat, north * std::cos(azimuth) + east * std::sin(azimuth)));
+    gnc::LunarAscentParameters parameters;
+    parameters.plane_normal_moon_inertial = requested;
+    REQUIRE(fx.session.plan_lunar_ascent(parameters, 0.0));
+    fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
+    REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
+    const auto m = fx.ephemeris.state_gcrf(ephemeris::Body::Moon, fx.session.epoch());
+    const auto& s = fx.session.body(0).state();
+    const Vec3 h = math::normalized(cross(s.position_gcrf_m - m.position_m, s.velocity_gcrf_mps - m.velocity_mps));
+    const double error = std::acos(std::clamp(dot(h, requested), -1.0, 1.0));
+    const auto [low, high] = fx.llo_apsides();
+    std::printf("[lunar_ascent] Apollo 17, azimuth 60 deg: plane %.4f deg off the requested one (i %.2f deg), LLO %.2f x %.2f km\n",
+                error / deg, std::acos(dot(h, pole)) / deg, low / 1000.0, high / 1000.0);
+    CHECK(error < 0.05 * deg);
+    CHECK(low > 99e3);
+    CHECK(high < 101e3);
 }
 
 TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish the ascent into the LLO",

@@ -27,6 +27,12 @@ constexpr double anomaly_search_step_s = 600.0;
 constexpr double anomaly_search_tolerance_s = 1.0;
 constexpr double apsis_now_s = 1.0;  // an apsis less than this ahead or behind counts as "now"
 constexpr double far_future_s = 1e30;  // "no apsis found yet"
+// LLO plane through a site: a site this close to the arrival axis (sine of the angle) lies in every plane through it.
+constexpr double site_on_axis_sin = 0.01;  // [E] ~0.6 deg
+// Fixed point between the TLI into a plane and the asymptote it arrives on: done when the plane moves less than this
+// (1e-5 rad: ~17 m at the lunar surface), at most this many solves.
+constexpr double plane_fixed_point_rad = 1e-5;
+constexpr int plane_fixed_point_solves = 6;
 
 bool debug_enabled() { return std::getenv("STARSIM_DEBUG_OUTBOUND") != nullptr; }
 
@@ -55,8 +61,91 @@ LunarOutboundPlanner::LunarOutboundPlanner(const environment::GravityModel& grav
       position_(gravity),
       gm_moon_(ephemeris.gm_m3ps2(ephemeris::Body::Moon)) {}
 
-LunarArrivalTarget LunarOutboundPlanner::llo_target(const LunarOutboundParameters& p) const {
-    return {p.llo.altitude_m, p.llo.inclination_rad, p.arrival_epoch};
+Vec3 llo_plane_through_site(const frames::BodyOrientation& moon, double latitude_rad, double longitude_rad,
+                            time::Epoch touchdown, const Vec3& arrival_asymptote_moon_inertial,
+                            const std::optional<Vec3>& arrival_normal_moon_inertial) {
+    const auto rotation = moon.fixed_to_gcrf(touchdown).rotation;
+    const Vec3 site = rotation * Vec3{std::cos(latitude_rad) * std::cos(longitude_rad),
+                                      std::cos(latitude_rad) * std::sin(longitude_rad), std::sin(latitude_rad)};
+    const Vec3 pole = rotation * Vec3{0.0, 0.0, 1.0};
+    const Vec3 a = math::normalized(arrival_asymptote_moon_inertial);
+    Vec3 n = cross(a, site);
+    if (norm(n) < site_on_axis_sin) n = pole - a * dot(a, pole);  // the plane through the axis of least inclination
+    n = math::normalized(n);
+    const Vec3 sense = arrival_normal_moon_inertial ? *arrival_normal_moon_inertial : pole;  // else prograde
+    return dot(n, sense) < 0.0 ? -n : n;
+}
+
+LunarArrivalTarget LunarOutboundPlanner::llo_target(const LunarOutboundParameters& p, const OutboundPlan* plan) const {
+    LunarArrivalTarget target{p.llo.altitude_m, p.llo.inclination_rad, p.arrival_epoch};
+    target.plane_normal_moon_inertial = p.llo.plane_normal_moon_inertial;
+    if (plan && plan->llo_plane_normal_moon_inertial) {
+        // the plan's plane holds its site only on the plan's asymptote: the solves after the plan hold its arrival
+        target.plane_normal_moon_inertial = plan->llo_plane_normal_moon_inertial;
+        target.periselene_epoch = plan->llo_arrival_epoch;
+        target.hold_arrival_epoch = true;
+    }
+    return target;
+}
+
+TransferSolution LunarOutboundPlanner::solve_through_site(const StateVector& state, time::Epoch epoch,
+                                                          time::Epoch burn_epoch, const LunarOutboundParameters& p,
+                                                          OutboundPlan& plan) const {
+    const auto& site = *p.llo_site;
+    // The inclination-targeted transfer first (polar by default: the plan without a site); its arrival epoch is held
+    // and its plane turned about its asymptote onto the site - the least change from that transfer. The arrival time
+    // is free in that solve and drifts along a nearly flat family (Mons Mouton 2026-11-13: +19 h for the polar plane,
+    // -12 h for a plane solved freely, 2 m/s of TLI apart), and a day turns the asymptote by ~13 deg: held, the plane
+    // stays the plane through the site, also in the mid-course corrections after the plan.
+    TransferSolution solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
+    std::optional<Vec3> warm;
+    Vec3 axis;
+    std::optional<Vec3> sense;  // the first transfer's: turned, not reversed
+    time::Epoch arrival = p.arrival_epoch;
+    if (solution.converged) {
+        axis = arrival_axis(solution.arrival.relative_state, gm_moon_);
+        sense = cross(solution.arrival.relative_state.position_m, solution.arrival.relative_state.velocity_mps);
+        warm = solution.burn.delta_v_gcrf_mps;
+        arrival = solution.arrival.periselene_epoch;
+    } else {  // the Earth two-body arc from the burn to the Moon's centre at the planned arrival
+        const StateVector at_burn = position_.coast(state, epoch, burn_epoch);
+        const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, p.arrival_epoch);
+        const auto centre = orbit::solve_lambert(at_burn.position_m, moon.position_m, p.arrival_epoch - burn_epoch,
+                                                 ephemeris_.gm_m3ps2(ephemeris::Body::Earth),
+                                                 cross(at_burn.position_m, at_burn.velocity_mps));
+        axis = centre ? math::normalized(centre->arrival_velocity_mps - moon.velocity_mps)
+                      : -math::normalized(moon.velocity_mps);
+    }
+    const time::Epoch touchdown = site.touchdown ? *site.touchdown : arrival + site.first_pass_after_arrival_s;
+    Vec3 normal = llo_plane_through_site(moon_orientation_, site.latitude_rad, site.longitude_rad, touchdown, axis, sense);
+    for (int i = 0; i < plane_fixed_point_solves; ++i) {
+        auto target = llo_target(p);
+        target.plane_normal_moon_inertial = normal;
+        target.periselene_epoch = arrival;
+        // turned with the arrival free first (a large turn with the arrival held creeps: Apollo 11 77 deg, 40 Newton
+        // steps), then held where it arrived
+        target.hold_arrival_epoch = i > 0;
+        solution = transfer_.solve(state, epoch, burn_epoch, target, warm);
+        if (!solution.converged && warm) solution = transfer_.solve(state, epoch, burn_epoch, target);
+        if (!solution.converged) return solution;
+        warm = solution.burn.delta_v_gcrf_mps;
+        arrival = solution.arrival.periselene_epoch;
+        axis = arrival_axis(solution.arrival.relative_state, gm_moon_);
+        const Vec3 next = llo_plane_through_site(moon_orientation_, site.latitude_rad, site.longitude_rad,
+                                                 touchdown, axis, normal);
+        const double moved = std::acos(std::clamp(dot(next, normal), -1.0, 1.0));
+        if (debug_enabled()) {
+            std::printf("[outbound] LLO plane through the site, solve %d: TLI %.1f m/s, i %.3f deg, plane moved %.2e rad\n",
+                        i + 1, norm(solution.burn.delta_v_gcrf_mps), solution.arrival.inclination_rad / constants::deg_to_rad,
+                        moved);
+        }
+        if (moved < plane_fixed_point_rad) break;
+        normal = next;
+    }
+    plan.llo_plane_normal_moon_inertial = normal;
+    plan.llo_arrival_epoch = arrival;
+    plan.llo_touchdown = touchdown;
+    return solution;
 }
 
 std::optional<time::Epoch> LunarOutboundPlanner::nrho_insertion_epoch(const LunarOutboundParameters& p) const {
@@ -179,7 +268,16 @@ OutboundPlan LunarOutboundPlanner::plan(const StateVector& state, time::Epoch ep
         transfer_.best_departure(state, epoch, epoch + p.earliest_departure_s, p.arrival_epoch);
 
     if (p.orbit == LunarOrbitKind::Llo) {
-        const auto solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
+        TransferSolution solution;
+        if (!p.llo.plane_normal_moon_inertial && p.llo_site) {
+            solution = solve_through_site(state, epoch, burn_epoch, p, plan);
+        } else {
+            solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
+            if (solution.converged && p.llo.plane_normal_moon_inertial) {  // a given plane: its arrival is held after
+                plan.llo_plane_normal_moon_inertial = p.llo.plane_normal_moon_inertial;
+                plan.llo_arrival_epoch = solution.arrival.periselene_epoch;
+            }
+        }
         if (!solution.converged) {
             plan.reason = report::make(report::Code::lunar_no_moon_transfer);
             return plan;
@@ -222,7 +320,8 @@ std::optional<gnc::BurnNode> LunarOutboundPlanner::finite_tli(const StateVector&
         if (p.orbit == LunarOrbitKind::Llo) {
             auto targeter = transfer_;
             targeter.set_finite_burn(scaled);
-            const auto solution = targeter.solve(state, epoch, plan.tli.epoch, llo_target(p), burn.delta_v_gcrf_mps);
+            const auto solution =
+                targeter.solve(state, epoch, plan.tli.epoch, llo_target(p, &plan), burn.delta_v_gcrf_mps);
             converged = solution.converged;
             if (converged) burn = solution.burn;
         } else {
@@ -251,10 +350,10 @@ std::optional<gnc::BurnNode> LunarOutboundPlanner::mid_course(const StateVector&
                                                               const OutboundPlan& plan) const {
     gnc::BurnNode burn;
     if (p.orbit == LunarOrbitKind::Llo) {
-        auto solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p), Vec3{});
+        auto solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p, &plan), Vec3{});
         // A finite TLI can leave an arc that no longer comes near the Moon: no periselene to start Newton from zero;
         // then the Lambert guess aimed beside the Moon at the planned arrival.
-        if (!solution.converged) solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
+        if (!solution.converged) solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p, &plan));
         if (debug_enabled()) {
             const auto free = transfer_.evaluate(state, epoch, burn_epoch, Vec3{});
             std::printf("[outbound] MCC: free arc reached %d periselene %.0f km i %.2f deg; solve %d after %d it, "

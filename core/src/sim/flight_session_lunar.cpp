@@ -96,6 +96,7 @@ void FlightSession::reset_lunar() {
     lunar_burns_.clear();
     lunar_landing_.reset();
     lunar_touchdown_.reset();
+    lunar_landing_plane_normal_.reset();
     lunar_descent_plan_.reset();
     lunar_landing_setup_.reset();
     lunar_ascent_.reset();
