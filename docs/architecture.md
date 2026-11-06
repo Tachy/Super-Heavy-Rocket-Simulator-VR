@@ -8,7 +8,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth and Moon albedo and infrared;
-  terrain: the lunar site tile + LDEM_16, the Earth terrain (3DEP 1 m / GLO-30 / ETOPO 2022 + site plateaus) and the
+  terrain: the lunar site tiles + LDEM_64, the Earth terrain (3DEP 1 m / GLO-30 / ETOPO 2022 + site plateaus) and the
   EGM2008 geoid as the sea level; `environment::terrain_horizon` (terrain horizon elevations by a great-circle
   march, and the banded bake of a terrain node's vertex lattice, for the Moon's terrain shadows;
   `StarsimCore.horizon_elevations` / `horizon_elevation_rad`); one shared immutable instance per data set, `sim::shared_earth_terrain` /

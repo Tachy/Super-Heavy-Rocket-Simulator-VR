@@ -213,20 +213,40 @@ license = "Factual values displayed in the public SpaceX webcast, transcribed by
 credit = "Telemetry: SpaceX webcast; transcription: this project"
 
 [[source]]
-id = "lola_ldem_16"
-name = "LRO LOLA gridded elevation LDEM_16 (global, 16 px/deg) - lunar terrain outside the site tiles"
-url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_16.img"
-target = "data/terrain/ldem_16.toml"
+id = "lola_ldem_64"
+name = "LRO LOLA gridded elevation LDEM_64 (global, 64 px/deg, 473 m) - lunar terrain outside the site tiles"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_64.img"
+target = "data/terrain/ldem_64.toml"
 kind = "lunar_tiles"
 license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
 credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
 
 [[source]]
-id = "lola_ldem_80s_20m"
-name = "LRO LOLA polar gridded elevation LDEM_80S_20M (20 m/px, 80-90 S) - cropped to the landing-site tiles of config/lunar_sites.toml"
+id = "lunar_sites"
+name = "Landing-site tiles of the preset sites of config/lunar_sites.toml (height + albedo), cut from the products of config/lunar_terrain_products.toml by the core CLI lunar_site_tile (build the core first)"
 url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80s_20m.img"
-target = "data/terrain/mons_mouton_im2.toml"
-kind = "lunar_tiles"
+target = "data/terrain/sites"
+kind = "lunar_site_tiles"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lunar_test_sites"
+name = "Opt-in free test sites (Tsiolkovskiy, 75 N 30 E): the same tiles as lunar_sites, for the free-coordinate tests"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80n_20m.img"
+target = "data/terrain/sites"
+kind = "lunar_site_tiles"
+opt_in = true
+sites = [{ id = "tsiolkovskiy", latitude_deg = -20.4, longitude_deg = 129.1 }, { id = "north_75n_30e", latitude_deg = 75.0, longitude_deg = 30.0 }]
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_ldem_80s_20m"
+name = "LRO LOLA polar gridded elevation LDEM_80S_20M (20 m/px, 80-90 S) - landing-site terrain tiles (Mons Mouton), ranged reads"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80s_20m.img"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
 license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
 credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
 

@@ -1,12 +1,32 @@
-# Lunar landing sites (MOON_ME latitude / longitude, the frame of the LOLA maps). The data pipeline crops a LOLA tile
-# around each site (tools/data_pipeline/lunar_tile.py -> data/terrain/<id>.toml).
+# Lunar landing sites (MOON_ME latitude / longitude, the frame of the LOLA maps). A site is an id and a position: its
+# terrain tile is cut from the products of lunar_terrain_products.toml (tools/data_pipeline/lunar_tile.py through the
+# core CLI build/core/lunar_site_tile.exe) into data/terrain/sites/<cache key>.toml; the key names the product, the
+# position and the size (config/lunar_site_tile.hpp), so a moved site never reuses an old tile.
 [sources]
 artemis_2024 = "NASA, Artemis III candidate landing regions (2024-10-28): nine regions incl. Mons Mouton Plateau and Mons Mouton"
 im2 = "https://en.wikipedia.org/wiki/Mons_Mouton (retrieved 2026-10-15): IM-2 Athena landed 2025-03-06 at 84 deg 47' 26\" S, 29 deg 11' 45\" E"
+lroc_nac = "LROC NAC-controlled landing-site coordinates (retrieved 2026-11-06): Apollo 11 0.67416 N 23.47314 E (0 40 27 N, 23 28 23 E), Apollo 15 26.13222 N 3.63386 E (26 07 56 N, 3 38 02 E), Apollo 17 20.19089 N 30.77168 E (Haase et al. 2019, Earth Space Sci. 6, doi:10.1029/2018EA000408: 20.1908 N, 30.7717 E); Wikipedia articles of the missions"
+
+# The global height grid under every tile (data/terrain/<grid>.toml, fetch.py lola_ldem_64): LOLA LDEM_64, 473 m.
+[global]
+grid = "ldem_64"
 
 [[site]]
 id = "mons_mouton_im2"
 latitude_deg = -84.7906               # [S:im2] in the Mons Mouton region (Artemis III candidates [S:artemis_2024])
 longitude_deg = 29.1957               # [S:im2] east
-tile_half_size_m = 10000.0            # [E] 20 x 20 km tile
-product = "LDEM_80S_20M"
+
+[[site]]
+id = "apollo_11"
+latitude_deg = 0.67416                # [S:lroc_nac] Mare Tranquillitatis
+longitude_deg = 23.47314              # [S:lroc_nac] east
+
+[[site]]
+id = "apollo_15"
+latitude_deg = 26.13222               # [S:lroc_nac] Hadley Rille / Apennine front
+longitude_deg = 3.63386               # [S:lroc_nac] east
+
+[[site]]
+id = "apollo_17"
+latitude_deg = 20.19089               # [S:lroc_nac] Taurus-Littow valley
+longitude_deg = 30.77168              # [S:lroc_nac] east

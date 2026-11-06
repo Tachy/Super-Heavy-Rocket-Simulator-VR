@@ -318,18 +318,18 @@ TEST_CASE("Lunar site tile: no product for the site refuses with lunar.site_no_p
     CHECK(config::plan_site_tile(products, "height", 80.05 * deg, 0.0).product_id != "ldem_80n_20m");
 }
 
-TEST_CASE("Lunar site tile: north polar tiles agree with LDEM_16", "[config][lunar_site_tile][data]") {
+TEST_CASE("Lunar site tile: north polar tiles agree with LDEM_64", "[config][lunar_site_tile][data]") {
     const std::filesystem::path sites = std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "sites";
-    const std::filesystem::path global_path = std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_16.toml";
-    if (!std::filesystem::exists(sites) || !std::filesystem::exists(global_path)) SKIP("site tiles / LDEM_16 not installed");
+    const std::filesystem::path global_path = std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_64.toml";
+    if (!std::filesystem::exists(sites) || !std::filesystem::exists(global_path)) SKIP("site tiles / LDEM_64 not installed");
     auto global_file = config::load_terrain_grid_file(global_path);
     environment::CylindricalGrid global;
     global.pixels_per_degree = global_file.pixels_per_degree;
     global.zero_line = global_file.zero_line;
     global.zero_sample = global_file.zero_sample;
     global.grid = {global_file.lines, global_file.samples, global_file.dn_scale_m, std::move(global_file.dn)};
-    // Orientation limit: measured rms against LDEM_16 is 72-104 m (ldem_45n_100m, ldem_80n_20m, ldem_60n_60m, 2026-11-06,
-    // fix round 1 of the lunar sites plan); a wrong sign or axis choice gives 800-1950 m.
+    // Orientation limit: measured rms against LDEM_16 was 72-104 m (ldem_45n_100m, ldem_80n_20m, ldem_60n_60m, 2026-11-06,
+    // fix round 1 of the lunar sites plan), against LDEM_64 11 m for the real 75 N tile (ldem_60n_60m, task 4); a wrong sign or axis choice gives 800-1950 m.
     constexpr double kOrientationRmsLimitM = 150.0;
     int checked = 0;
     for (const auto& entry : std::filesystem::directory_iterator(sites)) {
@@ -342,7 +342,7 @@ TEST_CASE("Lunar site tile: north polar tiles agree with LDEM_16", "[config][lun
             square += d * d;
         }
         const double rms = std::sqrt(square / static_cast<double>(file.checks.size()));
-        std::printf("[lunar_site_tile] %s: rms against LDEM_16 %.0f m\n", entry.path().filename().string().c_str(), rms);
+        std::printf("[lunar_site_tile] %s: rms against LDEM_64 %.0f m\n", entry.path().filename().string().c_str(), rms);
         CHECK(rms < kOrientationRmsLimitM);
         ++checked;
     }

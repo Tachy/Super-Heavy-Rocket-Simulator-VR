@@ -14,9 +14,15 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   flaps / pins, ship RCS; landing thrusters re-sized in l4 to 12 x 90 kN (throttle 35-100 %), canted 15 deg at 40 m,
   `landing_only`: never in burns or `ignite()`). Engine groups take `station_m` / `cant_deg`. Legs [E] deployable (user 2026-11-04, Task 6b of the models plan; like Falcon 9's), six,
   footprint radius 12 m (user 2026-10-15): slope limit ~9 deg at 12 m stance (NASA's Artemis limit ~8-10 deg); absorber
-  1e7 N/m, damping 3e6 N s/m [E], crush 4.5 MN [E]. Terrain: `config/lunar_sites.toml` (default `mons_mouton_im2`,
-  IM-2's landing point [S], 5,322 m above the sphere); `fetch.py` crops LOLA `LDEM_80S_20M` to 20 x 20 km per site by
-  one HTTP range request and fetches the global `LDEM_16` into `data/terrain/`. `environment::LunarTerrain` (tiles behind
+  1e7 N/m, damping 3e6 N s/m [E], crush 4.5 MN [E]. Terrain: `config/lunar_sites.toml` (`[global] grid = "ldem_64"`; sites are `id`, `latitude_deg`,
+  `longitude_deg`: `mons_mouton_im2` (default; IM-2's landing point [S], 5,322 m above the sphere) and the LROC NAC
+  positions of `apollo_11` / `apollo_15` / `apollo_17`; product, tile size and cache key come from
+  `lunar_terrain_products.toml` via `plan_site_tile`, `LunarSiteConfig::height_tile_key`). `fetch.py lola_ldem_64` fetches the
+  global LOLA `LDEM_64` (473 m) whole into `data/terrain/`; `fetch.py lunar_sites` runs the core CLI `lunar_site_tile`
+  for every site (height + albedo; an albedo refusal is not fatal, the global albedo is used) into
+  `data/terrain/sites/<cache key>.{toml,i16}`; `sim::load_lunar_terrain` reads the global grid and the height tile of
+  every preset site by its key (polar and simple-cylindrical tiles; a missing tile is `data.lunar_terrain_missing`;
+  albedo tiles are not read yet). `environment::LunarTerrain` (tiles behind
   `environment::LunarTile` in `lunar_tile.hpp`: `make_polar_tile(tile, north)` - south projection as LOLA's, north per the PDS label
   `line = pole_line + rho cos(lon) / scale` - and `make_cylindrical_tile` (simple cylindrical, pixel (0, 0) centred at
   the given lat / lon, longitude wraps over 0/360, edge distance by the finer metric); a tile
@@ -37,9 +43,9 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   a tile mean of 1 (no-data pixels 1.0). Range merging (`RangePolicy`): height = exactly the crop rows (gap 0), albedo =
   rows joined across gaps up to 512 KiB in blocks of at most 24 MiB (~7 requests instead of ~1500 for a 150 km tile,
   ~165 MB). Polar half size in pixels = round(half / scale) (no conformal factor: the tile is 1-7 % smaller on the ground
-  at 45-60 deg). The north polar line convention `line = pole_line + rho cos(lon) / s` was checked against LDEM_16 for
+  at 45-60 deg). The north polar line convention `line = pole_line + rho cos(lon) / s` was checked against LDEM_16 (superseded by LDEM_64) for
   LDEM_80N_20M (rms 87 m vs 799-1538 m for the other sign choices), LDEM_60N_60M (104 m vs 1191-1825) and LDEM_45N_100M
-  (72 m vs 1340-1952); the WAC north mosaic is assumed to share it (not checkable against heights). Products file: `config/lunar_terrain_products.toml`
+  (72 m vs 1340-1952); the real 75 N / 30 E tile (LDEM_60N_60M) agrees with LDEM_64 to 11 m rms (the [data] test, limit 150 m); the WAC north mosaic is assumed to share it (not checkable against heights). Products file: `config/lunar_terrain_products.toml`
   describes each product (URL, layout, projection, scale; `[selection]` orders them) and
   `tools/data_pipeline/probe_lunar_products.py --verify-config` checks it against the PDS labels. Heights: LOLA polar
   20 m (80-90 deg, own `tile_half_size_m` 10 km), SLDEM2015 512 px/deg (+-60 deg, ~59 m, km values), LOLA polar 60 m

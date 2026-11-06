@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "starsim/config/data_missing.hpp"
+#include "starsim/config/lunar_site_tile.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/report/report.hpp"
 #include "toml_document.hpp"
@@ -13,13 +14,16 @@ namespace starsim::config {
 
 namespace {
 
-LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t) {
+LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t,
+                           const std::vector<LunarTerrainProduct>& products) {
     LunarSiteConfig s;
     s.id = doc.text(t, "id");
-    s.product = doc.text(t, "product");
     s.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
     s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
-    s.tile_half_size_m = doc.positive(t, "tile_half_size_m");
+    // The height tile's product, size and cache key come from the products description (no refusal for a preset).
+    const auto request = plan_site_tile(products, "height", s.latitude_rad, s.longitude_rad);
+    s.tile_half_size_m = request.half_size_m;
+    s.height_tile_key = request.cache_key;
     return s;
 }
 
@@ -34,9 +38,15 @@ std::vector<LunarSiteConfig> load_lunar_sites(const std::filesystem::path& confi
     const detail::Document doc(config_dir / "lunar_sites.toml");
     std::vector<LunarSiteConfig> sites;
     if (auto list = doc.root["site"].as_array()) {
-        for (const auto& node : *list) sites.push_back(parse_site(doc, *node.as_table()));
+        const auto products = load_lunar_terrain_products(config_dir);
+        for (const auto& node : *list) sites.push_back(parse_site(doc, *node.as_table(), products));
     }
     return sites;
+}
+
+std::string load_lunar_global_grid_name(const std::filesystem::path& config_dir) {
+    const detail::Document doc(config_dir / "lunar_sites.toml");
+    return doc.text(doc.table(doc.root, "global"), "grid");
 }
 
 LunarSiteConfig load_lunar_site(const std::filesystem::path& config_dir, std::string_view id) {

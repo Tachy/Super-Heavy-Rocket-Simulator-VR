@@ -1,29 +1,39 @@
-"""LOLA terrain for the lunar landing sites (lunar l2).
+"""LOLA terrain for the lunar landing sites.
 
-Site tiles: crop of the south polar stereographic LDEM_80S_20M (20 m/px, 80-90 S) around each site of
-config/lunar_sites.toml, fetched with one HTTP range request over the rows it needs (the full product is 1.8 GB).
-Global grid: LDEM_16 (16 px/deg, 33 MB) for the terrain outside the tiles. Output in data/terrain/: a TOML header and
-int16 heights (DN; height above the 1737.4 km sphere = DN x dn_scale_m), read by core/src/config/lunar_site_config.cpp.
+Global grid: LDEM_64 (64 px/deg, 473 m, 531 MB, fetched whole) for the terrain outside the tiles -> data/terrain/ldem_64.*.
+Site tiles: the core CLI build/core/lunar_site_tile.exe plans the HTTP byte ranges of a site's height and albedo tile
+from config/lunar_terrain_products.toml (`plan`), this module downloads them (<= 32 parallel connections, HTTP 429
+Retry-After honoured by stopping) and the CLI assembles the tile (`assemble`) -> data/terrain/sites/<cache key>.{toml,i16}.
+Output: a TOML header and int16 DN (height above the 1737.4 km sphere = DN x dn_scale_m; albedo = relative factor), read
+by core/src/config/lunar_site_config.cpp.
 
 Projections (LOLA dsmap_polar.cat [S], spherical R = 1737.4 km; 0-based indices):
   south polar stereographic: rho = 2 R tan(pi/4 + lat/2), X = rho sin(lon), Y = -rho cos(lon),
   sample = pole_sample + X / scale, line = pole_line + Y / scale (longitude 0 up from the south pole, east clockwise
   as seen from below);
-  simple cylindrical (LDEM_16): line = zero_line - ppd lat_deg, sample = zero_sample + ppd lon_deg (lon 0..360 east).
+  simple cylindrical (LDEM_64): line = zero_line - ppd lat_deg, sample = zero_sample + ppd lon_deg (lon 0..360 east).
 """
 
 from __future__ import annotations
 
+import json
 import math
+import mmap
 import re
 import struct
+import subprocess
 import sys
 import tomllib
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SPHERE_RADIUS_M = 1737400.0  # LOLA reference sphere [S: label OFFSET, A_AXIS_RADIUS]
-ORIENTATION_RMS_LIMIT_M = 150.0  # [E] tile vs LDEM_16 (1.9 km pixels in rough polar terrain)
+ORIENTATION_RMS_LIMIT_M = 150.0  # [E] tile vs LDEM_64 (0.47 km pixels in rough polar terrain)
+CLI_EXE = Path("build/core/lunar_site_tile.exe")
+MAX_CONNECTIONS = 16  # PDS Geosciences: 403 at 64 connections (task 1) and, measured 2026-11-06, after ~300 small ranges at 32; 16 ran 600 ranges clean
+GET_ATTEMPTS = 3
 USER_AGENT = {"User-Agent": "starsim-data-pipeline"}
 
 
@@ -88,17 +98,60 @@ def bilinear(tile: list[list[int]], line: float, sample: float) -> float:
             + fl * ((1 - fs) * tile[l0 + 1][s0] + fs * tile[l0 + 1][s0 + 1]))
 
 
+
+
 # ----------------------------------------------------------------------------------------------- downloads
 
-def _get(url: str, byte_range: tuple[int, int] | None = None) -> bytes:
+class RateLimited(RuntimeError):
+    """HTTP 429: the host asks to wait `retry_after_s` seconds (None when it sent no Retry-After)."""
+
+    def __init__(self, url: str, retry_after_s: int | None):
+        super().__init__(f"{url}: HTTP 429, Retry-After {retry_after_s} s")
+        self.url = url
+        self.retry_after_s = retry_after_s
+
+
+def _open(url: str, byte_range: tuple[int, int] | None):
     headers = dict(USER_AGENT)
     if byte_range:
         headers["Range"] = f"bytes={byte_range[0]}-{byte_range[1]}"
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:
-        if byte_range and response.status != 206:
-            raise RuntimeError(f"{url}: server ignored the range request (HTTP {response.status}); "
-                               "refusing to download the whole product")
-        return response.read()
+    try:
+        return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=120)
+    except urllib.error.HTTPError as error:
+        if error.code == 429:  # never retried: the caller reports it and stops
+            retry_after = error.headers.get("Retry-After") if error.headers else None
+            raise RateLimited(url, int(retry_after) if retry_after and retry_after.isdigit() else None) from error
+        raise
+
+
+def _get(url: str, byte_range: tuple[int, int] | None = None) -> bytes:
+    """The body of a URL (or of an inclusive byte range, which must come back as HTTP 206 and complete).
+    Transient network errors are retried GET_ATTEMPTS times; HTTP 429 raises RateLimited at once, other HTTP errors too."""
+    for attempt in range(GET_ATTEMPTS):
+        try:
+            with _open(url, byte_range) as response:
+                if byte_range and response.status != 206:
+                    raise RuntimeError(f"{url}: server ignored the range request (HTTP {response.status}); "
+                                       "refusing to download the whole product")
+                data = response.read()
+            if byte_range and len(data) != byte_range[1] - byte_range[0] + 1:
+                raise ConnectionError(f"{url}: short range body ({len(data)} bytes)")
+            return data
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            if isinstance(error, urllib.error.HTTPError) or attempt == GET_ATTEMPTS - 1:
+                raise
+            print(f"  retry {attempt + 1}: {error}")
+    raise AssertionError("unreachable")
+
+
+def _download(url: str, target: Path) -> None:
+    """Streams a whole file to `target` (through a .part file)."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(target.name + ".part")
+    with _open(url, None) as response, partial.open("wb") as out:
+        while chunk := response.read(1 << 20):
+            out.write(chunk)
+    partial.replace(target)
 
 
 def _label_url(img_url: str) -> str:
@@ -110,183 +163,217 @@ def _require(label: dict, key: str, expected) -> None:
         raise RuntimeError(f"label {key} = {label.get(key)!r}, expected {expected!r}")
 
 
-def _write_i16(path: Path, values: list[int]) -> None:
-    path.write_bytes(struct.pack(f"<{len(values)}h", *values))
-
-
 def fetch_global(source: dict, out_dir: Path) -> None:
-    label = parse_label(_get(_label_url(source["url"])).decode("latin-1"))
+    """The global grid of `source` whole -> out_dir/<name>.{i16,toml} (name = the .img file's stem, e.g. ldem_64)."""
+    img_url = source["url"]
+    name = img_url.rsplit("/", 1)[1][: -len(".img")]
+    label = parse_label(_get(_label_url(img_url)).decode("latin-1"))
     _require(label, "SAMPLE_TYPE", "LSB_INTEGER")
     _require(label, "SAMPLE_BITS", 16.0)
     _require(label, "MAP_PROJECTION_TYPE", "SIMPLE CYLINDRICAL")
     _require(label, "OFFSET", SPHERE_RADIUS_M)
     lines, samples = int(label["LINES"]), int(label["LINE_SAMPLES"])
     ppd = label["MAP_RESOLUTION"]
-    data = _get(source["url"])
-    if len(data) != 2 * lines * samples:
-        raise RuntimeError(f"{source['url']}: {len(data)} bytes, expected {2 * lines * samples}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "ldem_16.i16").write_bytes(data)
+    heights = out_dir / f"{name}.i16"
+    _download(img_url, heights)
+    if heights.stat().st_size != 2 * lines * samples:
+        size = heights.stat().st_size
+        heights.unlink()
+        raise RuntimeError(f"{img_url}: {size} bytes, expected {2 * lines * samples}")
     # SAMPLE_PROJECTION_OFFSET is the sample of CENTER_LONGITUDE: sample of longitude 0 = offset - ppd x centre
     zero_sample = label["SAMPLE_PROJECTION_OFFSET"] - ppd * label["CENTER_LONGITUDE"]
-    (out_dir / "ldem_16.toml").write_text(
-        "# LOLA LDEM_16 (global, simple cylindrical) - written by tools/data_pipeline/lunar_tile.py\n"
+    (out_dir / f"{name}.toml").write_text(
+        f"# LOLA {name.upper()} (global, simple cylindrical) - written by tools/data_pipeline/lunar_tile.py\n"
         "[grid]\n"
-        'product = "LDEM_16"\n'
+        f'product = "{name.upper()}"\n'
         'projection = "simple_cylindrical"\n'
         f"sphere_radius_m = {SPHERE_RADIUS_M}\n"
         f"dn_scale_m = {label['SCALING_FACTOR']}\n"
-        'heights = "ldem_16.i16"\n'
+        f'heights = "{name}.i16"\n'
         f"lines = {lines}\n"
         f"samples = {samples}\n"
         f"pixels_per_degree = {ppd}\n"
         f"zero_line = {label['LINE_PROJECTION_OFFSET']}\n"
         f"zero_sample = {zero_sample}\n", encoding="utf-8")
-    print(f"  LDEM_16 {lines} x {samples} -> {out_dir / 'ldem_16.i16'}")
-
-
-def fetch_site_tile(site: dict, source: dict, out_dir: Path) -> None:
-    label = parse_label(_get(_label_url(source["url"])).decode("latin-1"))
-    _require(label, "SAMPLE_TYPE", "LSB_INTEGER")
-    _require(label, "SAMPLE_BITS", 16.0)
-    _require(label, "MAP_PROJECTION_TYPE", "POLAR STEREOGRAPHIC")
-    _require(label, "CENTER_LATITUDE", -90.0)
-    _require(label, "A_AXIS_RADIUS", SPHERE_RADIUS_M / 1000.0)
-    _require(label, "OFFSET", SPHERE_RADIUS_M)
-    full_lines, full_samples = int(label["LINES"]), int(label["LINE_SAMPLES"])
-    scale = label["MAP_SCALE"]
-    pole_line, pole_sample = label["LINE_PROJECTION_OFFSET"], label["SAMPLE_PROJECTION_OFFSET"]
-    lat, lon = math.radians(site["latitude_deg"]), math.radians(site["longitude_deg"])
-    line, sample = polar_south_line_sample(lat, lon, pole_line, pole_sample, scale)
-    half = round(site["tile_half_size_m"] / scale)
-    first_line, first_sample = round(line) - half, round(sample) - half
-    count = 2 * half + 1
-    if first_line < 0 or first_sample < 0 or first_line + count > full_lines or first_sample + count > full_samples:
-        raise RuntimeError(f"site {site['id']}: tile outside {source['id']}")
-    row_bytes = 2 * full_samples
-    print(f"  {site['id']}: rows {first_line}..{first_line + count - 1} ({count * row_bytes / 1e6:.1f} MB)")
-    rows = _get(source["url"], (first_line * row_bytes, (first_line + count) * row_bytes - 1))
-    tile = crop_rows(rows, full_samples, first_sample, count)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    _write_i16(out_dir / f"{site['id']}.i16", [v for row in tile for v in row])
-    dn_scale = label["SCALING_FACTOR"]
-    checks = []
-    for fl, fs in [(0, 0), (-0.4, -0.4), (-0.4, 0), (-0.4, 0.4), (0, -0.4), (0, 0.4), (0.4, -0.4), (0.4, 0), (0.4, 0.37)]:
-        cl, cs = line + fl * half, sample + fs * half
-        c_lat, c_lon = polar_south_lat_lon(cl, cs, pole_line, pole_sample, scale)
-        checks.append((math.degrees(c_lat), math.degrees(c_lon),
-                       dn_scale * bilinear(tile, cl - first_line, cs - first_sample)))
-    text = (f"# LOLA {source['id']} tile around {site['id']} - written by tools/data_pipeline/lunar_tile.py\n"
-            "[grid]\n"
-            f'product = "{site["product"]}"\n'
-            'projection = "polar_stereographic_south"\n'
-            f"sphere_radius_m = {SPHERE_RADIUS_M}\n"
-            f"dn_scale_m = {dn_scale}\n"
-            f'heights = "{site["id"]}.i16"\n'
-            f"lines = {count}\n"
-            f"samples = {count}\n"
-            f"pole_line = {pole_line}\n"
-            f"pole_sample = {pole_sample}\n"
-            f"scale_m = {scale}\n"
-            f"first_line = {first_line}\n"
-            f"first_sample = {first_sample}\n")
-    for c_lat, c_lon, h in checks:
-        text += f"\n[[check]]\nlatitude_deg = {c_lat!r}\nlongitude_deg = {c_lon!r}\nheight_m = {h!r}\n"
-    (out_dir / f"{site['id']}.toml").write_text(text, encoding="utf-8")
-    finish_tile(site["id"], out_dir)
-
-
-def finish_tile(site_id: str, out_dir: Path) -> None:
-    """Orientation check of a written tile; a rejected tile is removed so fetch.py does not take it as present."""
-    try:
-        check_orientation(site_id, out_dir)
-    except Exception:
-        for suffix in (".toml", ".i16"):
-            (out_dir / f"{site_id}{suffix}").unlink(missing_ok=True)
-        raise
+    print(f"  {name.upper()} {lines} x {samples} -> {heights}")
 
 
 # ----------------------------------------------------------------------------------------------- orientation check
 
-def _load_grid(out_dir: Path, name: str) -> tuple[dict, list[list[int]]]:
-    with (out_dir / f"{name}.toml").open("rb") as f:
+def _load_tile(tile_dir: Path, name: str) -> tuple[dict, list[list[int]]]:
+    with (tile_dir / f"{name}.toml").open("rb") as f:
         grid = tomllib.load(f)["grid"]
-    data = (out_dir / grid["heights"]).read_bytes()
+    data = (tile_dir / grid["heights"]).read_bytes()
     n = grid["samples"]
     values = struct.unpack(f"<{grid['lines'] * n}h", data)
     return grid, [list(values[k * n:(k + 1) * n]) for k in range(grid["lines"])]
 
 
-def check_orientation(site_id: str, out_dir: Path) -> float:
-    """rms (m) of the tile against LDEM_16 over a 21 x 21 lattice; raises if a mirrored tile would fit as well."""
-    tile_grid, tile = _load_grid(out_dir, site_id)
-    glob_grid, glob = _load_grid(out_dir, "ldem_16")
+def check_orientation(tile_name: str, tile_dir: Path, global_dir: Path, global_name: str = "ldem_64") -> float | None:
+    """rms (m) of a south polar height tile against the global grid over a 21 x 21 lattice; raises if a mirrored tile
+    would fit as well. None for every other tile (north polar tiles: the core test "north polar tiles agree with
+    LDEM_64"; cylindrical tiles are no reprojection of anything)."""
+    with (tile_dir / f"{tile_name}.toml").open("rb") as f:
+        header = tomllib.load(f)["grid"]
+    if header["projection"] != "polar_stereographic_south" or header.get("kind", "height") != "height":
+        return None
+    tile_grid, tile = _load_tile(tile_dir, tile_name)
+    with (global_dir / f"{global_name}.toml").open("rb") as f:
+        glob_grid = tomllib.load(f)["grid"]
     count = tile_grid["lines"]
+    n, glob_lines = glob_grid["samples"], glob_grid["lines"]
+    with (global_dir / glob_grid["heights"]).open("rb") as gf, mmap.mmap(gf.fileno(), 0, access=mmap.ACCESS_READ) as glob:
 
-    def global_height(lat: float, lon: float) -> float:
-        line, sample = cylindrical_line_sample(lat, lon, glob_grid["pixels_per_degree"], glob_grid["zero_line"],
-                                               glob_grid["zero_sample"])
-        line = min(max(line, 0.0), glob_grid["lines"] - 1.0)
-        s0 = math.floor(sample)
-        fs = sample - s0
-        l0 = min(int(math.floor(line)), glob_grid["lines"] - 2)
-        fl = line - l0
-        n = glob_grid["samples"]
-        a, b = s0 % n, (s0 + 1) % n
-        v = ((1 - fl) * ((1 - fs) * glob[l0][a] + fs * glob[l0][b])
-             + fl * ((1 - fs) * glob[l0 + 1][a] + fs * glob[l0 + 1][b]))
-        return glob_grid["dn_scale_m"] * v
+        def node(line: int, sample: int) -> int:
+            return struct.unpack_from("<h", glob, 2 * (line * n + sample % n))[0]
 
-    def rms(transform) -> float:
-        total, n = 0.0, 0
-        for i in range(21):
-            for j in range(21):
-                tl, ts = i * (count - 1) / 20.0, j * (count - 1) / 20.0
-                sl, ss = transform(tl, ts)
-                lat, lon = polar_south_lat_lon(tile_grid["first_line"] + tl, tile_grid["first_sample"] + ts,
-                                               tile_grid["pole_line"], tile_grid["pole_sample"], tile_grid["scale_m"])
-                d = tile_grid["dn_scale_m"] * bilinear(tile, sl, ss) - global_height(lat, lon)
-                total += d * d
-                n += 1
-        return math.sqrt(total / n)
+        def global_height(lat: float, lon: float) -> float:
+            line, sample = cylindrical_line_sample(lat, lon, glob_grid["pixels_per_degree"], glob_grid["zero_line"],
+                                                   glob_grid["zero_sample"])
+            line = min(max(line, 0.0), glob_lines - 1.0)
+            s0 = math.floor(sample)
+            fs = sample - s0
+            l0 = min(int(math.floor(line)), glob_lines - 2)
+            fl = line - l0
+            v = ((1 - fl) * ((1 - fs) * node(l0, s0) + fs * node(l0, s0 + 1))
+                 + fl * ((1 - fs) * node(l0 + 1, s0) + fs * node(l0 + 1, s0 + 1)))
+            return glob_grid["dn_scale_m"] * v
 
-    last = count - 1
-    correct = rms(lambda l, s: (l, s))
-    alternatives = {"lines flipped": rms(lambda l, s: (last - l, s)),
-                    "samples flipped": rms(lambda l, s: (l, last - s)),
-                    "transposed": rms(lambda l, s: (s, l))}
-    print(f"  orientation vs LDEM_16: rms {correct:.1f} m; "
+        def rms(transform) -> float:
+            total, k = 0.0, 0
+            for i in range(21):
+                for j in range(21):
+                    tl, ts = i * (count - 1) / 20.0, j * (count - 1) / 20.0
+                    sl, ss = transform(tl, ts)
+                    lat, lon = polar_south_lat_lon(tile_grid["first_line"] + tl, tile_grid["first_sample"] + ts,
+                                                   tile_grid["pole_line"], tile_grid["pole_sample"], tile_grid["scale_m"])
+                    d = tile_grid["dn_scale_m"] * bilinear(tile, sl, ss) - global_height(lat, lon)
+                    total += d * d
+                    k += 1
+            return math.sqrt(total / k)
+
+        last = count - 1
+        correct = rms(lambda l, s: (l, s))
+        alternatives = {"lines flipped": rms(lambda l, s: (last - l, s)),
+                        "samples flipped": rms(lambda l, s: (l, last - s)),
+                        "transposed": rms(lambda l, s: (s, l))}
+    print(f"  orientation vs {global_name.upper()}: rms {correct:.1f} m; "
           + ", ".join(f"{k} {v:.1f} m" for k, v in alternatives.items()))
     if correct > ORIENTATION_RMS_LIMIT_M or correct > 0.5 * min(alternatives.values()):
-        raise RuntimeError(f"tile {site_id} does not match LDEM_16 (rms {correct:.1f} m, alternatives {alternatives})")
+        raise RuntimeError(f"tile {tile_name} does not match {global_name} (rms {correct:.1f} m, alternatives {alternatives})")
     return correct
 
 
-# ----------------------------------------------------------------------------------------------- entry point
+def finish_tile(tile_name: str, tile_dir: Path, global_dir: Path) -> None:
+    """Orientation check of a written tile; a rejected tile is removed so fetch.py does not take it as present."""
+    try:
+        check_orientation(tile_name, tile_dir, global_dir)
+    except Exception:
+        for suffix in (".toml", ".i16"):
+            (tile_dir / f"{tile_name}{suffix}").unlink(missing_ok=True)
+        raise
 
-_done = False
+
+# ----------------------------------------------------------------------------------------------- site tiles through the CLI
+
+def _run_cli(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True)
 
 
-def fetch_all(sources: list[dict], repo_root: Path, force: bool = False) -> None:
-    """Global grid first, then every site tile of config/lunar_sites.toml that is missing (or all with `force`)."""
-    global _done
-    if _done:
-        return
-    _done = True
-    out_dir = repo_root / "data" / "terrain"
-    by_id = {s["id"]: s for s in sources}
-    if force or not (out_dir / "ldem_16.toml").exists():
-        fetch_global(by_id["lola_ldem_16"], out_dir)
-    else:
-        print("  LDEM_16 already present")
-    with (repo_root / "config" / "lunar_sites.toml").open("rb") as f:
-        sites = tomllib.load(f)["site"]
-    product_source = {"LDEM_80S_20M": by_id["lola_ldem_80s_20m"]}
+def _download_ranges(ranges: list[dict], work: Path) -> int:
+    """Every range of the request -> work/<index>.bin, MAX_CONNECTIONS at a time; stops at the first error
+    (RateLimited included). Returns the bytes loaded."""
+    total = 0
+    with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as pool:
+        futures = [(r, pool.submit(_get, r["url"], (r["first"], r["last"]))) for r in ranges]
+        try:
+            for r, future in futures:
+                body = future.result()
+                (work / f"{r['index']}.bin").write_bytes(body)
+                total += len(body)
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+    return total
+
+
+def fetch_site_tile(site: dict, kind: str, exe: Path, config_dir: Path, tile_dir: Path, global_dir: Path,
+                    force: bool = False) -> str:
+    """One tile (kind "height" | "albedo") of a site through the CLI: plan, download, assemble. Returns "ok", "present"
+    or "refused" (the CLI found no product for the tile; ledger ruling R6: fatal for a height tile only, the caller
+    decides). Raises RateLimited on HTTP 429."""
+    plan = _run_cli([str(exe), "plan", str(config_dir), kind, repr(site["latitude_deg"]), repr(site["longitude_deg"])])
+    if plan.returncode == 2:
+        print(f"  {site['id']} {kind}: no product ({plan.stderr.strip()})")
+        return "refused"
+    if plan.returncode != 0:
+        raise RuntimeError(f"lunar_site_tile plan failed for {site['id']} {kind}: {plan.stderr.strip()}")
+    request = json.loads(plan.stdout)
+    key = request["cache_key"]
+    if not force and (tile_dir / f"{key}.toml").exists():
+        print(f"  {site['id']} {kind}: {key} present")
+        return "present"
+    megabytes = sum(r["last"] - r["first"] + 1 for r in request["ranges"]) / 1e6
+    print(f"  {site['id']} {kind}: {key}, {len(request['ranges'])} ranges, {megabytes:.1f} MB")
+    work = tile_dir / f".{key}.work"  # unique per tile: parallel fetches never share it
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        (work / "request.json").write_text(plan.stdout, encoding="utf-8")
+        _download_ranges(request["ranges"], work)
+        built = _run_cli([str(exe), "assemble", str(config_dir), str(work / "request.json"), str(work),
+                          str(work / f"{key}.toml")])
+        if built.returncode != 0:
+            raise RuntimeError(f"lunar_site_tile assemble failed for {site['id']} {kind}: {built.stderr.strip()}")
+        (work / f"{key}.i16").replace(tile_dir / f"{key}.i16")
+        (work / f"{key}.toml").replace(tile_dir / f"{key}.toml")  # the header last: it marks the tile as present
+    finally:
+        for leftover in work.iterdir():
+            leftover.unlink()
+        work.rmdir()
+    finish_tile(key, tile_dir, global_dir)
+    return "ok"
+
+
+def fetch_site_tiles(sites: list[dict], repo_root: Path, force: bool = False) -> None:
+    """Height and albedo tile of every site. A missing height product is an error, an albedo refusal is not (the
+    global albedo is used there); HTTP 429 reports the Retry-After and stops without retrying."""
+    exe = repo_root / CLI_EXE
+    if not exe.exists():
+        raise SystemExit(f"{CLI_EXE} is missing: build the core first (tools/build.ps1)")
+    tile_dir = repo_root / "data" / "terrain" / "sites"
+    tile_dir.mkdir(parents=True, exist_ok=True)
     for site in sites:
-        if not force and (out_dir / f"{site['id']}.toml").exists():
-            print(f"  {site['id']} already present")
-            continue
-        fetch_site_tile(site, product_source[site["product"]], out_dir)
+        for kind in ("height", "albedo"):
+            try:
+                outcome = fetch_site_tile(site, kind, exe, repo_root / "config", tile_dir, repo_root / "data" / "terrain",
+                                          force)
+            except RateLimited as limited:
+                wait = f"{limited.retry_after_s} s" if limited.retry_after_s is not None else "an unknown time"
+                raise SystemExit(f"{limited.url} answered HTTP 429: the host asks to wait {wait} (Retry-After). "
+                                 "Stopped; run fetch.py again after that time.") from limited
+            if outcome == "refused" and kind == "height":
+                raise SystemExit(f"site {site['id']}: no height product holds its tile")
+
+
+# ----------------------------------------------------------------------------------------------- entry points
+
+def fetch_global_grid(source: dict, repo_root: Path, force: bool = False) -> None:
+    out_dir = repo_root / "data" / "terrain"
+    name = source["url"].rsplit("/", 1)[1][: -len(".img")]
+    if force or not (out_dir / f"{name}.toml").exists():
+        fetch_global(source, out_dir)
+    else:
+        print(f"  {name.upper()} already present")
+
+
+def fetch_sites(source: dict, repo_root: Path, force: bool = False) -> None:
+    """The preset sites of config/lunar_sites.toml, or the source's own `sites` list (the opt-in test sites)."""
+    if "sites" in source:
+        sites = source["sites"]
+    else:
+        with (repo_root / "config" / "lunar_sites.toml").open("rb") as f:
+            sites = tomllib.load(f)["site"]
+    fetch_site_tiles(sites, repo_root, force)
 
 
 if __name__ == "__main__":

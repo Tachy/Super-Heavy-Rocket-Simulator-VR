@@ -56,7 +56,7 @@ on top of that relief.
   derived at construction so that the median plane-detrended RMS in 125 mm windows (Guo's statistic, 25 x 25 samples,
   1536 windows at hashed places) equals `rms_height_at_baseline_m` (3.62 mm). Octaves fade out between band_start / 2
   and band_start.
-- band_start_m = tile pixel scale x tile_weight + global spacing (1.9 km) x (1 - tile_weight): continuous over the
+- band_start_m = tile pixel scale x tile_weight + global spacing (0.47 km since LDEM_64, 2026-11-06; 1.9 km with LDEM_16) x (1 - tile_weight): continuous over the
   1 km tile blend (20 m in a tile core).
 - Band limit L > 0 (terrain nodes, coarse queries): the mean of the full relief over the footprint p + a e_s + b e_t,
   |a|, |b| <= L/2 - the face lattice's (s, t) parallelogram (axes up to ~25 deg from orthogonal near face corners),

@@ -306,7 +306,12 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
             say(std::string("Earth terrain not loadable - flat ground: ") + e.what());
         }
     }
-    if (!std::filesystem::exists(data_dir / "terrain" / "ldem_16.toml")) {
+    bool moon_grid_present = false;
+    try {
+        moon_grid_present = std::filesystem::exists(data_dir / "terrain" / (config::load_lunar_global_grid_name(config) + ".toml"));
+    } catch (const std::exception&) {  // no lunar_sites.toml (a bare directory): nothing to load
+    }
+    if (!moon_grid_present) {
         say("Lunar terrain missing - smooth sphere (python tools/data_pipeline/fetch.py)");
     } else {
         try {

@@ -156,7 +156,8 @@ TEST_CASE("The Moon's surface height and normal come from its terrain", "[enviro
 
 TEST_CASE("LOLA data: the site tile matches the pipeline's raw-grid check points", "[terrain][data]") {
     const std::filesystem::path data = STARSIM_DATA_DIR;
-    const auto file = config::load_terrain_grid_file(data / "terrain" / "mons_mouton_im2.toml");
+    const auto site_config = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
+    const auto file = config::load_terrain_grid_file(data / "terrain" / "sites" / (site_config.height_tile_key + ".toml"));
     const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, data);
     REQUIRE(file.checks.size() == 9);
     for (const auto& c : file.checks) {
@@ -188,6 +189,8 @@ TEST_CASE("A tile that no longer matches lunar_sites.toml is refused", "[terrain
     REQUIRE(at != std::string::npos);
     s.replace(at, 23, "latitude_deg = -84.6906");  // moved 3 km: the downloaded tile is stale
     std::ofstream(dir / "lunar_sites.toml") << s;
+    std::filesystem::copy_file(std::filesystem::path(STARSIM_CONFIG_DIR) / "lunar_terrain_products.toml",
+                               dir / "lunar_terrain_products.toml", std::filesystem::copy_options::overwrite_existing);
     try {
         sim::load_lunar_terrain(dir, STARSIM_DATA_DIR);
         FAIL("expected an error");

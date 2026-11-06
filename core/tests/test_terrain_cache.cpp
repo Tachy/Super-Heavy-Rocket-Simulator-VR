@@ -49,7 +49,7 @@ TEST_CASE("cache rethrows a missing file", "[terrain_cache]") {
 TEST_CASE("The composed Moon surface is shared per options and built from shared parts",
           "[terrain_cache][moon_surface][data][slow]") {
     const std::filesystem::path data_dir = STARSIM_DATA_DIR;
-    if (!std::filesystem::exists(data_dir / "terrain" / "ldem_16.i16") ||
+    if (!std::filesystem::exists(data_dir / "terrain" / "ldem_64.i16") ||
         !std::filesystem::exists(data_dir / "terrain" / "diviner_rock_abundance.i16")) {
         SKIP("LOLA or Diviner data not installed (fetch.py)");
     }

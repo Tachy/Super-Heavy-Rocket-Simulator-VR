@@ -969,6 +969,9 @@ port.transfer_dock = "transfer_dock"
 
 [lunar_site]
 mons_mouton_im2.name = "Mons Mouton (IM-2)"
+apollo_11.name = "Apollo 11 (Mare Tranquillitatis)"
+apollo_15.name = "Apollo 15 (Hadley-Rille)"
+apollo_17.name = "Apollo 17 (Taurus-Littrow)"
 
 [zone]
 pacific_san_diego.name = "Pazifik vor San Diego"

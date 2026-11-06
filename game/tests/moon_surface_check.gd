@@ -548,8 +548,12 @@ func _measure() -> void:
 	print("  measure  surface_samples_detail, 67 x 67 lattice (band limit = level spacing, rocks off)")
 	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
 	var site: Dictionary = TomlLite.load_file(config_dir.path_join("lunar_sites.toml"))["site"][0]
-	var tile: Dictionary = TomlLite.load_file(config_dir.path_join("../data/terrain").simplify_path()
-			.path_join(str(site["id"]) + ".toml"))["grid"]
+	var sites_dir := config_dir.path_join("../data/terrain/sites").simplify_path()
+	var tile_file := ""  ## the site's 20 m polar height tile (cache key height_ldem_80s_20m_<lat>_<lon>_<half km>)
+	for file_name in DirAccess.get_files_at(sites_dir):
+		if file_name.begins_with("height_ldem_80s_20m_") and file_name.ends_with(".toml"):
+			tile_file = file_name
+	var tile: Dictionary = TomlLite.load_file(sites_dir.path_join(tile_file))["grid"]
 	var tile_edge := _tile_point(tile, 0.5 * (int(tile["lines"]) - 1), int(tile["samples"]) - 1 - 500.0
 			/ float(tile["scale_m"]))
 	var places := []

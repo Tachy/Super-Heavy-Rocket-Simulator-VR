@@ -63,8 +63,14 @@ def main() -> int:
     for source in sources:
         target = REPO_ROOT / source["target"]
         print(f"[{source['id']}] {source['name']}")
-        if source.get("kind") == "lunar_tiles":  # LOLA: range-cropped site tiles + the global grid (lunar_tile.py)
-            lunar_tile.fetch_all(load_sources(), REPO_ROOT, args.force)
+        if source.get("kind") == "lunar_tiles":  # LOLA global grid LDEM_64, fetched whole (lunar_tile.py)
+            lunar_tile.fetch_global_grid(source, REPO_ROOT, args.force)
+            continue
+        if source.get("kind") == "lunar_site_tiles":  # site tiles through the core CLI build/core/lunar_site_tile.exe
+            if source.get("opt_in") and source["id"] not in args.ids:
+                print(f"  skipped (opt-in): build the core, then run `python tools/data_pipeline/fetch.py {source['id']}`")
+                continue
+            lunar_tile.fetch_sites(source, REPO_ROOT, args.force)
             continue
         if source.get("kind") == "rock_abundance":  # Diviner rock abundance -> int16 DN + TOML header (rock_abundance.py)
             import rock_abundance

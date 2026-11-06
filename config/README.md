@@ -258,10 +258,10 @@ flow separation (vacuum engines).
 - With an OEM, mass, drag area and C_D come from its header instead of the config.
 
 ## Lunar landing sites (`lunar_sites.toml`)
-- `[[site]]`: `id`, `latitude_deg` / `longitude_deg` (MOON_ME, the frame of the LOLA maps), `tile_half_size_m`
-  (half the side of the terrain tile), `product` (LOLA product the tile is cropped from: `"LDEM_80S_20M"`).
-  `python tools/data_pipeline/fetch.py` writes the tile to `data/terrain/<id>.toml` / `.i16` (and the global grid
-  `ldem_16`); `sim::load_lunar_terrain` reads them.
+- `[global] grid`: base name of the global height grid in `data/terrain` (`"ldem_64"`, LOLA 64 px/deg).
+- `[[site]]`: `id`, `latitude_deg` / `longitude_deg` (MOON_ME, the frame of the LOLA maps); the product, tile size and
+  cache key follow from `lunar_terrain_products.toml`. `python tools/data_pipeline/fetch.py lola_ldem_64 lunar_sites`
+  writes the global grid and the tiles `data/terrain/sites/<cache key>.toml` / `.i16`; `sim::load_lunar_terrain` reads them.
 
 ## Lunar terrain products (`lunar_terrain_products.toml`)
 - Description of the public data products a landing-site tile is cut from (no code reads it yet; the tile planner of

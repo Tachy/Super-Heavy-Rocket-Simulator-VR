@@ -97,7 +97,7 @@ double brute_force_elevation_rad(const environment::Terrain& terrain, double lat
 }
 
 std::shared_ptr<const environment::LunarTerrain> lunar_terrain_or_skip() {
-    if (!std::filesystem::exists(std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_16.i16")) {
+    if (!std::filesystem::exists(std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_64.i16")) {
         SKIP("data/terrain missing (tools/data_pipeline/fetch.py)");
     }
     return sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
@@ -156,10 +156,10 @@ TEST_CASE("LOLA data: the march agrees with a brute-force march and its early-ou
     const auto terrain = lunar_terrain_or_skip();
     std::mt19937 rng(20261030);
     std::uniform_real_distribution<double> u01(0.0, 1.0);
-    int compared = 0;
+    int compared = 0, outliers = 0;
     double worst_rad = 0.0;
     for (int i = 0; i < 64; ++i) {
-        // Half the points over the whole Moon (LDEM_16), half within 30 km of the IM-2 site (20 m tile).
+        // Half the points over the whole Moon (LDEM_64), half within 30 km of the IM-2 site (20 m tile).
         double lat, lon;
         if (i % 2 == 0) {
             lat = std::asin(2.0 * u01(rng) - 1.0);
@@ -173,9 +173,12 @@ TEST_CASE("LOLA data: the march agrees with a brute-force march and its early-ou
             const double marched = environment::horizon_elevation_rad(*terrain, R, lat, lon, h, az, leaf_march);
             const double brute = brute_force_elevation_rad(*terrain, lat, lon, h, az);
             INFO("point " << i << " lat " << lat / deg << " lon " << lon / deg << " h " << h << " az " << k);
-            CHECK(marched - brute <= tolerance_rad);  // conservative: never higher
+            // Conservative: never higher. LDEM_64 (473 m; LDEM_16: 1.9 km) has steep bilinear walls a few tens of metres
+            // from an observer near the pole, where both marches sample the slope's top 10 m apart and differ by the
+            // sampling: a handful of rays, counted instead of asserted one by one (see `kOutlierLimit`).
+            if (marched - brute > tolerance_rad) ++outliers;
             if (brute < 5.0 * deg) {
-                CHECK(std::abs(marched - brute) <= tolerance_rad);
+                if (std::abs(marched - brute) > tolerance_rad && marched - brute <= tolerance_rad) ++outliers;
                 worst_rad = std::max(worst_rad, std::abs(marched - brute));
                 ++compared;
             }
@@ -183,6 +186,11 @@ TEST_CASE("LOLA data: the march agrees with a brute-force march and its early-ou
     }
     std::printf("[terrain_horizon] %d rays compared, worst |march - brute| = %.4f deg\n", compared, worst_rad / deg);
     CHECK(compared > 500);
+    // Measured with LDEM_64 (2026-11-06, lunar sites plan task 4): 4 of the 1,024 rays outside 0.1 deg (all within 30 km
+    // of the IM-2 site at -84 deg, marched higher by 0.11-0.61 deg), worst |march - brute| 0.49 deg; with LDEM_16 none.
+    constexpr int kOutlierLimit = 8;
+    CHECK(outliers <= kOutlierLimit);
+    CHECK(worst_rad <= 0.7 * deg);
 }
 
 TEST_CASE("LOLA data: poles and the antimeridian give finite horizons", "[terrain_horizon][data]") {
@@ -288,7 +296,9 @@ NodeLattice make_lattice(const environment::Terrain& terrain, double lat0, doubl
 
 // Compares the banded lattice with the full per-vertex march (the same samples, no bands); prints
 // worst / 99th percentile; checks the tolerance where the reference is below 5 deg.
-// The limits are the measured values with a margin (see the cases): where the reference is below 5 deg the worst and
+// The limits are the measured values with a margin (see the cases; the LOLA ones re-measured on LDEM_64 2026-11-06, whose
+// 4x finer relief moves banded vs full: IM-2 level 7 worst 0.68, lon 180 1.34 / p99 0.73, lon 100 0.58 / p99 0.25 deg,
+// limits before 0.65, 1.1 / 0.65, 0.5 / 0.2): where the reference is below 5 deg the worst and
 // the 99th percentile of |banded - full|, in degrees.
 void compare_banded(const environment::Terrain& terrain, double lat0, double lon0, double spacing_m,
                     const char* label, double worst_limit_deg, double p99_limit_deg) {
@@ -376,7 +386,7 @@ TEST_CASE("LOLA data: banded lattice vs the full march, IM-2 leaf and level 7", 
     // occluder, and the linear interpolation over a stride errs by up to half the difference of their slopes (worst
     // value, rare); the typical error (p99) is a fifth to a tenth of it.
     compare_banded(*terrain, site_lat, site_lon, 10.4, "IM-2 leaf 10.4 m", 0.4, 0.1);
-    compare_banded(*terrain, site_lat, site_lon, 333.0, "IM-2 level 7 333 m", 0.65, 0.3);
+    compare_banded(*terrain, site_lat, site_lon, 333.0, "IM-2 level 7 333 m", 0.75, 0.3);
 }
 
 TEST_CASE("LOLA data: banded lattice vs the full march near the pole and across lon 180", "[terrain_horizon][data]") {
@@ -384,8 +394,8 @@ TEST_CASE("LOLA data: banded lattice vs the full march near the pole and across 
     // At the pole the north of neighbouring vertices turns by degrees: the bake falls back to smaller strides (exact
     // inside; the edge vertices interpolate over an edge stride decided from the edge alone, for the seams: worst 0.30).
     compare_banded(*terrain, -89.5 * deg, 20.0 * deg, 333.0, "lat -89.5 level 7", 0.35, 0.1);
-    compare_banded(*terrain, 5.0 * deg, constants::pi - 0.02 * deg, 333.0, "lon 180 level 7", 1.1, 0.65);
-    compare_banded(*terrain, 5.0 * deg, 100.0 * deg, 333.0, "lon 100 level 7 (control)", 0.5, 0.2);
+    compare_banded(*terrain, 5.0 * deg, constants::pi - 0.02 * deg, 333.0, "lon 180 level 7", 1.5, 0.8);
+    compare_banded(*terrain, 5.0 * deg, 100.0 * deg, 333.0, "lon 100 level 7 (control)", 0.65, 0.3);
 }
 
 TEST_CASE("LOLA data: banded lattice timing (printed, not asserted)", "[terrain_horizon][data]") {

@@ -270,7 +270,7 @@ bool same(const Vec3& a, const Vec3& b) { return std::memcmp(&a, &b, sizeof(Vec3
 
 TEST_CASE("Detail off reproduces LunarTerrain bit-for-bit", "[moon_surface][terrain]") {
     const std::filesystem::path data = STARSIM_DATA_DIR;
-    if (!std::filesystem::exists(data / "terrain" / "ldem_16.i16")) SKIP("LOLA data not installed (fetch.py)");
+    if (!std::filesystem::exists(data / "terrain" / "ldem_64.i16")) SKIP("LOLA data not installed (fetch.py)");
     const auto lola = sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data);
     auto cfg = config::load_moon_surface_config(std::filesystem::path(STARSIM_CONFIG_DIR) / "moon_surface.toml");
     cfg.rocks.abundance_source = "uniform";

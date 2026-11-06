@@ -8,15 +8,18 @@
 
 namespace starsim::config {
 
-// A lunar landing site (config/lunar_sites.toml; MOON_ME latitude / longitude). The data pipeline crops a LOLA tile
-// around it into data/terrain/<id>.toml.
+// A lunar landing site (config/lunar_sites.toml: id and MOON_ME latitude / longitude). The data pipeline cuts its
+// terrain tile from the products of lunar_terrain_products.toml into data/terrain/sites/<height_tile_key>.toml.
 struct LunarSiteConfig {
     std::string id;
-    std::string product;  // LOLA product the tile is cropped from
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    double tile_half_size_m = 0.0;
+    double tile_half_size_m = 0.0;  // of the height tile: the product's (lunar_terrain_products.toml)
+    std::string height_tile_key;    // cache key of the height tile (config/lunar_site_tile.hpp)
 };
+
+// Base name (in data/terrain) of the global lunar height grid: `[global] grid` of lunar_sites.toml ("ldem_64").
+std::string load_lunar_global_grid_name(const std::filesystem::path& config_dir);
 
 LunarSiteConfig load_lunar_site(const std::filesystem::path& config_dir, std::string_view id);
 std::vector<LunarSiteConfig> load_lunar_sites(const std::filesystem::path& config_dir);
