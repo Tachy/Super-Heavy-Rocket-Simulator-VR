@@ -1144,7 +1144,7 @@ on top of that relief.
   against the exact Hapke raster 1.8276 (LOD 1) / 1.8457 (LOD 3), now gated at 2 % in test_unresolved_shading. GPU
   rock patches at abundance 3 / 10 equal the Task 13 numbers to 0.01 % (ab.10 +1.52 % worst); moon_shadow_check PASS. The boulder-field camera jump fails its 5 ms gate
   intermittently (one 21-26 ms pool allocation in the pool take): 4 of 5 runs with this pass's code, 2 of 4 with the former
-  LOD-0 shadow mesh - not from this pass (known-issues).
+  LOD-1 shadow mesh - not from this pass (known-issues).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -1301,7 +1301,7 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   it, but looking into a low Sun the microfacet side is up to 2-6 x darker (numpy experiment, Task 10 report): a
   brightness gradient with distance in that view direction. Inside its range the near-field shadow map draws the mesh
   relief's real shadows (from 2 texels up); between the map and the statistics Smith's visible-lit fraction (Task 12)
-  hands over within 0.3 % (down-Sun), 0.6 % (across) and 2.0 % (into the Sun, dark ground) at A11 (Validation).
+  hands over within 0.2 % (down-Sun), 1.1 % (across) and 1.7 % (into the Sun, dark ground) at A11 (Validation).
 - The regolith texture relief (s0-s3) casts no shadows; it only modulates the radiance (mean-preserving). Real cast shadows of
   pebbles (horizon maps of the height textures, the spec's "height-map pebbles with self-shadowing") are not built.
 - The oblique eye's rock terms (Task 12) use the LOD-2 template meshes (162 vertices), 2 yaws and 5 burial nodes [D]
@@ -1321,7 +1321,7 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   directional shadow fades by view depth, not distance (the fade's 2 % ring sits a little closer at the image edges);
   the texture relief, the pebbles and the 1-2 cm rocks cast none (statistical); PCSS LOW quality, normal bias 1 texel
   [E] - a hard PCF map came out 3-6 % darker on the relief than the PCSS one (acne / bias, Task 12 report). Into a low
-  Sun the handover reads 0.980 / 0.981 in two depth bands at A11 (dark ground): at the 2 % gate, little margin (review
+  Sun the handover reads 0.983 / 0.990 / 0.983 / 0.995 at A11 (dark ground): within the 2 % gate, little margin (review
   m3). The 8192 px 32-bit atlas (256 MB) is held only while the near shadows are active (restored on leaving).
 - Drawn rocks (Task 11): shapes are angular fragments since fix A of Task 11; their tilt distribution and the
   fresh / eroded share are [E] (no lunar measurement retrieved), the exposed H/D (eta 0.444) is not checked against a
