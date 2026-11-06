@@ -515,7 +515,9 @@ TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation",
     // the depot's 600 t went into the HLS (less chill-down and boil-off), its main tanks not full yet
     const auto& hls = f.session.body(f.session.controlled_index()).vehicle();
     CHECK(hls.main_propellant_kg() > 1000.0e3 + 600.0e3 - 30.0e3);  // [test] chill-down / settling-gas headroom
-    CHECK(std::chrono::duration<double>(std::chrono::steady_clock::now() - wall).count() < 60.0);  // coasted
+    // coasted, not ticked: 2 days at tick_s are ~3.5e7 ticks (hours even on an idle machine); the coast takes ~4 s
+    // alone and 70 s was measured under a full parallel ctest load, so the bound only separates the two regimes
+    CHECK(std::chrono::duration<double>(std::chrono::steady_clock::now() - wall).count() < 600.0);
 }
 
 TEST_CASE("A continuation that installs a new sequence keeps it running", "[refuelling][iss_mission]") {

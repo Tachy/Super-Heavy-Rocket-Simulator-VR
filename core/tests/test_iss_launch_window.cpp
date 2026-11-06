@@ -212,11 +212,13 @@ TEST_CASE("Launch window: empty candidates keep the separation orbit (ISS unchan
                                                f.clock.from_utc({2026, 10, 16, 0, 0, 0.0}), f.parameters(), gm);
     REQUIRE(w.feasible);
     CHECK_FALSE(w.phasing_orbit);
-    // recorded before f1 (empty candidates must not move it)
-    CHECK(w.liftoff.tdb_seconds_past_j2000() == Catch::Approx(845499835.167408943).epsilon(0.0).margin(1e-6));
+    // recorded before f1 (empty candidates must not move it). Margin 5 ms: the epochs follow the Earth orientation
+    // kernel (earth_latest_high_prec.bpc, re-fetched with every data update); a UT1 / EOP revision of ~1 ms is 0.46 m
+    // of pad motion and moved them by +33 us / +715 us (2026-11-06); a candidate taken would move them by minutes.
+    CHECK(w.liftoff.tdb_seconds_past_j2000() == Catch::Approx(845499835.167408943).epsilon(0.0).margin(5e-3));
     // M8a Task 7: SLC-40's derived height (-20.00 -> -23.29 m) moves the pad position: 845519535.204464555 ->
     // 845519535.204483509 (+19 us; the liftoff stays)
-    CHECK(w.schedule.waypoint0_epoch.tdb_seconds_past_j2000() == Catch::Approx(845519535.204483509).epsilon(0.0).margin(1e-6));
+    CHECK(w.schedule.waypoint0_epoch.tdb_seconds_past_j2000() == Catch::Approx(845519535.204483509).epsilon(0.0).margin(5e-3));
 }
 
 TEST_CASE("Launch window: a raise that eats the mission limit is infeasible", "[iss][launch_window]") {
