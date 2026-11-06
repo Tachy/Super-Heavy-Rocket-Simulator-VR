@@ -277,10 +277,8 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
     m.max_crossrange_m = doc.positive(descent, "max_crossrange_km") * 1000.0;
     m.slope_limit_rad = doc.positive(descent, "slope_limit_deg") * deg;
     m.touchdown_search_radius_m = doc.positive(descent, "touchdown_search_radius_m");
-    if (descent.contains("touchdown_utc")) {
-        m.touchdown_utc = time::UtcDateTime::parse_iso(doc.text(descent, "touchdown_utc"));
-        if (!m.touchdown_utc) doc.fail("descent: touchdown_utc is not YYYY-MM-DDTHH:MM:SS");
-        if (m.touchdown_utc->unix_seconds() <= m.epoch_utc.unix_seconds()) doc.fail("descent: touchdown_utc must be after epoch_utc");
+    if (descent.contains("touchdown_after_epoch_h")) {
+        m.touchdown_after_epoch_s = doc.positive(descent, "touchdown_after_epoch_h") * 3600.0;
     }
     m.surface_stay_s = doc.number(doc.table(doc.root, "surface"), "stay_hours") * 3600.0;
     if (m.surface_stay_s < 0.0) doc.fail("surface: stay_hours must be >= 0");

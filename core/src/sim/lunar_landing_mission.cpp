@@ -28,6 +28,10 @@ namespace {
 // [E] revolutions from the LLO arrival until the session is "in the LLO" and plans the descent: the first trim check
 // 600 s after the LOI, then up to two apsis trims (FlightSession::llo_trim_interval_s, max_llo_trims).
 constexpr double llo_settling_revolutions = 2.0;
+// [D] NRHO variant: the LLO's wait for the site its [budget] legs were measured with (l4 Task 9 mission flight: site
+// wait ~4 d, llo_to_nrho 986 m/s 5.3 d after the LLO arrival); the plane through the site is chosen within it
+// (mission::nrho_site_departure) - a longer wait is not in the return leg's budget.
+constexpr double nrho_site_wait_s = 4.0 * 86400.0;
 
 struct PlacedSite {
     std::shared_ptr<const environment::LunarTerrain> terrain;  // LOLA: the site height, the planners
@@ -70,18 +74,20 @@ PlacedSite place(FlightSession& session, const config::LunarLandingMission& m, c
     return placed;
 }
 
-// After the touchdown check (`reachable`: a point was found): outbound plan, budget, legs.
-MissionStart plan_after_touchdown_check(FlightSession& session, const config::LunarLandingMission& m, time::Epoch epoch,
-                                        bool reachable) {
+MissionStart refused_start(FlightSession& session, time::Epoch epoch, const report::Report& reason) {
+    session.disengage_autopilot();
     MissionStart s;
     s.kind = config::MissionKind::LunarLanding;
     s.epoch = epoch;
-    const auto refuse = [&](const report::Report& reason) {
-        session.disengage_autopilot();
-        s.return_planned = false;
-        s.refusal = reason;
-        return s;
-    };
+    s.return_planned = false;
+    s.refusal = reason;
+    return s;
+}
+
+// After the outbound plan and the touchdown check (`reachable`: a point was found): budget, legs.
+MissionStart plan_after_touchdown_check(FlightSession& session, const config::LunarLandingMission& m, time::Epoch epoch,
+                                        const mission::LunarOutboundParameters& outbound, bool reachable) {
+    const auto refuse = [&](const report::Report& reason) { return refused_start(session, epoch, reason); };
     const auto setup = lunar_landing_setup(m);
     const auto& v = session.body(session.controlled_index()).vehicle();
     if (!reachable) {
@@ -89,16 +95,21 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
                                          report::make(report::Code::lunar_mission_no_touchdown_point)));
     }
     const auto* site = session.lunar_landing_site();
-    const auto outbound =
-        lunar_outbound_parameters(m, session.gravity(), session.ephemeris(), epoch, site ? &site->config : nullptr);
-    if (!session.plan_lunar_outbound(outbound)) return refuse(session.lunar_status());
+    const auto* outbound_plan = session.lunar_outbound_plan();
+    const bool via_nrho = outbound.orbit == mission::LunarOrbitKind::Nrho;
+    // NRHO: the site's share of the departure burn (ruling R12) - the NRHO stays as it is
+    std::optional<mission::NrhoSiteDeparture> departure;
+    if (via_nrho && site && session.moon_orientation()) {
+        departure = lunar_nrho_site_departure(m, outbound, *outbound_plan, session.ephemeris(),
+                                              *session.moon_orientation(), site->config, epoch);
+    }
     const double mass_kg = v.mass_properties().mass_kg;
     const auto& sets = setup.guidance.braking_sets;
-    const auto budget = lunar_mission_budget(m, *session.lunar_outbound_plan(), mass_kg, mass_kg - v.propellant_kg(),
+    const auto budget = lunar_mission_budget(m, *outbound_plan, mass_kg, mass_kg - v.propellant_kg(),
                                              gnc::groups_vacuum_isp_s(v, sets.front()),
-                                             gnc::groups_vacuum_isp_s(v, sets.back()), session.settling_gas_bound_kg());
-    const bool via_nrho = outbound.orbit == mission::LunarOrbitKind::Nrho;
-    if (!budget.closes && via_nrho) {  // the NRHO stays as it is: the site is out of its reach on this budget
+                                             gnc::groups_vacuum_isp_s(v, sets.back()), session.settling_gas_bound_kg(),
+                                             departure ? departure->extra_delta_v_mps : 0.0);
+    if (!budget.closes && via_nrho) {  // the site is out of the NRHO's reach on this budget
         const auto unreachable = report::make(
             report::Code::lunar_nrho_site_unreachable,
             {report::angle("latitude", site ? site->config.latitude_rad : 0.0), report::mass("budget_short", -budget.margin_kg)});
@@ -106,10 +117,12 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
                                          report::with_cause(unreachable, budget.reason)));
     }
     if (!budget.closes) return refuse(report::with_cause(report::make(report::Code::lunar_mission_infeasible), budget.reason));
+    MissionStart s;
+    s.kind = config::MissionKind::LunarLanding;
+    s.epoch = epoch;
     LunarMissionSequence sequence;
     sequence.landing = setup;
     // the descent takes the pass the LLO plane was chosen for (or the mission's planned touchdown)
-    const auto* outbound_plan = session.lunar_outbound_plan();
     sequence.landing.descent.planned_touchdown =
         outbound_plan->llo_touchdown ? outbound_plan->llo_touchdown : lunar_planned_touchdown(m, epoch);
     sequence.via_nrho = via_nrho;
@@ -123,17 +136,36 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
     return s;
 }
 
-// The mission from the controlled body as it is (after the placement, or the refuelled HLS): a touchdown point within
-// the slope limit for the approach of a polar pass (either direction), then plan_after_touchdown_check. On the session's
-// composed surface (its fidelity flags) with the hazard check, as the descent planner selects - that search runs on a
-// background thread (a refused site checks every candidate: up to ~30 s); LOLA alone (milliseconds) is decided at once.
+// The approaches the touchdown point is checked for (ruling R13): the planned LLO plane's over the site at its
+// touchdown; an inclination-targeted LLO or the NRHO's (polar, the descent waits for a pass): north- and southbound.
+std::vector<double> approach_azimuths(const FlightSession& session, const config::LunarLandingMission& m,
+                                      const PlacedSite& placed) {
+    const auto* plan = session.lunar_outbound_plan();
+    if (!plan || !plan->llo_plane_normal_moon_inertial || !plan->llo_touchdown || !session.moon_orientation()) {
+        return {0.0, constants::pi};
+    }
+    return {mission::llo_approach_azimuth(*session.moon_orientation(), placed.site.config.latitude_rad,
+                                          placed.site.config.longitude_rad, *plan->llo_touchdown,
+                                          *plan->llo_plane_normal_moon_inertial,
+                                          constants::moon_mean_radius_m + m.llo_altitude_m,
+                                          session.ephemeris().gm_m3ps2(ephemeris::Body::Moon))};
+}
+
+// The mission from the controlled body as it is (after the placement, or the refuelled HLS): the outbound plan first
+// (its LLO plane gives the approach over the site), then a touchdown point within the slope limit for that approach,
+// then plan_after_touchdown_check. On the session's composed surface (its fidelity flags) with the hazard check, as
+// the descent planner selects - that search runs on a background thread (a refused site checks every candidate: up to
+// ~30 s); LOLA alone (milliseconds) is decided at once.
 DeferredMissionStart plan_from_live_state(FlightSession& session, const config::LunarLandingMission& m,
                                           time::Epoch epoch, const PlacedSite& placed) {
+    const auto outbound = std::make_shared<const mission::LunarOutboundParameters>(lunar_outbound_parameters(
+        m, session.gravity(), session.ephemeris(), epoch, &placed.site.config));
+    if (!session.plan_lunar_outbound(*outbound)) return {refused_start(session, epoch, session.lunar_status())};
     const auto setup = lunar_landing_setup(m);
     const auto& stage = session.body(session.controlled_index()).vehicle().stages().front().config;
     const double footprint_m = stage.landing_legs.footprint_radius_m;
     const double lat = placed.site.config.latitude_rad, lon = placed.site.config.longitude_rad;
-    const std::vector<double> azimuths{0.0, constants::pi};
+    const auto azimuths = approach_azimuths(session, m, placed);
     auto surface = std::dynamic_pointer_cast<const environment::DetailedLunarTerrain>(session.moon_surface_shared());
     const bool hazards = surface && surface->detail_on() && stage.landing_legs.foot_pad_radius_m > 0.0;
     if (!hazards) {
@@ -143,7 +175,7 @@ DeferredMissionStart plan_from_live_state(FlightSession& session, const config::
                                                                      setup.descent)
                                          .has_value();
         }
-        return {plan_after_touchdown_check(session, m, epoch, reachable)};
+        return {plan_after_touchdown_check(session, m, epoch, *outbound, reachable)};
     }
     auto search = std::make_shared<std::shared_future<std::optional<mission::TouchdownPoint>>>(
         mission::select_touchdown_point_async(std::move(surface), lat, lon, azimuths, footprint_m, setup.descent,
@@ -151,12 +183,12 @@ DeferredMissionStart plan_from_live_state(FlightSession& session, const config::
             .share());
     DeferredMissionStart d;
     d.status = report::make(report::Code::start_checking_landing_site);
-    d.poll = [search, m, epoch](FlightSession& f) -> std::optional<MissionStart> {
+    d.poll = [search, m, epoch, outbound](FlightSession& f) -> std::optional<MissionStart> {
         if (search->wait_for(std::chrono::seconds(0)) != std::future_status::ready) return std::nullopt;
-        return plan_after_touchdown_check(f, m, epoch, search->get().has_value());
+        return plan_after_touchdown_check(f, m, epoch, *outbound, search->get().has_value());
     };
-    d.wait = [search, m, epoch](FlightSession& f) {
-        return plan_after_touchdown_check(f, m, epoch, search->get().has_value());
+    d.wait = [search, m, epoch, outbound](FlightSession& f) {
+        return plan_after_touchdown_check(f, m, epoch, *outbound, search->get().has_value());
     };
     return d;
 }
@@ -193,7 +225,7 @@ LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& m) {
 
 std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMission& m,
                                                    const mission::OutboundPlan& plan, double vacuum_isp_s,
-                                                   double approach_isp_s) {
+                                                   double approach_isp_s, double nrho_plane_change_mps) {
     const auto setup = lunar_landing_setup(m);
     const bool nrho = m.lunar_orbit == "nrho";
     std::vector<mission::BudgetLeg> legs{{"tli", norm(plan.tli.delta_v_gcrf_mps), vacuum_isp_s}};
@@ -201,6 +233,8 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
         if (plan.powered_flyby) legs.push_back({"swing_by", norm(plan.powered_flyby->delta_v_gcrf_mps), vacuum_isp_s});
         legs.push_back({"insertion", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
         legs.push_back({"nrho_to_llo", m.nrho_to_llo_delta_v_mps, vacuum_isp_s, 2});  // departure + LLO arrival
+        // the turn onto the plane through the site, in the departure burn (no ignition of its own)
+        legs.push_back({"nrho_plane_change", nrho_plane_change_mps, vacuum_isp_s, 0});
     } else {
         legs.push_back({"loi", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
     }
@@ -220,8 +254,9 @@ size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs) {
 
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
-                                           double approach_isp_s, double settling_gas_kg) {
-    const auto legs = lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s);
+                                           double approach_isp_s, double settling_gas_kg,
+                                           double nrho_plane_change_mps) {
+    const auto legs = lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s, nrho_plane_change_mps);
     return mission::lunar_budget(initial_mass_kg, dry_mass_kg,
                                  m.reserve_kg + settling_gas_kg * static_cast<double>(lunar_in_orbit_ignitions(legs)),
                                  legs);
@@ -287,15 +322,31 @@ MissionStart continue_lunar_landing_mission(FlightSession& session, const std::f
 }
 
 std::optional<time::Epoch> lunar_planned_touchdown(const config::LunarLandingMission& m, time::Epoch epoch) {
-    if (!m.touchdown_utc) return std::nullopt;
-    return epoch + (m.touchdown_utc->unix_seconds() - m.epoch_utc.unix_seconds());  // same leap-second count
+    if (!m.touchdown_after_epoch_s) return std::nullopt;
+    return epoch + *m.touchdown_after_epoch_s;
 }
 
 double lunar_first_pass_after_arrival_s(const config::LunarLandingMission& m, double gm_moon) {
-    const double r = constants::moon_mean_radius_m + m.llo_altitude_m;
+    // the NRHO variant descends into the default LLO (no [lunar_orbit] altitude_km)
+    const double altitude_m = m.lunar_orbit == "nrho" ? mission::LloTarget{}.altitude_m : m.llo_altitude_m;
+    const double r = constants::moon_mean_radius_m + altitude_m;
     const double period = constants::two_pi * std::sqrt(r * r * r / gm_moon);
     const mission::LunarDescentParameters descent;
     return llo_settling_revolutions * period + descent.min_lead_s + 1.25 * period;
+}
+
+std::optional<mission::NrhoSiteDeparture> lunar_nrho_site_departure(const config::LunarLandingMission& m,
+                                                                    const mission::LunarOutboundParameters& outbound,
+                                                                    const mission::OutboundPlan& plan,
+                                                                    const ephemeris::Ephemeris& ephemeris,
+                                                                    const frames::BodyOrientation& moon,
+                                                                    const config::LunarSiteConfig& site,
+                                                                    time::Epoch epoch) {
+    if (outbound.orbit != mission::LunarOrbitKind::Nrho || !outbound.nrho) return std::nullopt;
+    return mission::nrho_site_departure(*outbound.nrho, ephemeris, moon, plan.insertion.epoch, site.latitude_rad,
+                                        site.longitude_rad, outbound.llo.altitude_m, lunar_planned_touchdown(m, epoch),
+                                        lunar_first_pass_after_arrival_s(m, ephemeris.gm_m3ps2(ephemeris::Body::Moon)),
+                                        nrho_site_wait_s);
 }
 
 mission::LunarOutboundParameters lunar_outbound_parameters(const config::LunarLandingMission& m,

@@ -376,11 +376,13 @@ flow separation (vacuum engines).
   `[descent]` `pdi_altitude_above_site_km` (periselene after the DOI), `braking_range_km` (fallback; the planner sizes
   the range from the mass), `max_crossrange_km` (the LLO waits for a site pass within this; a plane trim removes the
   rest), `slope_limit_deg`, `touchdown_search_radius_m` (admissible point nearest to the site), optional
-  `touchdown_utc` (the landing the mission is planned for: the LLO plane holds the site then and the descent takes that
+  `touchdown_after_epoch_h` (the landing the mission is planned for, hours after `[orbit] epoch_utc` - a duration, so a
+  start at another epoch keeps the timing: the LLO plane holds the site then and the descent takes that
   pass; absent: the first pass after the LLO arrival); `[surface]`
   `stay_hours`; `[ascent]` `insertion_altitude_above_site_km` (PEG cutoff), `aposelene_km` (circularised there);
   `[budget]` delta-v of the legs not planned at the start (`descent_delta_v_mps`, `ascent_delta_v_mps`, for the NRHO
-  variant `nrho_to_llo_delta_v_mps` / `llo_to_nrho_delta_v_mps`) and `reserve_kg`: the start refuses a mission whose
+  variant `nrho_to_llo_delta_v_mps` / `llo_to_nrho_delta_v_mps` - the polar transfer; the plane change a site needs is
+  computed per site, `docs/subsystems/lunar.md`) and `reserve_kg`: the start refuses a mission whose
   budget does not close ("Mission nicht durchführbar: ... fehlen N t").
 - `ship_lunar_return_llo.toml`, `ship_lunar_return_nrho.toml`, `ship_lunar_aircatch_llo.toml` (`kind = "lunar_return"`,
   `config::load_lunar_return_mission`, `sim::start_lunar_return_mission`; lunar l5): a ship (`[mission]` `vehicle`,

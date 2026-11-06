@@ -13,9 +13,12 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "starsim/config/lunar_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -40,8 +43,8 @@ TEST_CASE("Lunar landing missions load", "[config][lunar]") {
     CHECK_THAT(llo.mcc_after_tli_s[1], WithinAbs(2.5 * 86400.0, 1e-6));
     CHECK_THAT(llo.llo_altitude_m, WithinAbs(100e3, 1e-6));
     CHECK_FALSE(llo.llo_inclination_rad);  // Task 7 (lunar sites): the plane is chosen through the site
-    REQUIRE(llo.touchdown_utc);
-    CHECK(*llo.touchdown_utc == time::UtcDateTime{2026, 11, 22, 1, 20, 0.0});
+    REQUIRE(llo.touchdown_after_epoch_s);  // 2026-11-22T01:20 UTC from epoch_utc 2026-11-13T00:00 (9 d 1 h 20 min)
+    CHECK_THAT(*llo.touchdown_after_epoch_s, WithinAbs(((9.0 * 24.0 + 1.0) * 60.0 + 20.0) * 60.0, 1e-3));
     const auto nrho = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
     CHECK(nrho.lunar_orbit == "nrho");
     CHECK(nrho.nrho_revolutions == 9);
@@ -89,7 +92,7 @@ TEST_CASE("mons mouton mission unchanged: inclination within 1 deg of polar and 
     REQUIRE(plan);
     REQUIRE(plan->llo_plane_normal_moon_inertial);
     const auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo");
-    const auto touchdown = time.from_utc(*m.touchdown_utc);
+    const auto touchdown = *sim::lunar_planned_touchdown(m, time.from_utc(m.epoch_utc));
     const auto rotation = moon.fixed_to_gcrf(touchdown).rotation;
     const math::Vec3 pole{rotation(0, 2), rotation(1, 2), rotation(2, 2)};
     const double inclination = std::acos(std::clamp(dot(*plan->llo_plane_normal_moon_inertial, pole), -1.0, 1.0));
@@ -203,6 +206,123 @@ TEST_CASE("Mission 1 closes in the LLO with the 120 t HLS; NRHO and 204 t are re
             CHECK(session.lunar_step() == sim::LunarStep::None);
         }
     }
+}
+
+// Ruling R12 (lunar sites plan): the NRHO stays as it is; a site the polar LLO the NRHO descent flies into does not
+// pass within the wait costs a plane change, in the departure burn or in the LLO, whichever is cheaper. Hand check per
+// site at the pass found (independent of mission::nrho_site_departure's vector formulation): (a) the turn about the
+// perilune radius is the angle between the horizontal directions towards the pole (the polar plane) and towards the
+// site; each burn by the law of cosines on the horizontal speeds (perilune and vis-viva aposelene speed) plus the radial
+// speed removed, the polar burn subtracted (no credit below it); (b) in the LLO the site's angle from the polar plane,
+// 2 v sin(di / 2). Budget: the extra leg on the vacuum Raptors scales the final mass by
+// exp(-dv / (g0 Isp)) (rocket equation).
+TEST_CASE("The NRHO budget charges the plane change to the site: shortfalls differ by site", "[sim][lunar][lunar_budget_mission]") {
+    test::spice_session();
+    spice::SpiceEphemeris ephemeris;
+    auto earth = spice::SpiceOrientation::earth();
+    auto moon = spice::SpiceOrientation::moon_mean_earth();
+    spice::SpiceTimeConverter time;
+    const auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
+    const auto epoch = time.from_utc(m.epoch_utc);
+    sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
+    sim::place_lunar_landing_mission(session, m, STARSIM_CONFIG_DIR, epoch);
+    const auto outbound = sim::lunar_outbound_parameters(m, session.gravity(), session.ephemeris(), epoch);
+    REQUIRE(session.plan_lunar_outbound(outbound));
+    const auto& plan = *session.lunar_outbound_plan();
+    const auto& v = session.body(session.controlled_index()).vehicle();
+    const auto& sets = sim::lunar_landing_setup(m).guidance.braking_sets;
+    const double isp = gnc::groups_vacuum_isp_s(v, sets.front()), approach_isp = gnc::groups_vacuum_isp_s(v, sets.back());
+    const double mass = v.mass_properties().mass_kg, dry = mass - v.propellant_kg();
+    const double gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const double r_llo = constants::moon_mean_radius_m + 100e3;
+
+    struct Hand {
+        double extra_mps, turn_rad;
+        bool in_llo;
+    };
+    struct Result {
+        double extra_mps, short_kg, final_kg;
+    };
+    const auto evaluate = [&](const config::LunarSiteConfig& site) {
+        const char* site_id = site.id.c_str();
+        const auto d = sim::lunar_nrho_site_departure(m, outbound, plan, ephemeris, moon, site, epoch);
+        REQUIRE(d);
+        CHECK(d->departure > plan.insertion.epoch);
+        const auto rel = mission::moon_relative(ephemeris, outbound.nrho->state_gcrf(d->departure), d->departure);
+        const math::Vec3 r_hat = math::normalized(rel.position_m);
+        const double r = norm(rel.position_m);
+        const double v_apo = std::sqrt(gm * (2.0 / r - 2.0 / (r + r_llo)));  // vis-viva, a = (r + r_llo) / 2
+        const double v_r = dot(rel.velocity_mps, r_hat);
+        const math::Vec3 v_h_vec = rel.velocity_mps - r_hat * v_r;
+        const double v_h = norm(v_h_vec);
+        const math::Vec3 ahead = v_h_vec / v_h;
+        const auto burn = [&](const math::Vec3& direction) {
+            const double c = dot(direction, ahead);
+            return std::sqrt(v_r * v_r + v_h * v_h + v_apo * v_apo - 2.0 * v_h * v_apo * c);
+        };
+        // the doc's numbers: perilune, coplanar burn, and the burn into the polar plane through the perilune point
+        const auto r0 = moon.fixed_to_gcrf(d->departure).rotation;
+        const math::Vec3 pole{r0(0, 2), r0(1, 2), r0(2, 2)};
+        math::Vec3 to_pole = math::normalized(pole - r_hat * dot(pole, r_hat));
+        if (dot(to_pole, ahead) < 0.0) to_pole = -to_pole;
+        std::printf("[lunar_mission] NRHO perilune: lat %.1f deg, %.0f km up, %.0f m/s; departure coplanar %.0f m/s, into "
+                    "the polar plane %.0f m/s (%.1f deg turn)\n",
+                    std::asin(dot(r_hat, pole)) / constants::deg_to_rad, (r - constants::moon_mean_radius_m) / 1e3,
+                    norm(rel.velocity_mps), burn(ahead), burn(to_pole),
+                    std::acos(std::clamp(dot(to_pole, ahead), -1.0, 1.0)) / constants::deg_to_rad);
+        const auto hand = [&](time::Epoch t) {
+            const auto rt = moon.fixed_to_gcrf(t).rotation;
+            const math::Vec3 s = rt * math::Vec3{std::cos(site.latitude_rad) * std::cos(site.longitude_rad),
+                                                 std::cos(site.latitude_rad) * std::sin(site.longitude_rad),
+                                                 std::sin(site.latitude_rad)};
+            math::Vec3 to_site = math::normalized(s - r_hat * dot(s, r_hat));
+            if (dot(to_site, to_pole) < 0.0) to_site = -to_site;  // turned, not reversed
+            const double in_burn = std::max(burn(to_site) - burn(to_pole), 0.0);
+            const double llo_turn = std::asin(std::abs(dot(math::normalized(cross(r_hat, pole)), s)));
+            const double in_llo = 2.0 * std::sqrt(gm / r_llo) * std::sin(0.5 * llo_turn);
+            if (in_llo < in_burn) return Hand{in_llo, llo_turn, true};
+            return Hand{in_burn, std::acos(std::clamp(dot(to_site, to_pole), -1.0, 1.0)), false};
+        };
+        const auto at_pass = hand(d->touchdown);
+        // the pass of least cost within the 4 d wait: no later than that, and no dearer than the first pass
+        const double half_period = constants::pi * std::sqrt(std::pow(0.5 * (r + r_llo), 3) / gm);
+        const time::Epoch first_pass = d->departure + half_period + sim::lunar_first_pass_after_arrival_s(m, gm);
+        CHECK(d->touchdown >= first_pass);
+        CHECK(d->touchdown <= first_pass + 4.0 * 86400.0 + 1.0);
+        CHECK(d->extra_delta_v_mps <= hand(first_pass).extra_mps + 0.01);
+        const auto budget = sim::lunar_mission_budget(m, plan, mass, dry, isp, approach_isp, session.settling_gas_bound_kg(),
+                                                      d->extra_delta_v_mps);
+        std::printf("[lunar_mission] NRHO -> LLO for %s: %s, turn %.2f deg (hand %.2f), +%.1f m/s (hand %.1f; first pass "
+                    "%.1f), pass %.2f d after the first, short %.0f kg\n",
+                    site_id, d->in_llo ? "in the LLO" : "in the departure burn", d->plane_change_rad / constants::deg_to_rad,
+                    at_pass.turn_rad / constants::deg_to_rad, d->extra_delta_v_mps, at_pass.extra_mps,
+                    hand(first_pass).extra_mps, (d->touchdown - first_pass) / 86400.0, -budget.margin_kg);
+        CHECK(d->in_llo == at_pass.in_llo);
+        CHECK_THAT(d->plane_change_rad, WithinAbs(at_pass.turn_rad, 1e-6));
+        CHECK_THAT(d->extra_delta_v_mps, WithinAbs(at_pass.extra_mps, 0.01));
+        return Result{d->extra_delta_v_mps, -budget.margin_kg, budget.final_mass_kg};
+    };
+    // the polar LLO reaches the south-pole site and Apollo 11 within the wait (the Moon turns them through its plane);
+    // free sites on the equator off that longitude band
+    const auto south = evaluate(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
+    const auto apollo_11 = evaluate(config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11"));
+    const auto free_site = [](const char* id, double lon_deg) {
+        config::LunarSiteConfig c;
+        c.id = id;
+        c.longitude_rad = lon_deg * constants::deg_to_rad;
+        return c;
+    };
+    const auto west = evaluate(free_site("equator_45w", -45.0));
+    // its antipode lies in the same planes through the Moon's centre: the same cost
+    CHECK_THAT(evaluate(free_site("equator_135e", 135.0)).extra_mps, WithinAbs(west.extra_mps, 0.01));
+    CHECK(south.extra_mps < 1.0);
+    CHECK(apollo_11.extra_mps < 1.0);
+    CHECK(west.extra_mps > 100.0);
+    CHECK(west.short_kg - south.short_kg > 1000.0);  // site-dependent
+    // the extra leg alone separates the two shortfalls: rocket equation on the vacuum Raptors
+    const double hand_kg = south.final_kg * (1.0 - std::exp(-(west.extra_mps - south.extra_mps) /
+                                                             (isp * constants::standard_gravity_mps2)));
+    CHECK_THAT(west.short_kg - south.short_kg, WithinAbs(hand_kg, 1.0));
 }
 
 // Task 6c: from these epochs the Lambert first guess (aimed past one limb of the Moon) left the TLI Newton creeping along

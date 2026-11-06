@@ -69,11 +69,33 @@ Vec3 llo_plane_through_site(const frames::BodyOrientation& moon, double latitude
                                       std::cos(latitude_rad) * std::sin(longitude_rad), std::sin(latitude_rad)};
     const Vec3 pole = rotation * Vec3{0.0, 0.0, 1.0};
     const Vec3 a = math::normalized(arrival_asymptote_moon_inertial);
-    Vec3 n = cross(a, site);
-    if (norm(n) < site_on_axis_sin) n = pole - a * dot(a, pole);  // the plane through the axis of least inclination
-    n = math::normalized(n);
     const Vec3 sense = arrival_normal_moon_inertial ? *arrival_normal_moon_inertial : pole;  // else prograde
+    Vec3 n = cross(a, site);
+    if (norm(n) < site_on_axis_sin) {
+        // The site lies in every plane through the axis: the one closest to the sense plane (no turn), else - the
+        // sense parallel to the axis - any plane through it.
+        n = sense - a * dot(a, sense);
+        if (norm(n) < site_on_axis_sin) n = cross(a, std::abs(a.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0});
+    }
+    n = math::normalized(n);
     return dot(n, sense) < 0.0 ? -n : n;
+}
+
+double llo_approach_azimuth(const frames::BodyOrientation& moon, double latitude_rad, double longitude_rad,
+                            time::Epoch touchdown, const Vec3& plane_normal_moon_inertial, double llo_radius_m,
+                            double gm_moon_m3ps2) {
+    const auto transform = moon.fixed_to_gcrf(touchdown);
+    const Vec3 s = transform.rotation * Vec3{std::cos(latitude_rad) * std::cos(longitude_rad),
+                                             std::cos(latitude_rad) * std::sin(longitude_rad), std::sin(latitude_rad)};
+    const Vec3 pole = transform.rotation * Vec3{0.0, 0.0, 1.0};
+    // circular speed along the plane over the site, minus the Moon's rotation (as LunarDescentPlanner's pass azimuth)
+    const Vec3 inertial_v = math::normalized(cross(plane_normal_moon_inertial, s)) * std::sqrt(gm_moon_m3ps2 / llo_radius_m);
+    const Vec3 ground_v = inertial_v - cross(frames::rotation_vector(transform), s * llo_radius_m);
+    Vec3 east = cross(pole, s);
+    if (norm(east) < site_on_axis_sin) east = cross(Vec3{1.0, 0.0, 0.0}, s);  // at a pole: any horizontal frame
+    east = math::normalized(east);
+    const Vec3 north = cross(s, east);
+    return std::atan2(dot(ground_v, east), dot(ground_v, north));
 }
 
 LunarArrivalTarget LunarOutboundPlanner::llo_target(const LunarOutboundParameters& p, const OutboundPlan* plan) const {
@@ -100,7 +122,11 @@ TransferSolution LunarOutboundPlanner::solve_through_site(const StateVector& sta
     TransferSolution solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
     std::optional<Vec3> warm;
     Vec3 axis;
-    std::optional<Vec3> sense;  // the first transfer's: turned, not reversed
+    // The sense of the plane: the first transfer's (turned, not reversed). Measured against the other sense (TLI + LOI,
+    // 2026-11-02 + 4 d, touchdown arrival + 8 h): Apollo 11 4,005.8 (i 167.1 deg) vs 4,000.7 m/s (i 13.5 deg), Apollo 15
+    // 3,998.3 (i 31.3 deg) vs 4,008.0 m/s (i 148.4 deg), Mons Mouton (hls_lunar_llo) 3,240 vs 3,488 m/s TLI - the kept
+    // sense is never more than ~5 m/s dearer, the other can be 250 m/s dearer; choosing by cost would double the solves.
+    std::optional<Vec3> sense;
     time::Epoch arrival = p.arrival_epoch;
     if (solution.converged) {
         axis = arrival_axis(solution.arrival.relative_state, gm_moon_);

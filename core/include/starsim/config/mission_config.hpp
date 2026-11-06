@@ -109,9 +109,10 @@ struct LunarLandingMission {
     double max_crossrange_m = 20.0e3;
     double slope_limit_rad = 8.0 * constants::deg_to_rad;
     double touchdown_search_radius_m = 1000.0;
-    // [descent] touchdown_utc: the landing the mission is planned for (its Sun, its stay); the LLO plane holds the site
-    // then and the descent takes that pass. Absent: the first pass after the LLO arrival.
-    std::optional<time::UtcDateTime> touchdown_utc;
+    // [descent] touchdown_after_epoch_h: the landing the mission is planned for (its Sun, its stay), as a duration from
+    // the mission's start epoch; the LLO plane holds the site then and the descent takes that pass. Absent: the first
+    // pass after the LLO arrival.
+    std::optional<double> touchdown_after_epoch_s;
     // [surface]
     double surface_stay_s = 0.0;
     // [ascent] (defaults as gnc::LunarAscentParameters)

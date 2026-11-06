@@ -25,6 +25,39 @@ struct TwoBurnTransfer {
     double total_delta_v_mps = 0.0;
 };
 
+// The NRHO -> LLO descent's cost for a landing site (lunar sites plan, ruling R12). The NRHO stays as it is; the
+// flown transfer (nrho_to_llo, the mission's [budget] nrho_to_llo leg) departs at a perilune into the polar LLO through
+// that point (2026-11-13 mission, first perilune after the insertion: 35.5 deg turned from the NRHO plane, 969 + 276
+// m/s in the full model, 977 m/s two-body for the first burn), whose inertial plane the site turns through with the
+// Moon (~13 deg a day). A site not in that plane at a pass within the wait costs a plane change, the cheaper of
+// (two-body about the Moon):
+// (a) in the departure burn: the plane through the perilune point and the site (llo_plane_through_site with the
+//     perilune direction as the axis); the burn is the difference of the velocity vectors - the perilune velocity and
+//     the transfer's aposelene speed for the LLO radius, horizontal, in the plane - minus the polar one (a combined
+//     change of plane and speed, for a horizontal velocity the law of cosines dv = sqrt(v1^2 + v2^2 - 2 v1 v2 cos(di))
+//     [S: Vallado, Fundamentals of Astrodynamics and Applications, 4th ed., sec. 6.4 "Combined Changes to Inclination
+//     and Speed"]); not credited below the polar burn (the flight flies the polar transfer). A site near the antipode
+//     of the perilune point needs a large turn about it (the turn axis passes through the site);
+// (b) in the polar LLO: the least turn that holds the site, di = asin(|n . s|), as a pure plane change at a node,
+//     dv = 2 v_llo sin(di / 2) [S: Vallado, sec. 6.4 "Inclination Only"].
+struct NrhoSiteDeparture {
+    time::Epoch departure;              // the reference perilune of the burn
+    time::Epoch touchdown;              // the pass the cost is for
+    double plane_change_rad = 0.0;      // the turn of the cheaper option
+    bool in_llo = false;                // (b) rather than (a)
+    double extra_delta_v_mps = 0.0;     // over the polar transfer
+};
+
+// `after`: the NRHO is joined then (the outbound plan's insertion); the departure is its first perilune at least the
+// burn lead later (as LunarOrbitTransfer::nrho_to_llo). `touchdown`: planned (taken as it is), else the pass of least
+// cost from the transfer's arrival + `first_pass_after_arrival_s` to `site_wait_s` later. Empty when the reference
+// holds no such perilune.
+std::optional<NrhoSiteDeparture> nrho_site_departure(const NrhoReference& nrho, const ephemeris::Ephemeris& ephemeris,
+                                                     const frames::BodyOrientation& moon, time::Epoch after,
+                                                     double latitude_rad, double longitude_rad, double llo_altitude_m,
+                                                     std::optional<time::Epoch> touchdown,
+                                                     double first_pass_after_arrival_s, double site_wait_s);
+
 // Transfers between the NRHO reference and the low lunar orbit, and NRHO station keeping, in the full force model
 // (the gravity model the flight uses). Burns are impulsive nodes; the session flies them as finite burns.
 class LunarOrbitTransfer {

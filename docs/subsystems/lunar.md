@@ -101,8 +101,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   solves the inclination-targeted transfer (polar by default), holds its arrival epoch and turns its plane about its
   incoming asymptote (`mission::arrival_axis`) onto `llo_plane_through_site(moon, lat, lon, touchdown, asymptote,
   sense)` - the plane through the site at the touchdown and the asymptote (no plane change at the LOI; the sense of
-  the transfer it is turned from, else prograde; a site within ~0.6 deg of the axis: the plane through the axis of
-  least inclination); a fixed point of plane and asymptote (2 solves, 1e-5 rad). `LunarArrivalTarget` takes the plane
+  the transfer it is turned from, else prograde; a site within ~0.6 deg of the axis: the plane through the axis
+  closest to the sense plane, without one of least inclination). The kept sense measured against the other (TLI + LOI):
+  Apollo 11 4,005.8 vs 4,000.7 m/s, Apollo 15 3,998.3 vs 4,008.0 m/s, Mons Mouton 3,240 vs 3,488 m/s TLI - never more
+  than ~5 m/s dearer, so no second solve by cost. A fixed point of plane and asymptote (2 solves, 1e-5 rad). `LunarArrivalTarget` takes the plane
   normal (residual: the turn about the arrival axis, atan2, 1e-4 rad) and `hold_arrival_epoch` (a third constraint,
   10 s: the arrival time is otherwise free and drifts along a nearly flat family - a day for ~2 m/s of TLI - turning
   the asymptote ~13 deg/day); `OutboundPlan::llo_plane_normal_moon_inertial`, `llo_arrival_epoch`, `llo_touchdown`;
@@ -137,17 +139,30 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   The landing campaign flies the composed surface (20 / 21 within 1 m: seed 14 on an 8 deg slope 1.52 m off after a
   0.02 m first contact: rigid-body rocking after the engines-off contact, the hull swinging round a single sticking
   downhill foot - traced in follow-up U-8, `moon-surface.md` open points; accepted by the user 2026-11-06 as real behaviour of a tall lander with free roll at the 8 deg slope limit, a known red; known-issues). The mission start checks the
-  touchdown point on a background thread (status "Landeplatz wird geprüft", follow-up U-7, `moon-surface.md`).
+  touchdown point on a background thread (status "Landeplatz wird geprüft", follow-up U-7, `moon-surface.md`) after
+  the outbound plan, for the approach the flight will fly (ruling R13): the plan's LLO plane over the site at its
+  touchdown (`mission::llo_approach_azimuth`, the ground velocity as `LunarDescentPlanner` computes it at a pass:
+  Apollo 15 72.0 deg vs 72.05 deg spherical trigonometry, Apollo 11 -102.8 deg); an inclination-targeted LLO or the
+  NRHO's: a polar pass, both directions.
   Masses: HLS ~573 t in the LLO, ~566 t at PDI (~500 t NRHO variant), lands ~315 t. Site pass: the LLO plane holds
-  the site at the planned touchdown (`[descent] touchdown_utc`, Mons Mouton 2026-11-22 01:20 / depot variant 18:45 UTC,
-  the daylight touchdowns of the epoch scan; without it the first pass after the arrival: 2 settling revolutions +
+  the site at the planned touchdown (`[descent] touchdown_after_epoch_h`, a duration from the start epoch: Mons Mouton
+  217.33 h = 2026-11-22 01:20 / depot variant 234.75 h = 18:45 UTC, the daylight touchdowns of the epoch scan; without it the first pass after the arrival: 2 settling revolutions +
   `min_lead_s` + 1.25 revolutions, `sim::lunar_first_pass_after_arrival_s`); `LunarDescentParameters::planned_touchdown`
   makes the descent skip passes earlier than half a revolution before it, then it takes the first pass within
   `max_crossrange_km` (20 km) and trims the residual plane ~90 deg before it (user 2026-10-15) - the residual
   crossrange, not the wait. `[lunar_orbit] inclination_deg` (optional) keeps the inclination-targeted LLO for explicit
   missions (they wait for the pass as before). The NRHO variant keeps its orbit and the polar LLO from it (the descent
-  waits for the pass); its start budget decides: not closing is `lunar.mission_infeasible` <-
-  `lunar.nrho_site_unreachable(latitude, budget_short)` <- the leg that runs short. DOI on the
+  waits for the pass); its start budget decides, with a site-dependent leg `nrho_plane_change` (ruling R12,
+  `mission::nrho_site_departure`, `sim::lunar_nrho_site_departure`): the flown transfer departs at the first perilune
+  after the insertion into the polar plane through that point (2026-11-13: perilune 73.1 N, 2,196 km up, 35.5 deg
+  turned from the NRHO plane, 969 + 276 m/s full model, 977 m/s two-body); a site that plane does not pass within the
+  4 d wait the [budget] legs were measured with costs the cheaper plane change - in the departure burn (the plane
+  through the perilune point and the site; vector burn, no credit below the polar burn) or in the polar LLO
+  (2 v sin(di/2)). Measured: Mons Mouton and Apollo 11 0 m/s (passes 1.7 / 2.2 d after the first), 0 N 45 W and its
+  antipode 187 m/s (83.5 deg turn in the burn: +5.5 t short), 0 N 90 W 0 (the site plane is cheaper than the polar
+  one). Not closing is `lunar.mission_infeasible` <- `lunar.nrho_site_unreachable(latitude, budget_short)` <- the leg
+  that runs short. The flight still flies the polar transfer and waits (the plane change is budgeted, not flown;
+  known-issues). DOI on the
   vacuum Raptors at minimum (periselene 15 km above the site), trims / DOI / circularisation on the single sea-level
   Raptor (`lunar_small_burn`, transients <= 60 % of the burn [E]). Braking (`gnc/apollo_braking`, Klumpp R-695 quartic
   targets) on the 3 RVacs + RCS attitude (user 2026-10-15: Isp 380 vs 350), then sea_level_1, then the landing
@@ -227,7 +242,8 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   ~90 deg). `idle()` also waits for a running input / chunk; an advance that throws stalls the runner until the next
   command, the snapshot is still built, and `FlightSim` reports input / advance / snapshot errors once via `push_error`
   (`SessionRunner::take_error`). `[plan_speed]` checks wall time and runs as one `RUN_SERIAL` CTest test. Plan time:
-  whole mission start LLO ~7 s, NRHO ~8 s, aircatch ~4.5 s (`InterpolatedEphemeris` / `InterpolatedOrientation`;
+  whole mission start (`[.plan_timing]`, 2026-11-06, after the free LLO plane) return LLO 5.0 s, NRHO 3.9 s, aircatch
+  2.7 s, landing `hls_lunar_llo` 1.6 s (`InterpolatedEphemeris` / `InterpolatedOrientation`;
   `solve_lambert` bracket scan 100 samples first, 4,000 only as fallback).
   `[plan_speed]` reference plans re-measured 2026-11-03 (`test_plan_timing.cpp` lists old and new): entry speed 9695 -> 9859 m/s,
   braking 1033 -> 845 m/s (LLO) because the ship's dry mass 177 t (was 255 t) lowers the entry mass 290 -> 212 t and with it the

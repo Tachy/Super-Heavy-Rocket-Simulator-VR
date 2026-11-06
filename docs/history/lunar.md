@@ -13,3 +13,14 @@ Superseded states of `docs/subsystems/lunar.md` (older lunar history: `docs/hist
   reached in a reasonable wait; an equatorial site sits in a polar plane only twice a month.
 - Ascent: `LunarAscentParameters::northerly` (true): the polar plane through the liftoff point, launched north,
   whatever plane the landing came from.
+
+## Task 7 first state (2026-11-06, superseded by its fix round 1)
+
+- Planned touchdown key `[descent] touchdown_utc` (a UTC date, applied as an offset from `[orbit] epoch_utc`);
+  renamed `touchdown_after_epoch_h` (a duration) because the use was relative.
+- The start checked the touchdown point before the outbound plan, for polar approaches (0 / 180 deg) only.
+- NRHO: the budget refusal carried `lunar.nrho_site_unreachable` but its legs were fixed [D] numbers (the same for
+  every site).
+- A site on the arrival axis took the plane through it of least inclination even with an arrival plane given.
+- Plan time noted as "whole mission start LLO ~7 s, NRHO ~8 s, aircatch ~4.5 s" (return starts, before the l6 timing
+  work was re-measured).

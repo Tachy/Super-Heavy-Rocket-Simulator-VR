@@ -29,6 +29,8 @@ constexpr double ascent_phase_step_s = 120.0;
 constexpr int ascent_refined_per_window = 3;      // [E] cheapest two-body candidates refined per window
 constexpr double ascent_tolerance_m = 100.0;      // [E] position aim on the reference
 constexpr double station_keeping_tolerance_m = 100.0;
+// NRHO -> LLO for a site: touchdowns scanned over the wait at this step (the site turns ~0.09 deg inertially) [E]
+constexpr double site_wait_scan_step_s = 600.0;
 
 bool debug_enabled() { return std::getenv("STARSIM_DEBUG_LUNAR_TRANSFER") != nullptr; }
 
@@ -40,6 +42,64 @@ std::optional<time::Epoch> next_perilune(const NrhoReference& nrho, time::Epoch 
     return std::nullopt;
 }
 }  // namespace
+
+std::optional<NrhoSiteDeparture> nrho_site_departure(const NrhoReference& nrho, const ephemeris::Ephemeris& ephemeris,
+                                                     const frames::BodyOrientation& moon, time::Epoch after,
+                                                     double latitude_rad, double longitude_rad, double llo_altitude_m,
+                                                     std::optional<time::Epoch> touchdown,
+                                                     double first_pass_after_arrival_s, double site_wait_s) {
+    const auto tp = next_perilune(nrho, after + min_lead_s);
+    if (!tp || !nrho.covers(*tp)) return std::nullopt;
+    const double gm_moon = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const auto rel = moon_relative(ephemeris, nrho.state_gcrf(*tp), *tp);
+    const Vec3 r_hat = math::normalized(rel.position_m);
+    const double r = norm(rel.position_m);
+    const double r_llo = constants::moon_mean_radius_m + llo_altitude_m;
+    const double v_llo = std::sqrt(gm_moon / r_llo);
+    const double v_aposelene = std::sqrt(gm_moon * 2.0 * r_llo / (r * (r + r_llo)));  // transfer ellipse r -> r_llo
+    const double half_period = constants::pi * std::sqrt(std::pow(0.5 * (r + r_llo), 3) / gm_moon);
+    // the departure burn into a plane through the perilune point: the difference of the velocity vectors (the perilune
+    // velocity may keep a small radial part) to the aposelene speed, horizontal, in that plane
+    const auto burn = [&](const Vec3& normal) { return norm(cross(normal, r_hat) * v_aposelene - rel.velocity_mps); };
+    // the flown transfer (nrho_to_llo: inclination 90 deg): the polar plane through the perilune point, in the NRHO's
+    // sense
+    const Vec3 pole = moon.fixed_to_gcrf(*tp).rotation * Vec3{0.0, 0.0, 1.0};
+    const Vec3 nrho_normal = math::normalized(cross(rel.position_m, rel.velocity_mps));
+    Vec3 polar = cross(pole, r_hat);
+    // a perilune over a pole is in every polar plane: then the NRHO's own (the transfer turns nothing)
+    polar = norm(polar) < 1e-6 ? nrho_normal : math::normalized(polar);
+    if (dot(polar, nrho_normal) < 0.0) polar = -polar;
+    const double polar_burn = burn(polar);
+
+    NrhoSiteDeparture d;
+    d.departure = *tp;
+    const time::Epoch first_pass = *tp + half_period + first_pass_after_arrival_s;
+    const auto evaluate = [&](time::Epoch t) {
+        NrhoSiteDeparture c = d;
+        c.touchdown = t;
+        // (a) in the departure burn: the plane through the perilune point and the site
+        const Vec3 site_plane = llo_plane_through_site(moon, latitude_rad, longitude_rad, t, rel.position_m, polar);
+        // not credited below the polar burn: the flight flies the polar transfer
+        const double in_burn = std::max(burn(site_plane) - polar_burn, 0.0);
+        // (b) in the polar LLO: the least turn that holds the site
+        const auto rotation = moon.fixed_to_gcrf(t).rotation;
+        const Vec3 site = rotation * Vec3{std::cos(latitude_rad) * std::cos(longitude_rad),
+                                          std::cos(latitude_rad) * std::sin(longitude_rad), std::sin(latitude_rad)};
+        const double llo_turn = std::asin(std::min(std::abs(dot(polar, site)), 1.0));
+        const double in_llo = 2.0 * v_llo * std::sin(0.5 * llo_turn);
+        c.in_llo = in_llo < in_burn;
+        c.plane_change_rad = c.in_llo ? llo_turn : std::acos(std::clamp(dot(site_plane, polar), -1.0, 1.0));
+        c.extra_delta_v_mps = std::min(in_burn, in_llo);
+        return c;
+    };
+    if (touchdown) return evaluate(*touchdown);
+    d = evaluate(first_pass);
+    for (double wait = site_wait_scan_step_s; wait <= site_wait_s; wait += site_wait_scan_step_s) {
+        const auto c = evaluate(first_pass + wait);  // the pass of least cost within the wait
+        if (c.extra_delta_v_mps < d.extra_delta_v_mps) d = c;
+    }
+    return d;
+}
 
 LunarOrbitTransfer::LunarOrbitTransfer(const environment::GravityModel& gravity, const ephemeris::Ephemeris& ephemeris,
                                        const frames::BodyOrientation& moon_orientation)

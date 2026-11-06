@@ -6,6 +6,7 @@
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/mission/lunar_budget.hpp"
+#include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/mission_start.hpp"
@@ -24,10 +25,11 @@ void place_lunar_landing_mission(FlightSession& session, const config::LunarLand
 // The landing, surface stay and ascent of the mission ([descent], [surface], [ascent], [budget]).
 LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& mission);
 
-// The budget legs of the mission (refuelling r6: the campaign's HLS demand), in flight order.
+// The budget legs of the mission (refuelling r6: the campaign's HLS demand), in flight order. NRHO: the leg
+// "nrho_plane_change" = `nrho_plane_change_mps` (lunar_nrho_site_departure: the site's share of the departure burn).
 std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMission& mission,
                                                    const mission::OutboundPlan& plan, double vacuum_isp_s,
-                                                   double approach_isp_s);
+                                                   double approach_isp_s, double nrho_plane_change_mps = 0.0);
 
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
 // mission's nominal legs (NRHO -> LLO, descent, ascent, LLO -> NRHO). `vacuum_isp_s`: the vacuum Raptors (outbound,
@@ -36,18 +38,33 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
 // ignition (FlightSession::settling_gas_bound_kg).
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mission, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
-                                           double approach_isp_s, double settling_gas_kg);
+                                           double approach_isp_s, double settling_gas_kg,
+                                           double nrho_plane_change_mps = 0.0);
+
+// NRHO variant (lunar sites plan, ruling R12): the site-dependent extra delta-v of the NRHO -> LLO departure - the turn
+// from the NRHO plane at the departure perilune onto the plane through the site (mission::nrho_site_departure; the
+// [budget] nrho_to_llo_delta_v_mps is the coplanar transfer). `outbound`: the mission's parameters with the reference
+// (lunar_outbound_parameters), `plan` its outbound plan (the NRHO is joined at its insertion). Empty for an LLO mission
+// or when the reference holds no departure perilune.
+std::optional<mission::NrhoSiteDeparture> lunar_nrho_site_departure(const config::LunarLandingMission& mission,
+                                                                    const mission::LunarOutboundParameters& outbound,
+                                                                    const mission::OutboundPlan& plan,
+                                                                    const ephemeris::Ephemeris& ephemeris,
+                                                                    const frames::BodyOrientation& moon,
+                                                                    const config::LunarSiteConfig& site,
+                                                                    time::Epoch epoch);
 
 // The in-flight ignitions of the legs (refuelling f3: each settles first; f4: per leg as flown - DOI + PDI, the
 // ascent's circularization, two-burn NRHO transfers). A lower bound: mid-course corrections, a plane trim and NRHO
 // station keeping are not budgeted legs.
 size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs);
 
-// start_mission's lunar branch (`vehicle`: an override, e.g. the 204 t HLS): place, check a touchdown point within the
-// slope limit at the site (approach of a polar pass, both directions), plan the outbound flight, check the budget, then
-// chain the legs (FlightSession::set_lunar_mission). Refused (return_planned false, German refusal, autopilot off):
-// placement or terrain failed, no touchdown point, outbound plan refused, "Mission nicht durchführbar: " + budget.
-// The pass over the site is checked in the LLO when the descent is planned (the LLO plane is known only then).
+// start_mission's lunar branch (`vehicle`: an override, e.g. the 204 t HLS): place, plan the outbound flight, check a
+// touchdown point within the slope limit at the site for the approach the flight will fly (the plan's LLO plane over
+// the site at its touchdown, llo_approach_azimuth; an inclination-targeted or NRHO-reached LLO: a polar pass, both
+// directions), check the budget, then chain the legs (FlightSession::set_lunar_mission). Refused (return_planned false,
+// German refusal, autopilot off): placement or terrain failed, outbound plan refused, no touchdown point, "Mission
+// nicht durchführbar: " + budget. The pass over the site is checked again in the LLO when the descent is planned.
 MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                          const config::LunarLandingMission& mission, time::Epoch epoch,
                                          const config::VehicleConfig* vehicle = nullptr);
@@ -72,8 +89,8 @@ std::optional<math::StateVector> lunar_parking_state(const FlightSession& sessio
 MissionStart continue_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                             const config::LunarLandingMission& mission, time::Epoch epoch);
 
-// The touchdown the mission started at `epoch` is planned for: [descent] touchdown_utc (relative to [orbit] epoch_utc,
-// which `epoch` is); empty without it.
+// The touchdown the mission started at `epoch` is planned for: `epoch` + [descent] touchdown_after_epoch_h (a duration
+// from the mission's start, so a start at another epoch keeps its timing); empty without it.
 std::optional<time::Epoch> lunar_planned_touchdown(const config::LunarLandingMission& mission, time::Epoch epoch);
 
 // Without a planned touchdown: the first pass after the LLO arrival the session can take - the trims' settling

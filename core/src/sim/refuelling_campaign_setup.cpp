@@ -98,15 +98,23 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
         return d;
     }
     const auto* site = session.lunar_landing_site();
-    if (!session.plan_lunar_outbound(lunar_outbound_parameters(lunar, session.gravity(), session.ephemeris(),
-                                                               lunar_epoch, site ? &site->config : nullptr))) {
+    const auto outbound = lunar_outbound_parameters(lunar, session.gravity(), session.ephemeris(), lunar_epoch,
+                                                    site ? &site->config : nullptr);
+    if (!session.plan_lunar_outbound(outbound)) {
         d.refusal = session.lunar_status();
         return d;
+    }
+    // NRHO: the site's share of the departure burn (as the mission start budgets it)
+    std::optional<mission::NrhoSiteDeparture> departure;
+    if (site && session.moon_orientation()) {
+        departure = lunar_nrho_site_departure(lunar, outbound, *session.lunar_outbound_plan(), session.ephemeris(),
+                                              *session.moon_orientation(), site->config, lunar_epoch);
     }
     const auto& v = session.body(session.controlled_index()).vehicle();
     const auto& sets = lunar_landing_setup(lunar).guidance.braking_sets;
     const auto legs = lunar_mission_legs(lunar, *session.lunar_outbound_plan(), gnc::groups_vacuum_isp_s(v, sets.front()),
-                                         gnc::groups_vacuum_isp_s(v, sets.back()));
+                                         gnc::groups_vacuum_isp_s(v, sets.back()),
+                                         departure ? departure->extra_delta_v_mps : 0.0);
     auto& out = d.values;
     out.capacity_kg = v.propellant_kg();
     out.headers_kg = v.propellant_kg() - v.main_propellant_kg();

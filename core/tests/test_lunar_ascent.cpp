@@ -198,6 +198,25 @@ TEST_CASE("After a 3-day stay under time warp the HLS ascends into the 100 km LL
 
 // Lunar sites plan Task 7: the ascent flies a given plane (the mission's landing LLO plane) - here a 60 deg azimuth
 // from Apollo 17 (20.19 N), neither polar nor through the pole: the LLO after the circularisation holds that plane.
+// The requested plane misses the liftoff point (the landing LLO's plane a day later: the site has turned out of it): the
+// plane flown holds the point and is the least turn from the requested one - the turn equals the point's elevation
+// above the requested plane (5 deg here), about the line where the two planes cross.
+TEST_CASE("The ascent plane through a liftoff point off the requested plane is its least turn", "[gnc][lunar_ascent]") {
+    const Vec3 requested = math::normalized(Vec3{0.2, -0.3, 0.9});
+    // a point 5 deg above the requested plane (towards its normal), 1,740 km from the centre
+    const Vec3 in_plane = math::normalized(cross(requested, Vec3{1.0, 0.0, 0.0}));
+    const Vec3 position = (in_plane * std::cos(5.0 * deg) + requested * std::sin(5.0 * deg)) * 1740e3;
+    const auto flown = gnc::ascent_plane_through(position, requested);
+    REQUIRE(flown);
+    CHECK(std::abs(dot(*flown, math::normalized(position))) < 1e-12);  // holds the liftoff point
+    CHECK(norm(*flown) == Catch::Approx(1.0).margin(1e-12));
+    // hand: the normal tilts by the point's elevation, in the plane of the normal and the point
+    CHECK(std::acos(std::clamp(dot(*flown, requested), -1.0, 1.0)) == Catch::Approx(5.0 * deg).margin(1e-9));
+    CHECK(std::abs(dot(*flown, math::normalized(cross(requested, position)))) < 1e-12);  // no turn about another axis
+    // a point on the normal: every plane through it is as far
+    CHECK_FALSE(gnc::ascent_plane_through(requested * 1740e3, requested));
+}
+
 TEST_CASE("ascent from 20 N inserts into the requested plane within 0.05 deg", "[gnc][lunar_ascent][terrain][data]") {
     const auto a17 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_17");
     if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, a17)) SKIP("Apollo 17 tile not installed");

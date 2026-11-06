@@ -34,7 +34,7 @@ struct LloTarget {
 struct LloSiteTarget {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    std::optional<time::Epoch> touchdown;     // planned (a window, the mission's touchdown_utc) ...
+    std::optional<time::Epoch> touchdown;     // planned (a window, the mission's touchdown_after_epoch_h) ...
     double first_pass_after_arrival_s = 0.0;  // ... else this long after the transfer's arrival
 };
 
@@ -42,11 +42,20 @@ struct LloSiteTarget {
 // asymptote: every plane through it is reached at the LOI cost of the arrival, so this one costs no plane change). Of
 // its two senses the one of `arrival_normal_moon_inertial` (the arrival plane it is turned from: the other sense passes
 // the Moon on its other side - another transfer), without one the prograde (normal on the Moon's north side). A site
-// (nearly) on the axis is in every plane through it: then the plane through the axis of least inclination. Unit
-// normal, Moon-centred GCRF axes. The same holds for a transfer from a lunar orbit with its burn point as the axis.
+// (nearly) on the axis is in every plane through it: then the plane through the axis closest to the sense plane (the
+// arrival plane itself: no turn; without one the plane of least inclination). Unit normal, Moon-centred GCRF axes. The
+// same holds for a transfer from a lunar orbit with its burn point as the axis (nrho_site_departure).
 math::Vec3 llo_plane_through_site(const frames::BodyOrientation& moon, double latitude_rad, double longitude_rad,
                                   time::Epoch touchdown, const math::Vec3& arrival_asymptote_moon_inertial,
                                   const std::optional<math::Vec3>& arrival_normal_moon_inertial = std::nullopt);
+
+// Approach azimuth over the site (rad from north, east positive) of a circular orbit of radius `llo_radius_m` in the
+// plane `plane_normal_moon_inertial` (its sense gives the direction of motion) at `touchdown`: the ground velocity
+// (inertial minus the Moon's rotation) on the site's horizontal, as LunarDescentPlanner computes it at a pass. The
+// mission start checks the touchdown point for this approach (plan 2026-11-06 ruling R13).
+double llo_approach_azimuth(const frames::BodyOrientation& moon, double latitude_rad, double longitude_rad,
+                            time::Epoch touchdown, const math::Vec3& plane_normal_moon_inertial, double llo_radius_m,
+                            double gm_moon_m3ps2);
 
 struct LunarOutboundParameters {
     LunarOrbitKind orbit = LunarOrbitKind::Llo;

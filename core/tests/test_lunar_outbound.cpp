@@ -99,6 +99,19 @@ double llo_site_distance_m(Fixture& fx, const char* site_id) {
                 (el.semi_major_axis_m * (1.0 - el.eccentricity) - r) / 1000.0,
                 (el.semi_major_axis_m * (1.0 + el.eccentricity) - r) / 1000.0, distance / 1000.0, planned / 1000.0,
                 (plan.insertion.epoch - p.arrival_epoch) / 3600.0);
+    // the approach the start checks the touchdown point for (ruling R13), against spherical trigonometry for a
+    // circular orbit of inclination i over latitude phi: sin(az) = cos(i) / cos(phi), north- or southbound by the sense
+    // of motion; the Moon's rotation (4.6 m/s of 1,633 m/s) turns the ground track by < 0.2 deg
+    const double gm_moon = fx.ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const double azimuth = mission::llo_approach_azimuth(fx.moon, site.latitude_rad, site.longitude_rad, touchdown,
+                                                         *plan.llo_plane_normal_moon_inertial, r + 100e3, gm_moon);
+    const double i_plan = std::acos(std::clamp(dot(*plan.llo_plane_normal_moon_inertial, pole), -1.0, 1.0));
+    const double s_az = std::clamp(std::cos(i_plan) / std::cos(site.latitude_rad), -1.0, 1.0);
+    const math::Vec3 east = math::normalized(cross(pole, site_dir));
+    const bool northbound = dot(cross(*plan.llo_plane_normal_moon_inertial, site_dir), cross(site_dir, east)) > 0.0;
+    const double hand = northbound ? std::asin(s_az) : constants::pi - std::asin(s_az);
+    std::printf("[validation] approach over %s: %.2f deg (hand %.2f deg)\n", site_id, azimuth / deg, hand / deg);
+    CHECK(std::abs(std::remainder(azimuth - hand, 2.0 * constants::pi)) < 0.2 * deg);
     CHECK(dot(h, *plan.llo_plane_normal_moon_inertial) > 0.0);  // the planned sense of motion
     CHECK(norm(plan.insertion.delta_v_gcrf_mps) > 800.0);         // [S] spec: LOI ~0.82-0.9 km/s, as the polar LLO
     CHECK(norm(plan.insertion.delta_v_gcrf_mps) < 920.0);
@@ -139,6 +152,14 @@ TEST_CASE("The LLO plane through a site holds the site and the asymptote in the 
     const math::Vec3 on_axis = mission::llo_plane_through_site(fx.moon, lat, lon, fx.t0, site);
     CHECK(std::abs(dot(on_axis, site)) < 1e-12);
     CHECK(std::acos(dot(on_axis, pole)) == Catch::Approx(lat).margin(1e-9));
+    // ... with an arrival plane: the plane through the axis closest to it (no turn when the axis lies in it)
+    const math::Vec3 arrival_normal = math::normalized(cross(site, asymptote));
+    CHECK(dot(mission::llo_plane_through_site(fx.moon, lat, lon, fx.t0, site, arrival_normal), arrival_normal) >
+          1.0 - 1e-12);
+    // degenerate: site, axis and sense all on the pole - still a unit normal holding the site
+    const auto polar = mission::llo_plane_through_site(fx.moon, 90.0 * deg, 0.0, fx.t0, pole, pole);
+    CHECK(std::abs(norm(polar) - 1.0) < 1e-12);
+    CHECK(std::abs(dot(polar, pole)) < 1e-9);
 }
 
 TEST_CASE("Outbound plan to the NRHO", "[mission][lunar][outbound][nrho][validation][slow]") {
