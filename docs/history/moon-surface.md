@@ -73,3 +73,23 @@ Superseded states of `docs/subsystems/moon-surface.md`.
   on the faceted, multimodal top it missed the global maximum (pivoting-pad rim-cut case D 0.42 m: 0.02 mm low, normal
   0.115 rad off, gate 0.05); `normal_toward` over 32^3 spatial bins with heap vectors and a Mat3 solve per generator
   triple. contact_speed sliding 51.5-52.8 us alone (gate 50; the convex Task 11 templates 37-39 us).
+
+## Regolith shading before the Task 10 fix round (13a8c9c, 2026-11-05; moved here in Task 13, review N2 of Task 10)
+- The rocks were shadowed twice: in the globe's theta_bar and by their explicit terms (review I2); the fix round took the
+  rocks' share out of the slope budget.
+- Site brightness (IM-2, Sun 6.75 deg, mean 8-bit, Task 9 / Task 10 first version / fix round): 2 m 35.3 / 30.6 / 30.8,
+  20 m 38.7 / 36.1 / 36.3, 200 m 37.7 / 36.3 / 36.4; grazing view 25.1 / 22.1 / 22.3; nadir from 1.2 km 36.7 / 35.7 / 35.2.
+- The first slope-map version used 8-bit normals (zero slope on code 128 = +0.0039, Godot's rounded 8-bit mips drifting
+  by ~1 code): a 4-7 % mean shift of the modulation under a low Sun; replaced by the half-float `.rgbah` maps.
+
+## Rock statistics before Task 13 (a4154314, 2026-11-05; ruling T17-A)
+- Cast shadow per cover sigma(e) from the template column tops (64 per side) with per-bin intervals along the light: on
+  the non-convex Task 17 shapes ~5 % long (8 deg: 3.30 against 3.14 from an exact raster of the meshes; the binning
+  took each strip's extreme column and filled the lit ground under a sun-side bulge).
+- View tables from the LOD-2 meshes' convex hull: the seen faces summed every front face (hidden ones in concavities
+  too) and the hull regions left the plan view out of the light region, so the excess X counted the ground under a
+  bulge a second time (8 deg Sun, eye 60 deg, 30 deg apart: X 0.180 against 0.045 exact, rock flux per cover 2.09
+  against 1.86).
+- Lommel-Seeliger face gains (mu0 / (mu0 + mu) over the flat face's) while the renderer draws Hapke: at a 7-8 deg Sun
+  the drawn rock faces are ~13 % brighter than that law said. The hull's flux excess hid most of it: the GPU rock patch
+  at abundance 10 read +2.64 % (gate 2 %); with honest geometry and Lommel-Seeliger +4.25 %; with the Hapke faces +1.52 %.

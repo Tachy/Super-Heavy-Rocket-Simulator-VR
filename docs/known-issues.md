@@ -261,12 +261,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   at south-pole Sun elevations; `docs/subsystems/moon-surface.md` open points).
 
 ## Moon procedural surface plan, Task 11 fix round B (2026-11-05)
-- Moon terrain quadtree main thread while streaming after a 10 km camera jump at 2 m: max 13.5 ms, p99 12.8 ms per
-  update without rocks (selection, dispatch, upload; Task 7 code) - over the 5 ms hitch gate the rock layer meets
-  (its own share max 1.2 ms). Goes to T13 (VR budget).
-- Moon terrain GPU cost alone exceeds the old 9 ms VR target in boulder fields (9.9 ms stereo mock at the Diviner
-  maximum, 8.1 ms at IM-2); the rock control no longer compensates terrain cost (it holds and logs). T13 reports the
-  Moon frame times (user 2026-11-05: below 90 fps acceptable on the Moon).
+- (Quadtree hitch and Moon frame times: see the Task 13 section.)
 - Lunar ground luminance (`docs/subsystems/moon-surface.md`, Task 11 fix B report): the albedo texture (CGI Moon Kit
   colour mosaic, sRGB-decoded) makes the maria ~4.3 x darker than its global mean - about twice the contrast reported
   for mare / highland normal albedo - so mare sites (Apollo 11, 15, 17) render ~2-3 x darker than photometry suggests;
@@ -282,24 +277,47 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   ("Landeplatz wird geprüft"), or a cheaper roll sweep.
 - Lunar campaign seeds 5 / 17 land 0.89 / 0.91 m off (gate 1 m) although the first contact is 0.02 m off: the
   footprint moves while the hull tips onto the downhill feet and overshoots (5.1-5.3 deg slopes;
-  `docs/subsystems/moon-surface.md`). Cause (foot slip during the tip vs. leg stroke) not traced.
+  `docs/subsystems/moon-surface.md`). Cause (foot slip during the tip vs. leg stroke) not traced. Seed 14 (8.0 deg, the
+  campaign's steepest spot) exceeds the gate the same way: 1.52 m with 0.02 m at first contact - the 8-14 campaign case
+  is red since the Task 12 head (Task 13: diagnosed as this post-contact slide, kept red and known, not a fitted fix).
 
 ## Moon procedural surface plan, Task 16: Sun shadows on the Earth (2026-11-05)
 - The Earth's near-field shadow map covers 500 m-4 km of view depth around the eye (terrain-rendering.md "Near-field Sun
   shadows (Earth)"); beyond it (and above 20 km, at night) nothing casts. A vehicle's own shadows on itself switch off
   when the eye climbs through 20 km over the ground (a step, as on the Moon).
 - The Earth terrain casts no shadow (dunes, levees): only structures and vehicles do; the relief keeps its normal shading.
-- Cost +1.2-1.3 ms in the stereo mock at the pad (vr-performance.md); not measured in the headset nor with weather on.
+- Cost in the stereo mock at the pad: vr-performance.md (Task 13 re-measure); not measured in the headset. With the
+  analog weather on the pad view takes 17.2 ms (14.4 ms without the shadows, Task 13b): the clouds' cost, over the
+  11.1 ms frame regardless of the shadows.
+- Ground bounce in the radiance cube comes from the global day texture (6.7 km texel): a wall's ground bounce is 30-40 %
+  low at Starbase (0.108 against 0.12-0.16 in the imagery within 1.5 km, red more than green); -6 % on a Sun-facing wall
+  at noon, -13..-17 % on a shaded one. Not fixed (needs an imagery read at each cube refresh; Task 13b,
+  `docs/subsystems/terrain-rendering.md` open points).
+- Earth near shadows: the penumbra grain does not crawl at HIGH in a desktop head-motion test (0.02 deg per frame); not
+  checked in the headset. Vehicle self-shadows fade between 20 and 30 km. The Falcon 9 ship's shadow on the sea is not
+  examined (Task 13b).
 - The tower's far tier (alpha-to-coverage box beyond 5 km) casts nothing; at that distance the tower's ground shadow lies
   beyond the shadow range anyway.
 
 ## Moon procedural surface plan, Task 12 (2026-11-05)
-- Near-field shadows and Task 12's statistics cost GPU time: stereo mock (3534 x 2838 per eye) at IM-2 2 m 9.3 ms before
-  Task 12, 11.7 without the map, 16.1 with it; in the Diviner boulder field 32.9 / 37.0 / 51.5 ms (vr-performance.md;
-  the boulder field is over the 45 fps floor without shadows already, T13).
-- Boulder-field camera jump (moon_surface_check --rocks_only, Diviner maximum): the rock layer's main-thread share still
-  exceeds the 5 ms gate in 1-2 frames of a run - single pool allocations of 4096-8192-instance MultiMeshes that stall
-  22-28 ms once per run (a GPU memory block, presumably) and ~5 ms attach-queue frames; the same without any rock shadow
-  casters (A/B, Task 12 fix 1), so not the casters' cost. The IM-2 jump passes. At the 512 MB pool bound the near nodes
-  stay statistical: the hand-over eviction finds no far node with LOD 0-2 buckets there. Goes to T13 with the quadtree's
-  own release / upload spikes (40+ ms).
+- Near-field shadows' GPU cost and the boulder-field camera jump: superseded by the Task 13 section.
+
+## Moon procedural surface plan, Task 13 (2026-11-06)
+- Moon frame times (stereo mock, vr-performance.md "Task 13 frame times"): IM-2 with near shadows 17.5 / 16.9 / 11.7 ms
+  at 2 m / 100 m / 2 km (within the 22.2 ms floor of ruling T11-U3); the Diviner boulder field 44.9 / 26.3 / 13.9 ms -
+  on its ground over the floor already without shadows (38.2 ms; the game's floor guard then raises the rock threshold).
+  The headset's larger target draws more (the mock is a lower bound). Not measured in the headset.
+- Moon quadtree main thread after a 10 km camera jump at 2 m: the selection phase takes up to 21 ms (IM-2) / 52 ms
+  (boulder field) in one frame, p99 14.4 / 16.6 ms - over the 5 ms hitch gate the rock layer meets (its share max
+  4.8 ms since Task 13's pool warming). A time-sliced selection would be the fix; not built (terrain-rendering.md).
+  Headset frame pacing while the view loads, the leaf `band_heights` retention (~70 MB) and the rock pool's real VRAM
+  (the 512 MB bound is computed from instance counts) are not measured.
+- Boulder fields at the 512 MB pool bound keep near nodes statistical (radiance-continuous; 353 nodes in the jump test):
+  the hand-over eviction finds no far node with the near LOD buckets there.
+- Summed roughness at L20 / L19 -7.6 / -6.7 % against the 10 % gate: a systematic deficit of the texture weights' mesh
+  transfer, not one crater tile's realisation (moon-surface.md Validation); more crater tiles would lower it.
+- Fill light at a grazing Sun: faint steps at the horizon maps' node borders (0.07 deg Sun; Task 12 fix 1) - not fixed.
+- Rock statistics against exact rasters of the drawn meshes (8 deg Sun, eye 60 deg): the hull excess X 0.025 against
+  0.045, the rock flux per cover +3.8 %; the GPU rock patch at abundance 10 reads +1.52 % (gate 2 %), abundance 1
+  -1.3..-1.5 %.
+- Surface static: no plume interaction (craters, dust, rocks do not react to the engines; the spec's limit).

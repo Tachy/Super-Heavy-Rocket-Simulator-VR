@@ -407,8 +407,7 @@ on top of that relief.
   from their exposed top columns (`RockLightTables::mean_tan`, the shape the light tables describe): 1.000 (Task 17 fix 1 templates; area share 0.0306, mean tan 0.0306) against the
   half-spheroid's pi eta 1.394 (the resting fragments' flat tops): <tan> 0.688 -> 0.678, theta_bar 23.657 -> 23.356 deg,
   S^2 0.603 -> 0.5857 (`[unresolved_shading]` test: regolith and rocks add up to the globe's mean tan to 1e-12; without
-  rocks nothing comes out; the column mean against pi eta on half-spheroids within 6 % at grid 64, 4 % at 128). Before the Task 10 fix round the rocks were shadowed twice (in theta_bar and by their explicit terms,
-  review I2). A node of vertex spacing L draws drawn(L) of it:
+  rocks nothing comes out; the column mean against pi eta on half-spheroids within 6 % at grid 64, 4 % at 128). A node of vertex spacing L draws drawn(L) of it:
   its vertices are the relief's L x L box mean, its normals central differences over 2 L; drawn(L) applies exactly
   that filter to the statistical surface - per roughness octave the spectral transfer of the generator's value noise
   (quintic fade kernel; `regolith_drawn_fraction`: 1 at L << s, 0.39 at L = s/2, 0.083 at L = s), per crater size the
@@ -434,17 +433,20 @@ on top of that relief.
   `rock_top` at the base; it sets the slope-budget share above): cover C = abundance x `rock_statistical_cover(d_geo)` (every rock
   below d_geo, the band [d_geo, 2 d_geo] with weight 1 - log2(D / d_geo), closed form over the law), visible rock share 1 -
   exp(-C) with reflectance ratio rho = I/F(1.35 w) / I/F(w) = 1.494 (standard geometry i 30, e 0, g 30; 1.43-1.54
-  over (87, 75, 12) .. (85, 20, 80) deg), lit-face gain G(e) (Lommel-Seeliger radiance of the rock seen from the zenith
-  per plan area over the flat ground's) and cast shadow outside the rock per rock plan area sigma(e), both measured on
-  the 32 angular templates (Task 11 fix C, review R1; `template_rock_light_tables`): each template's exposed top
-  columns (64 x 64 grid over [-1, 1]^2: height above the ground cut, facet normal), averaged over 8 light azimuths
-  (the yaw is uniform) and the burial law (9 Gauss nodes of clamp(0.3 + 0.15 N, 0, 0.6)), every rock the same plan
-  area; sigma per grid line along the light's azimuth as the convex rock's shadow interval beyond its footprint
-  (`rock_light_tables`; on a half-spheroid it reproduces the exact laws below to 0.7 % (G) and 1.1 % of 1 + sigma).
-  Tabulated every 2 deg, floor 1 deg (G / sigma: 2 deg 4.75 / 14.8, 4 deg 2.60 / 7.2, 8 deg 1.55 / 3.35, 14 deg
-  1.13 / 1.73, 20 deg 0.99 / 1.09, 30 deg 0.92 / 0.61, 50 deg 0.93 / 0.24; the half-spheroid of the same eta:
-  5.50 / 12.2, 2.97 / 5.9, 1.72 / 2.70, 1.22 / 1.35, 1.03 / 0.82, 0.93 / 0.42, 0.91 / 0.12: the resting fragments' flat
-  tops catch less of a low Sun, their steep sides cast longer shadows). The half-spheroid laws (`rock_lit_gain`,
+  over (87, 75, 12) .. (85, 20, 80) deg), lit-face gain G(e) (the rock's radiance seen from the zenith per plan area
+  over the flat rock's under the same light: each face with the rock's Hapke law - w x albedo_to_regolith, the globe's
+  theta_bar - as `moon_rock.gdshader` draws it, Task 13) and the ground the rock hides from the light per rock plan area
+  minus 1, sigma(e), both measured on the 32 angular templates (Task 11 fix C, review R1; `template_rock_light_tables`),
+  averaged over 8 light azimuths (the yaw is uniform) and the burial law (9 Gauss nodes of clamp(0.3 + 0.15 N, 0, 0.6)),
+  every rock the same plan area. G from each template's exposed top columns (64 x 64 grid over [-1, 1]^2: height above
+  the ground cut, facet normal; `rock_light_tables`); sigma from the LOD-1 mesh (`rock_mesh_shadow`, Task 13): on 128
+  lines along the light the union of the mesh's segments pushed by height x cot e and of the plan view - the solid's
+  exact projection on each line, so the lit ground between two parts and under a sun-side bulge stays lit (it matches a
+  raster of the projected triangles within 0.2 %; the earlier per-column bins read it ~5 % long on the non-convex
+  Task 17 shapes; history). Tabulated every 2 deg, floor 1 deg (G / sigma: 2 deg 5.39 / 13.8, 4 deg 2.91 / 6.70,
+  8 deg 1.70 / 3.15, 14 deg 1.20 / 1.63, 20 deg 1.02 / 1.03, 30 deg 0.90 / 0.58, 50 deg 0.88 / 0.23; the half-spheroid
+  of the same eta (Lommel-Seeliger): 5.50 / 12.2, 2.97 / 5.9, 1.72 / 2.70, 1.22 / 1.35, 1.03 / 0.82, 0.93 / 0.42,
+  0.91 / 0.12: the resting fragments' flat tops catch less of a low Sun, their steep sides cast longer shadows). The half-spheroid laws (`rock_lit_gain`,
   `rock_shadow_per_cover` = (sqrt(1 + 4 eta^2 cot^2 e) - 1) / 2) remain as the tables' reference shapes in the tests.
   The shader reads both tables (`detail_rock_lit_gain`, `detail_rock_shadow`).
   Per light at its elevation e: factor = G1(e) x [exp(-C (1 + sigma(e)) - C_g sigma(e)) + (1 - exp(-C)) rho G(e)] / N,
@@ -469,7 +471,7 @@ on top of that relief.
   coordinate's derivatives (anisotropic mips). The maps are loaded as zero-mean four-channel half-float slope maps
   (`MoonDetailShading.slope_image` loads the baked `.rgbah` maps and builds the mips; 8-bit normals put a zero slope on
   code 128 = +0.0039 and Godot's rounded 8-bit mips drift by ~1 code: a 4-7 % mean shift of the modulation under a low
-  Sun with the first version). The regolith component's amplitude weight
+  Sun). The regolith component's amplitude weight
   at L_eff is the share of its band's height variance the mesh does not draw (`MoonDetailShading.texture_weight`: the
   mesh keeps sinc^6(pi L / lambda) of a wavelength - L x L box mean, linear interpolation between vertices - so
   w^2 = sum V (1 - sinc^6) / sum V over the band's octave law V ~ lambda^(2H); tabulated 4 per octave from 1 mm). The
@@ -526,8 +528,10 @@ on top of that relief.
   non-empty chunk (child of the node's mesh instance, shows / hides with it), filled by one
   `RenderingServer.multimesh_set_buffer`, a pooled material with the node's parameters set. Pools per (LOD, capacity)
   key: a pooled MultiMesh keeps its LOD mesh for life (setting `MultiMesh.mesh` on a filled one was a 16 ms call).
-  PREWARM [E, measured with power-of-two buckets; each count split half and half with the half-octave bucket below]
-  warms ~6000 entries and 1500 materials within 1.5 ms per frame once the Moon terrain is active and the camera is
+  PREWARM [E, measured with power-of-two buckets; each count split half and half with the half-octave bucket below;
+  keyed for the six LODs since Task 13 - Task 17's new near LOD 0 had shifted every measured LOD by one, so the speck
+  LOD's large buckets were never warmed and the boulder camera jump stalled 22-37 ms on their allocation, ruling T12-C]
+  warms ~6900 entries and 1500 materials within 1.5 ms per frame once the Moon terrain is active and the camera is
   below 50 km (not from orbit); beyond, on-demand allocation (~0.15 ms each, at most 12 per frame). The quadtree shows
   a node's children only once their rocks are attached (`is_pending`), so the parent's rocks never vanish before the
   children's appear. `detach` at the release returns everything to the pools.
@@ -672,9 +676,12 @@ on top of that relief.
   restores the project's directional shadow atlas size / depth and soft-shadow quality (review m2).
 - Oblique eye (review T11-C5 R1): the statistical rocks hide the ground behind them and show their sides. From the
   templates (`rock_view_tables`, `template_rock_view_tables`: the LOD-2 meshes cut at the burial law, 5 burial nodes, 2 yaws): the ground
-  a convex rock hides from a direction is its projection along it (P_v; the light's shadow incl. footprint P_l), X = (|P_v| -
-  |P_l n P_v|) / A the ground hidden from the eye outside the light's shadow, and the Lommel-Seeliger radiance of the
-  faces seen (projected-area weighted) over the flat ground's, as a ratio R to the zenith view's gain. Tables at view
+  a rock hides from a direction is its projection along it with its plan view (P_v; the light's P_l), X = (|P_v| -
+  |P_l n P_v|) / A the ground hidden from the eye outside the light's shadow (convex hulls of the pushed points and the
+  plan view - the plan's ground under a bulge is the law's "1", not part of X; Task 13), the hidden ground per cover
+  at the view elevation from the same line regions as sigma, and the radiance of the faces the eye really sees (a
+  z-buffer of the orthographic view, 1/61 of the rock per pixel; each face with the rock's Hapke law over the flat
+  rock's, Task 13), as a ratio R to the zenith view's gain. Tables at view
   elevation 0-90 deg / 2 deg, light-eye azimuth difference 0-180 / 30 deg, the light on the gain grid (RG float texture
   `detail_rock_view`). Per light: f = F x [exp(-C (1 + sigma + X) - C_g' max(sigma - sigma_v + X, 0)) + (1 - exp(-C
   (1 + sigma_v))) rho G R] / N, sigma_v = sigma(e_view) the hidden ground per cover; from the zenith the nadir law.
@@ -796,11 +803,18 @@ on top of that relief.
   `game/shaders/moon_fill.gdshaderinc` (`moon_fill_albedo` (mu grid), `moon_fill_emitter`, `moon_fill_disc_visible`, `moon_fill_reflectance`); in
   `moon_detail.gdshaderinc` `detail_view_geometry`, `detail_rock_view_terms`, `detail_smith_visible`,
   `detail_light_factors_view`, `detail_sun_factor_view` (the map's Sun-only call), `detail_sun_factor_nadir` (the fill's
-  emitter), DETAIL_SHADOW_CASTER_FACTOR; `MoonRockLayer`: SHADOW_CASTER_FACTOR (shadow-only MultiMeshes, `shadow_lods`),
+  emitter), DETAIL_SHADOW_CASTER_FACTOR; `MoonRockLayer`: SHADOW_CASTER_FACTOR (shadow-only MultiMeshes, `shadow_lods`;
+  SHADOW_LOD_BIAS 1 [E] since Task 13: they draw the geometry one LOD coarser inside the rock's own pixel band, own
+  meshes at pool LOD LODS + L, `shadow_pool_lod`),
   the casters' reach (`_casts`, `_sweep_casters`, `_attach_casters`, `_release_casters`), the retry set, eviction by
   hand-over (`_transfer_to`, `_plan_transfer`, `_take_slot`), `_dispose_released`, `free_all`; `MoonNearShadow`
   `publish_caster_reach`, `load_enabled_setting` / `save_enabled_setting`; the time panel's check box. Core (`environment/unresolved_shading`): `UnresolvedView`, the `unresolved_light_factors`
   overload with it, `shadow_caster_factor`, `smith_visible_lit_fraction`, `RockViewTables` / `rock_view_tables`,
+  (Task 13) `rock_mesh_shadow` (line regions), the rock face law (`FaceLaw`, the rock's Hapke tabulated; an optional
+  `law` argument of `rock_light_tables`, `template_rock_light_tables`, `rock_view_tables`, `template_rock_view_tables`,
+  `rock_view_cache_key`), `rock_view_cache_version`, `RockViewCacheStatus` (`UnresolvedShadingModel::
+  rock_view_cache_status`, binding keys `rock_view_cache_status` / `rock_view_cache_file`),
+  `core/tests/test_rock_statistics_exact.cpp` (exact rasters: the `[.diag]` comparison and the line-region test),
   `RockViewModel` / `template_rock_view_tables`, `rock_view_excess_table`, `rock_view_gain_ratio_table`,
   `hapke_hemispherical_albedo`, `hemispherical_albedo_table`, `RockLightTables::mean_tan`, the view tables' file cache
   (`rock_view_cache_key`, `read_rock_view_cache`, `write_rock_view_cache`; `make_unresolved_shading_model(..., cache_dir)`,
@@ -828,8 +842,10 @@ on top of that relief.
   relief and rock shadows (the render's own flat-ground model gives 512 cd/m^2) and ~0.64 the scale albedo x R x norm
   against Sato's I/F ratio at the site (0.438 against 0.683). The 0.64 splits (review estimates, not measured here) into
   ~0.84 local map factor (the probe's sub-degree mosaic detail and the map's i30/e0/g30 definition against Sato's 1-deg
-  cell at g 102.7) and ~0.77 disc-integrated anchor, which itself is ~1/1.15 (the known level offset of the WAC-Hapke
-  w against ROLO 665 nm: Hapke with w 0.429 is 0.377 mag brighter than ROLO) times ~1/1.13 (Sato's w is at 643 nm;
+  cell at g 102.7) and ~0.77 disc-integrated anchor, which itself is ~1/1.15 (the WAC-Hapke calibration level against
+  ROLO, ruling T12-B's estimate; not to be confused with the 0.377 mag = x1.41 by which the game's highland-proxy w 0.429
+  exceeds ROLO, which moon_hapke_norm removes - Task 13 check of these numbers: the products 0.85 x 0.64 = 0.54 and
+  0.84 x 0.77 = 0.65 hold) times ~1/1.13 (Sato's w is at 643 nm;
   the lunar reflectance rises ~10-15 % from 550 to 650 nm, so a 643-nm reflectance with a photopic solar illuminance
   overstates the luminance). The phase-0 normalisation point adds ~4 % (Hapke disc 0.849 against K&S 0.883 at 2 deg).
   So both sources agree within their bands; no anchor change. The camera comparison also depends on the assumed f/8 [E]
@@ -1027,13 +1043,18 @@ on top of that relief.
   patches, L22), earthshine only (Sun 5 deg below) -0.04 % at abundance 1 and with no detail, -0.30 % at abundance 40
   with textures (gate 2 %). Summed roughness (Guo's statistic, 96 windows, mesh = core heights at the level's vertices
   bilinear, + each scale's regolith and crater components at their weights, + since Task 11 fix B the drawn rocks' tops
-  from 2 cm - the pebbles below are in s0) at L22 .. L17, 1024 px maps: 4.23 / 4.07 / 3.82 / 3.81 / 4.04 / 4.08 mm
-  against the measured 4 mm (+5.8 / +1.7 / -4.4 / -4.7 / +0.9 / +2.0 %, gate 10 %, not loosened); without the rock tops
-  3.92 / 3.77 / 3.65 / 3.74 / 3.87 / 3.91 mm. No double roughness anywhere.
+  from 2 cm - the pebbles below are in s0) at L22 .. L17, 1024 px maps, with the Task 17 templates (Task 13 run):
+  4.03 / 3.88 / 3.70 / 3.73 / 3.90 / 3.90 mm against the measured 4 mm (+0.7 / -3.1 / -7.6 / -6.7 / -2.6 / -2.5 %,
+  gate 10 %, not loosened). No double roughness anywhere. The L20 / L19 margin (2.4 / 3.3 %) is not realisation noise
+  of one crater tile (ruling T11-C5 asked for more crater tiles per scale): a trial bake with 2 x 2 the tiles (2048 px,
+  4 x the craters, scratch only) gave a LOWER crater rms in the scales L20 / L19 draw (s1 2.13 against 2.33 mm, s2
+  16.4 against 17.2 mm), so more tiles would narrow the margin rather than widen it - the 1024 px realisation sits
+  above the law's mean, and the deficit is systematic (the GDScript texture weights use an approximate mesh transfer,
+  open point "texture weights"). Not rebaked.
 - Site brightness (render_check, IM-2, 2026-11-22T01:20 UTC, Sun 6.75 deg, elevation -20 deg, eye adapted; mean 8-bit of
-  the image, `--moon_detail_shading=off` = Task 9's shading in the same view; re-measured in the fix round): Task 9 /
-  Task 10 / fix round 2 m 35.3 / 30.6 / 30.8 (-13 %), 20 m 38.7 / 36.1 / 36.3 (-6 %), 200 m 37.7 / 36.3 / 36.4 (-3 %);
-  grazing view (2 m, -6 deg) 25.1 / 22.1 / 22.3; nadir from 1.2 km 36.7 / 35.7 / 35.2 (-4 %). The
+  the image, `--moon_detail_shading=off` = Task 9's shading in the same view; Task 10 fix round): Task 9 / with the
+  detail 2 m 35.3 / 30.8 (-13 %), 20 m 38.7 / 36.3 (-6 %), 200 m 37.7 / 36.4 (-3 %); grazing view (2 m, -6 deg)
+  25.1 / 22.3; nadir from 1.2 km 36.7 / 35.2 (-4 %). The
   near ground darkens most: Smith's statistical shadows of the drawn cm relief (G1 ~0.70 at 7 deg) outweigh the smaller
   residual theta_bar (x1.02-1.25); rocks x0.96. All of it is shadowing physics, none tuned. The fix round's rocks-out
   budget (theta_res -0.5 deg) and the crater textures change the means by < 1 % (the modulation is mean-preserving).
@@ -1138,10 +1159,13 @@ on top of that relief.
   (proud bound 9.14 m). Summed roughness site + rock tops 4.005 mm (residual formula 3.614 mm, 3.62 kept); regolith
   theta_bar 23.356 deg, S^2 0.5858. Shape statistics: volume per D^3 mean +0.94 % (single templates within 11.5 %),
   extent ratios within 0.46 %; dust share 0.3403 (ROCK_DUST_MEAN 0.340); 8 of 32 templates cracked. GPU: moon_shadow_check
-  PASS, smoke PASS; moon_surface_check --rocks_only (idle): radiance gates at abundance 1 ok (Sun 7 deg +0.21 / +0.06 /
-  -0.01 / -0.15 %, Task 17 head +0.06 / -0.07 / -0.15 / -0.25 %), IM-2 jump ok, boulder jump 36.9 ms (T12-C stall);
-  abundance 3 all ok; abundance 10: Sun 7 deg first band +2.64 % (gate 2 %; Task 12 fix 2 measured +1.51 %, the Task 17
-  head was not measured at abundance 10) - open point. Images: screenshots/moon_surface/task17/fix1/.
+  PASS, smoke PASS. Images: screenshots/moon_surface/task17/fix1/.
+- Task 13 (rock statistics from the drawn meshes with Hapke faces, pool warming, coarser shadow casters): GPU rock patch
+  (drawn against statistical, against the realised drawn cover, gate 2 %) Sun 7 / 15 / 30 deg: abundance 1 -1.29..-1.48 /
+  -0.72..-0.76 / -0.10..-0.17 %, abundance 3 -0.72..-0.99 / -0.04..-0.16 / +0.13..-0.11 %, abundance 10 +1.52 / +0.99 /
+  +0.66 / +0.15 % (thresholds 0.1-0.8 m) / +0.25..+0.01 / +0.74..+0.29 %; earthshine twins equal. Full moon_surface_check
+  PASS (67 ok) incl. both camera jumps (rock share 4.82 / 4.75 ms); moon_shadow_check, moon_fill_check, smoke PASS; core
+  [moon_surface],[contact],[lunar],[terrain],[terrain_horizon] with [slow] 314 / 315 (the campaign 8-14, seed 14).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
@@ -1259,15 +1283,17 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   shadows): self-shadowed facets now get the light of the sunlit ground below their horizontal plane (a few % of the
   lit radiance); the photo comparison of Task 12 is in its report.
 - The pebble bumps of the s0 texture are baked at abundance 1 (they do not scale in boulder fields; review m6).
-- Summed roughness (mesh + textures + drawn rocks): the GD gate (10 %) re-measured after fix C's residual 3.62 mm and
-  the resting templates: see Validation (Rocks drawn).
+- Summed roughness (mesh + textures + drawn rocks): L20 -7.6 %, L19 -6.7 % against the 10 % gate (Validation, Regolith
+  shading): a systematic deficit, not one tile's realisation (more crater tiles would lower it further).
 - Fill light at a grazing Sun: the walls' term reads the node's horizon map, so faint steps at the horizon maps' node
   borders remain in partly sunlit ground at a 0.07 deg Sun (Task 12 fix 1 relief image); each wall's own Sun visibility
-  is estimated from the receiver's horizon with the wall and the occluder equally far [E], not computed. The rocks'
-  fill emitter is still Smith's G1 alone at the call site in `moon_rock.gdshader` (review N3 of Task 12 fix 1: the
-  terrain uses `moon_fill_emitter`; the one-line change belongs to the rock shader's owner). Shadow-only rock MultiMeshes draw the LOD the rock is drawn with: in the
-  boulder field the rock casters cost +5.6 ms (receivers +7.4, terrain casters +1.5; vr-performance.md) - a LOD bias of
-  +1 for the shadow MultiMeshes (review I5) is not built.
+  is estimated from the receiver's horizon with the wall and the occluder equally far [E], not computed; for walls
+  toward the Sun's azimuth the estimate is ill-conditioned and takes a floor of 0.05 on 1 - cos dphi [E] (Task 13, Task
+  12 re-review 2 m1: damps fragment-to-fragment flicker). Rocks and terrain share `moon_fill_emitter` (Task 17).
+  Both fixes of Task 12 fix 2 are held by `game/tests/moon_fill_check.gd` (Task 13, review m2): a floor that sees no Sun
+  under 12 deg walls (Sun 7 deg) keeps 0.76 % of the lit floor's reflectance from the walls (0 with the walls limited by
+  the receiver's own visibility - the red step), and the rock's lit share with the eye 11 deg below its horizontal equals
+  the 1 deg floor's (0.954).
 - The texture craters cast no shadows inside their bowls - the main cue of small craters under a low Sun (the LROC
   frame's dark crater floors); they only modulate the radiance (mean-preserving). The near-field shadow map draws the
   mesh's craters only; horizon maps of the crater textures would add the texture's. Craters above 20 m (beyond s3) on coarse leaves are left to the mesh (it
@@ -1298,9 +1324,16 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
 - The regolith texture relief (s0-s3) casts no shadows; it only modulates the radiance (mean-preserving). Real cast shadows of
   pebbles (horizon maps of the height textures, the spec's "height-map pebbles with self-shadowing") are not built.
 - The oblique eye's rock terms (Task 12) use the LOD-2 template meshes (162 vertices), 2 yaws and 5 burial nodes [D]
-  (the table build takes ~8 s on 24 threads; cached in `data/cache/rock_view_tables.bin` since fix 1, keyed by the
-  templates, the burial law and the grid: built once, then read; the core tests still build it); mutual shading of
-  statistical rocks (one rock's shadow on another's seen face) is left out; the earthshine uses the same tables.
+  (the table build takes ~8 s on 24 threads; cached in `data/cache/rock_view_tables.bin`, keyed by
+  `rock_view_cache_version` (in the header; the cache test pins a checksum of the tables per version, so an algorithm
+  change without the bump fails there), the templates, the burial law, the rock's Hapke law and the grid: built once,
+  then read; the core tests still build it; a failed write - an installed build without write access to data/cache -
+  is reported and warned about by `MoonDetailShading`, the tables are then built at every start); mutual shading of
+  statistical rocks (one rock's shadow on another's seen face) is left out; the earthshine uses the same tables. Against
+  an exact raster of the LOD-1 meshes (`[.diag]` case in `test_rock_statistics_exact.cpp`, 8 deg Sun, eye 60 deg, 30 deg
+  apart, the tables' sampling): hidden ground 1.146 vs 1.137, sigma 3.145 vs 3.142 (8 azimuths), X 0.025 vs 0.045 (the
+  hulls fill the lit gaps of a low Sun), rock flux per cover 2.196 vs 2.115 (Hapke; +3.8 %: the column G on LOD 0 and
+  the hulls).
 - Shadow map: the drawn rocks below 4 x the geometry threshold cast no map shadow (statistical, by design); Godot's
   directional shadow fades by view depth, not distance (the fade's 2 % ring sits a little closer at the image edges);
   the texture relief, the pebbles and the 1-2 cm rocks cast none (statistical); PCSS LOW quality, normal bias 1 texel
@@ -1314,14 +1347,16 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   load factor is an [E] load rule (the control's static floor); at the Diviner maximum (abundance ~52) the lists still
   hold 2.4 M rocks (5.4 M instance entries, ~430 MB). Node lists are built at the pixel angle of their build time (a
   change at run time leaves the lists; the node limit keeps the radiance consistent). The quadtree's own main-thread
-  update exceeds 5 ms while streaming after a camera jump (13.5 ms max without rocks; Task 7 code, known-issues, T13).
+  update exceeds 5 ms while streaming after a camera jump: its selection phase (the recursion over the new nodes, Task 7
+  code) takes up to 21 ms (IM-2) and 52 ms (boulder field) in one frame of the 10 km jump at 2 m, p99 14-17 ms
+  (Task 13 run; known-issues).
 - Rock pool memory: bounded at 512 MB (fix C); boulder fields beyond it keep nodes statistical; a retry set requeues
   them nearest first (Task 12, review N1); eviction hands far nodes' pooled MultiMeshes to nearer ones (fix 1) but in the
   boulder field no far node holds the LOD 0-2 buckets a near node needs, so it evicts none there (near nodes then stay
-  statistical, radiance-continuous). Boulder-field camera jump after fix 1: the rock layer's share p99 3.3-3.9 ms, but
-  1-2 frames per run over the 5 ms gate - single pool allocations stalling 22-28 ms once per run and ~5 ms attach-queue
-  frames, the same without any rock shadow casters (A/B); IM-2 passes. The OpenXR path's attach / upload cost is
-  not measured (T13).
+  statistical, radiance-continuous). Camera jump of 10 km at 2 m (Task 13, PREWARM keyed for six LODs): the rock
+  layer's main-thread share max 4.82 ms (IM-2) and 4.75 ms (boulder field, abundance 21.3; pool at its 512 MB bound, 353
+  nodes kept statistical, largest upload 5.4 MB per frame), both under the 5 ms gate. The OpenXR path's attach / upload
+  cost is not measured (the stereo mock only).
 - The 1-2 cm pebbles are texture bumps without cast shadows (the texture relief casts none); their mean shadow is in the
   statistical layer.
 - Texture coordinates follow the cube face lattice: across the 12 cube face edges the regolith texture is discontinuous
@@ -1347,7 +1382,15 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   gate (sliding 34-36 us against 48-51 us) - one constant (`contact_lattice_level`) if the controller wants 4 cm back.
   The disc pattern (25 samples) can miss up to ~1.5 cm of sub-pattern roughness. Rocks: the contact top is the
   template's exact column top (`rock_top`'s surface); the greatest protrusion is found by a node climb from the peak and
-  the support point along the pad normal (the polyhedron's extreme vertex) or along the rim arc (golden section, ~0.15 mm).
+  the support point along the pad normal (the polyhedron's extreme vertex) or along the rim arc (`RockTemplates::arc_peak`,
+  exact on the polyhedron since Task 17 fix 1). `arc_peak` does not offer the burial cut-off (z = z_floor along a facet)
+  as a candidate: the rock there is at ground level and cannot out-protrude the ground (Task 17 re-review M2); a facet
+  parallel to the pad plane offers the arc's middle (Task 13, M1). Its exactness test allows 2e-5 above a 1e5-sample
+  brute force (4.9e-6 seen); the pivoting-pad case whose peak lies under an edge reads 0.375 mm above its brute-force
+  reference (a weakness of the reference's inner pattern search, inside the 1 mm gate; not traced further). Contact
+  cost (Task 17 fix 1, alone): resting 25, sliding 44-46, descending 12 us against the 50 us gate - ~10 % margin on
+  sliding, 20 % above the convex Task 11 templates' 37 us. The contact query's per-thread buffers release the cache
+  patches they pinned at the end of each call (Task 13, M4).
 - Pivoting pad: the pad stays parallel to the plane fitted to the ground and is lifted by the highest protrusion (the
   ruling); a real ball-joint pad on a rim rock would tilt onto the rock and the ground opposite, lifting its joint by
   roughly half as much. No joint range limit is modelled.
@@ -1365,8 +1408,11 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   the same `select_touchdown_point` on the live state (spec: re-plan from flight data) - not built.
 - The roll at touchdown is free, so every roll must be safe (conservative); a roll-controlled touchdown could pick the
   roll that clears the rocks.
-- Lunar landing campaign on the composed surface (`[lunar_campaign][slow]`, Task 5 fix round 1): 21 / 21 within the
-  1 m gate, misses 0.01-0.91 m (seed 17 0.91 m and seed 5 0.89 m are the closest to the gate; seed 7, 1.12 m before
+- Lunar landing campaign on the composed surface (`[lunar_campaign][slow]`): 20 / 21 within the 1 m gate since the Task 12
+  head; seed 14 (spot 307 / 667 m, slope 8.0 deg, the steepest of the campaign) lands 1.52 m off although its first
+  contact is 0.02 m off at 0.002 m/s lateral (Task 13: `STARSIM_LUNAR_CASE=14`, 10 s): the same post-contact footprint
+  motion as seeds 5 / 17 below, growing with the slope (0.89-0.91 m at 5.1-5.3 deg, 1.52 m at 8.0 deg). Not a clear
+  defect without a trace of the foot slip; kept red and known (known-issues). At Task 5 fix round 1: 21 / 21, misses 0.01-0.91 m (seed 17 0.91 m and seed 5 0.89 m are the closest to the gate; seed 7, 1.12 m before
   the fix, now 0.09 m). The earlier two-foot stance (~50 s, ~2 cm/s creep) had two causes, both fixed: the guidance
   held the attitude with the RCS after the first contact (a rate damper about the line through two feet - now
   released at contact) and the regularised leg friction crept under any tangential load (now Coulomb stick-slip,
@@ -1422,7 +1468,5 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   (12-28 %) and grooves are there but modest; no overhangs (star-shaped body: accepted limit, a non-radial
   representation would be needed); real narrow cracks are only the shader's lines (mesh grooves >= 9 % wide); a residual
   vertex staircase on some fracture edges up close (LOD-0 spacing ~3.5 % of the size); single templates' volume per D^3
-  scatters within 11.5 % (mean +0.94 %, ruling T17-V); drawn rocks +2.64 % against the statistics at abundance 10, Sun
-  7 deg (gate 2 %; not the shader, the view-table LOD, the normal step or the spalls / grooves - with them removed it
-  was +2.90 % - so the remaining shape change: eroded polyhedra, erosion radii, undulation, riser lean); boulder-field
-  camera jump pool-allocation stall (T12-C, 6 LODs).
+  scatters within 11.5 % (mean +0.94 %, ruling T17-V). The drawn-against-statistical rock gate is back within 2 % at
+  abundance 10 since Task 13 (+1.52 %; the statistics from the drawn meshes with the rock's Hapke faces, history).

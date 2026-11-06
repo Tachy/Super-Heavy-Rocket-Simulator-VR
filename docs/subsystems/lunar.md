@@ -82,7 +82,8 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   from the vehicle config by `touchdown_hazard_limits`; the hull's rest plane over the feet, every roll). IM-2: the
   nominal point fails, the target moves 28.3 m. With the hazard check `TouchdownPoint::height_m` is the feet's rest
   plane under the centre (IM-2: ~0.9 m above LOLA), so the descent targets the height the pads stand on, not LOLA.
-  The landing campaign flies the composed surface (21 / 21 within 1 m, `moon-surface.md`).
+  The landing campaign flies the composed surface (20 / 21 within 1 m: seed 14 on an 8 deg slope 1.52 m off after a
+  0.02 m first contact, the post-contact slide of `moon-surface.md` open points; known-issues).
   Masses: HLS ~573 t in the LLO, ~566 t at PDI (~500 t NRHO variant), lands ~315 t. Site pass: the LLO waits for a pass
   of the polar site within `max_crossrange_km` (20 km) and trims the plane ~90 deg before it (user 2026-10-15); the
   wait cannot be shortened by the mission epoch (user 2026-10-16: "refuse honestly"; 5.8 d for Mons Mouton). DOI on the

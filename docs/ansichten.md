@@ -182,7 +182,7 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   an als Standard) [umgesetzt 2026-11-05]: die Schattenkarte der Sonne in Bodennähe auf der Erde (500 m bis 4 km um das
   Auge, bis 30 km Höhe - ab 20 km blenden die Schatten der Fahrzeuge weich aus -, solange die Sonne über dem Horizont steht): Turm, Startplatz, Raketen und Schiffe werfen echte
   Schatten mit dem Halbschatten der Sonnenscheibe auf Boden, Gelände und sich selbst. Das Gelände wirft keinen
-  Schatten (Dünen, Dämme). Aus = wie bisher ohne Schatten; kostet im VR-Test rund 1,2 ms GPU-Zeit.
+  Schatten (Dünen, Dämme). Aus = wie bisher ohne Schatten; kostet im VR-Test je nach Ansicht 1 bis 2,5 ms GPU-Zeit.
 - **Bildrate** [umgesetzt 2026-10-26]: letzte Zeile im Zeit-Panel (auch im VR-Panel), z. B. "Bildrate: 45 fps
   (22.2 ms)" - die Bilder der letzten Sekunde. In VR heißt die halbe Headset-Rate (45 bei 90 Hz), dass die Runtime
   Zwischenbilder rechnet.

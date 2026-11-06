@@ -208,7 +208,46 @@ path): 4.19 / 4.20 and 4.28 / 4.28 ms (no measurable cost). Shadows on with the 
 5.80 / 5.41 and 5.44 / 5.50; LOW and MEDIUM left a visible grain in the wide penumbrae on the terrain, hence HIGH.
 Some runs shared the machine with another agent's Godot runs; the medians agree within 0.1 ms across
 rounds. Not measured: the headset itself, the pad with weather on (the 45 Hz rule applies there).
-Memory (computed, not measured): the directional shadow atlas is 8192 x 8192 px at 32-bit depth = 256 MB of VRAM, held
-while the Earth shadows are active (below 20 km, Sun up) and shared with the Moon's (same size, never both). It comes on
-top of the per-eye target and the cloud / terrain textures; the RTX 4090 has 24 GB. A smaller atlas (`--earth_shadow_atlas`)
-or 16-bit depth was not tried: 4096 per split is the texel size the length check's tolerance was derived for.
+Atlas 8192 px 16-bit (128 MB computed; was 32-bit 256 MB with the same image, Task 13b): GPU -0.56 ms in the stereo mock
+(3534 x 2838, pad with Starship, eye 150 m, Sun 32.7 deg: shadows off 7.44 ms, 32-bit 10.55, 16-bit 9.99; analog
+weather on: 14.37 off, 17.19 on - the clouds' cost, known-issues). Active to 30 km (full to 20 km, fading to 30 km).
+4096 / 2048 px atlases fail the shadow-length tolerance (Task 13b), so 8192 stays.
+Task 13 re-measure of Task 16's views (same commands, 16-bit atlas, alone on the GPU, median of 120 frames, two rounds):
+see the table below. The cost depends on the view: +1.0-1.1 ms in Task 16's views (the vehicle and tower a small part of
+the frame), +2.55 ms in 13b's view (its off baseline 7.44 ms is a heavier framing of the pad). Both are right for their
+views; the game's settings text says "1-2,5 ms".
+
+## Task 13 frame times (Moon procedural surface plan, 2026-11-06)
+Stereo mock (`render_check --stereo=game/tests/data/pimax_dream_air_projections.json --gpu_time=120`, 3534 x 2838 per
+eye), alone on the GPU (RTX 4090), median of 120 frames, two rounds (r1 / r2). Moon: 2026-11-22T01:20 UTC, azimuth 150 deg
+from the Sun, elevation -20 deg, fov 60, `--rock_budget=off` (threshold scale 1); IM-2 (-84.79, 29.20; Sun 6.75 deg) and
+the Diviner boulder field (39.36 N, -0.17 E; Sun 48.6 deg, abundance load factor ~3.8 at the camera); near shadows on /
+`--moon_near_shadows=off`. Pad: Task 16's views (`--vehicle=starship_block3 --site=starbase_pad2 --watch_from_site=N
+--utc=2026-10-15T21:30:00`, Sun 31 deg), Earth near shadows on / off. Includes Task 17's rocks, Task 13's Hapke rock
+tables, pool warming for six LODs and the coarser shadow-only rock meshes.
+
+| View | Eye | Shadows off ms | Shadows on ms | Shadow cost ms |
+|---|---|---|---|---|
+| IM-2 | 2 m | 13.92 / 13.98 | 17.46 / 17.62 | +3.6 |
+| IM-2 | 100 m | 14.10 / 14.10 | 16.88 / 16.86 | +2.8 |
+| IM-2 | 2 km | 10.06 / 10.08 | 11.66 / 11.66 | +1.6 |
+| boulder field | 2 m | 38.24 / 38.35 | 44.87 / 44.89 | +6.6 |
+| boulder field | 100 m | 22.24 / 22.22 | 26.34 / 26.31 | +4.1 |
+| boulder field | 2 km | 12.07 / 12.04 | 13.91 / 13.93 | +1.9 |
+| pad, eye 150 m | 150 m east | 4.20 / 4.20 | 5.26 / 5.20 | +1.0 |
+| pad, eye 400 m | 400 m east | 4.27 / 4.29 | 5.25 / 5.31 | +1.0 |
+
+p99 within 0.5-1.6 ms of the medians. Against Task 12 fix 1 (same views): IM-2 2 m off 11.6-11.7 / on 16.0-16.1 ms, boulder
+2 m off 36.7-37.3 / on 51.4-51.7 ms: the off path is +2.3 ms at IM-2 (Task 17's rock surface shader and its sixth LOD,
+Task 13's brighter Hapke rock statistics are free), the shadow cost in the boulder field fell from +14.5 to +6.6 ms (the
+shadow-only rocks one LOD coarser). Ruling T11-U3 (user 2026-11-05: on the Moon quality before 90 fps): IM-2 meets the
+45 fps floor (22.2 ms) at every height with shadows (57-86 fps in the mock), the boulder field at 100 m and 2 km but not
+on its ground (44.9 ms, ~22 fps; 38.2 ms already without shadows - the rock budget control was held off here; in the game
+the floor guard raises the threshold scale toward 22.2 ms). The headset's 5294 x 4250 per eye draws ~1.6 x the mock's
+pixels (the rocks' vertex cost scales with the pixel angle: ~2.5 x, Task 11): the Moon numbers above are lower bounds for
+the headset. The Earth pad stays within the 9 ms GPU target (5.2-5.3 ms with shadows).
+Main thread (moon_surface_check, 10 km camera jump at 2 m): the rock layer's share max 4.82 ms (IM-2) / 4.75 ms (boulder
+field) per frame, gate 5 ms - passes since the pool warms the six LODs' buckets (was 36.9 ms at Task 17). The quadtree's
+own selection phase max 21 / 52 ms, p99 14.4 / 16.6 ms (known-issues). Pool: 194 MB at IM-2 2 m once warmed (6930 warm
+allocations), the 512 MB bound in the boulder field (353 nodes statistical). The pool's MB are computed from instance
+counts x bytes; the driver's real allocation was not read.

@@ -348,6 +348,11 @@ on top; it replaced the interim `GroundPatch`.
 
 ## Open points and known limits
 
+- Moon quadtree main thread after a camera jump (Task 13 run of `moon_surface_check`, 10 km jump at 2 m, rock layer
+  attached): the update's selection phase (the recursion over the new nodes) takes up to 21 ms at IM-2 and 52 ms in the
+  Diviner boulder field in one frame, p99 14.4 / 16.6 ms over 364 / 414 frames - over the 5 ms hitch gate the rock layer
+  meets (its own share max 4.8 ms). Not addressed (a time-sliced selection would be the fix); not measured: frame pacing
+  in the headset while the view loads, the leaf `band_heights` retention (~70 MB at a 2 m view, Task 7 review).
 - Moon with the procedural detail: a fresh 2 m spawn takes 26 s until the whole view is built (the cm detail under
   the camera after 7 s), a teleport 8 s (1.5 s); CPU-bound (16 builds at once on 24 threads; ~2700 builds and 1208
   horizon bakes, GDScript mesh assembly ~20 ms each). A 10 s spawn needs less work per node (e.g. the horizon bake or
