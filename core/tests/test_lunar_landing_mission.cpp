@@ -50,7 +50,7 @@ TEST_CASE("Lunar landing missions load", "[config][lunar]") {
     CHECK(llo.windows.count == 5);
     CHECK_THAT(llo.windows.sun_preferred_min_rad, WithinAbs(5.0 * constants::deg_to_rad, 1e-12));
     CHECK_THAT(llo.windows.sun_preferred_max_rad, WithinAbs(20.0 * constants::deg_to_rad, 1e-12));
-    const auto nrho =config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
+    const auto nrho = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
     CHECK(nrho.lunar_orbit == "nrho");
     CHECK(nrho.nrho_revolutions == 9);
     CHECK(nrho.nrho_synodic_months == 2);

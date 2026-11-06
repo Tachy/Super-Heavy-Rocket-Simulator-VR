@@ -211,7 +211,7 @@ TEST_CASE("far-side site with a day's stay lists windows or names the cause",
 }
 
 // The NRHO variant (spec: only where its budget closes): every candidate runs the chain with the NRHO reference; at
-// 120 t the NRHO budget is short everywhere (Task 7), so the answer is the refusal naming the NRHO. ~6 min: every
+// 120 t the NRHO budget is short everywhere (Task 7), so the answer is the refusal naming the NRHO. ~6-8 min (488 s measured): every
 // candidate builds its NRHO reference (~2 s each, 165 candidates).
 TEST_CASE("NRHO mission to Apollo 11 refuses with the NRHO cause", "[sim][lunar][lunar_windows][nrho][terrain][data][nightly]") {
     test::spice_session();

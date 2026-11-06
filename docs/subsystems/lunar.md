@@ -272,7 +272,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   outbound flight in its first poll (Task 7 N2); `MissionStart` carries `lunar_budget_margin_kg` and
   `lunar_planned_touchdown`. Search time 2026-11-07 (start 2026-11-06, 24 h stay, `hls_lunar_llo`, wall incl. the site surface load: Apollo 11 2.1 s, Apollo 15 1.9 s, Tsiolkovskiy 3.1 s; chain runs alone): Apollo 11 0.5 s
   (7 chain runs), Apollo 15 0.3 s (5), Tsiolkovskiy 1.5 s (22); a full refusal from the NRHO (`hls_lunar_nrho`) runs all
-  165 candidates, ~2.2 s each (the NRHO reference, multiple shooting, is built per candidate): ~6 min.
+  165 candidates, ~2.2-3 s each (the NRHO reference, multiple shooting, is built per candidate): 488 s measured (~6-8 min).
 
 ## Standing decisions
 - Plan like mission planners: find the departure window, no epoch hopping (user 2026-10-18); re-plan from flight data.
@@ -355,7 +355,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   (Apollo 11 candidate +9.96 d: +14.0 d) - the search drops that candidate (touchdown outside its daylight), the
   cause it counts is `lunar.no_daylight_for_stay`. The ascent's plane change for the Moon's rotation over the stay is
   not a budgeted leg of its own (whether the nominal [budget] `ascent_delta_v_mps` covers it for long stays is not
-  checked). A full NRHO refusal takes ~6 min (reference per
+  checked). A full NRHO refusal takes ~6-8 min (reference per
   candidate).
 - Heating: equilibrium air only (no non-equilibrium radiation, no ablation coupling); Starship's heat-flux limit and 6 m
   nose radius are estimates (tiles ~1650 C ~0.65 MW/m^2 radiative equilibrium); Tauber-Sutton is outside its range
