@@ -40,7 +40,8 @@ shaders:
   a new view snaps). The meter measures every 4th frame (`MEASURE_EVERY` [call]; only then it asks for the MSAA
   resolve). Display-referred emitters (vision.gdshaderinc `vision_display_referred`: plume, the stars' own
   brightness, orbit lines, labels, the VR panel) all draw in the transparent pass, after the meter: they are not
-  counted. Counted, their fixed display value D de-gains to D / gain and feeds the gain back on itself (log g_new =
+  counted. So are the tower lamps' lenses (`light_lens.gdshader`, blend_add, physical and scaled by the gain, also in the
+  transparent pass: small, under the meter's 2 % cut; the lamp-lit surfaces enter through `lamp_adaptation_cd_m2`). Counted, their fixed display value D de-gains to D / gain and feeds the gain back on itself (log g_new =
   C + s log g, s their weight share; in a black field s = 1 and the gain runs to a clamp set by D);
   `adaptation_meter_test.gd` checks that every display-referred shader has a blend mode. Feedback slope measured with
   `render_check --gain_probe` (field at two held gains, s = -d ln L_f / d ln g): pad noon 0.0000, pad noon under a

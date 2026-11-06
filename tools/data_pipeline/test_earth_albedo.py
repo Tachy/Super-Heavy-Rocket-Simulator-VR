@@ -259,3 +259,20 @@ def test_open_water_pedestal_is_read_over_open_water_only(tmp_path):
     ped = ea.open_water_pedestal(src, ea.WaterMask(tmp_path, "t"))
     # file pixel ~ 0.0025 deg ~ 275 m: the land edge is at column 400, the open water starts ~2 km (8 px x 8) before it
     assert ped.tolist() == pytest.approx([0.05] * 3, abs=0.01)  # the strip is a few % of the open water: below p90
+
+
+def test_open_water_pedestal_logs_when_there_is_no_open_water(tmp_path):
+    """Task 15 minor M3: no open water in the file gives zeros, and the run says so (the embedding then adds the full water
+    brightness)."""
+    from rasterio.transform import from_bounds
+    import rasterio
+    _write_area_grids(tmp_path)  # sea west of -97, land east
+    n = 100
+    src = tmp_path / "land.tif"
+    with rasterio.open(src, "w", driver="GTiff", width=n, height=n, count=3, dtype="uint16", crs="EPSG:4326",
+                       transform=from_bounds(-96.5, 25.0, -96.0, 27.0, n, n), nodata=0) as d:  # land only
+        d.write(np.full((3, n, n), 2000, dtype=np.uint16))
+    lines = []
+    ped = ea.open_water_pedestal(src, ea.WaterMask(tmp_path, "t"), log=lines.append)
+    assert ped.tolist() == [0.0, 0.0, 0.0]
+    assert len(lines) == 1 and "open-water samples" in lines[0] and "land.tif" in lines[0]

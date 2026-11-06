@@ -63,6 +63,7 @@ WATER_THRESHOLD_M = 0.05  # [S] = core EarthTerrain::water_threshold_m: orthomet
 OPEN_WATER_DIST_M = 2000.0  # [E] water farther than this from any non-water pixel is open water (no visible bottom)
 OPEN_WATER_PERCENTILE = 90.0  # [E] of the imagery over open water: the pedestal above which the brightness is bottom / surf
 OPEN_WATER_DECIMATION = 8  # the pedestal is read from every 8th pixel (80 m) of the Sentinel-2 file
+OPEN_WATER_MIN_PIXELS = 100  # [E] fewer open-water samples than this give no pedestal (zeros, logged)
 LAND_BLOCK_PX = 512  # block of the land-only Sentinel-2 file
 LAND_LATTICE_PX = 64  # lat / lon of a block's pixels from a lattice of this spacing (UTM to geographic is smooth: sub-mm)
 CLIMATOLOGY_FILE = REPO_ROOT / "data" / "raw" / f"earth_albedo_modis_{CLIMATOLOGY_YEAR}.npz"
@@ -345,12 +346,12 @@ def _lattice_bilinear(nodes: np.ndarray, rows: np.ndarray, cols: np.ndarray, fr:
     return (1 - wr) * ((1 - wc) * nodes[r0, c0] + wc * nodes[r0, c1]) + wr * ((1 - wc) * nodes[r1, c0] + wc * nodes[r1, c1])
 
 
-def open_water_pedestal(reflectance: Path, mask: "WaterMask") -> np.ndarray:
+def open_water_pedestal(reflectance: Path, mask: "WaterMask", log=print) -> np.ndarray:
     """Per channel (R, G, B) the `OPEN_WATER_PERCENTILE` of the Sentinel-2 reflectance over open water (water by the
     renderer's rule, > `OPEN_WATER_DIST_M` from any non-water pixel): what Sen2Cor L2A reports over the sea of this scene
     (turbidity, glint, scene-wise steps) - not water-leaving reflectance of the calibrated ocean level. Water pixels of the
-    tiles keep only the brightness above it (shallow bottoms, flats, surf) on top of the global sea; zeros when the file
-    has no open water."""
+    tiles keep only the brightness above it (shallow bottoms, flats, surf) on top of the global sea; zeros (logged) when the
+    file has fewer than OPEN_WATER_MIN_PIXELS open-water samples: the embedding then adds the imagery's full water brightness."""
     import rasterio
     from pyproj import Transformer
     from rasterio.enums import Resampling
@@ -366,7 +367,9 @@ def open_water_pedestal(reflectance: Path, mask: "WaterMask") -> np.ndarray:
         pixel_m = abs(t.a) * f * (111320.0 if ds.crs.is_geographic else 1.0)  # metres (degrees: at the equator)
     water = mask.water(np.asarray(lat), np.asarray(lon))
     open_water = water & (a > 0).all(axis=0) & (distance_transform_edt(water) * pixel_m > OPEN_WATER_DIST_M)
-    if open_water.sum() < 100:
+    if open_water.sum() < OPEN_WATER_MIN_PIXELS:
+        log(f"open_water_pedestal: only {int(open_water.sum())} open-water samples in {reflectance.name} (< {OPEN_WATER_MIN_PIXELS}): "
+            "pedestal zero, water pixels keep their full imagery brightness on top of the global sea")
         return np.zeros(3)
     return np.percentile(a[:, open_water], OPEN_WATER_PERCENTILE, axis=1)
 
