@@ -686,6 +686,8 @@ public:
     void reset_step_timing() { step_timing_ = {}; }
     // A FlightEnvironment of its own for a planner thread (the session's flags; the same sources and grids).
     std::shared_ptr<vehicle::WorkerEnvironment> worker_environment() const;
+    // The sources the session was built from (a planner's own session samples them on the same grids).
+    const vehicle::EnvironmentSources& environment_sources() const { return sources_; }
     const gnc::BoosterReturnGuidance* return_guidance(size_t index) const { return bodies_.at(index).return_guidance.get(); }
     // Return guidance of a body (nullptr if it has none) and its latest command.
     const gnc::ReturnCommand* return_status(size_t index) const;

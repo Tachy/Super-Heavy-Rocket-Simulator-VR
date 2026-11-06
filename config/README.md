@@ -383,7 +383,10 @@ flow separation (vacuum engines).
   `[budget]` delta-v of the legs not planned at the start (`descent_delta_v_mps`, `ascent_delta_v_mps`, for the NRHO
   variant `nrho_to_llo_delta_v_mps` / `llo_to_nrho_delta_v_mps` - the polar transfer; the plane change a site needs is
   computed per site, `docs/subsystems/lunar.md`) and `reserve_kg`: the start refuses a mission whose
-  budget does not close ("Mission nicht durchführbar: ... fehlen N t").
+  budget does not close ("Mission nicht durchführbar: ... fehlen N t"). `[windows]` (required; the landing window
+  search `sim::find_lunar_landing_windows`, lunar sites plan Task 8): `horizon_days` (touchdowns within this after the
+  chosen start), `count` (windows listed), `sun_preferred_min_deg` / `sun_preferred_max_deg` (the Sun elevation band
+  at touchdown that ranks the dates - no filter: the rule is Sun above the horizon over the whole stay).
 - `ship_lunar_return_llo.toml`, `ship_lunar_return_nrho.toml`, `ship_lunar_aircatch_llo.toml` (`kind = "lunar_return"`,
   `config::load_lunar_return_mission`, `sim::start_lunar_return_mission`; lunar l5): a ship (`[mission]` `vehicle`,
   `stage`, `site` = the Starbase tower) returns from lunar orbit. `[orbit]` `epoch_utc`, `kind = "llo" | "nrho"`; LLO

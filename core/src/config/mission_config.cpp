@@ -291,6 +291,15 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
     m.nrho_to_llo_delta_v_mps = doc.positive(budget, "nrho_to_llo_delta_v_mps");
     m.llo_to_nrho_delta_v_mps = doc.positive(budget, "llo_to_nrho_delta_v_mps");
     m.reserve_kg = doc.positive(budget, "reserve_kg");
+    const auto& windows = doc.table(doc.root, "windows");
+    m.windows.horizon_s = doc.positive(windows, "horizon_days") * 86400.0;
+    m.windows.count = positive_integer(doc, windows, "count");
+    m.windows.sun_preferred_min_rad = doc.number(windows, "sun_preferred_min_deg") * deg;
+    m.windows.sun_preferred_max_rad = doc.number(windows, "sun_preferred_max_deg") * deg;
+    if (m.windows.sun_preferred_min_rad < 0.0 || m.windows.sun_preferred_max_rad < m.windows.sun_preferred_min_rad ||
+        m.windows.sun_preferred_max_rad > 0.5 * constants::pi) {
+        doc.fail("windows: need 0 <= sun_preferred_min_deg <= sun_preferred_max_deg <= 90");
+    }
     return m;
 }
 

@@ -76,6 +76,7 @@ add_executable(starsim_core_tests
     test_rendezvous_session.cpp
     test_lunar_outbound.cpp
     test_lunar_landing_mission.cpp
+    test_lunar_windows.cpp
     test_lunar_return_mission.cpp
     test_lunar_return_session.cpp
     test_lunar_return_entry.cpp

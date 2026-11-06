@@ -65,17 +65,21 @@ size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs);
 // directions), check the budget, then chain the legs (FlightSession::set_lunar_mission). Refused (return_planned false,
 // German refusal, autopilot off): placement or terrain failed, outbound plan refused, no touchdown point, "Mission
 // nicht durchführbar: " + budget. The pass over the site is checked again in the LLO when the descent is planned.
+// `site`: land there instead of the mission's [mission] site (a free site, config::lunar_site_at; its tile must be in
+// data/terrain/sites). A planned start carries the budget margin and the planned touchdown.
 MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                          const config::LunarLandingMission& mission, time::Epoch epoch,
-                                         const config::VehicleConfig* vehicle = nullptr);
+                                         const config::VehicleConfig* vehicle = nullptr,
+                                         const config::LunarSiteConfig* site = nullptr);
 
-// start_lunar_landing_mission with the touchdown search on a background thread (follow-up U-7; on the composed surface
-// with the hazard check - LOLA alone is decided at once): the vehicle is placed and the search started, then the
-// DeferredMissionStart's poll (or wait) plans the rest from the search's result - the same start as the synchronous
-// call. Status start.checking_landing_site. A failed placement is decided at once.
+// start_lunar_landing_mission in steps (follow-up U-7): the vehicle is placed and status start.checking_landing_site
+// given at once; the first poll (or wait) plans the outbound flight and starts the touchdown search (on the composed
+// surface with the hazard check: on a background thread - LOLA alone is decided in that poll), the later polls plan the
+// rest from the search's result - the same start as the synchronous call. A failed placement is decided at once.
 DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                                  const config::LunarLandingMission& mission, time::Epoch epoch,
-                                                 const config::VehicleConfig* vehicle = nullptr);
+                                                 const config::VehicleConfig* vehicle = nullptr,
+                                                 const config::LunarSiteConfig* site = nullptr);
 
 // The mission's circular parking state at `epoch` (GCRF) for `inclination_rad`: the plane through the Moon at arrival
 // (epoch + flight_time_s), as the placement uses it; std::nullopt when the Moon's declination exceeds the inclination.
@@ -96,6 +100,8 @@ std::optional<time::Epoch> lunar_planned_touchdown(const config::LunarLandingMis
 // Without a planned touchdown: the first pass after the LLO arrival the session can take - the trims' settling
 // revolutions, then the descent planner's minimum lead and 1.25 revolutions.
 double lunar_first_pass_after_arrival_s(const config::LunarLandingMission& mission, double gm_moon_m3ps2);
+// The part of it until the session is in the LLO and plans the descent (the trims' settling revolutions, [E]).
+double lunar_llo_settling_s(const config::LunarLandingMission& mission, double gm_moon_m3ps2);
 
 // Outbound parameters of the mission started at `epoch` (FlightSession::plan_lunar_outbound); the NRHO variant builds
 // its reference (multiple shooting, ~15 s) with the first perilune at the arrival. LLO without [lunar_orbit]

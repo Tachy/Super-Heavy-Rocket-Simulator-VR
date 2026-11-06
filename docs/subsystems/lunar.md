@@ -249,6 +249,30 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   braking 1033 -> 845 m/s (LLO) because the ship's dry mass 177 t (was 255 t) lowers the entry mass 290 -> 212 t and with it the
   ballistic coefficient, so the corridor search allows a higher entry speed and the braking burn shrinks (LLO 883 -> 887, NRHO
   576 -> 568, aircatch 864 -> 865 m/s TEI).
+- Landing window search (lunar sites plan Task 8, `sim/lunar_windows.hpp`): `find_lunar_landing_windows(prototype,
+  config_dir, {mission_id, site, stay_s, start}, progress)` -> `LunarWindowResult{windows, refusal}`; each
+  `LunarLandingWindow` = mission start, touchdown, liftoff (touchdown + stay), Sun elevation / azimuth at touchdown,
+  daylight after it, propellant reserve (the start budget's margin above `reserve_kg`), LLO inclination, orbit kind.
+  Mission `[windows]` (`horizon_days` 90, `count` 5, `sun_preferred_min/max_deg` 5 / 20). Algorithm: daylight intervals
+  (`mission::daylight_intervals`) over the horizon plus the stay -> touchdown candidates every 6 h (centred in the slot)
+  in intervals that still hold the stay + 1 h ascent lead and no earlier than the transfer + descent lead
+  (`lunar_first_pass_after_arrival_s`) after the start -> ranked by the Sun elevation's distance to the band, ties
+  chronological -> per candidate the real chain on a session of its own (the prototype's sources, grids and surface
+  flags): mission start = touchdown - flight time - descent lead, `touchdown_after_epoch_h` = that lead, then
+  `start_lunar_landing_mission(..., &site)` (placement, outbound plan with the plane through the site at that
+  touchdown, touchdown point, budget), then the descent plan from the predicted LLO (TLI and LOI impulsive in the full
+  model, planned `lunar_llo_settling_s` after the LOI as the session) whose pass is the listed touchdown; it must lie in
+  the candidate's daylight with the stay and the lead. The list spreads over the lunar days first (a candidate whose
+  daylight already holds a window waits for a second round), then is sorted by preference on the listed touchdown's
+  Sun. No window: `lunar.no_window(cause)`, the most frequent cause over the candidates (`lunar.no_daylight_for_stay(stay,
+  daylight)` - also when no interval holds the stay -, `lunar.nrho_site_unreachable`, `lunar.budget_short`,
+  `lunar.no_site_pass`, else the innermost cause, e.g. a missing site tile); `lunar.window_search_cancelled` when the
+  progress callback returns false (windows found so far kept, not cached). Results cached per (config, mission, site,
+  stay, start hour, surface flags). The start (`begin_lunar_landing_mission`) gives its status first and plans the
+  outbound flight in its first poll (Task 7 N2); `MissionStart` carries `lunar_budget_margin_kg` and
+  `lunar_planned_touchdown`. Search time 2026-11-07 (start 2026-11-06, 24 h stay, `hls_lunar_llo`, wall incl. the site surface load: Apollo 11 2.1 s, Apollo 15 1.9 s, Tsiolkovskiy 3.1 s; chain runs alone): Apollo 11 0.5 s
+  (7 chain runs), Apollo 15 0.3 s (5), Tsiolkovskiy 1.5 s (22); a full refusal from the NRHO (`hls_lunar_nrho`) runs all
+  165 candidates, ~2.2 s each (the NRHO reference, multiple shooting, is built per candidate): ~6 min.
 
 ## Standing decisions
 - Plan like mission planners: find the departure window, no epoch hopping (user 2026-10-18); re-plan from flight data.
@@ -301,10 +325,20 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   270 deg within 1.7 deg (Sun declination in the Moon frame <= 1.54 deg + margin), Sun on the equator side at +-60 deg
   latitude. Short polar day: lat -88.4767 deg, 45 min at 2026-11-01 + 200.85 d (below the grid step, found by the
   refinement, agrees with 60 s brute force).
+- Landing windows (`test_lunar_windows.cpp` `[lunar_windows]`, start 2026-11-06): Apollo 11 24 h - 5 windows, Sun
+  7-20 deg at touchdown and up over the stay, one per lunar day first (+9.7, +39.3, +68.9 d), sorted by the band;
+  Apollo 15 - 5 windows, each re-planned through the public chain from its listed start (plane chosen for the listed
+  touchdown, descent planned in the predicted LLO): touchdown within 0.11 h of the listed one, crossrange <= 0.2 km
+  (ruling R4; the flight from window 1 lands in Task 9); Tsiolkovskiy (20.4 S 129.1 E, far side) 24 h lists 5, 16 d
+  refuses with `lunar.no_daylight_for_stay`; equator 15 d refuses with it naming the longest daylight 14.8 d; zero stay
+  lists windows (liftoff = touchdown); progress 0 -> 1 monotonic, a cancel after the first candidate stops there and is
+  not cached. `[nightly]` NRHO to Apollo 11: refusal `lunar.nrho_site_unreachable` (short 5-84 t by window).
 
 ## Diagnostics
 - Lunar: `STARSIM_DEBUG_NRHO`, `STARSIM_DEBUG_OUTBOUND`, `STARSIM_DEBUG_LUNAR_TRANSFER`,
-  `STARSIM_DEBUG_LUNAR_SESSION`, `STARSIM_DEBUG_LUNAR_DESCENT`, `STARSIM_DEBUG_LUNAR_ASCENT`; single
+  `STARSIM_DEBUG_LUNAR_SESSION`, `STARSIM_DEBUG_LUNAR_DESCENT`, `STARSIM_DEBUG_LUNAR_ASCENT`,
+  `STARSIM_DEBUG_LUNAR_WINDOWS` (per candidate: time, touchdown, band, outcome; plane-site distance, arrival drift,
+  pass); single
   campaign case `"[.lunar_case]"` with `STARSIM_LUNAR_CASE=<seed>`; hidden `"[.lunar_return_case]"`
   (`STARSIM_RETURN_SEED`, `STARSIM_RETURN_AIRCATCH=1`), `"[.lunar_gate_replay]"` (`STARSIM_GATE_STATE`),
   `"[.lunar_handover_replay]"` (`STARSIM_HANDOVER_STATE`), `"[.lunar_return_epoch_probe]"`, `"Aerocapture dispersion
@@ -316,6 +350,13 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   re-plan after the trim; no boil-off in the stay; no degraded profile for automatic aborts from fast low states (PEG
   saturates: 111 x 115 km); status at burn end shows osculating elements (95 x 100 km for a 100 km LLO); the sub-orbital
   cutoff guard is untested.
+- Window search: the plane-through-site transfer lets the arrival drift by -10 .. +21 h from start + flight time
+  (Task 7's free-then-held arrival); when it lands after the planned touchdown the descent takes a pass days later
+  (Apollo 11 candidate +9.96 d: +14.0 d) - the search drops that candidate (touchdown outside its daylight), the
+  cause it counts is `lunar.no_daylight_for_stay`. The ascent's plane change for the Moon's rotation over the stay is
+  not a budgeted leg of its own (whether the nominal [budget] `ascent_delta_v_mps` covers it for long stays is not
+  checked). A full NRHO refusal takes ~6 min (reference per
+  candidate).
 - Heating: equilibrium air only (no non-equilibrium radiation, no ablation coupling); Starship's heat-flux limit and 6 m
   nose radius are estimates (tiles ~1650 C ~0.65 MW/m^2 radiative equilibrium); Tauber-Sutton is outside its range
   (Rn 0.3-3 m).

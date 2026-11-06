@@ -26,6 +26,10 @@ struct MissionStart {
     report::Report refusal;  // why the start was refused (ok: started)
     report::Reports warnings;  // ISS missions: the ISS source note, station reboosts in the mission window
     std::optional<mission::LaunchWindow> launch_window;  // ISS launch / rendezvous from a window's separation
+    // lunar landing, planned: the budget's margin above the reserve and the touchdown the flight is planned for (the
+    // LLO plane's, or the NRHO departure's pass); the window search lists them
+    std::optional<double> lunar_budget_margin_kg;
+    std::optional<time::Epoch> lunar_planned_touchdown;
 };
 
 struct StartOptions {

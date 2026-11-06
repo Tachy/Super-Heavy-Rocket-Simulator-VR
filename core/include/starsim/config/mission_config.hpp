@@ -124,6 +124,14 @@ struct LunarLandingMission {
     double nrho_to_llo_delta_v_mps = 876.0;
     double llo_to_nrho_delta_v_mps = 725.0;
     double reserve_kg = 10000.0;
+    // [windows]: the landing window search (sim::find_lunar_landing_windows)
+    struct Windows {
+        double horizon_s = 90.0 * 86400.0;  // touchdowns searched within this after the chosen start
+        int count = 5;                       // windows listed (the first that pass, by preference)
+        // the Sun elevation band at touchdown that ranks the windows (no filter: Sun above the horizon is the rule)
+        double sun_preferred_min_rad = 5.0 * constants::deg_to_rad;
+        double sun_preferred_max_rad = 20.0 * constants::deg_to_rad;
+    } windows;
 };
 
 LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& config_dir, std::string_view mission_id);

@@ -273,10 +273,12 @@ on top of that relief.
   azimuths, footprint, p, limits)` (`mission/touchdown_search.hpp`) runs the search for each azimuth in turn on a
   `std::async` thread and gives the first point - the synchronous point bit for bit. It holds the surface by
   `shared_ptr` and copies its parameters; it touches only the surface (no CSPICE, no session); the future's destructor
-  waits for it. The mission start uses it: `sim::begin_lunar_landing_mission` places the HLS, starts the search over
-  both polar approach directions and returns a `sim::DeferredMissionStart` (status `start.checking_landing_site`,
-  `poll` / `wait`; `sim::start_mission_deferred` dispatches, `start_mission` = deferred + wait); LOLA only (detail
-  off) is decided at once. `FlightSim.start_mission` posts it as a deferred command that holds the session
+  waits for it. The mission start uses it: `sim::begin_lunar_landing_mission` places the HLS and returns a
+  `sim::DeferredMissionStart` at once (status `start.checking_landing_site`, `poll` / `wait`;
+  `sim::start_mission_deferred` dispatches, `start_mission` = deferred + wait); its first poll plans the outbound
+  flight, then starts the search for the approach of the planned LLO plane over the site at its touchdown
+  (`mission::llo_approach_azimuth`; an inclination-targeted or NRHO-reached LLO: both polar directions), the later
+  polls take its result; LOLA only (detail off) is decided in that first poll. `FlightSim.start_mission` posts it as a deferred command that holds the session
   (`SessionRunner::post_deferred(..., hold_session = true)`: no advance, no pilot input until the outcome) and puts
   the status into `autopilot_status()["mission_start_status"]` until the outcome; `flight_controller.gd` shows it as
   the event line. The refuelling continuation (`continue_lunar_landing_mission`, a leg inside the flight) and the

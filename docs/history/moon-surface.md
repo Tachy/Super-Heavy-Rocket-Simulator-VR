@@ -228,3 +228,8 @@ Standing decision until U-2: a missing Diviner map was an error, "not a silent f
 `load_rock_abundance_file`) threw a German `ConfigError` naming `fetch.py diviner_rock_abundance`, and `LunarRocks` with
 `abundance_source = "diviner"` and no map threw `std::invalid_argument`; `tools/package.ps1` refused to build a package
 without the map in the base data. Replaced because the map is an 88 MB optional data part (user 2026-11-06).
+
+### Mission start order: search started inside begin (superseded 2026-11-07)
+Until lunar sites Task 8 `sim::begin_lunar_landing_mission` placed the HLS, started the touchdown search over both polar
+approach directions (Task 7: after planning the outbound flight inside the call) and only then returned its status - the
+event line stayed blank while the outbound plan ran (~2-15 s). Now the status comes first and the first poll plans.

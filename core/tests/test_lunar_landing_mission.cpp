@@ -45,7 +45,12 @@ TEST_CASE("Lunar landing missions load", "[config][lunar]") {
     CHECK_FALSE(llo.llo_inclination_rad);  // Task 7 (lunar sites): the plane is chosen through the site
     REQUIRE(llo.touchdown_after_epoch_s);  // 2026-11-22T01:20 UTC from epoch_utc 2026-11-13T00:00 (9 d 1 h 20 min)
     CHECK_THAT(*llo.touchdown_after_epoch_s, WithinAbs(((9.0 * 24.0 + 1.0) * 60.0 + 20.0) * 60.0, 1e-3));
-    const auto nrho = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
+    // [windows] (lunar sites Task 8): 90 d, 5 windows, preferred Sun 5-20 deg
+    CHECK_THAT(llo.windows.horizon_s, WithinAbs(90.0 * 86400.0, 1e-6));
+    CHECK(llo.windows.count == 5);
+    CHECK_THAT(llo.windows.sun_preferred_min_rad, WithinAbs(5.0 * constants::deg_to_rad, 1e-12));
+    CHECK_THAT(llo.windows.sun_preferred_max_rad, WithinAbs(20.0 * constants::deg_to_rad, 1e-12));
+    const auto nrho =config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_nrho");
     CHECK(nrho.lunar_orbit == "nrho");
     CHECK(nrho.nrho_revolutions == 9);
     CHECK(nrho.nrho_synodic_months == 2);

@@ -134,6 +134,7 @@ add_library(starsim_core STATIC
     src/sim/ascent_plan_cache.cpp
     src/sim/capsule_return_mission.cpp
     src/sim/lunar_landing_mission.cpp
+    src/sim/lunar_windows.cpp
     src/sim/lunar_return_mission.cpp
     src/sim/mission_start.cpp
     src/sim/propellant_transfer.cpp

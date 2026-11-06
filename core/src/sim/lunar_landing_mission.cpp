@@ -40,9 +40,11 @@ struct PlacedSite {
 };
 
 // The Moon's terrain (the data pipeline's directory next to config/: repository layout), the composed surface with
-// every part (the session picks the fidelity flags from them) and the mission's site on it.
-PlacedSite load_site(const config::LunarLandingMission& m, const std::filesystem::path& config_dir) {
-    const auto site = config::load_lunar_site(config_dir, m.site_id);
+// every part (the session picks the fidelity flags from them) and the mission's site on it (`site_override`: another
+// site than the mission's, e.g. a free one).
+PlacedSite load_site(const config::LunarLandingMission& m, const std::filesystem::path& config_dir,
+                     const config::LunarSiteConfig* site_override = nullptr) {
+    const auto site = site_override ? *site_override : config::load_lunar_site(config_dir, m.site_id);
     PlacedSite placed;
     placed.surface = shared_moon_surface(config_dir, config_dir.parent_path() / "data", {true, true}, site);
     placed.terrain = placed.surface->lola_shared();
@@ -56,7 +58,7 @@ void set_site(FlightSession& session, const PlacedSite& placed) {
 }
 
 PlacedSite place(FlightSession& session, const config::LunarLandingMission& m, const std::filesystem::path& config_dir,
-                 time::Epoch epoch, const config::VehicleConfig* vehicle) {
+                 time::Epoch epoch, const config::VehicleConfig* vehicle, const config::LunarSiteConfig* site) {
     if (!session.moon_orientation()) {
         throw report::Refusal(report::make(report::Code::lunar_landing_no_moon_orientation));
     }
@@ -64,7 +66,7 @@ PlacedSite place(FlightSession& session, const config::LunarLandingMission& m, c
     if (!state) {
         throw report::Refusal(report::make(report::Code::lunar_mission_no_parking_plane));
     }
-    const auto placed = load_site(m, config_dir);
+    const auto placed = load_site(m, config_dir, site);
     if (vehicle) {
         session.place_in_orbit(*vehicle, *state, epoch);
     } else {
@@ -120,11 +122,14 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
     MissionStart s;
     s.kind = config::MissionKind::LunarLanding;
     s.epoch = epoch;
+    s.lunar_budget_margin_kg = budget.margin_kg;
     LunarMissionSequence sequence;
     sequence.landing = setup;
     // the descent takes the pass the LLO plane was chosen for (or the mission's planned touchdown)
     sequence.landing.descent.planned_touchdown =
         outbound_plan->llo_touchdown ? outbound_plan->llo_touchdown : lunar_planned_touchdown(m, epoch);
+    s.lunar_planned_touchdown = sequence.landing.descent.planned_touchdown;
+    if (departure) s.lunar_planned_touchdown = departure->touchdown;
     sequence.via_nrho = via_nrho;
     sequence.nrho = outbound.nrho;
     if (!sequence.via_nrho) {
@@ -202,7 +207,7 @@ MissionStart decided_now(FlightSession& session, DeferredMissionStart start) {
 void place_lunar_landing_mission(FlightSession& session, const config::LunarLandingMission& m,
                                  const std::filesystem::path& config_dir, time::Epoch epoch,
                                  const config::VehicleConfig* vehicle) {
-    place(session, m, config_dir, epoch, vehicle);
+    place(session, m, config_dir, epoch, vehicle, nullptr);
 }
 
 LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& m) {
@@ -264,10 +269,11 @@ mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m,
 
 DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                                  const config::LunarLandingMission& m, time::Epoch epoch,
-                                                 const config::VehicleConfig* vehicle) {
+                                                 const config::VehicleConfig* vehicle,
+                                                 const config::LunarSiteConfig* site) {
     PlacedSite placed;
     try {
-        placed = place(session, m, config_dir, epoch, vehicle);
+        placed = place(session, m, config_dir, epoch, vehicle, site);
     } catch (const std::runtime_error& e) {  // no plane, no Moon orientation, terrain files missing
         session.disengage_autopilot();
         MissionStart s;
@@ -276,13 +282,28 @@ DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const s
         s.refusal = detail::exception_report(e);
         return {s};
     }
-    return plan_from_live_state(session, m, epoch, placed);
+    // The outbound plan (seconds; the NRHO reference ~15 s) runs at the first poll, so the status is published first
+    // (Task 7 N2: the event line stayed blank while it ran inside this call).
+    auto inner = std::make_shared<std::optional<DeferredMissionStart>>();
+    const auto planned = [inner, m, epoch, placed](FlightSession& f) -> DeferredMissionStart& {
+        if (!*inner) *inner = plan_from_live_state(f, m, epoch, placed);
+        return **inner;
+    };
+    DeferredMissionStart d;
+    d.status = report::make(report::Code::start_checking_landing_site);
+    d.poll = [planned](FlightSession& f) -> std::optional<MissionStart> {
+        auto& later = planned(f);
+        if (later.done) return std::move(*later.done);
+        return later.poll(f);
+    };
+    d.wait = [planned](FlightSession& f) { return decided_now(f, std::move(planned(f))); };
+    return d;
 }
 
 MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                          const config::LunarLandingMission& m, time::Epoch epoch,
-                                         const config::VehicleConfig* vehicle) {
-    return decided_now(session, begin_lunar_landing_mission(session, config_dir, m, epoch, vehicle));
+                                         const config::VehicleConfig* vehicle, const config::LunarSiteConfig* site) {
+    return decided_now(session, begin_lunar_landing_mission(session, config_dir, m, epoch, vehicle, site));
 }
 
 std::optional<math::StateVector> lunar_parking_state(const FlightSession& session, const config::LunarLandingMission& m,
@@ -326,13 +347,22 @@ std::optional<time::Epoch> lunar_planned_touchdown(const config::LunarLandingMis
     return epoch + *m.touchdown_after_epoch_s;
 }
 
-double lunar_first_pass_after_arrival_s(const config::LunarLandingMission& m, double gm_moon) {
+namespace {
+double llo_period_s(const config::LunarLandingMission& m, double gm_moon) {
     // the NRHO variant descends into the default LLO (no [lunar_orbit] altitude_km)
     const double altitude_m = m.lunar_orbit == "nrho" ? mission::LloTarget{}.altitude_m : m.llo_altitude_m;
     const double r = constants::moon_mean_radius_m + altitude_m;
-    const double period = constants::two_pi * std::sqrt(r * r * r / gm_moon);
+    return constants::two_pi * std::sqrt(r * r * r / gm_moon);
+}
+}  // namespace
+
+double lunar_llo_settling_s(const config::LunarLandingMission& m, double gm_moon) {
+    return llo_settling_revolutions * llo_period_s(m, gm_moon);
+}
+
+double lunar_first_pass_after_arrival_s(const config::LunarLandingMission& m, double gm_moon) {
     const mission::LunarDescentParameters descent;
-    return llo_settling_revolutions * period + descent.min_lead_s + 1.25 * period;
+    return lunar_llo_settling_s(m, gm_moon) + descent.min_lead_s + 1.25 * llo_period_s(m, gm_moon);
 }
 
 std::optional<mission::NrhoSiteDeparture> lunar_nrho_site_departure(const config::LunarLandingMission& m,

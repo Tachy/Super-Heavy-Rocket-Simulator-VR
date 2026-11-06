@@ -47,6 +47,12 @@ touchdown_search_radius_m = 1000.0  # [E]
 [surface]
 stay_hours = 24.0                   # [E] mission parameter (Artemis III plans ~6.5 days; Apollo 17 75 h)
 
+[windows]                           # landing window search (sim::find_lunar_landing_windows; lunar sites plan Task 8)
+horizon_days = 90.0                 # [E] spec: windows in roughly the next 3 months from the chosen start
+count = 5                           # [E] spec: a small list of 3-5 dates
+sun_preferred_min_deg = 5.0         # [E] spec: Apollo-like low Sun shows relief; ranks the dates, no filter
+sun_preferred_max_deg = 20.0        # [E] spec: the hard condition is only Sun above the horizon over the stay
+
 [ascent]
 insertion_altitude_above_site_km = 15.0  # [E] Apollo inserted ~18 km up
 aposelene_km = 100.0                     # the LLO (spec)
