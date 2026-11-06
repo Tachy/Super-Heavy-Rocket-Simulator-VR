@@ -22,7 +22,7 @@
   #define ImageryDir "..\build\part_imagery"
 #endif
 #ifndef DivinerDir
-  #define DivinerDir "..uild\part_diviner"
+  #define DivinerDir "..\build\part_diviner"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\build"
@@ -97,8 +97,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\data\terrain\earth"
 Type: filesandordirs; Name: "{app}\data\imagery"
-Type: files; Name: "{app}\data	errain\diviner_rock_abundance.toml"
-Type: files; Name: "{app}\data	errain\diviner_rock_abundance.i16"
+Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.toml"
+Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.i16"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: main; Flags: ignoreversion recursesubdirs

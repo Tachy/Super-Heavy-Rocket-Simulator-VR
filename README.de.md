@@ -156,7 +156,8 @@ tests/     Validierungsdaten (JPL Horizons, Webcast-Telemetrie, Referenzlöser)
 Jedes GitHub-Release enthält:
 - `Super-Heavy-Rocket-Simulator-VR-<version>-setup.exe` – den Installer mit allem (pro Benutzer, ohne Adminrechte). Das
   Erdgelände und die Luftbilder der Startplätze sind optionale Komponenten; ohne sie ist der Boden um die Rampen flach
-  und ohne Textur. Startmenü: der Simulator (VR, OpenXR-Runtime gestartet) und sein Desktop-Modus.
+  und ohne Textur. Auch die Felsenhäufigkeitskarte des Mondes (Diviner) ist optional; ohne sie folgen die Felsen des
+  Mondes der globalen statistischen Häufigkeit. Startmenü: der Simulator (VR, OpenXR-Runtime gestartet) und sein Desktop-Modus.
 - `...-windows.zip` – dasselbe Spiel ohne Installer, mit den Basisdaten spielbar (`Start-VR.cmd`,
   `Start-Desktop.cmd`); `...-data-terrain.zip`, `...-data-imagery.zip` und `...-data-diviner.zip` werden in denselben Ordner entpackt.
 

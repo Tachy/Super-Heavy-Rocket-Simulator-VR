@@ -145,7 +145,8 @@ tests/     validation fixtures (JPL Horizons, webcast telemetry, reference solve
 Each GitHub release carries:
 - `Super-Heavy-Rocket-Simulator-VR-<version>-setup.exe` - the installer with everything (per user, no admin rights). The
   Earth terrain and the aerial imagery of the launch sites are optional components; without them the ground near the
-  pads is flat and untextured. Start menu: the simulator (VR, OpenXR runtime running) and its desktop mode.
+  pads is flat and untextured. The lunar rock abundance map (Diviner) is optional too; without it the Moon's rocks follow
+  the global statistical abundance. Start menu: the simulator (VR, OpenXR runtime running) and its desktop mode.
 - `...-windows.zip` - the same game without installer, playable with the base data (`Start-VR.cmd`,
   `Start-Desktop.cmd`); `...-data-terrain.zip`, `...-data-imagery.zip` and `...-data-diviner.zip` unpack into the same folder.
 

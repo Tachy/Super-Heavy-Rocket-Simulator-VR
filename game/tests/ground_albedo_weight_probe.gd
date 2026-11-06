@@ -1,91 +1,92 @@
 extends SceneTree
-## Probe (U-4): the wall irradiance the radiance cube's ground bounce gives, against what the imagery's ground gives a vertical
-## face at the same height, at Pad B. The cube is drawn at the eye (height h); for a vertical face there the ground bounce is
-## the cosine-weighted mean of the ground radiance over the lower hemisphere; with the ground albedo a(r) at the horizontal
-## distance r = h / tan(beta) (beta: the depression below the horizon) and the face's cosine cos(beta) cos(phi):
-##   E_bounce ~ int a(r(beta)) cos^2(beta) dbeta over 0..90 deg, normalised by pi / 4 (the mean albedo for a uniform ground).
-## "truth": the same face's view-factor weighting over the imagery's own pixels (the 30 m crop, 6 km box, four orientations),
-## dF = cos(e) cos(g) dA / (pi d^2) for a face element at height h; no profile, no model. "cube": a(r) as sky.gdshader draws it
-## (the ring profile, then the blend to the global day texture 1500 .. 6000 m) or, "global", the day texture alone (luminance 0.101).
+## Probe (U-4): the ground albedo a vertical face gets its ground bounce from, as the radiance cube draws it, against an
+## independent reference, per face orientation.
+## Reference ("truth"): imagery_face_albedo.gd - the face's exact view-factor integral over the imagery at its finest
+## resolution (polar grid around the eye, nested crops from ~ 1 m NAIP to ~ 40 m Sentinel-2 at 6 km, the global day texture
+## beyond), no rings, no azimuth averaging, no shared sampling with GroundAlbedoNear.ring_albedo.
+## Model ("cube"): GroundAlbedoNear.face_albedo - the albedo as sky.gdshader draws it (the sector x ring profile by horizontal
+## distance and azimuth, blended to the global day texture 1500 .. 6000 m) under the same view-factor kernel; "azimuth mean":
+## the same profile with its sectors averaged (what an azimuth-blind profile gives); "global": the day texture alone.
 ##   godot --headless --path game --script res://tests/ground_albedo_weight_probe.gd
-## Prints a table; exit code 0 (a probe, not a gate).
+## Prints a table per probe point; exit code 0 (a probe, not a gate).
 
-const LAT_DEG := 25.99677
-const LON_DEG := -97.15804
-const METRES_PER_DEGREE := 111132.0
-const HALF_M := 3000.0
-const STEP_M := 30.0
+const ImageryFaceAlbedo := preload("res://tests/imagery_face_albedo.gd")
+
+## Probe points: Pad B (the mount; within ~ 15 m of it the imagery shows the mount's top and shadow, not ground) and the
+## flats 1 km west of it.
+const SITES := [["Pad B", 25.99677, -97.15804], ["flats 1 km west of Pad B", 25.99677, -97.16804]]
 ## The global day texture's linear RGB at the site (task 13b).
 const GLOBAL_CHANNEL := [0.083, 0.108, 0.083]
+const ORIENTATIONS := 8
+const HEIGHTS_M := [2.0, 10.0, 40.0, 75.0, 148.0]
 
 
 func _initialize() -> void:
 	var imagery := ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml"))
-	var half_lat := HALF_M / METRES_PER_DEGREE
-	var half_lon := half_lat / cos(deg_to_rad(LAT_DEG))
-	var box := Rect2(LON_DEG - half_lon, LAT_DEG - half_lat, 2.0 * half_lon, 2.0 * half_lat)
-	var crop := imagery.crop(box, STEP_M / METRES_PER_DEGREE)
-	var image: Image = crop["image"]
-	var image_box: Rect2 = crop["box_deg"]
-	print("ground_albedo_weight_probe: crop %dx%d, source %s level %d" % [image.get_width(), image.get_height(),
-			crop["source_id"], crop["level"]])
-	var n := int(2.0 * HALF_M / STEP_M)
-	var albedo := PackedFloat64Array()  # per cell: linear luminance
-	for j in range(n):
-		for i in range(n):
-			var x_m := -HALF_M + (i + 0.5) * STEP_M  # east
-			var y_m := HALF_M - (j + 0.5) * STEP_M  # north
-			var lon := LON_DEG + x_m / (METRES_PER_DEGREE * cos(deg_to_rad(LAT_DEG)))
-			var lat := LAT_DEG + y_m / METRES_PER_DEGREE
-			var px := clampi(int((lon - image_box.position.x) / image_box.size.x * image.get_width()), 0, image.get_width() - 1)
-			var py := clampi(int((image_box.end.y - lat) / image_box.size.y * image.get_height()), 0, image.get_height() - 1)
-			var c := image.get_pixel(px, py)
-			albedo.append(_luma(Vector3(GroundAlbedoNear._decode(c.r), GroundAlbedoNear._decode(c.g), GroundAlbedoNear._decode(c.b))))
-	var rings := GroundAlbedoNear.ring_albedo(imagery, LAT_DEG, LON_DEG)
-	var ring_luma := []
-	for ring in rings:
-		ring_luma.append(snappedf(_luma(ring), 0.0001))
-	print("  ring albedo luminance (0-100, 100-250, 250-700, 700-1500 m): %s; global day texture %.3f" % [ring_luma, _luma(Vector3(GLOBAL_CHANNEL[0], GLOBAL_CHANNEL[1], GLOBAL_CHANNEL[2]))])
-	print("  eye height h | truth (imagery, wall at h) | cube with the profile (error) | cube, global texture only (error)")
-	for h: float in [2.0, 10.0, 40.0, 75.0, 148.0]:
-		var truth := _truth(albedo, n, h)
-		var cube := _cube(rings, h, true)
-		var global := _cube(rings, h, false)
-		print("  %6.0f m     | %.4f                     | %.4f  (%+.1f %%)             | %.4f  (%+.1f %%)" % [h, truth, cube,
-				100.0 * (cube / truth - 1.0), global, 100.0 * (global / truth - 1.0)])
+	for site in SITES:
+		_site(imagery, site[0], site[1], site[2])
 	quit(0)
 
 
-## The face's view-factor weighted mean of the imagery's ground (four orientations), wall element at height h.
-func _truth(albedo: PackedFloat64Array, n: int, h: float) -> float:
-	var sum := 0.0
-	var weight := 0.0
-	for orient in range(4):
-		var normal := Vector2.from_angle(orient * PI / 2.0)
-		for j in range(n):
-			for i in range(n):
-				var x_m := -HALF_M + (i + 0.5) * STEP_M
-				var y_m := HALF_M - (j + 0.5) * STEP_M
-				var along := normal.x * x_m + normal.y * y_m
-				if along <= 0.0:
-					continue
-				var d2 := x_m * x_m + y_m * y_m + h * h
-				var w := along * h / (PI * d2 * d2)
-				sum += albedo[j * n + i] * w
-				weight += w
-	return sum / weight
+func _site(imagery: ImagerySource, label: String, lat_deg: float, lon_deg: float) -> void:
+	print("ground_albedo_weight_probe: %s (%.5f, %.5f)" % [label, lat_deg, lon_deg])
+	var reference := ImageryFaceAlbedo.new(imagery, lat_deg, lon_deg, true)
+	if reference.crops.is_empty():
+		print("  no imagery covers the reference's crops")
+		return
+	var global_rgb := Vector3(GLOBAL_CHANNEL[0], GLOBAL_CHANNEL[1], GLOBAL_CHANNEL[2])
+	var global_luma := ImageryFaceAlbedo.luma(global_rgb)
+	var profile := GroundAlbedoNear.ring_albedo(imagery, lat_deg, lon_deg)
+	var n := GroundAlbedoNear.ring_count()
+	print("  profile (GroundAlbedoNear.ring_albedo), luminance per sector (N, NE, E, ...) and ring (edges %s m):"
+			% [GroundAlbedoNear.RING_EDGES_M])
+	for s in range(GroundAlbedoNear.SECTORS):
+		var row := []
+		for k in range(n):
+			row.append(snappedf(ImageryFaceAlbedo.luma(profile[s * n + k]), 0.0001))
+		print("    sector %d: %s" % [s, row])
+	print("  global day texture %.3f" % global_luma)
+	var radial := []
+	for r: float in [1.0, 3.0, 6.0, 10.0, 15.0, 20.0, 30.0, 50.0, 75.0, 100.0]:
+		var m := 0.0
+		for ip in range(360):
+			m += reference.sample(r * sin(deg_to_rad(ip)), r * cos(deg_to_rad(ip))) / 360.0
+		radial.append("%.0f m %.3f" % [r, m])
+	print("  imagery azimuth mean at the horizontal distance: %s" % ", ".join(radial))
+	var mean_profile := _azimuth_mean(profile)
+	var azimuths := []
+	for o in range(ORIENTATIONS):
+		azimuths.append(o * TAU / ORIENTATIONS)
+	print("  h (m) | face azimuth | truth (imagery, exact) | cube (error) | cube, azimuth mean of the profile (error) | global only (error)")
+	for h: float in HEIGHTS_M:
+		var truths := reference.face_albedo(h, azimuths, global_luma)
+		var sum_err := 0.0
+		var max_err := 0.0
+		var sum_mean_err := 0.0
+		for o in range(ORIENTATIONS):
+			var truth: float = truths[o]
+			var cube := ImageryFaceAlbedo.luma(GroundAlbedoNear.face_albedo(profile, h, azimuths[o], global_rgb))
+			var mean := ImageryFaceAlbedo.luma(GroundAlbedoNear.face_albedo(mean_profile, h, azimuths[o], global_rgb))
+			var err := 100.0 * (cube / truth - 1.0)
+			sum_err += absf(err)
+			max_err = maxf(max_err, absf(err))
+			sum_mean_err += absf(100.0 * (mean / truth - 1.0))
+			print("  %5.0f | %5.0f deg    | %.4f                 | %.4f (%+5.1f %%) | %.4f (%+5.1f %%)                      | %.4f (%+5.1f %%)" % [
+					h, rad_to_deg(azimuths[o]), truth, cube, err, mean, 100.0 * (mean / truth - 1.0), global_luma,
+					100.0 * (global_luma / truth - 1.0)])
+		print("  %5.0f | truth over azimuth %.4f .. %.4f; cube |error| mean %.1f %%, max %.1f %%; azimuth-mean profile |error| mean %.1f %%"
+				% [h, truths.min(), truths.max(), sum_err / ORIENTATIONS, max_err, sum_mean_err / ORIENTATIONS])
 
 
-## The cube's weighted mean luminance for an eye at height h: the profile blended to the global texture (with_profile), or
-## the texture alone. The weighted sum of the channels' face albedos.
-func _cube(rings: PackedVector3Array, h: float, with_profile: bool) -> float:
-	var profile := rings if with_profile else PackedVector3Array()
-	var y := 0.0
-	var weights := [0.2126, 0.7152, 0.0722]
-	for c in range(3):
-		y += weights[c] * GroundAlbedoNear.face_bounce_albedo(profile, c, h, GLOBAL_CHANNEL[c])
-	return y
-
-
-func _luma(rgb: Vector3) -> float:
-	return 0.2126 * rgb.x + 0.7152 * rgb.y + 0.0722 * rgb.z
+## The profile with every sector replaced by the mean over the sectors (an azimuth-blind profile, for comparison).
+func _azimuth_mean(profile: PackedVector3Array) -> PackedVector3Array:
+	var n := GroundAlbedoNear.ring_count()
+	var out := profile.duplicate()
+	for k in range(n):
+		var m := Vector3.ZERO
+		for s in range(GroundAlbedoNear.SECTORS):
+			m += profile[s * n + k]
+		m /= float(GroundAlbedoNear.SECTORS)
+		for s in range(GroundAlbedoNear.SECTORS):
+			out[s * n + k] = m
+	return out

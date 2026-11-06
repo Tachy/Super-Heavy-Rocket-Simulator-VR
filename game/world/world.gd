@@ -105,9 +105,13 @@ var _earth_horizon_ground_height_m := 0.0  # the terrain under the eye above the
 var _radiance_serial := 0
 ## The imagery's mean ground albedo around the eye for the radiance cube's ground bounce (GroundAlbedoNear, Task 13b).
 var _ground_albedo_near: GroundAlbedoNear
-## [E] Above this height over the ground (m) the local mean is not used: the cube's ground is then at least this far away,
-## where sky.gdshader's radiance_local_albedo_far_m has already faded to the global texture (6000 m).
+## [E] Above this height over the WGS84 ellipsoid (m) the local profile is not used: the cube's ground is then about this far
+## away (the terrain under Starbase / Cape is within ~ 30 m of the ellipsoid), where sky.gdshader's radiance_local_albedo_far_m
+## has already faded to the global texture (6000 m).
 const GROUND_ALBEDO_NEAR_HEIGHT_M := 6000.0
+## [D] |p| - a is never above the height over the ellipsoid (its radius is at most a): an eye with |p| - a beyond a height
+## + this margin is above that height over the highest ground (8.8 km; the geoid adds at most ~ 0.1 km) without a sample.
+const EARTH_HIGHEST_GROUND_MARGIN_M := 9000.0
 
 
 ## Emitted when `_ready` has run through (or stopped at the missing SPICE kernels). `_ready` only suspends (between its
@@ -125,7 +129,7 @@ func _ready() -> void:
 		boot_finished.emit()
 		return
 	spice_ok = true
-	await LoadingScreen.step("StartplÃ¤tze und Fahrzeugdaten laden")
+	await LoadingScreen.step("Startplätze und Fahrzeugdaten laden")
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	flight.setup(Paths.config_dir())
 	free_control.setup(Paths.config_dir())
@@ -134,7 +138,7 @@ func _ready() -> void:
 
 	add_child(clock)
 	add_child(camera)
-	await LoadingScreen.step("Himmel und AtmosphÃ¤re vorbereiten")
+	await LoadingScreen.step("Himmel und Atmosphäre vorbereiten")
 	_setup_environment()
 	atmosphere.start_loading(core, Paths.config_dir(), data_dir.path_join("atmosphere"))
 	Atmosphere.configure_moon_brdf(core, Paths.config_dir(), moon_brdf)
@@ -155,7 +159,7 @@ func _ready() -> void:
 	atmosphere.direct_sun = clouds.direct_sun_transmittance  # the vehicles' and the eye's direct Sun: the drawn shapes
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: _sim_target_tdb_s = NAN)  # no lag after a jump
 	await _setup_bodies(data_dir)
-	await LoadingScreen.step("Wolken-Shader vorwÃ¤rmen, Sternkatalog laden")
+	await LoadingScreen.step("Wolken-Shader vorwärmen, Sternkatalog laden")
 	_warm_earth_clouds_shader()
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
@@ -181,11 +185,14 @@ var _sim_target_tdb_s := NAN  ## the instant the flight sim was asked for last f
 var _environment: Environment  ## the WorldEnvironment's (ambient energy under the clouds, Task 9)
 
 
-## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2).
+## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2); the ground albedo
+## read runs a method of GroundAlbedoNear, which must not be freed under it.
 func _exit_tree() -> void:
 	atmosphere.shutdown()
 	weather.shutdown()
 	clouds.shutdown()
+	if _ground_albedo_near != null:
+		_ground_albedo_near.finish()
 
 
 func _process(delta: float) -> void:
@@ -670,8 +677,8 @@ func _update_moon_near_shadow(camera_gcrf_m: Vector3, sun_distance_m: float) -> 
 func _update_earth_near_shadow(camera_gcrf_m: Vector3, camera_fixed_m: Vector3, sun_from_camera_m: Vector3) -> void:
 	var height_m := INF
 	# |p| - a is never above the height over the ellipsoid (the ellipsoid's radius is at most a): an eye with it beyond
-	# FADE_END_HEIGHT_M + 9 km (the highest ground, 8.8 km) is out of the near shadows without a terrain sample.
-	if camera_fixed_m.length() - EARTH_SEMI_MAJOR_AXIS_M < EarthNearShadow.FADE_END_HEIGHT_M + 9000.0:
+	# FADE_END_HEIGHT_M + EARTH_HIGHEST_GROUND_MARGIN_M is out of the near shadows without a terrain sample.
+	if camera_fixed_m.length() - EARTH_SEMI_MAJOR_AXIS_M < EarthNearShadow.FADE_END_HEIGHT_M + EARTH_HIGHEST_GROUND_MARGIN_M:
 		height_m = SurfaceClearance.surface_distance_m(camera_fixed_m, _earth_heights)
 	var sin_e := sun_from_camera_m.normalized().dot(camera_gcrf_m.normalized())
 	earth_near_shadow.update(sun_light, moon_near_shadow.active, height_m, asin(clampf(sin_e, -1.0, 1.0)),
@@ -707,7 +714,7 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 	# change of the value (a new place) counts as a change of the sky for the refresh rule, so the cube is drawn anew with it.
 	var local_albedo := _local_ground_albedo(camera_gcrf_m)
 	var local_albedo_levels: Array = []  # the rings' components (always the same length: -1 without a profile)
-	for k in range(GroundAlbedoNear.ring_count()):
+	for k in range(GroundAlbedoNear.profile_size()):
 		var ring := local_albedo[k] if local_albedo.size() > k else Vector3(-1.0, -1.0, -1.0)
 		local_albedo_levels.append_array([ring.x, ring.y, ring.z])
 	var due := _radiance_refresh.due(atmosphere.ready, Frames.to_render(camera_gcrf_m.normalized()),
@@ -741,18 +748,20 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 	_sky_material.set_shader_parameter("radiance_moon_to_earth", Frames.to_render((-moon_gcrf_m).normalized()))
 
 
-## The ring albedos of the imagery's ground around the eye (empty: the global day texture alone): only for an
-## eye within GROUND_ALBEDO_NEAR_HEIGHT_M of the Earth's ground, not near the Moon.
+## The sector x ring albedos of the imagery's ground around the eye (empty: the global day texture alone): only for an
+## eye within GROUND_ALBEDO_NEAR_HEIGHT_M of the WGS84 ellipsoid, not near the Moon.
 func _local_ground_albedo(camera_gcrf_m: Vector3) -> PackedVector3Array:
-	var fixed := earth.fixed_to_gcrf.transposed() * camera_gcrf_m
-	if fixed.length() - EARTH_SEMI_MAJOR_AXIS_M > GROUND_ALBEDO_NEAR_HEIGHT_M + 9000.0:
+	if not GroundAlbedoNear.enabled:
 		return PackedVector3Array()
-	var geo := SurfaceClearance._geodetic(fixed, true)
+	var fixed := earth.fixed_to_gcrf.transposed() * camera_gcrf_m
+	if fixed.length() - EARTH_SEMI_MAJOR_AXIS_M > GROUND_ALBEDO_NEAR_HEIGHT_M + EARTH_HIGHEST_GROUND_MARGIN_M:
+		return PackedVector3Array()
+	var geo := SurfaceClearance.geodetic(fixed, true)
 	if geo.z > GROUND_ALBEDO_NEAR_HEIGHT_M:
 		return PackedVector3Array()
 	if _ground_albedo_near == null:
 		_ground_albedo_near = GroundAlbedoNear.new(ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml")))
-	return _ground_albedo_near.at(geo.x, geo.y)
+	return _ground_albedo_near.at(geo.x, geo.y, maxf(geo.z, 0.0))
 
 
 ## The part of the Earth's disc an eye near the Moon sees: the terrain's horizon where the core has it (marched anew only
@@ -805,9 +814,9 @@ func _setup_bodies(data_dir: String) -> void:
 	earth.name = "Earth"
 	earth.setup(EARTH_SEMI_MAJOR_AXIS_M, EARTH_FLATTENING, _earth_material)
 	add_child(earth)
-	await LoadingScreen.step("ErdgelÃ¤nde und Satellitenbilder einrichten")
+	await LoadingScreen.step("Erdgelände und Satellitenbilder einrichten")
 	_setup_earth_terrain(data_dir)
-	await LoadingScreen.step("StartplÃ¤tze und FangtÃ¼rme aufbauen")
+	await LoadingScreen.step("Startplätze und Fangtürme aufbauen")
 	for site: Dictionary in sites:
 		earth.add_child(_make_pad(site))
 	for site: Dictionary in sites:
@@ -821,7 +830,7 @@ func _setup_bodies(data_dir: String) -> void:
 			if view.has_models:  # the mount model has its own ground (pit, ramps): no concrete disc over the footprint
 				earth.get_node("Pad_" + str(site["id"])).visible = false
 
-	await LoadingScreen.step("Mond und MondgelÃ¤nde aufbauen")
+	await LoadingScreen.step("Mond und Mondgelände aufbauen")
 	_moon_material.shader = load("res://shaders/moon.gdshader")
 	_moon_material.set_shader_parameter("albedo_texture", _load_texture(data_dir.path_join("textures/moon_color.png")))
 	_moon_material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)

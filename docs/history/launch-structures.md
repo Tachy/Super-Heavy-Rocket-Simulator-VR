@@ -90,3 +90,13 @@ terrain shader). Task 16 chose the Sun's directional shadow map (`EarthNearShado
   (Task 15, 2026-11-05) made that imagery 2.3 x brighter (the same pixels now: median sRGB 0.384, 95th percentile 0.548), which left
   the 4 ha plate at the imagery's median and clearly darker than the light ground beside it (a dark brown checkered polygon from
   altitude). Now the mean of the imagery inside the outline (0.195 linear luminance, Sentinel-2 0.200).
+
+## Ground bounce: the azimuth-blind ring profile (U-4 first version, c2339af9, superseded 2026-11-06)
+- The first U-4 profile was four annuli (0-100, 100-250, 250-700, 700-1500 m; Pad B 0.160 / 0.142 / 0.125 / 0.114
+  luminance) averaged over azimuth from one 30 m crop, read again after 150 m. The shader indexed it by the slant ray
+  length t (above ~50 m eye height ring 0 was never drawn) while the profile and its model used the horizontal distance.
+  Its probe compared it with the imagery's view-factor weighting averaged over four face orientations, from the same 30 m
+  crop: -0.5 / -1.8 / -2.9 / -2.0 / -1.3 % at 2-148 m, and `radiance_budget.gd` with the local ground 0.160 gave -0.8 / -1.0 %
+  (noon) - agreement by construction (fix review I-3). The per-face reference (exact integral, full-resolution imagery) shows
+  the azimuth-blind profile off by 8.6-17.3 % mean, up to 33 % per face; replaced by the 8 x 5 sector x ring profile by
+  horizontal distance (launch-structures.md "Ground bounce").

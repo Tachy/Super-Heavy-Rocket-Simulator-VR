@@ -178,7 +178,7 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   perspective over 300 m, the steel map's grime and contrast: -5 %); leg face seen from the west at noon 782 / 746. So the
   renderer reproduces the budget within 2-5 % - renderer consistency, not absolute truth: the budget uses the same cube
   ground albedo as the renderer (the figures of this paragraph are from before U-4: the cube's ground was then the global
-  texel, 30-40 % low in the bounce; now the ring profile, below); the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
+  texel, 30-40 % low in the bounce; now the sector x ring profile, below); the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
   bounce alone) and 0.89 of it on a Sun-facing face at 39 deg, 0.13 on a shaded one. A tower much darker than the ground at pad
   noon is therefore the physics of vertical faces under a high Sun (and the 0.16 steel against the 0.20 ground), not a missing
   light. Photo of a similar Sun: none dated (the extracted webcast frames carry no date or Sun elevation); f12_1860 (ground view, high
@@ -186,26 +186,39 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   included), consistent with a leg ratio between the two renders' 0.10 and 0.89 depending on the face's Sun angle; not a calibration.
   Ground bounce (U-4, `game/world/ground_albedo_near.gd`, `sky.gdshader` `radiance_local_albedo`): the radiance cube's ground used to
   be the global day texture alone (one texel ~ 6.7 km: 0.083 / 0.108 / 0.083 linear RGB at the site, luminance 0.101), while the
-  imagery within 1.5 km averages 0.114-0.160 (rings 0-100 m 0.160, 100-250 0.142, 250-700 0.125, 700-1500 0.114 luminance, from the
-  Sentinel-2 / NAIP pyramids after U-3; the hardstand ground 0.195): the bounce a wall got was 25-37 % low depending on the
-  eye height (2-148 m; red more than green: the texel is bluish with bay and Gulf). Now the cube's ground near the eye is the
-  ring profile of the imagery: `GroundAlbedoNear` reads the imagery crop (3 km box, 30 m texels, up to 3 x 3 JPEG tiles) on a
-  `WorkerThreadPool` task and averages it in four annuli (0-100, 100-250, 250-700, 700-1500 m, equal-area samples); the
-  shader holds each ring's value at its mid-distance, interpolates between them and blends to the texture between 1.5 and
-  6 km. A new read starts after 150 m of travel (one at a time); its arrival and any change of the profile count as a sky
-  change for `SkyRadianceRefresh`, so the cube is drawn anew with it. Only for an Earth eye below 6 km (the cube's ground is
-  farther than that above, where the shader has faded to the texture) and where an imagery pyramid covers the whole 3 km box.
-  Probe `game/tests/ground_albedo_weight_probe.gd` (the cube's face-bounce albedo from the profile against the imagery's own
-  view-factor weighting for a wall at the eye's height, four orientations, 6 km box): eye 2 / 10 / 40 / 75 / 148 m, imagery
-  0.1601 / 0.1597 / 0.1527 / 0.1438 / 0.1334, cube with the profile -0.5 / -1.8 / -2.9 / -2.0 / -1.3 %, the global texel
-  alone -37 / -37 / -34 / -30 / -24 %. `radiance_budget.gd` (the analytic budget with the local ground 0.160): the vertical
-  face at noon, Sun side / shade side, cube ground before -15.7 % / -19.6 %, now -0.8 % / -1.0 %; Sun 39.4 deg before -2.6 % /
-  -16.2 %, now -0.1 % / -0.8 %. Rendered (booster body, shaded side, 300 m WSW, eye 40 m, noon, `--camera_exposure=8,0.004,100`
-  probe): 2413 -> 2715 cd/m^2 (+12.5 %: the stainless steel reflects the cube, whose ground is now brighter). Cost: read
-  6-14 ms on a worker (warm tile cache), main thread a distance test and a poll per frame; stereo mock (3534 x 2838 per eye, pad,
-  eye 128 m, Sun 87 deg, nothing else on the GPU, median of 120 frames, two runs each) 10.115 / 10.047 ms off, 10.165 / 10.141 ms
-  on: +0.07 ms (the cube is drawn anew only on a refresh; the shader's ground branch is a few instructions). The profile has
-  no slope term: a flat-ground model like the cube's ground. Imagery-less eyes keep the texel.
+  imagery near Pad B is 0.08-0.24 depending on distance and direction (Gulf, beach and pad to the east, flats and bay to the
+  west; the hardstand 0.195). Now the cube's ground near the eye is a sector x ring profile of the imagery: `GroundAlbedoNear`
+  averages the imagery in 8 azimuth sectors (centred on north, every 45 deg) x 5 annuli by horizontal distance (0-25, 25-100,
+  100-250, 250-700, 700-1500 m; 12 x 16 equal-area samples per cell), the inner three rings from a fine crop (+-250 m, NAIP
+  ~1.2 m after the 3 x 3 tile limit), the outer ones from the box's crop (+-1.5 km, ~30 m), on a `WorkerThreadPool` task. The
+  shader takes the hit point's horizontal offset from the eye in the eye's east / north (not the slant ray length), holds
+  each cell at its ring's mid-distance and its sector's centre, interpolates linearly in distance and azimuth and blends to
+  the texture between 1.5 and 6 km horizontal distance. A new read starts when the eye moved max(12.5 m, half its height
+  over the ellipsoid) (one at a time); its arrival and any change of the profile count as a sky change for
+  `SkyRadianceRefresh`, so the cube is drawn anew with it. Only for an Earth eye below 6 km over the ellipsoid and where one
+  imagery source covers the whole box (else the texel); `render_check --ground_albedo_near=off` switches it off.
+  Validation (`game/tests/ground_albedo_weight_probe.gd`): the reference is the face's exact view-factor integral over the
+  imagery at its finest resolution, per face azimuth (`game/tests/imagery_face_albedo.gd`: polar grid around the eye, 600
+  nadir angles x 360 azimuths, nested crops 1.2 / 4.8 / 19 / 38 m out to 6 km, the texel beyond; no rings, no sectors, its own
+  sampling), against the cube's weighting of the profile under the same kernel (`GroundAlbedoNear.face_albedo`). Pad B,
+  eye 2 / 10 / 40 / 75 / 148 m, 8 face azimuths: the reference spreads 0.113-0.123 / 0.113-0.157 / 0.111-0.184 /
+  0.110-0.179 / 0.108-0.161 over azimuth; the cube's error |mean| / max 8.3 / 19.7 %, 1.7 / 3.7 %, 2.2 / 4.3 %, 1.7 / 4.0 %,
+  0.8 / 1.9 %; the same profile averaged over azimuth 8.6 / 11.1 / 17.3 / 17.1 / 13.8 % (an azimuth-blind profile is wrong
+  per face by up to 33 %), the texel alone -7 .. -45 %. The 2 m row at Pad B is a limit of the probe point: within ~15 m the
+  imagery shows the launch mount's top and shadow (0.112-0.119 against 0.146-0.174 at 30-75 m), which the 0-25 m ring
+  averages by area while a 2 m face weights the first metres; on the flats 1 km west the 2 m error is 1.8 / 3.7 % (all
+  heights within 1.8 % mean, 3.7 % max). `radiance_budget.gd` (Pad B, faces at 40 m, the sun-facing and the shaded face's
+  azimuths, two references): against the imagery's exact albedo per face, noon (Sun 87.5 deg) sun side / shade side before
+  U-4 -10.4 / -19.8 %, now -0.3 / -0.5 %; Sun 39.4 deg before -0.8 / -21.2 %, now +0.2 / -1.7 % (faces at 10 m: +0.1 / +1.8 %,
+  +0.1 / +0.7 %; at 148 m: +0.7 / +0.2 %, 0.0 / -0.2 %). Against the hardstand's 0.195 (Task 13b) the cube stays -12 .. -17 %
+  at noon: the hardstand is only the ground inside the pad's outline, a face sees the darker flats and water beyond it.
+  Rendered (tower from 300 m WSW, eye 40 m, noon, `--camera_exposure=8,0.004,100`, probe on the tower's west face): 809.5 ->
+  826.6 cd/m^2 (+2.1 %): from the WSW eye the west-facing face sees the dark flats, little more than the texel. Cost: read
+  ~23 ms on a worker (cold, two crops), main thread a distance test and a poll per frame; stereo mock (3534 x 2838 per eye,
+  pad, eye 128 m, Sun 87 deg, nothing else on the GPU, median of 120 frames, two runs each) 9.880 / 9.891 ms off, 9.888 /
+  9.891 ms on (+0.004 ms; the cube is drawn anew only on a refresh). Limits: one profile at the eye (the cube is drawn there:
+  an object far from the eye gets the eye's ground); no slope term (flat ground like the cube's ground); the imagery
+  includes the structures' tops and shadows; imagery-less eyes keep the texel.
 
 ## Prototype evidence (task 5, `screenshots/pad-b/t5_*.png`, `tools/structures/measure/render_views.sh`)
 - Look pass: narrower decks (2.5 m inset), thinner chevrons (0.4 m), darker core; seen diagonally the tower now reads as

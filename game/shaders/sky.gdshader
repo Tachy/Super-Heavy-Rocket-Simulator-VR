@@ -48,32 +48,43 @@ uniform vec3 radiance_earth_drawn = vec3(0.0, 1.0, 0.0);  // from the eye, rende
 uniform vec3 radiance_cloud_sky_factor = vec3(1.0);
 uniform vec3 radiance_cloud_ground_factor = vec3(1.0);
 
-// The albedo of the imagery's ground around the eye by distance (GroundAlbedoNear: the mean in the annuli of
-// RADIANCE_LOCAL_RING_EDGES_M = GroundAlbedoNear.RING_EDGES_M; valid 0: none, the global day texture alone). The global texel (~7 km) averages the land with the
-// bay and the Gulf (0.108 at Starbase against 0.20 of the ground within a hundred metres) and so leaves a wall's bounce 30-40 %
-// low; the cube is drawn at the eye, so the ground near it counts most. The ring values hold at the ring's mid-distance and
-// are interpolated linearly in between; beyond the last ring's outer edge (radiance_local_albedo_near_m) the ground blends to
-// the texture by radiance_local_albedo_far_m.
-const int RADIANCE_LOCAL_RINGS = 4;
-const float RADIANCE_LOCAL_RING_EDGES_M[RADIANCE_LOCAL_RINGS + 1] = float[](0.0, 100.0, 250.0, 700.0, 1500.0);
+// The albedo of the imagery's ground around the eye by horizontal distance and azimuth (GroundAlbedoNear: the mean in the
+// cells of RADIANCE_LOCAL_SECTORS azimuth sectors x the annuli of RADIANCE_LOCAL_RING_EDGES_M = GroundAlbedoNear.SECTORS,
+// RING_EDGES_M; sector-major; valid 0: none, the global day texture alone). The global texel (~7 km) averages the land with
+// the bay and the Gulf (0.108 at Starbase against 0.20 of the ground within a hundred metres) and so leaves a wall's bounce
+// 30-40 % low; the cube is drawn at the eye, so the ground near it, on the side a face looks at, counts most. The cell values
+// hold at the rings' mid-distances and the sectors' centres and are interpolated linearly in between; beyond the last ring's
+// outer edge (radiance_local_albedo_near_m, horizontal distance) the ground blends to the texture by radiance_local_albedo_far_m.
+const int RADIANCE_LOCAL_SECTORS = 8;
+const int RADIANCE_LOCAL_RINGS = 5;
+const float RADIANCE_LOCAL_RING_EDGES_M[RADIANCE_LOCAL_RINGS + 1] = float[](0.0, 25.0, 100.0, 250.0, 700.0, 1500.0);
 uniform float radiance_local_albedo_valid = 0.0;
-uniform vec3 radiance_local_albedo[RADIANCE_LOCAL_RINGS];
+uniform vec3 radiance_local_albedo[RADIANCE_LOCAL_SECTORS * RADIANCE_LOCAL_RINGS];
 uniform float radiance_local_albedo_near_m = 1500.0;
 uniform float radiance_local_albedo_far_m = 6000.0;
 
-// The local ground albedo at distance t (m) along the ray: ring values interpolated between the rings' mid-distances.
-vec3 radiance_local_ground_albedo(float t) {
-	if (t <= 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[0] + RADIANCE_LOCAL_RING_EDGES_M[1])) {
-		return radiance_local_albedo[0];
+// One sector's ring values at the horizontal distance r: held inside the first mid-distance and beyond the last, linear between.
+vec3 radiance_local_sector_albedo(int sector, float r) {
+	int base = sector * RADIANCE_LOCAL_RINGS;
+	if (r <= 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[0] + RADIANCE_LOCAL_RING_EDGES_M[1])) {
+		return radiance_local_albedo[base];
 	}
 	for (int k = 0; k + 1 < RADIANCE_LOCAL_RINGS; k++) {
 		float mid0 = 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[k] + RADIANCE_LOCAL_RING_EDGES_M[k + 1]);
 		float mid1 = 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[k + 1] + RADIANCE_LOCAL_RING_EDGES_M[k + 2]);
-		if (t <= mid1) {
-			return mix(radiance_local_albedo[k], radiance_local_albedo[k + 1], (t - mid0) / (mid1 - mid0));
+		if (r <= mid1) {
+			return mix(radiance_local_albedo[base + k], radiance_local_albedo[base + k + 1], (r - mid0) / (mid1 - mid0));
 		}
 	}
-	return radiance_local_albedo[RADIANCE_LOCAL_RINGS - 1];
+	return radiance_local_albedo[base + RADIANCE_LOCAL_RINGS - 1];
+}
+
+// The local ground albedo at the horizontal distance r (m) and azimuth (rad, from north toward east) from the eye.
+vec3 radiance_local_ground_albedo(float r, float azimuth) {
+	float u = mod(azimuth / (2.0 * ATM_PI / float(RADIANCE_LOCAL_SECTORS)), float(RADIANCE_LOCAL_SECTORS));
+	int s0 = int(floor(u)) % RADIANCE_LOCAL_SECTORS;
+	int s1 = (s0 + 1) % RADIANCE_LOCAL_SECTORS;
+	return mix(radiance_local_sector_albedo(s0, r), radiance_local_sector_albedo(s1, r), fract(u));
 }
 
 // The model ground seen along v from the camera, lit and attenuated (scene units).
@@ -106,7 +117,14 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 		albedo = textureLod(day_texture, vec2(lon / (2.0 * ATM_PI) + 0.5, 0.5 - lat / ATM_PI), 0.0).rgb;  // no mip jump at the lon seam
 	}
 	if (radiance_local_albedo_valid > 0.5) {
-		albedo = mix(radiance_local_ground_albedo(t), albedo, smoothstep(radiance_local_albedo_near_m, radiance_local_albedo_far_m, t));
+		// The hit's horizontal offset from the eye in the eye's east / north (the pole is the local y axis: ITRF z): the
+		// profile is built by horizontal distance (GroundAlbedoNear.ring_albedo), not the slant ray length t.
+		vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), up));
+		vec3 north = cross(up, east);
+		vec2 offset = vec2(dot(v, east), dot(v, north)) * t;
+		float r_h = length(offset);
+		albedo = mix(radiance_local_ground_albedo(r_h, r_h > 0.0 ? atan(offset.x, offset.y) : 0.0), albedo,
+				smoothstep(radiance_local_albedo_near_m, radiance_local_albedo_far_m, r_h));
 	}
 	vec3 sky_light;
 	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light) * atm_sunlit(point_local);  // Moon shadow

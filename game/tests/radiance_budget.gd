@@ -3,10 +3,12 @@ extends SceneTree
 ## sky and ground-bounce illuminance on a horizontal plane and on vertical faces (toward / away from the Sun), from the core's
 ## atmosphere (sun_and_sky_illuminance, the model the renderer's light follows), and the radiance of materials of given albedo
 ## under it: L = albedo x E / pi. The ground bounce is listed with the albedo the radiance cube draws (the global day
-## texture, bilinear at the site: sky.gdshader ground_radiance) and with the local ground (the hardstand's / terrain's).
-##   godot --headless --path game --script res://tests/radiance_budget.gd [-- --utc=2025-06-15T18:30:00 --local=0.20]
+## texture, bilinear at the site, before U-4; the imagery profile now: GroundAlbedoNear) against two references: the hardstand
+## and the imagery's exact view-factor integral for each face (imagery_face_albedo.gd).
+##   godot --headless --path game --script res://tests/radiance_budget.gd [-- --utc=2025-06-15T18:30:00 --face_height=40]
 ## No GPU. Prints one table per UTC; exit code 0 (a probe, not a gate).
 
+const ImageryFaceAlbedo := preload("res://tests/imagery_face_albedo.gd")
 const SITE_LAT_DEG := 25.99677
 const SITE_LON_DEG := -97.15804
 ## [E] Materials as the game draws them (linear albedo): tower legs, braces, cladding (tower_material.gd); [D] the
@@ -96,42 +98,47 @@ func _report(utc: String) -> void:
 	var beam: Vector3 = (horizontal_lux["sun_lux"] as Vector3) / maxf(sin_e, 1e-6)
 	var sky_h: Vector3 = horizontal_lux["sky_lux"]
 	var cube_albedo := _cube_ground_albedo()
-	var local_albedo := float(_args.get("local", "0.16"))
-	# The ground the cube draws now: the imagery's ring profile at the eye (U-4, GroundAlbedoNear), the green channel like the
-	# cube ground below; weighted for a vertical face at the 2 m eye (probe: ground_albedo_weight_probe.gd).
-	var rings := GroundAlbedoNear.ring_albedo(ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml")),
+	var sun_azimuth := atan2(to_sun.dot(east), to_sun.dot(north))
+	# The ground the cube draws now: the imagery's sector x ring profile at the eye (U-4, GroundAlbedoNear), all albedos as
+	# linear luminance, weighted for the sun-facing and the shaded vertical face (their azimuths) at --face_height
+	# (default 40 m: a tower face; below ~ 15 m the probe point's imagery is the mount's top, not ground).
+	var face_height := float(_args.get("face_height", "40"))
+	var profile := GroundAlbedoNear.ring_albedo(ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml")),
 			SITE_LAT_DEG, SITE_LON_DEG)
-	var now_g := GroundAlbedoNear.face_bounce_albedo(rings, 1, 2.0, cube_albedo.y) if not rings.is_empty() else cube_albedo.y
+	var global_rgb := cube_albedo
+	var now_sun := ImageryFaceAlbedo.luma(GroundAlbedoNear.face_albedo(profile, face_height, sun_azimuth, global_rgb))
+	var now_shade := ImageryFaceAlbedo.luma(GroundAlbedoNear.face_albedo(profile, face_height, sun_azimuth + PI, global_rgb))
+	# References for the ground each face sees, independent of the cube's profile: [sun-facing, shaded] albedo. The hardstand
+	# (Task 13b; [D] MATERIALS) and the imagery's exact view-factor integral for each face at face_height (imagery_face_albedo.gd:
+	# full-resolution imagery, polar grid, no rings or sectors; luminance).
+	var exact: Array = ImageryFaceAlbedo.new(ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml")),
+			SITE_LAT_DEG, SITE_LON_DEG).face_albedo(face_height, [sun_azimuth, sun_azimuth + PI], ImageryFaceAlbedo.luma(cube_albedo))
+	var references := {"hardstand": [MATERIALS["hardstand"], MATERIALS["hardstand"]], "imagery, exact per face": exact}
 	print("radiance_budget: %s Sun %.2f deg, beam %.0f lux (G), sky on a horizontal plane %.0f lux (G), ratio sky/global %.3f" % [
 			utc, rad_to_deg(asin(sin_e)), beam.y, sky_h.y, sky_h.y / (beam.y * sin_e + sky_h.y)])
-	print("  radiance cube's ground albedo (global day texture at the site, linear RGB): (%.3f %.3f %.3f), local ground %.2f"
-			% [cube_albedo.x, cube_albedo.y, cube_albedo.z, local_albedo])
-	var cube_g := cube_albedo.y
+	print("  radiance cube's ground albedo before U-4 (global day texture at the site, linear RGB): (%.3f %.3f %.3f)" % [
+			cube_albedo.x, cube_albedo.y, cube_albedo.z])
+	print("  cube's ground now (profile, luminance, faces at %.0f m): sun-facing face %.3f, shaded face %.3f" % [face_height, now_sun,
+			now_shade])
 	var global_h := beam.y * sin_e + sky_h.y
 	var face_direct := beam.y * cos(asin(sin_e))
 	var face_sky := 0.5 * sky_h.y  # the model's (1 + n.up) / 2 tilt, n.up = 0
-	for label in ["cube ground", "cube ground now", "local ground"]:
-		var alb := cube_g if label == "cube ground" else (now_g if label == "cube ground now" else local_albedo)
-		var bounce := 0.5 * alb * global_h
-		print("  vertical face, bounce from the %s (albedo %.3f): bounce %.0f lux = %.1f %% of the horizontal global %.0f lux" % [
-				label, alb, bounce, 100.0 * bounce / global_h, global_h])
-	var truth_sun := 0.0
-	var truth_shade := 0.0
-	for label in ["local ground", "cube ground", "cube ground now"]:
-		var alb := cube_g if label == "cube ground" else (now_g if label == "cube ground now" else local_albedo)
-		var bounce := 0.5 * alb * global_h
-		var sun_side := face_direct + face_sky + bounce
-		var shade_side := face_sky + bounce
-		if label == "local ground":
-			truth_sun = sun_side
-			truth_shade = shade_side
-		print(("  %s: E_vertical sun-facing %.0f (direct %.0f + sky %.0f + bounce %.0f), shade side %.0f lux; against the local ground "
-				+ "(the analytic budget): sun side %+.1f %%, shade side %+.1f %%") % [label, sun_side, face_direct, face_sky,
-				bounce, shade_side, 100.0 * (sun_side / truth_sun - 1.0), 100.0 * (shade_side / truth_shade - 1.0)])
-		for m in ["leg", "clad", "brace"]:
-			var l_sun: float = MATERIALS[m] * sun_side / PI
-			var l_shade: float = MATERIALS[m] * shade_side / PI
-			var l_ground: float = MATERIALS["hardstand"] * global_h / PI
-			print("    %-5s albedo %.2f: sun side %6.0f cd/m2 (%.3f of the hardstand %6.0f), shade side %6.0f (%.3f)" % [
-					m, MATERIALS[m], l_sun, l_sun / l_ground, l_ground, l_shade, l_shade / l_ground])
-	print("  sun azimuth from north %.1f deg" % rad_to_deg(atan2(to_sun.dot(east), to_sun.dot(north))))
+	var cube_g := ImageryFaceAlbedo.luma(cube_albedo)
+	for ref_label: String in references:
+		var ref: Array = references[ref_label]
+		var truth_sun: float = face_direct + face_sky + 0.5 * float(ref[0]) * global_h
+		var truth_shade: float = face_sky + 0.5 * float(ref[1]) * global_h
+		print("  against the %s (albedo sun-facing %.3f / shaded %.3f, analytic budget: sun side %.0f lux, shade side %.0f lux):"
+				% [ref_label, ref[0], ref[1], truth_sun, truth_shade])
+		for row in [["cube ground before U-4", cube_g, cube_g], ["cube ground now", now_sun, now_shade]]:
+			var sun_side: float = face_direct + face_sky + 0.5 * float(row[1]) * global_h
+			var shade_side: float = face_sky + 0.5 * float(row[2]) * global_h
+			print("    %-22s: E_vertical sun side %.0f lux (%+.1f %%), shade side %.0f lux (%+.1f %%)" % [row[0], sun_side,
+					100.0 * (sun_side / truth_sun - 1.0), shade_side, 100.0 * (shade_side / truth_shade - 1.0)])
+	for m in ["leg", "clad", "brace"]:
+		var l_sun: float = MATERIALS[m] * (face_direct + face_sky + 0.5 * now_sun * global_h) / PI
+		var l_shade: float = MATERIALS[m] * (face_sky + 0.5 * now_shade * global_h) / PI
+		var l_ground: float = MATERIALS["hardstand"] * global_h / PI
+		print("    %-5s albedo %.2f (cube ground now): sun side %6.0f cd/m2 (%.3f of the hardstand %6.0f), shade side %6.0f (%.3f)" % [
+				m, MATERIALS[m], l_sun, l_sun / l_ground, l_ground, l_shade, l_shade / l_ground])
+	print("  sun azimuth from north %.1f deg" % rad_to_deg(sun_azimuth))

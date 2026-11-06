@@ -200,8 +200,8 @@ foreach ($f in @("diviner_rock_abundance.toml", "diviner_rock_abundance.i16")) {
     if (-not (Test-Path (Join-Path $Data "terrain\$f"))) {
         throw "data/terrain/$f is missing (python tools/data_pipeline/fetch.py diviner_rock_abundance): the Diviner part needs it"
     }
-    New-Item -ItemType Directory -Force (Join-Path $divinerPart "data	errain") | Out-Null
-    Copy-Item (Join-Path $Data "terrain\$f") (Join-Path $divinerPart "data	errain\$f")
+    New-Item -ItemType Directory -Force (Join-Path $divinerPart "data\terrain") | Out-Null
+    Copy-Item (Join-Path $Data "terrain\$f") (Join-Path $divinerPart "data\terrain\$f")
 }
 Mirror (Join-Path $Data "terrain\earth") (Join-Path $terrainPart "data\terrain\earth") @()
 Mirror (Join-Path $Data "imagery") (Join-Path $imageryPart "data\imagery") @()
@@ -219,6 +219,9 @@ if (-not $SkipTests) {
     Mirror $divinerPart $full @()
     $line = SelfCheck (Join-Path $full $ExeName)
     if ($line -notmatch 'earth_terrain=yes imagery=yes') { throw "Full package should find the terrain and imagery: $line" }
+    if (-not (Test-Path (Join-Path $full "data\terrain\diviner_rock_abundance.i16"))) {
+        throw "Full package lacks the Diviner part under data\terrain"
+    }
     Remove-Item $full -Recurse -Force
 }
 

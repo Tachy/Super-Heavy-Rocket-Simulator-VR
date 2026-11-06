@@ -13,7 +13,7 @@ const _WGS84_E2 := 6.69437999014e-3  ## [S: NIMA TR8350.2] first eccentricity sq
 static func clamp_fixed(p_fixed_m: Vector3, heights: HeightSource) -> Vector3:
 	if heights == null or p_fixed_m.length() < 1.0:
 		return p_fixed_m
-	var geo := _geodetic(p_fixed_m, heights.body == "earth")  # (lat_deg, lon_deg, height above the reference surface)
+	var geo := geodetic(p_fixed_m, heights.body == "earth")  # (lat_deg, lon_deg, height above the reference surface)
 	var surface: Dictionary = heights.sample_band_limited(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]), 0.0)
 	var floor_m: float = (surface["height_m"] as PackedFloat64Array)[0] + MIN_CLEARANCE_M
 	if geo.z >= floor_m:
@@ -24,7 +24,7 @@ static func clamp_fixed(p_fixed_m: Vector3, heights: HeightSource) -> Vector3:
 ## Distance (m) of the body-fixed position above `heights`' surface; without a source above the reference surface
 ## (WGS84 ellipsoid, the Moon's mean sphere). Never negative.
 static func surface_distance_m(p_fixed_m: Vector3, heights: HeightSource) -> float:
-	var geo := _geodetic(p_fixed_m, heights == null or heights.body == "earth")
+	var geo := geodetic(p_fixed_m, heights == null or heights.body == "earth")
 	if heights == null:
 		return maxf(geo.z, 0.0)
 	var surface: Dictionary = heights.sample_band_limited(PackedFloat64Array([geo.x]), PackedFloat64Array([geo.y]), 0.0)
@@ -33,7 +33,7 @@ static func surface_distance_m(p_fixed_m: Vector3, heights: HeightSource) -> flo
 
 ## Geodetic latitude / longitude (deg) and height (m) of a body-fixed point: Earth WGS84 (Bowring, two iterations:
 ## sub-millimetre near the surface), Moon the mean sphere.
-static func _geodetic(p: Vector3, earth: bool) -> Vector3:
+static func geodetic(p: Vector3, earth: bool) -> Vector3:
 	var lon := atan2(p.y, p.x)
 	var rho := sqrt(p.x * p.x + p.y * p.y)
 	if not earth:

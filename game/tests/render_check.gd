@@ -27,6 +27,7 @@
 #          (EarthShadowLength; the view: an eye high over the pad looking down), exit code 1 outside the tolerance.
 #          [--shadow_crawl=<frames>,<step deg>] once settled: the view turns that much per frame, every frame saved as <out>_crawl<n>.png
 #          (Task 13b: the penumbra grain's temporal stability, analysed offline).
+# Radiance cube ground bounce (U-4): [--ground_albedo_near=off] the cube's ground from the global day texture alone (no imagery profile).
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed); with it [--catch_hull=<station m>] a
 #          static booster hull with that hull station on the arm deck (a picture of the closed pose, no flight).
@@ -178,6 +179,7 @@ func _initialize() -> void:
 	if _args.has("moon_shadow_quality"):
 		MoonNearShadow.soft_quality = ["hard", "very_low", "low", "medium", "high", "ultra"].find(String(_args["moon_shadow_quality"])) as RenderingServer.ShadowQuality
 	EarthNearShadow.enabled = _args.get("earth_near_shadows", "on") != "off"  # the fidelity setting (Task 16)
+	GroundAlbedoNear.enabled = _args.get("ground_albedo_near", "on") != "off"  # U-4: the cube's ground from the global texture alone
 	EarthNearShadow.splits = int(_args.get("earth_shadow_splits", "4"))
 	EarthNearShadow.soft = _args.get("earth_shadow_soft", "on") != "off"
 	EarthNearShadow.atlas_size = int(_args.get("earth_shadow_atlas", str(EarthNearShadow.ATLAS_SIZE)))

@@ -228,6 +228,38 @@ def test_embed_sentinel2_is_land_only(tmp_path):
     assert out[px(26.0, -99.5)] == pytest.approx([0.1] * 3)  # > 100 km beyond the box: the global sea
 
 
+def test_embed_sentinel2_without_open_water_leaves_the_global_sea(tmp_path, monkeypatch):
+    """Review M-4 (follow-ups): too few open-water samples give no calibrated sea level (open_water_levels -> None): the sea
+    inside the box is the global sea plus the imagery's full water brightness (pedestal zero), the sea outside stays global."""
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    _write_area_grids(tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "imagery.toml").write_text(
+        '[[source]]\nid = "s2_t"\nproduct = "sentinel2_median"\narea = "t"\nbox = "regional"\nmin_level = 8\n'
+        'max_level = 13\n', encoding="utf-8")
+    (tmp_path / "config" / "earth_terrain.toml").write_text(
+        '[[area]]\nid = "t"\nlatitude_deg = 26.0\nlongitude_deg = -97.0\nlocal_half_size_m = 5000.0\n'
+        'regional_half_size_m = 100000.0\n', encoding="utf-8")
+    raw = tmp_path / "data" / "raw" / "imagery" / "s2_t"
+    raw.mkdir(parents=True)
+    with rasterio.open(raw / "reflectance.tif", "w", driver="GTiff", width=200, height=200, count=3, dtype="uint16",
+                       crs="EPSG:4326", transform=from_bounds(-98.0, 25.0, -96.0, 27.0, 200, 200), nodata=0) as d:
+        d.write(np.full((3, 200, 200), 2000, dtype=np.uint16))
+    monkeypatch.setattr(ea, "OPEN_WATER_MIN_PIXELS", 10 ** 9)  # no scene has that much open water: level None
+    logs = []
+    h, w = 2700, 5400
+    land = np.zeros((h, w), dtype=bool)
+    land[:, int((-97.0 + 180.0) / 360.0 * w):] = True
+    out = ea.embed_sentinel2(np.full((h, w, 3), 0.1), tmp_path, log=logs.append, land=land)
+    px = lambda lat, lon: (int((90.0 - lat) / 180.0 * h), int((lon + 180.0) / 360.0 * w))  # noqa: E731
+    assert any("open-water samples" in m for m in logs)
+    assert out[px(26.0, -97.5)] == pytest.approx([0.3] * 3, rel=1e-3)  # inside: global 0.1 + the water's 0.2 above pedestal 0
+    assert out[px(26.0, -98.15)] == pytest.approx([0.1] * 3)  # outside the box: the global sea, no calibrated fade
+    assert out[px(26.0, -96.5)] == pytest.approx([0.2] * 3, rel=1e-3)  # land inside: Sentinel-2 as before
+
+
 def test_sea_only_continues_the_sea_under_land(tmp_path):
     h, w = 4, 8
     (tmp_path / "data" / "terrain" / "earth").mkdir(parents=True)

@@ -43,7 +43,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   worker (ship-entry-return.md "Planner work off the sim thread"). Left: the entry guidance's first cycle after a
   placement (~55 ms), the refuelling campaign's live re-plans (`plan_refuelling_campaign`, unmeasured); no
   cancellation - a new return request or the session's end (`FlightSim::setup` on the Godot main thread) waits for a
-  running job (up to ~38 s for the tanker reserve); the hand-over holds cost propellant (b4 aircatch 9.1 t left
+  running job (up to ~38 s for the tanker reserve; likewise the lunar landing site check at mission start, U-7: the
+  `std::async` touchdown search, up to ~30 s, held by the runner's deferred poll, which `FlightSim::~FlightSim` / `setup`
+  destroy; the held session takes no cancel command meanwhile); the hand-over holds cost propellant (b4 aircatch 9.1 t left
   against 11.6 t synchronous); the gate aim's very first refresh in real-time play uses the analytic flip model for
   one cycle (M2).
   Fix round 2: a background job lives with its owner (the far re-plan with the Burn state, the tanker reserve with the
@@ -293,10 +295,16 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Cost in the stereo mock at the pad: vr-performance.md (Task 13 re-measure); not measured in the headset. With the
   analog weather on the pad view takes 17.2 ms (14.4 ms without the shadows, Task 13b): the clouds' cost, over the
   11.1 ms frame regardless of the shadows.
-- Ground bounce in the radiance cube: the imagery's ring profile (`GroundAlbedoNear`, 0-1500 m, read on a worker) replaces
-  the global day texture's 6.7 km texel near the eye, within 3 % of the imagery's view-factor weighted albedo at eye heights
-  of 2-148 m; only where the two imagery areas (Starbase, Cape) cover the eye and below 6 km. Elsewhere on Earth the
-  texel stays (the bounce at a site without imagery is the global mean of land, sea and snow).
+- Ground bounce in the radiance cube: the imagery's sector x ring profile (`GroundAlbedoNear`, 8 azimuth sectors x 5 rings
+  to 1.5 km, read on a worker) replaces the global day texture's 6.7 km texel near the eye, within 2.2 % mean / 4.3 % max of
+  the imagery's exact view-factor albedo per face azimuth at eye heights of 10-148 m (launch-structures.md); a 2 m eye at the
+  launch mount is up to 20 % off (the 0-25 m ring averages the mount's top and shadow in the imagery by area). One profile at
+  the eye: objects far from the eye get the eye's ground. Only where the two imagery areas (Starbase, Cape) cover the eye
+  and below 6 km. Elsewhere on Earth the texel stays (the bounce at a site without imagery is the global mean of land, sea
+  and snow).
+- Orbit renders hang in `render_check` (follow-ups batch B, 2026-11-06): ground views at 128 m and 5 km render, but views
+  from 400 km and 1500 km produced no frames for more than 4 min (CPU idle) and were killed; not investigated. The rim of the
+  U-3 sea calibration's 100 km fade has therefore not been looked at from orbit. Open.
 - Earth near shadows: the penumbra grain does not crawl at HIGH in a desktop head-motion test (0.02 deg per frame); not
   checked in the headset. The Falcon 9 ship's shadow on the sea is not
   examined (Task 13b).
