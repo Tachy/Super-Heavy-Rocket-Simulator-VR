@@ -30,8 +30,8 @@ statistic).
 
 Craters (Task 10 fix round): every scale also carries the small craters of the core's law (config [craters]: N(>D) =
 density (D / ref)^-b, fresh / degraded depth per D, rim, degraded share) whose diameter lies in its band (D from 1 cm,
-each crater in exactly one scale): Poisson count of the law's expectation on the periodic tile, uniform positions, D by
-the law's inverse cumulative, the core's crater_profile_m (bowl to R, (r / R)^-3 rim flank to 3 R), zero mean. They are
+each crater in exactly one scale): the law's expected count on the periodic tile rounded (crater_population), uniform
+positions, D by the law's inverse cumulative at stratified quantiles, the core's crater_profile_m (bowl to R, (r / R)^-3 rim flank to 3 R), zero mean. They are
 kept as a separate component, so the shader weights each by the share the mesh does not draw (regolith: the band's
 spectral transfer; craters: the core's crater_drawn_fraction) - one texture fetch for both.
 

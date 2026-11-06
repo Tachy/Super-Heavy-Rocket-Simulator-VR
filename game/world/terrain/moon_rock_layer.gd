@@ -55,6 +55,9 @@ const LODS := 6
 ## ~3.5 cm per metre of rock) for rocks above 300 px - the near boulders only.
 const LOD_MIN_PX: Array[float] = [300.0, 100.0, 30.0, 10.0, 4.0, 0.0]
 const LOD_VERTICES: Array[int] = [10242, 2562, 642, 162, 42, 12]
+## [E] The shadow-only MultiMeshes draw this many LODs coarser than the rock (Task 13; Task 12 fix 1: the casters cost
+## +5.6 ms in the boulder field at the drawn LOD): a caster of ~1.5 px is 1-2 shadow-map texels, its silhouette below that.
+const SHADOW_LOD_BIAS := 1
 ## Vertex count of LOD 0 (the template textures' width).
 const MAX_VERTICES := 10242
 const FLOATS_PER_INSTANCE := 20  ## transform 12, colour 4, custom 4
@@ -143,9 +146,11 @@ const PREWARM_MAX_HEIGHT_M := 50000.0
 ## [E, measured: Task 11 fix B report, IM-2 2 m camera jump] Pool entries allocated at start-up per pool key (about the
 ## peak use after a 10 km jump; the pool grows beyond on demand within the attach budget, ~0.15 ms per allocation).
 ## Measured with power-of-two buckets: each count is split half and half between its bucket and the half-octave bucket
-## below (_init).
-const PREWARM := {64: 290, 1000064: 1160, 2000064: 1660, 3000064: 460, 3000128: 620, 3000256: 570, 3000512: 160,
-		4000064: 200, 4000128: 80, 4000256: 170, 4000512: 320, 4001024: 560, 4002048: 680}
+## below (_init). Task 13: keyed for the six LODs of Task 17 (its new near LOD 0 had shifted every measured LOD by one, so
+## the speck LOD's large buckets were never warmed - the boulder-jump allocation stalls of ruling T12-C); LOD 0 (> 300 px)
+## grows on demand.
+const PREWARM := {1000064: 290, 2000064: 1160, 3000064: 1660, 4000064: 460, 4000128: 620, 4000256: 570, 4000512: 160,
+		5000064: 200, 5000128: 80, 5000256: 170, 5000512: 320, 5001024: 560, 5002048: 680}
 const PREWARM_MATERIALS := 1500
 ## [E] Main-thread time per frame the pool warming may take (process_queue, before the attaches).
 const PREWARM_BUDGET_US := 1500
@@ -177,7 +182,7 @@ var stats := {"nodes_built": 0, "rocks_built": 0, "build_ms": 0.0, "max_node_ms"
 		"pool_mb": 0.0, "allocations": 0, "unpooled": 0, "rock_gpu_ms_estimate": 0.0, "load_factor": 1.0,
 		"terrain_over_floor": 0, "bucket_peak": {}}
 var material_template: ShaderMaterial  ## the rock material the pooled node materials copy (tests: the rock patch)
-var meshes: Array[ArrayMesh] = []  ## per LOD
+var meshes: Array[ArrayMesh] = []  ## per LOD, then the shadow-only meshes per list LOD (shadow_pool_lod)
 var top_z := PackedFloat32Array()  ## per template: the highest LOD-0 vertex z (unit template)
 var _stats_mutex := Mutex.new()
 var _logged_scale := 1.0
@@ -301,6 +306,7 @@ func _build_templates() -> void:
 	cavities.resize(MAX_VERTICES * LODS * TEMPLATES)
 	cavities.fill(0.0)
 	top_z.resize(TEMPLATES)
+	var lod_arrays: Array = []
 	for lod in LODS:
 		var core_lod := mini(lod, CORE_LODS - 1)
 		var directions := PackedVector3Array()
@@ -349,6 +355,20 @@ func _build_templates() -> void:
 		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
 				Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
 		meshes.append(array_mesh)
+		lod_arrays.append(arrays)
+	# Shadow-only meshes (Task 13, Task 12 review I5): list LOD L casts with the geometry of L + SHADOW_LOD_BIAS (its
+	# vertex row) inside L's own pixel band, at pool LOD LODS + L (shadow_pool_lod).
+	for lod in LODS:
+		var coarse := mini(lod + SHADOW_LOD_BIAS, LODS - 1)
+		var arrays: Array = (lod_arrays[coarse] as Array).duplicate()
+		var band := PackedFloat32Array()
+		for k in (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size():
+			band.append_array([float(coarse), LOD_MIN_PX[lod], 1.0e30 if lod == 0 else LOD_MIN_PX[lod - 1], 0.0])
+		arrays[Mesh.ARRAY_CUSTOM0] = band
+		var shadow_mesh := ArrayMesh.new()
+		shadow_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
+				Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+		meshes.append(shadow_mesh)
 	var image := Image.create_from_data(MAX_VERTICES, LODS * TEMPLATES, false, Image.FORMAT_RGBAF,
 			texels.to_byte_array())
 	material_template.set_shader_parameter("rock_template_data", ImageTexture.create_from_image(image))
@@ -853,7 +873,7 @@ func _transfer_to(item: Array, limit_m: float) -> bool:
 		var shadow_capacities: PackedInt32Array = rocks["shadow_capacities"]
 		for lod in LODS:
 			if shadow_capacities[lod] > 0:
-				wanted.append([lod, shadow_capacities[lod]])
+				wanted.append([shadow_pool_lod(lod), shadow_capacities[lod]])
 	wanted.sort_custom(func(a: Array, b: Array) -> bool: return int(a[1]) > int(b[1]))
 	# The donors: the farthest nodes of the last sweep (FAR_KEEP of them, farthest first) beyond limit_m, taken one after
 	# the other (at most EVICT_DONORS_MAX) until their pooled MultiMeshes cover the item's buckets.
@@ -1048,7 +1068,7 @@ func _caster_room(rocks: Dictionary) -> bool:
 	var shadow_capacities: PackedInt32Array = rocks["shadow_capacities"]
 	for lod in LODS:
 		if shadow_capacities[lod] > 0:
-			var key := pool_key(lod, shadow_capacities[lod])
+			var key := pool_key(shadow_pool_lod(lod), shadow_capacities[lod])
 			wanted[key] = int(wanted.get(key, 0)) + 1
 	var needed := 0
 	var needed_instances := 0
@@ -1077,7 +1097,7 @@ func _attach_casters(entry: Dictionary) -> void:
 		var n_shadow: int = (rocks["shadow_counts"] as PackedInt32Array)[lod]
 		if n_shadow <= 0:
 			continue
-		var taken := _take_slot(lod, (rocks["shadow_capacities"] as PackedInt32Array)[lod])
+		var taken := _take_slot(shadow_pool_lod(lod), (rocks["shadow_capacities"] as PackedInt32Array)[lod])
 		var node: MultiMeshInstance3D = taken[0]
 		var buffer := _fit(shadow_buffers[lod], int(taken[1]) % POOL_KEY_PER_LOD)
 		RenderingServer.multimesh_set_buffer(node.multimesh.get_rid(), buffer)
@@ -1195,9 +1215,9 @@ func _can_attach(item: Array) -> int:
 		for capacity: int in capacities[lod]:
 			var key := pool_key(lod, capacity)
 			wanted[key] = int(wanted.get(key, 0)) + 1
-		var shadow_capacity: int = (rocks.get("shadow_capacities", PackedInt32Array([0, 0, 0, 0, 0])) as PackedInt32Array)[lod]
+		var shadow_capacity: int = (rocks.get("shadow_capacities", PackedInt32Array([0, 0, 0, 0, 0, 0])) as PackedInt32Array)[lod]
 		if casts and shadow_capacity > 0:  # the shadow casters' bucket (attached with the node)
-			var shadow_key := pool_key(lod, shadow_capacity)
+			var shadow_key := pool_key(shadow_pool_lod(lod), shadow_capacity)
 			wanted[shadow_key] = int(wanted.get(shadow_key, 0)) + 1
 	var needed := 0
 	var needed_instances := 0
@@ -1261,6 +1281,11 @@ func _free_entry(node: MultiMeshInstance3D, key: int) -> void:
 
 ## Pool key of a LOD's bucket: a pooled MultiMesh keeps its LOD mesh for life (setting MultiMesh.mesh on a filled
 ## MultiMesh measured 16 ms on the main thread: Task 11 fix B report).
+## The pool LOD (meshes index) of list LOD lod's shadow-only MultiMeshes.
+static func shadow_pool_lod(lod: int) -> int:
+	return LODS + lod
+
+
 static func pool_key(lod: int, capacity: int) -> int:
 	return lod * POOL_KEY_PER_LOD + capacity
 

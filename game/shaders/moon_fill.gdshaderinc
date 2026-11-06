@@ -103,8 +103,10 @@ float moon_fill_reflectance(vec3 n, vec3 up, vec3 to_sun, float mu_view, float g
 			if (mu0 <= 0.0) {
 				continue;
 			}
-			// The wall's own Sun visibility (N2): the occluder seen from the wall point, never below the receiver's.
-			float tan_seen = (tan_occluder - tan(h)) / max(1.0 - dot(toward, sun_flat), 1.0e-4);
+			// The wall's own Sun visibility (N2): the occluder seen from the wall point, never below the receiver's. The
+			// estimate is ill-conditioned for walls toward the Sun's azimuth (1 - cos dphi -> 0: tan_seen jumps on a tiny
+			// tan_occluder - tan h, flickering between fragments); [E] floor 0.05 (dphi ~18 deg; Task 12 re-review 2 m1).
+			float tan_seen = (tan_occluder - tan(h)) / max(1.0 - dot(toward, sun_flat), 0.05);
 			float visible = max(receiver_visible, moon_fill_disc_visible(sun_elevation - atan(tan_seen)));
 			// The wall's own relief shadows (Smith's G1 at its incidence over the ground's band, n1).
 			float tan_wall = mu0 / sqrt(max(1.0 - mu0 * mu0, 1.0e-6));
