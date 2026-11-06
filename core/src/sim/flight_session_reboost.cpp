@@ -24,15 +24,15 @@ double FlightSession::station_mean_height_m() const {
 }
 
 bool FlightSession::start_station_reboost(double height_m, std::vector<std::string> groups) {
-    const auto refuse = [&](const char* why) {
-        reboost_status_ = why;
+    const auto refuse = [&](report::Code why) {
+        reboost_status_ = report::make(why);
         return false;
     };
-    if (reboost_) return refuse("Reboost läuft bereits");
-    if (!station_index_) return refuse("Reboost: keine Station");
-    if (bodies_.size() != 1) return refuse("Reboost nur ohne andere Fahrzeuge");
-    if (groups.empty()) return refuse("Reboost: keine Triebwerksgruppen");
-    if (station_mean_height_m() > height_m - mission::raise_tolerance_m) return refuse("Reboost: Station hoch genug");
+    if (reboost_) return refuse(report::Code::reboost_already_running);
+    if (!station_index_) return refuse(report::Code::reboost_no_station);
+    if (bodies_.size() != 1) return refuse(report::Code::reboost_other_vehicles);
+    if (groups.empty()) return refuse(report::Code::reboost_no_engine_groups);
+    if (station_mean_height_m() > height_m - mission::raise_tolerance_m) return refuse(report::Code::reboost_height_sufficient);
     const size_t index = *station_index_;
     auto& body = *bodies_[index].body;
     Reboost r;
@@ -49,7 +49,7 @@ bool FlightSession::start_station_reboost(double height_m, std::vector<std::stri
     controlled_ = index;
     reset_mission_state();
     reboost_ = std::move(r);
-    reboost_status_ = "Reboost";
+    reboost_status_ = report::make(report::Code::reboost_flying);
     run_reboost();  // the first burn now (or the end)
     return true;
 }
@@ -58,7 +58,8 @@ void FlightSession::run_reboost() {
     auto& r = *reboost_;
     if (r.burning) {
         if (autopilot_.state == AutopilotState::Burn) return;  // flying (turn, settling, burn)
-        if (!burn_abort_reason_.empty()) return end_reboost(false, "Reboost abgebrochen: " + burn_abort_reason_);
+        if (!burn_abort_reason_.empty()) return end_reboost(false, report::with_cause(report::make(report::Code::reboost_aborted),
+                                                                              report::legacy(burn_abort_reason_)));
         // the tail-off first, as the Raise leg (f1): a burn planned during it lit the Raptor again on the unsettled
         // liquid (f2 probe: gas ingestion on a 1000 t depot right after its first burn)
         if (bodies_[controlled_].body->vehicle().any_engine_producing_thrust()) return;
@@ -91,14 +92,14 @@ void FlightSession::run_reboost() {
     const auto ahead = orbit::propagate_two_body(state, gm_earth_, at - epoch_);
     const gnc::BurnNode node{at, dv_mps * math::normalized(ahead.velocity_mps)};
     if (!start_burn(node, burn_configurations(&r.groups), true, small_burn_transient_share)) {
-        return end_reboost(false, "Reboost: Brennvorgang nicht möglich");
+        return end_reboost(false, report::make(report::Code::reboost_burn_not_possible));
     }
     r.burning = true;
     r.record.cold_gas = r.record.cold_gas || burn_config_.rcs;
     ++r.record.burns;
 }
 
-void FlightSession::end_reboost(bool completed, std::string reason) {
+void FlightSession::end_reboost(bool completed, report::Report reason) {
     auto r = std::move(*reboost_);
     reboost_.reset();
     disengage_autopilot();
@@ -108,7 +109,7 @@ void FlightSession::end_reboost(bool completed, std::string reason) {
     r.record.propellant_kg = r.start_main_kg - bodies_[r.station_body].body->vehicle().main_propellant_kg();
     make_station(r.station_body);  // the ideal attitude at once
     station_impulses_ = std::move(r.impulses);
-    reboost_status_ = completed ? std::string("Reboost abgeschlossen") : r.record.reason;
+    reboost_status_ = completed ? report::make(report::Code::reboost_completed) : r.record.reason;
     last_reboost_ = std::move(r.record);
 }
 

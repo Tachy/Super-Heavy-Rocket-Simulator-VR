@@ -21,6 +21,7 @@
 #include "starsim/mission/tanker_reserve.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/sim/staging_sequence.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/sim/station_start.hpp"
 #include <limits>
 #include <map>
@@ -278,7 +279,7 @@ struct ReboostRecord {  // refuelling f2: one station reboost
     int burns = 0;
     bool cold_gas = false;       // a burn flew on the cold gas (the Raptor's transients too large)
     bool completed = false;
-    std::string reason;          // German when not completed
+    report::Report reason;       // why it ended when not completed (ok when completed)
 };
 
 // Refuelling f2: a driver above the mission sequences (sim::RefuellingCampaignFlight). FlightSession::advance_to calls
@@ -892,12 +893,12 @@ public:
     // Hohmann pair from its energy-mean semi-major axis (the first burn reboost_lead_s ahead; transients over
     // small_burn_transient_share: the cold gas) with the settling push before each ignition (f3). The station is the
     // controlled body during the burns and the station again after the last one - or when a burn is refused or
-    // aborted (last_reboost then says why). False with a German reboost_status() when refused: no station, other
+    // aborted (last_reboost then says why). False with a refusal code in reboost_status() when refused: no station, other
     // bodies present, no engine groups, already within raise_tolerance_m of the height or above, a reboost running.
     bool start_station_reboost(double height_m, std::vector<std::string> engine_groups);
     bool station_reboost_active() const { return reboost_.has_value(); }
     static constexpr double reboost_lead_s = 1800.0;  // [E] the depot's turn on 1.5 kN thrusters and the settling
-    const std::string& reboost_status() const { return reboost_status_; }
+    const report::Report& reboost_status() const { return reboost_status_; }
     const std::optional<ReboostRecord>& last_reboost() const { return last_reboost_; }
     // The station's mean height above the equatorial radius from its J2 energy (f2); std::logic_error without one.
     double station_mean_height_m() const;
@@ -1054,7 +1055,7 @@ public:
     // abort keeps the leg (proximity_resume continues). Empty ends it; cleared with the bodies (as the station).
     void set_iss_mission(std::optional<IssMissionSequence> sequence);
     IssMissionLeg iss_mission_leg() const { return iss_leg_; }
-    const std::string& iss_mission_status() const { return iss_status_; }  // German
+    const report::Report& iss_mission_status() const { return iss_status_; }  // code iss.leg_status / iss.ended / ...
     const std::optional<IssMissionSequence>& iss_mission() const { return iss_mission_; }
     // Mass and propellant at every leg change (refuelling r5: the reference flights' measured numbers).
     struct MissionMark {
@@ -1294,10 +1295,10 @@ private:
         std::vector<StationImpulse> impulses;  // the station's, kept for its return
     };
     std::optional<Reboost> reboost_;
-    std::string reboost_status_;
+    report::Report reboost_status_;
     std::optional<ReboostRecord> last_reboost_;
     void run_reboost();  // every tick while a reboost runs: the next burn or the end
-    void end_reboost(bool completed, std::string reason);
+    void end_reboost(bool completed, report::Report reason);
     void apply_station_impulses();                  // those due now
     struct RendezvousTarget {
         size_t target_index = 0;
@@ -1616,15 +1617,15 @@ private:
     // ISS mission sequence (flight_session_iss_mission.cpp).
     std::optional<IssMissionSequence> iss_mission_;
     IssMissionLeg iss_leg_ = IssMissionLeg::None;
-    std::string iss_status_;
+    report::Report iss_status_;
     std::vector<MissionMark> iss_marks_;
     int iss_capture_retries_ = 0;
     unsigned iss_generation_ = 0;                  // counts set_iss_mission calls (a continuation may set one)
     std::optional<time::Epoch> raise_start_epoch_;  // the separation of a raise sequence (f1: the limit runs from it)
     void run_iss_mission();            // every tick: the leg change due now
     bool iss_mission_pending() const;  // a leg change is due (the coast stops)
-    void iss_end(const std::string& reason);
-    void iss_enter(IssMissionLeg leg, std::string status);
+    void iss_end(report::Report reason);
+    void iss_enter(IssMissionLeg leg, report::Report status);
     void iss_start_transfer();  // Docked with a transfer: start it (-> Transfer) or end the mission
     // After the ascent (`first`) or a raise burn: the next apsis burn to raise_to (-> Raise) or the phasing plan.
     void iss_start_raise(bool first);

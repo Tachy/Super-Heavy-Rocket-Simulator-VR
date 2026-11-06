@@ -221,7 +221,7 @@ TEST_CASE("Raise: two burns to an orbit above the depot, then the phasing plan",
     f.start();
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ascent);
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     const auto& marks = f.session.iss_mission_marks();
     CHECK(std::count_if(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Raise; }) == 2);
@@ -247,7 +247,7 @@ TEST_CASE("Raise: every below-depot candidate can be planned after its flown rai
     f.sequence.raise_to = mission::PhasingOrbit{re + periapsis_km * 1e3, re + 190e3};
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
 }
 
@@ -262,7 +262,7 @@ TEST_CASE("Raise: a candidate below the insertion periapsis never lowers it", "[
     const double rp0 = f.mean_apsides().first;  // the fixture's osculating 120 km periapsis is ~127 km mean
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     const auto [rp, ra] = f.mean_apsides();
     CHECK(rp == Catch::Approx(rp0).margin(3e3));  // [E] the mean periapsis kept (never lowered)
     CHECK(ra == Catch::Approx(re + 270e3).margin(3e3));
@@ -296,7 +296,7 @@ TEST_CASE("Raise: the phasing deadline counts from the separation, not from the 
     f.start();
     const auto separation = f.session.epoch();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     REQUIRE(f.session.rendezvous_deadline().has_value());
     CHECK(*f.session.rendezvous_deadline() - separation ==
@@ -311,7 +311,8 @@ TEST_CASE("Raise: a burn that runs dry ends the mission with its reason", "[refu
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 2.0 * 3600.0);
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ended);
-    CHECK(f.session.iss_mission_status().find("kein Treibstoff") != std::string::npos);
+    // the cause is the burn abort reason (not yet a code, Task 11)
+    CHECK(report::transitional_text(f.session.iss_mission_status()).find("kein Treibstoff") != std::string::npos);
 }
 
 namespace {
@@ -357,12 +358,12 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     for (int i = 0; i < 120 && f.leg() == IssMissionLeg::Docked; ++i) f.session.advance_to(f.session.epoch() + 1.0);
     REQUIRE(f.leg() == IssMissionLeg::Transfer);
     f.fly([&] { return f.leg() == IssMissionLeg::Departure || f.leg() == IssMissionLeg::Ended; }, 3600.0, 10.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Departure);
     CHECK(f.session.transfer_state().phase == sim::TransferPhase::Complete);
     CHECK(f.session.transfer_state().delivered_kg[0] > 140.0e3);  // r4: 144.6 t LOX
     f.fly([&] { return f.leg() != IssMissionLeg::Departure; }, 4.0 * 3600.0, 10.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Return);
     REQUIRE(f.session.ship_return_plan());
     CHECK(f.session.ship_return_plan()->feasible);
@@ -457,7 +458,7 @@ TEST_CASE("Docked tanker: the ship return flies to the catch", "[refuelling][iss
     f.session.set_iss_mission(f.tanker_sequence());
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 10.0 * 86400.0,
           600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Complete);
     const auto& tanker = f.session.body(f.session.controlled_index());
     CHECK(tanker.caught());
@@ -475,7 +476,7 @@ TEST_CASE("A stopped transfer ends the mission", "[refuelling][iss_mission]") {
     f.session.stop_transfer();
     f.fly([&] { return f.leg() != IssMissionLeg::Transfer; }, 60.0, 1.0);
     CHECK(f.leg() == IssMissionLeg::Ended);
-    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::StartsWith("Mission beendet"));
+    CHECK(f.session.iss_mission_status().code == report::Code::iss_ended);
     CHECK(f.session.docked());  // no undocking after a failed transfer
 }
 
@@ -487,7 +488,7 @@ TEST_CASE("Ship return refused ends the mission", "[refuelling][iss_mission]") {
     f.session.set_iss_mission(q);
     f.fly([&] { return f.leg() == IssMissionLeg::Return || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 10.0);
     CHECK(f.leg() == IssMissionLeg::Ended);
-    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::StartsWith("Mission beendet"));
+    CHECK(f.session.iss_mission_status().code == report::Code::iss_ended);
 }
 
 TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation", "[refuelling][iss_mission]") {
@@ -507,7 +508,7 @@ TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation",
     const auto wall = std::chrono::steady_clock::now();
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 3.0 * 86400.0,
           3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.leg() == IssMissionLeg::Complete);
     CHECK(std::abs(called - at) <= 0.5 * sim::FlightSession::tick_s + 1e-6);
     // the depot's 600 t went into the HLS (less chill-down and boil-off), its main tanks not full yet
@@ -533,7 +534,7 @@ TEST_CASE("A continuation that installs a new sequence keeps it running", "[refu
     f.session.set_iss_mission(q);
     const auto& marks = f.session.iss_mission_marks();
     f.fly([&] { return !marks.empty() && marks.front().leg == IssMissionLeg::Rendezvous; }, 6.0 * 3600.0, 60.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE_FALSE(marks.empty());
     CHECK(marks.front().leg == IssMissionLeg::Rendezvous);  // set_iss_mission cleared the old sequence's marks
     CHECK(std::none_of(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Complete; }));
@@ -554,7 +555,7 @@ TEST_CASE("A sequence set after a hard capture goes through the Docked gate into
     q.transfer = sim::MissionTransfer::FillChaser;
     f.session.set_iss_mission(q);
     f.fly([&] { return f.session.iss_mission_leg() != IssMissionLeg::Docked; }, 600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Transfer);
     const auto& marks = f.session.iss_mission_marks();
     REQUIRE(marks.size() >= 2);
@@ -573,7 +574,9 @@ TEST_CASE("Continuation refusal ends the mission", "[refuelling][iss_mission]") 
     f.session.set_iss_mission(q);
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 60.0);
     CHECK(f.leg() == IssMissionLeg::Ended);
-    CHECK(f.session.iss_mission_status() == "Mission beendet: Mondmission: zu spät");
+    REQUIRE(f.session.iss_mission_status().code == report::Code::iss_ended);
+    REQUIRE(f.session.iss_mission_status().causes.size() == 1);
+    CHECK(report::transitional_text(f.session.iss_mission_status().causes.front()) == "Mondmission: zu spät");  // legacy cause
 }
 
 TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuelling][mission][ascent_planner]") {
@@ -597,7 +600,7 @@ TEST_CASE("depot_launch: pad -> orbit, the depot becomes the station, the booste
     while (f.session.epoch() - f.t0 < 1800.0 && f.session.iss_mission_leg() == IssMissionLeg::Ascent) {
         f.session.advance_to(f.session.epoch() + 1.0);
     }
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     REQUIRE(f.session.station_index());
     const double insertion_s = f.session.iss_mission_marks().back().epoch - f.t0;
@@ -692,7 +695,7 @@ TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelli
            f.session.iss_mission_leg() != IssMissionLeg::Docked && f.session.iss_mission_leg() != IssMissionLeg::Ended) {
         f.session.advance_to(f.session.epoch() + 60.0);
     }
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK((f.session.iss_mission_leg() == IssMissionLeg::Docking || f.session.iss_mission_leg() == IssMissionLeg::Docked));
     const auto wp0 = refuelling_test::mark(f.session, IssMissionLeg::Proximity);
     REQUIRE(wp0);
@@ -719,7 +722,7 @@ TEST_CASE("Refuelling flights: the window's separation estimate matches the flow
     while (session.iss_mission_leg() == IssMissionLeg::Ascent && session.epoch() - w.liftoff < 1200.0) {
         session.advance_to(session.epoch() + 1.0);
     }
-    INFO(session.iss_mission_status());
+    INFO(report::transitional_text(session.iss_mission_status()));
     REQUIRE(session.iss_mission_leg() == IssMissionLeg::Raise);  // the 120 km insertion is raised at apoapsis
     const auto& marks = session.iss_mission_marks();  // Ascent, Raise
     REQUIRE(marks.size() >= 2u);
@@ -790,7 +793,7 @@ TEST_CASE("tanker_flight_orbit: phasing orbit -> docked -> transfer -> caught at
     REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight_orbit", f.t0, f.clock)
                 .refusal.empty());
     fly_mission(f, 12.0 * 86400.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     const auto n = refuelling_test::tanker_numbers(f.session);
     refuelling_test::print("tanker_flight_orbit", n);
@@ -811,7 +814,7 @@ TEST_CASE("tanker_flight: pad -> booster caught -> docked -> transfer -> ship ca
     }
     REQUIRE(f.session.tower()->phase() == sim::CatchPhase::Caught);
     fly_mission(f, 12.0 * 86400.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     const auto n = refuelling_test::tanker_numbers(f.session);
     refuelling_test::print("tanker_flight", n);
@@ -853,7 +856,7 @@ TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then pl
         f.session.advance_to(f.session.epoch() + 10.0);
         t += 10.0;
     }
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     INFO(f.session.body(f.session.controlled_index()).breakup_reason());
     INFO("elapsed " << t << " s");
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
@@ -1086,12 +1089,15 @@ TEST_CASE("A deorbit called off after the plan ends the mission", "[refuelling][
     f.session.set_tank_mass(ship, 0, "lox_main", 400.0);
     f.session.set_tank_mass(ship, 0, "ch4_main", 100.0);
     f.fly([&] { return f.leg() != IssMissionLeg::Return; }, 9.0 * 86400.0, 600.0);
-    std::printf("[r5] called-off deorbit: %s (abort: %s)\n", f.session.iss_mission_status().c_str(),
+    std::printf("[r5] called-off deorbit: %s (abort: %s)\n", report::transitional_text(f.session.iss_mission_status()).c_str(),
                 f.session.burn_abort_reason().c_str());
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK(f.leg() == IssMissionLeg::Ended);
     // at once, with the call-off's reason (before: days later "Schiff verloren")
-    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::StartsWith("Mission beendet: Zu wenig Treibstoff"));
+    REQUIRE(f.session.iss_mission_status().code == report::Code::iss_ended);
+    REQUIRE(f.session.iss_mission_status().causes.size() == 1);
+    CHECK_THAT(report::transitional_text(f.session.iss_mission_status().causes.front()),  // legacy cause (Task 11)
+               Catch::Matchers::StartsWith("Zu wenig Treibstoff"));
     CHECK_FALSE(f.session.body(ship).caught());
 }
 
@@ -1129,13 +1135,15 @@ TEST_CASE("Probe: hls_refuel_orbit timeline", "[.r5_probe]") {
         if (step_s > 2.0) {
             std::printf("[probe] sim %7.2f h  wall %6.0f s (+%5.1f)  leg %-22s autopilot %-12s %s\n",
                         (f.lunar.epoch() - start) / 3600.0, wall_s, step_s, sim::id_of(f.lunar.iss_mission_leg()),
-                        sim::id_of(f.lunar.autopilot().state), f.lunar.iss_mission_status().c_str());
+                        sim::id_of(f.lunar.autopilot().state),
+                        report::transitional_text(f.lunar.iss_mission_status()).c_str());
             std::fflush(stdout);
         }
-        if (wall_s > 900.0 || f.lunar.iss_mission_status().find("Freigabe") != std::string::npos) break;
+        if (wall_s > 900.0 || report::transitional_text(f.lunar.iss_mission_status()).find("Freigabe") != std::string::npos) break;
     }
     std::printf("[probe] end: sim %.2f h, leg %s, %s\n", (f.lunar.epoch() - start) / 3600.0,
-                sim::id_of(f.lunar.iss_mission_leg()), f.lunar.iss_mission_status().c_str());
+                sim::id_of(f.lunar.iss_mission_leg()),
+                report::transitional_text(f.lunar.iss_mission_status()).c_str());
 }
 
 TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continues with the real tank load",
@@ -1150,7 +1158,7 @@ TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continu
            f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
         f.lunar.advance_to(f.lunar.epoch() + 600.0);
     }
-    INFO(f.lunar.iss_mission_status());
+    INFO(report::transitional_text(f.lunar.iss_mission_status()));
     REQUIRE(f.lunar.iss_mission_leg() == IssMissionLeg::Complete);
     REQUIRE(f.lunar.lunar_outbound_plan());
     const auto& hls = f.lunar.body(f.lunar.controlled_index()).vehicle();
@@ -1184,7 +1192,7 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
            f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
         f.lunar.advance_to(f.lunar.epoch() + 600.0);
     }
-    INFO(f.lunar.iss_mission_status());
+    INFO(report::transitional_text(f.lunar.iss_mission_status()));
     INFO("breakup: " << f.lunar.body(f.lunar.controlled_index()).breakup_reason() << ", tower "
                      << sim::id_of(f.lunar.tower()->phase()) << ", liftoff +"
                      << (f.lunar.epoch() - s.epoch) / 3600.0 << " h");

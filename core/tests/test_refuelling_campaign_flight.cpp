@@ -182,7 +182,7 @@ TEST_CASE("Reboost: a low depot raises to 200 km in two burns and is the station
     fly_reboost(f.session);
     REQUIRE(f.session.last_reboost());
     const auto& r = *f.session.last_reboost();
-    INFO(r.reason);
+    INFO(report::transitional_text(r.reason));
     CHECK(r.completed);
     CHECK(r.burns == 2);
     REQUIRE(f.session.station_index() == std::optional<size_t>{0});
@@ -208,7 +208,7 @@ TEST_CASE("Reboost refusals", "[campaign_flown][refuelling][reboost]") {
     test::spice_session();
     refuelling_test::DepotSession f;
     CHECK_FALSE(f.session.start_station_reboost(200.0e3, belly));  // no station
-    CHECK_FALSE(f.session.reboost_status().empty());
+    CHECK_FALSE(f.session.reboost_status().ok());
     f.session.add_station(refuelling_test::depot_config(400.0e3),
                           refuelling_test::depot_state(f.earth, f.t0, 0.0, 201.0e3), f.t0);
     CHECK_FALSE(f.session.start_station_reboost(200.0e3, belly));  // already above
@@ -229,9 +229,9 @@ TEST_CASE("Reboost: a refused burn leaves the depot a station", "[campaign_flown
     fly_reboost(f.session);
     CHECK_FALSE(f.session.station_reboost_active());
     REQUIRE(f.session.last_reboost());
-    INFO(f.session.last_reboost()->reason);
+    INFO(report::transitional_text(f.session.last_reboost()->reason));
     CHECK_FALSE(f.session.last_reboost()->completed);
-    CHECK_FALSE(f.session.last_reboost()->reason.empty());
+    CHECK_FALSE(f.session.last_reboost()->reason.ok());
     REQUIRE(f.session.station_index() == std::optional<size_t>{0});
     CHECK(f.session.body(0).ideal_attitude());
     f.session.advance_to(f.session.epoch() + 3600.0);  // a station again: it coasts
@@ -269,7 +269,7 @@ TEST_CASE("A campaign tanker launches beside the kept depot and flies its chain 
     while (f.session.iss_mission_leg() == IssMissionLeg::Ascent && f.session.epoch() - w.liftoff < 1200.0) {
         f.session.advance_to(f.session.epoch() + 1.0);
     }
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK((f.session.iss_mission_leg() == IssMissionLeg::Raise ||
            f.session.iss_mission_leg() == IssMissionLeg::Rendezvous));
     CHECK(f.session.station_index().has_value());
@@ -394,7 +394,7 @@ TEST_CASE("Flown campaign: station keeping when the depot is low and the next ar
     for (const auto& r : st.reboosts) {
         std::printf("[f2] reboost %.2f-%.2f h: %d burns, cold gas %d, %.1f kg, %s\n", (r.start - *st.start) / 3600.0,
                     (r.end - *st.start) / 3600.0, r.burns, r.cold_gas ? 1 : 0, r.propellant_kg,
-                    r.completed ? "completed" : r.reason.c_str());
+                    (r.completed ? std::string("completed") : report::transitional_text(r.reason)).c_str());
     }
     REQUIRE(st.reboosts.size() == 1u);
     CHECK(st.reboosts[0].completed);
@@ -448,7 +448,7 @@ TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
                           refuelling_test::depot_state(f.earth, f.t0, 0.0, 193.0e3), f.t0);
     std::printf("start mean %.3f km\n", mean_height_km(f.session));
     std::printf("start %d: %s\n", f.session.start_station_reboost(200.0e3, belly) ? 1 : 0,
-                f.session.reboost_status().c_str());
+                report::transitional_text(f.session.reboost_status()).c_str());
     const auto t0 = f.session.epoch();
     while (f.session.station_reboost_active() && f.session.epoch() - t0 < 4.0 * 3600.0) {
         f.session.advance_to(f.session.epoch() + 60.0);
@@ -462,7 +462,7 @@ TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
                     (el.semi_major_axis_m * (1 + el.eccentricity) - constants::wgs84_semi_major_axis_m) / 1e3,
                     b.vehicle().main_propellant_kg());
     }
-    if (f.session.last_reboost()) std::printf("end: %s\n", f.session.last_reboost()->reason.c_str());
+    if (f.session.last_reboost()) std::printf("end: %s\n", report::transitional_text(f.session.last_reboost()->reason).c_str());
     if (f.session.station_index()) std::printf("end mean %.3f km\n", mean_height_km(f.session));
 }
 

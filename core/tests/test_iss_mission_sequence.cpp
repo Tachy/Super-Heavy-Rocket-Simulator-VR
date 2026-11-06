@@ -56,11 +56,11 @@ TEST_CASE("ISS mission sequence: proximity -> docking -> docked completes the mi
         s.advance_to(d.t0 + t + 10.0, 1000000);
         saw_docking = saw_docking || s.iss_mission_leg() == IssMissionLeg::Docking;
     }
-    INFO(s.iss_mission_status());
+    INFO(report::transitional_text(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Docked);
     CHECK(saw_docking);
     CHECK(s.docked());
-    CHECK(s.iss_mission_status().find("Mission abgeschlossen") != std::string::npos);
+    CHECK(s.iss_mission_status().code == report::Code::iss_completed);
 }
 
 TEST_CASE("ISS mission sequence: an abort waits for resume", "[iss][iss_mission][proximity]") {
@@ -85,7 +85,9 @@ TEST_CASE("ISS mission sequence: a collision ends the mission", "[iss][iss_missi
     s.mark_iss_leg_for_test(IssMissionLeg::Proximity);
     REQUIRE(docking_test::DragonAtPort::wait_for(
         s, c.t0, [&] { return s.iss_mission_leg() == IssMissionLeg::Ended; }, 120.0));
-    CHECK(s.iss_mission_status() == "Mission beendet: Kollision");
+    CHECK(s.iss_mission_status().code == report::Code::iss_ended);
+    REQUIRE(s.iss_mission_status().causes.size() == 1);
+    CHECK(s.iss_mission_status().causes.front().code == report::Code::iss_collision);
 }
 
 TEST_CASE("ISS mission sequence: a refused phasing flight ends the mission with the planner's reason",
@@ -105,7 +107,7 @@ TEST_CASE("ISS mission sequence: a refused phasing flight ends the mission with 
     CHECK(s.iss_mission_leg() == IssMissionLeg::Ascent);
     s.advance_to(start.epoch + 10.0, 10000);
     CHECK(s.iss_mission_leg() == IssMissionLeg::Ended);
-    CHECK(s.iss_mission_status().rfind("Mission beendet: ", 0) == 0);
+    CHECK(s.iss_mission_status().code == report::Code::iss_ended);
 }
 
 TEST_CASE("ISS mission sequence: cleared with the bodies", "[iss][iss_mission]") {
@@ -170,7 +172,7 @@ TEST_CASE("ISS mission sequence: an undocking by hand before the undock epoch co
     s.advance_to(d.t0 + 10.0, 100000);
     REQUIRE(s.undock());  // the player undocks early (FlightSim::undock)
     s.advance_to(d.t0 + 1300.0, 1000000);
-    INFO(s.iss_mission_status());
+    INFO(report::transitional_text(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Departure);
-    CHECK(s.iss_mission_status().rfind("Mission beendet", 0) != 0);
+    CHECK(s.iss_mission_status().code != report::Code::iss_ended);
 }

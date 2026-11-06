@@ -364,7 +364,7 @@ Plan `docs/superpowers/archive/plans/2026-10-20-iss-i6-missions.md`.
   (`plan_rendezvous` once the Dragon flies free) -> Proximity (`start_proximity` at Waypoint 0) -> Docking -> Docked, or
   WaitUndock -> Departure -> Return (`plan_capsule_return` with `lead_s` aimed at the previewed pass) -> Complete. Runs
   every tick (also autopilot Off / Orbit); the coast stops at every due leg change and the undock epoch. A proximity
-  abort keeps the leg; a collision or lost vehicle ends the mission ("Mission beendet: ..."). Cleared with the bodies
+  abort keeps the leg; a collision or lost vehicle ends the mission (status code `iss.ended` with the cause as nested report; `iss_mission_status()` is a `report::Report`). Cleared with the bodies
   (`clear_station`).
 - **Launch window** (`mission/iss_launch_window`): `AscentGuidance` fixes its inertial target plane at liftoff through
   the pad (`gnc::ascent_plane_normal`), so the window is the upward zero of the node difference between that plane and the

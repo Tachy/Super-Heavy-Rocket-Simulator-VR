@@ -53,6 +53,23 @@ double main_free_kg(const vehicle::Vehicle& v, config::TankContents contents) {
     return free;
 }
 
+// The status reports of the legs: "<leg>" alone, "<leg>: <cause>", and the closing ones.
+report::Report leg_ref_report(report::Code code, IssMissionLeg leg) {
+    return report::make(code, {report::ref("leg", std::string("phase.iss_mission_leg.") + id_of(leg))});
+}
+
+report::Report leg_report(IssMissionLeg leg) { return leg_ref_report(report::Code::iss_leg, leg); }
+
+report::Report leg_status(IssMissionLeg leg, report::Report cause) {
+    return report::with_cause(leg_ref_report(report::Code::iss_leg_status, leg), std::move(cause));
+}
+
+report::Report completed(report::Code reason, std::initializer_list<report::Param> params = {}) {
+    return report::with_cause(report::make(report::Code::iss_completed), report::make(reason, params));
+}
+
+report::Report simple(report::Code code) { return report::make(code); }
+
 }  // namespace
 
 void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) {
@@ -62,7 +79,7 @@ void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) 
     iss_mission_ = std::move(sequence);
     ++iss_generation_;  // a continuation that sets a new sequence must not be ended as the old one (r5 minor)
     raise_start_epoch_.reset();
-    iss_status_.clear();
+    iss_status_ = report::Report{};
     iss_marks_.clear();
     iss_capture_retries_ = 0;
     if (!iss_mission_) {
@@ -70,14 +87,14 @@ void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) 
         return;
     }
     if (iss_mission_->from_launch) {
-        iss_enter(IssMissionLeg::Ascent, "Aufstieg");
+        iss_enter(IssMissionLeg::Ascent, leg_report(IssMissionLeg::Ascent));
     } else if (iss_mission_->transfer && docked()) {
         // through the Docked gate: an active docking autopilot hands over first (r5 minor: start_transfer refused it)
-        iss_enter(IssMissionLeg::Docked, "Angedockt");
+        iss_enter(IssMissionLeg::Docked, leg_report(IssMissionLeg::Docked));
     } else if (iss_mission_->undock_epoch) {
-        iss_enter(IssMissionLeg::WaitUndock, "Angedockt: Abkoppeln geplant");
+        iss_enter(IssMissionLeg::WaitUndock, simple(report::Code::iss_undock_planned));
     } else {
-        iss_enter(IssMissionLeg::Rendezvous, "Phasenflug");
+        iss_enter(IssMissionLeg::Rendezvous, leg_report(IssMissionLeg::Rendezvous));
     }
 }
 
@@ -86,7 +103,7 @@ void FlightSession::mark_rendezvous_at_waypoint0_for_test() {
     rendezvous_status_ = "Wegpunkt 0 erreicht";
 }
 
-void FlightSession::iss_enter(IssMissionLeg leg, std::string status) {
+void FlightSession::iss_enter(IssMissionLeg leg, report::Report status) {
     iss_leg_ = leg;
     release_background_tasks();  // leaving Docked orphans a running reserve
     iss_status_ = std::move(status);
@@ -98,7 +115,9 @@ void FlightSession::iss_enter(IssMissionLeg leg, std::string status) {
     iss_marks_.push_back(mark);
 }
 
-void FlightSession::iss_end(const std::string& reason) { iss_enter(IssMissionLeg::Ended, "Mission beendet: " + reason); }
+void FlightSession::iss_end(report::Report reason) {
+    iss_enter(IssMissionLeg::Ended, report::with_cause(report::make(report::Code::iss_ended), std::move(reason)));
+}
 
 void FlightSession::iss_start_transfer() {
     const auto& q = *iss_mission_;
@@ -118,11 +137,11 @@ void FlightSession::iss_start_transfer() {
         r.limit_kg = {main_free_kg(v, config::TankContents::Oxidizer), main_free_kg(v, config::TankContents::Fuel)};
         request = r;
     }
-    if (!request) return iss_end(reason);
+    if (!request) return iss_end(report::legacy(reason));
     if (!start_transfer(*request)) {
-        return iss_end(transfer_ && transfer_->active() ? docking_status_ : transfer_state().status);
+        return iss_end(report::legacy(transfer_ && transfer_->active() ? docking_status_ : transfer_state().status));
     }
-    iss_enter(IssMissionLeg::Transfer, "Treibstofftransfer");
+    iss_enter(IssMissionLeg::Transfer, leg_report(IssMissionLeg::Transfer));
 }
 
 void FlightSession::iss_start_raise(bool first) {
@@ -158,9 +177,9 @@ void FlightSession::iss_start_raise(bool first) {
             phasing.earliest_arrival_s = std::max(0.0, phasing.earliest_arrival_s - used_s);
         }
         if (plan_rendezvous(phasing)) {
-            iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
+            iss_enter(IssMissionLeg::Rendezvous, leg_status(IssMissionLeg::Rendezvous, report::legacy(rendezvous_status_)));
         } else {
-            iss_end(rendezvous_status_);
+            iss_end(report::legacy(rendezvous_status_));
         }
         return;
     }
@@ -169,8 +188,8 @@ void FlightSession::iss_start_raise(bool first) {
     const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
     const bool started = start_burn(*node, groups.empty() ? burn_configurations() : burn_configurations(&groups), true,
                                     small_burn_transient_share);
-    if (!started) return iss_end("Phasing-Bahn anheben nicht möglich");
-    iss_enter(IssMissionLeg::Raise, "Phasing-Bahn anheben");
+    if (!started) return iss_end(simple(report::Code::iss_raise_not_possible));
+    iss_enter(IssMissionLeg::Raise, leg_report(IssMissionLeg::Raise));
 }
 
 bool FlightSession::iss_mission_pending() const {
@@ -221,17 +240,21 @@ void FlightSession::run_iss_mission() {
     const auto& q = *iss_mission_;
     // the running leg's status line
     switch (iss_leg_) {
-        case IssMissionLeg::Rendezvous: iss_status_ = "Phasenflug: " + rendezvous_status_; break;
-        case IssMissionLeg::Proximity: iss_status_ = "Annäherung: " + proximity_status_; break;
-        case IssMissionLeg::Docking: iss_status_ = "Andocken: " + docking_status_; break;
-        case IssMissionLeg::Transfer: iss_status_ = "Treibstofftransfer: " + transfer_state().status; break;
-        case IssMissionLeg::Departure: iss_status_ = "Abflug: " + docking_status_; break;
+        case IssMissionLeg::Rendezvous:
+            iss_status_ = leg_status(iss_leg_, report::legacy(rendezvous_status_));
+            break;
+        case IssMissionLeg::Proximity: iss_status_ = leg_status(iss_leg_, report::legacy(proximity_status_)); break;
+        case IssMissionLeg::Docking: iss_status_ = leg_status(iss_leg_, report::legacy(docking_status_)); break;
+        case IssMissionLeg::Transfer:
+            iss_status_ = leg_status(iss_leg_, report::legacy(transfer_state().status));
+            break;
+        case IssMissionLeg::Departure: iss_status_ = leg_status(iss_leg_, report::legacy(docking_status_)); break;
         default: break;
     }
     // Refuelling f3: an unsettled in-orbit ignition lost the engines - whatever leg flew it, the mission ends.
     if (iss_leg_ != IssMissionLeg::None && iss_leg_ != IssMissionLeg::Complete && iss_leg_ != IssMissionLeg::Ended &&
         burn_abort_reason_.rfind("Gasansaugung", 0) == 0) {
-        return iss_end(burn_abort_reason_);
+        return iss_end(report::legacy(burn_abort_reason_));
     }
     if (!iss_mission_pending()) return;
     const bool lost = bodies_[controlled_].body->impacted();
@@ -239,20 +262,20 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::Ascent:
             if (q.ascent_to_station) {
                 make_station(controlled_);
-                iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: Depot im Orbit");
+                iss_enter(IssMissionLeg::Complete, completed(report::Code::iss_reason_depot_in_orbit));
             } else if (q.raise_to) {
                 iss_start_raise(true);
             } else if (plan_rendezvous(q.phasing)) {
-                iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
+                iss_enter(IssMissionLeg::Rendezvous, leg_status(IssMissionLeg::Rendezvous, report::legacy(rendezvous_status_)));
             } else {
-                iss_end(rendezvous_status_);
+                iss_end(report::legacy(rendezvous_status_));
             }
             return;
         case IssMissionLeg::Raise:
             if (lost) {
-                iss_end("Fahrzeug verloren");
+                iss_end(simple(report::Code::iss_vehicle_lost));
             } else if (!burn_abort_reason_.empty()) {  // a raise burn that ran dry is not flown (r5 minor)
-                iss_end(burn_abort_reason_);
+                iss_end(report::legacy(burn_abort_reason_));
             } else if (bodies_[controlled_].body->vehicle().any_engine_producing_thrust()) {
                 // f1: wait for the tail-off - a next burn started during it counted the residual thrust as its
                 // ignition (the leg stays pending, so the session keeps ticking instead of coasting)
@@ -262,13 +285,13 @@ void FlightSession::run_iss_mission() {
             return;
         case IssMissionLeg::Rendezvous:
             if (lost) {
-                iss_end("Fahrzeug verloren");
+                iss_end(simple(report::Code::iss_vehicle_lost));
             } else if (rendezvous_step_ == RendezvousStep::None) {
-                iss_end(rendezvous_status_);
+                iss_end(report::legacy(rendezvous_status_));
             } else if (start_proximity(q.station_port, q.proximity)) {
-                iss_enter(IssMissionLeg::Proximity, "Annäherung: " + proximity_status_);
+                iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, report::legacy(proximity_status_)));
             } else {
-                iss_end(proximity_status_);
+                iss_end(report::legacy(proximity_status_));
             }
             return;
         case IssMissionLeg::Proximity:
@@ -277,25 +300,29 @@ void FlightSession::run_iss_mission() {
                 proximity_waiting_after_capture_failure() && !docking_busy() && !lost &&
                 !collision_impulse_ns()) {  // waiting at Waypoint 2 after a failed capture: resume or give up (r5)
                 if (iss_capture_retries_ >= q.max_capture_retries) {
-                    iss_end("Andocken fehlgeschlagen nach " + std::to_string(iss_capture_retries_) + " Neuversuchen");
+                    iss_end(report::make(report::Code::iss_docking_failed_after_retries,
+                                         {report::count("retries", iss_capture_retries_)}));
                 } else if (proximity_resume()) {
                     ++iss_capture_retries_;
-                    iss_enter(IssMissionLeg::Proximity, "Annäherung: neuer Anflug " + std::to_string(iss_capture_retries_));
+                    iss_enter(IssMissionLeg::Proximity,
+                              report::make(report::Code::iss_proximity_retry, {report::count("retry", iss_capture_retries_)}));
                 } else {
-                    iss_end(proximity_status_);
+                    iss_end(report::legacy(proximity_status_));
                 }
                 return;
             }
             if (collision_impulse_ns()) {
-                iss_end("Kollision");
+                iss_end(simple(report::Code::iss_collision));
             } else if (lost) {
-                iss_end("Fahrzeug verloren");
+                iss_end(simple(report::Code::iss_vehicle_lost));
             } else if (docked()) {
-                iss_enter(IssMissionLeg::Docked, "Mission abgeschlossen: angedockt an " + q.station_port);
+                iss_enter(IssMissionLeg::Docked,
+                          completed(report::Code::iss_reason_docked,
+                                    {report::ref("port", "place.port." + q.station_port)}));
             } else if (docking_busy()) {
-                iss_enter(IssMissionLeg::Docking, "Andocken: " + docking_status_);
+                iss_enter(IssMissionLeg::Docking, leg_status(IssMissionLeg::Docking, report::legacy(docking_status_)));
             } else {  // a failed capture: the proximity flight retreats to Waypoint 2 and waits for resume
-                iss_enter(IssMissionLeg::Proximity, "Annäherung: " + proximity_status_);
+                iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, report::legacy(proximity_status_)));
             }
             return;
         case IssMissionLeg::Docked:
@@ -303,31 +330,31 @@ void FlightSession::run_iss_mission() {
             return;
         case IssMissionLeg::Transfer:
             if (collision_impulse_ns()) {  // r5 minor: a collision stops the transfer; report the collision
-                iss_end("Kollision");
+                iss_end(simple(report::Code::iss_collision));
             } else if (transfer_state().phase == TransferPhase::Stopped) {
-                iss_end(transfer_state().status);
+                iss_end(report::legacy(transfer_state().status));
             } else if (undock()) {
-                iss_enter(IssMissionLeg::Departure, "Abflug: " + docking_status_);
+                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, report::legacy(docking_status_)));
             } else {
-                iss_end(docking_status_);
+                iss_end(report::legacy(docking_status_));
             }
             return;
         case IssMissionLeg::WaitUndock:
             if (!docked()) {  // the hooks are opening already: the pilot undocked early
-                iss_enter(IssMissionLeg::Departure, "Abflug: " + docking_status_);
+                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, report::legacy(docking_status_)));
             } else if (undock()) {
-                iss_enter(IssMissionLeg::Departure, "Abflug: " + docking_status_);
+                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, report::legacy(docking_status_)));
             } else {
-                iss_end(docking_status_);
+                iss_end(report::legacy(docking_status_));
             }
             return;
         case IssMissionLeg::Departure: {
             if (collision_impulse_ns()) {
-                iss_end("Kollision");
+                iss_end(simple(report::Code::iss_collision));
                 return;
             }
             if (lost) {
-                iss_end("Fahrzeug verloren");
+                iss_end(simple(report::Code::iss_vehicle_lost));
                 return;
             }
             if (q.ship_return) {
@@ -340,49 +367,51 @@ void FlightSession::run_iss_mission() {
                 // the latest request's outcome (the pilot's key R may have replaced this one: its plan is flown)
                 const auto outcome = ship_return_outcome();
                 if (!outcome) {
-                    iss_status_ = "Abflug: Rückkehr wird geplant";
+                    iss_status_ = simple(report::Code::iss_departure_planning_return);
                     return;
                 }
                 iss_return_requested_ = false;
                 if (*outcome) {
-                    iss_enter(IssMissionLeg::Return, "Rückkehr geplant");
+                    iss_enter(IssMissionLeg::Return, simple(report::Code::iss_return_planned));
                 } else {
-                    iss_end(ship_return_plan() ? ship_return_plan()->reason : std::string("Rückkehr nicht möglich"));
+                    iss_end(ship_return_plan() ? report::legacy(ship_return_plan()->reason)
+                                               : simple(report::Code::iss_return_not_possible));
                 }
                 return;
             }
             if (q.continuation) {
-                iss_enter(IssMissionLeg::WaitContinue, "Warten auf Fortsetzung");
+                iss_enter(IssMissionLeg::WaitContinue, leg_report(IssMissionLeg::WaitContinue));
                 return;
             }
             if (!q.capsule_return) {  // a departure without a return: complete at the exit of the approach ellipsoid
-                iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: abgeflogen");
+                iss_enter(IssMissionLeg::Complete, completed(report::Code::iss_reason_departed));
                 return;
             }
             auto p = *q.capsule_return;
             if (q.deorbit_epoch) p.lead_s = std::max(p.lead_s, *q.deorbit_epoch - epoch_ - iss_return_lead_margin_s);
             if (plan_capsule_return(p)) {
-                iss_enter(IssMissionLeg::Return, "Rückkehr geplant");
+                iss_enter(IssMissionLeg::Return, simple(report::Code::iss_return_planned));
             } else {
-                iss_end(deorbit_plan_ ? deorbit_plan_->reason : std::string("Rückkehr nicht möglich"));
+                iss_end(deorbit_plan_ ? report::legacy(deorbit_plan_->reason) : simple(report::Code::iss_return_not_possible));
             }
             return;
         }
         case IssMissionLeg::Return:
             if (q.ship_return) {
                 if (bodies_[controlled_].body->caught()) {
-                    iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: gefangen");
+                    iss_enter(IssMissionLeg::Complete, completed(report::Code::iss_reason_caught));
                 } else if (!ship_return_ && !lost && !bodies_[controlled_].body->resting()) {
-                    iss_end(burn_abort_reason_.empty() ? std::string("Rückkehr abgebrochen") : burn_abort_reason_);
+                    iss_end(burn_abort_reason_.empty() ? simple(report::Code::iss_return_aborted)
+                                                   : report::legacy(burn_abort_reason_));
                 } else {
-                    iss_end(lost ? "Schiff verloren" : "Schiff nicht gefangen");
+                    iss_end(simple(lost ? report::Code::iss_ship_lost : report::Code::iss_ship_not_caught));
                 }
                 return;
             }
             if (capsule_return_step_ == CapsuleReturnStep::SplashedDown) {
-                iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: gewassert");
+                iss_enter(IssMissionLeg::Complete, completed(report::Code::iss_reason_splashed_down));
             } else {
-                iss_end("Kapsel verloren");
+                iss_end(simple(report::Code::iss_capsule_lost));
             }
             return;
         case IssMissionLeg::WaitContinue: {
@@ -391,9 +420,9 @@ void FlightSession::run_iss_mission() {
             const std::string refusal = continuation(*this);
             if (!iss_mission_ || iss_generation_ != generation) return;  // ended, or a new sequence runs
             if (refusal.empty()) {
-                iss_enter(IssMissionLeg::Complete, "Mission fortgesetzt");
+                iss_enter(IssMissionLeg::Complete, simple(report::Code::iss_continued));
             } else {
-                iss_end(refusal);
+                iss_end(report::legacy(refusal));
             }
             return;
         }

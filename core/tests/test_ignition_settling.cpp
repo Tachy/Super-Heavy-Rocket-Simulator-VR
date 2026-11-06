@@ -367,7 +367,7 @@ TEST_CASE("The autopilot settles before a raise burn and the burn flies", "[igni
         f.session.advance_to(f.session.epoch() + 10.0);
         seen = seen || f.session.settling();
     }
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK(seen);
     CHECK(f.session.iss_mission_leg() == sim::IssMissionLeg::Rendezvous);
     CHECK_FALSE(f.any_failed());

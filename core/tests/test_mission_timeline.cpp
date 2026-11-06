@@ -1200,7 +1200,7 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe][ascent_planner]") {
         }
     }
     std::printf("  [probe] flown %.0f s, leg %s: %s; %zu bodies\n", session.epoch() - start,
-                sim::id_of(session.iss_mission_leg()), session.iss_mission_status().c_str(), session.body_count());
+                sim::id_of(session.iss_mission_leg()), report::transitional_text(session.iss_mission_status()).c_str(), session.body_count());
     (void)st;
 }
 

@@ -78,6 +78,29 @@ const char* id_of(Kind kind) {
     return "number";
 }
 
+Report legacy(std::string text) { return make(Code::legacy, {legacy_text("text", std::move(text))}); }
+
+std::string transitional_text(const Report& report) {
+    if (report.code == Code::legacy && !report.params.empty()) return report.params.front().text;
+    std::string out(id_of(report.code));
+    if (report.params.empty() && report.causes.empty()) return out;
+    out += '(';
+    bool first = true;
+    for (const Param& p : report.params) {
+        if (!first) out += ", ";
+        first = false;
+        out += p.name;
+        out += '=';
+        out += (p.kind == Kind::ref || p.kind == Kind::legacy_text) ? p.text : std::to_string(p.value_si);
+    }
+    for (const Report& c : report.causes) {
+        if (!first) out += ", ";
+        first = false;
+        out += "cause=" + transitional_text(c);
+    }
+    return out + ')';
+}
+
 Refusal::Refusal(Report report)
     : std::runtime_error(std::string(id_of(report.code))), report_(std::move(report)) {}
 

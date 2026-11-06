@@ -9,6 +9,7 @@
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/math/state_vector.hpp"
 #include "starsim/orbit/oem.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/time/epoch.hpp"
 #include "starsim/time/time_scale_converter.hpp"
 
@@ -30,10 +31,10 @@ struct StationStart {
     time::Epoch epoch;                     // of state_gcrf
     std::vector<StationImpulse> impulses;  // events with DV > 0 after the start epoch, sorted by epoch
     bool from_oem = false;
-    std::string note;                      // German: which source was used (and why), shown by the mission
+    report::Report note;                   // which source was used (and why), shown by the mission
 };
 
-// The ISS at `epoch`. Oem: the archive file covering the epoch, else std::runtime_error (German message). Synthetic:
+// The ISS at `epoch`. Oem: the archive file covering the epoch, else std::runtime_error. Synthetic:
 // mean elements of archive.latest() (or the config's reference orbit without any file), advanced by J2 in the true
 // equator frame (`earth`: the Earth's orientation, see orbit/synthetic_station_orbit.hpp); the argument of latitude
 // from the scenario (default: the advanced one). Auto: Oem where covered, else Synthetic (note says so).

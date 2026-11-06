@@ -128,7 +128,7 @@ double descent_delta_v_mps(const DescentResult& r) {
     return 380.0 * g0 * std::log(r.m0 / m_drop) + 350.0 * g0 * std::log(m_drop / r.m1);
 }
 
-void report(const char* label, const Fixture& fx, const DescentResult& r) {
+void print_result(const char* label, const Fixture& fx, const DescentResult& r) {
     std::printf("[lunar_descent] %s: %s, offset %.2f m, sink %.2f m/s, lateral %.2f m/s, braking %.0f s, total %.0f s, "
                 "%.1f -> %.1f (drop) -> %.1f t, %.0f m/s (%.0f m/s at 350 s), %s\n",
                 label, sim::id_of(r.outcome), r.offset_m, r.sink_mps, r.lateral_mps, r.braking_s, r.seconds,
@@ -145,7 +145,7 @@ TEST_CASE("The HLS brakes from PDI at the real mass and lands within 1 m",
         const auto r = fly_from_pdi(fx);
         char label[32];
         std::snprintf(label, sizeof(label), "%.0f t at PDI", r.m0 / 1000.0);
-        report(label, fx, r);
+        print_result(label, fx, r);
         CAPTURE(propellant);
         CHECK(fx.session.lunar_step() == sim::LunarStep::Landed);
         CHECK(r.outcome == sim::LegTouchdown::Landed);
@@ -164,7 +164,7 @@ TEST_CASE("The HLS deploys its legs before the approach and keeps them out for t
     fx.place_at_pdi(test::hls_pdi_propellant_kg);
     REQUIRE(fx.session.body(0).vehicle().leg_deployment() == 0.0);  // in the orbit: stowed
     const auto r = fly_from_pdi(fx);
-    report("legs", fx, r);
+    print_result("legs", fx, r);
     const auto& stage = fx.session.body(0).vehicle().stages().front().config;
     const auto p = gnc::lunar_landing_parameters(stage);
     std::printf("[lunar_descent] legs: %.2f at PDI, out at t_go %.1f s (rule %.1f s), %.2f at the hand-over, %.2f at contact\n",
@@ -191,7 +191,7 @@ TEST_CASE("A vacuum-Raptor failure early in the braking phase at the real mass: 
     Fixture fx;
     fx.place_at_pdi(test::hls_pdi_propellant_kg);
     const auto r = fly_from_pdi(fx, 30.0);
-    report("engine out 30 s after PDI", fx, r);
+    print_result("engine out 30 s after PDI", fx, r);
     CHECK(r.outcome == sim::LegTouchdown::Landed);
     CHECK(r.offset_m < 1.0);
     CHECK(descent_delta_v_mps(r) < 2600.0);

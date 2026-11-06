@@ -113,7 +113,7 @@ void RefuellingCampaignFlight::update(FlightSession& s) {
     if (s.station_index()) state_.depot_propellant_kg = main_kg(s, *s.station_index());
     switch (state_.phase) {
         case CampaignFlightPhase::DepotAscent:
-            if (s.iss_mission_leg() == IssMissionLeg::Ended) return end(s.iss_mission_status());
+            if (s.iss_mission_leg() == IssMissionLeg::Ended) return end(report::transitional_text(s.iss_mission_status()));
             if (s.iss_mission_leg() != IssMissionLeg::Complete || !s.station_index()) return;
             s.keep_only_station();  // the caught booster goes
             return begin(s);
@@ -218,7 +218,7 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
             state_.status = "Bahnhaltung des Depots";
             return;
         }
-        state_.status = "Bahnhaltung abgelehnt: " + s.reboost_status();
+        state_.status = "Bahnhaltung abgelehnt: " + report::transitional_text(s.reboost_status());
     }
     state_.phase = CampaignFlightPhase::WaitLaunch;
     state_.status = flight_name(!tanker, static_cast<int>(state_.rows.size()) + 1) + ": warten auf das Startfenster";
@@ -255,14 +255,15 @@ void RefuellingCampaignFlight::launch(FlightSession& s) {
 void RefuellingCampaignFlight::watch_flight(FlightSession& s) {
     const auto leg = s.iss_mission_leg();
     if (leg != IssMissionLeg::Complete && leg != IssMissionLeg::Ended) {
-        state_.status = flight_name(state_.rows.back().hls, state_.rows.back().number) + ": " + s.iss_mission_status();
+        state_.status = flight_name(state_.rows.back().hls, state_.rows.back().number) + ": " +
+                         report::transitional_text(s.iss_mission_status());
         return;
     }
     auto& row = state_.rows.back();
     row.failed = leg == IssMissionLeg::Ended;
     const size_t depot = *s.station_index();
     if (row.failed) {
-        row.note = s.iss_mission_status();
+        row.note = report::transitional_text(s.iss_mission_status());
         char range[64];
         std::snprintf(range, sizeof range, " (Abstand %.1f km)",
                       norm(s.body(s.controlled_index()).state().position_gcrf_m - s.body(depot).state().position_gcrf_m) /

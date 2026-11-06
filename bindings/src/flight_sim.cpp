@@ -308,17 +308,13 @@ FlightSim::Outcome FlightSim::mission_started(const sim::MissionStart& s, const 
     context_.mission_display_name = godot::String::utf8(config::mission_display_name(config_dir_, id).c_str());
     context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
     context_.mission_warnings = godot::Array();
-    std::string joined;
-    for (const auto& w : s.warnings) {
-        context_.mission_warnings.push_back(legacy_report(w));
-        joined += (joined.empty() ? "" : "; ") + w;
-    }
+    for (const auto& w : s.warnings) context_.mission_warnings.push_back(report_dict(w));
     const bool from_window = s.launch_window && s.launch_window->feasible;
     context_.iss_liftoff_tdb_s = from_window ? s.launch_window->liftoff.tdb_seconds_past_j2000() : 0.0;
     context_.iss_separation_tdb_s = from_window ? s.launch_window->separation.tdb_seconds_past_j2000() : 0.0;
     context_.iss_plane_bias_deg = from_window ? s.launch_window->plane_bias_rad * constants::rad_to_deg : 0.0;
     if (!s.refusal.empty()) return Outcome{false, legacy_report(s.refusal)};
-    return Outcome{true, legacy_report(joined)};
+    return Outcome{true, report_dict(report::Report{})};
 }
 
 int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latitude_deg, double longitude_deg,

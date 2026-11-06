@@ -199,7 +199,7 @@ godot::Dictionary build_iss_mission(const sim::FlightSession& session, const Sna
     godot::Dictionary d;
     d["present"] = true;
     d["leg"] = qualified_id("iss_mission_leg", sim::id_of(session.iss_mission_leg()));
-    d["status"] = legacy_report(session.iss_mission_status());
+    d["status"] = report_dict(session.iss_mission_status());
     d["port"] = q ? german(q->station_port) : godot::String();
     d["liftoff_tdb_s"] = context.iss_liftoff_tdb_s;
     d["separation_tdb_s"] = context.iss_separation_tdb_s;

@@ -111,7 +111,7 @@ TEST_CASE("Impulse signs from a manoeuvre OEM: retrograde, posigrade, near the w
         CHECK(s.impulses.front().name == c.name);
         CHECK(s.impulses.front().delta_v_mps == Catch::Approx(c.expected_mps));
         // an undeterminable sign is assumed posigrade (reboosts are) and the note says so
-        CHECK((s.note.find("posigrad") != std::string::npos) == c.assumed);
+        CHECK((s.note.code == report::Code::station_oem_source_assumed) == c.assumed);
     }
 }
 
@@ -154,7 +154,8 @@ TEST_CASE("ISS start: OEM, synthetic and auto", "[iss][station]") {
 
     const auto b = sim::iss_start(iss, archive, time, earth, outside, sim::IssOrbitSource::Auto);
     CHECK_FALSE(b.from_oem);
-    CHECK_FALSE(b.note.empty());
+    CHECK(b.note.code == report::Code::station_no_oem);
+    REQUIRE(b.note.causes.size() == 1);
     const double h = norm(b.state_gcrf.position_m) - constants::wgs84_semi_major_axis_m;
     CHECK(h / 1e3 == Catch::Approx(413.0).margin(15.0));
 

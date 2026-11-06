@@ -60,7 +60,7 @@ TEST_CASE("ISS mission: crew_dragon_iss from the window's separation to hard cap
     CHECK(st.epoch == st.launch_window->separation);
     const double kg0 = f.session.body(f.session.controlled_index()).vehicle().rcs_propellant_kg();
     fly(f.session, [&] { return f.session.iss_mission_leg() == IssMissionLeg::Docked; }, 30.0 * 3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Docked);
     // the Dragon is held on the station now: its own tank still shows what the flight used
     const double used_kg = kg0 - f.session.body(f.session.controlled_index()).vehicle().rcs_propellant_kg();
@@ -86,7 +86,7 @@ TEST_CASE("ISS mission: crew_dragon_iss at IDA-3 with a set phase on the synthet
     CHECK_FALSE(st.launch_window);
     CHECK(st.epoch == f.clock.from_utc(m.epoch_utc));
     fly(f.session, [&] { return f.session.iss_mission_leg() == IssMissionLeg::Docked; }, 30.0 * 3600.0);
-    INFO(f.session.iss_mission_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()));
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Docked);
     if (verbose()) {
         std::printf("[iss_mission] crew_dragon_iss IDA-3, 40 deg, synthetic: docked %.1f h after the start\n",
@@ -142,7 +142,7 @@ TEST_CASE("ISS mission: the window's separation estimate matches the flown ascen
     while (s.iss_mission_leg() == IssMissionLeg::Ascent && s.epoch() - w.liftoff < 1800.0) {
         s.advance_to(s.epoch() + 1.0, 100000);
     }
-    INFO(s.iss_mission_status());
+    INFO(report::transitional_text(s.iss_mission_status()));
     REQUIRE(s.iss_mission_leg() == IssMissionLeg::Rendezvous);
     const auto& dragon = s.body(s.controlled_index()).state();
     const double dt = s.epoch() - w.separation;
@@ -191,7 +191,7 @@ TEST_CASE("ISS mission: falcon9_crew_dragon_iss from the pad to hard capture", "
     }
     const double kg0 = s.body(s.controlled_index()).vehicle().rcs_propellant_kg();
     fly(s, [&] { return s.iss_mission_leg() == IssMissionLeg::Docked; }, 30.0 * 3600.0);
-    INFO(s.iss_mission_status());
+    INFO(report::transitional_text(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Docked);
     CHECK(s.epoch() - st.launch_window->liftoff < m.mission_limit_s + 3.0 * 3600.0);
     if (verbose()) {
@@ -242,7 +242,7 @@ TEST_CASE("ISS mission: crew_dragon_iss_departure - undock timed to the pass, sp
         }
         s.advance_to(s.epoch() + step, 10000000);
     }
-    INFO(s.iss_mission_status());
+    INFO(report::transitional_text(s.iss_mission_status()));
     CHECK(s.iss_mission_leg() == IssMissionLeg::Complete);
     CHECK(s.capsule_return_step() == sim::CapsuleReturnStep::SplashedDown);
     REQUIRE(s.ship_return_plan());

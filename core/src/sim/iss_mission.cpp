@@ -30,7 +30,7 @@ config::VehicleConfig iss_vehicle(const std::filesystem::path& config_dir, const
             if (p.id == port) return iss;
         }
     }
-    throw std::runtime_error("Mission " + mission_id + ": unbekannter Andockport '" + port + "' an " + station_id);
+    throw std::runtime_error("Mission " + mission_id + ": unknown docking port '" + port + "' at " + station_id);
 }
 
 // The station's state at any epoch of one source. A scenario argument of latitude (synthetic orbit only) holds at
@@ -138,15 +138,15 @@ std::optional<time::Epoch> station_consistent_wait(const StationSource& station,
     return std::nullopt;
 }
 
-// German: the station impulses (reboosts) in [from, to].
+// The station impulses (reboosts) in [from, to], as warnings (the UTC time and the event name are shown as written).
 void reboost_warnings(const StationStart& st, time::Epoch from, time::Epoch to, const time::TimeScaleConverter& time,
-                      std::vector<std::string>& out) {
+                      report::Reports& out) {
     for (const auto& impulse : st.impulses) {
         if (impulse.epoch < from || impulse.epoch > to) continue;
-        char dv[32];
-        std::snprintf(dv, sizeof dv, "%.2f m/s", impulse.delta_v_mps);
-        out.push_back("Bahnmanöver der ISS um " + time.to_utc(impulse.epoch).to_iso_string().substr(0, 19) +
-                      " UTC: " + dv + " (" + impulse.name + ")");
+        out.push_back(report::make(
+            report::Code::station_reboost_maneuver,
+            {report::legacy_text("utc", time.to_utc(impulse.epoch).to_iso_string().substr(0, 19)),
+             report::speed("dv", impulse.delta_v_mps), report::legacy_text("name", impulse.name)}));
     }
 }
 
@@ -159,7 +159,7 @@ StationStart place_docked(FlightSession& session, const config::VehicleConfig& d
     for (const auto& stage : dragon.stages) {
         if (!stage.docking_ports.empty() && chaser_port.empty()) chaser_port = stage.docking_ports.front().id;
     }
-    if (chaser_port.empty()) throw std::runtime_error("Das Fahrzeug " + dragon.id + " hat keinen Andockport");
+    if (chaser_port.empty()) throw std::runtime_error("The vehicle " + dragon.id + " has no docking port");
     // anywhere near the station (dock_in_place moves it to the mated pose)
     const Vec3 radial = math::normalized(st.state_gcrf.position_m);
     session.place_in_orbit(dragon, {st.state_gcrf.position_m - 100.0 * radial, st.state_gcrf.velocity_mps}, epoch);
@@ -227,7 +227,7 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
         session.clear_bodies();  // the mission does not start
         return s;
     }
-    for (const auto& w : session.rendezvous_warnings()) s.warnings.push_back(w);
+    for (const auto& w : session.rendezvous_warnings()) s.warnings.push_back(report::legacy(w));  // Task 5
     IssMissionSequence q;
     q.station_port = mission.port;
     q.phasing = phasing;

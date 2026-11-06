@@ -61,8 +61,12 @@ StationStart from_oem(const config::VehicleConfig& iss, const orbit::Oem& oem, t
     std::sort(out.impulses.begin(), out.impulses.end(),
               [](const StationImpulse& a, const StationImpulse& b) { return a.epoch < b.epoch; });
     out.from_oem = true;
-    out.note = "ISS-Bahn: NASA-OEM vom " + header.creation_date;
-    if (!assumed.empty()) out.note += "; Manöver am Rand der Daten als posigrad angenommen: " + assumed;
+    // the OEM's creation date and the event names are data from the file, shown as written
+    out.note = assumed.empty() ? report::make(report::Code::station_oem_source,
+                                              {report::legacy_text("date", header.creation_date)})
+                               : report::make(report::Code::station_oem_source_assumed,
+                                              {report::legacy_text("date", header.creation_date),
+                                               report::legacy_text("maneuvers", assumed)});
     return out;
 }
 
@@ -70,20 +74,19 @@ StationStart synthetic(const config::VehicleConfig& iss, const orbit::OemArchive
                        const time::TimeScaleConverter& time, const frames::BodyOrientation& earth, time::Epoch epoch,
                        std::optional<double> argument_of_latitude_rad) {
     orbit::StationMeanElements mean;
-    std::string origin;
+    std::optional<std::string> oem_date;  // the OEM the orbital plane comes from; none: the configuration
     if (const orbit::Oem* latest = archive.latest()) {
         mean = orbit::mean_elements_from_oem(*latest, gm, earth);
-        origin = "Bahnebene aus dem OEM vom " + latest->header().creation_date;
+        oem_date = latest->header().creation_date;
     } else {
         const auto& reference = iss.stages.front().reference_orbit;
-        if (!reference) throw std::runtime_error("Die ISS-Konfiguration hat keine Referenzbahn ([stage.station.reference_orbit]).");
+        if (!reference) throw std::runtime_error("The ISS configuration has no reference orbit ([stage.station.reference_orbit]).");
         const auto utc = time::UtcDateTime::parse_iso(reference->reference_utc);
-        if (!utc) throw std::runtime_error("Ungültige reference_utc der ISS-Referenzbahn: " + reference->reference_utc);
+        if (!utc) throw std::runtime_error("Invalid reference_utc of the ISS reference orbit: " + reference->reference_utc);
         mean.epoch = time.from_utc(*utc);
         mean.semi_major_axis_m = equatorial_radius_m + reference->altitude_m;
         mean.inclination_rad = reference->inclination_rad;
         mean.raan_rad = reference->raan_rad;
-        origin = "aus der Konfiguration";
     }
     const auto advanced = orbit::advance_mean_elements(mean, epoch, gm, constants::earth_j2, equatorial_radius_m,
                                                        argument_of_latitude_rad);
@@ -91,7 +94,8 @@ StationStart synthetic(const config::VehicleConfig& iss, const orbit::OemArchive
     out.vehicle = iss;
     out.state_gcrf = orbit::synthetic_station_state(advanced, gm, earth);
     out.epoch = epoch;
-    out.note = "ISS-Bahn: synthetische Referenzbahn (" + origin + ")";
+    out.note = oem_date ? report::make(report::Code::station_synthetic_from_oem, {report::legacy_text("date", *oem_date)})
+                        : report::make(report::Code::station_synthetic_from_config);
     return out;
 }
 
@@ -123,7 +127,7 @@ StationStart iss_start(const config::VehicleConfig& iss, const orbit::OemArchive
     }
     if (covering) return from_oem(iss, *covering, epoch);
     auto out = synthetic(iss, archive, time, earth, epoch, argument_of_latitude_rad);
-    out.note = "Kein OEM für dieses Datum: synthetische Referenzbahn. " + out.note;
+    out.note = report::with_cause(report::make(report::Code::station_no_oem), std::move(out.note));
     return out;
 }
 

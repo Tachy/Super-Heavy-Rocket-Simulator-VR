@@ -24,7 +24,7 @@ struct MissionStart {
     // planned (outbound flight, budget) and its legs chained
     bool return_planned = false;
     std::string refusal;  // lunar landing: German reason when refused (start_lunar_landing_mission)
-    std::vector<std::string> warnings;  // ISS missions: the ISS source note, station reboosts in the mission window
+    report::Reports warnings;  // ISS missions: the ISS source note, station reboosts in the mission window
     std::optional<mission::LaunchWindow> launch_window;  // ISS launch / rendezvous from a window's separation
 };
 
