@@ -68,7 +68,7 @@ TEST_CASE("The ship's heat shield fails beyond its heat-rate limit", "[heating][
     auto body = ship(40000.0, {7000.0, 0.0, 0.0});  // nose first: little drag, ~1.5 MW/m^2
     fly(*body, world, 0.1);
     CHECK(body->impacted());
-    CHECK(body->breakup_reason() == "Hitzeschild versagt");
+    CHECK(body->breakup_reason().code == report::Code::breakup_heat_shield_failed);
 }
 
 TEST_CASE("Heat load integrates the heat rate; a warning comes before the limit", "[heating][vehicle]") {
@@ -76,7 +76,7 @@ TEST_CASE("Heat load integrates the heat rate; a warning comes before the limit"
     auto body = ship(40000.0, {7000.0, 0.0, 0.0}, 1.0e7);
     fly(*body, world, 1.0);
     REQUIRE_FALSE(body->impacted());
-    CHECK(body->breakup_reason().empty());
+    CHECK(body->breakup_reason().ok());
     CHECK(body->peak_heat_rate_w_m2() > 1.4e6);
     CHECK(body->heat_load_j_m2() == Approx(body->peak_heat_rate_w_m2() * 1.0).epsilon(0.02));
     CHECK_FALSE(body->heat_warning());  // 15 % of the raised limit
@@ -91,7 +91,7 @@ TEST_CASE("A belly-first ship breaks up beyond its load limit", "[heating][vehic
     auto body = ship(40000.0, {0.0, 0.0, -7000.0}, 1.0e8);  // broadside at 40 km: ~17 g
     fly(*body, world, 0.1);
     CHECK(body->impacted());
-    CHECK(body->breakup_reason() == "Strukturüberlast");
+    CHECK(body->breakup_reason().code == report::Code::breakup_structural_overload);
 }
 
 TEST_CASE("Vehicles without a heat shield and stacks are not judged", "[heating][vehicle]") {

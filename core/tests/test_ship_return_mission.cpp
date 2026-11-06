@@ -245,8 +245,8 @@ TEST_CASE("A burn on dry main tanks is aborted with a reason", "[ship][session][
         session.advance_to(session.epoch() + 60.0, 400000);
     }
     CHECK(session.autopilot().state != sim::AutopilotState::Burn);
-    INFO(session.burn_abort_reason());
-    CHECK(session.burn_abort_reason().find("Treibstoff") != std::string::npos);
+    INFO(report::describe(session.burn_abort_reason()));
+    CHECK(session.burn_abort_reason().code == report::Code::burn_aborted_no_propellant);
 }
 
 TEST_CASE("A burn whose engines failed is aborted as a failure, not as empty tanks", "[ship][session][deorbit][boil_off]") {
@@ -264,7 +264,7 @@ TEST_CASE("A burn whose engines failed is aborted as a failure, not as empty tan
         session.advance_to(session.epoch() + 60.0, 400000);
     }
     CHECK(session.autopilot().state != sim::AutopilotState::Burn);
-    CHECK_THAT(session.burn_abort_reason(), Catch::Matchers::ContainsSubstring("ausgefallen"));
+    CHECK(session.burn_abort_reason().code == report::Code::burn_aborted_engines_failed);
 }
 
 TEST_CASE("A deorbit re-plan keeps the boil-off until its burn", "[ship][session][deorbit][boil_off]") {
@@ -297,7 +297,7 @@ TEST_CASE("A ship return vents the residue its flaps cannot trim before the entr
     const double main_before_kg = session.body(0).vehicle().main_propellant_kg();
     CHECK(planned_vent_kg > 10000.0);
     while (session.autopilot().state == sim::AutopilotState::Burn) session.advance_to(session.epoch() + 60.0, 400000);
-    INFO(session.burn_abort_reason());
+    INFO(report::describe(session.burn_abort_reason()));
     REQUIRE(session.autopilot().state == sim::AutopilotState::Return);
     const auto& vehicle = session.body(0).vehicle();
     const auto headers = [&] { return vehicle.propellant_kg() - vehicle.main_propellant_kg(); };
@@ -357,7 +357,7 @@ TEST_CASE("A ship return with a heavy residue vents part of it before the burn",
                 (plan.node.epoch - session.epoch()) / 3600.0);
     REQUIRE(plan.entry_vent_kg / rate > coast_s);  // the premise: the coast alone is too short
     while (session.autopilot().state == sim::AutopilotState::Burn) session.advance_to(session.epoch() + 60.0, 400000);
-    INFO(session.burn_abort_reason());
+    INFO(report::describe(session.burn_abort_reason()));
     REQUIRE(session.autopilot().state == sim::AutopilotState::Return);
     const double vented_before_burn_kg = session.entry_vented_kg();
     while (!session.entry_guidance(0) && session.epoch() - session.ship_return_plan()->entry_interface_epoch < 0.0) {

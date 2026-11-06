@@ -99,7 +99,7 @@ struct Run {
     double peak_heat_w_m2 = 0.0, peak_load_g = 0.0, propellant_t = 0.0;
     double braking_height_m = 0.0;  // geodetic height of the braking burn's centre
     std::pair<double, double> exit_apsides{0.0, 0.0}, raised_apsides{0.0, 0.0};
-    std::string breakup;
+    report::Report breakup;
     report::Report status, braking_status;
 };
 
@@ -262,7 +262,7 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
                         r.exit_apsides.second / 1000.0, r.raised_apsides.first / 1000.0, r.raised_apsides.second / 1000.0);
         }
         std::printf(" | %s | %s, %.1f t left, %s%s%s\n", report::describe(r.braking_status).c_str(), r.caught ? "caught" : sim::id_of(r.result), r.propellant_t,
-                    report::describe(r.status).c_str(), r.breakup.empty() ? "" : " / ", r.breakup.c_str());
+                    report::describe(r.status).c_str(), r.breakup.ok() ? "" : " / ", report::describe(r.breakup).c_str());
         std::fflush(stdout);
         // The checks of the former nominal case "Lunar return direct: the ship is caught at Starbase" (test_lunar_return_session
         // .cpp): the braking burn at the mission's [return] braking_height_km 2000 km +-50 km, the shield intact
@@ -270,7 +270,7 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
         std::printf("%s case %2u: braking burn at %.0f km\n", tag, seed, r.braking_height_m / 1000.0);
         bool ok = r.caught && r.peak_heat_w_m2 < 1.2e6;
         if (!aircatch) {
-            ok = ok && std::abs(r.braking_height_m - 2000e3) < 50e3 && r.breakup.find("Hitzeschild") == std::string::npos &&
+            ok = ok && std::abs(r.braking_height_m - 2000e3) < 50e3 && r.breakup.code != report::Code::breakup_heat_shield_failed &&
                  r.propellant_t >= 0.0;
         }
         if (aircatch) ok = ok && r.raised && r.raised_apsides.first > 150e3;

@@ -453,8 +453,8 @@ void FlightSession::run_autopilot() {
                 cutoff();
                 ship_return_ = false;
                 disengage_autopilot();  // the lunar / rendezvous step machines end with it (no half state)
-                burn_abort_reason_ = failed ? "Brennvorgang abgebrochen: Triebwerke ausgefallen"
-                                            : "Brennvorgang abgebrochen: kein Treibstoff für die Triebwerke";
+                burn_abort_reason_ = report::make(failed ? report::Code::burn_aborted_engines_failed
+                                                         : report::Code::burn_aborted_no_propellant);
                 break;
             }
             if (autopilot_.burn.complete) {
@@ -819,7 +819,7 @@ void FlightSession::reset_mission_state() {
     reset_proximity();
     departure_.reset();
     settle_manual_ = false;  // f3: a manual push does not carry into a new flight
-    burn_abort_reason_.clear();  // f2 review I1: a gas ingestion ended the last flight, not the next one
+    burn_abort_reason_ = {};  // f2 review I1: a gas ingestion ended the last flight, not the next one
     scheduled_liftoff_.reset();
     rcs_burn_lit_ = false;
     meco_to_boostback_s_ = 0.0;  // Task 5 minor: the last flight's MECO -> boostback forecast does not carry over
@@ -1184,7 +1184,7 @@ void FlightSession::report_gas_ingestion() {
     cutoff();
     ship_return_ = false;
     disengage_autopilot();  // the lunar / rendezvous step machines end with it (no half state)
-    burn_abort_reason_ = gas_ingestion_reason;
+    burn_abort_reason_ = report::make(report::Code::burn_gas_ingestion);
 }
 
 void FlightSession::ignite() {

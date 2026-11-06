@@ -143,7 +143,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
             if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
                 std::printf("  [ascent planner] impact T+%.1f s, state %s, %zu bodies, speed %.1f m/s: %s\n",
                             session.mission_time_s(), id_of(state), session.body_count(),
-                            math::norm(body.state().velocity_gcrf_mps), body.breakup_reason().c_str());
+                            math::norm(body.state().velocity_gcrf_mps), report::describe(body.breakup_reason()).c_str());
             }
             return {nan, report::make(report::Code::ascent_trial_crashed)};
         }

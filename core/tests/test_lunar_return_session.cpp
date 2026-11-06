@@ -126,7 +126,7 @@ void fly_direct_to_catch(test::LunarReturnSession& t) {
         }
     }
     INFO(report::describe(t.session.lunar_status()));
-    INFO(body.breakup_reason());
+    INFO(report::describe(body.breakup_reason()));
     const auto* braking = burn_of(t.session, sim::LunarStep::Braking);
     std::printf("[lunar return] TEI %.1f m/s (plan %.1f), braking %.1f m/s (plan %.1f), entry %.0f m/s %.2f deg, peak heat "
                 "%.0f kW/m2 (radiative %.0f), peak load %.2f g, %s, %.1f t left\n",
@@ -147,7 +147,7 @@ void fly_direct_to_catch(test::LunarReturnSession& t) {
     }
     REQUIRE(braking != nullptr);
     CHECK(std::abs(geodetic_height_m(t, braking->centre_gcrf_m, braking->node.epoch) - braking_height_m) < 50e3);
-    CHECK(body.breakup_reason().find("Hitzeschild") == std::string::npos);
+    CHECK(body.breakup_reason().code != report::Code::breakup_heat_shield_failed);
     CHECK(body.peak_heat_rate_w_m2() < 1.2e6);
     CHECK(body.vehicle().propellant_kg() >= 0.0);
     CHECK(body.caught());
@@ -319,7 +319,7 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", 
         }
     }
     INFO(report::describe(t.session.lunar_status()));
-    INFO(body.breakup_reason());
+    INFO(report::describe(body.breakup_reason()));
     std::printf("[aircatch] exit %.1f x %.1f km, raised %.1f x %.1f km, deorbit %s, peak heat %.0f kW/m2, %s, "
                 "%.1f t left\n",
                 exit_apsides.first / 1000.0, exit_apsides.second / 1000.0, raised_apsides.first / 1000.0,
@@ -364,9 +364,9 @@ TEST_CASE("Aerocapture outcome names a capture that stays in the atmosphere", "[
     }
     t.session.advance_to(t.session.epoch() + 1.0, 200);  // an impact in a call's last tick: the step machine judges it
     INFO(report::describe(t.session.lunar_status()));
-    INFO(body.breakup_reason());
+    INFO(report::describe(body.breakup_reason()));
     std::printf("[aircatch dispersed] %s | %s | peak heat %.0f kW/m2\n", report::describe(t.session.lunar_status()).c_str(),
-                body.breakup_reason().c_str(), body.peak_heat_rate_w_m2() / 1000.0);
+                report::describe(body.breakup_reason()).c_str(), body.peak_heat_rate_w_m2() / 1000.0);
     CHECK(std::string(report::id_of(t.session.lunar_status().code)).rfind("lunar.aerocapture", 0) == 0);
     CHECK(t.session.autopilot().state == sim::AutopilotState::Off);
     CHECK(burn_of(t.session, sim::LunarStep::PerigeeRaise) == nullptr);

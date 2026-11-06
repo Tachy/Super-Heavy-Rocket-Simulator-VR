@@ -172,7 +172,7 @@ Outcome fly(const Case& c, int index) {
         std::cout << "case " << index << ": gamma " << c.gamma_deg << " v " << c.speed_mps << " range "
                   << c.range_offset_m / 1e3 << " km cross " << c.cross_offset_m / 1e3 << " km prop "
                   << c.propellant_kg / 1e3 << " t (vented " << vented_kg / 1e3 << " t) crossflow x" << c.crossflow_factor << " flap x" << c.flap_factor
-                  << " -> gate " << o.gate << " broken " << o.broken << " '" << body.breakup_reason() << "' after "
+                  << " -> gate " << o.gate << " broken " << o.broken << " '" << report::describe(body.breakup_reason()) << "' after "
                   << o.time_s << " s, miss " << o.miss_m << " m, belly " << o.belly_off_down_rad / deg << " deg, sink "
                   << o.sink_mps << " m/s, peak heat " << o.peak_heat_w_m2 / 1e3 << " kW/m2, load " << o.peak_load_g
                   << " g, hand-over ZEM " << o.handover_zem_m << " m at " << o.handover_height_m << " m\n";

@@ -217,7 +217,7 @@ ReplayResult replay(const char* file, double t_start, const char* name) {
     if (verbose) std::cout << name << ": speed rms " << r.speed_rms * 100 << " % over " << r.speed_points
                            << " s, below Mach 3 over altitude " << r.low_rms * 100 << " % over " << r.low_points
                            << " s, lift saturated " << r.saturated_fraction * 100 << " %, subsonic ratio "
-                           << r.subsonic_ratio << ", breakup '" << scenario.body().breakup_reason() << "'\n";
+                           << r.subsonic_ratio << ", breakup '" << report::describe(scenario.body().breakup_reason()) << "'\n";
     r.impacted = scenario.body().impacted();
     return r;
 }

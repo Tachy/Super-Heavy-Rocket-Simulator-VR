@@ -12,6 +12,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/math/state_vector.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/time/epoch.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -180,7 +181,7 @@ public:
     bool impacted() const { return impacted_; }
     bool resting() const { return resting_ || landed_; }  // carried by the ground after a gentle touchdown / landed
     // Entry (a single stage with a heat shield): stagnation heat rate of the last tick, its integral and peak.
-    // Exceeding a limit breaks the vehicle up (impacted() then true, breakup_reason() names the cause in German);
+    // Exceeding a limit breaks the vehicle up (impacted() then true, breakup_reason() names the cause as a report code);
     // heat_warning() from 80 % of a limit. Heating is integrated in step() only (coast() is for vacuum arcs).
     // heat_rate_w_m2() is convective plus radiative (env.radiative_heating, Earth air only); the radiative share alone:
     // radiative_heat_rate_w_m2().
@@ -191,7 +192,7 @@ public:
     bool heat_warning() const { return heat_warning_; }
     // The aerodynamic load exceeded the crew limit ([stage.heat_shield] crew_load_limit_g) at some point (stays set).
     bool crew_load_warning() const { return crew_load_warning_; }
-    const std::string& breakup_reason() const { return breakup_reason_; }
+    const report::Report& breakup_reason() const { return breakup_reason_; }
     // Skip-out ("Abprall"): after dipping below 80 km the vehicle climbed back above 100 km (set once, stays set).
     bool skipped_out() const { return skipped_out_; }
     // Accelerometer: aerodynamic acceleration (hull, fins, flaps; body axes) at the end of the last tick. Set while the
@@ -322,7 +323,7 @@ private:
     double peak_heat_rate_w_m2_ = 0.0;
     bool heat_warning_ = false;
     bool crew_load_warning_ = false;
-    std::string breakup_reason_;
+    report::Report breakup_reason_;
     bool entered_atmosphere_ = false;
     bool skipped_out_ = false;
     math::Vec3 aero_acceleration_body_mps2_;

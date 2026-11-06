@@ -126,7 +126,7 @@ godot::Dictionary telemetry(const sim::FlightSession& session, size_t index) {
     d["heat_rate_w_m2"] = body.heat_rate_w_m2();
     d["heat_load_j_m2"] = body.heat_load_j_m2();
     d["heat_warning"] = body.heat_warning();
-    d["breakup_reason"] = legacy_report(body.breakup_reason());
+    d["breakup_reason"] = report_dict(body.breakup_reason());
     d["skipped_out"] = body.skipped_out();
     if (const auto* e = session.entry_status(index)) {  // entry guidance setpoint (flight director)
         d["entry_phase"] = qualified_id("entry_phase", gnc::id_of(e->phase));
@@ -396,7 +396,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     d["has_direction"] = ap.state == sim::AutopilotState::Booster || ap.state == sim::AutopilotState::Staging ||
                          ap.state == sim::AutopilotState::UpperStage || burning;
     d["settling"] = session.settling();  // refuelling f3: the cold-gas push (autopilot or manual) is on
-    d["burn_abort_reason"] = legacy_report(session.burn_abort_reason());
+    d["burn_abort_reason"] = report_dict(session.burn_abort_reason());
     if (burning) {
         godot::Dictionary b;
         b["time_to_ignition_s"] = ap.burn.time_to_ignition_s;

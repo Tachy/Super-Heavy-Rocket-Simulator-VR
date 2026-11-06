@@ -129,8 +129,8 @@ public:
     int64_t plan_ship_return();
     // Node `seconds_from_now` ahead with orbit-relative components (prograde, normal, radial-out), m/s.
     int64_t plan_burn(double seconds_from_now, double prograde_mps, double normal_mps, double radial_mps);
-    // {state, phase, time_to_go_s, direction (GCRF), settling (f3: the push is on), burn_abort_reason (German; e.g.
-    //  "Gasansaugung ..." after an unsettled in-orbit ignition), burn: {time_to_ignition_s, remaining_dv_mps,
+    // {state, phase, time_to_go_s, direction (GCRF), settling (f3: the push is on), burn_abort_reason (report dict; e.g.
+    //  burn.gas_ingestion after an unsettled in-orbit ignition), burn: {time_to_ignition_s, remaining_dv_mps,
     //  burn_duration_s, direction}, return: {feasible, reason, delta_v_mps, propellant_t, burn_in_s, entry_in_s,
     //  crossrange_km}}
     godot::Dictionary autopilot_status() const;
@@ -169,7 +169,7 @@ public:
     // the other way), thrust_n, firing, duty (0..1 allocated this tick), starved (supply empty), blocked (behind a closed
     // nose cone, or a payload still stacked)}].
     godot::Array body_rcs(int index) const;
-    // Parachute sets: [{id, role, state (German: verstaut / offen / abgeworfen / Fallschirm gerissen), count,
+    // Parachute sets: [{id, role, state (qualified id parachute_state.<stowed|open|released|torn>), count,
     // attach_station_m (body), drag_area_m2 (now, all canopies), full_drag_area_m2, inflation (0..1), direction (body unit
     // vector from the riser point towards the canopies: against the point's air velocity; +x below 0.1 m/s),
     // peak_load_n, max_load_n (per canopy)}].

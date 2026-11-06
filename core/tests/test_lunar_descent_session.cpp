@@ -108,7 +108,7 @@ PdiRun fly_pdi(Fixture& fx, double settled, double after_pdi_s) {
         stage.settled = settled;
         fx.session.advance_to(pdi + after_pdi_s, 1);
         run.pushed = run.pushed || fx.session.settling();
-        if (fx.session.body(0).vehicle().any_engine_producing_thrust() || !fx.session.burn_abort_reason().empty()) {
+        if (fx.session.body(0).vehicle().any_engine_producing_thrust() || !fx.session.burn_abort_reason().ok()) {
             run.lit = fx.session.epoch();
         }
     }
@@ -127,7 +127,7 @@ TEST_CASE("PDI: settled propellant needs no push and lights on time",
     const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
     const auto run = fly_pdi(fx, 1.0, 120.0);
     INFO(report::describe(fx.session.lunar_status()) << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
-         << fx.session.burn_abort_reason());
+         << report::describe(fx.session.burn_abort_reason()));
     REQUIRE(run.lit);
     CHECK_FALSE(run.pushed);
     CHECK(*run.lit - pdi > -10.0);  // [E] the braking Raptors' start-up before the PDI, not a whole lead
@@ -146,7 +146,7 @@ TEST_CASE("PDI: unsettled propellant holds the ignition while the push settles i
     REQUIRE(lead > 10.0);
     const auto run = fly_pdi(fx, 0.0, sim::FlightSession::settling_hold_factor * lead + 300.0);
     INFO(report::describe(fx.session.lunar_status()) << " / " << sim::id_of(fx.session.lunar_step()) << ", abort: "
-         << fx.session.burn_abort_reason());
+         << report::describe(fx.session.burn_abort_reason()));
     REQUIRE(run.lit);
     CHECK(run.pushed);
     CHECK(*run.lit - pdi > 0.5 * lead);  // held past the planned ignition (bounded: it lights in the end)

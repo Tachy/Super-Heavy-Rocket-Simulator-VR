@@ -253,8 +253,8 @@ void FlightSession::run_iss_mission() {
     }
     // Refuelling f3: an unsettled in-orbit ignition lost the engines - whatever leg flew it, the mission ends.
     if (iss_leg_ != IssMissionLeg::None && iss_leg_ != IssMissionLeg::Complete && iss_leg_ != IssMissionLeg::Ended &&
-        burn_abort_reason_.rfind("Gasansaugung", 0) == 0) {
-        return iss_end(report::legacy(burn_abort_reason_));
+        burn_abort_reason_.code == report::Code::burn_gas_ingestion) {
+        return iss_end(burn_abort_reason_);
     }
     if (!iss_mission_pending()) return;
     const bool lost = bodies_[controlled_].body->impacted();
@@ -274,8 +274,8 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::Raise:
             if (lost) {
                 iss_end(simple(report::Code::iss_vehicle_lost));
-            } else if (!burn_abort_reason_.empty()) {  // a raise burn that ran dry is not flown (r5 minor)
-                iss_end(report::legacy(burn_abort_reason_));
+            } else if (!burn_abort_reason_.ok()) {  // a raise burn that ran dry is not flown (r5 minor)
+                iss_end(burn_abort_reason_);
             } else if (bodies_[controlled_].body->vehicle().any_engine_producing_thrust()) {
                 // f1: wait for the tail-off - a next burn started during it counted the residual thrust as its
                 // ignition (the leg stays pending, so the session keeps ticking instead of coasting)
@@ -401,8 +401,7 @@ void FlightSession::run_iss_mission() {
                 if (bodies_[controlled_].body->caught()) {
                     iss_enter(IssMissionLeg::Complete, completed(report::Code::iss_reason_caught));
                 } else if (!ship_return_ && !lost && !bodies_[controlled_].body->resting()) {
-                    iss_end(burn_abort_reason_.empty() ? simple(report::Code::iss_return_aborted)
-                                                   : report::legacy(burn_abort_reason_));
+                    iss_end(!burn_abort_reason_.ok() ? burn_abort_reason_ : simple(report::Code::iss_return_aborted));
                 } else {
                     iss_end(simple(lost ? report::Code::iss_ship_lost : report::Code::iss_ship_not_caught));
                 }

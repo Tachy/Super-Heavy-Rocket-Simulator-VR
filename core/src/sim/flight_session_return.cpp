@@ -672,7 +672,7 @@ void FlightSession::apply_deorbit_replan(const DeorbitReplanResult& result) {
             deorbit_plan_->reason = shortfall;
             ship_return_ = false;
             disengage_autopilot();
-            burn_abort_reason_ = report::describe(shortfall);  // text until Task 11 turns burn_abort_reason_ into a report
+            burn_abort_reason_ = shortfall;
             return;
         }
     }

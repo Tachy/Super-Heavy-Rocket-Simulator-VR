@@ -163,7 +163,7 @@ void print(const sim::FlightSession& session, const char* name) {
                     i, gnc::id_of(m.mode), gnc::id_of(m.phase), m.fire_time_s, m.peak_load_g, m.min_clearance_m,
                     m.touchdown_enu_m ? m.touchdown_enu_m->x : 0.0, m.touchdown_enu_m ? m.touchdown_enu_m->y : 0.0,
                     m.touchdown_over_water ? "water" : "land", m.touchdown_sink_mps, sim::id_of(m.outcome),
-                    m.reason.c_str());
+                    report::describe(m.reason).c_str());
     }
     if (s.ship_impact_enu_m) {
         std::printf("  ship impact E %.0f N %.0f m at %.1f m/s, tower %.0f m, shore %.0f m, %s\n", s.ship_impact_enu_m->x,
@@ -321,12 +321,12 @@ TEST_CASE("A load above the catch floor but short of the gate's need aborts the 
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
     CHECK_FALSE(s.early);
-    CHECK(report::same(s.give_up_reason, report::legacy("Fang abgebrochen")));  // legacy until Task 11
+    CHECK(report::same(s.give_up_reason, report::make(report::Code::crew_escape_catch_aborted)));
     CHECK(s.fired);
     CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {
         CHECK(m.outcome != sim::CrewOutcome::Flying);
-        CHECK(m.reason.find("außerhalb") == std::string::npos);
+        CHECK(m.reason.code != report::Code::crew_escape_lost_outside_limits);
     }
 }
 
@@ -360,12 +360,12 @@ TEST_CASE("A catch the guidance gives up for want of propellant ejects the crew"
     print(session, "catch abort");
     const auto& s = *session.crew_escape_state();
     CHECK(s.armed);
-    CHECK(report::same(s.give_up_reason, report::legacy("Fang abgebrochen")));  // legacy until Task 11
+    CHECK(report::same(s.give_up_reason, report::make(report::Code::crew_escape_catch_aborted)));
     CHECK(s.fired);
     CHECK_FALSE(session.body(0).caught());
     for (const auto& m : s.members) {
         CHECK(m.outcome != sim::CrewOutcome::Flying);
-        CHECK(m.reason.find("außerhalb") == std::string::npos);
+        CHECK(m.reason.code != report::Code::crew_escape_lost_outside_limits);
     }
 }
 

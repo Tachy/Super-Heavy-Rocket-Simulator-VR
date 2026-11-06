@@ -136,7 +136,7 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     settling_push_ = false;
     rcs_burn_lit_ = false;
     settling_hold_start_.reset();
-    burn_abort_reason_.clear();
+    burn_abort_reason_ = {};
     // the status until the burn's first tick: a coast before it read the previous burn's (l5 Task 10: the deorbit
     // re-plan saw the old burn's time to ignition and planned again on every coast step)
     autopilot_.burn = {};

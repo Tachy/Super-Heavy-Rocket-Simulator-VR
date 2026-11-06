@@ -103,13 +103,12 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
                                  lunar_step_ == LunarStep::CaptureCircularize;
         if (aerocapture) {
             flying.entry_guidance.reset();
-            lunar_abort(cause.empty() ? report::make(report::Code::lunar_aerocapture_impact)
-                                      : report::with_cause(report::make(report::Code::lunar_aerocapture_broke_up),
-                                                           report::legacy(cause)));
+            lunar_abort(cause.ok() ? report::make(report::Code::lunar_aerocapture_impact)
+                                      : report::with_cause(report::make(report::Code::lunar_aerocapture_broke_up), cause));
             return;
         }
-        lunar_abort(cause.empty() ? report::make(report::Code::lunar_return_ended_impact)
-                                  : report::with_cause(report::make(report::Code::lunar_return_ended), report::legacy(cause)));
+        lunar_abort(cause.ok() ? report::make(report::Code::lunar_return_ended_impact)
+                                  : report::with_cause(report::make(report::Code::lunar_return_ended), cause));
         return;
     }
     switch (lunar_step_) {

@@ -17,7 +17,7 @@ godot::Dictionary member_dictionary(const sim::FlightSession& session, const sim
     d["peak_load_g"] = m.peak_load_g;
     d["min_clearance_m"] = m.min_clearance_m;
     d["outcome"] = qualified_id("crew_outcome", sim::id_of(m.outcome));
-    d["reason"] = legacy_report(m.reason);
+    d["reason"] = report_dict(m.reason);
     d["body_index"] = m.body_index ? static_cast<int64_t>(*m.body_index) : int64_t{-1};
     if (m.body_index && *m.body_index < session.body_count()) {
         const auto& body = session.body(*m.body_index);

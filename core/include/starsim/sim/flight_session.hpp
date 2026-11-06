@@ -426,8 +426,6 @@ public:
     double liftoff_ignition_lead_s() const;
     static constexpr double liftoff_hold_margin_s = 0.5;  // [E] all engines at full thrust this long before T-0
     // Also ends an attitude mode and a capsule return (d2 minor: a mode set before outlived the autopilot).
-    // Refuelling f3: the abort reason of an unsettled in-orbit ignition (starts with "Gasansaugung", the spec's reason).
-    static constexpr const char* gas_ingestion_reason = "Gasansaugung: Treibstoff nicht gesetzt, Triebwerke ausgefallen";
     void disengage_autopilot() {
         disengage_scheduled_events();
         autopilot_.state = AutopilotState::Off;
@@ -573,7 +571,7 @@ public:
     static constexpr double call_off_burn_margin = 1.02;
     // Why the last burn was aborted (German; empty: none). A burn whose engines run dry - e.g. main tanks boiled off
     // while waiting (refuelling r2) - cannot finish: it is cut off, the autopilot goes off.
-    const std::string& burn_abort_reason() const { return burn_abort_reason_; }
+    const report::Report& burn_abort_reason() const { return burn_abort_reason_; }
     struct MainPropellant {  // the main tanks' contents (refuelling r2 boil-off checks)
         double oxidizer_kg = 0.0;
         double fuel_kg = 0.0;
@@ -1373,7 +1371,7 @@ private:
     vehicle::SettlingPush settling_push_now() const;
     std::optional<size_t> burn_stage_index() const;  // the lowest stage with burn engines
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
-    std::string burn_abort_reason_;
+    report::Report burn_abort_reason_;
     // Refuelling f3: an engine of the controlled vehicle ingested gas at its start - cut off, autopilot off, reason.
     void report_gas_ingestion();
     // Refuelling r2: the main-tank propellant `body` will still have at `at`, flown ahead on a copy of itself (free

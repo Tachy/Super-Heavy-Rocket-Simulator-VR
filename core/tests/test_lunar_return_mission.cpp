@@ -299,5 +299,5 @@ TEST_CASE("Probe: Block 3 lunar return with boil-off", "[.r5_probe]") {
                 "impacted %d, status '%s', abort '%s'\n",
                 start_kg / 1e3, b.vehicle().propellant_kg() / 1e3, b.vehicle().main_propellant_kg() / 1e3,
                 (t.session.epoch() - t0) / 86400.0, b.caught(), b.impacted(), report::describe(t.session.lunar_status()).c_str(),
-                t.session.burn_abort_reason().c_str());
+                report::describe(t.session.burn_abort_reason()).c_str());
 }

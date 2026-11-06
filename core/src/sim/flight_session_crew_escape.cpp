@@ -17,7 +17,7 @@ namespace starsim::sim {
 
 namespace {
 
-void lose(CrewMemberState& m, std::string reason) {
+void lose(CrewMemberState& m, report::Report reason) {
     if (m.outcome != CrewOutcome::Flying) return;
     m.outcome = CrewOutcome::Lost;
     m.reason = std::move(reason);
@@ -107,9 +107,9 @@ void FlightSession::crew_judge(size_t member) {
             m.touchdown_enu_m = site_enu_m(launch_site_, r_itrf);
             m.touchdown_over_water = crew_over_water(r_itrf);
             m.touchdown_sink_mps = c.sink_mps[member];
-            char text[96];
-            std::snprintf(text, sizeof text, "zu hart aufgesetzt (%.1f m/s)", m.touchdown_sink_mps);
-            if (body.impacted() || m.touchdown_sink_mps > c.config.max_touchdown_sink_mps) lose(m, text);
+            if (body.impacted() || m.touchdown_sink_mps > c.config.max_touchdown_sink_mps) {
+                lose(m, report::make(report::Code::crew_escape_lost_touchdown_hard, {report::speed("sink", m.touchdown_sink_mps)}));
+            }
             if (m.outcome == CrewOutcome::Flying) m.outcome = CrewOutcome::Rescued;
         }
         return;
@@ -118,11 +118,9 @@ void FlightSession::crew_judge(size_t member) {
     m.load_g = norm(body.specific_force_body_mps2()) / constants::standard_gravity_mps2;
     m.peak_load_g = std::max(m.peak_load_g, m.load_g);
     if (c.loads[member].exceeded(m.load_g, tick_s, c.config.max_load_g, c.config.max_load_duration_s)) {
-        char text[96];
-        std::snprintf(text, sizeof text, "Belastung über %.0f g", c.config.max_load_g);
-        lose(m, text);
+        lose(m, report::make(report::Code::crew_escape_lost_load, {report::number("limit_g", c.config.max_load_g)}));
     }
-    if (body.vehicle().parachute_torn()) lose(m, "Fallschirm gerissen");
+    if (body.vehicle().parachute_torn()) lose(m, report::make(report::Code::parachute_torn));
 
     // Clearances: the ship's hull (once the seat left the hatch), its plume while engines burn, the tower.
     const auto& ship = *bodies_[controlled_].body;
@@ -132,23 +130,23 @@ void FlightSession::crew_judge(size_t member) {
     const math::Vec3 top = ss.position_gcrf_m + ss.attitude.rotate(math::Vec3{ship.vehicle().length_m(), 0.0, 0.0} - mp.cg_point_m());
     const math::Vec3& p = body.state().position_gcrf_m;
     double clearance = 1e9;
-    const char* what = "";
+    auto what = report::Code::ok;  // the collision partner (a crew_escape_lost_collision_* code)
     const double hull = hull_clearance_m(bottom, top, 0.5 * ship.vehicle().diameter_m(), p);
     // counted once the seat is the minimum clearance out of the hatch (before that it rides out on its rails)
     if (!c.out_of_hull[member] && hull >= c.config.min_clearance_m) c.out_of_hull[member] = true;
-    if (c.out_of_hull[member] && hull < clearance) clearance = hull, what = "Schiff";
+    if (c.out_of_hull[member] && hull < clearance) clearance = hull, what = report::Code::crew_escape_lost_collision_hull;
     if (ship.vehicle().any_engine_producing_thrust()) {
         const double plume = plume_clearance_m(bottom, ss.attitude.rotate(math::Vec3{-1.0, 0.0, 0.0}),
                                                c.config.plume_half_angle_rad, c.config.plume_length_m, p);
-        if (plume < clearance) clearance = plume, what = "Abgasstrahl";
+        if (plume < clearance) clearance = plume, what = report::Code::crew_escape_lost_collision_plume;
     }
     if (tower_) {
         const auto& g = tower_->geometry();
         const double tower = contact::distance_to_box(g.tower_box(), g.to_site(r_itrf));
-        if (tower < clearance) clearance = tower, what = "Turm";
+        if (tower < clearance) clearance = tower, what = report::Code::crew_escape_lost_collision_tower;
     }
     m.min_clearance_m = std::min(m.min_clearance_m, clearance);
-    if (clearance < c.config.min_clearance_m) lose(m, std::string("Zusammenstoß: ") + what);
+    if (clearance < c.config.min_clearance_m) lose(m, report::make(what));
 }
 
 void FlightSession::run_crew_escape() {
@@ -189,10 +187,10 @@ void FlightSession::run_crew_escape() {
         } else if (ship.ship_landing) {
             const auto* scvx = ship.ship_landing->scvx();
             if (ship.return_command.abort || ship.ship_landing->upright_descent_active() || (scvx && scvx->aborting())) {
-                crew_arm(report::legacy("Fang abgebrochen"), false);  // text until Task 11
+                crew_arm(report::make(report::Code::crew_escape_catch_aborted), false);
             } else if (ship.ship_landing->phase() == gnc::ReturnPhase::Landed && !ship.body->caught() &&
                        !(tower_ && tower_->in_contact(*ship.body))) {
-                crew_arm(report::legacy("Fang verfehlt"), false);  // text until Task 11  // final review I1: the CG passed the catch point, no abort flag
+                crew_arm(report::make(report::Code::crew_escape_catch_missed), false);  // final review I1: the CG passed the catch point, no abort flag
             } else if (!ship.return_command.run_groups.empty()) {
                 // final review I1: every commanded engine starved or failed (ran dry hovering at the arms)
                 bool any_alive = false;
@@ -202,13 +200,13 @@ void FlightSession::run_crew_escape() {
                         any_alive = true;
                     }
                 }
-                if (!any_alive) crew_arm(report::legacy("Triebwerke ohne Treibstoff: Fang nicht möglich"), false);  // text until Task 11
+                if (!any_alive) crew_arm(report::make(report::Code::crew_escape_catch_engines_dry), false);
             }
         }
     }
     // Crew still aboard a ship that broke up or struck the ground: lost.
     if (!c.fire_epoch && ship_down && (st.armed || returning)) {
-        for (auto& m : st.members) lose(m, "außerhalb der Schleudersitz-Grenzen");
+        for (auto& m : st.members) lose(m, report::make(report::Code::crew_escape_lost_outside_limits));
     }
     // Firing: inside the envelope; an early give-up over water or at the minimum firing height.
     if (st.armed && !c.fire_epoch && !ship_down) {
@@ -229,7 +227,7 @@ void FlightSession::run_crew_escape() {
             if (m.body_index || m.outcome != CrewOutcome::Flying) continue;
             if (epoch_ - *c.fire_epoch < k * c.config.stagger_s) continue;
             if (ship_down) {
-                lose(m, "Schiff aufgeschlagen vor dem Ausstieg");  // the stagger left this seat too late
+                lose(m, report::make(report::Code::crew_escape_lost_ship_down));  // the stagger left this seat too late
             } else {
                 crew_fire_seat(k);
             }

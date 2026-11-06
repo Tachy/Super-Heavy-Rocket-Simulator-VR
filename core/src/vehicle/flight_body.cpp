@@ -518,16 +518,16 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         aero_acceleration_body_mps2_ = end.aero_body_n / end.mass.mass_kg;
         const double load_g = norm(aero_acceleration_body_mps2_) / constants::standard_gravity_mps2;
         if (heat_rate_w_m2_ > shield.max_heat_rate_w_m2 || heat_load_j_m2_ > shield.max_heat_load_j_m2) {
-            breakup_reason_ = "Hitzeschild versagt";
+            breakup_reason_ = report::make(report::Code::breakup_heat_shield_failed);
         } else if (shield.max_load_g > 0.0 && load_g > shield.max_load_g) {
-            breakup_reason_ = "Strukturüberlast";
+            breakup_reason_ = report::make(report::Code::breakup_structural_overload);
         }
         if (shield.crew_load_limit_g > 0.0 && load_g > shield.crew_load_limit_g) crew_load_warning_ = true;
         constexpr double warning_fraction = 0.8;
         heat_warning_ = heat_rate_w_m2_ >= warning_fraction * shield.max_heat_rate_w_m2 ||
                         heat_load_j_m2_ >= warning_fraction * shield.max_heat_load_j_m2 ||
                         (shield.max_load_g > 0.0 && load_g >= warning_fraction * shield.max_load_g);
-        if (!breakup_reason_.empty()) impacted_ = true;
+        if (!breakup_reason_.ok()) impacted_ = true;
         constexpr double entry_height_m = 80000.0, skip_height_m = 100000.0;  // [E] event thresholds
         if (body.has_atmosphere()) {
             if (geodetic.height_m < entry_height_m) entered_atmosphere_ = true;

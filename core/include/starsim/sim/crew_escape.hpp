@@ -28,7 +28,7 @@ struct CrewMemberState {
     bool touchdown_over_water = false;
     double touchdown_sink_mps = 0.0;
     CrewOutcome outcome = CrewOutcome::Flying;
-    std::string reason;                // why lost (empty otherwise)
+    report::Report reason;             // why lost (ok otherwise)
 };
 
 struct CrewEscapeState {

@@ -57,7 +57,7 @@ ReturnResult return_result(LandingOutcome outcome, double contact_tilt_rad, doub
 
 LandingOutcome landing_outcome(const vehicle::FlightBody& body, const LaunchSite& site, const Vec3& position_itrf_m) {
     if (body.caught()) return LandingOutcome::Caught;
-    if (!body.breakup_reason().empty()) return LandingOutcome::BrokenUp;
+    if (!body.breakup_reason().ok()) return LandingOutcome::BrokenUp;
     if (!body.impacted() && !body.resting()) return LandingOutcome::Flying;
     if (body.vehicle().splashdown_recovery()) {  // capsule: judged by its sink at the water (FlightBody), not the site
         return body.resting() ? LandingOutcome::SplashedDown : LandingOutcome::Impact;

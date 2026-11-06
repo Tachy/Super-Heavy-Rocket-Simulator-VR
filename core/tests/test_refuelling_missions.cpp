@@ -857,7 +857,7 @@ TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then pl
         t += 10.0;
     }
     INFO(report::describe(f.session.iss_mission_status()));
-    INFO(f.session.body(f.session.controlled_index()).breakup_reason());
+    INFO(report::describe(f.session.body(f.session.controlled_index()).breakup_reason()));
     INFO("elapsed " << t << " s");
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     REQUIRE(refuelling_test::mark(f.session, IssMissionLeg::Raise));
@@ -1090,14 +1090,14 @@ TEST_CASE("A deorbit called off after the plan ends the mission", "[refuelling][
     f.session.set_tank_mass(ship, 0, "ch4_main", 100.0);
     f.fly([&] { return f.leg() != IssMissionLeg::Return; }, 9.0 * 86400.0, 600.0);
     std::printf("[r5] called-off deorbit: %s (abort: %s)\n", report::describe(f.session.iss_mission_status()).c_str(),
-                f.session.burn_abort_reason().c_str());
+                report::describe(f.session.burn_abort_reason()).c_str());
     INFO(report::describe(f.session.iss_mission_status()));
     CHECK(f.leg() == IssMissionLeg::Ended);
     // at once, with the call-off's reason (before: days later "Schiff verloren")
     REQUIRE(f.session.iss_mission_status().code == report::Code::iss_ended);
     REQUIRE(f.session.iss_mission_status().causes.size() == 1);
-    CHECK_THAT(report::describe(f.session.iss_mission_status().causes.front()),  // legacy cause (Task 11): burn_abort_reason_
-               Catch::Matchers::StartsWith("deorbit.boil_off_short"));
+    CHECK(f.session.iss_mission_status().causes.front().code == f.session.burn_abort_reason().code);  // the call-off shortfall
+    CHECK(report::describe(f.session.iss_mission_status().causes.front()).starts_with("deorbit.boil_off_short"));
     CHECK_FALSE(f.session.body(ship).caught());
 }
 
@@ -1193,7 +1193,7 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
         f.lunar.advance_to(f.lunar.epoch() + 600.0);
     }
     INFO(report::describe(f.lunar.iss_mission_status()));
-    INFO("breakup: " << f.lunar.body(f.lunar.controlled_index()).breakup_reason() << ", tower "
+    INFO("breakup: " << report::describe(f.lunar.body(f.lunar.controlled_index()).breakup_reason()) << ", tower "
                      << sim::id_of(f.lunar.tower()->phase()) << ", liftoff +"
                      << (f.lunar.epoch() - s.epoch) / 3600.0 << " h");
     for (const auto& m : f.lunar.iss_mission_marks()) {

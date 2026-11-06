@@ -81,7 +81,7 @@ void print(const sim::FlightSession& session, const char* name) {
     for (const auto& m : s.members) {
         std::printf("  %s %s, peak %.1f g, clearance %.1f m, touchdown %s %.1f m/s: %s %s\n", gnc::id_of(m.mode),
                     gnc::id_of(m.phase), m.peak_load_g, m.min_clearance_m, m.touchdown_over_water ? "water" : "land",
-                    m.touchdown_sink_mps, sim::id_of(m.outcome), m.reason.c_str());
+                    m.touchdown_sink_mps, sim::id_of(m.outcome), report::describe(m.reason).c_str());
     }
 }
 
@@ -189,11 +189,11 @@ TEST_CASE("Crew outside the envelope is lost", "[crew_escape][mission]") {
     session.set_crew_escape(config::load_crew_escape(STARSIM_CONFIG_DIR, "starship_crew"));
     for (int i = 0; i < 600 && !session.body(0).impacted(); ++i) session.advance_to(session.epoch() + 1.0, 100000);
     REQUIRE(session.body(0).impacted());
-    INFO(session.body(0).breakup_reason());
+    INFO(report::describe(session.body(0).breakup_reason()));
     const auto& s = *session.crew_escape_state();
     CHECK_FALSE(s.fired);
     for (const auto& m : s.members) {
         CHECK(m.outcome == sim::CrewOutcome::Lost);
-        CHECK_THAT(m.reason, Catch::Matchers::ContainsSubstring("außerhalb der Schleudersitz-Grenzen"));
+        CHECK(m.reason.code == report::Code::crew_escape_lost_outside_limits);
     }
 }

@@ -56,7 +56,7 @@ struct HandoverFlight {
     double crossrange_km = 0.0;
     double gate_height_m = -1.0;  // height where the entry handed over to the flip (-1: never)
     std::string phase;
-    std::string breakup;
+    report::Report breakup;
 };
 
 // Flies the direct entry from the hand-over state to the catch (or impact, or `limit_s`), with truth air density and
@@ -119,7 +119,7 @@ HandoverFlight fly_handover(double density_factor, double aero_factor, double li
                 "phase %s, downrange %.1f km, crossrange %.1f km, %.1f t left, %s\n",
                 density_factor, aero_factor, f.caught ? "caught" : f.impacted ? "impacted" : "open", f.seconds,
                 f.peak_heat_w_m2 / 1000.0, f.peak_load_g, f.phase.c_str(), f.downrange_km, f.crossrange_km,
-                f.propellant_t, f.breakup.c_str());
+                f.propellant_t, report::describe(f.breakup).c_str());
     return f;
 }
 
@@ -163,10 +163,10 @@ TEST_CASE("Lunar return entry after a short braking burn hands over to the flip 
         h.velocity_gcrf_mps = along * v_horizontal - up * std::sqrt(speed * speed - v_horizontal * v_horizontal);
         const auto f = fly_handover(1.0, 1.0, 7200.0, h);
         std::printf("[lunar return entry] braking short by %.0f m/s: gate at %.0f m, '%s'\n", missing_mps,
-                    f.gate_height_m, f.breakup.c_str());
+                    f.gate_height_m, report::describe(f.breakup).c_str());
         INFO("short by " << missing_mps << " m/s");
         CHECK(f.gate_height_m < 5000.0);  // never handed over, or near the gate (800 m, more in a fast fall)
-        CHECK((f.caught || f.impacted || !f.breakup.empty()));
+        CHECK((f.caught || f.impacted || !f.breakup.ok()));
     }
 }
 
@@ -289,7 +289,7 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
     std::printf("[b4 fixture] plan %.1f m/s in %.1f h; %s, peak heat %.0f kW/m2, %.1f t left, %s\n", plan->delta_v_mps,
                 (plan->node.epoch - epoch) / 3600.0, body.caught() ? "caught" : body.impacted() ? "impacted" : "open",
                 body.peak_heat_rate_w_m2() / 1000.0, body.vehicle().propellant_kg() / 1000.0,
-                body.breakup_reason().c_str());
+                report::describe(body.breakup_reason()).c_str());
     CHECK(body.caught());
 }
 
@@ -324,7 +324,7 @@ TEST_CASE("Lunar return aerocapture from the hand-over state exits near 400 km",
                 "%s\n",
                 exited() ? "exited" : body.impacted() ? "impacted" : "open", t.session.epoch() - epoch,
                 e.eccentricity < 1.0 ? apoapsis_m / 1000.0 : -1.0, min_height_m / 1000.0,
-                body.peak_heat_rate_w_m2() / 1000.0, peak_load_g, body.breakup_reason().c_str());
+                body.peak_heat_rate_w_m2() / 1000.0, peak_load_g, report::describe(body.breakup_reason()).c_str());
     REQUIRE(exited());
     CHECK(e.eccentricity < 1.0);
     CHECK(std::abs(apoapsis_m - 400e3) < 100e3);
@@ -377,7 +377,7 @@ struct AircatchPass {
     double min_height_km = 0.0;
     double peak_heat_w_m2 = 0.0;
     double max_axis_error_below_80km_deg = 0.0;  // the body x-axis from the commanded one
-    std::string breakup;
+    report::Report breakup;
 };
 
 AircatchPass fly_aircatch_pass(double density_factor, double aero_factor, double propellant_kg, double kick_height_m = -1.0,
@@ -435,7 +435,7 @@ AircatchPass fly_aircatch_pass(double density_factor, double aero_factor, double
                 density_factor, aero_factor, propellant_kg / 1000.0,
                 f.exited ? "exited" : f.impacted ? "impacted" : "stays in", f.apoapsis_km, f.min_height_km,
                 f.peak_heat_w_m2 / 1000.0, f.max_axis_error_below_80km_deg, body.vehicle().propellant_kg() / 1000.0,
-                f.breakup.c_str());
+                report::describe(f.breakup).c_str());
     return f;
 }
 

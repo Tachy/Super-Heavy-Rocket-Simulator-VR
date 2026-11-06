@@ -58,8 +58,7 @@ void FlightSession::run_reboost() {
     auto& r = *reboost_;
     if (r.burning) {
         if (autopilot_.state == AutopilotState::Burn) return;  // flying (turn, settling, burn)
-        if (!burn_abort_reason_.empty()) return end_reboost(false, report::with_cause(report::make(report::Code::reboost_aborted),
-                                                                              report::legacy(burn_abort_reason_)));
+        if (!burn_abort_reason_.ok()) return end_reboost(false, report::with_cause(report::make(report::Code::reboost_aborted), burn_abort_reason_));
         // the tail-off first, as the Raise leg (f1): a burn planned during it lit the Raptor again on the unsettled
         // liquid (f2 probe: gas ingestion on a 1000 t depot right after its first burn)
         if (bodies_[controlled_].body->vehicle().any_engine_producing_thrust()) return;

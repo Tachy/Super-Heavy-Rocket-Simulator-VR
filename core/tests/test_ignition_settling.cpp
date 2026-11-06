@@ -209,12 +209,12 @@ TEST_CASE("Unsettled ignition in orbit: the engines ingest gas and fail", "[igni
     f.session.advance_to(f.session.epoch() + 1.0);
     CHECK(f.any_failed());
     CHECK_FALSE(f.vehicle().any_engine_producing_thrust());
-    CHECK_THAT(f.session.burn_abort_reason(), Catch::Matchers::StartsWith("Gasansaugung"));
+    CHECK(f.session.burn_abort_reason().code == report::Code::burn_gas_ingestion);
     // f2 review I1: a new flight does not inherit it - the ISS mission chain ends any leg on a gas ingestion reason, so
     // a stale one failed every later campaign flight at liftoff (launch_from_pad, keep_only_station, clear_bodies and
     // the reboost all start through reset_mission_state)
     f.session.clear_bodies();
-    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(f.session.burn_abort_reason().ok());
 }
 
 TEST_CASE("Settled ignition in orbit lights normally; the flag off never ingests", "[ignition_settling][sim]") {
@@ -371,7 +371,7 @@ TEST_CASE("The autopilot settles before a raise burn and the burn flies", "[igni
     CHECK(seen);
     CHECK(f.session.iss_mission_leg() == sim::IssMissionLeg::Rendezvous);
     CHECK_FALSE(f.any_failed());
-    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(f.session.burn_abort_reason().ok());
     CHECK(gas_estimate > 0.0);
     CHECK(supply0 - f.vehicle().rcs_supply_kg() > gas_estimate);  // the raise burn's propellant on top of the gas
 }
@@ -391,7 +391,7 @@ TEST_CASE("Settling: the coast stops before the lead in 10 s and in 600 s steps"
     run_to(coarse.session, end, 600.0);
     for (auto* f : {&fine, &coarse}) {
         CHECK_FALSE(f->any_failed());
-        CHECK(f->session.burn_abort_reason().empty());
+        CHECK(f->session.burn_abort_reason().ok());
         CHECK_FALSE(f->session.settling());
     }
 }
@@ -439,7 +439,7 @@ TEST_CASE("Settling: a lead longer than the time left holds the ignition", "[ign
         if (!lit && f.vehicle().any_engine_producing_thrust()) lit = f.session.epoch();
     }
     CHECK_FALSE(f.any_failed());
-    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(f.session.burn_abort_reason().ok());
     REQUIRE(lit);
     CHECK(*lit - node.epoch > 0.0);  // held past the planned ignition
     CHECK(*lit - node.epoch < sim::FlightSession::settling_hold_factor * lead);
@@ -455,7 +455,7 @@ TEST_CASE("Settling: an ignition already due when the burn starts is held, not l
     REQUIRE(f.session.execute_burn(node));
     run_to(f.session, node.epoch + 600.0, 1.0);
     CHECK_FALSE(f.any_failed());
-    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(f.session.burn_abort_reason().ok());
 }
 
 TEST_CASE("Settling in lunar orbit: the Moon's tide acts on the liquid", "[ignition_settling][vehicle]") {
@@ -520,7 +520,7 @@ TEST_CASE("Manual settle: an autopilot RCS burn clears it and refuses it while i
     CHECK_FALSE(f.session.settle(true));
     run_to(f.session, node.epoch + 600.0, 10.0);
     CHECK(f.session.autopilot().state != sim::AutopilotState::Burn);
-    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(f.session.burn_abort_reason().ok());
     CHECK(f.session.settle(true));  // free again after the burn
 }
 
@@ -535,12 +535,12 @@ TEST_CASE("Settling: a hold that never settles lights after the hold limit and i
     // the liquid is shaken loose every second: the push never settles it (test access to the flown vehicle)
     auto& stage = const_cast<vehicle::FlightBody&>(f.session.body(0)).vehicle().stages()[0];
     const auto limit = node.epoch + sim::FlightSession::settling_hold_factor * lead + 300.0;
-    while (f.session.epoch() < limit && f.session.burn_abort_reason().empty()) {
+    while (f.session.epoch() < limit && f.session.burn_abort_reason().ok()) {
         stage.settled = 0.0;
         f.session.advance_to(f.session.epoch() + 1.0);
     }
     CHECK(f.any_failed());
-    CHECK_THAT(f.session.burn_abort_reason(), Catch::Matchers::StartsWith("Gasansaugung"));
+    CHECK(f.session.burn_abort_reason().code == report::Code::burn_gas_ingestion);
     CHECK(f.session.epoch() - node.epoch > sim::FlightSession::settling_hold_factor * lead - 0.5 * lead);
 }
 
