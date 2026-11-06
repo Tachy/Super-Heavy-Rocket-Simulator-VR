@@ -94,10 +94,24 @@ on top; it replaced the interim `GroundPatch`.
     averaged into them, and outside the box the edge ratio Sentinel-2 / MODIS of the land pixels fades out over 50 km
     on land pixels only (`EMBED_FEATHER_M` [E]): the two calibrated land products differ there (Sentinel-2 +9.5 % at
     Starbase, -10 % at the Cape against the climatology), and the embedding spreads that over the feather instead of
-    drawing it as a step where the renderer fades between the levels. The sea is never embedded (a land-only
-    construction: the feather is justified by the land disagreement, not by a sea bias): sea pixels inside a box keep
-    the global sea plus the mean brightness of their water pixels above the open-water pedestal (below). 2.5 MB (JPEG
-    quality 95).
+    drawing it as a step where the renderer fades between the levels. The sea is not embedded pixel by pixel (the land
+    feather is justified by the land disagreement): sea pixels inside a box take the box's calibrated open-water
+    level (next item) plus the mean brightness of their water pixels above the open-water pedestal (below). 2.5 MB
+    (JPEG quality 95).
+  - Calibrated sea (follow-up U-3, `earth_albedo.open_water_levels`, `SEA_FEATHER_M`): the Blue Marble sea through the
+    land tables is one nearly constant colour worldwide (luminance 0.019: [0.0087, 0.0215, 0.0283]), and it is not a
+    calibrated product. Inside each Sentinel-2 box the sea texels take the median (`OPEN_WATER_LEVEL_PERCENTILE` [E]) of
+    the L2A reflectance over open water (renderer's water rule, > 2 km from non-water, per channel; Starbase [0.033,
+    0.042, 0.049] = luminance 0.040, Cape [0.0054, 0.0133, 0.0281] = 0.0127: the turbid Gulf against the clear Atlantic),
+    fading back to the global sea with a cosine over 100 km outside the box (`SEA_FEATHER_M` [E]; the Gulf east of
+    -94.8 deg and the Atlantic beyond ~300 km of the Cape keep 0.019). A single global open-water value cannot be
+    sourced from the two scenes (a factor 3 apart; the global 0.019 lies between them), so the calibration is
+    regional: where we have L2A the sea is L2A. Open-water tile pixels read 0.0404 at the Gulf (L2A median 0.0404)
+    and 0.0125 at the Cape (0.0127); the offshore z13 mean over 330 sampled pixels is 0.0404. Rendered, the sea at
+    the pad view and a 5 km Gulf view changes by < 1 % in luminance (Sun 87 deg, 18:30 UTC: 0.2318 -> 0.2284 and
+    0.2626 -> 0.2620 mean linear luminance of the sea patch): the sea shader's reflected sky dominates the body colour
+    at those angles. L2A includes sky glint (Sen2Cor does not remove it), which the sea shader adds again - the
+    calibrated body colour counts it twice at a few percent of the sea's radiance; not separated.
   - Water in the tiles (`earth_albedo.WaterMask`, the renderer's sea rule: orthometric height <= 0.05 m from the 1 m
     local grid where it covers, else the GLO-30 regional grid, minus EGM2008): a water pixel of a Sentinel-2 or NAIP
     tile takes the global level's sea (`sea_only`: the day texture with land pixels replaced by the nearest sea pixel, so
@@ -367,20 +381,19 @@ on top; it replaced the interim `GroundPatch`.
 - The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
   does not rebuild its tree on a change.
 
-- Earth surface albedo (Task 15): the global sea is the Blue Marble through land-fitted tables (no calibrated ocean
-  product; water-leaving reflectance is left to the sea shader's body colour); the Gulf at Starbase is turbid (Sentinel-2
-  open water luminance ~0.04 vs 0.016 of the table), so it reads darker than the satellite shows. The water rule
+- Earth surface albedo (Task 15, U-3): the global sea outside the Sentinel-2 boxes is still the Blue Marble through
+  land-fitted tables (luminance 0.019, no calibrated global ocean product): only the sea in and around the two boxes
+  is L2A (above). The cosine fade over 100 km makes the Gulf shelf east of Starbase a brighter patch against the
+  0.019 Gulf beyond it (a real shelf is turbid; the rim itself is an [E] construction). The pedestal stays the 90th
+  percentile, so a bright flat pixel reads median + (value - pedestal): below its L2A value by pedestal - median (0.021
+  at Starbase; the beach-spot figures of the Task 15 gates were not re-measured). The water rule
   (0.05 m) flags tidal flats as water; their brightness is kept through the pedestal rule, which is an [E] construction
   (90th percentile of the open-water L2A), and the Cape NAIP sea cells step up to 17 % (90th percentile, dark cells)
   against Sentinel-2. The two calibrated land products disagree by 10-20 % (Sentinel-2 2025 median of the least cloudy
   scenes vs the MODIS NBAR monthly median), spread over the 50 km land feather. The global level's land is an annual
   median: no seasons and no snow cover outside the permanently snow-covered areas.
-- Ground bounce in the radiance cube (Task 13b): the cube's ground is the global day texture (one texel ~ 6.7 km, 0.108
-  green at Starbase), the imagery within 1.5 km averages 0.12-0.16, so a wall's ground bounce is ~30-40 % low (a wall's
-  irradiance 6 % at noon on a Sun-facing face, 13-17 % on a shaded one; red more than green). A local mean from
-  `ImagerySource.crop` for the cube's ground near the eye was tried on paper (a ring profile by distance fits the wall's bounce
-  kernel) and not built: a tenth of a stop on lit faces, and an imagery read per cube refresh on the main thread. Numbers in
-  launch-structures.md Validation.
+- Ground bounce in the radiance cube: built (follow-up U-4), see `docs/subsystems/launch-structures.md` (Validation,
+  "Ground bounce"). Open: only Earth eyes below 6 km over the imagery pyramids (the two areas) get the local profile.
 - The Falcon 9 drone ship's shadow on the sea, and the Sun's penumbra on the sea in general, were not examined (the deck was).
 - Open for the user, unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site
   coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.

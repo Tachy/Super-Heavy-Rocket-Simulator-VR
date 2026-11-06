@@ -48,6 +48,34 @@ uniform vec3 radiance_earth_drawn = vec3(0.0, 1.0, 0.0);  // from the eye, rende
 uniform vec3 radiance_cloud_sky_factor = vec3(1.0);
 uniform vec3 radiance_cloud_ground_factor = vec3(1.0);
 
+// The albedo of the imagery's ground around the eye by distance (GroundAlbedoNear: the mean in the annuli of
+// RADIANCE_LOCAL_RING_EDGES_M = GroundAlbedoNear.RING_EDGES_M; valid 0: none, the global day texture alone). The global texel (~7 km) averages the land with the
+// bay and the Gulf (0.108 at Starbase against 0.20 of the ground within a hundred metres) and so leaves a wall's bounce 30-40 %
+// low; the cube is drawn at the eye, so the ground near it counts most. The ring values hold at the ring's mid-distance and
+// are interpolated linearly in between; beyond the last ring's outer edge (radiance_local_albedo_near_m) the ground blends to
+// the texture by radiance_local_albedo_far_m.
+const int RADIANCE_LOCAL_RINGS = 4;
+const float RADIANCE_LOCAL_RING_EDGES_M[RADIANCE_LOCAL_RINGS + 1] = float[](0.0, 100.0, 250.0, 700.0, 1500.0);
+uniform float radiance_local_albedo_valid = 0.0;
+uniform vec3 radiance_local_albedo[RADIANCE_LOCAL_RINGS];
+uniform float radiance_local_albedo_near_m = 1500.0;
+uniform float radiance_local_albedo_far_m = 6000.0;
+
+// The local ground albedo at distance t (m) along the ray: ring values interpolated between the rings' mid-distances.
+vec3 radiance_local_ground_albedo(float t) {
+	if (t <= 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[0] + RADIANCE_LOCAL_RING_EDGES_M[1])) {
+		return radiance_local_albedo[0];
+	}
+	for (int k = 0; k + 1 < RADIANCE_LOCAL_RINGS; k++) {
+		float mid0 = 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[k] + RADIANCE_LOCAL_RING_EDGES_M[k + 1]);
+		float mid1 = 0.5 * (RADIANCE_LOCAL_RING_EDGES_M[k + 1] + RADIANCE_LOCAL_RING_EDGES_M[k + 2]);
+		if (t <= mid1) {
+			return mix(radiance_local_albedo[k], radiance_local_albedo[k + 1], (t - mid0) / (mid1 - mid0));
+		}
+	}
+	return radiance_local_albedo[RADIANCE_LOCAL_RINGS - 1];
+}
+
 // The model ground seen along v from the camera, lit and attenuated (scene units).
 vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 	vec3 v = normalize(view_local * ATM_STRETCH);
@@ -76,6 +104,9 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 		float lon = atan(point_local.x, point_local.z);
 		float lat = asin(clamp(normal_local.y, -1.0, 1.0));
 		albedo = textureLod(day_texture, vec2(lon / (2.0 * ATM_PI) + 0.5, 0.5 - lat / ATM_PI), 0.0).rgb;  // no mip jump at the lon seam
+	}
+	if (radiance_local_albedo_valid > 0.5) {
+		albedo = mix(radiance_local_ground_albedo(t), albedo, smoothstep(radiance_local_albedo_near_m, radiance_local_albedo_far_m, t));
 	}
 	vec3 sky_light;
 	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light) * atm_sunlit(point_local);  // Moon shadow

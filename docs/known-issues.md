@@ -292,10 +292,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Cost in the stereo mock at the pad: vr-performance.md (Task 13 re-measure); not measured in the headset. With the
   analog weather on the pad view takes 17.2 ms (14.4 ms without the shadows, Task 13b): the clouds' cost, over the
   11.1 ms frame regardless of the shadows.
-- Ground bounce in the radiance cube comes from the global day texture (6.7 km texel): a wall's ground bounce is 30-40 %
-  low at Starbase (0.108 against 0.12-0.16 in the imagery within 1.5 km, red more than green); -6 % on a Sun-facing wall
-  at noon, -13..-17 % on a shaded one. Not fixed (needs an imagery read at each cube refresh; Task 13b,
-  `docs/subsystems/terrain-rendering.md` open points).
+- Ground bounce in the radiance cube: the imagery's ring profile (`GroundAlbedoNear`, 0-1500 m, read on a worker) replaces
+  the global day texture's 6.7 km texel near the eye, within 3 % of the imagery's view-factor weighted albedo at eye heights
+  of 2-148 m; only where the two imagery areas (Starbase, Cape) cover the eye and below 6 km. Elsewhere on Earth the
+  texel stays (the bounce at a site without imagery is the global mean of land, sea and snow).
 - Earth near shadows: the penumbra grain does not crawl at HIGH in a desktop head-motion test (0.02 deg per frame); not
   checked in the headset. The Falcon 9 ship's shadow on the sea is not
   examined (Task 13b).

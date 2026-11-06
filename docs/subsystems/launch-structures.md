@@ -177,18 +177,35 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   0.195) 7 531 predicted / 7 509 rendered at noon, 4 536 / 4 433 at 39 deg; sunlit tower leg (0.16) at 39 deg 4 181 / 3 964 (aerial
   perspective over 300 m, the steel map's grime and contrast: -5 %); leg face seen from the west at noon 782 / 746. So the
   renderer reproduces the budget within 2-5 % - renderer consistency, not absolute truth: the budget uses the same cube
-  ground albedo as the renderer, whose bounce is itself 30-40 % low (below; final review); the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
+  ground albedo as the renderer (the figures of this paragraph are from before U-4: the cube's ground was then the global
+  texel, 30-40 % low in the bounce; now the ring profile, below); the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
   bounce alone) and 0.89 of it on a Sun-facing face at 39 deg, 0.13 on a shaded one. A tower much darker than the ground at pad
   noon is therefore the physics of vertical faces under a high Sun (and the 0.16 steel against the 0.20 ground), not a missing
   light. Photo of a similar Sun: none dated (the extracted webcast frames carry no date or Sun elevation); f12_1860 (ground view, high
   Sun from behind the camera): lattice median luminance 0.046 against the sand's 0.175 (ratio 0.26, sky seen through the lattice
   included), consistent with a leg ratio between the two renders' 0.10 and 0.89 depending on the face's Sun angle; not a calibration.
-  Ground bounce: the radiance cube's ground is the global day texture (one texel ~ 6.7 km: 0.083 / 0.108 / 0.083 linear RGB at the
-  site), the imagery within 1.5 km averages 0.12-0.16 (rings 0-100 m 0.159, 100-250 0.143, 250-700 0.126, 700-1500 0.119 luminance;
-  the hardstand ground 0.195): the bounce a wall gets is ~30-40 % low (red more than green: the global texel is bluish with bay
-  and Gulf), a wall's total irradiance 6 % low on the Sun side at noon, 13-17 % on shaded faces. Left as it is (below a quarter of a
-  stop on lit faces; a local ground albedo in the cube needs an imagery read at each refresh, up to 9 JPEG tiles on the main thread, whose
-  cost was not measured): open point in terrain-rendering.md.
+  Ground bounce (U-4, `game/world/ground_albedo_near.gd`, `sky.gdshader` `radiance_local_albedo`): the radiance cube's ground used to
+  be the global day texture alone (one texel ~ 6.7 km: 0.083 / 0.108 / 0.083 linear RGB at the site, luminance 0.101), while the
+  imagery within 1.5 km averages 0.114-0.160 (rings 0-100 m 0.160, 100-250 0.142, 250-700 0.125, 700-1500 0.114 luminance, from the
+  Sentinel-2 / NAIP pyramids after U-3; the hardstand ground 0.195): the bounce a wall got was 25-37 % low depending on the
+  eye height (2-148 m; red more than green: the texel is bluish with bay and Gulf). Now the cube's ground near the eye is the
+  ring profile of the imagery: `GroundAlbedoNear` reads the imagery crop (3 km box, 30 m texels, up to 3 x 3 JPEG tiles) on a
+  `WorkerThreadPool` task and averages it in four annuli (0-100, 100-250, 250-700, 700-1500 m, equal-area samples); the
+  shader holds each ring's value at its mid-distance, interpolates between them and blends to the texture between 1.5 and
+  6 km. A new read starts after 150 m of travel (one at a time); its arrival and any change of the profile count as a sky
+  change for `SkyRadianceRefresh`, so the cube is drawn anew with it. Only for an Earth eye below 6 km (the cube's ground is
+  farther than that above, where the shader has faded to the texture) and where an imagery pyramid covers the whole 3 km box.
+  Probe `game/tests/ground_albedo_weight_probe.gd` (the cube's face-bounce albedo from the profile against the imagery's own
+  view-factor weighting for a wall at the eye's height, four orientations, 6 km box): eye 2 / 10 / 40 / 75 / 148 m, imagery
+  0.1601 / 0.1597 / 0.1527 / 0.1438 / 0.1334, cube with the profile -0.5 / -1.8 / -2.9 / -2.0 / -1.3 %, the global texel
+  alone -37 / -37 / -34 / -30 / -24 %. `radiance_budget.gd` (the analytic budget with the local ground 0.160): the vertical
+  face at noon, Sun side / shade side, cube ground before -15.7 % / -19.6 %, now -0.8 % / -1.0 %; Sun 39.4 deg before -2.6 % /
+  -16.2 %, now -0.1 % / -0.8 %. Rendered (booster body, shaded side, 300 m WSW, eye 40 m, noon, `--camera_exposure=8,0.004,100`
+  probe): 2413 -> 2715 cd/m^2 (+12.5 %: the stainless steel reflects the cube, whose ground is now brighter). Cost: read
+  6-14 ms on a worker (warm tile cache), main thread a distance test and a poll per frame; stereo mock (3534 x 2838 per eye, pad,
+  eye 128 m, Sun 87 deg, nothing else on the GPU, median of 120 frames, two runs each) 10.115 / 10.047 ms off, 10.165 / 10.141 ms
+  on: +0.07 ms (the cube is drawn anew only on a refresh; the shader's ground branch is a few instructions). The profile has
+  no slope term: a flat-ground model like the cube's ground. Imagery-less eyes keep the texel.
 
 ## Prototype evidence (task 5, `screenshots/pad-b/t5_*.png`, `tools/structures/measure/render_views.sh`)
 - Look pass: narrower decks (2.5 m inset), thinner chevrons (0.4 m), darker core; seen diagonally the tower now reads as

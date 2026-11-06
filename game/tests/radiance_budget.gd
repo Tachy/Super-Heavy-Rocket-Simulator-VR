@@ -96,7 +96,12 @@ func _report(utc: String) -> void:
 	var beam: Vector3 = (horizontal_lux["sun_lux"] as Vector3) / maxf(sin_e, 1e-6)
 	var sky_h: Vector3 = horizontal_lux["sky_lux"]
 	var cube_albedo := _cube_ground_albedo()
-	var local_albedo := float(_args.get("local", "0.20"))
+	var local_albedo := float(_args.get("local", "0.16"))
+	# The ground the cube draws now: the imagery's ring profile at the eye (U-4, GroundAlbedoNear), the green channel like the
+	# cube ground below; weighted for a vertical face at the 2 m eye (probe: ground_albedo_weight_probe.gd).
+	var rings := GroundAlbedoNear.ring_albedo(ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml")),
+			SITE_LAT_DEG, SITE_LON_DEG)
+	var now_g := GroundAlbedoNear.face_bounce_albedo(rings, 1, 2.0, cube_albedo.y) if not rings.is_empty() else cube_albedo.y
 	print("radiance_budget: %s Sun %.2f deg, beam %.0f lux (G), sky on a horizontal plane %.0f lux (G), ratio sky/global %.3f" % [
 			utc, rad_to_deg(asin(sin_e)), beam.y, sky_h.y, sky_h.y / (beam.y * sin_e + sky_h.y)])
 	print("  radiance cube's ground albedo (global day texture at the site, linear RGB): (%.3f %.3f %.3f), local ground %.2f"
@@ -105,18 +110,24 @@ func _report(utc: String) -> void:
 	var global_h := beam.y * sin_e + sky_h.y
 	var face_direct := beam.y * cos(asin(sin_e))
 	var face_sky := 0.5 * sky_h.y  # the model's (1 + n.up) / 2 tilt, n.up = 0
-	for label in ["cube ground", "local ground"]:
-		var alb := cube_g if label == "cube ground" else local_albedo
+	for label in ["cube ground", "cube ground now", "local ground"]:
+		var alb := cube_g if label == "cube ground" else (now_g if label == "cube ground now" else local_albedo)
 		var bounce := 0.5 * alb * global_h
 		print("  vertical face, bounce from the %s (albedo %.3f): bounce %.0f lux = %.1f %% of the horizontal global %.0f lux" % [
 				label, alb, bounce, 100.0 * bounce / global_h, global_h])
-	for label in ["cube ground", "local ground"]:
-		var alb := cube_g if label == "cube ground" else local_albedo
+	var truth_sun := 0.0
+	var truth_shade := 0.0
+	for label in ["local ground", "cube ground", "cube ground now"]:
+		var alb := cube_g if label == "cube ground" else (now_g if label == "cube ground now" else local_albedo)
 		var bounce := 0.5 * alb * global_h
 		var sun_side := face_direct + face_sky + bounce
 		var shade_side := face_sky + bounce
-		print("  %s: E_vertical sun-facing %.0f (direct %.0f + sky %.0f + bounce %.0f), shade side %.0f lux" % [
-				label, sun_side, face_direct, face_sky, bounce, shade_side])
+		if label == "local ground":
+			truth_sun = sun_side
+			truth_shade = shade_side
+		print(("  %s: E_vertical sun-facing %.0f (direct %.0f + sky %.0f + bounce %.0f), shade side %.0f lux; against the local ground "
+				+ "(the analytic budget): sun side %+.1f %%, shade side %+.1f %%") % [label, sun_side, face_direct, face_sky,
+				bounce, shade_side, 100.0 * (sun_side / truth_sun - 1.0), 100.0 * (shade_side / truth_shade - 1.0)])
 		for m in ["leg", "clad", "brace"]:
 			var l_sun: float = MATERIALS[m] * sun_side / PI
 			var l_shade: float = MATERIALS[m] * shade_side / PI
