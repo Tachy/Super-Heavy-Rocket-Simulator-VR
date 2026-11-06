@@ -1,7 +1,7 @@
 # Moon procedural near-ground surface
 
-Spec `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md`, plan
-`docs/superpowers/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 12 (craters, regolith
+Spec `docs/superpowers/archive/specs/2026-11-04-moon-procedural-surface-design.md`, plan
+`docs/superpowers/archive/plans/2026-11-04-moon-procedural-surface.md`. Current state after Task 12 (craters, regolith
 roughness and rocks in the core; the composed physics surface and disc footpads; the touchdown hazard check; the
 bindings; the terrain mesh down to the cm detail; the baked textures; Hapke reflectance for globe and terrain; the
 regolith detail shading with the statistics of the unresolved surface; rocks as geometry; near-field Sun shadows, the

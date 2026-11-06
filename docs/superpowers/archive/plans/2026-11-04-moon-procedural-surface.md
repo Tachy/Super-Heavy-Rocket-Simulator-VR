@@ -17,7 +17,7 @@ with Hapke plus a statistical term for everything unresolved, and adds a Sun sha
 **Tech Stack:** C++20 core (Catch2), godot-cpp GDExtension, Godot 4 double (GDScript, .gdshader), Python (numpy) for
 the texture bake.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-moon-procedural-surface-design.md` (read it before any task).
+**Spec:** `docs/superpowers/archive/specs/2026-11-04-moon-procedural-surface-design.md` (read it before any task).
 
 ## Global Constraints
 - Architecture: generator, contact and planner in `core` (no Godot, float64); bindings thin; no physics in GDScript.
