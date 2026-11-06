@@ -20,8 +20,8 @@ def detail():
     return detail_file.load(ROOT / "config" / "structures" / "starbase_olp2.toml")
 
 
-def test_concrete_map_matches_the_bright_terrain_imagery(detail):
-    """No bright patch against the terrain: the map's mean is the 95th luminance percentile of the NAIP imagery at the site."""
+def test_concrete_map_matches_the_imagery_inside_the_outline(detail):
+    """The map's mean is the colour the (albedo-calibrated) imagery has inside the drawn outline: neither a bright nor a dark patch."""
     mean = mt.bake_concrete(detail["trench"]).reshape(-1, 3).mean(axis=0) / 255.0
     assert mean == pytest.approx(mt.TERRAIN_BRIGHT, abs=0.012)
 

@@ -24,9 +24,12 @@ TONE_SPREAD = 0.09                       # [E] plate-to-plate brightness spread 
 GREY_SHIFT = 0.10                        # [E] share of plates with the tan pulled to grey, images.jpeg
 STREAK_DARKEN = 0.20                     # [E] strongest dirt streak
 STAIN_DARKEN = 0.18                      # [E] strongest blotch
-CONCRETE = np.array([0.4365, 0.4135, 0.3258])  # [E] sRGB base of the hardstand: the map's mean (0.912 x the base after stains and joints) is the
-# 95th luminance percentile of the terrain imagery around the site (NAIP z17, +-250 m: 0.398, 0.377, 0.297 in the colours the terrain shows)
-TERRAIN_BRIGHT = np.array([0.398, 0.377, 0.297])  # [E] same percentile, the target of the map's mean (tests)
+CONCRETE = np.array([0.5395, 0.5120, 0.4704])  # [E] sRGB base of the hardstand: the map's mean (0.912 x the base after stains and joints) is the
+# mean colour of the terrain imagery INSIDE the drawn outline (what that ground really looks like), as the terrain shows it since the physically
+# calibrated albedo of 2026-11-05: NAIP z17 (124 537 px) sRGB 0.492, 0.467, 0.429 = linear luminance 0.195; Sentinel-2 z13 (515 px, an
+# independent product) 0.510, 0.476, 0.438 = 0.200; the ground round it (<300 m) 0.135. Before it: the 95th luminance percentile of the
+# then 2.3 x darker imagery (0.398, 0.377, 0.297), which left the plate darker than the ground beside it
+TERRAIN_BRIGHT = np.array([0.492, 0.467, 0.429])  # [E] the imagery mean inside the outline, the target of the map's mean (tests)
 JOINT_DARKEN = 0.86                      # [E] slab joint as a share of the slab
 SLAB_SPREAD = 0.05                       # [E] slab-to-slab brightness spread (+-)
 FILE_NAME = "mount_panels.png"

@@ -83,3 +83,10 @@ Until Task 16 the tower members cast no shadow and there was no shadow proxy: th
 DirectionalLight) had no shadow map and `terrain_earth.gdshader` was unshaded, so the tower, mount and vehicles cast no
 shadow on the ground or on each other (a real one was left open: Sun shadows or a baked / analytic tower shadow on the
 terrain shader). Task 16 chose the Sun's directional shadow map (`EarthNearShadow`), as on the Moon.
+
+## Hardstand colour from the 95th imagery percentile (2026-10-31, replaced 2026-11-06, moon surface plan Task 13b)
+- The concrete map's mean was the 95th luminance percentile of the NAIP z17 imagery within 250 m of the site as the terrain
+  showed it then (sRGB 0.398 / 0.377 / 0.297, "no bright patch against the terrain"). The physically calibrated Earth albedo
+  (Task 15, 2026-11-05) made that imagery 2.3 x brighter (the same pixels now: median sRGB 0.384, 95th percentile 0.548), which left
+  the 4 ha plate at the imagery's median and clearly darker than the light ground beside it (a dark brown checkered polygon from
+  altitude). Now the mean of the imagery inside the outline (0.195 linear luminance, Sentinel-2 0.200).
