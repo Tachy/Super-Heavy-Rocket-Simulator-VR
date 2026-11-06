@@ -32,16 +32,35 @@ CASE_RE = re.compile(r'case\s+[\w:]+\s*:\s*return\s+"([^"]*)"\s*;')
 WORD_RE = re.compile(r"[A-Za-zÄÖÜäöüß]+")
 
 
-def parse_codes_def(text):
-    """Return [(id, [param names])] for every STARSIM_CODE line (comment lines are skipped)."""
-    out = []
-    for line in text.splitlines():
-        if line.lstrip().startswith("//"):
-            continue
-        m = CODE_RE.search(line)
-        if m:
-            params = [p for p in m.group(3).split(",") if p]
-            out.append((m.group(2), params))
+_STRIP_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*.*?\*/', re.S)
+CODE_USE_RE = re.compile(r"STARSIM_CODE\s*\(")
+
+
+def _strip_comments(text):
+    """Blank out // and /* */ comments (newlines kept); strings stay."""
+
+    def repl(m):
+        g = m.group(0)
+        return g if g.startswith('"') else re.sub(r"[^\n]", " ", g)
+
+    return _STRIP_RE.sub(repl, text)
+
+
+def parse_codes_def(text, findings=None):
+    """Return [(id, [param names])] for every STARSIM_CODE entry (comments ignored, entries may wrap lines).
+
+    An occurrence that does not parse is appended to `findings` (when given)."""
+    stripped = _strip_comments(text)
+    out, parsed_at = [], set()
+    for m in CODE_RE.finditer(stripped):
+        parsed_at.add(m.start())
+        out.append((m.group(2), [p for p in m.group(3).split(",") if p]))
+    if findings is not None:
+        for m in CODE_USE_RE.finditer(stripped):
+            line_start = stripped.rfind("\n", 0, m.start()) + 1
+            if m.start() in parsed_at or stripped[line_start : m.start()].lstrip().startswith("#"):
+                continue
+            findings.append(f"codes.def:{stripped.count(chr(10), 0, m.start()) + 1}: STARSIM_CODE entry does not parse")
     return out
 
 
@@ -90,6 +109,22 @@ def check_tables(de, en):
     return findings
 
 
+_TOML_TOKEN_RE = re.compile(r"\"(?:[^\"\\\n]|\\.)*\"|'[^'\n]*'|#[^\n]*")
+
+
+def check_raw_toml(text, label):
+    """Subset rules on the raw file text: no escapes in basic strings, no multi-line strings."""
+    findings = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        if '"""' in line or "'''" in line:
+            findings.append(f"{label}:{line_no}: multi-line string is not in the TomlLite subset")
+            continue
+        for m in _TOML_TOKEN_RE.finditer(line):
+            if m.group(0).startswith('"') and "\\" in m.group(0):
+                findings.append(f"{label}:{line_no}: escape sequence in value (not in the TomlLite subset)")
+    return findings
+
+
 def check_codes(codes, de, en):
     fde, fen = flatten(de), flatten(en)
     findings = []
@@ -108,8 +143,20 @@ def check_codes(codes, de, en):
     return findings
 
 
-def parse_phase_ids(cpp_text):
-    """{ns: [ids]} for every `// i18n-ns: <ns>` switch (marker line to the closing brace)."""
+CASE_LINE_RE = re.compile(r'^\s*case\s+[\w:]+\s*:\s*return\s+"([^"]*)"\s*;\s*(//.*)?$')
+_LITERAL_RE = re.compile(r"\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*'")
+
+
+def _code_part(line):
+    """The line without string/char literals and without a trailing // comment."""
+    return _LITERAL_RE.sub('""', line).split("//")[0]
+
+
+def parse_phase_ids(cpp_text, findings=None, path=""):
+    """{ns: [ids]} for every `// i18n-ns: <ns>` switch (marker line to the closing brace).
+
+    Every `case` line there must be `case X::Y: return "id";` on one line. Other case lines and a
+    marker without any id are appended to `findings` when given."""
     result = {}
     lines = cpp_text.splitlines()
     for i, line in enumerate(lines):
@@ -119,19 +166,28 @@ def parse_phase_ids(cpp_text):
         ns = m.group(1)
         depth, opened = 0, False
         ids = result.setdefault(ns, [])
-        for later in lines[i:]:
-            code = later.split("//")[0] if "//" in later and '"' not in later.split("//")[0] else later
+        for k in range(i, len(lines)):
+            later = lines[k]
+            code = _code_part(later)
             for ch in code:
                 if ch == "{":
                     depth += 1
                     opened = True
                 elif ch == "}":
                     depth -= 1
-            for cm in CASE_RE.finditer(later):
-                if cm.group(1) not in ids:
+            if re.match(r"\s*case\b", code):
+                cm = CASE_LINE_RE.match(later)
+                if cm is None:
+                    if findings is not None:
+                        findings.append(
+                            f"{path}:{k + 1}: case line in i18n-ns '{ns}' is not `case X::Y: return \"id\";`"
+                        )
+                elif cm.group(1) not in ids:
                     ids.append(cm.group(1))
             if opened and depth <= 0:
                 break
+        if not ids and findings is not None:
+            findings.append(f"{path}:{i + 1}: i18n-ns '{ns}' marker yields no phase ids")
     return result
 
 
@@ -156,7 +212,19 @@ def _bad_literal(content):
     return None
 
 
-def _scan(text, path, comment_start, block_comments, triple_quotes, quotes):
+RAW_RE = re.compile(r'R"([^()\\\s"]{0,16})\(')
+
+
+def _quoted_end(text, i, quote, multiline):
+    """Index of the closing quote of the literal opened at i (or of the newline/end that stops it)."""
+    n = len(text)
+    j = i + 1
+    while j < n and text[j] != quote and (multiline or text[j] != "\n"):
+        j += 2 if text[j] == "\\" else 1
+    return min(j, n)
+
+
+def _scan(text, path, comment_start, block_comments, triple_quotes, quotes, cpp=False, multiline=False):
     """Collect string literals outside comments; return findings for the bad ones."""
     lines = text.splitlines()
     findings = []
@@ -174,19 +242,33 @@ def _scan(text, path, comment_start, block_comments, triple_quotes, quotes):
             end = n if end < 0 else end + 2
             line_no += text.count("\n", i, end)
             i = end
-        elif triple_quotes and text.startswith('"""', i):
-            end = text.find('"""', i + 3)
+        elif triple_quotes and (text.startswith('"""', i) or text.startswith("'''", i)):
+            tq = text[i : i + 3]
+            end = text.find(tq, i + 3)
             end = n if end < 0 else end + 3
             content = text[i + 3 : max(i + 3, end - 3)]
             _report(findings, lines, path, line_no, content)
             line_no += text.count("\n", i, end)
             i = end
+        elif cpp and c == "R" and (i == 0 or text[i - 1] in "uUL8" or not (text[i - 1].isalnum() or text[i - 1] == "_")) and RAW_RE.match(text, i):
+            m = RAW_RE.match(text, i)
+            close = ")" + m.group(1) + '"'
+            end = text.find(close, m.end())
+            end = n if end < 0 else end + len(close)
+            _report(findings, lines, path, line_no, text[m.end() : max(m.end(), end - len(close))])
+            line_no += text.count("\n", i, end)
+            i = end
+        elif cpp and c == "'":
+            if i > 0 and text[i - 1].isalnum():  # digit separator 1'000
+                i += 1
+            else:  # char literal: a skipped token
+                j = _quoted_end(text, i, "'", False)
+                i = j + 1 if j < n and text[j] == "'" else j
         elif c in quotes:
-            j = i + 1
-            while j < n and text[j] != c and text[j] != "\n":
-                j += 2 if text[j] == "\\" else 1
-            _report(findings, lines, path, line_no, text[i + 1 : min(j, n)])
-            i = j + 1
+            j = _quoted_end(text, i, c, multiline)
+            _report(findings, lines, path, line_no, text[i + 1 : j])
+            line_no += text.count("\n", i, j)
+            i = j + 1 if j < n and text[j] == c else j
         else:
             i += 1
     return findings
@@ -202,15 +284,21 @@ def _report(findings, lines, path, line_no, content):
 
 
 def scan_cpp(text, path):
-    return _scan(text, path, "//", True, False, '"')
+    return _scan(text, path, "//", True, False, '"', cpp=True)
 
 
 def scan_gd(text, path):
     return _scan(text, path, "#", False, True, "\"'")
 
 
+def scan_tscn(text, path):
+    """.tscn: `;` comments, strings may span lines (embedded shader code)."""
+    return _scan(text, path, ";", False, False, '"', multiline=True)
+
+
 def _is_test_file(path):
-    return "tests" in path.parts or path.name.startswith("test_")
+    rel = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+    return "tests" in rel.parts or path.name.startswith("test_")
 
 
 def _literal_files(paths):
@@ -235,7 +323,12 @@ def check_literals(paths):
     for f in _literal_files(paths):
         text = f.read_text(encoding="utf-8", errors="replace")
         shown = f.relative_to(ROOT).as_posix() if f.is_relative_to(ROOT) else str(f)
-        findings += scan_gd(text, shown) if f.suffix in {".gd", ".tscn"} else scan_cpp(text, shown)
+        if f.suffix == ".gd":
+            findings += scan_gd(text, shown)
+        elif f.suffix == ".tscn":
+            findings += scan_tscn(text, shown)
+        else:
+            findings += scan_cpp(text, shown)
     return findings
 
 
@@ -271,13 +364,18 @@ def main(argv):
         findings += missing
     if de is not None:
         if "codes" in checks:
-            findings += check_codes(parse_codes_def(CODES_DEF.read_text(encoding="utf-8")), de, en)
+            codes = parse_codes_def(CODES_DEF.read_text(encoding="utf-8"), findings)
+            findings += check_codes(codes, de, en)
         if "tables" in checks:
             findings += check_tables(de, en)
+            for table in (DE_TABLE, EN_TABLE):
+                findings += check_raw_toml(table.read_text(encoding="utf-8"), f"config/i18n/{table.name}")
         if "phases" in checks:
             merged = {}
             for f in sorted((ROOT / "core" / "src").rglob("*.cpp")):
-                for ns, ids in parse_phase_ids(f.read_text(encoding="utf-8", errors="replace")).items():
+                shown = f.relative_to(ROOT).as_posix()
+                text = f.read_text(encoding="utf-8", errors="replace")
+                for ns, ids in parse_phase_ids(text, findings, shown).items():
                     merged.setdefault(ns, [])
                     merged[ns] += [x for x in ids if x not in merged[ns]]
             findings += check_phases(merged, de, en)

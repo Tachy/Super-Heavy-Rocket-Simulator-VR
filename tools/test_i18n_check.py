@@ -92,3 +92,72 @@ def test_phase_id_without_key_fails():
     findings = c.check_phases(ids, tables, tables)
     assert any("phase.docking_phase.soft_capture" in f for f in findings)
     assert not any("phase.docking_phase.approach" in f for f in findings)
+
+
+def test_scan_cpp_char_literal_and_continuation_keep_line_numbers():
+    src = "char q = '\"';\nauto a = \"Grenze\";\n#define X \\\n  1\nauto b = \"Grenze\"; // i18n-ok\nauto c = \"Wetter\";\n"
+    findings = c.scan_cpp(src, "x.cpp")
+    assert [f.split(":")[1] for f in findings] == ["2", "6"]
+
+
+def test_scan_cpp_unterminated_string_keeps_line_numbers():
+    findings = c.scan_cpp('auto a = "oops;\nauto b = "Grenze";\n', "x.cpp")
+    assert len(findings) == 1 and "x.cpp:2" in findings[0]
+
+
+def test_scan_cpp_raw_string():
+    src = 'auto a = R"(say "hi" und nicht)";\nauto b = R"x(plain)x";\nauto d = "Grenze";\n'
+    findings = c.scan_cpp(src, "x.cpp")
+    assert len(findings) == 2 and "x.cpp:1" in findings[0] and "x.cpp:3" in findings[1]
+
+
+def test_scan_tscn_multiline_string_and_semicolon_comment():
+    src = 'a = "line1\nline2"\n; "Höhe"\nb = "Höhe"\n'
+    findings = c.scan_tscn(src, "x.tscn")
+    assert len(findings) == 1 and "x.tscn:4" in findings[0]
+
+
+def test_scan_gd_single_triple_quote():
+    assert len(c.scan_gd("var a = '''Höhe'''\n", "x.gd")) == 1
+
+
+def test_parse_codes_def_wrapped_and_block_comment():
+    text = '/* STARSIM_CODE(old, "old", "") */\nSTARSIM_CODE(a_b,\n    "a.b",\n    "x")\n'
+    findings = []
+    assert c.parse_codes_def(text, findings) == [("a.b", ["x"])]
+    assert findings == []
+
+
+def test_parse_codes_def_unparsable_is_finding():
+    findings = []
+    assert c.parse_codes_def('STARSIM_CODE(a, "a")\n', findings) == []
+    assert len(findings) == 1 and "does not parse" in findings[0]
+
+
+def test_parse_phase_ids_wrapped_case_is_finding():
+    src = (
+        "const char* id_of(P p) {  // i18n-ns: ns\n"
+        "    switch (p) {\n"
+        '        case P::A: return "a";\n'
+        "        case P::B:\n"
+        '            return "b";\n'
+        '        case P::C: { return "c"; }\n'
+        '        default: return "a}";\n'
+        "    }\n"
+        "}\n"
+    )
+    findings = []
+    assert c.parse_phase_ids(src, findings, "x.cpp") == {"ns": ["a"]}
+    assert len(findings) == 2 and "x.cpp:4" in findings[0] and "x.cpp:6" in findings[1]
+
+
+def test_parse_phase_ids_marker_without_ids_is_finding():
+    findings = []
+    c.parse_phase_ids("int f() {  // i18n-ns: empty\n  return 1;\n}\n", findings, "x.cpp")
+    assert any("yields no phase ids" in f for f in findings)
+
+
+def test_raw_toml_escapes_and_multiline_fail():
+    assert c.check_raw_toml('a = "ok" # "x\\n"\nb = \'C:\\p\'\n', "de") == []
+    assert len(c.check_raw_toml('a = "l\\n"\n', "de")) == 1
+    assert c.check_raw_toml('a = """\nx"""\n', "de")
