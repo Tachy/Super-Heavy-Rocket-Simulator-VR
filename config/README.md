@@ -263,6 +263,24 @@ flow separation (vacuum engines).
   `python tools/data_pipeline/fetch.py` writes the tile to `data/terrain/<id>.toml` / `.i16` (and the global grid
   `ldem_16`); `sim::load_lunar_terrain` reads them.
 
+## Lunar terrain products (`lunar_terrain_products.toml`)
+- Description of the public data products a landing-site tile is cut from (no code reads it yet; the tile planner of
+  the lunar-sites plan will). `[selection]`: `height_order` / `albedo_order` (product ids, the first whose coverage
+  holds the whole tile wins), `tile_half_size_m` / `albedo_tile_half_size_m` (75 km: 150 km tiles).
+- `[[product]]`: `id`, `kind` (`"height"` | `"albedo"`), `projection` (`simple_cylindrical` |
+  `polar_stereographic_south` | `polar_stereographic_north`), `latitude_min_deg` / `latitude_max_deg` (coverage),
+  `resolution_m`, `sample_type` (`int16` | `float32` | `uint16` | `uint8`, little endian), `scale` / `offset`
+  (value = raw x scale + offset; heights in m above the 1737.4 km LOLA sphere, albedo as dimensionless photometrically
+  normalised reflectance), `source` (id in `tools/data_pipeline/sources.toml`), optional `tile_half_size_m` (overrides
+  `[selection]`; the 20 m polar products use 10 km so a tile stays ~2 MB), optional `invalid_below` (float albedo:
+  values below it are PDS special constants).
+- `[[product.file]]`: `url`, `lines`, `samples`, `record_bytes`, `header_bytes` (bytes before pixel (0, 0)); cylindrical
+  files add `pixels_per_degree`, `first_latitude_deg`, `first_longitude_deg` (outer edge of pixel (0, 0)); polar files
+  add `pole_line`, `pole_sample` (0-based pixel-centre coordinates of the pole) and `scale_m`.
+- Every value comes from the PDS label of its file: `python tools/data_pipeline/probe_lunar_products.py --verify-config`.
+  Licence: NASA PDS data, public domain; the SLDEM2015 elevation also carries JAXA SELENE Terrain Camera data
+  (credited in `CREDITS.md`).
+
 ## Launch sites (`launch_sites.toml`)
 - `[[site]]`: `id`, `latitude_deg`, `longitude_deg`, `height_m` (ground above the WGS84 ellipsoid, [D]:
   the median of the 1 m local terrain grid within `plateau_radius_m`, written by

@@ -1,0 +1,640 @@
+# Lunar terrain and albedo products for the landing-site tiles (lunar sites plan, task 1).
+# Every layout value below was read from the PDS label of the file (checked by
+# `python tools/data_pipeline/probe_lunar_products.py --verify-config`); findings and measured throughput are in
+# docs/subsystems/lunar.md (data products). Documented in config/README.md. Sources: tools/data_pipeline/sources.toml.
+#
+# value = raw * scale + offset. Heights: metres above the 1737.4 km LOLA sphere (offset 0; SLDEM2015 raw values are
+# kilometres, hence scale 1000). Albedo: photometrically normalised reflectance (float32, dimensionless).
+# Cylindrical files: first_latitude_deg / first_longitude_deg are the outer EDGE of pixel (0, 0), latitude falling and
+# longitude rising with the index; pixel (l, s) is centred at first + (k + 0.5) / pixels_per_degree.
+# Polar files: pole_line / pole_sample are 0-based pixel-centre coordinates of the pole, scale_m the pixel size.
+# header_bytes = bytes before the first pixel (the PDS3 header attached to the LROC files, one record).
+# A product may carry its own tile_half_size_m, overriding [selection] (ledger ruling R1).
+
+[selection]
+# First product whose coverage holds the whole tile wins. LDEM_64 (473 m) is deliberately absent: no landing on a
+# coarse fallback. The 100 m LDEM_45* products bridge the +-60 deg seam where SLDEM2015 ends and the 60 m polar
+# products begin (a tile straddling 60 deg is in neither of them).
+height_order = ["ldem_80s_20m", "ldem_80n_20m", "sldem2015_512", "ldem_60s_60m", "ldem_60n_60m", "ldem_45s_100m", "ldem_45n_100m"]
+# The WAC mosaic has the same photometric normalisation on both sides of 60 deg, so a tile across the seam can be
+# assembled per pixel from the equatorial and the polar file (task 3); the order is for tiles inside one product.
+albedo_order = ["wac_emp_643nm_equatorial", "wac_emp_643nm_south", "wac_emp_643nm_north"]
+tile_half_size_m = 75000.0
+albedo_tile_half_size_m = 75000.0
+
+# LOLA polar 20 m, 80-90 S (the Mons Mouton tile source; 1.8 GB, never downloaded whole).
+[[product]]
+id = "ldem_80s_20m"
+kind = "height"
+projection = "polar_stereographic_south"
+latitude_min_deg = -90.0
+latitude_max_deg = -80.0
+resolution_m = 20.0
+sample_type = "int16"
+scale = 0.5
+offset = 0.0
+source = "lola_ldem_80s_20m"
+tile_half_size_m = 10000.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80s_20m.img"
+lines = 30400
+samples = 30400
+record_bytes = 60800
+header_bytes = 0
+pole_line = 15199.5
+pole_sample = 15199.5
+scale_m = 20.0
+
+# LOLA polar 20 m, 80-90 N.
+[[product]]
+id = "ldem_80n_20m"
+kind = "height"
+projection = "polar_stereographic_north"
+latitude_min_deg = 80.0
+latitude_max_deg = 90.0
+resolution_m = 20.0
+sample_type = "int16"
+scale = 0.5
+offset = 0.0
+source = "lola_ldem_80n_20m"
+tile_half_size_m = 10000.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80n_20m.img"
+lines = 30400
+samples = 30400
+record_bytes = 60800
+header_bytes = 0
+pole_line = 15199.5
+pole_sample = 15199.5
+scale_m = 20.0
+
+# SLDEM2015 (LOLA + Kaguya TC), 512 px/deg, +-60 deg: 32 files of 30 deg x 45 deg. Values are KILOMETRES above
+# the 1737.4 km sphere (scale 1000 gives metres).
+[[product]]
+id = "sldem2015_512"
+kind = "height"
+projection = "simple_cylindrical"
+latitude_min_deg = -60.0
+latitude_max_deg = 60.0
+resolution_m = 59.2
+sample_type = "float32"
+scale = 1000.0
+offset = 0.0
+source = "lola_sldem2015"
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_000_045_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 0.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_045_090_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 45.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_090_135_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 90.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_135_180_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 135.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_180_225_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 180.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_225_270_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 225.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_270_315_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 270.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_00n_30n_315_360_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 30.0
+first_longitude_deg = 315.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_000_045_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 0.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_045_090_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 45.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_090_135_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 90.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_135_180_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 135.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_180_225_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 180.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_225_270_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 225.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_270_315_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 270.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30n_60n_315_360_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 60.0
+first_longitude_deg = 315.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_000_045_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 0.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_045_090_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 45.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_090_135_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 90.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_135_180_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 135.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_180_225_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 180.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_225_270_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 225.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_270_315_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 270.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_30s_00s_315_360_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = 0.0
+first_longitude_deg = 315.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_000_045_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 0.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_045_090_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 45.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_090_135_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 90.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_135_180_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 135.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_180_225_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 180.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_225_270_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 225.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_270_315_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 270.0
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/sldem2015_512_60s_30s_315_360_float.img"
+lines = 15360
+samples = 23040
+record_bytes = 92160
+header_bytes = 0
+pixels_per_degree = 512.0
+first_latitude_deg = -30.0
+first_longitude_deg = 315.0
+
+# LOLA polar 60 m, 60-90 S (the 60-80 deg band; 1.9 GB, ranged reads only).
+[[product]]
+id = "ldem_60s_60m"
+kind = "height"
+projection = "polar_stereographic_south"
+latitude_min_deg = -90.0
+latitude_max_deg = -60.0
+resolution_m = 60.0
+sample_type = "int16"
+scale = 0.5
+offset = 0.0
+source = "lola_ldem_60s_60m"
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_60s_60m.img"
+lines = 31040
+samples = 31040
+record_bytes = 62080
+header_bytes = 0
+pole_line = 15519.5
+pole_sample = 15519.5
+scale_m = 60.0
+
+# LOLA polar 60 m, 60-90 N.
+[[product]]
+id = "ldem_60n_60m"
+kind = "height"
+projection = "polar_stereographic_north"
+latitude_min_deg = 60.0
+latitude_max_deg = 90.0
+resolution_m = 60.0
+sample_type = "int16"
+scale = 0.5
+offset = 0.0
+source = "lola_ldem_60n_60m"
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_60n_60m.img"
+lines = 31040
+samples = 31040
+record_bytes = 62080
+header_bytes = 0
+pole_line = 15519.5
+pole_sample = 15519.5
+scale_m = 60.0
+
+# LOLA polar 100 m, 45-90 S: bridges the +-60 deg seam (SLDEM ends at 60, the 60 m polar product starts there).
+[[product]]
+id = "ldem_45s_100m"
+kind = "height"
+projection = "polar_stereographic_south"
+latitude_min_deg = -90.0
+latitude_max_deg = -45.0
+resolution_m = 100.0
+sample_type = "int16"
+scale = 0.5
+offset = 0.0
+source = "lola_ldem_45s_100m"
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_45s_100m.img"
+lines = 28800
+samples = 28800
+record_bytes = 57600
+header_bytes = 0
+pole_line = 14399.5
+pole_sample = 14399.5
+scale_m = 100.0
+
+# LOLA polar 100 m, 45-90 N (seam bridge).
+[[product]]
+id = "ldem_45n_100m"
+kind = "height"
+projection = "polar_stereographic_north"
+latitude_min_deg = 45.0
+latitude_max_deg = 90.0
+resolution_m = 100.0
+sample_type = "int16"
+scale = 0.5
+offset = 0.0
+source = "lola_ldem_45n_100m"
+
+[[product.file]]
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_45n_100m.img"
+lines = 28800
+samples = 28800
+record_bytes = 57600
+header_bytes = 0
+pole_line = 14399.5
+pole_sample = 14399.5
+scale_m = 100.0
+
+# LROC WAC 643 nm reflectance, photometrically normalised (i = 30, e = 0, g = 30 deg; empirical function, GLD100
+# topography), 304 px/deg, +-60 deg: 8 files of 60 deg x 90 deg. A 1 record PDS3 header precedes the pixels.
+[[product]]
+id = "wac_emp_643nm_equatorial"
+kind = "albedo"
+projection = "simple_cylindrical"
+latitude_min_deg = -60.0
+latitude_max_deg = 60.0
+resolution_m = 99.75
+sample_type = "float32"
+scale = 1.0
+offset = 0.0
+source = "lroc_wac_emp_643nm_304p"
+invalid_below = -1.0e30
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300N0450_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 60.0
+first_longitude_deg = 0.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300N1350_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 60.0
+first_longitude_deg = 90.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300N2250_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 60.0
+first_longitude_deg = 180.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300N3150_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 60.0
+first_longitude_deg = 270.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300S0450_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 0.0
+first_longitude_deg = 0.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300S1350_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 0.0
+first_longitude_deg = 90.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300S2250_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 0.0
+first_longitude_deg = 180.0
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_E300S3150_304P.IMG"
+lines = 18240
+samples = 27360
+record_bytes = 109440
+header_bytes = 109440
+pixels_per_degree = 304.0
+first_latitude_deg = 0.0
+first_longitude_deg = 270.0
+
+# Same mosaic, polar stereographic tile 60-90 S.
+[[product]]
+id = "wac_emp_643nm_south"
+kind = "albedo"
+projection = "polar_stereographic_south"
+latitude_min_deg = -90.0
+latitude_max_deg = -60.0
+resolution_m = 99.75
+sample_type = "float32"
+scale = 1.0
+offset = 0.0
+source = "lroc_wac_emp_643nm_304p"
+invalid_below = -1.0e30
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_P900S0000_304P.IMG"
+lines = 18669
+samples = 18669
+record_bytes = 74676
+header_bytes = 74676
+pole_line = 9334.5
+pole_sample = 9334.5
+scale_m = 99.747863237334
+
+# Same mosaic, polar stereographic tile 60-90 N.
+[[product]]
+id = "wac_emp_643nm_north"
+kind = "albedo"
+projection = "polar_stereographic_north"
+latitude_min_deg = 60.0
+latitude_max_deg = 90.0
+resolution_m = 99.75
+sample_type = "float32"
+scale = 1.0
+offset = 0.0
+source = "lroc_wac_emp_643nm_304p"
+invalid_below = -1.0e30
+
+[[product.file]]
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/WAC_EMP_643NM_P900N0000_304P.IMG"
+lines = 18669
+samples = 18669
+record_bytes = 74676
+header_bytes = 74676
+pole_line = 9334.5
+pole_sample = 9334.5
+scale_m = 99.747863237334

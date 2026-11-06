@@ -231,6 +231,69 @@ license = "NASA PDS data: public domain (NASA data and images are not copyrighte
 credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
 
 [[source]]
+id = "lola_ldem_80n_20m"
+name = "LRO LOLA polar gridded elevation LDEM_80N_20M (20 m/px, 80-90 N) - landing-site terrain tiles, ranged reads at run time"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80n_20m.img"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_sldem2015"
+name = "SLDEM2015 merged LOLA + SELENE Terrain Camera elevation, 512 px/deg, 60 S-60 N (~59 m) - landing-site terrain tiles, ranged reads at run time"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/tiles/float_img/"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "N. Barker et al. (2016), Icarus 273, 346-355 (A new lunar digital elevation model from LOLA and SELENE Terrain Camera); LRO LOLA team (NASA GSFC); JAXA SELENE (Kaguya) Terrain Camera team; NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_ldem_60s_60m"
+name = "LRO LOLA polar gridded elevation LDEM_60S_60M (60 m/px, 60-90 S) - landing-site terrain tiles, ranged reads at run time"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_60s_60m.img"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_ldem_60n_60m"
+name = "LRO LOLA polar gridded elevation LDEM_60N_60M (60 m/px, 60-90 N) - landing-site terrain tiles, ranged reads at run time"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_60n_60m.img"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_ldem_45s_100m"
+name = "LRO LOLA polar gridded elevation LDEM_45S_100M (100 m/px, 45-90 S) - landing-site terrain tiles across the 60 deg seam, ranged reads at run time"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_45s_100m.img"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_ldem_45n_100m"
+name = "LRO LOLA polar gridded elevation LDEM_45N_100M (100 m/px, 45-90 N) - landing-site terrain tiles across the 60 deg seam, ranged reads at run time"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_45n_100m.img"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lroc_wac_emp_643nm_304p"
+name = "LROC WAC 643 nm empirically photometrically normalised reflectance mosaic, 304 px/deg (~100 m), WAC_EMP_643NM_*_304P - albedo of the landing-site tiles, ranged reads at run time"
+url = "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/MDR/WAC_EMP/"
+target = "config/lunar_terrain_products.toml"
+kind = "licence_only"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "A. K. Boyd, M. S. Robinson, H. Sato (2012), LPSC 43 abstract 2795 (empirical WAC photometry); LROC team (ASU), NASA Planetary Data System Imaging Node"
+
+[[source]]
 id = "geoid_egm2008"
 name = "EGM2008 geoid undulation, 2.5 arc-minute grid (NGA) via the PROJ CDN - sea level, site heights and the 1-degree config grid"
 url = "https://cdn.proj.org/us_nga_egm08_25.tif"

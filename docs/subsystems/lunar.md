@@ -21,7 +21,17 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `finest_resolution_m` the grid spacings, for the procedural detail of `moon-surface.md`; normals by central
   differences over 10 m) through
   `ReferenceBody::set_terrain` / `surface_height_m` / `surface_normal_fixed`; `FlightSession::set_moon_terrain`,
-  `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Leg landings work on any reference body
+  `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Terrain and albedo products for landing
+  sites anywhere (plan 2026-11-06, task 1; data only, no code reads them yet): `config/lunar_terrain_products.toml`
+  describes each product (URL, layout, projection, scale; `[selection]` orders them) and
+  `tools/data_pipeline/probe_lunar_products.py --verify-config` checks it against the PDS labels. Heights: LOLA polar
+  20 m (80-90 deg, own `tile_half_size_m` 10 km), SLDEM2015 512 px/deg (+-60 deg, ~59 m, km values), LOLA polar 60 m
+  (60-90 deg), LOLA polar 100 m (45-90 deg, the +-60 deg seam bridge). Albedo: LROC WAC_EMP 643 nm, 304 px/deg (~100 m),
+  normalised to i = 30, e = 0, g = 30 deg. Measured (150 km tile, ~0.5 s per range request): rows as separate ranges 156 s at 8 connections, ~40 s at 32,
+  PDS Geosciences answers HTTP 403 at 64; full-row bulk ranges reach 10-15 MB/s (233 MB SLDEM tile in ~25 s). The PDS Imaging
+  CloudFront host (LROC) answered HTTP 429 with `Retry-After: 3600` after ~1,500 small range requests in 10 min: read albedo
+  in large row blocks and honour Retry-After. Polar north uses `line = pole_line + rho cos(lon) / s` (south has the minus sign).
+  Leg landings work on any reference body
   (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`). Footpads are discs (`foot_pad_radius_m`, HLS 1.0 m [E],
   user-approved 2026-11-04; 0 = point foot): each foot stands on `below_disc` (the pad's support and normal), the base
