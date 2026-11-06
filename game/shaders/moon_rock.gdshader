@@ -91,9 +91,16 @@ varying flat vec4 rock_place;  // COLOR (grid a, grid b, global u, v)
 varying flat float rock_lod_v;  // the mesh's LOD (CUSTOM0.x)
 // [E] Share of the LOD triangle's own (flat) normal in the shading normal per LOD (Task 17, controller look feedback:
 // small rocks read as smooth eggs with interpolated normals). The coarse LODs cannot carry the relief's chips; their
-// facets show the sampled fragment as an angular body - Apollo cobbles are mostly angular to subangular. LOD 0-1
-// keep the smooth interpolated normals of the resolved relief (hard edges from the geometry itself).
-const float ROCK_FLAT_SHARE[6] = float[](0.0, 0.25, 0.6, 0.85, 1.0, 1.0);
+// facets show the sampled fragment as an angular body - Apollo cobbles are mostly angular to subangular. LOD 0 keeps
+// the interpolated normals of the resolved relief (hard edges from the geometry itself); fix round 1 (review I4: mid-size
+// rocks read as rounded cobbles) raised the mid LODs' share (0.25 / 0.6 -> 0.4 / 0.75).
+// [E] Highest dust fillet (fix round 1: 0.05 D drew a 15-20 cm band at the base of 3-4 m boulders; Apollo boulders
+// show fillets of a few cm to a decimetre).
+const float ROCK_FILLET_MAX_M = 0.06;
+// [E] Fillet edge: height noise as a share of the band and its wavelength in bands (look).
+const float ROCK_FILLET_EDGE_NOISE = 1.0;
+const float ROCK_FILLET_EDGE_WAVELENGTH = 3.0;
+const float ROCK_FLAT_SHARE[6] = float[](0.0, 0.4, 0.75, 0.9, 1.0, 1.0);
 
 // The template's plan-area tables (linear between samples).
 float rock_area_forward(int template_id, float z, float bottom, float top) {
@@ -218,8 +225,10 @@ void fragment() {
 	float pixel_m = max(length(fwidth(rock_m)), 1.0e-6);
 	float dust = 0.0;
 	float surface_albedo = 1.0;
+	vec3 detail_gradient = vec3(0.0);
 	if (rock_surface) {
 		vec4 detail = rock_surface_detail(rock_m, pixel_m);
+		detail_gradient = detail.xyz;
 		dust = rock_dust(model_normal.z, rock_cavity, rock_m);
 		vec3 g = detail.xyz * (1.0 - 0.5 * dust);  // [E] a thin dust layer keeps half the relief of the rock beneath
 		model_normal = normalize(model_normal - (g - model_normal * dot(g, model_normal)));
@@ -233,8 +242,19 @@ void fragment() {
 	vec2 global_uv = rock_place.zw;
 	float abundance = texture(detail_rock_abundance, global_uv).r;
 	float diameter = rock_custom.x;
-	float fillet = clamp(height_above_ground_m / (ROCK_FILLET_PER_DIAMETER * diameter), 0.0, 1.0);
+	// The fillet's upper edge is irregular (drifted, uneven dust; fix round 1, review: a smooth contour band read as an
+	// untextured strip): its height varies by +-ROCK_FILLET_EDGE_NOISE of the band along the rock.
+	float band_m = min(ROCK_FILLET_PER_DIAMETER * diameter, ROCK_FILLET_MAX_M);
+	float edge = rock_surface ? ROCK_FILLET_EDGE_NOISE * rock_noise(rock_m / max(band_m * ROCK_FILLET_EDGE_WAVELENGTH, 1.0e-3)).w : 0.0;
+	float fillet = clamp(height_above_ground_m / band_m + edge, 0.0, 1.0);
 	fillet = fillet * fillet * (3.0 - 2.0 * fillet);
+	// The fillet's regolith carries the dust's granular relief (half the rock texture's slopes, as dust on rock) on the
+	// local vertical instead of a smooth plane.
+	vec3 fillet_g = to_local * (0.5 * detail_gradient);
+	vec3 fillet_up = normalize(up - (fillet_g - up * dot(fillet_g, up)));
+	// A dust ramp, not a painted band: the fillet's surface turns from the ground's vertical at its foot to the rock's
+	// face at its top, so its shading runs continuously into the rock's.
+	fillet_up = normalize(mix(fillet_up, n, fillet));
 	// Texture: albedo variation and the slope modulation (the gradient taken to the local frame like a normal).
 	vec3 gradient = vec3(0.0);
 	float relative_albedo = 1.0;
@@ -263,9 +283,9 @@ void fragment() {
 	float ground_theta_bar = detail_theta_bar(detail_cell_m);
 	// Dusted surface reflects like the regolith (factor 1); the bare rock carries the law's excess over the dust share.
 	float albedo_factor = rock_surface ? mix(rock_bare_albedo_factor(rock_custom.z), 1.0, dust) : rock_custom.z;
-	float sun_reflectance = moon_rock_reflectance(n, up, normalize(to_sun), to_eye, albedo_factor, gradient, fillet,
+	float sun_reflectance = moon_rock_reflectance(n, fillet_up, normalize(to_sun), to_eye, albedo_factor, gradient, fillet,
 			ground_theta_bar);
-	float earth_reflectance = moon_rock_reflectance(n, up, normalize(to_earth), to_eye, albedo_factor, gradient, fillet,
+	float earth_reflectance = moon_rock_reflectance(n, fillet_up, normalize(to_earth), to_eye, albedo_factor, gradient, fillet,
 			ground_theta_bar);
 	// Smith's G1 of the node's unshadowed drawn relief for each light at its macroscopic elevation (the ground's own
 	// factor; review I1: the earthshine is a directional light like the Sun).

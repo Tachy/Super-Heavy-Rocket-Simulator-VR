@@ -59,3 +59,17 @@ Superseded states of `docs/subsystems/moon-surface.md`.
   every LOD. LODs icosphere 4 / 3 / 2 / 1 (5120 / 1280 / 320 / 80 triangles, bands >= 100 / 30-100 / 10-30 / 4-10 px)
   plus the icosahedron. User 2026-11-05 (screenshots/moon_surface/compare/user/a17_boulder_real_left_render_right.jpg):
   the rocks looked like crystals - clean convex polyhedra with flat, evenly lit faces and sharp straight edges.
+
+## Task 17 templates and contact queries before fix round 1 (7ad10c70, 2026-11-05)
+- Shape constants: erosion radius fresh 0.6-1.4 %, eroded 3.5-7 % of the long semi-axis; eroded fragments 5-8 primary
+  planes cut 3-12 % (mostly the ellipsoid); undulation 0-1.2 % fresh / 0-2.5 % eroded; step risers 35-63 deg from the
+  tangent plane, sharp inner corners; no major spalls, no through-cracks; vertex normals from central differences over
+  0.2 of the LOD edge angle. Review (task-17-review.md, I4): mid-size rocks read as rounded river cobbles, the big A17
+  boulder a smooth warped lump; fracture edges drew a staircase at the LOD-0 vertex spacing.
+- Shader: flat-normal share per LOD 0 / 0.25 / 0.6 / 0.85 / 1 / 1; crack lines a pure darkening (~2.5 % mean, not
+  mean-preserving); dust fillet blended on the plain local vertical below a straight 0.05 D contour (an untextured band
+  at the base of large rocks); ROCK_DUST_MEAN 0.343.
+- Contact: the rim of a pad over a rock searched by 9 coarse samples + 12 golden-section steps (5 + 8 before Task 17):
+  on the faceted, multimodal top it missed the global maximum (pivoting-pad rim-cut case D 0.42 m: 0.02 mm low, normal
+  0.115 rad off, gate 0.05); `normal_toward` over 32^3 spatial bins with heap vectors and a Mat3 solve per generator
+  triple. contact_speed sliding 51.5-52.8 us alone (gate 50; the convex Task 11 templates 37-39 us).

@@ -29,12 +29,15 @@ constexpr std::int64_t patch_nodes = std::int64_t{1} << patch_shift;  // per sid
 constexpr std::int64_t patch_mask = patch_nodes - 1;
 // A cell's points lie within its largest centre-to-corner chord; 1 % margin for the edges' curvature ([E]).
 constexpr double patch_radius_margin = 1.01;
-// Rim arc search for a rock cut by the disc rim: coarse samples over the arc the rock can cover, then golden-section
-// steps around the best ([E]; Task 17: the fractured templates' top is piecewise planar with many small facets, so the
-// arc is sampled finer (9 coarse samples, 12 golden steps: bracket ~0.1 % of the span): the 5 / 8 of the smooth convex templates left the
-// maximum up to 0.1 mm low on a neighbouring facet, whose normal differed by up to 0.19 rad).
-constexpr int arc_coarse_samples = 9;
-constexpr int arc_golden_steps = 12;
+// Rim maximum of a rock cut by the disc rim (exact, RockTemplates::arc_peak): the point handed on to the contact-normal
+// query is moved this far into the facet that carries the maximum, so that the column query there lands on that facet
+// despite rounding ([D]: above the ~2e-10 m rounding of the offsets, far below any facet size and the 1 mm contact
+// tolerance).
+constexpr double rim_nudge_m = 1e-8;
+// The pad's tilt from the local vertical widens the rim span a rock's footprint can cover: a disc point maps to the
+// sphere radially, so a footprint of radius a reaches up to a / cos(tilt) in the disc plane; the cosine is floored here
+// ([D]: 60 deg, beyond any pad tilt the legs allow).
+constexpr double min_rim_tilt_cos = 0.5;
 // Node climb over a rock's footprint columns: at most this many steps ([E]: 96 columns across, a climb from the peak
 // node takes a few).
 constexpr int max_climb_steps = 200;
@@ -574,14 +577,17 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
     // spacing 2 a / footprint_columns); measured against the brute-force maximum: <= 0.15 mm (test_detailed_lunar_terrain
     // "pivoting footpad" cases), below the contact tolerance of 1 mm.
     const double slope = std::hypot(gx, gy);
-    RockQuery q;
+    // Per-thread buffers reused across calls (the contact path allocates nothing per call once warm; the patches the
+    // previous call held are released here).
+    thread_local RockQuery q;
+    q.candidates.clear(), q.held.clear(), q.max_peak_m = -std::numeric_limits<double>::infinity();
     gather_rocks(centre_unit, r, q);
     struct Candidate {
         const ContactCache::RockEntry* e;
         double bx, by, px, py, bound;
     };
-    std::vector<Candidate> candidates;
-    candidates.reserve(q.candidates.size());
+    thread_local std::vector<Candidate> candidates;
+    candidates.clear();
     const ContactCache::RockEntry* winner = nullptr;  // the rock carrying the pad, and where
     double winner_x = 0.0, winner_y = 0.0;
     for (const auto* e : q.candidates) {
@@ -601,20 +607,12 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
     });
     const RockTemplates& templates = RockTemplates::instance();
     constexpr int columns = RockTemplates::footprint_columns;
-    constexpr double golden = 0.6180339887498949;  // (sqrt 5 - 1) / 2
+    const double rim_tilt_cos = std::max(dot(up, centre_unit), min_rim_tilt_cos);
     for (const Candidate& cand : candidates) {
         if (cand.bound <= best) break;
         const Rock& rock = cand.e->rock;
         const double a = rock.axes_m.x;
         double found = -std::numeric_limits<double>::infinity(), found_x = 0.0, found_y = 0.0;
-        // Protrusion of the rock's contact top at disc point (x, y) above the plane (-inf where it misses).
-        const auto protrusion = [&](double x, double y) {
-            const auto top = contact_top(rock, at(x, y), sphere_radius_m_);
-            if (!top) return -std::numeric_limits<double>::infinity();
-            const double p = *top - (x * x + y * y) / two_r_sphere - plane(x, y);
-            if (p > found) found = p, found_x = x, found_y = y;
-            return p;
-        };
         // The footprint column node (i, j): its disc point and protrusion (-inf outside the disc or where it misses).
         const Vec3 ea = math::column(rock.local_to_fixed, 0), eb = math::column(rock.local_to_fixed, 1);
         const double ea1 = dot(ea, t.e1), ea2 = dot(ea, t.e2), eb1 = dot(eb, t.e1), eb2 = dot(eb, t.e2);
@@ -662,39 +660,60 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
         }
         // Along the rim arc the rock covers (a rock the rim cuts), then inward from the best rim point.
         const double db = std::hypot(cand.bx, cand.by);
-        if (db + a > r && cand.bound > std::max(best, found)) {
+        const double a_disc = a / rim_tilt_cos;  // the footprint's reach in the disc plane
+        if (db + a_disc > r && cand.bound > std::max(best, found)) {
             double half_span = constants::pi;
             bool crosses = true;
             if (db > 0.0) {
-                const double cos_span = (r * r + db * db - a * a) / (2.0 * r * db);
+                const double cos_span = (r * r + db * db - a_disc * a_disc) / (2.0 * r * db);
                 if (cos_span >= 1.0) crosses = false;
                 else if (cos_span > -1.0) half_span = std::acos(cos_span);
             }
             if (crosses) {
-                const double theta_b = std::atan2(cand.by, cand.bx);
-                const auto rim = [&](double theta) { return protrusion(r * std::cos(theta), r * std::sin(theta)); };
-                const double step = 2.0 * half_span / arc_coarse_samples;
-                double best_theta = theta_b, best_value = -std::numeric_limits<double>::infinity();
-                for (int k = 0; k < arc_coarse_samples; ++k) {
-                    const double theta = theta_b - half_span + (k + 0.5) * step;
-                    const double v = rim(theta);
-                    if (v > best_value) best_value = v, best_theta = theta;
+                // The rim maps to the rock's unit coordinates as u(theta) = u0 + A cos(theta) + B sin(theta): the
+                // radial projection onto the sphere adds only a term constant on the rim (|offset| = r) up to
+                // O(r^3 / R^2) ~ 1e-13 m, so four rim points fix it. On the polyhedral top the protrusion along the rim
+                // is a sinusoid per facet: the exact maximum (RockTemplates::arc_peak) replaces a sampled search, which
+                // missed the global maximum on the multimodal faceted profile (Task 17 fix 1).
+                const auto unit_coords = [&](double x, double y) {
+                    const Vec3 offset = (at(x, y) - rock.base_unit) * sphere_radius_m_;
+                    return std::pair{dot(offset, ea) / a, dot(offset, eb) / rock.axes_m.y};
+                };
+                const auto [px, py] = unit_coords(r, 0.0);
+                const auto [mx, my] = unit_coords(-r, 0.0);
+                const auto [qx, qy] = unit_coords(0.0, r);
+                const auto [nx, ny] = unit_coords(0.0, -r);
+                RockTemplates::ArcQuery query;
+                query.u0x = 0.5 * (px + mx), query.u0y = 0.5 * (py + my);
+                query.ax = 0.5 * (px - mx), query.ay = 0.5 * (py - my);
+                query.bx = 0.5 * (qx - nx), query.by = 0.5 * (qy - ny);
+                // Protrusion = base + c top - burial + (a^2 ux^2 + b^2 uy^2) / 2R - r^2 / 2R - plane(r cos, r sin):
+                // the curvature term's part linear in (cos, sin) joins the plane's; its quadratic part varies by
+                // < r^2 / 2R sin^2(tilt) < 1e-7 m along the rim and is evaluated exactly at the maximum only.
+                const double a2 = a * a, b2 = rock.axes_m.y * rock.axes_m.y;
+                query.kz = rock.axes_m.z;
+                query.kc = -gx * r + (a2 * query.u0x * query.ax + b2 * query.u0y * query.ay) / sphere_radius_m_;
+                query.ks = -gy * r + (a2 * query.u0x * query.bx + b2 * query.u0y * query.by) / sphere_radius_m_;
+                query.theta_mid = std::atan2(cand.by, cand.bx);
+                query.half_span = half_span;
+                query.z_floor = rock.burial_m / rock.axes_m.z;
+                query.nudge = rim_nudge_m / a;
+                // Only a maximum that beats the best protrusion so far matters: the terms outside the arc value
+                // (constant ones and the curvature remainder a^2 (|u0|^2 + |A cos + B sin|^2) / 2R >= 0, bounded above).
+                {
+                    const double speed = std::hypot(query.ax, query.ay) + std::hypot(query.bx, query.by);
+                    const double u0_2 = query.u0x * query.u0x + query.u0y * query.u0y;
+                    const double constant = rock.base_height_m - rock.burial_m - r * r / two_r_sphere - mean;
+                    query.value_floor = std::max(best, found) - constant -
+                                        std::max(a2, b2) * (u0_2 + speed * speed) / two_r_sphere;
                 }
-                if (best_value > -std::numeric_limits<double>::infinity()) {
-                    double lo = best_theta - step, hi = best_theta + step;
-                    double x1 = hi - golden * (hi - lo), x2 = lo + golden * (hi - lo);
-                    double f1 = rim(x1), f2 = rim(x2);
-                    for (int k = 0; k < arc_golden_steps; ++k) {
-                        if (f1 >= f2) {
-                            hi = x2, x2 = x1, f2 = f1;
-                            x1 = hi - golden * (hi - lo);
-                            f1 = rim(x1);
-                        } else {
-                            lo = x1, x1 = x2, f1 = f2;
-                            x2 = lo + golden * (hi - lo);
-                            f2 = rim(x2);
-                        }
-                    }
+                if (const auto peak = templates.arc_peak(rock.template_id, query)) {
+                    const double ux = query.u0x + query.ax * peak->cos_theta + query.bx * peak->sin_theta;
+                    const double uy = query.u0y + query.ay * peak->cos_theta + query.by * peak->sin_theta;
+                    const double value = rock.base_height_m + rock.axes_m.z * peak->top - rock.burial_m +
+                                         (a2 * ux * ux + b2 * uy * uy) / two_r_sphere - r * r / two_r_sphere -
+                                         plane(r * peak->cos_theta, r * peak->sin_theta);
+                    if (value > found) found = value, found_x = r * peak->nudged_cos, found_y = r * peak->nudged_sin;
                     if (!peak_inside) {  // the protrusion may grow inward on a tilted plane
                         const double rim_x = found_x, rim_y = found_y;
                         const auto [i, j] = nearest_node(rim_x, rim_y);

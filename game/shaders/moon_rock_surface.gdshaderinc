@@ -34,6 +34,9 @@ const float ROCK_GRAIN_ALBEDO = 0.08;
 const float ROCK_CRACK_WAVELENGTH_M = 0.35;
 const float ROCK_CRACK_WIDTH = 0.05;
 const float ROCK_CRACK_DARKENING = 0.45;
+// [D] Mean line share of the crack term (Monte Carlo of the noise below, 4e6 samples: 0.0567 +- 0.0001): the albedo is
+// divided by 1 - darkening x this, so the crack lines are mean-preserving like the grains.
+const float ROCK_CRACK_MEAN_LINE = 0.0567;
 // [E] An octave fades out below this many pixels per wavelength.
 const float ROCK_DETAIL_MIN_PIXELS = 4.0;
 // [E] Dust: up-facing term from the template normal's vertical component (smoothstep between the two), cavity term
@@ -45,8 +48,9 @@ const float ROCK_DUST_CAVITY = 1.0;
 const float ROCK_DUST_PATCH_M = 0.4;
 const float ROCK_DUST_MAX = 0.8;
 // [D] Mean dust coverage of the templates' exposed plan area (core test "Dust share of the rock templates": the
-// formula above with the patchiness mean 0.75, plan-area weighted over every template at the mean burial).
-const float ROCK_DUST_MEAN = 0.343;
+// formula above with the patchiness mean 0.75, plan-area weighted over every template at the mean burial; the test
+// mirrors these constants: keep both in sync).
+const float ROCK_DUST_MEAN = 0.340;
 
 float rock_hash(vec3 p) {
 	p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
@@ -107,7 +111,7 @@ vec4 rock_surface_detail(vec3 p_m, float pixel_m) {
 	if (crack_fade > 0.0) {
 		vec4 c = rock_noise(p_m / ROCK_CRACK_WAVELENGTH_M + vec3(3.7, 11.3, 5.9));
 		float line = 1.0 - smoothstep(0.0, ROCK_CRACK_WIDTH * max(length(c.xyz), 0.2), abs(c.w));
-		albedo *= 1.0 - crack_fade * ROCK_CRACK_DARKENING * line;
+		albedo *= (1.0 - crack_fade * ROCK_CRACK_DARKENING * line) / (1.0 - crack_fade * ROCK_CRACK_DARKENING * ROCK_CRACK_MEAN_LINE);
 	}
 	return vec4(gradient, albedo);
 }

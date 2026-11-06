@@ -220,6 +220,20 @@ Highest brute_rock_max(const environment::LunarRocks& lr, const Rock& rock, cons
             }
             if (!moved) step *= 0.5;
         }
+        // On the rim the pattern's steps leave the disc: refine there along the rim angle (the code's rim maximum is exact,
+        // Task 17 fix 1; the 8000 rim samples alone leave the reference up to ~0.4 mm along the rim off it).
+        if (best_x * best_x + best_y * best_y > radius * radius * (1.0 - 1e-9)) {
+            double phi = std::atan2(best_y, best_x);
+            for (double step = constants::two_pi / rim; step > 1e-10;) {
+                bool moved = false;
+                for (const double dir : {1.0, -1.0}) {
+                    if (!moved && try_point(radius * std::cos(phi + dir * step), radius * std::sin(phi + dir * step))) {
+                        phi += dir * step, moved = true;
+                    }
+                }
+                if (!moved) step *= 0.5;
+            }
+        }
         const Vec3 pad_normal = math::normalized(disc.c - disc.e1 * plane.gx - disc.e2 * plane.gy);
         if (const auto top = lr.rock_top(rock, best.unit, pad_normal)) best.normal = top->second;
     }
@@ -350,7 +364,7 @@ TEST_CASE("A rock at the rim lifts the pivoting pad by its protrusion above the 
             const double expected = plane.mean + rock_max.height_m;
             // A level pad on the same rock: lifted by the rock's full height above the plane's centre height.
             const double level = brute_rock_max(*lr, rock, disc, pad).height_m;
-            std::printf("9 deg plane, rock D %.2f m, %s: support %.4f m, plane + protrusion %.4f m (diff %.2f mm), level pad on "
+            std::printf("9 deg plane, rock D %.2f m, %s: support %.4f m, plane + protrusion %.4f m (diff %.4f mm), level pad on "
                         "the rock %.4f m, normal off %.4f rad\n",
                         rock.diameter_m, rim_cut ? "rim cut" : "peak under edge", support.height_m, expected,
                         1e3 * (support.height_m - expected), level, angle_between(support.normal_fixed, rock_max.normal));
@@ -394,7 +408,7 @@ TEST_CASE("A pivoting footpad on the procedural ground stands on its plane and t
             if (other) continue;
             const auto support = s.support_under_disc(centre, centre, pad);
             const double expected = plane.mean + rock_max.height_m;
-            std::printf("rock D %.2f m, %s: support %.4f m, brute force %.4f m (diff %.2f mm), normal off %.4f rad\n",
+            std::printf("rock D %.2f m, %s: support %.4f m, brute force %.4f m (diff %.4f mm), normal off %.4f rad\n",
                         rock.diameter_m, rim_cut ? "rim cut" : "peak under edge", support.height_m, expected,
                         1e3 * (support.height_m - expected), angle_between(support.normal_fixed, rock_max.normal));
             CHECK(std::abs(support.height_m - expected) <= 1e-3);

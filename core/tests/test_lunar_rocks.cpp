@@ -478,6 +478,42 @@ TEST_CASE("Rock shapes are star-shaped and closed", "[moon_surface][environment]
     }
 }
 
+TEST_CASE("One rock template is fractured and keeps its axes (fast)", "[moon_surface][environment]") {
+    // The fast tier's shape check (review m7; the full statistics are the [slow] case below): the relief features exist,
+    // the extents keep the fragment's axis ratios, the LOD-0 mesh has concave edges, and some templates carry a
+    // through-crack and major spalls.
+    const RockTemplates& t = RockTemplates::instance();
+    constexpr int id = 0;
+    CHECK(t.chip_count(id) > 0);
+    CHECK(t.step_count(id) > 0);
+    CHECK(t.pit_count(id) > 0);
+    const auto& s = t.relief_stats(id);
+    const auto& b = t.base_stats(id);
+    CHECK(std::abs(s.extent_b_to_a / b.extent_b_to_a - 1.0) < 0.01);
+    CHECK(std::abs(s.extent_c_to_a / b.extent_c_to_a - 1.0) < 0.01);
+    const auto& m = t.mesh(id, 0);
+    std::map<std::pair<int, int>, int> edge_face;
+    for (size_t f = 0; f < m.indices.size() / 3; ++f) {
+        for (size_t e = 0; e < 3; ++e) edge_face[{m.indices[3 * f + e], m.indices[3 * f + (e + 1) % 3]}] = static_cast<int>(f);
+    }
+    int concave = 0;
+    for (const auto& [e, f] : edge_face) {
+        const int g = edge_face.at({e.second, e.first});
+        const auto v = [&](int face, int k) { return m.vertices[static_cast<size_t>(m.indices[static_cast<size_t>(3 * face + k)])]; };
+        const Vec3 n = cross(v(f, 1) - v(f, 0), v(f, 2) - v(f, 0));
+        for (int k = 0; k < 3; ++k) {
+            const int w = m.indices[static_cast<size_t>(3 * g + k)];
+            if (w != e.first && w != e.second && dot(n, m.vertices[static_cast<size_t>(w)] - v(f, 0)) > 1e-12) ++concave;
+        }
+    }
+    int cracked = 0;
+    for (int k = 0; k < RockTemplates::count; ++k) cracked += t.crack_count(k);
+    std::printf("template %d: %d chips, %d steps, %d pits, %d concave edge sides; %d of %d templates cracked\n", id,
+                t.chip_count(id), t.step_count(id), t.pit_count(id), concave, cracked, RockTemplates::count);
+    CHECK(concave > 100);
+    CHECK(cracked >= 3);
+}
+
 TEST_CASE("Rock templates are fractured, eroded impact fragments", "[moon_surface][environment][slow]") {
     const RockTemplates& t = RockTemplates::instance();
     // Axis law (Fujiwara et al. / Michikami et al. 2016): mean b/a 0.71, c/a 0.50, spread 0.15 (clamped), so the
@@ -717,13 +753,66 @@ TEST_CASE("Pad contact normal on hand-built vertices and faces", "[moon_surface]
     CHECK(faces >= 10);
 }
 
+TEST_CASE("The arc maximum over the rock tops is exact", "[moon_surface][environment][contact]") {
+    // RockTemplates::arc_peak (the pad rim over a rock, Task 17 fix 1) against a dense brute force over column_top: never
+    // below it, above it only by the sampling gap, and the nudged point reproduces the value through column_top.
+    const RockTemplates& t = RockTemplates::instance();
+    constexpr int samples = 100000;
+    int cases = 0, found = 0;
+    double worst_gap = 0.0, worst_reproduce = 0.0;
+    for (int id = 0; id < RockTemplates::count; id += 3) {
+        for (int k = 0; k < 12; ++k) {
+            const auto h = [&](std::uint64_t f) { return unit_hash(5000 + static_cast<std::uint64_t>(id), static_cast<std::uint64_t>(k), f); };
+            RockTemplates::ArcQuery q;
+            q.u0x = h(1) - 0.5, q.u0y = h(2) - 0.5;
+            const double la = 0.4 + 2.0 * h(3), lb = la * (0.5 + 0.5 * h(4)), turn = constants::two_pi * h(5);
+            q.ax = la * std::cos(turn), q.ay = la * std::sin(turn);
+            q.bx = -lb * std::sin(turn), q.by = lb * std::cos(turn);
+            q.kz = 0.2 + 0.8 * h(6), q.kc = 0.6 * h(7) - 0.3, q.ks = 0.6 * h(8) - 0.3;
+            q.theta_mid = constants::two_pi * h(9);
+            q.half_span = k % 4 == 0 ? constants::pi : 0.3 + 2.5 * h(10);
+            q.z_floor = k % 3 == 0 ? t.bottom_z(id) + 0.3 * (t.top_z(id) - t.bottom_z(id)) : -2.0;
+            q.nudge = 1e-9;
+            double brute = -std::numeric_limits<double>::infinity();
+            for (int s = 0; s <= samples; ++s) {
+                const double theta = q.theta_mid - q.half_span + 2.0 * std::min(q.half_span, constants::pi) * s / samples;
+                const double c = std::cos(theta), sn = std::sin(theta);
+                const auto top = t.column_top(id, q.u0x + q.ax * c + q.bx * sn, q.u0y + q.ay * c + q.by * sn);
+                if (top && *top > q.z_floor) brute = std::max(brute, q.kz * *top + q.kc * c + q.ks * sn);
+            }
+            const auto peak = t.arc_peak(id, q);
+            ++cases;
+            if (!std::isfinite(brute)) {
+                CHECK(!peak);
+                continue;
+            }
+            REQUIRE(peak);
+            ++found;
+            CHECK(peak->value >= brute - 1e-12);
+            worst_gap = std::max(worst_gap, peak->value - brute);
+            CHECK(peak->value - brute < 1e-4);
+            const double ux = q.u0x + q.ax * peak->nudged_cos + q.bx * peak->nudged_sin;
+            const double uy = q.u0y + q.ay * peak->nudged_cos + q.by * peak->nudged_sin;
+            const auto top = t.column_top(id, ux, uy);
+            REQUIRE(top);
+            const double again = q.kz * *top + q.kc * peak->nudged_cos + q.ks * peak->nudged_sin;
+            worst_reproduce = std::max(worst_reproduce, std::abs(again - peak->value));
+            CHECK(std::abs(again - peak->value) < 1e-7);
+        }
+    }
+    std::printf("arc maximum: %d cases (%d with a maximum), exact minus brute force <= %.2e, nudged point reproduces the "
+                "value to %.2e\n",
+                cases, found, worst_gap, worst_reproduce);
+    CHECK(found > cases / 2);
+}
+
 TEST_CASE("Dust share of the rock templates", "[moon_surface][environment]") {
     // The renderer's dust (game/shaders/moon_rock_surface.gdshaderinc, Task 17): coverage = max x patch x clamp(
     // smoothstep(low, high, n_z) + cavity), the patchiness 0.5 + 0.5 x a smoothstep of symmetric noise (mean 0.75). Its mean over the
     // templates' exposed plan area at the mean burial is the shader's ROCK_DUST_MEAN, which keeps the drawn rock's mean
     // albedo factor at the rock law's. The constants mirror the shader's.
     constexpr double low = 0.6, high = 0.95, cavity_weight = 1.0, dust_max = 0.8, patch_mean = 0.75;
-    constexpr double shader_mean = 0.343;  // ROCK_DUST_MEAN
+    constexpr double shader_mean = 0.340;  // ROCK_DUST_MEAN (keep in sync: a shader dust edit must update this test)
     const auto smoothstep = [](double a, double b, double x) {
         const double t = std::clamp((x - a) / (b - a), 0.0, 1.0);
         return t * t * (3.0 - 2.0 * t);

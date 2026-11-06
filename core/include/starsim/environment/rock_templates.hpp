@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -31,7 +32,9 @@ struct TemplateMesh {
 // The rock IS its LOD-0 mesh: radius / normal / column tops / support / contact normals are exact queries on that
 // polyhedron (same shape for the renderer, the contact physics and the statistics). Scaled so that the farthest vertex
 // is at r = 1. Template frame: z = the local vertical; a rock scales it isotropically by its size (LunarRocks).
-// Everything derives from the integer hash: identical on every machine.
+// Everything derives from the integer hash; the field uses CRT transcendentals (log, acos, sin, cos), whose last bits
+// may differ between CPUs (FMA code paths), so templates agree across machines to ULP level, and exactly between the
+// renderer, the contact and the statistics within one process (review m4).
 class RockTemplates {
 public:
     static constexpr int count = 32;  // [E] enough that neighbours do not look alike and the axis law is sampled
@@ -54,6 +57,25 @@ public:
     std::optional<double> column_top(int id, double x, double y) const;
     // column_top and the outward normal of the triangle it lies on.
     std::optional<std::pair<double, math::Vec3>> column_hit(int id, double x, double y) const;
+    // The highest value of kz top(u(theta)) + kc cos(theta) + ks sin(theta) over the column tops along the elliptic arc
+    // u(theta) = u0 + a cos(theta) + b sin(theta) (unit coordinates), |theta - theta_mid| <= half_span (>= pi: the whole
+    // ellipse), counting only tops above z_floor; kz > 0. Exact on the LOD-0 polyhedron: on each up-facing triangle the
+    // value is a sinusoid in theta, so its maximum lies at the triangle's stationary point, where the arc crosses one of
+    // its edges or at an end of a partial arc (closed form, no search). The returned point is moved by `nudge` (unit length along the arc) into the
+    // triangle that carries the maximum, so that a column query there lands on it despite rounding.
+    struct ArcQuery {
+        double u0x = 0.0, u0y = 0.0, ax = 0.0, ay = 0.0, bx = 0.0, by = 0.0;
+        double kz = 1.0, kc = 0.0, ks = 0.0;
+        double theta_mid = 0.0, half_span = 0.0;
+        double z_floor = -2.0, nudge = 0.0;
+        double value_floor = -std::numeric_limits<double>::infinity();  // only maxima above it are wanted
+    };
+    struct ArcPeak {
+        double value = 0.0, top = 0.0;
+        double cos_theta = 1.0, sin_theta = 0.0;  // the maximum's arc point (exact)
+        double nudged_cos = 1.0, nudged_sin = 0.0;  // the same point moved into its triangle
+    };
+    std::optional<ArcPeak> arc_peak(int id, const ArcQuery& q) const;
     // The footprint column (i, j)'s top (column centre x = -1 + (2 i + 1) / footprint_columns, y likewise): NaN where
     // the column misses the rock.
     double column_grid_node(int id, int i, int j) const {
@@ -77,10 +99,11 @@ public:
     double c_axis_tilt_rad(int id) const { return shapes_[static_cast<size_t>(id)].tilt_rad; }
     bool eroded(int id) const { return shapes_[static_cast<size_t>(id)].eroded; }
     int primary_planes(int id) const { return shapes_[static_cast<size_t>(id)].primary_planes; }
-    // Relief features: chips (secondary + tertiary), steps, pits; the erosion radius (unit size, before the scale).
+    // Relief features: chips (secondary + tertiary), steps (major spalls included), pits; the erosion radius (unit size, before the scale).
     int chip_count(int id) const { return shapes_[static_cast<size_t>(id)].chips; }
     int step_count(int id) const { return shapes_[static_cast<size_t>(id)].steps; }
     int pit_count(int id) const { return shapes_[static_cast<size_t>(id)].pits; }
+    int crack_count(int id) const { return shapes_[static_cast<size_t>(id)].cracks; }  // through-cracks (V grooves)
     double erosion_radius(int id) const { return shapes_[static_cast<size_t>(id)].erosion_radius; }
 
     // Shape statistics of the relief against the same fragment without relief (primary cuts only, sharp; the Task 11
@@ -119,7 +142,7 @@ private:
     struct Shape {
         double b_to_a = 1.0, c_to_a = 1.0, tilt_rad = 0.0;
         bool eroded = false;
-        int primary_planes = 0, chips = 0, steps = 0, pits = 0;
+        int primary_planes = 0, chips = 0, steps = 0, pits = 0, cracks = 0;
         double erosion_radius = 0.0;
         double bottom_z = -1.0, top_z = 1.0, volume = 0.0;
         ShapeStats relief, base;
@@ -127,9 +150,15 @@ private:
         std::vector<math::Vec3> vertex;
         std::vector<std::array<int, 3>> triangle;
         std::vector<math::Vec3> triangle_normal;
+        struct TrianglePlane {
+            math::Vec3 n;
+            double d = 0.0;  // n . p = d on the plane
+        };
+        std::vector<TrianglePlane> triangle_plane;  // normal and offset together (normal_toward's plane reject)
         std::vector<ColumnTri> column_tris;
         Bins column_bins;   // up-facing triangles (column_tris) by xy cell, highest first
-        Bins space_bins;    // all triangles by 3-D cell (space_bins_per_side^3 over [-1, 1]^3)
+        std::vector<double> bin_zmax;     // highest up-facing triangle per column bin (-inf: empty)
+        std::vector<double> coarse_zmax;  // highest up-facing triangle per coarse cell (8 x 8 column bins)
         Bins support_bins;  // vertex candidates per cube-map direction cell
         std::vector<double> column_tops;  // sorted tops of the footprint columns that hit the rock
         std::vector<double> column_grid;  // footprint_columns^2 column tops by (i, j), NaN where the column misses
