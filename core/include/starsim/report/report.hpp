@@ -20,13 +20,13 @@ enum class Code : std::uint16_t {
 };
 
 // Physical kind of a parameter value (all values are SI: rad, kg, m, m/s, s).
-enum class Kind : std::uint8_t { angle, mass, length, speed, time, count, number, ref, legacy_text };
+enum class Kind : std::uint8_t { angle, mass, length, speed, time, count, number, ref, legacy_text, utc, data_name };
 
 struct Param {
     const char* name;
     Kind kind;
     double value_si = 0.0;
-    std::string text;  // ref: table key; legacy_text: transitional text
+    std::string text;  // ref: table key; legacy_text: transitional text; data_name: verbatim data identifier
 };
 
 struct Report {
@@ -41,6 +41,8 @@ using Reports = std::vector<Report>;
 
 Report make(Code code, std::initializer_list<Param> params = {});
 Report with_cause(Report report, Report cause);
+// Same code, same parameters (name, kind, value, text) and same causes.
+bool same(const Report& a, const Report& b);
 
 Param angle(const char* name, double rad);
 Param mass(const char* name, double kg);
@@ -51,6 +53,10 @@ Param count(const char* name, long long value);
 Param number(const char* name, double value);
 Param ref(const char* name, std::string key);
 Param legacy_text(const char* name, std::string text);
+// UTC seconds since the Unix epoch (computed in the core from an Epoch); NaN when unknown.
+Param utc(const char* name, double unix_s);
+// A verbatim ASCII identifier read from an external data file (never text written in the code); shown as is.
+Param data_name(const char* name, std::string id);
 
 struct CodeInfo {
     Code code;

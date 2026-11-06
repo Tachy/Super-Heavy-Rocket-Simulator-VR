@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "starsim/report/report.hpp"
+
 #include "starsim/math/state_vector.hpp"
 #include "starsim/time/epoch.hpp"
 
@@ -43,7 +45,7 @@ struct PhasingOrbit {
 // burn coelliptic_height_m below the target -> coelliptic coast -> approach initiation -> Waypoint 0.
 struct PhasingSchedule {
     bool feasible = false;
-    std::string reason;  // German when refused
+    report::Report reason;  // ok when feasible
     int phasing_revolutions = 0;
     int extra_laps = 0;
     double phase_orbit_apoapsis_radius_m = 0.0;  // the phase burn's target apoapsis (0 without one)

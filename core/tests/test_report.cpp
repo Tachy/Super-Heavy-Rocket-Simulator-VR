@@ -5,6 +5,7 @@
 #include <string>
 
 #include "starsim/report/report.hpp"
+#include "starsim/time/utc_date_time.hpp"
 
 using namespace starsim;
 
@@ -23,6 +24,24 @@ TEST_CASE("Parameters carry kind and SI value", "[report]") {
     CHECK(report::angle("slope", 0.1449).kind == report::Kind::angle);
     CHECK(report::ref("site", "lunar_site.mons_mouton.name").text == "lunar_site.mons_mouton.name");
     CHECK(report::count("n", 3).value_si == 3.0);
+}
+
+TEST_CASE("utc and data_name parameters", "[report]") {
+    const auto u = report::utc("date", 1760466601.0);
+    CHECK(u.kind == report::Kind::utc);
+    CHECK(u.value_si == 1760466601.0);
+    CHECK(std::string(report::id_of(u.kind)) == "utc");
+    const auto n = report::data_name("name", "ISS_REBOOST_1");
+    CHECK(n.kind == report::Kind::data_name);
+    CHECK(n.text == "ISS_REBOOST_1");
+    CHECK(std::string(report::id_of(n.kind)) == "data_name");
+    CHECK(report::transitional_text(report::make(report::Code::legacy, {n})) == "ISS_REBOOST_1");
+}
+
+TEST_CASE("UtcDateTime unix_seconds matches known dates", "[report][time]") {
+    CHECK(time::UtcDateTime{1970, 1, 1, 0, 0, 0.0}.unix_seconds() == 0.0);
+    CHECK(time::UtcDateTime{2000, 1, 1, 12, 0, 0.0}.unix_seconds() == 946728000.0);
+    CHECK(time::UtcDateTime{2025, 10, 14, 18, 30, 1.0}.unix_seconds() == 1760466601.0);
 }
 
 TEST_CASE("Code table: unique dotted ASCII ids, enumerator = id with _", "[report]") {

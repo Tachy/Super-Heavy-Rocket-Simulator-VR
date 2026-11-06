@@ -304,7 +304,7 @@ TEST_CASE("Settling gas: the session's phasing plan reserves it per burn", "[ign
     mission::PhasingParameters p;
     p.mission_limit_s = 48.0 * 3600.0;
     const bool planned = f.session.plan_rendezvous(p);
-    INFO(f.session.rendezvous_status());
+    INFO(report::transitional_text(f.session.rendezvous_status()));
     REQUIRE(planned);
     REQUIRE(f.session.rendezvous_plan() != nullptr);
     CHECK(f.session.rendezvous_plan()->parameters.reserve_per_burn_kg == Catch::Approx(f.session.settling_gas_kg()));

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "starsim/math/constants.hpp"
@@ -38,6 +39,12 @@ std::optional<double> impulse_sign(const orbit::Oem& oem, const orbit::OemEvent&
                : -1.0;
 }
 
+// The OEM's CREATION_DATE (UTC text) as Unix seconds; NaN when it does not parse.
+double oem_unix_seconds(const std::string& creation_date) {
+    const auto utc = time::UtcDateTime::parse_iso(creation_date);
+    return utc ? utc->unix_seconds() : std::numeric_limits<double>::quiet_NaN();
+}
+
 StationStart from_oem(const config::VehicleConfig& iss, const orbit::Oem& oem, time::Epoch epoch) {
     StationStart out;
     out.vehicle = iss;
@@ -61,12 +68,11 @@ StationStart from_oem(const config::VehicleConfig& iss, const orbit::Oem& oem, t
     std::sort(out.impulses.begin(), out.impulses.end(),
               [](const StationImpulse& a, const StationImpulse& b) { return a.epoch < b.epoch; });
     out.from_oem = true;
-    // the OEM's creation date and the event names are data from the file, shown as written
-    out.note = assumed.empty() ? report::make(report::Code::station_oem_source,
-                                              {report::legacy_text("date", header.creation_date)})
+    // the event names are data from the OEM file, shown as written
+    const report::Param created = report::utc("date", oem_unix_seconds(header.creation_date));
+    out.note = assumed.empty() ? report::make(report::Code::station_oem_source, {created})
                                : report::make(report::Code::station_oem_source_assumed,
-                                              {report::legacy_text("date", header.creation_date),
-                                               report::legacy_text("maneuvers", assumed)});
+                                              {created, report::data_name("maneuvers", assumed)});
     return out;
 }
 
@@ -94,7 +100,7 @@ StationStart synthetic(const config::VehicleConfig& iss, const orbit::OemArchive
     out.vehicle = iss;
     out.state_gcrf = orbit::synthetic_station_state(advanced, gm, earth);
     out.epoch = epoch;
-    out.note = oem_date ? report::make(report::Code::station_synthetic_from_oem, {report::legacy_text("date", *oem_date)})
+    out.note = oem_date ? report::make(report::Code::station_synthetic_from_oem, {report::utc("date", oem_unix_seconds(*oem_date))})
                         : report::make(report::Code::station_synthetic_from_config);
     return out;
 }

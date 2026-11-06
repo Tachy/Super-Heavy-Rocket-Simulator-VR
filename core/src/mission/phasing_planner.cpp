@@ -52,9 +52,8 @@ std::optional<double> secant(F f, double x0, double x1, double tolerance) {
     return std::abs(f1) <= tolerance ? std::optional<double>(x1) : std::nullopt;
 }
 
-std::string limit_text(const PhasingParameters& p) {
-    return "Kein Rendezvous: Phasenwinkel nicht innerhalb von " +
-           std::to_string(static_cast<int>(std::lround(p.mission_limit_s / 3600.0))) + " h erreichbar";
+report::Report limit_reason(const PhasingParameters& p) {
+    return report::make(report::Code::phasing_phase_unreachable, {report::time("limit", p.mission_limit_s)});
 }
 
 // The coelliptic aim point at the coelliptic burn: behind and below the target.
@@ -70,16 +69,16 @@ Vec3 approach_initiation_point(const StateVector& target_at_ai, const PhasingPar
 }
 }  // namespace
 
-const char* german_name(PhasingBurnKind kind) {
+const char* id_of(PhasingBurnKind kind) {  // i18n-ns: phasing_burn_kind
     switch (kind) {
-        case PhasingBurnKind::Phase: return "Phasenmanöver";
-        case PhasingBurnKind::Boost: return "Anhebung";
-        case PhasingBurnKind::Coelliptic: return "Koelliptisches Manöver";
-        case PhasingBurnKind::ApproachInitiation: return "Annäherungsbeginn";
-        case PhasingBurnKind::MidCourse: return "Kurskorrektur";
-        case PhasingBurnKind::Braking: return "Bremsmanöver";
+        case PhasingBurnKind::Phase: return "phase";
+        case PhasingBurnKind::Boost: return "boost";
+        case PhasingBurnKind::Coelliptic: return "coelliptic";
+        case PhasingBurnKind::ApproachInitiation: return "approach_initiation";
+        case PhasingBurnKind::MidCourse: return "mid_course";
+        case PhasingBurnKind::Braking: return "braking";
     }
-    return "?";
+    return "";
 }
 
 PhasingPlanner::PhasingPlanner(const environment::GravityModel& gravity) : gravity_(gravity) {}
@@ -242,7 +241,7 @@ PhasingPlan PhasingPlanner::plan(const StateVector& chaser, const StateVector& t
         const double scheduled_s = s.boost_epoch - epoch;
         const auto solved = secant(g, scheduled_s, scheduled_s + boost_epoch_step_s, phase_tolerance_m / r);
         if (!solved || std::abs(*solved - scheduled_s) > max_boost_shift_s) {
-            out.reason = "Kein Rendezvous: Zielführung konvergiert nicht (Anhebung)";
+            out.reason = report::make(report::Code::phasing_guidance_boost);
             return out;
         }
         const double shift = *solved - scheduled_s;
@@ -251,7 +250,7 @@ PhasingPlan PhasingPlanner::plan(const StateVector& chaser, const StateVector& t
         s.approach_initiation_epoch = s.approach_initiation_epoch + shift;
         s.waypoint0_epoch = s.waypoint0_epoch + shift;
         if (s.boost_epoch - epoch < p.first_burn_lead_s || s.waypoint0_epoch - epoch > p.mission_limit_s) {
-            out.reason = limit_text(p);
+            out.reason = limit_reason(p);
             return out;
         }
     }
@@ -271,7 +270,8 @@ PhasingPlan PhasingPlanner::plan(const StateVector& chaser, const StateVector& t
     for (const auto kind : kinds) {
         const auto node = retarget(kind, c, tg, t, out, model);
         if (!node) {
-            out.reason = std::string("Kein Rendezvous: Zielführung konvergiert nicht (") + german_name(kind) + ")";
+            out.reason = report::make(report::Code::phasing_guidance_burn,
+                                      {report::ref("kind", std::string("phase.phasing_burn_kind.") + id_of(kind))});
             return out;
         }
         // coast to the node in sample steps, keeping the closest approach to the ellipsoid before the approach initiation
@@ -290,7 +290,7 @@ PhasingPlan PhasingPlanner::plan(const StateVector& chaser, const StateVector& t
     }
     out.min_ellipsoid_metric_before_ai = min_metric;
     if (min_metric <= 1.0) {
-        out.reason = "Kein Rendezvous: Bahn tritt vor dem Annäherungsbeginn in das Annäherungsellipsoid ein";
+        out.reason = report::make(report::Code::phasing_enters_ellipsoid);
         return out;
     }
 
@@ -298,9 +298,9 @@ PhasingPlan PhasingPlanner::plan(const StateVector& chaser, const StateVector& t
     out.propellant_kg = engines.mass_kg * (1.0 - std::exp(-out.total_delta_v_mps / exhaust_mps));
     const double reserve_kg = p.reserve_kg + p.reserve_per_burn_kg * static_cast<double>(out.burns.size());
     if (out.propellant_kg + reserve_kg > propellant_kg) {
-        out.reason = "Kein Rendezvous: Treibstoff reicht nicht (" + std::to_string(std::lround(out.propellant_kg)) +
-                     " kg + Reserve " + std::to_string(std::lround(reserve_kg)) + " kg, an Bord " +
-                     std::to_string(std::lround(propellant_kg)) + " kg)";
+        out.reason = report::make(report::Code::phasing_insufficient_propellant,
+                                  {report::mass("needed", out.propellant_kg), report::mass("reserve", reserve_kg),
+                                   report::mass("onboard", propellant_kg)});
         return out;
     }
     out.feasible = true;

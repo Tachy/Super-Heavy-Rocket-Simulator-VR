@@ -662,9 +662,9 @@ TEST_CASE("Rendezvous floors: a returning ship keeps its own return, the HLS its
         refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
         const auto& stage = f.session.body(f.session.controlled_index()).vehicle().stages().front().config;
         REQUIRE(stage.rendezvous_reserve);
-        std::string why;
+        report::Report why;
         const auto floors = f.session.rendezvous_floors(&why);
-        INFO(why);
+        INFO(report::transitional_text(why));
         REQUIRE(floors);
         const double need = floors->proximity_kg - stage.rendezvous_reserve->proximity_kg;
         INFO("return need " << need << " kg");

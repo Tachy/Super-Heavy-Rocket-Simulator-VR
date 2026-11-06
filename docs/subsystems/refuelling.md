@@ -142,7 +142,7 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight, a 
   with transients up to 0.6 of the burn; below that (~7 m/s) the burn flies on the cold-gas RCS along +x and is
   re-targeted with that model; modelled at the throttle they fly (minimum throttle between the two minimum impulses).
   Budget: `rcs_supply_kg`. Between burns a Starship holds the docking orientation (LVLH rolled 180 deg). Refused with no
-  main propellant ("Kein Rendezvous: kein Treibstoff").
+  main propellant (report `rendezvous.refused` with cause `rendezvous.no_propellant`).
 - Compound refresh (`FlightSession::set_tank_mass`): a tank change of either docked body moves the compound CG (the
   station body's state), keeps the velocity and the hulls in place; the attached mass follows the chaser's hull-fixed CG;
   `compound_mass()` is recomputed.

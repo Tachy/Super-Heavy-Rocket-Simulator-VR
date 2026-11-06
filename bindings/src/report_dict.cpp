@@ -15,7 +15,8 @@ godot::Dictionary report_dict(const report::Report& report) {
     godot::Dictionary kinds;
     for (const auto& p : report.params) {
         const godot::String name = godot::String::utf8(p.name);
-        if (p.kind == report::Kind::ref || p.kind == report::Kind::legacy_text) {
+        if (p.kind == report::Kind::ref || p.kind == report::Kind::legacy_text ||
+            p.kind == report::Kind::data_name) {
             params[name] = godot::String::utf8(p.text.c_str());
         } else {
             params[name] = p.value_si;

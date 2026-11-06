@@ -134,7 +134,7 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
     LaunchWindow w;
     const double a_separation = 0.5 * (p.separation_periapsis_radius_m + p.separation_apoapsis_radius_m);
     const double a_station = orbit::elements_from_state(station(earliest), gm_m3ps2).semi_major_axis_m;
-    std::string last_reason = "keine Ebenenquerung";
+    report::Reports last_reasons{report::make(report::Code::launch_window_no_plane_crossing)};
     // no candidates: the separation orbit is the phasing orbit (the ISS missions, unchanged)
     std::vector<std::optional<PhasingOrbit>> candidates;
     if (p.phasing_orbits.empty()) candidates.emplace_back();
@@ -178,9 +178,9 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
                 const bool clear = a_chaser <= r_c - phasing_clearance_m ||
                                    a_chaser >= a_station + p.phasing.coelliptic_height_m + phasing_clearance_m;
                 if (!clear) {
-                    c.schedule.reason = "Kein Rendezvous: Phasing-Bahn zu nah an der Zielbahn";
+                    c.schedule.reason = report::make(report::Code::phasing_orbit_too_close);
                 } else if (!raise.feasible || q.mission_limit_s <= 0.0) {
-                    c.schedule.reason = "Kein Rendezvous: Phasing-Bahn nicht erreichbar";
+                    c.schedule.reason = report::make(report::Code::phasing_orbit_unreachable);
                 } else {
                     c.raised = c.separation + raise.elapsed_s;
                     c.raised_state_gcrf = raise.state;
@@ -219,14 +219,15 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
         if (!found) break;
         // every candidate at this crossing; the cheapest feasible one (ties: the first in the list)
         std::optional<LaunchWindow> best, any;
-        std::vector<std::string> reasons;  // every candidate's (f1 minor M4: only the first one's was reported)
+        report::Reports reasons;  // every candidate's (f1 minor M4: only the first one's was reported)
         for (const auto& orbit : candidates) {
             const auto c = evaluate(t1, orbit);
             if (!c) continue;
             if (!any) any = c;
             if (c->schedule.feasible && (!best || c->cost.total_kg() < best->cost.total_kg())) best = c;
             if (!c->schedule.feasible &&
-                std::find(reasons.begin(), reasons.end(), c->schedule.reason) == reasons.end()) {
+                std::none_of(reasons.begin(), reasons.end(),
+                             [&](const report::Report& r) { return report::same(r, c->schedule.reason); })) {
                 reasons.push_back(c->schedule.reason);
             }
         }
@@ -239,15 +240,13 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
             best->rejected = w.rejected;
             return *best;
         }
-        last_reason.clear();
-        for (const auto& reason : reasons) last_reason += (last_reason.empty() ? "" : "; ") + reason;
+        last_reasons = reasons;
         ++w.rejected;
         t = any->liftoff + 3600.0;  // past this crossing: the next one is ~a day later
     }
-    char text[64];
-    std::snprintf(text, sizeof text, "Kein Startfenster in %g Tagen: ", p.search_s / 86400.0);
     w.feasible = false;
-    w.reason = text + last_reason;
+    w.reason = report::make(report::Code::launch_window_none, {report::number("days", p.search_s / 86400.0)});
+    w.reason.causes = last_reasons;
     return w;
 }
 

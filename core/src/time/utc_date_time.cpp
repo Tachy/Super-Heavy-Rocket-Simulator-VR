@@ -38,6 +38,17 @@ std::string UtcDateTime::to_iso_string() const {
     return buffer;
 }
 
+double UtcDateTime::unix_seconds() const {
+    // days from civil (H. Hinnant)
+    const long long y = static_cast<long long>(year) - (month <= 2 ? 1 : 0);
+    const long long era = (y >= 0 ? y : y - 399) / 400;
+    const long long yoe = y - era * 400;
+    const long long doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    const long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const long long days = era * 146097 + doe - 719468;
+    return static_cast<double>(days) * 86400.0 + hour * 3600.0 + minute * 60.0 + second;
+}
+
 std::optional<UtcDateTime> UtcDateTime::parse_iso(std::string_view text) {
     if (!text.empty() && (text.back() == 'Z' || text.back() == 'z')) {
         text.remove_suffix(1);

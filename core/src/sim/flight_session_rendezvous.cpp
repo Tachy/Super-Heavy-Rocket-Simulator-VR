@@ -34,7 +34,6 @@
 
 namespace starsim::sim {
 
-using detail::german;
 using mission::PhasingBurnKind;
 
 const char* id_of(RendezvousStep step) {  // i18n-ns: rendezvous_step
@@ -46,6 +45,18 @@ const char* id_of(RendezvousStep step) {  // i18n-ns: rendezvous_step
     }
     return "";
 }
+
+namespace {
+
+report::Param burn_kind_ref(PhasingBurnKind kind) {
+    return report::ref("kind", std::string("phase.phasing_burn_kind.") + mission::id_of(kind));
+}
+
+report::Report aborted(report::Report cause) {  // "Rendezvous abgebrochen: <cause>"
+    return report::with_cause(report::make(report::Code::rendezvous_aborted), std::move(cause));
+}
+
+}  // namespace
 
 math::StateVector FlightSession::station_state() const {
     const auto& s = bodies_.at(*station_index_).body->state();
@@ -104,12 +115,12 @@ double FlightSession::rendezvous_budget_kg() const {
     return vehicle.rcs_supply_kg();  // the main tanks (engines and cold gas); the headers are the landing reserve
 }
 
-std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(std::string* reason) const {
-    const auto refuse = [&](const std::string& why) -> std::optional<config::RendezvousReserveConfig> {
-        if (reason) *reason = why;
+std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(report::Report* reason) const {
+    const auto refuse = [&](report::Report why) -> std::optional<config::RendezvousReserveConfig> {
+        if (reason) *reason = std::move(why);
         return std::nullopt;
     };
-    if (bodies_.empty()) return refuse("kein Fahrzeug");
+    if (bodies_.empty()) return refuse(report::make(report::Code::rendezvous_no_vehicle));
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const config::RendezvousReserveConfig* configured = nullptr;
     for (const auto& s : vehicle.stages()) {
@@ -118,7 +129,7 @@ std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(
             break;
         }
     }
-    if (!configured) return refuse("Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
+    if (!configured) return refuse(report::make(report::Code::rendezvous_reserve_key_missing));
     auto floors = *configured;
     // Fix round 1 of planner Task 8 (I1): a ship that returns to the tower keeps its own return beyond the configured
     // allowances - the deorbit burn from the station's orbit to the return's entry interface (two-body, at its apoapsis)
@@ -126,9 +137,9 @@ std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(
     // reserve books them (without the boil-off of a wait: its pass is not known before the docking).
     const auto& stage = vehicle.stages().front().config;
     if (stage.recovery_method == "tower_catch" && !stage.return_mission.empty() && station_index_) {
-        std::string why;
+        std::string why;  // the return planners' reasons are still text (their tasks convert them)
         const auto settings = ship_return_settings(&why);
-        if (!settings) return refuse(why);
+        if (!settings) return refuse(report::legacy(why));
         const auto st = station_state();
         const auto e = orbit::elements_from_state(st, constants::earth_gm_m3ps2);
         const double dv = mission::entry_deorbit_delta_v_mps(
@@ -136,7 +147,7 @@ std::optional<config::RendezvousReserveConfig> FlightSession::rendezvous_floors(
             constants::wgs84_semi_major_axis_m + settings->entry_interface_height_m, settings->entry_flight_path_rad,
             constants::earth_gm_m3ps2);
         const auto p = return_reserve_parameters(dv, &why);
-        if (!p) return refuse(why);
+        if (!p) return refuse(report::legacy(why));
         const double need_kg =
             mission::tanker_reserve(vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg(), *p).total_kg;
         floors.proximity_kg += need_kg;
@@ -159,14 +170,14 @@ void FlightSession::reset_rendezvous() {
     rendezvous_mid_course_ = false;
     rendezvous_retarget_replanned_ = false;
     rendezvous_boost_check_.reset();
-    rendezvous_status_.clear();
+    rendezvous_status_ = {};
     rendezvous_burns_.clear();
     rendezvous_warnings_.clear();
     rendezvous_replans_ = 0;
 }
 
-void FlightSession::rendezvous_abort(const std::string& status) {
-    rendezvous_status_ = status;
+void FlightSession::rendezvous_abort(report::Report status) {
+    rendezvous_status_ = std::move(status);
     rendezvous_step_ = RendezvousStep::None;
     rendezvous_boost_check_.reset();
     autopilot_.state = AutopilotState::Off;
@@ -174,34 +185,40 @@ void FlightSession::rendezvous_abort(const std::string& status) {
 }
 
 bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
-    const auto refuse = [&](const std::string& reason) {
-        rendezvous_status_ = reason;
+    const auto refuse = [&](report::Report reason) {
+        rendezvous_status_ = std::move(reason);
         return false;
     };
-    if (bodies_.empty() || !station_index_) return refuse("Kein Rendezvous: keine Station");
-    if (docking_busy()) return refuse("Rendezvous nicht möglich: angedockt");
-    if (controlled_ == *station_index_) return refuse("Kein Rendezvous: die Station selbst wird gesteuert");
+    const auto refuse_because = [&](report::Code cause) {  // "Kein Rendezvous: <cause>"
+        return refuse(report::with_cause(report::make(report::Code::rendezvous_refused), report::make(cause)));
+    };
+    if (bodies_.empty() || !station_index_) return refuse_because(report::Code::rendezvous_no_station);
+    if (docking_busy()) return refuse(report::make(report::Code::rendezvous_docked));
+    if (controlled_ == *station_index_) return refuse_because(report::Code::rendezvous_station_controlled);
     if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
-        return refuse("Kein Rendezvous: Autopilot aktiv");
+        return refuse_because(report::Code::rendezvous_autopilot_active);
     }
     if ((rendezvous_step_ != RendezvousStep::None && rendezvous_step_ != RendezvousStep::Waypoint0) ||
         lunar_step_ != LunarStep::None) {
-        return refuse("Kein Rendezvous: ein Flug läuft bereits");
+        return refuse_because(report::Code::rendezvous_flight_running);
     }
     p = with_station_limits(p, station_limits());
     // the vehicle's own reserve (planner plan Task 8)
-    std::string why;
+    report::Report why;
     const auto floors = rendezvous_floors(&why);
-    if (!floors) return refuse("Kein Rendezvous: " + why);
+    if (!floors) return refuse(report::with_cause(report::make(report::Code::rendezvous_refused), std::move(why)));
     p.reserve_kg = floors->phasing_kg;
     // Crew Dragon flies the phasing with its nose cone open (it opens after the separation): only then its Dracos turn
     // it without a push - closed, a turn to a burn pushed it up to 0.28 m/s (i3: Waypoint 0 missed by 130-390 m).
     auto& vehicle = bodies_[controlled_].body->vehicle();
     const bool cone_was_open = vehicle.nose_cone_open();
     if (vehicle.has_nose_cone()) vehicle.set_nose_cone_open(true);
-    const auto refuse_closed = [&](const std::string& reason) {  // a refused plan leaves the cone as it was
+    const auto refuse_closed = [&](report::Report reason) {  // a refused plan leaves the cone as it was
         if (vehicle.has_nose_cone()) vehicle.set_nose_cone_open(cone_was_open);
-        return refuse(reason);
+        return refuse(std::move(reason));
+    };
+    const auto refuse_closed_because = [&](report::Code cause) {
+        return refuse_closed(report::with_cause(report::make(report::Code::rendezvous_refused), report::make(cause)));
     };
     const double mass = vehicle.mass_properties().mass_kg;
     if (!(p.chaser_drag_area_per_mass_m2pkg > 0.0)) {
@@ -218,16 +235,16 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
     }
     // f3: each phasing burn settles first (the phasing drains the tanks little: the gas with the tanks as now)
     p.reserve_per_burn_kg = settling_gas_kg();
-    if (!(rendezvous_budget_kg() > 0.0)) return refuse_closed("Kein Rendezvous: kein Treibstoff");
+    if (!(rendezvous_budget_kg() > 0.0)) return refuse_closed_because(report::Code::rendezvous_no_propellant);
     const auto engines = rendezvous_engines();
-    if (!(engines.thrust_n > 0.0)) return refuse_closed("Kein Rendezvous: keine Triebwerke für die Manöver");
+    if (!(engines.thrust_n > 0.0)) return refuse_closed_because(report::Code::rendezvous_no_engines);
     mission::PhasingPlan plan;
     try {
         plan = mission::PhasingPlanner(gravity_).plan(controlled_state(), station_state(), epoch_, p, engines,
                                                       rendezvous_budget_kg());
     } catch (const std::exception& e) {
         if (rendezvous_debug_) std::printf("[rendezvous] planning threw: %s\n", e.what());
-        return refuse_closed("Kein Rendezvous: Planung fehlgeschlagen");
+        return refuse_closed_because(report::Code::rendezvous_planning_failed);
     }
     if (!plan.feasible) return refuse_closed(plan.reason);
     reset_rendezvous();
@@ -240,8 +257,8 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
     rendezvous_target_ref_impulses_ = station_impulses_.size();
     for (const auto& impulse : station_impulses_) {
         if (impulse.epoch >= epoch_ && impulse.epoch <= plan.schedule.waypoint0_epoch) {
-            rendezvous_warnings_.push_back("Achtung: Bahnanhebung der Station um " + german(impulse.delta_v_mps, 2) +
-                                           " m/s während des Rendezvous");
+            rendezvous_warnings_.push_back(
+                report::make(report::Code::rendezvous_station_raise_warning, {report::speed("dv", impulse.delta_v_mps)}));
         }
     }
     autopilot_.state = AutopilotState::Rendezvous;
@@ -333,8 +350,8 @@ bool FlightSession::rendezvous_replan() {
     ++rendezvous_replans_;
     rendezvous_start(std::move(plan));
     const auto& first = rendezvous_plan_->burns.front();
-    rendezvous_status_ = std::string("Neu geplant: ") + mission::german_name(first.kind) + " in " +
-                         german((first.node.epoch - epoch_) / 3600.0, 1) + " h";
+    rendezvous_status_ = report::make(report::Code::rendezvous_replanned,
+                                      {burn_kind_ref(first.kind), report::time("wait", first.node.epoch - epoch_)});
     return true;
 }
 
@@ -356,7 +373,8 @@ void FlightSession::rendezvous_fly_due_burn() {
         (!node || norm(node->delta_v_gcrf_mps) < rendezvous_plan_->parameters.mid_course_threshold_mps)) {
         // below the threshold, or not converged (then the braking burn still stops the Dragon near Waypoint 0)
         rendezvous_mid_course_ = false;
-        rendezvous_status_ = node ? "Kurskorrektur nicht nötig" : "Kurskorrektur nicht berechenbar";
+        rendezvous_status_ = report::make(node ? report::Code::rendezvous_correction_not_needed
+                                          : report::Code::rendezvous_correction_not_computable);
         rendezvous_enter_coast();
         return;
     }
@@ -367,18 +385,18 @@ void FlightSession::rendezvous_fly_due_burn() {
             rendezvous_replan();
             return;
         }
-        rendezvous_abort(std::string("Rendezvous abgebrochen: ") + mission::german_name(kind) + " nicht berechenbar");
+        rendezvous_abort(aborted(report::make(report::Code::rendezvous_burn_not_computable, {burn_kind_ref(kind)})));
         return;
     }
     const double mass = bodies_[controlled_].body->vehicle().mass_properties().mass_kg;
     if (!execute_rendezvous_burn(*node)) {
-        rendezvous_abort("Rendezvous abgebrochen: Brennvorgang nicht möglich");
+        rendezvous_abort(aborted(report::make(report::Code::rendezvous_burn_not_possible)));
         return;
     }
     rendezvous_burns_.push_back({kind, *node, mass});
     if (rendezvous_debug_) {  // diagnostics: the planner's prediction of the burn, compared after it
         rendezvous_debug_command_ = {controlled_state(), epoch_, rendezvous_engines(norm(node->delta_v_gcrf_mps))};
-        std::printf("[rendezvous] %s on %s: %.0f N, cold gas below %.2f m/s, in %.0f s\n", mission::german_name(kind),
+        std::printf("[rendezvous] %s on %s: %.0f N, cold gas below %.2f m/s, in %.0f s\n", mission::id_of(kind),
                     burn_config_.rcs ? "cold gas" : "engines", burn_config_.thrust_n, rendezvous_rcs_below_mps(),
                     node->epoch - epoch_);
     }
@@ -389,7 +407,8 @@ void FlightSession::rendezvous_fly_due_burn() {
     }
     rendezvous_retarget_replanned_ = false;
     rendezvous_step_ = RendezvousStep::Burn;
-    rendezvous_status_ = std::string(mission::german_name(kind)) + ": " + german(norm(node->delta_v_gcrf_mps), 2) + " m/s";
+    rendezvous_status_ = report::make(report::Code::rendezvous_burn,
+                                      {burn_kind_ref(kind), report::speed("dv", norm(node->delta_v_gcrf_mps))});
 }
 
 void FlightSession::rendezvous_after_burn() {
@@ -408,14 +427,14 @@ void FlightSession::rendezvous_after_burn() {
         const math::Vec3 along = normalized(now.velocity_mps);
         const math::Vec3 radial = normalized(now.position_m);
         std::printf("[rendezvous] %s executed: dv error %.3f m/s (along %.3f, radial %.3f), position error %.1f m\n",
-                    mission::german_name(last), norm(dv_error), dot(dv_error, along), dot(dv_error, radial),
+                    mission::id_of(last), norm(dv_error), dot(dv_error, along), dot(dv_error, radial),
                     norm(now.position_m - predicted.position_m));
         rendezvous_debug_command_.reset();
     }
     if (last == PhasingBurnKind::Braking) {
         rendezvous_step_ = RendezvousStep::Waypoint0;
         autopilot_.state = AutopilotState::Off;
-        rendezvous_status_ = "Wegpunkt 0 erreicht";
+        rendezvous_status_ = report::make(report::Code::rendezvous_waypoint0_reached);
         return;
     }
     if (last == PhasingBurnKind::ApproachInitiation) rendezvous_mid_course_ = true;
@@ -424,11 +443,11 @@ void FlightSession::rendezvous_after_burn() {
 
 void FlightSession::run_rendezvous_steps() {
     if (!station_index_) {
-        rendezvous_abort("Rendezvous abgebrochen: keine Station");
+        rendezvous_abort(aborted(report::make(report::Code::rendezvous_no_station)));
         return;
     }
     if (bodies_[controlled_].body->impacted()) {
-        rendezvous_abort("Rendezvous abgebrochen: Fahrzeug verloren");
+        rendezvous_abort(aborted(report::make(report::Code::rendezvous_vehicle_lost)));
         return;
     }
     switch (rendezvous_step_) {
@@ -448,8 +467,8 @@ void FlightSession::run_rendezvous_steps() {
                                     ? rendezvous_plan_->schedule.approach_initiation_epoch +
                                           rendezvous_plan_->parameters.mid_course_after_s
                                     : rendezvous_plan_->burns.at(rendezvous_next_).node.epoch;
-        rendezvous_status_ = std::string("Phasing: ") + mission::german_name(kind) + " in " +
-                             german((due - epoch_) / 3600.0, 1) + " h";
+        rendezvous_status_ =
+            report::make(report::Code::rendezvous_waiting, {burn_kind_ref(kind), report::time("wait", due - epoch_)});
         return;
     }
     rendezvous_track_drag();
@@ -474,14 +493,14 @@ void FlightSession::run_rendezvous(Flying& flying) {
     } catch (const std::exception& e) {
         if (rendezvous_debug_) std::printf("[rendezvous] planning threw: %s\n", e.what());
         // a throwing planner would throw again on every tick: the rendezvous ends, the vehicle drifts
-        rendezvous_abort("Rendezvous abgebrochen: Planung fehlgeschlagen");
+        rendezvous_abort(aborted(report::make(report::Code::rendezvous_planning_failed)));
     }
-    if (rendezvous_debug_ && rendezvous_status_ != rendezvous_debug_last_) {  // diagnostics: every status change
-        rendezvous_debug_last_ = rendezvous_status_;
+    if (rendezvous_debug_ && report::transitional_text(rendezvous_status_) != rendezvous_debug_last_) {  // diagnostics
+        rendezvous_debug_last_ = report::transitional_text(rendezvous_status_);
         const double range_m = station_index_ ? norm(station_state().position_m - controlled_state().position_m) : 0.0;
         std::printf("[rendezvous] %7.3f h  %-10s  range %.1f km  %.3f t  %s\n", mission_time_s() / 3600.0,
                     id_of(rendezvous_step_), range_m / 1000.0,
-                    flying.body->vehicle().mass_properties().mass_kg / 1000.0, rendezvous_status_.c_str());
+                    flying.body->vehicle().mass_properties().mass_kg / 1000.0, rendezvous_debug_last_.c_str());
     }
 }
 

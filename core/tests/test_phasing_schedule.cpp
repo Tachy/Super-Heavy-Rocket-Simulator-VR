@@ -68,7 +68,7 @@ TEST_CASE("Schedule: a phase beyond the mission limit is refused, a longer limit
     const auto chaser = circular(205e3, 1.0 - 330.0 * deg);
     const auto refused = mission::phasing_schedule(chaser, target, t0, {}, gm);
     CHECK_FALSE(refused.feasible);
-    CHECK(refused.reason.rfind("Kein Rendezvous", 0) == 0);
+    CHECK(refused.reason.code == report::Code::phasing_phase_unreachable);
     // The ISS just ahead (0.05 deg): the coelliptic geometry needs more lead - one more lap.
     mission::PhasingParameters two_days;
     two_days.mission_limit_s = 48.0 * 3600.0;
@@ -81,7 +81,7 @@ TEST_CASE("Schedule refuses a chaser between the coelliptic height and the targe
     const auto target = circular(415e3, 1.0);
     const auto s = mission::phasing_schedule(circular(414e3, 0.5), target, t0, {}, gm);
     CHECK_FALSE(s.feasible);
-    CHECK(s.reason.rfind("Kein Rendezvous", 0) == 0);
+    CHECK(s.reason.code == report::Code::phasing_orbit_crosses_target);
     orbit::KeplerianElements hyperbolic;
     hyperbolic.semi_major_axis_m = -2.0e7;
     hyperbolic.eccentricity = 1.5;
@@ -94,7 +94,7 @@ TEST_CASE("Schedule refuses a chaser between the coelliptic height and the targe
     eccentric.raan_rad = 1.0;
     const auto e = mission::phasing_schedule(orbit::state_from_elements(eccentric, gm), target, t0, {}, gm);
     CHECK_FALSE(e.feasible);
-    CHECK(e.reason == "Kein Rendezvous: Bahn kreuzt die Zielbahn");
+    CHECK(e.reason.code == report::Code::phasing_orbit_crosses_target);
 }
 
 TEST_CASE("Schedule: a chaser above the target waits for the target to catch up, then descends",
@@ -126,7 +126,7 @@ TEST_CASE("Schedule: an above orbit whose periapsis crosses the target's is refu
     e.raan_rad = 1.0;
     const auto s = mission::phasing_schedule(orbit::state_from_elements(e, gm), circular(200e3, 1.0), t0, {}, gm);
     CHECK_FALSE(s.feasible);
-    CHECK(s.reason == "Kein Rendezvous: Bahn kreuzt die Zielbahn");
+    CHECK(s.reason.code == report::Code::phasing_orbit_crosses_target);
 }
 
 TEST_CASE("Schedule: the catch-up rate matches dn = -1.5 n da / a", "[rendezvous][phasing]") {

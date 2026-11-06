@@ -71,12 +71,12 @@ struct Flight {
 
     void report(const char* name) const {
         for (const auto& b : session.rendezvous_burns()) {
-            std::printf("[validation] %s: %-22s +%.2f h %.2f m/s\n", name, mission::german_name(b.kind),
+            std::printf("[validation] %s: %-22s +%.2f h %.2f m/s\n", name, mission::id_of(b.kind),
                         (b.node.epoch - start.epoch) / 3600.0, norm(b.node.delta_v_gcrf_mps));
         }
         const auto r = relative();
         std::printf("[validation] %s: %s, re-plans %d, LVLH (%.1f, %.1f, %.1f) m (%.3f, %.3f, %.3f) m/s, %.0f kg used\n",
-                    name, session.rendezvous_status().c_str(), session.rendezvous_replans(), r.position_m.x,
+                    name, report::transitional_text(session.rendezvous_status()).c_str(), session.rendezvous_replans(), r.position_m.x,
                     r.position_m.y, r.position_m.z, r.velocity_mps.x, r.velocity_mps.y, r.velocity_mps.z,
                     2562.0 - session.body(session.controlled_index()).vehicle().rcs_propellant_kg());
     }
@@ -87,19 +87,21 @@ TEST_CASE("Rendezvous plan refusals in the session", "[rendezvous][phasing][sess
     test::spice_session();
     Flight f(330.0, 0.0);
     CHECK_FALSE(f.session.plan_rendezvous({}));  // beyond 28 h
-    CHECK(f.session.rendezvous_status().find("nicht innerhalb") != std::string::npos);
+    CHECK(f.session.rendezvous_status().code == report::Code::phasing_phase_unreachable);
     CHECK(f.session.autopilot().state == sim::AutopilotState::Off);
     CHECK_FALSE(f.session.body(f.session.controlled_index()).vehicle().nose_cone_open());  // a refusal leaves it closed
     sim::FlightSession lonely{f.ephemeris, f.earth, rendezvous_test::config_dir};
     lonely.place_in_orbit(config::load_vehicle(rendezvous_test::config_dir, "crew_dragon"), f.start.dragon, f.start.epoch);
     CHECK_FALSE(lonely.plan_rendezvous({}));
-    CHECK(lonely.rendezvous_status() == "Kein Rendezvous: keine Station");
+    CHECK(lonely.rendezvous_status().code == report::Code::rendezvous_refused);
+    REQUIRE(lonely.rendezvous_status().causes.size() == 1);
+    CHECK(lonely.rendezvous_status().causes.front().code == report::Code::rendezvous_no_station);
     // a Starship is planned too since refuelling r3 (Raptor and cold gas on its main tanks): here the phase refuses it
     sim::FlightSession ship{f.ephemeris, f.earth, rendezvous_test::config_dir};
     ship.place_in_orbit(config::load_vehicle(rendezvous_test::config_dir, "starship_block3"), f.start.dragon, f.start.epoch);
     ship.add_station(f.start.iss.vehicle, f.start.iss.state_gcrf, f.start.iss.epoch, f.start.iss.impulses);
     CHECK_FALSE(ship.plan_rendezvous({}));
-    CHECK(ship.rendezvous_status().find("nicht innerhalb") != std::string::npos);
+    CHECK(ship.rendezvous_status().code == report::Code::phasing_phase_unreachable);
 }
 
 TEST_CASE("Phasing and proximity reserves from config", "[rendezvous][phasing][proximity][session][config]") {

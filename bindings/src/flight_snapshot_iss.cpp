@@ -24,7 +24,7 @@ godot::Dictionary absent() {
 
 godot::Array warnings(const sim::FlightSession& session) {
     godot::Array a;
-    for (const auto& w : session.rendezvous_warnings()) a.push_back(legacy_report(w));
+    a.append_array(report_array(session.rendezvous_warnings()));
     for (const auto& w : session.proximity_warnings()) a.push_back(legacy_report(w));
     return a;
 }
@@ -74,9 +74,9 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
     godot::Dictionary d;
     d["present"] = true;
     d["feasible"] = plan->feasible;
-    d["reason"] = legacy_report(plan->reason);
+    d["reason"] = report_dict(plan->reason);
     d["step"] = qualified_id("rendezvous_step", sim::id_of(session.rendezvous_step()));
-    d["status"] = legacy_report(session.rendezvous_status());
+    d["status"] = report_dict(session.rendezvous_status());
     d["replans"] = session.rendezvous_replans();
     d["total_delta_v_mps"] = plan->total_delta_v_mps;
     d["propellant_kg"] = plan->propellant_kg;
@@ -84,7 +84,7 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
     godot::Array burns;
     for (const auto& b : session.rendezvous_burns()) {  // flown
         godot::Dictionary e;
-        e["kind"] = german(mission::german_name(b.kind));  // transitional: removed by Task 5
+        e["kind"] = qualified_id("phasing_burn_kind", mission::id_of(b.kind));
         e["epoch_tdb_s"] = b.node.epoch.tdb_seconds_past_j2000();
         e["delta_v_mps"] = norm(b.node.delta_v_gcrf_mps);
         e["flown"] = true;
@@ -95,7 +95,7 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
         const auto& b = plan->burns[i];
         if (!session.rendezvous_burns().empty() && b.node.epoch <= session.rendezvous_burns().back().node.epoch) continue;
         godot::Dictionary e;
-        e["kind"] = german(mission::german_name(b.kind));  // transitional: removed by Task 5
+        e["kind"] = qualified_id("phasing_burn_kind", mission::id_of(b.kind));
         e["epoch_tdb_s"] = b.node.epoch.tdb_seconds_past_j2000();
         e["delta_v_mps"] = norm(b.node.delta_v_gcrf_mps);
         e["flown"] = false;

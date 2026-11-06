@@ -74,7 +74,7 @@ struct LaunchWindowParameters {
 
 struct LaunchWindow {
     bool feasible = false;
-    std::string reason;  // German when refused
+    report::Report reason;  // ok when feasible; launch_window.none with the candidates' phasing reasons as causes
     time::Epoch liftoff, separation;
     math::StateVector separation_state_gcrf;  // predicted
     double plane_bias_rad = 0.0;
@@ -96,8 +96,8 @@ math::StateVector separation_state_estimate(const math::Vec3& pad_gcrf_m, const 
 
 // The first liftoff at or after `earliest` (within search_s) at which the ascent guidance's target plane
 // (gnc::ascent_plane_normal through the pad) is the station's plane turned by plane_bias_rad (match at the schedule's
-// boost), and whose predicted separation state gives a feasible phasing_schedule. Refused: "Kein Startfenster in
-// <n> Tagen: <reason of the last schedule>".
+// boost), and whose predicted separation state gives a feasible phasing_schedule. Refused: launch_window.none with
+// the days searched and the reasons of the last crossing's schedules as causes.
 LaunchWindow plan_launch_window(const math::Vec3& pad_itrf_m, const frames::BodyOrientation& earth,
                                 const StationStateAt& station, time::Epoch earliest, const LaunchWindowParameters& p,
                                 double gm_m3ps2);

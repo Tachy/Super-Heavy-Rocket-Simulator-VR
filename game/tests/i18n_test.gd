@@ -26,11 +26,21 @@ func _initialize() -> void:
 			["mission_event_kind.meco", "MECO"], ["guidance_mode.upright", "aufrecht"]]:
 		_check(I18n.phase_text(pair[0]) == pair[1], "real phase table, de: %s -> %s" % [pair[0], I18n.phase_text(pair[0])])
 
+	# real report table (de): the rendezvous codes read as before
+	var waiting := {"code": "rendezvous.waiting", "params": {"kind": "phase.phasing_burn_kind.boost", "wait": 5400.0},
+			"kinds": {"kind": "ref", "wait": "time"}, "causes": []}
+	_check(I18n.report_text(waiting) == "Phasing: Anhebung in 1,5 h", "real report, de: %s" % I18n.report_text(waiting))
+	var window := {"code": "launch_window.none", "params": {"days": 3.0}, "kinds": {"days": "number"}, "causes": [
+			{"code": "phasing.orbit_too_close", "params": {}, "kinds": {}, "causes": []}]}
+	_check(I18n.report_text(window) == "Kein Startfenster in 3 Tagen: Kein Rendezvous: Phasing-Bahn zu nah an der Zielbahn",
+			"real report, de: %s" % I18n.report_text(window))
+
 	var de := {
 		"report.t.steep": "zu steil: {slope:deg1} (Grenze {limit})",
 		"report.t.outer": "außen: {cause}",
 		"report.t.ref": "Phase {what}",
 		"report.legacy": "{text}",
+		"report.t.oem": "OEM vom {date:date}, {date}: {maneuvers}",
 		"phase.t.coast": "Freiflug",
 		"only.de": "nur",
 	}
@@ -64,6 +74,11 @@ func _initialize() -> void:
 	_check(I18n.format_value(NAN, "number") == "–" and I18n.format_value(INF, "length") == "–", "NaN and inf: dash")
 	_check(I18n.format_value(-0.0, "number", "n1") == "0,0", "negative zero: %s" % I18n.format_value(-0.0, "number", "n1"))
 	_check(I18n.format_value(3.0, "count") == "3", "count")
+	_check(I18n.format_value(1760466601.0, "utc") == "2025-10-14 18:30 UTC", "utc default: %s" % I18n.format_value(1760466601.0, "utc"))
+	_check(I18n.format_value(1760466601.0, "utc", "date") == "2025-10-14", "date spec")
+	_check(I18n.format_value(NAN, "utc") == "–" and I18n.format_value(NAN, "utc", "date") == "–", "utc NaN: dash")
+	var oem := {"code": "t.oem", "params": {"date": 1760466601.0, "maneuvers": "A1, B2"}, "kinds": {"date": "utc", "maneuvers": "data_name"}, "causes": []}
+	_check(I18n.report_text(oem) == "OEM vom 2025-10-14, 2025-10-14 18:30 UTC: A1, B2", "station report: %s" % I18n.report_text(oem))
 	_check(I18n.format_value(0.25, "number", "pct0") == "25 %", "pct0")
 
 	# the live switch

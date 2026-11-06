@@ -152,6 +152,10 @@ static func format_value(value: float, kind: String, spec: String = "") -> Strin
 			return number(value, 0)
 		"clock":
 			return _clock(value)
+		"utc":
+			return _utc(value, true)
+		"date":
+			return _utc(value, false)
 	return number(value, decimals)
 
 
@@ -222,7 +226,18 @@ static func _default_spec(kind: String) -> String:
 			return "s0"
 		"count":
 			return "int"
+		"utc":
+			return "utc"
 	return "n2"
+
+
+## UTC seconds since the Unix epoch as "YYYY-MM-DD HH:MM UTC" (with_time) or "YYYY-MM-DD"; same in every language.
+static func _utc(unix_s: float, with_time: bool) -> String:
+	var dt := Time.get_datetime_dict_from_unix_time(int(floorf(unix_s)))
+	var date := "%04d-%02d-%02d" % [dt["year"], dt["month"], dt["day"]]
+	if not with_time:
+		return date
+	return "%s %02d:%02d UTC" % [date, dt["hour"], dt["minute"]]
 
 
 static func _clock(seconds: float) -> String:

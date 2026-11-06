@@ -280,7 +280,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         const auto p = refuelling_window_parameters(tanker_mission, tanker_ascent, ve_tanker, gas_tanker);
         const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, config_start, p, gm);
         if (!w.feasible) {
-            report.result.reason = "Referenzfenster des Tankers: " + w.reason;
+            report.result.reason = "Referenzfenster des Tankers: " + report::transitional_text(w.reason);  // text until Task 7
             return report;
         }
         report.reference_phasing_s = w.schedule.waypoint0_epoch - w.separation;
@@ -289,7 +289,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         const auto ph = refuelling_window_parameters(hls_mission, hls_ascent, ve_hls, gas_hls);
         const auto wh = mission::plan_launch_window(hls_pad, src.earth, reference_depot_at, config_start, ph, gm);
         if (!wh.feasible) {
-            report.result.reason = "Referenzfenster des HLS: " + wh.reason;
+            report.result.reason = "Referenzfenster des HLS: " + report::transitional_text(wh.reason);  // text until Task 7
             return report;
         }
         hls_reference_cost = wh.cost;

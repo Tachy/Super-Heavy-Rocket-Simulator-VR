@@ -192,7 +192,7 @@ MissionStart launch_campaign_flight(FlightSession& session, const std::filesyste
     s.kind = m.kind;
     s.launch_window = w;
     if (!w.feasible) {
-        s.refusal = w.reason;
+        s.refusal = report::transitional_text(w.reason);  // text until Task 10
         return s;
     }
     if (std::abs(session.epoch() - w.liftoff) > FlightSession::tick_s) {
@@ -264,7 +264,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         const auto w = mission::plan_launch_window(pad, earth, depot_at, earliest, p, gm);
         s.launch_window = w;
         if (!w.feasible) {
-            s.refusal = w.reason;
+            s.refusal = report::transitional_text(w.reason);  // text until Task 10
             return s;
         }
         if (m.kind == config::MissionKind::HlsRefuel && w.liftoff >= lunar_epoch) {
@@ -293,7 +293,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         session.set_launch_site(launch_site_from_config(site));  // the return site
         session.add_station(depot_vehicle, depot, earliest);
         if (!session.plan_rendezvous(phasing)) {
-            s.refusal = session.rendezvous_status();
+            s.refusal = report::transitional_text(session.rendezvous_status());  // text until Task 10
             session.clear_bodies();  // the mission does not start
             return s;
         }

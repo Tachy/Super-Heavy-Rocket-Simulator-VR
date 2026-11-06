@@ -81,7 +81,7 @@ TEST_CASE("Docking session: commands refused while docked", "[iss][docking]") {
     CHECK_FALSE(s.start_proximity("ida2"));
     CHECK(s.proximity_status() == "Anflug nicht möglich: angedockt");
     CHECK_FALSE(s.plan_rendezvous({}));
-    CHECK(s.rendezvous_status() == "Rendezvous nicht möglich: angedockt");
+    CHECK(s.rendezvous_status().code == report::Code::rendezvous_docked);
     CHECK_FALSE(s.plan_capsule_return());
     CHECK(s.docking_status() == "Rückkehr nicht möglich: angedockt");
     s.stage();

@@ -44,7 +44,7 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
     const auto et = orbit::elements_from_state(target, gm);
     if (!(ec.semi_major_axis_m > 0.0) || ec.eccentricity >= 1.0 || !(et.semi_major_axis_m > 0.0) ||
         et.eccentricity >= 1.0) {
-        s.reason = "Kein Rendezvous: keine geschlossene Bahn";
+        s.reason = report::make(report::Code::phasing_no_closed_orbit);
         return s;
     }
     const double r_d = ec.semi_major_axis_m, r_i = et.semi_major_axis_m;
@@ -53,7 +53,7 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
     // the periapsis keeps coelliptic_height_m [E] above the target's orbit while the target catches up
     const bool above = r_d * (1.0 - ec.eccentricity) > r_i + p.coelliptic_height_m;
     if (r_d * (1.0 + ec.eccentricity) >= r_c && !above) {
-        s.reason = "Kein Rendezvous: Bahn kreuzt die Zielbahn";
+        s.reason = report::make(report::Code::phasing_orbit_crosses_target);
         return s;
     }
     s.above = above;
@@ -119,8 +119,7 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
         if (found) break;
     }
     if (!s.feasible) {
-        s.reason = "Kein Rendezvous: Phasenwinkel nicht innerhalb von " +
-                   std::to_string(static_cast<int>(std::lround(p.mission_limit_s / 3600.0))) + " h erreichbar";
+        s.reason = report::make(report::Code::phasing_phase_unreachable, {report::time("limit", p.mission_limit_s)});
         return s;
     }
     s.coelliptic_epoch = s.boost_epoch + t_h;

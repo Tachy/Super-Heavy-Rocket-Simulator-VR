@@ -80,7 +80,7 @@ TEST_CASE("Phasing plan from 120 deg: burns, Waypoint 0, budget", "[rendezvous][
     CHECK(plan.burns[0].kind == mission::PhasingBurnKind::Boost);
     CHECK(plan.burns[3].kind == mission::PhasingBurnKind::Braking);
     for (const auto& b : plan.burns) {
-        std::printf("[validation] %-22s at +%.2f h: %.2f m/s\n", mission::german_name(b.kind),
+        std::printf("[validation] %-22s at +%.2f h: %.2f m/s\n", mission::id_of(b.kind),
                     (b.node.epoch - start.epoch) / 3600.0, norm(b.node.delta_v_gcrf_mps));
     }
     std::printf("[validation] total %.1f m/s, %.0f kg, Waypoint 0 at +%.2f h, AE metric before AI %.2f\n",
@@ -148,7 +148,8 @@ TEST_CASE("Phasing plan refuses a phase beyond the mission limit", "[rendezvous]
     const auto plan = fx.planner.plan(start.dragon, start.iss.state_gcrf, start.epoch, fx.parameters(), dracos,
                                       dragon_propellant_kg);
     CHECK_FALSE(plan.feasible);
-    CHECK(plan.reason.find("nicht innerhalb von 28 h") != std::string::npos);
+    REQUIRE(plan.reason.code == report::Code::phasing_phase_unreachable);
+    CHECK(std::lround(plan.reason.params.front().value_si / 3600.0) == 28);  // "within 28 h"
 }
 
 TEST_CASE("Phasing plan refuses without the reserve", "[rendezvous][phasing]") {
@@ -157,7 +158,7 @@ TEST_CASE("Phasing plan refuses without the reserve", "[rendezvous][phasing]") {
     const auto start = rendezvous_test::start(fx.clock, fx.spice_earth, 90.0, 0.0);
     const auto plan = fx.planner.plan(start.dragon, start.iss.state_gcrf, start.epoch, fx.parameters(), dracos, 1200.0);
     CHECK_FALSE(plan.feasible);
-    CHECK(plan.reason.rfind("Kein Rendezvous: Treibstoff", 0) == 0);
+    CHECK(plan.reason.code == report::Code::phasing_insufficient_propellant);
 }
 
 TEST_CASE("Phasing budget: the settling gas per burn is reserved", "[rendezvous][phasing]") {
@@ -175,7 +176,7 @@ TEST_CASE("Phasing budget: the settling gas per burn is reserved", "[rendezvous]
         free.propellant_kg + free.parameters.reserve_kg + 400.0 * static_cast<double>(free.burns.size());
     const auto short_by_one = plan_with(400.0, needed_kg - 1.0);
     CHECK_FALSE(short_by_one.feasible);
-    CHECK(short_by_one.reason.rfind("Kein Rendezvous: Treibstoff reicht nicht", 0) == 0);
+    CHECK(short_by_one.reason.code == report::Code::phasing_insufficient_propellant);
     CHECK(plan_with(400.0, needed_kg + 1.0).feasible);
 }
 

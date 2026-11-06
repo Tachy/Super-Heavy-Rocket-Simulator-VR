@@ -100,7 +100,7 @@ void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) 
 
 void FlightSession::mark_rendezvous_at_waypoint0_for_test() {
     rendezvous_step_ = RendezvousStep::Waypoint0;
-    rendezvous_status_ = "Wegpunkt 0 erreicht";
+    rendezvous_status_ = report::make(report::Code::rendezvous_waypoint0_reached);
 }
 
 void FlightSession::iss_enter(IssMissionLeg leg, report::Report status) {
@@ -177,9 +177,9 @@ void FlightSession::iss_start_raise(bool first) {
             phasing.earliest_arrival_s = std::max(0.0, phasing.earliest_arrival_s - used_s);
         }
         if (plan_rendezvous(phasing)) {
-            iss_enter(IssMissionLeg::Rendezvous, leg_status(IssMissionLeg::Rendezvous, report::legacy(rendezvous_status_)));
+            iss_enter(IssMissionLeg::Rendezvous, leg_status(IssMissionLeg::Rendezvous, rendezvous_status_));
         } else {
-            iss_end(report::legacy(rendezvous_status_));
+            iss_end(rendezvous_status_);
         }
         return;
     }
@@ -241,7 +241,7 @@ void FlightSession::run_iss_mission() {
     // the running leg's status line
     switch (iss_leg_) {
         case IssMissionLeg::Rendezvous:
-            iss_status_ = leg_status(iss_leg_, report::legacy(rendezvous_status_));
+            iss_status_ = leg_status(iss_leg_, rendezvous_status_);
             break;
         case IssMissionLeg::Proximity: iss_status_ = leg_status(iss_leg_, report::legacy(proximity_status_)); break;
         case IssMissionLeg::Docking: iss_status_ = leg_status(iss_leg_, report::legacy(docking_status_)); break;
@@ -266,9 +266,9 @@ void FlightSession::run_iss_mission() {
             } else if (q.raise_to) {
                 iss_start_raise(true);
             } else if (plan_rendezvous(q.phasing)) {
-                iss_enter(IssMissionLeg::Rendezvous, leg_status(IssMissionLeg::Rendezvous, report::legacy(rendezvous_status_)));
+                iss_enter(IssMissionLeg::Rendezvous, leg_status(IssMissionLeg::Rendezvous, rendezvous_status_));
             } else {
-                iss_end(report::legacy(rendezvous_status_));
+                iss_end(rendezvous_status_);
             }
             return;
         case IssMissionLeg::Raise:
@@ -287,7 +287,7 @@ void FlightSession::run_iss_mission() {
             if (lost) {
                 iss_end(simple(report::Code::iss_vehicle_lost));
             } else if (rendezvous_step_ == RendezvousStep::None) {
-                iss_end(report::legacy(rendezvous_status_));
+                iss_end(rendezvous_status_);
             } else if (start_proximity(q.station_port, q.proximity)) {
                 iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, report::legacy(proximity_status_)));
             } else {

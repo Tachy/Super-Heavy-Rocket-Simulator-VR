@@ -209,7 +209,7 @@ TEST_CASE("ISS mission: no launch window - refused, nothing launched", "[iss][is
     m.window.search_s = 86400.0;
     const auto st = sim::start_iss_launch_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
     CHECK_FALSE(st.return_planned);
-    CHECK(st.refusal.find("Kein Startfenster") != std::string::npos);
+    CHECK(st.refusal.find("launch_window.none") != std::string::npos);  // the code id until Task 10
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::None);
     CHECK(f.session.body_count() == 0);
 }

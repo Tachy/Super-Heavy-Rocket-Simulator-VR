@@ -138,15 +138,15 @@ std::optional<time::Epoch> station_consistent_wait(const StationSource& station,
     return std::nullopt;
 }
 
-// The station impulses (reboosts) in [from, to], as warnings (the UTC time and the event name are shown as written).
+// The station impulses (reboosts) in [from, to], as warnings (the event name is data from the OEM file).
 void reboost_warnings(const StationStart& st, time::Epoch from, time::Epoch to, const time::TimeScaleConverter& time,
                       report::Reports& out) {
     for (const auto& impulse : st.impulses) {
         if (impulse.epoch < from || impulse.epoch > to) continue;
         out.push_back(report::make(
             report::Code::station_reboost_maneuver,
-            {report::legacy_text("utc", time.to_utc(impulse.epoch).to_iso_string().substr(0, 19)),
-             report::speed("dv", impulse.delta_v_mps), report::legacy_text("name", impulse.name)}));
+            {report::utc("utc", time.to_utc(impulse.epoch).unix_seconds()),
+             report::speed("dv", impulse.delta_v_mps), report::data_name("name", impulse.name)}));
     }
 }
 
@@ -210,7 +210,7 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
         const auto w = window_for(config_dir, launch, earth, station, time);
         s.launch_window = w;
         if (!w.feasible) {
-            s.refusal = w.reason;
+            s.refusal = report::transitional_text(w.reason);  // text until Task 10
             return s;
         }
         s.epoch = w.separation;
@@ -223,11 +223,11 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
     session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);
     s.warnings.push_back(st.note);
     if (!session.plan_rendezvous(phasing)) {
-        s.refusal = session.rendezvous_status();
+        s.refusal = report::transitional_text(session.rendezvous_status());  // text until Task 10
         session.clear_bodies();  // the mission does not start
         return s;
     }
-    for (const auto& w : session.rendezvous_warnings()) s.warnings.push_back(report::legacy(w));  // Task 5
+    for (const auto& w : session.rendezvous_warnings()) s.warnings.push_back(w);
     IssMissionSequence q;
     q.station_port = mission.port;
     q.phasing = phasing;
@@ -248,7 +248,7 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
     const auto w = window_for(config_dir, mission, earth, station, time);
     s.launch_window = w;
     if (!w.feasible) {
-        s.refusal = w.reason;
+        s.refusal = report::transitional_text(w.reason);  // text until Task 10
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);

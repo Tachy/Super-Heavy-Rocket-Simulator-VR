@@ -14,7 +14,7 @@
 namespace starsim::mission {
 
 enum class PhasingBurnKind { Phase, Boost, Coelliptic, ApproachInitiation, MidCourse, Braking };
-const char* german_name(PhasingBurnKind kind);
+const char* id_of(PhasingBurnKind kind);  // snake_case id (the namespace phasing_burn_kind of the text tables)
 
 struct PhasingBurn {
     PhasingBurnKind kind = PhasingBurnKind::Boost;
@@ -23,7 +23,7 @@ struct PhasingBurn {
 
 struct PhasingPlan {
     bool feasible = false;
-    std::string reason;  // German when refused
+    report::Report reason;  // ok when feasible
     PhasingSchedule schedule;
     std::vector<PhasingBurn> burns;  // in order; the mid-course correction is planned in flight only
     double total_delta_v_mps = 0.0;

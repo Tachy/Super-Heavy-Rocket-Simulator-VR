@@ -78,7 +78,7 @@ TEST_CASE("Launch window: at liftoff the ascent plane is the biased ISS plane", 
     const Fixture f;
     const time::Epoch earliest = f.clock.from_utc({2026, 10, 16, 0, 0, 0.0});
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(), earliest, f.parameters(), gm);
-    INFO(w.reason);
+    INFO(report::transitional_text(w.reason));
     REQUIRE(w.feasible);
     CHECK(w.liftoff - earliest >= 0.0);
     // one northerly crossing per sidereal day; a rejected one (phase out of reach in 28 h) moves it a day on
@@ -112,7 +112,7 @@ TEST_CASE("Launch window: a phase that never closes in a short limit is refused 
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(),
                                                f.clock.from_utc({2026, 10, 16, 0, 0, 0.0}), p, gm);
     CHECK_FALSE(w.feasible);
-    CHECK(w.reason.find("Kein Startfenster") != std::string::npos);
+    CHECK(w.reason.code == report::Code::launch_window_none);
     CHECK(w.rejected >= 1);
 }
 
@@ -128,7 +128,7 @@ TEST_CASE("Launch window: never before the earliest liftoff, also when the bias 
     for (const double after_s : {5.0, 30.0, 60.0}) {
         const time::Epoch earliest = w.liftoff + after_s;
         const auto later = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(), earliest, p, gm);
-        INFO(after_s << " s: " << later.reason);
+        INFO(after_s << " s: " << report::transitional_text(later.reason));
         if (later.feasible) CHECK(later.liftoff - earliest >= 0.0);
     }
 }
@@ -176,7 +176,7 @@ TEST_CASE("Launch window: candidates - the cheapest feasible orbit, below or abo
     time::Epoch earliest = f.start;
     for (int i = 0; i < 12; ++i) {  // twelve consecutive windows
         const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, earliest, p, gm);
-        INFO(i << ": " << w.reason);
+        INFO(i << ": " << report::transitional_text(w.reason));
         REQUIRE(w.feasible);
         REQUIRE(w.phasing_orbit);
         (w.phasing_orbit->periapsis_radius_m > re + 200e3 ? above : below)++;
@@ -228,7 +228,7 @@ TEST_CASE("Launch window: a raise that eats the mission limit is infeasible", "[
     p.search_s = 3.0 * 86400.0;
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
     CHECK_FALSE(w.feasible);
-    CHECK(w.reason.rfind("Kein Startfenster", 0) == 0);
+    CHECK(w.reason.code == report::Code::launch_window_none);
 }
 
 TEST_CASE("Launch window: a candidate too close to the coelliptic height is refused", "[iss][launch_window]") {
@@ -241,7 +241,8 @@ TEST_CASE("Launch window: a candidate too close to the coelliptic height is refu
     p.search_s = 3.0 * 86400.0;
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
     CHECK_FALSE(w.feasible);
-    CHECK(w.reason.find("zu nah an der Zielbahn") != std::string::npos);
+    REQUIRE(w.reason.code == report::Code::launch_window_none);
+    CHECK(w.reason.causes.front().code == report::Code::phasing_orbit_too_close);
     p.phasing_orbits = {{re + 180e3, re + 190e3}, {re + 190e3, re + 190e3}};  // 180 x 190 km keeps its clearance
     p.search_s = 20.0 * 86400.0;
     const auto ok = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
@@ -259,9 +260,11 @@ TEST_CASE("Launch window: the refusal names every candidate's reason", "[iss][la
     p.search_s = 3.0 * 86400.0;
     const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
     REQUIRE_FALSE(w.feasible);
-    INFO(w.reason);
-    CHECK(w.reason.find("zu nah an der Zielbahn") != std::string::npos);
-    CHECK(w.reason.find("; ") != std::string::npos);  // and the other candidate's
+    INFO(report::transitional_text(w.reason));
+    REQUIRE(w.reason.code == report::Code::launch_window_none);
+    CHECK(std::any_of(w.reason.causes.begin(), w.reason.causes.end(),
+                      [](const report::Report& r) { return r.code == report::Code::phasing_orbit_too_close; }));
+    CHECK(w.reason.causes.size() >= 2);  // and the other candidate's
 }
 
 TEST_CASE("Phasing cost against a hand computation", "[iss][launch_window]") {

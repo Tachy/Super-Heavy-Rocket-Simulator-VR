@@ -926,12 +926,12 @@ public:
     // Waypoint 0 below the station (mission::PhasingPlanner) on its burn engines (Crew Dragon: the Dracos along +x),
     // re-targets every burn from the live states, tracks both bodies' drag from their arcs and re-plans a waiting plan
     // when the boost geometry drifts beyond rendezvous_replan_tolerance_m. The parameters' drag fields are filled from
-    // the vehicles when 0. False with a German rendezvous_status() when refused (no station, the station controlled, the
+    // the vehicles when 0. False with a refusal code in rendezvous_status() when refused (no station, the station controlled, the
     // autopilot busy, a rendezvous or lunar flight under way, or the planner's reason).
     bool plan_rendezvous(mission::PhasingParameters parameters);
     RendezvousStep rendezvous_step() const { return rendezvous_step_; }
     const mission::PhasingPlan* rendezvous_plan() const { return rendezvous_plan_ ? &*rendezvous_plan_ : nullptr; }
-    const std::string& rendezvous_status() const { return rendezvous_status_; }  // German status line
+    const report::Report& rendezvous_status() const { return rendezvous_status_; }  // status line or refusal (ok: none)
     // The finite-burn model a rendezvous burn of `delta_v_mps` is planned with (infinite: the strongest burn).
     mission::FiniteBurnModel rendezvous_burn_model(double delta_v_mps) const { return rendezvous_engines(delta_v_mps); }
     // f2: the longest rendezvous burn the cold gas flies (longer: the burn set once its minimum impulse fits)
@@ -944,7 +944,7 @@ public:
     const std::vector<RendezvousBurnRecord>& rendezvous_burns() const { return rendezvous_burns_; }
     int rendezvous_replans() const { return rendezvous_replans_; }
     // German: a station impulse (reboost) inside the plan's span, as planned at plan_rendezvous.
-    const std::vector<std::string>& rendezvous_warnings() const { return rendezvous_warnings_; }
+    const report::Reports& rendezvous_warnings() const { return rendezvous_warnings_; }
     // [E] the boost phase check ~2 orbits before the boost, as deorbit_replan_lead_s
     static constexpr double rendezvous_check_lead_s = 3.0 * 3600.0;
     static constexpr double rendezvous_replan_tolerance_m = 2000.0;  // [E] along-track miss of the boost geometry
@@ -1040,7 +1040,7 @@ public:
     // aborts below `proximity_kg`): its [stage.recovery] rendezvous_reserve_kg (its first stage with the key), for a
     // ship that returns to the tower plus its own return need from the station's orbit (fix round 1 of planner Task 8);
     // nullopt with a German *reason without the key or the return's settings.
-    std::optional<config::RendezvousReserveConfig> rendezvous_floors(std::string* reason = nullptr) const;
+    std::optional<config::RendezvousReserveConfig> rendezvous_floors(report::Report* reason = nullptr) const;
     // A scenario that starts docked (ISS i6): the armed pair (set_rendezvous_target with the chaser's active port on a
     // passive station port) mated at once - the chaser moved to the mated pose moving with the station, the mechanism
     // Docked, the compound merged (momentum kept). Throws std::logic_error without an armed mechanism or outside Ready.
@@ -1637,7 +1637,7 @@ private:
     void rendezvous_after_burn();         // the burn is flown: the next burn, or Waypoint 0
     void rendezvous_fly_due_burn();       // Coast: retarget and command the burn due
     void reset_rendezvous();
-    void rendezvous_abort(const std::string& status);
+    void rendezvous_abort(report::Report status);
     bool rendezvous_replan();  // from the live states; false: aborted with the planner's reason
     void rendezvous_enter_coast();  // step Coast towards the next burn's command epoch (and the boost check)
     time::Epoch rendezvous_preparation_epoch(const gnc::BurnNode& node) const;  // ignition - burn_preparation_s
@@ -1708,9 +1708,9 @@ private:
     math::StateVector rendezvous_chaser_ref_, rendezvous_target_ref_;  // drag tracking arcs from here
     time::Epoch rendezvous_chaser_ref_epoch_, rendezvous_target_ref_epoch_;
     size_t rendezvous_target_ref_impulses_ = 0;  // station impulses still pending at the target reference
-    std::string rendezvous_status_;
+    report::Report rendezvous_status_;
     std::vector<RendezvousBurnRecord> rendezvous_burns_;
-    std::vector<std::string> rendezvous_warnings_;
+    report::Reports rendezvous_warnings_;
     int rendezvous_replans_ = 0;
     bool rendezvous_debug_ = false;  // STARSIM_DEBUG_RENDEZVOUS, read once at construction
     std::string rendezvous_debug_last_;
