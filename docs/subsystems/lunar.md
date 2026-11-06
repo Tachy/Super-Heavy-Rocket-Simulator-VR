@@ -16,7 +16,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   footprint radius 12 m (user 2026-10-15): slope limit ~9 deg at 12 m stance (NASA's Artemis limit ~8-10 deg); absorber
   1e7 N/m, damping 3e6 N s/m [E], crush 4.5 MN [E]. Terrain: `config/lunar_sites.toml` (default `mons_mouton_im2`,
   IM-2's landing point [S], 5,322 m above the sphere); `fetch.py` crops LOLA `LDEM_80S_20M` to 20 x 20 km per site by
-  one HTTP range request and fetches the global `LDEM_16` into `data/terrain/`. `environment::LunarTerrain` (tile
+  one HTTP range request and fetches the global `LDEM_16` into `data/terrain/`. `environment::LunarTerrain` (tiles behind
+  `environment::LunarTile` in `lunar_tile.hpp`: `make_polar_tile(tile, north)` - south projection as LOLA's, north per the PDS label
+  `line = pole_line + rho cos(lon) / scale` - and `make_cylindrical_tile` (simple cylindrical, pixel (0, 0) centred at
+  the given lat / lon, longitude wraps over 0/360, edge distance by the finer metric); a tile
   inside, global grid outside, 1 km smoothstep blend - `tile_blend` / `tile_weight` expose it, `global_resolution_m`,
   `finest_resolution_m` the grid spacings, for the procedural detail of `moon-surface.md`; normals by central
   differences over 10 m) through

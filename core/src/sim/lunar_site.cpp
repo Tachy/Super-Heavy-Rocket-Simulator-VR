@@ -26,13 +26,14 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
     global.zero_sample = global_file.zero_sample;
     const double radius = global_file.sphere_radius_m;
     global.grid = grid_of(global_file);
-    std::vector<environment::PolarStereographicTile> tiles;
+    std::vector<std::shared_ptr<const environment::LunarTile>> tiles;
     for (const auto& site : config::load_lunar_sites(config_dir)) {
         auto f = config::load_terrain_grid_file(data_dir / "terrain" / (site.id + ".toml"));
-        if (f.projection != "polar_stereographic_south") {
-            throw std::runtime_error("lunar terrain: tile " + site.id + " is not south polar stereographic");
+        if (f.projection != "polar_stereographic_south" && f.projection != "polar_stereographic_north") {
+            throw std::runtime_error("lunar terrain: tile " + site.id + " is not polar stereographic");
         }
         environment::PolarStereographicTile t;
+        t.north = f.projection == "polar_stereographic_north";
         t.sphere_radius_m = f.sphere_radius_m;
         t.scale_m = f.scale_m;
         t.pole_line = f.pole_line;
@@ -49,7 +50,8 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
             throw config::ConfigError("lunar terrain: tile " + site.id +
                                       " no longer matches lunar_sites.toml - run python tools/data_pipeline/fetch.py again");
         }
-        tiles.push_back(std::move(t));
+        const bool north = t.north;
+        tiles.push_back(environment::make_polar_tile(std::move(t), north));
     }
     return std::make_shared<const environment::LunarTerrain>(std::move(global), std::move(tiles), radius);
 }

@@ -246,7 +246,7 @@ TEST_CASE("lunar terrain through the Terrain interface is unchanged", "[environm
     g.pixels_per_degree = 1.0;
     g.zero_line = 89.5;
     g.zero_sample = -0.5;
-    const environment::LunarTerrain lunar(g, {}, constants::moon_mean_radius_m);
+    const environment::LunarTerrain lunar(g, std::vector<environment::PolarStereographicTile>{}, constants::moon_mean_radius_m);
     const environment::Terrain& terrain = lunar;
     const Vec3 p = frames::geodetic_to_fixed({-40.3 * deg, 12.7 * deg, 50.0}, {constants::moon_mean_radius_m, 0.0});
     CHECK(terrain.height_at_fixed_m(p) == lunar.height_at_fixed_m(p));

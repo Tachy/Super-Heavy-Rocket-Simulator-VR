@@ -29,7 +29,7 @@ struct TerrainCheck {
 };
 struct TerrainGridFile {
     std::string product;
-    std::string projection;  // "polar_stereographic_south", "simple_cylindrical" or "geographic"
+    std::string projection;  // "polar_stereographic_south" / "_north", "simple_cylindrical" or "geographic"
     double sphere_radius_m = 0.0;
     double dn_scale_m = 0.0;
     int lines = 0;

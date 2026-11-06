@@ -15,6 +15,7 @@
 #include "starsim/config/data_missing.hpp"
 #include "starsim/config/lunar_site_config.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/lunar_tile.hpp"
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
@@ -195,4 +196,110 @@ TEST_CASE("A tile that no longer matches lunar_sites.toml is refused", "[terrain
         CHECK(std::string(e.what()).find("mons_mouton_im2") != std::string::npos);
     }
     std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+// A synthetic grid whose heights depend on line and sample (distinct at every pixel, 0.5 m steps).
+environment::HeightGrid ramp_grid(int lines, int samples) {
+    environment::HeightGrid g{lines, samples, 0.5, std::vector<std::int16_t>(static_cast<size_t>(lines) * samples)};
+    for (int l = 0; l < lines; ++l) {
+        for (int s = 0; s < samples; ++s) {
+            g.dn[static_cast<size_t>(l) * samples + s] = static_cast<std::int16_t>(7 * l + 3 * s + (l * s) % 11);
+        }
+    }
+    return g;
+}
+
+Vec3 unit_of(double lat, double lon) {
+    return {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+}
+
+}  // namespace
+
+TEST_CASE("north polar tile mirrors the south one", "[environment][lunar][terrain]") {
+    environment::PolarStereographicTile south;
+    south.grid = ramp_grid(401, 401);
+    south.sphere_radius_m = R;
+    south.scale_m = 60.0;
+    south.pole_line = south.pole_sample = 200.0;  // the pole at the centre pixel
+    auto north = south;
+    north.grid.dn.assign(south.grid.dn.rbegin(), south.grid.dn.rend());  // rotated by 180 deg about the pole pixel
+    const auto south_tile = environment::make_polar_tile(south, false);
+    const auto north_tile = environment::make_polar_tile(north, true);
+    // (+lat, lon) on the north tile is the point reflection through the pole of (-lat, -lon) on the south tile.
+    for (const auto [lat_deg, lon_deg] : {std::pair{89.9, 30.0}, {89.8, 200.0}, {89.85, -75.0}}) {
+        const Vec3 n = unit_of(lat_deg * deg, lon_deg * deg), s = unit_of(-lat_deg * deg, -lon_deg * deg);
+        REQUIRE(north_tile->contains(n));
+        REQUIRE(south_tile->contains(s));
+        CHECK(std::abs(north_tile->height_m(n) - south_tile->height_m(s)) < 1e-9);
+        CHECK(std::abs(north_tile->edge_distance_m(n) - south_tile->edge_distance_m(s)) < 1e-6);
+    }
+    // the PDS north convention: longitude 0 is down the lines, longitude 90 along the samples
+    environment::PolarStereographicTile probe = south;
+    probe.north = true;
+    const auto [l0, s0] = probe.position(85.0 * deg, 0.0);
+    CHECK(l0 - 200.0 == Catch::Approx(2.0 * R * std::tan(2.5 * deg) / 60.0));
+    CHECK(s0 == Catch::Approx(200.0));
+    const auto [l90, s90] = probe.position(85.0 * deg, 90.0 * deg);
+    CHECK(s90 > 200.0);
+    const auto [ld, sd] = probe.position_of_direction(unit_of(85.0 * deg, 33.0 * deg));
+    const auto [lp, sp] = probe.position(85.0 * deg, 33.0 * deg);
+    CHECK(ld == Catch::Approx(lp).margin(1e-9));
+    CHECK(sd == Catch::Approx(sp).margin(1e-9));
+    CHECK(!north_tile->contains(unit_of(-85.0 * deg, 30.0 * deg)));
+    CHECK(std::isinf(north_tile->outside_distance_m(unit_of(-85.0 * deg, 30.0 * deg))));
+}
+
+TEST_CASE("cylindrical tile samples bilinearly and blends to the global grid over 1 km",
+          "[environment][lunar][terrain]") {
+    // 20 ppd (~1.5 km per pixel is too coarse for a 1 km blend): 2000 ppd = 15 m, a 600 x 600 tile (9 km) at 0 N 23 E.
+    environment::CylindricalGrid cg;
+    cg.pixels_per_degree = 2000.0;
+    cg.grid = {600, 600, 0.5, std::vector<std::int16_t>(600 * 600, 2 * 300)};  // 300 m everywhere
+    const double half = 299.5 / 2000.0 * deg;
+    const auto tile = environment::make_cylindrical_tile(cg, half, 23.0 * deg - half, R);
+    const LunarTerrain terrain(flat_global(0.0), {tile}, R);
+    const double px_m = R * deg / 2000.0;
+    CHECK(tile->scale_m() == Catch::Approx(px_m));
+    CHECK(terrain.in_tile(0.0, 23.0 * deg));
+    CHECK(terrain.height_m(0.0, 23.0 * deg) == Catch::Approx(300.0));
+    CHECK(terrain.height_at_direction_m(unit_of(0.0, 23.0 * deg)) == Catch::Approx(300.0));
+    // bilinear between nodes: a ramp along the samples, 1 m per pixel
+    environment::CylindricalGrid ramp = cg;
+    for (int l = 0; l < 600; ++l) {
+        for (int s = 0; s < 600; ++s) ramp.grid.dn[static_cast<size_t>(l) * 600 + s] = static_cast<std::int16_t>(2 * s);
+    }
+    const auto rt = environment::make_cylindrical_tile(ramp, half, 23.0 * deg - half, R);
+    const double lon_node = 23.0 * deg - half;  // sample 0
+    CHECK(rt->height_m(unit_of(0.0, lon_node + 10.25 / 2000.0 * deg)) == Catch::Approx(10.25).margin(0.01));
+    // blend along the equator (parallel = pixel size at 0 N): the edge is 299.5 px from the centre
+    const double edge_m = 299.5 * px_m;
+    const auto weight_at = [&](double inside_m) {
+        return terrain.tile_weight(unit_of(0.0, 23.0 * deg + (edge_m - inside_m) / R));
+    };
+    CHECK(weight_at(2000.0) == 1.0);
+    CHECK(weight_at(-50.0) == 0.0);
+    CHECK(weight_at(500.0) == Catch::Approx(0.5).margin(0.002));
+    CHECK(terrain.height_m(0.0, 23.0 * deg + (edge_m + 50.0) / R) == Catch::Approx(0.0));
+    CHECK(terrain.height_m(0.0, 23.0 * deg + (edge_m - 500.0) / R) == Catch::Approx(150.0).margin(1.0));
+    CHECK(terrain.finest_resolution_within_m(0.0, 23.0 * deg + (edge_m + 500.0) / R, 600.0) == Catch::Approx(px_m));
+    CHECK(terrain.finest_resolution_within_m(0.0, 23.0 * deg + (edge_m + 2000.0) / R, 600.0) > 1000.0);
+}
+
+TEST_CASE("cylindrical tile across the 0/360 seam", "[environment][lunar][terrain]") {
+    environment::CylindricalGrid cg;
+    cg.pixels_per_degree = 1000.0;
+    cg.grid = ramp_grid(400, 400);
+    const double half = 199.5 / 1000.0 * deg;
+    const auto tile = environment::make_cylindrical_tile(cg, 10.0 * deg + half, -half, R);  // centred on 10 N, lon 0
+    const Vec3 west = unit_of(10.0 * deg, -0.01 * deg), wrapped = unit_of(10.0 * deg, 359.99 * deg);
+    REQUIRE(tile->contains(west));
+    REQUIRE(tile->contains(wrapped));
+    CHECK(std::abs(tile->height_m(west) - tile->height_m(wrapped)) < 1e-6);
+    CHECK(tile->height_m(unit_of(10.0 * deg, 0.01 * deg)) != tile->height_m(west));  // the two sides differ
+    CHECK(!tile->contains(unit_of(10.0 * deg, 180.0 * deg)));
+    const LunarTerrain terrain(flat_global(0.0), {tile}, R);
+    CHECK(terrain.in_tile(10.0 * deg, 359.99 * deg));
+    CHECK(terrain.in_tile(10.0 * deg, -0.01 * deg));
 }

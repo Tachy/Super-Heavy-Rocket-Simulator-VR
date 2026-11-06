@@ -55,7 +55,7 @@ TerrainGridFile load_terrain_grid_file(const std::filesystem::path& toml_path) {
     f.dn_scale_m = doc.positive(g, "dn_scale_m");
     f.lines = static_cast<int>(doc.positive(g, "lines"));
     f.samples = static_cast<int>(doc.positive(g, "samples"));
-    if (f.projection == "polar_stereographic_south") {
+    if (f.projection == "polar_stereographic_south" || f.projection == "polar_stereographic_north") {
         f.pole_line = doc.number(g, "pole_line");
         f.pole_sample = doc.number(g, "pole_sample");
         f.scale_m = doc.positive(g, "scale_m");
