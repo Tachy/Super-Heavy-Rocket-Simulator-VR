@@ -17,6 +17,26 @@ const OUTLINE_PX := 2.5
 const OUTLINE_DIRECTIONS := 8
 
 
+var _key := ""
+var _colour := Color.WHITE
+
+
+## Shows the text of a table key and follows the language: the meshes are rebuilt on every change.
+func setup_key(key: String, colour: Color) -> void:
+	_key = key
+	_colour = colour
+	setup(I18n.text(key), colour)
+	if not I18n.events.language_changed.is_connected(_on_language_changed):
+		I18n.events.language_changed.connect(_on_language_changed)
+
+
+func _on_language_changed(_language: String) -> void:
+	for child in get_children():
+		remove_child(child)
+		child.queue_free()
+	setup(I18n.text(_key), _colour)
+
+
 func setup(text: String, colour: Color) -> void:
 	mesh = _text_mesh(text, OFFSET_PX)
 	material_override = _material(colour, 1)

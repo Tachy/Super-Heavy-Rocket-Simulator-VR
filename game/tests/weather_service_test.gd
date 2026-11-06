@@ -15,6 +15,19 @@ var _serial := 0
 var _dirs: Array = []  ## the test directories, removed at the end
 
 
+## The table text of a weather line up to its first placeholder (the language-neutral start of the line).
+static func _prefix(key: String) -> String:
+	return I18n.text(key).split("{")[0]
+
+
+static func _date(day: String, month: String, year: String) -> String:
+	return I18n.text("ui.date.full", {"d": day, "m": month, "y": year})
+
+
+static func _era5(day: String, month: String, year: String, hour: String) -> String:
+	return I18n.text("ui.weather.era5", {"date": _date(day, month, year), "hour": hour})
+
+
 ## The fetcher double: records requests, answers them on pump() (after request() returned, as the real one does).
 class FakeFetcher:
 	extends RefCounted
@@ -148,13 +161,13 @@ func _test_archive_and_warp() -> void:
 	var changes: Array = []
 	service.snapshots_changed.connect(func(b: Dictionary, a: Dictionary) -> void: changes.append([b, a]))
 	var epoch := _core.utc_to_tdb_s(ARCHIVE_UTC)
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: typisch"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.analog")),
 			"analog first")
 	var bracket := _core.weather_bracket(_core.weather_utc_hour(epoch), 1, ZATTRS, -1, WeatherService.ANALOG_YEAR)
 	_check(bracket["before"]["kind"] == "era5", "the archive epoch brackets ERA5 snapshots")
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.era5")),
 			"archive epoch")
-	_check(service.status_text() == "Wetter: ERA5, 08.04.2024 18:00 UTC", "ERA5 line: " + service.status_text())
+	_check(service.status_text() == _era5("08", "04", "2024", "18"), "ERA5 line: " + service.status_text())
 	_check(changes.size() >= 2 and not changes.back()[0].is_empty(), "snapshots_changed emitted with loaded snapshots")
 	var kept_texels := 0
 	for file: String in service._loaded:
@@ -183,15 +196,15 @@ func _test_archive_and_warp() -> void:
 	# Warp: no new requests, "Stand".
 	service._seconds_per_download = 20.0
 	var count := fetcher.requests.size()
-	_run_until(service, fetcher, LATER_UTC, 1.0e7, func() -> bool: return service.status_text().begins_with("Wetter: Stand"),
+	_run_until(service, fetcher, LATER_UTC, 1.0e7, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.held")),
 			"warp hold")
 	for i in range(30):
 		service.update(_core.utc_to_tdb_s(LATER_UTC), 1.0e7)
 		fetcher.pump()
 	_check(fetcher.requests.size() == count, "warp 1e7: no new requests")
-	_check(service.status_text() == "Wetter: Stand 18:00 UTC", "hold line: " + service.status_text())
+	_check(service.status_text() == I18n.text("ui.weather.held", {"hour": "18"}), "hold line: " + service.status_text())
 	# Warp back to 1: the current bracket (09.04. 03/04 UTC) is requested and blended in.
-	_run_until(service, fetcher, LATER_UTC, 1.0, func() -> bool: return service.status_text() == "Wetter: ERA5, 09.04.2024 03:00 UTC",
+	_run_until(service, fetcher, LATER_UTC, 1.0, func() -> bool: return service.status_text() == _era5("09", "04", "2024", "03"),
 			"warp back")
 	_check(fetcher.requests.size() > count, "warp back to 1: the current bracket is requested")
 	_check(service.blend() > 0.0 and service.blend() < 0.3, "blended in at 03:10 (%.3f)" % service.blend())
@@ -202,13 +215,13 @@ func _test_fallbacks() -> void:
 	var fetcher := FakeFetcher.new()
 	fetcher.fail_files = true
 	var service := _make(fetcher)
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: typisch"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.analog")),
 			"404")
 	for i in range(20):
 		service.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
 		fetcher.pump()
 		OS.delay_msec(5)
-	_check(service.status_text() == "Wetter: typisch (Analogtag 15.04.2025)", "404: analog line: " + service.status_text())
+	_check(service.status_text() == I18n.text("ui.weather.analog", {"date": _date("15", "04", "2025")}), "404: analog line: " + service.status_text())
 	_check(_count_state(service, "failed") >= 1, "the failed snapshot is recorded")
 	service.shutdown()
 
@@ -220,7 +233,7 @@ func _test_fallbacks() -> void:
 	# The analog's load runs on a worker and may still be running when the job fails (Task 8: the load also builds the
 	# GPU form): wait for its line instead of reading it in the same frame.
 	_run_until(service2, truncated, ARCHIVE_UTC, 1.0,
-			func() -> bool: return service2.status_text().begins_with("Wetter: typisch"), "truncated: analog line", 10.0)
+			func() -> bool: return service2.status_text().begins_with(_prefix("ui.weather.analog")), "truncated: analog line", 10.0)
 	for key: String in service2._jobs:
 		_check(not FileAccess.file_exists(service2._cache_dir.path_join(key + ".wthr")), "no cache file of a damaged build")
 	service2.shutdown()
@@ -239,12 +252,12 @@ func _test_disabled() -> void:
 	var service := _make(fetcher)
 	var cleared: Array = []
 	service.snapshots_changed.connect(func(b: Dictionary, a: Dictionary) -> void: cleared.append(b.is_empty() and a.is_empty()))
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: typisch"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.analog")),
 			"before switch off")
 	var count := fetcher.requests.size()
 	service.enabled = false
 	service.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
-	_check(service.status_text() == "Wetter: aus", "off line")
+	_check(service.status_text() == I18n.text("ui.weather.off"), "off line")
 	_check(cleared.size() > 0 and cleared.back(), "textures cleared on switch off")
 	for i in range(10):
 		service.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
@@ -287,14 +300,14 @@ func _test_bad_load_recovers() -> void:
 		return _core.weather_load_snapshot(file)
 	var service := _make(fetcher, loader)
 	service.retry_after_s = 0.3
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.era5")),
 			"bad load: recovered to ERA5")
 	_check(failures[0] >= 1, "bad load: a load was made to fail (%d)" % failures[0])
 	for i in range(60):  # the old bug deleted the rebuilt good file again and again
 		service.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
 		fetcher.pump()
 		OS.delay_msec(10)
-	_check(service.status_text().begins_with("Wetter: ERA5"), "bad load: stays on ERA5: " + service.status_text())
+	_check(service.status_text().begins_with(_prefix("ui.weather.era5")), "bad load: stays on ERA5: " + service.status_text())
 	_check(service._bad_files.is_empty(), "bad load: no stale bad-file entry")
 	var kept := 0
 	for name: String in DirAccess.get_files_at(service._cache_dir):
@@ -313,7 +326,7 @@ func _test_no_data() -> void:
 	_dirs.append(empty)
 	var service := _make(fetcher, Callable(), empty)
 	_run_until(service, fetcher, ARCHIVE_UTC, 1.0,
-			func() -> bool: return service.status_text() == "Wetter: aus (keine Daten)", "no data")
+			func() -> bool: return service.status_text() == I18n.text("ui.weather.off_no_data"), "no data")
 	service.shutdown()
 
 
@@ -324,9 +337,9 @@ func _test_probe_retry() -> void:
 	var service := _make(fetcher)
 	service.retry_after_s = 0.3
 	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.settled(), "offline settled")
-	_check(service.status_text().begins_with("Wetter: typisch"), "offline: analog line: " + service.status_text())
+	_check(service.status_text().begins_with(_prefix("ui.weather.analog")), "offline: analog line: " + service.status_text())
 	fetcher.offline = false
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.era5")),
 			"back online: ERA5")
 	# Switched off during a probe, back on later: probing resumes.
 	var service2 := _make(fetcher)
@@ -339,7 +352,7 @@ func _test_probe_retry() -> void:
 		fetcher.pump()
 	fetcher.offline = false
 	service2.enabled = true
-	_run_until(service2, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service2.status_text().begins_with("Wetter: ERA5"),
+	_run_until(service2, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service2.status_text().begins_with(_prefix("ui.weather.era5")),
 			"off during a probe, then on: ERA5")
 	service.shutdown()
 	service2.shutdown()
@@ -350,7 +363,7 @@ func _test_probe_retry() -> void:
 func _test_core_cache_eviction() -> void:
 	var fetcher := FakeFetcher.new()
 	var service := _make(fetcher)
-	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with(_prefix("ui.weather.era5")),
 			"eviction: ERA5 active")
 	var files: Array = service._active["files"]
 	var spares: Array = []

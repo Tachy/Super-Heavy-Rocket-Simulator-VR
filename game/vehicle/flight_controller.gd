@@ -67,9 +67,9 @@ func setup(config_dir: String) -> void:
 	_throttle = mapping.get("throttle", {})
 
 
-## `vehicle_name`: the vehicle's display name for the messages (the mission catalogue's; "" shows the file id).
+## `vehicle_name_key`: the text key of the vehicle's display name for the messages ("" shows the file id).
 func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0, countdown_s := LAUNCH_COUNTDOWN_S,
-		vehicle_name := "") -> bool:
+		vehicle_name_key := "") -> bool:
 	_clear_views()
 	# External view: the onboard computer plans the launch to the configured target and engages the ascent autopilot in
 	# the same command (the countdown holds until the plan is in); manual control only places the vehicle.
@@ -77,7 +77,7 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s, target)
 	launch_site_id = ""
 	_pending_launch = {"id": id, "site_id": site["id"], "event": {"key": "event.launch_at", "params": {
-			"vehicle": {"literal": vehicle_name if vehicle_name != "" else vehicle_id},
+			"vehicle": {"key": vehicle_name_key} if vehicle_name_key != "" else {"literal": vehicle_id},
 			"site": {"key": "site.%s.name" % site["id"]}}}}
 	if id <= 0:
 		last_event_report = {"key": "event.start_failed"}

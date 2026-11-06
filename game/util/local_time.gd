@@ -12,7 +12,7 @@ const GRID_MAGIC := "STZG"
 const GRID_VERSION := 1
 const HEADER_BYTES := 40
 const RUN_BYTES := 4  ## u16 first column + u16 zone index
-const MINUS := "−"  ## U+2212, the typographic minus of the offset
+const MINUS := "−"  # i18n-ok: U+2212, the typographic minus sign of the offset, same in every language
 
 static var _shared: LocalTime = null
 
@@ -94,9 +94,9 @@ static func unix_from_iso(utc_iso: String) -> int:
 	return Time.get_unix_time_from_datetime_string(text) + (1 if leap else 0)
 
 
-## "Ortszeit 07:00:00 CDT (UTC−5)", without an abbreviation "Ortszeit 17:30:00 (UTC+5:30)"; "" for {}. When the local
-## date differs from the UTC date (evenings west of Greenwich, mornings east of it) the local day and month lead the
-## clock: "Ortszeit 20.10. 19:28:00 CDT (UTC−5)" under "2024-10-21 00:28:00 UTC".
+## "Local time 07:00:00 CDT (UTC−5)" (table text ui.local_time.line), without an abbreviation "... 17:30:00 (UTC+5:30)";
+## "" for {}. When the local date differs from the UTC date (evenings west of Greenwich, mornings east of it) the local
+## day and month lead the clock ("20.10. 19:28:00 CDT") under "2024-10-21 00:28:00 UTC".
 static func format_line(zone: Dictionary, unix_s: int) -> String:
 	if zone.is_empty():
 		return ""
@@ -104,10 +104,10 @@ static func format_line(zone: Dictionary, unix_s: int) -> String:
 	var clock := Time.get_time_string_from_unix_time(unix_s + offset_s)
 	var local_date := Time.get_date_dict_from_unix_time(unix_s + offset_s)
 	if Time.get_date_string_from_unix_time(unix_s + offset_s) != Time.get_date_string_from_unix_time(unix_s):
-		clock = "%02d.%02d. %s" % [local_date["day"], local_date["month"], clock]
+		clock = "%s %s" % [I18n.text("ui.date.short", {"d": "%02d" % local_date["day"], "m": "%02d" % local_date["month"]}), clock]
 	var abbreviation: String = zone["abbreviation"]
 	var utc := "(%s)" % format_offset(offset_s)
-	return "Ortszeit %s %s" % [clock, utc if abbreviation == "" else "%s %s" % [abbreviation, utc]]
+	return I18n.text("ui.local_time.line", {"clock": clock, "zone": utc if abbreviation == "" else "%s %s" % [abbreviation, utc]})
 
 
 ## "UTC−5", "UTC+5:30", "UTC+0".

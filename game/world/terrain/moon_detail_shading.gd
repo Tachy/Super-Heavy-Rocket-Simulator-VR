@@ -103,8 +103,8 @@ static func _configure_textures(material: ShaderMaterial, stats: Dictionary) -> 
 	var dir := Paths.data_dir().path_join(TEXTURE_DIR)
 	var toml_path := dir.path_join("moon_detail.toml")
 	if not FileAccess.file_exists(toml_path):
-		push_warning("MoonDetailShading: %s fehlt (python tools/data_pipeline/fetch.py moon_detail) - Regolith ohne "
-				% toml_path + "Detailtexturen")
+		push_warning("MoonDetailShading: %s missing (python tools/data_pipeline/fetch.py moon_detail) - regolith without "
+				% toml_path + "detail textures")
 		return []
 	var table: Dictionary = TomlLite.load_file(toml_path)
 	var scales: Array = table.get("regolith", [])
@@ -118,8 +118,8 @@ static func _configure_textures(material: ShaderMaterial, stats: Dictionary) -> 
 		var path := dir.path_join("regolith_slope_%s.rgbah" % SCALES[i])
 		var image := slope_image(path)
 		if entry.is_empty() or image == null:
-			push_warning("MoonDetailShading: %s fehlt oder ist veraltet (python tools/data_pipeline/fetch.py --force "
-					% path + "moon_detail) - Regolith ohne Detailtexturen")
+			push_warning("MoonDetailShading: %s missing or stale (python tools/data_pipeline/fetch.py --force "
+					% path + "moon_detail) - regolith without detail textures")
 			return []
 		material.set_shader_parameter("detail_slope_" + SCALES[i], ImageTexture.create_from_image(image))
 		var tile := float(entry["tile_m"])

@@ -32,7 +32,7 @@ func _initialize() -> void:
 	_check(slc_ids[0] == MissionCatalogue.FREE_FLIGHT, "free flight first on a pad")
 	for id in ["falcon9_rtls", "crs35_ascent", "falcon9_crew_dragon_iss"]:
 		_check(slc_ids.has(id), "SLC-40 lists %s" % id)
-	_check(slc[slc_ids.find("falcon9_rtls")]["name"] == "Medium Launcher: Landung am Startgelände", "display_name of RTLS")
+	_check(slc[slc_ids.find("falcon9_rtls")]["name"] == I18n.text("mission.falcon9_rtls.display_name"), "display_name of RTLS")
 	var lunar := catalogue.missions_for("lunar_orbit", "starship_block3")
 	_check(lunar.size() == 4, "lunar orbit, Starship: 4 entries (%d)" % lunar.size())
 	_check(not _ids(lunar).has(MissionCatalogue.FREE_FLIGHT), "no free flight in flight places")
@@ -41,6 +41,8 @@ func _initialize() -> void:
 			var listed := _ids(catalogue.missions_for(place_id, vehicle_id))
 			_check(not listed.has("ship_return_starbase") and not listed.has("leo_ascent"), "unlisted missions stay out")
 
+	_check(slc[0]["name"] == I18n.text("ui.catalogue.free_flight"), "free flight name from the table")
+	_check(catalogue.vehicles_at("ccsfs_slc40")[0]["name_key"] == "vehicle.falcon9_block5.display_name", "vehicle name key")
 	_check(MissionCatalogue.index_of([{"id": "a"}, {"id": "b"}], "b") == 1, "index_of found")
 	_check(MissionCatalogue.index_of([], "x") == -1, "index_of absent")
 	print("MISSION CATALOGUE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)

@@ -76,7 +76,7 @@ func _ready() -> void:
 	# built (CloudKernels: seconds when their SPIR-V is not cached yet), then a few world frames.
 	if loading != null:
 		loading.finish_when_idle(func() -> String:
-			return world.atmosphere.status_text if world.atmosphere.loading else world.clouds.kernels_status())
+			return world.atmosphere.status_key if world.atmosphere.loading else world.clouds.kernels_status())
 
 
 ## One line `SELF-CHECK OK ...` (exit code 0) or `SELF-CHECK FAIL <reason>` (exit code 1).

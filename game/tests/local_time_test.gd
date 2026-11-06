@@ -14,6 +14,8 @@ var _failures := 0
 
 
 func _initialize() -> void:
+	var _events: I18nEvents = I18n.events  # the first access runs the static initialisers: before the path is set
+	I18n.settings_path = "user://local_time_test_%d.cfg" % OS.get_process_id()  # never touch the real setting
 	_test_formatting()
 	_test_missing_data()
 	var lt := LocalTime.load_from(Paths.data_dir().path_join("timezones"))
@@ -25,10 +27,23 @@ func _initialize() -> void:
 	quit(0 if _failures == 0 else 1)
 
 
+## The expected local-time line for "clock zone" (the date part "20.10." of a changed day is the table's day.month).
+func _line(rest: String) -> String:
+	var parts := rest.split(" ", true, 1)
+	var clock := parts[0]
+	var zone := parts[1]
+	if parts[0].contains("."):  # "20.10. 19:28:00 CDT (UTC−5)": day and month lead the clock
+		var more := parts[1].split(" ", true, 1)
+		var dm := parts[0].split(".")
+		clock = I18n.text("ui.date.short", {"d": dm[0], "m": dm[1]}) + " " + more[0]
+		zone = more[1]
+	return I18n.text("ui.local_time.line", {"clock": clock, "zone": zone.replace("-", LocalTime.MINUS)})
+
+
 func _test_formatting() -> void:
-	_check(LocalTime.format_offset(-5 * HOUR_S) == "UTC−5", "offset -5 h")
+	_check(LocalTime.format_offset(-5 * HOUR_S) == "UTC" + LocalTime.MINUS + "5", "offset -5 h")
 	_check(LocalTime.format_offset(19800) == "UTC+5:30", "offset +5:30")
-	_check(LocalTime.format_offset(-12600) == "UTC−3:30", "offset -3:30")
+	_check(LocalTime.format_offset(-12600) == "UTC" + LocalTime.MINUS + "3:30", "offset -3:30")
 	_check(LocalTime.format_offset(0) == "UTC+0", "offset 0")
 	_check(LocalTime.unix_from_iso("2024-07-01T12:00:00.000") == 1719835200, "ISO -> Unix")
 	_check(LocalTime.unix_from_iso("2016-12-31T23:59:60.500") == 1483228800, "leap second -> next midnight")
@@ -47,15 +62,15 @@ func _test_zones(lt: LocalTime) -> void:
 	var starbase := lt.lookup(STARBASE.x, STARBASE.y, summer)
 	_check(starbase.get("zone_id") == "America/Chicago", "Starbase zone (%s)" % starbase.get("zone_id"))
 	var line := LocalTime.format_line(starbase, summer)
-	_check(line == "Ortszeit 07:00:00 CDT (UTC−5)", "Starbase summer: %s" % line)
+	_check(line == _line("07:00:00 CDT (UTC-5)"), "Starbase summer: %s" % line)
 	var winter := LocalTime.unix_from_iso("2024-01-15T12:00:00")
 	line = LocalTime.format_line(lt.lookup(STARBASE.x, STARBASE.y, winter), winter)
-	_check(line == "Ortszeit 06:00:00 CST (UTC−6)", "Starbase winter: %s" % line)
+	_check(line == _line("06:00:00 CST (UTC-6)"), "Starbase winter: %s" % line)
 
 	var cape := lt.lookup(CAPE.x, CAPE.y, summer)
 	_check(cape.get("zone_id") == "America/New_York", "Cape zone (%s)" % cape.get("zone_id"))
-	_check(LocalTime.format_line(cape, summer) == "Ortszeit 08:00:00 EDT (UTC−4)", "Cape summer EDT")
-	_check(LocalTime.format_line(lt.lookup(CAPE.x, CAPE.y, winter), winter) == "Ortszeit 07:00:00 EST (UTC−5)",
+	_check(LocalTime.format_line(cape, summer) == _line("08:00:00 EDT (UTC-4)"), "Cape summer EDT")
+	_check(LocalTime.format_line(lt.lookup(CAPE.x, CAPE.y, winter), winter) == _line("07:00:00 EST (UTC-5)"),
 			"Cape winter EST")
 
 	# DST start in Chicago: 2024-03-10 02:00 CST = 08:00 UTC jumps to 03:00 CDT
@@ -64,26 +79,26 @@ func _test_zones(lt: LocalTime) -> void:
 	var after := lt.lookup(CHICAGO.x, CHICAGO.y, change)
 	_check(before.get("abbreviation") == "CST" and before.get("offset_s") == -6 * HOUR_S, "1 s before: CST")
 	_check(after.get("abbreviation") == "CDT" and after.get("offset_s") == -5 * HOUR_S, "at the change: CDT")
-	_check(LocalTime.format_line(before, change - 1) == "Ortszeit 01:59:59 CST (UTC−6)", "local 01:59:59 CST")
-	_check(LocalTime.format_line(after, change) == "Ortszeit 03:00:00 CDT (UTC−5)", "local 03:00:00 CDT")
+	_check(LocalTime.format_line(before, change - 1) == _line("01:59:59 CST (UTC-6)"), "local 01:59:59 CST")
+	_check(LocalTime.format_line(after, change) == _line("03:00:00 CDT (UTC-5)"), "local 03:00:00 CDT")
 
 	var india := lt.lookup(NEW_DELHI.x, NEW_DELHI.y, summer)
 	_check(india.get("zone_id") == "Asia/Kolkata", "India zone (%s)" % india.get("zone_id"))
 	line = LocalTime.format_line(india, summer)
-	_check(line == "Ortszeit 17:30:00 IST (UTC+5:30)", "India: %s" % line)
+	_check(line == _line("17:30:00 IST (UTC+5:30)"), "India: %s" % line)  # i18n-ok: time zone abbreviation
 
 	var ocean := lt.lookup(MID_PACIFIC.x, MID_PACIFIC.y, summer)
 	_check(ocean.get("zone_id") == "Etc/GMT+10", "mid-Pacific nautical zone (%s)" % ocean.get("zone_id"))
 	line = LocalTime.format_line(ocean, summer)
-	_check(line == "Ortszeit 02:00:00 (UTC−10)", "mid-Pacific: %s" % line)
+	_check(line == _line("02:00:00 (UTC-10)"), "mid-Pacific: %s" % line)
 
 	# Local date differs from the UTC date: shown as day and month before the clock
 	var evening := LocalTime.unix_from_iso("2024-10-21T00:28:00")
 	line = LocalTime.format_line(lt.lookup(STARBASE.x, STARBASE.y, evening), evening)
-	_check(line == "Ortszeit 20.10. 19:28:00 CDT (UTC−5)", "Starbase evening, previous local day: %s" % line)
+	_check(line == _line("20.10. 19:28:00 CDT (UTC-5)"), "Starbase evening, previous local day: %s" % line)
 	var late := LocalTime.unix_from_iso("2024-07-01T20:00:00")
 	line = LocalTime.format_line(lt.lookup(NEW_DELHI.x, NEW_DELHI.y, late), late)
-	_check(line == "Ortszeit 02.07. 01:30:00 IST (UTC+5:30)", "India after local midnight, next local day: %s" % line)
+	_check(line == _line("02.07. 01:30:00 IST (UTC+5:30)"), "India after local midnight, next local day: %s" % line)  # i18n-ok: time zone abbreviation
 
 
 func _test_camera(lt: LocalTime) -> void:
@@ -97,7 +112,7 @@ func _test_camera(lt: LocalTime) -> void:
 	_check(absf(geodetic.x - STARBASE.x) < 1e-9 and absf(geodetic.y - STARBASE.y) < 1e-9
 			and absf(geodetic.z - 2.0) < 1e-6, "gcrf_to_geodetic inverts geodetic_to_gcrf_m (%s)" % geodetic)
 	var line := lt.camera_line(core, ground, tdb)
-	_check(line == "Ortszeit 07:00:00 CDT (UTC−5)", "camera at Starbase: %s" % line)
+	_check(line == _line("07:00:00 CDT (UTC-5)"), "camera at Starbase: %s" % line)
 	var below_karman := core.geodetic_to_gcrf_m(STARBASE.x, STARBASE.y, 99000.0, tdb)
 	_check(lt.camera_line(core, below_karman, tdb) != "", "camera at 99 km: shown")
 	var high := core.geodetic_to_gcrf_m(STARBASE.x, STARBASE.y, 150000.0, tdb)

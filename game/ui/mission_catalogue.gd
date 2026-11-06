@@ -6,7 +6,6 @@ extends RefCounted
 ## tables (vehicle.<id>.display_name, mission.<id>.display_name, site.<id>.name, place.<id>.name) resolved when asked.
 
 const FREE_FLIGHT := ""
-const FREE_FLIGHT_NAME := "Freier Flug"
 
 var _places: Array[Dictionary] = []  # {id, name_key, name, site}
 var _vehicle_ids := []  # vehicle file ids
@@ -43,14 +42,16 @@ func vehicles_at(place_id: String) -> Array[Dictionary]:
 	ids.sort()
 	var result: Array[Dictionary] = []
 	for vehicle_id in ids:
-		result.append({"id": vehicle_id, "name": I18n.text("vehicle.%s.display_name" % vehicle_id) if _vehicle_ids.has(vehicle_id) else vehicle_id})
+		var known: bool = _vehicle_ids.has(vehicle_id)
+		result.append({"id": vehicle_id, "name_key": "vehicle.%s.display_name" % vehicle_id if known else "",
+				"name": I18n.text("vehicle.%s.display_name" % vehicle_id) if known else vehicle_id})
 	return result
 
 
 func missions_for(place_id: String, vehicle_id: String) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	if (_pad_vehicles.get(place_id, []) as Array).has(vehicle_id):
-		result.append({"id": FREE_FLIGHT, "name": FREE_FLIGHT_NAME})
+		result.append({"id": FREE_FLIGHT, "name": I18n.text("ui.catalogue.free_flight")})
 	var matching: Array[Dictionary] = []
 	for mission in _missions:
 		if mission["place"] == place_id and mission["vehicle"] == vehicle_id:

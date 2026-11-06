@@ -1,19 +1,21 @@
 class_name FreeCameraWizard
 extends VBoxContainer
-## Setup wizard of the free camera ("Achsen einrichten"): asks for the six motions in turn, detects the axis the user moved
-## furthest (device + index), records its direction, centre and both extremes (FreeCameraCalibration) and saves the mapping
-## to user://. Plain controls in the time panel, so it works on the desktop and in the VR panel alike.
+## Setup wizard of the free camera ("Set up axes" in the time panel): asks for the six motions in turn, detects the axis
+## the user moved furthest (device + index), records its direction, centre and both extremes (FreeCameraCalibration) and
+## saves the mapping to user://. Plain controls in the time panel, so it works on the desktop and in the VR panel alike.
+## Texts come from the text tables (wizard.*); the state is kept as data and drawn by _render, so a language switch
+## re-renders the open step.
 
 signal closed
 
-## [role, title, instruction]: the asked ("positive") direction is the first one named.
+## [role, title key, instruction key]: the asked ("positive") direction is the first one named.
 const STEPS := [
-	["roll", "Rollen", "Stick ganz nach rechts, dann ganz nach links, dann zurück in die Mitte."],
-	["pitch", "Nicken", "Stick ganz nach hinten (Nase hoch), dann ganz nach vorne, dann zurück in die Mitte."],
-	["yaw", "Gieren", "Stick nach rechts verdrehen (Twist), dann nach links, dann zurück in die Mitte."],
-	["forward", "Vorwärts / Rückwärts (Wippe)", "Wippe ganz nach vorne (vorwärts), dann ganz zurück (rückwärts), dann in die Mitte."],
-	["strafe", "Seitlich", "Mini-Stick ganz nach rechts, dann ganz nach links, dann zurück in die Mitte."],
-	["vertical", "Hoch / Runter", "Mini-Stick ganz nach oben, dann ganz nach unten, dann zurück in die Mitte."],
+	["roll", "wizard.step.roll.title", "wizard.step.roll.text"],
+	["pitch", "wizard.step.pitch.title", "wizard.step.pitch.text"],
+	["yaw", "wizard.step.yaw.title", "wizard.step.yaw.text"],
+	["forward", "wizard.step.forward.title", "wizard.step.forward.text"],
+	["strafe", "wizard.step.strafe.title", "wizard.step.strafe.text"],
+	["vertical", "wizard.step.vertical.title", "wizard.step.vertical.text"],
 ]
 
 enum Phase { PROMPT, MEASURING, RESULT, DONE }
@@ -25,6 +27,7 @@ var _entries := {}  ## role -> entry, built up in this run (starts from the save
 var _index := 0
 var _phase := Phase.PROMPT
 var _last_entry := {}
+var _saved := true  ## the mapping was written to user:// (DONE)
 
 var _title := Label.new()
 var _text := Label.new()
@@ -45,6 +48,7 @@ func _ready() -> void:
 	add_child(_text)
 	add_child(_status)
 	add_child(_buttons)
+	I18n.events.language_changed.connect(func(_language: String) -> void: _render())
 
 
 func is_open() -> bool:
@@ -67,30 +71,63 @@ func _process(delta: float) -> void:
 	if _phase != Phase.MEASURING:
 		return
 	_calibrator.feed(FreeCameraCalibration.snapshot(), delta)
-	var best := _calibrator.best_key()
-	_status.text = "Erkannt: %s (Ausschlag %.2f)" % [_describe(best), _calibrator.excursion_of(best)] if best != "" \
-			else "Noch keine Bewegung erkannt ..."
+	_status.text = _measuring_status()
 	if _calibrator.settled():
 		_finish_measuring()
+
+
+func _measuring_status() -> String:
+	var best := _calibrator.best_key()
+	if best == "":
+		return I18n.text("wizard.nothing_yet")
+	return I18n.text("wizard.detected_live", {"axis": _describe(best), "excursion": _calibrator.excursion_of(best)})
 
 
 func _show_prompt() -> void:
 	_phase = Phase.PROMPT
 	set_process(false)
-	var step: Array = STEPS[_index]
-	_title.text = "Schritt %d/%d: %s" % [_index + 1, STEPS.size(), step[1]]
-	_text.text = "%s\nDrücke danach \"Messen\" (Hände in Ruhelage) und bewege den Regler." % step[2]
-	_status.text = "Bereits gespeichert: %s" % _describe_entry(_entries[step[0]]) if _entries.has(step[0]) else ""
-	_set_buttons([["Messen", _start_measuring], ["Überspringen", _next], ["Abbrechen", _close]])
+	_render()
+
+
+## Draws the current step from the state (phase, step index, entries).
+func _render() -> void:
+	if not visible:
+		return
+	var step: Array = STEPS[mini(_index, STEPS.size() - 1)]
+	_title.text = I18n.text("wizard.step_title", {"n": _index + 1, "total": STEPS.size(), "title": I18n.text(step[1])})
+	match _phase:
+		Phase.PROMPT:
+			_text.text = I18n.text(step[2]) + "\n" + I18n.text("wizard.prompt")
+			_status.text = I18n.text("wizard.saved", {"entry": _describe_entry(_entries[step[0]])}) \
+					if _entries.has(step[0]) else ""
+			_set_buttons([["wizard.button.measure", _start_measuring], ["wizard.button.skip", _next],
+					["wizard.button.cancel", _close]])
+		Phase.MEASURING:
+			_text.text = I18n.text(step[2]) + "\n" + I18n.text("wizard.measuring")
+			_status.text = _measuring_status() if _calibrator.best_key() != "" else I18n.text("wizard.move_control")
+			_set_buttons([["wizard.button.finish", _finish_measuring], ["wizard.button.cancel", _close]])
+		Phase.RESULT:
+			_text.text = I18n.text(step[2]) + "\n" + I18n.text("wizard.measuring")
+			if _last_entry.is_empty():
+				_status.text = I18n.text("wizard.not_detected")
+				_set_buttons([["wizard.button.repeat", _show_prompt], ["wizard.button.skip", _next],
+						["wizard.button.cancel", _close]])
+			else:
+				_status.text = I18n.text("wizard.detected", {"entry": _describe_entry(_last_entry)})
+				_set_buttons([["wizard.button.next", _next], ["wizard.button.repeat", _show_prompt],
+						["wizard.button.cancel", _close]])
+		Phase.DONE:
+			_title.text = I18n.text("wizard.done_title")
+			_text.text = I18n.text("wizard.done_saved" if _saved else "wizard.done_failed")
+			_status.text = ""
+			_set_buttons([["wizard.button.close", _close]])
 
 
 func _start_measuring() -> void:
 	_calibrator.begin(FreeCameraCalibration.snapshot(), _taken_keys())
 	_phase = Phase.MEASURING
 	set_process(true)
-	_text.text = "%s\nDie Messung endet von selbst, sobald der Regler wieder in der Mitte ist." % STEPS[_index][2]
-	_status.text = "Bewege den Regler ..."
-	_set_buttons([["Fertig", _finish_measuring], ["Abbrechen", _close]])
+	_render()
 
 
 ## Keys ("device:axis") of the axes the earlier steps of this run took, so one control is not taken twice.
@@ -109,20 +146,17 @@ func _taken_keys() -> Array:
 func _finish_measuring() -> void:
 	set_process(false)
 	var result := _calibrator.result()
+	_phase = Phase.RESULT
 	if result.is_empty():
-		_phase = Phase.RESULT
 		_last_entry = {}
-		_status.text = "Keine Bewegung erkannt."
-		_set_buttons([["Wiederholen", _show_prompt], ["Überspringen", _next], ["Abbrechen", _close]])
+		_render()
 		return
 	var parts: PackedStringArray = str(result["key"]).split(":")
 	var device := int(parts[0])
 	_last_entry = {"device_name": Input.get_joy_name(device), "axis": int(parts[1]), "center": result["center"],
 			"raw_pos": result["raw_pos"], "raw_neg": result["raw_neg"]}
 	_entries[STEPS[_index][0]] = _last_entry
-	_phase = Phase.RESULT
-	_status.text = "Erkannt: %s" % _describe_entry(_last_entry)
-	_set_buttons([["Weiter", _next], ["Wiederholen", _show_prompt], ["Abbrechen", _close]])
+	_render()
 
 
 func _next() -> void:
@@ -131,11 +165,8 @@ func _next() -> void:
 		_show_prompt()
 		return
 	_phase = Phase.DONE
-	var saved := control.set_calibration(_entries)
-	_title.text = "Fertig"
-	_text.text = "Alle Achsen eingerichtet." if saved else "Speichern fehlgeschlagen - die Zuordnung gilt nur bis zum Beenden."
-	_status.text = ""
-	_set_buttons([["Schließen", _close]])
+	_saved = control.set_calibration(_entries)
+	_render()
 
 
 func _close() -> void:
@@ -146,22 +177,30 @@ func _close() -> void:
 
 func _describe(key: String) -> String:
 	if key == "":
-		return "-"
+		return I18n.DASH
 	var parts: PackedStringArray = key.split(":")
-	return "%s, Achse %s" % [Input.get_joy_name(int(parts[0])), parts[1]]
+	return I18n.text("wizard.axis", {"device": Input.get_joy_name(int(parts[0])), "axis": parts[1]})
 
 
 static func _describe_entry(entry: Dictionary) -> String:
-	return "%s, Achse %d (Mitte %+.2f, Ausschlag %+.2f / %+.2f)" % [entry["device_name"], int(entry["axis"]),
-			float(entry["center"]), float(entry["raw_pos"]), float(entry["raw_neg"])]
+	return I18n.text("wizard.entry", {"device": entry["device_name"], "axis": str(int(entry["axis"])),
+			"center": _signed(float(entry["center"])), "pos": _signed(float(entry["raw_pos"])),
+			"neg": _signed(float(entry["raw_neg"]))})
 
 
+## A value with an explicit sign and two decimals (as %+.2f), in the active language's number format.
+static func _signed(value: float) -> String:
+	var text := I18n.number(value, 2)
+	return text if text.begins_with("-") else "+" + text
+
+
+## Rebuilds the button row from [text key, action] specs.
 func _set_buttons(specs: Array) -> void:
 	for child in _buttons.get_children():
 		_buttons.remove_child(child)
 		child.queue_free()
 	for spec in specs:
 		var button := Button.new()
-		button.text = spec[0]
+		button.text = I18n.text(spec[0])
 		button.pressed.connect(spec[1])
 		_buttons.add_child(button)

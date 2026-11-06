@@ -40,7 +40,7 @@ const BLEND_PUSH_STEP := 0.01
 const DEBUG_ENV := "STARSIM_DEBUG_WEATHER"
 const SETTINGS_FILE := "user://settings.cfg"
 
-## "Wetter" switch. Off: no requests, no snapshots, "Wetter: aus".
+## "Weather" switch. Off: no requests, no snapshots, the line "Weather: off".
 var enabled := true:
 	set(value):
 		if value == enabled:
@@ -146,28 +146,28 @@ func blend() -> float:
 	return _blend
 
 
-## The German source line of the overlay.
+## The overlay line in the active language.
 func status_text() -> String:
 	if pinned_label != "":
 		return pinned_label
 	if not enabled:
-		return "Wetter: aus"
+		return I18n.text("ui.weather.off")
 	if _active.is_empty():
-		return "Wetter: aus (keine Daten)" if _no_data() else "Wetter: wird geladen ..."
+		return I18n.text("ui.weather.off_no_data" if _no_data() else "ui.weather.loading")
 	if _held:
 		var meta: Dictionary = _active["metas"][0]
-		return "Wetter: Stand %02d:00 UTC" % posmod(int(meta["valid_hour"]), 24)
+		return I18n.text("ui.weather.held", {"hour": "%02d" % posmod(int(meta["valid_hour"]), 24)})
 	var before: Dictionary = _active["metas"][0]
 	match String(_active["kind"]):
 		"era5":
-			return "Wetter: ERA5, %s %02d:00 UTC" % [_date_text(int(before["valid_hour"]), true),
-					posmod(int(before["valid_hour"]), 24)]
+			return I18n.text("ui.weather.era5", {"date": _date_text(int(before["valid_hour"]), true),
+					"hour": "%02d" % posmod(int(before["valid_hour"]), 24)})
 		"gfs":
 			var cycle := int(before["cycle_hour"])
 			var day := _date_text(cycle, false)
-			return "Wetter: GFS-Vorhersage vom %s %02d UTC, +%d h" % [day, posmod(cycle, 24), int(before["lead_h"])]
+			return I18n.text("ui.weather.gfs", {"date": day, "hour": "%02d" % posmod(cycle, 24), "lead": int(before["lead_h"])})
 		_:
-			return "Wetter: typisch (Analogtag %s)" % _date_text(int(before.get("analog_hour", before["valid_hour"])), true)
+			return I18n.text("ui.weather.analog", {"date": _date_text(int(before.get("analog_hour", before["valid_hour"])), true)})
 
 
 ## The overlay line of one loaded snapshot (StarsimCore.weather_load_snapshot): checks that pin a file (render_check).
@@ -175,15 +175,15 @@ static func snapshot_label(snapshot: Dictionary) -> String:
 	match String(snapshot.get("kind", "")):
 		"era5":
 			var hour := int(snapshot["valid_hour"])
-			return "Wetter: ERA5, %s %02d:00 UTC" % [_date_text(hour, true), posmod(hour, 24)]
+			return I18n.text("ui.weather.era5", {"date": _date_text(hour, true), "hour": "%02d" % posmod(hour, 24)})
 		"gfs":
 			var cycle := int(snapshot["cycle_hour"])
-			return "Wetter: GFS-Vorhersage vom %s %02d UTC, +%d h" % [_date_text(cycle, false), posmod(cycle, 24),
-					int(snapshot["lead_h"])]
+			return I18n.text("ui.weather.gfs", {"date": _date_text(cycle, false), "hour": "%02d" % posmod(cycle, 24),
+					"lead": int(snapshot["lead_h"])})
 		"analog":
-			return "Wetter: typisch (Analogtag %s)" % _date_text(int(snapshot.get("analog_hour",
-					snapshot["valid_hour"])), true)
-	return "Wetter: Testschicht"
+			return I18n.text("ui.weather.analog", {"date": _date_text(int(snapshot.get("analog_hour",
+					snapshot["valid_hour"])), true)})
+	return I18n.text("ui.weather.test")
 
 
 ## Nothing is active and nothing can come: no usable analog file and no wanted snapshot still downloading or building.
@@ -746,6 +746,5 @@ func _on_fetch_finished(id: int, ok: bool, code: int, body: PackedByteArray) -> 
 ## "dd.mm.yyyy" (with_year) or "dd.mm." of an hour since 1900.
 static func _date_text(hour_1900: int, with_year: bool) -> String:
 	var dt := Time.get_datetime_dict_from_unix_time(int((float(hour_1900) - HOURS_1900_TO_1970) * 3600.0))
-	if with_year:
-		return "%02d.%02d.%04d" % [dt["day"], dt["month"], dt["year"]]
-	return "%02d.%02d." % [dt["day"], dt["month"]]
+	var parts := {"d": "%02d" % dt["day"], "m": "%02d" % dt["month"], "y": "%04d" % dt["year"]}
+	return I18n.text("ui.date.full" if with_year else "ui.date.short", parts)

@@ -322,7 +322,7 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
 
 
-## The loading screen's hold (Main): a step text while the cloud kernels or the shadow maps are still being built
+## The loading screen's hold (Main): a step text key while the cloud kernels or the shadow maps are still being built
 ## (CloudEffect.kernels_status), "" once they are.
 func kernels_status() -> String:
 	var text := effect.kernels_status()
@@ -497,7 +497,7 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 	if id == "":
 		return _empty_slot()
 	if not snapshot.has("cloud_texels"):  # stripped after an earlier upload (the service reloads before announcing again)
-		push_warning("Wolken: Texel-Daten von %s fehlen" % id)
+		push_warning("CloudLayer: texel data of %s missing" % id)
 		return _empty_slot()
 	var columns := int(snapshot["columns"])
 	var rows := int(snapshot["rows"])
@@ -608,7 +608,7 @@ func _bind_slots() -> void:
 func _upload_noise() -> void:
 	var noise := _noise_result
 	if not noise.has("shape"):
-		push_error("Wolken: Rauschtexturen fehlen: " + str(noise.get("error", "")))
+		push_error("CloudLayer: noise textures missing: " + str(noise.get("error", "")))
 		return
 	var states := int(noise["detail_states"])
 	_noise_textures = [_noise_texture(noise["shape"], int(noise["shape_size"])),
@@ -642,7 +642,7 @@ func _upload_transfer() -> void:
 	var table := _transfer_result
 	_transfer_result = {}
 	if not table.get("ok", false):
-		push_warning("Wolken: Transfertabelle fehlt, geschlossene Form: " + str(table.get("error", "")))
+		push_warning("CloudLayer: transfer table missing, closed form: " + str(table.get("error", "")))
 		return
 	var size: Vector3i = table["size"]
 	var texels: PackedByteArray = table["texels"]
@@ -740,16 +740,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## The HUD's line of the live toggle (German UI): the divisor (and what the volume does now), the key.
+## The HUD's line of the live toggle: the divisor (and what the volume does now), the key.
 func status_line() -> String:
 	var note := ""
 	if effect.baked_failed():
-		note = " (Wolkenvolumen nicht verfügbar)"
+		note = "ui.cloud.note_unavailable"
 	elif not ShaderGlobals.value(&"cloud_enabled"):
-		note = " (keine Wolken aktiv)"  # none in sight / far away / pass off: nothing bakes
+		note = "ui.cloud.note_none_active"  # none in sight / far away / pass off: nothing bakes
 	elif not effect.baked_shown:
-		note = " (Volumen wird gebacken)" if effect.baked != null else " (Wolken-Shader werden gebaut)"
-	return "Wolken: Auflösung 1/%s%s  [F8 Auflösung]" % [String.num(divisor(), 1).trim_suffix(".0"), note]
+		note = "ui.cloud.note_baking" if effect.baked != null else "ui.cloud.note_building"
+	return I18n.text("ui.cloud.status", {"divisor": String.num(divisor(), 1).trim_suffix(".0"),
+			"note": " " + I18n.text(note) if note != "" else ""})
 
 
 static func _wrap(q: Vector3) -> Vector3:

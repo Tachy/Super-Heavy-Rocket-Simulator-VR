@@ -165,8 +165,8 @@ func _ready() -> void:
 	add_child(stars)
 	add_child(moon_orbit)
 	moon_orbit.visible = false
-	_setup_label(earth_label, "Erde")
-	_setup_label(moon_label, "Mond")
+	_setup_label(earth_label, "ui.map.earth")
+	_setup_label(moon_label, "ui.map.moon")
 	clock.set_time(core.utc_to_tdb_s(Time.get_datetime_string_from_system(true)))
 	if PerfLog.requested():
 		add_child(PerfLog.new(self))
@@ -362,10 +362,10 @@ func update_world() -> void:
 
 
 ## Puts a vehicle on a launch site at the current instant and focuses the camera on it; the ascent autopilot counts
-## down `countdown_s` and lifts off at T-0. `vehicle_name`: display name for the messages ("" shows the file id).
+## down `countdown_s` and lifts off at T-0. `vehicle_name_key`: display name key for the messages ("" shows the file id).
 func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightController.LAUNCH_COUNTDOWN_S,
-		vehicle_name := "") -> bool:
-	if not flight.launch(vehicle_id, site, clock.tdb_s, 90.0, countdown_s, vehicle_name):
+		vehicle_name_key := "") -> bool:
+	if not flight.launch(vehicle_id, site, clock.tdb_s, 90.0, countdown_s, vehicle_name_key):
 		return false
 	clock.warp = 1.0
 	set_focus(FOCUS_VEHICLE)
@@ -950,8 +950,8 @@ func _make_pad(site: Dictionary) -> MeshInstance3D:
 
 
 ## Screen-space label for the map view, where bodies are only a few pixels large (MapLabel).
-func _setup_label(label: MapLabel, text: String) -> void:
-	label.setup(text, Color(0.75, 0.85, 1.0))
+func _setup_label(label: MapLabel, key: String) -> void:
+	label.setup_key(key, Color(0.75, 0.85, 1.0))
 	label.visible = false
 	add_child(label)
 

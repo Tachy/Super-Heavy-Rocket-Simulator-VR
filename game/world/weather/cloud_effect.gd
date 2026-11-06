@@ -20,9 +20,9 @@ const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clo
 		"res://shaders/cloud_far.gdshaderinc", "res://shaders/cloud_light.gdshaderinc",
 		"res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
-## The loading screen's step texts while the kernels are built (kernels_status; German UI).
-const STATUS_COMPILING := "Wolken-Shader übersetzen (einmalig nach einer Änderung, einige Sekunden)"
-const STATUS_LOADING := "Wolken-Shader laden"
+## The loading screen's step texts (table keys) while the kernels are built (kernels_status).
+const STATUS_COMPILING := "loading.cloud_compile"
+const STATUS_LOADING := "loading.cloud_load"
 ## The pass's own kernel (the upsample; CloudKernels specs from kernel_specs) - the march's are the baked volume's.
 const PASS_KERNELS := ["upsample"]
 const GROUP := 8
@@ -107,7 +107,7 @@ func set_quality(divisor: float) -> void:
 	RenderingServer.call_on_render_thread(_set_quality.bind(divisor))
 
 
-## Main thread (the loading screen's hold): a step text while the kernels are still being built - the compile's when
+## Main thread (the loading screen's hold): a step text key while the kernels are still being built - the compile's when
 ## SPIR-V had to be compiled (no cached copy: the first start, a changed shader), else the cache read's; "" once they
 ## are built (or without a RenderingDevice).
 func kernels_status() -> String:

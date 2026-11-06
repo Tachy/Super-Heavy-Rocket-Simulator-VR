@@ -45,8 +45,10 @@ func _initialize() -> void:
 	# The free camera's height over sea level: 1000 m above the ellipsoid at 0 N 80 E (the geoid's low, N ~ -100 m).
 	var above_low := core.sea_level_height_m(core.geodetic_to_gcrf_m(0.0, 80.0, 1000.0, 0.0), 0.0)
 	_check(above_low > 1050.0 and above_low < 1150.0, "sea_level_height_m applies the geoid (%.1f m)" % above_low)
-	_check(TimePanel.camera_height_line(2500.0, false) == "Kamerahöhe: 2500 m über NN"
-			and TimePanel.camera_height_line(1.2345e5, true) == "Kamerahöhe: 123.5 km über mittlerem Mondradius"
+	_check(TimePanel.camera_height_line(2500.0, false) == I18n.text("ui.panel.camera_height",
+					{"height": I18n.number(2500.0, 0) + " m", "reference": I18n.text("ui.panel.height_msl")})
+			and TimePanel.camera_height_line(1.2345e5, true) == I18n.text("ui.panel.camera_height",
+					{"height": I18n.number(123.45, 1) + " km", "reference": I18n.text("ui.panel.height_moon")})
 			and TimePanel.camera_height_line(NAN, false) == "", "TimePanel.camera_height_line formats the height")
 	var starbase := _site(config_dir, "starbase_pad2")
 	var lat_arr := PackedFloat64Array([float(starbase.get("latitude_deg", 0.0))])
@@ -582,7 +584,7 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 				and absf(float(olp.get("height_m", INF)) - float(olp_site.get("height_m", NAN))) < 1e-6,
 				"Earth terrain: sea at the ship, pad plateau at Pad 2")
 	else:
-		print("  (Erdgelände fehlt: earth_surface not checked)")
+		print("  (Earth terrain missing: earth_surface not checked)")
 	# Sea state and deck motion (Task 6): falcon9_asds is calm (no sea state, level deck); the hull from drone_ships.toml
 	_check(not zone.has("sea_state") and float(zone.get("deck_heave_m", NAN)) == 0.0
 			and float(zone.get("deck_roll_deg", NAN)) == 0.0 and float(zone.get("deck_pitch_deg", NAN)) == 0.0
@@ -597,10 +599,11 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 			and absf(float(sea.get("heading_deg", 0.0)) - 60.0) < 1e-9, "ASDS sea: the mission's sea state Hs 2.5 m, Tp 8 s, 60 deg")
 	_check(absf(float(sea_zone.get("heading_deg", 0.0)) - 60.0) < 1e-6, "ASDS sea: the deck turned along the waves (60 deg)")
 	var readout := TimePanel.sea_state_line(sea_zone)
-	_check(readout.begins_with("Seegang Hs 2.5 m, Tp 8 s - Deck: Hub ")
-			and TimePanel.sea_state_line(zone) == "Seegang ruhig - Deck in Ruhe" and TimePanel.sea_state_line({}) == "",
+	_check(readout.begins_with(I18n.text("ui.panel.sea_state").split("{")[0] + I18n.format_value(2.5, "length", "m1"))
+			and TimePanel.sea_state_line(zone) == I18n.text("ui.panel.sea_calm") and TimePanel.sea_state_line({}) == "",
 			"time panel readout: '%s'" % readout)
-	_check(TimePanel.frame_rate_line(45.0) == "Bildrate: 45 fps (22.2 ms)" and TimePanel.frame_rate_line(0.0) == "",
+	_check(TimePanel.frame_rate_line(45.0) == I18n.text("ui.panel.frame_rate", {"fps": 45, "ms": 1000.0 / 45.0})
+			and TimePanel.frame_rate_line(0.0) == "",
 			"time panel frame rate line: '%s'" % TimePanel.frame_rate_line(45.0))
 	var pose_seen := false  # the deck moves: some pose within 10 s differs from the level deck, all within the limits
 	var pose_sane := true

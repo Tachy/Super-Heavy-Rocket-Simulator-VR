@@ -23,7 +23,7 @@ func _initialize() -> void:
 ## Arc labels near "now" must not cover the mission clock and name under the apex (Task 4c follow-up).
 func _test_label_layout() -> void:
 	var font := WebcastStyle.label_font()
-	var clock := MissionClock.text_rect("T+ 1 d 00:00:22", "Rückkehr vom Mond (LLO)", WebcastStyle.value_font(), font)
+	var clock := MissionClock.text_rect("T+ 1 d 00:00:22", I18n.text("mission.ship_lunar_return_llo.display_name"), WebcastStyle.value_font(), font)
 	_check(clock.has_area() and clock.position.y > 0.0, "clock area lies below the apex")
 	var free := true
 	var moved_up := false
@@ -31,21 +31,21 @@ func _test_label_layout() -> void:
 	for i in range(-40, 41):
 		var f := 0.5 + 0.005 * i  # events from just left to just right of the apex
 		for prefer_below: bool in [true, false]:
-			var side := TimelineArc.label_side("Zündung", f, prefer_below, font, clock)
+			var side := TimelineArc.label_side(I18n.text("event.ignition"), f, prefer_below, font, clock)
 			if side == TimelineArc.SIDE_NONE:
 				continue
-			free = free and not TimelineArc.label_rect("Zündung", f, side == TimelineArc.SIDE_BELOW, font).intersects(clock)
+			free = free and not TimelineArc.label_rect(I18n.text("event.ignition"), f, side == TimelineArc.SIDE_BELOW, font).intersects(clock)
 			if prefer_below and side == TimelineArc.SIDE_ABOVE:
 				moved_up = true
 				both_sides[0 if f < 0.5 else 1] = true
 	_check(free, "no placed label covers the clock")
 	_check(moved_up and both_sides[0] and both_sides[1], "labels below the line near the apex move above, both sides")
-	_check(TimelineArc.label_side("Zündung", 0.1, true, font, clock) == TimelineArc.SIDE_BELOW,
+	_check(TimelineArc.label_side(I18n.text("event.ignition"), 0.1, true, font, clock) == TimelineArc.SIDE_BELOW,
 			"far from the apex a label keeps its side")
-	_check(TimelineArc.label_side("Zündung", 0.5, true, font, Rect2()) == TimelineArc.SIDE_BELOW,
+	_check(TimelineArc.label_side(I18n.text("event.ignition"), 0.5, true, font, Rect2()) == TimelineArc.SIDE_BELOW,
 			"no clock: the alternation is kept")
 	var everywhere := Rect2(-2000.0, -2000.0, 4000.0, 4000.0)
-	_check(TimelineArc.label_side("Zündung", 0.5, true, font, everywhere) == TimelineArc.SIDE_NONE,
+	_check(TimelineArc.label_side(I18n.text("event.ignition"), 0.5, true, font, everywhere) == TimelineArc.SIDE_NONE,
 			"both sides colliding: the label is left out")
 
 
@@ -201,8 +201,8 @@ func _test_overlay() -> void:
 	_check(overlay.mission_clock.clock == "" and overlay.mission_clock.mission_name == "Testflug", "no T-0: no clock")
 	overlay.show_clock({"t0_tdb_s": 25.0, "events": []}, 100.0, "Testflug")
 	_check(overlay.mission_clock.clock == "T+ 00:01:15", "T+ from the timeline's T-0")
-	overlay.top_bar.show_weather("Wetter: aus")
-	_check(overlay.top_bar.weather == "Wetter: aus", "the weather line is kept by the top bar")
+	overlay.top_bar.show_weather(I18n.text("ui.weather.off"))
+	_check(overlay.top_bar.weather == I18n.text("ui.weather.off"), "the weather line is kept by the top bar")
 	overlay.free()
 
 

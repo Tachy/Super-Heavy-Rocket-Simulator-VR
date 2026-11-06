@@ -97,7 +97,7 @@ func poll(surface_distance_m := 1.0e6) -> Dictionary:
 	return {"rates": Vector3(pitch, -yaw, -roll), "velocity": Vector3(strafe, vertical, -forward)}
 
 
-## German one-line readout of the raw axes (to check the mapping on the hardware), or a hint when a device is missing.
+## One-line readout of the raw axes (to check the mapping on the hardware), or a hint when a device is missing.
 func readout_text() -> String:
 	var parts := PackedStringArray()
 	for role in ["roll", "pitch", "yaw"]:
@@ -106,12 +106,12 @@ func readout_text() -> String:
 		parts.append("%s %+.2f" % [role_label(role), float(_last_raw.get(role, 0.0))])
 	var missing := _missing_devices.duplicate()
 	if _devices["stick"] < 0 and not calibration.has("roll"):
-		missing.append("Joystick")
+		missing.append(I18n.text("ui.camera.device.stick"))
 	if _devices["throttle"] < 0 and not calibration.has("forward"):
-		missing.append("Schubhebel")
-	var text := "Freie Kamera - Achsen: " + "  ".join(parts)
+		missing.append(I18n.text("ui.camera.device.throttle"))
+	var text := I18n.text("ui.camera.readout", {"axes": "  ".join(parts)})
 	if not missing.is_empty():
-		text += "\nNicht gefunden: " + ", ".join(missing)
+		text += "\n" + I18n.text("ui.camera.not_found", {"devices": ", ".join(missing)})
 	return text
 
 
@@ -127,13 +127,7 @@ static func _find_device(name_part: String) -> int:
 
 
 static func role_label(role: String) -> String:
-	match role:
-		"roll": return "Rollen"
-		"pitch": return "Nicken"
-		"yaw": return "Gieren"
-		"forward": return "Vor/Zurück"
-		"strafe": return "Seitlich"
-		_: return "Hoch/Runter"
+	return I18n.text("ui.camera.role." + (role if ["roll", "pitch", "yaw", "forward", "strafe"].has(role) else "vertical"))
 
 
 func _number(key: String) -> float:

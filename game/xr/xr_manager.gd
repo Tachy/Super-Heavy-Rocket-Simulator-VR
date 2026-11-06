@@ -52,8 +52,8 @@ func _ready() -> void:
 		xr_ready = false
 	if want_vr and not xr_ready:
 		# VR start without a usable headset: no silent fallback to the desktop
-		OS.alert("Kein VR-Headset gefunden.\n\nHeadset einschalten und seine OpenXR-Runtime starten\n"
-				+ "oder die Desktop-Version starten (Start-Desktop.cmd).", "Starship-Simulator")
+		OS.alert(I18n.text("ui.xr.no_headset_a") + "\n\n" + I18n.text("ui.xr.no_headset_b") + "\n"
+				+ I18n.text("ui.xr.no_headset_c"), "Starship-Simulator")
 		get_tree().quit(1)
 		return
 	if xr_ready:

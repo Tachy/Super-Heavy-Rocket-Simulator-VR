@@ -127,8 +127,9 @@ const MOON_VIEW_AZIMUTHS := 8
 var ready := false
 ## A table load is running on a worker thread.
 var loading := false
-## German status line for the UI while the tables load or compute ("" when idle); the error text after a failure.
-var status_text := ""
+## Table key of the status line for the UI while the tables load or compute ("" when idle); after a failure the key of
+## the report text (report.<code>). Resolved at display time (status_text), so a language switch re-renders it.
+var status_key := ""
 ## AtmosphereParameters of the loaded tables (StarsimCore.load_atmosphere "parameters").
 var parameters := {}
 ## GPU format of the tables, chosen before start_loading. Half float [call, Task 5 fix round 1]: half the VRAM (42 vs 85
@@ -267,10 +268,14 @@ func start_loading(core: StarsimCore, config_dir: String, cache_dir: String) -> 
 	_core = core
 	ShaderGlobals.set_value(&"atmosphere_enabled", false)
 	var cached := FileAccess.file_exists(cache_dir.path_join(CACHE_FILE))
-	status_text = ("Atmosphäre wird geladen ..." if cached
-			else "Atmosphäre wird berechnet (einmalig, etwa eine Minute) ...")
+	status_key = "loading.atmosphere_load" if cached else "loading.atmosphere_compute"
 	loading = true
 	_task_id = WorkerThreadPool.add_task(_load_task.bind(config_dir, cache_dir), false, "atmosphere tables")
+
+
+## The status line in the active language ("" when idle).
+func status_text() -> String:
+	return I18n.text(status_key) if status_key != "" else ""
 
 
 ## Main thread: uploads the tables once the worker finished. Returns true when the atmosphere is ready.
@@ -718,7 +723,7 @@ static func configure_moon_brdf(core: StarsimCore, config_dir: String, brdf: Str
 	var hapke: Dictionary = core.load_moon_hapke(config_dir)
 	var present := bool(hapke.get("present", false))
 	if brdf == "hapke" and not present:
-		push_warning("Atmosphere: %s - Mond mit Lommel-Seeliger" % String(hapke.get("error", "keine Hapke-Parameter")))
+		push_warning("Atmosphere: %s - Moon with Lommel-Seeliger" % String(hapke.get("error", "no Hapke parameters")))
 	moon_brdf_hapke = brdf == "hapke" and present
 	_hapke_core = core if present else null
 	if present:
@@ -1278,7 +1283,7 @@ func _images_3d(data: PackedFloat32Array, size: Vector3i) -> Array[Image]:
 func _upload(result: Dictionary) -> void:
 	if not result.get("ok", false):
 		# The player sees the report text (data.atmosphere_unavailable); the cause stays in the English log.
-		status_text = I18n.report_text(result.get("report", {"code": "data.atmosphere_unavailable"}))
+		status_key = "report." + str(result.get("report", {}).get("code", "data.atmosphere_unavailable"))
 		push_error("Atmosphere: " + str(result.get("error", "load failed")))
 		return
 	parameters = result["parameters"]
@@ -1320,4 +1325,4 @@ func _upload(result: Dictionary) -> void:
 	ShaderGlobals.set_value(&"atmosphere_table_sizes", Vector4(t_size.x, t_size.y, i_size.x, i_size.y))
 	ShaderGlobals.set_value(&"atmosphere_enabled", true)
 	ready = true
-	status_text = ""
+	status_key = ""

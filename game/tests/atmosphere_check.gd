@@ -73,7 +73,7 @@ func _run() -> void:
 	print("atmosphere_check: table format %s" % ("RGBAF" if _atmosphere.table_format == Image.FORMAT_RGBAF else "RGBAH"))
 	_atmosphere.start_loading(_core, Paths.config_dir(), Paths.data_dir().path_join("atmosphere"))
 	if not _atmosphere.wait_until_loaded():
-		_fail_and_quit("atmosphere tables not loaded: " + _atmosphere.status_text)
+		_fail_and_quit("atmosphere tables not loaded: " + _atmosphere.status_text())
 		return
 	_setup_scene()
 

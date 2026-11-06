@@ -38,7 +38,7 @@ func _run() -> void:
 		return
 	_atmosphere.start_loading(_core, Paths.config_dir(), Paths.data_dir().path_join("atmosphere"))
 	if not _atmosphere.wait_until_loaded():
-		push_error("atmosphere tables not loaded: " + _atmosphere.status_text)
+		push_error("atmosphere tables not loaded: " + _atmosphere.status_text())
 		quit(1)
 		return
 	for height_m in [2.0, 20000.0]:

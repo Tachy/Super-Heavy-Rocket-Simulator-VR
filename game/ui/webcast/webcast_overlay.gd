@@ -93,7 +93,7 @@ func _process_unprofiled(delta: float) -> void:
 	if mission == "" and active:  # no mission name configured: the viewed (else the controlled) vehicle's
 		mission = _text_of(sim.body_display_name(index if index >= 0 else sim.controlled_index()))
 	if sim.autopilot_status().get("planning", false):  # also a mission start planned before its vehicle is placed
-		mission = FlightController.PLANNING_EVENT  # the countdown holds while the onboard computer plans
+		mission = FlightController.event_text(FlightController.PLANNING_EVENT)  # the countdown holds while the onboard computer plans
 	show_clock(timeline, now, mission)
 	if index < 0:
 		show_gauges({"left": [], "right": []}, {}, [], [], {}, "")

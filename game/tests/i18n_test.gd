@@ -136,6 +136,36 @@ func _initialize() -> void:
 	_check(notice.text.begins_with("Platzhaltermodell"), "notice label follows the switch back to German: %s" % notice.text)
 	_check(FlightController.event_text(ignition) == "Zündung", "back to German")
 	notice.free()
+	# panels, wizard, world and status texts (Task 15): every one reads in the active language at call time
+	I18n.set_language("de")
+	var map_label := MapLabel.new()
+	map_label.setup_key("ui.map.earth", Color.WHITE)
+	var zone := {"offset_s": -18000, "abbreviation": "CDT"}
+	var weather := {"kind": "era5", "valid_hour": 1000000}
+	var entry := {"device_name": "Stick", "axis": 2, "center": 0.0, "raw_pos": 0.5, "raw_neg": -0.5}
+	var atmosphere := Atmosphere.new()
+	atmosphere.status_key = "loading.atmosphere_load"
+	var panel_de := [TimePanel.camera_height_line(2500.0, false), LocalTime.format_line(zone, 1700000000),
+			WeatherService.snapshot_label(weather), FreeCameraControl.role_label("roll"), atmosphere.status_text(),
+			(map_label.mesh as TextMesh).text, FreeCameraWizard._describe_entry(entry), TimePanel.sea_state_line({"has_deck": true})]
+	I18n.set_language("en")
+	var panel_en := [TimePanel.camera_height_line(2500.0, false), LocalTime.format_line(zone, 1700000000),
+			WeatherService.snapshot_label(weather), FreeCameraControl.role_label("roll"), atmosphere.status_text(),
+			(map_label.mesh as TextMesh).text, FreeCameraWizard._describe_entry(entry), TimePanel.sea_state_line({"has_deck": true})]
+	for i in panel_de.size():
+		_check(panel_de[i] != "" and panel_en[i] != "" and panel_de[i] != panel_en[i],
+				"text %d differs by language: '%s' / '%s'" % [i, panel_de[i], panel_en[i]])
+	_check(panel_en[0] == "Camera height: 2500 m above MSL" and panel_en[5] == "Earth" and panel_en[3] == "Roll",
+			"English panel texts: %s" % [panel_en])
+	_check(MissionCatalogue.load_from(Paths.config_dir()).missions_for("ccsfs_slc40", "falcon9_block5")[0]["name"] == "Free flight",
+			"catalogue free flight in English")
+	var named := {"key": "event.launch_at", "params": {"vehicle": {"key": "vehicle.starship_block3.display_name"},
+			"site": {"key": "site.starbase_pad2.name"}}}
+	_check(FlightController.event_text(named).begins_with("Heavy Launcher Mk3 at "), "launch event re-renders the vehicle name: %s"
+			% FlightController.event_text(named))
+	I18n.set_language("de")
+	_check(map_label.mesh != null and (map_label.mesh as TextMesh).text == "Erde", "map label follows the switch to German")
+	map_label.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(settings))
 	label.free()
 

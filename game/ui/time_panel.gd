@@ -3,19 +3,21 @@ extends PanelContainer
 ## Time and view control: UTC display/input, time warp, camera focus, eclipse readout.
 ## Keys: Space = pause/resume, +/- = warp faster/slower.
 
+## [table key of the name, focus]
 const FOCUS_OPTIONS := [
-	["Erde", World.FOCUS_EARTH],
-	["Mond", World.FOCUS_MOON],
-	["Erde-Mond-System", World.FOCUS_EARTH_MOON],
-	["Fahrzeug", World.FOCUS_VEHICLE],
-	["Freie Kamera", World.FOCUS_FREE],  ## HOTAS 6 DOF (config/input_hotas.toml [free_camera])
+	["ui.focus.earth", World.FOCUS_EARTH],
+	["ui.focus.moon", World.FOCUS_MOON],
+	["ui.focus.earth_moon", World.FOCUS_EARTH_MOON],
+	["ui.focus.vehicle", World.FOCUS_VEHICLE],
+	["ui.focus.free", World.FOCUS_FREE],  ## HOTAS 6 DOF (config/input_hotas.toml [free_camera])
 ]
-const VEHICLE_FOCUS_INDEX := 3  ## FOCUS_OPTIONS entry "Fahrzeug"
+const VEHICLE_FOCUS_INDEX := 3  ## FOCUS_OPTIONS entry "ui.focus.vehicle"
+## [table key of the name, UTC ("" = now)]
 const PRESETS := [
-	["Jetzt", ""],
-	["Totale Sonnenfinsternis 08.04.2024 (Dallas)", "2024-04-08T18:42:00"],
-	["Vollmond 23.04.2024", "2024-04-23T23:49:00"],
-	["Totale Mondfinsternis 14.03.2025", "2025-03-14T06:58:00"],
+	["ui.preset.now", ""],
+	["ui.preset.solar_eclipse", "2024-04-08T18:42:00"],
+	["ui.preset.full_moon", "2024-04-23T23:49:00"],
+	["ui.preset.lunar_eclipse", "2025-03-14T06:58:00"],
 ]
 
 ## The frame-rate line in the info text (render_check --repeat_identical hides it: it changes from frame to frame).
@@ -59,36 +61,31 @@ func _ready() -> void:
 	_utc_input.custom_minimum_size.x = 230
 	_utc_input.text_submitted.connect(func(_text: String) -> void: _apply_utc_input())
 	time_row.add_child(_utc_input)
-	time_row.add_child(_button("Setzen", _apply_utc_input))
+	time_row.add_child(_button("ui.panel.set", _apply_utc_input))
 	box.add_child(time_row)
 
 	var warp_row := HBoxContainer.new()
-	warp_row.add_child(_button("<<", func() -> void: world.clock.step_warp(-1)))
-	warp_row.add_child(_button("Pause", _toggle_pause))
-	warp_row.add_child(_button(">>", func() -> void: world.clock.step_warp(1)))
-	warp_row.add_child(_button("Rückwärts", func() -> void: world.clock.warp = -world.clock.warp))
+	warp_row.add_child(_button("", func() -> void: world.clock.step_warp(-1), "<<"))
+	warp_row.add_child(_button("ui.panel.pause", _toggle_pause))
+	warp_row.add_child(_button("", func() -> void: world.clock.step_warp(1), ">>"))
+	warp_row.add_child(_button("ui.panel.reverse", func() -> void: world.clock.warp = -world.clock.warp))
 	box.add_child(warp_row)
 
-	for option in FOCUS_OPTIONS:
-		_focus.add_item(option[0])
-	for site in world.sites:
-		# A site with a [site.viewpoint] is seen from there (World._viewpoint_site), else from its pad.
-		_focus.add_item("%s (%s)" % [I18n.text("site.%s.name" % site["id"]), "Aussicht" if site.has("viewpoint") else "Boden"])
+	_fill_focus()
 	_focus.item_selected.connect(_on_focus_selected)
 	box.add_child(_focus)
-	_axes_button = _button("Achsen einrichten", func() -> void: _wizard.open())
+	_axes_button = _button("ui.panel.axes_setup", func() -> void: _wizard.open())
 	_axes_button.visible = false
 	box.add_child(_axes_button)
 	_wizard.control = world.free_control
 	box.add_child(_wizard)
 
-	for preset in PRESETS:
-		_presets.add_item(preset[0])
+	_fill_presets()
 	_presets.item_selected.connect(_on_preset_selected)
 	box.add_child(_presets)
 
 	var weather_box := CheckBox.new()
-	weather_box.text = "Wetter"
+	I18n.bind_text(weather_box, &"text", "ui.panel.weather")
 	weather_box.button_pressed = world.weather.enabled
 	weather_box.toggled.connect(func(on: bool) -> void:
 		world.weather.enabled = on
@@ -96,8 +93,8 @@ func _ready() -> void:
 	box.add_child(weather_box)
 	# Fidelity setting moon_near_shadows (MoonNearShadow): the Sun's shadow map near the lunar ground.
 	var moon_shadow_box := CheckBox.new()
-	moon_shadow_box.text = "Mondschatten nah"
-	moon_shadow_box.tooltip_text = "Schattenkarte der Sonne in Bodennähe auf dem Mond (Steine, Gelände, Fahrzeuge)"
+	I18n.bind_text(moon_shadow_box, &"text", "ui.panel.moon_shadow")
+	I18n.bind_text(moon_shadow_box, &"tooltip_text", "ui.panel.moon_shadow_tip")
 	moon_shadow_box.button_pressed = MoonNearShadow.enabled
 	moon_shadow_box.toggled.connect(func(on: bool) -> void:
 		MoonNearShadow.enabled = on
@@ -105,8 +102,8 @@ func _ready() -> void:
 	box.add_child(moon_shadow_box)
 	# Fidelity setting earth_near_shadows (EarthNearShadow, Task 16): the Sun's shadow map near the Earth's ground.
 	var earth_shadow_box := CheckBox.new()
-	earth_shadow_box.text = "Schatten Erde"
-	earth_shadow_box.tooltip_text = "Schattenkarte der Sonne in Bodennähe auf der Erde (Turm, Startrampe, Fahrzeuge)"
+	I18n.bind_text(earth_shadow_box, &"text", "ui.panel.earth_shadow")
+	I18n.bind_text(earth_shadow_box, &"tooltip_text", "ui.panel.earth_shadow_tip")
 	earth_shadow_box.button_pressed = EarthNearShadow.enabled
 	earth_shadow_box.toggled.connect(func(on: bool) -> void:
 		EarthNearShadow.enabled = on
@@ -116,7 +113,7 @@ func _ready() -> void:
 
 	box.add_child(HSeparator.new())
 	var launch_label := Label.new()
-	launch_label.text = "Start vorbereiten"
+	I18n.bind_text(launch_label, &"text", "ui.panel.prepare_launch")
 	box.add_child(launch_label)
 	_catalogue = MissionCatalogue.load_from(Paths.config_dir())
 	_place_list = _catalogue.places()
@@ -126,7 +123,7 @@ func _ready() -> void:
 	_vehicles.item_selected.connect(func(_index: int) -> void: _refill_missions())
 	for option: OptionButton in [_places, _vehicles, _missions]:
 		box.add_child(option)
-	_start_button = _button("Starten", _on_start_pressed)
+	_start_button = _button("ui.panel.start", _on_start_pressed)
 	box.add_child(_start_button)
 	_start_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_start_status.custom_minimum_size.x = 300
@@ -145,7 +142,7 @@ func _process(_delta: float) -> void:
 
 func _process_unprofiled(_delta: float) -> void:
 	if not world.core.is_open():
-		_utc_label.text = "SPICE-Daten fehlen: python tools/data_pipeline/fetch.py"
+		_utc_label.text = I18n.text("ui.panel.spice_missing")
 		return
 	_axes_button.visible = world.focus == World.FOCUS_FREE
 	if world.focus != World.FOCUS_FREE:
@@ -158,8 +155,8 @@ func _process_unprofiled(_delta: float) -> void:
 		return
 	_utc_label.text = "%s UTC" % world.core.tdb_s_to_utc(t).substr(0, 19).replace("T", "  ")
 	var lines := PackedStringArray()
-	lines.append("Zeitraffer: %sx" % _format_warp(world.clock.warp))
-	lines.append("Mond-Distanz: %.0f km" % (world.moon_gcrf_m.length() / 1000.0))
+	lines.append(I18n.text("ui.panel.warp", {"warp": _format_warp(world.clock.warp)}))
+	lines.append(I18n.text("ui.panel.moon_distance", {"distance": world.moon_gcrf_m.length()}))
 	if world.focus == World.FOCUS_FREE:
 		var p := world.camera.position_gcrf_m
 		var on_moon := world.free_pose.frame == FreeCameraPose.FRAME_MOON
@@ -170,13 +167,13 @@ func _process_unprofiled(_delta: float) -> void:
 	for site in world.sites:
 		var fraction: float = world.core.solar_eclipse_fraction(site["latitude_deg"], site["longitude_deg"], site["height_m"], t)
 		if fraction > 0.0:
-			lines.append("Sonnenbedeckung %s: %.1f %%" % [I18n.text("site.%s.name" % site["id"]), fraction * 100.0])
+			lines.append(I18n.text("ui.panel.sun_coverage", {"site": I18n.text("site.%s.name" % site["id"]), "fraction": fraction}))
 	if world.flight.sim.is_active():
 		var sea := sea_state_line(world.flight.sim.landing_zone())
 		if sea != "":
 			lines.append(sea)
-	if world.atmosphere.status_text != "":
-		lines.append(world.atmosphere.status_text)
+	if world.atmosphere.status_key != "":
+		lines.append(world.atmosphere.status_text())
 	lines.append(world.weather.status_text())
 	lines.append(world.clouds.status_line())  # the cloud march's live toggle (F8, CloudLayer)
 	var frame_rate := frame_rate_line(Engine.get_frames_per_second()) if show_frame_rate else ""
@@ -190,7 +187,7 @@ func _process_unprofiled(_delta: float) -> void:
 static func frame_rate_line(fps: float) -> String:
 	if fps <= 0.0:
 		return ""
-	return "Bildrate: %d fps (%.1f ms)" % [roundi(fps), 1000.0 / fps]
+	return I18n.text("ui.panel.frame_rate", {"fps": roundi(fps), "ms": 1000.0 / fps})
 
 
 ## The free camera's height (user 2026-10-30): above mean sea level (EGM2008 geoid), or - in the Moon's frame
@@ -198,8 +195,9 @@ static func frame_rate_line(fps: float) -> String:
 static func camera_height_line(height_m: float, on_moon: bool) -> String:
 	if is_nan(height_m):
 		return ""
-	var value := "%.0f m" % height_m if absf(height_m) < 1.0e4 else "%.1f km" % (height_m / 1000.0)
-	return "Kamerahöhe: %s %s" % [value, "über mittlerem Mondradius" if on_moon else "über NN"]
+	var value := I18n.format_value(height_m, "length", "m0" if absf(height_m) < 1.0e4 else "km1")
+	return I18n.text("ui.panel.camera_height", {"height": value,
+			"reference": I18n.text("ui.panel.height_moon" if on_moon else "ui.panel.height_msl")})
 
 
 ## The sea state and deck motion while a drone ship is the landing zone (FlightSim.landing_zone), else "".
@@ -208,9 +206,16 @@ static func sea_state_line(zone: Dictionary) -> String:
 		return ""
 	var sea: Dictionary = zone.get("sea_state", {})
 	if sea.is_empty():
-		return "Seegang ruhig - Deck in Ruhe"
-	return "Seegang Hs %.1f m, Tp %.0f s - Deck: Hub %+.2f m, Rollen %+.1f°, Stampfen %+.1f°" % [sea["hs_m"], sea["tp_s"],
-			zone.get("deck_heave_m", 0.0), zone.get("deck_roll_deg", 0.0), zone.get("deck_pitch_deg", 0.0)]
+		return I18n.text("ui.panel.sea_calm")
+	return I18n.text("ui.panel.sea_state", {"hs": sea["hs_m"], "tp": sea["tp_s"],
+			"heave": _signed(zone.get("deck_heave_m", 0.0), 2), "roll": _signed(zone.get("deck_roll_deg", 0.0), 1),
+			"pitch": _signed(zone.get("deck_pitch_deg", 0.0), 1)})
+
+
+## A number with an explicit sign ("+0,25"), as %+.nf.
+static func _signed(value: float, decimals: int) -> String:
+	var text := I18n.number(value, decimals)
+	return text if text.begins_with("-") else "+" + text
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -255,6 +260,29 @@ func _on_preset_selected(index: int) -> void:
 	world.clock.set_time(world.core.utc_to_tdb_s(utc))
 
 
+## The focus drop-down: the fixed entries, then the sites (a site with a [site.viewpoint] is seen from there,
+## World._viewpoint_site, else from its pad). Keeps the selection.
+func _fill_focus() -> void:
+	var selected := _focus.selected
+	_focus.clear()
+	for option in FOCUS_OPTIONS:
+		_focus.add_item(I18n.text(option[0]))
+	for site in world.sites:
+		_focus.add_item(I18n.text("ui.focus.site_viewpoint" if site.has("viewpoint") else "ui.focus.site_ground",
+				{"site": I18n.text("site.%s.name" % site["id"])}))
+	if selected >= 0:
+		_focus.select(selected)
+
+
+func _fill_presets() -> void:
+	var selected := _presets.selected
+	_presets.clear()
+	for preset in PRESETS:
+		_presets.add_item(I18n.text(preset[0]))
+	if selected >= 0:
+		_presets.select(selected)
+
+
 ## Refills the vehicle box for the selected place (keeping the selected vehicle when it is offered there), then the
 ## mission box.
 func _refill_vehicles() -> void:
@@ -296,7 +324,7 @@ func _on_start_pressed() -> void:
 	if mission_id == MissionCatalogue.FREE_FLIGHT:
 		var site: Dictionary = _place_list[_places.selected]["site"]
 		var vehicle: Dictionary = _vehicle_list[_vehicles.selected]
-		started = world.launch_vehicle(vehicle["id"], site, FlightController.LAUNCH_COUNTDOWN_S, vehicle["name"])
+		started = world.launch_vehicle(vehicle["id"], site, FlightController.LAUNCH_COUNTDOWN_S, vehicle.get("name_key", ""))
 		if started:
 			_focus.select(VEHICLE_FOCUS_INDEX)  # world.launch_vehicle follows the vehicle at once
 	else:
@@ -336,10 +364,29 @@ func _render_start_status() -> void:
 
 
 func _on_language_changed(_language: String) -> void:
+	_fill_focus()
+	_fill_presets()
+	_refill_places()
 	_render_start_status()
 
 
-## The "Sprache" row: label and a drop-down with the languages (saved in user://settings.cfg [ui] language).
+## The place / vehicle / mission drop-downs in the new language, keeping the selected entries.
+func _refill_places() -> void:
+	var place := _selected_id(_place_list, _places)
+	_place_list = _catalogue.places()
+	_places.clear()
+	for entry in _place_list:
+		_places.add_item(entry["name"])
+	if not _place_list.is_empty():
+		_places.select(maxi(MissionCatalogue.index_of(_place_list, place), 0))
+	var mission := _selected_id(_mission_list, _missions)
+	_refill_vehicles()
+	var index := MissionCatalogue.index_of(_mission_list, mission)
+	if index >= 0:
+		_missions.select(index)
+
+
+## The language row: label and a drop-down with the languages (saved in user://settings.cfg [ui] language).
 func _language_row() -> HBoxContainer:
 	var row := HBoxContainer.new()
 	var label := Label.new()
@@ -354,9 +401,13 @@ func _language_row() -> HBoxContainer:
 	return row
 
 
-func _button(text: String, action: Callable) -> Button:
+## A button labelled with the text of `key` (follows the language), or with `symbol` (no words) when the key is "".
+func _button(key: String, action: Callable, symbol := "") -> Button:
 	var button := Button.new()
-	button.text = text
+	if key != "":
+		I18n.bind_text(button, &"text", key)
+	else:
+		button.text = symbol  # i18n-ok: an arrow symbol, no words
 	button.pressed.connect(action)
 	return button
 

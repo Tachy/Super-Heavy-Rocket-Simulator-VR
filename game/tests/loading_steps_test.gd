@@ -23,7 +23,7 @@ func _initialize() -> void:
 	_check(steps.duration_ms(0, 9000) == 1000 and steps.duration_ms(7, 9500) == 1500,
 			"durations: to the next step; the running one up to now")
 	steps.finish(10000)
-	steps.add("Nach dem Ende", 11000)
+	steps.add("after the end", 11000)
 	_check(steps.finished and steps.current() == "Schritt 8" and steps.duration_ms(7, 99999) == 2000,
 			"after finish() nothing is added and the last step ends there")
 	_check(steps.report_lines(10000).size() == steps.count(), "one report line per step")
@@ -156,7 +156,7 @@ func _check_vr_lifecycle() -> void:
 			and xr.camera.environment != environment and xr.camera.compositor != compositor,
 			"vr: the screen builds one quad and blanks the XR camera")
 	var frames := Engine.get_process_frames()
-	await LoadingScreen.step("Hauptszene laden")
+	await LoadingScreen.step("loading.main_scene_load")
 	_check(Engine.get_process_frames() > frames, "vr: a step waits for a rendered frame")
 	screen.reparent(root)  # the boot scene's hand-over
 	boot.free()
@@ -164,8 +164,8 @@ func _check_vr_lifecycle() -> void:
 	root.add_child(main)
 	_check(LoadingScreen.current == screen and LoadingScreen.start(main) == screen and _layers(xr) == 1,
 			"vr: after the reparent Main gets the same screen, still one quad")
-	await LoadingScreen.step("SPICE-Kernel laden")
-	var hold := ["Atmosphäre wird geladen"]
+	await LoadingScreen.step("loading.spice")
+	var hold := ["loading.atmosphere_load"]
 	screen.finish_when_idle(func() -> String: return hold[0])
 	await _wait_frames(3)
 	_check(is_instance_valid(screen) and screen.steps.current() == hold[0] and xr.camera.cull_mask == 0,
@@ -185,9 +185,9 @@ func _check_vr_timeout() -> void:
 	var environment := xr.camera.environment
 	var compositor := xr.camera.compositor
 	var screen := LoadingScreen.create(root, LoadingScreen.Mode.VR, xr)
-	await LoadingScreen.step("Oberfläche aufbauen")
+	await LoadingScreen.step("loading.ui")
 	screen.armed_timeout_ms = 50
-	screen.finish_when_idle(func() -> String: return "hängt")
+	screen.finish_when_idle(func() -> String: return "stuck")
 	var started := Time.get_ticks_msec()
 	while is_instance_valid(screen) and Time.get_ticks_msec() - started < 2000:
 		await process_frame
