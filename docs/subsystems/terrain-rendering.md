@@ -127,11 +127,16 @@ on top; it replaced the interim `GroundPatch`.
   within +-25 % of their references at every level the game draws there - global 12 km box vs MCD43A4 NBAR
   (Jul 2024 - Jun 2025 median): Starbase pad +3 %, Boca Chica beach 0 %, Cape LC-39A +2 %, Sahara 25 N 25 E -2 %,
   Amazon 5 S 65 W +4 %, Kansas 38.5 N 98.5 W 0 %; Sentinel-2 z13 and NAIP z17 200 m boxes vs Sentinel-2 L2A band
-  medians: pad -1 % / +4 %, beach +8 % / +10 % (the spot lies on the tidal flats: water pixels with their excess over
-  the pedestal), Cape +1 % / +6 %. Level steps (mean over the transition): NAIP vs Sentinel-2 over the NAIP boxes
+  medians: pad -1 % / +4 %, beach +8 % / +10 % (the spot lies on the tidal flats: 92.6 % of its 460 z13 pixels are water by the renderer's rule,
+  and a water pixel reads the global level there (~0.084, a 12 km mean with land and bay) plus the imagery's excess over the
+  open-water pedestal (luminance 0.062): the global level is ~0.02 above the pedestal, so a spot of flat pixels reads above
+  L2A, by (global - pedestal) / L2A = +8..14 %, not below it; z13 water pixels 0.180, land pixels 0.189, all 0.1805 against
+  L2A 0.1666), Cape +1 % / +6 %. Level steps (mean over the transition): NAIP vs Sentinel-2 over the NAIP boxes
   +0.2 % Starbase / -2.5 % Cape (median 250 m cell 1.1 % / 1.4 %, 90th percentile 3 % / 17 % - dark Cape sea cells),
   Sentinel-2 vs the day texture in the 10 km band inside the box edge +4.6 % / +2.1 % over all cells (land +4.9 % /
-  +2.4 %, sea -0.8 % / +1.0 %).
+  +2.4 %, sea -0.8 % / +1.0 %). The plan's limit for a level step is 5 %: the Starbase land step (+4.9 %) is 0.1 point
+  under it, i.e. close to the limit (the product disagreement of 10-20 % spread over the 50 km feather), and the Cape
+  NAIP 90th percentile (17 %: single dark sea cells, median 1.4 %) is beyond it.
   Which checks are independent: (a) independent of the chain - Sentinel-2 L2A (ESA Sen2Cor, own median composite) vs
   MODIS MCD43A4 NBAR (NASA, native 500 m, the same 12 dates) at 0.005 deg cells of the land pixels, 60 048 / 63 394
   cells: mean ratio +11.6 % Starbase (median cell 1.10, 10-90 % 0.97-1.26, r = 0.80), -9.3 % Cape (median 0.85, 10-90 %
@@ -171,7 +176,7 @@ on top; it replaced the interim `GroundPatch`.
 - **Near-field Sun shadows (Earth)** (moon procedural surface plan Task 16, `EarthNearShadow`,
   `game/world/earth_near_shadow.gd`, `earth_near_shadow.gdshaderinc`): the Moon's technique (moon-surface.md "Near-field
   shadows") on the Earth. Godot's directional shadow map of the Sun's DirectionalLight (`World.sun_light`), PSSM 4 splits
-  (0.1 / 0.2 / 0.5 of the range, blended), 8192 px atlas with 32-bit depth, PCSS with the solar disc's angular diameter
+  (0.1 / 0.2 / 0.5 of the range, blended), 8192 px atlas with 16-bit depth (128 MB; Task 13b, was 32-bit / 256 MB with the same image), PCSS with the solar disc's angular diameter
   (0.533 deg at 1 AU), soft filter HIGH (LOW, the Moon's, left a grain in the wide penumbrae on the terrain), bias
   0.03 / normal bias 1.0 [E]; one shadow pass for both VR eyes (multiview).
   Range [E]: the shadow of a CASTER_HEIGHT_M 147.9 m caster (the tower head) x 1.25 at the Sun's elevation, at least
@@ -186,8 +191,10 @@ on top; it replaced the interim `GroundPatch`.
   maps) seen through the aerial perspective's transmittance; on the sea its diffuse Sun and glint (water_radiance is
   linear in the Sun's visible fraction: the sea minus the same sea without it). Active with the fidelity setting
   `earth_near_shadows` (`user://settings.cfg` [graphics], default on; the time panel's "Schatten Erde"; render_check
-  `--earth_near_shadows=off`), the Moon's near shadows off, the Sun above -1.1 deg and the eye within 20 km of the
-  Earth's ground (SurfaceClearance); above it the light casts nothing (no cost in orbit). Both shadow classes drive the
+  `--earth_near_shadows=off`), the Moon's near shadows off, the Sun above -1.1 deg and the eye within 30 km of the
+  Earth's ground (SurfaceClearance); the shadows keep full strength to 20 km and fade out by a smoothstep of the light's
+  `shadow_opacity` between 20 and 30 km (Task 13b: no step in the vehicles' self-shadows; the terrain's 4 km range no
+  longer reaches the ground from there); above 30 km the light casts nothing (no cost in orbit). Both shadow classes drive the
   one light: `MoonNearShadow.update` first, `EarthNearShadow.update` only while the Moon's is off; the directional atlas
   goes back to the project's when neither is active.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
@@ -273,6 +280,19 @@ on top; it replaced the interim `GroundPatch`.
   734 to 716 m between PCSS LOW and HIGH because the tip pixel, hence dh, moved). Rerun: `render_check --shadow_length`
   (options in the header of `game/tests/render_check.gd`; GPU, no `--headless`); keep the eye over the tower's centre
   (in a nadir view the shadowed upper tower's pixels project beyond their footprint and could lengthen the tip).
+- Earth shadows, Task 13b (render_check `--shadow_crawl=24,0.02`: the view turns 0.02 deg in azimuth and 0.01 deg in elevation
+  per frame, 24 frames saved; nadir 500 m over the pad, Sun 19.4 deg, fov 70 deg, penumbra pixels of the shadow tip, 10 922 of
+  them, high-passed with a 7 x 7 box): the mean frame-to-frame change of the high-passed luminance, in units of 1e-5:
+  no shadows 22 (the imagery's own resampling), PCSS HIGH 24, PCSS LOW 32, hard shadows 17. So the HIGH penumbra does not crawl
+  against the ground at this head motion (the same as without shadows within the noise; LOW is 45 % above); not checked in the
+  headset (the per-eye pixel grids, real head motion). Atlas: 16-bit at 8192 px equals 32-bit (Sun 39.4 deg hard shadow
+  length -1.31 m, tolerance 1.61, both; 115 / 8 pixels of 1.44 M differ by > 2 at Sun 19.4 / 5.6 deg, 23 / 3 by > 8, single lattice
+  edge pixels); 4096 px doubles the texel (0.22 -> 0.44 m at 500 m range) and the edge error (-2.9 m) and 2048 px -4.8 m, so
+  the size stays 8192, the depth is 16-bit. Stereo mock (3534 x 2838 per eye, pad with Starship, eye 150 m, Sun 32.7 deg),
+  GPU median of 120 frames, nothing else running: shadows off 7.44 ms, 32-bit 10.55, 16-bit 9.99; with the analog weather on
+  14.37 off, 17.19 on (16-bit). The Falcon 9 drone ship (mission `falcon9_asds_sea`, landed + 20 s, Sun 70.9 deg): the stage and
+  its legs shadow the deck, no acne, the deck's edge is lit to the rim; one render, not a test. A weather-on pad scene (analog,
+  Sun 39 deg): tower, mount and vehicle shadows stay; no artefact seen.
 - Camera-precision test: relative error < 3e-7. Quadtree test: morph start < end for every level >= 2 on both bodies.
 - Moon: mesh vs core 0.004 / 0.005 m at the IM-2 site / tile edge; lander CG 18.11 m above the drawn surface (detail
   off; `terrain_quadtree_test.gd` runs the Moon with the detail off as the regression baseline).
@@ -350,6 +370,13 @@ on top; it replaced the interim `GroundPatch`.
   against Sentinel-2. The two calibrated land products disagree by 10-20 % (Sentinel-2 2025 median of the least cloudy
   scenes vs the MODIS NBAR monthly median), spread over the 50 km land feather. The global level's land is an annual
   median: no seasons and no snow cover outside the permanently snow-covered areas.
+- Ground bounce in the radiance cube (Task 13b): the cube's ground is the global day texture (one texel ~ 6.7 km, 0.108
+  green at Starbase), the imagery within 1.5 km averages 0.12-0.16, so a wall's ground bounce is ~30-40 % low (a wall's
+  irradiance 6 % at noon on a Sun-facing face, 13-17 % on a shaded one; red more than green). A local mean from
+  `ImagerySource.crop` for the cube's ground near the eye was tried on paper (a ring profile by distance fits the wall's bounce
+  kernel) and not built: a tenth of a stop on lit faces, and an imagery read per cube refresh on the main thread. Numbers in
+  launch-structures.md Validation.
+- The Falcon 9 drone ship's shadow on the sea, and the Sun's penumbra on the sea in general, were not examined (the deck was).
 - Open for the user, unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site
   coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.
 - Terrain-load draw stall (~1 run in 3 shows one 11-17 ms frame inside the RenderingServer draw; engine-internal,

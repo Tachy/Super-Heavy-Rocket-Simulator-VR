@@ -34,8 +34,15 @@ func _initialize() -> void:
 	_check("on at the pad by day", shadow.active and light.shadow_enabled
 			and absf(light.light_angular_distance - 0.533) < 0.002, "angular distance %.4f deg" % light.light_angular_distance)
 	_check("shader global on with the fade range", (ShaderGlobals.value(&"earth_near_shadow") as Vector4).x == 1.0)
+	_check("full strength up to 20 km", is_equal_approx(light.shadow_opacity, 1.0))
 	shadow.update(light, false, 25000.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
-	_check("off above 20 km", not shadow.active and not light.shadow_enabled)
+	_check("fading between 20 and 30 km (no step)", shadow.active and light.shadow_enabled
+			and absf(light.shadow_opacity - 0.5) < 1.0e-6, "opacity %.3f" % light.shadow_opacity)
+	shadow.update(light, false, 20000.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
+	var just_below := EarthNearShadow.strength(20000.0 + 1.0)
+	_check("continuous at 20 km", shadow.active and is_equal_approx(light.shadow_opacity, 1.0) and just_below > 0.999999)
+	shadow.update(light, false, 35000.0, deg_to_rad(30.0), Atmosphere.ASTRONOMICAL_UNIT_M)
+	_check("off above 30 km", not shadow.active and not light.shadow_enabled and is_equal_approx(light.shadow_opacity, 1.0))
 	shadow.update(light, false, 2.0, deg_to_rad(-5.0), Atmosphere.ASTRONOMICAL_UNIT_M)
 	_check("off with the Sun down", not shadow.active and not light.shadow_enabled)
 	light.shadow_enabled = true  # the Moon's settings on the light: left alone

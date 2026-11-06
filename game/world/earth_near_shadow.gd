@@ -23,6 +23,7 @@ static var enabled := load_enabled_setting()
 static var splits := 4
 static var soft := true
 static var atlas_size := ATLAS_SIZE
+static var atlas_16_bit := true  ## 16-bit depth (render_check --earth_shadow_32bit: the former 32-bit atlas)
 static var bias := SHADOW_BIAS  ## (render_check --earth_shadow_bias=<bias>,<normal bias>)
 static var normal_bias := SHADOW_NORMAL_BIAS
 static var soft_quality := SOFT_QUALITY  ## (render_check --earth_shadow_quality=hard|very_low|low|medium|high|ultra)
@@ -30,6 +31,9 @@ static var soft_quality := SOFT_QUALITY  ## (render_check --earth_shadow_quality
 ## [E] Active below this height of the eye over the Earth's ground: vehicles keep their own shadows on themselves while
 ## climbing out (the same bound as the Moon's ACTIVE_HEIGHT_M); above it the map would only hold a vehicle seen from far.
 const ACTIVE_HEIGHT_M := 20000.0
+## [E] The vehicles' self-shadows fade out between ACTIVE_HEIGHT_M and this height instead of switching off as a step (the light's
+## shadow_opacity falls by a smoothstep; the terrain's own range, 4 km at most, no longer reaches the ground from there).
+const FADE_END_HEIGHT_M := 30000.0
 ## [E] Shadow range (max distance, m of view depth): on the ground at least RANGE_MIN_M, and long enough for the shadow of
 ## a CASTER_HEIGHT_M caster at the Sun's elevation (h / tan e, at most RANGE_MAX_M) with RANGE_SHADOW_MARGIN, growing
 ## with the eye's height by RANGE_PER_HEIGHT (a vehicle's shadow on the ground below it).
@@ -49,8 +53,10 @@ const RANGE_STEPS_PER_OCTAVE := 4.0
 const SPLITS := Vector3(0.1, 0.2, 0.5)
 ## [E] The shadow fades out over the range's last 20 % (Godot's fade_start); the terrain's light() uses the same weight.
 const FADE_START := 0.8
-## [E, measured Task 16] Directional shadow atlas 8192 px (4096 per split), 32-bit depth (the light's depth range spans
-## km at a low Sun). VRAM: 8192 x 8192 x 4 B = 256 MB while active (computed, docs vr-performance.md).
+## [E, measured Task 13b] Directional shadow atlas 8192 px (4096 per split), 16-bit depth: VRAM 8192 x 8192 x 2 B = 128 MB while
+## active (computed; 256 MB with the 32-bit atlas of Task 16, which gave the same image: Sun 39 deg shadow length -1.31 m both,
+## 23 / 115 pixels of 1.44 M differ by > 8 / > 2 at 19 deg and 3 / 8 at 5.6 deg, single lattice edge pixels). Halving the atlas to
+## 4096 doubles the texel (0.22 -> 0.44 m at 500 m) and the shadow edge's error (-1.3 -> -2.9 m at 190 m): kept at 8192.
 const ATLAS_SIZE := 8192
 ## [E, renders Task 16] Bias in Godot's units (shadow_bias x the split's texel; normal bias along the receiver's normal in
 ## texels): no acne on the hardstand, the hulls and the members at 5-60 deg Sun, contact kept at the tower foot.
@@ -73,13 +79,14 @@ var _logged_range_m := 0.0
 ## the Sun (the disc's angular diameter).
 func update(sun_light: DirectionalLight3D, moon_active: bool, height_over_ground_m: float, sun_elevation_rad: float,
 		sun_distance_m: float) -> void:
-	active = enabled and not moon_active and height_over_ground_m < ACTIVE_HEIGHT_M and sun_elevation_rad > -0.02
+	active = enabled and not moon_active and height_over_ground_m < FADE_END_HEIGHT_M and sun_elevation_rad > -0.02
 	if not active:
 		ShaderGlobals.set_value(&"earth_near_shadow", Vector4(0.0, 0.0, 0.0, 0.0))
 		if moon_active:
 			_atlas_set = false  # the Moon's settings are on the light and the atlas
 			return
 		sun_light.shadow_enabled = false
+		sun_light.shadow_opacity = 1.0
 		if _atlas_set:  # the project's atlas and filter back (as MoonNearShadow does on leaving the Moon)
 			RenderingServer.directional_shadow_atlas_set_size(
 					int(ProjectSettings.get_setting("rendering/lights_and_shadows/directional_shadow/size", 4096)),
@@ -89,10 +96,11 @@ func update(sun_light: DirectionalLight3D, moon_active: bool, height_over_ground
 			_atlas_set = false
 		return
 	if not _atlas_set:
-		RenderingServer.directional_shadow_atlas_set_size(atlas_size, false)
+		RenderingServer.directional_shadow_atlas_set_size(atlas_size, atlas_16_bit)
 		RenderingServer.directional_soft_shadow_filter_set_quality(soft_quality)
 		_atlas_set = true
 	sun_light.shadow_enabled = true
+	sun_light.shadow_opacity = strength(height_over_ground_m)
 	range_m = shadow_range_m(height_over_ground_m, sun_elevation_rad)
 	sun_light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if splits >= 4 \
 			else (DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if splits == 2 else DirectionalLight3D.SHADOW_ORTHOGONAL)
@@ -111,6 +119,12 @@ func update(sun_light: DirectionalLight3D, moon_active: bool, height_over_ground
 		print("[EarthNearShadow] range %.0f m (eye %.0f m over the ground, Sun %.1f deg)" % [range_m,
 				height_over_ground_m, rad_to_deg(sun_elevation_rad)])
 		_logged_range_m = range_m
+
+
+## The shadows' strength (the light's shadow_opacity) at an eye height: 1 up to ACTIVE_HEIGHT_M, then a smoothstep to 0 at
+## FADE_END_HEIGHT_M.
+static func strength(height_over_ground_m: float) -> float:
+	return 1.0 - smoothstep(ACTIVE_HEIGHT_M, FADE_END_HEIGHT_M, height_over_ground_m)
 
 
 ## The shadow range (m of view depth): the tallest caster's shadow at the Sun's elevation with its margin (quantised, at

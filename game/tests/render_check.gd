@@ -21,10 +21,12 @@
 #          away from the eye). The log's "Moon load" line: the deepest drawn level's wall-time timeline since the view
 #          was placed (or the last climb move) and the time until the terrain settled.
 # Earth near-field Sun shadows (Task 16, EarthNearShadow): [--earth_near_shadows=off] (the fidelity setting off: the
-#          render before Task 16), [--earth_shadow_splits=1|2|4] [--earth_shadow_soft=off] [--earth_shadow_atlas=<px>]
+#          render before Task 16), [--earth_shadow_splits=1|2|4] [--earth_shadow_soft=off] [--earth_shadow_atlas=<px>] [--earth_shadow_32bit]
 #          [--earth_shadow_bias=<bias>,<normal bias>] [--earth_shadow_quality=hard|very_low|low|medium|high|ultra];
 #          [--shadow_length] once settled: the tower's shadow tip measured against its casters' geometry
 #          (EarthShadowLength; the view: an eye high over the pad looking down), exit code 1 outside the tolerance.
+#          [--shadow_crawl=<frames>,<step deg>] once settled: the view turns that much per frame, every frame saved as <out>_crawl<n>.png
+#          (Task 13b: the penumbra grain's temporal stability, analysed offline).
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed); with it [--catch_hull=<station m>] a
 #          static booster hull with that hull station on the arm deck (a picture of the closed pose, no flight).
@@ -114,6 +116,7 @@ var _approach_next := 0  ## --approach: the next step (0: none moved yet)
 var _approach_move_frame := 0
 var _approach_finished := false
 var _sweep_frame := -1  ## --rock_scale_sweep: the next frame (-1: not started)
+var _crawl_frame := -1  ## --shadow_crawl: the next frame (-1: not started)
 var _approach_target := {}  ## --approach: the ground site of the first placement (the target point)
 var _stereo: StereoMockXr  ## --stereo: the stand-in headset
 var _stereo_capture_frames := 0
@@ -178,6 +181,7 @@ func _initialize() -> void:
 	EarthNearShadow.splits = int(_args.get("earth_shadow_splits", "4"))
 	EarthNearShadow.soft = _args.get("earth_shadow_soft", "on") != "off"
 	EarthNearShadow.atlas_size = int(_args.get("earth_shadow_atlas", str(EarthNearShadow.ATLAS_SIZE)))
+	EarthNearShadow.atlas_16_bit = not _args.has("earth_shadow_32bit")
 	if _args.has("earth_shadow_quality"):
 		EarthNearShadow.soft_quality = ["hard", "very_low", "low", "medium", "high", "ultra"].find(String(_args["earth_shadow_quality"])) as RenderingServer.ShadowQuality
 	if _args.has("earth_shadow_bias"):
@@ -376,6 +380,8 @@ func _process(_delta: float) -> bool:
 	if _args.has("approach") and (settled or _approach_next > 0) and not _approach_done(world, settled):
 		return false
 	if _args.has("rock_scale_sweep") and settled and not _rock_sweep_done(world):
+		return false
+	if _args.has("shadow_crawl") and settled and not _shadow_crawl_done(world):
 		return false
 	if settled:
 		if _args.has("deterministic"):
@@ -761,6 +767,24 @@ func _rock_sweep_done(world: World) -> bool:
 	if _sweep_frame < frames and world.moon_rocks != null:
 		world.moon_rocks.threshold_scale = spec[0] * pow(spec[1] / spec[0], float(_sweep_frame) / float(frames - 1))
 	return _sweep_frame >= frames
+
+
+## --shadow_crawl=<frames>,<step deg> (Task 13b; ground view): once settled the view turns by <step> in azimuth and half of it in
+## elevation every frame (a head's micro motion), each frame saved as <out>_crawl<frame>.png - the near shadows' penumbra
+## grain: does it crawl against the ground (offline: temporal std of the high-passed penumbra pixels, vs the same run with
+## --earth_shadow_soft=off / --earth_near_shadows=off).
+func _shadow_crawl_done(world: World) -> bool:
+	var spec: PackedFloat64Array = String(_args["shadow_crawl"]).split_floats(",", false)
+	var frames := maxi(int(spec[0]), 2)
+	if _crawl_frame >= frames:
+		return true
+	if _crawl_frame >= 0 and _args.has("out"):
+		root.get_viewport().get_texture().get_image().save_png("%s_crawl%03d.png" % [String(_args["out"]).get_basename(),
+				_crawl_frame])
+	_crawl_frame += 1
+	world.camera.azimuth += deg_to_rad(spec[1])
+	world.camera.elevation += deg_to_rad(0.5 * spec[1])
+	return _crawl_frame >= frames
 
 
 ## --approach: the eye's distance (m) from the target at a step (geometric from..to).

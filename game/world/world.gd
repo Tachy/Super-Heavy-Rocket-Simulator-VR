@@ -665,8 +665,8 @@ func _update_moon_near_shadow(camera_gcrf_m: Vector3, sun_distance_m: float) -> 
 func _update_earth_near_shadow(camera_gcrf_m: Vector3, camera_fixed_m: Vector3, sun_from_camera_m: Vector3) -> void:
 	var height_m := INF
 	# |p| - a is never above the height over the ellipsoid (the ellipsoid's radius is at most a): an eye with it beyond
-	# ACTIVE_HEIGHT_M + 9 km (the highest ground, 8.8 km) is out of the near shadows without a terrain sample.
-	if camera_fixed_m.length() - EARTH_SEMI_MAJOR_AXIS_M < EarthNearShadow.ACTIVE_HEIGHT_M + 9000.0:
+	# FADE_END_HEIGHT_M + 9 km (the highest ground, 8.8 km) is out of the near shadows without a terrain sample.
+	if camera_fixed_m.length() - EARTH_SEMI_MAJOR_AXIS_M < EarthNearShadow.FADE_END_HEIGHT_M + 9000.0:
 		height_m = SurfaceClearance.surface_distance_m(camera_fixed_m, _earth_heights)
 	var sin_e := sun_from_camera_m.normalized().dot(camera_gcrf_m.normalized())
 	earth_near_shadow.update(sun_light, moon_near_shadow.active, height_m, asin(clampf(sin_e, -1.0, 1.0)),

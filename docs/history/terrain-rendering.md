@@ -141,3 +141,9 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
 `terrain_earth.gdshader` was `render_mode unshaded` with everything in ALBEDO; vehicles and structures cast no shadow on
 the Earth's terrain (known-issues: "shadows on the ground only on the Moon"). Since Task 16 it is lit only for the
 near-field Sun shadow map's light() (the off path gives the same image).
+
+## Earth near-field shadows: 32-bit atlas, 20 km step (Task 16, 2026-11-05; replaced 2026-11-06, Task 13b)
+- The directional atlas was 8192 px with 32-bit depth (256 MB VRAM) "because the light's depth range spans km at a low Sun". Measured
+  in Task 13b: 16-bit gives the same image (shadow length and pixel diffs in terrain-rendering.md Validation), 128 MB, -0.56 ms GPU.
+- The shadows switched off as a step when the eye passed 20 km over the ground (the vehicles' self-shadows vanished at once); now
+  they fade between 20 and 30 km (`shadow_opacity`).
