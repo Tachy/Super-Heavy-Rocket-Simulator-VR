@@ -153,7 +153,10 @@ std::string config_contents_hash(const std::filesystem::path& config_dir) {
     std::error_code ec;
     for (std::filesystem::recursive_directory_iterator it(config_dir, ec), end; !ec && it != end; it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
-        files.emplace_back(std::filesystem::relative(it->path(), config_dir, ec).generic_string(), it->path());
+        const auto relative = std::filesystem::relative(it->path(), config_dir, ec);
+        // The text tables (config/i18n) never affect a plan; a wording change must not invalidate cached plans.
+        if (!relative.empty() && *relative.begin() == "i18n") continue;
+        files.emplace_back(relative.generic_string(), it->path());
     }
     std::sort(files.begin(), files.end());
     std::uint64_t h = fnv_offset;

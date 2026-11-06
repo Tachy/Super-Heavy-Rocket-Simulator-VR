@@ -255,3 +255,19 @@ TEST_CASE("plan cache key changes with the config contents", "[sim][plan_cache]"
     write_file(renamed.path / "sub" / "b.csv", "1,2,3\n");
     CHECK(sim::config_contents_hash(renamed.path) != h0);
 }
+
+TEST_CASE("plan cache hash ignores the text tables", "[sim][plan_cache]") {
+    TempDir a("config_hash_i18n_a");
+    write_file(a.path / "a.toml", "alpha = 1\n");
+    write_file(a.path / "i18n" / "de.toml", "x = \"eins\"\n");
+    TempDir b("config_hash_i18n_b");
+    write_file(b.path / "a.toml", "alpha = 1\n");
+    write_file(b.path / "i18n" / "de.toml", "x = \"zwei\"\n");
+    write_file(b.path / "i18n" / "en.toml", "x = \"two\"\n");
+    CHECK(sim::config_contents_hash(a.path) == sim::config_contents_hash(b.path));
+
+    TempDir c("config_hash_i18n_c");
+    write_file(c.path / "a.toml", "alpha = 2\n");
+    write_file(c.path / "i18n" / "de.toml", "x = \"eins\"\n");
+    CHECK(sim::config_contents_hash(c.path) != sim::config_contents_hash(a.path));
+}
