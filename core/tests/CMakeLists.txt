@@ -40,6 +40,7 @@ add_executable(starsim_core_tests
     test_earth_return.cpp
     test_lunar_descent.cpp
     test_lunar_site_tile.cpp
+    test_lunar_site_sun.cpp
     test_lunar_touchdown_hazards.cpp
     test_lunar_ascent.cpp
     test_lunar_landing_campaign.cpp

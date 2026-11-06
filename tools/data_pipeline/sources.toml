@@ -691,3 +691,12 @@ target = "game/world/terrain/moon_rock_layer.gd"
 kind = "licence_only"
 license = "NASA photographs: public domain (US government work, NASA media usage guidelines); AS11-40-5903 from the LPI Apollo Image Atlas (www.lpi.usra.edu/resources/apollo/images/print/AS11/40/5903.jpg), AS15-86-11603 and AS17-140-21497 from images.nasa.gov (~large.jpg)"
 credit = "Apollo surface photographs AS11-40-5903, AS15-86-11603, AS17-140-21497: NASA (look references, not shipped)"
+
+[[source]]
+id = "alsj_sun_angles_apollo"
+name = "Apollo landing Sun elevations (lunar sites Task 6): Apollo Lunar Surface Journal, 'Sun and Earth: Altitudes and Azimuths at the Apollo Landing Sites' (Fjeld / Scotti ephemeris), data file Scotti_AltAz.txt, landing rows: Apollo 11 1969-07-20 20:17:39 UT 10.65 deg, Apollo 15 1971-07-30 22:16:29 UT 12.05 deg, Apollo 17 1972-12-11 19:54:58 UT 13.33 deg (geometric elevation of the Sun's centre over the local horizontal - our definition); mission-report planning value for comparison: Apollo 11 Mission Report / SP-4029 'Apollo 11 Summary' (Ascent Phase) 10.8 deg planned, landing range 5-14 deg"
+url = "https://www.nasa.gov/wp-content/uploads/static/history/alsj/Scotti_AltAz.txt"
+target = "core/tests/test_lunar_site_sun.cpp"
+kind = "licence_only"
+license = "NASA publication (US government work, public domain); only numerical values are used"
+credit = "Apollo landing Sun elevations: Apollo Lunar Surface Journal (NASA), computed by P. Fjeld and J. Scotti"

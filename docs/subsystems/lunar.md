@@ -249,6 +249,12 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   the aircatch ship up, x0.5 exits to ~10,000 km apoapsis (outside the +-15 %). Fixture "An aerocapture pass with 64 t
   aboard damps a roll disturbance at peak q" (`[header_tanks][aerocapture]`): 1.3 deg axis error, apoapsis 420 km,
   peak 904 kW/m2, 60.9 t left.
+- Sun at a site (`mission/lunar_site_sun.hpp`, `test_lunar_site_sun.cpp` `[lunar_sun]`): `site_sun` = apparent Sun centre
+  (light time + aberration, observer at the site) over the sphere's tangent plane (no terrain); `daylight_intervals`
+  brackets horizon crossings on a 2 h grid, bisects to 1 s, clips to the span. Apollo 11 / 15 / 17 touchdown elevations
+  10.70 / 12.02 / 13.35 deg vs the ALSJ Fjeld-Scotti table 10.65 / 12.05 / 13.33 (0.02-0.05 deg; the Apollo 11 mission
+  report's 10.8 deg is a planning value at another time); equatorial daylight 14.82 d (14.77 +- 0.3); Mons Mouton Sun
+  stays under 7 deg over 60 d.
 
 ## Diagnostics
 - Lunar: `STARSIM_DEBUG_NRHO`, `STARSIM_DEBUG_OUTBOUND`, `STARSIM_DEBUG_LUNAR_TRANSFER`,
