@@ -251,10 +251,16 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   peak 904 kW/m2, 60.9 t left.
 - Sun at a site (`mission/lunar_site_sun.hpp`, `test_lunar_site_sun.cpp` `[lunar_sun]`): `site_sun` = apparent Sun centre
   (light time + aberration, observer at the site) over the sphere's tangent plane (no terrain); `daylight_intervals`
-  brackets horizon crossings on a 2 h grid, bisects to 1 s, clips to the span. Apollo 11 / 15 / 17 touchdown elevations
+  brackets horizon crossings on a 2 h grid, bisects to 1 s, clips to the span (none if dark all span). Near the poles
+  the elevation only grazes the horizon, so a grid-sample peak (trough) of the same sign on both sides is refined by a
+  ternary search and inserted as a sample when it lies across the horizon: a day or night as short as the 1 s tolerance
+  is found. Remaining limit: one elevation extremum per two grid steps (4 h); true at every lunar site (diurnal period 29.5 d). Apollo 11 / 15 / 17 touchdown elevations
   10.70 / 12.02 / 13.35 deg vs the ALSJ Fjeld-Scotti table 10.65 / 12.05 / 13.33 (0.02-0.05 deg; the Apollo 11 mission
   report's 10.8 deg is a planning value at another time); equatorial daylight 14.82 d (14.77 +- 0.3); Mons Mouton Sun
-  stays under 7 deg over 60 d.
+  stays under 7 deg over 90 d (3 lunations; 90 - 84.79 + 1.54 = 6.75 deg bound). Azimuth: equatorial rise 90 / set
+  270 deg within 1.7 deg (Sun declination in the Moon frame <= 1.54 deg + margin), Sun on the equator side at +-60 deg
+  latitude. Short polar day: lat -88.4767 deg, 45 min at 2026-11-01 + 200.85 d (below the grid step, found by the
+  refinement, agrees with 60 s brute force).
 
 ## Diagnostics
 - Lunar: `STARSIM_DEBUG_NRHO`, `STARSIM_DEBUG_OUTBOUND`, `STARSIM_DEBUG_LUNAR_TRANSFER`,

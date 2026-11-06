@@ -28,7 +28,10 @@ struct DaylightInterval {
 // Daylight intervals inside [from, from + span_s], in time order. Crossings are bracketed on a coarse grid (2 h) and
 // bisected to 1 s. An interval that is already running at `from` starts at `from`; one still running at the end is
 // closed at `from + span_s` (polar sites with no sunrise / sunset in the span: one interval clipped to the span, or
-// none when dark). Assumes the Sun does not rise and set again within one grid step (true at every lunar site).
+// none when dark). Limits: a grid step holds at most one crossing; a day or night shorter than a step (the elevation
+// only grazes the horizon near the poles) is found by refining the extremum between two same-sign samples, so the
+// scan assumes one elevation extremum per two steps (4 h; the diurnal period is 29.5 d). Shortest found: ~ the 1 s
+// bisection tolerance.
 std::vector<DaylightInterval> daylight_intervals(const ephemeris::Ephemeris& ephemeris,
                                                  const frames::BodyOrientation& moon, double latitude_rad,
                                                  double longitude_rad, time::Epoch from, double span_s);

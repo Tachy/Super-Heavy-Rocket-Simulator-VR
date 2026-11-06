@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
@@ -11,7 +12,9 @@ namespace starsim::mission {
 
 namespace {
 
-constexpr double scan_step_s = 7200.0;  // the Sun moves ~1 deg per 2 h; one crossing per step at most
+// The Sun moves ~1 deg per 2 h. A grid step holds at most one crossing; shorter grazing intervals near the poles
+// (peak or trough of the elevation curve between two grid samples) are caught by the extremum refinement.
+constexpr double scan_step_s = 7200.0;
 constexpr double bisect_tolerance_s = 1.0;
 
 }  // namespace
@@ -46,34 +49,77 @@ std::vector<DaylightInterval> daylight_intervals(const ephemeris::Ephemeris& eph
     const auto elevation = [&](time::Epoch t) {
         return site_sun(ephemeris, moon, latitude_rad, longitude_rad, t).elevation_rad;
     };
-    const auto crossing = [&](time::Epoch lo, time::Epoch hi) {  // sign of the elevation differs at lo and hi
-        const bool lo_up = elevation(lo) > 0.0;
+    // Bisection between a sample below and one above the horizon (or vice versa), `lo_up` = state at lo.
+    const auto crossing = [&](time::Epoch lo, time::Epoch hi, bool lo_up) {
         while (hi - lo > bisect_tolerance_s) {
             const time::Epoch mid = lo + 0.5 * (hi - lo);
             ((elevation(mid) > 0.0) == lo_up ? lo : hi) = mid;
         }
         return lo + 0.5 * (hi - lo);
     };
+    // Extremum of the elevation inside (lo, hi) by ternary search (unimodal over two grid steps); `sign` = +1 for a
+    // maximum, -1 for a minimum. Returns the time and the elevation there.
+    const auto extremum = [&](time::Epoch lo, time::Epoch hi, double sign) {
+        while (hi - lo > bisect_tolerance_s) {
+            const time::Epoch a = lo + (hi - lo) / 3.0, b = hi - (hi - lo) / 3.0;
+            if (sign * elevation(a) < sign * elevation(b)) {
+                lo = a;
+            } else {
+                hi = b;
+            }
+        }
+        const time::Epoch t = lo + 0.5 * (hi - lo);
+        return std::pair<time::Epoch, double>{t, elevation(t)};
+    };
 
     std::vector<DaylightInterval> result;
     if (span_s <= 0.0) return result;
     const time::Epoch end = from + span_s;
-    bool up = elevation(from) > 0.0;
-    time::Epoch rise = from;
-    time::Epoch previous = from;
-    while (previous < end) {
-        const time::Epoch next = (end - previous > scan_step_s) ? previous + scan_step_s : end;
-        const bool next_up = elevation(next) > 0.0;
-        if (next_up != up) {
-            const time::Epoch t = crossing(previous, next);
-            if (next_up) {
-                rise = t;
-            } else {
-                result.push_back({rise, t});
+
+    // Coarse grid of (time, elevation).
+    std::vector<std::pair<time::Epoch, double>> grid;
+    for (time::Epoch t = from; t < end; t = (end - t > scan_step_s) ? t + scan_step_s : end) {
+        grid.emplace_back(t, elevation(t));
+    }
+    grid.emplace_back(end, elevation(end));
+
+    // Near the poles the elevation curve only grazes the horizon: a short day (or short night) is a peak (or trough)
+    // between two grid samples of the same sign. Insert the extremum as a sample when it lies on the other side.
+    std::vector<std::pair<time::Epoch, double>> samples;
+    samples.push_back(grid.front());
+    for (std::size_t i = 1; i + 1 < grid.size(); ++i) {
+        const double before = grid[i - 1].second, here = grid[i].second, after = grid[i + 1].second;
+        const bool same_side = (before > 0.0) == (here > 0.0) && (here > 0.0) == (after > 0.0);
+        if (same_side && (here - before) * (after - here) < 0.0) {
+            const double sign = here > 0.0 ? -1.0 : 1.0;  // trough inside a day, peak inside a night
+            const auto [t, value] = extremum(grid[i - 1].first, grid[i + 1].first, sign);
+            if ((value > 0.0) != (here > 0.0)) {
+                if (t < grid[i].first) {
+                    samples.emplace_back(t, value);
+                    samples.push_back(grid[i]);
+                } else {
+                    samples.push_back(grid[i]);
+                    samples.emplace_back(t, value);
+                }
+                continue;
             }
-            up = next_up;
         }
-        previous = next;
+        samples.push_back(grid[i]);
+    }
+    if (grid.size() > 1) samples.push_back(grid.back());
+
+    bool up = samples.front().second > 0.0;
+    time::Epoch rise = from;
+    for (std::size_t i = 1; i < samples.size(); ++i) {
+        const bool next_up = samples[i].second > 0.0;
+        if (next_up == up) continue;
+        const time::Epoch t = crossing(samples[i - 1].first, samples[i].first, up);
+        if (next_up) {
+            rise = t;
+        } else {
+            result.push_back({rise, t});
+        }
+        up = next_up;
     }
     if (up) result.push_back({rise, end});
     return result;
